@@ -423,7 +423,7 @@ END IF
 allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
 allocate(rop(lag_rep%nce)) ! Reconstructed gradient operator
 allocate(mop(lag_rep%nce,lag_rep%nce)) ! Local laplacian matrix
-!$omp do
+!$omp do schedule(static) ordered
 do i=1,lag_rep%mesh%nc
   !---Get local reconstructed operators
   mop=0.d0
@@ -449,7 +449,9 @@ do i=1,lag_rep%mesh%nc
     END DO
   END IF
   !---Add local values to global matrix (atomically)
+  !$omp ordered
   call mat%atomic_add_values(j,j,mop,lag_rep%nce,lag_rep%nce)
+  !$omp end ordered 
 end do
 deallocate(j,rop,mop)
 !$omp end parallel
@@ -639,10 +641,11 @@ NULLIFY(xloc)
 call x%set(0.d0)
 call x%get_local(xloc)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(field,xloc,lag_rep) private(det)
+!$omp parallel default(firstprivate) shared(field,xloc,lag_rep) private(det,xtmp)
 allocate(j(lag_rep%nce),xtmp(lag_rep%nce))
-!$omp do schedule(static)
+!$omp do schedule(static) ordered
 do i=1,lag_rep%mesh%nc
+  call lag_rep%ncdofs(i,j) ! Get local to global DOF mapping
   !---Loop over quadrature points
   xtmp=0.d0
   do m=1,lag_rep%quad%np
@@ -655,11 +658,12 @@ do i=1,lag_rep%mesh%nc
       xtmp(jc) = xtmp(jc) + rop*etmp(1)*det
     end do
   end do
-  call lag_rep%ncdofs(i,j) ! Get local to global DOF mapping
+  !$omp ordered
   do jc=1,lag_rep%nce
     !$omp atomic
-    xloc(j(jc))=xloc(j(jc)) + xtmp(jc)
+    xloc(j(jc)) = xloc(j(jc)) + xtmp(jc)
   end do
+  !$omp end ordered
 end do
 deallocate(j,xtmp)
 !$omp end parallel
@@ -682,6 +686,7 @@ CLASS(oft_vector), INTENT(inout) :: z !< Field projected onto boundary Lagrange 
 INTEGER(i4) :: i,m,k,jc,cell,ptmap(3)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: j
 REAL(r8) :: vol,det,etmp(3),sgop(3,3),rop
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vloc 
 REAL(r8), POINTER, DIMENSION(:) :: xloc,yloc,zloc
 REAL(r8), POINTER, DIMENSION(:,:) :: vtmp
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
@@ -696,10 +701,12 @@ call y%get_local(yloc)
 call z%set(0.d0)
 call z%get_local(zloc)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(field,xloc,yloc,zloc,lag_rep)
-allocate(j(lag_rep%nce),vtmp(lag_rep%nce,3))
-!$omp do schedule(static)
+!$omp parallel default(firstprivate) shared(field,xloc,yloc,zloc) private(vloc,det)
+allocate(j(lag_rep%nce),vloc(lag_rep%nce,3))
+!$omp do schedule(static) ordered
 do i=1,lag_rep%mesh%nc
+  call lag_rep%ncdofs(i,j) ! Get local to global DOF mapping
+  vloc=0.d0
   !---Loop over quadrature points
   vtmp=0.d0
   do m=1,lag_rep%quad%np
@@ -709,20 +716,23 @@ do i=1,lag_rep%mesh%nc
     !---Project on to Lagrange basis
     do jc=1,lag_rep%nce
       call oft_blag_eval(lag_rep,i,jc,lag_rep%quad%pts(:,m),rop)
-      vtmp(jc,:) = vtmp(jc,:) + rop*etmp*det
+      vloc(jc,1)=vloc(jc,1)+rop*etmp(1)*det
+      vloc(jc,2)=vloc(jc,2)+rop*etmp(2)*det
+      vloc(jc,3)=vloc(jc,3)+rop*etmp(3)*det
     end do
   end do
-  call lag_rep%ncdofs(i,j) ! Get local to global DOF mapping
+  !$omp ordered
   do jc=1,lag_rep%nce
     !$omp atomic
-    xloc(j(jc)) = xloc(j(jc))+vtmp(jc,1)
+    xloc(j(jc))=xloc(j(jc))+vloc(jc,1)
     !$omp atomic
-    yloc(j(jc)) = yloc(j(jc))+vtmp(jc,2)
+    yloc(j(jc))=yloc(j(jc))+vloc(jc,2)
     !$omp atomic
-    zloc(j(jc)) = zloc(j(jc))+vtmp(jc,3)
+    zloc(j(jc))=zloc(j(jc))+vloc(jc,3)
   end do
+  !$omp end ordered
 end do
-deallocate(j,vtmp)
+deallocate(j,vloc)
 !$omp end parallel
 call x%restore_local(xloc,add=.TRUE.)
 call y%restore_local(yloc,add=.TRUE.)

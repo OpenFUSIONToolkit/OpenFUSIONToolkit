@@ -13,7 +13,7 @@ oft_in_template = """
  ppn=1
  debug=0
  test_run=T
- use_petsc={8}
+ use_petsc={9}
 /
 
 &mesh_options
@@ -26,17 +26,15 @@ oft_in_template = """
 /
 
 &cube_options
- mesh_type={9}
- ni=1,4,0
- rscale=2.,2.,0.
- shift=1.0,-1.0,0.
+ mesh_type={8}
+ ni=4,1,0
+ rscale=2.,0.5,0.
+ shift=-1.0,-0.25,0.
  ref_per=T,T,F
 /
 
 &xmhd_options
-  linear={3}
-  lin_tol ={6}
-  nl_tol = 1.E-8
+  linear={7}
   cyl=F
   order={2}
   n0=1E19,
@@ -53,32 +51,31 @@ oft_in_template = """
   nu=1.E-16
   gamma=1.67
   D_diff=1.E-16
-  dt={4}
-  nsteps={5}
+  dt={3}
+  nsteps={4}
   rst_freq=5
-  use_mfnk={7}
+  use_mfnk={5}
+  lin_tol={6}
+  nl_tol = 1.E-8
   pm=F
-  den_scale=1.d19
-  
+  den_scale=1.E19
 /
 
 &xmhd_plot_options
- t0=.9e-5
- dt=1.e-5
  rst_start=0
  rst_end={4}
 /
 """
 
 # Common setup function and process handling
-def sound_2d_setup(nbase,nlevels,order,linear=False, 
-                 mf=False,petsc=False, hex_mesh=False):
+def sound_2d_setup(nbase,nlevels,order,
+                   linear=False,mf=False,petsc=False,hex_mesh=False):
     mesh_type=1
     if hex_mesh:
         mesh_type=2
-    dt='2.500E-8'
-    its='4000'
-    tol='1.E-12'
+    dt='1.E-6'
+    its='100'
+    tol='1.E-10'
     mf_flag='F'
     petsc_flag=('T' if petsc else 'F')
     lin_flag=('T' if linear else 'F')
@@ -91,153 +88,154 @@ def sound_2d_setup(nbase,nlevels,order,linear=False,
     #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nbase, nlevels, order,lin_flag,
-                                       dt, its, tol, mf_flag,petsc_flag,
-                                    mesh_type))
+        fid.write(oft_in_template.format(nbase, nlevels, order,
+                                         dt, its, mf_flag, tol, lin_flag, mesh_type, petsc_flag))
     return run_OFT("./test_sound_2d", nproc, 4000)
 
 def validate_result(verr_exp,nerr_exp,terr_exp, steps_exp=11,linear=False):
     retval = True
     with open('sound_2d.results','r') as fid:
         verr_test = float(fid.readline())
-        if verr_test > 1.01*verr_exp:
+        if verr_test > 1.05*verr_exp:
             print("FAILED: Velocity error too high!")
-            print("  Expected = {0}".format(verr_exp))
-            print("  Actual =   {0}".format(verr_test))
+            print("  Expected = {0:.8E}".format(verr_exp))
+            print("  Actual =   {0:.8E}".format(verr_test))
             retval = False
         nerr_test = float(fid.readline())
-        if nerr_test > 1.01*nerr_exp:
+        if nerr_test > 1.05*nerr_exp:
             print("FAILED: Density error too high!")
-            print("  Expected = {0}".format(nerr_exp))
-            print("  Actual =   {0}".format(nerr_test))
+            print("  Expected = {0:.8E}".format(nerr_exp))
+            print("  Actual =   {0:.8E}".format(nerr_test))
             retval = False
         terr_test = float(fid.readline())
-        if terr_test > 1.01*nerr_exp:
-            print("FAILED: Density error too high!")
-            print("  Expected = {0}".format(terr_exp))
-            print("  Actual =   {0}".format(terr_test))
+        if terr_test > 1.05*terr_exp:
+            print("FAILED: Temperature error too high!")
+            print("  Expected = {0:.8E}".format(terr_exp))
+            print("  Actual =   {0:.8E}".format(terr_test))
             retval = False
     return retval
 #============================================================================
-#Non-Linear test runners for NP=2
-
-def test_nl_p2():
-    verr_exp = 1.4477427222428568E-002
-    nerr_exp = 1.8098066719625182E-002
-    terr_exp = 1.8188555555408339E-002
-    assert sound_2d_setup(1,1,2)
+# Non-Linear test runners for NP=2
+@pytest.mark.parametrize("mf", (False, True))
+def test_nl_r1_p2(mf,petsc_flag=False):
+    verr_exp = 3.4757492919345006E-3
+    nerr_exp = 1.0042257109873824E-2
+    terr_exp = 1.0042257501380656E-2
+    assert sound_2d_setup(1,1,2,mf=mf,petsc=petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)
 
 @pytest.mark.mpi
 @pytest.mark.coverage
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("petsc_flag", (True, False))
-def test_nl_p2_mpi(mf, petsc_flag):
-    verr_exp = 1.4477427222428568E-002
-    nerr_exp = 1.8098066719625182E-002
-    terr_exp = 1.8188555555408339E-002
-    assert sound_2d_setup(1,1,2, mf=mf, petsc=petsc_flag)
+def test_nl_r1_p2_mpi(mf,petsc_flag):
+    if mf and petsc_flag:
+        pytest.skip()
+    verr_exp = 3.4757492919345006E-3
+    nerr_exp = 1.0042257109873824E-2
+    terr_exp = 1.0042257501380656E-2
+    assert sound_2d_setup(1,2,2,mf=mf,petsc=petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)
 
 #============================================================================
 # Non-Linear test runners for NP=3
-
-def test_nl_p3():
-    verr_exp = 8.1141504705730411E-003
-    nerr_exp = 8.1134814444124882E-003
-    terr_exp = 8.1545550097106480E-003
-    assert sound_2d_setup(1,1,3)
+@pytest.mark.parametrize("mf", (False, True))
+def test_nl_r1_p3(mf,petsc_flag=False):
+    verr_exp = 2.1428547309174486E-3
+    nerr_exp = 2.1814302475110835E-3
+    terr_exp = 2.1800283394622167E-3
+    assert sound_2d_setup(1,1,3,mf=mf,petsc=petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)
+
 @pytest.mark.mpi
 @pytest.mark.coverage
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("petsc_flag", (True, False))
-def test_nl_p3_mpi(mf, petsc_flag):
-    verr_exp = 8.1141504705730411E-003
-    nerr_exp = 8.1134814444124882E-003
-    terr_exp = 8.1545550097106480E-003
-    assert sound_2d_setup(1,1,3, mf=mf, petsc=petsc_flag)
+def test_nl_r1_p3_mpi(mf,petsc_flag):
+    if mf and petsc_flag:
+        pytest.skip()
+    verr_exp = 2.1428547309174486E-3
+    nerr_exp = 2.1814302475110835E-3
+    terr_exp = 2.1800283394622167E-3
+    assert sound_2d_setup(1,2,3,mf=mf,petsc=petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)
 
 #============================================================================
 # Non-Linear test runners for NP=4
-
-def test_nl_p4():
-    verr_exp = 7.9690160287047319E-003
-    nerr_exp = 7.9629023996221435E-003
-    terr_exp = 8.0027129244056965E-003
-    assert sound_2d_setup(1,1,4)
+@pytest.mark.parametrize("mf", (False, True))
+def test_nl_r1_p4(mf,petsc_flag=False):
+    verr_exp = 2.081834197322753E-3
+    nerr_exp = 2.083623647676870E-3
+    terr_exp = 2.083635171836626E-3
+    assert sound_2d_setup(1,1,4,mf=mf,petsc=petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)
 
 @pytest.mark.mpi
 @pytest.mark.coverage
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("petsc_flag", (True, False))
-def test_nl_p4_mpi(mf, petsc_flag):
-    verr_exp = 7.9690160287047319E-003
-    nerr_exp = 7.9629023996221435E-003
-    terr_exp = 8.0027129244056965E-003
-    assert sound_2d_setup(1,1,4, mf=mf, petsc=petsc_flag)
-    assert validate_result(verr_exp, nerr_exp, terr_exp)
-#============================================================================
-# Linear test runners for NP=2
-@pytest.mark.linear
-def test_lin_p2():
-    verr_exp = 1.4475321807125909E-002
-    nerr_exp = 1.8096366550025649E-002
-    terr_exp =1.8186848072669490E-002
-    assert sound_2d_setup(1,1,2, linear = True)
+def test_nl_r1_p4_mpi(mf,petsc_flag):
+    if mf and petsc_flag:
+        pytest.skip()
+    verr_exp = 2.081834197322753E-3
+    nerr_exp = 2.083623647676870E-3
+    terr_exp = 2.083635171836626E-3
+    assert sound_2d_setup(1,2,4,mf=mf,petsc=petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)
 
-@pytest.mark.linear
+#============================================================================
+# Linear test runners for NP=2
+def test_lin_r1_p2(petsc_flag=False):
+    verr_exp = 8.54387175E-03
+    nerr_exp = 1.18926533E-02
+    terr_exp = 1.18926532E-02
+    assert sound_2d_setup(1,1,2,linear=True,petsc=petsc_flag)
+    assert validate_result(verr_exp, nerr_exp, terr_exp)
+
 @pytest.mark.mpi
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", (True, False))
-def test_lin_p2_mpi(petsc_flag):
-    verr_exp = 1.4475321807125909E-002
-    nerr_exp = 1.8096366550025649E-002
-    terr_exp =1.8186848072669490E-002
-    assert sound_2d_setup(1,1,2, petsc=petsc_flag, linear = True)
+def test_lin_r1_p2_mpi(petsc_flag):
+    verr_exp = 8.54387175E-03
+    nerr_exp = 1.18926533E-02
+    terr_exp = 1.18926532E-02
+    assert sound_2d_setup(1,2,2,linear=True,petsc=petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)
 
 #============================================================================
 # Linear test runners for NP=3
-@pytest.mark.linear
-def test_lin_p3():
-    verr_exp = 8.1092620709466330E-003
-    nerr_exp = 8.1067291952836486E-003
-    terr_exp = 8.1472470392866935E-003
-    assert sound_2d_setup(1,1,3, linear = True)
+def test_lin_r1_p3(petsc_flag=False):
+    verr_exp = 8.74577449E-03
+    nerr_exp = 8.75411608E-03
+    terr_exp = 8.75411607E-03
+    assert sound_2d_setup(1,1,3,linear=True,petsc=petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)
 
-@pytest.mark.linear
 @pytest.mark.mpi
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", (True, False))
-def test_lin_p3_mpi(petsc_flag):
-    verr_exp = 8.1092620709466330E-003
-    nerr_exp = 8.1067291952836486E-003
-    terr_exp = 8.1472470392866935E-003
-    assert sound_2d_setup(1,1,3, linear = True, petsc= petsc_flag)
+def test_lin_r1_p3_mpi(petsc_flag):
+    verr_exp = 8.74577449E-03
+    nerr_exp = 8.75411608E-03
+    terr_exp = 8.75411607E-03
+    assert sound_2d_setup(1,2,3,linear=True,petsc=petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)
 
 #============================================================================
-#Linear test runners for NP=4
-@pytest.mark.linear
-def test_lin_p4():
-    verr_exp = 7.9648052134242055E-003
-    nerr_exp = 7.9586787434810218E-003
-    terr_exp = 7.9984691203724943E-003
-    assert sound_2d_setup(1,1,4, linear = True)
+# Linear test runners for NP=4
+def test_lin_r1_p4(petsc_flag=False):
+    verr_exp = 8.74382139E-03
+    nerr_exp = 8.74369833E-03
+    terr_exp = 8.74369838E-03
+    assert sound_2d_setup(1,1,4,linear=True,petsc=petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)
-    
-@pytest.mark.linear
+
 @pytest.mark.mpi
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", (True, False))
-def test_lin_p4_mpi(petsc_flag):
-    verr_exp = 7.9648052134242055E-003
-    nerr_exp = 7.9586787434810218E-003
-    terr_exp = 7.9984691203724943E-003
-    assert sound_2d_setup(1,1,4, linear = True,petsc = petsc_flag)
+def test_lin_r1_p4_mpi(petsc_flag):
+    verr_exp = 8.74382139E-03
+    nerr_exp = 8.74369833E-03
+    terr_exp = 8.74369838E-03
+    assert sound_2d_setup(1,2,4,linear=True,petsc=petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)

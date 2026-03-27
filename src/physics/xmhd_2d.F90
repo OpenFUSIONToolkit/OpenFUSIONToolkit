@@ -9,6 +9,7 @@ MODULE xmhd_2d
 #if !defined(XMHD_RST_LEN)
 #define XMHD_RST_LEN 5
 #endif
+#define XMHD_ITCACHE 10
 USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, &
   hdf5_field_exist, oft_bin_file, xdmf_plot_file
@@ -90,10 +91,13 @@ TYPE, public :: oft_xmhd_2d_sim
   LOGICAL :: mfnk = .FALSE. !< Use matrix free method?
   LOGICAL :: cyl_flag = .FALSE. !Use cylindrical coordinates
   LOGICAL :: linear = .FALSE. !Run sim. in linear mode
+  LOGICAL :: timestep_cn = .FALSE. ! Use Crank-Nicolson timestep?
   INTEGER(i4) :: nsteps = -1 !< # of timesteps
   INTEGER(i4) :: rst_base = 0 !< starting index of restart files
   INTEGER(i4) :: rst_freq = 10 !< frequency to generate restart files
+  INTEGER(i4) :: ittarget = 40 !< Needs docs
   REAL(r8) :: dt = -1.d0 !< timestep
+  REAL(r8) :: jac_dt = -1.d0
   REAL(r8) :: t = 0.d0 !< current time
   REAL(r8) :: chi = -1.d0 !< thermal diffusivity
   REAL(r8) :: nu = -1.d0 !< viscosity
@@ -155,6 +159,9 @@ type(oft_timer) :: mytimer
 TYPE(oft_bin_file) :: hist_file
 integer(i4) :: hist_i4(3)
 real(4) :: hist_r4(9)
+!---Timestep control
+integer(i4) :: itcount(XMHD_ITCACHE)
+real(r8) :: dtin,dthist(XMHD_ITCACHE)
 !---
 !---Extrapolation fields
 integer(i4), parameter :: maxextrap=2
@@ -188,6 +195,12 @@ CALL u%add(0.d0,1.d0,self%u)
 104 FORMAT (I TDIFF_RST_LEN.TDIFF_RST_LEN)
 WRITE(rst_char,104)0
 CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
+
+!---Fill timestep control cache
+itcount=self%ittarget
+dthist=self%dt
+dtin=self%dt
+
 !---------------------------------------------------------------------------
 ! Set parameters of nonlinear function
 !---------------------------------------------------------------------------
@@ -211,6 +224,8 @@ self%nlfun%by_bc=>self%by_bc
 !---------------------------------------------------------------------------
 ! Setup linear solver
 !---------------------------------------------------------------------------
+self%jac_dt=self%dt
+IF(self%timestep_cn)self%jac_dt=self%dt/2.d0
 CALL build_approx_jacobian(self,u)
 
 IF(self%mfnk)THEN
@@ -222,10 +237,10 @@ IF(self%mfnk)THEN
 ELSE
   solver%A=>self%jacobian
 END IF
-solver%its=400
+solver%its=self%ittarget*4
 solver%atol=self%lin_tol
 solver%itplot=1
-solver%nrits=20
+solver%nrits=40
 solver%pm=oft_env%pm
 NULLIFY(solver%pre)
 IF(ASSOCIATED(self%xml_pre_def))THEN
@@ -273,14 +288,24 @@ END IF
 npre=0
 DO i=1,self%nsteps
   IF(oft_env%head_proc)CALL mytimer%tick()
-  self%nlfun%dt=0.d0
+  IF(self%timestep_cn)THEN
+    self%nlfun%dt=-self%dt/2.0
+  ELSE
+    self%nlfun%dt=0.d0
+  END IF
   CALL self%nlfun%apply(u,v)
   n_avg=self%nlfun%diag_vals(1)
   u_avg = self%nlfun%diag_vals(2:4)
   T_avg = self%nlfun%diag_vals(5)
   psi_avg = self%nlfun%diag_vals(6)
   by_avg = self%nlfun%diag_vals(7)
-  self%nlfun%dt=self%dt
+  IF(self%timestep_cn)THEN
+    self%nlfun%dt=self%dt/2.0
+    self%jac_dt=self%dt/2.d0
+  ELSE
+    self%nlfun%dt=self%dt
+    self%jac_dt=self%dt
+  END IF
   npre = npre + 1
   IF((.NOT.self%mfnk).OR.MOD(npre,1)==0)THEN
     CALL update_jacobian(u)
@@ -305,7 +330,7 @@ DO i=1,self%nsteps
     hist_i4=[self%rst_base+i-1,nksolver%lits,nksolver%nlits]
     hist_r4=REAL([self%t,n_avg, u_avg(1), u_avg(2), u_avg(3),T_avg,psi_avg,by_avg,elapsed_time],4)
 103 FORMAT(' Timestep',I8,ES14.6,2X,I4,2X,I4,F12.3,ES12.2)
-    WRITE(*,103)self%rst_base+i,self%t,nksolver%lits,nksolver%nlits,elapsed_time,self%dt
+    WRITE(*,103)self%rst_base+i,self%t+self%dt,nksolver%lits,nksolver%nlits,elapsed_time,self%dt
     IF(oft_debug_print(1))WRITE(*,*)
     CALL hist_file%write(data_i4=hist_i4, data_r4=hist_r4)
   END IF
@@ -328,6 +353,20 @@ DO i=1,self%nsteps
     END IF
     !---
   END IF
+  !---
+  itcount(MOD(i,XMHD_ITCACHE)+1)=nksolver%lits
+  dthist(MOD(i,XMHD_ITCACHE)+1)=self%dt
+  self%dt=self%ittarget*SUM(dthist)/SUM(itcount)
+  IF(self%dt>dtin)self%dt=dtin
+  IF(self%dt<1.d-3*dtin)CALL oft_abort('Time step dropped too low!','run_simulation',__FILE__)
+  IF(ABS(1.d0-(self%dt-dthist(MOD(i,XMHD_ITCACHE)+1))/dthist(MOD(i,XMHD_ITCACHE)+1))>0.1d0)npre=-1
+  ! IF(nksolver%lits<4)THEN
+  !   self%dt=self%dt*1.1d0
+  !   npre=-1
+  ! ELSE IF(nksolver%lits>100)THEN
+  !   self%dt=self%dt/2.d0
+  !   npre=-1
+  ! END IF
 END DO
 CALL hist_file%close()
 CALL nksolver%delete()
@@ -343,14 +382,13 @@ end subroutine run_simulation
 SUBROUTINE run_lin_simulation(self)
 CLASS(oft_xmhd_2d_sim), TARGET, INTENT(INOUT) :: self
 !---Solver objects
-CLASS(oft_vector), POINTER :: u, v, up
+CLASS(oft_vector), POINTER :: u, v, up,un1,un2
 TYPE(oft_native_gmres_solver), TARGET :: solver
 TYPE(OFT_TIMER) :: mytimer
 !---History file fields
 TYPE(oft_bin_file) :: hist_file
 INTEGER(i4) :: hist_i4(1)
 REAL(4) :: hist_r4(9)
-!---
 !---Extrapolation fields
 integer(i4), parameter :: maxextrap=2
 integer(i4) :: nextrap
@@ -359,7 +397,7 @@ type(oft_vector_ptr), allocatable, dimension(:) :: extrap_fields
 !---
 character(LEN=TDIFF_RST_LEN) :: rst_char
 integer(i4) :: i,j,io_stat,rst_tmp,npre
-real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time
+real(r8) :: n_avg, u_avg(3), T_avg, psi_avg, by_avg,elapsed_time,diag_save(7)
 real(r8), pointer :: plot_vals(:),plot_vec(:,:)
 current_sim=>self
 !---------------------------------------------------------------------------
@@ -386,7 +424,8 @@ CALL u%add(0.d0,1.d0,self%u)
 !---Create initial conditions restart file
 104 FORMAT (I TDIFF_RST_LEN.TDIFF_RST_LEN)
 WRITE(rst_char,104)0
-CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U0')
+CALL self%rst_save(self%u0, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U0')
+CALL self%rst_save(u, self%t, self%dt, 'xmhd2d_'//rst_char//'.rst', 'U')
 
 ALLOCATE(self%mfun)
 self%mfun%B_0=self%B_0
@@ -402,6 +441,7 @@ self%mfun%psi_bc=>self%psi_bc
 self%mfun%by_bc=>self%by_bc
 
 ! Construct the linear advance matrix with equilibrium fields
+self%jac_dt=self%dt
 CALL build_approx_jacobian(self,self%u0)
 !---------------------------------------------------------------------------
 ! Setup linear solver
@@ -438,9 +478,14 @@ END IF
 !------------------------------------------------------------------------------
 ! Begin time stepping
 !------------------------------------------------------------------------------
-DO i=1, self%nsteps
+IF(self%timestep_cn)THEN
+  CALL self%fe_rep%vec_create(un1)
+  CALL self%fe_rep%vec_create(un2)
+  CALL un2%add(0.d0,1.d0,u)
+  CALL un1%add(0.d0,1.d0,u)
+END IF
+DO i=1,self%nsteps
   IF(oft_env%head_proc)CALL mytimer%tick
-  CALL self%mfun%apply(u,v)
   DO j=maxextrap,2,-1
     CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
     extrapt(j)=extrapt(j-1)
@@ -448,8 +493,27 @@ DO i=1, self%nsteps
   IF(nextrap<maxextrap)nextrap=nextrap+1
   CALL extrap_fields(1)%f%add(0.d0,1.d0,u)
   extrapt(1)=self%t
+  IF(self%timestep_cn)THEN
+    CALL un2%add(0.d0,1.d0,un1)
+    CALL un1%add(0.d0,1.d0,u)
+  END IF
+  IF(self%timestep_cn.AND.(i>1))THEN
+    IF(i==2)THEN
+      self%jac_dt=self%dt*2.d0/3.d0
+      CALL build_approx_jacobian(self,self%u0)
+      CALL solver%pre%update(.TRUE.)
+    END IF
+    CALL un2%add(-1.d0,4.d0,un1)
+    CALL un2%scale(1.d0/3.d0)
+    CALL self%mfun%apply(u,v) ! This double call and diag swap should be replaced with a better approach
+    diag_save=self%mfun%diag_vals
+    CALL self%mfun%apply(un2,v)
+    self%mfun%diag_vals=diag_save
+  ELSE
+    CALL self%mfun%apply(u,v)
+  END IF
   IF(i>maxextrap)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,self%t+self%dt,u)
-  CALL solver%apply(u, v)
+  CALL solver%apply(u,v)
   !---------------------------------------------------------------------------
   ! Write out initial solution progress
   !---------------------------------------------------------------------------
@@ -488,6 +552,11 @@ CALL u%delete()
 CALL up%delete()
 CALL v%delete()
 DEALLOCATE(u,up,v)
+IF(self%timestep_cn)THEN
+  CALL un1%delete()
+  CALL un2%delete()
+  DEALLOCATE(un1,un2)
+END IF
 END SUBROUTINE run_lin_simulation
 !---------------------------------------------------------------------------
 !> Compute the mass matrix for RHS
@@ -680,8 +749,8 @@ class(xmhd_2d_nlfun), intent(inout) :: self !< NL function object
 class(oft_vector), target, intent(inout) :: a !< Source field
 class(oft_vector), intent(inout) :: b !< Result of metric function
 type(oft_quad_type), pointer :: quad
-LOGICAL :: cyl_flag, linear
-INTEGER(i4) :: i
+LOGICAL :: linear,cyl_flag
+INTEGER(i4) :: i,l
 REAL(r8) :: k_boltz = elec_charge
 REAL(r8) :: m_i=proton_mass
 REAL(r8) :: chi, eta, nu, D_diff, gamma, diag_vals(7), B_0(3)
@@ -726,18 +795,18 @@ CALL b%get_local(psi_res, 6)
 CALL b%get_local(by_res, 7)
 diag_vals=0.d0
 
+!!$omp parallel reduction(+:diag_vals)
 BLOCK
-INTEGER(i4) :: k, m, jr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
 LOGICAL :: curved
-REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
-         dvel(3,3),div_vel,jac_mat(3,4), jac_det,int_factor, btmp(3), tmp1(3), coords(3)
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc, &
-                     psi_weights_loc, by_weights_loc
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads, res_loc
-!$omp parallel private(k, m,jr,cell_dofs, curved, n, vel, T, psi, by, dT, dn, dpsi, dby, &
-!$omp dvel, div_vel, jac_mat, jac_det, int_factor, btmp, tmp1, coords, &
-!$omp basis_vals,basis_grads,T_weights_loc,n_weights_loc,psi_weights_loc,by_weights_loc,vel_weights_loc,res_loc) reduction(+:diag_vals)
+INTEGER(i4) :: k,m,jr
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: cell_dofs
+REAL(r8) :: n,vel(3),T,psi,by,dT(3),dn(3),dpsi(3),dby(3)
+REAL(r8) :: dvel(3,3),div_vel,jac_mat(3,4),jac_det,int_factor,btmp(3),tmp1(3),coords(3)
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,T_weights_loc,n_weights_loc,psi_weights_loc,by_weights_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc,basis_grads,res_loc
+!$omp parallel private(k,m,jr,curved,coords,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
+!$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
+!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,btmp, tmp1) reduction(+:diag_vals)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
         psi_weights_loc(oft_blagrange%nce), by_weights_loc(oft_blagrange%nce),&
@@ -931,6 +1000,7 @@ DEALLOCATE(basis_vals,basis_grads,n_weights_loc,T_weights_loc,&
           vel_weights_loc, psi_weights_loc, by_weights_loc,cell_dofs,res_loc)
 !$omp end parallel
 END BLOCK
+!!$omp end parallel
 IF(oft_debug_print(2))write(*,'(4X,A)')'Applying BCs'
 CALL fem_dirichlet_vec(oft_blagrange,n_weights,n_res,self%n_bc)
 CALL fem_dirichlet_vec(oft_blagrange,vel_weights(1, :),velx_res,self%velx_bc)
@@ -962,7 +1032,7 @@ LOGICAL :: cyl_flag, linear
 INTEGER(i4) :: i
 REAL(r8) :: k_boltz=elec_charge
 REAL(r8) :: m_i = proton_mass
-REAL(r8) :: chi, eta, nu, D_diff, gamma, B_0(3), diag_vals(7)
+REAL(r8) :: chi, eta, nu, D_diff, gamma, B_0(3), diag_vals(7), dt_fac
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights, psi_weights, by_weights, vtmp
 REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
 integer(KIND=omp_lock_kind), allocatable, dimension(:) :: tlocks
@@ -994,27 +1064,29 @@ D_diff = self%D_diff
 B_0 = self%B_0
 cyl_flag = self%cyl_flag
 linear = self%linear
+dt_fac = self%jac_dt
 
 !--Setup thread locks
 ALLOCATE(tlocks(self%fe_rep%nfields))
 DO i=1,self%fe_rep%nfields
   call omp_init_lock(tlocks(i))
 END DO
-
+!!$omp parallel
 BLOCK
 LOGICAL :: curved
-INTEGER(i4) :: k, l, m, jr, jc
+INTEGER(i4) :: m,jr,jc,k,l
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
-REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
-dvel(3,3),div_vel,jac_mat(3,4), jac_det,int_factor, btmp(3), tmp2(3), tmp3(3), coords(3)
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
-                                    psi_weights_loc, by_weights_loc, res_loc
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads
+REAL(r8) :: n,vel(3),T,psi,by,dT(3),dn(3),dpsi(3),dby(3),dvel(3,3),div_vel
+REAL(r8) :: jac_mat(3,4),jac_det,int_factor,btmp(3),tmp2(3),tmp3(3),coords(3)
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: psi_weights_loc,by_weights_loc,res_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc,basis_grads
 TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: iloc
 type(oft_local_mat), allocatable, dimension(:,:) :: jac_loc
-!$omp parallel private(k, l, m,jr,jc,curved,coords,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
-!$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
-!$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,btmp,tmp2,tmp3, iloc, jac_loc) reduction(+:diag_vals)
+!$omp parallel private(m,jr,jc,k,l,curved,coords,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
+!$omp n_weights_loc,vel_weights_loc, psi_weights_loc,by_weights_loc,res_loc,btmp, &
+!$omp n,T,vel,by,psi,jac_loc,jac_mat,jac_det,int_factor,dn,dT,dvel,div_vel,dpsi,dby,iloc, &
+!$omp tmp2,tmp3) reduction(+:diag_vals)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
 ALLOCATE(n_weights_loc(oft_blagrange%nce),vel_weights_loc(3, oft_blagrange%nce),&
         T_weights_loc(oft_blagrange%nce), psi_weights_loc(oft_blagrange%nce),&
@@ -1079,6 +1151,11 @@ DO i=1,mesh%nc
       btmp = cross_product(dpsi/(coords(1)+gs_epsilon), [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0]/(coords(1)+gs_epsilon) + B_0
     END IF
     diag_vals = diag_vals + [n, vel(1), vel(2), vel(3), T, psi, by]*int_factor
+    IF (cyl_flag) THEN
+      btmp = cross_product(dpsi/coords(1), [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0] + B_0
+    ELSE
+      btmp = cross_product(dpsi, [0.d0,1.d0,0.d0]) + by*[0.d0,1.d0,0.d0] + B_0
+    END IF
     !---Compute local matrix contributions
     DO jr=1,oft_blagrange%nce
       DO jc=1,oft_blagrange%nce
@@ -1087,30 +1164,30 @@ DO i=1,mesh%nc
         IF (cyl_flag) THEN
           jac_loc(1, 1)%m(jr,jc) = jac_loc(1, 1)%m(jr, jc) &
           + basis_vals(jr)*basis_vals(jc)*int_factor*coords(1) &
-          + self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), vel)*int_factor*coords(1) & !delta_n*div(u)
-          + self%dt*basis_vals(jr)*basis_vals(jc)*div_vel*int_factor*coords(1) & ! u dot grad(delta_n)
-          + self%dt*D_diff*DOT_PRODUCT(basis_grads(:, jr),basis_grads(:, jc))*int_factor*coords(1)
+          + dt_fac*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), vel)*int_factor*coords(1) & !delta_n*div(u)
+          + dt_fac*basis_vals(jr)*basis_vals(jc)*div_vel*int_factor*coords(1) & ! u dot grad(delta_n)
+          + dt_fac*D_diff*DOT_PRODUCT(basis_grads(:, jr),basis_grads(:, jc))*int_factor*coords(1)
         ELSE
           jac_loc(1, 1)%m(jr,jc) = jac_loc(1, 1)%m(jr, jc) &
           + basis_vals(jr)*basis_vals(jc)*int_factor &
-          + self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), vel)*int_factor & !delta_n*div(u)
-          + self%dt*basis_vals(jr)*basis_vals(jc)*div_vel*int_factor & ! u dot grad(delta_n)
-          + self%dt*D_diff*DOT_PRODUCT(basis_grads(:, jr),basis_grads(:, jc))*int_factor
+          + dt_fac*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), vel)*int_factor & !delta_n*div(u)
+          + dt_fac*basis_vals(jr)*basis_vals(jc)*div_vel*int_factor & ! u dot grad(delta_n)
+          + dt_fac*D_diff*DOT_PRODUCT(basis_grads(:, jr),basis_grads(:, jc))*int_factor
         END IF
         ! --n, vel
         IF (cyl_flag) THEN
           DO l=1,3
             jac_loc(1, l+1)%m(jr,jc) = jac_loc(1, l+1)%m(jr, jc) &
-            + basis_vals(jr)*self%dt*n*basis_grads(l, jc)*int_factor*coords(1) & ! n*div(delta_u) = n*SUM(basis_grads)?
-            + basis_vals(jr)*self%dt*basis_vals(jc)*dn(l)*int_factor*coords(1) ! u dot grad(n)
+            + basis_vals(jr)*dt_fac*n*basis_grads(l, jc)*int_factor*coords(1) & ! n*div(delta_u) = n*SUM(basis_grads)?
+            + basis_vals(jr)*dt_fac*basis_vals(jc)*dn(l)*int_factor*coords(1) ! u dot grad(n)
           END DO          
           jac_loc(1,2)%m(jr,jc) = jac_loc(1,2)%m(jr,jc) &
-          + basis_vals(jr)*self%dt*n*basis_vals(jc)*int_factor
+          + basis_vals(jr)*dt_fac*n*basis_vals(jc)*int_factor
         ELSE
           DO l=1,3
             jac_loc(1, l+1)%m(jr,jc) = jac_loc(1, l+1)%m(jr, jc) &
-            + basis_vals(jr)*self%dt*n*basis_grads(l, jc)*int_factor & ! n*div(delta_u) = n*SUM(basis_grads)?
-            + basis_vals(jr)*self%dt*basis_vals(jc)*dn(l)*int_factor ! u dot grad(n)
+            + basis_vals(jr)*dt_fac*n*basis_grads(l, jc)*int_factor & ! n*div(delta_u) = n*SUM(basis_grads)?
+            + basis_vals(jr)*dt_fac*basis_vals(jc)*dn(l)*int_factor ! u dot grad(n)
           END DO
         END IF
         !--Momentum 
@@ -1119,55 +1196,55 @@ DO i=1,mesh%nc
           DO l=1,3
             jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
             ! grad T terms
-            + self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor*coords(1)/(m_i*n) & ! 
-            + self%dt*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor*coords(1)/(m_i*n) &
-            - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*n*dT(l)*int_factor*coords(1)/(m_i*n**2.d0) &
-            - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor*coords(1)/(m_i*n**2.d0) &
+            + dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor*coords(1)/(m_i*n) & ! 
+            + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor*coords(1)/(m_i*n) &
+            - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*n*dT(l)*int_factor*coords(1)/(m_i*n**2.d0) &
+            - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor*coords(1)/(m_i*n**2.d0) &
             ! dyadic b terms
-            - self%dt*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*int_factor*coords(1)/(mu0*m_i*n**2.d0) &
-            - self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*int_factor*coords(1)/(mu0*m_i*n**2.d0) &
-            + self%dt*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp(l)*int_factor*coords(1)/(mu0*m_i*n**3.d0) &
-            + self%dt*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp, btmp)*int_factor*coords(1)/(2.d0*mu0*m_i*n**2.d0) &
-            + self%dt*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp, btmp)*int_factor*coords(1)/(2.d0*mu0*m_i*n**2.d0) &
-            - self%dt*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp, btmp)*int_factor*coords(1)/(mu0*m_i*n**3.d0) &
+            - dt_fac*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*int_factor*coords(1)/(mu0*m_i*n**2.d0) &
+            - dt_fac*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*int_factor*coords(1)/(mu0*m_i*n**2.d0) &
+            + dt_fac*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp(l)*int_factor*coords(1)/(mu0*m_i*n**3.d0) &
+            + dt_fac*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp, btmp)*int_factor*coords(1)/(2.d0*mu0*m_i*n**2.d0) &
+            + dt_fac*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp, btmp)*int_factor*coords(1)/(2.d0*mu0*m_i*n**2.d0) &
+            - dt_fac*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp, btmp)*int_factor*coords(1)/(mu0*m_i*n**3.d0) &
             ! velocity dissipation terms
-            - self%dt*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(l, :))*int_factor*coords(1)/(m_i*n**2) & 
-            - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(l, :))*int_factor*coords(1)/(m_i*n**2) &
-            + self%dt*nu*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, dvel(l, :))*int_factor*coords(1)/(m_i*n**3)
+            - dt_fac*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(l, :))*int_factor*coords(1)/(m_i*n**2) & 
+            - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(l, :))*int_factor*coords(1)/(m_i*n**2) &
+            + dt_fac*nu*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, dvel(l, :))*int_factor*coords(1)/(m_i*n**3)
           END DO       
           jac_loc(2,1)%m(jr,jc) = jac_loc(2,1)%m(jr,jc) &
-          - self%dt*basis_vals(jr)*basis_vals(jc)*(btmp(2)**2-btmp(1)**2-btmp(3)**2)*int_factor/(mu0*m_i*n**2*(coords(1)+gs_epsilon)) &
-          - self%dt*basis_vals(jr)*basis_vals(jc)*nu*vel(1)*int_factor/(m_i*n**2*(coords(1)+gs_epsilon))
+          - dt_fac*basis_vals(jr)*basis_vals(jc)*(btmp(2)**2-btmp(1)**2-btmp(3)**2)*int_factor/(mu0*m_i*n**2*(coords(1)+gs_epsilon)) &
+          - dt_fac*basis_vals(jr)*basis_vals(jc)*nu*vel(1)*int_factor/(m_i*n**2*(coords(1)+gs_epsilon))
           jac_loc(3,1)%m(jr,jc) = jac_loc(3,1)%m(jr,jc) &
-          + self%dt*basis_vals(jr)*basis_vals(jc)*(btmp(1)*btmp(2))*int_factor/(mu0*m_i*n**2*(coords(1)+gs_epsilon)) &
-          - self%dt*basis_vals(jr)*basis_vals(jc)*nu*vel(2)*int_factor/(m_i*n**2*(coords(1)+gs_epsilon))
+          + dt_fac*basis_vals(jr)*basis_vals(jc)*(btmp(1)*btmp(2))*int_factor/(mu0*m_i*n**2*(coords(1)+gs_epsilon)) &
+          - dt_fac*basis_vals(jr)*basis_vals(jc)*nu*vel(2)*int_factor/(m_i*n**2*(coords(1)+gs_epsilon))
         ELSE
           IF (linear) THEN
             DO l=1,3
               jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
-              + self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor/(m_i*n) & ! 
-              + self%dt*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor/(m_i*n) &
-              + basis_vals(jr)*basis_vals(jc)*self%dt*DOT_PRODUCT(vel,dvel(l,:))*int_factor/n 
+              + dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor/(m_i*n) & ! 
+              + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor/(m_i*n) &
+              + basis_vals(jr)*basis_vals(jc)*dt_fac*DOT_PRODUCT(vel,dvel(l,:))*int_factor/n 
             END DO
           ELSE
             DO l=1,3
               jac_loc(l+1,1)%m(jr,jc) = jac_loc(l+1,1)%m(jr,jc) &
               ! grad T terms
-              + self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor/(m_i*n) & ! 
-              + self%dt*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor/(m_i*n) &
-              - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*n*dT(l)*int_factor/(m_i*n**2.d0) &
-              - self%dt*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor/(m_i*n**2.d0) &
+              + dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dT(l)*int_factor/(m_i*n) & ! 
+              + dt_fac*basis_vals(jr)*2.d0*k_boltz*T*basis_grads(l,jc)*int_factor/(m_i*n) &
+              - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*n*dT(l)*int_factor/(m_i*n**2.d0) &
+              - dt_fac*basis_vals(jr)*2.d0*k_boltz*basis_vals(jc)*dn(l)*T*int_factor/(m_i*n**2.d0) &
               ! dyadic b terms
-              - self%dt*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*int_factor/(mu0*m_i*n**2.d0) &
-              - self%dt*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*int_factor/(mu0*m_i*n**2.d0) &
-              + self%dt*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp(l)*int_factor/(mu0*m_i*n**3.d0) &
-              + self%dt*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp, btmp)*int_factor/(2.d0*mu0*m_i*n**2.d0) &
-              + self%dt*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp, btmp)*int_factor/(2.d0*mu0*m_i*n**2.d0) &
-              - self%dt*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp, btmp)*int_factor/(mu0*m_i*n**3.d0) &
+              - dt_fac*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), btmp)*btmp(l)*int_factor/(mu0*m_i*n**2.d0) &
+              - dt_fac*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), btmp)*btmp(l)*int_factor/(mu0*m_i*n**2.d0) &
+              + dt_fac*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, btmp)*btmp(l)*int_factor/(mu0*m_i*n**3.d0) &
+              + dt_fac*basis_vals(jc)*basis_grads(l,jr)*DOT_PRODUCT(btmp, btmp)*int_factor/(2.d0*mu0*m_i*n**2.d0) &
+              + dt_fac*basis_vals(jr)*basis_grads(l,jc)*DOT_PRODUCT(btmp, btmp)*int_factor/(2.d0*mu0*m_i*n**2.d0) &
+              - dt_fac*basis_vals(jr)*basis_vals(jc)*dn(l)*DOT_PRODUCT(btmp, btmp)*int_factor/(mu0*m_i*n**3.d0) &
               ! velocity dissipation terms
-              - self%dt*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(l, :))*int_factor/(m_i*n**2) & 
-              - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(l, :))*int_factor/(m_i*n**2) &
-              + self%dt*nu*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, dvel(l, :))*int_factor/(m_i*n**3)
+              - dt_fac*nu*basis_vals(jc)*DOT_PRODUCT(basis_grads(:,jr), dvel(l, :))*int_factor/(m_i*n**2) & 
+              - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(basis_grads(:,jc), dvel(l, :))*int_factor/(m_i*n**2) &
+              + dt_fac*nu*basis_vals(jr)*2.d0*basis_vals(jc)*DOT_PRODUCT(dn, dvel(l, :))*int_factor/(m_i*n**3)
             END DO
           END IF
         END IF
@@ -1176,33 +1253,33 @@ DO i=1,mesh%nc
           DO k=1,3
             jac_loc(k+1,k+1)%m(jr,jc)= jac_loc(k+1,k+1)%m(jr,jc) &
               + basis_vals(jr)*basis_vals(jc)*int_factor &
-              + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, basis_grads(:,jc))*int_factor*coords(1) &
-              + self%dt*nu*DOT_PRODUCT(basis_grads(:,jr), basis_grads(:,jc))*int_factor*coords(1)/(m_i*n) &
-              - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(dn, basis_grads(:,jc))*int_factor*coords(1)/(m_i*n**2)
+              + dt_fac*basis_vals(jr)*DOT_PRODUCT(vel, basis_grads(:,jc))*int_factor*coords(1) &
+              + dt_fac*nu*DOT_PRODUCT(basis_grads(:,jr), basis_grads(:,jc))*int_factor*coords(1)/(m_i*n) &
+              - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(dn, basis_grads(:,jc))*int_factor*coords(1)/(m_i*n**2)
             DO l=1,3
               jac_loc(k+1,l+1)%m(jr,jc)= jac_loc(k+1,l+1)%m(jr,jc) &
-              + self%dt*basis_vals(jr)*basis_vals(jc)*dvel(k, l)*int_factor*coords(1)
+              + dt_fac*basis_vals(jr)*basis_vals(jc)*dvel(k, l)*int_factor*coords(1)
             END DO
           END DO
           jac_loc(2,2)%m(jr,jc)= jac_loc(2,2)%m(jr,jc) &
-          + self%dt*nu*basis_vals(jr)*basis_vals(jc)*int_factor/(m_i*n*(coords(1)+gs_epsilon))
+          + dt_fac*nu*basis_vals(jr)*basis_vals(jc)*int_factor/(m_i*n*(coords(1)+gs_epsilon))
           jac_loc(2,3)%m(jr,jc)= jac_loc(2,3)%m(jr,jc) &
-          -self%dt*basis_vals(jr)*2.d0*vel(2)*basis_vals(jc)*int_factor
+          -dt_fac*basis_vals(jr)*2.d0*vel(2)*basis_vals(jc)*int_factor
           jac_loc(3,2)%m(jr,jc)= jac_loc(3,2)%m(jr,jc) &
-          + self%dt*basis_vals(jr)*basis_vals(jc)*vel(2)*int_factor
+          + dt_fac*basis_vals(jr)*basis_vals(jc)*vel(2)*int_factor
           jac_loc(3,3)%m(jr,jc)= jac_loc(3,3)%m(jr,jc) &
-          + self%dt*basis_vals(jr)*basis_vals(jc)*vel(1)*int_factor &
-          + self%dt*nu*basis_vals(jr)*basis_vals(jc)*int_factor/(m_i*n*(coords(1)+gs_epsilon))
+          + dt_fac*basis_vals(jr)*basis_vals(jc)*vel(1)*int_factor &
+          + dt_fac*nu*basis_vals(jr)*basis_vals(jc)*int_factor/(m_i*n*(coords(1)+gs_epsilon))
         ELSE
           DO k=1,3
             jac_loc(k+1,k+1)%m(jr,jc)= jac_loc(k+1,k+1)%m(jr,jc) &
               + basis_vals(jr)*basis_vals(jc)*int_factor &
-              + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, basis_grads(:,jc))*int_factor &
-              + self%dt*nu*DOT_PRODUCT(basis_grads(:,jr), basis_grads(:,jc))*int_factor/(m_i*n) &
-              - self%dt*nu*basis_vals(jr)*DOT_PRODUCT(dn, basis_grads(:,jc))*int_factor/(m_i*n**2)
+              + dt_fac*basis_vals(jr)*DOT_PRODUCT(vel, basis_grads(:,jc))*int_factor &
+              + dt_fac*nu*DOT_PRODUCT(basis_grads(:,jr), basis_grads(:,jc))*int_factor/(m_i*n) &
+              - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(dn, basis_grads(:,jc))*int_factor/(m_i*n**2)
             DO l=1,3
               jac_loc(k+1,l+1)%m(jr,jc)= jac_loc(k+1,l+1)%m(jr,jc) &
-              + self%dt*basis_vals(jr)*basis_vals(jc)*dvel(k, l)*int_factor
+              + dt_fac*basis_vals(jr)*basis_vals(jc)*dvel(k, l)*int_factor
             END DO
           END DO
         END IF
@@ -1210,14 +1287,14 @@ DO i=1,mesh%nc
         IF (cyl_flag) THEN
           DO l=1,3
             jac_loc(l+1,5)%m(jr,jc) = jac_loc(l+1,5)%m(jr,jc) &
-            + self%dt*basis_vals(jr)*2*k_boltz*dn(l)*basis_vals(jc)*int_factor*coords(1)/(m_i*n) &
-            + self%dt*basis_vals(jr)*2*k_boltz*basis_grads(l,jc)*int_factor*coords(1)/(m_i) 
+            + dt_fac*basis_vals(jr)*2*k_boltz*dn(l)*basis_vals(jc)*int_factor*coords(1)/(m_i*n) &
+            + dt_fac*basis_vals(jr)*2*k_boltz*basis_grads(l,jc)*int_factor*coords(1)/(m_i) 
           END DO
         ELSE
           DO l=1,3
             jac_loc(l+1,5)%m(jr,jc) = jac_loc(l+1,5)%m(jr,jc) &
-            + self%dt*basis_vals(jr)*2*k_boltz*dn(l)*basis_vals(jc)*int_factor/(m_i*n) &
-            + self%dt*basis_vals(jr)*2*k_boltz*basis_grads(l,jc)*int_factor/(m_i) 
+            + dt_fac*basis_vals(jr)*2*k_boltz*dn(l)*basis_vals(jc)*int_factor/(m_i*n) &
+            + dt_fac*basis_vals(jr)*2*k_boltz*basis_grads(l,jc)*int_factor/(m_i) 
           END DO
         END IF
         ! --vel, psi
@@ -1225,27 +1302,27 @@ DO i=1,mesh%nc
           tmp2 = cross_product(basis_grads(:,jc), [0.d0,1.d0/(coords(1)+gs_epsilon),0.d0]) ! this is 'dB'
           DO l=1,3
             jac_loc(l+1,6)%m(jr,jc) = jac_loc(l+1,6)%m(jr,jc) &
-            + self%dt*DOT_PRODUCT(basis_grads(:,jr), tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n*mu0) &
-            + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n*mu0) &
-            - self%dt*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n*mu0) &
-            - self%dt*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
-            - self%dt*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
-            + self%dt*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n**2*mu0) 
+            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n*mu0) &
+            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n*mu0) &
+            - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n*mu0) &
+            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
+            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
+            + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n**2*mu0) 
           END DO
           jac_loc(2,6)%m(jr,jc) = jac_loc(2,6)%m(jr,jc) &
-          + self%dt*basis_vals(jr)*(btmp(2)*tmp2(2)-btmp(1)*tmp2(1)-btmp(3)*tmp2(3))*int_factor/(m_i*n*mu0)
+          + dt_fac*basis_vals(jr)*(btmp(2)*tmp2(2)-btmp(1)*tmp2(1)-btmp(3)*tmp2(3))*int_factor/(m_i*n*mu0)
           jac_loc(3,6)%m(jr,jc) = jac_loc(3,6)%m(jr,jc) &
-          - self%dt*basis_vals(jr)*(btmp(1)*tmp2(2)+btmp(2)*tmp2(1))*int_factor/(m_i*n*mu0)
+          - dt_fac*basis_vals(jr)*(btmp(1)*tmp2(2)+btmp(2)*tmp2(1))*int_factor/(m_i*n*mu0)
         ELSE
           tmp2 = cross_product(basis_grads(:,jc), [0.d0,1.d0,0.d0])
           DO l=1,3
             jac_loc(l+1,6)%m(jr,jc) = jac_loc(l+1,6)%m(jr,jc) &
-            + self%dt*DOT_PRODUCT(basis_grads(:,jr), tmp2)*btmp(l)*int_factor/(m_i*n*mu0) &
-            + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor/(m_i*n*mu0) &
-            - self%dt*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n*mu0) &
-            - self%dt*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor/(m_i*n**2*mu0) &
-            - self%dt*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor/(m_i*n**2*mu0) &
-            + self%dt*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n**2*mu0) 
+            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), tmp2)*btmp(l)*int_factor/(m_i*n*mu0) &
+            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor/(m_i*n*mu0) &
+            - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n*mu0) &
+            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor/(m_i*n**2*mu0) &
+            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor/(m_i*n**2*mu0) &
+            + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n**2*mu0) 
           END DO
         END IF
         ! --vel, by
@@ -1253,135 +1330,135 @@ DO i=1,mesh%nc
           tmp2 = [0.d0,basis_vals(jc)/(coords(1)+gs_epsilon),0.d0]! this is 'B_y'
           DO l=1,3
             jac_loc(l+1,7)%m(jr,jc) = jac_loc(l+1,7)%m(jr,jc) &
-            + self%dt*DOT_PRODUCT(basis_grads(:,jr),tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n*mu0) &
-            + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n*mu0) &
-            - self%dt*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n*mu0) &
-            - self%dt*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
-            - self%dt*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
-            + self%dt*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n**2*mu0)
+            + dt_fac*DOT_PRODUCT(basis_grads(:,jr),tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n*mu0) &
+            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n*mu0) &
+            - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n*mu0) &
+            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
+            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor*coords(1)/(m_i*n**2*mu0) &
+            + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor*coords(1)/(m_i*n**2*mu0)
           END DO
           jac_loc(2,7)%m(jr,jc) = jac_loc(2,7)%m(jr,jc) &
-          + self%dt*basis_vals(jr)*(btmp(2)*tmp2(2)-btmp(1)*tmp2(1)-btmp(3)*tmp2(3))*int_factor/(m_i*n*mu0)
+          + dt_fac*basis_vals(jr)*(btmp(2)*tmp2(2)-btmp(1)*tmp2(1)-btmp(3)*tmp2(3))*int_factor/(m_i*n*mu0)
           jac_loc(3,7)%m(jr,jc) = jac_loc(3,7)%m(jr,jc) &
-          - self%dt*basis_vals(jr)*(btmp(1)*tmp2(2)+btmp(2)*tmp2(1))*int_factor/(m_i*n*mu0)
+          - dt_fac*basis_vals(jr)*(btmp(1)*tmp2(2)+btmp(2)*tmp2(1))*int_factor/(m_i*n*mu0)
         ELSE
           tmp2 = [0.d0,basis_vals(jc),0.d0] 
           DO l=1,3
             jac_loc(l+1,7)%m(jr,jc) = jac_loc(l+1,7)%m(jr,jc) &
-            + self%dt*DOT_PRODUCT(basis_grads(:,jr),tmp2)*btmp(l)*int_factor/(m_i*n*mu0) &
-            + self%dt*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor/(m_i*n*mu0) &
-            - self%dt*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n*mu0) &
-            - self%dt*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor/(m_i*n**2*mu0) &
-            - self%dt*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor/(m_i*n**2*mu0) &
-            + self%dt*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n**2*mu0)
+            + dt_fac*DOT_PRODUCT(basis_grads(:,jr),tmp2)*btmp(l)*int_factor/(m_i*n*mu0) &
+            + dt_fac*DOT_PRODUCT(basis_grads(:,jr), btmp)*tmp2(l)*int_factor/(m_i*n*mu0) &
+            - dt_fac*basis_grads(l,jr)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n*mu0) &
+            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, tmp2)*btmp(l)*int_factor/(m_i*n**2*mu0) &
+            - dt_fac*basis_vals(jr)*DOT_PRODUCT(dn, btmp)*tmp2(l)*int_factor/(m_i*n**2*mu0) &
+            + dt_fac*basis_vals(jr)*dn(l)*DOT_PRODUCT(tmp2, btmp)*int_factor/(m_i*n**2*mu0)
           END DO
         END IF
         ! Temperature
         ! T, n
         IF (cyl_flag) THEN
           jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
-            - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), dT)*int_factor*coords(1)/n & ! grad(delta_n) 
-            + self%dt*chi*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dT)*int_factor*coords(1)/(n**2) ! delta_n 
+            - dt_fac*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), dT)*int_factor*coords(1)/n & ! grad(delta_n) 
+            + dt_fac*chi*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dT)*int_factor*coords(1)/(n**2) ! delta_n 
         ELSE
           IF (linear) THEN
             jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
-            + self%dt*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(vel, dT)*int_factor/(n*(gamma-1))&
-            + self%dt*basis_vals(jr)*basis_vals(jc)*k_boltz*T*div_vel*int_factor/n &
-            - self%dt*basis_vals(jc)*chi*DOT_PRODUCT(basis_grads(:, jr), dT)*int_factor/n &
-            - self%dt*basis_vals(jr)*chi*basis_vals(jc)*DOT_PRODUCT(dn,dT)*int_factor/(n**2) 
+            + dt_fac*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(vel, dT)*int_factor/(n*(gamma-1))&
+            + dt_fac*basis_vals(jr)*basis_vals(jc)*k_boltz*T*div_vel*int_factor/n &
+            - dt_fac*basis_vals(jc)*chi*DOT_PRODUCT(basis_grads(:, jr), dT)*int_factor/n &
+            - dt_fac*basis_vals(jr)*chi*basis_vals(jc)*DOT_PRODUCT(dn,dT)*int_factor/(n**2) 
           ELSE
             jac_loc(5, 1)%m(jr,jc) = jac_loc(5, 1)%m(jr, jc) &  
-            - self%dt*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), dT)*int_factor/n & ! grad(delta_n) 
-            + self%dt*chi*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dT)*int_factor/(n**2) ! delta_n 
+            - dt_fac*chi*basis_vals(jr)*DOT_PRODUCT(basis_grads(:, jc), dT)*int_factor/n & ! grad(delta_n) 
+            + dt_fac*chi*basis_vals(jr)*basis_vals(jc)*DOT_PRODUCT(dn, dT)*int_factor/(n**2) ! delta_n 
           END IF
         END IF
         ! T, vel
         IF (cyl_flag) THEN
           DO l=1,3
             jac_loc(5, l+1)%m(jr,jc) = jac_loc(5, l+1)%m(jr, jc) &  
-            + basis_vals(jr) * self%dt*basis_vals(jc)*dT(l)*int_factor*coords(1)/(gamma-1) & ! delta_u dot Delta_T
-            + basis_vals(jr) * self%dt*T*basis_grads(l, jc)*int_factor*coords(1) ! div(delta u) = SUM(basis_grads)?
+            + basis_vals(jr) * dt_fac*basis_vals(jc)*dT(l)*int_factor*coords(1)/(gamma-1) & ! delta_u dot Delta_T
+            + basis_vals(jr) * dt_fac*T*basis_grads(l, jc)*int_factor*coords(1) ! div(delta u) = SUM(basis_grads)?
           END DO
           jac_loc(5, 2)%m(jr,jc) = jac_loc(5, 2)%m(jr, jc) &
-            + basis_vals(jr)*self%dt*T*basis_vals(jc)*int_factor 
+            + basis_vals(jr)*dt_fac*T*basis_vals(jc)*int_factor 
         ELSE
           DO l=1,3
             jac_loc(5, l+1)%m(jr,jc) = jac_loc(5, l+1)%m(jr, jc) &  
-            + basis_vals(jr) * self%dt*basis_vals(jc)*dT(l)*int_factor/(gamma-1) & ! delta_u dot Delta_T
-            + basis_vals(jr) * self%dt*T*basis_grads(l, jc)*int_factor ! div(delta u) = SUM(basis_grads)?
+            + basis_vals(jr) * dt_fac*basis_vals(jc)*dT(l)*int_factor/(gamma-1) & ! delta_u dot Delta_T
+            + basis_vals(jr) * dt_fac*T*basis_grads(l, jc)*int_factor ! div(delta u) = SUM(basis_grads)?
           END DO
         END IF
         ! T, T
         IF(cyl_flag) THEN
           jac_loc(5, 5)%m(jr,jc) = jac_loc(5,5)%m(jr, jc) &  
           + basis_vals(jr) * basis_vals(jc)*int_factor*coords(1)/(gamma-1) &! delta_T
-          + basis_vals(jr) * self%dt*DOT_PRODUCT(vel, basis_grads(:, jc))*int_factor*coords(1)/(gamma-1) & ! nabla(dT)
-          + basis_vals(jr) * self%dt*basis_vals(jc)*div_vel*int_factor*coords(1) & ! dT != nabla(dT)
-          + self%dt * chi * DOT_PRODUCT(basis_grads(:, jc),basis_grads(:, jr))*int_factor*coords(1) & ! dT_Chi
-          - self%dt*basis_vals(jr)*chi*DOT_PRODUCT(dn, basis_grads(:, jc))*int_factor*coords(1)/n 
+          + basis_vals(jr) * dt_fac*DOT_PRODUCT(vel, basis_grads(:, jc))*int_factor*coords(1)/(gamma-1) & ! nabla(dT)
+          + basis_vals(jr) * dt_fac*basis_vals(jc)*div_vel*int_factor*coords(1) & ! dT != nabla(dT)
+          + dt_fac * chi * DOT_PRODUCT(basis_grads(:, jc),basis_grads(:, jr))*int_factor*coords(1) & ! dT_Chi
+          - dt_fac*basis_vals(jr)*chi*DOT_PRODUCT(dn, basis_grads(:, jc))*int_factor*coords(1)/n 
         ELSE
           jac_loc(5, 5)%m(jr,jc) = jac_loc(5,5)%m(jr, jc) &  
           + basis_vals(jr) * basis_vals(jc)*int_factor/(gamma-1) &! delta_T
-          + basis_vals(jr) * self%dt*DOT_PRODUCT(vel, basis_grads(:, jc))*int_factor/(gamma-1) & ! nabla(dT)
-          + basis_vals(jr) * self%dt*basis_vals(jc)*div_vel*int_factor & ! dT != nabla(dT)
-          + self%dt * chi * DOT_PRODUCT(basis_grads(:, jc),basis_grads(:, jr))*int_factor & ! dT_Chi
-          - self%dt*basis_vals(jr)*chi*DOT_PRODUCT(dn, basis_grads(:, jc))*int_factor/n 
+          + basis_vals(jr) * dt_fac*DOT_PRODUCT(vel, basis_grads(:, jc))*int_factor/(gamma-1) & ! nabla(dT)
+          + basis_vals(jr) * dt_fac*basis_vals(jc)*div_vel*int_factor & ! dT != nabla(dT)
+          + dt_fac * chi * DOT_PRODUCT(basis_grads(:, jc),basis_grads(:, jr))*int_factor & ! dT_Chi
+          - dt_fac*basis_vals(jr)*chi*DOT_PRODUCT(dn, basis_grads(:, jc))*int_factor/n 
         END IF
         ! Induction
         !--psi, vel
         IF (cyl_flag) THEN
           DO l=1,3
             jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
-            + basis_vals(jr)*self%dt*basis_vals(jc)*dpsi(l)*int_factor/(coords(1)+gs_epsilon)
+            + basis_vals(jr)*dt_fac*basis_vals(jc)*dpsi(l)*int_factor/(coords(1)+gs_epsilon)
             tmp2 = [0.d0, 0.d0,0.d0]
             tmp2(l) = 1.d0
             tmp3 = cross_product(B_0, tmp2)
             jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
-            + basis_vals(jr)*self%dt*basis_vals(jc)*tmp3(2)*int_factor/(coords(1)+gs_epsilon)
+            + basis_vals(jr)*dt_fac*basis_vals(jc)*tmp3(2)*int_factor/(coords(1)+gs_epsilon)
           END DO
         ELSE
           DO l=1,3
             jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
-            + basis_vals(jr)*self%dt*basis_vals(jc)*dpsi(l)*int_factor
+            + basis_vals(jr)*dt_fac*basis_vals(jc)*dpsi(l)*int_factor
             tmp2 = [0.d0, 0.d0,0.d0]
             tmp2(l) = 1.d0
             tmp3 = cross_product(B_0, tmp2)
             jac_loc(6,l+1)%m(jr,jc) = jac_loc(6,l+1)%m(jr,jc) &
-            + basis_vals(jr)*self%dt*basis_vals(jc)*tmp3(2)*int_factor
+            + basis_vals(jr)*dt_fac*basis_vals(jc)*tmp3(2)*int_factor
           END DO
         END IF
         ! --psi, psi
         IF (cyl_flag) THEN
           jac_loc(6, 6)%m(jr,jc) = jac_loc(6, 6)%m(jr,jc) &
           + basis_vals(jr)*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon) &
-          + self%dt*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*int_factor/(coords(1)+gs_epsilon) &
-          + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/(mu0*(coords(1)+gs_epsilon))
+          + dt_fac*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*int_factor/(coords(1)+gs_epsilon) &
+          + dt_fac*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/(mu0*(coords(1)+gs_epsilon))
         ELSE
           jac_loc(6, 6)%m(jr,jc) = jac_loc(6, 6)%m(jr,jc) &
           + basis_vals(jr)*basis_vals(jc)*int_factor &
-          + self%dt*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*int_factor &
-          + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/mu0
+          + dt_fac*basis_vals(jr)*DOT_PRODUCT(vel,basis_grads(:,jc))*int_factor &
+          + dt_fac*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/mu0
         END IF
         !--by, vel
         tmp2 = cross_product(dpsi,basis_grads(:,jc))
         IF(cyl_flag) THEN
           DO l=1,3
             jac_loc(7,l+1)%m(jr,jc) = jac_loc(7, l+1)%m(jr,jc) &
-            + basis_vals(jr)*self%dt*basis_vals(jc)*dby(l)*int_factor/(coords(1)+gs_epsilon) &
-            + basis_vals(jr)*self%dt*by*basis_grads(l,jc)*int_factor/(coords(1)+gs_epsilon)
+            + basis_vals(jr)*dt_fac*basis_vals(jc)*dby(l)*int_factor/(coords(1)+gs_epsilon) &
+            + basis_vals(jr)*dt_fac*by*basis_grads(l,jc)*int_factor/(coords(1)+gs_epsilon)
           END DO
           jac_loc(7,2)%m(jr,jc) = jac_loc(7, 2)%m(jr,jc) &
-          + basis_vals(jr)*self%dt*by*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon)**2
+          + basis_vals(jr)*dt_fac*by*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon)**2
           jac_loc(7,3)%m(jr,jc) = jac_loc(7, 3)%m(jr,jc) &
-          -basis_vals(jr)*self%dt*tmp2(2)*int_factor/(coords(1)+gs_epsilon)
+          -basis_vals(jr)*dt_fac*tmp2(2)*int_factor/(coords(1)+gs_epsilon)
         ELSE
           DO l=1,3
             jac_loc(7,l+1)%m(jr,jc) = jac_loc(7, l+1)%m(jr,jc) &
-            + basis_vals(jr)*self%dt*basis_vals(jc)*dby(l)*int_factor &
-            + basis_vals(jr)*self%dt*by*basis_grads(l,jc)*int_factor
+            + basis_vals(jr)*dt_fac*basis_vals(jc)*dby(l)*int_factor &
+            + basis_vals(jr)*dt_fac*by*basis_grads(l,jc)*int_factor
             IF (l==2) THEN
               jac_loc(7,l+1)%m(jr,jc) = jac_loc(7, l+1)%m(jr,jc) &
-              - basis_vals(jr)*self%dt*tmp2(l)*int_factor
+              - basis_vals(jr)*dt_fac*tmp2(l)*int_factor
             END IF
           END DO
         END IF
@@ -1389,26 +1466,26 @@ DO i=1,mesh%nc
         tmp2 = cross_product(basis_grads(:,jc),dvel(2,:))
         IF (cyl_flag) THEN
           jac_loc(7, 6)%m(jr,jc) = jac_loc(7, 6)%m(jr,jc) &
-          - basis_vals(jr)*self%dt*tmp2(2)*int_factor/(coords(1)+gs_epsilon)
+          - basis_vals(jr)*dt_fac*tmp2(2)*int_factor/(coords(1)+gs_epsilon)
         ELSE
           jac_loc(7, 6)%m(jr,jc) = jac_loc(7, 6)%m(jr,jc) &
-          - basis_vals(jr)*self%dt*tmp2(2)*int_factor  
+          - basis_vals(jr)*dt_fac*tmp2(2)*int_factor  
         END IF
         !-- by, by
         IF (cyl_flag) THEN
           jac_loc(7, 7)%m(jr,jc) = jac_loc(7, 7)%m(jr,jc) &
           + basis_vals(jr)*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon) &
-          + self%dt*basis_vals(jr)*dvel(1,1)*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon) &
-          + self%dt*basis_vals(jr)*dvel(3,3)*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon) &
-          - self%dt*basis_vals(jr)*vel(1)*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon)**2 &
-          + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, basis_grads(:,jc))*int_factor/(coords(1)+gs_epsilon) &
-          + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr), basis_grads(:,jc))*int_factor/(mu0*(coords(1)+gs_epsilon))
+          + dt_fac*basis_vals(jr)*dvel(1,1)*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon) &
+          + dt_fac*basis_vals(jr)*dvel(3,3)*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon) &
+          - dt_fac*basis_vals(jr)*vel(1)*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon)**2 &
+          + dt_fac*basis_vals(jr)*DOT_PRODUCT(vel, basis_grads(:,jc))*int_factor/(coords(1)+gs_epsilon) &
+          + dt_fac*eta*DOT_PRODUCT(basis_grads(:,jr), basis_grads(:,jc))*int_factor/(mu0*(coords(1)+gs_epsilon))
         ELSE
           jac_loc(7, 7)%m(jr,jc) = jac_loc(7, 7)%m(jr,jc) &
           + basis_vals(jr)*basis_vals(jc)*int_factor &
-          + basis_vals(jr)*self%dt*DOT_PRODUCT(basis_grads(:,jc),vel)*int_factor & 
-          + basis_vals(jr)*self%dt*basis_vals(jc)*div_vel*int_factor & 
-          + self%dt*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/mu0 
+          + basis_vals(jr)*dt_fac*DOT_PRODUCT(basis_grads(:,jc),vel)*int_factor & 
+          + basis_vals(jr)*dt_fac*basis_vals(jc)*div_vel*int_factor & 
+          + dt_fac*eta*DOT_PRODUCT(basis_grads(:,jr),basis_grads(:,jc))*int_factor/mu0 
         END IF
       END DO
     END DO
@@ -1646,9 +1723,11 @@ DO
   END IF
   !Plot data
   CALL xdmf_plot%add_timestep(t)
+  !
   CALL u%get_local(plot_vals,1)
   plot_vals = plot_vals*self%den_scale
   CALL mesh%save_vertex_scalar(plot_vals,xdmf_plot,'n')
+  !
   CALL u%get_local(plot_vals,2)
   plot_vec(1,:)=plot_vals
   CALL u%get_local(plot_vals,3)
@@ -1656,11 +1735,15 @@ DO
   CALL u%get_local(plot_vals,4)
   plot_vec(2,:)=plot_vals
   CALL mesh%save_vertex_vector(plot_vec,xdmf_plot,'V')
+  !
   CALL u%get_local(plot_vals,5)
   CALL mesh%save_vertex_scalar(plot_vals,xdmf_plot,'T')
+  !
   CALL u%get_local(plot_vals,6)
   CALL mesh%save_vertex_scalar(plot_vals,xdmf_plot,'psi')
+  !
   CALL grad_psi%u%restore_local(plot_vals)
+  CALL grad_psi%setup(oft_blagrange)
   CALL oft_blag_vproject(oft_blagrange,grad_psi,ux,uy,uz)
   CALL v_lag%set(0.d0)
   CALL lminv%apply(v_lag,ux)

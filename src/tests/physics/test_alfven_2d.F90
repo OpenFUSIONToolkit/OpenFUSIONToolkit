@@ -50,7 +50,7 @@ REAL(r8) :: D_diff=1.E-12
 REAL(r8) :: gamma=1.67d0
 REAL(r8) :: den_scale=1.d19
 REAL(r8) :: B_0(3)=0.d0
-REAL(r8) :: k_dir(3) = (/0.d0,1.d0,0.d0/) !< Direction of wave propogation
+REAL(r8) :: k_dir(3) = (/1.d0,0.d0,0.d0/) !< Direction of wave propogation
 Real(r8) :: v_dir(3) = (/1.d0,0.d0,0.d0/) !<Direction of velocity perturbation
 REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
 REAL(r8) :: lam = 2.d0 !< Wavelength
@@ -64,8 +64,8 @@ LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
 LOGICAL :: linear=.FALSE.
 LOGICAL :: cyl=.FALSE.
-NAMELIST/xmhd_options/linear, lin_tol, nl_tol, cyl, order,nsteps, rst_freq, dt, n0, psi0, velx0,&
-vely0,velz0, t0, by0, bx0, bz0,chi,eta,nu, D_diff, gamma, den_scale, use_mfnk,pm
+NAMELIST/xmhd_options/linear,lin_tol,nl_tol,cyl,order,nsteps,rst_freq,dt,n0,psi0,velx0, &
+vely0,velz0,t0,by0,bx0,bz0,chi,eta,nu,D_diff,gamma,den_scale,use_mfnk,pm
 !------------------------------------------------------------------------------
 ! Initialize enviroment
 !------------------------------------------------------------------------------
@@ -79,6 +79,10 @@ CLOSE(io_unit)
 !---------------------------------------------------------------------------
 CALL multigrid_construct_surf(mg_mesh)
 CALL mhd_sim%setup(mg_mesh,order)
+
+ALLOCATE(mhd_sim%n_bc(ML_oft_blagrange%current_level%ne))
+mhd_sim%n_bc=.TRUE.
+mhd_sim%t_bc=>mhd_sim%n_bc
 
 !---------------------------------------------------------------------------
 ! Set intial conditions from analytic functions
@@ -100,72 +104,37 @@ B=v_alf*SQRT(mu0*n0*proton_mass)
 B_delta = v_delta*B/v_alf
 
 !---Project n initial condition onto scalar Lagrange basis
-field_init%func=>const_init
 field_init%mesh=>mesh
-CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-CALL u%set(0.d0)
-CALL minv%apply(u,v)
-CALL u%scale(n0)
+CALL u%set(n0)
 CALL u%get_local(vec_vals)
-! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'n0')
 mhd_sim%den_scale = den_scale
 vec_vals = vec_vals / den_scale
 CALL mhd_sim%u%restore_local(vec_vals,1)
 IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,1)
 
 !---Project v_x initial condition onto scalar Lagrange basis
-CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-CALL u%set(0.d0)
-CALL minv%apply(u,v)
-CALL u%scale(0.d0)
-CALL u%get_local(vec_vals)
-IF (linear) THEN
-    CALL mhd_sim%u0%restore_local(vec_vals,2)
-    CALL mhd_sim%u0%restore_local(vec_vals,3)
-    CALL mhd_sim%u0%restore_local(vec_vals,4)
-    CALL mhd_sim%u0%restore_local(vec_vals,6)
-    CALL mhd_sim%u0%restore_local(vec_vals,7)
-END IF
-
 field_init%func=>velx_alf
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(v_delta)
 CALL u%get_local(vec_vals)
-! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vx0')
 CALL mhd_sim%u%restore_local(vec_vals,2)
 CALL ML_oft_blagrange%vec_create(vx_ic)
 CALL vx_ic%restore_local(vec_vals)
 
-!---Project v_y initial condition onto scalar Lagrange basis
-field_init%func=>vely_alf
-CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-CALL u%set(0.d0)
-CALL minv%apply(u,v)
-CALL u%scale(v_delta)
-CALL u%get_local(vec_vals)
-! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vy0')
-CALL mhd_sim%u%restore_local(vec_vals,3)
-
-!---Project v_z initial condition onto scalar Lagrange basis
-field_init%func=>velz_alf
-CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-CALL u%set(0.d0)
-CALL minv%apply(u,v)
-CALL u%scale(v_delta)
-CALL u%get_local(vec_vals)
-! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'vz0')
-CALL mhd_sim%u%restore_local(vec_vals,4)
+! !---Project v_z initial condition onto scalar Lagrange basis
+! field_init%func=>velz_alf
+! CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
+! CALL u%set(0.d0)
+! CALL minv%apply(u,v)
+! CALL u%scale(v_delta)
+! CALL u%get_local(vec_vals)
+! CALL mhd_sim%u%restore_local(vec_vals,4)
 
 !---Project T initial condition onto scalar Lagrange basis
-field_init%func=>const_init
-CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-CALL u%set(0.d0)
-CALL minv%apply(u,v)
-CALL u%scale(t0)
+CALL u%set(t0)
 CALL u%get_local(vec_vals)
-! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'T0')
 CALL mhd_sim%u%restore_local(vec_vals,5)
 IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,5)
 
@@ -176,20 +145,9 @@ CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(B_delta)
 CALL u%get_local(vec_vals)
-! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'psi0')
 CALL mhd_sim%u%restore_local(vec_vals,6)
 CALL ML_oft_blagrange%vec_create(psi_ic)
 CALL psi_ic%restore_local(vec_vals)
-
-!---Project by initial condition onto scalar Lagrange basis
-field_init%func=>const_init
-CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-CALL u%set(0.d0)
-CALL minv%apply(u,v)
-CALL u%scale(by0)
-CALL u%get_local(vec_vals)
-! CALL mesh%save_vertex_scalar(vec_vals,mhd_sim%xdmf_plot,'by0')
-CALL mhd_sim%u%restore_local(vec_vals,7)
 
 !---Cleanup objects used for projection
 CALL u%delete ! Destroy LHS vector
@@ -207,7 +165,7 @@ DEALLOCATE(minv)
 mhd_sim%chi=chi
 mhd_sim%eta=eta
 mhd_sim%nu=nu
-mhd_sim%gamma=gamma
+mhd_sim%gamma=5.d0/3.d0 !gamma
 mhd_sim%D_diff=D_diff
 B_0(3) = B
 mhd_sim%B_0 = B_0
@@ -216,12 +174,19 @@ mhd_sim%nsteps=nsteps
 mhd_sim%rst_freq=rst_freq
 mhd_sim%mfnk=use_mfnk
 mhd_sim%linear = linear
+mhd_sim%lin_tol=lin_tol
+mhd_sim%ittarget=300
+mhd_sim%timestep_cn=.TRUE.
 oft_env%pm=pm
-IF (linear) THEN
+IF(linear)THEN
+  CALL mhd_sim%u%add(1.d0,-1.d0,mhd_sim%u0)
   CALL mhd_sim%run_lin_simulation()
+  CALL mhd_sim%u%add(1.d0,1.d0,mhd_sim%u0)
 ELSE
   CALL mhd_sim%run_simulation()
 END IF
+
+CALL xmhd_2d_plot(mhd_sim)
 
 CALL ML_oft_blagrange%vec_create(tmp)
 !---Compare vx waveform
@@ -262,34 +227,28 @@ CLOSE(io_unit)
 CALL oft_finalize
 CONTAINS
 
-SUBROUTINE const_init(pt,val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = 1.0
-END SUBROUTINE const_init
-
 SUBROUTINE psi_alf(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = COS(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)*lam/(2.d0*pi)
+val = SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)*lam/(2.d0*pi)
 END SUBROUTINE psi_alf
 
 SUBROUTINE velx_alf(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = v_dir(1)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+val = v_dir(1)*COS(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
 END SUBROUTINE velx_alf
 
 SUBROUTINE vely_alf(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = v_dir(2)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+val = v_dir(2)*COS(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
 END SUBROUTINE vely_alf
 
 SUBROUTINE velz_alf(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = v_dir(3)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+val = v_dir(3)*COS(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
 END SUBROUTINE velz_alf
 
 
