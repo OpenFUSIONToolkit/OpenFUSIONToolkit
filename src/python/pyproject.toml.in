@@ -5,12 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "OpenFUSIONToolkit"
 authors = [
+    {name = "Anson Braun"},
     {name = "Daniel Burgess"},
+    {name = "Samuel Freiberger"},
     {name = "Sophia Guizzo"},
     {name = "Chris Hansen"},
     {name = "Julia Kirby"},
+    {name = "John Lhota"},
     {name = "Francois Logak"},
-    {name = "Matthew Pharr"}
+    {name = "Oak Nelson"},
+    {name = "Matthew Pharr"},
+    {name = "Benjy Smith"},
+    {name = "Thomas Wang"},
 ]
 maintainers = [
   {name = "Chris Hansen", email = "christopher.hansen@columbia.edu"}
@@ -33,7 +39,7 @@ dependencies = [
     "h5py",
     "netCDF4"
 ]
-version = "@CMAKE_PROJECT_VERSION@@OFT_VER_SUFFIX@"
+version = "@CMAKE_PROJECT_VERSION@@OFT_PYPI_VER_SUFFIX@"
 
 [project.urls]
 Homepage = "https://openfusiontoolkit.github.io/OpenFUSIONToolkit/"

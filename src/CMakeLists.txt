@@ -4,6 +4,7 @@
 cmake_minimum_required( VERSION 3.12 )
 project( OpenFUSIONToolkit LANGUAGES NONE VERSION "1.0.0" )
 set( OFT_VER_SUFFIX "-beta7" CACHE INTERNAL "Version suffix" )
+set( OFT_PYPI_VER_SUFFIX "${OFT_VER_SUFFIX}" CACHE INTERNAL "Version suffix for PYPI (needs to be pep440)" )
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )
 
 option(OFT_BUILD_TESTS "Build tests?" OFF)
@@ -35,6 +36,17 @@ set(OFT_SHARED_LIBS CACHE INTERNAL "package_shared_libs")
 set(OFT_PYTHON_BINS CACHE INTERNAL "package_python_binaries")
 if(OFT_PACKAGE_NIGHTLY)
   execute_process(
+    COMMAND git describe --tags --abbrev=0
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_LAST_TAG
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  execute_process(
+    COMMAND git rev-list ${GIT_LAST_TAG}..HEAD --count
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_COMMIT_COUNT
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  set( OFT_PYPI_VER_SUFFIX "${OFT_VER_SUFFIX}.dev${GIT_COMMIT_COUNT}" CACHE INTERNAL "Version suffix for PYPI (needs to be pep440)" )
+  execute_process(
     COMMAND git rev-parse --short HEAD
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
     OUTPUT_VARIABLE GIT_REV_HASH
@@ -47,7 +59,6 @@ if(OFT_BUILD_DOCS OR OFT_PACKAGE_BUILD OR OFT_DEBUG_STACK)
     set(Python3_FIND_VIRTUALENV ONLY)
   endif()
   find_package(Python3 REQUIRED)
-  message( STATUS ${Python3_EXECUTABLE} )
 endif()
 
 ########################
