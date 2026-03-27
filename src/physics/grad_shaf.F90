@@ -5604,7 +5604,7 @@ IF(.NOT.ASSOCIATED(mat))THEN
   IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
     DEALLOCATE(graphs(2,1)%g%kr,graphs(2,1)%g%lc)
     DEALLOCATE(graphs(1,2)%g%kr,graphs(1,2)%g%lc)
-    DEALLOCATE(graphs(2,2)%g%kr,graphs(2,1)%g%lc)
+    DEALLOCATE(graphs(2,2)%g%kr,graphs(2,2)%g%lc)
     DEALLOCATE(graphs(2,1)%g,graphs(1,2)%g,graphs(2,2)%g)
   END IF
   DEALLOCATE(graphs)
