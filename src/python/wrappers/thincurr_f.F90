@@ -67,7 +67,8 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
 #ifdef HAVE_XML
-TYPE(xml_node), POINTER :: thincurr_node
+TYPE(xml_node), POINTER :: thincurr_node, eta_vol_node, thickness_node
+LOGICAL :: has_eta_vol, has_thickness
 #endif
 CALL copy_string('',error_str)
 CALL copy_string_rev(mesh_file,filename)
@@ -207,6 +208,16 @@ IF(c_associated(xml_ptr))THEN
   CALL xml_get_element(thincurr_node,"thincurr",tw_obj%xml,ierr)
   IF(ierr/=0)THEN
     CALL copy_string('Error getting ThinCurr XML node',error_str)
+    RETURN
+  END IF
+  ! Pre-validate XML combinations at wrapper boundary so Python callers get
+  ! a normal exception instead of a hard abort from deeper native setup.
+  CALL xml_get_element(tw_obj%xml,"eta_vol",eta_vol_node,ierr)
+  has_eta_vol=ASSOCIATED(eta_vol_node)
+  CALL xml_get_element(tw_obj%xml,"thickness",thickness_node,ierr)
+  has_thickness=ASSOCIATED(thickness_node)
+  IF(has_eta_vol .AND. (.NOT.has_thickness))THEN
+    CALL copy_string('Invalid XML resistivity inputs: "eta_vol" requires "thickness"',error_str)
     RETURN
   END IF
 #else
@@ -690,7 +701,7 @@ TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
 CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
-res_tmp=tw_obj%Eta
+res_tmp=tw_obj%Eta_surf*mu0
 END SUBROUTINE thincurr_get_eta
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -711,22 +722,14 @@ IF(ANY(res_tmp<=0.d0))THEN
   RETURN
 END IF
 
-tw_obj%Eta=res_tmp
-! If thickness is set, update Eta_reg using thickness,
-! Otherwise assume Eta already represents surface resistivity and set Eta_reg=Eta/mu0.
-! Eta_reg can be updated later when thickness is set.
-IF (ASSOCIATED(tw_obj%Thickness)) THEN ! If thickness if set, use it to compute Eta_reg
-  IF(ANY(tw_obj%Thickness<=0.d0))THEN
-    CALL copy_string('All values in "thickness" must be > 0',error_str)
-    RETURN
-  END IF
-  tw_obj%Eta_reg=(tw_obj%Eta/tw_obj%Thickness)/mu0
-ELSE ! No thickness provided: treat Eta as surface resistivity
-  tw_obj%Eta_reg=tw_obj%Eta/mu0
+tw_obj%Eta_surf=res_tmp/mu0
+! If thickness is set, update Eta_vol as well
+IF (ASSOCIATED(tw_obj%Thickness)) THEN ! If thickness if set, use it to compute Eta_surf
+  IF(ALL(tw_obj%Thickness>0.d0))tw_obj%Eta_vol=tw_obj%Eta_surf*tw_obj%Thickness
 END IF
 END SUBROUTINE thincurr_set_eta
 !---------------------------------------------------------------------------------
-!> Return the thickness of the regions as an array of length nreg. If thickness is not set, return 0 for all regions.
+!> Return the thickness of the regions as an array of length nreg. If thickness is not set, return -1 for all regions.
 !---------------------------------------------------------------------------------
 SUBROUTINE thincurr_get_thickness(tw_ptr,thickness_ptr,error_str)BIND(C,NAME="thincurr_get_thickness")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr ! ThickCurr object pointer
@@ -741,12 +744,12 @@ CALL c_f_pointer(thickness_ptr, thick_tmp, [tw_obj%mesh%nreg]) ! Associate the t
 IF (ASSOCIATED(tw_obj%Thickness)) THEN
   thick_tmp = tw_obj%Thickness ! If thickness is set, copy it to the output array
 ELSE
-  ! Warn that thickness is not set, returning 0 for all regions. This is the legacy behavior, but users should be aware that this may not be physically correct.
-  thick_tmp = 0.d0 ! If thickness is not set, return 0 for all regions
+  ! Warn that thickness is not set, returning -1 for all regions. This is the legacy behavior, but users should be aware that this may not be physically correct.
+  thick_tmp = -1.d0
 END IF
 END SUBROUTINE thincurr_get_thickness
 !---------------------------------------------------------------------------------
-!> Set the thickness of the regions using an array of length nreg and recompute Eta_reg using the provided thickness value.
+!> Set the thickness of the regions using an array of length nreg and recompute Eta_surf using the provided thickness value.
 !---------------------------------------------------------------------------------
 SUBROUTINE thincurr_set_thickness(tw_ptr,thickness_ptr,error_str)BIND(C,NAME="thincurr_set_thickness")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
@@ -763,12 +766,8 @@ IF(ANY(thick_tmp<=0.d0))THEN
   RETURN
 END IF
 tw_obj%Thickness=thick_tmp
-IF (ASSOCIATED(tw_obj%Eta)) THEN ! If Eta is allocated, we can compute Eta_reg using the new thickness values. Otherwise, we will compute Eta_reg when Eta is set.
-  IF(ANY(tw_obj%Eta<=0.d0))THEN
-    CALL copy_string('All values in "eta" must be > 0',error_str)
-    RETURN
-  END IF
-  tw_obj%Eta_reg=(tw_obj%Eta/tw_obj%Thickness)/mu0
+IF (ASSOCIATED(tw_obj%Eta_surf)) THEN ! If Eta_surf is allocated, we can compute Eta_vol using the new thickness values.
+  IF(ALL(tw_obj%Eta_surf>0.d0))tw_obj%Eta_vol=tw_obj%Eta_surf*tw_obj%Thickness
 END IF
 END SUBROUTINE thincurr_set_thickness
 !---------------------------------------------------------------------------------
@@ -1031,7 +1030,7 @@ END SUBROUTINE thincurr_time_domain
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE thincurr_time_domain_plot(tw_ptr,compute_B,rebuild_sensors,nsteps,nplot, &
-  sensor_ptr,sensor_vals_ptr,nsensor,compute_J_vol,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain_plot")
+  sensor_ptr,sensor_vals_ptr,nsensor,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain_plot")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: compute_B !< Needs docs
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: rebuild_sensors !< Needs docs
@@ -1040,7 +1039,6 @@ INTEGER(KIND=c_int), VALUE, INTENT(in) :: nplot !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: sensor_vals_ptr !< Needs docs
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsensor !< Needs docs
-LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: compute_J_vol !< Compute volumetric current density J_vol = J/thickness
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
@@ -1073,9 +1071,9 @@ END IF
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr, hodlr_op)
-  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),sensor_waveform,LOGICAL(compute_J_vol),hodlr_op=hodlr_op)
+  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),sensor_waveform,hodlr_op=hodlr_op)
 ELSE
-  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),sensor_waveform,LOGICAL(compute_J_vol))
+  CALL plot_td_sim(tw_obj,nsteps,nplot,sensors,LOGICAL(compute_B),LOGICAL(rebuild_sensors),sensor_waveform)
 END IF
 oft_env%pm=pm_save
 END SUBROUTINE thincurr_time_domain_plot

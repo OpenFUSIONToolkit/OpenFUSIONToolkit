@@ -148,6 +148,8 @@ class ThinCurr_XML:
         self.icoils = []
         self.vcoils = []
         self.eta = None
+        self.eta_vol = None
+        self.thickness = None
     
     def add_Icoil(self, icoil):
         """! Add an I-coil to this ThinCurr block
@@ -170,6 +172,18 @@ class ThinCurr_XML:
         @param resistivities array of float, resistivity values by section
         """
         self.eta = resistivities
+
+    def set_eta_vol(self, resistivities):
+        """! Set volumetric resistivity values
+        @param resistivities array of float, volumetric resistivity values by section
+        """
+        self.eta_vol = resistivities
+
+    def set_thickness(self, thicknesses):
+        """! Set thickness values
+        @param thicknesses array of float, thickness values by section
+        """
+        self.thickness = thicknesses
     
     def build_XML(self, parent_tag):
         """! Build XML structure for ThinCurr block
@@ -181,6 +195,16 @@ class ThinCurr_XML:
         if self.eta is not None:
             eta_element = ET.SubElement(thincurr_element, "eta")
             eta_element.text = ' '.join('{0:.4E}'.format(r) for r in self.eta)
+
+        # Add eta_vol (volumetric resistivities) if present
+        if self.eta_vol is not None:
+            eta_vol_element = ET.SubElement(thincurr_element, "eta_vol")
+            eta_vol_element.text = ' '.join('{0:.4E}'.format(r) for r in self.eta_vol)
+
+        # Add thickness if present
+        if self.thickness is not None:
+            thickness_element = ET.SubElement(thincurr_element, "thickness")
+            thickness_element.text = ' '.join('{0:.4E}'.format(t) for t in self.thickness)
         
         # Add I-coils if present
         if self.icoils:

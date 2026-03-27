@@ -14,6 +14,7 @@ import numpy
 import h5py
 from ._interface import *
 from ..io import build_XDMF
+from warnings import warn
 
 
 class ThinCurr():
@@ -344,9 +345,9 @@ class ThinCurr():
                {'names': sensor_names, 'ptr': sensor_loc}
     
     def get_eta_values(self):
-        '''! Get resistivity values for model
+        '''! Get surface resistivity values for model
 
-        @returns `eta_values` Resistivity values for model [nregs]
+        @returns `eta_values` Surface resistivity values for model [nregs]
         '''
         eta_values = numpy.zeros((self.nregs,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
@@ -355,32 +356,82 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         return eta_values
     
-    def set_eta_values(self,eta_values=None,thickness=None):
+    def set_eta_values(self,eta_values=None,eta_surf=None,eta_vol=None,thickness=None):
         '''! Set resistivity values for model (overrides those in XML if specified)
 
-        @param eta_values New resistivity values for model [nregs].
+        @param eta_values New resistivity values for model (surface resistivity) [nregs]. 
+                          Backward compatible: treated as surface resistivity if provided alone.
+        @param eta_surf New surface resistivity values for model [nregs].
+        @param eta_vol New volumetric (bulk) resistivity values for model [nregs]. Units: Ohm*m
         @param thickness New thickness values for model [nregs]. Units: m
+        
+        Allowed behaviors:
+          1) Pass eta_values only (backward compatible, treated as surface resistivity)
+          2) Pass eta_surf only (surface resistivity)
+          3) Pass eta_surf and thickness (surface resistivity and thickness)
+          4) Pass eta_vol and thickness (compute surface resistivity as eta_vol/thickness)
+        
+        Raises error if more than one resistivity type is specified or invalid combination provided.
         '''
-        if eta_values is None:
-            raise ValueError('"eta_values" cannot be None')
-        if eta_values.shape[0] != self.nregs:
-            raise IndexError('Incorrect shape of "eta_values", should be [nregs]')
-        if thickness is not None and thickness.shape[0] != self.nregs:
-            raise IndexError('Incorrect shape of "thickness", should be dimensions of [nregs] (or thickness should be None)')
-        if numpy.any(eta_values <= 0.0):
-            raise ValueError('All values in "eta_values" must be > 0')
-        if thickness is not None and numpy.any(thickness <= 0.0):
-            raise ValueError('All values in "thickness" must be > 0')
+        # Count how many resistivity types are provided
+        resistivity_count = sum([eta_values is not None, eta_surf is not None, eta_vol is not None])
+        
+        if resistivity_count == 0:
+            raise ValueError('At least one resistivity type must be specified: eta_values, eta_surf, or eta_vol')
+        
+        if resistivity_count > 1:
+            raise ValueError('Only one resistivity type can be specified: eta_values, eta_surf, or eta_vol (not multiple)')
+        
+        # Determine which resistivity type was provided and process accordingly
+        if eta_values is not None:
+            # Case 1: Original behavior - eta_values is surface resistivity
+            warn("Argument `eta_values` is deprecated, use `eta_surf` instead. This argument will be removed in a future version.", DeprecationWarning, stacklevel=2)
+            if thickness is not None:
+                raise ValueError('"thickness" can only be specified with "eta_surf" or "eta_vol", not "eta_values"')
+            if eta_values.shape[0] != self.nregs:
+                raise IndexError('Incorrect shape of "eta_values", should be [nregs]')
+            if numpy.any(eta_values <= 0.0):
+                raise ValueError('All values in "eta_values" must be > 0')
+            eta_to_set = eta_values
+            
+        elif eta_surf is not None:
+            # Case 2 or 3: eta_surf provided
+            if eta_surf.shape[0] != self.nregs:
+                raise IndexError('Incorrect shape of "eta_surf", should be [nregs]')
+            if numpy.any(eta_surf <= 0.0):
+                raise ValueError('All values in "eta_surf" must be > 0')
+            eta_to_set = eta_surf
+            
+        elif eta_vol is not None:
+            # Case 4: eta_vol provided
+            if thickness is None:
+                raise ValueError('"thickness" must be provided when specifying "eta_vol"')
+            if eta_vol.shape[0] != self.nregs:
+                raise IndexError('Incorrect shape of "eta_vol", should be [nregs]')
+            if thickness.shape[0] != self.nregs:
+                raise IndexError('Incorrect shape of "thickness", should be [nregs]')
+            if numpy.any(eta_vol <= 0.0):
+                raise ValueError('All values in "eta_vol" must be > 0')
+            if numpy.any(thickness <= 0.0):
+                raise ValueError('All values in "thickness" must be > 0')
+            # Compute surface resistivity from volumetric resistivity and thickness
+            eta_to_set = eta_vol / thickness
+        
+        # Validate thickness if provided (for cases 2 and 3)
+        if thickness is not None and eta_vol is None:
+            if thickness.shape[0] != self.nregs:
+                raise IndexError('Incorrect shape of "thickness", should be [nregs]')
+            if numpy.any(thickness <= 0.0):
+                raise ValueError('All values in "thickness" must be > 0')
 
-        # 1) Set resistivity
-        eta_values = numpy.ascontiguousarray(eta_values, dtype=numpy.float64)
+        # 1) Set surface resistivity
+        eta_to_set = numpy.ascontiguousarray(eta_to_set, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        thincurr_set_eta(self.tw_obj,eta_values,error_string)
+        thincurr_set_eta(self.tw_obj,eta_to_set,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
 
         # 2) Set thickness (if provided)
-        # TODO: Add test
         if thickness is not None:
             thickness = numpy.ascontiguousarray(thickness, dtype=numpy.float64)
             error_string = self._oft_env.get_c_errorbuff()
@@ -595,7 +646,7 @@ class ThinCurr():
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
     
-    def plot_td(self,nsteps,compute_B=False,rebuild_sensors=False,plot_freq=10,sensor_obj=None,sensor_values=None,compute_J_vol=False):
+    def plot_td(self,nsteps,compute_B=False,rebuild_sensors=False,plot_freq=10,sensor_obj=None,sensor_values=None):
         '''! Generate plot files for a time domain simulation that has already been run.
 
         @param nsteps Number of steps to take
@@ -603,8 +654,6 @@ class ThinCurr():
         @param rebuild_sensors Recompute sensor signals (overwriting if present)
         @param plot_freq Frequency to load plot files
         @param sensor_obj Sensor object to use
-        @param compute_J_vol Compute volumetric current density `J_vol = J/thickness`
-                    and save `thickness` to XDMF HDF5 output using model thickness values.
         '''
         sensor_ptr = c_void_p()
         if sensor_obj is not None:
@@ -620,10 +669,10 @@ class ThinCurr():
         error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
             thincurr_time_domain_plot(self.tw_obj,c_bool(compute_B),c_bool(rebuild_sensors),c_int(nsteps),c_int(plot_freq),sensor_ptr,
-                                      sensor_values,nsensor,c_bool(compute_J_vol),self.Lmat_hodlr,error_string)
+                                      sensor_values,nsensor,self.Lmat_hodlr,error_string)
         else:
             thincurr_time_domain_plot(self.tw_obj,c_bool(compute_B),c_bool(rebuild_sensors),c_int(nsteps),c_int(plot_freq),sensor_ptr,
-                                      sensor_values,nsensor,c_bool(compute_J_vol),c_void_p(),error_string)
+                                      sensor_values,nsensor,c_void_p(),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
 

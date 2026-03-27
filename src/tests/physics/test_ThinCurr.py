@@ -580,21 +580,18 @@ def validate_mode(drive_exp,result_exp):
     return result_val
 
 
-def _write_thincurr_xml(xml_filename, eta_values, thickness_values=None):
-    eta_string = ' '.join(['{0:.12E}'.format(val) for val in eta_values])
-    thickness_block = ''
+def _write_thincurr_xml(xml_filename, eta_values=None, thickness_values=None, eta_vol_values=None):
+    from OpenFUSIONToolkit import OFT_env
+    from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_XML
+
+    thincurr_xml = ThinCurr_XML()
+    if eta_values is not None:
+        thincurr_xml.set_eta(eta_values)
+    if eta_vol_values is not None:
+        thincurr_xml.set_eta_vol(eta_vol_values)
     if thickness_values is not None:
-        thickness_string = ' '.join(['{0:.12E}'.format(val) for val in thickness_values])
-        thickness_block = '<thickness>{0}</thickness>'.format(thickness_string)
-    with open(xml_filename, 'w+') as fid:
-        fid.write(
-            '<oft>\n'
-            '  <thincurr>\n'
-            '    <eta>{0}</eta>\n'
-            '    {1}\n'
-            '  </thincurr>\n'
-            '</oft>\n'.format(eta_string, thickness_block)
-        )
+        thincurr_xml.set_thickness(thickness_values)
+    OFT_env.write_oft_xml([thincurr_xml], xml_filename)
 
 
 def _build_dummy_model(xml_filename):
@@ -663,11 +660,11 @@ def run_thickness_api_roundtrip_and_validation(mp_q):
         xml_filename = 'oft_in_thickness_api.xml'
         eta_values = np.r_[1.E4*mu0]
         thickness_values = np.r_[2.5E-3]
-        _write_thincurr_xml(xml_filename, eta_values, thickness_values)
+        _write_thincurr_xml(xml_filename, eta_values=eta_values, thickness_values=thickness_values)
 
         tw_model = _build_dummy_model(xml_filename)
 
-        tw_model.set_eta_values(eta_values=eta_values, thickness=thickness_values)
+        tw_model.set_eta_values(eta_surf=eta_values, thickness=thickness_values)
         if not np.allclose(tw_model.get_eta_values(), eta_values):
             result = False
         if not np.allclose(tw_model.get_thickness(), thickness_values):
@@ -683,7 +680,11 @@ def run_thickness_api_roundtrip_and_validation(mp_q):
         with pytest.raises(ValueError):
             tw_model.set_eta_values(eta_values=np.r_[-1.0])
         with pytest.raises(ValueError):
-            tw_model.set_eta_values(eta_values=eta_values, thickness=np.r_[-1.0])
+            tw_model.set_eta_values(eta_values=eta_values, thickness=thickness_values)
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(eta_surf=eta_values, thickness=np.r_[-1.0])
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(eta_vol=np.r_[1.0e-6])
         with pytest.raises(IndexError):
             tw_model.set_thickness(np.r_[1.E-3, 2.E-3])
     except BaseException as e:
@@ -706,7 +707,7 @@ def run_plot_td_compute_jvol_outputs_fields(mp_q):
         io_basepath = 'td_jvol_regression'
         eta_values = np.r_[1.E4*mu0]
         thickness_values = np.r_[2.0E-3]
-        _write_thincurr_xml(xml_filename, eta_values, thickness_values)
+        _write_thincurr_xml(xml_filename, eta_values=eta_values, thickness_values=thickness_values)
 
         if os.path.isdir(io_basepath):
             shutil.rmtree(io_basepath)
@@ -717,7 +718,7 @@ def run_plot_td_compute_jvol_outputs_fields(mp_q):
         tw_model.compute_Lmat()
         tw_model.compute_Rmat()
         tw_model.run_td(2.E-5, 5, direct=True, plot_freq=1)
-        tw_model.plot_td(5, plot_freq=1, compute_J_vol=True)
+        tw_model.plot_td(5, plot_freq=1)
         tw_model.build_XDMF()
 
         xmf_files = sorted(glob.glob(os.path.join(io_basepath, '*.xmf')))
@@ -749,7 +750,7 @@ def run_eta_only_matches_surface_resistivity_with_thickness(mp_q):
         eta_surface = np.r_[1.E4*mu0]
         thickness_values = np.r_[2.5E-3]
         eta_bulk = eta_surface*thickness_values
-        _write_thincurr_xml(xml_filename, eta_surface)
+        _write_thincurr_xml(xml_filename, eta_values=eta_surface)
 
         model_surface = _build_dummy_model(xml_filename)
         model_surface.set_eta_values(eta_values=eta_surface)
@@ -757,12 +758,34 @@ def run_eta_only_matches_surface_resistivity_with_thickness(mp_q):
         R_surface = model_surface.Rmat
 
         model_bulk = _build_dummy_model(xml_filename)
-        model_bulk.set_eta_values(eta_values=eta_bulk, thickness=thickness_values)
+        model_bulk.set_eta_values(eta_vol=eta_bulk, thickness=thickness_values)
         model_bulk.compute_Rmat(copy_out=True)
         R_bulk = model_bulk.Rmat
 
         if not np.allclose(R_surface, R_bulk, rtol=1.E-10, atol=1.E-12):
             result = False
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_eta_vol_without_thickness_fails_xml_loading():
+    assert mp_run(run_eta_vol_without_thickness_fails_xml_loading, ())
+
+
+def run_eta_vol_without_thickness_fails_xml_loading(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_vol_only_invalid.xml'
+        eta_vol_values = np.r_[2.5E-3]
+        _write_thincurr_xml(xml_filename, eta_vol_values=eta_vol_values)
+
+        with pytest.raises(Exception):
+            _build_dummy_model(xml_filename)
     except BaseException as e:
         print(e)
         result = False

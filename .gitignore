@@ -19,6 +19,3 @@
 # Workflow products
 src/examples/TokaMaker/AdvancedWorkflows/IsofluxController/IODATA*
 src/examples/TokaMaker/AdvancedWorkflows/IsofluxController/__pycache__*
-
-# Working directory
-src/working/*
