@@ -241,7 +241,7 @@ tokamaker_save_ifile = ctypes_subroutine(oftpy_lib.tokamaker_save_ifile,
 tokamaker_save_mug = ctypes_subroutine(oftpy_lib.tokamaker_save_mug,
     [c_void_p, c_char_p, c_char_p])
 
-# tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,error_str)
+# tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,normalize,error_str)
 tokamaker_set_coil_current_dist = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_current_dist,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_bool, c_char_p])
 ## @endcond

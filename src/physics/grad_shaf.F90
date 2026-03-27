@@ -5601,6 +5601,12 @@ IF(.NOT.ASSOCIATED(mat))THEN
   CALL oft_lag_vec%delete
   DEALLOCATE(oft_lag_vec)
   NULLIFY(graphs(1,1)%g)
+  IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
+    DEALLOCATE(graphs(2,1)%g%kr,graphs(2,1)%g%lc)
+    DEALLOCATE(graphs(1,2)%g%kr,graphs(1,2)%g%lc)
+    DEALLOCATE(graphs(2,2)%g%kr,graphs(2,1)%g%lc)
+    DEALLOCATE(graphs(2,1)%g,graphs(1,2)%g,graphs(2,2)%g)
+  END IF
   DEALLOCATE(graphs)
 ELSE
   CALL mat%zero
@@ -5804,7 +5810,7 @@ character(LEN=*), intent(in) :: bc
 real(8), intent(in) :: main_scale
 real(r8), optional, intent(in) :: nonaxi_vals(:,:)
 real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,v,t1,psi_tmp,nturns,eta_wt,pt(3),coil_dist
+real(8) :: psitmp,goptmp(3,3),det,v,t1,psi_tmp,nturns,eta_wt,pt(3),coil_dist,vcont_val
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),row_tmp(:,:),col_tmp(:,:),eta_reg(:)
 integer(4) :: i,j,m,l,k,j2(1),jvsc(1)
 integer(4), allocatable :: j_lag(:)
@@ -5817,6 +5823,7 @@ NULLIFY(btmp)
 CALL self%psi_coil(iCoil)%f%get_local(btmp)
 j2=self%fe_rep%ne+iCoil
 jvsc=self%fe_rep%ne+self%ncoils+1
+vcont_val=self%coil_vcont(iCoil)
 !
 ALLOCATE(eta_reg(smesh%nreg))
 eta_reg=-1.d0
@@ -5873,8 +5880,10 @@ DO j=1,smesh%nc
   call mat%add_values(j2,j_lag,col_tmp,1,self%fe_rep%nce)
   call mat%add_values(j_lag,j2,row_tmp,self%fe_rep%nce,1)
   !---VSC contributions
-  call mat%add_values(jvsc,j_lag,self%coil_vcont(iCoil)*col_tmp,1,self%fe_rep%nce)
-  call mat%add_values(j_lag,jvsc,self%coil_vcont(iCoil)*row_tmp,self%fe_rep%nce,1)
+  IF(ABS(vcont_val)>1.d-10)THEN
+    call mat%atomic_add_values(jvsc,j_lag,vcont_val*col_tmp,1,self%fe_rep%nce)
+    call mat%atomic_add_values(j_lag,jvsc,vcont_val*row_tmp,self%fe_rep%nce,1)
+  END IF
   !!$omp end critical
 end do
 IF(PRESENT(nonaxi_vals))THEN
@@ -5901,7 +5910,7 @@ IF(PRESENT(nonaxi_vals))THEN
       col_tmp(1,1)=col_tmp(1,1)+nonaxi_vals(l,m)*btmp(self%region_info%noaxi_nodes(m)%v(l))
     end do
     row_tmp(:,1)=row_tmp(:,1)*col_tmp(1,1)
-    call mat%atomic_add_values(j_lag,j2,row_tmp(:,1),self%fe_rep%nce,1)
+    call mat%add_values(j_lag,j2,row_tmp(:,1),self%fe_rep%nce,1)
   end do
 END IF
 deallocate(j_lag,rop,row_tmp,col_tmp)

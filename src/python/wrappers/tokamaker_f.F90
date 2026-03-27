@@ -1551,8 +1551,9 @@ INTEGER(c_int), VALUE, INTENT(in) :: iCoil
 TYPE(c_ptr), VALUE, INTENT(in) :: curr_dist
 LOGICAL(c_bool), VALUE, INTENT(in) :: normalize
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 INTEGER(4) :: i
+REAL(r8) :: norm
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 class(oft_vector), pointer :: tmp_vec
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
@@ -1563,8 +1564,13 @@ NULLIFY(tmp_vec)
 call tMaker_obj%gs%psi%new(tmp_vec)
 
 CALL gs_coil_source_distributed(tMaker_obj%gs,iCoil,tmp_vec,vals_tmp)
-IF (normalize) THEN
-  CALL tmp_vec%scale(1.0/tmp_vec%sum())
+IF(normalize)THEN
+  norm = tmp_vec%sum()
+  IF(ABS(norm)<1.d-12)THEN
+    CALL copy_string('Normalization value close to zero',error_str)
+    RETURN
+  END IF
+  CALL tmp_vec%scale(1.d0/norm)
 END IF
 
 CALL tMaker_obj%gs%zerob_bc%apply(tmp_vec)

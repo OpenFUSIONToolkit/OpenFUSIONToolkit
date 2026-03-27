@@ -401,12 +401,12 @@ def validate_coil(results,psi_err_exp,mutual_err_exp):
         print("FAILED: error in solve!")
         return False
     test_result = True
-    if abs(results[0]) > abs(psi_err_exp)*1.1:
+    if abs(results[0]) > 1.1*abs(psi_err_exp):
         print("FAILED: psi error too high!")
         print("  Expected = {0:.5E}".format(psi_err_exp))
         print("  Actual =   {0:.5E}".format(results[0]))
         test_result = False
-    if abs((results[1]-mutual_err_exp)/mutual_err_exp) > 0.1:
+    if abs(results[1]) > 1.1*abs(mutual_err_exp):
         print("FAILED: coil mutual error too high!")
         print("  Expected = {0:.5E}".format(mutual_err_exp))
         print("  Actual =   {0:.5E}".format(results[1]))

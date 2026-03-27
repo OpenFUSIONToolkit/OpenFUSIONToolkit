@@ -9,9 +9,9 @@
 @date May 2023
 @ingroup doxy_oft_python
 '''
+import copy
 import collections
 import ctypes
-from os import walk
 import numpy
 from ._interface import *
 
@@ -458,14 +458,16 @@ class TokaMaker():
         else:
             return None
     
-    def coil_dict2vec(self,coil_dict={},keep_virtual=False,default_value=0.0):
+    def coil_dict2vec(self,coil_dict=None,keep_virtual=False,default_value=0.0):
         '''! Create coil vector from dictionary of values
 
-        @param coil_vec Input dictionary
+        @param coil_dict Input dictionary
         @param keep_virtual Keep virtual coils in vector instead of mapping to component coils
         @param default_value Fill value for unspecified entries
-        @returns `coil_dict` Ouput vector
+        @returns Ouput vector
         '''
+        if coil_dict is None:
+            coil_dict = {}
         vector = default_value*numpy.ones((self.ncoils+len(self._virtual_coils),))
         removal_vector = numpy.zeros((self.ncoils+len(self._virtual_coils),))
         for coil_key, value in coil_dict.items():
@@ -493,7 +495,7 @@ class TokaMaker():
 
         @param coil_vec Input vector
         @param always_virtual Always include virtual coils even if not present in vector
-        @returns `coil_dict` Ouput dictionary
+        @returns Ouput dictionary
         '''
         if (coil_vec.shape[0] != self.ncoils) and (coil_vec.shape[0] != self.ncoils+len(self._virtual_coils)):
             raise ValueError('Input vector has incorrect length, should be {0} or {1}'.format(self.ncoils, self.ncoils+len(self._virtual_coils)))
@@ -653,8 +655,7 @@ class TokaMaker():
         tokamaker_set_vcoil(self._tMaker_ptr,res_array,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        #Merge dicts and overwrite with new values where necessary. Only used for plotting.
-        self._vcoils = self._vcoils | coil_resistivities
+        self._vcoils = copy.deepcopy(coil_resistivities)
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0, curr_source=None):
         r'''! Initialize \f$\psi\f$ using uniform current distributions
@@ -1116,7 +1117,7 @@ class TokaMaker():
         tokamaker_get_jtor(self._tMaker_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return curr
+        return curr/mu0
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
@@ -1399,11 +1400,13 @@ class TokaMaker():
                     break
             return self.x_points[:i,:], self.diverted
     
-    def set_coil_currents(self, currents={}):
+    def set_coil_currents(self, currents=None):
         '''! Set coil currents
 
         @param currents Current in each coil [A]
         '''
+        if currents is None:
+            currents = {}
         current_array = numpy.ascontiguousarray(self.coil_dict2vec(currents), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_coil_currents(self._tMaker_ptr,current_array,error_string)
