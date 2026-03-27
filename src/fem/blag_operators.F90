@@ -448,10 +448,8 @@ do i=1,lag_rep%mesh%nc
       IF(bc_flag(j(jr)))mop(jr,:)=0.d0
     END DO
   END IF
-  !---Add local values to global matrix
-  ! !$omp critical
+  !---Add local values to global matrix (atomically)
   call mat%atomic_add_values(j,j,mop,lag_rep%nce,lag_rep%nce)
-  ! !$omp end critical
 end do
 deallocate(j,rop,mop)
 !$omp end parallel
@@ -641,7 +639,7 @@ NULLIFY(xloc)
 call x%set(0.d0)
 call x%get_local(xloc)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(field,xloc) private(det)
+!$omp parallel default(firstprivate) shared(field,xloc,lag_rep) private(det)
 allocate(j(lag_rep%nce),xtmp(lag_rep%nce))
 !$omp do schedule(static)
 do i=1,lag_rep%mesh%nc

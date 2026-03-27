@@ -219,7 +219,7 @@ mhd_sim%linear = linear
 oft_env%pm=pm
 IF (linear) THEN
   CALL mhd_sim%run_lin_simulation()
-ELSE 
+ELSE
   CALL mhd_sim%run_simulation()
 END IF
 

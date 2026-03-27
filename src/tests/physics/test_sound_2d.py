@@ -208,6 +208,7 @@ def test_lin_p3():
     nerr_exp = 8.1067291952836486E-003
     terr_exp = 8.1472470392866935E-003
     assert sound_2d_setup(1,1,3, linear = True)
+    assert validate_result(verr_exp, nerr_exp, terr_exp)
 
 @pytest.mark.linear
 @pytest.mark.mpi
@@ -219,6 +220,7 @@ def test_lin_p3_mpi(petsc_flag):
     terr_exp = 8.1472470392866935E-003
     assert sound_2d_setup(1,1,3, linear = True, petsc= petsc_flag)
     assert validate_result(verr_exp, nerr_exp, terr_exp)
+
 #============================================================================
 #Linear test runners for NP=4
 @pytest.mark.linear
@@ -233,7 +235,7 @@ def test_lin_p4():
 @pytest.mark.mpi
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", (True, False))
-def test_lin_p4_mpi(mf, petsc_flag):
+def test_lin_p4_mpi(petsc_flag):
     verr_exp = 7.9648052134242055E-003
     nerr_exp = 7.9586787434810218E-003
     terr_exp = 7.9984691203724943E-003

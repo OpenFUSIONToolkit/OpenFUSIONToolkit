@@ -554,7 +554,7 @@ ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
         psi_weights_loc(oft_blagrange%nce), by_weights_loc(oft_blagrange%nce),&
         vel_weights_loc(3, oft_blagrange%nce))
 ALLOCATE(cell_dofs(oft_blagrange%nce),res_loc(oft_blagrange%nce,7))
-!$omp do schedule(static)
+!$omp do ordered
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i) ! Straight cell test
   call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
@@ -623,7 +623,8 @@ DO i=1,mesh%nc
       + basis_vals(jr)*by*int_factor 
     END DO
   END DO
-    !---Add local values to full vector
+  !---Add local values to full vector
+  !$omp ordered
   DO jr=1,oft_blagrange%nce
     !$omp atomic
     n_res(cell_dofs(jr)) = n_res(cell_dofs(jr)) + res_loc(jr,1)/self%den_scale
@@ -640,6 +641,7 @@ DO i=1,mesh%nc
     !$omp atomic
     by_res(cell_dofs(jr)) = by_res(cell_dofs(jr)) + res_loc(jr,7)
   END DO
+  !$omp end ordered
 END DO
 !---Cleanup thread-local storage
 DEALLOCATE(basis_vals,basis_grads,n_weights_loc,T_weights_loc,&
@@ -741,7 +743,7 @@ ALLOCATE(T_weights_loc(oft_blagrange%nce),n_weights_loc(oft_blagrange%nce),&
         psi_weights_loc(oft_blagrange%nce), by_weights_loc(oft_blagrange%nce),&
         vel_weights_loc(3, oft_blagrange%nce))
 ALLOCATE(cell_dofs(oft_blagrange%nce),res_loc(oft_blagrange%nce,7))
-!$omp do schedule(static)
+!$omp do ordered
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i) ! Straight cell test
   call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
@@ -903,7 +905,8 @@ DO i=1,mesh%nc
       END IF
     END DO
   END DO
-    !---Add local values to full vector
+  !---Add local values to full vector
+  !$omp ordered
   DO jr=1,oft_blagrange%nce
     !$omp atomic
     n_res(cell_dofs(jr)) = n_res(cell_dofs(jr)) + res_loc(jr,1)/self%den_scale
@@ -920,6 +923,7 @@ DO i=1,mesh%nc
     !$omp atomic
     by_res(cell_dofs(jr)) = by_res(cell_dofs(jr)) + res_loc(jr,7)
   END DO
+  !$omp end ordered
 END DO
 
 !---Cleanup thread-local storage
@@ -1022,7 +1026,7 @@ DO i=1,self%fe_rep%nfields
    iloc(i)%v=>cell_dofs
 END DO
 CALL self%fe_rep%mat_setup_local(jac_loc, self%jacobian_block_mask)
-!$omp do schedule(static)
+!$omp do ordered
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i) ! Straight cell test
   call oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
@@ -1422,7 +1426,9 @@ DO i=1,mesh%nc
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%psi_bc(cell_dofs),6)
   CALL self%fe_rep%mat_zero_local_rows(jac_loc,self%by_bc(cell_dofs), 7)
   !----Add local contributions to matrix
+  !$omp ordered
   CALL self%fe_rep%mat_add_local(self%jacobian,jac_loc,iloc,tlocks)
+  !$omp end ordered
 END DO
 !---Cleanup thread-local storage
 CALL self%fe_rep%mat_destroy_local(jac_loc)

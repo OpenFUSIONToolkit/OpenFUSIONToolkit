@@ -115,11 +115,11 @@ def validate_result(verr_exp,berr_exp,steps_exp=11,linear=False):
 
 #============================================================================
 #Non-Linear test runners for NP=2
-
-def test_nl_p2(petsc_flag=False):
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_nl_p2(petsc_flag):
     berr_exp = 5.3027098135759567E-003
     verr_exp = 1.1873721610050637E-002
-    assert alfven_2d_setup(1,1,2)
+    assert alfven_2d_setup(1,1,2, petsc=petsc_flag)
     assert validate_result(verr_exp, berr_exp)
 
 @pytest.mark.mpi
@@ -134,11 +134,12 @@ def test_nl_p2_mpi(mf, petsc_flag):
 
 # #============================================================================
 # Non-Linear test runners for NP=3
-def test_nl_p3(petsc_flag=False):
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_nl_p3(petsc_flag):
     berr_exp = 1.6236743534312869E-003
     verr_exp = 2.1925507340437565E-003
 
-    assert alfven_2d_setup(1,1,3)
+    assert alfven_2d_setup(1,1,3,petsc=petsc_flag)
     assert validate_result(verr_exp, berr_exp)
 
 @pytest.mark.mpi
@@ -153,10 +154,11 @@ def test_nl_p3_mpi(petsc_flag, mf):
 
 # #============================================================================
 # Non-Linear test runners for NP=4
-def test_nl_p4(petsc_flag=False):
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_nl_p4(petsc_flag):
     berr_exp = 1.5317157832293636E-003
     verr_exp = 1.5358764924959429E-003
-    assert alfven_2d_setup(1,1,4)
+    assert alfven_2d_setup(1,1,4, petsc=petsc_flag)
     assert validate_result(verr_exp, berr_exp)
 
 @pytest.mark.mpi
@@ -171,10 +173,11 @@ def test_nl_p4_mpi(mf, petsc_flag):
 
 #============================================================================
 #Linear test runners for NP=2
-def test_lin_p2():
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_lin_p2(petsc_flag):
     berr_exp = 5.3034820766112590E-003
     verr_exp = 1.1872270591502096E-002
-    assert alfven_2d_setup(1,1,2, linear = True)
+    assert alfven_2d_setup(1,1,2, linear = True, petsc=petsc_flag)
     assert validate_result(verr_exp, berr_exp)
 
 @pytest.mark.mpi
@@ -184,13 +187,15 @@ def test_lin_p2_mpi(petsc_flag):
     berr_exp = 5.3027098135759567E-003
     verr_exp = 1.1873721610050637E-002
     assert alfven_2d_setup(1,1,2, petsc=petsc_flag, linear = True)
-    assert validate_result(verr_exp, berr_exp) 
+    assert validate_result(verr_exp, berr_exp)
+
 #============================================================================
 #Linear test runners for NP=3
-def test_lin_p3():
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_lin_p3(petsc_flag):
     berr_exp = 1.6202219032234132E-003
     verr_exp = 2.1913245828609224E-003
-    assert alfven_2d_setup(1,1,3, linear = True)
+    assert alfven_2d_setup(1,1,3, linear = True, petsc=petsc_flag)
     assert validate_result(verr_exp, berr_exp)
 
 @pytest.mark.mpi
@@ -204,10 +209,11 @@ def test_lin_p3_mpi(petsc_flag):
 
 #============================================================================
 #Linear test runners for NP=2
-def test_lin_p4():
+@pytest.mark.parametrize("petsc_flag", (True, False))
+def test_lin_p4(petsc_flag):
     berr_exp = 1.5317056628653773E-003
     verr_exp = 1.5358785580589698E-003
-    assert alfven_2d_setup(1,1,4, linear = True)
+    assert alfven_2d_setup(1,1,4, linear = True, petsc=petsc_flag)
     assert validate_result(verr_exp, berr_exp)
 
 @pytest.mark.mpi
