@@ -58,7 +58,7 @@ if(OFT_BUILD_DOCS OR OFT_PACKAGE_BUILD OR OFT_DEBUG_STACK)
   if(OFT_PACKAGE_BUILD AND OFT_PACKAGE_PYTHON)
     set(Python3_FIND_VIRTUALENV ONLY)
   endif()
-  find_package(Python3 REQUIRED)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
 endif()
 
 ########################

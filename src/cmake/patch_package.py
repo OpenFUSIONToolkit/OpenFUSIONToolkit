@@ -37,7 +37,7 @@ print('Copying required dynamic libraries')
 # Check for required utilities
 _, _, errcode = run_command('which ldconfig')
 if errcode != 0:
-    print('Unable to locate "lconfig" command')
+    print('Unable to locate "ldconfig" command')
     sys.exit(-1)
 _, _, errcode = run_command('which readelf')
 if errcode != 0:
@@ -172,5 +172,5 @@ for filename in sorted(patch_files):
     # print("  {0}".format(filename))
     _, _, errcode = run_command("patchelf --set-rpath '$ORIGIN' {0}".format(filename))
     if errcode != 0:
-        print(". WARNING: non-zero error code ({1}) patching {0}".format(filename, errcode))
+        print("  WARNING: non-zero error code ({1}) patching {0}".format(filename, errcode))
 print()

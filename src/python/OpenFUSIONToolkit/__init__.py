@@ -12,4 +12,4 @@
 from ._core import OFT_env
 
 __all__ = ["OFT_env"]
-__version__ = '1.0.0-beta6'
+__version__ = '@CMAKE_PROJECT_VERSION@@OFT_PYPI_VER_SUFFIX@'

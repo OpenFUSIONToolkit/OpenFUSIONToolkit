@@ -1,5 +1,6 @@
 [build-system]
 requires = ["setuptools"]
+#requires = ["setuptools>=68"] # For new license format (requires Python 3.8+)
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -25,11 +26,13 @@ description = "Modeling tools for plasma and fusion research and engineering"
 readme = "README.md"
 requires-python = ">=3.7"
 keywords = ["Fusion", "Plasma", "TokaMaker", "ThinCurr"]
-license = "LGPL-3.0-only"
-license-files = ["LICENSE"]
+license = "LGPL-3.0"
+#License-Expression = "LGPL-3.0-only"
+#License-files = ["LICENSE"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
     "Topic :: Scientific/Engineering :: Physics"
 ]
 dependencies = [

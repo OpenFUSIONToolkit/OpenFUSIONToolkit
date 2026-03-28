@@ -27,13 +27,13 @@ jobs:
             name: "Linux-x86_64",
             os: ubuntu-24.04,
             image: "quay.io/pypa/manylinux_2_28_x86_64",
-            python: "python3.14"
+            python: "/opt/python/cp314-cp314/bin/python"
           }
         - {
             name: "Linux-arm64",
             os: ubuntu-24.04-arm,
             image: "quay.io/pypa/manylinux_2_28_aarch64",
-            python: "python3.14"
+            python: "/opt/python/cp314-cp314/bin/python"
           }
 
     steps:
@@ -42,10 +42,10 @@ jobs:
     
     - name: Install prerequisites
       run: |
-        sudo dnf -y update
-        sudo dnf -y --enablerepo=powertools install git zlib-devel m4 make cmake patch perl python3 doxygen graphviz
-        sudo dnf clean all
-        sudo rm -rf /var/cache/yum
+        dnf -y update
+        dnf -y --enablerepo=powertools install git zlib-devel m4 make cmake patch perl doxygen graphviz
+        dnf clean all
+        rm -rf /var/cache/yum
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
