@@ -811,13 +811,13 @@ class TokaMaker():
         @param weights Weight to be applied to each constraint point [:] (default: 1)
         '''
         warn(
-            "`set_saddles()` is deprecated, use `set_saddles_constraints()` instead. This function will be removed in a future version.",
+            "`set_saddles()` is deprecated, use `set_saddle_constraints()` instead. This function will be removed in a future version.",
             DeprecationWarning,
             stacklevel=2
         )
-        self.set_saddles_constraints(saddles,weights)
+        self.set_saddle_constraints(saddles,weights)
 
-    def set_saddles_constraints(self,saddles,weights=None):
+    def set_saddle_constraints(self,saddles,weights=None):
         '''! Set saddle constraint points (poloidal field should vanish at each point)
 
         @param saddles List of points defining constraints [:,2]
