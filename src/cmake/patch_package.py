@@ -35,16 +35,13 @@ def get_prereqs(filename):
 print('Copying required dynamic libraries')
 
 # Check for required utilities
-_, _, errcode = run_command('which ldconfig')
-if errcode != 0:
+if shutil.which('ldconfig') is None:
     print('Unable to locate "ldconfig" command')
     sys.exit(-1)
-_, _, errcode = run_command('which readelf')
-if errcode != 0:
+if shutil.which('readelf') is None:
     print('Unable to locate "readelf" command')
     sys.exit(-1)
-_, _, errcode = run_command('which patchelf')
-if errcode != 0:
+if shutil.which('patchelf') is None:
     print('Unable to locate "patchelf" command')
     sys.exit(-1)
 
