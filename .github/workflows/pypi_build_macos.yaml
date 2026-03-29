@@ -65,11 +65,10 @@ jobs:
     
     - name: Install prerequisites
       run: |
-        brew install doxygen graphviz
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
-        python -m pip install jupyter nbconvert
+        python -m pip install build wheel jupyter nbconvert
 
     - name: Check compilers
       run: |
@@ -88,7 +87,7 @@ jobs:
       working-directory: libs
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
+        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package ${{ matrix.config.build_libs_flags }}
 
     - name: Build external (Release)
       if: ${{ inputs.release }}
@@ -96,7 +95,7 @@ jobs:
       working-directory: libs
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_package_release --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
+        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_package_release ${{ matrix.config.build_libs_flags }}
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
