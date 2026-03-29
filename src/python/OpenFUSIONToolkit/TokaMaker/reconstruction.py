@@ -519,7 +519,7 @@ class reconstruction():
         @param xtol Stopping condition: termination occurs when the relative error between two consecutive iterates is at most `xtol`
         @param gtol Stopping condition: termination occurs when the cosine of the angle between fvec and any column of the jacobian is at most `gtol` in absolute value
         @result Error flag
-        ''' 
+        '''
         # Check for possibly conflicting constraints
         if self._tMaker_obj._tMaker_equil.Isoflux_constraints is not None:
             oft_warning('Removing conflicting isoflux constraints from equilibrium object via `.set_isoflux_constraints(None)`')
