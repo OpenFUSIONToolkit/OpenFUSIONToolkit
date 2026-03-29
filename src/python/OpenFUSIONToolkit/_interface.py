@@ -75,12 +75,12 @@ else:
 try:
     oftpy_lib = ctypes.CDLL(os.path.join(root_path,'liboftpy'+lib_suffix))
     oft_triangle_lib = ctypes.CDLL(os.path.join(root_path,'liboft_triangle'+lib_suffix))
-except OSError as first_error:
+except OSError:
     try:
         oftpy_lib = ctypes.CDLL(os.path.join(root_path,'..','..','bin','liboftpy'+lib_suffix))
         oft_triangle_lib = ctypes.CDLL(os.path.join(root_path,'..','..','bin','liboft_triangle'+lib_suffix))
-    except OSError as second_error:
-        raise FileNotFoundError('Unable to load OFT shared library') from second_error
+    except OSError as load_error:
+        raise FileNotFoundError('Unable to load OFT shared library') from load_error
 
 # Abort callback
 @ctypes.CFUNCTYPE(None)
