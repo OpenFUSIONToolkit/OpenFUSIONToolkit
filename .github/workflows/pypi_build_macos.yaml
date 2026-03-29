@@ -17,6 +17,10 @@ jobs:
     name: ${{ format('PYPI macOS Nightly ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 45
+    env:
+      CC: ${{ matrix.config.cc }}
+      CXX: ${{ matrix.config.cxx }}
+      FC: ${{ matrix.config.fc }}
 
     strategy:
       fail-fast: false
