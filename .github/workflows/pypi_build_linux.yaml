@@ -15,7 +15,7 @@ on:
 jobs:
   build:
     name: ${{ format('PYPI Linux Nightly ({0})', matrix.config.name) }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.config.os }}
     container: ${{ matrix.config.image }}
     timeout-minutes: 45
 
