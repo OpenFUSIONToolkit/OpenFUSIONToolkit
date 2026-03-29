@@ -1568,6 +1568,8 @@ IF(normalize)THEN
   norm = tmp_vec%sum()
   IF(ABS(norm)<1.d-12)THEN
     CALL copy_string('Normalization value close to zero',error_str)
+    CALL tmp_vec%delete()
+    DEALLOCATE(tmp_vec)
     RETURN
   END IF
   CALL tmp_vec%scale(1.d0/norm)
@@ -1586,6 +1588,8 @@ DO i=1,tMaker_obj%gs%ncoils
     tMaker_obj%gs%Lcoils(iCoil,i)=tMaker_obj%gs%Lcoils(i,iCoil)
   END IF
 END DO
+CALL tmp_vec%delete()
+DEALLOCATE(tmp_vec)
 END SUBROUTINE tokamaker_set_coil_current_dist
 END MODULE tokamaker_f
 

@@ -650,7 +650,7 @@ class TokaMaker():
 
         @param coil_resistivities Resistivities for Vcoils [Ohms] (dictionary of form `{coil_name: coil_res}`)
         '''
-        res_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_resistivities,keep_virtual=True,default_value=-1.0), dtype=numpy.float64)
+        res_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_resistivities,default_value=-1.0), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_vcoil(self._tMaker_ptr,res_array,error_string)
         if error_string.value != b'':

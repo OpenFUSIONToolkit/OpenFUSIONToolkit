@@ -363,7 +363,7 @@ DO j=1,4
         EXIT
     END IF
 END DO
-DEALLOCATE(currs_tmp)
+IF(ASSOCIATED(currs_tmp))DEALLOCATE(currs_tmp)
 !
 time=time+self%mfop%dt
 dt=self%mfop%dt

@@ -1253,7 +1253,7 @@ SUBROUTINE create_dense_graph(outgraph,rvec,cvec)
 TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
 CLASS(oft_vector), POINTER, INTENT(in) :: rvec !< Vector representing matrix rows
 CLASS(oft_vector), POINTER, OPTIONAL, INTENT(in) :: cvec !< Vector representing matrix columns (optional)
-INTEGER(i4) :: i
+INTEGER(i4) :: i,j
 CLASS(oft_vector), POINTER :: vec2
 DEBUG_STACK_PUSH
 IF(PRESENT(cvec))THEN
@@ -1274,7 +1274,7 @@ ALLOCATE(outgraph%lc(outgraph%nnz))
 outgraph%kr(1)=1
 DO i=1,rvec%n
   outgraph%kr(i+1)=outgraph%kr(i)+vec2%n
-  outgraph%lc(outgraph%kr(i):outgraph%kr(i+1)-1)=[(i,i=1,vec2%n)]
+  outgraph%lc(outgraph%kr(i):outgraph%kr(i+1)-1)=[(j,j=1,vec2%n)]
 END DO
 DEBUG_STACK_POP
 END SUBROUTINE create_dense_graph

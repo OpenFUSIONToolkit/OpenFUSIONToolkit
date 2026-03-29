@@ -1856,14 +1856,16 @@ lag_rep=>self%fe_rep
 NULLIFY(btmp,btmp_coils,psi_vals,coil_vals)
 call b%set(0.d0)
 CALL b%get_local(btmp,1)
-CALL b%get_local(btmp_coils,2)
 CALL dpsi_dt%get_local(psi_vals,1)
-CALL dpsi_dt%get_local(coil_vals,2)
+IF(self%ncoils>0)THEN
+  CALL b%get_local(btmp_coils,2)
+  ! CALL dpsi_dt%get_local(coil_vals,2)
+ENDIF
 ! DO l=1,self%ncoils
 !   IF(self%Rcoils(l)<=0.d0)CYCLE
 !   btmp_coils(l)=DOT_PRODUCT(coil_vals(1:self%ncoils),self%Lcoils(1:self%ncoils,l))
 ! END DO
-DEALLOCATE(coil_vals)
+! DEALLOCATE(coil_vals)
 !
 ALLOCATE(eta_reg(self%fe_rep%mesh%nreg),reg_source(self%fe_rep%mesh%nreg))
 reg_source=0.d0
@@ -1930,9 +1932,14 @@ DO j=1,self%fe_rep%mesh%nc
 END DO
 deallocate(rhs_loc,j_lag,rop)
 !$omp end parallel
-CALL b%restore_local(btmp,1,add=.TRUE.,wait=.TRUE.)
-CALL b%restore_local(btmp_coils,2,add=.TRUE.)
-DEALLOCATE(btmp,btmp_coils,psi_vals,eta_reg,reg_source)
+IF(self%ncoils>0)THEN
+  CALL b%restore_local(btmp,1,add=.TRUE.,wait=.TRUE.)
+  CALL b%restore_local(btmp_coils,2,add=.TRUE.)
+  DEALLOCATE(btmp_coils)
+ELSE
+  CALL b%restore_local(btmp,add=.TRUE.)
+END IF
+DEALLOCATE(btmp,psi_vals,eta_reg,reg_source)
 ! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_wall_source
 !------------------------------------------------------------------------------
