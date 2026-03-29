@@ -26,7 +26,7 @@ description = "Modeling tools for plasma and fusion research and engineering"
 readme = "README.md"
 requires-python = ">=3.7"
 keywords = ["Fusion", "Plasma", "TokaMaker", "ThinCurr"]
-license = "LGPL-3.0"
+license = "LGPL-3.0-only"
 #License-Expression = "LGPL-3.0-only"
 #License-files = ["LICENSE"]
 classifiers = [
@@ -55,3 +55,14 @@ viz = ["pyvista"]
 
 [tool.setuptools.package-data]
 OpenFUSIONToolkit = ["lib*"]
+
+[tool.ruff]
+# Assume Python 3.7 for OMFIT compatability
+target-version = "py37"
+
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`) codes by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+#select = ["E4", "E7", "E9", "F"]
+ignore = ["E722", "F403", "F405"]
