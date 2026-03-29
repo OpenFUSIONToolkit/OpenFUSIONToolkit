@@ -57,7 +57,7 @@ viz = ["pyvista"]
 OpenFUSIONToolkit = ["lib*"]
 
 [tool.ruff]
-# Assume Python 3.7 for OMFIT compatability
+# Assume Python 3.7 for OMFIT compatibility
 target-version = "py37"
 
 [tool.ruff.lint]
