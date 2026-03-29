@@ -1281,7 +1281,7 @@ tMaker_obj%device%urf=settings%urf
 tMaker_obj%device%maxits=settings%maxits
 tMaker_obj%device%nl_tol=settings%nl_tol
 tMaker_obj%mode=settings%mode
-tMaker_obj%gs_equil%mode=tMaker_obj%mode
+IF(ASSOCIATED(tMaker_obj%gs_equil))tMaker_obj%gs_equil%mode=tMaker_obj%mode
 IF((.NOT.tMaker_obj%device%dipole_mode).AND.settings%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution")
 tMaker_obj%device%dipole_mode=settings%dipole_mode
 IF((.NOT.tMaker_obj%device%mirror_mode).AND.settings%mirror_mode)CALL oft_warn("TokaMaker's mirror functionality is experimental, use with caution")
@@ -1619,10 +1619,7 @@ INTEGER(4) :: i
 class(oft_vector), pointer :: tmp_vec
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil))THEN
-  CALL copy_string('Equilibrium object not allocated',error_str)
-  RETURN
-END IF
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
 CALL c_f_pointer(curr_dist, vals_tmp, [tMaker_obj%gs_equil%psi%n])
 ! Update coil flux to overwrite old uniform distribution
 NULLIFY(tmp_vec)
