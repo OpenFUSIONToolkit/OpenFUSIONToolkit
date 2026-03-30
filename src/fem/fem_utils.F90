@@ -189,7 +189,7 @@ subroutine diff_interp_apply_2d(self,cell,f,gop,val)
   real(r8), allocatable, dimension(:) :: aval,bval
   DEBUG_STACK_PUSH
   IF(self%dim<=0)CALL oft_abort("Field dimension must be specified.", &
-    "diff_interp_apply",__FILE__)
+    "diff_interp_apply_2d",__FILE__)
   ALLOCATE(aval(self%dim),bval(self%dim))
   CALL self%a%interp(cell,f,gop,aval)
   CALL self%b%interp(cell,f,gop,bval)

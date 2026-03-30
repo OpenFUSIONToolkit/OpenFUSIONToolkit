@@ -3,7 +3,7 @@
 !---------------------------------------------------------------------------
 !> @file xmhd_2d.F90
 !
-!> Solve time-dependent MHD equations with lagrange basis
+!> Solve time-dependent MHD equations in 2D with lagrange basis set
 !---------------------------------------------------------------------------
 MODULE xmhd_2d
 USE oft_base

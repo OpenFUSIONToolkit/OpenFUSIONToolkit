@@ -535,7 +535,7 @@ FUNCTION scal_energy_2d(mesh,field,quad_order) RESULT(energy)
   CLASS(oft_bmesh), INTENT(inout) :: mesh
   CLASS(bfem_interp), INTENT(inout) :: field !< Input field
   INTEGER(i4), INTENT(in) :: quad_order !< Desired quadrature order
-  REAL(r8) :: energy !< \f$ \int u dS \f$
+  REAL(r8) :: energy !< \f$ \int u^2 dS \f$
   INTEGER(i4) :: i,m,cell
   REAL(r8) :: area,etmp(1),sgop(3,3)
   TYPE(oft_quad_type) :: quad
