@@ -552,7 +552,9 @@ self%mfun%by_bc=>self%by_bc
 
 ! Construct the linear advance matrix with equilibrium fields
 CALL build_approx_jacobian(self,self%u0)
-CALL self%jacobian%save('lin_ops.h5', 'jacobian', bc_flags=[self%n_bc,self%velx_bc,self%vely_bc,self%velz_bc,self%T_bc,self%psi_bc,self%by_bc])
+CALL self%jacobian%save('lin_ops.h5', 'jacobian', &
+      bc_flags=[self%n_bc,self%velx_bc,self%vely_bc,self%velz_bc,self%T_bc,self%psi_bc,self%by_bc], &
+      nfields=self%fe_rep%nfields)
 !---------------------------------------------------------------------------
 ! Setup linear solver
 !---------------------------------------------------------------------------
@@ -1197,7 +1199,7 @@ END DO
 
 BLOCK
 LOGICAL :: curved
-INTEGER(i4) :: k, l, m, jr, jc
+INTEGER(i4) :: k, l, m, ik, jr, jc
 INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
 REAL(r8) :: n, vel(3), T, psi, by, dT(3),dn(3),dpsi(3),dby(3),&
 dvel(3,3),div_vel,jac_mat(3,4), jac_det,int_factor, btmp(3), tmp2(3), tmp3(3), coords(3)
@@ -1206,7 +1208,7 @@ REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_weights_loc,T_weights_loc,&
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vel_weights_loc, basis_grads
 TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: iloc
 type(oft_local_mat), allocatable, dimension(:,:) :: jac_loc
-!$omp parallel private(k, l, m,jr,jc,curved,coords,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
+!$omp parallel private(ik, k, l, m,jr,jc,curved,coords,cell_dofs,basis_vals,basis_grads,T_weights_loc, &
 !$omp n_weights_loc,psi_weights_loc, by_weights_loc,vel_weights_loc,res_loc,jac_mat, &
 !$omp jac_det,int_factor,T,n,psi,by,vel,dT,dn,dpsi,dby,dvel,div_vel,btmp,tmp2,tmp3, iloc, jac_loc) reduction(+:diag_vals)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
@@ -1216,8 +1218,8 @@ ALLOCATE(n_weights_loc(oft_blagrange%nce),vel_weights_loc(3, oft_blagrange%nce),
 ALLOCATE(cell_dofs(oft_blagrange%nce))
 ALLOCATE(jac_loc(self%fe_rep%nfields,self%fe_rep%nfields))
 ALLOCATE(iloc(self%fe_rep%nfields))
-DO i=1,self%fe_rep%nfields
-   iloc(i)%v=>cell_dofs
+DO ik=1,self%fe_rep%nfields
+   iloc(ik)%v=>cell_dofs
 END DO
 CALL self%fe_rep%mat_setup_local(jac_loc, self%jacobian_block_mask)
 !$omp do schedule(static)

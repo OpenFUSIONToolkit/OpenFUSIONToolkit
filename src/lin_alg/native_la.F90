@@ -2322,6 +2322,7 @@ CALL hdf5_write(self%ncg,filename,TRIM(path)//'/ncg')
 CALL hdf5_write(self%M,filename,TRIM(path)//'/M')
 CALL hdf5_write(lg,filename,TRIM(path)//'/lg')
 If(PRESENT(bc_flags))CALL hdf5_write(bit_flags,filename,TRIM(path)//'/bc_flags')
+IF(PRESENT(nfields))CALL hdf5_write(nfields,filename,TRIM(path)//'/nfields')
 DEALLOCATE(lg)
 DEBUG_STACK_POP
 end subroutine mat_save
