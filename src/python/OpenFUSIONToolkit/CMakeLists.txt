@@ -1,4 +1,5 @@
 add_subdirectory( TokaMaker )
+add_subdirectory( TokaMax )
 add_subdirectory( ThinCurr )
 add_subdirectory( Marklin )
 
