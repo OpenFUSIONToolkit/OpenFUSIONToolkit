@@ -53,7 +53,6 @@ integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nle
 TYPE(xml_node), optional, pointer, intent(in) :: xml_root !< Preconditioner definition node (optional)
 !---
 NULLIFY(pre)
-#ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml).AND.PRESENT(xml_root))THEN
   IF(ASSOCIATED(xml_root))THEN
     !---Create preconditioner
@@ -61,7 +60,6 @@ IF(ASSOCIATED(oft_env%xml).AND.PRESENT(xml_root))THEN
       ml_vecspace=ml_vecspace,pre_node=xml_root,bc=bc)
   END IF
 END IF
-#endif
 IF(.NOT.ASSOCIATED(pre))THEN
   IF(use_petsc)THEN
     CALL create_petsc_mlpre(pre,Mats,levels,nlevels=nlevels, &
@@ -486,7 +484,6 @@ RECURSIVE SUBROUTINE create_solver_xml(solver,solver_node,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
 TYPE(xml_node), POINTER, INTENT(in) :: solver_node
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nread,nnodes,ierr
 TYPE(xml_node), POINTER :: pre_node
@@ -499,11 +496,11 @@ val_level=1
 IF(PRESENT(level))val_level=level
 native_solver=.FALSE.
 !---
-CALL xml_extractDataAttribute(solver_node,"type",solver_type,iostat=ierr)
+! CALL xml_extractDataAttribute(solver_node,"type",solver_type,iostat=ierr)
 IF(oft_debug_print(2))WRITE(*,*)'Found solver: ',solver_type
 force_native=.FALSE.
 IF(xml_hasAttribute(solver_node,"native"))THEN
-  CALL xml_extractDataAttribute(solver_node,"native",temp_string,iostat=ierr)
+  ! CALL xml_extractDataAttribute(solver_node,"native",temp_string,iostat=ierr)
   force_native=((temp_string(1:1)=='t').OR.(temp_string(1:1)=='T'))
 END IF
 !---
@@ -555,9 +552,6 @@ IF(ierr==0)THEN
   CALL create_pre_xml(solver%pre,pre_node,native_solver,val_level)
 END IF
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','create_solver_xml',__FILE__)
-#endif
 end subroutine create_solver_xml
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -674,7 +668,6 @@ CLASS(oft_solver), POINTER, INTENT(out) :: pre
 TYPE(xml_node), POINTER, INTENT(in) :: pre_node
 LOGICAL, INTENT(in) :: native_solver
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nread,nnodes,ierr
 TYPE(xml_node), POINTER :: solver_node
@@ -686,7 +679,7 @@ DEBUG_STACK_PUSH
 val_level=1
 IF(PRESENT(level))val_level=level
 !---
-CALL xml_extractDataAttribute(pre_node,"type",pre_type,iostat=ierr)
+! CALL xml_extractDataAttribute(pre_node,"type",pre_type,iostat=ierr)
 IF(oft_debug_print(2))WRITE(*,*)'Found preconditioner: ',pre_type
 !---
 SELECT CASE(TRIM(pre_type))
@@ -737,9 +730,6 @@ IF(ierr==0)THEN
   CALL create_solver_xml(pre%pre,solver_node,val_level)
 END IF
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','create_pre_xml',__FILE__)
-#endif
 end subroutine create_pre_xml
 !------------------------------------------------------------------------------
 !> Construct PETSc Multi-Grid preconditioner using native mechanics
@@ -752,7 +742,6 @@ integer(i4), intent(in) :: nlevels !< Number of levels
 class(oft_ml_vecspace), target, intent(in) :: ml_vecspace !< Multi-level vectorspace
 TYPE(xml_node), POINTER, INTENT(in) :: pre_node !< Preconditioner XML element
 class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition (optional)
-#ifdef HAVE_XML
 !---
 integer(i4) :: i,ierr,nnodes
 class(oft_ml_precond), pointer :: this_ml
@@ -771,8 +760,8 @@ IF(oft_debug_print(1))WRITE(*,*)'Creating MG smoother'
 CALL xml_get_element(pre_node,"smoother",current_nodes,ierr)
 IF(current_nodes%n==0)CALL oft_abort("Object contains no smoother definitions.","create_ml_xml",__FILE__)
 DO i=1,current_nodes%n
-  current_node=>current_nodes%nodes(i)%this
-  CALL xml_extractDataAttribute(current_node,"direction",dir_type,iostat=ierr)
+  current_node=>current_nodes%nodes(i)!%this
+  ! CALL xml_extractDataAttribute(current_node,"direction",dir_type,iostat=ierr)
   IF(oft_debug_print(2))WRITE(*,*)'Found smoother: ',dir_type
   SELECT CASE(TRIM(dir_type))
     CASE("up")
@@ -862,8 +851,5 @@ DO i=nlevels-1,1,-1
   END IF
 END DO
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','create_ml_xml',__FILE__)
-#endif
 end subroutine create_ml_xml
 END MODULE oft_solver_utils

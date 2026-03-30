@@ -2096,10 +2096,8 @@ TYPE(oft_lag_zerob), POINTER :: bc_tmp
 TYPE(oft_ml_fe_vecspace), POINTER :: tmp_vecspace
 !---
 TYPE(xml_node), POINTER :: pre_node
-#ifdef HAVE_XML
 integer(i4) :: nnodes
 TYPE(xml_node), POINTER :: lag_node
-#endif
 DEBUG_STACK_PUSH
 !---
 minlev=1
@@ -2142,12 +2140,10 @@ CALL ML_lag_rep%set_level(levin)
 ! Search for XML-spec
 !------------------------------------------------------------------------------
 NULLIFY(pre_node)
-#ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"lagrange",lag_node,ierr)
   IF(ierr==0)CALL xml_get_element(lag_node,"lop",pre_node,ierr)
 END IF
-#endif
 !------------------------------------------------------------------------------
 ! Setup preconditioner
 !------------------------------------------------------------------------------

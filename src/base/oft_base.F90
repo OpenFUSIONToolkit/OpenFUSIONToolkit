@@ -24,6 +24,8 @@ MODULE oft_base
 USE, INTRINSIC :: iso_fortran_env, ONLY: error_unit
 USE omp_lib
 USE oft_local
+USE oft_xml, ONLY: xml_doc,xml_node,xml_nodelist,xml_parsefile,xml_get_element,xml_hasAttribute, &
+  xml_read_content,xml_read_attribute
 USE oft_sort, ONLY: sort_array
 #ifdef HAVE_PETSC
 USE petscsys
@@ -99,14 +101,6 @@ INTERFACE oft_random_number
 END INTERFACE oft_random_number
 PRIVATE oft_random_number_r8
 !------------------------------------------------------------------------------
-!> Dummy shadow type for Fox XML node
-!------------------------------------------------------------------------------
-#if !defined(HAVE_XML)
-TYPE :: xml_node
-  INTEGER(i4) :: dummy = 0
-END TYPE
-#endif
-!------------------------------------------------------------------------------
 !> Open FUSION Toolkit environment class
 !!
 !! Contains runtime enviroment information
@@ -136,9 +130,8 @@ TYPE :: oft_env_type
   CHARACTER(LEN=4) :: crank = '' !< Processor rank in character form
   CHARACTER(LEN=OFT_PATH_SLEN) :: ifile = 'none' !< Name of input file
   CHARACTER(LEN=OFT_PATH_SLEN) :: xml_file = 'none' !< Name of XML input file
-#ifdef HAVE_XML
+  TYPE(xml_doc), POINTER :: xml_doc => NULL()
   TYPE(xml_node), POINTER :: xml => NULL()
-#endif
 END TYPE oft_env_type
 !---Global variables
 TYPE(oft_env_type) :: oft_env !< Global container for environment information
@@ -204,9 +197,6 @@ INTEGER(i4) :: omp_nthreads=-1
 LOGICAL :: test_run=.FALSE.
 CHARACTER(LEN=OFT_PATH_SLEN) :: ifile
 LOGICAL :: called_from_lib
-#ifdef HAVE_XML
-TYPE(xml_node), POINTER :: doc
-#endif
 LOGICAL :: rst
 NAMELIST/runtime_options/ppn,omp_nthreads,debug,oft_stack_disabled,use_petsc,test_run,nparts
 !---Initialize MPI
@@ -291,17 +281,14 @@ IF(PRESENT(nthreads))THEN
 END IF
 !---Parse xml file if necessary
 IF(oft_env%xml_file(1:4)/='none')THEN
-#ifdef HAVE_XML
   !---Test for existence of XML file
   INQUIRE(FILE=TRIM(oft_env%xml_file),exist=rst)
   IF(.NOT.rst)CALL oft_abort('XML file specified but does not exist.','oft_init',__FILE__)
-  doc=>xml_parseFile(TRIM(oft_env%xml_file),iostat=ierr)
+  CALL xml_parsefile(oft_env%xml_file,oft_env%xml_doc,ierr)
   IF(ierr/=0)CALL oft_abort('Error parsing XML input file','oft_init',__FILE__)
-  CALL xml_get_element(doc,"oft",oft_env%xml,ierr)
-  IF(ierr/=0)CALL oft_abort('Error finding "oft" XML root element','oft_init',__FILE__)
-#else
-  CALL oft_warn("Open FUSION Toolkit not built wit xml support, ignoring xml input.")
-#endif
+  oft_env%xml=>oft_env%xml_doc%root
+  ! CALL xml_get_element(doc,"oft",oft_env%xml,ierr)
+  ! IF(ierr/=0)CALL oft_abort('Error finding "oft" XML root element','oft_init',__FILE__)
 END IF
 !---
 IF(MOD(oft_env%nprocs,ppn)/=0)CALL oft_abort('# of MPI tasks and Procs per node do not agree.','oft_init',__FILE__)

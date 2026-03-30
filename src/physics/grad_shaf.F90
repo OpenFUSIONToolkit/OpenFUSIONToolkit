@@ -490,7 +490,8 @@ WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Loading external coils:'
 CALL oft_increase_indent
 WRITE(*,'(3A)')oft_indent,'coil_file = ',TRIM(self%coil_file)
-doc=>xml_parseFile(TRIM(self%coil_file),iostat=ierr)
+CALL xml_parsefile(TRIM(self%coil_file),doc,ierr)
+! doc=>xml_parseFile(TRIM(self%coil_file),iostat=ierr)
 CALL xml_get_element(doc,"tokamaker",tmaker_group,ierr)
 CALL xml_get_element(tmaker_group,"coils",group_node,ierr)
 !---Count coil sets
@@ -501,7 +502,7 @@ ALLOCATE(self%coils_ext(self%ncoils_ext))
 DO i=1,self%ncoils_ext
   coil_set=>coil_sets%nodes(i)%this
   !---
-  CALL xml_extractDataAttribute(coil_set,"current",self%coils_ext(i)%curr,iostat=ierr)
+  ! CALL xml_extractDataAttribute(coil_set,"current",self%coils_ext(i)%curr,iostat=ierr)
   !---
   CALL xml_get_element(coil_set,"coil",coil_sets,ierr)
   self%coils_ext(i)%ncoils=coils%n
@@ -510,7 +511,7 @@ DO i=1,self%ncoils_ext
   self%coils_ext(i)%scale=1.d0
   DO j=1,self%coils_ext(i)%ncoils
     coil=>coils%nodes(j)%this
-    CALL xml_extractDataContent(coil,self%coils_ext(i)%pt(:,j),num=nread,iostat=ierr)
+    ! CALL xml_extractDataContent(coil,self%coils_ext(i)%pt(:,j),num=nread,iostat=ierr)
     cell=0
     CALL bmesh_findcell(self%fe_rep%mesh,cell,self%coils_ext(i)%pt(:,j),f)
     IF((MAXVAL(f)<1.d0+tol).AND.(MINVAL(f)>-tol).AND.check_inmesh)THEN
@@ -518,7 +519,7 @@ DO i=1,self%ncoils_ext
       CALL oft_abort('External coil in mesh','gs_load_coils',__FILE__)
     END IF
     !---Get polarity
-    IF(xml_hasAttribute(coil,"scale"))CALL xml_extractDataAttribute(coil,"scale",self%coils_ext(i)%scale(j),num=nread,iostat=ierr)
+    ! IF(xml_hasAttribute(coil,"scale"))CALL xml_extractDataAttribute(coil,"scale",self%coils_ext(i)%scale(j),num=nread,iostat=ierr)
   END DO
   IF(ASSOCIATED(coils%nodes))DEALLOCATE(coils%nodes)
 END DO
@@ -571,7 +572,8 @@ WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Loading internal coil and wall regions:'
 CALL oft_increase_indent
 WRITE(*,'(3A)')oft_indent,'coil_file = ',TRIM(self%coil_file)
-doc=>xml_parseFile(TRIM(self%coil_file),iostat=ierr)
+CALL xml_parsefile(TRIM(self%coil_file),doc,ierr)
+! doc=>xml_parseFile(TRIM(self%coil_file),iostat=ierr)
 CALL xml_get_element(doc,"tokamaker",tmaker_group,ierr)
 !---Count coil regions
 CALL xml_get_element(tmaker_group,"region",regions,ierr)
@@ -585,8 +587,8 @@ self%ncoil_regs=0
 self%ncond_regs=0
 DO i=1,nreg_defs
   region=>regions%nodes(i)%this
-  CALL xml_extractDataAttribute(region,"id",id,num=nread,iostat=ierr)
-  CALL xml_extractDataAttribute(region,"type",reg_type,iostat=ierr)
+  ! CALL xml_extractDataAttribute(region,"id",id,num=nread,iostat=ierr)
+  ! CALL xml_extractDataAttribute(region,"type",reg_type,iostat=ierr)
   IF(id<=0.OR.id>nregions)CALL oft_abort("Invalid region ID.","gs_load_regions",__FILE__)
   region_map(i)=id
   SELECT CASE(TRIM(reg_type))
@@ -617,13 +619,13 @@ DO i=1,nreg_defs
       !---
       CALL xml_get_element(region,"neigs",field,ierr)
       IF(ierr==0)THEN
-        CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%neigs, &
+        ! CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%neigs, &
              num=nread,iostat=ierr)
       END IF
       !---
       CALL xml_get_element(region,"eta",field,ierr)
       IF(ierr==0)THEN
-        CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%eta, &
+        ! CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%eta, &
              num=nread,iostat=ierr)
       END IF
       !---
@@ -632,7 +634,7 @@ DO i=1,nreg_defs
         self%cond_regions(self%ncond_regs)%fixed=.FALSE.
         CALL xml_get_element(region,"fixed",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%fixed, &
+          ! CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%fixed, &
                num=nread,iostat=ierr)
         END IF
         !
@@ -640,7 +642,7 @@ DO i=1,nreg_defs
         self%cond_regions(self%ncond_regs)%weights=1.d-5
         CALL xml_get_element(region,"weights",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%weights, &
+          ! CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%weights, &
                num=nread,iostat=ierr)
         END IF
         !
@@ -648,7 +650,7 @@ DO i=1,nreg_defs
         self%cond_regions(self%ncond_regs)%mtype=1
         CALL xml_get_element(region,"mtype",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%mtype, &
+          ! CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%mtype, &
                num=nread,iostat=ierr)
         END IF
         !
@@ -656,13 +658,13 @@ DO i=1,nreg_defs
         self%cond_regions(self%ncond_regs)%mind=[(j,j=1,self%cond_regions(self%ncond_regs)%neigs)]
         CALL xml_get_element(region,"mind",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%mind, &
+          ! CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%mind, &
                num=nread,iostat=ierr)
         END IF
         !
         CALL xml_get_element(region,"pair",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%pair, &
+          ! CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%pair, &
                num=nread,iostat=ierr)
         END IF
         !
@@ -670,19 +672,19 @@ DO i=1,nreg_defs
         self%cond_regions(self%ncond_regs)%fit_scales = ABS(1.d0/self%cond_regions(self%ncond_regs)%weights)
         CALL xml_get_element(region,"fit_scales",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%fit_scales, &
+          ! CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%fit_scales, &
                num=nread,iostat=ierr)
         END IF
       END IF
       !---
       CALL xml_get_element(region,"continuous",field,ierr)
       IF(ierr==0)THEN
-        CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%continuous, &
+        ! CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%continuous, &
              num=nread,iostat=ierr)
         IF(.NOT.self%cond_regions(self%ncond_regs)%continuous)THEN
           CALL xml_get_element(region,"extent",field,ierr)
           IF(ierr==0)THEN
-            CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%extent, &
+            ! CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%extent, &
                  num=nread,iostat=ierr)
           ELSE
             CALL oft_abort("No extents for non-continuous region","gs_load_regions",__FILE__)
@@ -690,7 +692,7 @@ DO i=1,nreg_defs
           !---Get toroidal coverage
           CALL xml_get_element(region,"coverage",field,ierr)
           IF(ierr==0)THEN
-            CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%coverage, &
+            ! CALL xml_extractDataContent(field,self%cond_regions(self%ncond_regs)%coverage, &
                  num=nread,iostat=ierr)
           END IF
         END IF

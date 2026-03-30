@@ -186,9 +186,7 @@ TYPE(oft_1d_int), POINTER, INTENT(IN) :: hole_ns(:) !< Hole nodesets
 INTEGER(4) :: i,j,k,l,face,ioffset,ed,error_flag
 INTEGER(4), ALLOCATABLE :: kfh_tmp(:),np_inverse(:)
 REAL(8) :: f(3),rgop(3,3),area_i,norm_i(3)
-#ifdef HAVE_XML
 TYPE(xml_node), POINTER :: coil_element
-#endif
 !
 IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)
 !---
@@ -196,7 +194,6 @@ WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Creating thin-wall model'
 CALL oft_increase_indent
 CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
-#ifdef HAVE_XML
 !---Load coils
 IF(.NOT.ASSOCIATED(self%xml))CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
 CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
@@ -224,7 +221,6 @@ DO i=1,self%n_icoils
     self%icoils(i)%radius(j)=MAX(coil_min_rad,self%icoils(i)%radius(j)) ! Remove dummy radius on Icoils
   END DO
 END DO
-#endif
 !---Analyze mesh to construct holes
 WRITE(*,'(2A)')oft_indent,'Building holes'
 ALLOCATE(self%hmesh(self%nholes))
@@ -2402,7 +2398,7 @@ CALL oft_increase_indent
 !---Setup coil sets
 DO i=1,ncoils
   coil_tmp=>coils(i)
-  coil_set=>coil_sets%nodes(i)%this
+  coil_set=>coil_sets%nodes(i)!%this
   !
   CALL xml_get_element(coil_set,"coil",coil_list,ierr)
   IF(ierr/=0)CYCLE
@@ -2416,23 +2412,23 @@ DO i=1,ncoils
   coil_tmp%Rself=0.d0
   !---Get coil set name
   IF(xml_hasAttribute(coil_set,"name"))THEN
-    CALL xml_extractDataAttribute(coil_set,"name",coil_tmp%name,num=nread,iostat=ierr)
+    ! CALL xml_extractDataAttribute(coil_set,"name",coil_tmp%name,num=nread,iostat=ierr)
   ELSE
     WRITE(coil_tmp%name,'(A8,I5.5)')'UNKNOWN_',i
   END IF
   !---Get coil set resistivity per unit length (can be overriden)
   IF(xml_hasAttribute(coil_set,"res_per_len"))THEN
-    CALL xml_extractDataAttribute(coil_set,"res_per_len",res_per_len,num=nread,iostat=ierr)
+    ! CALL xml_extractDataAttribute(coil_set,"res_per_len",res_per_len,num=nread,iostat=ierr)
     coil_tmp%res_per_len=res_per_len
   END IF
   !---Get coil set radius (can be overriden)
   IF(xml_hasAttribute(coil_set,"radius"))THEN
-    CALL xml_extractDataAttribute(coil_set,"radius",radius,num=nread,iostat=ierr)
+    ! CALL xml_extractDataAttribute(coil_set,"radius",radius,num=nread,iostat=ierr)
     coil_tmp%radius=radius
   END IF
   !---Get sensor flag
   IF(xml_hasAttribute(coil_set,"sens_mask"))THEN
-    CALL xml_extractDataAttribute(coil_set,"sens_mask",coil_tmp%sens_mask,num=nread,iostat=ierr)
+    ! CALL xml_extractDataAttribute(coil_set,"sens_mask",coil_tmp%sens_mask,num=nread,iostat=ierr)
     IF(coil_tmp%sens_mask)THEN
       IF(oft_debug_print(2))WRITE(*,'(2A,I6,A)')oft_indent,'Masking coil ',i,' from sensors'
       nmasked=nmasked+1
@@ -2440,10 +2436,10 @@ DO i=1,ncoils
   END IF
   ALLOCATE(coil_tmp%coils(coil_tmp%ncoils))
   DO j=1,coil_tmp%ncoils
-    coil=>coil_list%nodes(j)%this
+    coil=>coil_list%nodes(j)!%this
     !---Look for HDF5 path
     IF(xml_hasAttribute(coil,"path"))THEN
-      CALL xml_extractDataAttribute(coil,"path",coil_path,num=nread,iostat=ierr)
+      ! CALL xml_extractDataAttribute(coil,"path",coil_path,num=nread,iostat=ierr)
       IF(ierr/=0)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Error reading "path" in coil '//coil_ind,'tw_load_coils',__FILE__)
@@ -2473,14 +2469,14 @@ DO i=1,ncoils
     ELSE
       !---Read number of points
       IF(xml_hasAttribute(coil,"npts"))THEN
-        CALL xml_extractDataAttribute(coil,"npts",coil_tmp%coils(j)%npts,num=nread,iostat=ierr)
+        ! CALL xml_extractDataAttribute(coil,"npts",coil_tmp%coils(j)%npts,num=nread,iostat=ierr)
         coil_type=2
       ELSE
         coil_type=1
       END IF
       SELECT CASE(coil_type)
         CASE(1)
-          CALL xml_extractDataContent(coil,pts_tmp,num=nread,iostat=ierr)
+          ! CALL xml_extractDataContent(coil,pts_tmp,num=nread,iostat=ierr)
           IF(ierr/=0)THEN
             WRITE(coil_ind,'(I6,2X,I6)')i,j
             CALL oft_abort('Error reading circular coil '//coil_ind,'tw_load_coils',__FILE__)
@@ -2493,7 +2489,7 @@ DO i=1,ncoils
           END DO
         CASE(2)
           ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
-          CALL xml_extractDataContent(coil,coil_tmp%coils(j)%pts,num=nread,iostat=ierr)
+          ! CALL xml_extractDataContent(coil,coil_tmp%coils(j)%pts,num=nread,iostat=ierr)
           IF(ierr/=0)THEN
             WRITE(coil_ind,'(I6,2X,I6)')i,j
             CALL oft_abort('Error reading coil '//coil_ind,'tw_load_coils',__FILE__)
@@ -2501,11 +2497,11 @@ DO i=1,ncoils
       END SELECT
     END IF
     !---Get scale factor
-    IF(xml_hasAttribute(coil,"scale"))CALL xml_extractDataAttribute(coil,"scale",coil_tmp%scales(j),num=nread,iostat=ierr)
+    ! IF(xml_hasAttribute(coil,"scale"))CALL xml_extractDataAttribute(coil,"scale",coil_tmp%scales(j),num=nread,iostat=ierr)
     !---Get coil resistivity per unit length
-    IF(xml_hasAttribute(coil,"res_per_len"))CALL xml_extractDataAttribute(coil,"res_per_len",coil_tmp%res_per_len(j),num=nread,iostat=ierr)
+    ! IF(xml_hasAttribute(coil,"res_per_len"))CALL xml_extractDataAttribute(coil,"res_per_len",coil_tmp%res_per_len(j),num=nread,iostat=ierr)
     !---Get coil radius
-    IF(xml_hasAttribute(coil,"radius"))CALL xml_extractDataAttribute(coil,"radius",coil_tmp%radius(j),num=nread,iostat=ierr)
+    ! IF(xml_hasAttribute(coil,"radius"))CALL xml_extractDataAttribute(coil,"radius",coil_tmp%radius(j),num=nread,iostat=ierr)
   END DO
   IF(ASSOCIATED(coil_list%nodes))DEALLOCATE(coil_list%nodes)
 END DO
@@ -2755,7 +2751,7 @@ CALL xml_get_element(self%xml,"eta",eta_group,ierr)
 IF(ASSOCIATED(eta_group))THEN
   WRITE(*,*)
   WRITE(*,'(2A)')oft_indent,'Loading region resistivity:'
-  CALL xml_extractDataContent(eta_group,self%Eta_reg,num=nread,iostat=ierr)
+  ! CALL xml_extractDataContent(eta_group,self%Eta_reg,num=nread,iostat=ierr)
   IF(nread/=nreg_mesh)CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
   ! WRITE(*,'(2A)')oft_indent,'  Eta = ',REAL(self%Eta_reg,4)
   DO i=1,nreg_mesh
@@ -2767,7 +2763,7 @@ END IF
 CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr)
 IF(ierr==0)THEN
   WRITE(*,'(2A)')oft_indent,'Loading sensor mask:'
-  CALL xml_extractDataContent(sens_node,self%sens_mask,num=nread,iostat=ierr)
+  ! CALL xml_extractDataContent(sens_node,self%sens_mask,num=nread,iostat=ierr)
   IF(nread/=nreg_mesh)CALL oft_abort('Sensor mask size mismatch','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
     WRITE(*,'(A,I4,L1)')oft_indent,i,self%sens_mask(i)

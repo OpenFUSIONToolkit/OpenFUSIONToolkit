@@ -36,7 +36,6 @@ INTEGER(i4) :: io_unit,ierr
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange
 TYPE(oft_lag_zerob), TARGET :: lag_zerob
-#if defined(HAVE_XML)
 !---Initialize enviroment
 CALL oft_init
 !---Setup grid
@@ -50,9 +49,6 @@ oft_env%pm=.FALSE.
 CALL test_lap
 !---Finalize enviroment
 CALL oft_finalize
-#else
-WRITE(*,*)'SKIP TEST'
-#endif
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$ and output
@@ -67,10 +63,8 @@ CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 !---
-#ifdef HAVE_XML
 integer(i4) :: nnodes
 TYPE(xml_node), POINTER :: solver_node
-#endif
 !---Set FE level
 CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 !---Create solver fields
@@ -80,14 +74,12 @@ CALL ML_oft_lagrange%vec_create(v)
 CALL oft_lag_getlop(ML_oft_lagrange%current_level,lop,'zerob')
 CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'none')
 !---Setup matrix solver
-#ifdef HAVE_XML
 CALL xml_get_element(oft_env%xml,"solver",solver_node,ierr)
 IF(ierr==0)THEN
   CALL create_solver_xml(linv,solver_node)
 ELSE
   CALL oft_abort('Could not find XML node.','test_lap',__FILE__)
 END IF
-#endif
 linv%A=>lop
 !---Solve
 CALL u%set(1.d0)

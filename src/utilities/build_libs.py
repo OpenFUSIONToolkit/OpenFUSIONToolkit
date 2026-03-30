@@ -418,8 +418,6 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         cmake_lines.append("-DOFT_ARPACK_ROOT:PATH={0}".format(mydict["ARPACK_ROOT"]))
     if "LIBXML2_ROOT" in mydict:
         cmake_lines.append("-DLIBXML2_ROOT:PATH={0}".format(mydict["LIBXML2_ROOT"]))
-    if "FOX_ROOT" in mydict:
-        cmake_lines.append("-DOFT_FoX_ROOT:PATH={0}".format(mydict["FOX_ROOT"]))
     if "ONURBS_ROOT" in mydict:
         cmake_lines.append("-DOFT_OpenNURBS_ROOT:PATH={0}".format(mydict["ONURBS_ROOT"]))
     if "PETSC_ROOT" in mydict:
@@ -1783,43 +1781,6 @@ class UMFPACK(package):
         self.run_build(build_lines, self.config_dict)
 
 
-class FOX(package):
-    def __init__(self):
-        self.name = "FOX"
-        self.url = "https://github.com/andreww/fox/archive/refs/tags/4.1.2.tar.gz"
-        self.build_dir = "fox-4.1.2"
-
-    def setup(self, config_dict):
-        self.config_dict = config_dict.copy()
-        self.setup_root_struct()
-        install_path = os.path.join(self.root_path, self.install_dir)
-        self.config_dict["FOX_INCLUDE"] = os.path.join(install_path, "finclude")
-        self.config_dict["FOX_LIBS"] = "-lFoX_dom -lFoX_sax -lFoX_fsys -lFoX_utils -lFoX_common"
-        self.config_dict['CROSS_COMPILE_FLAG'] = ""
-        if 'CROSS_COMPILE_HOST' in config_dict:
-            self.config_dict['CROSS_COMPILE_FLAG'] = '--host="{0}"'.format(config_dict['CROSS_COMPILE_HOST'])
-        # Installation check files
-        self.install_chk_files = [os.path.join(self.config_dict['FOX_LIB'], 'libFoX_dom.a')]
-        #
-        return self.config_dict
-
-    def build(self):
-        build_lines = [
-            "make distclean",
-            "export CC={CC}",
-            "export FC={FC}",
-            "export CFLAGS=-fPIC",
-            "export FCFLAGS=-fPIC"]
-        if config_dict['OS_TYPE'] == 'Darwin': # Prevent configuration error with GCC
-            build_lines.append("export GFORTRAN_UNBUFFERED_ALL=Y")
-        build_lines += [
-            "./configure --prefix={FOX_ROOT} --enable-dom {CROSS_COMPILE_FLAG}",
-            "make -j{MAKE_THREADS}",
-            "make install"
-        ]
-        self.run_build(build_lines, self.config_dict)
-
-
 class LIBXML2(package):
     def __init__(self, static_libs=False):
         self.name = "LIBXML2"
@@ -2140,9 +2101,7 @@ group = parser.add_argument_group("METIS", "METIS package options")
 group.add_argument("--metis_wrapper", action="store_true", default=False, help="METIS included in compilers")
 #
 group = parser.add_argument_group("XML", "XML package options")
-group.add_argument("--build_libxml2", default=1, type=int, choices=(0,1), help="Build Libxml2 library? (default: 1)")
 group.add_argument("--libxml2_static", action="store_true", default=False, help="Build and link Libxml2 statically?")
-group.add_argument("--build_fox", default=1, type=int, choices=(0,1), help="Build Fox XML library? (default: 1)")
 #
 group = parser.add_argument_group("OpenNURBS", "OpenNURBS package options")
 group.add_argument("--build_onurbs", default=0, type=int, choices=(0,1), help="Build OpenNURBS library? (default: 0)")
@@ -2185,10 +2144,6 @@ fetch_progress = options.no_dl_progress
 build_cmake_ver = None
 if options.build_cmake == 1:
     build_cmake_ver = CMAKE().version
-# if (options.build_libxml2 == 1) and (options.build_fox == 1):
-#     parser.exit(-1, '"--build_libxml2" and "--build_fox" cannot be specified together\n')
-if (options.build_libxml2 == 0) and (options.build_fox == 0):
-    parser.exit(-1, 'One of "--build_libxml2" or "--build_fox" must be specified\n')
 config_dict = setup_build_env(build_cmake_ver=build_cmake_ver)
 config_dict['DOWN_ONLY'] = options.download_only
 config_dict['SETUP_ONLY'] = options.setup_only
@@ -2269,15 +2224,11 @@ if (options.hdf5_cc is not None) and (options.hdf5_fc is not None):
     packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required))
 else:
     packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required,shared_libs=(not options.hdf5_static)))
+# Always build Libxml2
+packages.append(LIBXML2(options.libxml2_static))
 # Are we building OpenNURBS?
 if options.build_onurbs == 1:
     packages.append(ONURBS())
-# Are we building LIBXML2?
-if options.build_libxml2 == 1:
-    packages.append(LIBXML2(options.libxml2_static))
-# Are we building FoX?
-if options.build_fox == 1:
-    packages.append(FOX())
 # Are we building ARPACK?
 if options.build_arpack == 1:
     packages.append(ARPACK(parallel=use_mpi, link_omp=options.oblas_threads))
