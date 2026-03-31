@@ -489,23 +489,24 @@ INTEGER(i4) :: nread,nnodes,ierr
 TYPE(xml_node), POINTER :: pre_node
 !---
 integer(i4) :: i,val_level
-CHARACTER(LEN=20) :: solver_type,temp_string
+! CHARACTER(LEN=20) :: solver_type,temp_string
+CHARACTER(LEN=:), ALLOCATABLE :: solver_type
 LOGICAL :: force_native,native_solver,petsc_solver
 DEBUG_STACK_PUSH
 val_level=1
 IF(PRESENT(level))val_level=level
 native_solver=.FALSE.
 !---
-! CALL xml_extractDataAttribute(solver_node,"type",solver_type,iostat=ierr)
+CALL xml_read_attribute(solver_node,"type",solver_type,iostat=ierr)
 IF(oft_debug_print(2))WRITE(*,*)'Found solver: ',solver_type
 force_native=.FALSE.
 IF(xml_hasAttribute(solver_node,"native"))THEN
-  ! CALL xml_extractDataAttribute(solver_node,"native",temp_string,iostat=ierr)
-  force_native=((temp_string(1:1)=='t').OR.(temp_string(1:1)=='T'))
+  CALL xml_read_attribute(solver_node,"native",force_native,iostat=ierr)
+  ! force_native=((temp_string(1:1)=='t').OR.(temp_string(1:1)=='T'))
 END IF
 !---
 petsc_solver=use_petsc.AND.(.NOT.force_native)
-SELECT CASE(TRIM(solver_type))
+SELECT CASE(solver_type)
   CASE("cg")
     IF(petsc_solver)THEN
       CALL create_petsc_solver(solver,"cg")
@@ -544,6 +545,7 @@ SELECT CASE(TRIM(solver_type))
   CASE DEFAULT
     CALL oft_abort("Invalid solver type.","create_solver_xml",__FILE__)
 END SELECT
+DEALLOCATE(solver_type)
 !---
 CALL solver%setup_from_xml(solver_node,val_level)
 !---
@@ -674,15 +676,15 @@ TYPE(xml_node), POINTER :: solver_node
 !---
 integer(i4) :: i,val_level,smoother
 logical :: switch
-CHARACTER(LEN=20) :: pre_type,temp_string
+CHARACTER(LEN=:), ALLOCATABLE :: pre_type
 DEBUG_STACK_PUSH
 val_level=1
 IF(PRESENT(level))val_level=level
 !---
-! CALL xml_extractDataAttribute(pre_node,"type",pre_type,iostat=ierr)
+CALL xml_read_attribute(pre_node,"type",pre_type,iostat=ierr)
 IF(oft_debug_print(2))WRITE(*,*)'Found preconditioner: ',pre_type
 !---
-SELECT CASE(TRIM(pre_type))
+SELECT CASE(pre_type)
   CASE("jacobi")
     IF(use_petsc)THEN
       CALL create_petsc_pre(pre,"jacobi")
@@ -722,6 +724,7 @@ SELECT CASE(TRIM(pre_type))
   CASE DEFAULT
     CALL oft_abort("Invalid precon type.","create_pre_xml",__FILE__)
 END SELECT
+DEALLOCATE(pre_type)
 !---
 CALL pre%setup_from_xml(pre_node,val_level)
 !---
@@ -746,7 +749,7 @@ class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition (
 integer(i4) :: i,ierr,nnodes
 class(oft_ml_precond), pointer :: this_ml
 LOGICAL :: symmetric,up_present,down_present,coarse_present
-CHARACTER(LEN=20) :: dir_type
+CHARACTER(LEN=:), ALLOCATABLE :: dir_type
 TYPE(xml_node), POINTER :: up_node,down_node,coarse_node,current_node,solver_node
 TYPE(xml_nodelist) :: current_nodes
 DEBUG_STACK_PUSH
@@ -760,10 +763,10 @@ IF(oft_debug_print(1))WRITE(*,*)'Creating MG smoother'
 CALL xml_get_element(pre_node,"smoother",current_nodes,ierr)
 IF(current_nodes%n==0)CALL oft_abort("Object contains no smoother definitions.","create_ml_xml",__FILE__)
 DO i=1,current_nodes%n
-  current_node=>current_nodes%nodes(i)!%this
-  ! CALL xml_extractDataAttribute(current_node,"direction",dir_type,iostat=ierr)
+  current_node=>current_nodes%nodes(i)
+  CALL xml_read_attribute(current_node,"direction",dir_type,iostat=ierr)
   IF(oft_debug_print(2))WRITE(*,*)'Found smoother: ',dir_type
-  SELECT CASE(TRIM(dir_type))
+  SELECT CASE(dir_type)
     CASE("up")
       up_present=.TRUE.
       CALL xml_get_element(current_node,"solver",up_node,ierr)
@@ -778,6 +781,7 @@ DO i=1,current_nodes%n
     CASE DEFAULT
       CALL oft_abort("Invalid smoother direction.","create_ml_xml",__FILE__)
   END SELECT
+  DEALLOCATE(dir_type)
 END DO
 IF(ASSOCIATED(current_nodes%nodes))DEALLOCATE(current_nodes%nodes)
 !---

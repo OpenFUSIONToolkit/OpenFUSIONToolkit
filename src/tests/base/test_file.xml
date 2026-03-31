@@ -1,0 +1,10 @@
+<oft>
+  <test1 attr1="Some string value">Some string content</test1>
+  <test2 attr1="2.0" attr2="1.E-3" attr3="-1.E-3">1.0, 2.0, 3.0, 4.0</test2>
+  <test3 attr1="2" attr2="-2">1, 2, 3,
+  10, 20, 30,
+  100, 200, 300</test3>
+  <test4 attr1="0" attr2="True" attr3="T" attr4=".FALSE.">1.0, 2.0, 3.0
+  ,10.0, 20.0, 30.0
+  ,100.0, 200.0, 300.0</test4>
+</oft>

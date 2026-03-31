@@ -2459,13 +2459,13 @@ end subroutine xmhd_alloc_ops
 !------------------------------------------------------------------------------
 subroutine xmhd_setup_regions()
 !---XML solver fields
-integer(i4) :: nread_id,nread_eta,nread_type,ierr,i,j,reg_type(1)
-real(r8) :: eta(1)
+integer(i4) :: nread_id,nread_eta,nread_type,ierr,i,j,reg_type
+real(r8) :: eta
 TYPE(xml_node), POINTER :: reg_node,inner_node
 TYPE(xml_nodelist) :: reg_nodes
-integer(i4), ALLOCATABLE :: regs(:),reg_types(:)
+integer(i4), POINTER :: regs(:),reg_types(:)
 DEBUG_STACK_PUSH
-ALLOCATE(regs(mesh%nreg),reg_types(mesh%nreg))
+ALLOCATE(reg_types(mesh%nreg))
 reg_types=1
 IF(.NOT.ALLOCATED(eta_reg))THEN
   ALLOCATE(eta_reg(mesh%nreg),solid_cell(mesh%nc))
@@ -2482,34 +2482,36 @@ IF(ASSOCIATED(xmhd_root_node))THEN
       CALL xml_get_element(reg_node,"id",inner_node,ierr)
       IF(ierr/=0)CALL oft_abort("Error reading regions IDs for group", &
         "xmhd_setup_regions",__FILE__)
-      ! CALL xml_extractDataContent(inner_node,regs,num=nread_id,iostat=ierr)
-      IF(nread_id==0)CALL oft_abort("Zero values given in id group", &
+      CALL xml_read_content(inner_node,regs,iostat=ierr)
+      IF(ierr/=0)CALL oft_abort("Error reading values in id group", &
       "xmhd_setup_regions",__FILE__)
-      IF(ierr>0)CALL oft_abort("Too many id values specified","xmhd_setup_regions", &
-      __FILE__)
+      ! IF(.NOT.ALLOCATED(regs))CALL oft_abort("Zero values given in id group", &
+      ! "xmhd_setup_regions",__FILE__)
+      ! IF(SIZE(regs)>mesh%nreg)CALL oft_abort("Too many id values specified","xmhd_setup_regions", &
+      ! __FILE__)
       IF(ANY(regs(1:nread_id)>mesh%nreg).OR.ANY(regs(1:nread_id)<=0))CALL oft_abort( &
       "Invalid region ID","xmhd_setup_regions",__FILE__)
       !---
       CALL xml_get_element(reg_node,"eta",inner_node,ierr)
-      ! CALL xml_extractDataContent(inner_node,eta,num=nread_eta,iostat=ierr)
-      IF(nread_eta==0)CALL oft_abort("Zero values given in eta group", &
+      CALL xml_read_content(inner_node,eta,iostat=ierr)
+      IF(ierr/=0)CALL oft_abort("Error reading values in eta group", &
       "xmhd_setup_regions",__FILE__)
-      IF(ierr>0)CALL oft_abort("Too many eta values specified","xmhd_setup_regions", &
-      __FILE__)
-      IF(eta(1)<0.d0)CALL oft_abort("Invalid eta value specified","xmhd_setup_regions", &
+      ! IF(ierr>0)CALL oft_abort("Too many eta values specified","xmhd_setup_regions", &
+      ! __FILE__)
+      IF(eta<0.d0)CALL oft_abort("Invalid eta value specified","xmhd_setup_regions", &
       __FILE__)
       !---Get region type
       CALL xml_get_element(reg_node,"type",inner_node,ierr)
       IF(ierr/=0)THEN
-        reg_type(1)=2.d0
+        reg_type=2.d0
       ELSE
         ! inner_node=>xml_item(inner_nodes,0)
-        ! ! CALL xml_extractDataContent(inner_node,reg_type,num=nread_type,iostat=ierr)
+        ! CALL xml_read_content(inner_node,reg_type,iostat=ierr)
         ! IF(nread_eta==0)CALL oft_abort("Zero values given in type group", &
         ! "xmhd_setup_regions",__FILE__)
         ! IF(ierr>0)CALL oft_abort("Too many type values specified","xmhd_setup_regions", &
         ! __FILE__)
-        IF(reg_type(1)<1.OR.reg_type(1)>2)CALL oft_abort("Invalid type specified","xmhd_setup_regions", &
+        IF(reg_type<1.OR.reg_type>2)CALL oft_abort("Invalid type specified","xmhd_setup_regions", &
           __FILE__)
       END IF
       !---
@@ -2517,10 +2519,11 @@ IF(ASSOCIATED(xmhd_root_node))THEN
         IF(eta_reg(regs(j))>0.d0)THEN
           CALL oft_abort("Region blocks overlap","xmhd_setup_regions",__FILE__)
         ELSE
-          eta_reg(regs(j))=eta(1)
+          eta_reg(regs(j))=eta
         END IF
-        reg_types(regs(j))=reg_type(1)
+        reg_types(regs(j))=reg_type
       END DO
+      DEALLOCATE(regs)
     END DO
   END IF
 END IF

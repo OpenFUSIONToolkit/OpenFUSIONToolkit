@@ -417,44 +417,52 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 INTEGER(i4) :: nnodes,nread
 TYPE(xml_node), POINTER :: current_node
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: atol,rtol
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
+REAL(r8), POINTER, DIMENSION(:) :: read_real
 DEBUG_STACK_PUSH
 !---
 val_level=1
 IF(PRESENT(level))val_level=level
-ALLOCATE(its(val_level),atol(val_level),rtol(val_level))
 !---
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,its,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough its values specified","cg_setup_xml",__FILE__)
-    self%its=its(val_level)
-  ELSE
-    self%its=its(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough its values specified","cg_setup_xml",__FILE__)
+      self%its=read_int(val_level)
+    ELSE
+      self%its=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,atol,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough atol values specified","cg_setup_xml",__FILE__)
-    self%atol=atol(val_level)
-  ELSE
-    self%atol=atol(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough atol values specified","cg_setup_xml",__FILE__)
+      self%atol=read_real(val_level)
+    ELSE
+      self%atol=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough rtol values specified","cg_setup_xml",__FILE__)
-    self%rtol=rtol(val_level)
-  ELSE
-    self%rtol=rtol(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough rtol values specified","cg_setup_xml",__FILE__)
+      self%rtol=read_real(val_level)
+    ELSE
+      self%rtol=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 IF(oft_debug_print(1))THEN
@@ -462,8 +470,6 @@ IF(oft_debug_print(1))THEN
   WRITE(*,*)' - Iterations:  ',self%its
   WRITE(*,*)' - Tolerance:   ',REAL(self%atol,4),REAL(self%rtol,4)
 END IF
-!---
-DEALLOCATE(its,atol,rtol)
 DEBUG_STACK_POP
 end subroutine cg_setup_xml
 !------------------------------------------------------------------------------
@@ -655,55 +661,66 @@ INTEGER(i4) :: nnodes,nread
 TYPE(xml_node), POINTER :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its,nrits
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: atol,rtol
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
+REAL(r8), POINTER, DIMENSION(:) :: read_real
 DEBUG_STACK_PUSH
 !---
 val_level=1
 IF(PRESENT(level))val_level=level
-ALLOCATE(its(val_level),nrits(val_level),atol(val_level),rtol(val_level))
 !---
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,its,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough its values specified","gmres_setup_xml",__FILE__)
-    self%its=its(val_level)
-  ELSE
-    self%its=its(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough its values specified","gmres_setup_xml",__FILE__)
+      self%its=read_int(val_level)
+    ELSE
+      self%its=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"nrits",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,nrits,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough nrits values specified","gmres_setup_xml",__FILE__)
-    self%nrits=nrits(val_level)
-  ELSE
-    self%nrits=nrits(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough nrits values specified","gmres_setup_xml",__FILE__)
+      self%nrits=read_int(val_level)
+    ELSE
+      self%nrits=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,atol,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough atol values specified","gmres_setup_xml",__FILE__)
-    self%atol=atol(val_level)
-  ELSE
-    self%atol=atol(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough atol values specified","gmres_setup_xml",__FILE__)
+      self%atol=read_real(val_level)
+    ELSE
+      self%atol=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough rtol values specified","gmres_setup_xml",__FILE__)
-    self%rtol=rtol(val_level)
-  ELSE
-    self%rtol=rtol(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough rtol values specified","gmres_setup_xml",__FILE__)
+      self%rtol=read_real(val_level)
+    ELSE
+      self%rtol=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 IF(oft_debug_print(1))THEN
@@ -713,8 +730,6 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A,ES10.2)')'- Abs-Tol:     ',self%atol
   WRITE(*,'(2X,A,ES10.2)')'- Rel-Tol:     ',self%rtol
 END IF
-!---
-DEALLOCATE(its,nrits,atol,rtol)
 DEBUG_STACK_POP
 end subroutine gmres_setup_xml
 !------------------------------------------------------------------------------
@@ -899,55 +914,66 @@ INTEGER(i4) :: nnodes,nread
 TYPE(xml_node), POINTER :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its,nrits
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: atol,rtol
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
+REAL(r8), POINTER, DIMENSION(:) :: read_real
 DEBUG_STACK_PUSH
 !---
 val_level=1
 IF(PRESENT(level))val_level=level
-ALLOCATE(its(val_level),nrits(val_level),atol(val_level),rtol(val_level))
 !---
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,its,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough its values specified","gmres_setup_xml",__FILE__)
-    self%its=its(val_level)
-  ELSE
-    self%its=its(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough its values specified","gmres_setup_xml",__FILE__)
+      self%its=read_int(val_level)
+    ELSE
+      self%its=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"nrits",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,nrits,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough nrits values specified","gmres_setup_xml",__FILE__)
-    self%nrits=nrits(val_level)
-  ELSE
-    self%nrits=nrits(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough nrits values specified","gmres_setup_xml",__FILE__)
+      self%nrits=read_int(val_level)
+    ELSE
+      self%nrits=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,atol,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough atol values specified","gmres_setup_xml",__FILE__)
-    self%atol=atol(val_level)
-  ELSE
-    self%atol=atol(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough atol values specified","gmres_setup_xml",__FILE__)
+      self%atol=read_real(val_level)
+    ELSE
+      self%atol=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough rtol values specified","gmres_setup_xml",__FILE__)
-    self%rtol=rtol(val_level)
-  ELSE
-    self%rtol=rtol(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough rtol values specified","gmres_setup_xml",__FILE__)
+      self%rtol=read_real(val_level)
+    ELSE
+      self%rtol=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 IF(oft_debug_print(1))THEN
@@ -957,8 +983,6 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A,ES10.2)')'- Abs-Tol:     ',self%atol
   WRITE(*,'(2X,A,ES10.2)')'- Rel-Tol:     ',self%rtol
 END IF
-!---
-DEALLOCATE(its,nrits,atol,rtol)
 DEBUG_STACK_POP
 end subroutine cgmres_setup_xml
 !------------------------------------------------------------------------------
@@ -1471,33 +1495,38 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 INTEGER(i4) :: nnodes,nread
 TYPE(xml_node), POINTER :: current_node
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: df
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
+REAL(r8), POINTER, DIMENSION(:) :: read_real
 DEBUG_STACK_PUSH
 !---
 val_level=1
 IF(PRESENT(level))val_level=level
-ALLOCATE(its(val_level),df(val_level))
 !---
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,its,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough its values specified","jblock_setup_xml",__FILE__)
-    self%its=its(val_level)
-  ELSE
-    self%its=its(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough its values specified","jblock_setup_xml",__FILE__)
+      self%its=read_int(val_level)
+    ELSE
+      self%its=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"df",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,df,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough df values specified","jblock_setup_xml",__FILE__)
-    self%df=df(val_level)
-  ELSE
-    self%df=df(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough df values specified","jblock_setup_xml",__FILE__)
+      self%df=read_real(val_level)
+    ELSE
+      self%df=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 IF(oft_debug_print(1))THEN
@@ -1505,8 +1534,6 @@ IF(oft_debug_print(1))THEN
   WRITE(*,*)' - Iterations:  ',self%its
   WRITE(*,*)' - Factor:      ',self%df
 END IF
-!---
-DEALLOCATE(its,df)
 DEBUG_STACK_POP
 end subroutine jblock_setup_xml
 !------------------------------------------------------------------------------
@@ -2109,42 +2136,52 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 INTEGER(i4) :: nnodes,nread
 TYPE(xml_node), POINTER :: current_node,sub_node
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: nlocals
+INTEGER(i4), POINTER, DIMENSION(:) :: read_tmp
 DEBUG_STACK_PUSH
 !---
 val_level=1
 IF(PRESENT(level))val_level=level
-ALLOCATE(nlocals(val_level))
 !---Read-in desired number of subdomains
 CALL xml_get_element(solver_node,"nlocal",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,nlocals,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough local sizes specified", &
-    "bjprecond_setup_xml",__FILE__)
-    self%nlocal=nlocals(val_level)
-  ELSE
-    self%nlocal=nlocals(1)
+  CALL xml_read_content(current_node,read_tmp,iostat=ierr)
+  IF(ASSOCIATED(read_tmp))THEN
+    IF(SIZE(read_tmp)>1)THEN
+      IF(SIZE(read_tmp)<val_level)CALL oft_abort("Not enough local sizes specified", &
+        "bjprecond_setup_xml",__FILE__)
+      self%nlocal=read_tmp(val_level)
+    ELSE
+      self%nlocal=read_tmp(1)
+    END IF
+    DEALLOCATE(read_tmp)
   END IF
 END IF
 IF(self%nlocal<-1)THEN
   !---Read-in desired number of subdomains
   CALL xml_get_element(solver_node,"groups",current_node,ierr)
   IF(ierr==0)THEN
-    ! CALL xml_extractDataContent(current_node,self%slice_group,num=nread,iostat=ierr)
+    CALL xml_read_content(current_node,read_tmp,iostat=ierr)
+    IF(ASSOCIATED(read_tmp))THEN
+      IF(SIZE(read_tmp)>10)THEN
+        CALL oft_abort("Too many slice groups specified","bjprecond_setup_xml",__FILE__)
+      ELSE
+        self%slice_group=read_tmp(1)
+      END IF
+      DEALLOCATE(read_tmp)
+    END IF
   END IF
 END IF
 !---Read-in desired boundary overlap specification
 CALL xml_get_element(solver_node,"boverlap",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,self%boundary_overlap,num=nread,iostat=ierr)
-  IF(nread>1)CALL oft_abort("boverlap must be single value","bjprecond_setup_xml",__FILE__)
+  CALL xml_read_content(current_node,self%boundary_overlap,iostat=ierr)
+  IF(ierr/=0)CALL oft_abort("Error reading boverlap","bjprecond_setup_xml",__FILE__)
 END IF
 !---Read-in desired internal overlap specification
 CALL xml_get_element(solver_node,"loverlap",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,self%loverlap,num=nread,iostat=ierr)
-  IF(nread>1)CALL oft_abort("loverlap must be single value","bjprecond_setup_xml",__FILE__)
+  CALL xml_read_content(current_node,self%loverlap,iostat=ierr)
+  IF(ierr/=0)CALL oft_abort("Error reading loverlap","bjprecond_setup_xml",__FILE__)
 END IF
 IF(oft_debug_print(1))THEN
   WRITE(*,'(A)')'Block Jacobi solver setup:'

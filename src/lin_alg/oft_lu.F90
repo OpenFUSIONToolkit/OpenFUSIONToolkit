@@ -672,15 +672,16 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 INTEGER(i4) :: nnodes,nread
 TYPE(xml_node), POINTER :: current_node
 !---
-CHARACTER(LEN=7) :: factor_package
+CHARACTER(LEN=:), ALLOCATABLE :: factor_package
 CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
-  IF(nread==1)THEN
+  CALL xml_read_content(current_node,factor_package,iostat=ierr)
+  IF(ALLOCATED(factor_package))THEN
+    IF(LEN(factor_package)>7)CALL oft_abort('Factorization package name too long','lusolver_setup_xml',__FILE__)
     self%package=factor_package
   END IF
 END IF
@@ -934,15 +935,16 @@ INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 INTEGER(i4) :: nnodes,nread
 TYPE(xml_node), POINTER :: current_node
 !---
-CHARACTER(LEN=7) :: factor_package
+CHARACTER(LEN=:), ALLOCATABLE :: factor_package
 CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
-  ! CALL xml_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
-  IF(nread==1)THEN
+  CALL xml_read_content(current_node,factor_package,iostat=ierr)
+  IF(ALLOCATED(factor_package))THEN
+    IF(LEN(factor_package)>7)CALL oft_abort('Factorization package name too long','ilusolver_setup_xml',__FILE__)
     self%package=factor_package
   END IF
 END IF
