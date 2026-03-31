@@ -130,8 +130,8 @@ int oft_xml_get_elements(const void* parent_ptr, const char* name, int* n,
  *
  * elements_ptr: pointer to array previously returned by oft_xml_get_elements
  */
-void oft_xml_free_elements(void* elements_ptr) {
-    if (elements_ptr != NULL) free(elements_ptr);
+void oft_xml_free_ptr(void* gen_ptr) {
+    if (gen_ptr != NULL) free(gen_ptr);
 }
 
 /*

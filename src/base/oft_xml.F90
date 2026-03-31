@@ -124,13 +124,6 @@ INTERFACE
     INTEGER(c_int) :: ierr !< 0 on success, nonzero on error
   END FUNCTION oft_xml_get_elements_c
 !------------------------------------------------------------------------------
-!> Free the array of node pointers allocated by \ref oft_xml_get_elements_c.
-!------------------------------------------------------------------------------
-  SUBROUTINE oft_xml_free_elements_c(elements_ptr) BIND(C, NAME="oft_xml_free_elements")
-    IMPORT c_ptr
-    TYPE(c_ptr), VALUE, INTENT(in) :: elements_ptr !< Pointer to array to free
-  END SUBROUTINE oft_xml_free_elements_c
-!------------------------------------------------------------------------------
 !> Extract the string content from a given xml node.
 !------------------------------------------------------------------------------
   FUNCTION oft_xml_get_content_c(node_ptr,content,content_len) &
@@ -163,6 +156,13 @@ INTERFACE
     TYPE(c_ptr), VALUE, INTENT(in) :: attr_name !< Null-terminated attribute name
     INTEGER(c_int) :: ierr !< 0 on success, nonzero on error
   END FUNCTION oft_xml_has_attribute_c
+!------------------------------------------------------------------------------
+!> Free the array of node pointers allocated by \ref oft_xml_get_elements_c.
+!------------------------------------------------------------------------------
+  SUBROUTINE oft_xml_free_ptr_c(gen_ptr) BIND(C, NAME="oft_xml_free_ptr")
+    IMPORT c_ptr
+    TYPE(c_ptr), VALUE, INTENT(in) :: gen_ptr !< Pointer to array to free
+  END SUBROUTINE oft_xml_free_ptr_c
 !------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load_file_c.
 !------------------------------------------------------------------------------
@@ -300,7 +300,7 @@ ALLOCATE(elements%nodes(elements%n))
 DO i=1,elements%n
   elements%nodes(i)%obj=elements_list(i)
 END DO
-CALL oft_xml_free_elements_c(elements_c)
+CALL oft_xml_free_ptr_c(elements_c)
 END SUBROUTINE xml_get_element_list
 !---------------------------------------------------------------------------------
 !> Extract the string content from a given xml node into a Fortran string.
@@ -326,6 +326,7 @@ DO i=1,content_len-1
   IF(buffer(i)==c_null_char)EXIT
   content_tmp(i:i)=buffer(i)
 END DO
+CALL oft_xml_free_ptr_c(buffer_ptr)
 content=TRIM(ADJUSTL(content_tmp))
 DEALLOCATE(content_tmp)
 END SUBROUTINE oft_xml_get_content
@@ -355,6 +356,7 @@ DO i=1,content_len-1
   IF(buffer(i)==c_null_char)EXIT
   content_tmp(i:i)=buffer(i)
 END DO
+CALL oft_xml_free_ptr_c(buffer_ptr)
 content=TRIM(ADJUSTL(content_tmp))
 DEALLOCATE(content_tmp)
 END SUBROUTINE oft_xml_get_attr
@@ -787,7 +789,7 @@ INTEGER(i4), POINTER, INTENT(inout) :: output(:,:) !< Output string
 INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
-INTEGER(i4) :: ierr,shape_tmp(2)
+INTEGER(i4) :: i,j,ierr,shape_tmp(2)
 INTEGER(i4), POINTER :: data_tmp(:)
 CALL xml_extractDataContent_int1D(node,data_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
@@ -798,6 +800,11 @@ END IF
 WRITE(*,*)'CHK',SIZE(data_tmp),shape_tmp,ierr
 ALLOCATE(output(shape_tmp(1),shape_tmp(2)))
 WRITE(*,*)'CHK2',SHAPE(output),shape_tmp
+! DO i=1,shape_tmp(1)
+!   DO j=1,shape_tmp(2)
+!     output(i,j)=data_tmp((j-1)*shape_tmp(1)+i)
+!   END DO
+! END DO
 output=RESHAPE(data_tmp,shape_tmp)
 IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
 IF(PRESENT(data_shape))data_shape=shape_tmp
