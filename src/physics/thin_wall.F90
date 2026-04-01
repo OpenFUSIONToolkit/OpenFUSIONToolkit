@@ -199,7 +199,7 @@ IF(.NOT.self%xml%associated().AND.ASSOCIATED(oft_env%xml))CALL xml_get_element(o
 CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
 IF(error_flag==0)THEN
   WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils'
-  CALL tw_load_coils(coil_element,self%n_vcoils,self%vcoils)
+  CALL tw_load_coils(coil_element,'VCOIL',self%n_vcoils,self%vcoils)
 ELSE
   WRITE(*,'(2A)')oft_indent,'No V(t) driver coils found'
 END IF
@@ -212,7 +212,7 @@ END DO
 CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
 IF(error_flag==0)THEN
   WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils'
-  CALL tw_load_coils(coil_element,self%n_icoils,self%icoils)
+  CALL tw_load_coils(coil_element,'ICOIL',self%n_icoils,self%icoils)
 ELSE
   WRITE(*,'(2A)')oft_indent,'No I(t) driver coils found'
 END IF
@@ -2366,8 +2366,9 @@ END SUBROUTINE tw_setup_hole
 !------------------------------------------------------------------------------
 !> Read coil sets for "oft_in.xml" file
 !------------------------------------------------------------------------------
-subroutine tw_load_coils(group_node,ncoils,coils)
+subroutine tw_load_coils(group_node,name_prefix,ncoils,coils)
 TYPE(xml_node), INTENT(IN) :: group_node !< XML node relative to base `<thincurr>` node
+CHARACTER(LEN=5), INTENT(IN) :: name_prefix !< Prefix for coil set names (e.g. "icoil" or "vcoil")
 INTEGER(4), INTENT(out) :: ncoils !< Number of coil sets found
 TYPE(tw_coil_set), POINTER, INTENT(out) :: coils(:) !< List of coil sets
 !---XML solver fields
@@ -2419,7 +2420,7 @@ DO i=1,ncoils
     END IF
     DEALLOCATE(str_tmp)
   ELSE
-    WRITE(coil_tmp%name,'(A8,I5.5)')'UNKNOWN_',i
+    WRITE(coil_tmp%name,'(A5,A1,I5.5)')name_prefix,'_',i
   END IF
   !---Get coil set resistivity per unit length (can be overriden)
   IF(xml_hasAttribute(coil_set,"res_per_len"))THEN
@@ -3169,7 +3170,7 @@ CALL native_vector_slice_push(outvec,global_le,rst_info)
 CALL hdf5_write(rst_info,filename,path)
 IF(self%n_vcoils>0)THEN
   allocate(pcoil_vals(self%n_vcoils))
-  pcoil_vals=outvec%v(self%np_active+self%nholes:self%nelems)
+  pcoil_vals=outvec%v(self%np_active+self%nholes+1:self%nelems)
   CALL hdf5_write(pcoil_vals,filename,path//"_Vcoils")
   deallocate(pcoil_vals)
 END IF

@@ -194,7 +194,7 @@ INTEGER(i4) :: ppn=1
 INTEGER(i4) :: debug=0
 INTEGER(i4) :: nparts=1
 INTEGER(i4) :: omp_nthreads=-1
-LOGICAL :: test_run=.FALSE.
+LOGICAL :: test_run,from_api
 CHARACTER(LEN=OFT_PATH_SLEN) :: ifile
 LOGICAL :: called_from_lib
 LOGICAL :: rst
@@ -218,8 +218,10 @@ IF(oft_env%rank==0)oft_env%head_proc=.TRUE.
 WRITE(oft_env%crank,'(I4.4)')oft_env%rank
 !---Read settings filename from command line
 IF(PRESENT(nthreads))THEN
+  from_api=.TRUE.
   omp_nthreads=nthreads
 ELSE
+  from_api=.FALSE.
   nargs=COMMAND_ARGUMENT_COUNT()
   oft_env%ifile=TRIM('oft.in') ! If none, use default
   oft_env%xml_file=TRIM('none') ! If none, specify
@@ -236,6 +238,7 @@ END IF
 INQUIRE(file=oft_env%ifile,exist=rst)
 IF(.NOT.rst)CALL oft_abort('Input file does not exist.','oft_init',__FILE__)
 !---Read in node options
+test_run=.FALSE.
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,runtime_options,IOSTAT=ierr)
 CLOSE(io_unit)
@@ -322,8 +325,10 @@ IF(oft_env%rank==0)THEN
 #else
   WRITE(*,'(A)')    '  Not compiled with OpenMP'
 #endif
+IF(.NOT.from_api)THEN
   WRITE(*,'(2A)')   'Fortran input file    = ',TRIM(oft_env%ifile)
   WRITE(*,'(2A)')   'XML input file        = ',TRIM(oft_env%xml_file)
+END IF
   WRITE(*,'(A,3I4)')'Integer Precisions    = ',i4,i8
   WRITE(*,'(A,3I4)')'Float Precisions      = ',r4,r8,r10
   WRITE(*,'(A,3I4)')'Complex Precisions    = ',c4,c8

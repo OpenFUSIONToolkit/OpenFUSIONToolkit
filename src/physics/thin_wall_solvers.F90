@@ -807,8 +807,8 @@ IF(sensors%nfloops>0)THEN
     CALL floop_hist%write(data_r8=senout)
   END IF
 END IF
-IF(sensors%njumpers+self%nholes>0)THEN
-  ALLOCATE(jumpout(sensors%njumpers+self%nholes+1))
+IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
+  ALLOCATE(jumpout(sensors%njumpers+self%nholes+self%n_vcoils+1))
   DO j=1,sensors%njumpers
     tmp=0.d0
     val_prev=0.d0
@@ -829,7 +829,7 @@ IF(sensors%njumpers+self%nholes>0)THEN
     END DO
     jumpout(j+1)=tmp/mu0
   END DO
-  DO j=1,self%nholes
+  DO j=1,self%nholes+self%n_vcoils
     jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
   END DO
   !---Setup history file
@@ -843,6 +843,9 @@ IF(sensors%njumpers+self%nholes>0)THEN
     DO i=1,self%nholes
       WRITE(hole_jumper_name,'(A,I4.4)')'HOLE_',i
       CALL jumper_hist%add_field(hole_jumper_name, 'r8')
+    END DO
+    DO i=1,self%n_vcoils
+      CALL jumper_hist%add_field(self%vcoils(i)%name, 'r8')
     END DO
     CALL jumper_hist%write_header
     CALL jumper_hist%open
@@ -960,7 +963,7 @@ DO i=1,nsteps
     senout(1)=t
     CALL floop_hist%write(data_r8=senout)
   END IF
-  IF(sensors%njumpers+self%nholes>0)THEN
+  IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
     DO j=1,sensors%njumpers
       tmp=0.d0
       val_prev=0.d0
@@ -981,7 +984,7 @@ DO i=1,nsteps
       END DO
       jumpout(j+1)=tmp/mu0
     END DO
-    DO j=1,self%nholes
+    DO j=1,self%nholes+self%n_vcoils
       jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
     END DO
     jumpout(1)=t
@@ -996,7 +999,7 @@ IF(sensors%nfloops>0)THEN
   CALL floop_hist%close
   DEALLOCATE(senout)
 END IF
-IF(sensors%njumpers+self%nholes>0)THEN
+IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
   CALL jumper_hist%close
   DEALLOCATE(jumpout)
 END IF
@@ -1061,8 +1064,8 @@ IF(rebuild_sensors)THEN
       CALL floop_hist%open
     END IF
   END IF
-  IF(sensors%njumpers+self%nholes>0)THEN
-    ALLOCATE(jumpout(sensors%njumpers+self%nholes+1))
+  IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
+    ALLOCATE(jumpout(sensors%njumpers+self%nholes+self%n_vcoils+1))
     jumpout = 0.d0
     !---Setup history file
     IF(oft_env%head_proc)THEN
@@ -1075,6 +1078,9 @@ IF(rebuild_sensors)THEN
       DO i=1,self%nholes
         WRITE(hole_jumper_name,'(A,I4.4)')'HOLE_',i
         CALL jumper_hist%add_field(hole_jumper_name, 'r8')
+      END DO
+      DO i=1,self%n_vcoils
+        CALL jumper_hist%add_field(self%vcoils(i)%name, 'r8')
       END DO
       CALL jumper_hist%write_header
       CALL jumper_hist%open
@@ -1163,7 +1169,7 @@ DO i=0,nsteps
       senout(1)=t
       CALL floop_hist%write(data_r8=senout)
     END IF
-    IF(sensors%njumpers+self%nholes>0)THEN
+    IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
       DO j=1,sensors%njumpers
         tmp=0.d0
         val_prev=0.d0
@@ -1184,7 +1190,7 @@ DO i=0,nsteps
         END DO
         jumpout(j+1)=tmp/mu0
       END DO
-      DO j=1,self%nholes
+      DO j=1,self%nholes+self%n_vcoils
         jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
       END DO
       jumpout(1)=t
@@ -1198,7 +1204,7 @@ IF(sensors%nfloops>0)THEN
   CALL floop_hist%close()
   DEALLOCATE(senout)
 END IF
-IF(sensors%njumpers+self%nholes>0)THEN
+IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
   CALL jumper_hist%close()
   DEALLOCATE(jumpout)
 END IF
