@@ -957,11 +957,12 @@ end subroutine matrix_delete
 !! @note This subroutine is a dummy routine used to specify the interface
 !! of the member function and catch errors in uninitialized matrices.
 !---------------------------------------------------------------------------------
-subroutine matrix_save(self, filename, path, bc_flags)
+subroutine matrix_save(self, filename, path, bc_flags, nfields)
 class(oft_matrix), intent(inout) :: self
 character(LEN=*), intent(in) :: filename !< Name of restart file
 character(LEN=*), intent(in) :: path !< Path to store solution vector in file
 logical, intent(in), optional, dimension(:) :: bc_flags
+integer, intent(in), optional :: nfields
 call oft_abort('No matrix save implemented for this matrix type', 'matrix_save', __FILE__)
 end subroutine matrix_save
 !---------------------------------------------------------------------------------

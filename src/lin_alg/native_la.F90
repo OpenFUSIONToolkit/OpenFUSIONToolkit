@@ -2289,13 +2289,14 @@ end subroutine mat_delete
 !---------------------------------------------------------------------------------
 !> Save matrix in CSR format
 !---------------------------------------------------------------------------------
-subroutine mat_save(self,filename, path, bc_flags)
+subroutine mat_save(self,filename, path, bc_flags, nfields)
 class(oft_native_matrix), intent(inout) :: self !< Matrix object
 character(LEN=*), intent(in) :: filename !< Name of restart file
 character(LEN=*), intent(in) :: path !< Path to store solution vector in file
 LOGICAL, INTENT(IN), OPTIONAL, DIMENSION(:) :: bc_flags
+INTEGER, INTENT(IN), OPTIONAL :: nfields
 integer(i4), dimension(:), allocatable :: bit_flags
-integer(i4) :: i, j, k=24
+integer(i4) :: i, j
 INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: lg !< global index of each element
 DEBUG_STACK_PUSH
 ALLOCATE(lg(self%nr))
