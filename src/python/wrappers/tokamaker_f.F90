@@ -189,7 +189,7 @@ END FUNCTION tokamaker_equil_ccast
 !> Needs docs
 !---------------------------------------------------------------------------------
 FUNCTION tokamaker_require_equil(tMaker_obj,error_str) RESULT(success)
-TYPE(tokamaker_instance), POINTER, INTENT(out) :: tMaker_obj
+TYPE(tokamaker_instance), INTENT(in) :: tMaker_obj
 CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 LOGICAL :: success
 !---Clear error flag
