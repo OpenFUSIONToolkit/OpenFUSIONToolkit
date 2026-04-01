@@ -33,6 +33,19 @@ def get_prereqs(filename):
     return preqs, known_libs
 
 print('Copying required dynamic libraries')
+
+# Check for required utilities
+if shutil.which('ldconfig') is None:
+    print('Unable to locate "ldconfig" command')
+    sys.exit(-1)
+if shutil.which('readelf') is None:
+    print('Unable to locate "readelf" command')
+    sys.exit(-1)
+if shutil.which('patchelf') is None:
+    print('Unable to locate "patchelf" command')
+    sys.exit(-1)
+
+#
 output, error, errcode = run_command('ldconfig -p')
 if errcode != 0:
     print("WARNING: non-zero error code ({0}) reading ldconfig".format(errcode))
@@ -148,7 +161,13 @@ if MKL_ROOT is not None:
             os.symlink(filename, symname)
 
 # Patch files with $ORIGIN runpath
-for filename in patch_files:
+print()
+print("Patching RPATH in executables:")
+for filename in sorted(patch_files):
+    if os.path.splitext(filename)[1] == ".py":
+        continue
+    # print("  {0}".format(filename))
     _, _, errcode = run_command("patchelf --set-rpath '$ORIGIN' {0}".format(filename))
     if errcode != 0:
-        print("WARNING: non-zero error code ({1}) patching {0}".format(filename, errcode))
+        print("  WARNING: non-zero error code ({1}) patching {0}".format(filename, errcode))
+print()

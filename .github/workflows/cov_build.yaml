@@ -6,7 +6,8 @@ on:
       - main
       - cov_debug
   pull_request:
-    types: [opened, reopened, synchronize]
+    types:
+      - ready_for_review
 
 concurrency:
   group: cov-${{ github.ref }}

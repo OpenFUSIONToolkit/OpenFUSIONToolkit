@@ -1,0 +1,119 @@
+name: PYPI Linux CD Build
+
+on:
+  push:
+    branches:
+      - main
+      - cd_debug
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Release build?'
+        required: false
+        type: boolean
+  
+jobs:
+  build:
+    name: ${{ format('PYPI Linux Nightly ({0})', matrix.config.name) }}
+    runs-on: ${{ matrix.config.os }}
+    container: ${{ matrix.config.image }}
+    timeout-minutes: 45
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - {
+            name: "Linux-x86_64",
+            os: ubuntu-24.04,
+            image: "quay.io/pypa/manylinux_2_28_x86_64",
+            python: "/opt/python/cp314-cp314/bin/python"
+          }
+        # - {
+        #     name: "Linux-arm64",
+        #     os: ubuntu-24.04-arm,
+        #     image: "quay.io/pypa/manylinux_2_28_aarch64",
+        #     python: "/opt/python/cp314-cp314/bin/python"
+        #   }
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+    
+    - name: Install prerequisites
+      run: |
+        dnf -y update
+        dnf -y --enablerepo=powertools install git zlib-devel m4 make cmake patch perl
+        dnf clean all
+        rm -rf /var/cache/yum
+        ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
+        echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
+        source ${{ github.workspace }}/setup_env.sh
+        python -m pip install -U pip
+        python -m pip install jupyter nbconvert build wheel
+
+    - name: Create build directory
+      run: mkdir libs
+
+    - name: Build external (Nightly)
+      if: ${{ !inputs.release }}
+      shell: bash
+      working-directory: libs
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        python ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --oblas_dynamic_arch --build_umfpack=1 --build_arpack=1 --oft_package
+
+    - name: Build external (Release)
+      if: ${{ inputs.release }}
+      shell: bash
+      working-directory: libs
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        python ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --oblas_dynamic_arch --build_umfpack=1 --build_arpack=1 --oft_package --oft_package_release
+
+    - name: Upload library failure log
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: Library failure log
+        path: libs/build/build_error.log
+    
+    - name: Remove external build directory
+      shell: bash
+      working-directory: libs
+      run: rm -rf build
+
+    - name: Configure OFT
+      shell: bash
+      working-directory: libs
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        bash config_cmake.sh
+
+    - name: Build OFT
+      shell: bash
+      working-directory: libs/build_release
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make
+    
+    - name: Install OFT
+      shell: bash
+      working-directory: libs/build_release
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make install
+
+    - name: Build Python Wheels
+      shell: bash
+      working-directory: libs/install_release/python
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        bash make_package.sh
+    
+    - name: Upload PYPI artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.config.name }}-${{ github.sha }}
+        path: libs/install_release/python/dist/*.whl
+        overwrite: true

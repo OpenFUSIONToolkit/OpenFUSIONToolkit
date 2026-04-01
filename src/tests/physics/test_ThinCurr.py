@@ -511,7 +511,9 @@ def validate_td(sigs_final, jumpers_final=None, tols=(1.E-8, 1.E-3)):
         except BaseException as e:
             print(e)
             return False
-        if not len(td_sigs_final) == len(jumpers_final):
+        for (i, val) in enumerate(td_sigs_final[1:]):
+            print(val)
+        if len(td_sigs_final) != len(jumpers_final):
             print("FAILED: Number of jumpers does not match")
             return False
         retval = True
@@ -521,6 +523,8 @@ def validate_td(sigs_final, jumpers_final=None, tols=(1.E-8, 1.E-3)):
             print("  Actual =   {0}".format(td_sigs_final[0]))
             retval = False
         for (i, val) in enumerate(jumpers_final[1:]):
+            if val is None:
+                continue
             if abs((val-td_sigs_final[i+1])/val) > tols[1]:
                 print("FAILED: Signal {0} incorrect!".format(i+1))
                 print("  Expected = {0}".format(val))
@@ -646,12 +650,13 @@ def test_fr_plate(direct_flag,python):
 @pytest.mark.parametrize("python", (True,))
 def test_td_plate_volt(direct_flag,python):
     sigs_final = (4.E-3, 4.580643E-4, 3.854292E-4)
+    jumpers_final = (4.E-3, 1697.895)
     assert ThinCurr_setup("tw_test-plate.h5",1,direct_flag,
                            vcoils=((0.5, 0.1),),
                            floops=((0.5, -0.05), (0.5, -0.1)),
                            volt_waveform=((0.0, 1.0), (1.0, 1.0)),
                            python=python)
-    assert validate_td(sigs_final)
+    assert validate_td(sigs_final,jumpers_final)
 
 #============================================================================
 # Test runners for cylinder
@@ -691,7 +696,7 @@ def test_fr_cyl(direct_flag,python):
 @pytest.mark.parametrize("python", (True,))
 def test_td_cyl_volt(direct_flag,python):
     sigs_final = (4.E-3, 1.504279E-4, 1.276624E-4)
-    jumpers_final = (4.E-3, 1.1203960E3, 1120.396)
+    jumpers_final = (4.E-3, 1.1203960E3, 1120.396, 655.853, 655.850)
     assert ThinCurr_setup("tw_test-cyl.h5",1,direct_flag,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
@@ -748,13 +753,14 @@ def test_fr_torus(direct_flag,python):
 @pytest.mark.parametrize("python", (True,))
 def test_td_torus_volt(direct_flag,python):
     sigs_final = (4.E-3, 5.653338E-5, 4.035387E-6)
+    jumpers_final = (4.E-3, None, -597.6068, 371.74769, 371.74780)
     assert ThinCurr_setup("tw_test-torus.h5",1,direct_flag,
                            vcoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
                            volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)),
                            lin_tol=1.E-11,
                            python=python)
-    assert validate_td(sigs_final)
+    assert validate_td(sigs_final,jumpers_final)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
@@ -831,12 +837,13 @@ def test_fr_passive(direct_flag,python):
 @pytest.mark.parametrize("python", (True,))
 def test_td_passive_volt(direct_flag,python):
    sigs_final = (4.E-3, 4.379235E-4, 4.389248E-4)
+   jumpers_final = (4.E-3, -641.4736, 1673.2893)
    assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
                           vcoils=((0.5, 0.0), (0.5, 0.1)),
                           floops=((0.5, -0.05), (0.5, -0.1)),
                           volt_waveform=((0.0, 0.0, 1.0), (1.0, 0.0, 1.0)),
                           python=python)
-   assert validate_td(sigs_final)
+   assert validate_td(sigs_final, jumpers_final)
 
 #============================================================================
 # Test runners for large cylinder (w/ ACA+)
@@ -879,7 +886,7 @@ def test_fr_aca(python):
 @pytest.mark.parametrize("python", (True,))
 def test_td_volt_aca(python):
     sigs_final = (4.E-3, 1.512679E-4, 1.291681E-4)
-    jumpers_final = (4.E-3, 1.122550E3, 1122.550)
+    jumpers_final = (4.E-3, 1.122550E3, 1122.550, 656.9544, 656.9797)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
