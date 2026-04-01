@@ -36,7 +36,6 @@ def io_setup(test_id, parallel = False):
 
 # Test runner for base test case
 @pytest.mark.coverage
-@pytest.mark.parametrize("test_id", (1,)) #2,3,4,5))
+@pytest.mark.parametrize("test_id", (1,2,3,4))
 def test_base(test_id):
     assert io_setup(test_id)
-    assert False

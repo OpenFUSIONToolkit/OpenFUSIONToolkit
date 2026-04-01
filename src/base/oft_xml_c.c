@@ -47,7 +47,6 @@ int oft_xml_get_root(const void* doc_ptr, void** root_ptr) {
     root = xmlDocGetRootElement((xmlDoc*)doc_ptr);
     if (root == NULL) return 2;
     *root_ptr = (void*)root;
-    // printf("Root element: %s\n", root->name);
     return 0;
 }
 
@@ -143,7 +142,6 @@ void oft_xml_free_ptr(void* gen_ptr) {
  * Returns 0 on success, nonzero on error.
  */
 int oft_xml_get_content(const void* node_ptr, char** content, int* content_len) {
-    // printf("Getting content from %p %p\n", node_ptr, NULL);
     const xmlNode* node = (const xmlNode*)node_ptr;
     *content_len = 0;
     if (node == NULL) return 1;
@@ -155,7 +153,7 @@ int oft_xml_get_content(const void* node_ptr, char** content, int* content_len) 
     *content_len = (int)strlen((const char*)text);
     *content = (char*)malloc((*content_len + 1) * sizeof(char));
     strncpy(*content, (const char*)text, (size_t)*content_len);
-    content[*content_len] = '\0';
+    (*content)[*content_len] = '\0';
     xmlFree(text);
     *content_len += 1; /* include null terminator in length */
     return 0;
@@ -174,12 +172,11 @@ int oft_xml_has_attribute(const void* node_ptr, const char* attr_name) {
     const xmlNode* node = (const xmlNode*)node_ptr;
     int len;
     if (node == NULL || attr_name == NULL) {
-        // printf("Node or attribute is NULL in check\n");
         return 1;
     }
-    // printf("Checking attribute '%s' from node '%s'\n", attr_name, node->name);
     xmlChar* attr = xmlGetProp(node, (const xmlChar*)attr_name);
     if (attr == NULL) return 2;
+    xmlFree(attr);
     return 0;
 }
 
@@ -194,22 +191,18 @@ int oft_xml_has_attribute(const void* node_ptr, const char* attr_name) {
  */
 int oft_xml_get_attribute(const void* node_ptr, const char* attr_name,
                           char** content, int* content_len) {
-    // printf("Getting attribute from %p\n", node_ptr);
     const xmlNode* node = (const xmlNode*)node_ptr;
     *content_len = 0;
-    // printf("Getting attribute from %p\n", node);
     if (node == NULL || attr_name == NULL) {
         *content = NULL;
-        // printf("Node or attribute is NULL in read\n");
         return 1;
     }
-    // printf("Getting attribute '%s' from node '%s'\n", attr_name, node->name);
     xmlChar* attr = xmlGetProp(node, (const xmlChar*)attr_name);
     if (attr == NULL) return 2;
     *content_len = (int)strlen((const char*)attr);
     *content = (char*)malloc((*content_len + 1) * sizeof(char));
     strncpy(*content, (const char*)attr, (size_t)*content_len);
-    content[*content_len] = '\0';
+    (*content)[*content_len] = '\0';
     xmlFree(attr);
     *content_len += 1; /* include null terminator in length */
     return 0;

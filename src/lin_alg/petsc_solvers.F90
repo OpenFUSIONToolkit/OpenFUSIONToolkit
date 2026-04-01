@@ -417,11 +417,11 @@ end subroutine cg_solver_apply
 !------------------------------------------------------------------------------
 subroutine cg_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_cg_solver), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: read_int
@@ -594,11 +594,11 @@ end subroutine gmres_solver_apply
 !------------------------------------------------------------------------------
 subroutine gmres_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_gmres_solver), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: read_int
@@ -912,11 +912,11 @@ end subroutine sjacobi_solver_apply
 !------------------------------------------------------------------------------
 subroutine sjacobi_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_sjacobi_solver), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: read_int
@@ -1027,11 +1027,11 @@ end subroutine direct_solver_apply
 !------------------------------------------------------------------------------
 subroutine direct_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_direct_solver), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node,sub_node
+TYPE(xml_node) :: current_node,sub_node
 CHARACTER(LEN=20) :: sub_type
 CHARACTER(LEN=6) :: factor_type,factor_package
 !---
@@ -1432,11 +1432,11 @@ end subroutine asprecond_setup
 !------------------------------------------------------------------------------
 subroutine asprecond_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_asprecond), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node,sub_node
+TYPE(xml_node) :: current_node,sub_node
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: read_int
@@ -1537,11 +1537,11 @@ end subroutine create_lu_pc
 !---------------------------------------------------------------------------------
 subroutine lu_pc_load_xml(self,solver_node,level)
 CLASS(oft_petsc_factordef), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: i,ierr,nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 CHARACTER(LEN=:), ALLOCATABLE :: factor_type,factor_package
 DEBUG_STACK_PUSH
 !---

@@ -282,8 +282,8 @@ end type ml_xmhd_vecspace
 ! Global variables
 !------------------------------------------------------------------------------
 INTEGER(i4), PARAMETER :: xmhd_rst_version = 3 !< Restart file version number
-TYPE(xml_node), POINTER :: xmhd_root_node => NULL() !< xMHD XML node
-TYPE(xml_node), POINTER :: xmhd_pre_node => NULL() !< preconditioner XML node
+TYPE(xml_node) :: xmhd_root_node !< xMHD XML node
+TYPE(xml_node) :: xmhd_pre_node !< preconditioner XML node
 !---Equation control
 LOGICAL :: xmhd_jcb = .TRUE. !< Include JxB force on fluid
 LOGICAL :: xmhd_advec = .TRUE. !< Include fluid advection
@@ -778,7 +778,7 @@ solver%pm=oft_env%pm
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
 IF(nlevels==1)THEN
-  IF(ASSOCIATED(xmhd_pre_node))THEN
+  IF(xmhd_pre_node%associated())THEN
     CALL create_solver_xml(solver%pre,xmhd_pre_node)
   ELSE
     CALL create_diag_pre(solver%pre)
@@ -1244,7 +1244,7 @@ solver%pm=oft_env%pm
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
 IF(nlevels==1)THEN
-  IF(ASSOCIATED(xmhd_pre_node))THEN
+  IF(xmhd_pre_node%associated())THEN
     CALL create_solver_xml(solver%pre,xmhd_pre_node)
   ELSE
     CALL create_diag_pre(solver%pre)
@@ -2461,7 +2461,8 @@ subroutine xmhd_setup_regions()
 !---XML solver fields
 integer(i4) :: nread_id,nread_eta,nread_type,ierr,i,j,reg_type
 real(r8) :: eta
-TYPE(xml_node), POINTER :: reg_node,inner_node
+TYPE(xml_node) :: inner_node
+TYPE(xml_node), POINTER :: reg_node
 TYPE(xml_nodelist) :: reg_nodes
 integer(i4), POINTER :: regs(:),reg_types(:)
 DEBUG_STACK_PUSH
@@ -2472,7 +2473,7 @@ IF(.NOT.ALLOCATED(eta_reg))THEN
 END IF
 eta_reg=-1.d0
 solid_cell=.FALSE.
-IF(ASSOCIATED(xmhd_root_node))THEN
+IF(xmhd_root_node%associated())THEN
   !---Look for pre node
   CALL xml_get_element(xmhd_root_node,"region",reg_nodes,ierr)
   IF(reg_nodes%n>0)THEN
@@ -2489,8 +2490,7 @@ IF(ASSOCIATED(xmhd_root_node))THEN
       ! "xmhd_setup_regions",__FILE__)
       ! IF(SIZE(regs)>mesh%nreg)CALL oft_abort("Too many id values specified","xmhd_setup_regions", &
       ! __FILE__)
-      IF(ANY(regs(1:nread_id)>mesh%nreg).OR.ANY(regs(1:nread_id)<=0))CALL oft_abort( &
-      "Invalid region ID","xmhd_setup_regions",__FILE__)
+      IF(ANY(regs>mesh%nreg).OR.ANY(regs<=0))CALL oft_abort("Invalid region ID","xmhd_setup_regions",__FILE__)
       !---
       CALL xml_get_element(reg_node,"eta",inner_node,ierr)
       CALL xml_read_content(inner_node,eta,iostat=ierr)
@@ -2515,7 +2515,7 @@ IF(ASSOCIATED(xmhd_root_node))THEN
           __FILE__)
       END IF
       !---
-      DO j=1,nread_id
+      DO j=1,SIZE(regs)
         IF(eta_reg(regs(j))>0.d0)THEN
           CALL oft_abort("Region blocks overlap","xmhd_setup_regions",__FILE__)
         ELSE

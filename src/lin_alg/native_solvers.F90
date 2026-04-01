@@ -412,10 +412,10 @@ end subroutine cg_solver_apply
 !------------------------------------------------------------------------------
 subroutine cg_setup_xml(self,solver_node,level)
 CLASS(oft_native_cg_solver), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), POINTER, DIMENSION(:) :: read_int
 REAL(r8), POINTER, DIMENSION(:) :: read_real
@@ -654,11 +654,11 @@ end subroutine gmres_solver_apply
 !------------------------------------------------------------------------------
 subroutine gmres_setup_xml(self,solver_node,level)
 CLASS(oft_native_gmres_solver), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), POINTER, DIMENSION(:) :: read_int
@@ -907,11 +907,11 @@ end subroutine cgmres_solver_apply
 !------------------------------------------------------------------------------
 subroutine cgmres_setup_xml(self,solver_node,level)
 CLASS(oft_native_gmres_csolver), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), POINTER, DIMENSION(:) :: read_int
@@ -1490,10 +1490,10 @@ end subroutine jblock_precond_apply
 !------------------------------------------------------------------------------
 subroutine jblock_setup_xml(self,solver_node,level)
 CLASS(oft_jblock_precond), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), POINTER, DIMENSION(:) :: read_int
 REAL(r8), POINTER, DIMENSION(:) :: read_real
@@ -2131,10 +2131,10 @@ end subroutine bjprecond_update
 !------------------------------------------------------------------------------
 subroutine bjprecond_setup_xml(self,solver_node,level)
 CLASS(oft_bjprecond), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node,sub_node
+TYPE(xml_node) :: current_node
 INTEGER(i4) :: val_level,ierr
 INTEGER(i4), POINTER, DIMENSION(:) :: read_tmp
 DEBUG_STACK_PUSH

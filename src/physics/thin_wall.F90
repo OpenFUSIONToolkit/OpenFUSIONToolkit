@@ -139,7 +139,7 @@ TYPE :: tw_type
   TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL() !< Jumper definitions
   TYPE(tw_coil_set), POINTER, DIMENSION(:) :: vcoils => NULL() !< List of Vcoils
   TYPE(tw_coil_set), POINTER, DIMENSION(:) :: icoils => NULL() !< List of Icoils
-  TYPE(xml_node), POINTER :: xml => NULL()
+  TYPE(xml_node) :: xml
 CONTAINS
   !> Setup thin-wall model
   PROCEDURE :: setup => tw_setup
@@ -186,7 +186,7 @@ TYPE(oft_1d_int), POINTER, INTENT(IN) :: hole_ns(:) !< Hole nodesets
 INTEGER(4) :: i,j,k,l,face,ioffset,ed,error_flag
 INTEGER(4), ALLOCATABLE :: kfh_tmp(:),np_inverse(:)
 REAL(8) :: f(3),rgop(3,3),area_i,norm_i(3)
-TYPE(xml_node), POINTER :: coil_element
+TYPE(xml_node) :: coil_element
 !
 IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)
 !---
@@ -195,7 +195,7 @@ WRITE(*,'(2A)')oft_indent,'Creating thin-wall model'
 CALL oft_increase_indent
 CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
 !---Load coils
-IF(.NOT.ASSOCIATED(self%xml))CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
+IF(.NOT.self%xml%associated().AND.ASSOCIATED(oft_env%xml))CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
 CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
 IF(error_flag==0)THEN
   WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils'
@@ -2222,8 +2222,7 @@ END IF
 END FUNCTION load_from_file
 !
 SUBROUTINE save_to_file()
-INTEGER(4) :: hash_tmp(4),file_counts(4)
-LOGICAL :: exists
+INTEGER(4) :: hash_tmp(4)
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%nelems
   hash_tmp(2) = self%mesh%nc
@@ -2232,16 +2231,12 @@ IF(TRIM(save_file)/='none')THEN
   WRITE(*,'(2A)')oft_indent,'Saving B-field operator to file: ',TRIM(save_file)
   CALL hdf5_create_file(TRIM(save_file))
   CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
-  IF(exists.AND.ALL(file_counts==hash_tmp))THEN
-    CALL hdf5_write(self%Bel(:,:,1),TRIM(save_file),'Bel_X')
-    CALL hdf5_write(self%Bel(:,:,2),TRIM(save_file),'Bel_Y')
-    CALL hdf5_write(self%Bel(:,:,3),TRIM(save_file),'Bel_Z')
-    IF(exists)THEN
-      CALL hdf5_write(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X')
-      CALL hdf5_write(self%Bdr(:,:,2),TRIM(save_file),'Bdr_Y')
-      CALL hdf5_write(self%Bdr(:,:,3),TRIM(save_file),'Bdr_Z')
-    END IF
-  END IF
+  CALL hdf5_write(self%Bel(:,:,1),TRIM(save_file),'Bel_X')
+  CALL hdf5_write(self%Bel(:,:,2),TRIM(save_file),'Bel_Y')
+  CALL hdf5_write(self%Bel(:,:,3),TRIM(save_file),'Bel_Z')
+  CALL hdf5_write(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X')
+  CALL hdf5_write(self%Bdr(:,:,2),TRIM(save_file),'Bdr_Y')
+  CALL hdf5_write(self%Bdr(:,:,3),TRIM(save_file),'Bdr_Z')
 END IF
 END SUBROUTINE save_to_file
 END SUBROUTINE tw_compute_Bops
@@ -2372,12 +2367,13 @@ END SUBROUTINE tw_setup_hole
 !> Read coil sets for "oft_in.xml" file
 !------------------------------------------------------------------------------
 subroutine tw_load_coils(group_node,ncoils,coils)
-TYPE(xml_node), POINTER, INTENT(IN) :: group_node !< XML node relative to base `<thincurr>` node
+TYPE(xml_node), INTENT(IN) :: group_node !< XML node relative to base `<thincurr>` node
 INTEGER(4), INTENT(out) :: ncoils !< Number of coil sets found
 TYPE(tw_coil_set), POINTER, INTENT(out) :: coils(:) !< List of coil sets
 !---XML solver fields
 integer(4) :: ncoil_sets,nread,coil_type,nmasked
-TYPE(xml_node), POINTER :: doc,coil_set,coil,thincurr_group
+TYPE(xml_node) :: doc,thincurr_group
+TYPE(xml_node), POINTER :: coil_set,coil
 TYPE(xml_nodelist) :: coil_sets,coil_list
 !---
 LOGICAL :: success
@@ -2760,7 +2756,7 @@ subroutine tw_load_eta(self)
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
 !---XML solver fields
 integer(4) :: nshells,nreg_mesh,nread
-TYPE(xml_node), POINTER :: sens_node,eta_group,thincurr_group
+TYPE(xml_node) :: sens_node,eta_group,thincurr_group
 !---
 INTEGER(4) :: i,j,io_unit,ierr,id,cell
 REAL(8) :: location(2)
@@ -2773,7 +2769,7 @@ ALLOCATE(self%sens_mask(nreg_mesh))
 self%sens_mask=.FALSE.
 ! Read resistivity values
 CALL xml_get_element(self%xml,"eta",eta_group,ierr)
-IF(ASSOCIATED(eta_group))THEN
+IF(ierr==0)THEN
   WRITE(*,*)
   WRITE(*,'(2A)')oft_indent,'Loading region resistivity:'
   CALL xml_read_content(eta_group,eta_tmp,iostat=ierr)

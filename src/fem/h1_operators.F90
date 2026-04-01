@@ -1001,9 +1001,9 @@ TYPE(oft_h1_zerob), POINTER :: zerob_bc
 TYPE(oft_h1_zerogrnd), POINTER :: zerogrnd_bc
 TYPE(oft_ml_fe_vecspace), POINTER :: tmp_vecspace
 !---
-TYPE(xml_node), POINTER :: pre_node
+TYPE(xml_node) :: pre_node
 integer(i4) :: nnodes
-TYPE(xml_node), POINTER :: h1_node
+TYPE(xml_node) :: h1_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
@@ -1045,7 +1045,6 @@ CALL ML_h1_rep%set_level(levin)
 !------------------------------------------------------------------------------
 ! Search for XML-spec
 !------------------------------------------------------------------------------
-NULLIFY(pre_node)
 IF(ASSOCIATED(oft_env%xml))THEN
   !---Look for H^1 FE node
   CALL xml_get_element(oft_env%xml,"h1",h1_node,ierr)

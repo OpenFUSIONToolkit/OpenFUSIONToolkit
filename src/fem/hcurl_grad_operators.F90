@@ -1874,10 +1874,10 @@ INTEGER(i4) :: minlev,toplev,nl
 INTEGER(i4) :: i,j,levin,ierr
 LOGICAL :: create_mats
 CHARACTER(LEN=2) :: lev_char
-TYPE(xml_node), POINTER :: pre_node
+TYPE(xml_node) :: pre_node
 TYPE(oft_ml_hcurl_grad_vecspace), POINTER :: tmp_vecspace
 integer(i4) :: nnodes
-TYPE(xml_node), POINTER :: hcurl_grad_node
+TYPE(xml_node) :: hcurl_grad_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
@@ -1919,7 +1919,6 @@ CALL ML_hcurl_aug_obj%set_level(levin,propogate=.TRUE.)
 !------------------------------------------------------------------------------
 ! Search for XML-spec
 !------------------------------------------------------------------------------
-NULLIFY(pre_node)
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"hcurl_grad",hcurl_grad_node,ierr)
   IF(ierr==0)CALL xml_get_element(hcurl_grad_node,"mop",pre_node,ierr)

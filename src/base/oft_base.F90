@@ -284,11 +284,10 @@ IF(oft_env%xml_file(1:4)/='none')THEN
   !---Test for existence of XML file
   INQUIRE(FILE=TRIM(oft_env%xml_file),exist=rst)
   IF(.NOT.rst)CALL oft_abort('XML file specified but does not exist.','oft_init',__FILE__)
+  ALLOCATE(oft_env%xml_doc)
   CALL xml_parsefile(oft_env%xml_file,oft_env%xml_doc,ierr)
   IF(ierr/=0)CALL oft_abort('Error parsing XML input file','oft_init',__FILE__)
   oft_env%xml=>oft_env%xml_doc%root
-  ! CALL xml_get_element(doc,"oft",oft_env%xml,ierr)
-  ! IF(ierr/=0)CALL oft_abort('Error finding "oft" XML root element','oft_init',__FILE__)
 END IF
 !---
 IF(MOD(oft_env%nprocs,ppn)/=0)CALL oft_abort('# of MPI tasks and Procs per node do not agree.','oft_init',__FILE__)

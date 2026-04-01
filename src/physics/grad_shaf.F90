@@ -476,7 +476,7 @@ class(gs_eq), intent(inout) :: self !< G-S object
 logical, optional, intent(in) :: ignore_inmesh
 !---XML solver fields
 integer(i4) :: nread
-TYPE(xml_node), POINTER :: doc,group_node,coil_set,coil,tmaker_group
+TYPE(xml_node) :: doc,group_node,coil_set,coil,tmaker_group
 TYPE(xml_nodelist) :: coil_sets,coils
 !---
 INTEGER(i4) :: i,j,ierr,cell
@@ -560,7 +560,7 @@ subroutine gs_load_regions(self)
 class(gs_eq), intent(inout) :: self !< G-S object
 !---XML solver fields
 integer(4) :: nread
-TYPE(xml_node), POINTER :: doc,region,field,tmaker_group
+TYPE(xml_node) :: doc,region,field,tmaker_group
 TYPE(xml_nodelist) :: regions,fields
 !---
 INTEGER(4) :: i,j,ierr,id,nregions,nreg_defs,nfields

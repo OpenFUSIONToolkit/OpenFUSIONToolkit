@@ -78,12 +78,8 @@ CALL copy_string_rev(xml_file,xml_filename)
 INQUIRE(FILE=TRIM(xml_filename),exist=rst)
 IF(.NOT.rst)RETURN
 CALL xml_parsefile(TRIM(xml_filename),doc,ierr)
-! doc=>xml_parseFile(TRIM(xml_filename),iostat=ierr)
 IF(ierr/=0)RETURN
-ALLOCATE(oft_node)
-CALL xml_get_element(doc%root,"oft",oft_node,ierr)
-IF(ierr/=0)RETURN
-oft_node_ptr=C_LOC(oft_node)
+oft_node_ptr=C_LOC(doc%root)
 END SUBROUTINE oftpy_load_xml
 !---------------------------------------------------------------------------------
 !> Set debug verbosity level

@@ -50,11 +50,11 @@ class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition s
 integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
 real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
 integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
-TYPE(xml_node), optional, pointer, intent(in) :: xml_root !< Preconditioner definition node (optional)
+TYPE(xml_node), optional, intent(in) :: xml_root !< Preconditioner definition node (optional)
 !---
 NULLIFY(pre)
 IF(ASSOCIATED(oft_env%xml).AND.PRESENT(xml_root))THEN
-  IF(ASSOCIATED(xml_root))THEN
+  IF(xml_root%associated())THEN
     !---Create preconditioner
     CALL create_ml_xml(pre,Mats,levels,nlevels=nlevels, &
       ml_vecspace=ml_vecspace,pre_node=xml_root,bc=bc)
@@ -482,11 +482,11 @@ end subroutine create_gmres_solver
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_solver_xml(solver,solver_node,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node
+TYPE(xml_node), INTENT(in) :: solver_node
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 !---
 INTEGER(i4) :: nread,nnodes,ierr
-TYPE(xml_node), POINTER :: pre_node
+TYPE(xml_node) :: pre_node
 !---
 integer(i4) :: i,val_level
 ! CHARACTER(LEN=20) :: solver_type,temp_string
@@ -667,12 +667,12 @@ end subroutine create_bjacobi_pre
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_pre_xml(pre,pre_node,native_solver,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
-TYPE(xml_node), POINTER, INTENT(in) :: pre_node
+TYPE(xml_node), INTENT(in) :: pre_node
 LOGICAL, INTENT(in) :: native_solver
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
 !---
 INTEGER(i4) :: nread,nnodes,ierr
-TYPE(xml_node), POINTER :: solver_node
+TYPE(xml_node) :: solver_node
 !---
 integer(i4) :: i,val_level,smoother
 logical :: switch
@@ -743,14 +743,15 @@ TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
 integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
 class(oft_ml_vecspace), target, intent(in) :: ml_vecspace !< Multi-level vectorspace
-TYPE(xml_node), POINTER, INTENT(in) :: pre_node !< Preconditioner XML element
+TYPE(xml_node), INTENT(in) :: pre_node !< Preconditioner XML element
 class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition (optional)
 !---
 integer(i4) :: i,ierr,nnodes
 class(oft_ml_precond), pointer :: this_ml
 LOGICAL :: symmetric,up_present,down_present,coarse_present
 CHARACTER(LEN=:), ALLOCATABLE :: dir_type
-TYPE(xml_node), POINTER :: up_node,down_node,coarse_node,current_node,solver_node
+TYPE(xml_node) :: up_node,down_node,coarse_node,solver_node
+TYPE(xml_node), POINTER :: current_node
 TYPE(xml_nodelist) :: current_nodes
 DEBUG_STACK_PUSH
 !---

@@ -64,7 +64,7 @@ CLASS(oft_matrix), POINTER :: lop => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
 !---
 integer(i4) :: nnodes
-TYPE(xml_node), POINTER :: solver_node
+TYPE(xml_node) :: solver_node
 !---Set FE level
 CALL ML_oft_lagrange%set_level(ML_oft_lagrange%nlevels)
 !---Create solver fields

@@ -666,11 +666,11 @@ end subroutine lusolver_update
 !------------------------------------------------------------------------------
 subroutine lusolver_setup_xml(self,solver_node,level)
 CLASS(oft_lusolver), INTENT(inout) :: self
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
 CHARACTER(LEN=:), ALLOCATABLE :: factor_package
 CHARACTER(LEN=3) :: fac_type
@@ -929,11 +929,11 @@ end subroutine ilusolver_update
 !------------------------------------------------------------------------------
 subroutine ilusolver_setup_xml(self,solver_node,level)
 CLASS(oft_ilusolver), INTENT(inout) :: self
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
 CHARACTER(LEN=:), ALLOCATABLE :: factor_package
 CHARACTER(LEN=3) :: fac_type

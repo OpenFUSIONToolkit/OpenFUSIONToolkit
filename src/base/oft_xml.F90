@@ -58,6 +58,8 @@ IMPLICIT NONE
 !------------------------------------------------------------------------------
 TYPE :: xml_node
   TYPE(c_ptr) :: obj = c_null_ptr !< Opaque pointer to xmlNode
+CONTAINS
+  PROCEDURE :: associated => xml_node_associated
 END TYPE xml_node
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -182,7 +184,7 @@ END INTERFACE xml_get_element
 !> Generate inverse of sparse indexing
 !------------------------------------------------------------------------------
 INTERFACE xml_read_content
-  MODULE PROCEDURE xml_extractDataContent_string2
+  MODULE PROCEDURE xml_extractDataContent_string
   MODULE PROCEDURE xml_extractDataContent_double
   MODULE PROCEDURE xml_extractDataContent_double1D
   MODULE PROCEDURE xml_extractDataContent_double2D
@@ -197,7 +199,7 @@ END INTERFACE xml_read_content
 !> Generate inverse of sparse indexing
 !------------------------------------------------------------------------------
 INTERFACE xml_read_attribute
-  MODULE PROCEDURE xml_extractDataAttribute_string2
+  MODULE PROCEDURE xml_extractDataAttribute_string
   MODULE PROCEDURE xml_extractDataAttribute_double
   MODULE PROCEDURE xml_extractDataAttribute_double1D
   MODULE PROCEDURE xml_extractDataAttribute_double2D
@@ -208,7 +210,40 @@ INTERFACE xml_read_attribute
   MODULE PROCEDURE xml_extractDataAttribute_logical1D
   MODULE PROCEDURE xml_extractDataAttribute_logical2D
 END INTERFACE xml_read_attribute
+!---
+TYPE :: xml_exception
+  CHARACTER(LEN=:), ALLOCATABLE :: msg
+END TYPE xml_exception
+INTEGER(i4) :: xml_exception_depth = 0
+TYPE(xml_exception) :: xml_exceptions(10)
+!$omp threadprivate(xml_exception_depth,xml_exceptions)
 CONTAINS
+!---------------------------------------------------------------------------------
+!> Check if an xml_node is associated with a valid xmlNode pointer.
+!---------------------------------------------------------------------------------
+FUNCTION xml_node_associated(self) RESULT(is_assoc)
+CLASS(xml_node), INTENT(in) :: self
+LOGICAL :: is_assoc
+is_assoc = c_associated(self%obj)
+END FUNCTION xml_node_associated
+!---------------------------------------------------------------------------------
+!> Check if an xml_node is associated with a valid xmlNode pointer.
+!---------------------------------------------------------------------------------
+SUBROUTINE xml_set_exception(message)
+CHARACTER(LEN=*), INTENT(in) :: message
+xml_exception_depth=xml_exception_depth+1
+xml_exceptions(xml_exception_depth)%msg=TRIM(ADJUSTL(message))
+END SUBROUTINE xml_set_exception
+!---------------------------------------------------------------------------------
+!> Check if an xml_node is associated with a valid xmlNode pointer.
+!---------------------------------------------------------------------------------
+SUBROUTINE xml_clear_exceptions()
+INTEGER(i4) :: i
+DO i=1,xml_exception_depth
+  xml_exceptions(i)%msg=''
+END DO
+xml_exception_depth=0
+END SUBROUTINE xml_clear_exceptions
 !---------------------------------------------------------------------------------
 !> Parse an XML file from a given file path.
 !---------------------------------------------------------------------------------
@@ -218,31 +253,25 @@ TYPE(xml_doc), INTENT(out) :: doc !< C pointer to parsed xmlDoc
 INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
 CHARACTER(KIND=c_char) :: c_filepath(LEN_TRIM(filepath)+1)
 INTEGER(i4) :: i
-! WRITE(*,*)1,1
 doc%doc=c_null_ptr
 DO i=1,LEN_TRIM(filepath)
   c_filepath(i) = filepath(i:i)
 END DO
 c_filepath(LEN_TRIM(filepath)+1) = c_null_char
-! WRITE(*,*)1,2
 ierr = INT(oft_xml_parse_file_c(c_filepath, doc%doc), i4)
-! WRITE(*,*)1,3
 IF(ierr/=0)THEN
     doc%doc=c_null_ptr
     doc%root=>NULL()
   RETURN
 END IF
-! WRITE(*,*)1,4
 ALLOCATE(doc%root)
 ierr = INT(oft_xml_get_root_c(doc%doc, doc%root%obj), i4)
-! WRITE(*,*)1,5
 IF(ierr/=0)THEN
     CALL oft_xml_free_doc_c(doc%doc)
     doc%doc=c_null_ptr
     doc%root=>NULL()
   RETURN
 END IF
-! WRITE(*,*)1,6
 END SUBROUTINE xml_parsefile
 !---------------------------------------------------------------------------------
 !> Retrieve a pointer to the I-th xml node with a given name contained within
@@ -305,7 +334,7 @@ END SUBROUTINE xml_get_element_list
 !---------------------------------------------------------------------------------
 !> Extract the string content from a given xml node into a Fortran string.
 !---------------------------------------------------------------------------------
-SUBROUTINE oft_xml_get_content(node,content,ierr)
+SUBROUTINE xml_get_content(node,content,ierr)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: content !< Output string
 INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
@@ -329,7 +358,7 @@ END DO
 CALL oft_xml_free_ptr_c(buffer_ptr)
 content=TRIM(ADJUSTL(content_tmp))
 DEALLOCATE(content_tmp)
-END SUBROUTINE oft_xml_get_content
+END SUBROUTINE xml_get_content
 !---------------------------------------------------------------------------------
 !> Extract the string value of a given attribute on a given xml node.
 !---------------------------------------------------------------------------------
@@ -369,16 +398,13 @@ CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 CHARACTER(KIND=c_char), TARGET :: c_name(LEN_TRIM(attr_name)+1)
 INTEGER(i4) :: i,ierr
 LOGICAL :: has_attr
-! WRITE(*,*)5,1
 has_attr=.FALSE.
 DO i=1,LEN_TRIM(attr_name)
   c_name(i)=attr_name(i:i)
 END DO
 c_name(LEN_TRIM(attr_name)+1)=c_null_char
-! WRITE(*,*)5,2,c_name
 ierr=INT(oft_xml_has_attribute_c(node%obj,C_LOC(c_name)),i4)
 IF(ierr/=0)RETURN
-! WRITE(*,*)5,3
 has_attr=.TRUE.
 END FUNCTION xml_hasAttribute
 !---------------------------------------------------------------------------------
@@ -394,85 +420,141 @@ END SUBROUTINE oft_xml_free
 !---------------------------------------------------------------------------------
 !> Extract the string content from a given xml node into a Fortran string.
 !---------------------------------------------------------------------------------
+SUBROUTINE normalize_string(content_in,content_out)
+CHARACTER(LEN=*), INTENT(in) :: content_in !< Input string
+CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: content_out !< Output string
+INTEGER(i4) :: i,j,k,ilast,nchars
+CHARACTER(*), PARAMETER :: NL = new_line('A')
+CHARACTER(LEN=:), ALLOCATABLE :: line_strip
+nchars=LEN(content_in)
+content_out=content_in
+!---Remove leading and trailing whitespace
+DO i=1,nchars
+  IF((content_in(i:i)/=' ').OR.(content_in(i:i)/=NL))EXIT
+END DO
+DO j=nchars,1,-1
+  IF((content_in(j:j)/=' ').OR.(content_in(j:j)/=NL))EXIT
+END DO
+nchars=j
+content_out=content_in(i:nchars)
+!---Remove blank lines and comment lines, and trim whitespace from remaining lines
+ilast=i
+k=1
+DO j=i,nchars
+  IF(content_in(j:j)==NL)THEN
+    line_strip = TRIM(ADJUSTL(content_in(ilast:j-1)))
+    IF(LEN(line_strip)==0)THEN
+      ilast=j+1
+      CYCLE
+    END IF
+    IF(line_strip(1:1)=='#')THEN
+      CYCLE
+    ELSE IF(line_strip(1:1)==',')THEN
+      line_strip = TRIM(ADJUSTL(line_strip(2:)))
+    END IF
+    IF(line_strip(LEN(line_strip):LEN(line_strip))==',')THEN
+      line_strip = line_strip(:LEN(line_strip)-1)
+    END IF
+    content_out(k:k+LEN(line_strip))=line_strip//NL
+    k=k+LEN(line_strip)+1
+    ilast=j+1
+  END IF
+END DO
+!---Add final line if needed
+line_strip = TRIM(ADJUSTL(content_in(ilast:nchars)))
+! WRITE(*,*)'Remaining: "',line_strip,'"'
+IF(LEN(line_strip)>0)THEN
+  IF(line_strip(1:1)/='#')THEN
+    IF(line_strip(1:1)==',')THEN
+      line_strip = TRIM(ADJUSTL(line_strip(2:)))
+    END IF
+    IF(line_strip(LEN(line_strip):LEN(line_strip))==',')THEN
+      line_strip = line_strip(:LEN(line_strip)-1)
+    END IF
+    content_out(k:k+LEN(line_strip)-1)=line_strip
+    k=k+LEN(line_strip)
+  END IF
+  content_out=content_out(:k-1)
+ELSE
+  content_out=content_out(:k-2)
+END IF
+END SUBROUTINE normalize_string
+!---------------------------------------------------------------------------------
+!> Extract the string content from a given xml node into a Fortran string.
+!---------------------------------------------------------------------------------
 SUBROUTINE tokenize_string(content,tokens,ierr)
-CHARACTER(LEN=*), INTENT(in) :: content !< Output string
+CHARACTER(LEN=*), INTENT(inout) :: content !< Output string
 INTEGER(i4), ALLOCATABLE, INTENT(out) :: tokens(:,:,:) !< Output array
 INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
-INTEGER(i4) :: i,j,nchars,ncols,nrows,istart,iend,nr_loc,iend2
+LOGICAL :: is_delim
+INTEGER(i4) :: i,j,nchars,nrows,ncols,istart,iend,nr_loc,iend2,offset
 REAL(r8) :: val_tmp
 CHARACTER(LEN=:), ALLOCATABLE :: line_strip
 character(len=256) :: msg
 character(*), parameter :: NL = new_line('A')
+!---Count number of lines/rows
 nchars=LEN(content)
-ncols=0
+nrows=1
 DO i=1,nchars
   IF(content(i:i)==NL)THEN
+    nrows=nrows+1
+  END IF
+END DO
+!---Convert from space-delimited to CSV if needed
+IF(INDEX(content,',')==0)THEN
+  is_delim=((content(1:1)==' ').OR.(content(1:1)==NL))
+  DO i=2,nchars
+    IF(content(i:i)==' ')THEN
+      IF(.NOT.is_delim)THEN
+        content(i:i)=','
+        is_delim=.TRUE.
+      END IF
+    ELSE
+      is_delim=.FALSE.
+    END IF
+  END DO
+END IF
+! WRITE(*,*)'Parsing: ncols=',ncols
+!---Count number of columns
+istart=1
+iend=INDEX(content(istart:nchars),NL)
+IF(iend==0)THEN
+  iend=nchars+1
+ELSE
+  iend=istart+iend-1
+END IF
+ncols=1
+DO j=istart,iend-1
+  IF(content(j:j)==',')THEN
     ncols=ncols+1
   END IF
 END DO
-ncols=ncols+1
-WRITE(*,*)'Parsing: ncols=',ncols
+! WRITE(*,*)'Parsing: ncols=',ncols-offset,' nrows=',nrows
+!---Generate actual tokens
+ALLOCATE(tokens(2,ncols,nrows))
 istart=1
-DO i=1,ncols
-  iend = INDEX(content(istart:nchars),NL)
+outer_read: DO i=1,nrows
+  iend=INDEX(content(istart:nchars),NL)
   IF(iend==0)THEN
     iend=nchars+1
   ELSE
     iend=istart+iend-1
   END IF
-  line_strip = TRIM(ADJUSTL(content(istart:iend-1)))
-  nr_loc=0
-  DO j=1,LEN(line_strip)
-    IF(line_strip(j:j)==',')THEN
-      nr_loc=nr_loc+1
-    END IF
-  END DO
-  WRITE(*,*)'"',line_strip,'" ',nr_loc
-  IF(i==1)THEN
-    nrows=nr_loc
-  ELSE IF((i==2).AND.(line_strip(1:1)==','))THEN
-    nrows=nrows+1
-  ELSE IF((i==ncols).AND.(line_strip(1:1)/=','))THEN
-    nr_loc=nr_loc+1
-  END IF
-  IF(nr_loc/=nrows)THEN
-    ierr=-10000
-    RETURN
-  END IF
-  istart=iend+1
-END DO
-IF(ncols==1)nrows=nrows+1
-WRITE(*,*)'Parsing: ncols=',ncols,' nrows=',nrows
-!
-ALLOCATE(tokens(2,nrows,ncols))
-istart=1
-outer_read: DO i=1,ncols
-  iend = INDEX(content(istart+1:nchars),NL)
-  IF(iend==0)THEN
-    iend=nchars+1
-  ELSE
-    iend=istart+iend
-  END IF
-  ! iend=istart+1+MIN(INDEX(content(istart+1:),NL),nchars-istart+1)
-  ! ! WRITE(*,*)'"',content(istart:iend-1),'"'
-  line_strip = TRIM(ADJUSTL(content(istart:iend-1)))
-  ! IF(line_strip(1:1)==NL)istart=istart+INDEX(content(istart:iend-1),NL)
-  IF(line_strip(1:1)==',')istart=istart+INDEX(content(istart:iend-1),',')
-  DO j=1,nrows
+  DO j=1,ncols
     iend2=INDEX(content(istart:iend-1),',')-1
-    IF(iend2<0)iend2=MIN(iend-istart,nchars-istart+1)
-    WRITE(*,*)i,j,'"',content(istart:istart+iend2-1),'"',istart,istart+iend2-1,nchars
+    IF(iend2<0)THEN
+      IF(j<ncols)THEN
+        ierr=-10000
+        CALL xml_set_exception('Inconsistent number of columns when tokenizing comma/newline-delimited string')
+        EXIT outer_read
+      END IF
+      iend2=MIN(iend-istart,nchars-istart+1)
+    END IF
+    ! WRITE(*,*)i,j,'"',content(istart:istart+iend2-1),'"',istart,istart+iend2-1,nchars
     tokens(:,j,i)=[istart,istart+iend2-1]
-    ! READ(content(istart:istart+iend2-1),*,IOSTAT=ierr,iomsg=msg)val_tmp
-    ! IF(ierr/=0)THEN
-    !   ! WRITE(*,*)'Error parsing double value at column ',i,' row ',j
-    !   ! WRITE(*,*)msg
-    !   EXIT outer_read
-    ! END IF
-    ! output((i-1)*nrows+j)=val_tmp
     istart=istart+iend2+1
   END DO
-  istart=istart+1
+  istart=iend+1
 END DO outer_read
 ! WRITE(*,*)'Parsing error code: ',ierr
 IF(ierr/=0)THEN
@@ -484,19 +566,22 @@ END SUBROUTINE tokenize_string
 !> Extract the string content from a given xml node into a Fortran string.
 !---------------------------------------------------------------------------------
 SUBROUTINE parse_string_to_doubles(content,output,output_shape,ierr)
-CHARACTER(LEN=*), INTENT(in) :: content !< Output string
+CHARACTER(LEN=*), INTENT(inout) :: content !< Output string
 REAL(r8), POINTER, INTENT(out) :: output(:) !< Output array
 INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
 INTEGER(i4) :: i,j,ncols,nrows
 INTEGER(i4), ALLOCATABLE :: tokens(:,:,:)
 REAL(r8) :: val_tmp
-CHARACTER(LEN=:), ALLOCATABLE :: line_strip
+CHARACTER(LEN=8) :: col_char,row_char
 character(len=256) :: msg
+CHARACTER(LEN=:), ALLOCATABLE :: content_tmp
 
-CALL tokenize_string(content,tokens,ierr)
+CALL normalize_string(content,content_tmp)
+CALL tokenize_string(content_tmp,tokens,ierr)
 IF(ierr/=0)THEN
-  DEALLOCATE(tokens)
+  ierr=-1
+  DEALLOCATE(content_tmp)
   RETURN
 END IF
 
@@ -506,17 +591,20 @@ IF(PRESENT(output_shape))output_shape=[nrows,ncols]
 ALLOCATE(output(nrows*ncols))
 outer_read: DO i=1,ncols
   DO j=1,nrows
-    READ(content(tokens(1,j,i):tokens(2,j,i)),*,IOSTAT=ierr)val_tmp
+    READ(content_tmp(tokens(1,j,i):tokens(2,j,i)),*,IOSTAT=ierr,IOMSG=msg)val_tmp
     IF(ierr/=0)THEN
-      ! WRITE(*,*)'Error parsing double value at column ',i,' row ',j
-      ! WRITE(*,*)msg
+      WRITE(col_char,'(I8)')i
+      WRITE(row_char,'(I8)')j
+      CALL xml_set_exception('Error parsing double value at column '//TRIM(ADJUSTL(col_char))//' row '//TRIM(ADJUSTL(row_char)))
+      CALL xml_set_exception(msg)
       EXIT outer_read
     END IF
     output((i-1)*nrows+j)=val_tmp
   END DO
 END DO outer_read
-DEALLOCATE(tokens)
+DEALLOCATE(tokens,content_tmp)
 IF(ierr/=0)THEN
+  ierr=-2
   DEALLOCATE(output)
   RETURN
 END IF
@@ -525,19 +613,22 @@ END SUBROUTINE parse_string_to_doubles
 !> Extract the string content from a given xml node into a Fortran string.
 !---------------------------------------------------------------------------------
 SUBROUTINE parse_string_to_integers(content,output,output_shape,ierr)
-CHARACTER(LEN=*), INTENT(in) :: content !< Output string
+CHARACTER(LEN=*), INTENT(inout) :: content !< Output string
 INTEGER(i4), POINTER, INTENT(out) :: output(:) !< Output array
 INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
 INTEGER(i4) :: i,j,ncols,nrows
 INTEGER(i4), ALLOCATABLE :: tokens(:,:,:)
 INTEGER(i4) :: val_tmp
-CHARACTER(LEN=:), ALLOCATABLE :: line_strip
+CHARACTER(LEN=8) :: col_char,row_char
 character(len=256) :: msg
+CHARACTER(LEN=:), ALLOCATABLE :: content_tmp
 
-CALL tokenize_string(content,tokens,ierr)
+CALL normalize_string(content,content_tmp)
+CALL tokenize_string(content_tmp,tokens,ierr)
 IF(ierr/=0)THEN
-  DEALLOCATE(tokens)
+  ierr=-1
+  DEALLOCATE(content_tmp)
   RETURN
 END IF
 
@@ -547,17 +638,20 @@ IF(PRESENT(output_shape))output_shape=[nrows,ncols]
 ALLOCATE(output(nrows*ncols))
 outer_read: DO i=1,ncols
   DO j=1,nrows
-    READ(content(tokens(1,j,i):tokens(2,j,i)),*,IOSTAT=ierr)val_tmp
+    READ(content_tmp(tokens(1,j,i):tokens(2,j,i)),*,IOSTAT=ierr)val_tmp
     IF(ierr/=0)THEN
-      ! WRITE(*,*)'Error parsing integer value at column ',i,' row ',j
-      ! WRITE(*,*)msg
+      WRITE(col_char,'(I8)')i
+      WRITE(row_char,'(I8)')j
+      CALL xml_set_exception('Error parsing integer value at column '//TRIM(ADJUSTL(col_char))//' row '//TRIM(ADJUSTL(row_char)))
+      CALL xml_set_exception(msg)
       EXIT outer_read
     END IF
     output((i-1)*nrows+j)=val_tmp
   END DO
 END DO outer_read
-DEALLOCATE(tokens)
+DEALLOCATE(tokens,content_tmp)
 IF(ierr/=0)THEN
+  ierr=-2
   DEALLOCATE(output)
   RETURN
 END IF
@@ -566,17 +660,21 @@ END SUBROUTINE parse_string_to_integers
 !> Extract the string content from a given xml node into a Fortran string.
 !---------------------------------------------------------------------------------
 SUBROUTINE parse_string_to_logicals(content,output,output_shape,ierr)
-CHARACTER(LEN=*), INTENT(in) :: content !< Output string
+CHARACTER(LEN=*), INTENT(inout) :: content !< Output string
 LOGICAL, POINTER, INTENT(out) :: output(:) !< Output array
 INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
 INTEGER(i4) :: i,j,ncols,nrows
 INTEGER(i4), ALLOCATABLE :: tokens(:,:,:)
+CHARACTER(LEN=8) :: col_char,row_char
 CHARACTER(LEN=:), ALLOCATABLE :: token_strip
+CHARACTER(LEN=:), ALLOCATABLE :: content_tmp
 
-CALL tokenize_string(content,tokens,ierr)
+CALL normalize_string(content,content_tmp)
+CALL tokenize_string(content_tmp,tokens,ierr)
 IF(ierr/=0)THEN
-  DEALLOCATE(tokens)
+  ierr=-1
+  DEALLOCATE(content_tmp)
   RETURN
 END IF
 
@@ -586,377 +684,310 @@ IF(PRESENT(output_shape))output_shape=[nrows,ncols]
 ALLOCATE(output(nrows*ncols))
 outer_read: DO i=1,ncols
   DO j=1,nrows
-    token_strip=TRIM(ADJUSTL(content(tokens(1,j,i):tokens(2,j,i))))
+    token_strip=TRIM(ADJUSTL(content_tmp(tokens(1,j,i):tokens(2,j,i))))
     CALL string_to_upper(token_strip)
     IF((token_strip=='TRUE').OR.(token_strip=='.TRUE.').OR.(token_strip=='1').OR.(token_strip=='T'))THEN
       output((i-1)*nrows+j)=.TRUE.
     ELSE IF((token_strip=='FALSE').OR.(token_strip=='.FALSE.').OR.(token_strip=='0').OR.(token_strip=='F'))THEN
       output((i-1)*nrows+j)=.FALSE.
     ELSE
-      ! WRITE(*,*)'Error parsing logical value at column ',i,' row ',j
-      ! WRITE(*,*)'Unrecognized token: "',token_strip,'"'
+      WRITE(col_char,'(I8)')i
+      WRITE(row_char,'(I8)')j
+      CALL xml_set_exception('Error parsing logical value at column '//TRIM(ADJUSTL(col_char))//' row '//TRIM(ADJUSTL(row_char)))
       EXIT outer_read
     END IF
   END DO
 END DO outer_read
+DEALLOCATE(tokens,content_tmp)
 IF(ierr/=0)THEN
+  ierr=-2
   DEALLOCATE(output)
   RETURN
 END IF
 END SUBROUTINE parse_string_to_logicals
-! !---------------------------------------------------------------------------------
-! !> Free an XML document previously parsed with \ref oft_xml_load.
-! !---------------------------------------------------------------------------------
-! SUBROUTINE xml_extractDataContent_string1(node,data,iostat)
-! TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
-! CHARACTER(LEN=*), INTENT(out) :: data !< Output string
-! INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
-! INTEGER(i4) :: ierr
-! CHARACTER(LEN=:), ALLOCATABLE :: data_tmp
-! CALL oft_xml_get_content(node,data_tmp,ierr)
-! IF(PRESENT(iostat))THEN
-!   iostat=ierr
-! ELSE
-!   STOP 'Error extracting string content from XML node in xml_extractDataContent_string1'
-!   ! CALL oft_abort('Error extracting string content from XML node', 'xml_extractDataContent_string1', __FILE__)
-! END IF
-! IF(LEN(data_tmp)>LEN(data))THEN
-!   STOP 'Extracted string from XML content is too long for the provided output variable in xml_extractDataContent_string1'
-!   ! CALL oft_abort('Extracted string from XML content is too long for the provided output variable', 'xml_extractDataContent_string1', __FILE__)
-! END IF
-! data=data_tmp(1:LEN(data))
-! DEALLOCATE(data_tmp)
-! END SUBROUTINE xml_extractDataContent_string1
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataContent_string2(node,output,iostat)
+SUBROUTINE xml_extractDataContent_string(node,output,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: output !< Output string
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
-CALL oft_xml_get_content(node,output,ierr)
-IF(PRESENT(iostat))THEN
-  iostat=ierr
-ELSE
-  STOP 'Error extracting string content from XML node in xml_extractDataContent_string2'
-  ! CALL oft_abort('Error extracting string content from XML node', 'xml_extractDataContent_string2', __FILE__)
-END IF
-END SUBROUTINE xml_extractDataContent_string2
+CALL xml_get_content(node,output,ierr)
+CALL xml_set_exception('Error in child of xml_extractDataContent_string')
+IF(PRESENT(iostat))iostat=ierr
+END SUBROUTINE xml_extractDataContent_string
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataContent_double1D(node,output,data_shape,iostat)
+SUBROUTINE xml_extractDataContent_double1D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
-REAL(r8), POINTER, INTENT(inout) :: output(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+REAL(r8), POINTER, INTENT(out) :: output(:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
-CALL oft_xml_get_content(node,content,ierr)
-WRITE(*,*)'rCHK',ierr
+CALL xml_get_content(node,content,ierr)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    DEALLOCATE(content)
-    RETURN
-  ELSE
-    STOP 'Error extracting string content from XML node in xml_extractDataContent_double1D'
-    ! CALL oft_abort('Error extracting string content from XML node', 'xml_extractDataContent_double1D', __FILE__)
-  END IF
+  CALL xml_set_exception('Error in child of xml_extractDataContent_double1D')
+  IF(PRESENT(iostat))iostat=-1
+  RETURN
 END IF
-CALL parse_string_to_doubles(content,output,data_shape,ierr)
-WRITE(*,*)'pCHK',ierr
+CALL parse_string_to_doubles(content,output,output_shape,ierr)
 DEALLOCATE(content)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    RETURN
-  ELSE
-    STOP 'Error parsing double values from XML node in xml_extractDataContent_double1D'
-    ! CALL oft_abort('Error parsing double values from XML node', 'xml_extractDataContent_double1D', __FILE__)
-  END IF
+  CALL xml_set_exception('Error in child of xml_extractDataContent_double1D')
+  IF(PRESENT(iostat))iostat=-2
+  RETURN
 END IF
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataContent_double1D
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataContent_double(node,output,data_shape,iostat)
+SUBROUTINE xml_extractDataContent_double(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 REAL(r8), INTENT(out) :: output !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr
-REAL(r8), POINTER :: data_tmp(:)
-CALL xml_extractDataContent_double1D(node,data_tmp,data_shape,ierr)
+REAL(r8), POINTER :: output_tmp(:)
+CALL xml_extractDataContent_double1D(node,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataContent_double')
   IF(PRESENT(iostat))iostat=ierr
-  IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
+  IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
 END IF
-output=data_tmp(1)
-DEALLOCATE(data_tmp)
+output=output_tmp(1)
+DEALLOCATE(output_tmp)
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataContent_double
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataContent_double2D(node,output,data_shape,iostat)
+SUBROUTINE xml_extractDataContent_double2D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
-REAL(r8), POINTER, INTENT(inout) :: output(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+REAL(r8), POINTER, INTENT(out) :: output(:,:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: shape_tmp(2),ierr
-REAL(r8), POINTER :: data_tmp(:)
-CALL xml_extractDataContent_double1D(node,data_tmp,shape_tmp,ierr)
-WRITE(*,*)'CHK',ierr
+REAL(r8), POINTER :: output_tmp(:)
+CALL xml_extractDataContent_double1D(node,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataContent_double2D')
   IF(PRESENT(iostat))iostat=ierr
-  IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
+  IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
 END IF
 ALLOCATE(output(shape_tmp(1),shape_tmp(2)))
-output=RESHAPE(data_tmp,shape_tmp)
-DEALLOCATE(data_tmp)
-IF(PRESENT(data_shape))data_shape=shape_tmp
+output=RESHAPE(output_tmp,shape_tmp)
+DEALLOCATE(output_tmp)
+IF(PRESENT(output_shape))output_shape=shape_tmp
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataContent_double2D
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataContent_int1D(node,output,data_shape,iostat)
+SUBROUTINE xml_extractDataContent_int1D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
-INTEGER(i4), POINTER, INTENT(inout) :: output(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), POINTER, INTENT(out) :: output(:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
-CALL oft_xml_get_content(node,content,ierr)
+CALL xml_get_content(node,content,ierr)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    IF(ALLOCATED(content))DEALLOCATE(content)
-    RETURN
-  ELSE
-    STOP 'Error extracting string content from XML node in xml_extractDataContent_int1D'
-    ! CALL oft_abort('Error extracting string content from XML node', 'xml_extractDataContent_int1D', __FILE__)
-  END IF
+  CALL xml_set_exception('Error in child of xml_extractDataContent_int1D')
+  IF(PRESENT(iostat))iostat=-1
+  RETURN
 END IF
-CALL parse_string_to_integers(content,output,data_shape,ierr)
+CALL parse_string_to_integers(content,output,output_shape,ierr)
 DEALLOCATE(content)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    IF(ASSOCIATED(output))DEALLOCATE(output)
-    RETURN
-  ELSE
-    STOP 'Error parsing integer values from XML node in xml_extractDataContent_int1D'
-    ! CALL oft_abort('Error parsing integer values from XML node', 'xml_extractDataContent_int1D', __FILE__)
-  END IF
+  CALL xml_set_exception('Error in child of xml_extractDataContent_int1D')
+  IF(PRESENT(iostat))iostat=-2
+  RETURN
 END IF
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataContent_int1D
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataContent_int(node,output,data_shape,iostat)
+SUBROUTINE xml_extractDataContent_int(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 INTEGER(i4), INTENT(out) :: output !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
-INTEGER(i4), POINTER :: data_tmp(:)
-CALL xml_extractDataContent_int1D(node,data_tmp,data_shape,ierr)
+INTEGER(i4), POINTER :: output_tmp(:)
+CALL xml_extractDataContent_int1D(node,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataContent_int')
   IF(PRESENT(iostat))iostat=ierr
-  IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
+  IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
 END IF
-output=data_tmp(1)
-DEALLOCATE(data_tmp)
+output=output_tmp(1)
+DEALLOCATE(output_tmp)
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataContent_int
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataContent_int2D(node,output,data_shape,iostat)
+SUBROUTINE xml_extractDataContent_int2D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
-INTEGER(i4), POINTER, INTENT(inout) :: output(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), POINTER, INTENT(out) :: output(:,:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: i,j,ierr,shape_tmp(2)
-INTEGER(i4), POINTER :: data_tmp(:)
-CALL xml_extractDataContent_int1D(node,data_tmp,shape_tmp,ierr)
+INTEGER(i4), POINTER :: output_tmp(:)
+CALL xml_extractDataContent_int1D(node,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataContent_int2D')
   IF(PRESENT(iostat))iostat=ierr
-  IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
+  IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
 END IF
-WRITE(*,*)'CHK',SIZE(data_tmp),shape_tmp,ierr
 ALLOCATE(output(shape_tmp(1),shape_tmp(2)))
-WRITE(*,*)'CHK2',SHAPE(output),shape_tmp
-! DO i=1,shape_tmp(1)
-!   DO j=1,shape_tmp(2)
-!     output(i,j)=data_tmp((j-1)*shape_tmp(1)+i)
-!   END DO
-! END DO
-output=RESHAPE(data_tmp,shape_tmp)
-IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
-IF(PRESENT(data_shape))data_shape=shape_tmp
+output=RESHAPE(output_tmp,shape_tmp)
+IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
+IF(PRESENT(output_shape))output_shape=shape_tmp
 IF(PRESENT(iostat))iostat=0
-WRITE(*,*)'Done',ierr
 END SUBROUTINE xml_extractDataContent_int2D
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataContent_logical1D(node,output,data_shape,iostat)
+SUBROUTINE xml_extractDataContent_logical1D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
-LOGICAL, POINTER, INTENT(inout) :: output(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+LOGICAL, POINTER, INTENT(out) :: output(:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
-CALL oft_xml_get_content(node,content,ierr)
+CALL xml_get_content(node,content,ierr)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    DEALLOCATE(content)
-    RETURN
-  ELSE
-    STOP 'Error extracting string content from XML node in xml_extractDataContent_logical1D'
-    ! CALL oft_abort('Error extracting string content from XML node', 'xml_extractDataContent_logical1D', __FILE__)
-  END IF
+  CALL xml_set_exception('Error in child of xml_extractDataContent_logical1D')
+  IF(PRESENT(iostat))iostat=-1
+  RETURN
 END IF
-CALL parse_string_to_logicals(content,output,data_shape,ierr)
+CALL parse_string_to_logicals(content,output,output_shape,ierr)
 DEALLOCATE(content)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    RETURN
-  ELSE
-    STOP 'Error parsing logical values from XML node in xml_extractDataContent_logical1D'
-    ! CALL oft_abort('Error parsing logical values from XML node', 'xml_extractDataContent_logical1D', __FILE__)
-  END IF
+  CALL xml_set_exception('Error in child of xml_extractDataContent_logical1D')
+  IF(PRESENT(iostat))iostat=-2
+  RETURN
 END IF
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataContent_logical1D
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataContent_logical(node,output,data_shape,iostat)
+SUBROUTINE xml_extractDataContent_logical(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 LOGICAL, INTENT(out) :: output !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
-LOGICAL, POINTER :: data_tmp(:)
-CALL xml_extractDataContent_logical1D(node,data_tmp,data_shape,ierr)
+LOGICAL, POINTER :: output_tmp(:)
+CALL xml_extractDataContent_logical1D(node,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataContent_logical')
   IF(PRESENT(iostat))iostat=ierr
-  IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
+  IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
 END IF
-output=data_tmp(1)
-DEALLOCATE(data_tmp)
+output=output_tmp(1)
+DEALLOCATE(output_tmp)
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataContent_logical
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataContent_logical2D(node,output,data_shape,iostat)
+SUBROUTINE xml_extractDataContent_logical2D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
-LOGICAL, POINTER, INTENT(inout) :: output(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+LOGICAL, POINTER, INTENT(out) :: output(:,:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)
-LOGICAL, POINTER :: data_tmp(:)
-CALL xml_extractDataContent_logical1D(node,data_tmp,shape_tmp,ierr)
+LOGICAL, POINTER :: output_tmp(:)
+CALL xml_extractDataContent_logical1D(node,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataContent_logical2D')
   IF(PRESENT(iostat))iostat=ierr
-  IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
+  IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
 END IF
 ALLOCATE(output(shape_tmp(1),shape_tmp(2)))
-output=RESHAPE(data_tmp,shape_tmp)
-DEALLOCATE(data_tmp)
-IF(PRESENT(data_shape))data_shape=shape_tmp
+output=RESHAPE(output_tmp,shape_tmp)
+DEALLOCATE(output_tmp)
+IF(PRESENT(output_shape))output_shape=shape_tmp
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataContent_logical2D
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataAttribute_string2(node,attr_name,output,iostat)
+SUBROUTINE xml_extractDataAttribute_string(node,attr_name,output,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 CHARACTER(LEN=:), ALLOCATABLE, INTENT(inout) :: output !< Output string
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CALL oft_xml_get_attr(node,attr_name,output,ierr)
-IF(PRESENT(iostat))THEN
-  iostat=ierr
-ELSE
-  STOP 'Error extracting string content from XML node in xml_extractDataAttribute_string2'
-  ! CALL oft_abort('Error extracting string content from XML node', 'xml_extractDataAttribute_string', __FILE__)
+IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_string')
+  IF(PRESENT(iostat))iostat=-1
+  RETURN
 END IF
-END SUBROUTINE xml_extractDataAttribute_string2
+IF(PRESENT(iostat))iostat=0
+END SUBROUTINE xml_extractDataAttribute_string
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataAttribute_double1D(node,attr_name,output,data_shape,iostat)
+SUBROUTINE xml_extractDataAttribute_double1D(node,attr_name,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
-REAL(r8), POINTER, INTENT(inout) :: output(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+REAL(r8), POINTER, INTENT(out) :: output(:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
 CALL oft_xml_get_attr(node,attr_name,content,ierr)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    DEALLOCATE(content)
-    RETURN
-  ELSE
-    STOP 'Error extracting string content from XML node in xml_extractDataAttribute_double1D'
-    ! CALL oft_abort('Error extracting string content from XML node', 'xml_extractDataAttribute_double1D', __FILE__)
-  END IF
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_double1D')
+  IF(PRESENT(iostat))iostat=-1
+  RETURN
 END IF
-CALL parse_string_to_doubles(content,output,data_shape,ierr)
+CALL parse_string_to_doubles(content,output,output_shape,ierr)
 DEALLOCATE(content)
-WRITE(*,*)'CHK',ierr,ASSOCIATED(output)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    RETURN
-  ELSE
-    STOP 'Error parsing double values from XML node in xml_extractDataAttribute_double1D'
-    ! CALL oft_abort('Error parsing double values from XML node', 'xml_extractDataAttribute_double1D', __FILE__)
-  END IF
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_double1D')
+  IF(PRESENT(iostat))iostat=-2
+  RETURN
 END IF
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataAttribute_double1D
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataAttribute_double(node,attr_name,output,data_shape,iostat)
+SUBROUTINE xml_extractDataAttribute_double(node,attr_name,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 REAL(r8), INTENT(out) :: output !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
 REAL(r8), POINTER :: output_tmp(:)
-CALL xml_extractDataAttribute_double1D(node,attr_name,output_tmp,data_shape,ierr)
-WRITE(*,*)'CHK',ierr,ASSOCIATED(output_tmp)
+CALL xml_extractDataAttribute_double1D(node,attr_name,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_double')
   IF(PRESENT(iostat))iostat=ierr
   IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
@@ -968,17 +999,18 @@ END SUBROUTINE xml_extractDataAttribute_double
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataAttribute_double2D(node,attr_name,output,data_shape,iostat)
+SUBROUTINE xml_extractDataAttribute_double2D(node,attr_name,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
-REAL(r8), POINTER, INTENT(inout) :: output(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+REAL(r8), POINTER, INTENT(out) :: output(:,:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)
 REAL(r8), POINTER :: output_tmp(:)
 CALL xml_extractDataAttribute_double1D(node,attr_name,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_double2D')
   IF(PRESENT(iostat))iostat=ierr
   IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
@@ -986,169 +1018,155 @@ END IF
 ALLOCATE(output(shape_tmp(1),shape_tmp(2)))
 output=RESHAPE(output_tmp,shape_tmp)
 DEALLOCATE(output_tmp)
-IF(PRESENT(data_shape))data_shape=shape_tmp
+IF(PRESENT(output_shape))output_shape=shape_tmp
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataAttribute_double2D
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataAttribute_int1D(node,attr_name,data,data_shape,iostat)
+SUBROUTINE xml_extractDataAttribute_int1D(node,attr_name,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
-INTEGER(i4), POINTER, INTENT(inout) :: data(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), POINTER, INTENT(out) :: output(:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
 CALL oft_xml_get_attr(node,attr_name,content,ierr)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    DEALLOCATE(content)
-    RETURN
-  ELSE
-    STOP 'Error extracting string content from XML node in xml_extractDataAttribute_int1D'
-    ! CALL oft_abort('Error extracting string content from XML node', 'xml_extractDataAttribute_int1D', __FILE__)
-  END IF
+ CALL xml_set_exception('Error in child of xml_extractDataAttribute_int1D')
+  IF(PRESENT(iostat))iostat=-2
+  RETURN
 END IF
-CALL parse_string_to_integers(content,data,data_shape,ierr)
+CALL parse_string_to_integers(content,output,output_shape,ierr)
 DEALLOCATE(content)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    RETURN
-  ELSE
-    STOP 'Error parsing integer values from XML node in xml_extractDataAttribute_int1D'
-    ! CALL oft_abort('Error parsing integer values from XML node', 'xml_extractDataAttribute_int1D', __FILE__)
-  END IF
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_int1D')
+  IF(PRESENT(iostat))iostat=-2
+  RETURN
 END IF
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataAttribute_int1D
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataAttribute_int(node,attr_name,data,data_shape,iostat)
+SUBROUTINE xml_extractDataAttribute_int(node,attr_name,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
-INTEGER(i4), INTENT(out) :: data !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), INTENT(out) :: output !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
-INTEGER(i4), POINTER :: data_tmp(:)
-CALL xml_extractDataAttribute_int1D(node,attr_name,data_tmp,data_shape,ierr)
+INTEGER(i4), POINTER :: output_tmp(:)
+CALL xml_extractDataAttribute_int1D(node,attr_name,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_int')
   IF(PRESENT(iostat))iostat=ierr
-  IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
+  IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
 END IF
-data=data_tmp(1)
-DEALLOCATE(data_tmp)
+output=output_tmp(1)
+DEALLOCATE(output_tmp)
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataAttribute_int
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataAttribute_int2D(node,attr_name,data,data_shape,iostat)
+SUBROUTINE xml_extractDataAttribute_int2D(node,attr_name,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
-INTEGER(i4), POINTER, INTENT(inout) :: data(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), POINTER, INTENT(out) :: output(:,:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)
-INTEGER(i4), POINTER :: data_tmp(:)
-CALL xml_extractDataAttribute_int1D(node,attr_name,data_tmp,shape_tmp,ierr)
+INTEGER(i4), POINTER :: output_tmp(:)
+CALL xml_extractDataAttribute_int1D(node,attr_name,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_int2D')
   IF(PRESENT(iostat))iostat=ierr
-  IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
+  IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
 END IF
-ALLOCATE(data(shape_tmp(1),shape_tmp(2)))
-data=RESHAPE(data_tmp,shape_tmp)
-DEALLOCATE(data_tmp)
-IF(PRESENT(data_shape))data_shape=shape_tmp
+ALLOCATE(output(shape_tmp(1),shape_tmp(2)))
+output=RESHAPE(output_tmp,shape_tmp)
+DEALLOCATE(output_tmp)
+IF(PRESENT(output_shape))output_shape=shape_tmp
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataAttribute_int2D
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataAttribute_logical1D(node,attr_name,data,data_shape,iostat)
+SUBROUTINE xml_extractDataAttribute_logical1D(node,attr_name,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
-LOGICAL, POINTER, INTENT(inout) :: data(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+LOGICAL, POINTER, INTENT(out) :: output(:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
 CALL oft_xml_get_attr(node,attr_name,content,ierr)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    DEALLOCATE(content)
-    RETURN
-  ELSE
-    STOP 'Error extracting string content from XML node in xml_extractDataAttribute_logical1D'
-    ! CALL oft_abort('Error extracting string content from XML node', 'xml_extractDataAttribute_logical1D', __FILE__)
-  END IF
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_logical1D')
+  IF(PRESENT(iostat))iostat=-1
+  RETURN
 END IF
-CALL parse_string_to_logicals(content,data,data_shape,ierr)
+CALL parse_string_to_logicals(content,output,output_shape,ierr)
 DEALLOCATE(content)
 IF(ierr/=0)THEN
-  IF(PRESENT(iostat))THEN
-    iostat=ierr
-    RETURN
-  ELSE
-    STOP 'Error parsing logical values from XML node in xml_extractDataAttribute_logical1D'
-    ! CALL oft_abort('Error parsing logical values from XML node', 'xml_extractDataAttribute_logical1D', __FILE__)
-  END IF
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_logical1D')
+  IF(PRESENT(iostat))iostat=-2
+  RETURN
 END IF
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataAttribute_logical1D
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataAttribute_logical(node,attr_name,data,data_shape,iostat)
+SUBROUTINE xml_extractDataAttribute_logical(node,attr_name,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
-LOGICAL, INTENT(out) :: data !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+LOGICAL, INTENT(out) :: output !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
-LOGICAL, POINTER :: data_tmp(:)
-CALL xml_extractDataAttribute_logical1D(node,attr_name,data_tmp,data_shape,ierr)
+LOGICAL, POINTER :: output_tmp(:)
+CALL xml_extractDataAttribute_logical1D(node,attr_name,output_tmp,output_shape,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_logical2')
   IF(PRESENT(iostat))iostat=ierr
-  IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
+  IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
 END IF
-data=data_tmp(1)
-DEALLOCATE(data_tmp)
+output=output_tmp(1)
+DEALLOCATE(output_tmp)
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataAttribute_logical
 !---------------------------------------------------------------------------------
 !> Free an XML document previously parsed with \ref oft_xml_load.
 !---------------------------------------------------------------------------------
-SUBROUTINE xml_extractDataAttribute_logical2D(node,attr_name,data,data_shape,iostat)
+SUBROUTINE xml_extractDataAttribute_logical2D(node,attr_name,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
-LOGICAL, POINTER, INTENT(inout) :: data(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: data_shape(2) !< Shape of the output array (nrows, ncols)
+LOGICAL, POINTER, INTENT(out) :: output(:,:) !< Output string
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)
-LOGICAL, POINTER :: data_tmp(:)
-CALL xml_extractDataAttribute_logical1D(node,attr_name,data_tmp,shape_tmp,ierr)
+LOGICAL, POINTER :: output_tmp(:)
+CALL xml_extractDataAttribute_logical1D(node,attr_name,output_tmp,shape_tmp,ierr)
 IF(ierr/=0)THEN
+  CALL xml_set_exception('Error in child of xml_extractDataAttribute_logical2D')
   IF(PRESENT(iostat))iostat=ierr
-  IF(ASSOCIATED(data_tmp))DEALLOCATE(data_tmp)
+  IF(ASSOCIATED(output_tmp))DEALLOCATE(output_tmp)
   RETURN
 END IF
-ALLOCATE(data(shape_tmp(1),shape_tmp(2)))
-data=RESHAPE(data_tmp,shape_tmp)
-DEALLOCATE(data_tmp)
-IF(PRESENT(data_shape))data_shape=shape_tmp
+ALLOCATE(output(shape_tmp(1),shape_tmp(2)))
+output=RESHAPE(output_tmp,shape_tmp)
+DEALLOCATE(output_tmp)
+IF(PRESENT(output_shape))output_shape=shape_tmp
 IF(PRESENT(iostat))iostat=0
 END SUBROUTINE xml_extractDataAttribute_logical2D
 END MODULE oft_xml
