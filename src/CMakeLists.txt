@@ -1,7 +1,7 @@
 ########################
 # Open FUSION Toolkit
 ########################
-cmake_minimum_required( VERSION 3.27 )
+cmake_minimum_required( VERSION 3.12 )
 project( OpenFUSIONToolkit LANGUAGES NONE VERSION "1.0.0" )
 set( OFT_VER_SUFFIX "-beta7" CACHE INTERNAL "Version suffix" )
 set( OFT_PYPI_VER_SUFFIX "${OFT_VER_SUFFIX}" CACHE INTERNAL "Version suffix for PYPI (needs to be pep440)" )

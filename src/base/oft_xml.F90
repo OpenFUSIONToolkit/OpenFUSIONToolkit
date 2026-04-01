@@ -17,7 +17,7 @@
 !! \ref oft_xml_parse_real and their @c _array variants) are always available.
 !!
 !! The @c _array variants accept comma-and-newline-delimited strings, reading
-!! data into a flat array.  A 2-component @p shape (nrows, ncols) is returned,
+!! data into a flat array.  A 2-component @p shape (ncols, nrows) is returned,
 !! where commas delimit columns within a row and newlines delimit rows.
 !!
 !! Typical usage (with LIBXML2):
@@ -430,10 +430,10 @@ nchars=LEN(content_in)
 content_out=content_in
 !---Remove leading and trailing whitespace
 DO i=1,nchars
-  IF((content_in(i:i)/=' ').OR.(content_in(i:i)/=NL))EXIT
+  IF((content_in(i:i)/=' ').AND.(content_in(i:i)/=NL))EXIT
 END DO
 DO j=nchars,1,-1
-  IF((content_in(j:j)/=' ').OR.(content_in(j:j)/=NL))EXIT
+  IF((content_in(j:j)/=' ').AND.(content_in(j:j)/=NL))EXIT
 END DO
 nchars=j
 content_out=content_in(i:nchars)
@@ -568,9 +568,9 @@ END SUBROUTINE tokenize_string
 SUBROUTINE parse_string_to_doubles(content,output,output_shape,ierr)
 CHARACTER(LEN=*), INTENT(inout) :: content !< Output string
 REAL(r8), POINTER, INTENT(out) :: output(:) !< Output array
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
-INTEGER(i4) :: i,j,ncols,nrows
+INTEGER(i4) :: i,j,nrows,ncols
 INTEGER(i4), ALLOCATABLE :: tokens(:,:,:)
 REAL(r8) :: val_tmp
 CHARACTER(LEN=8) :: col_char,row_char
@@ -585,12 +585,12 @@ IF(ierr/=0)THEN
   RETURN
 END IF
 
-ncols=SIZE(tokens,3)
-nrows=SIZE(tokens,2)
-IF(PRESENT(output_shape))output_shape=[nrows,ncols]
-ALLOCATE(output(nrows*ncols))
-outer_read: DO i=1,ncols
-  DO j=1,nrows
+nrows=SIZE(tokens,3)
+ncols=SIZE(tokens,2)
+IF(PRESENT(output_shape))output_shape=[ncols,nrows]
+ALLOCATE(output(ncols*nrows))
+outer_read: DO i=1,nrows
+  DO j=1,ncols
     READ(content_tmp(tokens(1,j,i):tokens(2,j,i)),*,IOSTAT=ierr,IOMSG=msg)val_tmp
     IF(ierr/=0)THEN
       WRITE(col_char,'(I8)')i
@@ -599,7 +599,7 @@ outer_read: DO i=1,ncols
       CALL xml_set_exception(msg)
       EXIT outer_read
     END IF
-    output((i-1)*nrows+j)=val_tmp
+    output((i-1)*ncols+j)=val_tmp
   END DO
 END DO outer_read
 DEALLOCATE(tokens,content_tmp)
@@ -615,9 +615,9 @@ END SUBROUTINE parse_string_to_doubles
 SUBROUTINE parse_string_to_integers(content,output,output_shape,ierr)
 CHARACTER(LEN=*), INTENT(inout) :: content !< Output string
 INTEGER(i4), POINTER, INTENT(out) :: output(:) !< Output array
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
-INTEGER(i4) :: i,j,ncols,nrows
+INTEGER(i4) :: i,j,nrows,ncols
 INTEGER(i4), ALLOCATABLE :: tokens(:,:,:)
 INTEGER(i4) :: val_tmp
 CHARACTER(LEN=8) :: col_char,row_char
@@ -632,12 +632,12 @@ IF(ierr/=0)THEN
   RETURN
 END IF
 
-ncols=SIZE(tokens,3)
-nrows=SIZE(tokens,2)
-IF(PRESENT(output_shape))output_shape=[nrows,ncols]
-ALLOCATE(output(nrows*ncols))
-outer_read: DO i=1,ncols
-  DO j=1,nrows
+nrows=SIZE(tokens,3)
+ncols=SIZE(tokens,2)
+IF(PRESENT(output_shape))output_shape=[ncols,nrows]
+ALLOCATE(output(ncols*nrows))
+outer_read: DO i=1,nrows
+  DO j=1,ncols
     READ(content_tmp(tokens(1,j,i):tokens(2,j,i)),*,IOSTAT=ierr)val_tmp
     IF(ierr/=0)THEN
       WRITE(col_char,'(I8)')i
@@ -646,7 +646,7 @@ outer_read: DO i=1,ncols
       CALL xml_set_exception(msg)
       EXIT outer_read
     END IF
-    output((i-1)*nrows+j)=val_tmp
+    output((i-1)*ncols+j)=val_tmp
   END DO
 END DO outer_read
 DEALLOCATE(tokens,content_tmp)
@@ -662,9 +662,9 @@ END SUBROUTINE parse_string_to_integers
 SUBROUTINE parse_string_to_logicals(content,output,output_shape,ierr)
 CHARACTER(LEN=*), INTENT(inout) :: content !< Output string
 LOGICAL, POINTER, INTENT(out) :: output(:) !< Output array
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), INTENT(out) :: ierr !< Error flag (0 on success)
-INTEGER(i4) :: i,j,ncols,nrows
+INTEGER(i4) :: i,j,nrows,ncols
 INTEGER(i4), ALLOCATABLE :: tokens(:,:,:)
 CHARACTER(LEN=8) :: col_char,row_char
 CHARACTER(LEN=:), ALLOCATABLE :: token_strip
@@ -678,18 +678,18 @@ IF(ierr/=0)THEN
   RETURN
 END IF
 
-ncols=SIZE(tokens,3)
-nrows=SIZE(tokens,2)
-IF(PRESENT(output_shape))output_shape=[nrows,ncols]
-ALLOCATE(output(nrows*ncols))
-outer_read: DO i=1,ncols
-  DO j=1,nrows
+nrows=SIZE(tokens,3)
+ncols=SIZE(tokens,2)
+IF(PRESENT(output_shape))output_shape=[ncols,nrows]
+ALLOCATE(output(ncols*nrows))
+outer_read: DO i=1,nrows
+  DO j=1,ncols
     token_strip=TRIM(ADJUSTL(content_tmp(tokens(1,j,i):tokens(2,j,i))))
     CALL string_to_upper(token_strip)
     IF((token_strip=='TRUE').OR.(token_strip=='.TRUE.').OR.(token_strip=='1').OR.(token_strip=='T'))THEN
-      output((i-1)*nrows+j)=.TRUE.
+      output((i-1)*ncols+j)=.TRUE.
     ELSE IF((token_strip=='FALSE').OR.(token_strip=='.FALSE.').OR.(token_strip=='0').OR.(token_strip=='F'))THEN
-      output((i-1)*nrows+j)=.FALSE.
+      output((i-1)*ncols+j)=.FALSE.
     ELSE
       WRITE(col_char,'(I8)')i
       WRITE(row_char,'(I8)')j
@@ -714,7 +714,7 @@ CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: output !< Output string
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CALL xml_get_content(node,output,ierr)
-CALL xml_set_exception('Error in child of xml_extractDataContent_string')
+IF(ierr/=0)CALL xml_set_exception('Error in child of xml_extractDataContent_string')
 IF(PRESENT(iostat))iostat=ierr
 END SUBROUTINE xml_extractDataContent_string
 !---------------------------------------------------------------------------------
@@ -723,7 +723,7 @@ END SUBROUTINE xml_extractDataContent_string
 SUBROUTINE xml_extractDataContent_double1D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 REAL(r8), POINTER, INTENT(out) :: output(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
@@ -748,7 +748,7 @@ END SUBROUTINE xml_extractDataContent_double1D
 SUBROUTINE xml_extractDataContent_double(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 REAL(r8), INTENT(out) :: output !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr
@@ -770,7 +770,7 @@ END SUBROUTINE xml_extractDataContent_double
 SUBROUTINE xml_extractDataContent_double2D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 REAL(r8), POINTER, INTENT(out) :: output(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: shape_tmp(2),ierr
@@ -794,7 +794,7 @@ END SUBROUTINE xml_extractDataContent_double2D
 SUBROUTINE xml_extractDataContent_int1D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 INTEGER(i4), POINTER, INTENT(out) :: output(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
@@ -819,7 +819,7 @@ END SUBROUTINE xml_extractDataContent_int1D
 SUBROUTINE xml_extractDataContent_int(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 INTEGER(i4), INTENT(out) :: output !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
@@ -841,7 +841,7 @@ END SUBROUTINE xml_extractDataContent_int
 SUBROUTINE xml_extractDataContent_int2D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 INTEGER(i4), POINTER, INTENT(out) :: output(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: i,j,ierr,shape_tmp(2)
@@ -865,7 +865,7 @@ END SUBROUTINE xml_extractDataContent_int2D
 SUBROUTINE xml_extractDataContent_logical1D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 LOGICAL, POINTER, INTENT(out) :: output(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
@@ -890,7 +890,7 @@ END SUBROUTINE xml_extractDataContent_logical1D
 SUBROUTINE xml_extractDataContent_logical(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 LOGICAL, INTENT(out) :: output !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
@@ -912,7 +912,7 @@ END SUBROUTINE xml_extractDataContent_logical
 SUBROUTINE xml_extractDataContent_logical2D(node,output,output_shape,iostat)
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 LOGICAL, POINTER, INTENT(out) :: output(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)
@@ -954,7 +954,7 @@ SUBROUTINE xml_extractDataAttribute_double1D(node,attr_name,output,output_shape,
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 REAL(r8), POINTER, INTENT(out) :: output(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
@@ -980,7 +980,7 @@ SUBROUTINE xml_extractDataAttribute_double(node,attr_name,output,output_shape,io
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 REAL(r8), INTENT(out) :: output !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
@@ -1003,7 +1003,7 @@ SUBROUTINE xml_extractDataAttribute_double2D(node,attr_name,output,output_shape,
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 REAL(r8), POINTER, INTENT(out) :: output(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)
@@ -1028,7 +1028,7 @@ SUBROUTINE xml_extractDataAttribute_int1D(node,attr_name,output,output_shape,ios
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 INTEGER(i4), POINTER, INTENT(out) :: output(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
@@ -1054,7 +1054,7 @@ SUBROUTINE xml_extractDataAttribute_int(node,attr_name,output,output_shape,iosta
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 INTEGER(i4), INTENT(out) :: output !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
@@ -1077,7 +1077,7 @@ SUBROUTINE xml_extractDataAttribute_int2D(node,attr_name,output,output_shape,ios
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 INTEGER(i4), POINTER, INTENT(out) :: output(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)
@@ -1102,7 +1102,7 @@ SUBROUTINE xml_extractDataAttribute_logical1D(node,attr_name,output,output_shape
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 LOGICAL, POINTER, INTENT(out) :: output(:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
@@ -1128,7 +1128,7 @@ SUBROUTINE xml_extractDataAttribute_logical(node,attr_name,output,output_shape,i
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 LOGICAL, INTENT(out) :: output !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 INTEGER(i4) :: ierr
 CHARACTER(LEN=:), ALLOCATABLE :: content
@@ -1151,7 +1151,7 @@ SUBROUTINE xml_extractDataAttribute_logical2D(node,attr_name,output,output_shape
 TYPE(xml_node), INTENT(in) :: node !< C pointer to xmlNode
 CHARACTER(LEN=*), INTENT(in) :: attr_name !< Attribute name
 LOGICAL, POINTER, INTENT(out) :: output(:,:) !< Output string
-INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (nrows, ncols)
+INTEGER(i4), OPTIONAL, INTENT(out) :: output_shape(2) !< Shape of the output array (ncols, nrows)
 INTEGER(i4), OPTIONAL, INTENT(out) :: iostat !< I/O status flag (0 on success)
 CHARACTER(LEN=:), ALLOCATABLE :: content
 INTEGER(i4) :: ierr,shape_tmp(2)

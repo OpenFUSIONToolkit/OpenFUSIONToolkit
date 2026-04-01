@@ -476,7 +476,8 @@ class(gs_eq), intent(inout) :: self !< G-S object
 logical, optional, intent(in) :: ignore_inmesh
 !---XML solver fields
 integer(i4) :: nread
-TYPE(xml_node) :: doc,group_node,coil_set,coil,tmaker_group
+TYPE(xml_node) :: group_node,coil_set,coil,tmaker_group
+TYPE(xml_doc) :: doc
 TYPE(xml_nodelist) :: coil_sets,coils
 !---
 INTEGER(i4) :: i,j,ierr,cell
@@ -491,8 +492,7 @@ WRITE(*,'(2A)')oft_indent,'Loading external coils:'
 CALL oft_increase_indent
 WRITE(*,'(3A)')oft_indent,'coil_file = ',TRIM(self%coil_file)
 CALL xml_parsefile(TRIM(self%coil_file),doc,ierr)
-! doc=>xml_parseFile(TRIM(self%coil_file),iostat=ierr)
-CALL xml_get_element(doc,"tokamaker",tmaker_group,ierr)
+tmaker_group=>doc%root
 CALL xml_get_element(tmaker_group,"coils",group_node,ierr)
 !---Count coil sets
 CALL xml_get_element(group_node,"coil_set",coil_sets,ierr)

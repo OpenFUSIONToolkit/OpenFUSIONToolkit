@@ -958,8 +958,6 @@ IF(oft_debug_print(1))THEN
   WRITE(*,*)' - Iterations:  ',self%its
   WRITE(*,*)' - Factor:      ',self%df
 END IF
-!---
-DEALLOCATE(its,df)
 DEBUG_STACK_POP
 end subroutine sjacobi_setup_xml
 !------------------------------------------------------------------------------

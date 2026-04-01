@@ -489,7 +489,6 @@ INTEGER(i4) :: nread,nnodes,ierr
 TYPE(xml_node) :: pre_node
 !---
 integer(i4) :: i,val_level
-! CHARACTER(LEN=20) :: solver_type,temp_string
 CHARACTER(LEN=:), ALLOCATABLE :: solver_type
 LOGICAL :: force_native,native_solver,petsc_solver
 DEBUG_STACK_PUSH
@@ -498,6 +497,7 @@ IF(PRESENT(level))val_level=level
 native_solver=.FALSE.
 !---
 CALL xml_read_attribute(solver_node,"type",solver_type,iostat=ierr)
+IF(ierr/=0)CALL oft_abort("Error reading solver type.","create_solver_xml",__FILE__)
 IF(oft_debug_print(2))WRITE(*,*)'Found solver: ',solver_type
 force_native=.FALSE.
 IF(xml_hasAttribute(solver_node,"native"))THEN
