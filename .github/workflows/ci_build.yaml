@@ -62,9 +62,9 @@ jobs:
             oneapi_ver: ""
           }
         - {
-            name: "macOS Sonoma GCC 13",
+            name: "macOS Sonoma GCC 14",
             os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13",
+            cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
             python: "python3.12",
             build_flags: "--build_umfpack=1 --build_superlu=1",
             mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",

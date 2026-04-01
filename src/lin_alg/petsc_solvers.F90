@@ -424,8 +424,8 @@ INTEGER(i4) :: nnodes,nread
 TYPE(xml_node) :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: read_int
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: read_real
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
+REAL(r8), POINTER, DIMENSION(:) :: read_real
 DEBUG_STACK_PUSH
 !---
 val_level=1
@@ -434,9 +434,10 @@ IF(PRESENT(level))val_level=level
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ALLOCATED(read_int))THEN
+  IF(ierr/=0)CALL oft_abort("Error reading `its` node","cg_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
-      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough its values specified","cg_setup_xml",__FILE__)
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `its` values specified","cg_setup_xml",__FILE__)
       self%its=read_int(val_level)
     ELSE
       self%its=read_int(1)
@@ -448,9 +449,10 @@ END IF
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_real,iostat=ierr)
-  IF(ALLOCATED(read_real))THEN
+  IF(ierr/=0)CALL oft_abort("Error reading `atol` node","cg_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_real))THEN
     IF(SIZE(read_real)>1)THEN
-      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough atol values specified","cg_setup_xml",__FILE__)
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `atol` values specified","cg_setup_xml",__FILE__)
       self%atol=read_real(val_level)
     ELSE
       self%atol=read_real(1)
@@ -462,9 +464,10 @@ END IF
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_real,iostat=ierr)
-  IF(ALLOCATED(read_real))THEN
+  IF(ierr/=0)CALL oft_abort("Error reading `rtol` node","cg_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_real))THEN
     IF(SIZE(read_real)>1)THEN
-      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough rtol values specified","cg_setup_xml",__FILE__)
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `rtol` values specified","cg_setup_xml",__FILE__)
       self%rtol=read_real(val_level)
     ELSE
       self%rtol=read_real(1)
@@ -601,8 +604,8 @@ INTEGER(i4) :: nnodes,nread
 TYPE(xml_node) :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: read_int
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: read_real
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
+REAL(r8), POINTER, DIMENSION(:) :: read_real
 DEBUG_STACK_PUSH
 !---
 val_level=1
@@ -611,9 +614,10 @@ IF(PRESENT(level))val_level=level
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ALLOCATED(read_int))THEN
+  IF(ierr/=0)CALL oft_abort("Error reading `its` node","gmres_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
-      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough its values specified","gmres_setup_xml",__FILE__)
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `its` values specified","gmres_setup_xml",__FILE__)
       self%its=read_int(val_level)
     ELSE
       self%its=read_int(1)
@@ -625,9 +629,10 @@ END IF
 CALL xml_get_element(solver_node,"nrits",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ALLOCATED(read_int))THEN
+  IF(ierr/=0)CALL oft_abort("Error reading `nrits` node","gmres_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
-      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough nrits values specified","gmres_setup_xml",__FILE__)
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `nrits` values specified","gmres_setup_xml",__FILE__)
       self%nrits=read_int(val_level)
     ELSE
       self%nrits=read_int(1)
@@ -639,9 +644,10 @@ END IF
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_real,iostat=ierr)
-  IF(ALLOCATED(read_real))THEN
+  IF(ierr/=0)CALL oft_abort("Error reading `atol` node","gmres_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_real))THEN
     IF(SIZE(read_real)>1)THEN
-      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough atol values specified","gmres_setup_xml",__FILE__)
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `atol` values specified","gmres_setup_xml",__FILE__)
       self%atol=read_real(val_level)
     ELSE
       self%atol=read_real(1)
@@ -653,9 +659,10 @@ END IF
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_real,iostat=ierr)
-  IF(ALLOCATED(read_real))THEN
+  IF(ierr/=0)CALL oft_abort("Error reading `rtol` node","gmres_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_real))THEN
     IF(SIZE(read_real)>1)THEN
-      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough rtol values specified","gmres_setup_xml",__FILE__)
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `rtol` values specified","gmres_setup_xml",__FILE__)
       self%rtol=read_real(val_level)
     ELSE
       self%rtol=read_real(1)
@@ -919,8 +926,8 @@ INTEGER(i4) :: nnodes,nread
 TYPE(xml_node) :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: read_int
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: read_real
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
+REAL(r8), POINTER, DIMENSION(:) :: read_real
 DEBUG_STACK_PUSH
 !---
 val_level=1
@@ -929,9 +936,10 @@ IF(PRESENT(level))val_level=level
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ALLOCATED(read_int))THEN
+  IF(ierr/=0)CALL oft_abort("Error reading `its` node","sjacobi_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
-      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough its values specified","jblock_setup_xml",__FILE__)
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `its` values specified","sjacobi_setup_xml",__FILE__)
       self%its=read_int(val_level)
     ELSE
       self%its=read_int(1)
@@ -943,9 +951,10 @@ END IF
 CALL xml_get_element(solver_node,"df",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_real,iostat=ierr)
-  IF(ALLOCATED(read_real))THEN
+  IF(ierr/=0)CALL oft_abort("Error reading `df` node","sjacobi_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_real))THEN
     IF(SIZE(read_real)>1)THEN
-      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough df values specified","jblock_setup_xml",__FILE__)
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `df` values specified","sjacobi_setup_xml",__FILE__)
       self%df=read_real(val_level)
     ELSE
       self%df=read_real(1)
@@ -1437,7 +1446,7 @@ INTEGER(i4) :: nnodes,nread
 TYPE(xml_node) :: current_node,sub_node
 !---
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: read_int
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
 DEBUG_STACK_PUSH
 !---
 val_level=1
@@ -1446,9 +1455,10 @@ IF(PRESENT(level))val_level=level
 CALL xml_get_element(solver_node,"overlap",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ALLOCATED(read_int))THEN
+  IF(ierr/=0)CALL oft_abort("Error reading `overlap` node","asprecond_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
-      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough overlap values specified","asprecond_setup_xml",__FILE__)
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `overlap` values specified","asprecond_setup_xml",__FILE__)
       self%overlap=read_int(val_level)
     ELSE
       self%overlap=read_int(1)
@@ -1460,9 +1470,10 @@ END IF
 CALL xml_get_element(solver_node,"nlocal",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ALLOCATED(read_int))THEN
+  IF(ierr/=0)CALL oft_abort("Error reading `nlocal` node","asprecond_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
-      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough local flags specified","asprecond_setup_xml",__FILE__)
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `nlocal` values specified","asprecond_setup_xml",__FILE__)
       self%n_local=read_int(val_level)
     ELSE
       self%n_local=read_int(1)

@@ -680,6 +680,7 @@ DEBUG_STACK_PUSH
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,factor_package,iostat=ierr)
+  IF(ierr/=0)CALL oft_abort("Error reading `package` node","lusolver_setup_xml",__FILE__)
   IF(ALLOCATED(factor_package))THEN
     IF(LEN(factor_package)>7)CALL oft_abort('Factorization package name too long','lusolver_setup_xml',__FILE__)
     self%package=factor_package
@@ -943,6 +944,7 @@ DEBUG_STACK_PUSH
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,factor_package,iostat=ierr)
+  IF(ierr/=0)CALL oft_abort("Error reading `package` node","ilusolver_setup_xml",__FILE__)
   IF(ALLOCATED(factor_package))THEN
     IF(LEN(factor_package)>7)CALL oft_abort('Factorization package name too long','ilusolver_setup_xml',__FILE__)
     self%package=factor_package
