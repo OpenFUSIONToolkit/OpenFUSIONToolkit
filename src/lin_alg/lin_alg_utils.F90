@@ -1212,6 +1212,8 @@ CLASS(oft_vector), POINTER, INTENT(in) :: vec !< Vector representing matrix rows
 LOGICAL, INTENT(in) :: periodic !< Apply periodic BCs?
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
+IF(vec%n<3)CALL oft_abort('Vector size must be at least 3 for tridiagonal graph', &
+  'create_tridiag_graph',__FILE__)
 !---Setup graph
 ALLOCATE(outgraph)
 IF(periodic)THEN

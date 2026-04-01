@@ -1558,7 +1558,7 @@ class(oft_vector), pointer :: tmp_vec
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(iCoil<0)THEN
-  IF(ASSOCIATED(tMaker_obj%gs%dist_coil(iCoil)%v))DEALLOCATE(tMaker_obj%gs%dist_coil(iCoil)%v)
+  IF(ASSOCIATED(tMaker_obj%gs%dist_coil(ABS(iCoil))%v))DEALLOCATE(tMaker_obj%gs%dist_coil(ABS(iCoil))%v)
   RETURN
 END IF
 IF(.NOT.ASSOCIATED(tMaker_obj%gs%dist_coil(iCoil)%v))ALLOCATE(tMaker_obj%gs%dist_coil(iCoil)%v(tMaker_obj%gs%psi%n))
@@ -1578,6 +1578,7 @@ IF(normalize)THEN
     RETURN
   END IF
   CALL tmp_vec%scale(1.d0/norm)
+  tMaker_obj%gs%dist_coil(iCoil)%v = tMaker_obj%gs%dist_coil(iCoil)%v / norm
 END IF
 
 CALL tMaker_obj%gs%zerob_bc%apply(tmp_vec)

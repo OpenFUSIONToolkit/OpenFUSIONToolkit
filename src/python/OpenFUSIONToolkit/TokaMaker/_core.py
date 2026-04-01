@@ -1169,7 +1169,7 @@ class TokaMaker():
         if coil_voltages is not None:
             volt_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_voltages,keep_virtual=True), dtype=numpy.float64)
         else:
-            volt_array = numpy.zeros((self.ncoils+1,), dtype=numpy.float64)
+            volt_array = numpy.ascontiguousarray(self.coil_dict2vec(None,keep_virtual=True), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_psi_dt(self._tMaker_ptr,psi0,curr_array,volt_array,c_double(dt),error_string)
         if error_string.value != b'':

@@ -5862,15 +5862,18 @@ DO j=1,smesh%nc
     if(curved.OR.(m==1))call smesh%jacobian(j,self%fe_rep%quad%pts(:,m),goptmp,v)
     det=v*self%fe_rep%quad%wts(m)
     pt=smesh%log2phys(j,self%fe_rep%quad%pts(:,m))
-    psi_tmp=0.d0; coil_dist=0.d0
+    psi_tmp=0.d0
     DO l=1,self%fe_rep%nce
       CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
       psi_tmp=psi_tmp+btmp(j_lag(l))*rop(l)
     END DO
     IF(ASSOCIATED(self%dist_coil(iCoil)%v))THEN
+      coil_dist=0.d0
       DO l=1,self%fe_rep%nce
         coil_dist=coil_dist+self%dist_coil(iCoil)%v(j_lag(l))*rop(l)
       END DO
+    ELSE
+      coil_dist=1.d0
     END IF
     !
     DO l=1,self%fe_rep%nce
