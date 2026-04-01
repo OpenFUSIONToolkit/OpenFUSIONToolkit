@@ -21,7 +21,7 @@ USE oft_gauss_quadrature, ONLY: set_quad_1d
 USE oft_tet_quadrature, ONLY: set_quad_2d
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell, cell_is_curved
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
-USE oft_stitching, ONLY: oft_seam, seam_list
+USE oft_stitching, ONLY: oft_seam, seam_list, destory_seam
 !---
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_matrix, oft_graph, oft_graph_ptr, oft_map, map_list
 USE oft_la_utils, ONLY: create_matrix, graph_add_dense_blocks, create_dense_graph, create_vector, &
@@ -219,7 +219,7 @@ TYPE :: gs_eq
   REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL() !< Targets for coil regularization terms
   REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL() !< Coil currents
   REAL(r8), POINTER, DIMENSION(:) :: coil_vcont => NULL() !< Virtual VSC definition as weighted sum of other coils
-  REAL(r8), POINTER, DIMENSION(:) :: Rcoils => NULL() !< Resistivity of each coil (negative for Icoils)
+  REAL(r8), POINTER, DIMENSION(:) :: Rcoils => NULL() !< Lumped resistance [Ohms] of each coil (negative for Icoils)
   REAL(r8), POINTER, DIMENSION(:) :: coils_dt => NULL() !< Coil currents at start of step for quasi-static calculations
   REAL(r8), POINTER, DIMENSION(:) :: coils_volt => NULL() !< Coil voltages for (valid for Vcoils only)
   REAL(r8), POINTER, DIMENSION(:,:) :: rlimiter_nds => NULL() !< Location of limiter nodes
@@ -233,7 +233,6 @@ TYPE :: gs_eq
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_bounds => NULL() !< Coil current bounds
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_nturns => NULL() !< Number of turns for each coil in each region
   REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils => NULL() !< Coil mutual inductance matrix
-  REAL(r8), POINTER, DIMENSION(:,:) :: dist_coil => NULL() !< Current distribution for each coil (if defined)
   LOGICAL :: free = .FALSE. !< Computing free-boundary equilibrium?
   LOGICAL :: compute_chi = .FALSE. !< Compute toroidal field potential?
   LOGICAL :: plot_step = .TRUE. !< Save solver steps for plotting
@@ -251,6 +250,7 @@ TYPE :: gs_eq
   TYPE(oft_lusolver) :: lu_solver_dt !< LHS inverse solver with time dependence
   TYPE(axi_coil_set), POINTER, DIMENSION(:) :: coils_ext => NULL() !< External coil definitions
   TYPE(coil_region), POINTER, DIMENSION(:) :: coil_regions => NULL() !< Meshed coil regions
+  TYPE(oft_1d_real), POINTER, DIMENSION(:) :: dist_coil => NULL() !< Current distribution for each coil (if defined)
   TYPE(cond_region), POINTER, DIMENSION(:) :: cond_regions => NULL() !< Meshed conducting regions
   TYPE(gs_region_info) :: region_info !< Region information for non-continuous conductors
   TYPE(oft_seam), POINTER :: coil_stitch => NULL() !< Coil vector stitching information
@@ -1225,14 +1225,14 @@ ELSE
       self%coil_nturns(self%coil_regions(i)%id,:)/self%coil_regions(i)%area ! Normalize turns by coil area
   END DO
 END IF
-ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils+1,self%ncoils+1),self%dist_coil(self%psi%n,self%ncoils))
+ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils+1,self%ncoils+1),self%dist_coil(self%ncoils))
 ALLOCATE(self%Rcoils(self%ncoils+1),self%coils_dt(self%ncoils+1),self%coils_volt(self%ncoils+1))
-self%dist_coil=1.d0
 self%Rcoils=-1.d0
 self%coils_dt=0.d0
 self%coils_volt=0.d0
 self%Lcoils=0.d0
 DO i=1,self%ncoils
+  NULLIFY(self%dist_coil(i)%v)
   CALL self%psi%new(self%psi_coil(i)%f)
   CALL gs_coil_source(self,i,tmp_vec)
   CALL self%zerob_bc%apply(tmp_vec)
@@ -1904,10 +1904,14 @@ DO j=1,self%fe_rep%mesh%nc
       IF(self%Rcoils(l)<=0.d0)CYCLE
       nturns = self%coil_nturns(self%fe_rep%mesh%reg(j),l)
       IF(ABS(nturns)>1.d-8)THEN
-        cond_norm=0.d0
-        do jc=1,lag_rep%nce ! Loop over degrees of freedom
-          cond_norm = cond_norm + self%dist_coil(j_lag(jc),l)*rop(jc)
-        end do
+        IF(ASSOCIATED(self%dist_coil(l)%v))THEN
+          cond_norm=0.d0
+          do jc=1,lag_rep%nce ! Loop over degrees of freedom
+            cond_norm = cond_norm + self%dist_coil(l)%v(j_lag(jc))*rop(jc)
+          end do
+        ELSE
+          cond_norm=1.d0
+        END IF
         rhs_loc(self%fe_rep%nce+l)=rhs_loc(self%fe_rep%nce+l)+mu0*2.d0*pi*psitmp*nturns*cond_norm*det
       END IF
     END DO
@@ -5862,8 +5866,12 @@ DO j=1,smesh%nc
     DO l=1,self%fe_rep%nce
       CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
       psi_tmp=psi_tmp+btmp(j_lag(l))*rop(l)
-      coil_dist=coil_dist+self%dist_coil(j_lag(l),iCoil)*rop(l)
     END DO
+    IF(ASSOCIATED(self%dist_coil(iCoil)%v))THEN
+      DO l=1,self%fe_rep%nce
+        coil_dist=coil_dist+self%dist_coil(iCoil)%v(j_lag(l))*rop(l)
+      END DO
+    END IF
     !
     DO l=1,self%fe_rep%nce
       col_tmp(1,l)=col_tmp(1,l)+mu0*2.d0*pi*rop(l)*nturns*coil_dist*det
@@ -5955,6 +5963,16 @@ IF(ASSOCIATED(self%coil_bounds))DEALLOCATE(self%coil_bounds)
 IF(ASSOCIATED(self%saddle_cmask))DEALLOCATE(self%saddle_cmask)
 IF(ASSOCIATED(self%saddle_pmask))DEALLOCATE(self%saddle_pmask)
 IF(ASSOCIATED(self%Lcoils))DEALLOCATE(self%Lcoils)
+!
+IF(ASSOCIATED(self%Rcoils))DEALLOCATE(self%Rcoils)
+IF(ASSOCIATED(self%coils_dt))DEALLOCATE(self%coils_dt)
+IF(ASSOCIATED(self%coils_volt))DEALLOCATE(self%coils_volt)
+IF(ASSOCIATED(self%dist_coil))THEN
+  DO i=1,self%ncoils
+    IF(ASSOCIATED(self%dist_coil(i)%v))DEALLOCATE(self%dist_coil(i)%v)
+  END DO
+  DEALLOCATE(self%dist_coil)
+END IF
 !---
 CALL self%lu_solver%delete()
 CALL self%lu_solver_dt%delete()
@@ -6020,6 +6038,19 @@ IF(ASSOCIATED(self%chi))THEN
   CALL self%chi%delete()
   DEALLOCATE(self%chi)
 END IF
+IF(ASSOCIATED(self%coil_vec))THEN
+  CALL self%coil_vec%delete()
+  DEALLOCATE(self%coil_vec)
+END IF
+IF(ASSOCIATED(self%aug_vec))THEN
+  CALL self%aug_vec%delete()
+  DEALLOCATE(self%aug_vec)
+END IF
+IF(ASSOCIATED(self%coil_stitch))THEN
+  CALL destory_seam(self%coil_stitch)
+  DEALLOCATE(self%coil_stitch)
+END IF
+IF(ASSOCIATED(self%coil_map))DEALLOCATE(self%coil_map)
 !---
 CALL self%dels%delete()
 CALL self%mrop%delete()

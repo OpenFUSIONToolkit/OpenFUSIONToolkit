@@ -1557,8 +1557,13 @@ REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 class(oft_vector), pointer :: tmp_vec
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(iCoil<0)THEN
+  IF(ASSOCIATED(tMaker_obj%gs%dist_coil(iCoil)%v))DEALLOCATE(tMaker_obj%gs%dist_coil(iCoil)%v)
+  RETURN
+END IF
+IF(.NOT.ASSOCIATED(tMaker_obj%gs%dist_coil(iCoil)%v))ALLOCATE(tMaker_obj%gs%dist_coil(iCoil)%v(tMaker_obj%gs%psi%n))
 CALL c_f_pointer(curr_dist, vals_tmp, [tMaker_obj%gs%psi%n])
-tMaker_obj%gs%dist_coil(:,iCoil) = vals_tmp
+tMaker_obj%gs%dist_coil(iCoil)%v = vals_tmp
 ! Update coil flux to overwrite old uniform distribution
 NULLIFY(tmp_vec)
 call tMaker_obj%gs%psi%new(tmp_vec)

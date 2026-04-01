@@ -561,10 +561,14 @@ do i=1,mesh%nc
             IF(self%gs_eq%Rcoils(jr)<=0.d0)CYCLE
             nturns = self%gs_eq%coil_nturns(mesh%reg(i),jr)
             IF(ABS(nturns)>1.d-8)THEN
-                cond_norm=0.d0
-                do jc=1,lag_rep%nce ! Loop over degrees of freedom
-                    cond_norm = cond_norm + self%gs_eq%dist_coil(j(jc),jr)*rop(jc)
-                end do
+                IF(ASSOCIATED(self%gs_eq%dist_coil(jr)%v))THEN
+                    cond_norm=0.d0
+                    do jc=1,lag_rep%nce ! Loop over degrees of freedom
+                        cond_norm = cond_norm + self%gs_eq%dist_coil(jr)%v(j(jc))*rop(jc)
+                    end do
+                ELSE
+                    cond_norm=1.d0
+                END IF
                 vals_loc(lag_rep%nce+jr)=vals_loc(lag_rep%nce+jr)+mu0*2.d0*pi*psi_tmp*nturns*cond_norm*det
             END IF
         END DO

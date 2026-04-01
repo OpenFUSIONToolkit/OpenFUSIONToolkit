@@ -645,17 +645,17 @@ class TokaMaker():
             raise Exception(error_string.value)
         self._virtual_coils['#VSC']['facs'] = coil_gains.copy()
     
-    def set_vcoils(self,coil_resistivities):
-        '''! Set or unset one or more coils as Vcoils
+    def set_vcoils(self,coil_resistances):
+        '''! Set or unset one or more coils as Vcoils by defining their lumped resistances
 
-        @param coil_resistivities Resistivities for Vcoils [Ohms] (dictionary of form `{coil_name: coil_res}`)
+        @param coil_resistances Lumped coil resistances for Vcoils [Ohms] (dictionary of form `{coil_name: coil_res}`)
         '''
-        res_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_resistivities,default_value=-1.0), dtype=numpy.float64)
+        res_array = numpy.ascontiguousarray(self.coil_dict2vec(coil_resistances,default_value=-1.0), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_vcoil(self._tMaker_ptr,res_array,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        self._vcoils = copy.deepcopy(coil_resistivities)
+        self._vcoils = copy.deepcopy(coil_resistances)
 
     def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0, curr_source=None):
         r'''! Initialize \f$\psi\f$ using uniform current distributions
@@ -1871,21 +1871,27 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def set_coil_current_dist(self,coil_name,curr_dist,normalize=False):
+    def set_coil_current_dist(self,coil_name,curr_dist=None,normalize=False):
         '''! Overwrite coil with non-uniform current distribution.
 
         @param coil_name Name of coil to modify
         @param curr_dist Relative current density [self.np]
         '''
-        if curr_dist.shape[0] != self.np:
-            raise IndexError('Incorrect shape of "curr_dist", should be [np]')
         if coil_name not in self.coil_sets:
             raise KeyError('Unknown coil "{0}"'.format(coil_name))
         iCoil = self.coil_sets[coil_name]['id']
-        self.dist_coils[iCoil] = curr_dist
-        curr_dist = numpy.ascontiguousarray(curr_dist, dtype=numpy.float64)
+        if curr_dist is None:
+            curr_dist = numpy.ones((self.np,), dtype=numpy.float64)
+            iCoil_c = c_int(-(iCoil+1))
+            self.dist_coils.pop(iCoil,None)
+        else:
+            if curr_dist.shape != (self.np,):
+                raise ValueError('curr_dist must be the same shape as the number of points in the mesh ({0})'.format(self.np))
+            curr_dist = numpy.ascontiguousarray(curr_dist, dtype=numpy.float64)
+            self.dist_coils[iCoil] = curr_dist
+            iCoil_c = c_int(iCoil+1)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_coil_current_dist(self._tMaker_ptr,c_int(iCoil+1),curr_dist,c_bool(normalize),error_string)
+        tokamaker_set_coil_current_dist(self._tMaker_ptr,iCoil_c,curr_dist,c_bool(normalize),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
