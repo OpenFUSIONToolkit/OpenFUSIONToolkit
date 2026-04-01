@@ -1823,7 +1823,7 @@ class LIBXML2(package):
                 '-DBUILD_STATIC_LIBS:BOOL=OFF'
             ]
         build_lines += [
-            "{CMAKE} {0} ..".format(' '.join(cmake_options)),
+            "{CMAKE} " + " ".join(cmake_options) + " ..",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
