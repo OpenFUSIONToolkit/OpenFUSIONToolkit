@@ -19,7 +19,7 @@ USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_la_base, ONLY: oft_vector
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, oft_lag_setup
 USE mhd_utils, ONLY: mu0
-USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_save_fgrid, gs_setup_walls, gs_save_prof, &
+USE oft_gs, ONLY: gs_factory, gs_save_fields, gs_save_fgrid, gs_setup_walls, gs_save_prof, &
   gs_fixed_vflux, gs_load_regions, oft_indent
 USE oft_gs_util, ONLY: gs_save, gs_load, gs_analyze, gs_save_eqdsk, &
   gs_profile_load, gs_profile_save
@@ -29,7 +29,7 @@ IMPLICIT NONE
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 LOGICAL :: file_exists
 REAL(8), ALLOCATABLE :: pts(:,:)
-TYPE(gs_eq) :: mygs
+TYPE(gs_factory) :: mygs
 CLASS(oft_vector), POINTER :: xv
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_lagrange,ML_oft_blagrange

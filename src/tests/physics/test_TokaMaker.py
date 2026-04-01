@@ -366,7 +366,8 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     if dist is not None:
         mygs.set_coil_current_dist('COIL',dist(mygs.r[:,0],mygs.r[:,1]))
     try:
-        psi0 = mygs.vac_solve()
+        vac_Eq = mygs.vac_solve()
+        psi0 = vac_Eq.get_psi(False)
     except ValueError:
         mp_q.put(None)
         return
@@ -1044,8 +1045,8 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
     eq_info['j_ind_axis'] = float(j_ind[0])
 
     # Bootstrap fraction (psi-space trapezoid estimate)
-    bs_frac = np.trapz(j_BS, psi_sample) / np.trapz(j_total, psi_sample) \
-              if np.trapz(j_total, psi_sample) != 0 else 0.0
+    bs_frac = np.trapezoid(j_BS, psi_sample) / np.trapezoid(j_total, psi_sample) \
+              if np.trapezoid(j_total, psi_sample) != 0 else 0.0
     eq_info['bs_fraction'] = float(bs_frac)
 
     mp_q.put([eq_info])

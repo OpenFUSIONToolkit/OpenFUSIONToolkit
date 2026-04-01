@@ -34,7 +34,7 @@ USE oft_lag_basis, ONLY: oft_blag_geval, oft_blag_eval, oft_blag_npos, &
   oft_scalar_bfem
 USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE axi_green, ONLY: green
-USE oft_gs, ONLY: gs_epsilon, flux_func, gs_eq, gs_update_bounds, &
+USE oft_gs, ONLY: gs_epsilon, flux_func, gs_factory, gs_equil, gs_update_bounds, &
     gs_test_bounds, gs_mat_create, compute_bcmat, set_bcmat, build_dels
 USE mhd_utils, ONLY: mu0
 IMPLICIT NONE
@@ -55,7 +55,8 @@ type, extends(oft_noop_matrix) :: oft_tmaker_td_mfop
     real(8), pointer, dimension(:) :: curr_reg => NULL() !< Coil current by region
     CLASS(flux_func), POINTER :: F => NULL() !< Flux function for \f$ F*F' \f$ term
     CLASS(flux_func), POINTER :: P => NULL() !< Flux function for \f$ P' \f$ term
-    TYPE(gs_eq), POINTER :: gs_eq => NULL() !< Equilibrium object
+    TYPE(gs_factory), POINTER :: gs_device => NULL() !< Factory/device object
+    TYPE(gs_equil), POINTER :: gs_equil => NULL() !< Equilibrium object
     CLASS(oft_matrix), POINTER :: vac_op => NULL() !< Vacuum time-advance operator
 contains
     !> Setup operator, allocating internal storage
@@ -129,7 +130,7 @@ CONTAINS
 !------------------------------------------------------------------------------
 subroutine setup_gs_td(self,eq_in,dt,lin_tol,nl_tol,pre_plasma)
 class(oft_tmaker_td), intent(inout) :: self !< NL operator object
-TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in !< Needs Docs
+TYPE(gs_equil), TARGET, INTENT(inout) :: eq_in !< Needs Docs
 REAL(8), INTENT(in) :: dt !< Needs Docs
 REAL(8), INTENT(in) :: lin_tol !< Needs Docs
 REAL(8), INTENT(in) :: nl_tol !< Needs Docs
@@ -153,17 +154,17 @@ CALL self%mfop%setup(eq_in)
 ! Create Solver fields
 !------------------------------------------------------------------------------
 NULLIFY(vals_out)
-self%psi_sol=>self%mfop%gs_eq%psi
-call eq_in%fe_rep%vec_create(self%rhs)
-call eq_in%fe_rep%vec_create(self%psi_tmp)
-call eq_in%fe_rep%vec_create(self%tmp_vec)
+self%psi_sol=>self%mfop%gs_equil%psi
+call eq_in%device%fe_rep%vec_create(self%rhs)
+call eq_in%device%fe_rep%vec_create(self%psi_tmp)
+call eq_in%device%fe_rep%vec_create(self%tmp_vec)
 !------------------------------------------------------------------------------
 ! Create extrapolation fields (Unused)
 !------------------------------------------------------------------------------
 IF(maxextrap>0)THEN
     ALLOCATE(self%extrap_fields(maxextrap),self%extrapt(maxextrap))
     DO i=1,maxextrap
-        CALL eq_in%fe_rep%vec_create(self%extrap_fields(i)%f)
+        CALL eq_in%device%fe_rep%vec_create(self%extrap_fields(i)%f)
         self%extrapt(i)=0.d0
     END DO
     self%nextrap=0
@@ -187,7 +188,7 @@ self%mf_solver%pm=oft_env%pm
 ! Setup preconditioner
 ! CALL create_diag_pre(self%mf_solver%pre)
 ! self%mf_solver%pre%A=>dels
-IF(pre_plasma.AND.(self%mfop%gs_eq%region_info%nnonaxi<=0))THEN
+IF(pre_plasma.AND.(self%mfop%gs_device%region_info%nnonaxi<=0))THEN
     ALLOCATE(self%adv_op)
     CALL build_jop(self%mfop,self%adv_op,self%psi_sol)
     ALLOCATE(self%pre_solver)
@@ -284,7 +285,7 @@ END IF
 !
 CALL self%psi_tmp%add(0.d0,1.d0,self%psi_sol)
 CALL apply_rhs(self%mfop,self%psi_sol,self%rhs)
-CALL self%mfop%gs_eq%zerob_bc%apply(self%rhs)
+CALL self%mfop%gs_device%zerob_bc%apply(self%rhs)
 ! ! Extrapolate solution (linear)
 ! DO j=maxextrap,2,-1
 !   CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
@@ -304,7 +305,7 @@ DO j=1,4
         IF(ASSOCIATED(self%adv_op))CALL build_jop(self%mfop,self%adv_op,self%psi_sol)
         CALL self%vac_pre%update(.TRUE.)
         CALL apply_rhs(self%mfop,self%psi_sol,self%rhs)
-        CALL self%mfop%gs_eq%zerob_bc%apply(self%rhs)
+        CALL self%mfop%gs_device%zerob_bc%apply(self%rhs)
         CYCLE
     ELSE
         EXIT
@@ -319,8 +320,8 @@ nretry=j-1
 IF(j>4)THEN
     nretry=-nretry
 ELSE
-    self%mfop%gs_eq%alam=self%mfop%f_scale
-    self%mfop%gs_eq%pnorm=self%mfop%p_scale
+    self%mfop%gs_equil%alam=self%mfop%f_scale
+    self%mfop%gs_equil%pnorm=self%mfop%p_scale
 END IF
 ! WRITE(*,'(4ES14.6,3I4)')time_val,self%mfop%ip,self%mfop%gs_eq%o_point(2),err_tmp, &
 ! nksolver%nlits,nksolver%lits,j
@@ -334,7 +335,7 @@ end subroutine step_gs_td
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine eig_gs_td(eq_in,neigs,eigs,eig_vecs,omega,include_bounds,eta_plasma)
-TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in
+TYPE(gs_equil), TARGET, INTENT(inout) :: eq_in
 INTEGER(4), INTENT(in) :: neigs
 REAL(r8), INTENT(out) :: eigs(:,:),eig_vecs(:,:)
 REAL(r8), INTENT(in) :: omega
@@ -358,7 +359,7 @@ CALL eig_mfop%setup(eq_in)
 NULLIFY(lhs_mat,rhs_mat)
 sigma_plasma=0.d0
 IF(eta_plasma>0.d0)sigma_plasma=1.d0/eta_plasma
-CALL build_linearized(eig_mfop,lhs_mat,rhs_mat,eig_mfop%gs_eq%psi,omega,include_bounds,sigma_plasma)
+CALL build_linearized(eig_mfop,lhs_mat,rhs_mat,eig_mfop%gs_equil%psi,omega,include_bounds,sigma_plasma)
 wrap_mat%rhs_mat=>rhs_mat
 wrap_mat%lhs_inv=>adv_pre
 adv_pre%A=>lhs_mat
@@ -369,7 +370,7 @@ arsolver%A=>wrap_mat
 arsolver%tol=1.E-8_r8
 arsolver%nev=neigs
 arsolver%which='LM'
-CALL eq_in%fe_rep%vec_create(eig_vec)
+CALL eq_in%device%fe_rep%vec_create(eig_vec)
 CALL arsolver%apply(eig_vec,lam0)
 
 IF(arsolver%info>=0)THEN
@@ -421,8 +422,8 @@ logical :: curved
 CLASS(oft_bmesh), POINTER :: mesh
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
-mesh=>self%gs_eq%mesh
-lag_rep=>self%gs_eq%fe_rep
+mesh=>self%gs_device%mesh
+lag_rep=>self%gs_device%fe_rep
 !------------------------------------------------------------------------------
 ! Get local vector values
 !------------------------------------------------------------------------------
@@ -433,10 +434,10 @@ CALL b%get_local(rhs_vals)
 !
 ALLOCATE(reg_source(mesh%nreg))
 reg_source=0.d0
-IF(ASSOCIATED(self%gs_eq%region_info%nonaxi_vals))THEN
+IF(ASSOCIATED(self%gs_device%region_info%nonaxi_vals))THEN
     DO i=1,mesh%nreg
-        IF(self%gs_eq%region_info%reg_map(i)==0)CYCLE
-        reg_source(i)=DOT_PRODUCT(pol_vals,self%gs_eq%region_info%nonaxi_vals(:,i))
+        IF(self%gs_device%region_info%reg_map(i)==0)CYCLE
+        reg_source(i)=DOT_PRODUCT(pol_vals,self%gs_device%region_info%nonaxi_vals(:,i))
     END DO
 END IF
 !------------------------------------------------------------------------------
@@ -491,31 +492,32 @@ end subroutine apply_rhs
 !------------------------------------------------------------------------------
 subroutine setup_mfop(self,eq_in)
 class(oft_tmaker_td_mfop), intent(inout) :: self !< NL operator object
-TYPE(gs_eq), TARGET, INTENT(inout) :: eq_in
+TYPE(gs_equil), TARGET, INTENT(inout) :: eq_in
 INTEGER(4) :: i,j,k
 DEBUG_STACK_PUSH
-self%gs_eq=>eq_in
-self%ip_target=self%gs_eq%Itor_target
-self%ip_ratio_target=self%gs_eq%Ip_ratio_target
-self%f_scale=self%gs_eq%alam
-self%p_scale=self%gs_eq%pnorm
+self%gs_equil=>eq_in
+self%gs_device=>eq_in%device
+self%ip_target=self%gs_equil%Itor_target
+self%ip_ratio_target=self%gs_equil%Ip_ratio_target
+self%f_scale=self%gs_equil%alam
+self%p_scale=self%gs_equil%pnorm
 !
-self%F=>self%gs_eq%I
-self%P=>self%gs_eq%P
+self%F=>self%gs_equil%I
+self%P=>self%gs_equil%P
 !
-ALLOCATE(self%eta_reg(eq_in%mesh%nreg))
+ALLOCATE(self%eta_reg(self%gs_device%mesh%nreg))
 self%eta_reg=-1.d0
-DO i=1,self%gs_eq%ncond_regs
-    j=self%gs_eq%cond_regions(i)%id
-    self%eta_reg(j)=self%gs_eq%cond_regions(i)%eta
+DO i=1,self%gs_device%ncond_regs
+    j=self%gs_device%cond_regions(i)%id
+    self%eta_reg(j)=self%gs_device%cond_regions(i)%eta
 END DO
-ALLOCATE(self%curr_reg(eq_in%mesh%nreg))
+ALLOCATE(self%curr_reg(self%gs_device%mesh%nreg))
 self%curr_reg=0.d0
-DO i=1,self%gs_eq%ncoils
-    DO k=1,self%gs_eq%ncoil_regs
-        j=self%gs_eq%coil_regions(k)%id
+DO i=1,self%gs_device%ncoils
+    DO k=1,self%gs_device%ncoil_regs
+        j=self%gs_device%coil_regions(k)%id
         self%curr_reg(j)=self%curr_reg(j) &
-          + (self%gs_eq%coil_currs(i) + self%gs_eq%vcontrol_val*self%gs_eq%coil_vcont(i))*self%gs_eq%coil_nturns(j,i)
+          + (self%gs_equil%coil_currs(i) + self%gs_equil%vcontrol_val*self%gs_device%coil_vcont(i))*self%gs_device%coil_nturns(j,i)
     END DO
 END DO
 !
@@ -531,21 +533,21 @@ INTEGER(4) :: i,j,k
 DEBUG_STACK_PUSH
 ! Update coil currents (end of time step)
 self%curr_reg=0.d0
-DO i=1,self%gs_eq%ncoils
-    DO k=1,self%gs_eq%ncoil_regs
-        j=self%gs_eq%coil_regions(k)%id
+DO i=1,self%gs_device%ncoils
+    DO k=1,self%gs_device%ncoil_regs
+        j=self%gs_device%coil_regions(k)%id
         self%curr_reg(j)=self%curr_reg(j) &
-            + (self%gs_eq%coil_currs(i) + self%gs_eq%vcontrol_val*self%gs_eq%coil_vcont(i))*self%gs_eq%coil_nturns(j,i)
+            + (self%gs_equil%coil_currs(i) + self%gs_equil%vcontrol_val*self%gs_device%coil_vcont(i))*self%gs_device%coil_nturns(j,i)
     END DO
 END DO
 ! Point to profiles in case they changed
-self%F=>self%gs_eq%I
-self%P=>self%gs_eq%P
+self%F=>self%gs_equil%I
+self%P=>self%gs_equil%P
 ! Update current target and sync scale factors
-self%ip_target=self%gs_eq%Itor_target
-self%ip_ratio_target=self%gs_eq%Ip_ratio_target
-self%f_scale=self%gs_eq%alam
-self%p_scale=self%gs_eq%pnorm
+self%ip_target=self%gs_equil%Itor_target
+self%ip_ratio_target=self%gs_equil%Ip_ratio_target
+self%f_scale=self%gs_equil%alam
+self%p_scale=self%gs_equil%pnorm
 DEBUG_STACK_POP
 end subroutine update_mfop
 !------------------------------------------------------------------------------
@@ -565,7 +567,7 @@ IF(ASSOCIATED(self%eta_reg))DEALLOCATE(self%eta_reg)
 IF(ASSOCIATED(self%curr_reg))DEALLOCATE(self%curr_reg)
 ! TODO: Deallocate in the future, need to check if same as GS_EQ
 NULLIFY(self%F,self%P)
-NULLIFY(self%gs_eq)
+NULLIFY(self%gs_device)
 !
 IF(ASSOCIATED(self%vac_op))THEN
     CALL self%vac_op%delete()
@@ -593,8 +595,8 @@ type(oft_timer) :: mytimer
 CLASS(oft_bmesh), POINTER :: mesh
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
-mesh=>self%gs_eq%mesh
-lag_rep=>self%gs_eq%fe_rep
+mesh=>self%gs_device%mesh
+lag_rep=>self%gs_device%fe_rep
 CALL mytimer%tick()
 !------------------------------------------------------------------------------
 ! Get local vector values
@@ -602,11 +604,11 @@ CALL mytimer%tick()
 NULLIFY(pol_vals,rhs_vals,ptmp,pvals)
 CALL a%get_local(pol_vals)
 !---
-self%gs_eq%psi=>a ! HERE
-CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
+self%gs_equil%psi=>a ! HERE
+CALL gs_update_bounds(self%gs_equil,track_opoint=.TRUE.)
 !
-self%F%plasma_bounds=self%gs_eq%plasma_bounds
-self%P%plasma_bounds=self%gs_eq%plasma_bounds
+self%F%plasma_bounds=self%gs_equil%plasma_bounds
+self%P%plasma_bounds=self%gs_equil%plasma_bounds
 CALL b%set(0.d0)
 CALL b%get_local(rhs_vals)
 CALL b%new(ptmp)
@@ -633,13 +635,13 @@ do i=1,mesh%nc
         call mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
         det=vol*lag_rep%quad%wts(m)
         pt=mesh%log2phys(i,lag_rep%quad%pts(:,m))
-        IF(.NOT.gs_test_bounds(self%gs_eq,pt))CYCLE
+        IF(.NOT.gs_test_bounds(self%gs_equil,pt))CYCLE
         psi_tmp=0.d0!; dpsi_tmp=0.d0
         do jr=1,lag_rep%nce ! Loop over degrees of freedom
             call oft_blag_eval(lag_rep,i,jr,lag_rep%quad%pts(:,m),rop(jr))
             psi_tmp = psi_tmp + pol_vals(j(jr))*rop(jr)
         end do
-        IF(psi_tmp<self%gs_eq%plasma_bounds(1))CYCLE
+        IF(psi_tmp<self%gs_equil%plasma_bounds(1))CYCLE
         !---Compute local matrix contributions
         p_source=self%p_scale*pt(1)*self%P%Fp(psi_tmp)
         f_source=self%f_scale*0.5d0*self%F%fp(psi_tmp)/(pt(1)+gs_epsilon)
@@ -868,8 +870,8 @@ CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 !CALL build_vac_op(mat)
 !RETURN
-mesh=>self%gs_eq%mesh
-lag_rep=>self%gs_eq%fe_rep
+mesh=>self%gs_device%mesh
+lag_rep=>self%gs_device%fe_rep
 IF(oft_debug_print(1))THEN
     WRITE(*,'(2X,A)')'Constructing Toroidal flux time-advance operator'
     CALL mytimer%tick()
@@ -878,7 +880,7 @@ END IF
 ! Allocate matrix
 !------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat%mat))THEN
-    CALL gs_mat_create(self%gs_eq%fe_rep,mat%mat)
+    CALL gs_mat_create(self%gs_device%fe_rep,mat%mat)
     ALLOCATE(mat%lim_nodes(lag_rep%nce),mat%lim_vals(a%n,lag_rep%nce))
     ALLOCATE(mat%ax_nodes(lag_rep%nce),mat%ax_vals(a%n,lag_rep%nce))
 ELSE
@@ -889,18 +891,18 @@ END IF
 NULLIFY(pol_vals)
 CALL a%get_local(pol_vals)
 !---Update plasma boundary
-self%gs_eq%psi=>a
-CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
+self%gs_equil%psi=>a
+CALL gs_update_bounds(self%gs_equil,track_opoint=.TRUE.)
 allocate(lim_weights(lag_rep%nce))
 cell=0
-CALL bmesh_findcell(mesh,cell,self%gs_eq%lim_point,ftmp)
+CALL bmesh_findcell(mesh,cell,self%gs_equil%lim_point,ftmp)
 call lag_rep%ncdofs(cell,mat%lim_nodes)
 do jc=1,lag_rep%nce ! Loop over degrees of freedom
   call oft_blag_eval(lag_rep,cell,jc,ftmp,lim_weights(jc))
 end do
 allocate(ax_weights(lag_rep%nce))
 cell=0
-CALL bmesh_findcell(mesh,cell,self%gs_eq%o_point,ftmp)
+CALL bmesh_findcell(mesh,cell,self%gs_equil%o_point,ftmp)
 call lag_rep%ncdofs(cell,mat%ax_nodes)
 do jc=1,lag_rep%nce ! Loop over degrees of freedom
   call oft_blag_eval(lag_rep,cell,jc,ftmp,ax_weights(jc))
@@ -916,9 +918,9 @@ end do
 !     END IF
 ! END DO
 ! WRITE(*,*)mat%lim_node
-self%F%plasma_bounds=self%gs_eq%plasma_bounds
-self%P%plasma_bounds=self%gs_eq%plasma_bounds
-psi_norm=self%gs_eq%plasma_bounds(2)-self%gs_eq%plasma_bounds(1)
+self%F%plasma_bounds=self%gs_equil%plasma_bounds
+self%P%plasma_bounds=self%gs_equil%plasma_bounds
+psi_norm=self%gs_equil%plasma_bounds(2)-self%gs_equil%plasma_bounds(1)
 !------------------------------------------------------------------------------
 ! Operator integration
 !------------------------------------------------------------------------------
@@ -947,7 +949,7 @@ do i=1,mesh%nc
         end do
         eta_source=0.d0; gs_source=0.d0
         IF(mesh%reg(i)==1)THEN
-            in_bounds=gs_test_bounds(self%gs_eq,pt).AND.(psi_tmp>self%gs_eq%plasma_bounds(1))
+            in_bounds=gs_test_bounds(self%gs_equil,pt).AND.(psi_tmp>self%gs_equil%plasma_bounds(1))
             IF(in_bounds)THEN
                 gs_source=self%dt*(self%p_scale*pt(1)*pt(1)*self%P%Fpp(psi_tmp) &
                 + self%f_scale*0.5d0*self%F%fpp(psi_tmp))
@@ -958,9 +960,9 @@ do i=1,mesh%nc
         !---Compute local matrix contributions
         do jr=1,lag_rep%nce
             ax_loc(jr) = ax_loc(jr) + &
-              rop(jr)*gs_source*(psi_tmp-self%gs_eq%plasma_bounds(1))/psi_norm*det/(pt(1)+gs_epsilon)
+              rop(jr)*gs_source*(psi_tmp-self%gs_equil%plasma_bounds(1))/psi_norm*det/(pt(1)+gs_epsilon)
             lim_loc(jr) = lim_loc(jr) + &
-              rop(jr)*gs_source*(1.d0-(psi_tmp-self%gs_eq%plasma_bounds(1))/psi_norm)*det/(pt(1)+gs_epsilon)
+              rop(jr)*gs_source*(1.d0-(psi_tmp-self%gs_equil%plasma_bounds(1))/psi_norm)*det/(pt(1)+gs_epsilon)
             do jc=1,lag_rep%nce
             lop(jr,jc) = lop(jr,jc) + (self%dt*DOT_PRODUCT(gop(1:2,jr),gop(1:2,jc)) &
                 + rop(jr)*rop(jc)*(eta_source-gs_source))*det/(pt(1)+gs_epsilon)
@@ -991,7 +993,7 @@ end do
 deallocate(j,rop,gop,lop,lim_loc,ax_loc)
 !$omp end parallel
 DEALLOCATE(pol_vals,lim_weights,ax_weights)
-CALL set_bcmat(self%gs_eq,mat%mat)
+CALL set_bcmat(self%gs_device,mat%mat)
 ! !---Set diagonal entries for dirichlet rows
 ! ALLOCATE(lop(1,1),j(1))
 ! lop(1,1)=1.d0
@@ -1019,7 +1021,7 @@ end subroutine build_jop
 subroutine build_vac_op(self,mat)
 class(oft_tmaker_td_mfop), intent(inout) :: self
 class(oft_matrix), pointer, intent(inout) :: mat
-CALL build_dels(mat,self%gs_eq,'free',self%dt,self%dt)
+CALL build_dels(mat,self%gs_device,'free',self%dt,self%dt)
 end subroutine build_vac_op
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -1049,32 +1051,32 @@ type(oft_timer) :: mytimer
 CLASS(oft_bmesh), POINTER :: smesh
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
-smesh=>self%gs_eq%mesh
-lag_rep=>self%gs_eq%fe_rep
+smesh=>self%gs_device%mesh
+lag_rep=>self%gs_device%fe_rep
 IF(oft_debug_print(1))THEN
     WRITE(*,'(2X,A)')'Constructing Toroidal flux time-advance operator'
     CALL mytimer%tick()
 END IF
 !---Update plasma boundary
-self%gs_eq%psi=>a
-CALL gs_update_bounds(self%gs_eq,track_opoint=.TRUE.)
+self%gs_equil%psi=>a
+CALL gs_update_bounds(self%gs_equil,track_opoint=.TRUE.)
 allocate(bnd_nodes(2*lag_rep%nce),lim_weights(lag_rep%nce),ax_weights(lag_rep%nce))
 IF(include_bounds)THEN
     cell=0
-    CALL bmesh_findcell(smesh,cell,self%gs_eq%lim_point,ftmp)
+    CALL bmesh_findcell(smesh,cell,self%gs_equil%lim_point,ftmp)
     call lag_rep%ncdofs(cell,bnd_nodes(1:lag_rep%nce))
     do jc=1,lag_rep%nce ! Loop over degrees of freedom
     call oft_blag_eval(lag_rep,cell,jc,ftmp,lim_weights(jc))
     end do
     cell=0
-    CALL bmesh_findcell(smesh,cell,self%gs_eq%o_point,ftmp)
+    CALL bmesh_findcell(smesh,cell,self%gs_equil%o_point,ftmp)
     call lag_rep%ncdofs(cell,bnd_nodes(lag_rep%nce+1:2*lag_rep%nce))
     do jc=1,lag_rep%nce ! Loop over degrees of freedom
     call oft_blag_eval(lag_rep,cell,jc,ftmp,ax_weights(jc))
     end do
 END IF
 !---
-nnonaxi=self%gs_eq%region_info%nnonaxi
+nnonaxi=self%gs_device%region_info%nnonaxi
 !------------------------------------------------------------------------------
 ! Allocate matrix
 !------------------------------------------------------------------------------
@@ -1093,10 +1095,10 @@ IF(.NOT.ASSOCIATED(lhs_mat))THEN
         !---Add dense blocks
         ALLOCATE(dense_flag(lag_rep%ne))
         dense_flag=0
-        DO m=1,self%gs_eq%region_info%nnonaxi
-            dense_flag(self%gs_eq%region_info%noaxi_nodes(m)%v)=m
+        DO m=1,self%gs_device%region_info%nnonaxi
+            dense_flag(self%gs_device%region_info%noaxi_nodes(m)%v)=m
         END DO
-        CALL graph_add_dense_blocks(graph1,graph2,dense_flag,self%gs_eq%region_info%noaxi_nodes)
+        CALL graph_add_dense_blocks(graph1,graph2,dense_flag,self%gs_device%region_info%noaxi_nodes)
         NULLIFY(graph1%kr,graph1%lc)
         graph1%nnz=graph2%nnz
         graph1%kr=>graph2%kr
@@ -1108,7 +1110,7 @@ IF(.NOT.ASSOCIATED(lhs_mat))THEN
     CALL create_matrix(rhs_mat,graphs,oft_lag_vec,oft_lag_vec)
     NULLIFY(graphs(1,1)%g)
     !---Add dense block for boundary
-    IF(self%gs_eq%free)THEN
+    IF(self%gs_device%free)THEN
         ALLOCATE(bc_nodes(1))
         bc_nodes(1)%n=lag_rep%nbe
         bc_nodes(1)%v=>lag_rep%lbe
@@ -1150,14 +1152,14 @@ NULLIFY(pol_vals,eta_vals)
 ! CALL eta_vec%get_local(eta_vals)
 CALL a%get_local(pol_vals)
 ! WRITE(*,*)mat%lim_node
-self%F%plasma_bounds=self%gs_eq%plasma_bounds
-self%P%plasma_bounds=self%gs_eq%plasma_bounds
-psi_norm=self%gs_eq%plasma_bounds(2)-self%gs_eq%plasma_bounds(1)
+self%F%plasma_bounds=self%gs_equil%plasma_bounds
+self%P%plasma_bounds=self%gs_equil%plasma_bounds
+psi_norm=self%gs_equil%plasma_bounds(2)-self%gs_equil%plasma_bounds(1)
 !------------------------------------------------------------------------------
 ! Operator integration
 !------------------------------------------------------------------------------
 IF(nnonaxi>0)THEN
-    ALLOCATE(nonaxi_vals(self%gs_eq%region_info%block_max+1,nnonaxi))
+    ALLOCATE(nonaxi_vals(self%gs_device%region_info%block_max+1,nnonaxi))
     nonaxi_vals=0.d0
 END IF
 !$omp parallel private(j,rop,gop,det,lhs_vals,rhs_vals,curved,goptmp,m,vol,jc,jr,pt,psi_tmp, &
@@ -1188,12 +1190,12 @@ do i=1,lag_rep%mesh%nc
         end do
         eta_source=0.d0; gs_source=0.d0; lim_source=0.d0; ax_source=0.d0
         IF(smesh%reg(i)==1)THEN
-            in_bounds=gs_test_bounds(self%gs_eq,pt).AND.(psi_tmp>self%gs_eq%plasma_bounds(1))
+            in_bounds=gs_test_bounds(self%gs_equil,pt).AND.(psi_tmp>self%gs_equil%plasma_bounds(1))
             IF(in_bounds)THEN
                 gs_source=(self%p_scale*pt(1)*pt(1)*self%P%Fpp(psi_tmp) &
                     + self%f_scale*0.5d0*self%F%fpp(psi_tmp))
-                lim_source=gs_source*(1.d0-(psi_tmp-self%gs_eq%plasma_bounds(1))/psi_norm)
-                ax_source=gs_source*(psi_tmp-self%gs_eq%plasma_bounds(1))/psi_norm
+                lim_source=gs_source*(1.d0-(psi_tmp-self%gs_equil%plasma_bounds(1))/psi_norm)
+                ax_source=gs_source*(psi_tmp-self%gs_equil%plasma_bounds(1))/psi_norm
             END IF
             eta_source=sigma_plasma
         ELSE IF(smesh%reg(i)>1.AND.(self%eta_reg(smesh%reg(i))>0.d0))THEN
@@ -1208,14 +1210,14 @@ do i=1,lag_rep%mesh%nc
                     - rop(jr)*rop(jc)*gs_source)*det/(pt(1)+gs_epsilon)
                 rhs_vals(jr,jc) = rhs_vals(jr,jc) + rop(jr)*rop(jc)*eta_source*det/(pt(1)+gs_epsilon)
             end do
-            IF(nnonaxi>0.AND.self%gs_eq%region_info%reg_map(smesh%reg(i))>0)THEN
+            IF(nnonaxi>0.AND.self%gs_device%region_info%reg_map(smesh%reg(i))>0)THEN
                 nonaxi_tmp(jr)=nonaxi_tmp(jr) + rop(jr)*eta_source*det/(pt(1)+gs_epsilon)
             END IF
         end do
-        IF(nnonaxi>0.AND.self%gs_eq%region_info%reg_map(smesh%reg(i))>0)THEN
+        IF(nnonaxi>0.AND.self%gs_device%region_info%reg_map(smesh%reg(i))>0)THEN
             !$omp atomic
-            nonaxi_vals(self%gs_eq%region_info%block_max+1,self%gs_eq%region_info%reg_map(smesh%reg(i))) = &
-              nonaxi_vals(self%gs_eq%region_info%block_max+1,self%gs_eq%region_info%reg_map(smesh%reg(i))) + det
+            nonaxi_vals(self%gs_device%region_info%block_max+1,self%gs_device%region_info%reg_map(smesh%reg(i))) = &
+              nonaxi_vals(self%gs_device%region_info%block_max+1,self%gs_device%region_info%reg_map(smesh%reg(i))) + det
         END IF
     end do
     !---Apply bc to local matrix
@@ -1240,11 +1242,11 @@ do i=1,lag_rep%mesh%nc
         !$omp atomic
         ax_vals(j(jr))=ax_vals(j(jr))+ax_loc(jr)
     END DO
-    IF(nnonaxi>0.AND.self%gs_eq%region_info%reg_map(smesh%reg(i))>0)THEN
+    IF(nnonaxi>0.AND.self%gs_device%region_info%reg_map(smesh%reg(i))>0)THEN
         DO jr=1,lag_rep%nce
           !$omp atomic
-          nonaxi_vals(self%gs_eq%region_info%node_mark(smesh%reg(i),j(jr)),self%gs_eq%region_info%reg_map(smesh%reg(i))) = &
-            nonaxi_vals(self%gs_eq%region_info%node_mark(smesh%reg(i),j(jr)),self%gs_eq%region_info%reg_map(smesh%reg(i))) &
+          nonaxi_vals(self%gs_device%region_info%node_mark(smesh%reg(i),j(jr)),self%gs_device%region_info%reg_map(smesh%reg(i))) = &
+            nonaxi_vals(self%gs_device%region_info%node_mark(smesh%reg(i),j(jr)),self%gs_device%region_info%reg_map(smesh%reg(i))) &
             + nonaxi_tmp(jr)
         END DO
     END IF
@@ -1254,7 +1256,7 @@ IF(nnonaxi>0)THEN
     !$omp do schedule(dynamic,1)
     !ordered
     do i=1,lag_rep%mesh%nc
-        IF(self%gs_eq%region_info%reg_map(smesh%reg(i))==0)CYCLE
+        IF(self%gs_device%region_info%reg_map(smesh%reg(i))==0)CYCLE
         !---Get local to global DOF mapping
         call lag_rep%ncdofs(i,j)
         !---Get local reconstructed operators
@@ -1267,15 +1269,15 @@ IF(nnonaxi>0)THEN
                 lim_loc(jc) = lim_loc(jc) + rop(jc)*det
             end do
         end do
-        lim_loc=-lim_loc/nonaxi_vals(self%gs_eq%region_info%block_max+1,self%gs_eq%region_info%reg_map(smesh%reg(i)))
+        lim_loc=-lim_loc/nonaxi_vals(self%gs_device%region_info%block_max+1,self%gs_device%region_info%reg_map(smesh%reg(i)))
         !---Add local values to global matrix
-        m=self%gs_eq%region_info%reg_map(smesh%reg(i))
+        m=self%gs_device%region_info%reg_map(smesh%reg(i))
         !!$omp ordered
         do jc=1,lag_rep%nce
-            call rhs_mat%atomic_add_values(j(jc:jc),self%gs_eq%region_info%noaxi_nodes(m)%v, &
-              lim_loc(jc)*nonaxi_vals(:,m),1,self%gs_eq%region_info%noaxi_nodes(m)%n)
-            call lhs_mat%atomic_add_values(j(jc:jc),self%gs_eq%region_info%noaxi_nodes(m)%v, &
-              -sigma*lim_loc(jc)*nonaxi_vals(:,m),1,self%gs_eq%region_info%noaxi_nodes(m)%n)
+            call rhs_mat%atomic_add_values(j(jc:jc),self%gs_device%region_info%noaxi_nodes(m)%v, &
+              lim_loc(jc)*nonaxi_vals(:,m),1,self%gs_device%region_info%noaxi_nodes(m)%n)
+            call lhs_mat%atomic_add_values(j(jc:jc),self%gs_device%region_info%noaxi_nodes(m)%v, &
+              -sigma*lim_loc(jc)*nonaxi_vals(:,m),1,self%gs_device%region_info%noaxi_nodes(m)%n)
         end do
         !!$omp end ordered
     end do
@@ -1305,7 +1307,7 @@ IF(include_bounds)THEN
 END IF
 DEALLOCATE(bnd_nodes,lim_weights,ax_weights)
 DEALLOCATE(lim_vals,ax_vals)
-CALL set_bcmat(self%gs_eq,lhs_mat)
+CALL set_bcmat(self%gs_device,lhs_mat)
 !---Assemble matrix
 CALL lag_rep%vec_create(oft_lag_vec)
 CALL rhs_mat%assemble(oft_lag_vec)

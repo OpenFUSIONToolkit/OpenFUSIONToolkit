@@ -24,7 +24,7 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
   oft_blag_vproject
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
-USE oft_gs, ONLY: gs_eq, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
+USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon
 #ifdef OFT_TOKAMAKER_LEGACY
 use oft_gs, only: gs_get_cond_source, gs_get_cond_weights, gs_set_cond_weights
@@ -46,7 +46,7 @@ contains
   procedure :: interp => sauter_apply
 end type sauter_interp
 !
-CLASS(gs_eq), POINTER :: gs_fit => NULL()
+CLASS(gs_factory), POINTER :: gs_fit => NULL()
 CLASS(flux_func), POINTER :: ff_fit => NULL()
 REAL(8), POINTER, DIMENSION(:,:) :: tmpprof => NULL()
 CONTAINS
@@ -74,11 +74,11 @@ SELECT CASE(TRIM(profType))
     ALLOCATE(zero_flux_func::F)
   CASE("flat")
     CALL create_flat_f(F)
-  CASE("linear")
-    READ(io_unit,*)ncofs
-    READ(io_unit,*)alpha
-    CALL create_linear_ff(F,alpha)
-    F%ncofs=ncofs
+  ! CASE("linear")
+  !   READ(io_unit,*)ncofs
+  !   READ(io_unit,*)alpha
+  !   CALL create_linear_ff(F,alpha)
+  !   F%ncofs=ncofs
   CASE("poly")
     READ(io_unit,*)ncofs,zero_grad
     ALLOCATE(cofs(ncofs))
@@ -99,16 +99,16 @@ SELECT CASE(TRIM(profType))
     READ(io_unit,*)yvals
     CALL create_jphi_ff(F,ncofs,cofs,yvals,alpha)
     DEALLOCATE(cofs,yvals)
-  CASE("idcd")
-    READ(io_unit,*)ncofs
-    READ(io_unit,*)sep,alpha
-    CALL create_twolam_ff(F,sep,alpha)
-    F%ncofs=ncofs
-  CASE("step-slant")
-    READ(io_unit,*)ncofs
-    READ(io_unit,*)sep,alpha,beta
-    CALL create_stepslant_ff(F,sep,alpha,beta)
-    F%ncofs=ncofs
+  ! CASE("idcd")
+  !   READ(io_unit,*)ncofs
+  !   READ(io_unit,*)sep,alpha
+  !   CALL create_twolam_ff(F,sep,alpha)
+  !   F%ncofs=ncofs
+  ! CASE("step-slant")
+  !   READ(io_unit,*)ncofs
+  !   READ(io_unit,*)sep,alpha,beta
+  !   CALL create_stepslant_ff(F,sep,alpha,beta)
+  !   F%ncofs=ncofs
   ! CASE("mercier")
   !   READ(io_unit,*)npsi
   !   CALL create_mercier_ff(F,npsi)
@@ -141,10 +141,10 @@ SELECT TYPE(this=>F)
     WRITE(io_unit,*)"zero"
   TYPE IS(flat_flux_func)
     WRITE(io_unit,*)"flat"
-  TYPE IS(linear_flux_func)
-    WRITE(io_unit,*)"linear"
-    WRITE(io_unit,*)this%ncofs
-    WRITE(io_unit,*)this%alpha
+  ! TYPE IS(linear_flux_func)
+  !   WRITE(io_unit,*)"linear"
+  !   WRITE(io_unit,*)this%ncofs
+  !   WRITE(io_unit,*)this%alpha
   TYPE IS(poly_flux_func)
     WRITE(io_unit,*)"poly"
     IF(this%zero_grad)THEN
@@ -164,14 +164,14 @@ SELECT TYPE(this=>F)
     WRITE(io_unit,*)this%npsi,this%y0
     WRITE(io_unit,*)this%x
     WRITE(io_unit,*)this%jphi
-  TYPE IS(twolam_flux_func)
-    WRITE(io_unit,*)"idcd"
-    WRITE(io_unit,*)this%ncofs
-    WRITE(io_unit,*)this%sep,this%alpha
-  TYPE IS(stepslant_flux_func)
-    WRITE(io_unit,*)"step-slant"
-    WRITE(io_unit,*)this%ncofs
-    WRITE(io_unit,*)this%sep,this%alpha,this%beta
+  ! TYPE IS(twolam_flux_func)
+  !   WRITE(io_unit,*)"idcd"
+  !   WRITE(io_unit,*)this%ncofs
+  !   WRITE(io_unit,*)this%sep,this%alpha
+  ! TYPE IS(stepslant_flux_func)
+  !   WRITE(io_unit,*)"step-slant"
+  !   WRITE(io_unit,*)this%ncofs
+  !   WRITE(io_unit,*)this%sep,this%alpha,this%beta
   ! TYPE IS(mercier_flux_func)
   !   WRITE(io_unit,*)"mercier"
   !   WRITE(io_unit,*)this%npsi
@@ -189,7 +189,7 @@ END SUBROUTINE gs_profile_save
 !> Save data to legacy TokaMaker G-S file
 !------------------------------------------------------------------------------
 SUBROUTINE gs_save(self,filename,mpsi_sample)
-class(gs_eq), target, intent(inout) :: self !< G-S object
+class(gs_factory), target, intent(inout) :: self !< G-S object
 character(LEN=*), intent(in) :: filename !< Filename for restart file
 INTEGER(4), OPTIONAL, intent(in) :: mpsi_sample !< Number of flux (radial) sampling points (optional)
 integer(4) :: i,j,m,np_plot
@@ -368,7 +368,7 @@ END SUBROUTINE gs_save
 !> Load data from legacy TokaMaker G-S file
 !------------------------------------------------------------------------------
 SUBROUTINE gs_load(self,filename)
-class(gs_eq), target, intent(inout) :: self !< G-S object
+class(gs_factory), target, intent(inout) :: self !< G-S object
 character(LEN=*), intent(in) :: filename !< Filename for restart file
 integer(4) :: i,m
 real(8) :: x1,x2,tmpval,tmp_version
@@ -462,7 +462,7 @@ end subroutine cond_fit_error
 !> Needs docs
 !------------------------------------------------------------------------------
 subroutine cond_fit(self,tmpin)
-class(gs_eq), target, intent(inout) :: self !< G-S object
+class(gs_factory), target, intent(inout) :: self !< G-S object
 real(8), target, intent(in) :: tmpin(:,:) !< Needs docs
 real(8), allocatable :: wttmp(:),contmp(:)
 !---MINPACK variables
@@ -578,7 +578,7 @@ end subroutine fit_ff
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE gs_analyze(self)
-class(gs_eq), intent(inout) :: self
+class(gs_factory), intent(inout) :: self
 integer(4) :: i,io_unit
 integer(4), parameter :: npsi = 50
 real(8) :: Itor,centroid(2),vol,pvol,dflux,tflux,pmax,curr,bp_vol,li
@@ -678,7 +678,7 @@ END SUBROUTINE gs_analyze
 !> Compute various global quantities for Grad-Shafranov equilibrium
 !------------------------------------------------------------------------------
 subroutine gs_comp_globals(self,itor,centroid,vol,pvol,dflux,tflux,bp_vol)
-class(gs_eq), intent(inout) :: self !< G-S object
+class(gs_equil), intent(inout) :: self !< G-S object
 real(8), intent(out) :: itor !< Toroidal current
 real(8), intent(out) :: centroid(2) !< Current centroid [2]
 real(8), intent(out) :: vol !< Plasma volume
@@ -692,10 +692,12 @@ real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
 real(8) :: pt(3),curr_cent(2),Btor,Bpol(2)
 integer(4) :: i,m
 class(oft_bmesh), pointer :: smesh
+type(gs_factory), pointer :: device
 !---
-smesh=>self%mesh
+device=>self%device
+smesh=>device%mesh
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep)
+CALL psi_eval%setup(device%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
 !---
 itor = 0.d0
@@ -710,11 +712,11 @@ bp_vol = 0.d0
 !$omp reduction(+:tflux) reduction(+:bp_vol)
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
-  do m=1,self%fe_rep%quad%np
-    call smesh%jacobian(i,self%fe_rep%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,self%fe_rep%quad%pts(:,m),goptmp,psitmp)
+  do m=1,device%fe_rep%quad%np
+    call smesh%jacobian(i,device%fe_rep%quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
     IF(psitmp(1)<self%plasma_bounds(1))CYCLE
-    pt=smesh%log2phys(i,self%fe_rep%quad%pts(:,m))
+    pt=smesh%log2phys(i,device%fe_rep%quad%pts(:,m))
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt))THEN
       IF(self%mode==0)THEN
@@ -724,21 +726,21 @@ do i=1,smesh%nc
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
         + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
       END IF
-      itor = itor + itor_loc*v*self%fe_rep%quad%wts(m)
-      centroid = centroid + itor_loc*pt(1:2)*v*self%fe_rep%quad%wts(m)
-      pvol = pvol + (self%pnorm*self%P%F(psitmp(1)))*v*self%fe_rep%quad%wts(m)*pt(1)
-      vol = vol + v*self%fe_rep%quad%wts(m)*pt(1)
+      itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
+      centroid = centroid + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
+      pvol = pvol + (self%pnorm*self%P%F(psitmp(1)))*v*device%fe_rep%quad%wts(m)*pt(1)
+      vol = vol + v*device%fe_rep%quad%wts(m)*pt(1)
       !---Compute total toroidal Field
       IF(self%mode==0)THEN
         Btor = (self%alam*(self%I%F(psitmp(1))) + self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
         Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2))/(pt(1)+gs_epsilon)
       END IF
-      tflux = tflux + Btor*v*self%fe_rep%quad%wts(m)
+      tflux = tflux + Btor*v*device%fe_rep%quad%wts(m)
       !---Compute internal inductance
-      call psi_geval%interp(i,self%fe_rep%quad%pts(:,m),goptmp,gpsitmp)
+      call psi_geval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,gpsitmp)
       Bpol = [gpsitmp(1),gpsitmp(2)]/(pt(1)+gs_epsilon)
-      bp_vol = bp_vol + SUM(Bpol**2)*v*self%fe_rep%quad%wts(m)*pt(1)
+      bp_vol = bp_vol + SUM(Bpol**2)*v*device%fe_rep%quad%wts(m)*pt(1)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
         Btor = self%alam*(self%I%F(psitmp(1)))/pt(1)
@@ -746,7 +748,7 @@ do i=1,smesh%nc
         Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2) &
         - self%I%f_offset)/pt(1)
       END IF
-      dflux = dflux + Btor*v*self%fe_rep%quad%wts(m)
+      dflux = dflux + Btor*v*device%fe_rep%quad%wts(m)
     END IF
   end do
 end do
@@ -765,7 +767,7 @@ end subroutine gs_comp_globals
 !> Compute plasma loop voltage
 !------------------------------------------------------------------------------
 subroutine gs_calc_vloop(self,vloop)
-class(gs_eq), intent(inout) :: self !< G-S object
+class(gs_equil), intent(inout) :: self !< G-S object
 real(8), intent(out) :: vloop !< loop voltage
 type(oft_lag_brinterp), target :: psi_eval
 type(oft_lag_bginterp), target :: psi_geval
@@ -779,12 +781,14 @@ real(8) :: pt(3) ! radial coordinate
 real(8) :: psitmp(1) ! magnetic flux coordinate
 integer(4) :: i,m
 class(oft_bmesh), pointer :: smesh
+type(gs_factory), pointer :: device
 !---
-smesh=>self%mesh
+device=>self%device
+smesh=>device%mesh
 CALL self%eta%update(self) ! Make sure eta is up to date with current equilibrium
 IF(ASSOCIATED(self%I_NI))CALL self%I_NI%update(self) ! Make sure I_NI is up to date with current equilibrium
 psi_eval%u=>self%psi
-CALL psi_eval%setup(self%fe_rep)
+CALL psi_eval%setup(device%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
 !---
 eta_jsq = 0.d0
@@ -795,11 +799,11 @@ vloop = 0.d0
 !!$omp reduction(+:itor) reduction(+:vol) &
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
-  do m=1,self%fe_rep%quad%np
-    call smesh%jacobian(i,self%fe_rep%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,self%fe_rep%quad%pts(:,m),goptmp,psitmp)
+  do m=1,device%fe_rep%quad%np
+    call smesh%jacobian(i,device%fe_rep%quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
     IF(psitmp(1)<self%plasma_bounds(1))CYCLE
-    pt=smesh%log2phys(i,self%fe_rep%quad%pts(:,m))
+    pt=smesh%log2phys(i,device%fe_rep%quad%pts(:,m))
     !---Compute toroidal current itor, and eta*j^2 eta_jsq (numerator of Vloop integral)
     IF(gs_test_bounds(self,pt))THEN
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
@@ -810,8 +814,8 @@ do i=1,smesh%nc
         itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
           + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+gs_epsilon))
       END IF
-      eta_jsq = eta_jsq + (itor_loc**2)*v*self%fe_rep%quad%wts(m)*pt(1)*self%eta%fp(psitmp(1))
-      itor = itor + itor_loc*v*self%fe_rep%quad%wts(m)
+      eta_jsq = eta_jsq + (itor_loc**2)*v*device%fe_rep%quad%wts(m)*pt(1)*self%eta%fp(psitmp(1))
+      itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
     END IF
   end do
 end do
@@ -827,7 +831,7 @@ end subroutine gs_calc_vloop
 !> Needs docs
 !---------------------------------------------------------------------------
 subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
-class(gs_eq), intent(inout) :: gseq !< G-S object
+class(gs_equil), intent(inout) :: gseq !< G-S object
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: npsi !< Number of points in flux coordinate
 integer(4), intent(in) :: ntheta !< Number of points in poloidal coordinate
@@ -846,6 +850,8 @@ real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell,io_unit
 LOGICAL :: do_pack,save_single
 TYPE(spline_type) :: rz
+type(gs_factory), pointer :: device
+device=>gseq%device
 !---
 IF(PRESENT(error_str))error_str=""
 WRITE(*,'(3A)')oft_indent,'Saving iFile: ',TRIM(filename)
@@ -867,20 +873,20 @@ x1 = x1 + xr*psi_pad
 xr = (x2-x1)
 !
 psi_int%u=>gseq%psi
-CALL psi_int%setup(gseq%fe_rep)
+CALL psi_int%setup(device%fe_rep)
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
 DO j=1,100
-  IF(gseq%dipole_mode.OR.gseq%mirror_mode)THEN
+  IF(device%dipole_mode.OR.device%mirror_mode)THEN
     pt=[raxis*j/REAL(100,8),0.d0,0.d0]
   ELSE
-    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+    pt=[(device%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
   END IF
-  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
+  CALL bmesh_findcell(device%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
-  IF(gseq%dipole_mode.OR.gseq%mirror_mode)THEN
+  IF(device%dipole_mode.OR.device%mirror_mode)THEN
     IF(psi_surf(1)>x1)EXIT
   ELSE
     IF(psi_surf(1)<x1)EXIT
@@ -905,7 +911,7 @@ ALLOCATE(zout(ntheta,npsi))
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
-CALL field%setup(gseq%fe_rep)
+CALL field%setup(device%fe_rep)
 active_tracer%neq=3
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -936,7 +942,7 @@ do j=2,npsi
   !$omp critical
   CALL gs_psi2r(gseq,psi_surf(1),pt,psi_int=psi_int)
   !$omp end critical
-  CALL tracinginv_fs(gseq%mesh,pt,ptout)
+  CALL tracinginv_fs(device%mesh,pt,ptout)
   pt_last=pt
   !---Exit if trace fails
   IF(active_tracer%status/=1)THEN
@@ -1061,7 +1067,7 @@ end subroutine gs_save_ifile
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
 subroutine gs_save_eqdsk(gseq,filename,nr,nz,rbounds,zbounds,run_info,limiter_file,psi_pad,rcentr_in,trunc_eq,lcfs_press,cocos,error_str)
-class(gs_eq), intent(inout) :: gseq !< Equilibrium to save
+class(gs_equil), intent(inout) :: gseq !< Equilibrium to save
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: nr !< Number of radial points for flux/psi grid
 integer(4), intent(in) :: nz !< Number of vertical points for flux grid
@@ -1084,6 +1090,7 @@ real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,k,cell,io_unit,lim_max
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: rz
+type(gs_factory), pointer :: device
 !---
 INTEGER(4) :: nlim
 REAL(8), ALLOCATABLE, DIMENSION(:) :: rlim,zlim
@@ -1094,6 +1101,7 @@ REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
 LOGICAL :: do_truncate
 !---
+device=>gseq%device
 IF(PRESENT(error_str))error_str=""
 WRITE(*,'(3A)')oft_indent,'Saving gEQDSK: ',TRIM(filename)
 CALL oft_increase_indent
@@ -1115,20 +1123,20 @@ IF(do_truncate)THEN
   xr = (x2-x1)
 END IF
 psi_int%u=>gseq%psi
-CALL psi_int%setup(gseq%fe_rep)
+CALL psi_int%setup(device%fe_rep)
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
 DO j=1,100
-  IF(gseq%dipole_mode)THEN
+  IF(device%dipole_mode)THEN
     pt=[raxis*j/REAL(100,8),0.d0,0.d0]
   ELSE
-    pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+    pt=[(device%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
   END IF
-  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
+  CALL bmesh_findcell(device%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF(gseq%dipole_mode.OR.gseq%mirror_mode)THEN
+  IF(device%dipole_mode.OR.device%mirror_mode)THEN
     IF(psi_tmp(1)>x1)EXIT
   ELSE
     IF(psi_tmp(1)<x1)EXIT
@@ -1152,7 +1160,7 @@ ALLOCATE(zout(nr))
 !$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field,fptmp) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
-CALL field%setup(gseq%fe_rep)
+CALL field%setup(device%fe_rep)
 active_tracer%neq=3
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -1182,9 +1190,9 @@ do j=1,nr
     !$omp end critical
     IF(j==nr)THEN
       ALLOCATE(ptout(3,active_tracer%maxsteps+1))
-      CALL tracinginv_fs(gseq%mesh,pt(1:2),ptout)
+      CALL tracinginv_fs(device%mesh,pt(1:2),ptout)
     ELSE
-      CALL tracinginv_fs(gseq%mesh,pt(1:2))
+      CALL tracinginv_fs(device%mesh,pt(1:2))
     END IF
     pt_last=pt
     !---Exit if trace fails
@@ -1285,7 +1293,7 @@ DO i=1,nr
   pt(1) = (i-1)*rdim/REAL(nr-1,8) + rbounds(1)
   DO j=1,nz
     pt(2) = (j-1)*zdim/REAL(nz-1,8) + zbounds(1)
-    call bmesh_findcell(gseq%mesh,cell,pt,f)
+    call bmesh_findcell(device%mesh,cell,pt,f)
     call psi_int%interp(cell,f,gop,psi_tmp)
     psirz(i,j)=psi_tmp(1)
   END DO
@@ -1309,23 +1317,23 @@ idum = 0 ! dummy variable
 xdum = 0.d0 ! dummy variable
 ! Read or set limiting contour
 IF(TRIM(limiter_file)=='')THEN
-  IF(gseq%lim_nloops>1)THEN
-    IF(nlim/=gseq%nlim_con+1)CALL oft_warn("Multiply-connected plasma region detected: Using largest boundary loop as limiter")
+  IF(device%lim_nloops>1)THEN
+    IF(nlim/=device%nlim_con+1)CALL oft_warn("Multiply-connected plasma region detected: Using largest boundary loop as limiter")
     nlim=0
-    DO i=1,gseq%lim_nloops
-      IF(gseq%lim_ptr(i+1)-gseq%lim_ptr(i)>nlim)THEN
-        nlim=gseq%lim_ptr(i+1)-gseq%lim_ptr(i)
+    DO i=1,device%lim_nloops
+      IF(device%lim_ptr(i+1)-device%lim_ptr(i)>nlim)THEN
+        nlim=device%lim_ptr(i+1)-device%lim_ptr(i)
         lim_max=i
       END IF
     END DO
   ELSE
     lim_max=1
   END IF
-  nlim=gseq%lim_ptr(lim_max+1)-gseq%lim_ptr(lim_max)+1
+  nlim=device%lim_ptr(lim_max+1)-device%lim_ptr(lim_max)+1
   ALLOCATE(rlim(nlim),zlim(nlim))
-  DO i=gseq%lim_ptr(lim_max),gseq%lim_ptr(lim_max+1)-1
-    rlim(i-gseq%lim_ptr(lim_max)+1)=gseq%mesh%r(1,gseq%lim_con(i))
-    zlim(i-gseq%lim_ptr(lim_max)+1)=gseq%mesh%r(2,gseq%lim_con(i))
+  DO i=device%lim_ptr(lim_max),device%lim_ptr(lim_max+1)-1
+    rlim(i-device%lim_ptr(lim_max)+1)=device%mesh%r(1,device%lim_con(i))
+    zlim(i-device%lim_ptr(lim_max)+1)=device%mesh%r(2,device%lim_con(i))
   END DO
   rlim(nlim)=rlim(1)
   zlim(nlim)=zlim(1)
@@ -1440,7 +1448,7 @@ end subroutine sauter_apply
 !> Compute factors required for Sauter bootstrap formula
 !------------------------------------------------------------------------------
 subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs)
-class(gs_eq), intent(inout) :: gseq !< G-S object
+class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux sample points
 real(8), intent(in) :: psi_q(nr) !< Location of flux sample points
 real(8), intent(out) :: fc(nr) !< Trapped particle fraction \f$ f_c \f$
@@ -1453,7 +1461,9 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
 type(sauter_interp), target :: field
+type(gs_factory), pointer :: device
 !---
+device=>gseq%device
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
 x1=0.d0; x2=1.d0
@@ -1464,13 +1474,13 @@ IF(gseq%plasma_bounds(1)>-1.d98)THEN
 END IF
 ! IF(.NOT.gseq%free)x1 = x1 + (x2-x1)*2.d-2
 psi_int%u=>gseq%psi
-CALL psi_int%setup(gseq%fe_rep)
+CALL psi_int%setup(device%fe_rep)
 !---Find Rmax along Zaxis
 rmax=raxis
 cell=0
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
+  pt=[(device%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  CALL bmesh_findcell(device%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_tmp)
   IF( psi_tmp(1) < x1)EXIT
@@ -1491,7 +1501,7 @@ call set_tracer(1)
 ! !$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
 field%mag_axis=gseq%o_point
-CALL field%setup(gseq%fe_rep)
+CALL field%setup(device%fe_rep)
 active_tracer%neq=8
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -1523,9 +1533,9 @@ do j=1,nr
   END IF
   field%bmax=0.d0
   field%stage_1=.TRUE.
-  CALL tracinginv_fs(gseq%mesh,pt(1:2))
+  CALL tracinginv_fs(device%mesh,pt(1:2))
   field%stage_1=.FALSE.
-  CALL tracinginv_fs(gseq%mesh,pt(1:2))
+  CALL tracinginv_fs(device%mesh,pt(1:2))
   pt_last=pt
   !---Skip point if trace fails
   if(active_tracer%status/=1)THEN
