@@ -62,15 +62,6 @@ jobs:
             oneapi_ver: ""
           }
         - {
-            name: "macOS Sonoma GCC 14",
-            os: macos-14,
-            cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
-            python: "python3.12",
-            build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
-            xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
-          }
-        - {
             name: "macOS Sequoia GCC 15",
             os: macos-15,
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
@@ -87,6 +78,15 @@ jobs:
             build_flags: "--build_umfpack=1 --build_superlu=1",
             mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer"
+          }
+        - {
+            name: "macOS Tahoe GCC 15",
+            os: macos-26,
+            cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
+            python: "python3.13",
+            build_flags: "--build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
+            xcode_path: "/Applications/Xcode_26.2.0.app/Contents/Developer"
           }
         exclude:
           - parallel: mpich
