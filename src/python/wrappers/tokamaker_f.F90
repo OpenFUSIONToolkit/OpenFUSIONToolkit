@@ -27,7 +27,7 @@ USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_setup_walls, build_dels, flux_func, &
   gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
-  gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
+  gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
 #ifdef OFT_TOKAMAKER_LEGACY
 USE oft_gs, ONLY: gs_load_regions
@@ -374,16 +374,16 @@ INTEGER(i4) :: ntargets,ierr
 LOGICAL :: vac_save
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(vacuum)THEN
-  vac_save=tMaker_obj%gs%has_plasma
-  tMaker_obj%gs%has_plasma=.FALSE.
-END IF
 IF(ANY(tMaker_obj%gs%rcoils>0.d0).AND.(tMaker_obj%gs%dt>0.d0))THEN
   ntargets=tMaker_obj%gs%isoflux_ntargets+tMaker_obj%gs%flux_ntargets+tMaker_obj%gs%saddle_ntargets
   IF(ntargets>0)THEN
     CALL copy_string('Use of shape targets with time-dependence and Vcoils is not supported at this time',error_str)
     RETURN
   END IF
+END IF
+IF(vacuum)THEN
+  vac_save=tMaker_obj%gs%has_plasma
+  tMaker_obj%gs%has_plasma=.FALSE.
 END IF
 tMaker_obj%gs%timing=0.d0
 CALL tMaker_obj%gs%solve(ierr)
@@ -1555,52 +1555,65 @@ TYPE(c_ptr), VALUE, INTENT(in) :: curr_dist
 TYPE(c_ptr), INTENT(out) :: dist_pointer
 LOGICAL(c_bool), VALUE, INTENT(in) :: normalize
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-INTEGER(4) :: i
+INTEGER(4) :: i,ic
 REAL(r8) :: norm
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 class(oft_vector), pointer :: tmp_vec
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+ic = ABS(iCoil) ! Reset coil index, use allocation of dist_coil(ic) to track whether distribution is set
 IF(iCoil<0)THEN
-  IF(ASSOCIATED(tMaker_obj%gs%dist_coil(ABS(iCoil))%v))DEALLOCATE(tMaker_obj%gs%dist_coil(ABS(iCoil))%v)
-  dist_pointer=c_null_ptr
-  RETURN
+  IF(ASSOCIATED(tMaker_obj%gs%dist_coil(ic)%v))THEN
+    DEALLOCATE(tMaker_obj%gs%dist_coil(ic)%v)
+    dist_pointer=c_null_ptr
+  ELSE
+    RETURN
+  END IF
+ELSE
+  IF(.NOT.ASSOCIATED(tMaker_obj%gs%dist_coil(ic)%v))ALLOCATE(tMaker_obj%gs%dist_coil(ic)%v(tMaker_obj%gs%psi%n))
+  CALL c_f_pointer(curr_dist, vals_tmp, [tMaker_obj%gs%psi%n])
+  tMaker_obj%gs%dist_coil(ic)%v = vals_tmp
+  dist_pointer=C_LOC(tMaker_obj%gs%dist_coil(ic)%v)
 END IF
-IF(.NOT.ASSOCIATED(tMaker_obj%gs%dist_coil(iCoil)%v))ALLOCATE(tMaker_obj%gs%dist_coil(iCoil)%v(tMaker_obj%gs%psi%n))
-CALL c_f_pointer(curr_dist, vals_tmp, [tMaker_obj%gs%psi%n])
-tMaker_obj%gs%dist_coil(iCoil)%v = vals_tmp
-dist_pointer=C_LOC(tMaker_obj%gs%dist_coil(iCoil)%v)
 ! Update coil flux to overwrite old uniform distribution
 NULLIFY(tmp_vec)
 call tMaker_obj%gs%psi%new(tmp_vec)
 
-CALL gs_coil_source_distributed(tMaker_obj%gs,iCoil,tmp_vec,vals_tmp)
-IF(normalize)THEN
-  norm = tmp_vec%sum()
-  IF(ABS(norm)<1.d-12)THEN
-    CALL copy_string('Normalization value close to zero',error_str)
-    CALL tmp_vec%delete()
-    DEALLOCATE(tmp_vec,tMaker_obj%gs%dist_coil(iCoil)%v)
-    dist_pointer=c_null_ptr
-    RETURN
+IF(ASSOCIATED(tMaker_obj%gs%dist_coil(ic)%v))THEN
+  CALL gs_coil_source_distributed(tMaker_obj%gs,ic,tmp_vec,vals_tmp)
+  IF(normalize)THEN
+    norm = tmp_vec%sum()
+    IF(ABS(norm)<1.d-12)THEN
+      CALL copy_string('Normalization value close to zero',error_str)
+      CALL tmp_vec%delete()
+      DEALLOCATE(tmp_vec,tMaker_obj%gs%dist_coil(ic)%v)
+      dist_pointer=c_null_ptr
+      RETURN
+    END IF
+    CALL tmp_vec%scale(1.d0/norm)
+    tMaker_obj%gs%dist_coil(ic)%v = tMaker_obj%gs%dist_coil(ic)%v / norm
   END IF
-  CALL tmp_vec%scale(1.d0/norm)
-  tMaker_obj%gs%dist_coil(iCoil)%v = tMaker_obj%gs%dist_coil(iCoil)%v / norm
+ELSE
+  CALL gs_coil_source(tMaker_obj%gs,ic,tmp_vec)
 END IF
 
 CALL tMaker_obj%gs%zerob_bc%apply(tmp_vec)
-CALL gs_vacuum_solve(tMaker_obj%gs,tMaker_obj%gs%psi_coil(iCoil)%f,tmp_vec)
+CALL gs_vacuum_solve(tMaker_obj%gs,tMaker_obj%gs%psi_coil(ic)%f,tmp_vec)
 ! Update coil mutual inductances
 DO i=1,tMaker_obj%gs%ncoils
-  IF(i==iCoil)THEN
-    CALL gs_coil_mutual_distributed(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%dist_coil(iCoil)%v,tMaker_obj%gs%Lcoils(i,iCoil))
+  IF(ASSOCIATED(tMaker_obj%gs%dist_coil(i)%v))THEN
+    CALL gs_coil_mutual_distributed(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(ic)%f,tMaker_obj%gs%dist_coil(i)%v,tMaker_obj%gs%Lcoils(i,ic))
   ELSE
-    IF(ASSOCIATED(tMaker_obj%gs%dist_coil(i)%v))THEN
-      CALL gs_coil_mutual_distributed(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%dist_coil(i)%v,tMaker_obj%gs%Lcoils(i,iCoil))
+    CALL gs_coil_mutual(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(ic)%f,tMaker_obj%gs%Lcoils(i,ic))
+  END IF
+  IF(i/=ic)THEN ! Integral can be slightly different in each direction so compute both ways and average
+    IF(ASSOCIATED(tMaker_obj%gs%dist_coil(ic)%v))THEN
+      CALL gs_coil_mutual_distributed(tMaker_obj%gs,ic,tMaker_obj%gs%psi_coil(i)%f,tMaker_obj%gs%dist_coil(ic)%v,tMaker_obj%gs%Lcoils(ic,i))
     ELSE
-      CALL gs_coil_mutual(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%Lcoils(i,iCoil))
+      CALL gs_coil_mutual(tMaker_obj%gs,ic,tMaker_obj%gs%psi_coil(i)%f,tMaker_obj%gs%Lcoils(ic,i))
     END IF
-    tMaker_obj%gs%Lcoils(iCoil,i)=tMaker_obj%gs%Lcoils(i,iCoil)
+    tMaker_obj%gs%Lcoils(i,ic)=(tMaker_obj%gs%Lcoils(ic,i)+tMaker_obj%gs%Lcoils(i,ic))/2.d0
+    tMaker_obj%gs%Lcoils(ic,i)=tMaker_obj%gs%Lcoils(i,ic)
   END IF
 END DO
 CALL tmp_vec%delete()

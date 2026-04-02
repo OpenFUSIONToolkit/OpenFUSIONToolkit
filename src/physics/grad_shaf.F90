@@ -1245,7 +1245,7 @@ DO i=1,self%ncoils
   DO j=i,self%ncoils
     CALL gs_coil_mutual(self,i,self%psi_coil(j)%f,self%Lcoils(i,j))
     self%Lcoils(i,j)=self%Lcoils(i,j)
-    IF(j>i)THEN ! Integral can be slightly different so compute both ways and average
+    IF(j>i)THEN ! Integral can be slightly different in each direction so compute both ways and average
       CALL gs_coil_mutual(self,j,self%psi_coil(i)%f,self%Lcoils(j,i))
       self%Lcoils(j,i)=(self%Lcoils(j,i)+self%Lcoils(i,j))/2.d0
       self%Lcoils(i,j)=self%Lcoils(j,i)

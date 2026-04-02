@@ -449,7 +449,7 @@ def test_coil_h2(order,dist_coil):
 def test_coil_h3(order,dist_coil):
     if dist_coil:
         errs = np.r_[1.30686E-03, 1.00862E-05, 4.33982E-07]
-        mutual_errs = np.r_[4.30803E-04, 3.04001E-06, 1.38680E-07]
+        mutual_errs = np.r_[4.30803E-04, 3.04001E-06, 1.69941E-07]
         results = mp_run(run_coil_case,(0.1/4.0,order,coil_dist))
     else:
         errs = np.r_[9.12771E-04, 1.58232E-06, 3.04067E-07]
