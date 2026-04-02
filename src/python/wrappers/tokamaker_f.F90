@@ -396,7 +396,7 @@ END SUBROUTINE tokamaker_solve
 SUBROUTINE tokamaker_vac_solve(tMaker_ptr,psi_in,rhs_source,error_str) BIND(C,NAME="tokamaker_vac_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Input: BCs for \f$ \psi \f$, Output: solution \f$ \psi \f$
-TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
+TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term [A/m^2] (optional)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ierr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp,rhs_tmp
@@ -413,6 +413,7 @@ IF(c_associated(rhs_source))THEN
   CALL tMaker_obj%gs%psi%new(rhs_vec)
   CALL c_f_pointer(rhs_source, rhs_tmp, [tMaker_obj%gs%psi%n])
   CALL rhs_vec%restore_local(rhs_tmp)
+  CALL rhs_vec%scale(mu0)
   source_field%u=>rhs_vec
   CALL source_field%setup(tMaker_obj%gs%fe_rep)
   CALL tMaker_obj%gs%vac_solve(psi_tmp,rhs_source=source_field,ierr=ierr)
@@ -679,6 +680,7 @@ CALL tMaker_obj%gs%dels_full%apply(u,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%get_local(vals_tmp)
+vals_tmp=vals_tmp/mu0
 !
 CALL u%delete()
 CALL v%delete()
@@ -715,6 +717,7 @@ CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL c_f_pointer(jtor, vals_tmp, [tMaker_obj%gs%psi%n])
 CALL u%get_local(vals_tmp)
+vals_tmp=vals_tmp/mu0
 !
 CALL j_interp%delete()
 CALL u%delete()
@@ -1592,7 +1595,7 @@ DO i=1,tMaker_obj%gs%ncoils
   CALL gs_coil_mutual(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%Lcoils(i,iCoil))
   tMaker_obj%gs%Lcoils(iCoil,i)=tMaker_obj%gs%Lcoils(i,iCoil)
   IF(i==iCoil)THEN
-    CALL gs_coil_mutual_distributed(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,vals_tmp,tMaker_obj%gs%Lcoils(i,iCoil))
+    CALL gs_coil_mutual_distributed(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%dist_coil(iCoil)%v,tMaker_obj%gs%Lcoils(i,iCoil))
   ELSE
     CALL gs_coil_mutual(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%Lcoils(i,iCoil))
     tMaker_obj%gs%Lcoils(iCoil,i)=tMaker_obj%gs%Lcoils(i,iCoil)

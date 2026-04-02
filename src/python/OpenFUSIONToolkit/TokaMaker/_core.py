@@ -768,7 +768,7 @@ class TokaMaker():
         @note If isoflux, flux, or saddle constraints are desired use @ref solve instead.
         
         @param psi Boundary values for vacuum solve
-        @param rhs_source Current source (optional)
+        @param rhs_source Current source [A/m^2] (optional)
         '''
         if psi is None:
             psi = numpy.zeros((self.np,),dtype=numpy.float64)
@@ -1098,26 +1098,26 @@ class TokaMaker():
         r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator
  
         @param psi \f$ \psi \f$ corresponding to desired current density
-        @result \f$ J_{\phi} = \textrm{M}^{-1} \Delta^{*} \psi \f$
+        @result \f$ J_{\phi} = \textrm{M}^{-1} \Delta^{*} \psi \f$ [A/m^2]
         '''
         curr = numpy.copy(psi)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_get_dels_curr(self._tMaker_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return curr/mu0
+        return curr
     
     def get_jtor_plasma(self):
         r'''! Get plasma toroidal current density for current equilibrium
  
-        @result \f$ J_{\phi} \f$ by evalutating RHS source terms
+        @result \f$ J_{\phi} \f$ by evalutating RHS source terms [A/m^2]
         '''
         curr = numpy.zeros((self.np,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_get_jtor(self._tMaker_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return curr/mu0
+        return curr
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
