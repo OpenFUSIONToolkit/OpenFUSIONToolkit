@@ -414,10 +414,10 @@ class TokaMaker():
         ## Mesh regions [nc] 
         self.reg = numpy.ctypeslib.as_array(reg_loc,shape=(self.nc,))
 
-    ## @cond
+    # cond
     @property
     def alam(self):
-        r'''F*F' normalization value'''
+        r'''! F*F' normalization value'''
         if self._alam is not None:
             return self._alam[0]
         else:
@@ -432,7 +432,7 @@ class TokaMaker():
     
     @property
     def pnorm(self):
-        r'''Pressure normalization value'''
+        r'''! Pressure normalization value'''
         if self._pnorm is not None:
             return self._pnorm[0]
         else:
@@ -444,8 +444,8 @@ class TokaMaker():
             self._pnorm[0] = value
         else:
             raise ValueError('Class must be initialized to set "pnorm"')
-    ## @endcond
-    
+    # endcond    
+
     @property
     def diverted(self):
         r'''! Diverted flag (limited if `False`)'''
