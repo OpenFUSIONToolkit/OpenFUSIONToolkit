@@ -248,9 +248,9 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
                 line = result.split("\n")[0]
                 ver_string = line.split("version")[1]
                 ver_string = ver_string.split("-")[0]  # Needed if patch release
-                if ver_lt(ver_string,"3.12"):
+                if ver_lt(ver_string,"3.27"):
                     config_dict['CMAKE'] = None
-                    cmake_err_string = "specified CMAKE version < 3.12"
+                    cmake_err_string = "specified CMAKE version < 3.27"
                 else:
                     config_dict['CMAKE_VERSION'] = ver_string
             except:

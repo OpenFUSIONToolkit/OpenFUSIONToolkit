@@ -165,6 +165,7 @@ jobs:
         cat compiler_id.txt
 
     - name: Setup PyVista
+      if: ${{ !startsWith(matrix.config.os, 'macos') }}
       uses: pyvista/setup-headless-display-action@v3
 
     - name: Cache external libraries
