@@ -1545,10 +1545,11 @@ END SUBROUTINE tokamaker_save_mug
 !---------------------------------------------------------------------------
 !> Overwrites default coil flux contribution to non-uniform current distribution
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,normalize,error_str) BIND(C,NAME="tokamaker_set_coil_current_dist")
+SUBROUTINE tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,dist_pointer,normalize,error_str) BIND(C,NAME="tokamaker_set_coil_current_dist")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 INTEGER(c_int), VALUE, INTENT(in) :: iCoil
 TYPE(c_ptr), VALUE, INTENT(in) :: curr_dist
+TYPE(c_ptr), INTENT(out) :: dist_pointer
 LOGICAL(c_bool), VALUE, INTENT(in) :: normalize
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i
@@ -1559,11 +1560,13 @@ TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(iCoil<0)THEN
   IF(ASSOCIATED(tMaker_obj%gs%dist_coil(ABS(iCoil))%v))DEALLOCATE(tMaker_obj%gs%dist_coil(ABS(iCoil))%v)
+  dist_pointer=c_null_ptr
   RETURN
 END IF
 IF(.NOT.ASSOCIATED(tMaker_obj%gs%dist_coil(iCoil)%v))ALLOCATE(tMaker_obj%gs%dist_coil(iCoil)%v(tMaker_obj%gs%psi%n))
 CALL c_f_pointer(curr_dist, vals_tmp, [tMaker_obj%gs%psi%n])
 tMaker_obj%gs%dist_coil(iCoil)%v = vals_tmp
+dist_pointer=C_LOC(tMaker_obj%gs%dist_coil(iCoil)%v)
 ! Update coil flux to overwrite old uniform distribution
 NULLIFY(tmp_vec)
 call tMaker_obj%gs%psi%new(tmp_vec)
@@ -1574,7 +1577,8 @@ IF(normalize)THEN
   IF(ABS(norm)<1.d-12)THEN
     CALL copy_string('Normalization value close to zero',error_str)
     CALL tmp_vec%delete()
-    DEALLOCATE(tmp_vec)
+    DEALLOCATE(tmp_vec,tMaker_obj%gs%dist_coil(iCoil)%v)
+    dist_pointer=c_null_ptr
     RETURN
   END IF
   CALL tmp_vec%scale(1.d0/norm)

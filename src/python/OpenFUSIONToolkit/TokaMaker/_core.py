@@ -1875,7 +1875,8 @@ class TokaMaker():
         '''! Overwrite coil with non-uniform current distribution.
 
         @param coil_name Name of coil to modify
-        @param curr_dist Relative current density [self.np]
+        @param curr_dist Relative current density [self.np] (None to disable non-uniform distribution and return to uniform current)
+        @param normalize Normalize distribution to have unit current?
         '''
         if coil_name not in self.coil_sets:
             raise KeyError('Unknown coil "{0}"'.format(coil_name))
@@ -1883,17 +1884,21 @@ class TokaMaker():
         if curr_dist is None:
             curr_dist = numpy.ones((self.np,), dtype=numpy.float64)
             iCoil_c = c_int(-(iCoil+1))
-            self.dist_coils.pop(iCoil,None)
         else:
             if curr_dist.shape != (self.np,):
                 raise ValueError('curr_dist must be the same shape as the number of points in the mesh ({0})'.format(self.np))
             curr_dist = numpy.ascontiguousarray(curr_dist, dtype=numpy.float64)
-            self.dist_coils[iCoil] = curr_dist
             iCoil_c = c_int(iCoil+1)
+        dist_coil_ptr = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_coil_current_dist(self._tMaker_ptr,iCoil_c,curr_dist,c_bool(normalize),error_string)
+        tokamaker_set_coil_current_dist(self._tMaker_ptr,iCoil_c,curr_dist,ctypes.byref(dist_coil_ptr),c_bool(normalize),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        # Update python side coil distribution if successful
+        if iCoil_c.value > 0:
+            self.dist_coils[iCoil] = numpy.ctypeslib.as_array(dist_coil_ptr,shape=(self.np,))
+        else:
+            self.dist_coils.pop(iCoil,None)
 
     def eig_wall(self,neigs=4,pm=False):
         r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures
