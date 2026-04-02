@@ -1592,12 +1592,14 @@ CALL tMaker_obj%gs%zerob_bc%apply(tmp_vec)
 CALL gs_vacuum_solve(tMaker_obj%gs,tMaker_obj%gs%psi_coil(iCoil)%f,tmp_vec)
 ! Update coil mutual inductances
 DO i=1,tMaker_obj%gs%ncoils
-  CALL gs_coil_mutual(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%Lcoils(i,iCoil))
-  tMaker_obj%gs%Lcoils(iCoil,i)=tMaker_obj%gs%Lcoils(i,iCoil)
   IF(i==iCoil)THEN
     CALL gs_coil_mutual_distributed(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%dist_coil(iCoil)%v,tMaker_obj%gs%Lcoils(i,iCoil))
   ELSE
-    CALL gs_coil_mutual(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%Lcoils(i,iCoil))
+    IF(ASSOCIATED(tMaker_obj%gs%dist_coil(i)%v))THEN
+      CALL gs_coil_mutual_distributed(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%dist_coil(i)%v,tMaker_obj%gs%Lcoils(i,iCoil))
+    ELSE
+      CALL gs_coil_mutual(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%Lcoils(i,iCoil))
+    END IF
     tMaker_obj%gs%Lcoils(iCoil,i)=tMaker_obj%gs%Lcoils(i,iCoil)
   END IF
 END DO
