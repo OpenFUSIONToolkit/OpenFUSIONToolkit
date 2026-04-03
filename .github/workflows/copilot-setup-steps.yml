@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/copilot-setup-steps.yml
+      - src/utilities/build_libs.py
 
 jobs:
   copilot-setup-steps:

@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - cd_debug
+  pull_request:
+    paths:
+      - .github/workflows/pypi_build_linux.yml
+      - src/utilities/build_libs.py
   workflow_dispatch:
     inputs:
       release:
