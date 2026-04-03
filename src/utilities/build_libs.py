@@ -2166,9 +2166,9 @@ if options.macos_sdk_path is not None:
     if not os.path.isdir(options.macos_sdk_path):
         parser.exit(-1, 'Specified "--macos_sdk_path={0}" directory does not exist\n'.format(options.macos_sdk_path))
     config_dict['MACOS_SDK_PATH'] = options.macos_sdk_path
-if (options.oft_package is not None) and (options.macos_deployment_target is not None):
+if options.oft_package and (options.macos_deployment_target is not None):
     config_dict['MACOSX_DEPLOYMENT_TARGET'] = options.macos_deployment_target
-if (options.oft_package is not None) and ('MACOSX_DEPLOYMENT_TARGET' not in config_dict):
+if options.oft_package and ('MACOSX_DEPLOYMENT_TARGET' not in config_dict):
     macos_deployment_target = os.environ.get('MACOSX_DEPLOYMENT_TARGET',None)
     if macos_deployment_target is not None:
         config_dict['MACOSX_DEPLOYMENT_TARGET'] = macos_deployment_target
