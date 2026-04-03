@@ -21,6 +21,7 @@ jobs:
       CC: ${{ matrix.config.cc }}
       CXX: ${{ matrix.config.cxx }}
       FC: ${{ matrix.config.fc }}
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.config.deployment_target || '' }}
     
     strategy:
       fail-fast: false
@@ -49,7 +50,8 @@ jobs:
             python: "python3.13",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
             build_libs_flags: "--build_umfpack=1",
-            cache_key: "openmp"
+            cache_key: "openmp",
+            deployment_target: "15.0"
           }
         - {
             name: "macOS-x86_64-Rosetta",
@@ -58,7 +60,8 @@ jobs:
             python: "python3.13",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
             build_libs_flags: "--build_umfpack=1 --oblas_no_avx",
-            cache_key: "openmp_noavx"
+            cache_key: "openmp_noavx",
+            deployment_target: "15.0"
           }
         - {
             name: "macOS-arm64",
@@ -67,7 +70,8 @@ jobs:
             python: "python3.13",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
             build_libs_flags: "--build_umfpack=1",
-            cache_key: "openmp"
+            cache_key: "openmp",
+            deployment_target: "15.0"
         }
 
     steps:
@@ -78,7 +82,7 @@ jobs:
       id: cache-ext-libs
       uses: actions/cache@v4
       with:
-        path: libs
+        path: builds
         key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.config.cache_key }}-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - name: Get OS version (Linux)
@@ -132,12 +136,12 @@ jobs:
 
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
-      run: mkdir libs
+      run: mkdir builds
 
     - name: Build external (Nightly)
       if: ${{ !inputs.release }}
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
@@ -145,7 +149,7 @@ jobs:
     - name: Build external (Release)
       if: ${{ inputs.release }}
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_package_release --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
@@ -155,37 +159,37 @@ jobs:
       if: failure()
       with:
         name: Library failure log
-        path: libs/build/build_error.log
+        path: builds/build/build_error.log
     
     - name: Remove external build directory
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: rm -rf build
 
     - name: Configure OFT
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make
     
     - name: Install OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make install
 
     - name: Package OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make package
@@ -194,5 +198,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.config.name }}-${{ github.sha }}
-        path: libs/build_release/OpenFUSIONToolkit_*
+        path: builds/build_release/OpenFUSIONToolkit_*
         overwrite: true

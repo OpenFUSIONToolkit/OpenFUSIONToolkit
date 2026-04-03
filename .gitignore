@@ -1,13 +1,14 @@
 # Non-Source directories
-/build*
-/install*
 /src/docs/generated
 
 # FORTRAN compile objects
 *.o
 *.a
 *.mod
+
+# Python artifacts
 *.pyc
+__pycache__
 
 # Editor Items
 .settings
@@ -16,12 +17,8 @@
 .pydevproject
 .vscode
 
-# Workflow products
-src/examples/TokaMaker/AdvancedWorkflows/IsofluxController/IODATA*
-src/examples/TokaMaker/AdvancedWorkflows/IsofluxController/__pycache__
-
 # Build/environment artifacts
-/libs/
+/builds/
 /oft_venv/
 /compiler_id.txt
 /setup_env.sh

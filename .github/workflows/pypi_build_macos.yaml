@@ -21,6 +21,7 @@ jobs:
       CC: ${{ matrix.config.cc }}
       CXX: ${{ matrix.config.cxx }}
       FC: ${{ matrix.config.fc }}
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.config.deployment_target }}
 
     strategy:
       fail-fast: false
@@ -33,7 +34,8 @@ jobs:
             python: "python3.13",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
             build_libs_flags: "--build_umfpack=1 --oblas_no_avx",
-            cache_key: "openmp_noavx"
+            cache_key: "openmp_noavx",
+            deployment_target: "15.0"
           }
         - {
             name: "macOS-arm64",
@@ -42,7 +44,8 @@ jobs:
             python: "python3.13",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
             build_libs_flags: "--build_umfpack=1",
-            cache_key: "openmp"
+            cache_key: "openmp",
+            deployment_target: "15.0"
         }
 
     steps:

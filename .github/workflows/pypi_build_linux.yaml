@@ -53,12 +53,12 @@ jobs:
         python -m pip install jupyter nbconvert build wheel
 
     - name: Create build directory
-      run: mkdir libs
+      run: mkdir builds
 
     - name: Build external (Nightly)
       if: ${{ !inputs.release }}
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --oblas_dynamic_arch --build_umfpack=1 --build_arpack=1 --oft_package
@@ -66,7 +66,7 @@ jobs:
     - name: Build external (Release)
       if: ${{ inputs.release }}
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --oblas_dynamic_arch --build_umfpack=1 --build_arpack=1 --oft_package --oft_package_release
@@ -76,37 +76,37 @@ jobs:
       if: failure()
       with:
         name: Library failure log
-        path: libs/build/build_error.log
+        path: builds/build/build_error.log
     
     - name: Remove external build directory
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: rm -rf build
 
     - name: Configure OFT
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make
     
     - name: Install OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make install
 
     - name: Build Python Wheels
       shell: bash
-      working-directory: libs/install_release/python
+      working-directory: builds/install_release/python
       run: |
         source ${{ github.workspace }}/setup_env.sh
         bash make_package.sh
@@ -115,5 +115,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.config.name }}-${{ github.sha }}
-        path: libs/install_release/python/dist/*.whl
+        path: builds/install_release/python/dist/*.whl
         overwrite: true

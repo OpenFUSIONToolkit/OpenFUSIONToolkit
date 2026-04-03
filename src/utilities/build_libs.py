@@ -373,6 +373,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
     if 'MACOS_SDK_PATH' in tmp_dict:
         env_lines.append('export SYSROOT={0}'.format(tmp_dict['MACOS_SDK_PATH']))
         cmake_lines.append('-DCMAKE_OSX_SYSROOT={0}'.format(tmp_dict['MACOS_SDK_PATH']))
+    if 'MACOSX_DEPLOYMENT_TARGET' in tmp_dict:
+        env_lines.append('export MACOSX_DEPLOYMENT_TARGET={0}'.format(tmp_dict['MACOSX_DEPLOYMENT_TARGET']))
     if mydict['BASE_CFLAGS'] != '':
         cmake_lines.append('-DCMAKE_C_FLAGS:STRING="{BASE_CFLAGS}"')
     if mydict['BASE_FFLAGS'] != '':
@@ -646,6 +648,8 @@ class package:
         addl_envs = {}
         if 'MACOS_SDK_PATH' in config_dict:
             addl_envs['SDKROOT'] = self.config_dict['MACOS_SDK_PATH']
+        if 'MACOSX_DEPLOYMENT_TARGET' in config_dict:
+            addl_envs['MACOSX_DEPLOYMENT_TARGET'] = self.config_dict['MACOSX_DEPLOYMENT_TARGET']
         result, _ = run_command("bash build_tmp.sh", timeout=self.build_timeout*60, env_vars=addl_envs)
         with open("build_tmp.log", "w+") as fid:
             fid.write(result)
@@ -1782,7 +1786,7 @@ class UMFPACK(package):
 
 
 class LIBXML2(package):
-    def __init__(self, static_libs=False):
+    def __init__(self, static_libs=True):
         self.name = "LIBXML2"
         self.url = "https://gitlab.gnome.org/GNOME/libxml2/-/archive/v2.15.2/libxml2-v2.15.2.tar.gz"
         self.static_libs = static_libs
@@ -1810,17 +1814,18 @@ class LIBXML2(package):
         ]
         cmake_options = [
             '-DCMAKE_INSTALL_PREFIX:PATH={LIBXML2_ROOT}',
-            '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON'
+            '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+            '-DLIBXML2_WITH_PROGRAMS:BOOL=OFF',
+            '-DLIBXML2_WITH_TESTS:BOOL=OFF',
+            '-DLIBXML2_WITH_ICONV:BOOL=OFF'
         ]
         if self.static_libs:
             cmake_options += [
-                '-DBUILD_SHARED_LIBS:BOOL=OFF',
-                '-DBUILD_STATIC_LIBS:BOOL=ON'
+                '-DBUILD_SHARED_LIBS:BOOL=OFF'
             ]
         else:
             cmake_options += [
-                '-DBUILD_SHARED_LIBS:BOOL=ON',
-                '-DBUILD_STATIC_LIBS:BOOL=OFF'
+                '-DBUILD_SHARED_LIBS:BOOL=ON'
             ]
         build_lines += [
             "{CMAKE} " + " ".join(cmake_options) + " ..",
@@ -2048,8 +2053,9 @@ parser.add_argument("--setup_only", action="store_true", default=False, help="Do
 parser.add_argument("--nthread", "--nthreads", default=1, type=int, help="Number of threads to use for make (default=1)")
 parser.add_argument("--opt_flags", default=None, type=str, help="Compiler optimization flags")
 parser.add_argument("--ld_flags", default=None, type=str, help="Linker flags")
-parser.add_argument("--macos_sdk_path", default=None, type=str, help="Path to macos SDK to use for building")
-parser.add_argument("--cross_compile_host", default=None, type=str, help="Host type for cross-compilation")
+parser.add_argument("--macos_sdk_path", default=None, type=str, help="Path to macOS SDK to use for building")
+parser.add_argument("--macos_deployment_target", default=None, type=str, help="macOS deployment target version, required for python package builds (e.g. 10.15)")
+parser.add_argument("--cross_compile_host", default=None, type=str, help="Host type for cross-compilation (unused)")
 parser.add_argument("--no_dl_progress", action="store_false", default=True, help="Do not report progress during file download")
 #
 group = parser.add_argument_group("CMAKE", "CMAKE configure options for the Open FUSION Toolkit")
@@ -2062,6 +2068,7 @@ group.add_argument("--oft_py_kernel", default="python3", type=str, help="Name of
 group.add_argument("--oft_build_examples", default=0, type=int, choices=(0,1), help="Build OFT examples? (default: 0)")
 group.add_argument("--oft_build_docs", default=0, type=int, choices=(0,1), help="Build OFT documentation (requires doxygen)? (default: 0)")
 group.add_argument("--oft_package", action="store_true", default=False, help="Perform a packaging build of OFT?")
+group.add_argument("--oft_package_python", default=1, type=int, choices=(0,1), help="Setup for build of PYPI wheels when packaging?")
 group.add_argument("--oft_package_release", action="store_true", default=False, help="Perform a release package of OFT?")
 group.add_argument("--oft_build_coverage", action="store_true", default=False, help="Build OFT with code coverage flags?")
 group.add_argument("--oft_debug_stack", action="store_true", default=False, help="Enable internal debug stack?")
@@ -2101,7 +2108,7 @@ group = parser.add_argument_group("METIS", "METIS package options")
 group.add_argument("--metis_wrapper", action="store_true", default=False, help="METIS included in compilers")
 #
 group = parser.add_argument_group("XML", "XML package options")
-group.add_argument("--libxml2_static", action="store_true", default=False, help="Build and link Libxml2 statically?")
+group.add_argument("--libxml2_shared", action="store_true", default=False, help="Build and link Libxml2 as a shared library?")
 #
 group = parser.add_argument_group("OpenNURBS", "OpenNURBS package options")
 group.add_argument("--build_onurbs", default=0, type=int, choices=(0,1), help="Build OpenNURBS library? (default: 0)")
@@ -2159,6 +2166,17 @@ if options.macos_sdk_path is not None:
     if not os.path.isdir(options.macos_sdk_path):
         parser.exit(-1, 'Specified "--macos_sdk_path={0}" directory does not exist\n'.format(options.macos_sdk_path))
     config_dict['MACOS_SDK_PATH'] = options.macos_sdk_path
+if (options.oft_package is not None) and (options.macos_deployment_target is not None):
+    config_dict['MACOSX_DEPLOYMENT_TARGET'] = options.macos_deployment_target
+if (options.oft_package is not None) and ('MACOSX_DEPLOYMENT_TARGET' not in config_dict):
+    macos_deployment_target = os.environ.get('MACOSX_DEPLOYMENT_TARGET',None)
+    if macos_deployment_target is not None:
+        config_dict['MACOSX_DEPLOYMENT_TARGET'] = macos_deployment_target
+    else:
+        if options.oft_package_python == 1:
+            parser.exit(-1, '"--macos_deployment_target" is required for Python package builds on macOS\n')
+        else:
+            print('Warning: "--macos_deployment_target" is recommended for package builds on macOS')
 # Building with MPI?
 use_mpi = False
 if (options.mpi_cc is not None) and (options.mpi_fc is not None):
@@ -2225,7 +2243,7 @@ if (options.hdf5_cc is not None) and (options.hdf5_fc is not None):
 else:
     packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required,shared_libs=(not options.hdf5_static)))
 # Always build Libxml2
-packages.append(LIBXML2(options.libxml2_static))
+packages.append(LIBXML2(not options.libxml2_shared))
 # Are we building OpenNURBS?
 if options.build_onurbs == 1:
     packages.append(ONURBS())

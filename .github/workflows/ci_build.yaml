@@ -172,18 +172,18 @@ jobs:
       id: cache-ext-libs
       uses: actions/cache@v4
       with:
-        path: libs
+        path: builds
         key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py', 'compiler_id.txt') }}
 
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
-      run: mkdir libs
+      run: mkdir builds
 
     - name: Build external (OpenMP)
       if: ${{ matrix.parallel == 'openmp' }}
       shell: bash
       timeout-minutes: 30
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py ${{ matrix.config.build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1
@@ -192,7 +192,7 @@ jobs:
       if: startsWith(matrix.parallel, 'mpich')
       shell: bash
       timeout-minutes: 60
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_mpich=1
@@ -201,7 +201,7 @@ jobs:
       if: startsWith(matrix.parallel, 'openmpi')
       shell: bash
       timeout-minutes: 60
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_openmpi=1
@@ -211,25 +211,25 @@ jobs:
       if: failure()
       with:
         name: Library_failure_log-${{ matrix.config.os }}_${{ matrix.parallel }}
-        path: libs/build/build_error.log
+        path: builds/build/build_error.log
 
     - name: Configure OFT
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make
     
     - name: Install OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make install
@@ -237,7 +237,7 @@ jobs:
     - name: Test OFT
       shell: bash
       timeout-minutes: 90
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make test
@@ -247,14 +247,14 @@ jobs:
       if: ${{ matrix.config.os != 'macos-15-intel' }}
       shell: bash
       timeout-minutes: 20
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make test_examples
 
     - name: Fixup cache
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         rm -rf build
         rm -rf petsc*

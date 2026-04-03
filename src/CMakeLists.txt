@@ -56,6 +56,9 @@ endif()
 
 if(OFT_BUILD_DOCS OR OFT_PACKAGE_BUILD OR OFT_DEBUG_STACK)
   if(OFT_PACKAGE_BUILD AND OFT_PACKAGE_PYTHON)
+    if(APPLE AND (NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET))
+      message( FATAL_ERROR "Python package build on macOS requires the MACOSX_DEPLOYMENT_TARGET environment variable to be set" )
+    endif()
     set(Python3_FIND_VIRTUALENV ONLY)
   endif()
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -203,7 +206,11 @@ endif()
 # Libxml2
 find_package( LibXml2 REQUIRED )
 include_directories( ${LIBXML2_INCLUDE_DIR} )
-set( EXT_LIBS ${LIBXML2_LIBRARIES} ${EXT_LIBS} )
+set( EXT_LIBS LibXml2::LibXml2 ${EXT_LIBS} )
+# find_package( Iconv )
+# if(Iconv_FOUND)
+#   set( EXT_LIBS Iconv::Iconv ${EXT_LIBS} )
+# endif()
 # HDF5
 if( OFT_HDF5_HL )
   find_package( HDF5 COMPONENTS C Fortran HL REQUIRED )
@@ -517,7 +524,8 @@ if(OFT_PACKAGE_BUILD)
 
   if( OFT_PACKAGE_PYTHON )
     if(APPLE)
-      set(OFT_PYPACKAGE_PLATFORM macosx_11_0_${CMAKE_HOST_SYSTEM_PROCESSOR})
+      string(REPLACE "." "_" PYPI_OSX_VERSION ${CMAKE_OSX_DEPLOYMENT_TARGET})
+      set(OFT_PYPACKAGE_PLATFORM macosx_${PYPI_OSX_VERSION}_${CMAKE_HOST_SYSTEM_PROCESSOR})
     elseif(UNIX AND NOT APPLE)
       execute_process(
         COMMAND ldd --version
@@ -535,6 +543,7 @@ if(OFT_PACKAGE_BUILD)
       # set(OFT_PYPACKAGE_PLATFORM manylinux2014_${CMAKE_HOST_SYSTEM_PROCESSOR}) # CentOS 7, Ubuntu 20.04
       set(OFT_PYPACKAGE_PLATFORM manylinux_${LDD_VERSION_US}_${CMAKE_HOST_SYSTEM_PROCESSOR}) # Generic tag format based on LIBC
     endif()
+    message(STATUS "Computed PYPI tag: ${OFT_PYPACKAGE_PLATFORM}")
     configure_file( python/pyproject.toml.in ${CMAKE_CURRENT_BINARY_DIR}/python/pyproject.toml @ONLY )
     install( FILES ${CMAKE_CURRENT_BINARY_DIR}/python/pyproject.toml DESTINATION python COMPONENT app )
     configure_file( python/make_package.sh.in ${CMAKE_CURRENT_BINARY_DIR}/python/make_package.sh @ONLY )
