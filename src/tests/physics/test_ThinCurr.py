@@ -2,6 +2,8 @@ from __future__ import print_function
 import os
 import sys
 import time
+import glob
+import shutil
 import multiprocessing
 import pytest
 import numpy as np
@@ -13,7 +15,10 @@ from oft_testing import run_OFT
 from OpenFUSIONToolkit.io import histfile
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
 
+
+
 mu0 = np.pi*4.E-7
+_oft_env_singleton = None
 
 # Basic template for input file
 oft_in_template = """
@@ -122,7 +127,7 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
@@ -171,7 +176,7 @@ def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25,nsplit=1)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
@@ -200,7 +205,7 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25,nsplit=1)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
@@ -575,6 +580,35 @@ def validate_mode(drive_exp,result_exp):
     return result_val
 
 
+def _write_thincurr_xml(xml_filename, eta_values=None, thickness_values=None, eta_vol_values=None):
+    from OpenFUSIONToolkit import OFT_env
+    from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_XML
+
+    thincurr_xml = ThinCurr_XML()
+    if eta_values is not None:
+        thincurr_xml.set_eta(eta_values)
+    if eta_vol_values is not None:
+        thincurr_xml.set_eta_vol(eta_vol_values)
+    if thickness_values is not None:
+        thincurr_xml.set_thickness(thickness_values)
+    OFT_env.write_oft_xml([thincurr_xml], xml_filename)
+
+
+def _build_dummy_model(xml_filename):
+    from OpenFUSIONToolkit import OFT_env
+    from OpenFUSIONToolkit.ThinCurr import ThinCurr
+    from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+
+    global _oft_env_singleton
+    if _oft_env_singleton is None:
+        _oft_env_singleton = OFT_env(nthreads=-1)
+
+    r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
+    model = ThinCurr(_oft_env_singleton)
+    model.setup_model(r=r_dummy, lc=lc_dummy, xml_filename=xml_filename)
+    return model
+
+
 def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_Hamada,sigs_mnmodes_2D_PEST,sigs_mnmodes_2D_Hamada,t,delta_phi,tol=1.E-6):
     try:
         interface.load_histfile()
@@ -612,6 +646,152 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
     for file in save_files:
         os.remove(file)  
     return result_val
+
+
+@pytest.mark.coverage
+def test_thickness_api_roundtrip_and_validation():
+    assert mp_run(run_thickness_api_roundtrip_and_validation, ())
+
+
+def run_thickness_api_roundtrip_and_validation(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_thickness_api.xml'
+        eta_values = np.r_[1.E4*mu0]
+        thickness_values = np.r_[2.5E-3]
+        _write_thincurr_xml(xml_filename, eta_values=eta_values, thickness_values=thickness_values)
+
+        tw_model = _build_dummy_model(xml_filename)
+
+        tw_model.set_eta_values(eta_surf=eta_values, thickness=thickness_values)
+        if not np.allclose(tw_model.get_eta_values(), eta_values):
+            result = False
+        if not np.allclose(tw_model.get_thickness(), thickness_values):
+            result = False
+
+        new_thickness = np.r_[3.5E-3]
+        tw_model.set_thickness(new_thickness)
+        if not np.allclose(tw_model.get_thickness(), new_thickness):
+            result = False
+
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values()
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(eta_values=np.r_[-1.0])
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(eta_values=eta_values, thickness=thickness_values)
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(eta_surf=eta_values, thickness=np.r_[-1.0])
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(eta_vol=np.r_[1.0e-6])
+        with pytest.raises(IndexError):
+            tw_model.set_thickness(np.r_[1.E-3, 2.E-3])
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_plot_td_compute_jvol_outputs_fields():
+    assert mp_run(run_plot_td_compute_jvol_outputs_fields, ())
+
+
+def run_plot_td_compute_jvol_outputs_fields(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_compute_jvol.xml'
+        io_basepath = 'td_jvol_regression'
+        eta_values = np.r_[1.E4*mu0]
+        thickness_values = np.r_[2.0E-3]
+        _write_thincurr_xml(xml_filename, eta_values=eta_values, thickness_values=thickness_values)
+
+        if os.path.isdir(io_basepath):
+            shutil.rmtree(io_basepath)
+
+        tw_model = _build_dummy_model(xml_filename)
+        tw_model.setup_io(basepath=io_basepath)
+        tw_model.compute_Mcoil()
+        tw_model.compute_Lmat()
+        tw_model.compute_Rmat()
+        tw_model.run_td(2.E-5, 5, direct=True, plot_freq=1)
+        tw_model.plot_td(5, plot_freq=1)
+        tw_model.build_XDMF()
+
+        xmf_files = sorted(glob.glob(os.path.join(io_basepath, '*.xmf')))
+        if len(xmf_files) == 0:
+            result = False
+        xmf_text = ''
+        for xmf_file in xmf_files:
+            with open(xmf_file, 'r') as fid:
+                xmf_text += fid.read()
+        if 'J_vol' not in xmf_text or 'thickness' not in xmf_text:
+            result = False
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_eta_only_matches_surface_resistivity_with_thickness():
+    assert mp_run(run_eta_only_matches_surface_resistivity_with_thickness, ())
+
+
+def run_eta_only_matches_surface_resistivity_with_thickness(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_compat.xml'
+        eta_surface = np.r_[1.E4*mu0]
+        thickness_values = np.r_[2.5E-3]
+        eta_bulk = eta_surface*thickness_values
+        _write_thincurr_xml(xml_filename, eta_values=eta_surface)
+
+        model_surface = _build_dummy_model(xml_filename)
+        model_surface.set_eta_values(eta_values=eta_surface)
+        model_surface.compute_Rmat(copy_out=True)
+        R_surface = model_surface.Rmat
+
+        model_bulk = _build_dummy_model(xml_filename)
+        model_bulk.set_eta_values(eta_vol=eta_bulk, thickness=thickness_values)
+        model_bulk.compute_Rmat(copy_out=True)
+        R_bulk = model_bulk.Rmat
+
+        if not np.allclose(R_surface, R_bulk, rtol=1.E-10, atol=1.E-12):
+            result = False
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_eta_vol_without_thickness_fails_xml_loading():
+    assert mp_run(run_eta_vol_without_thickness_fails_xml_loading, ())
+
+
+def run_eta_vol_without_thickness_fails_xml_loading(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_vol_only_invalid.xml'
+        eta_vol_values = np.r_[2.5E-3]
+        _write_thincurr_xml(xml_filename, eta_vol_values=eta_vol_values)
+
+        with pytest.raises(Exception):
+            _build_dummy_model(xml_filename)
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
 
 #============================================================================
 # Test runners for plate
