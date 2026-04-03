@@ -3,24 +3,21 @@
  *
  * SPDX-License-Identifier: LGPL-3.0-only
  *------------------------------------------------------------------------------
- * LIBXML2 DOM interface functions for the Open FUSION Toolkit
+ * Libxml2 DOM interface functions for the Open FUSION Toolkit
  *
  * Provides C functions callable from Fortran via iso_c_binding for
- * DOM-style access to XML files using the LIBXML2 library.
+ * DOM-style access to XML files using the Libxml2 library.
  *----------------------------------------------------------------------------*/
-#include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
-#include <ctype.h>
 #include <libxml/parser.h>
-#include <libxml/tree.h>
 
-/*
- * Parse an XML file from a given file path.
+/**
+ * Parse an XML file from a given file path
  *
- * filepath: null-terminated path to XML file
- * doc_ptr:  output pointer to xmlDoc (cast to void*)
- * Returns 0 on success, nonzero on error.
+ * @param filepath Null-terminated path to XML file
+ * @param doc_ptr  Output pointer to xmlDoc
+ * @return 0 on success, nonzero on error
  */
 int oft_xml_parse_file(const char* filepath, void** doc_ptr) {
     xmlDoc* doc;
@@ -33,12 +30,12 @@ int oft_xml_parse_file(const char* filepath, void** doc_ptr) {
     return 0;
 }
 
-/*
- * Retrieve a pointer to the root element of an XML document.
+/**
+ * Retrieve a pointer to the root element of an XML document
  *
- * doc_ptr:  pointer to xmlDoc (from oft_xml_load_file), cast to void*
- * root_ptr: output pointer to root xmlNode (cast to void*)
- * Returns 0 on success, nonzero on error.
+ * @param doc_ptr  Pointer to xmlDoc
+ * @param root_ptr Output pointer to root xmlNode
+ * @return 0 on success, nonzero on error
  */
 int oft_xml_get_root(const void* doc_ptr, void** root_ptr) {
     xmlNode* root;
@@ -50,15 +47,15 @@ int oft_xml_get_root(const void* doc_ptr, void** root_ptr) {
     return 0;
 }
 
-/*
- * Retrieve a pointer to the I-th xml node with a given name contained
- * within a specified parent node (1-based index).
+/**
+ * Retrieve a pointer to the i-th xml node with a given name contained
+ * within a specified parent node (1-based index)
  *
- * parent_ptr:  pointer to parent xmlNode (cast to void*)
- * name:        null-terminated element name to search for
- * index:       1-based index among matching children
- * element_ptr: output pointer to matching xmlNode (cast to void*)
- * Returns 0 on success, nonzero on error.
+ * @param parent_ptr  Pointer to parent xmlNode
+ * @param name        Null-terminated element name to search for
+ * @param index       1-based index among matching children
+ * @param element_ptr Output pointer to matching xmlNode
+ * @return 0 on success, nonzero on error
  */
 int oft_xml_get_element(const void* parent_ptr, const char* name, int index,
                         void** element_ptr) {
@@ -81,16 +78,15 @@ int oft_xml_get_element(const void* parent_ptr, const char* name, int index,
     return 2; /* not found */
 }
 
-/*
+/**
  * Retrieve pointers to all xml nodes with a given name contained within
- * a specified parent node.
+ * a specified parent node
  *
- * parent_ptr:   pointer to parent xmlNode (cast to void*)
- * name:         null-terminated element name to search for
- * n:            output count of matching children
- * elements_ptr: output pointer to a heap-allocated array of void* pointers
- *               to matching xmlNodes; caller must free with oft_xml_free_elements
- * Returns 0 on success, nonzero on error.
+ * @param parent_ptr   Pointer to parent xmlNode (cast to void*)
+ * @param name         Null-terminated element name to search for
+ * @param n            Output count of matching children
+ * @param elements_ptr Output pointer to array of pointers to matching xmlNodes
+ * @return 0 on success, nonzero on error
  */
 int oft_xml_get_elements(const void* parent_ptr, const char* name, int* n,
                          void** elements_ptr) {
@@ -124,22 +120,22 @@ int oft_xml_get_elements(const void* parent_ptr, const char* name, int* n,
     return 0;
 }
 
-/*
- * Free the array of node pointers allocated by oft_xml_get_elements.
+/**
+ * Free a C array/object
  *
- * elements_ptr: pointer to array previously returned by oft_xml_get_elements
+ * @param gen_ptr Pointer to be freed
  */
 void oft_xml_free_ptr(void* gen_ptr) {
     if (gen_ptr != NULL) free(gen_ptr);
 }
 
-/*
+/**
  * Extract the string content from a given xml node.
  *
- * node_ptr: pointer to xmlNode (cast to void*)
- * content:  output character buffer (not null-terminated by libxml2; we add '\0')
- * content_len:  Size of content buffer (including null terminator)
- * Returns 0 on success, nonzero on error.
+ * @param node_ptr    Pointer to xmlNode
+ * @param content     Output character buffer (null-terminated)
+ * @param content_len Size of content buffer
+ * @return 0 on success, nonzero on error.
  */
 int oft_xml_get_content(const void* node_ptr, char** content, int* content_len) {
     const xmlNode* node = (const xmlNode*)node_ptr;
@@ -159,14 +155,12 @@ int oft_xml_get_content(const void* node_ptr, char** content, int* content_len) 
     return 0;
 }
 
-/*
- * Extract the string value of a given attribute on a given xml node.
+/**
+ * Test if a given xml node has a specified attribute
  *
- * node_ptr:  pointer to xmlNode (cast to void*)
- * attr_name: null-terminated attribute name
- * content:  output character buffer (not null-terminated by libxml2; we add '\0')
- * content_len:  Size of content buffer (including null terminator)
- * Returns 0 on success, nonzero on error.
+ * @param node_ptr    Pointer to xmlNode
+ * @param attr_name   Null-terminated attribute name
+ * @return 0 if attribute exists, nonzero otherwise
  */
 int oft_xml_has_attribute(const void* node_ptr, const char* attr_name) {
     const xmlNode* node = (const xmlNode*)node_ptr;
@@ -180,14 +174,14 @@ int oft_xml_has_attribute(const void* node_ptr, const char* attr_name) {
     return 0;
 }
 
-/*
- * Extract the string value of a given attribute on a given xml node.
+/**
+ * Extract the string value of a given attribute on a given xml node
  *
- * node_ptr:  pointer to xmlNode (cast to void*)
- * attr_name: null-terminated attribute name
- * content:  output character buffer (not null-terminated by libxml2; we add '\0')
- * content_len:  Size of content buffer (including null terminator)
- * Returns 0 on success, nonzero on error.
+ * @param node_ptr    Pointer to xmlNode
+ * @param attr_name   Null-terminated attribute name
+ * @param content     Output character buffer (null-terminated)
+ * @param content_len Size of content buffer
+ * @return 0 on success, nonzero on error.
  */
 int oft_xml_get_attribute(const void* node_ptr, const char* attr_name,
                           char** content, int* content_len) {
@@ -208,10 +202,10 @@ int oft_xml_get_attribute(const void* node_ptr, const char* attr_name,
     return 0;
 }
 
-/*
- * Free an XML document previously parsed with oft_xml_load_file.
+/**
+ * Free an XML document previously parsed with \ref oft_xml_load_file
  *
- * doc_ptr: pointer to xmlDoc (from oft_xml_load_file), cast to void*
+ * @param doc_ptr Pointer to xmlDoc
  */
 void oft_xml_free_doc(void* doc_ptr) {
     if (doc_ptr != NULL)
