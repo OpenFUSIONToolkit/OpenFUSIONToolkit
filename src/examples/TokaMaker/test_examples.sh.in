@@ -31,6 +31,7 @@ run_test CUTE CUTE_VDE_ex.ipynb
 # HBT cases
 run_test HBT HBT_mesh_ex.ipynb
 run_test HBT HBT_eq_ex.ipynb
+run_test HBT HBT_vac_coils.ipynb
 
 # ITER cases
 run_test ITER ITER_mesh_ex.ipynb
