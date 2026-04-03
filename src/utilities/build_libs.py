@@ -2162,21 +2162,22 @@ if options.ld_flags is not None:
     config_dict['LD_FLAGS'] = options.ld_flags
 if options.cross_compile_host is not None:
     config_dict['CROSS_COMPILE_HOST'] = options.cross_compile_host
-if options.macos_sdk_path is not None:
-    if not os.path.isdir(options.macos_sdk_path):
-        parser.exit(-1, 'Specified "--macos_sdk_path={0}" directory does not exist\n'.format(options.macos_sdk_path))
-    config_dict['MACOS_SDK_PATH'] = options.macos_sdk_path
-if options.oft_package and (options.macos_deployment_target is not None):
-    config_dict['MACOSX_DEPLOYMENT_TARGET'] = options.macos_deployment_target
-if options.oft_package and ('MACOSX_DEPLOYMENT_TARGET' not in config_dict):
-    macos_deployment_target = os.environ.get('MACOSX_DEPLOYMENT_TARGET',None)
-    if macos_deployment_target is not None:
-        config_dict['MACOSX_DEPLOYMENT_TARGET'] = macos_deployment_target
-    else:
-        if options.oft_package_python == 1:
-            parser.exit(-1, '"--macos_deployment_target" is required for Python package builds on macOS\n')
+if config_dict['OS_TYPE'] == 'Darwin':
+    if options.macos_sdk_path is not None:
+        if not os.path.isdir(options.macos_sdk_path):
+            parser.exit(-1, 'Specified "--macos_sdk_path={0}" directory does not exist\n'.format(options.macos_sdk_path))
+        config_dict['MACOS_SDK_PATH'] = options.macos_sdk_path
+    if options.oft_package and (options.macos_deployment_target is not None):
+        config_dict['MACOSX_DEPLOYMENT_TARGET'] = options.macos_deployment_target
+    if options.oft_package and ('MACOSX_DEPLOYMENT_TARGET' not in config_dict):
+        macos_deployment_target = os.environ.get('MACOSX_DEPLOYMENT_TARGET',None)
+        if macos_deployment_target is not None:
+            config_dict['MACOSX_DEPLOYMENT_TARGET'] = macos_deployment_target
         else:
-            print('Warning: "--macos_deployment_target" is recommended for package builds on macOS')
+            if options.oft_package_python == 1:
+                parser.exit(-1, '"--macos_deployment_target" is required for Python package builds on macOS\n')
+            else:
+                print('Warning: "--macos_deployment_target" is recommended for package builds on macOS')
 # Building with MPI?
 use_mpi = False
 if (options.mpi_cc is not None) and (options.mpi_fc is not None):
