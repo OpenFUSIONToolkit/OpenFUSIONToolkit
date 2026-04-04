@@ -69,8 +69,6 @@ def fetch_file(url, file, headers={'User-Agent' : "Magic Browser"}):
             file_size = -1
     except ValueError as e:
         error_exit('Invalid download URL: "{0}"'.format(original_url), exception=e)
-    except Exception as e:
-        error_exit('Download failed for file: "{0}"'.format(original_url), exception=e)
     else:
         line = "  Downloading: {0}".format(original_url)
         print(line)
@@ -1798,11 +1796,11 @@ class LIBXML2(package):
         install_path = os.path.join(self.root_path, self.install_dir)
         self.config_dict["LIBXML2_INCLUDE"] = os.path.join(install_path, "include")
         self.config_dict["LIBXML2_LIBS"] = "-lxml2"
-        # Installation check files
-        if self.static_libs:
-            self.install_chk_files = [os.path.join(self.config_dict['LIBXML2_LIB'], 'libxml2.a')]
-        else:
-            self.install_chk_files = [os.path.join(self.config_dict['LIBXML2_LIB'], 'libxml2'+self.config_dict['DYN_EXT'])]
+        # # Installation check files
+        # if self.static_libs:
+        #     self.install_chk_files = [os.path.join(self.config_dict['LIBXML2_LIB'], 'libxml2.a')]
+        # else:
+        #     self.install_chk_files = [os.path.join(self.config_dict['LIBXML2_LIB'], 'libxml2'+self.config_dict['DYN_EXT'])]
         #
         return self.config_dict
 
