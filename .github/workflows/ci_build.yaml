@@ -32,24 +32,24 @@ jobs:
             os: ubuntu-22.04,
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
             python: "python3",
-            build_flags: "--nthread=2 --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--nthread=2 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
+            build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 GCC 14",
             os: ubuntu-24.04,
             cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
             python: "python3",
-            build_flags: "--nthread=2 --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--nthread=2 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
+            build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 Intel 2025.2",
             os: ubuntu-24.04,
             cc: "icx", cxx: "icx", fc: "ifx",
             python: "python3",
-            build_flags: "--nthread=2 --use_mkl --mkl_root=$MKLROOT",
-            mpi_build_flags: "--nthread=2 --use_mkl --mkl_root=$MKLROOT",
+            build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
+            mpi_build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
             oneapi_ver: "-2025.2"
           }
         - {
@@ -57,8 +57,8 @@ jobs:
             os: ubuntu-24.04,
             cc: "icx", cxx: "icx", fc: "ifx",
             python: "python3",
-            build_flags: "--nthread=2 --use_mkl --mkl_root=$MKLROOT",
-            mpi_build_flags: "--nthread=2 --use_mkl --mkl_root=$MKLROOT",
+            build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
+            mpi_build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
             oneapi_ver: ""
           }
         - {

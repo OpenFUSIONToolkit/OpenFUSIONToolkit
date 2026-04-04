@@ -36,7 +36,7 @@ jobs:
             os: ubuntu-22.04,
             cc: "gcc-12",cxx: "g++-12", fc: "gfortran-12",
             python: "python3",
-            build_libs_flags: "--nthread=2 --build_umfpack=1 --oblas_dynamic_arch",
+            build_libs_flags: "--nthread=4 --build_umfpack=1 --oblas_dynamic_arch",
             cache_key: "openmp"
           }
         - {
@@ -44,7 +44,7 @@ jobs:
             os: ubuntu-22.04,
             cc: "icx",cxx: "icx", fc: "ifx",
             python: "python3",
-            build_libs_flags: "--nthread=2 --use_mkl --mkl_root=$MKLROOT",
+            build_libs_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
             cache_key: "openmp"
           }
         - {

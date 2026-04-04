@@ -58,7 +58,7 @@ jobs:
       timeout-minutes: 60
       working-directory: builds
       run: >
-        python3 ../src/utilities/build_libs.py --no_dl_progress --nthread=2
+        python3 ../src/utilities/build_libs.py --no_dl_progress --nthread=4
         --build_mpich=1 --build_arpack=1 --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1
         --build_cmake=1 --oft_build_tests=1 --oft_build_coverage
 
