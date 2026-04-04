@@ -1282,6 +1282,7 @@ class OpenBLAS(package):
         self.dynamic_arch = dynamic_arch
         self.no_avx = no_avx
         self.shared_libs = shared_libs
+        self.build_timeout = 30
 
     def setup(self, config_dict):
         self.config_dict = config_dict.copy()

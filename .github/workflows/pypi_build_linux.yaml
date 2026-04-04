@@ -33,12 +33,12 @@ jobs:
             image: "quay.io/pypa/manylinux_2_28_x86_64",
             python: "/opt/python/cp314-cp314/bin/python"
           }
-        # - {
-        #     name: "Linux-arm64",
-        #     os: ubuntu-24.04-arm,
-        #     image: "quay.io/pypa/manylinux_2_28_aarch64",
-        #     python: "/opt/python/cp314-cp314/bin/python"
-        #   }
+        - {
+            name: "Linux-arm64",
+            os: ubuntu-24.04-arm,
+            image: "quay.io/pypa/manylinux_2_28_aarch64",
+            python: "/opt/python/cp314-cp314/bin/python"
+          }
 
     steps:
     - name: Checkout repo
