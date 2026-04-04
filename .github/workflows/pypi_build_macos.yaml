@@ -43,13 +43,13 @@ jobs:
           }
         - {
             name: "macOS-arm64",
-            os: macos-15,
+            os: macos-14,
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
-            python: "python3.13",
-            xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
+            python: "python3.12",
+            xcode_path: "/Applications/Xcode_16.2.app/Contents/Developer",
             build_libs_flags: "--nthread=3 --build_umfpack=1",
             cache_key: "openmp",
-            deployment_target: "15.0"
+            deployment_target: "14.0"
         }
 
     steps:
