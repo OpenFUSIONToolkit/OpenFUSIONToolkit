@@ -65,7 +65,7 @@ jobs:
       working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --oblas_dynamic_arch --build_umfpack=1 --build_arpack=1 --oft_package
+        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --oblas_dynamic_arch --build_umfpack=1 --build_arpack=1 --oft_package
 
     - name: Build external (Release)
       if: ${{ inputs.release }}
@@ -73,7 +73,7 @@ jobs:
       working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --no_dl_progress --nthread=3 --oblas_dynamic_arch --build_umfpack=1 --build_arpack=1 --oft_package --oft_package_release
+        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --oblas_dynamic_arch --build_umfpack=1 --build_arpack=1 --oft_package --oft_package_release
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4

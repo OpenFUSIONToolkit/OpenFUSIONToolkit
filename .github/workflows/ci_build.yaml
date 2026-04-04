@@ -32,24 +32,24 @@ jobs:
             os: ubuntu-22.04,
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
             python: "python3",
-            build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
+            build_flags: "--nthread=2 --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=2 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 GCC 14",
             os: ubuntu-24.04,
             cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
             python: "python3",
-            build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
+            build_flags: "--nthread=2 --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=2 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 Intel 2025.2",
             os: ubuntu-24.04,
             cc: "icx", cxx: "icx", fc: "ifx",
             python: "python3",
-            build_flags: "--use_mkl --mkl_root=$MKLROOT",
-            mpi_build_flags: "--use_mkl --mkl_root=$MKLROOT",
+            build_flags: "--nthread=2 --use_mkl --mkl_root=$MKLROOT",
+            mpi_build_flags: "--nthread=2 --use_mkl --mkl_root=$MKLROOT",
             oneapi_ver: "-2025.2"
           }
         - {
@@ -57,8 +57,8 @@ jobs:
             os: ubuntu-24.04,
             cc: "icx", cxx: "icx", fc: "ifx",
             python: "python3",
-            build_flags: "--use_mkl --mkl_root=$MKLROOT",
-            mpi_build_flags: "--use_mkl --mkl_root=$MKLROOT",
+            build_flags: "--nthread=2 --use_mkl --mkl_root=$MKLROOT",
+            mpi_build_flags: "--nthread=2 --use_mkl --mkl_root=$MKLROOT",
             oneapi_ver: ""
           }
         - {
@@ -66,8 +66,8 @@ jobs:
             os: macos-15,
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.13",
-            build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
+            build_flags: "--nthread=3 --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=3 --build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer"
           }
         - {
@@ -75,8 +75,8 @@ jobs:
             os: macos-15-intel,
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.13",
-            build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
+            build_flags: "--nthread=4 --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=4 --build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer"
           }
         - {
@@ -84,8 +84,8 @@ jobs:
             os: macos-26,
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.13",
-            build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
+            build_flags: "--nthread=3 --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=3 --build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_26.2.0.app/Contents/Developer"
           }
         exclude:
@@ -108,7 +108,7 @@ jobs:
               os: ubuntu-22.04,
               cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
               python: "python3",
-              mpi_build_flags: "--oblas_dynamic_arch --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 --build_cmake=1"
+              mpi_build_flags: "--nthread=2 --oblas_dynamic_arch --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 --build_cmake=1"
             }
 
     steps:
@@ -186,7 +186,7 @@ jobs:
       working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py ${{ matrix.config.build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1
+        python ../src/utilities/build_libs.py ${{ matrix.config.build_flags }} --no_dl_progress --build_arpack=1 --oft_build_tests=1
     
     - name: Build external (MPICH+OpenMP)
       if: startsWith(matrix.parallel, 'mpich')
@@ -195,7 +195,7 @@ jobs:
       working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_mpich=1
+        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --build_arpack=1 --oft_build_tests=1 --build_mpich=1
 
     - name: Build external (OpenMPI+OpenMP)
       if: startsWith(matrix.parallel, 'openmpi')
@@ -204,7 +204,7 @@ jobs:
       working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_openmpi=1
+        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --build_arpack=1 --oft_build_tests=1 --build_openmpi=1
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
