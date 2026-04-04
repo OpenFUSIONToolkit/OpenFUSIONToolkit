@@ -68,23 +68,18 @@ END SUBROUTINE oftpy_init
 SUBROUTINE oftpy_load_xml(xml_file,oft_node_ptr) BIND(C,NAME="oftpy_load_xml")
 CHARACTER(KIND=c_char), INTENT(in) :: xml_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), INTENT(out) :: oft_node_ptr !< Needs docs
-#ifdef HAVE_XML
 INTEGER(i4) :: ierr
 LOGICAL :: rst
 CHARACTER(LEN=OFT_PATH_SLEN) :: xml_filename = 'none'
-TYPE(xml_node), POINTER :: doc,oft_node
+TYPE(xml_doc) :: doc
+TYPE(xml_node), POINTER :: oft_node
 !---Test for existence of XML file
 CALL copy_string_rev(xml_file,xml_filename)
 INQUIRE(FILE=TRIM(xml_filename),exist=rst)
 IF(.NOT.rst)RETURN
-doc=>xml_parseFile(TRIM(xml_filename),iostat=ierr)
+CALL xml_parsefile(TRIM(xml_filename),doc,ierr)
 IF(ierr/=0)RETURN
-CALL xml_get_element(doc,"oft",oft_node,ierr)
-IF(ierr/=0)RETURN
-oft_node_ptr=C_LOC(oft_node)
-#else
-oft_node_ptr=C_NULL_PTR
-#endif
+oft_node_ptr=C_LOC(doc%root)
 END SUBROUTINE oftpy_load_xml
 !---------------------------------------------------------------------------------
 !> Set debug verbosity level

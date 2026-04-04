@@ -32,24 +32,24 @@ jobs:
             os: ubuntu-22.04,
             cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
             python: "python3",
-            build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
+            build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 GCC 14",
             os: ubuntu-24.04,
             cc: "gcc-14", cxx: "g++-14", fc: "gfortran-14",
             python: "python3",
-            build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
+            build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_superlu_dist=1"
           }
         - {
             name: "Ubuntu 24.04 Intel 2025.2",
             os: ubuntu-24.04,
             cc: "icx", cxx: "icx", fc: "ifx",
             python: "python3",
-            build_flags: "--use_mkl --mkl_root=$MKLROOT",
-            mpi_build_flags: "--use_mkl --mkl_root=$MKLROOT",
+            build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
+            mpi_build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
             oneapi_ver: "-2025.2"
           }
         - {
@@ -57,26 +57,17 @@ jobs:
             os: ubuntu-24.04,
             cc: "icx", cxx: "icx", fc: "ifx",
             python: "python3",
-            build_flags: "--use_mkl --mkl_root=$MKLROOT",
-            mpi_build_flags: "--use_mkl --mkl_root=$MKLROOT",
+            build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
+            mpi_build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
             oneapi_ver: ""
-          }
-        - {
-            name: "macOS Sonoma GCC 13",
-            os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13",
-            python: "python3.12",
-            build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
-            xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer"
           }
         - {
             name: "macOS Sequoia GCC 15",
             os: macos-15,
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.13",
-            build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
+            build_flags: "--nthread=3 --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=3 --build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer"
           }
         - {
@@ -84,9 +75,18 @@ jobs:
             os: macos-15-intel,
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.13",
-            build_flags: "--build_umfpack=1 --build_superlu=1",
-            mpi_build_flags: "--build_umfpack=1 --build_superlu_dist=1",
+            build_flags: "--nthread=4 --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=4 --build_umfpack=1 --build_superlu_dist=1",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer"
+          }
+        - {
+            name: "macOS Tahoe GCC 15",
+            os: macos-26,
+            cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
+            python: "python3.13",
+            build_flags: "--nthread=3 --build_umfpack=1 --build_superlu=1",
+            mpi_build_flags: "--nthread=3 --build_umfpack=1 --build_superlu_dist=1",
+            xcode_path: "/Applications/Xcode_26.2.0.app/Contents/Developer"
           }
         exclude:
           - parallel: mpich
@@ -108,7 +108,7 @@ jobs:
               os: ubuntu-22.04,
               cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
               python: "python3",
-              mpi_build_flags: "--oblas_dynamic_arch --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 --build_cmake=1"
+              mpi_build_flags: "--nthread=2 --oblas_dynamic_arch --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 --build_cmake=1"
             }
 
     steps:
@@ -142,7 +142,7 @@ jobs:
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
-        python -m pip install pytest numpy scipy h5py matplotlib xarray jupyter nbconvert pyvista
+        python -m pip install pytest numpy scipy h5py matplotlib xarray jupyter nbconvert
     
     - name: Install Intel oneAPI
       if: ${{ matrix.config.cc == 'icx' }}
@@ -165,70 +165,71 @@ jobs:
         cat compiler_id.txt
 
     - name: Setup PyVista
+      if: ${{ !startsWith(matrix.config.os, 'macos') }}
       uses: pyvista/setup-headless-display-action@v3
 
     - name: Cache external libraries
       id: cache-ext-libs
       uses: actions/cache@v4
       with:
-        path: libs
+        path: builds
         key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py', 'compiler_id.txt') }}
 
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
-      run: mkdir libs
+      run: mkdir builds
 
     - name: Build external (OpenMP)
       if: ${{ matrix.parallel == 'openmp' }}
       shell: bash
       timeout-minutes: 30
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py ${{ matrix.config.build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1
+        python ../src/utilities/build_libs.py ${{ matrix.config.build_flags }} --no_dl_progress --build_arpack=1 --oft_build_tests=1
     
     - name: Build external (MPICH+OpenMP)
       if: startsWith(matrix.parallel, 'mpich')
       shell: bash
       timeout-minutes: 60
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_mpich=1
+        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --build_arpack=1 --oft_build_tests=1 --build_mpich=1
 
     - name: Build external (OpenMPI+OpenMP)
       if: startsWith(matrix.parallel, 'openmpi')
       shell: bash
       timeout-minutes: 60
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --nthread=3 --build_arpack=1 --oft_build_tests=1 --build_openmpi=1
+        python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --build_arpack=1 --oft_build_tests=1 --build_openmpi=1
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
       if: failure()
       with:
         name: Library_failure_log-${{ matrix.config.os }}_${{ matrix.parallel }}
-        path: libs/build/build_error.log
+        path: builds/build/build_error.log
 
     - name: Configure OFT
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make
     
     - name: Install OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make install
@@ -236,7 +237,7 @@ jobs:
     - name: Test OFT
       shell: bash
       timeout-minutes: 90
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make test
@@ -246,14 +247,14 @@ jobs:
       if: ${{ matrix.config.os != 'macos-15-intel' }}
       shell: bash
       timeout-minutes: 20
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make test_examples
 
     - name: Fixup cache
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         rm -rf build
         rm -rf petsc*

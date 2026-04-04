@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - cd_debug
+  pull_request:
+    paths:
+      - .github/workflows/pypi_build_macos.yml
+      - src/utilities/build_libs.py
   workflow_dispatch:
     inputs:
       release:
@@ -21,6 +25,7 @@ jobs:
       CC: ${{ matrix.config.cc }}
       CXX: ${{ matrix.config.cxx }}
       FC: ${{ matrix.config.fc }}
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.config.deployment_target }}
 
     strategy:
       fail-fast: false
@@ -32,17 +37,19 @@ jobs:
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.13",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
-            build_libs_flags: "--build_umfpack=1 --oblas_no_avx",
-            cache_key: "openmp_noavx"
+            build_libs_flags: "--nthread=4 --build_umfpack=1 --oblas_no_avx",
+            cache_key: "openmp_noavx",
+            deployment_target: "15.0"
           }
         - {
             name: "macOS-arm64",
             os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13",
+            cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.12",
-            xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer",
-            build_libs_flags: "--build_umfpack=1",
-            cache_key: "openmp"
+            xcode_path: "/Applications/Xcode_16.2.app/Contents/Developer",
+            build_libs_flags: "--nthread=3 --build_umfpack=1",
+            cache_key: "openmp",
+            deployment_target: "14.0"
         }
 
     steps:
@@ -87,7 +94,7 @@ jobs:
       working-directory: libs
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package ${{ matrix.config.build_libs_flags }}
+        python ../src/utilities/build_libs.py --no_dl_progress --build_arpack=1 --oft_package ${{ matrix.config.build_libs_flags }}
 
     - name: Build external (Release)
       if: ${{ inputs.release }}
@@ -95,7 +102,7 @@ jobs:
       working-directory: libs
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_package_release ${{ matrix.config.build_libs_flags }}
+        python ../src/utilities/build_libs.py --no_dl_progress --build_arpack=1 --oft_package --oft_package_release ${{ matrix.config.build_libs_flags }}
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4

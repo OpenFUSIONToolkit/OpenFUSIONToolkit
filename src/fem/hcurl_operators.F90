@@ -1631,11 +1631,9 @@ CHARACTER(LEN=2) :: lev_char
 TYPE(oft_hcurl_zerob), POINTER :: bc_tmp
 TYPE(oft_ml_fe_vecspace), POINTER :: tmp_vecspace
 !---
-TYPE(xml_node), POINTER :: pre_node
-#ifdef HAVE_XML
+TYPE(xml_node) :: pre_node
 integer(i4) :: nnodes
-TYPE(xml_node), POINTER :: hcurl_node
-#endif
+TYPE(xml_node) :: hcurl_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
@@ -1677,13 +1675,10 @@ CALL ML_hcurl_rep%set_level(levin)
 !------------------------------------------------------------------------------
 ! Search for XML-spec
 !------------------------------------------------------------------------------
-NULLIFY(pre_node)
-#ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"hcurl",hcurl_node,ierr)
   IF(ierr==0)CALL xml_get_element(hcurl_node,"wop",pre_node,ierr)
 END IF
-#endif
 !------------------------------------------------------------------------------
 ! Setup preconditioner
 !------------------------------------------------------------------------------
@@ -1725,11 +1720,9 @@ CLASS(oft_vector), POINTER :: oft_hcurl_vec
 TYPE(oft_hcurl_zerob), POINTER :: bc_tmp
 TYPE(oft_ml_fe_vecspace), POINTER :: tmp_vecspace
 !---
-TYPE(xml_node), POINTER :: pre_node
-#ifdef HAVE_XML
+TYPE(xml_node) :: pre_node
 integer(i4) :: nnodes
-TYPE(xml_node), POINTER :: hcurl_node
-#endif
+TYPE(xml_node) :: hcurl_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
@@ -1765,13 +1758,10 @@ CALL ML_hcurl_rep%set_level(levin)
 !------------------------------------------------------------------------------
 ! Search for XML-spec
 !------------------------------------------------------------------------------
-NULLIFY(pre_node)
-#ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"hcurl",hcurl_node,ierr)
   IF(ierr==0)CALL xml_get_element(hcurl_node,"jmlb",pre_node,ierr)
 END IF
-#endif
 !------------------------------------------------------------------------------
 ! Setup preconditioner
 !------------------------------------------------------------------------------

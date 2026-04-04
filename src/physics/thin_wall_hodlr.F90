@@ -2920,12 +2920,12 @@ IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
   END IF
   DEALLOCATE(imap)
   DO i=1,self%mf_obj%ndense+1
-    level=self%mf_obj%dense_blocks(1,i)
-    iblock=self%mf_obj%dense_blocks(2,i)
     IF(i==self%mf_obj%ndense+1)THEN
       IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))EXIT
       n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
     ELSE
+      level=self%mf_obj%dense_blocks(1,i)
+      iblock=self%mf_obj%dense_blocks(2,i)
       n = self%mf_obj%levels(level)%blocks(iblock)%nelems
     END IF
     ! oft_env%pm=.TRUE.
@@ -3062,12 +3062,12 @@ IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
   END IF
   DEALLOCATE(imap)
   DO i=1,self%mf_obj%ndense+1
-    level=self%mf_obj%dense_blocks(1,i)
-    iblock=self%mf_obj%dense_blocks(2,i)
     IF(i==self%mf_obj%ndense+1)THEN
       IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))EXIT
       n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
     ELSE
+      level=self%mf_obj%dense_blocks(1,i)
+      iblock=self%mf_obj%dense_blocks(2,i)
       n = self%mf_obj%levels(level)%blocks(iblock)%nelems
     END IF
     ! oft_env%pm=.TRUE.
