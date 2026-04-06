@@ -6,7 +6,8 @@ on:
       - main
       - cov_debug
   pull_request:
-    types: [opened, reopened, synchronize]
+    types:
+      - ready_for_review
 
 concurrency:
   group: cov-${{ github.ref }}
@@ -38,12 +39,12 @@ jobs:
       id: cache-ext-libs
       uses: actions/cache@v4
       with:
-        path: libs
+        path: builds
         key: cov_build-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
-      run: mkdir libs
+      run: mkdir builds
 
     - name: Check compilers
       run: |
@@ -55,9 +56,9 @@ jobs:
     - name: Build external
       shell: bash
       timeout-minutes: 60
-      working-directory: libs
+      working-directory: builds
       run: >
-        python3 ../src/utilities/build_libs.py --no_dl_progress --nthread=2
+        python3 ../src/utilities/build_libs.py --no_dl_progress --nthread=4
         --build_mpich=1 --build_arpack=1 --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1
         --build_cmake=1 --oft_build_tests=1 --oft_build_coverage
 
@@ -66,38 +67,38 @@ jobs:
       if: failure()
       with:
         name: Library failure log
-        path: libs/build/build_error.log
+        path: builds/build/build_error.log
 
     - name: Configure OFT
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/oft_venv/bin/activate
         bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: make
 
     - name: Test OFT
       shell: bash
       timeout-minutes: 120
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/oft_venv/bin/activate
         make test_cov
     
     - name: Fixup cache
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         rm -rf build
         rm -rf petsc*
     
     - name: Generate coverage report (GCOV)
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         lcov -c --directory . --output-file main_coverage.info --gcov-tool $GCOV
         lcov --ignore-errors unused -r main_coverage.info -o cleaned_coverage.txt '/opt/*' '/usr/*'
@@ -105,7 +106,7 @@ jobs:
     
     - name: Generate coverage report (Python)
       shell: bash
-      working-directory: libs/build_release/tests
+      working-directory: builds/build_release/tests
       run: |
         source ${{ github.workspace }}/oft_venv/bin/activate
         coverage combine . grid lin_alg fem physics
@@ -115,7 +116,7 @@ jobs:
     - name: Upload coverage report to Codecov
       uses: codecov/codecov-action@v5
       with:
-        files: libs/build_release/cleaned_coverage.txt,libs/build_release/tests/coverage.xml
+        files: builds/build_release/cleaned_coverage.txt,builds/build_release/tests/coverage.xml
         token: ${{ secrets.CODECOV_TOKEN }}
         report_type: coverage
         disable_search: true
