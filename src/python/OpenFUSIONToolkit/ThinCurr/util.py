@@ -27,11 +27,9 @@ class torus_fourier_sensor():
         if radial_positions[0] == radial_positions[-1] or axial_positions[0] == axial_positions[-1]:
             self.radial_positions =  radial_positions[0:-1]
             self.axial_positions = axial_positions[0:-1]
-            print(len(self.radial_positions))
         else:
             self.radial_positions =  radial_positions
             self.axial_positions = axial_positions
-            print(len(self.radial_positions))
         theta_values,_ = self.convert_to_polar()
         sorted_indices = np.argsort(theta_values)
         self.radial_positions = self.radial_positions[sorted_indices]
