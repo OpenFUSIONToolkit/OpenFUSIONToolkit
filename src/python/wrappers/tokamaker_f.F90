@@ -629,7 +629,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: eigs !< Eigenvalues array
 TYPE(c_ptr), VALUE, INTENT(in) :: eig_vecs !< Eigenvectors array
 LOGICAL(c_bool), VALUE, INTENT(in) :: pm !< Report solver progress?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-REAL(8) :: alam_save,pnorm_save
+REAL(8) :: ffp_scale_save,p_scale_save
 REAL(8), POINTER :: eigs_tmp(:,:),eig_vecs_tmp(:,:)
 LOGICAL :: pm_save
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -642,14 +642,14 @@ IF(ANY(tMaker_obj%device%Rcoils>0.d0))THEN
 END IF
 CALL c_f_pointer(eigs, eigs_tmp, [2,neigs])
 CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [tMaker_obj%gs_equil%psi%n,neigs])
-alam_save=tMaker_obj%gs_equil%alam; tMaker_obj%gs_equil%alam=0.d0
-pnorm_save=tMaker_obj%gs_equil%pnorm; tMaker_obj%gs_equil%pnorm=0.d0
+ffp_scale_save=tMaker_obj%gs_equil%ffp_scale; tMaker_obj%gs_equil%ffp_scale=0.d0
+p_scale_save=tMaker_obj%gs_equil%p_scale; tMaker_obj%gs_equil%p_scale=0.d0
 pm_save=oft_env%pm; oft_env%pm=pm
 CALL eig_gs_td(tMaker_obj%gs_equil,neigs,eigs_tmp,eig_vecs_tmp,0.d0,.FALSE.,-1.d0)
 oft_env%pm=pm_save
 IF((eigs_tmp(1,1)<-1.d98).AND.(eigs_tmp(2,1)<-1.d98))CALL copy_string('Error in eigenvalue solve',error_str)
-tMaker_obj%gs_equil%alam=alam_save
-tMaker_obj%gs_equil%pnorm=pnorm_save
+tMaker_obj%gs_equil%ffp_scale=ffp_scale_save
+tMaker_obj%gs_equil%p_scale=p_scale_save
 #else
 CALL copy_string('Eigenvalue solve requires ARPACK',error_str)
 #endif
@@ -961,15 +961,15 @@ END SUBROUTINE tokamaker_get_plasma_Lmat
 !---------------------------------------------------------------------------------
 !> Get references to internal variables for direct access from Python
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_refs(tMaker_equil_ptr,o_point,lim_point,x_points,diverted,plasma_bounds,alam,pnorm,has_plasma,error_str) BIND(C,NAME="tokamaker_get_refs")
+SUBROUTINE tokamaker_get_refs(tMaker_equil_ptr,o_point,lim_point,x_points,diverted,plasma_bounds,ffp_scale,p_scale,has_plasma,error_str) BIND(C,NAME="tokamaker_get_refs")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 TYPE(c_ptr), INTENT(out) :: o_point !< Pointer to magnetic axis array
 TYPE(c_ptr), INTENT(out) :: lim_point !< Pointer to limiting point array
 TYPE(c_ptr), INTENT(out) :: x_points !< Pointer to X-point array
 TYPE(c_ptr), INTENT(out) :: diverted !< Pointer to diverted flag
 TYPE(c_ptr), INTENT(out) :: plasma_bounds !< Pointer to plasma axis/LCFS values
-TYPE(c_ptr), INTENT(out) :: alam !< Pointer to F*F' scale factor
-TYPE(c_ptr), INTENT(out) :: pnorm !< Pointer to P' scale factor
+TYPE(c_ptr), INTENT(out) :: ffp_scale !< Pointer to F*F' scale factor
+TYPE(c_ptr), INTENT(out) :: p_scale !< Pointer to P' scale factor
 TYPE(c_ptr), INTENT(out) :: has_plasma !< Pointer to plasma/vacuum flag
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
@@ -979,8 +979,8 @@ lim_point=c_loc(tMaker_equil_obj%lim_point)
 x_points=c_loc(tMaker_equil_obj%x_points)
 diverted=c_loc(tMaker_equil_obj%diverted)
 plasma_bounds=c_loc(tMaker_equil_obj%plasma_bounds)
-alam=c_loc(tMaker_equil_obj%alam)
-pnorm=c_loc(tMaker_equil_obj%pnorm)
+ffp_scale=c_loc(tMaker_equil_obj%ffp_scale)
+p_scale=c_loc(tMaker_equil_obj%p_scale)
 has_plasma=c_loc(tMaker_equil_obj%has_plasma)
 END SUBROUTINE tokamaker_get_refs
 !---------------------------------------------------------------------------------
@@ -1099,14 +1099,14 @@ END IF
 DO i=1,npsi
   r=psi_in(i)*(x2-x1) + x1
   IF(tMaker_equil_obj%mode==0)THEN
-    fp(i)=tMaker_equil_obj%alam*tMaker_equil_obj%I%fp(r)
-    f(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%alam*tMaker_equil_obj%I%f(r) + tMaker_equil_obj%I%f_offset
+    fp(i)=tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%fp(r)
+    f(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%f(r) + tMaker_equil_obj%I%f_offset
   ELSE
-    f(i)=SQRT(tMaker_equil_obj%psiscale*tMaker_equil_obj%alam*tMaker_equil_obj%I%f(r) + tMaker_equil_obj%I%f_offset**2)
-    fp(i)=tMaker_equil_obj%alam*tMaker_equil_obj%I%fp(r)/(2.d0*f(i))
+    f(i)=SQRT(tMaker_equil_obj%psiscale*tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%f(r) + tMaker_equil_obj%I%f_offset**2)
+    fp(i)=tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%fp(r)/(2.d0*f(i))
   END IF
-  pp(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%pnorm*tMaker_equil_obj%P%fp(r)
-  p(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%psiscale*tMaker_equil_obj%pnorm*tMaker_equil_obj%P%f(r)
+  pp(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%p_scale*tMaker_equil_obj%P%fp(r)
+  p(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%psiscale*tMaker_equil_obj%p_scale*tMaker_equil_obj%P%f(r)
 END DO
 END SUBROUTINE tokamaker_get_profs
 !---------------------------------------------------------------------------------

@@ -253,8 +253,8 @@ do j=1,self%npsi-1
     call gseq%device%mesh%jacobian(active_tracer%cell,active_tracer%f,gop,vol)
     call psi_int%interp(active_tracer%cell,active_tracer%f,gop,psi_surf)
     !---Get flux variables
-    I=gseq%alam*gseq%I%f(psi_surf(1))+gseq%I%f_offset
-    Ip=gseq%alam*gseq%I%fp(psi_surf(1))
+    I=gseq%ffp_scale*gseq%I%f(psi_surf(1))+gseq%I%f_offset
+    Ip=gseq%ffp_scale*gseq%I%fp(psi_surf(1))
     v=>active_tracer%v
     !---Compute profile variables
     q=I*v(3)/(2*pi) ! Safety Factor (q)
@@ -462,7 +462,7 @@ DO i=1,self%npsi
 END DO
 ! Disable Ip matching and fix F*F' scale (matching is done here instead)
 IF(gseq%Itor_target>0.d0)gseq%Itor_target=-gseq%Itor_target
-gseq%alam=1.d0
+gseq%ffp_scale=1.d0
 !---Clean up
 CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)

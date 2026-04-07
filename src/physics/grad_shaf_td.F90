@@ -392,8 +392,8 @@ DEALLOCATE(vals_out)
 IF(j>4)THEN
     nretry=-nretry
 ELSE
-    self%mfop%gs_equil%alam=self%mfop%f_scale
-    self%mfop%gs_equil%pnorm=self%mfop%p_scale
+    self%mfop%gs_equil%ffp_scale=self%mfop%f_scale
+    self%mfop%gs_equil%p_scale=self%mfop%p_scale
 END IF
 ! WRITE(*,'(4ES14.6,3I4)')time_val,self%mfop%ip,self%mfop%gs_equil%o_point(2),err_tmp, &
 ! nksolver%nlits,nksolver%lits,j
@@ -606,8 +606,8 @@ self%gs_equil=>eq_in
 self%gs_device=>eq_in%device
 self%ip_target=self%gs_equil%Itor_target
 self%ip_ratio_target=self%gs_equil%Ip_ratio_target
-self%f_scale=self%gs_equil%alam
-self%p_scale=self%gs_equil%pnorm
+self%f_scale=self%gs_equil%ffp_scale
+self%p_scale=self%gs_equil%p_scale
 !
 self%F=>self%gs_equil%I
 self%P=>self%gs_equil%P
@@ -635,8 +635,8 @@ self%P=>self%gs_equil%P
 ! Update current target and sync scale factors
 self%ip_target=self%gs_equil%Itor_target
 self%ip_ratio_target=self%gs_equil%Ip_ratio_target
-self%f_scale=self%gs_equil%alam
-self%p_scale=self%gs_equil%pnorm
+self%f_scale=self%gs_equil%ffp_scale
+self%p_scale=self%gs_equil%p_scale
 DEBUG_STACK_POP
 end subroutine update_mfop
 !------------------------------------------------------------------------------

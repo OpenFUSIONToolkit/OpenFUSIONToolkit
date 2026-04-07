@@ -281,8 +281,8 @@ TYPE :: gs_equil
   INTEGER(i4) :: flux_ntargets = 0 !< Number of \f$ \psi \f$ target locations
   REAL(r8) :: psiscale = 1.d0 !< Solution scale factor for homogeneous equilibria
   REAL(r8) :: psimax = 1.d0 !< Maximum \f$ \psi \f$ value for homogeneous equilibria
-  REAL(r8) :: alam = 1.d0 !< Scale factor for F*F' or F' profile (see mode)
-  REAL(r8) :: pnorm = 1.d0 !< Scale factor for P' profile
+  REAL(r8) :: ffp_scale = 1.d0 !< Scale factor for F*F' or F' profile (see mode)
+  REAL(r8) :: p_scale = 1.d0 !< Scale factor for P' profile
   REAL(r8) :: dipole_a = 0.d0 !< Anisotropy exponent for dipole pressure profiles
   REAL(r8) :: mirror_n = -1.d0 !< Anisotropy exponent for mirror pressure profiles
   REAL(r8) :: mirror_bturn = 0.d0 !< Turning point for mirror pressure profiles
@@ -1479,8 +1479,8 @@ self%mode=source%mode
 self%nx_points=source%nx_points
 self%psiscale=source%psiscale
 self%psimax=source%psimax
-self%alam=source%alam
-self%pnorm=source%pnorm
+self%ffp_scale=source%ffp_scale
+self%p_scale=source%p_scale
 self%dipole_a=source%dipole_a
 self%mirror_n=source%mirror_n
 self%mirror_bturn=source%mirror_bturn
@@ -1573,9 +1573,9 @@ ELSE
   CALL equil%psi%restore_local(psi_vals)
   WRITE(*,'(2A)')oft_indent,'Computing force-free eigenmode'
   CALL oft_increase_indent
-  call eigsolver%apply(equil%psi,equil%alam)
-  equil%alam=sqrt(equil%alam)
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Lambda = ',equil%alam
+  call eigsolver%apply(equil%psi,equil%ffp_scale)
+  equil%ffp_scale=sqrt(equil%ffp_scale)
+  WRITE(*,'(2A,ES11.3)')oft_indent,'Lambda = ',equil%ffp_scale
   CALL oft_decrease_indent
   !---
   IF(.NOT.self%free)THEN
@@ -2240,17 +2240,17 @@ DO j=1,device%fe_rep%mesh%nc
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
       IF(self%mode==0)THEN
-        itor_loc = self%I%Fp(psitmp(1))*((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset)/(pt(1)+gs_epsilon)
+        itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        itor_loc = 0.5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
+        itor_loc = 0.5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
       END IF
       ! Handle anisotropic pressure
       IF(ASSOCIATED(self%P_ani))THEN
         CALL self%P_ani%interp(j,device%fe_rep%quad%pts(:,m),goptmp,pani)
         CALL bcross_kappa_fun%interp(j,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
-        itor_loc = itor_loc + self%pnorm*pt(1)*(self%P%fp(psitmp(1))*pani(2)+self%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
+        itor_loc = itor_loc + self%p_scale*pt(1)*(self%P%fp(psitmp(1))*pani(2)+self%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
       ELSE
-        itor_loc = itor_loc + self%pnorm*pt(1)*self%P%Fp(psitmp(1))
+        itor_loc = itor_loc + self%p_scale*pt(1)*self%P%Fp(psitmp(1))
       END IF
       b_tmp=0.d0
       DO l=1,device%fe_rep%nce
@@ -2512,12 +2512,12 @@ class(gs_factory), intent(inout) :: self !< G-S factory/device object
 class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
 integer(4), optional, intent(out) :: ierr !< Error flag
 class(oft_vector), pointer :: rhs,rhs_bc,psip,psiin,psi_bc,psi_eddy,psi_dt
-class(oft_vector), pointer :: tmp_vec,psi_alam,psi_press,psi_vac,psi_vcont,psi_aug,tmp_aug
+class(oft_vector), pointer :: tmp_vec,psi_ffp,psi_press,psi_vac,psi_vcont,psi_aug,tmp_aug
 real(r8), pointer, DIMENSION(:) :: vals_tmp
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: goptmp(3,3),pt(2),v,pmax,pmin,dpnorm,curr
 real(8) :: opoint(2),R0_in,f(3),V0_in,V0_tmp,estored
-REAL(8) :: nl_res,psimax,alamin,alamp,itor,pnorm0,pnormp,itor_alam,itor_press
+REAL(8) :: nl_res,psimax,ffp_scale_in,ffp_scale_prev,itor,pnorm0,pnormp,itor_ffp,itor_press
 REAL(8) :: R0_tmp,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3),t0,t1
 REAL(8) :: param_mat(3,3),param_vec(3),param_rhs(3)
 integer(4) :: i,ii,j,k,error_flag,cell,ierr_loc
@@ -2541,8 +2541,8 @@ CALL equil%psi%new(psip)
 CALL equil%psi%new(psiin)
 CALL psiin%add(0.d0,1.d0,equil%psi)
 CALL psip%add(0.d0,1.d0,equil%psi)
-alamin=equil%alam
-alamp=equil%alam
+ffp_scale_in=equil%ffp_scale
+ffp_scale_prev=equil%ffp_scale
 !---
 CALL equil%psi%new(rhs)
 CALL equil%psi%new(rhs_bc)
@@ -2550,7 +2550,7 @@ CALL equil%psi%new(psi_bc)
 CALL equil%psi%new(psi_vac)
 CALL equil%psi%new(psi_vcont)
 CALL equil%psi%new(psi_eddy)
-CALL equil%psi%new(psi_alam)
+CALL equil%psi%new(psi_ffp)
 CALL equil%psi%new(psi_press)
 t0=omp_get_wtime()
 IF(.NOT.self%free)THEN
@@ -2571,7 +2571,7 @@ CALL equil%I%update(equil)
 CALL equil%p%update(equil)
 IF(ASSOCIATED(equil%P_ani))CALL equil%P_ani%update(equil)
 !---Get J_phi source term
-CALL gs_source(equil,equil%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
+CALL gs_source(equil,equil%psi,rhs,psi_ffp,psi_press,itor_ffp,itor_press,estored)
 IF(self%dt>0.d0)THEN
   CALL equil%psi%new(psi_dt)
   IF(self%ncoils>0)THEN
@@ -2626,8 +2626,8 @@ IF(self%save_visit.AND.self%plot_final.AND.(eq_count==0))THEN
 END IF
 !---
 nl_res=1.d99
-pnorm0 = equil%pnorm
-pnormp = equil%pnorm
+pnorm0 = equil%p_scale
+pnormp = equil%p_scale
 R0_in = equil%o_point(1)
 V0_in = equil%o_point(2)
 cell=0
@@ -2667,7 +2667,7 @@ DO i=1,self%maxits
   CALL psip%add(0.d0,1.d0,equil%psi)
 
   !---Compute toroidal flux contribution
-  CALL rhs%add(0.d0,1.d0,psi_alam)
+  CALL rhs%add(0.d0,1.d0,psi_ffp)
   CALL self%zerob_bc%apply(rhs)
   !---Solve linear system
   CALL rhs%get_local(vals_tmp)
@@ -2680,8 +2680,8 @@ DO i=1,self%maxits
   self%lu_solver%nrhs=2
   CALL psi_press%set(0.d0)
   CALL self%lu_solver%apply(psi_press,rhs)
-  CALL psi_alam%restore_local(self%lu_solver%sec_rhs(:,1))
-  IF(ABS(equil%alam)>TINY(equil%alam)*1.d2)CALL psi_alam%scale(1.d0/equil%alam)
+  CALL psi_ffp%restore_local(self%lu_solver%sec_rhs(:,1))
+  IF(ABS(equil%ffp_scale)>TINY(equil%ffp_scale)*1.d2)CALL psi_ffp%scale(1.d0/equil%ffp_scale)
   self%lu_solver%nrhs=1
   self%timing(3)=self%timing(3)+(omp_get_wtime()-t1)
   oft_env%pm=pm_save
@@ -2693,11 +2693,11 @@ DO i=1,self%maxits
     param_rhs(1)=0.d0
   ELSE
     IF(equil%Itor_target>0.d0)THEN
-      param_mat(1,:)=[itor_alam,itor_press,0.d0]
+      param_mat(1,:)=[itor_ffp,itor_press,0.d0]
       param_rhs(1)=equil%Itor_target
     ELSE
       param_mat(1,1)=1.d0
-      param_rhs(1)=equil%alam
+      param_rhs(1)=equil%ffp_scale
     END IF
   END IF
 
@@ -2724,7 +2724,7 @@ DO i=1,self%maxits
       param_rhs(2)=equil%pax_target
     ELSE
       param_mat(2,2)=1.d0
-      param_rhs(2)=equil%pnorm
+      param_rhs(2)=equil%p_scale
     END IF
   ELSE
     IF(equil%R0_target>0.d0)THEN
@@ -2737,7 +2737,7 @@ DO i=1,self%maxits
       psi_geval%u=>psi_vcont
       CALL psi_geval%setup(self%fe_rep)
       CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-      psi_geval%u=>psi_alam
+      psi_geval%u=>psi_ffp
       CALL psi_geval%setup(self%fe_rep)
       CALL psi_geval%interp(cell,f,goptmp,gpsi1)
       psi_geval%u=>psi_press
@@ -2752,10 +2752,10 @@ DO i=1,self%maxits
       param_rhs(2)=equil%pax_target
     ELSE IF(equil%Ip_ratio_target>-1.d98)THEN
       param_rhs(2)=0.d0
-      param_mat(2,:)=[itor_alam,-itor_press*equil%Ip_ratio_target,0.d0]
+      param_mat(2,:)=[itor_ffp,-itor_press*equil%Ip_ratio_target,0.d0]
     ELSE
       param_mat(2,2)=1.d0
-      param_rhs(2)=equil%pnorm
+      param_rhs(2)=equil%p_scale
     END IF
   END IF
 
@@ -2772,7 +2772,7 @@ DO i=1,self%maxits
     psi_geval%u=>psi_vcont
     CALL psi_geval%setup(self%fe_rep)
     CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-    psi_geval%u=>psi_alam
+    psi_geval%u=>psi_ffp
     CALL psi_geval%setup(self%fe_rep)
     CALL psi_geval%interp(cell,f,goptmp,gpsi1)
     psi_geval%u=>psi_press
@@ -2793,13 +2793,13 @@ DO i=1,self%maxits
     EXIT
   END IF
   param_vec=MATMUL(param_mat,param_rhs)
-  equil%alam=param_vec(1)
-  equil%pnorm=param_vec(2)
+  equil%ffp_scale=param_vec(1)
+  equil%p_scale=param_vec(2)
   equil%vcontrol_val=param_vec(3)
 
   ! Create plasma poloidal flux
   CALL equil%psi%set(0.d0)
-  CALL equil%psi%add(0.d0,equil%alam,psi_alam,equil%pnorm,psi_press)
+  CALL equil%psi%add(0.d0,equil%ffp_scale,psi_ffp,equil%p_scale,psi_press)
 
   ! Fit coils if operating in isoflux mode
   IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
@@ -2935,7 +2935,7 @@ DO i=1,self%maxits
       CALL equil%psi%get_local(vals_tmp)
       equil%psimax=MAXVAL(vals_tmp)
       CALL equil%psi%scale(1.d0/equil%psimax)
-      equil%alam=SQRT((equil%alam**2)/equil%psimax)
+      equil%ffp_scale=SQRT((equil%ffp_scale**2)/equil%psimax)
       equil%psimax=1.d0
     ! ELSE IF(self%Itor_target>0.d0)THEN
     !   itor=self%itor()
@@ -2943,13 +2943,13 @@ DO i=1,self%maxits
     !     error_flag=-5
     !     EXIT
     !   END IF
-    !   alamp=itor/self%Itor_target
-    !   CALL self%psi%scale(1.d0/alamp)
-    !   self%alam=SQRT((self%alam**2)/alamp)
+    !   ffp_scale_prev=itor/self%Itor_target
+    !   CALL self%psi%scale(1.d0/ffp_scale_prev)
+    !   self%ffp_scale=SQRT((self%ffp_scale**2)/ffp_scale_prev)
     END IF
     CALL equil%psi%add(1.d0,1.d0,psi_vac)
     CALL equil%psi%add(1.d0,equil%vcontrol_val,psi_vcont)
-    alamp=equil%alam
+    ffp_scale_prev=equil%ffp_scale
   END IF
   !---Update flux functions
   CALL gs_update_bounds(equil)
@@ -2975,7 +2975,7 @@ DO i=1,self%maxits
     CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vcont')
   END IF
   !---Update vacuum field part
-  CALL gs_source(equil,equil%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
+  CALL gs_source(equil,equil%psi,rhs,psi_ffp,psi_press,itor_ffp,itor_press,estored)
   !---Compute error in NL function
   CALL tmp_vec%set(0.d0)
   CALL tmp_vec%add(0.d0,1.d0,equil%psi,-1.d0,psi_vac)
@@ -2985,7 +2985,7 @@ DO i=1,self%maxits
   CALL self%zerob_bc%apply(psip)
   nl_res=psip%dot(psip)
   !---Output progress
-  IF(oft_env%pm)WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,equil%alam,equil%pnorm, &
+  IF(oft_env%pm)WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,equil%ffp_scale,equil%p_scale, &
     SQRT(nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
   !---Check if converged
   IF((equil%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
@@ -3028,10 +3028,10 @@ CALL psi_bc%delete
 CALL psi_vac%delete
 CALL psi_vcont%delete
 CALL psi_eddy%delete
-CALL psi_alam%delete
+CALL psi_ffp%delete
 CALL psi_press%delete
 DEALLOCATE(rhs,psip,psiin)
-DEALLOCATE(rhs_bc,psi_bc,psi_alam,psi_press,psi_vac,psi_vcont)
+DEALLOCATE(rhs_bc,psi_bc,psi_ffp,psi_press,psi_vac,psi_vcont)
 DEALLOCATE(vals_tmp,psi_eddy)
 IF(self%dt>0.d0)THEN
   CALL psi_dt%delete
@@ -3062,13 +3062,13 @@ class(gs_factory), intent(inout) :: self !< G-S factory/device object
 class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
 logical, intent(in) :: adjust_r0 !< Needs docs
 integer(4), optional, intent(out) :: ierr !< Error flag
-class(oft_vector), pointer :: rhs,rhs_bc,psip,psiin,psi_bc,psi_alam,psi_press
+class(oft_vector), pointer :: rhs,rhs_bc,psip,psiin,psi_bc,psi_ffp,psi_press
 class(oft_vector), pointer :: psi_vac,psi_vcont
 real(r8), pointer, dimension(:) :: vals_tmp
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: goptmp(3,3),pt(2),v,pmax,pmin,dpnorm
-real(8) :: opoint(2),f(3),t0,t1,curr,itor_alam,itor_press,estored
-REAL(8) :: psimax,alamin,alamp,pnorm0,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3)
+real(8) :: opoint(2),f(3),t0,t1,curr,itor_ffp,itor_press,estored
+REAL(8) :: psimax,ffp_scale_in,ffp_scale_prev,pnorm0,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3)
 REAL(8) :: param_mat(3,3),param_vec(3),param_rhs(3)
 integer(4) :: ii,j,k,error_flag,cell,ierr_loc
 CHARACTER(LEN=40) :: err_reason
@@ -3082,15 +3082,15 @@ CALL equil%psi%new(psip)
 CALL equil%psi%new(psiin)
 CALL psiin%add(0.d0,1.d0,equil%psi)
 CALL psip%add(0.d0,1.d0,equil%psi)
-alamin=equil%alam
-alamp=equil%alam
+ffp_scale_in=equil%ffp_scale
+ffp_scale_prev=equil%ffp_scale
 !---
 CALL equil%psi%new(rhs)
 CALL equil%psi%new(rhs_bc)
 CALL equil%psi%new(psi_bc)
 CALL equil%psi%new(psi_vac)
 CALL equil%psi%new(psi_vcont)
-CALL equil%psi%new(psi_alam)
+CALL equil%psi%new(psi_ffp)
 CALL equil%psi%new(psi_press)
 IF(oft_env%pm)THEN
   WRITE(*,'(2A)')oft_indent,'Starting Linearized GS solver'
@@ -3102,8 +3102,8 @@ CALL equil%I%update(equil)
 CALL equil%p%update(equil)
 IF(ASSOCIATED(equil%P_ani))CALL equil%P_ani%update(equil)
 !---Get J_phi source term
-CALL gs_source(equil,equil%psi,rhs,psi_alam,psi_press,itor_alam,itor_press,estored)
-IF(ABS(equil%alam)>TINY(equil%alam)*1.d2)CALL psi_alam%scale(1.d0/equil%alam)
+CALL gs_source(equil,equil%psi,rhs,psi_ffp,psi_press,itor_ffp,itor_press,estored)
+IF(ABS(equil%ffp_scale)>TINY(equil%ffp_scale)*1.d2)CALL psi_ffp%scale(1.d0/equil%ffp_scale)
 !---Update vacuum field part
 CALL psi_vac%set(0.d0)
 DO j=1,self%ncoils
@@ -3128,13 +3128,13 @@ END DO
 param_mat=0.d0
 param_rhs=0.d0
 IF(equil%Itor_target>0.d0)THEN
-  itor_alam=equil%itor(psi_alam)
+  itor_ffp=equil%itor(psi_ffp)
   itor_press=equil%itor(psi_press)
-  param_mat(1,:)=[itor_alam,itor_press,0.d0]
+  param_mat(1,:)=[itor_ffp,itor_press,0.d0]
   param_rhs(1)=equil%Itor_target
 ELSE
   param_mat(1,1)=1.d0
-  param_rhs(1)=equil%alam
+  param_rhs(1)=equil%ffp_scale
 END IF
 
 !---Get desired O-point location for linear fit
@@ -3156,7 +3156,7 @@ IF((equil%R0_target>0.d0).AND.adjust_r0)THEN
   psi_geval%u=>psi_vcont
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-  psi_geval%u=>psi_alam
+  psi_geval%u=>psi_ffp
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi1)
   psi_geval%u=>psi_press
@@ -3165,7 +3165,7 @@ IF((equil%R0_target>0.d0).AND.adjust_r0)THEN
   param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
 ELSE
   param_mat(2,2)=1.d0
-  param_rhs(2)=equil%pnorm
+  param_rhs(2)=equil%p_scale
 END IF
 
 !---Add row for vertical control
@@ -3181,7 +3181,7 @@ IF((equil%V0_target>-1.d98).AND.adjust_r0)THEN
   psi_geval%u=>psi_vcont
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-  psi_geval%u=>psi_alam
+  psi_geval%u=>psi_ffp
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi1)
   psi_geval%u=>psi_press
@@ -3198,13 +3198,13 @@ pm_save=oft_env%pm; oft_env%pm=.FALSE.
 CALL lapack_matinv(3,param_mat,ierr_loc)
 oft_env%pm=pm_save
 param_vec=MATMUL(param_mat,param_rhs)
-equil%alam=param_vec(1)
-equil%pnorm=param_vec(2)
+equil%ffp_scale=param_vec(1)
+equil%p_scale=param_vec(2)
 equil%vcontrol_val=param_vec(3)
 
 ! Create plasma poloidal flux
 CALL equil%psi%set(0.d0)
-CALL equil%psi%add(0.d0,equil%alam,psi_alam,equil%pnorm,psi_press)
+CALL equil%psi%add(0.d0,equil%ffp_scale,psi_ffp,equil%p_scale,psi_press)
 CALL equil%psi%add(1.d0,1.d0,psi_vac)
 CALL equil%psi%add(1.d0,equil%vcontrol_val,psi_vcont)
 
@@ -3212,7 +3212,7 @@ CALL equil%psi%add(1.d0,equil%vcontrol_val,psi_vcont)
 ! !---Compute initial guess based on zeroing r-gradient
 ! IF(equil%R0_target>0.d0.AND.adjust_r0)THEN
 !   !---Compute toroidal flux contribution
-!   CALL rhs%add(0.d0,1.d0,psi_alam)
+!   CALL rhs%add(0.d0,1.d0,psi_ffp)
 !   IF(equil%free)THEN ! Set BC for dirichlet flux
 !     CALL psi_bc%set(0.d0)
 !     CALL gs_set_bc(self,self%u_hom,psi_bc)
@@ -3231,14 +3231,14 @@ CALL equil%psi%add(1.d0,equil%vcontrol_val,psi_vcont)
 !   t1=omp_get_wtime()
 !   self%lu_solver%nrhs=2
 !   CALL self%lu_solver%apply(psi_press,rhs)
-!   CALL psi_alam%restore_local(self%lu_solver%sec_rhs(:,1))
+!   CALL psi_ffp%restore_local(self%lu_solver%sec_rhs(:,1))
 !   self%lu_solver%nrhs=1
 !   self%timing(3)=self%timing(3)+(omp_get_wtime()-t1)
 !   oft_env%pm=pm_save
 !   !---Update pressure with fixed R0 using bissection
 !   pmin=-1.d99
 !   pmax=-1.d99
-!   pnorm0=self%pnorm
+!   pnorm0=self%p_scale
 !   dpnorm=.1d0
 !   R0_hist=0.d0
 !   R0_tmp=self%R0_target
@@ -3251,18 +3251,18 @@ CALL equil%psi%add(1.d0,equil%vcontrol_val,psi_vcont)
 !       CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
 !       CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
 !       !
-!       psi_geval%u=>psi_alam
+!       psi_geval%u=>psi_ffp
 !       CALL psi_geval%setup(self%fe_rep)
 !       CALL psi_geval%interp(cell,f,goptmp,gpsi1)
 !       psi_geval%u=>psi_press
 !       CALL psi_geval%setup(self%fe_rep)
 !       CALL psi_geval%interp(cell,f,goptmp,gpsi2)
-!       IF(gpsi2(1)/=0.d0)self%pnorm=-gpsi1(1)/gpsi2(1)
+!       IF(gpsi2(1)/=0.d0)self%p_scale=-gpsi1(1)/gpsi2(1)
 !       opoint=pt
 !     END IF
 !     !
 !     CALL self%psi%set(0.d0)
-!     CALL self%psi%add(0.d0,1.d0,psi_alam,self%pnorm,psi_press)
+!     CALL self%psi%add(0.d0,1.d0,psi_ffp,self%p_scale,psi_press)
 !     IF(self%R0_target<0.d0)EXIT
 !     !---Compute R0
 !     CALL gs_psimax(self,psimax,opoint(1),opoint(2))
@@ -3270,22 +3270,22 @@ CALL equil%psi%add(1.d0,equil%vcontrol_val,psi_vcont)
 !     !---Compute next guess for pnorm
 !     IF(opoint(1)>R0_tmp)THEN
 !       R0_hist(2)=opoint(1)
-!       pmax=self%pnorm
+!       pmax=self%p_scale
 !     END IF
 !     IF(opoint(1)<R0_tmp)THEN
 !       R0_hist(1)=opoint(1)
-!       pmin=self%pnorm
+!       pmin=self%p_scale
 !     END IF
 !     IF(pmin>-1.d98.AND.pmax>-1.d98)THEN
-!       self%pnorm = (R0_tmp-R0_hist(1))*(pmax-pmin)/(R0_hist(2)-R0_hist(1)) + pmin
+!       self%p_scale = (R0_tmp-R0_hist(1))*(pmax-pmin)/(R0_hist(2)-R0_hist(1)) + pmin
 !       CYCLE
 !     END IF
-!     IF(opoint(1)>R0_tmp)self%pnorm = self%pnorm - dpnorm
-!     IF(opoint(1)<R0_tmp)self%pnorm = self%pnorm + dpnorm
+!     IF(opoint(1)>R0_tmp)self%p_scale = self%p_scale - dpnorm
+!     IF(opoint(1)<R0_tmp)self%p_scale = self%p_scale + dpnorm
 !   END DO
 ! ELSE
 !   !---Compute full contribution
-!   CALL rhs%add(0.d0,1.d0,psi_alam,self%pnorm,psi_press)
+!   CALL rhs%add(0.d0,1.d0,psi_ffp,self%p_scale,psi_press)
 !   IF(self%free)THEN ! Set BC for dirichlet flux
 !     CALL psi_bc%set(0.d0)
 !     CALL gs_set_bc(self,self%u_hom,psi_bc)
@@ -3325,10 +3325,10 @@ CALL rhs_bc%delete
 CALL psi_bc%delete
 CALL psi_vac%delete
 CALL psi_vcont%delete
-CALL psi_alam%delete
+CALL psi_ffp%delete
 CALL psi_press%delete
 DEALLOCATE(rhs,psip,psiin)
-DEALLOCATE(rhs_bc,psi_bc,psi_alam,psi_press,psi_vac,psi_vcont)
+DEALLOCATE(rhs_bc,psi_bc,psi_ffp,psi_press,psi_vac,psi_vcont)
 DEALLOCATE(vals_tmp)
 !---
 IF(self%compute_chi)CALL equil%get_chi
@@ -3582,7 +3582,7 @@ real(8), pointer, intent(inout) :: pts(:,:) !< Locations of boundary points
 real(8), pointer, intent(inout) :: fluxes(:) !< Required flux at each point
 class(oft_vector), pointer :: rhs,psi_fixed,psi_dummy
 real(r8), pointer, DIMENSION(:) :: vals_tmp
-real(8) :: itor_alam,itor_press,estored
+real(8) :: itor_ffp,itor_press,estored
 integer(4) :: i,io_unit
 logical :: pm_save
 CLASS(oft_matrix), POINTER :: dels_free
@@ -3601,7 +3601,7 @@ lu_solver%A=>dels_free
 CALL self%psi%new(rhs)
 CALL self%psi%new(psi_fixed)
 CALL self%psi%new(psi_dummy)
-CALL gs_source(self,self%psi,rhs,psi_fixed,psi_dummy,itor_alam,itor_press,estored)
+CALL gs_source(self,self%psi,rhs,psi_fixed,psi_dummy,itor_ffp,itor_press,estored)
 CALL psi_fixed%set(0.d0)
 CALL device%zerob_bc%apply(rhs)
 CALL lu_solver%apply(psi_fixed,rhs)
@@ -3655,13 +3655,13 @@ END SUBROUTINE gs_get_cond_source
 !------------------------------------------------------------------------------
 !> Compute plasma component of RHS source for Grad-Shafranov equation
 !------------------------------------------------------------------------------
-subroutine gs_source(self,a,b,b2,b3,itor_alam,itor_press,estore)
+subroutine gs_source(self,a,b,b2,b3,itor_ffp,itor_press,estore)
 class(gs_equil), intent(inout) :: self !< G-S object
 class(oft_vector), TARGET, intent(inout) :: a !< \f$ \psi \f$
 CLASS(oft_vector), intent(inout) :: b !< Full RHS source
-CLASS(oft_vector), intent(inout) :: b2 !< F*F' component of source (including `alam`)
-CLASS(oft_vector), intent(inout) :: b3 !< P' component of source (without `pnorm`)
-REAL(8), INTENT(out) :: itor_alam,itor_press,estore
+CLASS(oft_vector), intent(inout) :: b2 !< F*F' component of source (including `ffp_scale`)
+CLASS(oft_vector), intent(inout) :: b3 !< P' component of source (without `p_scale`)
+REAL(8), INTENT(out) :: itor_ffp,itor_press,estore
 real(r8), pointer, dimension(:) :: atmp,btmp,b2tmp,b3tmp
 real(8) :: psitmp,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),pani(2)
 real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:)
@@ -3690,11 +3690,11 @@ ELSE
   NULLIFY(bcross_kappa_fun%u)
 END IF
 !---
-itor_alam=0.d0
+itor_ffp=0.d0
 itor_press=0.d0
 estore=0.d0
 !$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp) &
-!$omp reduction(+:itor_alam) reduction(+:itor_press) reduction(+:estore)
+!$omp reduction(+:itor_ffp) reduction(+:itor_press) reduction(+:estore)
 allocate(rhs_loc(device%fe_rep%nce,3))
 allocate(rop(device%fe_rep%nce),vcache(device%fe_rep%nce))
 allocate(j_lag(device%fe_rep%nce))
@@ -3724,19 +3724,19 @@ do j=1,device%fe_rep%mesh%nc
       END DO
       IF(psitmp>self%plasma_bounds(1))THEN
         IF(self%mode==0)THEN
-          ffp(1:2)=((self%alam**2)*self%I%f(psitmp)+self%alam*self%I%f_offset)*self%I%fp(psitmp)
-          itor_alam = itor_alam + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)
+          ffp(1:2)=((self%ffp_scale**2)*self%I%f(psitmp)+self%ffp_scale*self%I%f_offset)*self%I%fp(psitmp)
+          itor_ffp = itor_ffp + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)
         ELSE
-          ffp(1:2)=0.5d0*self%alam*self%I%fp(psitmp)
-          itor_alam = itor_alam + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+          ffp(1:2)=0.5d0*self%ffp_scale*self%I%fp(psitmp)
+          itor_ffp = itor_ffp + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
         END IF
         ! Handle anisotropic pressure
         IF(ASSOCIATED(self%P_ani))THEN
           CALL self%P_ani%interp(j,device%fe_rep%quad%pts(:,m),goptmp,pani)
           CALL bcross_kappa_fun%interp(j,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
-          ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*(self%P%fp(psitmp)*pani(2)+self%P%f(psitmp)*(pani(1)-pani(2))*bcross_kappa(1))*(pt(1)**2)
+          ffp([1,3]) = ffp([1,3]) + [self%p_scale,1.d0]*(self%P%fp(psitmp)*pani(2)+self%P%f(psitmp)*(pani(1)-pani(2))*bcross_kappa(1))*(pt(1)**2)
         ELSE
-          ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
+          ffp([1,3]) = ffp([1,3]) + [self%p_scale,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
         END IF
         !
         estore = estore + (self%P%F(psitmp))*v*device%fe_rep%quad%wts(m)*pt(1)
@@ -3773,7 +3773,7 @@ IF(ASSOCIATED(bcross_kappa_fun%u))THEN
   CALL bcross_kappa_fun%delete
 END IF
 estore = estore*2.d0*pi*self%psiscale
-itor_alam = itor_alam*self%psiscale
+itor_ffp = itor_ffp*self%psiscale
 itor_press = itor_press*self%psiscale
 device%timing(2)=device%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_source
@@ -3827,9 +3827,9 @@ do j=1,device%fe_rep%mesh%nc
     pt=device%fe_rep%mesh%log2phys(j,device%fe_rep%quad%pts(:,m))
     call psi_interp%interp(j,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
     IF(self%mode==0)THEN
-      f=self%alam*self%I%f(psitmp(1))+self%I%f_offset
+      f=self%ffp_scale*self%I%f(psitmp(1))+self%I%f_offset
     ELSE
-      f=SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2)
+      f=SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2)
     END IF
     do l=1,device%fe_rep%nce
       call oft_blag_eval(device%fe_rep,j,l,device%fe_rep%quad%pts(:,m),rop)
@@ -3923,17 +3923,17 @@ do i=1,device%fe_rep%mesh%nc
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
       IF(self%mode==0)THEN
-        itor_loc = self%I%Fp(psitmp(1))*((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset)/(pt(1)+gs_epsilon)
+        itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        itor_loc = 0.5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
+        itor_loc = 0.5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
       END IF
       ! Handle anisotropic pressure
       IF(ASSOCIATED(self%P_ani))THEN
         CALL self%P_ani%interp(i,device%fe_rep%quad%pts(:,m),goptmp,pani)
         CALL bcross_kappa_fun%interp(i,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
-        itor_loc = itor_loc + self%pnorm*pt(1)*(self%P%fp(psitmp(1))*pani(2)+self%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
+        itor_loc = itor_loc + self%p_scale*pt(1)*(self%P%fp(psitmp(1))*pani(2)+self%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
       ELSE
-        itor_loc = itor_loc + self%pnorm*pt(1)*self%P%Fp(psitmp(1))
+        itor_loc = itor_loc + self%p_scale*pt(1)*self%P%Fp(psitmp(1))
       END IF
       itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
       curr_cent = curr_cent + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
@@ -4448,17 +4448,17 @@ DO i=1,npts
   !---
   B([1,3])=[-gpsitmp(2),gpsitmp(1)]/pts(1,i)
   IF(self%mode==0)THEN
-    B(2)=(self%alam*self%I%f(psitmp(1))+self%I%f_offset)/pts(1,i)
+    B(2)=(self%ffp_scale*self%I%f(psitmp(1))+self%I%f_offset)/pts(1,i)
   ELSE
-    B(2)=SQRT(self%alam*self%I%f(psitmp(1)) + self%I%f_offset**2)/pts(1,i)
+    B(2)=SQRT(self%ffp_scale*self%I%f(psitmp(1)) + self%I%f_offset**2)/pts(1,i)
   END IF
   B=B*self%psiscale
   ! Handle anisotropic pressure
   IF(ASSOCIATED(self%P_ani))THEN
     CALL self%P_ani%interp(cell,f,goptmp,pani)
-    B(5) = self%pnorm*self%P%fp(psitmp(1))*pani(2)*self%psiscale/mu0
+    B(5) = self%p_scale*self%P%fp(psitmp(1))*pani(2)*self%psiscale/mu0
   ELSE
-    B(5) = self%pnorm*self%P%f(psitmp(1))*self%psiscale/mu0
+    B(5) = self%p_scale*self%P%f(psitmp(1))*self%psiscale/mu0
   END IF
   IF(self%plasma_bounds(1)<-1.d98)THEN
     B(4)=psitmp(1)
@@ -4587,9 +4587,9 @@ do i=1,device%fe_rep%mesh%nc
       pt(1)=MAX(pt(1),gs_epsilon)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
-        Btor = self%alam*(self%I%F(psitmp(1)))/pt(1)
+        Btor = self%ffp_scale*(self%I%F(psitmp(1)))/pt(1)
       ELSE
-        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2) &
+        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2) &
         - self%I%f_offset)/pt(1)
       END IF
       !---Update integrand
@@ -4645,7 +4645,7 @@ do i=1,device%fe_rep%mesh%nc
     !---Compute Magnetic Field
     B(1) = -gpsitmp(2)/(pt(1)+gs_epsilon)
     B(2) = gpsitmp(1)/(pt(1)+gs_epsilon)
-    B(3) = self%alam*self%I%F(psitmp(1))/(pt(1)+gs_epsilon)
+    B(3) = self%ffp_scale*self%I%F(psitmp(1))/(pt(1)+gs_epsilon)
     !---Update integrand
     helic = helic + DOT_PRODUCT(A,B)*v*device%fe_rep%quad%wts(m)*pt(1)
     ener = ener + DOT_PRODUCT(B,B)*v*device%fe_rep%quad%wts(m)*pt(1)
@@ -4841,9 +4841,9 @@ do j=1,nr
   END IF
   !---Get flux variables
   IF(gseq%mode==0)THEN
-    fpol=gseq%alam*gseq%I%f(psi_surf)+gseq%I%f_offset
+    fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
   ELSE
-    fpol=SQRT(gseq%alam*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
+    fpol=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
     + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
   END IF
   !---Safety Factor (q)
@@ -5075,9 +5075,9 @@ SELECT CASE(self%mode)
     CALL self%psi_eval%interp(cell,f,gop,psitmp)
     IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
       IF(self%equil%mode==0)THEN
-        val(1)=self%equil%psiscale*(self%equil%alam*self%equil%I%f(psitmp(1))+self%equil%I%f_offset)
+        val(1)=self%equil%psiscale*(self%equil%ffp_scale*self%equil%I%f(psitmp(1))+self%equil%I%f_offset)
       ELSE
-        val(1)=self%equil%psiscale*SQRT(self%equil%alam*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)
+        val(1)=self%equil%psiscale*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)
       END IF
     ELSE
       val(1)=self%equil%psiscale*self%equil%I%f_offset
@@ -5088,9 +5088,9 @@ SELECT CASE(self%mode)
       ! Handle anisotropic pressure
       IF(ASSOCIATED(self%equil%P_ani))THEN
         CALL self%equil%P_ani%interp(cell,f,gop,pani)
-        val(1) = (self%equil%psiscale**2)*self%equil%pnorm*self%equil%P%F(psitmp(1))*pani(2)/mu0
+        val(1) = (self%equil%psiscale**2)*self%equil%p_scale*self%equil%P%F(psitmp(1))*pani(2)/mu0
       ELSE
-        val(1) = (self%equil%psiscale**2)*self%equil%pnorm*self%equil%P%F(psitmp(1))/mu0
+        val(1) = (self%equil%psiscale**2)*self%equil%p_scale*self%equil%P%F(psitmp(1))/mu0
       END IF
     ELSE
       val(1)=0.d0
@@ -5133,9 +5133,9 @@ val(1)=-self%equil%psiscale*gpsitmp(2)/(pt(1)+gs_epsilon)
 val(3)=self%equil%psiscale*gpsitmp(1)/(pt(1)+gs_epsilon)
 IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
   IF(self%equil%mode==0)THEN
-    val(2)=self%equil%psiscale*(self%equil%alam*self%equil%I%f(psitmp(1))+self%equil%I%f_offset)/(pt(1)+gs_epsilon)
+    val(2)=self%equil%psiscale*(self%equil%ffp_scale*self%equil%I%f(psitmp(1))+self%equil%I%f_offset)/(pt(1)+gs_epsilon)
   ELSE
-    val(2)=self%equil%psiscale*SQRT(self%equil%alam*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)/(pt(1)+gs_epsilon)
+    val(2)=self%equil%psiscale*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)/(pt(1)+gs_epsilon)
   END IF
 ELSE
   val(2)=self%equil%psiscale*self%equil%I%f_offset/(pt(1)+gs_epsilon)
@@ -5191,17 +5191,17 @@ CALL self%psi_geval%interp(cell,f,gop,gpsitmp)
 ! Evaluate J_tor
 IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
   IF(self%equil%mode==0)THEN
-    val(1)=self%equil%I%Fp(psitmp(1))*((self%equil%alam**2)*self%equil%I%f(psitmp(1))+self%equil%alam*self%equil%I%f_offset)/(pt(1)+gs_epsilon)
+    val(1)=self%equil%I%Fp(psitmp(1))*((self%equil%ffp_scale**2)*self%equil%I%f(psitmp(1))+self%equil%ffp_scale*self%equil%I%f_offset)/(pt(1)+gs_epsilon)
   ELSE
-    val(1)=0.5d0*self%equil%alam*self%equil%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
+    val(1)=0.5d0*self%equil%ffp_scale*self%equil%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
   END IF
   ! Handle anisotropic pressure
   IF(ASSOCIATED(self%equil%P_ani))THEN
     CALL self%equil%P_ani%interp(cell,f,gop,pani)
     CALL self%bcross_kappa_fun%interp(cell,f,gop,bcross_kappa)
-    val(1) = val(1) + self%equil%pnorm*pt(1)*(self%equil%P%fp(psitmp(1))*pani(2)+self%equil%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
+    val(1) = val(1) + self%equil%p_scale*pt(1)*(self%equil%P%fp(psitmp(1))*pani(2)+self%equil%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
   ELSE
-    val(1) = val(1) + self%equil%pnorm*pt(1)*self%equil%P%Fp(psitmp(1))
+    val(1) = val(1) + self%equil%p_scale*pt(1)*self%equil%P%Fp(psitmp(1))
   END IF
 ELSE
   val(1)=0.d0
@@ -5589,14 +5589,14 @@ DO i=0,m
   IF(i==0)r = r + (x2-x1)*1.d-10
   outtmp(1)=self%psiscale*r
   IF(self%mode==0)THEN
-    outtmp(2)=self%alam*self%I%fp(r)
-    outtmp(3)=self%psiscale*self%alam*self%I%f(r) + self%I%f_offset
+    outtmp(2)=self%ffp_scale*self%I%fp(r)
+    outtmp(3)=self%psiscale*self%ffp_scale*self%I%f(r) + self%I%f_offset
   ELSE
-    outtmp(3)=SQRT(self%psiscale*self%alam*self%I%f(r) + self%I%f_offset**2)
-    outtmp(2)=self%alam*self%I%fp(r)/(2.d0*outtmp(3))
+    outtmp(3)=SQRT(self%psiscale*self%ffp_scale*self%I%f(r) + self%I%f_offset**2)
+    outtmp(2)=self%ffp_scale*self%I%fp(r)/(2.d0*outtmp(3))
   END IF
-  outtmp(4)=self%psiscale*self%pnorm*self%P%fp(r)
-  outtmp(5)=self%psiscale*self%psiscale*self%pnorm*self%P%f(r)
+  outtmp(4)=self%psiscale*self%p_scale*self%P%fp(r)
+  outtmp(5)=self%psiscale*self%psiscale*self%p_scale*self%P%f(r)
   WRITE(io_unit,100)outtmp
 END DO
 CLOSE(io_unit)

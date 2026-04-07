@@ -308,7 +308,7 @@ offset=0
 IF(gs%device%free)THEN
   IF(fit_alam)THEN
     offset=1
-    cofs(1)=gs_active%alam
+    cofs(1)=gs_active%ffp_scale
   ELSE IF(gs_active%Itor_target>0.d0)THEN
     offset=1
     cofs(1)=gs_active%Itor_target
@@ -334,8 +334,8 @@ IF(fit_R0)THEN
   cofs_scale(offset+1)=5.d0/(gs_active%device%spatial_bounds(2,1)-gs_active%device%spatial_bounds(1,1))
   offset=offset+1
 ELSE IF(fit_Pnorm)THEN
-  cofs(offset+1)=gs_active%pnorm
-  cofs_scale(offset+1)=1.d0/MAX(gs_active%pnorm,1.d-2)
+  cofs(offset+1)=gs_active%p_scale
+  cofs_scale(offset+1)=1.d0/MAX(gs_active%p_scale,1.d-2)
   offset=offset+1
 ELSE IF(gs_active%estore_target>0.d0)THEN
   cofs(offset+1)=gs_active%estore_target
@@ -425,7 +425,7 @@ IF(file_exists)THEN
   READ(io_unit,*)i
   IF(i==ncofs)THEN
     READ(io_unit,*)cofs
-    READ(io_unit,*)gs_active%pnorm,gs_active%vcontrol_val
+    READ(io_unit,*)gs_active%p_scale,gs_active%vcontrol_val
   END IF
   CLOSE(io_unit)
 ENDIF
@@ -450,7 +450,7 @@ IF(maxfev>0)THEN
   WRITE(*,*)
   IF(SQRT(SUM(error**2))>chi_best)THEN
     cofs=cofs_best
-    gs_active%pnorm=pnorm_best
+    gs_active%p_scale=pnorm_best
     gs_active%vcontrol_val=vcont_best
     CALL gs_active%psi%add(0.d0,1.d0,psi_best)
   END IF
@@ -473,7 +473,7 @@ CLOSE(io_unit)
 OPEN(NEWUNIT=io_unit,FILE=TRIM(outpath)//'_cofs')
 WRITE(io_unit,*)ncofs
 WRITE(io_unit,*)cofs
-WRITE(io_unit,*)gs_active%pnorm,gs_active%vcontrol_val
+WRITE(io_unit,*)gs_active%p_scale,gs_active%vcontrol_val
 CLOSE(io_unit)
 !---Cleanup
 CALL psi_best%delete
@@ -595,9 +595,9 @@ CHARACTER(LEN=40) :: err_reason
 IF(.NOT.ASSOCIATED(psi_center))THEN
   ALLOCATE(cofs_in(n))
   cofs_in=cofs
-  alam_in=gs_active%alam
+  alam_in=gs_active%ffp_scale
   ip_target_in=gs_active%Itor_target
-  pnorm_in=gs_active%pnorm
+  pnorm_in=gs_active%p_scale
   estore_target_in=gs_active%estore_target
   ! bounds_in=gs_active%spatial_bounds
   bounds_in(:,1)=gs_active%plasma_bounds
@@ -629,7 +629,7 @@ IF(iflag==1)THEN
   IF(gs_active%device%free)THEN
     IF(fit_alam)THEN
       offset=1
-      gs_active%alam=cofs(1)
+      gs_active%ffp_scale=cofs(1)
     ELSE IF(gs_active%Itor_target>0.d0)THEN
       offset=1
       gs_active%Itor_target=cofs(1)
@@ -664,7 +664,7 @@ IF(iflag==1)THEN
     gs_active%R0_target=cofs(offset+1)+gs_active%device%rmin
     offset=offset+1
   ELSE IF(fit_Pnorm)THEN
-    gs_active%pnorm=cofs(offset+1)
+    gs_active%p_scale=cofs(offset+1)
     offset=offset+1
   ELSE IF(gs_active%estore_target>0.d0)THEN
     gs_active%estore_target=cofs(offset+1)
@@ -739,14 +739,14 @@ IF(iflag==1)THEN
     IF(SQRT(SUM(err**2))<chi_best)THEN
       chi_best=SQRT(SUM(err**2))
       cofs_best=cofs
-      alam_best=gs_active%alam
-      pnorm_best=gs_active%pnorm
+      alam_best=gs_active%ffp_scale
+      pnorm_best=gs_active%p_scale
       vcont_best=gs_active%vcontrol_val
       CALL psi_best%add(0.d0,1.d0,gs_active%psi)
     END IF
-    alam_in=gs_active%alam
+    alam_in=gs_active%ffp_scale
     ip_target_in=gs_active%Itor_target
-    pnorm_in=gs_active%pnorm
+    pnorm_in=gs_active%p_scale
     estore_target_in=gs_active%estore_target
     ! bounds_in=gs_active%spatial_bounds
     bounds_in(:,1)=gs_active%plasma_bounds
@@ -758,8 +758,8 @@ IF(iflag==1)THEN
     IF(ierr<0)THEN
       WRITE(*,'(3A)')oft_indent,'Step Failed: ',TRIM(err_reason)
     END IF
-    WRITE(*,'(2A,ES11.3)')oft_indent,'Alam              =',gs_active%alam
-    WRITE(*,'(2A,ES11.3)')oft_indent,'P_scale           =',gs_active%pnorm
+    WRITE(*,'(2A,ES11.3)')oft_indent,'Alam              =',gs_active%ffp_scale
+    WRITE(*,'(2A,ES11.3)')oft_indent,'P_scale           =',gs_active%p_scale
     IF(gs_active%R0_target>0.d0)THEN
       WRITE(*,'(2A,ES11.3)')oft_indent,'R0_target         =',gs_active%R0_target
     END IF
@@ -853,10 +853,10 @@ ELSE
     IF(fit_alam)THEN
       CALL reset_eq
       dx = dxi/cofs_scale(offset+1)
-      gs_active%alam=cofs(offset+1) + dx
+      gs_active%ffp_scale=cofs(offset+1) + dx
       CALL run_err(.FALSE.,jac_mat(:,offset+1),m,ierr)
       jac_mat(:,offset+1)=(jac_mat(:,offset+1)-err)/dx
-      gs_active%alam=cofs(offset+1)
+      gs_active%ffp_scale=cofs(offset+1)
       offset=1
     ELSE IF(gs_active%Itor_target>0.d0)THEN
       CALL reset_eq
@@ -920,10 +920,10 @@ ELSE
   ELSE IF(fit_Pnorm)THEN
     CALL reset_eq
     dx = dxi/cofs_scale(offset+1)
-    gs_active%pnorm=cofs(offset+1) + dx
+    gs_active%p_scale=cofs(offset+1) + dx
     CALL run_err(linearized_fit,jac_mat(:,offset+1),m,ierr)
     jac_mat(:,offset+1)=(jac_mat(:,offset+1)-err)/dx
-    gs_active%pnorm=cofs(offset+1)
+    gs_active%p_scale=cofs(offset+1)
     offset=offset+1
   ELSE IF(gs_active%estore_target>0.d0)THEN
     CALL reset_eq
@@ -1024,9 +1024,9 @@ DEALLOCATE(cof_tmp,err_tmp)
 CONTAINS
 !
 SUBROUTINE reset_eq
-gs_active%alam=alam_in
+gs_active%ffp_scale=alam_in
 gs_active%Itor_target=ip_target_in
-gs_active%pnorm=pnorm_in
+gs_active%p_scale=pnorm_in
 gs_active%estore_target=estore_target_in
 ! gs_active%spatial_bounds=bounds_in
 gs_active%plasma_bounds=bounds_in(:,1)
@@ -1044,7 +1044,7 @@ INTEGER(4) :: i
 REAL(8) :: alamin
 LOGICAL :: pm_save
 !---
-alamin=gs_active%alam
+alamin=gs_active%ffp_scale
 pm_save=oft_env%pm; oft_env%pm=fit_pm
 IF(linear)THEN
   call gs_active%device%lin_solve(gs_active,.TRUE.,ierr)
@@ -1057,7 +1057,7 @@ IF(ierr<0)THEN
   DO i=1,m
     err(i)=conlist(i)%con%val*conlist(i)%con%wt*2.d0
   END DO
-  IF(.NOT.gs_active%device%free)gs_active%alam=alamin
+  IF(.NOT.gs_active%device%free)gs_active%ffp_scale=alamin
 ELSE
   !$omp parallel do schedule(dynamic,1)
   DO i=1,m
@@ -1429,9 +1429,9 @@ CALL psi_eval%delete()
 CALL psi_geval%delete()
 btmp(1)= -gs%psiscale*gpsi(2)/self%r(1)
 IF(gs%mode==0)THEN
-  btmp(2)= gs%psiscale*(gs%alam*gs%I%f(psi(1))+gs%I%f_offset)/self%r(1)
+  btmp(2)= gs%psiscale*(gs%ffp_scale*gs%I%f(psi(1))+gs%I%f_offset)/self%r(1)
 ELSE
-  btmp(2)=gs%psiscale*SQRT(gs%alam*gs%I%f(psi(1)) + gs%I%f_offset**2)/self%r(1)
+  btmp(2)=gs%psiscale*SQRT(gs%ffp_scale*gs%I%f(psi(1)) + gs%I%f_offset**2)/self%r(1)
 END IF
 btmp(3)= gs%psiscale*gpsi(1)/self%r(1)
 !---
@@ -1636,7 +1636,7 @@ IF(self%r(1)>0.d0)THEN
     in_plasma=.FALSE.
   END IF
   IF(.NOT.in_plasma)THEN
-    err=gs%psiscale*gs%psiscale*gs%pnorm*gs%P%f(gs%plasma_bounds(2))/mu0/(gs%plasma_bounds(2)-gs%plasma_bounds(1))
+    err=gs%psiscale*gs%psiscale*gs%p_scale*gs%P%f(gs%plasma_bounds(2))/mu0/(gs%plasma_bounds(2)-gs%plasma_bounds(1))
     press=err*(psi(1)-gs%plasma_bounds(1))
   END IF
   CALL psi_eval%delete()
@@ -1656,7 +1656,7 @@ INTEGER(4) :: i,ip
 CLASS(oft_bmesh), POINTER :: smesh
 smesh=>gs%device%mesh
 IF(self%r(1)<0.d0)THEN ! Magnetic axis pressure constraint
-  val = gs%psiscale*gs%psiscale*gs%pnorm*gs%P%f(gs%plasma_bounds(2))/mu0
+  val = gs%psiscale*gs%psiscale*gs%p_scale*gs%P%f(gs%plasma_bounds(2))/mu0
   RETURN
 END IF
 IF(self%cell==0)THEN
@@ -1684,6 +1684,6 @@ call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 CALL psi_eval%delete
 !---
-val = gs%psiscale*gs%psiscale*gs%pnorm*gs%P%f(psi(1))/mu0
+val = gs%psiscale*gs%psiscale*gs%p_scale*gs%P%f(psi(1))/mu0
 END FUNCTION fit_press_eval
 END MODULE oft_gs_fit

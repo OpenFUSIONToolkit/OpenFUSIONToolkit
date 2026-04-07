@@ -369,33 +369,59 @@ class TokaMaker():
         return self._tMaker_ptr
 
     @property
+    def ffp_scale(self):
+        r'''! F*F' scale value'''
+        return self._ffp_scale[0]
+    
+    # @cond
+    @ffp_scale.setter
+    def ffp_scale(self,value):
+        self._ffp_scale[0] = value
+    # @endcond
+    
+    @property
+    def p_scale(self):
+        r'''! Pressure scale value'''
+        return self._p_scale[0]
+    
+    # @cond
+    @p_scale.setter
+    def p_scale(self,value):
+        self._p_scale[0] = value
+    # @endcond
+
+    @property
     def alam(self):
-        r'''! F*F' normalization value'''
+        r'''! F*F' normalization value
+        
+        @deprecated Use `ffp_scale` property instead.'''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.alam
+        return self._tMaker_equil.ffp_scale
     
     # @cond
     @alam.setter
     def alam(self,value):
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        self._tMaker_equil.alam = value
+        self._tMaker_equil.ffp_scale = value
     # @endcond
     
     @property
     def pnorm(self):
-        r'''! Pressure normalization value'''
+        r'''! Pressure normalization value
+        
+        @deprecated Use `p_scale` property instead.'''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.pnorm
+        return self._tMaker_equil.p_scale
     
     # @cond
     @pnorm.setter
     def pnorm(self,value):
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        self._tMaker_equil.pnorm = value
+        self._tMaker_equil.p_scale = value
     # @endcond
     
     @property
@@ -764,6 +790,8 @@ class TokaMaker():
         `grad_wt_lim>0`. When set the actual weight will be
         $w_i * min(grad_wt_lim,|\nabla \psi|_{max} / |\nabla \psi|_i)$
 
+        @deprecated Use `set_isoflux_constraints` instead.
+
         @param isoflux List of points defining constraints [:,2]
         @param weights Weight to be applied to each constraint point [:] (default: 1)
         @param grad_wt_lim Limit on gradient-based weighting (negative to disable)
@@ -821,6 +849,8 @@ class TokaMaker():
     def set_flux(self,locations,targets,weights=None):
         r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$ [Wb/rad]
 
+        @deprecated Use `set_psi_constraints` or `set_flux_constraints` instead.
+
         @param locations List of points defining constraints [:,2]
         @param targets Target \f$ \psi \f$ value in Wb/rad at each point [:]
         @param weights Weight to be applied to each constraint point [:] (default: 1)
@@ -872,6 +902,8 @@ class TokaMaker():
     
     def set_saddles(self,saddles,weights=None):
         '''! Set saddle constraint points (poloidal field should vanish at each point)
+
+        @deprecated Use `set_saddle_constraints` instead.
 
         @param saddles List of points defining constraints [:,2]
         @param weights Weight to be applied to each constraint point [:] (default: 1)
@@ -995,6 +1027,8 @@ class TokaMaker():
 
     def get_delstar_curr(self,psi):
         r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator
+
+        @deprecated Use `calc_delstar_curr` instead.
  
         @param psi \f$ \psi \f$ corresponding to desired current density
         @result \f$ J_{\phi} = \textrm{M}^{-1} \Delta^{*} \psi \f$ [A/m^2]
@@ -1018,6 +1052,8 @@ class TokaMaker():
     
     def get_jtor_plasma(self):
         r'''! Get plasma toroidal current density for current equilibrium
+
+        @deprecated Use `calc_jtor_plasma` instead.
  
         @result \f$ J_{\phi} \f$ by evalutating RHS source terms
         '''
@@ -1260,6 +1296,8 @@ class TokaMaker():
     def area_integral(self,field,reg_mask=-1):
         r'''! Compute area integral of field over a specified region
 
+        @deprecated Use `compute_area_integral` instead.
+
         @param field Field to integrate [np]
         @param reg_mask ID of region for integration (negative for whole mesh)
         @result \f$ \int f dA \f$
@@ -1289,6 +1327,8 @@ class TokaMaker():
     
     def flux_integral(self,psi_vals,field_vals):
         r'''! Compute area integral of flux function over the plasma
+
+        @deprecated Use `compute_flux_integral` instead.
 
         @param psi_vals \f$ \hat{\psi} \f$ values defining flux function [:]
         @param field_vals Flux function values at each \f$ \hat{\psi} \f$ value [:]
@@ -1840,18 +1880,18 @@ class TokaMaker_equilibrium():
         x_loc = c_double_ptr()
         div_flag_loc = c_bool_ptr()
         bounds_loc = c_double_ptr()
-        alam_loc = c_double_ptr()
-        pnorm_loc = c_double_ptr()
+        ffp_scale_loc = c_double_ptr()
+        p_scale_loc = c_double_ptr()
         has_plasma_loc = c_bool_ptr()
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_get_refs(self._equil_ptr,ctypes.byref(o_loc),ctypes.byref(lim_loc),ctypes.byref(x_loc),ctypes.byref(div_flag_loc),
-                    ctypes.byref(bounds_loc),ctypes.byref(alam_loc),ctypes.byref(pnorm_loc),ctypes.byref(has_plasma_loc),error_string)
+                    ctypes.byref(bounds_loc),ctypes.byref(ffp_scale_loc),ctypes.byref(p_scale_loc),ctypes.byref(has_plasma_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        ## F*F' normalization value [1] (use @ref TokaMaker.TokaMaker.alam "alam" property)
-        self._alam = numpy.ctypeslib.as_array(alam_loc,shape=(1,))
-        ## Pressure normalization value [1] (use @ref TokaMaker.TokaMaker.pnorm "pnorm" property)
-        self._pnorm = numpy.ctypeslib.as_array(pnorm_loc,shape=(1,))
+        ## F*F' scale value [1] (use @ref TokaMaker.TokaMaker.ffp_scale "ffp_scale" property)
+        self._ffp_scale = numpy.ctypeslib.as_array(ffp_scale_loc,shape=(1,))
+        ## Pressure scale value [1] (use @ref TokaMaker.TokaMaker.p_scale "p_scale" property)
+        self._p_scale = numpy.ctypeslib.as_array(p_scale_loc,shape=(1,))
         ## Location of O-point (magnetic axis) [2]
         self._o_point = numpy.ctypeslib.as_array(o_loc,shape=(2,))
         ## Limiting point (limter or active X-point) [2]
@@ -1866,8 +1906,8 @@ class TokaMaker_equilibrium():
         self._has_plasma = numpy.ctypeslib.as_array(has_plasma_loc,shape=(1,))
 
         if self.Vacuum:
-            self.alam = 0.0
-            self.pnorm = 0.0
+            self.ffp_scale = 0.0
+            self.p_scale = 0.0
             self._o_point[:] = [-1.0, 0.0]
             self._lim_point[:] = [-1.0, 0.0]
             for i in range(self._x_points.shape[0]):
@@ -1876,8 +1916,8 @@ class TokaMaker_equilibrium():
             self._psi_bounds[:] = [-1.E99, 1.E99]
         else:
             if source_eq is None:
-                self.alam = 0.1
-                self.pnorm = 0.1
+                self.ffp_scale = 0.1
+                self.p_scale = 0.1
                 default_prof={
                     'type': 'linterp',
                     'x': numpy.array([0.0,1.0]),
@@ -1899,25 +1939,53 @@ class TokaMaker_equilibrium():
         r'''C pointer to Fortran-side equilibrium object'''
         return self._equil_ptr
     
-    ## @cond
+    @property
+    def ffp_scale(self):
+        r'''! F*F' scale value'''
+        return self._ffp_scale[0]
+    
+    # @cond
+    @ffp_scale.setter
+    def ffp_scale(self,value):
+        self._ffp_scale[0] = value
+    # endcond
+    
+    @property
+    def p_scale(self):
+        r'''! Pressure scale value'''
+        return self._p_scale[0]
+    
+    # @cond
+    @p_scale.setter
+    def p_scale(self,value):
+        self._p_scale[0] = value
+    # endcond
+    
     @property
     def alam(self):
-        r'''F*F' normalization value'''
-        return self._alam[0]
+        r'''! F*F' scale value
+        
+        @deprecated Use `ffp_scale` property instead.'''
+        return self.ffp_scale
     
+    # @cond
     @alam.setter
     def alam(self,value):
-        self._alam[0] = value
-    
+        self.ffp_scale = value
+    # endcond
+
     @property
     def pnorm(self):
-        r'''Pressure normalization value'''
-        return self._pnorm[0]
+        r'''! Pressure scale value
+        
+        @deprecated Use `p_scale` property instead.'''
+        return self.p_scale
     
+    # @cond
     @pnorm.setter
     def pnorm(self,value):
-        self._pnorm[0] = value
-    ## @endcond
+        self.p_scale = value
+    # @endcond
     
     @property
     def diverted(self):

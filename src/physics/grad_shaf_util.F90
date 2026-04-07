@@ -720,21 +720,21 @@ do i=1,smesh%nc
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt))THEN
       IF(self%mode==0)THEN
-        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-        + self%I%Fp(psitmp(1))*((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset)/(pt(1)+gs_epsilon))
+        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
+        + self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon))
       ELSE
-        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-        + .5d0*self%alam*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
+        + .5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
       END IF
       itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
       centroid = centroid + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
-      pvol = pvol + (self%pnorm*self%P%F(psitmp(1)))*v*device%fe_rep%quad%wts(m)*pt(1)
+      pvol = pvol + (self%p_scale*self%P%F(psitmp(1)))*v*device%fe_rep%quad%wts(m)*pt(1)
       vol = vol + v*device%fe_rep%quad%wts(m)*pt(1)
       !---Compute total toroidal Field
       IF(self%mode==0)THEN
-        Btor = (self%alam*(self%I%F(psitmp(1))) + self%I%f_offset)/(pt(1)+gs_epsilon)
+        Btor = (self%ffp_scale*(self%I%F(psitmp(1))) + self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2))/(pt(1)+gs_epsilon)
+        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2))/(pt(1)+gs_epsilon)
       END IF
       tflux = tflux + Btor*v*device%fe_rep%quad%wts(m)
       !---Compute internal inductance
@@ -743,9 +743,9 @@ do i=1,smesh%nc
       bp_vol = bp_vol + SUM(Bpol**2)*v*device%fe_rep%quad%wts(m)*pt(1)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
-        Btor = self%alam*(self%I%F(psitmp(1)))/pt(1)
+        Btor = self%ffp_scale*(self%I%F(psitmp(1)))/pt(1)
       ELSE
-        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%alam*self%I%F(psitmp(1)) + self%I%f_offset**2) &
+        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2) &
         - self%I%f_offset)/pt(1)
       END IF
       dflux = dflux + Btor*v*device%fe_rep%quad%wts(m)
@@ -808,11 +808,11 @@ do i=1,smesh%nc
     IF(gs_test_bounds(self,pt))THEN
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
       IF(self%mode==0)THEN
-        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + self%I%Fp(psitmp(1))*((self%alam**2)*self%I%f(psitmp(1))+self%alam*self%I%f_offset - I_NI)/(pt(1)+gs_epsilon))
+        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
+          + self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset - I_NI)/(pt(1)+gs_epsilon))
       ELSE
-        itor_loc = (self%pnorm*pt(1)*self%P%Fp(psitmp(1)) &
-          + (0.5d0*self%alam*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+gs_epsilon))
+        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
+          + (0.5d0*self%ffp_scale*self%I%Fp(psitmp(1)) - I_NI)/(pt(1)+gs_epsilon))
       END IF
       eta_jsq = eta_jsq + (itor_loc**2)*v*device%fe_rep%quad%wts(m)*pt(1)*self%eta%fp(psitmp(1))
       itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
@@ -979,12 +979,12 @@ do j=2,npsi
   cout(j,1)=psi_surf(1) ! Poloidal flux
   !---Toroidal flux function
   IF(gseq%mode==0)THEN
-    cout(j,2)=gseq%alam*gseq%I%f(psi_surf(1))+gseq%I%f_offset
+    cout(j,2)=gseq%ffp_scale*gseq%I%f(psi_surf(1))+gseq%I%f_offset
   ELSE
-    cout(j,2)=SQRT(gseq%alam*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2) &
+    cout(j,2)=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2) &
     + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
   END IF
-  cout(j,3)=gseq%pnorm*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
+  cout(j,3)=gseq%p_scale*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
   cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
 end do
 CALL active_tracer%delete
@@ -1003,12 +1003,12 @@ rout(:,1)=raxis
 zout(:,1)=zaxis
 cout(1,1)=x2
 IF(gseq%mode==0)THEN
-  cout(1,2)=(gseq%alam*gseq%I%f(x2)+gseq%I%f_offset)
+  cout(1,2)=(gseq%ffp_scale*gseq%I%f(x2)+gseq%I%f_offset)
 ELSE
-  cout(1,2)=SQRT(gseq%alam*gseq%I%f(x2) + gseq%I%f_offset**2) &
+  cout(1,2)=SQRT(gseq%ffp_scale*gseq%I%f(x2) + gseq%I%f_offset**2) &
       + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
 END IF
-cout(1,3)=gseq%pnorm*gseq%P%f(x2)/mu0
+cout(1,3)=gseq%p_scale*gseq%P%f(x2)/mu0
 cout(1,4)=(cout(3,4)-cout(2,4))*(x2-cout(2,1))/(cout(3,1)-cout(2,1)) + cout(2,4)
 !---Add LCFS pressure if specified
 IF(PRESENT(lcfs_press))cout(:,3)=cout(:,3)+lcfs_press
@@ -1242,18 +1242,18 @@ do j=1,nr
   !------------------------------------------------------------------------------
   !---Get flux variables
   IF(gseq%mode==0)THEN
-    fptmp=gseq%alam*gseq%I%f(psi_trace)+gseq%I%f_offset
-    fpol(j)=gseq%alam*gseq%I%f(psi_surf)+gseq%I%f_offset
-    ffprim(j)=gseq%I%fp(psi_surf)*((gseq%alam**2)*gseq%I%f(psi_surf)+gseq%alam*gseq%I%f_offset)
+    fptmp=gseq%ffp_scale*gseq%I%f(psi_trace)+gseq%I%f_offset
+    fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
+    ffprim(j)=gseq%I%fp(psi_surf)*((gseq%ffp_scale**2)*gseq%I%f(psi_surf)+gseq%ffp_scale*gseq%I%f_offset)
   ELSE
-    fptmp=SQRT(gseq%alam*gseq%I%f(psi_trace) + gseq%I%f_offset**2) &
+    fptmp=SQRT(gseq%ffp_scale*gseq%I%f(psi_trace) + gseq%I%f_offset**2) &
       + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
-    fpol(j)=SQRT(gseq%alam*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
+    fpol(j)=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
       + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
-    ffprim(j)=0.5d0*gseq%alam*gseq%I%fp(psi_surf)
+    ffprim(j)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi_surf)
   END IF
-  pres(j)=gseq%pnorm*gseq%P%f(psi_surf)/mu0
-  pprime(j)=gseq%pnorm*gseq%P%fp(psi_surf)/mu0
+  pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0
+  pprime(j)=gseq%p_scale*gseq%P%fp(psi_surf)/mu0
   !---Safety Factor (q)
   IF(j>1)qpsi(j)=fptmp*active_tracer%v(3)/(2*pi)
 end do
@@ -1526,9 +1526,9 @@ do j=1,nr
   CALL gs_psi2r(gseq,psi_surf,pt,psi_int=psi_int)
   ! !$omp end critical
   IF(gseq%mode==0)THEN
-    field%f_surf=gseq%alam*gseq%I%f(psi_surf)+gseq%I%f_offset
+    field%f_surf=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
   ELSE
-    field%f_surf=SQRT(gseq%alam*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
+    field%f_surf=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
       + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
   END IF
   field%bmax=0.d0
