@@ -1498,7 +1498,7 @@ class TokaMaker():
         if (saddle_color is not None) and (equilibrium.Saddle_constraints is not None):
             ax.plot(equilibrium.Saddle_constraints[:,0],equilibrium.Saddle_constraints[:,1],color=saddle_color,marker=saddle_marker,linestyle='none')
     
-    def plot_eddy(self,fig,ax,psi=None,equilibrium=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False):
+    def plot_eddy(self,fig,ax,psi=None,equilibrium=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False,include_Vcoils=False):
         r'''! Plot contours of \f$\hat{\psi}\f$
 
         @param fig Figure to add to
@@ -1509,6 +1509,8 @@ class TokaMaker():
         @param nlevels Number contour lines used for shading (with "psi" only)
         @param colormap Colormap to use for shadings
         @param clabel Label for colorbar (`None` to disable colorbar)
+        @param symmap Make colorscale symmetric around zero (only applies if `colormap` is specified)
+        @param include_Vcoils Include V-coil regions when plotting eddy currents? (only applies if `dpsi_dt=None` is specified)
         @result Colorbar object
         '''
         if self.settings.mirror_mode:
@@ -1531,7 +1533,7 @@ class TokaMaker():
                 if equilibrium is not None:
                     raise ValueError('Only one of "psi", "equilibrium" or "dpsi_dt" can be specified')
         if psi is not None:
-            mask, plot_field = self.get_conductor_currents(psi,cell_centered=(nlevels < 0))
+            mask, plot_field = self.get_conductor_currents(psi,cell_centered=(nlevels < 0),include_Vcoils=include_Vcoils)
         elif dpsi_dt is not None:
             mask, plot_field = self.get_conductor_source(dpsi_dt)
         if mask.sum() == 0:
@@ -1558,15 +1560,16 @@ class TokaMaker():
         ax.set_aspect('equal','box')
         return cb
     
-    def get_conductor_currents(self,psi,cell_centered=False):
+    def get_conductor_currents(self,psi,cell_centered=False,include_Vcoils=False):
         r'''! Get toroidal current density in conducting regions for a given \f$ \psi \f$
 
         @param psi Psi corresponding to field with conductor currents (eg. from time-dependent simulation)
         @param cell_centered Get currents at cell centers
+        @param include_Vcoils Include voltage coils in the calculation?
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.calc_conductor_currents(psi,cell_centered)
+        return self._tMaker_equil.calc_conductor_currents(psi,cell_centered,include_Vcoils)
     
     def get_conductor_source(self,dpsi_dt):
         r'''! Get toroidal current density in conducting regions for a \f$ d \psi / dt \f$ source
@@ -1601,14 +1604,6 @@ class TokaMaker():
                 if cond_reg.get('noncontinuous',False):
                     mesh_currents[mask_tmp] -= (mesh_currents[mask_tmp]*area[mask_tmp]).sum()/area[mask_tmp].sum()
                 mask = numpy.logical_or(mask,mask_tmp)
-        # # Treat vcoils as conductors when looking at induced currents
-        # for coil_name, coil_obj in self.coil_sets.items():
-        #     if coil_name in self._vcoils.keys():
-        #         for sub_coil in coil_obj["sub_coils"]:
-        #             mask_tmp = (self.reg == sub_coil['reg_id'])
-        #             field_tmp = -dpsi_dt/self._vcoils[coil_name]
-        #             mesh_currents[mask_tmp] = numpy.mean(field_tmp[self.lc[mask_tmp]],axis=1)
-        #             mask = numpy.logical_or(mask,mask_tmp)
         return mask, mesh_currents
 
     def get_vfixed(self):
@@ -2498,11 +2493,12 @@ class TokaMaker_equilibrium():
             raise Exception(error_string.value)
         return curr/mu0
 
-    def calc_conductor_currents(self,psi,cell_centered=False):
+    def calc_conductor_currents(self,psi,cell_centered=False,include_Vcoils=False):
         r'''! Get toroidal current density in conducting regions for a given \f$ \psi \f$
 
         @param psi Psi corresponding to field with conductor currents (eg. from time-dependent simulation)
         @param cell_centered Get currents at cell centers
+        @param include_Vcoils Include voltage coils in the calculation?
         '''
         curr = self.calc_delstar_curr(psi)
         if cell_centered:
@@ -2517,13 +2513,14 @@ class TokaMaker_equilibrium():
                     mesh_currents[mask_tmp] = numpy.sum(curr[self._tMaker.lc[mask_tmp,:]],axis=1)/3.0
                 mask = numpy.logical_or(mask,mask_tmp)
         # Treat vcoils as conductors when looking at induced currents
-        for coil_name, coil_obj in self.coil_sets.items():
-            if coil_name in self._vcoils.keys():
-                for sub_coil in coil_obj["sub_coils"]:
-                    mask_tmp = (self.reg == sub_coil['reg_id'])
-                    if cell_centered:
-                        mesh_currents[mask_tmp] = numpy.mean(curr[self.lc[mask_tmp]],axis=1)
-                    mask = numpy.logical_or(mask,mask_tmp)
+        if include_Vcoils:
+            for coil_name, coil_obj in self._tMaker.coil_sets.items():
+                if coil_name in self._tMaker._vcoils.keys():
+                    for sub_coil in coil_obj["sub_coils"]:
+                        mask_tmp = (self._tMaker.reg == sub_coil['reg_id'])
+                        if cell_centered:
+                            mesh_currents[mask_tmp] = numpy.mean(curr[self._tMaker.lc[mask_tmp]],axis=1)
+                        mask = numpy.logical_or(mask,mask_tmp)
         if cell_centered:
             return mask, mesh_currents
         else:
