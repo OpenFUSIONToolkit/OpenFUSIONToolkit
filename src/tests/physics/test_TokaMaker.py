@@ -172,8 +172,8 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order,F0=1.0,full_domain=True)
-    mygs.pnorm=a
-    mygs.alam=b*R*R*2.0
+    mygs.p_scale=a
+    mygs.ffp_scale=b*R*R*2.0
     mygs.set_profiles(ffp_prof={'type': 'flat'},pp_prof={'type': 'flat'})
     mygs.init_psi()
     psi_solovev_TM, _, rz_x = solovev_psi(mygs.r[:,0], mygs.r[:,1],R,a,b,c0)
@@ -267,7 +267,7 @@ def run_sph_case(mesh_resolution,fe_order,mp_q):
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order)
-    mygs.pnorm=0.0
+    mygs.p_scale=0.0
     ffp_prof={
         'type': 'linterp',
         'x': [0.0,1.0],
@@ -657,7 +657,7 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         mygs.set_flux(None,None)
         mygs.set_saddles(None)
         mygs.set_targets(R0=mygs.o_point[0],V0=mygs.o_point[1])
-        myrecon.settings.fitPnorm = False
+        myrecon.settings.fit_Pscale = False
         myrecon.settings.fitR0 = True
         myrecon.settings.fitCoils = True
         myrecon.settings.pm = False

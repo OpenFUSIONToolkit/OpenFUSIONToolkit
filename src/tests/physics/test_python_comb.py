@@ -82,7 +82,7 @@ def run_all(dummy,mp_q):
         mygs.setup_mesh(mesh_pts,mesh_lc)
         mygs.settings.free_boundary = False
         mygs.setup(order=2)
-        mygs.pnorm=0.0
+        mygs.p_scale=0.0
         ffp_prof={
             'type': 'linterp',
             'x': [0.0,1.0],
@@ -95,7 +95,7 @@ def run_all(dummy,mp_q):
         mygs.update_settings()
         mygs.init_psi()
         mygs.solve()
-        mp_q.put(mygs.alam)
+        mp_q.put(mygs.ffp_scale)
     except:
         mp_q.put(None)
         return

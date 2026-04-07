@@ -138,7 +138,7 @@ tokamaker_get_coil_currents = ctypes_subroutine(oftpy_lib.tokamaker_get_coil_cur
 tokamaker_get_plasma_Lmat = ctypes_subroutine(oftpy_lib.tokamaker_get_plasma_Lmat,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
-# tokamaker_get_refs(tMaker_equil_ptr,o_point,lim_point,x_points,diverted,plasma_bounds,alam,pnorm,has_plasma,error_str)
+# tokamaker_get_refs(tMaker_equil_ptr,o_point,lim_point,x_points,diverted,plasma_bounds,ffp_scale,p_scale,has_plasma,error_str)
 tokamaker_get_refs = ctypes_subroutine(oftpy_lib.tokamaker_get_refs,
     [c_void_p, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_bool_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr,  c_double_ptr_ptr, c_bool_ptr_ptr, c_char_p])
 

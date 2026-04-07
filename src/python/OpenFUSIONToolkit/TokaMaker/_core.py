@@ -371,23 +371,31 @@ class TokaMaker():
     @property
     def ffp_scale(self):
         r'''! F*F' scale value'''
-        return self._ffp_scale[0]
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.ffp_scale
     
     # @cond
     @ffp_scale.setter
     def ffp_scale(self,value):
-        self._ffp_scale[0] = value
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        self._tMaker_equil.ffp_scale = value
     # @endcond
     
     @property
     def p_scale(self):
         r'''! Pressure scale value'''
-        return self._p_scale[0]
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.p_scale
     
     # @cond
     @p_scale.setter
     def p_scale(self,value):
-        self._p_scale[0] = value
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        self._tMaker_equil.p_scale = value
     # @endcond
 
     @property
@@ -395,16 +403,12 @@ class TokaMaker():
         r'''! F*F' normalization value
         
         @deprecated Use `ffp_scale` property instead.'''
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.ffp_scale
+        return self.ffp_scale
     
     # @cond
     @alam.setter
     def alam(self,value):
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        self._tMaker_equil.ffp_scale = value
+        self.ffp_scale = value
     # @endcond
     
     @property
@@ -412,16 +416,12 @@ class TokaMaker():
         r'''! Pressure normalization value
         
         @deprecated Use `p_scale` property instead.'''
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.p_scale
+        return self.p_scale
     
     # @cond
     @pnorm.setter
     def pnorm(self,value):
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        self._tMaker_equil.p_scale = value
+        self.p_scale = value
     # @endcond
     
     @property

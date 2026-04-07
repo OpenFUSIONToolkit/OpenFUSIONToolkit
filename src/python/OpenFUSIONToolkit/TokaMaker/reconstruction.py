@@ -17,8 +17,8 @@ class tokamaker_recon_settings_struct(c_struct):
 
      - `fitI` Adjust \f$ F*F' \f$ parameterization coefficients?
      - `fitP` Adjust \f$ P' \f$ parameterization coefficients?
-     - `fitPnorm` Adjust \f$ P' \f$ scale factor?
-     - `fitAlam` Adjust \f$ F*F' \f$ scale factor?
+     - `fit_Pscale` Adjust \f$ P' \f$ scale factor?
+     - `fit_FFPscale` Adjust \f$ F*F' \f$ scale factor?
      - `fitR0` Utilize and adjust \f$ R_0 \f$ constraint?
      - `fitV0` Utilize and adjust \f$ Z_0 \f$ constraint?
      - `fitCoils` Allow adjustment of PF coil currents?
@@ -30,8 +30,8 @@ class tokamaker_recon_settings_struct(c_struct):
     '''
     _fields_ = [("fitI", c_bool),
                 ("fitP", c_bool),
-                ("fitPnorm", c_bool),
-                ("fitAlam", c_bool),
+                ("fit_Pscale", c_bool),
+                ("fit_FFPscale", c_bool),
                 ("fitR0", c_bool),
                 ("fitV0", c_bool),
                 ("fitCoils", c_bool),
@@ -51,8 +51,8 @@ def tokamaker_recon_default_settings(oft_env):
     settings = tokamaker_recon_settings_struct()
     settings.fitI = False
     settings.fitP = False
-    settings.fitPnorm = True
-    settings.fitAlam = True
+    settings.fit_Pscale = True
+    settings.fit_FFPscale = True
     settings.fitR0 = False
     settings.fitV0 = False
     settings.fitCoils = False

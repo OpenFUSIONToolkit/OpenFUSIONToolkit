@@ -68,8 +68,8 @@ END TYPE tokamaker_settings_type
 TYPE, BIND(C) :: tokamaker_recon_settings_type
   LOGICAL(KIND=c_bool) :: fitI = .TRUE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitP = .TRUE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fitPnorm = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fitAlam = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fit_Pscale = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fit_FFPscale = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitR0 = .TRUE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitV0 = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitCoils = .FALSE. !< Needs docs
@@ -530,7 +530,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
 TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
-LOGICAL :: fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering
+LOGICAL :: fitI,fitP,fit_Pscale,fit_FFPscale,fitR0,fitV0,fitCoils,fitF0,fixedCentering
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
 CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -546,8 +546,8 @@ error_flag=0
 IF(vacuum)tMaker_obj%gs_equil%has_plasma=.FALSE.
 fitI=settings%fitI
 fitP=settings%fitP
-fitPnorm=settings%fitPnorm
-fitAlam=settings%fitAlam
+fit_Pscale=settings%fit_Pscale
+fit_FFPscale=settings%fit_FFPscale
 fitR0=settings%fitR0
 fitV0=settings%fitV0
 fitCoils=settings%fitCoils
@@ -559,8 +559,8 @@ CALL c_f_pointer(settings%outfile,outfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(infile_c,infile)
 CALL copy_string_rev(outfile_c,outfile)
 tMaker_obj%device%timing=0.d0
-CALL fit_gs(tMaker_obj%gs_equil,infile,outfile,fitI,fitP,fitPnorm,&
-            fitAlam,fitR0,fitV0,fitCoils,fitF0, &
+CALL fit_gs(tMaker_obj%gs_equil,infile,outfile,fitI,fitP,fit_Pscale,&
+            fit_FFPscale,fitR0,fitV0,fitCoils,fitF0, &
             fixedCentering)
 CALL gs_profile_save(TRIM(outfile)//'_fprof',tMaker_obj%gs_equil%I)
 CALL gs_profile_save(TRIM(outfile)//'_pprof',tMaker_obj%gs_equil%P)

@@ -182,8 +182,8 @@ END TYPE fit_constraint_ptr
 TYPE(gs_equil), POINTER, PUBLIC :: gs_active => NULL() !< Needs docs
 REAL(8), ALLOCATABLE :: cofs_best(:) !< Needs docs
 REAL(8) :: chi_best = 1.d99 !< Needs docs
-REAL(8) :: alam_best = 1.d99 !< Needs docs
-REAL(8) :: pnorm_best = 1.d99 !< Needs docs
+REAL(8) :: ffp_scale_best = 1.d99 !< Needs docs
+REAL(8) :: p_scale_best = 1.d99 !< Needs docs
 REAL(8) :: vcont_best = 1.d99 !< Needs docs
 CLASS(oft_vector), POINTER :: psi_best => NULL() !< Needs docs
 REAL(8), ALLOCATABLE :: cofs_scale(:) !< Needs docs
@@ -196,8 +196,8 @@ INTEGER(4), PRIVATE :: geval_count = 0 !< Needs docs
 LOGICAL :: fit_pm = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fit_I = .TRUE. !< Needs docs
 LOGICAL, PRIVATE :: fit_P = .TRUE. !< Needs docs
-LOGICAL, PRIVATE :: fit_Pnorm = .TRUE. !< Needs docs
-LOGICAL, PRIVATE :: fit_Alam = .FALSE. !< Needs docs
+LOGICAL, PRIVATE :: fit_Pscale = .TRUE. !< Needs docs
+LOGICAL, PRIVATE :: fit_FFPscale = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fit_R0 = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fit_V0 = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fit_coils = .FALSE. !< Needs docs
@@ -212,14 +212,14 @@ CONTAINS
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering)
+SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fit_p_scale,fit_ffp_scale,fitR0,fitV0,fitCoils,fitF0,fixedCentering)
 TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: inpath !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: outpath !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitI !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitP !< Needs docs
-LOGICAL, OPTIONAL, INTENT(in) :: fitPnorm !< Needs docs
-LOGICAL, OPTIONAL, INTENT(in) :: fitAlam !< Needs docs
+LOGICAL, OPTIONAL, INTENT(in) :: fit_p_scale !< Needs docs
+LOGICAL, OPTIONAL, INTENT(in) :: fit_ffp_scale !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitR0 !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitV0 !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitCoils !< Needs docs
@@ -238,10 +238,10 @@ fit_I = .TRUE.
 IF(PRESENT(fitI))fit_I=fitI
 fit_P = .TRUE.
 IF(PRESENT(fitP))fit_P=fitP
-fit_Pnorm = .TRUE.
-IF(PRESENT(fitPnorm))fit_Pnorm=fitPnorm
-fit_Alam = .FALSE.
-IF(PRESENT(fitAlam))fit_alam=fitAlam
+fit_Pscale = .TRUE.
+IF(PRESENT(fit_p_scale))fit_Pscale=fit_p_scale
+fit_FFPscale = .FALSE.
+IF(PRESENT(fit_ffp_scale))fit_FFPscale=fit_ffp_scale
 fit_R0 = .FALSE.
 IF(PRESENT(fitR0))fit_R0=fitR0
 fit_V0 = .FALSE.
@@ -252,13 +252,13 @@ fit_F0 = .FALSE.
 IF(PRESENT(fitF0))fit_F0=fitF0
 fixed_centering = .FALSE.
 IF(PRESENT(fixedCentering))fixed_centering=fixedCentering
-IF(fit_Pnorm.AND.fit_R0)CALL oft_abort('R0 or Pnorm fitting cannot be used together', &
+IF(fit_Pscale.AND.fit_R0)CALL oft_abort('R0 or p_scale fitting cannot be used together', &
 'fit_gs',__FILE__)
-IF(fit_Pnorm.AND.gs%R0_target>0.d0)THEN
+IF(fit_Pscale.AND.gs%R0_target>0.d0)THEN
   gs%R0_target=-1.d0
   CALL oft_warn('P_norm adjustment requested, disabling R0 target')
 END IF
-IF(fit_Pnorm.AND.gs%pax_target>0.d0)THEN
+IF(fit_Pscale.AND.gs%pax_target>0.d0)THEN
   gs%pax_target=-1.d0
   CALL oft_warn('P_norm adjustment requested, disabling P_ax target')
 END IF
@@ -270,16 +270,16 @@ CALL fit_load(inpath,conlist)
 !---Count coefficients
 ncofs=0
 IF(gs%device%free)THEN
-  IF(fit_alam.OR.(gs_active%Itor_target>0.d0))ncofs = ncofs+1
+  IF(fit_FFPscale.OR.(gs_active%Itor_target>0.d0))ncofs = ncofs+1
 ELSE
   ncofs=ncofs+1
-  IF(fit_alam)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
+  IF(fit_FFPscale)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
   'fit_gs',__FILE__)
 END IF
 IF(gs_active%I%ncofs>0.AND.fit_I)THEN
   ncofs = ncofs+gs_active%I%ncofs
 END IF
-IF(fit_Pnorm.OR.fit_R0)ncofs = ncofs+1
+IF(fit_Pscale.OR.fit_R0)ncofs = ncofs+1
 IF(fit_V0)ncofs = ncofs + 1
 IF(gs_active%P%ncofs>0.AND.fit_P)THEN
   ncofs = ncofs+gs_active%P%ncofs
@@ -306,7 +306,7 @@ ALLOCATE(cofs(ncofs),cofs_scale(ncofs))
 cofs_scale=1.0
 offset=0
 IF(gs%device%free)THEN
-  IF(fit_alam)THEN
+  IF(fit_FFPscale)THEN
     offset=1
     cofs(1)=gs_active%ffp_scale
   ELSE IF(gs_active%Itor_target>0.d0)THEN
@@ -321,7 +321,7 @@ ELSE
     cofs(1)=gs_active%psiscale
     cofs_scale(1)=1.d0/ABS(gs_active%psiscale)
   END IF
-  IF(fit_alam)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
+  IF(fit_FFPscale)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
   'fit_gs',__FILE__)
 END IF
 IF(gs_active%I%ncofs>0.AND.fit_I)THEN
@@ -333,7 +333,7 @@ IF(fit_R0)THEN
   cofs(offset+1)=gs_active%R0_target-gs_active%device%rmin
   cofs_scale(offset+1)=5.d0/(gs_active%device%spatial_bounds(2,1)-gs_active%device%spatial_bounds(1,1))
   offset=offset+1
-ELSE IF(fit_Pnorm)THEN
+ELSE IF(fit_Pscale)THEN
   cofs(offset+1)=gs_active%p_scale
   cofs_scale(offset+1)=1.d0/MAX(gs_active%p_scale,1.d-2)
   offset=offset+1
@@ -412,8 +412,8 @@ CLOSE(io_unit)
 IF(ierr>0)CALL oft_abort('Error parsing "gs_fit_options" in input file.','fit_gs',__FILE__)
 !---
 chi_best=1.d99
-alam_best = 1.d99
-pnorm_best = 1.d99
+ffp_scale_best = 1.d99
+p_scale_best = 1.d99
 vcont_best = 1.d99
 ALLOCATE(cofs_best(ncofs))
 cofs_best=cofs
@@ -435,7 +435,7 @@ IF(maxfev>0)THEN
   !---Initialize
   CALL fit_error(ncons,ncofs,cofs,error,info)
   ! gs_active%Itor_target=-1.d0
-  ! IF(fit_Alam)cofs(1)=gs_active%alam
+  ! IF(fit_FFPscale)cofs(1)=gs_active%ffp_scale
   IF(gs_active%device%ierr<0)CALL oft_abort('Initial equilibrium solve failed to converge','fit_gs',__FILE__)
   !---
   call lmder(fit_error_grad,ncons,ncofs,cofs,error,fjac,ldfjac, &
@@ -450,7 +450,7 @@ IF(maxfev>0)THEN
   WRITE(*,*)
   IF(SQRT(SUM(error**2))>chi_best)THEN
     cofs=cofs_best
-    gs_active%p_scale=pnorm_best
+    gs_active%p_scale=p_scale_best
     gs_active%vcontrol_val=vcont_best
     CALL gs_active%psi%add(0.d0,1.d0,psi_best)
   END IF
@@ -588,16 +588,16 @@ logical :: plot_save
 integer(4) :: i,j,js,je,offset,ierr
 real(8) :: rel_err(m),abs_err(m),dx,dxi
 real(8), allocatable :: cof_tmp(:),err_tmp(:)
-real(8), save :: alam_in,pnorm_in,bounds_in(2,2),vcont_in,ip_target_in,estore_target_in
+real(8), save :: ffp_scale_in,p_scale_in,bounds_in(2,2),vcont_in,ip_target_in,estore_target_in
 real(8), allocatable, save :: cofs_in(:)
 class(oft_vector), pointer, save :: psi_center => NULL()
 CHARACTER(LEN=40) :: err_reason
 IF(.NOT.ASSOCIATED(psi_center))THEN
   ALLOCATE(cofs_in(n))
   cofs_in=cofs
-  alam_in=gs_active%ffp_scale
+  ffp_scale_in=gs_active%ffp_scale
   ip_target_in=gs_active%Itor_target
-  pnorm_in=gs_active%p_scale
+  p_scale_in=gs_active%p_scale
   estore_target_in=gs_active%estore_target
   ! bounds_in=gs_active%spatial_bounds
   bounds_in(:,1)=gs_active%plasma_bounds
@@ -627,7 +627,7 @@ IF(iflag==1)THEN
   !---
   offset=0
   IF(gs_active%device%free)THEN
-    IF(fit_alam)THEN
+    IF(fit_FFPscale)THEN
       offset=1
       gs_active%ffp_scale=cofs(1)
     ELSE IF(gs_active%Itor_target>0.d0)THEN
@@ -663,7 +663,7 @@ IF(iflag==1)THEN
   IF(fit_R0)THEN
     gs_active%R0_target=cofs(offset+1)+gs_active%device%rmin
     offset=offset+1
-  ELSE IF(fit_Pnorm)THEN
+  ELSE IF(fit_Pscale)THEN
     gs_active%p_scale=cofs(offset+1)
     offset=offset+1
   ELSE IF(gs_active%estore_target>0.d0)THEN
@@ -708,9 +708,9 @@ IF(iflag==1)THEN
   END IF
   IF(fit_F0)gs_active%I%f_offset = cofs(offset+1)
   ! !---Centering
-  ! alam_in=gs_active%alam
+  ! ffp_scale_in=gs_active%ffp_scale
   ! ip_target_in=gs_active%Itor_target
-  ! pnorm_in=gs_active%pnorm
+  ! p_scale_in=gs_active%p_scale
   ! estore_target_in=gs_active%estore_target
   ! bounds_in=gs_active%spatial_bounds
   ! vcont_in=gs_active%vcontrol_val
@@ -739,14 +739,14 @@ IF(iflag==1)THEN
     IF(SQRT(SUM(err**2))<chi_best)THEN
       chi_best=SQRT(SUM(err**2))
       cofs_best=cofs
-      alam_best=gs_active%ffp_scale
-      pnorm_best=gs_active%p_scale
+      ffp_scale_best=gs_active%ffp_scale
+      p_scale_best=gs_active%p_scale
       vcont_best=gs_active%vcontrol_val
       CALL psi_best%add(0.d0,1.d0,gs_active%psi)
     END IF
-    alam_in=gs_active%ffp_scale
+    ffp_scale_in=gs_active%ffp_scale
     ip_target_in=gs_active%Itor_target
-    pnorm_in=gs_active%p_scale
+    p_scale_in=gs_active%p_scale
     estore_target_in=gs_active%estore_target
     ! bounds_in=gs_active%spatial_bounds
     bounds_in(:,1)=gs_active%plasma_bounds
@@ -758,7 +758,7 @@ IF(iflag==1)THEN
     IF(ierr<0)THEN
       WRITE(*,'(3A)')oft_indent,'Step Failed: ',TRIM(err_reason)
     END IF
-    WRITE(*,'(2A,ES11.3)')oft_indent,'Alam              =',gs_active%ffp_scale
+    WRITE(*,'(2A,ES11.3)')oft_indent,'FFp_scale         =',gs_active%ffp_scale
     WRITE(*,'(2A,ES11.3)')oft_indent,'P_scale           =',gs_active%p_scale
     IF(gs_active%R0_target>0.d0)THEN
       WRITE(*,'(2A,ES11.3)')oft_indent,'R0_target         =',gs_active%R0_target
@@ -767,7 +767,7 @@ IF(iflag==1)THEN
       WRITE(*,'(2A,ES11.3)')oft_indent,'V0_target         =',gs_active%V0_target
     END IF
     IF(gs_active%device%free)THEN
-      IF(fit_alam)THEN
+      IF(fit_FFPscale)THEN
         offset=offset+1
       ELSE IF(gs_active%Itor_target>0.d0)THEN
         WRITE(*,'(2A,ES11.3)')oft_indent,'Itor_target       =',gs_active%Itor_target/mu0
@@ -790,7 +790,7 @@ IF(iflag==1)THEN
       WRITE(*,*)
       offset = je
     END IF
-    IF(fit_pnorm.OR.fit_R0.OR.(gs_active%estore_target>0.d0))offset=offset+1
+    IF(fit_Pscale.OR.fit_R0.OR.(gs_active%estore_target>0.d0))offset=offset+1
     IF(fit_V0)offset=offset+1
     IF(gs_active%P%ncofs>0.AND.fit_P)THEN
       js = offset; je = offset+gs_active%P%ncofs
@@ -850,7 +850,7 @@ ELSE
   offset=0
   dxi = 1.d-2
   IF(gs_active%device%free)THEN
-    IF(fit_alam)THEN
+    IF(fit_FFPscale)THEN
       CALL reset_eq
       dx = dxi/cofs_scale(offset+1)
       gs_active%ffp_scale=cofs(offset+1) + dx
@@ -917,7 +917,7 @@ ELSE
     jac_mat(:,offset+1)=(jac_mat(:,offset+1)-err)/dx
     gs_active%R0_target=cofs(offset+1)+gs_active%device%rmin
     offset=offset+1
-  ELSE IF(fit_Pnorm)THEN
+  ELSE IF(fit_Pscale)THEN
     CALL reset_eq
     dx = dxi/cofs_scale(offset+1)
     gs_active%p_scale=cofs(offset+1) + dx
@@ -1024,9 +1024,9 @@ DEALLOCATE(cof_tmp,err_tmp)
 CONTAINS
 !
 SUBROUTINE reset_eq
-gs_active%ffp_scale=alam_in
+gs_active%ffp_scale=ffp_scale_in
 gs_active%Itor_target=ip_target_in
-gs_active%p_scale=pnorm_in
+gs_active%p_scale=p_scale_in
 gs_active%estore_target=estore_target_in
 ! gs_active%spatial_bounds=bounds_in
 gs_active%plasma_bounds=bounds_in(:,1)
@@ -1041,10 +1041,10 @@ INTEGER(4), INTENT(in) :: m
 REAL(8), INTENT(inout) :: err(m)
 INTEGER(4), INTENT(out) :: ierr
 INTEGER(4) :: i
-REAL(8) :: alamin
+REAL(8) :: ffp_scalein
 LOGICAL :: pm_save
 !---
-alamin=gs_active%ffp_scale
+ffp_scalein=gs_active%ffp_scale
 pm_save=oft_env%pm; oft_env%pm=fit_pm
 IF(linear)THEN
   call gs_active%device%lin_solve(gs_active,.TRUE.,ierr)
@@ -1057,7 +1057,7 @@ IF(ierr<0)THEN
   DO i=1,m
     err(i)=conlist(i)%con%val*conlist(i)%con%wt*2.d0
   END DO
-  IF(.NOT.gs_active%device%free)gs_active%ffp_scale=alamin
+  IF(.NOT.gs_active%device%free)gs_active%ffp_scale=ffp_scalein
 ELSE
   !$omp parallel do schedule(dynamic,1)
   DO i=1,m
