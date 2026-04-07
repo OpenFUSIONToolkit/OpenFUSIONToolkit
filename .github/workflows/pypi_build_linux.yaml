@@ -55,6 +55,9 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         python -m pip install -U pip
         python -m pip install jupyter nbconvert build wheel
+    
+    - name: Mark repository as safe
+      run: git config --global --add safe.directory $GITHUB_WORKSPACE
 
     - name: Create build directory
       run: mkdir builds
