@@ -230,8 +230,8 @@ ELSE
   CALL hdf5_write(1.d0,filename,'gs/vac_flag')
 END IF
 CALL hdf5_write(self%psiscale,filename,'gs/psiscale')
-CALL hdf5_write(self%alam,filename,'gs/alam')
-CALL hdf5_write(self%pnorm,filename,'gs/pnorm')
+CALL hdf5_write(self%ffp_scale,filename,'gs/ffp_scale')
+CALL hdf5_write(self%p_scale,filename,'gs/p_scale')
 CALL hdf5_write(self%R0_target,filename,'gs/r0_target')
 CALL hdf5_write(self%Itor_target,filename,'gs/Ip_target')
 CALL hdf5_write(self%vcontrol_val,filename,'gs/vcont_val')
@@ -388,8 +388,8 @@ IF(INT(tmpval)/=self%fe_rep%order)CALL oft_abort("order mismatch","gs_load",__FI
 CALL hdf5_read(tmpval,filename,'gs/mpsi')
 m=INT(tmpval)
 CALL hdf5_read(self%psiscale,filename,'gs/psiscale')
-CALL hdf5_read(self%alam,filename,'gs/alam')
-CALL hdf5_read(self%pnorm,filename,'gs/pnorm')
+CALL hdf5_read(self%ffp_scale,filename,'gs/ffp_scale')
+CALL hdf5_read(self%p_scale,filename,'gs/p_scale')
 CALL hdf5_read(self%R0_target,filename,'gs/r0_target')
 CALL hdf5_read(self%Itor_target,filename,'gs/Ip_target')
 CALL hdf5_read(self%vcontrol_val,filename,'gs/vcont_val')
@@ -621,7 +621,7 @@ q95=linterp(psi_q,prof,npsi,0.05d0)
 baxis=self%o_point
 psimax=1.d0
 IF(self%plasma_bounds(1)>-1.d98)psimax=self%plasma_bounds(2)
-pmax=self%pnorm*self%P%f(psimax)*self%psiscale*self%psiscale
+pmax=self%p_scale*self%P%f(psimax)*self%psiscale*self%psiscale
 beta(1) = (2.d0*pvol/vol)/(Itor/dl)**2
 IF(ABS(self%I%f_offset)>0.d0)beta(2) = 2.d0*pvol/vol/(self%I%f_offset/centroid(1))**2
 WRITE(*,'(2A,ES11.3)')oft_indent,'Toroidal Current [A]    = ',Itor/mu0

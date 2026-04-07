@@ -1933,6 +1933,10 @@ class TokaMaker_equilibrium():
         tokamaker_equil_destroy(self._equil_ptr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+    
+    def copy(self):
+        r'''! Create a copy of the equilibrium object'''
+        return TokaMaker_equilibrium(source_eq=self)
         
     @property
     def c_ptr(self):
