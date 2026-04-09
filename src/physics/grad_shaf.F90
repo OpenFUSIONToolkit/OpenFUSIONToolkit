@@ -531,8 +531,10 @@ DO i=1,self%ncoils_ext
       CALL oft_abort('External coil in mesh','gs_load_coils',__FILE__)
     END IF
     !---Get polarity
-    IF(xml_hasAttribute(coil,"scale"))CALL xml_read_attribute(coil,"scale",self%coils_ext(i)%scale(j),iostat=ierr)
-    IF(ierr/=0)CALL oft_xml_abort("Error reading `scale` attribute.","gs_load_coils",__FILE__)
+    IF(xml_hasAttribute(coil,"scale"))THEN
+      CALL xml_read_attribute(coil,"scale",self%coils_ext(i)%scale(j),iostat=ierr)
+      IF(ierr/=0)CALL oft_xml_abort("Error reading `scale` attribute.","gs_load_coils",__FILE__)
+    END IF
   END DO
   IF(ASSOCIATED(coils%nodes))DEALLOCATE(coils%nodes)
 END DO

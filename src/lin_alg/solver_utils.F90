@@ -768,7 +768,7 @@ IF(current_nodes%n==0)CALL oft_abort("Object contains no smoother definitions.",
 DO i=1,current_nodes%n
   current_node=>current_nodes%nodes(i)
   CALL xml_read_attribute(current_node,"direction",dir_type,iostat=ierr)
-  IF(ierr/=0)CALL oft_xml_abort("Error reading direction attribute.","create_solver_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading direction attribute.","create_ml_xml",__FILE__)
   IF(oft_debug_print(2))WRITE(*,*)'Found smoother: ',dir_type
   SELECT CASE(dir_type)
     CASE("up")

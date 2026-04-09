@@ -2413,7 +2413,7 @@ DO i=1,ncoils
   IF(xml_hasAttribute(coil_set,"name"))THEN
     CALL xml_read_attribute(coil_set,"name",str_tmp,iostat=ierr)
     IF(ierr/=0)THEN
-      WRITE(coil_ind,'(I6,2X,I6)')i
+      WRITE(coil_ind,'(I6)')i
       CALL oft_xml_abort('Error reading "name" for coil set '//coil_ind,'tw_load_coils',__FILE__)
     END IF
     IF(LEN(str_tmp)>LEN(coil_tmp%name))THEN
