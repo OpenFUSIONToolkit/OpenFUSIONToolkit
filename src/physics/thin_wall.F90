@@ -2744,10 +2744,10 @@ subroutine tw_load_eta(self)
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
 !---XML solver fields
 integer(4) :: nshells,nreg_mesh,nread
-TYPE(xml_node), POINTER :: sens_node,eta_group,eta_vol_group,thincurr_group,thickness_group
+TYPE(xml_node), POINTER :: sens_node,eta_group,eta_surf_group,eta_vol_group,thincurr_group,thickness_group
 !---
 INTEGER(4) :: i,j,io_unit,ierr,id,cell
-REAL(8) :: location(2),eta_chk
+REAL(8) :: location(2)
 LOGICAL :: has_eta_surf,has_eta_vol,has_thickness
 nreg_mesh=MAXVAL(self%mesh%reg)
 !--- Deallocate if already set
@@ -2772,6 +2772,10 @@ IF(.NOT.ASSOCIATED(self%xml))THEN
 END IF
 ! Read surface resistivity values
 CALL xml_get_element(self%xml,"eta",eta_group,ierr)
+IF(.NOT.ASSOCIATED(eta_group))THEN
+  CALL xml_get_element(self%xml,"eta_surf",eta_surf_group,ierr)
+  eta_group=>eta_surf_group
+END IF
 IF(ASSOCIATED(eta_group))THEN
   WRITE(*,*)
   WRITE(*,'(2A)')oft_indent,'Loading region surface resistivity:'
@@ -2783,8 +2787,6 @@ IF(ASSOCIATED(eta_group))THEN
     WRITE(*,'(A,I4,ES12.4)')oft_indent,i,self%Eta_surf(i)
   END DO
   has_eta_surf=.TRUE.
-ELSE
-  CALL oft_warn('No "eta" XML node.  Ignore this warning if resistivity does not need to be specified.')
 END IF
 ! Read volumetric resistivity values
 CALL xml_get_element(self%xml,"eta_vol",eta_vol_group,ierr)
@@ -2811,26 +2813,23 @@ IF(ASSOCIATED(thickness_group))THEN
     WRITE(*,'(A,I4,ES12.4)')oft_indent,i,self%Thickness(i)
   END DO
   has_thickness=.TRUE.
-ELSE
-  CALL oft_warn('No "thickness" XML node.')
 END IF
-IF(has_eta_surf.AND.has_eta_vol.AND.has_thickness)THEN
-  !---When all are provided, ensure consistency: eta_vol == eta_surf * thickness.
-  DO i=1,nreg_mesh
-    eta_chk=self%Eta_surf(i)*self%Thickness(i)
-    IF(ABS(self%Eta_vol(i)-eta_chk)>1.d-8*MAX(ABS(self%Eta_vol(i)),ABS(eta_chk),1.d0))THEN
-      CALL oft_abort('Incompatible XML resistivity inputs: expected eta_vol = eta * thickness', 'tw_load_eta', __FILE__)
-    END IF
-  END DO
-ELSEIF(has_eta_vol.AND.(.NOT.has_thickness))THEN
-  !---Volumetric resistivity requires thickness to recover surface resistivity.
-  CALL oft_abort('Invalid XML resistivity inputs: "eta_vol" requires "thickness"', 'tw_load_eta', __FILE__)
-ELSEIF(has_eta_surf.AND.has_thickness)THEN
-  !---Compute eta_vol from eta_surf and thickness
-  self%Eta_vol=self%Eta_surf*self%Thickness
-ELSEIF(has_eta_vol.AND.has_thickness)THEN
-  !---Compute eta_surf from eta_vol and thickness
+IF(has_eta_surf)THEN
+  !---Recompute eta_surf if eta_vol and thickness also provided
+  IF(has_eta_vol.AND.has_thickness)THEN
+    CALL oft_warn('"eta_surf" (or "eta"), "eta_vol," and "thickness" all provided from XML. Recalculating eta_surf from eta_vol')
+    self%Eta_surf=self%Eta_vol/self%Thickness
+  !---Compute eta_vol if eta_surf and thickness provided
+  ELSE IF((.NOT.has_eta_vol).AND.has_thickness)THEN
+    self%Eta_vol=self%Eta_surf*self%Thickness
+  END IF
+ELSE IF (has_eta_vol.AND.has_thickness)THEN
+  !---Compute eta_surf if eta_vol and thickness provided
   self%Eta_surf=self%Eta_vol/self%Thickness
+ELSE IF (has_eta_vol.AND.(.NOT.has_thickness))THEN
+  CALL oft_warn('"eta_vol" specified without thickness in XML. eta_vol is retained, but eta_surf is not inferred in this load path. Provide thickness and then set resistivity explicitly.')
+ELSE
+  CALL oft_warn('Cannot gather or infer surface resisitivity from XML. Ignore if warning this does not need to be specified.')
 END IF
 ! Read sensor mask
 CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr)

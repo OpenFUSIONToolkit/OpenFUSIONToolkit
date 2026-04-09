@@ -67,8 +67,7 @@ TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: hole_nsets => NULL()
 #ifdef HAVE_XML
-TYPE(xml_node), POINTER :: thincurr_node, eta_vol_node, thickness_node
-LOGICAL :: has_eta_vol, has_thickness
+TYPE(xml_node), POINTER :: thincurr_node
 #endif
 CALL copy_string('',error_str)
 CALL copy_string_rev(mesh_file,filename)
@@ -208,16 +207,6 @@ IF(c_associated(xml_ptr))THEN
   CALL xml_get_element(thincurr_node,"thincurr",tw_obj%xml,ierr)
   IF(ierr/=0)THEN
     CALL copy_string('Error getting ThinCurr XML node',error_str)
-    RETURN
-  END IF
-  ! Pre-validate XML combinations at wrapper boundary so Python callers get
-  ! a normal exception instead of a hard abort from deeper native setup.
-  CALL xml_get_element(tw_obj%xml,"eta_vol",eta_vol_node,ierr)
-  has_eta_vol=ASSOCIATED(eta_vol_node)
-  CALL xml_get_element(tw_obj%xml,"thickness",thickness_node,ierr)
-  has_thickness=ASSOCIATED(thickness_node)
-  IF(has_eta_vol .AND. (.NOT.has_thickness))THEN
-    CALL copy_string('Invalid XML resistivity inputs: "eta_vol" requires "thickness"',error_str)
     RETURN
   END IF
 #else
@@ -706,26 +695,70 @@ END SUBROUTINE thincurr_get_eta
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE thincurr_set_eta(tw_ptr,eta_ptr,error_str)BIND(C,NAME="thincurr_set_eta")
+SUBROUTINE thincurr_get_eta_vol(tw_ptr,eta_ptr,error_str)BIND(C,NAME="thincurr_get_eta_vol")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eta_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
-INTEGER(4) :: nreg_mesh
 REAL(8), POINTER :: res_tmp(:)
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
 CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
-IF(ANY(res_tmp<=0.d0))THEN
-  CALL copy_string('All values in "eta" must be > 0',error_str)
+res_tmp=tw_obj%Eta_vol*mu0
+END SUBROUTINE thincurr_get_eta_vol
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_set_eta(tw_ptr,eta_surf_ptr,eta_vol_ptr,error_str)BIND(C,NAME="thincurr_set_eta")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: eta_surf_ptr !< Surface resistivity pointer (or NULL)
+TYPE(c_ptr), VALUE, INTENT(in) :: eta_vol_ptr !< Volumetric resistivity pointer (or NULL)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+!
+LOGICAL :: has_eta_surf, has_eta_vol
+REAL(8), POINTER :: eta_surf_tmp(:), eta_vol_tmp(:)
+TYPE(tw_type), POINTER :: tw_obj
+CALL copy_string('',error_str)
+CALL c_f_pointer(tw_ptr, tw_obj)
+has_eta_surf=c_associated(eta_surf_ptr)
+has_eta_vol=c_associated(eta_vol_ptr)
+
+IF(has_eta_surf .AND. has_eta_vol)THEN
+  CALL copy_string('Only one of "eta_surf" or "eta_vol" can be passed to thincurr_set_eta',error_str)
+  RETURN
+END IF
+IF((.NOT.has_eta_surf) .AND. (.NOT.has_eta_vol))THEN
+  CALL copy_string('One of "eta_surf" or "eta_vol" must be passed to thincurr_set_eta',error_str)
   RETURN
 END IF
 
-tw_obj%Eta_surf=res_tmp/mu0
-! If thickness is set, update Eta_vol as well
-IF (ASSOCIATED(tw_obj%Thickness)) THEN ! If thickness if set, use it to compute Eta_surf
-  IF(ALL(tw_obj%Thickness>0.d0))tw_obj%Eta_vol=tw_obj%Eta_surf*tw_obj%Thickness
+IF(has_eta_surf)THEN
+  CALL c_f_pointer(eta_surf_ptr, eta_surf_tmp, [tw_obj%mesh%nreg])
+  IF(ANY(eta_surf_tmp<=0.d0))THEN
+    CALL copy_string('All values in "eta_surf" must be > 0',error_str)
+    RETURN
+  END IF
+  tw_obj%Eta_surf=eta_surf_tmp/mu0
+  IF (ASSOCIATED(tw_obj%Thickness)) THEN
+    IF(ALL(tw_obj%Thickness>0.d0))tw_obj%Eta_vol=tw_obj%Eta_surf*tw_obj%Thickness
+  END IF
+ELSE
+  CALL c_f_pointer(eta_vol_ptr, eta_vol_tmp, [tw_obj%mesh%nreg])
+  IF(ANY(eta_vol_tmp<=0.d0))THEN
+    CALL copy_string('All values in "eta_vol" must be > 0',error_str)
+    RETURN
+  END IF
+  IF(.NOT.ASSOCIATED(tw_obj%Thickness))THEN
+    CALL copy_string('"eta_vol" requires thickness to already be set',error_str)
+    RETURN
+  END IF
+  IF(.NOT.ALL(tw_obj%Thickness>0.d0))THEN
+    CALL copy_string('"eta_vol" requires positive thickness values',error_str)
+    RETURN
+  END IF
+  tw_obj%Eta_vol=eta_vol_tmp/mu0
+  tw_obj%Eta_surf=tw_obj%Eta_vol/tw_obj%Thickness
 END IF
 END SUBROUTINE thincurr_set_eta
 !---------------------------------------------------------------------------------
@@ -766,9 +799,6 @@ IF(ANY(thick_tmp<=0.d0))THEN
   RETURN
 END IF
 tw_obj%Thickness=thick_tmp
-IF (ASSOCIATED(tw_obj%Eta_surf)) THEN ! If Eta_surf is allocated, we can compute Eta_vol using the new thickness values.
-  IF(ALL(tw_obj%Eta_surf>0.d0))tw_obj%Eta_vol=tw_obj%Eta_surf*tw_obj%Thickness
-END IF
 END SUBROUTINE thincurr_set_thickness
 !---------------------------------------------------------------------------------
 !> Needs docs
