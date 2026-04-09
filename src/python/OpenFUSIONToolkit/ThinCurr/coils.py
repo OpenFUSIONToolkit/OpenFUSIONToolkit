@@ -8,130 +8,119 @@
 @date Feb 2026
 '''
 import xml.etree.ElementTree as ET
+from .._core import bool_to_string
 # ===============================
 # Icoil and Vcoil classes
 # ===============================
 
-class ThinCurr_Icoil:
+class ThinCurr_coil_set:
+    def __init__(self, name, sens_mask=False):
+        """! Initialize general coil set
+        @param name Name of the coil set
+        @param sens_mask Masking flag for coil (if `True`, coil is masked from sensors)
+        """
+        self.name = name
+        self.sens_mask = sens_mask
+        self.subcoils = []  # List of subcoil dictionaries
+    
+    def add_subcoil(self, RZ=None, pts=None, scale=None, npoints=None, hdf5_path=None):
+        """! Add a subcoil to this V-coil set
+        @param RZ [R, Z] position (for circular coils; centered on Z-axis)
+        @param pts Array of [x, y, z] positions (for general coils)
+        @param scale Scaling factor for coil current (`1.0` if not specified)
+        @param npoints Number of points (for general coils)
+        @param hdf5_path Path to HDF5 dataset containing coil points (alternative to `pts` and `RZ`)
+        """
+        if pts is not None: # General 3D coil
+            if (RZ is not None) or (hdf5_path is not None):
+                raise ValueError("Only one of `RZ`, `pts`, or `hdf5_path` should be provided")
+            if npoints is None:
+                npoints = len(pts)
+            self.subcoils.append({'pts': pts,'scale': scale,'npts': npoints})
+        elif RZ is not None: # Circular coil
+            if (pts is not None) or (hdf5_path is not None):
+                raise ValueError("Only one of `RZ`, `pts`, or `hdf5_path` should be provided")
+            self.subcoils.append({'RZ': RZ,'scale': scale})
+        elif hdf5_path is not None: # Coil points from HDF5 dataset
+            if (RZ is not None) or (pts is not None):
+                raise ValueError("Only one of `RZ`, `pts`, or `hdf5_path` should be provided")
+            self.subcoils.append({'hdf5_path': hdf5_path,'scale': scale})
+        else:
+            raise ValueError("Either `RZ`, `pts`, or `path` must be provided")
+    
+    def build_coil_XML(self, coil_set):
+        """! Build XML structure for this V-coil
+        @param coil_set Coil set XML element to attach to
+        """
+        for subcoil in self.subcoils:
+            if 'pts' in subcoil:
+                # Custom 3D coil - detected by presence of 'pts' key
+                coil_element = ET.SubElement(coil_set, "coil", attrib={"npts": str(subcoil['npts'])})
+                # Format xyz points
+                text_lines = []
+                for xyz in subcoil['pts']:
+                    text_lines.append('{0:E}, {1:E}, {2:E}'.format(xyz[0], xyz[1], xyz[2]))
+                coil_element.text = "\n" + "\n".join(text_lines) + "\n"
+            elif 'RZ' in subcoil:
+                coil_element = ET.SubElement(coil_set, "coil")
+                coil_element.text = '{0:E}, {1:E}'.format(subcoil['RZ'][0], subcoil['RZ'][1])
+            elif 'hdf5_path' in subcoil:
+                coil_element = ET.SubElement(coil_set, "coil", attrib={"path": subcoil['hdf5_path']})
+                if subcoil['scale'] is not None:
+                    coil_element.set("scale", str(subcoil['scale']))
+            # Handling common attributes
+            if subcoil['scale'] is not None:
+                coil_element.set("scale", str(subcoil['scale']))
+
+class ThinCurr_Icoil(ThinCurr_coil_set):
     """! I-coil class for defining current-driven coils in OpenFUSIONToolkit"""
     
     def __init__(self, name, sens_mask=False):
         """! Initialize I-coil
-        @param name string, name of the coil set
-        @param sens_mask bool or array, sensitivity mask for coil points
+        @param name Name of the coil set
+        @param sens_mask Masking flag for coil (if `True`, coil is masked from sensors)
         """
-        self.name = name
-        self.sens_mask = sens_mask
-        self.subcoils = []  # List of subcoil dictionaries
-    
-    def add_subcoil(self, RZ=None, pts=None, scale=None, npoints=None):
-        """! Add a subcoil to this I-coil set
-        @param RZ array of [R, Z] positions (for non-custom coils)
-        @param pts array of [x, y, z] positions (for custom coils)
-        @param scale float, scaling factor for coil current (None if not specified)
-        @param npoints int, number of points (for custom coils)
-        """
-        if pts is not None:
-            # Custom coil with 3D points
-            self.subcoils.append({'pts': pts,'scale': scale,'npoints': npoints})
-        elif RZ is not None:
-            # Standard RZ coil
-            self.subcoils.append({'RZ': RZ,'scale': scale})
-        else:
-            raise ValueError("Either RZ or pts must be provided")
+        super().__init__(name, sens_mask)
     
     def build_XML(self, parent_tag):
         """! Build XML structure for this I-coil
-        @param parent_tag ET.Element, parent XML element to attach to
+        @param parent_tag Parent XML element to attach to
         """
-        coil_set = ET.SubElement(parent_tag, "coil_set", attrib={"name": self.name})
-        
-        for subcoil in self.subcoils:
-                    if 'pts' in subcoil:
-                        # Custom 3D coil - detected by presence of 'pts' key
-                        coil_element = ET.SubElement(coil_set, "coil", attrib={"npoints": str(subcoil['npoints'])})
-                        if subcoil['scale'] is not None:
-                            coil_element.set("scale", str(subcoil['scale']))
-                        # Format xyz points
-                        text_lines = []
-                        for xyz in subcoil['pts']:
-                            text_lines.append('{0:.6f}, {1:.6f}, {2:.6f}'.format(xyz[0], xyz[1], xyz[2]))
-                        coil_element.text = "\n" + "\n".join(text_lines) + "\n"
-                    elif 'RZ' in subcoil:
-                        # Standard RZ coil - detected by presence of 'RZ' key
-                        for rz in subcoil['RZ']:
-                            coil_element = ET.SubElement(coil_set, "coil")
-                            # Only add scale attribute if it's not None
-                            if subcoil['scale'] is not None:
-                                coil_element.set("scale", str(subcoil['scale']))
-                            coil_element.text = '{0:.6f}, {1:.6f}'.format(rz[0], rz[1])
+        # Build attributes for coil_set
+        attrib = {"name": self.name}
+        if self.sens_mask:
+            attrib["sens_mask"] = bool_to_string(self.sens_mask)
+        coil_set = ET.SubElement(parent_tag, "coil_set", attrib=attrib)
+        # Build subcoil elements
+        self.build_coil_XML(coil_set)
 
 
-class ThinCurr_Vcoil:
+class ThinCurr_Vcoil(ThinCurr_coil_set):
     """! V-coil class for defining voltage-driven coils in OpenFUSIONToolkit"""
     
     def __init__(self, name, resistivity_per_length, radius, sens_mask=False):
         """! Initialize V-coil
-        @param name string, name of the coil set
-        @param resistivity_per_length float, resistivity per unit length
-        @param radius float, coil radius 
-        @param sens_mask bool or array, sensitivity mask for coil points
+        @param name Name of the coil set
+        @param resistivity_per_length Resistivity per unit length
+        @param radius Coil radius 
+        @param sens_mask Masking flag for coil (if `True`, coil is masked from sensors)
         """
-        self.name = name
+        super().__init__(name, sens_mask)
+        # Vcoil-specific fields
         self.resistivity_per_length = resistivity_per_length
         self.radius = radius
-        self.sens_mask = sens_mask
-        self.subcoils = []  # List of subcoil dictionaries
-    
-    def add_subcoil(self, RZ=None, pts=None, scale=None, npoints=None):
-        """! Add a subcoil to this V-coil set
-        @param RZ array of [R, Z] positions (for non-custom coils)
-        @param pts array of [x, y, z] positions (for custom coils)
-        @param scale float, scaling factor for coil current (None if not specified)
-        @param npoints int, number of points (for custom coils)
-        """
-        if pts is not None:
-            # Custom coil with 3D points
-            self.subcoils.append({'pts': pts,'scale': scale,'npoints': npoints})
-        elif RZ is not None:
-            # Standard RZ coil
-            self.subcoils.append({'RZ': RZ,'scale': scale})
-        else:
-            raise ValueError("Either RZ or pts must be provided")
     
     def build_XML(self, parent_tag):
         """! Build XML structure for this V-coil
-        @param parent_tag ET.Element, parent XML element to attach to
+        @param parent_tag Parent XML element to attach to
         """
         # Build attributes for coil_set
         attrib = {"name": self.name,"radius": str(self.radius), "res_per_len": str(self.resistivity_per_length)}
         if self.sens_mask:
-            attrib["sens_mask"] = str(self.sens_mask)
-        
+            attrib["sens_mask"] = bool_to_string(self.sens_mask)
         coil_set = ET.SubElement(parent_tag, "coil_set", attrib=attrib)
-        
-        for subcoil in self.subcoils:
-                    if 'pts' in subcoil:
-                        # Custom 3D coil - detected by presence of 'pts' key
-                        coil_element = ET.SubElement(coil_set, "coil", attrib={"npoints": str(subcoil['npoints'])})
-                        # Only add scale attribute if it's not None
-                        if subcoil['scale'] is not None:
-                            coil_element.set("scale", str(subcoil['scale']))
-                        # Format xyz points
-                        text_lines = []
-                        for xyz in subcoil['pts']:
-                            text_lines.append('{0:.6f}, {1:.6f}, {2:.6f}'.format(xyz[0], xyz[1], xyz[2]))
-                        coil_element.text = "\n" + "\n".join(text_lines) + "\n"
-                    elif 'RZ' in subcoil:
-                        # Standard RZ coil - detected by presence of 'RZ' key
-                        for rz in subcoil['RZ']:
-                            coil_element = ET.SubElement(coil_set, "coil")
-                            # Only add scale attribute if it's not None
-                            if subcoil['scale'] is not None:
-                                coil_element.set("scale", str(subcoil['scale']))
-                            coil_element.text = '{0:.6f}, {1:.6f}'.format(rz[0], rz[1])
-
-
+        # Build subcoil elements
+        self.build_coil_XML(coil_set)
 
 
 # ===============================
@@ -167,20 +156,20 @@ class ThinCurr_XML:
     
     def set_eta(self, resistivities):
         """! Set resistivity values
-        @param resistivities array of float, resistivity values by section
+        @param resistivities Resistivity values by section
         """
         self.eta = resistivities
     
     def build_XML(self, parent_tag):
         """! Build XML structure for ThinCurr block
-        @param parent_tag ET.Element, parent XML element to attach to
+        @param parent_tag Parent XML element to attach to
         """
         thincurr_element = ET.SubElement(parent_tag, "thincurr")
         
         # Add eta (resistivities) if present
         if self.eta is not None:
             eta_element = ET.SubElement(thincurr_element, "eta")
-            eta_element.text = ' '.join('{0:.4E}'.format(r) for r in self.eta)
+            eta_element.text = ', '.join('{0:E}'.format(r) for r in self.eta)
         
         # Add I-coils if present
         if self.icoils:

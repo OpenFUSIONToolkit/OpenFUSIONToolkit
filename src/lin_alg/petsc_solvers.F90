@@ -434,7 +434,7 @@ IF(PRESENT(level))val_level=level
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort("Error reading `its` node","cg_setup_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `its` node","cg_setup_xml",__FILE__)
   IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
       IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `its` values specified","cg_setup_xml",__FILE__)
@@ -449,7 +449,7 @@ END IF
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_real,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort("Error reading `atol` node","cg_setup_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `atol` node","cg_setup_xml",__FILE__)
   IF(ASSOCIATED(read_real))THEN
     IF(SIZE(read_real)>1)THEN
       IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `atol` values specified","cg_setup_xml",__FILE__)
@@ -464,7 +464,7 @@ END IF
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_real,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort("Error reading `rtol` node","cg_setup_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `rtol` node","cg_setup_xml",__FILE__)
   IF(ASSOCIATED(read_real))THEN
     IF(SIZE(read_real)>1)THEN
       IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `rtol` values specified","cg_setup_xml",__FILE__)
@@ -614,7 +614,7 @@ IF(PRESENT(level))val_level=level
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort("Error reading `its` node","gmres_setup_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `its` node","gmres_setup_xml",__FILE__)
   IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
       IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `its` values specified","gmres_setup_xml",__FILE__)
@@ -629,7 +629,7 @@ END IF
 CALL xml_get_element(solver_node,"nrits",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort("Error reading `nrits` node","gmres_setup_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `nrits` node","gmres_setup_xml",__FILE__)
   IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
       IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `nrits` values specified","gmres_setup_xml",__FILE__)
@@ -644,7 +644,7 @@ END IF
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_real,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort("Error reading `atol` node","gmres_setup_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `atol` node","gmres_setup_xml",__FILE__)
   IF(ASSOCIATED(read_real))THEN
     IF(SIZE(read_real)>1)THEN
       IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `atol` values specified","gmres_setup_xml",__FILE__)
@@ -659,7 +659,7 @@ END IF
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_real,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort("Error reading `rtol` node","gmres_setup_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `rtol` node","gmres_setup_xml",__FILE__)
   IF(ASSOCIATED(read_real))THEN
     IF(SIZE(read_real)>1)THEN
       IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `rtol` values specified","gmres_setup_xml",__FILE__)
@@ -936,7 +936,7 @@ IF(PRESENT(level))val_level=level
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort("Error reading `its` node","sjacobi_setup_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `its` node","sjacobi_setup_xml",__FILE__)
   IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
       IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `its` values specified","sjacobi_setup_xml",__FILE__)
@@ -951,7 +951,7 @@ END IF
 CALL xml_get_element(solver_node,"df",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_real,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort("Error reading `df` node","sjacobi_setup_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `df` node","sjacobi_setup_xml",__FILE__)
   IF(ASSOCIATED(read_real))THEN
     IF(SIZE(read_real)>1)THEN
       IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `df` values specified","sjacobi_setup_xml",__FILE__)
@@ -1455,7 +1455,7 @@ IF(PRESENT(level))val_level=level
 CALL xml_get_element(solver_node,"overlap",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort("Error reading `overlap` node","asprecond_setup_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `overlap` node","asprecond_setup_xml",__FILE__)
   IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
       IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `overlap` values specified","asprecond_setup_xml",__FILE__)
@@ -1470,7 +1470,7 @@ END IF
 CALL xml_get_element(solver_node,"nlocal",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_int,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort("Error reading `nlocal` node","asprecond_setup_xml",__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `nlocal` node","asprecond_setup_xml",__FILE__)
   IF(ASSOCIATED(read_int))THEN
     IF(SIZE(read_int)>1)THEN
       IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `nlocal` values specified","asprecond_setup_xml",__FILE__)
@@ -1557,6 +1557,7 @@ DEBUG_STACK_PUSH
 CALL xml_get_element(solver_node,"type",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,factor_type,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `type` node","lu_pc_load_xml",__FILE__)
   IF(ALLOCATED(factor_type))THEN
     IF(LEN(factor_type)>6)CALL oft_abort('Factorization type name too long','lu_pc_load_xml',__FILE__)
     self%type=factor_type
@@ -1567,6 +1568,7 @@ END IF
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,factor_package,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `package` node","lu_pc_load_xml",__FILE__)
   IF(ALLOCATED(factor_package))THEN
     IF(LEN(factor_package)>6)CALL oft_abort('Factorization package name too long','lu_pc_load_xml',__FILE__)
     self%package=factor_package

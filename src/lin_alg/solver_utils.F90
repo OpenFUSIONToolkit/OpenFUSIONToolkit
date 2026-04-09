@@ -497,11 +497,12 @@ IF(PRESENT(level))val_level=level
 native_solver=.FALSE.
 !---
 CALL xml_read_attribute(solver_node,"type",solver_type,iostat=ierr)
-IF(ierr/=0)CALL oft_abort("Error reading solver type.","create_solver_xml",__FILE__)
+IF(ierr/=0)CALL oft_xml_abort("Error reading solver type.","create_solver_xml",__FILE__)
 IF(oft_debug_print(2))WRITE(*,*)'Found solver: ',solver_type
 force_native=.FALSE.
 IF(xml_hasAttribute(solver_node,"native"))THEN
   CALL xml_read_attribute(solver_node,"native",force_native,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `native` attribute.","create_solver_xml",__FILE__)
   ! force_native=((temp_string(1:1)=='t').OR.(temp_string(1:1)=='T'))
 END IF
 !---
@@ -682,6 +683,7 @@ val_level=1
 IF(PRESENT(level))val_level=level
 !---
 CALL xml_read_attribute(pre_node,"type",pre_type,iostat=ierr)
+IF(ierr/=0)CALL oft_xml_abort("Error reading preconditioner type.","create_pre_xml",__FILE__)
 IF(oft_debug_print(2))WRITE(*,*)'Found preconditioner: ',pre_type
 !---
 SELECT CASE(pre_type)
@@ -766,6 +768,7 @@ IF(current_nodes%n==0)CALL oft_abort("Object contains no smoother definitions.",
 DO i=1,current_nodes%n
   current_node=>current_nodes%nodes(i)
   CALL xml_read_attribute(current_node,"direction",dir_type,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading direction attribute.","create_solver_xml",__FILE__)
   IF(oft_debug_print(2))WRITE(*,*)'Found smoother: ',dir_type
   SELECT CASE(dir_type)
     CASE("up")
