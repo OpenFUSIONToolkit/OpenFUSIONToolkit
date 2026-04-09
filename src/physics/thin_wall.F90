@@ -2462,7 +2462,6 @@ DO i=1,ncoils
     !---Look for HDF5 path
     IF(xml_hasAttribute(coil,"path"))THEN
       CALL xml_read_attribute(coil,"path",str_tmp,iostat=ierr)
-      WRITE(*,*)'Reading coil points from HDF5 path: ',str_tmp
       IF(ierr/=0)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_xml_abort('Error reading "path" in coil '//coil_ind,'tw_load_coils',__FILE__)

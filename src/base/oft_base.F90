@@ -198,7 +198,7 @@ INTEGER(i4) :: omp_nthreads=-1
 LOGICAL :: test_run,from_api
 CHARACTER(LEN=OFT_PATH_SLEN) :: ifile
 LOGICAL :: called_from_lib
-LOGICAL :: rst
+LOGICAL :: rst,print_header
 NAMELIST/runtime_options/ppn,omp_nthreads,debug,oft_stack_disabled,use_petsc,test_run,nparts
 !---Initialize MPI
 #ifdef HAVE_MPI
@@ -310,7 +310,9 @@ ELSE
 END IF
 #endif
 !---Print runtime information
-IF((oft_env%rank==0).AND.(.NOT.quiet))THEN
+print_header=(oft_env%rank==0)
+IF(PRESENT(quiet))print_header=print_header.AND.(.NOT.quiet)
+IF(print_header)THEN
   WRITE(*,'(A)')    '#----------------------------------------------'
   WRITE(*,'(A)')    'Open FUSION Toolkit Initialized'
   CALL oft_print_git()

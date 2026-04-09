@@ -46,7 +46,7 @@ class ThinCurr_coil_set:
                 raise ValueError("Only one of `RZ`, `pts`, or `hdf5_path` should be provided")
             self.subcoils.append({'hdf5_path': hdf5_path,'scale': scale})
         else:
-            raise ValueError("Either `RZ`, `pts`, or `path` must be provided")
+            raise ValueError("Either `RZ`, `pts`, or `hdf5_path` must be provided")
     
     def build_coil_XML(self, coil_set):
         """! Build XML structure for this V-coil
