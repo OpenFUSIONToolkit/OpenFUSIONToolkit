@@ -120,7 +120,9 @@ TYPE :: tw_type
   INTEGER(i4), POINTER, DIMENSION(:) :: closures => NULL() !< List of closure vertices [nclosures]
   INTEGER(i4), POINTER, DIMENSION(:) :: kfh => NULL() !< Pointer to face-hole interaction list [mesh%nc+1]
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lfh => NULL() !< List of face-hole interactions [nfh]
-  REAL(r8), POINTER, DIMENSION(:) :: Eta_reg => NULL() !< Resistivity*thickness values for each region [nreg]
+  REAL(r8), POINTER, DIMENSION(:) :: Eta_vol => NULL() !< Resistivity values for each region, divided by mu0 [nreg].
+  REAL(r8), POINTER, DIMENSION(:) :: Thickness => NULL() !< Thickness values for each region [nreg]. Units: meters
+  REAL(r8), POINTER, DIMENSION(:) :: Eta_surf => NULL() !< Surface resistivity (eta/thickness) values for each region, divided by mu0 [nreg].
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2dr => NULL() !< Element to driver (icoils) coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2coil => NULL() !< Element to coil (vcoils+icoils) coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Ael2sen => NULL() !< Element to sensor coupling matrix
@@ -1717,9 +1719,9 @@ DEBUG_STACK_PUSH
 bmesh=>tw_obj%mesh
 WRITE(*,'(2A)')oft_indent,'Building resistivity matrix'
 CALL oft_increase_indent
-IF(ALL(tw_obj%Eta_reg<0.d0))THEN
+IF(ALL(tw_obj%Eta_surf<0.d0))THEN
   CALL oft_warn('Resistivity not set, using "eta=mu0" for all regions')
-  tw_obj%Eta_reg=1.d0
+  tw_obj%Eta_surf=1.d0
 END IF
 ALLOCATE(tw_obj%Rmat)
 Rmat=>tw_obj%Rmat
@@ -1889,7 +1891,7 @@ DO i=1,bmesh%nc
     ninteract=ninteract+1
     j_add(ninteract)=face_interact(1,j,i)
   END DO
-  eta_eff=tw_obj%Eta_reg(bmesh%reg(i))
+  eta_eff=tw_obj%Eta_surf(bmesh%reg(i))
   !---Compute mass coupling
   CALL bmesh%jacobian(i,f,gop,area)
   CALL bmesh%norm(i,f,norm)
@@ -2764,11 +2766,27 @@ REAL(8) :: location(2)
 REAL(r8), POINTER :: eta_tmp(:)
 LOGICAL, POINTER :: sens_mask_tmp(:)
 nreg_mesh=MAXVAL(self%mesh%reg)
-ALLOCATE(self%Eta_reg(nreg_mesh))
-self%Eta_reg=-1.d0
+!--- Deallocate if already set
+IF (ASSOCIATED(self%Eta_vol)) DEALLOCATE(self%Eta_vol) 
+IF (ASSOCIATED(self%Thickness)) DEALLOCATE(self%Thickness) 
+IF (ASSOCIATED(self%Eta_surf)) DEALLOCATE(self%Eta_surf)
+ALLOCATE(self%Eta_vol(nreg_mesh))
+ALLOCATE(self%Thickness(nreg_mesh))
+ALLOCATE(self%Eta_surf(nreg_mesh))
+!---Default to negative values that are obviously wrong
+self%Thickness=-1.d0
+self%Eta_vol=-1.d0
+self%Eta_surf=-1.d0
 ALLOCATE(self%sens_mask(nreg_mesh))
 self%sens_mask=.FALSE.
-! Read resistivity values
+has_eta_surf=.FALSE.
+has_eta_vol=.FALSE.
+has_thickness=.FALSE.
+IF(.NOT.ASSOCIATED(self%xml))THEN
+  CALL oft_warn('No "thincurr" XML node specified. Ignore this warning if an XML node does not need to be specified.')
+  RETURN
+END IF
+! Read surface resistivity values
 CALL xml_get_element(self%xml,"eta",eta_group,ierr)
 IF(ierr==0)THEN
   WRITE(*,*)
@@ -3072,14 +3090,30 @@ SUBROUTINE tw_save_pfield(self,a,tag)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 real(8), intent(in) :: a(:) !< Solution values [self%nelems]
 character(LEN=*), intent(in) :: tag !< Path to save vector in HDF5 plot files
-INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
+INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc,ic
 REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: ptvec,cellvec
+REAL(8), ALLOCATABLE, DIMENSION(:) :: thickness_cell
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: ptvec,cellvec,jvol_cellvec
 DEBUG_STACK_PUSH
 !---Avg to cells
 ALLOCATE(cellvec(3,self%mesh%nc))
 CALL tw_recon_curr(self,a,cellvec)
 CALL self%mesh%save_cell_vector(cellvec/mu0,self%xdmf,TRIM(tag)) ! Convert back to Amps
+!---Automatically save volumetric current density when thickness is valid
+IF(ASSOCIATED(self%Thickness))THEN
+  IF(ALL(self%Thickness>0.d0))THEN
+    ALLOCATE(thickness_cell(self%mesh%nc))
+    ALLOCATE(jvol_cellvec(3,self%mesh%nc))
+    jvol_cellvec=cellvec
+    DO ic=1,self%mesh%nc
+      thickness_cell(ic)=self%Thickness(self%mesh%reg(ic))
+      jvol_cellvec(:,ic)=jvol_cellvec(:,ic)/(mu0*thickness_cell(ic))
+    END DO
+    CALL self%mesh%save_cell_scalar(thickness_cell,self%xdmf,'thickness')
+    CALL self%mesh%save_cell_vector(jvol_cellvec,self%xdmf,'J_vol')
+    DEALLOCATE(thickness_cell,jvol_cellvec)
+  END IF
+END IF
 !---Avg to points
 ALLOCATE(ptvec(3,self%mesh%np))
 DO i=1,self%mesh%np

@@ -678,32 +678,121 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eta_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
-INTEGER(4) :: nreg_mesh
 REAL(8), POINTER :: res_tmp(:)
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
-!
 CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
-res_tmp=tw_obj%Eta_reg*mu0
+res_tmp=tw_obj%Eta_surf*mu0
 END SUBROUTINE thincurr_get_eta
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE thincurr_set_eta(tw_ptr,eta_ptr,error_str)BIND(C,NAME="thincurr_set_eta")
+SUBROUTINE thincurr_get_eta_vol(tw_ptr,eta_ptr,error_str)BIND(C,NAME="thincurr_get_eta_vol")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: eta_ptr !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 !
-INTEGER(4) :: nreg_mesh
 REAL(8), POINTER :: res_tmp(:)
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
-!
 CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
-tw_obj%Eta_reg=res_tmp/mu0
+res_tmp=tw_obj%Eta_vol*mu0
+END SUBROUTINE thincurr_get_eta_vol
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_set_eta(tw_ptr,eta_surf_ptr,eta_vol_ptr,error_str)BIND(C,NAME="thincurr_set_eta")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: eta_surf_ptr !< Surface resistivity pointer (or NULL)
+TYPE(c_ptr), VALUE, INTENT(in) :: eta_vol_ptr !< Volumetric resistivity pointer (or NULL)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+!
+LOGICAL :: has_eta_surf, has_eta_vol
+REAL(8), POINTER :: eta_surf_tmp(:), eta_vol_tmp(:)
+TYPE(tw_type), POINTER :: tw_obj
+CALL copy_string('',error_str)
+CALL c_f_pointer(tw_ptr, tw_obj)
+has_eta_surf=c_associated(eta_surf_ptr)
+has_eta_vol=c_associated(eta_vol_ptr)
+
+IF(has_eta_surf .AND. has_eta_vol)THEN
+  CALL copy_string('Only one of "eta_surf" or "eta_vol" can be passed to thincurr_set_eta',error_str)
+  RETURN
+END IF
+IF((.NOT.has_eta_surf) .AND. (.NOT.has_eta_vol))THEN
+  CALL copy_string('One of "eta_surf" or "eta_vol" must be passed to thincurr_set_eta',error_str)
+  RETURN
+END IF
+
+IF(has_eta_surf)THEN
+  CALL c_f_pointer(eta_surf_ptr, eta_surf_tmp, [tw_obj%mesh%nreg])
+  IF(ANY(eta_surf_tmp<=0.d0))THEN
+    CALL copy_string('All values in "eta_surf" must be > 0',error_str)
+    RETURN
+  END IF
+  tw_obj%Eta_surf=eta_surf_tmp/mu0
+  IF (ASSOCIATED(tw_obj%Thickness)) THEN
+    IF(ALL(tw_obj%Thickness>0.d0))tw_obj%Eta_vol=tw_obj%Eta_surf*tw_obj%Thickness
+  END IF
+ELSE
+  CALL c_f_pointer(eta_vol_ptr, eta_vol_tmp, [tw_obj%mesh%nreg])
+  IF(ANY(eta_vol_tmp<=0.d0))THEN
+    CALL copy_string('All values in "eta_vol" must be > 0',error_str)
+    RETURN
+  END IF
+  IF(.NOT.ASSOCIATED(tw_obj%Thickness))THEN
+    CALL copy_string('"eta_vol" requires thickness to already be set',error_str)
+    RETURN
+  END IF
+  IF(.NOT.ALL(tw_obj%Thickness>0.d0))THEN
+    CALL copy_string('"eta_vol" requires positive thickness values',error_str)
+    RETURN
+  END IF
+  tw_obj%Eta_vol=eta_vol_tmp/mu0
+  tw_obj%Eta_surf=tw_obj%Eta_vol/tw_obj%Thickness
+END IF
 END SUBROUTINE thincurr_set_eta
+!---------------------------------------------------------------------------------
+!> Return the thickness of the regions as an array of length nreg. If thickness is not set, return -1 for all regions.
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_get_thickness(tw_ptr,thickness_ptr,error_str)BIND(C,NAME="thincurr_get_thickness")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr ! ThickCurr object pointer
+TYPE(c_ptr), VALUE, INTENT(in) :: thickness_ptr ! Pointer to array to hold thickness values, should be of length nreg
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) ! Buffer to hold error message if any
+!
+REAL(8), POINTER :: thick_tmp(:) ! Temporary pointer to hold thickness values
+TYPE(tw_type), POINTER :: tw_obj ! Pointer to the ThinCurr object
+CALL copy_string('',error_str) ! Initialize error string to empty
+CALL c_f_pointer(tw_ptr, tw_obj) ! Associate the ThinCurr object pointer with a pointer
+CALL c_f_pointer(thickness_ptr, thick_tmp, [tw_obj%mesh%nreg]) ! Associate the thickness array pointer with a pointer of the correct size
+IF (ASSOCIATED(tw_obj%Thickness)) THEN
+  thick_tmp = tw_obj%Thickness ! If thickness is set, copy it to the output array
+ELSE
+  ! Warn that thickness is not set, returning -1 for all regions. This is the legacy behavior, but users should be aware that this may not be physically correct.
+  thick_tmp = -1.d0
+END IF
+END SUBROUTINE thincurr_get_thickness
+!---------------------------------------------------------------------------------
+!> Set the thickness of the regions using an array of length nreg and recompute Eta_surf using the provided thickness value.
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_set_thickness(tw_ptr,thickness_ptr,error_str)BIND(C,NAME="thincurr_set_thickness")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: thickness_ptr !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+!
+REAL(8), POINTER :: thick_tmp(:)
+TYPE(tw_type), POINTER :: tw_obj
+CALL copy_string('',error_str)
+CALL c_f_pointer(tw_ptr, tw_obj)
+CALL c_f_pointer(thickness_ptr, thick_tmp, [tw_obj%mesh%nreg])
+IF(ANY(thick_tmp<=0.d0))THEN
+  CALL copy_string('All values in "thickness" must be > 0',error_str)
+  RETURN
+END IF
+tw_obj%Thickness=thick_tmp
+END SUBROUTINE thincurr_set_thickness
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------

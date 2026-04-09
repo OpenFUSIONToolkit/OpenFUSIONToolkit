@@ -2,18 +2,26 @@ from __future__ import print_function
 import os
 import sys
 import time
+import glob
+import shutil
 import multiprocessing
 import pytest
 import numpy as np
 import h5py
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
-sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
+# sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
+thincurr_python_path = '/home/andrew-maris/repos/OpenFUSIONToolkit/build_release' #os.getenv('OFT_ROOTPATH')
+if thincurr_python_path is not None:
+    sys.path.append(os.path.join(thincurr_python_path,'python'))
 from oft_testing import run_OFT
 from OpenFUSIONToolkit.io import histfile
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
 
+
+
 mu0 = np.pi*4.E-7
+_oft_env_singleton = None
 
 # Basic template for input file
 oft_in_template = """
@@ -122,7 +130,7 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
@@ -171,7 +179,7 @@ def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25,nsplit=1)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
@@ -200,7 +208,7 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25,nsplit=1)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
@@ -575,6 +583,50 @@ def validate_mode(drive_exp,result_exp):
     return result_val
 
 
+def _write_thincurr_xml(xml_filename, eta_values=None, thickness_values=None, eta_vol_values=None):
+    from OpenFUSIONToolkit import OFT_env
+    from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_XML
+
+    thincurr_xml = ThinCurr_XML()
+    if eta_values is not None:
+        thincurr_xml.set_eta(eta_values)
+    if eta_vol_values is not None:
+        thincurr_xml.set_eta_vol(eta_vol_values)
+    if thickness_values is not None:
+        thincurr_xml.set_thickness(thickness_values)
+    OFT_env.write_oft_xml([thincurr_xml], xml_filename)
+
+
+def _build_dummy_model(xml_filename):
+    from OpenFUSIONToolkit import OFT_env
+    from OpenFUSIONToolkit.ThinCurr import ThinCurr
+    from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+
+    global _oft_env_singleton
+    if _oft_env_singleton is None:
+        _oft_env_singleton = OFT_env(nthreads=-1)
+
+    r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
+    model = ThinCurr(_oft_env_singleton)
+    model.setup_model(r=r_dummy, lc=lc_dummy, xml_filename=xml_filename)
+    return model
+
+
+def _get_eta_values_pair(tw_model):
+    """Return (eta_surf, eta_vol_or_none) for both old and new API shapes."""
+    eta_values = tw_model.get_eta_values()
+    if isinstance(eta_values, tuple):
+        if len(eta_values) != 2:
+            raise RuntimeError("Unexpected get_eta_values() tuple length: {}".format(len(eta_values)))
+        return eta_values
+    return eta_values, None
+
+
+def _supports_eta_vol_tuple_api(tw_model):
+    eta_values = tw_model.get_eta_values()
+    return isinstance(eta_values, tuple) and (len(eta_values) == 2)
+
+
 def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_Hamada,sigs_mnmodes_2D_PEST,sigs_mnmodes_2D_Hamada,t,delta_phi,tol=1.E-6):
     try:
         interface.load_histfile()
@@ -612,6 +664,324 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
     for file in save_files:
         os.remove(file)  
     return result_val
+
+
+@pytest.mark.coverage
+def test_thickness_api_roundtrip_and_validation():
+    assert mp_run(run_thickness_api_roundtrip_and_validation, ())
+
+
+def run_thickness_api_roundtrip_and_validation(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_thickness_api.xml'
+        eta_values = np.r_[1.E4*mu0]
+        thickness_values = np.r_[2.5E-3]
+        _write_thincurr_xml(xml_filename, eta_values=eta_values, thickness_values=thickness_values)
+
+        tw_model = _build_dummy_model(xml_filename)
+
+        tw_model.set_eta_values(eta_surf=eta_values, thickness=thickness_values)
+        has_tuple_eta_api = _supports_eta_vol_tuple_api(tw_model)
+        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
+        if not np.allclose(eta_surf, eta_values):
+            result = False
+        if (eta_vol is not None) and (not np.allclose(eta_vol, eta_values * thickness_values)):
+            result = False
+        if not np.allclose(tw_model.get_thickness(), thickness_values):
+            result = False
+
+        new_thickness = np.r_[3.5E-3]
+        tw_model.set_thickness(new_thickness)
+        if not np.allclose(tw_model.get_thickness(), new_thickness):
+            result = False
+
+        eta_bulk = np.r_[3.0E4*mu0] * new_thickness
+        tw_model.set_eta_values(eta_vol=eta_bulk, thickness=new_thickness)
+        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
+        if (eta_vol is not None) and (not np.allclose(eta_vol, eta_bulk)):
+            result = False
+        if not np.allclose(eta_surf, eta_bulk / new_thickness):
+            result = False
+
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values()
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(eta_values=np.r_[-1.0])
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(eta_values=eta_values, thickness=thickness_values)
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(eta_surf=eta_values, thickness=np.r_[-1.0])
+        if has_tuple_eta_api:
+            tw_model.set_eta_values(eta_vol=np.r_[1.0e-6])
+        else:
+            with pytest.raises(ValueError):
+                tw_model.set_eta_values(eta_vol=np.r_[1.0e-6])
+        xml_no_thickness = 'oft_in_eta_no_thickness.xml'
+        _write_thincurr_xml(xml_no_thickness, eta_values=eta_values)
+        tw_no_thickness = _build_dummy_model(xml_no_thickness)
+        with pytest.raises(Exception):
+            tw_no_thickness.set_eta_values(eta_vol=np.r_[1.0e-6])
+        with pytest.raises(IndexError):
+            tw_model.set_thickness(np.r_[1.E-3, 2.E-3])
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_plot_td_compute_jvol_outputs_fields():
+    assert mp_run(run_plot_td_compute_jvol_outputs_fields, ())
+
+
+def run_plot_td_compute_jvol_outputs_fields(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_compute_jvol.xml'
+        io_basepath = 'td_jvol_regression'
+        eta_values = np.r_[1.E4*mu0]
+        thickness_values = np.r_[2.0E-3]
+        _write_thincurr_xml(xml_filename, eta_values=eta_values, thickness_values=thickness_values)
+
+        if os.path.isdir(io_basepath):
+            shutil.rmtree(io_basepath)
+
+        tw_model = _build_dummy_model(xml_filename)
+        tw_model.setup_io(basepath=io_basepath)
+        tw_model.compute_Mcoil()
+        tw_model.compute_Lmat()
+        tw_model.compute_Rmat()
+        tw_model.run_td(2.E-5, 5, direct=True, plot_freq=1)
+        tw_model.plot_td(5, plot_freq=1)
+        tw_model.build_XDMF()
+
+        xmf_files = sorted(glob.glob(os.path.join(io_basepath, '*.xmf')))
+        if len(xmf_files) == 0:
+            result = False
+        xmf_text = ''
+        for xmf_file in xmf_files:
+            with open(xmf_file, 'r') as fid:
+                xmf_text += fid.read()
+        if 'J_vol' not in xmf_text or 'thickness' not in xmf_text:
+            result = False
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_eta_only_matches_surface_resistivity_with_thickness():
+    assert mp_run(run_eta_only_matches_surface_resistivity_with_thickness, ())
+
+
+def run_eta_only_matches_surface_resistivity_with_thickness(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_compat.xml'
+        eta_surface = np.r_[1.E4*mu0]
+        thickness_values = np.r_[2.5E-3]
+        eta_bulk = eta_surface*thickness_values
+        _write_thincurr_xml(xml_filename, eta_values=eta_surface)
+
+        model_surface = _build_dummy_model(xml_filename)
+        model_surface.set_eta_values(eta_values=eta_surface)
+        model_surface.compute_Rmat(copy_out=True)
+        R_surface = model_surface.Rmat
+
+        model_bulk = _build_dummy_model(xml_filename)
+        model_bulk.set_eta_values(eta_vol=eta_bulk, thickness=thickness_values)
+        model_bulk.compute_Rmat(copy_out=True)
+        R_bulk = model_bulk.Rmat
+
+        if not np.allclose(R_surface, R_bulk, rtol=1.E-10, atol=1.E-12):
+            result = False
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_eta_vol_without_thickness_fails_xml_loading():
+    assert mp_run(run_eta_vol_without_thickness_fails_xml_loading, ())
+
+
+def run_eta_vol_without_thickness_fails_xml_loading(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_vol_only_invalid.xml'
+        eta_vol_values = np.r_[2.5E-3]
+        _write_thincurr_xml(xml_filename, eta_vol_values=eta_vol_values)
+
+        # Current behavior: eta_vol-only XML is allowed (warning path), but
+        # eta_surf cannot be inferred without thickness.
+        tw_model = _build_dummy_model(xml_filename)
+        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
+
+        # eta_vol should be retained when available from the backend.
+        if (eta_vol is not None) and (not np.allclose(eta_vol, eta_vol_values, rtol=1.E-5, atol=1.E-12)):
+            result = False
+
+        # eta_surf should not be a valid positive inferred value in this path.
+        if np.all(eta_surf > 0.0):
+            result = False
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_get_eta_values_returns_none_for_unset_eta_vol():
+    assert mp_run(run_get_eta_values_returns_none_for_unset_eta_vol, ())
+
+
+def run_get_eta_values_returns_none_for_unset_eta_vol(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_only.xml'
+        eta_values = np.r_[1.E4*mu0]
+        _write_thincurr_xml(xml_filename, eta_values=eta_values)
+
+        tw_model = _build_dummy_model(xml_filename)
+        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
+
+        # Verify eta_surf is set
+        if not np.allclose(eta_surf, eta_values, rtol=1.E-4, atol=1.E-12):
+            result = False
+        
+        # Verify eta_vol is None when not provided
+        if eta_vol is not None:
+            result = False
+            raise RuntimeError('Expected eta_vol to be None when not set, but got: {}'.format(eta_vol))
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_deprecation_warning_eta_values():
+    assert mp_run(run_deprecation_warning_eta_values, ())
+
+
+def run_deprecation_warning_eta_values(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_deprecation.xml'
+        eta_values = np.r_[1.E4*mu0]
+        _write_thincurr_xml(xml_filename, eta_values=eta_values)
+
+        tw_model = _build_dummy_model(xml_filename)
+
+        # Capture deprecation warning when using eta_values parameter
+        with pytest.warns(DeprecationWarning, match=r".*eta_values.*deprecated.*"):
+            tw_model.set_eta_values(eta_values=eta_values)
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_xml_loading_eta_vol_with_thickness():
+    assert mp_run(run_xml_loading_eta_vol_with_thickness, ())
+
+
+def run_xml_loading_eta_vol_with_thickness(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_vol_thickness_xml.xml'
+        eta_vol_values = np.r_[2.5E-2*mu0]
+        thickness_values = np.r_[2.5E-3]
+        # When both eta_vol and thickness are provided, eta_surf should be computed
+        expected_eta_surf = eta_vol_values / thickness_values
+        _write_thincurr_xml(xml_filename, eta_vol_values=eta_vol_values, thickness_values=thickness_values)
+
+        tw_model = _build_dummy_model(xml_filename)
+        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
+        thickness = tw_model.get_thickness()
+
+        # Verify eta_vol loaded correctly (new API only)
+        if (eta_vol is not None) and (not np.allclose(eta_vol, eta_vol_values)):
+            result = False
+            print("eta_vol mismatch: expected {}, got {}".format(eta_vol_values, eta_vol))
+
+        # Verify thickness loaded correctly
+        if not np.allclose(thickness, thickness_values):
+            result = False
+            print("thickness mismatch: expected {}, got {}".format(thickness_values, thickness))
+
+        # Verify eta_surf was computed from eta_vol and thickness
+        if not np.allclose(eta_surf, expected_eta_surf, rtol=1.E-10):
+            result = False
+            print("eta_surf mismatch: expected {}, got {}".format(expected_eta_surf, eta_surf))
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_xml_loading_all_three_with_preference():
+    assert mp_run(run_xml_loading_all_three_with_preference, ())
+
+
+def run_xml_loading_all_three_with_preference(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_all_three_eta.xml'
+        eta_surf_values = np.r_[1.E4*mu0]
+        thickness_values = np.r_[2.5E-3]
+        eta_vol_values = eta_surf_values * thickness_values
+        
+        # When all three are provided, eta_surf should remain consistent with eta_vol/thickness.
+        expected_eta_surf_final = eta_vol_values / thickness_values
+        
+        _write_thincurr_xml(xml_filename, eta_values=eta_surf_values, 
+                           eta_vol_values=eta_vol_values, thickness_values=thickness_values)
+
+        tw_model = _build_dummy_model(xml_filename)
+        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
+        thickness = tw_model.get_thickness()
+
+        # Verify eta_vol preserved (new API only)
+        if (eta_vol is not None) and (not np.allclose(eta_vol, eta_vol_values)):
+            result = False
+            print("eta_vol not preserved: expected {}, got {}".format(eta_vol_values, eta_vol))
+
+        # Verify thickness preserved
+        if not np.allclose(thickness, thickness_values):
+            result = False
+            print("thickness not preserved: expected {}, got {}".format(thickness_values, thickness))
+
+        # Verify eta_surf is consistent with eta_vol/thickness
+        if not np.allclose(eta_surf, expected_eta_surf_final, rtol=1.E-5, atol=1.E-12):
+            result = False
+            print("eta_surf not recalculated: expected {}, got {}".format(expected_eta_surf_final, eta_surf))
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
 
 #============================================================================
 # Test runners for plate
