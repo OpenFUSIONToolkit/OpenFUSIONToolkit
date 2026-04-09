@@ -10,8 +10,10 @@ test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from oft_testing import run_OFT
+from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit.io import histfile
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
+from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil, ThinCurr_Vcoil, ThinCurr_XML
 
 mu0 = np.pi*4.E-7
 
@@ -74,15 +76,6 @@ oft_in_template = """
 /
 """
 
-oft_in_xml_template_template = """
-<oft>
-  <thincurr>
-    <eta>{1}</eta>
-    {0}
-  </thincurr>
-</oft>
-"""
-
 
 def mp_run(target,args,timeout=180):
     if os.environ.get('OFT_DEBUG_TEST', 0):
@@ -114,7 +107,6 @@ def mp_run(target,args,timeout=180):
 def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,mp_q):
     result = True
     try:
-        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
         myOFT = OFT_env(nthreads=-1)
         tw_model = ThinCurr(myOFT)
@@ -163,7 +155,6 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
 
 def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
     try:
-        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
         myOFT = OFT_env(nthreads=-1)
         tw_model = ThinCurr(myOFT)
@@ -192,7 +183,6 @@ def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
 
 def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
     try:
-        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
         myOFT = OFT_env(nthreads=-1)
         tw_model = ThinCurr(myOFT)
@@ -234,7 +224,6 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
 def run_mode(meshfile,freq,mp_q):
     result = True
     try:
-        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
         from OpenFUSIONToolkit.ThinCurr.meshing import build_torus_bnorm_grid, ThinCurr_periodic_toroid
         myOFT = OFT_env(nthreads=-1)
@@ -282,7 +271,6 @@ def run_mode(meshfile,freq,mp_q):
 def run_td_for_Mirnov(meshfile,direct_flag,curr_waveform,lin_tol,mp_q):
     result = True
     try:
-        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
         myOFT = OFT_env(nthreads=-1)
         tw_model = ThinCurr(myOFT)
@@ -301,6 +289,40 @@ def run_td_for_Mirnov(meshfile,direct_flag,curr_waveform,lin_tol,mp_q):
         result = False
     oftpy_dump_cov()
     mp_q.put(result)
+
+
+def build_xml(icoils,vcoils,eta,mp_q):
+    nPhi = 180
+    phi_fac = 2.0*np.pi/(nPhi-1)
+    # Create XML input file for coils
+    xml = ThinCurr_XML()
+    xml.set_eta([eta*mu0])
+    if icoils is not None:
+        test_Icoil = ThinCurr_Icoil(name="Test")
+        for icoil in icoils:
+            R = icoil[0]; Z = icoil[1]
+            coil_pts = []
+            for i in range(nPhi):
+                phi = i*phi_fac
+                coil_pts.append([R*np.cos(phi), R*np.sin(phi), Z])
+            test_Icoil.add_subcoil(pts=coil_pts)
+        xml.add_Icoil(test_Icoil)
+    if vcoils is not None:
+        with h5py.File('test_vcoils.h5','w') as h5_file:
+            for j, vcoil in enumerate(vcoils):
+                test_Vcoil = ThinCurr_Vcoil(name="Test_{0:d}".format(j+1), resistivity_per_length=1.256637E-5, radius=1.E-2)
+                R = vcoil[0]; Z = vcoil[1]
+                vcoil_pts = []
+                for i in range(nPhi):
+                    phi = i*phi_fac
+                    vcoil_pts.append([R*np.cos(phi), R*np.sin(phi), Z])
+                h5_file.create_dataset('vcoil_{0:04d}'.format(j+1), data=np.array(vcoil_pts), dtype='f8')
+                test_Vcoil.add_subcoil(hdf5_path='test_vcoils.h5:vcoil_{0:04d}'.format(j+1))
+                xml.add_Vcoil(test_Vcoil)
+    myOFT = OFT_env(nthreads=1,quiet=True)
+    myOFT.write_oft_xml([xml], "oft_in.xml")
+    mp_q.put(True)
+
 
 def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,use_aca=False,
                     icoils=None,vcoils=None,floops=None,curr_waveform=None,volt_waveform=None,
@@ -340,32 +362,11 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
             oft_in_meshfile,direct_flag,freq,fr_limit,coil_file_line,volt_file_line,
             neigs,L_svd_tol,B_svd_tol,reduce_model_flag,lin_tol,jumper_start
         ))
-    # Create XML input file for coils
-    coil_string = ""
-    if icoils is not None:
-        coil_string += '<icoils><coil_set type="2">\n'
-        for icoil in icoils:
-            coil_string += '<coil npts="{0}">'.format(nPhi)
-            R = icoil[0]; Z = icoil[1]
-            for i in range(nPhi):
-                phi = i*phi_fac
-                coil_string += '{0:.12E} {1:.12E} {2:.12E}\n'.format(R*np.cos(phi), R*np.sin(phi), Z)
-            coil_string += "</coil>\n"
-        coil_string += "</coil_set></icoils>\n"
-    if vcoils is not None:
-        coil_string += '<vcoils>\n'
-        with h5py.File('test_vcoils.h5','w') as h5_file:
-            for j, pcoil in enumerate(vcoils):
-                coil_string += '<coil_set type="2" res_per_len="1.256637E-5" radius="1.E-2"><coil path="test_vcoils.h5:vcoil_{0:04d}"/></coil_set>\n'.format(j+1)
-                R = pcoil[0]; Z = pcoil[1]
-                vcoil_pts = []
-                for i in range(nPhi):
-                    phi = i*phi_fac
-                    vcoil_pts.append([R*np.cos(phi), R*np.sin(phi), Z])
-                h5_file.create_dataset('vcoil_{0:04d}'.format(j+1), data=np.array(vcoil_pts), dtype='f8')
-        coil_string += "</vcoils>\n"
-    with open('oft_in.xml','w+') as fid:
-        fid.write(oft_in_xml_template_template.format(coil_string, eta*mu0))
+    # Create XML input file for coils (needs separate process since it instantiates OFT_env)
+    xml_result = mp_run(build_xml,(icoils,vcoils,eta))
+    if not xml_result:
+        print("Failed to build XML input file")
+        return False
     # Create flux loop definition file for sensors
     if floops is not None:
         with open('floops.loc', 'w+') as fid:
@@ -413,6 +414,7 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
     elif run_type == 6:
         return mp_run(run_td_for_Mirnov,(meshfile,direct_flag,curr_waveform,lin_tol))
 
+
 def validate_eigs(eigs, tols=(1.E-5, 1.E-9)):
     """
     Helper function to validate eigenvalues against test case.
@@ -439,6 +441,7 @@ def validate_eigs(eigs, tols=(1.E-5, 1.E-9)):
             print("  Value =    {0}".format(eigs_run_real[i]))
             retval = False
     return retval
+
 
 def validate_fr(fr_real, fr_imag, tols=(1.E-4, 1.E-4),python=False):
     """
@@ -477,6 +480,7 @@ def validate_fr(fr_real, fr_imag, tols=(1.E-4, 1.E-4),python=False):
             print("  Actual =   {0}".format(fr_run_imag[i]))
             retval = False
     return retval
+
 
 def validate_td(sigs_final, jumpers_final=None, tols=(1.E-8, 1.E-3)):
     """
@@ -531,6 +535,7 @@ def validate_td(sigs_final, jumpers_final=None, tols=(1.E-8, 1.E-3)):
                 print("  Actual =   {0}".format(td_sigs_final[i+1]))
                 retval = False
     return retval
+
 
 def validate_model_red(eigs, tols=(1.E-5, 1.E-9)):
     """

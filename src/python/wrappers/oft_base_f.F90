@@ -49,15 +49,18 @@ END SUBROUTINE copy_string_rev
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE oftpy_init(nthreads,input_file,slens,abort_fun) BIND(C,NAME="oftpy_init")
+SUBROUTINE oftpy_init(nthreads,quiet,input_file,slens,abort_fun) BIND(C,NAME="oftpy_init")
 INTEGER(c_int), VALUE, INTENT(in) :: nthreads !< Needs docs
+LOGICAL(c_bool), VALUE, INTENT(in) :: quiet !< If `True`, do not print OFT environment information on initialization
 CHARACTER(KIND=c_char), INTENT(in) :: input_file(OFT_PATH_SLEN) !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: slens !< String lengths
 TYPE(c_funptr), VALUE, INTENT(in) :: abort_fun !< Abort callback for Python
 INTEGER(4), POINTER, DIMENSION(:) :: slens_tmp
+LOGICAL :: quiet_f
 IF(oft_env%ifile/='none')RETURN
 CALL copy_string_rev(input_file,oft_env%ifile)
-CALL oft_init(nthreads)
+quiet_f=quiet
+CALL oft_init(nthreads=nthreads,quiet=quiet_f)
 CALL c_f_pointer(slens, slens_tmp, [4])
 IF(c_associated(abort_fun))CALL c_f_procpointer(abort_fun,oft_abort_cb)
 slens_tmp=[OFT_MPI_PLEN,OFT_SLEN,OFT_PATH_SLEN,OFT_ERROR_SLEN]

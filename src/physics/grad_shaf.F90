@@ -513,6 +513,7 @@ DO i=1,self%ncoils_ext
   coil_set=>coil_sets%nodes(i)%this
   !---
   CALL xml_read_attribute(coil_set,"current",self%coils_ext(i)%curr,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `current` attribute.","gs_load_coils",__FILE__)
   !---
   CALL xml_get_element(coil_set,"coil",coil_sets,ierr)
   self%coils_ext(i)%ncoils=coils%n
@@ -522,6 +523,7 @@ DO i=1,self%ncoils_ext
   DO j=1,self%coils_ext(i)%ncoils
     coil=>coils%nodes(j)%this
     CALL xml_read_content(coil,self%coils_ext(i)%pt(:,j),iostat=ierr)
+    IF(ierr/=0)CALL oft_xml_abort("Error reading coil position.","gs_load_coils",__FILE__)
     cell=0
     CALL bmesh_findcell(self%fe_rep%mesh,cell,self%coils_ext(i)%pt(:,j),f)
     IF((MAXVAL(f)<1.d0+tol).AND.(MINVAL(f)>-tol).AND.check_inmesh)THEN
@@ -529,7 +531,10 @@ DO i=1,self%ncoils_ext
       CALL oft_abort('External coil in mesh','gs_load_coils',__FILE__)
     END IF
     !---Get polarity
-    IF(xml_hasAttribute(coil,"scale"))CALL xml_read_attribute(coil,"scale",self%coils_ext(i)%scale(j),iostat=ierr)
+    IF(xml_hasAttribute(coil,"scale"))THEN
+      CALL xml_read_attribute(coil,"scale",self%coils_ext(i)%scale(j),iostat=ierr)
+      IF(ierr/=0)CALL oft_xml_abort("Error reading `scale` attribute.","gs_load_coils",__FILE__)
+    END IF
   END DO
   IF(ASSOCIATED(coils%nodes))DEALLOCATE(coils%nodes)
 END DO
@@ -598,7 +603,9 @@ self%ncond_regs=0
 DO i=1,nreg_defs
   region=>regions%nodes(i)!%this
   CALL xml_read_attribute(region,"id",id,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading region ID.","gs_load_regions",__FILE__)
   CALL xml_read_attribute(region,"type",reg_type,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading region type.","gs_load_regions",__FILE__)
   IF(id<=0.OR.id>nregions)CALL oft_abort("Invalid region ID.","gs_load_regions",__FILE__)
   region_map(i)=id
   SELECT CASE(TRIM(reg_type))
@@ -629,14 +636,14 @@ DO i=1,nreg_defs
       !---
       CALL xml_get_element(region,"neigs",field,ierr)
       IF(ierr==0)THEN
-        CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%neigs, &
-             iostat=ierr)
+        CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%neigs,iostat=ierr)
+        IF(ierr/=0)CALL oft_xml_abort("Error reading `nmodes`.","gs_load_regions",__FILE__)
       END IF
       !---
       CALL xml_get_element(region,"eta",field,ierr)
       IF(ierr==0)THEN
-        CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%eta, &
-             iostat=ierr)
+        CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%eta,iostat=ierr)
+        IF(ierr/=0)CALL oft_xml_abort("Error reading `eta`.","gs_load_regions",__FILE__)
       END IF
       !---
       IF(self%cond_regions(self%ncond_regs)%neigs>0)THEN
@@ -644,8 +651,8 @@ DO i=1,nreg_defs
         ! self%cond_regions(self%ncond_regs)%fixed=.FALSE.
         CALL xml_get_element(region,"fixed",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%fixed, &
-               iostat=ierr)
+          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%fixed,iostat=ierr)
+          IF(ierr/=0)CALL oft_xml_abort("Error reading `fixed`.","gs_load_regions",__FILE__)
           IF(ALLOCATED(self%cond_regions(self%ncond_regs)%fixed))THEN
             IF(SIZE(self%cond_regions(self%ncond_regs)%fixed) /= self%cond_regions(self%ncond_regs)%neigs)THEN
               CALL oft_abort("Size of 'fixed' array does not match number of eigenmodes.","gs_load_regions",__FILE__)
@@ -661,8 +668,8 @@ DO i=1,nreg_defs
         ! self%cond_regions(self%ncond_regs)%weights=1.d-5
         CALL xml_get_element(region,"weights",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%weights, &
-               iostat=ierr)
+          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%weights,iostat=ierr)
+          IF(ierr/=0)CALL oft_xml_abort("Error reading `weights`.","gs_load_regions",__FILE__)
           IF(ALLOCATED(self%cond_regions(self%ncond_regs)%weights))THEN
             IF(SIZE(self%cond_regions(self%ncond_regs)%weights) /= self%cond_regions(self%ncond_regs)%neigs)THEN
               CALL oft_abort("Size of 'weights' array does not match number of eigenmodes.","gs_load_regions",__FILE__)
@@ -678,8 +685,8 @@ DO i=1,nreg_defs
         ! self%cond_regions(self%ncond_regs)%mtype=1
         CALL xml_get_element(region,"mtype",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%mtype, &
-               iostat=ierr)
+          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%mtype,iostat=ierr)
+          IF(ierr/=0)CALL oft_xml_abort("Error reading `mtype`.","gs_load_regions",__FILE__)
           IF(ALLOCATED(self%cond_regions(self%ncond_regs)%mtype))THEN
             IF(SIZE(self%cond_regions(self%ncond_regs)%mtype) /= self%cond_regions(self%ncond_regs)%neigs)THEN
               CALL oft_abort("Size of 'mtype' array does not match number of eigenmodes.","gs_load_regions",__FILE__)
@@ -695,8 +702,8 @@ DO i=1,nreg_defs
         ! self%cond_regions(self%ncond_regs)%mind=[(j,j=1,self%cond_regions(self%ncond_regs)%neigs)]
         CALL xml_get_element(region,"mind",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%mind, &
-               iostat=ierr)
+          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%mind,iostat=ierr)
+          IF(ierr/=0)CALL oft_xml_abort("Error reading `mind`.","gs_load_regions",__FILE__)
           IF(ALLOCATED(self%cond_regions(self%ncond_regs)%mind))THEN
             IF(SIZE(self%cond_regions(self%ncond_regs)%mind) /= self%cond_regions(self%ncond_regs)%neigs)THEN
               CALL oft_abort("Size of 'mind' array does not match number of eigenmodes.","gs_load_regions",__FILE__)
@@ -710,16 +717,16 @@ DO i=1,nreg_defs
         !
         CALL xml_get_element(region,"pair",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%pair, &
-               iostat=ierr)
+          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%pair,iostat=ierr)
+          IF(ierr/=0)CALL oft_xml_abort("Error reading `pair`.","gs_load_regions",__FILE__)
         END IF
         !
         ! ALLOCATE(self%cond_regions(self%ncond_regs)%fit_scales(self%cond_regions(self%ncond_regs)%neigs))
         ! self%cond_regions(self%ncond_regs)%fit_scales = ABS(1.d0/self%cond_regions(self%ncond_regs)%weights)
         CALL xml_get_element(region,"fit_scales",field,ierr)
         IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%fit_scales, &
-               iostat=ierr)
+          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%fit_scales,iostat=ierr)
+          IF(ierr/=0)CALL oft_xml_abort("Error reading `fit_scales`.","gs_load_regions",__FILE__)
           IF(ALLOCATED(self%cond_regions(self%ncond_regs)%fit_scales))THEN
             IF(SIZE(self%cond_regions(self%ncond_regs)%fit_scales) /= self%cond_regions(self%ncond_regs)%neigs)THEN
               CALL oft_abort("Size of 'fit_scales' array does not match number of eigenmodes.","gs_load_regions",__FILE__)
@@ -734,21 +741,21 @@ DO i=1,nreg_defs
       !---
       CALL xml_get_element(region,"continuous",field,ierr)
       IF(ierr==0)THEN
-        CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%continuous, &
-             iostat=ierr)
+        CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%continuous,iostat=ierr)
+        IF(ierr/=0)CALL oft_xml_abort("Error reading `continuous`.","gs_load_regions",__FILE__)
         IF(.NOT.self%cond_regions(self%ncond_regs)%continuous)THEN
           CALL xml_get_element(region,"extent",field,ierr)
           IF(ierr==0)THEN
-            CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%extent, &
-                 iostat=ierr)
+            CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%extent,iostat=ierr)
+            IF(ierr/=0)CALL oft_xml_abort("Error reading `extent`.","gs_load_regions",__FILE__)
           ELSE
             CALL oft_abort("No extents for non-continuous region","gs_load_regions",__FILE__)
           END IF
           !---Get toroidal coverage
           CALL xml_get_element(region,"coverage",field,ierr)
           IF(ierr==0)THEN
-            CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%coverage, &
-                 iostat=ierr)
+            CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%coverage,iostat=ierr)
+            IF(ierr/=0)CALL oft_xml_abort("Error reading `coverage`.","gs_load_regions",__FILE__)
           END IF
         END IF
       END IF
