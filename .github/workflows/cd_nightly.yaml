@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - cd_debug
+  pull_request:
+    paths:
+      - .github/workflows/cd_nightly.yml
+      - src/utilities/build_libs.py
   workflow_dispatch:
     inputs:
       release:
@@ -21,6 +25,7 @@ jobs:
       CC: ${{ matrix.config.cc }}
       CXX: ${{ matrix.config.cxx }}
       FC: ${{ matrix.config.fc }}
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.config.deployment_target || '' }}
     
     strategy:
       fail-fast: false
@@ -31,7 +36,7 @@ jobs:
             os: ubuntu-22.04,
             cc: "gcc-12",cxx: "g++-12", fc: "gfortran-12",
             python: "python3",
-            build_libs_flags: "--build_umfpack=1 --oblas_dynamic_arch",
+            build_libs_flags: "--nthread=4 --build_umfpack=1 --oblas_dynamic_arch",
             cache_key: "openmp"
           }
         - {
@@ -39,7 +44,7 @@ jobs:
             os: ubuntu-22.04,
             cc: "icx",cxx: "icx", fc: "ifx",
             python: "python3",
-            build_libs_flags: "--use_mkl --mkl_root=$MKLROOT",
+            build_libs_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
             cache_key: "openmp"
           }
         - {
@@ -48,8 +53,9 @@ jobs:
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.13",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
-            build_libs_flags: "--build_umfpack=1",
-            cache_key: "openmp"
+            build_libs_flags: "--nthread=4 --build_umfpack=1",
+            cache_key: "openmp",
+            deployment_target: "15.0"
           }
         - {
             name: "macOS-x86_64-Rosetta",
@@ -57,17 +63,19 @@ jobs:
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.13",
             xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
-            build_libs_flags: "--build_umfpack=1 --oblas_no_avx",
-            cache_key: "openmp_noavx"
+            build_libs_flags: "--nthread=4 --build_umfpack=1 --oblas_no_avx",
+            cache_key: "openmp_noavx",
+            deployment_target: "15.0"
           }
         - {
             name: "macOS-arm64",
             os: macos-14,
-            cc: "gcc-13", cxx: "g++-13", fc: "gfortran-13",
+            cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.12",
-            xcode_path: "/Applications/Xcode_15.4.app/Contents/Developer",
-            build_libs_flags: "--build_umfpack=1",
-            cache_key: "openmp"
+            xcode_path: "/Applications/Xcode_16.2.app/Contents/Developer",
+            build_libs_flags: "--nthread=3 --build_umfpack=1",
+            cache_key: "openmp",
+            deployment_target: "14.0"
         }
 
     steps:
@@ -78,7 +86,7 @@ jobs:
       id: cache-ext-libs
       uses: actions/cache@v4
       with:
-        path: libs
+        path: builds
         key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.config.cache_key }}-${{ hashFiles('src/utilities/build_libs.py') }}
 
     - name: Get OS version (Linux)
@@ -132,60 +140,60 @@ jobs:
 
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
-      run: mkdir libs
+      run: mkdir builds
 
     - name: Build external (Nightly)
       if: ${{ !inputs.release }}
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
+        python ../src/utilities/build_libs.py --no_dl_progress --build_arpack=1 --oft_package --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
 
     - name: Build external (Release)
       if: ${{ inputs.release }}
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --oft_package --oft_package_release --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
+        python ../src/utilities/build_libs.py --no_dl_progress --build_arpack=1 --oft_package --oft_package_release --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
       if: failure()
       with:
         name: Library failure log
-        path: libs/build/build_error.log
+        path: builds/build/build_error.log
     
     - name: Remove external build directory
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: rm -rf build
 
     - name: Configure OFT
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make
     
     - name: Install OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make install
 
     - name: Package OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make package
@@ -194,5 +202,5 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.config.name }}-${{ github.sha }}
-        path: libs/build_release/OpenFUSIONToolkit_*
+        path: builds/build_release/OpenFUSIONToolkit_*
         overwrite: true
