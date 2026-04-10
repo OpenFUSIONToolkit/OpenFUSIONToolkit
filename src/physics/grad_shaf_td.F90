@@ -154,7 +154,6 @@ CALL self%mfop%setup(eq_in)
 ! Create Solver fields
 !------------------------------------------------------------------------------
 NULLIFY(vals_out,psi_tmp)
-self%psi_sol=>self%mfop%gs_equil%psi
 call eq_in%device%fe_rep%vec_create(psi_tmp)
 IF(eq_in%device%ncoils>0)THEN
     call eq_in%device%aug_vec%new(self%psi_sol)
@@ -173,7 +172,7 @@ IF(eq_in%device%ncoils>0)THEN
     CALL self%psi_sol%restore_local(vals_out,2)
     DEALLOCATE(vals_out)
 ELSE
-    call eq_in%device%fe_rep%vec_create(self%psi_sol) !self%psi_sol=>eq_in%psi
+    call eq_in%device%fe_rep%vec_create(self%psi_sol)
     call eq_in%device%fe_rep%vec_create(self%rhs)
     call eq_in%device%fe_rep%vec_create(self%psi_tmp)
     call eq_in%device%fe_rep%vec_create(self%tmp_vec)

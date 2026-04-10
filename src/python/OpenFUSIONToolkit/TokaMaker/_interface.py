@@ -262,8 +262,8 @@ class TokaMaker_field_interpolator():
     def __init__(self,tMaker_equil_obj,int_obj,int_type,dim,fbary_tol=1.E-8):
         '''! Initialize interpolation object
 
-        @param tMaker_obj Address of FORTRAN TokaMaker class
-        @param int_obj Address of FORTRAN interpolation class
+        @param tMaker_equil_obj Address of Fortran TokaMaker equilibrium object
+        @param int_obj Address of Fortran interpolation object
         @param int_type Interpolation type (see @ref TokaMaker.TokaMaker.get_field_eval "get_field_eval")
         @param dim Dimension of vector field
         @param fbary_tol Tolerance for physical to logical mapping
