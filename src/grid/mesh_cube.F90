@@ -531,15 +531,18 @@ end subroutine smesh_square_load
 subroutine smesh_square_cadlink(smesh)
 class(oft_bmesh), intent(inout) :: smesh
 integer(i4) :: i,j
+real(r8) :: xmin,xmax,ymin,ymax
+xmin=MINVAL(smesh%r(1,:)); xmax=MAXVAL(smesh%r(1,:))
+ymin=MINVAL(smesh%r(2,:)); ymax=MAXVAL(smesh%r(2,:))
 DO i=1,smesh%nbe
   j=smesh%lbe(i)
-  IF(ALL(smesh%r(1,smesh%le(:,j))==1.d0))THEN
+  IF(ALL(smesh%r(1,smesh%le(:,j))==xmin))THEN
     smesh%bes(i)=1
-  ELSE IF(ALL(smesh%r(1,smesh%le(:,j))==0.d0))THEN
+  ELSE IF(ALL(smesh%r(1,smesh%le(:,j))==xmax))THEN
     smesh%bes(i)=2
-  ELSE IF(ALL(smesh%r(2,smesh%le(:,j))==1.d0))THEN
+  ELSE IF(ALL(smesh%r(2,smesh%le(:,j))==ymin))THEN
     smesh%bes(i)=3
-  ELSE IF(ALL(smesh%r(2,smesh%le(:,j))==0.d0))THEN
+  ELSE IF(ALL(smesh%r(2,smesh%le(:,j))==ymax))THEN
     smesh%bes(i)=4
   END IF
 END DO

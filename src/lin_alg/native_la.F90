@@ -157,6 +157,8 @@ contains
   procedure :: update_slice => matrix_update_slice
   !> Delete matrix
   procedure :: delete => mat_delete
+  !> Save matrix
+  procedure :: save => mat_save
 end type oft_native_matrix
 !---------------------------------------------------------------------------------
 !> Native CRS complex matrix class
@@ -2284,6 +2286,47 @@ IF(ASSOCIATED(self%color))DEALLOCATE(self%color)
 self%nred=0
 DEBUG_STACK_POP
 end subroutine mat_delete
+!---------------------------------------------------------------------------------
+!> Save matrix in CSR format
+!---------------------------------------------------------------------------------
+subroutine mat_save(self,filename, path, bc_flags, nfields)
+class(oft_native_matrix), intent(inout) :: self !< Matrix object
+character(LEN=*), intent(in) :: filename !< Name of restart file
+character(LEN=*), intent(in) :: path !< Path to store solution vector in file
+LOGICAL, INTENT(IN), OPTIONAL, DIMENSION(:) :: bc_flags
+INTEGER, INTENT(IN), OPTIONAL :: nfields
+integer(i4), dimension(:), allocatable :: bit_flags
+integer(i4) :: i, j
+INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: lg !< global index of each element
+DEBUG_STACK_PUSH
+ALLOCATE(lg(self%nr))
+IF(PRESENT(bc_flags)) THEN
+  ALLOCATE(bit_flags(size(bc_flags)))
+  bit_flags=0
+  bit_flags=MERGE(1,0,bc_flags)
+END IF
+DO i=1,self%ni
+  DO j=1, self%i_map(i)%n
+    lg(self%i_map(i)%offset+j)=self%i_map(i)%offsetg+self%i_map(i)%lge(j)
+  END DO
+END DO
+!---
+CALL hdf5_create_file(filename)
+!---Save matrix
+CALL hdf5_create_group(filename, path)
+CALL hdf5_write(self%nr,filename,TRIM(path)//'/nr')
+CALL hdf5_write(self%nc,filename,TRIM(path)//'/nc')
+CALL hdf5_write(self%kr,filename,TRIM(path)//'/kr')
+CALL hdf5_write(self%lc,filename,TRIM(path)//'/lc')
+CALL hdf5_write(self%nrg,filename,TRIM(path)//'/nrg')
+CALL hdf5_write(self%ncg,filename,TRIM(path)//'/ncg')
+CALL hdf5_write(self%M,filename,TRIM(path)//'/M')
+CALL hdf5_write(lg,filename,TRIM(path)//'/lg')
+If(PRESENT(bc_flags))CALL hdf5_write(bit_flags,filename,TRIM(path)//'/bc_flags')
+IF(PRESENT(nfields))CALL hdf5_write(nfields,filename,TRIM(path)//'/nfields')
+DEALLOCATE(lg)
+DEBUG_STACK_POP
+end subroutine mat_save
 !---------------------------------------------------------------------------------
 !> Build full local submatrix for matrix
 !! - Create stitching structures
