@@ -200,6 +200,20 @@ xml_exception_depth=xml_exception_depth+1
 xml_exceptions(xml_exception_depth)%msg=TRIM(ADJUSTL(message))
 END SUBROUTINE xml_set_exception
 !---------------------------------------------------------------------------------
+!> Print messages from the exception stack
+!---------------------------------------------------------------------------------
+SUBROUTINE xml_print_exceptions()
+INTEGER(i4) :: i
+IF(xml_exception_depth==0)THEN
+  WRITE(*,*)'No XML exceptions to report.'
+  RETURN
+END IF
+WRITE(*,'(A)')'WARNING: XML Exceptions found'
+DO i=xml_exception_depth,1,-1
+  WRITE(*,'(2A)')'WARNING:     ',xml_exceptions(i)%msg
+END DO
+END SUBROUTINE xml_print_exceptions
+!---------------------------------------------------------------------------------
 !> Clear messages from the exception stack
 !---------------------------------------------------------------------------------
 SUBROUTINE xml_clear_exceptions()
@@ -381,8 +395,8 @@ END SUBROUTINE oft_xml_free
 SUBROUTINE normalize_string(content_in,content_out)
 CHARACTER(LEN=*), INTENT(in) :: content_in !< Input string
 CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: content_out !< Output string
-INTEGER(i4) :: i,j,k,ilast,nchars
-CHARACTER(*), PARAMETER :: NL = new_line('A')
+INTEGER(i4) :: i,j,k,m,ilast,nchars
+CHARACTER(*), PARAMETER :: NL = new_line('A'),TAB=ACHAR(9)
 CHARACTER(LEN=:), ALLOCATABLE :: line_strip
 nchars=LEN(content_in)
 content_out=content_in
@@ -400,7 +414,12 @@ ilast=i
 k=1
 DO j=i,nchars
   IF(content_in(j:j)==NL)THEN
-    line_strip = TRIM(ADJUSTL(content_in(ilast:j-1)))
+    !---Replace tabs if found
+    line_strip = content_in(ilast:j-1)
+    DO m=1,LEN(line_strip)
+      IF(line_strip(m:m)==TAB)line_strip(m:m)=' '
+    END DO
+    line_strip = TRIM(ADJUSTL(line_strip))
     IF(LEN(line_strip)==0)THEN
       ilast=j+1
       CYCLE
@@ -413,6 +432,7 @@ DO j=i,nchars
     IF(line_strip(LEN(line_strip):LEN(line_strip))==',')THEN
       line_strip = line_strip(:LEN(line_strip)-1)
     END IF
+    ! WRITE(*,*)'Stripped line: "',line_strip,'"'
     content_out(k:k+LEN(line_strip))=line_strip//NL
     k=k+LEN(line_strip)+1
     ilast=j+1
@@ -420,6 +440,10 @@ DO j=i,nchars
 END DO
 !---Add final line if needed
 line_strip = TRIM(ADJUSTL(content_in(ilast:nchars)))
+DO m=1,LEN(line_strip)
+  IF(line_strip(m:m)==TAB)line_strip(m:m)=' '
+END DO
+line_strip = TRIM(ADJUSTL(line_strip))
 ! WRITE(*,*)'Remaining: "',line_strip,'"'
 IF(LEN(line_strip)>0)THEN
   IF(line_strip(1:1)/='#')THEN
@@ -449,7 +473,7 @@ LOGICAL :: is_delim
 INTEGER(i4) :: i,j,nchars,nrows,ncols,istart,iend,nr_loc,iend2,offset
 REAL(r8) :: val_tmp
 CHARACTER(LEN=:), ALLOCATABLE :: line_strip
-character(len=256) :: msg
+character(LEN=8) :: row_string
 character(*), parameter :: NL = new_line('A')
 ierr=0
 !---Count number of lines/rows
@@ -505,7 +529,8 @@ outer_read: DO i=1,nrows
     IF(iend2<0)THEN
       IF(j<ncols)THEN
         ierr=-10000
-        CALL xml_set_exception('Inconsistent number of columns when tokenizing comma/newline-delimited string')
+        WRITE(row_string,'(I8)')i
+        CALL xml_set_exception('Inconsistent number of columns at row ' // TRIM(ADJUSTL(row_string)) // ' when tokenizing delimited string')
         EXIT outer_read
       END IF
       iend2=MIN(iend-istart,nchars-istart+1)

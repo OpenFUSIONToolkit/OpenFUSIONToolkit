@@ -56,6 +56,10 @@ def ctypes_subroutine(function, argtypes=None, restype=None):
         tmp_fun.argtypes = argtypes
     return tmp_fun
 
+def bool_to_string(value):
+    '''! Convert boolean value to lowercase string for XML attributes'''
+    return 'true' if value else 'false'
+
 # Common parameters
 ## Vacuum magnetic permeability
 mu0 = numpy.pi*4.E-7
@@ -93,7 +97,7 @@ def oft_python_abort():
 
 # Global init function
 oft_init = ctypes_subroutine(oftpy_lib.oftpy_init,
-    [c_int, c_char_p, ctypes_numpy_array(int32,1), c_void_p])
+    [c_int, c_bool, c_char_p, ctypes_numpy_array(int32,1), c_void_p])
 
 # oftpy_set_debug(debug_level)
 oftpy_set_debug = ctypes_subroutine(oftpy_lib.oftpy_set_debug,
