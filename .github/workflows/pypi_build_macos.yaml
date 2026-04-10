@@ -7,7 +7,7 @@ on:
       - cd_debug
   pull_request:
     paths:
-      - .github/workflows/pypi_build_macos.yml
+      - .github/workflows/pypi_build_macos.yaml
       - src/utilities/build_libs.py
   workflow_dispatch:
     inputs:
@@ -55,6 +55,8 @@ jobs:
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Cache external libraries
       id: cache-ext-libs

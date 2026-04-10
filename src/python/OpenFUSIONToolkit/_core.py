@@ -14,10 +14,11 @@ import platform
 import shutil
 import tempfile
 import ctypes
+from warnings import warn
 import numpy
 from ._interface import *
-import xml.etree.ElementTree as ET
 from .util import run_shell_command, oft_warning
+from .io import write_oft_xml
 
 
 class OFT_env():
@@ -199,18 +200,19 @@ class OFT_env():
                     fid.write("  {0}={1}\n".format(option_name,option_value))
                 fid.write("/\n\n")
     
-    def write_oft_xml(self,xml_blocks,path):
-        """! Write OFT XML file from a list of XML block objects.
-        @param xml_blocks list of objects with build_XML methods
-        @param path string, output path for XML file
+    @staticmethod
+    def write_oft_xml(xml_blocks,path):
+        r"""! Write OFT XML file from a list of XML block objects
+
+        @param xml_blocks List of objects for child nodes, must implement `build_XML` method
+        @param path Output path for XML file
         """
-        oft_element = ET.Element("oft")
-        xml_doc = ET.ElementTree(oft_element)
-        for xml_block in xml_blocks:
-            xml_block.build_XML(oft_element)
-        ET.indent(xml_doc, space="  ", level=0)
-        xml_doc.write(path, encoding="us-ascii", xml_declaration=True)
-        print(f"XML file created at {path}")
+        warn(
+            "`OFT_env.write_oft_xml()` is deprecated, use standalone `io.write_oft_xml()` instead. This method will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        write_oft_xml(xml_blocks,path)
 
     def __del__(self):
         '''! Destroy environment and cleanup known temporary files'''

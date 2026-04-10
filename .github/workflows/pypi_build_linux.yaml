@@ -7,7 +7,7 @@ on:
       - cd_debug
   pull_request:
     paths:
-      - .github/workflows/pypi_build_linux.yml
+      - .github/workflows/pypi_build_linux.yaml
       - src/utilities/build_libs.py
   workflow_dispatch:
     inputs:
@@ -43,6 +43,8 @@ jobs:
     steps:
     - name: Checkout repo
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
     
     - name: Install prerequisites
       run: |
@@ -55,6 +57,9 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         python -m pip install -U pip
         python -m pip install jupyter nbconvert build wheel
+    
+    - name: Mark repository as safe
+      run: git config --global --add safe.directory $GITHUB_WORKSPACE
 
     - name: Create build directory
       run: mkdir builds
