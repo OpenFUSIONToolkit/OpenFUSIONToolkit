@@ -33,9 +33,6 @@ USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_de
   gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
-#ifdef OFT_TOKAMAKER_LEGACY
-USE oft_gs, ONLY: gs_load_regions
-#endif
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
   sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
@@ -287,11 +284,7 @@ IF(TRIM(tMaker_obj%device%coil_file)=='none')THEN
     END IF
   END DO
 ELSE
-#ifdef OFT_TOKAMAKER_LEGACY
-  CALL gs_load_regions(tMaker_obj%device)
-#else
-  CALL oft_abort("OFT not compiled with legacy TokaMaker support","tokamaker_setup_regions",__FILE__)
-#endif
+  CALL oft_abort("Legacy TokaMaker region loading no longer supported","tokamaker_setup_regions",__FILE__)
 END IF
 END SUBROUTINE tokamaker_setup_regions
 !---------------------------------------------------------------------------------

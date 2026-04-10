@@ -23,8 +23,8 @@ option(OFT_PACKAGE_NIGHTLY "Perform a nightly build and include git hash in pack
 option(OFT_PACKAGE_PYTHON "Setup Python packaging?" ON)
 option(OFT_COVERAGE "Build with code coverage information?" OFF)
 option(OFT_EXECSTACK "Allow executable stack in shared libraries/executables?" OFF)
-option(OFT_TOKAMAKER_LEGACY "Build legacy TokaMaker executables?" OFF)
-option(OFT_THINCURR_LEGACY "Build legacy ThinCurr executables?" OFF)
+option(OFT_TOKAMAKER_LEGACY "UNSUPPORTED: Build legacy TokaMaker executables?" OFF)
+option(OFT_THINCURR_LEGACY "DEPRECATED: Build legacy ThinCurr executables?" OFF)
 option(OFT_PY_KERNEL "Python kernel name to use for testing examples" "python3")
 set(OFT_MPI_PLEN "4" CACHE STRING "Size of strings for MPI processor index")
 set(OFT_PATH_SLEN "200" CACHE STRING "Size of path strings")
@@ -358,7 +358,7 @@ endif()
 ########################
 # Setup component flags
 if( OFT_TOKAMAKER_LEGACY )
-  add_definitions( -DOFT_TOKAMAKER_LEGACY )
+  message( FATAL_ERROR "Legacy TokaMaker functionality is no longer available." )
 endif()
 # Include files
 add_subdirectory( include )

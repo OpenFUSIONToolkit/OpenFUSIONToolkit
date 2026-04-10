@@ -101,24 +101,6 @@ TYPE :: cond_region
   INTEGER(i4) :: neigs = 0 !< Number of fixed-shape current modes defined in region
   REAL(r8) :: eta = -1.d0 !< Resistivity of region
   CLASS(oft_vector_ptr), POINTER, DIMENSION(:) :: psi_eig => NULL() !< Flux for each current mode
-#ifdef OFT_TOKAMAKER_LEGACY
-  INTEGER(i4) :: nc_quad = 0 !< Number of quadrilateral parent cells (if subdivided)
-  INTEGER(i4) :: pair = -1 !< Pair region
-  REAL(r8) :: coverage = 1.d0 !< Toroidal coverage if not toroidally continuous
-  REAL(r8) :: extent(2) = 0.d0 !< Toroidal extent of one section if not toroidally continuous
-  LOGICAL, POINTER, DIMENSION(:) :: fixed => NULL() !< Flag for fixing scale of current modes
-  INTEGER(i4), POINTER, DIMENSION(:) :: mtype => NULL() !< Type of current modes
-  INTEGER(i4), POINTER, DIMENSION(:) :: mind => NULL() !< Index of current modes
-  INTEGER(i4), POINTER, DIMENSION(:) :: eig_map => NULL() !< Mapping for current modes
-  INTEGER(i4), POINTER, DIMENSION(:,:) :: lc => NULL() !< Cell list for region
-  REAL(r8), POINTER, DIMENSION(:) :: weights => NULL() !< Scale factors for current modes
-  REAL(r8), POINTER, DIMENSION(:) :: pair_signs => NULL() !< Pairing signs for current modes
-  REAL(r8), POINTER, DIMENSION(:) :: fit_scales => NULL() !< Fitting scales for current modes
-  REAL(r8), POINTER, DIMENSION(:,:) :: cond_vals => NULL() !< Current distributions for current modes
-  REAL(r8), POINTER, DIMENSION(:,:) :: rc => NULL() !< Centers of quadrilateral parent cells
-  REAL(r8), POINTER, DIMENSION(:,:) :: cond_curr => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:,:,:) :: corr_3d => NULL() !< 3D correction for current modes
-#endif
 END TYPE cond_region
 !------------------------------------------------------------------------------
 !> Information for non-continuous regions
@@ -242,9 +224,6 @@ TYPE :: gs_factory
   TYPE(oft_blag_zerob), POINTER :: zerob_bc => NULL() !< BC object for zeroing boundary nodes
   TYPE(oft_blag_zerogrnd), POINTER :: zerogrnd_bc => NULL() !< BC object for zeroing grounding node(s)
   TYPE(oft_gs_zerob), POINTER :: gs_zerob_bc => NULL() !< BC object for zeroing nodes outside plasma region
-#ifdef OFT_TOKAMAKER_LEGACY
-  PROCEDURE(region_eta_set), NOPASS, POINTER :: set_eta => NULL() !< Needs docs
-#endif
 CONTAINS
   !> Setup G-S object from FE representation
   PROCEDURE :: setup => gs_setup
@@ -252,10 +231,6 @@ CONTAINS
   PROCEDURE :: init => gs_init
   !> Initialize \f$ \psi \f$ using simple definition
   PROCEDURE :: init_psi => gs_init_psi
-#ifdef OFT_TOKAMAKER_LEGACY
-  !> Needs docs
-  PROCEDURE :: load_coils => gs_load_coils
-#endif
   !> Load non-node limiter points
   PROCEDURE :: load_limiters => gs_load_limiters
   !> Solve nonlinear G-S system
@@ -456,17 +431,6 @@ abstract interface
     class(gs_ani_press), intent(inout) :: self
     class(gs_equil), intent(inout) :: gseq
   end subroutine ani_press_update
-#ifdef OFT_TOKAMAKER_LEGACY
-  !------------------------------------------------------------------------------
-  !> Needs Docs
-  !------------------------------------------------------------------------------
-  function region_eta_set(rc,id) result(eta)
-    import r8, i4
-    real(8), intent(in) :: rc(2)
-    integer(4), intent(in) :: id
-    real(8) :: eta
-  end function region_eta_set
-#endif
 end interface
 !---Encapsulation for external function call parameters
 TYPE, PRIVATE :: opt_targets
@@ -515,301 +479,6 @@ self%zerob_bc%ML_lag_rep=>self%ML_fe_rep
 ALLOCATE(self%zerogrnd_bc)
 self%zerogrnd_bc%ML_lag_rep=>self%ML_fe_rep
 end subroutine gs_setup
-#ifdef OFT_TOKAMAKER_LEGACY
-!------------------------------------------------------------------------------
-!> Needs Docs
-!------------------------------------------------------------------------------
-subroutine gs_load_coils(self,ignore_inmesh)
-class(gs_factory), intent(inout) :: self !< G-S object
-logical, optional, intent(in) :: ignore_inmesh
-!---XML solver fields
-integer(i4) :: nread
-TYPE(xml_node) :: group_node,coil_set,coil,tmaker_group
-TYPE(xml_doc) :: doc
-TYPE(xml_nodelist) :: coil_sets,coils
-!---
-INTEGER(i4) :: i,j,ierr,cell
-REAL(r8) :: f(3)
-REAL(r8), PARAMETER :: tol=1.d-8
-LOGICAL :: check_inmesh
-check_inmesh=.TRUE.
-IF(PRESENT(ignore_inmesh))check_inmesh=.NOT.ignore_inmesh
-IF(TRIM(self%coil_file)=='none')RETURN
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Loading external coils:'
-CALL oft_increase_indent
-WRITE(*,'(3A)')oft_indent,'coil_file = ',TRIM(self%coil_file)
-CALL xml_parsefile(TRIM(self%coil_file),doc,ierr)
-tmaker_group=>doc%root
-CALL xml_get_element(tmaker_group,"coils",group_node,ierr)
-!---Count coil sets
-CALL xml_get_element(group_node,"coil_set",coil_sets,ierr)
-self%ncoils_ext=coil_sets%n
-ALLOCATE(self%coils_ext(self%ncoils_ext))
-!---Setup coil sets
-DO i=1,self%ncoils_ext
-  coil_set=>coil_sets%nodes(i)%this
-  !---
-  CALL xml_read_attribute(coil_set,"current",self%coils_ext(i)%curr,iostat=ierr)
-  IF(ierr/=0)CALL oft_xml_abort("Error reading `current` attribute.","gs_load_coils",__FILE__)
-  !---
-  CALL xml_get_element(coil_set,"coil",coil_sets,ierr)
-  self%coils_ext(i)%ncoils=coils%n
-  ALLOCATE(self%coils_ext(i)%pt(2,self%coils_ext(i)%ncoils))
-  ALLOCATE(self%coils_ext(i)%scale(self%coils_ext(i)%ncoils))
-  self%coils_ext(i)%scale=1.d0
-  DO j=1,self%coils_ext(i)%ncoils
-    coil=>coils%nodes(j)%this
-    CALL xml_read_content(coil,self%coils_ext(i)%pt(:,j),iostat=ierr)
-    IF(ierr/=0)CALL oft_xml_abort("Error reading coil position.","gs_load_coils",__FILE__)
-    cell=0
-    CALL bmesh_findcell(self%fe_rep%mesh,cell,self%coils_ext(i)%pt(:,j),f)
-    IF((MAXVAL(f)<1.d0+tol).AND.(MINVAL(f)>-tol).AND.check_inmesh)THEN
-      WRITE(*,*)'BAD COIL Found: ',i,self%coils_ext(i)%pt(:,j)
-      CALL oft_abort('External coil in mesh','gs_load_coils',__FILE__)
-    END IF
-    !---Get polarity
-    IF(xml_hasAttribute(coil,"scale"))THEN
-      CALL xml_read_attribute(coil,"scale",self%coils_ext(i)%scale(j),iostat=ierr)
-      IF(ierr/=0)CALL oft_xml_abort("Error reading `scale` attribute.","gs_load_coils",__FILE__)
-    END IF
-  END DO
-  IF(ASSOCIATED(coils%nodes))DEALLOCATE(coils%nodes)
-END DO
-IF(ASSOCIATED(coil_sets%nodes))DEALLOCATE(coil_sets%nodes)
-!---
-IF(oft_debug_print(2))THEN
-  WRITE(*,*)
-  WRITE(*,'(2A)')oft_indent,'Coils set definitions'
-  WRITE(*,'(2A)')oft_indent,'========================='
-  WRITE(*,'(2A,I4,A)')oft_indent,'Found ',self%ncoils_ext,' coil sets'
-  CALL oft_increase_indent
-  DO i=1,self%ncoils_ext
-    WRITE(*,'(2A,ES11.3)')oft_indent,'Current [A] : ',self%coils_ext(i)%curr
-    CALL oft_increase_indent
-    DO j=1,self%coils_ext(i)%ncoils
-      WRITE(*,'(2A,2ES11.3)')oft_indent,'Position  : ',self%coils_ext(i)%pt(:,j)
-    END DO
-    CALL oft_decrease_indent
-    WRITE(*,*)
-  END DO
-  CALL oft_decrease_indent
-  WRITE(*,'(2A)')oft_indent,'========================='
-  WRITE(*,*)
-ELSE
-  WRITE(*,'(2A,I4,A)')oft_indent,'Found ',self%ncoils_ext,' coil sets'
-END IF
-!---Normalize currents
-DO i=1,self%ncoils_ext
-  self%coils_ext(i)%curr=self%coils_ext(i)%curr*mu0
-END DO
-CALL oft_decrease_indent
-CALL gs_load_regions(self)
-end subroutine gs_load_coils
-!------------------------------------------------------------------------------
-!> Needs Docs
-!------------------------------------------------------------------------------
-subroutine gs_load_regions(self)
-class(gs_factory), intent(inout) :: self !< G-S object
-!---XML solver fields
-integer(4) :: nread
-TYPE(xml_node) :: doc,region,field,tmaker_group
-TYPE(xml_nodelist) :: regions,fields
-!---
-INTEGER(4) :: i,j,ierr,id,nregions,nreg_defs,nfields
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: region_flag,region_map
-CHARACTER(LEN=10) :: reg_type
-!---
-IF(TRIM(self%coil_file)=='none')RETURN
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Loading internal coil and wall regions:'
-CALL oft_increase_indent
-WRITE(*,'(3A)')oft_indent,'coil_file = ',TRIM(self%coil_file)
-CALL xml_parsefile(TRIM(self%coil_file),doc,ierr)
-! doc=>xml_parseFile(TRIM(self%coil_file),iostat=ierr)
-CALL xml_get_element(doc,"tokamaker",tmaker_group,ierr)
-!---Count coil regions
-CALL xml_get_element(tmaker_group,"region",regions,ierr)
-nreg_defs=regions%n
-nregions=MAXVAL(self%fe_rep%mesh%reg)
-ALLOCATE(region_map(nreg_defs),region_flag(nreg_defs))
-region_flag=0
-region_map=0
-!---
-self%ncoil_regs=0
-self%ncond_regs=0
-DO i=1,nreg_defs
-  region=>regions%nodes(i)!%this
-  CALL xml_read_attribute(region,"id",id,iostat=ierr)
-  IF(ierr/=0)CALL oft_xml_abort("Error reading region ID.","gs_load_regions",__FILE__)
-  CALL xml_read_attribute(region,"type",reg_type,iostat=ierr)
-  IF(ierr/=0)CALL oft_xml_abort("Error reading region type.","gs_load_regions",__FILE__)
-  IF(id<=0.OR.id>nregions)CALL oft_abort("Invalid region ID.","gs_load_regions",__FILE__)
-  region_map(i)=id
-  SELECT CASE(TRIM(reg_type))
-    CASE("plasma")
-      region_flag(i)=1
-    CASE("wall")
-      region_flag(i)=2
-      self%ncond_regs=self%ncond_regs+1
-    CASE("coil")
-      region_flag(i)=3
-      self%ncoil_regs=self%ncoil_regs+1
-    CASE DEFAULT
-      CALL oft_abort("Unknown region type.","gs_load_regions",__FILE__)
-  END SELECT
-END DO
-!
-ALLOCATE(self%cond_regions(self%ncond_regs))
-ALLOCATE(self%coil_regions(self%ncoil_regs))
-self%ncond_regs=0
-self%ncoil_regs=0
-!---Setup coil sets
-DO i=1,nreg_defs
-  region=>regions%nodes(i)%this
-  SELECT CASE(region_flag(i))
-    CASE(2)
-      self%ncond_regs=self%ncond_regs+1
-      self%cond_regions(self%ncond_regs)%id=region_map(i)
-      !---
-      CALL xml_get_element(region,"neigs",field,ierr)
-      IF(ierr==0)THEN
-        CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%neigs,iostat=ierr)
-        IF(ierr/=0)CALL oft_xml_abort("Error reading `nmodes`.","gs_load_regions",__FILE__)
-      END IF
-      !---
-      CALL xml_get_element(region,"eta",field,ierr)
-      IF(ierr==0)THEN
-        CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%eta,iostat=ierr)
-        IF(ierr/=0)CALL oft_xml_abort("Error reading `eta`.","gs_load_regions",__FILE__)
-      END IF
-      !---
-      IF(self%cond_regions(self%ncond_regs)%neigs>0)THEN
-        ! ALLOCATE(self%cond_regions(self%ncond_regs)%fixed(self%cond_regions(self%ncond_regs)%neigs))
-        ! self%cond_regions(self%ncond_regs)%fixed=.FALSE.
-        CALL xml_get_element(region,"fixed",field,ierr)
-        IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%fixed,iostat=ierr)
-          IF(ierr/=0)CALL oft_xml_abort("Error reading `fixed`.","gs_load_regions",__FILE__)
-          IF(ALLOCATED(self%cond_regions(self%ncond_regs)%fixed))THEN
-            IF(SIZE(self%cond_regions(self%ncond_regs)%fixed) /= self%cond_regions(self%ncond_regs)%neigs)THEN
-              CALL oft_abort("Size of 'fixed' array does not match number of eigenmodes.","gs_load_regions",__FILE__)
-            END IF
-          END IF
-        END IF
-        IF(.NOT.ALLOCATED(self%cond_regions(self%ncond_regs)%fixed))THEN
-          ALLOCATE(self%cond_regions(self%ncond_regs)%fixed(self%cond_regions(self%ncond_regs)%neigs))
-          self%cond_regions(self%ncond_regs)%fixed=.FALSE.
-        END IF
-        !
-        ! ALLOCATE(self%cond_regions(self%ncond_regs)%weights(self%cond_regions(self%ncond_regs)%neigs))
-        ! self%cond_regions(self%ncond_regs)%weights=1.d-5
-        CALL xml_get_element(region,"weights",field,ierr)
-        IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%weights,iostat=ierr)
-          IF(ierr/=0)CALL oft_xml_abort("Error reading `weights`.","gs_load_regions",__FILE__)
-          IF(ALLOCATED(self%cond_regions(self%ncond_regs)%weights))THEN
-            IF(SIZE(self%cond_regions(self%ncond_regs)%weights) /= self%cond_regions(self%ncond_regs)%neigs)THEN
-              CALL oft_abort("Size of 'weights' array does not match number of eigenmodes.","gs_load_regions",__FILE__)
-            END IF
-          END IF
-        END IF
-        IF(.NOT.ALLOCATED(self%cond_regions(self%ncond_regs)%weights))THEN
-          ALLOCATE(self%cond_regions(self%ncond_regs)%weights(self%cond_regions(self%ncond_regs)%neigs))
-          self%cond_regions(self%ncond_regs)%weights=1.d-5
-        END IF
-        !
-        ! ALLOCATE(self%cond_regions(self%ncond_regs)%mtype(self%cond_regions(self%ncond_regs)%neigs))
-        ! self%cond_regions(self%ncond_regs)%mtype=1
-        CALL xml_get_element(region,"mtype",field,ierr)
-        IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%mtype,iostat=ierr)
-          IF(ierr/=0)CALL oft_xml_abort("Error reading `mtype`.","gs_load_regions",__FILE__)
-          IF(ALLOCATED(self%cond_regions(self%ncond_regs)%mtype))THEN
-            IF(SIZE(self%cond_regions(self%ncond_regs)%mtype) /= self%cond_regions(self%ncond_regs)%neigs)THEN
-              CALL oft_abort("Size of 'mtype' array does not match number of eigenmodes.","gs_load_regions",__FILE__)
-            END IF
-          END IF
-        END IF
-        IF(.NOT.ALLOCATED(self%cond_regions(self%ncond_regs)%mtype))THEN
-          ALLOCATE(self%cond_regions(self%ncond_regs)%mtype(self%cond_regions(self%ncond_regs)%neigs))
-          self%cond_regions(self%ncond_regs)%mtype=1
-        END IF
-        !
-        ! ALLOCATE(self%cond_regions(self%ncond_regs)%mind(self%cond_regions(self%ncond_regs)%neigs))
-        ! self%cond_regions(self%ncond_regs)%mind=[(j,j=1,self%cond_regions(self%ncond_regs)%neigs)]
-        CALL xml_get_element(region,"mind",field,ierr)
-        IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%mind,iostat=ierr)
-          IF(ierr/=0)CALL oft_xml_abort("Error reading `mind`.","gs_load_regions",__FILE__)
-          IF(ALLOCATED(self%cond_regions(self%ncond_regs)%mind))THEN
-            IF(SIZE(self%cond_regions(self%ncond_regs)%mind) /= self%cond_regions(self%ncond_regs)%neigs)THEN
-              CALL oft_abort("Size of 'mind' array does not match number of eigenmodes.","gs_load_regions",__FILE__)
-            END IF
-          END IF
-        END IF
-        IF(.NOT.ALLOCATED(self%cond_regions(self%ncond_regs)%mind))THEN
-          ALLOCATE(self%cond_regions(self%ncond_regs)%mind(self%cond_regions(self%ncond_regs)%neigs))
-          self%cond_regions(self%ncond_regs)%mind=[(j,j=1,self%cond_regions(self%ncond_regs)%neigs)]
-        END IF
-        !
-        CALL xml_get_element(region,"pair",field,ierr)
-        IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%pair,iostat=ierr)
-          IF(ierr/=0)CALL oft_xml_abort("Error reading `pair`.","gs_load_regions",__FILE__)
-        END IF
-        !
-        ! ALLOCATE(self%cond_regions(self%ncond_regs)%fit_scales(self%cond_regions(self%ncond_regs)%neigs))
-        ! self%cond_regions(self%ncond_regs)%fit_scales = ABS(1.d0/self%cond_regions(self%ncond_regs)%weights)
-        CALL xml_get_element(region,"fit_scales",field,ierr)
-        IF(ierr==0)THEN
-          CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%fit_scales,iostat=ierr)
-          IF(ierr/=0)CALL oft_xml_abort("Error reading `fit_scales`.","gs_load_regions",__FILE__)
-          IF(ALLOCATED(self%cond_regions(self%ncond_regs)%fit_scales))THEN
-            IF(SIZE(self%cond_regions(self%ncond_regs)%fit_scales) /= self%cond_regions(self%ncond_regs)%neigs)THEN
-              CALL oft_abort("Size of 'fit_scales' array does not match number of eigenmodes.","gs_load_regions",__FILE__)
-            END IF
-          END IF
-        END IF
-        IF(.NOT.ALLOCATED(self%cond_regions(self%ncond_regs)%fit_scales))THEN
-          ALLOCATE(self%cond_regions(self%ncond_regs)%fit_scales(self%cond_regions(self%ncond_regs)%neigs))
-          self%cond_regions(self%ncond_regs)%fit_scales = ABS(1.d0/self%cond_regions(self%ncond_regs)%weights)
-        END IF
-      END IF
-      !---
-      CALL xml_get_element(region,"continuous",field,ierr)
-      IF(ierr==0)THEN
-        CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%continuous,iostat=ierr)
-        IF(ierr/=0)CALL oft_xml_abort("Error reading `continuous`.","gs_load_regions",__FILE__)
-        IF(.NOT.self%cond_regions(self%ncond_regs)%continuous)THEN
-          CALL xml_get_element(region,"extent",field,ierr)
-          IF(ierr==0)THEN
-            CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%extent,iostat=ierr)
-            IF(ierr/=0)CALL oft_xml_abort("Error reading `extent`.","gs_load_regions",__FILE__)
-          ELSE
-            CALL oft_abort("No extents for non-continuous region","gs_load_regions",__FILE__)
-          END IF
-          !---Get toroidal coverage
-          CALL xml_get_element(region,"coverage",field,ierr)
-          IF(ierr==0)THEN
-            CALL xml_read_content(field,self%cond_regions(self%ncond_regs)%coverage,iostat=ierr)
-            IF(ierr/=0)CALL oft_xml_abort("Error reading `coverage`.","gs_load_regions",__FILE__)
-          END IF
-        END IF
-      END IF
-    CASE(3)
-      self%ncoil_regs=self%ncoil_regs+1
-      self%coil_regions(self%ncoil_regs)%id=region_map(i)
-  END SELECT
-END DO
-IF(ASSOCIATED(regions%nodes))DEALLOCATE(regions%nodes)
-!---
-WRITE(*,'(2A,I4,A)')oft_indent,'Found ',self%ncond_regs,' conducting regions'
-WRITE(*,'(2A,I4,A)')oft_indent,'Found ',self%ncoil_regs,' coil regions'
-WRITE(*,*)
-CALL oft_decrease_indent
-end subroutine gs_load_regions
-#endif
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -904,113 +573,6 @@ DO i=1,self%ncond_regs
     IF(smesh%reg(j)==self%cond_regions(i)%id)self%cond_regions(i)%nc=self%cond_regions(i)%nc+1
   END DO
   IF(self%cond_regions(i)%nc==0)CYCLE
-#ifdef OFT_TOKAMAKER_LEGACY
-  IF(MOD(self%cond_regions(i)%nc,4)/=0.OR.(self%cond_regions(i)%neigs==0))THEN
-    self%cond_regions(i)%nc_quad=self%cond_regions(i)%nc
-    ALLOCATE(self%cond_regions(i)%lc(1,self%cond_regions(i)%nc_quad))
-    ALLOCATE(self%cond_regions(i)%cond_vals(self%cond_regions(i)%nc_quad,self%cond_regions(i)%neigs))
-    ALLOCATE(self%cond_regions(i)%cond_curr(self%cond_regions(i)%nc_quad-1,self%cond_regions(i)%neigs))
-    ALLOCATE(self%cond_regions(i)%rc(2,self%cond_regions(i)%nc_quad))
-    self%cond_regions(i)%nc=0
-    self%cond_regions(i)%lc=0
-    self%cond_regions(i)%cond_curr=0.d0
-    self%cond_regions(i)%cond_vals=0.d0
-    self%cond_regions(i)%rc=0.d0
-    DO j=1,smesh%nc
-      IF(smesh%reg(j)==self%cond_regions(i)%id)THEN
-        self%cond_regions(i)%nc=self%cond_regions(i)%nc+1
-        self%cond_regions(i)%lc(1,self%cond_regions(i)%nc)=j
-        self%cond_regions(i)%rc(:,self%cond_regions(i)%nc)= &
-          (smesh%r(1:2,smesh%lc(1,j)) + smesh%r(1:2,smesh%lc(2,j)) &
-          + smesh%r(1:2,smesh%lc(3,j)))/3.d0
-      END IF
-    END DO
-    CYCLE
-  END IF
-  !CALL oft_abort('BAD COND region','gs_setup_walls',__FILE__)
-  self%cond_regions(i)%nc_quad=self%cond_regions(i)%nc/4
-  !---
-  ALLOCATE(self%cond_regions(i)%lc(4,self%cond_regions(i)%nc_quad))
-  ALLOCATE(self%cond_regions(i)%cond_vals(self%cond_regions(i)%nc_quad,self%cond_regions(i)%neigs))
-  ALLOCATE(self%cond_regions(i)%cond_curr(self%cond_regions(i)%nc_quad-1,self%cond_regions(i)%neigs))
-  ALLOCATE(self%cond_regions(i)%rc(2,self%cond_regions(i)%nc_quad))
-  self%cond_regions(i)%nc=0
-  self%cond_regions(i)%lc=0
-  self%cond_regions(i)%cond_curr=0.d0
-  self%cond_regions(i)%cond_vals=0.d0
-  f=1.d0/3.d0
-  k=0
-  DO j=1,smesh%np
-    IF(pmark(j)==self%cond_regions(i)%id)THEN
-      k=k+1
-      self%cond_regions(i)%rc(:,k) = smesh%r(1:2,j)
-      ! WRITE(*,*)j
-      IF(smesh%kpc(j+1)-smesh%kpc(j)>4)THEN
-        WRITE(*,*)j,pmark(j),smesh%kpc(j+1)-smesh%kpc(j)
-        DO l=smesh%kpc(j),smesh%kpc(j+1)-1
-          WRITE(*,*)smesh%lpc(l),smesh%reg(smesh%lpc(l))
-        END DO
-        CALL oft_abort("Bad conductor","Bad",__FILE__)
-      END IF
-      DO l=smesh%kpc(j),smesh%kpc(j+1)-1
-        self%cond_regions(i)%nc=self%cond_regions(i)%nc+1
-        self%cond_regions(i)%lc(MOD(self%cond_regions(i)%nc-1,4)+1,CEILING(self%cond_regions(i)%nc/4.d0))=smesh%lpc(l)
-      END DO
-    END IF
-  END DO
-  ! DO j=1,smesh%nc
-  !   IF(smesh%reg(j)==self%cond_regions(i)%id)THEN
-  !     self%cond_regions(i)%nc=self%cond_regions(i)%nc+1
-  !     self%cond_regions(i)%lc(MOD(self%cond_regions(i)%nc-1,4)+1,CEILING(self%cond_regions(i)%nc/4.d0))=j
-  !     !---
-  !     IF(MOD(self%cond_regions(i)%nc,4)==0)THEN
-  !       k=k+1
-  !       self%cond_regions(i)%rc(:,k) = smesh%r(1:2,smesh%lc(1,j))
-  !     END IF
-  !   END IF
-  ! END DO
-  IF(k/=self%cond_regions(i)%nc_quad)CALL oft_abort('BAD COUNTS!','gs_setup_walls',__FILE__)
-  rcenter=SUM(self%cond_regions(i)%rc,DIM=2)/REAL(self%cond_regions(i)%nc_quad,8)
-  IF(self%cond_regions(i)%neigs>0.AND.do_load)THEN
-    WRITE(num_str,'(I2.2)')i
-    INQUIRE(FILE='wall_eig.rst',EXIST=file_exists)
-    IF(.NOT.file_exists)CALL oft_abort("No eddy current shape file","gs_setup_walls",__FILE__)
-    CALL hdf5_read(self%cond_regions(i)%cond_vals, 'wall_eig.rst', 'eig_'//num_str)
-    WRITE(*,*)MINVAL(self%cond_regions(i)%cond_vals)
-    WRITE(*,*)MAXVAL(self%cond_regions(i)%cond_vals)
-    self%cond_regions(i)%cond_vals=self%cond_regions(i)%cond_vals/4.d0
-    !
-    IF(nphi_3d>0)THEN
-      ALLOCATE(self%cond_regions(i)%corr_3d(3,nphi_3d,smesh%np+smesh%ne,self%cond_regions(i)%neigs))
-      self%cond_regions(i)%corr_3d=0.d0
-      DO j=1,self%cond_regions(i)%neigs
-        WRITE(num_str2,'(I2.2)')j
-        IF(hdf5_field_exist('wall_eig.rst', 'rz_corr_r'//num_str//'_'//num_str2))THEN
-          CALL hdf5_read(self%cond_regions(i)%corr_3d(1,:,:,j), 'wall_eig.rst', 'rz_corr_r'//num_str//'_'//num_str2)
-          CALL hdf5_read(self%cond_regions(i)%corr_3d(2,:,:,j), 'wall_eig.rst', 'rz_corr_t'//num_str//'_'//num_str2)
-          CALL hdf5_read(self%cond_regions(i)%corr_3d(3,:,:,j), 'wall_eig.rst', 'rz_corr_z'//num_str//'_'//num_str2)
-        END IF
-      END DO
-    END IF
-  END IF
-  !---
-  DO j=1,self%cond_regions(i)%neigs
-    !---Compute poloidal flows
-    self%cond_regions(i)%cond_curr(1,j)=self%cond_regions(i)%cond_vals(1,j)
-    DO k=2,self%cond_regions(i)%nc_quad-1
-      self%cond_regions(i)%cond_curr(k,j)=self%cond_regions(i)%cond_curr(k-1,j) &
-      + self%cond_regions(i)%cond_vals(k,j)
-    END DO
-  END DO
-  IF(self%cond_regions(i)%pair<0)THEN
-    ALLOCATE(self%cond_regions(i)%eig_map(self%cond_regions(i)%neigs))
-    self%cond_regions(i)%eig_map=[(j,j=1,self%cond_regions(i)%neigs)]+self%ncond_eigs
-    self%ncond_eigs=self%ncond_eigs+self%cond_regions(i)%neigs
-  ELSE
-    ALLOCATE(self%cond_regions(i)%pair_signs(self%cond_regions(i)%neigs))
-    self%cond_regions(i)%pair_signs = self%cond_regions(i)%weights
-  END IF
-#endif
   !---
   IF(oft_debug_print(2))THEN
     WRITE(*,'(2A,I8,A)')oft_indent,'Found ',self%cond_regions(i)%nc,' conductor cells'
@@ -1020,15 +582,6 @@ DO i=1,self%ncond_regs
 END DO
 ALLOCATE(self%cond_weights(self%ncond_eigs))
 self%cond_weights=0.d0
-#ifdef OFT_TOKAMAKER_LEGACY
-DO i=1,self%ncond_regs
-  IF(self%cond_regions(i)%pair>0)THEN
-    self%cond_regions(i)%eig_map=>self%cond_regions(self%cond_regions(i)%pair)%eig_map
-  END IF
-END DO
-CALL gs_get_cond_weights(self,self%cond_weights,.FALSE.)
-CALL gs_set_cond_weights(self,self%cond_weights,.FALSE.)
-#endif
 !---Setup limiters
 ALLOCATE(regmark(smesh%nreg))
 regmark=1
@@ -1112,43 +665,6 @@ END IF
 !---Mark non-continuous regions
 CALL set_noncontinuous
 !---
-#ifdef OFT_TOKAMAKER_LEGACY
-IF(do_plot)THEN
-  ALLOCATE(eigs(smesh%nc))
-  ! DO j=1,smesh%nc
-  !   eigs(j)=REAL(smesh%reg(j),8)
-  ! END DO
-  ! CALL smesh%save_cell_scalar(eigs,self%xdmf,'Regions')
-  !---
-  eigs=0.d0
-  DO j=1,self%ncond_regs
-    IF(self%cond_regions(j)%neigs>0)THEN
-      DO k=1,self%cond_regions(j)%nc_quad
-        DO l=1,4
-          i=self%cond_regions(j)%lc(l,k)
-          eigs(i)=eigs(i) &
-          + DOT_PRODUCT(self%cond_regions(j)%weights,self%cond_regions(j)%cond_vals(k,:))
-        END DO
-      END DO
-    END IF
-  END DO
-  ! CALL smesh%save_cell_scalar(eigs,self%xdmf,'Eig')
-  !---
-  eigs=0.d0
-  DO j=1,self%ncond_regs
-    IF(self%cond_regions(j)%neigs>0)THEN
-      DO k=1,self%cond_regions(j)%nc_quad-1
-        DO l=1,4
-          i=self%cond_regions(j)%lc(l,k)
-          eigs(i)=eigs(i) + self%cond_regions(j)%cond_curr(k,1)
-        END DO
-      END DO
-    END IF
-  END DO
-  ! CALL smesh%save_cell_scalar(eigs,self%xdmf,'Curr')
-  DEALLOCATE(eigs)
-END IF
-#endif
 IF(oft_debug_print(2))CALL oft_decrease_indent
 contains
 !
@@ -1338,25 +854,6 @@ DO i=1,self%ncoils
     END IF
   END DO
 END DO
-#ifdef OFT_TOKAMAKER_LEGACY
-! ALLOCATE(self%psi_cond(self%ncond_eigs))
-call self%fe_rep%vec_create(tmp_vec2)
-DO i=1,self%ncond_regs
-  ALLOCATE(self%cond_regions(i)%psi_eig(self%cond_regions(i)%neigs))
-  DO j=1,self%cond_regions(i)%neigs
-    CALL self%fe_rep%vec_create(self%cond_regions(i)%psi_eig(j)%f)
-    CALL gs_cond_source(self,i,j,tmp_vec)
-    CALL self%zerob_bc%apply(tmp_vec)
-    CALL gs_vacuum_solve(self,self%cond_regions(i)%psi_eig(j)%f,tmp_vec)
-    CALL self%cond_regions(i)%psi_eig(j)%f%get_local(psi_vals)
-    WRITE(cond_tag,'(I2.2)')i
-    WRITE(eig_tag,'(I2.2)')j
-    IF(self%save_visit)CALL smesh%save_vertex_scalar(psi_vals,self%xdmf,'Psi_cond'//cond_tag//"_"//eig_tag)
-  END DO
-END DO
-CALL tmp_vec2%delete()
-DEALLOCATE(tmp_vec2)
-#endif
 CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
 !---Create coil vector
@@ -1617,15 +1114,6 @@ END IF
 DO i=1,self%ncoils
   CALL equil%psi%add(1.d0,equil%coil_currs(i),self%psi_coil(i)%f)
 END DO
-#ifdef OFT_TOKAMAKER_LEGACY
-DO i=1,self%ncond_regs
-  DO j=1,self%cond_regions(i)%neigs
-    ! k=self%cond_regions(i)%eig_map(j)
-    CALL equil%psi%add(1.d0,self%cond_regions(i)%weights(j), &
-      self%cond_regions(i)%psi_eig(j)%f)
-  END DO
-END DO
-#endif
 !
 equil%plasma_bounds=[-1.d99,1.d99]
 CALL gs_update_bounds(equil)
@@ -1932,67 +1420,6 @@ deallocate(rhs_loc,j_lag,rop)
 CALL b%restore_local(btmp,add=.TRUE.)
 DEALLOCATE(btmp)
 end subroutine gs_coil_source_distributed
-#ifdef OFT_TOKAMAKER_LEGACY
-!------------------------------------------------------------------------------
-!> Needs docs
-!------------------------------------------------------------------------------
-subroutine gs_cond_source(self,iCond,iMode,b)
-class(gs_factory), intent(inout) :: self
-integer(4), intent(in) :: iCond
-integer(4), intent(in) :: iMode
-CLASS(oft_vector), intent(inout) :: b
-real(r8), pointer, dimension(:) :: btmp
-real(8) :: psitmp,goptmp(3,3),det,pt(3),v,ffp(3),t1
-real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),vcache(:)
-integer(4) :: j,m,l,k,kk
-integer(4), allocatable :: j_lag(:)
-logical :: curved
-t1=omp_get_wtime()
-!---
-NULLIFY(btmp)
-! IF(.NOT.ASSOCIATED(self%cflag))CALL gs_setup_cflag(self)
-call b%set(0.d0)
-CALL b%get_local(btmp)
-!---
-!$omp parallel private(j,kk,rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,vcache)
-allocate(rhs_loc(self%fe_rep%nce))
-allocate(rop(self%fe_rep%nce))
-allocate(j_lag(self%fe_rep%nce))
-!$omp do schedule(static,1)
-DO k=1,self%cond_regions(iCond)%nc_quad
-DO kk=1,4
-  j=self%cond_regions(iCond)%lc(kk,k)
-  psitmp=self%cond_regions(iCond)%cond_vals(k,iMode)/self%fe_rep%mesh%ca(j)
-  call self%fe_rep%ncdofs(j,j_lag)
-  rhs_loc=0.d0
-  curved=cell_is_curved(self%fe_rep%mesh,j)
-  do m=1,self%fe_rep%quad%np
-    if(curved.OR.(m==1))call self%fe_rep%mesh%jacobian(j,self%fe_rep%quad%pts(:,m),goptmp,v)
-    det=v*self%fe_rep%quad%wts(m)
-    DO l=1,self%fe_rep%nce
-      CALL oft_blag_eval(self%fe_rep,j,l,self%fe_rep%quad%pts(:,m),rop(l))
-    END DO
-    !$omp simd
-    do l=1,self%fe_rep%nce
-      rhs_loc(l)=rhs_loc(l)+rop(l)*psitmp*det
-    end do
-  end do
-  !---Get local to global DOF mapping
-  do l=1,self%fe_rep%nce
-    m = j_lag(l)
-    !$omp atomic
-    btmp(m)=btmp(m)+rhs_loc(l)
-  end do
-END DO
-end do
-deallocate(rhs_loc,j_lag,rop)
-!$omp end parallel
-! DEALLOCATE(cond_fac)
-CALL b%restore_local(btmp,add=.TRUE.)
-DEALLOCATE(btmp)
-! self%timing(2)=self%timing(2)+(omp_get_wtime()-t1)
-end subroutine gs_cond_source
-#endif
 !------------------------------------------------------------------------------
 !> Calculate RHS source for quasi-static solve from previous \f$ \psi \f$
 !------------------------------------------------------------------------------
@@ -2600,14 +2027,6 @@ DO j=1,self%ncoils
 END DO
 !
 CALL psi_eddy%set(0.d0)
-#ifdef OFT_TOKAMAKER_LEGACY
-DO j=1,self%ncond_regs
-  DO k=1,self%cond_regions(j)%neigs
-    CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
-      self%cond_regions(j)%psi_eig(k)%f)
-  END DO
-END DO
-#endif
 CALL psi_vac%add(1.d0,1.d0,psi_eddy)
 !
 CALL psi_vcont%set(0.d0)
@@ -2831,14 +2250,6 @@ DO i=1,self%maxits
   IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
     !---Update vacuum field part
     CALL psi_eddy%set(0.d0)
-#ifdef OFT_TOKAMAKER_LEGACY
-    DO j=1,self%ncond_regs
-      DO k=1,self%cond_regions(j)%neigs
-        CALL psi_eddy%add(1.d0,self%cond_regions(j)%weights(k), &
-          self%cond_regions(j)%psi_eig(k)%f)
-      END DO
-    END DO
-#endif
     CALL psi_vac%add(1.d0,1.d0,psi_eddy)
   END IF
 
@@ -3117,15 +2528,6 @@ DO j=1,self%ncoils
   ! curr = self%coil_regions(j)%curr
   CALL psi_vac%add(1.d0,equil%coil_currs(j),self%psi_coil(j)%f)
 END DO
-#ifdef OFT_TOKAMAKER_LEGACY
-DO j=1,self%ncond_regs
-  DO k=1,self%cond_regions(j)%neigs
-    ii=self%cond_regions(j)%eig_map(k)
-    CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-      self%cond_regions(j)%psi_eig(k)%f)
-  END DO
-END DO
-#endif
 CALL psi_vcont%set(0.d0)
 DO j=1,self%ncoils
   ! curr = self%coil_regions(j)%vcont_gain
@@ -3408,14 +2810,6 @@ DO j=1,self%ncoils
   CALL psi_vcont%add(1.d0,self%coil_vcont(j),self%psi_coil(j)%f)
 END DO
 ! CALL psi_eddy%set(0.d0)
-#ifdef OFT_TOKAMAKER_LEGACY
-DO j=1,self%ncond_regs
-  DO k=1,self%cond_regions(j)%neigs
-    CALL psi_vac%add(1.d0,self%cond_regions(j)%weights(k), &
-      self%cond_regions(j)%psi_eig(k)%f)
-  END DO
-END DO
-#endif
 ! CALL psi_vac%add(1.d0,1.d0,psi_eddy)
 !
 IF((self%dt>0.d0).AND.oft_env%pm)THEN
@@ -3635,30 +3029,6 @@ CALL psi_dummy%delete
 DEALLOCATE(rhs,psi_fixed,psi_dummy)
 DEALLOCATE(vals_tmp)
 end subroutine gs_fixed_vflux
-#ifdef OFT_TOKAMAKER_LEGACY
-!------------------------------------------------------------------------------
-!> Needs Docs
-!------------------------------------------------------------------------------
-subroutine gs_get_cond_source(self,cond_fac)
-CLASS(gs_factory), intent(inout) :: self !< G-S object
-REAL(8), intent(inout) :: cond_fac(:)
-real(8) :: curr
-integer(4) :: i,j,l,k
-!---
-cond_fac=0.d0
-DO j=1,self%ncond_regs
-  IF(self%cond_regions(j)%neigs>0)THEN
-    DO k=1,self%cond_regions(j)%nc_quad
-      curr = SUM(self%cond_regions(j)%weights*self%cond_regions(j)%cond_vals(k,:))
-      DO l=1,4
-        i=self%cond_regions(j)%lc(l,k)
-        cond_fac(i)=cond_fac(i) + curr/self%fe_rep%mesh%ca(i)
-      END DO
-    END DO
-  END IF
-END DO
-END SUBROUTINE gs_get_cond_source
-#endif
 !------------------------------------------------------------------------------
 !> Compute plasma component of RHS source for Grad-Shafranov equation
 !------------------------------------------------------------------------------
@@ -4958,78 +4328,6 @@ DEALLOCATE(ptout)
 !!$omp end parallel
 CALL psi_int%delete
 end subroutine gs_trace_surf
-#ifdef OFT_TOKAMAKER_LEGACY
-!------------------------------------------------------------------------------
-!> Needs Docs
-!------------------------------------------------------------------------------
-subroutine gs_set_cond_weights(self,vals,skip_fixed)
-class(gs_factory), intent(inout) :: self
-real(8), intent(in) :: vals(:)
-logical, intent(in) :: skip_fixed
-integer(4) :: i,j,k,kk
-!---
-k=0
-kk=0
-DO i=1,self%ncond_regs
-  IF(self%cond_regions(i)%pair<0)THEN
-    DO j=1,self%cond_regions(i)%neigs
-      k=k+1
-      IF(self%cond_regions(i)%fixed(j).AND.skip_fixed)CYCLE
-      kk=kk+1
-      self%cond_weights(k)=vals(kk)
-      self%cond_regions(i)%weights(j)=self%cond_weights(k)
-    END DO
-  ELSE
-    DO j=1,self%cond_regions(i)%neigs
-      self%cond_regions(i)%weights(j)=self%cond_regions(i)%pair_signs(j)* &
-        self%cond_regions(self%cond_regions(i)%pair)%weights(j)
-    END DO
-  END IF
-END DO
-end subroutine gs_set_cond_weights
-!------------------------------------------------------------------------------
-!> Needs Docs
-!------------------------------------------------------------------------------
-subroutine gs_get_cond_weights(self,vals,skip_fixed)
-class(gs_factory), intent(inout) :: self
-real(8), intent(inout) :: vals(:)
-logical, intent(in) :: skip_fixed
-integer(4) :: i,j,k,kk
-!---
-k=0
-kk=0
-DO i=1,self%ncond_regs
-  IF(self%cond_regions(i)%pair<0)THEN
-    DO j=1,self%cond_regions(i)%neigs
-      k=k+1
-      self%cond_weights(k)=self%cond_regions(i)%weights(j)
-      IF(self%cond_regions(i)%fixed(j).AND.skip_fixed)CYCLE
-      kk=kk+1
-      vals(kk)=self%cond_weights(k)
-    END DO
-  END IF
-END DO
-end subroutine gs_get_cond_weights
-!------------------------------------------------------------------------------
-!> Needs Docs
-!------------------------------------------------------------------------------
-subroutine gs_get_cond_scales(self,vals,skip_fixed)
-class(gs_factory), intent(inout) :: self
-real(8), intent(inout) :: vals(:)
-logical, intent(in) :: skip_fixed
-integer(4) :: i,j,k
-k=0
-DO i=1,self%ncond_regs
-  IF(self%cond_regions(i)%pair<0)THEN
-    DO j=1,self%cond_regions(i)%neigs
-      IF(self%cond_regions(i)%fixed(j).AND.skip_fixed)CYCLE
-      k=k+1
-      vals(k) = self%cond_regions(i)%fit_scales(j)
-    END DO
-  END IF
-END DO
-end subroutine gs_get_cond_scales
-#endif
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -6178,20 +5476,6 @@ END IF
 !---
 IF(self%ncond_regs>0)THEN
   DO i=1,self%ncond_regs
-#ifdef OFT_TOKAMAKER_LEGACY
-    IF(ASSOCIATED(self%cond_regions(i)%fixed))DEALLOCATE(self%cond_regions(i)%fixed)
-    IF(ASSOCIATED(self%cond_regions(i)%mtype))DEALLOCATE(self%cond_regions(i)%mtype)
-    IF(ASSOCIATED(self%cond_regions(i)%mind))DEALLOCATE(self%cond_regions(i)%mind)
-    IF(ASSOCIATED(self%cond_regions(i)%eig_map))DEALLOCATE(self%cond_regions(i)%eig_map)
-    IF(ASSOCIATED(self%cond_regions(i)%lc))DEALLOCATE(self%cond_regions(i)%lc)
-    IF(ASSOCIATED(self%cond_regions(i)%weights))DEALLOCATE(self%cond_regions(i)%weights)
-    IF(ASSOCIATED(self%cond_regions(i)%pair_signs))DEALLOCATE(self%cond_regions(i)%pair_signs)
-    IF(ASSOCIATED(self%cond_regions(i)%fit_scales))DEALLOCATE(self%cond_regions(i)%fit_scales)
-    IF(ASSOCIATED(self%cond_regions(i)%cond_vals))DEALLOCATE(self%cond_regions(i)%cond_vals)
-    IF(ASSOCIATED(self%cond_regions(i)%rc))DEALLOCATE(self%cond_regions(i)%rc)
-    IF(ASSOCIATED(self%cond_regions(i)%cond_curr))DEALLOCATE(self%cond_regions(i)%cond_curr)
-    IF(ASSOCIATED(self%cond_regions(i)%corr_3d))DEALLOCATE(self%cond_regions(i)%corr_3d)
-#endif
     IF(self%cond_regions(i)%neigs>0)THEN
       DO j=1,self%cond_regions(i)%neigs
         IF(ASSOCIATED(self%cond_regions(i)%psi_eig(j)%f))CALL self%cond_regions(i)%psi_eig(j)%f%delete()
@@ -6230,10 +5514,6 @@ IF(ASSOCIATED(self%mop_axis))THEN
   CALL self%mop_axis%delete()
   DEALLOCATE(self%mop_axis)
 END IF
-! Destory I and P in the future
-#ifdef OFT_TOKAMAKER_LEGACY
-NULLIFY(self%set_eta)
-#endif
 end subroutine factory_destroy
 !------------------------------------------------------------------------------
 !> Destroy internal storage and nullify references for Grad-Shafranov object

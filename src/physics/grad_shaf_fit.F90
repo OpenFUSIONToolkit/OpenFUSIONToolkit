@@ -23,9 +23,6 @@ use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 use oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, gs_dflux, gs_itor_nl, gs_psi2r, &
   gs_err_reason, gs_test_bounds, gs_get_qprof, gs_epsilon
-#ifdef OFT_TOKAMAKER_LEGACY
-use oft_gs, only: gs_get_cond_weights, gs_set_cond_weights, gs_get_cond_scales
-#endif
 ! use oft_gs_profiles, only: twolam_flux_func
 use tracing_2d, only: active_tracer, tracer, set_tracer
 use mhd_utils, only: mu0
@@ -285,20 +282,6 @@ IF(gs_active%P%ncofs>0.AND.fit_P)THEN
   ncofs = ncofs+gs_active%P%ncofs
 END IF
 ncond_active = 0
-#ifdef OFT_TOKAMAKER_LEGACY
-IF(gs_active%ncond_regs>0)THEN
-  DO i=1,gs_active%ncond_regs
-    IF(gs_active%cond_regions(i)%pair<0)THEN
-      DO j=1,gs_active%cond_regions(i)%neigs
-        IF(gs_active%cond_regions(i)%fixed(j))CYCLE
-        ncond_active=ncond_active+1
-      END DO
-    END IF
-  END DO
-  WRITE(*,*)'Fixed',ncond_active,gs_active%ncond_eigs
-  ncofs = ncofs + ncond_active !gs_active%ncond_eigs
-END IF
-#endif
 IF(fit_coils)ncofs = ncofs + gs_active%device%ncoils
 IF(fit_F0)ncofs = ncofs + 1
 !---
@@ -352,14 +335,6 @@ IF(gs_active%P%ncofs>0.AND.fit_P)THEN
   CALL gs_active%P%get_cofs(cofs(js+1:je))
   offset = je
 END IF
-#ifdef OFT_TOKAMAKER_LEGACY
-IF(ncond_active>0)THEN
-  js = offset; je = offset+ncond_active
-  CALL gs_get_cond_weights(gs_active,cofs(js+1:je),.TRUE.)
-  CALL gs_get_cond_scales(gs_active,cofs_scale(js+1:je),.TRUE.)
-  offset = je
-END IF
-#endif
 IF(fit_coils)THEN
   js = offset; je = offset+gs_active%device%ncoils
   ALLOCATE(curr_in(gs_active%device%ncoils))
@@ -692,13 +667,6 @@ IF(iflag==1)THEN
     END IF
     offset = je
   END IF
-#ifdef OFT_TOKAMAKER_LEGACY
-  IF(ncond_active>0)THEN
-    js = offset; je = offset+ncond_active
-    CALL gs_set_cond_weights(gs_active,cofs(js+1:je),.TRUE.)
-    offset = je
-  END IF
-#endif
   IF(fit_coils)THEN
     js = offset; je = offset+gs_active%device%ncoils
     DO i=1,gs_active%device%ncoils
@@ -972,24 +940,6 @@ ELSE
     ierr=gs_active%P%set_cofs(cof_tmp(1:je-js))
     offset = je
   END IF
-#ifdef OFT_TOKAMAKER_LEGACY
-  IF(ncond_active>0)THEN
-    js = offset; je = offset+ncond_active
-    cof_tmp(1:je-js)=cofs(js+1:je)
-    DO j=1,je-js
-      CALL reset_eq
-      dx = dxi/cofs_scale(js+j)
-      cof_tmp(j)=cofs(js+j) + dx
-      CALL gs_set_cond_weights(gs_active,cof_tmp(1:je-js),.TRUE.)
-      CALL run_err(linearized_fit,jac_mat(:,js+j),m,ierr)
-      jac_mat(:,js+j)=(jac_mat(:,js+j)-err)/dx
-      cof_tmp(j)=cofs(js+j)
-    END DO
-    cof_tmp(1:je-js)=cofs(js+1:je)
-    CALL gs_set_cond_weights(gs_active,cof_tmp(1:je-js),.TRUE.)
-    offset = je
-  END IF
-#endif
   IF(fit_coils)THEN
     js = offset; je = offset+gs_active%device%ncoils
     DO j=1,gs_active%device%ncoils
@@ -1188,21 +1138,6 @@ DO i=1,gs_active%device%ncond_regs
 END DO
 ALLOCATE(nax_corr(gs_active%device%ncond_eigs,neddy),nax_tmp(j,neddy))
 nax_corr=0.d0
-#ifdef OFT_TOKAMAKER_LEGACY
-DO i=1,gs_active%device%ncond_regs
-  nax_tmp=0.d0
-  WRITE(num_str,'(I2.2)')i
-  IF(oft_file_exist('wall_eig.rst'))THEN
-    CALL hdf5_read(nax_tmp(1:gs_active%device%cond_regions(i)%neigs,:), 'wall_eig.rst', &
-      'corr_'//num_str, success=file_exists)
-    WRITE(*,'(2A,I4)')oft_indent,'Non-axisymmetric corrections found: ',i
-  END IF
-  DO j=1,gs_active%device%cond_regions(i)%neigs
-    nax_corr(gs_active%device%cond_regions(i)%eig_map(j),:)=nax_corr(gs_active%device%cond_regions(i)%eig_map(j),:) &
-      + nax_tmp(j,:)
-  END DO
-END DO
-#endif
 IF(ANY(ABS(nax_corr)>0.d0))THEN
   k=0
   DO i=1,ncons
