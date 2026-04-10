@@ -21,17 +21,22 @@ import h5py
 eol_byte = '\n'.encode()
 
 
-def write_oft_xml(xml_blocks,path):
+def write_oft_xml(xml_blocks,path,pretty=True):
     r"""! Write OFT XML file from a list of XML block objects
 
     @param xml_blocks List of objects for child nodes, must implement `build_XML` method
     @param path Output path for XML file
+    @param pretty Whether to pretty-print the XML with indentation (default: `True`)
     """
     oft_element = ET.Element("oft")
     xml_doc = ET.ElementTree(oft_element)
     for xml_block in xml_blocks:
         xml_block.build_XML(oft_element)
-    ET.indent(xml_doc, space="  ", level=0)
+    if pretty:
+        if hasattr(ET, 'indent'):
+            ET.indent(xml_doc, space="  ", level=0)
+        else:
+            print("Warning: Pretty printing of XML requires Python 3.9+. Output will not be indented.")
     xml_doc.write(path, encoding="us-ascii", xml_declaration=True)
     print(f"XML file created at {path}")
 

@@ -74,7 +74,8 @@ SELECT CASE(TRIM(profType))
     ALLOCATE(zero_flux_func::F)
   CASE("flat")
     CALL create_flat_f(F)
-  ! CASE("linear")
+  CASE("linear")
+    CALL oft_abort('"linear" profile no longer supported.','gs_profile_load',__FILE__)
   !   READ(io_unit,*)ncofs
   !   READ(io_unit,*)alpha
   !   CALL create_linear_ff(F,alpha)
@@ -99,12 +100,14 @@ SELECT CASE(TRIM(profType))
     READ(io_unit,*)yvals
     CALL create_jphi_ff(F,ncofs,cofs,yvals,alpha)
     DEALLOCATE(cofs,yvals)
-  ! CASE("idcd")
+  CASE("idcd")
+    CALL oft_abort('"idcd" profile no longer supported.','gs_profile_load',__FILE__)
   !   READ(io_unit,*)ncofs
   !   READ(io_unit,*)sep,alpha
   !   CALL create_twolam_ff(F,sep,alpha)
   !   F%ncofs=ncofs
-  ! CASE("step-slant")
+  CASE("step-slant")
+    CALL oft_abort('"step-slant" profile no longer supported.','gs_profile_load',__FILE__)
   !   READ(io_unit,*)ncofs
   !   READ(io_unit,*)sep,alpha,beta
   !   CALL create_stepslant_ff(F,sep,alpha,beta)

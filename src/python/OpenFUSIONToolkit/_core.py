@@ -14,9 +14,11 @@ import platform
 import shutil
 import tempfile
 import ctypes
+from warnings import warn
 import numpy
 from ._interface import *
 from .util import run_shell_command, oft_warning
+from .io import write_oft_xml
 
 
 class OFT_env():
@@ -197,6 +199,20 @@ class OFT_env():
                 for option_name, option_value in options.items():
                     fid.write("  {0}={1}\n".format(option_name,option_value))
                 fid.write("/\n\n")
+    
+    @staticmethod
+    def write_oft_xml(xml_blocks,path):
+        r"""! Write OFT XML file from a list of XML block objects
+
+        @param xml_blocks List of objects for child nodes, must implement `build_XML` method
+        @param path Output path for XML file
+        """
+        warn(
+            "`OFT_env.write_oft_xml()` is deprecated, use standalone `io.write_oft_xml()` instead. This method will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        write_oft_xml(xml_blocks,path)
 
     def __del__(self):
         '''! Destroy environment and cleanup known temporary files'''
