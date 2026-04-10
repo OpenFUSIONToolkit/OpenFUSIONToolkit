@@ -2759,11 +2759,12 @@ subroutine tw_load_eta(self)
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
 !---XML solver fields
 integer(4) :: nshells,nreg_mesh,nread
-TYPE(xml_node) :: sens_node,eta_group,thincurr_group
+TYPE(xml_node) :: sens_node,eta_group,eta_surf_group,eta_vol_group,thincurr_group,thickness_group
 !---
 INTEGER(4) :: i,j,io_unit,ierr,id,cell
 REAL(8) :: location(2)
-REAL(r8), POINTER :: eta_tmp(:)
+LOGICAL :: has_eta_surf,has_eta_vol,has_thickness
+REAL(r8), POINTER :: eta_tmp(:),eta_vol_tmp(:),thickness_tmp(:)
 LOGICAL, POINTER :: sens_mask_tmp(:)
 nreg_mesh=MAXVAL(self%mesh%reg)
 !--- Deallocate if already set
@@ -2782,7 +2783,7 @@ self%sens_mask=.FALSE.
 has_eta_surf=.FALSE.
 has_eta_vol=.FALSE.
 has_thickness=.FALSE.
-IF(.NOT.ASSOCIATED(self%xml))THEN
+IF(.NOT.self%xml%associated())THEN
   CALL oft_warn('No "thincurr" XML node specified. Ignore this warning if an XML node does not need to be specified.')
   RETURN
 END IF
@@ -2790,16 +2791,78 @@ END IF
 CALL xml_get_element(self%xml,"eta",eta_group,ierr)
 IF(ierr==0)THEN
   WRITE(*,*)
-  WRITE(*,'(2A)')oft_indent,'Loading region resistivity:'
+  WRITE(*,'(2A)')oft_indent,'Loading region surface resistivity:'
   CALL xml_read_content(eta_group,eta_tmp,iostat=ierr)
   IF(ierr/=0)CALL oft_abort('Error reading eta values','tw_load_eta',__FILE__)
-  IF(SIZE(eta_tmp)/=SIZE(self%Eta_reg))CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
-  ! WRITE(*,'(2A)')oft_indent,'  Eta = ',REAL(self%Eta_reg,4)
+  IF(SIZE(eta_tmp)/=SIZE(self%Eta_surf))CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
+  IF(ANY(eta_tmp<=0.d0))CALL oft_abort('All "eta" values must be > 0','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
     WRITE(*,'(A,I4,ES12.4)')oft_indent,i,eta_tmp(i)
-    self%Eta_reg(i)=eta_tmp(i)/mu0 ! Convert to magnetic units
+    self%Eta_surf(i)=eta_tmp(i)/mu0 ! Convert to magnetic units
   END DO
   DEALLOCATE(eta_tmp)
+  has_eta_surf=.TRUE.
+ELSE
+  CALL xml_get_element(self%xml,"eta_surf",eta_surf_group,ierr)
+  IF(ierr==0)THEN
+    WRITE(*,*)
+    WRITE(*,'(2A)')oft_indent,'Loading region surface resistivity:'
+    CALL xml_read_content(eta_surf_group,eta_tmp,iostat=ierr)
+    IF(ierr/=0)CALL oft_abort('Error reading eta values','tw_load_eta',__FILE__)
+    IF(SIZE(eta_tmp)/=SIZE(self%Eta_surf))CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
+    IF(ANY(eta_tmp<=0.d0))CALL oft_abort('All "eta" values must be > 0','tw_load_eta',__FILE__)
+    DO i=1,nreg_mesh
+      WRITE(*,'(A,I4,ES12.4)')oft_indent,i,eta_tmp(i)
+      self%Eta_surf(i)=eta_tmp(i)/mu0 ! Convert to magnetic units
+    END DO
+    DEALLOCATE(eta_tmp)
+    has_eta_surf=.TRUE.
+  END IF
+END IF
+! Read volumetric resistivity values
+CALL xml_get_element(self%xml,"eta_vol",eta_vol_group,ierr)
+IF(ierr==0)THEN
+  WRITE(*,*)
+  WRITE(*,'(2A)')oft_indent,'Loading region volumetric resistivity:'
+  CALL xml_read_content(eta_vol_group,eta_vol_tmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_abort('Error reading eta_vol values','tw_load_eta',__FILE__)
+  IF(SIZE(eta_vol_tmp)/=SIZE(self%Eta_vol))CALL oft_abort('Eta_vol size mismatch','tw_load_eta',__FILE__)
+  IF(ANY(eta_vol_tmp<=0.d0))CALL oft_abort('All "eta_vol" values must be > 0','tw_load_eta',__FILE__)
+  DO i=1,nreg_mesh
+    WRITE(*,'(A,I4,ES12.4)')oft_indent,i,eta_vol_tmp(i)
+    self%Eta_vol(i)=eta_vol_tmp(i)/mu0 ! Convert to magnetic units
+  END DO
+  DEALLOCATE(eta_vol_tmp)
+  has_eta_vol=.TRUE.
+END IF
+! Read thickness values
+CALL xml_get_element(self%xml,"thickness",thickness_group,ierr)
+IF(ierr==0)THEN
+  WRITE(*,'(2A)')oft_indent,'Loading region thickness:'
+  CALL xml_read_content(thickness_group,thickness_tmp,iostat=ierr)
+  IF(ierr/=0)CALL oft_abort('Error reading thickness values','tw_load_eta',__FILE__)
+  IF(SIZE(thickness_tmp)/=SIZE(self%Thickness))CALL oft_abort('Thickness size mismatch','tw_load_eta',__FILE__)
+  IF(ANY(thickness_tmp<=0.d0))CALL oft_abort('All "thickness" values must be > 0','tw_load_eta',__FILE__)
+  DO i=1,nreg_mesh
+    WRITE(*,'(A,I4,ES12.4)')oft_indent,i,thickness_tmp(i)
+    self%Thickness(i)=thickness_tmp(i)
+  END DO
+  DEALLOCATE(thickness_tmp)
+  has_thickness=.TRUE.
+END IF
+IF(has_eta_surf)THEN
+  IF(has_eta_vol.AND.has_thickness)THEN
+    CALL oft_warn('"eta_surf" (or "eta"), "eta_vol," and "thickness" all provided from XML. Recalculating eta_surf from eta_vol')
+    self%Eta_surf=self%Eta_vol/self%Thickness
+  ELSE IF((.NOT.has_eta_vol).AND.has_thickness)THEN
+    self%Eta_vol=self%Eta_surf*self%Thickness
+  END IF
+ELSE IF (has_eta_vol.AND.has_thickness)THEN
+  self%Eta_surf=self%Eta_vol/self%Thickness
+ELSE IF (has_eta_vol.AND.(.NOT.has_thickness))THEN
+  CALL oft_warn('"eta_vol" specified without thickness in XML. eta_vol is retained, but eta_surf is not inferred in this load path. Provide thickness and then set resistivity explicitly.')
+ELSE
+  CALL oft_warn('Cannot gather or infer surface resisitivity from XML. Ignore if warning this does not need to be specified.')
 END IF
 ! Read sensor mask
 CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr)

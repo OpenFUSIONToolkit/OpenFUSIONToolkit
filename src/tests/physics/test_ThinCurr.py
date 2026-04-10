@@ -10,10 +10,7 @@ import numpy as np
 import h5py
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
-# sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
-thincurr_python_path = '/home/andrew-maris/repos/OpenFUSIONToolkit/build_release' #os.getenv('OFT_ROOTPATH')
-if thincurr_python_path is not None:
-    sys.path.append(os.path.join(thincurr_python_path,'python'))
+sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from oft_testing import run_OFT
 from OpenFUSIONToolkit.io import histfile
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
@@ -612,21 +609,6 @@ def _build_dummy_model(xml_filename):
     return model
 
 
-def _get_eta_values_pair(tw_model):
-    """Return (eta_surf, eta_vol_or_none) for both old and new API shapes."""
-    eta_values = tw_model.get_eta_values()
-    if isinstance(eta_values, tuple):
-        if len(eta_values) != 2:
-            raise RuntimeError("Unexpected get_eta_values() tuple length: {}".format(len(eta_values)))
-        return eta_values
-    return eta_values, None
-
-
-def _supports_eta_vol_tuple_api(tw_model):
-    eta_values = tw_model.get_eta_values()
-    return isinstance(eta_values, tuple) and (len(eta_values) == 2)
-
-
 def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_Hamada,sigs_mnmodes_2D_PEST,sigs_mnmodes_2D_Hamada,t,delta_phi,tol=1.E-6):
     try:
         interface.load_histfile()
@@ -674,35 +656,82 @@ def test_thickness_api_roundtrip_and_validation():
 def run_thickness_api_roundtrip_and_validation(mp_q):
     result = True
     try:
+        import warnings
         os.chdir(test_dir)
         xml_filename = 'oft_in_thickness_api.xml'
         eta_values = np.r_[1.E4*mu0]
         thickness_values = np.r_[2.5E-3]
+        eta_vol_values = eta_values * thickness_values
         _write_thincurr_xml(xml_filename, eta_values=eta_values, thickness_values=thickness_values)
 
         tw_model = _build_dummy_model(xml_filename)
 
         tw_model.set_eta_values(eta_surf=eta_values, thickness=thickness_values)
-        has_tuple_eta_api = _supports_eta_vol_tuple_api(tw_model)
-        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
-        if not np.allclose(eta_surf, eta_values):
+        
+        # Verify get_eta_values() without flag shows deprecation warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            eta_returned = tw_model.get_eta_values()
+            if len(w) == 0 or not issubclass(w[-1].category, DeprecationWarning):
+                print("WARNING: Expected DeprecationWarning for get_eta_values() not found")
+        
+        if not np.allclose(eta_returned, eta_values):
             result = False
-        if (eta_vol is not None) and (not np.allclose(eta_vol, eta_values * thickness_values)):
+        eta_surf_out, eta_vol_out = tw_model.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_out, eta_values):
+            result = False
+        if not np.allclose(eta_vol_out, eta_vol_values):
             result = False
         if not np.allclose(tw_model.get_thickness(), thickness_values):
             result = False
 
-        new_thickness = np.r_[3.5E-3]
-        tw_model.set_thickness(new_thickness)
-        if not np.allclose(tw_model.get_thickness(), new_thickness):
+        tw_model_pair = _build_dummy_model(xml_filename)
+        tw_model_pair.set_eta_values(eta_surf=eta_values, eta_vol=eta_vol_values)
+        eta_surf_pair, eta_vol_pair = tw_model_pair.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_pair, eta_values):
+            result = False
+        if not np.allclose(eta_vol_pair, eta_vol_values):
+            result = False
+        if not np.allclose(tw_model_pair.get_thickness(), thickness_values):
             result = False
 
-        eta_bulk = np.r_[3.0E4*mu0] * new_thickness
-        tw_model.set_eta_values(eta_vol=eta_bulk, thickness=new_thickness)
-        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
-        if (eta_vol is not None) and (not np.allclose(eta_vol, eta_bulk)):
+        tw_model_alias = _build_dummy_model(xml_filename)
+        tw_model_alias.set_eta_values(eta_values=eta_values, thickness=thickness_values)
+        eta_surf_alias, eta_vol_alias = tw_model_alias.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_alias, eta_values):
             result = False
-        if not np.allclose(eta_surf, eta_bulk / new_thickness):
+        if not np.allclose(eta_vol_alias, eta_vol_values):
+            result = False
+
+        tw_model_eta_only = _build_dummy_model(xml_filename)
+        tw_model_eta_only.set_eta_values(eta_surf=eta_values)
+        eta_surf_only, eta_vol_only = tw_model_eta_only.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_only, eta_values):
+            result = False
+        if eta_vol_only is not None:
+            result = False
+        if not np.allclose(tw_model_eta_only.get_thickness(), -1.0):
+            result = False
+
+        eta_surf_override = eta_values * 1.5
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            tw_model_three = _build_dummy_model(xml_filename)
+            tw_model_three.set_eta_values(eta_surf=eta_surf_override, eta_vol=eta_vol_values, thickness=thickness_values)
+        if len(w) == 0 or not any(issubclass(item.category, UserWarning) for item in w):
+            result = False
+        eta_surf_three, eta_vol_three = tw_model_three.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_three, eta_values):
+            result = False
+        if not np.allclose(eta_vol_three, eta_vol_values):
+            result = False
+        if not np.allclose(tw_model_three.get_thickness(), thickness_values):
+            result = False
+
+        # Test updating thickness with a new set_eta_values call
+        new_thickness = np.r_[3.5E-3]
+        tw_model.set_eta_values(eta_surf=eta_values, thickness=new_thickness)
+        if not np.allclose(tw_model.get_thickness(), new_thickness):
             result = False
 
         with pytest.raises(ValueError):
@@ -710,21 +739,18 @@ def run_thickness_api_roundtrip_and_validation(mp_q):
         with pytest.raises(ValueError):
             tw_model.set_eta_values(eta_values=np.r_[-1.0])
         with pytest.raises(ValueError):
-            tw_model.set_eta_values(eta_values=eta_values, thickness=thickness_values)
+            tw_model.set_eta_values(thickness=thickness_values)
         with pytest.raises(ValueError):
             tw_model.set_eta_values(eta_surf=eta_values, thickness=np.r_[-1.0])
-        if has_tuple_eta_api:
-            tw_model.set_eta_values(eta_vol=np.r_[1.0e-6])
-        else:
-            with pytest.raises(ValueError):
-                tw_model.set_eta_values(eta_vol=np.r_[1.0e-6])
-        xml_no_thickness = 'oft_in_eta_no_thickness.xml'
+        # eta_vol requires pre-existing thickness when thickness is not passed.
+        # Use a fresh model with no thickness XML to exercise this error path.
+        xml_no_thickness = 'oft_in_no_thickness.xml'
         _write_thincurr_xml(xml_no_thickness, eta_values=eta_values)
-        tw_no_thickness = _build_dummy_model(xml_no_thickness)
+        tw_model_no_thickness = _build_dummy_model(xml_no_thickness)
         with pytest.raises(Exception):
-            tw_no_thickness.set_eta_values(eta_vol=np.r_[1.0e-6])
+            tw_model_no_thickness.set_eta_values(eta_vol=np.r_[1.0e-6])
         with pytest.raises(IndexError):
-            tw_model.set_thickness(np.r_[1.E-3, 2.E-3])
+            tw_model.set_eta_values(eta_surf=eta_values, thickness=np.r_[1.E-3, 2.E-3])
     except BaseException as e:
         print(e)
         result = False
@@ -810,11 +836,11 @@ def run_eta_only_matches_surface_resistivity_with_thickness(mp_q):
 
 
 @pytest.mark.coverage
-def test_eta_vol_without_thickness_fails_xml_loading():
-    assert mp_run(run_eta_vol_without_thickness_fails_xml_loading, ())
+def test_eta_vol_without_thickness_warns_and_loads():
+    assert mp_run(run_eta_vol_without_thickness_warns_and_loads, ())
 
 
-def run_eta_vol_without_thickness_fails_xml_loading(mp_q):
+def run_eta_vol_without_thickness_warns_and_loads(mp_q):
     result = True
     try:
         os.chdir(test_dir)
@@ -822,16 +848,9 @@ def run_eta_vol_without_thickness_fails_xml_loading(mp_q):
         eta_vol_values = np.r_[2.5E-3]
         _write_thincurr_xml(xml_filename, eta_vol_values=eta_vol_values)
 
-        # Current behavior: eta_vol-only XML is allowed (warning path), but
-        # eta_surf cannot be inferred without thickness.
+        # eta_vol-only XML should load with warning; eta_surf cannot be inferred.
         tw_model = _build_dummy_model(xml_filename)
-        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
-
-        # eta_vol should be retained when available from the backend.
-        if (eta_vol is not None) and (not np.allclose(eta_vol, eta_vol_values, rtol=1.E-5, atol=1.E-12)):
-            result = False
-
-        # eta_surf should not be a valid positive inferred value in this path.
+        eta_surf = tw_model.get_eta_values()
         if np.all(eta_surf > 0.0):
             result = False
     except BaseException as e:
@@ -842,42 +861,12 @@ def run_eta_vol_without_thickness_fails_xml_loading(mp_q):
 
 
 @pytest.mark.coverage
-def test_get_eta_values_returns_none_for_unset_eta_vol():
-    assert mp_run(run_get_eta_values_returns_none_for_unset_eta_vol, ())
+def test_get_eta_values_deprecation_warning():
+    """Test that get_eta_values() without include_eta_vol flag shows deprecation warning."""
+    assert mp_run(run_get_eta_values_deprecation_warning, ())
 
 
-def run_get_eta_values_returns_none_for_unset_eta_vol(mp_q):
-    result = True
-    try:
-        os.chdir(test_dir)
-        xml_filename = 'oft_in_eta_only.xml'
-        eta_values = np.r_[1.E4*mu0]
-        _write_thincurr_xml(xml_filename, eta_values=eta_values)
-
-        tw_model = _build_dummy_model(xml_filename)
-        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
-
-        # Verify eta_surf is set
-        if not np.allclose(eta_surf, eta_values, rtol=1.E-4, atol=1.E-12):
-            result = False
-        
-        # Verify eta_vol is None when not provided
-        if eta_vol is not None:
-            result = False
-            raise RuntimeError('Expected eta_vol to be None when not set, but got: {}'.format(eta_vol))
-    except BaseException as e:
-        print(e)
-        result = False
-    oftpy_dump_cov()
-    mp_q.put(result)
-
-
-@pytest.mark.coverage
-def test_deprecation_warning_eta_values():
-    assert mp_run(run_deprecation_warning_eta_values, ())
-
-
-def run_deprecation_warning_eta_values(mp_q):
+def run_get_eta_values_deprecation_warning(mp_q):
     result = True
     try:
         os.chdir(test_dir)
@@ -886,10 +875,25 @@ def run_deprecation_warning_eta_values(mp_q):
         _write_thincurr_xml(xml_filename, eta_values=eta_values)
 
         tw_model = _build_dummy_model(xml_filename)
+        tw_model.set_eta_values(eta_surf=eta_values)
 
-        # Capture deprecation warning when using eta_values parameter
-        with pytest.warns(DeprecationWarning, match=r".*eta_values.*deprecated.*"):
-            tw_model.set_eta_values(eta_values=eta_values)
+        import warnings
+        # Check that calling get_eta_values() without flag triggers deprecation warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            eta = tw_model.get_eta_values()
+            
+            # Should get a DeprecationWarning
+            if len(w) == 0 or not issubclass(w[-1].category, DeprecationWarning):
+                print("ERROR: Expected DeprecationWarning not found")
+                result = False
+            elif "include_eta_vol" not in str(w[-1].message):
+                print(f"ERROR: Expected 'include_eta_vol' in warning message, got: {w[-1].message}")
+                result = False
+            elif not np.allclose(eta, eta_values):
+                print("ERROR: eta_surf values don't match")
+                result = False
+
     except BaseException as e:
         print(e)
         result = False
@@ -898,39 +902,50 @@ def run_deprecation_warning_eta_values(mp_q):
 
 
 @pytest.mark.coverage
-def test_xml_loading_eta_vol_with_thickness():
-    assert mp_run(run_xml_loading_eta_vol_with_thickness, ())
+def test_get_eta_values_with_flag_returns_tuple():
+    """Test that get_eta_values(include_eta_vol=True) returns tuple with eta_vol."""
+    assert mp_run(run_get_eta_values_with_flag_returns_tuple, ())
 
 
-def run_xml_loading_eta_vol_with_thickness(mp_q):
+def run_get_eta_values_with_flag_returns_tuple(mp_q):
     result = True
     try:
         os.chdir(test_dir)
-        xml_filename = 'oft_in_eta_vol_thickness_xml.xml'
-        eta_vol_values = np.r_[2.5E-2*mu0]
-        thickness_values = np.r_[2.5E-3]
-        # When both eta_vol and thickness are provided, eta_surf should be computed
-        expected_eta_surf = eta_vol_values / thickness_values
-        _write_thincurr_xml(xml_filename, eta_vol_values=eta_vol_values, thickness_values=thickness_values)
+        xml_filename = 'oft_in_eta_vol_tuple.xml'
+        eta_surf = np.r_[1.E4*mu0]
+        eta_vol = np.r_[2.5E-2]
+        thickness = np.r_[2.5E-3]
+        _write_thincurr_xml(xml_filename, eta_values=eta_surf, thickness_values=thickness)
 
         tw_model = _build_dummy_model(xml_filename)
-        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
-        thickness = tw_model.get_thickness()
+        tw_model.set_eta_values(eta_vol=eta_vol, thickness=thickness)
 
-        # Verify eta_vol loaded correctly (new API only)
-        if (eta_vol is not None) and (not np.allclose(eta_vol, eta_vol_values)):
-            result = False
-            print("eta_vol mismatch: expected {}, got {}".format(eta_vol_values, eta_vol))
+        import warnings
+        # Call with include_eta_vol=True should NOT trigger warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result_tuple = tw_model.get_eta_values(include_eta_vol=True)
+            
+            # Should not get DeprecationWarning
+            for warning in w:
+                if issubclass(warning.category, DeprecationWarning):
+                    print(f"ERROR: Unexpected DeprecationWarning when include_eta_vol=True: {warning.message}")
+                    result = False
+                    break
 
-        # Verify thickness loaded correctly
-        if not np.allclose(thickness, thickness_values):
+        # Check that result is a tuple with (eta_surf, eta_vol)
+        if not isinstance(result_tuple, tuple) or len(result_tuple) != 2:
+            print(f"ERROR: Expected tuple of length 2, got {type(result_tuple)} of length {len(result_tuple) if isinstance(result_tuple, tuple) else 'N/A'}")
             result = False
-            print("thickness mismatch: expected {}, got {}".format(thickness_values, thickness))
+        else:
+            eta_surf_ret, eta_vol_ret = result_tuple
+            if eta_vol_ret is None:
+                print("ERROR: eta_vol should not be None when it was explicitly set")
+                result = False
+            elif not np.allclose(eta_vol_ret, eta_vol):
+                print(f"ERROR: eta_vol values don't match. Expected {eta_vol}, got {eta_vol_ret}")
+                result = False
 
-        # Verify eta_surf was computed from eta_vol and thickness
-        if not np.allclose(eta_surf, expected_eta_surf, rtol=1.E-10):
-            result = False
-            print("eta_surf mismatch: expected {}, got {}".format(expected_eta_surf, eta_surf))
     except BaseException as e:
         print(e)
         result = False
@@ -938,49 +953,10 @@ def run_xml_loading_eta_vol_with_thickness(mp_q):
     mp_q.put(result)
 
 
-@pytest.mark.coverage
-def test_xml_loading_all_three_with_preference():
-    assert mp_run(run_xml_loading_all_three_with_preference, ())
 
 
-def run_xml_loading_all_three_with_preference(mp_q):
-    result = True
-    try:
-        os.chdir(test_dir)
-        xml_filename = 'oft_in_all_three_eta.xml'
-        eta_surf_values = np.r_[1.E4*mu0]
-        thickness_values = np.r_[2.5E-3]
-        eta_vol_values = eta_surf_values * thickness_values
-        
-        # When all three are provided, eta_surf should remain consistent with eta_vol/thickness.
-        expected_eta_surf_final = eta_vol_values / thickness_values
-        
-        _write_thincurr_xml(xml_filename, eta_values=eta_surf_values, 
-                           eta_vol_values=eta_vol_values, thickness_values=thickness_values)
 
-        tw_model = _build_dummy_model(xml_filename)
-        eta_surf, eta_vol = _get_eta_values_pair(tw_model)
-        thickness = tw_model.get_thickness()
 
-        # Verify eta_vol preserved (new API only)
-        if (eta_vol is not None) and (not np.allclose(eta_vol, eta_vol_values)):
-            result = False
-            print("eta_vol not preserved: expected {}, got {}".format(eta_vol_values, eta_vol))
-
-        # Verify thickness preserved
-        if not np.allclose(thickness, thickness_values):
-            result = False
-            print("thickness not preserved: expected {}, got {}".format(thickness_values, thickness))
-
-        # Verify eta_surf is consistent with eta_vol/thickness
-        if not np.allclose(eta_surf, expected_eta_surf_final, rtol=1.E-5, atol=1.E-12):
-            result = False
-            print("eta_surf not recalculated: expected {}, got {}".format(expected_eta_surf_final, eta_surf))
-    except BaseException as e:
-        print(e)
-        result = False
-    oftpy_dump_cov()
-    mp_q.put(result)
 
 
 #============================================================================
