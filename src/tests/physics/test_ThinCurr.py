@@ -578,7 +578,6 @@ def validate_mode(drive_exp,result_exp):
 
 
 def _write_thincurr_xml(xml_filename, eta_values=None, thickness_values=None, eta_vol_values=None):
-    from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_XML
 
     thincurr_xml = ThinCurr_XML()
@@ -588,7 +587,7 @@ def _write_thincurr_xml(xml_filename, eta_values=None, thickness_values=None, et
         thincurr_xml.set_eta_vol(eta_vol_values)
     if thickness_values is not None:
         thincurr_xml.set_thickness(thickness_values)
-    OFT_env.write_oft_xml([thincurr_xml], xml_filename)
+    write_oft_xml([thincurr_xml], xml_filename)
 
 
 def _build_dummy_model(xml_filename):
