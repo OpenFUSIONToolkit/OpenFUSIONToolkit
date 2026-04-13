@@ -454,9 +454,12 @@ def _find_optimal_scale_inner(
         tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs[0], ravgs[1])
 
         if diagnostic_plots:
+            if _q_npsi < n_psi:
+                print(f"Diagnostic plots use npsi={_q_npsi} (coarser than full npsi={n_psi}), so curves may look rough. Only the on-axis value (psi_N=0) is used for error calculations.")
+            _psi_plot = numpy.linspace(psi_pad, 1.0 - psi_pad, len(tmp_jphi))
             plt.figure()
             plt.plot(psi_N, matched_input_jphi/1e6, linestyle='--', label=r'Input $j_\phi$')
-            plt.plot(psi_N, tmp_jphi/1e6, label=r'Output $j_\phi$')
+            plt.plot(_psi_plot, tmp_jphi/1e6, label=r'Output $j_\phi$')
             plt.title(f'Iteration {n}')#', Ip error: {Ip_err:.3f} %')
             plt.legend()
             plt.xlabel(r'$\hat \psi$')
