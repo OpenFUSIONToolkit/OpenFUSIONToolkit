@@ -2414,6 +2414,10 @@ DO i=1,ncoils
   !---Get coil set name
   IF(xml_hasAttribute(coil_set,"name"))THEN
     CALL xml_read_attribute(coil_set,"name",str_tmp,iostat=ierr)
+    IF(ierr/=0)THEN
+      WRITE(coil_ind,'(I6)')i
+      CALL oft_xml_abort('Error reading "name" for coil set '//coil_ind,'tw_load_coils',__FILE__)
+    END IF
     IF(LEN(str_tmp)>LEN(coil_tmp%name))THEN
       WRITE(*,'(2A,I6,A)')oft_indent,'Coil set name too long for coil set ',i,', truncating'
       coil_tmp%name=str_tmp(1:LEN(coil_tmp%name))
@@ -2427,16 +2431,28 @@ DO i=1,ncoils
   !---Get coil set resistivity per unit length (can be overriden)
   IF(xml_hasAttribute(coil_set,"res_per_len"))THEN
     CALL xml_read_attribute(coil_set,"res_per_len",res_per_len,iostat=ierr)
+    IF(ierr/=0)THEN
+      WRITE(coil_ind,'(I6,2X,I6)')i
+      CALL oft_xml_abort('Error reading "res_per_len" for coil set '//coil_ind,'tw_load_coils',__FILE__)
+    END IF
     coil_tmp%res_per_len=res_per_len
   END IF
   !---Get coil set radius (can be overriden)
   IF(xml_hasAttribute(coil_set,"radius"))THEN
     CALL xml_read_attribute(coil_set,"radius",radius,iostat=ierr)
+    IF(ierr/=0)THEN
+      WRITE(coil_ind,'(I6,2X,I6)')i
+      CALL oft_xml_abort('Error reading "radius" for coil set '//coil_ind,'tw_load_coils',__FILE__)
+    END IF
     coil_tmp%radius=radius
   END IF
   !---Get sensor flag
   IF(xml_hasAttribute(coil_set,"sens_mask"))THEN
     CALL xml_read_attribute(coil_set,"sens_mask",coil_tmp%sens_mask,iostat=ierr)
+    IF(ierr/=0)THEN
+      WRITE(coil_ind,'(I6,2X,I6)')i
+      CALL oft_xml_abort('Error reading "sens_mask" for coil set '//coil_ind,'tw_load_coils',__FILE__)
+    END IF
     IF(coil_tmp%sens_mask)THEN
       IF(oft_debug_print(2))WRITE(*,'(2A,I6,A)')oft_indent,'Masking coil ',i,' from sensors'
       nmasked=nmasked+1
@@ -2450,7 +2466,7 @@ DO i=1,ncoils
       CALL xml_read_attribute(coil,"path",str_tmp,iostat=ierr)
       IF(ierr/=0)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
-        CALL oft_abort('Error reading "path" in coil '//coil_ind,'tw_load_coils',__FILE__)
+        CALL oft_xml_abort('Error reading "path" in coil '//coil_ind,'tw_load_coils',__FILE__)
       END IF
       ipath=INDEX(str_tmp,":")
       IF(ipath==0)THEN
@@ -2479,6 +2495,10 @@ DO i=1,ncoils
       !---Read number of points
       IF(xml_hasAttribute(coil,"npts"))THEN
         CALL xml_read_attribute(coil,"npts",coil_tmp%coils(j)%npts,iostat=ierr)
+        IF(ierr/=0)THEN
+          WRITE(coil_ind,'(I6,2X,I6)')i,j
+          CALL oft_xml_abort('Error reading "npts" for coil '//coil_ind,'tw_load_coils',__FILE__)
+        END IF
         coil_type=2
       ELSE
         coil_type=1
@@ -2488,7 +2508,7 @@ DO i=1,ncoils
           CALL xml_read_content(coil,pts_tmp,iostat=ierr)
           IF(ierr/=0)THEN
             WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_abort('Error reading circular coil '//coil_ind,'tw_load_coils',__FILE__)
+            CALL oft_xml_abort('Error reading circular coil '//coil_ind,'tw_load_coils',__FILE__)
           END IF
           IF(SIZE(pts_tmp,1)/=2)THEN
             WRITE(coil_ind,'(I6,2X,I6)')i,j
@@ -2506,7 +2526,7 @@ DO i=1,ncoils
           CALL xml_read_content(coil,coil_tmp%coils(j)%pts,iostat=ierr)
           IF(ierr/=0)THEN
             WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_abort('Error reading coil '//coil_ind,'tw_load_coils',__FILE__)
+            CALL oft_xml_abort('Error reading coil '//coil_ind,'tw_load_coils',__FILE__)
           END IF
           IF(SIZE(coil_tmp%coils(j)%pts,1)/=3)THEN
             WRITE(coil_ind,'(I6,2X,I6)')i,j
@@ -2519,11 +2539,29 @@ DO i=1,ncoils
       END SELECT
     END IF
     !---Get scale factor
-    IF(xml_hasAttribute(coil,"scale"))CALL xml_read_attribute(coil,"scale",coil_tmp%scales(j),iostat=ierr)
+    IF(xml_hasAttribute(coil,"scale"))THEN
+      CALL xml_read_attribute(coil,"scale",coil_tmp%scales(j),iostat=ierr)
+      IF(ierr/=0)THEN
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
+        CALL oft_xml_abort('Error reading "scale" for coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
+    END IF
     !---Get coil resistivity per unit length
-    IF(xml_hasAttribute(coil,"res_per_len"))CALL xml_read_attribute(coil,"res_per_len",coil_tmp%res_per_len(j),iostat=ierr)
+    IF(xml_hasAttribute(coil,"res_per_len"))THEN
+      CALL xml_read_attribute(coil,"res_per_len",coil_tmp%res_per_len(j),iostat=ierr)
+      IF(ierr/=0)THEN
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
+        CALL oft_xml_abort('Error reading "res_per_len" for coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
+    END IF
     !---Get coil radius
-    IF(xml_hasAttribute(coil,"radius"))CALL xml_read_attribute(coil,"radius",coil_tmp%radius(j),iostat=ierr)
+    IF(xml_hasAttribute(coil,"radius"))THEN
+      CALL xml_read_attribute(coil,"radius",coil_tmp%radius(j),iostat=ierr)
+      IF(ierr/=0)THEN
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
+        CALL oft_xml_abort('Error reading "radius" for coil '//coil_ind,'tw_load_coils',__FILE__)
+      END IF
+    END IF
   END DO
   IF(ASSOCIATED(coil_list%nodes))DEALLOCATE(coil_list%nodes)
 END DO
@@ -2793,7 +2831,7 @@ IF(ierr==0)THEN
   WRITE(*,*)
   WRITE(*,'(2A)')oft_indent,'Loading region surface resistivity:'
   CALL xml_read_content(eta_group,eta_tmp,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort('Error reading eta values','tw_load_eta',__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort('Error reading eta values','tw_load_eta',__FILE__)
   IF(SIZE(eta_tmp)/=SIZE(self%Eta_surf))CALL oft_abort('Eta size mismatch','tw_load_eta',__FILE__)
   IF(ANY(eta_tmp<=0.d0))CALL oft_abort('All "eta" values must be > 0','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
@@ -2869,7 +2907,7 @@ CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr)
 IF(ierr==0)THEN
   WRITE(*,'(2A)')oft_indent,'Loading sensor mask:'
   CALL xml_read_content(sens_node,sens_mask_tmp,iostat=ierr)
-  IF(ierr/=0)CALL oft_abort('Error reading sensor mask values','tw_load_eta',__FILE__)
+  IF(ierr/=0)CALL oft_xml_abort('Error reading sensor mask values','tw_load_eta',__FILE__)
   IF(SIZE(sens_mask_tmp)/=SIZE(self%sens_mask))CALL oft_abort('Sensor mask size mismatch','tw_load_eta',__FILE__)
   DO i=1,nreg_mesh
     WRITE(*,'(A,I4,L1)')oft_indent,i,sens_mask_tmp(i)

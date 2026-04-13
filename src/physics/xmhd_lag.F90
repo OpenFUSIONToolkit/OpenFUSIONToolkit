@@ -2481,11 +2481,9 @@ IF(xmhd_root_node%associated())THEN
       reg_node=>reg_nodes%nodes(i+1)!%this
       !---
       CALL xml_get_element(reg_node,"id",inner_node,ierr)
-      IF(ierr/=0)CALL oft_abort("Error reading regions IDs for group", &
-        "xmhd_setup_regions",__FILE__)
+      IF(ierr/=0)CALL oft_xml_abort("Error reading regions IDs for group","xmhd_setup_regions",__FILE__)
       CALL xml_read_content(inner_node,regs,iostat=ierr)
-      IF(ierr/=0)CALL oft_abort("Error reading values in id group", &
-      "xmhd_setup_regions",__FILE__)
+      IF(ierr/=0)CALL oft_xml_abort("Error reading values in id group","xmhd_setup_regions",__FILE__)
       ! IF(.NOT.ALLOCATED(regs))CALL oft_abort("Zero values given in id group", &
       ! "xmhd_setup_regions",__FILE__)
       ! IF(SIZE(regs)>mesh%nreg)CALL oft_abort("Too many id values specified","xmhd_setup_regions", &
@@ -2494,7 +2492,7 @@ IF(xmhd_root_node%associated())THEN
       !---
       CALL xml_get_element(reg_node,"eta",inner_node,ierr)
       CALL xml_read_content(inner_node,eta,iostat=ierr)
-      IF(ierr/=0)CALL oft_abort("Error reading values in eta group", &
+      IF(ierr/=0)CALL oft_xml_abort("Error reading values in eta group", &
       "xmhd_setup_regions",__FILE__)
       ! IF(ierr>0)CALL oft_abort("Too many eta values specified","xmhd_setup_regions", &
       ! __FILE__)
@@ -2505,8 +2503,8 @@ IF(xmhd_root_node%associated())THEN
       IF(ierr/=0)THEN
         reg_type=2.d0
       ELSE
-        ! inner_node=>xml_item(inner_nodes,0)
-        ! CALL xml_read_content(inner_node,reg_type,iostat=ierr)
+        CALL xml_read_content(inner_node,reg_type,iostat=ierr)
+        IF(ierr/=0)CALL oft_xml_abort("Error reading values in type group","xmhd_setup_regions",__FILE__)
         ! IF(nread_eta==0)CALL oft_abort("Zero values given in type group", &
         ! "xmhd_setup_regions",__FILE__)
         ! IF(ierr>0)CALL oft_abort("Too many type values specified","xmhd_setup_regions", &

@@ -6,6 +6,8 @@ on:
       - main
       - cov_debug
   pull_request:
+    paths:
+      - .github/workflows/cov_build.yaml
     types:
       - ready_for_review
 

@@ -17,8 +17,8 @@ class tokamaker_recon_settings_struct(c_struct):
 
      - `fitI` Adjust \f$ F*F' \f$ parameterization coefficients?
      - `fitP` Adjust \f$ P' \f$ parameterization coefficients?
-     - `fitPnorm` Adjust \f$ P' \f$ scale factor?
-     - `fitAlam` Adjust \f$ F*F' \f$ scale factor?
+     - `fit_Pscale` Adjust \f$ P' \f$ scale factor?
+     - `fit_FFPscale` Adjust \f$ F*F' \f$ scale factor?
      - `fitR0` Utilize and adjust \f$ R_0 \f$ constraint?
      - `fitV0` Utilize and adjust \f$ Z_0 \f$ constraint?
      - `fitCoils` Allow adjustment of PF coil currents?
@@ -30,8 +30,8 @@ class tokamaker_recon_settings_struct(c_struct):
     '''
     _fields_ = [("fitI", c_bool),
                 ("fitP", c_bool),
-                ("fitPnorm", c_bool),
-                ("fitAlam", c_bool),
+                ("fit_Pscale", c_bool),
+                ("fit_FFPscale", c_bool),
                 ("fitR0", c_bool),
                 ("fitV0", c_bool),
                 ("fitCoils", c_bool),
@@ -51,8 +51,8 @@ def tokamaker_recon_default_settings(oft_env):
     settings = tokamaker_recon_settings_struct()
     settings.fitI = False
     settings.fitP = False
-    settings.fitPnorm = True
-    settings.fitAlam = True
+    settings.fit_Pscale = True
+    settings.fit_FFPscale = True
     settings.fitR0 = False
     settings.fitV0 = False
     settings.fitCoils = False
@@ -521,15 +521,15 @@ class reconstruction():
         @result Error flag
         '''
         # Check for possibly conflicting constraints
-        if self._tMaker_obj._isoflux_targets is not None:
-            oft_warning('Removing conflicting isoflux targets from equilibrium object via `.set_isoflux(None)`')
-            self._tMaker_obj.set_isoflux(None)
-        if self._tMaker_obj._flux_targets is not None:
-            oft_warning('Removing conflicting flux targets from equilibrium object via `.set_flux(None,None)`')
-            self._tMaker_obj.set_flux(None,None)
-        if self._tMaker_obj._saddle_targets is not None:
-            oft_warning('Removing conflicting saddle targets from equilibrium object via `.set_saddles(None)`')
-            self._tMaker_obj.set_saddles(None)
+        if self._tMaker_obj._tMaker_equil.Isoflux_constraints is not None:
+            oft_warning('Removing conflicting isoflux constraints from equilibrium object via `.set_isoflux_constraints(None)`')
+            self._tMaker_obj.set_isoflux_constraints(None)
+        if self._tMaker_obj._tMaker_equil.Psi_constraints is not None:
+            oft_warning('Removing conflicting Psi constraints from equilibrium object via `.set_psi_constraints(None,None)`')
+            self._tMaker_obj.set_psi_constraints(None,None)
+        if self._tMaker_obj._tMaker_equil.Saddle_constraints is not None:
+            oft_warning('Removing conflicting saddle targets from equilibrium object via `.set_saddle_constraints(None)`')
+            self._tMaker_obj.set_saddle_constraints(None)
         # Modify input file
         self.write_fit_in()
         self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['linearized_fit'] = 'T' if linearized_fit else 'F'
