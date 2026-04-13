@@ -32,3 +32,6 @@ run_test cyl cyl_forces.ipynb
 run_test torus torus_bnorm_mode.ipynb
 run_test torus torus_freq_response.ipynb
 run_test torus torus_time_domain.ipynb
+
+# XML example
+run_test xml ex_oft_creation.ipynb

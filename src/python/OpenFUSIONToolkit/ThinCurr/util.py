@@ -24,7 +24,7 @@ class torus_fourier_sensor():
             raise ValueError('Helicity should be either 1 or -1')
         self.major_radius = major_radius
         self.helicity = helicity
-        if radial_positions[0] == radial_positions[-1] and axial_positions[0] == axial_positions[-1]:
+        if (abs(radial_positions[0] - radial_positions[-1]) < 1e-13) or (abs(axial_positions[0] - axial_positions[-1]) < 1e-13):
             self.radial_positions =  radial_positions[0:-1]
             self.axial_positions = axial_positions[0:-1]
         else:
@@ -257,14 +257,13 @@ class torus_fourier_sensor():
         @param scale The scaling of the values in the file
         @param hamada_dphi Hamada phase shifts [ntheta]
         '''
-            
-        if hamada_dphi is not None and hamada_dphi[0] == hamada_dphi[-1]:
-            hamada_dphi = hamada_dphi[0:-1]
 
         B = self.get_B_mesh(t)
         if hamada_dphi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
         else:
+            if abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
+                hamada_dphi = hamada_dphi[0:-1]
             B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
         
         B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
@@ -424,10 +423,13 @@ class torus_fourier_sensor():
             n_modes = np.fft.fftfreq(self.nphi)*self.nphi
             toroidal_harmonics=np.fft.fft(B_n,axis=1,norm="forward")
             # Apply phase shift
-            if hamada_dphi is not None and len(hamada_dphi) == len(self.radial_positions):
-                toroidal_harmonics *= np.exp(-1j*np.outer(hamada_dphi,n_modes))
-            elif hamada_dphi is not None:
-                raise ValueError('The hamada_dphi input should have the same dimension as the radial/axial positions')
+            if hamada_dphi is not None:
+                if abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
+                    hamada_dphi = hamada_dphi[0:-1]
+                if len(hamada_dphi) == len(self.radial_positions):
+                    toroidal_harmonics *= np.exp(-1j*np.outer(hamada_dphi,n_modes))
+                else:
+                    raise ValueError('The hamada_dphi input should have the same dimension as the radial/axial positions')
             toroidal_harmonics *= 2.0
             toroidal_harmonics[:,0] /= 2.0
             if len(n_modes)%2==0:
@@ -516,7 +518,9 @@ class torus_fourier_sensor():
             if hamada_dphi is None:
                 B_n_fft, n_modes, m_modes = self.fft2(B)
             else:
-                B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
+                if abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
+                    hamada_dphi = hamada_dphi[0:-1]
+                B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)    
 
             B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
 
@@ -561,6 +565,8 @@ class torus_fourier_sensor():
         if hamada_dphi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
         else:
+            if abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
+                hamada_dphi = hamada_dphi[0:-1]
             B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
         
         B_n_sorted, n_modes_sorted, m_modes_sorted = self.sort_fft_indices_and_mesh(B_n_fft,n_modes,m_modes)
@@ -604,8 +610,6 @@ class torus_fourier_sensor():
         '''
 
         harmonics = np.array([harmonics]).flatten()
-        if hamada_dphi is not None and hamada_dphi[0] == hamada_dphi[-1]:
-            hamada_dphi = hamada_dphi[0:-1]
         if x_type not in ['modes','angles']:
             raise ValueError("Unsupported x variable is provided. Accepts 'modes' and 'angles' only.")
         elif x_type == 'modes' and (x_mode_min is None or x_mode_max is None):
@@ -615,6 +619,8 @@ class torus_fourier_sensor():
         if hamada_dphi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
         else:
+            if abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
+                hamada_dphi = hamada_dphi[0:-1]
             B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
 
         import matplotlib.pyplot as plt

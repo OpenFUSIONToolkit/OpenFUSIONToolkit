@@ -21,12 +21,9 @@ use oft_lu, only: lapack_matinv
 !---
 use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 use oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
-use oft_gs, only: gs_eq, gs_dflux, gs_itor_nl, gs_psi2r, &
+use oft_gs, only: gs_equil, gs_dflux, gs_itor_nl, gs_psi2r, &
   gs_err_reason, gs_test_bounds, gs_get_qprof, gs_epsilon
-#ifdef OFT_TOKAMAKER_LEGACY
-use oft_gs, only: gs_get_cond_weights, gs_set_cond_weights, gs_get_cond_scales
-#endif
-use oft_gs_profiles, only: twolam_flux_func
+! use oft_gs_profiles, only: twolam_flux_func
 use tracing_2d, only: active_tracer, tracer, set_tracer
 use mhd_utils, only: mu0
 IMPLICIT NONE
@@ -179,11 +176,11 @@ TYPE :: fit_constraint_ptr
   CLASS(fit_constraint), POINTER :: con => NULL() !< Constraint object
 END TYPE fit_constraint_ptr
 !---
-TYPE(gs_eq), POINTER, PUBLIC :: gs_active => NULL() !< Needs docs
+TYPE(gs_equil), POINTER, PUBLIC :: gs_active => NULL() !< Needs docs
 REAL(8), ALLOCATABLE :: cofs_best(:) !< Needs docs
 REAL(8) :: chi_best = 1.d99 !< Needs docs
-REAL(8) :: alam_best = 1.d99 !< Needs docs
-REAL(8) :: pnorm_best = 1.d99 !< Needs docs
+REAL(8) :: ffp_scale_best = 1.d99 !< Needs docs
+REAL(8) :: p_scale_best = 1.d99 !< Needs docs
 REAL(8) :: vcont_best = 1.d99 !< Needs docs
 CLASS(oft_vector), POINTER :: psi_best => NULL() !< Needs docs
 REAL(8), ALLOCATABLE :: cofs_scale(:) !< Needs docs
@@ -196,8 +193,8 @@ INTEGER(4), PRIVATE :: geval_count = 0 !< Needs docs
 LOGICAL :: fit_pm = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fit_I = .TRUE. !< Needs docs
 LOGICAL, PRIVATE :: fit_P = .TRUE. !< Needs docs
-LOGICAL, PRIVATE :: fit_Pnorm = .TRUE. !< Needs docs
-LOGICAL, PRIVATE :: fit_Alam = .FALSE. !< Needs docs
+LOGICAL, PRIVATE :: fit_Pscale = .TRUE. !< Needs docs
+LOGICAL, PRIVATE :: fit_FFPscale = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fit_R0 = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fit_V0 = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fit_coils = .FALSE. !< Needs docs
@@ -212,14 +209,14 @@ CONTAINS
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering)
-TYPE(gs_eq), TARGET, INTENT(inout) :: gs !< Needs docs
+SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fit_p_scale,fit_ffp_scale,fitR0,fitV0,fitCoils,fitF0,fixedCentering)
+TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: inpath !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: outpath !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitI !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitP !< Needs docs
-LOGICAL, OPTIONAL, INTENT(in) :: fitPnorm !< Needs docs
-LOGICAL, OPTIONAL, INTENT(in) :: fitAlam !< Needs docs
+LOGICAL, OPTIONAL, INTENT(in) :: fit_p_scale !< Needs docs
+LOGICAL, OPTIONAL, INTENT(in) :: fit_ffp_scale !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitR0 !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitV0 !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitCoils !< Needs docs
@@ -238,10 +235,10 @@ fit_I = .TRUE.
 IF(PRESENT(fitI))fit_I=fitI
 fit_P = .TRUE.
 IF(PRESENT(fitP))fit_P=fitP
-fit_Pnorm = .TRUE.
-IF(PRESENT(fitPnorm))fit_Pnorm=fitPnorm
-fit_Alam = .FALSE.
-IF(PRESENT(fitAlam))fit_alam=fitAlam
+fit_Pscale = .TRUE.
+IF(PRESENT(fit_p_scale))fit_Pscale=fit_p_scale
+fit_FFPscale = .FALSE.
+IF(PRESENT(fit_ffp_scale))fit_FFPscale=fit_ffp_scale
 fit_R0 = .FALSE.
 IF(PRESENT(fitR0))fit_R0=fitR0
 fit_V0 = .FALSE.
@@ -252,13 +249,13 @@ fit_F0 = .FALSE.
 IF(PRESENT(fitF0))fit_F0=fitF0
 fixed_centering = .FALSE.
 IF(PRESENT(fixedCentering))fixed_centering=fixedCentering
-IF(fit_Pnorm.AND.fit_R0)CALL oft_abort('R0 or Pnorm fitting cannot be used together', &
+IF(fit_Pscale.AND.fit_R0)CALL oft_abort('R0 or p_scale fitting cannot be used together', &
 'fit_gs',__FILE__)
-IF(fit_Pnorm.AND.gs%R0_target>0.d0)THEN
+IF(fit_Pscale.AND.gs%R0_target>0.d0)THEN
   gs%R0_target=-1.d0
   CALL oft_warn('P_norm adjustment requested, disabling R0 target')
 END IF
-IF(fit_Pnorm.AND.gs%pax_target>0.d0)THEN
+IF(fit_Pscale.AND.gs%pax_target>0.d0)THEN
   gs%pax_target=-1.d0
   CALL oft_warn('P_norm adjustment requested, disabling P_ax target')
 END IF
@@ -269,46 +266,32 @@ WRITE(*,'(A)')'*** Loading fit constraints ***'
 CALL fit_load(inpath,conlist)
 !---Count coefficients
 ncofs=0
-IF(gs%free)THEN
-  IF(fit_alam.OR.(gs_active%Itor_target>0.d0))ncofs = ncofs+1
+IF(gs%device%free)THEN
+  IF(fit_FFPscale.OR.(gs_active%Itor_target>0.d0))ncofs = ncofs+1
 ELSE
   ncofs=ncofs+1
-  IF(fit_alam)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
+  IF(fit_FFPscale)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
   'fit_gs',__FILE__)
 END IF
 IF(gs_active%I%ncofs>0.AND.fit_I)THEN
   ncofs = ncofs+gs_active%I%ncofs
 END IF
-IF(fit_Pnorm.OR.fit_R0)ncofs = ncofs+1
+IF(fit_Pscale.OR.fit_R0)ncofs = ncofs+1
 IF(fit_V0)ncofs = ncofs + 1
 IF(gs_active%P%ncofs>0.AND.fit_P)THEN
   ncofs = ncofs+gs_active%P%ncofs
 END IF
 ncond_active = 0
-#ifdef OFT_TOKAMAKER_LEGACY
-IF(gs_active%ncond_regs>0)THEN
-  DO i=1,gs_active%ncond_regs
-    IF(gs_active%cond_regions(i)%pair<0)THEN
-      DO j=1,gs_active%cond_regions(i)%neigs
-        IF(gs_active%cond_regions(i)%fixed(j))CYCLE
-        ncond_active=ncond_active+1
-      END DO
-    END IF
-  END DO
-  WRITE(*,*)'Fixed',ncond_active,gs_active%ncond_eigs
-  ncofs = ncofs + ncond_active !gs_active%ncond_eigs
-END IF
-#endif
-IF(fit_coils)ncofs = ncofs + gs_active%ncoils
+IF(fit_coils)ncofs = ncofs + gs_active%device%ncoils
 IF(fit_F0)ncofs = ncofs + 1
 !---
 ALLOCATE(cofs(ncofs),cofs_scale(ncofs))
 cofs_scale=1.0
 offset=0
-IF(gs%free)THEN
-  IF(fit_alam)THEN
+IF(gs%device%free)THEN
+  IF(fit_FFPscale)THEN
     offset=1
-    cofs(1)=gs_active%alam
+    cofs(1)=gs_active%ffp_scale
   ELSE IF(gs_active%Itor_target>0.d0)THEN
     offset=1
     cofs(1)=gs_active%Itor_target
@@ -321,7 +304,7 @@ ELSE
     cofs(1)=gs_active%psiscale
     cofs_scale(1)=1.d0/ABS(gs_active%psiscale)
   END IF
-  IF(fit_alam)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
+  IF(fit_FFPscale)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
   'fit_gs',__FILE__)
 END IF
 IF(gs_active%I%ncofs>0.AND.fit_I)THEN
@@ -330,12 +313,12 @@ IF(gs_active%I%ncofs>0.AND.fit_I)THEN
   offset = je
 END IF
 IF(fit_R0)THEN
-  cofs(offset+1)=gs_active%R0_target-gs_active%rmin
-  cofs_scale(offset+1)=5.d0/(gs_active%spatial_bounds(2,1)-gs_active%spatial_bounds(1,1))
+  cofs(offset+1)=gs_active%R0_target-gs_active%device%rmin
+  cofs_scale(offset+1)=5.d0/(gs_active%device%spatial_bounds(2,1)-gs_active%device%spatial_bounds(1,1))
   offset=offset+1
-ELSE IF(fit_Pnorm)THEN
-  cofs(offset+1)=gs_active%pnorm
-  cofs_scale(offset+1)=1.d0/MAX(gs_active%pnorm,1.d-2)
+ELSE IF(fit_Pscale)THEN
+  cofs(offset+1)=gs_active%p_scale
+  cofs_scale(offset+1)=1.d0/MAX(gs_active%p_scale,1.d-2)
   offset=offset+1
 ELSE IF(gs_active%estore_target>0.d0)THEN
   cofs(offset+1)=gs_active%estore_target
@@ -344,7 +327,7 @@ ELSE IF(gs_active%estore_target>0.d0)THEN
 END IF
 IF(fit_V0)THEN
   cofs(offset+1)=gs_active%V0_target
-  cofs_scale(offset+1)=40.d0/(gs_active%spatial_bounds(2,2)-gs_active%spatial_bounds(1,2))
+  cofs_scale(offset+1)=40.d0/(gs_active%device%spatial_bounds(2,2)-gs_active%device%spatial_bounds(1,2))
   offset=offset+1
 END IF
 IF(gs_active%P%ncofs>0.AND.fit_P)THEN
@@ -352,18 +335,10 @@ IF(gs_active%P%ncofs>0.AND.fit_P)THEN
   CALL gs_active%P%get_cofs(cofs(js+1:je))
   offset = je
 END IF
-#ifdef OFT_TOKAMAKER_LEGACY
-IF(ncond_active>0)THEN
-  js = offset; je = offset+ncond_active
-  CALL gs_get_cond_weights(gs_active,cofs(js+1:je),.TRUE.)
-  CALL gs_get_cond_scales(gs_active,cofs_scale(js+1:je),.TRUE.)
-  offset = je
-END IF
-#endif
 IF(fit_coils)THEN
-  js = offset; je = offset+gs_active%ncoils
-  ALLOCATE(curr_in(gs_active%ncoils))
-  DO i=1,gs_active%ncoils
+  js = offset; je = offset+gs_active%device%ncoils
+  ALLOCATE(curr_in(gs_active%device%ncoils))
+  DO i=1,gs_active%device%ncoils
     curr_in(i)=gs_active%coil_currs(i)
     cofs(js+i)=0.d0
     cofs_scale(js+i) = 1.0/ABS(gs_active%coil_currs(i))
@@ -412,8 +387,8 @@ CLOSE(io_unit)
 IF(ierr>0)CALL oft_abort('Error parsing "gs_fit_options" in input file.','fit_gs',__FILE__)
 !---
 chi_best=1.d99
-alam_best = 1.d99
-pnorm_best = 1.d99
+ffp_scale_best = 1.d99
+p_scale_best = 1.d99
 vcont_best = 1.d99
 ALLOCATE(cofs_best(ncofs))
 cofs_best=cofs
@@ -425,7 +400,7 @@ IF(file_exists)THEN
   READ(io_unit,*)i
   IF(i==ncofs)THEN
     READ(io_unit,*)cofs
-    READ(io_unit,*)gs_active%pnorm,gs_active%vcontrol_val
+    READ(io_unit,*)gs_active%p_scale,gs_active%vcontrol_val
   END IF
   CLOSE(io_unit)
 ENDIF
@@ -435,8 +410,8 @@ IF(maxfev>0)THEN
   !---Initialize
   CALL fit_error(ncons,ncofs,cofs,error,info)
   ! gs_active%Itor_target=-1.d0
-  ! IF(fit_Alam)cofs(1)=gs_active%alam
-  IF(gs_active%ierr<0)CALL oft_abort('Initial equilibrium solve failed to converge','fit_gs',__FILE__)
+  ! IF(fit_FFPscale)cofs(1)=gs_active%ffp_scale
+  IF(gs_active%device%ierr<0)CALL oft_abort('Initial equilibrium solve failed to converge','fit_gs',__FILE__)
   !---
   call lmder(fit_error_grad,ncons,ncofs,cofs,error,fjac,ldfjac, &
              ftol,xtol,gtol,maxfev,cofs_scale,mode,factor,nprint,info,nfev,njev, &
@@ -450,7 +425,7 @@ IF(maxfev>0)THEN
   WRITE(*,*)
   IF(SQRT(SUM(error**2))>chi_best)THEN
     cofs=cofs_best
-    gs_active%pnorm=pnorm_best
+    gs_active%p_scale=p_scale_best
     gs_active%vcontrol_val=vcont_best
     CALL gs_active%psi%add(0.d0,1.d0,psi_best)
   END IF
@@ -473,7 +448,7 @@ CLOSE(io_unit)
 OPEN(NEWUNIT=io_unit,FILE=TRIM(outpath)//'_cofs')
 WRITE(io_unit,*)ncofs
 WRITE(io_unit,*)cofs
-WRITE(io_unit,*)gs_active%pnorm,gs_active%vcontrol_val
+WRITE(io_unit,*)gs_active%p_scale,gs_active%vcontrol_val
 CLOSE(io_unit)
 !---Cleanup
 CALL psi_best%delete
@@ -588,16 +563,16 @@ logical :: plot_save
 integer(4) :: i,j,js,je,offset,ierr
 real(8) :: rel_err(m),abs_err(m),dx,dxi
 real(8), allocatable :: cof_tmp(:),err_tmp(:)
-real(8), save :: alam_in,pnorm_in,bounds_in(2,2),vcont_in,ip_target_in,estore_target_in
+real(8), save :: ffp_scale_in,p_scale_in,bounds_in(2,2),vcont_in,ip_target_in,estore_target_in
 real(8), allocatable, save :: cofs_in(:)
 class(oft_vector), pointer, save :: psi_center => NULL()
 CHARACTER(LEN=40) :: err_reason
 IF(.NOT.ASSOCIATED(psi_center))THEN
   ALLOCATE(cofs_in(n))
   cofs_in=cofs
-  alam_in=gs_active%alam
+  ffp_scale_in=gs_active%ffp_scale
   ip_target_in=gs_active%Itor_target
-  pnorm_in=gs_active%pnorm
+  p_scale_in=gs_active%p_scale
   estore_target_in=gs_active%estore_target
   ! bounds_in=gs_active%spatial_bounds
   bounds_in(:,1)=gs_active%plasma_bounds
@@ -626,10 +601,10 @@ IF(iflag==1)THEN
   END IF
   !---
   offset=0
-  IF(gs_active%free)THEN
-    IF(fit_alam)THEN
+  IF(gs_active%device%free)THEN
+    IF(fit_FFPscale)THEN
       offset=1
-      gs_active%alam=cofs(1)
+      gs_active%ffp_scale=cofs(1)
     ELSE IF(gs_active%Itor_target>0.d0)THEN
       offset=1
       gs_active%Itor_target=cofs(1)
@@ -661,10 +636,10 @@ IF(iflag==1)THEN
     offset = je
   END IF
   IF(fit_R0)THEN
-    gs_active%R0_target=cofs(offset+1)+gs_active%rmin
+    gs_active%R0_target=cofs(offset+1)+gs_active%device%rmin
     offset=offset+1
-  ELSE IF(fit_Pnorm)THEN
-    gs_active%pnorm=cofs(offset+1)
+  ELSE IF(fit_Pscale)THEN
+    gs_active%p_scale=cofs(offset+1)
     offset=offset+1
   ELSE IF(gs_active%estore_target>0.d0)THEN
     gs_active%estore_target=cofs(offset+1)
@@ -692,25 +667,18 @@ IF(iflag==1)THEN
     END IF
     offset = je
   END IF
-#ifdef OFT_TOKAMAKER_LEGACY
-  IF(ncond_active>0)THEN
-    js = offset; je = offset+ncond_active
-    CALL gs_set_cond_weights(gs_active,cofs(js+1:je),.TRUE.)
-    offset = je
-  END IF
-#endif
   IF(fit_coils)THEN
-    js = offset; je = offset+gs_active%ncoils
-    DO i=1,gs_active%ncoils
+    js = offset; je = offset+gs_active%device%ncoils
+    DO i=1,gs_active%device%ncoils
       gs_active%coil_currs(i)=cofs(js+i)+curr_in(i)
     END DO
     offset = je
   END IF
   IF(fit_F0)gs_active%I%f_offset = cofs(offset+1)
   ! !---Centering
-  ! alam_in=gs_active%alam
+  ! ffp_scale_in=gs_active%ffp_scale
   ! ip_target_in=gs_active%Itor_target
-  ! pnorm_in=gs_active%pnorm
+  ! p_scale_in=gs_active%p_scale
   ! estore_target_in=gs_active%estore_target
   ! bounds_in=gs_active%spatial_bounds
   ! vcont_in=gs_active%vcontrol_val
@@ -739,14 +707,14 @@ IF(iflag==1)THEN
     IF(SQRT(SUM(err**2))<chi_best)THEN
       chi_best=SQRT(SUM(err**2))
       cofs_best=cofs
-      alam_best=gs_active%alam
-      pnorm_best=gs_active%pnorm
+      ffp_scale_best=gs_active%ffp_scale
+      p_scale_best=gs_active%p_scale
       vcont_best=gs_active%vcontrol_val
       CALL psi_best%add(0.d0,1.d0,gs_active%psi)
     END IF
-    alam_in=gs_active%alam
+    ffp_scale_in=gs_active%ffp_scale
     ip_target_in=gs_active%Itor_target
-    pnorm_in=gs_active%pnorm
+    p_scale_in=gs_active%p_scale
     estore_target_in=gs_active%estore_target
     ! bounds_in=gs_active%spatial_bounds
     bounds_in(:,1)=gs_active%plasma_bounds
@@ -758,16 +726,16 @@ IF(iflag==1)THEN
     IF(ierr<0)THEN
       WRITE(*,'(3A)')oft_indent,'Step Failed: ',TRIM(err_reason)
     END IF
-    WRITE(*,'(2A,ES11.3)')oft_indent,'Alam              =',gs_active%alam
-    WRITE(*,'(2A,ES11.3)')oft_indent,'P_scale           =',gs_active%pnorm
+    WRITE(*,'(2A,ES11.3)')oft_indent,'FFp_scale         =',gs_active%ffp_scale
+    WRITE(*,'(2A,ES11.3)')oft_indent,'P_scale           =',gs_active%p_scale
     IF(gs_active%R0_target>0.d0)THEN
       WRITE(*,'(2A,ES11.3)')oft_indent,'R0_target         =',gs_active%R0_target
     END IF
     IF(gs_active%V0_target>-1.d98)THEN
       WRITE(*,'(2A,ES11.3)')oft_indent,'V0_target         =',gs_active%V0_target
     END IF
-    IF(gs_active%free)THEN
-      IF(fit_alam)THEN
+    IF(gs_active%device%free)THEN
+      IF(fit_FFPscale)THEN
         offset=offset+1
       ELSE IF(gs_active%Itor_target>0.d0)THEN
         WRITE(*,'(2A,ES11.3)')oft_indent,'Itor_target       =',gs_active%Itor_target/mu0
@@ -790,7 +758,7 @@ IF(iflag==1)THEN
       WRITE(*,*)
       offset = je
     END IF
-    IF(fit_pnorm.OR.fit_R0.OR.(gs_active%estore_target>0.d0))offset=offset+1
+    IF(fit_Pscale.OR.fit_R0.OR.(gs_active%estore_target>0.d0))offset=offset+1
     IF(fit_V0)offset=offset+1
     IF(gs_active%P%ncofs>0.AND.fit_P)THEN
       js = offset; je = offset+gs_active%P%ncofs
@@ -811,7 +779,7 @@ IF(iflag==1)THEN
       offset=je
     END IF
     IF(fit_coils)THEN
-      js = offset; je = offset+gs_active%ncoils
+      js = offset; je = offset+gs_active%device%ncoils
       WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'Coil currents [%]  ='
       DO i=js+1,je
         WRITE(*,'(100ES11.3)',ADVANCE="NO")cofs(i)/curr_in(i-js)
@@ -845,18 +813,18 @@ ELSE
     END IF
   END IF
   CALL oft_increase_indent
-  plot_save=gs_active%plot_final; gs_active%plot_final=.FALSE.
+  plot_save=gs_active%device%plot_final; gs_active%device%plot_final=.FALSE.
   !---
   offset=0
   dxi = 1.d-2
-  IF(gs_active%free)THEN
-    IF(fit_alam)THEN
+  IF(gs_active%device%free)THEN
+    IF(fit_FFPscale)THEN
       CALL reset_eq
       dx = dxi/cofs_scale(offset+1)
-      gs_active%alam=cofs(offset+1) + dx
+      gs_active%ffp_scale=cofs(offset+1) + dx
       CALL run_err(.FALSE.,jac_mat(:,offset+1),m,ierr)
       jac_mat(:,offset+1)=(jac_mat(:,offset+1)-err)/dx
-      gs_active%alam=cofs(offset+1)
+      gs_active%ffp_scale=cofs(offset+1)
       offset=1
     ELSE IF(gs_active%Itor_target>0.d0)THEN
       CALL reset_eq
@@ -912,18 +880,18 @@ ELSE
   IF(fit_R0)THEN
     CALL reset_eq
     dx = 2.0*dxi/cofs_scale(offset+1)
-    gs_active%R0_target=cofs(offset+1)+gs_active%rmin + dx
+    gs_active%R0_target=cofs(offset+1)+gs_active%device%rmin + dx
     CALL run_err(.FALSE.,jac_mat(:,offset+1),m,ierr)
     jac_mat(:,offset+1)=(jac_mat(:,offset+1)-err)/dx
-    gs_active%R0_target=cofs(offset+1)+gs_active%rmin
+    gs_active%R0_target=cofs(offset+1)+gs_active%device%rmin
     offset=offset+1
-  ELSE IF(fit_Pnorm)THEN
+  ELSE IF(fit_Pscale)THEN
     CALL reset_eq
     dx = dxi/cofs_scale(offset+1)
-    gs_active%pnorm=cofs(offset+1) + dx
+    gs_active%p_scale=cofs(offset+1) + dx
     CALL run_err(linearized_fit,jac_mat(:,offset+1),m,ierr)
     jac_mat(:,offset+1)=(jac_mat(:,offset+1)-err)/dx
-    gs_active%pnorm=cofs(offset+1)
+    gs_active%p_scale=cofs(offset+1)
     offset=offset+1
   ELSE IF(gs_active%estore_target>0.d0)THEN
     CALL reset_eq
@@ -972,27 +940,9 @@ ELSE
     ierr=gs_active%P%set_cofs(cof_tmp(1:je-js))
     offset = je
   END IF
-#ifdef OFT_TOKAMAKER_LEGACY
-  IF(ncond_active>0)THEN
-    js = offset; je = offset+ncond_active
-    cof_tmp(1:je-js)=cofs(js+1:je)
-    DO j=1,je-js
-      CALL reset_eq
-      dx = dxi/cofs_scale(js+j)
-      cof_tmp(j)=cofs(js+j) + dx
-      CALL gs_set_cond_weights(gs_active,cof_tmp(1:je-js),.TRUE.)
-      CALL run_err(linearized_fit,jac_mat(:,js+j),m,ierr)
-      jac_mat(:,js+j)=(jac_mat(:,js+j)-err)/dx
-      cof_tmp(j)=cofs(js+j)
-    END DO
-    cof_tmp(1:je-js)=cofs(js+1:je)
-    CALL gs_set_cond_weights(gs_active,cof_tmp(1:je-js),.TRUE.)
-    offset = je
-  END IF
-#endif
   IF(fit_coils)THEN
-    js = offset; je = offset+gs_active%ncoils
-    DO j=1,gs_active%ncoils
+    js = offset; je = offset+gs_active%device%ncoils
+    DO j=1,gs_active%device%ncoils
       CALL reset_eq
       dx = dxi/cofs_scale(js+j)
       gs_active%coil_currs(j)=cofs(js+j)+curr_in(j)+dx
@@ -1011,7 +961,7 @@ ELSE
     gs_active%I%f_offset = cofs(offset+1)
     offset = offset+1
   END IF
-  gs_active%plot_final=plot_save
+  gs_active%device%plot_final=plot_save
   CALL oft_decrease_indent
   IF(ANY(isnan(jac_mat)))THEN
     CALL oft_abort("Gradient failed: NaN detected", "fit_error_grad", __FILE__)
@@ -1024,9 +974,9 @@ DEALLOCATE(cof_tmp,err_tmp)
 CONTAINS
 !
 SUBROUTINE reset_eq
-gs_active%alam=alam_in
+gs_active%ffp_scale=ffp_scale_in
 gs_active%Itor_target=ip_target_in
-gs_active%pnorm=pnorm_in
+gs_active%p_scale=p_scale_in
 gs_active%estore_target=estore_target_in
 ! gs_active%spatial_bounds=bounds_in
 gs_active%plasma_bounds=bounds_in(:,1)
@@ -1041,15 +991,15 @@ INTEGER(4), INTENT(in) :: m
 REAL(8), INTENT(inout) :: err(m)
 INTEGER(4), INTENT(out) :: ierr
 INTEGER(4) :: i
-REAL(8) :: alamin
+REAL(8) :: ffp_scalein
 LOGICAL :: pm_save
 !---
-alamin=gs_active%alam
+ffp_scalein=gs_active%ffp_scale
 pm_save=oft_env%pm; oft_env%pm=fit_pm
 IF(linear)THEN
-  call gs_active%lin_solve(.TRUE.,ierr)
+  call gs_active%device%lin_solve(gs_active,.TRUE.,ierr)
 ELSE
-  call gs_active%solve(ierr)
+  call gs_active%device%solve(gs_active,ierr)
 END IF
 oft_env%pm=pm_save
 IF(ierr<0)THEN
@@ -1057,7 +1007,7 @@ IF(ierr<0)THEN
   DO i=1,m
     err(i)=conlist(i)%con%val*conlist(i)%con%wt*2.d0
   END DO
-  IF(.NOT.gs_active%free)gs_active%alam=alamin
+  IF(.NOT.gs_active%device%free)gs_active%ffp_scale=ffp_scalein
 ELSE
   !$omp parallel do schedule(dynamic,1)
   DO i=1,m
@@ -1099,13 +1049,13 @@ OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,*)n
 !---
 ncons=n
-IF(fit_coils)ncons=n+gs_active%ncoils
+IF(fit_coils)ncons=n+gs_active%device%ncoils
 ! IF(gs_active%V0_target>-1.d98)ncons=ncons+1
 ALLOCATE(cons(ncons))
 j=1
 !---
 IF(fit_coils)THEN
-  DO i=1,gs_active%ncoils
+  DO i=1,gs_active%device%ncoils
     ALLOCATE(coil_con)
     coil_con%coil=i
     coil_con%val=gs_active%coil_currs(i)/mu0
@@ -1183,26 +1133,11 @@ END DO
 CLOSE(io_unit)
 !---Load non-axisymmetric corrections
 j=0
-DO i=1,gs_active%ncond_regs
-  j=MAX(j,gs_active%cond_regions(i)%neigs)
+DO i=1,gs_active%device%ncond_regs
+  j=MAX(j,gs_active%device%cond_regions(i)%neigs)
 END DO
-ALLOCATE(nax_corr(gs_active%ncond_eigs,neddy),nax_tmp(j,neddy))
+ALLOCATE(nax_corr(gs_active%device%ncond_eigs,neddy),nax_tmp(j,neddy))
 nax_corr=0.d0
-#ifdef OFT_TOKAMAKER_LEGACY
-DO i=1,gs_active%ncond_regs
-  nax_tmp=0.d0
-  WRITE(num_str,'(I2.2)')i
-  IF(oft_file_exist('wall_eig.rst'))THEN
-    CALL hdf5_read(nax_tmp(1:gs_active%cond_regions(i)%neigs,:), 'wall_eig.rst', &
-      'corr_'//num_str, success=file_exists)
-    WRITE(*,'(2A,I4)')oft_indent,'Non-axisymmetric corrections found: ',i
-  END IF
-  DO j=1,gs_active%cond_regions(i)%neigs
-    nax_corr(gs_active%cond_regions(i)%eig_map(j),:)=nax_corr(gs_active%cond_regions(i)%eig_map(j),:) &
-      + nax_tmp(j,:)
-  END DO
-END DO
-#endif
 IF(ANY(ABS(nax_corr)>0.d0))THEN
   k=0
   DO i=1,ncons
@@ -1211,7 +1146,7 @@ IF(ANY(ABS(nax_corr)>0.d0))THEN
     k=k+1
     IF(ANY(ABS(nax_corr(:,k))>0.d0))THEN
       IF(oft_debug_print(1))WRITE(*,'(2A,2I4)')oft_indent,'Non-ax correction: ',i,k
-      ALLOCATE(cons(i)%con%nax_corr(gs_active%ncond_eigs))
+      ALLOCATE(cons(i)%con%nax_corr(gs_active%device%ncond_eigs))
       cons(i)%con%nax_corr=nax_corr(:,k)
     END IF
   END DO
@@ -1230,7 +1165,7 @@ END SUBROUTINE fit_load
 !---------------------------------------------------------------------------------
 FUNCTION fit_dummy_error(self,gs) RESULT(err)
 CLASS(fit_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 CALL oft_abort('No constraint type specified.','fit_dummy_error',__FILE__)
 err=0.d0
@@ -1240,7 +1175,7 @@ END FUNCTION fit_dummy_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_dummy_eval(self,gs) RESULT(val)
 CLASS(fit_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 CALL oft_abort('No constraint type specified.','fit_dummy_eval',__FILE__)
 val=0.d0
@@ -1250,10 +1185,10 @@ END FUNCTION fit_dummy_eval
 !---------------------------------------------------------------------------------
 FUNCTION fit_dummy_nax_corr(self,gs) RESULT(val)
 CLASS(fit_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 val = 0.d0
-IF(ASSOCIATED(self%nax_corr))val = DOT_PRODUCT(self%nax_corr,gs%cond_weights)
+IF(ASSOCIATED(self%nax_corr))val = DOT_PRODUCT(self%nax_corr,gs%device%cond_weights)
 END FUNCTION fit_dummy_nax_corr
 !---------------------------------------------------------------------------------
 !> Needs Docs
@@ -1274,7 +1209,7 @@ END FUNCTION fit_dummy_parallel
 !---------------------------------------------------------------------------------
 FUNCTION fit_coil_error(self,gs) RESULT(err)
 CLASS(coil_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 err = (gs%coil_currs(self%coil)/mu0 - self%val)*self%wt
 END FUNCTION fit_coil_error
@@ -1283,7 +1218,7 @@ END FUNCTION fit_coil_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_coil_eval(self,gs) RESULT(val)
 CLASS(coil_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 val = gs%coil_currs(self%coil)/mu0
 END FUNCTION fit_coil_eval
@@ -1292,7 +1227,7 @@ END FUNCTION fit_coil_eval
 !---------------------------------------------------------------------------------
 FUNCTION fit_vcont_error(self,gs) RESULT(err)
 CLASS(vcont_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 err = (gs%vcontrol_val - self%val)*self%wt
 END FUNCTION fit_vcont_error
@@ -1301,7 +1236,7 @@ END FUNCTION fit_vcont_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_vcont_eval(self,gs) RESULT(val)
 CLASS(vcont_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 val = gs%vcontrol_val
 END FUNCTION fit_vcont_eval
@@ -1310,7 +1245,7 @@ END FUNCTION fit_vcont_eval
 !---------------------------------------------------------------------------------
 FUNCTION fit_q_error(self,gs) RESULT(err)
 CLASS(q_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: qval
 qval = self%eval(gs)
@@ -1322,7 +1257,7 @@ END FUNCTION fit_q_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_q_eval(self,gs) RESULT(val)
 CLASS(q_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 INTEGER(4) :: j
 INTEGER(4), PARAMETER :: npsi=30
@@ -1380,10 +1315,10 @@ END FUNCTION fit_q_parallel
 !---------------------------------------------------------------------------------
 FUNCTION fit_field_error(self,gs) RESULT(err)
 CLASS(field_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 err = self%eval(gs)
-IF(ASSOCIATED(self%nax_corr))err=err+DOT_PRODUCT(self%nax_corr,gs%cond_weights)
+IF(ASSOCIATED(self%nax_corr))err=err+DOT_PRODUCT(self%nax_corr,gs%device%cond_weights)
 err = (self%val - err)*self%wt
 END FUNCTION fit_field_error
 !---------------------------------------------------------------------------------
@@ -1391,14 +1326,14 @@ END FUNCTION fit_field_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_field_eval(self,gs) RESULT(val)
 CLASS(field_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 TYPE(oft_lag_brinterp) :: psi_eval
 TYPE(oft_lag_bginterp) :: psi_geval
 REAL(8) :: goptmp(3,3),v,psi(1),gpsi(3),rmin,rdiff,btmp(3)
 INTEGER(4) :: i,ip
 CLASS(oft_bmesh), POINTER :: smesh
-smesh=>gs%mesh
+smesh=>gs%device%mesh
 IF(self%cell==0)THEN
   call bmesh_findcell(smesh,self%cell,self%r,self%f)
   IF((minval(self%f)<-1.d-6).OR.(maxval(self%f)>1.d0+1.d-6))THEN
@@ -1419,9 +1354,9 @@ IF(self%cell==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup(gs%fe_rep)
+CALL psi_eval%setup(gs%device%fe_rep)
 psi_geval%u=>gs%psi
-CALL psi_geval%setup(gs%fe_rep)
+CALL psi_geval%setup(gs%device%fe_rep)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 call psi_geval%interp(self%cell,self%f,goptmp,gpsi)
@@ -1429,9 +1364,9 @@ CALL psi_eval%delete()
 CALL psi_geval%delete()
 btmp(1)= -gs%psiscale*gpsi(2)/self%r(1)
 IF(gs%mode==0)THEN
-  btmp(2)= gs%psiscale*(gs%alam*gs%I%f(psi(1))+gs%I%f_offset)/self%r(1)
+  btmp(2)= gs%psiscale*(gs%ffp_scale*gs%I%f(psi(1))+gs%I%f_offset)/self%r(1)
 ELSE
-  btmp(2)=gs%psiscale*SQRT(gs%alam*gs%I%f(psi(1)) + gs%I%f_offset**2)/self%r(1)
+  btmp(2)=gs%psiscale*SQRT(gs%ffp_scale*gs%I%f(psi(1)) + gs%I%f_offset**2)/self%r(1)
 END IF
 btmp(3)= gs%psiscale*gpsi(1)/self%r(1)
 !---
@@ -1452,7 +1387,7 @@ END SUBROUTINE fit_field_setup_comp
 !---------------------------------------------------------------------------------
 FUNCTION fit_flux_error(self,gs) RESULT(err)
 CLASS(flux_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: psitmp
 psitmp = self%eval(gs)
@@ -1463,13 +1398,13 @@ END FUNCTION fit_flux_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_flux_eval(self,gs) RESULT(val)
 CLASS(flux_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 TYPE(oft_lag_brinterp) :: psi_eval
 REAL(8) :: goptmp(3,3),v,psi(1),rmin,rdiff
 INTEGER(4) :: i,ip
 CLASS(oft_bmesh), POINTER :: smesh
-smesh=>gs%mesh
+smesh=>gs%device%mesh
 IF(self%cell==0)THEN
   call bmesh_findcell(smesh,self%cell,self%r,self%f)
   IF((minval(self%f)<-1.d-6).OR.(maxval(self%f)>1.d0+1.d-6))THEN
@@ -1490,7 +1425,7 @@ IF(self%cell==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup(gs%fe_rep)
+CALL psi_eval%setup(gs%device%fe_rep)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 CALL psi_eval%delete()
@@ -1502,10 +1437,10 @@ END FUNCTION fit_flux_eval
 !---------------------------------------------------------------------------------
 FUNCTION fit_saddle_error(self,gs) RESULT(err)
 CLASS(saddle_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 err = self%eval(gs)
-IF(ASSOCIATED(self%nax_corr))err=err+DOT_PRODUCT(self%nax_corr,gs%cond_weights)
+IF(ASSOCIATED(self%nax_corr))err=err+DOT_PRODUCT(self%nax_corr,gs%device%cond_weights)
 err = (self%val - err)*self%wt
 END FUNCTION fit_saddle_error
 !---------------------------------------------------------------------------------
@@ -1513,14 +1448,14 @@ END FUNCTION fit_saddle_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_saddle_eval(self,gs) RESULT(val)
 CLASS(saddle_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 TYPE(oft_lag_brinterp) :: psi_eval
 REAL(8) :: goptmp(3,3),psi(1,2)
 INTEGER(4) :: i
 IF(self%cells(1)==0)THEN
   DO i=1,2
-    call bmesh_findcell(gs%mesh,self%cells(i),self%r(:,i),self%f(:,i))
+    call bmesh_findcell(gs%device%mesh,self%cells(i),self%r(:,i),self%f(:,i))
     IF((MINVAL(self%f(:,i))<-1.d-6).OR.(MAXVAL(self%f(:,i))>1.d0+1.d-6))THEN
       CALL oft_abort("Saddle coil off mesh","fit_saddle_error",__FILE__)
     END IF
@@ -1528,7 +1463,7 @@ IF(self%cells(1)==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup(gs%fe_rep)
+CALL psi_eval%setup(gs%device%fe_rep)
 DO i=1,2
   call psi_eval%interp(self%cells(i),self%f(:,i),goptmp,psi(:,i))
 END DO
@@ -1568,7 +1503,7 @@ END SUBROUTINE fit_saddle_setup_comp
 !---------------------------------------------------------------------------------
 FUNCTION fit_itor_error(self,gs) RESULT(err)
 CLASS(itor_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: itor
 itor = self%eval(gs)
@@ -1579,7 +1514,7 @@ END FUNCTION fit_itor_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_itor_eval(self,gs) RESULT(val)
 CLASS(itor_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 REAL(8) :: itor
 CALL gs_itor_nl(gs,itor)
@@ -1598,7 +1533,7 @@ END FUNCTION fit_itor_parallel
 !---------------------------------------------------------------------------------
 FUNCTION fit_dflux_error(self,gs) RESULT(err)
 CLASS(dflux_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: dflux
 dflux=self%eval(gs)
@@ -1609,7 +1544,7 @@ END FUNCTION fit_dflux_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_dflux_eval(self,gs) RESULT(val)
 CLASS(dflux_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 val=gs_dflux(gs)
 END FUNCTION fit_dflux_eval
@@ -1618,7 +1553,7 @@ END FUNCTION fit_dflux_eval
 !---------------------------------------------------------------------------------
 FUNCTION fit_press_error(self,gs) RESULT(err)
 CLASS(press_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: press,psi(1),goptmp(3,4)
 TYPE(oft_lag_brinterp) :: psi_eval
@@ -1627,7 +1562,7 @@ press = self%eval(gs)
 !---Handle outside plasma guidance
 IF(self%r(1)>0.d0)THEN
   psi_eval%u=>gs%psi
-  CALL psi_eval%setup(gs%fe_rep)
+  CALL psi_eval%setup(gs%device%fe_rep)
   call psi_eval%interp(self%cell,self%f,goptmp,psi)
   in_plasma=.TRUE.
   IF(gs_test_bounds(gs,self%r))THEN
@@ -1636,7 +1571,7 @@ IF(self%r(1)>0.d0)THEN
     in_plasma=.FALSE.
   END IF
   IF(.NOT.in_plasma)THEN
-    err=gs%psiscale*gs%psiscale*gs%pnorm*gs%P%f(gs%plasma_bounds(2))/mu0/(gs%plasma_bounds(2)-gs%plasma_bounds(1))
+    err=gs%psiscale*gs%psiscale*gs%p_scale*gs%P%f(gs%plasma_bounds(2))/mu0/(gs%plasma_bounds(2)-gs%plasma_bounds(1))
     press=err*(psi(1)-gs%plasma_bounds(1))
   END IF
   CALL psi_eval%delete()
@@ -1648,15 +1583,15 @@ END FUNCTION fit_press_error
 !---------------------------------------------------------------------------------
 FUNCTION fit_press_eval(self,gs) RESULT(val)
 CLASS(press_constraint), INTENT(inout) :: self !< Needs docs
-TYPE(gs_eq), INTENT(inout) :: gs !< Needs docs
+TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: val !< Needs docs
 TYPE(oft_lag_brinterp) :: psi_eval
 REAL(8) :: goptmp(3,3),v,psi(1),rmin,rdiff
 INTEGER(4) :: i,ip
 CLASS(oft_bmesh), POINTER :: smesh
-smesh=>gs%mesh
+smesh=>gs%device%mesh
 IF(self%r(1)<0.d0)THEN ! Magnetic axis pressure constraint
-  val = gs%psiscale*gs%psiscale*gs%pnorm*gs%P%f(gs%plasma_bounds(2))/mu0
+  val = gs%psiscale*gs%psiscale*gs%p_scale*gs%P%f(gs%plasma_bounds(2))/mu0
   RETURN
 END IF
 IF(self%cell==0)THEN
@@ -1679,11 +1614,11 @@ IF(self%cell==0)THEN
 END IF
 !---
 psi_eval%u=>gs%psi
-CALL psi_eval%setup(gs%fe_rep)
+CALL psi_eval%setup(gs%device%fe_rep)
 call smesh%jacobian(self%cell,self%f,goptmp,v)
 call psi_eval%interp(self%cell,self%f,goptmp,psi)
 CALL psi_eval%delete
 !---
-val = gs%psiscale*gs%psiscale*gs%pnorm*gs%P%f(psi(1))/mu0
+val = gs%psiscale*gs%psiscale*gs%p_scale*gs%P%f(psi(1))/mu0
 END FUNCTION fit_press_eval
 END MODULE oft_gs_fit

@@ -417,52 +417,62 @@ end subroutine cg_solver_apply
 !------------------------------------------------------------------------------
 subroutine cg_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_cg_solver), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: atol,rtol
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
+REAL(r8), POINTER, DIMENSION(:) :: read_real
 DEBUG_STACK_PUSH
 !---
 val_level=1
 IF(PRESENT(level))val_level=level
-ALLOCATE(its(val_level),atol(val_level),rtol(val_level))
 !---
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,its,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough its values specified","cg_setup_xml",__FILE__)
-    self%its=its(val_level)
-  ELSE
-    self%its=its(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `its` node","cg_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `its` values specified","cg_setup_xml",__FILE__)
+      self%its=read_int(val_level)
+    ELSE
+      self%its=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,atol,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough atol values specified","cg_setup_xml",__FILE__)
-    self%atol=atol(val_level)
-  ELSE
-    self%atol=atol(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `atol` node","cg_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `atol` values specified","cg_setup_xml",__FILE__)
+      self%atol=read_real(val_level)
+    ELSE
+      self%atol=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough rtol values specified","cg_setup_xml",__FILE__)
-    self%rtol=rtol(val_level)
-  ELSE
-    self%rtol=rtol(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `rtol` node","cg_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `rtol` values specified","cg_setup_xml",__FILE__)
+      self%rtol=read_real(val_level)
+    ELSE
+      self%rtol=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 !---
@@ -471,11 +481,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,*)' - Iterations:  ',self%its
   WRITE(*,*)' - Tolerance:   ',REAL(self%atol,4),REAL(self%rtol,4)
 END IF
-DEALLOCATE(its,atol,rtol)
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','cg_setup_xml',__FILE__)
-#endif
 end subroutine cg_setup_xml
 !------------------------------------------------------------------------------
 !> Print solver configuration
@@ -591,63 +597,77 @@ end subroutine gmres_solver_apply
 !------------------------------------------------------------------------------
 subroutine gmres_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_gmres_solver), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its,nrits
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: atol,rtol
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
+REAL(r8), POINTER, DIMENSION(:) :: read_real
 DEBUG_STACK_PUSH
 !---
 val_level=1
 IF(PRESENT(level))val_level=level
-ALLOCATE(its(val_level),nrits(val_level),atol(val_level),rtol(val_level))
 !---
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,its,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough its values specified","gmres_setup_xml",__FILE__)
-    self%its=its(val_level)
-  ELSE
-    self%its=its(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `its` node","gmres_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `its` values specified","gmres_setup_xml",__FILE__)
+      self%its=read_int(val_level)
+    ELSE
+      self%its=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"nrits",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,nrits,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough nrits values specified","gmres_setup_xml",__FILE__)
-    self%nrits=nrits(val_level)
-  ELSE
-    self%nrits=nrits(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `nrits` node","gmres_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `nrits` values specified","gmres_setup_xml",__FILE__)
+      self%nrits=read_int(val_level)
+    ELSE
+      self%nrits=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,atol,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough atol values specified","gmres_setup_xml",__FILE__)
-    self%atol=atol(val_level)
-  ELSE
-    self%atol=atol(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `atol` node","gmres_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `atol` values specified","gmres_setup_xml",__FILE__)
+      self%atol=read_real(val_level)
+    ELSE
+      self%atol=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"rtol",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,rtol,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough rtol values specified","gmres_setup_xml",__FILE__)
-    self%rtol=rtol(val_level)
-  ELSE
-    self%rtol=rtol(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `rtol` node","gmres_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `rtol` values specified","gmres_setup_xml",__FILE__)
+      self%rtol=read_real(val_level)
+    ELSE
+      self%rtol=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 !---
@@ -657,11 +677,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,*)' - Restart:     ',self%nrits
   WRITE(*,*)' - Tolerance:   ',REAL(self%atol,4),REAL(self%rtol,4)
 END IF
-DEALLOCATE(its,nrits,atol,rtol)
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','gmres_setup_xml',__FILE__)
-#endif
 end subroutine gmres_setup_xml
 !------------------------------------------------------------------------------
 !> Print solver configuration
@@ -903,41 +919,47 @@ end subroutine sjacobi_solver_apply
 !------------------------------------------------------------------------------
 subroutine sjacobi_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_sjacobi_solver), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: its
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: df
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
+REAL(r8), POINTER, DIMENSION(:) :: read_real
 DEBUG_STACK_PUSH
 !---
 val_level=1
 IF(PRESENT(level))val_level=level
-ALLOCATE(its(val_level),df(val_level))
 !---
 CALL xml_get_element(solver_node,"its",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,its,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough its values specified","jblock_setup_xml",__FILE__)
-    self%its=its(val_level)
-  ELSE
-    self%its=its(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `its` node","sjacobi_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `its` values specified","sjacobi_setup_xml",__FILE__)
+      self%its=read_int(val_level)
+    ELSE
+      self%its=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"df",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,df,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough df values specified","jblock_setup_xml",__FILE__)
-    self%df=df(val_level)
-  ELSE
-    self%df=df(1)
+  CALL xml_read_content(current_node,read_real,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `df` node","sjacobi_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_real))THEN
+    IF(SIZE(read_real)>1)THEN
+      IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `df` values specified","sjacobi_setup_xml",__FILE__)
+      self%df=read_real(val_level)
+    ELSE
+      self%df=read_real(1)
+    END IF
+    DEALLOCATE(read_real)
   END IF
 END IF
 IF(oft_debug_print(1))THEN
@@ -945,12 +967,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,*)' - Iterations:  ',self%its
   WRITE(*,*)' - Factor:      ',self%df
 END IF
-!---
-DEALLOCATE(its,df)
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','sjacobi_setup_xml',__FILE__)
-#endif
 end subroutine sjacobi_setup_xml
 !------------------------------------------------------------------------------
 !> Cast a solver object to a oft_petsc_direct_solver
@@ -1017,12 +1034,11 @@ end subroutine direct_solver_apply
 !------------------------------------------------------------------------------
 subroutine direct_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_direct_solver), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node,sub_node
+TYPE(xml_node) :: current_node,sub_node
 CHARACTER(LEN=20) :: sub_type
 CHARACTER(LEN=6) :: factor_type,factor_package
 !---
@@ -1039,9 +1055,6 @@ IF(oft_debug_print(1))THEN
   WRITE(*,*)' - Factor package: ',self%pre_factor%package
 END IF
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','direct_setup_xml',__FILE__)
-#endif
 end subroutine direct_setup_xml
 !------------------------------------------------------------------------------
 !> Print solver configuration
@@ -1426,40 +1439,46 @@ end subroutine asprecond_setup
 !------------------------------------------------------------------------------
 subroutine asprecond_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_asprecond), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node,sub_node
+TYPE(xml_node) :: current_node,sub_node
 !---
 INTEGER(i4) :: val_level,ierr
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: overlaps,nlocals
+INTEGER(i4), POINTER, DIMENSION(:) :: read_int
 DEBUG_STACK_PUSH
 !---
 val_level=1
 IF(PRESENT(level))val_level=level
-ALLOCATE(overlaps(val_level),nlocals(val_level))
 !---Read in overlap size
 CALL xml_get_element(solver_node,"overlap",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,overlaps,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough overlap values specified","asprecond_setup_xml",__FILE__)
-    self%overlap=overlaps(val_level)
-  ELSE
-    self%overlap=overlaps(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `overlap` node","asprecond_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `overlap` values specified","asprecond_setup_xml",__FILE__)
+      self%overlap=read_int(val_level)
+    ELSE
+      self%overlap=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 !---Read in local field splitting flag
 CALL xml_get_element(solver_node,"nlocal",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,nlocals,num=nread,iostat=ierr)
-  IF(nread>1)THEN
-    IF(ierr<0)CALL oft_abort("Not enough local flags specified","asprecond_setup_xml",__FILE__)
-    self%n_local=nlocals(val_level)
-  ELSE
-    self%n_local=nlocals(1)
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `nlocal` node","asprecond_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `nlocal` values specified","asprecond_setup_xml",__FILE__)
+      self%n_local=read_int(val_level)
+    ELSE
+      self%n_local=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
   END IF
 END IF
 IF(self%n_local<-1)CALL oft_abort("Slice grouping not supported with PETSc","asprecond_setup_xml",__FILE__)
@@ -1473,9 +1492,6 @@ IF(oft_debug_print(1))THEN
   WRITE(*,*)' - NLocal:     ',self%n_local
 END IF
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','asprecond_setup_xml',__FILE__)
-#endif
 end subroutine asprecond_setup_xml
 !---------------------------------------------------------------------------------
 !> Set factorization package for PETSc PC object
@@ -1530,34 +1546,36 @@ end subroutine create_lu_pc
 !---------------------------------------------------------------------------------
 subroutine lu_pc_load_xml(self,solver_node,level)
 CLASS(oft_petsc_factordef), INTENT(inout) :: self !< Solver object
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML element containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: i,ierr,nnodes,nread
-TYPE(xml_node), POINTER :: current_node
-CHARACTER(LEN=6) :: factor_type,factor_package
+TYPE(xml_node) :: current_node
+CHARACTER(LEN=:), ALLOCATABLE :: factor_type,factor_package
 DEBUG_STACK_PUSH
 !---
 CALL xml_get_element(solver_node,"type",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,factor_type,num=nread,iostat=ierr)
-  IF(nread==1)THEN
+  CALL xml_read_content(current_node,factor_type,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `type` node","lu_pc_load_xml",__FILE__)
+  IF(ALLOCATED(factor_type))THEN
+    IF(LEN(factor_type)>6)CALL oft_abort('Factorization type name too long','lu_pc_load_xml',__FILE__)
     self%type=factor_type
+    DEALLOCATE(factor_type)
   END IF
 END IF
 !---
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
-  IF(nread==1)THEN
+  CALL xml_read_content(current_node,factor_package,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `package` node","lu_pc_load_xml",__FILE__)
+  IF(ALLOCATED(factor_package))THEN
+    IF(LEN(factor_package)>6)CALL oft_abort('Factorization package name too long','lu_pc_load_xml',__FILE__)
     self%package=factor_package
+    DEALLOCATE(factor_package)
   END IF
 END IF
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','lu_pc_load_xml',__FILE__)
-#endif
 end subroutine lu_pc_load_xml
 #endif
 end module oft_petsc_solvers

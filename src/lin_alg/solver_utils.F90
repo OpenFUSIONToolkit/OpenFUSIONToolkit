@@ -50,18 +50,16 @@ class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition s
 integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
 real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
 integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
-TYPE(xml_node), optional, pointer, intent(in) :: xml_root !< Preconditioner definition node (optional)
+TYPE(xml_node), optional, intent(in) :: xml_root !< Preconditioner definition node (optional)
 !---
 NULLIFY(pre)
-#ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml).AND.PRESENT(xml_root))THEN
-  IF(ASSOCIATED(xml_root))THEN
+  IF(xml_root%associated())THEN
     !---Create preconditioner
     CALL create_ml_xml(pre,Mats,levels,nlevels=nlevels, &
       ml_vecspace=ml_vecspace,pre_node=xml_root,bc=bc)
   END IF
 END IF
-#endif
 IF(.NOT.ASSOCIATED(pre))THEN
   IF(use_petsc)THEN
     CALL create_petsc_mlpre(pre,Mats,levels,nlevels=nlevels, &
@@ -484,31 +482,32 @@ end subroutine create_gmres_solver
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_solver_xml(solver,solver_node,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: solver
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node
+TYPE(xml_node), INTENT(in) :: solver_node
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nread,nnodes,ierr
-TYPE(xml_node), POINTER :: pre_node
+TYPE(xml_node) :: pre_node
 !---
 integer(i4) :: i,val_level
-CHARACTER(LEN=20) :: solver_type,temp_string
+CHARACTER(LEN=:), ALLOCATABLE :: solver_type
 LOGICAL :: force_native,native_solver,petsc_solver
 DEBUG_STACK_PUSH
 val_level=1
 IF(PRESENT(level))val_level=level
 native_solver=.FALSE.
 !---
-CALL xml_extractDataAttribute(solver_node,"type",solver_type,iostat=ierr)
+CALL xml_read_attribute(solver_node,"type",solver_type,iostat=ierr)
+IF(ierr/=0)CALL oft_xml_abort("Error reading solver type.","create_solver_xml",__FILE__)
 IF(oft_debug_print(2))WRITE(*,*)'Found solver: ',solver_type
 force_native=.FALSE.
 IF(xml_hasAttribute(solver_node,"native"))THEN
-  CALL xml_extractDataAttribute(solver_node,"native",temp_string,iostat=ierr)
-  force_native=((temp_string(1:1)=='t').OR.(temp_string(1:1)=='T'))
+  CALL xml_read_attribute(solver_node,"native",force_native,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `native` attribute.","create_solver_xml",__FILE__)
+  ! force_native=((temp_string(1:1)=='t').OR.(temp_string(1:1)=='T'))
 END IF
 !---
 petsc_solver=use_petsc.AND.(.NOT.force_native)
-SELECT CASE(TRIM(solver_type))
+SELECT CASE(solver_type)
   CASE("cg")
     IF(petsc_solver)THEN
       CALL create_petsc_solver(solver,"cg")
@@ -547,6 +546,7 @@ SELECT CASE(TRIM(solver_type))
   CASE DEFAULT
     CALL oft_abort("Invalid solver type.","create_solver_xml",__FILE__)
 END SELECT
+DEALLOCATE(solver_type)
 !---
 CALL solver%setup_from_xml(solver_node,val_level)
 !---
@@ -555,9 +555,6 @@ IF(ierr==0)THEN
   CALL create_pre_xml(solver%pre,pre_node,native_solver,val_level)
 END IF
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','create_solver_xml',__FILE__)
-#endif
 end subroutine create_solver_xml
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -671,25 +668,25 @@ end subroutine create_bjacobi_pre
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_pre_xml(pre,pre_node,native_solver,level)
 CLASS(oft_solver), POINTER, INTENT(out) :: pre
-TYPE(xml_node), POINTER, INTENT(in) :: pre_node
+TYPE(xml_node), INTENT(in) :: pre_node
 LOGICAL, INTENT(in) :: native_solver
 INTEGER(i4), OPTIONAL, INTENT(in) :: level
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nread,nnodes,ierr
-TYPE(xml_node), POINTER :: solver_node
+TYPE(xml_node) :: solver_node
 !---
 integer(i4) :: i,val_level,smoother
 logical :: switch
-CHARACTER(LEN=20) :: pre_type,temp_string
+CHARACTER(LEN=:), ALLOCATABLE :: pre_type
 DEBUG_STACK_PUSH
 val_level=1
 IF(PRESENT(level))val_level=level
 !---
-CALL xml_extractDataAttribute(pre_node,"type",pre_type,iostat=ierr)
+CALL xml_read_attribute(pre_node,"type",pre_type,iostat=ierr)
+IF(ierr/=0)CALL oft_xml_abort("Error reading preconditioner type.","create_pre_xml",__FILE__)
 IF(oft_debug_print(2))WRITE(*,*)'Found preconditioner: ',pre_type
 !---
-SELECT CASE(TRIM(pre_type))
+SELECT CASE(pre_type)
   CASE("jacobi")
     IF(use_petsc)THEN
       CALL create_petsc_pre(pre,"jacobi")
@@ -729,6 +726,7 @@ SELECT CASE(TRIM(pre_type))
   CASE DEFAULT
     CALL oft_abort("Invalid precon type.","create_pre_xml",__FILE__)
 END SELECT
+DEALLOCATE(pre_type)
 !---
 CALL pre%setup_from_xml(pre_node,val_level)
 !---
@@ -737,9 +735,6 @@ IF(ierr==0)THEN
   CALL create_solver_xml(pre%pre,solver_node,val_level)
 END IF
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','create_pre_xml',__FILE__)
-#endif
 end subroutine create_pre_xml
 !------------------------------------------------------------------------------
 !> Construct PETSc Multi-Grid preconditioner using native mechanics
@@ -750,15 +745,15 @@ TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
 integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
 class(oft_ml_vecspace), target, intent(in) :: ml_vecspace !< Multi-level vectorspace
-TYPE(xml_node), POINTER, INTENT(in) :: pre_node !< Preconditioner XML element
+TYPE(xml_node), INTENT(in) :: pre_node !< Preconditioner XML element
 class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition (optional)
-#ifdef HAVE_XML
 !---
 integer(i4) :: i,ierr,nnodes
 class(oft_ml_precond), pointer :: this_ml
 LOGICAL :: symmetric,up_present,down_present,coarse_present
-CHARACTER(LEN=20) :: dir_type
-TYPE(xml_node), POINTER :: up_node,down_node,coarse_node,current_node,solver_node
+CHARACTER(LEN=:), ALLOCATABLE :: dir_type
+TYPE(xml_node) :: up_node,down_node,coarse_node,solver_node
+TYPE(xml_node), POINTER :: current_node
 TYPE(xml_nodelist) :: current_nodes
 DEBUG_STACK_PUSH
 !---
@@ -771,10 +766,11 @@ IF(oft_debug_print(1))WRITE(*,*)'Creating MG smoother'
 CALL xml_get_element(pre_node,"smoother",current_nodes,ierr)
 IF(current_nodes%n==0)CALL oft_abort("Object contains no smoother definitions.","create_ml_xml",__FILE__)
 DO i=1,current_nodes%n
-  current_node=>current_nodes%nodes(i)%this
-  CALL xml_extractDataAttribute(current_node,"direction",dir_type,iostat=ierr)
+  current_node=>current_nodes%nodes(i)
+  CALL xml_read_attribute(current_node,"direction",dir_type,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading direction attribute.","create_ml_xml",__FILE__)
   IF(oft_debug_print(2))WRITE(*,*)'Found smoother: ',dir_type
-  SELECT CASE(TRIM(dir_type))
+  SELECT CASE(dir_type)
     CASE("up")
       up_present=.TRUE.
       CALL xml_get_element(current_node,"solver",up_node,ierr)
@@ -789,6 +785,7 @@ DO i=1,current_nodes%n
     CASE DEFAULT
       CALL oft_abort("Invalid smoother direction.","create_ml_xml",__FILE__)
   END SELECT
+  DEALLOCATE(dir_type)
 END DO
 IF(ASSOCIATED(current_nodes%nodes))DEALLOCATE(current_nodes%nodes)
 !---
@@ -862,8 +859,5 @@ DO i=nlevels-1,1,-1
   END IF
 END DO
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','create_ml_xml',__FILE__)
-#endif
 end subroutine create_ml_xml
 END MODULE oft_solver_utils

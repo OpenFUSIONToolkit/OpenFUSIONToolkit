@@ -666,22 +666,23 @@ end subroutine lusolver_update
 !------------------------------------------------------------------------------
 subroutine lusolver_setup_xml(self,solver_node,level)
 CLASS(oft_lusolver), INTENT(inout) :: self
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
-CHARACTER(LEN=7) :: factor_package
+CHARACTER(LEN=:), ALLOCATABLE :: factor_package
 CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
-  IF(nread==1)THEN
+  CALL xml_read_content(current_node,factor_package,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `package` node","lusolver_setup_xml",__FILE__)
+  IF(ALLOCATED(factor_package))THEN
+    IF(LEN(factor_package)>7)CALL oft_abort('Factorization package name too long','lusolver_setup_xml',__FILE__)
     self%package=factor_package
   END IF
 END IF
@@ -690,9 +691,6 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,2A)')'- Package:  ',self%package
 END IF
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','lusolver_setup_xml',__FILE__)
-#endif
 end subroutine lusolver_setup_xml
 !------------------------------------------------------------------------------
 !> Check for thread safety
@@ -932,22 +930,23 @@ end subroutine ilusolver_update
 !------------------------------------------------------------------------------
 subroutine ilusolver_setup_xml(self,solver_node,level)
 CLASS(oft_ilusolver), INTENT(inout) :: self
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
-CHARACTER(LEN=7) :: factor_package
+CHARACTER(LEN=:), ALLOCATABLE :: factor_package
 CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
-  IF(nread==1)THEN
+  CALL xml_read_content(current_node,factor_package,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `package` node","ilusolver_setup_xml",__FILE__)
+  IF(ALLOCATED(factor_package))THEN
+    IF(LEN(factor_package)>7)CALL oft_abort('Factorization package name too long','ilusolver_setup_xml',__FILE__)
     self%package=factor_package
   END IF
 END IF
@@ -956,9 +955,6 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,2A)')'- Package:  ',self%package
 END IF
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','lusolver_setup_xml',__FILE__)
-#endif
 end subroutine ilusolver_setup_xml
 !------------------------------------------------------------------------------
 !> Check for thread safety

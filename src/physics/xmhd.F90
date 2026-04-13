@@ -289,8 +289,8 @@ end type ml_xmhd_vecspace
 ! Global variables
 !------------------------------------------------------------------------------
 INTEGER(i4), PARAMETER :: xmhd_rst_version = 3 !< Restart file version number
-TYPE(xml_node), POINTER :: xmhd_root_node => NULL() !< xMHD XML node
-TYPE(xml_node), POINTER :: xmhd_pre_node => NULL() !< preconditioner XML node
+TYPE(xml_node) :: xmhd_root_node !< xMHD XML node
+TYPE(xml_node) :: xmhd_pre_node !< preconditioner XML node
 !---Equation control
 LOGICAL :: xmhd_jcb = .TRUE. !< Include JxB force on fluid
 LOGICAL :: xmhd_advec = .TRUE. !< Include fluid advection
@@ -499,7 +499,6 @@ close(io_unit)
 if(ierr<0)call oft_abort('No MHD options found in input file.','xmhd_read_settings',__FILE__)
 if(ierr>0)call oft_abort('Error parsing MHD options in input file.','xmhd_read_settings',__FILE__)
 !---Look for xMHD node
-#ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"xmhd",xmhd_root_node,ierr)
   IF(ierr==0)THEN
@@ -507,7 +506,6 @@ IF(ASSOCIATED(oft_env%xml))THEN
     CALL xml_get_element(xmhd_root_node,"pre",xmhd_pre_node,ierr)
   END IF
 END IF
-#endif
 !------------------------------------------------------------------------------
 ! Check settings and setup
 !------------------------------------------------------------------------------
@@ -836,7 +834,7 @@ solver%pm=oft_env%pm
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
 IF(nlevels==1)THEN
-  IF(ASSOCIATED(xmhd_pre_node))THEN
+  IF(xmhd_pre_node%associated())THEN
     CALL create_solver_xml(solver%pre,xmhd_pre_node)
   ELSE
     CALL create_diag_pre(solver%pre)
@@ -1355,7 +1353,7 @@ solver%pm=oft_env%pm
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
 IF(nlevels==1)THEN
-  IF(ASSOCIATED(xmhd_pre_node))THEN
+  IF(xmhd_pre_node%associated())THEN
     CALL create_solver_xml(solver%pre,xmhd_pre_node)
   ELSE
     CALL create_diag_pre(solver%pre)
@@ -2592,70 +2590,72 @@ end subroutine xmhd_alloc_ops
 !------------------------------------------------------------------------------
 subroutine xmhd_setup_regions()
 !---XML solver fields
-#ifdef HAVE_XML
-integer(i4) :: nread_id,nread_eta,nread_type,ierr,i,j,reg_type(1)
-real(r8) :: eta(1)
-TYPE(xml_node), POINTER :: reg_node,inner_node
+integer(i4) :: nread_id,nread_eta,nread_type,ierr,i,j,reg_type
+real(r8) :: eta
+TYPE(xml_node) :: inner_node
+TYPE(xml_node), POINTER :: reg_node
 TYPE(xml_nodelist) :: reg_nodes
-#endif
-integer(i4), ALLOCATABLE :: regs(:),reg_types(:)
+integer(i4), POINTER :: regs(:),reg_types(:)
 DEBUG_STACK_PUSH
-ALLOCATE(regs(mesh%nreg),reg_types(mesh%nreg))
+ALLOCATE(reg_types(mesh%nreg))
 reg_types=1
 IF(.NOT.ALLOCATED(eta_reg))THEN
   ALLOCATE(eta_reg(mesh%nreg),solid_cell(mesh%nc))
 END IF
 eta_reg=-1.d0
 solid_cell=.FALSE.
-#ifdef HAVE_XML
-IF(ASSOCIATED(xmhd_root_node))THEN
+IF(xmhd_root_node%associated())THEN
   !---Look for pre node
   CALL xml_get_element(xmhd_root_node,"region",reg_nodes,ierr)
   IF(reg_nodes%n>0)THEN
     DO i=0,reg_nodes%n-1
-      reg_node=>reg_nodes%nodes(i+1)%this
+      reg_node=>reg_nodes%nodes(i+1)!%this
       !---
       CALL xml_get_element(reg_node,"id",inner_node,ierr)
       IF(ierr/=0)CALL oft_abort("Error reading regions IDs for group", &
         "xmhd_setup_regions",__FILE__)
-      CALL xml_extractDataContent(inner_node,regs,num=nread_id,iostat=ierr)
-      IF(nread_id==0)CALL oft_abort("Zero values given in id group", &
-        "xmhd_setup_regions",__FILE__)
-      IF(ierr>0)CALL oft_abort("Too many id values specified","xmhd_setup_regions", &
-      __FILE__)
-      IF(ANY(regs(1:nread_id)>mesh%nreg).OR.ANY(regs(1:nread_id)<=0))CALL oft_abort( &
-        "Invalid region ID","xmhd_setup_regions",__FILE__)
+      CALL xml_read_content(inner_node,regs,iostat=ierr)
+      IF(ierr/=0)CALL oft_abort("Error reading values in id group", &
+      "xmhd_setup_regions",__FILE__)
+      ! IF(nread_id==0)CALL oft_abort("Zero values given in id group", &
+      !   "xmhd_setup_regions",__FILE__)
+      ! IF(ierr>0)CALL oft_abort("Too many id values specified","xmhd_setup_regions", &
+      ! __FILE__)
+      IF(ANY(regs>mesh%nreg).OR.ANY(regs<=0))CALL oft_abort("Invalid region ID","xmhd_setup_regions",__FILE__)
       !---
       CALL xml_get_element(reg_node,"eta",inner_node,ierr)
-      CALL xml_extractDataContent(inner_node,eta,num=nread_eta,iostat=ierr)
-      IF(nread_eta==0)CALL oft_abort("Zero values given in eta group", &
-        "xmhd_setup_regions",__FILE__)
-      IF(ierr>0)CALL oft_abort("Too many eta values specified","xmhd_setup_regions", &
-        __FILE__)
-      IF(eta(1)<0.d0)CALL oft_abort("Invalid eta value specified","xmhd_setup_regions", &
+      CALL xml_read_content(inner_node,eta,iostat=ierr)
+      IF(ierr/=0)CALL oft_xml_abort("Error reading values in eta group","xmhd_setup_regions",__FILE__)
+      ! IF(nread_eta==0)CALL oft_abort("Zero values given in eta group", &
+      !   "xmhd_setup_regions",__FILE__)
+      ! IF(ierr>0)CALL oft_abort("Too many eta values specified","xmhd_setup_regions", &
+      !   __FILE__)
+      IF(eta<0.d0)CALL oft_abort("Invalid eta value specified","xmhd_setup_regions", &
         __FILE__)
       !---Get region type
       CALL xml_get_element(reg_node,"type",inner_node,ierr)
       IF(ierr/=0)THEN
-        reg_type(1)=2.d0
+        reg_type=2.d0
       ELSE
-        CALL xml_extractDataContent(inner_node,reg_type,num=nread_type,iostat=ierr)
-        IF(nread_eta==0)CALL oft_abort("Zero values given in type group", &
-          "xmhd_setup_regions",__FILE__)
-        IF(ierr>0)CALL oft_abort("Too many type values specified","xmhd_setup_regions", &
-          __FILE__)
-        IF(reg_type(1)<1.OR.reg_type(1)>2)CALL oft_abort("Invalid type specified","xmhd_setup_regions", &
+        CALL xml_read_content(inner_node,reg_type,iostat=ierr)
+        IF(ierr/=0)CALL oft_xml_abort("Error reading values in type group","xmhd_setup_regions",__FILE__)
+        ! IF(nread_eta==0)CALL oft_abort("Zero values given in type group", &
+        !   "xmhd_setup_regions",__FILE__)
+        ! IF(ierr>0)CALL oft_abort("Too many type values specified","xmhd_setup_regions", &
+        !   __FILE__)
+        IF(reg_type<1.OR.reg_type>2)CALL oft_abort("Invalid type specified","xmhd_setup_regions", &
           __FILE__)
       END IF
       !---
-      DO j=1,nread_id
+      DO j=1,SIZE(regs)
         IF(eta_reg(regs(j))>0.d0)THEN
           CALL oft_abort("Region blocks overlap","xmhd_setup_regions",__FILE__)
         ELSE
-          eta_reg(regs(j))=eta(1)
+          eta_reg(regs(j))=eta
         END IF
-        reg_types(regs(j))=reg_type(1)
+        reg_types(regs(j))=reg_type
       END DO
+      DEALLOCATE(regs)
     END DO
   END IF
 END IF
@@ -2669,7 +2669,6 @@ DO i=1,mesh%nc
 END DO
 #ifdef HAVE_MPI
 call MPI_ALLREDUCE(MPI_IN_PLACE,xmhd_rw,1,OFT_MPI_LOGICAL,MPI_LOR,oft_env%COMM,ierr)
-#endif
 #endif
 eta_reg=ABS(eta_reg)
 DEBUG_STACK_POP

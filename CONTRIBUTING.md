@@ -78,6 +78,7 @@ Daniel Burgess (@d-burg)\
 Samuel Freiberger (@samuel-frei)\
 Sophia Guizzo (@sguizzo)\
 Chris Hansen (@hansec)\
+Joseph Jerkins (@DeIonizedPlasma)\
 Julia Kirby (@juliagoestoikea)\
 John Lhota (@john4255)\
 Francois Logak\
