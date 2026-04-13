@@ -183,17 +183,17 @@ class ThinCurr_XML:
         # Add eta (resistivities) if present
         if self.eta is not None:
             eta_element = ET.SubElement(thincurr_element, "eta")
-            eta_element.text = ' '.join('{0:.E}'.format(r) for r in self.eta)
+            eta_element.text = ' '.join('{0:.6E}'.format(r) for r in self.eta)
 
         # Add eta_vol (volumetric resistivities) if present
         if self.eta_vol is not None:
             eta_vol_element = ET.SubElement(thincurr_element, "eta_vol")
-            eta_vol_element.text = ' '.join('{0:.E}'.format(r) for r in self.eta_vol)
+            eta_vol_element.text = ' '.join('{0:.6E}'.format(r) for r in self.eta_vol)
 
         # Add thickness if present
         if self.thickness is not None:
             thickness_element = ET.SubElement(thincurr_element, "thickness")
-            thickness_element.text = ' '.join('{0:.E}'.format(t) for t in self.thickness)
+            thickness_element.text = ' '.join('{0:.6E}'.format(t) for t in self.thickness)
         
         # Add I-coils if present
         if self.icoils:
