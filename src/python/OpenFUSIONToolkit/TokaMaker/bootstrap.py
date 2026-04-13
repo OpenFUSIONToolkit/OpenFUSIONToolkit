@@ -858,6 +858,7 @@ def solve_with_bootstrap(mygs,
                          isolate_edge_jBS=False,
                          psi_pad=1e-3,
                          iterations=3,
+                         iteration_tol=0,
                          diagnostic_plots=False,
                          parameterize_jBS = False,
                          use_OMFIT_sauter = False,
@@ -879,6 +880,8 @@ def solve_with_bootstrap(mygs,
     @param isolate_edge_jBS If True, isolate edge spike in bootstrap current
     @param psi_pad Padding for flux surface calculations
     @param iterations Number of solver iterations
+    @param iteration_tol Relative RMS tolerance on \f$j_\phi\f$ for early exit of the
+        iteration loop. Typical value 0.01 exits at <1% rel change. 0 runs all iterations.
     @param diagnostic_plots If True, plot diagnostic figures
     @param parameterize_jBS If True, use parameterized edge spike
     @param use_OMFIT_sauter If True, use OMFIT Sauter model
@@ -1131,6 +1134,17 @@ def solve_with_bootstrap(mygs,
             _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
 
             tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs[0], ravgs[1])
+
+            # Check j_phi convergence for early exit
+            if iteration_tol > 0 and numpy.linalg.norm(matched_input_jphi) > 0:
+                jphi_rel_rms = (numpy.linalg.norm(tmp_jphi - matched_input_jphi)
+                                / numpy.linalg.norm(matched_input_jphi))
+                if verbose:
+                    print(f'   Iteration {n+1}/{iterations}: j_phi RMS residual = {jphi_rel_rms*100:.2f}%')
+                if jphi_rel_rms < iteration_tol:
+                    if verbose:
+                        print(f'   j_phi converged at iteration {n+1}, stopping early.')
+                    break
 
             if diagnostic_plots:
                 plt.figure()
