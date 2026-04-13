@@ -375,7 +375,8 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
     
 def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
                             Ip_target, psi_pad, spike_prof=None, find_j0=True, scale_j0=1.0,
-                            tolerance=0.01, max_iter=5, diagnostic_plots=False, verbose=True):
+                            tolerance=0.01, max_iter=5, diagnostic_plots=False, verbose=True,
+                            nl_tol_inner=None, npsi_inner=None):
     r'''! Optimize scaling to match input/output \f$j_0\f$ or \f$I_p\f$
 
     @param mygs Grad-Shafranov solver object
@@ -392,15 +393,46 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     @param tolerance Relative error tolerance for secant method
     @param max_iter Maximum number of secant iterations
     @param diagnostic_plots If True, plot input/output \f$j_\phi\f$
+    @param nl_tol_inner If not None, temporarily use this GS solver tolerance for the secant
+        iterations (tighter final solve uses the original value). Typical: 1e-4.
+    @param npsi_inner If not None, use this many flux-surface sample points for
+        \f$j_\phi\f$ error evaluations (only the on-axis value is needed). Typical: 15.
     @result Tuple (optimal scale factor, output \f$j_\phi(\hat{\psi})\f$)
     '''
+    n_psi = len(psi_N)
+    _q_npsi = npsi_inner if npsi_inner is not None else n_psi
+
+    # Temporarily loosen the GS solver tolerance for the secant iterations.
+    # This is safe because we only need rough j_phi accuracy to guide the
+    # 1%-tolerance secant search; the original tolerance is restored afterward.
+    _saved_nl_tol = None
+    if nl_tol_inner is not None:
+        _saved_nl_tol = mygs.settings.nl_tol
+        mygs.settings.nl_tol = nl_tol_inner
+        mygs.update_settings()
+
+    try:
+        return _find_optimal_scale_inner(
+            mygs, psi_N, n_psi, _q_npsi, pressure, ffp_prof, pp_prof,
+            j_inductive, Ip_target, psi_pad, spike_prof, find_j0, scale_j0,
+            tolerance, max_iter, diagnostic_plots, verbose,
+        )
+    finally:
+        if _saved_nl_tol is not None:
+            mygs.settings.nl_tol = _saved_nl_tol
+            mygs.update_settings()
+
+
+def _find_optimal_scale_inner(
+        mygs, psi_N, n_psi, _q_npsi, pressure, ffp_prof, pp_prof,
+        j_inductive, Ip_target, psi_pad, spike_prof, find_j0, scale_j0,
+        tolerance, max_iter, diagnostic_plots, verbose):
+    """Implementation of find_optimal_scale (called after tolerance is set)."""
     import matplotlib.pyplot as plt
 
-    n_psi = len(psi_N)
-    
     if spike_prof is None:
         spike_prof = numpy.zeros_like(j_inductive)
-    
+
     # We want: Input_J0 - Output_J0 ~ 0
     def get_j0_error(scale_val, n):
         if verbose:
@@ -414,9 +446,10 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
 
         solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target)
         
-        # Check Convergence
-        _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-        _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+        # Check Convergence using _q_npsi points (may be smaller than n_psi;
+        # only tmp_jphi[0] is needed so coarser sampling is fine).
+        _, f, fp, _, pp = mygs.get_profiles(npsi=_q_npsi, psi_pad=psi_pad)
+        _, _, ravgs, _, _, _ = mygs.get_q(npsi=_q_npsi, psi_pad=psi_pad)
 
         tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs[0], ravgs[1])
 
@@ -825,7 +858,9 @@ def solve_with_bootstrap(mygs,
                          diagnostic_plots=False,
                          parameterize_jBS = False,
                          use_OMFIT_sauter = False,
-                         verbose = True):
+                         verbose = True,
+                         nl_tol_inner=None,
+                         npsi_inner=None):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
     @param mygs Grad-Shafranov solver object
@@ -844,6 +879,10 @@ def solve_with_bootstrap(mygs,
     @param diagnostic_plots If True, plot diagnostic figures
     @param parameterize_jBS If True, use parameterized edge spike
     @param use_OMFIT_sauter If True, use OMFIT Sauter model
+    @param nl_tol_inner If not None, use this GS tolerance for secant solves inside
+        find_optimal_scale; the original tolerance is restored for the final solve. Typical: 1e-4.
+    @param npsi_inner If not None, use this many flux-surface points inside find_optimal_scale
+        secant evaluations (only on-axis value is needed, so coarser is fine). Typical: 15.
     @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
     '''
     from scipy.optimize import root_scalar
@@ -1049,7 +1088,8 @@ def solve_with_bootstrap(mygs,
         final_scale_j0, final_jphi = find_optimal_scale(mygs,
             psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive,
             Ip_target, psi_pad, spike_prof=spike_prof, find_j0=True,
-            diagnostic_plots=diagnostic_plots, verbose=verbose
+            diagnostic_plots=diagnostic_plots, verbose=verbose,
+            nl_tol_inner=nl_tol_inner, npsi_inner=npsi_inner,
         )
         if verbose:
             print('\n >>> Finding optimal Ip scale factor')
@@ -1058,7 +1098,8 @@ def solve_with_bootstrap(mygs,
             psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive,
             Ip_target, psi_pad, spike_prof=spike_prof, find_j0=False,
             scale_j0=final_scale_j0,
-            tolerance=0.001, diagnostic_plots=diagnostic_plots, verbose=verbose
+            tolerance=0.001, diagnostic_plots=diagnostic_plots, verbose=verbose,
+            nl_tol_inner=nl_tol_inner, npsi_inner=npsi_inner,
         )
         
         if verbose:
