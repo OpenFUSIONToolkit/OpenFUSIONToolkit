@@ -461,8 +461,8 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
 
         solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target)
     
-        eq_stats = mygs.get_stats(lcfs_pad=psi_pad)
-        output_Ip = eq_stats['Ip']
+        # get_globals() is sufficient here — we only need Ip, not the full stat block
+        output_Ip, *_ = mygs.get_globals()
         
         # Calculate residual (difference) and relative error
         diff = output_Ip - Ip_target
