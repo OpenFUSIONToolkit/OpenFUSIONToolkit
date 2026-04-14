@@ -49,7 +49,28 @@ BASE_CONFIG = {
     'pedestal': {
         'model_name': 'set_T_ped_n_ped',
     },
-    'transport': {
+    # 'transport': { # recommended in torax documentation
+    #     'model_name': 'combined',
+    #     'transport_models': [
+    #         # Base model: QLKNN applied everywhere (default ADD)
+    #         {
+    #             'model_name': 'qlknn',
+    #             'rho_max': 1.0,
+    #         },
+    #         # Edge overwrite: Sets D_e and V_e in the edge, ignoring QLKNN there.
+    #         # Keeps chi_i/chi_e from QLKNN (because they are disabled here).
+    #         {
+    #             'model_name': 'constant',
+    #             'rho_min': 0.9,
+    #             'D_e': 0.5,
+    #             'V_e': -1.0,
+    #             'merge_mode': 'overwrite',
+    #             'disable_chi_i': True,
+    #             'disable_chi_e': True,
+    #         },
+    #     ],
+    # },
+    'transport': { # old base config
         'model_name': 'qlknn',
         'apply_inner_patch': True,
         'rho_inner': 0.1,
@@ -162,7 +183,7 @@ class TokTox:
 
     # ─── Initialization ─────────────────────────────────────────────────────────
 
-    def __init__(self, t_init, t_final, eqtimes, g_eqdsk_arr, tx_dt=0.1, tm_times=None, last_surface_factor=0.99, prescribed_currents=False, cocos=2, oft_env=None, oft_threads=4, truncate_eq=False):
+    def __init__(self, t_init, t_final, eqtimes, g_eqdsk_arr, tx_dt=0.1, tm_times=None, last_surface_factor=0.99, cocos=2, oft_env=None, oft_threads=4, truncate_eq=False):
         r'''! Initialize the Coupled TokaMaker + TORAX object.
         @param t_init Start time (s).
         @param t_final End time (s).
@@ -172,7 +193,6 @@ class TokTox:
         @param tm_times Time points where TokaMaker solves equilibrium.
         @param last_surface_factor Last surface factor for Torax.
         @param n_rho Number of grid cells for torax.
-        @param prescribed_currents Use prescribed coil currents or solve inverse problem to calculate currents.
         @param cocos COCOS version of input EQDSK.
         @param oft_env OFT environment.
         @param truncate_eq Whether to truncate equilibrium when saving TokaMaker output to EQDSK.
@@ -192,7 +212,6 @@ class TokTox:
         self._t_init = t_init
         self._t_final = t_final
         self._tx_dt = tx_dt # TORAX timestep
-        self._prescribed_currents = prescribed_currents
         self._last_surface_factor = last_surface_factor
         self._n_rho = 50 # resolution of TORAX grid, default 50, changed with set_tx_grid()
         self._psi_N = np.linspace(0.0, 1.0, N_PSI) # standardized psi_N grid all values should be mapped onto
@@ -378,22 +397,19 @@ class TokTox:
             pax.append(g['pres'][0])
             Ip.append(abs(g['ip']))
 
-            # Convert eqdsk psi to TokaMaker native convention (psi_axis > psi_lcfs, i.e. psi
-            # decreases outward). If the file has psi increasing outward (cocos=2 save negates
-            # TM's native psi), negate both values so _psi_lcfs_seed matches TM's expectation.
-            _psimag = g['psimag']
-            _psibry = g['psibry']
-            if _psimag < _psibry:  # file has psi increasing outward → negate to TM convention
-                _psimag = -_psimag
-                _psibry = -_psibry
-            psi_axis.append(_psimag)
-            psi_lcfs.append(_psibry)  # now in TM native convention (psi_lcfs < psi_axis)
+            # Eqdsks are written via TokaMaker save_eqdsk(cocos=2), which negates
+            # TM's native psi on write. Flip sign back to store TM-native in _state
+            # (psi_axis > psi_lcfs, in Wb/rad). Sign is preserved (can be ±).
+            psi_axis.append(-g['psimag'])
+            psi_lcfs.append(-g['psibry'])
 
             lcfs.append(interp_lcfs(g['rzout']))
 
-            psi_eqdsk = np.linspace(0.0, 1.0, g['nr'])            
-            ffp = np.interp(self._psi_N, psi_eqdsk, g['ffprim'])
-            pp = np.interp(self._psi_N, psi_eqdsk, g['pprime'])
+            psi_eqdsk = np.linspace(0.0, 1.0, g['nr'])
+            # cocos=2 file psi = -psi_TM, so d/dpsi_file = -d/dpsi_TM.
+            # Flip pprime and ffprime to get TM-native derivatives.
+            ffp = -np.interp(self._psi_N, psi_eqdsk, g['ffprim'])
+            pp  = -np.interp(self._psi_N, psi_eqdsk, g['pprime'])
             q = np.interp(self._psi_N, psi_eqdsk, g['qpsi'])
 
             ffp_prof.append(ffp)
@@ -510,7 +526,6 @@ class TokTox:
         self._enable_fusion = True
         self._enable_ei_exchange = True
 
-        self._targets = None
         self._loaded_config = None   # set by load_config()
         self._tx_grid_type = None
         self._tx_grid = None
@@ -684,14 +699,21 @@ class TokTox:
         if vsc is not None:
             self._tm.set_coil_vsc({vsc: 1.0})
 
-    def set_coil_reg(self, targets=None, i=0, coil_bounds=None, updownsym=False,
+    def set_coil_reg(self, coil_bounds=None, updownsym=False,
                      default_weight=1.0E-1, disable_coils=None,
                      disable_weight=1.0E4, symmetry_weight=1.0E3,
                      disable_virtual_vsc=True, vsc_weight=1.0E4):
-        r'''! Set coil regularization using the matrix-based TokaMaker input.
-        @param targets Dict of {coil_name: target_current} or {coil_name: time_series} for prescribed currents.
-        @param i Timestep index (used for prescribed_currents interpolation).
-        @param coil_bounds Dict of {coil_name: [min, max]} current bounds. Default ±50 kA.
+        r'''! Set coil regularization using the dict-based TokaMaker reg_terms API.
+
+        Coil bounds are hard current limits in Amperes per turn (A/turn). The total
+        current in a coil region is I_coil [A/turn] * n_turns, where n_turns comes
+        from the mesh file coil definition.
+
+        During the pulse, coil current targets are set automatically: the initial
+        equilibrium currents seed i=0, and each subsequent timestep uses the previous
+        timestep's solved currents as loose targets.
+
+        @param coil_bounds Dict of {coil_name: [min, max]} hard current bounds [A/turn]. Default ±5 MA/turn.
         @param updownsym Enforce up-down symmetry for coil pairs (U/L naming convention).
         @param default_weight Regularization weight for normal coils (default 0.1).
         @param disable_coils List of coil name prefixes to disable (e.g. ['DV1', 'DV2']).
@@ -705,86 +727,58 @@ class TokTox:
         self._tm.set_coil_bounds(coil_bounds)
         self._coil_bounds = coil_bounds  # store for re-application after solve
 
-        if self._prescribed_currents and targets:
-            self._targets = targets
-
-        # Build matrix-based regularization (same API as tokamaker_runner.py)
-        n = self._tm.ncoils + 1  # +1 for virtual VSC coil
-        coil_regmat = np.zeros((n, n), dtype=np.float64)
-        coil_reg_weights = np.zeros((n,), dtype=np.float64)
-        coil_targets = np.zeros((n,), dtype=np.float64)
-
         if disable_coils is None:
             disable_coils = []
 
-        for name, coil in self._tm.coil_sets.items():
-            cid = coil['id']
-
-            # Determine target current for this coil
-            if self._prescribed_currents and targets:
-                t_current = np.interp(self._tm_times[i], self._targets['time'], self._targets.get(name, [0.0]*len(self._targets.get('time', [0]))))
-                coil_targets[cid] = t_current
-            elif targets and name in targets:
-                coil_targets[cid] = targets[name]
-
-            if updownsym and 'U' in name:
-                # Enforce up-down symmetry: I_upper - I_lower = 0
-                lower_name = name.replace('U', 'L')
-                if lower_name in self._tm.coil_sets:
-                    coil_regmat[cid, cid] = 1.0
-                    coil_regmat[cid, self._tm.coil_sets[lower_name]['id']] = -1.0
-                    coil_reg_weights[cid] = symmetry_weight
-                    continue
-
-            # Normal coil regularization
-            coil_regmat[cid, cid] = 1.0
-            if any(name.startswith(prefix) for prefix in disable_coils):
-                coil_reg_weights[cid] = disable_weight
-            else:
-                coil_reg_weights[cid] = default_weight
-
-        # Virtual VSC coil (last entry in the matrix)
-        coil_regmat[-1, -1] = 1.0
-        if disable_virtual_vsc:
-            coil_reg_weights[-1] = vsc_weight
-        else:
-            coil_reg_weights[-1] = default_weight
-
-        self._tm.set_coil_reg(coil_regmat, reg_weights=coil_reg_weights, reg_targets=coil_targets)
-
-        # Store config for post-solve re-application
         self._coil_reg_config = {
-            'targets': targets, 'coil_bounds': coil_bounds,
+            'coil_bounds': coil_bounds,
             'updownsym': updownsym, 'default_weight': default_weight,
             'disable_coils': disable_coils, 'disable_weight': disable_weight,
             'symmetry_weight': symmetry_weight,
             'disable_virtual_vsc': disable_virtual_vsc, 'vsc_weight': vsc_weight,
         }
+        self._apply_coil_reg(targets=None)
 
-    def _get_i0_coil_targets(self):
-        r'''! Resolve i=0 coil-current targets for the current TM loop.
-
-        Behavior:
-          1. Loop 1: force zero coil-current targets (None) so i=0 is
-             constrained by LCFS/psi targets rather than seeded coil currents.
-          2. Loop 2+: use previous loop solved equilibrium at i=0 when available.
-          3. Fallback: None (caller uses zeros in set_coil_reg).
-
-        @return Tuple (targets_dict_or_None, source_label).
+    def _apply_coil_reg(self, targets=None):
+        r'''! Internal: build and apply reg_terms from stored config plus per-timestep targets.
+        @param targets Dict of {coil_name: current [A/turn]} to use as soft targets, or None for zeros.
         '''
-        if self._current_loop <= 1:
-            return None, 'forced to zero on loop 1'
+        cfg = self._coil_reg_config
+        updownsym    = cfg['updownsym']
+        default_weight = cfg['default_weight']
+        disable_coils  = cfg['disable_coils']
+        disable_weight = cfg['disable_weight']
+        symmetry_weight = cfg['symmetry_weight']
+        disable_virtual_vsc = cfg['disable_virtual_vsc']
+        vsc_weight   = cfg['vsc_weight']
 
-        eq0 = self._state.get('equil', {}).get(0)
-        if eq0 is not None:
-            try:
-                coil_targets, _ = eq0.get_coil_currents()
-                if coil_targets:
-                    return coil_targets, 'previous loop i=0 equilibrium'
-            except Exception as e:
-                self._log(f'TM: failed to pull i=0 coil targets from previous equilibrium: {e}')
+        reg_terms = []
+        processed_for_symmetry = set()
 
-        return None, 'no previous loop i=0 equilibrium available'
+        for name in self._tm.coil_sets:
+            if name in processed_for_symmetry:
+                continue
+
+            t_target = targets[name] if (targets and name in targets) else 0.0
+
+            if updownsym and 'U' in name:
+                # Enforce up-down symmetry: I_upper - I_lower = 0
+                lower_name = name.replace('U', 'L')
+                if lower_name in self._tm.coil_sets:
+                    reg_terms.append(self._tm.coil_reg_term(
+                        {name: 1.0, lower_name: -1.0}, target=0.0, weight=symmetry_weight))
+                    processed_for_symmetry.add(name)
+                    processed_for_symmetry.add(lower_name)
+                    continue
+
+            weight = disable_weight if any(name.startswith(p) for p in disable_coils) else default_weight
+            reg_terms.append(self._tm.coil_reg_term({name: 1.0}, target=t_target, weight=weight))
+
+        # Virtual VSC coil
+        vsc_w = vsc_weight if disable_virtual_vsc else default_weight
+        reg_terms.append(self._tm.coil_reg_term({'#VSC': 1.0}, target=0.0, weight=vsc_w))
+
+        self._tm.set_coil_reg(reg_terms=reg_terms)
 
 
     # ─── Property Setters ───────────────────────────────────────────────────────
@@ -1628,7 +1622,9 @@ class TokTox:
         if self._save_outputs:
             self._res_update(data_tree)
 
-        consumed_flux = 2.0 * np.pi * (self._state['psi_lcfs_tx'][-1] - self._state['psi_lcfs_tx'][0])
+        # Flux consumption: positive Ip drives psi_lcfs down in TM-native.
+        # Convention: consumed_flux > 0 means plasma has consumed flux from CS.
+        consumed_flux = -2.0 * np.pi * (self._state['psi_lcfs_tx'][-1] - self._state['psi_lcfs_tx'][0])
         consumed_flux_integral = np.trapezoid(v_loops[0:], self._tm_times[0:])
         self._log(f"Loop {self._current_loop} TORAX: cflux={consumed_flux:.4f} Wb")
         self._print(f'  TORAX: done (cflux={consumed_flux:.4f} Wb)')
@@ -1697,20 +1693,11 @@ class TokTox:
         self._state['q_prof_tx'][i] = self._extract_tx_profile(data_tree, 'q', t)
 
         # ── Psi profile (flux surfaces) ─────────────────────────────────────
-        # TORAX stores psi in COCOS 11 (Wb, growing from axis outward, positive).
-        # TokaMaker expects psi in Wb/rad with psi_axis > psi_lcfs (decreasing outward).
-        # Step 1: convert Wb → Wb/rad.
-        # Step 2: reflect profile so axis > lcfs (TM convention).
-        # Step 3: match sign to the eqdsk seed — TORAX always produces positive psi
-        #         after its internal normalization, regardless of the input COCOS sign.
-        #         If the seed eqdsks have negative psi_lcfs (TokaMaker native convention),
-        #         the reflected profile must also be negated so the psi constraint passed
-        #         to TokaMaker's GS solver has the correct sign.
-        psi_tx = self._extract_tx_profile(data_tree, 'psi', t, load_into_state=None) / (2.0 * np.pi)
-        psi_tx = 2.0 * psi_tx[-1] - psi_tx  # reflect: axis > lcfs (TM convention)
-        psi_lcfs_seed = self._psi_lcfs_seed[i]
-        if psi_lcfs_seed != 0.0 and np.sign(psi_tx[-1]) != np.sign(psi_lcfs_seed):
-            psi_tx = -psi_tx  # match sign of eqdsk seed
+        # TORAX stores psi in COCOS 11 (Wb, grows outward, positive-Ip sign).
+        # TokaMaker native convention: Wb/rad, psi_axis > psi_lcfs (decreasing outward),
+        # with overall sign determined by the equilibrium (can be positive or negative).
+        # Transform: psi_TM = -psi_COCOS11 / (2π)
+        psi_tx = -self._extract_tx_profile(data_tree, 'psi', t, load_into_state=None) / (2.0 * np.pi)
         self._state['psi_tx'][i] = {'x': self._psi_N.copy(), 'y': psi_tx.copy(), 'type': 'linterp'}
         self._state['psi_lcfs_tx'][i] = self._state['psi_tx'][i]['y'][-1]
         self._state['psi_axis_tx'][i] = self._state['psi_tx'][i]['y'][0]
@@ -1847,21 +1834,22 @@ class TokTox:
         # ── Per-loop initialization (before timestep sweep) ──────────────────
         self._state['psi_grid_prev_tm'] = {}
 
-        # Reset coil regularization to i=0 targets so stale end-of-loop targets
-        # from the previous loop don't carry over.
-        cfg = getattr(self, '_coil_reg_config', {})
-        reg_kwargs = {k: v for k, v in cfg.items() if k != 'targets'} if cfg else {}
-        prev_coil_targets = None
-        if cfg:
-            if self._prescribed_currents:
-                self.set_coil_reg(i=0, **reg_kwargs)
-            else:
-                prev_coil_targets, target_src = self._get_i0_coil_targets()
-                # if prev_coil_targets is None:
-                #     self._log(f'\tTM: i=0 coil targets {target_src}; using zero targets with regularization weight.')
-                # else:
-                #     self._log(f'\tTM: i=0 coil targets seeded from {target_src}.')
-                self.set_coil_reg(targets=prev_coil_targets, **reg_kwargs)
+        # Seed i=0 coil targets from the initial equilibrium so stale end-of-loop
+        # targets from the previous loop don't carry over.
+        if getattr(self, '_coil_reg_config', None):
+            init_targets = None
+            try:
+                init_targets, _ = self._tm.get_coil_currents()
+            except Exception as e:
+                self._log(f'TM: could not read initial equilibrium coil currents: {e}')
+            self._apply_coil_reg(targets=init_targets)
+
+        # Debug: log coil bounds at the start of each loop
+        if self._debug_mode and hasattr(self, '_coil_bounds') and self._coil_bounds:
+            self._log('  TM coil bounds [A/turn] (turns * A/turn = total A-turns):')
+            for cname, (lo, hi) in self._coil_bounds.items():
+                n_turns = self._tm.coil_sets.get(cname, {}).get('net_turns', 1.0)
+                self._log(f'    {cname}: [{lo:.3g}, {hi:.3g}] A/turn  x {n_turns:.0f} turns = [{lo*n_turns:.3g}, {hi*n_turns:.3g}] A-turns')
 
         # Warm-start psi at t=0: set psi_dt so eddy-current contribution is negligible.
         if 0 in self._psi_warm_start and self._psi_warm_start[0] is not None:
@@ -2075,14 +2063,13 @@ class TokTox:
                 self._log(f'    TM FAIL at t={t:.2f}s — {err_short}')
                 _pbar.set_postfix_str(f't={t:.2f}s FAIL', refresh=False)
 
-            if self._prescribed_currents:
-                if i + 1 < len(self._tm_times):
-                    self.set_coil_reg(i=i+1, **reg_kwargs)
-            elif not skip_coil_update:
+            if not skip_coil_update and getattr(self, '_coil_reg_config', None):
                 prev_coil_targets, _ = self._state['equil'][i].get_coil_currents()
-                self.set_coil_reg(targets=prev_coil_targets, **reg_kwargs)
+                self._apply_coil_reg(targets=prev_coil_targets)
 
-        consumed_flux = (self._state['psi_lcfs_tm'][-1] - self._state['psi_lcfs_tm'][0]) * 2.0 * np.pi
+        # Flux consumption: positive Ip drives psi_lcfs down in TM-native.
+        # Convention: consumed_flux > 0 means plasma has consumed flux from CS.
+        consumed_flux = -(self._state['psi_lcfs_tm'][-1] - self._state['psi_lcfs_tm'][0]) * 2.0 * np.pi
         consumed_flux_integral = np.trapezoid(self._state['vloop_tm'][0:], self._tm_times[0:])
 
         n_ok = sum(1 for e in _loop_level_log if e['succeeded'])
@@ -2493,6 +2480,8 @@ class TokTox:
                 except OSError:
                     pass
 
+
+        self._current_loop -= 1 # adjust back to last completed loop for reporting
         # ── End-of-run mode-specific outputs ──
         if self._output_mode is not False:
             if self._output_mode in ('minimal', 'debug') and self._out_dir is not None:
@@ -2514,7 +2503,7 @@ class TokTox:
                     self._log(f'plot_lcfs_evolution failed: {_e}')
 
             if self._output_mode in ('normal', 'minimal', 'debug') and self._out_dir is not None:
-                movie_name = f'movie_loop{self._current_loop - 1:03d}.mp4'
+                movie_name = f'movie_loop{self._current_loop:03d}.mp4'
                 if self._output_file_tag is not None:
                     movie_name = f'{self._output_file_tag}_{movie_name}'
                 _movie_path = os.path.join(self._out_dir, movie_name)
@@ -2525,7 +2514,7 @@ class TokTox:
 
         # ── Summary table ──
         _sim_elapsed = time.time() - _sim_start_time
-        n_loops = self._current_loop - 1
+        n_loops = self._current_loop
         converged = err <= convergence_threshold
         self._print(f'\n{"="*60}')
         if converged:

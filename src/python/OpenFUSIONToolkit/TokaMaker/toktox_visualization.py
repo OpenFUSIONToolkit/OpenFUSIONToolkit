@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 import shutil
 import platform
-from typing import TYPE_CHECKING
+# from typing import TYPE_CHECKING
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,8 +18,8 @@ import matplotlib.cm as cm
 from matplotlib.gridspec import GridSpec
 from matplotlib.colors import Normalize
 
-if TYPE_CHECKING:
-    from toktox import TokTox
+# if TYPE_CHECKING:
+#     from toktox import TokTox
 
 # =========================================================================
 #  Style constants
@@ -368,7 +368,9 @@ def profile_plot(tt, i, t, save_path=None, display=True):
 
 def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None, display=True):
     """TokaMaker input/output diagnostic plot for a single timestep."""
-    from read_eqdsk_extended import read_eqdsk_extended
+    # Seed FF'/p'/q references are pulled from tt._state.
+    # Keep the old EQDSK reader path commented for future volume-vs-psi use.
+    # from read_eqdsk_extended import read_eqdsk_extended
 
     s = tt._state
     psi_N = tt._psi_N
@@ -422,14 +424,42 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
     beta_pol_tx = float(s['beta_pol'][i])
     beta_n_tx = float(s['beta_N_tx'][i])
 
-    _eqtimes_arr = np.array(tt._eqtimes)
-    _seed_idx = int(np.argmin(np.abs(_eqtimes_arr - t)))
-    _seed_g = read_eqdsk_extended(tt._init_files[_seed_idx])
-    _seed_psi_n = np.linspace(0.0, 1.0, len(_seed_g['ffprim']))
-    _seed_ffp_norm = _seed_g['ffprim'].copy() / _seed_g['ffprim'][0]
-    _seed_pp_norm = _seed_g['pprime'].copy() / _seed_g['pprime'][0]
-    q0_seed_eq = _seed_g['q0']
-    q95_seed_eq = _seed_g['q95']
+    _seed_ffp_prof = s.get('ffp_prof_eqdsk', {}).get(i)
+    _seed_pp_prof = s.get('pp_prof_eqdsk', {}).get(i)
+    _seed_q_prof = s.get('q_prof_eqdsk', {}).get(i)
+
+    _seed_ffp_x = _seed_ffp_norm = None
+    if _seed_ffp_prof is not None:
+        _seed_ffp_x = np.asarray(_seed_ffp_prof.get('x', []), dtype=float)
+        _seed_ffp_norm = np.asarray(_seed_ffp_prof.get('y', []), dtype=float)
+        if _seed_ffp_x.size == 0 or _seed_ffp_norm.size == 0:
+            _seed_ffp_x, _seed_ffp_norm = None, None
+
+    _seed_pp_x = _seed_pp_norm = None
+    if _seed_pp_prof is not None:
+        _seed_pp_x = np.asarray(_seed_pp_prof.get('x', []), dtype=float)
+        _seed_pp_norm = np.asarray(_seed_pp_prof.get('y', []), dtype=float)
+        if _seed_pp_x.size == 0 or _seed_pp_norm.size == 0:
+            _seed_pp_x, _seed_pp_norm = None, None
+
+    q0_seed_eq = np.nan
+    q95_seed_eq = np.nan
+    if _seed_q_prof is not None:
+        _seed_q_x = np.asarray(_seed_q_prof.get('x', []), dtype=float)
+        _seed_q_y = np.asarray(_seed_q_prof.get('y', []), dtype=float)
+        if _seed_q_x.size > 0 and _seed_q_y.size > 0:
+            q0_seed_eq = float(np.interp(0.0, _seed_q_x, _seed_q_y))
+            q95_seed_eq = float(np.interp(0.95, _seed_q_x, _seed_q_y))
+
+    # Fallback kept intentionally (commented):
+    # _eqtimes_arr = np.array(tt._eqtimes)
+    # _seed_idx = int(np.argmin(np.abs(_eqtimes_arr - t)))
+    # _seed_g = read_eqdsk_extended(tt._init_files[_seed_idx])
+    # _seed_ffp_norm = _seed_g['ffprim'].copy() / _seed_g['ffprim'][0]
+    # _seed_pp_norm = _seed_g['pprime'].copy() / _seed_g['pprime'][0]
+    # q0_seed_eq = _seed_g['q0']
+    # q95_seed_eq = _seed_g['q95']
+    # _seed_volume_vs_psi = _seed_g[...]  # volume(psi) if/when needed
 
     fig = plt.figure(figsize=(22, 12))
     gs_layout = fig.add_gridspec(3, 6, hspace=0.70, wspace=0.55)
@@ -443,7 +473,7 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
     ax_tbl1 = fig.add_subplot(gs_layout[0, 4:6])
     ax_tbl2 = fig.add_subplot(gs_layout[1:3, 4:6])
 
-    _plot_levels(ax_ffp_tx, 'ffp', seed_x=_seed_psi_n, seed_y=_seed_ffp_norm, seed_label="FF' seed EQDSK (norm)")
+    _plot_levels(ax_ffp_tx, 'ffp', seed_x=_seed_ffp_x, seed_y=_seed_ffp_norm, seed_label="FF' seed EQDSK (norm)")
     ax_ffp_tx.set_title("FF' tried levels (norm)", fontsize=10)
     ax_ffp_tx.set_xlabel(r'$\hat{\psi}$')
     ax_ffp_tx.set_ylabel("FF' (norm)")
@@ -451,7 +481,7 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
     ax_ffp_tx.grid(True, alpha=0.3)
     ax_ffp_tx.axhline(0, color='k', linewidth=0.5)
 
-    _plot_levels(ax_pp_tx, 'pp', seed_x=_seed_psi_n, seed_y=_seed_pp_norm, seed_label="p' seed EQDSK (norm)")
+    _plot_levels(ax_pp_tx, 'pp', seed_x=_seed_pp_x, seed_y=_seed_pp_norm, seed_label="p' seed EQDSK (norm)")
     ax_pp_tx.set_title("p' tried levels (normalized)", fontsize=10)
     ax_pp_tx.set_xlabel(r'$\hat{\psi}$')
     ax_pp_tx.set_ylabel("p' (norm)")
@@ -748,14 +778,12 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.set_title(r'$\psi_{lcfs}$ & $\psi_{axis}$ (TM & TX)')
     ax.plot(times, s['psi_lcfs_tm'], '-', color='tab:blue', label=r'$\psi_{lcfs}$ TM')
     ax.plot(times, s['psi_axis_tm'], '-', color='tab:orange', label=r'$\psi_{axis}$ TM')
-    t_psi_lcfs, y_psi_lcfs = _tx_profile_at_rho(tt, 'psi', 1.0, scale=1.0/(2.0*np.pi))
-    t_psi_axis, y_psi_axis = _tx_profile_at_rho(tt, 'psi', 0.0, scale=1.0/(2.0*np.pi))
+    # TORAX psi is COCOS 11; convert to TM-native: psi_TM = -psi_COCOS11 / (2π)
+    t_psi_lcfs, y_psi_lcfs = _tx_profile_at_rho(tt, 'psi', 1.0, scale=-1.0/(2.0*np.pi))
+    t_psi_axis, y_psi_axis = _tx_profile_at_rho(tt, 'psi', 0.0, scale=-1.0/(2.0*np.pi))
     if t_psi_lcfs is not None:
         ax.plot(t_psi_lcfs, y_psi_lcfs, '--', color='tab:blue', linewidth=1, label=r'$\psi_{lcfs}$ TX')
     if t_psi_axis is not None:
-        # Reflect psi_axis over psi_lcfs to match TM convention (same as _tx_update)
-        y_psi_lcfs_interp = np.interp(t_psi_axis, t_psi_lcfs, y_psi_lcfs)
-        y_psi_axis = 2.0 * y_psi_lcfs_interp - y_psi_axis
         ax.plot(t_psi_axis, y_psi_axis, '--', color='tab:orange', linewidth=1, label=r'$\psi_{axis}$ TX')
     ax.set_xlabel('Time [s]')
     ax.set_ylabel(r'$\psi$ [Wb/rad]')
@@ -905,9 +933,9 @@ def plot_scalars(tt, save_path=None, display=True):
     ax = axes[3, 2]
     ax.set_title('Flux Consumption [Wb]')
     psi_lcfs_tm_arr = np.array(s['psi_lcfs_tm'])
-    ax.plot(times, (psi_lcfs_tm_arr - psi_lcfs_tm_arr[0]) * 2 * np.pi, '-o', markersize=3, label='Flux TM')
+    ax.plot(times, -(psi_lcfs_tm_arr - psi_lcfs_tm_arr[0]) * 2 * np.pi, '-o', markersize=3, label='Flux TM')
     if t_psi_lcfs is not None:
-        flux_tx = (y_psi_lcfs - y_psi_lcfs[0]) * 2 * np.pi
+        flux_tx = -(y_psi_lcfs - y_psi_lcfs[0]) * 2 * np.pi
         ax.plot(t_psi_lcfs, flux_tx, '-', linewidth=1, label='Flux TX')
     ax.set_xlabel('Time [s]')
     ax.set_ylabel('Flux Consumption [Wb]')
@@ -924,8 +952,25 @@ def plot_scalars(tt, save_path=None, display=True):
 #  Coil current plot
 # =========================================================================
 
+def _coil_net_turns(tt, cname):
+    """Return net_turns for a coil set name, defaulting to 1."""
+    return tt._tm.coil_sets.get(cname, {}).get('net_turns', 1.0)
+
+
+def _coil_aturn_clim(tt):
+    """Return (min, max) colormap limits in A-turns from _coil_bounds (A/turn * turns)."""
+    coil_bounds = getattr(tt, '_coil_bounds', {})
+    if not coil_bounds:
+        return -1.0, 1.0
+    vals = []
+    for cname, (lo, hi) in coil_bounds.items():
+        n = _coil_net_turns(tt, cname)
+        vals.extend([lo * n, hi * n])
+    return min(vals), max(vals)
+
+
 def plot_coils(tt, save_path=None, display=True):
-    """Plot coil current traces with limit bands."""
+    """Plot coil current traces in MA-turns with limit bands."""
     coil_data = tt._results.get('COIL', {})
     if not coil_data:
         return
@@ -936,15 +981,17 @@ def plot_coils(tt, save_path=None, display=True):
     fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3 * nrows), squeeze=False)
     for k, cname in enumerate(coil_names):
         ax = axes[k // ncols, k % ncols]
+        n_turns = _coil_net_turns(tt, cname)
         t_vals = sorted(coil_data[cname].keys())
-        i_vals = [coil_data[cname][t_v] * 1e-3 for t_v in t_vals]
+        i_vals = [coil_data[cname][t_v] * n_turns * 1e-3 for t_v in t_vals]
         ax.plot(t_vals, i_vals, '-o', ms=2, lw=1.2)
         if hasattr(tt, '_coil_bounds') and cname in tt._coil_bounds:
             lo, hi = tt._coil_bounds[cname]
-            ax.axhline(lo * 1e-3, color='r', ls='--', lw=0.8, label=f'limit {lo * 1e-3:.0f} kA')
-            ax.axhline(hi * 1e-3, color='r', ls='--', lw=0.8, label=f'limit {hi * 1e-3:.0f} kA')
+            lo_ka, hi_ka = lo * n_turns * 1e-6, hi * n_turns * 1e-6
+            ax.axhline(lo_ka, color='r', ls='--', lw=0.8, label=f'limit {lo_ka:.0f} MA-t')
+            ax.axhline(hi_ka, color='r', ls='--', lw=0.8, label=f'limit {hi_ka:.0f} MA-t')
         ax.set_title(cname, fontsize=9)
-        ax.set_ylabel('I [kA]', fontsize=8)
+        ax.set_ylabel('I [MA-turns]', fontsize=8)
         ax.set_xlabel('Time [s]', fontsize=8)
         ax.tick_params(labelsize=7)
         ax.grid(True, alpha=0.3)
@@ -1041,7 +1088,11 @@ def plot_lcfs_evolution(tt, save_path=None, display=True, one_plot=False):
                 try:
                     lcfs = equil.trace_surf(1.0)
                 except Exception:
-                    continue
+                    try:
+                        lcfs = equil.trace_surf(0.99)
+                    except Exception:
+                        print('Failed to trace LCFS from equilibrium at time index', i)
+                        continue
             if lcfs is None or len(lcfs) == 0:
                 continue
             lcfs = np.asarray(lcfs)
@@ -1099,7 +1150,7 @@ def make_movie(tt, save_path=None, display=True, speed_factor=1.0, loop=None, no
         None  → auto-detect (embed if in Jupyter and display=True).
     """
     if loop is None:
-        loop = tt._current_loop - 1
+        loop = tt._current_loop
 
     tmp_dir = _make_temp_dir()
     try:
@@ -1108,8 +1159,8 @@ def make_movie(tt, save_path=None, display=True, speed_factor=1.0, loop=None, no
 
         psi_lcfs_tm = np.array(tt._state['psi_lcfs_tm'])
         psi_lcfs_tx = np.array(tt._state['psi_lcfs_tx'])
-        flux_con_tm = (psi_lcfs_tm - psi_lcfs_tm[0]) * 2.0 * np.pi
-        flux_con_tx = (psi_lcfs_tx - psi_lcfs_tx[0]) * 2.0 * np.pi
+        flux_con_tm = -(psi_lcfs_tm - psi_lcfs_tm[0]) * 2.0 * np.pi
+        flux_con_tx = -(psi_lcfs_tx - psi_lcfs_tx[0]) * 2.0 * np.pi
 
         # Render equil plots from stored psi snapshots
         equil_dir = os.path.join(tmp_dir, 'equil')
@@ -1143,7 +1194,6 @@ def make_movie(tt, save_path=None, display=True, speed_factor=1.0, loop=None, no
 def _render_equil_frames(tt, loop, equil_dir):
     """Render equilibrium plots from stored equilibrium snapshots to PNG files."""
     equil_data = tt._state.get('equil', {})
-    coil_bounds = getattr(tt, '_coil_bounds', {})
 
     for i in range(len(tt._tm_times)):
         out_path = os.path.join(equil_dir, f'equil_{loop:03d}.{i:03d}.png')
@@ -1160,17 +1210,16 @@ def _render_equil_frames(tt, loop, equil_dir):
             continue
 
         fig, ax = plt.subplots(1, 1, figsize=(11, 12))
-        min_bound = min(b for bounds in coil_bounds.values() for b in bounds) * 1.E-6 if coil_bounds else -1
-        max_bound = max(b for bounds in coil_bounds.values() for b in bounds) * 1.E-6 if coil_bounds else 1
+        min_bound, max_bound = _coil_aturn_clim(tt)
         cb = tt._tm.plot_machine(fig, ax, equilibrium=equil, coil_colormap='seismic', coil_symmap=False,
-                                  coil_scale=1.E-6, coil_clabel=r'$I_C$ [MA]')
+                                  coil_scale=1.E-6, coil_clabel=r'$I_C$ [MA-turns]')
         tt._tm.plot_constraints(fig, ax, equilibrium=equil)
         if cb is not None:
-            cb.mappable.set_clim(min_bound, max_bound)
+            cb.mappable.set_clim(min_bound * 1e-6, max_bound * 1e-6)
         tt._tm.plot_psi(fig, ax, equilibrium=equil, xpoint_color='r', vacuum_nlevels=4)
         x_pt = getattr(tt, '_x_point_targets', None)
         if x_pt is not None and _x_points_active(tt, i, t=tt._tm_times[i]):
-            ax.plot(x_pt[:, 0], x_pt[:, 1], 'rx', markersize=10, markeredgewidth=2, label='Saddle point targets')
+            ax.plot(x_pt[:, 0], x_pt[:, 1], 'x', color='purple', markersize=10, markeredgewidth=2, label='Saddle point targets')
         sp = tt._state.get('strike_pts', {}).get(i)
         if sp is not None and len(sp) > 0:
             ax.plot(sp[:, 0], sp[:, 1], 'g^', markersize=10, markeredgewidth=2, label='Strike point targets')
@@ -1189,7 +1238,7 @@ def _render_frame(tt, loop, idx, t_now, times, flux_con_tm, flux_con_tx, out_pat
 
     fig = plt.figure(figsize=(MOVIE_FIG_W, MOVIE_FIG_H), dpi=MOVIE_DPI)
     gs = GridSpec(6, 3, figure=fig, width_ratios=[1.2, 1.0, 1.0],
-                  wspace=0.16, hspace=0.18,
+                  wspace=0.28, hspace=0.18,
                   left=0.045, right=0.94, top=0.96, bottom=0.05)
 
     # Column 0: info + equil
@@ -1282,7 +1331,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
     ax.plot(times, np.array(s['Ip_tx']) / 1e6, color=COLOR_TX, ls=LS_PRI, lw=LW, label='Ip TX')
     ax.plot(times, np.array(s['Ip_ni_tx']) / 1e6, color=COLOR_TX, ls=LS_SEC, lw=LW, label='Ip_ni TX')
     ax.set_ylabel('Ip [MA]', fontsize=LABEL_FS)
-    ax.set_title('Plasma Current', fontsize=TITLE_FS)
+    ax.set_title('Scalars', fontsize=TITLE_FS)
     ax.legend(fontsize=LEGEND_FS, loc='upper left')
     _style(ax)
 
@@ -1359,14 +1408,15 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
         cs_colors = plt.cm.tab10(np.linspace(0, 1, max(len(cs_coils), 1)))
         for ci, (cname, cvals) in enumerate(cs_coils):
             ct = sorted(cvals.keys())
-            ci_vals = [cvals[t_v] * 1e-3 for t_v in ct]
+            n_turns = _coil_net_turns(tt, cname)
+            ci_vals = [cvals[t_v] * n_turns * 1e-6 for t_v in ct]
             ax.plot(ct, ci_vals, ls=LS_PRI, lw=LW * 0.8, color=cs_colors[ci], label=cname)
         _legend_if_labeled(ax, fontsize=LEGEND_FS - 2, loc='upper left', ncol=2)
     else:
         ax.text(0.5, 0.5, 'No CS coils', transform=ax.transAxes,
                 ha='center', va='center', fontsize=LABEL_FS)
-    ax.set_ylabel('I_coil [kA]', fontsize=LABEL_FS)
-    ax.set_title('CS Coil Currents', fontsize=TITLE_FS)
+    ax.set_ylabel('I_coil [MA-turns]', fontsize=LABEL_FS)
+    # ax.set_title('CS Coil Currents', fontsize=TITLE_FS)
     _style(ax)
 
     # 6: PF and other coil currents
@@ -1375,14 +1425,15 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
         oth_colors = plt.cm.tab20(np.linspace(0, 1, max(len(other_coils), 1)))
         for ci, (cname, cvals) in enumerate(other_coils):
             ct = sorted(cvals.keys())
-            ci_vals = [cvals[t_v] * 1e-3 for t_v in ct]
+            n_turns = _coil_net_turns(tt, cname)
+            ci_vals = [cvals[t_v] * n_turns * 1e-6 for t_v in ct]
             ax.plot(ct, ci_vals, ls=LS_PRI, lw=LW * 0.75, color=oth_colors[ci], label=cname)
         _legend_if_labeled(ax, fontsize=LEGEND_FS - 3, loc='upper left', ncol=2)
     else:
         ax.text(0.5, 0.5, 'No PF/other coils', transform=ax.transAxes,
                 ha='center', va='center', fontsize=LABEL_FS)
-    ax.set_ylabel('I_coil [kA]', fontsize=LABEL_FS)
-    ax.set_title('PF/Other Coil Currents', fontsize=TITLE_FS)
+    ax.set_ylabel('I_coil [MA-turns]', fontsize=LABEL_FS)
+    # ax.set_title('PF/Other Coil Currents', fontsize=TITLE_FS)
     _style(ax)
 
     _vline(axes, t_now)
@@ -1636,7 +1687,7 @@ def plot_equil_interactive(tt, loop=None, notebook_mode=None, save_path=None):
         notebook_mode = _in_jupyter()
 
     if loop is None:
-        loop = tt._current_loop - 1
+        loop = tt._current_loop
 
     equil_data = tt._state.get('equil', {})
     times = tt._tm_times
@@ -1649,7 +1700,7 @@ def plot_equil_interactive(tt, loop=None, notebook_mode=None, save_path=None):
             min_bound = min(b for bounds in coil_bounds.values() for b in bounds) * 1.E-6 if coil_bounds else -1
             max_bound = max(b for bounds in coil_bounds.values() for b in bounds) * 1.E-6 if coil_bounds else 1
             cb = tt._tm.plot_machine(fig, ax, equilibrium=equil, coil_colormap='seismic', coil_symmap=False,
-                                      coil_scale=1.E-6, coil_clabel=r'$I_C$ [MA]')
+                                      coil_scale=1.E-6, coil_clabel=r'$I_C$ [MA-turns]')
             if cb is not None:
                 cb.mappable.set_clim(min_bound, max_bound)
             tt._tm.plot_constraints(fig, ax, equilibrium=equil)
@@ -1780,7 +1831,7 @@ def summary(tt):
 
     # Flux consumption
     psi_lcfs_tm = np.array(s['psi_lcfs_tm'])
-    out['flux_consumed_Wb'] = float((psi_lcfs_tm[-1] - psi_lcfs_tm[0]) * 2 * np.pi)
+    out['flux_consumed_Wb'] = float(-(psi_lcfs_tm[-1] - psi_lcfs_tm[0]) * 2 * np.pi)
 
     # Power
     _, y_Pa = _tx_scalar(tt, 'P_alpha_total')
