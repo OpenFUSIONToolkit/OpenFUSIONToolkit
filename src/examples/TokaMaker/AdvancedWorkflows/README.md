@@ -22,17 +22,18 @@ AdvancedWorkflows/
 │   ├── d3d_pulse_ex.py
 │   └── README.md
 │
-├── TokaMax/
-│   ├── etc
-│   ├── etc
-│   └── README.md
-│
 ├── Poloidal Field Coil Optimization/
 │   ├── etc
 │   ├── etc
 │   └── README.md
 │
-└── Isoflux Controller/
-    ├── NSTXU_shape_control_simulator.ipynb
-    ├── NSTXU_shape_generator.ipynb
-    └── README.md
+├── Isoflux Controller/
+|   ├── NSTXU_shape_control_simulator.ipynb
+|   ├── NSTXU_shape_generator.ipynb
+|   └── README.md
+|
+└── TokaMaker+TORAX/
+    └── ITER/
+        ├── ITER_toktox_pulse_ex.ipynb
+        ├── ITER_mesh.h5
+        └── README.md
