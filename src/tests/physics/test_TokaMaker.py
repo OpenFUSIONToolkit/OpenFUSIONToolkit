@@ -569,21 +569,21 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
             mp_q.put(None)
             return
         if stability_test:
-            eig_vals, eig_vecs = mygs.eig_td(-1.E2,10,False)
+            growth_rates, eig_modes = mygs.compute_linear_stability(1.E2,10,False)
             # Run brief nonlinear evolution
             psi0 = mygs.get_psi(False)
-            eig_sign = eig_vecs[0,(mygs.r[:,1]-R0)>0.0][abs(eig_vecs[0,(mygs.r[:,1]-R0)>0.0]).argmax()]
-            psi_ic = psi0-0.01*eig_vecs[0,:]*(mygs.psi_bounds[1]-mygs.psi_bounds[0])/eig_sign
+            eig_sign = eig_modes[0,(mygs.r[:,1]-R0)>0.0][abs(eig_modes[0,(mygs.r[:,1]-R0)>0.0]).argmax()]
+            psi_ic = psi0-0.01*eig_modes[0,:]*(mygs.psi_bounds[1]-mygs.psi_bounds[0])/eig_sign
             mygs.set_psi(psi_ic)
             mygs.set_saddles(None)
             mygs.set_isoflux(None)
-            dt = 0.1/abs(eig_vals[0,0])
+            dt = 0.1/abs(growth_rates[0])
             mygs.setup_td(dt,1.E-13,1.E-11)
             sim_time = 0.0
             for i in range(5):
                 sim_time, _, nl_its, lin_its, nretry = mygs.step_td(sim_time,dt)
             psi1 = mygs.get_psi(False)
-            mp_q.put([{'gamma': eig_vals[:5,0], 'nl_change': np.linalg.norm(psi1-psi0)}])
+            mp_q.put([{'gamma': growth_rates[:5], 'nl_change': np.linalg.norm(psi1-psi0)}])
             oftpy_dump_cov()
             return
         mygs.save_eqdsk('test.eqdsk',lcfs_pressure=6.E4)
