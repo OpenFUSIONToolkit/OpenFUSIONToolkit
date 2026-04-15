@@ -2898,9 +2898,9 @@ IF(has_eta_surf)THEN
 ELSE IF (has_eta_vol.AND.has_thickness)THEN
   self%Eta_surf=self%Eta_vol/self%Thickness
 ELSE IF (has_eta_vol.AND.(.NOT.has_thickness))THEN
-  CALL oft_warn('"eta_vol" specified without thickness in XML. eta_vol is retained, but eta_surf is not inferred in this load path. Provide thickness and then set resistivity explicitly.')
+  CALL oft_warn('"eta_vol" specified without "thickness" nor "eta_surf" in XML. Please specify "eta_surf" or both "eta_vol" and "thickness".')
 ELSE
-  CALL oft_warn('Cannot gather or infer surface resisitivity from XML. Ignore if warning this does not need to be specified.')
+  CALL oft_warn('Cannot gather or infer surface resisitivity from XML. Ignore this warning if resistivity is specified later or is not needed.')
 END IF
 ! Read sensor mask
 CALL xml_get_element(self%xml,"sens_mask",sens_node,ierr)
