@@ -94,6 +94,7 @@ end type xdmf_plot_file
 !> Write data to an HDF5 file
 !------------------------------------------------------------------------------
 INTERFACE hdf5_write
+  MODULE PROCEDURE hdf5_write_string
   MODULE PROCEDURE hdf5_write_scalar_r8
   MODULE PROCEDURE hdf5_write_scalar_i4
   MODULE PROCEDURE hdf5_write_scalar_l
@@ -107,6 +108,7 @@ END INTERFACE hdf5_write
 !> Read data from an HDF5 file
 !------------------------------------------------------------------------------
 INTERFACE hdf5_read
+  MODULE PROCEDURE hdf5_read_string
   MODULE PROCEDURE hdf5_read_scalar_r8
   MODULE PROCEDURE hdf5_read_scalar_i4
   MODULE PROCEDURE hdf5_read_scalar_l
@@ -767,6 +769,42 @@ call h5close_f(error)
 DEBUG_STACK_POP
 end subroutine hdf5_add_string_attribute
 !------------------------------------------------------------------------------
+!> String implementation of \ref oft_io::hdf5_write
+!------------------------------------------------------------------------------
+subroutine hdf5_write_string(string,filename,path)
+character(LEN=*), intent(in) :: string !< String to write to file
+character(LEN=*), intent(in) :: filename !< Path to file
+character(LEN=*), intent(in) :: path !< Variable path in file
+logical :: write_single
+integer(i4) :: error
+integer(i4), parameter :: one=1
+integer(HID_T) :: file_id,dspace_id,dset_id
+INTEGER(HSIZE_T), DIMENSION(1) :: dims
+DEBUG_STACK_PUSH
+!---Remove field if it already exists
+IF(hdf5_field_exist(filename,path))THEN
+  CALL oft_warn('Overwriting existing object "'//TRIM(path)//'" in file '//TRIM(filename))
+  CALL hdf5_delete_obj(filename,path)
+END IF
+!---Initialize HDF5 and open file
+call h5open_f(error)
+call h5fopen_f(TRIM(filename), H5F_ACC_RDWR_F, file_id, error)
+IF(error/=0)CALL oft_abort('Error opening file','hdf5_write_string',__FILE__)
+!---Create dataset and perform write
+dims=LEN(string)
+call h5screate_simple_f(one,dims,dspace_id,error)
+call h5dcreate_f(file_id, "/"//TRIM(path), H5T_NATIVE_CHARACTER, &
+  dspace_id, dset_id, error)
+call h5dwrite_f(dset_id, H5T_NATIVE_CHARACTER, string, dims, error)
+!---Close dataset
+call h5dclose_f(dset_id, error)
+call h5sclose_f(dspace_id, error)
+!---Close file and HDF5
+call h5fclose_f(file_id, error)
+call h5close_f(error)
+DEBUG_STACK_POP
+end subroutine hdf5_write_string
+!------------------------------------------------------------------------------
 !> real(r8) scalar implementation of \ref oft_io::hdf5_write
 !------------------------------------------------------------------------------
 subroutine hdf5_write_scalar_r8(val,filename,path,single_prec)
@@ -1106,6 +1144,55 @@ CALL oft_mpi_barrier(error)
 DEBUG_STACK_POP
 end subroutine hdf5_write_rst
 !------------------------------------------------------------------------------
+!> String implementation of \ref oft_io::hdf5_read
+!------------------------------------------------------------------------------
+subroutine hdf5_read_string(string,filename,path,success)
+character(LEN=:), allocatable, intent(inout) :: string !< String to read from file
+character(LEN=*), intent(in) :: filename !< Path to file
+character(LEN=*), intent(in) :: path !< Variable path in file
+logical, optional, intent(out) :: success !< Successful read?
+integer(i4) :: error
+integer(i4), parameter :: one=1,zero=0
+INTEGER(HSIZE_T) :: space_count
+integer(HID_T) :: file_id,dset_id,dspace_id
+INTEGER(HSIZE_T), DIMENSION(1) :: dims
+! DEBUG_STACK_PUSH
+IF(PRESENT(success))THEN
+  success=.FALSE.
+  CALL h5eset_auto_f(zero, error)
+END IF
+!---Initialize HDF5 and open file
+call h5open_f(error)
+call h5fopen_f(TRIM(filename), H5F_ACC_RDONLY_F, file_id, error)
+IF(error/=0)GOTO 103
+CALL h5dopen_f(file_id, "/"//TRIM(path), dset_id, error)
+IF(error/=0)GOTO 102
+!---
+CALL h5dget_space_f(dset_id, dspace_id, error)
+IF(error/=0)GOTO 101
+CALL h5sget_simple_extent_npoints_f(dspace_id, space_count, error)
+IF(error/=0)GOTO 100
+dims = space_count
+ALLOCATE(CHARACTER(LEN=dims(1)) :: string)
+call h5dread_f(dset_id, H5T_NATIVE_CHARACTER, string, dims, error)
+IF(error/=0)GOTO 100
+!---Close and finalize HDF5
+call h5dclose_f(dset_id, error)
+call h5fclose_f(file_id, error)
+call h5close_f(error)
+! DEBUG_STACK_POP
+IF(PRESENT(success))THEN
+  success=.TRUE.
+  CALL h5eset_auto_f(one, error)
+END IF
+RETURN
+100 CALL h5sclose_f(dspace_id, error)
+101 CALL h5dclose_f(dset_id, error)
+102 CALL h5fclose_f(file_id, error)
+103 CALL h5close_f(error)
+IF(PRESENT(success))CALL h5eset_auto_f(one, error)
+end subroutine hdf5_read_string
+!------------------------------------------------------------------------------
 !> real(r8) scalar implementation of \ref oft_io::hdf5_read
 !------------------------------------------------------------------------------
 subroutine hdf5_read_scalar_r8(val,filename,path,success)
@@ -1135,7 +1222,7 @@ IF(.NOT.success_read)THEN
 END IF
 IF(tmpval(1)==0)THEN
   val=.FALSE.
-ELSE IF(tmpval(1)==0)THEN
+ELSE IF(tmpval(1)==1)THEN
   val=.TRUE.
 ELSE
   val=.FALSE.

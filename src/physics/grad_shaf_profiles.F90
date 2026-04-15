@@ -12,6 +12,7 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 module oft_gs_profiles
+USE oft_io, ONLY: hdf5_read, hdf5_write, hdf5_field_exist
 USE oft_base
 USE spline_mod
 USE oft_gs, ONLY: flux_func, gs_equil, oft_indent, oft_increase_indent, &
@@ -184,6 +185,7 @@ subroutine zero_save_hdf5(self,filename,path)
 class(zero_flux_func), intent(inout) :: self
 character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('zero',filename,path//'/TYPE')
 end subroutine zero_save_hdf5
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -270,6 +272,7 @@ subroutine flat_save_hdf5(self,filename,path)
 class(flat_flux_func), intent(inout) :: self
 character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('flat',filename,path//'/TYPE')
 end subroutine flat_save_hdf5
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -301,11 +304,12 @@ end subroutine flat_load_txt
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_flat_f(func)
-CLASS(flux_func), POINTER, INTENT(inout) :: func
-IF(.NOT.ASSOCIATED(func))ALLOCATE(flat_flux_func::func)
+CLASS(flux_func), INTENT(inout) :: func
 select type(self=>func)
   type is(flat_flux_func)
     self%ncofs=0
+class default
+  CALL oft_abort('Invalid flux function type in create_flat_f','create_flat_f',__FILE__)
 end select
 END SUBROUTINE create_flat_f
 !------------------------------------------------------------------------------
@@ -388,6 +392,7 @@ subroutine poly_save_hdf5(self,filename,path)
 class(poly_flux_func), intent(inout) :: self
 character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('poly',filename,path//'/TYPE')
 CALL hdf5_write(self%ncofs,filename,path//'/NCOFS')
 CALL hdf5_write(self%cofs,filename,path//'/COFS')
 CALL hdf5_write(self%zero_grad,filename,path//'/ZERO_GRAD')
@@ -401,10 +406,10 @@ integer, intent(in) :: io_unit
 WRITE(io_unit,*)'poly'
 IF(self%zero_grad)THEN
   WRITE(io_unit,*)self%ncofs+1,self%zero_grad
-  WRITE(io_unit,*)0.d0,cofs
+  WRITE(io_unit,*)0.d0,self%cofs
 ELSE
   WRITE(io_unit,*)self%ncofs,self%zero_grad
-  WRITE(io_unit,*)cofs
+  WRITE(io_unit,*)self%cofs
 END IF
 end subroutine poly_save_txt
 !------------------------------------------------------------------------------
@@ -442,13 +447,12 @@ end subroutine poly_load_txt
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_poly_ff(func,ncofs,cofs,zero_grad)
-CLASS(flux_func), POINTER, INTENT(inout) :: func
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: ncofs
 REAL(8), INTENT(in) :: cofs(:)
 LOGICAL, INTENT(in) :: zero_grad
 INTEGER(4) :: i,offset
 
-IF(.NOT.ASSOCIATED(func))ALLOCATE(poly_flux_func::func)
 select type(self=>func)
   type is(poly_flux_func)
   !---
@@ -476,7 +480,7 @@ select type(self=>func)
     self%c0=1.d0-self%c0
   END IF
 class default
-  CALL oft_error('Invalid flux function type in create_poly_ff')
+  CALL oft_abort('Invalid flux function type in create_poly_ff','create_poly_ff',__FILE__)
 end select
 END SUBROUTINE create_poly_ff
 !------------------------------------------------------------------------------
@@ -618,6 +622,7 @@ subroutine spline_save_hdf5(self,filename,path)
 class(spline_flux_func), intent(inout) :: self
 character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('spline',filename,path//'/TYPE')
 CALL hdf5_write(self%npsi,filename,path//'/NPSI')
 CALL hdf5_write(self%func%xs(0:self%npsi-1),filename,path//'/XVALS')
 CALL hdf5_write(self%func%fs(0:self%npsi-1,1),filename,path//'/YVALS')
@@ -672,13 +677,12 @@ end subroutine spline_load_txt
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_spline_ff(func,npsi,psivals,yvals)
-CLASS(flux_func), POINTER, INTENT(inout) :: func
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: npsi
 REAL(8), INTENT(in) :: psivals(npsi),yvals(npsi)
 REAL(8) :: psi1,psi2
 REAL(8), ALLOCATABLE :: c(:)
 INTEGER(4) :: i,ierr
-IF(.NOT.ASSOCIATED(func))ALLOCATE(spline_flux_func::func)
 select type(self=>func)
   type is(spline_flux_func)
   !---
@@ -708,6 +712,8 @@ select type(self=>func)
   ierr=self%set_cofs(c)
   DEALLOCATE(c)
   ! WRITE(*,*)'Spline Created',self%ncofs,self%func%xs
+class default
+  CALL oft_abort('Invalid flux function type in create_spline_ff','create_spline_ff',__FILE__)
 end select
 
 END SUBROUTINE create_spline_ff
@@ -852,6 +858,7 @@ subroutine linterp_save_hdf5(self,filename,path)
 class(linterp_flux_func), intent(inout) :: self
 character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('linterp',filename,path//'/TYPE')
 CALL hdf5_write(self%npsi,filename,path//'/NPSI')
 CALL hdf5_write(self%x,filename,path//'/XVALS')
 CALL hdf5_write(self%yp,filename,path//'/YVALS')
@@ -911,13 +918,12 @@ end subroutine linterp_load_txt
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_linterp_ff(func,npsi,psivals,yvals,y0)
-CLASS(flux_func), POINTER, INTENT(inout) :: func
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: npsi
 REAL(8), INTENT(in) :: psivals(npsi)
 REAL(8), INTENT(in) :: yvals(npsi)
 REAL(8), INTENT(in) :: y0
 INTEGER(4) :: i,ierr
-IF(.NOT.ASSOCIATED(func))ALLOCATE(linterp_flux_func::func)
 SELECT TYPE(self=>func)
   TYPE IS(linterp_flux_func)
   !---
@@ -928,14 +934,21 @@ SELECT TYPE(self=>func)
   ALLOCATE(self%yp(self%npsi))
   ALLOCATE(self%y(self%npsi))
   !---
-  IF(y0<1.d-8)CALL oft_abort("Support for y0 = 0 has been removed","create_linterp_ff",__FILE__)
+  ! IF(y0<1.d-8)CALL oft_abort("Support for y0 = 0 has been removed","create_linterp_ff",__FILE__)
   self%y0=y0
   DO i=1,self%npsi
     self%x(i)=psivals(i)
     self%yp(i)=yvals(i)
   END DO
-  ierr=self%set_cofs(yvals)
+  IF(self%y0<1.d-8)THEN
+    self%ncofs=self%ncofs-1
+    ierr=self%set_cofs(yvals(2:self%npsi))
+  ELSE
+    ierr=self%set_cofs(yvals)
+  END IF
   IF(oft_debug_print(1))WRITE(*,*)'Linear interpolator Created',self%ncofs,self%x,self%y0
+class default
+  CALL oft_abort('Invalid flux function type in create_linterp_ff','create_linterp_ff',__FILE__)
 END SELECT
 
 END SUBROUTINE create_linterp_ff
@@ -1120,6 +1133,7 @@ subroutine wesson_save_hdf5(self,filename,path)
 class(wesson_flux_func), intent(inout) :: self
 character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('wesson',filename,path//'/TYPE')
 CALL hdf5_write(self%ncofs,filename,path//'/NCOFS')
 CALL hdf5_write(self%gamma,filename,path//'/GAMMA')
 end subroutine wesson_save_hdf5
@@ -1159,16 +1173,16 @@ end subroutine wesson_load_txt
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_wesson_ff(func,ncofs,gamma)
-CLASS(flux_func), POINTER, INTENT(inout) :: func
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: ncofs
 REAL(8), INTENT(in) :: gamma
-
-IF(.NOT.ASSOCIATED(func))ALLOCATE(wesson_flux_func::func)
 select type(self=>func)
   type is(wesson_flux_func)
   !---
   self%ncofs=ncofs
   self%gamma=gamma
+class default
+  CALL oft_abort('Invalid flux function type in create_wesson_ff','create_wesson_ff',__FILE__)
 end select
 
 END SUBROUTINE create_wesson_ff

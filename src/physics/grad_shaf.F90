@@ -2453,7 +2453,9 @@ DO i=1,self%maxits
   IF(oft_env%pm)WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,equil%ffp_scale,equil%p_scale, &
     SQRT(nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
   !---Check if converged
-  IF((equil%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
+  IF((equil%R0_target>0.d0).AND.(ABS(R0_tmp-equil%R0_target)>1.d-8))CYCLE
+  IF((equil%V0_target>-1.d98).AND.(ABS(V0_tmp-equil%V0_target)>1.d-8))CYCLE
+  ! IF((equil%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
   IF(SQRT(nl_res)<self%nl_tol)EXIT
 end do
 IF(oft_env%pm)CALL oft_decrease_indent

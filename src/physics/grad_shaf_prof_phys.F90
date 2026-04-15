@@ -12,6 +12,7 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 module grad_shaf_prof_phys
+USE oft_io, only: hdf5_write, hdf5_read, hdf5_field_exist
 use oft_base
 use oft_mesh_type, only: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
@@ -57,6 +58,12 @@ type, extends(linterp_flux_func) :: jphi_flux_func
   real(8), pointer, dimension(:) :: jphi => NULL() !< Jphi(psi) profile values
 contains
   !> Needs docs
+  procedure :: save_hdf5 => jphi_save_hdf5
+  procedure :: save_txt => jphi_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => jphi_load_hdf5
+  procedure :: load_txt => jphi_load_txt
+  !> Needs docs
   procedure :: copy => jphi_copy
   !> Update F*F' profile from Jphi, P', and current equilibrium
   procedure :: update => jphi_update
@@ -77,6 +84,12 @@ end type minbinv_interp
 type, extends(spline_flux_func) :: dipole_b0_flux_func
   real(r8) :: psi_pad = 1.d-1
 contains
+  !> Needs docs
+  procedure :: save_hdf5 => dipole_b0_save_hdf5
+  procedure :: save_txt => dipole_b0_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => dipole_b0_load_hdf5
+  procedure :: load_txt => dipole_b0_load_txt
   !> Needs docs
   procedure :: copy => dipole_b0_copy
   !> Needs docs
@@ -108,6 +121,12 @@ end type dipole_ani_press
 type, extends(spline_flux_func) :: mirror_b0_flux_func
   real(r8) :: z_midplane = 0.d0 !< Z location of mirror midplane
 contains
+  !> Needs docs
+  procedure :: save_hdf5 => mirror_b0_save_hdf5
+  procedure :: save_txt => mirror_b0_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => mirror_b0_load_hdf5
+  procedure :: load_txt => mirror_b0_load_txt
   !> Needs docs
   procedure :: copy => mirror_b0_copy
   !> Needs docs
@@ -352,16 +371,79 @@ val(3:8)=val(3:8)*val(2)
 deallocate(j)
 end subroutine minterpinv_apply
 !------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_save_hdf5(self,filename,path)
+class(jphi_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('jphi',filename,path//'/TYPE')
+CALL hdf5_write(self%npsi,filename,path//'/NPSI')
+CALL hdf5_write(self%x,filename,path//'/XVALS')
+CALL hdf5_write(self%jphi,filename,path//'/YVALS')
+CALL hdf5_write(self%j0,filename,path//'/J0')
+end subroutine jphi_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_save_txt(self,io_unit)
+class(jphi_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'jphi'
+WRITE(io_unit,*)self%npsi,self%j0
+WRITE(io_unit,*)self%x
+WRITE(io_unit,*)self%jphi
+end subroutine jphi_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_load_hdf5(self,filename,path,success)
+class(jphi_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+integer(i4) :: npsi
+real(r8) :: J0
+real(r8), allocatable :: xvals(:),yvals(:)
+CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
+IF(.NOT.success)RETURN
+ALLOCATE(xvals(npsi),yvals(npsi))
+CALL hdf5_read(xvals,filename,path//'/XVALS',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(yvals,filename,path//'/YVALS',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(J0,filename,path//'/J0',success=success)
+IF(.NOT.success)RETURN
+CALL create_jphi_ff(self,npsi,xvals,yvals,J0)
+DEALLOCATE(xvals,yvals)
+end subroutine jphi_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_load_txt(self,io_unit)
+class(jphi_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+integer(i4) :: npsi
+real(r8) :: J0
+real(r8), allocatable :: xvals(:),yvals(:)
+READ(io_unit,*)npsi,J0
+ALLOCATE(xvals(npsi),yvals(npsi))
+READ(io_unit,*)xvals
+READ(io_unit,*)yvals
+CALL create_jphi_ff(self,npsi,xvals,yvals,J0)
+DEALLOCATE(xvals,yvals)
+end subroutine jphi_load_txt
+!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals,y0)
-CLASS(flux_func), POINTER, INTENT(out) :: func
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: npsi
 REAL(8), INTENT(in) :: psivals(npsi)
 REAL(8), INTENT(in) :: yvals(npsi)
 REAL(8), INTENT(in) :: y0
 INTEGER(4) :: i,ierr
-ALLOCATE(jphi_flux_func::func)
+! IF(.NOT.ASSOCIATED(func))ALLOCATE(jphi_flux_func::func)
 SELECT TYPE(self=>func)
   TYPE IS(jphi_flux_func)
   !---
@@ -383,6 +465,8 @@ SELECT TYPE(self=>func)
   self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
   ierr=self%set_cofs(self%yp)
   IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ncofs,self%x,self%j0
+class default
+  CALL oft_abort('Invalid flux function type in create_jphi_ff','create_jphi_ff',__FILE__)
 END SELECT
 
 END SUBROUTINE create_jphi_ff
@@ -504,10 +588,9 @@ END SUBROUTINE gs_flux_int
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_dipole_b0_prof(func,npsi)
-CLASS(flux_func), POINTER, INTENT(out) :: func
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: npsi
 INTEGER(4) :: i
-ALLOCATE(dipole_b0_flux_func::func)
 select type(self=>func)
   type is(dipole_b0_flux_func)
     !---
@@ -517,8 +600,56 @@ select type(self=>func)
     DO i=1,omp_get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
+class default
+  CALL oft_abort('Invalid flux function type in create_dipole_b0_prof','create_dipole_b0_prof',__FILE__)
 end select
 END SUBROUTINE create_dipole_b0_prof
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_b0_save_hdf5(self,filename,path)
+class(dipole_b0_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('dipole_b0',filename,path//'/TYPE')
+CALL hdf5_write(self%npsi,filename,path//'/NPSI')
+CALL hdf5_write(self%psi_pad,filename,path//'/PSI_PAD')
+end subroutine dipole_b0_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_b0_save_txt(self,io_unit)
+class(dipole_b0_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'dipole_b0'
+WRITE(io_unit,*)self%npsi,self%psi_pad
+end subroutine dipole_b0_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_b0_load_hdf5(self,filename,path,success)
+class(dipole_b0_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+integer(i4) :: npsi
+real(r8), allocatable :: xvals(:),yvals(:)
+CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(self%psi_pad,filename,path//'/PSI_PAD',success=success)
+IF(.NOT.success)RETURN
+CALL create_dipole_b0_prof(self,npsi)
+end subroutine dipole_b0_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_b0_load_txt(self,io_unit)
+class(dipole_b0_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+integer(i4) :: npsi
+READ(io_unit,*)npsi,self%psi_pad
+CALL create_dipole_b0_prof(self,npsi)
+end subroutine dipole_b0_load_txt
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -695,6 +826,7 @@ ALLOCATE(self%psi_eval,self%psi_geval)
 self%psi_eval%u=>self%gs%psi
 CALL self%psi_eval%setup(self%gs%device%fe_rep)
 CALL self%psi_geval%shared_setup(self%psi_eval)
+ALLOCATE(dipole_b0_flux_func::self%B0_prof)
 CALL create_dipole_b0_prof(self%B0_prof,64)
 end subroutine dipole_ani_setup
 !------------------------------------------------------------------------------
@@ -749,10 +881,10 @@ end subroutine dipole_ani_apply
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_mirror_b0_prof(func,npsi)
-CLASS(flux_func), POINTER, INTENT(out) :: func
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: npsi
 INTEGER(4) :: i
-ALLOCATE(mirror_b0_flux_func::func)
+! IF(.NOT.ASSOCIATED(func))ALLOCATE(mirror_b0_flux_func::func)
 select type(self=>func)
   type is(mirror_b0_flux_func)
     !---
@@ -762,8 +894,58 @@ select type(self=>func)
     DO i=1,omp_get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
+class default
+  CALL oft_abort('Invalid flux function type in create_mirror_b0_prof','create_mirror_b0_prof',__FILE__)
 end select
 END SUBROUTINE create_mirror_b0_prof
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_b0_save_hdf5(self,filename,path)
+class(mirror_b0_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('mirror_b0',filename,path//'/TYPE')
+CALL hdf5_write(self%npsi,filename,path//'/NPSI')
+CALL hdf5_write(self%z_midplane,filename,path//'/Z_MIDPLANE')
+end subroutine mirror_b0_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_b0_save_txt(self,io_unit)
+class(mirror_b0_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'mirror_b0'
+WRITE(io_unit,*)self%npsi
+WRITE(io_unit,*)self%z_midplane
+end subroutine mirror_b0_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_b0_load_hdf5(self,filename,path,success)
+class(mirror_b0_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+integer(i4) :: npsi
+real(r8), allocatable :: xvals(:),yvals(:)
+CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(self%z_midplane,filename,path//'/Z_MIDPLANE',success=success)
+IF(.NOT.success)RETURN
+CALL create_mirror_b0_prof(self,npsi)
+end subroutine mirror_b0_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_b0_load_txt(self,io_unit)
+class(mirror_b0_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+integer(i4) :: npsi
+READ(io_unit,*)npsi
+READ(io_unit,*)self%z_midplane
+CALL create_mirror_b0_prof(self,npsi)
+end subroutine mirror_b0_load_txt
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -873,6 +1055,7 @@ ALLOCATE(self%psi_eval,self%psi_geval)
 self%psi_eval%u=>self%gs%psi
 CALL self%psi_eval%setup(self%gs%device%fe_rep)
 CALL self%psi_geval%shared_setup(self%psi_eval)
+ALLOCATE(mirror_b0_flux_func::self%B0_prof)
 CALL create_mirror_b0_prof(self%B0_prof,64)
 end subroutine mirror_slosh_setup
 !------------------------------------------------------------------------------

@@ -14,7 +14,8 @@
 MODULE oft_gs_util
 USE oft_base
 USE spline_mod
-USE oft_io, ONLY: hdf5_create_file, hdf5_create_group, hdf5_write, hdf5_read
+USE oft_io, ONLY: hdf5_create_file, hdf5_create_group, hdf5_write, hdf5_read, &
+  hdf5_field_get_sizes, hdf5_field_exist
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
 USE oft_solver_base, ONLY: oft_solver
@@ -25,7 +26,7 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
-  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon
+  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
 IMPLICIT NONE
@@ -77,6 +78,7 @@ END SUBROUTINE gs_profile_alloc
 SUBROUTINE gs_profile_load(filename,F)
 CHARACTER(LEN=*), INTENT(in) :: filename !< File storing function definition
 CLASS(flux_func), POINTER, INTENT(out) :: F !< Flux function object
+INTEGER(4) :: io_unit
 ! !---
 ! REAL(8) :: alpha,beta,sep
 ! REAL(8), ALLOCATABLE, DIMENSION(:) :: cofs,yvals
@@ -144,9 +146,7 @@ END SUBROUTINE gs_profile_load
 SUBROUTINE gs_profile_save(filename,F)
 CHARACTER(LEN=*), INTENT(in) :: filename !< File to store function definition
 CLASS(flux_func), POINTER, INTENT(in) :: F !< Flux function object
-!---
 INTEGER(4) :: io_unit
-!---
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 ! !---
 ! SELECT TYPE(this=>F)
@@ -345,6 +345,7 @@ character(LEN=*), optional, intent(in) :: filename
 real(r8), pointer :: vals_tmp(:)
 integer(4) :: hash_tmp,io_unit
 logical :: pm_save
+IF(ASSOCIATED(self%P_ani))CALL oft_abort('Anisotropic pressure profiles not currently supported in tokamaker save.','gs_save_tokamaker',__FILE__)
 CALL hdf5_create_file(filename)
 ! CALL hdf5_create_group(filename,'mesh')
 ! CALL hdf5_write(self%device%fe_rep%mesh%r,filename,'mesh/R')
@@ -363,18 +364,36 @@ CALL hdf5_write(vals_tmp,filename,'tokamaker/PSI')
 CALL hdf5_write(self%coil_currs,filename,'tokamaker/COIL_CURRENTS')
 !---
 CALL hdf5_write(self%ffp_scale,filename,'tokamaker/FFP_SCALE')
-CALL hdf5_write(self%I%f_offset,'tokamaker/F0')
+CALL hdf5_write(self%I%f_offset,filename,'tokamaker/F0')
 CALL hdf5_create_group(filename,'tokamaker/FFP_PROFILE')
 CALL self%I%save(filename,'tokamaker/FFP_PROFILE')
 CALL hdf5_write(self%p_scale,filename,'tokamaker/P_SCALE')
 CALL hdf5_create_group(filename,'tokamaker/PP_PROFILE')
 CALL self%P%save(filename,'tokamaker/PP_PROFILE')
+IF(ASSOCIATED(self%I_NI))THEN
+  CALL hdf5_create_group(filename,'tokamaker/NI_PROFILE')
+  CALL self%I_NI%save(filename,'tokamaker/NI_PROFILE')
+END IF
+IF(ASSOCIATED(self%eta))THEN
+  CALL hdf5_create_group(filename,'tokamaker/ETA_PROFILE')
+  CALL self%eta%save(filename,'tokamaker/ETA_PROFILE')
+END IF
+! IF(ASSOCIATED(self%P_ani))THEN
+!   CALL hdf5_create_group(filename,'tokamaker/P_ANI')
+!   CALL self%P_ani%save(filename,'tokamaker/P_ANI')
+! END IF
 !---
 CALL hdf5_write(self%plasma_bounds,filename,'tokamaker/PSI_BOUNDS')
 CALL hdf5_write(self%o_point,filename,'tokamaker/O_POINT')
 CALL hdf5_write(self%lim_point,filename,'tokamaker/LIM_POINT')
 CALL hdf5_write(self%diverted,filename,'tokamaker/DIVERTED')
 !---
+IF(self%Itor_target>0.d0)CALL hdf5_write(self%Itor_target,filename,'tokamaker/IP_TARGET')
+IF(self%Ip_ratio_target>-1.d98)CALL hdf5_write(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET')
+IF(self%R0_target>0.d0)CALL hdf5_write(self%R0_target,filename,'tokamaker/R0_TARGET')
+IF(self%V0_target>-1.d98)CALL hdf5_write(self%V0_target,filename,'tokamaker/V0_TARGET')
+IF(self%pax_target>0.d0)CALL hdf5_write(self%pax_target,filename,'tokamaker/PAX_TARGET')
+IF(self%estore_target>0.d0)CALL hdf5_write(self%estore_target,filename,'tokamaker/ESTORE_TARGET')
 IF(self%isoflux_ntargets>0)CALL hdf5_write(self%isoflux_targets,filename,'tokamaker/ISOFLUX_TARGETS')
 IF(self%flux_ntargets>0)CALL hdf5_write(self%flux_targets,filename,'tokamaker/FLUX_TARGETS')
 IF(self%saddle_ntargets>0)CALL hdf5_write(self%saddle_targets,filename,'tokamaker/SADDLE_TARGETS')
@@ -385,10 +404,12 @@ end subroutine gs_save_tokamaker
 subroutine gs_load_tokamaker(self,filename)
 class(gs_equil), intent(inout) :: self
 character(LEN=*), optional, intent(in) :: filename
-integer(4) :: hash_tmp,hash_in,io_unit,int_tmp
+integer(4) :: hash_tmp,hash_in,io_unit,int_tmp,ndims
+integer(i4), allocatable :: dim_sizes(:)
 REAL(r8) :: pt_tmp(2),scale_tmp,diff_val
 real(r8), pointer :: vals_tmp(:)
 logical :: success,pm_save,logical_tmp
+CHARACTER(LEN=:), ALLOCATABLE :: profType
 ! CALL hdf5_write(self%device%fe_rep%mesh%r,filename,'mesh/R')
 ! CALL hdf5_write(self%device%fe_rep%mesh%lc,filename,'mesh/LC')
 !---Check compatibility of mesh and FE representation
@@ -415,25 +436,64 @@ NULLIFY(vals_tmp)
 CALL self%psi%get_local(vals_tmp)
 CALL hdf5_read(vals_tmp,filename,'tokamaker/PSI',success=success)
 IF(.NOT.success)GOTO 100
+CALL self%psi%restore_local(vals_tmp)
 CALL hdf5_read(self%coil_currs,filename,'tokamaker/COIL_CURRENTS',success=success)
 IF(.NOT.success)GOTO 100
 CALL gs_update_bounds(self)
 !---Load flux functions
 CALL hdf5_read(self%ffp_scale,filename,'tokamaker/FFP_SCALE',success=success)
 IF(.NOT.success)GOTO 100
+CALL hdf5_read(profType,filename,'tokamaker/FFP_PROFILE/TYPE',success=success)
+IF(.NOT.success)GOTO 100
+CALL gs_profile_alloc(profType,self%I)
+DEALLOCATE(profType)
 CALL self%I%load(filename,'tokamaker/FFP_PROFILE',success=success)
+CALL self%I%update(self)
 IF(.NOT.success)GOTO 100
 CALL hdf5_read(self%I%f_offset,filename,'tokamaker/F0',success=success)
 IF(.NOT.success)GOTO 100
 CALL hdf5_read(self%p_scale,filename,'tokamaker/P_SCALE',success=success)
 IF(.NOT.success)GOTO 100
-CALL self%P%load(filename,'tokamaker/PP_PROFILE',success=success)
+CALL hdf5_read(profType,filename,'tokamaker/PP_PROFILE/TYPE',success=success)
 IF(.NOT.success)GOTO 100
+CALL gs_profile_alloc(profType,self%P)
+DEALLOCATE(profType)
+CALL self%P%load(filename,'tokamaker/PP_PROFILE',success=success)
+CALL self%P%update(self)
+IF(.NOT.success)GOTO 100
+IF(hdf5_field_exist(filename,'tokamaker/NI_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/NI_PROFILE/TYPE',success=success)
+  IF(.NOT.success)GOTO 100
+  CALL gs_profile_alloc(profType,self%I_NI)
+  DEALLOCATE(profType)
+  CALL self%I_NI%load(filename,'tokamaker/NI_PROFILE',success=success)
+  IF(.NOT.success)GOTO 100
+  CALL self%I_NI%update(self)
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/ETA_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/ETA_PROFILE/TYPE',success=success)
+  IF(.NOT.success)GOTO 100
+  CALL gs_profile_alloc(profType,self%eta)
+  DEALLOCATE(profType)
+  CALL self%eta%load(filename,'tokamaker/ETA_PROFILE',success=success)
+  IF(.NOT.success)GOTO 100
+  CALL self%eta%update(self)
+END IF
+! IF(hdf5_field_exist(filename,'tokamaker/P_ANI'))THEN
+!   CALL hdf5_read(profType,filename,'tokamaker/P_ANI/TYPE',success=success)
+!   IF(.NOT.success)GOTO 100
+!   CALL gs_ani_alloc(profType,self%P_ani)
+!   DEALLOCATE(profType)
+!   CALL self%P_ani%load(filename,'tokamaker/P_ANI',success=success)
+!   IF(.NOT.success)GOTO 100
+!   CALL self%P_ani%update(self)
+! END IF
 !---Check consistency of values and warn if they differ beyond expected numerical differences
 CALL hdf5_read(pt_tmp,filename,'tokamaker/PSI_BOUNDS',success=success)
 IF(.NOT.success)GOTO 100
 diff_val=ABS(pt_tmp(2)-pt_tmp(1))*1.d-2
 IF(ANY(ABS(pt_tmp-self%plasma_bounds)>diff_val))THEN
+  WRITE(*,*)pt_tmp,self%plasma_bounds
   CALL oft_warn('Plasma bounds in equilibrium file do not match recomputed values.')
 END IF
 CALL hdf5_read(pt_tmp,filename,'tokamaker/O_POINT',success=success)
@@ -454,15 +514,54 @@ IF(logical_tmp.NEQV.self%diverted)THEN
   CALL oft_warn('Diverted status in equilibrium file does not match recomputed value.')
 END IF
 !---Load targets and coil currents
+IF(hdf5_field_exist(filename,'tokamaker/IP_TARGET'))THEN
+  CALL hdf5_read(self%Itor_target,filename,'tokamaker/IP_TARGET',success=success)
+  IF(.NOT.success)GOTO 100
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/IP_RATIO_TARGET'))THEN
+  CALL hdf5_read(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET',success=success)
+  IF(.NOT.success)GOTO 100
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/R0_TARGET'))THEN
+  CALL hdf5_read(self%R0_target,filename,'tokamaker/R0_TARGET',success=success)
+  IF(.NOT.success)GOTO 100
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/V0_TARGET'))THEN
+  CALL hdf5_read(self%V0_target,filename,'tokamaker/V0_TARGET',success=success)
+  IF(.NOT.success)GOTO 100
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/PAX_TARGET'))THEN
+  CALL hdf5_read(self%pax_target,filename,'tokamaker/PAX_TARGET',success=success)
+  IF(.NOT.success)GOTO 100
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/ESTORE_TARGET'))THEN
+  CALL hdf5_read(self%estore_target,filename,'tokamaker/ESTORE_TARGET',success=success)
+  IF(.NOT.success)GOTO 100
+END IF
 IF(hdf5_field_exist(filename,'tokamaker/ISOFLUX_TARGETS'))THEN
+  CALL hdf5_field_get_sizes(filename,'tokamaker/ISOFLUX_TARGETS',ndims,dim_sizes)
+  IF(dim_sizes(1)/=5)CALL oft_abort('Invalid first dimension for isoflux targets', 'gs_load_tokamaker', __FILE__)
+  self%isoflux_ntargets=dim_sizes(2)
+  ALLOCATE(self%isoflux_targets(dim_sizes(1),dim_sizes(2)))
+  DEALLOCATE(dim_sizes)
   CALL hdf5_read(self%isoflux_targets,filename,'tokamaker/ISOFLUX_TARGETS',success=success)
   IF(.NOT.success)GOTO 100
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/FLUX_TARGETS'))THEN
+  CALL hdf5_field_get_sizes(filename,'tokamaker/FLUX_TARGETS',ndims,dim_sizes)
+  IF(dim_sizes(1)/=4)CALL oft_abort('Invalid first dimension for flux targets', 'gs_load_tokamaker', __FILE__)
+  ALLOCATE(self%flux_targets(dim_sizes(1),dim_sizes(2)))
+  self%flux_ntargets=dim_sizes(2)
+  DEALLOCATE(dim_sizes)
   CALL hdf5_read(self%flux_targets,filename,'tokamaker/FLUX_TARGETS',success=success)
   IF(.NOT.success)GOTO 100
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/SADDLE_TARGETS'))THEN
+  CALL hdf5_field_get_sizes(filename,'tokamaker/SADDLE_TARGETS',ndims,dim_sizes)
+  IF(dim_sizes(1)/=3)CALL oft_abort('Invalid first dimension for saddle targets', 'gs_load_tokamaker', __FILE__)
+  ALLOCATE(self%saddle_targets(dim_sizes(1),dim_sizes(2)))
+  self%saddle_ntargets=dim_sizes(2)
+  DEALLOCATE(dim_sizes)
   CALL hdf5_read(self%saddle_targets,filename,'tokamaker/SADDLE_TARGETS',success=success)
   IF(.NOT.success)GOTO 100
 END IF
