@@ -582,8 +582,8 @@ END SUBROUTINE tokamaker_setup_td
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_eig_td(tMaker_ptr,omega,neigs,eigs,eig_vecs,include_bounds,eta_plasma,pm,error_str) BIND(C,NAME="tokamaker_eig_td")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_eig_td(tMaker_equil_ptr,omega,neigs,eigs,eig_vecs,include_bounds,eta_plasma,pm,error_str) BIND(C,NAME="tokamaker_eig_td")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 REAL(c_double), VALUE, INTENT(in) :: omega !< Shift parameter for eigenvalue solve
 INTEGER(c_int), VALUE, INTENT(in) :: neigs !< Number of eigenvalues to compute
 TYPE(c_ptr), VALUE, INTENT(in) :: eigs !< Eigenvalues array
@@ -594,20 +594,21 @@ LOGICAL(c_bool), VALUE, INTENT(in) :: pm !< Report solver progress?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER :: eigs_tmp(:,:),eig_vecs_tmp(:,:)
 LOGICAL :: pm_save
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
 #ifdef HAVE_ARPACK
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
-IF(ANY(tMaker_obj%device%Rcoils>0.d0))THEN
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+IF(ANY(tMaker_equil_obj%device%Rcoils>0.d0))THEN
   CALL copy_string('Eigenvalue solve not supported with Vcoils',error_str)
   RETURN
 END IF
 CALL c_f_pointer(eigs, eigs_tmp, [2,neigs])
-CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [tMaker_obj%gs_equil%psi%n,neigs])
+CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [tMaker_equil_obj%psi%n,neigs])
 pm_save=oft_env%pm; oft_env%pm=pm
-CALL eig_gs_td(tMaker_obj%gs_equil,neigs,eigs_tmp,eig_vecs_tmp,omega,LOGICAL(include_bounds),eta_plasma)
+CALL eig_gs_td(tMaker_equil_obj,neigs,eigs_tmp,eig_vecs_tmp,-omega,LOGICAL(include_bounds),eta_plasma)
 oft_env%pm=pm_save
 IF((eigs_tmp(1,1)<-1.d98).AND.(eigs_tmp(2,1)<-1.d98))CALL copy_string('Error in eigenvalue solve',error_str)
+!---Convert eigenvalues from decay rates to growth rates
+eigs_tmp(1,:)=-eigs_tmp(1,:)
 #else
 CALL copy_string('Eigenvalue solve requires ARPACK',error_str)
 #endif
