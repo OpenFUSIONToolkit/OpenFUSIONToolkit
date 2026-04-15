@@ -47,7 +47,7 @@ BASE_CONFIG = {
         'bootstrap_current': {},
     },
     'pedestal': {
-        'model_name': 'set_T_ped_n_ped',
+        # 'model_name': 'set_T_ped_n_ped',
     },
     # 'transport': { # recommended in torax documentation
     #     'model_name': 'combined',
@@ -492,6 +492,10 @@ class TokTox:
         self._T_i_ped = None
         self._T_e_ped = None
         self._n_e_ped = None
+        self._ped_top = None
+
+        # Optional full replacement for the TORAX pedestal section.
+        self._pedestal_config = None
 
         self._Te_right_bc = None
         self._Ti_right_bc = None
@@ -513,7 +517,6 @@ class TokTox:
         self._evolve_current = None
         self._evolve_Ti = None
         self._evolve_Te = None
-        self._ped_top = None
         self._chi_min = None
         self._chi_max = None
         self._De_min = None
@@ -883,19 +886,45 @@ class TokTox:
         self._use_nbi_current = nbi_current
 
     def set_pedestal(self, set_pedestal=False, T_i_ped=None, T_e_ped=None, n_e_ped=None, ped_top=0.95):
-        r'''! Set pedestals for ion and electron temperatures.
-        @param T_i_ped Ion temperature pedestal (dictionary of temperature at times).
-        @param T_e_ped Electron temperature pedestal (dictionary of temperature at times).
-        '''
-        self._set_pedestal = set_pedestal
-        if T_i_ped:
-            self._T_i_ped = T_i_ped
-        if T_e_ped:
-            self._T_e_ped = T_e_ped
-        if n_e_ped:
-            self._n_e_ped = n_e_ped
+        r'''! Set pedestals for ion/electron temperatures and density (legacy API).
 
+        This preserves the original behavior:
+        - set_pedestal=True uses model_name='set_T_ped_n_ped'
+        - set_pedestal=False uses model_name='no_pedestal'
+
+        @param set_pedestal Toggle pedestal model on/off.
+        @param T_i_ped Ion temperature pedestal (time-varying scalar allowed).
+        @param T_e_ped Electron temperature pedestal (time-varying scalar allowed).
+        @param n_e_ped Electron density pedestal (time-varying scalar allowed).
+        @param ped_top Pedestal-top location rho_norm_ped_top.
+        '''
+        # Using legacy setter disables full pedestal dict replacement.
+        self._pedestal_config = None
+
+        self._set_pedestal = set_pedestal
+        if T_i_ped is not None:
+            self._T_i_ped = T_i_ped
+        if T_e_ped is not None:
+            self._T_e_ped = T_e_ped
+        if n_e_ped is not None:
+            self._n_e_ped = n_e_ped
         self._ped_top = ped_top
+
+    def load_pedestal_config(self, pedestal_config):
+        r'''! Load pedestal config dict and fully replace 'pedestal' in TORAX config.
+
+        If provided, this dict is copied to 'myconfig['pedestal']' directly,
+        replacing the full pedestal section from BASE_CONFIG and load_config().
+
+        @param pedestal_config Dictionary in TORAX pedestal config format, or
+                               None to clear and fall back to set_pedestal().
+        '''
+        if pedestal_config is None:
+            self._pedestal_config = None
+            return
+        if not isinstance(pedestal_config, dict):
+            raise TypeError('pedestal_config must be a dictionary or None.')
+        self._pedestal_config = copy.deepcopy(pedestal_config)
 
     def set_evolve(self, density=True, Ti=True, Te=True, current=True):
         r'''! Set variables as either prescribed (False) or evolved (True).
@@ -944,6 +973,7 @@ class TokTox:
             self._Ve_min = Ve_min
         if Ve_max is not None:
             self._Ve_max = Ve_max
+
     def set_x_points(self, diverted_times=None, x_point_targets=None, x_point_weight=100.0):
         r'''! Configure diverted window and X-point targets for TM saddle constraints.
 
@@ -1338,7 +1368,8 @@ class TokTox:
             myconfig['profile_conditions']['initial_psi_mode'] = 'geometry' # if loop 0 wasn't run, uses psi from initial eqdsk, not ideal
 
         # ── 6. Explicit set_*() overrides ──────────────────────────────────
-        #    Only applied when the attribute is not None (i.e. the user made an explicit setter call, or will be None if relying on the loaded config / base config value).
+        #    Only applied when the attribute is not None (i.e. the user called the setter
+        #    explicitly after load_config(); None means fall through to the loaded/base config).
         if self._Ip is not None:
             myconfig['profile_conditions']['Ip'] = self._Ip
 
@@ -1390,28 +1421,40 @@ class TokTox:
                 myconfig['sources']['generic_current']['I_generic'] = (nbi_times, _NBI_W_TO_MA * np.array(nbi_pow))
                 myconfig['sources']['generic_current']['gaussian_location'] = self._generic_heat_loc
 
-        if self._T_i_ped is not None:
-            myconfig.setdefault('pedestal', {})
-            myconfig['pedestal']['T_i_ped'] = self._T_i_ped
-        if self._T_e_ped is not None:
-            myconfig.setdefault('pedestal', {})
-            myconfig['pedestal']['T_e_ped'] = self._T_e_ped
+        if self._pedestal_config is not None:
+            # Full pedestal dict replacement requested via load_pedestal_config().
+            myconfig['pedestal'] = copy.deepcopy(self._pedestal_config)
+        else:
+            # Accept bool or time-varying dict for set_pedestal.
+            ped_enabled = (
+                self._set_pedestal is not None
+                and not (
+                    isinstance(self._set_pedestal, (bool, np.bool_))
+                    and (not bool(self._set_pedestal))
+                )
+            )
 
-        if self._n_e_ped is not None:
-            myconfig.setdefault('pedestal', {})
-            myconfig['pedestal']['n_e_ped_is_fGW'] = False
-            myconfig['pedestal']['n_e_ped'] = self._n_e_ped
-        
-        if self._set_pedestal is True:
-            myconfig.setdefault('pedestal', {})
-            myconfig['pedestal']['set_pedestal'] = self._set_pedestal
-            if self._ped_top is not None:
-                myconfig.setdefault('pedestal', {})
-                myconfig['pedestal']['rho_norm_ped_top'] = self._ped_top
-        elif self._set_pedestal is False or self._set_pedestal is None:
-            myconfig['pedestal']['model_name'] = 'no_pedestal'
-        
-        
+            if ped_enabled:
+                # Build in required key order:
+                # model_name -> set_pedestal -> rho_norm_ped_top -> T_i/T_e/n_e.
+                ped_cfg = {}
+                ped_cfg['model_name'] = 'set_T_ped_n_ped'
+                ped_cfg['set_pedestal'] = self._set_pedestal
+                if self._ped_top is not None:
+                    ped_cfg['rho_norm_ped_top'] = self._ped_top
+                if self._T_i_ped is not None:
+                    ped_cfg['T_i_ped'] = self._T_i_ped
+                if self._T_e_ped is not None:
+                    ped_cfg['T_e_ped'] = self._T_e_ped
+                if self._n_e_ped is not None:
+                    ped_cfg['n_e_ped_is_fGW'] = False
+                    ped_cfg['n_e_ped'] = self._n_e_ped
+                myconfig['pedestal'] = ped_cfg
+            else:
+                # Replace pedestal section entirely to avoid invalid extra keys
+                # for the no_pedestal model.
+                myconfig['pedestal'] = {'model_name': 'no_pedestal'}
+
         if self._nbar is not None:
             myconfig['profile_conditions']['nbar'] = self._nbar
         if self._normalize_to_nbar is not None:
@@ -1477,7 +1520,7 @@ class TokTox:
                 f.write('# Torax configuration\n')
                 f.write(f'# Loop {self._current_loop}\n\n')
                 f.write('tx_config = ')
-                f.write(pprint.pformat(self._to_plain_python(myconfig), width=100))
+                f.write(pprint.pformat(self._to_plain_python(myconfig), width=100, sort_dicts=False))
 
         tx_config = torax.ToraxConfig.from_dict(myconfig)
         return tx_config
@@ -1573,7 +1616,7 @@ class TokTox:
             with open(config_filename, 'w') as f:
                 f.write('# Torax configuration\n# Loop 0 (transport init)\n\n')
                 f.write('tx_config = ')
-                f.write(pprint.pformat(self._to_plain_python(init_config), width=100))
+                f.write(pprint.pformat(self._to_plain_python(init_config), width=100, sort_dicts=False))
 
         self._log(f'Transport init: running ~{INIT_RUNTIME}s steady-state TORAX simulation...')
         tx_config = torax.ToraxConfig.from_dict(init_config)
@@ -1834,14 +1877,17 @@ class TokTox:
         # ── Per-loop initialization (before timestep sweep) ──────────────────
         self._state['psi_grid_prev_tm'] = {}
 
-        # Seed i=0 coil targets from the initial equilibrium so stale end-of-loop
-        # targets from the previous loop don't carry over.
+        # Seed coil regularization targets
+        # Loop 1: use zero targets (None) so the solver freely finds the correct
+        # coil configuration without being biased toward the initial equilibrium.
+        # Loop 2+: seed from the last solve of the previous loop for warm-starting.
         if getattr(self, '_coil_reg_config', None):
             init_targets = None
-            try:
-                init_targets, _ = self._tm.get_coil_currents()
-            except Exception as e:
-                self._log(f'TM: could not read initial equilibrium coil currents: {e}')
+            if self._current_loop > 1:
+                try:
+                    init_targets, _ = self._tm.get_coil_currents()
+                except Exception as e:
+                    self._log(f'TM: could not read initial equilibrium coil currents: {e}')
             self._apply_coil_reg(targets=init_targets)
 
         # Debug: log coil bounds at the start of each loop
@@ -1851,7 +1897,7 @@ class TokTox:
                 n_turns = self._tm.coil_sets.get(cname, {}).get('net_turns', 1.0)
                 self._log(f'    {cname}: [{lo:.3g}, {hi:.3g}] A/turn  x {n_turns:.0f} turns = [{lo*n_turns:.3g}, {hi*n_turns:.3g}] A-turns')
 
-        # Warm-start psi at t=0: set psi_dt so eddy-current contribution is negligible.
+
         if 0 in self._psi_warm_start and self._psi_warm_start[0] is not None:
             self._tm.set_psi_dt(psi0=self._psi_warm_start[0], dt=1.0e10)
 
@@ -1908,23 +1954,23 @@ class TokTox:
                 self._state['strike_pts'][i] = np.empty((0, 2))
 
             isoflux_weights = LCFS_WEIGHT * np.ones(len(lcfs))
-            lcfs_psi_target = self._state['psi_lcfs_tx'][i] # _state in Wb/rad, TM expects Wb/rad (AKA Wb-rad)
+            lcfs_psi_target = self._state['psi_lcfs_tx'][i] # _state in Wb/rad, TM uses Wb/rad (AKA Wb-rad)
 
-            # Shape control: set_isoflux on all LCFS points for lcfs shape targets.
+            # set_isoflux on all LCFS points for lcfs shape targets
             self._tm.set_isoflux_constraints(lcfs, isoflux_weights) # shape targets
 
             # Pick outboard midplane point (largest R at approx Z = Z_axis)
             z_axis = self._state['Z'][i]
             omp_idx = np.argmax(lcfs[:, 0] * np.exp(-0.5 * ((lcfs[:, 1] - z_axis) / (0.3 * self._state['a'][i]))**2))
             omp_point = lcfs[omp_idx:omp_idx+1, :]  # shape (1, 2)
-            # Set lcfs psi value target (from torax) only at midplane outboard side of lcfs.
+            # Set lcfs psi value target (from TORAX) only at midplane outboard side of lcfs.
             self._tm.set_psi_constraints(omp_point, targets=np.array([lcfs_psi_target]),
                                          weights=np.array([LCFS_WEIGHT * 10.])) # psi value target
             
             
             self._tm.update_settings()
 
-            if i>0:
+            if i > 0:
                 if self._state['psi_grid_prev_tm'][i-1] is not None:
                     self._tm.set_psi_dt(psi0=self._state['psi_grid_prev_tm'][i-1], dt=self._tm_times[i]-self._tm_times[i-1])
             
@@ -1939,7 +1985,6 @@ class TokTox:
             
             # Pre-calculate all level profiles
             level_profiles = []
-
 
             # Level 0: jphi
             # ffp_0 = self._state['j_tot'][i]
@@ -1972,11 +2017,9 @@ class TokTox:
                 ffp_level = level_prof['ffp']
                 pp_level = level_prof['pp']
 
-                # Initialize psi from geometry parameters. Fallback initial guess, usually overwritten by warm-start.
+                # Initialize psi from geometry parameters
                 self._tm.init_psi(self._state['R0_mag'][i], self._state['Z'][i], self._state['a'][i], self._state['kappa'][i], self._state['delta'][i])
 
-                # Warm-start: only on first attempt (level_idx==0); on fallback levels use cold init_psi to avoid contamination from a failed prior solve leaving bad internal psi state.
-                # if level_idx == 0:
                 if i in self._psi_warm_start and self._psi_warm_start[i] is not None:
                     self._tm.set_psi(self._psi_warm_start[i], update_bounds=True)
                 elif i > 0 and (i-1) in self._state.get('psi_grid_prev_tm', {}) and self._state['psi_grid_prev_tm'][i-1] is not None:
@@ -1998,7 +2041,6 @@ class TokTox:
                     level_attempts.append({'level': level_idx, 'name': level_name,
                                           'ffp': ffp_level, 'pp': pp_level,
                                           'succeeded': False, 'error': str(e)})
-
 
             if not solve_succeeded:
                 self._eqdsk_skip.append(eq_name)
@@ -2067,8 +2109,8 @@ class TokTox:
                 prev_coil_targets, _ = self._state['equil'][i].get_coil_currents()
                 self._apply_coil_reg(targets=prev_coil_targets)
 
-        # Flux consumption: positive Ip drives psi_lcfs down in TM-native.
-        # Convention: consumed_flux > 0 means plasma has consumed flux from CS.
+        # Flux consumption: positive Ip drives psi_lcfs down in TM convention
+        # Convention: consumed_flux > 0
         consumed_flux = -(self._state['psi_lcfs_tm'][-1] - self._state['psi_lcfs_tm'][0]) * 2.0 * np.pi
         consumed_flux_integral = np.trapezoid(self._state['vloop_tm'][0:], self._tm_times[0:])
 
@@ -2099,7 +2141,6 @@ class TokTox:
     # ── Profile level functions ──────────────────────────────────────────
     # Each level takes (self, ffp_prof, pp_prof, i) and returns (ffp_prof, pp_prof).
     # All levels receive deep copies of the raw TORAX profiles (not cumulative).
-    # Level 0 is always identity. Add new levels by appending to self._profile_levels.
 
     def _level1_raw(self, ffp_prof, pp_prof):
         r'''! Raw TORAX profiles passed through unchanged.'''
@@ -2301,7 +2342,7 @@ class TokTox:
         @param convergence_threshold Max fractional change in consumed flux between loops for convergence.
         @param max_loop Maximum number of loops.
         @param run_name Name for this run (used in output directory and log file).
-        @param output_mode Output level selector: False, 'minimal', 'normal', or 'debug'.
+        @param output_mode Output level selector: False (or None), 'minimal', 'normal', or 'debug'.
         @param skip_bad_init_eqdsks If True, skip broken initial gEQDSK files instead of raising.
         @param t_ave_toggle Time-averaging mode: 'off' (no averaging), 'flattop' (average only
                during flat-top), or 'pulse' (average over the whole pulse).
@@ -2332,10 +2373,10 @@ class TokTox:
             output_mode = 'normal'
         if isinstance(output_mode, str):
             output_mode = output_mode.strip().lower()
-            if output_mode in ('false', 'none', 'off', 'no'):
+            if output_mode in ('false', 'none', 'off', 'no') or output_mode is None:
                 output_mode = False
-        if output_mode not in (False, 'minimal', 'normal', 'debug'):
-            raise ValueError("Invalid output_mode. Use False, 'minimal', 'normal', or 'debug'.")
+        if output_mode not in (None, False, 'minimal', 'normal', 'debug'):
+            raise ValueError("Invalid output_mode. Use None, False, 'minimal', 'normal', or 'debug'.")
 
         self._output_mode = output_mode
         self._save_outputs = (self._output_mode is not False)
@@ -2538,7 +2579,6 @@ class TokTox:
             self._print(f'  Outputs saved to: {self._out_dir}')
         self._print(f'  Log file: {self._log_file}')
 
-    # =========================================================================
     # ─── Results & Visualization ────────────────────────────────────────────────
 
     @property

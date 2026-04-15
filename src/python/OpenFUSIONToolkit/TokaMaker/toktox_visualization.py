@@ -49,8 +49,6 @@ DIAG_FS = 13
 MOVIE_FIG_W, MOVIE_FIG_H = 19.2, 10.8
 MOVIE_DPI = 200
 
-N_PSI = 1000
-
 
 # =========================================================================
 #  Helpers
@@ -168,7 +166,7 @@ def profile_plot(tt, i, t, save_path=None, display=True):
     s = tt._state
     psi_N = tt._psi_N
 
-    tm_psi, tm_f_prof, tm_fp_prof, tm_p_prof, tm_pp_prof = tt._tm.get_profiles(npsi=N_PSI)
+    tm_psi, tm_f_prof, tm_fp_prof, tm_p_prof, tm_pp_prof = tt._tm.get_profiles(npsi=len(tt._psi_N))
     tm_ffp_prof = tm_f_prof * tm_fp_prof
 
     fig, axes = plt.subplots(6, 3, figsize=(20, 24))
@@ -540,7 +538,7 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
             ax_pp_tm.legend(lines1 + lines2, labels1 + labels2, fontsize=7, loc='upper left')
 
         try:
-            psi_geo, q_tm_vals, _, _, _, _ = tt._tm.get_q(npsi=N_PSI, psi_pad=0.02)
+            psi_geo, q_tm_vals, _, _, _, _ = tt._tm.get_q(npsi=len(tt._psi_N), psi_pad=0.02)
             ax_q_tm.plot(psi_geo, q_tm_vals, 'r--', linewidth=2, label='TokaMaker')
         except Exception:
             pass
@@ -1416,7 +1414,6 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
         ax.text(0.5, 0.5, 'No CS coils', transform=ax.transAxes,
                 ha='center', va='center', fontsize=LABEL_FS)
     ax.set_ylabel('I_coil [MA-turns]', fontsize=LABEL_FS)
-    # ax.set_title('CS Coil Currents', fontsize=TITLE_FS)
     _style(ax)
 
     # 6: PF and other coil currents
@@ -1433,7 +1430,6 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
         ax.text(0.5, 0.5, 'No PF/other coils', transform=ax.transAxes,
                 ha='center', va='center', fontsize=LABEL_FS)
     ax.set_ylabel('I_coil [MA-turns]', fontsize=LABEL_FS)
-    # ax.set_title('PF/Other Coil Currents', fontsize=TITLE_FS)
     _style(ax)
 
     _vline(axes, t_now)
@@ -1844,7 +1840,7 @@ def summary(tt):
     # Internal inductance
     out['l_i_flattop_avg'] = float(np.nanmean(s['l_i_tm'][ft_mask])) if np.any(ft_mask) else None
 
-    # Loop tage
+    # Loop voltage
     if np.any(ft_mask):
         out['vloop_tm_flattop_avg_V'] = float(np.nanmean(np.array(s['vloop_tm'])[ft_mask]))
         out['vloop_tx_flattop_avg_V'] = float(np.nanmean(np.array(s['vloop_tx'])[ft_mask]))
