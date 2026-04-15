@@ -1786,7 +1786,7 @@ class TokaMaker():
         eig_vecs = numpy.zeros((neigs,self.np),dtype=numpy.float64)
         damp_coeff = abs(omega)*damping_scale
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_eig_td(self._tMaker_ptr,c_double(-omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),c_double(damp_coeff),pm,error_string)
+        tokamaker_eig_td(self._tMaker_equil.c_ptr,c_double(-omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),c_double(damp_coeff),pm,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         eig_vals[:,0] *= -1.0

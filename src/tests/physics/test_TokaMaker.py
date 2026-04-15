@@ -692,7 +692,7 @@ def test_ITER_eig(order):
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_stability(order):
     exp_dict = {
-        'gamma': [-12.3620, 1.83981, 3.41613, 5.12470, 6.53393],
+        'gamma': [12.3620, -1.83981, -3.41613, -5.12470, -6.53393],
         'nl_change': [225.4421413167051, 338.0113029638385][order-2]
     }
     results = mp_run(run_ITER_case,(1.0,(order,),False,True,False))
@@ -839,7 +839,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     mygs.update_settings()
     mygs.solve()
     if stability_test:
-        eig_vals, _ = mygs.eig_td(-1.E3,10,False)
+        eig_vals, _ = mygs.compute_linear_stability(1.E3,10,False)
         mp_q.put([{'gamma': eig_vals[:5,0]}])
         oftpy_dump_cov()
         return
@@ -868,7 +868,7 @@ def test_LTX_eig(order):
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_stability(order):
     exp_dict = {
-        'gamma': [-234.1051, 214.4196, 282.0877, 388.7592, 388.7592]
+        'gamma': [234.1051, -214.4196, -282.0877, -388.7592, -388.7592]
     }
     results = mp_run(run_LTX_case,(order,False,True))
     assert validate_dict(results,exp_dict)
