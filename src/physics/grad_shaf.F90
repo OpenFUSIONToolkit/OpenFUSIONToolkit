@@ -80,6 +80,18 @@ CONTAINS
   PROCEDURE(flux_cofs_set), DEFERRED :: set_cofs
   !> Get current function parameterization
   PROCEDURE(flux_cofs_get), DEFERRED :: get_cofs
+  !> Save flux function definition to file
+  GENERIC :: save => save_hdf5, save_txt
+  !> Save flux function definition to HDF5 file
+  PROCEDURE(flux_save_hdf5), DEFERRED :: save_hdf5
+  !> Save flux function definition to text file
+  PROCEDURE(flux_save_txt), DEFERRED :: save_txt
+  !> Load flux function definition from file
+  GENERIC :: load => load_hdf5, load_txt
+  !> Load flux function definition from HDF5 file
+  PROCEDURE(flux_load_hdf5), DEFERRED :: load_hdf5
+  !> Load flux function definition from text file
+  PROCEDURE(flux_load_txt), DEFERRED :: load_txt
 END TYPE flux_func
 !------------------------------------------------------------------------------
 !> Internal coil region structure
@@ -414,6 +426,41 @@ abstract interface
     class(flux_func), intent(inout) :: self
     real(r8), intent(out) :: c(:)
   end subroutine flux_cofs_get
+  !------------------------------------------------------------------------------
+  !> Needs Docs
+  !------------------------------------------------------------------------------
+  subroutine flux_save_hdf5(self,filename,path)
+    import flux_func
+    class(flux_func), intent(inout) :: self
+    character(LEN=*), intent(in) :: filename
+    character(LEN=*), intent(in) :: path
+  end subroutine flux_save_hdf5
+  !------------------------------------------------------------------------------
+  !> Needs Docs
+  !------------------------------------------------------------------------------
+  subroutine flux_save_txt(self,io_unit)
+    import flux_func
+    class(flux_func), intent(inout) :: self
+    integer, intent(in) :: io_unit
+  end subroutine flux_save_txt
+  !------------------------------------------------------------------------------
+  !> Needs Docs
+  !------------------------------------------------------------------------------
+  subroutine flux_load_hdf5(self,filename,path,success)
+    import flux_func
+    class(flux_func), intent(inout) :: self
+    character(LEN=*), intent(in) :: filename
+    character(LEN=*), intent(in) :: path
+    logical, intent(out) :: success
+  end subroutine flux_load_hdf5
+  !------------------------------------------------------------------------------
+  !> Needs Docs
+  !------------------------------------------------------------------------------
+  subroutine flux_load_txt(self,io_unit)
+    import flux_func
+    class(flux_func), intent(inout) :: self
+    integer, intent(in) :: io_unit
+  end subroutine flux_load_txt
   !------------------------------------------------------------------------------
   !> Needs Docs
   !------------------------------------------------------------------------------

@@ -1084,6 +1084,28 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return TokaMaker_equilibrium(source_eq=self._tMaker_equil,skip_targets=skip_targets,skip_constraints=skip_constraints)
 
+    def replace_eq(self,source_eq=None,source_file=None,skip_targets=False,skip_constraints=False):
+        '''! Replace the current equilibrium object with a copy of another equilibrium object or one loaded from file
+        
+        @param source_eq `TokaMaker_equilibrium` object to copy from
+        @param source_file Path to a file containing a TokaMaker equilibrium
+        @param skip_targets When copying, skip copying target values
+        @param skip_constraints When copying, skip copying constraint values
+        @result New `TokaMaker_equilibrium` object with copied values
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        if source_eq is not None:
+            if source_file is not None:
+                raise ValueError("Cannot specify both `source_eq` and `source_file`")
+            self._tMaker_equil = TokaMaker_equilibrium(source_eq=source_eq,skip_targets=skip_targets,skip_constraints=skip_constraints)
+        elif source_file is not None:
+            cfilename = self._oft_env.path2c(source_file)
+            error_string = self._oft_env.get_c_errorbuff()
+            tokamaker_load_tokamaker(self._tMaker_equil.c_ptr,cfilename,error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
+
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
 
@@ -2722,5 +2744,16 @@ class TokaMaker_equilibrium():
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_save_mug(self._equil_ptr,cfilename,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+    
+    def save_TokaMaker(self,filename):
+        r'''! Save current equilibrium to an HDF5 file for latter use with TokaMaker
+
+        @param filename Filename to save equilibrium to
+        '''
+        cfilename = self._oft_env.path2c(filename)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_save_tokamaker(self._equil_ptr,cfilename,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)

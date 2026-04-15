@@ -96,6 +96,7 @@ end type xdmf_plot_file
 INTERFACE hdf5_write
   MODULE PROCEDURE hdf5_write_scalar_r8
   MODULE PROCEDURE hdf5_write_scalar_i4
+  MODULE PROCEDURE hdf5_write_scalar_l
   MODULE PROCEDURE hdf5_write_1d_r8
   MODULE PROCEDURE hdf5_write_1d_i4
   MODULE PROCEDURE hdf5_write_2d_r8
@@ -108,6 +109,7 @@ END INTERFACE hdf5_write
 INTERFACE hdf5_read
   MODULE PROCEDURE hdf5_read_scalar_r8
   MODULE PROCEDURE hdf5_read_scalar_i4
+  MODULE PROCEDURE hdf5_read_scalar_l
   MODULE PROCEDURE hdf5_read_1d_r8
   MODULE PROCEDURE hdf5_read_1d_i4
   MODULE PROCEDURE hdf5_read_2d_r8
@@ -779,6 +781,23 @@ end subroutine hdf5_write_scalar_r8
 !------------------------------------------------------------------------------
 !> integer(i4) scalar implementation of \ref oft_io::hdf5_write
 !------------------------------------------------------------------------------
+subroutine hdf5_write_scalar_l(val,filename,path)
+logical, intent(in) :: val !< Value to write to file
+character(LEN=*), intent(in) :: filename !< Path to file
+character(LEN=*), intent(in) :: path !< Variable path in file
+integer(i4) :: tmpval(1)
+DEBUG_STACK_PUSH
+IF(val)THEN
+  tmpval(1)=1
+ELSE
+  tmpval(1)=0
+END IF
+CALL hdf5_write_1d_i4(tmpval,filename,path)
+DEBUG_STACK_POP
+end subroutine hdf5_write_scalar_l
+!------------------------------------------------------------------------------
+!> integer(i4) scalar implementation of \ref oft_io::hdf5_write
+!------------------------------------------------------------------------------
 subroutine hdf5_write_scalar_i4(val,filename,path)
 integer(i4), intent(in) :: val !< Value to write to file
 character(LEN=*), intent(in) :: filename !< Path to file
@@ -1098,6 +1117,33 @@ real(r8) :: tmpval(1)
 CALL hdf5_read_1d_r8(tmpval,filename,path,success)
 val=tmpval(1)
 end subroutine hdf5_read_scalar_r8
+!------------------------------------------------------------------------------
+!> logical scalar implementation of \ref oft_io::hdf5_read
+!------------------------------------------------------------------------------
+subroutine hdf5_read_scalar_l(val,filename,path,success)
+logical, intent(out) :: val !< Value to read from file
+character(LEN=*), intent(in) :: filename !< Path to file
+character(LEN=*), intent(in) :: path !< Variable path in file
+logical, optional, intent(out) :: success !< Successful read?
+logical :: success_read
+integer(i4) :: tmpval(1)
+CALL hdf5_read_1d_i4(tmpval,filename,path,success_read)
+IF(.NOT.success_read)THEN
+  val=.FALSE.
+  IF(PRESENT(success))success=.FALSE.
+  RETURN
+END IF
+IF(tmpval(1)==0)THEN
+  val=.FALSE.
+ELSE IF(tmpval(1)==0)THEN
+  val=.TRUE.
+ELSE
+  val=.FALSE.
+  IF(PRESENT(success))success=.FALSE.
+  RETURN
+END IF
+IF(PRESENT(success))success=.TRUE.
+end subroutine hdf5_read_scalar_l
 !------------------------------------------------------------------------------
 !> integer(i4) scalar implementation of \ref oft_io::hdf5_read
 !------------------------------------------------------------------------------

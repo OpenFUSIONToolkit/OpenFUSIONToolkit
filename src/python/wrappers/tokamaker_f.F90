@@ -1649,6 +1649,36 @@ CALL copy_string_rev(filename,filename_tmp)
 CALL gs_save_mug(tMaker_equil_obj,filename_tmp)
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_mug
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_save_tokamaker(tMaker_equil_ptr,filename,error_str) BIND(C,NAME="tokamaker_save_tokamaker")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
+CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL copy_string_rev(filename,filename_tmp)
+CALL gs_save_tokamaker(tMaker_equil_obj,filename_tmp)
+CALL copy_string(TRIM(error_flag),error_str)
+END SUBROUTINE tokamaker_save_tokamaker
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_load_tokamaker(tMaker_equil_ptr,filename,error_str) BIND(C,NAME="tokamaker_load_tokamaker")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
+CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL copy_string_rev(filename,filename_tmp)
+CALL gs_load_tokamaker(tMaker_equil_obj,filename_tmp)
+CALL copy_string(TRIM(error_flag),error_str)
+END SUBROUTINE tokamaker_load_tokamaker
 !---------------------------------------------------------------------------
 !> Overwrites default coil flux contribution to non-uniform current distribution
 !------------------------------------------------------------------------------
