@@ -1731,6 +1731,8 @@ class TokaMaker():
     def eig_wall(self,neigs=4,pm=False):
         r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures
 
+        @deprecated Use `compute_wall_modes` property instead.
+
         @param neigs Number of eigenvalues to compute
         @param pm Print solver statistics and raw eigenvalues?
         @result eigenvalues[neigs,2], eigenvectors[neigs,self.np]
@@ -1765,6 +1767,8 @@ class TokaMaker():
 
     def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False,damping_scale=-1.0):
         '''! Compute eigenvalues for the linearized time-dependent system
+
+        @deprecated Use `compute_linear_stability` property instead.
 
         @param omega Growth rate localization point (eigenvalues closest to this value will be found)
         @param neigs Number of eigenvalues to compute
