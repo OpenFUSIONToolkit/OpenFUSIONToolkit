@@ -202,7 +202,7 @@ tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,
 tokamaker_set_mirror_slosh = ctypes_subroutine(oftpy_lib.tokamaker_set_mirror_slosh,
     [c_void_p, c_double, c_double, c_double, c_char_p])
 
-# tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,V0_target,error_str)
+# tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,Z0_target,error_str)
 tokamaker_set_targets = ctypes_subroutine(oftpy_lib.tokamaker_set_targets,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double, c_char_p])
 

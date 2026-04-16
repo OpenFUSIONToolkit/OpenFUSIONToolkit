@@ -341,7 +341,7 @@ end subroutine gs_calc_vloop
 !------------------------------------------------------------------------------
 subroutine gs_save_tokamaker(self,filename)
 class(gs_equil), intent(inout) :: self
-character(LEN=*), optional, intent(in) :: filename
+character(LEN=*), intent(in) :: filename
 real(r8), pointer :: vals_tmp(:)
 integer(4) :: hash_tmp,io_unit
 logical :: pm_save
@@ -391,7 +391,7 @@ CALL hdf5_write(self%diverted,filename,'tokamaker/DIVERTED')
 IF(self%Itor_target>0.d0)CALL hdf5_write(self%Itor_target,filename,'tokamaker/IP_TARGET')
 IF(self%Ip_ratio_target>-1.d98)CALL hdf5_write(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET')
 IF(self%R0_target>0.d0)CALL hdf5_write(self%R0_target,filename,'tokamaker/R0_TARGET')
-IF(self%V0_target>-1.d98)CALL hdf5_write(self%V0_target,filename,'tokamaker/V0_TARGET')
+IF(self%Z0_target>-1.d98)CALL hdf5_write(self%Z0_target,filename,'tokamaker/Z0_TARGET')
 IF(self%pax_target>0.d0)CALL hdf5_write(self%pax_target,filename,'tokamaker/PAX_TARGET')
 IF(self%estore_target>0.d0)CALL hdf5_write(self%estore_target,filename,'tokamaker/ESTORE_TARGET')
 IF(self%isoflux_ntargets>0)CALL hdf5_write(self%isoflux_targets,filename,'tokamaker/ISOFLUX_TARGETS')
@@ -401,9 +401,10 @@ end subroutine gs_save_tokamaker
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-subroutine gs_load_tokamaker(self,filename)
+subroutine gs_load_tokamaker(self,filename,error_string)
 class(gs_equil), intent(inout) :: self
-character(LEN=*), optional, intent(in) :: filename
+character(LEN=*), intent(in) :: filename
+CHARACTER(LEN=OFT_ERROR_SLEN), intent(out) :: error_string
 integer(4) :: hash_tmp,hash_in,io_unit,int_tmp,ndims
 integer(i4), allocatable :: dim_sizes(:)
 REAL(r8) :: pt_tmp(2),scale_tmp,diff_val
@@ -415,68 +416,111 @@ CHARACTER(LEN=:), ALLOCATABLE :: profType
 !---Check compatibility of mesh and FE representation
 CALL hdf5_read(int_tmp,filename,'tokamaker/FE_ORDER',success=success)
 IF(int_tmp/=self%device%fe_rep%order)THEN
-  CALL oft_abort('FE order of equilibrium does not match current device.','gs_load_tokamaker',__FILE__)
+  error_string='FE order of equilibrium does not match current device.'
+  RETURN
 END IF
 hash_tmp = oft_simple_hash(C_LOC(self%device%mesh%lc),INT(4*3*self%device%mesh%nc,8))
 CALL hdf5_read(hash_in,filename,'tokamaker/LC_HASH',success=success)
 IF(hash_tmp/=hash_in)THEN
-  CALL oft_abort('Cell list hash for equilibrium does not match current device.','gs_load_tokamaker',__FILE__)
+  error_string='Cell list hash for equilibrium does not match current device.'
+  RETURN
 END IF
 hash_tmp = oft_simple_hash(C_LOC(self%device%mesh%reg),INT(4*self%device%mesh%nc,8))
 CALL hdf5_read(hash_in,filename,'tokamaker/REG_HASH',success=success)
 IF(hash_tmp/=hash_in)THEN
-  CALL oft_abort('Region hash for equilibrium does not match current device.','gs_load_tokamaker',__FILE__)
+  error_string='Region hash for equilibrium does not match current device.'
+  RETURN
 END IF
 CALL hdf5_read(int_tmp,filename,'tokamaker/NCOILS',success=success)
 IF(int_tmp/=self%device%ncoils)THEN
-  CALL oft_abort('Number of coils for equilibrium does not match current device.','gs_load_tokamaker',__FILE__)
+  error_string='Number of coils for equilibrium does not match current device.'
+  RETURN
 END IF
 !---Load psi and update bounds
 NULLIFY(vals_tmp)
 CALL self%psi%get_local(vals_tmp)
 CALL hdf5_read(vals_tmp,filename,'tokamaker/PSI',success=success)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string='Failed to read PSI values.'
+  RETURN
+END IF
 CALL self%psi%restore_local(vals_tmp)
 CALL hdf5_read(self%coil_currs,filename,'tokamaker/COIL_CURRENTS',success=success)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string='Failed to read coil currents.'
+  RETURN
+END IF
 CALL gs_update_bounds(self)
 !---Load flux functions
 CALL hdf5_read(self%ffp_scale,filename,'tokamaker/FFP_SCALE',success=success)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string="Failed to read F*F' scale."
+  RETURN
+END IF
 CALL hdf5_read(profType,filename,'tokamaker/FFP_PROFILE/TYPE',success=success)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string="Failed to read F*F' profile type."
+  RETURN
+END IF
 CALL gs_profile_alloc(profType,self%I)
 DEALLOCATE(profType)
 CALL self%I%load(filename,'tokamaker/FFP_PROFILE',success=success)
 CALL self%I%update(self)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string="Failed to load F*F' profile."
+  RETURN
+END IF
 CALL hdf5_read(self%I%f_offset,filename,'tokamaker/F0',success=success)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string='Failed to read F0 values.'
+  RETURN
+END IF
 CALL hdf5_read(self%p_scale,filename,'tokamaker/P_SCALE',success=success)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string='Failed to read P scale.'
+  RETURN
+END IF
 CALL hdf5_read(profType,filename,'tokamaker/PP_PROFILE/TYPE',success=success)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string="Failed to read P' profile type."
+  RETURN
+END IF
 CALL gs_profile_alloc(profType,self%P)
 DEALLOCATE(profType)
 CALL self%P%load(filename,'tokamaker/PP_PROFILE',success=success)
 CALL self%P%update(self)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string="Failed to load P' profile."
+  RETURN
+END IF
 IF(hdf5_field_exist(filename,'tokamaker/NI_PROFILE'))THEN
   CALL hdf5_read(profType,filename,'tokamaker/NI_PROFILE/TYPE',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to read non-inductive current profile type.'
+    RETURN
+  END IF
   CALL gs_profile_alloc(profType,self%I_NI)
   DEALLOCATE(profType)
   CALL self%I_NI%load(filename,'tokamaker/NI_PROFILE',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to load non-inductive current profile.'
+    RETURN
+  END IF
   CALL self%I_NI%update(self)
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/ETA_PROFILE'))THEN
   CALL hdf5_read(profType,filename,'tokamaker/ETA_PROFILE/TYPE',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to read ETA profile type.'
+    RETURN
+  END IF
   CALL gs_profile_alloc(profType,self%eta)
   DEALLOCATE(profType)
   CALL self%eta%load(filename,'tokamaker/ETA_PROFILE',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to load ETA profile.'
+    RETURN
+  END IF
   CALL self%eta%update(self)
 END IF
 ! IF(hdf5_field_exist(filename,'tokamaker/P_ANI'))THEN
@@ -490,53 +534,82 @@ END IF
 ! END IF
 !---Check consistency of values and warn if they differ beyond expected numerical differences
 CALL hdf5_read(pt_tmp,filename,'tokamaker/PSI_BOUNDS',success=success)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string='Failed to read PSI bounds.'
+  RETURN
+END IF
 diff_val=ABS(pt_tmp(2)-pt_tmp(1))*1.d-2
 IF(ANY(ABS(pt_tmp-self%plasma_bounds)>diff_val))THEN
-  WRITE(*,*)pt_tmp,self%plasma_bounds
   CALL oft_warn('Plasma bounds in equilibrium file do not match recomputed values.')
 END IF
 CALL hdf5_read(pt_tmp,filename,'tokamaker/O_POINT',success=success)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string='Failed to read O-point.'
+  RETURN
+END IF
 diff_val=self%device%mesh%hrms
 IF(SQRT(SUM((pt_tmp-self%o_point)**2))>diff_val)THEN
   CALL oft_warn('O-point in equilibrium file does not match recomputed location.')
 END IF
 CALL hdf5_read(pt_tmp,filename,'tokamaker/LIM_POINT',success=success)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string='Failed to read Limiting point.'
+  RETURN
+END IF
 diff_val=self%device%mesh%hrms
 IF(SQRT(SUM((pt_tmp-self%lim_point)**2))>diff_val)THEN
   CALL oft_warn('Limiting point in equilibrium file does not match recomputed location.')
 END IF
 CALL hdf5_read(logical_tmp,filename,'tokamaker/DIVERTED',success=success)
-IF(.NOT.success)GOTO 100
+IF(.NOT.success)THEN
+  error_string='Failed to read Diverted status.'
+  RETURN
+END IF
 IF(logical_tmp.NEQV.self%diverted)THEN
   CALL oft_warn('Diverted status in equilibrium file does not match recomputed value.')
 END IF
 !---Load targets and coil currents
 IF(hdf5_field_exist(filename,'tokamaker/IP_TARGET'))THEN
   CALL hdf5_read(self%Itor_target,filename,'tokamaker/IP_TARGET',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to read Ip target.'
+    RETURN
+  END IF
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/IP_RATIO_TARGET'))THEN
   CALL hdf5_read(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to read Ip ratio target.'
+    RETURN
+  END IF
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/R0_TARGET'))THEN
   CALL hdf5_read(self%R0_target,filename,'tokamaker/R0_TARGET',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to read R0 target.'
+    RETURN
+  END IF
 END IF
-IF(hdf5_field_exist(filename,'tokamaker/V0_TARGET'))THEN
-  CALL hdf5_read(self%V0_target,filename,'tokamaker/V0_TARGET',success=success)
-  IF(.NOT.success)GOTO 100
+IF(hdf5_field_exist(filename,'tokamaker/Z0_TARGET'))THEN
+  CALL hdf5_read(self%Z0_target,filename,'tokamaker/Z0_TARGET',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Z0 target.'
+    RETURN
+  END IF
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/PAX_TARGET'))THEN
   CALL hdf5_read(self%pax_target,filename,'tokamaker/PAX_TARGET',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to read P axis target.'
+    RETURN
+  END IF
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/ESTORE_TARGET'))THEN
   CALL hdf5_read(self%estore_target,filename,'tokamaker/ESTORE_TARGET',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to read stored energy target.'
+    RETURN
+  END IF
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/ISOFLUX_TARGETS'))THEN
   CALL hdf5_field_get_sizes(filename,'tokamaker/ISOFLUX_TARGETS',ndims,dim_sizes)
@@ -545,7 +618,10 @@ IF(hdf5_field_exist(filename,'tokamaker/ISOFLUX_TARGETS'))THEN
   ALLOCATE(self%isoflux_targets(dim_sizes(1),dim_sizes(2)))
   DEALLOCATE(dim_sizes)
   CALL hdf5_read(self%isoflux_targets,filename,'tokamaker/ISOFLUX_TARGETS',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to read isoflux targets.'
+    RETURN
+  END IF
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/FLUX_TARGETS'))THEN
   CALL hdf5_field_get_sizes(filename,'tokamaker/FLUX_TARGETS',ndims,dim_sizes)
@@ -554,7 +630,10 @@ IF(hdf5_field_exist(filename,'tokamaker/FLUX_TARGETS'))THEN
   self%flux_ntargets=dim_sizes(2)
   DEALLOCATE(dim_sizes)
   CALL hdf5_read(self%flux_targets,filename,'tokamaker/FLUX_TARGETS',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to read flux targets.'
+    RETURN
+  END IF
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/SADDLE_TARGETS'))THEN
   CALL hdf5_field_get_sizes(filename,'tokamaker/SADDLE_TARGETS',ndims,dim_sizes)
@@ -563,10 +642,11 @@ IF(hdf5_field_exist(filename,'tokamaker/SADDLE_TARGETS'))THEN
   self%saddle_ntargets=dim_sizes(2)
   DEALLOCATE(dim_sizes)
   CALL hdf5_read(self%saddle_targets,filename,'tokamaker/SADDLE_TARGETS',success=success)
-  IF(.NOT.success)GOTO 100
+  IF(.NOT.success)THEN
+    error_string='Failed to read saddle targets.'
+    RETURN
+  END IF
 END IF
-RETURN
-100 CALL oft_abort('Error loading equilibrium file.','gs_load_tokamaker',__FILE__)
 end subroutine gs_load_tokamaker
 !---------------------------------------------------------------------------
 !> Needs docs

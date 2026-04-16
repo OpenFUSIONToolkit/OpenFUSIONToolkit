@@ -1391,20 +1391,20 @@ END SUBROUTINE tokamaker_set_mirror_slosh
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,V0_target,error_str) BIND(C,NAME="tokamaker_set_targets")
+SUBROUTINE tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,Z0_target,error_str) BIND(C,NAME="tokamaker_set_targets")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 REAL(c_double), VALUE, INTENT(in) :: ip_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: ip_ratio_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: pax_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: estore_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: R0_target !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: V0_target !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: Z0_target !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
 tMaker_obj%gs_equil%R0_target=R0_target
-tMaker_obj%gs_equil%V0_target=V0_target
+tMaker_obj%gs_equil%Z0_target=Z0_target
 tMaker_obj%gs_equil%pax_target=pax_target*mu0
 tMaker_obj%gs_equil%estore_target=estore_target*mu0
 tMaker_obj%gs_equil%itor_target=ip_target*mu0
@@ -1657,12 +1657,10 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium inst
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
-CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(filename,filename_tmp)
 CALL gs_save_tokamaker(tMaker_equil_obj,filename_tmp)
-CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_tokamaker
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -1676,7 +1674,7 @@ CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(filename,filename_tmp)
-CALL gs_load_tokamaker(tMaker_equil_obj,filename_tmp)
+CALL gs_load_tokamaker(tMaker_equil_obj,filename_tmp,error_flag)
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_load_tokamaker
 !---------------------------------------------------------------------------

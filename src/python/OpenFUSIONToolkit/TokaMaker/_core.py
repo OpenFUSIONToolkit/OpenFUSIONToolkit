@@ -987,6 +987,11 @@ class TokaMaker():
                 raise ValueError("`R0` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._tMaker_equil._R0_target = copy.copy(R0)
         if V0 is not None:
+            warn(
+                "`V0` is deprecated, use `Z0` instead. This argument will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2
+            )
             Z0 = V0
         if Z0 is not None:
             self._tMaker_equil._Z0_target = copy.copy(Z0)
@@ -1091,7 +1096,6 @@ class TokaMaker():
         @param source_file Path to a file containing a TokaMaker equilibrium
         @param skip_targets When copying, skip copying target values
         @param skip_constraints When copying, skip copying constraint values
-        @result New `TokaMaker_equilibrium` object with copied values
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -1100,11 +1104,13 @@ class TokaMaker():
                 raise ValueError("Cannot specify both `source_eq` and `source_file`")
             self._tMaker_equil = TokaMaker_equilibrium(source_eq=source_eq,skip_targets=skip_targets,skip_constraints=skip_constraints)
         elif source_file is not None:
+            tmp_eq = TokaMaker_equilibrium(source_eq=self._tMaker_equil,skip_targets=skip_targets,skip_constraints=skip_constraints)
             cfilename = self._oft_env.path2c(source_file)
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_load_tokamaker(self._tMaker_equil.c_ptr,cfilename,error_string)
+            tokamaker_load_tokamaker(tmp_eq.c_ptr,cfilename,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
+            self._tMaker_equil = tmp_eq
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
