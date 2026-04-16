@@ -12,6 +12,7 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 MODULE oft_gs_util
+USE, INTRINSIC :: iso_c_binding, ONLY: C_LOC
 USE oft_base
 USE spline_mod
 USE oft_io, ONLY: hdf5_create_file, hdf5_create_group, hdf5_write, hdf5_read, &
