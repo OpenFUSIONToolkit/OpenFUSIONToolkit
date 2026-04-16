@@ -1,12 +1,20 @@
-"""
-GEQDSK (g-file) and Osborne p-file (kinetic profile) readers and writers.
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! GEQDSK (g-file) and Osborne p-file (kinetic profile) readers and writers
 
 Reads standard GEQDSK equilibrium files and computes flux-surface-averaged
-quantities, and reads/writes Osborne p-files for kinetic profiles. No OMFIT
-or external equilibrium-code dependencies required.
+quantities, and reads/writes Osborne p-files for kinetic profiles.  Adapted
+from OMFIT `omfit_eqdsk` / `omfit_osborne` with no OMFIT runtime dependency.
 
 Dependencies: numpy, scipy, contourpy (ships with matplotlib).
-"""
+
+@authors Daniel Burgess
+@date April 2026
+@ingroup doxy_oft_python
+'''
 
 import io
 import re
@@ -29,17 +37,11 @@ from scipy import constants, integrate, interpolate
 # ---------------------------------------------------------------------------
 
 def _cocos_params(cocos_index):
-    """Return COCOS sign/exponent parameters for a given COCOS index.
+    r'''! Return COCOS sign/exponent parameters for a given COCOS index
 
-    Parameters
-    ----------
-    cocos_index : int
-        COCOS convention index (1-8 or 11-18).
-
-    Returns
-    -------
-    dict with keys: sigma_Bp, sigma_RpZ, sigma_rhotp, exp_Bp
-    """
+    @param cocos_index COCOS convention index (1-8 or 11-18)
+    @result Dict with keys: `sigma_Bp`, `sigma_RpZ`, `sigma_rhotp`, `exp_Bp`
+    '''
     if cocos_index < 1 or cocos_index > 18 or cocos_index in (9, 10):
         raise ValueError(f"Invalid COCOS index: {cocos_index}")
 
@@ -63,19 +65,13 @@ def _cocos_params(cocos_index):
 # ---------------------------------------------------------------------------
 
 def _read_geqdsk(filename):
-    """Parse a GEQDSK (g-file) into a plain dict.
+    r'''! Parse a GEQDSK (g-file) into a plain dict
 
-    Parameters
-    ----------
-    filename : str or path-like
-        Path to the g-file.
-
-    Returns
-    -------
-    dict
-        Keys match the standard GEQDSK field names (NW, NH, RDIM, ...,
-        FPOL, PRES, FFPRIM, PPRIME, PSIRZ, QPSI, RBBBS, ZBBBS, etc.).
-    """
+    @param filename Path to the g-file
+    @result Dict whose keys match the standard GEQDSK field names (`NW`, `NH`,
+            `RDIM`, ..., `FPOL`, `PRES`, `FFPRIM`, `PPRIME`, `PSIRZ`, `QPSI`,
+            `RBBBS`, `ZBBBS`, etc.)
+    '''
 
     def splitter(text, step=16):
         return [text[step * k : step * (k + 1)] for k in range(len(text) // step)]
@@ -217,7 +213,11 @@ def _read_geqdsk(filename):
 # ---------------------------------------------------------------------------
 
 def _write_fortran_block(stream, values):
-    """Write *values* in standard GEQDSK format (5 per line, 16 chars each)."""
+    r'''! Write *values* in standard GEQDSK format (5 per line, 16 chars each)
+
+    @param stream Open text stream to write to
+    @param values 1-D sequence of floats to serialise
+    '''
     for i, v in enumerate(values):
         stream.write(f"{v:16.9E}")
         if (i + 1) % 5 == 0:
@@ -227,7 +227,11 @@ def _write_fortran_block(stream, values):
 
 
 def _write_geqdsk_to_stream(g, stream):
-    """Serialise a raw g-file dict *g* to an open text *stream*."""
+    r'''! Serialise a raw g-file dict *g* to an open text *stream*
+
+    @param g Raw g-file dict (as produced by `_read_geqdsk`)
+    @param stream Open text stream to write to
+    '''
     NW = int(g["NW"])
     NH = int(g["NH"])
 
@@ -265,9 +269,34 @@ def _write_geqdsk_to_stream(g, stream):
         lim[1::2] = g["ZLIM"][:nlim]
         _write_fortran_block(stream, lim)
 
+    # --- Optional extended blocks (KVTOR/RVTOR/NMASS, PRESSW, PWPRIM,
+    # DMION, RHOVN).  Emitted only when the dict contains them, so
+    # round-tripping an extended g-file produced by `_read_geqdsk` is
+    # lossless.  Standard minimal g-files are unaffected.
+    has_kvtor = "KVTOR" in g and "RVTOR" in g and "NMASS" in g
+    if has_kvtor:
+        kvtor = int(g["KVTOR"])
+        rvtor = float(g["RVTOR"])
+        nmass = int(g["NMASS"])
+        stream.write(f" {kvtor:5d} {rvtor:16.9E} {nmass:5d}\n")
+
+        if kvtor > 0 and "PRESSW" in g and "PWPRIM" in g:
+            _write_fortran_block(stream, g["PRESSW"])
+            _write_fortran_block(stream, g["PWPRIM"])
+
+        if nmass > 0 and "DMION" in g:
+            _write_fortran_block(stream, g["DMION"])
+
+        if "RHOVN" in g and len(g["RHOVN"]) > 0:
+            _write_fortran_block(stream, g["RHOVN"])
+
 
 def write_geqdsk(g, filename):
-    """Write a raw g-file dict to *filename*."""
+    r'''! Write a raw g-file dict to *filename*
+
+    @param g Raw g-file dict (as produced by `_read_geqdsk`)
+    @param filename Output path for the g-file
+    '''
     with open(filename, "w") as f:
         _write_geqdsk_to_stream(g, f)
 
@@ -277,22 +306,14 @@ def write_geqdsk(g, filename):
 # ---------------------------------------------------------------------------
 
 def _trace_contours(R, Z, PSI, levels):
-    """Extract contour lines of PSI at given levels using contourpy.
+    r'''! Extract contour lines of \f$\psi\f$ at given levels using contourpy
 
-    Parameters
-    ----------
-    R, Z : 1-D arrays
-        Grid coordinates.
-    PSI : 2-D array (len(Z), len(R))
-        Poloidal flux on the grid.
-    levels : 1-D array
-        PSI values at which to extract contours.
-
-    Returns
-    -------
-    list of list of ndarray
-        For each level, a list of (N, 2) arrays of (R, Z) points.
-    """
+    @param R 1-D array of R grid coordinates [m]
+    @param Z 1-D array of Z grid coordinates [m]
+    @param PSI 2-D array (`len(Z)` x `len(R)`) of poloidal flux on the grid [Wb]
+    @param levels 1-D array of \f$\psi\f$ values at which to extract contours
+    @result List (one per level) of lists of `(N,2)` arrays of `(R,Z)` points
+    '''
     cg = contourpy.contour_generator(R, Z, PSI, name="serial", line_type="Separate")
     all_contours = []
     for lev in levels:
@@ -302,25 +323,19 @@ def _trace_contours(R, Z, PSI, levels):
 
 
 def _select_main_contour(segments, R0, Z0, sigma_RpZ, sigma_rhotp):
-    """Select the main closed contour encircling the magnetic axis.
+    r'''! Select the main closed contour encircling the magnetic axis
 
-    Uses the winding/angular-coverage criterion: the contour whose
+    Uses the winding / angular-coverage criterion: the contour whose
     double integral of angle vs. arc-fraction has the largest amplitude
     is most likely the one that wraps around the axis.
 
-    Parameters
-    ----------
-    segments : list of (N, 2) arrays
-        Candidate contour segments at a single PSI level.
-    R0, Z0 : float
-        Magnetic axis position.
-    sigma_RpZ, sigma_rhotp : int
-        COCOS sign factors for orientation.
-
-    Returns
-    -------
-    ndarray (N, 2) or None
-    """
+    @param segments List of `(N,2)` candidate contour segments at a single \f$\psi\f$ level
+    @param R0 Magnetic axis R [m]
+    @param Z0 Magnetic axis Z [m]
+    @param sigma_RpZ COCOS right-handedness sign
+    @param sigma_rhotp COCOS \f$\theta_{\mathrm{pol}}\cdot\phi_{\mathrm{tor}}\f$ sign
+    @result `(N,2)` ndarray of the selected contour with correct orientation, or `None`
+    '''
     if not segments:
         return None
 
@@ -362,20 +377,13 @@ def _select_main_contour(segments, R0, Z0, sigma_RpZ, sigma_rhotp):
 
 
 def _crop_at_xpoint(seg, R0, Z0):
-    """Crop an open separatrix contour at the X-point to produce a closed LCFS.
+    r'''! Crop an open separatrix contour at the X-point to produce a closed LCFS
 
-    Parameters
-    ----------
-    seg : ndarray (N, 2)
-        Open contour segment with columns (R, Z).
-    R0, Z0 : float
-        Magnetic axis position.
-
-    Returns
-    -------
-    ndarray (M, 2)
-        Closed contour (first point == last point).
-    """
+    @param seg `(N,2)` open contour segment with columns `(R, Z)`
+    @param R0 Magnetic axis R [m]
+    @param Z0 Magnetic axis Z [m]
+    @result `(M,2)` closed contour (first point == last point)
+    '''
     r, z = seg[:, 0], seg[:, 1]
     n = len(r)
 
@@ -442,18 +450,14 @@ def _crop_at_xpoint(seg, R0, Z0):
 # ---------------------------------------------------------------------------
 
 def _flux_geometry(R, Z):
-    """Compute geometric properties of a single flux surface contour.
+    r'''! Compute geometric properties of a single flux-surface contour
 
-    Parameters
-    ----------
-    R, Z : 1-D arrays
-        Contour points (should be closed: first == last, or nearly so).
-
-    Returns
-    -------
-    dict with keys: R (geometric center), Z, a (minor radius),
-        kappa, delta, perimeter, surfArea
-    """
+    @param R 1-D array of contour R coordinates (closed: first == last, or nearly so)
+    @param Z 1-D array of contour Z coordinates (closed: first == last, or nearly so)
+    @result Dict with keys `R` (geometric center), `Z`, `a` (minor radius),
+            `kappa`, `kapu`, `kapl`, `delta`, `delu`, `dell`, `perimeter`,
+            `surfArea`, `eps`
+    '''
     geo = {}
 
     def _parabola_extremum(idx, main, other):
@@ -518,23 +522,16 @@ def _flux_geometry(R, Z):
 
 
 def _resample_contour(R, Z, npts=257, periodic=True):
-    """Resample a closed contour to *npts* equally-spaced-in-arc-length points.
+    r'''! Resample a closed contour to *npts* equally-spaced-in-arc-length points
 
-    Parameters
-    ----------
-    R, Z : 1-D arrays
-        Contour coordinates (should be nearly closed: first ~ last).
-    npts : int
-        Number of output points (including the repeated closing point).
-    periodic : bool
-        If *True* (default), use a periodic cubic spline.  Set to *False*
-        for the separatrix surface where the X-point cusp produces a
-        derivative discontinuity.
-
-    Returns
-    -------
-    R_new, Z_new : 1-D arrays of length *npts*
-    """
+    @param R 1-D array of contour R coordinates (nearly closed: first \f$\approx\f$ last)
+    @param Z 1-D array of contour Z coordinates (nearly closed: first \f$\approx\f$ last)
+    @param npts Number of output points (including the repeated closing point)
+    @param periodic If `True` (default), use a periodic cubic spline. Set to `False`
+                    for the separatrix surface where the X-point cusp produces a
+                    derivative discontinuity.
+    @result Tuple `(R_new, Z_new)` of 1-D arrays of length *npts*
+    '''
     R = np.asarray(R, dtype=float).copy()
     Z = np.asarray(Z, dtype=float).copy()
     R[-1], Z[-1] = R[0], Z[0]
@@ -562,19 +559,18 @@ def _resample_contour(R, Z, npts=257, periodic=True):
 
 
 def _detect_xpoint_angle(R, Z, R0, Z0):
-    """Detect the X-point angle on a separatrix contour.
+    r'''! Detect the X-point angle on a separatrix contour
 
-    Parameters
-    ----------
-    R, Z : 1-D arrays
-        Separatrix contour (should be nearly closed: first ~ last).
-    R0, Z0 : float
-        Magnetic axis coordinates.
+    Finds the location of the sharpest bend (minimum cosine of angle between
+    adjacent tangent vectors) and returns \f$\theta = \mathrm{atan2}(Z-Z_0, R-R_0)\f$
+    at that point.
 
-    Returns
-    -------
-    float or None
-    """
+    @param R 1-D array of separatrix R coordinates (nearly closed)
+    @param Z 1-D array of separatrix Z coordinates (nearly closed)
+    @param R0 Magnetic axis R [m]
+    @param Z0 Magnetic axis Z [m]
+    @result Poloidal angle \f$\theta\f$ of the X-point, or `None` if detection fails
+    '''
     R = np.asarray(R, dtype=float)
     Z = np.asarray(Z, dtype=float)
     n = len(R)
@@ -596,23 +592,20 @@ def _detect_xpoint_angle(R, Z, R0, Z0):
 
 
 def _resample_contour_theta(R, Z, R0, Z0, npts=257, theta_xpt=None):
-    """Resample a closed contour to *npts* equally-spaced-in-angle points.
+    r'''! Resample a closed contour to *npts* equally-spaced-in-angle points
 
-    Parameters
-    ----------
-    R, Z : 1-D arrays
-        Contour coordinates (should be nearly closed: first ~ last).
-    R0, Z0 : float
-        Magnetic axis coordinates.
-    npts : int
-        Number of output points (including the repeated closing point).
-    theta_xpt : float or None
-        Pre-computed X-point angle.  If ``None``, detected from this contour.
+    Fits periodic cubic splines \f$R(\theta)\f$ and \f$Z(\theta)\f$ where
+    \f$\theta = \mathrm{atan2}(Z-Z_0, R-R_0)\f$, sorted starting from the
+    X-point angle.
 
-    Returns
-    -------
-    R_new, Z_new : 1-D arrays of length *npts*
-    """
+    @param R 1-D array of contour R coordinates (nearly closed)
+    @param Z 1-D array of contour Z coordinates (nearly closed)
+    @param R0 Magnetic axis R [m]
+    @param Z0 Magnetic axis Z [m]
+    @param npts Number of output points (including the repeated closing point)
+    @param theta_xpt Pre-computed X-point angle; if `None`, detected from this contour
+    @result Tuple `(R_new, Z_new)` of 1-D arrays of length *npts*
+    '''
     R = np.asarray(R, dtype=float).copy()
     Z = np.asarray(Z, dtype=float).copy()
     R[-1], Z[-1] = R[0], Z[0]
@@ -671,27 +664,26 @@ def _resample_contour_theta(R, Z, R0, Z0, npts=257, theta_xpt=None):
 # ---------------------------------------------------------------------------
 
 class GEQDSKEquilibrium:
-    """GEQDSK equilibrium with flux-surface-averaged quantities.
+    r'''! GEQDSK equilibrium with flux-surface-averaged quantities
 
-    Reads a standard g-file and lazily computes magnetic fields,
-    flux-surface contours, averages, geometry, and inductance.
-
-    Parameters
-    ----------
-    filename : str or path-like
-        Path to the g-file.
-    cocos : int
-        COCOS convention index (default 1, standard EFIT).
-    nlevels : int or None
-        Number of normalised-psi levels for flux-surface analysis.
-        Defaults to NW from the g-file.
-    resample : ``"theta"`` or ``"arc_length"``
-        Contour resampling method for near-separatrix surfaces
-        (psi_N >= 0.99).
-    """
+    Reads a standard g-file and lazily computes magnetic fields, flux-surface
+    contours, averages, geometry, and inductance.
+    '''
 
     def __init__(self, filename, cocos=1, nlevels=None, resample="theta",
                  extrapolate_edge=True):
+        r'''! Initialize GEQDSKEquilibrium by reading a g-file from disk
+
+        @param filename Path to the g-file
+        @param cocos COCOS convention index (default 1, standard EFIT)
+        @param nlevels Number of normalised-\f$\psi\f$ levels for flux-surface
+                       analysis (defaults to `NW` from the g-file)
+        @param resample Contour resampling method for near-separatrix surfaces
+                        (\f$\hat{\psi} \geq 0.99\f$): `"theta"` or `"arc_length"`
+        @param extrapolate_edge If `True` (default), extrapolate \f$p'\f$ and
+                                \f$FF'\f$ at the separatrix when the g-file has
+                                them forced to zero
+        '''
         self._raw = _read_geqdsk(filename)
         self._cocos_index = int(cocos)
         self._cocos = _cocos_params(cocos)
@@ -707,18 +699,43 @@ class GEQDSKEquilibrium:
     @classmethod
     def from_bytes(cls, raw_bytes, cocos=1, nlevels=None, resample="theta",
                    extrapolate_edge=True):
-        """Construct from in-memory bytes (e.g. from HDF5 storage)."""
+        r'''! Construct from in-memory bytes (e.g. from HDF5 storage)
+
+        @param raw_bytes Raw content of a g-file
+        @param cocos COCOS convention index
+        @param nlevels Number of \f$\hat{\psi}\f$ levels
+        @param resample Contour resampling method (`"theta"` or `"arc_length"`)
+        @param extrapolate_edge Extrapolate \f$p'\f$ and \f$FF'\f$ at separatrix
+                                when forced to zero
+        @result New `GEQDSKEquilibrium` instance
+        '''
+        import os as _os
         with tempfile.NamedTemporaryFile(mode="wb", suffix=".geqdsk",
                                          delete=False) as tmp:
             tmp.write(raw_bytes)
             tmp_path = tmp.name
-        return cls(tmp_path, cocos=cocos, nlevels=nlevels, resample=resample,
-                   extrapolate_edge=extrapolate_edge)
+        try:
+            return cls(tmp_path, cocos=cocos, nlevels=nlevels, resample=resample,
+                       extrapolate_edge=extrapolate_edge)
+        finally:
+            try:
+                _os.remove(tmp_path)
+            except OSError:
+                pass
 
     @classmethod
     def from_raw(cls, raw_dict, cocos=1, nlevels=None, resample="theta",
                  extrapolate_edge=True):
-        """Construct directly from a raw g-file dict (no file I/O)."""
+        r'''! Construct directly from a raw g-file dict (no file I/O)
+
+        @param raw_dict Dict with standard GEQDSK keys (as returned by `_read_geqdsk`)
+        @param cocos COCOS convention index
+        @param nlevels Number of \f$\hat{\psi}\f$ levels
+        @param resample Contour resampling method (`"theta"` or `"arc_length"`)
+        @param extrapolate_edge Extrapolate \f$p'\f$ and \f$FF'\f$ at separatrix
+                                when forced to zero
+        @result New `GEQDSKEquilibrium` instance
+        '''
         obj = object.__new__(cls)
         obj._raw = {k: (v.copy() if isinstance(v, np.ndarray) else v)
                      for k, v in raw_dict.items()}
@@ -738,7 +755,7 @@ class GEQDSKEquilibrium:
 
     @property
     def R_grid(self):
-        """1-D R grid."""
+        r'''! 1-D R grid [m]'''
         if "R_grid" not in self._cache:
             NW = int(self._raw["NW"])
             self._cache["R_grid"] = np.linspace(
@@ -750,7 +767,7 @@ class GEQDSKEquilibrium:
 
     @property
     def Z_grid(self):
-        """1-D Z grid."""
+        r'''! 1-D Z grid [m]'''
         if "Z_grid" not in self._cache:
             NH = int(self._raw["NH"])
             self._cache["Z_grid"] = np.linspace(
@@ -762,105 +779,105 @@ class GEQDSKEquilibrium:
 
     @property
     def psi_RZ(self):
-        """2-D poloidal flux array (NH x NW)."""
+        r'''! 2-D poloidal flux array (`NH` x `NW`) [Wb]'''
         return self._raw["PSIRZ"]
 
     @property
     def psi_N_RZ(self):
-        """2-D normalised poloidal flux on the (R, Z) grid."""
+        r'''! 2-D normalised poloidal flux \f$\hat{\psi}(R,Z)\f$ on the (R,Z) grid'''
         return (self._raw["PSIRZ"] - self.psi_axis) / (self.psi_boundary - self.psi_axis)
 
     @property
     def psi_axis(self):
-        """Poloidal flux at the magnetic axis."""
+        r'''! Poloidal flux at the magnetic axis [Wb]'''
         return self._raw["SIMAG"]
 
     @property
     def psi_boundary(self):
-        """Poloidal flux at the last closed flux surface."""
+        r'''! Poloidal flux at the last closed flux surface [Wb]'''
         return self._raw["SIBRY"]
 
     @property
     def psi_N(self):
-        """Normalised psi levels used for flux-surface analysis."""
+        r'''! Normalised \f$\hat{\psi}\f$ levels used for flux-surface analysis'''
         return np.linspace(0, 1, self._nlevels)
 
     @property
     def fpol(self):
-        """F = R*Bt poloidal current function, on uniform psi_N grid."""
+        r'''! \f$F = R B_t\f$ poloidal current function, on uniform \f$\hat{\psi}\f$ grid [T m]'''
         return self._raw["FPOL"]
 
     @property
     def pres(self):
-        """Pressure profile on uniform psi_N grid."""
+        r'''! Pressure profile on uniform \f$\hat{\psi}\f$ grid [Pa]'''
         return self._raw["PRES"]
 
     @property
     def pprime(self):
-        """dP/dpsi on uniform psi_N grid."""
+        r'''! \f$dP/d\psi\f$ on uniform \f$\hat{\psi}\f$ grid [Pa/Wb]'''
         return self._raw["PPRIME"]
 
     @property
     def ffprim(self):
-        """F*dF/dpsi on uniform psi_N grid."""
+        r'''! \f$F\,dF/d\psi\f$ on uniform \f$\hat{\psi}\f$ grid [T\f$^2\f$ m\f$^2\f$/Wb]'''
         return self._raw["FFPRIM"]
 
     @property
     def qpsi(self):
-        """Safety factor from the g-file on uniform psi_N grid."""
+        r'''! Safety factor from the g-file on uniform \f$\hat{\psi}\f$ grid'''
         return self._raw["QPSI"]
 
     @property
     def Ip(self):
-        """Plasma current [A]."""
+        r'''! Plasma current \f$I_p\f$ [A]'''
         return self._raw["CURRENT"]
 
     @property
     def R_mag(self):
-        """R of the magnetic axis [m]."""
+        r'''! R of the magnetic axis [m]'''
         return self._raw["RMAXIS"]
 
     @property
     def Z_mag(self):
-        """Z of the magnetic axis [m]."""
+        r'''! Z of the magnetic axis [m]'''
         return self._raw["ZMAXIS"]
 
     @property
     def R_center(self):
-        """Reference geometric center R [m]."""
+        r'''! Reference geometric center R [m]'''
         return self._raw["RCENTR"]
 
     @property
     def B_center(self):
-        """Vacuum toroidal field at R_center [T]."""
+        r'''! Vacuum toroidal field at `R_center` [T]'''
         return self._raw["BCENTR"]
 
     @property
     def boundary_R(self):
-        """R coordinates of the plasma boundary."""
+        r'''! R coordinates of the plasma boundary [m]'''
         return self._raw["RBBBS"]
 
     @property
     def boundary_Z(self):
-        """Z coordinates of the plasma boundary."""
+        r'''! Z coordinates of the plasma boundary [m]'''
         return self._raw["ZBBBS"]
 
     @property
     def limiter_R(self):
-        """R coordinates of the limiter."""
+        r'''! R coordinates of the limiter [m]'''
         return self._raw["RLIM"]
 
     @property
     def limiter_Z(self):
-        """Z coordinates of the limiter."""
+        r'''! Z coordinates of the limiter [m]'''
         return self._raw["ZLIM"]
 
     @property
     def rhovn(self):
-        r"""Normalised toroidal flux coordinate rho = sqrt(Phi_tor/Phi_tor_edge).
+        r'''! Normalised toroidal flux coordinate \f$\rho = \sqrt{\Phi_{\mathrm{tor}}/\Phi_{\mathrm{tor,edge}}}\f$
 
         Always computed from the safety factor profile.
-        """
+        '''
         NW = int(self._raw["NW"])
         psi_grid = np.linspace(self.psi_axis, self.psi_boundary, NW)
         phi = integrate.cumulative_trapezoid(self._raw["QPSI"], psi_grid, initial=0)
@@ -871,13 +888,24 @@ class GEQDSKEquilibrium:
 
     @property
     def cocos(self):
-        """Current COCOS convention index."""
+        r'''! Current COCOS convention index'''
         return self._cocos_index
 
     # --- COCOS conversion and sign-flip methods ---
 
     def cocosify(self, cocos_out, copy=False):
-        """Convert the raw g-file data from the current COCOS to *cocos_out*."""
+        r'''! Convert the raw g-file data from the current COCOS to *cocos_out*
+
+        Applies the multiplicative sign / \f$2\pi\f$ factors to every relevant
+        field following Sauter & Medvedev, Comput. Phys. Commun. 184 (2013) 293,
+        Eq. 14/23.
+
+        @param cocos_out Target COCOS convention index (1-8 or 11-18)
+        @param copy If `True`, return a new `GEQDSKEquilibrium` with converted
+                    data, leaving this object unchanged.  If `False` (default),
+                    convert in place and return `self`.
+        @result Converted object (`self` when *copy=False*)
+        '''
         cc_in = _cocos_params(self._cocos_index)
         cc_out = _cocos_params(cocos_out)
 
@@ -913,7 +941,15 @@ class GEQDSKEquilibrium:
         return target
 
     def flip_Bt_Ip(self, copy=False):
-        """Reverse the signs of Bt and Ip in the raw g-file data."""
+        r'''! Reverse the signs of \f$B_t\f$ and \f$I_p\f$ in the raw g-file data
+
+        Negates `BCENTR`, `FPOL`, `CURRENT`, `PSIRZ`, `SIMAG`, `SIBRY`, `PPRIME`,
+        and `FFPRIM` -- equivalent to flipping the direction of both the toroidal
+        field and the plasma current while keeping the COCOS index unchanged.
+
+        @param copy If `True`, return a new object; otherwise modify in place
+        @result Modified `GEQDSKEquilibrium` object
+        '''
         target = self._copy_for_mutation() if copy else self
         g = target._raw
 
@@ -939,11 +975,17 @@ class GEQDSKEquilibrium:
     # --- Save / serialise ---
 
     def save(self, filename):
-        """Write the (possibly modified) g-file data to *filename*."""
+        r'''! Write the (possibly modified) g-file data to *filename*
+
+        @param filename Output path for the g-file
+        '''
         write_geqdsk(self._raw, filename)
 
     def to_bytes(self):
-        """Serialise to in-memory bytes."""
+        r'''! Serialise to in-memory bytes (round-trips with `from_bytes`)
+
+        @result Raw g-file content as bytes
+        '''
         buf = io.StringIO()
         _write_geqdsk_to_stream(self._raw, buf)
         return buf.getvalue().encode("ascii")
@@ -951,7 +993,7 @@ class GEQDSKEquilibrium:
     # --- Lazy field computation ---
 
     def _compute_fields(self):
-        """Compute Br, Bz, Jt on the full (R, Z) grid."""
+        r'''! Compute \f$B_R\f$, \f$B_Z\f$, \f$J_t\f$ on the full (R,Z) grid'''
         if "Br" in self._cache:
             return
 
@@ -978,7 +1020,7 @@ class GEQDSKEquilibrium:
     # --- Lazy flux-surface tracing and averaging ---
 
     def _trace_surfaces(self):
-        """Trace flux surfaces and compute all averaged quantities."""
+        r'''! Trace flux surfaces and compute all averaged quantities'''
         if "avg" in self._cache:
             return
 
@@ -1024,7 +1066,7 @@ class GEQDSKEquilibrium:
         avg = {key: np.zeros(nc) for key in [
             "R", "1/R", "1/R**2", "R**2",
             "Bp", "Bp**2", "Bt", "Bt**2", "Btot**2",
-            "Jt", "Jt/R",
+            "Jt", "Jt/R", "Jt/R_num",
             "vp", "q", "ip",
             "F", "PPRIME", "FFPRIM",
         ]}
@@ -1033,19 +1075,6 @@ class GEQDSKEquilibrium:
             "delta", "delu", "dell", "perimeter", "surfArea", "eps",
         ]}
         contour_data = []
-
-        theta_xpt = None
-        if self._resample_method == "theta" and nc > 1:
-            sep_seg = _select_main_contour(
-                contours[nc - 1], R0, Z0,
-                cc["sigma_RpZ"], cc["sigma_rhotp"],
-            )
-            if sep_seg is not None and len(sep_seg) >= 10:
-                sep_seg = _crop_at_xpoint(sep_seg, R0, Z0)
-            if sep_seg is not None and len(sep_seg) >= 6:
-                theta_xpt = _detect_xpoint_angle(
-                    sep_seg[:, 0], sep_seg[:, 1], R0, Z0
-                )
 
         dpsi_arr = np.abs(np.gradient(psi_levels))
 
@@ -1074,7 +1103,7 @@ class GEQDSKEquilibrium:
                 avg["Btot**2"][k] = Bt_axis**2
                 Jt0 = float(Jt_interp.ev(Z0, R0))
                 avg["Jt"][k] = Jt0
-                avg["Jt/R"][k] = Jt0 / R0
+                avg["Jt/R_num"][k] = Jt0 / R0
                 avg["vp"][k] = 0.0
                 avg["ip"][k] = 0.0
                 for gk in geo_arrays:
@@ -1107,9 +1136,19 @@ class GEQDSKEquilibrium:
                 r_s, z_s = seg[:, 0].copy(), seg[:, 1].copy()
                 r_s[-1], z_s[-1] = r_s[0], z_s[0]
             elif pn >= 0.99 and len(seg) >= 20:
-                r_s, z_s = _resample_contour(
-                    seg[:, 0], seg[:, 1], npts=257, periodic=False,
-                )
+                # Near-separatrix: choose theta-based vs arc-length
+                # resampling per self._resample_method.  Theta-based
+                # resampling places points uniformly in angle around the
+                # magnetic axis, which preserves the X-point cusp better
+                # than arc-length for separatrix-adjacent surfaces.
+                if self._resample_method == "theta":
+                    r_s, z_s = _resample_contour_theta(
+                        seg[:, 0], seg[:, 1], R0, Z0, npts=257,
+                    )
+                else:
+                    r_s, z_s = _resample_contour(
+                        seg[:, 0], seg[:, 1], npts=257, periodic=False,
+                    )
             elif len(seg) >= 20:
                 r_s, z_s = _resample_contour(seg[:, 0], seg[:, 1], npts=257)
             else:
@@ -1155,8 +1194,13 @@ class GEQDSKEquilibrium:
             avg["Bt"][k] = flx_avg(Bt_s)
             avg["Bt**2"][k] = flx_avg(Bt_s**2)
             avg["Btot**2"][k] = flx_avg(B2_s)
+            # Numerical <Jt> from curl(B)/mu_0; stored for cross-checks.
+            # Note: avg["Jt/R"] is written analytically below (after the
+            # per-surface loop), so we intentionally do NOT populate a
+            # numerical `Jt/R` here -- save it under `Jt/R_num` for
+            # downstream consumers that want the numerical version.
             avg["Jt"][k] = flx_avg(Jt_s)
-            avg["Jt/R"][k] = flx_avg(Jt_s / r_s)
+            avg["Jt/R_num"][k] = flx_avg(Jt_s / r_s)
 
             avg["vp"][k] = (
                 cc["sigma_rhotp"] * cc["sigma_Bp"]
@@ -1321,75 +1365,87 @@ class GEQDSKEquilibrium:
 
     @property
     def j_tor_averaged(self):
-        r"""Flux-surface-averaged toroidal current density <Jt/R>/<1/R> [A/m^2]."""
+        r'''! Flux-surface-averaged toroidal current density \f$\langle J_t/R\rangle / \langle 1/R\rangle\f$ [A/m\f$^2\f$]'''
         self._trace_surfaces()
         avg = self._cache["avg"]
         return avg["Jt/R"] / avg["1/R"]
 
     @property
     def j_tor_averaged_direct(self):
-        r"""Direct flux-surface average of Jt from GS [A/m^2]."""
+        r'''! Direct flux-surface average \f$\langle J_t\rangle\f$ from the Grad-Shafranov equation [A/m\f$^2\f$]'''
         self._trace_surfaces()
         return self._cache["avg"]["Jt_GS"]
 
     @property
     def j_tor_averaged_numerical(self):
-        """Numerically flux-surface-averaged <Jt> [A/m^2]."""
+        r'''! Numerically flux-surface-averaged \f$\langle J_t\rangle\f$ via \f$\nabla\times B / \mu_0\f$ [A/m\f$^2\f$]'''
         self._trace_surfaces()
         return self._cache["avg"]["Jt"]
 
     @property
     def j_tor_over_R(self):
-        """<Jt/R> from Grad-Shafranov equation [A/m^3]."""
+        r'''! \f$\langle J_t/R\rangle\f$ from the Grad-Shafranov equation [A/m\f$^3\f$]'''
         self._trace_surfaces()
         return self._cache["avg"]["Jt/R"]
 
     @property
     def q_profile(self):
-        """Safety factor from flux-surface averaging."""
+        r'''! Safety factor from flux-surface averaging'''
         self._trace_surfaces()
         return self._cache["avg"]["q"]
 
     @property
     def li(self):
-        """Internal inductance dict."""
+        r'''! Internal inductance dict (keys: `li_from_definition`, `li(1)`, `li(1)_EFIT`, `li(1)_TLUCE`, `li(2)`, `li(3)`)'''
         self._trace_surfaces()
         return self._cache["li"]
 
     @property
     def geometry(self):
-        """Per-surface geometric quantities dict."""
+        r'''! Per-surface geometric quantities dict
+
+        Keys: `R`, `Z`, `a`, `kappa`, `kapu`, `kapl`, `delta`, `delu`, `dell`,
+        `perimeter`, `surfArea`, `eps`, `vol`, `cxArea`
+        '''
         self._trace_surfaces()
         return self._cache["geo"]
 
     @property
     def averages(self):
-        """All flux-surface-averaged quantities dict."""
+        r'''! All flux-surface-averaged quantities dict
+
+        Keys: `R`, `1/R`, `1/R**2`, `R**2`, `Bp`, `Bp**2`, `Bt`, `Bt**2`,
+        `Btot**2`, `Jt`, `Jt/R`, `vp`, `q`, `ip`, `F`, `PPRIME`, `FFPRIM`
+        '''
         self._trace_surfaces()
         return self._cache["avg"]
 
     @property
     def midplane(self):
-        """Outboard midplane quantities on the psi_N grid."""
+        r'''! Outboard midplane quantities on the \f$\hat{\psi}\f$ grid (keys: `R`, `Z`, `Br`, `Bz`, `Bp`, `Bt`, `Btot`)'''
         self._trace_surfaces()
         return self._cache["midplane"]
 
     @property
     def betas(self):
-        """Plasma beta values: beta_t, beta_p, beta_n."""
+        r'''! Plasma beta values (keys: `beta_t`, `beta_p`, `beta_n`)'''
         self._trace_surfaces()
         return self._cache["betas"]
 
     @property
     def contours(self):
-        """List of (N, 2) contour arrays for each psi_N level."""
+        r'''! List of `(N,2)` contour arrays for each \f$\hat{\psi}\f$ level'''
         self._trace_surfaces()
         return self._cache["contours"]
 
     # --- Integration methods ---
 
     def volume_integral(self, what):
-        """Volume integral of a quantity on the psi_N grid."""
+        r'''! Volume integral of a quantity on the \f$\hat{\psi}\f$ grid
+
+        @param what Array-like of length `nlevels`, sampled at `self.psi_N`
+        @result 1-D ndarray (`nlevels`,) cumulative integral from core to each surface
+        '''
         self._trace_surfaces()
         dpsi = self.psi_boundary - self.psi_axis
         psi_arr = self.psi_N * dpsi + self.psi_axis
@@ -1398,7 +1454,11 @@ class GEQDSKEquilibrium:
         )
 
     def surface_integral(self, what):
-        """Cross-section integral of a quantity on the psi_N grid."""
+        r'''! Cross-section (area) integral of a quantity on the \f$\hat{\psi}\f$ grid
+
+        @param what Array-like of length `nlevels`
+        @result 1-D ndarray (`nlevels`,) cumulative area integral
+        '''
         self._trace_surfaces()
         dpsi = self.psi_boundary - self.psi_axis
         psi_arr = self.psi_N * dpsi + self.psi_axis
@@ -1408,7 +1468,12 @@ class GEQDSKEquilibrium:
         ) / (2.0 * np.pi)
 
     def flux_integral(self, psi_N_val, profile):
-        """Total flux integral at a given psi_N value (scalar)."""
+        r'''! Total flux integral at a given \f$\hat{\psi}\f$ value (scalar)
+
+        @param psi_N_val Normalised poloidal flux location (0 = axis, 1 = boundary)
+        @param profile Array-like of length `nlevels` to integrate
+        @result Value of the volume integral at *psi_N_val*
+        '''
         cum = self.volume_integral(profile)
         return float(np.interp(psi_N_val, self.psi_N, cum))
 
@@ -1467,26 +1532,22 @@ class GEQDSKEquilibrium:
 
     @property
     def keys(self):
-        """Flat list of all available attribute names (scalars + profiles + derived)."""
+        r'''! Flat list of all available attribute names (scalars + profiles + derived)'''
         return [name for _, items in self._CATALOGUE for name, *_ in items]
 
     def describe(self, verbose=False):
-        """Print a categorised summary of all available quantities.
+        r'''! Print a categorised summary of all available quantities
 
-        Parameters
-        ----------
-        verbose : bool
-            If ``True``, also triggers lazy evaluation of derived quantities so
-            that actual shapes and sample values are printed for them.  If
-            ``False`` (default), shape info is only printed for already-cached
-            quantities to avoid an unexpected flux-surface trace.
+        Access any listed name as an attribute, e.g. `eq.q_profile` or
+        `eq.geometry['kappa']`.  Dict-valued entries (`geometry`, `li`, etc.)
+        can be inspected with their `.keys()`.
 
-        Notes
-        -----
-        Access any listed name as an attribute, e.g. ``eq.q_profile`` or
-        ``eq.geometry['kappa']``.  Dict-valued entries (``geometry``, ``li``,
-        etc.) can be inspected with their ``.keys()``.
-        """
+        @param verbose If `True`, also triggers lazy evaluation of derived
+                       quantities so actual shapes and sample values are printed.
+                       If `False` (default), shape info is only printed for
+                       already-cached quantities to avoid an unexpected
+                       flux-surface trace.
+        '''
         def _shape_str(val):
             if isinstance(val, np.ndarray):
                 if val.ndim == 0:
@@ -1605,23 +1666,14 @@ _PFILE_HEADER_RE = re.compile(
 # ---------------------------------------------------------------------------
 
 def _read_pfile(filename):
-    """Parse an Osborne p-file into an OrderedDict.
+    r'''! Parse an Osborne p-file into an OrderedDict
 
-    Parameters
-    ----------
-    filename : str or path-like
-        Path to the p-file.
-
-    Returns
-    -------
-    OrderedDict
-        Keyed by profile name (``"ne"``, ``"te"``, ...).  Each value is a
-        dict with keys ``"psinorm"``, ``"data"``, ``"derivative"``,
-        ``"units"``, and ``"deriv_label"``.
-
-        The special key ``"N Z A"`` (if present) maps to a dict with
-        ``"N"``, ``"Z"``, ``"A"`` arrays.
-    """
+    @param filename Path to the p-file
+    @result OrderedDict keyed by profile name (`"ne"`, `"te"`, ...). Each value
+            is a dict with keys `"psinorm"`, `"data"`, `"derivative"`, `"units"`,
+            and `"deriv_label"`.  The special key `"N Z A"` (if present) maps
+            to a dict with `"N"`, `"Z"`, `"A"` arrays.
+    '''
     with open(filename, "r") as f:
         lines = f.read().strip().splitlines()
 
@@ -1678,7 +1730,11 @@ def _read_pfile(filename):
 
 
 def _write_pfile(profiles, filename):
-    """Write an OrderedDict of profiles to an Osborne p-file."""
+    r'''! Write an OrderedDict of profiles to an Osborne p-file
+
+    @param profiles OrderedDict with the same structure as returned by `_read_pfile`
+    @param filename Output path for the p-file
+    '''
     buf = []
     for key, val in profiles.items():
         if key == "N Z A":
@@ -1710,58 +1766,79 @@ def _write_pfile(profiles, filename):
 # ---------------------------------------------------------------------------
 
 class PFile:
-    """Interface for Osborne p-file kinetic profiles.
+    r'''! Interface for Osborne p-file kinetic profiles
 
-    Parameters
-    ----------
-    filename : str or path-like
-        Path to the p-file.
-
-    Examples
-    --------
-    >>> pf = PFile("p123456.01234")
-    >>> pf.ne          # electron density array
-    >>> pf.te          # electron temperature array
-    >>> pf.psinorm_for("ne")  # psinorm grid for ne
-    >>> "omgeb" in pf  # check if profile exists
-    True
-    """
+    Example usage:
+    ```
+    pf = PFile("p123456.01234")
+    pf.ne                    # electron density array
+    pf.te                    # electron temperature array
+    pf.psinorm_for("ne")     # psinorm grid for ne
+    "omgeb" in pf            # check if profile exists
+    ```
+    '''
 
     def __init__(self, filename):
+        r'''! Initialize PFile by reading an Osborne p-file from disk
+
+        @param filename Path to the p-file
+        '''
         self._raw = _read_pfile(filename)
 
     @classmethod
     def from_bytes(cls, raw_bytes):
-        """Construct from in-memory bytes."""
+        r'''! Construct from in-memory bytes
+
+        @param raw_bytes Raw p-file content
+        @result New `PFile` instance
+        '''
+        import os as _os
         with tempfile.NamedTemporaryFile(
             mode="wb", suffix=".pfile", delete=False
         ) as tmp:
             tmp.write(raw_bytes)
             tmp_path = tmp.name
-        return cls(tmp_path)
+        try:
+            return cls(tmp_path)
+        finally:
+            try:
+                _os.remove(tmp_path)
+            except OSError:
+                pass
 
     def save(self, filename):
-        """Write the profiles to *filename* in p-file format."""
+        r'''! Write the profiles to *filename* in p-file format
+
+        @param filename Output path for the p-file
+        '''
         _write_pfile(self._raw, filename)
 
     def to_bytes(self):
-        """Serialize to in-memory bytes."""
+        r'''! Serialise to in-memory bytes (round-trips with `from_bytes`)
+
+        @result Raw p-file content as bytes
+        '''
+        import os as _os
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".pfile", delete=False
         ) as tmp:
             tmp_path = tmp.name
-        _write_pfile(self._raw, tmp_path)
-        with open(tmp_path, "rb") as fh:
-            data = fh.read()
-        import os
-        os.remove(tmp_path)
+        try:
+            _write_pfile(self._raw, tmp_path)
+            with open(tmp_path, "rb") as fh:
+                data = fh.read()
+        finally:
+            try:
+                _os.remove(tmp_path)
+            except OSError:
+                pass
         return data
 
     # --- Dict-like access ---
 
     @property
     def keys(self):
-        """Profile names in file order (list of str)."""
+        r'''! Profile names in file order (list of str)'''
         return list(self._raw.keys())
 
     def __contains__(self, key):
@@ -1779,21 +1856,33 @@ class PFile:
     # --- Per-profile accessors ---
 
     def psinorm_for(self, key):
-        """Return the psinorm grid for profile *key*."""
+        r'''! Return the psinorm grid for profile *key*
+
+        @param key Profile name
+        @result 1-D ndarray of psinorm values, or `None` if not present
+        '''
         entry = self._raw.get(key)
         if entry is None or key == "N Z A":
             return None
         return entry["psinorm"]
 
     def derivative_for(self, key):
-        """Return the derivative array for profile *key*."""
+        r'''! Return the derivative array for profile *key*
+
+        @param key Profile name
+        @result 1-D ndarray of d(data)/dpsinorm, or `None` if not present
+        '''
         entry = self._raw.get(key)
         if entry is None or key == "N Z A":
             return None
         return entry["derivative"]
 
     def units_for(self, key):
-        """Return the units string for profile *key*."""
+        r'''! Return the units string for profile *key*
+
+        @param key Profile name
+        @result Units string, or `None` if the key is not a profile
+        '''
         entry = self._raw.get(key)
         if entry is None or key == "N Z A":
             return None
@@ -1809,110 +1898,106 @@ class PFile:
 
     @property
     def ne(self):
-        """Electron density [10^20/m^3]."""
+        r'''! Electron density \f$n_e\f$ [10\f$^{20}\f$/m\f$^3\f$]'''
         return self._get_data("ne")
 
     @property
     def te(self):
-        """Electron temperature [KeV]."""
+        r'''! Electron temperature \f$T_e\f$ [keV]'''
         return self._get_data("te")
 
     @property
     def ni(self):
-        """Ion density [10^20/m^3]."""
+        r'''! Ion density \f$n_i\f$ [10\f$^{20}\f$/m\f$^3\f$]'''
         return self._get_data("ni")
 
     @property
     def ti(self):
-        """Ion temperature [KeV]."""
+        r'''! Ion temperature \f$T_i\f$ [keV]'''
         return self._get_data("ti")
 
     @property
     def nb(self):
-        """Fast ion density [10^20/m^3]."""
+        r'''! Fast ion density \f$n_b\f$ [10\f$^{20}\f$/m\f$^3\f$]'''
         return self._get_data("nb")
 
     @property
     def pb(self):
-        """Fast ion pressure [KPa]."""
+        r'''! Fast ion pressure \f$p_b\f$ [kPa]'''
         return self._get_data("pb")
 
     @property
     def ptot(self):
-        """Total pressure [KPa]."""
+        r'''! Total pressure \f$p_{\mathrm{tot}}\f$ [kPa]'''
         return self._get_data("ptot")
 
     @property
     def omeg(self):
-        """Toroidal rotation VTOR/R [kRad/s]."""
+        r'''! Toroidal rotation \f$V_{\mathrm{TOR}}/R\f$ [kRad/s]'''
         return self._get_data("omeg")
 
     @property
     def omegp(self):
-        """Poloidal rotation Bt*VPOL/(RBp) [kRad/s]."""
+        r'''! Poloidal rotation \f$B_t V_{\mathrm{POL}}/(R B_p)\f$ [kRad/s]'''
         return self._get_data("omegp")
 
     @property
     def omgvb(self):
-        """VxB rotation term [kRad/s]."""
+        r'''! \f$V\times B\f$ rotation term [kRad/s]'''
         return self._get_data("omgvb")
 
     @property
     def omgpp(self):
-        """Diamagnetic rotation term [kRad/s]."""
+        r'''! Diamagnetic rotation term [kRad/s]'''
         return self._get_data("omgpp")
 
     @property
     def omgeb(self):
-        """ExB rotation frequency [kRad/s]."""
+        r'''! \f$E\times B\f$ rotation frequency [kRad/s]'''
         return self._get_data("omgeb")
 
     @property
     def er(self):
-        """Radial electric field [kV/m]."""
+        r'''! Radial electric field \f$E_r\f$ [kV/m]'''
         return self._get_data("er")
 
     @property
     def kpol(self):
-        """KPOL = VPOL/Bp [km/s/T]."""
+        r'''! \f$K_{\mathrm{POL}} = V_{\mathrm{POL}}/B_p\f$ [km/s/T]'''
         return self._get_data("kpol")
 
     @property
     def omghb(self):
-        """Hahm-Burrell ExB shearing rate."""
+        r'''! Hahm-Burrell \f$E\times B\f$ shearing rate'''
         return self._get_data("omghb")
 
     @property
     def ion_species(self):
-        """Ion species dict with 'N', 'Z', 'A' arrays, or None."""
+        r'''! Ion species dict with `'N'`, `'Z'`, `'A'` arrays, or `None`'''
         return self._raw.get("N Z A")
 
     # --- Construction helpers ---
 
     @classmethod
     def new(cls):
-        """Create an empty PFile (no profiles loaded from disk)."""
+        r'''! Create an empty PFile (no profiles loaded from disk)
+
+        @result New empty `PFile` instance
+        '''
         obj = object.__new__(cls)
         obj._raw = OrderedDict()
         return obj
 
     def set_profile(self, key, psinorm, data, derivative=None, units=None):
-        """Add or replace a profile.
+        r'''! Add or replace a profile
 
-        Parameters
-        ----------
-        key : str
-            Profile name (e.g. ``"ne"``, ``"te"``).
-        psinorm : array-like
-            Normalised poloidal flux grid.
-        data : array-like
-            Profile values on *psinorm*.
-        derivative : array-like or None
-            Derivative d(data)/d(psinorm).  If ``None``, computed via
-            ``np.gradient``.
-        units : str or None
-            Unit label.  If ``None``, looked up from :data:`PFILE_UNITS`.
-        """
+        @param key Profile name (e.g. `"ne"`, `"te"`)
+        @param psinorm Normalised poloidal flux grid
+        @param data Profile values on *psinorm*
+        @param derivative Derivative d(data)/d(psinorm); if `None`, computed
+                          via `np.gradient`
+        @param units Unit label; if `None`, looked up from `PFILE_UNITS`
+        '''
         psinorm = np.asarray(psinorm, dtype=float)
         data = np.asarray(data, dtype=float)
         if derivative is None:
@@ -1930,7 +2015,12 @@ class PFile:
         }
 
     def set_ion_species(self, N, Z, A):
-        """Set the ion species block."""
+        r'''! Set the ion species block
+
+        @param N Atomic number for each species
+        @param Z Charge state for each species
+        @param A Mass number for each species
+        '''
         self._raw["N Z A"] = {
             "N": np.asarray(N, dtype=float),
             "Z": np.asarray(Z, dtype=float),
@@ -1938,7 +2028,7 @@ class PFile:
         }
 
     def compute_derivatives(self):
-        """Recompute d(data)/d(psinorm) for all profiles in place."""
+        r'''! Recompute d(data)/d(psinorm) for all profiles in place'''
         for key, val in self._raw.items():
             if key == "N Z A":
                 continue
@@ -1947,11 +2037,13 @@ class PFile:
     # --- Physics computations ---
 
     def compute_pressure(self):
-        """Compute total pressure from density and temperature profiles.
+        r'''! Compute total pressure from density and temperature profiles
 
-        Uses ``ptot = _NT_TO_KPA * (ne*Te + (ni + nz1)*Ti) + pb``.
-        Requires ``ne``, ``te``, ``ni``, ``ti`` on the same psinorm grid.
-        """
+        Uses \f$p_{\mathrm{tot}} = c_{NT}\,(n_e T_e + (n_i + n_{z1}) T_i) + p_b\f$
+        with \f$c_{NT}\f$ converting from (10\f$^{20}\f$/m\f$^3\f$ \f$\cdot\f$ keV)
+        to kPa.  Requires `ne`, `te`, `ni`, `ti` on the same psinorm grid.
+        `nz1` and `pb` default to zero if absent.  Stores the result as `ptot`.
+        '''
         psinorm = self._raw["ne"]["psinorm"]
         ne = self._raw["ne"]["data"]
         te = self._raw["te"]["data"]
@@ -1969,10 +2061,13 @@ class PFile:
         self.set_profile("ptot", psinorm, ptot)
 
     def compute_quasineutrality(self):
-        """Compute impurity density nz1 from quasi-neutrality.
+        r'''! Compute impurity density \f$n_{z1}\f$ from quasi-neutrality
 
-        ``nz1 = (ne - ni - nb) / Z_impurity``
-        """
+        \f$n_{z1} = (n_e - n_i - n_b) / Z_{\mathrm{imp}}\f$.
+        Requires `ne`, `ni` on the same grid and an `"N Z A"` block with at
+        least one impurity species.  `nb` defaults to zero if absent.  Stores
+        the result as `nz1`.
+        '''
         nza = self._raw.get("N Z A")
         if nza is None:
             raise ValueError("Ion species (N Z A) block required")
@@ -1995,19 +2090,38 @@ class PFile:
         self.set_profile("nz1", psinorm, nz1)
 
     def compute_zeff(self):
-        """Compute the effective charge profile.
+        r'''! Compute the effective charge profile \f$Z_{\mathrm{eff}}\f$
 
-        Returns
-        -------
-        psinorm : numpy.ndarray
-        zeff : numpy.ndarray
-        """
+        \f$Z_{\mathrm{eff}} = (n_i Z_{\mathrm{main}}^2 + n_{z1} Z_{\mathrm{imp}}^2
+        + n_b Z_{\mathrm{beam}}^2)/n_e\f$.  Charge states are read from the
+        `"N Z A"` block using the OMFIT convention: impurities first, then
+        main ion, beam ion last.  Species-count-specific handling:
+          - 1 species: treated as the impurity (main = beam = main ion
+                       hydrogen, \f$Z=1\f$).
+          - 2 species: impurity + main ion (no separate beam; beam \f$n_b\f$
+                       defaults to zero so its charge state is irrelevant).
+          - 3+ species: impurity(ies) first, main ion at [-2], beam at [-1].
+
+        @result Tuple `(psinorm, zeff)` of 1-D ndarrays
+        '''
         nza = self._raw.get("N Z A")
         if nza is None:
             raise ValueError("Ion species (N Z A) block required")
-        Z_imp = nza["Z"][0]
-        Z_main = nza["Z"][-2]
-        Z_beam = nza["Z"][-1]
+        Zs = np.asarray(nza["Z"], dtype=float)
+        if Zs.size < 1:
+            raise ValueError("N Z A block must contain at least one species")
+        Z_imp = Zs[0]
+        if Zs.size == 1:
+            # Single species taken as the impurity; assume hydrogenic main/beam
+            Z_main = 1.0
+            Z_beam = 1.0
+        elif Zs.size == 2:
+            # Impurity + main ion (no separate beam species)
+            Z_main = Zs[-1]
+            Z_beam = 1.0   # beam density will default to zero, so Z_beam is unused
+        else:
+            Z_main = Zs[-2]
+            Z_beam = Zs[-1]
 
         psinorm = self._raw["ne"]["psinorm"]
         ne = self._raw["ne"]["data"]
@@ -2025,19 +2139,18 @@ class PFile:
         return psinorm, zeff
 
     def compute_diamagnetic_rotations(self, psi, nI=None, TI=None):
-        """Compute diamagnetic rotation frequencies from kinetic profiles.
+        r'''! Compute diamagnetic rotation frequencies from kinetic profiles
 
-        Parameters
-        ----------
-        psi : array-like
-            Poloidal flux in SI (Weber), same length as the profile grids.
-        nI : array-like or None
-            Impurity density in 10^20/m^3.
-        TI : array-like or None
-            Impurity temperature in keV.
+        For species \f$s\f$:
+        \f$\omega_{\mathrm{dia},s} = \frac{1}{n_s Z_s e}\frac{d(n_s T_s)}{d\psi}\f$.
+        In p-file units (n in 10\f$^{20}\f$/m\f$^3\f$, T in keV, \f$\psi\f$ in Wb)
+        this gives results in kRad/s.  Sets `omgpp`, `ommpp`, `omepp` profiles.
 
-        Sets omgpp, ommpp, omepp profiles in kRad/s.
-        """
+        @param psi Poloidal flux in SI (Weber), same length as the profile grids
+        @param nI Impurity density [10\f$^{20}\f$/m\f$^3\f$]; if `None`, uses
+                  `nz1` from the p-file when present, otherwise defaults to zero
+        @param TI Impurity temperature [keV]; if `None`, uses `ti`
+        '''
         psi = np.asarray(psi, dtype=float)
         dpsi = np.gradient(psi)
         psinorm = self._raw["ne"]["psinorm"]
@@ -2048,7 +2161,11 @@ class PFile:
         ti = self._raw["ti"]["data"]
 
         if nI is None:
-            nI = self._raw["nz1"]["data"]
+            nz1_entry = self._raw.get("nz1")
+            if nz1_entry is not None:
+                nI = nz1_entry["data"]
+            else:
+                nI = np.zeros_like(ni, dtype=float)
         else:
             nI = np.asarray(nI, dtype=float)
         if TI is None:
@@ -2083,16 +2200,20 @@ class PFile:
 
     def compute_rotation_decomposition(self, R=None, Bp=None, Bt=None,
                                        psi=None):
-        """Compute ExB and VxB rotation frequencies and derived quantities.
+        r'''! Compute \f$E\times B\f$ and \f$V\times B\f$ rotation frequencies and derived quantities
 
-        Parameters
-        ----------
-        R, Bp, Bt : array-like or None
-            Midplane major radius [m], poloidal field [T], and toroidal
-            field [T] on the profile psinorm grid.
-        psi : array-like or None
-            Poloidal flux in SI (Weber).
-        """
+        From the diamagnetic terms (`omgpp`, `ommpp`, `omepp`) and the impurity
+        \f$V\times B\f$ rotation `omgvb`, computes:
+        `omgeb` = `omgvb` + `omgpp`, `ommvb` = `omgeb` - `ommpp`,
+        `omevb` = `omgeb` - `omepp`.  If equilibrium data are provided, also
+        computes `er = omgeb * R * Bp` and the Hahm-Burrell shearing rate
+        `omghb`.
+
+        @param R Midplane major radius [m] on the profile psinorm grid
+        @param Bp Poloidal field [T] on the profile psinorm grid
+        @param Bt Toroidal field [T] on the profile psinorm grid
+        @param psi Poloidal flux in SI (Weber)
+        '''
         psinorm = self._raw["omgpp"]["psinorm"]
 
         omgvb = self._get_data("omgvb")
@@ -2142,20 +2263,14 @@ class PFile:
     # --- Remap ---
 
     def remap(self, psinorm=None, key="ne"):
-        """Return a new PFile with all profiles on a common grid.
+        r'''! Return a new `PFile` with all profiles on a common grid
 
-        Parameters
-        ----------
-        psinorm : array-like, int, or None
-            Target grid.  If ``None``, use the grid from *key*.
-            If ``int``, use ``np.linspace(0, 1, psinorm)``.
-        key : str
-            Profile whose grid to use when *psinorm* is ``None``.
-
-        Returns
-        -------
-        PFile
-        """
+        @param psinorm Target grid. If `None`, use the grid from *key*.
+                       If `int`, use `np.linspace(0, 1, psinorm)`.
+                       If array-like, use as given.
+        @param key Profile whose grid to use when *psinorm* is `None`
+        @result New `PFile` instance with interpolated profiles on the common grid
+        '''
         if psinorm is None:
             if key not in self._raw:
                 raise KeyError(f"Profile {key!r} not found for grid reference")
@@ -2204,18 +2319,15 @@ class PFile:
     # --- Introspection / discovery ---
 
     def describe(self):
-        """Print a categorised summary of all profiles and derived quantities.
+        r'''! Print a categorised summary of all profiles and derived quantities
 
         Groups profiles by physics category (kinetic, rotation, impurity, etc.),
-        showing grid length, data range, units, and whether a descriptive
-        label from ``PFILE_DESCRIPTIONS`` is known.  The ion species block is
-        also printed if present.
-
-        Notes
-        -----
-        Access any profile as ``pf.ne``, ``pf.te``, etc. (for common named
-        profiles), or generically via ``pf['key']`` / ``pf._get_data('key')``.
-        """
+        showing grid length, data range, units, and whether a descriptive label
+        from `PFILE_DESCRIPTIONS` is known.  The ion species block is also
+        printed if present.  Access any profile as `pf.ne`, `pf.te`, etc. (for
+        common named profiles), or generically via `pf['key']` /
+        `pf._get_data('key')`.
+        '''
         # Group profile keys by physics category
         categories = [
             ("Kinetic profiles",        ["ne", "te", "ni", "ti", "nb", "pb", "ptot"]),
@@ -2288,26 +2400,17 @@ class PFile:
 
 def read_geqdsk(filename, cocos=1, nlevels=None, resample="theta",
                 extrapolate_edge=True):
-    """Read a GEQDSK file and return a GEQDSKEquilibrium object.
+    r'''! Read a GEQDSK file and return a `GEQDSKEquilibrium` object
 
-    Parameters
-    ----------
-    filename : str or path-like
-        Path to the g-file.
-    cocos : int
-        COCOS convention index (default 1).
-    nlevels : int
-        Number of psi_N levels for flux-surface analysis.
-    resample : str
-        Contour resampling method (``"theta"`` or ``"arc_length"``).
-    extrapolate_edge : bool
-        If ``True`` (default), extrapolate p' and FF' at the separatrix
-        when the g-file has them forced to zero.
-
-    Returns
-    -------
-    GEQDSKEquilibrium
-    """
+    @param filename Path to the g-file
+    @param cocos COCOS convention index (default 1)
+    @param nlevels Number of \f$\hat{\psi}\f$ levels for flux-surface analysis
+    @param resample Contour resampling method (`"theta"` or `"arc_length"`)
+    @param extrapolate_edge If `True` (default), extrapolate \f$p'\f$ and
+                            \f$FF'\f$ at the separatrix when the g-file has
+                            them forced to zero
+    @result `GEQDSKEquilibrium` instance
+    '''
     return GEQDSKEquilibrium(
         filename, cocos=cocos, nlevels=nlevels, resample=resample,
         extrapolate_edge=extrapolate_edge,
@@ -2315,15 +2418,9 @@ def read_geqdsk(filename, cocos=1, nlevels=None, resample="theta",
 
 
 def read_pfile(filename):
-    """Read an Osborne p-file and return a PFile object.
+    r'''! Read an Osborne p-file and return a `PFile` object
 
-    Parameters
-    ----------
-    filename : str or path-like
-        Path to the p-file.
-
-    Returns
-    -------
-    PFile
-    """
+    @param filename Path to the p-file
+    @result `PFile` instance
+    '''
     return PFile(filename)
