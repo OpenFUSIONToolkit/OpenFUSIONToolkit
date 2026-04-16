@@ -1,6 +1,7 @@
 !---------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 !---------------------------------------------------------------------------
+!! SPDX-License-Identifier: LGPL-3.0-only
 !> @file oft_scalar_inits.F90
 !
 !> Field initializations and evaluation for common scalar analytic field types
