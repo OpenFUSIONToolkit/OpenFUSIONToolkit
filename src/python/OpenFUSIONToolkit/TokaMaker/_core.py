@@ -1782,6 +1782,10 @@ class TokaMaker():
             DeprecationWarning,
             stacklevel=2
         )
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        if omega > 0.0:
+            raise ValueError("Omega should be negative to search for unstable modes (negative eigenvalues; positive growth rates)")
         eig_vals = numpy.zeros((neigs,2),dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.np),dtype=numpy.float64)
         damp_coeff = abs(omega)*damping_scale
@@ -2711,6 +2715,8 @@ class TokaMaker_equilibrium():
         @param damping_scale Scale factor for damping term to artificially limit growth rate (negative to disable)?
         @result \f$ \gamma \f$ [nmodes], eigenvectors [nmodes,self.np]
         '''
+        if omega < 0.0:
+            raise ValueError("Omega should be positive to search for unstable modes (positive growth rates)")
         eig_vals = numpy.zeros((nmodes,2),dtype=numpy.float64)
         eig_vecs = numpy.zeros((nmodes,self._tMaker.np),dtype=numpy.float64)
         damp_coeff = abs(omega)*damping_scale
