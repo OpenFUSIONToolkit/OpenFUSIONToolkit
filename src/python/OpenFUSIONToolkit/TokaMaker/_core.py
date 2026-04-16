@@ -1731,7 +1731,7 @@ class TokaMaker():
     def eig_wall(self,neigs=4,pm=False):
         r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures
 
-        @deprecated Use `compute_wall_modes` property instead.
+        @deprecated Use `compute_wall_modes` method instead.
 
         @param neigs Number of eigenvalues to compute
         @param pm Print solver statistics and raw eigenvalues?
@@ -1768,7 +1768,7 @@ class TokaMaker():
     def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False,damping_scale=-1.0):
         '''! Compute eigenvalues for the linearized time-dependent system
 
-        @deprecated Use `compute_linear_stability` property instead.
+        @deprecated Use `compute_linear_stability` method instead.
 
         @param omega Growth rate localization point (eigenvalues closest to this value will be found)
         @param neigs Number of eigenvalues to compute
@@ -1806,6 +1806,8 @@ class TokaMaker():
         @param damping_scale Scale factor for damping term to artificially limit growth rate (negative to disable)?
         @result \f$ \gamma \f$ [nmodes], eigenvectors [nmodes,self.np]
         '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.compute_linear_stability(omega,nmodes,include_bounds,pm,damping_scale)
 
     def setup_td(self,dt,lin_tol,nl_tol,pre_plasma=False):
@@ -2713,7 +2715,7 @@ class TokaMaker_equilibrium():
         @param include_bounds Include bounding flux terms for constant normalized profiles?
         @param pm Print solver statistics and raw eigenvalues?
         @param damping_scale Scale factor for damping term to artificially limit growth rate (negative to disable)?
-        @result \f$ \gamma \f$ [nmodes], eigenvectors [nmodes,self.np]
+        @result \f$ \gamma \f$ [nmodes], eigenvectors [nmodes,self._tMaker.np]
         '''
         if omega < 0.0:
             raise ValueError("Omega should be positive to search for unstable modes (positive growth rates)")
