@@ -465,6 +465,10 @@ IF(.NOT.success)THEN
 END IF
 CALL gs_profile_alloc(profType,self%I)
 DEALLOCATE(profType)
+IF(ASSOCIATED(self%I))THEN
+  CALL self%I%delete()
+  DEALLOCATE(self%I)
+END IF
 CALL self%I%load(filename,'tokamaker/FFP_PROFILE',success=success)
 CALL self%I%update(self)
 IF(.NOT.success)THEN
@@ -486,6 +490,10 @@ IF(.NOT.success)THEN
   error_string="Failed to read P' profile type."
   RETURN
 END IF
+IF(ASSOCIATED(self%P))THEN
+  CALL self%P%delete()
+  DEALLOCATE(self%P)
+END IF
 CALL gs_profile_alloc(profType,self%P)
 DEALLOCATE(profType)
 CALL self%P%load(filename,'tokamaker/PP_PROFILE',success=success)
@@ -499,6 +507,10 @@ IF(hdf5_field_exist(filename,'tokamaker/NI_PROFILE'))THEN
   IF(.NOT.success)THEN
     error_string='Failed to read non-inductive current profile type.'
     RETURN
+  END IF
+  IF(ASSOCIATED(self%I_NI))THEN
+    CALL self%I_NI%delete()
+    DEALLOCATE(self%I_NI)
   END IF
   CALL gs_profile_alloc(profType,self%I_NI)
   DEALLOCATE(profType)
@@ -515,6 +527,10 @@ IF(hdf5_field_exist(filename,'tokamaker/ETA_PROFILE'))THEN
     error_string='Failed to read ETA profile type.'
     RETURN
   END IF
+  IF(ASSOCIATED(self%eta))THEN
+    CALL self%eta%delete()
+    DEALLOCATE(self%eta)
+  END IF
   CALL gs_profile_alloc(profType,self%eta)
   DEALLOCATE(profType)
   CALL self%eta%load(filename,'tokamaker/ETA_PROFILE',success=success)
@@ -527,6 +543,10 @@ END IF
 ! IF(hdf5_field_exist(filename,'tokamaker/P_ANI'))THEN
 !   CALL hdf5_read(profType,filename,'tokamaker/P_ANI/TYPE',success=success)
 !   IF(.NOT.success)GOTO 100
+!   IF(ASSOCIATED(self%P_ani))THEN
+!     CALL self%P_ani%delete()
+!     DEALLOCATE(self%P_ani)
+!   END IF
 !   CALL gs_ani_alloc(profType,self%P_ani)
 !   DEALLOCATE(profType)
 !   CALL self%P_ani%load(filename,'tokamaker/P_ANI',success=success)

@@ -23,7 +23,8 @@ use oft_gs, only: gs_equil, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
   gs_get_qprof, gs_ani_press, gs_epsilon
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
-use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, spline_func_copy
+use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
+  spline_func_copy, spline_func_delete
 use spline_mod
 USE mhd_utils, ONLY: mu0
 implicit none
@@ -47,6 +48,8 @@ contains
   !> Needs docs
   procedure :: copy => mercier_copy
   !> Needs docs
+  procedure :: delete => mercier_delete
+  !> Needs docs
   procedure :: update => mercier_update
 end type mercier_flux_func
 !------------------------------------------------------------------------------
@@ -65,6 +68,8 @@ contains
   procedure :: load_txt => jphi_load_txt
   !> Needs docs
   procedure :: copy => jphi_copy
+  !> Needs docs
+  procedure :: delete => jphi_delete
   !> Update F*F' profile from Jphi, P', and current equilibrium
   procedure :: update => jphi_update
 end type jphi_flux_func
@@ -92,6 +97,8 @@ contains
   procedure :: load_txt => dipole_b0_load_txt
   !> Needs docs
   procedure :: copy => dipole_b0_copy
+  !> Needs docs
+  procedure :: delete => dipole_b0_delete
   !> Needs docs
   procedure :: update => dipole_b0_update
 end type dipole_b0_flux_func
@@ -129,6 +136,8 @@ contains
   procedure :: load_txt => mirror_b0_load_txt
   !> Needs docs
   procedure :: copy => mirror_b0_copy
+  !> Needs docs
+  procedure :: delete => mirror_b0_delete
   !> Needs docs
   procedure :: update => mirror_b0_update
 end type mirror_b0_flux_func
@@ -193,6 +202,14 @@ SELECT TYPE(new)
     CALL spline_copy(self%funcp,new%funcp)
 END SELECT
 end subroutine mercier_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mercier_delete(self)
+class(mercier_flux_func), intent(inout) :: self
+IF(ASSOCIATED(self%fun_loc))CALL spline_dealloc(self%funcp)
+CALL spline_func_delete(self)
+end subroutine mercier_delete
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -487,6 +504,17 @@ SELECT TYPE(new)
 END SELECT
 end subroutine jphi_copy
 !------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_delete(self)
+class(jphi_flux_func), intent(inout) :: self
+self%j0=0.d0
+IF(ASSOCIATED(self%jphi))DEALLOCATE(self%jphi)
+IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
+IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
+IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
+end subroutine jphi_delete
+!------------------------------------------------------------------------------
 !> Update F*F' profile from Jphi, P', and current equilibrium
 !------------------------------------------------------------------------------
 subroutine jphi_update(self,gseq)
@@ -664,6 +692,14 @@ SELECT TYPE(new)
     new%psi_pad=self%psi_pad
 END SELECT
 end subroutine dipole_b0_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_b0_delete(self)
+class(dipole_b0_flux_func), intent(inout) :: self
+integer(i4) :: i
+CALL spline_func_delete(self)
+end subroutine dipole_b0_delete
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -960,6 +996,14 @@ SELECT TYPE(new)
     new%z_midplane = self%z_midplane
 END SELECT
 end subroutine mirror_b0_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_b0_delete(self)
+class(mirror_b0_flux_func), intent(inout) :: self
+integer(i4) :: i
+CALL spline_func_delete(self)
+end subroutine mirror_b0_delete
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

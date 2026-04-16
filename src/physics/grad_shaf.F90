@@ -66,6 +66,8 @@ TYPE, ABSTRACT :: flux_func
   REAL(r8) :: f_offset = 0.d0 !< Offset value
   REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Current plasma bounds (for normalization)
 CONTAINS
+  !> Delete profile
+  PROCEDURE(flux_func_delete), DEFERRED :: delete
   !> Copy profile
   PROCEDURE(flux_func_copy), DEFERRED :: copy
   !> Evaluate function
@@ -384,6 +386,13 @@ contains
 end type gsinv_interp
 !---
 abstract interface
+  !------------------------------------------------------------------------------
+  !> Needs Docs
+  !------------------------------------------------------------------------------
+  subroutine flux_func_delete(self)
+    import flux_func
+    class(flux_func), intent(inout) :: self
+  end subroutine flux_func_delete
   !------------------------------------------------------------------------------
   !> Needs Docs
   !------------------------------------------------------------------------------
@@ -5569,7 +5578,6 @@ end subroutine factory_destroy
 !------------------------------------------------------------------------------
 subroutine equil_destroy(self)
 class(gs_equil), intent(inout) :: self !< G-S object
-! integer(i4) :: i,j
 ! IF(ASSOCIATED(self%cond_weights))DEALLOCATE(self%cond_weights)
 IF(ASSOCIATED(self%isoflux_targets))DEALLOCATE(self%isoflux_targets)
 IF(ASSOCIATED(self%saddle_targets))DEALLOCATE(self%saddle_targets)
@@ -5577,7 +5585,7 @@ IF(ASSOCIATED(self%flux_targets))DEALLOCATE(self%flux_targets)
 IF(ASSOCIATED(self%coil_reg_mat))DEALLOCATE(self%coil_reg_mat)
 IF(ASSOCIATED(self%coil_reg_targets))DEALLOCATE(self%coil_reg_targets)
 IF(ASSOCIATED(self%coil_currs))DEALLOCATE(self%coil_currs)
-!---
+!---Destroy solution fields
 IF(ASSOCIATED(self%psi))THEN
   CALL self%psi%delete()
   DEALLOCATE(self%psi)
@@ -5586,9 +5594,24 @@ IF(ASSOCIATED(self%chi))THEN
   CALL self%chi%delete()
   DEALLOCATE(self%chi)
 END IF
-!---
-! Destory I and P in the future
-NULLIFY(self%I,self%P)
+!---Destroy flux functions
+IF(ASSOCIATED(self%I))THEN
+  CALL self%I%delete()
+  DEALLOCATE(self%I)
+END IF
+IF(ASSOCIATED(self%P))THEN
+  CALL self%P%delete()
+  DEALLOCATE(self%P)
+END IF
+IF(ASSOCIATED(self%I_NI))THEN
+  CALL self%I_NI%delete()
+  DEALLOCATE(self%I_NI)
+END IF
+IF(ASSOCIATED(self%eta))THEN
+  CALL self%eta%delete()
+  DEALLOCATE(self%eta)
+END IF
+! TODO: Destroy P_ani
 end subroutine equil_destroy
 !------------------------------------------------------------------------------
 !> Compute boundary condition matrix for free-boundary case

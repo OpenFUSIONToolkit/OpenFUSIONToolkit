@@ -1833,9 +1833,9 @@ class TokaMaker():
 
 
 class TokaMaker_equilibrium():
-    '''! TokaMaker G-S solver class'''
+    '''! TokaMaker G-S equilibrium class'''
     def __init__(self,TokaMaker_obj=None,source_eq=None,skip_targets=False,skip_constraints=False):
-        '''! Initialize TokaMaker object
+        '''! Initialize TokaMaker equilibrium object
 
         @param TokaMaker_obj TokaMaker object (See @ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker "TokaMaker")
         @param source_eq Existing equilibrium object to copy

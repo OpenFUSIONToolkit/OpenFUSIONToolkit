@@ -23,6 +23,8 @@ implicit none
 !------------------------------------------------------------------------------
 type, extends(flux_func) :: zero_flux_func
 contains
+  !> Delete profile
+  procedure :: delete => zero_delete
   !> Needs docs
   procedure :: copy => zero_copy
   !> Needs docs
@@ -47,6 +49,8 @@ end type zero_flux_func
 !------------------------------------------------------------------------------
 type, extends(flux_func) :: flat_flux_func
 contains
+  !> Delete profile
+  procedure :: delete => flat_delete
   !> Needs docs
   procedure :: copy => flat_copy
   !> Needs docs
@@ -75,6 +79,8 @@ type, extends(flux_func) :: poly_flux_func
   real(8), pointer, dimension(:) :: cofs => NULL() !< Coefficients [deg]
   logical :: zero_grad = .FALSE. !< Force zero gradient at boundary
 contains
+  !> Delete profile
+  procedure :: delete => poly_delete
   !> Needs docs
   procedure :: copy => poly_copy
   !> Needs docs
@@ -108,6 +114,8 @@ type, extends(flux_func) :: spline_flux_func
   TYPE(spline_type) :: func !< Needs docs
   TYPE(spline_type), POINTER, DIMENSION(:) :: fun_loc => NULL() !< Needs docs
 contains
+  !> Delete profile
+  procedure :: delete => spline_func_delete
   !> Needs docs
   procedure :: copy => spline_func_copy
   !> Needs docs
@@ -137,6 +145,8 @@ type, extends(flux_func) :: linterp_flux_func
   real(8), pointer, dimension(:) :: yp => NULL() !< Needs docs
   real(8), pointer, dimension(:) :: y => NULL() !< Needs docs
 contains
+  !> Delete profile
+  procedure :: delete => linterp_delete
   !> Needs docs
   procedure :: copy => linterp_copy
   !> Needs docs
@@ -164,16 +174,15 @@ end type linterp_flux_func
 type, extends(flux_func) :: wesson_flux_func
   real(8) :: gamma = 0.d0
 contains
+  procedure :: delete => wesson_delete
   procedure :: copy => wesson_copy
   procedure :: f => wesson_f
   procedure :: fp => wesson_fp
   procedure :: update => wesson_update
   procedure :: set_cofs => wesson_cofs_update
   procedure :: get_cofs => wesson_cofs_get
-  !> Needs docs
   procedure :: save_hdf5 => wesson_save_hdf5
   procedure :: save_txt => wesson_save_txt
-  !> Needs docs
   procedure :: load_hdf5 => wesson_load_hdf5
   procedure :: load_txt => wesson_load_txt
 end type wesson_flux_func
@@ -225,6 +234,13 @@ new%plasma_bounds=self%plasma_bounds
 new%f_offset=self%f_offset
 new%ncofs=0
 end subroutine zero_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine zero_delete(self)
+class(zero_flux_func), intent(inout) :: self
+!--- No internal memory to free
+end subroutine zero_delete
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -325,6 +341,13 @@ new%plasma_bounds=self%plasma_bounds
 new%f_offset=self%f_offset
 new%ncofs=0
 end subroutine flat_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine flat_delete(self)
+class(flat_flux_func), intent(inout) :: self
+!--- No internal memory to free
+end subroutine flat_delete
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -504,6 +527,15 @@ SELECT TYPE(new)
     new%cofs=self%cofs
 END SELECT
 end subroutine poly_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine poly_delete(self)
+class(poly_flux_func), intent(inout) :: self
+IF(ASSOCIATED(self%cofs))DEALLOCATE(self%cofs)
+self%ncofs=0
+self%deg=0
+end subroutine poly_delete
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -748,6 +780,21 @@ SELECT TYPE(new)
 END SELECT
 end subroutine spline_func_copy
 !------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine spline_func_delete(self)
+class(spline_flux_func), intent(inout) :: self
+integer(i4) :: i
+self%npsi=0
+self%ncofs=0
+IF(ASSOCIATED(self%fun_loc))THEN
+  CALL spline_dealloc(self%func)
+  DO i=1,omp_get_max_threads()
+    CALL spline_dealloc(self%fun_loc(i))
+  END DO
+END IF
+end subroutine spline_func_delete
+!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 function spline_f(self,psi) result(b)
@@ -974,6 +1021,17 @@ SELECT TYPE(new)
     new%y=self%y
 END SELECT
 end subroutine linterp_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine linterp_delete(self)
+class(linterp_flux_func), intent(inout) :: self
+self%npsi=0
+self%ncofs=0
+IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
+IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
+IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
+end subroutine linterp_delete
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -1203,6 +1261,14 @@ SELECT TYPE(new)
     new%gamma=self%gamma
 END SELECT
 end subroutine wesson_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine wesson_delete(self)
+class(wesson_flux_func), intent(inout) :: self
+self%ncofs=0
+self%gamma=0.d0
+end subroutine wesson_delete
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
