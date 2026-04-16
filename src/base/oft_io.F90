@@ -1180,6 +1180,7 @@ IF(error/=0)THEN
   GOTO 100
 END IF
 !---Close and finalize HDF5
+CALL h5sclose_f(dspace_id, error)
 call h5dclose_f(dset_id, error)
 call h5fclose_f(file_id, error)
 call h5close_f(error)

@@ -416,23 +416,39 @@ CHARACTER(LEN=:), ALLOCATABLE :: profType
 ! CALL hdf5_write(self%device%fe_rep%mesh%lc,filename,'mesh/LC')
 !---Check compatibility of mesh and FE representation
 CALL hdf5_read(int_tmp,filename,'tokamaker/FE_ORDER',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read FE order.'
+  RETURN
+END IF
 IF(int_tmp/=self%device%fe_rep%order)THEN
   error_string='FE order of equilibrium does not match current device.'
   RETURN
 END IF
 hash_tmp = oft_simple_hash(C_LOC(self%device%mesh%lc),INT(4*3*self%device%mesh%nc,8))
 CALL hdf5_read(hash_in,filename,'tokamaker/LC_HASH',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read cell list hash.'
+  RETURN
+END IF
 IF(hash_tmp/=hash_in)THEN
   error_string='Cell list hash for equilibrium does not match current device.'
   RETURN
 END IF
 hash_tmp = oft_simple_hash(C_LOC(self%device%mesh%reg),INT(4*self%device%mesh%nc,8))
 CALL hdf5_read(hash_in,filename,'tokamaker/REG_HASH',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read region hash.'
+  RETURN
+END IF
 IF(hash_tmp/=hash_in)THEN
   error_string='Region hash for equilibrium does not match current device.'
   RETURN
 END IF
 CALL hdf5_read(int_tmp,filename,'tokamaker/NCOILS',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read number of coils.'
+  RETURN
+END IF
 IF(int_tmp/=self%device%ncoils)THEN
   error_string='Number of coils for equilibrium does not match current device.'
   RETURN
@@ -463,12 +479,12 @@ IF(.NOT.success)THEN
   error_string="Failed to read F*F' profile type."
   RETURN
 END IF
-CALL gs_profile_alloc(profType,self%I)
-DEALLOCATE(profType)
 IF(ASSOCIATED(self%I))THEN
   CALL self%I%delete()
   DEALLOCATE(self%I)
 END IF
+CALL gs_profile_alloc(profType,self%I)
+DEALLOCATE(profType)
 CALL self%I%load(filename,'tokamaker/FFP_PROFILE',success=success)
 CALL self%I%update(self)
 IF(.NOT.success)THEN

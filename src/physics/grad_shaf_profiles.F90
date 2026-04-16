@@ -792,6 +792,7 @@ IF(ASSOCIATED(self%fun_loc))THEN
   DO i=1,omp_get_max_threads()
     CALL spline_dealloc(self%fun_loc(i))
   END DO
+  DEALLOCATE(self%fun_loc)
 END IF
 end subroutine spline_func_delete
 !------------------------------------------------------------------------------

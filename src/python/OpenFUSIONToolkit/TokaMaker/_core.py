@@ -1111,6 +1111,8 @@ class TokaMaker():
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._tMaker_equil = tmp_eq
+        else:
+            raise ValueError("Must specify either `source_eq` or `source_file`")
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
@@ -2754,7 +2756,7 @@ class TokaMaker_equilibrium():
             raise Exception(error_string.value)
     
     def save_TokaMaker(self,filename):
-        r'''! Save current equilibrium to an HDF5 file for latter use with TokaMaker
+        r'''! Save current equilibrium to an HDF5 file for later use with TokaMaker
 
         @param filename Filename to save equilibrium to
         '''
