@@ -1175,7 +1175,10 @@ IF(error/=0)GOTO 100
 dims = space_count
 ALLOCATE(CHARACTER(LEN=dims(1)) :: string)
 call h5dread_f(dset_id, H5T_NATIVE_CHARACTER, string, dims, error)
-IF(error/=0)GOTO 100
+IF(error/=0)THEN
+  DEALLOCATE(string)
+  GOTO 100
+END IF
 !---Close and finalize HDF5
 call h5dclose_f(dset_id, error)
 call h5fclose_f(file_id, error)

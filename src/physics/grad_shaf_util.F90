@@ -616,7 +616,8 @@ IF(hdf5_field_exist(filename,'tokamaker/ISOFLUX_TARGETS'))THEN
   CALL hdf5_field_get_sizes(filename,'tokamaker/ISOFLUX_TARGETS',ndims,dim_sizes)
   IF(dim_sizes(1)/=5)CALL oft_abort('Invalid first dimension for isoflux targets', 'gs_load_tokamaker', __FILE__)
   self%isoflux_ntargets=dim_sizes(2)
-  ALLOCATE(self%isoflux_targets(dim_sizes(1),dim_sizes(2)))
+  IF(ASSOCIATED(self%isoflux_targets))DEALLOCATE(self%isoflux_targets)
+  ALLOCATE(self%isoflux_targets(5,self%isoflux_ntargets))
   DEALLOCATE(dim_sizes)
   CALL hdf5_read(self%isoflux_targets,filename,'tokamaker/ISOFLUX_TARGETS',success=success)
   IF(.NOT.success)THEN
@@ -627,8 +628,9 @@ END IF
 IF(hdf5_field_exist(filename,'tokamaker/FLUX_TARGETS'))THEN
   CALL hdf5_field_get_sizes(filename,'tokamaker/FLUX_TARGETS',ndims,dim_sizes)
   IF(dim_sizes(1)/=4)CALL oft_abort('Invalid first dimension for flux targets', 'gs_load_tokamaker', __FILE__)
-  ALLOCATE(self%flux_targets(dim_sizes(1),dim_sizes(2)))
   self%flux_ntargets=dim_sizes(2)
+  IF(ASSOCIATED(self%flux_targets))DEALLOCATE(self%flux_targets)
+  ALLOCATE(self%flux_targets(4,self%flux_ntargets))
   DEALLOCATE(dim_sizes)
   CALL hdf5_read(self%flux_targets,filename,'tokamaker/FLUX_TARGETS',success=success)
   IF(.NOT.success)THEN
@@ -639,8 +641,9 @@ END IF
 IF(hdf5_field_exist(filename,'tokamaker/SADDLE_TARGETS'))THEN
   CALL hdf5_field_get_sizes(filename,'tokamaker/SADDLE_TARGETS',ndims,dim_sizes)
   IF(dim_sizes(1)/=3)CALL oft_abort('Invalid first dimension for saddle targets', 'gs_load_tokamaker', __FILE__)
-  ALLOCATE(self%saddle_targets(dim_sizes(1),dim_sizes(2)))
   self%saddle_ntargets=dim_sizes(2)
+  IF(ASSOCIATED(self%saddle_targets))DEALLOCATE(self%saddle_targets)
+  ALLOCATE(self%saddle_targets(3,self%saddle_ntargets))
   DEALLOCATE(dim_sizes)
   CALL hdf5_read(self%saddle_targets,filename,'tokamaker/SADDLE_TARGETS',success=success)
   IF(.NOT.success)THEN

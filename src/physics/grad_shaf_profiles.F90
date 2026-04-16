@@ -204,6 +204,7 @@ character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
 logical, intent(out) :: success
 self%ncofs=0
+success=.TRUE.
 end subroutine zero_load_hdf5
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -291,6 +292,7 @@ character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
 logical, intent(out) :: success
 self%ncofs=0
+success=.TRUE.
 end subroutine flat_load_hdf5
 !------------------------------------------------------------------------------
 !> Needs Docs
