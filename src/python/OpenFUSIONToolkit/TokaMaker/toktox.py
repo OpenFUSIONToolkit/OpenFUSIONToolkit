@@ -1317,7 +1317,6 @@ class TokTox:
             # For times where TM succeeded last loop, use the TM-solved EQDSK.
             # For times where TM failed, omit from the map (TORAX interpolates from neighbors),
             # except t=0 which always gets a seed fallback (see below).
-            eqtimes_arr = np.array(self._eqtimes)
             full_eqdsk_map = {}
             n_tm = 0
             for i, t in enumerate(self._tm_times):
