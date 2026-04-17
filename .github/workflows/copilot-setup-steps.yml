@@ -15,10 +15,6 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-    env:
-      CC: gcc-14
-      CXX: g++-14
-      FC: gfortran-14
 
     steps:
     - name: Checkout repo
@@ -30,7 +26,13 @@ jobs:
     - name: Install prerequisites
       # Creates setup_env.sh to activate the Python venv; all subsequent steps
       # that need Python or the OFT install must source this file explicitly.
+      # CC/CXX/FC are written to GITHUB_ENV here because Copilot ignores job-level
+      # env: settings and only honours steps, permissions, runs-on, services,
+      # snapshot, and timeout-minutes.
       run: |
+        echo "CC=gcc-14" >> $GITHUB_ENV
+        echo "CXX=g++-14" >> $GITHUB_ENV
+        echo "FC=gfortran-14" >> $GITHUB_ENV
         python3 -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
