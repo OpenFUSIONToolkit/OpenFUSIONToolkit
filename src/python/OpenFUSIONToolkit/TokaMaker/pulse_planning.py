@@ -3290,7 +3290,7 @@ def plot_profile_evolution(tt, save_path=None, display=True, one_plot=False):
         t_min, t_max = phase_times[0], phase_times[-1]
         norm = Normalize(vmin=t_min, vmax=t_max if t_max > t_min else t_min + 1e-9)
 
-        fig, axes = plt.subplots(2, 3, figsize=(14, 10))
+        fig, axes = plt.subplots(2, 4, figsize=(18, 10))
         if one_plot:
             fig.suptitle(f'Profile Evolution Over Time (loop {tt._current_loop})', fontsize=14)
         else:
@@ -3323,6 +3323,22 @@ def plot_profile_evolution(tt, save_path=None, display=True, one_plot=False):
                 color = cmap(norm(times[i_t]))
                 ax.plot(s['q_prof_tx'][i_t]['x'], s['q_prof_tx'][i_t]['y'], color=color, linewidth=1.5, alpha=0.8)
         ax.set_xlim([0, 1])
+
+        ax = axes[0, 3]
+        ax.set_title(r'$\eta$')
+        ax.set_xlabel(r'$\hat{\psi}$')
+        ax.set_ylabel(r'$\eta$ [Ohm m]')
+        plotted_eta = False
+        for i_t in indices:
+            if i_t in s.get('eta_prof', {}):
+                color = cmap(norm(times[i_t]))
+                ax.plot(s['eta_prof'][i_t]['x'], s['eta_prof'][i_t]['y'], color=color, linewidth=1.5, alpha=0.8)
+                plotted_eta = True
+        ax.set_xlim([0, 1])
+        if plotted_eta:
+            ax.set_yscale('log')
+
+        axes[1, 3].axis('off')
 
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
@@ -3368,7 +3384,7 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.set_title(r'$\psi_{lcfs}$ & $\psi_{axis}$ (TM & TX)')
     ax.plot(times, s['psi_lcfs_tm'], '-', color='tab:blue', label=r'$\psi_{lcfs}$ TM')
     ax.plot(times, s['psi_axis_tm'], '-', color='tab:orange', label=r'$\psi_{axis}$ TM')
-    t_psi_lcfs, y_psi_lcfs = _tx_profile_at_rho(tt, 'psi', 1.0, scale=-1.0/(2.0*np.pi))
+    t_psi_lcfs, y_psi_lcfs = _tx_profile_at_rho(tt, 'psi', 1.0, scale=-1.0/(2.0*np.pi)) # TODO: just pull from state
     t_psi_axis, y_psi_axis = _tx_profile_at_rho(tt, 'psi', 0.0, scale=-1.0/(2.0*np.pi))
     if t_psi_lcfs is not None:
         ax.plot(t_psi_lcfs, y_psi_lcfs, '--', color='tab:blue', linewidth=1, label=r'$\psi_{lcfs}$ TX')
