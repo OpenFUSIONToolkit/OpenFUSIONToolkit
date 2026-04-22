@@ -2709,7 +2709,7 @@ def _legend_if_labeled(ax, *args, **kwargs):
 
 
 def _vline(axes, t_now):
-    for ax in (axes if hasattr(axes, '__iter__') else [axes]):
+    for ax in (axes if hasattr(axes, '__iter__') else [axes]): # TODO remove __iter__
         ax.axvline(t_now, color=VLINE_COLOR, ls=VLINE_LS, lw=VLINE_LW, zorder=10)
 
 
@@ -3338,7 +3338,15 @@ def plot_profile_evolution(tt, save_path=None, display=True, one_plot=False):
         if plotted_eta:
             ax.set_yscale('log')
 
-        axes[1, 3].axis('off')
+        ax = axes[1, 3]
+        ax.set_title(r'$\psi$')
+        ax.set_xlabel(r'$\hat{\psi}$')
+        ax.set_ylabel(r'$\psi$ [Wb/rad]')
+        for i_t in indices:
+            if i_t in s.get('psi_tx', {}):
+                color = cmap(norm(times[i_t]))
+                ax.plot(s['psi_tx'][i_t]['x'], s['psi_tx'][i_t]['y'], color=color, linewidth=1.5, alpha=0.8)
+        ax.set_xlim([0, 1])
 
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
