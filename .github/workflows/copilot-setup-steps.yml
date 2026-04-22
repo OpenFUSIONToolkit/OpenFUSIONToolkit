@@ -36,7 +36,7 @@ jobs:
         python3 -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
-        python -m pip install pytest numpy scipy h5py triangle matplotlib xarray
+        python -m pip install pytest numpy scipy h5py matplotlib xarray
 
     - name: Check compilers
       run: |
@@ -57,14 +57,14 @@ jobs:
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
       run: mkdir builds
 
-    - name: Build external libraries (OpenMP)
+    - name: Build external libraries
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
       shell: bash
       timeout-minutes: 30
       working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        python ../src/utilities/build_libs.py --oblas_dynamic_arch --build_umfpack=1 --build_superlu=1 --no_dl_progress --nthread=4 --build_arpack=1 --oft_build_tests=1
+        python ../src/utilities/build_libs.py --build_umfpack=1 --build_superlu=1 --no_dl_progress --nthread=4 --build_arpack=1 --oft_build_tests=1 --build_mpich=1
 
     - name: Upload library failure log
       uses: actions/upload-artifact@v4
