@@ -679,6 +679,8 @@ class gs_Domain:
         @param lw Width of lines in calls to "triplot()"
         @param show_legends Show legends for plots with more than one region?
         @param col_max Maximum number of entries per column in each legend
+        @param split_coil_sets Split coil sets into sub-coils when plotting
+        @param rotate Flip horizontal and vertical axes as for mirror/FRC configurations
         '''
         if self._r is None:
             raise ValueError('"plot_mesh()" can only be called after "build_mesh()"')

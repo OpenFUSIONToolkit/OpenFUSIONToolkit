@@ -115,6 +115,10 @@ oftpy_load_xml = ctypes_subroutine(oftpy_lib.oftpy_load_xml,
 oft_setup_smesh = ctypes_subroutine(oftpy_lib.oft_setup_smesh,
     [c_int,c_int, ctypes_numpy_array(float64,2) ,c_int, c_int, ctypes_numpy_array(int32,2), ctypes_numpy_array(int32,1), c_int_ptr, c_void_ptr_ptr])
 
+# Get mesh representation: oft_smesh_get(mesh_ptr,ndim,np,r_loc,npc,nc,lc_loc,reg_loc,nreg,error_str)
+oft_smesh_get = ctypes_subroutine(oftpy_lib.oft_smesh_get,
+    [c_void_p, c_int_ptr, c_int_ptr, c_double_ptr_ptr, c_int_ptr, c_int_ptr, c_int_ptr_ptr, c_int_ptr_ptr, c_int_ptr, c_char_p])
+
 # Set mesh in memory: (ndim,np,r_loc,npc,nc,lc_loc,reg_loc,mesh_ptr)
 oft_setup_vmesh = ctypes_subroutine(oftpy_lib.oft_setup_vmesh,
     [c_int,c_int, ctypes_numpy_array(float64,2) ,c_int, c_int, ctypes_numpy_array(int32,2), ctypes_numpy_array(int32,1), c_int_ptr, c_void_ptr_ptr])

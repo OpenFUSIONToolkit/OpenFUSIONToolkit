@@ -1051,6 +1051,7 @@ IF(PRESENT(r0))THEN
     CALL gs_gen_source(self,circle_init,tmp_vec)
   ELSE
     CALL equil%psi%set(1.d0)
+    CALL self%gs_zerob_bc%apply(equil%psi)
     CALL self%mop%apply(equil%psi,tmp_vec)
   END IF
   CALL equil%psi%set(0.d0)

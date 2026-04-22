@@ -144,6 +144,38 @@ END SUBROUTINE oft_setup_smesh
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
+SUBROUTINE oft_smesh_get(mesh_ptr,ndim,np,r_loc,npc,nc,lc_loc,reg_loc,nreg,error_str) BIND(C,NAME="oft_smesh_get")
+TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Needs docs
+INTEGER(c_int), INTENT(out) :: ndim !< Needs docs
+INTEGER(c_int), INTENT(out) :: np !< Needs docs
+TYPE(c_ptr), INTENT(out) :: r_loc !< Needs docs
+INTEGER(c_int), INTENT(out) :: npc !< Needs docs
+INTEGER(c_int), INTENT(out) :: nc !< Needs docs
+TYPE(c_ptr), INTENT(out) :: lc_loc !< Needs docs
+TYPE(c_ptr), INTENT(out) :: reg_loc !< Needs docs
+INTEGER(c_int), INTENT(out) :: nreg !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
+TYPE(multigrid_mesh), POINTER :: mg_mesh
+IF(.NOT.c_associated(mesh_ptr))THEN
+  CALL copy_string('Mesh object not associated',error_str)
+  RETURN
+END IF
+CALL copy_string('',error_str)
+CALL c_f_pointer(mesh_ptr,mg_mesh)
+!---Read values
+ndim=mg_mesh%smesh%dim
+np=mg_mesh%smesh%np
+npc=mg_mesh%smesh%cell_np
+nc=mg_mesh%smesh%nc
+nreg=mg_mesh%smesh%nreg
+!---Get pointers
+r_loc=C_LOC(mg_mesh%smesh%r)
+lc_loc=C_LOC(mg_mesh%smesh%lc)
+reg_loc=C_LOC(mg_mesh%smesh%reg)
+END SUBROUTINE oft_smesh_get
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
 SUBROUTINE oft_setup_vmesh(ndim,np,r_loc,npc,nc,lc_loc,reg_loc,nregs,mesh_ptr) BIND(C,NAME="oft_setup_vmesh")
 TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Needs docs
 TYPE(c_ptr), VALUE, INTENT(in) :: lc_loc !< Needs docs

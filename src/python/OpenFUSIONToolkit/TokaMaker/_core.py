@@ -1430,6 +1430,145 @@ class TokaMaker():
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
         return colorbar
+
+    def plot_mesh(self,fig,ax,lw=0.5,show_legends=True,col_max=10,split_coil_sets=False,plot_tessellated=False):
+        '''! Plot machine geometry
+
+        @param fig Figure to add to (unused)
+        @param ax Axes to add to (must be scalar, [2], or [2,2])
+        @param lw Width of lines in calls to "triplot()"
+        @param show_legends Show legends for plots with more than one region?
+        @param col_max Maximum number of entries per column in each legend
+        @param split_coil_sets Split coil sets into sub-coils when plotting
+        @param plot_tessellated Plot mesh tessellated onto FE node points?
+        '''
+        if not plot_tessellated:
+            if not self._mesh_ptr:
+                raise ValueError('`plot_mesh()` can only be called after `setup_mesh()`')
+            # Get "raw" mesh
+            ndim_c = c_int()
+            np_c = c_int()
+            npc_c = c_int()
+            nc_c = c_int()
+            nreg_c = c_int()
+            r_loc = c_double_ptr()
+            lc_loc = c_int_ptr()
+            reg_loc = c_int_ptr()
+            error_string = self._oft_env.get_c_errorbuff()
+            oft_smesh_get(self._mesh_ptr,ctypes.byref(ndim_c),ctypes.byref(np_c),ctypes.byref(r_loc),ctypes.byref(npc_c),
+                          ctypes.byref(nc_c),ctypes.byref(lc_loc),ctypes.byref(reg_loc),ctypes.byref(nreg_c),error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
+            rz_plot = numpy.ctypeslib.as_array(r_loc,shape=(np_c.value, 3))
+            lc_plot = numpy.ctypeslib.as_array(lc_loc,shape=(nc_c.value, npc_c.value)) - 1
+            reg_plot = numpy.ctypeslib.as_array(reg_loc,shape=(nc_c.value,))
+        else:
+            if self.r is None:
+                raise ValueError('`plot_mesh(plot_tessellated=True)` can only be called after `setup()`')
+            rz_plot = self.r
+            lc_plot = self.lc
+            reg_plot = self.reg
+        # Get format type from shape of axis object
+        format_type = -1
+        try:
+            if (ax.shape[0] == 2):
+                format_type = 1
+                try:
+                    if (ax.shape[1] == 2):
+                        format_type = 2
+                    else:
+                        format_type = -1
+                except:
+                    pass
+            else:
+                format_type = -1
+        except:
+            format_type = 0
+        if format_type < 0:
+            raise ValueError("Axes for plotting must be scalar, [2], or [2,2]")
+        # Set appropriate axes based on format type
+        if format_type == 0:
+            plasma_axis = ax
+            cond_axis = ax
+            coil_axis = ax
+            vac_axis = ax
+            ax_flat = [ax]
+        elif format_type == 1:
+            plasma_axis = ax[0]
+            vac_axis = ax[0]
+            cond_axis = ax[1]
+            coil_axis = ax[1]
+            ax_flat = ax.flatten()
+        else:
+            plasma_axis = ax[1,0]
+            cond_axis = ax[0,1]
+            coil_axis = ax[1,1]
+            vac_axis = ax[0,0]
+            ax_flat = ax.flatten()
+        #
+        if self.settings.mirror_mode:
+            r_plot = rz_plot[:,1]
+            z_plot = rz_plot[:,0]
+        else:
+            r_plot = rz_plot[:,0]
+            z_plot = rz_plot[:,1]
+        # Get region count
+        nregs = reg_plot.max()
+        reg_mark = numpy.zeros((nregs,))
+        reg_mark[0] = 1
+        # Plot the plasma region
+        plasma_axis.triplot(r_plot,z_plot,lc_plot[reg_plot==1,:],lw=lw,label='Plasma')
+        # Plot conductor regions
+        nCond = 0
+        for key, cond in self._cond_dict.items():
+            if 'vac_id' in cond:
+                continue
+            nCond += 1
+            reg_mark[cond['reg_id']-1] = 1
+            cond_axis.triplot(r_plot,z_plot,lc_plot[reg_plot==cond['reg_id'],:],lw=lw,label=key)
+        # Plot coil regions
+        coil_colors = {}
+        for key, coil in self._coil_dict.items():
+            reg_mark[coil['reg_id']-1] = 1
+            if split_coil_sets:
+                leg_key = key
+            else:
+                leg_key = coil.get('coil_set',key)
+            if leg_key not in coil_colors:
+                lines, _ = coil_axis.triplot(r_plot,z_plot,lc_plot[reg_plot==coil['reg_id'],:],lw=lw,label=leg_key)
+                coil_colors[leg_key] = lines.get_color()
+            else:
+                coil_axis.triplot(r_plot,z_plot,lc_plot[reg_plot==coil['reg_id'],:],lw=lw,color=coil_colors[leg_key])
+        nCoil = len(coil_colors)
+        # Plot the vacuum regions
+        nVac = 0
+        for i in range(nregs):
+            if reg_mark[i] == 0:
+                nVac += 1
+                vac_axis.triplot(r_plot,z_plot,lc_plot[reg_plot==i+1,:],lw=lw,label='Vacuum_{0}'.format(nVac))
+        # Format plots
+        for ax_tmp in ax_flat:
+            ax_tmp.set_aspect('equal','box')
+            if self.settings.mirror_mode:
+                ax_tmp.set_xlabel('Z (m)')
+                ax_tmp.set_ylabel('R (m)')
+            else:
+                ax_tmp.set_xlabel('R (m)')
+                ax_tmp.set_ylabel('Z (m)')
+        if show_legends:
+            if format_type == 0:
+                ncols = max(1,numpy.floor((1+nCond+nCoil+nVac)/col_max))
+                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
+            elif format_type == 1:
+                ncols = max(1,numpy.floor((1+nVac)/col_max))
+                plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
+                ncols = max(1,numpy.floor((nCond+nCoil)/col_max))
+                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
+            elif format_type == 2:
+                ncols = max(1,numpy.floor((nCond)/col_max))
+                cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
+                ncols = max(1,numpy.floor((nCoil)/col_max))
+                coil_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
     
     def plot_psi(self,fig,ax,equilibrium=None,psi=None,normalized=True,
         plasma_color=None,plasma_nlevels=8,plasma_levels=None,plasma_colormap=None,plasma_linestyles=None,
