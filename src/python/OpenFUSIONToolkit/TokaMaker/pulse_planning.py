@@ -1,22 +1,25 @@
-import numpy as np
-import pprint
-from scipy.interpolate import interp1d, CubicSpline
-from scipy.ndimage import gaussian_filter1d
-from scipy.signal import savgol_filter
 import copy
 import json
+import logging
 import os
+import platform
+import pprint
 import shutil
 import subprocess
+import sys
 import tempfile
-import platform
-from datetime import datetime
 import time
+from contextlib import contextmanager
+from datetime import datetime
 
-import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-from matplotlib.gridspec import GridSpec
+import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.colors import Normalize
+from matplotlib.gridspec import GridSpec
+from scipy.interpolate import CubicSpline, interp1d
+from scipy.ndimage import gaussian_filter1d
+from scipy.signal import savgol_filter
 
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
@@ -117,8 +120,6 @@ BASE_CONFIG = {
 # Setup output re-direct from TORAX to log file, suppressing frivolous warnings.
 # Errors will still be output in terminal.
 # This is the first step, needs to be given self._log_file once that is configured in self.fly().
-import logging
-import sys
 def log_redirect_setup():
     r'''! Step 1/3 of setup to redirect noisy outputs to log file.
     Performs the initial, minimal logging setup.
@@ -143,10 +144,9 @@ def log_redirect_setup():
 log_redirect_setup()
 
 # Now import "noisy" packages, after running log_redirect_setup:
-import torax
+import torax  # noqa: E402
 
 
-from contextlib import contextmanager
 @contextmanager
 def redirect_outputs_to_log(filename):
     r'''! Step 2/3 of setup to redirect noisy outputs to log file. 
@@ -1649,7 +1649,7 @@ class TokTox:
         r'''! Run the TORAX transport simulation.
         @return Tuple (consumed_flux, consumed_flux_integral).
         '''
-        self._print(f'  TORAX: running simulation...')
+        self._print('  TORAX: running simulation...')
         myconfig = self._get_tx_config()
         try:
             data_tree, hist = torax.run_simulation(myconfig, log_timestep_info=False)
@@ -2291,8 +2291,7 @@ class TokTox:
     def _quiet_tm(self):
         r'''! Context manager: redirect C/Fortran-level stdout+stderr to /dev/null.
         '''
-        import contextlib, os, sys
-        @contextlib.contextmanager
+        @contextmanager
         def _cm():
             target_fd = os.open(os.devnull, os.O_WRONLY)
             saved_out = os.dup(1)
@@ -2784,7 +2783,6 @@ def profile_plot(tt, i, t, save_path=None, display=True):
     psi_N = tt._psi_N
 
     tm_psi, tm_f_prof, tm_fp_prof, tm_p_prof, tm_pp_prof = tt._tm.get_profiles(npsi=len(tt._psi_N))
-    tm_ffp_prof = tm_f_prof * tm_fp_prof
 
     fig, axes = plt.subplots(6, 3, figsize=(20, 24))
     plt.suptitle(f'loop {tt._current_loop} - t-idx {i}/{len(tt._tm_times)-1} - t = {t:.1f} s', fontsize=14)
@@ -2982,7 +2980,6 @@ def profile_plot(tt, i, t, save_path=None, display=True):
 def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None, display=True):
     """TokaMaker input/output diagnostic plot for a single timestep."""
     s = tt._state
-    psi_N = tt._psi_N
 
     _winning = next((a for a in level_attempts if a['succeeded']), None)
     _last = level_attempts[-1] if level_attempts else {}
@@ -3828,8 +3825,6 @@ def _render_equil_frames(tt, loop, equil_dir):
 
 def _render_frame(tt, loop, idx, t_now, times, flux_con_tm, flux_con_tx, out_path, run_name, equil_dir):
     """Create a single composite movie frame."""
-    from matplotlib.image import imread
-
     fig = plt.figure(figsize=(MOVIE_FIG_W, MOVIE_FIG_H), dpi=MOVIE_DPI)
     gs = GridSpec(6, 3, figure=fig, width_ratios=[1.2, 1.0, 1.0],
                   wspace=0.28, hspace=0.18,
@@ -4400,7 +4395,7 @@ def summary(tt):
         out['vloop_tx_flattop_avg_V'] = float(np.nanmean(np.array(s['vloop_tx'])[ft_mask]))
 
     print(f"\n{'=' * 55}")
-    print(f"  TokTox Physics Summary")
+    print("  TokTox Physics Summary")
     print(f"{'=' * 55}")
     for key, val in out.items():
         if val is not None:
