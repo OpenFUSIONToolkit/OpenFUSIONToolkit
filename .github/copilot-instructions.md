@@ -168,7 +168,7 @@ This validates that all `SUBROUTINE`/`FUNCTION` entries have matching debug stac
 
 - **OS**: Ubuntu 24.04
 - **Compilers**: `gcc-14` / `g++-14` / `gfortran-14`
-- **Parallel**: OpenMP only (no MPI)
+- **Parallel**: OpenMP + MPICH (MPI enabled)
 - **Libraries**: OpenBLAS, UMFPACK, SuperLU, ARPACK, HDF5, METIS
 
 ## Coding Conventions
