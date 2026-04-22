@@ -1,4 +1,8 @@
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file tokamaker_f.F90
 !
 !> Fortran part of Python wrapper for Grad-Shafranov functionality
@@ -6,7 +10,7 @@
 !! @authors Chris Hansen
 !! @date May 2023
 !! @ingroup doxy_oft_python
-!------------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 MODULE tokamaker_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
   c_f_pointer, c_bool, c_null_ptr, c_associated
@@ -25,13 +29,10 @@ USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
 USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp, oft_blag_project
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
-USE oft_gs, ONLY: gs_eq, gs_save_fields, gs_setup_walls, build_dels, flux_func, &
+USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_dels, flux_func, &
   gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
-  gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source_distributed, gs_vacuum_solve, &
+  gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
-#ifdef OFT_TOKAMAKER_LEGACY
-USE oft_gs, ONLY: gs_load_regions
-#endif
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
   sauter_fc, gs_calc_vloop
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
@@ -47,7 +48,6 @@ IMPLICIT NONE
 TYPE, BIND(C) :: tokamaker_settings_type
   LOGICAL(KIND=c_bool) :: pm = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: free_boundary = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: has_plasma = .TRUE. !< Needs docs
   LOGICAL(KIND=c_bool) :: limited_only = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: dipole_mode = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: mirror_mode = .FALSE. !< Needs docs
@@ -65,8 +65,8 @@ END TYPE tokamaker_settings_type
 TYPE, BIND(C) :: tokamaker_recon_settings_type
   LOGICAL(KIND=c_bool) :: fitI = .TRUE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitP = .TRUE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fitPnorm = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fitAlam = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fit_Pscale = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fit_FFPscale = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitR0 = .TRUE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitV0 = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitCoils = .FALSE. !< Needs docs
@@ -80,12 +80,14 @@ END TYPE tokamaker_recon_settings_type
 !> Needs docs
 !---------------------------------------------------------------------------------
 TYPE :: tokamaker_instance
+  INTEGER(i4) :: mode = 1 !< Needs docs
   INTEGER(i4), POINTER, DIMENSION(:) :: reg_plot => NULL() !< Needs docs
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_plot => NULL() !< Needs docs
   REAL(r8), POINTER, DIMENSION(:,:) :: r_plot => NULL() !< Needs docs
   TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< Mesh container
   TYPE(oft_ml_fem_type), POINTER :: ML_oft_blagrange => NULL() !< Finite element container
-  TYPE(gs_eq), POINTER :: gs => NULL() !< G-S object
+  TYPE(gs_factory), POINTER :: device => NULL() !< G-S object
+  TYPE(gs_equil), POINTER :: gs_equil => NULL() !< G-S object
   TYPE(oft_tmaker_td), POINTER :: gs_td => NULL() !< Time-dependent G-S object
 END TYPE tokamaker_instance
 CONTAINS
@@ -94,7 +96,7 @@ CONTAINS
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str) BIND(C,NAME="tokamaker_alloc")
 TYPE(c_ptr), INTENT(out) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Pointer to mesh object
 CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 CALL copy_string('',error_str)
@@ -103,16 +105,53 @@ IF(.NOT.c_associated(mesh_ptr))THEN
   RETURN
 END IF
 ALLOCATE(tMaker_obj)
-ALLOCATE(tMaker_obj%gs,tMaker_obj%gs_td,tMaker_obj%ML_oft_blagrange)
+ALLOCATE(tMaker_obj%device,tMaker_obj%gs_td,tMaker_obj%ML_oft_blagrange)
 tMaker_ptr=C_LOC(tMaker_obj)
 CALL c_f_pointer(mesh_ptr,tMaker_obj%ml_mesh)
 END SUBROUTINE tokamaker_alloc
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_equil_copy(tMaker_ptr,old_equil_ptr,new_equil_ptr,error_str) BIND(C,NAME="tokamaker_equil_copy")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: old_equil_ptr !< Pointer to old equilibrium object
+TYPE(c_ptr), INTENT(out) :: new_equil_ptr !< Pointer to new equilibrium object
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+TYPE(gs_equil), POINTER :: old_equil,new_equil
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+ALLOCATE(new_equil)
+IF(.NOT.c_associated(old_equil_ptr))THEN
+  new_equil%mode=tMaker_obj%mode
+  CALL new_equil%new(tMaker_obj%device)
+ELSE
+  IF(.NOT.tokamaker_equil_ccast(old_equil_ptr,old_equil,error_str))THEN
+    DEALLOCATE(new_equil)
+    RETURN
+  END IF
+  CALL new_equil%copy(old_equil)
+END IF
+new_equil_ptr=C_LOC(new_equil)
+END SUBROUTINE tokamaker_equil_copy
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_equil_set(tMaker_ptr,new_equil_ptr,error_str) BIND(C,NAME="tokamaker_equil_set")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), VALUE, INTENT(in) :: new_equil_ptr !< Pointer to old equilibrium object
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+TYPE(gs_equil), POINTER :: new_equil
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.tokamaker_equil_ccast(new_equil_ptr,new_equil,error_str))RETURN
+tMaker_obj%gs_equil=>new_equil
+END SUBROUTINE tokamaker_equil_set
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
 FUNCTION tokamaker_ccast(tMaker_cptr,tMaker_obj,error_str) RESULT(success)
 TYPE(c_ptr), INTENT(in) :: tMaker_cptr !< C pointer to TokaMaker object
-TYPE(tokamaker_instance), POINTER, INTENT(out) :: tMaker_obj
+TYPE(tokamaker_instance), POINTER, INTENT(out) :: tMaker_obj !< Fortran TokaMaker object
 CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 LOGICAL :: success
 !---Clear error flag
@@ -126,15 +165,49 @@ CALL c_f_pointer(tMaker_cptr,tMaker_obj)
 success=.TRUE.
 END FUNCTION tokamaker_ccast
 !---------------------------------------------------------------------------------
+!> Evaluate Green's function for axisymmetric toroidal current loop
+!---------------------------------------------------------------------------------
+FUNCTION tokamaker_equil_ccast(tMaker_equil_cptr,tMaker_equil_obj,error_str) RESULT(success)
+TYPE(c_ptr), INTENT(in) :: tMaker_equil_cptr !< C pointer to TokaMaker equilibrium object
+TYPE(gs_equil), POINTER, INTENT(out) :: tMaker_equil_obj
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+LOGICAL :: success
+!---Clear error flag
+IF(PRESENT(error_str))CALL copy_string('',error_str)
+IF(.NOT.c_associated(tMaker_equil_cptr))THEN
+  IF(PRESENT(error_str))CALL copy_string('TokaMaker equilibrium object not associated',error_str)
+  success=.FALSE.
+  RETURN
+END IF
+CALL c_f_pointer(tMaker_equil_cptr,tMaker_equil_obj)
+success=.TRUE.
+END FUNCTION tokamaker_equil_ccast
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+FUNCTION tokamaker_require_equil(tMaker_obj,error_str) RESULT(success)
+TYPE(tokamaker_instance), INTENT(in) :: tMaker_obj
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+LOGICAL :: success
+!---Clear error flag
+IF(PRESENT(error_str))CALL copy_string('',error_str)
+IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil))THEN
+  IF(PRESENT(error_str))CALL copy_string('Equilibrium object not allocated',error_str)
+  success=.FALSE.
+  RETURN
+END IF
+success=.TRUE.
+END FUNCTION tokamaker_require_equil
+!---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_eval_green(n,r,z,rc,zc,vals) BIND(C,NAME="tokamaker_eval_green")
-INTEGER(c_int), VALUE, INTENT(in) :: n !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: rc !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: zc !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: r !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: z !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of evaluation points
+REAL(c_double), VALUE, INTENT(in) :: rc !< R coordinate of coil
+REAL(c_double), VALUE, INTENT(in) :: zc !< Z coordinate of coil
+TYPE(c_ptr), VALUE, INTENT(in) :: r !< R coordinates for evaluation
+TYPE(c_ptr), VALUE, INTENT(in) :: z !< Z coordinates for evaluation
+TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Psi values
 INTEGER(4) :: i
 REAL(r8), POINTER, DIMENSION(:) :: rtmp,ztmp,vals_tmp
 CALL c_f_pointer(r, rtmp, [n])
@@ -161,63 +234,57 @@ real(r8), POINTER :: eta_tmp(:),nturns_tmp(:,:)
 INTEGER(i4), POINTER :: contig_tmp(:)
 INTEGER(4) :: i
 INTEGER(4), POINTER :: xpoint_tmp(:)
-! TYPE(multigrid_mesh), POINTER :: mg_mesh
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 CLASS(oft_bmesh), POINTER :: smesh
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 smesh=>tMaker_obj%ml_mesh%smesh
-CALL copy_string_rev(coil_file,tMaker_obj%gs%coil_file)
-IF(TRIM(tMaker_obj%gs%coil_file)=='none')THEN
+CALL copy_string_rev(coil_file,tMaker_obj%device%coil_file)
+IF(TRIM(tMaker_obj%device%coil_file)=='none')THEN
   !
   CALL c_f_pointer(xpoint_mask, xpoint_tmp, [smesh%nreg])
-  ALLOCATE(tMaker_obj%gs%saddle_rmask(smesh%nreg))
-  tMaker_obj%gs%saddle_rmask=LOGICAL(xpoint_tmp==0)
+  ALLOCATE(tMaker_obj%device%saddle_rmask(smesh%nreg))
+  tMaker_obj%device%saddle_rmask=LOGICAL(xpoint_tmp==0)
   !
   CALL c_f_pointer(reg_eta, eta_tmp, [smesh%nreg])
-  tMaker_obj%gs%ncoil_regs=0
-  tMaker_obj%gs%ncond_regs=0
+  tMaker_obj%device%ncoil_regs=0
+  tMaker_obj%device%ncond_regs=0
   DO i=2,smesh%nreg
     IF(eta_tmp(i)>0.d0)THEN
-      tMaker_obj%gs%ncond_regs=tMaker_obj%gs%ncond_regs+1
+      tMaker_obj%device%ncond_regs=tMaker_obj%device%ncond_regs+1
     ELSE
-      tMaker_obj%gs%ncoil_regs=tMaker_obj%gs%ncoil_regs+1
+      tMaker_obj%device%ncoil_regs=tMaker_obj%device%ncoil_regs+1
     END IF
   END DO
   !
-  tMaker_obj%gs%ncoils=ncoils
-  ALLOCATE(tMaker_obj%gs%coil_vcont(ncoils),tMaker_obj%gs%coil_currs(ncoils))
-  tMaker_obj%gs%coil_vcont = 0.d0
-  tMaker_obj%gs%coil_currs = 0.d0
+  tMaker_obj%device%ncoils=ncoils
+  ALLOCATE(tMaker_obj%device%coil_vcont(ncoils))
+  tMaker_obj%device%coil_vcont = 0.d0
   CALL c_f_pointer(coil_nturns, nturns_tmp, [smesh%nreg,ncoils])
-  ALLOCATE(tMaker_obj%gs%coil_nturns(smesh%nreg,ncoils))
-  tMaker_obj%gs%coil_nturns=0.d0
-  tMaker_obj%gs%coil_nturns=nturns_tmp
+  ALLOCATE(tMaker_obj%device%coil_nturns(smesh%nreg,ncoils))
+  tMaker_obj%device%coil_nturns=0.d0
+  tMaker_obj%device%coil_nturns=nturns_tmp
   !
   CALL c_f_pointer(contig_flag, contig_tmp, [smesh%nreg])
-  ALLOCATE(tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs))
-  ALLOCATE(tMaker_obj%gs%coil_regions(tMaker_obj%gs%ncoil_regs))
-  tMaker_obj%gs%ncond_regs=0
-  tMaker_obj%gs%ncoil_regs=0
+  ALLOCATE(tMaker_obj%device%cond_regions(tMaker_obj%device%ncond_regs))
+  ALLOCATE(tMaker_obj%device%coil_regions(tMaker_obj%device%ncoil_regs))
+  tMaker_obj%device%ncond_regs=0
+  tMaker_obj%device%ncoil_regs=0
   DO i=2,smesh%nreg
     IF(eta_tmp(i)>0.d0)THEN
-      tMaker_obj%gs%ncond_regs=tMaker_obj%gs%ncond_regs+1
+      tMaker_obj%device%ncond_regs=tMaker_obj%device%ncond_regs+1
       IF(eta_tmp(i)<1.d9)THEN
-        tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs)%eta=eta_tmp(i)
+        tMaker_obj%device%cond_regions(tMaker_obj%device%ncond_regs)%eta=eta_tmp(i)
       END IF
-      tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs)%id=i
-      tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs)%continuous=(contig_tmp(i)==1)
-      IF(tMaker_obj%gs%dipole_mode)tMaker_obj%gs%cond_regions(tMaker_obj%gs%ncond_regs)%inner_limiter=(contig_tmp(i)==-1)
+      tMaker_obj%device%cond_regions(tMaker_obj%device%ncond_regs)%id=i
+      tMaker_obj%device%cond_regions(tMaker_obj%device%ncond_regs)%continuous=(contig_tmp(i)==1)
+      IF(tMaker_obj%device%dipole_mode)tMaker_obj%device%cond_regions(tMaker_obj%device%ncond_regs)%inner_limiter=(contig_tmp(i)==-1)
     ELSE
-      tMaker_obj%gs%ncoil_regs=tMaker_obj%gs%ncoil_regs+1
-      tMaker_obj%gs%coil_regions(tMaker_obj%gs%ncoil_regs)%id=i
+      tMaker_obj%device%ncoil_regs=tMaker_obj%device%ncoil_regs+1
+      tMaker_obj%device%coil_regions(tMaker_obj%device%ncoil_regs)%id=i
     END IF
   END DO
 ELSE
-#ifdef OFT_TOKAMAKER_LEGACY
-  CALL gs_load_regions(tMaker_obj%gs)
-#else
-  CALL oft_abort("OFT not compiled with legacy TokaMaker support","tokamaker_setup_regions",__FILE__)
-#endif
+  CALL oft_abort("Legacy TokaMaker region loading no longer supported","tokamaker_setup_regions",__FILE__)
 END IF
 END SUBROUTINE tokamaker_setup_regions
 !---------------------------------------------------------------------------------
@@ -236,9 +303,9 @@ IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(ASSOCIATED(tMaker_obj%r_plot))DEALLOCATE(tMaker_obj%r_plot)
 IF(ASSOCIATED(tMaker_obj%lc_plot))DEALLOCATE(tMaker_obj%lc_plot)
 IF(ASSOCIATED(tMaker_obj%reg_plot))DEALLOCATE(tMaker_obj%reg_plot)
-IF(ASSOCIATED(tMaker_obj%gs))THEN
-  CALL tMaker_obj%gs%delete()
-  DEALLOCATE(tMaker_obj%gs)
+IF(ASSOCIATED(tMaker_obj%device))THEN
+  CALL tMaker_obj%device%delete()
+  DEALLOCATE(tMaker_obj%device)
 END IF
 IF(ASSOCIATED(tMaker_obj%ML_oft_blagrange))THEN
   CALL tMaker_obj%ML_oft_blagrange%current_level%delete()
@@ -252,11 +319,23 @@ END SUBROUTINE tokamaker_destroy
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,error_str) BIND(C,NAME="tokamaker_setup")
+SUBROUTINE tokamaker_equil_destroy(tMaker_equil_ptr,error_str) BIND(C,NAME="tokamaker_equil_destroy")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL tMaker_equil_obj%delete()
+DEALLOCATE(tMaker_equil_obj)
+END SUBROUTINE tokamaker_equil_destroy
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< FE order for Lagrange elements
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Needs docs
 INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Needs docs
+TYPE(c_ptr), INTENT(out) :: coil_Lmat !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 REAL(8) :: theta
@@ -267,15 +346,15 @@ IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 !------------------------------------------------------------------------------
 ! Check input files
 !------------------------------------------------------------------------------
-IF(TRIM(tMaker_obj%gs%coil_file)/='none')THEN
-    INQUIRE(EXIST=file_exists,FILE=TRIM(tMaker_obj%gs%coil_file))
+IF(TRIM(tMaker_obj%device%coil_file)/='none')THEN
+    INQUIRE(EXIST=file_exists,FILE=TRIM(tMaker_obj%device%coil_file))
     IF(.NOT.file_exists)THEN
         CALL copy_string('Specified "coil_file" cannot be found',error_str)
         RETURN
     END IF
 END IF
-IF(TRIM(tMaker_obj%gs%limiter_file)/='none')THEN
-    INQUIRE(EXIST=file_exists,FILE=TRIM(tMaker_obj%gs%limiter_file))
+IF(TRIM(tMaker_obj%device%limiter_file)/='none')THEN
+    INQUIRE(EXIST=file_exists,FILE=TRIM(tMaker_obj%device%limiter_file))
     IF(.NOT.file_exists)THEN
         CALL copy_string('Specified "limiter_file" cannot be found',error_str)
         RETURN
@@ -293,74 +372,79 @@ END IF
 !------------------------------------------------------------------------------
 tMaker_obj%ml_mesh%smesh%tess_order=order
 CALL oft_lag_setup(tMaker_obj%ml_mesh,order,ML_blag_obj=tMaker_obj%ML_oft_blagrange,minlev=-1)
-CALL tMaker_obj%gs%setup(tMaker_obj%ML_oft_blagrange)
+CALL tMaker_obj%device%setup(tMaker_obj%ML_oft_blagrange)
 !------------------------------------------------------------------------------
 ! Setup experimental geometry
 !------------------------------------------------------------------------------
-tMaker_obj%gs%save_visit=.FALSE.
-tMaker_obj%gs%full_domain=full_domain
-CALL gs_setup_walls(tMaker_obj%gs)
-CALL tMaker_obj%gs%load_limiters
-CALL tMaker_obj%gs%init()
+tMaker_obj%device%save_visit=.FALSE.
+tMaker_obj%device%full_domain=full_domain
+CALL gs_setup_walls(tMaker_obj%device)
+CALL tMaker_obj%device%load_limiters
+CALL tMaker_obj%device%init()
+! ALLOCATE(tMaker_obj%gs_equil)
+! tMaker_obj%gs_equil%mode=tMaker_obj%mode
+! CALL tMaker_obj%gs_equil%new(tMaker_obj%device)
 ! IF(tMaker_obj%gs%dipole_mode)THEN
 !   tMaker_obj%gs%dipole_a=0.d0
 !   CALL create_dipole_b0_prof(tMaker_obj%gs%dipole_B0,64)
 ! END IF
-ncoils=tMaker_obj%gs%ncoils
+ncoils=tMaker_obj%device%ncoils
+coil_Lmat=C_LOC(tMaker_obj%device%Lcoils)
 END SUBROUTINE tokamaker_setup
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Load profile specification files
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_load_profiles(tMaker_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str) BIND(C,NAME="tokamaker_load_profiles")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_load_profiles(tMaker_equil_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str) BIND(C,NAME="tokamaker_load_profiles")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 CHARACTER(KIND=c_char), INTENT(in) :: f_file(OFT_PATH_SLEN) !< F*F' prof.in file
 CHARACTER(KIND=c_char), INTENT(in) :: p_file(OFT_PATH_SLEN) !< P' prof.in file
 REAL(c_double), VALUE, INTENT(in) :: f_offset !< Vacuum F_0 value (must be > -1E98 to update)
-CHARACTER(KIND=c_char), INTENT(in) :: eta_file(OFT_PATH_SLEN) !< Resistivity (eta) prof.in file
-CHARACTER(KIND=c_char), INTENT(in) :: f_NI_file(OFT_PATH_SLEN) !< Non-inductive F*F' prof.in file
+CHARACTER(KIND=c_char), INTENT(in) :: eta_file(OFT_PATH_SLEN) !< Resistivity (eta) profile specification file
+CHARACTER(KIND=c_char), INTENT(in) :: f_NI_file(OFT_PATH_SLEN) !< Non-inductive F*F' profile specification file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 CLASS(flux_func), POINTER :: prof_tmp
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(f_file,tmp_str)
 IF(TRIM(tmp_str)/='none')THEN
   CALL gs_profile_load(tmp_str,prof_tmp)
-  IF(ASSOCIATED(tMaker_obj%gs%I))THEN
-    prof_tmp%f_offset=tMaker_obj%gs%I%f_offset ! Persist F0 with profile changes
-    CALL prof_tmp%update(tMaker_obj%gs)        ! Initialize new profile with current EQ
+  IF(ASSOCIATED(tMaker_equil_obj%I))THEN
+    prof_tmp%f_offset=tMaker_equil_obj%I%f_offset ! Persist F0 with profile changes
+    CALL prof_tmp%update(tMaker_equil_obj)        ! Initialize new profile with current EQ
   END IF
-  tMaker_obj%gs%I=>prof_tmp
+  tMaker_equil_obj%I=>prof_tmp
 END IF
-IF(f_offset>-1.d98)tMaker_obj%gs%I%f_offset=f_offset
+IF(f_offset>-1.d98)tMaker_equil_obj%I%f_offset=f_offset
 CALL copy_string_rev(p_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%P)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%P)
 CALL copy_string_rev(eta_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%eta)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%eta)
 CALL copy_string_rev(f_NI_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_obj%gs%I_NI)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%I_NI)
 END SUBROUTINE tokamaker_load_profiles
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str) BIND(C,NAME="tokamaker_init_psi")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-REAL(c_double), VALUE, INTENT(in) :: r0 !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: z0 !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: a !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: kappa !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: delta !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: r0 !< Major radius
+REAL(c_double), VALUE, INTENT(in) :: z0 !< Vertical position
+REAL(c_double), VALUE, INTENT(in) :: a !< Minor radius
+REAL(c_double), VALUE, INTENT(in) :: kappa !< Elongation
+REAL(c_double), VALUE, INTENT(in) :: delta !< Triangularity
 TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ierr
 REAL(8), POINTER, DIMENSION(:) :: rhs_tmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
 IF(c_associated(rhs_source))THEN
-  CALL c_f_pointer(rhs_source, rhs_tmp, [tMaker_obj%gs%psi%n])
-  CALL tMaker_obj%gs%init_psi(ierr,curr_source=rhs_tmp)
+  CALL c_f_pointer(rhs_source, rhs_tmp, [tMaker_obj%gs_equil%psi%n])
+  CALL tMaker_obj%device%init_psi(tMaker_obj%gs_equil,ierr,curr_source=rhs_tmp)
 ELSE
-  CALL tMaker_obj%gs%init_psi(ierr,r0=[r0,z0],a=a,kappa=kappa,delta=delta)
+  CALL tMaker_obj%device%init_psi(tMaker_obj%gs_equil,ierr,r0=[r0,z0],a=a,kappa=kappa,delta=delta)
 END IF
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_init_psi
@@ -371,17 +455,25 @@ SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,error_str) BIND(C,NAME="tokamaker_s
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Perform vacuum solve?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-INTEGER(i4) :: ierr
+INTEGER(i4) :: ntargets,ierr
 LOGICAL :: vac_save
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-tMaker_obj%gs%timing=0.d0
-IF(vacuum)THEN
-  vac_save=tMaker_obj%gs%has_plasma
-  tMaker_obj%gs%has_plasma=.FALSE.
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+IF(ANY(tMaker_obj%device%rcoils>0.d0).AND.(tMaker_obj%device%dt>0.d0))THEN
+  ntargets=tMaker_obj%gs_equil%isoflux_ntargets+tMaker_obj%gs_equil%flux_ntargets+tMaker_obj%gs_equil%saddle_ntargets
+  IF(ntargets>0)THEN
+    CALL copy_string('Use of shape targets with time-dependence and Vcoils is not supported at this time',error_str)
+    RETURN
+  END IF
 END IF
-CALL tMaker_obj%gs%solve(ierr)
-IF(vacuum)tMaker_obj%gs%has_plasma=vac_save
+IF(vacuum)THEN
+  vac_save=tMaker_obj%gs_equil%has_plasma
+  tMaker_obj%gs_equil%has_plasma=.FALSE.
+END IF
+tMaker_obj%device%timing=0.d0
+CALL tMaker_obj%device%solve(tMaker_obj%gs_equil,ierr)
+IF(vacuum)tMaker_obj%gs_equil%has_plasma=vac_save
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_solve
 !---------------------------------------------------------------------------------
@@ -389,32 +481,35 @@ END SUBROUTINE tokamaker_solve
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_vac_solve(tMaker_ptr,psi_in,rhs_source,error_str) BIND(C,NAME="tokamaker_vac_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Input: BCs for \f$ \psi \f$, Output: solution
-TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term (optional)
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_in !< Input: BCs for \f$ \psi \f$, Output: solution \f$ \psi \f$
+TYPE(c_ptr), VALUE, INTENT(in) :: rhs_source !< Current source term [A/m^2] (optional)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-INTEGER(i4) :: ierr
+INTEGER(i4) :: j,k,ierr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp,rhs_tmp
 CLASS(oft_vector), POINTER :: psi_tmp,rhs_vec
 TYPE(oft_lag_brinterp) :: source_field
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
 NULLIFY(psi_tmp)
-CALL tMaker_obj%gs%psi%new(psi_tmp)
-CALL c_f_pointer(psi_in, vals_tmp, [tMaker_obj%gs%psi%n])
+CALL tMaker_obj%gs_equil%psi%new(psi_tmp)
+CALL c_f_pointer(psi_in, vals_tmp, [tMaker_obj%gs_equil%psi%n])
 CALL psi_tmp%restore_local(vals_tmp)
+!
 IF(c_associated(rhs_source))THEN
   NULLIFY(rhs_tmp)
-  CALL tMaker_obj%gs%psi%new(rhs_vec)
-  CALL c_f_pointer(rhs_source, rhs_tmp, [tMaker_obj%gs%psi%n])
+  CALL tMaker_obj%gs_equil%psi%new(rhs_vec)
+  CALL c_f_pointer(rhs_source, rhs_tmp, [tMaker_obj%gs_equil%psi%n])
   CALL rhs_vec%restore_local(rhs_tmp)
+  CALL rhs_vec%scale(mu0)
   source_field%u=>rhs_vec
-  CALL source_field%setup(tMaker_obj%gs%fe_rep)
-  CALL tMaker_obj%gs%vac_solve(psi_tmp,rhs_source=source_field,ierr=ierr)
+  CALL source_field%setup(tMaker_obj%device%fe_rep)
+  CALL tMaker_obj%device%vac_solve(tMaker_obj%gs_equil,psi_tmp,rhs_source=source_field,ierr=ierr)
   CALL source_field%delete()
   CALL rhs_vec%delete()
   DEALLOCATE(rhs_vec)
 ELSE
-  CALL tMaker_obj%gs%vac_solve(psi_tmp,ierr=ierr)
+  CALL tMaker_obj%device%vac_solve(tMaker_obj%gs_equil,psi_tmp,ierr=ierr)
 END IF
 CALL psi_tmp%get_local(vals_tmp)
 CALL psi_tmp%delete()
@@ -428,7 +523,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
 TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
-LOGICAL :: fitI,fitP,fitPnorm,fitAlam,fitR0,fitV0,fitCoils,fitF0,fixedCentering
+LOGICAL :: fitI,fitP,fit_Pscale,fit_FFPscale,fitR0,fitV0,fitCoils,fitF0,fixedCentering
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
 CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -436,12 +531,16 @@ IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj))THEN
   error_flag=-100
   RETURN
 END IF
+IF(.NOT.tokamaker_require_equil(tMaker_obj))THEN
+  error_flag=-101
+  RETURN
+END IF
 error_flag=0
-IF(vacuum)tMaker_obj%gs%has_plasma=.FALSE.
+IF(vacuum)tMaker_obj%gs_equil%has_plasma=.FALSE.
 fitI=settings%fitI
 fitP=settings%fitP
-fitPnorm=settings%fitPnorm
-fitAlam=settings%fitAlam
+fit_Pscale=settings%fit_Pscale
+fit_FFPscale=settings%fit_FFPscale
 fitR0=settings%fitR0
 fitV0=settings%fitV0
 fitCoils=settings%fitCoils
@@ -452,124 +551,153 @@ CALL c_f_pointer(settings%infile,infile_c,[OFT_PATH_SLEN])
 CALL c_f_pointer(settings%outfile,outfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(infile_c,infile)
 CALL copy_string_rev(outfile_c,outfile)
-tMaker_obj%gs%timing=0.d0
-CALL fit_gs(tMaker_obj%gs,infile,outfile,fitI,fitP,fitPnorm,&
-            fitAlam,fitR0,fitV0,fitCoils,fitF0, &
+tMaker_obj%device%timing=0.d0
+CALL fit_gs(tMaker_obj%gs_equil,infile,outfile,fitI,fitP,fit_Pscale,&
+            fit_FFPscale,fitR0,fitV0,fitCoils,fitF0, &
             fixedCentering)
-CALL gs_profile_save(TRIM(outfile)//'_fprof',tMaker_obj%gs%I)
-CALL gs_profile_save(TRIM(outfile)//'_pprof',tMaker_obj%gs%P)
-tMaker_obj%gs%has_plasma=.TRUE.
+CALL gs_profile_save(TRIM(outfile)//'_fprof',tMaker_obj%gs_equil%I)
+CALL gs_profile_save(TRIM(outfile)//'_pprof',tMaker_obj%gs_equil%P)
+tMaker_obj%gs_equil%has_plasma=.TRUE.
 END SUBROUTINE tokamaker_recon_run
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_setup_td(tMaker_ptr,dt,lin_tol,nl_tol,pre_plasma,error_str) BIND(C,NAME="tokamaker_setup_td")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-REAL(c_double), VALUE, INTENT(in) :: dt !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: lin_tol !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: nl_tol !< Needs docs
-LOGICAL(c_bool), VALUE, INTENT(in) :: pre_plasma !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: dt !< Time step size
+REAL(c_double), VALUE, INTENT(in) :: lin_tol !< Linear solver tolerance
+REAL(c_double), VALUE, INTENT(in) :: nl_tol !< Nonlinear solver tolerance
+LOGICAL(c_bool), VALUE, INTENT(in) :: pre_plasma !< Include plasma contributions in preconditioner?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
 IF(ASSOCIATED(tMaker_obj%gs_td))THEN
   CALL tMaker_obj%gs_td%delete()
   DEALLOCATE(tMaker_obj%gs_td)
 END IF
 ALLOCATE(tMaker_obj%gs_td)
-CALL tMaker_obj%gs_td%setup(tMaker_obj%gs,dt,lin_tol,nl_tol,LOGICAL(pre_plasma))
+CALL tMaker_obj%gs_td%setup(tMaker_obj%gs_equil,dt,lin_tol,nl_tol,LOGICAL(pre_plasma))
 END SUBROUTINE tokamaker_setup_td
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_eig_td(tMaker_ptr,omega,neigs,eigs,eig_vecs,include_bounds,eta_plasma,pm,error_str) BIND(C,NAME="tokamaker_eig_td")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-REAL(c_double), VALUE, INTENT(in) :: omega !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: neigs !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: eigs !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: eig_vecs !< Needs docs
-LOGICAL(c_bool), VALUE, INTENT(in) :: include_bounds !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: eta_plasma !< Needs docs
-LOGICAL(c_bool), VALUE, INTENT(in) :: pm !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: omega !< Shift parameter for eigenvalue solve
+INTEGER(c_int), VALUE, INTENT(in) :: neigs !< Number of eigenvalues to compute
+TYPE(c_ptr), VALUE, INTENT(in) :: eigs !< Eigenvalues array
+TYPE(c_ptr), VALUE, INTENT(in) :: eig_vecs !< Eigenvectors array
+LOGICAL(c_bool), VALUE, INTENT(in) :: include_bounds !< Include boundary conditions
+REAL(c_double), VALUE, INTENT(in) :: eta_plasma !< Plasma resistivity
+LOGICAL(c_bool), VALUE, INTENT(in) :: pm !< Report solver progress?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER :: eigs_tmp(:,:),eig_vecs_tmp(:,:)
 LOGICAL :: pm_save
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+#ifdef HAVE_ARPACK
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+IF(ANY(tMaker_obj%device%Rcoils>0.d0))THEN
+  CALL copy_string('Eigenvalue solve not supported with Vcoils',error_str)
+  RETURN
+END IF
 CALL c_f_pointer(eigs, eigs_tmp, [2,neigs])
-CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [tMaker_obj%gs%psi%n,neigs])
+CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [tMaker_obj%gs_equil%psi%n,neigs])
 pm_save=oft_env%pm; oft_env%pm=pm
-CALL eig_gs_td(tMaker_obj%gs,neigs,eigs_tmp,eig_vecs_tmp,omega,LOGICAL(include_bounds),eta_plasma)
+CALL eig_gs_td(tMaker_obj%gs_equil,neigs,eigs_tmp,eig_vecs_tmp,omega,LOGICAL(include_bounds),eta_plasma)
 oft_env%pm=pm_save
 IF((eigs_tmp(1,1)<-1.d98).AND.(eigs_tmp(2,1)<-1.d98))CALL copy_string('Error in eigenvalue solve',error_str)
+#else
+CALL copy_string('Eigenvalue solve requires ARPACK',error_str)
+#endif
 END SUBROUTINE tokamaker_eig_td
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_eig_wall(tMaker_ptr,neigs,eigs,eig_vecs,pm,error_str) BIND(C,NAME="tokamaker_eig_wall")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-INTEGER(c_int), VALUE, INTENT(in) :: neigs !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: eigs !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: eig_vecs !< Needs docs
-LOGICAL(c_bool), VALUE, INTENT(in) :: pm !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: neigs !< Number of eigenvalues to compute
+TYPE(c_ptr), VALUE, INTENT(in) :: eigs !< Eigenvalues array
+TYPE(c_ptr), VALUE, INTENT(in) :: eig_vecs !< Eigenvectors array
+LOGICAL(c_bool), VALUE, INTENT(in) :: pm !< Report solver progress?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-REAL(8) :: alam_save,pnorm_save
+REAL(8) :: ffp_scale_save,p_scale_save
 REAL(8), POINTER :: eigs_tmp(:,:),eig_vecs_tmp(:,:)
 LOGICAL :: pm_save
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+#ifdef HAVE_ARPACK
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+IF(ANY(tMaker_obj%device%Rcoils>0.d0))THEN
+  CALL copy_string('Eigenvalue solve not supported with Vcoils',error_str)
+  RETURN
+END IF
 CALL c_f_pointer(eigs, eigs_tmp, [2,neigs])
-CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [tMaker_obj%gs%psi%n,neigs])
-alam_save=tMaker_obj%gs%alam; tMaker_obj%gs%alam=0.d0
-pnorm_save=tMaker_obj%gs%pnorm; tMaker_obj%gs%pnorm=0.d0
+CALL c_f_pointer(eig_vecs, eig_vecs_tmp, [tMaker_obj%gs_equil%psi%n,neigs])
+ffp_scale_save=tMaker_obj%gs_equil%ffp_scale; tMaker_obj%gs_equil%ffp_scale=0.d0
+p_scale_save=tMaker_obj%gs_equil%p_scale; tMaker_obj%gs_equil%p_scale=0.d0
 pm_save=oft_env%pm; oft_env%pm=pm
-CALL eig_gs_td(tMaker_obj%gs,neigs,eigs_tmp,eig_vecs_tmp,0.d0,.FALSE.,-1.d0)
+CALL eig_gs_td(tMaker_obj%gs_equil,neigs,eigs_tmp,eig_vecs_tmp,0.d0,.FALSE.,-1.d0)
 oft_env%pm=pm_save
 IF((eigs_tmp(1,1)<-1.d98).AND.(eigs_tmp(2,1)<-1.d98))CALL copy_string('Error in eigenvalue solve',error_str)
-tMaker_obj%gs%alam=alam_save
-tMaker_obj%gs%pnorm=pnorm_save
+tMaker_obj%gs_equil%ffp_scale=ffp_scale_save
+tMaker_obj%gs_equil%p_scale=p_scale_save
+#else
+CALL copy_string('Eigenvalue solve requires ARPACK',error_str)
+#endif
 END SUBROUTINE tokamaker_eig_wall
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_step_td(tMaker_ptr,time,dt,nl_its,lin_its,nretry,error_str) BIND(C,NAME="tokamaker_step_td")
+SUBROUTINE tokamaker_step_td(tMaker_ptr,curr_ptr,volt_ptr,time,dt,nl_its,lin_its,nretry,error_str) BIND(C,NAME="tokamaker_step_td")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-REAL(c_double), INTENT(inout) :: time !< Needs docs
-REAL(c_double), INTENT(inout) :: dt !< Needs docs
-INTEGER(c_int), INTENT(out) :: nl_its !< Needs docs
-INTEGER(c_int), INTENT(out) :: lin_its !< Needs docs
-INTEGER(c_int), INTENT(out) :: nretry !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: curr_ptr !< Coil currents at end of step
+TYPE(c_ptr), VALUE, INTENT(in) :: volt_ptr !< Coil voltages at end of step
+REAL(c_double), INTENT(inout) :: time !< Current simulation time
+REAL(c_double), INTENT(inout) :: dt !< Time step size
+INTEGER(c_int), INTENT(out) :: nl_its !< Number of nonlinear iterations performed
+INTEGER(c_int), INTENT(out) :: lin_its !< Number of linear iterations performed
+INTEGER(c_int), INTENT(out) :: nretry !< Number of retries performed
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+REAL(8), ALLOCATABLE, DIMENSION(:) :: coil_currents,coil_voltages
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL tMaker_obj%gs_td%step(time,dt,nl_its,lin_its,nretry)
+ALLOCATE(coil_currents(tMaker_obj%device%ncoils),coil_voltages(tMaker_obj%device%ncoils))
+CALL c_f_pointer(curr_ptr, vals_tmp, [tMaker_obj%device%ncoils])
+coil_currents=vals_tmp*mu0
+CALL c_f_pointer(volt_ptr, vals_tmp, [tMaker_obj%device%ncoils])
+coil_voltages=vals_tmp*mu0
+CALL tMaker_obj%gs_td%step(coil_currents,coil_voltages,time,dt,nl_its,lin_its,nretry)
+DEALLOCATE(coil_currents,coil_voltages)
 END SUBROUTINE tokamaker_step_td
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_mesh(tMaker_ptr,np,r_loc,nc,lc_loc,reg_loc,error_str) BIND(C,NAME="tokamaker_get_mesh")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), INTENT(out) :: lc_loc !< Needs docs
-TYPE(c_ptr), INTENT(out) :: r_loc !< Needs docs
-TYPE(c_ptr), INTENT(out) :: reg_loc !< Needs docs
-INTEGER(c_int), INTENT(out) :: np !< Needs docs
-INTEGER(c_int), INTENT(out) :: nc !< Needs docs
+TYPE(c_ptr), INTENT(out) :: lc_loc !< Cell list pointer
+TYPE(c_ptr), INTENT(out) :: r_loc !< Vertex list pointer
+TYPE(c_ptr), INTENT(out) :: reg_loc !< Region ID pointer
+INTEGER(c_int), INTENT(out) :: np !< Number of vertices
+INTEGER(c_int), INTENT(out) :: nc !< Number of cells
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,j,k,id
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL tMaker_obj%gs%mesh%tessellate(tMaker_obj%r_plot, tMaker_obj%lc_plot, tMaker_obj%gs%mesh%tess_order)
+CALL tMaker_obj%device%mesh%tessellate(tMaker_obj%r_plot, tMaker_obj%lc_plot, tMaker_obj%device%mesh%tess_order)
 np=SIZE(tMaker_obj%r_plot,DIM=2,KIND=c_int)
 nc=SIZE(tMaker_obj%lc_plot,DIM=2,KIND=c_int)
 r_loc=c_loc(tMaker_obj%r_plot)
 lc_loc=c_loc(tMaker_obj%lc_plot)
 !
 ALLOCATE(tMaker_obj%reg_plot(nc))
-k=nc/tMaker_obj%gs%mesh%nc
-IF(ASSOCIATED(tMaker_obj%gs%mesh%reg))THEN
+k=nc/tMaker_obj%device%mesh%nc
+IF(ASSOCIATED(tMaker_obj%device%mesh%reg))THEN
   !$omp parallel do private(j,id)
-  DO i=1,tMaker_obj%gs%mesh%nc
-    id=tMaker_obj%gs%mesh%reg(i)
+  DO i=1,tMaker_obj%device%mesh%nc
+    id=tMaker_obj%device%mesh%reg(i)
     DO j=1,k
       tMaker_obj%reg_plot((i-1)*k+j)=id
     END DO
@@ -584,69 +712,70 @@ END SUBROUTINE tokamaker_get_mesh
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_limiter(tMaker_ptr,np,r_loc,nloops,loop_ptr,error_str) BIND(C,NAME="tokamaker_get_limiter")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), INTENT(out) :: r_loc !< Needs docs
-TYPE(c_ptr), INTENT(out) :: loop_ptr !< Needs docs
-INTEGER(c_int), INTENT(out) :: np !< Needs docs
-INTEGER(c_int), INTENT(out) :: nloops !< Needs docs
+TYPE(c_ptr), INTENT(out) :: r_loc !< Limiter vertex list pointer
+TYPE(c_ptr), INTENT(out) :: loop_ptr !< Limiter loops pointer
+INTEGER(c_int), INTENT(out) :: np !< Number of limiter vertices
+INTEGER(c_int), INTENT(out) :: nloops !< Number of limiter loops
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i
 REAL(8), POINTER, DIMENSION(:,:) :: r_tmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-np=tMaker_obj%gs%nlim_con
-ALLOCATE(r_tmp(2,tMaker_obj%gs%nlim_con))
+np=tMaker_obj%device%nlim_con
+ALLOCATE(r_tmp(2,tMaker_obj%device%nlim_con))
 r_loc=C_LOC(r_tmp)
-DO i=1,tMaker_obj%gs%nlim_con
-  r_tmp(:,i)=tMaker_obj%gs%mesh%r(1:2,tMaker_obj%gs%lim_con(i))
+DO i=1,tMaker_obj%device%nlim_con
+  r_tmp(:,i)=tMaker_obj%device%mesh%r(1:2,tMaker_obj%device%lim_con(i))
 END DO
-nloops=tMaker_obj%gs%lim_nloops
-loop_ptr=C_LOC(tMaker_obj%gs%lim_ptr)
+nloops=tMaker_obj%device%lim_nloops
+loop_ptr=C_LOC(tMaker_obj%device%lim_ptr)
 END SUBROUTINE tokamaker_get_limiter
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_psi(tMaker_ptr,psi_vals,psi_lim,psi_max,error_str) BIND(C,NAME="tokamaker_get_psi")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
-REAL(c_double), INTENT(out) :: psi_lim !< Needs docs
-REAL(c_double), INTENT(out) :: psi_max !< Needs docs
+SUBROUTINE tokamaker_get_psi(tMaker_equil_ptr,psi_vals,psi_lim,psi_max,error_str) BIND(C,NAME="tokamaker_get_psi")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< \f$ \psi \f$ values at node points
+REAL(c_double), INTENT(out) :: psi_lim !< Psi value at plasma boundary
+REAL(c_double), INTENT(out) :: psi_max !< Psi value at magnetic axis
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs%psi%n])
-CALL tMaker_obj%gs%psi%get_local(vals_tmp)
-psi_lim = tMaker_obj%gs%plasma_bounds(1)
-psi_max = tMaker_obj%gs%plasma_bounds(2)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_equil_obj%psi%n])
+CALL tMaker_equil_obj%psi%get_local(vals_tmp)
+psi_lim = tMaker_equil_obj%plasma_bounds(1)
+psi_max = tMaker_equil_obj%plasma_bounds(2)
 END SUBROUTINE tokamaker_get_psi
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_dels_curr(tMaker_ptr,psi_vals,error_str) BIND(C,NAME="tokamaker_get_dels_curr")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
+SUBROUTINE tokamaker_get_dels_curr(tMaker_equil_ptr,psi_vals,error_str) BIND(C,NAME="tokamaker_get_dels_curr")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< \f$ \psi \f$ at node points
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_solver), POINTER :: minv
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(.NOT.ASSOCIATED(tMaker_obj%gs%dels_full))CALL build_dels(tMaker_obj%gs%dels_full,tMaker_obj%gs,"none")
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+IF(.NOT.ASSOCIATED(tMaker_equil_obj%device%dels_full))CALL build_dels(tMaker_equil_obj%device%dels_full,tMaker_equil_obj%device,"none")
 !
-CALL tMaker_obj%gs%psi%new(u)
-CALL tMaker_obj%gs%psi%new(v)
-CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs%psi%n])
+CALL tMaker_equil_obj%psi%new(u)
+CALL tMaker_equil_obj%psi%new(v)
+CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_equil_obj%psi%n])
 CALL u%restore_local(vals_tmp)
 !
 NULLIFY(minv)
 CALL create_cg_solver(minv)
-minv%A=>tMaker_obj%gs%mop
+minv%A=>tMaker_equil_obj%device%mop
 minv%its=-2
 CALL create_diag_pre(minv%pre) ! Setup Preconditioner
-CALL tMaker_obj%gs%dels_full%apply(u,v)
+CALL tMaker_equil_obj%device%dels_full%apply(u,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%get_local(vals_tmp)
+vals_tmp=vals_tmp/mu0
 !
 CALL u%delete()
 CALL v%delete()
@@ -657,32 +786,33 @@ END SUBROUTINE tokamaker_get_dels_curr
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_jtor(tMaker_ptr,jtor,error_str) BIND(C,NAME="tokamaker_get_jtor")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), VALUE, INTENT(in) :: jtor !< Needs docs
+SUBROUTINE tokamaker_get_jtor(tMaker_equil_ptr,jtor,error_str) BIND(C,NAME="tokamaker_get_jtor")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+TYPE(c_ptr), VALUE, INTENT(in) :: jtor !< \f$ J_{\phi} \f$ at node points
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 CLASS(oft_vector), POINTER :: u,v
 CLASS(oft_solver), POINTER :: minv
 TYPE(gs_j_interp) :: j_interp
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(.NOT.ASSOCIATED(tMaker_obj%gs%dels_full))CALL build_dels(tMaker_obj%gs%dels_full,tMaker_obj%gs,"none")
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+IF(.NOT.ASSOCIATED(tMaker_equil_obj%device%dels_full))CALL build_dels(tMaker_equil_obj%device%dels_full,tMaker_equil_obj%device,"none")
 !
-CALL tMaker_obj%gs%psi%new(u)
-CALL tMaker_obj%gs%psi%new(v)
+CALL tMaker_equil_obj%psi%new(u)
+CALL tMaker_equil_obj%psi%new(v)
 !
 NULLIFY(minv)
 CALL create_cg_solver(minv)
-minv%A=>tMaker_obj%gs%mop
+minv%A=>tMaker_equil_obj%device%mop
 minv%its=-2
 CALL create_diag_pre(minv%pre) ! Setup Preconditioner
-CALL j_interp%setup(tMaker_obj%gs)
-CALL oft_blag_project(tMaker_obj%gs%fe_rep,j_interp,v)
+CALL j_interp%setup(tMaker_equil_obj)
+CALL oft_blag_project(tMaker_equil_obj%device%fe_rep,j_interp,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL c_f_pointer(jtor, vals_tmp, [tMaker_obj%gs%psi%n])
+CALL c_f_pointer(jtor, vals_tmp, [tMaker_equil_obj%psi%n])
 CALL u%get_local(vals_tmp)
+vals_tmp=vals_tmp/mu0
 !
 CALL j_interp%delete()
 CALL u%delete()
@@ -692,13 +822,13 @@ CALL minv%delete()
 DEALLOCATE(u,v,minv)
 END SUBROUTINE tokamaker_get_jtor
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Compute area integral of a scalar field over a specified region
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_area_int(tMaker_ptr,vec_vals,reg_ind,result,error_str) BIND(C,NAME="tokamaker_area_int")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), VALUE, INTENT(in) :: vec_vals !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: reg_ind !< Needs docs
-REAL(c_double), INTENT(out) :: result !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: vec_vals !< Value of integrand at node points
+INTEGER(c_int), VALUE, INTENT(in) :: reg_ind !< Index of region to integrate over (`reg_ind < 0` -> full domain)
+REAL(c_double), INTENT(out) :: result !< \f$ \int f dA \f$
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,m
 real(8) :: goptmp(3,3),v,pt(3),valtmp(1)
@@ -708,51 +838,51 @@ TYPE(oft_lag_brinterp) :: field
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 NULLIFY(field%u)
-CALL tMaker_obj%gs%psi%new(field%u)
-CALL c_f_pointer(vec_vals, vals_tmp, [tMaker_obj%gs%psi%n])
+CALL tMaker_obj%device%fe_rep%vec_create(field%u)
+CALL c_f_pointer(vec_vals, vals_tmp, [field%u%n])
 CALL field%u%restore_local(vals_tmp)
-CALL field%setup(tMaker_obj%gs%fe_rep)
+CALL field%setup(tMaker_obj%device%fe_rep)
 IF(reg_ind>0)THEN
-  result = bscal_surf_int(tMaker_obj%gs%mesh,field,tMaker_obj%gs%fe_rep%quad%order,reg_ind)
+  result = bscal_surf_int(tMaker_obj%device%mesh,field,tMaker_obj%device%fe_rep%quad%order,reg_ind)
 ELSE
-  result = bscal_surf_int(tMaker_obj%gs%mesh,field,tMaker_obj%gs%fe_rep%quad%order)
+  result = bscal_surf_int(tMaker_obj%device%mesh,field,tMaker_obj%device%fe_rep%quad%order)
 END IF
 CALL field%u%delete
 DEALLOCATE(field%u)
 CALL field%delete
 END SUBROUTINE tokamaker_area_int
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Compute the area integral of a flux function over the plasma region
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_flux_int(tMaker_ptr,psi_vals,field_vals,nvals,result,error_str) BIND(C,NAME="tokamaker_flux_int")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: field_vals !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: nvals
-REAL(c_double), INTENT(out) :: result !< Needs docs
+SUBROUTINE tokamaker_flux_int(tMaker_equil_ptr,psi_vals,field_vals,nvals,result,error_str) BIND(C,NAME="tokamaker_flux_int")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< \f$ \psi \f$ values for flux function definition
+TYPE(c_ptr), VALUE, INTENT(in) :: field_vals !< Value of the flux function at matching `psi_vals`
+INTEGER(c_int), VALUE, INTENT(in) :: nvals !< Number of values in `psi_vals` and `field_vals`
+REAL(c_double), INTENT(out) :: result !< Integral result
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: i,m
 REAL(r8) :: area,psitmp(1),sgop(3,3)
 REAL(8), POINTER, DIMENSION(:) :: psi_tmp,field_tmp
 TYPE(gs_prof_interp) :: prof_interp_obj
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 DEBUG_STACK_PUSH
 !---Setup
 CALL c_f_pointer(psi_vals, psi_tmp, [nvals])
 CALL c_f_pointer(field_vals, field_tmp, [nvals])
 result=0.d0
 prof_interp_obj%mode=4
-CALL prof_interp_obj%setup(tMaker_obj%gs)
+CALL prof_interp_obj%setup(tMaker_equil_obj)
 !$omp parallel do private(m,psitmp,sgop,area) reduction(+:result)
-do i=1,tMaker_obj%gs%mesh%nc
-  IF(tMaker_obj%gs%mesh%reg(i)/=1)CYCLE
+do i=1,tMaker_equil_obj%device%mesh%nc
+  IF(tMaker_equil_obj%device%mesh%reg(i)/=1)CYCLE
   !---Loop over quadrature points
-  do m=1,tMaker_obj%gs%fe_rep%quad%np
-    call tMaker_obj%gs%mesh%jacobian(i,tMaker_obj%gs%fe_rep%quad%pts(:,m),sgop,area)
-    call prof_interp_obj%interp(i,tMaker_obj%gs%fe_rep%quad%pts(:,m),sgop,psitmp)
+  do m=1,tMaker_equil_obj%device%fe_rep%quad%np
+    call tMaker_equil_obj%device%mesh%jacobian(i,tMaker_equil_obj%device%fe_rep%quad%pts(:,m),sgop,area)
+    call prof_interp_obj%interp(i,tMaker_equil_obj%device%fe_rep%quad%pts(:,m),sgop,psitmp)
     psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
-    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*tMaker_obj%gs%fe_rep%quad%wts(m)
+    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*tMaker_equil_obj%device%fe_rep%quad%wts(m)
   end do
 end do
 !---Global reduction and cleanup
@@ -761,106 +891,104 @@ CALL prof_interp_obj%delete()
 DEBUG_STACK_POP
 END SUBROUTINE tokamaker_flux_int
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Get coil currents
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_coil_currents(tMaker_ptr,currents,reg_currents,error_str) BIND(C,NAME="tokamaker_get_coil_currents")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), VALUE, INTENT(in) :: currents !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: reg_currents !< Needs docs
+SUBROUTINE tokamaker_get_coil_currents(tMaker_equil_ptr,currents,reg_currents,error_str) BIND(C,NAME="tokamaker_get_coil_currents")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+TYPE(c_ptr), VALUE, INTENT(in) :: currents !< Coil currents by coil index
+TYPE(c_ptr), VALUE, INTENT(in) :: reg_currents !< Currents in each region due to coils
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,j
 REAL(8) :: curr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp,coil_regs
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL c_f_pointer(reg_currents, coil_regs, [tMaker_obj%gs%mesh%nreg])
-CALL c_f_pointer(currents, vals_tmp, [tMaker_obj%gs%ncoils])
-vals_tmp=(tMaker_obj%gs%coil_currs + tMaker_obj%gs%coil_vcont*tMaker_obj%gs%vcontrol_val)/mu0
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL c_f_pointer(reg_currents, coil_regs, [tMaker_equil_obj%device%mesh%nreg])
+CALL c_f_pointer(currents, vals_tmp, [tMaker_equil_obj%device%ncoils])
+vals_tmp=(tMaker_equil_obj%coil_currs + tMaker_equil_obj%device%coil_vcont*tMaker_equil_obj%vcontrol_val)/mu0
 coil_regs = 0.d0
-DO j=1,tMaker_obj%gs%ncoil_regs
-  DO i=1,tMaker_obj%gs%ncoils
-    coil_regs(tMaker_obj%gs%coil_regions(j)%id) = coil_regs(tMaker_obj%gs%coil_regions(j)%id) &
-      + vals_tmp(i)*tMaker_obj%gs%coil_nturns(tMaker_obj%gs%coil_regions(j)%id,i)
+DO j=1,tMaker_equil_obj%device%ncoil_regs
+  DO i=1,tMaker_equil_obj%device%ncoils
+    coil_regs(tMaker_equil_obj%device%coil_regions(j)%id) = coil_regs(tMaker_equil_obj%device%coil_regions(j)%id) &
+      + vals_tmp(i)*tMaker_equil_obj%device%coil_nturns(tMaker_equil_obj%device%coil_regions(j)%id,i)
   END DO
-  coil_regs(tMaker_obj%gs%coil_regions(j)%id) = coil_regs(tMaker_obj%gs%coil_regions(j)%id)*tMaker_obj%gs%coil_regions(j)%area
+  coil_regs(tMaker_equil_obj%device%coil_regions(j)%id) = coil_regs(tMaker_equil_obj%device%coil_regions(j)%id)*tMaker_equil_obj%device%coil_regions(j)%area
 END DO
 END SUBROUTINE tokamaker_get_coil_currents
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Get mutual inductance matrix for coils and plasma
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_coil_Lmat(tMaker_ptr,Lmat,error_str) BIND(C,NAME="tokamaker_get_coil_Lmat")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), VALUE, INTENT(in) :: Lmat !< Needs docs
+SUBROUTINE tokamaker_get_plasma_Lmat(tMaker_equil_ptr,Lmat,error_str) BIND(C,NAME="tokamaker_get_plasma_Lmat")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+TYPE(c_ptr), VALUE, INTENT(in) :: Lmat !< Inductance matrix
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 INTEGER(4) :: i
 REAL(8) :: tmp1,tmp2,tmp3,itor
 CLASS(oft_vector), POINTER :: rhs,vec1,vec2
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-!---Update plasma row/column
-IF(tMaker_obj%gs%has_plasma)THEN
-  DO i=1,tMaker_obj%gs%ncoils
-    CALL gs_plasma_mutual(tMaker_obj%gs,tMaker_obj%gs%psi_coil(i)%f,tMaker_obj%gs%Lcoils(i,tMaker_obj%gs%ncoils+1),itor)
-    tMaker_obj%gs%Lcoils(tMaker_obj%gs%ncoils+1,i)=tMaker_obj%gs%Lcoils(i,tMaker_obj%gs%ncoils+1)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+!---Compute plasma row/column
+CALL c_f_pointer(Lmat, vals_tmp, [tMaker_equil_obj%device%ncoils+1])
+IF(tMaker_equil_obj%has_plasma)THEN
+  DO i=1,tMaker_equil_obj%device%ncoils
+    CALL gs_plasma_mutual(tMaker_equil_obj,tMaker_equil_obj%device%psi_coil(i)%f,vals_tmp(i),itor)
   END DO
   !
-  CALL tMaker_obj%gs%psi%new(rhs)
-  CALL tMaker_obj%gs%psi%new(vec1)
-  CALL tMaker_obj%gs%psi%new(vec2)
-  CALL gs_source(tMaker_obj%gs,tMaker_obj%gs%psi,rhs,vec1,vec2,tmp1,tmp2,tmp3)
+  CALL tMaker_equil_obj%psi%new(rhs)
+  CALL tMaker_equil_obj%psi%new(vec1)
+  CALL tMaker_equil_obj%psi%new(vec2)
+  CALL gs_source(tMaker_equil_obj,tMaker_equil_obj%psi,rhs,vec1,vec2,tmp1,tmp2,tmp3)
   CALL vec1%set(0.d0)
-  CALL tMaker_obj%gs%lu_solver%apply(vec1,rhs)
-  CALL gs_plasma_mutual(tMaker_obj%gs,vec1,tMaker_obj%gs%Lcoils(tMaker_obj%gs%ncoils+1,tMaker_obj%gs%ncoils+1),itor)
-  tMaker_obj%gs%Lcoils(tMaker_obj%gs%ncoils+1,tMaker_obj%gs%ncoils+1)=tMaker_obj%gs%Lcoils(tMaker_obj%gs%ncoils+1,tMaker_obj%gs%ncoils+1)/itor
+  CALL tMaker_equil_obj%device%lu_solver%apply(vec1,rhs)
+  CALL gs_plasma_mutual(tMaker_equil_obj,vec1,vals_tmp(tMaker_equil_obj%device%ncoils+1),itor)
+  vals_tmp(tMaker_equil_obj%device%ncoils+1)=vals_tmp(tMaker_equil_obj%device%ncoils+1)/itor
   CALL rhs%delete()
   CALL vec1%delete()
   CALL vec2%delete()
   DEALLOCATE(rhs,vec1,vec2)
 ELSE
-  tMaker_obj%gs%Lcoils(tMaker_obj%gs%ncoils+1,:)=0.d0
-  tMaker_obj%gs%Lcoils(:,tMaker_obj%gs%ncoils+1)=0.d0
+  CALL copy_string('No plasma present',error_str)
 END IF
-!---Copy out inductance matrix
-CALL c_f_pointer(Lmat, vals_tmp, [tMaker_obj%gs%ncoils+1,tMaker_obj%gs%ncoils+1])
-vals_tmp=tMaker_obj%gs%Lcoils
-END SUBROUTINE tokamaker_get_coil_Lmat
+END SUBROUTINE tokamaker_get_plasma_Lmat
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Get references to internal variables for direct access from Python
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_refs(tMaker_ptr,o_point,lim_point,x_points,diverted,plasma_bounds,alam,pnorm,error_str) BIND(C,NAME="tokamaker_get_refs")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(c_ptr), INTENT(out) :: o_point !< Needs docs
-TYPE(c_ptr), INTENT(out) :: lim_point !< Needs docs
-TYPE(c_ptr), INTENT(out) :: x_points !< Needs docs
-TYPE(c_ptr), INTENT(out) :: diverted !< Needs docs
-TYPE(c_ptr), INTENT(out) :: plasma_bounds !< Needs docs
-TYPE(c_ptr), INTENT(out) :: alam !< Needs docs
-TYPE(c_ptr), INTENT(out) :: pnorm !< Needs docs
+SUBROUTINE tokamaker_get_refs(tMaker_equil_ptr,o_point,lim_point,x_points,diverted,plasma_bounds,ffp_scale,p_scale,has_plasma,error_str) BIND(C,NAME="tokamaker_get_refs")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+TYPE(c_ptr), INTENT(out) :: o_point !< Pointer to magnetic axis array
+TYPE(c_ptr), INTENT(out) :: lim_point !< Pointer to limiting point array
+TYPE(c_ptr), INTENT(out) :: x_points !< Pointer to X-point array
+TYPE(c_ptr), INTENT(out) :: diverted !< Pointer to diverted flag
+TYPE(c_ptr), INTENT(out) :: plasma_bounds !< Pointer to plasma axis/LCFS values
+TYPE(c_ptr), INTENT(out) :: ffp_scale !< Pointer to F*F' scale factor
+TYPE(c_ptr), INTENT(out) :: p_scale !< Pointer to P' scale factor
+TYPE(c_ptr), INTENT(out) :: has_plasma !< Pointer to plasma/vacuum flag
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-o_point=c_loc(tMaker_obj%gs%o_point)
-lim_point=c_loc(tMaker_obj%gs%lim_point)
-x_points=c_loc(tMaker_obj%gs%x_points)
-diverted=c_loc(tMaker_obj%gs%diverted)
-plasma_bounds=c_loc(tMaker_obj%gs%plasma_bounds)
-alam=c_loc(tMaker_obj%gs%alam)
-pnorm=c_loc(tMaker_obj%gs%pnorm)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+o_point=c_loc(tMaker_equil_obj%o_point)
+lim_point=c_loc(tMaker_equil_obj%lim_point)
+x_points=c_loc(tMaker_equil_obj%x_points)
+diverted=c_loc(tMaker_equil_obj%diverted)
+plasma_bounds=c_loc(tMaker_equil_obj%plasma_bounds)
+ffp_scale=c_loc(tMaker_equil_obj%ffp_scale)
+p_scale=c_loc(tMaker_equil_obj%p_scale)
+has_plasma=c_loc(tMaker_equil_obj%has_plasma)
 END SUBROUTINE tokamaker_get_refs
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_trace_surf(tMaker_ptr,psi_surf,points,npoints,error_str) BIND(C,NAME="tokamaker_trace_surf")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_trace_surf(tMaker_equil_ptr,psi_surf,points,npoints,error_str) BIND(C,NAME="tokamaker_trace_surf")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 REAL(c_double), VALUE, INTENT(in) :: psi_surf !< Needs docs
 TYPE(c_ptr), INTENT(out) ::  points !< Needs docs
 INTEGER(c_int), INTENT(out) :: npoints !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:,:) :: pts_tmp
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL gs_trace_surf(tMaker_obj%gs,psi_surf,pts_tmp,npoints)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL gs_trace_surf(tMaker_equil_obj,psi_surf,pts_tmp,npoints)
 IF(npoints>0)THEN
   points = c_loc(pts_tmp)
 ELSE
@@ -868,125 +996,125 @@ ELSE
 END IF
 END SUBROUTINE tokamaker_trace_surf
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Compute q profile and related quantities
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_q(tMaker_ptr,npsi,psi_q,qvals,ravgs,dl,rbounds,zbounds,error_str) BIND(C,NAME="tokamaker_get_q")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
-REAL(c_double), INTENT(in) :: psi_q(npsi) !< Needs docs
-REAL(c_double), INTENT(out) :: qvals(npsi) !< Needs docs
-REAL(c_double), INTENT(out) :: ravgs(npsi,3) !< Needs docs
-REAL(c_double), INTENT(inout) :: dl !< Needs docs
-REAL(c_double), INTENT(out) :: rbounds(2,2) !< Needs docs
-REAL(c_double), INTENT(out) :: zbounds(2,2) !< Needs docs
+SUBROUTINE tokamaker_get_q(tMaker_equil_ptr,npsi,psi_q,qvals,ravgs,dl,rbounds,zbounds,error_str) BIND(C,NAME="tokamaker_get_q")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Number of evaluation points
+REAL(c_double), INTENT(in) :: psi_q(npsi) !< \f$ \psi \f$ values to compute q and other fields
+REAL(c_double), INTENT(out) :: qvals(npsi) !< q values
+REAL(c_double), INTENT(out) :: ravgs(npsi,3) !< <R>, <1/R>, and dV/dPsi
+REAL(c_double), INTENT(inout) :: dl !< Length of LCFS flux surface (psi_q(1))
+REAL(c_double), INTENT(out) :: rbounds(2,2) !< Radial bounds of LCFS
+REAL(c_double), INTENT(out) :: zbounds(2,2) !< Vertical bounds of LCFS
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 IF(dl>0.d0)THEN
-  CALL gs_get_qprof(tMaker_obj%gs,npsi,psi_q,qvals,dl,rbounds,zbounds,ravgs)
+  CALL gs_get_qprof(tMaker_equil_obj,npsi,psi_q,qvals,dl,rbounds,zbounds,ravgs)
 ELSE
-  CALL gs_get_qprof(tMaker_obj%gs,npsi,psi_q,qvals,ravgs=ravgs)
+  CALL gs_get_qprof(tMaker_equil_obj,npsi,psi_q,qvals,ravgs=ravgs)
   dl = -1.d0
   rbounds = 0.d0
   zbounds = 0.d0
 END IF
 END SUBROUTINE tokamaker_get_q
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Evaluate Sauter trapped particle fraction and related quantities
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_sauter_fc(tMaker_ptr,npsi,psi_saut,fc,r_avgs,modb_avgs,error_str) BIND(C,NAME="tokamaker_sauter_fc")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
-REAL(c_double), INTENT(in) :: psi_saut(npsi) !< Needs docs
-REAL(c_double), INTENT(out) :: fc(npsi) !< Needs docs
-REAL(c_double), INTENT(out) :: r_avgs(npsi,3) !< Needs docs
-REAL(c_double), INTENT(out) :: modb_avgs(npsi,2) !< Needs docs
+SUBROUTINE tokamaker_sauter_fc(tMaker_equil_ptr,npsi,psi_saut,fc,r_avgs,modb_avgs,error_str) BIND(C,NAME="tokamaker_sauter_fc")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Number of evaluation points
+REAL(c_double), INTENT(in) :: psi_saut(npsi) !< \f$ \psi \f$ values to compute trapped particle fraction and other fields
+REAL(c_double), INTENT(out) :: fc(npsi) !< Trapped particle fraction
+REAL(c_double), INTENT(out) :: r_avgs(npsi,3) !< Flux surface averaged radial coordinates \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
+REAL(c_double), INTENT(out) :: modb_avgs(npsi,2) !< Flux surface averaged field strength \f$<|B|>\f$, \f$<|B|^2>\f$
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL sauter_fc(tMaker_obj%gs,npsi,psi_saut,fc,r_avgs,modb_avgs)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL sauter_fc(tMaker_equil_obj,npsi,psi_saut,fc,r_avgs,modb_avgs)
 END SUBROUTINE tokamaker_sauter_fc
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Compute various global quantities for Grad-Shafranov equilibrium
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_globals(tMaker_ptr,Itor,centroid,vol,pvol,dflux,tflux,bp_vol,error_str) BIND(C,NAME="tokamaker_get_globals")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-REAL(c_double), INTENT(out) :: Itor !< Needs docs
-REAL(c_double), INTENT(out) :: centroid(2) !< Needs docs
-REAL(c_double), INTENT(out) :: vol !< Needs docs
-REAL(c_double), INTENT(out) :: pvol !< Needs docs
-REAL(c_double), INTENT(out) :: dflux !< Needs docs
-REAL(c_double), INTENT(out) :: tflux !< Needs docs
-REAL(c_double), INTENT(out) :: bp_vol !< Needs docs
+SUBROUTINE tokamaker_get_globals(tMaker_equil_ptr,Itor,centroid,vol,pvol,dflux,tflux,bp_vol,error_str) BIND(C,NAME="tokamaker_get_globals")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+REAL(c_double), INTENT(out) :: Itor !< Toroidal current
+REAL(c_double), INTENT(out) :: centroid(2) !< Plasma current centroid (R,Z)
+REAL(c_double), INTENT(out) :: vol !< Plasma volume
+REAL(c_double), INTENT(out) :: pvol !< \f$ \int P dV \f$
+REAL(c_double), INTENT(out) :: dflux !< Diamagnetic flux
+REAL(c_double), INTENT(out) :: tflux !< Toroidal flux contained within plasma
+REAL(c_double), INTENT(out) :: bp_vol !< \f$ \int B_p^2 dV \f$
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL gs_comp_globals(tMaker_obj%gs,Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL gs_comp_globals(tMaker_equil_obj,Itor,centroid,vol,pvol,dflux,tflux,bp_vol)
 Itor=Itor/mu0
 vol=vol*2.d0*pi
 pvol=pvol*2.d0*pi/mu0
 END SUBROUTINE tokamaker_get_globals
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Compute loop voltage required to maintain Grad-Shafranov equilibrium
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_gs_calc_vloop(tMaker_ptr,vloop,error_str) BIND(C,NAME="tokamaker_gs_calc_vloop")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-REAL(c_double), INTENT(out) :: vloop
+SUBROUTINE tokamaker_gs_calc_vloop(tMaker_equil_ptr,vloop,error_str) BIND(C,NAME="tokamaker_gs_calc_vloop")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+REAL(c_double), INTENT(out) :: vloop !< Loop voltage
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(.NOT.ASSOCIATED(tMaker_obj%gs%eta))THEN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+IF(.NOT.ASSOCIATED(tMaker_equil_obj%eta))THEN
   vloop=-1.d0
   RETURN
 END IF
-CALL gs_calc_vloop(tMaker_obj%gs,vloop)
+CALL gs_calc_vloop(tMaker_equil_obj,vloop)
 END SUBROUTINE tokamaker_gs_calc_vloop
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Retrieve F and P profiles and their derivatives
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_profs(tMaker_ptr,npsi,psi_in,f,fp,p,pp,error_str) BIND(C,NAME="tokamaker_get_profs")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
-REAL(c_double), INTENT(in) :: psi_in(npsi) !< Needs docs
-REAL(c_double), INTENT(out) :: f(npsi) !< Needs docs
-REAL(c_double), INTENT(out) :: fp(npsi) !< Needs docs
-REAL(c_double), INTENT(out) :: p(npsi) !< Needs docs
-REAL(c_double), INTENT(out) :: pp(npsi) !< Needs docs
+SUBROUTINE tokamaker_get_profs(tMaker_equil_ptr,npsi,psi_in,f,fp,p,pp,error_str) BIND(C,NAME="tokamaker_get_profs")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Evaluation points
+REAL(c_double), INTENT(in) :: psi_in(npsi) !< \f$ \psi \f$ values to evaluate profiles
+REAL(c_double), INTENT(out) :: f(npsi) !< \f$ F( \psi ) \f$
+REAL(c_double), INTENT(out) :: fp(npsi) !< \f$ F'( \psi ) \f$
+REAL(c_double), INTENT(out) :: p(npsi) !< \f$ P( \psi ) \f$
+REAL(c_double), INTENT(out) :: pp(npsi) !< \f$ P'( \psi ) \f$
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i
 REAL(8) :: x1,x2,r
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 x1=0.d0; x2=1.d0
-IF(tMaker_obj%gs%plasma_bounds(1)>-1.d98)THEN
-  x1=tMaker_obj%gs%plasma_bounds(1); x2=tMaker_obj%gs%plasma_bounds(2)
+IF(tMaker_equil_obj%plasma_bounds(1)>-1.d98)THEN
+  x1=tMaker_equil_obj%plasma_bounds(1); x2=tMaker_equil_obj%plasma_bounds(2)
 END IF
 DO i=1,npsi
   r=psi_in(i)*(x2-x1) + x1
-  IF(tMaker_obj%gs%mode==0)THEN
-    fp(i)=tMaker_obj%gs%alam*tMaker_obj%gs%I%fp(r)
-    f(i)=tMaker_obj%gs%psiscale*tMaker_obj%gs%alam*tMaker_obj%gs%I%f(r) + tMaker_obj%gs%I%f_offset
+  IF(tMaker_equil_obj%mode==0)THEN
+    fp(i)=tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%fp(r)
+    f(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%f(r) + tMaker_equil_obj%I%f_offset
   ELSE
-    f(i)=SQRT(tMaker_obj%gs%psiscale*tMaker_obj%gs%alam*tMaker_obj%gs%I%f(r) + tMaker_obj%gs%I%f_offset**2)
-    fp(i)=tMaker_obj%gs%alam*tMaker_obj%gs%I%fp(r)/(2.d0*f(i))
+    f(i)=SQRT(tMaker_equil_obj%psiscale*tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%f(r) + tMaker_equil_obj%I%f_offset**2)
+    fp(i)=tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%fp(r)/(2.d0*f(i))
   END IF
-  pp(i)=tMaker_obj%gs%psiscale*tMaker_obj%gs%pnorm*tMaker_obj%gs%P%fp(r)
-  p(i)=tMaker_obj%gs%psiscale*tMaker_obj%gs%psiscale*tMaker_obj%gs%pnorm*tMaker_obj%gs%P%f(r)
+  pp(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%p_scale*tMaker_equil_obj%P%fp(r)
+  p(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%psiscale*tMaker_equil_obj%p_scale*tMaker_equil_obj%P%f(r)
 END DO
 END SUBROUTINE tokamaker_get_profs
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Compute external flux needed to reproduce fixed boundary equilibrium at domain boundary
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_vfixed(tMaker_ptr,npts,pts,fluxes,error_str) BIND(C,NAME="tokamaker_get_vfixed")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-INTEGER(c_int), INTENT(out) :: npts !< Needs docs
-TYPE(c_ptr), INTENT(out) :: pts !< Needs docs
-TYPE(c_ptr), INTENT(out) :: fluxes !< Needs docs
+SUBROUTINE tokamaker_get_vfixed(tMaker_equil_ptr,npts,pts,fluxes,error_str) BIND(C,NAME="tokamaker_get_vfixed")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+INTEGER(c_int), INTENT(out) :: npts !< Number of node points on domain boundary
+TYPE(c_ptr), INTENT(out) :: pts !< Location of node points on domain boundary
+TYPE(c_ptr), INTENT(out) :: fluxes !< Required flux at node points
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER :: pts_tmp(:,:),fluxes_tmp(:)
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL gs_fixed_vflux(tMaker_obj%gs,pts_tmp,fluxes_tmp)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL gs_fixed_vflux(tMaker_equil_obj,pts_tmp,fluxes_tmp)
 pts=C_LOC(pts_tmp)
 fluxes=C_LOC(fluxes_tmp)
 npts=SIZE(fluxes_tmp,DIM=1)
@@ -994,8 +1122,8 @@ END SUBROUTINE tokamaker_get_vfixed
 !---------------------------------------------------------------------------------
 !> Create an interpolation object for tokamaker fields
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_field_eval(tMaker_ptr,imode,int_obj,error_str) BIND(C,NAME="tokamaker_get_field_eval")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_get_field_eval(tMaker_equil_ptr,imode,int_obj,error_str) BIND(C,NAME="tokamaker_get_field_eval")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Field type
 TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to interpolation object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
@@ -1004,29 +1132,30 @@ TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 CLASS(oft_vector), POINTER :: tmp1,tmp2,tmp3
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 IF(imode==1)THEN
   ALLOCATE(b_interp_obj)
-  b_interp_obj%gs=>tMaker_obj%gs
-  CALL b_interp_obj%setup(tMaker_obj%gs)
+  b_interp_obj%equil=>tMaker_equil_obj
+  CALL b_interp_obj%setup(tMaker_equil_obj)
   int_obj=C_LOC(b_interp_obj)
 ELSEIF(imode>=2.AND.imode<=4)THEN
   ALLOCATE(prof_interp_obj)
-  prof_interp_obj%gs=>tMaker_obj%gs
+  prof_interp_obj%equil=>tMaker_equil_obj
   prof_interp_obj%mode=imode-1
-  CALL prof_interp_obj%setup(tMaker_obj%gs)
+  CALL prof_interp_obj%setup(tMaker_equil_obj)
   int_obj=C_LOC(prof_interp_obj)
 ELSEIF(imode==5)THEN
   ALLOCATE(psi_grad_obj)
-  psi_grad_obj%u=>tMaker_obj%gs%psi
-  CALL psi_grad_obj%setup(tMaker_obj%gs%fe_rep)
+  psi_grad_obj%u=>tMaker_equil_obj%psi
+  CALL psi_grad_obj%setup(tMaker_equil_obj%device%fe_rep)
   int_obj=C_LOC(psi_grad_obj)
 ELSEIF(imode>=6.AND.imode<=8)THEN
   ALLOCATE(psi_grad_obj)
-  CALL tMaker_obj%gs%psi%new(tmp1)
-  CALL tMaker_obj%gs%psi%new(tmp2)
-  CALL tMaker_obj%gs%psi%new(tmp3)
-  CALL gs_project_b(tMaker_obj%gs,tmp1,tmp2,tmp3)
+  CALL tMaker_equil_obj%psi%new(tmp1)
+  CALL tMaker_equil_obj%psi%new(tmp2)
+  CALL tMaker_equil_obj%psi%new(tmp3)
+  CALL gs_project_b(tMaker_equil_obj,tmp1,tmp2,tmp3)
   IF(imode==6)THEN
     psi_grad_obj%u=>tmp1
     NULLIFY(tmp1)
@@ -1049,7 +1178,7 @@ ELSEIF(imode>=6.AND.imode<=8)THEN
     CALL tmp3%delete()
     DEALLOCATE(tmp3)
   END IF
-  CALL psi_grad_obj%setup(tMaker_obj%gs%fe_rep)
+  CALL psi_grad_obj%setup(tMaker_equil_obj%device%fe_rep)
   int_obj=C_LOC(psi_grad_obj)
 END IF
 END SUBROUTINE tokamaker_get_field_eval
@@ -1057,8 +1186,8 @@ END SUBROUTINE tokamaker_get_field_eval
 !> Evaluate a TokaMaker field with an interpolation object created by
 !! \ref tokamaker_f::tokamaker_get_field_eval
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_apply_field_eval(tMaker_ptr,int_obj,int_type,pt,fbary_tol,cell,dim,field) BIND(C,NAME="tokamaker_apply_field_eval")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+SUBROUTINE tokamaker_apply_field_eval(tMaker_equil_ptr,int_obj,int_type,pt,fbary_tol,cell,dim,field) BIND(C,NAME="tokamaker_apply_field_eval")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Pointer to interpolation object
 INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Field type (negative to destroy)
 REAL(c_double), INTENT(in) :: pt(3) !< Location for evaluation [R,Z,0]
@@ -1071,7 +1200,8 @@ TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
 REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj))CALL oft_abort("TokaMaker object not associated","tokamaker_apply_field_eval",__FILE__)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj))CALL oft_abort("TokaMaker equilibrium object not associated","tokamaker_apply_field_eval",__FILE__)
 IF(int_type<0)THEN
   IF(ABS(int_type)==1)THEN
     CALL c_f_pointer(int_obj, b_interp_obj)
@@ -1089,14 +1219,14 @@ IF(int_type<0)THEN
   END IF
   RETURN
 END IF
-call bmesh_findcell(tMaker_obj%gs%mesh,cell,pt,f)
+call bmesh_findcell(tMaker_equil_obj%device%mesh,cell,pt,f)
 IF(cell==0)RETURN
 fmin=MINVAL(f); fmax=MAXVAL(f)
 IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
   cell=-ABS(cell)
   RETURN
 END IF
-CALL tMaker_obj%gs%mesh%jacobian(cell,f,goptmp,vol)
+CALL tMaker_equil_obj%device%mesh%jacobian(cell,f,goptmp,vol)
 IF(int_type==1)THEN
   CALL c_f_pointer(int_obj, b_interp_obj)
   CALL b_interp_obj%interp(cell,f,goptmp,field)
@@ -1111,66 +1241,82 @@ END SUBROUTINE tokamaker_apply_field_eval
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_psi(tMaker_ptr,psi_vals,update_bounds,error_str) BIND(C,NAME="tokamaker_set_psi")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+SUBROUTINE tokamaker_set_psi(tMaker_equil_ptr,psi_vals,update_bounds,error_str) BIND(C,NAME="tokamaker_set_psi")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
 LOGICAL(c_bool), VALUE, INTENT(in) :: update_bounds !< Update bounds by determining new limiting points
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs%psi%n])
-CALL tMaker_obj%gs%psi%restore_local(vals_tmp)
-IF(update_bounds)CALL gs_update_bounds(tMaker_obj%gs)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_equil_obj%psi%n])
+CALL tMaker_equil_obj%psi%restore_local(vals_tmp)
+IF(update_bounds)CALL gs_update_bounds(tMaker_equil_obj)
 END SUBROUTINE tokamaker_set_psi
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Set flux/coil current at previous time and coil voltage for quasi-static solve
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_psi_dt(tMaker_ptr,psi_vals,dt,error_str) BIND(C,NAME="tokamaker_set_psi_dt")
+SUBROUTINE tokamaker_set_psi_dt(tMaker_ptr,psi_vals,icoils,vcoils,dt,error_str) BIND(C,NAME="tokamaker_set_psi_dt")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: dt !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< \f$ \psi \f$ values at reference time (t - dt)
+TYPE(c_ptr), VALUE, INTENT(in) :: icoils !< Coil currents at reference time (t - dt)
+TYPE(c_ptr), VALUE, INTENT(in) :: vcoils !< Coil voltages over time step
+REAL(c_double), VALUE, INTENT(in) :: dt !< Time step size
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+INTEGER(i4) :: i
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp,ictmp,vtmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-tMaker_obj%gs%dt=dt
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+tMaker_obj%device%dt=dt
 IF(dt>0.d0)THEN
-  IF(.NOT.ASSOCIATED(tMaker_obj%gs%psi_dt))CALL tMaker_obj%gs%psi%new(tMaker_obj%gs%psi_dt)
-  CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs%psi%n])
-  CALL tMaker_obj%gs%psi_dt%restore_local(vals_tmp)
+  IF(.NOT.ASSOCIATED(tMaker_obj%device%psi_dt))CALL tMaker_obj%gs_equil%psi%new(tMaker_obj%device%psi_dt)
+  CALL c_f_pointer(psi_vals, vals_tmp, [tMaker_obj%gs_equil%psi%n])
+  CALL tMaker_obj%device%psi_dt%restore_local(vals_tmp)
+  CALL c_f_pointer(icoils, ictmp, [tMaker_obj%device%ncoils+1])
+  CALL c_f_pointer(vcoils, vtmp, [tMaker_obj%device%ncoils+1])
+  DO i=1,tMaker_obj%device%ncoils
+    IF(ABS(vtmp(i))>1.d-10.AND.tMaker_obj%device%Rcoils(i)<=0.d0)THEN
+      CALL copy_string("Non-zero voltage given in fixed-current coil.",error_str)
+      RETURN
+    END IF
+  END DO
+  tMaker_obj%device%coils_dt=ictmp*mu0
+  tMaker_obj%device%coils_volt=vtmp*mu0
 ELSE
-  IF(ASSOCIATED(tMaker_obj%gs%psi_dt))THEN
-    CALL tMaker_obj%gs%psi_dt%delete()
-    DEALLOCATE(tMaker_obj%gs%psi_dt)
+  IF(ASSOCIATED(tMaker_obj%device%psi_dt))THEN
+    CALL tMaker_obj%device%psi_dt%delete()
+    DEALLOCATE(tMaker_obj%device%psi_dt)
+    tMaker_obj%device%coils_dt=0.d0
+    tMaker_obj%device%coils_volt=0.d0
   END IF
 END IF
 END SUBROUTINE tokamaker_set_psi_dt
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Update TokaMaker settings
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_settings(tMaker_ptr,settings,error_str) BIND(C,NAME="tokamaker_set_settings")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-TYPE(tokamaker_settings_type), INTENT(in) :: settings !< Needs docs
+TYPE(tokamaker_settings_type), INTENT(in) :: settings !< Settings object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 oft_env%pm=settings%pm
-tMaker_obj%gs%has_plasma=settings%has_plasma
-tMaker_obj%gs%free=settings%free_boundary
-tMaker_obj%gs%lim_zmax=settings%lim_zmax
-tMaker_obj%gs%rmin=settings%rmin
-tMaker_obj%gs%mode=settings%mode
-tMaker_obj%gs%urf=settings%urf
-tMaker_obj%gs%maxits=settings%maxits
-tMaker_obj%gs%nl_tol=settings%nl_tol
-IF((.NOT.tMaker_obj%gs%dipole_mode).AND.settings%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution")
-tMaker_obj%gs%dipole_mode=settings%dipole_mode
-IF((.NOT.tMaker_obj%gs%mirror_mode).AND.settings%mirror_mode)CALL oft_warn("TokaMaker's mirror functionality is experimental, use with caution")
-tMaker_obj%gs%mirror_mode=settings%mirror_mode
+tMaker_obj%device%free=settings%free_boundary
+tMaker_obj%device%lim_zmax=settings%lim_zmax
+tMaker_obj%device%rmin=settings%rmin
+tMaker_obj%device%urf=settings%urf
+tMaker_obj%device%maxits=settings%maxits
+tMaker_obj%device%nl_tol=settings%nl_tol
+tMaker_obj%mode=settings%mode
+IF(ASSOCIATED(tMaker_obj%gs_equil))tMaker_obj%gs_equil%mode=tMaker_obj%mode
+IF((.NOT.tMaker_obj%device%dipole_mode).AND.settings%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution and report bugs")
+tMaker_obj%device%dipole_mode=settings%dipole_mode
+IF((.NOT.tMaker_obj%device%mirror_mode).AND.settings%mirror_mode)CALL oft_warn("TokaMaker's mirror functionality is experimental, use with caution and report bugs")
+tMaker_obj%device%mirror_mode=settings%mirror_mode
 CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
-CALL copy_string_rev(limfile_c,tMaker_obj%gs%limiter_file)
+CALL copy_string_rev(limfile_c,tMaker_obj%device%limiter_file)
 END SUBROUTINE tokamaker_set_settings
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -1181,20 +1327,21 @@ REAL(c_double), VALUE, INTENT(in) :: dipole_a !< New value for dipole_a
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(.NOT.tMaker_obj%gs%dipole_mode)THEN
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+IF(.NOT.tMaker_obj%device%dipole_mode)THEN
   CALL copy_string('Dipole pressure profile requires dipole_mode',error_str)
   RETURN
 END IF
 IF(dipole_a<=0.d0)THEN
-  IF(ASSOCIATED(tMaker_obj%gs%P_ani))THEN
-    CALL tMaker_obj%gs%P_ani%delete()
-    DEALLOCATE(tMaker_obj%gs%P_ani)
+  IF(ASSOCIATED(tMaker_obj%gs_equil%P_ani))THEN
+    CALL tMaker_obj%gs_equil%P_ani%delete()
+    DEALLOCATE(tMaker_obj%gs_equil%P_ani)
   END IF
 ELSE
-  IF(.NOT.ASSOCIATED(tMaker_obj%gs%P_ani))ALLOCATE(dipole_ani_press::tMaker_obj%gs%P_ani)
-  SELECT TYPE(this=>tMaker_obj%gs%P_ani)
+  IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%P_ani))ALLOCATE(dipole_ani_press::tMaker_obj%gs_equil%P_ani)
+  SELECT TYPE(this=>tMaker_obj%gs_equil%P_ani)
     CLASS IS(dipole_ani_press)
-      IF(.NOT.ASSOCIATED(this%psi_eval))CALL this%setup(tMaker_obj%gs)
+      IF(.NOT.ASSOCIATED(this%psi_eval))CALL this%setup(tMaker_obj%gs_equil)
       this%a_exp=dipole_a
     CLASS DEFAULT
       CALL copy_string('Invalid anisotropic pressure type',error_str)
@@ -1214,20 +1361,21 @@ REAL(c_double), VALUE, INTENT(in) :: mirror_zthroat !< New value for dipole_a
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(.NOT.tMaker_obj%gs%mirror_mode)THEN
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+IF(.NOT.tMaker_obj%device%mirror_mode)THEN
   CALL copy_string('Sloshing ions pressure profile requires mirror_mode',error_str)
   RETURN
 END IF
 IF(mirror_n<=0.d0)THEN
-  IF(ASSOCIATED(tMaker_obj%gs%P_ani))THEN
-    CALL tMaker_obj%gs%P_ani%delete()
-    DEALLOCATE(tMaker_obj%gs%P_ani)
+  IF(ASSOCIATED(tMaker_obj%gs_equil%P_ani))THEN
+    CALL tMaker_obj%gs_equil%P_ani%delete()
+    DEALLOCATE(tMaker_obj%gs_equil%P_ani)
   END IF
 ELSE
-  IF(.NOT.ASSOCIATED(tMaker_obj%gs%P_ani))ALLOCATE(mirror_ani_slosh::tMaker_obj%gs%P_ani)
-  SELECT TYPE(this=>tMaker_obj%gs%P_ani)
+  IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%P_ani))ALLOCATE(mirror_ani_slosh::tMaker_obj%gs_equil%P_ani)
+  SELECT TYPE(this=>tMaker_obj%gs_equil%P_ani)
     CLASS IS(mirror_ani_slosh)
-      IF(.NOT.ASSOCIATED(this%psi_geval))CALL this%setup(tMaker_obj%gs)
+      IF(.NOT.ASSOCIATED(this%psi_geval))CALL this%setup(tMaker_obj%gs_equil)
       this%n_exp=mirror_n
       this%bturn=mirror_bturn
       this%zthroat=mirror_zthroat
@@ -1254,12 +1402,13 @@ REAL(c_double), VALUE, INTENT(in) :: V0_target !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-tMaker_obj%gs%R0_target=R0_target
-tMaker_obj%gs%V0_target=V0_target
-tMaker_obj%gs%pax_target=pax_target*mu0
-tMaker_obj%gs%estore_target=estore_target*mu0
-tMaker_obj%gs%itor_target=ip_target*mu0
-tMaker_obj%gs%ip_ratio_target=ip_ratio_target
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+tMaker_obj%gs_equil%R0_target=R0_target
+tMaker_obj%gs_equil%V0_target=V0_target
+tMaker_obj%gs_equil%pax_target=pax_target*mu0
+tMaker_obj%gs_equil%estore_target=estore_target*mu0
+tMaker_obj%gs_equil%itor_target=ip_target*mu0
+tMaker_obj%gs_equil%ip_ratio_target=ip_ratio_target
 END SUBROUTINE tokamaker_set_targets
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -1274,16 +1423,17 @@ REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(ASSOCIATED(tMaker_obj%gs%isoflux_targets))DEALLOCATE(tMaker_obj%gs%isoflux_targets)
-tMaker_obj%gs%isoflux_ntargets=ntargets
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+IF(ASSOCIATED(tMaker_obj%gs_equil%isoflux_targets))DEALLOCATE(tMaker_obj%gs_equil%isoflux_targets)
+tMaker_obj%gs_equil%isoflux_ntargets=ntargets
 IF(ntargets>0)THEN
-  ALLOCATE(tMaker_obj%gs%isoflux_targets(5,tMaker_obj%gs%isoflux_ntargets))
-  tMaker_obj%gs%isoflux_targets(1:2,:)=targets
-  tMaker_obj%gs%isoflux_targets(3,:)=weights
-  tMaker_obj%gs%isoflux_targets(4:5,:)=ref_points
-  tMaker_obj%gs%isoflux_grad_wt_lim=1.d0/grad_wt_lim
+  ALLOCATE(tMaker_obj%gs_equil%isoflux_targets(5,tMaker_obj%gs_equil%isoflux_ntargets))
+  tMaker_obj%gs_equil%isoflux_targets(1:2,:)=targets
+  tMaker_obj%gs_equil%isoflux_targets(3,:)=weights
+  tMaker_obj%gs_equil%isoflux_targets(4:5,:)=ref_points
+  tMaker_obj%device%isoflux_grad_wt_lim=1.d0/grad_wt_lim
 ELSE
-  tMaker_obj%gs%isoflux_grad_wt_lim=-1.d0
+  tMaker_obj%device%isoflux_grad_wt_lim=-1.d0
 END IF
 END SUBROUTINE tokamaker_set_isoflux
 !---------------------------------------------------------------------------------
@@ -1299,13 +1449,14 @@ REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(ASSOCIATED(tMaker_obj%gs%flux_targets))DEALLOCATE(tMaker_obj%gs%flux_targets)
-tMaker_obj%gs%flux_ntargets=ntargets
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+IF(ASSOCIATED(tMaker_obj%gs_equil%flux_targets))DEALLOCATE(tMaker_obj%gs_equil%flux_targets)
+tMaker_obj%gs_equil%flux_ntargets=ntargets
 IF(ntargets>0)THEN
-  ALLOCATE(tMaker_obj%gs%flux_targets(4,tMaker_obj%gs%flux_ntargets))
-  tMaker_obj%gs%flux_targets(1:2,:)=locations
-  tMaker_obj%gs%flux_targets(3,:)=targets
-  tMaker_obj%gs%flux_targets(4,:)=weights
+  ALLOCATE(tMaker_obj%gs_equil%flux_targets(4,tMaker_obj%gs_equil%flux_ntargets))
+  tMaker_obj%gs_equil%flux_targets(1:2,:)=locations
+  tMaker_obj%gs_equil%flux_targets(3,:)=targets
+  tMaker_obj%gs_equil%flux_targets(4,:)=weights
   ! tMaker_obj%gs%isoflux_grad_wt_lim=1.d0/grad_wt_lim
 ! ELSE
   ! tMaker_obj%gs%isoflux_grad_wt_lim=-1.d0
@@ -1322,12 +1473,13 @@ REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(ASSOCIATED(tMaker_obj%gs%saddle_targets))DEALLOCATE(tMaker_obj%gs%saddle_targets)
-tMaker_obj%gs%saddle_ntargets=ntargets
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+IF(ASSOCIATED(tMaker_obj%gs_equil%saddle_targets))DEALLOCATE(tMaker_obj%gs_equil%saddle_targets)
+tMaker_obj%gs_equil%saddle_ntargets=ntargets
 IF(ntargets>0)THEN
-  ALLOCATE(tMaker_obj%gs%saddle_targets(3,tMaker_obj%gs%saddle_ntargets))
-  tMaker_obj%gs%saddle_targets(1:2,:)=targets
-  tMaker_obj%gs%saddle_targets(3,:)=weights
+  ALLOCATE(tMaker_obj%gs_equil%saddle_targets(3,tMaker_obj%gs_equil%saddle_ntargets))
+  tMaker_obj%gs_equil%saddle_targets(1:2,:)=targets
+  tMaker_obj%gs_equil%saddle_targets(3,:)=weights
 END IF
 END SUBROUTINE tokamaker_set_saddles
 !---------------------------------------------------------------------------------
@@ -1342,9 +1494,10 @@ REAL(8) :: curr
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL c_f_pointer(currents, vals_tmp, [tMaker_obj%gs%ncoils])
-tMaker_obj%gs%coil_currs = vals_tmp*mu0
-tMaker_obj%gs%vcontrol_val = 0.d0
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+CALL c_f_pointer(currents, vals_tmp, [tMaker_obj%device%ncoils])
+tMaker_obj%gs_equil%coil_currs = vals_tmp*mu0
+tMaker_obj%gs_equil%vcontrol_val = 0.d0
 END SUBROUTINE tokamaker_set_coil_currents
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -1360,18 +1513,19 @@ REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
 INTEGER(4) :: i
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(ASSOCIATED(tMaker_obj%gs%coil_reg_mat))DEALLOCATE(tMaker_obj%gs%coil_reg_mat,tMaker_obj%gs%coil_reg_targets)
-tMaker_obj%gs%nregularize=nregularize
-ALLOCATE(tMaker_obj%gs%coil_reg_mat(tMaker_obj%gs%nregularize,tMaker_obj%gs%ncoils+1))
-ALLOCATE(tMaker_obj%gs%coil_reg_targets(tMaker_obj%gs%nregularize))
-CALL c_f_pointer(coil_reg_mat, vals_tmp, [tMaker_obj%gs%nregularize,tMaker_obj%gs%ncoils+1])
-tMaker_obj%gs%coil_reg_mat=vals_tmp
-CALL c_f_pointer(coil_reg_targets, vals_tmp, [tMaker_obj%gs%nregularize,1])
-tMaker_obj%gs%coil_reg_targets=vals_tmp(:,1)*mu0
-CALL c_f_pointer(coil_reg_weights, vals_tmp, [tMaker_obj%gs%nregularize,1])
-DO i=1,tMaker_obj%gs%nregularize
-  tMaker_obj%gs%coil_reg_targets(i)=tMaker_obj%gs%coil_reg_targets(i)*vals_tmp(i,1)
-  tMaker_obj%gs%coil_reg_mat(i,:)=tMaker_obj%gs%coil_reg_mat(i,:)*vals_tmp(i,1)
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+IF(ASSOCIATED(tMaker_obj%gs_equil%coil_reg_mat))DEALLOCATE(tMaker_obj%gs_equil%coil_reg_mat,tMaker_obj%gs_equil%coil_reg_targets)
+tMaker_obj%gs_equil%nregularize=nregularize
+ALLOCATE(tMaker_obj%gs_equil%coil_reg_mat(tMaker_obj%gs_equil%nregularize,tMaker_obj%device%ncoils+1))
+ALLOCATE(tMaker_obj%gs_equil%coil_reg_targets(tMaker_obj%gs_equil%nregularize))
+CALL c_f_pointer(coil_reg_mat, vals_tmp, [tMaker_obj%gs_equil%nregularize,tMaker_obj%device%ncoils+1])
+tMaker_obj%gs_equil%coil_reg_mat=vals_tmp
+CALL c_f_pointer(coil_reg_targets, vals_tmp, [tMaker_obj%gs_equil%nregularize,1])
+tMaker_obj%gs_equil%coil_reg_targets=vals_tmp(:,1)*mu0
+CALL c_f_pointer(coil_reg_weights, vals_tmp, [tMaker_obj%gs_equil%nregularize,1])
+DO i=1,tMaker_obj%gs_equil%nregularize
+  tMaker_obj%gs_equil%coil_reg_targets(i)=tMaker_obj%gs_equil%coil_reg_targets(i)*vals_tmp(i,1)
+  tMaker_obj%gs_equil%coil_reg_mat(i,:)=tMaker_obj%gs_equil%coil_reg_mat(i,:)*vals_tmp(i,1)
 END DO
 END SUBROUTINE tokamaker_set_coil_regmat
 !---------------------------------------------------------------------------------
@@ -1385,15 +1539,15 @@ REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
 INTEGER(4) :: i
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL c_f_pointer(coil_bounds, vals_tmp, [2,tMaker_obj%gs%ncoils+1])
-IF(.NOT.ASSOCIATED(tMaker_obj%gs%coil_bounds))THEN
-  ALLOCATE(tMaker_obj%gs%coil_bounds(2,tMaker_obj%gs%ncoils+1))
-  tMaker_obj%gs%coil_bounds(1,:)=-1.d98; tMaker_obj%gs%coil_bounds(2,:)=1.d98
+CALL c_f_pointer(coil_bounds, vals_tmp, [2,tMaker_obj%device%ncoils+1])
+IF(.NOT.ASSOCIATED(tMaker_obj%device%coil_bounds))THEN
+  ALLOCATE(tMaker_obj%device%coil_bounds(2,tMaker_obj%device%ncoils+1))
+  tMaker_obj%device%coil_bounds(1,:)=-1.d98; tMaker_obj%device%coil_bounds(2,:)=1.d98
 END IF
-DO i=1,tMaker_obj%gs%ncoils
-  tMaker_obj%gs%coil_bounds([2,1],i)=-vals_tmp(:,i)*mu0
+DO i=1,tMaker_obj%device%ncoils
+  tMaker_obj%device%coil_bounds([2,1],i)=-vals_tmp(:,i)*mu0
 END DO
-tMaker_obj%gs%coil_bounds([2,1],tMaker_obj%gs%ncoils+1)=-vals_tmp(:,tMaker_obj%gs%ncoils+1)*mu0
+tMaker_obj%device%coil_bounds([2,1],tMaker_obj%device%ncoils+1)=-vals_tmp(:,tMaker_obj%device%ncoils+1)*mu0
 END SUBROUTINE tokamaker_set_coil_bounds
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -1406,14 +1560,28 @@ REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 INTEGER(4) :: i
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL c_f_pointer(coil_gains, vals_tmp, [tMaker_obj%gs%ncoils])
-tMaker_obj%gs%coil_vcont=vals_tmp
+CALL c_f_pointer(coil_gains, vals_tmp, [tMaker_obj%device%ncoils])
+tMaker_obj%device%coil_vcont=vals_tmp
 END SUBROUTINE tokamaker_set_coil_vsc
+!---------------------------------------------------------------------------------
+!> Set Vcoils by defining non-zero resistance of coils
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_set_vcoil(tMaker_ptr,rcoils,error_str) BIND(C,NAME="tokamaker_set_vcoil")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+TYPE(c_ptr), VALUE, INTENT(in) :: rcoils !< Resistance of coils (Ohm)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(8), POINTER, DIMENSION(:) :: rtmp
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(ALL(tMaker_obj%device%Rcoils<0.d0))CALL oft_warn("TokaMaker's Vcoil functionality is experimental, use with caution and report bugs")
+CALL c_f_pointer(rcoils, rtmp, [tMaker_obj%device%ncoils])
+tMaker_obj%device%Rcoils(1:tMaker_obj%device%ncoils)=rtmp
+END SUBROUTINE tokamaker_set_vcoil
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_save_eqdsk(tMaker_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,cocos,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+SUBROUTINE tokamaker_save_eqdsk(tMaker_equil_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,cocos,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(in) :: run_info(40) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: nr !< Needs docs
@@ -1430,16 +1598,16 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 CHARACTER(LEN=40) :: run_info_f
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp,lim_file
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(run_info,run_info_f)
 CALL copy_string_rev(filename,filename_tmp)
 CALL copy_string_rev(lim_filename,lim_file)
 IF(rcentr>0.d0)THEN
-  CALL gs_save_eqdsk(tMaker_obj%gs,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
+  CALL gs_save_eqdsk(tMaker_equil_obj,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
     rcentr_in=rcentr,trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,cocos=cocos,error_str=error_flag)
 ELSE
-  CALL gs_save_eqdsk(tMaker_obj%gs,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
+  CALL gs_save_eqdsk(tMaker_equil_obj,filename_tmp,nr,nz,rbounds,zbounds,run_info_f,lim_file,psi_pad, &
     trunc_eq=LOGICAL(trunc_eq),lcfs_press=lcfs_press,cocos=cocos,error_str=error_flag)
 END IF
 CALL copy_string(TRIM(error_flag),error_str)
@@ -1447,8 +1615,8 @@ END SUBROUTINE tokamaker_save_eqdsk
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_save_ifile(tMaker_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str) BIND(C,NAME="tokamaker_save_ifile")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+SUBROUTINE tokamaker_save_ifile(tMaker_equil_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str) BIND(C,NAME="tokamaker_save_ifile")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
 INTEGER(c_int), VALUE, INTENT(in) :: ntheta !< Needs docs
@@ -1459,61 +1627,102 @@ LOGICAL(c_bool), VALUE, INTENT(in) :: single_prec !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(filename,filename_tmp)
-CALL gs_save_ifile(tMaker_obj%gs,filename_tmp,npsi,ntheta,psi_pad,lcfs_press=lcfs_press, &
+CALL gs_save_ifile(tMaker_equil_obj,filename_tmp,npsi,ntheta,psi_pad,lcfs_press=lcfs_press, &
   pack_lcfs=LOGICAL(pack_lcfs),single_prec=LOGICAL(single_prec),error_str=error_flag)
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_ifile
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_save_mug(tMaker_ptr,filename,error_str) BIND(C,NAME="tokamaker_save_mug")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
+SUBROUTINE tokamaker_save_mug(tMaker_equil_ptr,filename,error_str) BIND(C,NAME="tokamaker_save_mug")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(filename,filename_tmp)
-CALL gs_save_mug(tMaker_obj%gs,filename_tmp)
+CALL gs_save_mug(tMaker_equil_obj,filename_tmp)
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_mug
 !---------------------------------------------------------------------------
 !> Overwrites default coil flux contribution to non-uniform current distribution
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,error_str) BIND(C,NAME="tokamaker_set_coil_current_dist")
+SUBROUTINE tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,dist_pointer,normalize,error_str) BIND(C,NAME="tokamaker_set_coil_current_dist")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 INTEGER(c_int), VALUE, INTENT(in) :: iCoil
 TYPE(c_ptr), VALUE, INTENT(in) :: curr_dist
+TYPE(c_ptr), INTENT(out) :: dist_pointer
+LOGICAL(c_bool), VALUE, INTENT(in) :: normalize
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+INTEGER(4) :: i,ic
+REAL(r8) :: norm
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
-INTEGER(4) :: i
 class(oft_vector), pointer :: tmp_vec
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-CALL c_f_pointer(curr_dist, vals_tmp, [tMaker_obj%gs%psi%n])
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+ic = ABS(iCoil) ! Reset coil index, use allocation of dist_coil(ic) to track whether distribution is set
+IF(iCoil<0)THEN
+  IF(ASSOCIATED(tMaker_obj%device%dist_coil(ic)%v))THEN
+    DEALLOCATE(tMaker_obj%device%dist_coil(ic)%v)
+    dist_pointer=c_null_ptr
+  ELSE
+    RETURN
+  END IF
+ELSE
+  IF(.NOT.ASSOCIATED(tMaker_obj%device%dist_coil(ic)%v))ALLOCATE(tMaker_obj%device%dist_coil(ic)%v(tMaker_obj%gs_equil%psi%n))
+  CALL c_f_pointer(curr_dist, vals_tmp, [tMaker_obj%gs_equil%psi%n])
+  tMaker_obj%device%dist_coil(ic)%v = vals_tmp
+  dist_pointer=C_LOC(tMaker_obj%device%dist_coil(ic)%v)
+END IF
 ! Update coil flux to overwrite old uniform distribution
 NULLIFY(tmp_vec)
-call tMaker_obj%gs%psi%new(tmp_vec)
+call tMaker_obj%gs_equil%psi%new(tmp_vec)
 
-CALL gs_coil_source_distributed(tMaker_obj%gs,iCoil,tmp_vec,vals_tmp)
+IF(ASSOCIATED(tMaker_obj%device%dist_coil(ic)%v))THEN
+  CALL gs_coil_source_distributed(tMaker_obj%device,ic,tmp_vec,vals_tmp)
+  IF(normalize)THEN
+    norm = tmp_vec%sum()
+    IF(ABS(norm)<1.d-12)THEN
+      CALL copy_string('Normalization value close to zero',error_str)
+      CALL tmp_vec%delete()
+      DEALLOCATE(tmp_vec,tMaker_obj%device%dist_coil(ic)%v)
+      dist_pointer=c_null_ptr
+      RETURN
+    END IF
+    CALL tmp_vec%scale(1.d0/norm)
+    tMaker_obj%device%dist_coil(ic)%v = tMaker_obj%device%dist_coil(ic)%v / norm
+  END IF
+ELSE
+  CALL gs_coil_source(tMaker_obj%device,ic,tmp_vec)
+END IF
 
-CALL tMaker_obj%gs%zerob_bc%apply(tmp_vec)
-CALL gs_vacuum_solve(tMaker_obj%gs,tMaker_obj%gs%psi_coil(iCoil)%f,tmp_vec)
+CALL tMaker_obj%device%zerob_bc%apply(tmp_vec)
+CALL gs_vacuum_solve(tMaker_obj%device,tMaker_obj%device%psi_coil(ic)%f,tmp_vec)
 ! Update coil mutual inductances
-DO i=1,tMaker_obj%gs%ncoils
-  CALL gs_coil_mutual(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%Lcoils(i,iCoil))
-  tMaker_obj%gs%Lcoils(iCoil,i)=tMaker_obj%gs%Lcoils(i,iCoil)
-  IF(i==iCoil)THEN
-    CALL gs_coil_mutual_distributed(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,vals_tmp,tMaker_obj%gs%Lcoils(i,iCoil))
+DO i=1,tMaker_obj%device%ncoils
+  IF(ASSOCIATED(tMaker_obj%device%dist_coil(i)%v))THEN
+    CALL gs_coil_mutual_distributed(tMaker_obj%device,i,tMaker_obj%device%psi_coil(ic)%f,tMaker_obj%device%dist_coil(i)%v,tMaker_obj%device%Lcoils(i,ic))
   ELSE
-    CALL gs_coil_mutual(tMaker_obj%gs,i,tMaker_obj%gs%psi_coil(iCoil)%f,tMaker_obj%gs%Lcoils(i,iCoil))
-    tMaker_obj%gs%Lcoils(iCoil,i)=tMaker_obj%gs%Lcoils(i,iCoil)
+    CALL gs_coil_mutual(tMaker_obj%device,i,tMaker_obj%device%psi_coil(ic)%f,tMaker_obj%device%Lcoils(i,ic))
+  END IF
+  IF(i/=ic)THEN ! Integral can be slightly different in each direction so compute both ways and average
+    IF(ASSOCIATED(tMaker_obj%device%dist_coil(ic)%v))THEN
+      CALL gs_coil_mutual_distributed(tMaker_obj%device,ic,tMaker_obj%device%psi_coil(i)%f,tMaker_obj%device%dist_coil(ic)%v,tMaker_obj%device%Lcoils(ic,i))
+    ELSE
+      CALL gs_coil_mutual(tMaker_obj%device,ic,tMaker_obj%device%psi_coil(i)%f,tMaker_obj%device%Lcoils(ic,i))
+    END IF
+    tMaker_obj%device%Lcoils(i,ic)=(tMaker_obj%device%Lcoils(ic,i)+tMaker_obj%device%Lcoils(i,ic))/2.d0
+    tMaker_obj%device%Lcoils(ic,i)=tMaker_obj%device%Lcoils(i,ic)
   END IF
 END DO
+CALL tmp_vec%delete()
+DEALLOCATE(tmp_vec)
 END SUBROUTINE tokamaker_set_coil_current_dist
 END MODULE tokamaker_f
 

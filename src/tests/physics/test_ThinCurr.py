@@ -2,6 +2,8 @@ from __future__ import print_function
 import os
 import sys
 import time
+import glob
+import shutil
 import multiprocessing
 import pytest
 import numpy as np
@@ -10,10 +12,14 @@ test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from oft_testing import run_OFT
-from OpenFUSIONToolkit.io import histfile
+from OpenFUSIONToolkit.io import histfile, write_oft_xml
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
+from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil, ThinCurr_Vcoil, ThinCurr_XML
+
+
 
 mu0 = np.pi*4.E-7
+_oft_env_singleton = None
 
 # Basic template for input file
 oft_in_template = """
@@ -74,15 +80,6 @@ oft_in_template = """
 /
 """
 
-oft_in_xml_template_template = """
-<oft>
-  <thincurr>
-    <eta>{1}</eta>
-    {0}
-  </thincurr>
-</oft>
-"""
-
 
 def mp_run(target,args,timeout=180):
     if os.environ.get('OFT_DEBUG_TEST', 0):
@@ -122,7 +119,7 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
@@ -171,7 +168,7 @@ def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25,nsplit=1)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
@@ -200,7 +197,7 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,mp_q):
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
             r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25,nsplit=1)
             tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
-            tw_model.set_eta_values(np.r_[1.E4*mu0])
+            tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.setup_io()
@@ -302,6 +299,7 @@ def run_td_for_Mirnov(meshfile,direct_flag,curr_waveform,lin_tol,mp_q):
     oftpy_dump_cov()
     mp_q.put(result)
 
+
 def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,use_aca=False,
                     icoils=None,vcoils=None,floops=None,curr_waveform=None,volt_waveform=None,
                     python=False,lin_tol=1.E-9,jumper_start=0,run_reduced=False):
@@ -341,31 +339,31 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
             neigs,L_svd_tol,B_svd_tol,reduce_model_flag,lin_tol,jumper_start
         ))
     # Create XML input file for coils
-    coil_string = ""
+    xml = ThinCurr_XML()
+    xml.set_eta([eta*mu0])
     if icoils is not None:
-        coil_string += '<icoils><coil_set type="2">\n'
+        test_Icoil = ThinCurr_Icoil(name="Test")
         for icoil in icoils:
-            coil_string += '<coil npts="{0}">'.format(nPhi)
             R = icoil[0]; Z = icoil[1]
+            coil_pts = []
             for i in range(nPhi):
                 phi = i*phi_fac
-                coil_string += '{0:.12E} {1:.12E} {2:.12E}\n'.format(R*np.cos(phi), R*np.sin(phi), Z)
-            coil_string += "</coil>\n"
-        coil_string += "</coil_set></icoils>\n"
+                coil_pts.append([R*np.cos(phi), R*np.sin(phi), Z])
+            test_Icoil.add_subcoil(pts=coil_pts)
+        xml.add_Icoil(test_Icoil)
     if vcoils is not None:
-        coil_string += '<vcoils>\n'
         with h5py.File('test_vcoils.h5','w') as h5_file:
-            for j, pcoil in enumerate(vcoils):
-                coil_string += '<coil_set type="2" res_per_len="1.256637E-5" radius="1.E-2"><coil path="test_vcoils.h5:vcoil_{0:04d}"/></coil_set>\n'.format(j+1)
-                R = pcoil[0]; Z = pcoil[1]
+            for j, vcoil in enumerate(vcoils):
+                test_Vcoil = ThinCurr_Vcoil(name="Test_{0:d}".format(j+1), resistivity_per_length=1.256637E-5, radius=1.E-2)
+                R = vcoil[0]; Z = vcoil[1]
                 vcoil_pts = []
                 for i in range(nPhi):
                     phi = i*phi_fac
                     vcoil_pts.append([R*np.cos(phi), R*np.sin(phi), Z])
                 h5_file.create_dataset('vcoil_{0:04d}'.format(j+1), data=np.array(vcoil_pts), dtype='f8')
-        coil_string += "</vcoils>\n"
-    with open('oft_in.xml','w+') as fid:
-        fid.write(oft_in_xml_template_template.format(coil_string, eta*mu0))
+                test_Vcoil.add_subcoil(hdf5_path='test_vcoils.h5:vcoil_{0:04d}'.format(j+1))
+                xml.add_Vcoil(test_Vcoil)
+    write_oft_xml([xml], "oft_in.xml")
     # Create flux loop definition file for sensors
     if floops is not None:
         with open('floops.loc', 'w+') as fid:
@@ -413,6 +411,7 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
     elif run_type == 6:
         return mp_run(run_td_for_Mirnov,(meshfile,direct_flag,curr_waveform,lin_tol))
 
+
 def validate_eigs(eigs, tols=(1.E-5, 1.E-9)):
     """
     Helper function to validate eigenvalues against test case.
@@ -439,6 +438,7 @@ def validate_eigs(eigs, tols=(1.E-5, 1.E-9)):
             print("  Value =    {0}".format(eigs_run_real[i]))
             retval = False
     return retval
+
 
 def validate_fr(fr_real, fr_imag, tols=(1.E-4, 1.E-4),python=False):
     """
@@ -478,6 +478,7 @@ def validate_fr(fr_real, fr_imag, tols=(1.E-4, 1.E-4),python=False):
             retval = False
     return retval
 
+
 def validate_td(sigs_final, jumpers_final=None, tols=(1.E-8, 1.E-3)):
     """
     Helper function to validate time-dependent results against test case.
@@ -511,7 +512,9 @@ def validate_td(sigs_final, jumpers_final=None, tols=(1.E-8, 1.E-3)):
         except BaseException as e:
             print(e)
             return False
-        if not len(td_sigs_final) == len(jumpers_final):
+        for (i, val) in enumerate(td_sigs_final[1:]):
+            print(val)
+        if len(td_sigs_final) != len(jumpers_final):
             print("FAILED: Number of jumpers does not match")
             return False
         retval = True
@@ -521,12 +524,15 @@ def validate_td(sigs_final, jumpers_final=None, tols=(1.E-8, 1.E-3)):
             print("  Actual =   {0}".format(td_sigs_final[0]))
             retval = False
         for (i, val) in enumerate(jumpers_final[1:]):
+            if val is None:
+                continue
             if abs((val-td_sigs_final[i+1])/val) > tols[1]:
                 print("FAILED: Signal {0} incorrect!".format(i+1))
                 print("  Expected = {0}".format(val))
                 print("  Actual =   {0}".format(td_sigs_final[i+1]))
                 retval = False
     return retval
+
 
 def validate_model_red(eigs, tols=(1.E-5, 1.E-9)):
     """
@@ -571,6 +577,34 @@ def validate_mode(drive_exp,result_exp):
     return result_val
 
 
+def _write_thincurr_xml(xml_filename, eta_values=None, thickness_values=None, eta_vol_values=None):
+    from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_XML
+
+    thincurr_xml = ThinCurr_XML()
+    if eta_values is not None:
+        thincurr_xml.set_eta(eta_values)
+    if eta_vol_values is not None:
+        thincurr_xml.set_eta_vol(eta_vol_values)
+    if thickness_values is not None:
+        thincurr_xml.set_thickness(thickness_values)
+    write_oft_xml([thincurr_xml], xml_filename)
+
+
+def _build_dummy_model(xml_filename):
+    from OpenFUSIONToolkit import OFT_env
+    from OpenFUSIONToolkit.ThinCurr import ThinCurr
+    from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+
+    global _oft_env_singleton
+    if _oft_env_singleton is None:
+        _oft_env_singleton = OFT_env(nthreads=-1)
+
+    r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
+    model = ThinCurr(_oft_env_singleton)
+    model.setup_model(r=r_dummy, lc=lc_dummy, xml_filename=xml_filename)
+    return model
+
+
 def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_Hamada,sigs_mnmodes_2D_PEST,sigs_mnmodes_2D_Hamada,t,delta_phi,tol=1.E-6):
     try:
         interface.load_histfile()
@@ -609,6 +643,318 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
         os.remove(file)  
     return result_val
 
+
+@pytest.mark.coverage
+def test_thickness_api_roundtrip_and_validation():
+    assert mp_run(run_thickness_api_roundtrip_and_validation, ())
+
+
+def run_thickness_api_roundtrip_and_validation(mp_q):
+    result = True
+    try:
+        import warnings
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_thickness_api.xml'
+        eta_values = np.r_[1.E4*mu0]
+        thickness_values = np.r_[2.5E-3]
+        eta_vol_values = eta_values * thickness_values
+        _write_thincurr_xml(xml_filename, eta_values=eta_values, thickness_values=thickness_values)
+
+        tw_model = _build_dummy_model(xml_filename)
+
+        tw_model.set_eta_values(eta_surf=eta_values, thickness=thickness_values)
+        
+        # Verify get_eta_values() without flag shows deprecation warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            eta_returned = tw_model.get_eta_values()
+            if len(w) == 0 or not issubclass(w[-1].category, DeprecationWarning):
+                print("WARNING: Expected DeprecationWarning for get_eta_values() not found")
+        
+        if not np.allclose(eta_returned, eta_values):
+            result = False
+        eta_surf_out, eta_vol_out = tw_model.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_out, eta_values):
+            result = False
+        if not np.allclose(eta_vol_out, eta_vol_values):
+            result = False
+        if not np.allclose(tw_model.get_thickness(), thickness_values):
+            result = False
+
+        tw_model_pair = _build_dummy_model(xml_filename)
+        tw_model_pair.set_eta_values(eta_surf=eta_values, eta_vol=eta_vol_values)
+        eta_surf_pair, eta_vol_pair = tw_model_pair.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_pair, eta_values):
+            result = False
+        if not np.allclose(eta_vol_pair, eta_vol_values):
+            result = False
+        if not np.allclose(tw_model_pair.get_thickness(), thickness_values):
+            result = False
+
+        tw_model_alias = _build_dummy_model(xml_filename)
+        tw_model_alias.set_eta_values(eta_values=eta_values, thickness=thickness_values)
+        eta_surf_alias, eta_vol_alias = tw_model_alias.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_alias, eta_values):
+            result = False
+        if not np.allclose(eta_vol_alias, eta_vol_values):
+            result = False
+
+        tw_model_eta_only = _build_dummy_model(xml_filename)
+        tw_model_eta_only.set_eta_values(eta_surf=eta_values)
+        eta_surf_only, eta_vol_only = tw_model_eta_only.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_only, eta_values):
+            result = False
+        if eta_vol_only is not None:
+            result = False
+        if not np.allclose(tw_model_eta_only.get_thickness(), -1.0):
+            result = False
+
+        eta_surf_override = eta_values * 1.5
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            tw_model_three = _build_dummy_model(xml_filename)
+            tw_model_three.set_eta_values(eta_surf=eta_surf_override, eta_vol=eta_vol_values, thickness=thickness_values)
+        if len(w) == 0 or not any(issubclass(item.category, UserWarning) for item in w):
+            result = False
+        eta_surf_three, eta_vol_three = tw_model_three.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_three, eta_values):
+            result = False
+        if not np.allclose(eta_vol_three, eta_vol_values):
+            result = False
+        if not np.allclose(tw_model_three.get_thickness(), thickness_values):
+            result = False
+
+        # Test updating thickness with a new set_eta_values call
+        new_thickness = np.r_[3.5E-3]
+        tw_model.set_eta_values(eta_surf=eta_values, thickness=new_thickness)
+        if not np.allclose(tw_model.get_thickness(), new_thickness):
+            result = False
+
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values()
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(eta_values=np.r_[-1.0])
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(thickness=thickness_values)
+        with pytest.raises(ValueError):
+            tw_model.set_eta_values(eta_surf=eta_values, thickness=np.r_[-1.0])
+        # eta_vol requires pre-existing thickness when thickness is not passed.
+        # Use a fresh model with no thickness XML to exercise this error path.
+        xml_no_thickness = 'oft_in_no_thickness.xml'
+        _write_thincurr_xml(xml_no_thickness, eta_values=eta_values)
+        tw_model_no_thickness = _build_dummy_model(xml_no_thickness)
+        with pytest.raises(Exception):
+            tw_model_no_thickness.set_eta_values(eta_vol=np.r_[1.0e-6])
+        with pytest.raises(IndexError):
+            tw_model.set_eta_values(eta_surf=eta_values, thickness=np.r_[1.E-3, 2.E-3])
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_plot_td_compute_jvol_outputs_fields():
+    assert mp_run(run_plot_td_compute_jvol_outputs_fields, ())
+
+
+def run_plot_td_compute_jvol_outputs_fields(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_compute_jvol.xml'
+        io_basepath = 'td_jvol_regression'
+        eta_values = np.r_[1.E4*mu0]
+        thickness_values = np.r_[2.0E-3]
+        _write_thincurr_xml(xml_filename, eta_values=eta_values, thickness_values=thickness_values)
+
+        if os.path.isdir(io_basepath):
+            shutil.rmtree(io_basepath)
+
+        tw_model = _build_dummy_model(xml_filename)
+        tw_model.setup_io(basepath=io_basepath)
+        tw_model.compute_Mcoil()
+        tw_model.compute_Lmat()
+        tw_model.compute_Rmat()
+        tw_model.run_td(2.E-5, 5, direct=True, plot_freq=1)
+        tw_model.plot_td(5, plot_freq=1)
+        tw_model.build_XDMF()
+
+        xmf_files = sorted(glob.glob(os.path.join(io_basepath, '*.xmf')))
+        if len(xmf_files) == 0:
+            result = False
+        xmf_text = ''
+        for xmf_file in xmf_files:
+            with open(xmf_file, 'r') as fid:
+                xmf_text += fid.read()
+        if 'J_vol' not in xmf_text or 'thickness' not in xmf_text:
+            result = False
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_eta_only_matches_surface_resistivity_with_thickness():
+    assert mp_run(run_eta_only_matches_surface_resistivity_with_thickness, ())
+
+
+def run_eta_only_matches_surface_resistivity_with_thickness(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_compat.xml'
+        eta_surface = np.r_[1.E4*mu0]
+        thickness_values = np.r_[2.5E-3]
+        eta_bulk = eta_surface*thickness_values
+        _write_thincurr_xml(xml_filename, eta_values=eta_surface)
+
+        model_surface = _build_dummy_model(xml_filename)
+        model_surface.set_eta_values(eta_values=eta_surface)
+        model_surface.compute_Rmat(copy_out=True)
+        R_surface = model_surface.Rmat
+
+        model_bulk = _build_dummy_model(xml_filename)
+        model_bulk.set_eta_values(eta_vol=eta_bulk, thickness=thickness_values)
+        model_bulk.compute_Rmat(copy_out=True)
+        R_bulk = model_bulk.Rmat
+
+        if not np.allclose(R_surface, R_bulk, rtol=1.E-10, atol=1.E-12):
+            result = False
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_eta_vol_without_thickness_warns_and_loads():
+    assert mp_run(run_eta_vol_without_thickness_warns_and_loads, ())
+
+
+def run_eta_vol_without_thickness_warns_and_loads(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_vol_only_invalid.xml'
+        eta_vol_values = np.r_[2.5E-3]
+        _write_thincurr_xml(xml_filename, eta_vol_values=eta_vol_values)
+
+        # eta_vol-only XML should load with warning; eta_surf cannot be inferred.
+        tw_model = _build_dummy_model(xml_filename)
+        eta_surf = tw_model.get_eta_values()
+        if np.all(eta_surf > 0.0):
+            result = False
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_get_eta_values_deprecation_warning():
+    """Test that get_eta_values() without include_eta_vol flag shows deprecation warning."""
+    assert mp_run(run_get_eta_values_deprecation_warning, ())
+
+
+def run_get_eta_values_deprecation_warning(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_deprecation.xml'
+        eta_values = np.r_[1.E4*mu0]
+        _write_thincurr_xml(xml_filename, eta_values=eta_values)
+
+        tw_model = _build_dummy_model(xml_filename)
+        tw_model.set_eta_values(eta_surf=eta_values)
+
+        import warnings
+        # Check that calling get_eta_values() without flag triggers deprecation warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            eta = tw_model.get_eta_values()
+            
+            # Should get a DeprecationWarning
+            if len(w) == 0 or not issubclass(w[-1].category, DeprecationWarning):
+                print("ERROR: Expected DeprecationWarning not found")
+                result = False
+            elif "include_eta_vol" not in str(w[-1].message):
+                print(f"ERROR: Expected 'include_eta_vol' in warning message, got: {w[-1].message}")
+                result = False
+            elif not np.allclose(eta, eta_values):
+                print("ERROR: eta_surf values don't match")
+                result = False
+
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_get_eta_values_with_flag_returns_tuple():
+    """Test that get_eta_values(include_eta_vol=True) returns tuple with eta_vol."""
+    assert mp_run(run_get_eta_values_with_flag_returns_tuple, ())
+
+
+def run_get_eta_values_with_flag_returns_tuple(mp_q):
+    result = True
+    try:
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_eta_vol_tuple.xml'
+        eta_surf = np.r_[1.E4*mu0]
+        eta_vol = np.r_[2.5E-2]
+        thickness = np.r_[2.5E-3]
+        _write_thincurr_xml(xml_filename, eta_values=eta_surf, thickness_values=thickness)
+
+        tw_model = _build_dummy_model(xml_filename)
+        tw_model.set_eta_values(eta_vol=eta_vol, thickness=thickness)
+
+        import warnings
+        # Call with include_eta_vol=True should NOT trigger warning
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result_tuple = tw_model.get_eta_values(include_eta_vol=True)
+            
+            # Should not get DeprecationWarning
+            for warning in w:
+                if issubclass(warning.category, DeprecationWarning):
+                    print(f"ERROR: Unexpected DeprecationWarning when include_eta_vol=True: {warning.message}")
+                    result = False
+                    break
+
+        # Check that result is a tuple with (eta_surf, eta_vol)
+        if not isinstance(result_tuple, tuple) or len(result_tuple) != 2:
+            print(f"ERROR: Expected tuple of length 2, got {type(result_tuple)} of length {len(result_tuple) if isinstance(result_tuple, tuple) else 'N/A'}")
+            result = False
+        else:
+            eta_surf_ret, eta_vol_ret = result_tuple
+            if eta_vol_ret is None:
+                print("ERROR: eta_vol should not be None when it was explicitly set")
+                result = False
+            elif not np.allclose(eta_vol_ret, eta_vol):
+                print(f"ERROR: eta_vol values don't match. Expected {eta_vol}, got {eta_vol_ret}")
+                result = False
+
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+
+
+
+
+
+
 #============================================================================
 # Test runners for plate
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
@@ -646,12 +992,13 @@ def test_fr_plate(direct_flag,python):
 @pytest.mark.parametrize("python", (True,))
 def test_td_plate_volt(direct_flag,python):
     sigs_final = (4.E-3, 4.580643E-4, 3.854292E-4)
+    jumpers_final = (4.E-3, 1697.895)
     assert ThinCurr_setup("tw_test-plate.h5",1,direct_flag,
                            vcoils=((0.5, 0.1),),
                            floops=((0.5, -0.05), (0.5, -0.1)),
                            volt_waveform=((0.0, 1.0), (1.0, 1.0)),
                            python=python)
-    assert validate_td(sigs_final)
+    assert validate_td(sigs_final,jumpers_final)
 
 #============================================================================
 # Test runners for cylinder
@@ -691,7 +1038,7 @@ def test_fr_cyl(direct_flag,python):
 @pytest.mark.parametrize("python", (True,))
 def test_td_cyl_volt(direct_flag,python):
     sigs_final = (4.E-3, 1.504279E-4, 1.276624E-4)
-    jumpers_final = (4.E-3, 1.1203960E3, 1120.396)
+    jumpers_final = (4.E-3, 1.1203960E3, 1120.396, 655.853, 655.850)
     assert ThinCurr_setup("tw_test-cyl.h5",1,direct_flag,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
@@ -748,13 +1095,14 @@ def test_fr_torus(direct_flag,python):
 @pytest.mark.parametrize("python", (True,))
 def test_td_torus_volt(direct_flag,python):
     sigs_final = (4.E-3, 5.653338E-5, 4.035387E-6)
+    jumpers_final = (4.E-3, None, -597.6068, 371.74769, 371.74780)
     assert ThinCurr_setup("tw_test-torus.h5",1,direct_flag,
                            vcoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
                            volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)),
                            lin_tol=1.E-11,
                            python=python)
-    assert validate_td(sigs_final)
+    assert validate_td(sigs_final,jumpers_final)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
@@ -831,12 +1179,13 @@ def test_fr_passive(direct_flag,python):
 @pytest.mark.parametrize("python", (True,))
 def test_td_passive_volt(direct_flag,python):
    sigs_final = (4.E-3, 4.379235E-4, 4.389248E-4)
+   jumpers_final = (4.E-3, -641.4736, 1673.2893)
    assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
                           vcoils=((0.5, 0.0), (0.5, 0.1)),
                           floops=((0.5, -0.05), (0.5, -0.1)),
                           volt_waveform=((0.0, 0.0, 1.0), (1.0, 0.0, 1.0)),
                           python=python)
-   assert validate_td(sigs_final)
+   assert validate_td(sigs_final, jumpers_final)
 
 #============================================================================
 # Test runners for large cylinder (w/ ACA+)
@@ -879,7 +1228,7 @@ def test_fr_aca(python):
 @pytest.mark.parametrize("python", (True,))
 def test_td_volt_aca(python):
     sigs_final = (4.E-3, 1.512679E-4, 1.291681E-4)
-    jumpers_final = (4.E-3, 1.122550E3, 1122.550)
+    jumpers_final = (4.E-3, 1.122550E3, 1122.550, 656.9544, 656.9797)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),

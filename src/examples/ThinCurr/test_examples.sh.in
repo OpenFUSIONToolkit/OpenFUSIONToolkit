@@ -1,0 +1,37 @@
+#!/bin/bash
+
+log_path=$1
+ROOT_PATH=$(pwd)
+
+run_test() {
+  cd $1
+  jupyter nbconvert --execute --to notebook --inplace --ExecutePreprocessor.kernel_name=@OFT_PY_KERNEL@ $2 > tmp.log 2>&1
+  if [ $? -ne 0 ]; then
+    echo "Example ThinCurr/$1/$2 failed."
+    echo "" >> $log_path
+    echo "====== Begin ThinCurr/$1/$2 output ======" >> $log_path
+    cat tmp.log >> $log_path
+    echo "======  End ThinCurr/$1/$2 output  ======" >> $log_path
+    echo "" >> $log_path
+  else
+    echo "Example ThinCurr/$1/$2 ran successfully."
+  fi
+  rm tmp.log
+  cd $ROOT_PATH
+}
+
+# Plate cases
+run_test plate plate_eigenvalues.ipynb
+
+# Cylinder cases
+run_test cyl cyl_time_domain.ipynb
+run_test cyl cyl_time_domain-jumpers.ipynb
+run_test cyl cyl_forces.ipynb
+
+# Torus cases
+run_test torus torus_bnorm_mode.ipynb
+run_test torus torus_freq_response.ipynb
+run_test torus torus_time_domain.ipynb
+
+# XML example
+run_test xml ex_oft_creation.ipynb
