@@ -114,6 +114,12 @@ Or run individual test files:
 ```bash
 cd builds/build_release/tests
 ../../run_test.sh physics/test_TokaMaker.py -k "test_name"
+```
+
+To list tests for a specific file or folder:
+
+```bash
+cd builds/build_release/tests
 ../../run_test.sh physics/test_TokaMaker.py --collect-only
 ```
 
