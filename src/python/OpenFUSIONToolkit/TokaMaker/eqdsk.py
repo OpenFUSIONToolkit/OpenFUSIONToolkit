@@ -799,32 +799,48 @@ class GEQDSKEquilibrium:
 
     @property
     def psi_N(self):
-        r'''! Normalised \f$\hat{\psi}\f$ levels used for flux-surface analysis'''
+        r'''! Normalised raw g-file \f$\hat{\psi}\f$ grid for 1-D profiles (`NW` points)
+
+        Matches the length and spacing of `fpol`, `pres`, `pprime`, `ffprim`,
+        `qpsi`, and `rhovn`.  For the flux-surface-analysis grid (used by the
+        derived FSA quantities) see `psi_N_levels`.
+        '''
+        return np.linspace(0, 1, int(self._raw["NW"]))
+
+    @property
+    def psi_N_levels(self):
+        r'''! Normalised \f$\hat{\psi}\f$ levels used for flux-surface analysis (`nlevels` points)
+
+        This is the grid on which lazy FSA quantities (`q_profile`,
+        `j_tor_averaged`, `geometry[...]`, `averages[...]`, `midplane[...]`,
+        etc.) are evaluated.  Defaults to `NW` (identical to `psi_N`) unless
+        a different `nlevels` was passed at construction.
+        '''
         return np.linspace(0, 1, self._nlevels)
 
     @property
     def fpol(self):
-        r'''! \f$F = R B_t\f$ poloidal current function, on uniform \f$\hat{\psi}\f$ grid [T m]'''
+        r'''! \f$F = R B_t\f$ poloidal current function, on the raw `psi_N` grid (`NW` points) [T m]'''
         return self._raw["FPOL"]
 
     @property
     def pres(self):
-        r'''! Pressure profile on uniform \f$\hat{\psi}\f$ grid [Pa]'''
+        r'''! Pressure profile on the raw `psi_N` grid (`NW` points) [Pa]'''
         return self._raw["PRES"]
 
     @property
     def pprime(self):
-        r'''! \f$dP/d\psi\f$ on uniform \f$\hat{\psi}\f$ grid [Pa/Wb]'''
+        r'''! \f$dP/d\psi\f$ on the raw `psi_N` grid (`NW` points) [Pa/Wb]'''
         return self._raw["PPRIME"]
 
     @property
     def ffprim(self):
-        r'''! \f$F\,dF/d\psi\f$ on uniform \f$\hat{\psi}\f$ grid [T\f$^2\f$ m\f$^2\f$/Wb]'''
+        r'''! \f$F\,dF/d\psi\f$ on the raw `psi_N` grid (`NW` points) [T\f$^2\f$ m\f$^2\f$/Wb]'''
         return self._raw["FFPRIM"]
 
     @property
     def qpsi(self):
-        r'''! Safety factor from the g-file on uniform \f$\hat{\psi}\f$ grid'''
+        r'''! Safety factor from the g-file, on the raw `psi_N` grid (`NW` points)'''
         return self._raw["QPSI"]
 
     @property
@@ -1030,7 +1046,7 @@ class GEQDSKEquilibrium:
         R = self.R_grid
         Z = self.Z_grid
 
-        psi_N_levels = self.psi_N
+        psi_N_levels = self.psi_N_levels
         dpsi = self.psi_boundary - self.psi_axis
         psi_levels = psi_N_levels * dpsi + self.psi_axis
 
@@ -1449,27 +1465,27 @@ class GEQDSKEquilibrium:
     # --- Integration methods ---
 
     def volume_integral(self, what):
-        r'''! Volume integral of a quantity on the \f$\hat{\psi}\f$ grid
+        r'''! Volume integral of a quantity on the FSA grid
 
-        @param what Array-like of length `nlevels`, sampled at `self.psi_N`
+        @param what Array-like of length `nlevels`, sampled at `self.psi_N_levels`
         @result 1-D ndarray (`nlevels`,) cumulative integral from core to each surface
         '''
         self._trace_surfaces()
         dpsi = self.psi_boundary - self.psi_axis
-        psi_arr = self.psi_N * dpsi + self.psi_axis
+        psi_arr = self.psi_N_levels * dpsi + self.psi_axis
         return integrate.cumulative_trapezoid(
             self._cache["avg"]["vp"] * np.asarray(what), psi_arr, initial=0
         )
 
     def surface_integral(self, what):
-        r'''! Cross-section (area) integral of a quantity on the \f$\hat{\psi}\f$ grid
+        r'''! Cross-section (area) integral of a quantity on the FSA grid
 
-        @param what Array-like of length `nlevels`
+        @param what Array-like of length `nlevels`, sampled at `self.psi_N_levels`
         @result 1-D ndarray (`nlevels`,) cumulative area integral
         '''
         self._trace_surfaces()
         dpsi = self.psi_boundary - self.psi_axis
-        psi_arr = self.psi_N * dpsi + self.psi_axis
+        psi_arr = self.psi_N_levels * dpsi + self.psi_axis
         return integrate.cumulative_trapezoid(
             self._cache["avg"]["vp"] * self._cache["avg"]["1/R"] * np.asarray(what),
             psi_arr, initial=0,
@@ -1479,11 +1495,12 @@ class GEQDSKEquilibrium:
         r'''! Total flux integral at a given \f$\hat{\psi}\f$ value (scalar)
 
         @param psi_N_val Normalised poloidal flux location (0 = axis, 1 = boundary)
-        @param profile Array-like of length `nlevels` to integrate
+        @param profile Array-like of length `nlevels` to integrate (sampled at
+                       `self.psi_N_levels`)
         @result Value of the volume integral at *psi_N_val*
         '''
         cum = self.volume_integral(profile)
-        return float(np.interp(psi_N_val, self.psi_N, cum))
+        return float(np.interp(psi_N_val, self.psi_N_levels, cum))
 
     # --- Introspection / discovery ---
 
@@ -1500,14 +1517,14 @@ class GEQDSKEquilibrium:
             ("psi_boundary", "Poloidal flux at LCFS",                "Wb"),
             ("cocos",        "COCOS convention index",               ""),
         ]),
-        ("1-D profiles (raw, on uniform psi_N from g-file)", [
+        ("1-D profiles (raw, on psi_N grid from g-file, length NW)", [
             ("fpol",   "F = R * B_t",                "T m"),
             ("pres",   "Pressure",                   "Pa"),
             ("pprime", "dP/dpsi",                    "Pa/Wb"),
             ("ffprim", "F * dF/dpsi",                "T^2 m^2/Wb"),
             ("qpsi",   "Safety factor (from file)",  ""),
             ("rhovn",  "Normalised toroidal flux",   ""),
-            ("psi_N",  "Normalised psi level grid",  ""),
+            ("psi_N",  "Normalised psi grid (NW)",   ""),
         ]),
         ("Boundary and limiter", [
             ("boundary_R", "LCFS R coordinates", "m"),
@@ -1521,7 +1538,8 @@ class GEQDSKEquilibrium:
             ("psi_RZ",    "Poloidal flux on (R,Z) grid",       "Wb"),
             ("psi_N_RZ",  "Normalised flux on (R,Z) grid",     ""),
         ]),
-        ("Derived 1-D profiles (lazy, flux-surface averaged)", [
+        ("Derived 1-D profiles (lazy, FSA, on psi_N_levels, length nlevels)", [
+            ("psi_N_levels",               "Normalised psi FSA grid (nlevels)", ""),
             ("q_profile",                  "Safety factor from FSA",            ""),
             ("j_tor_averaged",             "<Jt/R>/<1/R> (standard)",          "A/m^2"),
             ("j_tor_averaged_direct",      "<Jt> from GS",                      "A/m^2"),

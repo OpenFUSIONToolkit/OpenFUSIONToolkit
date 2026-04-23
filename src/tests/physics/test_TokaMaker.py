@@ -1533,15 +1533,18 @@ def run_eqdsk_gfile_case():
     results['cocos']            = int(eq.cocos)
 
     # --- j_tor and q profile sampling at interior psi_N positions ---
-    psi_N      = eq.psi_N
+    # FSA quantities live on psi_N_levels (length nlevels), which matches the
+    # raw g-file psi_N grid by default (nlevels=NW) but may differ if a
+    # custom nlevels is supplied at construction.
+    psi_N_lvl  = eq.psi_N_levels
     j_tor      = eq.j_tor_averaged         # <Jt/R>/<1/R>  standard convention
     j_tor_dir  = eq.j_tor_averaged_direct  # -(p'<R> + FF'<1/R>/mu0)*(2pi)^exp_Bp
     q          = eq.q_profile
     for pct in (10, 25, 50, 75, 90):
         psin_target = pct / 100.0
-        results[f'j_tor_psiN_{pct:02d}']        = float(np.interp(psin_target, psi_N, j_tor))
-        results[f'j_tor_direct_psiN_{pct:02d}'] = float(np.interp(psin_target, psi_N, j_tor_dir))
-        results[f'q_psiN_{pct:02d}']            = float(np.interp(psin_target, psi_N, q))
+        results[f'j_tor_psiN_{pct:02d}']        = float(np.interp(psin_target, psi_N_lvl, j_tor))
+        results[f'j_tor_direct_psiN_{pct:02d}'] = float(np.interp(psin_target, psi_N_lvl, j_tor_dir))
+        results[f'q_psiN_{pct:02d}']            = float(np.interp(psin_target, psi_N_lvl, q))
     return results
 
 
