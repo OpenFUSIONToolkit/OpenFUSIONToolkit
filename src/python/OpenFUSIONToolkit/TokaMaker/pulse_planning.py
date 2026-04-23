@@ -2338,7 +2338,7 @@ class TokTox:
     # ─── Main Simulation Loop ───────────────────────────────────────────────────
 
     def fly(self, run_name='tmp', convergence_threshold=-1.0, max_loop=3,
-            output_mode=False, skip_bad_init_eqdsks=False,
+            output_mode=False, skip_bad_init_eqdsks=False, run_tx_init=True,
             t_ave_toggle='off', t_ave_window=0.5, t_ave_causal=True, t_ave_ignore_start=0.25):
         r'''! Run TokaMaker-TORAX coupled simulation loop.
 
@@ -2347,6 +2347,8 @@ class TokTox:
         @param run_name Name for this run (used in output directory and log file).
         @param output_mode Output level selector: False (or None), 'minimal', 'normal', or 'debug'.
         @param skip_bad_init_eqdsks If True, skip broken initial gEQDSK files instead of raising.
+        @param run_tx_init If True (default), run Loop 0 transport initialization before the main
+               coupling loop. If False, skip initialization and start at loop 1.
         @param t_ave_toggle Time-averaging mode: 'off' (no averaging), 'flattop' (average only
                during flat-top), or 'pulse' (average over the whole pulse).
         @param t_ave_window Averaging window size in seconds. Default 0.5 s.
@@ -2474,9 +2476,10 @@ class TokTox:
         tx_cflux_vloop = []
 
         try:
-            # ── Loop 0: Transport initialization ──
-            self._print(f'\n{"="*60}\n  Loop 0: Transport Initialization\n{"="*60}')
-            self._run_tx_init()
+            # ── Loop 0: Transport initialization (optional) ──
+            if run_tx_init:
+                self._print(f'\n{"="*60}\n  Loop 0: Transport Initialization\n{"="*60}')
+                self._run_tx_init()
 
             self._current_loop = 1
 
