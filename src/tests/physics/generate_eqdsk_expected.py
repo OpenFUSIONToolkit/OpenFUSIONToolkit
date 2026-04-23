@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Regenerate the hardcoded expected-value dicts for the TokaMaker eqdsk tests.
+"""Regenerate the expected-value JSON fixtures for the TokaMaker eqdsk tests.
 
 Reads `ITER_test.eqdsk` and `D3Dlike_Hmode_test.peqdsk` with the OMFIT
 `OMFITgeqdsk` / `OMFITpFile` readers (which the TokaMaker `eqdsk` module
-was adapted from) and prints two Python dicts on stdout.  Paste the output
-into `test_TokaMaker.py` as `eqdsk_gfile_expected_dict` and
-`eqdsk_pfile_expected_dict` if the test input files change.
+was adapted from) and writes the results next to this script as
+`eqdsk_gfile_expected.json` and `eqdsk_pfile_expected.json`.  These are
+consumed directly by `test_TokaMaker.py::test_eqdsk_gfile` /
+`test_eqdsk_pfile`; the per-key tolerance overrides live in
+`eqdsk_gfile_tol.json` and are hand-maintained (not regenerated here).
 
 Raw scalar/profile quantities come from OMFIT's raw parser and should match
 the TokaMaker reader to floating-point precision.  Derived flux-surface
 quantities (q, geometry, li, betas, j_tor samples) come from OMFIT's
 `fluxSurfaces` tracer and the TokaMaker reader is expected to be "close
 enough" (within ~0.5-10% depending on the quantity -- see per-key
-tolerances in the test).
+tolerances in `eqdsk_gfile_tol.json`).
 
 Requires `omfit_classes` from an environment with scipy<1.14 and numpy<2.0
 (the standard `omfit_env` conda env works).  Compat shims below allow the
@@ -20,9 +22,9 @@ raw g-file/p-file parsers to run under newer scipy/numpy but the
 fluxSurfaces tracer requires the legacy versions.
 """
 
+import json
 import os
 import warnings
-import pprint
 
 warnings.filterwarnings('ignore')
 
@@ -158,11 +160,15 @@ def gen_pfile_expected():
     return out
 
 
+def _write_json(path, data):
+    with open(path, 'w') as fh:
+        json.dump(data, fh, indent=2, sort_keys=True)
+        fh.write('\n')
+    print(f'wrote {path}  ({len(data)} keys)')
+
+
 if __name__ == '__main__':
-    print('# ----- eqdsk_gfile_expected_dict (paste into test_TokaMaker.py) -----')
-    print('eqdsk_gfile_expected_dict = \\')
-    pprint.pprint(gen_gfile_expected(), width=100)
-    print()
-    print('# ----- eqdsk_pfile_expected_dict (paste into test_TokaMaker.py) -----')
-    print('eqdsk_pfile_expected_dict = \\')
-    pprint.pprint(gen_pfile_expected(), width=100)
+    gfile_out = os.path.join(HERE, 'eqdsk_gfile_expected.json')
+    pfile_out = os.path.join(HERE, 'eqdsk_pfile_expected.json')
+    _write_json(gfile_out, gen_gfile_expected())
+    _write_json(pfile_out, gen_pfile_expected())
