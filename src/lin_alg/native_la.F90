@@ -2299,6 +2299,7 @@ integer(i4), dimension(:), allocatable :: bit_flags
 integer(i4) :: i, j
 INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: lg !< global index of each element
 DEBUG_STACK_PUSH
+IF(oft_env%nprocs>1)CALL oft_abort('Not supported for nprocs>1','mat_save',__FILE__)
 ALLOCATE(lg(self%nr))
 IF(PRESENT(bc_flags)) THEN
   ALLOCATE(bit_flags(size(bc_flags)))

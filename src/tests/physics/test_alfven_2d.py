@@ -48,8 +48,8 @@ oft_in_template = """
   bx0=0.d0,
   bz0=0.d0,
   chi=1.E0
-  eta=1.E-8
-  nu=1.E-8
+  eta=0.00795774715
+  nu=0.59880239
   gamma=1.67
   D_diff=1.E0
   dt={4}
@@ -186,7 +186,7 @@ def test_lin_r1_p2(petsc_flag=False):
 def test_lin_r1_p2_mpi(petsc_flag):
     verr_exp = 1.811020939389565E-2
     berr_exp = 4.923999966698998E-3
-    assert alfven_2d_setup(1,1,2, petsc=petsc_flag, linear = True)
+    assert alfven_2d_setup(1,2,2, petsc=petsc_flag, linear = True)
     assert validate_result(verr_exp, berr_exp)
 
 #============================================================================
@@ -203,7 +203,7 @@ def test_lin_r1_p3(petsc_flag=False):
 def test_lin_r1_p3_mpi(petsc_flag):
     verr_exp = 2.5746106154166067E-3
     berr_exp = 5.148998451109316E-4
-    assert alfven_2d_setup(1,1,3, petsc=petsc_flag, linear = True)
+    assert alfven_2d_setup(1,2,3, petsc=petsc_flag, linear = True)
     assert validate_result(verr_exp, berr_exp) 
 
 #============================================================================
@@ -220,5 +220,5 @@ def test_lin_r1_p4(petsc_flag=False):
 def test_lin_r1_p4_mpi(petsc_flag):
     verr_exp = 4.997848969169074E-4
     berr_exp = 4.504851399342237E-4
-    assert alfven_2d_setup(1,1,4, petsc=petsc_flag, linear = True)
+    assert alfven_2d_setup(1,2,4, petsc=petsc_flag, linear = True)
     assert validate_result(verr_exp, berr_exp) 

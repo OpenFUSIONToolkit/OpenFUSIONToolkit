@@ -66,7 +66,7 @@ REAL(r8) :: by0 = 1.d0 !< Magnetic field scale (y-direction)
 REAL(r8) :: chi=1.d0 !< thermal diffusivity
 REAL(r8) :: eta=1.d0 !< electrical resistivity
 REAL(r8) :: nu=1.d0 !< viscosity
-REAL(r8) :: gamma=1.d0 !< adiabatic index
+REAL(r8) :: gamma=2.d0/3.d0 !< adiabatic index
 REAL(r8) :: D_diff=1.d0 !< Diffusion coefficient
 REAL(r8) :: den_scale=1.d19 !< Density scale factor for normalization of equations (used for post-processing)
 REAL(r8) :: den_inf = 2.d-1 !< Background density
@@ -78,15 +78,16 @@ REAL(r8) :: delta = 1.d-1 !< Relative size of perturbation (<<1)
 REAL(r8) :: dt = 1.d-3
 LOGICAL :: pm=.FALSE.
 LOGICAL :: use_mfnk=.FALSE.
-NAMELIST/xmhd_options/order, chi, eta, nu, gamma, D_diff, &
-dt, nsteps, rst_freq, use_mfnk, pm, n0, psi0, velx0, vely0, velz0, &
+LOGICAL :: linear=.FALSE.
+NAMELIST/harris_sheet_options/order, chi, eta, nu, gamma, D_diff, &
+dt, nsteps, rst_freq, use_mfnk, pm, linear, n0, psi0, velx0, vely0, velz0, &
 t0, by0, den_scale, delta, lam_n, lam_b, L_x, L_z
 !!\subsection doc_mug_recon_ex_driver_setup OFT Initialization
 !! See \ref doc_api_ex1 for a detailed description of calls in this section.
 CALL oft_init
 !---Read in options
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
-READ(io_unit,xmhd_options,IOSTAT=ierr)
+READ(io_unit,harris_sheet_options,IOSTAT=ierr)
 CLOSE(io_unit)
 !---------------------------------------------------------------------------
 ! Setup grid
@@ -118,70 +119,98 @@ field_init%mesh=>mesh
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-! CALL blag_zerob%apply(u)
 CALL u%scale(n0)
 CALL u%get_local(vec_vals)
 vec_vals = vec_vals / den_scale
-CALL mhd_sim%u%restore_local(vec_vals,1)
+IF (linear) THEN
+    CALL mhd_sim%u0%restore_local(vec_vals,1)
+    vec_vals = 0.d0
+     CALL mhd_sim%u%restore_local(vec_vals,1)
+ELSE
+     CALL mhd_sim%u%restore_local(vec_vals,1)
+END IF
 
-!---Project v_x initial condition onto scalar Lagrange basis
-field_init%func=>const_init
-CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-CALL u%set(0.d0)
-CALL minv%apply(u,v)
-CALL u%scale(velx0)
-! CALL blag_zerob%apply(u)
+!---Set v_x initial condition
+CALL u%set(velx0)
 CALL u%get_local(vec_vals)
-CALL mhd_sim%u%restore_local(vec_vals,2)
+IF (linear) THEN
+    CALL mhd_sim%u0%restore_local(vec_vals,2)
+    vec_vals = 0.d0
+     CALL mhd_sim%u%restore_local(vec_vals,2)
+ELSE
+     CALL mhd_sim%u%restore_local(vec_vals,2)
+END IF
 
-!---Project v_y initial condition onto scalar Lagrange basis
-field_init%func=>const_init
-CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-CALL u%set(0.d0)
-CALL minv%apply(u,v)
-CALL u%scale(vely0)
+!---Set v_y initial condition
+CALL u%set(vely0)
 CALL u%get_local(vec_vals)
-CALL mhd_sim%u%restore_local(vec_vals,3)
+IF (linear) THEN
+    CALL mhd_sim%u0%restore_local(vec_vals,3)
+    vec_vals = 0.d0
+     CALL mhd_sim%u%restore_local(vec_vals,3)
+ELSE
+     CALL mhd_sim%u%restore_local(vec_vals,3)
+END IF
 
-!---Project v_z initial condition onto scalar Lagrange basis
-field_init%func=>const_init
-CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-CALL u%set(0.d0)
-CALL minv%apply(u,v)
-CALL u%scale(velz0)
-! CALL blag_zerob%apply(u)
+!---Set v_z initial condition
+CALL u%set(velz0)
 CALL u%get_local(vec_vals)
-CALL mhd_sim%u%restore_local(vec_vals,4)
+IF (linear) THEN
+    CALL mhd_sim%u0%restore_local(vec_vals,4)
+    vec_vals = 0.d0
+     CALL mhd_sim%u%restore_local(vec_vals,4)
+ELSE
+     CALL mhd_sim%u%restore_local(vec_vals,4)
+END IF
 
-!---Project T initial condition onto scalar Lagrange basis
-field_init%func=>const_init
-CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
-CALL u%set(0.d0)
-CALL minv%apply(u,v)
-CALL u%scale(t0)
-! CALL blag_zerob%apply(u)
+!---Set T initial condition
+CALL u%set(t0)
 CALL u%get_local(vec_vals)
-CALL mhd_sim%u%restore_local(vec_vals,5)
+IF (linear) THEN
+    CALL mhd_sim%u0%restore_local(vec_vals,5)
+    vec_vals = 0.d0
+     CALL mhd_sim%u%restore_local(vec_vals,5)
+ELSE
+     CALL mhd_sim%u%restore_local(vec_vals,5)
+END IF
 
 !---Project psi initial condition onto scalar Lagrange basis
-field_init%func=>psi_harris
+field_init%func=>psi_harris_eq
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-! CALL blag_zerob%apply(u)
 CALL u%scale(psi0)
 CALL u%get_local(vec_vals)
-CALL mhd_sim%u%restore_local(vec_vals,6)
-
-!---Project by initial condition onto scalar Lagrange basis
-field_init%func=>const_init
+IF (linear) THEN 
+    CALL mhd_sim%u0%restore_local(vec_vals,6)
+ELSE
+    CALL mhd_sim%u%restore_local(vec_vals,6)
+END IF
+field_init%func=>psi_harris_pert
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
-CALL u%scale(by0)
-! CALL blag_zerob%apply(u)
+CALL u%scale(psi0)
+IF (linear) THEN
+    CALL mhd_sim%u%restore_local(vec_vals,6)
+ELSE
+    CALL mhd_sim%u%get_local(vec_vals,6)
+    CALL v%restore_local(vec_vals)
+    CALL u%add(1.d0, 1.d0, v)
+    CALL u%get_local(vec_vals)
+    CALL mhd_sim%u%restore_local(vec_vals,6)
+END IF
+
+!---Set By initial condition
+CALL u%set(by0)
 CALL u%get_local(vec_vals)
-CALL mhd_sim%u%restore_local(vec_vals,7)
+IF (linear) THEN
+    CALL mhd_sim%u0%restore_local(vec_vals,7)
+    vec_vals = 0.d0
+     CALL mhd_sim%u%restore_local(vec_vals,7)
+ELSE
+     CALL mhd_sim%u%restore_local(vec_vals,7)
+END IF
 
 !---Cleanup objects used for projection
 CALL u%delete ! Destroy LHS vector
@@ -207,13 +236,20 @@ mhd_sim%den_scale=den_scale
 mhd_sim%nsteps=nsteps
 mhd_sim%rst_freq=rst_freq
 mhd_sim%mfnk=use_mfnk
+mhd_sim%linear=linear
 oft_env%pm=pm
-CALL mhd_sim%run_simulation()
+
+IF (linear) THEN
+  CALL mhd_sim%run_lin_simulation()
+ELSE 
+  CALL mhd_sim%run_simulation()
+END IF
 
 CALL xmhd_2d_plot(mhd_sim)
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS
+
 !! To set the initial conditions we define a set of functions 
 !!
 !! The non-uniform initial conditions for this case is given by
@@ -222,11 +258,6 @@ CONTAINS
 !!
 !! The perturbation is then given by
 !! \f[ \delta B = -\frac{\pi}{L_z} cos(2 \pi x / L_x) sin(\pi z / L_z) \hat{x} + \frac{2 \pi}{L_x} sin(2 \pi x / L_x) cos(\pi z / L_z) \hat{x} \f]
-SUBROUTINE const_init(pt,val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = 1.0
-END SUBROUTINE const_init
 
 SUBROUTINE dens_harris(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
@@ -234,9 +265,21 @@ REAL(r8), INTENT(out) :: val
 val = den_inf + 1/((COSH(pt(2)/lam_n))**2)
 END SUBROUTINE dens_harris
 
-SUBROUTINE psi_harris(pt, val)
+SUBROUTINE psi_harris_eq(pt, val)
 REAL(r8), INTENT(in) :: pt(3)
 REAL(r8), INTENT(out) :: val
-val = -lam_b*LOG(COSH(pt(2)/lam_b)) - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
-END SUBROUTINE psi_harris
+val = -lam_b*LOG(COSH(pt(2)/lam_b))
+END SUBROUTINE psi_harris_eq
+
+SUBROUTINE psi_harris_pert(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
+END SUBROUTINE psi_harris_pert
+
+! SUBROUTINE psi_harris(pt, val)
+! REAL(r8), INTENT(in) :: pt(3)
+! REAL(r8), INTENT(out) :: val
+! val = -lam_b*LOG(COSH(pt(2)/lam_b)) - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
+! END SUBROUTINE psi_harris
 END PROGRAM xmhd_circle

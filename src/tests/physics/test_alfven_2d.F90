@@ -80,6 +80,7 @@ CLOSE(io_unit)
 CALL multigrid_construct_surf(mg_mesh)
 CALL mhd_sim%setup(mg_mesh,order)
 
+! Do not evolve n and T (set dirichlet conditions on all nodes)
 ALLOCATE(mhd_sim%n_bc(ML_oft_blagrange%current_level%ne))
 mhd_sim%n_bc=.TRUE.
 mhd_sim%t_bc=>mhd_sim%n_bc

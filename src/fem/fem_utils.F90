@@ -186,15 +186,13 @@ subroutine diff_interp_apply_2d(self,cell,f,gop,val)
   real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
   real(r8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,4]
   real(r8), intent(out) :: val(:) !< Reconstructed field at f [1]
-  real(r8), allocatable, dimension(:) :: aval,bval
+  real(r8):: aval(self%dim),bval(self%dim)
   DEBUG_STACK_PUSH
   IF(self%dim<=0)CALL oft_abort("Field dimension must be specified.", &
     "diff_interp_apply_2d",__FILE__)
-  ALLOCATE(aval(self%dim),bval(self%dim))
   CALL self%a%interp(cell,f,gop,aval)
   CALL self%b%interp(cell,f,gop,bval)
   val=aval-bval
-  DEALLOCATE(aval,bval)
   DEBUG_STACK_POP
   end subroutine diff_interp_apply_2d
 !------------------------------------------------------------------------------

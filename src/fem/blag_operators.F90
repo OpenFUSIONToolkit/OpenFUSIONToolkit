@@ -688,7 +688,6 @@ INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: j
 REAL(r8) :: vol,det,etmp(3),sgop(3,3),rop
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: vloc 
 REAL(r8), POINTER, DIMENSION(:) :: xloc,yloc,zloc
-REAL(r8), POINTER, DIMENSION(:,:) :: vtmp
 CLASS(oft_scalar_bfem), POINTER :: lag_rep
 DEBUG_STACK_PUSH
 IF(.NOT.oft_2D_lagrange_cast(lag_rep,fe_rep))CALL oft_abort("Incorrect FE type","oft_blag_vproject",__FILE__)
@@ -708,7 +707,6 @@ do i=1,lag_rep%mesh%nc
   call lag_rep%ncdofs(i,j) ! Get local to global DOF mapping
   vloc=0.d0
   !---Loop over quadrature points
-  vtmp=0.d0
   do m=1,lag_rep%quad%np
     call lag_rep%mesh%jacobian(i,lag_rep%quad%pts(:,m),sgop,vol)
     det=vol*lag_rep%quad%wts(m)

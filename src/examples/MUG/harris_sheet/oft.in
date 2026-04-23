@@ -12,10 +12,6 @@
   fix_boundary=T
 /
 
-&native_mesh_options
-  filename="circle_2d.h5"
-/
-
 &cube_options
  mesh_type=1
  ref_per=T,F,F
@@ -24,7 +20,7 @@
  shift=-12.8,-6.4,0.0
 /
 
-&xmhd_options
+&harris_sheet_options
   order=2
   n0=5.196374E16
   psi0=0.002045692328575E0,
@@ -34,8 +30,8 @@
   t0=1E2,
   by0=0,
   chi=2943.4,
-  eta=9.3317868E-4
-  nu=6.45427171e-7
+  eta=742.59999855
+  nu=7424.22118697
   delta = 1.E-1
   gamma=1.67
   D_diff=1.E1
@@ -45,8 +41,9 @@
   lam_n = 0.5E0
   L_x = 25.6E0
   L_z = 12.8E0
-  nsteps=1200
+  nsteps=4000
   rst_freq=10
   use_mfnk=T
   pm=F
+  linear=F
 /

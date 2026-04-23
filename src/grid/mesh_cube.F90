@@ -536,13 +536,13 @@ xmin=MINVAL(smesh%r(1,:)); xmax=MAXVAL(smesh%r(1,:))
 ymin=MINVAL(smesh%r(2,:)); ymax=MAXVAL(smesh%r(2,:))
 DO i=1,smesh%nbe
   j=smesh%lbe(i)
-  IF(ALL(smesh%r(1,smesh%le(:,j))==xmin))THEN
+  IF(ALL(smesh%r(1,smesh%le(:,j))==xmax))THEN
     smesh%bes(i)=1
-  ELSE IF(ALL(smesh%r(1,smesh%le(:,j))==xmax))THEN
+  ELSE IF(ALL(smesh%r(1,smesh%le(:,j))==xmin))THEN
     smesh%bes(i)=2
-  ELSE IF(ALL(smesh%r(2,smesh%le(:,j))==ymin))THEN
-    smesh%bes(i)=3
   ELSE IF(ALL(smesh%r(2,smesh%le(:,j))==ymax))THEN
+    smesh%bes(i)=3
+  ELSE IF(ALL(smesh%r(2,smesh%le(:,j))==ymin))THEN
     smesh%bes(i)=4
   END IF
 END DO
