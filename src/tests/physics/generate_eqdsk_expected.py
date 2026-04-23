@@ -21,8 +21,6 @@ fluxSurfaces tracer requires the legacy versions.
 """
 
 import os
-import sys
-import importlib.util
 import warnings
 import pprint
 

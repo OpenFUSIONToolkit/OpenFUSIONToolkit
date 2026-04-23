@@ -1415,7 +1415,15 @@ class GEQDSKEquilibrium:
         r'''! All flux-surface-averaged quantities dict
 
         Keys: `R`, `1/R`, `1/R**2`, `R**2`, `Bp`, `Bp**2`, `Bt`, `Bt**2`,
-        `Btot**2`, `Jt`, `Jt/R`, `vp`, `q`, `ip`, `F`, `PPRIME`, `FFPRIM`
+        `Btot**2`, `Jt`, `Jt/R`, `Jt/R_num`, `Jt_GS`, `vp`, `q`, `ip`, `F`,
+        `PPRIME`, `FFPRIM`.
+
+        `Jt/R` is the analytic Grad-Shafranov form
+        \f$-\sigma_{Bp}(p' + FF'\langle 1/R^2\rangle/\mu_0)(2\pi)^{e_{Bp}}\f$;
+        `Jt_GS` is the companion \f$\langle J_t\rangle\f$ analytic form used by
+        `j_tor_averaged_direct`.  `Jt` and `Jt/R_num` are the numerical
+        counterparts computed from \f$\nabla\times B/\mu_0\f$ on the contour,
+        retained for cross-checks.
         '''
         self._trace_surfaces()
         return self._cache["avg"]
