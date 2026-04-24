@@ -24,6 +24,22 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
+_NUMERIC = (int, float, np.integer, np.floating)
+
+
+def _round_outputs(obj: Any, ndigits: int = 2) -> Any:
+    """Round floats (and ints as floats) for JSON-friendly regression output; preserve bool, None, str."""
+    if obj is None or isinstance(obj, bool) or isinstance(obj, str):
+        return obj
+    if isinstance(obj, _NUMERIC):
+        return round(float(obj), ndigits)
+    if isinstance(obj, dict):
+        return {k: _round_outputs(v, ndigits) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        seq = [_round_outputs(x, ndigits) for x in obj]
+        return type(obj)(seq) if isinstance(obj, tuple) else seq
+    return obj
+
 # Repo src/python on path when run as script from elsewhere
 _TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO_ROOT = os.path.abspath(os.path.join(_TESTS_DIR, "..", ".."))
@@ -66,6 +82,45 @@ def _build_min_norm_coil_reg(mygs) -> None:
             reg_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=1.0e-2))
     reg_terms.append(mygs.coil_reg_term({"#VSC": 1.0}, target=0.0, weight=1.0e2))
     mygs.set_coil_reg(reg_terms=reg_terms)
+
+
+def _final_toktox_equilibrium_stats(tt) -> Dict[str, Any]:
+    """Scalars from each TokaMaker equilibrium produced in the last ``fly()`` TM pass."""
+    out: Dict[str, Any] = {}
+    out["toktox_last_completed_loop"] = int(getattr(tt, "_current_loop", -1))
+    equil = tt.state.get("equil", {}) or {}
+    tm_times = list(tt._tm_times)
+    for i in sorted(equil.keys(), key=lambda k: int(k) if isinstance(k, (int, np.integer)) else k):
+        eq = equil[i]
+        if eq is None:
+            continue
+        try:
+            stats = eq.get_stats(li_normalization="iter")
+        except Exception:
+            continue
+        pfx = f"final_equil_i{i}_"
+        out[f"{pfx}time_s"] = float(tm_times[i]) if i < len(tm_times) else float("nan")
+        for key, val in stats.items():
+            if key == "Ip_centroid":
+                out[f"{pfx}Ip_centroid_R_m"] = float(val[0])
+                out[f"{pfx}Ip_centroid_Z_m"] = float(val[1])
+            elif isinstance(val, (float, int, np.floating, np.integer)):
+                out[f"{pfx}{key}"] = float(val)
+            elif isinstance(val, np.ndarray):
+                out[f"{pfx}{key}"] = val.astype(float).tolist()
+            else:
+                out[f"{pfx}{key}"] = val
+        try:
+            out[f"{pfx}diverted"] = bool(eq.diverted)
+            out[f"{pfx}psi_lcfs_Wb_per_rad"] = float(eq.psi_bounds[0])
+            out[f"{pfx}psi_axis_Wb_per_rad"] = float(eq.psi_bounds[1])
+        except Exception:
+            pass
+        try:
+            out[f"{pfx}vloop_V"] = float(eq.calc_loopvoltage())
+        except ValueError:
+            out[f"{pfx}vloop_V"] = None
+    return out
 
 
 def _iter_baseline_shape() -> tuple[np.ndarray, np.ndarray]:
@@ -254,6 +309,8 @@ def run_toktox_test(
     out["q95_tm_last"] = float(st["q95_tm"][-1])
     out["beta_N_tm_max"] = float(np.max(st["beta_N_tm"]))
 
+    out.update(_final_toktox_equilibrium_stats(tt))
+
     # Merge physics summary (TORAX / integrated quantities).
     for k, v in phys.items():
         if v is not None and k not in out:
@@ -265,7 +322,13 @@ def run_toktox_test(
     # tt.plot_profile_evolution(display=True, one_plot=True)
     # tt.plot_lcfs_evolution(display=True, one_plot=True)
 
-    return out
+    rounded: Dict[str, Any] = {}
+    for k, v in out.items():
+        if k.startswith("_"):
+            rounded[k] = v
+        else:
+            rounded[k] = _round_outputs(v, ndigits=2)
+    return rounded
 
 
 def main() -> None:
@@ -274,7 +337,7 @@ def main() -> None:
     elapsed_s = time.perf_counter() - t_wall0
     slim = {k: v for k, v in result.items() if not k.startswith("_")}
     print(json.dumps(slim, indent=2, sort_keys=True))
-    print(f"\nTotal wall time (script): {elapsed_s:.3f} s", flush=True)
+    print(f"\nTotal wall time (script): {elapsed_s:.2f} s", flush=True)
 
 
 if __name__ == "__main__":
