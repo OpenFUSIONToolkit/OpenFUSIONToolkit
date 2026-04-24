@@ -84,7 +84,7 @@ BASE_CONFIG = {
         'model_name': 'qlknn',
         'apply_inner_patch': True,
         'rho_inner': 0.1,
-        'apply_outer_patch': True,
+        'apply_outer_patch': False,
         'D_e_outer': 0.1,
         'V_e_outer': 0.0,
         'chi_i_outer': 2.0,
