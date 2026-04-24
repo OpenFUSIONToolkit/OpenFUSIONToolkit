@@ -871,22 +871,27 @@ class TokTox:
         if Ti_right_bc:
             self._Ti_right_bc = Ti_right_bc
 
-    def set_heating(self, generic_heat=None, generic_heat_loc=None, nbi_current=False, ecrh=None, ecrh_loc=None, ohmic=None):
+    def set_heating(self, generic_heat=None, generic_heat_loc=None, generic_heat_width=0.25, nbi_current=False, ecrh=None, ecrh_loc=None, ecrh_width=0.1, ohmic=None):
         r'''! Set heating sources for Torax.
 
         Ohmic heating is always enabled (it is on by default in BASE_CONFIG).
         @param generic_heat Generic heating (dictionary of {time: power_in_watts}).
         @param generic_heat_loc Generic heating deposition location (normalized rho).
+        @param generic_heat_width Generic heating deposition width (normalized rho).
+        @param nbi_current Use NBI current.
         @param ecrh ECRH heating (dictionary of {time: power_in_watts}).
         @param ecrh_loc ECRH deposition location (normalized rho).
+        @param ecrh_width ECRH deposition width (normalized rho).
         @param nbi_current Whether to include NBI current drive, uses _NBI_W_TO_MA = 1/16e6 to convert heating to current driven.
         '''
         if generic_heat is not None and generic_heat_loc is not None:
             self._generic_heat = generic_heat
             self._generic_heat_loc = generic_heat_loc
+            self._generic_heat_width = generic_heat_width
         if ecrh is not None and ecrh_loc is not None:
             self._ecrh_heating = ecrh
             self._ecrh_loc = ecrh_loc
+            self._ecrh_width = ecrh_width
         if ohmic is not None:
             self._ohmic_power = ohmic
         
@@ -1413,6 +1418,7 @@ class TokTox:
             myconfig['sources'].setdefault('ecrh', {})
             myconfig['sources']['ecrh']['P_total'] = self._ecrh_heating
             myconfig['sources']['ecrh']['gaussian_location'] = self._ecrh_loc
+            myconfig['sources']['ecrh']['gaussian_width'] = self._ecrh_width
 
         if self._generic_heat is not None:
             nbi_times, nbi_pow = zip(*self._generic_heat.items())    
@@ -1420,6 +1426,7 @@ class TokTox:
             myconfig['sources'].setdefault('generic_heat', {})
             myconfig['sources']['generic_heat']['P_total'] = (nbi_times, nbi_pow)
             myconfig['sources']['generic_heat']['gaussian_location'] = self._generic_heat_loc
+            myconfig['sources']['generic_heat']['gaussian_width'] = self._generic_heat_width
 
             if self._use_nbi_current:
                 myconfig['sources'].setdefault('generic_current', {})
