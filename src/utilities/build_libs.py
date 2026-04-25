@@ -546,7 +546,7 @@ class package:
         build_start = time.time()
         self.build()
         build_duration = time.time() - build_start
-        build_minutes = build_duration//60
+        build_minutes = math.floor(build_duration/60)
         print("    Elapsed Time = {0}:{1:02d}".format(build_minutes,int(build_duration-build_minutes*60)))
         os.chdir(self.root_path)
         # Check to make sure Installation succeeded

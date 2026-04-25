@@ -210,7 +210,7 @@ nregs=mg_mesh%mesh%nreg
 mesh_ptr=C_LOC(mg_mesh)
 END SUBROUTINE oft_setup_vmesh
 !---------------------------------------------------------------------------------
-!> Return references to arrays defining an existing surface mesh.
+!> Return references to arrays defining an existing volume mesh.
 !!
 !! This routine exposes pointers to the coordinate, connectivity, and region
 !! arrays stored inside the Fortran `multigrid_mesh` object referenced by

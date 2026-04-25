@@ -1432,7 +1432,7 @@ class TokaMaker():
         return colorbar
 
     def plot_mesh(self,fig,ax,lw=0.5,show_legends=True,col_max=10,split_coil_sets=False,plot_tessellated=False):
-        '''! Plot machine geometry
+        '''! Plot computational mesh and regions
 
         @param fig Figure to add to (unused)
         @param ax Axes to add to (must be scalar, [2], or [2,2])
@@ -1478,11 +1478,11 @@ class TokaMaker():
                         format_type = 2
                     else:
                         format_type = -1
-                except:
+                except IndexError: # `ax` is a 1D array
                     pass
             else:
                 format_type = -1
-        except:
+        except AttributeError: # `ax` is not an array
             format_type = 0
         if format_type < 0:
             raise ValueError("Axes for plotting must be scalar, [2], or [2,2]")

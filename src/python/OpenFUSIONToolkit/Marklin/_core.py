@@ -122,7 +122,7 @@ class Marklin():
             oft_setup_vmesh(np,rfake,np,np,lcfake,regfake,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
         elif r is not None:
             if r.shape[1] != 3:
-                raise ValueError('Point list much have 3 spatial dimensions `[np,3]`')
+                raise ValueError('Point list must have 3 spatial dimensions `[np,3]`')
             r = numpy.ascontiguousarray(r, dtype=numpy.float64)
             lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
             np = c_int(r.shape[0])

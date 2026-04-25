@@ -123,8 +123,8 @@ oft_smesh_get = ctypes_subroutine(oftpy_lib.oft_smesh_get,
 oft_setup_vmesh = ctypes_subroutine(oftpy_lib.oft_setup_vmesh,
     [c_int, ctypes_numpy_array(float64,2) ,c_int, c_int, ctypes_numpy_array(int32,2), ctypes_numpy_array(int32,1), c_int_ptr, c_void_ptr_ptr])
 
-# Get surface mesh representation: oft_vmesh_get(mesh_ptr,np,r_loc,npc,nc,lc_loc,reg_loc,nreg,error_str)
-oft_vmesh_get = ctypes_subroutine(oftpy_lib.oft_smesh_get,
+# Get volume mesh representation: oft_vmesh_get(mesh_ptr,np,r_loc,npc,nc,lc_loc,reg_loc,nreg,error_str)
+oft_vmesh_get = ctypes_subroutine(oftpy_lib.oft_vmesh_get,
     [c_void_p, c_int_ptr, c_double_ptr_ptr, c_int_ptr, c_int_ptr, c_int_ptr_ptr, c_int_ptr_ptr, c_int_ptr, c_char_p])
 
 
