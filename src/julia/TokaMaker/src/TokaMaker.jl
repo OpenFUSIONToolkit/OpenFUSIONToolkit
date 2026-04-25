@@ -42,7 +42,9 @@ using .Bootstrap: Hmode_profiles, parameterize_edge_jBS, calculate_ln_lambda,
                    redl_bootstrap, get_jphi_from_GS
 
 include("Meshing.jl")
-using .Meshing: save_gs_mesh, load_gs_mesh, GsDomain
+using .Meshing: save_gs_mesh, load_gs_mesh, GsDomain, define_region!,
+                 add_polygon!, add_rectangle!, add_annulus!, add_enclosed!,
+                 build_mesh!, get_coils, get_conductors
 
 export OFTEnv, oftpy_set_debug, oftpy_set_nthreads
 export TokamakerSettings, tokamaker_default_settings
@@ -77,6 +79,8 @@ export MirnovCon, IpCon, FluxLoopCon, DFluxCon, PressCon, QCon, SaddleCon,
        ReconConstraints, run_reconstruction!
 export Hmode_profiles, parameterize_edge_jBS, calculate_ln_lambda,
        redl_bootstrap, get_jphi_from_GS
-export save_gs_mesh, load_gs_mesh, GsDomain
+export save_gs_mesh, load_gs_mesh, GsDomain, define_region!,
+       add_polygon!, add_rectangle!, add_annulus!, add_enclosed!,
+       build_mesh!, get_coils, get_conductors
 
 end # module

@@ -103,6 +103,7 @@ using TokaMaker
     if !isempty(TokaMaker.LibPath.liboftpy[])
         include("test_solovev.jl")
         include("test_ITER.jl")
+        include("test_meshing.jl")
     else
         @info "Skipping runtime tests: liboftpy not located. Build OFT with -DOFT_BUILD_PYTHON=ON."
     end
