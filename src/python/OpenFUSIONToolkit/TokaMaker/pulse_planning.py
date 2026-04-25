@@ -878,7 +878,6 @@ class TokTox:
         @param generic_heat Generic heating (dictionary of {time: power_in_watts}).
         @param generic_heat_loc Generic heating deposition location (normalized rho).
         @param generic_heat_width Generic heating deposition width (normalized rho).
-        @param nbi_current Use NBI current.
         @param ecrh ECRH heating (dictionary of {time: power_in_watts}).
         @param ecrh_loc ECRH deposition location (normalized rho).
         @param ecrh_width ECRH deposition width (normalized rho).
