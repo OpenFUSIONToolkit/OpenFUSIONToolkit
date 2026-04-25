@@ -11,7 +11,6 @@
 '''
 import sys
 import json
-import math
 import numpy
 from .._interface import *
 from ..util import oft_warning, run_shell_command
