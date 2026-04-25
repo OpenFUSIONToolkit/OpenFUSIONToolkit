@@ -252,6 +252,43 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         make test_examples
 
+    - name: Setup Julia (TokaMaker.jl)
+      if: ${{ matrix.parallel == 'openmp' && matrix.config.os != 'macos-15-intel' }}
+      uses: julia-actions/setup-julia@v2
+      with:
+        version: '1.11'
+
+    - name: Cache Julia depot
+      if: ${{ matrix.parallel == 'openmp' && matrix.config.os != 'macos-15-intel' }}
+      uses: julia-actions/cache@v2
+      with:
+        # Scope the cache key to the package's manifest-resolving inputs so
+        # cache hits are stable across CI runs but invalidate when deps change.
+        cache-name: 'tokamaker-jl-${{ matrix.config.name }}'
+        # Cache hits across PRs benefit even with miss-on-first-build.
+        cache-registries: 'true'
+        cache-compiled: 'true'
+
+    - name: Build TokaMaker.jl
+      if: ${{ matrix.parallel == 'openmp' && matrix.config.os != 'macos-15-intel' }}
+      uses: julia-actions/julia-buildpkg@v1
+      with:
+        project: src/julia/TokaMaker
+
+    - name: ABI sync check (TokaMaker.jl)
+      if: ${{ matrix.parallel == 'openmp' && matrix.config.os != 'macos-15-intel' }}
+      shell: bash
+      working-directory: src/julia/TokaMaker
+      run: julia --project=. dev/check_abi_sync.jl
+
+    - name: Test TokaMaker.jl
+      if: ${{ matrix.parallel == 'openmp' && matrix.config.os != 'macos-15-intel' }}
+      uses: julia-actions/julia-runtest@v1
+      env:
+        OFT_LIBRARY_PATH: ${{ github.workspace }}/builds/install_release/bin
+      with:
+        project: src/julia/TokaMaker
+
     - name: Fixup cache
       shell: bash
       working-directory: builds
