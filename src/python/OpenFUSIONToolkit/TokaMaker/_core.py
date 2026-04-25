@@ -1557,17 +1557,17 @@ class TokaMaker():
                 ax_tmp.set_ylabel('Z (m)')
         if show_legends:
             if format_type == 0:
-                ncols = max(1,numpy.floor((1+nCond+nCoil+nVac)/col_max))
+                ncols = max(1,(1+nCond+nCoil+nVac)//col_max)
                 plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
             elif format_type == 1:
-                ncols = max(1,numpy.floor((1+nVac)/col_max))
+                ncols = max(1,(1+nVac)//col_max)
                 plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
-                ncols = max(1,numpy.floor((nCond+nCoil)/col_max))
+                ncols = max(1,(nCond+nCoil)//col_max)
                 cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
             elif format_type == 2:
-                ncols = max(1,numpy.floor((nCond)/col_max))
+                ncols = max(1,(nCond)//col_max)
                 cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
-                ncols = max(1,numpy.floor((nCoil)/col_max))
+                ncols = max(1,(nCoil)//col_max)
                 coil_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
     
     def plot_psi(self,fig,ax,equilibrium=None,psi=None,normalized=True,
