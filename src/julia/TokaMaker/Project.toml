@@ -1,0 +1,42 @@
+name = "TokaMaker"
+uuid = "9c5b9a4f-8b3c-4f2e-a1d0-3e6f7d8a2b51"
+authors = ["Open FUSION Toolkit contributors"]
+version = "0.1.0-dev"
+
+[deps]
+Distributed = "8ba89e20-285c-5b6f-9357-94700520ee1b"
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+DSP = "717857b8-e6f2-59f4-9121-6e50c889abd2"
+HDF5 = "f67ccb44-e63f-5c2f-98bd-6dc0ccc4ba2f"
+Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LsqFit = "2fda8390-95c7-5789-9bda-21331edee243"
+OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Roots = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+Triangulate = "f7e6ffb2-c36d-4f8f-a77e-16e897189344"
+
+[weakdeps]
+Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
+
+[extensions]
+TokaMakerMakieExt = "Makie"
+
+[compat]
+julia = "1.9"
+Distributions = "0.25"
+DSP = "0.7, 0.8"
+HDF5 = "0.16, 0.17"
+Interpolations = "0.14, 0.15"
+JSON3 = "1"
+LsqFit = "0.13, 0.14, 0.15"
+OrderedCollections = "1"
+Roots = "2"
+StaticArrays = "1"
+Triangulate = "2"
+Makie = "0.20, 0.21, 0.22"
