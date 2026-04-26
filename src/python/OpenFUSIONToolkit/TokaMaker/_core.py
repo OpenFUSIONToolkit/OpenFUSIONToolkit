@@ -2451,9 +2451,10 @@ class TokaMaker_equilibrium():
             'tflux': tflux,
             'l_i': li
         }
-        if self._F0 > 0.0:
-            eq_stats['beta_tor'] = 100.0*(2.0*pvol*mu0/vol)/(numpy.power(self._F0/R_geo,2))
-            eq_stats['beta_n'] = eq_stats['beta_tor']*eq_stats['a_geo']*(self._F0/R_geo)/(Ip/1.E6)
+        if abs(self._F0) > 0.0:
+            F0_abs = abs(self._F0)
+            eq_stats['beta_tor'] = 100.0*(2.0*pvol*mu0/vol)/(numpy.power(F0_abs/R_geo,2))
+            eq_stats['beta_n'] = eq_stats['beta_tor']*eq_stats['a_geo']*(F0_abs/R_geo)/(Ip/1.E6)
         return eq_stats
 
     def print_info(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
