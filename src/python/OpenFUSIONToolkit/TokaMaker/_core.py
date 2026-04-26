@@ -703,6 +703,32 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files)
 
+    def load_kinetic_profiles(self, te_file='none', ti_file='none', ne_file='none', ni_file='none'):
+        r'''! Load kinetic profiles (electron and ion temperature and density) from files
+
+        @param te_file File containing electron temperature profile in KeV
+        @param ti_file File containing ion temperature profile in KeV
+        @param ne_file File containing electron density profile in m^-3
+        @param ni_file File containing ion density profile in m^-3
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.load_kinetic_profiles(te_file,ti_file,ne_file,ni_file)
+
+    def set_kinetic_profiles(self, te_prof=None, ti_prof=None, ne_prof=None, ni_prof=None, keep_files=False, Zeff=None):
+        r'''! Set kinetic profiles (electron and ion temperature and density) using a piecewise linear definition
+
+        @param te_prof Dictionary object containing electron temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ti_prof Dictionary object containing ion temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ne_prof Dictionary object containing electron density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param ni_prof Dictionary object containing ion density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param keep_files Retain temporary profile files
+        @param Zeff Effective charge for bootstrap calculation
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.set_kinetic_profiles(te_prof,ti_prof,ne_prof,ni_prof,keep_files,Zeff)
+
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
 
@@ -2131,6 +2157,68 @@ class TokaMaker_equilibrium():
                 except:
                     print('Warning: unable to delete temporary file "{0}"'.format(file))
     
+    def load_kinetic_profiles(self, te_file='none', ti_file='none', ne_file='none', ni_file='none'):
+        r'''! Load kinetic flux function profiles (electron/ion temperature and density) from files
+
+        @param te_file File containing electron temperature profile in KeV
+        @param ti_file File containing ion temperature profile in KeV
+        @param ne_file File containing electron density profile in m^-3
+        @param ni_file File containing ion density profile in m^-3
+        '''
+
+        te_file_c = self._oft_env.path2c(te_file)
+        ne_file_c = self._oft_env.path2c(ne_file)
+        ti_file_c = self._oft_env.path2c(ti_file)
+        ni_file_c = self._oft_env.path2c(ni_file)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_load_kinetic_profiles(self.c_ptr,c_double(self._Zeff),te_file_c,ne_file_c,ti_file_c,ni_file_c,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+
+    def set_kinetic_profiles(self, te_prof=None, ti_prof=None, ne_prof=None, ni_prof=None, keep_files=False, Zeff=None):
+        r'''! Set kinetic profiles (electron/ion temperature and density) using a piecewise linear definition
+
+        @param te_prof Dictionary object containing electron temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ti_prof Dictionary object containing ion temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ne_prof Dictionary object containing electron density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param ni_prof Dictionary object containing ion density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param keep_files Retain temporary profile files
+        @param Zeff Effective charge for bootstrap calculation
+        '''
+
+        if Zeff is None:
+            raise ValueError("Zeff must be provided when setting kinetic profiles")
+        self._Zeff = Zeff
+
+        delete_files = []
+        te_file = 'none'
+        if te_prof is not None:
+            te_file = self._oft_env.unique_tmpfile('tokamaker_te.prof')
+            create_prof_file(self, te_file, te_prof, "Te")
+            delete_files.append(te_file)
+        ti_file = 'none'
+        if ti_prof is not None:
+            ti_file = self._oft_env.unique_tmpfile('tokamaker_ti.prof')
+            create_prof_file(self, ti_file, ti_prof, "Ti")
+            delete_files.append(ti_file)
+        ne_file = 'none'
+        if ne_prof is not None:
+            ne_file = self._oft_env.unique_tmpfile('tokamaker_ne.prof')
+            create_prof_file(self, ne_file, ne_prof, "ne")
+            delete_files.append(ne_file)
+        ni_file = 'none'
+        if ni_prof is not None:
+            ni_file = self._oft_env.unique_tmpfile('tokamaker_ni.prof')
+            create_prof_file(self, ni_file, ni_prof, "ni")
+            delete_files.append(ni_file)
+        self.load_kinetic_profiles(te_file=te_file, ti_file=ti_file, ne_file=ne_file, ni_file=ni_file)
+        if not keep_files:
+            for file in delete_files:
+                try:
+                    os.remove(file)
+                except:
+                    print('Warning: unable to delete temporary file "{0}"'.format(file))
+
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
 
