@@ -104,6 +104,11 @@ using TokaMaker
         include("test_solovev.jl")
         include("test_ITER.jl")
         include("test_meshing.jl")
+        include("test_fields_and_stats.jl")
+        include("test_ITER_eig_stability.jl")
+        include("test_plotting.jl")
+        include("test_reconstruction.jl")
+        include("test_bootstrap_composers.jl")
     else
         @info "Skipping runtime tests: liboftpy not located. Build OFT with -DOFT_BUILD_PYTHON=ON."
     end

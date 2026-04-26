@@ -346,9 +346,215 @@ get_jphi_from_GS(ffprime, pprime, R_avg, one_over_R_avg) =
     @. ffprime * (one_over_R_avg / _MU0) + R_avg * pprime
 
 # ----------------------------------------------------------------------------
-# TODO: solve_jphi, find_optimal_scale, analyze_bootstrap_edge_spike,
-# solve_with_bootstrap. These compose the GS solver and require the full
-# Phase 2 + 5 method set; left as a follow-up since the pure bootstrap
-# building blocks above are already self-contained and testable.
+# Composer functions that combine bootstrap calculations with the GS solver.
+
+"""
+    solve_jphi(gs, ffp_prof, pp_prof, Ip_target, pax_target)
+
+Set the toroidal-current profile (`jphi-linterp`) and pressure profile, then
+solve for equilibrium. Mirrors `bootstrap.solve_jphi`.
+"""
+function solve_jphi(gs, ffp_prof::AbstractDict, pp_prof::AbstractDict,
+                    Ip_target::Real, pax_target::Real)
+    ffp_prof["type"] = "jphi-linterp"
+    # Late binding to avoid Bootstrap → Core dependency at module load
+    Base.invokelatest(set_targets!_anon, gs, Ip_target, pax_target)
+    Base.invokelatest(set_profiles!_anon, gs, ffp_prof, pp_prof)
+    Base.invokelatest(solve!_anon, gs)
+    return nothing
+end
+
+# Stub callbacks resolved at runtime so this module doesn't need to know the
+# Tokamaker type at compile time. The TokaMaker top-level module wires these.
+const set_targets!_anon = Ref{Function}()
+const set_profiles!_anon = Ref{Function}()
+const solve!_anon = Ref{Function}()
+const get_profiles_anon = Ref{Function}()
+const get_q_anon = Ref{Function}()
+const get_stats_anon = Ref{Function}()
+const compute_flux_integral_anon = Ref{Function}()
+
+"""
+    find_optimal_scale(gs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
+                       Ip_target; psi_pad=1e-3, spike_prof=nothing,
+                       find_j0=true, scale_j0=1.0, tolerance=1e-2,
+                       max_iter=5, verbose=true)
+
+Secant-method search for a scale factor `α` such that the input current
+profile `α * j_inductive + spike_prof` produces the requested `j_0` (when
+`find_j0=true`) or `I_p` (when `find_j0=false`) after a GS solve. Mirrors
+`bootstrap.find_optimal_scale`.
+"""
+function find_optimal_scale(gs, psi_N::AbstractVector, pressure::AbstractVector,
+                            ffp_prof::AbstractDict, pp_prof::AbstractDict,
+                            j_inductive::AbstractVector, Ip_target::Real;
+                            psi_pad::Real=1e-3,
+                            spike_prof::Union{Nothing,AbstractVector}=nothing,
+                            find_j0::Bool=true, scale_j0::Real=1.0,
+                            tolerance::Real=1e-2, max_iter::Integer=5,
+                            verbose::Bool=true)
+    n_psi = length(psi_N)
+    spike = spike_prof === nothing ? zeros(Float64, length(j_inductive)) :
+            Vector{Float64}(spike_prof)
+    j_ind = Vector{Float64}(j_inductive)
+    last_jphi = zeros(Float64, n_psi)
+
+    function get_j0_error(scale_val)
+        matched = scale_val .* j_ind .+ spike
+        ffp_prof["type"] = "jphi-linterp"; ffp_prof["y"] = matched
+        solve_jphi(gs, ffp_prof, pp_prof, Ip_target, pressure[1])
+        eq = gs.equilibrium
+        profs = get_profiles_anon[](eq; npsi=n_psi, psi_pad=psi_pad)
+        qres = get_q_anon[](eq; npsi=n_psi, psi_pad=psi_pad)
+        out_jphi = get_jphi_from_GS(profs.F .* profs.Fp, profs.Pp,
+                                     qres.ravgs[1, :], qres.ravgs[2, :])
+        last_jphi = out_jphi
+        input_j0 = scale_val * j_ind[1] + spike[1]
+        output_j0 = out_jphi[1]
+        diff = input_j0 - output_j0
+        rel = abs(diff) / abs(output_j0 + eps(Float64))
+        verbose && @info "  scale=$(round(scale_val; digits=4))  j0_in=$(round(input_j0; sigdigits=4))  j0_out=$(round(output_j0; sigdigits=4))  rel=$(round(rel; sigdigits=3))"
+        return diff, rel
+    end
+
+    function get_Ip_error(scale_val)
+        ffp_prof["type"] = "jphi-linterp"
+        ffp_prof["y"] = scale_j0 .* j_ind .+ spike
+        solve_jphi(gs, ffp_prof, pp_prof, Ip_target * scale_val, pressure[1])
+        stats = get_stats_anon[](gs.equilibrium; lcfs_pad=psi_pad)
+        out_Ip = stats["Ip"]
+        diff = out_Ip - Ip_target
+        rel = abs(diff) / max(abs(Ip_target), eps(Float64))
+        verbose && @info "  scale=$(round(scale_val; digits=4))  Ip_out=$(round(out_Ip / 1e6; sigdigits=4)) MA  rel=$(round(rel; sigdigits=3))"
+        return diff, rel
+    end
+
+    err_fun = find_j0 ? get_j0_error : get_Ip_error
+
+    p0 = 1.0
+    err0, rel0 = err_fun(p0)
+    rel0 < tolerance && return p0, last_jphi
+    p1 = if find_j0
+        err0 < 0 ? 1.2 : 0.8
+    else
+        err0 < 0 ? 1.01 : 0.99
+    end
+    err1, rel1 = err_fun(p1)
+    rel1 < tolerance && return p1, last_jphi
+
+    for i in 1:max_iter
+        abs(err1 - err0) < 1e-9 && break
+        p_new = p1 - err1 * (p1 - p0) / (err1 - err0)
+        p_new = clamp(p_new, 0.1, 5.0)
+        err_new, rel_new = err_fun(p_new)
+        rel_new < tolerance && return p_new, last_jphi
+        p0, err0 = p1, err1
+        p1, err1 = p_new, err_new
+    end
+    verbose && @info "find_optimal_scale: max_iter reached, returning best last value"
+    return p1, last_jphi
+end
+
+# ----------------------------------------------------------------------------
+# Peak detection — minimal subset of scipy.signal.find_peaks for our use.
+#
+# We only need: positions of local maxima (with optional height threshold).
+# Returns indices into `y` (1-based).
+
+"Find local-max indices in `y` where each peak satisfies y[i] > height."
+function find_peaks(y::AbstractVector; height::Real=-Inf)
+    n = length(y)
+    n < 3 && return Int[]
+    peaks = Int[]
+    @inbounds for i in 2:n-1
+        if y[i] > y[i-1] && y[i] >= y[i+1] && y[i] > height
+            push!(peaks, i)
+        end
+    end
+    return peaks
+end
+
+"Approximate full-width-at-half-max around peak index `idx`. Returns
+`(width, left_idx, right_idx)` with left/right indices clamped to the array."
+function peak_widths(y::AbstractVector, idx::Int; rel_height::Real=0.5)
+    n = length(y)
+    target = y[idx] * rel_height
+    li = idx
+    while li > 1 && y[li] > target
+        li -= 1
+    end
+    ri = idx
+    while ri < n && y[ri] > target
+        ri += 1
+    end
+    return ri - li, li, ri
+end
+
+"""
+    analyze_bootstrap_edge_spike(psi_N, j_BS) -> Dict
+
+Detect the bootstrap edge spike, compute a smoothly-blended core+spike
+profile via cubic Hermite interpolation. Mirrors a simplified version of
+`bootstrap.analyze_bootstrap_edge_spike` — skips the optional curve_fit
+parameterized-spike output (which uses scipy curve_fit and isn't strictly
+required for `solve_with_bootstrap`).
+"""
+function analyze_bootstrap_edge_spike(psi_N::AbstractVector, j_BS::AbstractVector)
+    edge_mask = psi_N .>= 0.7
+    psi_edge = psi_N[edge_mask]
+    j_edge = j_BS[edge_mask]
+    edge_peaks = find_peaks(j_edge; height=0.0)
+    if isempty(edge_peaks)
+        @info "No clear bootstrap edge peak found"
+        return nothing
+    end
+    # Pick peak closest to psi_N=1
+    idx_peak_local = edge_peaks[argmax(psi_edge[edge_peaks])]
+    peak_psi = psi_edge[idx_peak_local]
+    peak_height = j_edge[idx_peak_local]
+    # Find core minimum between psi=0.5 and the peak
+    core_mask = (psi_N .> 0.5) .& (psi_N .< peak_psi)
+    j_core = j_BS[core_mask]; psi_core = psi_N[core_mask]
+    isempty(j_core) && return nothing
+    lmin_arg = argmin(j_core)
+    lmin_jBS = j_core[lmin_arg]
+    fit_mask = psi_N .>= psi_core[lmin_arg]
+    masked_spike = fill(lmin_jBS, length(psi_N))
+    masked_spike[fit_mask] .= j_BS[fit_mask]
+    # Smoothing window via cubic Hermite blend
+    jBS_min_loc = psi_core[lmin_arg]
+    dist_to_peak = peak_psi - jBS_min_loc
+    blend_width = min(0.5 * dist_to_peak, 0.2)
+    x_start = jBS_min_loc - blend_width / 2.0
+    x_end = jBS_min_loc + blend_width / 2.0
+    idx_start = argmin(abs.(psi_N .- x_start))
+    idx_end = argmin(abs.(psi_N .- x_end))
+    idx_start = max(1, idx_start)
+    idx_end = min(length(psi_N) - 1, idx_end)
+    y_start = masked_spike[idx_start]; dy_start = 0.0
+    y_end = masked_spike[idx_end]
+    dy_end = (masked_spike[idx_end + 1] - masked_spike[idx_end - 1]) /
+             (psi_N[idx_end + 1] - psi_N[idx_end - 1])
+    x_window = psi_N[idx_start:idx_end]
+    t = (x_window .- x_window[1]) ./ (x_window[end] - x_window[1] + eps(Float64))
+    h00 = @. 2 * t^3 - 3 * t^2 + 1
+    h10 = @. t^3 - 2 * t^2 + t
+    h01 = @. -2 * t^3 + 3 * t^2
+    h11 = @. t^3 - t^2
+    dx = x_window[end] - x_window[1]
+    masked_spike[idx_start:idx_end] .= h00 .* y_start .+ h10 .* dx .* dy_start .+
+                                        h01 .* y_end .+ h11 .* dx .* dy_end
+    fwhm_idx = peak_widths(j_edge, idx_peak_local; rel_height=0.5)
+    sigma_init = fwhm_idx[1] > 0 ?
+        (psi_edge[min(fwhm_idx[3], length(psi_edge))] -
+         psi_edge[max(fwhm_idx[2], 1)]) / 2.355 : 0.01
+    return Dict{String,Any}(
+        "sigma" => sigma_init,
+        "background" => lmin_jBS,
+        "peak_psi" => peak_psi,
+        "peak_height" => peak_height,
+        "masked_spike" => masked_spike,
+    )
+end
 
 end # module

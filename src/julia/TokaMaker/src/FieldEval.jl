@@ -56,8 +56,12 @@ function _destroy_field_eval!(fi::TokamakerFieldInterpolator)
 end
 
 function get_field_eval(eq::TokaMakerEquilibrium, field_type::AbstractString)
-    haskey(_FIELD_TYPES, field_type) || error("Unknown field_type \"$field_type\"")
-    imode, dim = _FIELD_TYPES[field_type]
+    # Match Python's case-insensitive lookup
+    canonical = Dict("B" => "B", "PSI" => "psi", "F" => "F", "P" => "P",
+                     "DPSI" => "dPSI", "DBR" => "dBr", "DBT" => "dBt", "DBZ" => "dBz")
+    key = get(canonical, uppercase(field_type), nothing)
+    key === nothing && error("Unknown field_type \"$field_type\" (expected B, psi, F, P, dPSI, dBr, dBt, dBz)")
+    imode, dim = _FIELD_TYPES[key]
     int_obj = Ref{Ptr{Cvoid}}(C_NULL)
     buf = errbuf()
     c_tokamaker_get_field_eval(eq.eq_ptr, imode, int_obj, buf)
