@@ -128,11 +128,7 @@ function get_psi(eq::TokaMakerEquilibrium; normalized::Bool=true)
     if normalized
         denom = psi_max[] - psi_lim[]
         if abs(denom) > 0
-            if eq.psi_convention == 0
-                @. psi = (psi_lim[] - psi) / denom
-            else
-                @. psi = (psi - psi_lim[]) / denom
-            end
+            @. psi = (psi - psi_lim[]) / denom
         end
     end
     return psi
