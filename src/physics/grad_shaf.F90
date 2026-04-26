@@ -375,6 +375,19 @@ contains
   !> Needs docs
   procedure :: delete => gsinv_destroy
 end type gsinv_interp
+!------------------------------------------------------------------------------
+!> Interpolation object for computing Sauter trapped-particle factors
+!! (accumulates flux-surface averages of B, R, and bounce integrals)
+!------------------------------------------------------------------------------
+type, extends(gsinv_interp) :: sauter_interp
+  logical :: stage_1 = .FALSE. !< Stage 1 pass (finding Bmax)
+  real(8) :: f_surf = 0.d0     !< F surface value (R*Bt)
+  real(8) :: bmax = -1.d0      !< Maximum |B| on surface (set in stage 1)
+  real(8) :: mag_axis(2) = 0.d0 !< Magnetic axis (R, Z)
+contains
+  !> Evaluate ODE RHS for Sauter integration
+  procedure :: interp => sauter_apply
+end type sauter_interp
 !---
 abstract interface
   !------------------------------------------------------------------------------
@@ -6082,4 +6095,160 @@ DEALLOCATE(ltmp)
 DEALLOCATE(graphs(1,1)%g,tmp_vec)
 DEBUG_STACK_POP
 end subroutine gs_mat_create
+!------------------------------------------------------------------------------
+!> Evaluate terms in augmented tracing ODE for computing Sauter factors
+!! (see @ref sauter_fc)
+!------------------------------------------------------------------------------
+subroutine sauter_apply(self,cell,f,gop,val)
+class(sauter_interp), intent(inout) :: self !< Interpolation object
+integer(4), intent(in) :: cell !< Cell for interpolation
+real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
+real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+real(8), intent(out) :: val(:) !< Reconstructed field at f [8]
+integer(4), allocatable :: j(:)
+integer(4) :: jc
+real(8) :: rop(3),pt(3),grad(3)
+real(8) :: s,c,Bp2,Bt2,mod_B,bratio
+!---Get dofs
+allocate(j(self%lag_rep%nce))
+call self%lag_rep%ncdofs(cell,j)
+!---Reconstruct gradient
+grad=0.d0
+do jc=1,self%lag_rep%nce
+  call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
+  grad=grad+self%uvals(j(jc))*rop
+end do
+!---Get radial position
+pt=self%mesh%log2phys(cell,f)
+s=SIN(self%t)
+c=COS(self%t)
+Bp2 = (grad(1)**2 + grad(2)**2)/pt(1)**2
+Bt2 = (self%f_surf/pt(1))**2
+mod_B = SQRT(Bp2+Bt2)
+!---Position
+val(1)=(self%rho*(grad(1)*s-grad(2)*c))/(grad(1)*c+grad(2)*s)
+val(2)=pt(1)*SQRT((self%rho**2+val(1)**2)/SUM(grad**2))
+!---Geometric factors
+val(3)=val(2)*pt(1)         ! <R>
+val(4)=val(2)/pt(1)         ! <1/R>
+val(5)=val(2)*SQRT((pt(1)-self%mag_axis(1))**2+(pt(2)-self%mag_axis(2))**2)  ! <a>
+!---Magnetic field averages
+val(6)=val(2)*SQRT(Bp2+Bt2) ! <|B|>
+val(7)=val(2)*(Bp2+Bt2)     ! <|B|^2>
+IF(self%stage_1)THEN
+  self%bmax = MAX(self%bmax,mod_B)
+  val(8) = 0.d0  ! not used in stage 1; zero to prevent NaN accumulation
+  val(9) = 0.d0  ! likewise
+ELSE
+  bratio = MIN(1.d0,mod_B/self%bmax)
+  val(8)=val(2)*((1.d0 - SQRT(1.d0 - bratio) * (1.d0 + bratio / 2.d0)) / bratio**2)
+  val(9) = val(2)/pt(1)**2   ! q integrand: q = F_surf/(2π) * ∮ val(9)
+END IF
+deallocate(j)
+end subroutine sauter_apply
+!------------------------------------------------------------------------------
+!> Compute factors required for Sauter bootstrap formula
+!------------------------------------------------------------------------------
+subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs,qprof)
+class(gs_equil), intent(inout) :: gseq !< G-S object
+integer(4), intent(in) :: nr !< Number of flux sample points
+real(8), intent(in) :: psi_q(nr) !< Location of flux sample points in normalised psi
+real(8), intent(out) :: fc(nr) !< Circulating particle fraction \f$ f_c \f$
+real(8), intent(out) :: r_avgs(nr,3) !< Flux surface averaged radial coords \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
+real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field \f$<|B|>\f$, \f$<|B|^2>\f$
+real(8), optional, intent(out) :: qprof(nr) !< Safety factor q on each surface (avoids a separate gs_get_qprof call)
+real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi,h,h2,hf,ftu,ftl
+real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
+type(oft_lag_brinterp) :: psi_int
+real(8), pointer :: ptout(:,:)
+real(8), parameter :: tol=1.d-10
+integer(4) :: i,j,cell
+type(sauter_interp), target :: field
+type(gs_factory), pointer :: device
+device=>gseq%device
+raxis=gseq%o_point(1)
+zaxis=gseq%o_point(2)
+x1=0.d0; x2=1.d0
+IF(gseq%plasma_bounds(1)>-1.d98)THEN
+  x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
+END IF
+psi_int%u=>gseq%psi
+CALL psi_int%setup(device%fe_rep)
+!---Find Rmax along Z=zaxis
+rmax=raxis
+cell=0
+DO j=1,100
+  pt=[(device%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  CALL bmesh_findcell(device%mesh,cell,pt,f)
+  IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
+  CALL psi_int%interp(cell,f,gop,psi_tmp)
+  IF( psi_tmp(1) < x1)EXIT
+  rmax=pt(1)
+END DO
+pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]
+IF(oft_debug_print(1))THEN
+  WRITE(*,'(2A)')oft_indent,'Axis Position:'
+  CALL oft_increase_indent
+  WRITE(*,'(2A,ES11.3)')oft_indent,'R    = ',raxis
+  WRITE(*,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
+  WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
+  CALL oft_decrease_indent
+END IF
+call set_tracer(1)
+field%u=>gseq%psi
+field%mag_axis=gseq%o_point
+CALL field%setup(device%fe_rep)
+active_tracer%neq=9
+active_tracer%B=>field
+active_tracer%maxsteps=8e4
+active_tracer%raxis=raxis
+active_tracer%zaxis=zaxis
+active_tracer%inv=.TRUE.
+ALLOCATE(ptout(3,active_tracer%maxsteps+1))
+do j=1,nr
+  psi_surf=psi_q(j)*(x2-x1) + x1
+  IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN
+    active_tracer%tol=1.d-10
+  ELSE
+    active_tracer%tol=1.d-8
+  END IF
+  pt=pt_last
+  CALL gs_psi2r(gseq,psi_surf,pt,psi_int=psi_int)
+  IF(gseq%mode==0)THEN
+    fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
+  ELSE
+    fpol=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
+      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+  END IF
+  field%f_surf=fpol
+  field%bmax=0.d0
+  field%stage_1=.TRUE.
+  CALL tracinginv_fs(device%mesh,pt(1:2))
+  field%stage_1=.FALSE.
+  CALL tracinginv_fs(device%mesh,pt(1:2))
+  pt_last=pt
+  if(active_tracer%status/=1)THEN
+    WRITE(*,*)j,pt
+    CALL oft_warn("sauter_fc: Trace did not complete")
+    CYCLE
+  end if
+  r_avgs(j,1)=active_tracer%v(3)/active_tracer%v(2)
+  r_avgs(j,2)=active_tracer%v(4)/active_tracer%v(2)
+  r_avgs(j,3)=active_tracer%v(5)/active_tracer%v(2)
+  modb_avgs(j,1)=active_tracer%v(6)/active_tracer%v(2)
+  modb_avgs(j,2)=active_tracer%v(7)/active_tracer%v(2)
+  h = modb_avgs(j,1)/field%bmax
+  h2 = modb_avgs(j,2)/field%bmax**2
+  ftu = 1.d0 - h2 / (h**2) * (1.d0 - SQRT(1.d0 - h) * (1.d0 + 0.5d0 * h))
+  hf = active_tracer%v(8)/active_tracer%v(2)
+  ftl = 1.d0 - h2 * hf
+  fc(j) = 1.d0 - (0.75d0 * ftu + 0.25d0 * ftl)
+  qpsi = fpol * active_tracer%v(9) / (2*pi)
+  IF(PRESENT(qprof)) qprof(j) = qpsi
+end do
+CALL field%delete
+CALL active_tracer%delete
+DEALLOCATE(ptout)
+CALL psi_int%delete()
+end subroutine sauter_fc
 end module oft_gs
