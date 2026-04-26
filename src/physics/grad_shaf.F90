@@ -287,6 +287,11 @@ TYPE :: gs_equil
   CLASS(gs_ani_press), POINTER :: P_ani => NULL() !< Anisotropic flux interpolator
   CLASS(flux_func), POINTER :: eta => NULL() !< Resistivity flux function
   CLASS(flux_func), POINTER :: I_NI => NULL() !< Non-inductive F*F' flux function
+  CLASS(flux_func), POINTER :: Te => NULL() !< Electron temperature flux function [keV]
+  CLASS(flux_func), POINTER :: Ti => NULL() !< Ion temperature flux function [keV]
+  CLASS(flux_func), POINTER :: ne => NULL() !< Electron density flux function [m^-3]
+  CLASS(flux_func), POINTER :: ni => NULL() !< Ion density flux function [m^-3]
+  REAL(r8) :: Zeff = 1.d0 !< Effective charge for bootstrap calculation
   TYPE(gs_factory), POINTER :: device => NULL() !< Device/factory object for equilibrium
 CONTAINS
   !>

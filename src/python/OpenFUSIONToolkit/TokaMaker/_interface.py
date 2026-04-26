@@ -73,6 +73,10 @@ tokamaker_equil_destroy = ctypes_subroutine(oftpy_lib.tokamaker_equil_destroy,
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
     [c_void_p, c_char_p, c_double, c_char_p, c_char_p, c_char_p, c_char_p])
 
+# tokamaker_load_kinetic_profiles(tMaker_equil_ptr,Zeff,te_file,ne_file,ti_file,ni_file,error_str)
+tokamaker_load_kinetic_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_kinetic_profiles,
+    [c_void_p, c_double, c_char_p, c_char_p, c_char_p, c_char_p, c_char_p])
+
 # tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double_ptr, c_char_p])
