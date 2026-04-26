@@ -119,6 +119,8 @@ class TokaMaker():
         self.dist_coils = {}
         ## Vacuum F value
         self._F0 = 0.0
+        ## Zeff value, only used for jphi-split-bootstrap profile
+        self._Zeff = 0.0
         ## Normalized flux convention (0 -> tokamak, 1 -> spheromak)
         self.psi_convention = 0
         ## Number of regions in mesh
@@ -172,6 +174,7 @@ class TokaMaker():
         self.coil_sets = {}
         self._virtual_coils = {'#VSC': {'id': -1 ,'facs': {}}}
         self._F0 = 0.0
+        self._Zeff = 0.0
         self.nregs = -1
         self.ncoils = -1
         self.np = -1
@@ -1832,6 +1835,8 @@ class TokaMaker_equilibrium():
         if source_eq is None:
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.F0 "F0" property)
             self._F0 = copy.copy(self._tMaker._F0)
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Zeff "Zeff" property)
+            self._Zeff = copy.copy(self._tMaker._Zeff)
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Ip_target "Ip_target" property)
             self._Ip_target = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Ip_ratio_target "Ip_ratio_target" property)
@@ -2020,6 +2025,11 @@ class TokaMaker_equilibrium():
     def F0(self):
         r'''! Vacuum \f$ F = B_t(R_0) * R_0 \f$'''
         return self._F0
+
+    @property
+    def Zeff(self):
+        r'''! \f$ Z_{eff} \f$ for bootstrap calculation'''
+        return self._Zeff
 
     @property
     def Ip_target(self):
@@ -2454,6 +2464,8 @@ class TokaMaker_equilibrium():
         if self._F0 > 0.0:
             eq_stats['beta_tor'] = 100.0*(2.0*pvol*mu0/vol)/(numpy.power(self._F0/R_geo,2))
             eq_stats['beta_n'] = eq_stats['beta_tor']*eq_stats['a_geo']*(self._F0/R_geo)/(Ip/1.E6)
+        if self._Zeff != 0.0:
+            eq_stats['Zeff'] = self._Zeff
         return eq_stats
 
     def print_info(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
