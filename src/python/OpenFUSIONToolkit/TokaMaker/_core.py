@@ -987,6 +987,11 @@ class TokaMaker():
                 raise ValueError("`R0` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._tMaker_equil._R0_target = copy.copy(R0)
         if V0 is not None:
+            warn(
+                "`V0` is deprecated, use `Z0` instead. This argument will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2
+            )
             Z0 = V0
         if Z0 is not None:
             self._tMaker_equil._Z0_target = copy.copy(Z0)
@@ -1083,6 +1088,31 @@ class TokaMaker():
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return TokaMaker_equilibrium(source_eq=self._tMaker_equil,skip_targets=skip_targets,skip_constraints=skip_constraints)
+
+    def replace_eq(self,source_eq=None,source_file=None,skip_targets=False,skip_constraints=False):
+        '''! Replace the current equilibrium object with a copy of another equilibrium object or one loaded from file
+        
+        @param source_eq `TokaMaker_equilibrium` object to copy from
+        @param source_file Path to a file containing a TokaMaker equilibrium
+        @param skip_targets When copying, skip copying target values
+        @param skip_constraints When copying, skip copying constraint values
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        if source_eq is not None:
+            if source_file is not None:
+                raise ValueError("Cannot specify both `source_eq` and `source_file`")
+            self._tMaker_equil = TokaMaker_equilibrium(source_eq=source_eq,skip_targets=skip_targets,skip_constraints=skip_constraints)
+        elif source_file is not None:
+            tmp_eq = TokaMaker_equilibrium(source_eq=self._tMaker_equil,skip_targets=skip_targets,skip_constraints=skip_constraints)
+            cfilename = self._oft_env.path2c(source_file)
+            error_string = self._oft_env.get_c_errorbuff()
+            tokamaker_load_tokamaker(tmp_eq.c_ptr,cfilename,error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
+            self._tMaker_equil = tmp_eq
+        else:
+            raise ValueError("Must specify either `source_eq` or `source_file`")
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
@@ -1805,9 +1835,9 @@ class TokaMaker():
 
 
 class TokaMaker_equilibrium():
-    '''! TokaMaker G-S solver class'''
+    '''! TokaMaker G-S equilibrium class'''
     def __init__(self,TokaMaker_obj=None,source_eq=None,skip_targets=False,skip_constraints=False):
-        '''! Initialize TokaMaker object
+        '''! Initialize TokaMaker equilibrium object
 
         @param TokaMaker_obj TokaMaker object (See @ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker "TokaMaker")
         @param source_eq Existing equilibrium object to copy
@@ -2723,5 +2753,16 @@ class TokaMaker_equilibrium():
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_save_mug(self._equil_ptr,cfilename,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+    
+    def save_TokaMaker(self,filename):
+        r'''! Save current equilibrium to an HDF5 file for later use with TokaMaker
+
+        @param filename Filename to save equilibrium to
+        '''
+        cfilename = self._oft_env.path2c(filename)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_save_tokamaker(self._equil_ptr,cfilename,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)

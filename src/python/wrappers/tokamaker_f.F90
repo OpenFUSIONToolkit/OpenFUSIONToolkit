@@ -34,7 +34,7 @@ USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_de
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
-  sauter_fc, gs_calc_vloop
+  sauter_fc, gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
@@ -1391,20 +1391,20 @@ END SUBROUTINE tokamaker_set_mirror_slosh
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,V0_target,error_str) BIND(C,NAME="tokamaker_set_targets")
+SUBROUTINE tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,Z0_target,error_str) BIND(C,NAME="tokamaker_set_targets")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 REAL(c_double), VALUE, INTENT(in) :: ip_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: ip_ratio_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: pax_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: estore_target !< Needs docs
 REAL(c_double), VALUE, INTENT(in) :: R0_target !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: V0_target !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: Z0_target !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
 tMaker_obj%gs_equil%R0_target=R0_target
-tMaker_obj%gs_equil%V0_target=V0_target
+tMaker_obj%gs_equil%Z0_target=Z0_target
 tMaker_obj%gs_equil%pax_target=pax_target*mu0
 tMaker_obj%gs_equil%estore_target=estore_target*mu0
 tMaker_obj%gs_equil%itor_target=ip_target*mu0
@@ -1649,6 +1649,34 @@ CALL copy_string_rev(filename,filename_tmp)
 CALL gs_save_mug(tMaker_equil_obj,filename_tmp)
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_mug
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_save_tokamaker(tMaker_equil_ptr,filename,error_str) BIND(C,NAME="tokamaker_save_tokamaker")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL copy_string_rev(filename,filename_tmp)
+CALL gs_save_tokamaker(tMaker_equil_obj,filename_tmp)
+END SUBROUTINE tokamaker_save_tokamaker
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_load_tokamaker(tMaker_equil_ptr,filename,error_str) BIND(C,NAME="tokamaker_load_tokamaker")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
+CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL copy_string_rev(filename,filename_tmp)
+CALL gs_load_tokamaker(tMaker_equil_obj,filename_tmp,error_flag)
+CALL copy_string(TRIM(error_flag),error_str)
+END SUBROUTINE tokamaker_load_tokamaker
 !---------------------------------------------------------------------------
 !> Overwrites default coil flux contribution to non-uniform current distribution
 !------------------------------------------------------------------------------

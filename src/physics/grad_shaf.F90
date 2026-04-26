@@ -66,6 +66,8 @@ TYPE, ABSTRACT :: flux_func
   REAL(r8) :: f_offset = 0.d0 !< Offset value
   REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Current plasma bounds (for normalization)
 CONTAINS
+  !> Delete profile
+  PROCEDURE(flux_func_delete), DEFERRED :: delete
   !> Copy profile
   PROCEDURE(flux_func_copy), DEFERRED :: copy
   !> Evaluate function
@@ -80,6 +82,18 @@ CONTAINS
   PROCEDURE(flux_cofs_set), DEFERRED :: set_cofs
   !> Get current function parameterization
   PROCEDURE(flux_cofs_get), DEFERRED :: get_cofs
+  !> Save flux function definition to file
+  GENERIC :: save => save_hdf5, save_txt
+  !> Save flux function definition to HDF5 file
+  PROCEDURE(flux_save_hdf5), DEFERRED :: save_hdf5
+  !> Save flux function definition to text file
+  PROCEDURE(flux_save_txt), DEFERRED :: save_txt
+  !> Load flux function definition from file
+  GENERIC :: load => load_hdf5, load_txt
+  !> Load flux function definition from HDF5 file
+  PROCEDURE(flux_load_hdf5), DEFERRED :: load_hdf5
+  !> Load flux function definition from text file
+  PROCEDURE(flux_load_txt), DEFERRED :: load_txt
 END TYPE flux_func
 !------------------------------------------------------------------------------
 !> Internal coil region structure
@@ -267,7 +281,7 @@ TYPE :: gs_equil
   REAL(r8) :: pax_target = -1.d0 !< On-axis pressure target
   REAL(r8) :: Ip_ratio_target = -1.d99 !< Ip ratio target
   REAL(r8) :: R0_target = -1.d0 !< Magnetic axis radial target
-  REAL(r8) :: V0_target = -1.d99 !< Magnetic axis vertical target
+  REAL(r8) :: Z0_target = -1.d99 !< Magnetic axis vertical target
   REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Boundaing \f$ \psi \f$ values on [LCFS, axis]
   REAL(r8) :: o_point(2) = [-1.d0,1.d99] !< Location of magnetic axis
   REAL(r8) :: lim_point(2) = [-1.d0,1.d99] !< Location of limiting point or active X-point
@@ -375,6 +389,13 @@ abstract interface
   !------------------------------------------------------------------------------
   !> Needs Docs
   !------------------------------------------------------------------------------
+  subroutine flux_func_delete(self)
+    import flux_func
+    class(flux_func), intent(inout) :: self
+  end subroutine flux_func_delete
+  !------------------------------------------------------------------------------
+  !> Needs Docs
+  !------------------------------------------------------------------------------
   subroutine flux_func_copy(self,new)
     import flux_func
     class(flux_func), intent(inout) :: self
@@ -414,6 +435,41 @@ abstract interface
     class(flux_func), intent(inout) :: self
     real(r8), intent(out) :: c(:)
   end subroutine flux_cofs_get
+  !------------------------------------------------------------------------------
+  !> Needs Docs
+  !------------------------------------------------------------------------------
+  subroutine flux_save_hdf5(self,filename,path)
+    import flux_func
+    class(flux_func), intent(inout) :: self
+    character(LEN=*), intent(in) :: filename
+    character(LEN=*), intent(in) :: path
+  end subroutine flux_save_hdf5
+  !------------------------------------------------------------------------------
+  !> Needs Docs
+  !------------------------------------------------------------------------------
+  subroutine flux_save_txt(self,io_unit)
+    import flux_func
+    class(flux_func), intent(inout) :: self
+    integer, intent(in) :: io_unit
+  end subroutine flux_save_txt
+  !------------------------------------------------------------------------------
+  !> Needs Docs
+  !------------------------------------------------------------------------------
+  subroutine flux_load_hdf5(self,filename,path,success)
+    import flux_func
+    class(flux_func), intent(inout) :: self
+    character(LEN=*), intent(in) :: filename
+    character(LEN=*), intent(in) :: path
+    logical, intent(out) :: success
+  end subroutine flux_load_hdf5
+  !------------------------------------------------------------------------------
+  !> Needs Docs
+  !------------------------------------------------------------------------------
+  subroutine flux_load_txt(self,io_unit)
+    import flux_func
+    class(flux_func), intent(inout) :: self
+    integer, intent(in) :: io_unit
+  end subroutine flux_load_txt
   !------------------------------------------------------------------------------
   !> Needs Docs
   !------------------------------------------------------------------------------
@@ -994,7 +1050,7 @@ self%estore_target=source%estore_target
 self%pax_target=source%pax_target
 self%Ip_ratio_target=source%Ip_ratio_target
 self%R0_target=source%R0_target
-self%V0_target=source%V0_target
+self%Z0_target=source%Z0_target
 self%plasma_bounds=source%plasma_bounds
 self%o_point=source%o_point
 self%lim_point=source%lim_point
@@ -1950,7 +2006,7 @@ class(oft_vector), pointer :: tmp_vec,psi_ffp,psi_press,psi_vac,psi_vcont,psi_au
 real(r8), pointer, DIMENSION(:) :: vals_tmp
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: goptmp(3,3),pt(2),v,pmax,pmin,dpnorm,curr
-real(8) :: opoint(2),R0_in,f(3),V0_in,V0_tmp,estored
+real(8) :: opoint(2),R0_in,f(3),Z0_in,Z0_tmp,estored
 REAL(8) :: nl_res,psimax,ffp_scale_in,ffp_scale_prev,itor,pnorm0,pnormp,itor_ffp,itor_press
 REAL(8) :: R0_tmp,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3),t0,t1
 REAL(8) :: param_mat(3,3),param_vec(3),param_rhs(3)
@@ -2055,7 +2111,7 @@ nl_res=1.d99
 pnorm0 = equil%p_scale
 pnormp = equil%p_scale
 R0_in = equil%o_point(1)
-V0_in = equil%o_point(2)
+Z0_in = equil%o_point(2)
 cell=0
 IF(equil%R0_target>0.d0)THEN
   IF((equil%estore_target>0.d0).OR.(equil%pax_target>0.d0).OR.(equil%Ip_ratio_target>-1.d98))THEN
@@ -2071,10 +2127,10 @@ IF((equil%pax_target>0.d0).AND.(equil%Ip_ratio_target>-1.d98))THEN
   CALL oft_warn("Conflicting pressure targets specified, ignoring pax_target")
   equil%pax_target=-1.d0
 END IF
-IF(equil%V0_target>-1.d98)THEN
+IF(equil%Z0_target>-1.d98)THEN
   IF(equil%isoflux_ntargets>0.OR.equil%flux_ntargets>0)THEN
-    CALL oft_warn("V0_target and isoflux_targets specified, ignoring V0_target")
-    equil%V0_target=-1.d99
+    CALL oft_warn("Z0_target and isoflux_targets specified, ignoring Z0_target")
+    equil%Z0_target=-1.d99
     equil%vcontrol_val=0.d0
   END IF
 END IF
@@ -2086,9 +2142,9 @@ END IF
 DO i=1,self%maxits
   !---Ramp R0 target
   R0_tmp=(i-1)*(equil%R0_target-R0_in)/REAL(self%nR0_ramp,8) + R0_in
-  V0_tmp=(i-1)*(equil%V0_target-V0_in)/REAL(self%nR0_ramp,8) + V0_in
+  Z0_tmp=(i-1)*(equil%Z0_target-Z0_in)/REAL(self%nR0_ramp,8) + Z0_in
   IF(i>self%nR0_ramp)R0_tmp=equil%R0_target
-  IF(i>self%nR0_ramp)V0_tmp=equil%V0_target
+  IF(i>self%nR0_ramp)Z0_tmp=equil%Z0_target
   !---
   CALL psip%add(0.d0,1.d0,equil%psi)
 
@@ -2131,7 +2187,7 @@ DO i=1,self%maxits
   cell=0
   pt=equil%o_point
   IF(equil%R0_target>0.d0)pt(1)=R0_tmp
-  IF(equil%V0_target>-1.d98)pt(2)=V0_tmp
+  IF(equil%Z0_target>-1.d98)pt(2)=Z0_tmp
   CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
   CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
 
@@ -2186,7 +2242,7 @@ DO i=1,self%maxits
   END IF
 
   !---Add row for vertical control
-  IF(equil%V0_target>-1.d98)THEN
+  IF(equil%Z0_target>-1.d98)THEN
     ! 
     CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
     CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
@@ -2406,7 +2462,9 @@ DO i=1,self%maxits
   IF(oft_env%pm)WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,equil%ffp_scale,equil%p_scale, &
     SQRT(nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
   !---Check if converged
-  IF((equil%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
+  IF((equil%R0_target>0.d0).AND.(ABS(R0_tmp-equil%R0_target)>1.d-8))CYCLE
+  IF((equil%Z0_target>-1.d98).AND.(ABS(Z0_tmp-equil%Z0_target)>1.d-8))CYCLE
+  ! IF((equil%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
   IF(SQRT(nl_res)<self%nl_tol)EXIT
 end do
 IF(oft_env%pm)CALL oft_decrease_indent
@@ -2550,7 +2608,7 @@ END IF
 cell=0
 pt=equil%o_point
 IF(equil%R0_target>0.d0)pt(1)=equil%R0_target
-IF(equil%V0_target>-1.d98)pt(2)=equil%V0_target
+IF(equil%Z0_target>-1.d98)pt(2)=equil%Z0_target
 CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
 CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
 
@@ -2578,7 +2636,7 @@ ELSE
 END IF
 
 !---Add row for vertical control
-IF((equil%V0_target>-1.d98).AND.adjust_r0)THEN
+IF((equil%Z0_target>-1.d98).AND.adjust_r0)THEN
   ! 
   CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
   CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
@@ -5520,7 +5578,6 @@ end subroutine factory_destroy
 !------------------------------------------------------------------------------
 subroutine equil_destroy(self)
 class(gs_equil), intent(inout) :: self !< G-S object
-! integer(i4) :: i,j
 ! IF(ASSOCIATED(self%cond_weights))DEALLOCATE(self%cond_weights)
 IF(ASSOCIATED(self%isoflux_targets))DEALLOCATE(self%isoflux_targets)
 IF(ASSOCIATED(self%saddle_targets))DEALLOCATE(self%saddle_targets)
@@ -5528,7 +5585,7 @@ IF(ASSOCIATED(self%flux_targets))DEALLOCATE(self%flux_targets)
 IF(ASSOCIATED(self%coil_reg_mat))DEALLOCATE(self%coil_reg_mat)
 IF(ASSOCIATED(self%coil_reg_targets))DEALLOCATE(self%coil_reg_targets)
 IF(ASSOCIATED(self%coil_currs))DEALLOCATE(self%coil_currs)
-!---
+!---Destroy solution fields
 IF(ASSOCIATED(self%psi))THEN
   CALL self%psi%delete()
   DEALLOCATE(self%psi)
@@ -5537,9 +5594,24 @@ IF(ASSOCIATED(self%chi))THEN
   CALL self%chi%delete()
   DEALLOCATE(self%chi)
 END IF
-!---
-! Destory I and P in the future
-NULLIFY(self%I,self%P)
+!---Destroy flux functions
+IF(ASSOCIATED(self%I))THEN
+  CALL self%I%delete()
+  DEALLOCATE(self%I)
+END IF
+IF(ASSOCIATED(self%P))THEN
+  CALL self%P%delete()
+  DEALLOCATE(self%P)
+END IF
+IF(ASSOCIATED(self%I_NI))THEN
+  CALL self%I_NI%delete()
+  DEALLOCATE(self%I_NI)
+END IF
+IF(ASSOCIATED(self%eta))THEN
+  CALL self%eta%delete()
+  DEALLOCATE(self%eta)
+END IF
+! TODO: Destroy P_ani
 end subroutine equil_destroy
 !------------------------------------------------------------------------------
 !> Compute boundary condition matrix for free-boundary case

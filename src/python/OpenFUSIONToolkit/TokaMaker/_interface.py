@@ -202,7 +202,7 @@ tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,
 tokamaker_set_mirror_slosh = ctypes_subroutine(oftpy_lib.tokamaker_set_mirror_slosh,
     [c_void_p, c_double, c_double, c_double, c_char_p])
 
-# tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,V0_target,error_str)
+# tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,Z0_target,error_str)
 tokamaker_set_targets = ctypes_subroutine(oftpy_lib.tokamaker_set_targets,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double, c_char_p])
 
@@ -249,6 +249,14 @@ tokamaker_save_ifile = ctypes_subroutine(oftpy_lib.tokamaker_save_ifile,
 
 # tokamaker_save_mug(tMaker_equil_ptr,filename,error_str)
 tokamaker_save_mug = ctypes_subroutine(oftpy_lib.tokamaker_save_mug,
+    [c_void_p, c_char_p, c_char_p])
+
+# tokamaker_save_tokamaker(tMaker_equil_ptr,filename,error_str)
+tokamaker_save_tokamaker = ctypes_subroutine(oftpy_lib.tokamaker_save_tokamaker,
+    [c_void_p, c_char_p, c_char_p])
+
+# tokamaker_load_tokamaker(tMaker_equil_ptr,filename,error_str)
+tokamaker_load_tokamaker = ctypes_subroutine(oftpy_lib.tokamaker_load_tokamaker,
     [c_void_p, c_char_p, c_char_p])
 
 # tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,dist_pointer,normalize,error_str)

@@ -326,7 +326,7 @@ ELSE IF(gs_active%estore_target>0.d0)THEN
   offset=offset+1
 END IF
 IF(fit_V0)THEN
-  cofs(offset+1)=gs_active%V0_target
+  cofs(offset+1)=gs_active%Z0_target
   cofs_scale(offset+1)=40.d0/(gs_active%device%spatial_bounds(2,2)-gs_active%device%spatial_bounds(1,2))
   offset=offset+1
 END IF
@@ -646,7 +646,7 @@ IF(iflag==1)THEN
     offset=offset+1
   END IF
   IF(fit_V0)THEN
-    gs_active%V0_target=cofs(offset+1)
+    gs_active%Z0_target=cofs(offset+1)
     offset=offset+1
   END IF
   IF(gs_active%P%ncofs>0.AND.fit_P)THEN
@@ -731,8 +731,8 @@ IF(iflag==1)THEN
     IF(gs_active%R0_target>0.d0)THEN
       WRITE(*,'(2A,ES11.3)')oft_indent,'R0_target         =',gs_active%R0_target
     END IF
-    IF(gs_active%V0_target>-1.d98)THEN
-      WRITE(*,'(2A,ES11.3)')oft_indent,'V0_target         =',gs_active%V0_target
+    IF(gs_active%Z0_target>-1.d98)THEN
+      WRITE(*,'(2A,ES11.3)')oft_indent,'Z0_target         =',gs_active%Z0_target
     END IF
     IF(gs_active%device%free)THEN
       IF(fit_FFPscale)THEN
@@ -905,10 +905,10 @@ ELSE
   IF(fit_V0)THEN
     CALL reset_eq
     dx = 50.0*dxi/cofs_scale(offset+1)
-    gs_active%V0_target=cofs(offset+1) + dx
+    gs_active%Z0_target=cofs(offset+1) + dx
     CALL run_err(.FALSE.,jac_mat(:,offset+1),m,ierr)
     jac_mat(:,offset+1)=(jac_mat(:,offset+1)-err)/dx
-    gs_active%V0_target=cofs(offset+1)
+    gs_active%Z0_target=cofs(offset+1)
     offset=offset+1
   END IF
   IF(gs_active%P%ncofs>0.AND.fit_P)THEN
@@ -1050,7 +1050,7 @@ READ(io_unit,*)n
 !---
 ncons=n
 IF(fit_coils)ncons=n+gs_active%device%ncoils
-! IF(gs_active%V0_target>-1.d98)ncons=ncons+1
+! IF(gs_active%Z0_target>-1.d98)ncons=ncons+1
 ALLOCATE(cons(ncons))
 j=1
 !---
@@ -1064,7 +1064,7 @@ IF(fit_coils)THEN
     j=j+1
   END DO
 END IF
-! IF(gs_active%V0_target>-1.d98)THEN
+! IF(gs_active%Z0_target>-1.d98)THEN
 !   ALLOCATE(vcont_constraint::cons(j)%con)
 !   cons(j)%con%val=0.d0
 !   cons(j)%con%wt=2.d-8

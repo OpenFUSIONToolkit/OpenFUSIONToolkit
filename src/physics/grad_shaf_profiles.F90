@@ -12,6 +12,7 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 module oft_gs_profiles
+USE oft_io, ONLY: hdf5_read, hdf5_write, hdf5_field_exist
 USE oft_base
 USE spline_mod
 USE oft_gs, ONLY: flux_func, gs_equil, oft_indent, oft_increase_indent, &
@@ -22,6 +23,8 @@ implicit none
 !------------------------------------------------------------------------------
 type, extends(flux_func) :: zero_flux_func
 contains
+  !> Delete profile
+  procedure :: delete => zero_delete
   !> Needs docs
   procedure :: copy => zero_copy
   !> Needs docs
@@ -34,12 +37,20 @@ contains
   procedure :: set_cofs => zero_cofs_update
   !> Needs docs
   procedure :: get_cofs => zero_cofs_get
+  !> Needs docs
+  procedure :: save_hdf5 => zero_save_hdf5
+  procedure :: save_txt => zero_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => zero_load_hdf5
+  procedure :: load_txt => zero_load_txt
 end type zero_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(flux_func) :: flat_flux_func
 contains
+  !> Delete profile
+  procedure :: delete => flat_delete
   !> Needs docs
   procedure :: copy => flat_copy
   !> Needs docs
@@ -52,24 +63,13 @@ contains
   procedure :: set_cofs => flat_cofs_update
   !> Needs docs
   procedure :: get_cofs => flat_cofs_get
+  !> Needs docs
+  procedure :: save_hdf5 => flat_save_hdf5
+  procedure :: save_txt => flat_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => flat_load_hdf5
+  procedure :: load_txt => flat_load_txt
 end type flat_flux_func
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! type, extends(flux_func) :: linear_flux_func
-!   real(8) :: alpha = 0.d0 !< Slope parameter
-! contains
-!   !> Needs docs
-!   procedure :: f => linear_f
-!   !> Needs docs
-!   procedure :: fp => linear_fp
-!   !> Needs docs
-!   procedure :: update => linear_update
-!   !> Needs docs
-!   procedure :: set_cofs => linear_cofs_update
-!   !> Needs docs
-!   procedure :: get_cofs => linear_cofs_get
-! end type linear_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -79,6 +79,8 @@ type, extends(flux_func) :: poly_flux_func
   real(8), pointer, dimension(:) :: cofs => NULL() !< Coefficients [deg]
   logical :: zero_grad = .FALSE. !< Force zero gradient at boundary
 contains
+  !> Delete profile
+  procedure :: delete => poly_delete
   !> Needs docs
   procedure :: copy => poly_copy
   !> Needs docs
@@ -91,6 +93,12 @@ contains
   procedure :: set_cofs => poly_cofs_update
   !> Needs docs
   procedure :: get_cofs => poly_cofs_get
+  !> Needs docs
+  procedure :: save_hdf5 => poly_save_hdf5
+  procedure :: save_txt => poly_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => poly_load_hdf5
+  procedure :: load_txt => poly_load_txt
 end type poly_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -106,6 +114,8 @@ type, extends(flux_func) :: spline_flux_func
   TYPE(spline_type) :: func !< Needs docs
   TYPE(spline_type), POINTER, DIMENSION(:) :: fun_loc => NULL() !< Needs docs
 contains
+  !> Delete profile
+  procedure :: delete => spline_func_delete
   !> Needs docs
   procedure :: copy => spline_func_copy
   !> Needs docs
@@ -118,6 +128,12 @@ contains
   procedure :: set_cofs => spline_cofs_update
   !> Needs docs
   procedure :: get_cofs => spline_cofs_get
+  !> Needs docs
+  procedure :: save_hdf5 => spline_save_hdf5
+  procedure :: save_txt => spline_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => spline_load_hdf5
+  procedure :: load_txt => spline_load_txt
 end type spline_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -129,6 +145,8 @@ type, extends(flux_func) :: linterp_flux_func
   real(8), pointer, dimension(:) :: yp => NULL() !< Needs docs
   real(8), pointer, dimension(:) :: y => NULL() !< Needs docs
 contains
+  !> Delete profile
+  procedure :: delete => linterp_delete
   !> Needs docs
   procedure :: copy => linterp_copy
   !> Needs docs
@@ -143,59 +161,68 @@ contains
   procedure :: set_cofs => linterp_cofs_update
   !> Needs docs
   procedure :: get_cofs => linterp_cofs_get
+  !> Needs docs
+  procedure :: save_hdf5 => linterp_save_hdf5
+  procedure :: save_txt => linterp_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => linterp_load_hdf5
+  procedure :: load_txt => linterp_load_txt
 end type linterp_flux_func
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! type, extends(flux_func) :: twolam_flux_func
-!   real(8) :: alpha = 0.d0 !< Jump height
-!   real(8) :: sep = .5d0 !< Jump location (poloidal flux)
-!   real(8) :: width = 200.d0 !< Width factor for TANH
-! contains
-!   !> Needs docs
-!   procedure :: f => twolam_f
-!   !> Needs docs
-!   procedure :: fp => twolam_fp
-!   !> Needs docs
-!   procedure :: update => twolam_update
-!   !> Needs docs
-!   procedure :: set_cofs => twolam_cofs_update
-!   !> Needs docs
-!   procedure :: get_cofs => twolam_cofs_get
-! end type twolam_flux_func
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! type, extends(twolam_flux_func) :: stepslant_flux_func
-!   real(8) :: beta = 0.d0
-! contains
-!   !> Needs docs
-!   procedure :: f => stepslant_f
-!   !> Needs docs
-!   procedure :: fp => stepslant_fp
-!   !> Needs docs
-!   procedure :: update => stepslant_update
-!   !> Needs docs
-!   procedure :: set_cofs => stepslant_cofs_update
-!   !> Needs docs
-!   procedure :: get_cofs => stepslant_cofs_get
-! end type stepslant_flux_func
-!------------------------------------------------------------------------------
-! CLASS wesson_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(flux_func) :: wesson_flux_func
   real(8) :: gamma = 0.d0
 contains
+  procedure :: delete => wesson_delete
   procedure :: copy => wesson_copy
   procedure :: f => wesson_f
   procedure :: fp => wesson_fp
   procedure :: update => wesson_update
   procedure :: set_cofs => wesson_cofs_update
   procedure :: get_cofs => wesson_cofs_get
+  procedure :: save_hdf5 => wesson_save_hdf5
+  procedure :: save_txt => wesson_save_txt
+  procedure :: load_hdf5 => wesson_load_hdf5
+  procedure :: load_txt => wesson_load_txt
 end type wesson_flux_func
 contains
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine zero_save_hdf5(self,filename,path)
+class(zero_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('zero',filename,path//'/TYPE')
+end subroutine zero_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine zero_save_txt(self,io_unit)
+class(zero_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'zero'
+end subroutine zero_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine zero_load_hdf5(self,filename,path,success)
+class(zero_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+self%ncofs=0
+success=.TRUE.
+end subroutine zero_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine zero_load_txt(self,io_unit)
+class(zero_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+self%ncofs=0
+end subroutine zero_load_txt
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
@@ -207,6 +234,13 @@ new%plasma_bounds=self%plasma_bounds
 new%f_offset=self%f_offset
 new%ncofs=0
 end subroutine zero_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine zero_delete(self)
+class(zero_flux_func), intent(inout) :: self
+!--- No internal memory to free
+end subroutine zero_delete
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -249,14 +283,51 @@ class(zero_flux_func), intent(inout) :: self
 real(8), intent(out) :: c(:)
 end subroutine zero_cofs_get
 !------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine flat_save_hdf5(self,filename,path)
+class(flat_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('flat',filename,path//'/TYPE')
+end subroutine flat_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine flat_save_txt(self,io_unit)
+class(flat_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'flat'
+end subroutine flat_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine flat_load_hdf5(self,filename,path,success)
+class(flat_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+self%ncofs=0
+success=.TRUE.
+end subroutine flat_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine flat_load_txt(self,io_unit)
+class(flat_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+self%ncofs=0
+end subroutine flat_load_txt
+!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_flat_f(func)
-CLASS(flux_func), POINTER, INTENT(out) :: func
-ALLOCATE(flat_flux_func::func)
+CLASS(flux_func), INTENT(inout) :: func
 select type(self=>func)
   type is(flat_flux_func)
     self%ncofs=0
+class default
+  CALL oft_abort('Invalid flux function type in create_flat_f','create_flat_f',__FILE__)
 end select
 END SUBROUTINE create_flat_f
 !------------------------------------------------------------------------------
@@ -270,6 +341,13 @@ new%plasma_bounds=self%plasma_bounds
 new%f_offset=self%f_offset
 new%ncofs=0
 end subroutine flat_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine flat_delete(self)
+class(flat_flux_func), intent(inout) :: self
+!--- No internal memory to free
+end subroutine flat_delete
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -332,101 +410,80 @@ subroutine flat_cofs_get(self,c)
 class(flat_flux_func), intent(inout) :: self
 real(8), intent(out) :: c(:)
 end subroutine flat_cofs_get
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! SUBROUTINE create_linear_ff(func,alpha)
-! CLASS(flux_func), POINTER, INTENT(out) :: func
-! REAL(8), INTENT(in) :: alpha
-! ALLOCATE(linear_flux_func::func)
-! select type(self=>func)
-!   type is(linear_flux_func)
-!     self%ncofs=1
-!     self%alpha=alpha
-! end select
-! END SUBROUTINE create_linear_ff
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! function linear_f(self,psi) result(b)
-! class(linear_flux_func), intent(inout) :: self
-! real(8), intent(in) :: psi
-! real(8) :: b,x1,x2
-! IF(self%plasma_bounds(1)<-1.d98)THEN
-!   b=self%alpha*(psi**2 - psi) + psi
-!   RETURN
-! END IF
-! x1=self%plasma_bounds(1)
-! x2=self%plasma_bounds(2)
-! IF(psi>x1)THEN
-!   b = psi*(self%alpha*(psi - 2.d0*x1 - (x2-x1)) + (x2-x1))/(x2-x1) &
-!   - x1*(self%alpha*(x1 - 2.d0*x1 - (x2-x1)) + (x2-x1))/(x2-x1)
-! ELSE
-!   b = 0.d0
-! END IF
-! end function linear_f
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! function linear_fp(self,psi) result(b)
-! class(linear_flux_func), intent(inout) :: self
-! real(8), intent(in) :: psi
-! real(8) :: b,x1,x2
-! IF(self%plasma_bounds(1)<-1.d98)THEN
-!   b=1.d0 + self%alpha*(2.d0*psi - 1.d0)
-!   RETURN
-! END IF
-! x1=self%plasma_bounds(1)
-! x2=self%plasma_bounds(2)
-! IF(psi>x1)THEN
-!   b=1.d0 + self%alpha*(2.d0*(psi-x1)/(x2-x1) - 1.d0)
-! ELSE
-!   b=0.d0
-! END IF
-! end function linear_fp
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! subroutine linear_update(self,gseq)
-! class(linear_flux_func), intent(inout) :: self
-! class(gs_equil), intent(inout) :: gseq
-! self%plasma_bounds=gseq%plasma_bounds
-! end subroutine linear_update
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! function linear_cofs_update(self,c) result(ierr)
-! class(linear_flux_func), intent(inout) :: self
-! real(8), intent(in) :: c(:)
-! integer(4) :: ierr
-! ierr=0
-! self%alpha=c(1)
-! end function linear_cofs_update
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! subroutine linear_cofs_get(self,c)
-! class(linear_flux_func), intent(inout) :: self
-! real(8), intent(out) :: c(:)
-! c(1)=self%alpha
-! end subroutine linear_cofs_get
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine poly_save_hdf5(self,filename,path)
+class(poly_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('poly',filename,path//'/TYPE')
+CALL hdf5_write(self%ncofs,filename,path//'/NCOFS')
+CALL hdf5_write(self%cofs,filename,path//'/COFS')
+CALL hdf5_write(self%zero_grad,filename,path//'/ZERO_GRAD')
+end subroutine poly_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine poly_save_txt(self,io_unit)
+class(poly_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'poly'
+IF(self%zero_grad)THEN
+  WRITE(io_unit,*)self%ncofs+1,self%zero_grad
+  WRITE(io_unit,*)0.d0,self%cofs
+ELSE
+  WRITE(io_unit,*)self%ncofs,self%zero_grad
+  WRITE(io_unit,*)self%cofs
+END IF
+end subroutine poly_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine poly_load_hdf5(self,filename,path,success)
+class(poly_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+CALL hdf5_read(self%ncofs,filename,path//'/NCOFS',success=success)
+IF(.NOT.success)RETURN
+ALLOCATE(self%cofs(self%ncofs))
+CALL hdf5_read(self%cofs,filename,path//'/COFS',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(self%zero_grad,filename,path//'/ZERO_GRAD',success=success)
+IF(.NOT.success)RETURN
+end subroutine poly_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine poly_load_txt(self,io_unit)
+class(poly_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+logical :: zero_grad
+integer(i4) :: ncofs
+real(r8), allocatable :: cofs(:)
+READ(io_unit,*)ncofs,zero_grad
+ALLOCATE(cofs(ncofs))
+READ(io_unit,*)cofs
+CALL create_poly_ff(self,ncofs,cofs,zero_grad)
+DEALLOCATE(cofs)
+end subroutine poly_load_txt
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE create_poly_ff(func,ncofs,cofs,zero_fp)
-CLASS(flux_func), POINTER, INTENT(out) :: func
+SUBROUTINE create_poly_ff(func,ncofs,cofs,zero_grad)
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: ncofs
-REAL(8), OPTIONAL, INTENT(in) :: cofs(:)
-LOGICAL, OPTIONAL, INTENT(in) :: zero_fp
+REAL(8), INTENT(in) :: cofs(:)
+LOGICAL, INTENT(in) :: zero_grad
 INTEGER(4) :: i,offset
 
-ALLOCATE(poly_flux_func::func)
 select type(self=>func)
   type is(poly_flux_func)
   !---
   self%deg=ncofs
   self%ncofs=ncofs
-  IF(PRESENT(zero_fp))self%zero_grad=zero_fp
+  self%zero_grad=zero_grad
   offset=0
   IF(self%zero_grad)THEN
     offset=1
@@ -436,11 +493,9 @@ select type(self=>func)
   ALLOCATE(self%cofs(self%ncofs))
   self%cofs=0.d0
   !---
-  IF(PRESENT(cofs))THEN
-    DO i=1,self%ncofs
-      self%cofs(i)=cofs(offset+i)
-    END DO
-  END IF
+  DO i=1,self%ncofs
+    self%cofs(i)=cofs(offset+i)
+  END DO
   self%c0=1.d0
   IF(.NOT.self%zero_grad)THEN
     self%c0=0.d0
@@ -449,6 +504,8 @@ select type(self=>func)
     END DO
     self%c0=1.d0-self%c0
   END IF
+class default
+  CALL oft_abort('Invalid flux function type in create_poly_ff','create_poly_ff',__FILE__)
 end select
 END SUBROUTINE create_poly_ff
 !------------------------------------------------------------------------------
@@ -470,6 +527,15 @@ SELECT TYPE(new)
     new%cofs=self%cofs
 END SELECT
 end subroutine poly_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine poly_delete(self)
+class(poly_flux_func), intent(inout) :: self
+IF(ASSOCIATED(self%cofs))DEALLOCATE(self%cofs)
+self%ncofs=0
+self%deg=0
+end subroutine poly_delete
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -584,18 +650,73 @@ DO i=1,self%ncofs
 END DO
 end subroutine poly_cofs_get
 !------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine spline_save_hdf5(self,filename,path)
+class(spline_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('spline',filename,path//'/TYPE')
+CALL hdf5_write(self%npsi,filename,path//'/NPSI')
+CALL hdf5_write(self%func%xs(0:self%npsi-1),filename,path//'/XVALS')
+CALL hdf5_write(self%func%fs(0:self%npsi-1,1),filename,path//'/YVALS')
+end subroutine spline_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine spline_save_txt(self,io_unit)
+class(spline_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'spline'
+WRITE(io_unit,*)self%npsi
+WRITE(io_unit,*)self%func%xs(0:self%npsi-1)
+WRITE(io_unit,*)self%func%fs(0:self%npsi-1,1)
+end subroutine spline_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine spline_load_hdf5(self,filename,path,success)
+class(spline_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+integer(i4) :: npsi
+real(r8), allocatable :: xvals(:),yvals(:)
+CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
+IF(.NOT.success)RETURN
+ALLOCATE(xvals(npsi),yvals(npsi))
+CALL hdf5_read(xvals,filename,path//'/XVALS',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(yvals,filename,path//'/YVALS',success=success)
+IF(.NOT.success)RETURN
+CALL create_spline_ff(self,npsi,xvals,yvals)
+DEALLOCATE(xvals,yvals)
+end subroutine spline_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine spline_load_txt(self,io_unit)
+class(spline_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+integer(i4) :: npsi
+real(r8), allocatable :: xvals(:),yvals(:)
+READ(io_unit,*)npsi
+ALLOCATE(xvals(npsi),yvals(npsi))
+READ(io_unit,*)xvals
+READ(io_unit,*)yvals
+CALL create_spline_ff(self,npsi,xvals,yvals)
+DEALLOCATE(xvals,yvals)
+end subroutine spline_load_txt
+!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE create_spline_ff(func,npsi,psimin,psimax,psivals)
-CLASS(flux_func), POINTER, INTENT(out) :: func
+SUBROUTINE create_spline_ff(func,npsi,psivals,yvals)
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: npsi
-REAL(8), OPTIONAL, INTENT(in) :: psimin
-REAL(8), OPTIONAL, INTENT(in) :: psimax
-REAL(8), OPTIONAL, INTENT(in) :: psivals(npsi)
+REAL(8), INTENT(in) :: psivals(npsi),yvals(npsi)
 REAL(8) :: psi1,psi2
 REAL(8), ALLOCATABLE :: c(:)
 INTEGER(4) :: i,ierr
-ALLOCATE(spline_flux_func::func)
 select type(self=>func)
   type is(spline_flux_func)
   !---
@@ -606,28 +727,15 @@ select type(self=>func)
   DO i=1,omp_get_max_threads()
     CALL spline_alloc(self%fun_loc(i),self%npsi-1,1)
   END DO
-  IF(PRESENT(psivals))THEN
-    !---
-    DO i=1,self%npsi
-      self%func%xs(i-1)=psivals(i)
-      self%func%fs(i-1,1)=1.d0*psivals(i)
-    END DO
-  ELSE
-    !---
-    psi1=0.d0
-    psi2=1.d0
-    IF(PRESENT(psimin))psi1=psimin
-    IF(PRESENT(psimax))psi2=psimax
-    !---
-    DO i=1,self%npsi
-      self%func%xs(i-1)=(psi2-psi1)*i/(self%npsi+1) + psi1
-      self%func%fs(i-1,1)=1.d0*self%func%xs(i-1)
-    END DO
-  END IF
+  !---
+  DO i=1,self%npsi
+    self%func%xs(i-1)=psivals(i)
+    self%func%fs(i-1,1)=yvals(i)
+  END DO
   self%xmin=self%func%xs(0)
   self%xmax=self%func%xs(self%npsi-1)
   !---
-  WRITE(*,*)'Fitting',self%func%xs
+  ! WRITE(*,*)'Fitting',self%func%xs
   !CALL spline_fit(self%func,"extrap")
   CALL spline_fit(self%func,"not-a-knot")
   DO i=1,omp_get_max_threads()
@@ -637,7 +745,9 @@ select type(self=>func)
   CALL self%get_cofs(c)
   ierr=self%set_cofs(c)
   DEALLOCATE(c)
-  WRITE(*,*)'Spline Created',self%ncofs,self%func%xs
+  ! WRITE(*,*)'Spline Created',self%ncofs,self%func%xs
+class default
+  CALL oft_abort('Invalid flux function type in create_spline_ff','create_spline_ff',__FILE__)
 end select
 
 END SUBROUTINE create_spline_ff
@@ -669,6 +779,22 @@ SELECT TYPE(new)
     END DO
 END SELECT
 end subroutine spline_func_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine spline_func_delete(self)
+class(spline_flux_func), intent(inout) :: self
+integer(i4) :: i
+self%npsi=0
+self%ncofs=0
+IF(ASSOCIATED(self%fun_loc))THEN
+  CALL spline_dealloc(self%func)
+  DO i=1,omp_get_max_threads()
+    CALL spline_dealloc(self%fun_loc(i))
+  END DO
+  DEALLOCATE(self%fun_loc)
+END IF
+end subroutine spline_func_delete
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -776,16 +902,78 @@ DO i=0,self%npsi-1
 END DO
 end subroutine spline_cofs_get
 !------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine linterp_save_hdf5(self,filename,path)
+class(linterp_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('linterp',filename,path//'/TYPE')
+CALL hdf5_write(self%npsi,filename,path//'/NPSI')
+CALL hdf5_write(self%x,filename,path//'/XVALS')
+CALL hdf5_write(self%yp,filename,path//'/YVALS')
+CALL hdf5_write(self%y0,filename,path//'/Y0')
+end subroutine linterp_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine linterp_save_txt(self,io_unit)
+class(linterp_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'linterp'
+WRITE(io_unit,*)self%npsi,self%y0
+WRITE(io_unit,*)self%x
+WRITE(io_unit,*)self%yp
+end subroutine linterp_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine linterp_load_hdf5(self,filename,path,success)
+class(linterp_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+integer(i4) :: npsi
+real(r8) :: y0
+real(r8), allocatable :: xvals(:),yvals(:)
+CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
+IF(.NOT.success)RETURN
+ALLOCATE(xvals(npsi),yvals(npsi))
+CALL hdf5_read(xvals,filename,path//'/XVALS',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(yvals,filename,path//'/YVALS',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(y0,filename,path//'/Y0',success=success)
+IF(.NOT.success)RETURN
+CALL create_linterp_ff(self,npsi,xvals,yvals,y0)
+DEALLOCATE(xvals,yvals)
+end subroutine linterp_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine linterp_load_txt(self,io_unit)
+class(linterp_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+integer(i4) :: npsi
+real(r8) :: y0
+real(r8), allocatable :: xvals(:),yvals(:)
+READ(io_unit,*)npsi,y0
+ALLOCATE(xvals(npsi),yvals(npsi))
+READ(io_unit,*)xvals
+READ(io_unit,*)yvals
+CALL create_linterp_ff(self,npsi,xvals,yvals,y0)
+DEALLOCATE(xvals,yvals)
+end subroutine linterp_load_txt
+!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_linterp_ff(func,npsi,psivals,yvals,y0)
-CLASS(flux_func), POINTER, INTENT(out) :: func
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: npsi
 REAL(8), INTENT(in) :: psivals(npsi)
 REAL(8), INTENT(in) :: yvals(npsi)
 REAL(8), INTENT(in) :: y0
 INTEGER(4) :: i,ierr
-ALLOCATE(linterp_flux_func::func)
 SELECT TYPE(self=>func)
   TYPE IS(linterp_flux_func)
   !---
@@ -796,6 +984,7 @@ SELECT TYPE(self=>func)
   ALLOCATE(self%yp(self%npsi))
   ALLOCATE(self%y(self%npsi))
   !---
+  ! IF(y0<1.d-8)CALL oft_abort("Support for y0 = 0 has been removed","create_linterp_ff",__FILE__)
   self%y0=y0
   DO i=1,self%npsi
     self%x(i)=psivals(i)
@@ -808,6 +997,8 @@ SELECT TYPE(self=>func)
     ierr=self%set_cofs(yvals)
   END IF
   IF(oft_debug_print(1))WRITE(*,*)'Linear interpolator Created',self%ncofs,self%x,self%y0
+class default
+  CALL oft_abort('Invalid flux function type in create_linterp_ff','create_linterp_ff',__FILE__)
 END SELECT
 
 END SUBROUTINE create_linterp_ff
@@ -831,6 +1022,17 @@ SELECT TYPE(new)
     new%y=self%y
 END SELECT
 end subroutine linterp_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine linterp_delete(self)
+class(linterp_flux_func), intent(inout) :: self
+self%npsi=0
+self%ncofs=0
+IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
+IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
+IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
+end subroutine linterp_delete
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -985,163 +1187,63 @@ DO i=1,self%ncofs
   c(i)=self%yp(i+offset)
 END DO
 end subroutine linterp_cofs_get
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! SUBROUTINE create_twolam_ff(func,sep,alpha)
-! CLASS(flux_func), POINTER, INTENT(out) :: func
-! REAL(8), INTENT(in) :: sep
-! REAL(8), INTENT(in) :: alpha
-
-! ALLOCATE(twolam_flux_func::func)
-! select type(self=>func)
-!   type is(twolam_flux_func)
-!   !---
-!   self%ncofs=2
-!   self%sep=sep
-!   self%alpha=alpha
-! end select
-
-! END SUBROUTINE create_twolam_ff
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! function twolam_f(self,psi) result(b)
-! class(twolam_flux_func), intent(inout) :: self
-! real(8), intent(in) :: psi
-! real(8) :: b
-! b=(1.d0+self%alpha/2.d0)*psi + self%alpha*LOG(COSH(self%width*(psi-self%sep)))/2.d0/self%width &
-! - self%alpha*LOG(COSH(-self%width*self%sep))/2.d0/self%width
-! end function twolam_f
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! function twolam_fp(self,psi) result(b)
-! class(twolam_flux_func), intent(inout) :: self
-! real(8), intent(in) :: psi
-! real(8) :: b
-! b=1.d0 + self%alpha*(1.d0 + TANH(self%width*(psi-self%sep)))/2.d0
-! end function twolam_fp
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! subroutine twolam_update(self,gseq)
-! class(twolam_flux_func), intent(inout) :: self
-! class(gs_equil), intent(inout) :: gseq
-! self%plasma_bounds=gseq%plasma_bounds
-! end subroutine twolam_update
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! function twolam_cofs_update(self,c) result(ierr)
-! class(twolam_flux_func), intent(inout) :: self
-! real(8), intent(in) :: c(:)
-! integer(4) :: ierr
-! ierr=0
-! IF(c(1)<0.d0.OR.c(1)>1.d0)ierr=-1
-! IF(ABS(c(2))>1.d0)ierr=-1
-! self%sep=c(1)
-! self%alpha=c(2)
-! end function twolam_cofs_update
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! subroutine twolam_cofs_get(self,c)
-! class(twolam_flux_func), intent(inout) :: self
-! real(8), intent(out) :: c(:)
-! c(1)=self%sep
-! c(2)=self%alpha
-! end subroutine twolam_cofs_get
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! SUBROUTINE create_stepslant_ff(func,sep,alpha,beta)
-! CLASS(flux_func), POINTER, INTENT(out) :: func
-! REAL(8), INTENT(in) :: sep
-! REAL(8), INTENT(in) :: alpha
-! REAL(8), INTENT(in) :: beta
-
-! ALLOCATE(stepslant_flux_func::func)
-! select type(self=>func)
-!   type is(stepslant_flux_func)
-!   !---
-!   self%ncofs=2
-!   self%sep=sep
-!   self%alpha=alpha
-!   self%beta=beta
-! end select
-
-! END SUBROUTINE create_stepslant_ff
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! function stepslant_f(self,psi) result(b)
-! class(stepslant_flux_func), intent(inout) :: self
-! real(8), intent(in) :: psi
-! real(8) :: b
-! if(psi<self%sep)then
-!   b=psi
-! else
-!   b=self%sep + (1.d0+self%alpha)*(self%sep-psi)*((self%beta-2)*self%sep-self%beta*psi)/(2*self%sep)
-! end if
-! end function stepslant_f
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! function stepslant_fp(self,psi) result(b)
-! class(stepslant_flux_func), intent(inout) :: self
-! real(8), intent(in) :: psi
-! real(8) :: b
-! if(psi<self%sep) then
-!   b=1.d0
-! else
-!   b=(1.d0+self%alpha)*(1.d0+self%beta*(psi-self%sep)/self%sep)
-! end if
-! end function stepslant_fp
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! subroutine stepslant_update(self,gseq)
-! class(stepslant_flux_func), intent(inout) :: self
-! class(gs_equil), intent(inout) :: gseq
-! self%plasma_bounds=gseq%plasma_bounds
-! end subroutine stepslant_update
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! function stepslant_cofs_update(self,c) result(ierr)
-! class(stepslant_flux_func), intent(inout) :: self
-! real(8), intent(in) :: c(:)
-! integer(4) :: ierr
-! self%sep=c(1)
-! self%alpha=c(2)
-! self%beta=c(3)
-! ierr=0
-! end function stepslant_cofs_update
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! subroutine stepslant_cofs_get(self,c)
-! class(stepslant_flux_func), intent(inout) :: self
-! real(8), intent(out) :: c(:)
-! c(1)=self%sep
-! c(2)=self%alpha
-! c(3)=self%beta
-! end subroutine stepslant_cofs_get
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine wesson_save_hdf5(self,filename,path)
+class(wesson_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('wesson',filename,path//'/TYPE')
+CALL hdf5_write(self%ncofs,filename,path//'/NCOFS')
+CALL hdf5_write(self%gamma,filename,path//'/GAMMA')
+end subroutine wesson_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine wesson_save_txt(self,io_unit)
+class(wesson_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'wesson'
+WRITE(io_unit,*)self%ncofs
+WRITE(io_unit,*)self%gamma
+end subroutine wesson_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine wesson_load_hdf5(self,filename,path,success)
+class(wesson_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+CALL hdf5_read(self%ncofs,filename,path//'/NCOFS',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(self%gamma,filename,path//'/GAMMA',success=success)
+IF(.NOT.success)RETURN
+end subroutine wesson_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine wesson_load_txt(self,io_unit)
+class(wesson_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+READ(io_unit,*)self%ncofs
+READ(io_unit,*)self%gamma
+end subroutine wesson_load_txt
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_wesson_ff(func,ncofs,gamma)
-CLASS(flux_func), POINTER, INTENT(out) :: func
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: ncofs
 REAL(8), INTENT(in) :: gamma
-
-ALLOCATE(wesson_flux_func::func)
 select type(self=>func)
   type is(wesson_flux_func)
   !---
   self%ncofs=ncofs
   self%gamma=gamma
+class default
+  CALL oft_abort('Invalid flux function type in create_wesson_ff','create_wesson_ff',__FILE__)
 end select
 
 END SUBROUTINE create_wesson_ff
@@ -1160,6 +1262,14 @@ SELECT TYPE(new)
     new%gamma=self%gamma
 END SELECT
 end subroutine wesson_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine wesson_delete(self)
+class(wesson_flux_func), intent(inout) :: self
+self%ncofs=0
+self%gamma=0.d0
+end subroutine wesson_delete
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
