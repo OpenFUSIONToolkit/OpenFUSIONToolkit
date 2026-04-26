@@ -120,4 +120,6 @@ plot_constraints(fig, ax2, gs; isoflux=isoflux,
 mkpath("plots")
 out = joinpath("plots", "iter_baseline.png")
 save(out, fig)
+save_eqdsk(gs, joinpath("plots", "iter_baseline.eqdsk"); nr=129, nz=129)
 println("\nSaved: $(abspath(out))")
+println("Saved: $(abspath(joinpath("plots", "iter_baseline.eqdsk")))")

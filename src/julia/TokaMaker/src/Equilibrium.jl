@@ -465,18 +465,20 @@ const _DISABLED = -1e99
 
 function save_eqdsk(eq::TokaMakerEquilibrium, filename::AbstractString;
                     nr::Integer=65, nz::Integer=65,
-                    rbounds::Union{Nothing,AbstractVector}=nothing,
-                    zbounds::Union{Nothing,AbstractVector}=nothing,
-                    run_info::AbstractString="TokaMaker.jl",
-                    psi_pad::Real=0.001, rcentr::Real=_DISABLED,
-                    truncate_eq::Bool=false,
-                    limiter_file::AbstractString="none",
+                    rbounds::AbstractVector,
+                    zbounds::AbstractVector,
+                    run_info::AbstractString="",
+                    lcfs_pad::Real=0.01, rcentr::Real=-1.0,
+                    truncate_eq::Bool=true,
+                    limiter_file::AbstractString="",
                     lcfs_pressure::Real=0.0, cocos::Integer=7)
-    rb = rbounds === nothing ? Float64[_DISABLED, _DISABLED] : Vector{Float64}(rbounds)
-    zb = zbounds === nothing ? Float64[_DISABLED, _DISABLED] : Vector{Float64}(zbounds)
+    length(run_info) > 40 && error("run_info must be <= 40 chars (got $(length(run_info)))")
+    cocos in (2, 7) || error("Unsupported COCOS $cocos (only 2 or 7)")
+    rb = Vector{Float64}(rbounds); zb = Vector{Float64}(zbounds)
+    length(rb) == 2 || error("rbounds must have 2 entries"); length(zb) == 2 || error("zbounds must have 2 entries")
     buf = errbuf()
     c_tokamaker_save_eqdsk(eq.eq_ptr, padpath(filename), nr, nz, rb, zb,
-                           padpath(run_info), Float64(psi_pad), Float64(rcentr),
+                           padpath(run_info, 40), Float64(lcfs_pad), Float64(rcentr),
                            truncate_eq, padpath(limiter_file), Float64(lcfs_pressure),
                            Int32(cocos), buf)
     check_err(buf, "save_eqdsk")

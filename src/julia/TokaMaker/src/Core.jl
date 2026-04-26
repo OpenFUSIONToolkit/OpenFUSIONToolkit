@@ -395,6 +395,23 @@ lim_point(t::Tokamaker) = EquilibriumModule.lim_point(t.equilibrium)
 psi_bounds(t::Tokamaker) = EquilibriumModule.psi_bounds(t.equilibrium)
 diverted(t::Tokamaker) = EquilibriumModule.diverted(t.equilibrium)
 
+function _bounds_from_limiter(t::Tokamaker, dim::Int)
+    isempty(t.lim_contour) && error("save_eqdsk: lim_contour empty; pass rbounds/zbounds explicitly")
+    lo, hi = extrema(@view t.lim_contour[:, dim])
+    pad = (hi - lo) * 0.05
+    return [lo - pad, hi + pad]
+end
+
+function EquilibriumModule.save_eqdsk(t::Tokamaker, filename::AbstractString;
+                                      rbounds::Union{Nothing,AbstractVector}=nothing,
+                                      zbounds::Union{Nothing,AbstractVector}=nothing,
+                                      kwargs...)
+    rb = rbounds === nothing ? _bounds_from_limiter(t, 1) : rbounds
+    zb = zbounds === nothing ? _bounds_from_limiter(t, 2) : zbounds
+    return EquilibriumModule.save_eqdsk(t.equilibrium, filename;
+                                        rbounds=rb, zbounds=zb, kwargs...)
+end
+
 # ----------------------------------------------------------------------------
 # Profiles
 
