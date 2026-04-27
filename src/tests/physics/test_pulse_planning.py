@@ -1,17 +1,14 @@
 """
-Minimal TokTox (TokaMaker + TORAX) regression driver for ITER.
+Minimal ITER test for pulse_planning.py: the TokaMaker + TORAX coupled pulse simulation (TokTox).
 
 Builds two flattop-like seed equilibria (same Ip, slightly different axis pressure),
-runs a 5 s coupled pulse at constant Ip, and returns a flat dict of scalars for
-branch-to-branch comparison.
+runs a 5 s simulation at constant Ip, and returns a flat dict of scalars.
 
 Mesh file
 ---------
 Expects ``ITER_mesh.h5`` produced from ``src/examples/TokaMaker/ITER/ITER_mesh_ex.ipynb``
 (next to ``ITER_geom.json``), or set environment variable ``TOKAMAKER_ITER_MESH``
 to the ``.h5`` path.
-
-Dependencies: OpenFUSIONToolkit with TokaMaker, torax.
 """
 from __future__ import annotations
 
@@ -23,6 +20,7 @@ import time
 from typing import Any, Dict, Optional
 
 import numpy as np
+import pytest
 
 _NUMERIC = (int, float, np.integer, np.floating)
 
@@ -143,7 +141,7 @@ def _iter_baseline_shape() -> tuple[np.ndarray, np.ndarray]:
     return isoflux_pts, x_point
 
 
-def run_toktox_test(
+def test_toktox(
     mesh_path: Optional[str] = None,
     nthreads: int = 2,
     t_final: float = 5.0,
@@ -171,10 +169,8 @@ def run_toktox_test(
     """
     try:
         import torax  # noqa: F401
-    except ImportError as e:
-        raise RuntimeError(
-            "TokTox requires the ``torax`` package."
-        ) from e
+    except ImportError:
+        pytest.skip("TokTox requires the ``torax`` package.")
 
     from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.TokaMaker import TokaMaker
@@ -333,7 +329,7 @@ def run_toktox_test(
 
 def main() -> None:
     t_wall0 = time.perf_counter()
-    result = run_toktox_test()
+    result = test_toktox()
     elapsed_s = time.perf_counter() - t_wall0
     slim = {k: v for k, v in result.items() if not k.startswith("_")}
     print(json.dumps(slim, indent=2, sort_keys=True))

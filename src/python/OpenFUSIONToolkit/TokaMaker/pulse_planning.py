@@ -1,3 +1,14 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+'''! TokaMaker + TORAX Coupled Pulse Simulation Code (TokTox)
+
+@authors Freddie Sheehan and John Lhote
+@date April 2026
+@ingroup doxy_oft_python
+'''
 import copy
 import json
 import logging
