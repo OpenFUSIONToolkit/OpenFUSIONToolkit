@@ -528,6 +528,142 @@ CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)
 end subroutine jphi_update_default
 !---------------------------------------------------------------------------------
+!> Update F*F' profile from inductive Jphi coupled with bootstrap current.
+!>
+!> Algorithm (mirrors bootstrap.py:calculate_profiles_and_bootstrap):
+!>   1. Build <R>/<1/R> geometry spline (same as jphi_update_default).
+!>   2. Call calculate_bootstrap to get j_BS on a self%ngeom-point psi_N grid.
+!>   3. Interpolate j_BS and the inductive jphi profile onto self%x grid.
+!>   4. Brent method: find alpha such that
+!>        gs_flux_int(alpha*j_ind + j_BS) = ABS(Itor_target)
+!>   5. Assemble total jphi = alpha*j_ind + j_BS and compute F*F' as in
+!>      jphi_update_default.
+!---------------------------------------------------------------------------------
+SUBROUTINE jphi_bs_update(self, gseq)
+CLASS(jphi_flux_func), INTENT(inout) :: self
+CLASS(gs_equil), INTENT(inout) :: gseq
+INTEGER(i4) :: i, iter
+REAL(r8) :: pscale, pprime, j_BS_axis, psi_range
+REAL(r8), ALLOCATABLE :: qtmp(:)
+type(spline_type) :: R_spline
+! Bootstrap arrays (on self%x grid)
+REAL(r8), ALLOCATABLE :: B_times_Jbs(:), j_BS(:)
+! Working arrays on self%x grid
+REAL(r8), ALLOCATABLE :: jphi_total(:)
+! Secant scalars
+REAL(r8) :: alpha, alpha_lo, alpha_hi, fa, fb, fc, ip_target
+REAL(r8) :: ip_result_lo, ip_result_hi, ip_result
+INTEGER(i4), PARAMETER :: MAX_IT = 5
+REAL(r8), PARAMETER :: IP_TOL = 1.0e-6_r8
+!---
+self%plasma_bounds = gseq%plasma_bounds
+IF(gseq%mode/=1) &
+  CALL oft_abort("Jphi-BS profile requires (F^2)' formulation", &
+                 "jphi_bs_update",__FILE__)
+IF(gseq%pax_target<0.d0) &
+  CALL oft_abort("Jphi-BS profile requires Pax target", &
+                 "jphi_bs_update",__FILE__)
+IF(.NOT.ASSOCIATED(gseq%Te)) &
+  CALL oft_abort("Jphi-BS profile requires Te profile", &
+                 "jphi_bs_update",__FILE__)
+IF(.NOT.ASSOCIATED(gseq%Ti)) &
+  CALL oft_abort("Jphi-BS profile requires Ti profile", &
+                 "jphi_bs_update",__FILE__)
+IF(.NOT.ASSOCIATED(gseq%ne)) &
+  CALL oft_abort("Jphi-BS profile requires ne profile", &
+                 "jphi_bs_update",__FILE__)
+IF(.NOT.ASSOCIATED(gseq%ni)) &
+  CALL oft_abort("Jphi-BS profile requires ni profile", &
+                 "jphi_bs_update",__FILE__)
+!--- 1. Build <R>/<1/R> geometry spline
+CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
+ALLOCATE(qtmp(self%npsi))
+CALL eval_R_qtmp(R_spline, self%x, self%npsi, qtmp)
+!--- 2. Calculate bootstrap current on the self%x grid.
+psi_range = gseq%plasma_bounds(2) - gseq%plasma_bounds(1)
+ALLOCATE(B_times_Jbs(self%npsi), j_BS(self%npsi))
+CALL gseq%P%update(gseq)
+CALL calculate_bootstrap(gseq, self%npsi, self%x, B_times_Jbs, j_BS)
+DEALLOCATE(B_times_Jbs)
+!--- 3. Axis value (psi_N=1) extrapolated using the last grid point;
+!   clamp to zero if it opposes the average sign of j_BS.
+j_BS_axis = linterp(self%x, j_BS, self%npsi, 1.0_r8, 1)
+IF(SUM(j_BS) * j_BS_axis < 0.0_r8) j_BS_axis = 0.0_r8
+ALLOCATE(jphi_total(self%npsi))
+!--- 4. Secant method to find alpha such that
+!       gs_flux_int((alpha*j_ind + j_BS)/qtmp) = ABS(Itor_target)
+!   Note: the objective is linear in alpha (flux integral is linear), so the
+!   secant method converges in one step for exact arithmetic.  We keep a
+!   bracketed fallback and iterate for safety.
+ip_target = ABS(gseq%Itor_target)
+! Evaluate at two initial points: alpha=0 and alpha=1
+alpha_lo = 0.0_r8
+jphi_total = j_BS
+CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result_lo)
+fa = ip_result_lo - ip_target
+
+alpha_hi = 1.0_r8
+jphi_total = self%jphi + j_BS
+CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result_hi)
+fb = ip_result_hi - ip_target
+
+! Secant iterations: iterate as long as fb > fa (moving toward smaller residual).
+! For a linear function, this always converges regardless of bracketing status.
+alpha_lo = 0.0_r8
+alpha_hi = 1.0_r8
+alpha = 0.0_r8
+DO iter = 1, MAX_IT
+  ! Secant step: alpha = alpha_hi - fb * (alpha_hi - alpha_lo) / (fb - fa)
+  IF(ABS(fb - fa) > 1.0e-14_r8)THEN
+    alpha = alpha_hi - fb * (alpha_hi - alpha_lo) / (fb - fa)
+    ! Clamp to avoid wild excursions
+    alpha = MAX(-1.0_r8, MIN(3.0_r8, alpha))
+  ELSE
+    ! Denominator too small: converged or degenerate
+    EXIT
+  END IF
+  
+  jphi_total = alpha * self%jphi + j_BS
+  CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result)
+  fc = ip_result - ip_target
+  IF(ABS(fc) < IP_TOL * ip_target) EXIT
+  
+  ! Shift: make the new point the "right" reference, old right becomes "left"
+  alpha_lo = alpha_hi
+  fa = fb
+  alpha_hi = alpha
+  fb = fc
+END DO
+!--- 5. Assemble total jphi and compute F*F'
+jphi_total = alpha * self%jphi + j_BS
+!--- Pressure scale
+CALL gseq%P%update(gseq)
+IF(ASSOCIATED(gseq%P_ani)) &
+  CALL oft_abort('Jphi profiles do not support anisotropic pressure', &
+                 'jphi_bs_update',__FILE__)
+pscale = gseq%P%f(gseq%plasma_bounds(2))
+pscale = gseq%pax_target / pscale
+!--- Compute updated F*F' profile
+CALL spline_eval(R_spline, 0.d0, 0)
+pprime = gseq%P%fp(gseq%plasma_bounds(1))
+self%y0 = 2.d0*((alpha*self%j0 + j_BS_axis) - &
+           R_spline%f(1)*pprime*pscale)/R_spline%f(2)
+DO i = 1, self%npsi
+  CALL spline_eval(R_spline, self%x(i), 0)
+  pprime = gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2) - &
+                                  gseq%plasma_bounds(1)) + &
+                                  gseq%plasma_bounds(1))
+  self%yp(i) = 2.d0*(jphi_total(i) - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
+END DO
+! Disable Ip matching and fix F*F' scale (matching is done here instead)
+IF(gseq%Itor_target > 0.d0) gseq%Itor_target = -gseq%Itor_target
+gseq%ffp_scale = 1.d0
+!--- Clean up
+CALL spline_dealloc(R_spline)
+DEALLOCATE(j_BS, jphi_total, qtmp)
+i = self%set_cofs(self%yp)
+END SUBROUTINE jphi_bs_update
+!---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result)
