@@ -85,6 +85,13 @@ SELECT CASE(TRIM(profType))
     READ(io_unit,*)yvals
     CALL create_jphi_ff(F,ncofs,cofs,yvals,alpha)
     DEALLOCATE(cofs,yvals)
+  CASE("jphi-split-bootstrap")
+    READ(io_unit,*)ncofs,alpha
+    ALLOCATE(cofs(ncofs),yvals(ncofs))
+    READ(io_unit,*)cofs
+    READ(io_unit,*)yvals
+    CALL create_jphi_ff(F,ncofs,cofs,yvals,alpha,update_mode=1)
+    DEALLOCATE(cofs,yvals)
   CASE("idcd")
     CALL oft_abort('"idcd" profile no longer supported.','gs_profile_load',__FILE__)
   !   READ(io_unit,*)ncofs

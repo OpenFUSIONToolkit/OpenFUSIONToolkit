@@ -20,7 +20,7 @@ use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
-  gs_get_qprof, gs_ani_press, gs_epsilon
+  gs_get_qprof, gs_ani_press, gs_epsilon, sauter_fc
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, spline_func_copy
 use spline_mod
