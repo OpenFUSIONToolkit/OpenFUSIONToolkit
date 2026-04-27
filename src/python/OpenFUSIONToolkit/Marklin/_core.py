@@ -109,7 +109,7 @@ class Marklin():
             raise ValueError('Mesh already setup, must call "reset" before loading new mesh')
         nregs = c_int()
         if mesh_file is not None:
-            ndim = c_int(-1)
+            np = c_int(-1)
             rfake = numpy.ones((1,1),dtype=numpy.float64)
             lcfake = numpy.ones((1,1),dtype=numpy.int32)
             regfake = numpy.ones((1,),dtype=numpy.int32)
@@ -119,11 +119,12 @@ class Marklin():
             }
             self._oft_env.oft_in_groups['native_mesh_options'] = {'filename': '"{0}"'.format(mesh_file)}
             self._oft_env.update_oft_in()
-            oft_setup_vmesh(ndim,ndim,rfake,ndim,ndim,lcfake,regfake,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
+            oft_setup_vmesh(np,rfake,np,np,lcfake,regfake,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
         elif r is not None:
+            if r.shape[1] != 3:
+                raise ValueError('Point list must have 3 spatial dimensions `[np,3]`')
             r = numpy.ascontiguousarray(r, dtype=numpy.float64)
             lc = numpy.ascontiguousarray(lc, dtype=numpy.int32)
-            ndim = c_int(r.shape[1])
             np = c_int(r.shape[0])
             npc = c_int(lc.shape[1])
             nc = c_int(lc.shape[0])
@@ -131,7 +132,7 @@ class Marklin():
                 reg = numpy.ones((nc.value,),dtype=numpy.int32)
             else:
                 reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
-            oft_setup_vmesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
+            oft_setup_vmesh(np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value

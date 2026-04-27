@@ -1,6 +1,9 @@
 # Non-Source directories
 /src/docs/generated
 
+# Mac specific files
+.DS_Store
+
 # FORTRAN compile objects
 *.o
 *.a

@@ -109,18 +109,18 @@ END IF
 CALL omp_set_num_threads(nthreads)
 END SUBROUTINE oftpy_set_nthreads
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Setup surface mesh from specified coordinate, connectivity, and region arrays
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_setup_smesh(ndim,np,r_loc,npc,nc,lc_loc,reg_loc,nregs,mesh_ptr) BIND(C,NAME="oft_setup_smesh")
-TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: lc_loc !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: reg_loc !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: np !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: ndim !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: npc !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: nc !< Needs docs
-INTEGER(c_int), INTENT(out) :: nregs !< Needs docs
-TYPE(c_ptr), INTENT(out) :: mesh_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Pointer to point locations array `(3,np)`
+TYPE(c_ptr), VALUE, INTENT(in) :: lc_loc !< Pointer to cell connectivity array `(npc,nc)`
+TYPE(c_ptr), VALUE, INTENT(in) :: reg_loc !< Pointer to cell region array `(nc)`
+INTEGER(c_int), VALUE, INTENT(in) :: np !< Number of points in surface mesh
+INTEGER(c_int), VALUE, INTENT(in) :: ndim !< Spatial dimension of the mesh coordinates (Note: `r` array is always `(3,np)`)
+INTEGER(c_int), VALUE, INTENT(in) :: npc !< Number of points per cell (3 for triangles, 4 for quads)
+INTEGER(c_int), VALUE, INTENT(in) :: nc !< Number of cells in surface mesh
+INTEGER(c_int), INTENT(out) :: nregs !< Number of regions in surface mesh
+TYPE(c_ptr), INTENT(out) :: mesh_ptr !< Pointer to `multigrid_mesh` object containing the constructed surface mesh
 integer(i4), POINTER :: lc_tmp(:,:),reg_tmp(:)
 real(r8), POINTER :: r_tmp(:,:)
 TYPE(multigrid_mesh), POINTER :: mg_mesh
@@ -142,24 +142,59 @@ nregs=mg_mesh%smesh%nreg
 mesh_ptr=C_LOC(mg_mesh)
 END SUBROUTINE oft_setup_smesh
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Return references to arrays defining an existing surface mesh.
+!!
+!! This routine exposes pointers to the coordinate, connectivity, and region
+!! arrays stored inside the Fortran `multigrid_mesh` object referenced by
+!! `mesh_ptr`. No data are copied and callers must not free or reallocate the objects.
 !---------------------------------------------------------------------------------
-SUBROUTINE oft_setup_vmesh(ndim,np,r_loc,npc,nc,lc_loc,reg_loc,nregs,mesh_ptr) BIND(C,NAME="oft_setup_vmesh")
-TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: lc_loc !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: reg_loc !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: np !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: ndim !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: npc !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: nc !< Needs docs
-INTEGER(c_int), INTENT(out) :: nregs !< Needs docs
-TYPE(c_ptr), INTENT(out) :: mesh_ptr !< Needs docs
+SUBROUTINE oft_smesh_get(mesh_ptr,ndim,np,r_loc,npc,nc,lc_loc,reg_loc,nreg,error_str) BIND(C,NAME="oft_smesh_get")
+TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Pointer to `multigrid_mesh` object containing the desired surface mesh
+INTEGER(c_int), INTENT(out) :: ndim !< Spatial dimension of the mesh coordinates (Note: `r` array is always `(3,np)`)
+INTEGER(c_int), INTENT(out) :: np !< Number of points in surface mesh
+TYPE(c_ptr), INTENT(out) :: r_loc !< Pointer to point locations array `(3,np)`
+INTEGER(c_int), INTENT(out) :: npc !< Number of points per cell (3 for triangles, 4 for quads)
+INTEGER(c_int), INTENT(out) :: nc !< Number of cells in surface mesh
+TYPE(c_ptr), INTENT(out) :: lc_loc !< Pointer to cell connectivity array `(npc,nc)`
+TYPE(c_ptr), INTENT(out) :: reg_loc !< Pointer to cell region array `(nc)`
+INTEGER(c_int), INTENT(out) :: nreg !< Number of regions in surface mesh
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
+TYPE(multigrid_mesh), POINTER :: mg_mesh
+IF(.NOT.c_associated(mesh_ptr))THEN
+  CALL copy_string('Mesh object not associated',error_str)
+  RETURN
+END IF
+CALL copy_string('',error_str)
+CALL c_f_pointer(mesh_ptr,mg_mesh)
+!---Read values
+ndim=mg_mesh%smesh%dim
+np=mg_mesh%smesh%np
+npc=mg_mesh%smesh%cell_np
+nc=mg_mesh%smesh%nc
+nreg=mg_mesh%smesh%nreg
+!---Get pointers
+r_loc=C_LOC(mg_mesh%smesh%r)
+lc_loc=C_LOC(mg_mesh%smesh%lc)
+reg_loc=C_LOC(mg_mesh%smesh%reg)
+END SUBROUTINE oft_smesh_get
+!---------------------------------------------------------------------------------
+!> Setup volume mesh from specified coordinate, connectivity, and region arrays
+!---------------------------------------------------------------------------------
+SUBROUTINE oft_setup_vmesh(np,r_loc,npc,nc,lc_loc,reg_loc,nregs,mesh_ptr) BIND(C,NAME="oft_setup_vmesh")
+TYPE(c_ptr), VALUE, INTENT(in) :: r_loc !< Pointer to point locations array `(3,np)`
+TYPE(c_ptr), VALUE, INTENT(in) :: lc_loc !< Pointer to cell connectivity array `(npc,nc)`
+TYPE(c_ptr), VALUE, INTENT(in) :: reg_loc !< Pointer to cell region array `(nc)`
+INTEGER(c_int), VALUE, INTENT(in) :: np !< Number of points in volume mesh
+INTEGER(c_int), VALUE, INTENT(in) :: npc !< Number of points per cell (4 for tetrahedra, 8 for hexahedra)
+INTEGER(c_int), VALUE, INTENT(in) :: nc !< Number of cells in volume mesh
+INTEGER(c_int), INTENT(out) :: nregs !< Number of regions in volume mesh
+TYPE(c_ptr), INTENT(out) :: mesh_ptr !< Pointer to `multigrid_mesh` object containing the constructed volume mesh
 integer(i4), POINTER :: lc_tmp(:,:),reg_tmp(:)
 real(r8), POINTER :: r_tmp(:,:)
 TYPE(multigrid_mesh), POINTER :: mg_mesh
-IF(ndim>0)THEN
-    ALLOCATE(r_mem(ndim,np))
-    CALL c_f_pointer(r_loc, r_tmp, [ndim,np])
+IF(np>0)THEN
+    ALLOCATE(r_mem(3,np))
+    CALL c_f_pointer(r_loc, r_tmp, [3,np])
     r_mem=r_tmp
     ALLOCATE(lc_mem(npc,nc))
     CALL c_f_pointer(lc_loc, lc_tmp, [npc,nc])
@@ -174,4 +209,38 @@ CALL multigrid_construct(mg_mesh)
 nregs=mg_mesh%mesh%nreg
 mesh_ptr=C_LOC(mg_mesh)
 END SUBROUTINE oft_setup_vmesh
+!---------------------------------------------------------------------------------
+!> Return references to arrays defining an existing volume mesh.
+!!
+!! This routine exposes pointers to the coordinate, connectivity, and region
+!! arrays stored inside the Fortran `multigrid_mesh` object referenced by
+!! `mesh_ptr`. No data are copied and callers must not free or reallocate the objects.
+!---------------------------------------------------------------------------------
+SUBROUTINE oft_vmesh_get(mesh_ptr,np,r_loc,npc,nc,lc_loc,reg_loc,nreg,error_str) BIND(C,NAME="oft_vmesh_get")
+TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Pointer to `multigrid_mesh` object containing the desired volume mesh
+INTEGER(c_int), INTENT(out) :: np !< Number of points in volume mesh
+TYPE(c_ptr), INTENT(out) :: r_loc !< Pointer to point locations array `(3,np)`
+INTEGER(c_int), INTENT(out) :: npc !< Number of points per cell (4 for tetrahedra, 8 for hexahedra)
+INTEGER(c_int), INTENT(out) :: nc !< Number of cells in volume mesh
+TYPE(c_ptr), INTENT(out) :: lc_loc !< Pointer to cell connectivity array `(npc,nc)`
+TYPE(c_ptr), INTENT(out) :: reg_loc !< Pointer to cell region array `(nc)`
+INTEGER(c_int), INTENT(out) :: nreg !< Number of regions in volume mesh
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
+TYPE(multigrid_mesh), POINTER :: mg_mesh
+IF(.NOT.c_associated(mesh_ptr))THEN
+  CALL copy_string('Mesh object not associated',error_str)
+  RETURN
+END IF
+CALL copy_string('',error_str)
+CALL c_f_pointer(mesh_ptr,mg_mesh)
+!---Read values
+np=mg_mesh%mesh%np
+npc=mg_mesh%mesh%cell_np
+nc=mg_mesh%mesh%nc
+nreg=mg_mesh%mesh%nreg
+!---Get pointers
+r_loc=C_LOC(mg_mesh%mesh%r)
+lc_loc=C_LOC(mg_mesh%mesh%lc)
+reg_loc=C_LOC(mg_mesh%mesh%reg)
+END SUBROUTINE oft_vmesh_get
 END MODULE oft_base_f
