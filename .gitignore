@@ -22,3 +22,10 @@ __pycache__
 /oft_venv/
 /compiler_id.txt
 /setup_env.sh
+
+# Julia
+src/julia/**/Manifest.toml
+src/julia/**/oftpyin-*
+src/julia/**/tokamaker_*.prof
+src/julia/**/*.eqdsk
+src/julia/**/*.ifile
