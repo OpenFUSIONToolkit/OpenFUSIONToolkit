@@ -52,14 +52,16 @@ end type mercier_flux_func
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(linterp_flux_func) :: jphi_flux_func
-  integer(4) :: ngeom = 50 !< Number of points in psi for <R>, <1/R> evaluation
+  integer(4) :: ngeom = 100 !< Number of points in psi for <R>, <1/R> evaluation
   real(8) :: j0 = 0.d0 !< LCFS Jphi value
   real(8) :: norm_last = 1.d0 !< Last Jphi normalization factor (for Ip target)
   real(8), pointer, dimension(:) :: jphi => NULL() !< Jphi(psi) profile values
+  !> Update mode selector: 0 = inductive only (default), 1 = bootstrap-coupled
+  integer(4) :: update_mode = 0
 contains
   !> Needs docs
   procedure :: copy => jphi_copy
-  !> Update F*F' profile from Jphi, P', and current equilibrium
+  !> Update F*F' profile from Jphi and current equilibrium state
   procedure :: update => jphi_update
 end type jphi_flux_func
 !------------------------------------------------------------------------------
@@ -355,12 +357,13 @@ end subroutine minterpinv_apply
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals,y0)
+SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals,y0,update_mode)
 CLASS(flux_func), POINTER, INTENT(out) :: func
 INTEGER(4), INTENT(in) :: npsi
 REAL(8), INTENT(in) :: psivals(npsi)
 REAL(8), INTENT(in) :: yvals(npsi)
 REAL(8), INTENT(in) :: y0
+INTEGER(4), OPTIONAL, INTENT(in) :: update_mode
 INTEGER(4) :: i,ierr
 ALLOCATE(jphi_flux_func::func)
 SELECT TYPE(self=>func)
@@ -376,6 +379,9 @@ SELECT TYPE(self=>func)
   !---
   self%j0=y0
   self%y0=0.d0
+  IF (PRESENT(update_mode)) THEN
+    self%update_mode = update_mode
+  END IF
   DO i=1,self%npsi
     self%x(i) = psivals(i)
     self%jphi(i) = yvals(i)
@@ -400,13 +406,26 @@ SELECT TYPE(new)
     new%f_offset=self%f_offset
     new%ngeom = self%ngeom
     new%j0 = self%j0
+    new%update_mode = self%update_mode
     ALLOCATE(new%jphi, SOURCE=self%jphi)
 END SELECT
 end subroutine jphi_copy
 !------------------------------------------------------------------------------
-!> Update F*F' profile from Jphi, P', and current equilibrium
+!> Update F*F' profile — dispatches on update_mode.
+!> mode=0 (default): standard jphi profile update.
+!> mode=1: bootstrap-coupled update.
 !------------------------------------------------------------------------------
 subroutine jphi_update(self,gseq)
+class(jphi_flux_func), intent(inout) :: self
+class(gs_equil), intent(inout) :: gseq
+SELECT CASE(self%update_mode)
+  CASE(1)
+    CALL jphi_bs_update(self,gseq)
+  CASE DEFAULT
+    CALL jphi_update_default(self,gseq)
+END SELECT
+end subroutine jphi_update
+!------------------------------------------------------------------------------
 class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
