@@ -222,7 +222,7 @@ def run_toktox_test(
     for idx, (pax, eq_path) in enumerate(((pax_a, eq_a), (pax_b, eq_b))):
         mygs.set_isoflux_constraints(diverted_pts)
         mygs.set_saddle_constraints(x_point)
-        mygs.set_targets(Ip=Ip_flattop, pax=pax, R0=r0_geo, V0=z0)
+        mygs.set_targets(Ip=Ip_flattop, pax=pax)
         _build_min_norm_coil_reg(mygs)
         mygs.init_psi()
         mygs.solve()
