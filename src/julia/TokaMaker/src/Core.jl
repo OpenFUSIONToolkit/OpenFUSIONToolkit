@@ -13,6 +13,7 @@ export Tokamaker, setup_mesh!, setup_regions!, setup!, init_psi!, solve!,
        set_psi_constraints!, set_saddle_constraints!,
        set_coil_currents!, get_coil_currents,
        vac_solve!, compute_area_integral, compute_flux_integral,
+       get_conductor_currents, get_conductor_source,
        reset!, update_settings!, get_psi, set_psi!,
        coil_dict2vec, coil_vec2dict, set_coil_bounds!, set_coil_vsc!, set_coil_reg!
 
@@ -433,6 +434,113 @@ function compute_area_integral(t::Tokamaker, field::AbstractVector;
     c_tokamaker_area_int(t.tmaker_ptr, f, Int32(reg_mask), res, buf)
     check_err(buf, "compute_area_integral")
     return res[]
+end
+
+"""
+    get_conductor_currents(t, psi; cell_centered=false, include_Vcoils=false)
+        -> (mask::BitVector, currents::Vector{Float64})
+
+For a given `psi` (length `np`), return the toroidal current density in
+the conducting regions. Mirrors Python `TokaMaker.get_conductor_currents`
+which delegates to the equilibrium snapshot.
+
+* `mask` is per-cell (length `nc`); true where the cell belongs to a
+  resistive conductor (or vcoil if `include_Vcoils=true`).
+* If `cell_centered=true`, `currents` is per-cell — vertex values
+  averaged over each triangle. Otherwise it's the per-vertex current
+  density returned by `calc_delstar_curr`.
+"""
+function get_conductor_currents(t::Tokamaker, psi::AbstractVector;
+                                cell_centered::Bool=false,
+                                include_Vcoils::Bool=false)
+    eq = t.equilibrium
+    eq === nothing && error("get_conductor_currents: no equilibrium available")
+    length(psi) == t.np || error("psi length $(length(psi)) != np=$(t.np)")
+    curr = EquilibriumModule.calc_delstar_curr(eq, Vector{Float64}(psi))
+    mesh_currents = cell_centered ? zeros(Float64, t.nc) : curr
+    mask = falses(t.nc)
+    for (_, spec) in t.cond_dict
+        eta = get(spec, "eta", -1.0)
+        eta > 0 || continue
+        rid = Int32(spec["reg_id"])
+        @inbounds for k in 1:t.nc
+            t.reg[k] == rid || continue
+            mask[k] = true
+            if cell_centered
+                v = curr[t.lc[k, 1] + 1] + curr[t.lc[k, 2] + 1] + curr[t.lc[k, 3] + 1]
+                mesh_currents[k] = v / 3.0
+            end
+        end
+    end
+    if include_Vcoils
+        for (cname, cobj) in t.coil_sets
+            haskey(t.vcoils, cname) || continue
+            for sub in cobj["sub_coils"]
+                rid = Int32(sub["reg_id"])
+                @inbounds for k in 1:t.nc
+                    t.reg[k] == rid || continue
+                    mask[k] = true
+                    if cell_centered
+                        v = curr[t.lc[k, 1] + 1] + curr[t.lc[k, 2] + 1] + curr[t.lc[k, 3] + 1]
+                        mesh_currents[k] = v / 3.0
+                    end
+                end
+            end
+        end
+    end
+    return mask, mesh_currents
+end
+
+"""
+    get_conductor_source(t, dpsi_dt) -> (mask::BitVector, mesh_currents::Vector{Float64})
+
+For a `dpsi/dt` source (e.g. from linear stability eigenvectors), return
+per-cell induced toroidal current density in conducting regions. Mirrors
+Python `TokaMaker.get_conductor_source`.
+"""
+function get_conductor_source(t::Tokamaker, dpsi_dt::AbstractVector)
+    length(dpsi_dt) == t.np || error("dpsi_dt length $(length(dpsi_dt)) != np=$(t.np)")
+    curr = Vector{Float64}(dpsi_dt)
+    @inbounds for i in 1:t.np
+        if t.r[i, 1] > 0.0
+            curr[i] /= t.r[i, 1]
+        end
+    end
+    have_nc = any(haskey(spec, "noncontinuous") for (_, spec) in t.cond_dict)
+    area = zeros(Float64, t.nc)
+    if have_nc
+        @inbounds for k in 1:t.nc
+            i1 = t.lc[k, 1] + 1; i2 = t.lc[k, 2] + 1; i3 = t.lc[k, 3] + 1
+            v1r = t.r[i2, 1] - t.r[i1, 1]; v1z = t.r[i2, 2] - t.r[i1, 2]
+            v2r = t.r[i3, 1] - t.r[i1, 1]; v2z = t.r[i3, 2] - t.r[i1, 2]
+            area[k] = abs(v1r * v2z - v1z * v2r) / 2.0
+        end
+    end
+    mesh_currents = zeros(Float64, t.nc)
+    mask = falses(t.nc)
+    for (_, spec) in t.cond_dict
+        eta = get(spec, "eta", -1.0)
+        eta > 0 || continue
+        rid = Int32(spec["reg_id"])
+        cell_idxs = Int[]
+        @inbounds for k in 1:t.nc
+            if t.reg[k] == rid
+                v = -(curr[t.lc[k, 1] + 1] + curr[t.lc[k, 2] + 1] + curr[t.lc[k, 3] + 1]) / (3.0 * eta)
+                mesh_currents[k] = v
+                mask[k] = true
+                push!(cell_idxs, k)
+            end
+        end
+        if get(spec, "noncontinuous", false) && !isempty(cell_idxs)
+            num = sum(mesh_currents[k] * area[k] for k in cell_idxs)
+            den = sum(area[k] for k in cell_idxs)
+            offset = num / den
+            for k in cell_idxs
+                mesh_currents[k] -= offset
+            end
+        end
+    end
+    return mask, mesh_currents
 end
 
 """
