@@ -9,8 +9,10 @@ using ..EquilibriumModule
 using ..Profiles: write_profile_file
 
 export Tokamaker, setup_mesh!, setup_regions!, setup!, init_psi!, solve!,
-       set_profiles!, set_targets!, set_isoflux_constraints!, set_psi_constraints!,
-       set_saddle_constraints!, set_coil_currents!, get_coil_currents,
+       set_profiles!, set_targets!, get_targets, set_isoflux_constraints!,
+       set_psi_constraints!, set_saddle_constraints!,
+       set_coil_currents!, get_coil_currents,
+       vac_solve!, compute_area_integral, compute_flux_integral,
        reset!, update_settings!, get_psi, set_psi!,
        coil_dict2vec, coil_vec2dict, set_coil_bounds!, set_coil_vsc!, set_coil_reg!
 
@@ -49,6 +51,8 @@ mutable struct Tokamaker
     lim_contour::Matrix{Float64}
     lim_contours::Vector{Matrix{Float64}}
 
+    targets::OrderedDict{String,Float64}
+
     finalized::Bool
 
     function Tokamaker(env::OFTEnv)
@@ -73,6 +77,7 @@ mutable struct Tokamaker
             zeros(Float64, 0, 0),
             zeros(Float64, 0, 0),
             Matrix{Float64}[],
+            OrderedDict{String,Float64}(),
             false,
             )
     end
@@ -381,6 +386,82 @@ function solve!(t::Tokamaker; vacuum::Bool=false)
     return t.equilibrium
 end
 
+"""
+    vac_solve!(t; psi=nothing, rhs_source=nothing) -> equilibrium
+
+Solve a vacuum (no-plasma) Grad-Shafranov problem with present coil
+currents and an optional RHS current source. Mirrors Python
+`TokaMaker.vac_solve`. Use `solve!` instead if isoflux/flux/saddle
+constraints are required.
+"""
+function vac_solve!(t::Tokamaker;
+                    psi::Union{Nothing,AbstractVector}=nothing,
+                    rhs_source::Union{Nothing,AbstractVector}=nothing)
+    psi_vec = if psi === nothing
+        zeros(Float64, t.np)
+    else
+        length(psi) == t.np || error("psi length $(length(psi)) != np=$(t.np)")
+        Vector{Float64}(psi)
+    end
+    rhs_ptr = Ptr{Float64}(C_NULL)
+    rhs_vec = Float64[]
+    if rhs_source !== nothing
+        length(rhs_source) == t.np || error("rhs_source length $(length(rhs_source)) != np=$(t.np)")
+        rhs_vec = Vector{Float64}(rhs_source)
+        rhs_ptr = pointer(rhs_vec)
+    end
+    buf = errbuf()
+    GC.@preserve psi_vec rhs_vec begin
+        c_tokamaker_vac_solve(t.tmaker_ptr, psi_vec, rhs_ptr, buf)
+    end
+    check_err(buf, "vac_solve")
+    return t.equilibrium
+end
+
+"""
+    compute_area_integral(t, field; reg_mask=-1) -> Float64
+
+Integrate `field` (length `np`) over a region (negative `reg_mask` =
+whole mesh). Mirrors Python `TokaMaker.compute_area_integral`.
+"""
+function compute_area_integral(t::Tokamaker, field::AbstractVector;
+                               reg_mask::Integer=-1)
+    length(field) == t.np || error("field length $(length(field)) != np=$(t.np)")
+    f = Vector{Float64}(field)
+    res = Ref{Float64}(0.0)
+    buf = errbuf()
+    c_tokamaker_area_int(t.tmaker_ptr, f, Int32(reg_mask), res, buf)
+    check_err(buf, "compute_area_integral")
+    return res[]
+end
+
+"""
+    compute_flux_integral(t, psi_vals, field_vals) -> Float64
+
+Integrate a flux function (defined as `(psi_vals, field_vals)` pairs)
+over the plasma region. Mirrors Python
+`TokaMaker_equilibrium.compute_flux_integral`, including the
+`psi_convention=0` flip.
+"""
+function compute_flux_integral(t::Tokamaker, psi_vals::AbstractVector,
+                               field_vals::AbstractVector)
+    length(psi_vals) == length(field_vals) ||
+        error("psi_vals and field_vals must be the same length")
+    eq = t.equilibrium
+    eq === nothing && error("compute_flux_integral: no equilibrium available (call solve! first)")
+    pv = Vector{Float64}(psi_vals)
+    fv = Vector{Float64}(field_vals)
+    if t.psi_convention == 0
+        pv = reverse(1.0 .- pv)
+        fv = reverse(fv)
+    end
+    res = Ref{Float64}(0.0)
+    buf = errbuf()
+    c_tokamaker_flux_int(eq.eq_ptr, pv, fv, length(pv), res, buf)
+    check_err(buf, "compute_flux_integral")
+    return res[]
+end
+
 get_psi(t::Tokamaker; normalized::Bool=true) = EquilibriumModule.get_psi(t.equilibrium; normalized=normalized)
 set_psi!(t::Tokamaker, psi::Vector{Float64}; update_bounds::Bool=false) =
     EquilibriumModule.set_psi!(t.equilibrium, psi; update_bounds=update_bounds)
@@ -468,19 +549,34 @@ function set_targets!(t::Tokamaker;
                       retain_previous::Bool=false)
     DISABLED = -1e99
     # Z0 and V0 are aliases (Z0 in some docs; V0 in C ABI)
-    v0val = V0 !== nothing ? Float64(V0) : (Z0 !== nothing ? Float64(Z0) : DISABLED)
+    v0 = V0 !== nothing ? Float64(V0) : (Z0 !== nothing ? Float64(Z0) : nothing)
+    if !retain_previous
+        empty!(t.targets)
+    end
+    Ip       === nothing || (t.targets["Ip"]       = Float64(Ip))
+    Ip_ratio === nothing || (t.targets["Ip_ratio"] = Float64(Ip_ratio))
+    pax      === nothing || (t.targets["pax"]      = Float64(pax))
+    estore   === nothing || (t.targets["estore"]   = Float64(estore))
+    R0       === nothing || (t.targets["R0"]       = Float64(R0))
+    if v0 !== nothing
+        t.targets["V0"] = v0
+        t.targets["Z0"] = v0
+    end
     buf = errbuf()
     c_tokamaker_set_targets(t.tmaker_ptr,
-        Ip === nothing ? DISABLED : Float64(Ip),
-        Ip_ratio === nothing ? DISABLED : Float64(Ip_ratio),
-        pax === nothing ? DISABLED : Float64(pax),
-        estore === nothing ? DISABLED : Float64(estore),
-        R0 === nothing ? DISABLED : Float64(R0),
-        v0val,
+        get(t.targets, "Ip",       DISABLED),
+        get(t.targets, "Ip_ratio", DISABLED),
+        get(t.targets, "pax",      DISABLED),
+        get(t.targets, "estore",   DISABLED),
+        get(t.targets, "R0",       DISABLED),
+        get(t.targets, "V0",       DISABLED),
         buf)
     check_err(buf, "set_targets")
     return t
 end
+
+"Return the most recently set global targets as a Dict (mirrors Python `get_targets`)."
+get_targets(t::Tokamaker) = copy(t.targets)
 
 function set_isoflux_constraints!(t::Tokamaker, isoflux::AbstractMatrix;
                                    weights::Union{Nothing,AbstractVector}=nothing,

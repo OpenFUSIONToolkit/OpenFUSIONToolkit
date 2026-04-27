@@ -109,6 +109,7 @@ using TokaMaker
         include("test_plotting.jl")
         include("test_reconstruction.jl")
         include("test_bootstrap_composers.jl")
+        include("test_tier1_basics.jl")
     else
         @info "Skipping runtime tests: liboftpy not located. Build OFT with -DOFT_BUILD_PYTHON=ON."
     end

@@ -62,11 +62,12 @@ export OFTEnv, oftpy_set_debug, oftpy_set_nthreads
 export TokamakerSettings, tokamaker_default_settings
 export TokamakerReconSettings, tokamaker_recon_default_settings
 export Tokamaker, TokaMakerEquilibrium
-export setup_mesh!, setup_regions!, setup!, init_psi!, solve!, reset!,
-       update_settings!, set_profiles!, set_targets!,
+export setup_mesh!, setup_regions!, setup!, init_psi!, solve!, vac_solve!, reset!,
+       update_settings!, set_profiles!, set_targets!, get_targets,
        set_isoflux_constraints!, set_psi_constraints!, set_saddle_constraints!,
        set_coil_currents!, set_coil_bounds!, set_coil_vsc!, set_coil_reg!,
        get_coil_currents, get_psi, set_psi!,
+       compute_area_integral, compute_flux_integral,
        coil_dict2vec, coil_vec2dict
 export create_isoflux, create_power_flux_fun, create_spline_flux_fun,
        eval_green, read_eqdsk, read_ifile
