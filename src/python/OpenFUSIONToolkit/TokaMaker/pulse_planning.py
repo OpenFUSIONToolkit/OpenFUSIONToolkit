@@ -507,7 +507,10 @@ class TokTox:
         self._state['pax_tm'] = self._state['pax'].copy()
 
         self._psi_init = None
-        
+        self._n_e_init = None
+        self._T_e_init = None
+        self._T_i_init = None
+
         self._Ip = None
         self._Zeff = None
 
@@ -1469,10 +1472,14 @@ class TokTox:
            Every key in the loaded config overwrites the matching base key;
            keys only in BASE_CONFIG are kept as-is.
         3. Override geometry (always set by TokTox / TokaMaker equilibria).
+           For loop 2+ with injected ψ from run_tx_init, the seed EQDSK is forced
+           at t_initial so flux-surface metrics match loop 1 (see geometry branch).
         4. Override t_initial / t_final / fixed_dt from __init__ params.
         5. Use psi profile from loop 0 (if available) from profile_conditions.
         6. Apply any explicit set_*() overrides (only when the attribute is
            not None, i.e. the user called the setter after load_config).
+        7. If loop 0 ran with kinetics (`tx_init_kinetics=True`), override
+           n_e, T_e, T_i with profiles taken from the end of the init simulation.
 
         @return Torax config object.
         '''
@@ -1534,6 +1541,21 @@ class TokTox:
                 else:
                     self._log(f'Warning: Loop {self._current_loop}: TM failed at t=0 and seed EQDSK is also invalid.')
 
+            # Injected ψ (and optional kinetic inits) come from run_tx_init on the
+            # *seed* EQDSK at t_init — the same surface loop 1 uses.  If we kept the
+            # TM-solved EQDSK at t_init here, V', <|∇ψ|>, etc. change while ψ(ρ) is
+            # unchanged, so j is no longer consistent with that ψ and often looks
+            # jagged.  Force the seed file at t_init so TORAX's starting metric
+            # matches loop 1 whenever profile_conditions ψ is used.
+            if self._psi_init is not None:
+                seed_eqdsk_tinit = self._init_files[0]
+                if self._test_eqdsk(seed_eqdsk_tinit):
+                    full_eqdsk_map[self._t_init] = seed_eqdsk_tinit
+                    self._log(
+                        f'Loop {self._current_loop}: seed EQDSK at t_init={self._t_init} s for TORAX '
+                        f'(same geometry as loop 1 / run_tx_init; TM file at that time not used).'
+                    )
+
             if n_tm == 0:
                 self._log(f'Warning: Loop {self._current_loop}: no valid TM EQDSKs from loop {self._current_loop-1}, using all seed EQDSKs.')
             else:
@@ -1565,6 +1587,16 @@ class TokTox:
 
         # ── 6. Explicit set_*() overrides ──────────────────────────────────
         self._apply_set_overrides(myconfig)
+
+        # ── 7. Kinetic profiles from loop 0 (when tx_init_kinetics was used) ──
+        # Applied after set_*() so relaxed n_e / T_e / T_i replace the initial
+        # slice of user schedules, matching how psi from loop 0 seeds the flux.
+        if self._n_e_init is not None:
+            myconfig['profile_conditions']['n_e'] = self._n_e_init
+        if self._T_e_init is not None:
+            myconfig['profile_conditions']['T_e'] = self._T_e_init
+        if self._T_i_init is not None:
+            myconfig['profile_conditions']['T_i'] = self._T_i_init
 
         if self._output_mode in ('normal', 'debug') and self._out_dir is not None:
             cfg_name = f'tx_config_loop{self._current_loop:03d}.py'
@@ -1604,9 +1636,11 @@ class TokTox:
         r'''! Loop 0: Run a short TORAX simulation with eqdsk geometry to equilibrate initial inputs.
 
         Runs TORAX for ~0.5 s with steady-state (time-flattened) inputs to let
-        the current profile relax under the user's actual plasma conditions
-        (n_e, T_e, T_i, pedestal, sources, Z_eff, ...).  The resulting psi is
-        propagated into the main simulation (loop 1+).
+        profiles relax under the user's actual plasma conditions (n_e, T_e, T_i,
+        pedestal, sources, Z_eff, ...).  The resulting psi is propagated into
+        the main simulation (loop 1+).  If ``fly(..., tx_init_kinetics=True)``,
+        the final n_e, T_e, and T_i are also stored and injected into loop 1+
+        configs (after ``set_*()``), same tuple form as ``psi``.
 
         IMPORTANT: this loop applies the same `set_*()` overrides as the main
         sim via `_apply_set_overrides`, so loop 0 sees the same η(T_e, n_e,
@@ -1614,10 +1648,19 @@ class TokTox:
         psi is consistent with TORAX's defaults rather than the user's plasma
         and produces kinks in loop 1 as the current re-relaxes against the
         correct profiles.
+
+        Evolution flags: controlled by `fly(..., tx_init_kinetics=...)`.
+        When False (default), only current evolves; n_e, T_i, T_e are held fixed.
+        When True, `evolve_*` come from `set_evolve()` / loaded config (same as
+        loop 1+); `evolve_current` defaults to True if still unset so j still relaxes.
         '''
         INIT_RUNTIME = 0.5
         INIT_DT = 0.01
         self._log('Transport init: building steady-state init config...')
+
+        self._n_e_init = None
+        self._T_e_init = None
+        self._T_i_init = None
 
         # 1. BASE_CONFIG + loaded_config
         init_config = copy.deepcopy(BASE_CONFIG)
@@ -1653,12 +1696,16 @@ class TokTox:
         init_config['numerics']['t_final'] = self._t_init + INIT_RUNTIME
         init_config['numerics']['fixed_dt'] = INIT_DT
 
-        # Force evolve_* for steady-state init (override any user set_evolve()):
-        # only current relaxes; T_e, T_i, n_e are held at their initial profile.
-        init_config['numerics']['evolve_current'] = True
-        init_config['numerics']['evolve_density'] = False
-        init_config['numerics']['evolve_ion_heat'] = False
-        init_config['numerics']['evolve_electron_heat'] = False
+        # Evolution: either fixed kinetics (current only) or full set_evolve() / config.
+        if not getattr(self, '_tx_init_kinetics', False):
+            init_config['numerics']['evolve_current'] = True
+            init_config['numerics']['evolve_density'] = False
+            init_config['numerics']['evolve_ion_heat'] = False
+            init_config['numerics']['evolve_electron_heat'] = False
+        else:
+            self._log('Transport init: kinetics evolution enabled (evolve_* from set_evolve / config).')
+            # Default current evolution on if nothing set after merge + set_evolve.
+            init_config['numerics'].setdefault('evolve_current', True)
 
         # 5. Initial psi from eqdsk geometry (drop any psi/initial_psi_* set
         # by loaded_config so this run is independent of prior _psi_init).
@@ -1689,16 +1736,50 @@ class TokTox:
 
         t_final_init = self._t_init + INIT_RUNTIME
 
-        # Propagate psi from init into main simulation config
-        main_config = self._loaded_config if self._loaded_config is not None else BASE_CONFIG
-        main_config.setdefault('profile_conditions', {})
-
-        # Extract psi directly on its own grid
+        # Extract psi on TORAX rho_norm grid (cell + boundary points)
         psi_xr = data_tree.profiles.psi.sel(time=t_final_init, method='nearest')
         rho_psi_arr = psi_xr.coords['rho_norm'].to_numpy()
         psi_arr = psi_xr.to_numpy()
         self._psi_init = ([self._t_init], rho_psi_arr.tolist(), [psi_arr.tolist()])
-        
+
+        if getattr(self, '_tx_init_kinetics', False):
+            for _name, _attr in (('n_e', '_n_e_init'), ('T_e', '_T_e_init'), ('T_i', '_T_i_init')):
+                _xr = getattr(data_tree.profiles, _name).sel(time=t_final_init, method='nearest')
+                _rho = _xr.coords['rho_norm'].to_numpy()
+                _arr = _xr.to_numpy()
+                setattr(self, _attr, ([self._t_init], _rho.tolist(), [_arr.tolist()]))
+            self._log('Transport init: injecting relaxed n_e, T_e, T_i into loop 1+ TORAX configs.')
+
+        # TODO(delete): temporary — remove after validating run_tx_init outputs
+        try:
+            _sel_kw = dict(time=t_final_init, method='nearest')
+            fig, axs = plt.subplots(2, 2, figsize=(8, 6))
+            fig.suptitle('TMP run_tx_init profiles @ t_final (TODO delete)', fontsize=11, color='tab:red')
+
+            def _tx_init_plot(ax, var_name, ylabel):
+                xr_ = getattr(data_tree.profiles, var_name).sel(**_sel_kw)
+                r = xr_.coords['rho_norm'].to_numpy()
+                ax.plot(r, np.asarray(xr_.to_numpy()), lw=1.2)
+                ax.set_xlabel(r'$\rho_{\mathrm{norm}}$')
+                ax.set_ylabel(ylabel)
+                ax.set_title(var_name)
+                ax.set_xlim(0.0, 1.0)
+
+            _tx_init_plot(axs[0, 0], 'psi', r'$\psi$ [Wb]')
+            _tx_init_plot(axs[0, 1], 'n_e', r'$n_e$ [m$^{-3}$]')
+            _tx_init_plot(axs[1, 0], 'T_e', r'$T_e$ [keV]')
+            _tx_init_plot(axs[1, 1], 'T_i', r'$T_i$ [keV]')
+            fig.tight_layout()
+            _plot_path = (
+                os.path.join(self._out_dir, 'tx_init_profiles_TMP.png')
+                if self._out_dir
+                else os.path.abspath('tx_init_profiles_TMP.png')
+            )
+            fig.savefig(_plot_path, dpi=120)
+            plt.close(fig)
+            self._log(f'TODO(delete): run_tx_init profile plot: {_plot_path}')
+        except Exception as _e:
+            self._log(f'TODO(delete): run_tx_init profile plot failed: {_e}')
 
 
     def _run_tx(self):
@@ -2395,6 +2476,7 @@ class TokTox:
 
     def fly(self, run_name='tmp', convergence_threshold=-1.0, max_loop=3,
             output_mode=False, skip_bad_init_eqdsks=False, run_tx_init=True,
+            tx_init_kinetics=False,
             t_ave_toggle='off', t_ave_window=0.5, t_ave_causal=True, t_ave_ignore_start=0.25):
         r'''! Run TokaMaker-TORAX coupled simulation loop.
 
@@ -2405,6 +2487,13 @@ class TokTox:
         @param skip_bad_init_eqdsks If True, skip broken initial gEQDSK files instead of raising.
         @param run_tx_init If True (default), run Loop 0 transport initialization before the main
                coupling loop. If False, skip initialization and start at loop 1.
+        @param tx_init_kinetics If False (default), Loop 0 only evolves current (density and
+               ion/electron heat fixed at initial profiles). If True, Loop 0 uses the same
+               evolve_density / evolve_ion_heat / evolve_electron_heat / evolve_current flags
+               as set via set_evolve() (after merge with loaded config). If evolve_current is
+               still unset, it defaults to True so the init run still relaxes the current.
+               When True, the final n_e, T_e, and T_i from Loop 0 are injected into every
+               loop 1+ TORAX config (after set_ne / set_Te / set_Ti), same schedule form as psi.
         @param t_ave_toggle Time-averaging mode: 'off' (no averaging), 'flattop' (average only
                during flat-top), or 'pulse' (average over the whole pulse).
         @param t_ave_window Averaging window size in seconds. Default 0.5 s.
@@ -2445,6 +2534,7 @@ class TokTox:
         self._diagnostics = self._debug_mode
         self._skip_bad_init_eqdsks = skip_bad_init_eqdsks
         self._run_name = run_name
+        self._tx_init_kinetics = bool(tx_init_kinetics)
 
         # Time-averaging settings for sawtooth smoothing
         self._t_ave_toggle = t_ave_toggle
@@ -2535,7 +2625,14 @@ class TokTox:
             # ── Loop 0: Transport initialization (optional) ──
             if run_tx_init:
                 self._print(f'\n{"="*60}\n  Loop 0: Transport Initialization\n{"="*60}')
+                if self._tx_init_kinetics:
+                    self._print('  Loop 0: kinetics evolution ON (evolve_* from set_evolve / config)')
                 self._run_tx_init()
+            else:
+                self._psi_init = None
+                self._n_e_init = None
+                self._T_e_init = None
+                self._T_i_init = None
 
             self._current_loop = 1
 
