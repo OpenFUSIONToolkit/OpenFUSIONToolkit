@@ -281,7 +281,7 @@ def test_toktox(
         tt.set_Zeff(1.6)
         tt.set_evolve(density=True, Ti=True, Te=True, current=True)
 
-        tt.fly(run_name="tmp", max_loop=max_loop, output_mode=False, run_tx_init=True)
+        tt.fly(run_name="tmp", max_loop=max_loop, output_mode=False, initial_relax=True)
 
         phys = summary(tt)
     finally:

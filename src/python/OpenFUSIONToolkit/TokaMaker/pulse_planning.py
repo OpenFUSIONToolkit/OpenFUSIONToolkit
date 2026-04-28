@@ -41,6 +41,8 @@ LCFS_WEIGHT = 100.0
 N_PSI = 1000
 _NBI_W_TO_MA = 1/16e6
 mu_0 = 4.0 * np.pi * 1e-7
+# Fixed timestep for pre-loop-1 and inter-loop TORAX relax simulations only.
+RELAX_FIXED_DT = 0.01
 
 BASE_CONFIG = {
     'plasma_composition': {},
@@ -113,6 +115,8 @@ BASE_CONFIG = {
         'include_TEM': True,
         'include_ETG': True,
         'avoid_big_negative_s': False,
+        # 'smooth_everywhere': True,
+        # 'smoothing_width': 0.1,
     },
     'solver': {
         'solver_type': 'newton_raphson',
@@ -510,6 +514,9 @@ class TokTox:
         self._n_e_init = None
         self._T_e_init = None
         self._T_i_init = None
+        self._relax_profiles_snapshot = None  # buffer while appending to relax debug history
+        # Main TORAX snapshots at t_init after each completed coupling loop (for relax diagnostics).
+        self._relax_mainrun_profile_history = []
 
         self._Ip = None
         self._Zeff = None
@@ -692,6 +699,74 @@ class TokTox:
                             config[key] = ([first_t], rho_arr, [first_v])
                 except TypeError:
                     pass
+
+    @staticmethod
+    def _relax_flat_profile_to_rho_y(profile_val):
+        r'''! (rho_norm, y) from a ``profile_conditions`` value after merge + flatten.
+
+        Handles:
+          - nested ``{time: inner}`` (TORAX time-sliced profiles; flatten keeps one key);
+          - ``(rho, y)`` static radial tuples;
+          - ``(times, rho, [profiles])`` including a single time index.
+        '''
+        if profile_val is None:
+            return None, None
+
+        if isinstance(profile_val, dict) and profile_val:
+            keys = list(profile_val.keys())
+            if keys and all(isinstance(k, (int, float, np.integer, np.floating)) for k in keys):
+                sample_vals = list(profile_val.values())
+                all_scalar = all(
+                    isinstance(v, (int, float, np.integer, np.floating))
+                    for v in sample_vals
+                )
+                # TORAX ``set_ne`` / ``set_Te`` format: ``{t: {psi_N: value, ...}}`` after
+                # flatten has one time key; inner dict is *only* numeric keys in [0, 1].
+                if all_scalar:
+                    rho_try = np.array(sorted(keys), dtype=float)
+                    kmin, kmax = float(np.min(rho_try)), float(np.max(rho_try))
+                    if kmax <= 1.0 + 1e-5 and kmin >= -1e-5:
+                        y_try = np.array([float(profile_val[k]) for k in sorted(keys)], dtype=float)
+                        if rho_try.size >= 1:
+                            return rho_try, y_try
+                    # e.g. ``Ip: {0.: ..., 5.: ...}``: not a radial table — peel one time
+                inner = profile_val[min(keys)]
+                return TokTox._relax_flat_profile_to_rho_y(inner)
+
+        if isinstance(profile_val, (tuple, list)) and len(profile_val) == 2:
+            rho, y = profile_val
+            try:
+                rho = np.asarray(rho, dtype=float).ravel()
+                y = np.asarray(y, dtype=float).ravel()
+                if rho.size == 0 or y.size == 0:
+                    return None, None
+                if rho.shape == y.shape:
+                    return rho, y
+            except (TypeError, ValueError):
+                pass
+            return None, None
+
+        if isinstance(profile_val, (tuple, list)) and len(profile_val) == 3:
+            _t, rho, vs = profile_val
+            try:
+                rho = np.asarray(rho, dtype=float).ravel()
+                if isinstance(vs, np.ndarray):
+                    if vs.ndim == 2 and vs.shape[0] >= 1:
+                        y = np.asarray(vs[0], dtype=float).ravel()
+                    else:
+                        y = np.asarray(vs, dtype=float).ravel()
+                elif isinstance(vs, (list, tuple)) and len(vs) > 0:
+                    y = np.asarray(vs[0], dtype=float).ravel()
+                else:
+                    y = np.asarray(vs, dtype=float).ravel()
+                if rho.size == 0 or y.size == 0:
+                    return None, None
+                if rho.shape == y.shape:
+                    return rho, y
+            except (TypeError, ValueError):
+                pass
+
+        return None, None
 
 
     # ─── Setup & Configuration ──────────────────────────────────────────────────
@@ -1307,8 +1382,8 @@ class TokTox:
 
         Only applied when the corresponding attribute is not None (i.e. the user
         called the setter explicitly; None means fall through to the loaded/base
-        config). Used by both `_get_tx_config` (loop 1+) and `_run_tx_init`
-        (loop 0) so the transport-init simulation sees the same plasma
+        config). Used by both `_get_tx_config` (loop 1+) and `_run_tx_relax`
+        so each relax simulation sees the same plasma
         conditions as the main sim.
 
         Does NOT touch `geometry`, `numerics.{t_initial, t_final, fixed_dt}`,
@@ -1472,14 +1547,15 @@ class TokTox:
            Every key in the loaded config overwrites the matching base key;
            keys only in BASE_CONFIG are kept as-is.
         3. Override geometry (always set by TokTox / TokaMaker equilibria).
-           For loop 2+ with injected ψ from run_tx_init, the seed EQDSK is forced
-           at t_initial so flux-surface metrics match loop 1 (see geometry branch).
+           For loop 2+ with injected ψ and ``relax=False``, the seed EQDSK is
+           forced at t_initial (ψ from pre-loop-1 relax on seed); if ``relax=True``,
+           inter-loop relax keeps ψ on the TM ``i=0`` surface so TM EQDSK is used.
         4. Override t_initial / t_final / fixed_dt from __init__ params.
         5. Use psi profile from loop 0 (if available) from profile_conditions.
         6. Apply any explicit set_*() overrides (only when the attribute is
            not None, i.e. the user called the setter after load_config).
-        7. If loop 0 ran with kinetics (`tx_init_kinetics=True`), override
-           n_e, T_e, T_i with profiles taken from the end of the init simulation.
+        7. If ``relax_kinetics`` was True for the last relax, override n_e, T_e, T_i
+           with profiles taken from the end of that relax simulation.
 
         @return Torax config object.
         '''
@@ -1541,19 +1617,17 @@ class TokTox:
                 else:
                     self._log(f'Warning: Loop {self._current_loop}: TM failed at t=0 and seed EQDSK is also invalid.')
 
-            # Injected ψ (and optional kinetic inits) come from run_tx_init on the
-            # *seed* EQDSK at t_init — the same surface loop 1 uses.  If we kept the
-            # TM-solved EQDSK at t_init here, V', <|∇ψ|>, etc. change while ψ(ρ) is
-            # unchanged, so j is no longer consistent with that ψ and often looks
-            # jagged.  Force the seed file at t_init so TORAX's starting metric
-            # matches loop 1 whenever profile_conditions ψ is used.
-            if self._psi_init is not None:
+            # Injected ψ from pre-loop-1 relax used the *seed* EQDSK.  If we used
+            # the TM EQDSK at t_init without an inter-loop re-relax, the metric changes
+            # and j becomes inconsistent.  When ``relax=False``, force seed at t_init.
+            # When ``relax=True``, inter-loop relax aligns ψ with TM ``i=0`` — keep TM.
+            if self._psi_init is not None and not getattr(self, '_inter_loop_relax', False):
                 seed_eqdsk_tinit = self._init_files[0]
                 if self._test_eqdsk(seed_eqdsk_tinit):
                     full_eqdsk_map[self._t_init] = seed_eqdsk_tinit
                     self._log(
                         f'Loop {self._current_loop}: seed EQDSK at t_init={self._t_init} s for TORAX '
-                        f'(same geometry as loop 1 / run_tx_init; TM file at that time not used).'
+                        f'(ψ from pre-loop-1 relax on seed; inter-loop relax disabled).'
                     )
 
             if n_tm == 0:
@@ -1576,7 +1650,7 @@ class TokTox:
         myconfig['numerics']['t_final'] = self._t_final
         myconfig['numerics']['fixed_dt'] = self._tx_dt
 
-        # ── 5. Psi profile from loop 0  ──────────
+        # ── 5. Psi profile from last TORAX relax (pre-loop-1 / inter-loop) ──────────
         myconfig.setdefault('profile_conditions', {})
         if self._psi_init is not None:
             myconfig['profile_conditions']['psi'] = self._psi_init
@@ -1588,9 +1662,9 @@ class TokTox:
         # ── 6. Explicit set_*() overrides ──────────────────────────────────
         self._apply_set_overrides(myconfig)
 
-        # ── 7. Kinetic profiles from loop 0 (when tx_init_kinetics was used) ──
+        # ── 7. Kinetic profiles from last relax (when relax_kinetics was True) ──
         # Applied after set_*() so relaxed n_e / T_e / T_i replace the initial
-        # slice of user schedules, matching how psi from loop 0 seeds the flux.
+        # slice of user schedules, matching how ψ from relax seeds the flux.
         if self._n_e_init is not None:
             myconfig['profile_conditions']['n_e'] = self._n_e_init
         if self._T_e_init is not None:
@@ -1632,57 +1706,70 @@ class TokTox:
                 self._print(f'    EQDSK rejected by TORAX: {os.path.basename(eqdsk)}')
                 return False
 
-    def _run_tx_init(self):
-        r'''! Loop 0: Run a short TORAX simulation with eqdsk geometry to equilibrate initial inputs.
+    def _capture_relax_profiles_from_datatree(self, data_tree, time_val=None):
+        r'''! Store ψ, n_e, T_e, T_i at ``time_val`` for debug relax figures / history.
 
-        Runs TORAX for ~0.5 s with steady-state (time-flattened) inputs to let
-        profiles relax under the user's actual plasma conditions (n_e, T_e, T_i,
-        pedestal, sources, Z_eff, ...).  The resulting psi is propagated into
-        the main simulation (loop 1+).  If ``fly(..., tx_init_kinetics=True)``,
-        the final n_e, T_e, and T_i are also stored and injected into loop 1+
-        configs (after ``set_*()``), same tuple form as ``psi``.
-
-        IMPORTANT: this loop applies the same `set_*()` overrides as the main
-        sim via `_apply_set_overrides`, so loop 0 sees the same η(T_e, n_e,
-        Z_eff), heating, pedestal, etc. as loop 1.  Without this, the relaxed
-        psi is consistent with TORAX's defaults rather than the user's plasma
-        and produces kinks in loop 1 as the current re-relaxes against the
-        correct profiles.
-
-        Evolution flags: controlled by `fly(..., tx_init_kinetics=...)`.
-        When False (default), only current evolves; n_e, T_i, T_e are held fixed.
-        When True, `evolve_*` come from `set_evolve()` / loaded config (same as
-        loop 1+); `evolve_current` defaults to True if still unset so j still relaxes.
+        Updates ``_relax_profiles_snapshot`` temporarily so the caller can append a copy
+        to ``_relax_mainrun_profile_history``. Not used to seed inter-loop relax
+        (those profiles come from the user config each time).
         '''
-        INIT_RUNTIME = 0.5
-        INIT_DT = 0.01
-        self._log('Transport init: building steady-state init config...')
+        if time_val is None:
+            time_val = self._t_init
+        snap = {}
+        _sel = dict(time=time_val, method='nearest')
+        for _name in ('psi', 'n_e', 'T_e', 'T_i'):
+            _xr = getattr(data_tree.profiles, _name).sel(**_sel)
+            _rho = _xr.coords['rho_norm'].to_numpy()
+            _arr = _xr.to_numpy()
+            snap[_name] = ([self._t_init], _rho.tolist(), [_arr.tolist()])
+        self._relax_profiles_snapshot = snap
+
+    def _run_tx_relax(self, *, stage, eqdsk_path, prescribed_profiles):
+        r'''! Short TORAX relax: pre-loop-1 on the seed, or inter-loop on TM ``i=0`` EQDSK.
+
+        Uses flattened user inputs (``_apply_set_overrides`` + ``_flatten_time_dependent``).
+        If ``prescribed_profiles`` is None, ψ follows EQDSK ``initial_psi_mode='geometry'``
+        and n_e, T_e, T_i stay as already merged from base / loaded config and
+        ``_apply_set_overrides`` (user inputs). If a dict is passed, it must supply
+        ψ, n_e, T_e, T_i tuples (advanced; inter-loop uses None so kinetics are always user-specified).
+
+        @param stage ``'initial'`` or ``'interloop'`` (logging / output names only).
+        @param eqdsk_path Path to gEQDSK for ``geometry_configs`` at ``t_initial``.
+        @param prescribed_profiles None, or dict with keys psi, n_e, T_e, T_i (3-tuples).
+        '''
+        runtime = float(self._relax_duration)
+        dt_relax = RELAX_FIXED_DT
+        tag = 'Pre-loop-1 relax' if stage == 'initial' else f'Inter-loop relax (before loop {self._current_loop})'
+        self._log(f'{tag}: building config ({runtime:.4g} s, dt={dt_relax})...')
 
         self._n_e_init = None
         self._T_e_init = None
         self._T_i_init = None
 
-        # 1. BASE_CONFIG + loaded_config
         init_config = copy.deepcopy(BASE_CONFIG)
         if self._loaded_config is not None:
             self._config_merge(init_config, self._loaded_config)
 
-        # 2. User set_*() overrides — same as loop 1+
         self._apply_set_overrides(init_config)
 
-        # 3. Geometry: first seed eqdsk only — same geometry as loop 1, i=0.
-        # This ensures the psi evolved here satisfies the same GS metric coefficients
-        # as the main sim, so injected psi produces smooth j at t=0 of loop 1.
-        init_eqdsk = self._init_files[0]
-        if not self._test_eqdsk(init_eqdsk):
-            raise ValueError(f'Transport init: first seed eqdsk is not valid: {init_eqdsk}')
+        use_path = eqdsk_path
+        if not self._test_eqdsk(use_path):
+            if stage == 'initial':
+                raise ValueError(f'TORAX relax ({stage}): EQDSK not valid: {use_path}')
+            seed_eq = self._init_files[0]
+            if self._test_eqdsk(seed_eq):
+                use_path = seed_eq
+                self._log(f'{tag}: TM EQDSK invalid, using seed for relax: {use_path}')
+            else:
+                raise ValueError(f'TORAX relax (interloop): TM and seed EQDSK invalid: {eqdsk_path}')
+
         init_config['geometry'] = {
             'geometry_type': 'eqdsk',
             'geometry_directory': os.getcwd(),
             'last_surface_factor': self._last_surface_factor,
             'n_surfaces': 50,
             'Ip_from_parameters': True,
-            'geometry_configs': {self._t_init: {'geometry_file': init_eqdsk, 'cocos': self._cocos}},
+            'geometry_configs': {self._t_init: {'geometry_file': use_path, 'cocos': self._cocos}},
         }
 
         if self._tx_grid_type == 'n_rho':
@@ -1690,96 +1777,104 @@ class TokTox:
         elif self._tx_grid_type == 'face_centers':
             init_config['geometry']['face_centers'] = self._tx_grid
 
-        # 4. Numerics: short steady-state init sim.
         init_config.setdefault('numerics', {})
         init_config['numerics']['t_initial'] = self._t_init
-        init_config['numerics']['t_final'] = self._t_init + INIT_RUNTIME
-        init_config['numerics']['fixed_dt'] = INIT_DT
+        init_config['numerics']['t_final'] = self._t_init + runtime
+        init_config['numerics']['fixed_dt'] = dt_relax
 
-        # Evolution: either fixed kinetics (current only) or full set_evolve() / config.
-        if not getattr(self, '_tx_init_kinetics', False):
+        if not getattr(self, '_relax_kinetics', False):
             init_config['numerics']['evolve_current'] = True
             init_config['numerics']['evolve_density'] = False
             init_config['numerics']['evolve_ion_heat'] = False
             init_config['numerics']['evolve_electron_heat'] = False
         else:
-            self._log('Transport init: kinetics evolution enabled (evolve_* from set_evolve / config).')
-            # Default current evolution on if nothing set after merge + set_evolve.
+            self._log(f'{tag}: relax_kinetics ON (evolve_* from set_evolve / config).')
             init_config['numerics'].setdefault('evolve_current', True)
 
-        # 5. Initial psi from eqdsk geometry (drop any psi/initial_psi_* set
-        # by loaded_config so this run is independent of prior _psi_init).
         init_config.setdefault('profile_conditions', {})
-        init_config['profile_conditions'].pop('psi', None)
-        init_config['profile_conditions']['initial_psi_mode'] = 'geometry'
-        init_config['profile_conditions']['initial_psi_from_j'] = False
+        if prescribed_profiles is None:
+            init_config['profile_conditions'].pop('psi', None)
+            init_config['profile_conditions']['initial_psi_mode'] = 'geometry'
+            init_config['profile_conditions']['initial_psi_from_j'] = False
+        else:
+            pc = init_config['profile_conditions']
+            pc['psi'] = copy.deepcopy(prescribed_profiles['psi'])
+            pc['initial_psi_mode'] = 'profile_conditions'
+            pc['initial_psi_from_j'] = False
+            pc['n_e'] = copy.deepcopy(prescribed_profiles['n_e'])
+            pc['T_e'] = copy.deepcopy(prescribed_profiles['T_e'])
+            pc['T_i'] = copy.deepcopy(prescribed_profiles['T_i'])
 
-        # 6. Flatten all time-dependent values to their initial value (steady-state inputs)
         self._flatten_time_dependent(init_config)
 
+        pc_flat = init_config.get('profile_conditions', {})
+        _user_ref_curves = {}
+        for _k in ('n_e', 'T_e', 'T_i'):
+            if _k in pc_flat:
+                _r, _y = TokTox._relax_flat_profile_to_rho_y(pc_flat[_k])
+                if _r is not None:
+                    _user_ref_curves[_k] = (_r, _y)
+        if 'psi' in pc_flat:
+            _r, _y = TokTox._relax_flat_profile_to_rho_y(pc_flat['psi'])
+            if _r is not None:
+                _user_ref_curves['psi'] = (_r, _y)
+
         if self._output_mode in ('normal', 'debug') and self._out_dir is not None:
-            cfg_name = 'tx_config_loop000.py'
+            if stage == 'initial':
+                cfg_name = 'tx_config_relax000_initial.py'
+            else:
+                cfg_name = f'tx_config_relax_inter_{self._current_loop:03d}.py'
             if self._output_file_tag is not None:
                 cfg_name = f'{self._output_file_tag}_{cfg_name}'
             config_filename = os.path.join(self._out_dir, cfg_name)
             with open(config_filename, 'w') as f:
-                f.write('# Torax configuration\n# Loop 0 (transport init)\n\n')
+                f.write('# Torax configuration\n# TORAX relax ({stage})\n\n'.format(stage=stage))
                 f.write('tx_config = ')
                 f.write(pprint.pformat(self._to_plain_python(init_config), width=100, sort_dicts=False))
 
-        self._log(f'Transport init: running ~{INIT_RUNTIME}s steady-state TORAX simulation...')
+        self._log(f'{tag}: running TORAX...')
         tx_config = torax.ToraxConfig.from_dict(init_config)
         data_tree, hist = torax.run_simulation(tx_config, log_timestep_info=False)
 
         if hist.sim_error != torax.SimError.NO_ERROR:
-            raise ValueError(f'Transport init simulation failed: {hist.sim_error}')
+            raise ValueError(f'TORAX relax ({stage}) failed: {hist.sim_error}')
 
-        t_final_init = self._t_init + INIT_RUNTIME
+        t_final_relax = self._t_init + runtime
 
-        # Extract psi on TORAX rho_norm grid (cell + boundary points)
-        psi_xr = data_tree.profiles.psi.sel(time=t_final_init, method='nearest')
+        psi_xr = data_tree.profiles.psi.sel(time=t_final_relax, method='nearest')
         rho_psi_arr = psi_xr.coords['rho_norm'].to_numpy()
         psi_arr = psi_xr.to_numpy()
         self._psi_init = ([self._t_init], rho_psi_arr.tolist(), [psi_arr.tolist()])
 
-        if getattr(self, '_tx_init_kinetics', False):
+        if getattr(self, '_relax_kinetics', False):
             for _name, _attr in (('n_e', '_n_e_init'), ('T_e', '_T_e_init'), ('T_i', '_T_i_init')):
-                _xr = getattr(data_tree.profiles, _name).sel(time=t_final_init, method='nearest')
+                _xr = getattr(data_tree.profiles, _name).sel(time=t_final_relax, method='nearest')
                 _rho = _xr.coords['rho_norm'].to_numpy()
                 _arr = _xr.to_numpy()
                 setattr(self, _attr, ([self._t_init], _rho.tolist(), [_arr.tolist()]))
-            self._log('Transport init: injecting relaxed n_e, T_e, T_i into loop 1+ TORAX configs.')
+            self._log(f'{tag}: relaxed n_e, T_e, T_i will override loop 1+ configs after set_*().')
 
-        # TODO(delete): temporary — remove after validating run_tx_init outputs
-        try:
-            _sel_kw = dict(time=t_final_init, method='nearest')
-            fig, axs = plt.subplots(2, 2, figsize=(8, 6))
-            fig.suptitle('TMP run_tx_init profiles @ t_final (TODO delete)', fontsize=11, color='tab:red')
-
-            def _tx_init_plot(ax, var_name, ylabel):
-                xr_ = getattr(data_tree.profiles, var_name).sel(**_sel_kw)
-                r = xr_.coords['rho_norm'].to_numpy()
-                ax.plot(r, np.asarray(xr_.to_numpy()), lw=1.2)
-                ax.set_xlabel(r'$\rho_{\mathrm{norm}}$')
-                ax.set_ylabel(ylabel)
-                ax.set_title(var_name)
-                ax.set_xlim(0.0, 1.0)
-
-            _tx_init_plot(axs[0, 0], 'psi', r'$\psi$ [Wb]')
-            _tx_init_plot(axs[0, 1], 'n_e', r'$n_e$ [m$^{-3}$]')
-            _tx_init_plot(axs[1, 0], 'T_e', r'$T_e$ [keV]')
-            _tx_init_plot(axs[1, 1], 'T_i', r'$T_i$ [keV]')
-            fig.tight_layout()
-            _plot_path = (
-                os.path.join(self._out_dir, 'tx_init_profiles_TMP.png')
-                if self._out_dir
-                else os.path.abspath('tx_init_profiles_TMP.png')
-            )
-            fig.savefig(_plot_path, dpi=120)
-            plt.close(fig)
-            self._log(f'TODO(delete): run_tx_init profile plot: {_plot_path}')
-        except Exception as _e:
-            self._log(f'TODO(delete): run_tx_init profile plot failed: {_e}')
+        if getattr(self, '_debug_mode', False) and self._out_dir is not None:
+            if stage == 'initial':
+                _fig_name = 'tx_relax_profiles_initial.png'
+            else:
+                _fig_name = f'tx_relax_profiles_inter_loop{self._current_loop:03d}.png'
+            if self._output_file_tag is not None:
+                _fig_name = f'{self._output_file_tag}_{_fig_name}'
+            _relax_plot_path = os.path.join(self._out_dir, _fig_name)
+            try:
+                plot_tx_relax_profiles(
+                    self,
+                    data_tree,
+                    stage=stage,
+                    t_final_relax=t_final_relax,
+                    user_ref_curves=_user_ref_curves,
+                    save_path=_relax_plot_path,
+                    display=False,
+                )
+                self._log(f'TORAX relax profile figure ({stage}): {_relax_plot_path}')
+            except Exception as _e:
+                self._log(f'TORAX relax profile figure failed ({stage}): {_e}')
 
 
     def _run_tx(self):
@@ -1787,6 +1882,16 @@ class TokTox:
         @return Tuple (consumed_flux, consumed_flux_integral).
         '''
         self._print('  TORAX: running simulation...')
+
+        if self._current_loop >= 2 and getattr(self, '_inter_loop_relax', False):
+            prev_lp = self._current_loop - 1
+            tm_eq0 = os.path.join(self._eqdsk_dir, f'{prev_lp:03d}.000.eqdsk')
+            self._print(
+                f'  TORAX: inter-loop relax (~{self._relax_duration:g} s) before main run...'
+            )
+            # User n_e, T_e, T_i (merged config + set_*); ψ from geometry on this EQDSK.
+            self._run_tx_relax(stage='interloop', eqdsk_path=tm_eq0, prescribed_profiles=None)
+
         myconfig = self._get_tx_config()
         try:
             data_tree, hist = torax.run_simulation(myconfig, log_timestep_info=False)
@@ -1799,6 +1904,18 @@ class TokTox:
             raise ValueError(f'TORAX failed to run the simulation: {hist.sim_error}')
         
         self._data_tree = data_tree  # store for visualization at full TORAX resolution
+
+        try:
+            self._capture_relax_profiles_from_datatree(data_tree, self._t_init)
+            if self._relax_profiles_snapshot is not None:
+                self._relax_mainrun_profile_history.append(
+                    {
+                        'loop': int(self._current_loop),
+                        'profiles': copy.deepcopy(self._relax_profiles_snapshot),
+                    }
+                )
+        except Exception as _e:
+            self._log(f'Warning: could not snapshot TORAX profiles at t_init for next relax: {_e}')
 
         v_loops = np.zeros(len(self._tm_times))
         for i, t in enumerate(self._tm_times):
@@ -2475,9 +2592,10 @@ class TokTox:
     # ─── Main Simulation Loop ───────────────────────────────────────────────────
 
     def fly(self, run_name='tmp', convergence_threshold=-1.0, max_loop=3,
-            output_mode=False, skip_bad_init_eqdsks=False, run_tx_init=True,
-            tx_init_kinetics=False,
-            t_ave_toggle='off', t_ave_window=0.5, t_ave_causal=True, t_ave_ignore_start=0.25):
+            output_mode=False, skip_bad_init_eqdsks=False,
+            initial_relax=True, relax=False, relax_kinetics=False, relax_duration=0.1,
+            t_ave_toggle='off', t_ave_window=0.5, t_ave_causal=True, t_ave_ignore_start=0.25,
+            **kwargs):
         r'''! Run TokaMaker-TORAX coupled simulation loop.
 
         @param convergence_threshold Max fractional change in consumed flux between loops for convergence.
@@ -2485,15 +2603,20 @@ class TokTox:
         @param run_name Name for this run (used in output directory and log file).
         @param output_mode Output level selector: False (or None), 'minimal', 'normal', or 'debug'.
         @param skip_bad_init_eqdsks If True, skip broken initial gEQDSK files instead of raising.
-        @param run_tx_init If True (default), run Loop 0 transport initialization before the main
-               coupling loop. If False, skip initialization and start at loop 1.
-        @param tx_init_kinetics If False (default), Loop 0 only evolves current (density and
-               ion/electron heat fixed at initial profiles). If True, Loop 0 uses the same
-               evolve_density / evolve_ion_heat / evolve_electron_heat / evolve_current flags
-               as set via set_evolve() (after merge with loaded config). If evolve_current is
-               still unset, it defaults to True so the init run still relaxes the current.
-               When True, the final n_e, T_e, and T_i from Loop 0 are injected into every
-               loop 1+ TORAX config (after set_ne / set_Te / set_Ti), same schedule form as psi.
+        @param initial_relax If True (default), run a short TORAX relax on the seed EQDSK before
+               loop 1 (flattened user inputs; ψ from geometry unless inter-loop updated it earlier).
+               If False, skip and start loop 1 from EQDSK ψ / loaded config. When ``relax`` is True,
+               this is forced True so loop 1 establishes relaxed ψ before coupling loop ≥2.
+        @param relax If True, run an additional short TORAX relax before each coupling loop ≥2,
+               on TM-solved EQDSK ``(previous_loop).000.eqdsk`` (fallback: seed), with **user**
+               n_e, T_e, T_i from loaded config and ``set_*()`` (same as loop 1) and ψ from
+               geometry on that EQDSK—avoiding drift from previous TORAX outputs between loops.
+               Default False (backward compatible). Implies ``initial_relax=True``.
+        @param relax_kinetics If False (default), each relax only evolves current; density and
+               ion/electron heat stay fixed at the profiles present before that relax. If True,
+               relax uses the same ``evolve_*`` flags as ``set_evolve()`` / loaded config. When True,
+               relaxed n_e, T_e, T_i are injected into main TORAX after ``set_*()`` like ψ.
+        @param relax_duration Duration (s) of each relax simulation; timestep is fixed at 0.01 s.
         @param t_ave_toggle Time-averaging mode: 'off' (no averaging), 'flattop' (average only
                during flat-top), or 'pulse' (average over the whole pulse).
         @param t_ave_window Averaging window size in seconds. Default 0.5 s.
@@ -2501,8 +2624,23 @@ class TokTox:
                If False, window is centred on the timepoint.
         @param t_ave_ignore_start Ignore the first N seconds of the pulse when building the
                averaging window (avoids numerical transients). Default 0.25 s.
+
+        Deprecated keyword aliases (still accepted): ``run_tx_init`` → ``initial_relax``;
+        ``tx_init_kinetics`` → ``relax_kinetics``.
         '''
         import tempfile
+
+        if 'run_tx_init' in kwargs:
+            initial_relax = kwargs.pop('run_tx_init')
+        if 'tx_init_kinetics' in kwargs:
+            relax_kinetics = kwargs.pop('tx_init_kinetics')
+        if kwargs:
+            raise TypeError(
+                'fly() got unexpected keyword arguments: ' + ', '.join(sorted(kwargs))
+            )
+
+        if relax:
+            initial_relax = True
 
         # Disable JAX's persistent XLA compilation cache before any TORAX/JAX JIT
         # compilation occurs.  Since JAX 0.4.x the cache stores serialized XLA
@@ -2534,7 +2672,9 @@ class TokTox:
         self._diagnostics = self._debug_mode
         self._skip_bad_init_eqdsks = skip_bad_init_eqdsks
         self._run_name = run_name
-        self._tx_init_kinetics = bool(tx_init_kinetics)
+        self._relax_duration = float(relax_duration)
+        self._relax_kinetics = bool(relax_kinetics)
+        self._inter_loop_relax = bool(relax)
 
         # Time-averaging settings for sawtooth smoothing
         self._t_ave_toggle = t_ave_toggle
@@ -2622,17 +2762,23 @@ class TokTox:
         tx_cflux_vloop = []
 
         try:
-            # ── Loop 0: Transport initialization (optional) ──
-            if run_tx_init:
-                self._print(f'\n{"="*60}\n  Loop 0: Transport Initialization\n{"="*60}')
-                if self._tx_init_kinetics:
-                    self._print('  Loop 0: kinetics evolution ON (evolve_* from set_evolve / config)')
-                self._run_tx_init()
+            self._relax_mainrun_profile_history = []
+
+            # ── Pre-loop-1 TORAX relax (optional) ──
+            if initial_relax:
+                self._print(f'\n{"="*60}\n  Pre-loop-1: TORAX relax\n{"="*60}')
+                if self._relax_kinetics:
+                    self._print('  Pre-loop-1: relax_kinetics ON (evolve_* from set_evolve / config)')
+                init_seed = self._init_files[0]
+                if not self._test_eqdsk(init_seed):
+                    raise ValueError(f'Pre-loop-1 relax: first seed EQDSK not valid for TORAX: {init_seed}')
+                self._run_tx_relax(stage='initial', eqdsk_path=init_seed, prescribed_profiles=None)
             else:
                 self._psi_init = None
                 self._n_e_init = None
                 self._T_e_init = None
                 self._T_i_init = None
+                self._relax_profiles_snapshot = None
 
             self._current_loop = 1
 
@@ -3516,6 +3662,134 @@ def plot_profile_evolution(tt, save_path=None, display=True, one_plot=False):
             phase_save = save_path
 
         _save_or_display(fig, phase_save, display)
+
+
+# ── TORAX relax radial profiles (output_mode debug) ─────────────────────────
+
+def plot_tx_relax_profiles(
+    tt,
+    data_tree,
+    *,
+    stage,
+    t_final_relax,
+    user_ref_curves=None,
+    save_path=None,
+    display=False,
+):
+    """Plot ψ, n_e, T_e, T_i vs ρ_norm after a short TORAX relax.
+
+    Shows main-run history (``tt._relax_mainrun_profile_history``), **user** kinetic
+    profiles from flattened ``profile_conditions``, **init EQDSK** ψ at ``t_initial``
+    when ψ is not prescribed (``initial_psi_mode='geometry'``), and the profile at
+    ``t_final_relax``. Used when ``TokTox.fly(..., output_mode='debug')``.
+    """
+    t_init = tt._t_init
+    _sel_kw = dict(time=t_final_relax, method='nearest')
+    _sel_init = dict(time=t_init, method='nearest')
+    fig, axs = plt.subplots(2, 2, figsize=(8.5, 6.5))
+    _hist = getattr(tt, '_relax_mainrun_profile_history', None) or []
+    _uref = user_ref_curves or {}
+    if stage == 'initial':
+        _stage_lbl = 'pre-loop-1 relax'
+    else:
+        _stage_lbl = f'inter-loop relax (before loop {tt._current_loop})'
+    fig.suptitle(
+        f'TORAX {_stage_lbl}: history, user inputs, init EQDSK ψ, after relax',
+        fontsize=11,
+    )
+    _cmap_hist = plt.get_cmap('tab10')
+    _user_color = 'tab:green'
+    _eqdsk_psi_color = 'tab:purple'
+
+    def _one_panel(ax, var_name, ylabel):
+        for _entry in _hist:
+            lp = _entry['loop']
+            profs = _entry['profiles']
+            if var_name not in profs:
+                continue
+            tpr = profs[var_name]
+            r_h = np.asarray(tpr[1], dtype=float)
+            y_h = np.asarray(tpr[2][0], dtype=float)
+            _c = _cmap_hist(((lp - 1) % 10) / 9.0)
+            ax.plot(
+                r_h,
+                y_h,
+                lw=1.1,
+                ls=':',
+                color=_c,
+                alpha=0.95,
+                label=f'loop {lp} main @ t_init',
+            )
+
+        if var_name in _uref:
+            r_u, y_u = _uref[var_name]
+            ax.plot(
+                r_u,
+                y_u,
+                lw=1.25,
+                ls='-.',
+                color=_user_color,
+                alpha=0.95,
+                label=f'user {var_name} (config)',
+            )
+        elif var_name in ('n_e', 'T_e', 'T_i'):
+            # If profile_conditions could not be parsed, show TORAX’s actual initial slice.
+            try:
+                xr_ic = getattr(data_tree.profiles, var_name).sel(**_sel_init)
+                r_ic = xr_ic.coords['rho_norm'].to_numpy()
+                y_ic = np.asarray(xr_ic.to_numpy())
+                ax.plot(
+                    r_ic,
+                    y_ic,
+                    lw=1.25,
+                    ls='-.',
+                    color='tab:cyan',
+                    alpha=0.95,
+                    label=f'{var_name} at t_init (TORAX IC)',
+                )
+            except Exception:
+                pass
+        elif var_name == 'psi':
+            try:
+                xr_geo = getattr(data_tree.profiles, 'psi').sel(**_sel_init)
+                r_g = xr_geo.coords['rho_norm'].to_numpy()
+                y_g = np.asarray(xr_geo.to_numpy())
+                ax.plot(
+                    r_g,
+                    y_g,
+                    lw=1.25,
+                    ls='-.',
+                    color=_eqdsk_psi_color,
+                    alpha=0.95,
+                    label=r'init EQDSK $\psi$ (t_init)',
+                )
+            except Exception:
+                pass
+
+        xr_post = getattr(data_tree.profiles, var_name).sel(**_sel_kw)
+        r_post = xr_post.coords['rho_norm'].to_numpy()
+        y_post = np.asarray(xr_post.to_numpy())
+        ax.plot(
+            r_post,
+            y_post,
+            lw=2.0,
+            color='tab:blue',
+            zorder=5,
+            label='after this relax',
+        )
+
+        ax.set_xlabel(r'$\rho_{\mathrm{norm}}$')
+        ax.set_ylabel(ylabel)
+        ax.set_title(var_name)
+        ax.set_xlim(0.0, 1.0)
+        ax.legend(loc='best', fontsize=6, framealpha=0.92)
+
+    _one_panel(axs[0, 0], 'psi', r'$\psi$ [Wb]')
+    _one_panel(axs[0, 1], 'n_e', r'$n_e$ [m$^{-3}$]')
+    _one_panel(axs[1, 0], 'T_e', r'$T_e$ [keV]')
+    _one_panel(axs[1, 1], 'T_i', r'$T_i$ [keV]')
+    fig.tight_layout()
+    _save_or_display(fig, save_path, display)
 
 
 # ── Scalar time-series plot ───────────────────────────────────────────────────
