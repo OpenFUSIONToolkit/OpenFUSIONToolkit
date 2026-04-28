@@ -242,6 +242,21 @@ class TokTox:
         else:
             self._tm_times = sorted(tm_times)
 
+        # Drop any tm_times that fall outside the [t_init, t_final] simulation window.
+        _out_of_window = [t for t in self._tm_times if t < self._t_init or t > self._t_final]
+        if _out_of_window:
+            self._log(f"requested eq_times outside simulation time window: {_out_of_window}")
+            self._tm_times = [t for t in self._tm_times if self._t_init <= t <= self._t_final]
+
+        # Always solve an equilibrium at the start and end of the simulation window.
+        # Use a small tolerance so float round-off doesn't cause duplicate near-endpoint solves.
+        _endpoint_atol = 1e-9
+        if not any(abs(t - self._t_init) <= _endpoint_atol for t in self._tm_times):
+            self._tm_times.append(self._t_init)
+        if not any(abs(t - self._t_final) <= _endpoint_atol for t in self._tm_times):
+            self._tm_times.append(self._t_final)
+        self._tm_times = sorted(self._tm_times)
+
         N = len(self._tm_times)
 
         # ── Geometry scalars (seed values from EQDSK, updated by TM each loop) ──
