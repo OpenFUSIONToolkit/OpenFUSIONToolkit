@@ -1299,6 +1299,166 @@ class TokTox:
         }
 
 
+    def _apply_set_overrides(self, myconfig):
+        r'''! Apply user `set_*()` overrides to a TORAX config dict (in place).
+
+        Only applied when the corresponding attribute is not None (i.e. the user
+        called the setter explicitly; None means fall through to the loaded/base
+        config). Used by both `_get_tx_config` (loop 1+) and `_run_tx_init`
+        (loop 0) so the transport-init simulation sees the same plasma
+        conditions as the main sim.
+
+        Does NOT touch `geometry`, `numerics.{t_initial, t_final, fixed_dt}`,
+        or `profile_conditions.{psi, initial_psi_mode, initial_psi_from_j}` —
+        those are loop-specific and set by the calling method.
+
+        @param myconfig Config dict (modified in place).
+        '''
+        myconfig.setdefault('profile_conditions', {})
+        myconfig.setdefault('numerics', {})
+
+        if self._Ip is not None:
+            myconfig['profile_conditions']['Ip'] = self._Ip
+
+        if self._n_e is not None:
+            myconfig['profile_conditions']['n_e'] = self._n_e
+
+        if self._T_e is not None:
+            myconfig['profile_conditions']['T_e'] = self._T_e
+
+        if self._T_i is not None:
+            myconfig['profile_conditions']['T_i'] = self._T_i
+
+        if self._Zeff is not None:
+            myconfig.setdefault('plasma_composition', {})
+            myconfig['plasma_composition']['Z_eff'] = self._Zeff
+
+        if self._main_ion is not None:
+            myconfig.setdefault('plasma_composition', {})
+            myconfig['plasma_composition']['main_ion'] = self._main_ion
+
+        if self._impurity is not None:
+            myconfig.setdefault('plasma_composition', {})
+            myconfig['plasma_composition']['impurity'] = self._impurity
+
+        if self._enable_fusion:
+            myconfig.setdefault('sources', {})
+            myconfig['sources'].setdefault('fusion', {})
+
+        if self._enable_ei_exchange:
+            myconfig.setdefault('sources', {})
+            myconfig['sources'].setdefault('ei_exchange', {})
+
+        if self._ecrh_loc is not None:
+            myconfig.setdefault('sources', {})
+            myconfig['sources'].setdefault('ecrh', {})
+            myconfig['sources']['ecrh']['P_total'] = self._ecrh_heating
+            myconfig['sources']['ecrh']['gaussian_location'] = self._ecrh_loc
+            myconfig['sources']['ecrh']['gaussian_width'] = self._ecrh_width
+
+        if self._generic_heat is not None:
+            nbi_times, nbi_pow = zip(*self._generic_heat.items())
+            myconfig.setdefault('sources', {})
+            myconfig['sources'].setdefault('generic_heat', {})
+            myconfig['sources']['generic_heat']['P_total'] = (nbi_times, nbi_pow)
+            myconfig['sources']['generic_heat']['gaussian_location'] = self._generic_heat_loc
+            myconfig['sources']['generic_heat']['gaussian_width'] = self._generic_heat_width
+
+            if self._use_nbi_current:
+                myconfig['sources'].setdefault('generic_current', {})
+                myconfig['sources']['generic_current']['use_absolute_current'] = True
+                myconfig['sources']['generic_current']['I_generic'] = (nbi_times, _NBI_W_TO_MA * np.array(nbi_pow))
+                myconfig['sources']['generic_current']['gaussian_location'] = self._generic_heat_loc
+
+        if self._pedestal_config is not None:
+            # Full pedestal dict replacement requested via load_pedestal_config().
+            myconfig['pedestal'] = copy.deepcopy(self._pedestal_config)
+        else:
+            ped_enabled = (
+                self._set_pedestal is not None
+                and not (
+                    isinstance(self._set_pedestal, (bool, np.bool_))
+                    and (not bool(self._set_pedestal))
+                )
+            )
+
+            if ped_enabled:
+                # Build in required key order:
+                # model_name -> set_pedestal -> rho_norm_ped_top -> T_i/T_e/n_e.
+                ped_cfg = {}
+                ped_cfg['model_name'] = 'set_T_ped_n_ped'
+                ped_cfg['set_pedestal'] = self._set_pedestal
+                if self._ped_top is not None:
+                    ped_cfg['rho_norm_ped_top'] = self._ped_top
+                if self._T_i_ped is not None:
+                    ped_cfg['T_i_ped'] = self._T_i_ped
+                if self._T_e_ped is not None:
+                    ped_cfg['T_e_ped'] = self._T_e_ped
+                if self._n_e_ped is not None:
+                    ped_cfg['n_e_ped_is_fGW'] = False
+                    ped_cfg['n_e_ped'] = self._n_e_ped
+                myconfig['pedestal'] = ped_cfg
+            else:
+                # Replace pedestal section entirely to avoid invalid extra keys
+                # for the no_pedestal model.
+                myconfig['pedestal'] = {'model_name': 'no_pedestal'}
+
+        if self._nbar is not None:
+            myconfig['profile_conditions']['nbar'] = self._nbar
+        if self._normalize_to_nbar is not None:
+            myconfig['profile_conditions']['normalize_n_e_to_nbar'] = self._normalize_to_nbar
+
+        if self._ne_right_bc is not None:
+            myconfig['profile_conditions']['n_e_right_bc_is_fGW'] = False
+            myconfig['profile_conditions']['n_e_right_bc'] = self._ne_right_bc
+
+        if self._Te_right_bc is not None:
+            myconfig['profile_conditions']['T_e_right_bc'] = self._Te_right_bc
+        if self._Ti_right_bc is not None:
+            myconfig['profile_conditions']['T_i_right_bc'] = self._Ti_right_bc
+
+        if self._evolve_density is not None:
+            myconfig['numerics']['evolve_density'] = self._evolve_density
+        if self._evolve_current is not None:
+            myconfig['numerics']['evolve_current'] = self._evolve_current
+        if self._evolve_Ti is not None:
+            myconfig['numerics']['evolve_ion_heat'] = self._evolve_Ti
+        if self._evolve_Te is not None:
+            myconfig['numerics']['evolve_electron_heat'] = self._evolve_Te
+
+        if self._gp_s is not None and self._gp_dl is not None:
+            myconfig.setdefault('sources', {})
+            myconfig['sources']['gas_puff'] = {
+                'S_total': self._gp_s,
+                'puff_decay_length': self._gp_dl,
+            }
+
+        if (
+            self._pellet_deposition_location is not None
+            and self._pellet_width is not None
+            and self._pellet_s_total is not None
+        ):
+            myconfig.setdefault('sources', {})
+            myconfig['sources']['pellet'] = {
+                'S_total': self._pellet_s_total,
+                'pellet_width': self._pellet_width,
+                'pellet_deposition_location': self._pellet_deposition_location,
+            }
+
+        myconfig.setdefault('transport', {})
+        if self._chi_min is not None:
+            myconfig['transport']['chi_min'] = self._chi_min
+        if self._chi_max is not None:
+            myconfig['transport']['chi_max'] = self._chi_max
+        if self._De_min is not None:
+            myconfig['transport']['D_e_min'] = self._De_min
+        if self._De_max is not None:
+            myconfig['transport']['D_e_max'] = self._De_max
+        if self._Ve_min is not None:
+            myconfig['transport']['V_e_min'] = self._Ve_min
+        if self._Ve_max is not None:
+            myconfig['transport']['V_e_max'] = self._Ve_max
+
     def _get_tx_config(self):
         r'''! Generate config object for Torax simulation.
 
@@ -1404,150 +1564,7 @@ class TokTox:
             myconfig['profile_conditions']['initial_psi_mode'] = 'geometry' # if loop 0 wasn't run, uses psi from initial eqdsk, not ideal
 
         # ── 6. Explicit set_*() overrides ──────────────────────────────────
-        #    Only applied when the attribute is not None (i.e. the user called the setter
-        #    explicitly after load_config(); None means fall through to the loaded/base config).
-        if self._Ip is not None:
-            myconfig['profile_conditions']['Ip'] = self._Ip
-
-        if self._n_e is not None:
-            myconfig['profile_conditions']['n_e'] = self._n_e
-        
-        if self._T_e is not None:
-            myconfig['profile_conditions']['T_e'] = self._T_e
-        
-        if self._T_i is not None:
-            myconfig['profile_conditions']['T_i'] = self._T_i
-        
-        if self._Zeff is not None:
-            myconfig.setdefault('plasma_composition', {})
-            myconfig['plasma_composition']['Z_eff'] = self._Zeff
-
-        if self._main_ion is not None:
-            myconfig.setdefault('plasma_composition', {})
-            myconfig['plasma_composition']['main_ion'] = self._main_ion
-
-        if self._impurity is not None:
-            myconfig.setdefault('plasma_composition', {})
-            myconfig['plasma_composition']['impurity'] = self._impurity
-
-        if self._enable_fusion:
-            myconfig.setdefault('sources', {})
-            myconfig['sources'].setdefault('fusion', {})
-
-        if self._enable_ei_exchange:
-            myconfig.setdefault('sources', {})
-            myconfig['sources'].setdefault('ei_exchange', {})
-
-        if self._ecrh_loc is not None:
-            myconfig.setdefault('sources', {})
-            myconfig['sources'].setdefault('ecrh', {})
-            myconfig['sources']['ecrh']['P_total'] = self._ecrh_heating
-            myconfig['sources']['ecrh']['gaussian_location'] = self._ecrh_loc
-            myconfig['sources']['ecrh']['gaussian_width'] = self._ecrh_width
-
-        if self._generic_heat is not None:
-            nbi_times, nbi_pow = zip(*self._generic_heat.items())    
-            myconfig.setdefault('sources', {})
-            myconfig['sources'].setdefault('generic_heat', {})
-            myconfig['sources']['generic_heat']['P_total'] = (nbi_times, nbi_pow)
-            myconfig['sources']['generic_heat']['gaussian_location'] = self._generic_heat_loc
-            myconfig['sources']['generic_heat']['gaussian_width'] = self._generic_heat_width
-
-            if self._use_nbi_current:
-                myconfig['sources'].setdefault('generic_current', {})
-                myconfig['sources']['generic_current']['use_absolute_current'] = True
-                myconfig['sources']['generic_current']['I_generic'] = (nbi_times, _NBI_W_TO_MA * np.array(nbi_pow))
-                myconfig['sources']['generic_current']['gaussian_location'] = self._generic_heat_loc
-
-        if self._pedestal_config is not None:
-            # Full pedestal dict replacement requested via load_pedestal_config().
-            myconfig['pedestal'] = copy.deepcopy(self._pedestal_config)
-        else:
-            # Accept bool or time-varying dict for set_pedestal.
-            ped_enabled = (
-                self._set_pedestal is not None
-                and not (
-                    isinstance(self._set_pedestal, (bool, np.bool_))
-                    and (not bool(self._set_pedestal))
-                )
-            )
-
-            if ped_enabled:
-                # Build in required key order:
-                # model_name -> set_pedestal -> rho_norm_ped_top -> T_i/T_e/n_e.
-                ped_cfg = {}
-                ped_cfg['model_name'] = 'set_T_ped_n_ped'
-                ped_cfg['set_pedestal'] = self._set_pedestal
-                if self._ped_top is not None:
-                    ped_cfg['rho_norm_ped_top'] = self._ped_top
-                if self._T_i_ped is not None:
-                    ped_cfg['T_i_ped'] = self._T_i_ped
-                if self._T_e_ped is not None:
-                    ped_cfg['T_e_ped'] = self._T_e_ped
-                if self._n_e_ped is not None:
-                    ped_cfg['n_e_ped_is_fGW'] = False
-                    ped_cfg['n_e_ped'] = self._n_e_ped
-                myconfig['pedestal'] = ped_cfg
-            else:
-                # Replace pedestal section entirely to avoid invalid extra keys
-                # for the no_pedestal model.
-                myconfig['pedestal'] = {'model_name': 'no_pedestal'}
-
-        if self._nbar is not None:
-            myconfig['profile_conditions']['nbar'] = self._nbar
-        if self._normalize_to_nbar is not None:
-            myconfig['profile_conditions']['normalize_n_e_to_nbar'] = self._normalize_to_nbar
-
-        if self._ne_right_bc is not None:
-            myconfig['profile_conditions']['n_e_right_bc_is_fGW'] = False
-            myconfig['profile_conditions']['n_e_right_bc'] = self._ne_right_bc
-
-        if self._Te_right_bc is not None:
-            myconfig['profile_conditions']['T_e_right_bc'] = self._Te_right_bc
-        if self._Ti_right_bc is not None:
-            myconfig['profile_conditions']['T_i_right_bc'] = self._Ti_right_bc
-
-        if self._evolve_density is not None:
-            myconfig['numerics']['evolve_density'] = self._evolve_density
-        if self._evolve_current is not None:
-            myconfig['numerics']['evolve_current'] = self._evolve_current
-        if self._evolve_Ti is not None:
-            myconfig['numerics']['evolve_ion_heat'] = self._evolve_Ti
-        if self._evolve_Te is not None:
-            myconfig['numerics']['evolve_electron_heat'] = self._evolve_Te
-                
-        if self._gp_s is not None and self._gp_dl is not None:
-            myconfig.setdefault('sources', {})
-            myconfig['sources']['gas_puff'] = {
-                'S_total': self._gp_s,
-                'puff_decay_length': self._gp_dl,
-            }
-
-        if (
-            self._pellet_deposition_location is not None
-            and self._pellet_width is not None
-            and self._pellet_s_total is not None
-        ):
-            myconfig.setdefault('sources', {})
-            myconfig['sources']['pellet'] = {
-                'S_total': self._pellet_s_total,
-                'pellet_width': self._pellet_width,
-                'pellet_deposition_location': self._pellet_deposition_location,
-            }
-
-        myconfig.setdefault('transport', {})
-        if self._chi_min is not None:
-            myconfig['transport']['chi_min'] = self._chi_min
-        if self._chi_max is not None:
-            myconfig['transport']['chi_max'] = self._chi_max
-        if self._De_min is not None:
-            myconfig['transport']['D_e_min'] = self._De_min
-        if self._De_max is not None:
-            myconfig['transport']['D_e_max'] = self._De_max
-        if self._Ve_min is not None:
-            myconfig['transport']['V_e_min'] = self._Ve_min
-        if self._Ve_max is not None:
-            myconfig['transport']['V_e_max'] = self._Ve_max
+        self._apply_set_overrides(myconfig)
 
         if self._output_mode in ('normal', 'debug') and self._out_dir is not None:
             cfg_name = f'tx_config_loop{self._current_loop:03d}.py'
@@ -1586,19 +1603,31 @@ class TokTox:
     def _run_tx_init(self):
         r'''! Loop 0: Run a short TORAX simulation with eqdsk geometry to equilibrate initial inputs.
 
-        Run TORAX for 1 second with steady-state (time-flattened) inputs lets TORAX
-        evolve them to a more physical state.  The relaxed values are then
-        injected into the config used by the main simulation (loop 1 onwards).
+        Runs TORAX for ~0.5 s with steady-state (time-flattened) inputs to let
+        the current profile relax under the user's actual plasma conditions
+        (n_e, T_e, T_i, pedestal, sources, Z_eff, ...).  The resulting psi is
+        propagated into the main simulation (loop 1+).
+
+        IMPORTANT: this loop applies the same `set_*()` overrides as the main
+        sim via `_apply_set_overrides`, so loop 0 sees the same η(T_e, n_e,
+        Z_eff), heating, pedestal, etc. as loop 1.  Without this, the relaxed
+        psi is consistent with TORAX's defaults rather than the user's plasma
+        and produces kinks in loop 1 as the current re-relaxes against the
+        correct profiles.
         '''
         INIT_RUNTIME = 0.5
         INIT_DT = 0.01
         self._log('Transport init: building steady-state init config...')
 
+        # 1. BASE_CONFIG + loaded_config
         init_config = copy.deepcopy(BASE_CONFIG)
         if self._loaded_config is not None:
             self._config_merge(init_config, self._loaded_config)
 
-        # eqdsk geometry from the first seed file — same geometry as loop 1, i=0.
+        # 2. User set_*() overrides — same as loop 1+
+        self._apply_set_overrides(init_config)
+
+        # 3. Geometry: first seed eqdsk only — same geometry as loop 1, i=0.
         # This ensures the psi evolved here satisfies the same GS metric coefficients
         # as the main sim, so injected psi produces smooth j at t=0 of loop 1.
         init_eqdsk = self._init_files[0]
@@ -1618,32 +1647,27 @@ class TokTox:
         elif self._tx_grid_type == 'face_centers':
             init_config['geometry']['face_centers'] = self._tx_grid
 
-        # Numerics: 1-second steady-state init sim
+        # 4. Numerics: short steady-state init sim.
         init_config.setdefault('numerics', {})
         init_config['numerics']['t_initial'] = self._t_init
         init_config['numerics']['t_final'] = self._t_init + INIT_RUNTIME
         init_config['numerics']['fixed_dt'] = INIT_DT
-        
-        init_config['numerics']['evolve_current'] = True # Let current evolve to relax to psi profile
-        init_config['numerics']['evolve_density'] = False # Fix ne and Te/Ti profiles
+
+        # Force evolve_* for steady-state init (override any user set_evolve()):
+        # only current relaxes; T_e, T_i, n_e are held at their initial profile.
+        init_config['numerics']['evolve_current'] = True
+        init_config['numerics']['evolve_density'] = False
         init_config['numerics']['evolve_ion_heat'] = False
         init_config['numerics']['evolve_electron_heat'] = False
 
-        # Explicitly use J mode (nu formula) to initialize psi in the loop-0 sim.
-        # This is the same mode the main sim (loop 1+) will use, so T_e/T_i
-        # injected from here will be self-consistent with the initial current profile.
+        # 5. Initial psi from eqdsk geometry (drop any psi/initial_psi_* set
+        # by loaded_config so this run is independent of prior _psi_init).
         init_config.setdefault('profile_conditions', {})
+        init_config['profile_conditions'].pop('psi', None)
         init_config['profile_conditions']['initial_psi_mode'] = 'geometry'
+        init_config['profile_conditions']['initial_psi_from_j'] = False
 
-        # Propagate Ip from set_Ip() into the Loop 0 config.
-        # Without this, TORAX runs without an Ip constraint and may produce
-        # psi values with the wrong magnitude or sign (observed: ~10× too large
-        # for ITER). The loaded_config Ip (if any) is already merged above;
-        # set_Ip() values are stored separately in self._Ip and must be applied here.
-        if self._Ip is not None:
-            init_config['profile_conditions']['Ip'] = copy.deepcopy(self._Ip)
-
-        # Flatten all time-dependent values to their initial value (steady-state inputs)
+        # 6. Flatten all time-dependent values to their initial value (steady-state inputs)
         self._flatten_time_dependent(init_config)
 
         if self._output_mode in ('normal', 'debug') and self._out_dir is not None:
