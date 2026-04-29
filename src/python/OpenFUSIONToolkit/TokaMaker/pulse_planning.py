@@ -1904,12 +1904,7 @@ class TokTox:
 
             self._log(f'{tag}: running TORAX...')
             tx_config = torax.ToraxConfig.from_dict(init_config)
-            _t_relax_sim0 = time.perf_counter()
             data_tree, hist = torax.run_simulation(tx_config, log_timestep_info=False)
-            if getattr(self, '_output_mode', None) == 'debug':
-                self._print(
-                    f'  [debug timing] {tag}: TORAX.run_simulation {time.perf_counter() - _t_relax_sim0:.3f} s'
-                )
 
             if hist.sim_error != torax.SimError.NO_ERROR:
                 raise ValueError(f'TORAX relax ({stage}) failed: {hist.sim_error}')
@@ -1957,8 +1952,6 @@ class TokTox:
         @return Tuple (consumed_flux, consumed_flux_integral).
         '''
 
-        _dbg_tx = getattr(self, '_output_mode', None) == 'debug'
-        _t_inter_relax = 0.0
         if (self._current_loop >= 1 and getattr(self, '_inter_loop_relax', False)
                 and not self._coupling_iteration_is_first()):
             prev_lp = self._current_loop - 1
@@ -1967,17 +1960,13 @@ class TokTox:
                 f'  TORAX: Running relax ({self._relax_duration:g} s) simulation...'
             )
             # User n_e, T_e, T_i (merged config + set_*); ψ from geometry on this EQDSK.
-            _t0_il = time.perf_counter()
             self._run_tx_relax(stage='interloop', eqdsk_path=tm_eq0, prescribed_profiles=None)
-            _t_inter_relax = time.perf_counter() - _t0_il
 
         with self._loop0_coarse_tx_main_scope():
             myconfig = self._get_tx_config()
             self._print('  TORAX: running simulation...')
             try:
-                _t0_sim = time.perf_counter()
                 data_tree, hist = torax.run_simulation(myconfig, log_timestep_info=False)
-                _t_main_sim = time.perf_counter() - _t0_sim
             except Exception as e:
                 self._print(f'  TORAX: config/init FAILED — {e}')
                 raise
@@ -2001,27 +1990,12 @@ class TokTox:
                 self._log(f'Warning: could not snapshot TORAX profiles at t_init for next relax: {_e}')
 
             v_loops = np.zeros(len(self._tm_times))
-            _t0_txup = time.perf_counter()
             for i, t in enumerate(self._tm_times):
                 self._tx_update(i, data_tree)
                 v_loops[i] = data_tree.scalars.v_loop_lcfs.sel(time=t, method='nearest')
-            _t_tx_updates = time.perf_counter() - _t0_txup
 
-            _t_res = 0.0
             if self._save_outputs:
-                _t0_res = time.perf_counter()
                 self._res_update(data_tree)
-                _t_res = time.perf_counter() - _t0_res
-
-            if _dbg_tx:
-                _parts = []
-                if _t_inter_relax > 0:
-                    _parts.append(f'inter-loop relax (total) {_t_inter_relax:.3f} s')
-                _parts.append(f'main TORAX sim {_t_main_sim:.3f} s')
-                _parts.append(f'_tx_update × {len(self._tm_times)} {_t_tx_updates:.3f} s')
-                if _t_res > 0:
-                    _parts.append(f'_res_update {_t_res:.3f} s')
-                self._print(f'  [debug timing] TORAX coupling: {" | ".join(_parts)}')
 
             # Flux consumption: positive Ip drives psi_lcfs down in TM-native.
             # Convention: consumed_flux > 0 means plasma has consumed flux from CS.
@@ -2226,8 +2200,6 @@ class TokTox:
         @return Tuple (consumed_flux, consumed_flux_integral).
         '''
         from tqdm import tqdm
-        _dbg_tm = getattr(self, '_output_mode', None) == 'debug'
-        _t_tm0 = time.perf_counter()
         self._log(f"Loop {self._current_loop} TokaMaker:")
 
         self._eqdsk_skip = []
@@ -2279,7 +2251,6 @@ class TokTox:
 
         # Progress bar counts actual GS attempts (subsampled loop 0 → 13/13 not 13/25).
         _pbar_total = len(solve_idx_list)
-        _t_gs0 = time.perf_counter()
         with tqdm(total=_pbar_total,
                   desc=f'  TM loop {self._current_loop}', unit='solve',
                   bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_inv_fmt}]{postfix}'
@@ -2521,8 +2492,6 @@ class TokTox:
                     self._apply_coil_reg(targets=prev_coil_targets)
                 _pbar.update(1)
 
-        _t_gs1 = time.perf_counter()
-
         # Flux consumption: positive Ip drives psi_lcfs down in TM convention
         # Convention: consumed_flux > 0
         consumed_flux = -(self._state['psi_lcfs_tm'][-1] - self._state['psi_lcfs_tm'][0]) * 2.0 * np.pi
@@ -2547,32 +2516,15 @@ class TokTox:
                   + _skip_note
                   + (f' Failures: {n_fail}.' if n_fail else ''))
 
-        _t_summary = 0.0
         if self._debug_mode:
             summary_name = f'tm_summary_loop{self._current_loop:03d}.png'
             if self._output_file_tag is not None:
                 summary_name = f'{self._output_file_tag}_{summary_name}'
             _summary_path = os.path.join(self._out_dir, summary_name)
-            _t_sum0 = time.perf_counter()
             try:
                 tm_loop_summary_plot(self, _loop_level_log, save_path=_summary_path, display=False)
             except Exception as _e:
                 self._log(f'tm_loop_summary_plot failed: {_e}')
-            _t_summary = time.perf_counter() - _t_sum0
-
-        if _dbg_tm:
-            _t_end = time.perf_counter()
-            _post = _t_end - _t_gs1
-            _extra = (
-                f' (tm_loop_summary_plot {_t_summary:.3f} s)'
-                if self._debug_mode else ''
-            )
-            self._print(
-                f'  [debug timing] TokaMaker: prep/setup {_t_gs0 - _t_tm0:.3f} s | '
-                f'GS timestep sweep {_t_gs1 - _t_gs0:.3f} s | '
-                f'post (cflux, prints, diagnostics){_extra}: {_post:.3f} s | '
-                f'total {_t_end - _t_tm0:.3f} s'
-            )
 
         return consumed_flux, consumed_flux_integral
 
@@ -2775,9 +2727,8 @@ class TokTox:
             output_mode=False, skip_bad_init_eqdsks=False,
             initial_relax=True, relax=False, relax_kinetics=False, relax_duration=0.1,
             t_ave_toggle='off', t_ave_window=0.5, t_ave_causal=True, t_ave_ignore_start=0.25,
-            loop0=False,
-            **kwargs):
-        r'''! Run TokaMaker-TORAX coupled simulation loop.
+            loop0=False):
+        r'''! Run TokaMaker-TORAX coupled pulse simulation loop.
 
         @param convergence_threshold Max fractional change in consumed flux between loops for convergence.
         @param max_loop Highest **counted** coupling index to run (inclusive): full-resolution passes
@@ -2789,7 +2740,7 @@ class TokTox:
         @param output_mode Output level selector: False (or None), 'minimal', 'normal', or 'debug'.
         @param skip_bad_init_eqdsks If True, skip broken initial gEQDSK files instead of raising.
         @param initial_relax If True (default), run a short TORAX relax on the seed EQDSK before
-               the first coupling TM–TORAX pass (flattened user inputs; ψ from geometry unless an
+               the first coupling TM-TORAX pass (flattened user inputs; ψ from geometry unless an
                inter-loop relax already set ψ). If False, skip and start from EQDSK ψ / loaded config.
                When ``relax`` is True, this is forced True so initial relax establishes ψ before
                later coupling iterations.
@@ -2810,25 +2761,13 @@ class TokTox:
                If False, window is centred on the timepoint.
         @param t_ave_ignore_start Ignore the first N seconds of the pulse when building the
                averaging window (avoids numerical transients). Default 0.25 s.
-        @param loop0 If True (default), run a first coupling pass at index 0 with reduced cost:
+        @param loop0 If True, run a first coupling pass at index 0 with reduced cost:
                coarse TORAX radial grid (``face_centers`` linspace, ``DEFAULT_LOOP0_TX_FACE_POINTS``),
                the same coarse grid on the optional initial relax, and subsampled TokaMaker times
-               (stride 2). If False, skip that pass and start coupling at index 1 at full resolution
+               (stride 2). If False (default), skip that pass and start coupling at index 1 at full resolution
                (initial relax is unchanged and controlled only by ``initial_relax`` / ``relax``).
-
-        Deprecated keyword aliases (still accepted): ``run_tx_init`` → ``initial_relax``;
-        ``tx_init_kinetics`` → ``relax_kinetics``.
         '''
         import tempfile
-
-        if 'run_tx_init' in kwargs:
-            initial_relax = kwargs.pop('run_tx_init')
-        if 'tx_init_kinetics' in kwargs:
-            relax_kinetics = kwargs.pop('tx_init_kinetics')
-        if kwargs:
-            raise TypeError(
-                'fly() got unexpected keyword arguments: ' + ', '.join(sorted(kwargs))
-            )
 
         if relax:
             initial_relax = True
@@ -2969,12 +2908,7 @@ class TokTox:
                 init_seed = self._init_files[0]
                 if not self._test_eqdsk(init_seed):
                     raise ValueError(f'Initial TORAX relax: first seed EQDSK not valid for TORAX: {init_seed}')
-                _t_init_relax0 = time.perf_counter()
                 self._run_tx_relax(stage='initial', eqdsk_path=init_seed, prescribed_profiles=None)
-                if self._output_mode == 'debug':
-                    self._print(
-                        f'  [debug timing] Initial TORAX relax (total): {time.perf_counter() - _t_init_relax0:.3f} s'
-                    )
             else:
                 self._psi_init = None
                 self._n_e_init = None
@@ -3017,19 +2951,13 @@ class TokTox:
                         scalars_name = f'{self._output_file_tag}_{scalars_name}'
                     _scalars_path = os.path.join(self._out_dir, scalars_name)
                     try:
-                        if self._output_mode == 'debug':
-                            _t_scalars0 = time.perf_counter()
                         plot_scalars(self, save_path=_scalars_path, display=False)
-                        if self._output_mode == 'debug':
-                            self._print(
-                                f'  [debug timing] plot_scalars: {time.perf_counter() - _t_scalars0:.3f} s'
-                            )
                     except Exception as _e:
                         self._log(f'plot_scalars failed at loop {self._current_loop}: {_e}')
 
                 if self._output_mode == 'debug':
                     self._print(
-                        f'  [debug timing] Coupling loop {self._current_loop} total (wall): '
+                        f'  Loop {self._current_loop} wall time: '
                         f'{time.perf_counter() - _t_coupling_loop0:.3f} s'
                     )
 
@@ -4287,6 +4215,21 @@ def plot_coils(tt, save_path=None, display=True):
 
 # ── LCFS evolution plot ───────────────────────────────────────────────────────
 
+_LCFS_EVO_PSI_TRY = (1.0, 0.99, 0.98, 0.97)
+
+
+def _trace_lcfs_for_evolution_plot(equil):
+    """Try successive normalized ψ surfaces until tracing returns a non-empty contour."""
+    for psi in _LCFS_EVO_PSI_TRY:
+        try:
+            lcfs = equil.trace_surf(psi)
+        except Exception:
+            lcfs = None
+        if lcfs is not None and len(lcfs) > 0:
+            return lcfs
+    return None
+
+
 def plot_lcfs_evolution(tt, save_path=None, display=True, one_plot=False):
     """Plot time evolution of the last closed flux surface for each phase.
 
@@ -4356,14 +4299,15 @@ def plot_lcfs_evolution(tt, save_path=None, display=True, one_plot=False):
                 equil = equil_data.get(i)
                 if equil is None:
                     continue
-                try:
-                    lcfs = equil.trace_surf(1.0)
-                except Exception:
-                    try:
-                        lcfs = equil.trace_surf(0.99)
-                    except Exception:
-                        print('Failed to trace LCFS from equilibrium at time index', i)
-                        continue
+                lcfs = _trace_lcfs_for_evolution_plot(equil)
+                if lcfs is None or len(lcfs) == 0:
+                    if getattr(tt, '_output_mode', None) == 'debug' and hasattr(tt, '_print'):
+                        psi_str = ', '.join(str(p) for p in _LCFS_EVO_PSI_TRY)
+                        tt._print(
+                            f'  LCFS evolution: no contour traced at time index {i} '
+                            f'(t={times[i]:.4g} s, tried ψ_N={psi_str})'
+                        )
+                    continue
             if lcfs is None or len(lcfs) == 0:
                 continue
             lcfs = np.asarray(lcfs)
