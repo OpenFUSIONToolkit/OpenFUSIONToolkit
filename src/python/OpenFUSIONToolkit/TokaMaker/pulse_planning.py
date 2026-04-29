@@ -1956,11 +1956,25 @@ class TokTox:
                 and not self._coupling_iteration_is_first()):
             prev_lp = self._current_loop - 1
             tm_eq0 = os.path.join(self._eqdsk_dir, f'{prev_lp:03d}.000.eqdsk')
+            relax_eq = tm_eq0
+            if tm_eq0 in self._eqdsk_skip or not os.path.isfile(tm_eq0):
+                seed_eqdsk = self._init_files[0]
+                if self._test_eqdsk(seed_eqdsk):
+                    relax_eq = seed_eqdsk
+                    self._log(
+                        f'Loop {self._current_loop}: inter-loop relax: TM i=0 EQDSK from loop {prev_lp} '
+                        f'unavailable ({os.path.basename(tm_eq0)}), using seed EQDSK.'
+                    )
+                else:
+                    raise ValueError(
+                        f'Loop {self._current_loop}: inter-loop relax needs {tm_eq0} but it is missing '
+                        f'or skipped and seed EQDSK is not valid for TORAX: {seed_eqdsk}'
+                    )
             self._print(
                 f'  TORAX: Running relax ({self._relax_duration:g} s) simulation...'
             )
             # User n_e, T_e, T_i (merged config + set_*); ψ from geometry on this EQDSK.
-            self._run_tx_relax(stage='interloop', eqdsk_path=tm_eq0, prescribed_profiles=None)
+            self._run_tx_relax(stage='interloop', eqdsk_path=relax_eq, prescribed_profiles=None)
 
         with self._loop0_coarse_tx_main_scope():
             myconfig = self._get_tx_config()
