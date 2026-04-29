@@ -41,7 +41,7 @@ LCFS_WEIGHT = 100.0
 N_PSI = 1000
 _NBI_W_TO_MA = 1/16e6
 mu_0 = 4.0 * np.pi * 1e-7
-# Fixed timestep for pre-loop-1 and inter-loop TORAX relax simulations only.
+# Fixed timestep for loop 1 / loop 2+ TORAX relax simulations only.
 RELAX_FIXED_DT = 0.01
 
 BASE_CONFIG = {
@@ -249,7 +249,7 @@ class TokTox:
         # Drop any tm_times that fall outside the [t_init, t_final] simulation window.
         _out_of_window = [t for t in self._tm_times if t < self._t_init or t > self._t_final]
         if _out_of_window:
-            self._log(f"requested eq_times outside simulation time window: {_out_of_window}")
+            self._print(f"requested eq_times outside simulation time window: {_out_of_window}")
             self._tm_times = [t for t in self._tm_times if self._t_init <= t <= self._t_final]
 
         # Always solve an equilibrium at the start and end of the simulation window.
@@ -1548,8 +1548,8 @@ class TokTox:
            keys only in BASE_CONFIG are kept as-is.
         3. Override geometry (always set by TokTox / TokaMaker equilibria).
            For loop 2+ with injected ψ and ``relax=False``, the seed EQDSK is
-           forced at t_initial (ψ from pre-loop-1 relax on seed); if ``relax=True``,
-           inter-loop relax keeps ψ on the TM ``i=0`` surface so TM EQDSK is used.
+           forced at t_initial (ψ from loop 1 relax on seed); if ``relax=True``,
+           loop N relax keeps ψ on the TM ``i=0`` surface so TM EQDSK is used.
         4. Override t_initial / t_final / fixed_dt from __init__ params.
         5. Use psi profile from loop 0 (if available) from profile_conditions.
         6. Apply any explicit set_*() overrides (only when the attribute is
@@ -1617,17 +1617,17 @@ class TokTox:
                 else:
                     self._log(f'Warning: Loop {self._current_loop}: TM failed at t=0 and seed EQDSK is also invalid.')
 
-            # Injected ψ from pre-loop-1 relax used the *seed* EQDSK.  If we used
-            # the TM EQDSK at t_init without an inter-loop re-relax, the metric changes
+            # Injected ψ from loop 1 relax used the *seed* EQDSK.  If we used
+            # the TM EQDSK at t_init without a loop N re-relax, the metric changes
             # and j becomes inconsistent.  When ``relax=False``, force seed at t_init.
-            # When ``relax=True``, inter-loop relax aligns ψ with TM ``i=0`` — keep TM.
+            # When ``relax=True``, loop N relax aligns ψ with TM ``i=0`` — keep TM.
             if self._psi_init is not None and not getattr(self, '_inter_loop_relax', False):
                 seed_eqdsk_tinit = self._init_files[0]
                 if self._test_eqdsk(seed_eqdsk_tinit):
                     full_eqdsk_map[self._t_init] = seed_eqdsk_tinit
                     self._log(
                         f'Loop {self._current_loop}: seed EQDSK at t_init={self._t_init} s for TORAX '
-                        f'(ψ from pre-loop-1 relax on seed; inter-loop relax disabled).'
+                        f'(ψ from loop 1 relax on seed; loop 2+ relax disabled).'
                     )
 
             if n_tm == 0:
@@ -1650,7 +1650,7 @@ class TokTox:
         myconfig['numerics']['t_final'] = self._t_final
         myconfig['numerics']['fixed_dt'] = self._tx_dt
 
-        # ── 5. Psi profile from last TORAX relax (pre-loop-1 / inter-loop) ──────────
+        # ── 5. Psi profile from last TORAX relax (loop 1 / loop N) ───────────────────
         myconfig.setdefault('profile_conditions', {})
         if self._psi_init is not None:
             myconfig['profile_conditions']['psi'] = self._psi_init
@@ -1710,7 +1710,7 @@ class TokTox:
         r'''! Store ψ, n_e, T_e, T_i at ``time_val`` for debug relax figures / history.
 
         Updates ``_relax_profiles_snapshot`` temporarily so the caller can append a copy
-        to ``_relax_mainrun_profile_history``. Not used to seed inter-loop relax
+        to ``_relax_mainrun_profile_history``. Not used to seed loop 2+ relax runs
         (those profiles come from the user config each time).
         '''
         if time_val is None:
@@ -1725,13 +1725,13 @@ class TokTox:
         self._relax_profiles_snapshot = snap
 
     def _run_tx_relax(self, *, stage, eqdsk_path, prescribed_profiles):
-        r'''! Short TORAX relax: pre-loop-1 on the seed, or inter-loop on TM ``i=0`` EQDSK.
+        r'''! Short TORAX relax: loop 1 on the seed EQDSK, or loop N on TM ``i=0`` EQDSK.
 
         Uses flattened user inputs (``_apply_set_overrides`` + ``_flatten_time_dependent``).
         If ``prescribed_profiles`` is None, ψ follows EQDSK ``initial_psi_mode='geometry'``
         and n_e, T_e, T_i stay as already merged from base / loaded config and
         ``_apply_set_overrides`` (user inputs). If a dict is passed, it must supply
-        ψ, n_e, T_e, T_i tuples (advanced; inter-loop uses None so kinetics are always user-specified).
+        ψ, n_e, T_e, T_i tuples (advanced; loop N relax uses None so kinetics are always user-specified).
 
         @param stage ``'initial'`` or ``'interloop'`` (logging / output names only).
         @param eqdsk_path Path to gEQDSK for ``geometry_configs`` at ``t_initial``.
@@ -1739,7 +1739,7 @@ class TokTox:
         '''
         runtime = float(self._relax_duration)
         dt_relax = RELAX_FIXED_DT
-        tag = 'Pre-loop-1 relax' if stage == 'initial' else f'Inter-loop relax (before loop {self._current_loop})'
+        tag = 'Loop 1 relax' if stage == 'initial' else f'Loop {self._current_loop} relax'
         self._log(f'{tag}: building config ({runtime:.4g} s, dt={dt_relax})...')
 
         self._n_e_init = None
@@ -1761,7 +1761,7 @@ class TokTox:
                 use_path = seed_eq
                 self._log(f'{tag}: TM EQDSK invalid, using seed for relax: {use_path}')
             else:
-                raise ValueError(f'TORAX relax (interloop): TM and seed EQDSK invalid: {eqdsk_path}')
+                raise ValueError(f'{tag}: TM and seed EQDSK invalid: {eqdsk_path}')
 
         init_config['geometry'] = {
             'geometry_type': 'eqdsk',
@@ -1887,7 +1887,7 @@ class TokTox:
             prev_lp = self._current_loop - 1
             tm_eq0 = os.path.join(self._eqdsk_dir, f'{prev_lp:03d}.000.eqdsk')
             self._print(
-                f'  TORAX: inter-loop relax (~{self._relax_duration:g} s) before main run...'
+                f'  TORAX: Loop {self._current_loop} relax (~{self._relax_duration:g} s) before main run...'
             )
             # User n_e, T_e, T_i (merged config + set_*); ψ from geometry on this EQDSK.
             self._run_tx_relax(stage='interloop', eqdsk_path=tm_eq0, prescribed_profiles=None)
@@ -2381,7 +2381,7 @@ class TokTox:
         _lvl_counts = Counter(e['level_name'] for e in _loop_level_log if e['succeeded'])
         _lvl_summary = ', '.join(f'{name}: {cnt}' for name, cnt in sorted(_lvl_counts.items()))
         n_fail = len(self._tm_times) - n_ok
-        self._log(f'\tTM summary: {n_ok}/{len(self._tm_times)} solved. Levels: {_lvl_summary}.'
+        self._print(f'\tTM summary: {n_ok}/{len(self._tm_times)} solved. Levels: {_lvl_summary}.'
                   + (f' Failures: {n_fail}.' if n_fail else ''))
 
         if self._debug_mode:
@@ -2604,7 +2604,7 @@ class TokTox:
         @param output_mode Output level selector: False (or None), 'minimal', 'normal', or 'debug'.
         @param skip_bad_init_eqdsks If True, skip broken initial gEQDSK files instead of raising.
         @param initial_relax If True (default), run a short TORAX relax on the seed EQDSK before
-               loop 1 (flattened user inputs; ψ from geometry unless inter-loop updated it earlier).
+               loop 1 (flattened user inputs; ψ from geometry unless a loop 2+ relax already set ψ).
                If False, skip and start loop 1 from EQDSK ψ / loaded config. When ``relax`` is True,
                this is forced True so loop 1 establishes relaxed ψ before coupling loop ≥2.
         @param relax If True, run an additional short TORAX relax before each coupling loop ≥2,
@@ -2764,14 +2764,14 @@ class TokTox:
         try:
             self._relax_mainrun_profile_history = []
 
-            # ── Pre-loop-1 TORAX relax (optional) ──
+            # ── Loop 1 TORAX relax (optional) ──
             if initial_relax:
-                self._print(f'\n{"="*60}\n  Pre-loop-1: TORAX relax\n{"="*60}')
+                self._print(f'\n{"="*60}\n  Loop 1 relax: TORAX\n{"="*60}')
                 if self._relax_kinetics:
-                    self._print('  Pre-loop-1: relax_kinetics ON (evolve_* from set_evolve / config)')
+                    self._print('  Loop 1 relax: relax_kinetics ON (evolve_* from set_evolve / config)')
                 init_seed = self._init_files[0]
                 if not self._test_eqdsk(init_seed):
-                    raise ValueError(f'Pre-loop-1 relax: first seed EQDSK not valid for TORAX: {init_seed}')
+                    raise ValueError(f'Loop 1 relax: first seed EQDSK not valid for TORAX: {init_seed}')
                 self._run_tx_relax(stage='initial', eqdsk_path=init_seed, prescribed_profiles=None)
             else:
                 self._psi_init = None
@@ -3690,9 +3690,10 @@ def plot_tx_relax_profiles(
     _hist = getattr(tt, '_relax_mainrun_profile_history', None) or []
     _uref = user_ref_curves or {}
     if stage == 'initial':
-        _stage_lbl = 'pre-loop-1 relax'
+        _relax_loop = 1
     else:
-        _stage_lbl = f'inter-loop relax (before loop {tt._current_loop})'
+        _relax_loop = tt._current_loop
+    _stage_lbl = f'Loop {_relax_loop} relax'
     fig.suptitle(
         f'TORAX {_stage_lbl}: history, user inputs, init EQDSK ψ, after relax',
         fontsize=11,
