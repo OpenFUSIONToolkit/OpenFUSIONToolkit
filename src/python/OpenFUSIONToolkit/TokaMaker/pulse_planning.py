@@ -43,6 +43,9 @@ _NBI_W_TO_MA = 1/16e6
 mu_0 = 4.0 * np.pi * 1e-7
 # Fixed timestep for loop 1 / loop 2+ TORAX relax simulations only.
 RELAX_FIXED_DT = 0.01
+# EQDSK sampling for ``save_eqdsk`` when validating with TORAX in ``_run_tm``:
+# start at nr=nz=100, increase by 50 up to 350 (six attempts).
+EQDSK_SAVE_NR_NZ_SEQUENCE = (100, 150, 200, 250, 300, 350)
 
 BASE_CONFIG = {
     'plasma_composition': {},
@@ -109,14 +112,14 @@ BASE_CONFIG = {
         'D_e_max': 50,
         'V_e_min': -10,
         'V_e_max': 10,
-        'smoothing_width': 0.3,
+        # 'smoothing_width': 0.3,
         'DV_effective': True,
         'include_ITG': True,
         'include_TEM': True,
         'include_ETG': True,
         'avoid_big_negative_s': False,
-        # 'smooth_everywhere': True,
-        # 'smoothing_width': 0.1,
+        'smooth_everywhere': True,
+        'smoothing_width': 0.3,
     },
     'solver': {
         'solver_type': 'newton_raphson',
@@ -1601,7 +1604,8 @@ class TokTox:
             n_tm = 0
             for i, t in enumerate(self._tm_times):
                 eqdsk = os.path.join(self._eqdsk_dir, f'{self._current_loop - 1:03d}.{i:03d}.eqdsk')
-                tm_ok = (eqdsk not in self._eqdsk_skip) and self._test_eqdsk(eqdsk)
+                # TM stage already saved and validated each EQDSK with TORAX (_run_tm).
+                tm_ok = eqdsk not in self._eqdsk_skip
                 if tm_ok:
                     full_eqdsk_map[t] = eqdsk
                     n_tm += 1
@@ -1686,25 +1690,31 @@ class TokTox:
         tx_config = torax.ToraxConfig.from_dict(myconfig)
         return tx_config
 
-    def _test_eqdsk(self, eqdsk):
-            myconfig = copy.deepcopy(BASE_CONFIG)
-            if self._loaded_config is not None:
-                self._config_merge(myconfig, self._loaded_config)
-            myconfig['geometry'] = {
-                'geometry_type': 'eqdsk',
-                'geometry_directory': os.getcwd(),
-                'last_surface_factor': self._last_surface_factor,
-                'Ip_from_parameters': False,
-                'geometry_file': eqdsk,
-                'cocos': self._cocos,
-            }
-            try:
-                _ = torax.ToraxConfig.from_dict(myconfig)
-                return True
-            except Exception as e:
+    def _test_eqdsk(self, eqdsk, *, quiet=False):
+        r'''! Return whether TORAX accepts ``eqdsk`` as ``ToraxConfig`` geometry.
+
+        @param quiet If True, do not print or append to the coupling log on failure
+               (used for intermediate-resolution retries in ``_run_tm``).
+        '''
+        myconfig = copy.deepcopy(BASE_CONFIG)
+        if self._loaded_config is not None:
+            self._config_merge(myconfig, self._loaded_config)
+        myconfig['geometry'] = {
+            'geometry_type': 'eqdsk',
+            'geometry_directory': os.getcwd(),
+            'last_surface_factor': self._last_surface_factor,
+            'Ip_from_parameters': False,
+            'geometry_file': eqdsk,
+            'cocos': self._cocos,
+        }
+        try:
+            _ = torax.ToraxConfig.from_dict(myconfig)
+            return True
+        except Exception as e:
+            if not quiet:
                 self._log(f"TEST EQDSK FAILED: {eqdsk} — {repr(e)}")
                 self._print(f'    EQDSK rejected by TORAX: {os.path.basename(eqdsk)}')
-                return False
+            return False
 
     def _capture_relax_profiles_from_datatree(self, data_tree, time_val=None):
         r'''! Store ψ, n_e, T_e, T_i at ``time_val`` for debug relax figures / history.
@@ -1753,15 +1763,6 @@ class TokTox:
         self._apply_set_overrides(init_config)
 
         use_path = eqdsk_path
-        if not self._test_eqdsk(use_path):
-            if stage == 'initial':
-                raise ValueError(f'TORAX relax ({stage}): EQDSK not valid: {use_path}')
-            seed_eq = self._init_files[0]
-            if self._test_eqdsk(seed_eq):
-                use_path = seed_eq
-                self._log(f'{tag}: TM EQDSK invalid, using seed for relax: {use_path}')
-            else:
-                raise ValueError(f'{tag}: TM and seed EQDSK invalid: {eqdsk_path}')
 
         init_config['geometry'] = {
             'geometry_type': 'eqdsk',
@@ -1881,18 +1882,18 @@ class TokTox:
         r'''! Run the TORAX transport simulation.
         @return Tuple (consumed_flux, consumed_flux_integral).
         '''
-        self._print('  TORAX: running simulation...')
 
         if self._current_loop >= 2 and getattr(self, '_inter_loop_relax', False):
             prev_lp = self._current_loop - 1
             tm_eq0 = os.path.join(self._eqdsk_dir, f'{prev_lp:03d}.000.eqdsk')
             self._print(
-                f'  TORAX: Loop {self._current_loop} relax (~{self._relax_duration:g} s) before main run...'
+                f'  TORAX: Loop {self._current_loop} relax ({self._relax_duration:g} s)'
             )
             # User n_e, T_e, T_i (merged config + set_*); ψ from geometry on this EQDSK.
             self._run_tx_relax(stage='interloop', eqdsk_path=tm_eq0, prescribed_profiles=None)
 
         myconfig = self._get_tx_config()
+        self._print('  TORAX: running simulation...')
         try:
             data_tree, hist = torax.run_simulation(myconfig, log_timestep_info=False)
         except Exception as e:
@@ -2309,11 +2310,30 @@ class TokTox:
                 self._state['psi_grid_prev_tm'][i] = None  # if solve failed, set psi grid to None
             
             if solve_succeeded:
-                with self._quiet_tm():
-                    self._state['equil'][i].save_eqdsk(eq_name,
-                        lcfs_pad=1-self._last_surface_factor, run_info='TokaMaker EQDSK',
-                        cocos=self._cocos, nr=300, nz=300, truncate_eq=self._truncate_eq)
-                    self._tm_update(i)
+                torax_accepted = False
+                _n_attempts = len(EQDSK_SAVE_NR_NZ_SEQUENCE)
+                for _attempt_idx, nr_nz in enumerate(EQDSK_SAVE_NR_NZ_SEQUENCE):
+                    quiet_test = (_attempt_idx < _n_attempts - 1)
+                    with self._quiet_tm():
+                        self._state['equil'][i].save_eqdsk(eq_name,
+                            lcfs_pad=1-self._last_surface_factor, run_info='TokaMaker EQDSK',
+                            cocos=self._cocos, nr=nr_nz, nz=nr_nz,
+                            truncate_eq=self._truncate_eq)
+                    if self._test_eqdsk(eq_name, quiet=quiet_test):
+                        torax_accepted = True
+                        if _attempt_idx > 0:
+                            base_nz = EQDSK_SAVE_NR_NZ_SEQUENCE[0]
+                            self._print(
+                                f'    EQDSK {os.path.basename(eq_name)}: base nr=nz={base_nz} rejected by TORAX; '
+                                f'accepted at nr=nz={nr_nz}.'
+                            )
+                        break
+                if not torax_accepted:
+                    raise ValueError(
+                        f'TORAX rejected TokaMaker EQDSK after save attempts nr=nz '
+                        f'in {EQDSK_SAVE_NR_NZ_SEQUENCE}: {eq_name}'
+                    )
+                self._tm_update(i)
 
                 # Store diverted/limited flag for this timestep
                 if not hasattr(self, '_diverted_flags'):
