@@ -38,9 +38,24 @@ def _round_outputs(obj: Any, ndigits: int = 2) -> Any:
         return type(obj)(seq) if isinstance(obj, tuple) else seq
     return obj
 
-# Repo src/python on path when run as script from elsewhere
+# Repo root: walk upward from this file until ``src/python`` exists (works for
+# ``src/tests/physics/``, ``tests/``, etc.).
+def _repo_root() -> str:
+    d = os.path.dirname(os.path.abspath(__file__))
+    while True:
+        if os.path.isdir(os.path.join(d, "src", "python")):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            raise RuntimeError(
+                "Could not find repository root (no parent directory contains src/python). "
+                "Set TOKAMAKER_ITER_MESH to the ITER_mesh.h5 path."
+            )
+        d = parent
+
+
 _TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_TESTS_DIR, "..", ".."))
+_REPO_ROOT = _repo_root()
 _PYTHON_SRC = os.path.join(_REPO_ROOT, "src", "python")
 if _PYTHON_SRC not in sys.path:
     sys.path.insert(0, _PYTHON_SRC)
@@ -152,6 +167,7 @@ def test_toktox(
     eqdsk_nr: int = 100,
     eqdsk_nz: int = 100,
     max_loop: int = 1,
+    loop0: bool = True,
 ) -> Dict[str, Any]:
     """
     Run the minimal ITER TokTox benchmark and return numerical outputs.
@@ -166,6 +182,10 @@ def test_toktox(
     pax_a, pax_b
         Axis pressure targets [Pa] for the two seeds (slight mismatch so transport
         has something to do while Ip stays flat).
+    max_loop
+        Highest counted coupling index (see ``TokTox.fly``); default ``1``.
+    loop0
+        If True (default), run the cheap index-0 pass before counted loops.
     """
     try:
         import torax  # noqa: F401
@@ -281,7 +301,13 @@ def test_toktox(
         tt.set_Zeff(1.6)
         tt.set_evolve(density=True, Ti=True, Te=True, current=True)
 
-        tt.fly(run_name="tmp", max_loop=max_loop, output_mode=False, initial_relax=True)
+        tt.fly(
+            run_name="tmp",
+            max_loop=max_loop,
+            loop0=loop0,
+            output_mode=False,
+            initial_relax=True,
+        )
 
         phys = summary(tt)
     finally:

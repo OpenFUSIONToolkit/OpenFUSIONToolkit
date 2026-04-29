@@ -41,11 +41,13 @@ LCFS_WEIGHT = 100.0
 N_PSI = 1000
 _NBI_W_TO_MA = 1/16e6
 mu_0 = 4.0 * np.pi * 1e-7
-# Fixed timestep for loop 1 / loop 2+ TORAX relax simulations only.
+# Fixed timestep for initial / inter-loop TORAX relax simulations only.
 RELAX_FIXED_DT = 0.01
 # EQDSK sampling for ``save_eqdsk`` when validating with TORAX in ``_run_tm``:
 # start at nr=nz=100, increase by 50 up to 350 (six attempts).
 EQDSK_SAVE_NR_NZ_SEQUENCE = (100, 150, 200, 250, 300, 350)
+# Default TORAX radial face count for loop 0 coarse runs (evenly spaced normalized rho).
+DEFAULT_LOOP0_TX_FACE_POINTS = 51
 
 BASE_CONFIG = {
     'plasma_composition': {},
@@ -222,6 +224,8 @@ class TokTox:
         @param oft_env OFT environment.
         @param truncate_eq Whether to truncate equilibrium when saving TokaMaker output to EQDSK.
         @param oft_threads Number of threads for OFT.
+        @brief Coupling ``fly()`` option ``loop0``: if True, the first coupling pass uses a coarse
+               TORAX grid and subsampled TokaMaker times; if False, that pass is skipped (see ``fly()``).
         '''
         if oft_env is not None:
             self._oftenv = oft_env
@@ -578,6 +582,7 @@ class TokTox:
         self._loaded_config = None   # set by load_config()
         self._tx_grid_type = None
         self._tx_grid = None
+        self._tx_grid_stash = []  # stack of (type, grid) for loop-1 coarse TORAX grid save/restore
 
         self._diverted_times = None
         self._x_point_targets = None
@@ -799,6 +804,68 @@ class TokTox:
         self._tx_grid = grid
         if grid_type not in ['n_rho', 'face_centers']:
             raise ValueError(f'Invalid grid type: {type}. Must be "n_rho" or "face_centers".')
+
+    def _push_tx_grid(self):
+        r'''! Save current TORAX grid onto stack for later ``_pop_tx_grid``.'''
+        g = self._tx_grid
+        if isinstance(g, np.ndarray):
+            g = g.copy()
+        elif isinstance(g, list):
+            g = copy.deepcopy(g)
+        self._tx_grid_stash.append((self._tx_grid_type, g))
+
+    def _pop_tx_grid(self):
+        r'''! Restore TORAX grid from ``_push_tx_grid`` stack.'''
+        self._tx_grid_type, self._tx_grid = self._tx_grid_stash.pop()
+
+    def _coupling_iteration_is_first(self):
+        r'''! True on the first TokaMaker–TORAX coupling pass (TORAX uses the seed gEQDSK map).'''
+        if self._current_loop == 0:
+            return True
+        if not getattr(self, '_fly_loop0', True) and self._current_loop == 1:
+            return True
+        return False
+
+    @staticmethod
+    def _loop0_tm_solve_indices(n_tm, stride):
+        r'''! TokaMaker timestep indices for coupling loop 0 subsampling: endpoints plus every ``stride``-th.'''
+        if n_tm <= 0:
+            return []
+        if stride <= 1:
+            return list(range(n_tm))
+        return sorted({0, n_tm - 1}.union(range(0, n_tm, stride)))
+
+    @contextmanager
+    def _loop0_coarse_tx_relax_scope(self, stage):
+        r'''! Apply loop-0 coarse TORAX grid during initial relax only; restore after.'''
+        active = (
+            stage == 'initial'
+            and getattr(self, '_loop0_relax_coarse_tx', True)
+            and getattr(self, '_loop0_coarse_tx', True)
+        )
+        if active:
+            self._push_tx_grid()
+            npt = int(getattr(self, '_loop0_tx_face_points', DEFAULT_LOOP0_TX_FACE_POINTS))
+            self.set_tx_grid('face_centers', np.linspace(0.0, 1.0, npt))
+        try:
+            yield
+        finally:
+            if active:
+                self._pop_tx_grid()
+
+    @contextmanager
+    def _loop0_coarse_tx_main_scope(self):
+        r'''! Apply loop-0 coarse TORAX grid for main ``_run_tx``; restore after.'''
+        active = self._current_loop == 0 and getattr(self, '_loop0_coarse_tx', True)
+        if active:
+            self._push_tx_grid()
+            npt = int(getattr(self, '_loop0_tx_face_points', DEFAULT_LOOP0_TX_FACE_POINTS))
+            self.set_tx_grid('face_centers', np.linspace(0.0, 1.0, npt))
+        try:
+            yield
+        finally:
+            if active:
+                self._pop_tx_grid()
 
     def initialize_tm(self, mesh, R0_geo, weights=None, vsc=None):
         r'''! Initialize GS Solver Object.
@@ -1385,7 +1452,7 @@ class TokTox:
 
         Only applied when the corresponding attribute is not None (i.e. the user
         called the setter explicitly; None means fall through to the loaded/base
-        config). Used by both `_get_tx_config` (loop 1+) and `_run_tx_relax`
+        config). Used by both `_get_tx_config` (coupling loop 0+) and `_run_tx_relax`
         so each relax simulation sees the same plasma
         conditions as the main sim.
 
@@ -1550,11 +1617,11 @@ class TokTox:
            Every key in the loaded config overwrites the matching base key;
            keys only in BASE_CONFIG are kept as-is.
         3. Override geometry (always set by TokTox / TokaMaker equilibria).
-           For loop 2+ with injected ψ and ``relax=False``, the seed EQDSK is
-           forced at t_initial (ψ from loop 1 relax on seed); if ``relax=True``,
+           For loop 1+ with injected ψ and ``relax=False``, the seed EQDSK is
+           forced at t_initial (ψ from initial TORAX relax on seed); if ``relax=True``,
            loop N relax keeps ψ on the TM ``i=0`` surface so TM EQDSK is used.
         4. Override t_initial / t_final / fixed_dt from __init__ params.
-        5. Use psi profile from loop 0 (if available) from profile_conditions.
+        5. Use psi profile from initial TORAX relax (if available) from profile_conditions.
         6. Apply any explicit set_*() overrides (only when the attribute is
            not None, i.e. the user called the setter after load_config).
         7. If ``relax_kinetics`` was True for the last relax, override n_e, T_e, T_i
@@ -1578,7 +1645,7 @@ class TokTox:
             'n_surfaces': 50,
             'Ip_from_parameters': True, # True tells TX to pull from config, not from eqdsk, in case eqdsks fail TX retains correct Ip targets
         }
-        if self._current_loop == 1:
+        if self._coupling_iteration_is_first():
             eq_safe = []
             t_safe = []
             t_skipped = []
@@ -1605,7 +1672,7 @@ class TokTox:
             for i, t in enumerate(self._tm_times):
                 eqdsk = os.path.join(self._eqdsk_dir, f'{self._current_loop - 1:03d}.{i:03d}.eqdsk')
                 # TM stage already saved and validated each EQDSK with TORAX (_run_tm).
-                tm_ok = eqdsk not in self._eqdsk_skip
+                tm_ok = eqdsk not in self._eqdsk_skip and os.path.isfile(eqdsk)
                 if tm_ok:
                     full_eqdsk_map[t] = eqdsk
                     n_tm += 1
@@ -1621,7 +1688,7 @@ class TokTox:
                 else:
                     self._log(f'Warning: Loop {self._current_loop}: TM failed at t=0 and seed EQDSK is also invalid.')
 
-            # Injected ψ from loop 1 relax used the *seed* EQDSK.  If we used
+            # Injected ψ from initial relax used the *seed* EQDSK.  If we used
             # the TM EQDSK at t_init without a loop N re-relax, the metric changes
             # and j becomes inconsistent.  When ``relax=False``, force seed at t_init.
             # When ``relax=True``, loop N relax aligns ψ with TM ``i=0`` — keep TM.
@@ -1631,7 +1698,7 @@ class TokTox:
                     full_eqdsk_map[self._t_init] = seed_eqdsk_tinit
                     self._log(
                         f'Loop {self._current_loop}: seed EQDSK at t_init={self._t_init} s for TORAX '
-                        f'(ψ from loop 1 relax on seed; loop 2+ relax disabled).'
+                        f'(ψ from initial relax on seed; inter-loop relax disabled).'
                     )
 
             if n_tm == 0:
@@ -1654,14 +1721,14 @@ class TokTox:
         myconfig['numerics']['t_final'] = self._t_final
         myconfig['numerics']['fixed_dt'] = self._tx_dt
 
-        # ── 5. Psi profile from last TORAX relax (loop 1 / loop N) ───────────────────
+        # ── 5. Psi profile from last TORAX relax (initial / inter-loop) ───────────────────
         myconfig.setdefault('profile_conditions', {})
         if self._psi_init is not None:
             myconfig['profile_conditions']['psi'] = self._psi_init
             myconfig['profile_conditions']['initial_psi_mode'] = 'profile_conditions'
             myconfig['profile_conditions']['initial_psi_from_j'] = False
         else:
-            myconfig['profile_conditions']['initial_psi_mode'] = 'geometry' # if loop 0 wasn't run, uses psi from initial eqdsk, not ideal
+            myconfig['profile_conditions']['initial_psi_mode'] = 'geometry'  # if initial relax was skipped
 
         # ── 6. Explicit set_*() overrides ──────────────────────────────────
         self._apply_set_overrides(myconfig)
@@ -1694,7 +1761,8 @@ class TokTox:
         r'''! Return whether TORAX accepts ``eqdsk`` as ``ToraxConfig`` geometry.
 
         @param quiet If True, do not print or append to the coupling log on failure
-               (used for intermediate-resolution retries in ``_run_tm``).
+               (used for intermediate-resolution retries in ``_run_tm``). If False,
+               failure is only reported when ``output_mode`` is ``'debug'``.
         '''
         myconfig = copy.deepcopy(BASE_CONFIG)
         if self._loaded_config is not None:
@@ -1711,7 +1779,7 @@ class TokTox:
             _ = torax.ToraxConfig.from_dict(myconfig)
             return True
         except Exception as e:
-            if not quiet:
+            if not quiet and self._output_mode == 'debug':
                 self._log(f"TEST EQDSK FAILED: {eqdsk} — {repr(e)}")
                 self._print(f'    EQDSK rejected by TORAX: {os.path.basename(eqdsk)}')
             return False
@@ -1720,7 +1788,7 @@ class TokTox:
         r'''! Store ψ, n_e, T_e, T_i at ``time_val`` for debug relax figures / history.
 
         Updates ``_relax_profiles_snapshot`` temporarily so the caller can append a copy
-        to ``_relax_mainrun_profile_history``. Not used to seed loop 2+ relax runs
+        to ``_relax_mainrun_profile_history``. Not used to seed inter-loop relax runs
         (those profiles come from the user config each time).
         '''
         if time_val is None:
@@ -1735,7 +1803,7 @@ class TokTox:
         self._relax_profiles_snapshot = snap
 
     def _run_tx_relax(self, *, stage, eqdsk_path, prescribed_profiles):
-        r'''! Short TORAX relax: loop 1 on the seed EQDSK, or loop N on TM ``i=0`` EQDSK.
+        r'''! Short TORAX relax: initial run on the seed EQDSK, or inter-loop on TM ``i=0`` EQDSK.
 
         Uses flattened user inputs (``_apply_set_overrides`` + ``_flatten_time_dependent``).
         If ``prescribed_profiles`` is None, ψ follows EQDSK ``initial_psi_mode='geometry'``
@@ -1749,133 +1817,139 @@ class TokTox:
         '''
         runtime = float(self._relax_duration)
         dt_relax = RELAX_FIXED_DT
-        tag = 'Loop 1 relax' if stage == 'initial' else f'Loop {self._current_loop} relax'
+        tag = 'Initial TORAX relax' if stage == 'initial' else f'Loop {self._current_loop} inter-loop relax'
         self._log(f'{tag}: building config ({runtime:.4g} s, dt={dt_relax})...')
+        with self._loop0_coarse_tx_relax_scope(stage):
 
-        self._n_e_init = None
-        self._T_e_init = None
-        self._T_i_init = None
+            self._n_e_init = None
+            self._T_e_init = None
+            self._T_i_init = None
 
-        init_config = copy.deepcopy(BASE_CONFIG)
-        if self._loaded_config is not None:
-            self._config_merge(init_config, self._loaded_config)
+            init_config = copy.deepcopy(BASE_CONFIG)
+            if self._loaded_config is not None:
+                self._config_merge(init_config, self._loaded_config)
 
-        self._apply_set_overrides(init_config)
+            self._apply_set_overrides(init_config)
 
-        use_path = eqdsk_path
+            use_path = eqdsk_path
 
-        init_config['geometry'] = {
-            'geometry_type': 'eqdsk',
-            'geometry_directory': os.getcwd(),
-            'last_surface_factor': self._last_surface_factor,
-            'n_surfaces': 50,
-            'Ip_from_parameters': True,
-            'geometry_configs': {self._t_init: {'geometry_file': use_path, 'cocos': self._cocos}},
-        }
+            init_config['geometry'] = {
+                'geometry_type': 'eqdsk',
+                'geometry_directory': os.getcwd(),
+                'last_surface_factor': self._last_surface_factor,
+                'n_surfaces': 50,
+                'Ip_from_parameters': True,
+                'geometry_configs': {self._t_init: {'geometry_file': use_path, 'cocos': self._cocos}},
+            }
 
-        if self._tx_grid_type == 'n_rho':
-            init_config['geometry']['n_rho'] = self._tx_grid
-        elif self._tx_grid_type == 'face_centers':
-            init_config['geometry']['face_centers'] = self._tx_grid
+            if self._tx_grid_type == 'n_rho':
+                init_config['geometry']['n_rho'] = self._tx_grid
+            elif self._tx_grid_type == 'face_centers':
+                init_config['geometry']['face_centers'] = self._tx_grid
 
-        init_config.setdefault('numerics', {})
-        init_config['numerics']['t_initial'] = self._t_init
-        init_config['numerics']['t_final'] = self._t_init + runtime
-        init_config['numerics']['fixed_dt'] = dt_relax
+            init_config.setdefault('numerics', {})
+            init_config['numerics']['t_initial'] = self._t_init
+            init_config['numerics']['t_final'] = self._t_init + runtime
+            init_config['numerics']['fixed_dt'] = dt_relax
 
-        if not getattr(self, '_relax_kinetics', False):
-            init_config['numerics']['evolve_current'] = True
-            init_config['numerics']['evolve_density'] = False
-            init_config['numerics']['evolve_ion_heat'] = False
-            init_config['numerics']['evolve_electron_heat'] = False
-        else:
-            self._log(f'{tag}: relax_kinetics ON (evolve_* from set_evolve / config).')
-            init_config['numerics'].setdefault('evolve_current', True)
+            if not getattr(self, '_relax_kinetics', False):
+                init_config['numerics']['evolve_current'] = True
+                init_config['numerics']['evolve_density'] = False
+                init_config['numerics']['evolve_ion_heat'] = False
+                init_config['numerics']['evolve_electron_heat'] = False
+            else:
+                self._log(f'{tag}: relax_kinetics ON (evolve_* from set_evolve / config).')
+                init_config['numerics'].setdefault('evolve_current', True)
 
-        init_config.setdefault('profile_conditions', {})
-        if prescribed_profiles is None:
-            init_config['profile_conditions'].pop('psi', None)
-            init_config['profile_conditions']['initial_psi_mode'] = 'geometry'
-            init_config['profile_conditions']['initial_psi_from_j'] = False
-        else:
-            pc = init_config['profile_conditions']
-            pc['psi'] = copy.deepcopy(prescribed_profiles['psi'])
-            pc['initial_psi_mode'] = 'profile_conditions'
-            pc['initial_psi_from_j'] = False
-            pc['n_e'] = copy.deepcopy(prescribed_profiles['n_e'])
-            pc['T_e'] = copy.deepcopy(prescribed_profiles['T_e'])
-            pc['T_i'] = copy.deepcopy(prescribed_profiles['T_i'])
+            init_config.setdefault('profile_conditions', {})
+            if prescribed_profiles is None:
+                init_config['profile_conditions'].pop('psi', None)
+                init_config['profile_conditions']['initial_psi_mode'] = 'geometry'
+                init_config['profile_conditions']['initial_psi_from_j'] = False
+            else:
+                pc = init_config['profile_conditions']
+                pc['psi'] = copy.deepcopy(prescribed_profiles['psi'])
+                pc['initial_psi_mode'] = 'profile_conditions'
+                pc['initial_psi_from_j'] = False
+                pc['n_e'] = copy.deepcopy(prescribed_profiles['n_e'])
+                pc['T_e'] = copy.deepcopy(prescribed_profiles['T_e'])
+                pc['T_i'] = copy.deepcopy(prescribed_profiles['T_i'])
 
-        self._flatten_time_dependent(init_config)
+            self._flatten_time_dependent(init_config)
 
-        pc_flat = init_config.get('profile_conditions', {})
-        _user_ref_curves = {}
-        for _k in ('n_e', 'T_e', 'T_i'):
-            if _k in pc_flat:
-                _r, _y = TokTox._relax_flat_profile_to_rho_y(pc_flat[_k])
+            pc_flat = init_config.get('profile_conditions', {})
+            _user_ref_curves = {}
+            for _k in ('n_e', 'T_e', 'T_i'):
+                if _k in pc_flat:
+                    _r, _y = TokTox._relax_flat_profile_to_rho_y(pc_flat[_k])
+                    if _r is not None:
+                        _user_ref_curves[_k] = (_r, _y)
+            if 'psi' in pc_flat:
+                _r, _y = TokTox._relax_flat_profile_to_rho_y(pc_flat['psi'])
                 if _r is not None:
-                    _user_ref_curves[_k] = (_r, _y)
-        if 'psi' in pc_flat:
-            _r, _y = TokTox._relax_flat_profile_to_rho_y(pc_flat['psi'])
-            if _r is not None:
-                _user_ref_curves['psi'] = (_r, _y)
+                    _user_ref_curves['psi'] = (_r, _y)
 
-        if self._output_mode in ('normal', 'debug') and self._out_dir is not None:
-            if stage == 'initial':
-                cfg_name = 'tx_config_relax000_initial.py'
-            else:
-                cfg_name = f'tx_config_relax_inter_{self._current_loop:03d}.py'
-            if self._output_file_tag is not None:
-                cfg_name = f'{self._output_file_tag}_{cfg_name}'
-            config_filename = os.path.join(self._out_dir, cfg_name)
-            with open(config_filename, 'w') as f:
-                f.write('# Torax configuration\n# TORAX relax ({stage})\n\n'.format(stage=stage))
-                f.write('tx_config = ')
-                f.write(pprint.pformat(self._to_plain_python(init_config), width=100, sort_dicts=False))
+            if self._output_mode in ('normal', 'debug') and self._out_dir is not None:
+                if stage == 'initial':
+                    cfg_name = 'tx_config_relax000_initial.py'
+                else:
+                    cfg_name = f'tx_config_relax_inter_{self._current_loop:03d}.py'
+                if self._output_file_tag is not None:
+                    cfg_name = f'{self._output_file_tag}_{cfg_name}'
+                config_filename = os.path.join(self._out_dir, cfg_name)
+                with open(config_filename, 'w') as f:
+                    f.write('# Torax configuration\n# TORAX relax ({stage})\n\n'.format(stage=stage))
+                    f.write('tx_config = ')
+                    f.write(pprint.pformat(self._to_plain_python(init_config), width=100, sort_dicts=False))
 
-        self._log(f'{tag}: running TORAX...')
-        tx_config = torax.ToraxConfig.from_dict(init_config)
-        data_tree, hist = torax.run_simulation(tx_config, log_timestep_info=False)
-
-        if hist.sim_error != torax.SimError.NO_ERROR:
-            raise ValueError(f'TORAX relax ({stage}) failed: {hist.sim_error}')
-
-        t_final_relax = self._t_init + runtime
-
-        psi_xr = data_tree.profiles.psi.sel(time=t_final_relax, method='nearest')
-        rho_psi_arr = psi_xr.coords['rho_norm'].to_numpy()
-        psi_arr = psi_xr.to_numpy()
-        self._psi_init = ([self._t_init], rho_psi_arr.tolist(), [psi_arr.tolist()])
-
-        if getattr(self, '_relax_kinetics', False):
-            for _name, _attr in (('n_e', '_n_e_init'), ('T_e', '_T_e_init'), ('T_i', '_T_i_init')):
-                _xr = getattr(data_tree.profiles, _name).sel(time=t_final_relax, method='nearest')
-                _rho = _xr.coords['rho_norm'].to_numpy()
-                _arr = _xr.to_numpy()
-                setattr(self, _attr, ([self._t_init], _rho.tolist(), [_arr.tolist()]))
-            self._log(f'{tag}: relaxed n_e, T_e, T_i will override loop 1+ configs after set_*().')
-
-        if getattr(self, '_debug_mode', False) and self._out_dir is not None:
-            if stage == 'initial':
-                _fig_name = 'tx_relax_profiles_initial.png'
-            else:
-                _fig_name = f'tx_relax_profiles_inter_loop{self._current_loop:03d}.png'
-            if self._output_file_tag is not None:
-                _fig_name = f'{self._output_file_tag}_{_fig_name}'
-            _relax_plot_path = os.path.join(self._out_dir, _fig_name)
-            try:
-                plot_tx_relax_profiles(
-                    self,
-                    data_tree,
-                    stage=stage,
-                    t_final_relax=t_final_relax,
-                    user_ref_curves=_user_ref_curves,
-                    save_path=_relax_plot_path,
-                    display=False,
+            self._log(f'{tag}: running TORAX...')
+            tx_config = torax.ToraxConfig.from_dict(init_config)
+            _t_relax_sim0 = time.perf_counter()
+            data_tree, hist = torax.run_simulation(tx_config, log_timestep_info=False)
+            if getattr(self, '_output_mode', None) == 'debug':
+                self._print(
+                    f'  [debug timing] {tag}: TORAX.run_simulation {time.perf_counter() - _t_relax_sim0:.3f} s'
                 )
-                self._log(f'TORAX relax profile figure ({stage}): {_relax_plot_path}')
-            except Exception as _e:
-                self._log(f'TORAX relax profile figure failed ({stage}): {_e}')
+
+            if hist.sim_error != torax.SimError.NO_ERROR:
+                raise ValueError(f'TORAX relax ({stage}) failed: {hist.sim_error}')
+
+            t_final_relax = self._t_init + runtime
+
+            psi_xr = data_tree.profiles.psi.sel(time=t_final_relax, method='nearest')
+            rho_psi_arr = psi_xr.coords['rho_norm'].to_numpy()
+            psi_arr = psi_xr.to_numpy()
+            self._psi_init = ([self._t_init], rho_psi_arr.tolist(), [psi_arr.tolist()])
+
+            if getattr(self, '_relax_kinetics', False):
+                for _name, _attr in (('n_e', '_n_e_init'), ('T_e', '_T_e_init'), ('T_i', '_T_i_init')):
+                    _xr = getattr(data_tree.profiles, _name).sel(time=t_final_relax, method='nearest')
+                    _rho = _xr.coords['rho_norm'].to_numpy()
+                    _arr = _xr.to_numpy()
+                    setattr(self, _attr, ([self._t_init], _rho.tolist(), [_arr.tolist()]))
+                self._log(f'{tag}: relaxed n_e, T_e, T_i will override coupling configs after set_*().')
+
+            if getattr(self, '_debug_mode', False) and self._out_dir is not None:
+                if stage == 'initial':
+                    _fig_name = 'tx_relax_profiles_initial.png'
+                else:
+                    _fig_name = f'tx_relax_profiles_inter_loop{self._current_loop:03d}.png'
+                if self._output_file_tag is not None:
+                    _fig_name = f'{self._output_file_tag}_{_fig_name}'
+                _relax_plot_path = os.path.join(self._out_dir, _fig_name)
+                try:
+                    plot_tx_relax_profiles(
+                        self,
+                        data_tree,
+                        stage=stage,
+                        t_final_relax=t_final_relax,
+                        user_ref_curves=_user_ref_curves,
+                        save_path=_relax_plot_path,
+                        display=False,
+                    )
+                    self._log(f'TORAX relax profile figure ({stage}): {_relax_plot_path}')
+                except Exception as _e:
+                    self._log(f'TORAX relax profile figure failed ({stage}): {_e}')
 
 
     def _run_tx(self):
@@ -1883,56 +1957,79 @@ class TokTox:
         @return Tuple (consumed_flux, consumed_flux_integral).
         '''
 
-        if self._current_loop >= 2 and getattr(self, '_inter_loop_relax', False):
+        _dbg_tx = getattr(self, '_output_mode', None) == 'debug'
+        _t_inter_relax = 0.0
+        if (self._current_loop >= 1 and getattr(self, '_inter_loop_relax', False)
+                and not self._coupling_iteration_is_first()):
             prev_lp = self._current_loop - 1
             tm_eq0 = os.path.join(self._eqdsk_dir, f'{prev_lp:03d}.000.eqdsk')
             self._print(
-                f'  TORAX: Loop {self._current_loop} relax ({self._relax_duration:g} s)'
+                f'  TORAX: Running relax ({self._relax_duration:g} s) simulation...'
             )
             # User n_e, T_e, T_i (merged config + set_*); ψ from geometry on this EQDSK.
+            _t0_il = time.perf_counter()
             self._run_tx_relax(stage='interloop', eqdsk_path=tm_eq0, prescribed_profiles=None)
+            _t_inter_relax = time.perf_counter() - _t0_il
 
-        myconfig = self._get_tx_config()
-        self._print('  TORAX: running simulation...')
-        try:
-            data_tree, hist = torax.run_simulation(myconfig, log_timestep_info=False)
-        except Exception as e:
-            self._print(f'  TORAX: config/init FAILED — {e}')
-            raise
+        with self._loop0_coarse_tx_main_scope():
+            myconfig = self._get_tx_config()
+            self._print('  TORAX: running simulation...')
+            try:
+                _t0_sim = time.perf_counter()
+                data_tree, hist = torax.run_simulation(myconfig, log_timestep_info=False)
+                _t_main_sim = time.perf_counter() - _t0_sim
+            except Exception as e:
+                self._print(f'  TORAX: config/init FAILED — {e}')
+                raise
 
-        if hist.sim_error != torax.SimError.NO_ERROR:
-            self._print(f'  TORAX: sim FAILED ({hist.sim_error})')
-            raise ValueError(f'TORAX failed to run the simulation: {hist.sim_error}')
+            if hist.sim_error != torax.SimError.NO_ERROR:
+                self._print(f'  TORAX: sim FAILED ({hist.sim_error})')
+                raise ValueError(f'TORAX failed to run the simulation: {hist.sim_error}')
         
-        self._data_tree = data_tree  # store for visualization at full TORAX resolution
+            self._data_tree = data_tree  # store for visualization at full TORAX resolution
 
-        try:
-            self._capture_relax_profiles_from_datatree(data_tree, self._t_init)
-            if self._relax_profiles_snapshot is not None:
-                self._relax_mainrun_profile_history.append(
-                    {
-                        'loop': int(self._current_loop),
-                        'profiles': copy.deepcopy(self._relax_profiles_snapshot),
-                    }
-                )
-        except Exception as _e:
-            self._log(f'Warning: could not snapshot TORAX profiles at t_init for next relax: {_e}')
+            try:
+                self._capture_relax_profiles_from_datatree(data_tree, self._t_init)
+                if self._relax_profiles_snapshot is not None:
+                    self._relax_mainrun_profile_history.append(
+                        {
+                            'loop': int(self._current_loop),
+                            'profiles': copy.deepcopy(self._relax_profiles_snapshot),
+                        }
+                    )
+            except Exception as _e:
+                self._log(f'Warning: could not snapshot TORAX profiles at t_init for next relax: {_e}')
 
-        v_loops = np.zeros(len(self._tm_times))
-        for i, t in enumerate(self._tm_times):
-            self._tx_update(i, data_tree)
-            v_loops[i] = data_tree.scalars.v_loop_lcfs.sel(time=t, method='nearest')
+            v_loops = np.zeros(len(self._tm_times))
+            _t0_txup = time.perf_counter()
+            for i, t in enumerate(self._tm_times):
+                self._tx_update(i, data_tree)
+                v_loops[i] = data_tree.scalars.v_loop_lcfs.sel(time=t, method='nearest')
+            _t_tx_updates = time.perf_counter() - _t0_txup
 
-        if self._save_outputs:
-            self._res_update(data_tree)
+            _t_res = 0.0
+            if self._save_outputs:
+                _t0_res = time.perf_counter()
+                self._res_update(data_tree)
+                _t_res = time.perf_counter() - _t0_res
 
-        # Flux consumption: positive Ip drives psi_lcfs down in TM-native.
-        # Convention: consumed_flux > 0 means plasma has consumed flux from CS.
-        consumed_flux = -2.0 * np.pi * (self._state['psi_lcfs_tx'][-1] - self._state['psi_lcfs_tx'][0])
-        consumed_flux_integral = np.trapezoid(v_loops[0:], self._tm_times[0:])
-        self._log(f"Loop {self._current_loop} TORAX: cflux={consumed_flux:.4f} Wb")
-        self._print(f'  TORAX: done (cflux={consumed_flux:.4f} Wb)')
-        return consumed_flux, consumed_flux_integral
+            if _dbg_tx:
+                _parts = []
+                if _t_inter_relax > 0:
+                    _parts.append(f'inter-loop relax (total) {_t_inter_relax:.3f} s')
+                _parts.append(f'main TORAX sim {_t_main_sim:.3f} s')
+                _parts.append(f'_tx_update × {len(self._tm_times)} {_t_tx_updates:.3f} s')
+                if _t_res > 0:
+                    _parts.append(f'_res_update {_t_res:.3f} s')
+                self._print(f'  [debug timing] TORAX coupling: {" | ".join(_parts)}')
+
+            # Flux consumption: positive Ip drives psi_lcfs down in TM-native.
+            # Convention: consumed_flux > 0 means plasma has consumed flux from CS.
+            consumed_flux = -2.0 * np.pi * (self._state['psi_lcfs_tx'][-1] - self._state['psi_lcfs_tx'][0])
+            consumed_flux_integral = np.trapezoid(v_loops[0:], self._tm_times[0:])
+            self._log(f"Loop {self._current_loop} TORAX: cflux={consumed_flux:.4f} Wb")
+            self._print(f'  TORAX: done (cflux={consumed_flux:.4f} Wb)')
+            return consumed_flux, consumed_flux_integral
 
     def _tx_update(self, i, data_tree):
         r'''! Update the simulation state from TORAX results at timestep i.
@@ -2129,22 +2226,40 @@ class TokTox:
         @return Tuple (consumed_flux, consumed_flux_integral).
         '''
         from tqdm import tqdm
-        self._print(f'  TokaMaker: solving {len(self._tm_times)} equilibria...')
+        _dbg_tm = getattr(self, '_output_mode', None) == 'debug'
+        _t_tm0 = time.perf_counter()
         self._log(f"Loop {self._current_loop} TokaMaker:")
 
         self._eqdsk_skip = []
         _loop_level_log = []
 
+        n_tm = len(self._tm_times)
+        _stride = int(getattr(self, '_loop0_tm_stride', 2))
+        _eff_stride = _stride if self._current_loop == 0 else 1
+        solve_idx_list = self._loop0_tm_solve_indices(n_tm, _eff_stride)
+        solve_idx_set = set(solve_idx_list)
+        prev_solve_for = {}
+        _last_si = None
+        for _si in solve_idx_list:
+            prev_solve_for[_si] = _last_si
+            _last_si = _si
+
+        if self._current_loop == 0 and len(solve_idx_list) < n_tm:
+            self._log(f'Loop 0 TokaMaker: subsampling {len(solve_idx_list)}/{n_tm} timesteps (stride={_stride}).')
+            self._print(f'  TokaMaker: {len(solve_idx_list)}/{n_tm} GS solves (loop 0 subsampled, stride={_stride})...')
+        else:
+            self._print(f'  TokaMaker: solving {len(self._tm_times)} equilibria...')
+
         # ── Per-loop initialization (before timestep sweep) ──────────────────
         self._state['psi_grid_prev_tm'] = {}
 
         # Seed coil regularization targets
-        # Loop 1: use zero targets (None) so the solver freely finds the correct
+        # First coupling pass: use zero targets (None) so the solver freely finds the correct
         # coil configuration without being biased toward the initial equilibrium.
-        # Loop 2+: seed from the last solve of the previous loop for warm-starting.
+        # Later coupling loops: seed from the last solve of the previous loop for warm-starting.
         if getattr(self, '_coil_reg_config', None):
             init_targets = None
-            if self._current_loop > 1:
+            if self._current_loop > 0 and not self._coupling_iteration_is_first():
                 try:
                     init_targets, _ = self._tm.get_coil_currents()
                 except Exception as e:
@@ -2162,260 +2277,305 @@ class TokTox:
         if 0 in self._psi_warm_start and self._psi_warm_start[0] is not None:
             self._tm.set_psi_dt(psi0=self._psi_warm_start[0], dt=1.0e10)
 
-        _pbar = tqdm(enumerate(self._tm_times), total=len(self._tm_times),
-                    desc=f'  TM loop {self._current_loop}', unit='solve',
-                    bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_inv_fmt}]{postfix}')
-        for i, t in _pbar:
-            # Clear isoflux, flux, and saddle targets from previous timepoint
-            self._tm.set_isoflux_constraints(None)
-            self._tm.set_psi_constraints(None, None)
-            self._tm.set_saddle_constraints(None)
+        # Progress bar counts actual GS attempts (subsampled loop 0 → 13/13 not 13/25).
+        _pbar_total = len(solve_idx_list)
+        _t_gs0 = time.perf_counter()
+        with tqdm(total=_pbar_total,
+                  desc=f'  TM loop {self._current_loop}', unit='solve',
+                  bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_inv_fmt}]{postfix}'
+                  ) as _pbar:
+            for i, t in enumerate(self._tm_times):
+                if i not in solve_idx_set:
+                    _loop_level_log.append({
+                        'i': i, 't': t, 'skipped': True, 'succeeded': False,
+                        'level': None, 'level_name': None, 'error': None,
+                    })
+                    continue
 
-            Ip_target = abs(self._state['Ip'][i])
-            P0_target = abs(self._state['pax'][i])
-            
-            self._tm.set_targets(Ip=Ip_target, pax=P0_target) # using pax target with j_phi inputs 
-            self._tm.set_resistivity(eta_prof=self._state['eta_prof'][i])
-            
-            ffp_prof = {'x': self._state['ffp_prof'][i]['x'].copy(),
-                           'y': self._state['ffp_prof'][i]['y'].copy(),
-                           'type': self._state['ffp_prof'][i]['type']}
-            pp_prof = {'x': self._state['pp_prof'][i]['x'].copy(),
-                          'y': self._state['pp_prof'][i]['y'].copy(),
-                          'type': self._state['pp_prof'][i]['type']}
-            
-            lcfs = self._state['lcfs_geo'][i]
+                prev_tm_idx = prev_solve_for[i]
 
-            # Set saddle-point (X-point) constraints during diverted phase
-            use_x_points = (
-                self._x_point_targets is not None
-                and self._diverted_times is not None
-                and self._diverted_times[0] <= t <= self._diverted_times[1]
-            )
-            if use_x_points:
-                saddle_weights = self._x_point_weight * np.ones(self._x_point_targets.shape[0])
-                self._tm.set_saddle_constraints(self._x_point_targets, saddle_weights)
+                # Clear isoflux, flux, and saddle targets from previous timepoint
+                self._tm.set_isoflux_constraints(None)
+                self._tm.set_psi_constraints(None, None)
+                self._tm.set_saddle_constraints(None)
 
-                # trims lcfs targets near X-point(s)
-                perc_limit = 0.60       # LCFS points above percentage limit* max(abs(Z)) are removed from isoflux targets
-                Z_max_abs = np.max(np.abs(lcfs[:, 1]))
-                Z_lim = perc_limit * Z_max_abs
-                if np.shape(self._x_point_targets)[0] == 1 and self._x_point_targets[0][1] > 0: # upper single null
-                    lcfs = lcfs[lcfs[:, 1] <= Z_lim]   
-                elif np.shape(self._x_point_targets)[0] == 1 and self._x_point_targets[0][1] < 0: # lower single null
-                    lcfs = lcfs[lcfs[:, 1] >= -Z_lim]
-                elif np.shape(self._x_point_targets)[0] == 2: # double null
-                    lcfs = lcfs[np.abs(lcfs[:, 1]) <= Z_lim]
+                Ip_target = abs(self._state['Ip'][i])
+                P0_target = abs(self._state['pax'][i])
+        
+                self._tm.set_targets(Ip=Ip_target, pax=P0_target) # using pax target with j_phi inputs 
+                self._tm.set_resistivity(eta_prof=self._state['eta_prof'][i])
+        
+                ffp_prof = {'x': self._state['ffp_prof'][i]['x'].copy(),
+                               'y': self._state['ffp_prof'][i]['y'].copy(),
+                               'type': self._state['ffp_prof'][i]['type']}
+                pp_prof = {'x': self._state['pp_prof'][i]['x'].copy(),
+                              'y': self._state['pp_prof'][i]['y'].copy(),
+                              'type': self._state['pp_prof'][i]['type']}
+        
+                lcfs = self._state['lcfs_geo'][i]
 
-            # When diverted, add manually specified strike points to isoflux targets
-            if use_x_points and self._strike_point_targets is not None:
-                self._state['strike_pts'][i] = self._strike_point_targets
-                lcfs = np.vstack([lcfs, self._strike_point_targets])
-            else:
-                self._state['strike_pts'][i] = np.empty((0, 2))
+                # Set saddle-point (X-point) constraints during diverted phase
+                use_x_points = (
+                    self._x_point_targets is not None
+                    and self._diverted_times is not None
+                    and self._diverted_times[0] <= t <= self._diverted_times[1]
+                )
+                if use_x_points:
+                    saddle_weights = self._x_point_weight * np.ones(self._x_point_targets.shape[0])
+                    self._tm.set_saddle_constraints(self._x_point_targets, saddle_weights)
 
-            isoflux_weights = LCFS_WEIGHT * np.ones(len(lcfs))
-            lcfs_psi_target = self._state['psi_lcfs_tx'][i] # _state in Wb/rad, TM uses Wb/rad (AKA Wb-rad)
+                    # trims lcfs targets near X-point(s)
+                    perc_limit = 0.60       # LCFS points above percentage limit* max(abs(Z)) are removed from isoflux targets
+                    Z_max_abs = np.max(np.abs(lcfs[:, 1]))
+                    Z_lim = perc_limit * Z_max_abs
+                    if np.shape(self._x_point_targets)[0] == 1 and self._x_point_targets[0][1] > 0: # upper single null
+                        lcfs = lcfs[lcfs[:, 1] <= Z_lim]   
+                    elif np.shape(self._x_point_targets)[0] == 1 and self._x_point_targets[0][1] < 0: # lower single null
+                        lcfs = lcfs[lcfs[:, 1] >= -Z_lim]
+                    elif np.shape(self._x_point_targets)[0] == 2: # double null
+                        lcfs = lcfs[np.abs(lcfs[:, 1]) <= Z_lim]
 
-            # set_isoflux on all LCFS points for lcfs shape targets
-            self._tm.set_isoflux_constraints(lcfs, isoflux_weights) # shape targets
+                # When diverted, add manually specified strike points to isoflux targets
+                if use_x_points and self._strike_point_targets is not None:
+                    self._state['strike_pts'][i] = self._strike_point_targets
+                    lcfs = np.vstack([lcfs, self._strike_point_targets])
+                else:
+                    self._state['strike_pts'][i] = np.empty((0, 2))
 
-            # Pick outboard midplane point (largest R at approx Z = Z_axis)
-            z_axis = self._state['Z'][i]
-            omp_idx = np.argmax(lcfs[:, 0] * np.exp(-0.5 * ((lcfs[:, 1] - z_axis) / (0.3 * self._state['a'][i]))**2))
-            omp_point = lcfs[omp_idx:omp_idx+1, :]  # shape (1, 2)
-            # Set lcfs psi value target (from TORAX) only at midplane outboard side of lcfs.
-            self._tm.set_psi_constraints(omp_point, targets=np.array([lcfs_psi_target]),
-                                         weights=np.array([LCFS_WEIGHT * 10.])) # psi value target
-            
-            
-            self._tm.update_settings()
+                isoflux_weights = LCFS_WEIGHT * np.ones(len(lcfs))
+                lcfs_psi_target = self._state['psi_lcfs_tx'][i] # _state in Wb/rad, TM uses Wb/rad (AKA Wb-rad)
 
-            if i > 0:
-                if self._state['psi_grid_prev_tm'][i-1] is not None:
-                    self._tm.set_psi_dt(psi0=self._state['psi_grid_prev_tm'][i-1], dt=self._tm_times[i]-self._tm_times[i-1])
-            
-            skip_coil_update = False
-            eq_name = os.path.join(self._eqdsk_dir, f'{self._current_loop:03d}.{i:03d}.eqdsk')
+                # set_isoflux on all LCFS points for lcfs shape targets
+                self._tm.set_isoflux_constraints(lcfs, isoflux_weights) # shape targets
 
-            solve_succeeded = False
-            level_attempts = []
+                # Pick outboard midplane point (largest R at approx Z = Z_axis)
+                z_axis = self._state['Z'][i]
+                omp_idx = np.argmax(lcfs[:, 0] * np.exp(-0.5 * ((lcfs[:, 1] - z_axis) / (0.3 * self._state['a'][i]))**2))
+                omp_point = lcfs[omp_idx:omp_idx+1, :]  # shape (1, 2)
+                # Set lcfs psi value target (from TORAX) only at midplane outboard side of lcfs.
+                self._tm.set_psi_constraints(omp_point, targets=np.array([lcfs_psi_target]),
+                                             weights=np.array([LCFS_WEIGHT * 10.])) # psi value target
+        
+        
+                self._tm.update_settings()
 
-            ffp_prof_raw = copy.deepcopy(ffp_prof)
-            pp_prof_raw  = copy.deepcopy(pp_prof)
-            
-            # Pre-calculate all level profiles
-            level_profiles = []
+                if prev_tm_idx is not None:
+                    _psi_prev = self._state['psi_grid_prev_tm'].get(prev_tm_idx)
+                    if _psi_prev is not None:
+                        self._tm.set_psi_dt(
+                            psi0=_psi_prev,
+                            dt=self._tm_times[i] - self._tm_times[prev_tm_idx],
+                        )
 
-            # Level 0: jphi
-            # ffp_0 = self._state['j_tot'][i]
-            # pp_0 = pp_prof
-            # level_profiles.append({'ffp': ffp_0, 'pp': pp_0, 'name': 'lv0: jphi'})
+                skip_coil_update = False
+                eq_name = os.path.join(self._eqdsk_dir, f'{self._current_loop:03d}.{i:03d}.eqdsk')
 
-            # Level 1: raw
-            ffp_1, pp_1 = self._level1_raw(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
-            level_profiles.append({'ffp': ffp_1, 'pp': pp_1, 'name': 'lv1: raw'})
-            
-            # Level 2: sign flip
-            ffp_2, pp_2 = self._level2_sign_flip(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
-            level_profiles.append({'ffp': ffp_2, 'pp': pp_2, 'name': 'lv2: sign_flip'})
-            
-            # Level 3: pedestal smoothing (takes p_profile as input) # TODO: read in actual n_rho_ped_top, have to add to state first
-            ffp_3, pp_3 = self._level3_pedestal_smoothing(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw), copy.deepcopy(self._state['p_prof_tx'][i])) 
-            level_profiles.append({'ffp': ffp_3, 'pp': pp_3, 'name': 'lv3: pedestal_smoothing'})
-            
-            # Level 4: power flux
-            ffp_4, pp_4 = self._level4_power_flux(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
-            level_profiles.append({'ffp': ffp_4, 'pp': pp_4, 'name': 'lv4: power_flux'})
+                solve_succeeded = False
+                level_attempts = []
 
-            # Level 5: power flux + pax from initial eqdsk
-            ffp_5, pp_5 = self._level4_power_flux(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
-            level_profiles.append({'ffp': ffp_5, 'pp': pp_5, 'name': 'lv5: power_flux + pax'})
+                ffp_prof_raw = copy.deepcopy(ffp_prof)
+                pp_prof_raw  = copy.deepcopy(pp_prof)
+        
+                # Pre-calculate all level profiles
+                level_profiles = []
 
-            # Try each level
-            for level_idx, level_prof in enumerate(level_profiles):
-                level_name = level_prof['name']
-                ffp_level = level_prof['ffp']
-                pp_level = level_prof['pp']
+                # Level 0: jphi
+                # ffp_0 = self._state['j_tot'][i]
+                # pp_0 = pp_prof
+                # level_profiles.append({'ffp': ffp_0, 'pp': pp_0, 'name': 'lv0: jphi'})
 
-                # Initialize psi from geometry parameters
-                self._tm.init_psi(self._state['R0_mag'][i], self._state['Z'][i], self._state['a'][i], self._state['kappa'][i], self._state['delta'][i])
+                # Level 1: raw
+                ffp_1, pp_1 = self._level1_raw(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
+                level_profiles.append({'ffp': ffp_1, 'pp': pp_1, 'name': 'lv1: raw'})
+        
+                # Level 2: sign flip
+                ffp_2, pp_2 = self._level2_sign_flip(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
+                level_profiles.append({'ffp': ffp_2, 'pp': pp_2, 'name': 'lv2: sign_flip'})
+        
+                # Level 3: pedestal smoothing (takes p_profile as input) # TODO: read in actual n_rho_ped_top, have to add to state first
+                ffp_3, pp_3 = self._level3_pedestal_smoothing(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw), copy.deepcopy(self._state['p_prof_tx'][i])) 
+                level_profiles.append({'ffp': ffp_3, 'pp': pp_3, 'name': 'lv3: pedestal_smoothing'})
+        
+                # Level 4: power flux
+                ffp_4, pp_4 = self._level4_power_flux(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
+                level_profiles.append({'ffp': ffp_4, 'pp': pp_4, 'name': 'lv4: power_flux'})
 
-                if i in self._psi_warm_start and self._psi_warm_start[i] is not None:
-                    self._tm.set_psi(self._psi_warm_start[i], update_bounds=True)
-                elif i > 0 and (i-1) in self._state.get('psi_grid_prev_tm', {}) and self._state['psi_grid_prev_tm'][i-1] is not None:
-                    self._tm.set_psi(self._state['psi_grid_prev_tm'][i-1], update_bounds=True)
+                # Level 5: power flux + pax from initial eqdsk
+                ffp_5, pp_5 = self._level4_power_flux(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
+                level_profiles.append({'ffp': ffp_5, 'pp': pp_5, 'name': 'lv5: power_flux + pax'})
 
-                try:
-                    with self._quiet_tm():
-                        self._tm.set_profiles(ffp_prof=ffp_level, pp_prof=pp_level,
-                                              ffp_NI_prof=self._state['ffp_ni_prof'][i])
-                        self._state['equil'][i] = self._tm.solve()
+                # Try each level
+                for level_idx, level_prof in enumerate(level_profiles):
+                    level_name = level_prof['name']
+                    ffp_level = level_prof['ffp']
+                    pp_level = level_prof['pp']
 
-                    level_attempts.append({'level': level_idx, 'name': level_name,
-                                          'ffp': ffp_level, 'pp': pp_level,
-                                          'succeeded': True, 'error': None})
-                    ffp_prof, pp_prof = ffp_level, pp_level
-                    solve_succeeded = True
-                    break
-                except Exception as e:
-                    level_attempts.append({'level': level_idx, 'name': level_name,
-                                          'ffp': ffp_level, 'pp': pp_level,
-                                          'succeeded': False, 'error': str(e)})
+                    # Initialize psi from geometry parameters
+                    self._tm.init_psi(self._state['R0_mag'][i], self._state['Z'][i], self._state['a'][i], self._state['kappa'][i], self._state['delta'][i])
 
-            if not solve_succeeded:
-                self._eqdsk_skip.append(eq_name)
-                skip_coil_update = True
-                self._log(f'\tTM: Solve failed at t={t} (all levels attempted).')
-                self._state['psi_grid_prev_tm'][i] = None  # if solve failed, set psi grid to None
-            
-            if solve_succeeded:
-                torax_accepted = False
-                _n_attempts = len(EQDSK_SAVE_NR_NZ_SEQUENCE)
-                for _attempt_idx, nr_nz in enumerate(EQDSK_SAVE_NR_NZ_SEQUENCE):
-                    quiet_test = (_attempt_idx < _n_attempts - 1)
-                    with self._quiet_tm():
-                        self._state['equil'][i].save_eqdsk(eq_name,
-                            lcfs_pad=1-self._last_surface_factor, run_info='TokaMaker EQDSK',
-                            cocos=self._cocos, nr=nr_nz, nz=nr_nz,
-                            truncate_eq=self._truncate_eq)
-                    if self._test_eqdsk(eq_name, quiet=quiet_test):
-                        torax_accepted = True
-                        if _attempt_idx > 0:
-                            base_nz = EQDSK_SAVE_NR_NZ_SEQUENCE[0]
-                            self._print(
-                                f'    EQDSK {os.path.basename(eq_name)}: base nr=nz={base_nz} rejected by TORAX; '
-                                f'accepted at nr=nz={nr_nz}.'
-                            )
+                    if i in self._psi_warm_start and self._psi_warm_start[i] is not None:
+                        self._tm.set_psi(self._psi_warm_start[i], update_bounds=True)
+                    elif prev_tm_idx is not None and self._state['psi_grid_prev_tm'].get(prev_tm_idx) is not None:
+                        self._tm.set_psi(self._state['psi_grid_prev_tm'][prev_tm_idx], update_bounds=True)
+
+                    try:
+                        with self._quiet_tm():
+                            self._tm.set_profiles(ffp_prof=ffp_level, pp_prof=pp_level,
+                                                  ffp_NI_prof=self._state['ffp_ni_prof'][i])
+                            self._state['equil'][i] = self._tm.solve()
+
+                        level_attempts.append({'level': level_idx, 'name': level_name,
+                                              'ffp': ffp_level, 'pp': pp_level,
+                                              'succeeded': True, 'error': None})
+                        ffp_prof, pp_prof = ffp_level, pp_level
+                        solve_succeeded = True
                         break
-                if not torax_accepted:
-                    raise ValueError(
-                        f'TORAX rejected TokaMaker EQDSK after save attempts nr=nz '
-                        f'in {EQDSK_SAVE_NR_NZ_SEQUENCE}: {eq_name}'
-                    )
-                self._tm_update(i)
+                    except Exception as e:
+                        level_attempts.append({'level': level_idx, 'name': level_name,
+                                              'ffp': ffp_level, 'pp': pp_level,
+                                              'succeeded': False, 'error': str(e)})
 
-                # Store diverted/limited flag for this timestep
-                if not hasattr(self, '_diverted_flags'):
-                    self._diverted_flags = {}
-                self._diverted_flags[i] = self._state['equil'][i].diverted
-
-                # Store psi on nodes for later movie generation
-                self._tm_psi_on_nodes.setdefault(self._current_loop, {})[i] = self._state['equil'][i].get_psi(normalized=False)
-
-            _winning = next((a for a in level_attempts if a['succeeded']), None)
-            _last_attempt = level_attempts[-1] if level_attempts else {}
-            _loop_level_log.append({
-                'i': i, 't': t,
-                'succeeded': solve_succeeded,
-                'level': _winning['level'] if _winning else None,
-                'level_name': _winning['name'] if _winning else None,
-                'error': _last_attempt.get('error') if not solve_succeeded else None,
-            })
-
-            if self._output_mode in ('debug', 'normal') and self._out_dir is not None:
-                if self._output_mode == 'debug':
-                    diag_name = f'tm_diag_loop{self._current_loop:03d}_tidx{i:03d}.png'
-                    if self._output_file_tag is not None:
-                        diag_name = f'{self._output_file_tag}_{diag_name}'
-                    _diag_path = os.path.join(self._out_dir, diag_name)
-                    try:
-                        tm_diagnostic_plot(self, i, t, level_attempts, solve_succeeded,
-                                           save_path=_diag_path, display=False)
-                    except Exception as _e:
-                        self._log(f'tm_diagnostic_plot failed at i={i}: {_e}')
+                if not solve_succeeded:
+                    self._eqdsk_skip.append(eq_name)
+                    skip_coil_update = True
+                    self._log(f'\tTM: Solve failed at t={t} (all levels attempted).')
+                    self._state['psi_grid_prev_tm'][i] = None  # if solve failed, set psi grid to None
+        
                 if solve_succeeded:
-                    prof_name = f'profile_loop{self._current_loop:03d}_tidx{i:03d}.png'
-                    if self._output_file_tag is not None:
-                        prof_name = f'{self._output_file_tag}_{prof_name}'
-                    _prof_path = os.path.join(self._out_dir, prof_name)
-                    try:
-                        profile_plot(self, i, t, save_path=_prof_path, display=False)
-                    except Exception as _e:
-                        self._log(f'profile_plot failed at i={i}: {_e}')
+                    torax_accepted = False
+                    _n_attempts = len(EQDSK_SAVE_NR_NZ_SEQUENCE)
+                    for _attempt_idx, nr_nz in enumerate(EQDSK_SAVE_NR_NZ_SEQUENCE):
+                        quiet_test = (_attempt_idx < _n_attempts - 1)
+                        with self._quiet_tm():
+                            self._state['equil'][i].save_eqdsk(eq_name,
+                                lcfs_pad=1-self._last_surface_factor, run_info='TokaMaker EQDSK',
+                                cocos=self._cocos, nr=nr_nz, nz=nr_nz,
+                                truncate_eq=self._truncate_eq)
+                        if self._test_eqdsk(eq_name, quiet=quiet_test):
+                            torax_accepted = True
+                            if _attempt_idx > 0 and self._output_mode == 'debug':
+                                base_nz = EQDSK_SAVE_NR_NZ_SEQUENCE[0]
+                                self._print(
+                                    f'    EQDSK {os.path.basename(eq_name)}: base nr=nz={base_nz} rejected by TORAX; '
+                                    f'accepted at nr=nz={nr_nz}.'
+                                )
+                            break
+                    if not torax_accepted:
+                        raise ValueError(
+                            f'TORAX rejected TokaMaker EQDSK after save attempts nr=nz '
+                            f'in {EQDSK_SAVE_NR_NZ_SEQUENCE}: {eq_name}'
+                        )
+                    self._tm_update(i)
 
-            # Update progress bar postfix; print FAIL messages above the bar
-            if solve_succeeded:
-                lvl = _winning['level']
-                _pbar.set_postfix_str(f't={t:.2f}s OK(L{lvl})', refresh=False)
-            else:
-                err_short = (_last_attempt.get('error') or 'unknown')[:60]
-                tqdm.write(f'    WARNING: TM FAIL at t={t:.2f}s — {err_short}')
-                self._log(f'    TM FAIL at t={t:.2f}s — {err_short}')
-                _pbar.set_postfix_str(f't={t:.2f}s FAIL', refresh=False)
+                    # Store diverted/limited flag for this timestep
+                    if not hasattr(self, '_diverted_flags'):
+                        self._diverted_flags = {}
+                    self._diverted_flags[i] = self._state['equil'][i].diverted
 
-            if not skip_coil_update and getattr(self, '_coil_reg_config', None):
-                prev_coil_targets, _ = self._state['equil'][i].get_coil_currents()
-                self._apply_coil_reg(targets=prev_coil_targets)
+                    # Store psi on nodes for later movie generation
+                    self._tm_psi_on_nodes.setdefault(self._current_loop, {})[i] = self._state['equil'][i].get_psi(normalized=False)
+
+                _winning = next((a for a in level_attempts if a['succeeded']), None)
+                _last_attempt = level_attempts[-1] if level_attempts else {}
+                _loop_level_log.append({
+                    'i': i, 't': t,
+                    'succeeded': solve_succeeded,
+                    'level': _winning['level'] if _winning else None,
+                    'level_name': _winning['name'] if _winning else None,
+                    'error': _last_attempt.get('error') if not solve_succeeded else None,
+                })
+
+                if self._output_mode in ('debug', 'normal') and self._out_dir is not None:
+                    if self._output_mode == 'debug':
+                        diag_name = f'tm_diag_loop{self._current_loop:03d}_tidx{i:03d}.png'
+                        if self._output_file_tag is not None:
+                            diag_name = f'{self._output_file_tag}_{diag_name}'
+                        _diag_path = os.path.join(self._out_dir, diag_name)
+                        try:
+                            tm_diagnostic_plot(self, i, t, level_attempts, solve_succeeded,
+                                               save_path=_diag_path, display=False)
+                        except Exception as _e:
+                            self._log(f'tm_diagnostic_plot failed at i={i}: {_e}')
+                    if solve_succeeded:
+                        prof_name = f'profile_loop{self._current_loop:03d}_tidx{i:03d}.png'
+                        if self._output_file_tag is not None:
+                            prof_name = f'{self._output_file_tag}_{prof_name}'
+                        _prof_path = os.path.join(self._out_dir, prof_name)
+                        try:
+                            profile_plot(self, i, t, save_path=_prof_path, display=False)
+                        except Exception as _e:
+                            self._log(f'profile_plot failed at i={i}: {_e}')
+
+                # Update progress bar postfix; print FAIL messages above the bar
+                if solve_succeeded:
+                    lvl = _winning['level']
+                    _pbar.set_postfix_str(f't={t:.2f}s OK(L{lvl})', refresh=False)
+                else:
+                    err_short = (_last_attempt.get('error') or 'unknown')[:60]
+                    tqdm.write(f'    WARNING: TM FAIL at t={t:.2f}s — {err_short}')
+                    self._log(f'    TM FAIL at t={t:.2f}s — {err_short}')
+                    _pbar.set_postfix_str(f't={t:.2f}s FAIL', refresh=False)
+
+                if not skip_coil_update and getattr(self, '_coil_reg_config', None):
+                    prev_coil_targets, _ = self._state['equil'][i].get_coil_currents()
+                    self._apply_coil_reg(targets=prev_coil_targets)
+                _pbar.update(1)
+
+        _t_gs1 = time.perf_counter()
 
         # Flux consumption: positive Ip drives psi_lcfs down in TM convention
         # Convention: consumed_flux > 0
         consumed_flux = -(self._state['psi_lcfs_tm'][-1] - self._state['psi_lcfs_tm'][0]) * 2.0 * np.pi
         consumed_flux_integral = np.trapezoid(self._state['vloop_tm'][0:], self._tm_times[0:])
 
-        n_ok = sum(1 for e in _loop_level_log if e['succeeded'])
-        self._print(f'  TokaMaker: {n_ok}/{len(self._tm_times)} solved (cflux={consumed_flux:.4f} Wb)')
+        n_ok = sum(1 for e in _loop_level_log if e.get('succeeded'))
+        n_skip = sum(1 for e in _loop_level_log if e.get('skipped'))
+        n_gs = len(solve_idx_list)
+        self._print(f'  TokaMaker: {n_ok}/{n_gs} solved (cflux={consumed_flux:.4f} Wb)')
 
         # Compact level-usage summary for log
         from collections import Counter
-        _lvl_counts = Counter(e['level_name'] for e in _loop_level_log if e['succeeded'])
+        _lvl_counts = Counter(e['level_name'] for e in _loop_level_log if e.get('succeeded'))
         _lvl_summary = ', '.join(f'{name}: {cnt}' for name, cnt in sorted(_lvl_counts.items()))
-        n_fail = len(self._tm_times) - n_ok
-        self._print(f'\tTM summary: {n_ok}/{len(self._tm_times)} solved. Levels: {_lvl_summary}.'
+        n_fail = sum(1 for e in _loop_level_log if not e.get('skipped') and not e.get('succeeded'))
+        # Omit "Skipped: N" when timesteps were subsampled (already stated in the GS-solve preface).
+        _skip_note = (
+            f' Skipped: {n_skip}.'
+            if n_skip and n_gs >= len(self._tm_times) else ''
+        )
+        self._print(f'\tTM summary: {n_ok}/{n_gs} solved. Levels: {_lvl_summary}.'
+                  + _skip_note
                   + (f' Failures: {n_fail}.' if n_fail else ''))
 
+        _t_summary = 0.0
         if self._debug_mode:
             summary_name = f'tm_summary_loop{self._current_loop:03d}.png'
             if self._output_file_tag is not None:
                 summary_name = f'{self._output_file_tag}_{summary_name}'
             _summary_path = os.path.join(self._out_dir, summary_name)
+            _t_sum0 = time.perf_counter()
             try:
                 tm_loop_summary_plot(self, _loop_level_log, save_path=_summary_path, display=False)
             except Exception as _e:
                 self._log(f'tm_loop_summary_plot failed: {_e}')
+            _t_summary = time.perf_counter() - _t_sum0
+
+        if _dbg_tm:
+            _t_end = time.perf_counter()
+            _post = _t_end - _t_gs1
+            _extra = (
+                f' (tm_loop_summary_plot {_t_summary:.3f} s)'
+                if self._debug_mode else ''
+            )
+            self._print(
+                f'  [debug timing] TokaMaker: prep/setup {_t_gs0 - _t_tm0:.3f} s | '
+                f'GS timestep sweep {_t_gs1 - _t_gs0:.3f} s | '
+                f'post (cflux, prints, diagnostics){_extra}: {_post:.3f} s | '
+                f'total {_t_end - _t_tm0:.3f} s'
+            )
 
         return consumed_flux, consumed_flux_integral
-        
+
     # ── Profile level functions ──────────────────────────────────────────
     # Each level takes (self, ffp_prof, pp_prof, i) and returns (ffp_prof, pp_prof).
     # All levels receive deep copies of the raw TORAX profiles (not cumulative).
@@ -2615,22 +2775,28 @@ class TokTox:
             output_mode=False, skip_bad_init_eqdsks=False,
             initial_relax=True, relax=False, relax_kinetics=False, relax_duration=0.1,
             t_ave_toggle='off', t_ave_window=0.5, t_ave_causal=True, t_ave_ignore_start=0.25,
+            loop0=False,
             **kwargs):
         r'''! Run TokaMaker-TORAX coupled simulation loop.
 
         @param convergence_threshold Max fractional change in consumed flux between loops for convergence.
-        @param max_loop Maximum number of loops.
+        @param max_loop Highest **counted** coupling index to run (inclusive): full-resolution passes
+               use indices ``1 … max_loop``. The optional cheap pass at index ``0`` (when ``loop0=True``)
+               is always attempted first and does **not** count toward this limit. Example: ``max_loop=3``
+               runs loop ``0`` (if enabled) then loops ``1``, ``2``, and ``3`` before stopping unless
+               convergence ends earlier.
         @param run_name Name for this run (used in output directory and log file).
         @param output_mode Output level selector: False (or None), 'minimal', 'normal', or 'debug'.
         @param skip_bad_init_eqdsks If True, skip broken initial gEQDSK files instead of raising.
         @param initial_relax If True (default), run a short TORAX relax on the seed EQDSK before
-               loop 1 (flattened user inputs; ψ from geometry unless a loop 2+ relax already set ψ).
-               If False, skip and start loop 1 from EQDSK ψ / loaded config. When ``relax`` is True,
-               this is forced True so loop 1 establishes relaxed ψ before coupling loop ≥2.
-        @param relax If True, run an additional short TORAX relax before each coupling loop ≥2,
-               on TM-solved EQDSK ``(previous_loop).000.eqdsk`` (fallback: seed), with **user**
-               n_e, T_e, T_i from loaded config and ``set_*()`` (same as loop 1) and ψ from
-               geometry on that EQDSK—avoiding drift from previous TORAX outputs between loops.
+               the first coupling TM–TORAX pass (flattened user inputs; ψ from geometry unless an
+               inter-loop relax already set ψ). If False, skip and start from EQDSK ψ / loaded config.
+               When ``relax`` is True, this is forced True so initial relax establishes ψ before
+               later coupling iterations.
+        @param relax If True, run an additional short TORAX relax before each coupling iteration
+               with index ≥1, on TM-solved EQDSK ``(previous_loop).000.eqdsk`` (fallback: seed), with **user**
+               n_e, T_e, T_i from loaded config and ``set_*()`` and ψ from geometry on that EQDSK—
+               avoiding drift from previous TORAX outputs between loops.
                Default False (backward compatible). Implies ``initial_relax=True``.
         @param relax_kinetics If False (default), each relax only evolves current; density and
                ion/electron heat stay fixed at the profiles present before that relax. If True,
@@ -2644,6 +2810,11 @@ class TokTox:
                If False, window is centred on the timepoint.
         @param t_ave_ignore_start Ignore the first N seconds of the pulse when building the
                averaging window (avoids numerical transients). Default 0.25 s.
+        @param loop0 If True (default), run a first coupling pass at index 0 with reduced cost:
+               coarse TORAX radial grid (``face_centers`` linspace, ``DEFAULT_LOOP0_TX_FACE_POINTS``),
+               the same coarse grid on the optional initial relax, and subsampled TokaMaker times
+               (stride 2). If False, skip that pass and start coupling at index 1 at full resolution
+               (initial relax is unchanged and controlled only by ``initial_relax`` / ``relax``).
 
         Deprecated keyword aliases (still accepted): ``run_tx_init`` → ``initial_relax``;
         ``tx_init_kinetics`` → ``relax_kinetics``.
@@ -2661,6 +2832,12 @@ class TokTox:
 
         if relax:
             initial_relax = True
+
+        self._fly_loop0 = bool(loop0)
+        self._loop0_coarse_tx = self._fly_loop0
+        self._loop0_relax_coarse_tx = self._fly_loop0
+        self._loop0_tm_stride = 2 if self._fly_loop0 else 1
+        self._loop0_tx_face_points = int(DEFAULT_LOOP0_TX_FACE_POINTS)
 
         # Disable JAX's persistent XLA compilation cache before any TORAX/JAX JIT
         # compilation occurs.  Since JAX 0.4.x the cache stores serialized XLA
@@ -2784,15 +2961,20 @@ class TokTox:
         try:
             self._relax_mainrun_profile_history = []
 
-            # ── Loop 1 TORAX relax (optional) ──
+            # ── Initial TORAX relax (optional) ──
             if initial_relax:
-                self._print(f'\n{"="*60}\n  Loop 1 relax: TORAX\n{"="*60}')
+                self._print(f'\n{"="*60}\n  Initial TORAX relax\n{"="*60}')
                 if self._relax_kinetics:
-                    self._print('  Loop 1 relax: relax_kinetics ON (evolve_* from set_evolve / config)')
+                    self._print('  Initial relax: relax_kinetics ON (evolve_* from set_evolve / config)')
                 init_seed = self._init_files[0]
                 if not self._test_eqdsk(init_seed):
-                    raise ValueError(f'Loop 1 relax: first seed EQDSK not valid for TORAX: {init_seed}')
+                    raise ValueError(f'Initial TORAX relax: first seed EQDSK not valid for TORAX: {init_seed}')
+                _t_init_relax0 = time.perf_counter()
                 self._run_tx_relax(stage='initial', eqdsk_path=init_seed, prescribed_profiles=None)
+                if self._output_mode == 'debug':
+                    self._print(
+                        f'  [debug timing] Initial TORAX relax (total): {time.perf_counter() - _t_init_relax0:.3f} s'
+                    )
             else:
                 self._psi_init = None
                 self._n_e_init = None
@@ -2800,12 +2982,17 @@ class TokTox:
                 self._T_i_init = None
                 self._relax_profiles_snapshot = None
 
-            self._current_loop = 1
+            self._current_loop = 0 if self._fly_loop0 else 1
 
             # ── Main coupling loop ──
-            while err > convergence_threshold and self._current_loop <= max_loop:
+            # Counted coupling indices: 1 … max_loop (inclusive). Index 0 does not count toward max_loop.
+            while err > convergence_threshold:
+                if not (self._fly_loop0 and self._current_loop == 0):
+                    if self._current_loop > max_loop:
+                        break
                 self._print(f'\n{"="*60}\n  Loop {self._current_loop}\n{"="*60}')
 
+                _t_coupling_loop0 = time.perf_counter()
                 cflux_tx, cflux_tx_vloop = self._run_tx()
 
                 cflux_tm, cflux_tm_vloop = self._run_tm()
@@ -2830,9 +3017,21 @@ class TokTox:
                         scalars_name = f'{self._output_file_tag}_{scalars_name}'
                     _scalars_path = os.path.join(self._out_dir, scalars_name)
                     try:
+                        if self._output_mode == 'debug':
+                            _t_scalars0 = time.perf_counter()
                         plot_scalars(self, save_path=_scalars_path, display=False)
+                        if self._output_mode == 'debug':
+                            self._print(
+                                f'  [debug timing] plot_scalars: {time.perf_counter() - _t_scalars0:.3f} s'
+                            )
                     except Exception as _e:
                         self._log(f'plot_scalars failed at loop {self._current_loop}: {_e}')
+
+                if self._output_mode == 'debug':
+                    self._print(
+                        f'  [debug timing] Coupling loop {self._current_loop} total (wall): '
+                        f'{time.perf_counter() - _t_coupling_loop0:.3f} s'
+                    )
 
                 cflux_tx_prev = cflux_tx
                 self._current_loop += 1
@@ -2848,7 +3047,7 @@ class TokTox:
 
         self._current_loop -= 1 # adjust back to last completed loop for reporting
         # ── End-of-run mode-specific outputs ──
-        if self._output_mode is not False:
+        if self._output_mode is not False and not _in_jupyter():
             if self._output_mode in ('minimal', 'debug') and self._out_dir is not None:
                 profile_evo_name = 'profile_evolution.png'
                 lcfs_evo_name = 'lcfs_evolution.png'
@@ -2878,20 +3077,23 @@ class TokTox:
 
         # ── Summary table ──
         _sim_elapsed = time.time() - _sim_start_time
-        n_loops = self._current_loop
+        n_completed = len(tx_cflux_psi)
+        _coupling_loop0 = getattr(self, '_fly_loop0', True)
+        _loop_label0 = 0 if _coupling_loop0 else 1
         converged = err <= convergence_threshold
         self._print(f'\n{"="*60}')
         if converged:
-            self._print(f'  CONVERGED in {n_loops} loops (err={err*100:.3f}%)')
+            self._print(f'  CONVERGED in {n_completed} loops (err={err*100:.3f}%)')
         else:
-            self._print(f'  Max loops ({max_loop}) reached (err={err*100:.3f}%)')
+            self._print(f'  Max loop index ({max_loop}) reached (err={err*100:.3f}%)')
 
         # Print convergence history
         self._print(f'\n  {"Loop":<6} {"cflux TX [Wb]":<16} {"cflux TM [Wb]":<16} {"TX-TM diff %":<14}')
         self._print(f'  {"-"*52}')
         for s in range(len(tx_cflux_psi)):
             diff_pct = np.abs(tx_cflux_psi[s] - tm_cflux_psi[s]) / tm_cflux_psi[s] * 100 if tm_cflux_psi[s] != 0 else np.inf
-            self._print(f'  {s+1:<6} {tx_cflux_psi[s]:<16.4f} {tm_cflux_psi[s]:<16.4f} {diff_pct:<14.4f}')
+            _idx = _loop_label0 + s
+            self._print(f'  {_idx:<6} {tx_cflux_psi[s]:<16.4f} {tm_cflux_psi[s]:<16.4f} {diff_pct:<14.4f}')
         self._print(f'{"="*60}')
 
         # ── Elapsed time ──
@@ -3020,13 +3222,6 @@ def _save_or_display(fig, save_path=None, display=True):
 def _style(ax):
     ax.grid(True, alpha=GRID_ALPHA)
     ax.tick_params(labelsize=TICK_FS)
-
-
-def _legend_if_labeled(ax, *args, **kwargs):
-    """Add a legend only when labeled artists are present."""
-    handles, labels = ax.get_legend_handles_labels()
-    if handles and labels:
-        ax.legend(*args, **kwargs)
 
 
 def _vline(axes, t_now):
@@ -3225,7 +3420,9 @@ def profile_plot(tt, i, t, save_path=None, display=True):
             pass
     ax.set_xlabel(r'$\hat{\psi}$')
     ax.set_ylabel(r'$\chi$ [m²/s]')
-    _legend_if_labeled(ax, fontsize=9)
+    handles, _labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     ax = axes[4, 1]
@@ -3240,7 +3437,9 @@ def profile_plot(tt, i, t, save_path=None, display=True):
             pass
     ax.set_xlabel(r'$\hat{\psi}$')
     ax.set_ylabel(r'$\chi$ [m²/s]')
-    _legend_if_labeled(ax, fontsize=8, ncol=2)
+    handles, _labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(fontsize=8, ncol=2)
     ax.grid(True, alpha=0.3)
 
     ax = axes[4, 2]
@@ -3253,7 +3452,9 @@ def profile_plot(tt, i, t, save_path=None, display=True):
             pass
     ax.set_xlabel(r'$\hat{\psi}$')
     ax.set_ylabel(r'$\chi$ [m²/s]')
-    _legend_if_labeled(ax, fontsize=9)
+    handles, _labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     # Row 5: Diffusivity profiles
@@ -3266,7 +3467,9 @@ def profile_plot(tt, i, t, save_path=None, display=True):
         pass
     ax.set_xlabel(r'$\hat{\psi}$')
     ax.set_ylabel(r'$D$ [m²/s]')
-    _legend_if_labeled(ax, fontsize=9)
+    handles, _labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     ax = axes[5, 1]
@@ -3279,7 +3482,9 @@ def profile_plot(tt, i, t, save_path=None, display=True):
             pass
     ax.set_xlabel(r'$\hat{\psi}$')
     ax.set_ylabel(r'$D$ [m²/s]')
-    _legend_if_labeled(ax, fontsize=9)
+    handles, _labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     ax = axes[5, 2]
@@ -3291,7 +3496,9 @@ def profile_plot(tt, i, t, save_path=None, display=True):
         pass
     ax.set_xlabel(r'$\hat{\psi}$')
     ax.set_ylabel(r'$D$ [m²/s]')
-    _legend_if_labeled(ax, fontsize=9)
+    handles, _labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -4282,7 +4489,9 @@ def _render_equil_frames(tt, loop, equil_dir):
         if sp is not None and len(sp) > 0:
             ax.plot(sp[:, 0], sp[:, 1], 'g^', markersize=10, markeredgewidth=2, label='Strike point targets')
         ax.set_aspect('equal')
-        ax.legend(loc='upper right', fontsize=12)
+        handles, _labels = ax.get_legend_handles_labels()
+        if handles:
+            ax.legend(loc='upper right', fontsize=12)
         ax.tick_params(labelsize=11)
         if cb is not None:
             cb.ax.tick_params(labelsize=11)
@@ -4390,7 +4599,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
     ax = axes[1]
     ax.plot(times, s['vloop_tx'], color=COLOR_TX, ls=LS_PRI, lw=LW, label='Vloop TX')
     ax.set_ylabel('V_loop [V]', fontsize=LABEL_FS)
-    _legend_if_labeled(ax, fontsize=LEGEND_FS, loc='upper left')
+    ax.legend(fontsize=LEGEND_FS, loc='upper left')
     _style(ax)
     ax2 = ax.twinx()
     if s.get('l_i_tm', None) is not None:
@@ -4399,7 +4608,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
         ax2.plot(times, s['l_i_tx'], color=COLOR_TX, ls=LS_SEC, lw=LW, label='l_i TX')
     ax2.set_ylabel('l_i', fontsize=LABEL_FS)
     ax2.tick_params(labelsize=TICK_FS)
-    _legend_if_labeled(ax2, fontsize=LEGEND_FS, loc='upper right')
+    ax2.legend(fontsize=LEGEND_FS, loc='upper right')
 
     ax = axes[2]
     pkeys = [
@@ -4424,7 +4633,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
         ax2.plot(t_Q, y_Q, color='indigo', ls=LS_SEC, lw=LW, label='Q')
     ax2.set_ylabel('Q', fontsize=LABEL_FS)
     ax2.tick_params(labelsize=TICK_FS)
-    _legend_if_labeled(ax2, fontsize=LEGEND_FS, loc='upper right')
+    ax2.legend(fontsize=LEGEND_FS, loc='upper right')
 
     ax = axes[3]
     ax.plot(times, s['psi_axis_tm'], color=COLOR_TM, ls=LS_PRI, lw=LW, marker=MK_TM, ms=MK_SZ, label='\u03c8_axis TM')
@@ -4434,13 +4643,13 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
     ax.plot(times, s['psi_lcfs_tx'], color=COLOR_TX, ls=LS_SEC, lw=LW, label='\u03c8_lcfs TX')
     ax.tick_params(labelsize=TICK_FS)
     _style(ax)
-    _legend_if_labeled(ax, fontsize=LEGEND_FS, loc='upper left')
+    ax.legend(fontsize=LEGEND_FS, loc='upper left')
     ax2 = ax.twinx()
     ax2.plot(times, flux_con_tm, color='darkorange', ls='-.', lw=LW, marker=MK_TM, ms=MK_SZ, label='Flux TM')
     ax2.plot(times, flux_con_tx, color='seagreen', ls='-.', lw=LW, label='Flux TX')
     ax2.set_ylabel('Flux Consumed [Wb]', fontsize=LABEL_FS)
     ax2.tick_params(labelsize=TICK_FS)
-    _legend_if_labeled(ax2, fontsize=LEGEND_FS, loc='upper right')
+    ax2.legend(fontsize=LEGEND_FS, loc='upper right')
 
     coil_data = tt._results.get('COIL', {})
     cs_coils = []
@@ -4460,7 +4669,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
             n_turns = _coil_net_turns(tt, cname)
             ci_vals = [cvals[t_v] * n_turns * 1e-6 for t_v in ct]
             ax.plot(ct, ci_vals, ls=LS_PRI, lw=LW * 0.8, color=cs_colors[ci], label=cname)
-        _legend_if_labeled(ax, fontsize=LEGEND_FS - 2, loc='upper left', ncol=2)
+        ax.legend(fontsize=LEGEND_FS - 2, loc='upper left', ncol=2)
     else:
         ax.text(0.5, 0.5, 'No CS coils', transform=ax.transAxes,
                 ha='center', va='center', fontsize=LABEL_FS)
@@ -4475,7 +4684,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
             n_turns = _coil_net_turns(tt, cname)
             ci_vals = [cvals[t_v] * n_turns * 1e-6 for t_v in ct]
             ax.plot(ct, ci_vals, ls=LS_PRI, lw=LW * 0.75, color=oth_colors[ci], label=cname)
-        _legend_if_labeled(ax, fontsize=LEGEND_FS - 3, loc='upper left', ncol=2)
+        ax.legend(fontsize=LEGEND_FS - 3, loc='upper left', ncol=2)
     else:
         ax.text(0.5, 0.5, 'No PF/other coils', transform=ax.transAxes,
                 ha='center', va='center', fontsize=LABEL_FS)
