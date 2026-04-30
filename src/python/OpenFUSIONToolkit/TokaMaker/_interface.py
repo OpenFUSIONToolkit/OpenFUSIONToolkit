@@ -89,7 +89,7 @@ tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve,
 tokamaker_setup_td = ctypes_subroutine(oftpy_lib.tokamaker_setup_td,
     [c_void_p, c_double, c_double, c_double, c_bool, c_char_p])
 
-# tokamaker_eig_td(tMaker_ptr,omega,neigs,eigs,eig_vecs,include_bounds,eta_plasma,pm,error_str)
+# tokamaker_eig_td(tMaker_equil_ptr,omega,neigs,eigs,eig_vecs,include_bounds,eta_plasma,pm,error_str)
 tokamaker_eig_td = ctypes_subroutine(oftpy_lib.tokamaker_eig_td,
     [c_void_p, c_double, c_int, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_bool, c_double, c_bool, c_char_p])
 

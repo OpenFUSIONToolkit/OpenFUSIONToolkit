@@ -1731,10 +1731,17 @@ class TokaMaker():
     def eig_wall(self,neigs=4,pm=False):
         r'''! Compute eigenvalues (\f$ 1 / \tau_{L/R} \f$) for conducting structures
 
+        @deprecated Use `compute_wall_modes` method instead.
+
         @param neigs Number of eigenvalues to compute
         @param pm Print solver statistics and raw eigenvalues?
-        @result eigenvalues[neigs], eigenvectors[neigs,:]
+        @result eigenvalues[neigs,2], eigenvectors[neigs,self.np]
         '''
+        warn(
+            "`eig_wall()` is deprecated, use `compute_wall_modes()` instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
         eig_vals = numpy.zeros((neigs,2),dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.np),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
@@ -1742,25 +1749,66 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
         return eig_vals, eig_vecs
+    
+    def compute_wall_modes(self,nmodes=4,pm=False):
+        r'''! Compute wall current modes for conducting structures
+
+        @param nmodes Number of modes to compute
+        @param pm Print solver statistics and raw eigenvalues?
+        @result \f$ \Tau_{L/R} \f$ [nmodes], eigenvectors [nmodes,self.np]
+        '''
+        eig_vals = numpy.zeros((nmodes,2),dtype=numpy.float64)
+        eig_vecs = numpy.zeros((nmodes,self.np),dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_eig_wall(self._tMaker_ptr,c_int(nmodes),eig_vals,eig_vecs,pm,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        return 1.0/eig_vals[:,0], eig_vecs
 
     def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False,damping_scale=-1.0):
         '''! Compute eigenvalues for the linearized time-dependent system
+
+        @deprecated Use `compute_linear_stability` method instead.
 
         @param omega Growth rate localization point (eigenvalues closest to this value will be found)
         @param neigs Number of eigenvalues to compute
         @param include_bounds Include bounding flux terms for constant normalized profiles?
         @param pm Print solver statistics and raw eigenvalues?
         @param damping_scale Scale factor for damping term to artificially limit growth rate (negative to disable)?
-        @result eigenvalues[neigs], eigenvectors[neigs,:]
+        @result eigenvalues[neigs,2], eigenvectors[neigs,self.np]
         '''
+        warn(
+            "`eig_td()` is deprecated, use `compute_linear_stability()` with standard sign convention instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        if omega > 0.0:
+            raise ValueError("Omega should be negative to search for unstable modes (negative eigenvalues; positive growth rates)")
         eig_vals = numpy.zeros((neigs,2),dtype=numpy.float64)
         eig_vecs = numpy.zeros((neigs,self.np),dtype=numpy.float64)
         damp_coeff = abs(omega)*damping_scale
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_eig_td(self._tMaker_ptr,c_double(omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),c_double(damp_coeff),pm,error_string)
+        tokamaker_eig_td(self._tMaker_equil.c_ptr,c_double(-omega),c_int(neigs),eig_vals,eig_vecs,c_bool(include_bounds),c_double(damp_coeff),pm,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        eig_vals[:,0] *= -1.0
         return eig_vals, eig_vecs
+    
+    def compute_linear_stability(self,omega=1.E4,nmodes=4,include_bounds=True,pm=False,damping_scale=-1.0):
+        r'''! Compute a part of the stability spectrum for the linearized time-dependent system
+
+        @param omega Growth rate localization point (growth rates closest to this value will be found)
+        @param nmodes Number of modes to compute
+        @param include_bounds Include bounding flux terms for constant normalized profiles?
+        @param pm Print solver statistics and raw eigenvalues?
+        @param damping_scale Scale factor for damping term to artificially limit growth rate (negative to disable)?
+        @result \f$ \gamma \f$ [nmodes], eigenvectors [nmodes,self.np]
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.compute_linear_stability(omega,nmodes,include_bounds,pm,damping_scale)
 
     def setup_td(self,dt,lin_tol,nl_tol,pre_plasma=False):
         '''! Setup the time-dependent G-S solver
@@ -2659,6 +2707,27 @@ class TokaMaker_equilibrium():
         if error_string.value != b'':
             raise Exception(error_string.value)
         return result.value
+    
+    def compute_linear_stability(self,omega=1.E4,nmodes=4,include_bounds=True,pm=False,damping_scale=-1.0):
+        r'''! Compute a part of the stability spectrum for the linearized time-dependent system
+
+        @param omega Growth rate localization point (growth rates closest to this value will be found)
+        @param nmodes Number of modes to compute
+        @param include_bounds Include bounding flux terms for constant normalized profiles?
+        @param pm Print solver statistics and raw eigenvalues?
+        @param damping_scale Scale factor for damping term to artificially limit growth rate (negative to disable)?
+        @result \f$ \gamma \f$ [nmodes], eigenvectors [nmodes,self._tMaker.np]
+        '''
+        if omega < 0.0:
+            raise ValueError("Omega should be positive to search for unstable modes (positive growth rates)")
+        eig_vals = numpy.zeros((nmodes,2),dtype=numpy.float64)
+        eig_vecs = numpy.zeros((nmodes,self._tMaker.np),dtype=numpy.float64)
+        damp_coeff = abs(omega)*damping_scale
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_eig_td(self._equil_ptr,c_double(omega),c_int(nmodes),eig_vals,eig_vecs,c_bool(include_bounds),c_double(damp_coeff),pm,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        return eig_vals[:,0], eig_vecs
 
     def save_eqdsk(self,filename,nr=65,nz=65,rbounds=None,zbounds=None,run_info='',lcfs_pad=0.01,rcentr=None,truncate_eq=True,limiter_file='',lcfs_pressure=0.0, cocos=7):
         r'''! Save current equilibrium to gEQDSK format
