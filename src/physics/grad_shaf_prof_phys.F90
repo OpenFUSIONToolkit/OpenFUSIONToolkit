@@ -54,6 +54,7 @@ end type mercier_flux_func
 type, extends(linterp_flux_func) :: jphi_flux_func
   integer(4) :: ngeom = 50 !< Number of points in psi for <R>, <1/R> evaluation
   real(8) :: j0 = 0.d0 !< LCFS Jphi value
+  real(8) :: norm_last = 1.d0 !< Last Jphi normalization factor (for Ip target)
   real(8), pointer, dimension(:) :: jphi => NULL() !< Jphi(psi) profile values
 contains
   !> Needs docs
@@ -438,14 +439,25 @@ R_spline%fs(0:self%ngeom-2,2)=ravgs(1:self%ngeom-1,2); R_spline%fs(self%ngeom-1,
 CALL spline_fit(R_spline,"extrap")
 DEALLOCATE(ravgs,psi_q,qtmp)
 !---Update jphi normalization to match Ip target
-ALLOCATE(qtmp(self%npsi))
-DO i=1,self%npsi
-  CALL spline_eval(R_spline,self%x(i),0)
-  qtmp(i) = R_spline%f(1)*R_spline%f(2)
-END DO
-CALL gs_flux_int(gseq,self%x,self%jphi/qtmp,self%npsi,jphi_norm)
-jphi_norm=ABS(gseq%Itor_target)/jphi_norm
-DEALLOCATE(qtmp)
+IF(gseq%Itor_target>0.d0)THEN
+  ALLOCATE(qtmp(self%npsi))
+  DO i=1,self%npsi
+    CALL spline_eval(R_spline,self%x(i),0)
+    qtmp(i) = R_spline%f(1)*R_spline%f(2)
+  END DO
+  CALL gs_flux_int(gseq,self%x,self%jphi/qtmp,self%npsi,jphi_norm)
+  DEALLOCATE(qtmp)
+  jphi_norm=ABS(gseq%Itor_target)/jphi_norm
+  self%norm_last=jphi_norm
+  ! WRITE(*,*)'Ip flux: ',jphi_norm
+ELSE
+  CALL gs_itor_nl(gseq,jphi_norm)
+  jphi_norm=(ABS(gseq%Itor_target)*mu0/jphi_norm + self%norm_last)/2.d0
+  self%norm_last=jphi_norm
+  ! WRITE(*,*)'Ip NL: ',jphi_norm
+END IF
+! jphi_norm=ABS(gseq%Itor_target)/jphi_norm
+! WRITE(*,*)'Ip flux: ',jphi_norm
 !---Get pressure profile
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__) !CALL gseq%P_ani%update(gseq)
