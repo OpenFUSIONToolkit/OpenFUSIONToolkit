@@ -2817,11 +2817,8 @@ class TokTox:
         logging.info(f"File logging configured. All logs will be written to {self._log_file}")
 
     # =========================================================================
-    #  fly — main simulation loop
+    #  fly — run simulation loop
     # =========================================================================
-
-
-    # ─── Main Simulation Loop ───────────────────────────────────────────────────
 
     def fly(self, run_name='tmp', convergence_threshold=-1.0, max_loop=3,
             output_mode=False, skip_bad_init_eqdsks=False,
@@ -2890,19 +2887,12 @@ class TokTox:
         self._loop0_tx_face_points = int(DEFAULT_LOOP0_TX_FACE_POINTS)
 
         # Disable JAX's persistent XLA compilation cache before any TORAX/JAX JIT
-        # compilation occurs.  Since JAX 0.4.x the cache stores serialized XLA
-        # executables keyed by a hash that does NOT include the XLA/JAX version.
-        # After a JAX upgrade the old entries are loaded anyway (triggering the
-        # "Assume version compatibility. PjRt-IFRT does not track XLA executable
-        # versions" warnings) and can produce silently wrong numerical results or
-        # semaphore leaks.  Disabling the persistent cache here means JAX still
-        # JIT-compiles in memory for the duration of the session (fast after the
-        # first call) but never reads or writes stale on-disk entries.
+        # compilation occurs, was causing semaphore leaks.
         try:
             import jax
             jax.config.update('jax_enable_compilation_cache', False)
         except Exception:
-            pass  # non-fatal: older JAX versions may not have this config key
+            pass  # older JAX versions may not have this config key
 
         if output_mode is True:
             output_mode = 'normal'
@@ -3029,8 +3019,8 @@ class TokTox:
 
             self._current_loop = 0 if self._fly_loop0 else 1
 
-            # ── Main coupling loop ──
-            # Counted coupling indices: 1 … max_loop (inclusive). Index 0 does not count toward max_loop.
+            # ── Main loop ──
+            # Counted loop indices: 1 … max_loop (inclusive). Index 0 does not count toward max_loop.
             while err > convergence_threshold:
                 if not (self._fly_loop0 and self._current_loop == 0):
                     if self._current_loop > max_loop:
@@ -3857,7 +3847,7 @@ def plot_profile_evolution(tt, save_path=None, display=True, one_plot=False):
         t_min, t_max = phase_times[0], phase_times[-1]
         norm = Normalize(vmin=t_min, vmax=t_max if t_max > t_min else t_min + 1e-9)
 
-        fig, axes = plt.subplots(2, 4, figsize=(18, 10))
+        fig, axes = plt.subplots(2, 5, figsize=(22.5, 10))
         if one_plot:
             fig.suptitle(f'Profile Evolution Over Time (loop {tt._current_loop})', fontsize=14)
         else:
@@ -3913,6 +3903,38 @@ def plot_profile_evolution(tt, save_path=None, display=True, one_plot=False):
             if i_t in s.get('psi_tx', {}):
                 color = cmap(norm(times[i_t]))
                 ax.plot(s['psi_tx'][i_t]['x'], s['psi_tx'][i_t]['y'], color=color, linewidth=1.5, alpha=0.8)
+        ax.set_xlim([0, 1])
+
+        ax = axes[0, 4]
+        ax.set_title(r'$j_{\mathrm{tot}}$')
+        ax.set_xlabel(r'$\hat{\psi}$')
+        ax.set_ylabel(r'$j_{\mathrm{tot}}$ [MA/m$^2$]')
+        for i_t in indices:
+            if i_t in s.get('j_tot', {}):
+                color = cmap(norm(times[i_t]))
+                ax.plot(
+                    s['j_tot'][i_t]['x'],
+                    s['j_tot'][i_t]['y'] / 1e6,
+                    color=color,
+                    linewidth=1.5,
+                    alpha=0.8,
+                )
+        ax.set_xlim([0, 1])
+
+        ax = axes[1, 4]
+        ax.set_title(r'$j_{\mathrm{NI}}$')
+        ax.set_xlabel(r'$\hat{\psi}$')
+        ax.set_ylabel(r'$j_{\mathrm{NI}}$ [MA/m$^2$]')
+        for i_t in indices:
+            if i_t in s.get('j_ni', {}):
+                color = cmap(norm(times[i_t]))
+                ax.plot(
+                    s['j_ni'][i_t]['x'],
+                    s['j_ni'][i_t]['y'] / 1e6,
+                    color=color,
+                    linewidth=1.5,
+                    alpha=0.8,
+                )
         ax.set_xlim([0, 1])
 
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
