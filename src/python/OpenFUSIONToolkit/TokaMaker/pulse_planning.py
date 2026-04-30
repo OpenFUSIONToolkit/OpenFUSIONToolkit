@@ -529,8 +529,13 @@ class TokTox:
         self._Zeff = None
 
         self._nbi_heating = None
+        self._generic_heat = None
+        self._generic_heat_loc = None
+        self._generic_heat_width = None
+        self._use_nbi_current = False
         self._ecrh_heating = None
         self._ecrh_loc = None
+        self._ecrh_width = None
         self._nbi_loc = None
         self._ohmic_power = None
         self._nbar = None
