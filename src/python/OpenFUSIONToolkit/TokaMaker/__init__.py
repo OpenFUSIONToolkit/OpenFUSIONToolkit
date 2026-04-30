@@ -10,5 +10,6 @@
 @ingroup doxy_oft_python
 '''
 from ._core import TokaMaker, tokamaker_default_settings
+from .pulse_planning import TokTox
 
-__all__ = ["TokaMaker", "tokamaker_default_settings"]
+__all__ = ["TokaMaker", "tokamaker_default_settings", "TokTox"]

@@ -7,6 +7,8 @@ This folder contains examples of simple pulse design notebooks created in TokaMa
 ### Jupyter Notebooks
 - **CUTE_pulse_ex.ipynb**  
   Shows a simple pulse design framework for the CUTE machine.
+- **ITER_TokaMakerTORAX/ITER_TokaMakerTORAX_pulse.ipynb**
+  Shows a complete example of a pulse using the Tokamaker + TORAX pulse planning workflow.
 
 ### Python Scripts
 - **d3d_pulse_ex.py**  
@@ -24,6 +26,7 @@ These files support workflows for:
 ## Getting Started
 ### Jupyter Notebooks
 1. Ensure you have **Python 3.9+** and common scientific packages (`numpy`, `scipy`, `matplotlib`, `h5py`, etc.).
+  a. For the ITER_TokaMakerTORAX notebook, ensure you have the python packages specific in `requirements_TokaMakerTORAX.txt`.
 2. Open the notebooks in **JupyterLab** or **VS Code**.
 3. Place all files in the same working directory so notebooks can import the libraries and load the geometry files.
 
