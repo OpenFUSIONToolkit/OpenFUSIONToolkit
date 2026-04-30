@@ -3991,9 +3991,9 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.grid(True, alpha=0.3)
     ax.legend(fontsize=8)
 
-    # (0,1): psi_lcfs and psi_axis
+    # (0,1): psi_lcfs and psi_axis (left) + flux consumption (right, shares lcfs reference)
     ax = axes[0, 1]
-    ax.set_title(r'$\psi_{lcfs}$ & $\psi_{axis}$ (TM & TX)')
+    ax.set_title(r'$\psi_{lcfs}$ & $\psi_{axis}$; flux consumption')
     t_psi_lcfs, y_psi_lcfs = _tx_profile_at_rho(tt, 'psi', 1.0, scale=-1.0/(2.0*np.pi)) # TODO: just pull from state
     t_psi_axis, y_psi_axis = _tx_profile_at_rho(tt, 'psi', 0.0, scale=-1.0/(2.0*np.pi))
     ax.plot(times, s['psi_lcfs_tm'], color=COLOR_TM, ls='-', marker='o', ms=MK_SZ, lw=1, label=r'$\psi_{lcfs}$ TM')
@@ -4004,8 +4004,27 @@ def plot_scalars(tt, save_path=None, display=True):
         ax.plot(t_psi_axis, y_psi_axis, color=COLOR_TX, ls='--', lw=1, label=r'$\psi_{axis}$ TX')
     ax.set_xlabel('Time [s]')
     ax.set_ylabel(r'$\psi$ [Wb/rad]')
-    ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
+    ax2_psi = ax.twinx()
+    psi_lcfs_tm_arr = np.array(s['psi_lcfs_tm'])
+    ax2_psi.plot(
+        times,
+        -(psi_lcfs_tm_arr - psi_lcfs_tm_arr[0]) * 2 * np.pi,
+        color='darkorange',
+        ls='-.',
+        marker='o',
+        ms=MK_SZ,
+        lw=1,
+        label='Flux TM',
+    )
+    if t_psi_lcfs is not None:
+        flux_tx = -(y_psi_lcfs - y_psi_lcfs[0]) * 2 * np.pi
+        ax2_psi.plot(t_psi_lcfs, flux_tx, color='seagreen', ls='-.', lw=1, label='Flux TX')
+    ax2_psi.set_ylabel('Flux consumption [Wb]')
+    ax2_psi.tick_params(axis='y')
+    h1, l1 = ax.get_legend_handles_labels()
+    h2, l2 = ax2_psi.get_legend_handles_labels()
+    ax.legend(h1 + h2, l1 + l2, fontsize=7, loc='upper left', ncol=2)
 
     # (0,2): V_loop
     ax = axes[0, 2]
@@ -4159,18 +4178,25 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # (3,2): Flux consumption
+    # (3,2): tau_E (TORAX scalar) and H98 = H98(y,2) vs ITER98y2 (TORAX post_processing)
     ax = axes[3, 2]
-    ax.set_title('Flux Consumption [Wb]')
-    psi_lcfs_tm_arr = np.array(s['psi_lcfs_tm'])
-    ax.plot(times, -(psi_lcfs_tm_arr - psi_lcfs_tm_arr[0]) * 2 * np.pi, color=COLOR_TM, ls='-', marker='o', ms=MK_SZ, lw=1, label='Flux TM')
-    if t_psi_lcfs is not None:
-        flux_tx = -(y_psi_lcfs - y_psi_lcfs[0]) * 2 * np.pi
-        ax.plot(t_psi_lcfs, flux_tx, color=COLOR_TX, ls='-', lw=1, label='Flux TX')
+    ax.set_title(r'$\tau_E$ & $H_{98(y,2)}$ (TX)')
+    t_tau, y_tau = _tx_scalar(tt, 'tau_E')
+    t_h98, y_h98 = _tx_scalar(tt, 'H98')
+    if t_tau is not None:
+        ax.plot(t_tau, y_tau, color=COLOR_TX, ls='-', lw=1, label=r'$\tau_E$')
     ax.set_xlabel('Time [s]')
-    ax.set_ylabel('Flux Consumption [Wb]')
-    ax.legend(fontsize=8)
+    ax.set_ylabel(r'$\tau_E$ [s]')
     ax.grid(True, alpha=0.3)
+    ax2_te = ax.twinx()
+    if t_h98 is not None:
+        ax2_te.plot(t_h98, y_h98, color='crimson', ls='--', lw=1, label=r'$H_{98(y,2)}$')
+    ax2_te.set_ylabel(r'$H_{98(y,2)}$')
+    ax2_te.tick_params(axis='y')
+    h1, l1 = ax.get_legend_handles_labels()
+    h2, l2 = ax2_te.get_legend_handles_labels()
+    if h1 or h2:
+        ax.legend(h1 + h2, l1 + l2, fontsize=8, loc='upper left')
 
     plt.suptitle('Scalars', fontsize=14)
     plt.tight_layout()
