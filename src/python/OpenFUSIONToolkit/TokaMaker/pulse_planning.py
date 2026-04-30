@@ -380,6 +380,11 @@ class TokTox:
         # ── Warm-start psi: persists across loops ────────────────────────────────
         self._psi_warm_start = {}  # {i: psi_array}
 
+        # ── Steady-state mode ────────────────────────────────────────────
+        self._steady_state_mode = False
+        self._steady_state_tx_seed = None
+        self._steady_state_tm_psi_seed = None
+
         self._results['q'] = {}
         self._results['n_e'] = {}
         self._results['T_e'] = {}
@@ -1626,11 +1631,14 @@ class TokTox:
            forced at t_initial (ψ from initial TORAX relax on seed); if ``relax=True``,
            loop N relax keeps ψ on the TM ``i=0`` surface so TM EQDSK is used.
         4. Override t_initial / t_final / fixed_dt from __init__ params.
-        5. Use psi profile from initial TORAX relax (if available) from profile_conditions.
+        5. Use ψ profile from initial TORAX relax (if available) from profile_conditions.
         6. Apply any explicit set_*() overrides (only when the attribute is
            not None, i.e. the user called the setter after load_config).
         7. If ``relax_kinetics`` was True for the last relax, override n_e, T_e, T_i
            with profiles taken from the end of that relax simulation.
+        8. If ``fly(..., steady_state_mode=True)`` and this is not the first loop,
+           override ψ and kinetic profiles with profiles saved from the previous main TORAX run at
+           ``t_final`` (see ``_capture_steady_state_tx_seed``).
 
         @return Torax config object.
         '''
@@ -1674,13 +1682,34 @@ class TokTox:
             # except t=0 which always gets a seed fallback (see below).
             full_eqdsk_map = {}
             n_tm = 0
-            for i, t in enumerate(self._tm_times):
-                eqdsk = os.path.join(self._eqdsk_dir, f'{self._current_loop - 1:03d}.{i:03d}.eqdsk')
-                # TM stage already saved and validated each EQDSK with TORAX (_run_tm).
-                tm_ok = eqdsk not in self._eqdsk_skip and os.path.isfile(eqdsk)
-                if tm_ok:
-                    full_eqdsk_map[t] = eqdsk
-                    n_tm += 1
+            if self._steady_state_mode:
+                i_last = len(self._tm_times) - 1
+                eq_last = os.path.join(self._eqdsk_dir, f'{self._current_loop - 1:03d}.{i_last:03d}.eqdsk')
+                tm_last_ok = eq_last not in self._eqdsk_skip and os.path.isfile(eq_last)
+                if tm_last_ok:
+                    for t in self._tm_times:
+                        full_eqdsk_map[t] = eq_last
+                    n_tm = len(self._tm_times)
+                    self._log(
+                        f'Loop {self._current_loop}: steady_state_mode geometry — all TX times use '
+                        f'final TM EQDSK from loop {self._current_loop - 1}: {os.path.basename(eq_last)}.'
+                    )
+                else:
+                    self._log(
+                        f'Loop {self._current_loop}: steady_state_mode: final TM EQDSK missing or skipped '
+                        f'({os.path.basename(eq_last)}); falling back to per-time TM map.'
+                    )
+
+            if not self._steady_state_mode or n_tm == 0:
+                full_eqdsk_map = {}
+                n_tm = 0
+                for i, t in enumerate(self._tm_times):
+                    eqdsk = os.path.join(self._eqdsk_dir, f'{self._current_loop - 1:03d}.{i:03d}.eqdsk')
+                    # TM stage already saved and validated each EQDSK with TORAX (_run_tm).
+                    tm_ok = eqdsk not in self._eqdsk_skip and os.path.isfile(eqdsk)
+                    if tm_ok:
+                        full_eqdsk_map[t] = eqdsk
+                        n_tm += 1
             # If i=0 TM failed, always fall back to the seed EQDSK so TORAX
             # has a valid initial geometry. Other failed timesteps are left out of the
             # map and TORAX interpolates from neighboring solved entries.
@@ -1697,7 +1726,10 @@ class TokTox:
             # the TM EQDSK at t_init without a loop N re-relax, the metric changes
             # and j becomes inconsistent.  When ``relax=False``, force seed at t_init.
             # When ``relax=True``, loop N relax aligns ψ with TM ``i=0`` — keep TM.
-            if self._psi_init is not None and not getattr(self, '_inter_loop_relax', False):
+            # steady_state_mode uses the final TM EQDSK everywhere and seeds ψ from the
+            # previous TORAX t_final; do not replace t_init with the seed file.
+            if (self._psi_init is not None and not self._relax
+                    and not self._steady_state_mode):
                 seed_eqdsk_tinit = self._init_files[0]
                 if self._test_eqdsk(seed_eqdsk_tinit):
                     full_eqdsk_map[self._t_init] = seed_eqdsk_tinit
@@ -1747,6 +1779,22 @@ class TokTox:
             myconfig['profile_conditions']['T_e'] = self._T_e_init
         if self._T_i_init is not None:
             myconfig['profile_conditions']['T_i'] = self._T_i_init
+
+        # ── 8. Steady-state coupling: previous loop TORAX t_final → IC for this loop ──
+        if (self._steady_state_mode
+                and not self._coupling_iteration_is_first()
+                and self._steady_state_tx_seed):
+            seed = self._steady_state_tx_seed
+            pc = myconfig['profile_conditions']
+            for k in ('psi', 'n_e', 'T_e', 'T_i'):
+                if k in seed and seed[k] is not None:
+                    pc[k] = copy.deepcopy(seed[k])
+            pc['initial_psi_mode'] = 'profile_conditions'
+            pc['initial_psi_from_j'] = False
+            self._log(
+                f'Loop {self._current_loop}: steady_state_mode: TORAX initial profiles from '
+                f'previous loop t_final={self._t_final:g} s.'
+            )
 
         if self._output_mode in ('normal', 'debug') and self._out_dir is not None:
             cfg_name = f'tx_config_loop{self._current_loop:03d}.py'
@@ -1806,6 +1854,22 @@ class TokTox:
             _arr = _xr.to_numpy()
             snap[_name] = ([self._t_init], _rho.tolist(), [_arr.tolist()])
         self._relax_profiles_snapshot = snap
+
+    def _capture_steady_state_tx_seed(self, data_tree):
+        r'''! Store ψ, n_e, T_e, T_i at ``t_final`` for ``steady_state_mode`` next coupling loop.
+
+        Profile tuples use ``t_init`` as the time key (TORAX ``profile_conditions`` convention),
+        matching ``_psi_init`` / relax snapshots.
+        '''
+        t_fin = float(self._t_final)
+        _sel = dict(time=t_fin, method='nearest')
+        seed = {}
+        for _name in ('psi', 'n_e', 'T_e', 'T_i'):
+            _xr = getattr(data_tree.profiles, _name).sel(**_sel)
+            _rho = _xr.coords['rho_norm'].to_numpy()
+            _arr = _xr.to_numpy()
+            seed[_name] = ([self._t_init], _rho.tolist(), [_arr.tolist()])
+        self._steady_state_tx_seed = seed
 
     def _run_tx_relax(self, *, stage, eqdsk_path, prescribed_profiles):
         r'''! Short TORAX relax: initial run on the seed EQDSK, or inter-loop on TM ``i=0`` EQDSK.
@@ -1957,17 +2021,18 @@ class TokTox:
         @return Tuple (consumed_flux, consumed_flux_integral).
         '''
 
-        if (self._current_loop >= 1 and getattr(self, '_inter_loop_relax', False)
+        if (self._current_loop >= 1 and self._relax
                 and not self._coupling_iteration_is_first()):
             prev_lp = self._current_loop - 1
-            tm_eq0 = os.path.join(self._eqdsk_dir, f'{prev_lp:03d}.000.eqdsk')
+            i_eq = (len(self._tm_times) - 1) if self._steady_state_mode else 0
+            tm_eq0 = os.path.join(self._eqdsk_dir, f'{prev_lp:03d}.{i_eq:03d}.eqdsk')
             relax_eq = tm_eq0
             if tm_eq0 in self._eqdsk_skip or not os.path.isfile(tm_eq0):
                 seed_eqdsk = self._init_files[0]
                 if self._test_eqdsk(seed_eqdsk):
                     relax_eq = seed_eqdsk
                     self._log(
-                        f'Loop {self._current_loop}: inter-loop relax: TM i=0 EQDSK from loop {prev_lp} '
+                        f'Loop {self._current_loop}: inter-loop relax: TM EQDSK (t_idx={i_eq}) from loop {prev_lp} '
                         f'unavailable ({os.path.basename(tm_eq0)}), using seed EQDSK.'
                     )
                 else:
@@ -2022,6 +2087,11 @@ class TokTox:
             consumed_flux_integral = np.trapezoid(v_loops[0:], self._tm_times[0:])
             self._log(f"Loop {self._current_loop} TORAX: cflux={consumed_flux:.4f} Wb")
             self._print(f'  TORAX: done (cflux={consumed_flux:.4f} Wb)')
+            if self._steady_state_mode:
+                try:
+                    self._capture_steady_state_tx_seed(data_tree)
+                except Exception as _e:
+                    self._log(f'steady_state_mode: could not capture t_final profiles for next loop: {_e}')
             return consumed_flux, consumed_flux_integral
 
     def _tx_update(self, i, data_tree):
@@ -2243,6 +2313,11 @@ class TokTox:
 
         # ── Per-loop initialization (before timestep sweep) ──────────────────
         self._state['psi_grid_prev_tm'] = {}
+
+        if (self._steady_state_mode
+                and not self._coupling_iteration_is_first()
+                and self._steady_state_tm_psi_seed is not None):
+            self._psi_warm_start[0] = np.asarray(self._steady_state_tm_psi_seed, dtype=float).copy()
 
         # Seed coil regularization targets
         # First coupling pass: use zero targets (None) so the solver freely finds the correct
@@ -2545,6 +2620,12 @@ class TokTox:
             except Exception as _e:
                 self._log(f'tm_loop_summary_plot failed: {_e}')
 
+        if self._steady_state_mode:
+            i_hi = len(self._tm_times) - 1
+            pg = self._state['psi_grid_prev_tm'].get(i_hi)
+            if pg is not None:
+                self._steady_state_tm_psi_seed = np.asarray(pg, dtype=float).copy()
+
         return consumed_flux, consumed_flux_integral
 
     # ── Profile level functions ──────────────────────────────────────────
@@ -2746,7 +2827,7 @@ class TokTox:
             output_mode=False, skip_bad_init_eqdsks=False,
             initial_relax=True, relax=False, relax_kinetics=False, relax_duration=0.1,
             t_ave_toggle='off', t_ave_window=0.5, t_ave_causal=True, t_ave_ignore_start=0.25,
-            loop0=False):
+            loop0=False, steady_state_mode=False):
         r'''! Run TokaMaker-TORAX coupled pulse simulation loop.
 
         @param convergence_threshold Max fractional change in consumed flux between loops for convergence.
@@ -2785,11 +2866,22 @@ class TokTox:
                the same coarse grid on the optional initial relax, and subsampled TokaMaker times
                (stride 2). If False (default), skip that pass and start coupling at index 1 at full resolution
                (initial relax is unchanged and controlled only by ``initial_relax`` / ``relax``).
+        @param steady_state_mode If False (default), each coupling loop after the first reuses the
+               time-dependent TokaMaker EQDSK sequence from the previous loop (existing behavior).
+               If True, after each completed loop the next loop seeds TORAX with ψ and kinetics from
+               the previous main run at ``t_final``, uses the final TokaMaker EQDSK from the
+               previous loop for all TORAX geometry times (flat equilibrium shape in time), warm-starts
+               TokaMaker at ``i=0`` from the previous loop's final ψ grid, and runs inter-loop relax
+               on that final EQDSK when ``relax`` is True.
         '''
         import tempfile
 
         if relax:
             initial_relax = True
+
+        self._steady_state_mode = bool(steady_state_mode)
+        self._steady_state_tx_seed = None
+        self._steady_state_tm_psi_seed = None
 
         self._fly_loop0 = bool(loop0)
         self._loop0_coarse_tx = self._fly_loop0
@@ -2829,7 +2921,7 @@ class TokTox:
         self._run_name = run_name
         self._relax_duration = float(relax_duration)
         self._relax_kinetics = bool(relax_kinetics)
-        self._inter_loop_relax = bool(relax)
+        self._relax = bool(relax)
 
         # Time-averaging settings for sawtooth smoothing
         self._t_ave_toggle = t_ave_toggle
