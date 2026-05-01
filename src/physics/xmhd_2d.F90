@@ -1233,7 +1233,7 @@ DO i=1,mesh%nc
         IF (cyl_flag) THEN
           DO k=1,3
             jac_loc(k+1,k+1)%m(jr,jc)= jac_loc(k+1,k+1)%m(jr,jc) &
-              + basis_vals(jr)*basis_vals(jc)*int_factor &
+              + basis_vals(jr)*basis_vals(jc)*int_factor*coords(1) &
               + dt_fac*basis_vals(jr)*DOT_PRODUCT(vel, basis_grads(:,jc))*int_factor*coords(1) &
               + dt_fac*nu*DOT_PRODUCT(basis_grads(:,jr), basis_grads(:,jc))*int_factor*coords(1) &
               - dt_fac*nu*basis_vals(jr)*DOT_PRODUCT(dn, basis_grads(:,jc))*int_factor*coords(1)/n
