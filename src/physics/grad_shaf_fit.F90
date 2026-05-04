@@ -196,7 +196,7 @@ LOGICAL, PRIVATE :: fit_P = .TRUE. !< Needs docs
 LOGICAL, PRIVATE :: fit_Pscale = .TRUE. !< Needs docs
 LOGICAL, PRIVATE :: fit_FFPscale = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fit_R0 = .FALSE. !< Needs docs
-LOGICAL, PRIVATE :: fit_V0 = .FALSE. !< Needs docs
+LOGICAL, PRIVATE :: fit_Z0 = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fit_coils = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fit_F0 = .FALSE. !< Needs docs
 LOGICAL, PRIVATE :: fixed_centering = .FALSE. !< Needs docs
@@ -209,7 +209,7 @@ CONTAINS
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fit_p_scale,fit_ffp_scale,fitR0,fitV0,fitCoils,fitF0,fixedCentering)
+SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fit_p_scale,fit_ffp_scale,fitR0,fitZ0,fitCoils,fitF0,fixedCentering)
 TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: inpath !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: outpath !< Needs docs
@@ -218,7 +218,7 @@ LOGICAL, OPTIONAL, INTENT(in) :: fitP !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fit_p_scale !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fit_ffp_scale !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitR0 !< Needs docs
-LOGICAL, OPTIONAL, INTENT(in) :: fitV0 !< Needs docs
+LOGICAL, OPTIONAL, INTENT(in) :: fitZ0 !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitCoils !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitF0 !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fixedCentering !< Needs docs
@@ -241,8 +241,8 @@ fit_FFPscale = .FALSE.
 IF(PRESENT(fit_ffp_scale))fit_FFPscale=fit_ffp_scale
 fit_R0 = .FALSE.
 IF(PRESENT(fitR0))fit_R0=fitR0
-fit_V0 = .FALSE.
-IF(PRESENT(fitV0))fit_V0=fitV0
+fit_Z0 = .FALSE.
+IF(PRESENT(fitZ0))fit_Z0=fitZ0
 fit_coils = .FALSE.
 IF(PRESENT(fitCoils))fit_coils=fitCoils
 fit_F0 = .FALSE.
@@ -277,7 +277,7 @@ IF(gs_active%I%ncofs>0.AND.fit_I)THEN
   ncofs = ncofs+gs_active%I%ncofs
 END IF
 IF(fit_Pscale.OR.fit_R0)ncofs = ncofs+1
-IF(fit_V0)ncofs = ncofs + 1
+IF(fit_Z0)ncofs = ncofs + 1
 IF(gs_active%P%ncofs>0.AND.fit_P)THEN
   ncofs = ncofs+gs_active%P%ncofs
 END IF
@@ -325,7 +325,7 @@ ELSE IF(gs_active%estore_target>0.d0)THEN
   cofs_scale(offset+1)=1.d0/MAX(gs_active%estore_target,1.d-2)
   offset=offset+1
 END IF
-IF(fit_V0)THEN
+IF(fit_Z0)THEN
   cofs(offset+1)=gs_active%Z0_target
   cofs_scale(offset+1)=40.d0/(gs_active%device%spatial_bounds(2,2)-gs_active%device%spatial_bounds(1,2))
   offset=offset+1
@@ -645,7 +645,7 @@ IF(iflag==1)THEN
     gs_active%estore_target=cofs(offset+1)
     offset=offset+1
   END IF
-  IF(fit_V0)THEN
+  IF(fit_Z0)THEN
     gs_active%Z0_target=cofs(offset+1)
     offset=offset+1
   END IF
@@ -759,7 +759,7 @@ IF(iflag==1)THEN
       offset = je
     END IF
     IF(fit_Pscale.OR.fit_R0.OR.(gs_active%estore_target>0.d0))offset=offset+1
-    IF(fit_V0)offset=offset+1
+    IF(fit_Z0)offset=offset+1
     IF(gs_active%P%ncofs>0.AND.fit_P)THEN
       js = offset; je = offset+gs_active%P%ncofs
       WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'P_cofs            ='
@@ -902,7 +902,7 @@ ELSE
     gs_active%estore_target=cofs(offset+1)
     offset=offset+1
   END IF
-  IF(fit_V0)THEN
+  IF(fit_Z0)THEN
     CALL reset_eq
     dx = 50.0*dxi/cofs_scale(offset+1)
     gs_active%Z0_target=cofs(offset+1) + dx

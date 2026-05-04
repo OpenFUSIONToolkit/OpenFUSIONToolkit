@@ -9,31 +9,18 @@
 @date April 2024
 @ingroup doxy_oft_python
 '''
+from warnings import warn
 from .._interface import *
 from ..util import oft_warning
 
-class tokamaker_recon_settings_struct(c_struct):
-    r'''! TokaMaker reconstruction settings structure
-
-     - `fitI` Adjust \f$ F*F' \f$ parameterization coefficients?
-     - `fitP` Adjust \f$ P' \f$ parameterization coefficients?
-     - `fit_Pscale` Adjust \f$ P' \f$ scale factor?
-     - `fit_FFPscale` Adjust \f$ F*F' \f$ scale factor?
-     - `fitR0` Utilize and adjust \f$ R_0 \f$ constraint?
-     - `fitV0` Utilize and adjust \f$ Z_0 \f$ constraint?
-     - `fitCoils` Allow adjustment of PF coil currents?
-     - `fitF0` Allow adjustment of TF coil current?
-     - `fixedCentering` Do not update centering (initial guess for NL solve) as solve progresses
-     - `pm` Show detailed progress output?
-     - `infile` File containing constraint definitions
-     - `outfile` File to write output information to
-    '''
+## @cond
+class tokamaker_recon_settings_cstruct(c_struct):
     _fields_ = [("fitI", c_bool),
                 ("fitP", c_bool),
                 ("fit_Pscale", c_bool),
                 ("fit_FFPscale", c_bool),
                 ("fitR0", c_bool),
-                ("fitV0", c_bool),
+                ("fitZ0", c_bool),
                 ("fitCoils", c_bool),
                 ("fitF0", c_bool),
                 ("fixedCentering", c_bool),
@@ -41,32 +28,9 @@ class tokamaker_recon_settings_struct(c_struct):
                 ("infile", ctypes.c_char_p),
                 ("outfile", ctypes.c_char_p)]
 
-
-def tokamaker_recon_default_settings(oft_env):
-    '''! Initialize reconstruction settings object with default values
-
-    @param oft_env OFT runtime environment 
-    @result tokamaker_recon_settings_struct object
-    '''
-    settings = tokamaker_recon_settings_struct()
-    settings.fitI = False
-    settings.fitP = False
-    settings.fit_Pscale = True
-    settings.fit_FFPscale = True
-    settings.fitR0 = False
-    settings.fitV0 = False
-    settings.fitCoils = False
-    settings.fitF0 = False
-    settings.fixedCentering = False
-    settings.pm = False
-    settings.infile = oft_env.path2c('fit.in')
-    settings.outfile = oft_env.path2c('fit.out')
-    return settings
-
-## @cond
 # tokamaker_recon_run(tMaker_ptr,vacuum,settings,error_flag)
 tokamaker_recon_run = ctypes_subroutine(oftpy_lib.tokamaker_recon_run,
-    [c_void_p, c_bool, ctypes.POINTER(tokamaker_recon_settings_struct), c_int_ptr])
+    [c_void_p, c_bool, tokamaker_recon_settings_cstruct, c_int_ptr])
 ## @endcond
 
 Mirnov_con_id = 1
@@ -349,6 +313,78 @@ con_map = {
 }
 
 
+class tokamaker_recon_settings:
+    r'''! TokaMaker reconstruction settings class'''
+    def __init__(self):
+        ## Adjust \f$ F*F' \f$ parameterization coefficients?
+        self.fitI = False
+        ## Adjust \f$ P' \f$ parameterization coefficients?
+        self.fitP = False
+        ## Adjust \f$ P' \f$ scale factor?
+        self.fit_Pscale = True
+        ## Adjust \f$ F*F' \f$ scale factor?
+        self.fit_FFPscale = True
+        ## Utilize and adjust \f$ R_0 \f$ constraint?
+        self.fitR0 = False
+        ## Utilize and adjust \f$ Z_0 \f$ constraint?
+        self.fitZ0 = False
+        ## Allow adjustment of PF coil currents?
+        self.fitCoils = False
+        ## Allow adjustment of TF coil current?
+        self.fitF0 = False
+        ## Do not update centering (initial guess for NL solve) as solve progresses
+        self.fixedCentering = False
+        ## Show detailed progress output?
+        self.pm = False
+        ## File containing constraint definitions
+        self.infile = 'fit.in'
+        ## File to write output information to
+        self.outfile = 'fit.out'
+        # Must be added last
+        self._initialized = True
+
+    def __setattr__(self, name, value):
+        # Check if the attribute is being created for the first time after initialization
+        if (name not in self.__dict__) and hasattr(self, '_initialized'):
+            raise AttributeError(f"Cannot add new attribute '{name}' to tokamaker_recon_settings")
+        super().__setattr__(name, value)
+    
+    @property
+    def fitV0(self):
+        warn(
+            "`fitV0` is deprecated, use `fitZ0` instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return self.fitZ0
+    
+    @fitV0.setter
+    def fitV0(self, value):
+        warn(
+            "`fitV0` is deprecated, use `fitZ0` instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        self.fitZ0 = value
+    
+    def get_c_struct(self,oft_env):
+        r'''! Get C struct representation of settings for passing to TokaMaker Fortran API'''
+        c_struct_instance = tokamaker_recon_settings_cstruct()
+        c_struct_instance.fitI = self.fitI
+        c_struct_instance.fitP = self.fitP
+        c_struct_instance.fit_Pscale = self.fit_Pscale
+        c_struct_instance.fit_FFPscale = self.fit_FFPscale
+        c_struct_instance.fitR0 = self.fitR0
+        c_struct_instance.fitZ0 = self.fitZ0
+        c_struct_instance.fitCoils = self.fitCoils
+        c_struct_instance.fitF0 = self.fitF0
+        c_struct_instance.fixedCentering = self.fixedCentering
+        c_struct_instance.pm = self.pm
+        c_struct_instance.infile = oft_env.path2c(self.infile)
+        c_struct_instance.outfile = oft_env.path2c(self.outfile)
+        return c_struct_instance
+
+
 class reconstruction():
     '''! TokaMaker equilibrium reconstruction class'''
     def __init__(self,tMaker_obj,in_filename='fit.in',out_filename='fit.out'):
@@ -361,7 +397,7 @@ class reconstruction():
         ## Grad-Shafranov object for reconstruction
         self._tMaker_obj = tMaker_obj
         ## Reconstruction specific settings object
-        self.settings = tokamaker_recon_default_settings(self._tMaker_obj._oft_env)
+        self.settings = tokamaker_recon_settings()
         ## Plasma current constraint
         self._Ip_con = None
         ## Diamagnetic flux constraint 
@@ -379,8 +415,8 @@ class reconstruction():
         ## Name of reconstruction output file
         self.out_file = out_filename
         # Update settings
-        self.settings.infile = self._tMaker_obj._oft_env.path2c(self.con_file)
-        self.settings.outfile = self._tMaker_obj._oft_env.path2c(self.out_file)
+        self.settings.infile = self.con_file
+        self.settings.outfile = self.out_file
         # Fit-specific input file settings
         self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options'] = {
             'ftol': '1.E-3',
@@ -541,5 +577,5 @@ class reconstruction():
         self._tMaker_obj._oft_env.update_oft_in()
         # Run reconstruction
         error_flag = c_int()
-        tokamaker_recon_run(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings,ctypes.byref(error_flag))
+        tokamaker_recon_run(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings.get_c_struct(self._tMaker_obj._oft_env),ctypes.byref(error_flag))
         return error_flag.value

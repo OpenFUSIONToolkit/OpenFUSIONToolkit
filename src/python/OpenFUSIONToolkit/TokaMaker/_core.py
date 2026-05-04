@@ -16,27 +16,6 @@ from warnings import warn
 import numpy
 from ._interface import *
 
-def tokamaker_default_settings(oft_env):
-    '''! Initialize settings object with default values
-
-    @param oft_env Current runtime environment
-    @result tokamaker_settings_struct object
-    '''
-    settings = tokamaker_settings_struct()
-    settings.pm = True
-    settings.free_boundary = True
-    settings.limited_only = False
-    settings.dipole_mode = False
-    settings.mirror_mode = False
-    settings.maxits = 40
-    settings.mode = 1
-    settings.urf = 0.2
-    settings.nl_tol = 1.E-6
-    settings.rmin = 0.0
-    settings.lim_zmax = 1.E99
-    settings.limiter_file = oft_env.path2c('none')
-    return settings
-
 
 def create_prof_file(self, filename, profile_dict, name):
     '''! Create profile input file to be read by load_profiles()
@@ -84,6 +63,60 @@ def create_prof_file(self, filename, profile_dict, name):
         fid.write("\n".join(file_lines))
 
 
+class tokamaker_settings:
+    r'''! TokaMaker settings class'''
+    def __init__(self):
+        ## Print 'performance' information (eg. iteration count) during run?
+        self.pm = True
+        ## Perform free-boundary calculation?
+        self.free_boundary = True
+        ## Do not search for X-points when determining LCFS?
+        self.limited_only = False
+        ## Use dipole mode (only toroidal current, no pressure gradient)
+        self.dipole_mode = False
+        ## Use mirror mode (symmetry about z=0 plane, only upper half of mesh used)
+        self.mirror_mode = False
+        ## Maximum NL iteration count for G-S solver
+        self.maxits = 40
+        ## Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
+        self.mode = 1
+        ## Under-relaxation factor for NL fixed-point iteration
+        self.urf = 0.2
+        ## Convergence tolerance for NL solver
+        self.nl_tol = 1.E-6
+        ## Minimum magnetic axis major radius, used to catch 'lost' equilibria
+        self.rmin = 0.0
+        ## Maximum vertical range for limiter points, can be used to exclude complex diverter regions
+        self.lim_zmax = 1.E99
+        ## File containing additional limiter points not included in mesh (default: 'none')
+        self.limiter_file = None
+        # Must be added last
+        self._initialized = True
+
+    def __setattr__(self, name, value):
+        # Check if the attribute is being created for the first time after initialization
+        if (name not in self.__dict__) and hasattr(self, '_initialized'):
+            raise AttributeError(f"Cannot add new attribute '{name}' to tokamaker_settings")
+        super().__setattr__(name, value)
+    
+    def get_c_struct(self,oft_env):
+        r'''! Get C struct representation of settings for passing to TokaMaker Fortran API'''
+        c_struct_instance = tokamaker_settings_cstruct()
+        c_struct_instance.pm = self.pm
+        c_struct_instance.free_boundary = self.free_boundary
+        c_struct_instance.limited_only = self.limited_only
+        c_struct_instance.dipole_mode = self.dipole_mode
+        c_struct_instance.mirror_mode = self.mirror_mode
+        c_struct_instance.maxits = self.maxits
+        c_struct_instance.mode = self.mode
+        c_struct_instance.urf = self.urf
+        c_struct_instance.nl_tol = self.nl_tol
+        c_struct_instance.rmin = self.rmin
+        c_struct_instance.lim_zmax = self.lim_zmax
+        c_struct_instance.limiter_file = oft_env.path2c(self.limiter_file) if self.limiter_file else None
+        return c_struct_instance
+
+
 class TokaMaker():
     '''! TokaMaker G-S solver class'''
     def __init__(self,OFT_env):
@@ -100,7 +133,7 @@ class TokaMaker():
         ## Internal mesh object
         self._mesh_ptr = c_void_p()
         ## General settings object
-        self.settings = tokamaker_default_settings(self._oft_env)
+        self.settings = tokamaker_settings()
         ## Conductor definition dictionary
         self._cond_dict = {}
         ## Vacuum definition dictionary
@@ -164,7 +197,7 @@ class TokaMaker():
         self._tMaker_ptr = c_void_p()
         self._tMaker_equil = None
         self._mesh_ptr = c_void_p()
-        self.settings = tokamaker_default_settings(self._oft_env)
+        self.settings = tokamaker_settings()
         self._cond_dict = {}
         self._vac_dict = {}
         self._coil_dict = {}
@@ -1287,7 +1320,7 @@ class TokaMaker():
     def update_settings(self):
         '''! Update settings after changes to values in python'''
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_settings(self._tMaker_ptr,ctypes.byref(self.settings),error_string)
+        tokamaker_set_settings(self._tMaker_ptr,self.settings.get_c_struct(self._oft_env),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     

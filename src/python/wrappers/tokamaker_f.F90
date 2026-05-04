@@ -68,7 +68,7 @@ TYPE, BIND(C) :: tokamaker_recon_settings_type
   LOGICAL(KIND=c_bool) :: fit_Pscale = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fit_FFPscale = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitR0 = .TRUE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fitV0 = .FALSE. !< Needs docs
+  LOGICAL(KIND=c_bool) :: fitZ0 = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitCoils = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fitF0 = .FALSE. !< Needs docs
   LOGICAL(KIND=c_bool) :: fixedCentering = .FALSE. !< Needs docs
@@ -521,9 +521,9 @@ END SUBROUTINE tokamaker_vac_solve
 SUBROUTINE tokamaker_recon_run(tMaker_ptr,vacuum,settings,error_flag) BIND(C,NAME="tokamaker_recon_run")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
-TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
+TYPE(tokamaker_recon_settings_type), VALUE, INTENT(in) :: settings !< Needs docs
 INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
-LOGICAL :: fitI,fitP,fit_Pscale,fit_FFPscale,fitR0,fitV0,fitCoils,fitF0,fixedCentering
+LOGICAL :: fitI,fitP,fit_Pscale,fit_FFPscale,fitR0,fitZ0,fitCoils,fitF0,fixedCentering
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
 CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -542,7 +542,7 @@ fitP=settings%fitP
 fit_Pscale=settings%fit_Pscale
 fit_FFPscale=settings%fit_FFPscale
 fitR0=settings%fitR0
-fitV0=settings%fitV0
+fitZ0=settings%fitZ0
 fitCoils=settings%fitCoils
 fitF0=settings%fitF0
 fixedCentering=settings%fixedCentering
@@ -553,7 +553,7 @@ CALL copy_string_rev(infile_c,infile)
 CALL copy_string_rev(outfile_c,outfile)
 tMaker_obj%device%timing=0.d0
 CALL fit_gs(tMaker_obj%gs_equil,infile,outfile,fitI,fitP,fit_Pscale,&
-            fit_FFPscale,fitR0,fitV0,fitCoils,fitF0, &
+            fit_FFPscale,fitR0,fitZ0,fitCoils,fitF0, &
             fixedCentering)
 CALL gs_profile_save(TRIM(outfile)//'_fprof',tMaker_obj%gs_equil%I)
 CALL gs_profile_save(TRIM(outfile)//'_pprof',tMaker_obj%gs_equil%P)
@@ -1297,7 +1297,7 @@ END SUBROUTINE tokamaker_set_psi_dt
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_settings(tMaker_ptr,settings,error_str) BIND(C,NAME="tokamaker_set_settings")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-TYPE(tokamaker_settings_type), INTENT(in) :: settings !< Settings object
+TYPE(tokamaker_settings_type), VALUE, INTENT(in) :: settings !< Settings object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -1315,8 +1315,12 @@ IF((.NOT.tMaker_obj%device%dipole_mode).AND.settings%dipole_mode)CALL oft_warn("
 tMaker_obj%device%dipole_mode=settings%dipole_mode
 IF((.NOT.tMaker_obj%device%mirror_mode).AND.settings%mirror_mode)CALL oft_warn("TokaMaker's mirror functionality is experimental, use with caution and report bugs")
 tMaker_obj%device%mirror_mode=settings%mirror_mode
-CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
-CALL copy_string_rev(limfile_c,tMaker_obj%device%limiter_file)
+IF(c_associated(settings%limiter_file))THEN
+  CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
+  CALL copy_string_rev(limfile_c,tMaker_obj%device%limiter_file)
+ELSE
+  tMaker_obj%device%limiter_file="none"
+END IF
 END SUBROUTINE tokamaker_set_settings
 !---------------------------------------------------------------------------------
 !> Needs docs
