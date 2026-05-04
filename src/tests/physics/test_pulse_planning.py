@@ -353,6 +353,22 @@ def test_toktox(
     return rounded
 
 
+def test_bool_schedule_value_at_time():
+    """Piecewise ``set_pedestal`` dict matches TORAX-style backward-time lookup."""
+    pytest.importorskip("torax")
+    from OpenFUSIONToolkit.TokaMaker.pulse_planning import TokTox
+
+    fn = TokTox._bool_schedule_value_at_time
+    assert fn(None, 0.0) is True
+    assert fn(True, 999.0) is True
+    assert fn(False, 0.0) is False
+    sch = {0.0: True, 30.0: True, 31.0: False, 90.0: False}
+    assert fn(sch, 30.5) is True
+    assert fn(sch, 31.0) is False
+    assert fn(sch, 89.99) is False
+    assert fn(sch, 90.0) is False
+
+
 def main() -> None:
     t_wall0 = time.perf_counter()
     result = test_toktox()

@@ -219,7 +219,6 @@ class TokTox:
         @param tx_dt Time step (s) of TORAX simulation.
         @param tm_times Time points where TokaMaker solves equilibrium.
         @param last_surface_factor Last surface factor for Torax.
-        @param n_rho Number of grid cells for torax.
         @param cocos COCOS version of input EQDSK.
         @param oft_env OFT environment.
         @param truncate_eq Whether to truncate equilibrium when saving TokaMaker output to EQDSK.
@@ -242,7 +241,6 @@ class TokTox:
         self._t_final = t_final
         self._tx_dt = tx_dt # TORAX timestep
         self._last_surface_factor = last_surface_factor
-        self._n_rho = 50 # resolution of TORAX grid, default 50, changed with set_tx_grid()
         self._psi_N = np.linspace(0.0, 1.0, N_PSI) # standardized psi_N grid all values should be mapped onto
         self._truncate_eq = truncate_eq
 
@@ -3145,6 +3143,128 @@ class TokTox:
         r'''! Access simulation state dict.'''
         return self._state
 
+    def get_final_timepoint_results(self, eqdsk_save_dir=None):
+        r'''! Profiles and scalars at the last TokaMaker timepoint of the last completed coupling loop.
+
+        Call after ``fly()`` when TokaMaker has populated ``state['equil']`` at every timestep index.
+
+        Profiles use the usual TokTox flux-surface dict form ``{'x', 'y', 'type'}`` (``x`` =
+        normalized poloidal flux when applicable). TokaMaker ``p_prime`` and ``FF_prime`` are
+        ``P'`` and ``F F'`` from ``get_profiles(npsi=...)`` on the same grid as stored in state.
+        Kinetic profiles and ``eta`` come from the TORAX-updated state at that timestep; current
+        densities ``j_*`` are TORAX flux-surface profiles (sources for the GS solve).
+
+        Scalars: fusion ``Q`` from TORAX (last save or live data tree); ``q95`` and ``q0`` from
+        TokaMaker ``get_q`` (``l_i`` likewise from ``get_stats``); ``V_loop`` from TORAX
+        ``v_loop_lcfs``; ``Ip`` is the TokaMaker equilibrium value.
+
+        @param eqdsk_save_dir If set (non-empty str or path-like), write the final TokaMaker
+               equilibrium gEQDSK with ``save_eqdsk`` into this directory (created if needed).
+               If ``None`` (default), no file is written.
+        @return dict with ``time``, ``simulation_loop``, ``tm_time_index``, profile keys, nested
+                ``j`` current profiles, scalar values, ``coil_currents``, ``coil_currents_by_region``,
+                ``tokamaker_equilibrium`` (TokaMaker equilibrium instance at this timestep — same
+                reference as ``state['equil'][tm_time_index]``), and ``eqdsk_path`` (absolute path
+                string when saved, else ``None``).
+        '''
+        def _snap(prof):
+            if prof is None:
+                return None
+            out = {}
+            for k, v in prof.items():
+                if isinstance(v, np.ndarray):
+                    out[k] = np.array(v, copy=True)
+                else:
+                    out[k] = copy.deepcopy(v)
+            return out
+
+        tm_times = getattr(self, '_tm_times', None)
+        if tm_times is None or len(tm_times) == 0:
+            raise RuntimeError('TokTox has no tm_times; run fly() first.')
+        i = len(tm_times) - 1
+        t = float(tm_times[i])
+        equil = self._state.get('equil', {}).get(i)
+        if equil is None:
+            raise RuntimeError(
+                f'No TokaMaker equilibrium at final time index {i} (t={t} s); cannot build snapshot.'
+            )
+
+        coils, currents_reg = equil.get_coil_currents()
+
+        eqdsk_path = None
+        if eqdsk_save_dir:
+            out_dir = os.path.abspath(os.path.expanduser(str(eqdsk_save_dir)))
+            os.makedirs(out_dir, exist_ok=True)
+            lp = int(getattr(self, '_current_loop', -1))
+            fname = f'toktox_final_loop{lp:03d}_t{t:.6f}s.eqdsk'
+            eqdsk_path = os.path.join(out_dir, fname)
+            nr_nz = EQDSK_SAVE_NR_NZ_SEQUENCE[-1]
+            with self._quiet_tm():
+                equil.save_eqdsk(
+                    eqdsk_path,
+                    lcfs_pad=1.0 - self._last_surface_factor,
+                    run_info='TokaMaker EQDSK (TokTox final timepoint)',
+                    cocos=self._cocos,
+                    nr=nr_nz,
+                    nz=nr_nz,
+                    truncate_eq=self._truncate_eq,
+                )
+
+        Q_val = np.nan
+        Q_ts = self._results.get('Q')
+        if isinstance(Q_ts, dict) and Q_ts.get('x') is not None and len(Q_ts['x']) > 0:
+            xq = np.asarray(Q_ts['x'], dtype=float)
+            yq = np.asarray(Q_ts['y'], dtype=float)
+            Q_val = float(yq[int(np.argmin(np.abs(xq - t)))])
+        else:
+            dt = getattr(self, '_data_tree', None)
+            if dt is not None:
+                try:
+                    Q_val = float(self._extract_tx_scalar(dt, 'Q_fusion', t))
+                except Exception:
+                    Q_val = np.nan
+
+        j_keys = [
+            ('j_total', 'j_tot'),
+            ('j_ohmic', 'j_ohmic'),
+            ('j_non_inductive', 'j_ni'),
+            ('j_bootstrap', 'j_bootstrap'),
+            ('j_ecrh', 'j_ecrh'),
+            ('j_external', 'j_external'),
+            ('j_generic_current', 'j_generic_current'),
+        ]
+        j_out = {}
+        for out_name, state_key in j_keys:
+            j_out[out_name] = _snap(self._state.get(state_key, {}).get(i))
+
+        return {
+            'time': t,
+            'simulation_loop': int(getattr(self, '_current_loop', -1)),
+            'tm_time_index': i,
+            'ne': _snap(self._state.get('n_e', {}).get(i)),
+            'Te': _snap(self._state.get('T_e', {}).get(i)),
+            'Ti': _snap(self._state.get('T_i', {}).get(i)),
+            'q': _snap(self._state.get('q_prof_tm', {}).get(i)),
+            'psi': _snap(self._state.get('psi_tm', {}).get(i)),
+            'q_torax': _snap(self._state.get('q_prof_tx', {}).get(i)),
+            'psi_torax': _snap(self._state.get('psi_tx', {}).get(i)),
+            'eta': _snap(self._state.get('eta_prof', {}).get(i)),
+            'p_prime': _snap(self._state.get('pp_prof_tm', {}).get(i)),
+            'FF_prime': _snap(self._state.get('ffp_prof_tm', {}).get(i)),
+            'j': j_out,
+            'Q': Q_val,
+            'q95': float(self._state['q95_tm'][i]),
+            'q0': float(self._state['q0_tm'][i]),
+            'l_i': float(self._state['l_i_tm'][i]),
+            'V_loop': float(self._state['vloop_tx'][i]),
+            'Ip': float(self._state['Ip_tm'][i]),
+            'Ip_torax': float(self._state['Ip_tx'][i]),
+            'coil_currents': copy.deepcopy(coils),
+            'coil_currents_by_region': np.array(currents_reg, copy=True),
+            'tm_equilibrium': equil,
+            'eqdsk_path': eqdsk_path,
+        }
+
     # ─── Visualization ──────────────────────────────────────────────────────────
 
     def make_movie(self, save_path=None, **kwargs):
@@ -3847,7 +3967,7 @@ def plot_profile_evolution(tt, save_path=None, display=True, one_plot=False):
         t_min, t_max = phase_times[0], phase_times[-1]
         norm = Normalize(vmin=t_min, vmax=t_max if t_max > t_min else t_min + 1e-9)
 
-        fig, axes = plt.subplots(2, 5, figsize=(22.5, 10))
+        fig, axes = plt.subplots(2, 5, figsize=(25, 10))
         if one_plot:
             fig.suptitle(f'Profile Evolution Over Time (loop {tt._current_loop})', fontsize=14)
         else:
@@ -4636,7 +4756,7 @@ def _draw_info(ax, tt, loop, run_name):
     dt_val = getattr(tt, '_tx_dt', getattr(tt, '_dt', None))
     lines = [
         f'Run:   {run_name}            loop:  {loop}',
-        f'n_rho: {tt._n_rho}          dt:    {dt_val} s',
+        # f'tx grid points: {len(tt._tx_grid)}          dt:    {dt_val} s',
         f'time range:     [{tt._t_init}, {tt._t_final}] s          times: {len(tt._tm_times)}',
         f'LSF:   {tt._last_surface_factor}',
         f't_ave: {t_ave}    window: {getattr(tt, "_t_ave_window", 0):.2f} s',
