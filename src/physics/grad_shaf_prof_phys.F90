@@ -870,6 +870,130 @@ nu_i_star = 4.90e-18_r8 * ABS(qvals) * R_avg * ni &
 ! Electron collisionality
 nu_e_star = 6.921e-18_r8 * ABS(qvals) * R_avg * ne &
           * Zeff * ln_le / (Te**2 * eps**1.5_r8)
+! Compute bootstrap current via Redl 2021
+CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, qvals, eps, ft, f, &
+    dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &
+    ln_le, ln_lii, nu_e_star, nu_i_star, B_times_Jbs)
+!------------------------------------------------------------------------------
+!> Redl 2021 bootstrap current formula.
+!>
+!> Translates Python bootstrap.py:redl_bootstrap with fixed settings:
+!>   - use_legacy_L34 = .FALSE.  (L34 = L31)
+!>   - use_sign_q     = .TRUE.
+!>   - formula_form   = 'jboot1'
+!>   - nu_e_star and nu_i_star are passed in pre-computed (no internal fallback)
+!>
+!> Reference: Redl et al., Phys. Plasmas 28, 022502 (2021)
+!>
+!> @param n           Number of flux surfaces
+!> @param Te          Electron temperature [eV]
+!> @param Ti          Ion temperature [eV]
+!> @param ne          Electron density [m^-3]
+!> @param ni          Ion density [m^-3]
+!> @param pe          Electron pressure [Pa]
+!> @param pi          Ion pressure [Pa]
+!> @param Zeff        Effective charge
+!> @param q           Safety factor
+!> @param eps         Inverse aspect ratio
+!> @param fT          Trapped particle fraction
+!> @param I_psi       Toroidal current function F = R*Bt [T*m]
+!> @param dT_e_dpsi   d(Te)/d(psi) [eV/Wb]
+!> @param dT_i_dpsi   d(Ti)/d(psi) [eV/Wb]
+!> @param dn_e_dpsi   d(ne)/d(psi) [m^-3/Wb]
+!> @param dn_i_dpsi   d(ni)/d(psi) [m^-3/Wb]
+!> @param ln_lambda_e Electron Coulomb logarithm
+!> @param ln_lambda_ii Ion Coulomb logarithm
+!> @param nu_e_star   Electron collisionality (pre-computed)
+!> @param nu_i_star   Ion collisionality (pre-computed)
+!> @param avg_j_bootstrap_times_B Output: <j_{bs,parallel}*B> [same units as -I_psi * pe * d/dpsi]
+!------------------------------------------------------------------------------
+SUBROUTINE redl_bootstrap(n, Te, Ti, ne, ni, pe, pi, Zeff, q, eps, fT, I_psi, &
+    dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &
+    ln_lambda_e, ln_lambda_ii, nu_e_star, nu_i_star, avg_j_bootstrap_times_B)
+INTEGER(i4), INTENT(in) :: n
+REAL(r8), INTENT(in) :: Te(n), Ti(n), ne(n), ni(n)
+REAL(r8), INTENT(in) :: pe(n), pi(n), Zeff(n)
+REAL(r8), INTENT(in) :: q(n), eps(n), fT(n), I_psi(n)
+REAL(r8), INTENT(in) :: dT_e_dpsi(n), dT_i_dpsi(n)
+REAL(r8), INTENT(in) :: dn_e_dpsi(n), dn_i_dpsi(n)
+REAL(r8), INTENT(in) :: ln_lambda_e(n), ln_lambda_ii(n)
+REAL(r8), INTENT(in) :: nu_e_star(n), nu_i_star(n)
+REAL(r8), INTENT(out) :: avg_j_bootstrap_times_B(n)
+!---
+REAL(r8) :: R_pe(n)
+REAL(r8) :: ft_31_d1(n), ft_31_d2(n), X31(n), L31(n), L34(n), dZ(n)
+REAL(r8) :: dee_2(n), dee_3(n), X32_ee(n), F32_ee(n)
+REAL(r8) :: dei_2(n), dei_3(n), X32_ei(n), F32_ei(n), L32(n)
+REAL(r8) :: alpha0(n), alpha(n)
+REAL(r8) :: dp_dpsi(n), bra1(n), bra2(n), bra3(n)
+REAL(r8), PARAMETER :: EC = 1.602176634e-19_r8
+!---
+R_pe = pe / (pe + pi)
+! =====================================================================
+! L31 (Redl Eqs. 10-11)
+! =====================================================================
+ft_31_d1 = (0.67_r8 * (1.0_r8 - 0.7_r8*fT) * SQRT(nu_e_star)) &
+         / (0.56_r8 + 0.44_r8*Zeff)
+ft_31_d2 = ((0.52_r8 + 0.086_r8*SQRT(nu_e_star)) &
+          * (1.0_r8 + 0.87_r8*fT) * nu_e_star) &
+         / (1.0_r8 + 1.13_r8*SQRT(MAX(Zeff - 1.0_r8, 0.0_r8)))
+X31 = fT / (1.0_r8 + ft_31_d1 + ft_31_d2)
+dZ = Zeff**1.2_r8 - 0.71_r8
+L31 = (1.0_r8 + 0.15_r8/dZ)*X31 &
+    - (0.22_r8/dZ)*X31**2 &
+    + (0.01_r8/dZ)*X31**3 &
+    + (0.06_r8/dZ)*X31**4
+! L34 = L31 (use_legacy_L34 = .FALSE.)
+L34 = L31
+! =====================================================================
+! L32 (Redl Eqs. 12-16)
+! =====================================================================
+dee_2 = (0.23_r8 * (1.0_r8 - 0.96_r8*fT) * SQRT(nu_e_star)) &
+      / SQRT(Zeff)
+dee_3 = (0.13_r8 * (1.0_r8 - 0.38_r8*fT) * nu_e_star / (Zeff**2)) &
+      * (SQRT(1.0_r8 + 2.0_r8*SQRT(MAX(Zeff - 1.0_r8, 0.0_r8))) &
+       + fT**2 * SQRT((0.075_r8 + 0.25_r8*(Zeff - 1.0_r8)**2) * nu_e_star))
+X32_ee = fT / (1.0_r8 + dee_2 + dee_3)
+F32_ee = ( (0.1_r8 + 0.6_r8*Zeff) &
+         / (Zeff*(0.77_r8 + 0.63_r8*(1.0_r8 + (Zeff - 1.0_r8)**1.1_r8))) &
+         * (X32_ee - X32_ee**4) &
+         + 0.7_r8/(1.0_r8 + 0.2_r8*Zeff) &
+         * (X32_ee**2 - X32_ee**4 - 1.2_r8*(X32_ee**3 - X32_ee**4)) &
+         + 1.3_r8/(1.0_r8 + 0.5_r8*Zeff) * X32_ee**4 )
+dei_2 = (0.87_r8 * (1.0_r8 + 0.39_r8*fT) * SQRT(nu_e_star)) &
+      / (1.0_r8 + 2.95_r8*(Zeff - 1.0_r8)**2)
+dei_3 = 1.53_r8 * (1.0_r8 - 0.37_r8*fT) * nu_e_star &
+      * (2.0_r8 + 0.375_r8*(Zeff - 1.0_r8))
+X32_ei = fT / (1.0_r8 + dei_2 + dei_3)
+F32_ei = ( -(0.4_r8 + 1.93_r8*Zeff) / (Zeff*(0.8_r8 + 0.6_r8*Zeff)) &
+           * (X32_ei - X32_ei**4) &
+           + 5.5_r8/(1.5_r8 + 2.0_r8*Zeff) &
+           * (X32_ei**2 - X32_ei**4 - 0.8_r8*(X32_ei**3 - X32_ei**4)) &
+           - 1.3_r8/(1.0_r8 + 0.5_r8*Zeff) * X32_ei**4 )
+L32 = F32_ee + F32_ei
+! =====================================================================
+! Alpha (Redl Eqs. 20-21)
+! =====================================================================
+alpha0 = -(0.62_r8 + 0.055_r8*(Zeff - 1.0_r8)) &
+        / (0.53_r8 + 0.17_r8*(Zeff - 1.0_r8)) &
+        * (1.0_r8 - fT) &
+        / (1.0_r8 - (0.31_r8 - 0.065_r8*(Zeff - 1.0_r8))*fT - 0.25_r8*fT**2)
+alpha = ((alpha0 + 0.7_r8*Zeff*SQRT(fT)*SQRT(nu_i_star)) &
+       / (1.0_r8 + 0.18_r8*SQRT(nu_i_star)) &
+       - 0.002_r8*nu_i_star**2*fT**6) &
+      / (1.0_r8 + 0.004_r8*nu_i_star**2*fT**6)
+! =====================================================================
+! Assemble: jboot1 form with use_sign_q = .TRUE.
+! =====================================================================
+dp_dpsi = (ne*dT_e_dpsi + Te*dn_e_dpsi &
+         + ni*dT_i_dpsi + Ti*dn_i_dpsi) * EC
+bra1 = L31 * dp_dpsi / pe
+bra2 = L32 * dT_e_dpsi / Te
+bra3 = L34 * alpha * (1.0_r8 - R_pe) / R_pe * dT_i_dpsi / Ti
+avg_j_bootstrap_times_B = -I_psi * pe * (bra1 + bra2 + bra3)
+! Apply sign(q)
+avg_j_bootstrap_times_B = avg_j_bootstrap_times_B * SIGN(1.0_r8, q)
+END SUBROUTINE redl_bootstrap
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
