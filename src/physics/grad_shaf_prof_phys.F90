@@ -459,19 +459,18 @@ CLASS(gs_equil), INTENT(inout) :: gseq
 INTEGER(i4), INTENT(in) :: ngeom
 TYPE(spline_type), INTENT(out) :: R_spline
 INTEGER(i4) :: i
-REAL(r8), ALLOCATABLE :: ravgs(:,:), psi_q(:), qtmp(:)
+REAL(r8), ALLOCATABLE :: ravgs(:,:), psi_q(:), qprof(:)
 REAL(r8), PARAMETER :: psi_pad = 1.d-3
-ALLOCATE(ravgs(ngeom+1,3), psi_q(ngeom+1), qtmp(ngeom+1))
+ALLOCATE(ravgs(ngeom,2), psi_q(ngeom), qprof(ngeom))
+psi_q = [(REAL(i-1,r8)/REAL(ngeom,r8), i=1,ngeom)]
 IF(gseq%diverted)THEN
-  psi_q = [(REAL(i-1,r8)/REAL(ngeom,r8), i=1,ngeom)]
   psi_q(1) = MIN(psi_q(2), psi_pad)
-  CALL gs_get_qprof(gseq, ngeom, psi_q, qtmp, ravgs=ravgs)
+  CALL gs_get_qprof(gseq, ngeom, psi_q, qprof, ravgs=ravgs)
   psi_q(1) = 0.d0
   ravgs(1,1) = gseq%lim_point(1)
   ravgs(1,2) = 1.d0/gseq%lim_point(1)
 ELSE
-  psi_q = [(REAL(i-1,r8)/REAL(ngeom,r8), i=1,ngeom)]
-  CALL gs_get_qprof(gseq, ngeom, psi_q, qtmp, ravgs=ravgs)
+  CALL gs_get_qprof(gseq, ngeom, psi_q, qprof, ravgs=ravgs)
 END IF
 CALL spline_alloc(R_spline, ngeom-1, 2)
 R_spline%xs(0:ngeom-2) = psi_q(1:ngeom-1); R_spline%xs(ngeom-1) = 1.d0
@@ -480,7 +479,7 @@ R_spline%fs(ngeom-1,1) = gseq%o_point(1)
 R_spline%fs(0:ngeom-2,2) = ravgs(1:ngeom-1,2)
 R_spline%fs(ngeom-1,2) = 1.d0/gseq%o_point(1)
 CALL spline_fit(R_spline, "extrap")
-DEALLOCATE(ravgs, psi_q, qtmp)
+DEALLOCATE(ravgs, psi_q, qprof)
 END SUBROUTINE build_Ravg_spline
 !------------------------------------------------------------------------------
 !> Evaluate the geometric factor qtmp(i) = <R>(psi_i) * <1/R>(psi_i) on an
@@ -550,31 +549,36 @@ end subroutine jphi_update_default
 !---------------------------------------------------------------------------------
 !> Update F*F' profile from inductive Jphi coupled with bootstrap current.
 !>
-!> Algorithm (mirrors bootstrap.py:calculate_profiles_and_bootstrap):
-!>   1. Build <R>/<1/R> geometry spline (same as jphi_update_default).
-!>   2. Call calculate_bootstrap to get j_BS on a self%ngeom-point psi_N grid.
-!>   3. Interpolate j_BS and the inductive jphi profile onto self%x grid.
-!>   4. Brent method: find alpha such that
-!>        gs_flux_int(alpha*j_ind + j_BS) = ABS(Itor_target)
-!>   5. Assemble total jphi = alpha*j_ind + j_BS and compute F*F' as in
-!>      jphi_update_default.
+!> Each call (one NL iteration):
+!>   1. Build <R>/<1/R> spline on self%x; pre-compute qtmp = <R>*<1/R>.
+!>   2. Evaluate bootstrap current j_BS on self%x (or reuse cache if frozen).
+!>   3. Apply edge taper to j_BS and jphi_ind component-wise.
+!>   4. Compute jphi_rescale to reconcile gs_itor_nl vs gs_flux_int.
+!>   5. Solve analytically for alpha: gs_flux_int is linear in alpha, so two
+!>      evaluations (alpha=0, alpha=1) give alpha = (Ip_target - Ip_lo)/(Ip_hi - Ip_lo).
+!>   6. Assemble jphi_total = alpha*jphi_ind + j_BS; compute F*F' knots.
+!>   7. Diagnostics (if diagnose_bs is set).
 !---------------------------------------------------------------------------------
 SUBROUTINE jphi_bs_update(self, gseq)
 CLASS(jphi_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
-INTEGER(i4) :: i, iter
-REAL(r8) :: pscale, pprime, j_BS_axis, psi_range
+INTEGER(i4) :: i
+REAL(r8) :: pscale, pprime
 REAL(r8), ALLOCATABLE :: qtmp(:)
-type(spline_type) :: R_spline
+TYPE(spline_type) :: R_spline
 ! Bootstrap arrays (on self%x grid)
-REAL(r8), ALLOCATABLE :: B_times_Jbs(:), j_BS(:)
+REAL(r8), ALLOCATABLE :: j_BS(:)
+! Optional edge-spike workspace (only allocated when isolate_edge_jBS or parameterize_jBS is set)
+REAL(r8), ALLOCATABLE :: j_spike_tmp(:)
 ! Working arrays on self%x grid
 REAL(r8), ALLOCATABLE :: jphi_total(:)
-! Secant scalars
-REAL(r8) :: alpha, alpha_lo, alpha_hi, fa, fb, fc, ip_target
-REAL(r8) :: ip_result_lo, ip_result_hi, ip_result
-INTEGER(i4), PARAMETER :: MAX_IT = 5
-REAL(r8), PARAMETER :: IP_TOL = 1.0e-6_r8
+REAL(r8), ALLOCATABLE :: jphi_ind(:)  !< Tapered copy of self%jphi (= self%jphi when taper off)
+! Alpha-solve scalars
+REAL(r8) :: alpha, ip_target, ip_ind, ip_result_lo, ip_result_hi, dalpha
+! Relative change in bootstrap current for freeze check
+REAL(r8) :: djBS
+! gs_itor_nl / gs_flux_int reconciliation
+REAL(r8) :: itor_nl = 0.0_r8, itor_flint = 0.0_r8, jphi_rescale
 !---
 self%plasma_bounds = gseq%plasma_bounds
 IF(gseq%mode/=1) &
@@ -595,10 +599,14 @@ IF(.NOT.ASSOCIATED(gseq%ne)) &
 IF(.NOT.ASSOCIATED(gseq%ni)) &
   CALL oft_abort("Jphi-BS profile requires ni profile", &
                  "jphi_bs_update",__FILE__)
-!--- 1. Build <R>/<1/R> geometry spline
-CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
+!--- 1. Build <R>/<1/R> spline; pre-compute qtmp = <R>*<1/R> on self%x.
+!   R_spline stays alive until after the F*F' loop (step 6).
 ALLOCATE(qtmp(self%npsi))
-CALL eval_R_qtmp(R_spline, self%x, self%npsi, qtmp)
+CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
+DO i = 1, self%npsi
+  CALL spline_eval(R_spline, self%x(i), 0)
+  qtmp(i) = R_spline%f(1) * R_spline%f(2)
+END DO
 !--- 2. Calculate bootstrap current on the self%x grid.
 psi_range = gseq%plasma_bounds(2) - gseq%plasma_bounds(1)
 ALLOCATE(B_times_Jbs(self%npsi), j_BS(self%npsi))
