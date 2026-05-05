@@ -828,6 +828,48 @@ ft = 1.0_r8 - fc
 ! Pressures [Pa]
 pe = EC * ne * Te
 pi_arr = EC * ni * Ti
+! Gradients d/dpsi [Wb^-1] via non-uniform finite differences
+! (one-sided at endpoints, central at interior points)
+dT_e_dpsi(1)     = (Te(2)     - Te(1))       / (psi_abs(2)     - psi_abs(1))
+dT_e_dpsi(n_psi) = (Te(n_psi) - Te(n_psi-1)) / (psi_abs(n_psi) - psi_abs(n_psi-1))
+dT_i_dpsi(1)     = (Ti(2)     - Ti(1))       / (psi_abs(2)     - psi_abs(1))
+dT_i_dpsi(n_psi) = (Ti(n_psi) - Ti(n_psi-1)) / (psi_abs(n_psi) - psi_abs(n_psi-1))
+dn_e_dpsi(1)     = (ne(2)     - ne(1))       / (psi_abs(2)     - psi_abs(1))
+dn_e_dpsi(n_psi) = (ne(n_psi) - ne(n_psi-1)) / (psi_abs(n_psi) - psi_abs(n_psi-1))
+dn_i_dpsi(1)     = (ni(2)     - ni(1))       / (psi_abs(2)     - psi_abs(1))
+dn_i_dpsi(n_psi) = (ni(n_psi) - ni(n_psi-1)) / (psi_abs(n_psi) - psi_abs(n_psi-1))
+DO i = 2, n_psi-1
+  dT_e_dpsi(i) = (Te(i+1) - Te(i-1)) / (psi_abs(i+1) - psi_abs(i-1))
+  dT_i_dpsi(i) = (Ti(i+1) - Ti(i-1)) / (psi_abs(i+1) - psi_abs(i-1))
+  dn_e_dpsi(i) = (ne(i+1) - ne(i-1)) / (psi_abs(i+1) - psi_abs(i-1))
+  dn_i_dpsi(i) = (ni(i+1) - ni(i-1)) / (psi_abs(i+1) - psi_abs(i-1))
+END DO
+! In the Fortran internal convention psi increases LCFS→axis (opposite to the
+! standard Sauter/Redl derivation where psi increases axis→LCFS).  Negate
+! all gradients so the bootstrap formula sees the conventional sign.
+dT_e_dpsi = -dT_e_dpsi
+dT_i_dpsi = -dT_i_dpsi
+dn_e_dpsi = -dn_e_dpsi
+dn_i_dpsi = -dn_i_dpsi
+! Coulomb logarithms (NRL formulary)
+! Electron: ne divided by 1e6 to convert m^-3 -> cm^-3
+ln_le = 23.5_r8 &
+      - LOG(SQRT(ne/1.0e6_r8) * Te**(-1.25_r8)) &
+      - SQRT(1.0e-5_r8 + (LOG(Te) - 2.0_r8)**2 / 16.0_r8)
+! Ion: constant 30 absorbs the m^-3 -> cm^-3 conversion
+Z_lnLam = MAX(ne/ni, 1.0_r8)
+ln_lii = 30.0_r8 - LOG(Z_lnLam**3 * SQRT(ni) / Ti**1.5_r8)
+ln_le  = MAX(ln_le,  10.0_r8)
+ln_lii = MAX(ln_lii, 10.0_r8)
+! Ion collisionality: Koh multi-species model
+Zdom = 1.0_r8    ! dominant ion charge (deuterium)
+Zavg = ne / ni
+Zion = (Zdom**2 * Zavg * Zeff)**0.25_r8
+nu_i_star = 4.90e-18_r8 * ABS(qvals) * R_avg * ni &
+          * Zion**4 * ln_lii / (Ti**2 * eps**1.5_r8)
+! Electron collisionality
+nu_e_star = 6.921e-18_r8 * ABS(qvals) * R_avg * ne &
+          * Zeff * ln_le / (Te**2 * eps**1.5_r8)
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
