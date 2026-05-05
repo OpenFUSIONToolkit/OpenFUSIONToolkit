@@ -459,7 +459,7 @@ def test_coil_h3(order,dist_coil):
 
 
 #============================================================================
-def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,mp_q):
+def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
     def create_mesh():
         with open('ITER_geom.json','r') as fid:
             ITER_geom = json.load(fid)
@@ -509,7 +509,7 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
         mygs.setup(order=fe_order,F0=5.3*6.2)
         #
-        if eig_test:
+        if test_type == 'eig':
             eig_vals, _ = mygs.eig_wall(10)
             mp_q.put([{'Tau_w': eig_vals[:5,0]}])
             oftpy_dump_cov()
@@ -564,11 +564,11 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         delta = 0.0
         try:
             mygs.init_psi(R0, Z0, a, kappa, delta)
-            mygs.solve()
+            EQ_obj, nl_its = mygs.solve(return_its=True)
         except ValueError:
             mp_q.put(None)
             return
-        if stability_test:
+        if test_type == 'stab':
             eig_vals, eig_vecs = mygs.eig_td(-1.E2,10,False)
             # Run brief nonlinear evolution
             psi0 = mygs.get_psi(False)
@@ -581,18 +581,25 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
             mygs.setup_td(dt,1.E-13,1.E-11)
             sim_time = 0.0
             for i in range(5):
-                sim_time, _, nl_its, lin_its, nretry = mygs.step_td(sim_time,dt)
+                sim_time, _, _, _, _ = mygs.step_td(sim_time,dt)
             psi1 = mygs.get_psi(False)
             mp_q.put([{'gamma': eig_vals[:5,0], 'nl_change': np.linalg.norm(psi1-psi0)}])
             oftpy_dump_cov()
             return
         mygs.save_eqdsk('test.eqdsk',lcfs_pressure=6.E4)
-        eq_info = mygs.get_stats(li_normalization='ITER')
+        if test_type == 'io':
+            EQ_obj.save_TokaMaker('test_eq.h5')
+            mygs.init_psi(R0, Z0, a, kappa, delta)
+            mygs.replace_eq(source_file='test_eq.h5')
+            EQ_obj = mygs.copy_eq()
+            _, nl_its = mygs.solve(return_its=True)
+        eq_info = EQ_obj.get_stats(li_normalization='ITER')
         Lmat = mygs.get_coil_Lmat()
         eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
         eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
         eq_info['Lplasma'] = Lmat[-1,-1]
-    if test_recon:
+        eq_info['nl_its'] = nl_its
+    if test_type == 'recon':
         import random
         from OpenFUSIONToolkit.TokaMaker.reconstruction import reconstruction
         # Sample constraint locations
@@ -648,7 +655,7 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         a = 1.0
         kappa = 1.0
         delta = 0.0
-        err_flag = mygs.init_psi(R0, Z0, a, kappa, delta)
+        mygs.init_psi(R0, Z0, a, kappa, delta)
         mygs.settings.maxits=100
         mygs.update_settings()
         mygs.solve()
@@ -661,7 +668,7 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         myrecon.settings.fitR0 = True
         myrecon.settings.fitCoils = True
         myrecon.settings.pm = False
-        err_flag = myrecon.reconstruct()
+        _ = myrecon.reconstruct()
         #
         eq_info = mygs.get_stats(li_normalization='ITER')
         eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
@@ -685,7 +692,7 @@ def test_ITER_eig(order):
     exp_dict = {
         'Tau_w': [1.51083009, 2.87431718, 3.91493237, 5.23482507, 5.61049374]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),True,False,False))
+    results = mp_run(run_ITER_case,(1.0,(order,),'eig'))
     assert validate_dict(results,exp_dict)
 
 @pytest.mark.coverage
@@ -695,7 +702,7 @@ def test_ITER_stability(order):
         'gamma': [-12.3620, 1.83981, 3.41613, 5.12470, 6.53393],
         'nl_change': [225.4421413167051, 338.0113029638385][order-2]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),False,True,False))
+    results = mp_run(run_ITER_case,(1.0,(order,),'stab'))
     assert validate_dict(results,exp_dict)
 
 ITER_eq_dict = {
@@ -728,10 +735,18 @@ ITER_eq_dict = {
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_eq(order):
-    results = mp_run(run_ITER_case,(1.0,(order,),False,False,False))
+    results = mp_run(run_ITER_case,(1.0,(order,),''))
     assert validate_dict(results,ITER_eq_dict)
     assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk')
     assert validate_ifile('tokamaker.ifile','ITER_test.ifile')
+
+@pytest.mark.coverage
+@pytest.mark.parametrize("order", (2,3))#,4))
+def test_ITER_eq_io(order):
+    eq_dict = ITER_eq_dict.copy()
+    eq_dict['nl_its'] = 1
+    results = mp_run(run_ITER_case,(1.0,(order,),'io'))
+    assert validate_dict(results,eq_dict)
 
 @pytest.mark.coverage
 def test_ITER_recon():
@@ -743,11 +758,11 @@ def test_ITER_recon():
     ITER_recon_dict['beta_pol'] = 44.16835089714342
     ITER_recon_dict['beta_tor'] = 1.8950360948919174
     ITER_recon_dict['beta_n'] = 1.2576100533550467
-    results = mp_run(run_ITER_case,(1.0,(2,),False,False,True))
+    results = mp_run(run_ITER_case,(1.0,(2,),'recon'))
     assert validate_dict(results,ITER_recon_dict)
 
 def test_ITER_concurrent():
-    results = mp_run(run_ITER_case,(1.0,(2,3),False,False,False))
+    results = mp_run(run_ITER_case,(1.0,(2,3),''))
     assert validate_dict(results,ITER_eq_dict)
 
 #============================================================================

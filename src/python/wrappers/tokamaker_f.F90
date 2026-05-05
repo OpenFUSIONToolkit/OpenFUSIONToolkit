@@ -34,7 +34,7 @@ USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_de
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
-  sauter_fc, gs_calc_vloop
+  sauter_fc, gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
 USE oft_gs_fit, ONLY: fit_gs, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
@@ -43,56 +43,56 @@ USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
 #include "local.h"
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> TokaMaker settings structure for passing settings between Python to Fortran
 !---------------------------------------------------------------------------------
 TYPE, BIND(C) :: tokamaker_settings_type
-  LOGICAL(KIND=c_bool) :: pm = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: free_boundary = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: limited_only = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: dipole_mode = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: mirror_mode = .FALSE. !< Needs docs
-  INTEGER(KIND=c_int) :: maxits = 40 !< Needs docs
-  INTEGER(KIND=c_int) :: mode = 1 !< Needs docs
-  REAL(KIND=c_double) :: urf = 0.3d0 !< Needs docs
-  REAL(KIND=c_double) :: nl_tol = 1.d-6 !< Needs docs
-  REAL(KIND=c_double) :: rmin = 0.d0 !< Needs docs
-  REAL(KIND=c_double) :: lim_zmax = 1.d99 !< Needs docs
-  TYPE(c_ptr) :: limiter_file !< Needs docs
+  LOGICAL(KIND=c_bool) :: pm = .FALSE. !< Print 'performance' information (eg. iteration count) during run?
+  LOGICAL(KIND=c_bool) :: free_boundary = .FALSE. !< Perform free-boundary calculation?
+  LOGICAL(KIND=c_bool) :: limited_only = .FALSE. !< Do not search for X-points when determining LCFS?
+  LOGICAL(KIND=c_bool) :: dipole_mode = .FALSE. !< Use dipole mode (only toroidal current, no pressure gradient)
+  LOGICAL(KIND=c_bool) :: mirror_mode = .FALSE. !< Use mirror mode (symmetry about z=0 plane, only upper half of mesh used)
+  INTEGER(KIND=c_int) :: maxits = 40 !< Maximum NL iteration count for G-S solver
+  INTEGER(KIND=c_int) :: mode = 1 !< Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
+  REAL(KIND=c_double) :: urf = 0.3d0 !< Under-relaxation factor for NL fixed-point iteration
+  REAL(KIND=c_double) :: nl_tol = 1.d-6 !< Convergence tolerance for NL solver
+  REAL(KIND=c_double) :: rmin = 0.d0 !< Minimum magnetic axis major radius, used to catch 'lost' equilibria
+  REAL(KIND=c_double) :: lim_zmax = 1.d99 !< Maximum vertical range for limiter points, can be used to exclude complex diverter regions
+  TYPE(c_ptr) :: limiter_file !< File containing additional limiter points not included in mesh (default: 'none')
 END TYPE tokamaker_settings_type
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> TokaMaker reconstruction settings structure for passing settings between Python to Fortran
 !---------------------------------------------------------------------------------
 TYPE, BIND(C) :: tokamaker_recon_settings_type
-  LOGICAL(KIND=c_bool) :: fitI = .TRUE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fitP = .TRUE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fit_Pscale = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fit_FFPscale = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fitR0 = .TRUE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fitV0 = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fitCoils = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fitF0 = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: fixedCentering = .FALSE. !< Needs docs
-  LOGICAL(KIND=c_bool) :: pm = .FALSE. !< Needs docs
-  TYPE(c_ptr) :: infile !< Needs docs
-  TYPE(c_ptr) :: outfile !< Needs docs
+  LOGICAL(KIND=c_bool) :: fitI = .TRUE. !< Adjust \f$ F*F' \f$ parameterization coefficients?
+  LOGICAL(KIND=c_bool) :: fitP = .TRUE. !< Adjust \f$ P' \f$ parameterization coefficients?
+  LOGICAL(KIND=c_bool) :: fit_Pscale = .FALSE. !< Adjust \f$ P' \f$ scale factor?
+  LOGICAL(KIND=c_bool) :: fit_FFPscale = .FALSE. !< Adjust \f$ F*F' \f$ scale factor?
+  LOGICAL(KIND=c_bool) :: fitR0 = .TRUE. !< Utilize and adjust \f$ R_0 \f$ constraint?
+  LOGICAL(KIND=c_bool) :: fitZ0 = .FALSE. !< Utilize and adjust \f$ Z_0 \f$ constraint?
+  LOGICAL(KIND=c_bool) :: fitCoils = .FALSE. !< Allow adjustment of PF coil currents?
+  LOGICAL(KIND=c_bool) :: fitF0 = .FALSE. !< Allow adjustment of TF coil current?
+  LOGICAL(KIND=c_bool) :: fixedCentering = .FALSE. !< Do not update centering (initial guess for NL solve) as solve progresses
+  LOGICAL(KIND=c_bool) :: pm = .FALSE. !< Show detailed progress output?
+  TYPE(c_ptr) :: infile !< File containing constraint definitions
+  TYPE(c_ptr) :: outfile !< File to write output information to
 END TYPE tokamaker_recon_settings_type
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> TokaMaker wrapper object for Python API
 !---------------------------------------------------------------------------------
 TYPE :: tokamaker_instance
-  INTEGER(i4) :: mode = 1 !< Needs docs
-  INTEGER(i4), POINTER, DIMENSION(:) :: reg_plot => NULL() !< Needs docs
-  INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_plot => NULL() !< Needs docs
-  REAL(r8), POINTER, DIMENSION(:,:) :: r_plot => NULL() !< Needs docs
-  TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< Mesh container
+  INTEGER(i4) :: mode = 1 !< Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
+  INTEGER(i4), POINTER, DIMENSION(:) :: reg_plot => NULL() !< Region index on tesselated plotting mesh
+  INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_plot => NULL() !< Cell list for tesselated plotting mesh
+  REAL(r8), POINTER, DIMENSION(:,:) :: r_plot => NULL() !< Point list for tesselated plotting mesh
+  TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< ML mesh container
   TYPE(oft_ml_fem_type), POINTER :: ML_oft_blagrange => NULL() !< Finite element container
-  TYPE(gs_factory), POINTER :: device => NULL() !< G-S object
-  TYPE(gs_equil), POINTER :: gs_equil => NULL() !< G-S object
+  TYPE(gs_factory), POINTER :: device => NULL() !< G-S device object
+  TYPE(gs_equil), POINTER :: gs_equil => NULL() !< Active G-S equilibrium object
   TYPE(oft_tmaker_td), POINTER :: gs_td => NULL() !< Time-dependent G-S object
 END TYPE tokamaker_instance
 CONTAINS
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Allocate TokaMaker wrapper object and initialize with mesh information
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str) BIND(C,NAME="tokamaker_alloc")
 TYPE(c_ptr), INTENT(out) :: tMaker_ptr !< Pointer to TokaMaker object
@@ -110,7 +110,7 @@ tMaker_ptr=C_LOC(tMaker_obj)
 CALL c_f_pointer(mesh_ptr,tMaker_obj%ml_mesh)
 END SUBROUTINE tokamaker_alloc
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Copy TokaMaker equilibrium object
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_equil_copy(tMaker_ptr,old_equil_ptr,new_equil_ptr,error_str) BIND(C,NAME="tokamaker_equil_copy")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
@@ -134,7 +134,7 @@ END IF
 new_equil_ptr=C_LOC(new_equil)
 END SUBROUTINE tokamaker_equil_copy
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Set TokaMaker equilibrium object for use in TokaMaker wrapper object
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_equil_set(tMaker_ptr,new_equil_ptr,error_str) BIND(C,NAME="tokamaker_equil_set")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
@@ -147,7 +147,7 @@ IF(.NOT.tokamaker_equil_ccast(new_equil_ptr,new_equil,error_str))RETURN
 tMaker_obj%gs_equil=>new_equil
 END SUBROUTINE tokamaker_equil_set
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Cast C pointer to TokaMaker wrapper object
 !---------------------------------------------------------------------------------
 FUNCTION tokamaker_ccast(tMaker_cptr,tMaker_obj,error_str) RESULT(success)
 TYPE(c_ptr), INTENT(in) :: tMaker_cptr !< C pointer to TokaMaker object
@@ -165,7 +165,7 @@ CALL c_f_pointer(tMaker_cptr,tMaker_obj)
 success=.TRUE.
 END FUNCTION tokamaker_ccast
 !---------------------------------------------------------------------------------
-!> Evaluate Green's function for axisymmetric toroidal current loop
+!> Cast C pointer to TokaMaker equilibrium object
 !---------------------------------------------------------------------------------
 FUNCTION tokamaker_equil_ccast(tMaker_equil_cptr,tMaker_equil_obj,error_str) RESULT(success)
 TYPE(c_ptr), INTENT(in) :: tMaker_equil_cptr !< C pointer to TokaMaker equilibrium object
@@ -183,7 +183,7 @@ CALL c_f_pointer(tMaker_equil_cptr,tMaker_equil_obj)
 success=.TRUE.
 END FUNCTION tokamaker_equil_ccast
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Require TokaMaker wrapper object to have TokaMaker equilibrium object allocated
 !---------------------------------------------------------------------------------
 FUNCTION tokamaker_require_equil(tMaker_obj,error_str) RESULT(success)
 TYPE(tokamaker_instance), INTENT(in) :: tMaker_obj
@@ -199,7 +199,7 @@ END IF
 success=.TRUE.
 END FUNCTION tokamaker_require_equil
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Evaluate Green's function for axisymmetric toroidal current loop
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_eval_green(n,r,z,rc,zc,vals) BIND(C,NAME="tokamaker_eval_green")
 INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of evaluation points
@@ -219,16 +219,16 @@ DO i=1,n
 END DO
 END SUBROUTINE tokamaker_eval_green
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Setup TokaMaker region representations based on coil, conductor, and other information
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_setup_regions(tMaker_ptr,coil_file,reg_eta,contig_flag,xpoint_mask,coil_nturns,ncoils,error_str) BIND(C,NAME="tokamaker_setup_regions")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-CHARACTER(KIND=c_char), INTENT(in) :: coil_file(OFT_PATH_SLEN) !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: contig_flag !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: xpoint_mask !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: coil_nturns !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: ncoils !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: coil_file(OFT_PATH_SLEN) !< Path to file containing coil information (for legacy region loading)
+TYPE(c_ptr), VALUE, INTENT(in) :: reg_eta !< Resistivity values for each region
+TYPE(c_ptr), VALUE, INTENT(in) :: contig_flag !< Toroidal contiguity/inner limiter flag for each region (1 if toroidally contiguous, 0 if not, -1 if inner limiter region)
+TYPE(c_ptr), VALUE, INTENT(in) :: xpoint_mask !< Region mask for X-point search (1 if region can contain X-points, 0 otherwise)
+TYPE(c_ptr), VALUE, INTENT(in) :: coil_nturns !< Number of turns for each coil
+INTEGER(c_int), VALUE, INTENT(in) :: ncoils !< Number of coils
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 real(r8), POINTER :: eta_tmp(:),nturns_tmp(:,:)
 INTEGER(i4), POINTER :: contig_tmp(:)
@@ -288,7 +288,7 @@ ELSE
 END IF
 END SUBROUTINE tokamaker_setup_regions
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Destroy TokaMaker wrapper object and associated device object
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_destroy(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_destroy")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
@@ -317,7 +317,7 @@ END IF
 DEALLOCATE(tMaker_obj)
 END SUBROUTINE tokamaker_destroy
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Destroy TokaMaker equilibrium object
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_equil_destroy(tMaker_equil_ptr,error_str) BIND(C,NAME="tokamaker_equil_destroy")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
@@ -328,14 +328,14 @@ CALL tMaker_equil_obj%delete()
 DEALLOCATE(tMaker_equil_obj)
 END SUBROUTINE tokamaker_equil_destroy
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Complete setup of TokaMaker device/wrapper object and build FE representation
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< FE order for Lagrange elements
-LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Needs docs
-INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Needs docs
-TYPE(c_ptr), INTENT(out) :: coil_Lmat !< Needs docs
+LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Plasma covers full domain (eg. fixed-boundary solves)?
+INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Number of coils in model
+TYPE(c_ptr), INTENT(out) :: coil_Lmat !< Pointer to coil inductance matrix
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 REAL(8) :: theta
@@ -424,7 +424,7 @@ CALL copy_string_rev(f_NI_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%I_NI)
 END SUBROUTINE tokamaker_load_profiles
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Initialize \f$ \psi \f$ using a uniform or specified current source
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str) BIND(C,NAME="tokamaker_init_psi")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
@@ -449,11 +449,12 @@ END IF
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 END SUBROUTINE tokamaker_init_psi
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Perform nonlinear solve to find equilibrium solution for given profiles, targets, etc.
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,error_str) BIND(C,NAME="tokamaker_solve")
+SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,nl_its,error_str) BIND(C,NAME="tokamaker_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Perform vacuum solve?
+INTEGER(c_int), INTENT(out) :: nl_its !< Number of nonlinear iterations
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ntargets,ierr
 LOGICAL :: vac_save
@@ -475,9 +476,10 @@ tMaker_obj%device%timing=0.d0
 CALL tMaker_obj%device%solve(tMaker_obj%gs_equil,ierr)
 IF(vacuum)tMaker_obj%gs_equil%has_plasma=vac_save
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
+nl_its=tMaker_obj%device%nl_its
 END SUBROUTINE tokamaker_solve
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Perform linear solve to find vacuum solution for given BCs and current sources
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_vac_solve(tMaker_ptr,psi_in,rhs_source,error_str) BIND(C,NAME="tokamaker_vac_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
@@ -516,14 +518,14 @@ CALL psi_tmp%delete()
 DEALLOCATE(psi_tmp)
 END SUBROUTINE tokamaker_vac_solve
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Perform an equilibrium reconstruction using TokaMaker
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_recon_run(tMaker_ptr,vacuum,settings,error_flag) BIND(C,NAME="tokamaker_recon_run")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Needs docs
-TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Needs docs
-INTEGER(c_int), INTENT(out) :: error_flag !< Needs docs
-LOGICAL :: fitI,fitP,fit_Pscale,fit_FFPscale,fitR0,fitV0,fitCoils,fitF0,fixedCentering
+LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Reconstruct vacuum equilibrium (no plasma)?
+TYPE(tokamaker_recon_settings_type), VALUE, INTENT(in) :: settings !< Reconstruction settings struct
+INTEGER(c_int), INTENT(out) :: error_flag !< Error flag (0 if no error)
+LOGICAL :: fitI,fitP,fit_Pscale,fit_FFPscale,fitR0,fitZ0,fitCoils,fitF0,fixedCentering
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
 CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -542,7 +544,7 @@ fitP=settings%fitP
 fit_Pscale=settings%fit_Pscale
 fit_FFPscale=settings%fit_FFPscale
 fitR0=settings%fitR0
-fitV0=settings%fitV0
+fitZ0=settings%fitZ0
 fitCoils=settings%fitCoils
 fitF0=settings%fitF0
 fixedCentering=settings%fixedCentering
@@ -553,34 +555,14 @@ CALL copy_string_rev(infile_c,infile)
 CALL copy_string_rev(outfile_c,outfile)
 tMaker_obj%device%timing=0.d0
 CALL fit_gs(tMaker_obj%gs_equil,infile,outfile,fitI,fitP,fit_Pscale,&
-            fit_FFPscale,fitR0,fitV0,fitCoils,fitF0, &
+            fit_FFPscale,fitR0,fitZ0,fitCoils,fitF0, &
             fixedCentering)
 CALL gs_profile_save(TRIM(outfile)//'_fprof',tMaker_obj%gs_equil%I)
 CALL gs_profile_save(TRIM(outfile)//'_pprof',tMaker_obj%gs_equil%P)
 tMaker_obj%gs_equil%has_plasma=.TRUE.
 END SUBROUTINE tokamaker_recon_run
 !---------------------------------------------------------------------------------
-!> Needs docs
-!---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup_td(tMaker_ptr,dt,lin_tol,nl_tol,pre_plasma,error_str) BIND(C,NAME="tokamaker_setup_td")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-REAL(c_double), VALUE, INTENT(in) :: dt !< Time step size
-REAL(c_double), VALUE, INTENT(in) :: lin_tol !< Linear solver tolerance
-REAL(c_double), VALUE, INTENT(in) :: nl_tol !< Nonlinear solver tolerance
-LOGICAL(c_bool), VALUE, INTENT(in) :: pre_plasma !< Include plasma contributions in preconditioner?
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
-IF(ASSOCIATED(tMaker_obj%gs_td))THEN
-  CALL tMaker_obj%gs_td%delete()
-  DEALLOCATE(tMaker_obj%gs_td)
-END IF
-ALLOCATE(tMaker_obj%gs_td)
-CALL tMaker_obj%gs_td%setup(tMaker_obj%gs_equil,dt,lin_tol,nl_tol,LOGICAL(pre_plasma))
-END SUBROUTINE tokamaker_setup_td
-!---------------------------------------------------------------------------------
-!> Needs docs
+!> Compute eigenvalues/eigenvectors of linearized plasma-conductor system
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_eig_td(tMaker_ptr,omega,neigs,eigs,eig_vecs,include_bounds,eta_plasma,pm,error_str) BIND(C,NAME="tokamaker_eig_td")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
@@ -613,7 +595,7 @@ CALL copy_string('Eigenvalue solve requires ARPACK',error_str)
 #endif
 END SUBROUTINE tokamaker_eig_td
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Compute eigenvalues/eigenvectors of conductor (wall) system
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_eig_wall(tMaker_ptr,neigs,eigs,eig_vecs,pm,error_str) BIND(C,NAME="tokamaker_eig_wall")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
@@ -648,7 +630,27 @@ CALL copy_string('Eigenvalue solve requires ARPACK',error_str)
 #endif
 END SUBROUTINE tokamaker_eig_wall
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Setup nonlinear time-dependent solver
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_setup_td(tMaker_ptr,dt,lin_tol,nl_tol,pre_plasma,error_str) BIND(C,NAME="tokamaker_setup_td")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+REAL(c_double), VALUE, INTENT(in) :: dt !< Time step size
+REAL(c_double), VALUE, INTENT(in) :: lin_tol !< Linear solver tolerance
+REAL(c_double), VALUE, INTENT(in) :: nl_tol !< Nonlinear solver tolerance
+LOGICAL(c_bool), VALUE, INTENT(in) :: pre_plasma !< Include plasma contributions in preconditioner?
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+IF(ASSOCIATED(tMaker_obj%gs_td))THEN
+  CALL tMaker_obj%gs_td%delete()
+  DEALLOCATE(tMaker_obj%gs_td)
+END IF
+ALLOCATE(tMaker_obj%gs_td)
+CALL tMaker_obj%gs_td%setup(tMaker_obj%gs_equil,dt,lin_tol,nl_tol,LOGICAL(pre_plasma))
+END SUBROUTINE tokamaker_setup_td
+!---------------------------------------------------------------------------------
+!> Advance the time-dependent solver by one time step
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_step_td(tMaker_ptr,curr_ptr,volt_ptr,time,dt,nl_its,lin_its,nretry,error_str) BIND(C,NAME="tokamaker_step_td")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
@@ -673,7 +675,7 @@ CALL tMaker_obj%gs_td%step(coil_currents,coil_voltages,time,dt,nl_its,lin_its,nr
 DEALLOCATE(coil_currents,coil_voltages)
 END SUBROUTINE tokamaker_step_td
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Build tessellated plotting mesh and return pointers to mesh information
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_mesh(tMaker_ptr,np,r_loc,nc,lc_loc,reg_loc,error_str) BIND(C,NAME="tokamaker_get_mesh")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
@@ -708,7 +710,7 @@ END IF
 reg_loc=c_loc(tMaker_obj%reg_plot)
 END SUBROUTINE tokamaker_get_mesh
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Get limiter geometry information
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_limiter(tMaker_ptr,np,r_loc,nloops,loop_ptr,error_str) BIND(C,NAME="tokamaker_get_limiter")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
@@ -731,7 +733,7 @@ nloops=tMaker_obj%device%lim_nloops
 loop_ptr=C_LOC(tMaker_obj%device%lim_ptr)
 END SUBROUTINE tokamaker_get_limiter
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Get \f$ \psi \f$ values for equilibrium
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_psi(tMaker_equil_ptr,psi_vals,psi_lim,psi_max,error_str) BIND(C,NAME="tokamaker_get_psi")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
@@ -748,7 +750,7 @@ psi_lim = tMaker_equil_obj%plasma_bounds(1)
 psi_max = tMaker_equil_obj%plasma_bounds(2)
 END SUBROUTINE tokamaker_get_psi
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Compute current density from \f$ \psi \f$ using \f$ \Delta^* \psi \f$ operator
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_dels_curr(tMaker_equil_ptr,psi_vals,error_str) BIND(C,NAME="tokamaker_get_dels_curr")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
@@ -784,7 +786,7 @@ CALL minv%delete()
 DEALLOCATE(u,v,minv)
 END SUBROUTINE tokamaker_get_dels_curr
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Compute plasma toroidal current density using G-S RHS source
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_jtor(tMaker_equil_ptr,jtor,error_str) BIND(C,NAME="tokamaker_get_jtor")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
@@ -977,13 +979,13 @@ p_scale=c_loc(tMaker_equil_obj%p_scale)
 has_plasma=c_loc(tMaker_equil_obj%has_plasma)
 END SUBROUTINE tokamaker_get_refs
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Trace a flux surface at specified \f$ \psi \f$ value and return points defining the surface
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_trace_surf(tMaker_equil_ptr,psi_surf,points,npoints,error_str) BIND(C,NAME="tokamaker_trace_surf")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
-REAL(c_double), VALUE, INTENT(in) :: psi_surf !< Needs docs
-TYPE(c_ptr), INTENT(out) ::  points !< Needs docs
-INTEGER(c_int), INTENT(out) :: npoints !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: psi_surf !< Location in normalized flux coordinates to trace surface (eg. 0 for LCFS)
+TYPE(c_ptr), INTENT(out) ::  points !< Points defining surface
+INTEGER(c_int), INTENT(out) :: npoints !< Number of points in contour
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:,:) :: pts_tmp
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
@@ -1239,11 +1241,11 @@ ELSE IF(int_type>=5)THEN
 END IF
 END SUBROUTINE tokamaker_apply_field_eval
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Set \f$ \psi \f$ values in TokaMaker equilibrium object
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_psi(tMaker_equil_ptr,psi_vals,update_bounds,error_str) BIND(C,NAME="tokamaker_set_psi")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
-TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: psi_vals !< New \f$ \psi \f$ values to set in TokaMaker equilibrium object
 LOGICAL(c_bool), VALUE, INTENT(in) :: update_bounds !< Update bounds by determining new limiting points
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
@@ -1297,7 +1299,7 @@ END SUBROUTINE tokamaker_set_psi_dt
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_settings(tMaker_ptr,settings,error_str) BIND(C,NAME="tokamaker_set_settings")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-TYPE(tokamaker_settings_type), INTENT(in) :: settings !< Settings object
+TYPE(tokamaker_settings_type), VALUE, INTENT(in) :: settings !< Settings object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -1315,11 +1317,15 @@ IF((.NOT.tMaker_obj%device%dipole_mode).AND.settings%dipole_mode)CALL oft_warn("
 tMaker_obj%device%dipole_mode=settings%dipole_mode
 IF((.NOT.tMaker_obj%device%mirror_mode).AND.settings%mirror_mode)CALL oft_warn("TokaMaker's mirror functionality is experimental, use with caution and report bugs")
 tMaker_obj%device%mirror_mode=settings%mirror_mode
-CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
-CALL copy_string_rev(limfile_c,tMaker_obj%device%limiter_file)
+IF(c_associated(settings%limiter_file))THEN
+  CALL c_f_pointer(settings%limiter_file,limfile_c,[OFT_PATH_SLEN])
+  CALL copy_string_rev(limfile_c,tMaker_obj%device%limiter_file)
+ELSE
+  tMaker_obj%device%limiter_file="none"
+END IF
 END SUBROUTINE tokamaker_set_settings
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Set parameters for dipole anisotropic pressure profile
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_dipole_a(tMaker_ptr,dipole_a,error_str) BIND(C,NAME="tokamaker_set_dipole_a")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
@@ -1351,7 +1357,7 @@ ELSE
 END IF
 END SUBROUTINE tokamaker_set_dipole_a
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Set parameters for mirror anisotropic pressure profile
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_mirror_slosh(tMaker_ptr,mirror_n,mirror_bturn,mirror_zthroat,error_str) BIND(C,NAME="tokamaker_set_mirror_slosh")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
@@ -1389,37 +1395,37 @@ ELSE
 END IF
 END SUBROUTINE tokamaker_set_mirror_slosh
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Set global target values for equilibrium solve
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,V0_target,error_str) BIND(C,NAME="tokamaker_set_targets")
+SUBROUTINE tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,Z0_target,error_str) BIND(C,NAME="tokamaker_set_targets")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-REAL(c_double), VALUE, INTENT(in) :: ip_target !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: ip_ratio_target !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: pax_target !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: estore_target !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: R0_target !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: V0_target !< Needs docs
+REAL(c_double), VALUE, INTENT(in) :: ip_target !< Target plasma current [A]
+REAL(c_double), VALUE, INTENT(in) :: ip_ratio_target !< Ratio of net plasma current contribution from \f$F F'\f$ compared to \f$ P' \f$
+REAL(c_double), VALUE, INTENT(in) :: pax_target !< Target axis pressure [Pa]
+REAL(c_double), VALUE, INTENT(in) :: estore_target !< Target stored energy [J]
+REAL(c_double), VALUE, INTENT(in) :: R0_target !< Target major radius for magnetic axis
+REAL(c_double), VALUE, INTENT(in) :: Z0_target !< Target vertical position for magnetic axis
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
 tMaker_obj%gs_equil%R0_target=R0_target
-tMaker_obj%gs_equil%V0_target=V0_target
+tMaker_obj%gs_equil%Z0_target=Z0_target
 tMaker_obj%gs_equil%pax_target=pax_target*mu0
 tMaker_obj%gs_equil%estore_target=estore_target*mu0
 tMaker_obj%gs_equil%itor_target=ip_target*mu0
 tMaker_obj%gs_equil%ip_ratio_target=ip_ratio_target
 END SUBROUTINE tokamaker_set_targets
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Sets isoflux targets for a TokaMaker instance
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_isoflux(tMaker_ptr,targets,ref_points,weights,ntargets,grad_wt_lim,error_str) BIND(C,NAME="tokamaker_set_isoflux")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
-REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Needs docs
-REAL(c_double), INTENT(in) :: ref_points(2,ntargets) !< Needs docs
-REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Number of isoflux target points
+REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Isoflux target locations
+REAL(c_double), INTENT(in) :: ref_points(2,ntargets) !< Reference points for isoflux targets
+REAL(c_double), INTENT(in) :: weights(ntargets) !< Weights for isoflux targets
+REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Limit on gradient-based weighting (negative to disable)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
@@ -1437,15 +1443,15 @@ ELSE
 END IF
 END SUBROUTINE tokamaker_set_isoflux
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Sets the flux targets for a TokaMaker instance
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_flux(tMaker_ptr,locations,targets,weights,ntargets,grad_wt_lim,error_str) BIND(C,NAME="tokamaker_set_flux")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
-REAL(c_double), INTENT(in) :: locations(2,ntargets) !< Needs docs
-REAL(c_double), INTENT(in) :: targets(ntargets) !< Needs docs
-REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Number of flux target points
+REAL(c_double), INTENT(in) :: locations(2,ntargets) !< Flux target locations
+REAL(c_double), INTENT(in) :: targets(ntargets) !< Flux target values
+REAL(c_double), INTENT(in) :: weights(ntargets) !< Weights for flux targets
+REAL(c_double), VALUE, INTENT(in) :: grad_wt_lim !< Limit on gradient-based weighting (negative to disable)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
@@ -1463,13 +1469,13 @@ IF(ntargets>0)THEN
 END IF
 END SUBROUTINE tokamaker_set_flux
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Sets the saddle point targets for a TokaMaker instance
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_saddles(tMaker_ptr,targets,weights,ntargets,error_str) BIND(C,NAME="tokamaker_set_saddles")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Needs docs
-REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Needs docs
-REAL(c_double), INTENT(in) :: weights(ntargets) !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: ntargets !< Number of saddle point target points
+REAL(c_double), INTENT(in) :: targets(2,ntargets) !< Saddle point target locations
+REAL(c_double), INTENT(in) :: weights(ntargets) !< Weights for saddle point targets
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
@@ -1483,11 +1489,11 @@ IF(ntargets>0)THEN
 END IF
 END SUBROUTINE tokamaker_set_saddles
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Set coil currents for a TokaMaker instance
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_coil_currents(tMaker_ptr,currents,error_str) BIND(C,NAME="tokamaker_set_coil_currents")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-TYPE(c_ptr), VALUE, INTENT(in) :: currents !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: currents !< Coil currents [A]
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
 INTEGER(4) :: i
 REAL(8) :: curr
@@ -1500,14 +1506,14 @@ tMaker_obj%gs_equil%coil_currs = vals_tmp*mu0
 tMaker_obj%gs_equil%vcontrol_val = 0.d0
 END SUBROUTINE tokamaker_set_coil_currents
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Sets the regularization matrix for coil currents in a TokaMaker instance
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_coil_regmat(tMaker_ptr,nregularize,coil_reg_mat,coil_reg_targets,coil_reg_weights,error_str) BIND(C,NAME="tokamaker_set_coil_regmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-INTEGER(c_int), VALUE, INTENT(in) :: nregularize !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_mat !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_targets !< Needs docs
-TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_weights !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: nregularize !< Number of regularization terms
+TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_mat !< Regularization matrix for coil currents
+TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_targets !< Target values for regularization
+TYPE(c_ptr), VALUE, INTENT(in) :: coil_reg_weights !< Weights for regularization terms
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
 REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
 INTEGER(4) :: i
@@ -1529,11 +1535,11 @@ DO i=1,tMaker_obj%gs_equil%nregularize
 END DO
 END SUBROUTINE tokamaker_set_coil_regmat
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Set hard bounds on coil currents for a TokaMaker instance
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_coil_bounds(tMaker_ptr,coil_bounds,error_str) BIND(C,NAME="tokamaker_set_coil_bounds")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-TYPE(c_ptr), VALUE, INTENT(in) :: coil_bounds !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: coil_bounds !< Hard bounds for each coil's current
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error information
 REAL(8), POINTER, DIMENSION(:,:) :: vals_tmp
 INTEGER(4) :: i
@@ -1550,11 +1556,11 @@ END DO
 tMaker_obj%device%coil_bounds([2,1],tMaker_obj%device%ncoils+1)=-vals_tmp(:,tMaker_obj%device%ncoils+1)*mu0
 END SUBROUTINE tokamaker_set_coil_bounds
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Define virtual VSC coil for a TokaMaker instance as a weighted sum of physical coils
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_coil_vsc(tMaker_ptr,coil_gains,error_str) BIND(C,NAME="tokamaker_set_coil_vsc")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-TYPE(c_ptr), VALUE, INTENT(in) :: coil_gains !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: coil_gains !< Coil weights for virtual VSC coil
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 INTEGER(4) :: i
@@ -1578,21 +1584,21 @@ CALL c_f_pointer(rcoils, rtmp, [tMaker_obj%device%ncoils])
 tMaker_obj%device%Rcoils(1:tMaker_obj%device%ncoils)=rtmp
 END SUBROUTINE tokamaker_set_vcoil
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Save current equilibrium in gEQDSK format
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_save_eqdsk(tMaker_equil_ptr,filename,nr,nz,rbounds,zbounds,run_info,psi_pad,rcentr,trunc_eq,lim_filename,lcfs_press,cocos,error_str) BIND(C,NAME="tokamaker_save_eqdsk")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
-CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: run_info(40) !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: nr !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: nz !< Needs docs
-REAL(c_double), INTENT(in) :: rbounds(2) !< Needs docs
-REAL(c_double), INTENT(in) :: zbounds(2) !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: psi_pad !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: rcentr !< Needs docs
-LOGICAL(c_bool), VALUE, INTENT(in) :: trunc_eq !< Needs docs
-CHARACTER(KIND=c_char), INTENT(in) :: lim_filename(OFT_PATH_SLEN) !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: lcfs_press !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Filename to save equilibrium to
+CHARACTER(KIND=c_char), INTENT(in) :: run_info(40) !< Run information
+INTEGER(c_int), VALUE, INTENT(in) :: nr !< Number of radial grid points
+INTEGER(c_int), VALUE, INTENT(in) :: nz !< Number of vertical grid points
+REAL(c_double), INTENT(in) :: rbounds(2) !< Radial grid bounds
+REAL(c_double), INTENT(in) :: zbounds(2) !< Vertical grid bounds
+REAL(c_double), VALUE, INTENT(in) :: psi_pad !< Padding in normalized flux at LCFS
+REAL(c_double), VALUE, INTENT(in) :: rcentr !< Value to use for Rcentr in gEQDSK file (negative to use equilibrium magnetic axis)
+LOGICAL(c_bool), VALUE, INTENT(in) :: trunc_eq !< Truncate equilibrium at `lcfs_pad`, if `False` \f$ q(\hat{\psi} > 1-pad) = q(1-pad) \f$
+CHARACTER(KIND=c_char), INTENT(in) :: lim_filename(OFT_PATH_SLEN) !< File containing limiter contour to use instead of TokaMaker limiter
+REAL(c_double), VALUE, INTENT(in) :: lcfs_press !< Plasma pressure on the LCFS (zero by default)
 INTEGER(c_int), VALUE, INTENT(in) :: cocos !< COCOS version. (Only 2 or 7 supported. COCOS=7 is the default.)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=40) :: run_info_f
@@ -1613,18 +1619,18 @@ END IF
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_eqdsk
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Save current equilibrium to iFile format
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_save_ifile(tMaker_equil_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str) BIND(C,NAME="tokamaker_save_ifile")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
-CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Needs docs
-INTEGER(c_int), VALUE, INTENT(in) :: ntheta !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: psi_pad !< Needs docs
-REAL(c_double), VALUE, INTENT(in) :: lcfs_press !< Needs docs
-LOGICAL(c_bool), VALUE, INTENT(in) :: pack_lcfs !< Needs docs
-LOGICAL(c_bool), VALUE, INTENT(in) :: single_prec !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Filename to save equilibrium to
+INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Number of radial sampling points
+INTEGER(c_int), VALUE, INTENT(in) :: ntheta !< Number of poloidal sampling points
+REAL(c_double), VALUE, INTENT(in) :: psi_pad !< Padding in normalized flux at LCFS
+REAL(c_double), VALUE, INTENT(in) :: lcfs_press !< Plasma pressure on the LCFS (zero by default)
+LOGICAL(c_bool), VALUE, INTENT(in) :: pack_lcfs !< Pack toward LCFS with quadraturic sampling?
+LOGICAL(c_bool), VALUE, INTENT(in) :: single_prec !< Save single precision file? (default: double precision)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
@@ -1635,29 +1641,57 @@ CALL gs_save_ifile(tMaker_equil_obj,filename_tmp,npsi,ntheta,psi_pad,lcfs_press=
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_ifile
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Save current equilibrium in MUG transfer format
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_save_mug(tMaker_equil_ptr,filename,error_str) BIND(C,NAME="tokamaker_save_mug")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
-CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Needs docs
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Needs docs
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Filename to save equilibrium to
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
+! CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL copy_string_rev(filename,filename_tmp)
+CALL gs_save_mug(tMaker_equil_obj,filename_tmp)
+! CALL copy_string(TRIM(error_flag),error_str)
+END SUBROUTINE tokamaker_save_mug
+!------------------------------------------------------------------------------
+!> Save current equilibrium in native TokaMaker format (eg. for restarting)
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_save_tokamaker(tMaker_equil_ptr,filename,error_str) BIND(C,NAME="tokamaker_save_tokamaker")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Filename to save equilibrium to
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+CALL copy_string_rev(filename,filename_tmp)
+CALL gs_save_tokamaker(tMaker_equil_obj,filename_tmp)
+END SUBROUTINE tokamaker_save_tokamaker
+!------------------------------------------------------------------------------
+!> Load equilibrium from native TokaMaker format
+!------------------------------------------------------------------------------
+SUBROUTINE tokamaker_load_tokamaker(tMaker_equil_ptr,filename,error_str) BIND(C,NAME="tokamaker_load_tokamaker")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
+CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Filename to load equilibrium from
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(filename,filename_tmp)
-CALL gs_save_mug(tMaker_equil_obj,filename_tmp)
+CALL gs_load_tokamaker(tMaker_equil_obj,filename_tmp,error_flag)
 CALL copy_string(TRIM(error_flag),error_str)
-END SUBROUTINE tokamaker_save_mug
+END SUBROUTINE tokamaker_load_tokamaker
 !---------------------------------------------------------------------------
 !> Overwrites default coil flux contribution to non-uniform current distribution
 !------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,dist_pointer,normalize,error_str) BIND(C,NAME="tokamaker_set_coil_current_dist")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-INTEGER(c_int), VALUE, INTENT(in) :: iCoil
-TYPE(c_ptr), VALUE, INTENT(in) :: curr_dist
-TYPE(c_ptr), INTENT(out) :: dist_pointer
-LOGICAL(c_bool), VALUE, INTENT(in) :: normalize
+INTEGER(c_int), VALUE, INTENT(in) :: iCoil !< Coil index
+TYPE(c_ptr), VALUE, INTENT(in) :: curr_dist !< Current distribution for coil
+TYPE(c_ptr), INTENT(out) :: dist_pointer !< Pointer to current distribution (for use in plotting)
+LOGICAL(c_bool), VALUE, INTENT(in) :: normalize !< Normalize distribution to have unit current?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,ic
 REAL(r8) :: norm
