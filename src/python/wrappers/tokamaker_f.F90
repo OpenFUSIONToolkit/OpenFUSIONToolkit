@@ -590,7 +590,7 @@ CALL eig_gs_td(tMaker_equil_obj,neigs,eigs_tmp,eig_vecs_tmp,-omega,LOGICAL(inclu
 oft_env%pm=pm_save
 IF((eigs_tmp(1,1)<-1.d98).AND.(eigs_tmp(2,1)<-1.d98))CALL copy_string('Error in eigenvalue solve',error_str)
 !---Convert eigenvalues from decay rates to growth rates
-eigs_tmp(1,:)=-eigs_tmp(1,:)
+eigs_tmp=-eigs_tmp ! Applied to real and imaginary parts, but imaginary part should be zero
 #else
 CALL copy_string('Eigenvalue solve requires ARPACK',error_str)
 #endif
