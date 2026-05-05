@@ -607,16 +607,36 @@ DO i = 1, self%npsi
   CALL spline_eval(R_spline, self%x(i), 0)
   qtmp(i) = R_spline%f(1) * R_spline%f(2)
 END DO
-!--- 2. Calculate bootstrap current on the self%x grid.
-psi_range = gseq%plasma_bounds(2) - gseq%plasma_bounds(1)
-ALLOCATE(B_times_Jbs(self%npsi), j_BS(self%npsi))
+!--- 2. Bootstrap current on self%x grid.
+ALLOCATE(j_BS(self%npsi))
 CALL gseq%P%update(gseq)
-CALL calculate_bootstrap(gseq, self%npsi, self%x, B_times_Jbs, j_BS)
-DEALLOCATE(B_times_Jbs)
-!--- 3. Axis value (psi_N=1) extrapolated using the last grid point;
-!   clamp to zero if it opposes the average sign of j_BS.
-j_BS_axis = linterp(self%x, j_BS, self%npsi, 1.0_r8, 1)
-IF(SUM(j_BS) * j_BS_axis < 0.0_r8) j_BS_axis = 0.0_r8
+IF(self%freeze_j_BS .AND. ASSOCIATED(self%j_BS_last)) THEN
+  !--- Frozen: reuse cached j_BS.
+  j_BS = self%j_BS_last
+  djBS = 0.0_r8
+ELSE
+  !--- Not frozen: run full bootstrap calculation (Sauter).
+  IF (gseq%boot_ops%isolate_edge_jBS .OR. gseq%boot_ops%parameterize_jBS) THEN
+    ALLOCATE(j_spike_tmp(self%npsi))
+    CALL calculate_bootstrap(gseq, self%npsi, self%x, j_BS, &
+        isolate_edge_jBS=gseq%boot_ops%isolate_edge_jBS, &
+        parameterize_jBS=gseq%boot_ops%parameterize_jBS, &
+        scale_jBS=gseq%boot_ops%scale_jBS, &
+        j_spike=j_spike_tmp)
+    IF(gseq%boot_ops%diagnose_bs)THEN
+      WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         j_BS(bulk)[A/m2]  j_spike[A/m2]   jphi[A/m2]'
+      DO i = 1, self%npsi
+        WRITE(*,'(A,I4,4ES15.5)') '  ', i, self%x(i), j_BS(i), j_spike_tmp(i), self%jphi(i)
+      END DO
+    END IF
+    j_BS = j_spike_tmp
+    DEALLOCATE(j_spike_tmp)
+  ELSE
+    CALL calculate_bootstrap(gseq, self%npsi, self%x, j_BS)
+    j_BS = j_BS * gseq%boot_ops%scale_jBS
+  END IF
+  !   calculate_bootstrap returns j_BS in raw A/m², multiply by mu0.
+  j_BS = j_BS * mu0
 ALLOCATE(jphi_total(self%npsi))
 !--- 4. Secant method to find alpha such that
 !       gs_flux_int((alpha*j_ind + j_BS)/qtmp) = ABS(Itor_target)
@@ -724,6 +744,90 @@ result=oft_mpi_sum(result)
 CALL prof_interp_obj%delete()
 ! DEBUG_STACK_POP
 END SUBROUTINE gs_flux_int
+!------------------------------------------------------------------------------
+!> Computes the bootstrap current on a uniform psi_N grid.
+!>
+!> Translated from Python bootstrap.py: calculate_profiles_and_bootstrap
+!> (up to and including the redl_bootstrap call).
+!>
+!> Fixed conventions: NRL Coulomb logs, Koh ion collisionality model,
+!> Redl 2021 jboot1 form with use_sign_q=.TRUE., L34=L31.
+!>
+!> @param gseq    Equilibrium object (must have Te, Ti, ne, ni, Zeff set)
+!> @param n_psi    Number of flux surface samples
+!> @param psi_N    Normalised psi grid [0,1], arbitrary spacing
+!> @param j_BS Output: average toroidal bootstrap current density [A/m^2] on psi_N grid
+!------------------------------------------------------------------------------
+SUBROUTINE calculate_bootstrap(gseq, n_psi, psi_N, j_BS, &
+                               isolate_edge_jBS, parameterize_jBS, scale_jBS, j_spike)
+CLASS(gs_equil), INTENT(inout) :: gseq
+INTEGER(i4), INTENT(in) :: n_psi
+REAL(r8), INTENT(in) :: psi_N(n_psi)  !< Normalised psi grid [0,1], arbitrary spacing
+REAL(r8), INTENT(out) :: j_BS(n_psi)
+LOGICAL,  OPTIONAL, INTENT(in)  :: isolate_edge_jBS  !< If .TRUE., isolate edge spike from core
+LOGICAL,  OPTIONAL, INTENT(in)  :: parameterize_jBS  !< If .TRUE., use parametrised skew-normal fit
+REAL(r8), OPTIONAL, INTENT(in)  :: scale_jBS         !< Scaling factor applied to spike profile (default 1)
+REAL(r8), OPTIONAL, INTENT(out) :: j_spike(n_psi)    !< Processed spike profile [A/m^2]
+!---
+INTEGER(i4) :: i
+REAL(r8) :: psi_abs(n_psi)
+REAL(r8) :: Te(n_psi), Ti(n_psi), ne(n_psi), ni(n_psi), Zeff(n_psi)
+REAL(r8) :: pe(n_psi), pi_arr(n_psi)
+REAL(r8) :: f(n_psi)        !< I(psi) = R*Bt [T*m]
+REAL(r8) :: fc(n_psi)       !< Circulating fraction
+REAL(r8) :: ft(n_psi)       !< Trapped particle fraction
+REAL(r8) :: eps(n_psi)      !< Inverse aspect ratio
+REAL(r8) :: qvals(n_psi)    !< Safety factor
+REAL(r8) :: R_avg(n_psi)    !< <R> [m] per flux surface
+REAL(r8) :: r_avgs_saut(n_psi,3)    !< Sauter FSA: <R>, <1/R>, <a>
+REAL(r8) :: modb_avgs_saut(n_psi,2) !< Sauter FSA: <|B|>, <|B|^2>
+REAL(r8) :: dn_e_dpsi(n_psi), dT_e_dpsi(n_psi)
+REAL(r8) :: dn_i_dpsi(n_psi), dT_i_dpsi(n_psi)
+REAL(r8) :: ln_le(n_psi), ln_lii(n_psi), Z_lnLam(n_psi)
+REAL(r8) :: Zavg(n_psi), Zion(n_psi)
+REAL(r8) :: nu_i_star(n_psi), nu_e_star(n_psi)
+REAL(r8) :: B_times_Jbs(n_psi)
+REAL(r8) :: psi_range, Zdom
+REAL(r8), PARAMETER :: EC = 1.602176634e-19_r8
+! Locals for optional edge-spike isolation
+LOGICAL  :: do_isolate, do_parametrize
+REAL(r8) :: scl_jBS
+REAL(r8), ALLOCATABLE :: masked_spike(:), parameterized_spike(:)
+! Workspace for psi_N convention flip (OFT: 0=LCFS,1=axis → standard: 0=axis,1=LCFS)
+REAL(r8), ALLOCATABLE :: psi_N_std(:), j_BS_std(:), mask_std(:), param_std(:)
+INTEGER(i4) :: k_flip
+!---
+! Compute raw psi values from the caller-supplied psi_N grid
+psi_range = gseq%plasma_bounds(2) - gseq%plasma_bounds(1)
+psi_abs = gseq%plasma_bounds(1) + psi_N * psi_range
+! Evaluate kinetic profiles on the psi grid; convert Te/Ti from keV to eV
+DO i = 1, n_psi
+  Te(i) = gseq%Te%fp(psi_N(i)) * 1000.0_r8
+  Ti(i) = gseq%Ti%fp(psi_N(i)) * 1000.0_r8
+  ne(i) = gseq%ne%fp(psi_N(i))
+  ni(i) = gseq%ni%fp(psi_N(i))
+END DO
+IF(MAXVAL(Te) > 5.0e5_r8)CALL oft_warn('calculate_bootstrap: max(Te) > 500 keV — profiles should be in keV, not eV')
+IF(MAXVAL(Ti) > 5.0e5_r8)CALL oft_warn('calculate_bootstrap: max(Ti) > 500 keV — profiles should be in keV, not eV')
+Zeff = gseq%boot_ops%Zeff
+IF(gseq%boot_ops%Zeff <= 0.0_r8)CALL oft_abort('Zeff must be set explicitly via set_boot_ops before bootstrap calculation','calculate_bootstrap',__FILE__)
+! Get I(psi) = R*Bt = F(psi) profile on the psi_N grid
+DO i = 1, n_psi
+  IF(gseq%mode==0)THEN
+    f(i) = gseq%ffp_scale * gseq%I%f(psi_abs(i)) + gseq%I%f_offset
+  ELSE
+    f(i) = SQRT(gseq%ffp_scale * gseq%I%f(psi_abs(i)) + gseq%I%f_offset**2) &
+           + gseq%I%f_offset * (1.0_r8 - SIGN(1.0_r8, gseq%I%f_offset))
+  END IF
+END DO
+! Get flux-surface geometry: fc, eps, q, and <R> in one tracing pass
+CALL sauter_fc(gseq, n_psi, psi_N, fc, r_avgs_saut, modb_avgs_saut, qprof=qvals)
+R_avg = r_avgs_saut(:,1)
+! ===================================================================
+ft = 1.0_r8 - fc
+! Pressures [Pa]
+pe = EC * ne * Te
+pi_arr = EC * ni * Ti
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

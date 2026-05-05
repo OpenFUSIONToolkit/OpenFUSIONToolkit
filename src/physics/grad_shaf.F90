@@ -6159,6 +6159,8 @@ real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field \f$<|B|>\
 real(8), optional, intent(out) :: qprof(nr) !< Safety factor q on each surface (avoids a separate gs_get_qprof call)
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi,h,h2,hf,ftu,ftl
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
+character(len=80) :: warn_str
+logical :: edge_trace_failed
 type(oft_lag_brinterp) :: psi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
@@ -6204,9 +6206,26 @@ active_tracer%maxsteps=8e4
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
-ALLOCATE(ptout(3,active_tracer%maxsteps+1))
+edge_trace_failed = .FALSE.
 do j=1,nr
   psi_surf=psi_q(j)*(x2-x1) + x1
+  !--- Axis guard: flux surface degenerates at psi_N=1; prescribe analytically.
+  IF(psi_q(j) == 1.d0)THEN
+    IF(gseq%mode==0)THEN
+      fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
+    ELSE
+      fpol=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
+        + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    END IF
+    r_avgs(j,1)    = raxis
+    r_avgs(j,2)    = 1.d0 / raxis
+    r_avgs(j,3)    = 0.d0
+    modb_avgs(j,1) = ABS(fpol) / raxis
+    modb_avgs(j,2) = (fpol / raxis)**2
+    fc(j)          = 1.d0
+    IF(PRESENT(qprof))   qprof(j)   = MERGE(qprof(j-1), 0.d0, j > 1)
+    CYCLE
+  END IF
   IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN
     active_tracer%tol=1.d-10
   ELSE
@@ -6230,6 +6249,7 @@ do j=1,nr
   if(active_tracer%status/=1)THEN
     WRITE(*,*)j,pt
     CALL oft_warn("sauter_fc: Trace did not complete")
+    IF(j==1) edge_trace_failed = .TRUE.
     CYCLE
   end if
   r_avgs(j,1)=active_tracer%v(3)/active_tracer%v(2)
@@ -6246,9 +6266,21 @@ do j=1,nr
   qpsi = fpol * active_tracer%v(9) / (2*pi)
   IF(PRESENT(qprof)) qprof(j) = qpsi
 end do
+! Edge guard: if psi_q(1) is very close to the separatrix (psi_N < 1e-5) and
+! the field-line trace failed there, copy the geometry from the second surface
+! as the best available approximation.
+IF (nr >= 2 .AND. psi_q(1) < 1.d-8 .AND. edge_trace_failed) THEN
+  fc(1)          = fc(2)
+  r_avgs(1,:)    = r_avgs(2,:)
+  modb_avgs(1,:) = modb_avgs(2,:)
+  IF (PRESENT(qprof))   qprof(1)   = 2*qprof(2) ! <this is totally wrong (q diverges at the separatrix), but better than leaving q=0 at the edge for now
+  IF (PRESENT(qprof)) THEN
+    WRITE(warn_str,'(A,ES10.3)') 'sauter_fc: edge geometry extrapolated from second surface; q unreliable beyond psi_N = ',psi_q(2)
+    CALL oft_warn(TRIM(warn_str))
+  END IF
+END IF
 CALL field%delete
 CALL active_tracer%delete
-DEALLOCATE(ptout)
 CALL psi_int%delete()
 end subroutine sauter_fc
 end module oft_gs
