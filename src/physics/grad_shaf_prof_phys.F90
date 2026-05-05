@@ -647,11 +647,13 @@ ELSE
       self%djBS_no_improve = self%djBS_no_improve + 1
       IF(self%djBS_no_improve >= 2) THEN
         self%freeze_j_BS = .TRUE.
-        IF(djBS > self%djBS_tol) &
-          WRITE(*,'(A,ES12.4,A,ES12.4,A)') &
-            '  [jphi_bs_update] WARNING: Bootstrap solution convergence stalled,' // &
+        IF(djBS > self%djBS_tol) THEN
+          WRITE(char_buf,'(A,ES12.4,A,ES12.4,A)') &
+            'Bootstrap solution convergence stalled,' // &
             ' relative change per nonlinear step = ', djBS, &
             ', above recommended tolerance (djBS_tol=', self%djBS_tol, ')'
+          CALL oft_warn(TRIM(char_buf))
+        END IF
       END IF
     ELSE
       self%djBS_no_improve = 0
@@ -694,27 +696,59 @@ IF(gseq%Itor_target < 0.d0 .AND. .NOT. self%freeze_j_BS) THEN
   END IF
   self%rescale_last = jphi_rescale
 END IF
-    alpha = MAX(-1.0_r8, MIN(3.0_r8, alpha))
+!--- 5. Solve analytically for alpha.
+!   gs_flux_int is linear in alpha; two evaluations (alpha=0 and alpha=1) give
+!   alpha = (Ip_target - Ip_lo) / (Ip_hi - Ip_lo).  Skip once frozen.
+ip_target = ABS(gseq%Itor_target)/jphi_rescale
+IF(self%freeze_j_BS .OR. self%freeze_alpha) THEN
+  !--- Frozen: reuse last converged alpha.
+  alpha = self%alpha_last
+  dalpha = 0.0_r8
+  ip_result_lo = 0.0_r8
+  ip_result_hi = 0.0_r8
+ELSE
+  !--- Not yet frozen: exact linear solve for alpha.
+  jphi_total = j_BS
+  CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result_lo)
+  jphi_total = jphi_ind + j_BS
+  CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result_hi)
+  ip_ind = ip_result_hi - ip_result_lo
+  IF(ABS(ip_ind) > 0.0_r8)THEN
+    alpha = (ip_target - ip_result_lo) / ip_ind
+    IF(alpha < -1.0_r8 .OR. alpha > 10.0_r8) THEN
+      WRITE(char_buf,'(A,ES12.4)') '[jphi_bs_update] WARNING: alpha out of expected range [-1,10]: alpha=', alpha
+      CALL oft_warn(TRIM(char_buf))
+    END IF
   ELSE
-    ! Denominator too small: converged or degenerate
-    EXIT
+    alpha = self%alpha_last
   END IF
-  
-  jphi_total = alpha * self%jphi + j_BS
-  CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result)
-  fc = ip_result - ip_target
-  IF(ABS(fc) < IP_TOL * ip_target) EXIT
-  
-  ! Shift: make the new point the "right" reference, old right becomes "left"
-  alpha_lo = alpha_hi
-  fa = fb
-  alpha_hi = alpha
-  fb = fc
-END DO
-!--- 5. Assemble total jphi and compute F*F'
-jphi_total = alpha * self%jphi + j_BS
+  dalpha = ABS(alpha - self%alpha_last)
+  !--- Freeze alpha on hard tol OR 2 consecutive steps above running minimum; also freeze bootstrap.
+  IF(dalpha < self%dalpha_tol) THEN
+    self%freeze_alpha = .TRUE.
+    self%freeze_j_BS = .TRUE.
+  ELSE IF(dalpha >= self%dalpha_min) THEN
+    self%dalpha_no_improve = self%dalpha_no_improve + 1
+    IF(self%dalpha_no_improve >= 2) THEN
+      self%freeze_alpha = .TRUE.
+      self%freeze_j_BS = .TRUE.
+      IF(dalpha > self%dalpha_tol) THEN
+        WRITE(char_buf,'(A,ES12.4,A,ES12.4,A)') &
+          'Alpha convergence stalled,' // &
+          ' relative change per nonlinear step = ', dalpha, &
+          ', above recommended tolerance (dalpha_tol=', self%dalpha_tol, ')'
+        CALL oft_warn(TRIM(char_buf))
+      END IF
+    END IF
+  ELSE
+    self%dalpha_no_improve = 0
+    self%dalpha_min = dalpha
+  END IF
+END IF
+self%alpha_last = alpha
+!--- 6. Assemble jphi_total and compute F*F' knots.
+jphi_total = alpha * jphi_ind + j_BS
 !--- Pressure scale
-CALL gseq%P%update(gseq)
 IF(ASSOCIATED(gseq%P_ani)) &
   CALL oft_abort('Jphi profiles do not support anisotropic pressure', &
                  'jphi_bs_update',__FILE__)
