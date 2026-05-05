@@ -680,33 +680,20 @@ IF (gseq%boot_ops%taper_edge_jBS) THEN
                         oft_psi_conv=.TRUE.)
 END IF
 ALLOCATE(jphi_total(self%npsi))
-!--- 4. Secant method to find alpha such that
-!       gs_flux_int((alpha*j_ind + j_BS)/qtmp) = ABS(Itor_target)
-!   Note: the objective is linear in alpha (flux integral is linear), so the
-!   secant method converges in one step for exact arithmetic.  We keep a
-!   bracketed fallback and iterate for safety.
-ip_target = ABS(gseq%Itor_target)
-! Evaluate at two initial points: alpha=0 and alpha=1
-alpha_lo = 0.0_r8
-jphi_total = j_BS
-CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result_lo)
-fa = ip_result_lo - ip_target
-
-alpha_hi = 1.0_r8
-jphi_total = self%jphi + j_BS
-CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result_hi)
-fb = ip_result_hi - ip_target
-
-! Secant iterations: iterate as long as fb > fa (moving toward smaller residual).
-! For a linear function, this always converges regardless of bracketing status.
-alpha_lo = 0.0_r8
-alpha_hi = 1.0_r8
-alpha = 0.0_r8
-DO iter = 1, MAX_IT
-  ! Secant step: alpha = alpha_hi - fb * (alpha_hi - alpha_lo) / (fb - fa)
-  IF(ABS(fb - fa) > 1.0e-14_r8)THEN
-    alpha = alpha_hi - fb * (alpha_hi - alpha_lo) / (fb - fa)
-    ! Clamp to avoid wild excursions
+!--- 4. Reconcile gs_itor_nl vs gs_flux_int when Itor_target < 0.
+!   No Ip target: rescale jphi_total so the integrated current matches the
+!   FEM solution (gs_itor_nl) rather than the profile quadrature (gs_flux_int).
+jphi_rescale = self%rescale_last
+IF(gseq%Itor_target < 0.d0 .AND. .NOT. self%freeze_j_BS) THEN
+  CALL gs_itor_nl(gseq, itor_nl)
+  IF(ASSOCIATED(self%jphi_total_last)) THEN
+    CALL gs_flux_int(gseq, self%x, self%jphi_total_last/qtmp, self%npsi, itor_flint)
+    IF(ABS(itor_flint) > 0.d0) THEN
+      jphi_rescale = (itor_nl/itor_flint + self%rescale_last) / 2.0_r8
+    END IF
+  END IF
+  self%rescale_last = jphi_rescale
+END IF
     alpha = MAX(-1.0_r8, MIN(3.0_r8, alpha))
   ELSE
     ! Denominator too small: converged or degenerate
