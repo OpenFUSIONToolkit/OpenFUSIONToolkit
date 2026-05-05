@@ -219,7 +219,7 @@ DO i=1,n
 END DO
 END SUBROUTINE tokamaker_eval_green
 !---------------------------------------------------------------------------------
-!> Setup TokaMaker region representations based on coil, conductor, and other inforamtion
+!> Setup TokaMaker region representations based on coil, conductor, and other information
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_setup_regions(tMaker_ptr,coil_file,reg_eta,contig_flag,xpoint_mask,coil_nturns,ncoils,error_str) BIND(C,NAME="tokamaker_setup_regions")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object

@@ -1924,17 +1924,28 @@ class TokaMaker_equilibrium():
             self._saddle_targets = None
         else:
             self._F0 = copy.copy(source_eq._F0)
-            if not skip_targets:
+            if skip_targets:
+                self._Ip_target = None
+                self._Ip_ratio_target = None
+                self._pax_target = None
+                self._estored_target = None
+                self._R0_target = None
+                self._Z0_target = None
+            else:
                 self._Ip_target = source_eq._Ip_target
                 self._Ip_ratio_target = source_eq._Ip_ratio_target
                 self._pax_target = source_eq._pax_target
                 self._estored_target = source_eq._estored_target
                 self._R0_target = source_eq._R0_target
                 self._Z0_target = source_eq._Z0_target
-            if not skip_constraints:
+            if skip_constraints:
+                self._isoflux_constraints = None
+                self._saddle_targets = None
+                self._psi_constraints = None
+            else:
                 self._isoflux_constraints = source_eq._isoflux_constraints.copy() if source_eq._isoflux_constraints is not None else None
                 self._saddle_targets = source_eq._saddle_targets.copy() if source_eq._saddle_targets is not None else None
-            self._psi_constraints = (source_eq._psi_constraints[0].copy(), source_eq._psi_constraints[1].copy()) if source_eq._psi_constraints is not None else None
+                self._psi_constraints = (source_eq._psi_constraints[0].copy(), source_eq._psi_constraints[1].copy()) if source_eq._psi_constraints is not None else None
         ## Normalized flux convention (0 -> tokamak, 1 -> spheromak)
         self.psi_convention = self._tMaker.psi_convention
         ## Free or fixed boundary flag
