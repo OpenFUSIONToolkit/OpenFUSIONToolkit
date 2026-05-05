@@ -45,7 +45,7 @@ mu_0 = 4.0 * np.pi * 1e-7
 RELAX_FIXED_DT = 0.01
 # EQDSK sampling for ``save_eqdsk`` when validating with TORAX in ``_run_tm``:
 # start at nr=nz=100, increase by 50 up to 350 (six attempts).
-EQDSK_SAVE_NR_NZ_SEQUENCE = (100, 150, 200, 250, 300, 350)
+EQDSK_SAVE_NR_NZ_SEQUENCE = (100, 150, 200, 250, 300, 350, 400, 450, 500)
 # Default TORAX radial face count for loop 0 coarse runs (evenly spaced normalized rho).
 DEFAULT_LOOP0_TX_FACE_POINTS = 51
 
@@ -2706,7 +2706,7 @@ class TokTox:
         self._state['f_prof_tm'][i] =   {'x': self._psi_N.copy(), 'y': np.interp(self._psi_N, tm_psi, tm_f_prof), 'type': 'linterp'}
 
         # pull geo profiles
-        psi_geo, q_tm, geo, _, _, _ = self._state['equil'][i].get_q(npsi=N_PSI, psi_pad=0.02)
+        psi_geo, q_tm, geo, _, _, _ = self._state['equil'][i].get_q(npsi=N_PSI, psi_pad=1-self._last_surface_factor)
 
         self._state['q0_tm'][i] = q_tm[0] if len(q_tm) > 0 else np.nan
         self._state['q95_tm'][i] = np.interp(0.95, psi_geo, q_tm) if len(psi_geo) > 0 and len(q_tm) > 0 else np.nan
@@ -3815,7 +3815,7 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
             ax_pp_tm.legend(lines1 + lines2, labels1 + labels2, fontsize=7, loc='upper left')
 
         try:
-            psi_geo, q_tm_vals, _, _, _, _ = tt._tm.get_q(npsi=len(tt._psi_N), psi_pad=0.02)
+            psi_geo, q_tm_vals, _, _, _, _ = tt._tm.get_q(npsi=len(tt._psi_N), psi_pad=1-tt._last_surface_factor)
             ax_q_tm.plot(psi_geo, q_tm_vals, 'r--', linewidth=2, label='TokaMaker')
         except Exception:
             pass
