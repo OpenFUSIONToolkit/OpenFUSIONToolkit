@@ -55,7 +55,19 @@ type, extends(linterp_flux_func) :: jphi_flux_func
   integer(4) :: ngeom = 50 !< Number of points in psi for <R>, <1/R> evaluation
   real(8) :: j0 = 0.d0 !< LCFS Jphi value
   real(8) :: norm_last = 1.d0 !< Last Jphi normalization factor (for Ip target)
+  real(8) :: alpha_last = 1.d0 !< Alpha (input Jphi rescaling factor) from previous NL iteration
+  real(8) :: rescale_last = 1.d0 !< Damped jphi_rescale from previous NL iteration, to ensure Ip target is met
+  logical :: freeze_j_BS = .FALSE. !< Set .TRUE. once j_BS stagnates for 2 steps; skips Sauter call (big speedup)
+  logical :: freeze_alpha = .FALSE.   !< Set .TRUE. once dalpha stagnates for 2 steps; skips alpha re-solve (speedup)
+  real(8) :: djBS_tol = 1.0e-6_r8    !< Hard RMS tolerance; freeze immediately if djBS drops below this
+  real(8) :: dalpha_tol = 1.0e-6_r8  !< Hard tolerance; freeze alpha immediately if dalpha drops below this
+  integer(4) :: djBS_no_improve = 0   !< Consecutive steps with non-decreasing djBS
+  real(8) :: djBS_min = huge(1.0d0)  !< Running minimum djBS seen so far
+  integer(4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
+  real(8) :: dalpha_min = huge(1.0d0) !< Running minimum dalpha seen so far
   real(8), pointer, dimension(:) :: jphi => NULL() !< Jphi(psi) profile values
+  real(8), pointer, dimension(:) :: jphi_total_last => NULL() !< Assembled jphi_total from previous NL iteration
+  real(8), pointer, dimension(:) :: j_BS_last => NULL() !< j_BS profile from previous NL iteration (for freeze check)
   !> Update mode selector: 0 = inductive only (default), 1 = bootstrap-coupled
   integer(4) :: update_mode = 0
 contains
@@ -406,8 +418,21 @@ SELECT TYPE(new)
     new%f_offset=self%f_offset
     new%ngeom = self%ngeom
     new%j0 = self%j0
+    new%norm_last = self%norm_last
+    new%alpha_last = self%alpha_last
+    new%rescale_last = self%rescale_last
+    new%freeze_j_BS = self%freeze_j_BS
+    new%freeze_alpha = self%freeze_alpha
+    new%djBS_tol = self%djBS_tol
+    new%dalpha_tol = self%dalpha_tol
+    new%djBS_no_improve = self%djBS_no_improve
+    new%djBS_min = self%djBS_min
+    new%dalpha_no_improve = self%dalpha_no_improve
+    new%dalpha_min = self%dalpha_min
     new%update_mode = self%update_mode
     ALLOCATE(new%jphi, SOURCE=self%jphi)
+    IF(ASSOCIATED(self%jphi_total_last)) ALLOCATE(new%jphi_total_last, SOURCE=self%jphi_total_last)
+    IF(ASSOCIATED(self%j_BS_last)) ALLOCATE(new%j_BS_last, SOURCE=self%j_BS_last)
 END SELECT
 end subroutine jphi_copy
 !------------------------------------------------------------------------------
@@ -418,12 +443,11 @@ end subroutine jphi_copy
 subroutine jphi_update(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
-SELECT CASE(self%update_mode)
-  CASE(1)
-    CALL jphi_bs_update(self,gseq)
-  CASE DEFAULT
-    CALL jphi_update_default(self,gseq)
-END SELECT
+IF(self%update_mode==1 .AND. gseq%Itor_target<=0.d0)THEN
+  CALL jphi_bs_update(self,gseq)
+ELSE
+  CALL jphi_update_default(self,gseq)
+END IF
 end subroutine jphi_update
 !------------------------------------------------------------------------------
 !> Build the <R> / <1/R> spline needed for jphi -> F*F' mapping.
@@ -497,15 +521,11 @@ IF(gseq%Itor_target>0.d0)THEN
   DEALLOCATE(qtmp)
   jphi_norm=ABS(gseq%Itor_target)/jphi_norm
   self%norm_last=jphi_norm
-  ! WRITE(*,*)'Ip flux: ',jphi_norm
 ELSE
   CALL gs_itor_nl(gseq,jphi_norm)
   jphi_norm=(ABS(gseq%Itor_target)*mu0/jphi_norm + self%norm_last)/2.d0
   self%norm_last=jphi_norm
-  ! WRITE(*,*)'Ip NL: ',jphi_norm
 END IF
-! jphi_norm=ABS(gseq%Itor_target)/jphi_norm
-! WRITE(*,*)'Ip flux: ',jphi_norm
 !---Get pressure profile
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__) !CALL gseq%P_ani%update(gseq)
