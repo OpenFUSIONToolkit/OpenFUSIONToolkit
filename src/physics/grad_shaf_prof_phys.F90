@@ -579,6 +579,7 @@ REAL(r8) :: alpha, ip_target, ip_ind, ip_result_lo, ip_result_hi, dalpha
 REAL(r8) :: djBS
 ! gs_itor_nl / gs_flux_int reconciliation
 REAL(r8) :: itor_nl = 0.0_r8, itor_flint = 0.0_r8, jphi_rescale
+CHARACTER(len=80) :: char_buf
 !---
 self%plasma_bounds = gseq%plasma_bounds
 IF(gseq%mode/=1) &
@@ -634,6 +635,12 @@ ELSE
   ELSE
     CALL calculate_bootstrap(gseq, self%npsi, self%x, j_BS)
     j_BS = j_BS * gseq%boot_ops%scale_jBS
+    IF(gseq%boot_ops%diagnose_bs)THEN
+      WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         j_BS[A/m2]      jphi[A/m2]'
+      DO i = 1, self%npsi
+        WRITE(*,'(A,I4,3ES15.5)') '  ', i, self%x(i), j_BS(i), self%jphi(i)
+      END DO
+    END IF
   END IF
   !   calculate_bootstrap returns j_BS in raw A/m², multiply by mu0.
   j_BS = j_BS * mu0
@@ -748,6 +755,8 @@ END IF
 self%alpha_last = alpha
 !--- 6. Assemble jphi_total and compute F*F' knots.
 jphi_total = alpha * jphi_ind + j_BS
+IF(.NOT.ASSOCIATED(self%jphi_total_last)) ALLOCATE(self%jphi_total_last(self%npsi))
+self%jphi_total_last = jphi_total
 !--- Pressure scale
 IF(ASSOCIATED(gseq%P_ani)) &
   CALL oft_abort('Jphi profiles do not support anisotropic pressure', &
@@ -769,7 +778,29 @@ CALL spline_dealloc(R_spline)
 ! Disable Ip matching; scale is enforced above.
 IF(gseq%Itor_target>0.d0)gseq%Itor_target=-gseq%Itor_target
 gseq%ffp_scale=1.d0
-i = self%set_cofs(self%yp)
+!--- 7. Diagnostics.
+IF(gseq%boot_ops%diagnose_bs)THEN
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] ip_target   = ', ip_target
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] ip_result_lo= ', ip_result_lo
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] ip_result_hi= ', ip_result_hi
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] alpha       = ', alpha
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] dalpha      = ', dalpha
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] djBS        = ', djBS
+  WRITE(*,'(A,L1)')     '  [jphi_bs_update] bs_frozen   = ', self%freeze_j_BS
+  WRITE(*,'(A,L1)')     '  [jphi_bs_update] freeze_alpha= ', self%freeze_alpha
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] j_BS max    = ', MAXVAL(ABS(j_BS))
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi max    = ', MAXVAL(ABS(self%jphi))
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi_rescale= ', jphi_rescale
+  !--- Side-by-side Ip comparison: FEM nonlinear solve vs profile flux integral
+  CALL gs_itor_nl(gseq, itor_nl)
+  CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, itor_flint)
+  WRITE(*,'(A)') '  [jphi_bs_update] --- Ip comparison (current jphi_total) ---'
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] Ip(gs_itor_nl)    = ', itor_nl/mu0
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] Ip(flux_int/qtmp) = ', itor_flint/mu0
+END IF
+!--- Clean up
+DEALLOCATE(j_BS, jphi_total, jphi_ind, qtmp)
+i=self%set_cofs(self%yp)
 END SUBROUTINE jphi_bs_update
 !------------------------------------------------------------------------------
 !> Apply a smooth edge taper to an array, zeroing it at the plasma edge.
