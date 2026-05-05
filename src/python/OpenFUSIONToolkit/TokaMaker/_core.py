@@ -1755,7 +1755,7 @@ class TokaMaker():
 
         @param nmodes Number of modes to compute
         @param pm Print solver statistics and raw eigenvalues?
-        @result \f$ \Tau_{L/R} \f$ [nmodes], eigenvectors [nmodes,self.np]
+        @result L/R time constants \f$ \tau_{L/R} \f$ [nmodes], eigenvectors [nmodes,self.np]
         '''
         eig_vals = numpy.zeros((nmodes,2),dtype=numpy.float64)
         eig_vecs = numpy.zeros((nmodes,self.np),dtype=numpy.float64)
