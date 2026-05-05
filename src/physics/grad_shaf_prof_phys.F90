@@ -637,6 +637,32 @@ ELSE
   END IF
   !   calculate_bootstrap returns j_BS in raw A/m², multiply by mu0.
   j_BS = j_BS * mu0
+  !--- 2a. Freeze check: freeze j_BS if RMS change drops below tol, or stagnates.
+  IF(ASSOCIATED(self%j_BS_last)) THEN
+    djBS = SQRT(SUM((j_BS - self%j_BS_last)**2) / REAL(self%npsi,r8)) / &
+           MAX(SQRT(SUM(j_BS**2) / REAL(self%npsi,r8)), 1.0e-30_r8)
+    IF(djBS < self%djBS_tol .OR. self%freeze_alpha) THEN
+      self%freeze_j_BS = .TRUE.
+    ELSE IF(djBS >= self%djBS_min) THEN
+      self%djBS_no_improve = self%djBS_no_improve + 1
+      IF(self%djBS_no_improve >= 2) THEN
+        self%freeze_j_BS = .TRUE.
+        IF(djBS > self%djBS_tol) &
+          WRITE(*,'(A,ES12.4,A,ES12.4,A)') &
+            '  [jphi_bs_update] WARNING: Bootstrap solution convergence stalled,' // &
+            ' relative change per nonlinear step = ', djBS, &
+            ', above recommended tolerance (djBS_tol=', self%djBS_tol, ')'
+      END IF
+    ELSE
+      self%djBS_no_improve = 0
+      self%djBS_min = djBS
+    END IF
+  ELSE
+    djBS = HUGE(1.0_r8)
+  END IF
+  IF(.NOT.ASSOCIATED(self%j_BS_last)) ALLOCATE(self%j_BS_last(self%npsi))
+  self%j_BS_last = j_BS
+END IF
 ALLOCATE(jphi_total(self%npsi))
 !--- 4. Secant method to find alpha such that
 !       gs_flux_int((alpha*j_ind + j_BS)/qtmp) = ABS(Itor_target)
