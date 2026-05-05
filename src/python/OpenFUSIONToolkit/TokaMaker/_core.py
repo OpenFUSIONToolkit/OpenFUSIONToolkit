@@ -1752,7 +1752,7 @@ class TokaMaker():
 
         @param filename Filename to save equilibrium to
         @param npsi Number of radial sampling points
-        @param ntheta Number of vertical sampling points
+        @param ntheta Number of poloidal sampling points
         @param lcfs_pad Padding in normalized flux at LCFS
         @param lcfs_pressure Plasma pressure on the LCFS (zero by default)
         @param pack_lcfs Pack toward LCFS with quadraturic sampling?

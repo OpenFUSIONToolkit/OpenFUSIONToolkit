@@ -394,7 +394,7 @@ subroutine jphi_save_hdf5(self,filename,path)
 class(jphi_flux_func), intent(inout) :: self
 character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
-IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('jphi',filename,path//'/TYPE')
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('jphi-linterp',filename,path//'/TYPE')
 CALL hdf5_write(self%npsi,filename,path//'/NPSI')
 CALL hdf5_write(self%x,filename,path//'/XVALS')
 CALL hdf5_write(self%jphi,filename,path//'/YVALS')
@@ -406,7 +406,7 @@ end subroutine jphi_save_hdf5
 subroutine jphi_save_txt(self,io_unit)
 class(jphi_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'jphi'
+WRITE(io_unit,*)'jphi-linterp'
 WRITE(io_unit,*)self%npsi,self%j0
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%jphi
