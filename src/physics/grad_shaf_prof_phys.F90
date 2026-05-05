@@ -663,6 +663,22 @@ ELSE
   IF(.NOT.ASSOCIATED(self%j_BS_last)) ALLOCATE(self%j_BS_last(self%npsi))
   self%j_BS_last = j_BS
 END IF
+!--- 3. Apply edge taper to j_BS and jphi_ind.
+!   self%j_BS_last caches the un-tapered j_BS so freeze comparisons track physics.
+!   taper_edge_psi0 is in standard convention (0=axis,1=LCFS);
+!   threshold in OFT convention (0=LCFS,1=axis) is (1 - taper_edge_psi0).
+ALLOCATE(jphi_ind(self%npsi))
+jphi_ind = self%jphi
+IF (gseq%boot_ops%taper_edge_jBS) THEN
+  CALL apply_edge_taper(self%npsi, self%x, j_BS, &
+                        1.0_r8 - gseq%boot_ops%taper_edge_psi0, &
+                        gseq%boot_ops%taper_edge_shape, &
+                        oft_psi_conv=.TRUE.)
+  CALL apply_edge_taper(self%npsi, self%x, jphi_ind, &
+                        1.0_r8 - gseq%boot_ops%taper_edge_psi0, &
+                        gseq%boot_ops%taper_edge_shape, &
+                        oft_psi_conv=.TRUE.)
+END IF
 ALLOCATE(jphi_total(self%npsi))
 !--- 4. Secant method to find alpha such that
 !       gs_flux_int((alpha*j_ind + j_BS)/qtmp) = ABS(Itor_target)
@@ -737,6 +753,70 @@ CALL spline_dealloc(R_spline)
 DEALLOCATE(j_BS, jphi_total, qtmp)
 i = self%set_cofs(self%yp)
 END SUBROUTINE jphi_bs_update
+!------------------------------------------------------------------------------
+!> Apply a smooth edge taper to an array, zeroing it at the plasma edge.
+!>
+!> @param n          Number of grid points
+!> @param psi        Normalised psi grid
+!> @param arr        Array to taper (modified in-place)
+!> @param psi0       psi value (in the grid's own convention) where taper begins
+!> @param shape      Taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
+!> @param oft_psi_conv  If .TRUE., psi uses OFT internal convention (0=LCFS, 1=axis)
+!>                      and psi0 should be the OFT threshold (= 1 - standard psi0).
+!>                      Taper then acts on points where psi <= psi0.
+!>                      If .FALSE. (default), standard convention (0=axis, 1=LCFS),
+!>                      taper acts on points where psi >= psi0.
+!------------------------------------------------------------------------------
+SUBROUTINE apply_edge_taper(n, psi, arr, psi0, shape, oft_psi_conv)
+INTEGER(i4), INTENT(in)    :: n
+REAL(r8),    INTENT(in)    :: psi(n)
+REAL(r8),    INTENT(inout) :: arr(n)
+REAL(r8),    INTENT(in)    :: psi0
+INTEGER(i4), INTENT(in)    :: shape
+LOGICAL,     OPTIONAL, INTENT(in) :: oft_psi_conv
+!---
+INTEGER(i4) :: i
+LOGICAL     :: do_oft
+REAL(r8)    :: t_taper, w_taper, span
+CHARACTER(len=80) :: char_buf
+REAL(r8), PARAMETER :: HALF_PI = 1.5707963267948966_r8
+do_oft = .FALSE.
+IF (PRESENT(oft_psi_conv)) do_oft = oft_psi_conv
+! Taper width: distance from threshold to the plasma edge.
+! OFT convention: edge at psi=0, so width = psi0.
+! Standard convention: edge at psi=1, so width = 1 - psi0.
+IF (do_oft) THEN
+  span = psi0
+ELSE
+  span = 1.0_r8 - psi0
+END IF
+IF (span < 1.0e-6_r8) RETURN
+DO i = 1, n
+  IF (do_oft) THEN
+    ! OFT convention: edge at psi=0, taper region is psi in [0, psi0]
+    IF (psi(i) > psi0) CYCLE
+    t_taper = (psi0 - psi(i)) / span
+  ELSE
+    ! Standard convention: edge at psi=1, taper region is psi in [psi0, 1]
+    IF (psi(i) < psi0) CYCLE
+    t_taper = (psi(i) - psi0) / span
+  END IF
+  t_taper = MIN(MAX(t_taper, 0.0_r8), 1.0_r8)
+  SELECT CASE (shape)
+    CASE (1)  ! cos² / Hann
+      w_taper = COS(HALF_PI * t_taper)**2
+    CASE (2)  ! quintic smoothstep
+      w_taper = 1.0_r8 - t_taper**3*(6.0_r8*t_taper**2 - 15.0_r8*t_taper + 10.0_r8)
+    CASE (3)  ! cubic power decay
+      w_taper = (1.0_r8 - t_taper)**3
+    CASE DEFAULT
+      WRITE(char_buf,'(A,I0,A)') 'apply_edge_taper: unknown taper shape=', shape, '; no taper applied'
+      CALL oft_warn(TRIM(char_buf))
+      w_taper = 1.0_r8
+  END SELECT
+  arr(i) = arr(i) * w_taper
+END DO
+END SUBROUTINE apply_edge_taper
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
