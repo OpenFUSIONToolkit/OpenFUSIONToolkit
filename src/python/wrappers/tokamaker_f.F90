@@ -451,9 +451,10 @@ END SUBROUTINE tokamaker_init_psi
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,error_str) BIND(C,NAME="tokamaker_solve")
+SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,nl_its,error_str) BIND(C,NAME="tokamaker_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Perform vacuum solve?
+INTEGER(c_int), INTENT(out) :: nl_its !< Number of nonlinear iterations
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ntargets,ierr
 LOGICAL :: vac_save
@@ -475,6 +476,7 @@ tMaker_obj%device%timing=0.d0
 CALL tMaker_obj%device%solve(tMaker_obj%gs_equil,ierr)
 IF(vacuum)tMaker_obj%gs_equil%has_plasma=vac_save
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
+nl_its=tMaker_obj%device%nl_its
 END SUBROUTINE tokamaker_solve
 !---------------------------------------------------------------------------------
 !> Needs docs

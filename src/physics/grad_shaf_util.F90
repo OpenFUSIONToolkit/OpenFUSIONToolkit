@@ -412,6 +412,7 @@ REAL(r8) :: pt_tmp(2),scale_tmp,diff_val
 real(r8), pointer :: vals_tmp(:)
 logical :: success,pm_save,logical_tmp
 CHARACTER(LEN=:), ALLOCATABLE :: profType
+error_string=''
 ! CALL hdf5_write(self%device%fe_rep%mesh%r,filename,'mesh/R')
 ! CALL hdf5_write(self%device%fe_rep%mesh%lc,filename,'mesh/LC')
 !---Check compatibility of mesh and FE representation

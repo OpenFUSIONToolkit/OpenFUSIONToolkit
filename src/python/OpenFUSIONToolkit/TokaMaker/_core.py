@@ -745,17 +745,22 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_resistivity(eta_prof)
 
-    def solve(self, vacuum=False):
+    def solve(self, vacuum=False, return_its=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.
         
         @param vacuum Perform vacuum solve? Plasma-related targets (eg. `Ip`) will be ignored.
+        @param return_its Return the number of nonlinear iterations?
         @result Equilibrium object
         '''
+        nl_its = c_int()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),error_string)
+        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),ctypes.byref(nl_its),error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
-        return self.copy_eq()
+        if return_its:
+            return self.copy_eq(), nl_its.value
+        else:
+            return self.copy_eq()
     
     def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
@@ -1135,7 +1140,7 @@ class TokaMaker():
         if source_eq is not None:
             if source_file is not None:
                 raise ValueError("Cannot specify both `source_eq` and `source_file`")
-            self._tMaker_equil = TokaMaker_equilibrium(source_eq=source_eq,skip_targets=skip_targets,skip_constraints=skip_constraints)
+            tmp_eq = TokaMaker_equilibrium(source_eq=source_eq,skip_targets=skip_targets,skip_constraints=skip_constraints)
         elif source_file is not None:
             tmp_eq = TokaMaker_equilibrium(source_eq=self._tMaker_equil,skip_targets=skip_targets,skip_constraints=skip_constraints)
             cfilename = self._oft_env.path2c(source_file)
@@ -1143,9 +1148,13 @@ class TokaMaker():
             tokamaker_load_tokamaker(tmp_eq.c_ptr,cfilename,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
-            self._tMaker_equil = tmp_eq
         else:
             raise ValueError("Must specify either `source_eq` or `source_file`")
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_equil_set(self._tMaker_ptr,tmp_eq.c_ptr,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        self._tMaker_equil = tmp_eq
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
