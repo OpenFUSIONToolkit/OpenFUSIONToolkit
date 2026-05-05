@@ -52,7 +52,7 @@ end type mercier_flux_func
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(linterp_flux_func) :: jphi_flux_func
-  integer(4) :: ngeom = 100 !< Number of points in psi for <R>, <1/R> evaluation
+  integer(4) :: ngeom = 50 !< Number of points in psi for <R>, <1/R> evaluation
   real(8) :: j0 = 0.d0 !< LCFS Jphi value
   real(8) :: norm_last = 1.d0 !< Last Jphi normalization factor (for Ip target)
   real(8), pointer, dimension(:) :: jphi => NULL() !< Jphi(psi) profile values
