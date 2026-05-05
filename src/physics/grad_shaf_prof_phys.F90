@@ -755,10 +755,9 @@ IF(ASSOCIATED(gseq%P_ani)) &
 pscale = gseq%P%f(gseq%plasma_bounds(2))
 pscale = gseq%pax_target / pscale
 !--- Compute updated F*F' profile
-CALL spline_eval(R_spline, 0.d0, 0)
+CALL spline_eval(R_spline, 0.d0, 0) ! LCFS point for y0 calculation
 pprime = gseq%P%fp(gseq%plasma_bounds(1))
-self%y0 = 2.d0*((alpha*self%j0 + j_BS_axis) - &
-           R_spline%f(1)*pprime*pscale)/R_spline%f(2)
+self%y0 = 2.d0*(self%j0*alpha - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 DO i = 1, self%npsi
   CALL spline_eval(R_spline, self%x(i), 0)
   pprime = gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2) - &
@@ -766,12 +765,10 @@ DO i = 1, self%npsi
                                   gseq%plasma_bounds(1))
   self%yp(i) = 2.d0*(jphi_total(i) - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 END DO
-! Disable Ip matching and fix F*F' scale (matching is done here instead)
-IF(gseq%Itor_target > 0.d0) gseq%Itor_target = -gseq%Itor_target
-gseq%ffp_scale = 1.d0
-!--- Clean up
 CALL spline_dealloc(R_spline)
-DEALLOCATE(j_BS, jphi_total, qtmp)
+! Disable Ip matching; scale is enforced above.
+IF(gseq%Itor_target>0.d0)gseq%Itor_target=-gseq%Itor_target
+gseq%ffp_scale=1.d0
 i = self%set_cofs(self%yp)
 END SUBROUTINE jphi_bs_update
 !------------------------------------------------------------------------------
