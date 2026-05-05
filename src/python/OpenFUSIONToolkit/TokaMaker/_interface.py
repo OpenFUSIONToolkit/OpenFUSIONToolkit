@@ -11,21 +11,8 @@
 '''
 from .._interface import *
 
-
-class tokamaker_settings_struct(c_struct):
-    r'''! TokaMaker settings structure
-
-     - `pm` Print 'performance' information (eg. iteration count) during run?
-     - `free_boundary` Perform free-boundary calculation?
-     - `limited_only` Do not search for X-points when determining LCFS?
-     - `maxits` Maximum NL iteration count for G-S solver
-     - `mode` Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
-     - `urf` Under-relaxation factor for NL fixed-point iteration
-     - `nl_tol` Convergence tolerance for NL solver
-     - `rmin` Minimum magnetic axis major radius, used to catch 'lost' equilibria
-     - `lim_zmax` Maximum vertical range for limiter points, can be used to exclude complex diverter regions
-     - `limiter_file` File containing additional limiter points not included in mesh (default: 'none')
-    '''
+## @cond
+class tokamaker_settings_cstruct(c_struct):
     _fields_ = [("pm", c_bool),
                 ("free_boundary", c_bool),
                 ("limited_only", c_bool),
@@ -39,8 +26,6 @@ class tokamaker_settings_struct(c_struct):
                 ("lim_zmax", c_double),
                 ("limiter_file", ctypes.c_char_p)]
 
-
-## @cond
 # tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str)
 tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr, c_void_p, c_char_p])
@@ -77,9 +62,9 @@ tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double_ptr, c_char_p])
 
-# tokamaker_solve(tMaker_ptr,vacuum,error_str)
+# tokamaker_solve(tMaker_ptr,vacuum,nl_its,error_str)
 tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve, 
-    [c_void_p, c_bool, c_char_p])
+    [c_void_p, c_bool, c_int_ptr, c_char_p])
 
 # tokamaker_vac_solve(tMaker_ptr,psi_in,rhs_source,error_str)
 tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve, 
@@ -192,7 +177,7 @@ tokamaker_set_psi_dt = ctypes_subroutine(oftpy_lib.tokamaker_set_psi_dt,
 
 # tokamaker_set_settings(tMaker_ptr,settings,error_str)
 tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,
-    [c_void_p, ctypes.POINTER(tokamaker_settings_struct), c_char_p])
+    [c_void_p, tokamaker_settings_cstruct, c_char_p])
 
 # tokamaker_set_dipole_a(tMaker_ptr,dipole_a,error_str)
 tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,
@@ -202,7 +187,7 @@ tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,
 tokamaker_set_mirror_slosh = ctypes_subroutine(oftpy_lib.tokamaker_set_mirror_slosh,
     [c_void_p, c_double, c_double, c_double, c_char_p])
 
-# tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,V0_target,error_str)
+# tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,Z0_target,error_str)
 tokamaker_set_targets = ctypes_subroutine(oftpy_lib.tokamaker_set_targets,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double, c_char_p])
 
@@ -249,6 +234,14 @@ tokamaker_save_ifile = ctypes_subroutine(oftpy_lib.tokamaker_save_ifile,
 
 # tokamaker_save_mug(tMaker_equil_ptr,filename,error_str)
 tokamaker_save_mug = ctypes_subroutine(oftpy_lib.tokamaker_save_mug,
+    [c_void_p, c_char_p, c_char_p])
+
+# tokamaker_save_tokamaker(tMaker_equil_ptr,filename,error_str)
+tokamaker_save_tokamaker = ctypes_subroutine(oftpy_lib.tokamaker_save_tokamaker,
+    [c_void_p, c_char_p, c_char_p])
+
+# tokamaker_load_tokamaker(tMaker_equil_ptr,filename,error_str)
+tokamaker_load_tokamaker = ctypes_subroutine(oftpy_lib.tokamaker_load_tokamaker,
     [c_void_p, c_char_p, c_char_p])
 
 # tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,dist_pointer,normalize,error_str)

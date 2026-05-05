@@ -16,27 +16,6 @@ from warnings import warn
 import numpy
 from ._interface import *
 
-def tokamaker_default_settings(oft_env):
-    '''! Initialize settings object with default values
-
-    @param oft_env Current runtime environment
-    @result tokamaker_settings_struct object
-    '''
-    settings = tokamaker_settings_struct()
-    settings.pm = True
-    settings.free_boundary = True
-    settings.limited_only = False
-    settings.dipole_mode = False
-    settings.mirror_mode = False
-    settings.maxits = 40
-    settings.mode = 1
-    settings.urf = 0.2
-    settings.nl_tol = 1.E-6
-    settings.rmin = 0.0
-    settings.lim_zmax = 1.E99
-    settings.limiter_file = oft_env.path2c('none')
-    return settings
-
 
 def create_prof_file(self, filename, profile_dict, name):
     '''! Create profile input file to be read by load_profiles()
@@ -84,6 +63,60 @@ def create_prof_file(self, filename, profile_dict, name):
         fid.write("\n".join(file_lines))
 
 
+class tokamaker_settings:
+    r'''! TokaMaker settings class'''
+    def __init__(self):
+        ## Print 'performance' information (eg. iteration count) during run?
+        self.pm = True
+        ## Perform free-boundary calculation?
+        self.free_boundary = True
+        ## Do not search for X-points when determining LCFS?
+        self.limited_only = False
+        ## Use dipole mode (only toroidal current, no pressure gradient)
+        self.dipole_mode = False
+        ## Use mirror mode (symmetry about z=0 plane, only upper half of mesh used)
+        self.mirror_mode = False
+        ## Maximum NL iteration count for G-S solver
+        self.maxits = 40
+        ## Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
+        self.mode = 1
+        ## Under-relaxation factor for NL fixed-point iteration
+        self.urf = 0.2
+        ## Convergence tolerance for NL solver
+        self.nl_tol = 1.E-6
+        ## Minimum magnetic axis major radius, used to catch 'lost' equilibria
+        self.rmin = 0.0
+        ## Maximum vertical range for limiter points, can be used to exclude complex diverter regions
+        self.lim_zmax = 1.E99
+        ## File containing additional limiter points not included in mesh (default: 'none')
+        self.limiter_file = None
+        # Must be added last
+        self._initialized = True
+
+    def __setattr__(self, name, value):
+        # Check if the attribute is being created for the first time after initialization
+        if (name not in self.__dict__) and hasattr(self, '_initialized'):
+            raise AttributeError(f"Cannot add new attribute '{name}' to tokamaker_settings")
+        super().__setattr__(name, value)
+    
+    def get_c_struct(self,oft_env):
+        r'''! Get C struct representation of settings for passing to TokaMaker Fortran API'''
+        c_struct_instance = tokamaker_settings_cstruct()
+        c_struct_instance.pm = self.pm
+        c_struct_instance.free_boundary = self.free_boundary
+        c_struct_instance.limited_only = self.limited_only
+        c_struct_instance.dipole_mode = self.dipole_mode
+        c_struct_instance.mirror_mode = self.mirror_mode
+        c_struct_instance.maxits = self.maxits
+        c_struct_instance.mode = self.mode
+        c_struct_instance.urf = self.urf
+        c_struct_instance.nl_tol = self.nl_tol
+        c_struct_instance.rmin = self.rmin
+        c_struct_instance.lim_zmax = self.lim_zmax
+        c_struct_instance.limiter_file = oft_env.path2c(self.limiter_file) if self.limiter_file else None
+        return c_struct_instance
+
+
 class TokaMaker():
     '''! TokaMaker G-S solver class'''
     def __init__(self,OFT_env):
@@ -100,7 +133,7 @@ class TokaMaker():
         ## Internal mesh object
         self._mesh_ptr = c_void_p()
         ## General settings object
-        self.settings = tokamaker_default_settings(self._oft_env)
+        self.settings = tokamaker_settings()
         ## Conductor definition dictionary
         self._cond_dict = {}
         ## Vacuum definition dictionary
@@ -164,7 +197,7 @@ class TokaMaker():
         self._tMaker_ptr = c_void_p()
         self._tMaker_equil = None
         self._mesh_ptr = c_void_p()
-        self.settings = tokamaker_default_settings(self._oft_env)
+        self.settings = tokamaker_settings()
         self._cond_dict = {}
         self._vac_dict = {}
         self._coil_dict = {}
@@ -712,17 +745,22 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_resistivity(eta_prof)
 
-    def solve(self, vacuum=False):
+    def solve(self, vacuum=False, return_its=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.
         
         @param vacuum Perform vacuum solve? Plasma-related targets (eg. `Ip`) will be ignored.
+        @param return_its Return the number of nonlinear iterations?
         @result Equilibrium object
         '''
+        nl_its = c_int()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),error_string)
+        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),ctypes.byref(nl_its),error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
-        return self.copy_eq()
+        if return_its:
+            return self.copy_eq(), nl_its.value
+        else:
+            return self.copy_eq()
     
     def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
@@ -987,6 +1025,11 @@ class TokaMaker():
                 raise ValueError("`R0` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._tMaker_equil._R0_target = copy.copy(R0)
         if V0 is not None:
+            warn(
+                "`V0` is deprecated, use `Z0` instead. This argument will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2
+            )
             Z0 = V0
         if Z0 is not None:
             self._tMaker_equil._Z0_target = copy.copy(Z0)
@@ -1083,6 +1126,35 @@ class TokaMaker():
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return TokaMaker_equilibrium(source_eq=self._tMaker_equil,skip_targets=skip_targets,skip_constraints=skip_constraints)
+
+    def replace_eq(self,source_eq=None,source_file=None,skip_targets=False,skip_constraints=False):
+        '''! Replace the current equilibrium object with a copy of another equilibrium object or one loaded from file
+        
+        @param source_eq `TokaMaker_equilibrium` object to copy from
+        @param source_file Path to a file containing a TokaMaker equilibrium
+        @param skip_targets When copying, skip copying target values
+        @param skip_constraints When copying, skip copying constraint values
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        if source_eq is not None:
+            if source_file is not None:
+                raise ValueError("Cannot specify both `source_eq` and `source_file`")
+            tmp_eq = TokaMaker_equilibrium(source_eq=source_eq,skip_targets=skip_targets,skip_constraints=skip_constraints)
+        elif source_file is not None:
+            tmp_eq = TokaMaker_equilibrium(source_eq=self._tMaker_equil,skip_targets=skip_targets,skip_constraints=skip_constraints)
+            cfilename = self._oft_env.path2c(source_file)
+            error_string = self._oft_env.get_c_errorbuff()
+            tokamaker_load_tokamaker(tmp_eq.c_ptr,cfilename,error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
+        else:
+            raise ValueError("Must specify either `source_eq` or `source_file`")
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_equil_set(self._tMaker_ptr,tmp_eq.c_ptr,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        self._tMaker_equil = tmp_eq
 
     def get_psi(self,normalized=True):
         r'''! Get poloidal flux values on node points
@@ -1257,7 +1329,7 @@ class TokaMaker():
     def update_settings(self):
         '''! Update settings after changes to values in python'''
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_settings(self._tMaker_ptr,ctypes.byref(self.settings),error_string)
+        tokamaker_set_settings(self._tMaker_ptr,self.settings.get_c_struct(self._oft_env),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
     
@@ -1680,7 +1752,7 @@ class TokaMaker():
 
         @param filename Filename to save equilibrium to
         @param npsi Number of radial sampling points
-        @param ntheta Number of vertical sampling points
+        @param ntheta Number of poloidal sampling points
         @param lcfs_pad Padding in normalized flux at LCFS
         @param lcfs_pressure Plasma pressure on the LCFS (zero by default)
         @param pack_lcfs Pack toward LCFS with quadraturic sampling?
@@ -1853,9 +1925,9 @@ class TokaMaker():
 
 
 class TokaMaker_equilibrium():
-    '''! TokaMaker G-S solver class'''
+    '''! TokaMaker G-S equilibrium class'''
     def __init__(self,TokaMaker_obj=None,source_eq=None,skip_targets=False,skip_constraints=False):
-        '''! Initialize TokaMaker object
+        '''! Initialize TokaMaker equilibrium object
 
         @param TokaMaker_obj TokaMaker object (See @ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker "TokaMaker")
         @param source_eq Existing equilibrium object to copy
@@ -1900,17 +1972,28 @@ class TokaMaker_equilibrium():
             self._saddle_targets = None
         else:
             self._F0 = copy.copy(source_eq._F0)
-            if not skip_targets:
+            if skip_targets:
+                self._Ip_target = None
+                self._Ip_ratio_target = None
+                self._pax_target = None
+                self._estored_target = None
+                self._R0_target = None
+                self._Z0_target = None
+            else:
                 self._Ip_target = source_eq._Ip_target
                 self._Ip_ratio_target = source_eq._Ip_ratio_target
                 self._pax_target = source_eq._pax_target
                 self._estored_target = source_eq._estored_target
                 self._R0_target = source_eq._R0_target
                 self._Z0_target = source_eq._Z0_target
-            if not skip_constraints:
+            if skip_constraints:
+                self._isoflux_constraints = None
+                self._saddle_targets = None
+                self._psi_constraints = None
+            else:
                 self._isoflux_constraints = source_eq._isoflux_constraints.copy() if source_eq._isoflux_constraints is not None else None
                 self._saddle_targets = source_eq._saddle_targets.copy() if source_eq._saddle_targets is not None else None
-            self._psi_constraints = (source_eq._psi_constraints[0].copy(), source_eq._psi_constraints[1].copy()) if source_eq._psi_constraints is not None else None
+                self._psi_constraints = (source_eq._psi_constraints[0].copy(), source_eq._psi_constraints[1].copy()) if source_eq._psi_constraints is not None else None
         ## Normalized flux convention (0 -> tokamak, 1 -> spheromak)
         self.psi_convention = self._tMaker.psi_convention
         ## Free or fixed boundary flag
@@ -2499,9 +2582,10 @@ class TokaMaker_equilibrium():
             'tflux': tflux,
             'l_i': li
         }
-        if self._F0 > 0.0:
-            eq_stats['beta_tor'] = 100.0*(2.0*pvol*mu0/vol)/(numpy.power(self._F0/R_geo,2))
-            eq_stats['beta_n'] = eq_stats['beta_tor']*eq_stats['a_geo']*(self._F0/R_geo)/(Ip/1.E6)
+        if abs(self._F0) > 0.0:
+            F0_abs = abs(self._F0)
+            eq_stats['beta_tor'] = 100.0*(2.0*pvol*mu0/vol)/(numpy.power(F0_abs/R_geo,2))
+            eq_stats['beta_n'] = eq_stats['beta_tor']*eq_stats['a_geo']*(F0_abs/R_geo)/(Ip/1.E6)
         return eq_stats
 
     def print_info(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
@@ -2791,5 +2875,16 @@ class TokaMaker_equilibrium():
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_save_mug(self._equil_ptr,cfilename,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+    
+    def save_TokaMaker(self,filename):
+        r'''! Save current equilibrium to an HDF5 file for later use with TokaMaker
+
+        @param filename Filename to save equilibrium to
+        '''
+        cfilename = self._oft_env.path2c(filename)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_save_tokamaker(self._equil_ptr,cfilename,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
