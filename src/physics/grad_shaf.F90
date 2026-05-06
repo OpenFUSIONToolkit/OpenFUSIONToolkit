@@ -243,6 +243,25 @@ CONTAINS
   PROCEDURE :: delete => factory_destroy
 END TYPE gs_factory
 !------------------------------------------------------------------------------
+!> Options for the jphi-split-bootstrap current profile update.
+!!
+!! Must be initialised (via @ref tokamaker_set_boot_ops or directly) before
+!! running TokaMaker with a `jphi-split-bootstrap` current profile.  Fields
+!! correspond to the optional arguments of @ref calculate_bootstrap in
+!! grad_shaf_prof_phys.F90.
+!------------------------------------------------------------------------------
+TYPE :: boot_ops
+  LOGICAL :: initialized = .FALSE. !< Options have been explicitly set?
+  LOGICAL :: isolate_edge_jBS = .FALSE. !< Isolate edge bootstrap spike from bulk?
+  LOGICAL :: parameterize_jBS = .FALSE. !< Use parametrised skew-normal fit for spike? Overrides `isolate_edge_jBS` if true.
+  REAL(r8) :: scale_jBS = 1.0_r8 !< Scaling factor applied to the spike profile (default 1)
+  REAL(r8) :: Zeff = 0.0_r8 !< Effective charge for bootstrap calculation (must be set explicitly)
+  LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration
+  LOGICAL :: taper_edge_jBS = .TRUE. !< Smooth taper of toroidal current to zero at plasma edge (guards against numerical issues at the separatrix)
+  REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
+  INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
+END TYPE boot_ops
+!------------------------------------------------------------------------------
 !> Grad-Shafranov equilibrium object
 !------------------------------------------------------------------------------
 TYPE :: gs_equil
@@ -291,7 +310,7 @@ TYPE :: gs_equil
   CLASS(flux_func), POINTER :: Ti => NULL() !< Ion temperature flux function [keV]
   CLASS(flux_func), POINTER :: ne => NULL() !< Electron density flux function [m^-3]
   CLASS(flux_func), POINTER :: ni => NULL() !< Ion density flux function [m^-3]
-  REAL(r8) :: Zeff = 1.d0 !< Effective charge for bootstrap calculation
+  TYPE(boot_ops) :: boot_ops !< Options for jphi-split-bootstrap current profile update
   TYPE(gs_factory), POINTER :: device => NULL() !< Device/factory object for equilibrium
 CONTAINS
   !>
@@ -1019,6 +1038,7 @@ self%lim_point=source%lim_point
 self%x_points=source%x_points
 self%x_vecs=source%x_vecs
 self%vcontrol_val=source%vcontrol_val
+self%boot_ops=source%boot_ops
 !---Things that need equilibrium fully setup to copy
 IF(ASSOCIATED(source%P_ani))CALL source%P_ani%copy(self%P_ani,self)
 end subroutine copy_eq

@@ -49,7 +49,8 @@ def create_prof_file(self, filename, profile_dict, name):
     file_lines = [profile_dict['type']]
     if profile_dict['type'] == 'flat':
         pass
-    elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp'):
+    elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp') \
+            or (profile_dict['type'] == 'jphi-split-bootstrap'):
         x = profile_dict.get('x',None)
         if x is None:
             raise KeyError('No array "x" for piecewise linear profile.')
@@ -79,7 +80,7 @@ def create_prof_file(self, filename, profile_dict, name):
             "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
         ]
     else:
-        raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp")')
+        raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp", "jphi-split-bootstrap")')
     with open(filename, 'w+') as fid:
         fid.write("\n".join(file_lines))
 
@@ -728,6 +729,28 @@ class TokaMaker():
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_kinetic_profiles(te_prof,ti_prof,ne_prof,ni_prof,keep_files,Zeff)
+
+    def set_boot_ops(self, isolate_edge_jBS=False, parameterize_jBS=False, scale_jBS=1.0, Zeff=None,
+                     diagnose_bs=False,
+                     taper_edge_jBS=True, taper_edge_psi0=0.999, taper_edge_shape=2):
+        r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
+
+        Must be called before solving with a `jphi-split-bootstrap` current profile.
+
+        @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk bootstrap current?
+        @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true.
+        @param scale_jBS Scaling factor applied to the spike profile (default 1.0)
+        @param Zeff Effective charge for bootstrap calculation (required)
+        @param diagnose_bs Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration
+        @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge (guards against numerical issues at the separatrix; default True)
+        @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins (default 0.999)
+        @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep (default), 3=cubic power
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.set_boot_ops(isolate_edge_jBS, parameterize_jBS, scale_jBS, Zeff,
+                                               diagnose_bs,
+                                               taper_edge_jBS, taper_edge_psi0, taper_edge_shape)
 
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
@@ -2171,7 +2194,7 @@ class TokaMaker_equilibrium():
         ti_file_c = self._oft_env.path2c(ti_file)
         ni_file_c = self._oft_env.path2c(ni_file)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_load_kinetic_profiles(self.c_ptr,c_double(self._Zeff),te_file_c,ne_file_c,ti_file_c,ni_file_c,error_string)
+        tokamaker_load_kinetic_profiles(self.c_ptr,te_file_c,ne_file_c,ti_file_c,ni_file_c,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -2188,7 +2211,7 @@ class TokaMaker_equilibrium():
 
         if Zeff is None:
             raise ValueError("Zeff must be provided when setting kinetic profiles")
-        self._Zeff = Zeff
+        self.set_boot_ops(Zeff=Zeff)
 
         delete_files = []
         te_file = 'none'
@@ -2218,6 +2241,39 @@ class TokaMaker_equilibrium():
                     os.remove(file)
                 except:
                     print('Warning: unable to delete temporary file "{0}"'.format(file))
+
+    def set_boot_ops(self, isolate_edge_jBS=False, parameterize_jBS=False, scale_jBS=1.0, Zeff=None,
+                     diagnose_bs=False,
+                     taper_edge_jBS=True, taper_edge_psi0=0.999, taper_edge_shape=2):
+        r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
+
+        Must be called before solving with a `jphi-split-bootstrap` current profile.
+
+        @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk bootstrap current?
+        @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true.
+        @param scale_jBS Scaling factor applied to the spike profile (default 1.0)
+        @param Zeff Effective charge for bootstrap calculation (required)
+        @param diagnose_bs Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration
+        @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge (guards against numerical issues at the separatrix; default True)
+        @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins (default 0.999)
+        @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep (default), 3=cubic power
+        '''
+        if Zeff is None:
+            raise ValueError('Zeff must be provided explicitly when setting bootstrap options')
+        bops = tokamaker_boot_ops_struct()
+        bops.isolate_edge_jBS = bool(isolate_edge_jBS)
+        bops.parameterize_jBS = bool(parameterize_jBS)
+        bops.scale_jBS = float(scale_jBS)
+        bops.Zeff = float(Zeff)
+        bops.diagnose_bs = bool(diagnose_bs)
+        bops.taper_edge_jBS = bool(taper_edge_jBS)
+        bops.taper_edge_psi0 = float(taper_edge_psi0)
+        bops.taper_edge_shape = int(taper_edge_shape)
+        self._Zeff = Zeff
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_set_boot_ops(self.c_ptr, ctypes.byref(bops), error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
 
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition

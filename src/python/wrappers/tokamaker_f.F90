@@ -426,9 +426,8 @@ END SUBROUTINE tokamaker_load_profiles
 !---------------------------------------------------------------------------------
 !> Load kinetic profile specification files (Te, Ti, ne, ni)
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_load_kinetic_profiles(tMaker_equil_ptr,Zeff,te_file,ne_file,ti_file,ni_file,error_str) BIND(C,NAME="tokamaker_load_kinetic_profiles")
+SUBROUTINE tokamaker_load_kinetic_profiles(tMaker_equil_ptr,te_file,ne_file,ti_file,ni_file,error_str) BIND(C,NAME="tokamaker_load_kinetic_profiles")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
-REAL(c_double), VALUE, INTENT(in) :: Zeff !< Effective charge for bootstrap calculation
 CHARACTER(KIND=c_char), INTENT(in) :: te_file(OFT_PATH_SLEN) !< Electron temperature [keV] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ne_file(OFT_PATH_SLEN) !< Electron density [m^-3] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ti_file(OFT_PATH_SLEN) !< Ion temperature [keV] profile specification file
@@ -437,7 +436,6 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-tMaker_equil_obj%Zeff=Zeff
 CALL copy_string_rev(te_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%Te)
 CALL copy_string_rev(ne_file,tmp_str)
@@ -447,6 +445,29 @@ IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%Ti)
 CALL copy_string_rev(ni_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%ni)
 END SUBROUTINE tokamaker_load_kinetic_profiles
+!---------------------------------------------------------------------------------
+!> Set bootstrap current options on the equilibrium object.
+!!
+!! Must be called before solving with a `jphi-split-bootstrap` current profile.
+!! Fields in @p bops correspond to the optional arguments of
+!! @ref calculate_bootstrap in grad_shaf_prof_phys.F90.
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_set_boot_ops(tMaker_equil_ptr,bops,error_str) BIND(C,NAME="tokamaker_set_boot_ops")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+TYPE(tokamaker_boot_ops_type), INTENT(in) :: bops !< Bootstrap options to apply
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+tMaker_equil_obj%boot_ops%initialized = .TRUE.
+tMaker_equil_obj%boot_ops%isolate_edge_jBS = bops%isolate_edge_jBS
+tMaker_equil_obj%boot_ops%parameterize_jBS = bops%parameterize_jBS
+tMaker_equil_obj%boot_ops%scale_jBS = bops%scale_jBS
+tMaker_equil_obj%boot_ops%Zeff = bops%Zeff
+tMaker_equil_obj%boot_ops%diagnose_bs = bops%diagnose_bs
+tMaker_equil_obj%boot_ops%taper_edge_jBS = bops%taper_edge_jBS
+tMaker_equil_obj%boot_ops%taper_edge_psi0 = bops%taper_edge_psi0
+tMaker_equil_obj%boot_ops%taper_edge_shape = bops%taper_edge_shape
+END SUBROUTINE tokamaker_set_boot_ops
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
