@@ -263,6 +263,7 @@ END TYPE gs_factory
 TYPE :: gs_equil
   LOGICAL :: diverted = .FALSE. !< Equilibrium is diverted?
   LOGICAL :: has_plasma = .TRUE. !< Solve with plasma? (otherwise vacuum)
+  LOGICAL :: Ip_target_skip = .FALSE. !< Skip toroidal current target in non-linear solve?
   INTEGER(i4) :: mode = 0 !< RHS source mode (0 -> F*F', 1 -> F')
   INTEGER(i4) :: nx_points = 0 !< Number of X-points in current solution
   INTEGER(i4) :: nregularize = 0 !< Number of regularization terms
@@ -277,7 +278,7 @@ TYPE :: gs_equil
   REAL(r8) :: mirror_n = -1.d0 !< Anisotropy exponent for mirror pressure profiles
   REAL(r8) :: mirror_bturn = 0.d0 !< Turning point for mirror pressure profiles
   REAL(r8) :: mirror_zthroat = 0.d0 !< Mirror peak field point
-  REAL(r8) :: Itor_target = -1.d0 !< Toroidal current target
+  REAL(r8) :: Ip_target = -1.d0 !< Toroidal current target
   REAL(r8) :: estore_target = -1.d0 !< Stored energy target
   REAL(r8) :: pax_target = -1.d0 !< On-axis pressure target
   REAL(r8) :: Ip_ratio_target = -1.d99 !< Ip ratio target
@@ -1046,7 +1047,8 @@ self%dipole_a=source%dipole_a
 self%mirror_n=source%mirror_n
 self%mirror_bturn=source%mirror_bturn
 self%mirror_zthroat=source%mirror_zthroat
-self%Itor_target=source%Itor_target
+self%Ip_target_skip=source%Ip_target_skip
+self%Ip_target=source%Ip_target
 self%estore_target=source%estore_target
 self%pax_target=source%pax_target
 self%Ip_ratio_target=source%Ip_ratio_target
@@ -1114,13 +1116,13 @@ IF(PRESENT(r0))THEN
   CALL equil%psi%set(0.d0)
   CALL gs_vacuum_solve(self,equil%psi,tmp_vec)
   itor=equil%itor()
-  IF(equil%Itor_target>0.d0)CALL equil%psi%scale(equil%Itor_target/itor)
+  IF(equil%Ip_target>0.d0)CALL equil%psi%scale(equil%Ip_target/itor)
 ELSE IF(PRESENT(curr_source))THEN
   CALL equil%psi%set(0.d0)
   CALL tmp_vec%restore_local(curr_source)
   CALL gs_vacuum_solve(self,equil%psi,tmp_vec)
   itor=equil%itor()
-  IF(equil%Itor_target>0.d0)CALL equil%psi%scale(equil%Itor_target/itor)
+  IF(equil%Ip_target>0.d0)CALL equil%psi%scale(equil%Ip_target/itor)
 ELSE
   !---Setup Solver
   eigsolver%A=>self%dels
@@ -1146,9 +1148,9 @@ ELSE
     call equil%psi%scale(1.d0/psi_vals(mind))
     equil%psimax=1.d0
   END IF
-  IF(equil%Itor_target>0.d0)THEN
+  IF(equil%Ip_target>0.d0)THEN
     itor=equil%itor()
-    CALL equil%psi%scale(equil%Itor_target/itor)
+    CALL equil%psi%scale(equil%Ip_target/itor)
   END IF
   !---Cleanup
   CALL eigsolver%pre%delete
@@ -2019,6 +2021,7 @@ logical :: pm_save,fail_test
 !---
 error_flag=0
 self%nl_its=0
+self%Ip_target_skip=.FALSE.
 IF(TRIM(self%lu_solver%package)=='none')THEN
   CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 ELSE
@@ -2177,9 +2180,9 @@ DO i=1,self%maxits
     param_mat(1,1)=1.d0
     param_rhs(1)=0.d0
   ELSE
-    IF(equil%Itor_target>0.d0)THEN
+    IF((equil%Ip_target>0.d0).AND.(.NOT.equil%Ip_target_skip))THEN
       param_mat(1,:)=[itor_ffp,itor_press,0.d0]
-      param_rhs(1)=equil%Itor_target
+      param_rhs(1)=equil%Ip_target
     ELSE
       param_mat(1,1)=1.d0
       param_rhs(1)=equil%ffp_scale
@@ -2414,13 +2417,13 @@ DO i=1,self%maxits
       CALL equil%psi%scale(1.d0/equil%psimax)
       equil%ffp_scale=SQRT((equil%ffp_scale**2)/equil%psimax)
       equil%psimax=1.d0
-    ! ELSE IF(self%Itor_target>0.d0)THEN
+    ! ELSE IF(self%Ip_target>0.d0)THEN
     !   itor=self%itor()
     !   IF(itor<=0.d0)THEN
     !     error_flag=-5
     !     EXIT
     !   END IF
-    !   ffp_scale_prev=itor/self%Itor_target
+    !   ffp_scale_prev=itor/self%Ip_target
     !   CALL self%psi%scale(1.d0/ffp_scale_prev)
     !   self%ffp_scale=SQRT((self%ffp_scale**2)/ffp_scale_prev)
     END IF
@@ -2602,11 +2605,11 @@ END DO
 
 param_mat=0.d0
 param_rhs=0.d0
-IF(equil%Itor_target>0.d0)THEN
+IF(equil%Ip_target>0.d0)THEN
   itor_ffp=equil%itor(psi_ffp)
   itor_press=equil%itor(psi_press)
   param_mat(1,:)=[itor_ffp,itor_press,0.d0]
-  param_rhs(1)=equil%Itor_target
+  param_rhs(1)=equil%Ip_target
 ELSE
   param_mat(1,1)=1.d0
   param_rhs(1)=equil%ffp_scale
