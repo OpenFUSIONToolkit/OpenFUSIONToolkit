@@ -21,8 +21,8 @@ AdvancedWorkflows/
 │   ├── CUTE_pulse_ex.ipynb
 │   ├── d3d_pulse_ex.py
 │   ├── README.md
-│   └── ITER_TokaMakerTORAX/
-│       ├── ITER_pulse_ex.ipynb
+│   └── ITER_TokaMaker_TORAX/
+│       ├── ITER_TokaMaker_TORAX_pulse_ex.ipynb
 │       └── ITER_mesh.h5
 │
 ├── Poloidal Field Coil Optimization/
