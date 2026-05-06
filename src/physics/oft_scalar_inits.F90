@@ -1,7 +1,8 @@
-!---------------------------------------------------------------------------
+!---------------------------------------------------------------------------------
 ! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
-!---------------------------------------------------------------------------
-!! SPDX-License-Identifier: LGPL-3.0-only
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
 !> @file oft_scalar_inits.F90
 !
 !> Field initializations and evaluation for common scalar analytic field types
@@ -87,8 +88,6 @@ IF(.NOT.ASSOCIATED(self%func))CALL oft_abort("No eval function specified", &
 pt=self%mesh%log2phys(cell,f)
 CALL self%func(pt,val(1))
 end subroutine poss_scalar_binterp
-!---------------------------------------------------------------------------
-! SUBROUTINE torus_interp
 !---------------------------------------------------------------------------
 !> Evaluate torus source
 !---------------------------------------------------------------------------

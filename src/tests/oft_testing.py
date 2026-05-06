@@ -61,13 +61,13 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
                 return False, std_out
             else:
                 return False
-    if std_out.find('ERROR') > -1:
+    if std_out.find('ERROR:') > -1:
         print("FAILED: detected OFT error!")
         if return_stdout:
             return False, std_out
         else:
             return False
-    if std_out.find('WARNING') > -1:
+    if std_out.find('WARNING:') > -1:
         print("FAILED: detected OFT warning!")
         if return_stdout:
             return False, std_out

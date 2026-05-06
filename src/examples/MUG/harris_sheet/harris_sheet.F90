@@ -111,7 +111,6 @@ CALL create_diag_pre(minv%pre) ! Setup Preconditioner
 CALL ML_oft_blagrange%vec_create(u)
 CALL ML_oft_blagrange%vec_create(v)
 
-!---Set constant values
 
 !---Project n initial condition onto scalar Lagrange basis
 field_init%func=>dens_harris
@@ -277,9 +276,4 @@ REAL(r8), INTENT(out) :: val
 val = - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
 END SUBROUTINE psi_harris_pert
 
-! SUBROUTINE psi_harris(pt, val)
-! REAL(r8), INTENT(in) :: pt(3)
-! REAL(r8), INTENT(out) :: val
-! val = -lam_b*LOG(COSH(pt(2)/lam_b)) - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
-! END SUBROUTINE psi_harris
 END PROGRAM xmhd_circle
