@@ -825,7 +825,8 @@ def solve_with_bootstrap(mygs,
                          diagnostic_plots=False,
                          parameterize_jBS = False,
                          use_OMFIT_sauter = False,
-                         verbose = True):
+                         verbose = True,
+                         use_sauter_eps = True):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
     @param mygs Grad-Shafranov solver object
@@ -844,6 +845,9 @@ def solve_with_bootstrap(mygs,
     @param diagnostic_plots If True, plot diagnostic figures
     @param parameterize_jBS If True, use parameterized edge spike
     @param use_OMFIT_sauter If True, use OMFIT Sauter model
+    @param use_sauter_eps If True (default), use the geometric inverse aspect ratio
+      \f$\varepsilon = (R_{\max}-R_{\min})/(2\langle R\rangle)\f$ from the field-line trace.
+      If False, use the formula \f$\varepsilon = \langle a\rangle / \langle R\rangle\f$.
     @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
     '''
     from scipy.optimize import root_scalar
@@ -895,11 +899,14 @@ def solve_with_bootstrap(mygs,
         '''
         # Get geometry and flux functions
         _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-        _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
+        if use_sauter_eps:
+            _, fc, r_avgs, _, eps = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad, return_eps=True)
+        else:
+            _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
+            eps = r_avgs[2] / r_avgs[0]
         
         # Geometry terms
         ft = 1 - fc 
-        eps = r_avgs[2] / r_avgs[0]
         _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
         R_avg = ravgs_q[0]
 
