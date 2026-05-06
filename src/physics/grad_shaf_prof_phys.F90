@@ -150,6 +150,18 @@ contains
   !>
   procedure :: update => mirror_slosh_update
 end type mirror_ani_slosh
+!------------------------------------------------------------------------------
+!> Context type for MINPACK-based fitting of the edge bootstrap profile.
+!> Module-level variable `active_edge_jbs` is populated by curve_fit_edge_jbs
+!> before invoking lmdif so that edge_jbs_residual can access the target data.
+!------------------------------------------------------------------------------
+TYPE :: edge_jbs_fit_ctx
+  INTEGER(i4) :: n_fit = 0           !< Number of data points in the fit
+  REAL(r8), ALLOCATABLE :: psi_fit(:) !< psi_N values at the fitting points
+  REAL(r8), ALLOCATABLE :: j_fit(:)   !< Target j_BS values [A/m^2]
+  REAL(r8) :: tail_alpha = 1.5_r8    !< Fixed right-side fall-off (Python default)
+END TYPE edge_jbs_fit_ctx
+TYPE(edge_jbs_fit_ctx) :: active_edge_jbs !< Module-level context for lmdif callback
 contains
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -947,10 +959,8 @@ REAL(r8), PARAMETER :: EC = 1.602176634e-19_r8
 ! Locals for optional edge-spike isolation
 LOGICAL  :: do_isolate, do_parametrize
 REAL(r8) :: scl_jBS
-REAL(r8), ALLOCATABLE :: masked_spike(:), parameterized_spike(:)
 ! Workspace for psi_N convention flip (OFT: 0=LCFS,1=axis → standard: 0=axis,1=LCFS)
 REAL(r8), ALLOCATABLE :: psi_N_std(:), j_BS_std(:), mask_std(:), param_std(:)
-INTEGER(i4) :: k_flip
 !---
 ! Compute raw psi values from the caller-supplied psi_N grid
 psi_range = gseq%plasma_bounds(2) - gseq%plasma_bounds(1)
@@ -1046,7 +1056,661 @@ IF(gseq%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,3ES12.4)') '    nu_e_star: ', nu_e_star(1), nu_e_star(n_psi/2), nu_e_star(n_psi)
   WRITE(*,'(A,3ES12.4)') '    j_BS     : ', j_BS(1), j_BS(n_psi/2), j_BS(n_psi)
 END IF
+!---
+! Optionally isolate the edge bootstrap spike and return as j_spike,
+! mirroring the isolate_edge_jBS, parameterize_jBS logic in
+! bootstrap.py:calculate_profiles_and_bootstrap.
+IF (PRESENT(j_spike)) THEN
+  do_isolate    = .FALSE.
+  do_parametrize = .FALSE.
+  scl_jBS       = 1.0_r8
+  IF (PRESENT(isolate_edge_jBS)) do_isolate    = isolate_edge_jBS
+  IF (PRESENT(parameterize_jBS)) do_parametrize = parameterize_jBS
+  IF (PRESENT(scale_jBS))        scl_jBS        = scale_jBS
+  IF (do_isolate .OR. do_parametrize) THEN
+    ! analyze_bootstrap_edge_spike uses standard psi_N convention (0=axis, 1=LCFS).
+    ! OFT internal convention is reversed (0=LCFS, 1=axis).
+    ! Flip arrays before calling, then flip outputs back.
+    ALLOCATE(psi_N_std(n_psi), j_BS_std(n_psi), mask_std(n_psi))
+    IF (do_parametrize) ALLOCATE(param_std(n_psi))
+    psi_N_std = 1.0_r8 - psi_N(n_psi:1:-1)
+    j_BS_std  = j_BS(n_psi:1:-1)
+    IF (do_parametrize) THEN
+      CALL analyze_bootstrap_edge_spike(n_psi, psi_N_std, j_BS_std, mask_std, &
+                                      param_std)
+      j_spike = scl_jBS * param_std(n_psi:1:-1)
+      DEALLOCATE(param_std)
+    ELSE
+      CALL analyze_bootstrap_edge_spike(n_psi, psi_N_std, j_BS_std, mask_std)
+      j_spike = scl_jBS * mask_std(n_psi:1:-1)
+    END IF
+    DEALLOCATE(psi_N_std, j_BS_std, mask_std)
+  END IF
+END IF
 END SUBROUTINE calculate_bootstrap
+!------------------------------------------------------------------------------
+!> Evaluate the skew-normal PDF at a single point.
+!>
+!> Equivalent to scipy.stats.skewnorm.pdf(x, sk, loc=ctr, scale=scl):
+!>   f = (2/scl) * phi((x-ctr)/scl) * Phi(sk*(x-ctr)/scl)
+!> where phi and Phi are the standard normal PDF and CDF.
+!>
+!> @param x   Evaluation point
+!> @param sk  Skewness parameter
+!> @param ctr Location (mean shift)
+!> @param scl Scale (width)
+!> @result    PDF value at x
+!------------------------------------------------------------------------------
+PURE FUNCTION skewnorm_pdf_pt(x, sk, ctr, scl) RESULT(y)
+REAL(r8), INTENT(in) :: x, sk, ctr, scl
+REAL(r8) :: y
+REAL(r8), PARAMETER :: INV_SQRT2PI = 0.39894228040143268_r8  ! 1/sqrt(2*pi)
+REAL(r8), PARAMETER :: INV_SQRT2   = 0.70710678118654752_r8  ! 1/sqrt(2)
+REAL(r8) :: z, phi_val, cdf_val
+z       =  (x - ctr) / scl
+phi_val =  INV_SQRT2PI * EXP(-0.5_r8 * z**2)
+cdf_val =  0.5_r8 * (1.0_r8 + ERF(sk * z * INV_SQRT2))
+y       =  (2.0_r8 / scl) * phi_val * cdf_val
+END FUNCTION skewnorm_pdf_pt
+!------------------------------------------------------------------------------
+!> Compute log(exp(a) + exp(b)) stably (avoids overflow).
+!> Mirrors numpy.logaddexp(a, b).
+!------------------------------------------------------------------------------
+PURE FUNCTION safe_logaddexp(a, b) RESULT(y)
+REAL(r8), INTENT(in) :: a, b
+REAL(r8) :: y, c
+c = MAX(a, b)
+y = c + LOG(EXP(a - c) + EXP(b - c))
+END FUNCTION safe_logaddexp
+!------------------------------------------------------------------------------
+!> Locate the peak of the skew-normal shape used in parametrise_edge_jbs
+!> using ternary search on the interval
+!>   [max(0, center - 3*width), min(1, center + 3*width)]
+!>
+!> The skew-normal PDF is strictly unimodal for all skewness values (Azzalini
+!> 1985), so ternary search is guaranteed to converge.  Each iteration cuts
+!> the search interval by a factor of 2/3; 100 iterations reduce an initial
+!> width of ~6*width to < 10^{-17} * initial_width (essentially machine
+!> precision), while requiring only 200 PDF evaluations — 50x fewer than the
+!> previous 10 000-point linear scan.
+!>
+!> @param center       Gaussian centre (loc)
+!> @param width        Gaussian width (scale)
+!> @param sk           Skewness parameter
+!> @param x_peak       Output: psi_N at the raw-shape peak
+!> @param val_peak_raw Output: raw-shape value at the peak
+!------------------------------------------------------------------------------
+SUBROUTINE find_skewnorm_peak(center, width, sk, x_peak, val_peak_raw)
+REAL(r8), INTENT(in)  :: center, width, sk
+REAL(r8), INTENT(out) :: x_peak, val_peak_raw
+INTEGER(i4), PARAMETER :: MAX_ITER = 100  ! (2/3)^100 * 6*width < 1e-17*width
+INTEGER(i4) :: iter
+REAL(r8)    :: x_lo, x_hi, x1, x2, f1, f2
+x_lo = MAX(0.0_r8, center - 3.0_r8*width)
+x_hi = MIN(1.0_r8, center + 3.0_r8*width)
+! Guard: if range collapses set a minimal width
+IF (x_hi <= x_lo) x_hi = x_lo + 1.0e-6_r8
+! Ternary search: at each step evaluate the PDF at the two third-points.
+! The unimodality guarantee ensures we can safely discard one third of the
+! interval according to which third-point has the lower value.
+DO iter = 1, MAX_ITER
+  x1 = x_lo + (x_hi - x_lo) / 3.0_r8
+  x2 = x_hi - (x_hi - x_lo) / 3.0_r8
+  f1 = skewnorm_pdf_pt(x1, sk, center, width)
+  f2 = skewnorm_pdf_pt(x2, sk, center, width)
+  IF (f1 < f2) THEN
+    x_lo = x1   ! peak cannot be in [x_lo, x1]
+  ELSE
+    x_hi = x2   ! peak cannot be in [x2, x_hi]
+  END IF
+END DO
+x_peak       = 0.5_r8 * (x_lo + x_hi)
+val_peak_raw = skewnorm_pdf_pt(x_peak, sk, center, width)
+! Avoid division by zero downstream
+IF (val_peak_raw < 1.0e-30_r8) val_peak_raw = 1.0e-30_r8
+END SUBROUTINE find_skewnorm_peak
+!------------------------------------------------------------------------------
+!> Evaluate the parametrised skewnorm profile on an arbitrary psi grid.
+!>
+!> Direct translation of the inner function generate_baseline_prof from
+!> Python bootstrap.py:parameterize_edge_jBS.  Constructs the profile by
+!> stitching a left-side SoftMax-blended skew-normal spike with a right-side
+!> cosine (or cosh) decay at x_peak:
+!>
+!>   left  (psi <= x_peak):  SoftMax(offset_in, amp*skewnorm/val_peak_raw)
+!>   right (psi >  x_peak):  stitch_height * cos(omega*(psi-x_peak))^tail_alpha
+!>
+!> x_peak and val_peak_raw must be pre-computed via find_skewnorm_peak so
+!> the golden-section scan is not repeated for every function evaluation.
+!>
+!> @param n            Number of psi points
+!> @param psi          psi_N grid [0, 1]
+!> @param amp          Amplitude of the skew-normal spike
+!> @param center       Spike centre in psi_N
+!> @param width        Spike width (sigma = FWHM/2.355)
+!> @param offset_in    Flat baseline J_BS level left of the spike
+!> @param sk           Skewness parameter (a in skewnorm.pdf)
+!> @param y_sep        Profile value prescribed at the separatrix (psi_N = 1)
+!> @param blend_width  SoftMax blend width (sharpness of left-side stitch)
+!> @param tail_alpha   Right-side decay exponent (>= 1)
+!> @param x_peak       Peak location of the raw skew-normal (from find_skewnorm_peak)
+!> @param val_peak_raw Peak value   of the raw skew-normal (from find_skewnorm_peak)
+!> @param profile      Output: profile values on the psi grid
+!------------------------------------------------------------------------------
+SUBROUTINE eval_baseline_profile(n, psi, amp, center, width, offset_in, sk, &
+    y_sep, blend_width, tail_alpha, x_peak, val_peak_raw, profile)
+INTEGER(i4), INTENT(in)  :: n
+REAL(r8),    INTENT(in)  :: psi(n)
+REAL(r8),    INTENT(in)  :: amp, center, width, offset_in, sk
+REAL(r8),    INTENT(in)  :: y_sep, blend_width, tail_alpha
+REAL(r8),    INTENT(in)  :: x_peak, val_peak_raw
+REAL(r8),    INTENT(out) :: profile(n)
+!---
+INTEGER(i4) :: i
+REAL(r8) :: k_smooth, diff_ao, argument, internal_amp
+REAL(r8) :: stitch_height, dist_to_edge
+REAL(r8) :: target_cos, omega_cos, target_cosh, omega_cosh
+REAL(r8) :: spike_val, pL, pR, arg_cos, base_cos
+LOGICAL  :: use_cos_decay
+! =====================================================================
+! Smoothing factor (mirrors Python k_smooth = amp/width * blend_width/4)
+! =====================================================================
+k_smooth = MAX((amp / width) * (blend_width / 4.0_r8), 1.0e-5_r8)
+! =====================================================================
+! Left-side parameters (Case A: amp > offset_in; Case B: otherwise)
+! =====================================================================
+IF (amp > offset_in) THEN
+  ! Case A: standard spike
+  diff_ao = amp - offset_in
+  IF (diff_ao > 1.0e-10_r8) THEN
+    argument    = MAX(1.0_r8 - EXP((offset_in - amp) / k_smooth), 1.0e-16_r8)
+    internal_amp = amp + k_smooth * LOG(argument)
+  ELSE
+    internal_amp = amp
+  END IF
+  stitch_height = amp
+ELSE
+  ! Case B: dominant offset
+  stitch_height = offset_in
+END IF
+! =====================================================================
+! Right-side parameters (cosine decay or cosh rise)
+! =====================================================================
+dist_to_edge = MAX(1.0_r8 - x_peak, 1.0e-5_r8)
+use_cos_decay = (y_sep < stitch_height) .AND. (ABS(stitch_height) > 1.0e-30_r8)
+IF (use_cos_decay) THEN
+  ! Cosine decay: stitch_height * cos(omega*(psi-x_peak))^tail_alpha
+  target_cos = MAX(-1.0_r8, MIN(1.0_r8, (y_sep / stitch_height)**(1.0_r8/tail_alpha)))
+  omega_cos  = ACOS(target_cos) / dist_to_edge
+ELSE IF (ABS(stitch_height) > 1.0e-30_r8) THEN
+  ! Cosh rise (rare: y_sep >= stitch_height)
+  target_cosh = (y_sep / stitch_height)**(1.0_r8/tail_alpha)
+  omega_cosh  = ACOSH(MAX(target_cosh, 1.0_r8)) / dist_to_edge
+ELSE
+  omega_cos = 0.0_r8
+  omega_cosh = 0.0_r8
+END IF
+! =====================================================================
+! Build full profile: stitch left side and right side at x_peak
+! =====================================================================
+DO i = 1, n
+  ! Left side
+  IF (amp > offset_in) THEN
+    spike_val = skewnorm_pdf_pt(psi(i), sk, center, width) / val_peak_raw * internal_amp
+    pL = safe_logaddexp(offset_in / k_smooth, spike_val / k_smooth) * k_smooth
+  ELSE
+    pL = offset_in
+  END IF
+  ! Right side
+  IF (use_cos_decay) THEN
+    arg_cos = omega_cos * (psi(i) - x_peak)
+    base_cos = MAX(COS(arg_cos), 0.0_r8)
+    pR = stitch_height * (base_cos**tail_alpha)
+  ELSE IF (ABS(stitch_height) > 1.0e-30_r8) THEN
+    pR = stitch_height * (COSH(omega_cosh * (psi(i) - x_peak))**tail_alpha)
+  ELSE
+    pR = 0.0_r8
+  END IF
+  ! Stitch
+  IF (psi(i) <= x_peak) THEN
+    profile(i) = pL
+  ELSE
+    profile(i) = pR
+  END IF
+  ! Clamp (mirrors: if y_sep >= 0: profile = maximum(profile, 0))
+  IF (y_sep >= 0.0_r8) profile(i) = MAX(profile(i), 0.0_r8)
+END DO
+END SUBROUTINE eval_baseline_profile
+!------------------------------------------------------------------------------
+!> Fortran equivalent of Python bootstrap.py:parameterize_edge_jBS.
+!>
+!> Generates the parameterised edge-bootstrap profile on an n-point psi_N
+!> grid.  When offset /= 0 an internal 1-D root find (bisection on alpha)
+!> ensures that profile(psi(1)) matches the requested offset level, mirroring
+!> the root_scalar(brentq) call in the Python.  When offset == 0 the function
+!> falls through directly to eval_baseline_profile with a very negative
+!> effective offset (reproducing the Python `-1e10` shortcut).
+!>
+!> Fixed parameter: tail_alpha = 1.5 (Python default, not a fit variable).
+!>
+!> @param n           Number of psi_N points
+!> @param psi         Normalised poloidal flux grid [0, 1]
+!> @param amp         Spike amplitude
+!> @param center      Spike centre in psi_N
+!> @param width       Spike width (sigma of skew-normal)
+!> @param offset      Requested flat-core level
+!> @param sk          Skewness parameter
+!> @param y_sep       Value at the separatrix (psi_N = 1)
+!> @param blend_width SoftMax blending width
+!> @param tail_alpha  Right-side fall-off exponent
+!> @param profile     Output: profile values on the psi grid
+!------------------------------------------------------------------------------
+SUBROUTINE parametrise_edge_jbs(n, psi, amp, center, width, offset, sk, &
+    y_sep, blend_width, tail_alpha, profile)
+INTEGER(i4), INTENT(in)  :: n
+REAL(r8),    INTENT(in)  :: psi(n)
+REAL(r8),    INTENT(in)  :: amp, center, width, offset, sk
+REAL(r8),    INTENT(in)  :: y_sep, blend_width, tail_alpha
+REAL(r8),    INTENT(out) :: profile(n)
+!---
+INTEGER(i4) :: iter
+REAL(r8)    :: x_peak, val_peak_raw
+REAL(r8)    :: a_lo, a_hi, a_mid, f_lo, f_hi, f_mid
+REAL(r8)    :: a_optimal
+REAL(r8)    :: psi1(1), prof1(1)  ! scratch 1-element arrays for bisection
+! =====================================================================
+! Pre-compute the raw skew-normal peak (independent of offset/alpha)
+! =====================================================================
+CALL find_skewnorm_peak(center, width, sk, x_peak, val_peak_raw)
+! =====================================================================
+! Determine the offset-corrected scaling alpha via bisection.
+!
+! Objective: f(alpha) = profile_at_psi1(alpha*offset) - offset = 0
+! Mirrors Python: root_scalar(obj, bracket=[-1e10, 10*amp], method='brentq')
+!
+! When offset == 0 skip the root find and use a deeply negative effective
+! offset (-1e20) to fully suppress the SoftMax baseline (pure spike, no floor).
+! =====================================================================
+IF (ABS(offset) < 1.0e-30_r8) THEN
+  ! offset = 0: pass a deeply negative effective offset so the SoftMax baseline
+  ! is completely suppressed (pure spike, no floor).  -1e20 ensures this holds
+  ! even for amp up to ~1e17 A/m^2; -1e10 would become marginal above ~50 MA/m^2.
+  CALL eval_baseline_profile(n, psi, amp, center, width, -1.0e20_r8, sk, &
+      y_sep, blend_width, tail_alpha, x_peak, val_peak_raw, profile)
+  RETURN
+END IF
+! Bisection bracket: mirrors Python [-1e10, 10*amp]
+! Use alpha values that drive alpha*offset to the extremes
+a_lo = -1.0e6_r8 / MAX(ABS(offset), 1.0e-30_r8)  ! alpha*offset ≈ -1e6
+a_hi = MAX(10.0_r8 * ABS(amp), 1.0_r8) / MAX(ABS(offset), 1.0e-30_r8)
+! Evaluate f at the bracket ends
+psi1(1) = psi(1)
+CALL eval_baseline_profile(1, psi1, amp, center, width, a_lo*offset, sk, &
+    y_sep, blend_width, tail_alpha, x_peak, val_peak_raw, prof1)
+f_lo = prof1(1) - offset
+CALL eval_baseline_profile(1, psi1, amp, center, width, a_hi*offset, sk, &
+    y_sep, blend_width, tail_alpha, x_peak, val_peak_raw, prof1)
+f_hi = prof1(1) - offset
+! If the bracket already straddles the root proceed; otherwise fall back
+! to a_optimal = 1 (identity scaling) to avoid NaN propagation.
+IF (f_lo * f_hi > 0.0_r8) THEN
+  a_optimal = 1.0_r8
+ELSE
+  ! 60 bisection iterations -> relative bracket width < 1e-18
+  DO iter = 1, 60
+    a_mid = 0.5_r8 * (a_lo + a_hi)
+    CALL eval_baseline_profile(1, psi1, amp, center, width, a_mid*offset, sk, &
+        y_sep, blend_width, tail_alpha, x_peak, val_peak_raw, prof1)
+    f_mid = prof1(1) - offset
+    IF (ABS(f_mid) < 1.0e-6_r8 * MAX(ABS(offset), 1.0e-30_r8)) EXIT
+    IF (SIGN(1.0_r8, f_mid) == SIGN(1.0_r8, f_lo)) THEN
+      a_lo = a_mid;  f_lo = f_mid
+    ELSE
+      a_hi = a_mid;  f_hi = f_mid
+    END IF
+  END DO
+  a_optimal = a_mid
+END IF
+! =====================================================================
+! Final evaluation on the full n-point psi grid
+! =====================================================================
+CALL eval_baseline_profile(n, psi, amp, center, width, a_optimal*offset, sk, &
+    y_sep, blend_width, tail_alpha, x_peak, val_peak_raw, profile)
+END SUBROUTINE parametrise_edge_jbs
+!------------------------------------------------------------------------------
+!> MINPACK lmdif residual subroutine for curve_fit_edge_jbs.
+!>
+!> Computes fvec(i) = parametrise_edge_jbs(psi_fit(i); cofs) - j_fit(i)
+!> where cofs(7) = (amp, center, width, offset, sk, y_sep, blend_width) and
+!> the fitting data are taken from the module-level active_edge_jbs context.
+!>
+!> Signature required by lmdif:  SUBROUTINE fcn(m, n, x, fvec, iflag)
+!------------------------------------------------------------------------------
+SUBROUTINE edge_jbs_residual(m, n, cofs, err, iflag)
+INTEGER(4),  INTENT(in)    :: m, n
+REAL(8),     INTENT(in)    :: cofs(n)
+REAL(8),     INTENT(out)   :: err(m)
+INTEGER(4),  INTENT(inout) :: iflag
+REAL(r8) :: amp, center, width, offset, sk, y_sep, blend_width
+REAL(r8) :: profile(active_edge_jbs%n_fit)
+!---
+amp        = cofs(1)
+center     = cofs(2)
+width      = cofs(3)
+offset     = cofs(4)
+sk         = cofs(5)
+y_sep      = cofs(6)
+blend_width = cofs(7)
+CALL parametrise_edge_jbs(active_edge_jbs%n_fit, active_edge_jbs%psi_fit, &
+    amp, center, width, offset, sk, y_sep, blend_width, &
+    active_edge_jbs%tail_alpha, profile)
+err = profile - active_edge_jbs%j_fit
+END SUBROUTINE edge_jbs_residual
+!------------------------------------------------------------------------------
+!> Levenberg-Marquardt least-squares fit of parametrise_edge_jbs to a set
+!> of (psi_fit, j_BS_fit) data points using MINPACK lmdif.
+!>
+!> Equivalent to the scipy.optimize.curve_fit call in Python's
+!> analyze_bootstrap_edge_spike (using the same 7-parameter model but without
+!> parameter bounds, which lmdif does not support natively).
+!>
+!> The 7 parameters and their Python / curve_fit correspondences are:
+!>   p(1)  amp         -- spike amplitude
+!>   p(2)  center      -- spike centre in psi_N
+!>   p(3)  width       -- spike sigma
+!>   p(4)  offset      -- flat-core level
+!>   p(5)  sk          -- skewness
+!>   p(6)  y_sep       -- value at psi_N = 1
+!>   p(7)  blend_width -- SoftMax blending width
+!>
+!> @param n_fit    Number of data points (m == n_fit for lmdif)
+!> @param psi_fit  psi_N values of the fitting points
+!> @param j_BS_fit Target j_BS values [A/m^2] at psi_fit
+!> @param p0       Initial parameter guess (7 elements)
+!> @param popt     Output: optimised parameters (7 elements)
+!------------------------------------------------------------------------------
+SUBROUTINE curve_fit_edge_jbs(n_fit, psi_fit, j_BS_fit, p0, popt)
+INTEGER(i4), INTENT(in)  :: n_fit
+REAL(r8),    INTENT(in)  :: psi_fit(n_fit), j_BS_fit(n_fit)
+REAL(r8),    INTENT(in)  :: p0(7)
+REAL(r8),    INTENT(out) :: popt(7)
+!---MINPACK variables (same pattern as gs_psi2pt / circle_interp)
+INTEGER(4), PARAMETER :: NPARAMS = 7
+REAL(8) :: ftol, xtol, gtol, epsfcn, factor
+REAL(8) :: cofs(NPARAMS), error_vec(n_fit)
+REAL(8), ALLOCATABLE :: diag(:), wa1(:), wa2(:), wa3(:), wa4(:), qtf(:)
+REAL(8), ALLOCATABLE :: fjac(:,:)
+INTEGER(4), ALLOCATABLE :: ipvt(:)
+INTEGER(4) :: maxfev, mode, nprint, info, nfev, ldfjac, ncons, ncofs  ! nfev: function eval count (informational)
+CHARACTER(len=80) :: char_buf
+!---
+! Populate module-level context so edge_jbs_residual can access the data
+IF (ALLOCATED(active_edge_jbs%psi_fit)) DEALLOCATE(active_edge_jbs%psi_fit)
+IF (ALLOCATED(active_edge_jbs%j_fit))   DEALLOCATE(active_edge_jbs%j_fit)
+ALLOCATE(active_edge_jbs%psi_fit(n_fit))
+ALLOCATE(active_edge_jbs%j_fit(n_fit))
+active_edge_jbs%n_fit   = n_fit
+active_edge_jbs%psi_fit = psi_fit
+active_edge_jbs%j_fit   = j_BS_fit
+active_edge_jbs%tail_alpha = 1.5_r8  ! fixed Python default
+! Initial guess
+cofs = p0
+ncons  = n_fit
+ncofs  = NPARAMS
+ldfjac = ncons
+ALLOCATE(diag(ncofs), fjac(ncons, ncofs))
+ALLOCATE(qtf(ncofs), wa1(ncofs), wa2(ncofs))
+ALLOCATE(wa3(ncofs), wa4(ncons))
+ALLOCATE(ipvt(ncofs))
+! MINPACK lmdif settings (mirrors existing usage in grad_shaf.F90)
+mode   = 1
+factor = 1.0d0
+maxfev = 10000     ! matches Python maxfev=10000
+ftol   = 1.0d-6
+xtol   = 1.0d-6
+gtol   = 1.0d-6
+epsfcn = 1.0d-6
+nprint = 0
+CALL lmdif(edge_jbs_residual, ncons, ncofs, cofs, error_vec, &
+           ftol, xtol, gtol, maxfev, epsfcn, diag, mode, factor, nprint, &
+           info, nfev, fjac, ldfjac, ipvt, qtf, wa1, wa2, wa3, wa4)
+DEALLOCATE(diag, fjac, qtf, wa1, wa2, wa3, wa4, ipvt)
+! info: 1-4 = converged, 0 = improper input, 5 = maxfev exceeded, 6-7 = tolerance too small
+IF (info <= 0 .OR. info >= 5) THEN
+  WRITE(char_buf,'(A,I0,A,I0)') '[curve_fit_edge_jbs] lmdif did not converge; info=', info, &
+    '; nfev=', nfev
+  CALL oft_warn(TRIM(char_buf))
+END IF
+popt = cofs
+END SUBROUTINE curve_fit_edge_jbs
+!------------------------------------------------------------------------------
+!> Analyse and isolate the edge bootstrap-current spike from a toroidal
+!> bootstrap current density profile.
+!>
+!> Translated from Python bootstrap.py: analyze_bootstrap_edge_spike
+!>
+!> The routine performs the following steps:
+!>   1. Locates the dominant local peak with j_BS > 0 in the edge region
+!>      (psi_N > 0.7).  When several peaks exist the one closest to the
+!>      separatrix (largest psi_N) is chosen.  A warning is emitted if
+!>      that peak is not also the tallest among qualifying peaks.
+!>   2. Finds the minimum of j_BS between psi_N = 0.5 and the peak (the
+!>      flat-core stitching level, lmin_j_BS).
+!>   3. Builds masked_spike: flat at lmin_j_BS for psi_N below the minimum
+!>      index, actual j_BS from that index to the separatrix.
+!>   4. Smooths the flat/spike junction with a cubic Hermite spline over a
+!>      window of width min(0.5 * dist_to_peak, 0.2) centred on the minimum.
+!>   5. (Optional) Fits parametrise_edge_jbs to j_BS over the spike region
+!>      (psi_N >= psi_N(lmin_idx)) via curve_fit_edge_jbs (MINPACK lmdif).
+!>      Only performed when parameterized_spike is present.  An approximate
+!>      FWHM is computed first as the initial sigma guess.  The 7 fitted
+!>      parameters are used to evaluate parameterized_spike on the full
+!>      n-point psi_N grid.
+!>
+!> @param n                  Number of flux surface samples
+!> @param psi_N              Normalised poloidal flux grid [0, 1]
+!> @param j_BS           Bootstrap current density j_phi profile [A/m^2]
+!> @param masked_spike       Output: isolated edge spike spliced onto flat core [A/m^2]
+!> @param parameterized_spike Output: parametrise_edge_jbs fit evaluated on full psi_N grid [A/m^2]
+!------------------------------------------------------------------------------
+SUBROUTINE analyze_bootstrap_edge_spike(n, psi_N, j_BS, masked_spike, &
+                                      parameterized_spike)
+INTEGER(i4), INTENT(in)  :: n
+REAL(r8),    INTENT(in)  :: psi_N(n)              !< Normalised poloidal flux [0=axis, 1=LCFS/plasma edge]
+REAL(r8),    INTENT(in)  :: j_BS(n)           !< Bootstrap current density [A/m^2]
+REAL(r8),    INTENT(out) :: masked_spike(n)        !< Isolated edge spike spliced onto flat core [A/m^2]
+REAL(r8), OPTIONAL, INTENT(out) :: parameterized_spike(n) !< parametrise_edge_jbs fit on full grid [A/m^2]
+!---
+INTEGER(i4) :: i, peak_idx, lmin_idx, left_idx, right_idx, idx_start, idx_end
+INTEGER(i4) :: n_fit
+REAL(r8)    :: best_psi, best_height, half_max, dist_tmp
+REAL(r8)    :: peak_psi, peak_height, lmin_j_BS, fwhm
+REAL(r8)    :: jBS_min_loc, dist_to_peak, blend_width_val, x_start, x_end
+REAL(r8)    :: dist_start, dist_end
+REAL(r8)    :: y_start, dy_start, y_end, dy_end
+REAL(r8)    :: dx_window, t, h00, h10, h01, h11, y_patch
+REAL(r8)    :: p0(7), popt(7)
+REAL(r8)    :: amp_fit, center_fit, width_fit, offset_fit, sk_fit, y_sep_fit, bw_fit
+REAL(r8), ALLOCATABLE :: psi_fit(:), j_fit(:)
+CHARACTER(len=80) :: char_buf
+! =====================================================================
+! 1. Find the dominant local peak in the edge region (psi_N > 0.7)
+!    with j_BS > 0.  Among all qualifying peaks choose the one with
+!    the largest psi_N value (closest to the separatrix).
+!    Warn if that peak is not also the tallest.
+!    Mirrors: peaks[numpy.argmax(psi_edge[peaks])] in Python.
+! =====================================================================
+peak_idx    = -1
+best_psi    = -1.0_r8
+best_height = -1.0_r8
+DO i = 2, n-1
+  IF (psi_N(i) < 0.7_r8)          CYCLE
+  IF (j_BS(i) <= 0.0_r8)      CYCLE
+  IF (j_BS(i) <= j_BS(i-1)) CYCLE
+  IF (j_BS(i) <= j_BS(i+1)) CYCLE
+  IF (j_BS(i) > best_height) best_height = j_BS(i)
+  IF (psi_N(i) > best_psi) THEN
+    peak_idx = i
+    best_psi = psi_N(i)
+  END IF
+END DO
+IF (peak_idx >= 1 .AND. j_BS(peak_idx) < best_height) THEN
+  WRITE(char_buf,'(A,ES12.4,A,ES12.4)') &
+    '[analyze_bootstrap_edge_spike] dominant (rightmost) peak height=', j_BS(peak_idx), &
+    ' is not the tallest peak; tallest=', best_height
+  CALL oft_warn(TRIM(char_buf))
+END IF
+IF (peak_idx < 1) THEN
+  ! No clear peak found: return flat-zero profiles
+  masked_spike = 0.0_r8
+  IF (PRESENT(parameterized_spike)) parameterized_spike = 0.0_r8
+  RETURN
+END IF
+peak_psi    = psi_N(peak_idx)
+peak_height = j_BS(peak_idx)
+! =====================================================================
+! 2. Find the minimum of j_BS between psi_N = 0.5 and the peak.
+!    This becomes the flat-core stitching level (lmin_j_BS).
+!    Mirrors: lmin_j_BS = min(j_bootstrap[(psi_N > 0.5) & (psi_N < peak_psi)])
+! =====================================================================
+lmin_j_BS = 1.0e30_r8
+lmin_idx  = peak_idx      ! fallback: use peak location if no point found
+DO i = 1, n
+  IF (psi_N(i) > 0.5_r8 .AND. psi_N(i) < peak_psi) THEN
+    IF (j_BS(i) < lmin_j_BS) THEN
+      lmin_j_BS = j_BS(i)
+      lmin_idx  = i
+    END IF
+  END IF
+END DO
+! =====================================================================
+! 3. Build masked_spike:
+!    - Flat at lmin_j_BS for psi_N < psi_N(lmin_idx)
+!    - Actual j_BS   for psi_N >= psi_N(lmin_idx)
+!    Mirrors: fit_mask = (psi_N >= masked_psi_N[lmin_arg])
+! =====================================================================
+DO i = 1, n
+  IF (psi_N(i) >= psi_N(lmin_idx)) THEN
+    masked_spike(i) = j_BS(i)
+  ELSE
+    masked_spike(i) = lmin_j_BS
+  END IF
+END DO
+! =====================================================================
+! 4. Smooth the flat/spike junction with a cubic Hermite spline.
+!    Blend window  = min(0.5 * dist_to_peak, 0.2), centred on lmin_loc.
+!    Mirrors the Hermite-spline patch in the Python.
+! =====================================================================
+jBS_min_loc     = psi_N(lmin_idx)
+dist_to_peak    = peak_psi - jBS_min_loc
+blend_width_val = MIN(0.5_r8 * dist_to_peak, 0.2_r8)
+x_start         = jBS_min_loc - 0.5_r8 * blend_width_val
+x_end           = jBS_min_loc + 0.5_r8 * blend_width_val
+! Find the nearest grid points to x_start and x_end
+idx_start  = 1
+dist_start = ABS(psi_N(1) - x_start)
+DO i = 2, n
+  dist_tmp = ABS(psi_N(i) - x_start)
+  IF (dist_tmp < dist_start) THEN
+    dist_start = dist_tmp
+    idx_start  = i
+  END IF
+END DO
+idx_end  = 1
+dist_end = ABS(psi_N(1) - x_end)
+DO i = 2, n
+  dist_tmp = ABS(psi_N(i) - x_end)
+  IF (dist_tmp < dist_end) THEN
+    dist_end = dist_tmp
+    idx_end  = i
+  END IF
+END DO
+! Safety clamp: mirrors Python max(0,...) and min(len-2,...) (1-indexed here)
+idx_start = MAX(1,   idx_start)
+idx_end   = MIN(n-1, idx_end)   ! keep room for the central-difference at idx_end+1
+idx_end   = MAX(2,   idx_end)   ! keep room for the central-difference at idx_end-1
+! Ensure idx_end is strictly right of lmin_idx so the central-difference
+! stencil for dy_end does not straddle the flat/spike step discontinuity
+idx_end   = MAX(idx_end, MIN(lmin_idx + 1, n-1))
+! Boundary conditions
+! Left boundary: on the flat section -> slope = 0
+y_start  = masked_spike(idx_start)
+dy_start = 0.0_r8
+! Right boundary: on the spike profile -> central-difference slope
+y_end  = masked_spike(idx_end)
+dy_end = (masked_spike(idx_end+1) - masked_spike(idx_end-1)) &
+       / (psi_N(idx_end+1)       - psi_N(idx_end-1))
+! Generate the cubic Hermite patch and overwrite the junction window
+dx_window = psi_N(idx_end) - psi_N(idx_start)
+IF (ABS(dx_window) > 0.0_r8 .AND. idx_end > idx_start) THEN
+  DO i = idx_start, idx_end
+    t = (psi_N(i) - psi_N(idx_start)) / dx_window
+    h00 =  2.0_r8*t**3 - 3.0_r8*t**2 + 1.0_r8   ! weight for y_start
+    h10 =         t**3 - 2.0_r8*t**2 + t          ! weight for dy_start (scaled)
+    h01 = -2.0_r8*t**3 + 3.0_r8*t**2              ! weight for y_end
+    h11 =         t**3 -        t**2               ! weight for dy_end (scaled)
+    y_patch = h00*y_start + h10*dx_window*dy_start &
+            + h01*y_end   + h11*dx_window*dy_end
+    masked_spike(i) = y_patch
+  END DO
+END IF
+! =====================================================================
+! 5. Fit parametrise_edge_jbs to j_BS over the edge-spike region.
+!    Only performed when parameterized_spike output is requested.
+! =====================================================================
+IF (PRESENT(parameterized_spike)) THEN
+  ! FWHM scan for LM fit initial guess
+  half_max  = 0.5_r8 * peak_height
+  left_idx  = lmin_idx   ! fallback: spike left boundary if no half-max crossing found before psi=0.7
+  DO i = peak_idx-1, 1, -1
+    IF (psi_N(i) < 0.7_r8) EXIT
+    IF (j_BS(i) <= half_max) THEN
+      left_idx = i
+      EXIT
+    END IF
+  END DO
+  right_idx = n       ! fallback: spike right boundary if no half-max crossing found before psi=1.0
+  DO i = peak_idx+1, n
+    IF (j_BS(i) <= half_max) THEN
+      right_idx = i
+      EXIT
+    END IF
+  END DO
+  fwhm = psi_N(right_idx) - psi_N(left_idx)
+  ! Build the (psi, j) fitting arrays over the spike region
+  n_fit = COUNT(psi_N >= psi_N(lmin_idx))
+  ALLOCATE(psi_fit(n_fit), j_fit(n_fit))
+  n_fit = 0
+  DO i = 1, n
+    IF (psi_N(i) >= psi_N(lmin_idx)) THEN
+      n_fit = n_fit + 1
+      psi_fit(n_fit) = psi_N(i)
+      j_fit(n_fit)   = j_BS(i)
+    END IF
+  END DO
+  ! Initial parameter guess (matches Python p0)
+  p0(1) = peak_height                          ! amp
+  p0(2) = peak_psi                             ! center
+  p0(3) = fwhm / 2.355_r8                     ! width (sigma)
+  p0(4) = lmin_j_BS                            ! offset
+  p0(5) = 1.0_r8                              ! sk
+  p0(6) = MAX(0.0_r8, j_BS(n))            ! y_sep
+  p0(7) = 0.05_r8                             ! blend_width
+  ! Levenberg-Marquardt fit
+  CALL curve_fit_edge_jbs(n_fit, psi_fit, j_fit, p0, popt)
+  DEALLOCATE(psi_fit, j_fit)
+  amp_fit    = popt(1)
+  center_fit = popt(2)
+  width_fit  = popt(3)
+  offset_fit = popt(4)
+  sk_fit     = popt(5)
+  y_sep_fit  = popt(6)
+  bw_fit     = popt(7)
+  ! Evaluate fitted profile on the full n-point grid
+  CALL parametrise_edge_jbs(n, psi_N, amp_fit, center_fit, width_fit, &
+      offset_fit, sk_fit, y_sep_fit, bw_fit, 1.5_r8, parameterized_spike)
+END IF
+END SUBROUTINE analyze_bootstrap_edge_spike
 !------------------------------------------------------------------------------
 !> Redl 2021 bootstrap current formula.
 !>
