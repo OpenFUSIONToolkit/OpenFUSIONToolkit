@@ -49,7 +49,7 @@ REAL(8) :: alpha,beta,sep
 REAL(8), ALLOCATABLE, DIMENSION(:) :: cofs,yvals
 INTEGER(4) :: ncofs,npsi,io_unit
 LOGICAL :: zero_grad
-CHARACTER(LEN=15) :: profType
+CHARACTER(LEN=32) :: profType
 !---
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,*)profType
