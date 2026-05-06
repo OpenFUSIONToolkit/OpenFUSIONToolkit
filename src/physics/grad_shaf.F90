@@ -2021,7 +2021,7 @@ logical :: pm_save,fail_test
 !---
 error_flag=0
 self%nl_its=0
-self%Ip_target_skip=.FALSE.
+equil%Ip_target_skip=.FALSE.
 IF(TRIM(self%lu_solver%package)=='none')THEN
   CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 ELSE
