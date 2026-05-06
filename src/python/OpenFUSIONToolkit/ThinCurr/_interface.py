@@ -78,8 +78,16 @@ thincurr_curr_Rmat = ctypes_subroutine(oftpy_lib.thincurr_Rmat,
 thincurr_get_eta = ctypes_subroutine(oftpy_lib.thincurr_get_eta,
     [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
 
-# thincurr_set_eta(tw_ptr,eta_ptr,error_string)
+# thincurr_get_eta_vol(tw_ptr,eta_ptr,error_string)
+thincurr_get_eta_vol = ctypes_subroutine(oftpy_lib.thincurr_get_eta_vol,
+    [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
+
+# thincurr_set_eta(tw_ptr,eta_surf_ptr,eta_vol_ptr,thickness_ptr,error_string)
 thincurr_set_eta = ctypes_subroutine(oftpy_lib.thincurr_set_eta,
+    [c_void_p, c_void_p, c_void_p, c_void_p, c_char_p])
+
+# thincurr_get_thickness(tw_ptr,thickness_ptr,error_string)
+thincurr_get_thickness = ctypes_subroutine(oftpy_lib.thincurr_get_thickness,
     [c_void_p, ctypes_numpy_array(float64,1), c_char_p])
 
 # Compute current regularization matrix thincurr_curr_regmat(tw_ptr,Rmat,error_str)
@@ -94,9 +102,9 @@ thincurr_eigenvalues = ctypes_subroutine(oftpy_lib.thincurr_eigenvalues,
 thincurr_freq_response = ctypes_subroutine(oftpy_lib.thincurr_freq_response,
     [c_void_p, c_bool, c_int, c_double, ctypes_numpy_array(float64,2), c_void_p, c_char_p])
 
-# thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_tol,timestep_cn,nstatus,nplot,vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,volts_full,sensor_vals_ptr,hodlr_ptr,error_str)
+# thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_atol,cg_rtol,timestep_cn,nstatus,nplot,vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,volts_full,sensor_vals_ptr,hodlr_ptr,error_str)
 thincurr_time_domain = ctypes_subroutine(oftpy_lib.thincurr_time_domain,
-    [c_void_p, c_bool, c_double, c_int, c_double, c_bool, c_int, c_int, ctypes_numpy_array(float64,1), c_void_p, c_int, ctypes_numpy_array(float64,2), c_int,
+    [c_void_p, c_bool, c_double, c_int, c_double, c_double, c_bool, c_int, c_int, ctypes_numpy_array(float64,1), c_void_p, c_int, ctypes_numpy_array(float64,2), c_int,
      ctypes_numpy_array(float64,2), c_bool, c_void_p, c_void_p, c_char_p])
 
 # thincurr_time_domain_plot(tw_ptr,compute_B,rebuild_sensors,nsteps,nplot,sensor_ptr,sensor_vals_ptr,nsensor,hodlr_ptr,error_str)

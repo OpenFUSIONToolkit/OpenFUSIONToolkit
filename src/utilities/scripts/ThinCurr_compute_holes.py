@@ -36,6 +36,12 @@ class trimesh:
         self._setup_edges()
         self._setup_neighbors()
         self._setup_boundary()
+        if len(self._non_manifold_edges) > 0:
+            print('ERROR: Non-manifold surface detected')
+            for k, cells in self._non_manifold_edges.items():
+                pt = (self.r[self.le[k,0],:] + self.r[self.le[k,1],:])/2.0
+                print('  {0} cells share edge {1} located at {2} {3} {4}'.format(2+len(cells), k+1, *pt))
+            raise ValueError("ThinCurr requires manifold surfaces")
         self.surf_tag = self._orient_surface()
         self.nsurfs = np.max(self.surf_tag)+1
         if info:
@@ -145,13 +151,19 @@ class trimesh:
                 nr[k]+=1                      # count cell to corner
         self.lef=-np.ones((self.ne,2), dtype=np.int32)
         self.lff=np.zeros((self.nf,3), dtype=np.int32)
+        self._non_manifold_edges = {}
         for i in range(self.nf):      # loop over cells & index to edges
             for j in range(3):        # loop over edges
                 k=abs(self.lfe[i,j])-1  # edge numbers
                 if self.lef[k,0]<0:
                     self.lef[k,0]=i   # record first cell
                 else:
-                    self.lef[k,1]=i   # record second cell
+                    if self.lef[k,1] >= 0: # Handle more than 2 connections
+                        curr_list = self._non_manifold_edges.get(k,[])
+                        if i not in curr_list:
+                            self._non_manifold_edges[k] = curr_list + [i]
+                    else:
+                        self.lef[k,1]=i   # record second cell
         for i in range(self.nf):     # loop over cells & locate neighbors
             for j in range(3):       # loop over edges
                 k=abs(self.lfe[i,j])-1 # edge numbers
@@ -232,7 +244,7 @@ class trimesh:
         return np.array(oriented)
     
     def get_face_edge_bop(self):
-        ''' Compute face to edge boundary operator \partial_2
+        r''' Compute face to edge boundary operator \partial_2
         '''
         I = np.zeros((self.nf*3,),dtype=np.int32); I[::3] = np.arange(self.nf); I[1::3] = np.arange(self.nf); I[2::3] = np.arange(self.nf)
         J = self.lfe.reshape((self.nf*3,))

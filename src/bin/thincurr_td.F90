@@ -225,10 +225,10 @@ ELSE
   curr_ic=0.d0
   oft_env%pm=.FALSE.
   IF(tw_hodlr%L_svd_tol>0.d0)THEN
-    CALL run_td_sim(tw_sim,dt,nsteps,curr_ic,direct,cg_tol,timestep_cn,nstatus, &
+    CALL run_td_sim(tw_sim,dt,nsteps,curr_ic,direct,[cg_tol,1.d-12],timestep_cn,nstatus, &
       nplot,sensors,curr_waveform,volt_waveform,sensor_waveform,tw_hodlr)
   ELSE
-    CALL run_td_sim(tw_sim,dt,nsteps,curr_ic,direct,cg_tol,timestep_cn,nstatus, &
+    CALL run_td_sim(tw_sim,dt,nsteps,curr_ic,direct,[cg_tol,1.d-12],timestep_cn,nstatus, &
       nplot,sensors,curr_waveform,volt_waveform,sensor_waveform)
   END IF
 END IF

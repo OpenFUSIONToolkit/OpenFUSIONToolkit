@@ -140,7 +140,7 @@ IF(sensors%nfloops>0)THEN
   CALL dgemv('N',sensors%nfloops,tw_sim%nelems,1.d0,tw_sim%Ael2sen,sensors%nfloops,utmp(:,2),1,0.d0,senout(:,2),1)
   OPEN(NEWUNIT=io_unit,FILE='thincurr_mode.dat')
   DO i=1,sensors%nfloops
-    WRITE(io_unit,'(A,4Es24.15)')sensors%floops(i)%name,senout(i,:)
+    WRITE(io_unit,'(A,4ES24.15)')sensors%floops(i)%name,senout(i,:)
   END DO
   CLOSE(io_unit)
   DEALLOCATE(senout)

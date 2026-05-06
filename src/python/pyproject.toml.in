@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools"]
+#requires = ["setuptools>=68"] # For new license format (requires Python 3.8+)
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "OpenFUSIONToolkit"
+authors = [
+    {name = "Anson Braun"},
+    {name = "Daniel Burgess"},
+    {name = "Samuel Freiberger"},
+    {name = "Sophia Guizzo"},
+    {name = "Chris Hansen"},
+    {name = "Julia Kirby"},
+    {name = "John Lhota"},
+    {name = "Francois Logak"},
+    {name = "Oak Nelson"},
+    {name = "Matthew Pharr"},
+    {name = "Benjy Smith"},
+    {name = "Thomas Wang"},
+]
+maintainers = [
+  {name = "Chris Hansen", email = "christopher.hansen@columbia.edu"}
+]
+description = "Modeling tools for plasma and fusion research and engineering"
+readme = "README.md"
+requires-python = ">=3.7"
+keywords = ["Fusion", "Plasma", "TokaMaker", "ThinCurr"]
+license = "LGPL-3.0-only"
+#License-Expression = "LGPL-3.0-only"
+#License-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Physics"
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "h5py",
+    "netCDF4"
+]
+version = "@CMAKE_PROJECT_VERSION@@OFT_PYPI_VER_SUFFIX@"
+
+[project.urls]
+Homepage = "https://openfusiontoolkit.github.io/OpenFUSIONToolkit/"
+Documentation = "https://openfusiontoolkit.github.io/OpenFUSIONToolkit/docs/index.html"
+Repository = "https://github.com/openfusiontoolkit/OpenFUSIONToolkit"
+Issues = "https://github.com/openfusiontoolkit/OpenFUSIONToolkit/issues"
+
+[project.optional-dependencies]
+viz = ["pyvista"]
+
+[tool.setuptools.package-data]
+OpenFUSIONToolkit = ["lib*"]
+
+[tool.ruff]
+# Assume Python 3.7 for OMFIT compatibility
+target-version = "py37"
+
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`) codes by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+#select = ["E4", "E7", "E9", "F"]
+ignore = ["E722", "F403", "F405"]

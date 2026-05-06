@@ -46,12 +46,12 @@ jobs:
         uses: actions/configure-pages@v4
 
       - name: Create build dir
-        run: mkdir build_docs
+        run: mkdir builds
 
       - name: Build OFT documentation (nightly)
         if: github.ref != 'refs/heads/gh-pages'
         shell: bash
-        working-directory: build_docs
+        working-directory: builds
         run: |
           cmake -DOFT_BUILD_DOCS:BOOL=ON -DOFT_DOCS_ONLY:BOOL=ON -DOFT_PACKAGE_NIGHTLY:BOOL=ON ../src
           make docs
@@ -59,13 +59,13 @@ jobs:
       - name: Build OFT documentation (deploy)
         if: github.ref == 'refs/heads/gh-pages'
         shell: bash
-        working-directory: build_docs
+        working-directory: builds
         run: bash ../src/docs/build_doc_versions.sh
       
       - name: Package full site
         run: |
           cp -rL src/docs/website _site
-          cp -r build_docs/doc/html _site/docs
+          cp -r builds/doc/html _site/docs
 
       - name: Fix permissions
         run: |

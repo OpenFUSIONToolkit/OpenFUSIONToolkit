@@ -18,9 +18,14 @@ mesh surface all
 set duplicate block elements off
 block 1 add surface 1 
 
+# Defines the jumper measuring the azimuthal current,
+# Use "--keep_nodeset_start 0" when using "ThinCurr_compute_holes" to avoid overwriting
+nodeset 1 add curve 3
+
 # The following definitions are no longer required, use "ThinCurr_compute_holes" instead
 #nodeset 1 add vertex 2
 
 # Export grid
 set large exodus file on
 export Genesis  "thincurr_ex-cyl.g" overwrite block 1
+

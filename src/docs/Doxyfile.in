@@ -175,7 +175,6 @@ SEARCH_INCLUDES        = YES
 INCLUDE_PATH           =
 INCLUDE_FILE_PATTERNS  =
 PREDEFINED             = HAVE_MPI=1 \
-                         HAVE_XML=1 \
                          HAVE_PHDF5=1 \
                          HAVE_ONURBS=1 \
                          HAVE_ARPACK=1 \

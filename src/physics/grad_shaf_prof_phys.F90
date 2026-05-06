@@ -12,17 +12,19 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 module grad_shaf_prof_phys
+USE oft_io, only: hdf5_write, hdf5_read, hdf5_field_exist
 use oft_base
 use oft_mesh_type, only: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
 use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
-use oft_gs, only: gs_eq, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
+use oft_gs, only: gs_equil, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
   gs_get_qprof, gs_ani_press, gs_epsilon
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
-use oft_gs_profiles, only: spline_flux_func, linterp_flux_func
+use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
+  spline_func_copy, spline_func_delete
 use spline_mod
 USE mhd_utils, ONLY: mu0
 implicit none
@@ -43,16 +45,32 @@ type, extends(spline_flux_func) :: mercier_flux_func
   integer(4) :: ntheta = 128
   TYPE(spline_type) :: funcp
 contains
-    procedure :: update => mercier_update
+  !> Needs docs
+  procedure :: copy => mercier_copy
+  !> Needs docs
+  procedure :: delete => mercier_delete
+  !> Needs docs
+  procedure :: update => mercier_update
 end type mercier_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(linterp_flux_func) :: jphi_flux_func
-  integer(4) :: ngeom = 50
-  real(8), pointer, dimension(:) :: jphi => NULL() !< Needs docs
+  integer(4) :: ngeom = 50 !< Number of points in psi for <R>, <1/R> evaluation
+  real(8) :: j0 = 0.d0 !< LCFS Jphi value
+  real(8), pointer, dimension(:) :: jphi => NULL() !< Jphi(psi) profile values
 contains
   !> Needs docs
+  procedure :: save_hdf5 => jphi_save_hdf5
+  procedure :: save_txt => jphi_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => jphi_load_hdf5
+  procedure :: load_txt => jphi_load_txt
+  !> Needs docs
+  procedure :: copy => jphi_copy
+  !> Needs docs
+  procedure :: delete => jphi_delete
+  !> Update F*F' profile from Jphi, P', and current equilibrium
   procedure :: update => jphi_update
 end type jphi_flux_func
 !------------------------------------------------------------------------------
@@ -71,7 +89,18 @@ end type minbinv_interp
 type, extends(spline_flux_func) :: dipole_b0_flux_func
   real(r8) :: psi_pad = 1.d-1
 contains
-    procedure :: update => dipole_b0_update
+  !> Needs docs
+  procedure :: save_hdf5 => dipole_b0_save_hdf5
+  procedure :: save_txt => dipole_b0_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => dipole_b0_load_hdf5
+  procedure :: load_txt => dipole_b0_load_txt
+  !> Needs docs
+  procedure :: copy => dipole_b0_copy
+  !> Needs docs
+  procedure :: delete => dipole_b0_delete
+  !> Needs docs
+  procedure :: update => dipole_b0_update
 end type dipole_b0_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -80,9 +109,10 @@ type, extends(gs_ani_press) :: dipole_ani_press
   REAL(r8) :: a_exp = 0.d0 !< Anisotropy exponent for mirror pressure profiles
   TYPE(oft_lag_brinterp), POINTER :: psi_eval => NULL() !< Needs docs
   TYPE(oft_lag_bginterp), POINTER :: psi_geval => NULL() !< Needs docs
-  TYPE(gs_eq), POINTER :: gs => NULL()
   CLASS(flux_func), POINTER :: B0_prof => NULL() !< Dipole minimum B profile
 contains
+  !> Needs docs
+  procedure :: copy => dipole_ani_copy
   !> Needs docs
   procedure :: setup => dipole_ani_setup
   !> Needs docs
@@ -98,7 +128,18 @@ end type dipole_ani_press
 type, extends(spline_flux_func) :: mirror_b0_flux_func
   real(r8) :: z_midplane = 0.d0 !< Z location of mirror midplane
 contains
-    procedure :: update => mirror_b0_update
+  !> Needs docs
+  procedure :: save_hdf5 => mirror_b0_save_hdf5
+  procedure :: save_txt => mirror_b0_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => mirror_b0_load_hdf5
+  procedure :: load_txt => mirror_b0_load_txt
+  !> Needs docs
+  procedure :: copy => mirror_b0_copy
+  !> Needs docs
+  procedure :: delete => mirror_b0_delete
+  !> Needs docs
+  procedure :: update => mirror_b0_update
 end type mirror_b0_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -109,9 +150,10 @@ type, extends(gs_ani_press) :: mirror_ani_slosh
   REAL(r8) :: zthroat = 0.d0 !< Mirror peak field location
   TYPE(oft_lag_brinterp), POINTER :: psi_eval => NULL() !< Needs docs
   TYPE(oft_lag_bginterp), POINTER :: psi_geval => NULL() !< Needs docs
-  TYPE(gs_eq), POINTER :: gs => NULL()
   CLASS(flux_func), POINTER :: B0_prof => NULL() !< Mirror minimum B profile
 contains
+  !> Needs docs
+  procedure :: copy => mirror_slosh_copy
   !> Needs docs
   procedure :: setup => mirror_slosh_setup
   !> Needs docs
@@ -146,9 +188,34 @@ END SUBROUTINE create_mercier_ff
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
+subroutine mercier_copy(self,new)
+class(mercier_flux_func), intent(inout) :: self
+class(flux_func), pointer, intent(inout) :: new
+CALL spline_func_copy(self,new)
+SELECT TYPE(new)
+  CLASS IS(mercier_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
+    new%rs = self%rs
+    new%ntheta = self%ntheta
+    CALL spline_alloc(new%funcp,new%npsi,1)
+    CALL spline_copy(self%funcp,new%funcp)
+END SELECT
+end subroutine mercier_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mercier_delete(self)
+class(mercier_flux_func), intent(inout) :: self
+IF(ASSOCIATED(self%fun_loc))CALL spline_dealloc(self%funcp)
+CALL spline_func_delete(self)
+end subroutine mercier_delete
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
 subroutine mercier_update(self,gseq)
 class(mercier_flux_func), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 type(mercierinv_interp), target :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: I,Ip,q,qp,vp,vpp,s,a,b,pp,gop(3,3),psi_surf(1),vol,rmax
@@ -162,7 +229,7 @@ IF(oft_debug_print(2))THEN
   CALL oft_increase_indent
 END IF
 psi_int%u=>gseq%psi
-CALL psi_int%setup(gseq%fe_rep)
+CALL psi_int%setup(gseq%device%fe_rep)
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
 IF(oft_debug_print(2))WRITE(*,'(2A,3ES11.3)')oft_indent,'Axis Position = ',raxis,zaxis
@@ -175,8 +242,8 @@ END IF
 rmax=raxis
 cell=0
 DO j=1,100
-  pt=[(gseq%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
+  pt=[(gseq%device%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  CALL bmesh_findcell(gseq%device%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
   IF( psi_surf(1) < x1)EXIT
@@ -188,7 +255,7 @@ call set_tracer(1)
 !$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
 pt=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
 field%u=>gseq%psi
-CALL field%setup(gseq%fe_rep)
+CALL field%setup(gseq%device%fe_rep)
 active_tracer%neq=8
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -207,7 +274,7 @@ do j=1,self%npsi-1
     !$omp critical
     CALL gs_psi2r(gseq,psi_surf(1),pt)
     !$omp end critical
-    call tracinginv_fs(gseq%mesh,pt(1:2))
+    call tracinginv_fs(gseq%device%mesh,pt(1:2))
     !---Exit if trace fails
     if(active_tracer%status/=1)THEN
       WRITE(*,*)'Tracer Error:',psi_surf(1),pt,active_tracer%y,active_tracer%status
@@ -218,12 +285,12 @@ do j=1,self%npsi-1
     !------------------------------------------------------------------------------
     !---Compute poloidal flux
     pt(1:2)=active_tracer%y
-    call bmesh_findcell(gseq%mesh,active_tracer%cell,pt,active_tracer%f)
-    call gseq%mesh%jacobian(active_tracer%cell,active_tracer%f,gop,vol)
+    call bmesh_findcell(gseq%device%mesh,active_tracer%cell,pt,active_tracer%f)
+    call gseq%device%mesh%jacobian(active_tracer%cell,active_tracer%f,gop,vol)
     call psi_int%interp(active_tracer%cell,active_tracer%f,gop,psi_surf)
     !---Get flux variables
-    I=gseq%alam*gseq%I%f(psi_surf(1))+gseq%I%f_offset
-    Ip=gseq%alam*gseq%I%fp(psi_surf(1))
+    I=gseq%ffp_scale*gseq%I%f(psi_surf(1))+gseq%I%f_offset
+    Ip=gseq%ffp_scale*gseq%I%fp(psi_surf(1))
     v=>active_tracer%v
     !---Compute profile variables
     q=I*v(3)/(2*pi) ! Safety Factor (q)
@@ -321,15 +388,79 @@ val(3:8)=val(3:8)*val(2)
 deallocate(j)
 end subroutine minterpinv_apply
 !------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_save_hdf5(self,filename,path)
+class(jphi_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('jphi-linterp',filename,path//'/TYPE')
+CALL hdf5_write(self%npsi,filename,path//'/NPSI')
+CALL hdf5_write(self%x,filename,path//'/XVALS')
+CALL hdf5_write(self%jphi,filename,path//'/YVALS')
+CALL hdf5_write(self%j0,filename,path//'/J0')
+end subroutine jphi_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_save_txt(self,io_unit)
+class(jphi_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'jphi-linterp'
+WRITE(io_unit,*)self%npsi,self%j0
+WRITE(io_unit,*)self%x
+WRITE(io_unit,*)self%jphi
+end subroutine jphi_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_load_hdf5(self,filename,path,success)
+class(jphi_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+integer(i4) :: npsi
+real(r8) :: J0
+real(r8), allocatable :: xvals(:),yvals(:)
+CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
+IF(.NOT.success)RETURN
+ALLOCATE(xvals(npsi),yvals(npsi))
+CALL hdf5_read(xvals,filename,path//'/XVALS',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(yvals,filename,path//'/YVALS',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(J0,filename,path//'/J0',success=success)
+IF(.NOT.success)RETURN
+CALL create_jphi_ff(self,npsi,xvals,yvals,J0)
+DEALLOCATE(xvals,yvals)
+end subroutine jphi_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_load_txt(self,io_unit)
+class(jphi_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+integer(i4) :: npsi
+real(r8) :: J0
+real(r8), allocatable :: xvals(:),yvals(:)
+READ(io_unit,*)npsi,J0
+ALLOCATE(xvals(npsi),yvals(npsi))
+READ(io_unit,*)xvals
+READ(io_unit,*)yvals
+CALL create_jphi_ff(self,npsi,xvals,yvals,J0)
+DEALLOCATE(xvals,yvals)
+end subroutine jphi_load_txt
+!------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals)
-CLASS(flux_func), POINTER, INTENT(out) :: func
+SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals,y0)
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: npsi
 REAL(8), INTENT(in) :: psivals(npsi)
 REAL(8), INTENT(in) :: yvals(npsi)
+REAL(8), INTENT(in) :: y0
 INTEGER(4) :: i,ierr
-ALLOCATE(jphi_flux_func::func)
+! IF(.NOT.ASSOCIATED(func))ALLOCATE(jphi_flux_func::func)
 SELECT TYPE(self=>func)
   TYPE IS(jphi_flux_func)
   !---
@@ -341,6 +472,7 @@ SELECT TYPE(self=>func)
   ALLOCATE(self%y(self%npsi))
   ALLOCATE(self%jphi(self%npsi))
   !---
+  self%j0=y0
   self%y0=0.d0
   DO i=1,self%npsi
     self%x(i) = psivals(i)
@@ -349,16 +481,45 @@ SELECT TYPE(self=>func)
   END DO
   self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
   ierr=self%set_cofs(self%yp)
-  IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ncofs,self%x,self%y0
+  IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ncofs,self%x,self%j0
+class default
+  CALL oft_abort('Invalid flux function type in create_jphi_ff','create_jphi_ff',__FILE__)
 END SELECT
 
 END SUBROUTINE create_jphi_ff
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_copy(self,new)
+class(jphi_flux_func), intent(inout) :: self
+class(flux_func), pointer, intent(inout) :: new
+CALL linterp_copy(self,new)
+SELECT TYPE(new)
+  CLASS IS(jphi_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
+    new%ngeom = self%ngeom
+    new%j0 = self%j0
+    ALLOCATE(new%jphi, SOURCE=self%jphi)
+END SELECT
+end subroutine jphi_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine jphi_delete(self)
+class(jphi_flux_func), intent(inout) :: self
+self%j0=0.d0
+IF(ASSOCIATED(self%jphi))DEALLOCATE(self%jphi)
+IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
+IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
+IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
+end subroutine jphi_delete
+!------------------------------------------------------------------------------
+!> Update F*F' profile from Jphi, P', and current equilibrium
 !------------------------------------------------------------------------------
 subroutine jphi_update(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
 REAL(r8) :: jphi_norm,pscale,pprime
 REAL(r8), ALLOCATABLE :: ravgs(:,:),qtmp(:),psi_q(:)
@@ -368,9 +529,18 @@ IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_
 ! IF(gseq%Itor_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
 !---Get updated flux surface geometry for Jphi -> F*F' mapping
-ALLOCATE(ravgs(self%ngeom,3),psi_q(self%ngeom),qtmp(self%ngeom))
-psi_q=[(REAL(i,8)/REAL(self%ngeom+1,8),i=1,self%ngeom)]
-CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
+ALLOCATE(ravgs(self%ngeom+1,3),psi_q(self%ngeom+1),qtmp(self%ngeom+1))
+IF(gseq%diverted)THEN
+  psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
+  psi_q(1)=psi_q(2)
+  CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
+  psi_q(1)=0.d0
+  ravgs(1,1)=gseq%lim_point(1)
+  ravgs(1,2)=1.d0/gseq%lim_point(1)
+ELSE
+  psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
+  CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
+END IF
 ! WRITE(*,*)'  <R>     = ',ravgs(2,1),ravgs(self%ngeom-2,1)
 ! WRITE(*,*)'  <1/R>   = ',ravgs(2,2),ravgs(self%ngeom-2,2)
 CALL spline_alloc(R_spline,self%ngeom-1,2)
@@ -394,6 +564,9 @@ IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
 !---Compute updated F*F' profile ! 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
+CALL spline_eval(R_spline,0.d0,0)
+pprime=gseq%P%fp(gseq%plasma_bounds(1))
+self%y0 = 2.d0*(self%j0*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 DO i=1,self%npsi
   CALL spline_eval(R_spline,self%x(i),0)
   pprime=gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
@@ -401,7 +574,7 @@ DO i=1,self%npsi
 END DO
 ! Disable Ip matching and fix F*F' scale (matching is done here instead)
 IF(gseq%Itor_target>0.d0)gseq%Itor_target=-gseq%Itor_target
-gseq%alam=1.d0
+gseq%ffp_scale=1.d0
 !---Clean up
 CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)
@@ -410,7 +583,7 @@ end subroutine jphi_update
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result)
-class(gs_eq), INTENT(inout) :: self !< Pointer to TokaMaker object
+class(gs_equil), INTENT(inout) :: self !< Pointer to TokaMaker object
 REAL(r8), INTENT(in) :: psi_tmp(:) !< Needs docs
 REAL(r8), INTENT(in) :: field_tmp(:) !< Needs docs
 INTEGER(i4), INTENT(in) :: nvals
@@ -424,14 +597,14 @@ result=0.d0
 prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
 !$omp parallel do private(m,psitmp,sgop,area) reduction(+:result)
-do i=1,self%mesh%nc
-  IF(self%mesh%reg(i)/=1)CYCLE
+do i=1,self%device%mesh%nc
+  IF(self%device%mesh%reg(i)/=1)CYCLE
   !---Loop over quadrature points
-  do m=1,self%fe_rep%quad%np
-    call self%mesh%jacobian(i,self%fe_rep%quad%pts(:,m),sgop,area)
-    call prof_interp_obj%interp(i,self%fe_rep%quad%pts(:,m),sgop,psitmp)
+  do m=1,self%device%fe_rep%quad%np
+    call self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
+    call prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
     psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
-    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*self%fe_rep%quad%wts(m)
+    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*self%device%fe_rep%quad%wts(m)
   end do
 end do
 !---Global reduction and cleanup
@@ -443,10 +616,9 @@ END SUBROUTINE gs_flux_int
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_dipole_b0_prof(func,npsi)
-CLASS(flux_func), POINTER, INTENT(out) :: func
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: npsi
 INTEGER(4) :: i
-ALLOCATE(dipole_b0_flux_func::func)
 select type(self=>func)
   type is(dipole_b0_flux_func)
     !---
@@ -456,14 +628,84 @@ select type(self=>func)
     DO i=1,omp_get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
+class default
+  CALL oft_abort('Invalid flux function type in create_dipole_b0_prof','create_dipole_b0_prof',__FILE__)
 end select
 END SUBROUTINE create_dipole_b0_prof
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
+subroutine dipole_b0_save_hdf5(self,filename,path)
+class(dipole_b0_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('dipole_b0',filename,path//'/TYPE')
+CALL hdf5_write(self%npsi,filename,path//'/NPSI')
+CALL hdf5_write(self%psi_pad,filename,path//'/PSI_PAD')
+end subroutine dipole_b0_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_b0_save_txt(self,io_unit)
+class(dipole_b0_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'dipole_b0'
+WRITE(io_unit,*)self%npsi,self%psi_pad
+end subroutine dipole_b0_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_b0_load_hdf5(self,filename,path,success)
+class(dipole_b0_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+integer(i4) :: npsi
+real(r8), allocatable :: xvals(:),yvals(:)
+CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(self%psi_pad,filename,path//'/PSI_PAD',success=success)
+IF(.NOT.success)RETURN
+CALL create_dipole_b0_prof(self,npsi)
+end subroutine dipole_b0_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_b0_load_txt(self,io_unit)
+class(dipole_b0_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+integer(i4) :: npsi
+READ(io_unit,*)npsi,self%psi_pad
+CALL create_dipole_b0_prof(self,npsi)
+end subroutine dipole_b0_load_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_b0_copy(self,new)
+class(dipole_b0_flux_func), intent(inout) :: self
+class(flux_func), pointer, intent(inout) :: new
+CALL spline_func_copy(self,new)
+SELECT TYPE(new)
+  TYPE IS(dipole_b0_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
+    new%psi_pad=self%psi_pad
+END SELECT
+end subroutine dipole_b0_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine dipole_b0_delete(self)
+class(dipole_b0_flux_func), intent(inout) :: self
+integer(i4) :: i
+CALL spline_func_delete(self)
+end subroutine dipole_b0_delete
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
 subroutine dipole_b0_update(self,gseq)
 class(dipole_b0_flux_func), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 type(minbinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: I,Ip,q,qp,vp,vpp,s,a,b,pp,gop(3,3),psi_surf(1),vol,rmax
@@ -477,7 +719,7 @@ IF(oft_debug_print(2))THEN
   CALL oft_increase_indent
 END IF
 psi_int%u=>gseq%psi
-CALL psi_int%setup(gseq%fe_rep)
+CALL psi_int%setup(gseq%device%fe_rep)
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
 IF(oft_debug_print(2))WRITE(*,'(2A,3ES11.3)')oft_indent,'Axis Position = ',raxis,zaxis
@@ -496,7 +738,7 @@ rmax=raxis
 cell=0
 DO j=1,100
   pt=[raxis*j/REAL(100,8),0.d0,0.d0]
-  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
+  CALL bmesh_findcell(gseq%device%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
   IF( psi_surf(1) > x1)EXIT
@@ -509,7 +751,7 @@ call set_tracer(1)
 pt=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
 ALLOCATE(field)
 field%u=>gseq%psi
-CALL field%setup(gseq%fe_rep)
+CALL field%setup(gseq%device%fe_rep)
 active_tracer%neq=2
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
@@ -523,7 +765,7 @@ do j=1,self%npsi+1
   psi_surf(1)=x2 - psi_surf(1)
   CALL gs_psi2r(gseq,psi_surf(1),pt,psi_int)
   field%minB=1.d99
-  call tracinginv_fs(gseq%mesh,pt(1:2))
+  call tracinginv_fs(gseq%device%mesh,pt(1:2))
   !---Exit if trace fails
   if(active_tracer%status/=1)THEN
     WRITE(*,*)'Tracer Error:',psi_surf(1),pt,active_tracer%y,active_tracer%status
@@ -592,15 +834,35 @@ end subroutine minbinv_apply
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
+subroutine dipole_ani_copy(self,new,new_gs)
+class(dipole_ani_press), intent(inout) :: self
+class(gs_ani_press), pointer, intent(inout) :: new
+class(gs_equil), target, intent(inout) :: new_gs
+ALLOCATE(new, MOLD=self)
+SELECT TYPE(new)
+  CLASS IS(dipole_ani_press)
+    new%a_exp = self%a_exp
+    IF(ASSOCIATED(self%psi_eval))THEN
+      CALL new%setup(new_gs)
+      CALL new%update(new_gs)
+    END IF
+  CLASS DEFAULT
+    CALL oft_abort('Allocation produced wrong type','dipole_ani_copy',__FILE__)
+END SELECT
+end subroutine dipole_ani_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
 subroutine dipole_ani_setup(self,gs)
 class(dipole_ani_press), intent(inout) :: self
-class(gs_eq), target, intent(inout) :: gs
+class(gs_equil), target, intent(inout) :: gs
 self%gs=>gs
-self%mesh=>gs%mesh
+self%mesh=>gs%device%mesh
 ALLOCATE(self%psi_eval,self%psi_geval)
 self%psi_eval%u=>self%gs%psi
-CALL self%psi_eval%setup(self%gs%fe_rep)
+CALL self%psi_eval%setup(self%gs%device%fe_rep)
 CALL self%psi_geval%shared_setup(self%psi_eval)
+ALLOCATE(dipole_b0_flux_func::self%B0_prof)
 CALL create_dipole_b0_prof(self%B0_prof,64)
 end subroutine dipole_ani_setup
 !------------------------------------------------------------------------------
@@ -631,7 +893,7 @@ end subroutine dipole_ani_delete
 !------------------------------------------------------------------------------
 subroutine dipole_ani_update(self,gseq)
 class(dipole_ani_press), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 CALL self%B0_prof%update(gseq)
 end subroutine dipole_ani_update
 !------------------------------------------------------------------------------
@@ -644,7 +906,7 @@ real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
 real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
 real(8), intent(out) :: val(:) !< Reconstructed [p_par, p_perp] factors [2]
 real(8) :: pt(3),psitmp(1),gpsitmp(3),Bp,H
-pt=self%gs%fe_rep%mesh%log2phys(cell,f)
+pt=self%gs%device%fe_rep%mesh%log2phys(cell,f)
 CALL self%psi_eval%interp(cell,f,gop,psitmp)
 CALL self%psi_geval%interp(cell,f,gop,gpsitmp)
 Bp = SQRT((gpsitmp(1)/(pt(1)+gs_epsilon))**2 + (gpsitmp(2)/(pt(1)+gs_epsilon))**2)
@@ -655,10 +917,10 @@ end subroutine dipole_ani_apply
 !> Needs Docs
 !------------------------------------------------------------------------------
 SUBROUTINE create_mirror_b0_prof(func,npsi)
-CLASS(flux_func), POINTER, INTENT(out) :: func
+CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: npsi
 INTEGER(4) :: i
-ALLOCATE(mirror_b0_flux_func::func)
+! IF(.NOT.ASSOCIATED(func))ALLOCATE(mirror_b0_flux_func::func)
 select type(self=>func)
   type is(mirror_b0_flux_func)
     !---
@@ -668,14 +930,86 @@ select type(self=>func)
     DO i=1,omp_get_max_threads()
       CALL spline_alloc(self%fun_loc(i),self%npsi,1)
     END DO
+class default
+  CALL oft_abort('Invalid flux function type in create_mirror_b0_prof','create_mirror_b0_prof',__FILE__)
 end select
 END SUBROUTINE create_mirror_b0_prof
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
+subroutine mirror_b0_save_hdf5(self,filename,path)
+class(mirror_b0_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('mirror_b0',filename,path//'/TYPE')
+CALL hdf5_write(self%npsi,filename,path//'/NPSI')
+CALL hdf5_write(self%z_midplane,filename,path//'/Z_MIDPLANE')
+end subroutine mirror_b0_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_b0_save_txt(self,io_unit)
+class(mirror_b0_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+WRITE(io_unit,*)'mirror_b0'
+WRITE(io_unit,*)self%npsi
+WRITE(io_unit,*)self%z_midplane
+end subroutine mirror_b0_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_b0_load_hdf5(self,filename,path,success)
+class(mirror_b0_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+integer(i4) :: npsi
+real(r8), allocatable :: xvals(:),yvals(:)
+CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(self%z_midplane,filename,path//'/Z_MIDPLANE',success=success)
+IF(.NOT.success)RETURN
+CALL create_mirror_b0_prof(self,npsi)
+end subroutine mirror_b0_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_b0_load_txt(self,io_unit)
+class(mirror_b0_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+integer(i4) :: npsi
+READ(io_unit,*)npsi
+READ(io_unit,*)self%z_midplane
+CALL create_mirror_b0_prof(self,npsi)
+end subroutine mirror_b0_load_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_b0_copy(self,new)
+class(mirror_b0_flux_func), intent(inout) :: self
+class(flux_func), pointer, intent(inout) :: new
+CALL spline_func_copy(self,new)
+SELECT TYPE(new)
+  TYPE IS(mirror_b0_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
+    new%z_midplane = self%z_midplane
+END SELECT
+end subroutine mirror_b0_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mirror_b0_delete(self)
+class(mirror_b0_flux_func), intent(inout) :: self
+integer(i4) :: i
+CALL spline_func_delete(self)
+end subroutine mirror_b0_delete
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
 subroutine mirror_b0_update(self,gseq)
 class(mirror_b0_flux_func), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 type(minbinv_interp), target :: field
 type(oft_lag_brinterp) :: psi_int
 type(oft_lag_bginterp) :: psi_gint
@@ -690,7 +1024,7 @@ IF(oft_debug_print(2))THEN
   CALL oft_increase_indent
 END IF
 psi_int%u=>gseq%psi
-CALL psi_int%setup(gseq%fe_rep)
+CALL psi_int%setup(gseq%device%fe_rep)
 CALL psi_gint%shared_setup(psi_int)
 x1=0.d0; x2=1.d0
 IF(gseq%plasma_bounds(1)>-1.d98)THEN
@@ -698,11 +1032,11 @@ IF(gseq%plasma_bounds(1)>-1.d98)THEN
 END IF
 xr = (x2-x1)
 !---Find Rmax along Zaxis
-rmax=gseq%rmax
+rmax=gseq%device%rmax
 cell=0
 DO j=1,100
   pt=[rmax*j/REAL(100,8),self%z_midplane,0.d0]
-  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
+  CALL bmesh_findcell(gseq%device%mesh,cell,pt,f)
   IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
   CALL psi_int%interp(cell,f,gop,psi_surf)
   IF( psi_surf(1) > x1)EXIT
@@ -714,8 +1048,8 @@ do j=1,self%npsi+1
   psi_surf(1)=(x2-x1)*(1.d0-j/REAL(self%npsi+2,4))
   psi_surf(1)=x2 - psi_surf(1)
   CALL gs_psi2r(gseq,psi_surf(1),pt)
-  CALL bmesh_findcell(gseq%mesh,cell,pt,f)
-  call gseq%mesh%jacobian(cell,f,gop,vol)
+  CALL bmesh_findcell(gseq%device%mesh,cell,pt,f)
+  call gseq%device%mesh%jacobian(cell,f,gop,vol)
   CALL psi_gint%interp(cell,f,gop,gpsi)
   !---Get surface minB
   self%func%xs(j-1)=psi_surf(1)
@@ -737,15 +1071,35 @@ end subroutine mirror_b0_update
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
+subroutine mirror_slosh_copy(self,new,new_gs)
+class(mirror_ani_slosh), intent(inout) :: self
+class(gs_ani_press), pointer, intent(inout) :: new
+class(gs_equil), target, intent(inout) :: new_gs
+ALLOCATE(new, MOLD=self)
+SELECT TYPE(new)
+  CLASS IS(mirror_ani_slosh)
+    new%n_exp = self%n_exp
+    new%bturn = self%bturn
+    new%zthroat = self%zthroat
+    IF(ASSOCIATED(self%psi_eval))THEN
+      CALL new%setup(new_gs)
+      CALL new%update(new_gs)
+    END IF
+END SELECT
+end subroutine mirror_slosh_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
 subroutine mirror_slosh_setup(self,gs)
 class(mirror_ani_slosh), intent(inout) :: self
-class(gs_eq), target, intent(inout) :: gs
+class(gs_equil), target, intent(inout) :: gs
 self%gs=>gs
-self%mesh=>gs%mesh
+self%mesh=>gs%device%mesh
 ALLOCATE(self%psi_eval,self%psi_geval)
 self%psi_eval%u=>self%gs%psi
-CALL self%psi_eval%setup(self%gs%fe_rep)
+CALL self%psi_eval%setup(self%gs%device%fe_rep)
 CALL self%psi_geval%shared_setup(self%psi_eval)
+ALLOCATE(mirror_b0_flux_func::self%B0_prof)
 CALL create_mirror_b0_prof(self%B0_prof,64)
 end subroutine mirror_slosh_setup
 !------------------------------------------------------------------------------
@@ -776,7 +1130,7 @@ end subroutine mirror_slosh_delete
 !------------------------------------------------------------------------------
 subroutine mirror_slosh_update(self,gseq)
 class(mirror_ani_slosh), intent(inout) :: self
-class(gs_eq), intent(inout) :: gseq
+class(gs_equil), intent(inout) :: gseq
 CALL self%B0_prof%update(gseq)
 end subroutine mirror_slosh_update
 !------------------------------------------------------------------------------
@@ -790,7 +1144,7 @@ real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
 real(8), intent(out) :: val(:) !< Reconstructed [p_par, p_perp] factors [2]
 real(8) :: pt(3),psitmp(1),gpsitmp(3),b_bar,b_turn
 !---
-pt=self%gs%fe_rep%mesh%log2phys(cell,f)
+pt=self%gs%device%fe_rep%mesh%log2phys(cell,f)
 CALL self%psi_eval%interp(cell,f,gop,psitmp)
 CALL self%psi_geval%interp(cell,f,gop,gpsitmp)
 b_turn = self%B0_prof%f(psitmp(1))*self%bturn

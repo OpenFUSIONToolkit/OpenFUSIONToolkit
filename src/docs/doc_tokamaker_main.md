@@ -20,7 +20,7 @@ conductors (eg. coils and structures).
 where \f$ \mathcal{P} \f$, \f$ \mathcal{S} \f$, and \f$ \mathcal{C} \f$ are axisymmetric domains corresponding to the plasma, passive conducting structures (eg. vacuum vessels), coils respectively.
 
 TokaMaker should primarily be used through the python interface using the \ref OpenFUSIONToolkit.TokaMaker "OpenFUSIONToolkit.TokaMaker" python module
-and the \ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker "OpenFUSIONToolkit.TokaMaker.TokaMaker" class.
+and the \ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker "OpenFUSIONToolkit.TokaMaker.TokaMaker" and \ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker_equilibrium "OpenFUSIONToolkit.TokaMaker.TokaMaker_equilibrium" classes.
 
 \section doc_gs_main_ex TokaMaker examples
 The following examples illustrate usage of TokaMaker to compute different Grad-Shafranov equilibria. For examples of how to create
@@ -37,6 +37,7 @@ new meshes, see \ref doc_gs_main_mesh_ex.
  - \subpage doc_tMaker_CUTE_ex2
  - \subpage doc_tMaker_LTX_ex2
  - \subpage doc_tMaker_ITER_ex3
+ - \subpage doc_tMaker_MANTA_ex2
 
 ### Equilibrium Reconstruction
  - \subpage doc_tMaker_ITER_ex4
@@ -46,6 +47,7 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 
 ### Other workflows/examples
  - \subpage doc_tMaker_ITER_ex5
+ - \subpage doc_tMaker_HBT_ex3
 
 \section doc_gs_main_mesh Building meshes using gs_Domain
 TokaMaker includes built-in meshing functionality through the \ref OpenFUSIONToolkit.TokaMaker.meshing.gs_Domain "gs_Domain" class,
@@ -73,5 +75,6 @@ The following examples illustrate usage of \ref OpenFUSIONToolkit.TokaMaker.mesh
  - \subpage doc_tMaker_ITER_ex1
  - \subpage doc_tMaker_DIIID_ex1
  - \subpage doc_tMaker_CUTE_ex1
+ - \subpage doc_tMaker_MANTA_ex1
  - \subpage doc_tMaker_LTX_ex1
  - \subpage doc_tMaker_dipole_ex1

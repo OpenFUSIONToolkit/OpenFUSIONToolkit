@@ -289,8 +289,8 @@ end type ml_xmhd_vecspace
 ! Global variables
 !------------------------------------------------------------------------------
 INTEGER(i4), PARAMETER :: xmhd_rst_version = 3 !< Restart file version number
-TYPE(xml_node), POINTER :: xmhd_root_node => NULL() !< xMHD XML node
-TYPE(xml_node), POINTER :: xmhd_pre_node => NULL() !< preconditioner XML node
+TYPE(xml_node) :: xmhd_root_node !< xMHD XML node
+TYPE(xml_node) :: xmhd_pre_node !< preconditioner XML node
 !---Equation control
 LOGICAL :: xmhd_jcb = .TRUE. !< Include JxB force on fluid
 LOGICAL :: xmhd_advec = .TRUE. !< Include fluid advection
@@ -499,7 +499,6 @@ close(io_unit)
 if(ierr<0)call oft_abort('No MHD options found in input file.','xmhd_read_settings',__FILE__)
 if(ierr>0)call oft_abort('Error parsing MHD options in input file.','xmhd_read_settings',__FILE__)
 !---Look for xMHD node
-#ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"xmhd",xmhd_root_node,ierr)
   IF(ierr==0)THEN
@@ -507,7 +506,6 @@ IF(ASSOCIATED(oft_env%xml))THEN
     CALL xml_get_element(xmhd_root_node,"pre",xmhd_pre_node,ierr)
   END IF
 END IF
-#endif
 !------------------------------------------------------------------------------
 ! Check settings and setup
 !------------------------------------------------------------------------------
@@ -836,7 +834,7 @@ solver%pm=oft_env%pm
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
 IF(nlevels==1)THEN
-  IF(ASSOCIATED(xmhd_pre_node))THEN
+  IF(xmhd_pre_node%associated())THEN
     CALL create_solver_xml(solver%pre,xmhd_pre_node)
   ELSE
     CALL create_diag_pre(solver%pre)
@@ -1355,7 +1353,7 @@ solver%pm=oft_env%pm
 nlevels=xmhd_nlevels-xmhd_minlev+1
 NULLIFY(solver%pre)
 IF(nlevels==1)THEN
-  IF(ASSOCIATED(xmhd_pre_node))THEN
+  IF(xmhd_pre_node%associated())THEN
     CALL create_solver_xml(solver%pre,xmhd_pre_node)
   ELSE
     CALL create_diag_pre(solver%pre)
@@ -2592,70 +2590,72 @@ end subroutine xmhd_alloc_ops
 !------------------------------------------------------------------------------
 subroutine xmhd_setup_regions()
 !---XML solver fields
-#ifdef HAVE_XML
-integer(i4) :: nread_id,nread_eta,nread_type,ierr,i,j,reg_type(1)
-real(r8) :: eta(1)
-TYPE(xml_node), POINTER :: reg_node,inner_node
+integer(i4) :: nread_id,nread_eta,nread_type,ierr,i,j,reg_type
+real(r8) :: eta
+TYPE(xml_node) :: inner_node
+TYPE(xml_node), POINTER :: reg_node
 TYPE(xml_nodelist) :: reg_nodes
-#endif
-integer(i4), ALLOCATABLE :: regs(:),reg_types(:)
+integer(i4), POINTER :: regs(:),reg_types(:)
 DEBUG_STACK_PUSH
-ALLOCATE(regs(mesh%nreg),reg_types(mesh%nreg))
+ALLOCATE(reg_types(mesh%nreg))
 reg_types=1
 IF(.NOT.ALLOCATED(eta_reg))THEN
   ALLOCATE(eta_reg(mesh%nreg),solid_cell(mesh%nc))
 END IF
 eta_reg=-1.d0
 solid_cell=.FALSE.
-#ifdef HAVE_XML
-IF(ASSOCIATED(xmhd_root_node))THEN
+IF(xmhd_root_node%associated())THEN
   !---Look for pre node
   CALL xml_get_element(xmhd_root_node,"region",reg_nodes,ierr)
   IF(reg_nodes%n>0)THEN
     DO i=0,reg_nodes%n-1
-      reg_node=>reg_nodes%nodes(i+1)%this
+      reg_node=>reg_nodes%nodes(i+1)!%this
       !---
       CALL xml_get_element(reg_node,"id",inner_node,ierr)
       IF(ierr/=0)CALL oft_abort("Error reading regions IDs for group", &
         "xmhd_setup_regions",__FILE__)
-      CALL xml_extractDataContent(inner_node,regs,num=nread_id,iostat=ierr)
-      IF(nread_id==0)CALL oft_abort("Zero values given in id group", &
-        "xmhd_setup_regions",__FILE__)
-      IF(ierr>0)CALL oft_abort("Too many id values specified","xmhd_setup_regions", &
-      __FILE__)
-      IF(ANY(regs(1:nread_id)>mesh%nreg).OR.ANY(regs(1:nread_id)<=0))CALL oft_abort( &
-        "Invalid region ID","xmhd_setup_regions",__FILE__)
+      CALL xml_read_content(inner_node,regs,iostat=ierr)
+      IF(ierr/=0)CALL oft_abort("Error reading values in id group", &
+      "xmhd_setup_regions",__FILE__)
+      ! IF(nread_id==0)CALL oft_abort("Zero values given in id group", &
+      !   "xmhd_setup_regions",__FILE__)
+      ! IF(ierr>0)CALL oft_abort("Too many id values specified","xmhd_setup_regions", &
+      ! __FILE__)
+      IF(ANY(regs>mesh%nreg).OR.ANY(regs<=0))CALL oft_abort("Invalid region ID","xmhd_setup_regions",__FILE__)
       !---
       CALL xml_get_element(reg_node,"eta",inner_node,ierr)
-      CALL xml_extractDataContent(inner_node,eta,num=nread_eta,iostat=ierr)
-      IF(nread_eta==0)CALL oft_abort("Zero values given in eta group", &
-        "xmhd_setup_regions",__FILE__)
-      IF(ierr>0)CALL oft_abort("Too many eta values specified","xmhd_setup_regions", &
-        __FILE__)
-      IF(eta(1)<0.d0)CALL oft_abort("Invalid eta value specified","xmhd_setup_regions", &
+      CALL xml_read_content(inner_node,eta,iostat=ierr)
+      IF(ierr/=0)CALL oft_xml_abort("Error reading values in eta group","xmhd_setup_regions",__FILE__)
+      ! IF(nread_eta==0)CALL oft_abort("Zero values given in eta group", &
+      !   "xmhd_setup_regions",__FILE__)
+      ! IF(ierr>0)CALL oft_abort("Too many eta values specified","xmhd_setup_regions", &
+      !   __FILE__)
+      IF(eta<0.d0)CALL oft_abort("Invalid eta value specified","xmhd_setup_regions", &
         __FILE__)
       !---Get region type
       CALL xml_get_element(reg_node,"type",inner_node,ierr)
       IF(ierr/=0)THEN
-        reg_type(1)=2.d0
+        reg_type=2.d0
       ELSE
-        CALL xml_extractDataContent(inner_node,reg_type,num=nread_type,iostat=ierr)
-        IF(nread_eta==0)CALL oft_abort("Zero values given in type group", &
-          "xmhd_setup_regions",__FILE__)
-        IF(ierr>0)CALL oft_abort("Too many type values specified","xmhd_setup_regions", &
-          __FILE__)
-        IF(reg_type(1)<1.OR.reg_type(1)>2)CALL oft_abort("Invalid type specified","xmhd_setup_regions", &
+        CALL xml_read_content(inner_node,reg_type,iostat=ierr)
+        IF(ierr/=0)CALL oft_xml_abort("Error reading values in type group","xmhd_setup_regions",__FILE__)
+        ! IF(nread_eta==0)CALL oft_abort("Zero values given in type group", &
+        !   "xmhd_setup_regions",__FILE__)
+        ! IF(ierr>0)CALL oft_abort("Too many type values specified","xmhd_setup_regions", &
+        !   __FILE__)
+        IF(reg_type<1.OR.reg_type>2)CALL oft_abort("Invalid type specified","xmhd_setup_regions", &
           __FILE__)
       END IF
       !---
-      DO j=1,nread_id
+      DO j=1,SIZE(regs)
         IF(eta_reg(regs(j))>0.d0)THEN
           CALL oft_abort("Region blocks overlap","xmhd_setup_regions",__FILE__)
         ELSE
-          eta_reg(regs(j))=eta(1)
+          eta_reg(regs(j))=eta
         END IF
-        reg_types(regs(j))=reg_type(1)
+        reg_types(regs(j))=reg_type
       END DO
+      DEALLOCATE(regs)
     END DO
   END IF
 END IF
@@ -2669,7 +2669,6 @@ DO i=1,mesh%nc
 END DO
 #ifdef HAVE_MPI
 call MPI_ALLREDUCE(MPI_IN_PLACE,xmhd_rw,1,OFT_MPI_LOGICAL,MPI_LOR,oft_env%COMM,ierr)
-#endif
 #endif
 eta_reg=ABS(eta_reg)
 DEBUG_STACK_POP
@@ -3979,7 +3978,7 @@ IF(ASSOCIATED(xmhd_lag_rop))THEN
   DO k=1,5
     tmp=0.d0
     vtmp=0.d0
-    !$omp simd reduction(+:tmp,vtmp)
+    !!$omp simd reduction(+:tmp,vtmp)
     DO jc=1,self%lag_rep%nce
       tmp = tmp + tloc%lf(jc,k)*xmhd_lag_rop(jc)
       vtmp = vtmp + tloc%lf(jc,k)*xmhd_lag_gop(:,jc)
@@ -3988,32 +3987,32 @@ IF(ASSOCIATED(xmhd_lag_rop))THEN
     dlf0(:,k)=vtmp
   END DO
   IF(xmhd_two_temp)THEN
-    !$omp simd reduction(+:Te,dTe)
+    !!$omp simd reduction(+:Te,dTe)
     DO jc=1,self%lag_rep%nce
       Te = Te + tloc%Te(jc)*xmhd_lag_rop(jc)
       dTe = dTe + tloc%Te(jc)*xmhd_lag_gop(:,jc)
     END DO
   END IF
   IF(n2_ind>0)THEN
-    !$omp simd reduction(+:N2,dN2)
+    !!$omp simd reduction(+:N2,dN2)
     DO jc=1,self%lag_rep%nce
       N2 = N2 + tloc%N2(jc)*xmhd_lag_rop(jc)
       dN2 = dN2 + tloc%N2(jc)*xmhd_lag_gop(:,jc)
     END DO
   END IF
   !---Reconstruct magnetic field
-  !$omp simd reduction(+:b0)
+  !!$omp simd reduction(+:b0)
   do jc=1,self%grad_rep%nce
     b0 = b0 + tloc%bgrad(jc)*xmhd_hgrad_rop(:,jc)
   end do
   !---Reconstruct magnetic field and current density
-  !$omp simd reduction(+:b0,j0)
+  !!$omp simd reduction(+:b0,j0)
   do jc=1,self%curl_rep%nce
     b0 = b0 + tloc%bcurl(jc)*xmhd_hcurl_rop(:,jc)
     j0 = j0 + tloc%bcurl(jc)*xmhd_hcurl_cop(:,jc)
   end do
   IF(j2_ind>0)THEN
-    !$omp simd reduction(+:J2,J2c)
+    !!$omp simd reduction(+:J2,J2c)
     do jc=1,self%curl_rep%nce
       J2 = J2 + tloc%J2(jc)*xmhd_hcurl_rop(:,jc)
       J2c = J2c + tloc%J2(jc)*xmhd_hcurl_cop(:,jc)
@@ -4027,7 +4026,7 @@ ELSE
   DO k=1,5
     tmp=0.d0
     vtmp=0.d0
-    !$omp simd reduction(+:tmp,vtmp)
+    !!$omp simd reduction(+:tmp,vtmp)
     DO jc=1,self%lag_rep%nce
       tmp = tmp + tloc%lf(jc,k)*lag_rop(jc)
       vtmp = vtmp + tloc%lf(jc,k)*lag_gop(:,jc)
@@ -4036,14 +4035,14 @@ ELSE
     dlf0(:,k)=vtmp
   END DO
   IF(xmhd_two_temp)THEN
-    !$omp simd reduction(+:Te,dTe)
+    !!$omp simd reduction(+:Te,dTe)
     DO jc=1,self%lag_rep%nce
       Te = Te + tloc%Te(jc)*lag_rop(jc)
       dTe = dTe + tloc%Te(jc)*lag_gop(:,jc)
     END DO
   END IF
   IF(n2_ind>0)THEN
-    !$omp simd reduction(+:N2,dN2)
+    !!$omp simd reduction(+:N2,dN2)
     DO jc=1,self%lag_rep%nce
       N2 = N2 + tloc%N2(jc)*lag_rop(jc)
       dN2 = dN2 + tloc%N2(jc)*lag_gop(:,jc)
@@ -4054,7 +4053,7 @@ ELSE
   ALLOCATE(hgrad_rop(3,self%grad_rep%nce))
   CALL oft_h1_geval_all(self%grad_rep,cell,f,hgrad_rop,gop)
   !---Reconstruct magnetic field
-  !$omp simd reduction(+:b0)
+  !!$omp simd reduction(+:b0)
   do jc=1,self%grad_rep%nce
     b0 = b0 + tloc%bgrad(jc)*hgrad_rop(:,jc)
   end do
@@ -4065,13 +4064,13 @@ ELSE
   CALL oft_hcurl_eval_all(self%curl_rep,cell,f,hcurl_rop,gop)
   CALL oft_hcurl_ceval_all(self%curl_rep,cell,f,hcurl_cop,cgop)
   !---Reconstruct magnetic field and current density
-  !$omp simd reduction(+:b0,j0)
+  !!$omp simd reduction(+:b0,j0)
   do jc=1,self%curl_rep%nce
     b0 = b0 + tloc%bcurl(jc)*hcurl_rop(:,jc)
     j0 = j0 + tloc%bcurl(jc)*hcurl_cop(:,jc)
   end do
   IF(j2_ind>0)THEN
-    !$omp simd reduction(+:J2,J2c)
+    !!$omp simd reduction(+:J2,J2c)
     do jc=1,self%curl_rep%nce
       J2 = J2 + tloc%J2(jc)*hcurl_rop(:,jc)
       J2c = J2c + tloc%J2(jc)*hcurl_cop(:,jc)
@@ -5068,10 +5067,10 @@ DO i=1,10
   END DO
 END DO
 IF(oft_env%head_proc)THEN
-  WRITE(*,'(A,Es11.3)')'  Dot    = ',dot_time/REAL(10*10*100,8)
-  WRITE(*,'(A,Es11.3)')'  MatVec = ',matvec_time/REAL(10*10*10,8)
-  WRITE(*,'(A,Es11.3)')'  NL Op  = ',nlop_time/REAL(10*10,8)
-  WRITE(*,'(A,Es11.3)')'  Build  = ',matvec_time/REAL(10,8)
+  WRITE(*,'(A,ES11.3)')'  Dot    = ',dot_time/REAL(10*10*100,8)
+  WRITE(*,'(A,ES11.3)')'  MatVec = ',matvec_time/REAL(10*10*10,8)
+  WRITE(*,'(A,ES11.3)')'  NL Op  = ',nlop_time/REAL(10*10,8)
+  WRITE(*,'(A,ES11.3)')'  Build  = ',matvec_time/REAL(10,8)
 END IF
 CALL oft_finalize()
 end subroutine xmhd_profile

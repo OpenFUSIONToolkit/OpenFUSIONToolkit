@@ -7,6 +7,7 @@
 *----------------------------------------------------------------------------*/
 #ifdef HAVE_UMFPACK
 #include "umfpack.h"
+#include <stdio.h>
 #include <stdbool.h>
 
 /* kind of integer to hold a pointer.  Use int.

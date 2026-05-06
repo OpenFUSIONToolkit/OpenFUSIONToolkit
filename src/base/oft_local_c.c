@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <stdint.h>
+#include "git_info.h"
 
 void oft_stack_print();
 void oft_finalize();
@@ -22,6 +23,12 @@ void dump_cov()
 #ifdef OFT_COVERAGE
 	__gcov_dump();
 #endif
+}
+
+// Print git information
+void oft_print_git() {
+   printf("Development branch:    %s\n",GITBRANCH);
+   printf("Revision id:           %s\n",GITVERSION);
 }
 
 // Define the function to be called when ctrl-c (SIGINT) signal is sent to process

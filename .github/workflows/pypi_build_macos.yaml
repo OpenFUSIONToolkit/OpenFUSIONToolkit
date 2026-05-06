@@ -1,0 +1,154 @@
+name: PYPI macOS CD Build
+
+on:
+  push:
+    branches:
+      - main
+      - cd_debug
+  pull_request:
+    paths:
+      - .github/workflows/pypi_build_macos.yaml
+      - src/utilities/build_libs.py
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Release build?'
+        required: false
+        type: boolean
+  
+jobs:
+  build:
+    name: ${{ format('PYPI macOS Nightly ({0})', matrix.config.name) }}
+    runs-on: ${{ matrix.config.os }}
+    timeout-minutes: 45
+    env:
+      CC: ${{ matrix.config.cc }}
+      CXX: ${{ matrix.config.cxx }}
+      FC: ${{ matrix.config.fc }}
+      MACOSX_DEPLOYMENT_TARGET: ${{ matrix.config.deployment_target }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - {
+            name: "macOS-x86_64-Rosetta",
+            os: macos-15-intel,
+            cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
+            python: "python3.13",
+            xcode_path: "/Applications/Xcode_16.4.app/Contents/Developer",
+            build_libs_flags: "--nthread=4 --build_umfpack=1 --oblas_no_avx",
+            cache_key: "openmp_noavx",
+            deployment_target: "15.0"
+          }
+        - {
+            name: "macOS-arm64",
+            os: macos-14,
+            cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
+            python: "python3.12",
+            xcode_path: "/Applications/Xcode_16.2.app/Contents/Developer",
+            build_libs_flags: "--nthread=3 --build_umfpack=1",
+            cache_key: "openmp",
+            deployment_target: "14.0"
+        }
+
+    steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Cache external libraries
+      id: cache-ext-libs
+      uses: actions/cache@v4
+      with:
+        path: libs
+        key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.config.cache_key }}-${{ hashFiles('src/utilities/build_libs.py') }}
+
+    - name: Get OS version
+      run: |
+        sw_vers -productVersion
+        pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
+        sudo xcode-select -s ${{ matrix.config.xcode_path }}
+        xcode-select -p
+    
+    - name: Install prerequisites
+      run: |
+        ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
+        echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
+        source ${{ github.workspace }}/setup_env.sh
+        python -m pip install build wheel jupyter nbconvert
+
+    - name: Check compilers
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        $CC --version
+        $CXX --version
+        $FC --version
+
+    - name: Create build directory
+      if: ${{ !steps.cache-ext-libs.outputs.cache-hit }}
+      run: mkdir libs
+
+    - name: Build external (Nightly)
+      if: ${{ !inputs.release }}
+      shell: bash
+      working-directory: libs
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        python ../src/utilities/build_libs.py --no_dl_progress --build_arpack=1 --oft_package ${{ matrix.config.build_libs_flags }}
+
+    - name: Build external (Release)
+      if: ${{ inputs.release }}
+      shell: bash
+      working-directory: libs
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        python ../src/utilities/build_libs.py --no_dl_progress --build_arpack=1 --oft_package --oft_package_release ${{ matrix.config.build_libs_flags }}
+
+    - name: Upload library failure log
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: Library failure log
+        path: libs/build/build_error.log
+    
+    - name: Remove external build directory
+      shell: bash
+      working-directory: libs
+      run: rm -rf build
+
+    - name: Configure OFT
+      shell: bash
+      working-directory: libs
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        bash config_cmake.sh
+
+    - name: Build OFT
+      shell: bash
+      working-directory: libs/build_release
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make
+    
+    - name: Install OFT
+      shell: bash
+      working-directory: libs/build_release
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make install
+
+    - name: Build Python Wheels
+      shell: bash
+      working-directory: libs/install_release/python
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        bash make_package.sh
+    
+    - name: Upload PYPI artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.config.name }}-${{ github.sha }}
+        path: libs/install_release/python/dist/*.whl
+        overwrite: true

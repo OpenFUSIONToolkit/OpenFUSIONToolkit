@@ -39,6 +39,9 @@ IMPLICIT NONE
 #else
 #define DEF_ILU_PACK "native"
 #endif
+#if !defined(DEF_LU_PACK) && defined(HAVE_UMFPACK)
+#define DEF_LU_PACK "umfpack"
+#endif
 #if !defined(DEF_LU_PACK) && defined(HAVE_MUMPS)
 #define DEF_LU_PACK "mumps"
 #endif
@@ -47,9 +50,6 @@ IMPLICIT NONE
 #endif
 #if !defined(DEF_LU_PACK) && defined(HAVE_SUPERLU_DIST)
 #define DEF_LU_PACK "superd"
-#endif
-#if !defined(DEF_LU_PACK) && defined(HAVE_UMFPACK)
-#define DEF_LU_PACK "umfpack"
 #endif
 #if !defined(DEF_LU_PACK)
 #define DEF_LU_PACK "none"
@@ -222,7 +222,7 @@ INTERFACE
   INTEGER(c_int), DIMENSION(n+1), INTENT(in) :: rowptr !< Row pointer into colind [n+1]
   REAL(c_double), DIMENSION(n), INTENT(inout) :: b !< Right hand side -> overwritten with solution [n]
   INTEGER(c_int), VALUE, INTENT(in) :: ldb !< Lowest dimension of vector `b` [n]
-  TYPE(c_ptr), INTENT(inout) :: grid_handle !< Pointer to SuperLU-DIST communication object
+  TYPE(c_ptr), VALUE, INTENT(in) :: grid_handle !< Pointer to SuperLU-DIST communication object
   TYPE(c_ptr), INTENT(inout) :: f_factors !< Pointer to SuperLU-DIST internal data storage
   LOGICAL(c_bool), VALUE, INTENT(in) :: iter_refine !< Perform iterative refinement?
   INTEGER(c_int), VALUE, INTENT(in) :: col_perm !< Column permutation method (0 -> natural ordering,
@@ -666,22 +666,23 @@ end subroutine lusolver_update
 !------------------------------------------------------------------------------
 subroutine lusolver_setup_xml(self,solver_node,level)
 CLASS(oft_lusolver), INTENT(inout) :: self
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
-CHARACTER(LEN=7) :: factor_package
+CHARACTER(LEN=:), ALLOCATABLE :: factor_package
 CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
-  IF(nread==1)THEN
+  CALL xml_read_content(current_node,factor_package,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `package` node","lusolver_setup_xml",__FILE__)
+  IF(ALLOCATED(factor_package))THEN
+    IF(LEN(factor_package)>7)CALL oft_abort('Factorization package name too long','lusolver_setup_xml',__FILE__)
     self%package=factor_package
   END IF
 END IF
@@ -690,9 +691,6 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,2A)')'- Package:  ',self%package
 END IF
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','lusolver_setup_xml',__FILE__)
-#endif
 end subroutine lusolver_setup_xml
 !------------------------------------------------------------------------------
 !> Check for thread safety
@@ -734,9 +732,11 @@ SELECT CASE(TRIM(self%package))
     mode=4
     CALL oft_superlu_dist_dgssv(mode,self%A%nr,nrhs,nrhs,rvals,ivals,ivals, &
       rvals,ldb,self%superlu_struct%grid_handle,self%superlu_struct%f_factors,nrhs,self%iter_refine,ierr)
+    self%superlu_struct%f_factors=C_NULL_PTR
     mode=2
     nrhs=1
     CALL oft_superlu_dist_slugrid(mode,self%superlu_struct%comm,nrhs,nrhs,self%superlu_struct%grid_handle,ierr)
+    self%superlu_struct%grid_handle=C_NULL_PTR
     CALL MPI_COMM_FREE(self%superlu_struct%comm, ierr)
     DEALLOCATE(self%superlu_struct%csc_vals,self%superlu_struct%csc_map)
     DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
@@ -930,22 +930,23 @@ end subroutine ilusolver_update
 !------------------------------------------------------------------------------
 subroutine ilusolver_setup_xml(self,solver_node,level)
 CLASS(oft_ilusolver), INTENT(inout) :: self
-TYPE(xml_node), POINTER, INTENT(in) :: solver_node !< XML node containing solver definition
+TYPE(xml_node), INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
-#ifdef HAVE_XML
 !---
 INTEGER(i4) :: nnodes,nread
-TYPE(xml_node), POINTER :: current_node
+TYPE(xml_node) :: current_node
 !---
-CHARACTER(LEN=7) :: factor_package
+CHARACTER(LEN=:), ALLOCATABLE :: factor_package
 CHARACTER(LEN=3) :: fac_type
 INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---
 CALL xml_get_element(solver_node,"package",current_node,ierr)
 IF(ierr==0)THEN
-  CALL xml_extractDataContent(current_node,factor_package,num=nread,iostat=ierr)
-  IF(nread==1)THEN
+  CALL xml_read_content(current_node,factor_package,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `package` node","ilusolver_setup_xml",__FILE__)
+  IF(ALLOCATED(factor_package))THEN
+    IF(LEN(factor_package)>7)CALL oft_abort('Factorization package name too long','ilusolver_setup_xml',__FILE__)
     self%package=factor_package
   END IF
 END IF
@@ -954,9 +955,6 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,2A)')'- Package:  ',self%package
 END IF
 DEBUG_STACK_POP
-#else
-CALL oft_abort('OFT not compiled with xml support.','lusolver_setup_xml',__FILE__)
-#endif
 end subroutine ilusolver_setup_xml
 !------------------------------------------------------------------------------
 !> Check for thread safety
