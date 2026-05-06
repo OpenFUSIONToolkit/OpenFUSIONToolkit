@@ -68,6 +68,7 @@ export setup_mesh!, setup_regions!, setup!, init_psi!, solve!, vac_solve!, reset
        set_coil_currents!, set_coil_bounds!, set_coil_vsc!, set_coil_reg!,
        get_coil_currents, get_psi, set_psi!,
        compute_area_integral, compute_flux_integral,
+       get_conductor_currents, get_conductor_source,
        coil_dict2vec, coil_vec2dict
 export create_isoflux, create_power_flux_fun, create_spline_flux_fun,
        eval_green, read_eqdsk, read_ifile

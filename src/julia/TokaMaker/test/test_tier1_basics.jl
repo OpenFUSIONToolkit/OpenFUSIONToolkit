@@ -96,6 +96,70 @@ end
         @test_throws ErrorException compute_flux_integral(gs, [0.0, 1.0], [1.0])
     end
 
+    @testset "get_conductor_currents" begin
+        psi = get_psi(gs)
+        mask, curr = get_conductor_currents(gs, psi)
+        @test length(mask) == gs.nc
+        @test length(curr) == gs.np   # vertex-valued by default
+        @test count(mask) > 0
+        @test all(isfinite, curr)
+
+        mask_c, curr_c = get_conductor_currents(gs, psi; cell_centered=true)
+        @test length(curr_c) == gs.nc
+        @test count(mask_c) == count(mask)
+        @test all(isfinite, curr_c)
+
+        @test_throws ErrorException get_conductor_currents(gs, ones(gs.np + 1))
+    end
+
+    @testset "get_conductor_source" begin
+        # Use psi as a synthetic dpsi_dt to exercise the path with non-zero values.
+        psi = get_psi(gs)
+        mask, src = get_conductor_source(gs, psi)
+        @test length(mask) == gs.nc
+        @test length(src) == gs.nc
+        @test count(mask) > 0
+        @test all(isfinite, src)
+        # Source has non-trivial range over the conducting cells
+        cm = src[mask]
+        @test maximum(cm) > minimum(cm)
+
+        @test_throws ErrorException get_conductor_source(gs, ones(gs.np + 1))
+    end
+
+    @testset "plot_eddy (Makie ext)" begin
+        have_cairo = try
+            @eval using CairoMakie
+            true
+        catch
+            false
+        end
+        if !have_cairo
+            @info "CairoMakie not installed; skipping plot_eddy test"
+            @test_skip true
+        else
+            psi = get_psi(gs)
+            # Filled-contour mode (default nlevels > 0)
+            fig1 = Makie.Figure()
+            ax1 = Makie.Axis(fig1[1, 1])
+            cb = TokaMaker.plot_eddy(fig1, ax1, gs; psi=psi, nlevels=10)
+            @test fig1 isa Makie.Figure
+            # Cell-centered (tripcolor) mode
+            fig2 = Makie.Figure()
+            ax2 = Makie.Axis(fig2[1, 1])
+            TokaMaker.plot_eddy(fig2, ax2, gs; psi=psi, nlevels=-1, symmap=true)
+            @test fig2 isa Makie.Figure
+            # dpsi_dt source mode
+            fig3 = Makie.Figure()
+            ax3 = Makie.Axis(fig3[1, 1])
+            TokaMaker.plot_eddy(fig3, ax3, gs; dpsi_dt=psi, nlevels=-1)
+            @test fig3 isa Makie.Figure
+            # Mutually-exclusive args throw
+            @test_throws ErrorException TokaMaker.plot_eddy(fig3, ax3, gs;
+                                                            psi=psi, dpsi_dt=psi)
+        end
+    end
+
     @testset "vac_solve!" begin
         cur = Dict{String,Float64}(name => 0.0 for name in keys(gs.coil_sets))
         first_pf = first(filter(n -> startswith(n, "PF"), collect(keys(cur))))

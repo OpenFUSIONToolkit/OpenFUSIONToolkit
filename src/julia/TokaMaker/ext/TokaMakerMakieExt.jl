@@ -372,4 +372,86 @@ end
 TokaMaker.plot_constraints(ax::Makie.AbstractAxis, gs::Tokamaker; kwargs...) =
     TokaMaker.plot_constraints(nothing, ax, gs; kwargs...)
 
+# ---------------------------------------------------------------------------
+# plot_eddy
+#
+# Mirrors Python `_core.TokaMaker.plot_eddy`. Three input modes:
+#   * `dpsi_dt`  -> linear-stability source -> per-cell current density
+#   * `psi`      -> psi field -> get_conductor_currents
+#   * (default)  -> use gs.equilibrium's psi
+#
+# `nlevels < 0` selects per-cell shading (tripcolor analog), otherwise
+# filled bands (tricontourf).
+
+function TokaMaker.plot_eddy(fig, ax::Makie.AbstractAxis, gs::Tokamaker;
+                             psi::Union{Nothing,AbstractVector}=nothing,
+                             equilibrium::Union{Nothing,TokaMakerEquilibrium}=nothing,
+                             dpsi_dt::Union{Nothing,AbstractVector}=nothing,
+                             nlevels::Int=40,
+                             colormap=:turbo,
+                             clabel::Union{Nothing,AbstractString}=raw"$J_w$ [A/m$^2$]",
+                             symmap::Bool=false,
+                             include_Vcoils::Bool=false)
+    r, z = _rzplot(gs)
+    faces = _faces1(gs)
+
+    mask, plot_field = if dpsi_dt !== nothing
+        (psi === nothing && equilibrium === nothing) ||
+            error("plot_eddy: pass only one of psi/equilibrium/dpsi_dt")
+        TokaMaker.get_conductor_source(gs, dpsi_dt)
+    else
+        psi_use = if psi !== nothing
+            equilibrium === nothing || error("plot_eddy: pass only one of psi/equilibrium/dpsi_dt")
+            Vector{Float64}(psi)
+        else
+            eq = equilibrium === nothing ? gs.equilibrium : equilibrium
+            eq === nothing && error("plot_eddy: no equilibrium available")
+            Vector{Float64}(EquilibriumModule.get_psi(eq; normalized=false))
+        end
+        TokaMaker.get_conductor_currents(gs, psi_use;
+                                         cell_centered=(nlevels < 0),
+                                         include_Vcoils=include_Vcoils)
+    end
+
+    if !any(mask)
+        @warn "plot_eddy: no conducting regions to plot"
+        return nothing
+    end
+
+    plt = if length(plot_field) == gs.nc
+        # Per-cell field (tripcolor-style)
+        crange = symmap ? (-maximum(abs, plot_field[mask]), maximum(abs, plot_field[mask])) : nothing
+        _tripcolor!(ax, r, z, faces, Vector(mask), plot_field;
+                    colormap=colormap, colorrange=crange)
+    else
+        # Vertex-valued field (filled contour bands)
+        levels = if symmap
+            m = maximum(abs, plot_field[unique(vec(faces[mask, :]))])
+            range(-m, m; length=abs(nlevels) + 1)
+        else
+            abs(nlevels)
+        end
+        Makie.tricontourf!(ax, r, z, plot_field;
+                           triangulation=(faces[mask, :])',
+                           levels=levels, colormap=colormap)
+    end
+
+    cb = nothing
+    if clabel !== nothing && fig !== nothing && plt !== nothing
+        cb = Makie.Colorbar(fig[1, end + 1], plt; label=clabel)
+    end
+    ax.aspect = Makie.DataAspect()
+    return cb
+end
+
+TokaMaker.plot_eddy(ax::Makie.AbstractAxis, gs::Tokamaker; kwargs...) =
+    TokaMaker.plot_eddy(nothing, ax, gs; kwargs...)
+
+function TokaMaker.plot_eddy(gs::Tokamaker; kwargs...)
+    fig = Makie.Figure()
+    ax = Makie.Axis(fig[1, 1]; xlabel="R (m)", ylabel="Z (m)")
+    cb = TokaMaker.plot_eddy(fig, ax, gs; kwargs...)
+    return fig, ax, cb
+end
+
 end # module
