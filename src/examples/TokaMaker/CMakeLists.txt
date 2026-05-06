@@ -4,6 +4,7 @@ install(DIRECTORY ITER DESTINATION examples/TokaMaker COMPONENT examples)
 install(DIRECTORY DIIID DESTINATION examples/TokaMaker COMPONENT examples)
 install(DIRECTORY CUTE DESTINATION examples/TokaMaker COMPONENT examples)
 install(DIRECTORY LTX DESTINATION examples/TokaMaker COMPONENT examples)
+install(DIRECTORY MANTA DESTINATION examples/TokaMaker COMPONENT examples)
 install(DIRECTORY Dipole DESTINATION examples/TokaMaker COMPONENT examples)
 install(DIRECTORY AdvancedWorkflows DESTINATION examples/TokaMaker COMPONENT examples)
 
