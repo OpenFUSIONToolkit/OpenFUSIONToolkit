@@ -1240,17 +1240,28 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.get_q(psi,psi_pad,npsi,compute_geo)
 
-    def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50):
-        r'''! Evaluate Sauter trapped particle fractions at specified or uniformly spaced points
+    def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50,return_eps=False):
+        r'''! Evaluate Sauter trapped particle fractions and flux-surface geometry at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
-        @result \f$ f_c \f$, [\f$<R>,<1/R>,<a>\f$], [\f$<|B|>,<|B|^2>\f$]
+        @param return_eps If True, append the local inverse aspect ratio array to the return tuple
+        @result Tuple `(psi, fc, r_avgs, modb_avgs)`, or `(psi, fc, r_avgs, modb_avgs, eps)` when `return_eps=True`
+          - `psi` [npsi] — normalised poloidal flux \f$\hat{\psi}\f$ of each sample
+          - `fc` [npsi] — circulating-particle fraction \f$f_c\f$ (Sauter 1999)
+          - `r_avgs` [3, npsi] — flux-surface-averaged radial coordinates:
+            row 0: \f$\langle R \rangle\f$, row 1: \f$\langle 1/R \rangle\f$, row 2: \f$\langle a \rangle\f$ (minor radius)
+          - `modb_avgs` [2, npsi] — flux-surface-averaged field:
+            row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
+          - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
+            \f$\varepsilon = (R_{\max} - R_{\min}) / (2 \langle R \rangle)\f$,
+            where \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius
+            reached by the field-line trace on that surface
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.calc_sauter_fc(psi,psi_pad,npsi)
+        return self._tMaker_equil.calc_sauter_fc(psi,psi_pad,npsi,return_eps)
 
     def get_globals(self):
         r'''! Get global plasma parameters
@@ -2667,13 +2678,24 @@ class TokaMaker_equilibrium():
         else:
             return V_loop.value
     
-    def calc_sauter_fc(self,psi=None,psi_pad=0.02,npsi=50):
-        r'''! Evaluate Sauter trapped particle fractions at specified or uniformly spaced points
+    def calc_sauter_fc(self,psi=None,psi_pad=0.02,npsi=50,return_eps=False):
+        r'''! Evaluate Sauter trapped particle fractions and flux-surface geometry at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
-        @result \f$ f_c \f$, [\f$<R>,<1/R>,<a>\f$], [\f$<|B|>,<|B|^2>\f$]
+        @param return_eps If True, append the local inverse aspect ratio array to the return tuple
+        @result Tuple `(psi, fc, r_avgs, modb_avgs)`, or `(psi, fc, r_avgs, modb_avgs, eps)` when `return_eps=True`
+          - `psi` [npsi] — normalised poloidal flux \f$\hat{\psi}\f$ of each sample
+          - `fc` [npsi] — circulating-particle fraction \f$f_c\f$ (Sauter 1999)
+          - `r_avgs` [3, npsi] — flux-surface-averaged values:
+            row 0: \f$\langle R \rangle\f$, row 1: \f$\langle 1/R \rangle\f$, row 2: \f$\langle a \rangle\f$ (minor radius)
+          - `modb_avgs` [2, npsi] — flux-surface-averaged field values:
+            row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
+          - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
+            \f$\varepsilon = (R_{\max} - R_{\min}) / (2 \langle R \rangle)\f$,
+            where \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius
+            reached by the field-line trace on that surface
         '''
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
@@ -2687,14 +2709,16 @@ class TokaMaker_equilibrium():
         fc = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         r_avgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
         modb_avgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
+        eps = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_sauter_fc(self._equil_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,error_string)
+        tokamaker_sauter_fc(self._equil_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,eps,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         if self.psi_convention == 0:
-            return psi_save,fc,r_avgs,modb_avgs
+            result = (psi_save, fc, r_avgs, modb_avgs)
         else:
-            return psi,fc,r_avgs,modb_avgs
+            result = (psi, fc, r_avgs, modb_avgs)
+        return result + (eps,) if return_eps else result
     
     def calc_delstar_curr(self,psi):
         r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator

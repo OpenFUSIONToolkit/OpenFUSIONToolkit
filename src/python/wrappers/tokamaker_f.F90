@@ -1067,17 +1067,18 @@ END SUBROUTINE tokamaker_get_q
 !---------------------------------------------------------------------------------
 !> Evaluate Sauter trapped particle fraction and related quantities
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_sauter_fc(tMaker_equil_ptr,npsi,psi_saut,fc,r_avgs,modb_avgs,error_str) BIND(C,NAME="tokamaker_sauter_fc")
+SUBROUTINE tokamaker_sauter_fc(tMaker_equil_ptr,npsi,psi_saut,fc,r_avgs,modb_avgs,eps,error_str) BIND(C,NAME="tokamaker_sauter_fc")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Number of evaluation points
 REAL(c_double), INTENT(in) :: psi_saut(npsi) !< \f$ \psi \f$ values to compute trapped particle fraction and other fields
 REAL(c_double), INTENT(out) :: fc(npsi) !< Trapped particle fraction
 REAL(c_double), INTENT(out) :: r_avgs(npsi,3) !< Flux surface averaged radial coordinates \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
 REAL(c_double), INTENT(out) :: modb_avgs(npsi,2) !< Flux surface averaged field strength \f$<|B|>\f$, \f$<|B|^2>\f$
+REAL(c_double), INTENT(out) :: eps(npsi) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(2\langle R \rangle) \f$
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-CALL sauter_fc(tMaker_equil_obj,npsi,psi_saut,fc,r_avgs,modb_avgs)
+CALL sauter_fc(tMaker_equil_obj,npsi,psi_saut,fc,r_avgs,modb_avgs,eps=eps)
 END SUBROUTINE tokamaker_sauter_fc
 !---------------------------------------------------------------------------------
 !> Compute various global quantities for Grad-Shafranov equilibrium

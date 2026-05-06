@@ -7,7 +7,7 @@
 !
 !> Physics-based flux functions for Grad-Sharfranov equilibrium
 !!
-!! @authors Chris Hansen
+!! @authors Chris Hansen, Stuart Benjamin (in-fortran bootstrap solve)
 !! @date August 2014
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
@@ -986,7 +986,7 @@ DO i = 1, n_psi
   END IF
 END DO
 ! Get flux-surface geometry: fc, eps, q, and <R> in one tracing pass
-CALL sauter_fc(gseq, n_psi, psi_N, fc, r_avgs_saut, modb_avgs_saut, qprof=qvals)
+CALL sauter_fc(gseq, n_psi, psi_N, fc, r_avgs_saut, modb_avgs_saut, qprof=qvals, eps=eps)
 R_avg = r_avgs_saut(:,1)
 ! ===================================================================
 ft = 1.0_r8 - fc

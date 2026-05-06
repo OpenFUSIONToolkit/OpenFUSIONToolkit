@@ -400,8 +400,10 @@ end type gsinv_interp
 !------------------------------------------------------------------------------
 type, extends(gsinv_interp) :: sauter_interp
   logical :: stage_1 = .FALSE. !< Stage 1 pass (finding Bmax)
-  real(8) :: f_surf = 0.d0     !< F surface value (R*Bt)
-  real(8) :: bmax = -1.d0      !< Maximum |B| on surface (set in stage 1)
+  real(8) :: f_surf = 0.d0      !< F surface value (R*Bt)
+  real(8) :: bmax = -1.d0       !< Maximum |B| on surface (set in stage 1)
+  real(8) :: rmax_surf = -1.d30 !< Maximum R on surface (set in stage 1)
+  real(8) :: rmin_surf =  1.d30 !< Minimum R on surface (set in stage 1)
   real(8) :: mag_axis(2) = 0.d0 !< Magnetic axis (R, Z)
 contains
   !> Evaluate ODE RHS for Sauter integration
@@ -6157,6 +6159,8 @@ val(6)=val(2)*SQRT(Bp2+Bt2) ! <|B|>
 val(7)=val(2)*(Bp2+Bt2)     ! <|B|^2>
 IF(self%stage_1)THEN
   self%bmax = MAX(self%bmax,mod_B)
+  self%rmax_surf = MAX(self%rmax_surf, pt(1))
+  self%rmin_surf = MIN(self%rmin_surf, pt(1))
   val(8) = 0.d0  ! not used in stage 1; zero to prevent NaN accumulation
   val(9) = 0.d0  ! likewise
 ELSE
@@ -6169,7 +6173,7 @@ end subroutine sauter_apply
 !------------------------------------------------------------------------------
 !> Compute factors required for Sauter bootstrap formula
 !------------------------------------------------------------------------------
-subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs,qprof)
+subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs,qprof,eps)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux sample points
 real(8), intent(in) :: psi_q(nr) !< Location of flux sample points in normalised psi
@@ -6177,6 +6181,7 @@ real(8), intent(out) :: fc(nr) !< Circulating particle fraction \f$ f_c \f$
 real(8), intent(out) :: r_avgs(nr,3) !< Flux surface averaged radial coords \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
 real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field \f$<|B|>\f$, \f$<|B|^2>\f$
 real(8), optional, intent(out) :: qprof(nr) !< Safety factor q on each surface (avoids a separate gs_get_qprof call)
+real(8), optional, intent(out) :: eps(nr) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(2\langle R \rangle) \f$ on each surface
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi,h,h2,hf,ftu,ftl
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
 character(len=80) :: warn_str
@@ -6244,6 +6249,7 @@ do j=1,nr
     modb_avgs(j,2) = (fpol / raxis)**2
     fc(j)          = 1.d0
     IF(PRESENT(qprof))   qprof(j)   = MERGE(qprof(j-1), 0.d0, j > 1)
+    IF(PRESENT(eps))     eps(j)     = 0.d0
     CYCLE
   END IF
   IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN
@@ -6261,6 +6267,8 @@ do j=1,nr
   END IF
   field%f_surf=fpol
   field%bmax=0.d0
+  field%rmax_surf = -1.d30
+  field%rmin_surf =  1.d30
   field%stage_1=.TRUE.
   CALL tracinginv_fs(device%mesh,pt(1:2))
   field%stage_1=.FALSE.
@@ -6285,6 +6293,7 @@ do j=1,nr
   fc(j) = 1.d0 - (0.75d0 * ftu + 0.25d0 * ftl)
   qpsi = fpol * active_tracer%v(9) / (2*pi)
   IF(PRESENT(qprof)) qprof(j) = qpsi
+  IF(PRESENT(eps))   eps(j)   = (field%rmax_surf - field%rmin_surf) / (2.d0 * r_avgs(j,1))
 end do
 ! Edge guard: if psi_q(1) is very close to the separatrix (psi_N < 1e-5) and
 ! the field-line trace failed there, copy the geometry from the second surface
@@ -6293,6 +6302,7 @@ IF (nr >= 2 .AND. psi_q(1) < 1.d-8 .AND. edge_trace_failed) THEN
   fc(1)          = fc(2)
   r_avgs(1,:)    = r_avgs(2,:)
   modb_avgs(1,:) = modb_avgs(2,:)
+  IF (PRESENT(eps))     eps(1)     = eps(2)
   IF (PRESENT(qprof))   qprof(1)   = 2*qprof(2) ! <this is totally wrong (q diverges at the separatrix), but better than leaving q=0 at the edge for now
   IF (PRESENT(qprof)) THEN
     WRITE(warn_str,'(A,ES10.3)') 'sauter_fc: edge geometry extrapolated from second surface; q unreliable beyond psi_N = ',psi_q(2)
