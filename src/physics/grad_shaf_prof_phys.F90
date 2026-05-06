@@ -1029,6 +1029,24 @@ nu_e_star = 6.921e-18_r8 * ABS(qvals) * R_avg * ne &
 CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, qvals, eps, ft, f, &
     dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &
     ln_le, ln_lii, nu_e_star, nu_i_star, B_times_Jbs)
+! Convert parallel bootstrap to phi component: j_phi = B_times_Jbs * <R> / F
+WHERE(ABS(f) > 0.0_r8)
+  j_BS = B_times_Jbs * (R_avg / f)
+ELSEWHERE
+  j_BS = 0.0_r8
+END WHERE
+! Guard NaN (where F -> 0)
+WHERE(.NOT.(ABS(j_BS) < 1.0e99_r8)) j_BS = 0.0_r8
+IF(gseq%boot_ops%diagnose_bs)THEN
+  WRITE(*,'(A)') '  [calculate_bootstrap] geometry & collisionality sample (i=1,mid,n):'
+  WRITE(*,'(A,3ES12.4)') '    <R>      : ', r_avgs_saut(1,1), r_avgs_saut(n_psi/2,1), r_avgs_saut(n_psi,1)
+  WRITE(*,'(A,3ES12.4)') '    <1/R>    : ', r_avgs_saut(1,2), r_avgs_saut(n_psi/2,2), r_avgs_saut(n_psi,2)
+  WRITE(*,'(A,3ES12.4)') '    eps      : ', eps(1), eps(n_psi/2), eps(n_psi)
+  WRITE(*,'(A,3ES12.4)') '    q        : ', qvals(1), qvals(n_psi/2), qvals(n_psi)
+  WRITE(*,'(A,3ES12.4)') '    nu_e_star: ', nu_e_star(1), nu_e_star(n_psi/2), nu_e_star(n_psi)
+  WRITE(*,'(A,3ES12.4)') '    j_BS     : ', j_BS(1), j_BS(n_psi/2), j_BS(n_psi)
+END IF
+END SUBROUTINE calculate_bootstrap
 !------------------------------------------------------------------------------
 !> Redl 2021 bootstrap current formula.
 !>
