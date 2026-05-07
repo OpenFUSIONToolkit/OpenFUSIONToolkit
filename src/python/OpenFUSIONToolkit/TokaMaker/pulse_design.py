@@ -4408,8 +4408,14 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.set_title(r'$T_e$ [keV]')
     te_edge_y = [s['T_e'][ii]['y'][-1] if ii in s.get('T_e', {}) else np.nan for ii in range(len(times))]
     ax.plot(times, te_edge_y, color=COLOR_TM, ls='-', marker='o', ms=MK_SZ, lw=1, label='T_e edge')
+    t_Te_vol_avg, y_Te_vol_avg = _tx_scalar(tt, 'T_e_volume_avg')
+    t_Ti_vol_avg, y_Ti_vol_avg = _tx_scalar(tt, 'T_i_volume_avg')
     t_Te, y_Te = _tx_profile_at_rho(tt, 'T_e', 0.0)
     t_Ti, y_Ti = _tx_profile_at_rho(tt, 'T_i', 0.0)
+    if t_Te_vol_avg is not None:
+        ax.plot(t_Te_vol_avg, y_Te_vol_avg, color='darkorange', ls='-.', lw=1, label=r'$\langle T_e \rangle$')
+    if t_Ti_vol_avg is not None:
+        ax.plot(t_Ti_vol_avg, y_Ti_vol_avg, color='purple', ls='-.', lw=1, label=r'$\langle T_i \rangle$')
     if t_Te is not None:
         ax.plot(t_Te, y_Te, color=COLOR_TX, ls='-', lw=1, label='T_e core')
     if t_Ti is not None:
