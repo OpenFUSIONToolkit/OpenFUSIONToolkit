@@ -252,12 +252,10 @@ def _run_tokamaker_torax(
             t_final=t_final,
             eqtimes=[0.0, t_final],
             g_eqdsk_arr=["seed_t0.eqdsk", "seed_t5.eqdsk"],
+            tokamaker_obj=mygs,
             tx_dt=tx_dt,
             tm_times=tm_times,
             last_surface_factor=0.99,
-            cocos=2,
-            oft_env=myoft,
-            oft_threads=nthreads,
             truncate_eq=False,
         )
 
@@ -269,33 +267,26 @@ def _run_tokamaker_torax(
         te_init = _parabolic_profile(0.10, 10.0, psi_sample)
         ne = {0.0: _array_to_profile_dict(ne_init, psi_sample)}
         te = {0.0: _array_to_profile_dict(te_init, psi_sample)}
-        tt.set_TORAX_ne(ne)
-        tt.set_TORAX_Te(te)
-        tt.set_TORAX_Ti(te)
-
-        tt.set_TORAX_right_bc(ne_right_bc=0.25e20, Te_right_bc=0.1, Ti_right_bc=0.1)
-        tt.set_TORAX_pedestal(set_pedestal=True, T_i_ped=3.0, T_e_ped=3.0, n_e_ped=0.8e20)
+        tt.set_ne(ne, right_bc=0.25e20)
+        tt.set_Te(te, right_bc=0.1)
+        tt.set_Ti(te, right_bc=0.1)
+        tt.set_pedestal(set_pedestal=True, T_i_ped=3.0, T_e_ped=3.0, n_e_ped=0.8e20)
 
         heat_times = {0.0: 30.0e6}
-        tt.set_TORAX_heating(
+        tt.set_heating(
             generic_heat=heat_times,
             generic_heat_loc=0.25,
             nbi_current=True,
             ecrh={0.0: 20.0e6},
             ecrh_loc=0.35,
+            fusion=True,
+            ei_exchange=True,
         )
-        tt.set_TORAX_sources(fusion=True, ei_exchange=True)
-
-        tt.set_TORAX_gas_puff(S_total=1e22, decay_length=0.05) # estimations based on budney2008
-        tt.set_TORAX_pellet(pellet_deposition_location=0.8, pellet_width=0.1, S_total={0: 5e21})
-
-        tt._tm = mygs
-        tt.set_TokaMaker_coil_reg(coil_bounds=coil_bounds, updownsym=False)
+        tt.set_fueling(gas_puff_S_total=1e22, gas_puff_decay_length=0.05, pellet_deposition_location=0.8, pellet_width=0.1, pellet_S_total={0: 5e21})
 
         tt.set_Ip({0.0: Ip_flattop})
-        tt.set_TORAX_plasma_composition(main_ion={"D": 0.5, "T": 0.5}, impurity="Ne")
-        tt.set_TORAX_Zeff(1.6)
-        tt.set_TORAX_evolve(density=True, Ti=True, Te=True, current=True)
+        tt.set_plasma_composition(Zeff=1.6, main_ion={"D": 0.5, "T": 0.5}, impurity="Ne")
+        tt.set_evolve(density=True, Ti=True, Te=True, current=True)
 
         tt.fly(
             run_name="tmp",

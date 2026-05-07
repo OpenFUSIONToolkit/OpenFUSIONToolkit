@@ -39,9 +39,6 @@ from scipy.interpolate import CubicSpline, interp1d
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import savgol_filter
 
-from OpenFUSIONToolkit import OFT_env
-from OpenFUSIONToolkit.TokaMaker import TokaMaker
-from OpenFUSIONToolkit.TokaMaker.meshing import load_gs_mesh
 from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk, create_power_flux_fun
 
 LCFS_WEIGHT = 100.0
@@ -219,29 +216,23 @@ class TokaMaker_TORAX:
 
     # ─── Initialization ─────────────────────────────────────────────────────────
 
-    def __init__(self, t_init, t_final, eqtimes, g_eqdsk_arr, tx_dt=0.1, tm_times=None, last_surface_factor=0.99, cocos=2, oft_env=None, oft_threads=4, truncate_eq=False):
+    def __init__(self, t_init, t_final, eqtimes, g_eqdsk_arr, tokamaker_obj, tx_dt=0.1, tm_times=None, last_surface_factor=0.99, truncate_eq=False):
         r'''! Initialize the Coupled TokaMaker + TORAX object.
                 @param t_init Start time (s).
                 @param t_final End time (s).
                 @param eqtimes Time points of each gEQDSK file.
                 @param g_eqdsk_arr Filenames of each gEQDSK file.
+                @param tokamaker_obj Preconfigured TokaMaker object.
                 @param tx_dt Time step (s) of TORAX simulation.
                 @param tm_times Time points where TokaMaker solves equilibrium.
                 @param last_surface_factor Last surface factor for Torax.
-                @param cocos COCOS version of input EQDSK.
-                @param oft_env OFT environment.
                 @param truncate_eq Whether to truncate equilibrium when saving TokaMaker output to EQDSK.
-                @param oft_threads Number of threads for OFT.
                 @brief Coupling fly() option loop0: if True, the first coupling pass uses a coarse
                        TORAX grid and subsampled TokaMaker times; if False, that pass is skipped (see fly()).
                 
         '''
-        if oft_env is not None:
-            self._oftenv = oft_env
-        else:
-            self._oftenv = OFT_env(nthreads=oft_threads)
-        self._tm = TokaMaker(self._oftenv)
-        self._cocos = cocos
+        self._tm = tokamaker_obj
+        self._cocos = 2 # only cocos=2 works currently.
 
         self._state = {}
         self._eqtimes = eqtimes
@@ -801,7 +792,7 @@ class TokaMaker_TORAX:
 
     def load_TORAX_config(self, config):
         r'''! Load a TORAX config dict.
-        
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html
                 The loaded config is deep-merged on top of BASE_CONFIG when the
                 simulation config is built.  Any key present in the loaded config
                 will override the corresponding BASE_CONFIG key; keys only in
@@ -817,6 +808,7 @@ class TokaMaker_TORAX:
 
     def set_TORAX_grid(self, grid_type, grid):
         r'''! Set TORAX grid type and grid points.
+                TORAX grid documentation: https://torax.readthedocs.io/en/latest/configuration.html#geometry
                 @param grid_type Grid type ('n_rho' or 'face_centers').
                 @param grid Grid points (integer or np.array).
                 
@@ -888,30 +880,6 @@ class TokaMaker_TORAX:
             if active:
                 self._pop_tx_grid()
 
-    def init_TokaMaker(self, mesh, R0_geo, weights=None, vsc=None):
-        r'''! Initialize GS Solver Object.
-                @param mesh Filename of reactor mesh.
-                @param R0_geo Major radius of machine geometric center.
-                @param vsc Vertical Stability Coil.
-                
-        '''
-        mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh(mesh)
-        self._tm.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-        self._tm.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-        self._tm.setup(order = 2, F0 = R0_geo*self._state['B0'][0])
-
-        self._tm.settings.maxits = 100
-
-        if vsc is not None:
-            self._tm.set_coil_vsc({vsc: 1.0})
-    
-    def load_TokaMaker(self, mygs):
-        r'''! Load already instantiated TokaMaker object.
-                @param mygs TokaMaker object.
-                
-        '''
-        self._tm = mygs
-        
     def set_TokaMaker_coil_reg(self, coil_bounds=None, updownsym=False,
                      default_weight=1.0E-1, disable_coils=None,
                      disable_weight=1.0E4, symmetry_weight=1.0E3,
@@ -999,106 +967,69 @@ class TokaMaker_TORAX:
     # ─── Property Setters ───────────────────────────────────────────────────────
 
     def set_Ip(self, Ip):
-        r'''! Set plasma current (Amps).
+        r'''! Set plasma current (Amps), used for both codes and not evolved by either.
                 @param ip Plasma current.
                 
         '''
         self._Ip = Ip
 
-    def set_TORAX_ne(self, n_e):
-        r'''! Set density profiles.
+    def set_ne(self, n_e, right_bc=None):
+        r'''! Set electron density profiles and optional right boundary condition.
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#profile-conditions
                 @param n_e Electron density (m^-3).
-                
+                @param right_bc Right boundary value at rho=1 (m^-3), scalar or time-varying map.
         '''
         self._n_e = n_e
+        if right_bc is not None:
+            self._ne_right_bc = right_bc
 
-    def set_TORAX_Te(self, T_e):
-        r'''! Set electron temperature profiles (keV).
-                @param T_e Electron temperature.
-                
+    def set_Te(self, T_e, right_bc=None):
+        r'''! Set electron temperature profiles and optional right boundary condition.
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#profile-conditions
+                @param T_e Electron temperature (keV).
+                @param right_bc Right boundary value at rho=1 (keV), scalar or time-varying map.
         '''
         self._T_e = T_e
+        if right_bc is not None:
+            self._Te_right_bc = right_bc
 
-    def set_TORAX_Ti(self, T_i):
-        r'''! Set ion temperature profiles (keV).
-                @param T_i ion temperature.
-                
+    def set_Ti(self, T_i, right_bc=None):
+        r'''! Set ion temperature profiles and optional right boundary condition.
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#profile-conditions
+                @param T_i Ion temperature (keV).
+                @param right_bc Right boundary value at rho=1 (keV), scalar or time-varying map.
         '''
         self._T_i = T_i
+        if right_bc is not None:
+            self._Ti_right_bc = right_bc
 
-    def set_TORAX_Zeff(self, Zeff):
-        r'''! Set plasma effective charge.
-                @param z_eff Effective charge.
-                
-        '''
-        self._Zeff = Zeff
-
-    def set_TORAX_plasma_composition(self, main_ion=None, impurity=None):
-        r'''! Set plasma composition (fuel and impurity species).
-        
-                Must be called together with set_Zeff() — set_Zeff() provides the
-                Z_eff target which TORAX uses to determine the impurity density for the
-                species specified here.
-        
-                @param main_ion Main ion species dict, e.g. {'D': 0.5, 'T': 0.5} for DT.
+    def set_plasma_composition(self, Zeff=None, main_ion=None, impurity=None):
+        r'''! Set plasma effective charge and composition.
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#profile-conditions
+                @param Zeff Effective charge target.
+                @param main_ion Main ion species dict, e.g. {'D': 0.5, 'T': 0.5}.
                 @param impurity Impurity species string, e.g. 'Ne', 'Ar', 'W'.
-                
         '''
+        if Zeff is not None:
+            self._Zeff = Zeff
         if main_ion is not None:
             self._main_ion = main_ion
         if impurity is not None:
             self._impurity = impurity
 
-    def set_TORAX_sources(self, fusion=True, ei_exchange=True):
-        r'''! Enable standard TORAX physics sources using TORAX defaults.
-        
-                Each flag adds the corresponding source with an empty config dict so
-                TORAX uses its built-in defaults.  Only call the ones you need — empty
-                dicts pull in TORAX's machine-specific defaults (e.g. ITER geometry for
-                fusion), which may not be appropriate for every simulation.
-                
-                Ohmic heating is enabled by default in the base_config. 
-                Currently there is no way to disable ohmic heating, other than changing base_config.
-        
-                @param fusion    Enable fusion alpha heating.
-                @param ei_exchange Enable electron-ion energy exchange.
-                
-        '''
-        self._enable_fusion = fusion
-        self._enable_ei_exchange = ei_exchange
-
-    def set_TORAX_nbar(self, nbar, normalize_to_nbar=True):
-        r'''! Set line averaged density over time.
-                @param nbar Density (m^-3).
-                @param normalize_to_nbar Whether to normalize initial n_e profile to match nbar.
-                
-        '''
-        self._nbar = nbar
-        self._normalize_to_nbar = normalize_to_nbar # when True, initial n_e profile will be normalized to match nbar, but time evolution will not be constrained to match nbar
-
-    def set_TORAX_right_bc(self, ne_right_bc=None, Te_right_bc=None, Ti_right_bc=None):
-        r'''! Set right (psi/rho=1) boundary conditions for density and temperatures.
-                These can be time varying and are not changed by TORAX, used as boundary conditions.
-        '''
-        if ne_right_bc:
-            self._ne_right_bc = ne_right_bc
-        if Te_right_bc:
-            self._Te_right_bc = Te_right_bc
-        if Ti_right_bc:
-            self._Ti_right_bc = Ti_right_bc
-
-    def set_TORAX_heating(self, generic_heat=None, generic_heat_loc=None, generic_heat_width=0.25, nbi_current=False, ecrh=None, ecrh_loc=None, ecrh_width=0.1, ohmic=None):
-        r'''! Set heating sources for Torax.
-        
-                Ohmic heating is always enabled (it is on by default in BASE_CONFIG).
-                @param generic_heat Generic heating (dictionary of {time: power_in_watts}).
+    def set_heating(self, generic_heat=None, generic_heat_loc=None, generic_heat_width=0.25, nbi_current=False, ecrh=None, ecrh_loc=None, ecrh_width=0.1, ohmic=None, fusion=True, ei_exchange=True):
+        r'''! Set TORAX heating and source toggles.
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#sources
+                @param generic_heat Generic heating ({time: power_W}).
                 @param generic_heat_loc Generic heating deposition location (normalized rho).
                 @param generic_heat_width Generic heating deposition width (normalized rho).
-                @param ecrh ECRH heating (dictionary of {time: power_in_watts}).
+                @param nbi_current Enable NBI current drive estimate from generic heating.
+                @param ecrh ECRH heating ({time: power_W}).
                 @param ecrh_loc ECRH deposition location (normalized rho).
                 @param ecrh_width ECRH deposition width (normalized rho).
-                @param nbi_current Whether to include NBI current drive, uses _NBI_W_TO_MA = 1/16e6 to convert heating to current driven.
-                
+                @param ohmic Optional explicit ohmic power ({time: power_W}).
+                @param fusion Enable fusion alpha heating source.
+                @param ei_exchange Enable electron-ion energy exchange source.
         '''
         if generic_heat is not None and generic_heat_loc is not None:
             self._generic_heat = generic_heat
@@ -1112,10 +1043,12 @@ class TokaMaker_TORAX:
             self._ohmic_power = ohmic
         
         self._use_nbi_current = nbi_current
+        self._enable_fusion = fusion
+        self._enable_ei_exchange = ei_exchange
 
-    def set_TORAX_pedestal(self, set_pedestal=False, T_i_ped=None, T_e_ped=None, n_e_ped=None, ped_top=0.95):
+    def set_pedestal(self, set_pedestal=False, T_i_ped=None, T_e_ped=None, n_e_ped=None, ped_top=0.90):
         r'''! Set pedestals for ion/electron temperatures and density (legacy API).
-        
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#pedestal
                 This preserves the original behavior:
                 - set_pedestal=True uses model_name='set_T_ped_n_ped'
                 - set_pedestal=False uses model_name='no_pedestal'
@@ -1139,9 +1072,9 @@ class TokaMaker_TORAX:
             self._n_e_ped = n_e_ped
         self._ped_top = ped_top
 
-    def load_TORAX_pedestal_config(self, pedestal_config):
+    def load_pedestal_config(self, pedestal_config):
         r'''! Load pedestal config dict and fully replace 'pedestal' in TORAX config.
-        
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#pedestal
                 If provided, this dict is copied to 'myconfig['pedestal']' directly,
                 replacing the full pedestal section from BASE_CONFIG and load_TORAX_config().
         
@@ -1156,8 +1089,9 @@ class TokaMaker_TORAX:
             raise TypeError('pedestal_config must be a dictionary or None.')
         self._pedestal_config = copy.deepcopy(pedestal_config)
 
-    def set_TORAX_evolve(self, density=True, Ti=True, Te=True, current=True):
-        r'''! Set variables as either prescribed (False) or evolved (True).
+    def set_evolve(self, density=True, Ti=True, Te=True, current=True):
+        r'''! Set variables as either prescribed (False) or evolved (True) for TORAX.
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#numerics
                 @param density Evolve density.
                 @param Ti Evolve ion temperature.
                 @param Te Evolve electron temperature.
@@ -1169,53 +1103,52 @@ class TokaMaker_TORAX:
         self._evolve_Ti = Ti
         self._evolve_Te = Te
 
-    def set_TORAX_gas_puff(self, S_total=None, decay_length=None):
-        r'''! Set gas puff particle source.
-                @param S_total Particle source (particles/s).
-                @param decay_length Decay length from edge (normalized rho coordinates).
-                
+    def set_fueling(self, gas_puff_S_total=None, gas_puff_decay_length=None, pellet_deposition_location=None, pellet_width=None, pellet_S_total=None):
+        r'''! Set gas puff and pellet fueling particle sources for TORAX.
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#sources
+                @param gas_puff_S_total Gas puff particle source (particles/s).
+                @param gas_puff_decay_length Gas puff decay length from edge (normalized rho).
+                @param pellet_deposition_location Pellet deposition location (normalized rho).
+                @param pellet_width Pellet deposition width (normalized rho).
+                @param pellet_S_total Pellet particle source (particles/s).
         '''
-        self._gp_s = S_total
-        self._gp_dl = decay_length
-
-    def set_TORAX_pellet(self, pellet_deposition_location=None, pellet_width=None, S_total=None):
-        r'''! Set pellet fueling particle source.
-                @param pellet_deposition_location Pellet deposition location (normalized rho coordinates).
-                @param pellet_width Pellet deposition width (normalized rho coordinates).
-                @param S_total Particle source (particles/s).
-                
-        '''
+        self._gp_s = gas_puff_S_total
+        self._gp_dl = gas_puff_decay_length
         self._pellet_deposition_location = pellet_deposition_location
         self._pellet_width = pellet_width
-        self._pellet_s_total = S_total
+        self._pellet_s_total = pellet_S_total
 
-    def set_TORAX_chi(self, chi_min=None, chi_max=None):
-        r'''! Set chi limits.'''
+    def set_transport_coefs(self, chi_min=None, chi_max=None, De_min=None, De_max=None, Ve_min=None, Ve_max=None):
+        r'''! Set transport coefficient bounds for TORAX.
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#transport
+                @param chi_min Minimum ion thermal diffusivity (m^2/s).
+                @param chi_max Maximum ion thermal diffusivity (m^2/s).
+                @param De_min Minimum electron diffusion coefficient (m^2/s).
+                @param De_max Maximum electron diffusion coefficient (m^2/s).
+                @param Ve_min Minimum electron thermal velocity (m/s).
+                @param Ve_max Maximum electron thermal velocity (m/s).
+        '''
         if chi_min is not None:
             self._chi_min = chi_min
         if chi_max is not None:
             self._chi_max = chi_max
-
-    def set_TORAX_De(self, De_min=None, De_max=None):
-        r'''! Set De limits.'''
         if De_min is not None:
             self._De_min = De_min
         if De_max is not None:
             self._De_max = De_max
-
-    def set_TORAX_Ve(self, Ve_min=None, Ve_max=None):
-        r'''! Set Ve limits.'''
         if Ve_min is not None:
             self._Ve_min = Ve_min
         if Ve_max is not None:
             self._Ve_max = Ve_max
 
-    def set_TokaMaker_x_points(self, diverted_times=None, x_point_targets=None, x_point_weight=100.0):
-        r'''! Configure diverted window and X-point targets for TM saddle constraints.
+    def set_x_points(self, diverted_times=None, x_point_targets=None, x_point_weight=100.0, strike_point_targets=None):
+        r'''! Configure diverted window, X-point targets, and optional strike points.
         
                 @param diverted_times Tuple (t_start, t_end) defining the diverted plasma window.
                 @param x_point_targets X-point target locations, shape (n_xpoints, 2) with [R, Z] pairs.
                 @param x_point_weight Weight for saddle-point constraints.
+                @param strike_point_targets Strike point locations, shape (n_points, 2) with [R, Z] pairs,
+                                            or None to disable.
                 
         '''
         if diverted_times is not None and len(diverted_times) != 2:
@@ -1224,19 +1157,6 @@ class TokaMaker_TORAX:
         self._diverted_times = diverted_times
         self._x_point_targets = None if x_point_targets is None else np.atleast_2d(x_point_targets)
         self._x_point_weight = x_point_weight
-
-    def set_TokaMaker_strike_points(self, strike_point_targets):
-        r'''! Manually specify strike point locations to add as isoflux targets during the diverted phase.
-        
-                Strike points are where the separatrix legs intersect the divertor/limiter surface.
-                They are added to the isoflux constraint array during the diverted window alongside
-                the LCFS shape targets. Automatic detection from the EQDSK boundary is not possible
-                because rzout traces only the closed plasma boundary (inside the vessel).
-        
-                @param strike_point_targets Strike point locations, shape (n_points, 2) with [R, Z] pairs,
-                                            or None to disable.
-                
-        '''
         self._strike_point_targets = None if strike_point_targets is None else np.atleast_2d(strike_point_targets)
 
 
@@ -2903,7 +2823,7 @@ class TokaMaker_TORAX:
             output_mode=False, skip_bad_init_eqdsks=False,
             initial_relax=True, relax=False, relax_kinetics=False, relax_duration=0.1,
             t_ave_toggle='off', t_ave_window=0.5, t_ave_causal=True, t_ave_ignore_start=0.25,
-            loop0=False, steady_state_mode=False):
+            loop0=False, steady_state_mode=False): # TODO: separate steady_state_mode?
         r'''! Run TokaMaker_TORAX coupled pulse design loop.
         
                 @param convergence_threshold Max fractional change in consumed flux between loops for convergence.
