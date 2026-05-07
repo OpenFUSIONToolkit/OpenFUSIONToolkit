@@ -20,6 +20,11 @@ __pycache__
 .pydevproject
 .vscode
 
+# Spack build artifacts
+.spack-env
+spack.lock
+spack.yaml
+
 # Build/environment artifacts
 /builds/
 /oft_venv/
