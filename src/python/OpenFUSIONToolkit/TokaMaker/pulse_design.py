@@ -1833,8 +1833,12 @@ class TokaMaker_TORAX:
             myconfig['profile_conditions']['T_i'] = self._T_i_init
 
         # ── 8. Steady-state coupling: previous loop TORAX t_final → IC for this loop ──
+        # If an inter-loop relax already ran this loop, its output should define the
+        # main-run ICs (psi always, and kinetics when relax_kinetics=True). In that case
+        # do not overwrite with the raw steady-state seed here.
         if (self._steady_state_mode
                 and not self._coupling_iteration_is_first()
+                and not (self._relax and self._current_loop >= 1)
                 and self._steady_state_tx_seed):
             seed = self._steady_state_tx_seed
             pc = myconfig['profile_conditions']
@@ -2048,6 +2052,12 @@ class TokaMaker_TORAX:
                     _arr = _xr.to_numpy()
                     setattr(self, _attr, ([self._t_init], _rho.tolist(), [_arr.tolist()]))
                 self._log(f'{tag}: relaxed n_e, T_e, T_i will override coupling configs after set_*().')
+            elif prescribed_profiles is not None:
+                # Kinetics were held fixed during relax; carry those fixed inputs into the
+                # main coupling config so steady-state inter-loop relax remains the final IC step.
+                for _name, _attr in (('n_e', '_n_e_init'), ('T_e', '_T_e_init'), ('T_i', '_T_i_init')):
+                    _v = prescribed_profiles.get(_name)
+                    setattr(self, _attr, copy.deepcopy(_v) if _v is not None else None)
 
             if getattr(self, '_debug_mode', False) and self._out_dir is not None:
                 if stage == 'initial':
@@ -2100,8 +2110,17 @@ class TokaMaker_TORAX:
             self._print(
                 f'  TORAX: Running relax ({self._relax_duration:g} s) simulation...'
             )
-            # User n_e, T_e, T_i (merged config + set_*); psi from geometry on this EQDSK.
-            self._run_tx_relax(stage='interloop', eqdsk_path=relax_eq, prescribed_profiles=None)
+            prescribed_profiles = None
+            if self._steady_state_mode and self._steady_state_tx_seed:
+                prescribed_profiles = copy.deepcopy(self._steady_state_tx_seed)
+                self._log(
+                    f'Loop {self._current_loop}: steady_state_mode inter-loop relax seeded from '
+                    f'previous loop t_final profiles on EQDSK {os.path.basename(relax_eq)}.'
+                )
+            # If prescribed_profiles is None: existing behavior (user kinetics, psi from geometry).
+            # In steady_state_mode with a captured seed: relax starts from previous loop t_final
+            # profiles on the final-previous-loop EQDSK, then relaxed outputs seed main TORAX.
+            self._run_tx_relax(stage='interloop', eqdsk_path=relax_eq, prescribed_profiles=prescribed_profiles)
 
         with self._loop0_coarse_tx_main_scope():
             myconfig = self._get_tx_config()
@@ -4823,9 +4842,20 @@ def _draw_info(ax, tt, loop, run_name):
     ax.axis('off')
     t_ave = getattr(tt, '_t_ave_toggle', 'off')
     dt_val = getattr(tt, '_tx_dt', getattr(tt, '_dt', None))
+    grid_type = getattr(tt, '_tx_grid_type', None)
+    gr = getattr(tt, '_tx_grid', None)
+    if grid_type == 'n_rho':
+        n_rho = int(gr) if np.isscalar(gr) else len(gr)
+        grid_label = f'n_rho = {n_rho}'
+    elif grid_type == 'face_centers':
+        grid_label = f'face_centers = {len(np.atleast_1d(gr))}'
+    elif np.isscalar(gr):
+        grid_label = f'n_rho = {int(gr)}'
+    else:
+        grid_label = f'face_centers = {len(np.atleast_1d(gr))}'
     lines = [
         f'Run:   {run_name}            loop:  {loop}',
-        # f'tx grid points: {len(tt._tx_grid)}          dt:    {dt_val} s',
+        f'{grid_label}          dt:    {dt_val} s',
         f'time range:     [{tt._t_init}, {tt._t_final}] s          times: {len(tt._tm_times)}',
         f'LSF:   {tt._last_surface_factor}',
         f't_ave: {t_ave}    window: {getattr(tt, "_t_ave_window", 0):.2f} s',
