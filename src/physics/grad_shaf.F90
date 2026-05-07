@@ -5485,7 +5485,10 @@ end subroutine dels_coil_part
 subroutine factory_destroy(self)
 class(gs_factory), intent(inout) :: self !< G-S object
 integer(i4) :: i,j
-IF(ASSOCIATED(self%gs_zerob_bc%node_flag))DEALLOCATE(self%gs_zerob_bc%node_flag)
+IF(oft_debug_print(2))WRITE(*,*)"Destroying Grad-Shafranov factory object"
+IF(ASSOCIATED(self%gs_zerob_bc))THEN
+  IF(ASSOCIATED(self%gs_zerob_bc%node_flag))DEALLOCATE(self%gs_zerob_bc%node_flag)
+END IF
 IF(ASSOCIATED(self%axis_flag))DEALLOCATE(self%axis_flag)
 !
 IF(ASSOCIATED(self%lim_con))DEALLOCATE(self%lim_con)
@@ -5512,8 +5515,8 @@ IF(ASSOCIATED(self%dist_coil))THEN
   DEALLOCATE(self%dist_coil)
 END IF
 !---
-CALL self%lu_solver%delete()
-CALL self%lu_solver_dt%delete()
+IF(ASSOCIATED(self%lu_solver%A))CALL self%lu_solver%delete()
+IF(ASSOCIATED(self%lu_solver_dt%A))CALL self%lu_solver_dt%delete()
 !---
 IF(self%ncoils_ext>0)THEN
   DO i=1,self%ncoils_ext
@@ -5533,10 +5536,14 @@ IF(self%ncoil_regs>0)THEN
 END IF
 !---
 IF(self%ncoils>0)THEN
-  DO i=1,self%ncoils
-    IF(ASSOCIATED(self%psi_coil(i)%f))CALL self%psi_coil(i)%f%delete()
-  END DO
-  DEALLOCATE(self%psi_coil,self%coil_vcont,self%coil_nturns)
+  IF(ASSOCIATED(self%psi_coil))THEN
+    DO i=1,self%ncoils
+      IF(ASSOCIATED(self%psi_coil(i)%f))CALL self%psi_coil(i)%f%delete()
+    END DO
+    DEALLOCATE(self%psi_coil)
+  END IF
+  IF(ASSOCIATED(self%coil_vcont))DEALLOCATE(self%coil_vcont)
+  IF(ASSOCIATED(self%coil_nturns))DEALLOCATE(self%coil_nturns)
   self%ncoils=0
 END IF
 !---
@@ -5568,10 +5575,21 @@ IF(ASSOCIATED(self%coil_stitch))THEN
 END IF
 IF(ASSOCIATED(self%coil_map))DEALLOCATE(self%coil_map)
 !---
-CALL self%dels%delete()
-CALL self%mrop%delete()
-CALL self%mop%delete()
-DEALLOCATE(self%dels,self%mrop,self%mop)
+IF(ASSOCIATED(self%dels))THEN
+  CALL self%dels%delete()
+  DEALLOCATE(self%dels)
+END IF
+IF(ASSOCIATED(self%mrop))THEN
+  CALL self%mrop%delete()
+  DEALLOCATE(self%mrop)
+END IF
+IF(ASSOCIATED(self%mop))THEN
+  CALL self%mop%delete()
+  DEALLOCATE(self%mop)
+END IF
+IF(ASSOCIATED(self%bc_rhs_list))DEALLOCATE(self%bc_rhs_list)
+IF(ASSOCIATED(self%bc_lmat))DEALLOCATE(self%bc_lmat)
+IF(ASSOCIATED(self%bc_bmat))DEALLOCATE(self%bc_bmat)
 IF(ASSOCIATED(self%dels_dt))THEN
   CALL self%dels_dt%delete()
   DEALLOCATE(self%dels_dt)
@@ -5586,6 +5604,7 @@ end subroutine factory_destroy
 !------------------------------------------------------------------------------
 subroutine equil_destroy(self)
 class(gs_equil), intent(inout) :: self !< G-S object
+IF(oft_debug_print(2))WRITE(*,*)"Destroying Grad-Shafranov equilibrium object"
 ! IF(ASSOCIATED(self%cond_weights))DEALLOCATE(self%cond_weights)
 IF(ASSOCIATED(self%isoflux_targets))DEALLOCATE(self%isoflux_targets)
 IF(ASSOCIATED(self%saddle_targets))DEALLOCATE(self%saddle_targets)
