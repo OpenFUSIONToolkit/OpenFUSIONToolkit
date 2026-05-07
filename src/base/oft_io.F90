@@ -970,7 +970,7 @@ dims=SHAPE(array)
 call h5screate_simple_f(one,dims,dspace_id,error)
 call h5dcreate_f(file_id, "/"//TRIM(path), H5T_STD_I64LE, &
   dspace_id, dset_id, error)
-call h5dwrite_f(dset_id, H5T_NATIVE_LLONG, array, dims, error)
+call h5dwrite_f(dset_id, H5T_STD_I64LE, array, dims, error)
 !---Close dataset
 call h5dclose_f(dset_id, error)
 call h5sclose_f(dspace_id, error)
