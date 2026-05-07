@@ -20,7 +20,7 @@
 !!
 !! As usual, we start with a few module imports for required functionality.
 ! START SOURCE
-PROGRAM xmhd_circle
+PROGRAM xmhd_tearing
 !---Runtime
 USE oft_base
 !---Grid
@@ -276,4 +276,4 @@ REAL(r8), INTENT(out) :: val
 val = - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
 END SUBROUTINE psi_harris_pert
 
-END PROGRAM xmhd_circle
+END PROGRAM xmhd_tearing
