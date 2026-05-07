@@ -3,7 +3,6 @@ import time
 import os
 import warnings
 import pytest
-import tempfile
 
 def run_command(command, cwd=None):
     pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)

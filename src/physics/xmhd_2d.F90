@@ -1776,7 +1776,20 @@ DO
   !Move to next file
   rst_cur = rst_cur + self%rst_freq
 END DO
-DEALLOCATE(u,up,v, plot_vals, plot_vec)
+IF (ASSOCIATED(u)) THEN
+  CALL u%delete
+  DEALLOCATE(u)
+END IF
+IF (ASSOCIATED(up)) THEN
+  CALL up%delete
+  DEALLOCATE(up)
+END IF
+IF (ASSOCIATED(v)) THEN
+  CALL v%delete
+  DEALLOCATE(v)
+END IF
+IF (ALLOCATED(plot_vals)) DEALLOCATE(plot_vals)
+IF (ALLOCATED(plot_vec)) DEALLOCATE(plot_vec)
 end subroutine xmhd_2d_plot
 
 !---------------------------------------------------------------------------

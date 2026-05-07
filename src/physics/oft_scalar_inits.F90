@@ -17,21 +17,21 @@ use oft_mesh_type, only: oft_mesh
 use fem_utils, only: fem_interp, bfem_interp
 implicit none
 !---------------------------------------------------------------------------
-!> Interpolation class for a uniform vector field
+!> Interpolation class for a scalar field
 !---------------------------------------------------------------------------
 type, extends(fem_interp) :: poss_scalar_field
   procedure(poss_scalar_eval), pointer, nopass :: func => NULL()
 contains
-  !> Reconstruct magnetic field
+  !> Interpolate scalar field value
   procedure :: interp => poss_scalar_interp
 end type poss_scalar_field
 !---------------------------------------------------------------------------
-!> Interpolation class for a uniform vector field
+!> Boundary interpolation class for a scalar field
 !---------------------------------------------------------------------------
 type, extends(bfem_interp) :: poss_scalar_bfield
   procedure(poss_scalar_eval), pointer, nopass :: func => NULL()
 contains
-  !> Reconstruct magnetic field
+  !> Interpolate scalar field value
   procedure :: interp => poss_scalar_binterp
 end type poss_scalar_bfield
 !
