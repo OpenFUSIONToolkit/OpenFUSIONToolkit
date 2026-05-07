@@ -34,8 +34,8 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
  *      Specifies the operation:
  *      = 1, performs full LU decomposition
  *      = 2, performs triangular solve
- *      = 3, free all the storage in the end
- *      = 4, performs numerical factorization only
+ *      = 3, performs numerical factorization only
+ *      = 4, free all the storage in the end
  *
  * f_factors (input/output) factors_t**
  *      If iopt == 1, it is an output and contains the pointer pointing to

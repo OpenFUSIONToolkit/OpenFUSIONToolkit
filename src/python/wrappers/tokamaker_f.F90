@@ -323,6 +323,10 @@ IF(ASSOCIATED(tMaker_obj%device))THEN
   CALL tMaker_obj%device%delete()
   DEALLOCATE(tMaker_obj%device)
 END IF
+IF(ASSOCIATED(tMaker_obj%gs_td))THEN
+  CALL tMaker_obj%gs_td%delete()
+  DEALLOCATE(tMaker_obj%gs_td)
+END IF
 IF(ASSOCIATED(tMaker_obj%ML_oft_blagrange))THEN
   CALL tMaker_obj%ML_oft_blagrange%current_level%delete()
 END IF

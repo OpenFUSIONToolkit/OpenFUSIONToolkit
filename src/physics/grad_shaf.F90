@@ -5487,7 +5487,8 @@ class(gs_factory), intent(inout) :: self !< G-S object
 integer(i4) :: i,j
 IF(oft_debug_print(2))WRITE(*,*)"Destroying Grad-Shafranov factory object"
 IF(ASSOCIATED(self%gs_zerob_bc))THEN
-  IF(ASSOCIATED(self%gs_zerob_bc%node_flag))DEALLOCATE(self%gs_zerob_bc%node_flag)
+  CALL self%gs_zerob_bc%delete()
+  DEALLOCATE(self%gs_zerob_bc)
 END IF
 IF(ASSOCIATED(self%axis_flag))DEALLOCATE(self%axis_flag)
 !

@@ -727,6 +727,7 @@ SELECT CASE(TRIM(self%package))
     CALL oft_superlu_dgssv(mode,nrhs,nrhs,nrhs,rvals,ivals,ivals, &
       rvals,ldb,self%superlu_struct%f_factors,nrhs,self%iter_refine,ierr)
     DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
+    self%superlu_struct%f_factors=C_NULL_PTR
 #endif
 #ifdef HAVE_SUPERLU_DIST
   CASE("superd")
@@ -749,6 +750,7 @@ SELECT CASE(TRIM(self%package))
     CALL oft_umfpack_dgssv(mode,nrhs,nrhs,nrhs,rvals,ivals,ivals, &
       rvals,ldb,self%superlu_struct%f_factors,nrhs,self%iter_refine,ierr)
     DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
+    self%superlu_struct%f_factors=C_NULL_PTR
 #endif
 #ifdef HAVE_MUMPS
   CASE("mumps")
