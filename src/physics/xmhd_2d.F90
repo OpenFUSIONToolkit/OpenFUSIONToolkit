@@ -1644,7 +1644,7 @@ class(oft_xmhd_2d_sim), intent(inout) :: self
 class(oft_vector), pointer :: ux,uy,uz,v_lag
 type(oft_lag_bginterp) :: grad_psi
 class(oft_matrix), pointer :: lmop => NULL()
-real(r8), pointer :: plot_vals(:),plot_vec(:,:), plot_u0(:)
+real(r8), pointer :: plot_vals(:),plot_vec(:,:),plot_u0(:)
 !---Solver objects
 CLASS(oft_solver), POINTER :: lminv => NULL()
 class(oft_vector), pointer :: u,v,up, u0
@@ -1684,8 +1684,7 @@ lminv%A=>lmop
 lminv%its=-2
 CALL create_diag_pre(lminv%pre)
 ALLOCATE(plot_vec(3,v_lag%n))
-NULLIFY(plot_vals)
-NULLIFY(plot_u0)
+NULLIFY(plot_vals,plot_u0)
 CALL grad_psi%setup(oft_blagrange)
 
 CALL xdmf_plot%setup("xmhd_2d")
@@ -1776,22 +1775,18 @@ DO
   !Move to next file
   rst_cur = rst_cur + self%rst_freq
 END DO
-IF (ASSOCIATED(u)) THEN
-  CALL u%delete
-  DEALLOCATE(u)
-END IF
-IF (ASSOCIATED(up)) THEN
-  CALL up%delete
-  DEALLOCATE(up)
-END IF
-IF (ASSOCIATED(v)) THEN
-  CALL v%delete
-  DEALLOCATE(v)
-END IF
-IF (ALLOCATED(plot_vals)) DEALLOCATE(plot_vals)
-IF (ALLOCATED(plot_vec)) DEALLOCATE(plot_vec)
+CALL u%delete
+CALL up%delete
+CALL v%delete
+CALL u0%delete
+CALL ux%delete
+CALL uy%delete
+CALL uz%delete
+DEALLOCATE(u,up,v,u0,ux,uy,uz)
+IF(ASSOCIATED(plot_vals))DEALLOCATE(plot_vals)
+IF(ASSOCIATED(plot_vec))DEALLOCATE(plot_vec)
+IF(ASSOCIATED(plot_u0))DEALLOCATE(plot_u0)
 end subroutine xmhd_2d_plot
-
 !---------------------------------------------------------------------------
 !> Load xMHD solution state from a restart file
 !---------------------------------------------------------------------------
