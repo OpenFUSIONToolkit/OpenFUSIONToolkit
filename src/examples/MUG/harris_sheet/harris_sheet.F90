@@ -191,6 +191,7 @@ CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(psi0)
 IF (linear) THEN
+    CALL u%get_local(vec_vals)
     CALL mhd_sim%u%restore_local(vec_vals,6)
 ELSE
     CALL mhd_sim%u%get_local(vec_vals,6)
