@@ -16,6 +16,8 @@
 typedef struct {
   void *Symbolic;
   void *Numeric;
+  int *Wi;
+  double *W;
   double Control [UMFPACK_CONTROL];
 } factors_t;
 
@@ -32,8 +34,8 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
  *      Specifies the operation:
  *      = 1, performs full LU decomposition
  *      = 2, performs triangular solve
- *      = 3, free all the storage in the end
- *      = 4, performs numerical factorization only
+ *      = 3, performs numerical factorization only
+ *      = 4, free all the storage in the end
  *
  * f_factors (input/output) factors_t**
  *      If iopt == 1, it is an output and contains the pointer pointing to
@@ -52,10 +54,21 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
 
       // Create or unpack storage structure
       if ( !*f_factors ) {
+        if ( iopt == 3) {
+          printf("UMFPACK: Refactor requested without symbolic factors\n");
+          *info = -1;
+          return;
+        }
         LUfactors = (factors_t*) malloc(sizeof(factors_t));
+        LUfactors->Wi = (int *) malloc(n * sizeof(int));
         /* Set the default input options. */
         umfpack_di_defaults( LUfactors->Control);
-        if (!iter_refine) LUfactors->Control[UMFPACK_IRSTEP] = 0;
+        if (iter_refine) {
+          LUfactors->W  = (double *) malloc(5*n * sizeof(double));
+        } else {
+          LUfactors->Control[UMFPACK_IRSTEP] = 0;
+          LUfactors->W  = (double *) malloc(n * sizeof(double));
+        }
         *f_factors = LUfactors;
         refactor = false;
       } else {
@@ -91,6 +104,7 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
           printf("UMFPACK: Determinant overflow detected in factorization\n");
         }
       }
+      // umfpack_di_report_info(LUfactors->Control, Info);
 
     } else if ( iopt == 2 ) { /* Perform solve */
 
@@ -100,7 +114,7 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
       for (j = 0; j < nrhs; j++)  {
         for (i = 0; i < n; i++) x[i] = b[i + j*n];
         // Reversed order of x -> b
-        status = umfpack_di_solve( UMFPACK_At, rowptr, colind, values, b+j*n, x, LUfactors->Numeric, LUfactors->Control, Info);
+        status = umfpack_di_wsolve( UMFPACK_At, rowptr, colind, values, b+j*n, x, LUfactors->Numeric, LUfactors->Control, Info, LUfactors->Wi, LUfactors->W);
         if ( status != 0 ) break;
       }
       free(x);
@@ -111,6 +125,8 @@ oft_umfpack_dgssv_c(int iopt, int n, int nnz, int nrhs,
       LUfactors = *f_factors;
       umfpack_di_free_symbolic( &LUfactors->Symbolic);
       umfpack_di_free_numeric( &LUfactors->Numeric);
+      free(LUfactors->Wi);
+      free(LUfactors->W);
       free(LUfactors);
       *f_factors = NULL;
 
