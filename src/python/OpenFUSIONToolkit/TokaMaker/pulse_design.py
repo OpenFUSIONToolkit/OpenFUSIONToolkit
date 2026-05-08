@@ -1017,12 +1017,14 @@ class TokaMaker_TORAX:
         if impurity is not None:
             self._impurity = impurity
 
-    def set_heating(self, generic_heat=None, generic_heat_loc=None, generic_heat_width=0.25, nbi_current=False, ecrh=None, ecrh_loc=None, ecrh_width=0.1, ohmic=None, fusion=True, ei_exchange=True):
+    def set_heating(self, generic_heat=None, generic_heat_loc=None, generic_heat_width=0.25, generic_heat_absorption_fraction=1.0, generic_heat_electron_heat_fraction=0.4, nbi_current=False, ecrh=None, ecrh_loc=None, ecrh_width=0.1, ohmic=None, fusion=True, ei_exchange=True):
         r'''! Set TORAX heating and source toggles.
                 TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#sources
                 @param generic_heat Generic heating ({time: power_W}).
                 @param generic_heat_loc Generic heating deposition location (normalized rho).
                 @param generic_heat_width Generic heating deposition width (normalized rho).
+                @param generic_heat_absorption_fraction Fraction of generic heating that is absorbed (default here 1.0, TORAX default is 0.0).
+                @param generic_heat_electron_heat_fraction Fraction of generic heating that is converted to electron heat (default 0.4, from arc v3a config, TORAX default is 0.6).
                 @param nbi_current Enable NBI current drive estimate from generic heating.
                 @param ecrh ECRH heating ({time: power_W}).
                 @param ecrh_loc ECRH deposition location (normalized rho).
@@ -1035,6 +1037,8 @@ class TokaMaker_TORAX:
             self._generic_heat = generic_heat
             self._generic_heat_loc = generic_heat_loc
             self._generic_heat_width = generic_heat_width
+            self._generic_heat_absorption_fraction = generic_heat_absorption_fraction
+            self._generic_heat_electron_heat_fraction = generic_heat_electron_heat_fraction
         if ecrh is not None and ecrh_loc is not None:
             self._ecrh_heating = ecrh
             self._ecrh_loc = ecrh_loc
@@ -1492,15 +1496,14 @@ class TokaMaker_TORAX:
             myconfig['sources']['generic_heat']['P_total'] = (nbi_times, nbi_pow)
             myconfig['sources']['generic_heat']['gaussian_location'] = self._generic_heat_loc
             myconfig['sources']['generic_heat']['gaussian_width'] = self._generic_heat_width
+            myconfig['sources']['generic_heat']['absorption_fraction'] = self._generic_heat_absorption_fraction 
+            myconfig['sources']['generic_heat']['electron_heat_fraction'] = self._generic_heat_electron_heat_fraction 
 
             if self._use_nbi_current:
                 myconfig['sources'].setdefault('generic_current', {})
                 myconfig['sources']['generic_current']['use_absolute_current'] = True
                 myconfig['sources']['generic_current']['I_generic'] = (nbi_times, _NBI_W_TO_MA * np.array(nbi_pow))
                 myconfig['sources']['generic_current']['gaussian_location'] = self._generic_heat_loc
-                myconfig['sources']['generic_heat']['absorption_fraction'] = 1.0 # default is 0.0, 1.0 means all heat is absorbed
-                # Detault of 0 doesn't seem to turn off the heating, but turning it to 1.0 for safety
-                myconfig['sources']['generic_heat']['electron_heat_fraction'] = 0.4 # for ICRH from arc v3a config
 
         if self._pedestal_config is not None:
             # Full pedestal dict replacement requested via load_pedestal_config().
