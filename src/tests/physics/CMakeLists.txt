@@ -22,6 +22,10 @@ if( OFT_BUILD_TESTS )
   configure_file( test_alfven_lag.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( cube.inp ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( cube.t3d ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  oft_add_test( test_alfven_2d.F90 test_phys_helpers )
+  configure_file( test_alfven_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  oft_add_test( test_sound_2d.F90 test_phys_helpers )
+  configure_file( test_sound_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
   # ThinCurr tests
   configure_file( test_ThinCurr.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
