@@ -1498,6 +1498,9 @@ class TokaMaker_TORAX:
                 myconfig['sources']['generic_current']['use_absolute_current'] = True
                 myconfig['sources']['generic_current']['I_generic'] = (nbi_times, _NBI_W_TO_MA * np.array(nbi_pow))
                 myconfig['sources']['generic_current']['gaussian_location'] = self._generic_heat_loc
+                myconfig['sources']['generic_heat']['absorption_fraction'] = 1.0 # default is 0.0, 1.0 means all heat is absorbed
+                # Detault of 0 doesn't seem to turn off the heating, but turning it to 1.0 for safety
+                myconfig['sources']['generic_heat']['electron_heat_fraction'] = 0.4 # for ICRH from arc v3a config
 
         if self._pedestal_config is not None:
             # Full pedestal dict replacement requested via load_pedestal_config().
