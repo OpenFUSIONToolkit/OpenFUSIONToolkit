@@ -105,7 +105,7 @@ IF(.NOT.c_associated(mesh_ptr))THEN
   RETURN
 END IF
 ALLOCATE(tMaker_obj)
-ALLOCATE(tMaker_obj%device,tMaker_obj%gs_td,tMaker_obj%ML_oft_blagrange)
+ALLOCATE(tMaker_obj%device)
 tMaker_ptr=C_LOC(tMaker_obj)
 CALL c_f_pointer(mesh_ptr,tMaker_obj%ml_mesh)
 END SUBROUTINE tokamaker_alloc
@@ -198,6 +198,22 @@ IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil))THEN
 END IF
 success=.TRUE.
 END FUNCTION tokamaker_require_equil
+!---------------------------------------------------------------------------------
+!> Require TokaMaker wrapper object to have TokaMaker time-dependent solver object allocated
+!---------------------------------------------------------------------------------
+FUNCTION tokamaker_require_td(tMaker_obj,error_str) RESULT(success)
+TYPE(tokamaker_instance), INTENT(in) :: tMaker_obj
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+LOGICAL :: success
+!---Clear error flag
+IF(PRESENT(error_str))CALL copy_string('',error_str)
+IF(.NOT.ASSOCIATED(tMaker_obj%gs_td))THEN
+  IF(PRESENT(error_str))CALL copy_string('Time-dependent solver object not allocated',error_str)
+  success=.FALSE.
+  RETURN
+END IF
+success=.TRUE.
+END FUNCTION tokamaker_require_td
 !---------------------------------------------------------------------------------
 !> Evaluate Green's function for axisymmetric toroidal current loop
 !---------------------------------------------------------------------------------
@@ -307,6 +323,10 @@ IF(ASSOCIATED(tMaker_obj%device))THEN
   CALL tMaker_obj%device%delete()
   DEALLOCATE(tMaker_obj%device)
 END IF
+IF(ASSOCIATED(tMaker_obj%gs_td))THEN
+  CALL tMaker_obj%gs_td%delete()
+  DEALLOCATE(tMaker_obj%gs_td)
+END IF
 IF(ASSOCIATED(tMaker_obj%ML_oft_blagrange))THEN
   CALL tMaker_obj%ML_oft_blagrange%current_level%delete()
 END IF
@@ -371,6 +391,7 @@ END IF
 ! Setup Lagrange Elements
 !------------------------------------------------------------------------------
 tMaker_obj%ml_mesh%smesh%tess_order=order
+ALLOCATE(tMaker_obj%ML_oft_blagrange)
 CALL oft_lag_setup(tMaker_obj%ml_mesh,order,ML_blag_obj=tMaker_obj%ML_oft_blagrange,minlev=-1)
 CALL tMaker_obj%device%setup(tMaker_obj%ML_oft_blagrange)
 !------------------------------------------------------------------------------
@@ -667,6 +688,7 @@ REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 REAL(8), ALLOCATABLE, DIMENSION(:) :: coil_currents,coil_voltages
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+IF(.NOT.tokamaker_require_td(tMaker_obj,error_str))RETURN
 ALLOCATE(coil_currents(tMaker_obj%device%ncoils),coil_voltages(tMaker_obj%device%ncoils))
 CALL c_f_pointer(curr_ptr, vals_tmp, [tMaker_obj%device%ncoils])
 coil_currents=vals_tmp*mu0
