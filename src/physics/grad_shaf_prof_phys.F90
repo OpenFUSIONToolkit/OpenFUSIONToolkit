@@ -473,7 +473,7 @@ TYPE(spline_type), INTENT(out) :: R_spline
 INTEGER(i4) :: i
 REAL(r8), ALLOCATABLE :: ravgs(:,:), psi_q(:), qprof(:)
 REAL(r8), PARAMETER :: psi_pad = 1.d-3
-ALLOCATE(ravgs(ngeom,2), psi_q(ngeom), qprof(ngeom))
+ALLOCATE(ravgs(ngeom,3), psi_q(ngeom), qprof(ngeom))
 psi_q = [(REAL(i-1,r8)/REAL(ngeom,r8), i=1,ngeom)]
 IF(gseq%diverted)THEN
   psi_q(1) = MIN(psi_q(2), psi_pad)
@@ -591,7 +591,7 @@ REAL(r8) :: alpha, ip_target, ip_ind, ip_result_lo, ip_result_hi, dalpha
 REAL(r8) :: djBS
 ! gs_itor_nl / gs_flux_int reconciliation
 REAL(r8) :: itor_nl = 0.0_r8, itor_flint = 0.0_r8, jphi_rescale
-CHARACTER(len=80) :: char_buf
+CHARACTER(len=256) :: char_buf
 !---
 self%plasma_bounds = gseq%plasma_bounds
 IF(gseq%mode/=1) &
@@ -1532,7 +1532,7 @@ REAL(r8)    :: dx_window, t, h00, h10, h01, h11, y_patch
 REAL(r8)    :: p0(7), popt(7)
 REAL(r8)    :: amp_fit, center_fit, width_fit, offset_fit, sk_fit, y_sep_fit, bw_fit
 REAL(r8), ALLOCATABLE :: psi_fit(:), j_fit(:)
-CHARACTER(len=80) :: char_buf
+CHARACTER(len=256) :: char_buf
 ! =====================================================================
 ! 1. Find the dominant local peak in the edge region (psi_N > 0.7)
 !    with j_BS > 0.  Among all qualifying peaks choose the one with
