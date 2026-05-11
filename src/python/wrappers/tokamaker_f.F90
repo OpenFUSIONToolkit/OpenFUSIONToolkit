@@ -1436,7 +1436,7 @@ tMaker_obj%gs_equil%R0_target=R0_target
 tMaker_obj%gs_equil%Z0_target=Z0_target
 tMaker_obj%gs_equil%pax_target=pax_target*mu0
 tMaker_obj%gs_equil%estore_target=estore_target*mu0
-tMaker_obj%gs_equil%itor_target=ip_target*mu0
+tMaker_obj%gs_equil%Ip_target=ip_target*mu0
 tMaker_obj%gs_equil%ip_ratio_target=ip_ratio_target
 END SUBROUTINE tokamaker_set_targets
 !---------------------------------------------------------------------------------
