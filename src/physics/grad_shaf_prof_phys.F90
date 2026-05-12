@@ -160,6 +160,8 @@ TYPE :: edge_jbs_fit_ctx
   REAL(r8), ALLOCATABLE :: psi_fit(:) !< psi_N values at the fitting points
   REAL(r8), ALLOCATABLE :: j_fit(:)   !< Target j_BS values [A/m^2]
   REAL(r8) :: tail_alpha = 1.5_r8    !< Fixed right-side fall-off (Python default)
+  REAL(r8) :: lb(7) = 0.0_r8        !< Lower bounds for the 7 parameters
+  REAL(r8) :: ub(7) = 1.0_r8        !< Upper bounds for the 7 parameters
 END TYPE edge_jbs_fit_ctx
 TYPE(edge_jbs_fit_ctx) :: active_edge_jbs !< Module-level context for lmdif callback
 contains
@@ -1392,15 +1394,23 @@ REAL(8),     INTENT(in)    :: cofs(n)
 REAL(8),     INTENT(out)   :: err(m)
 INTEGER(4),  INTENT(inout) :: iflag
 REAL(r8) :: amp, center, width, offset, sk, y_sep, blend_width
+REAL(r8) :: p_bounded(7)
 REAL(r8) :: profile(active_edge_jbs%n_fit)
+INTEGER(i4) :: k
 !---
-amp        = cofs(1)
-center     = cofs(2)
-width      = cofs(3)
-offset     = cofs(4)
-sk         = cofs(5)
-y_sep      = cofs(6)
-blend_width = cofs(7)
+! Inverse transform: P_bounded = lb + (tanh(P_internal) + 1) * (ub - lb) / 2
+DO k = 1, 7
+  p_bounded(k) = active_edge_jbs%lb(k) &
+               + (TANH(cofs(k)) + 1.0_r8) &
+               * (active_edge_jbs%ub(k) - active_edge_jbs%lb(k)) * 0.5_r8
+END DO
+amp         = p_bounded(1)
+center      = p_bounded(2)
+width       = p_bounded(3)
+offset      = p_bounded(4)
+sk          = p_bounded(5)
+y_sep       = p_bounded(6)
+blend_width = p_bounded(7)
 CALL parametrise_edge_jbs(active_edge_jbs%n_fit, active_edge_jbs%psi_fit, &
     amp, center, width, offset, sk, y_sep, blend_width, &
     active_edge_jbs%tail_alpha, profile)
@@ -1429,15 +1439,17 @@ END SUBROUTINE edge_jbs_residual
 !> @param p0       Initial parameter guess (7 elements)
 !> @param popt     Output: optimised parameters (7 elements)
 !------------------------------------------------------------------------------
-SUBROUTINE curve_fit_edge_jbs(n_fit, psi_fit, j_BS_fit, p0, popt)
+SUBROUTINE curve_fit_edge_jbs(n_fit, psi_fit, j_BS_fit, p0, popt, lb_in, ub_in)
 INTEGER(i4), INTENT(in)  :: n_fit
 REAL(r8),    INTENT(in)  :: psi_fit(n_fit), j_BS_fit(n_fit)
 REAL(r8),    INTENT(in)  :: p0(7)
 REAL(r8),    INTENT(out) :: popt(7)
+REAL(r8),    INTENT(in)  :: lb_in(7), ub_in(7)
 !---MINPACK variables (same pattern as gs_psi2pt / circle_interp)
 INTEGER(4), PARAMETER :: NPARAMS = 7
 REAL(8) :: ftol, xtol, gtol, epsfcn, factor
 REAL(8) :: cofs(NPARAMS), error_vec(n_fit)
+INTEGER(i4) :: k
 REAL(8), ALLOCATABLE :: diag(:), wa1(:), wa2(:), wa3(:), wa4(:), qtf(:)
 REAL(8), ALLOCATABLE :: fjac(:,:)
 INTEGER(4), ALLOCATABLE :: ipvt(:)
@@ -1453,8 +1465,19 @@ active_edge_jbs%n_fit   = n_fit
 active_edge_jbs%psi_fit = psi_fit
 active_edge_jbs%j_fit   = j_BS_fit
 active_edge_jbs%tail_alpha = 1.5_r8  ! fixed Python default
-! Initial guess
-cofs = p0
+! Bounds are passed in via the module-level context; declared as extra args below
+active_edge_jbs%lb = lb_in
+active_edge_jbs%ub = ub_in
+! Clamp p0 to lie strictly inside [lb + 1e-6*range, ub - 1e-6*range]
+! to avoid atanh(+-1) = +-Inf at the bounds.
+DO k = 1, NPARAMS
+  cofs(k) = MAX(lb_in(k) + 1.0e-6_r8 * (ub_in(k) - lb_in(k)), &
+            MIN(ub_in(k) - 1.0e-6_r8 * (ub_in(k) - lb_in(k)), p0(k)))
+END DO
+! Forward transform: P_internal = atanh(2*(P_bounded - lb)/(ub - lb) - 1)
+DO k = 1, NPARAMS
+  cofs(k) = ATANH(2.0_r8 * (cofs(k) - lb_in(k)) / (ub_in(k) - lb_in(k)) - 1.0_r8)
+END DO
 ncons  = n_fit
 ncofs  = NPARAMS
 ldfjac = ncons
@@ -1481,7 +1504,10 @@ IF (info <= 0 .OR. info >= 5) THEN
     '; nfev=', nfev
   CALL oft_warn(TRIM(char_buf))
 END IF
-popt = cofs
+! Inverse transform: recover bounded parameters from internal lmdif solution
+DO k = 1, NPARAMS
+  popt(k) = lb_in(k) + (TANH(cofs(k)) + 1.0_r8) * (ub_in(k) - lb_in(k)) * 0.5_r8
+END DO
 END SUBROUTINE curve_fit_edge_jbs
 !------------------------------------------------------------------------------
 !> Analyse and isolate the edge bootstrap-current spike from a toroidal
@@ -1531,6 +1557,8 @@ REAL(r8)    :: dist_start, dist_end
 REAL(r8)    :: y_start, dy_start, y_end, dy_end
 REAL(r8)    :: dx_window, t, h00, h10, h01, h11, y_patch
 REAL(r8)    :: p0(7), popt(7)
+REAL(r8)    :: lb(7), ub(7)
+REAL(r8)    :: amp_lo, amp_hi, off_lo, off_hi, ysep_hi, eps_tmp
 REAL(r8)    :: amp_fit, center_fit, width_fit, offset_fit, sk_fit, y_sep_fit, bw_fit
 REAL(r8), ALLOCATABLE :: psi_fit(:), j_fit(:)
 CHARACTER(len=256) :: char_buf
@@ -1689,16 +1717,36 @@ IF (PRESENT(parameterized_spike)) THEN
       j_fit(n_fit)   = j_BS(i)
     END IF
   END DO
-  ! Initial parameter guess (matches Python p0)
-  p0(1) = peak_height                          ! amp
+  ! Bounds for LM fit (mirrors Python bootstrap.py analyze_bootstrap_edge_spike)
+  ! amp bounds
+  eps_tmp = MAX(1.0e-6_r8, 1.0e-3_r8 * ABS(peak_height))
+  IF (peak_height == 0.0_r8) eps_tmp = 1.0e-6_r8
+  amp_lo  = MIN(0.9995_r8 * peak_height, peak_height - eps_tmp)
+  amp_hi  = MAX(1.0005_r8 * peak_height, peak_height + eps_tmp)
+  ! offset bounds
+  eps_tmp = MAX(1.0e-6_r8, 1.0e-3_r8 * ABS(lmin_j_BS))
+  IF (lmin_j_BS == 0.0_r8) eps_tmp = 1.0e-6_r8
+  off_lo  = MIN(0.99_r8 * lmin_j_BS, lmin_j_BS - eps_tmp)
+  off_hi  = MAX(1.01_r8 * lmin_j_BS, lmin_j_BS + eps_tmp)
+  ! y_sep upper bound: max(2|j_BS(n)|, |j_BS(n)|+1e-6, 1e-6)
+  ysep_hi = MAX(2.0_r8 * ABS(j_BS(n)), ABS(j_BS(n)) + 1.0e-6_r8, 1.0e-6_r8)
+  ! Assemble bound arrays
+  lb(1) = amp_lo;          ub(1) = amp_hi
+  lb(2) = 0.8_r8*peak_psi; ub(2) = MIN(1.2_r8*peak_psi, psi_N(n))
+  lb(3) = 0.0_r8;          ub(3) = 0.33_r8
+  lb(4) = off_lo;           ub(4) = off_hi
+  lb(5) = -50.0_r8;         ub(5) = 50.0_r8
+  lb(6) = 0.0_r8;           ub(6) = ysep_hi
+  lb(7) = 0.001_r8;         ub(7) = 0.2_r8
+  ! Initial parameter guess (matches Python p0)                          ! amp
   p0(2) = peak_psi                             ! center
   p0(3) = fwhm / 2.355_r8                     ! width (sigma)
   p0(4) = lmin_j_BS                            ! offset
   p0(5) = 1.0_r8                              ! sk
   p0(6) = MAX(0.0_r8, j_BS(n))            ! y_sep
   p0(7) = 0.05_r8                             ! blend_width
-  ! Levenberg-Marquardt fit
-  CALL curve_fit_edge_jbs(n_fit, psi_fit, j_fit, p0, popt)
+  ! Levenberg-Marquardt fit (pass bounds for internal tan-transform)
+  CALL curve_fit_edge_jbs(n_fit, psi_fit, j_fit, p0, popt, lb, ub)
   DEALLOCATE(psi_fit, j_fit)
   amp_fit    = popt(1)
   center_fit = popt(2)
