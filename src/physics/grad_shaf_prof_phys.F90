@@ -1077,7 +1077,7 @@ IF (PRESENT(j_spike)) THEN
     j_BS_std  = j_BS(n_psi:1:-1)
     IF (do_parametrize) THEN
       CALL analyze_bootstrap_edge_spike(n_psi, psi_N_std, j_BS_std, mask_std, &
-                                      param_std)
+                                      param_std, diagnose=gseq%boot_ops%diagnose_bs)
       j_spike = scl_jBS * param_std(n_psi:1:-1)
       DEALLOCATE(param_std)
     ELSE
@@ -1514,12 +1514,13 @@ END SUBROUTINE curve_fit_edge_jbs
 !> @param parameterized_spike Output: parametrise_edge_jbs fit evaluated on full psi_N grid [A/m^2]
 !------------------------------------------------------------------------------
 SUBROUTINE analyze_bootstrap_edge_spike(n, psi_N, j_BS, masked_spike, &
-                                      parameterized_spike)
+                                      parameterized_spike, diagnose)
 INTEGER(i4), INTENT(in)  :: n
 REAL(r8),    INTENT(in)  :: psi_N(n)              !< Normalised poloidal flux [0=axis, 1=LCFS/plasma edge]
 REAL(r8),    INTENT(in)  :: j_BS(n)           !< Bootstrap current density [A/m^2]
 REAL(r8),    INTENT(out) :: masked_spike(n)        !< Isolated edge spike spliced onto flat core [A/m^2]
 REAL(r8), OPTIONAL, INTENT(out) :: parameterized_spike(n) !< parametrise_edge_jbs fit on full grid [A/m^2]
+LOGICAL,  OPTIONAL, INTENT(in)  :: diagnose               !< If .TRUE., print fit parameters and profile table
 !---
 INTEGER(i4) :: i, peak_idx, lmin_idx, left_idx, right_idx, idx_start, idx_end
 INTEGER(i4) :: n_fit
@@ -1709,6 +1710,17 @@ IF (PRESENT(parameterized_spike)) THEN
   ! Evaluate fitted profile on the full n-point grid
   CALL parametrise_edge_jbs(n, psi_N, amp_fit, center_fit, width_fit, &
       offset_fit, sk_fit, y_sep_fit, bw_fit, 1.5_r8, parameterized_spike)
+  ! Optional verbose output for diagnostics if gseq%boot_ops%diagnose_bs
+  IF (PRESENT(diagnose) .AND. diagnose) THEN
+    WRITE(*,'(A,7(A,ES12.4))') '  [edge_spike_fit]', &
+      ' amp=',    amp_fit,    ' center=', center_fit, ' width=',  width_fit, &
+      ' offset=', offset_fit, ' sk=',     sk_fit,     ' y_sep=',  y_sep_fit, &
+      ' bw=',     bw_fit
+    WRITE(*,'(A)') '  [edge_spike_profile] i  psi_N(std)    parameterized_spike[A/m2]'
+    DO i = 1, n
+      WRITE(*,'(A,I4,2ES15.5)') '  ', i, psi_N(i), parameterized_spike(i)
+    END DO
+  END IF
 END IF
 END SUBROUTINE analyze_bootstrap_edge_spike
 !------------------------------------------------------------------------------
