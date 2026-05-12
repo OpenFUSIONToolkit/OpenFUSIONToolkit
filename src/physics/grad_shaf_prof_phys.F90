@@ -584,6 +584,7 @@ TYPE(spline_type) :: R_spline
 REAL(r8), ALLOCATABLE :: j_BS(:)
 ! Optional edge-spike workspace (only allocated when isolate_edge_jBS or parameterize_jBS is set)
 REAL(r8), ALLOCATABLE :: j_spike_tmp(:)
+REAL(r8), ALLOCATABLE :: j_spike_mask_tmp(:)  !< Raw masked (pre-fit) spike profile
 ! Working arrays on self%x grid
 REAL(r8), ALLOCATABLE :: jphi_total(:)
 REAL(r8), ALLOCATABLE :: jphi_ind(:)  !< Tapered copy of self%jphi (= self%jphi when taper off)
@@ -632,20 +633,27 @@ IF(self%freeze_j_BS .AND. ASSOCIATED(self%j_BS_last)) THEN
 ELSE
   !--- Not frozen: run full bootstrap calculation (Sauter).
   IF (gseq%boot_ops%isolate_edge_jBS .OR. gseq%boot_ops%parameterize_jBS) THEN
-    ALLOCATE(j_spike_tmp(self%npsi))
+    ALLOCATE(j_spike_tmp(self%npsi), j_spike_mask_tmp(self%npsi))
     CALL calculate_bootstrap(gseq, self%npsi, self%x, j_BS, &
         isolate_edge_jBS=gseq%boot_ops%isolate_edge_jBS, &
         parameterize_jBS=gseq%boot_ops%parameterize_jBS, &
         scale_jBS=gseq%boot_ops%scale_jBS, &
-        j_spike=j_spike_tmp)
-    IF(gseq%boot_ops%diagnose_bs)THEN
-      WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         j_BS(bulk)[A/m2]  j_spike[A/m2]   jphi[A/m2]'
-      DO i = 1, self%npsi
-        WRITE(*,'(A,I4,4ES15.5)') '  ', i, self%x(i), j_BS(i), j_spike_tmp(i), self%jphi(i)
-      END DO
+        j_spike=j_spike_tmp, j_spike_masked=j_spike_mask_tmp)
+    IF (gseq%boot_ops%diagnose_bs) THEN
+      IF (gseq%boot_ops%parameterize_jBS) THEN
+        WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         j_BS(bulk)[A/m2]  j_spike[A/m2]   j_spike_masked[A/m2]  jphi[A/m2]'
+        DO i = 1, self%npsi
+          WRITE(*,'(A,I4,5ES15.5)') '  ', i, self%x(i), j_BS(i), j_spike_tmp(i), j_spike_mask_tmp(i), self%jphi(i)
+        END DO
+      ELSE
+        WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         j_BS(bulk)[A/m2]  j_spike[A/m2]   jphi[A/m2]'
+        DO i = 1, self%npsi
+          WRITE(*,'(A,I4,4ES15.5)') '  ', i, self%x(i), j_BS(i), j_spike_tmp(i), self%jphi(i)
+        END DO
+      END IF
     END IF
     j_BS = j_spike_tmp
-    DEALLOCATE(j_spike_tmp)
+    DEALLOCATE(j_spike_tmp, j_spike_mask_tmp)
   ELSE
     CALL calculate_bootstrap(gseq, self%npsi, self%x, j_BS)
     j_BS = j_BS * gseq%boot_ops%scale_jBS
@@ -928,7 +936,8 @@ END SUBROUTINE gs_flux_int
 !> @param j_BS Output: average toroidal bootstrap current density [A/m^2] on psi_N grid
 !------------------------------------------------------------------------------
 SUBROUTINE calculate_bootstrap(gseq, n_psi, psi_N, j_BS, &
-                               isolate_edge_jBS, parameterize_jBS, scale_jBS, j_spike)
+                               isolate_edge_jBS, parameterize_jBS, scale_jBS, &
+                               j_spike, j_spike_masked)
 CLASS(gs_equil), INTENT(inout) :: gseq
 INTEGER(i4), INTENT(in) :: n_psi
 REAL(r8), INTENT(in) :: psi_N(n_psi)  !< Normalised psi grid [0,1], arbitrary spacing
@@ -936,7 +945,8 @@ REAL(r8), INTENT(out) :: j_BS(n_psi)
 LOGICAL,  OPTIONAL, INTENT(in)  :: isolate_edge_jBS  !< If .TRUE., isolate edge spike from core
 LOGICAL,  OPTIONAL, INTENT(in)  :: parameterize_jBS  !< If .TRUE., use parametrised skew-normal fit
 REAL(r8), OPTIONAL, INTENT(in)  :: scale_jBS         !< Scaling factor applied to spike profile (default 1)
-REAL(r8), OPTIONAL, INTENT(out) :: j_spike(n_psi)    !< Processed spike profile [A/m^2]
+REAL(r8), OPTIONAL, INTENT(out) :: j_spike(n_psi)        !< Processed spike profile [A/m^2]
+REAL(r8), OPTIONAL, INTENT(out) :: j_spike_masked(n_psi) !< Raw masked (pre-fit) spike profile [A/m^2]
 !---
 INTEGER(i4) :: i
 REAL(r8) :: psi_abs(n_psi)
@@ -1080,11 +1090,13 @@ IF (PRESENT(j_spike)) THEN
     IF (do_parametrize) THEN
       CALL analyze_bootstrap_edge_spike(n_psi, psi_N_std, j_BS_std, mask_std, &
                                       param_std, diagnose=gseq%boot_ops%diagnose_bs)
-      j_spike = scl_jBS * param_std(n_psi:1:-1)
+      IF (PRESENT(j_spike))        j_spike        = scl_jBS * param_std(n_psi:1:-1)
+      IF (PRESENT(j_spike_masked)) j_spike_masked = scl_jBS * mask_std(n_psi:1:-1)
       DEALLOCATE(param_std)
     ELSE
       CALL analyze_bootstrap_edge_spike(n_psi, psi_N_std, j_BS_std, mask_std)
-      j_spike = scl_jBS * mask_std(n_psi:1:-1)
+      IF (PRESENT(j_spike))        j_spike        = scl_jBS * mask_std(n_psi:1:-1)
+      IF (PRESENT(j_spike_masked)) j_spike_masked = scl_jBS * mask_std(n_psi:1:-1)
     END IF
     DEALLOCATE(psi_N_std, j_BS_std, mask_std)
   END IF
