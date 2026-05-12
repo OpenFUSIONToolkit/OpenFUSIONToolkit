@@ -46,7 +46,7 @@ N_PSI = 1000
 _NBI_W_TO_MA = 1/16e6
 mu_0 = 4.0 * np.pi * 1e-7
 # Fixed timestep for initial / inter-loop TORAX relax simulations only.
-RELAX_FIXED_DT = 0.01
+RELAX_FIXED_DT = 0.1
 # EQDSK sampling for save_eqdsk when validating with TORAX in _run_tm:
 # start at nr=nz=100, increase by 50 up to 500 until TORAX accepts eqdsk.
 EQDSK_SAVE_NR_NZ_SEQUENCE = (100, 150, 200, 250, 300, 350, 400, 450, 500)
@@ -2057,11 +2057,12 @@ class TokaMaker_TORAX:
                 self._print(f'  TORAX: config/init FAILED — {e}')
                 raise
 
+            self._data_tree = data_tree  # store for visualization at full TORAX resolution
+            # (set even on sim_error so partial data up to the failure is plottable)
+
             if hist.sim_error != torax.SimError.NO_ERROR:
                 self._print(f'  TORAX: sim FAILED ({hist.sim_error})')
                 raise ValueError(f'TORAX failed to run the simulation: {hist.sim_error}')
-        
-            self._data_tree = data_tree  # store for visualization at full TORAX resolution
 
             try:
                 self._capture_relax_tx_profiles_from_datatree(data_tree, self._t_init)
@@ -3034,7 +3035,30 @@ class TokaMaker_TORAX:
                 self._print(f'\n{"="*60}\n  Loop {self._current_loop}\n{"="*60}')
 
                 _t_coupling_loop0 = time.perf_counter()
-                cflux_tx, cflux_tx_vloop = self._run_tx()
+                try:
+                    cflux_tx, cflux_tx_vloop = self._run_tx()
+                except Exception as _tx_exc:
+                    # On any TORAX failure (e.g. temperature collapse), save the scalar
+                    # plot so the user has TM/TX time-series up to the failure point.
+                    # TokaMaker entries plot as zeros / prior-loop values; that's expected.
+                    if self._output_mode in ('normal', 'minimal', 'debug') and self._out_dir is not None:
+                        scalars_name = f'scalars_loop{self._current_loop:03d}_torax_failed.png'
+                        if self._output_file_tag is not None:
+                            scalars_name = f'{self._output_file_tag}_{scalars_name}'
+                        _scalars_path = os.path.join(self._out_dir, scalars_name)
+                        try:
+                            plot_scalars(self, save_path=_scalars_path, display=False)
+                            self._log(
+                                f'TORAX failed at loop {self._current_loop} ({_tx_exc}); '
+                                f'scalars plot saved to {_scalars_path}'
+                            )
+                            self._print(f'  TORAX failed; scalars plot saved to {_scalars_path}')
+                        except Exception as _e:
+                            self._log(
+                                f'plot_scalars failed after TORAX failure at loop '
+                                f'{self._current_loop}: {_e}'
+                            )
+                    raise
 
                 cflux_tm, cflux_tm_vloop = self._run_tm()
 
@@ -3541,6 +3565,7 @@ def profile_plot(tt, i, t, save_path=None, display=True):
     # Row 3: q, T, n
     ax = axes[3, 0]
     ax.set_title('q profile')
+    ax.axhline(1.0, color='k', ls='-', lw=1, label='q=1')
     ax.plot(s['q_prof_tx'][i]['x'], s['q_prof_tx'][i]['y'], 'b--', label='TX', linewidth=1)
     ax.plot(s['q_prof_tm'][i]['x'], s['q_prof_tm'][i]['y'], 'r--', label='TM', linewidth=2)
     ax.set_xlabel(r'$\hat{\psi}$')
@@ -3757,7 +3782,9 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
     ax_pp_tm = fig.add_subplot(gs_layout[1, 2:4])
     ax_q_tm = fig.add_subplot(gs_layout[2, 2:4])
     ax_tbl1 = fig.add_subplot(gs_layout[0, 4:6])
-    ax_tbl2 = fig.add_subplot(gs_layout[1:3, 4:6])
+    gs_tbl_eq = gs_layout[1:3, 4:6].subgridspec(1, 2, width_ratios=[1.15, 0.85], wspace=0.12)
+    ax_tbl2 = fig.add_subplot(gs_tbl_eq[0, 0])
+    ax_mini_eq = fig.add_subplot(gs_tbl_eq[0, 1])
 
     _plot_levels(ax_ffp_tx, 'ffp', seed_x=_seed_ffp_x, seed_y=_seed_ffp_norm, seed_label="FF' seed EQDSK (norm)")
     ax_ffp_tx.set_title("FF' tried levels (norm)", fontsize=10)
@@ -3825,6 +3852,7 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
             lines2, labels2 = ax_pp_tm_2.get_legend_handles_labels()
             ax_pp_tm.legend(lines1 + lines2, labels1 + labels2, fontsize=7, loc='upper left')
 
+        ax_q_tm.axhline(1.0, color='k', ls='-', lw=1, label='q=1')
         try:
             psi_geo, q_tm_vals, _, _, _, _ = tt._tm.get_q(npsi=len(tt._psi_N), psi_pad=1-tt._last_surface_factor)
             ax_q_tm.plot(psi_geo, q_tm_vals, 'r--', linewidth=2, label='TokaMaker')
@@ -3876,6 +3904,32 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
             f'  |  TokaMaker: FAILED',
             fontsize=13, color='darkred', fontweight='bold',
         )
+
+    equil_snap = s.get('equil', {}).get(i)
+    if solve_succeeded and equil_snap is not None:
+        tt._tm.plot_machine(
+            fig, ax_mini_eq, equilibrium=equil_snap, coil_colormap='seismic', coil_symmap=False,
+            coil_scale=1.E-6, coil_clabel=None,
+        )
+        tt._tm.plot_constraints(fig, ax_mini_eq, equilibrium=equil_snap)
+        tt._tm.plot_psi(fig, ax_mini_eq, equilibrium=equil_snap, xpoint_color='r', vacuum_nlevels=3)
+        x_pt = getattr(tt, '_x_point_targets', None)
+        if x_pt is not None and _x_points_active(tt, i, t=t):
+            ax_mini_eq.plot(x_pt[:, 0], x_pt[:, 1], 'x', color='purple', markersize=4, markeredgewidth=1)
+        sp = s.get('strike_pts', {}).get(i)
+        if sp is not None and len(sp) > 0:
+            ax_mini_eq.plot(sp[:, 0], sp[:, 1], 'g^', markersize=4, markeredgewidth=1)
+        ax_mini_eq.set_aspect('equal')
+        ax_mini_eq.set_title('TM equilibrium', fontsize=9)
+        ax_mini_eq.tick_params(labelsize=6)
+    else:
+        ax_mini_eq.axis('off')
+        _mini_msg = 'TokaMaker did not converge' if not solve_succeeded else 'No equilibrium snapshot'
+        ax_mini_eq.text(
+            0.5, 0.5, _mini_msg, transform=ax_mini_eq.transAxes, fontsize=8,
+            ha='center', va='center', color='darkred' if not solve_succeeded else 'gray', fontweight='bold',
+        )
+        ax_mini_eq.set_title('TM equilibrium', fontsize=9)
 
     _save_or_display(fig, save_path, display)
 
@@ -4216,11 +4270,20 @@ def plot_tx_relax_profiles(
 # ── Scalar time-series plot ───────────────────────────────────────────────────
 
 def plot_scalars(tt, save_path=None, display=True):
-    r'''! Plot 4x3 grid of time-series scalars.'''
+    r'''! Plot 4x3 grid of time-series scalars plus a bottom row: power channels, sources, P_LH.'''
     s = tt._state
     times = tt._tm_times
 
-    fig, axes = plt.subplots(4, 3, figsize=(16, 12))
+    _row_h = 3.0
+    fig = plt.figure(figsize=(16, 5 * _row_h + 0.5 * _row_h))
+    gs = fig.add_gridspec(5, 3, height_ratios=[1, 1, 1, 1, 1], hspace=0.35, wspace=0.3)
+    axes = np.empty((4, 3), dtype=object)
+    for i in range(4):
+        for j in range(3):
+            axes[i, j] = fig.add_subplot(gs[i, j])
+    ax_power = fig.add_subplot(gs[4, 0])
+    ax_sources = fig.add_subplot(gs[4, 1])
+    ax_plh = fig.add_subplot(gs[4, 2])
 
     # (0,0): Ip
     ax = axes[0, 0]
@@ -4350,33 +4413,8 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # (2,0): Power channels
-    ax = axes[2, 0]
-    ax.set_title('Power channels [W]')
-    power_rows = [('P_ohmic_e', 'P_ohmic_e', 'r-'), ('P_radiation_e', 'P_radiation_e', 'm--'),
-                  ('P_SOL_total', 'P_SOL_total', 'c--'), ('P_alpha_total', 'P_alpha_total', 'g-.'),
-                  ('P_aux_total', 'P_aux_total', 'y-.')]
-    y_non_lh = []
-    for tx_name, label, fmt in power_rows:
-        scale = -1.0 if tx_name == 'P_radiation_e' else 1.0
-        tx_t, tx_y = _tx_scalar(tt, tx_name, scale=scale)
-        if tx_t is not None:
-            ax.plot(tx_t, tx_y, fmt, linewidth=1, label=label)
-            y_non_lh.append(tx_y)
-    if y_non_lh:
-        y_all = np.concatenate([np.asarray(a, dtype=float).ravel() for a in y_non_lh])
-        y_all = y_all[np.isfinite(y_all)]
-        if y_all.size:
-            lo, hi = float(np.min(y_all)), float(np.max(y_all))
-            span = hi - lo
-            pad = 0.05 * span if span > 0 else 0.05 * max(abs(hi), abs(lo), 1.0)
-            ax.set_ylim(lo - pad, hi + pad)
-    tx_t, tx_y = _tx_scalar(tt, 'P_LH')
-    if tx_t is not None:
-        ax.plot(tx_t, tx_y, 'k-', linewidth=1, label='P_LH', zorder=5)
-    ax.set_xlabel('Time [s]')
-    ax.legend(fontsize=8)
-    ax.grid(True, alpha=0.3)
+    # (2,0): slot freed (power channels moved to bottom row); keep axis for future use.
+    axes[2, 0].axis('off')
 
     # (2,1): beta_N
     ax = axes[2, 1]
@@ -4407,6 +4445,7 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.set_title('Safety Factor q')
     t_q95, y_q95 = _tx_scalar(tt, 'q95')
     t_q0, y_q0 = _tx_profile_at_rho(tt, 'q', 0.0, rho_coord='rho_face_norm')
+    ax.axhline(1.0, color='k', ls='-', lw=1) # q=1 horizontal line
     ax.plot(times, s['q95_tm'], color=COLOR_TM, ls='-', marker='o', ms=MK_SZ, lw=1, label='q95 TM')
     ax.plot(times, s['q0_tm'], color=COLOR_TM, ls='--', marker='o', ms=MK_SZ, lw=1, label='q0 TM')
     if t_q95 is not None:
@@ -4449,6 +4488,107 @@ def plot_scalars(tt, save_path=None, display=True):
     h2, l2 = ax2_te.get_legend_handles_labels()
     if h1 or h2:
         ax.legend(h1 + h2, l1 + l2, fontsize=8, loc='upper left')
+
+    # Bottom row (left): power channels; P_LH overlaid here and shown on log axis at right.
+    ax = ax_power
+    ax.set_title('Power channels [W]')
+    power_rows = [('P_ohmic_e', 'P_ohmic_e', 'r-'), ('P_radiation_e', 'P_radiation_e', 'm--'),
+                  ('P_SOL_total', 'P_SOL_total', 'c--'), ('P_alpha_total', 'P_alpha_total', 'g-.'),
+                  ('P_aux_total', 'P_aux_total', 'y-.')]
+    y_non_lh = []
+    for tx_name, label, fmt in power_rows:
+        scale = -1.0 if tx_name == 'P_radiation_e' else 1.0
+        tx_t, tx_y = _tx_scalar(tt, tx_name, scale=scale)
+        if tx_t is not None:
+            ax.plot(tx_t, tx_y, fmt, linewidth=1, label=label)
+            y_non_lh.append(tx_y)
+    if y_non_lh:
+        y_all = np.concatenate([np.asarray(a, dtype=float).ravel() for a in y_non_lh])
+        y_all = y_all[np.isfinite(y_all)]
+        if y_all.size:
+            lo, hi = float(np.min(y_all)), float(np.max(y_all))
+            span = hi - lo
+            pad = 0.05 * span if span > 0 else 0.05 * max(abs(hi), abs(lo), 1.0)
+            ax.set_ylim(lo - pad, hi + pad)
+    t_plh_pc, y_plh_pc = _tx_scalar(tt, 'P_LH')
+    if t_plh_pc is not None:
+        ax.plot(t_plh_pc, y_plh_pc, 'k-', linewidth=1, label='P_LH', zorder=5)
+    ax.set_xlabel('Time [s]')
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
+
+    # Bottom row (right): L–H transition power threshold.
+    ax = ax_plh
+    ax.set_title(r'$P_{\mathrm{LH}}$ [W] (log scale)')
+    t_plh, y_plh = _tx_scalar(tt, 'P_LH')
+    if t_plh is not None:
+        y = np.asarray(y_plh, dtype=float)
+        y_plot = np.where((y > 0) & np.isfinite(y), y, np.nan)
+        ax.plot(t_plh, y_plot, 'k-', linewidth=1.2, label=r'$P_{\mathrm{LH}}$ TX')
+        if np.any(np.isfinite(y_plot) & (y_plot > 0)):
+            ax.set_yscale('log')
+        ax.legend(fontsize=8, loc='upper left')
+    else:
+        ax.text(
+            0.5, 0.5, r'$P_{\mathrm{LH}}$ not in TORAX output',
+            transform=ax.transAxes, ha='center', va='center', fontsize=9, color='gray',
+        )
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel('Power [W]')
+    ax.grid(True, alpha=0.3)
+
+    def _tx_scalar_if_nonzero(name, scale=1.0):
+        t, y = _tx_scalar(tt, name, scale=scale)
+        if t is None or y is None:
+            return None, None
+        ya = np.asarray(y, dtype=float)
+        if not np.any(np.isfinite(ya) & (np.abs(ya) > 0)):
+            return None, None
+        return t, y
+
+    ax_src = ax_sources
+    ax_src.set_title('Sources')
+    heat_cfg = [
+        ('P_aux_total', 'Aux', 'tab:blue', '-'),
+        ('P_ohmic_e', 'Ohmic', 'tab:red', '-'),
+        ('P_alpha_total', 'Alpha', 'tab:green', '-'),
+    ]
+    plotted_heat = False
+    for tx_name, label, clr, ls in heat_cfg:
+        tx_t, tx_y = _tx_scalar_if_nonzero(tx_name)
+        if tx_t is None:
+            continue
+        ax_src.plot(tx_t, tx_y, color=clr, ls=ls, lw=1.2, label=label)
+        plotted_heat = True
+    ax_src.set_ylabel('Heating power [W]')
+    ax_src.set_xlabel('Time [s]')
+    ax_src.grid(True, alpha=0.3)
+
+    fuel_cfg = [
+        ('S_gas_puff', 'Gas puff $S$', 'tab:brown', '-'),
+        ('S_pellet', 'Pellet $S$', 'tab:purple', '--'),
+    ]
+    ax2_src = None
+    for tx_name, label, clr, ls in fuel_cfg:
+        tx_t, tx_y = _tx_scalar_if_nonzero(tx_name)
+        if tx_t is None:
+            continue
+        if ax2_src is None:
+            ax2_src = ax_src.twinx()
+        ax2_src.plot(tx_t, tx_y, color=clr, ls=ls, lw=1.2, label=label)
+    if ax2_src is not None:
+        ax2_src.set_ylabel(r'Particle source $S$ [s$^{-1}$]')
+        ax2_src.tick_params(axis='y')
+
+    h1s, l1s = ax_src.get_legend_handles_labels()
+    h2s, l2s = ax2_src.get_legend_handles_labels() if ax2_src is not None else ([], [])
+    if h1s or h2s:
+        ax_src.legend(h1s + h2s, l1s + l2s, fontsize=8, loc='upper left', ncol=2)
+    elif not plotted_heat:
+        ax_src.text(
+            0.5, 0.5, 'No non-zero source scalars in TORAX output',
+            transform=ax_src.transAxes, ha='center', va='center', fontsize=9, color='gray',
+        )
 
     plt.suptitle('Scalars', fontsize=14)
     plt.tight_layout()
@@ -4954,6 +5094,7 @@ def _draw_profiles_movie(axes, tt, idx):
     s = tt._state
 
     ax = axes[0]
+    ax.axhline(1.0, color='k', ls='-', lw=1, label='q=1')
     x, y = _prof(s['q_prof_tm'], idx)
     if x is not None:
         ax.plot(x, y, color=COLOR_TM, ls=LS_PRI, lw=LW, marker=MK_TM, ms=MK_SZ, label='q TM')
