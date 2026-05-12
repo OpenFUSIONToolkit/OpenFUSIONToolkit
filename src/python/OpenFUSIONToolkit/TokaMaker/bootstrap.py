@@ -826,7 +826,8 @@ def solve_with_bootstrap(mygs,
                          parameterize_jBS = False,
                          use_OMFIT_sauter = False,
                          verbose = True,
-                         use_sauter_eps = True):
+                         use_sauter_eps = True,
+                         diagnose_bs = False):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
     @param mygs Grad-Shafranov solver object
@@ -848,6 +849,8 @@ def solve_with_bootstrap(mygs,
     @param use_sauter_eps If True (default), use the geometric inverse aspect ratio
       \f$\varepsilon = (R_{\max}-R_{\min})/(2\langle R\rangle)\f$ from the field-line trace.
       If False, use the formula \f$\varepsilon = \langle a\rangle / \langle R\rangle\f$.
+    @param diagnose_bs If True, print the 7 edge-spike fit parameters and the
+      parameterized spike profile table to stdout (mirroring the Fortran --diagnose-bs output).
     @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
     '''
     from scipy.optimize import root_scalar
@@ -991,6 +994,17 @@ def solve_with_bootstrap(mygs,
                 if parameterize_jBS:
                     res = analyze_bootstrap_edge_spike(psi_N, j_BS_final, diagnostic_plots=diagnostic_plots)
                     spike_prof = res['parameterized_spike'] * scale_jBS
+                    if diagnose_bs:
+                        popt = res['gaussian_params']
+                        amp, center, width, offset, sk, y_sep, bw = popt
+                        print(f'  [edge_spike_fit_ext]'
+                              f' amp={amp:.6E} center={center:.6E} width={width:.6E}'
+                              f' offset={offset:.6E} sk={sk:.6E} y_sep={y_sep:.6E}'
+                              f' bw={bw:.6E}')
+                        print('  [edge_spike_profile_ext] i  psi_N(std)    j_BS_raw[A/m2]    j_spike_masked[A/m2]  parameterized_spike[A/m2]')
+                        for _i, (_p, _r, _m, _v) in enumerate(
+                                zip(psi_N, j_BS_final, res['masked_spike'], res['parameterized_spike']), 1):
+                            print(f'   {_i:4d}   {_p:.5E}   {_r:.5E}   {_m:.5E}   {_v:.5E}')
                 else:
                     res = analyze_bootstrap_edge_spike(psi_N, j_BS_final)
                     spike_prof = res['masked_spike'] * scale_jBS
