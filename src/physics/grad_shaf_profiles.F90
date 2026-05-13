@@ -171,6 +171,31 @@ end type linterp_flux_func
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
+type, extends(linterp_flux_func) :: mlinterp_flux_func
+  integer(4) :: nbasis = 0 !< Needs docs
+  real(8), pointer, dimension(:,:) :: yp_basis => NULL() !< Needs docs
+  real(8), pointer, dimension(:) :: weights => NULL() !< Needs docs
+contains
+  !> Delete profile
+  procedure :: delete => mlinterp_delete
+  !> Needs docs
+  procedure :: copy => mlinterp_copy
+  !> Needs docs
+  procedure :: update => mlinterp_update
+  !> Needs docs
+  procedure :: set_cofs => mlinterp_cofs_update
+  !> Needs docs
+  procedure :: get_cofs => mlinterp_cofs_get
+  !> Needs docs
+  procedure :: save_hdf5 => mlinterp_save_hdf5
+  procedure :: save_txt => mlinterp_save_txt
+  !> Needs docs
+  procedure :: load_hdf5 => mlinterp_load_hdf5
+  procedure :: load_txt => mlinterp_load_txt
+end type mlinterp_flux_func
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
 type, extends(flux_func) :: wesson_flux_func
   real(8) :: gamma = 0.d0
 contains
@@ -1187,6 +1212,218 @@ DO i=1,self%ncofs
   c(i)=self%yp(i+offset)
 END DO
 end subroutine linterp_cofs_get
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mlinterp_save_hdf5(self,filename,path)
+class(mlinterp_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('mlinterp',filename,path//'/TYPE')
+CALL hdf5_write(self%nbasis,filename,path//'/NBASIS')
+CALL hdf5_write(self%weights,filename,path//'/WEIGHTS')
+CALL hdf5_write(self%npsi,filename,path//'/NPSI')
+CALL hdf5_write(self%x,filename,path//'/XVALS')
+CALL hdf5_write(self%yp_basis,filename,path//'/YVALS_BASIS')
+end subroutine mlinterp_save_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mlinterp_save_txt(self,io_unit)
+class(mlinterp_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+integer(4) :: i
+WRITE(io_unit,*)'mlinterp'
+WRITE(io_unit,*)self%npsi
+WRITE(io_unit,*)self%x
+WRITE(io_unit,*)self%nbasis
+WRITE(io_unit,*)self%weights
+DO i=1,self%nbasis
+  WRITE(io_unit,*)self%yp_basis(:,i)
+END DO
+end subroutine mlinterp_save_txt
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mlinterp_load_hdf5(self,filename,path,success)
+class(mlinterp_flux_func), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+character(LEN=*), intent(in) :: path
+logical, intent(out) :: success
+integer(i4) :: npsi,nbasis
+real(r8), allocatable :: xvals(:),weights(:)
+real(r8), allocatable :: yvals(:,:)
+CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(nbasis,filename,path//'/NBASIS',success=success)
+IF(.NOT.success)RETURN
+ALLOCATE(xvals(npsi),yvals(npsi+1,nbasis),weights(nbasis))
+CALL hdf5_read(xvals,filename,path//'/XVALS',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(yvals,filename,path//'/YVALS_BASIS',success=success)
+IF(.NOT.success)RETURN
+CALL hdf5_read(weights,filename,path//'/WEIGHTS',success=success)
+IF(.NOT.success)RETURN
+CALL create_mlinterp_ff(self,npsi,xvals,nbasis,yvals,weights)
+DEALLOCATE(xvals,yvals,weights)
+end subroutine mlinterp_load_hdf5
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mlinterp_load_txt(self,io_unit)
+class(mlinterp_flux_func), intent(inout) :: self
+integer, intent(in) :: io_unit
+integer(i4) :: i,npsi,nbasis
+real(r8), allocatable :: xvals(:),weights(:)
+real(r8), allocatable :: yvals(:,:)
+READ(io_unit,*)npsi
+ALLOCATE(xvals(npsi))
+READ(io_unit,*)xvals
+READ(io_unit,*)nbasis
+ALLOCATE(yvals(npsi+1,nbasis),weights(nbasis))
+READ(io_unit,*)weights
+DO i=1,nbasis
+  READ(io_unit,*)yvals(:,i)
+END DO
+CALL create_mlinterp_ff(self,npsi,xvals,nbasis,yvals,weights)
+DEALLOCATE(xvals,yvals,weights)
+end subroutine mlinterp_load_txt
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+SUBROUTINE create_mlinterp_ff(func,npsi,psivals,nbasis,yvals,weights)
+CLASS(flux_func), INTENT(inout) :: func
+INTEGER(4), INTENT(in) :: npsi
+REAL(8), INTENT(in) :: psivals(npsi)
+INTEGER(4), INTENT(in) :: nbasis
+REAL(8), INTENT(in) :: yvals(npsi+1,nbasis)
+REAL(8), INTENT(in) :: weights(nbasis)
+INTEGER(4) :: i,ierr
+SELECT TYPE(self=>func)
+  TYPE IS(mlinterp_flux_func)
+  !
+  self%npsi=npsi
+  self%nbasis=nbasis
+  self%ncofs=self%nbasis
+  !
+  ALLOCATE(self%x(self%npsi))
+  ALLOCATE(self%yp_basis(self%npsi+1,nbasis))
+  ALLOCATE(self%weights(nbasis))
+  self%weights=weights
+  ALLOCATE(self%yp(self%npsi))
+  ALLOCATE(self%y(self%npsi))
+  !---
+  self%x=psivals
+  self%yp_basis=yvals
+  self%y0=0.d0
+  self%yp=0.d0
+  DO i=1,self%nbasis
+    self%y0=self%y0+self%weights(i)*self%yp_basis(1,i)
+    self%yp=self%yp+self%weights(i)*self%yp_basis(2:self%npsi+1,i)
+  END DO
+  ierr=self%set_cofs(self%weights)
+  IF(oft_debug_print(1))WRITE(*,*)'Multi-linear interpolator Created',self%ncofs,self%x,self%y0
+class default
+  CALL oft_abort('Invalid flux function type in create_linterp_ff','create_linterp_ff',__FILE__)
+END SELECT
+END SUBROUTINE create_mlinterp_ff
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mlinterp_copy(self,new)
+class(mlinterp_flux_func), intent(inout) :: self
+class(flux_func), pointer, intent(inout) :: new
+ALLOCATE(new, MOLD=self)
+SELECT TYPE(new)
+  CLASS IS(mlinterp_flux_func)
+    new%plasma_bounds=self%plasma_bounds
+    new%f_offset=self%f_offset
+    new%npsi=self%npsi
+    new%ncofs=self%ncofs
+    new%y0=self%y0
+    ALLOCATE(new%x(new%npsi),new%yp(new%npsi),new%y(new%npsi))
+    new%x=self%x
+    new%yp=self%yp
+    new%y=self%y
+    new%nbasis=self%nbasis
+    ALLOCATE(new%weights(new%nbasis),new%yp_basis(new%npsi+1,new%nbasis))
+    new%weights=self%weights
+    new%yp_basis=self%yp_basis
+END SELECT
+end subroutine mlinterp_copy
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine mlinterp_delete(self)
+class(mlinterp_flux_func), intent(inout) :: self
+self%npsi=0
+self%ncofs=0
+self%nbasis=0
+IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
+IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
+IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
+IF(ASSOCIATED(self%weights))DEALLOCATE(self%weights)
+IF(ASSOCIATED(self%yp_basis))DEALLOCATE(self%yp_basis)
+end subroutine mlinterp_delete
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+subroutine mlinterp_update(self,gseq)
+class(mlinterp_flux_func), intent(inout) :: self
+class(gs_equil), intent(inout) :: gseq
+self%plasma_bounds=gseq%plasma_bounds
+end subroutine mlinterp_update
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+function mlinterp_cofs_update(self,c) result(ierr)
+class(mlinterp_flux_func), intent(inout) :: self
+real(8), intent(in) :: c(:)
+real(8) :: x,xp
+integer(4) :: ierr
+integer(4) :: i
+!---
+self%weights=c
+self%y0=0.d0
+self%yp=0.d0
+DO i=1,self%nbasis
+  self%y0=self%y0+self%weights(i)*self%yp_basis(1,i)
+  self%yp=self%yp+self%weights(i)*self%yp_basis(2:self%npsi+1,i)
+END DO
+! WRITE(*,*)'mLinterp set: ',self%y0
+! WRITE(*,*)'  yp: ',self%yp
+!---
+DO i=1,self%npsi
+  x=self%x(i)
+  IF(i==1)THEN
+    self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
+  ELSE
+    xp=self%x(i-1)
+    self%y(i-1)=self%y(i-1) - (xp*(.5d0*xp-xp)/(x-xp)*(self%yp(i)-self%yp(i-1)) &
+               + xp*self%yp(i-1))
+    self%y(i)=x*(.5d0*x - xp)/(x - xp)*(self%yp(i) - self%yp(i-1)) + x*self%yp(i-1)
+    self%y(i)=self%y(i) + self%y(i-1)
+  END IF
+END DO
+IF(oft_debug_print(2))THEN
+  WRITE(*,'(2A)')oft_indent,'Update Multi-linear interpolator:'
+  CALL oft_increase_indent
+  WRITE(*,'(2A,100ES11.3)')oft_indent,' x  =',self%x
+  WRITE(*,'(2A,100ES11.3)')oft_indent,' yp =',self%yp
+  WRITE(*,'(2A,100ES11.3)')oft_indent,' y  =',self%y
+  WRITE(*,'(2A,ES11.3)')oft_indent,' y0  =',self%y0
+  CALL oft_decrease_indent
+END IF
+ierr=0
+end function mlinterp_cofs_update
+!------------------------------------------------------------------------------
+!> Needs docs
+!------------------------------------------------------------------------------
+subroutine mlinterp_cofs_get(self,c)
+class(mlinterp_flux_func), intent(inout) :: self
+real(8), intent(out) :: c(:)
+c=self%weights
+end subroutine mlinterp_cofs_get
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

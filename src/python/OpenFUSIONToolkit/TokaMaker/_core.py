@@ -57,6 +57,52 @@ def create_prof_file(self, filename, profile_dict, name):
             "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
             "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
         ]
+    elif (profile_dict['type'] == 'mlinterp') or (profile_dict['type'] == 'jphi-mlinterp'):
+        if profile_dict['type'] == 'jphi-mlinterp':
+            raise NotImplementedError('jphi-mlinterp profile type not currently implemented')
+        x = profile_dict.get('x',None)
+        if x is None:
+            raise KeyError('No array "x" for piecewise linear profile.')
+        else:
+            x = numpy.array(x).copy()
+        y_basis = profile_dict.get('y_basis',None)
+        if y_basis is None:
+            raise KeyError('No array "y_basis" for multi-linear profile.')
+        else:
+            y_basis = numpy.array(y_basis).copy()
+        if y_basis.shape[1] != x.shape[0]:
+            raise ValueError('Dimension 1 of "y_basis" must match length of "x" for multi-linear profile.')
+        weights = profile_dict.get('weights',None)
+        if weights is None:
+            raise KeyError('No array "weights" for multi-linear profile.')
+        else:
+            weights = numpy.array(weights).copy()
+        if y_basis.shape[0] != weights.shape[0]:
+            raise ValueError('Dimension 0 of "y_basis" must match length of "weights" for multi-linear profile.')
+        if numpy.min(numpy.diff(x)) < 0.0:
+            raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
+        if (x[0] < 0.0) or (x[-1] > 1.0):
+            raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
+        if self.psi_convention == 0:
+            x = 1.0 - x
+            sort_inds = x.argsort()
+            x = x[sort_inds]
+            ynew = []
+            for y in y_basis:
+                ynew.append(y[sort_inds])
+            y_basis = ynew
+        elif self.psi_convention == 1:
+            pass
+        else:
+            raise ValueError('Unknown convention type, must be 0 (tokamak) or 1 (spheromak)')
+        file_lines += [
+            "{0}".format(x.shape[0]-1),
+            "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
+            "{0}".format(weights.shape[0]),
+            "{0}".format(" ".join(["{0}".format(val) for val in weights]))
+        ]
+        for y in y_basis:
+            file_lines += ["{0}".format(" ".join(["{0}".format(val) for val in y]))]
     else:
         raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp")')
     with open(filename, 'w+') as fid:

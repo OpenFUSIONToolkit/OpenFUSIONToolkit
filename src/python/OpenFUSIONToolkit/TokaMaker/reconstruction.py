@@ -560,7 +560,7 @@ class reconstruction():
         if self._tMaker_obj._tMaker_equil.Isoflux_constraints is not None:
             oft_warning('Removing conflicting isoflux constraints from equilibrium object via `.set_isoflux_constraints(None)`')
             self._tMaker_obj.set_isoflux_constraints(None)
-        if self._tMaker_obj._tMaker_equil.Psi_constraints is not None:
+        if self._tMaker_obj._tMaker_equil.Psi_constraints[0] is not None:
             oft_warning('Removing conflicting Psi constraints from equilibrium object via `.set_psi_constraints(None,None)`')
             self._tMaker_obj.set_psi_constraints(None,None)
         if self._tMaker_obj._tMaker_equil.Saddle_constraints is not None:
