@@ -45,8 +45,6 @@ LCFS_WEIGHT = 100.0
 N_PSI = 1000
 _NBI_W_TO_MA = 1/16e6
 mu_0 = 4.0 * np.pi * 1e-7
-# Fixed timestep for initial / inter-loop TORAX relax simulations only.
-RELAX_FIXED_DT = 0.1
 # EQDSK sampling for save_eqdsk when validating with TORAX in _run_tm:
 # start at nr=nz=100, increase by 50 up to 500 until TORAX accepts eqdsk.
 EQDSK_SAVE_NR_NZ_SEQUENCE = (100, 150, 200, 250, 300, 350, 400, 450, 500)
@@ -1871,7 +1869,7 @@ class TokaMaker_TORAX:
                 
         '''
         runtime = float(self._relax_duration)
-        dt_relax = RELAX_FIXED_DT
+        dt_relax = float(self._relax_dt)
         tag = 'Initial TORAX relax' if stage == 'initial' else f'Loop {self._current_loop} inter-loop relax'
         self._log(f'{tag}: building config ({runtime:.4g} s, dt={dt_relax})...')
         with self._loop0_coarse_tx_relax_scope(stage):
@@ -2440,6 +2438,7 @@ class TokaMaker_TORAX:
 
                 skip_coil_update = False
                 eq_name = os.path.join(self._eqdsk_dir, f'{self._current_loop:03d}.{i:03d}.eqdsk')
+                step_fail_msg = None  # set when TM GS succeeds but TORAX rejects all EQDSK resolutions
 
                 solve_succeeded = False
                 level_attempts = []
@@ -2507,7 +2506,8 @@ class TokaMaker_TORAX:
                     skip_coil_update = True
                     self._log(f'\tTM: Solve failed at t={t} (all levels attempted).')
                     self._state['psi_grid_prev_tm'][i] = None  # if solve failed, set psi grid to None
-        
+
+                tm_gs_ok = solve_succeeded
                 if solve_succeeded:
                     torax_accepted = False
                     _n_attempts = len(EQDSK_SAVE_NR_NZ_SEQUENCE)
@@ -2528,28 +2528,39 @@ class TokaMaker_TORAX:
                                 )
                             break
                     if not torax_accepted:
-                        raise ValueError(
-                            f'TORAX rejected TokaMaker EQDSK after save attempts nr=nz '
-                            f'in {EQDSK_SAVE_NR_NZ_SEQUENCE}: {eq_name}'
+                        # Same coupling outcome as a failed TM solve: skip this time for TORAX geometry
+                        # (TORAX interpolates neighbors in _get_tx_config) instead of aborting the whole fly.
+                        self._eqdsk_skip.append(eq_name)
+                        skip_coil_update = True
+                        self._state['psi_grid_prev_tm'][i] = None
+                        step_fail_msg = (
+                            f'TORAX rejected EQDSK after save attempts nr=nz in '
+                            f'{EQDSK_SAVE_NR_NZ_SEQUENCE}: {os.path.basename(eq_name)}'
                         )
-                    self._tm_update(i)
+                        self._log(f'\tTM: {step_fail_msg}')
+                        solve_succeeded = False
+                    else:
+                        self._tm_update(i)
 
-                    # Store diverted/limited flag for this timestep
-                    if not hasattr(self, '_diverted_flags'):
-                        self._diverted_flags = {}
-                    self._diverted_flags[i] = self._state['equil'][i].diverted
+                        # Store diverted/limited flag for this timestep
+                        if not hasattr(self, '_diverted_flags'):
+                            self._diverted_flags = {}
+                        self._diverted_flags[i] = self._state['equil'][i].diverted
 
-                    # Store psi on nodes for later movie generation
-                    self._tm_psi_on_nodes.setdefault(self._current_loop, {})[i] = self._state['equil'][i].get_psi(normalized=False)
+                        # Store psi on nodes for later movie generation
+                        self._tm_psi_on_nodes.setdefault(self._current_loop, {})[i] = self._state['equil'][i].get_psi(normalized=False)
 
                 _winning = next((a for a in level_attempts if a['succeeded']), None)
                 _last_attempt = level_attempts[-1] if level_attempts else {}
+                _log_err = step_fail_msg if step_fail_msg else (
+                    _last_attempt.get('error') if not solve_succeeded else None
+                )
                 _loop_level_log.append({
                     'i': i, 't': t,
                     'succeeded': solve_succeeded,
                     'level': _winning['level'] if _winning else None,
                     'level_name': _winning['name'] if _winning else None,
-                    'error': _last_attempt.get('error') if not solve_succeeded else None,
+                    'error': _log_err,
                 })
 
                 if self._output_mode in ('debug', 'normal') and self._out_dir is not None:
@@ -2559,8 +2570,11 @@ class TokaMaker_TORAX:
                             diag_name = f'{self._output_file_tag}_{diag_name}'
                         _diag_path = os.path.join(self._out_dir, diag_name)
                         try:
-                            tm_diagnostic_plot(self, i, t, level_attempts, solve_succeeded,
-                                               save_path=_diag_path, display=False)
+                            tm_diagnostic_plot(
+                                self, i, t, level_attempts, solve_succeeded,
+                                save_path=_diag_path, display=False,
+                                tm_gs_ok=tm_gs_ok, step_error=_log_err,
+                            )
                         except Exception as _e:
                             self._log(f'tm_diagnostic_plot failed at i={i}: {_e}')
                     if solve_succeeded:
@@ -2578,9 +2592,10 @@ class TokaMaker_TORAX:
                     lvl = _winning['level']
                     _pbar.set_postfix_str(f't={t:.2f}s OK(L{lvl})', refresh=False)
                 else:
-                    err_short = (_last_attempt.get('error') or 'unknown')[:60]
-                    tqdm.write(f'    WARNING: TM FAIL at t={t:.2f}s — {err_short}')
-                    self._log(f'    TM FAIL at t={t:.2f}s — {err_short}')
+                    err_short = (step_fail_msg or _last_attempt.get('error') or 'unknown')[:60]
+                    _fail_tag = 'TORAX EQDSK' if step_fail_msg else 'TM'
+                    tqdm.write(f'    WARNING: {_fail_tag} FAIL at t={t:.2f}s — {err_short}')
+                    self._log(f'    {_fail_tag} FAIL at t={t:.2f}s — {err_short}')
                     _pbar.set_postfix_str(f't={t:.2f}s FAIL', refresh=False)
 
                 if not skip_coil_update and getattr(self, '_coil_reg_config', None):
@@ -2828,7 +2843,7 @@ class TokaMaker_TORAX:
 
     def fly(self, run_name='tmp', convergence_threshold=-1.0, max_loop=3,
             output_mode=False, skip_bad_init_eqdsks=False,
-            initial_relax=True, relax=False, relax_kinetics=False, relax_duration=0.1,
+            initial_relax=True, relax=False, relax_kinetics=False, relax_duration=1.0, relax_dt=0.1,
             t_ave_toggle='off', t_ave_window=0.5, t_ave_causal=True, t_ave_ignore_start=0.25,
             loop0=False, steady_state_mode=False): # TODO: separate steady_state_mode?
         r'''! Run TokaMaker_TORAX coupled pulse design loop.
@@ -2856,7 +2871,9 @@ class TokaMaker_TORAX:
                        ion/electron heat stay fixed at the profiles present before that relax. If True,
                        relax uses the same evolve_* flags as set_evolve() / loaded config. When True,
                        relaxed n_e, T_e, T_i are injected into main TORAX after set_*() like psi.
-                @param relax_duration Duration (s) of each relax simulation; timestep is fixed at 0.01 s.
+                @param relax_duration Duration (s) of each relax simulation. Default 1.0 s.
+                @param relax_dt Fixed timestep (s) for each initial / inter-loop TORAX relax run
+                       (numerics.fixed_dt). Default 0.1 s.
                 @param t_ave_toggle Time-averaging mode: 'off' (no averaging), 'flattop' (average only
                        during flat-top), or 'pulse' (average over the whole pulse).
                 @param t_ave_window Averaging window size in seconds. Default 0.5 s.
@@ -2917,6 +2934,10 @@ class TokaMaker_TORAX:
         self._skip_bad_init_eqdsks = skip_bad_init_eqdsks
         self._run_name = run_name
         self._relax_duration = float(relax_duration)
+        _relax_dt = float(relax_dt)
+        if _relax_dt <= 0:
+            raise ValueError('relax_dt must be positive.')
+        self._relax_dt = _relax_dt
         self._relax_kinetics = bool(relax_kinetics)
         self._relax = bool(relax)
 
@@ -3693,13 +3714,26 @@ def profile_plot(tt, i, t, save_path=None, display=True):
 
 # ── TokaMaker diagnostic plot ─────────────────────────────────────────────────
 
-def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None, display=True):
-    r'''! TokaMaker input/output diagnostic plot for a single timestep.'''
+def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None, display=True,
+                       tm_gs_ok=None, step_error=None):
+    r'''! TokaMaker input/output diagnostic plot for a single timestep.
+
+        @param solve_succeeded Whether the full TM timestep succeeded including EQDSK validation
+               for TORAX (same flag as after `_run_tm` updates).
+        @param tm_gs_ok Whether the Grad-Shafranov solve succeeded (independent of EQDSK).
+               If None, inferred from level_attempts.
+        @param step_error Optional failure string (e.g. TORAX EQDSK rejection); overrides parsing
+               the last level attempt when provided.
+    '''
     s = tt._state
 
     _winning = next((a for a in level_attempts if a['succeeded']), None)
     _last = level_attempts[-1] if level_attempts else {}
-    fail_msg = _last.get('error') if not solve_succeeded else None
+    _gs_ok = tm_gs_ok if tm_gs_ok is not None else (_winning is not None)
+    fail_msg = (
+        step_error if step_error is not None
+        else (_last.get('error') if not solve_succeeded else None)
+    )
 
     _level_colors = plt.cm.tab20.colors
 
@@ -3899,14 +3933,21 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
         diag_rows.append(['Failure Reason:', fail_msg if fail_msg else 'Unknown', ''])
         render_table(ax_tbl2, diag_rows, 'TORAX Diagnostics & Failure Info')
 
-        plt.suptitle(
-            f'TM Diagnostic \u2014 loop {tt._current_loop}, t-idx {i}/{len(tt._tm_times) - 1}, t = {t:.2f} s'
-            f'  |  TokaMaker: FAILED',
-            fontsize=13, color='darkred', fontweight='bold',
-        )
+        if _gs_ok:
+            plt.suptitle(
+                f'TM Diagnostic \u2014 loop {tt._current_loop}, t-idx {i}/{len(tt._tm_times) - 1}, t = {t:.2f} s'
+                f'  |  TM GS OK \u2014 coupling failed (e.g. TORAX rejected EQDSK)',
+                fontsize=13, color='darkorange', fontweight='bold',
+            )
+        else:
+            plt.suptitle(
+                f'TM Diagnostic \u2014 loop {tt._current_loop}, t-idx {i}/{len(tt._tm_times) - 1}, t = {t:.2f} s'
+                f'  |  TokaMaker: FAILED',
+                fontsize=13, color='darkred', fontweight='bold',
+            )
 
     equil_snap = s.get('equil', {}).get(i)
-    if solve_succeeded and equil_snap is not None:
+    if _gs_ok and equil_snap is not None:
         tt._tm.plot_machine(
             fig, ax_mini_eq, equilibrium=equil_snap, coil_colormap='seismic', coil_symmap=False,
             coil_scale=1.E-6, coil_clabel=None,
@@ -3924,10 +3965,18 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
         ax_mini_eq.tick_params(labelsize=6)
     else:
         ax_mini_eq.axis('off')
-        _mini_msg = 'TokaMaker did not converge' if not solve_succeeded else 'No equilibrium snapshot'
+        if not _gs_ok:
+            _mini_msg = 'TokaMaker did not converge'
+            _mini_color = 'darkred'
+        elif not solve_succeeded:
+            _mini_msg = 'TM converged; EQDSK rejected by TORAX'
+            _mini_color = 'darkorange'
+        else:
+            _mini_msg = 'No equilibrium snapshot'
+            _mini_color = 'gray'
         ax_mini_eq.text(
             0.5, 0.5, _mini_msg, transform=ax_mini_eq.transAxes, fontsize=8,
-            ha='center', va='center', color='darkred' if not solve_succeeded else 'gray', fontweight='bold',
+            ha='center', va='center', color=_mini_color, fontweight='bold',
         )
         ax_mini_eq.set_title('TM equilibrium', fontsize=9)
 
