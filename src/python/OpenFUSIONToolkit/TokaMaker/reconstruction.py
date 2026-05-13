@@ -566,6 +566,10 @@ class reconstruction():
         if self._tMaker_obj._tMaker_equil.Saddle_constraints is not None:
             oft_warning('Removing conflicting saddle targets from equilibrium object via `.set_saddle_constraints(None)`')
             self._tMaker_obj.set_saddle_constraints(None)
+        if self._tMaker_obj.settings.target_weight > 0.0:
+            oft_warning('Removing conflicting soft targets from equilibrium solve via `.settings.target_weight = -1.0; .update_settings()`')
+            self._tMaker_obj.settings.target_weight = -1.0
+            self._tMaker_obj.update_settings()
         # Modify input file
         self.write_fit_in()
         self._tMaker_obj._oft_env.oft_in_groups['gs_fit_options']['linearized_fit'] = 'T' if linearized_fit else 'F'

@@ -57,6 +57,7 @@ TYPE, BIND(C) :: tokamaker_settings_type
   REAL(KIND=c_double) :: nl_tol = 1.d-6 !< Convergence tolerance for NL solver
   REAL(KIND=c_double) :: rmin = 0.d0 !< Minimum magnetic axis major radius, used to catch 'lost' equilibria
   REAL(KIND=c_double) :: lim_zmax = 1.d99 !< Maximum vertical range for limiter points, can be used to exclude complex diverter regions
+  REAL(KIND=c_double) :: target_weight = -1.d0 !< Weight for global targets when treated as soft constraints (negative for hard constraints)
   TYPE(c_ptr) :: limiter_file !< File containing additional limiter points not included in mesh (default: 'none')
 END TYPE tokamaker_settings_type
 !---------------------------------------------------------------------------------
@@ -1329,6 +1330,7 @@ TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 oft_env%pm=settings%pm
 tMaker_obj%device%free=settings%free_boundary
+tMaker_obj%device%target_weight=settings%target_weight
 tMaker_obj%device%lim_zmax=settings%lim_zmax
 tMaker_obj%device%rmin=settings%rmin
 tMaker_obj%device%urf=settings%urf

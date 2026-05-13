@@ -88,6 +88,8 @@ class tokamaker_settings:
         self.rmin = 0.0
         ## Maximum vertical range for limiter points, can be used to exclude complex diverter regions
         self.lim_zmax = 1.E99
+        ## Weight for global targets when treated as soft constraints (negative for hard constraints)
+        self.target_weight = -1.0
         ## File containing additional limiter points not included in mesh (default: 'none')
         self.limiter_file = None
         # Must be added last
@@ -113,6 +115,7 @@ class tokamaker_settings:
         c_struct_instance.nl_tol = self.nl_tol
         c_struct_instance.rmin = self.rmin
         c_struct_instance.lim_zmax = self.lim_zmax
+        c_struct_instance.target_weight = self.target_weight
         c_struct_instance.limiter_file = oft_env.path2c(self.limiter_file) if self.limiter_file else None
         return c_struct_instance
 

@@ -181,6 +181,7 @@ TYPE :: gs_factory
   REAL(r8) :: lim_zmax = 1.d99 !< Vertical position cutoff for limiter points
   REAL(r8) :: lim_area = -1.d0 !< Area inside the limiter
   REAL(r8) :: timing(4) = 0.d0 !< Timing for each phase of solve
+  REAL(r8) :: target_weight = -1.d0 !< Weight for global targets when treated as soft constraints (negative for hard constraints)
   REAL(r8) :: isoflux_grad_wt_lim = -1.d0 !< Limit for isoflux inverse gradient weighting (negative to disable)
   LOGICAL, POINTER, DIMENSION(:) :: axis_flag => NULL() !< FE boundary flag for on-axis nodes
   LOGICAL, POINTER, DIMENSION(:) :: saddle_pmask => NULL() !< Point mask for saddle search
@@ -1771,13 +1772,16 @@ end subroutine gs_plasma_mutual
 !------------------------------------------------------------------------------
 !> Compute coil currents to best fit isoflux, flux, and saddle targets at current solution
 !------------------------------------------------------------------------------
-subroutine gs_fit_isoflux(self,psi_full,ierr)
+subroutine gs_fit_isoflux(self,psi_full,ierr,plasma_terms,plasma_targets,plasma_psi)
 class(gs_equil), intent(inout) :: self !< G-S object
 class(oft_vector), target, intent(inout) :: psi_full !< Current \f$ \psi \f$
 integer(4), intent(out) :: ierr !< Error flag
+real(r8), optional, intent(in) :: plasma_terms(:,:) !< Plasma target terms for least squares fit
+real(r8), optional, intent(inout) :: plasma_targets(:) !< Plasma target values for least squares fit
+type(oft_vector_ptr), optional, intent(inout) :: plasma_psi(:) !< Flux solutions for plasma free parameters
 type(oft_lag_brinterp) :: psi_eval
 type(oft_lag_bginterp) :: psi_geval,psi_geval2
-integer(4) :: i,j,k,mind,nCon,io_unit,coffset,roffset
+integer(4) :: i,j,k,mind,nCon,nDof,io_unit,coffset,roffset,ncon_plasma,ndof_plasma
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta,gpsi(3),wt_max,wt_min
 real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:),wt_tmp(:)
@@ -1786,9 +1790,18 @@ logical :: pm_save
 type(gs_factory), pointer :: device
 !
 device=>self%device
-nCon = self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%nregularize
-ALLOCATE(err_mat(nCon,device%ncoils+1),err_inv(device%ncoils+1,device%ncoils+1))
-ALLOCATE(rhs(nCon),currs(device%ncoils+1))
+ncon_plasma=0
+ndof_plasma=0
+IF(PRESENT(plasma_terms))THEN
+  IF((.NOT.PRESENT(plasma_targets)).AND.(.NOT.PRESENT(plasma_psi)))CALL oft_abort("Must provide all terms, targets, and fluxes for plasma", &
+    "gs_fit_isoflux",__FILE__)
+  ncon_plasma=SIZE(plasma_terms,1)
+  ndof_plasma=SIZE(plasma_terms,2)
+END IF
+nCon = self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%nregularize+ncon_plasma
+nDof = device%ncoils+1+ndof_plasma
+ALLOCATE(err_mat(nCon,nDof),err_inv(nDof,nDof))
+ALLOCATE(rhs(nCon),currs(nDof))
 ALLOCATE(cells(2*self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets))
 err_mat=0.d0
 rhs=0.d0
@@ -1836,8 +1849,7 @@ END DO
 DO i=1,device%ncoils
   psi_eval%u=>device%psi_coil(i)%f
   CALL psi_eval%setup(device%fe_rep)
-  psi_geval%u=>device%psi_coil(i)%f
-  CALL psi_geval%setup(device%fe_rep)
+  CALL psi_geval%shared_setup(psi_eval)
   DO j=1,self%isoflux_ntargets
     CALL bmesh_findcell(device%fe_rep%mesh,cells((j-1)*2+1),self%isoflux_targets(1:2,j),f)
     CALL psi_eval%interp(cells((j-1)*2+1),f,goptmp,pol_val)
@@ -1869,6 +1881,37 @@ DO i=1,device%ncoils
   err_mat(:,device%ncoils+1)=err_mat(:,device%ncoils+1) &
     + device%coil_vcont(i)*err_mat(:,i)
 END DO
+DO i=1,ndof_plasma
+  psi_eval%u=>plasma_psi(i)%f
+  CALL psi_eval%setup(device%fe_rep)
+  CALL psi_geval%shared_setup(psi_eval)
+  DO j=1,self%isoflux_ntargets
+    CALL bmesh_findcell(device%fe_rep%mesh,cells((j-1)*2+1),self%isoflux_targets(1:2,j),f)
+    CALL psi_eval%interp(cells((j-1)*2+1),f,goptmp,pol_val)
+    err_mat(j,device%ncoils+1+i)=pol_val(1)
+  END DO
+  DO j=1,self%isoflux_ntargets
+    CALL bmesh_findcell(device%fe_rep%mesh,cells((j-1)*2+2),self%isoflux_targets(4:5,j),f)
+    CALL psi_eval%interp(cells((j-1)*2+2),f,goptmp,pol_val)
+    err_mat(j,device%ncoils+1+i)=err_mat(j,device%ncoils+1+i)-pol_val(1)
+  END DO
+  roffset=self%isoflux_ntargets
+  coffset=2*self%isoflux_ntargets
+  DO j=1,self%flux_ntargets
+    CALL bmesh_findcell(device%fe_rep%mesh,cells(coffset+j),self%flux_targets(1:2,j),f)
+    CALL psi_eval%interp(cells(coffset+j),f,goptmp,pol_val)
+    err_mat(roffset+j,device%ncoils+1+i)=pol_val(1)
+  END DO
+  roffset=roffset+self%flux_ntargets
+  coffset=coffset+self%flux_ntargets
+  DO j=1,self%saddle_ntargets
+    CALL bmesh_findcell(device%fe_rep%mesh,cells(coffset+j),self%saddle_targets(1:2,j),f)
+    CALL device%fe_rep%mesh%jacobian(cells(coffset+j),f,goptmp,v)
+    CALL psi_geval%interp(cells(coffset+j),f,goptmp,gpsi)
+    err_mat(roffset+2*(j-1)+1,device%ncoils+1+i)=gpsi(1)*self%saddle_targets(3,j)
+    err_mat(roffset+2*(j-1)+2,device%ncoils+1+i)=gpsi(2)*self%saddle_targets(3,j)
+  END DO
+END DO
 !---Enforce difference of fluxes
 wt_max=MAXVAL(wt_tmp)
 wt_min=device%isoflux_grad_wt_lim*wt_max
@@ -1892,6 +1935,11 @@ DO i=1,self%nregularize
   err_mat(roffset+i,device%ncoils+1)=self%coil_reg_mat(i,device%ncoils+1)
   rhs(roffset+i)=-self%coil_reg_targets(i)
 END DO
+!---Add plasma terms
+IF(PRESENT(plasma_terms))THEN
+  err_mat(nCon-nCon_plasma+1:nCon,nDof-nDof_plasma+1:nDof)=-plasma_terms*self%device%target_weight
+  rhs(nCon-ncon_plasma+1:nCon)=plasma_targets*self%device%target_weight
+END IF
 ! !---Convert appropriate terms to voltages
 ! ! L*(I^1-I^0)/dt + R*I^1 = V
 ! ! (L+dt*R)*I^1 = dt*V + L*I^0 - L*I_i^1
@@ -1954,21 +2002,25 @@ END DO
 ! END IF
 !---Solve L-S system
 IF(ASSOCIATED(device%coil_bounds))THEN
-BLOCK
-INTEGER(4) :: nsetp
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: index
-REAL(8) :: rnorm
-REAL(8), ALLOCATABLE, DIMENSION(:) :: w
-ALLOCATE(w(device%ncoils+1),index(device%ncoils+1))
-  CALL bvls(ncon,device%ncoils+1,err_mat,rhs, &
-    device%coil_bounds,currs,rnorm,nsetp,w,index,ierr)
+  BLOCK
+  INTEGER(4) :: nsetp
+  INTEGER(4), ALLOCATABLE, DIMENSION(:) :: index
+  REAL(8) :: rnorm
+  REAL(8), ALLOCATABLE, DIMENSION(:) :: w
+  REAL(8), ALLOCATABLE, DIMENSION(:,:) :: bounds
+  ALLOCATE(w(nDof),index(nDof),bounds(2,nDof))
+  bounds(1,:)=-1.d99
+  bounds(2,:)=1.d99
+  bounds(:,1:device%ncoils+1)=device%coil_bounds
+  CALL bvls(nCon,nDof,err_mat,rhs, &
+    bounds,currs,rnorm,nsetp,w,index,ierr)
   ! WRITE(*,*)ierr,currs
-DEALLOCATE(w,index)
-END BLOCK
+  DEALLOCATE(w,index,bounds)
+  END BLOCK
 ELSE
   err_inv=MATMUL(TRANSPOSE(err_mat),err_mat)
   pm_save=oft_env%pm; oft_env%pm=.FALSE.
-  CALL lapack_matinv(device%ncoils+1,err_inv,ierr)
+  CALL lapack_matinv(nDof,err_inv,ierr)
   oft_env%pm=pm_save
   currs=MATMUL(err_inv,MATMUL(TRANSPOSE(err_mat),rhs))
 END IF
@@ -1992,6 +2044,9 @@ ELSE
     self%coil_currs(i)=-currs(i)
   END DO
 END IF
+IF(PRESENT(plasma_terms))THEN
+  plasma_targets=-currs(nDof-ndof_plasma+1:nDof)
+END IF
 DEALLOCATE(err_mat,err_inv,rhs,currs,cells)
 CALL psi_eval%delete
 CALL psi_geval%delete
@@ -2005,13 +2060,14 @@ class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
 integer(4), optional, intent(out) :: ierr !< Error flag
 class(oft_vector), pointer :: rhs,rhs_bc,psip,psiin,psi_bc,psi_eddy,psi_dt
 class(oft_vector), pointer :: tmp_vec,psi_ffp,psi_press,psi_vac,psi_vcont,psi_aug,tmp_aug
+type(oft_vector_ptr) :: param_psi(2)
 real(r8), pointer, DIMENSION(:) :: vals_tmp
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: goptmp(3,3),pt(2),v,pmax,pmin,dpnorm,curr
 real(8) :: opoint(2),R0_in,f(3),Z0_in,Z0_tmp,estored
 REAL(8) :: nl_res,psimax,ffp_scale_in,ffp_scale_prev,itor,pnorm0,pnormp,itor_ffp,itor_press
 REAL(8) :: R0_tmp,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3),t0,t1
-REAL(8) :: param_mat(3,3),param_vec(3),param_rhs(3)
+REAL(8) :: param_mat(3,3),mat_save(2,2),param_vec(3),param_rhs(3)
 integer(4) :: i,ii,j,k,error_flag,cell,ierr_loc
 integer(4), save :: eq_count = 0
 CHARACTER(LEN=40) :: err_reason
@@ -2268,32 +2324,48 @@ DO i=1,self%maxits
     param_mat(3,3)=1.d0
     param_rhs(3)=0.d0
   END IF
-
-  ! Solve for parameters
-  pm_save=oft_env%pm; oft_env%pm=.FALSE.
-  CALL lapack_matinv(3,param_mat,ierr_loc)
-  oft_env%pm=pm_save
-  IF(ierr_loc/=0)THEN
-    error_flag=-6
-    EXIT
-  END IF
-  param_vec=MATMUL(param_mat,param_rhs)
-  equil%ffp_scale=param_vec(1)
-  equil%p_scale=param_vec(2)
-  equil%vcontrol_val=param_vec(3)
+  mat_save=param_mat(1:2,1:2)
 
   ! Create plasma poloidal flux
   CALL equil%psi%set(0.d0)
-  CALL equil%psi%add(0.d0,equil%ffp_scale,psi_ffp,equil%p_scale,psi_press)
+  IF(self%target_weight<0.d0)THEN
+    ! Solve for parameters
+    pm_save=oft_env%pm; oft_env%pm=.FALSE.
+    CALL lapack_matinv(3,param_mat,ierr_loc)
+    oft_env%pm=pm_save
+    IF(ierr_loc/=0)THEN
+      error_flag=-6
+      EXIT
+    END IF
+    param_vec=MATMUL(param_mat,param_rhs)
+    equil%ffp_scale=param_vec(1)
+    equil%p_scale=param_vec(2)
+    equil%vcontrol_val=param_vec(3)
+    ! Add to solution
+    CALL equil%psi%add(1.d0,equil%ffp_scale,psi_ffp,equil%p_scale,psi_press)
+  END IF
 
   ! Fit coils if operating in isoflux mode
   IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
     CALL equil%psi%add(1.d0,1.d0,psi_eddy)
     CALL equil%psi%add(1.d0,1.d0,psi_bc)
-    CALL equil%fit_isoflux(psip,ierr_loc)
-    IF(ierr_loc/=0)THEN
-      error_flag=-7
-      EXIT
+    IF(self%target_weight>0.d0)THEN
+      param_psi(1)%f=>psi_ffp
+      param_psi(2)%f=>psi_press
+      CALL equil%fit_isoflux(psip,ierr_loc,mat_save,param_rhs,param_psi)
+      IF(ierr_loc/=0)THEN
+        error_flag=-7
+        EXIT
+      END IF
+      equil%ffp_scale=param_rhs(1)
+      equil%p_scale=param_rhs(2)
+      CALL equil%psi%add(1.d0,equil%ffp_scale,psi_ffp,equil%p_scale,psi_press)
+    ELSE
+      CALL equil%fit_isoflux(psip,ierr_loc)
+      IF(ierr_loc/=0)THEN
+        error_flag=-7
+        EXIT
+      END IF
     END IF
     CALL equil%psi%add(1.d0,-1.d0,psi_eddy)
     CALL equil%psi%add(1.d0,-1.d0,psi_bc)

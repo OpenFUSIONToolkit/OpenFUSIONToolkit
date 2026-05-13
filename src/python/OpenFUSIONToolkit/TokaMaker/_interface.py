@@ -24,6 +24,7 @@ class tokamaker_settings_cstruct(c_struct):
                 ("nl_tol", c_double),
                 ("rmin", c_double),
                 ("lim_zmax", c_double),
+                ("target_weight", c_double),
                 ("limiter_file", ctypes.c_char_p)]
 
 # tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str)
