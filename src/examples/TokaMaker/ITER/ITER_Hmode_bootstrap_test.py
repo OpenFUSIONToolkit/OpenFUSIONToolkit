@@ -85,6 +85,7 @@ P0_target  = 6.2e5    # Pa
 Zeff_val   = 1.5      # effective charge (scalar)
 EC         = 1.602e-19
 n_sample   = 257
+n_sample_plot = n_sample
 psi_sample = np.linspace(0.0, 1.0, n_sample)
 
 xphalf = 0.965
@@ -213,6 +214,7 @@ if run_external:
         parameterize_jBS=args.parameterize_edge,
         diagnostic_plots=False,
         verbose=True,
+        diagnose_bs=args.diagnose_bs,
     )
     elapsed_ext = time.perf_counter() - t0
 
@@ -232,8 +234,8 @@ if run_external:
     print(f"  Saved: {os.path.join(script_dir, 'eq_external.png')}")
 
     # --- Extract 1D profiles ---
-    psi_e, F_e, Fp_e, P_e, Pp_e = mygs.get_profiles(npsi=n_sample, psi_pad=1e-3)
-    _, q_e, ravgs_e, _, _, _     = mygs.get_q(npsi=n_sample, psi_pad=1e-3)
+    psi_e, F_e, Fp_e, P_e, Pp_e = mygs.get_profiles(npsi=n_sample_plot, psi_pad=1e-3)
+    _, q_e, ravgs_e, _, _, _     = mygs.get_q(npsi=n_sample_plot, psi_pad=1e-3)
     jtor_e = F_e * Fp_e * ravgs_e[1] / mu0 + Pp_e * ravgs_e[0]
 
 # ---------------------------------------------------------------------------
@@ -254,6 +256,8 @@ if run_internal:
     ne_i, Te_i, ni_i, Ti_i = ne, Te, ni, Ti
     pressure_i = pressure
     pp_vals = np.gradient(pressure_i) / np.gradient(psi_sample)
+    # Enforce P' edge condition
+    pp_vals[-1] = 0.0
 
     mygs.set_kinetic_profiles(
         te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te_i / 1e3},
@@ -300,8 +304,8 @@ if run_internal:
     print(f"  Saved: {os.path.join(script_dir, 'eq_internal.png')}")
 
     # --- Extract 1D profiles ---
-    psi_i, F_i, Fp_i, P_i, Pp_i = mygs.get_profiles(npsi=n_sample, psi_pad=1e-3)
-    _, q_i, ravgs_i, _, _, _     = mygs.get_q(npsi=n_sample, psi_pad=1e-3)
+    psi_i, F_i, Fp_i, P_i, Pp_i = mygs.get_profiles(npsi=n_sample_plot, psi_pad=1e-3)
+    _, q_i, ravgs_i, _, _, _     = mygs.get_q(npsi=n_sample_plot, psi_pad=1e-3)
     jtor_i = F_i * Fp_i * ravgs_i[1] / mu0 + Pp_i * ravgs_i[0]
 
     mygs.reset()
@@ -447,6 +451,8 @@ if run_internal_compare:
         ne_c, Te_c, ni_c, Ti_c = ne, Te, ni, Ti
         pressure_c = pressure
         pp_vals = np.gradient(pressure_c) / np.gradient(psi_sample)
+        # Enforce P' edge condition
+        pp_vals[-1] = 0.0
 
         mygs.set_kinetic_profiles(
             te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te_c / 1e3},
@@ -480,8 +486,8 @@ if run_internal_compare:
         coils, _ = mygs.get_coil_currents()
         print_result(f"INTERNAL [{label}]", elapsed, stats, coils)
 
-        psi_p, F_p, Fp_p, P_p, Pp_p = mygs.get_profiles(npsi=n_sample, psi_pad=1e-3)
-        _, q_p, ravgs_p, _, _, _     = mygs.get_q(npsi=n_sample, psi_pad=1e-3)
+        psi_p, F_p, Fp_p, P_p, Pp_p = mygs.get_profiles(npsi=n_sample_plot, psi_pad=1e-3)
+        _, q_p, ravgs_p, _, _, _     = mygs.get_q(npsi=n_sample_plot, psi_pad=1e-3)
         jtor_p = F_p * Fp_p * ravgs_p[1] / mu0 + Pp_p * ravgs_p[0]
         mygs.reset()
         return elapsed, stats, psi_p, F_p, Fp_p, P_p, Pp_p, q_p, jtor_p
