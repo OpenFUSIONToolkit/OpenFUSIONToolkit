@@ -270,6 +270,7 @@ TYPE :: gs_equil
   INTEGER(i4) :: isoflux_ntargets = 0 !< Number of isoflux target locations
   INTEGER(i4) :: saddle_ntargets = 0 !< Number of saddle target locations
   INTEGER(i4) :: flux_ntargets = 0 !< Number of \f$ \psi \f$ target locations
+  INTEGER(i4) :: mirnov_ntargets = 0 !< Number of Mirnov (B-field) target locations
   REAL(r8) :: psiscale = 1.d0 !< Solution scale factor for homogeneous equilibria
   REAL(r8) :: psimax = 1.d0 !< Maximum \f$ \psi \f$ value for homogeneous equilibria
   REAL(r8) :: ffp_scale = 1.d0 !< Scale factor for F*F' or F' profile (see mode)
@@ -295,6 +296,7 @@ TYPE :: gs_equil
   REAL(r8), POINTER, DIMENSION(:,:) :: isoflux_targets => NULL() !< Isoflux target locations
   REAL(r8), POINTER, DIMENSION(:,:) :: saddle_targets => NULL() !< Saddle target locations
   REAL(r8), POINTER, DIMENSION(:,:) :: flux_targets => NULL() !< Flux target locations and values
+  REAL(r8), POINTER, DIMENSION(:,:) :: mirnov_targets => NULL() !< Mirnov target locations and values
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_reg_mat => NULL() !< Coil regularization terms
   CLASS(oft_vector), POINTER :: psi => NULL() !< Current \f$ \psi \f$ solution
   CLASS(oft_vector), POINTER :: chi => NULL() !< Toroidal field potential (if computed)
@@ -1018,6 +1020,8 @@ self%saddle_ntargets=source%saddle_ntargets
 IF(self%saddle_ntargets>0)ALLOCATE(self%saddle_targets,SOURCE=source%saddle_targets)
 self%flux_ntargets=source%flux_ntargets
 IF(self%flux_ntargets>0)ALLOCATE(self%flux_targets,SOURCE=source%flux_targets)
+self%mirnov_ntargets=source%mirnov_ntargets
+IF(self%mirnov_ntargets>0)ALLOCATE(self%mirnov_targets,SOURCE=source%mirnov_targets)
 !
 self%nregularize=source%nregularize
 IF(self%nregularize>0)THEN
@@ -1798,11 +1802,11 @@ IF(PRESENT(plasma_terms))THEN
   ncon_plasma=SIZE(plasma_terms,1)
   ndof_plasma=SIZE(plasma_terms,2)
 END IF
-nCon = self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%nregularize+ncon_plasma
+nCon = self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets+self%mirnov_ntargets+self%nregularize+ncon_plasma
 nDof = device%ncoils+1+ndof_plasma
 ALLOCATE(err_mat(nCon,nDof),err_inv(nDof,nDof))
 ALLOCATE(rhs(nCon),currs(nDof))
-ALLOCATE(cells(2*self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets))
+ALLOCATE(cells(2*self%isoflux_ntargets+self%flux_ntargets+self%saddle_ntargets+self%mirnov_ntargets))
 err_mat=0.d0
 rhs=0.d0
 cells=-1
@@ -1842,10 +1846,18 @@ DO j=1,self%saddle_ntargets
   CALL bmesh_findcell(device%fe_rep%mesh,cells(coffset+j),self%saddle_targets(1:2,j),f)
   CALL device%fe_rep%mesh%jacobian(cells(coffset+j),f,goptmp,v)
   CALL psi_geval%interp(cells(coffset+j),f,goptmp,gpsi)
-  rhs(roffset+2*(j-1)+1)=gpsi(1)*self%saddle_targets(3,j)
-  rhs(roffset+2*(j-1)+2)=gpsi(2)*self%saddle_targets(3,j)
+  rhs(roffset+2*(j-1)+1)=gpsi(1)!*self%saddle_targets(3,j)
+  rhs(roffset+2*(j-1)+2)=gpsi(2)!*self%saddle_targets(3,j)
 END DO
-!---Build L-S Matrix
+roffset=roffset+2*self%saddle_ntargets
+coffset=coffset+self%saddle_ntargets
+DO j=1,self%mirnov_ntargets
+  CALL bmesh_findcell(device%fe_rep%mesh,cells(coffset+j),self%mirnov_targets(1:2,j),f)
+  CALL device%fe_rep%mesh%jacobian(cells(coffset+j),f,goptmp,v)
+  CALL psi_geval%interp(cells(coffset+j),f,goptmp,gpsi)
+  rhs(roffset+j)=(-gpsi(2)*self%mirnov_targets(3,j) + gpsi(1)*self%mirnov_targets(4,j))/self%mirnov_targets(1,j)-self%mirnov_targets(5,j)
+END DO
+!---Build L-S Matrix (coils)
 DO i=1,device%ncoils
   psi_eval%u=>device%psi_coil(i)%f
   CALL psi_eval%setup(device%fe_rep)
@@ -1873,14 +1885,23 @@ DO i=1,device%ncoils
     CALL bmesh_findcell(device%fe_rep%mesh,cells(coffset+j),self%saddle_targets(1:2,j),f)
     CALL device%fe_rep%mesh%jacobian(cells(coffset+j),f,goptmp,v)
     CALL psi_geval%interp(cells(coffset+j),f,goptmp,gpsi)
-    err_mat(roffset+2*(j-1)+1,i)=gpsi(1)*self%saddle_targets(3,j)
-    err_mat(roffset+2*(j-1)+2,i)=gpsi(2)*self%saddle_targets(3,j)
+    err_mat(roffset+2*(j-1)+1,i)=gpsi(1)!*self%saddle_targets(3,j)
+    err_mat(roffset+2*(j-1)+2,i)=gpsi(2)!*self%saddle_targets(3,j)
+  END DO
+  roffset=roffset+2*self%saddle_ntargets
+  coffset=coffset+self%saddle_ntargets
+  DO j=1,self%mirnov_ntargets
+    CALL bmesh_findcell(device%fe_rep%mesh,cells(coffset+j),self%mirnov_targets(1:2,j),f)
+    CALL device%fe_rep%mesh%jacobian(cells(coffset+j),f,goptmp,v)
+    CALL psi_geval%interp(cells(coffset+j),f,goptmp,gpsi)
+    err_mat(roffset+j,i)=(-gpsi(2)*self%mirnov_targets(3,j) + gpsi(1)*self%mirnov_targets(4,j))/self%mirnov_targets(1,j)
   END DO
 END DO
 DO i=1,device%ncoils
   err_mat(:,device%ncoils+1)=err_mat(:,device%ncoils+1) &
     + device%coil_vcont(i)*err_mat(:,i)
 END DO
+!---Build L-S Matrix (plasma)
 DO i=1,ndof_plasma
   psi_eval%u=>plasma_psi(i)%f
   CALL psi_eval%setup(device%fe_rep)
@@ -1908,8 +1929,16 @@ DO i=1,ndof_plasma
     CALL bmesh_findcell(device%fe_rep%mesh,cells(coffset+j),self%saddle_targets(1:2,j),f)
     CALL device%fe_rep%mesh%jacobian(cells(coffset+j),f,goptmp,v)
     CALL psi_geval%interp(cells(coffset+j),f,goptmp,gpsi)
-    err_mat(roffset+2*(j-1)+1,device%ncoils+1+i)=gpsi(1)*self%saddle_targets(3,j)
-    err_mat(roffset+2*(j-1)+2,device%ncoils+1+i)=gpsi(2)*self%saddle_targets(3,j)
+    err_mat(roffset+2*(j-1)+1,device%ncoils+1+i)=gpsi(1)!*self%saddle_targets(3,j)
+    err_mat(roffset+2*(j-1)+2,device%ncoils+1+i)=gpsi(2)!*self%saddle_targets(3,j)
+  END DO
+  roffset=roffset+2*self%saddle_ntargets
+  coffset=coffset+self%saddle_ntargets
+  DO j=1,self%mirnov_ntargets
+    CALL bmesh_findcell(device%fe_rep%mesh,cells(coffset+j),self%mirnov_targets(1:2,j),f)
+    CALL device%fe_rep%mesh%jacobian(cells(coffset+j),f,goptmp,v)
+    CALL psi_geval%interp(cells(coffset+j),f,goptmp,gpsi)
+    err_mat(roffset+j,device%ncoils+1+i)=(-gpsi(2)*self%mirnov_targets(3,j) + gpsi(1)*self%mirnov_targets(4,j))/self%mirnov_targets(1,j)
   END DO
 END DO
 !---Enforce difference of fluxes
@@ -1926,8 +1955,22 @@ DO j=1,self%flux_ntargets
   err_mat(roffset+j,:)=err_mat(roffset+j,:)*self%flux_targets(4,j)
   rhs(roffset+j)=rhs(roffset+j)*self%flux_targets(4,j)
 END DO
+! Saddle weights applied above
+roffset=roffset+self%flux_ntargets
+DO j=1,self%saddle_ntargets
+  err_mat(roffset+2*(j-1)+1,:)=err_mat(roffset+2*(j-1)+1,:)*self%saddle_targets(3,j)
+  err_mat(roffset+2*(j-1)+2,:)=err_mat(roffset+2*(j-1)+2,:)*self%saddle_targets(3,j)
+  rhs(roffset+2*(j-1)+1)=rhs(roffset+2*(j-1)+1)*self%saddle_targets(3,j)
+  rhs(roffset+2*(j-1)+2)=rhs(roffset+2*(j-1)+2)*self%saddle_targets(3,j)
+END DO
+!---Apply weights to Mirnov constraints
+roffset=roffset+2*self%saddle_ntargets
+DO j=1,self%mirnov_ntargets
+  err_mat(roffset+j,:)=err_mat(roffset+j,:)*self%mirnov_targets(6,j)
+  rhs(roffset+j)=rhs(roffset+j)*self%mirnov_targets(6,j)
+END DO
 !---Coil regularization
-roffset=self%isoflux_ntargets+self%flux_ntargets+2*self%saddle_ntargets
+roffset=roffset+self%mirnov_ntargets
 DO i=1,self%nregularize
   DO j=1,device%ncoils
     err_mat(roffset+i,j)=self%coil_reg_mat(i,j)
@@ -5682,6 +5725,7 @@ IF(oft_debug_print(2))WRITE(*,*)"Destroying Grad-Shafranov equilibrium object"
 IF(ASSOCIATED(self%isoflux_targets))DEALLOCATE(self%isoflux_targets)
 IF(ASSOCIATED(self%saddle_targets))DEALLOCATE(self%saddle_targets)
 IF(ASSOCIATED(self%flux_targets))DEALLOCATE(self%flux_targets)
+IF(ASSOCIATED(self%mirnov_targets))DEALLOCATE(self%mirnov_targets)
 IF(ASSOCIATED(self%coil_reg_mat))DEALLOCATE(self%coil_reg_mat)
 IF(ASSOCIATED(self%coil_reg_targets))DEALLOCATE(self%coil_reg_targets)
 IF(ASSOCIATED(self%coil_currs))DEALLOCATE(self%coil_currs)

@@ -1027,6 +1027,39 @@ class TokaMaker():
                 raise Exception(error_string.value)
             self._tMaker_equil._saddle_targets = saddles.copy()
     
+    def set_mirnov_constraints(self,locations,norms,targets,weights=None):
+        r'''! Set explicit mirnov constraint points \f$ B \cdot \hat{n} \f$ [T]
+
+        @param locations List of points defining constraints [:,2]
+        @param norms List of normal vectors (\f$ \hat{n} \f$) at each constraint point [:,2]
+        @param targets Target \f$ B \cdot \hat{n} \f$ value in T at each point [:]
+        @param weights Weight to be applied to each constraint point [:] (default: 1)
+        '''
+        if locations is None:
+            error_string = self._oft_env.get_c_errorbuff()
+            tokamaker_set_mirnov(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,1)),numpy.zeros((1,)),numpy.zeros((1,)),0,error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
+            self._tMaker_equil._mirnov_constraints = None
+        else:
+            if norms.shape[0] != locations.shape[0]:
+                raise ValueError('Shape of "norms" does not match first dimension of "locations"')
+            if targets.shape[0] != locations.shape[0]:
+                raise ValueError('Shape of "targets" does not match first dimension of "locations"')
+            if weights is None:
+                weights = numpy.ones((locations.shape[0],), dtype=numpy.float64)
+            if weights.shape[0] != locations.shape[0]:
+                raise ValueError('Shape of "weights" does not match first dimension of "locations"')
+            locations = numpy.ascontiguousarray(locations, dtype=numpy.float64)
+            norms = numpy.ascontiguousarray(norms, dtype=numpy.float64)
+            targets = numpy.ascontiguousarray(targets, dtype=numpy.float64)
+            weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
+            error_string = self._oft_env.get_c_errorbuff()
+            tokamaker_set_mirnov(self._tMaker_ptr,locations,norms,targets,weights,locations.shape[0],error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
+            self._tMaker_equil._mirnov_constraints = (locations.copy(), norms.copy(), targets.copy())
+    
     def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,R0=None,V0=None,Z0=None,retain_previous=False):
         r'''! Set global target values
 
@@ -2158,6 +2191,8 @@ class TokaMaker_equilibrium():
             self._psi_constraints = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Saddle_constraints "Saddle_constraints" property)
             self._saddle_targets = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Mirnov_constraints "Mirnov_constraints" property)
+            self._mirnov_constraints = None
         else:
             self._F0 = copy.copy(source_eq._F0)
             if skip_targets:
@@ -2178,10 +2213,12 @@ class TokaMaker_equilibrium():
                 self._isoflux_constraints = None
                 self._saddle_targets = None
                 self._psi_constraints = None
+                self._mirnov_constraints = None
             else:
                 self._isoflux_constraints = source_eq._isoflux_constraints.copy() if source_eq._isoflux_constraints is not None else None
                 self._saddle_targets = source_eq._saddle_targets.copy() if source_eq._saddle_targets is not None else None
                 self._psi_constraints = (source_eq._psi_constraints[0].copy(), source_eq._psi_constraints[1].copy()) if source_eq._psi_constraints is not None else None
+                self._mirnov_constraints = (source_eq._mirnov_constraints[0].copy(), source_eq._mirnov_constraints[1].copy(), source_eq._mirnov_constraints[2].copy()) if source_eq._mirnov_constraints is not None else None
         ## Normalized flux convention (0 -> tokamak, 1 -> spheromak)
         self.psi_convention = self._tMaker.psi_convention
         ## Free or fixed boundary flag
@@ -2390,6 +2427,11 @@ class TokaMaker_equilibrium():
         r'''! Saddle constraint points'''
         return self._saddle_targets
     
+    @property
+    def Mirnov_constraints(self):
+        r'''! Mirnov constraint points'''
+        return self._mirnov_constraints
+
     def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
