@@ -551,9 +551,77 @@ class reconstruction():
                     self._pressure_cons.append(new_con)
                 else:
                     raise ValueError("Unknown constraint type")
+                
+    def plot_constraints(self, fig, ax, plot_flux_loops=True, plot_mirnovs=True, plot_saddles=True, plot_pressure=True, mirnov_scale=1.0, base_zorder=0):
+        '''! Plot constraint locations in R-Z plane for current constraints
+        
+        @param fig Matplotlib figure to plot on
+        @param ax Matplotlib axis to plot on
+        @param plot_flux_loops Whether to plot flux loop constraints
+        @param plot_mirnovs Whether to plot Mirnov sensor constraints
+        @param plot_saddles Whether to plot saddle loop constraints
+        @param plot_pressure Whether to plot plasma pressure constraints
+        @param mirnov_scale Scaling factor for Mirnov sensor quiver plot (default 1.0, smaller values increase arrow size)
+        @param base_zorder Base z-order for plotting constraints (default 0.0, higher values will plot on top of lower values)
+        '''
+        if plot_flux_loops:
+            for flux_loop in self._flux_loops:
+                ax.plot(flux_loop.loc[0], flux_loop.loc[1], 'ro', zorder=base_zorder+1)
+        mirnov_scale = 1.0/mirnov_scale/(0.005*(self._tMaker_obj.r.max(axis=0) - self._tMaker_obj.r.min(axis=0)).max())
+        if plot_mirnovs:
+            for mirnov in self._mirnovs:
+                ax.quiver(mirnov.loc[0], mirnov.loc[1], mirnov.norm[0], mirnov.norm[2], color='g', scale=mirnov_scale, zorder=base_zorder+2)
+        if plot_saddles:
+            for saddle in self._saddles:
+                ax.plot([saddle.pt1[0],saddle.pt2[0]], [saddle.pt1[1],saddle.pt2[1]], 'b+', zorder=base_zorder+1)
+        if plot_pressure:
+            for press_con in self._pressure_cons:
+                ax.plot(press_con.loc[0], press_con.loc[1], 'm.', zorder=base_zorder+1)
+    
+    def plot_error(self, fig, ax):
+        '''! Plot constraint values and reconstructed signals for current equilibrium from reconstruction output file
+        
+        @param fig Matplotlib figure to plot on
+        @param ax Matplotlib axis to plot on
+        '''
+        if len(ax) != 4:
+            raise ValueError("Must provide list of 4 axes for plotting flux loop, Mirnov, saddle, and pressure constraint errors")
+        err_output = numpy.loadtxt('fit.out')
+        i = 0
+        ax[0].set_title('Flux Loop Constraints')
+        ax[0].set_xlabel('Constraint Index')
+        ax[0].set_ylabel('Signal [Wb]')
+        for flux_loop in self._flux_loops:
+            ax[0].errorbar(i,err_output[i,3], yerr=flux_loop.err, color='r', capsize=2)
+            ax[0].plot(i,err_output[i,2], 'bx')
+            i += 1
+        ax[1].set_title('Mirnov Constraints')
+        ax[1].set_xlabel('Constraint Index')
+        ax[1].set_ylabel('Signal [T]')
+        for mirnov in self._mirnovs:
+            ax[1].errorbar(i,err_output[i,3], yerr=mirnov.err, color='r', capsize=2)
+            ax[1].plot(i,err_output[i,2], 'bx')
+            i += 1
+        ax[2].set_title('Saddle Constraints')
+        ax[2].set_xlabel('Constraint Index')
+        ax[2].set_ylabel('Signal [Wb]')
+        for saddle in self._saddles:
+            ax[2].errorbar(i,err_output[i,3], yerr=saddle.err, color='r', capsize=2)
+            ax[2].plot(i,err_output[i,2], 'bx')
+            i += 1
+        ax[3].set_title('Pressure Constraints')
+        ax[3].set_xlabel('Constraint Index')
+        ax[3].set_ylabel('Signal [Pa]')
+        for press_con in self._pressure_cons:
+            ax[3].errorbar(i,err_output[i,3], yerr=press_con.err, color='r', capsize=2)
+            ax[3].plot(i,err_output[i,2], 'bx')
+            i += 1
     
     def setup_constraints(self):
-        '''! Set up constraints in TokaMaker for current equilibrium without performing reconstruction'''
+        '''! Set up constraints in TokaMaker for current equilibrium without performing reconstruction
+        
+        @result Error flag
+        '''
         # Modify input file
         self.write_fit_in()
         # Run setup
