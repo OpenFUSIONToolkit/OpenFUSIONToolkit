@@ -1353,6 +1353,185 @@ def test_Redl_jBS(order):
     results = mp_run(run_Redl_jBS_case, (1.0, order), timeout=300)
     assert validate_dict(results, Redl_jBS_eq_dict)
 
+#============================================================================
+# Internal bootstrap test (ITER-based)
+#============================================================================
+def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
+    from OpenFUSIONToolkit.TokaMaker.bootstrap import Hmode_profiles
+
+    # --- Mesh creation (same as run_ITER_case) ---
+    def create_mesh():
+        with open('ITER_geom.json','r') as fid:
+            ITER_geom = json.load(fid)
+        plasma_dx = 0.15/mesh_resolution
+        coil_dx = 0.2/mesh_resolution
+        vv_dx = 0.3/mesh_resolution
+        vac_dx = 0.6/mesh_resolution
+        gs_mesh = gs_Domain()
+        gs_mesh.define_region('air',vac_dx,'boundary')
+        gs_mesh.define_region('plasma',plasma_dx,'plasma')
+        gs_mesh.define_region('vacuum1',vv_dx,'vacuum')
+        gs_mesh.define_region('vacuum2',vv_dx,'vacuum')
+        gs_mesh.define_region('vv1',vv_dx,'conductor',eta=6.9E-7)
+        gs_mesh.define_region('vv2',vv_dx,'conductor',eta=6.9E-7)
+        for key, coil in ITER_geom['coils'].items():
+            if not key.startswith('VS'):
+                gs_mesh.define_region(key,coil_dx,'coil')
+        gs_mesh.define_region('VSU',coil_dx,'coil',coil_set='VS',nTurns=1.0)
+        gs_mesh.define_region('VSL',coil_dx,'coil',coil_set='VS',nTurns=-1.0)
+        gs_mesh.add_polygon(ITER_geom['limiter'],'plasma',parent_name='vacuum1')
+        gs_mesh.add_annulus(ITER_geom['inner_vv'][0],'vacuum1',ITER_geom['inner_vv'][1],'vv1',parent_name='vacuum2')
+        gs_mesh.add_annulus(ITER_geom['outer_vv'][0],'vacuum2',ITER_geom['outer_vv'][1],'vv2',parent_name='air')
+        for key, coil in ITER_geom['coils'].items():
+            if key.startswith('VS'):
+                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='vacuum1')
+            else:
+                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='air')
+        mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
+        coil_dict = gs_mesh.get_coils()
+        cond_dict = gs_mesh.get_conductors()
+        save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,'ITER_mesh.h5')
+
+    if not os.path.exists('ITER_mesh.h5'):
+        try:
+            create_mesh()
+        except Exception as e:
+            print(e)
+            mp_q.put(None)
+            return
+
+    # --- Kinetic and current profiles (match ITER_Hmode_bootstrap_ex.py) ---
+    EC = 1.602e-19
+    n_sample = 257
+    psi_sample = np.linspace(0.0, 1.0, n_sample)
+    Ip_target = 13.0e6
+    Zeff_val = 1.5
+
+    xphalf = 0.965
+    ne = Hmode_profiles(edge=0.35, ped=0.6, core=1.1, rgrid=n_sample,
+                        expin=1.6, expout=1.6, widthp=0.35, xphalf=xphalf) * 1e20
+    Te = Hmode_profiles(edge=1500., ped=5000., core=21000., rgrid=n_sample,
+                        expin=1.3, expout=1.7, widthp=0.1, xphalf=xphalf)
+    ni = ne.copy()
+    Ti = Te.copy()
+    pressure = EC * ne * Te + EC * ni * Ti
+
+    inductive_jphi = create_power_flux_fun(n_sample, 2.25, 2.5)['y']
+    pp_vals = np.gradient(pressure) / np.gradient(psi_sample)
+    pp_vals[-1] = 0.0
+
+    # --- Set up GS solver ---
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
+    mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('ITER_mesh.h5')
+    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
+    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
+    mygs.settings.maxits = 100
+    mygs.setup(order=fe_order, F0=5.3*6.2)
+
+    mygs.set_coil_vsc({'VS': 1.0})
+    mygs.set_coil_bounds({key: [-50.E6, 50.E6] for key in mygs.coil_sets})
+
+    isoflux_pts = np.array([
+        [ 8.20,  0.41], [ 8.06,  1.46], [ 7.51,  2.62],
+        [ 6.14,  3.78], [ 4.51,  3.02], [ 4.26,  1.33],
+        [ 4.28,  0.08], [ 4.49, -1.34], [ 7.28, -1.89],
+        [ 8.00, -0.68],
+    ])
+    x_point = np.array([[5.125, -3.4]])
+    mygs.set_isoflux(np.vstack((isoflux_pts, x_point)))
+    mygs.set_saddles(x_point)
+
+    regularization_terms = []
+    for name in mygs.coil_sets:
+        if name.startswith('CS'):
+            w = 2.E-2 if name.startswith('CS1') else 1.E-2
+        else:
+            w = 1.E-2
+        regularization_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=w))
+    regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0}, target=0.0, weight=1.E2))
+    mygs.set_coil_reg(reg_terms=regularization_terms)
+
+    # Initial no-bootstrap solve
+    mygs.set_targets(Ip=Ip_target, pax=6.2E5)
+    mygs.settings.pm = False
+    mygs.update_settings()
+    try:
+        mygs.init_psi(6.3, 0.5, 2.0, 1.4, 0.0)
+        mygs.solve()
+    except ValueError:
+        mp_q.put(None)
+        return
+
+    # --- Configure internal bootstrap solver ---
+    mygs.set_kinetic_profiles(
+        te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
+        ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
+        ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
+        ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
+        Zeff=Zeff_val,
+    )
+    mygs.set_boot_ops(
+        scale_jBS=1.0,
+        Zeff=Zeff_val,
+    )
+    mygs.set_profiles(
+        ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
+        pp_prof={'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_vals[0]}
+    )
+    mygs.set_targets(Ip=Ip_target, pax=float(pressure[0]))
+    mygs.settings.pm = True
+    mygs.update_settings()
+    try:
+        mygs.solve()
+    except ValueError:
+        mp_q.put(None)
+        return
+
+    mu0 = 4.0 * np.pi * 1e-7
+    eq_info = mygs.get_stats(li_normalization='ITER')
+
+    # --- Extract 1D profiles ---
+    psi_i, F_i, Fp_i, P_i, Pp_i = mygs.get_profiles(npsi=n_sample, psi_pad=1e-3)
+    _, q_i, ravgs_i, _, _, _     = mygs.get_q(npsi=n_sample, psi_pad=1e-3)
+    jtor_i = F_i * Fp_i * ravgs_i[1] / mu0 + Pp_i * ravgs_i[0]
+
+    eq_info['jphi_axis'] = float(jtor_i[0])
+    eq_info['jphi_max']  = float(np.max(np.abs(jtor_i)))
+    eq_info['q_axis']    = float(q_i[0])
+    sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
+    eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
+
+    mp_q.put([eq_info])
+    oftpy_dump_cov()
+
+
+ITER_bootstrap_internal_eq_dict = {
+    'Ip':        13000003.568934187,
+    'kappa':     1.8716551520530502,
+    'R_geo':     6.222736229522072,
+    'a_geo':     1.9796968208833436,
+    'q_0':       1.3048832760855849,
+    'q_95':      3.496546887858883,
+    'P_ax':      739890.2815794483,
+    'beta_pol':  84.1939085621749,
+    'beta_tor':  2.460759294312031,
+    'jphi_axis': 1062217.9664686644,
+    'jphi_max':  1209632.4640837614,
+    'q_axis':    1.3424257453677648,
+    'jphi_prof': [1062217.9664686644, 1198226.0388944256, 1192657.4238587115,
+                  1090600.7792406438,  907411.0276865886,  684849.7423404952,
+                   445851.1048066826,  243022.36869465964, 160988.66709199466,
+                    40824.31269308129],
+}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("order", (2,))
+def test_ITER_bootstrap_internal(order):
+    results = mp_run(run_ITER_bootstrap_case_internal, (1.0, order), timeout=300)
+    assert validate_dict(results, ITER_bootstrap_internal_eq_dict)
+
 # # Example of how to run single test without pytest
 # if __name__ == '__main__':
 #     multiprocessing.freeze_support()
