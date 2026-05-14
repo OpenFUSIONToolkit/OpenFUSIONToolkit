@@ -1,18 +1,17 @@
 """
-ITER H-mode bootstrap test script.
+ITER H-mode bootstrap calculation script, using the internal jphi-split-bootstrap 
+method (Fortran-embedded) and the external solve_with_bootstrap() method.
 
-By default runs BOTH bootstrap methods and prints a side-by-side comparison.
+By default runs both methods and prints a side-by-side comparison.
 Pass --mode to restrict to a single method.
 
-  --mode both              (default) run external then internal and compare
+  --mode both              (default) run external, and internal, and compare
   --mode external          Python-side solve_with_bootstrap() from bootstrap.py
   --mode internal          GS-internal jphi-split-bootstrap (Fortran-embedded)
-  --mode internal-compare  Run internal solver twice: once with --isolate-edge
-                           and once with --parameterize-edge, then plot the diff
 
 Usage
 -----
-  python ITER_Hmode_bootstrap_test.py [--mode both|external|internal]
+  python ITER_Hmode_bootstrap_ex.py [--mode both|external|internal]
                                       [--isolate-edge]
                                       [--parameterize-edge]
                                       [--scale-jBS 1.0]
@@ -41,7 +40,7 @@ mu0 = 4.0 * np.pi * 1e-7
 # ---------------------------------------------------------------------------
 parser = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-parser.add_argument('--mode', choices=['both', 'external', 'internal', 'internal-compare'],
+parser.add_argument('--mode', choices=['both', 'external', 'internal'],
                     default='both',
                     help='Which bootstrap method(s) to run (default: both)')
 parser.add_argument('--isolate-edge', action='store_true',
@@ -64,7 +63,6 @@ args = parser.parse_args()
 
 run_external         = args.mode in ('both', 'external')
 run_internal         = args.mode in ('both', 'internal')
-run_internal_compare = args.mode == 'internal-compare'
 
 # ---------------------------------------------------------------------------
 # Imports
@@ -390,7 +388,7 @@ if run_external and run_internal:
 # ---------------------------------------------------------------------------
 # Single-run profile plot (external-only or internal-only)
 # ---------------------------------------------------------------------------
-if run_external != run_internal and not run_internal_compare:
+if run_external != run_internal:
     if run_external:
         psi_s, F_s, Fp_s, P_s, Pp_s = psi_e, F_e, Fp_e, P_e, Pp_e
         q_s, jtor_s = q_e, jtor_e
@@ -433,153 +431,6 @@ if run_external != run_internal and not run_internal_compare:
     fig.text(0.99, 0.01, timestamp, ha='right', va='bottom',
              fontsize=7, color='gray', transform=fig.transFigure)
     out_path = os.path.join(script_dir, f'profiles_{tag_s}{option_tag}_{timestamp}.png')
-    fig.savefig(out_path, dpi=300, bbox_inches='tight')
-    plt.close(fig)
-    print(f"\n  Saved: {out_path}")
-
-# ---------------------------------------------------------------------------
-# Internal-compare: isolate-edge vs parameterize-edge (internal solver only)
-# ---------------------------------------------------------------------------
-if run_internal_compare:
-
-    def _run_internal_case(label, isolate_edge, parameterize_edge):
-        print(f"\n{'='*60}")
-        print(f"  INTERNAL [{label}]  (jphi-split-bootstrap / Fortran-embedded)")
-        print(f"{'='*60}")
-        build_gs(mygs)
-
-        t0 = time.perf_counter()
-        ne_c, Te_c, ni_c, Ti_c = ne, Te, ni, Ti
-        pressure_c = pressure
-        pp_vals = np.gradient(pressure_c) / np.gradient(psi_sample)
-        # Enforce P' edge condition
-        pp_vals[-1] = 0.0
-
-        mygs.set_kinetic_profiles(
-            te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te_c / 1e3},
-            ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne_c},
-            ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti_c / 1e3},
-            ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni_c},
-            Zeff=Zeff_val,
-        )
-        mygs.set_boot_ops(
-            isolate_edge_jBS=isolate_edge,
-            parameterize_jBS=parameterize_edge,
-            scale_jBS=args.scale_jBS,
-            Zeff=Zeff_val,
-            diagnose_bs=args.diagnose_bs,
-            taper_edge_jBS=args.taper_edge,
-            taper_edge_psi0=args.taper_edge_psi0,
-            taper_edge_shape=args.taper_edge_shape,
-        )
-        mygs.set_profiles(
-            ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
-            pp_prof={'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_vals[0]},
-            foffset=5.3 * 6.2,
-        )
-        mygs.set_targets(Ip=Ip_target, pax=float(pressure_c[0]))
-        mygs.settings.pm = True
-        mygs.update_settings()
-        mygs.solve()
-
-        elapsed = time.perf_counter() - t0
-        stats = mygs.get_stats()
-        coils, _ = mygs.get_coil_currents()
-        print_result(f"INTERNAL [{label}]", elapsed, stats, coils)
-
-        psi_p, F_p, Fp_p, P_p, Pp_p = mygs.get_profiles(npsi=n_sample_plot, psi_pad=1e-3)
-        _, q_p, ravgs_p, _, _, _     = mygs.get_q(npsi=n_sample_plot, psi_pad=1e-3)
-        jtor_p = F_p * Fp_p * ravgs_p[1] / mu0 + Pp_p * ravgs_p[0]
-        mygs.reset()
-        return elapsed, stats, psi_p, F_p, Fp_p, P_p, Pp_p, q_p, jtor_p
-
-    (elapsed_iso, stats_iso,
-     psi_iso, F_iso, Fp_iso, P_iso, Pp_iso, q_iso, jtor_iso) = \
-        _run_internal_case('isolate-edge', isolate_edge=True, parameterize_edge=False)
-
-    (elapsed_par, stats_par,
-     psi_par, F_par, Fp_par, P_par, Pp_par, q_par, jtor_par) = \
-        _run_internal_case('parameterize-edge', isolate_edge=False, parameterize_edge=True)
-
-    # --- Scalar comparison table ---
-    cmp_keys = [('Ip', 'Ip [MA]', 1e6), ('P_ax', 'Pax [kPa]', 1e3),
-                ('beta_pol', 'beta_pol [%]', 1), ('beta_tor', 'beta_tor [%]', 1)]
-    print(f"\n{'='*60}")
-    print("  Comparison: isolate-edge vs parameterize-edge (internal)")
-    print(f"{'='*60}")
-    print(f"  {'Quantity':<18} {'isolate-edge':>14} {'param-edge':>12} {'Diff %':>10}")
-    print(f"  {'-'*58}")
-    for key, label, scale in cmp_keys:
-        v_iso = stats_iso.get(key, None)
-        v_par = stats_par.get(key, None)
-        if v_iso is None or v_par is None:
-            continue
-        pct = 100.0 * (v_par - v_iso) / v_iso if v_iso != 0 else float('nan')
-        print(f"  {label:<18} {v_iso/scale:>14.4f} {v_par/scale:>12.4f} {pct:>9.3f}%")
-    print(f"\n  Timing:  isolate-edge {elapsed_iso:.3f} s  |  "
-          f"parameterize-edge {elapsed_par:.3f} s"
-          f"  (ratio {elapsed_iso/elapsed_par:.2f}x)")
-
-    # --- Profile comparison figure (3 rows × 3 cols) ---
-    def _pct_diff_ic(a, b):
-        denom = np.where(np.abs(a) > 1e-10 * np.nanmax(np.abs(a)), np.abs(a), np.nan)
-        return 100.0 * (b - a) / denom
-
-    ic_parts = []
-    option_tag_ic   = ''
-    option_label_ic = ''
-
-    fig, axs = plt.subplots(3, 3, figsize=(15, 12))
-    fig.suptitle('Internal bootstrap: isolate-edge vs parameterize-edge' + option_label_ic, fontsize=13)
-    psi_lbl = r'$\hat{\psi}$'
-    kw = dict(lw=1.5)
-
-    # Row 0: F, F·F', P
-    axs[0, 0].plot(psi_iso, F_iso,         label='isolate-edge', **kw)
-    axs[0, 0].plot(psi_par, F_par,         label='parameterize-edge', ls='--', **kw)
-    axs[0, 0].set_ylabel('F [T·m]');  axs[0, 0].legend(fontsize=8)
-
-    axs[0, 1].plot(psi_iso, F_iso * Fp_iso, **kw)
-    axs[0, 1].plot(psi_par, F_par * Fp_par, ls='--', **kw)
-    axs[0, 1].set_ylabel("F·F' [T²]")
-
-    axs[0, 2].plot(psi_iso, P_iso / 1e6, **kw)
-    axs[0, 2].plot(psi_par, P_par / 1e6, ls='--', **kw)
-    axs[0, 2].set_ylabel('P [MPa]')
-
-    # Row 1: P', q, jφ
-    axs[1, 0].plot(psi_iso, Pp_iso / 1e3, **kw)
-    axs[1, 0].plot(psi_par, Pp_par / 1e3, ls='--', **kw)
-    axs[1, 0].set_ylabel("P' [kPa]")
-
-    axs[1, 1].plot(psi_iso, q_iso, **kw)
-    axs[1, 1].plot(psi_par, q_par, ls='--', **kw)
-    axs[1, 1].axhline(1.0, ls=':', c='k', alpha=0.5)
-    axs[1, 1].set_ylabel('q')
-
-    axs[1, 2].plot(psi_iso, jtor_iso / 1e6, **kw)
-    axs[1, 2].plot(psi_par, jtor_par / 1e6, ls='--', **kw)
-    axs[1, 2].set_ylabel(r'$\langle j_\phi \rangle$ [MA/m²]')
-
-    # Row 2: percentage differences (parameterize-edge − isolate-edge)
-    for col, (yi, yp, lbl) in enumerate([
-            (F_iso * Fp_iso, F_par * Fp_par, "Δ F·F' [%]"),
-            (q_iso,          q_par,          'Δ q [%]'),
-            (jtor_iso,       jtor_par,       r'Δ $j_\phi$ [%]'),
-    ]):
-        axs[2, col].plot(psi_iso, _pct_diff_ic(yi, yp), c='tab:red', **kw)
-        axs[2, col].axhline(0, ls=':', c='k', alpha=0.5)
-        axs[2, col].set_ylabel(lbl)
-
-    for ax in axs.flat:
-        ax.grid(ls=':')
-        ax.set_xlabel(psi_lbl)
-
-    fig.tight_layout()
-    timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    fig.text(0.99, 0.01, timestamp, ha='right', va='bottom',
-             fontsize=7, color='gray', transform=fig.transFigure)
-    out_path = os.path.join(script_dir, f'profiles_internal_compare{option_tag_ic}_{timestamp}.png')
     fig.savefig(out_path, dpi=300, bbox_inches='tight')
     plt.close(fig)
     print(f"\n  Saved: {out_path}")
