@@ -26,6 +26,8 @@ import os
 import sys
 import time
 
+import tempfile
+
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
@@ -238,6 +240,60 @@ if run_external:
     _, q_e, ravgs_e, _, _, _     = mygs.get_q(npsi=n_sample_plot, psi_pad=1e-3)
     jtor_e = F_e * Fp_e * ravgs_e[1] / mu0 + Pp_e * ravgs_e[0]
 
+    # -----------------------------------------------------------------------
+    # Save / load round-trip test (gs_save_tokamaker / gs_load_tokamaker)
+    # -----------------------------------------------------------------------
+    print("\n" + "-"*60)
+    print("  Save/load round-trip test (external bootstrap equilibrium)")
+    print("-"*60)
+    _save_ok = True
+    with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as _tf:
+        _save_fname = _tf.name
+    try:
+        # --- save ---
+        mygs._tMaker_equil.save_TokaMaker(_save_fname)
+        print(f"  Saved equilibrium to: {_save_fname}")
+
+        # --- inspect BOOT_OPS group (should be absent for external solver) ---
+        try:
+            import h5py
+            with h5py.File(_save_fname, 'r') as _hf:
+                if 'tokamaker/BOOT_OPS' in _hf:
+                    _grp = _hf['tokamaker/BOOT_OPS']
+                    _zeff_saved  = float(np.ravel(_grp['ZEFF'][()])[0])
+                    _scale_saved = float(np.ravel(_grp['SCALE_JBS'][()])[0])
+                    print(f"  BOOT_OPS present in file  -> ZEFF={_zeff_saved:.4f}  SCALE_JBS={_scale_saved:.4f}")
+                else:
+                    print("  BOOT_OPS group absent from file (expected for external solver)")
+        except ImportError:
+            print("  h5py not available; skipping BOOT_OPS inspection")
+
+        # snapshot psi before reload
+        _psi_before = mygs.get_psi(normalized=False)
+
+        # --- load (external solver uses linterp FFP — no kinetics needed) ---
+        mygs.replace_eq(source_file=_save_fname)
+        print("  Loaded equilibrium via replace_eq(source_file=...)")
+
+        # --- compare psi field ---
+        _psi_after   = mygs.get_psi(normalized=False)
+        _psi_maxdiff = float(np.max(np.abs(_psi_after - _psi_before)))
+        _psi_rms     = float(np.sqrt(np.mean((_psi_after - _psi_before)**2)))
+        _psi_scale   = float(np.max(np.abs(_psi_before)))
+        _tol = 1e-10
+        _ok_psi = _psi_maxdiff < _tol * _psi_scale
+        _save_ok = _save_ok and _ok_psi
+        _tag = 'OK' if _ok_psi else 'FAIL'
+        print(f"  psi field  max|Δpsi|={_psi_maxdiff:.2e}  rms={_psi_rms:.2e}"
+              f"  (rel tol {_tol:.0e} × |psi|_max={_psi_scale:.4f})  -> {_tag}")
+        print()
+        if _save_ok:
+            print("  RESULT: save/load round-trip PASSED")
+        else:
+            print("  RESULT: save/load round-trip FAILED — psi field changed after reload")
+    finally:
+        os.unlink(_save_fname)
+
 # ---------------------------------------------------------------------------
 # Run internal bootstrap
 # ---------------------------------------------------------------------------
@@ -307,6 +363,60 @@ if run_internal:
     psi_i, F_i, Fp_i, P_i, Pp_i = mygs.get_profiles(npsi=n_sample_plot, psi_pad=1e-3)
     _, q_i, ravgs_i, _, _, _     = mygs.get_q(npsi=n_sample_plot, psi_pad=1e-3)
     jtor_i = F_i * Fp_i * ravgs_i[1] / mu0 + Pp_i * ravgs_i[0]
+
+    # -----------------------------------------------------------------------
+    # Save / load round-trip test (gs_save_tokamaker / gs_load_tokamaker)
+    # -----------------------------------------------------------------------
+    print("\n" + "-"*60)
+    print("  Save/load round-trip test (internal bootstrap equilibrium)")
+    print("-"*60)
+    _save_ok = True
+    with tempfile.NamedTemporaryFile(suffix='.h5', delete=False) as _tf:
+        _save_fname = _tf.name
+    try:
+        # --- save ---
+        mygs._tMaker_equil.save_TokaMaker(_save_fname)
+        print(f"  Saved equilibrium to: {_save_fname}")
+
+        # --- inspect BOOT_OPS group ---
+        try:
+            import h5py
+            with h5py.File(_save_fname, 'r') as _hf:
+                if 'tokamaker/BOOT_OPS' in _hf:
+                    _grp = _hf['tokamaker/BOOT_OPS']
+                    _zeff_saved  = float(np.ravel(_grp['ZEFF'][()])[0])
+                    _scale_saved = float(np.ravel(_grp['SCALE_JBS'][()])[0])
+                    print(f"  BOOT_OPS present in file  -> ZEFF={_zeff_saved:.4f}  SCALE_JBS={_scale_saved:.4f}")
+                else:
+                    print("  BOOT_OPS group absent from file (boot_ops not initialised)")
+        except ImportError:
+            print("  h5py not available; skipping BOOT_OPS inspection")
+
+        # snapshot psi before reload
+        _psi_before = mygs.get_psi(normalized=False)
+
+        # --- load (kinetic profiles are now saved/loaded by gs_save/load_tokamaker) ---
+        mygs.replace_eq(source_file=_save_fname)
+        print("  Loaded equilibrium via replace_eq(source_file=...)")
+
+        # --- compare psi field (no profile evaluation triggered) ---
+        _psi_after = mygs.get_psi(normalized=False)
+        _psi_maxdiff = float(np.max(np.abs(_psi_after - _psi_before)))
+        _psi_rms     = float(np.sqrt(np.mean((_psi_after - _psi_before)**2)))
+        _psi_scale   = float(np.max(np.abs(_psi_before)))
+        _tol = 1e-10
+        _ok_psi = _psi_maxdiff < _tol * _psi_scale
+        _save_ok = _save_ok and _ok_psi
+        _tag = 'OK' if _ok_psi else 'FAIL'
+        print(f"  psi field  max|Δpsi|={_psi_maxdiff:.2e}  rms={_psi_rms:.2e}"
+              f"  (rel tol {_tol:.0e} × |psi|_max={_psi_scale:.4f})  -> {_tag}")
+        print()
+        if _save_ok:
+            print("  RESULT: save/load round-trip PASSED")
+        else:
+            print("  RESULT: save/load round-trip FAILED — psi field changed after reload")
+    finally:
+        os.unlink(_save_fname)
 
     mygs.reset()
 

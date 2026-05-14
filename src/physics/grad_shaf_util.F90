@@ -12,9 +12,11 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 MODULE oft_gs_util
+USE, INTRINSIC :: iso_c_binding, ONLY: C_LOC
 USE oft_base
 USE spline_mod
-USE oft_io, ONLY: hdf5_create_file, hdf5_create_group, hdf5_write, hdf5_read
+USE oft_io, ONLY: hdf5_create_file, hdf5_create_group, hdf5_write, hdf5_read, &
+  hdf5_field_get_sizes, hdf5_field_exist
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
 USE oft_solver_base, ONLY: oft_solver
@@ -25,7 +27,7 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
-  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, sauter_fc, sauter_interp
+  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, sauter_fc, sauter_interp
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
 IMPLICIT NONE
@@ -36,86 +38,99 @@ CLASS(flux_func), POINTER :: ff_fit => NULL()
 REAL(8), POINTER, DIMENSION(:,:) :: tmpprof => NULL()
 CONTAINS
 !---------------------------------------------------------------------------------
-!> Create flux function object from definition file
-!!
-!! @param[in] filename File storing function definition
-!! @param[out] f Flux function object
+!> Create flux function object from profile name
 !---------------------------------------------------------------------------------
-SUBROUTINE gs_profile_load(filename,F)
-CHARACTER(LEN=*), INTENT(in) :: filename
-CLASS(flux_func), POINTER, INTENT(out) :: F
-!---
-REAL(8) :: alpha,beta,sep
-REAL(8), ALLOCATABLE, DIMENSION(:) :: cofs,yvals
-INTEGER(4) :: ncofs,npsi,io_unit
-LOGICAL :: zero_grad
-CHARACTER(LEN=32) :: profType
-!---
-OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
-READ(io_unit,*)profType
+SUBROUTINE gs_profile_alloc(profType,F)
+CHARACTER(LEN=*), INTENT(in) :: profType !< Profile type
+CLASS(flux_func), POINTER, INTENT(out) :: F !< Flux function object
 !---
 SELECT CASE(TRIM(profType))
   CASE("zero")
     ALLOCATE(zero_flux_func::F)
   CASE("flat")
-    CALL create_flat_f(F)
-  CASE("linear")
-    CALL oft_abort('"linear" profile no longer supported.','gs_profile_load',__FILE__)
-  !   READ(io_unit,*)ncofs
-  !   READ(io_unit,*)alpha
-  !   CALL create_linear_ff(F,alpha)
-  !   F%ncofs=ncofs
+    ALLOCATE(flat_flux_func::F)
   CASE("poly")
-    READ(io_unit,*)ncofs,zero_grad
-    ALLOCATE(cofs(ncofs))
-    READ(io_unit,*)cofs
-    CALL create_poly_ff(F,ncofs,cofs,zero_grad)
-    DEALLOCATE(cofs)
+    ALLOCATE(poly_flux_func::F)
   CASE("linterp")
-    READ(io_unit,*)ncofs,alpha
-    ALLOCATE(cofs(ncofs),yvals(ncofs))
-    READ(io_unit,*)cofs
-    READ(io_unit,*)yvals
-    CALL create_linterp_ff(F,ncofs,cofs,yvals,alpha)
-    DEALLOCATE(cofs,yvals)
+    ALLOCATE(linterp_flux_func::F)
   CASE("jphi-linterp")
-    READ(io_unit,*)ncofs,alpha
-    ALLOCATE(cofs(ncofs),yvals(ncofs))
-    READ(io_unit,*)cofs
-    READ(io_unit,*)yvals
-    CALL create_jphi_ff(F,ncofs,cofs,yvals,alpha)
-    DEALLOCATE(cofs,yvals)
+    ALLOCATE(jphi_flux_func::F)
   CASE("jphi-split-bootstrap")
-    READ(io_unit,*)ncofs,alpha
-    ALLOCATE(cofs(ncofs),yvals(ncofs))
-    READ(io_unit,*)cofs
-    READ(io_unit,*)yvals
-    CALL create_jphi_ff(F,ncofs,cofs,yvals,alpha,update_mode=1)
-    DEALLOCATE(cofs,yvals)
-  CASE("idcd")
-    CALL oft_abort('"idcd" profile no longer supported.','gs_profile_load',__FILE__)
-  !   READ(io_unit,*)ncofs
-  !   READ(io_unit,*)sep,alpha
-  !   CALL create_twolam_ff(F,sep,alpha)
-  !   F%ncofs=ncofs
-  CASE("step-slant")
-    CALL oft_abort('"step-slant" profile no longer supported.','gs_profile_load',__FILE__)
-  !   READ(io_unit,*)ncofs
-  !   READ(io_unit,*)sep,alpha,beta
-  !   CALL create_stepslant_ff(F,sep,alpha,beta)
-  !   F%ncofs=ncofs
-  ! CASE("mercier")
-  !   READ(io_unit,*)npsi
-  !   CALL create_mercier_ff(F,npsi)
-  !   F%ncofs=0
+    ALLOCATE(jphi_flux_func::F)
+    SELECT TYPE(F)
+      TYPE IS(jphi_flux_func)
+        F%bootstrap_mode = 1
+    END SELECT
   CASE("wesson")
-    READ(io_unit,*)ncofs
-    READ(io_unit,*)beta
-    CALL create_wesson_ff(F,ncofs,beta)
+    ALLOCATE(wesson_flux_func::F)
   CASE DEFAULT
     CALL oft_abort('Invalid profile type.','gs_profile_load',__FILE__)
 END SELECT
+END SUBROUTINE gs_profile_alloc
+!---------------------------------------------------------------------------------
+!> Create flux function object from definition file
+!---------------------------------------------------------------------------------
+SUBROUTINE gs_profile_load(filename,F)
+CHARACTER(LEN=*), INTENT(in) :: filename !< File storing function definition
+CLASS(flux_func), POINTER, INTENT(out) :: F !< Flux function object
+INTEGER(4) :: io_unit
+! !---
+! REAL(8) :: alpha,beta,sep
+! REAL(8), ALLOCATABLE, DIMENSION(:) :: cofs,yvals
+! INTEGER(4) :: ncofs,npsi,io_unit
+! LOGICAL :: zero_grad
+CHARACTER(LEN=32) :: profType
+!---
+OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
+READ(io_unit,*)profType
+CALL gs_profile_alloc(profType,F)
+CALL F%load(io_unit)
 CLOSE(io_unit)
+! !---
+! SELECT CASE(TRIM(profType))
+!   CASE("zero")
+!     ALLOCATE(zero_flux_func::F)
+!   CASE("flat")
+!     ALLOCATE(flat_flux_func::F)
+!     ! CALL create_flat_f(F)
+!   CASE("linear")
+!     CALL oft_abort('"linear" profile no longer supported.','gs_profile_load',__FILE__)
+!   CASE("poly")
+!     ALLOCATE(poly_flux_func::F)
+!     ! READ(io_unit,*)ncofs,zero_grad
+!     ! ALLOCATE(cofs(ncofs))
+!     ! READ(io_unit,*)cofs
+!     ! CALL create_poly_ff(F,ncofs,cofs,zero_grad)
+!     ! DEALLOCATE(cofs)
+!   CASE("linterp")
+!     ALLOCATE(linterp_flux_func::F)
+!     ! READ(io_unit,*)ncofs,alpha
+!     ! ALLOCATE(cofs(ncofs),yvals(ncofs))
+!     ! READ(io_unit,*)cofs
+!     ! READ(io_unit,*)yvals
+!     ! CALL create_linterp_ff(F,ncofs,cofs,yvals,alpha)
+!     ! DEALLOCATE(cofs,yvals)
+!   CASE("jphi-linterp")
+!     ALLOCATE(jphi_flux_func::F)
+!     ! READ(io_unit,*)ncofs,alpha
+!     ! ALLOCATE(cofs(ncofs),yvals(ncofs))
+!     ! READ(io_unit,*)cofs
+!     ! READ(io_unit,*)yvals
+!     ! CALL create_jphi_ff(F,ncofs,cofs,yvals,alpha)
+!     ! DEALLOCATE(cofs,yvals)
+!   CASE("idcd")
+!     CALL oft_abort('"idcd" profile no longer supported.','gs_profile_load',__FILE__)
+!   CASE("step-slant")
+!     CALL oft_abort('"step-slant" profile no longer supported.','gs_profile_load',__FILE__)
+!   CASE("wesson")
+!     ALLOCATE(wesson_flux_func::F)
+!     ! READ(io_unit,*)ncofs
+!     ! READ(io_unit,*)beta
+!     ! CALL create_wesson_ff(F,ncofs,beta)
+!   CASE DEFAULT
+!     CALL oft_abort('Invalid profile type.','gs_profile_load',__FILE__)
+! END SELECT
+! CLOSE(io_unit)
 END SUBROUTINE gs_profile_load
 !---------------------------------------------------------------------------------
 !> Save flux function object to definition file
@@ -124,59 +139,43 @@ END SUBROUTINE gs_profile_load
 !! @param[in] f Flux function object
 !---------------------------------------------------------------------------------
 SUBROUTINE gs_profile_save(filename,F)
-CHARACTER(LEN=*), INTENT(in) :: filename
-CLASS(flux_func), POINTER, INTENT(in) :: F
-!---
+CHARACTER(LEN=*), INTENT(in) :: filename !< File to store function definition
+CLASS(flux_func), POINTER, INTENT(in) :: F !< Flux function object
 INTEGER(4) :: io_unit
-!---
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
-!---
-SELECT TYPE(this=>F)
-  TYPE IS(zero_flux_func)
-    WRITE(io_unit,*)"zero"
-  TYPE IS(flat_flux_func)
-    WRITE(io_unit,*)"flat"
-  ! TYPE IS(linear_flux_func)
-  !   WRITE(io_unit,*)"linear"
-  !   WRITE(io_unit,*)this%ncofs
-  !   WRITE(io_unit,*)this%alpha
-  TYPE IS(poly_flux_func)
-    WRITE(io_unit,*)"poly"
-    IF(this%zero_grad)THEN
-      WRITE(io_unit,*)this%deg+1,this%zero_grad
-      WRITE(io_unit,*)1.d0,this%cofs
-    ELSE
-      WRITE(io_unit,*)this%deg,this%zero_grad
-      WRITE(io_unit,*)this%cofs
-    END IF
-  TYPE IS(linterp_flux_func)
-    WRITE(io_unit,*)"linterp"
-    WRITE(io_unit,*)this%npsi,this%y0
-    WRITE(io_unit,*)this%x
-    WRITE(io_unit,*)this%yp
-  TYPE IS(jphi_flux_func)
-    WRITE(io_unit,*)"jphi-linterp"
-    WRITE(io_unit,*)this%npsi,this%y0
-    WRITE(io_unit,*)this%x
-    WRITE(io_unit,*)this%jphi
-  ! TYPE IS(twolam_flux_func)
-  !   WRITE(io_unit,*)"idcd"
-  !   WRITE(io_unit,*)this%ncofs
-  !   WRITE(io_unit,*)this%sep,this%alpha
-  ! TYPE IS(stepslant_flux_func)
-  !   WRITE(io_unit,*)"step-slant"
-  !   WRITE(io_unit,*)this%ncofs
-  !   WRITE(io_unit,*)this%sep,this%alpha,this%beta
-  ! TYPE IS(mercier_flux_func)
-  !   WRITE(io_unit,*)"mercier"
-  !   WRITE(io_unit,*)this%npsi
-  TYPE IS(wesson_flux_func)
-    WRITE(io_unit,*)"wesson"
-    WRITE(io_unit,*)this%ncofs
-    WRITE(io_unit,*)this%gamma
-  CLASS DEFAULT
-    CALL oft_abort('Invalid profile type.','gs_profile_save',__FILE__)
-END SELECT
+! !---
+! SELECT TYPE(this=>F)
+!   TYPE IS(zero_flux_func)
+!     WRITE(io_unit,*)"zero"
+!   TYPE IS(flat_flux_func)
+!     WRITE(io_unit,*)"flat"
+!   TYPE IS(poly_flux_func)
+!     WRITE(io_unit,*)"poly"
+!     ! IF(this%zero_grad)THEN
+!     !   WRITE(io_unit,*)this%deg+1,this%zero_grad
+!     !   WRITE(io_unit,*)1.d0,this%cofs
+!     ! ELSE
+!     !   WRITE(io_unit,*)this%deg,this%zero_grad
+!     !   WRITE(io_unit,*)this%cofs
+!     ! END IF
+!   TYPE IS(linterp_flux_func)
+!     WRITE(io_unit,*)"linterp"
+!     ! WRITE(io_unit,*)this%npsi,this%y0
+!     ! WRITE(io_unit,*)this%x
+!     ! WRITE(io_unit,*)this%yp
+!   TYPE IS(jphi_flux_func)
+!     WRITE(io_unit,*)"jphi-linterp"
+!     ! WRITE(io_unit,*)this%npsi,this%y0
+!     ! WRITE(io_unit,*)this%x
+!     ! WRITE(io_unit,*)this%jphi
+!   TYPE IS(wesson_flux_func)
+!     WRITE(io_unit,*)"wesson"
+!     ! WRITE(io_unit,*)this%ncofs
+!     ! WRITE(io_unit,*)this%gamma
+!   CLASS DEFAULT
+!     CALL oft_abort('Invalid profile type.','gs_profile_save',__FILE__)
+! END SELECT
+CALL F%save(io_unit)
 CLOSE(io_unit)
 END SUBROUTINE gs_profile_save
 !------------------------------------------------------------------------------
@@ -332,6 +331,477 @@ vloop=self%psiscale*(eta_jsq/itor)
 CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_calc_vloop
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine gs_save_tokamaker(self,filename)
+class(gs_equil), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+real(r8), pointer :: vals_tmp(:)
+integer(4) :: hash_tmp,io_unit
+logical :: pm_save
+IF(ASSOCIATED(self%P_ani))CALL oft_abort('Anisotropic pressure profiles not currently supported in tokamaker save.','gs_save_tokamaker',__FILE__)
+CALL hdf5_create_file(filename)
+! CALL hdf5_create_group(filename,'mesh')
+! CALL hdf5_write(self%device%fe_rep%mesh%r,filename,'mesh/R')
+! CALL hdf5_write(self%device%fe_rep%mesh%lc,filename,'mesh/LC')
+CALL hdf5_create_group(filename,'tokamaker')
+CALL hdf5_write(self%device%fe_rep%order,filename,'tokamaker/FE_ORDER')
+hash_tmp = oft_simple_hash(C_LOC(self%device%mesh%lc),INT(4*3*self%device%mesh%nc,8))
+CALL hdf5_write(hash_tmp,filename,'tokamaker/LC_HASH')
+hash_tmp = oft_simple_hash(C_LOC(self%device%mesh%reg),INT(4*self%device%mesh%nc,8))
+CALL hdf5_write(hash_tmp,filename,'tokamaker/REG_HASH')
+CALL hdf5_write(self%device%ncoils,filename,'tokamaker/NCOILS')
+!---
+NULLIFY(vals_tmp)
+CALL self%psi%get_local(vals_tmp)
+CALL hdf5_write(vals_tmp,filename,'tokamaker/PSI')
+CALL hdf5_write(self%coil_currs,filename,'tokamaker/COIL_CURRENTS')
+!---
+CALL hdf5_write(self%ffp_scale,filename,'tokamaker/FFP_SCALE')
+CALL hdf5_write(self%I%f_offset,filename,'tokamaker/F0')
+CALL hdf5_create_group(filename,'tokamaker/FFP_PROFILE')
+CALL self%I%save(filename,'tokamaker/FFP_PROFILE')
+CALL hdf5_write(self%p_scale,filename,'tokamaker/P_SCALE')
+CALL hdf5_create_group(filename,'tokamaker/PP_PROFILE')
+CALL self%P%save(filename,'tokamaker/PP_PROFILE')
+IF(ASSOCIATED(self%I_NI))THEN
+  CALL hdf5_create_group(filename,'tokamaker/NI_PROFILE')
+  CALL self%I_NI%save(filename,'tokamaker/NI_PROFILE')
+END IF
+IF(ASSOCIATED(self%eta))THEN
+  CALL hdf5_create_group(filename,'tokamaker/ETA_PROFILE')
+  CALL self%eta%save(filename,'tokamaker/ETA_PROFILE')
+END IF
+!---Save kinetic profiles (Te, Ti, ne, ni) if set
+IF(ASSOCIATED(self%Te))THEN
+  CALL hdf5_create_group(filename,'tokamaker/TE_PROFILE')
+  CALL self%Te%save(filename,'tokamaker/TE_PROFILE')
+END IF
+IF(ASSOCIATED(self%Ti))THEN
+  CALL hdf5_create_group(filename,'tokamaker/TI_PROFILE')
+  CALL self%Ti%save(filename,'tokamaker/TI_PROFILE')
+END IF
+IF(ASSOCIATED(self%ne))THEN
+  CALL hdf5_create_group(filename,'tokamaker/NE_PROFILE')
+  CALL self%ne%save(filename,'tokamaker/NE_PROFILE')
+END IF
+IF(ASSOCIATED(self%ni))THEN
+  CALL hdf5_create_group(filename,'tokamaker/NI_DENS_PROFILE')
+  CALL self%ni%save(filename,'tokamaker/NI_DENS_PROFILE')
+END IF
+! IF(ASSOCIATED(self%P_ani))THEN
+!   CALL hdf5_create_group(filename,'tokamaker/P_ANI')
+!   CALL self%P_ani%save(filename,'tokamaker/P_ANI')
+! END IF
+!---
+CALL hdf5_write(self%plasma_bounds,filename,'tokamaker/PSI_BOUNDS')
+CALL hdf5_write(self%o_point,filename,'tokamaker/O_POINT')
+CALL hdf5_write(self%lim_point,filename,'tokamaker/LIM_POINT')
+CALL hdf5_write(self%diverted,filename,'tokamaker/DIVERTED')
+!---
+IF(self%Itor_target>0.d0)CALL hdf5_write(self%Itor_target,filename,'tokamaker/IP_TARGET')
+IF(self%Ip_ratio_target>-1.d98)CALL hdf5_write(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET')
+IF(self%R0_target>0.d0)CALL hdf5_write(self%R0_target,filename,'tokamaker/R0_TARGET')
+IF(self%Z0_target>-1.d98)CALL hdf5_write(self%Z0_target,filename,'tokamaker/Z0_TARGET')
+IF(self%pax_target>0.d0)CALL hdf5_write(self%pax_target,filename,'tokamaker/PAX_TARGET')
+IF(self%estore_target>0.d0)CALL hdf5_write(self%estore_target,filename,'tokamaker/ESTORE_TARGET')
+IF(self%isoflux_ntargets>0)CALL hdf5_write(self%isoflux_targets,filename,'tokamaker/ISOFLUX_TARGETS')
+IF(self%flux_ntargets>0)CALL hdf5_write(self%flux_targets,filename,'tokamaker/FLUX_TARGETS')
+IF(self%saddle_ntargets>0)CALL hdf5_write(self%saddle_targets,filename,'tokamaker/SADDLE_TARGETS')
+!---Save boot_ops (only when initialized)
+IF(self%boot_ops%initialized)THEN
+  CALL hdf5_create_group(filename,'tokamaker/BOOT_OPS')
+  CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%isolate_edge_jBS),filename,'tokamaker/BOOT_OPS/ISOLATE_EDGE_JBS')
+  CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%parameterize_jBS),filename,'tokamaker/BOOT_OPS/PARAMETERIZE_JBS')
+  CALL hdf5_write(self%boot_ops%scale_jBS,filename,'tokamaker/BOOT_OPS/SCALE_JBS')
+  CALL hdf5_write(self%boot_ops%Zeff,filename,'tokamaker/BOOT_OPS/ZEFF')
+  CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%diagnose_bs),filename,'tokamaker/BOOT_OPS/DIAGNOSE_BS')
+  CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%taper_edge_jBS),filename,'tokamaker/BOOT_OPS/TAPER_EDGE_JBS')
+  CALL hdf5_write(self%boot_ops%taper_edge_psi0,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_PSI0')
+  CALL hdf5_write(self%boot_ops%taper_edge_shape,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_SHAPE')
+END IF
+end subroutine gs_save_tokamaker
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
+subroutine gs_load_tokamaker(self,filename,error_string)
+class(gs_equil), intent(inout) :: self
+character(LEN=*), intent(in) :: filename
+CHARACTER(LEN=OFT_ERROR_SLEN), intent(out) :: error_string
+integer(4) :: hash_tmp,hash_in,io_unit,int_tmp,ndims
+integer(i4), allocatable :: dim_sizes(:)
+REAL(r8) :: pt_tmp(2),scale_tmp,diff_val
+real(r8), pointer :: vals_tmp(:)
+logical :: success,pm_save,logical_tmp
+CHARACTER(LEN=:), ALLOCATABLE :: profType
+error_string=''
+! CALL hdf5_write(self%device%fe_rep%mesh%r,filename,'mesh/R')
+! CALL hdf5_write(self%device%fe_rep%mesh%lc,filename,'mesh/LC')
+!---Check compatibility of mesh and FE representation
+CALL hdf5_read(int_tmp,filename,'tokamaker/FE_ORDER',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read FE order.'
+  RETURN
+END IF
+IF(int_tmp/=self%device%fe_rep%order)THEN
+  error_string='FE order of equilibrium does not match current device.'
+  RETURN
+END IF
+hash_tmp = oft_simple_hash(C_LOC(self%device%mesh%lc),INT(4*3*self%device%mesh%nc,8))
+CALL hdf5_read(hash_in,filename,'tokamaker/LC_HASH',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read cell list hash.'
+  RETURN
+END IF
+IF(hash_tmp/=hash_in)THEN
+  error_string='Cell list hash for equilibrium does not match current device.'
+  RETURN
+END IF
+hash_tmp = oft_simple_hash(C_LOC(self%device%mesh%reg),INT(4*self%device%mesh%nc,8))
+CALL hdf5_read(hash_in,filename,'tokamaker/REG_HASH',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read region hash.'
+  RETURN
+END IF
+IF(hash_tmp/=hash_in)THEN
+  error_string='Region hash for equilibrium does not match current device.'
+  RETURN
+END IF
+CALL hdf5_read(int_tmp,filename,'tokamaker/NCOILS',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read number of coils.'
+  RETURN
+END IF
+IF(int_tmp/=self%device%ncoils)THEN
+  error_string='Number of coils for equilibrium does not match current device.'
+  RETURN
+END IF
+!---Load psi and update bounds
+NULLIFY(vals_tmp)
+CALL self%psi%get_local(vals_tmp)
+CALL hdf5_read(vals_tmp,filename,'tokamaker/PSI',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read PSI values.'
+  RETURN
+END IF
+CALL self%psi%restore_local(vals_tmp)
+CALL hdf5_read(self%coil_currs,filename,'tokamaker/COIL_CURRENTS',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read coil currents.'
+  RETURN
+END IF
+CALL gs_update_bounds(self)
+!---Load kinetic profiles (Te, Ti, ne, ni) early so they are available when
+!   flux function update() calls (e.g. jphi_bs_update) are made below
+IF(hdf5_field_exist(filename,'tokamaker/TE_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/TE_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Te profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%Te))THEN
+    CALL self%Te%delete()
+    DEALLOCATE(self%Te)
+  END IF
+  CALL gs_profile_alloc(profType,self%Te)
+  DEALLOCATE(profType)
+  CALL self%Te%load(filename,'tokamaker/TE_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load Te profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/TI_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/TI_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Ti profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%Ti))THEN
+    CALL self%Ti%delete()
+    DEALLOCATE(self%Ti)
+  END IF
+  CALL gs_profile_alloc(profType,self%Ti)
+  DEALLOCATE(profType)
+  CALL self%Ti%load(filename,'tokamaker/TI_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load Ti profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/NE_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/NE_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read ne profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%ne))THEN
+    CALL self%ne%delete()
+    DEALLOCATE(self%ne)
+  END IF
+  CALL gs_profile_alloc(profType,self%ne)
+  DEALLOCATE(profType)
+  CALL self%ne%load(filename,'tokamaker/NE_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load ne profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/NI_DENS_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/NI_DENS_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read ni profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%ni))THEN
+    CALL self%ni%delete()
+    DEALLOCATE(self%ni)
+  END IF
+  CALL gs_profile_alloc(profType,self%ni)
+  DEALLOCATE(profType)
+  CALL self%ni%load(filename,'tokamaker/NI_DENS_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load ni profile.'
+    RETURN
+  END IF
+END IF
+!---Load flux functions
+CALL hdf5_read(self%ffp_scale,filename,'tokamaker/FFP_SCALE',success=success)
+IF(.NOT.success)THEN
+  error_string="Failed to read F*F' scale."
+  RETURN
+END IF
+CALL hdf5_read(profType,filename,'tokamaker/FFP_PROFILE/TYPE',success=success)
+IF(.NOT.success)THEN
+  error_string="Failed to read F*F' profile type."
+  RETURN
+END IF
+IF(ASSOCIATED(self%I))THEN
+  CALL self%I%delete()
+  DEALLOCATE(self%I)
+END IF
+CALL gs_profile_alloc(profType,self%I)
+DEALLOCATE(profType)
+CALL self%I%load(filename,'tokamaker/FFP_PROFILE',success=success)
+CALL self%I%update(self)
+IF(.NOT.success)THEN
+  error_string="Failed to load F*F' profile."
+  RETURN
+END IF
+CALL hdf5_read(self%I%f_offset,filename,'tokamaker/F0',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read F0 values.'
+  RETURN
+END IF
+CALL hdf5_read(self%p_scale,filename,'tokamaker/P_SCALE',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read P scale.'
+  RETURN
+END IF
+CALL hdf5_read(profType,filename,'tokamaker/PP_PROFILE/TYPE',success=success)
+IF(.NOT.success)THEN
+  error_string="Failed to read P' profile type."
+  RETURN
+END IF
+IF(ASSOCIATED(self%P))THEN
+  CALL self%P%delete()
+  DEALLOCATE(self%P)
+END IF
+CALL gs_profile_alloc(profType,self%P)
+DEALLOCATE(profType)
+CALL self%P%load(filename,'tokamaker/PP_PROFILE',success=success)
+CALL self%P%update(self)
+IF(.NOT.success)THEN
+  error_string="Failed to load P' profile."
+  RETURN
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/NI_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/NI_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read non-inductive current profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%I_NI))THEN
+    CALL self%I_NI%delete()
+    DEALLOCATE(self%I_NI)
+  END IF
+  CALL gs_profile_alloc(profType,self%I_NI)
+  DEALLOCATE(profType)
+  CALL self%I_NI%load(filename,'tokamaker/NI_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load non-inductive current profile.'
+    RETURN
+  END IF
+  CALL self%I_NI%update(self)
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/ETA_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/ETA_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read ETA profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%eta))THEN
+    CALL self%eta%delete()
+    DEALLOCATE(self%eta)
+  END IF
+  CALL gs_profile_alloc(profType,self%eta)
+  DEALLOCATE(profType)
+  CALL self%eta%load(filename,'tokamaker/ETA_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load ETA profile.'
+    RETURN
+  END IF
+  CALL self%eta%update(self)
+END IF
+! IF(hdf5_field_exist(filename,'tokamaker/P_ANI'))THEN
+!   CALL hdf5_read(profType,filename,'tokamaker/P_ANI/TYPE',success=success)
+!   IF(.NOT.success)GOTO 100
+!   IF(ASSOCIATED(self%P_ani))THEN
+!     CALL self%P_ani%delete()
+!     DEALLOCATE(self%P_ani)
+!   END IF
+!   CALL gs_ani_alloc(profType,self%P_ani)
+!   DEALLOCATE(profType)
+!   CALL self%P_ani%load(filename,'tokamaker/P_ANI',success=success)
+!   IF(.NOT.success)GOTO 100
+!   CALL self%P_ani%update(self)
+! END IF
+!---Check consistency of values and warn if they differ beyond expected numerical differences
+CALL hdf5_read(pt_tmp,filename,'tokamaker/PSI_BOUNDS',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read PSI bounds.'
+  RETURN
+END IF
+diff_val=ABS(pt_tmp(2)-pt_tmp(1))*1.d-2
+IF(ANY(ABS(pt_tmp-self%plasma_bounds)>diff_val))THEN
+  CALL oft_warn('Plasma bounds in equilibrium file do not match recomputed values.')
+END IF
+CALL hdf5_read(pt_tmp,filename,'tokamaker/O_POINT',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read O-point.'
+  RETURN
+END IF
+diff_val=self%device%mesh%hrms
+IF(SQRT(SUM((pt_tmp-self%o_point)**2))>diff_val)THEN
+  CALL oft_warn('O-point in equilibrium file does not match recomputed location.')
+END IF
+CALL hdf5_read(pt_tmp,filename,'tokamaker/LIM_POINT',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read Limiting point.'
+  RETURN
+END IF
+diff_val=self%device%mesh%hrms
+IF(SQRT(SUM((pt_tmp-self%lim_point)**2))>diff_val)THEN
+  CALL oft_warn('Limiting point in equilibrium file does not match recomputed location.')
+END IF
+CALL hdf5_read(logical_tmp,filename,'tokamaker/DIVERTED',success=success)
+IF(.NOT.success)THEN
+  error_string='Failed to read Diverted status.'
+  RETURN
+END IF
+IF(logical_tmp.NEQV.self%diverted)THEN
+  CALL oft_warn('Diverted status in equilibrium file does not match recomputed value.')
+END IF
+!---Load targets and coil currents
+IF(hdf5_field_exist(filename,'tokamaker/IP_TARGET'))THEN
+  CALL hdf5_read(self%Itor_target,filename,'tokamaker/IP_TARGET',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Ip target.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/IP_RATIO_TARGET'))THEN
+  CALL hdf5_read(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Ip ratio target.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/R0_TARGET'))THEN
+  CALL hdf5_read(self%R0_target,filename,'tokamaker/R0_TARGET',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read R0 target.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/Z0_TARGET'))THEN
+  CALL hdf5_read(self%Z0_target,filename,'tokamaker/Z0_TARGET',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Z0 target.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/PAX_TARGET'))THEN
+  CALL hdf5_read(self%pax_target,filename,'tokamaker/PAX_TARGET',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read P axis target.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/ESTORE_TARGET'))THEN
+  CALL hdf5_read(self%estore_target,filename,'tokamaker/ESTORE_TARGET',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read stored energy target.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/ISOFLUX_TARGETS'))THEN
+  CALL hdf5_field_get_sizes(filename,'tokamaker/ISOFLUX_TARGETS',ndims,dim_sizes)
+  IF(dim_sizes(1)/=5)CALL oft_abort('Invalid first dimension for isoflux targets', 'gs_load_tokamaker', __FILE__)
+  self%isoflux_ntargets=dim_sizes(2)
+  IF(ASSOCIATED(self%isoflux_targets))DEALLOCATE(self%isoflux_targets)
+  ALLOCATE(self%isoflux_targets(5,self%isoflux_ntargets))
+  DEALLOCATE(dim_sizes)
+  CALL hdf5_read(self%isoflux_targets,filename,'tokamaker/ISOFLUX_TARGETS',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read isoflux targets.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/FLUX_TARGETS'))THEN
+  CALL hdf5_field_get_sizes(filename,'tokamaker/FLUX_TARGETS',ndims,dim_sizes)
+  IF(dim_sizes(1)/=4)CALL oft_abort('Invalid first dimension for flux targets', 'gs_load_tokamaker', __FILE__)
+  self%flux_ntargets=dim_sizes(2)
+  IF(ASSOCIATED(self%flux_targets))DEALLOCATE(self%flux_targets)
+  ALLOCATE(self%flux_targets(4,self%flux_ntargets))
+  DEALLOCATE(dim_sizes)
+  CALL hdf5_read(self%flux_targets,filename,'tokamaker/FLUX_TARGETS',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read flux targets.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/SADDLE_TARGETS'))THEN
+  CALL hdf5_field_get_sizes(filename,'tokamaker/SADDLE_TARGETS',ndims,dim_sizes)
+  IF(dim_sizes(1)/=3)CALL oft_abort('Invalid first dimension for saddle targets', 'gs_load_tokamaker', __FILE__)
+  self%saddle_ntargets=dim_sizes(2)
+  IF(ASSOCIATED(self%saddle_targets))DEALLOCATE(self%saddle_targets)
+  ALLOCATE(self%saddle_targets(3,self%saddle_ntargets))
+  DEALLOCATE(dim_sizes)
+  CALL hdf5_read(self%saddle_targets,filename,'tokamaker/SADDLE_TARGETS',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read saddle targets.'
+    RETURN
+  END IF
+END IF
+!---Load boot_ops if present
+IF(hdf5_field_exist(filename,'tokamaker/BOOT_OPS'))THEN
+  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/ISOLATE_EDGE_JBS',success=success)
+  IF(success) self%boot_ops%isolate_edge_jBS = (int_tmp/=0)
+  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/PARAMETERIZE_JBS',success=success)
+  IF(success) self%boot_ops%parameterize_jBS = (int_tmp/=0)
+  CALL hdf5_read(self%boot_ops%scale_jBS,filename,'tokamaker/BOOT_OPS/SCALE_JBS',success=success)
+  CALL hdf5_read(self%boot_ops%Zeff,filename,'tokamaker/BOOT_OPS/ZEFF',success=success)
+  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/DIAGNOSE_BS',success=success)
+  IF(success) self%boot_ops%diagnose_bs = (int_tmp/=0)
+  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_JBS',success=success)
+  IF(success) self%boot_ops%taper_edge_jBS = (int_tmp/=0)
+  CALL hdf5_read(self%boot_ops%taper_edge_psi0,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_PSI0',success=success)
+  CALL hdf5_read(self%boot_ops%taper_edge_shape,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_SHAPE',success=success)
+  self%boot_ops%initialized = .TRUE.
+END IF
+end subroutine gs_load_tokamaker
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------

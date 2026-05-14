@@ -66,14 +66,14 @@ def validate_dict(results,dict_exp):
                         continue
                     if abs((result_val[i]-exp_val[i])/exp_val[i]) > tol_dict.get(key,1.E-2):
                         print("FAILED: {0} ({1}) error too high!".format(key,i))
-                        print("  Expected = {0}".format(exp_val[i]))
-                        print("  Actual =   {0}".format(result_val[i]))
+                        print("  Expected = {0:E}".format(exp_val[i]))
+                        print("  Actual =   {0:E}".format(result_val[i]))
                         test_result = False
             else:
                 if abs((result_val-exp_val)/exp_val) > tol_dict.get(key,1.E-2):
                     print("FAILED: {0} error too high!".format(key))
-                    print("  Expected = {0}".format(exp_val))
-                    print("  Actual =   {0}".format(result_val))
+                    print("  Expected = {0:E}".format(exp_val))
+                    print("  Actual =   {0:E}".format(result_val))
                     test_result = False
     return test_result
 
@@ -459,7 +459,7 @@ def test_coil_h3(order,dist_coil):
 
 
 #============================================================================
-def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,mp_q):
+def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
     def create_mesh():
         with open('ITER_geom.json','r') as fid:
             ITER_geom = json.load(fid)
@@ -509,9 +509,13 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
         mygs.setup(order=fe_order,F0=5.3*6.2)
         #
-        if eig_test:
-            eig_vals, _ = mygs.eig_wall(10)
-            mp_q.put([{'Tau_w': eig_vals[:5,0]}])
+        if test_type.startswith('eig'):
+            if test_type == 'eig_dep':
+                eig_vals, _ = mygs.eig_wall(10)
+                mp_q.put([{'Tau_w': 1.0/eig_vals[:5,0]}])
+            else:
+                eig_vals, _ = mygs.compute_wall_modes(10)
+                mp_q.put([{'Tau_w': eig_vals[:5]}])
             oftpy_dump_cov()
             return
         #
@@ -564,35 +568,46 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         delta = 0.0
         try:
             mygs.init_psi(R0, Z0, a, kappa, delta)
-            mygs.solve()
+            EQ_obj, nl_its = mygs.solve(return_its=True)
         except ValueError:
             mp_q.put(None)
             return
-        if stability_test:
-            eig_vals, eig_vecs = mygs.eig_td(-1.E2,10,False)
+        if test_type.startswith('stab'):
+            if test_type == 'stab_dep':
+                eig_vals, eig_modes = mygs.eig_td(-1.E2,10,False)
+                growth_rates = -eig_vals[:,0]
+            else:
+                growth_rates, eig_modes = mygs.compute_linear_stability(1.E2,10,False)
             # Run brief nonlinear evolution
             psi0 = mygs.get_psi(False)
-            eig_sign = eig_vecs[0,(mygs.r[:,1]-R0)>0.0][abs(eig_vecs[0,(mygs.r[:,1]-R0)>0.0]).argmax()]
-            psi_ic = psi0-0.01*eig_vecs[0,:]*(mygs.psi_bounds[1]-mygs.psi_bounds[0])/eig_sign
+            eig_sign = eig_modes[0,(mygs.r[:,1]-R0)>0.0][abs(eig_modes[0,(mygs.r[:,1]-R0)>0.0]).argmax()]
+            psi_ic = psi0-0.01*eig_modes[0,:]*(mygs.psi_bounds[1]-mygs.psi_bounds[0])/eig_sign
             mygs.set_psi(psi_ic)
             mygs.set_saddles(None)
             mygs.set_isoflux(None)
-            dt = 0.1/abs(eig_vals[0,0])
+            dt = 0.1/abs(growth_rates[0])
             mygs.setup_td(dt,1.E-13,1.E-11)
             sim_time = 0.0
             for i in range(5):
-                sim_time, _, nl_its, lin_its, nretry = mygs.step_td(sim_time,dt)
+                sim_time, _, _, _, _ = mygs.step_td(sim_time,dt)
             psi1 = mygs.get_psi(False)
-            mp_q.put([{'gamma': eig_vals[:5,0], 'nl_change': np.linalg.norm(psi1-psi0)}])
+            mp_q.put([{'gamma': growth_rates[:5], 'nl_change': np.linalg.norm(psi1-psi0)}])
             oftpy_dump_cov()
             return
         mygs.save_eqdsk('test.eqdsk',lcfs_pressure=6.E4)
-        eq_info = mygs.get_stats(li_normalization='ITER')
+        if test_type == 'io':
+            EQ_obj.save_TokaMaker('test_eq.h5')
+            mygs.init_psi(R0, Z0, a, kappa, delta)
+            mygs.replace_eq(source_file='test_eq.h5')
+            EQ_obj = mygs.copy_eq()
+            _, nl_its = mygs.solve(return_its=True)
+        eq_info = EQ_obj.get_stats(li_normalization='ITER')
         Lmat = mygs.get_coil_Lmat()
         eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
         eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
         eq_info['Lplasma'] = Lmat[-1,-1]
-    if test_recon:
+        eq_info['nl_its'] = nl_its
+    if test_type == 'recon':
         import random
         from OpenFUSIONToolkit.TokaMaker.reconstruction import reconstruction
         # Sample constraint locations
@@ -648,7 +663,7 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         a = 1.0
         kappa = 1.0
         delta = 0.0
-        err_flag = mygs.init_psi(R0, Z0, a, kappa, delta)
+        mygs.init_psi(R0, Z0, a, kappa, delta)
         mygs.settings.maxits=100
         mygs.update_settings()
         mygs.solve()
@@ -661,7 +676,7 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         myrecon.settings.fitR0 = True
         myrecon.settings.fitCoils = True
         myrecon.settings.pm = False
-        err_flag = myrecon.reconstruct()
+        _ = myrecon.reconstruct()
         #
         eq_info = mygs.get_stats(li_normalization='ITER')
         eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
@@ -683,19 +698,25 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_eig(order):
     exp_dict = {
-        'Tau_w': [1.51083009, 2.87431718, 3.91493237, 5.23482507, 5.61049374]
+        'Tau_w': [6.619977E-01, 3.479492E-01, 2.554444E-01, 1.910381E-01, 1.782464E-01]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),True,False,False))
+    results = mp_run(run_ITER_case,(1.0,(order,),'eig'))
+    assert validate_dict(results,exp_dict)
+    # Test deprecated interface
+    results = mp_run(run_ITER_case,(1.0,(order,),'eig_dep'))
     assert validate_dict(results,exp_dict)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_stability(order):
     exp_dict = {
-        'gamma': [-12.3620, 1.83981, 3.41613, 5.12470, 6.53393],
+        'gamma': [12.3620, -1.83981, -3.41613, -5.12470, -6.53393],
         'nl_change': [225.4421413167051, 338.0113029638385][order-2]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),False,True,False))
+    results = mp_run(run_ITER_case,(1.0,(order,),'stab'))
+    assert validate_dict(results,exp_dict)
+    # Test deprecated interface
+    results = mp_run(run_ITER_case,(1.0,(order,),'stab_dep'))
     assert validate_dict(results,exp_dict)
 
 ITER_eq_dict = {
@@ -728,10 +749,18 @@ ITER_eq_dict = {
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_eq(order):
-    results = mp_run(run_ITER_case,(1.0,(order,),False,False,False))
+    results = mp_run(run_ITER_case,(1.0,(order,),''))
     assert validate_dict(results,ITER_eq_dict)
     assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk')
     assert validate_ifile('tokamaker.ifile','ITER_test.ifile')
+
+@pytest.mark.coverage
+@pytest.mark.parametrize("order", (2,3))#,4))
+def test_ITER_eq_io(order):
+    eq_dict = ITER_eq_dict.copy()
+    eq_dict['nl_its'] = 1
+    results = mp_run(run_ITER_case,(1.0,(order,),'io'))
+    assert validate_dict(results,eq_dict)
 
 @pytest.mark.coverage
 def test_ITER_recon():
@@ -743,15 +772,15 @@ def test_ITER_recon():
     ITER_recon_dict['beta_pol'] = 44.16835089714342
     ITER_recon_dict['beta_tor'] = 1.8950360948919174
     ITER_recon_dict['beta_n'] = 1.2576100533550467
-    results = mp_run(run_ITER_case,(1.0,(2,),False,False,True))
+    results = mp_run(run_ITER_case,(1.0,(2,),'recon'))
     assert validate_dict(results,ITER_recon_dict)
 
 def test_ITER_concurrent():
-    results = mp_run(run_ITER_case,(1.0,(2,3),False,False,False))
+    results = mp_run(run_ITER_case,(1.0,(2,3),''))
     assert validate_dict(results,ITER_eq_dict)
 
 #============================================================================
-def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
+def run_LTX_case(fe_order,test_type,mp_q):
     def create_mesh():
         with open('LTX_geom.json','r') as fid:
             LTX_geom = json.load(fid)
@@ -801,9 +830,9 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order,F0=0.10752)
     #
-    if eig_test:
-        eig_vals, _ = mygs.eig_wall(10)
-        mp_q.put([{'Tau_w': eig_vals[:5,0]}])
+    if test_type == 'eig':
+        eig_vals, _ = mygs.compute_wall_modes(10)
+        mp_q.put([{'Tau_w': eig_vals[:5]}])
         oftpy_dump_cov()
         return
     #
@@ -838,9 +867,9 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     mygs.settings.pm=True
     mygs.update_settings()
     mygs.solve()
-    if stability_test:
-        eig_vals, _ = mygs.eig_td(-1.E3,10,False)
-        mp_q.put([{'gamma': eig_vals[:5,0]}])
+    if test_type == 'stab':
+        eig_vals, _ = mygs.compute_linear_stability(1.E3,10,False)
+        mp_q.put([{'gamma': eig_vals[:5]}])
         oftpy_dump_cov()
         return
     #
@@ -859,18 +888,18 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_eig(order):
     exp_dict = {
-        'Tau_w': [195.300148, 253.92961287, 394.26207238, 460.20439568, 539.40856182]
+        'Tau_w': [5.152566E-03, 3.953030E-03, 2.536384E-03, 2.172948E-03, 1.853882E-03]
     }
-    results = mp_run(run_LTX_case,(order,True,False))
+    results = mp_run(run_LTX_case,(order,'eig'))
     assert validate_dict(results,exp_dict)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_stability(order):
     exp_dict = {
-        'gamma': [-234.1051, 214.4196, 282.0877, 388.7592, 388.7592]
+        'gamma': [234.1051, -214.4196, -282.0877, -388.7592, -388.7592]
     }
-    results = mp_run(run_LTX_case,(order,False,True))
+    results = mp_run(run_LTX_case,(order,'stab'))
     assert validate_dict(results,exp_dict)
 
 LTX_eq_dict = {
@@ -900,7 +929,7 @@ LTX_eq_dict = {
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_eq(order):
-    results = mp_run(run_LTX_case,(order,False,False))
+    results = mp_run(run_LTX_case,(order,''))
     assert validate_dict(results,LTX_eq_dict)
 
 #============================================================================

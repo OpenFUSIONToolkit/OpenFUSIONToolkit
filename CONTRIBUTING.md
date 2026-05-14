@@ -84,6 +84,7 @@ John Lhota (@john4255)\
 Francois Logak\
 Oak Nelson (@nelsonand)\
 Matthew Pharr (@matt-pharr)\
+Jeremy Salm (@jeremslm)\
 Benjy Smith (@benjysmith)\
 Thomas Wang (@ThomasWangAPAM)
 
