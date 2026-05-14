@@ -25,14 +25,3 @@ __pycache__
 /oft_venv/
 /compiler_id.txt
 /setup_env.sh
-src/examples/TokaMaker/ITER/results_deprecated/
-src/examples/TokaMaker/ITER/results_deprecated_newer/
-src/examples/TokaMaker/ITER/results_final_newer/
-src/examples/TokaMaker/ITER/results_final/
-src/examples/TokaMaker/ITER/results_final_final/
-src/examples/TokaMaker/ITER/profiles_internal*
-src/examples/TokaMaker/ITER/profiles_external*
-src/examples/TokaMaker/ITER/eq_*
-src/examples/TokaMaker/ITER/diff_bab3554.diff
-src/examples/TokaMaker/ITER/*.png
-src/examples/TokaMaker/ITER/*.log
