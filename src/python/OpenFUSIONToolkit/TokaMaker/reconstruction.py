@@ -31,6 +31,14 @@ class tokamaker_recon_settings_cstruct(c_struct):
 # tokamaker_recon_run(tMaker_ptr,vacuum,settings,error_flag)
 tokamaker_recon_run = ctypes_subroutine(oftpy_lib.tokamaker_recon_run,
     [c_void_p, c_bool, tokamaker_recon_settings_cstruct, c_int_ptr])
+
+# tokamaker_recon_err(tMaker_ptr,vacuum,settings,error_flag)
+tokamaker_recon_err = ctypes_subroutine(oftpy_lib.tokamaker_recon_err,
+    [c_void_p, c_bool, tokamaker_recon_settings_cstruct, c_int_ptr])
+
+# tokamaker_recon_setup(tMaker_ptr,settings,error_flag)
+tokamaker_recon_setup = ctypes_subroutine(oftpy_lib.tokamaker_recon_setup,
+    [c_void_p, tokamaker_recon_settings_cstruct, c_int_ptr])
 ## @endcond
 
 Mirnov_con_id = 1
@@ -543,6 +551,26 @@ class reconstruction():
                     self._pressure_cons.append(new_con)
                 else:
                     raise ValueError("Unknown constraint type")
+    
+    def setup_constraints(self):
+        '''! Set up constraints in TokaMaker for current equilibrium without performing reconstruction'''
+        # Modify input file
+        self.write_fit_in()
+        # Run setup
+        error_flag = c_int()
+        tokamaker_recon_setup(self._tMaker_obj._tMaker_ptr,self.settings.get_c_struct(self._tMaker_obj._oft_env),ctypes.byref(error_flag))
+        return error_flag.value
+
+    def eval_error(self, vacuum=False):
+        '''! Evaluate error in current equilibrium for specified constraints without performing reconstruction
+        
+        @param vacuum Perform vacuum reconstruction
+        @result Error flag
+        '''
+        # Run error evaluation
+        error_flag = c_int()
+        tokamaker_recon_err(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings.get_c_struct(self._tMaker_obj._oft_env),ctypes.byref(error_flag))
+        return error_flag.value
 
     def reconstruct(self, vacuum=False, linearized_fit=False, maxits=100, eps=1.E-3, ftol=1.E-3, xtol=1.E-3, gtol=1.E-3):
         '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.

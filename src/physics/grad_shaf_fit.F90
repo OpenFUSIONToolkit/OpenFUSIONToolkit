@@ -204,8 +204,38 @@ LOGICAL, PRIVATE :: linearized_fit = .FALSE. !< Needs docs
 TYPE(fit_constraint_ptr), POINTER, DIMENSION(:) :: conlist => NULL() !< Needs docs
 !---
 PUBLIC fit_constraint, field_constraint, itor_constraint, fit_pm
-PUBLIC fit_constraint_ptr, fit_gs, fit_load
+PUBLIC fit_constraint_ptr, fit_gs, fit_gs_error, fit_load, fit_gs_setup
 CONTAINS
+!---------------------------------------------------------------------------------
+!> Needs Docs
+!---------------------------------------------------------------------------------
+SUBROUTINE fit_gs_setup(gs,constraints,inpath)
+TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
+TYPE(fit_constraint_ptr), POINTER, DIMENSION(:), INTENT(out) :: constraints !< Needs docs
+CHARACTER(LEN=*), INTENT(in) :: inpath !< Needs docs
+integer(4) :: i,io_unit
+!---Load constraints
+gs_active=>gs
+CALL fit_load(inpath,constraints)
+END SUBROUTINE fit_gs_setup
+!---------------------------------------------------------------------------------
+!> Needs Docs
+!---------------------------------------------------------------------------------
+SUBROUTINE fit_gs_error(gs,constraints,inpath,outpath)
+TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
+TYPE(fit_constraint_ptr), POINTER, DIMENSION(:), INTENT(in) :: constraints !< Needs docs
+CHARACTER(LEN=*), INTENT(in) :: inpath !< Needs docs
+CHARACTER(LEN=*), INTENT(in) :: outpath !< Needs docs
+integer(4) :: i,io_unit
+!---Evaluate errors
+gs_active=>gs
+OPEN(NEWUNIT=io_unit,FILE=TRIM(outpath))
+DO i=1,SIZE(constraints)
+  WRITE(io_unit,'(I8,4ES20.12)')i,constraints(i)%con%error(gs),constraints(i)%con%eval(gs),constraints(i)%con%val, &
+  constraints(i)%con%get_nax(gs)
+END DO
+CLOSE(io_unit)
+END SUBROUTINE fit_gs_error
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------

@@ -35,7 +35,7 @@ USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_de
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
   sauter_fc, gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
-USE oft_gs_fit, ONLY: fit_gs, fit_pm
+USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
 USE diagnostic, ONLY: bscal_surf_int
@@ -89,6 +89,7 @@ TYPE :: tokamaker_instance
   TYPE(oft_ml_fem_type), POINTER :: ML_oft_blagrange => NULL() !< Finite element container
   TYPE(gs_factory), POINTER :: device => NULL() !< G-S device object
   TYPE(gs_equil), POINTER :: gs_equil => NULL() !< Active G-S equilibrium object
+  TYPE(fit_constraint_ptr), POINTER, DIMENSION(:) :: recon_constraints => NULL() !< Constraints for equilibrium reconstruction
   TYPE(oft_tmaker_td), POINTER :: gs_td => NULL() !< Time-dependent G-S object
 END TYPE tokamaker_instance
 CONTAINS
@@ -583,6 +584,58 @@ CALL gs_profile_save(TRIM(outfile)//'_fprof',tMaker_obj%gs_equil%I)
 CALL gs_profile_save(TRIM(outfile)//'_pprof',tMaker_obj%gs_equil%P)
 tMaker_obj%gs_equil%has_plasma=.TRUE.
 END SUBROUTINE tokamaker_recon_run
+!---------------------------------------------------------------------------------
+!> Perform an equilibrium reconstruction using TokaMaker
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_recon_setup(tMaker_ptr,settings,error_flag) BIND(C,NAME="tokamaker_recon_setup")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(tokamaker_recon_settings_type), VALUE, INTENT(in) :: settings !< Reconstruction settings struct
+INTEGER(c_int), INTENT(out) :: error_flag !< Error flag (0 if no error)
+CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c
+CHARACTER(LEN=OFT_PATH_SLEN) :: infile
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj))THEN
+  error_flag=-100
+  RETURN
+END IF
+IF(.NOT.tokamaker_require_equil(tMaker_obj))THEN
+  error_flag=-101
+  RETURN
+END IF
+error_flag=0
+CALL c_f_pointer(settings%infile,infile_c,[OFT_PATH_SLEN])
+CALL copy_string_rev(infile_c,infile)
+CALL fit_gs_setup(tMaker_obj%gs_equil,tMaker_obj%recon_constraints,infile)
+END SUBROUTINE tokamaker_recon_setup
+!---------------------------------------------------------------------------------
+!> Perform an equilibrium reconstruction using TokaMaker
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_recon_err(tMaker_ptr,vacuum,settings,error_flag) BIND(C,NAME="tokamaker_recon_err")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Reconstruct vacuum equilibrium (no plasma)?
+TYPE(tokamaker_recon_settings_type), VALUE, INTENT(in) :: settings !< Reconstruction settings struct
+INTEGER(c_int), INTENT(out) :: error_flag !< Error flag (0 if no error)
+CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
+CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj))THEN
+  error_flag=-100
+  RETURN
+END IF
+IF(.NOT.tokamaker_require_equil(tMaker_obj))THEN
+  error_flag=-101
+  RETURN
+END IF
+error_flag=0
+IF(vacuum)tMaker_obj%gs_equil%has_plasma=.FALSE.
+CALL c_f_pointer(settings%infile,infile_c,[OFT_PATH_SLEN])
+CALL c_f_pointer(settings%outfile,outfile_c,[OFT_PATH_SLEN])
+CALL copy_string_rev(infile_c,infile)
+CALL copy_string_rev(outfile_c,outfile)
+tMaker_obj%device%timing=0.d0
+CALL fit_gs_error(tMaker_obj%gs_equil,tMaker_obj%recon_constraints,infile,outfile)
+tMaker_obj%gs_equil%has_plasma=.TRUE.
+END SUBROUTINE tokamaker_recon_err
 !---------------------------------------------------------------------------------
 !> Compute eigenvalues/eigenvectors of linearized plasma-conductor system
 !---------------------------------------------------------------------------------
