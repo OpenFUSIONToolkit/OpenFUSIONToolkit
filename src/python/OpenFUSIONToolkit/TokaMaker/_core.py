@@ -770,7 +770,7 @@ class TokaMaker():
         @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
         @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true. (Internal default: False)
         @param scale_jBS Scaling factor applied to the spike profile. (Internal default: 1.0)
-        @param Zeff Effective charge for bootstrap calculation. No default is set, a value must be povided. Also, the dominant ion species is assumed to be singly charged (change Zdom inside calculate_bootstrap, grad_shaf_prof_phys.F90 if this is not the case).
+        @param Zeff Effective charge for bootstrap calculation. No default is set, a value must be provided. Also, the dominant ion species is assumed to be singly charged (change Zdom inside calculate_bootstrap, grad_shaf_prof_phys.F90 if this is not the case).
         @param diagnose_bs Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration. (Internal default: False)
         @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge. (Internal default: True)
         @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
