@@ -140,23 +140,25 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
         tw_model.compute_Mcoil()
         tw_model.compute_Lmat(use_hodlr=use_aca,cache_file='Lmat.save')
         tw_model.compute_Rmat()
+        rst_before = set(glob.glob('pThinCurr_*.rst'))
+        hist_before = os.path.exists('floops.hist')
         tw_model.run_td(2.E-5,200,direct=(direct_flag == 'T'),lin_tol=lin_tol,coil_currs=curr_waveform,coil_volts=volt_waveform,sensor_obj=sensor_obj)
         tw_model.plot_td(200,sensor_obj=sensor_obj)
         if basepath is not None:
             # Verify output files landed in basepath, not CWD
             rst_in_outdir = glob.glob(os.path.join(basepath, 'pThinCurr_*.rst'))
-            rst_in_cwd = glob.glob('pThinCurr_*.rst')
+            new_rst_in_cwd = set(glob.glob('pThinCurr_*.rst')) - rst_before
             if len(rst_in_outdir) == 0:
                 print("FAILED: No .rst files found in output directory")
                 result = False
-            if len(rst_in_cwd) > 0:
-                print("FAILED: {0} .rst file(s) written to CWD instead of output directory".format(len(rst_in_cwd)))
+            if len(new_rst_in_cwd) > 0:
+                print("FAILED: {0} .rst file(s) written to CWD instead of output directory".format(len(new_rst_in_cwd)))
                 result = False
             if floops is not None:
                 if not os.path.exists(os.path.join(basepath, 'floops.hist')):
                     print("FAILED: floops.hist not found in output directory")
                     result = False
-                if os.path.exists('floops.hist'):
+                if not hist_before and os.path.exists('floops.hist'):
                     print("FAILED: floops.hist written to CWD instead of output directory")
                     result = False
         if run_reduced:
@@ -1210,11 +1212,13 @@ def test_td_passive_volt(direct_flag,python):
 #============================================================================
 # Test for output directory (basepath) support in run_td / plot_td
 @pytest.mark.coverage
-def test_td_output_dir():
+@pytest.mark.parametrize("python", (True,))
+def test_td_output_dir(python):
     assert ThinCurr_setup("tw_test-plate.h5", 1, 'F',
                            icoils=((0.5, 0.1),),
                            floops=((0.5, -0.05), (0.5, -0.1)),
                            curr_waveform=((0.0, 0.0), (1.0, 1.0)),
+                           python=python,
                            basepath='td_output_dir_test')
 
 
