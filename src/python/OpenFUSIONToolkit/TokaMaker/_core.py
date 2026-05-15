@@ -1197,6 +1197,26 @@ class TokaMaker():
             tokamaker_load_tokamaker(tmp_eq.c_ptr,cfilename,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
+            # Sync the Python bootstrap options shadow dict from the newly loaded Fortran-side boot_ops.
+            bops = tokamaker_boot_ops_struct()
+            initialized = c_bool(False)
+            error_string = self._oft_env.get_c_errorbuff()
+            tokamaker_get_boot_ops(tmp_eq.c_ptr, ctypes.byref(bops), ctypes.byref(initialized), error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
+            if initialized.value:
+                tmp_eq._boot_ops = {
+                    'isolate_edge_jBS': bool(bops.isolate_edge_jBS),
+                    'parameterize_jBS': bool(bops.parameterize_jBS),
+                    'scale_jBS':        float(bops.scale_jBS),
+                    'Zeff':             float(bops.Zeff),
+                    'diagnose_bs':      bool(bops.diagnose_bs),
+                    'taper_edge_jBS':   bool(bops.taper_edge_jBS),
+                    'taper_edge_psi0':  float(bops.taper_edge_psi0),
+                    'taper_edge_shape': int(bops.taper_edge_shape),
+                }
+            else:
+                tmp_eq._boot_ops = None
         else:
             raise ValueError("Must specify either `source_eq` or `source_file`")
         error_string = self._oft_env.get_c_errorbuff()

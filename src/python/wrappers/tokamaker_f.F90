@@ -503,6 +503,29 @@ tMaker_equil_obj%boot_ops%taper_edge_psi0 = bops%taper_edge_psi0
 tMaker_equil_obj%boot_ops%taper_edge_shape = bops%taper_edge_shape
 END SUBROUTINE tokamaker_set_boot_ops
 !---------------------------------------------------------------------------------
+!> Get bootstrap current options from the equilibrium object.
+!!
+!! Returns the current Fortran-side state of the bootstrap options and whether
+!! they have been initialized (e.g. loaded from file or set via tokamaker_set_boot_ops).
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_boot_ops(tMaker_equil_ptr,bops,initialized,error_str) BIND(C,NAME="tokamaker_get_boot_ops")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+TYPE(tokamaker_boot_ops_type), INTENT(out) :: bops !< Bootstrap options read from object
+LOGICAL(c_bool), INTENT(out) :: initialized !< .TRUE. if boot_ops have been initialized
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+initialized = tMaker_equil_obj%boot_ops%initialized
+bops%isolate_edge_jBS = tMaker_equil_obj%boot_ops%isolate_edge_jBS
+bops%parameterize_jBS = tMaker_equil_obj%boot_ops%parameterize_jBS
+bops%scale_jBS = tMaker_equil_obj%boot_ops%scale_jBS
+bops%Zeff = tMaker_equil_obj%boot_ops%Zeff
+bops%diagnose_bs = tMaker_equil_obj%boot_ops%diagnose_bs
+bops%taper_edge_jBS = tMaker_equil_obj%boot_ops%taper_edge_jBS
+bops%taper_edge_psi0 = tMaker_equil_obj%boot_ops%taper_edge_psi0
+bops%taper_edge_shape = tMaker_equil_obj%boot_ops%taper_edge_shape
+END SUBROUTINE tokamaker_get_boot_ops
+!---------------------------------------------------------------------------------
 !> Initialize \f$ \psi \f$ using a uniform or specified current source
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str) BIND(C,NAME="tokamaker_init_psi")

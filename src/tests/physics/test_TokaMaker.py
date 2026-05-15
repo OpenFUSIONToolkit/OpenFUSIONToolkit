@@ -1502,6 +1502,30 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
     eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
 
+    # --- Verify that replace_eq(source_file=...) correctly syncs _boot_ops ---
+    save_file = 'ITER_boot_ops_test.h5'
+    try:
+        mygs._tMaker_equil.save_TokaMaker(save_file)
+        # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
+        mygs._tMaker_equil._boot_ops['Zeff'] = Zeff_val * 99.0
+        mygs._tMaker_equil._boot_ops['scale_jBS'] = -999.0
+        mygs.replace_eq(source_file=save_file)
+        boot_ops = mygs._tMaker_equil._boot_ops
+        if boot_ops is None:
+            raise AssertionError("_boot_ops is None after replace_eq(source_file=...)")
+        if abs(boot_ops['Zeff'] - Zeff_val) > 1e-10:
+            raise AssertionError(
+                f"_boot_ops['Zeff'] = {boot_ops['Zeff']} != {Zeff_val} after replace_eq(source_file=...)"
+            )
+        if abs(boot_ops['scale_jBS'] - 1.0) > 1e-10:
+            raise AssertionError(
+                f"_boot_ops['scale_jBS'] = {boot_ops['scale_jBS']} != 1.0 after replace_eq(source_file=...)"
+            )
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+
     mp_q.put([eq_info])
     oftpy_dump_cov()
 

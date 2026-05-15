@@ -786,6 +786,7 @@ IF(hdf5_field_exist(filename,'tokamaker/SADDLE_TARGETS'))THEN
   END IF
 END IF
 !---Load boot_ops if present
+self%boot_ops%initialized = .FALSE.
 IF(hdf5_field_exist(filename,'tokamaker/BOOT_OPS'))THEN
   CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/ISOLATE_EDGE_JBS',success=success)
   IF(success) self%boot_ops%isolate_edge_jBS = (int_tmp/=0)
