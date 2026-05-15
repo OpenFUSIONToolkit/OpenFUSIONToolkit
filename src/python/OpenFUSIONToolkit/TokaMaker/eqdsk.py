@@ -17,12 +17,12 @@ Dependencies: numpy, scipy, contourpy (ships with matplotlib).
 '''
 
 import io
+import os
 import re
 import tempfile
 import warnings
 from collections import OrderedDict
 
-import contourpy
 import numpy as np
 from scipy import constants, integrate, interpolate
 
@@ -109,7 +109,7 @@ def _read_geqdsk(filename):
     ) = scalars
     offset += 4
 
-    NW, NH = int(g["NW"]), int(g["NH"])
+    NW, NH = g["NW"], g["NH"]
     nlNW = int(np.ceil(NW / 5.0))
 
     # --- 1-D profiles (each NW long) ---
@@ -118,6 +118,8 @@ def _read_geqdsk(filename):
         offset += nlNW
 
     # --- 2-D poloidal flux: PSIRZ (NH x NW) ---
+    # Most writers pack PSIRZ tightly (ceil(NW*NH/5) lines, what we emit too);
+    # some pad each row to a multiple of 5 (NH * ceil(NW/5) lines). Try packed first.
     try:
         nlNWNH = int(np.ceil(NW * NH / 5.0))
         flat = np.fromiter(splitter(merge(EQDSK[offset : offset + nlNWNH])),
@@ -314,6 +316,7 @@ def _trace_contours(R, Z, PSI, levels):
     @param levels 1-D array of \f$\psi\f$ values at which to extract contours
     @result List (one per level) of lists of `(N,2)` arrays of `(R,Z)` points
     '''
+    import contourpy
     cg = contourpy.contour_generator(R, Z, PSI, name="serial", line_type="Separate")
     all_contours = []
     for lev in levels:
@@ -545,12 +548,16 @@ def _resample_contour(R, Z, npts=257, periodic=True):
     if s_total < 1e-14:
         return R, Z
 
-    tck_R = interpolate.splrep(s, R, k=3, per=periodic)
-    tck_Z = interpolate.splrep(s, Z, k=3, per=periodic)
+    if periodic:
+        spl_R = interpolate.make_interp_spline(s, R, k=3, bc_type="periodic")
+        spl_Z = interpolate.make_interp_spline(s, Z, k=3, bc_type="periodic")
+    else:
+        spl_R = interpolate.make_splrep(s, R, k=3)
+        spl_Z = interpolate.make_splrep(s, Z, k=3)
 
     s_new = np.linspace(0, s_total, npts)
-    R_new = interpolate.splev(s_new, tck_R)
-    Z_new = interpolate.splev(s_new, tck_Z)
+    R_new = spl_R(s_new)
+    Z_new = spl_Z(s_new)
 
     if not periodic:
         R_new[-1], Z_new[-1] = R_new[0], Z_new[0]
@@ -647,13 +654,13 @@ def _resample_contour_theta(R, Z, R0, Z0, npts=257, theta_xpt=None):
     elif t_sorted[0] < 0 and theta_eval[0] > 0:
         theta_eval = -theta_eval
 
-    tck_R = interpolate.splrep(t_sorted, R_sorted, k=3, per=True)
-    tck_Z = interpolate.splrep(t_sorted, Z_sorted, k=3, per=True)
+    spl_R = interpolate.make_interp_spline(t_sorted, R_sorted, k=3, bc_type="periodic")
+    spl_Z = interpolate.make_interp_spline(t_sorted, Z_sorted, k=3, bc_type="periodic")
 
     t_range = t_sorted[-1] - t_sorted[0]
     theta_wrapped = (theta_eval - t_sorted[0]) % t_range + t_sorted[0]
-    R_new = interpolate.splev(theta_wrapped, tck_R, ext=0)
-    Z_new = interpolate.splev(theta_wrapped, tck_Z, ext=0)
+    R_new = spl_R(theta_wrapped)
+    Z_new = spl_Z(theta_wrapped)
 
     R_new[-1], Z_new[-1] = R_new[0], Z_new[0]
     return R_new, Z_new
@@ -709,7 +716,6 @@ class GEQDSKEquilibrium:
                                 when forced to zero
         @result New `GEQDSKEquilibrium` instance
         '''
-        import os as _os
         with tempfile.NamedTemporaryFile(mode="wb", suffix=".geqdsk",
                                          delete=False) as tmp:
             tmp.write(raw_bytes)
@@ -719,7 +725,7 @@ class GEQDSKEquilibrium:
                        extrapolate_edge=extrapolate_edge)
         finally:
             try:
-                _os.remove(tmp_path)
+                os.remove(tmp_path)
             except OSError:
                 pass
 
@@ -1082,7 +1088,7 @@ class GEQDSKEquilibrium:
         avg = {key: np.zeros(nc) for key in [
             "R", "1/R", "1/R**2", "R**2",
             "Bp", "Bp**2", "Bt", "Bt**2", "Btot**2",
-            "Jt", "Jt/R", "Jt/R_num",
+            "Jt", "Jt/R_num",
             "vp", "q", "ip",
             "F", "PPRIME", "FFPRIM",
         ]}
@@ -1210,11 +1216,8 @@ class GEQDSKEquilibrium:
             avg["Bt"][k] = flx_avg(Bt_s)
             avg["Bt**2"][k] = flx_avg(Bt_s**2)
             avg["Btot**2"][k] = flx_avg(B2_s)
-            # Numerical <Jt> from curl(B)/mu_0; stored for cross-checks.
-            # Note: avg["Jt/R"] is written analytically below (after the
-            # per-surface loop), so we intentionally do NOT populate a
-            # numerical `Jt/R` here -- save it under `Jt/R_num` for
-            # downstream consumers that want the numerical version.
+            # Numerical <Jt> and <Jt/R> from curl(B)/mu_0; the analytic
+            # Grad-Shafranov forms are written as Jt/R and Jt_GS after the loop.
             avg["Jt"][k] = flx_avg(Jt_s)
             avg["Jt/R_num"][k] = flx_avg(Jt_s / r_s)
 
@@ -1818,7 +1821,7 @@ class PFile:
         @param raw_bytes Raw p-file content
         @result New `PFile` instance
         '''
-        import os as _os
+
         with tempfile.NamedTemporaryFile(
             mode="wb", suffix=".pfile", delete=False
         ) as tmp:
@@ -1828,7 +1831,7 @@ class PFile:
             return cls(tmp_path)
         finally:
             try:
-                _os.remove(tmp_path)
+                os.remove(tmp_path)
             except OSError:
                 pass
 
@@ -1844,7 +1847,7 @@ class PFile:
 
         @result Raw p-file content as bytes
         '''
-        import os as _os
+
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".pfile", delete=False
         ) as tmp:
@@ -1855,7 +1858,7 @@ class PFile:
                 data = fh.read()
         finally:
             try:
-                _os.remove(tmp_path)
+                os.remove(tmp_path)
             except OSError:
                 pass
         return data
