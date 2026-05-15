@@ -150,8 +150,8 @@ def print_result(label, elapsed, stats, coil_currents):
     print(f"  Pax           = {stats.get('P_ax', float('nan'))/1e3:.4f} kPa")
     print(f"  Beta_pol      = {stats.get('beta_pol', float('nan')):.4f} %")
     print(f"  Beta_tor      = {stats.get('beta_tor', float('nan')):.4f} %")
-    print(f"  q_0 (axis)    = {stats.get('q0', float('nan')):.4f}")
-    print(f"  q_95          = {stats.get('q95', float('nan')):.4f}")
+    print(f"  q_0 (axis)    = {stats.get('q_0', float('nan')):.4f}")
+    print(f"  q_95          = {stats.get('q_95', float('nan')):.4f}")
     print("  Coil Currents [MA]:")
     for key, val in coil_currents.items():
         print(f"    {key:10} {val/1e6:10.3f}")
@@ -163,7 +163,7 @@ def print_result(label, elapsed, stats, coil_currents):
 def print_comparison(stats_ext, stats_int):
     keys = [('Ip', 'Ip [MA]', 1e6), ('P_ax', 'Pax [kPa]', 1e3),
             ('beta_pol', 'beta_pol [%]', 1), ('beta_tor', 'beta_tor [%]', 1),
-            ('q0', 'q0', 1), ('q95', 'q95', 1)]
+            ('q_0', 'q0', 1), ('q_95', 'q95', 1)]
     print(f"\n{'='*60}")
     print("  Comparison: external vs internal")
     print(f"{'='*60}")
