@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
+from warnings import warn
 '''! Solvers and helper functions for TokaMaker bootstrap current functionality
 
 @authors Daniel Burgess
@@ -853,6 +854,13 @@ def solve_with_bootstrap(mygs,
       parameterized spike profile table to stdout (mirroring the Fortran --diagnose-bs output).
     @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
     '''
+    warn(
+        "solve_with_bootstrap() is deprecated, with the method migrated to the internal Fortran solver. To use, call "
+        "set_kinetic_profiles(), set_boot_ops() (optional) & set_profiles() with type='jphi-split-bootstrap'. "
+        "See ITER_Hmode_bootstrap_ex.py for a complete example.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     from scipy.optimize import root_scalar
     import matplotlib.pyplot as plt
 
