@@ -258,6 +258,25 @@ CONTAINS
   PROCEDURE :: delete => factory_destroy
 END TYPE gs_factory
 !------------------------------------------------------------------------------
+!> Options for the jphi-split-bootstrap current profile update.
+!!
+!! Must be initialised (via @ref tokamaker_set_boot_ops or directly) before
+!! running TokaMaker with a `jphi-split-bootstrap` current profile.  Fields
+!! correspond to the optional arguments of @ref calculate_bootstrap in
+!! grad_shaf_prof_phys.F90.
+!------------------------------------------------------------------------------
+TYPE :: boot_ops
+  LOGICAL :: initialized = .FALSE. !< Options have been explicitly set?
+  LOGICAL :: isolate_edge_jBS = .FALSE. !< Isolate edge bootstrap spike from bulk?
+  LOGICAL :: parameterize_jBS = .FALSE. !< Use parametrised skew-normal fit for spike? Overrides `isolate_edge_jBS` if true.
+  REAL(r8) :: scale_jBS = 1.0_r8 !< Scaling factor applied to the spike profile (default 1)
+  REAL(r8) :: Zeff = 0.0_r8 !< Effective charge for bootstrap calculation (must be set explicitly)
+  LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration
+  LOGICAL :: taper_edge_jBS = .TRUE. !< Smooth taper of toroidal current to zero at plasma edge (guards against numerical issues at the separatrix)
+  REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
+  INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
+END TYPE boot_ops
+!------------------------------------------------------------------------------
 !> Grad-Shafranov equilibrium object
 !------------------------------------------------------------------------------
 TYPE :: gs_equil
@@ -302,6 +321,11 @@ TYPE :: gs_equil
   CLASS(gs_ani_press), POINTER :: P_ani => NULL() !< Anisotropic flux interpolator
   CLASS(flux_func), POINTER :: eta => NULL() !< Resistivity flux function
   CLASS(flux_func), POINTER :: I_NI => NULL() !< Non-inductive F*F' flux function
+  CLASS(flux_func), POINTER :: Te => NULL() !< Electron temperature flux function [keV]
+  CLASS(flux_func), POINTER :: Ti => NULL() !< Ion temperature flux function [keV]
+  CLASS(flux_func), POINTER :: ne => NULL() !< Electron density flux function [m^-3]
+  CLASS(flux_func), POINTER :: ni => NULL() !< Ion density flux function [m^-3]
+  TYPE(boot_ops) :: boot_ops !< Options for jphi-split-bootstrap current profile update
   TYPE(gs_factory), POINTER :: device => NULL() !< Device/factory object for equilibrium
 CONTAINS
   !>
@@ -385,6 +409,21 @@ contains
   !> Needs docs
   procedure :: delete => gsinv_destroy
 end type gsinv_interp
+!------------------------------------------------------------------------------
+!> Interpolation object for computing Sauter trapped-particle factors
+!! (accumulates flux-surface averages of B, R, and bounce integrals)
+!------------------------------------------------------------------------------
+type, extends(gsinv_interp) :: sauter_interp
+  logical :: stage_1 = .FALSE. !< Stage 1 pass (finding Bmax)
+  real(8) :: f_surf = 0.d0      !< F surface value (R*Bt)
+  real(8) :: bmax = -1.d0       !< Maximum |B| on surface (set in stage 1)
+  real(8) :: rmax_surf = -1.d30 !< Maximum R on surface (set in stage 1)
+  real(8) :: rmin_surf =  1.d30 !< Minimum R on surface (set in stage 1)
+  real(8) :: mag_axis(2) = 0.d0 !< Magnetic axis (R, Z)
+contains
+  !> Evaluate ODE RHS for Sauter integration
+  procedure :: interp => sauter_apply
+end type sauter_interp
 !---
 abstract interface
   !------------------------------------------------------------------------------
@@ -1058,6 +1097,7 @@ self%lim_point=source%lim_point
 self%x_points=source%x_points
 self%x_vecs=source%x_vecs
 self%vcontrol_val=source%vcontrol_val
+self%boot_ops=source%boot_ops
 !---Things that need equilibrium fully setup to copy
 IF(ASSOCIATED(source%P_ani))CALL source%P_ani%copy(self%P_ani,self)
 end subroutine copy_eq
@@ -6177,4 +6217,200 @@ DEALLOCATE(ltmp)
 DEALLOCATE(graphs(1,1)%g,tmp_vec)
 DEBUG_STACK_POP
 end subroutine gs_mat_create
+!------------------------------------------------------------------------------
+!> Evaluate terms in augmented tracing ODE for computing Sauter factors
+!! (see @ref sauter_fc)
+!------------------------------------------------------------------------------
+subroutine sauter_apply(self,cell,f,gop,val)
+class(sauter_interp), intent(inout) :: self !< Interpolation object
+integer(4), intent(in) :: cell !< Cell for interpolation
+real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
+real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+real(8), intent(out) :: val(:) !< Reconstructed field at f [8]
+integer(4), allocatable :: j(:)
+integer(4) :: jc
+real(8) :: rop(3),pt(3),grad(3)
+real(8) :: s,c,Bp2,Bt2,mod_B,bratio
+!---Get dofs
+allocate(j(self%lag_rep%nce))
+call self%lag_rep%ncdofs(cell,j)
+!---Reconstruct gradient
+grad=0.d0
+do jc=1,self%lag_rep%nce
+  call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
+  grad=grad+self%uvals(j(jc))*rop
+end do
+!---Get radial position
+pt=self%mesh%log2phys(cell,f)
+s=SIN(self%t)
+c=COS(self%t)
+Bp2 = (grad(1)**2 + grad(2)**2)/pt(1)**2
+Bt2 = (self%f_surf/pt(1))**2
+mod_B = SQRT(Bp2+Bt2)
+!---Position
+val(1)=(self%rho*(grad(1)*s-grad(2)*c))/(grad(1)*c+grad(2)*s)
+val(2)=pt(1)*SQRT((self%rho**2+val(1)**2)/SUM(grad**2))
+!---Geometric factors
+val(3)=val(2)*pt(1)         ! <R>
+val(4)=val(2)/pt(1)         ! <1/R>
+val(5)=val(2)*SQRT((pt(1)-self%mag_axis(1))**2+(pt(2)-self%mag_axis(2))**2)  ! <a>
+!---Magnetic field averages
+val(6)=val(2)*SQRT(Bp2+Bt2) ! <|B|>
+val(7)=val(2)*(Bp2+Bt2)     ! <|B|^2>
+IF(self%stage_1)THEN
+  self%bmax = MAX(self%bmax,mod_B)
+  self%rmax_surf = MAX(self%rmax_surf, pt(1))
+  self%rmin_surf = MIN(self%rmin_surf, pt(1))
+  val(8) = 0.d0  ! not used in stage 1; zero to prevent NaN accumulation
+  val(9) = 0.d0  ! likewise
+ELSE
+  bratio = MIN(1.d0,mod_B/self%bmax)
+  val(8)=val(2)*((1.d0 - SQRT(1.d0 - bratio) * (1.d0 + bratio / 2.d0)) / bratio**2)
+  val(9) = val(2)/pt(1)**2   ! q integrand: q = F_surf/(2π) * ∮ val(9)
+END IF
+deallocate(j)
+end subroutine sauter_apply
+!------------------------------------------------------------------------------
+!> Compute factors required for Sauter bootstrap formula
+!------------------------------------------------------------------------------
+subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs,qprof,eps)
+class(gs_equil), intent(inout) :: gseq !< G-S object
+integer(4), intent(in) :: nr !< Number of flux sample points
+real(8), intent(in) :: psi_q(nr) !< Location of flux sample points in normalised psi
+real(8), intent(out) :: fc(nr) !< Circulating particle fraction \f$ f_c \f$
+real(8), intent(out) :: r_avgs(nr,3) !< Flux surface averaged radial coords \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
+real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field \f$<|B|>\f$, \f$<|B|^2>\f$
+real(8), optional, intent(out) :: qprof(nr) !< Safety factor q on each surface (avoids a separate gs_get_qprof call)
+real(8), optional, intent(out) :: eps(nr) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(2\langle R \rangle) \f$ on each surface
+real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi,h,h2,hf,ftu,ftl
+real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
+character(len=80) :: warn_str
+logical :: edge_trace_failed
+type(oft_lag_brinterp) :: psi_int
+real(8), pointer :: ptout(:,:)
+real(8), parameter :: tol=1.d-10
+integer(4) :: i,j,cell
+type(sauter_interp), target :: field
+type(gs_factory), pointer :: device
+device=>gseq%device
+raxis=gseq%o_point(1)
+zaxis=gseq%o_point(2)
+x1=0.d0; x2=1.d0
+IF(gseq%plasma_bounds(1)>-1.d98)THEN
+  x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
+END IF
+psi_int%u=>gseq%psi
+CALL psi_int%setup(device%fe_rep)
+!---Find Rmax along Z=zaxis
+rmax=raxis
+cell=0
+DO j=1,100
+  pt=[(device%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
+  CALL bmesh_findcell(device%mesh,cell,pt,f)
+  IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
+  CALL psi_int%interp(cell,f,gop,psi_tmp)
+  IF( psi_tmp(1) < x1)EXIT
+  rmax=pt(1)
+END DO
+pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]
+IF(oft_debug_print(1))THEN
+  WRITE(*,'(2A)')oft_indent,'Axis Position:'
+  CALL oft_increase_indent
+  WRITE(*,'(2A,ES11.3)')oft_indent,'R    = ',raxis
+  WRITE(*,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
+  WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
+  CALL oft_decrease_indent
+END IF
+call set_tracer(1)
+field%u=>gseq%psi
+field%mag_axis=gseq%o_point
+CALL field%setup(device%fe_rep)
+active_tracer%neq=9
+active_tracer%B=>field
+active_tracer%maxsteps=8e4
+active_tracer%raxis=raxis
+active_tracer%zaxis=zaxis
+active_tracer%inv=.TRUE.
+edge_trace_failed = .FALSE.
+do j=1,nr
+  psi_surf=psi_q(j)*(x2-x1) + x1
+  !--- Axis guard: flux surface degenerates at psi_N=1; prescribe analytically.
+  IF(psi_q(j) == 1.d0)THEN
+    IF(gseq%mode==0)THEN
+      fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
+    ELSE
+      fpol=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
+        + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    END IF
+    r_avgs(j,1)    = raxis
+    r_avgs(j,2)    = 1.d0 / raxis
+    r_avgs(j,3)    = 0.d0
+    modb_avgs(j,1) = ABS(fpol) / raxis
+    modb_avgs(j,2) = (fpol / raxis)**2
+    fc(j)          = 1.d0
+    IF(PRESENT(qprof))   qprof(j)   = MERGE(qprof(j-1), 0.d0, j > 1)
+    IF(PRESENT(eps))     eps(j)     = 0.d0
+    CYCLE
+  END IF
+  IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN
+    active_tracer%tol=1.d-10
+  ELSE
+    active_tracer%tol=1.d-8
+  END IF
+  pt=pt_last
+  CALL gs_psi2r(gseq,psi_surf,pt,psi_int=psi_int)
+  IF(gseq%mode==0)THEN
+    fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
+  ELSE
+    fpol=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
+      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+  END IF
+  field%f_surf=fpol
+  field%bmax=0.d0
+  field%rmax_surf = -1.d30
+  field%rmin_surf =  1.d30
+  field%stage_1=.TRUE.
+  CALL tracinginv_fs(device%mesh,pt(1:2))
+  field%stage_1=.FALSE.
+  CALL tracinginv_fs(device%mesh,pt(1:2))
+  pt_last=pt
+  if(active_tracer%status/=1)THEN
+    WRITE(*,*)j,pt
+    CALL oft_warn("sauter_fc: Trace did not complete")
+    IF(j==1) edge_trace_failed = .TRUE.
+    CYCLE
+  end if
+  r_avgs(j,1)=active_tracer%v(3)/active_tracer%v(2)
+  r_avgs(j,2)=active_tracer%v(4)/active_tracer%v(2)
+  r_avgs(j,3)=active_tracer%v(5)/active_tracer%v(2)
+  modb_avgs(j,1)=active_tracer%v(6)/active_tracer%v(2)
+  modb_avgs(j,2)=active_tracer%v(7)/active_tracer%v(2)
+  h = modb_avgs(j,1)/field%bmax
+  h2 = modb_avgs(j,2)/field%bmax**2
+  ftu = 1.d0 - h2 / (h**2) * (1.d0 - SQRT(1.d0 - h) * (1.d0 + 0.5d0 * h))
+  hf = active_tracer%v(8)/active_tracer%v(2)
+  ftl = 1.d0 - h2 * hf
+  fc(j) = 1.d0 - (0.75d0 * ftu + 0.25d0 * ftl)
+  qpsi = fpol * active_tracer%v(9) / (2*pi)
+  IF(PRESENT(qprof)) qprof(j) = qpsi
+  IF(PRESENT(eps))   eps(j)   = (field%rmax_surf - field%rmin_surf) / (2.d0 * r_avgs(j,1))
+end do
+! Edge guard: if psi_q(1) is very close to the separatrix (psi_N < 1e-5) and
+! the field-line trace failed there, copy the geometry from the second surface
+! as the best available approximation.
+IF (nr >= 2 .AND. psi_q(1) < 1.d-5 .AND. edge_trace_failed) THEN
+  fc(1)          = fc(2)
+  r_avgs(1,:)    = r_avgs(2,:)
+  modb_avgs(1,:) = modb_avgs(2,:)
+  IF (PRESENT(eps))     eps(1)     = eps(2)
+  IF (PRESENT(qprof))   qprof(1)   = 2*qprof(2) ! <this is totally wrong (q diverges at the separatrix), but better than leaving q=0 at the edge for now
+  IF (PRESENT(qprof)) THEN
+    WRITE(warn_str,'(A,ES10.3)') 'sauter_fc: edge geometry extrapolated from second surface; q unreliable beyond psi_N = ',psi_q(2)
+    CALL oft_warn(TRIM(warn_str))
+  END IF
+END IF
+CALL field%delete
+CALL active_tracer%delete
+CALL psi_int%delete()
+end subroutine sauter_fc
 end module oft_gs

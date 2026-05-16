@@ -28,7 +28,8 @@ def create_prof_file(self, filename, profile_dict, name):
     file_lines = [profile_dict['type']]
     if profile_dict['type'] == 'flat':
         pass
-    elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp'):
+    elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp') \
+            or (profile_dict['type'] == 'jphi-split-bootstrap'):
         x = profile_dict.get('x',None)
         if x is None:
             raise KeyError('No array "x" for piecewise linear profile.')
@@ -58,7 +59,7 @@ def create_prof_file(self, filename, profile_dict, name):
             "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
         ]
     else:
-        raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp")')
+        raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp", "jphi-split-bootstrap")')
     with open(filename, 'w+') as fid:
         fid.write("\n".join(file_lines))
 
@@ -733,6 +734,54 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files)
 
+    def load_kinetic_profiles(self, te_file='none', ti_file='none', ne_file='none', ni_file='none'):
+        r'''! Load kinetic profiles (electron and ion temperature and density) from files
+
+        @param te_file File containing electron temperature profile in KeV
+        @param ti_file File containing ion temperature profile in KeV
+        @param ne_file File containing electron density profile in m^-3
+        @param ni_file File containing ion density profile in m^-3
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.load_kinetic_profiles(te_file,ti_file,ne_file,ni_file)
+
+    def set_kinetic_profiles(self, te_prof=None, ti_prof=None, ne_prof=None, ni_prof=None, keep_files=False, Zeff=None):
+        r'''! Set kinetic profiles (electron and ion temperature and density) using a piecewise linear definition
+
+        @param te_prof Dictionary object containing electron temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ti_prof Dictionary object containing ion temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ne_prof Dictionary object containing electron density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param ni_prof Dictionary object containing ion density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param keep_files Retain temporary profile files
+        @param Zeff Effective charge for bootstrap calculation. The dominant ion species is assumed to be singly charged (change Zdom inside calculate_bootstrap, grad_shaf_prof_phys.F90 if this is not the case).
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.set_kinetic_profiles(te_prof,ti_prof,ne_prof,ni_prof,keep_files,Zeff)
+
+    def set_boot_ops(self, isolate_edge_jBS=None, parameterize_jBS=None, scale_jBS=None, Zeff=None,
+                     diagnose_bs=None, taper_edge_jBS=None, taper_edge_psi0=None, taper_edge_shape=None):
+        r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
+
+        Must be called before solving with a `jphi-split-bootstrap` current profile.
+        Parameters default to `None`; any `None` value is left at the Fortran-side default.
+
+        @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
+        @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true. (Internal default: False)
+        @param scale_jBS Scaling factor applied to the spike profile. (Internal default: 1.0)
+        @param Zeff Effective charge for bootstrap calculation. No default is set, a value must be provided. Also, the dominant ion species is assumed to be singly charged (change Zdom inside calculate_bootstrap, grad_shaf_prof_phys.F90 if this is not the case).
+        @param diagnose_bs Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration. (Internal default: False)
+        @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge. (Internal default: True)
+        @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
+        @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.set_boot_ops(isolate_edge_jBS, parameterize_jBS, scale_jBS, Zeff,
+                                               diagnose_bs,
+                                               taper_edge_jBS, taper_edge_psi0, taper_edge_shape)
+
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
 
@@ -1148,6 +1197,26 @@ class TokaMaker():
             tokamaker_load_tokamaker(tmp_eq.c_ptr,cfilename,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
+            # Sync the Python bootstrap options shadow dict from the newly loaded Fortran-side boot_ops.
+            bops = tokamaker_boot_ops_struct()
+            initialized = c_bool(False)
+            error_string = self._oft_env.get_c_errorbuff()
+            tokamaker_get_boot_ops(tmp_eq.c_ptr, ctypes.byref(bops), ctypes.byref(initialized), error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
+            if initialized.value:
+                tmp_eq._boot_ops = {
+                    'isolate_edge_jBS': bool(bops.isolate_edge_jBS),
+                    'parameterize_jBS': bool(bops.parameterize_jBS),
+                    'scale_jBS':        float(bops.scale_jBS),
+                    'Zeff':             float(bops.Zeff),
+                    'diagnose_bs':      bool(bops.diagnose_bs),
+                    'taper_edge_jBS':   bool(bops.taper_edge_jBS),
+                    'taper_edge_psi0':  float(bops.taper_edge_psi0),
+                    'taper_edge_shape': int(bops.taper_edge_shape),
+                }
+            else:
+                tmp_eq._boot_ops = None
         else:
             raise ValueError("Must specify either `source_eq` or `source_file`")
         error_string = self._oft_env.get_c_errorbuff()
@@ -1260,17 +1329,28 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.get_q(psi,psi_pad,npsi,compute_geo)
 
-    def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50):
-        r'''! Evaluate Sauter trapped particle fractions at specified or uniformly spaced points
+    def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50,return_eps=False):
+        r'''! Evaluate Sauter trapped particle fractions and flux-surface geometry at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
-        @result \f$ f_c \f$, [\f$<R>,<1/R>,<a>\f$], [\f$<|B|>,<|B|^2>\f$]
+        @param return_eps If True, append the local inverse aspect ratio array to the return tuple
+        @result Tuple `(psi, fc, r_avgs, modb_avgs)`, or `(psi, fc, r_avgs, modb_avgs, eps)` when `return_eps=True`
+          - `psi` [npsi] — normalised poloidal flux \f$\hat{\psi}\f$ of each sample
+          - `fc` [npsi] — circulating-particle fraction \f$f_c\f$ (Sauter 1999)
+          - `r_avgs` [3, npsi] — flux-surface-averaged radial coordinates:
+            row 0: \f$\langle R \rangle\f$, row 1: \f$\langle 1/R \rangle\f$, row 2: \f$\langle a \rangle\f$ (minor radius)
+          - `modb_avgs` [2, npsi] — flux-surface-averaged field:
+            row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
+          - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
+            \f$\varepsilon = (R_{\max} - R_{\min}) / (2 \langle R \rangle)\f$,
+            where \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius
+            reached by the field-line trace on that surface
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.calc_sauter_fc(psi,psi_pad,npsi)
+        return self._tMaker_equil.calc_sauter_fc(psi,psi_pad,npsi,return_eps)
 
     def get_globals(self):
         r'''! Get global plasma parameters
@@ -2109,6 +2189,8 @@ class TokaMaker_equilibrium():
             self._psi_constraints = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Saddle_constraints "Saddle_constraints" property)
             self._saddle_targets = None
+            ## Shadow of `gs_equil%boot_ops`; `None` until first call to `set_boot_ops`
+            self._boot_ops = None
         else:
             self._F0 = copy.copy(source_eq._F0)
             if skip_targets:
@@ -2133,6 +2215,8 @@ class TokaMaker_equilibrium():
                 self._isoflux_constraints = source_eq._isoflux_constraints.copy() if source_eq._isoflux_constraints is not None else None
                 self._saddle_targets = source_eq._saddle_targets.copy() if source_eq._saddle_targets is not None else None
                 self._psi_constraints = (source_eq._psi_constraints[0].copy(), source_eq._psi_constraints[1].copy()) if source_eq._psi_constraints is not None else None
+            ## Shadow of `gs_equil%boot_ops`; copied so subsequent set_boot_ops calls update from the source state
+            self._boot_ops = copy.copy(source_eq._boot_ops)
         ## Normalized flux convention (0 -> tokamak, 1 -> spheromak)
         self.psi_convention = self._tMaker.psi_convention
         ## Free or fixed boundary flag
@@ -2295,6 +2379,11 @@ class TokaMaker_equilibrium():
         return self._F0
 
     @property
+    def Zeff(self):
+        r'''! \f$ Z_{eff} \f$ for bootstrap calculation'''
+        return self._boot_ops['Zeff'] if self._boot_ops is not None else 0.0
+
+    @property
     def Ip_target(self):
         r'''! Plasma current target'''
         return self._Ip_target
@@ -2394,6 +2483,128 @@ class TokaMaker_equilibrium():
                 except:
                     print('Warning: unable to delete temporary file "{0}"'.format(file))
     
+    def load_kinetic_profiles(self, te_file='none', ti_file='none', ne_file='none', ni_file='none'):
+        r'''! Load kinetic flux function profiles (electron/ion temperature and density) from files
+
+        @param te_file File containing electron temperature profile in KeV
+        @param ti_file File containing ion temperature profile in KeV
+        @param ne_file File containing electron density profile in m^-3
+        @param ni_file File containing ion density profile in m^-3
+        '''
+
+        te_file_c = self._oft_env.path2c(te_file)
+        ne_file_c = self._oft_env.path2c(ne_file)
+        ti_file_c = self._oft_env.path2c(ti_file)
+        ni_file_c = self._oft_env.path2c(ni_file)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_load_kinetic_profiles(self.c_ptr,te_file_c,ne_file_c,ti_file_c,ni_file_c,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+
+    def set_kinetic_profiles(self, te_prof=None, ti_prof=None, ne_prof=None, ni_prof=None, keep_files=False, Zeff=None):
+        r'''! Set kinetic profiles (electron/ion temperature and density) using a piecewise linear definition
+
+        @param te_prof Dictionary object containing electron temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ti_prof Dictionary object containing ion temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ne_prof Dictionary object containing electron density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param ni_prof Dictionary object containing ion density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param keep_files Retain temporary profile files
+        @param Zeff Effective charge for bootstrap calculation. The dominant ion species is assumed to be singly charged (change Zdom inside calculate_bootstrap, grad_shaf_prof_phys.F90 if this is not the case).
+        '''
+
+        if Zeff is None:
+            raise ValueError("Zeff must be provided when setting kinetic profiles. (dominant ion species assumed singly charged)")
+        self.set_boot_ops(Zeff=Zeff)
+
+        delete_files = []
+        te_file = 'none'
+        if te_prof is not None:
+            te_file = self._oft_env.unique_tmpfile('tokamaker_te.prof')
+            create_prof_file(self, te_file, te_prof, "Te")
+            delete_files.append(te_file)
+        ti_file = 'none'
+        if ti_prof is not None:
+            ti_file = self._oft_env.unique_tmpfile('tokamaker_ti.prof')
+            create_prof_file(self, ti_file, ti_prof, "Ti")
+            delete_files.append(ti_file)
+        ne_file = 'none'
+        if ne_prof is not None:
+            ne_file = self._oft_env.unique_tmpfile('tokamaker_ne.prof')
+            create_prof_file(self, ne_file, ne_prof, "ne")
+            delete_files.append(ne_file)
+        ni_file = 'none'
+        if ni_prof is not None:
+            ni_file = self._oft_env.unique_tmpfile('tokamaker_ni.prof')
+            create_prof_file(self, ni_file, ni_prof, "ni")
+            delete_files.append(ni_file)
+        self.load_kinetic_profiles(te_file=te_file, ti_file=ti_file, ne_file=ne_file, ni_file=ni_file)
+        if not keep_files:
+            for file in delete_files:
+                try:
+                    os.remove(file)
+                except:
+                    print('Warning: unable to delete temporary file "{0}"'.format(file))
+
+    def set_boot_ops(self, isolate_edge_jBS=None, parameterize_jBS=None, scale_jBS=None, Zeff=None,
+                     diagnose_bs=None, taper_edge_jBS=None, taper_edge_psi0=None, taper_edge_shape=None):
+        r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
+
+        Must be called before solving with a `jphi-split-bootstrap` current profile.
+        Parameters default to `None`; any `None` value is left at the Fortran-side default.
+
+        @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
+        @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true. (Internal default: False)
+        @param scale_jBS Scaling factor applied to the spike profile. (Internal default: 1.0)
+        @param Zeff Effective charge for bootstrap calculation. No default is set, a value must be provided.
+        @param diagnose_bs Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration. (Internal default: False)
+        @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge. (Internal default: True)
+        @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
+        @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
+        '''
+        # On first call, seed the shadow dict from the Fortran-type defaults in grad_shaf.F90
+        if self._boot_ops is None:
+            self._boot_ops = {
+                'isolate_edge_jBS': False,
+                'parameterize_jBS': False,
+                'scale_jBS': 1.0,
+                'Zeff': 0.0,
+                'diagnose_bs': False,
+                'taper_edge_jBS': True,
+                'taper_edge_psi0': 0.999,
+                'taper_edge_shape': 2,
+            }
+        # Override only the explicitly provided kwargs
+        if isolate_edge_jBS is not None:
+            self._boot_ops['isolate_edge_jBS'] = bool(isolate_edge_jBS)
+        if parameterize_jBS is not None:
+            self._boot_ops['parameterize_jBS'] = bool(parameterize_jBS)
+        if scale_jBS is not None:
+            self._boot_ops['scale_jBS'] = float(scale_jBS)
+        if Zeff is not None:
+            self._boot_ops['Zeff'] = float(Zeff)
+        if diagnose_bs is not None:
+            self._boot_ops['diagnose_bs'] = bool(diagnose_bs)
+        if taper_edge_jBS is not None:
+            self._boot_ops['taper_edge_jBS'] = bool(taper_edge_jBS)
+        if taper_edge_psi0 is not None:
+            self._boot_ops['taper_edge_psi0'] = float(taper_edge_psi0)
+        if taper_edge_shape is not None:
+            self._boot_ops['taper_edge_shape'] = int(taper_edge_shape)
+        # Build the ctypes struct from the merged shadow state and send to Fortran
+        bops = tokamaker_boot_ops_struct()
+        bops.isolate_edge_jBS = self._boot_ops['isolate_edge_jBS']
+        bops.parameterize_jBS = self._boot_ops['parameterize_jBS']
+        bops.scale_jBS = self._boot_ops['scale_jBS']
+        bops.Zeff = self._boot_ops['Zeff']
+        bops.diagnose_bs = self._boot_ops['diagnose_bs']
+        bops.taper_edge_jBS = self._boot_ops['taper_edge_jBS']
+        bops.taper_edge_psi0 = self._boot_ops['taper_edge_psi0']
+        bops.taper_edge_shape = self._boot_ops['taper_edge_shape']
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_set_boot_ops(self.c_ptr, ctypes.byref(bops), error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
 
@@ -2785,13 +2996,24 @@ class TokaMaker_equilibrium():
         else:
             return V_loop.value
     
-    def calc_sauter_fc(self,psi=None,psi_pad=0.02,npsi=50):
-        r'''! Evaluate Sauter trapped particle fractions at specified or uniformly spaced points
+    def calc_sauter_fc(self,psi=None,psi_pad=0.02,npsi=50,return_eps=False):
+        r'''! Evaluate Sauter trapped particle fractions and flux-surface geometry at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
-        @result \f$ f_c \f$, [\f$<R>,<1/R>,<a>\f$], [\f$<|B|>,<|B|^2>\f$]
+        @param return_eps If True, append the local inverse aspect ratio array to the return tuple
+        @result Tuple `(psi, fc, r_avgs, modb_avgs)`, or `(psi, fc, r_avgs, modb_avgs, eps)` when `return_eps=True`
+          - `psi` [npsi] — normalised poloidal flux \f$\hat{\psi}\f$ of each sample
+          - `fc` [npsi] — circulating-particle fraction \f$f_c\f$ (Sauter 1999)
+          - `r_avgs` [3, npsi] — flux-surface-averaged values:
+            row 0: \f$\langle R \rangle\f$, row 1: \f$\langle 1/R \rangle\f$, row 2: \f$\langle a \rangle\f$ (minor radius)
+          - `modb_avgs` [2, npsi] — flux-surface-averaged field values:
+            row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
+          - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
+            \f$\varepsilon = (R_{\max} - R_{\min}) / (2 \langle R \rangle)\f$,
+            where \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius
+            reached by the field-line trace on that surface
         '''
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
@@ -2805,14 +3027,16 @@ class TokaMaker_equilibrium():
         fc = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         r_avgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
         modb_avgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
+        eps = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_sauter_fc(self._equil_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,error_string)
+        tokamaker_sauter_fc(self._equil_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,eps,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         if self.psi_convention == 0:
-            return psi_save,fc,r_avgs,modb_avgs
+            result = (psi_save, fc, r_avgs, modb_avgs)
         else:
-            return psi,fc,r_avgs,modb_avgs
+            result = (psi, fc, r_avgs, modb_avgs)
+        return result + (eps,) if return_eps else result
     
     def calc_delstar_curr(self,psi):
         r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator
