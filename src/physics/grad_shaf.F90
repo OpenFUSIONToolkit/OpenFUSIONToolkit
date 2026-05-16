@@ -6398,7 +6398,7 @@ end do
 ! Edge guard: if psi_q(1) is very close to the separatrix (psi_N < 1e-5) and
 ! the field-line trace failed there, copy the geometry from the second surface
 ! as the best available approximation.
-IF (nr >= 2 .AND. psi_q(1) < 1.d-8 .AND. edge_trace_failed) THEN
+IF (nr >= 2 .AND. psi_q(1) < 1.d-5 .AND. edge_trace_failed) THEN
   fc(1)          = fc(2)
   r_avgs(1,:)    = r_avgs(2,:)
   modb_avgs(1,:) = modb_avgs(2,:)
