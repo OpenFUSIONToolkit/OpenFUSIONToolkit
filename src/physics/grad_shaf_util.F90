@@ -492,8 +492,8 @@ IF(.NOT.success)THEN
   RETURN
 END IF
 CALL gs_update_bounds(self)
-!---Load kinetic profiles (Te, Ti, ne, ni) early so they are available when
-!   flux function update() calls (e.g. jphi_bs_update) are made below
+!---Load kinetic profiles (Te, Ti, ne, ni) before flux functions so they are
+!   available when flux function update() calls (e.g. jphi_bs_update) are made below
 IF(hdf5_field_exist(filename,'tokamaker/TE_PROFILE'))THEN
   CALL hdf5_read(profType,filename,'tokamaker/TE_PROFILE/TYPE',success=success)
   IF(.NOT.success)THEN
@@ -565,6 +565,24 @@ IF(hdf5_field_exist(filename,'tokamaker/NI_DENS_PROFILE'))THEN
     error_string='Failed to load ni profile.'
     RETURN
   END IF
+END IF
+!---Load boot_ops before flux functions so bootstrap options are available when
+!   flux function update() calls (e.g. jphi_bs_update) are made below
+self%boot_ops%initialized = .FALSE.
+IF(hdf5_field_exist(filename,'tokamaker/BOOT_OPS'))THEN
+  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/ISOLATE_EDGE_JBS',success=success)
+  IF(success) self%boot_ops%isolate_edge_jBS = (int_tmp/=0)
+  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/PARAMETERIZE_JBS',success=success)
+  IF(success) self%boot_ops%parameterize_jBS = (int_tmp/=0)
+  CALL hdf5_read(self%boot_ops%scale_jBS,filename,'tokamaker/BOOT_OPS/SCALE_JBS',success=success)
+  CALL hdf5_read(self%boot_ops%Zeff,filename,'tokamaker/BOOT_OPS/ZEFF',success=success)
+  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/DIAGNOSE_BS',success=success)
+  IF(success) self%boot_ops%diagnose_bs = (int_tmp/=0)
+  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_JBS',success=success)
+  IF(success) self%boot_ops%taper_edge_jBS = (int_tmp/=0)
+  CALL hdf5_read(self%boot_ops%taper_edge_psi0,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_PSI0',success=success)
+  CALL hdf5_read(self%boot_ops%taper_edge_shape,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_SHAPE',success=success)
+  self%boot_ops%initialized = .TRUE.
 END IF
 !---Load flux functions
 CALL hdf5_read(self%ffp_scale,filename,'tokamaker/FFP_SCALE',success=success)
@@ -784,23 +802,6 @@ IF(hdf5_field_exist(filename,'tokamaker/SADDLE_TARGETS'))THEN
     error_string='Failed to read saddle targets.'
     RETURN
   END IF
-END IF
-!---Load boot_ops if present
-self%boot_ops%initialized = .FALSE.
-IF(hdf5_field_exist(filename,'tokamaker/BOOT_OPS'))THEN
-  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/ISOLATE_EDGE_JBS',success=success)
-  IF(success) self%boot_ops%isolate_edge_jBS = (int_tmp/=0)
-  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/PARAMETERIZE_JBS',success=success)
-  IF(success) self%boot_ops%parameterize_jBS = (int_tmp/=0)
-  CALL hdf5_read(self%boot_ops%scale_jBS,filename,'tokamaker/BOOT_OPS/SCALE_JBS',success=success)
-  CALL hdf5_read(self%boot_ops%Zeff,filename,'tokamaker/BOOT_OPS/ZEFF',success=success)
-  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/DIAGNOSE_BS',success=success)
-  IF(success) self%boot_ops%diagnose_bs = (int_tmp/=0)
-  CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_JBS',success=success)
-  IF(success) self%boot_ops%taper_edge_jBS = (int_tmp/=0)
-  CALL hdf5_read(self%boot_ops%taper_edge_psi0,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_PSI0',success=success)
-  CALL hdf5_read(self%boot_ops%taper_edge_shape,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_SHAPE',success=success)
-  self%boot_ops%initialized = .TRUE.
 END IF
 end subroutine gs_load_tokamaker
 !---------------------------------------------------------------------------

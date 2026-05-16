@@ -1502,9 +1502,12 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
     eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
 
-    # --- Verify that replace_eq(source_file=...) correctly syncs _boot_ops ---
+    # --- Verify that boot_ops round-trip correctly through save/load, and that
+    #     replace_eq(source_file=...) correctly syncs the _boot_ops shadow dict ---
     save_file = 'ITER_boot_ops_test.h5'
     try:
+        # Capture expected state before save so we can check all fields
+        expected_boot_ops = dict(mygs._tMaker_equil._boot_ops)
         mygs._tMaker_equil.save_TokaMaker(save_file)
         # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
         mygs._tMaker_equil._boot_ops['Zeff'] = Zeff_val * 99.0
@@ -1513,14 +1516,24 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         boot_ops = mygs._tMaker_equil._boot_ops
         if boot_ops is None:
             raise AssertionError("_boot_ops is None after replace_eq(source_file=...)")
-        if abs(boot_ops['Zeff'] - Zeff_val) > 1e-10:
-            raise AssertionError(
-                f"_boot_ops['Zeff'] = {boot_ops['Zeff']} != {Zeff_val} after replace_eq(source_file=...)"
-            )
-        if abs(boot_ops['scale_jBS'] - 1.0) > 1e-10:
-            raise AssertionError(
-                f"_boot_ops['scale_jBS'] = {boot_ops['scale_jBS']} != 1.0 after replace_eq(source_file=...)"
-            )
+        # Verify all fields round-trip correctly through save/load
+        for key, expected in expected_boot_ops.items():
+            val = boot_ops[key]
+            if isinstance(expected, bool):
+                if val != expected:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
+                    )
+            elif isinstance(expected, float):
+                if abs(val - expected) > 1e-10:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
+                    )
+            elif isinstance(expected, int):
+                if val != expected:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
+                    )
     except Exception as e:
         print(e)
         mp_q.put(None)
