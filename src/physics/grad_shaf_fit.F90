@@ -1084,16 +1084,16 @@ IF(fit_coils)ncons=n+gs_active%device%ncoils
 ALLOCATE(cons(ncons))
 j=1
 !---
-IF(fit_coils)THEN
-  DO i=1,gs_active%device%ncoils
-    ALLOCATE(coil_con)
-    coil_con%coil=i
-    coil_con%val=gs_active%coil_currs(i)/mu0
-    coil_con%wt=ABS(1.d0/(.05d0*coil_con%val))
-    cons(j)%con=>coil_con
-    j=j+1
-  END DO
-END IF
+! IF(fit_coils)THEN
+!   DO i=1,gs_active%device%ncoils
+!     ALLOCATE(coil_con)
+!     coil_con%coil=i
+!     coil_con%val=gs_active%coil_currs(i)/mu0
+!     coil_con%wt=ABS(1.d0/(.05d0*coil_con%val))
+!     cons(j)%con=>coil_con
+!     j=j+1
+!   END DO
+! END IF
 ! IF(gs_active%Z0_target>-1.d98)THEN
 !   ALLOCATE(vcont_constraint::cons(j)%con)
 !   cons(j)%con%val=0.d0
@@ -1154,6 +1154,11 @@ DO i=1,n
       READ(io_unit,*,END=300)saddle_con%val,saddle_con%wt
       neddy=neddy+1
       cons(j)%con=>saddle_con
+    CASE(12)
+      ALLOCATE(coil_con)
+      READ(io_unit,*,END=300)coil_con%coil
+      READ(io_unit,*,END=300)coil_con%val,coil_con%wt
+      cons(j)%con=>coil_con
     CASE DEFAULT
       CALL oft_abort('Invalid constraint type.','fit_load',__FILE__)
   END SELECT

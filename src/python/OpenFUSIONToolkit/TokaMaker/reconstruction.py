@@ -48,6 +48,7 @@ dFlux_con_id = 8
 Press_con_id = 9
 q_con_id = 10
 saddle_con_id = 11
+coil_current_con_id = 12
 
 
 class Mirnov_con:
@@ -310,6 +311,40 @@ class saddle_con:
         file.write(' {0:E} {1:E}\n\n'.format(self.val, 1./self.err))
 
 
+class coil_current_con:
+    '''! TokaMaker equilibrium reconstruction coil current constraint'''
+    def __init__(self, ind=None, val=None, err=None):
+        '''! Create coil current constraint
+        
+        @param ind Index of coil
+        @param val Value of constraint [A]
+        @param err Error in constraint [A]
+        '''
+        self.ind = ind
+        self.val = val
+        self.err = err
+
+    def read(self, file):
+        '''! Read coil current constraint from file
+        
+        @param file Open file object containing constraint, must be positioned at start of constraint
+        '''
+        values = file.readline()
+        self.ind = int(values) - 1
+        values = file.readline().split()
+        self.val = float(values[0])
+        self.err = 1./float(values[1])
+
+    def write(self, file):
+        '''! Write coil current constraint to file
+        
+        @param file Open file object for saving constraints
+        '''
+        file.write('{0}\n'.format(coil_current_con_id))
+        file.write(' {0}\n'.format(self.ind+1))
+        file.write(' {0:E} {1:E}\n\n'.format(self.val, 1./(self.err)))
+
+
 con_map = {
     Mirnov_con_id: Mirnov_con,
     Ip_con_id: Ip_con,
@@ -317,7 +352,8 @@ con_map = {
     dFlux_con_id: dFlux_con,
     Press_con_id: Press_con,
     q_con_id: q_con,
-    saddle_con_id: saddle_con
+    saddle_con_id: saddle_con,
+    coil_current_con_id: coil_current_con
 }
 
 
@@ -418,6 +454,8 @@ class reconstruction():
         self._saddles = []
         ## Plasma pressure constraints
         self._pressure_cons = []
+        ## Coil current constraints
+        self._coil_current_cons = []
         ## Name of constraint file (input for reconstruction)
         self.con_file = in_filename
         ## Name of reconstruction output file
@@ -448,6 +486,7 @@ class reconstruction():
         self._mirnovs = []
         self._saddles = []
         self._pressure_cons = []
+        self._coil_current_cons = []
     
     def set_Ip(self,Ip,err):
         '''! Set plasma current constraint
@@ -464,6 +503,20 @@ class reconstruction():
         @param err Error in constraint
         '''
         self._Dflux_con = dFlux_con(val=DFlux, err=err)
+    
+    def set_coil_currents(self,targets,errs):
+        '''! Set coil current constraints
+        
+        @param targets Dictionary of coil current targets
+        @param errs Dictionary of coil current constraint errors
+        '''
+        self._coil_current_cons = []
+        for name, coil_set in self._tMaker_obj.coil_sets.items():
+            if name not in targets:
+                raise KeyError(f"Missing coil current target for coil set '{name}'")
+            if name not in errs:
+                raise KeyError(f"Missing coil current error for coil set '{name}'")
+            self._coil_current_cons.append(coil_current_con(ind=coil_set['id'], val=targets[name], err=errs[name]))
 
     def add_flux_loop(self,loc,val,err):
         '''! Add full poloidal flux loop constraint
@@ -515,7 +568,7 @@ class reconstruction():
     
     def write_fit_in(self):
         '''! Create reconstruction input file for specified constraints'''
-        constraints = self._flux_loops + self._mirnovs + self._saddles + self._pressure_cons
+        constraints = self._flux_loops + self._mirnovs + self._saddles + self._pressure_cons + self._coil_current_cons
         if self._Ip_con is not None:
             constraints.append(self._Ip_con)
         if self._Dflux_con is not None:
@@ -549,6 +602,8 @@ class reconstruction():
                     self._saddles.append(new_con)
                 elif con_type == Press_con_id:
                     self._pressure_cons.append(new_con)
+                elif con_type == coil_current_con_id:
+                    self._coil_current_cons.append(new_con)
                 else:
                     raise ValueError("Unknown constraint type")
                 
@@ -578,11 +633,13 @@ class reconstruction():
             for press_con in self._pressure_cons:
                 ax.plot(press_con.loc[0], press_con.loc[1], 'm.', zorder=base_zorder+1)
     
-    def plot_error(self, fig, ax):
+    def plot_error(self, fig, ax, coil_fig, coil_ax):
         '''! Plot constraint values and reconstructed signals for current equilibrium from reconstruction output file
         
         @param fig Matplotlib figure to plot on
         @param ax Matplotlib axis to plot on
+        @param coil_fig Matplotlib figure to plot coil current constraints on
+        @param coil_ax Matplotlib axis to plot coil current constraints on
         '''
         if len(ax) != 4:
             raise ValueError("Must provide list of 4 axes for plotting flux loop, Mirnov, saddle, and pressure constraint errors")
@@ -616,6 +673,18 @@ class reconstruction():
             ax[3].errorbar(i,err_output[i,3], yerr=press_con.err, color='r', capsize=2)
             ax[3].plot(i,err_output[i,2], 'bx')
             i += 1
+        #
+        if len(self._coil_current_cons) > 0:
+            ind_to_name = {self._tMaker_obj.coil_sets[coil_set]['id']: coil_set for coil_set in self._tMaker_obj.coil_sets}
+            coil_ax.set_title('Coil Current Constraints')
+            coil_ax.set_xlabel('Coil Set Index')
+            coil_ax.set_ylabel('Current [A]')
+            for coil_con in self._coil_current_cons:
+                coil_ax.errorbar(coil_con.ind, coil_con.val, yerr=coil_con.err, color='r', capsize=2)
+                coil_ax.plot(coil_con.ind, err_output[i,2], 'bx')
+                i += 1
+            coil_ax.set_xticks(range(len(ind_to_name)), labels=[ind_to_name[j] for j in sorted(ind_to_name.keys())],
+                rotation=45, ha="right", rotation_mode="anchor")
     
     def setup_constraints(self):
         '''! Set up constraints in TokaMaker for current equilibrium without performing reconstruction
