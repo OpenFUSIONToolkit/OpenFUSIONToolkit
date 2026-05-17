@@ -31,14 +31,14 @@ class Openfusiontoolkit(CMakePackage):
 
     # Version list supported by spack build (needs 1.0.0-beta8 or newer)
     version("main", branch="main")
-    version("1.0.0-beta7", sha256="d687c788f05118e88b3bcb78c14fbf726286b5359b122ecdb9829fc26084f3c4") # FIXME: remove and replace with 1.0.0-beta8 when available
+    # version("1.0.0-beta8", sha256="d687c788f05118e88b3bcb78c14fbf726286b5359b122ecdb9829fc26084f3c4") # FIXME: Uncomment and update hash when available
 
     # Build variants
     variant("build_type",default="Release",description="The build type to build",values=("Debug", "Release"))
     variant("examples", default=False, description="Whether to build examples")
     variant("python", default=True, description="Whether to build python interface")
     variant("mpi", default=False, description="Whether to enable MPI")
-    variant("openmp", default=True, description="Whether to build with OpenMP")
+    variant("openmp", default=True, description="Whether to build with OpenMP support")
     variant("arpack", default=True, description="Whether to build with ARPACK support")
     variant("netcdf", default=False, description="Whether to build with NetCDF support")
     variant("umfpack", default=False, description="Whether to build with UMFPACK support through SuiteSparse")
@@ -98,6 +98,8 @@ class Openfusiontoolkit(CMakePackage):
             args.append(self.define("OFT_ARPACK_ROOT", "{0}".format(self.spec["arpack-ng"].prefix)))
         if "umfpack" in self.spec:
             args.append(self.define("OFT_UMFPACK_ROOT", "{0}".format(self.spec["suite-sparse"].prefix)))
+        if "mumps" in self.spec:
+            args.append(self.define("OFT_MUMPS_ROOT", "{0}".format(self.spec["mumps"].prefix)))
         if "superlu" in self.spec:
             args.append(self.define("OFT_SUPERLU_ROOT", "{0}".format(self.spec["superlu"].prefix)))
         if "superlu-dist" in self.spec:
