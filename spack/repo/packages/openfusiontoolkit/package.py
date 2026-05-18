@@ -36,6 +36,7 @@ class Openfusiontoolkit(CMakePackage):
     # Build variants
     variant("build_type",default="Release",description="The build type to build",values=("Debug", "Release"))
     variant("examples", default=False, description="Whether to build examples")
+    variant("tests", default=False, description="Whether to build tests")
     variant("python", default=True, description="Whether to build python interface")
     variant("mpi", default=False, description="Whether to enable MPI")
     variant("openmp", default=True, description="Whether to build with OpenMP support")
@@ -87,6 +88,7 @@ class Openfusiontoolkit(CMakePackage):
         args = [
             self.define_from_variant("OFT_BUILD_PYTHON", "python"),
             self.define_from_variant("OFT_BUILD_EXAMPLES", "examples"),
+            self.define_from_variant("OFT_BUILD_TESTS", "tests"),
             self.define_from_variant("OFT_USE_OpenMP", "openmp"),
             self.define_from_variant("OFT_USE_MPI", "mpi"),
         ]
