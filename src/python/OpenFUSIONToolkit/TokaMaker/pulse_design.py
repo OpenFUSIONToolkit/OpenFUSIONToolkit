@@ -1103,7 +1103,8 @@ class TokaMaker_TORAX:
         self._evolve_Ti = Ti
         self._evolve_Te = Te
 
-    def set_fueling(self, gas_puff_S_total=None, gas_puff_decay_length=None, pellet_deposition_location=None, pellet_width=None, pellet_S_total=None):
+    def set_fueling(self, gas_puff_S_total=None, gas_puff_decay_length=None, pellet_deposition_location=None, pellet_width=None, pellet_S_total=None,
+                    generic_particle_location=None, generic_particle_width=None, generic_particle_S_total=None):
         r'''! Set gas puff and pellet fueling particle sources for TORAX.
                 TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#sources
                 @param gas_puff_S_total Gas puff particle source (particles/s).
@@ -1117,6 +1118,9 @@ class TokaMaker_TORAX:
         self._pellet_deposition_location = pellet_deposition_location
         self._pellet_width = pellet_width
         self._pellet_s_total = pellet_S_total
+        self._generic_particle_location = generic_particle_location
+        self._generic_particle_width = generic_particle_width
+        self._generic_particle_s_total = generic_particle_S_total
 
     def set_transport_coefs(self, chi_min=None, chi_max=None, De_min=None, De_max=None, Ve_min=None, Ve_max=None):
         r'''! Set transport coefficient bounds for TORAX.
@@ -1499,6 +1503,12 @@ class TokaMaker_TORAX:
                 myconfig['sources']['generic_current']['I_generic'] = (nbi_times, _NBI_W_TO_MA * np.array(nbi_pow))
                 myconfig['sources']['generic_current']['gaussian_location'] = self._generic_heat_loc
 
+        if self._generic_particle_location is not None:
+            myconfig['sources']['generic_particle'] = {}
+            myconfig['sources']['generic_particle']['deposition_location'] = self._generic_particle_location
+            myconfig['sources']['generic_particle']['particle_width'] = self._generic_particle_width
+            myconfig['sources']['generic_particle']['S_total'] = self._generic_particle_s_total
+            
         if self._pedestal_config is not None:
             # Full pedestal dict replacement requested via load_pedestal_config().
             myconfig['pedestal'] = copy.deepcopy(self._pedestal_config)
@@ -1915,6 +1925,7 @@ class TokaMaker_TORAX:
                 init_config['profile_conditions'].pop('psi', None)
                 init_config['profile_conditions']['initial_psi_mode'] = 'geometry'
                 init_config['profile_conditions']['initial_psi_from_j'] = False
+
             else:
                 pc = init_config['profile_conditions']
                 pc['psi'] = copy.deepcopy(prescribed_profiles['psi'])
