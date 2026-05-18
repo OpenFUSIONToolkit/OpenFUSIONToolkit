@@ -12,7 +12,7 @@ r'''! TokaMaker + TORAX Coupled Pulse Design and Simulation Workflow (TokaMaker_
     TokaMaker_TORAX workflow couples the two codes for pulse planning, predictive kinetic equilibria, 
         and other integrated modeling applications.
     
-    @authors Freddie Sheehan and John Lhote
+    @authors Freddie Sheehan and John Lhota
     @date May 2026
     @ingroup doxy_oft_python
 '''
