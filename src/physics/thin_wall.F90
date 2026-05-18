@@ -2210,8 +2210,8 @@ IF(TRIM(save_file)/='none')THEN
       IF(exists)THEN
         ALLOCATE(self%Bdr(self%mesh%np,self%n_icoils,3))
         CALL hdf5_read(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X',success=exists)
-        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_X',success=exists)
-        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_Y',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_Z',success=exists)
       END IF
     END IF
     IF(exists)RETURN
