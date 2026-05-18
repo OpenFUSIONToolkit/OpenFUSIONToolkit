@@ -1112,6 +1112,9 @@ class TokaMaker_TORAX:
                 @param pellet_deposition_location Pellet deposition location (normalized rho).
                 @param pellet_width Pellet deposition width (normalized rho).
                 @param pellet_S_total Pellet particle source (particles/s).
+                @param generic_particle_location Generic particle source location (normalized rho).
+                @param generic_particle_width Generic particle source width (normalized rho).
+                @param generic_particle_width Generic particle source amount (particles/s).
         '''
         self._gp_s = gas_puff_S_total
         self._gp_dl = gas_puff_decay_length
@@ -1925,7 +1928,6 @@ class TokaMaker_TORAX:
                 init_config['profile_conditions'].pop('psi', None)
                 init_config['profile_conditions']['initial_psi_mode'] = 'geometry'
                 init_config['profile_conditions']['initial_psi_from_j'] = False
-
             else:
                 pc = init_config['profile_conditions']
                 pc['psi'] = copy.deepcopy(prescribed_profiles['psi'])
