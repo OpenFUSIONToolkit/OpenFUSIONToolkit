@@ -50,14 +50,14 @@ spack env create -d /path/to/oft
 spack env activate /path/to/oft
 ```
 
-#### Mark OFT repo for development
-```shell
-spack develop --path /path/to/oft openfusiontoolkit
-```
-
 #### Add local repo to environment
 ```shell
 spack repo add /path/to/oft/spack/repo
+```
+
+#### Mark OFT repo for development
+```shell
+spack develop --path /path/to/oft openfusiontoolkit
 ```
 
 #### Add OFT to install environment
