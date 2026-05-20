@@ -633,17 +633,17 @@ class reconstruction():
             for press_con in self._pressure_cons:
                 ax.plot(press_con.loc[0], press_con.loc[1], 'm.', zorder=base_zorder+1)
     
-    def plot_error(self, fig, ax, coil_fig, coil_ax):
+    def plot_error(self, ax, coil_ax=None, ax_1d=None):
         '''! Plot constraint values and reconstructed signals for current equilibrium from reconstruction output file
         
-        @param fig Matplotlib figure to plot on
         @param ax Matplotlib axis to plot on
-        @param coil_fig Matplotlib figure to plot coil current constraints on
         @param coil_ax Matplotlib axis to plot coil current constraints on
+        @param ax_1d Matplotlib axis to plot 1D error spectrum on
         '''
         if len(ax) != 4:
             raise ValueError("Must provide list of 4 axes for plotting flux loop, Mirnov, saddle, and pressure constraint errors")
         err_output = numpy.loadtxt('fit.out')
+        # Plot signals for "main" diagnostics
         i = 0
         ax[0].set_title('Flux Loop Constraints')
         ax[0].set_xlabel('Constraint Index')
@@ -673,8 +673,8 @@ class reconstruction():
             ax[3].errorbar(i,err_output[i,3], yerr=press_con.err, color='r', capsize=2)
             ax[3].plot(i,err_output[i,2], 'bx')
             i += 1
-        #
-        if len(self._coil_current_cons) > 0:
+        # Plot coil signals
+        if (coil_ax is not None) and (len(self._coil_current_cons) > 0):
             ind_to_name = {self._tMaker_obj.coil_sets[coil_set]['id']: coil_set for coil_set in self._tMaker_obj.coil_sets}
             coil_ax.set_title('Coil Current Constraints')
             coil_ax.set_xlabel('Coil Set Index')
@@ -685,6 +685,25 @@ class reconstruction():
                 i += 1
             coil_ax.set_xticks(range(len(ind_to_name)), labels=[ind_to_name[j] for j in sorted(ind_to_name.keys())],
                 rotation=45, ha="right", rotation_mode="anchor")
+        # Plot error contributions
+        if ax_1d is not None:
+            err_ind = numpy.cumsum([0,
+                                    len(self._flux_loops),
+                                    len(self._mirnovs),
+                                    len(self._saddles),
+                                    len(self._pressure_cons),
+                                    len(self._coil_current_cons),
+                                    1 if self._Ip_con is not None else 0,
+                                    1 if self._Dflux_con is not None else 0])
+            names = ['Flux loops', 'Mirnovs', 'Saddle loops', 'Pressure', r'$I_C$', r'$I_p$', r'$\Delta \Phi$']
+            ax_1d.set_title(r'Signal $\chi^2$ contributions')
+            ax_1d.set_xlabel('Signal Index')
+            ax_1d.set_ylabel('$\chi^2_i$')
+            for i in range(err_ind.shape[0]-1):
+                if err_ind[i+1] == err_ind[i]:
+                    continue
+                ax_1d.plot(numpy.arange(err_ind[i],err_ind[i+1])+1,numpy.power(err_output[err_ind[i]:err_ind[i+1],1],2),label=names[i])
+            ax_1d.legend()
     
     def setup_constraints(self):
         '''! Set up constraints in TokaMaker for current equilibrium without performing reconstruction
