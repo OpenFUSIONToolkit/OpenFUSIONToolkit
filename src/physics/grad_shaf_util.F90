@@ -660,7 +660,6 @@ END IF
 CALL gs_profile_alloc(profType,self%I)
 DEALLOCATE(profType)
 CALL self%I%load(filename,'tokamaker/FFP_PROFILE',success=success)
-CALL self%I%update(self)
 IF(.NOT.success)THEN
   error_string="Failed to load F*F' profile."
   RETURN
@@ -687,7 +686,6 @@ END IF
 CALL gs_profile_alloc(profType,self%P)
 DEALLOCATE(profType)
 CALL self%P%load(filename,'tokamaker/PP_PROFILE',success=success)
-CALL self%P%update(self)
 IF(.NOT.success)THEN
   error_string="Failed to load P' profile."
   RETURN
@@ -709,7 +707,6 @@ IF(hdf5_field_exist(filename,'tokamaker/NI_PROFILE'))THEN
     error_string='Failed to load non-inductive current profile.'
     RETURN
   END IF
-  CALL self%I_NI%update(self)
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/ETA_PROFILE'))THEN
   CALL hdf5_read(profType,filename,'tokamaker/ETA_PROFILE/TYPE',success=success)
@@ -728,7 +725,6 @@ IF(hdf5_field_exist(filename,'tokamaker/ETA_PROFILE'))THEN
     error_string='Failed to load ETA profile.'
     RETURN
   END IF
-  CALL self%eta%update(self)
 END IF
 ! IF(hdf5_field_exist(filename,'tokamaker/P_ANI'))THEN
 !   CALL hdf5_read(profType,filename,'tokamaker/P_ANI/TYPE',success=success)
@@ -862,6 +858,11 @@ IF(hdf5_field_exist(filename,'tokamaker/SADDLE_TARGETS'))THEN
     RETURN
   END IF
 END IF
+!---Update all flux functions now that all fields (F0, targets, kinetics) are loaded
+CALL self%I%update(self)
+CALL self%P%update(self)
+IF(ASSOCIATED(self%I_NI))CALL self%I_NI%update(self)
+IF(ASSOCIATED(self%eta))CALL self%eta%update(self)
 end subroutine gs_load_tokamaker
 !---------------------------------------------------------------------------
 !> Needs docs
