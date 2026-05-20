@@ -856,13 +856,6 @@ def solve_with_bootstrap(mygs,
       parameterized spike profile table to stdout (mirroring the Fortran --diagnose-bs output).
     @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
     '''
-    warn(
-        "The python solve_with_bootstrap() wrapper is deprecated by mygs.solve_bootstrap() (internal fortran-solve)."
-        "Set use_python_solve = True to retain the original Python-based bootstrap calculation, otherwise "
-        "solve_with_bootstrap passes arguments to solve_bootstrap()",
-        DeprecationWarning,
-        stacklevel=2,
-    )
 
     if not use_python_solve:
         _python_only = {
@@ -913,6 +906,14 @@ def solve_with_bootstrap(mygs,
                     'scale_j0' : 1.0,
                     'scale_Ip' : 1.0}
         return results
+
+    warn(
+        "The python solve_with_bootstrap() is deprecated by mygs.solve_bootstrap() (internal fortran-solve)."
+        "Set use_python_solve = True to retain the original Python-based bootstrap calculation, otherwise "
+        "solve_with_bootstrap passes arguments to solve_bootstrap()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     from scipy.optimize import root_scalar
     import matplotlib.pyplot as plt
