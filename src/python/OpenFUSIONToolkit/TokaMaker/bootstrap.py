@@ -911,9 +911,15 @@ def solve_with_bootstrap(mygs,
         # Get geometry and flux functions
         _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
         if use_sauter_eps:
-            _, fc, r_avgs, _, eps = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad, return_eps=True)
+            _, fc, r_avgs, b_avgs, eps = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad, return_eps=True)
         else:
-            _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
+            warn(
+                "Using use_sauter_eps = False introduces error to the bootstrap calculation in highly elongated plasmas, "
+                "use_sauter_eps = True recommended",
+                UserWarning,
+                stacklevel=2,
+            )
+            _, fc, r_avgs, b_avgs = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
             eps = r_avgs[2] / r_avgs[0]
         
         # Geometry terms
@@ -987,7 +993,7 @@ def solve_with_bootstrap(mygs,
                 )
             
             # Convert to A/m^2
-            j_BS_final = j_BS_neo * (R_avg / f)
+            j_BS_final = j_BS_neo / b_avgs[0]
             j_BS_final = numpy.nan_to_num(j_BS_final, nan=0.0)
 
             # to-do: project j_BS_parallel to j_phi more accurately?

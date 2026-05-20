@@ -1099,6 +1099,7 @@ REAL(r8) :: ft(n_psi)       !< Trapped particle fraction
 REAL(r8) :: eps(n_psi)      !< Inverse aspect ratio
 REAL(r8) :: qvals(n_psi)    !< Safety factor
 REAL(r8) :: R_avg(n_psi)    !< <R> [m] per flux surface
+REAL(r8) :: B_avg(n_psi)    !< <B> [T] per flux surface
 REAL(r8) :: r_avgs_saut(n_psi,3)    !< Sauter FSA: <R>, <1/R>, <a>
 REAL(r8) :: modb_avgs_saut(n_psi,2) !< Sauter FSA: <|B|>, <|B|^2>
 REAL(r8) :: dn_e_dpsi(n_psi), dT_e_dpsi(n_psi)
@@ -1140,6 +1141,7 @@ END DO
 ! Get flux-surface geometry: fc, eps, q, and <R> in one tracing pass
 CALL sauter_fc(gseq, n_psi, psi_N, fc, r_avgs_saut, modb_avgs_saut, qprof=qvals, eps=eps)
 R_avg = r_avgs_saut(:,1)
+B_avg = modb_avgs_saut(:,1)
 ! ===================================================================
 ft = 1.0_r8 - fc
 ! Pressures [Pa]
@@ -1193,7 +1195,7 @@ CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, qvals, eps, ft, f, 
     ln_le, ln_lii, nu_e_star, nu_i_star, B_times_Jbs)
 ! Convert parallel bootstrap to phi component: j_phi = B_times_Jbs * <R> / F
 WHERE(ABS(f) > 0.0_r8)
-  j_BS = B_times_Jbs * (R_avg / f)
+  j_BS = B_times_Jbs / B_avg
 ELSEWHERE
   j_BS = 0.0_r8
 END WHERE
@@ -1206,6 +1208,7 @@ IF(gseq%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A)') '  [calculate_bootstrap] geometry & collisionality sample (i=1,mid,n):'
   WRITE(*,'(A,3ES12.4)') '    <R>      : ', r_avgs_saut(1,1), r_avgs_saut(n_psi/2,1), r_avgs_saut(n_psi,1)
   WRITE(*,'(A,3ES12.4)') '    <1/R>    : ', r_avgs_saut(1,2), r_avgs_saut(n_psi/2,2), r_avgs_saut(n_psi,2)
+  WRITE(*,'(A,3ES12.4)') '    <B>      : ', B_avg(1), B_avg(n_psi/2), B_avg(n_psi)
   WRITE(*,'(A,3ES12.4)') '    eps      : ', eps(1), eps(n_psi/2), eps(n_psi)
   WRITE(*,'(A,3ES12.4)') '    q        : ', qvals(1), qvals(n_psi/2), qvals(n_psi)
   WRITE(*,'(A,3ES12.4)') '    nu_e_star: ', nu_e_star(1), nu_e_star(n_psi/2), nu_e_star(n_psi)
