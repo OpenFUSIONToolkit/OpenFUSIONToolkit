@@ -526,6 +526,45 @@ bops%taper_edge_psi0 = tMaker_equil_obj%boot_ops%taper_edge_psi0
 bops%taper_edge_shape = tMaker_equil_obj%boot_ops%taper_edge_shape
 END SUBROUTINE tokamaker_get_boot_ops
 !---------------------------------------------------------------------------------
+!> Get cached bootstrap current profiles from the last jphi_bs_update call.
+!!
+!! Returns C pointers directly into the Fortran-owned arrays.
+!! n is the size of the total_j_phi/psi_n/j_bs_final/j_ind_final group (0 if not allocated).
+!! n_raw is the size of j_bs_raw (0 if not allocated).  The two sizes may differ.
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_boot_profs(tMaker_equil_ptr,n,psi_n_ptr,total_j_phi_ptr, &
+    j_bs_final_ptr,j_ind_final_ptr,n_raw,j_bs_raw_ptr,error_str) BIND(C,NAME="tokamaker_get_boot_profs")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+INTEGER(c_int), INTENT(out) :: n !< Size of total_j_phi, psi_n, j_bs_final, j_ind_final arrays (0 if not allocated)
+TYPE(c_ptr), INTENT(out) :: psi_n_ptr !< Pointer to psi_n array
+TYPE(c_ptr), INTENT(out) :: total_j_phi_ptr !< Pointer to total_j_phi array
+TYPE(c_ptr), INTENT(out) :: j_bs_final_ptr !< Pointer to j_bs_final array
+TYPE(c_ptr), INTENT(out) :: j_ind_final_ptr !< Pointer to j_ind_final array
+INTEGER(c_int), INTENT(out) :: n_raw !< Size of j_bs_raw array (0 if not allocated)
+TYPE(c_ptr), INTENT(out) :: j_bs_raw_ptr !< Pointer to j_bs_raw array (c_null_ptr if not allocated)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+n = 0
+n_raw = 0
+psi_n_ptr = c_null_ptr
+total_j_phi_ptr = c_null_ptr
+j_bs_final_ptr = c_null_ptr
+j_ind_final_ptr = c_null_ptr
+j_bs_raw_ptr = c_null_ptr
+IF(ASSOCIATED(tMaker_equil_obj%boot_profs%total_j_phi))THEN
+  n = SIZE(tMaker_equil_obj%boot_profs%total_j_phi, KIND=c_int)
+  psi_n_ptr = c_loc(tMaker_equil_obj%boot_profs%psi_n)
+  total_j_phi_ptr = c_loc(tMaker_equil_obj%boot_profs%total_j_phi)
+  j_bs_final_ptr = c_loc(tMaker_equil_obj%boot_profs%j_bs_final)
+  j_ind_final_ptr = c_loc(tMaker_equil_obj%boot_profs%j_ind_final)
+END IF
+IF(ASSOCIATED(tMaker_equil_obj%boot_profs%j_bs_raw))THEN
+  n_raw = SIZE(tMaker_equil_obj%boot_profs%j_bs_raw, KIND=c_int)
+  j_bs_raw_ptr = c_loc(tMaker_equil_obj%boot_profs%j_bs_raw)
+END IF
+END SUBROUTINE tokamaker_get_boot_profs
+!---------------------------------------------------------------------------------
 !> Initialize \f$ \psi \f$ using a uniform or specified current source
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str) BIND(C,NAME="tokamaker_init_psi")

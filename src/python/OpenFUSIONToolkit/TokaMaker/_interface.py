@@ -279,6 +279,11 @@ tokamaker_set_boot_ops = ctypes_subroutine(oftpy_lib.tokamaker_set_boot_ops,
 # tokamaker_get_boot_ops(tMaker_equil_ptr,bops,initialized,error_str)
 tokamaker_get_boot_ops = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_ops,
     [c_void_p, ctypes.POINTER(tokamaker_boot_ops_struct), ctypes.POINTER(c_bool), c_char_p])
+
+# tokamaker_get_boot_profs(tMaker_equil_ptr,n,psi_n_ptr,total_j_phi_ptr,j_bs_final_ptr,j_ind_final_ptr,n_raw,j_bs_raw_ptr,error_str)
+tokamaker_get_boot_profs = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_profs,
+    [c_void_p, c_int_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr,
+     c_int_ptr, c_double_ptr_ptr, c_char_p])
 ## @endcond
 
 

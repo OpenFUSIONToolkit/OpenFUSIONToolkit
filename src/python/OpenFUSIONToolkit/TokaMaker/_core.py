@@ -782,6 +782,19 @@ class TokaMaker():
                                                diagnose_bs,
                                                taper_edge_jBS, taper_edge_psi0, taper_edge_shape)
 
+    def get_boot_profs(self):
+        r'''! Get cached bootstrap current profiles from the last call to the G-S solver with a
+        `jphi-split-bootstrap` current profile.
+
+        @result Dictionary with keys `'psi_n'`, `'total_j_phi'`, `'j_bs_final'`, `'j_ind_final'`
+          and (when available) `'j_bs_raw'`.  Returns `None` if no profiles have been computed.
+          All arrays are 1-D numpy arrays of length *npsi*.  `'psi_n'` is in standard convention
+          (0 = axis, 1 = LCFS).  Current densities are in A/m².
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_boot_profs()
+
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
 
@@ -2646,6 +2659,46 @@ class TokaMaker_equilibrium():
         tokamaker_set_boot_ops(self.c_ptr, ctypes.byref(bops), error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+
+    def get_boot_profs(self):
+        r'''! Get cached bootstrap current profiles from the last call to the G-S solver with a
+        `jphi-split-bootstrap` current profile.
+
+        @result Dictionary with keys `'psi_n'`, `'total_j_phi'`, `'j_bs_final'`, `'j_ind_final'`
+          and (when available) `'j_bs_raw'`.  Returns `None` if no profiles have been computed.
+          All arrays are 1-D numpy arrays of length *npsi*.  `'psi_n'` is in standard convention
+          (0 = axis, 1 = LCFS).  Current densities are in A/m².
+        '''
+        n = c_int(0)
+        n_raw = c_int(0)
+        psi_n_ptr = c_double_ptr()
+        total_j_phi_ptr = c_double_ptr()
+        j_bs_final_ptr = c_double_ptr()
+        j_ind_final_ptr = c_double_ptr()
+        j_bs_raw_ptr = c_double_ptr()
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_boot_profs(self.c_ptr,
+            ctypes.byref(n), ctypes.byref(psi_n_ptr),
+            ctypes.byref(total_j_phi_ptr), ctypes.byref(j_bs_final_ptr),
+            ctypes.byref(j_ind_final_ptr),
+            ctypes.byref(n_raw), ctypes.byref(j_bs_raw_ptr),
+            error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        if n.value != n_raw.value:
+            warn(
+                f"Bootstrap profile size mismatch: total_j_phi group has {n.value} points but "
+                f"j_bs_raw has {n_raw.value} points — jphi_bs_update may not have run correctly.",
+                UserWarning, stacklevel=2)
+        result = {}
+        if n.value > 0:
+            result['psi_n'] = numpy.ctypeslib.as_array(psi_n_ptr, shape=(n.value,)).copy()
+            result['total_j_phi'] = numpy.ctypeslib.as_array(total_j_phi_ptr, shape=(n.value,)).copy()
+            result['j_bs_final'] = numpy.ctypeslib.as_array(j_bs_final_ptr, shape=(n.value,)).copy()
+            result['j_ind_final'] = numpy.ctypeslib.as_array(j_ind_final_ptr, shape=(n.value,)).copy()
+        if n_raw.value > 0:
+            result['j_bs_raw'] = numpy.ctypeslib.as_array(j_bs_raw_ptr, shape=(n_raw.value,)).copy()
+        return result if result else None
 
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition

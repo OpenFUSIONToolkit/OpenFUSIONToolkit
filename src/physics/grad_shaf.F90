@@ -276,6 +276,20 @@ TYPE :: boot_ops
   INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
 END TYPE boot_ops
 !------------------------------------------------------------------------------
+!> Cached current profiles produced by the last call to @ref jphi_bs_update.
+!!
+!! All four arrays are allocated/overwritten on every call to jphi_bs_update
+!! and remain valid until the next call or until the parent @ref gs_equil is
+!! destroyed.  Units are A/m² (before the mu0 normalisation used internally).
+!------------------------------------------------------------------------------
+TYPE :: boot_profs
+  REAL(r8), POINTER, DIMENSION(:) :: psi_n => NULL() !< Normalized flux values for these current profiles (0=axis,1=LCFS), set by 'x' from ffp_prof
+  REAL(r8), POINTER, DIMENSION(:) :: j_bs_raw => NULL() !< Raw bootstrap current density output directly from Redl PoP 2021 formula [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: total_j_phi => NULL() !< Total toroidal current density = j_ind_final + j_bs_final [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: j_ind_final => NULL() !< Input jphi, re-scaled & optionally tapered [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: j_bs_final => NULL() !< Bootstrap current density, optionally isolated/parametrised/tapered [A/m²]
+END TYPE boot_profs
+!------------------------------------------------------------------------------
 !> Grad-Shafranov equilibrium object
 !------------------------------------------------------------------------------
 TYPE :: gs_equil
@@ -326,6 +340,7 @@ TYPE :: gs_equil
   CLASS(flux_func), POINTER :: ni => NULL() !< Ion density flux function [m^-3]
   CLASS(flux_func), POINTER :: Zeff => NULL() !< Effective charge flux function (dimensionless)
   TYPE(boot_ops) :: boot_ops !< Options for jphi-split-bootstrap current profile update
+  TYPE(boot_profs) :: boot_profs !< Cached current profiles from the last jphi_bs_update call
   TYPE(gs_factory), POINTER :: device => NULL() !< Device/factory object for equilibrium
 CONTAINS
   !>
@@ -1103,6 +1118,11 @@ self%x_points=source%x_points
 self%x_vecs=source%x_vecs
 self%vcontrol_val=source%vcontrol_val
 self%boot_ops=source%boot_ops
+IF(ASSOCIATED(source%boot_profs%psi_n))ALLOCATE(self%boot_profs%psi_n,SOURCE=source%boot_profs%psi_n)
+IF(ASSOCIATED(source%boot_profs%j_bs_raw))ALLOCATE(self%boot_profs%j_bs_raw,SOURCE=source%boot_profs%j_bs_raw)
+IF(ASSOCIATED(source%boot_profs%total_j_phi))ALLOCATE(self%boot_profs%total_j_phi,SOURCE=source%boot_profs%total_j_phi)
+IF(ASSOCIATED(source%boot_profs%j_bs_final))ALLOCATE(self%boot_profs%j_bs_final,SOURCE=source%boot_profs%j_bs_final)
+IF(ASSOCIATED(source%boot_profs%j_ind_final))ALLOCATE(self%boot_profs%j_ind_final,SOURCE=source%boot_profs%j_ind_final)
 !---Things that need equilibrium fully setup to copy
 IF(ASSOCIATED(source%P_ani))CALL source%P_ani%copy(self%P_ani,self)
 end subroutine copy_eq
@@ -5704,6 +5724,12 @@ IF(ASSOCIATED(self%Zeff))THEN
   CALL self%Zeff%delete()
   DEALLOCATE(self%Zeff)
 END IF
+!---Destroy cached bootstrap current profiles
+IF(ASSOCIATED(self%boot_profs%j_bs_raw))DEALLOCATE(self%boot_profs%j_bs_raw)
+IF(ASSOCIATED(self%boot_profs%total_j_phi))DEALLOCATE(self%boot_profs%total_j_phi)
+IF(ASSOCIATED(self%boot_profs%j_bs_final))DEALLOCATE(self%boot_profs%j_bs_final)
+IF(ASSOCIATED(self%boot_profs%j_ind_final))DEALLOCATE(self%boot_profs%j_ind_final)
+IF(ASSOCIATED(self%boot_profs%psi_n))DEALLOCATE(self%boot_profs%psi_n)
 ! TODO: Destroy P_ani
 end subroutine equil_destroy
 !------------------------------------------------------------------------------

@@ -424,6 +424,18 @@ IF(self%boot_ops%initialized)THEN
   CALL hdf5_write(self%boot_ops%taper_edge_psi0,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_PSI0')
   CALL hdf5_write(self%boot_ops%taper_edge_shape,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_SHAPE')
 END IF
+!---Save cached bootstrap current profiles (only when available)
+IF(ASSOCIATED(self%boot_profs%total_j_phi).OR.ASSOCIATED(self%boot_profs%j_bs_raw))THEN
+  CALL hdf5_create_group(filename,'tokamaker/BOOT_PROFS')
+  IF(ASSOCIATED(self%boot_profs%total_j_phi))THEN
+    CALL hdf5_write(self%boot_profs%psi_n,filename,'tokamaker/BOOT_PROFS/PSI_N')
+    CALL hdf5_write(self%boot_profs%total_j_phi,filename,'tokamaker/BOOT_PROFS/TOTAL_J_PHI')
+    CALL hdf5_write(self%boot_profs%j_ind_final,filename,'tokamaker/BOOT_PROFS/J_IND_FINAL')
+    CALL hdf5_write(self%boot_profs%j_bs_final,filename,'tokamaker/BOOT_PROFS/J_BS_FINAL')
+    IF(ASSOCIATED(self%boot_profs%j_bs_raw)) &
+      CALL hdf5_write(self%boot_profs%j_bs_raw,filename,'tokamaker/BOOT_PROFS/J_BS_RAW')
+  END IF
+END IF
 end subroutine gs_save_tokamaker
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -603,6 +615,32 @@ IF(hdf5_field_exist(filename,'tokamaker/BOOT_OPS'))THEN
   CALL hdf5_read(self%boot_ops%taper_edge_psi0,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_PSI0',success=success)
   CALL hdf5_read(self%boot_ops%taper_edge_shape,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_SHAPE',success=success)
   self%boot_ops%initialized = .TRUE.
+END IF
+!---Load cached bootstrap current profiles if available
+IF(hdf5_field_exist(filename,'tokamaker/BOOT_PROFS'))THEN
+  IF(hdf5_field_exist(filename,'tokamaker/BOOT_PROFS/TOTAL_J_PHI'))THEN
+    CALL hdf5_field_get_sizes(filename,'tokamaker/BOOT_PROFS/TOTAL_J_PHI',ndims,dim_sizes)
+    IF(ASSOCIATED(self%boot_profs%psi_n))DEALLOCATE(self%boot_profs%psi_n)
+    ALLOCATE(self%boot_profs%psi_n(dim_sizes(1)))
+    IF(ASSOCIATED(self%boot_profs%total_j_phi))DEALLOCATE(self%boot_profs%total_j_phi)
+    ALLOCATE(self%boot_profs%total_j_phi(dim_sizes(1)))
+    IF(ASSOCIATED(self%boot_profs%j_ind_final))DEALLOCATE(self%boot_profs%j_ind_final)
+    ALLOCATE(self%boot_profs%j_ind_final(dim_sizes(1)))
+    IF(ASSOCIATED(self%boot_profs%j_bs_final))DEALLOCATE(self%boot_profs%j_bs_final)
+    ALLOCATE(self%boot_profs%j_bs_final(dim_sizes(1)))
+    DEALLOCATE(dim_sizes)
+    CALL hdf5_read(self%boot_profs%psi_n,filename,'tokamaker/BOOT_PROFS/PSI_N',success=success)
+    CALL hdf5_read(self%boot_profs%total_j_phi,filename,'tokamaker/BOOT_PROFS/TOTAL_J_PHI',success=success)
+    CALL hdf5_read(self%boot_profs%j_ind_final,filename,'tokamaker/BOOT_PROFS/J_IND_FINAL',success=success)
+    CALL hdf5_read(self%boot_profs%j_bs_final,filename,'tokamaker/BOOT_PROFS/J_BS_FINAL',success=success)
+    IF(hdf5_field_exist(filename,'tokamaker/BOOT_PROFS/J_BS_RAW'))THEN
+      CALL hdf5_field_get_sizes(filename,'tokamaker/BOOT_PROFS/J_BS_RAW',ndims,dim_sizes)
+      IF(ASSOCIATED(self%boot_profs%j_bs_raw))DEALLOCATE(self%boot_profs%j_bs_raw)
+      ALLOCATE(self%boot_profs%j_bs_raw(dim_sizes(1)))
+      DEALLOCATE(dim_sizes)
+      CALL hdf5_read(self%boot_profs%j_bs_raw,filename,'tokamaker/BOOT_PROFS/J_BS_RAW',success=success)
+    END IF
+  END IF
 END IF
 !---Load flux functions
 CALL hdf5_read(self%ffp_scale,filename,'tokamaker/FFP_SCALE',success=success)
