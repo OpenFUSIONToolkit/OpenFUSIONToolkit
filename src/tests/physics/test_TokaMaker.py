@@ -1571,7 +1571,13 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             Zeff={'x': psi_sample, 'y': np.linspace(1.0, 2.5, n_sample)},
             **zeff_common_kwargs,
         )
-        if np.allclose(profs_scalar['j_bs_raw'], profs_linear['j_bs_raw']):
+        j_scalar = profs_scalar['j_bs_raw']
+        j_linear = profs_linear['j_bs_raw']
+        magnitude = 0.5 * (np.abs(j_scalar) + np.abs(j_linear))
+        rel_diff = np.where(magnitude > 0, (j_linear - j_scalar) / magnitude, 0.0)
+        print("\nZeff scalar vs linear j_bs_raw relative difference (j_linear-j_scalar)/|mean|:")
+        print(rel_diff)
+        if np.allclose(j_scalar, j_linear):
             raise AssertionError(
                 "Bootstrap profiles with scalar Zeff and linearly-increasing Zeff profile "
                 "are identical; expected them to differ."
