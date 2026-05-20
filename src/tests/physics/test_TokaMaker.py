@@ -1081,7 +1081,8 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
             isolate_edge_jBS=False,
             psi_pad=psi_pad,
             iterations=2,
-            diagnostic_plots=False
+            diagnostic_plots=False,
+            use_python_solve=True,
         )
     except Exception as e:
         print("Bootstrap solve failed: {0}".format(e))
