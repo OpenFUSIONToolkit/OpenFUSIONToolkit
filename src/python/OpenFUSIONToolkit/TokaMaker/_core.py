@@ -734,33 +734,34 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files)
 
-    def load_kinetic_profiles(self, te_file='none', ti_file='none', ne_file='none', ni_file='none'):
+    def load_kinetic_profiles(self, te_file='none', ti_file='none', ne_file='none', ni_file='none', zeff_file='none'):
         r'''! Load kinetic profiles (electron and ion temperature and density) from files
 
         @param te_file File containing electron temperature profile in KeV
         @param ti_file File containing ion temperature profile in KeV
         @param ne_file File containing electron density profile in m^-3
         @param ni_file File containing ion density profile in m^-3
+        @param zeff_file File containing effective charge profile
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.load_kinetic_profiles(te_file,ti_file,ne_file,ni_file)
+        return self._tMaker_equil.load_kinetic_profiles(te_file,ti_file,ne_file,ni_file,zeff_file)
 
-    def set_kinetic_profiles(self, te_prof=None, ti_prof=None, ne_prof=None, ni_prof=None, keep_files=False, Zeff=None):
+    def set_kinetic_profiles(self, te_prof=None, ti_prof=None, ne_prof=None, ni_prof=None, Zeff=None, keep_files=False):
         r'''! Set kinetic profiles (electron and ion temperature and density) using a piecewise linear definition
 
         @param te_prof Dictionary object containing electron temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
         @param ti_prof Dictionary object containing ion temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
         @param ne_prof Dictionary object containing electron density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
         @param ni_prof Dictionary object containing ion density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param Zeff Scalar effective charge or Dictionary object containing effective charge profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
-        @param Zeff Effective charge for bootstrap calculation. The dominant ion species is assumed to be singly charged (change Zdom inside calculate_bootstrap, grad_shaf_prof_phys.F90 if this is not the case).
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.set_kinetic_profiles(te_prof,ti_prof,ne_prof,ni_prof,keep_files,Zeff)
+        return self._tMaker_equil.set_kinetic_profiles(te_prof,ti_prof,ne_prof,ni_prof,Zeff,keep_files)
 
-    def set_boot_ops(self, isolate_edge_jBS=None, parameterize_jBS=None, scale_jBS=None, Zeff=None,
+    def set_boot_ops(self, isolate_edge_jBS=None, parameterize_jBS=None, scale_jBS=None,
                      diagnose_bs=None, taper_edge_jBS=None, taper_edge_psi0=None, taper_edge_shape=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
 
@@ -770,7 +771,6 @@ class TokaMaker():
         @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
         @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true. (Internal default: False)
         @param scale_jBS Scaling factor applied to the spike profile. (Internal default: 1.0)
-        @param Zeff Effective charge for bootstrap calculation. No default is set, a value must be provided. Also, the dominant ion species is assumed to be singly charged (change Zdom inside calculate_bootstrap, grad_shaf_prof_phys.F90 if this is not the case).
         @param diagnose_bs Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration. (Internal default: False)
         @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge. (Internal default: True)
         @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
@@ -778,7 +778,7 @@ class TokaMaker():
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.set_boot_ops(isolate_edge_jBS, parameterize_jBS, scale_jBS, Zeff,
+        return self._tMaker_equil.set_boot_ops(isolate_edge_jBS, parameterize_jBS, scale_jBS,
                                                diagnose_bs,
                                                taper_edge_jBS, taper_edge_psi0, taper_edge_shape)
 
@@ -1209,7 +1209,6 @@ class TokaMaker():
                     'isolate_edge_jBS': bool(bops.isolate_edge_jBS),
                     'parameterize_jBS': bool(bops.parameterize_jBS),
                     'scale_jBS':        float(bops.scale_jBS),
-                    'Zeff':             float(bops.Zeff),
                     'diagnose_bs':      bool(bops.diagnose_bs),
                     'taper_edge_jBS':   bool(bops.taper_edge_jBS),
                     'taper_edge_psi0':  float(bops.taper_edge_psi0),
@@ -2379,11 +2378,6 @@ class TokaMaker_equilibrium():
         return self._F0
 
     @property
-    def Zeff(self):
-        r'''! \f$ Z_{eff} \f$ for bootstrap calculation'''
-        return self._boot_ops['Zeff'] if self._boot_ops is not None else 0.0
-
-    @property
     def Ip_target(self):
         r'''! Plasma current target'''
         return self._Ip_target
@@ -2483,61 +2477,114 @@ class TokaMaker_equilibrium():
                 except:
                     print('Warning: unable to delete temporary file "{0}"'.format(file))
     
-    def load_kinetic_profiles(self, te_file='none', ti_file='none', ne_file='none', ni_file='none'):
+    def load_kinetic_profiles(self, te_file='none', ti_file='none', ne_file='none', ni_file='none', zeff_file='none'):
         r'''! Load kinetic flux function profiles (electron/ion temperature and density) from files
 
         @param te_file File containing electron temperature profile in KeV
         @param ti_file File containing ion temperature profile in KeV
         @param ne_file File containing electron density profile in m^-3
         @param ni_file File containing ion density profile in m^-3
+        @param zeff_file File containing effective charge profile
         '''
 
         te_file_c = self._oft_env.path2c(te_file)
         ne_file_c = self._oft_env.path2c(ne_file)
         ti_file_c = self._oft_env.path2c(ti_file)
         ni_file_c = self._oft_env.path2c(ni_file)
+        zeff_file_c = self._oft_env.path2c(zeff_file)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_load_kinetic_profiles(self.c_ptr,te_file_c,ne_file_c,ti_file_c,ni_file_c,error_string)
+        tokamaker_load_kinetic_profiles(self.c_ptr,te_file_c,ne_file_c,ti_file_c,ni_file_c,zeff_file_c,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def set_kinetic_profiles(self, te_prof=None, ti_prof=None, ne_prof=None, ni_prof=None, keep_files=False, Zeff=None):
+    def set_kinetic_profiles(self, te_prof=None, ti_prof=None, ne_prof=None, ni_prof=None, Zeff=None, keep_files=False):
         r'''! Set kinetic profiles (electron/ion temperature and density) using a piecewise linear definition
 
         @param te_prof Dictionary object containing electron temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
         @param ti_prof Dictionary object containing ion temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
         @param ne_prof Dictionary object containing electron density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
         @param ni_prof Dictionary object containing ion density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param Zeff Effective charge state as a single value or a profile ['y'] with sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
-        @param Zeff Effective charge for bootstrap calculation. The dominant ion species is assumed to be singly charged (change Zdom inside calculate_bootstrap, grad_shaf_prof_phys.F90 if this is not the case).
         '''
-
-        if Zeff is None:
-            raise ValueError("Zeff must be provided when setting kinetic profiles. (dominant ion species assumed singly charged)")
-        self.set_boot_ops(Zeff=Zeff)
-
         delete_files = []
+
+        zeff_file = 'none'
+        if Zeff is not None:
+            if numpy.isscalar(Zeff):
+                Zeff = {
+                    'type': 'linterp',
+                    'x': numpy.array([0.0, 1.0]),
+                    'y': numpy.array([float(Zeff), float(Zeff)])
+                }
+            elif isinstance(Zeff, dict):
+                if 'x' not in Zeff or 'y' not in Zeff:
+                    raise ValueError('Zeff profile dictionary must contain "x" and "y" keys')
+                if len(Zeff['x']) != len(Zeff['y']):
+                    raise ValueError(f"Zeff profile dict: 'x' and 'y' must have the same length "
+                                     f"(got {len(Zeff['x'])} and {len(Zeff['y'])})")
+                if Zeff.get('type', 'linterp') != 'linterp':
+                    raise ValueError(f"Zeff profile 'type' must be 'linterp' (got {Zeff['type']!r})")
+                Zeff.setdefault('type', 'linterp')
+            else:
+                raise TypeError(f"Zeff must be a scalar or a profile dict with 'x' and 'y' keys; "
+                                f"got {type(Zeff).__name__}")
+            zeff_file = self._oft_env.unique_tmpfile('tokamaker_zeff.prof')
+            create_prof_file(self, zeff_file, Zeff, "Zeff")
+            delete_files.append(zeff_file)
         te_file = 'none'
         if te_prof is not None:
+            if not isinstance(te_prof, dict) or 'x' not in te_prof or 'y' not in te_prof:
+                raise TypeError("te_prof must be a dict with 'x' and 'y' keys")
+            if len(te_prof['x']) != len(te_prof['y']):
+                raise ValueError(f"te_prof: 'x' and 'y' must have the same length "
+                                 f"(got {len(te_prof['x'])} and {len(te_prof['y'])})")
+            if te_prof.get('type', 'linterp') != 'linterp':
+                raise ValueError(f"te_prof 'type' must be 'linterp' (got {te_prof['type']!r})")
+            te_prof.setdefault('type', 'linterp')
             te_file = self._oft_env.unique_tmpfile('tokamaker_te.prof')
             create_prof_file(self, te_file, te_prof, "Te")
             delete_files.append(te_file)
         ti_file = 'none'
         if ti_prof is not None:
+            if not isinstance(ti_prof, dict) or 'x' not in ti_prof or 'y' not in ti_prof:
+                raise TypeError("ti_prof must be a dict with 'x' and 'y' keys")
+            if len(ti_prof['x']) != len(ti_prof['y']):
+                raise ValueError(f"ti_prof: 'x' and 'y' must have the same length "
+                                 f"(got {len(ti_prof['x'])} and {len(ti_prof['y'])})")
+            if ti_prof.get('type', 'linterp') != 'linterp':
+                raise ValueError(f"ti_prof 'type' must be 'linterp' (got {ti_prof['type']!r})")
+            ti_prof.setdefault('type', 'linterp')
             ti_file = self._oft_env.unique_tmpfile('tokamaker_ti.prof')
             create_prof_file(self, ti_file, ti_prof, "Ti")
             delete_files.append(ti_file)
         ne_file = 'none'
         if ne_prof is not None:
+            if not isinstance(ne_prof, dict) or 'x' not in ne_prof or 'y' not in ne_prof:
+                raise TypeError("ne_prof must be a dict with 'x' and 'y' keys")
+            if len(ne_prof['x']) != len(ne_prof['y']):
+                raise ValueError(f"ne_prof: 'x' and 'y' must have the same length "
+                                 f"(got {len(ne_prof['x'])} and {len(ne_prof['y'])})")
+            if ne_prof.get('type', 'linterp') != 'linterp':
+                raise ValueError(f"ne_prof 'type' must be 'linterp' (got {ne_prof['type']!r})")
+            ne_prof.setdefault('type', 'linterp')
             ne_file = self._oft_env.unique_tmpfile('tokamaker_ne.prof')
             create_prof_file(self, ne_file, ne_prof, "ne")
             delete_files.append(ne_file)
         ni_file = 'none'
         if ni_prof is not None:
+            if not isinstance(ni_prof, dict) or 'x' not in ni_prof or 'y' not in ni_prof:
+                raise TypeError("ni_prof must be a dict with 'x' and 'y' keys")
+            if len(ni_prof['x']) != len(ni_prof['y']):
+                raise ValueError(f"ni_prof: 'x' and 'y' must have the same length "
+                                 f"(got {len(ni_prof['x'])} and {len(ni_prof['y'])})")
+            if ni_prof.get('type', 'linterp') != 'linterp':
+                raise ValueError(f"ni_prof 'type' must be 'linterp' (got {ni_prof['type']!r})")
+            ni_prof.setdefault('type', 'linterp')
             ni_file = self._oft_env.unique_tmpfile('tokamaker_ni.prof')
             create_prof_file(self, ni_file, ni_prof, "ni")
             delete_files.append(ni_file)
-        self.load_kinetic_profiles(te_file=te_file, ti_file=ti_file, ne_file=ne_file, ni_file=ni_file)
+        self.load_kinetic_profiles(te_file=te_file, ti_file=ti_file, ne_file=ne_file, ni_file=ni_file,zeff_file=zeff_file)
         if not keep_files:
             for file in delete_files:
                 try:
@@ -2545,7 +2592,7 @@ class TokaMaker_equilibrium():
                 except:
                     print('Warning: unable to delete temporary file "{0}"'.format(file))
 
-    def set_boot_ops(self, isolate_edge_jBS=None, parameterize_jBS=None, scale_jBS=None, Zeff=None,
+    def set_boot_ops(self, isolate_edge_jBS=None, parameterize_jBS=None, scale_jBS=None,
                      diagnose_bs=None, taper_edge_jBS=None, taper_edge_psi0=None, taper_edge_shape=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
 
@@ -2555,7 +2602,6 @@ class TokaMaker_equilibrium():
         @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
         @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true. (Internal default: False)
         @param scale_jBS Scaling factor applied to the spike profile. (Internal default: 1.0)
-        @param Zeff Effective charge for bootstrap calculation. No default is set, a value must be provided.
         @param diagnose_bs Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration. (Internal default: False)
         @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge. (Internal default: True)
         @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
@@ -2567,7 +2613,6 @@ class TokaMaker_equilibrium():
                 'isolate_edge_jBS': False,
                 'parameterize_jBS': False,
                 'scale_jBS': 1.0,
-                'Zeff': 0.0,
                 'diagnose_bs': False,
                 'taper_edge_jBS': True,
                 'taper_edge_psi0': 0.999,
@@ -2580,8 +2625,6 @@ class TokaMaker_equilibrium():
             self._boot_ops['parameterize_jBS'] = bool(parameterize_jBS)
         if scale_jBS is not None:
             self._boot_ops['scale_jBS'] = float(scale_jBS)
-        if Zeff is not None:
-            self._boot_ops['Zeff'] = float(Zeff)
         if diagnose_bs is not None:
             self._boot_ops['diagnose_bs'] = bool(diagnose_bs)
         if taper_edge_jBS is not None:
@@ -2595,7 +2638,6 @@ class TokaMaker_equilibrium():
         bops.isolate_edge_jBS = self._boot_ops['isolate_edge_jBS']
         bops.parameterize_jBS = self._boot_ops['parameterize_jBS']
         bops.scale_jBS = self._boot_ops['scale_jBS']
-        bops.Zeff = self._boot_ops['Zeff']
         bops.diagnose_bs = self._boot_ops['diagnose_bs']
         bops.taper_edge_jBS = self._boot_ops['taper_edge_jBS']
         bops.taper_edge_psi0 = self._boot_ops['taper_edge_psi0']

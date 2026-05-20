@@ -83,7 +83,6 @@ TYPE, BIND(C) :: tokamaker_boot_ops_type
   LOGICAL(c_bool) :: isolate_edge_jBS = .FALSE.  !< Isolate edge j_BS spike
   LOGICAL(c_bool) :: parameterize_jBS = .FALSE.  !< Overrides `isolate_edge_jBS` if true
   REAL(c_double)  :: scale_jBS = 1.0d0           !< Scaling factor for j_BS
-  REAL(c_double)  :: Zeff = 0.0d0                !< Effective charge (required; must be set explicitly)
   LOGICAL(c_bool) :: diagnose_bs = .FALSE.        !< Print diagnostic output
   LOGICAL(c_bool) :: taper_edge_jBS = .TRUE.      !< Taper j_BS at edge (guards against separatrix issues)
   REAL(c_double)  :: taper_edge_psi0 = 0.999d0   !< Taper onset psi_N (default 0.999)
@@ -458,14 +457,15 @@ CALL copy_string_rev(f_NI_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%I_NI)
 END SUBROUTINE tokamaker_load_profiles
 !---------------------------------------------------------------------------------
-!> Load kinetic profile specification files (Te, Ti, ne, ni)
+!> Load kinetic profile specification files (Te, Ti, ne, ni, Zeff)
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_load_kinetic_profiles(tMaker_equil_ptr,te_file,ne_file,ti_file,ni_file,error_str) BIND(C,NAME="tokamaker_load_kinetic_profiles")
+SUBROUTINE tokamaker_load_kinetic_profiles(tMaker_equil_ptr,te_file,ne_file,ti_file,ni_file,zeff_file,error_str) BIND(C,NAME="tokamaker_load_kinetic_profiles")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 CHARACTER(KIND=c_char), INTENT(in) :: te_file(OFT_PATH_SLEN) !< Electron temperature [keV] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ne_file(OFT_PATH_SLEN) !< Electron density [m^-3] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ti_file(OFT_PATH_SLEN) !< Ion temperature [keV] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ni_file(OFT_PATH_SLEN) !< Ion density [m^-3] profile specification file
+CHARACTER(KIND=c_char), INTENT(in) :: zeff_file(OFT_PATH_SLEN) !< Effective charge [-] profile specification file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
@@ -478,6 +478,8 @@ CALL copy_string_rev(ti_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%Ti)
 CALL copy_string_rev(ni_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%ni)
+CALL copy_string_rev(zeff_file,tmp_str)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%Zeff)
 END SUBROUTINE tokamaker_load_kinetic_profiles
 !---------------------------------------------------------------------------------
 !> Set bootstrap current options on the equilibrium object.
@@ -496,7 +498,6 @@ tMaker_equil_obj%boot_ops%initialized = .TRUE.
 tMaker_equil_obj%boot_ops%isolate_edge_jBS = bops%isolate_edge_jBS
 tMaker_equil_obj%boot_ops%parameterize_jBS = bops%parameterize_jBS
 tMaker_equil_obj%boot_ops%scale_jBS = bops%scale_jBS
-tMaker_equil_obj%boot_ops%Zeff = bops%Zeff
 tMaker_equil_obj%boot_ops%diagnose_bs = bops%diagnose_bs
 tMaker_equil_obj%boot_ops%taper_edge_jBS = bops%taper_edge_jBS
 tMaker_equil_obj%boot_ops%taper_edge_psi0 = bops%taper_edge_psi0
@@ -519,7 +520,6 @@ initialized = tMaker_equil_obj%boot_ops%initialized
 bops%isolate_edge_jBS = tMaker_equil_obj%boot_ops%isolate_edge_jBS
 bops%parameterize_jBS = tMaker_equil_obj%boot_ops%parameterize_jBS
 bops%scale_jBS = tMaker_equil_obj%boot_ops%scale_jBS
-bops%Zeff = tMaker_equil_obj%boot_ops%Zeff
 bops%diagnose_bs = tMaker_equil_obj%boot_ops%diagnose_bs
 bops%taper_edge_jBS = tMaker_equil_obj%boot_ops%taper_edge_jBS
 bops%taper_edge_psi0 = tMaker_equil_obj%boot_ops%taper_edge_psi0

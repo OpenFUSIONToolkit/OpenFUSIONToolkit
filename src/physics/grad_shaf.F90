@@ -270,7 +270,6 @@ TYPE :: boot_ops
   LOGICAL :: isolate_edge_jBS = .FALSE. !< Isolate edge bootstrap spike from bulk?
   LOGICAL :: parameterize_jBS = .FALSE. !< Use parametrised skew-normal fit for spike? Overrides `isolate_edge_jBS` if true.
   REAL(r8) :: scale_jBS = 1.0_r8 !< Scaling factor applied to the spike profile (default 1)
-  REAL(r8) :: Zeff = 0.0_r8 !< Effective charge for bootstrap calculation (must be set explicitly)
   LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration
   LOGICAL :: taper_edge_jBS = .TRUE. !< Smooth taper of toroidal current to zero at plasma edge (guards against numerical issues at the separatrix)
   REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
@@ -325,6 +324,7 @@ TYPE :: gs_equil
   CLASS(flux_func), POINTER :: Ti => NULL() !< Ion temperature flux function [keV]
   CLASS(flux_func), POINTER :: ne => NULL() !< Electron density flux function [m^-3]
   CLASS(flux_func), POINTER :: ni => NULL() !< Ion density flux function [m^-3]
+  CLASS(flux_func), POINTER :: Zeff => NULL() !< Effective charge flux function (dimensionless)
   TYPE(boot_ops) :: boot_ops !< Options for jphi-split-bootstrap current profile update
   TYPE(gs_factory), POINTER :: device => NULL() !< Device/factory object for equilibrium
 CONTAINS
@@ -1073,6 +1073,11 @@ CALL source%I%copy(self%I)
 CALL source%P%copy(self%P)
 IF(ASSOCIATED(source%I_NI))CALL source%I_NI%copy(self%I_NI)
 IF(ASSOCIATED(source%eta))CALL source%eta%copy(self%eta)
+IF(ASSOCIATED(source%Te))CALL source%Te%copy(self%Te)
+IF(ASSOCIATED(source%Ti))CALL source%Ti%copy(self%Ti)
+IF(ASSOCIATED(source%ne))CALL source%ne%copy(self%ne)
+IF(ASSOCIATED(source%ni))CALL source%ni%copy(self%ni)
+IF(ASSOCIATED(source%Zeff))CALL source%Zeff%copy(self%Zeff)
 self%diverted=source%diverted
 self%has_plasma=source%has_plasma
 self%mode=source%mode
@@ -5678,6 +5683,26 @@ END IF
 IF(ASSOCIATED(self%eta))THEN
   CALL self%eta%delete()
   DEALLOCATE(self%eta)
+END IF
+IF(ASSOCIATED(self%Te))THEN
+  CALL self%Te%delete()
+  DEALLOCATE(self%Te)
+END IF
+IF(ASSOCIATED(self%Ti))THEN
+  CALL self%Ti%delete()
+  DEALLOCATE(self%Ti)
+END IF
+IF(ASSOCIATED(self%ne))THEN
+  CALL self%ne%delete()
+  DEALLOCATE(self%ne)
+END IF
+IF(ASSOCIATED(self%ni))THEN
+  CALL self%ni%delete()
+  DEALLOCATE(self%ni)
+END IF
+IF(ASSOCIATED(self%Zeff))THEN
+  CALL self%Zeff%delete()
+  DEALLOCATE(self%Zeff)
 END IF
 ! TODO: Destroy P_ani
 end subroutine equil_destroy

@@ -744,6 +744,9 @@ IF(.NOT.ASSOCIATED(gseq%ne)) &
 IF(.NOT.ASSOCIATED(gseq%ni)) &
   CALL oft_abort("Jphi-BS profile requires ni profile", &
                  "jphi_bs_update",__FILE__)
+IF(.NOT.ASSOCIATED(gseq%Zeff)) &
+  CALL oft_abort("Jphi-BS profile requires Zeff profile", &
+                 "jphi_bs_update",__FILE__)
 !--- 1. Build <R>/<1/R> spline; pre-compute qtmp = <R>*<1/R> on self%x.
 !   R_spline stays alive until after the F*F' loop (step 6).
 ALLOCATE(qtmp(self%npsi))
@@ -1112,11 +1115,10 @@ DO i = 1, n_psi
   Ti(i) = gseq%Ti%fp(psi_N(i)) * 1000.0_r8
   ne(i) = gseq%ne%fp(psi_N(i))
   ni(i) = gseq%ni%fp(psi_N(i))
+  Zeff(i) = gseq%Zeff%fp(psi_N(i))
 END DO
 IF(MAXVAL(Te) > 5.0e5_r8)CALL oft_warn('calculate_bootstrap: max(Te) > 500 keV — profiles should be in keV, not eV')
 IF(MAXVAL(Ti) > 5.0e5_r8)CALL oft_warn('calculate_bootstrap: max(Ti) > 500 keV — profiles should be in keV, not eV')
-Zeff = gseq%boot_ops%Zeff
-IF(gseq%boot_ops%Zeff <= 0.0_r8)CALL oft_abort('Zeff must be set explicitly via set_boot_ops before bootstrap calculation','calculate_bootstrap',__FILE__)
 ! Get I(psi) = R*Bt = F(psi) profile on the psi_N grid
 DO i = 1, n_psi
   IF(gseq%mode==0)THEN

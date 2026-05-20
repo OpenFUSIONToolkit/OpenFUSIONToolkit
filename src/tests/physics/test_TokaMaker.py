@@ -1408,7 +1408,6 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             return
 
     # --- Kinetic and current profiles (match ITER_Hmode_bootstrap_ex.py) ---
-    EC = 1.602e-19
     n_sample = 257
     psi_sample = np.linspace(0.0, 1.0, n_sample)
     Ip_target = 13.0e6
@@ -1421,11 +1420,8 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
                         expin=1.3, expout=1.7, widthp=0.1, xphalf=xphalf)
     ni = ne.copy()
     Ti = Te.copy()
-    pressure = EC * ne * Te + EC * ni * Ti
 
     inductive_jphi = create_power_flux_fun(n_sample, 2.25, 2.5)['y']
-    pp_vals = np.gradient(pressure) / np.gradient(psi_sample)
-    pp_vals[-1] = 0.0
 
     # --- Set up GS solver ---
     myOFT = OFT_env(nthreads=-1)
@@ -1470,28 +1466,20 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         mp_q.put(None)
         return
 
-    # --- Configure internal bootstrap solver ---
-    mygs.set_kinetic_profiles(
-        te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
-        ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
-        ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
-        ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
-        Zeff=Zeff_val,
-    )
-    mygs.set_boot_ops(
-        scale_jBS=1.0,
-        Zeff=Zeff_val,
-    )
-    mygs.set_profiles(
-        ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
-        pp_prof={'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_vals[0]}
-    )
-    mygs.set_targets(Ip=Ip_target, pax=float(pressure[0]))
-    mygs.settings.pm = True
-    mygs.update_settings()
+    # --- Bootstrap solve ---
     try:
-        mygs.solve()
-    except ValueError:
+        mygs.solve_bootstrap(
+            ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
+            te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
+            ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
+            ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
+            ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
+            Zeff=Zeff_val,
+            Ip_target=Ip_target,
+            scale_jBS=1.0,
+            diagnose_bs=True,
+        )
+    except Exception:
         mp_q.put(None)
         return
 
@@ -1515,9 +1503,9 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     try:
         # Capture expected state before save so we can check all fields
         expected_boot_ops = dict(mygs._tMaker_equil._boot_ops)
+        expected_boot_profs = mygs.get_boot_profs()
         mygs._tMaker_equil.save_TokaMaker(save_file)
         # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
-        mygs._tMaker_equil._boot_ops['Zeff'] = Zeff_val * 99.0
         mygs._tMaker_equil._boot_ops['scale_jBS'] = -999.0
         mygs.replace_eq(source_file=save_file)
         boot_ops = mygs._tMaker_equil._boot_ops
@@ -1541,6 +1529,53 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
                     raise AssertionError(
                         f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
                     )
+        # Verify BOOT_PROFS arrays round-trip correctly through save/load
+        if expected_boot_profs is None:
+            raise AssertionError("get_boot_profs() returned None before save")
+        boot_profs = mygs.get_boot_profs()
+        if boot_profs is None:
+            raise AssertionError("get_boot_profs() returned None after replace_eq(source_file=...)")
+        for key, expected_arr in expected_boot_profs.items():
+            if key not in boot_profs:
+                raise AssertionError(
+                    f"boot_profs key '{key}' missing after replace_eq(source_file=...)"
+                )
+            if not np.allclose(boot_profs[key], expected_arr, rtol=1e-3):
+                reldiff = np.abs(boot_profs[key] - expected_arr) / (np.abs(expected_arr) + 1e-30)
+                idx = int(np.argmax(reldiff))
+                raise AssertionError(
+                    f"boot_profs['{key}'] does not match after replace_eq(source_file=...) "
+                    f"max_reldiff={reldiff.max():.3e} at idx={idx} "
+                    f"(expected={expected_arr[idx]:.6e}, got={boot_profs[key][idx]:.6e})"
+                )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        mp_q.put(None)
+        return
+
+    # --- verify that scalar Zeff and a linearly-increasing Zeff profile
+    #     produce different bootstrap current profiles ---
+    try:
+        zeff_common_kwargs = dict(
+            ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
+            te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
+            ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
+            ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
+            ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
+            Ip_target=Ip_target,
+            scale_jBS=1.0,
+        )
+        profs_scalar = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
+        profs_linear = mygs.solve_bootstrap(
+            Zeff={'x': psi_sample, 'y': np.linspace(1.0, 2.5, n_sample)},
+            **zeff_common_kwargs,
+        )
+        if np.allclose(profs_scalar['j_bs_raw'], profs_linear['j_bs_raw']):
+            raise AssertionError(
+                "Bootstrap profiles with scalar Zeff and linearly-increasing Zeff profile "
+                "are identical; expected them to differ."
+            )
     except Exception as e:
         print(e)
         mp_q.put(None)
@@ -1551,22 +1586,22 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
 
 
 ITER_bootstrap_internal_eq_dict = {
-    'Ip':        13000003.568934187,
-    'kappa':     1.8716551520530502,
-    'R_geo':     6.222736229522072,
-    'a_geo':     1.9796968208833436,
-    'q_0':       1.3048832760855849,
-    'q_95':      3.496546887858883,
-    'P_ax':      739890.2815794483,
-    'beta_pol':  84.1939085621749,
-    'beta_tor':  2.460759294312031,
-    'jphi_axis': 1062217.9664686644,
-    'jphi_max':  1209632.4640837614,
-    'q_axis':    1.3424257453677648,
-    'jphi_prof': [1062217.9664686644, 1198226.0388944256, 1192657.4238587115,
-                  1090600.7792406438,  907411.0276865886,  684849.7423404952,
-                   445851.1048066826,  243022.36869465964, 160988.66709199466,
-                    40824.31269308129],
+    'Ip':        13000021.329506887,
+    'kappa':     1.8722243080601702,
+    'R_geo':     6.222632257121038,
+    'a_geo':     1.9800640130877074,
+    'q_0':       1.274255516171996,
+    'q_95':      3.48819857866873,
+    'P_ax':      740021.6588360358,
+    'beta_pol':  83.41642381269997,
+    'beta_tor':  2.446974857926972,
+    'jphi_axis': 1088608.0753213796,
+    'jphi_max':  1229716.1200330486,
+    'q_axis':    1.3097126423445427,
+    'jphi_prof': [1088608.0753213796, 1220448.87480865,  1209554.0649150363,
+                  1101880.2157255267,  913252.2810206015,  686321.0129272697,
+                   443939.6217591005,  239301.0647344146,  153177.85384732572,
+                    38632.48848271347],
 }
 
 

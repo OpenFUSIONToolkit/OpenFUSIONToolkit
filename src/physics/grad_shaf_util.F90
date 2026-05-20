@@ -373,7 +373,7 @@ IF(ASSOCIATED(self%eta))THEN
   CALL hdf5_create_group(filename,'tokamaker/ETA_PROFILE')
   CALL self%eta%save(filename,'tokamaker/ETA_PROFILE')
 END IF
-!---Save kinetic profiles (Te, Ti, ne, ni) if set
+!---Save kinetic profiles (Te, Ti, ne, ni, Zeff) if set
 IF(ASSOCIATED(self%Te))THEN
   CALL hdf5_create_group(filename,'tokamaker/TE_PROFILE')
   CALL self%Te%save(filename,'tokamaker/TE_PROFILE')
@@ -389,6 +389,10 @@ END IF
 IF(ASSOCIATED(self%ni))THEN
   CALL hdf5_create_group(filename,'tokamaker/NI_DENS_PROFILE')
   CALL self%ni%save(filename,'tokamaker/NI_DENS_PROFILE')
+END IF
+IF(ASSOCIATED(self%Zeff))THEN
+  CALL hdf5_create_group(filename,'tokamaker/ZEFF_PROFILE')
+  CALL self%Zeff%save(filename,'tokamaker/ZEFF_PROFILE')
 END IF
 ! IF(ASSOCIATED(self%P_ani))THEN
 !   CALL hdf5_create_group(filename,'tokamaker/P_ANI')
@@ -415,7 +419,6 @@ IF(self%boot_ops%initialized)THEN
   CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%isolate_edge_jBS),filename,'tokamaker/BOOT_OPS/ISOLATE_EDGE_JBS')
   CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%parameterize_jBS),filename,'tokamaker/BOOT_OPS/PARAMETERIZE_JBS')
   CALL hdf5_write(self%boot_ops%scale_jBS,filename,'tokamaker/BOOT_OPS/SCALE_JBS')
-  CALL hdf5_write(self%boot_ops%Zeff,filename,'tokamaker/BOOT_OPS/ZEFF')
   CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%diagnose_bs),filename,'tokamaker/BOOT_OPS/DIAGNOSE_BS')
   CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%taper_edge_jBS),filename,'tokamaker/BOOT_OPS/TAPER_EDGE_JBS')
   CALL hdf5_write(self%boot_ops%taper_edge_psi0,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_PSI0')
@@ -566,6 +569,24 @@ IF(hdf5_field_exist(filename,'tokamaker/NI_DENS_PROFILE'))THEN
     RETURN
   END IF
 END IF
+IF(hdf5_field_exist(filename,'tokamaker/ZEFF_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/ZEFF_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Zeff profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%Zeff))THEN
+    CALL self%Zeff%delete()
+    DEALLOCATE(self%Zeff)
+  END IF
+  CALL gs_profile_alloc(profType,self%Zeff)
+  DEALLOCATE(profType)
+  CALL self%Zeff%load(filename,'tokamaker/ZEFF_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load Zeff profile.'
+    RETURN
+  END IF
+END IF
 !---Load boot_ops before flux functions so bootstrap options are available when
 !   flux function update() calls (e.g. jphi_bs_update) are made below
 self%boot_ops%initialized = .FALSE.
@@ -575,7 +596,6 @@ IF(hdf5_field_exist(filename,'tokamaker/BOOT_OPS'))THEN
   CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/PARAMETERIZE_JBS',success=success)
   IF(success) self%boot_ops%parameterize_jBS = (int_tmp/=0)
   CALL hdf5_read(self%boot_ops%scale_jBS,filename,'tokamaker/BOOT_OPS/SCALE_JBS',success=success)
-  CALL hdf5_read(self%boot_ops%Zeff,filename,'tokamaker/BOOT_OPS/ZEFF',success=success)
   CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/DIAGNOSE_BS',success=success)
   IF(success) self%boot_ops%diagnose_bs = (int_tmp/=0)
   CALL hdf5_read(int_tmp,filename,'tokamaker/BOOT_OPS/TAPER_EDGE_JBS',success=success)
