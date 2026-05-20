@@ -2154,6 +2154,108 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
+    def solve_bootstrap(self, ffp_prof, te_prof, ne_prof, ti_prof, ni_prof, Zeff, Ip_target, pres_prof=None, **kwargs):
+        r'''! Solve G-S equilibrium with self-consistent bootstrap current from kinetic profiles
+
+        Derives a pressure-gradient profile \f$P'(\hat{\psi})\f$ from the supplied kinetic
+        profiles, then calls the internal Fortran solver to reach a self-consistent equilibrium.
+        By default the pressure is computed from the kinetic profiles as
+        \f$P = e_C(n_e T_e + n_i T_i)\f$; if ``pres_prof`` is supplied it overrides this,
+        allowing additional contributions (e.g. fast-ion pressure) to be included provided the
+        total pressure is nowhere less than the kinetic pressure.
+        Temperature profiles are expected in keV; density profiles in m\f$^{-3}\f$.
+
+        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'`` \f$\hat{\psi_n}\f$ grid, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``)
+        @param te_prof Electron temperature profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$T_e\f$ [keV])
+        @param ne_prof Electron density profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$n_e\f$ [m\f$^{-3}\f$])
+        @param ti_prof Ion temperature profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$T_i\f$ [keV])
+        @param ni_prof Ion density profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$n_i\f$ [m\f$^{-3}\f$])
+        @param Zeff Effective charge \f$Z_{eff}\f$ (scalar or profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$Z_{eff}\f$))
+        @param Ip_target Target plasma current \f$I_p\f$ [A]
+        @param pres_prof Optional total pressure profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$P\f$ [Pa]).
+          If provided, must be \f$\geq\f$ the kinetic pressure \f$e_C(n_e T_e + n_i T_i)\f$ everywhere and
+          is used in place of the kinetic pressure to form \f$P'\f$ and \f$P_{ax}\f$.
+
+        @par Bootstrap solver options (forwarded to ``set_boot_ops()``)
+        @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk (default: False)
+        @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike;
+          overrides ``isolate_edge_jBS`` if True (default: False)
+        @param scale_jBS Scaling factor applied to the bootstrap current profile (default: 1.0)
+        @param diagnose_bs Print detailed output at each NL iteration (default: False)
+        @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge (default: True)
+        @param taper_edge_psi0 \f$\hat{\psi_n}\f$ (0=axis, 1=LCFS) where the taper begins (default: 0.999)
+        @param taper_edge_shape Taper shape: 1=cos\f$^2\f$/Hann, 2=quintic smoothstep, 3=cubic power
+          (default: 2)
+
+        @result Dictionary with 1-D numpy array values (A/m² unless noted):
+          - ``'psi_n'`` Normalised flux grid (0 = axis, 1 = LCFS), taken from ``ffp_prof['x']``
+          - ``'total_j_phi'`` Total toroidal current density = j_ind_final + j_bs_final [A/m²]
+          - ``'j_ind_final'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
+          - ``'j_bs_final'`` Bootstrap current density (optionally isolated / parametrised / tapered) [A/m²]
+          - ``'j_bs_raw'`` Bootstrap current density from the Redl PoP 2021 formula [A/m²]
+        '''
+        from scipy.interpolate import Akima1DInterpolator
+        # --- Type / shape check on ffp_prof ---
+        if not isinstance(ffp_prof, dict):
+            raise TypeError(f"ffp_prof must be a dict with 'x' and 'y' keys; got {type(ffp_prof).__name__}")
+        for _key in ('x', 'y'):
+            if _key not in ffp_prof:
+                raise ValueError(f"ffp_prof is missing required key '{_key}'")
+        if len(ffp_prof['x']) != len(ffp_prof['y']):
+            raise ValueError(f"ffp_prof: 'x' and 'y' must have the same length "
+                             f"(got {len(ffp_prof['x'])} and {len(ffp_prof['y'])})")
+        if ffp_prof.get('type', 'jphi-split-bootstrap') != 'jphi-split-bootstrap':
+            raise ValueError(f"ffp_prof 'type' must be 'jphi-split-bootstrap' (got {ffp_prof['type']!r})")
+        ffp_prof.setdefault('type', 'jphi-split-bootstrap')
+
+        # Evaluate pprime from kinetic profiles on the same psi 'x' grid as ffp_prof
+        psi_sample = numpy.asarray(ffp_prof['x'])
+        Te_eV = Akima1DInterpolator(te_prof['x'], te_prof['y'])(psi_sample) * 1e3
+        ne    = Akima1DInterpolator(ne_prof['x'], ne_prof['y'])(psi_sample)
+        Ti_eV = Akima1DInterpolator(ti_prof['x'], ti_prof['y'])(psi_sample) * 1e3
+        ni    = Akima1DInterpolator(ni_prof['x'], ni_prof['y'])(psi_sample)
+        pressure = eC * ne * Te_eV + eC * ni * Ti_eV
+        if pres_prof is not None:
+            if not isinstance(pres_prof, dict):
+                raise TypeError(f"pres_prof must be a dict with 'x' and 'y' keys; got {type(pres_prof).__name__}")
+            for _key in ('x', 'y'):
+                if _key not in pres_prof:
+                    raise ValueError(f"pres_prof is missing required key '{_key}'")
+            pres_vals = Akima1DInterpolator(pres_prof['x'], pres_prof['y'])(psi_sample)
+            if numpy.any(pres_vals < pressure):
+                raise ValueError(
+                    "pres_prof must be >= the kinetic pressure (eC*(ne*Te + ni*Ti)) at every point on the psi grid"
+                )
+            pressure = pres_vals
+        pp_vals = Akima1DInterpolator(psi_sample, pressure).derivative()(psi_sample)
+        pp_vals[-1] = 0.0
+        pp_prof = {'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_vals[0]}
+
+        # Evaluate pressure on axis
+        pax = float(pressure[0])
+        if ffp_prof['x'][0] > 0:
+            warn(f"Bootstrap solver expects profiles defined at psi=0 (axis). Current axis-pressure evaluated at psi_N={ffp_prof['x'][0]:.3f}. Consider extending profile to psi=0 for increased accuracy.", UserWarning, stacklevel=2)
+
+        # Set profiles and targets
+        self.set_kinetic_profiles(
+            te_prof=te_prof,
+            ne_prof=ne_prof,
+            ti_prof=ti_prof,
+            ni_prof=ni_prof,
+            Zeff=Zeff,
+        )
+        self.set_profiles(
+            ffp_prof=ffp_prof,
+            pp_prof=pp_prof
+        )
+        self.set_boot_ops(**kwargs)
+        self.set_targets(Ip=Ip_target, pax=pax)
+        self.settings.pm = True
+        self.update_settings()
+        self.solve()
+
+        # Extract bootstrap profiles
+        return self.get_boot_profs()
 
 class TokaMaker_equilibrium():
     '''! TokaMaker G-S equilibrium class'''

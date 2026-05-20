@@ -828,7 +828,9 @@ def solve_with_bootstrap(mygs,
                          use_OMFIT_sauter = False,
                          verbose = True,
                          use_sauter_eps = True,
-                         diagnose_bs = False):
+                         diagnose_bs = False,
+                         use_python_solve = False,
+                         **kwargs):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
     @param mygs Grad-Shafranov solver object
@@ -855,12 +857,63 @@ def solve_with_bootstrap(mygs,
     @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
     '''
     warn(
-        "solve_with_bootstrap() is deprecated, with the method migrated to the internal Fortran solver. To use, call "
-        "set_kinetic_profiles(), set_boot_ops() (optional) & set_profiles() with type='jphi-split-bootstrap'. "
-        "See ITER_Hmode_bootstrap_ex.py for a complete example.",
+        "The python solve_with_bootstrap() wrapper is deprecated by mygs.solve_bootstrap() (internal fortran-solve)."
+        "Set use_python_solve = True to retain the original Python-based bootstrap calculation, otherwise "
+        "solve_with_bootstrap passes arguments to solve_bootstrap()",
         DeprecationWarning,
         stacklevel=2,
     )
+
+    if not use_python_solve:
+        _python_only = {
+            'Zis': (Zis, None),
+            'psi_pad': (psi_pad, 1e-3),
+            'iterations': (iterations, 3),
+            'diagnostic_plots': (diagnostic_plots, False),
+            'use_OMFIT_sauter': (use_OMFIT_sauter, False),
+            'verbose': (verbose, True),
+            'use_sauter_eps': (use_sauter_eps, True),
+        }
+        non_default = [k for k, (v, d) in _python_only.items() if v != d]
+        if non_default:
+            warn(
+                "solve_with_bootstrap(use_python_solve=False): the following kwargs have no effect "
+                f"with the internal Fortran solver: {non_default}. "
+                "Pass method='external' to use them.",
+                UserWarning, stacklevel=2,
+            )
+        if inductive_jphi is None:
+            raise ValueError("inductive_jphi must be provided for method='internal'")
+        _ne = numpy.asarray(ne)
+        _Te = numpy.asarray(Te)
+        _ni = numpy.asarray(ni)
+        _Ti = numpy.asarray(Ti)
+        _psi = numpy.linspace(0., 1., len(_ne))
+        _Zeff = numpy.asarray(Zeff)
+        Zeff_arg = ({'x': _psi, 'y': _Zeff} if _Zeff.ndim > 0 and _Zeff.size > 1
+                    else float(_Zeff))
+        _results = mygs.solve_bootstrap(
+            ffp_prof={'type': 'jphi-split-bootstrap', 'x': _psi, 'y': numpy.asarray(inductive_jphi)},
+            te_prof={'type': 'linterp', 'x': _psi, 'y': _Te / 1e3},
+            ne_prof={'type': 'linterp', 'x': _psi, 'y': _ne},
+            ti_prof={'type': 'linterp', 'x': _psi, 'y': _Ti / 1e3},
+            ni_prof={'type': 'linterp', 'x': _psi, 'y': _ni},
+            Zeff=Zeff_arg,
+            Ip_target=Ip_target,
+            scale_jBS=scale_jBS,
+            isolate_edge_jBS=isolate_edge_jBS,
+            parameterize_jBS=parameterize_jBS,
+            diagnose_bs=diagnose_bs,
+            **kwargs
+        )
+        results = {'total_j_phi' : _results['total_j_phi'],
+                    'j_BS' : _results['j_bs_raw'],
+                    'j_inductive' : _results['j_ind_final'],
+                    'isolated_j_BS' : _results['j_bs_final'],
+                    'scale_j0' : 1.0,
+                    'scale_Ip' : 1.0}
+        return results
+
     from scipy.optimize import root_scalar
     import matplotlib.pyplot as plt
 

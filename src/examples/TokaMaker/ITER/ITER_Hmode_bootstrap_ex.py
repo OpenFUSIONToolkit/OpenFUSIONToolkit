@@ -96,6 +96,9 @@ Te = Hmode_profiles(edge=1500., ped=5000., core=21000., rgrid=n_sample,
 ni = ne.copy()
 Ti = Te.copy()
 pressure   = EC * ne * Te + EC * ni * Ti
+pp_vals = np.gradient(pressure) / np.gradient(psi_sample)
+# Enforce P' edge condition
+pp_vals[-1] = 0.0
 
 inductive_jphi = create_power_flux_fun(n_sample, 2.25, 2.5)['y']
 
@@ -215,6 +218,7 @@ if run_external:
         diagnostic_plots=False,
         verbose=True,
         diagnose_bs=args.diagnose_bs,
+        use_python_solve=True,
     )
     elapsed_ext = time.perf_counter() - t0
 
@@ -253,38 +257,49 @@ if run_internal:
 
     t0 = time.perf_counter()
 
-    ne_i, Te_i, ni_i, Ti_i = ne, Te, ni, Ti
-    pressure_i = pressure
-    pp_vals = np.gradient(pressure_i) / np.gradient(psi_sample)
-    # Enforce P' edge condition
-    pp_vals[-1] = 0.0
-
-    mygs.set_kinetic_profiles(
-        te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te_i / 1e3},
-        ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne_i},
-        ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti_i / 1e3},
-        ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni_i},
-        Zeff=Zeff_val,
-    )
-    mygs.set_boot_ops(
-        isolate_edge_jBS=args.isolate_edge,
-        parameterize_jBS=args.parameterize_edge,
-        scale_jBS=args.scale_jBS,
-        Zeff=Zeff_val,
-        diagnose_bs=args.diagnose_bs,
-        taper_edge_jBS=args.taper_edge,
-        taper_edge_psi0=args.taper_edge_psi0,
-        taper_edge_shape=args.taper_edge_shape,
-    )
-    mygs.set_profiles(
-        ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
-        pp_prof={'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_vals[0]},
-        foffset=5.3 * 6.2,
-    )
-    mygs.set_targets(Ip=Ip_target, pax=float(pressure_i[0]))
-    mygs.settings.pm = True
-    mygs.update_settings()
-    mygs.solve()
+    manual = True
+    if not manual:
+        mygs.solve_bootstrap(
+            ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
+            te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
+            ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
+            ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
+            ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
+            Zeff=Zeff_val,
+            Ip_target=Ip_target,
+            isolate_edge_jBS=args.isolate_edge,
+            parameterize_jBS=args.parameterize_edge,
+            scale_jBS=args.scale_jBS,
+            diagnose_bs=args.diagnose_bs,
+            taper_edge_jBS=args.taper_edge,
+            taper_edge_psi0=args.taper_edge_psi0,
+            taper_edge_shape=args.taper_edge_shape,
+        )
+    else:
+        mygs.set_kinetic_profiles(
+            te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
+            ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
+            ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
+            ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
+            Zeff=Zeff_val,
+        )
+        mygs.set_boot_ops(
+            isolate_edge_jBS=args.isolate_edge,
+            parameterize_jBS=args.parameterize_edge,
+            scale_jBS=args.scale_jBS,
+            diagnose_bs=args.diagnose_bs,
+            taper_edge_jBS=args.taper_edge,
+            taper_edge_psi0=args.taper_edge_psi0,
+            taper_edge_shape=args.taper_edge_shape,
+        )
+        mygs.set_profiles(
+            ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
+            pp_prof={'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_vals[0]}
+        )
+        mygs.set_targets(Ip=Ip_target, pax=float(pressure[0]))
+        mygs.settings.pm = True
+        mygs.update_settings()
+        mygs.solve()
 
     elapsed_int = time.perf_counter() - t0
 
