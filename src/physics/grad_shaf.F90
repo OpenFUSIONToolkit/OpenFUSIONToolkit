@@ -181,7 +181,7 @@ TYPE :: gs_factory
   REAL(r8) :: lim_zmax = 1.d99 !< Vertical position cutoff for limiter points
   REAL(r8) :: lim_area = -1.d0 !< Area inside the limiter
   REAL(r8) :: timing(4) = 0.d0 !< Timing for each phase of solve
-  REAL(r8) :: target_weight = -1.d0 !< Weight for global targets when treated as soft constraints (negative for hard constraints)
+  REAL(r8) :: target_weights(2) = -1.d0 !< Weight for global targets when treated as soft constraints (negative for hard constraints)
   REAL(r8) :: isoflux_grad_wt_lim = -1.d0 !< Limit for isoflux inverse gradient weighting (negative to disable)
   LOGICAL, POINTER, DIMENSION(:) :: axis_flag => NULL() !< FE boundary flag for on-axis nodes
   LOGICAL, POINTER, DIMENSION(:) :: saddle_pmask => NULL() !< Point mask for saddle search
@@ -1980,8 +1980,10 @@ DO i=1,self%nregularize
 END DO
 !---Add plasma terms
 IF(PRESENT(plasma_terms))THEN
-  err_mat(nCon-nCon_plasma+1:nCon,nDof-nDof_plasma+1:nDof)=-plasma_terms*self%device%target_weight
-  rhs(nCon-ncon_plasma+1:nCon)=plasma_targets*self%device%target_weight
+  DO j=1,nDof_plasma
+    err_mat(nCon-nCon_plasma+j,nDof-nDof_plasma+1:nDof)=-plasma_terms(j,:)*self%device%target_weights(j)
+    rhs(nCon-ncon_plasma+j)=plasma_targets(j)*self%device%target_weights(j)
+  END DO
 END IF
 ! !---Convert appropriate terms to voltages
 ! ! L*(I^1-I^0)/dt + R*I^1 = V
@@ -2371,7 +2373,7 @@ DO i=1,self%maxits
 
   ! Create plasma poloidal flux
   CALL equil%psi%set(0.d0)
-  IF(self%target_weight<0.d0)THEN
+  IF(ALL(self%target_weights<0.d0))THEN
     ! Solve for parameters
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     CALL lapack_matinv(3,param_mat,ierr_loc)
@@ -2392,7 +2394,7 @@ DO i=1,self%maxits
   IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
     CALL equil%psi%add(1.d0,1.d0,psi_eddy)
     CALL equil%psi%add(1.d0,1.d0,psi_bc)
-    IF(self%target_weight>0.d0)THEN
+    IF(ALL(self%target_weights>0.d0))THEN
       param_psi(1)%f=>psi_ffp
       param_psi(2)%f=>psi_press
       CALL equil%fit_isoflux(psip,ierr_loc,mat_save,param_rhs,param_psi)
