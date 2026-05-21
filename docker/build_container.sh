@@ -42,7 +42,7 @@ if [[ "${HAVE_PODMAN}" -ne 0 ]]; then
 fi
 if [ "$USE_DOCKER" = true ]; then
   HAVE_DOCKER=$(docker --version 1>/dev/null 2>&1; echo $?)
-  if [[ "${HAVE_DOCKER}" -eq 0 ]]; then
+  if [[ "${HAVE_DOCKER}" -ne 0 ]]; then
     echo "docker not available, exiting"
     exit 1
   fi
