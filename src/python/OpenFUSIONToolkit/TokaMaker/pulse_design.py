@@ -1121,6 +1121,10 @@ class TokaMaker_TORAX:
         self._pellet_deposition_location = pellet_deposition_location
         self._pellet_width = pellet_width
         self._pellet_s_total = pellet_S_total
+
+        if [generic_particle_location, generic_particle_width, generic_particle_S_total].count(None) in [1,2]:
+            raise ValueError("Must specify all three generic particle parameters or none of them.")
+        
         self._generic_particle_location = generic_particle_location
         self._generic_particle_width = generic_particle_width
         self._generic_particle_s_total = generic_particle_S_total
@@ -4395,7 +4399,7 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.set_xlabel('Time [s]')
     ax.set_ylabel('beta_N')
     ax.legend(fontsize=8)
-    ax.grid(True, alpha=0.3)
+    ax.grid(True, alphaf=0.3)
 
     # (2,2): l_i
     ax = axes[2, 2]
