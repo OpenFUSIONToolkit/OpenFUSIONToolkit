@@ -1079,7 +1079,7 @@ OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,*)n
 !---
 ncons=n
-IF(fit_coils)ncons=n+gs_active%device%ncoils
+! IF(fit_coils)ncons=n+gs_active%device%ncoils
 ! IF(gs_active%Z0_target>-1.d98)ncons=ncons+1
 ALLOCATE(cons(ncons))
 j=1

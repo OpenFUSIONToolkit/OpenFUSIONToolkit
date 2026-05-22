@@ -626,27 +626,27 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
         # Setup constraints
         random.seed(42)
         myrecon = reconstruction(mygs)
-        noise_amp = (random.random()-0.5)*2.0
+        noise_amp = random.gauss()
         Ip_noised = eq_info['Ip']*(1.0+noise_amp*0.05)
         myrecon.set_Ip(Ip_noised, err=0.05*eq_info['Ip'])
         flux_vals = []
         field_eval = mygs.get_field_eval('PSI')
         for i in range(B_locs.shape[0]):
             B_tmp = field_eval.eval(B_locs[i,:])
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss()
             flux_vals.append(B_tmp[0])
             psi_val = B_tmp[0]*2.0*np.pi
             myrecon.add_flux_loop(B_locs[i,:], psi_val*(1.0 + noise_amp*0.05), err=abs(psi_val*0.05))
         field_eval = mygs.get_field_eval('B')
         for i in range(B_locs.shape[0]):
             B_tmp = field_eval.eval(B_locs[i,:])
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss()
             myrecon.add_Mirnov(B_locs[i,:], np.r_[1.0,0.0,0.0], B_tmp[0] + noise_amp*abs(B_tmp[0]*0.05), err=abs(B_tmp[0]*0.05))
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss()
             myrecon.add_Mirnov(B_locs[i,:], np.r_[0.0,0.0,1.0], B_tmp[2] + noise_amp*abs(B_tmp[2]*0.05), err=abs(B_tmp[2]*0.05))
         coil_currents, _ = mygs.get_coil_currents()
         for key in coil_currents:
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss()
             coil_currents[key] *= 1.0+noise_amp*0.05
         # Compute starting equilibrium
         mygs.set_isoflux(None)
@@ -658,6 +658,8 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
             regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=coil_currents[name],weight=1.E-1))
         regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0},target=0.0,weight=1.E2))
         mygs.set_coil_reg(reg_terms=regularization_terms)
+        coil_err = {name: 0.05*abs(current) for name, current in coil_currents.items()}
+        myrecon.set_coil_currents(coil_currents,coil_err)
         R0 = 6.3
         Z0 = 0.5
         a = 1.0
@@ -765,13 +767,13 @@ def test_ITER_eq_io(order):
 @pytest.mark.coverage
 def test_ITER_recon():
     ITER_recon_dict = ITER_eq_dict.copy()
-    ITER_recon_dict['q_95'] = 2.7274510732722375
-    ITER_recon_dict['P_ax'] = 655693.6031014244
-    ITER_recon_dict['W_MHD'] = 257915984.01397622
-    ITER_recon_dict['l_i'] = 0.895954395982195
-    ITER_recon_dict['beta_pol'] = 44.16835089714342
-    ITER_recon_dict['beta_tor'] = 1.8950360948919174
-    ITER_recon_dict['beta_n'] = 1.2576100533550467
+    ITER_recon_dict['kappaU'] = 1.744512
+    ITER_recon_dict['q_0'] = 0.8108968
+    ITER_recon_dict['q_95'] = 2.702860
+    ITER_recon_dict['W_MHD'] = 2.387862E8
+    ITER_recon_dict['beta_pol'] = 41.72220
+    ITER_recon_dict['dflux'] = 1.565415
+    ITER_recon_dict['tflux'] = 1.204414E2
     results = mp_run(run_ITER_case,(1.0,(2,),'recon'))
     assert validate_dict(results,ITER_recon_dict)
 
