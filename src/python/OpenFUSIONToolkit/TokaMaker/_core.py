@@ -1065,7 +1065,7 @@ class TokaMaker():
                 raise Exception(error_string.value)
             self._tMaker_equil._mirnov_constraints = (locations.copy(), norms.copy(), targets.copy())
     
-    def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,R0=None,V0=None,Z0=None,retain_previous=False):
+    def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,Dflux=None,R0=None,V0=None,Z0=None,retain_previous=False):
         r'''! Set global target values
 
         @note Values that are not specified are reset to their defaults on each call unless `retain_previous=True`.
@@ -1074,6 +1074,7 @@ class TokaMaker():
         @param Ip_ratio Amplitude of net plasma current contribution from FF' compared to P'
         @param pax Target axis pressure [Pa]
         @param estore Target sotred energy [J]
+        @param Dflux Target diamagnetic flux [Wb]
         @param R0 Target major radius for magnetic axis
         @param V0 Target vertical position for magnetic axis
         @param Z0 Target vertical position for magnetic axis
@@ -1088,6 +1089,7 @@ class TokaMaker():
         if not retain_previous:
             self._tMaker_equil._Ip_target = None
             self._tMaker_equil._estored_target = None
+            self._tMaker_equil._dflux_target = None
             self._tMaker_equil._pax_target = None
             self._tMaker_equil._Ip_ratio_target = None
             self._tMaker_equil._R0_target = None
@@ -1101,6 +1103,8 @@ class TokaMaker():
             if (estore <= 0.0) and (not self._oft_env.float_is_disabled(estore)):
                 raise ValueError("`estore` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._tMaker_equil._estored_target = copy.copy(estore)
+        if Dflux is not None:
+            self._tMaker_equil._dflux_target = copy.copy(Dflux)
         if pax is not None:
             if (pax <= 0.0) and (not self._oft_env.float_is_disabled(pax)):
                 raise ValueError("`pax` must be positive or set to `OFT_env.float_disable_flag` to disable")
@@ -1126,6 +1130,7 @@ class TokaMaker():
                               float_to_c(self._tMaker_equil._Ip_ratio_target),
                               float_to_c(self._tMaker_equil._pax_target),
                               float_to_c(self._tMaker_equil._estored_target),
+                              float_to_c(self._tMaker_equil._dflux_target),
                               float_to_c(self._tMaker_equil._R0_target),
                               float_to_c(self._tMaker_equil._Z0_target),
                               error_string
@@ -2186,6 +2191,8 @@ class TokaMaker_equilibrium():
             self._pax_target = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Estored_target "Estored_target" property)
             self._estored_target = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Dflux_target "Dflux_target" property)
+            self._dflux_target = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.R0_target "R0_target" property)
             self._R0_target = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Z0_target "Z0_target" property)
@@ -2205,6 +2212,7 @@ class TokaMaker_equilibrium():
                 self._Ip_ratio_target = None
                 self._pax_target = None
                 self._estored_target = None
+                self._dflux_target = None
                 self._R0_target = None
                 self._Z0_target = None
             else:
@@ -2212,6 +2220,7 @@ class TokaMaker_equilibrium():
                 self._Ip_ratio_target = source_eq._Ip_ratio_target
                 self._pax_target = source_eq._pax_target
                 self._estored_target = source_eq._estored_target
+                self._dflux_target = source_eq._dflux_target
                 self._R0_target = source_eq._R0_target
                 self._Z0_target = source_eq._Z0_target
             if skip_constraints:
@@ -2405,6 +2414,11 @@ class TokaMaker_equilibrium():
         r'''! Stored energy target'''
         return self._estored_target
     
+    @property
+    def Dflux_target(self):
+        r'''! Dflux target'''
+        return self._dflux_target
+
     @property
     def R0_target(self):
         r'''! Magnetic axis radial position target'''

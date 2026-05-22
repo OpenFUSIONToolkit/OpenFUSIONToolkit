@@ -281,6 +281,7 @@ TYPE :: gs_equil
   REAL(r8) :: mirror_zthroat = 0.d0 !< Mirror peak field point
   REAL(r8) :: Itor_target = -1.d0 !< Toroidal current target
   REAL(r8) :: estore_target = -1.d0 !< Stored energy target
+  REAL(r8) :: dflux_target = -1.d0 !< Diamagnetic flux target
   REAL(r8) :: pax_target = -1.d0 !< On-axis pressure target
   REAL(r8) :: Ip_ratio_target = -1.d99 !< Ip ratio target
   REAL(r8) :: R0_target = -1.d0 !< Magnetic axis radial target
@@ -1053,6 +1054,7 @@ self%mirror_bturn=source%mirror_bturn
 self%mirror_zthroat=source%mirror_zthroat
 self%Itor_target=source%Itor_target
 self%estore_target=source%estore_target
+self%dflux_target=source%dflux_target
 self%pax_target=source%pax_target
 self%Ip_ratio_target=source%Ip_ratio_target
 self%R0_target=source%R0_target
@@ -2110,7 +2112,7 @@ real(r8), pointer, DIMENSION(:) :: vals_tmp
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: goptmp(3,3),pt(2),v,pmax,pmin,dpnorm,curr
 real(8) :: opoint(2),R0_in,f(3),Z0_in,Z0_tmp,estored
-REAL(8) :: nl_res,psimax,ffp_scale_in,ffp_scale_prev,itor,pnorm0,pnormp,itor_ffp,itor_press
+REAL(8) :: nl_res,psimax,ffp_scale_in,ffp_scale_prev,itor,pnorm0,pnormp,itor_ffp,itor_press,dflux_ffp
 REAL(8) :: R0_tmp,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3),t0,t1
 REAL(8) :: param_mat(3,3),mat_save(2,2),param_vec(3),param_rhs(3)
 integer(4) :: i,ii,j,k,error_flag,cell,ierr_loc
@@ -2165,7 +2167,7 @@ CALL equil%I%update(equil)
 CALL equil%p%update(equil)
 IF(ASSOCIATED(equil%P_ani))CALL equil%P_ani%update(equil)
 !---Get J_phi source term
-CALL gs_source(equil,equil%psi,rhs,psi_ffp,psi_press,itor_ffp,itor_press,estored)
+CALL gs_source(equil,equil%psi,rhs,psi_ffp,psi_press,itor_ffp,itor_press,estored,dflux_ffp)
 IF(self%dt>0.d0)THEN
   CALL equil%psi%new(psi_dt)
   IF(self%ncoils>0)THEN
@@ -2218,14 +2220,18 @@ R0_in = equil%o_point(1)
 Z0_in = equil%o_point(2)
 cell=0
 IF(equil%R0_target>0.d0)THEN
-  IF((equil%estore_target>0.d0).OR.(equil%pax_target>0.d0).OR.(equil%Ip_ratio_target>-1.d98))THEN
+  IF((equil%estore_target>0.d0).OR.(equil%dflux_target>-1.d98).OR.(equil%pax_target>0.d0).OR.(equil%Ip_ratio_target>-1.d98))THEN
     CALL oft_warn("Conflicting pressure targets specified, ignoring R0_target")
     equil%R0_target=-1.d0
   END IF
 END IF
-IF((equil%estore_target>0.d0).AND.((equil%pax_target>0.d0).OR.(equil%Ip_ratio_target>-1.d98)))THEN
+IF((equil%estore_target>0.d0).AND.((equil%dflux_target>-1.d98).OR.(equil%pax_target>0.d0).OR.(equil%Ip_ratio_target>-1.d98)))THEN
   CALL oft_warn("Conflicting pressure targets specified, ignoring estore_target")
   equil%estore_target=-1.d0
+END IF
+IF((equil%dflux_target>-1.d98).AND.((equil%pax_target>0.d0).OR.(equil%Ip_ratio_target>-1.d98)))THEN
+  CALL oft_warn("Conflicting pressure targets specified, ignoring dflux_target")
+  equil%dflux_target=-1.d0
 END IF
 IF((equil%pax_target>0.d0).AND.(equil%Ip_ratio_target>-1.d98))THEN
   CALL oft_warn("Conflicting pressure targets specified, ignoring pax_target")
@@ -2330,6 +2336,9 @@ DO i=1,self%maxits
       CALL psi_geval%setup(self%fe_rep)
       CALL psi_geval%interp(cell,f,goptmp,gpsi2)
       param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
+    ELSE IF(equil%dflux_target>-1.d98)THEN
+      param_rhs(2)=SIGN(equil%dflux_target**2,equil%dflux_target)
+      param_mat(2,:)=[SIGN(dflux_ffp**2,dflux_ffp)/equil%ffp_scale,0.d0,0.d0]
     ELSE IF(equil%estore_target>0.d0)THEN
       param_rhs(2)=equil%estore_target
       param_mat(2,2)=estored*3.d0/2.d0
@@ -2569,7 +2578,7 @@ DO i=1,self%maxits
     CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vcont')
   END IF
   !---Update vacuum field part
-  CALL gs_source(equil,equil%psi,rhs,psi_ffp,psi_press,itor_ffp,itor_press,estored)
+  CALL gs_source(equil,equil%psi,rhs,psi_ffp,psi_press,itor_ffp,itor_press,estored,dflux_ffp)
   !---Compute error in NL function
   CALL tmp_vec%set(0.d0)
   CALL tmp_vec%add(0.d0,1.d0,equil%psi,-1.d0,psi_vac)
@@ -2668,7 +2677,7 @@ class(oft_vector), pointer :: psi_vac,psi_vcont
 real(r8), pointer, dimension(:) :: vals_tmp
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: goptmp(3,3),pt(2),v,pmax,pmin,dpnorm
-real(8) :: opoint(2),f(3),t0,t1,curr,itor_ffp,itor_press,estored
+real(8) :: opoint(2),f(3),t0,t1,curr,itor_ffp,itor_press,estored,dflux_ffp
 REAL(8) :: psimax,ffp_scale_in,ffp_scale_prev,pnorm0,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3)
 REAL(8) :: param_mat(3,3),param_vec(3),param_rhs(3)
 integer(4) :: ii,j,k,error_flag,cell,ierr_loc
@@ -2703,7 +2712,7 @@ CALL equil%I%update(equil)
 CALL equil%p%update(equil)
 IF(ASSOCIATED(equil%P_ani))CALL equil%P_ani%update(equil)
 !---Get J_phi source term
-CALL gs_source(equil,equil%psi,rhs,psi_ffp,psi_press,itor_ffp,itor_press,estored)
+CALL gs_source(equil,equil%psi,rhs,psi_ffp,psi_press,itor_ffp,itor_press,estored,dflux_ffp)
 IF(ABS(equil%ffp_scale)>TINY(equil%ffp_scale)*1.d2)CALL psi_ffp%scale(1.d0/equil%ffp_scale)
 !---Update vacuum field part
 CALL psi_vac%set(0.d0)
@@ -3166,7 +3175,7 @@ real(8), pointer, intent(inout) :: pts(:,:) !< Locations of boundary points
 real(8), pointer, intent(inout) :: fluxes(:) !< Required flux at each point
 class(oft_vector), pointer :: rhs,psi_fixed,psi_dummy
 real(r8), pointer, DIMENSION(:) :: vals_tmp
-real(8) :: itor_ffp,itor_press,estored
+real(8) :: itor_ffp,itor_press,estored,dflux_ffp
 integer(4) :: i,io_unit
 logical :: pm_save
 CLASS(oft_matrix), POINTER :: dels_free
@@ -3185,7 +3194,7 @@ lu_solver%A=>dels_free
 CALL self%psi%new(rhs)
 CALL self%psi%new(psi_fixed)
 CALL self%psi%new(psi_dummy)
-CALL gs_source(self,self%psi,rhs,psi_fixed,psi_dummy,itor_ffp,itor_press,estored)
+CALL gs_source(self,self%psi,rhs,psi_fixed,psi_dummy,itor_ffp,itor_press,estored,dflux_ffp)
 CALL psi_fixed%set(0.d0)
 CALL device%zerob_bc%apply(rhs)
 CALL lu_solver%apply(psi_fixed,rhs)
@@ -3215,13 +3224,13 @@ end subroutine gs_fixed_vflux
 !------------------------------------------------------------------------------
 !> Compute plasma component of RHS source for Grad-Shafranov equation
 !------------------------------------------------------------------------------
-subroutine gs_source(self,a,b,b2,b3,itor_ffp,itor_press,estore)
+subroutine gs_source(self,a,b,b2,b3,itor_ffp,itor_press,estore,dflux_ffp)
 class(gs_equil), intent(inout) :: self !< G-S object
 class(oft_vector), TARGET, intent(inout) :: a !< \f$ \psi \f$
 CLASS(oft_vector), intent(inout) :: b !< Full RHS source
 CLASS(oft_vector), intent(inout) :: b2 !< F*F' component of source (including `ffp_scale`)
 CLASS(oft_vector), intent(inout) :: b3 !< P' component of source (without `p_scale`)
-REAL(8), INTENT(out) :: itor_ffp,itor_press,estore
+REAL(8), INTENT(out) :: itor_ffp,itor_press,estore,dflux_ffp
 real(r8), pointer, dimension(:) :: atmp,btmp,b2tmp,b3tmp
 real(8) :: psitmp,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),pani(2)
 real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:)
@@ -3253,8 +3262,9 @@ END IF
 itor_ffp=0.d0
 itor_press=0.d0
 estore=0.d0
+dflux_ffp=0.d0
 !$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp) &
-!$omp reduction(+:itor_ffp) reduction(+:itor_press) reduction(+:estore)
+!$omp reduction(+:itor_ffp) reduction(+:itor_press) reduction(+:estore) reduction(+:dflux_ffp)
 allocate(rhs_loc(device%fe_rep%nce,3))
 allocate(rop(device%fe_rep%nce),vcache(device%fe_rep%nce))
 allocate(j_lag(device%fe_rep%nce))
@@ -3285,10 +3295,13 @@ do j=1,device%fe_rep%mesh%nc
       IF(psitmp>self%plasma_bounds(1))THEN
         IF(self%mode==0)THEN
           ffp(1:2)=((self%ffp_scale**2)*self%I%f(psitmp)+self%ffp_scale*self%I%f_offset)*self%I%fp(psitmp)
-          itor_ffp = itor_ffp + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)
+          itor_ffp = itor_ffp + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+          dflux_ffp = dflux_ffp + (self%ffp_scale*self%I%F(psitmp))/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
         ELSE
           ffp(1:2)=0.5d0*self%ffp_scale*self%I%fp(psitmp)
           itor_ffp = itor_ffp + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+          dflux_ffp = dflux_ffp + (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp) + self%I%f_offset**2) &
+            - self%I%f_offset)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
         END IF
         ! Handle anisotropic pressure
         IF(ASSOCIATED(self%P_ani))THEN
@@ -3335,6 +3348,7 @@ END IF
 estore = estore*2.d0*pi*self%psiscale
 itor_ffp = itor_ffp*self%psiscale
 itor_press = itor_press*self%psiscale
+dflux_ffp = dflux_ffp*self%psiscale
 device%timing(2)=device%timing(2)+(omp_get_wtime()-t1)
 end subroutine gs_source
 !------------------------------------------------------------------------------

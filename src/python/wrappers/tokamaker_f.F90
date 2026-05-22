@@ -1004,7 +1004,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: Lmat !< Inductance matrix
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 INTEGER(4) :: i
-REAL(8) :: tmp1,tmp2,tmp3,itor
+REAL(8) :: tmp1,tmp2,tmp3,tmp4,itor
 CLASS(oft_vector), POINTER :: rhs,vec1,vec2
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
@@ -1018,7 +1018,7 @@ IF(tMaker_equil_obj%has_plasma)THEN
   CALL tMaker_equil_obj%psi%new(rhs)
   CALL tMaker_equil_obj%psi%new(vec1)
   CALL tMaker_equil_obj%psi%new(vec2)
-  CALL gs_source(tMaker_equil_obj,tMaker_equil_obj%psi,rhs,vec1,vec2,tmp1,tmp2,tmp3)
+  CALL gs_source(tMaker_equil_obj,tMaker_equil_obj%psi,rhs,vec1,vec2,tmp1,tmp2,tmp3,tmp4)
   CALL vec1%set(0.d0)
   CALL tMaker_equil_obj%device%lu_solver%apply(vec1,rhs)
   CALL gs_plasma_mutual(tMaker_equil_obj,vec1,vals_tmp(tMaker_equil_obj%device%ncoils+1),itor)
@@ -1477,12 +1477,13 @@ END SUBROUTINE tokamaker_set_mirror_slosh
 !---------------------------------------------------------------------------------
 !> Set global target values for equilibrium solve
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,Z0_target,error_str) BIND(C,NAME="tokamaker_set_targets")
+SUBROUTINE tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,dflux_target,R0_target,Z0_target,error_str) BIND(C,NAME="tokamaker_set_targets")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
 REAL(c_double), VALUE, INTENT(in) :: ip_target !< Target plasma current [A]
 REAL(c_double), VALUE, INTENT(in) :: ip_ratio_target !< Ratio of net plasma current contribution from \f$F F'\f$ compared to \f$ P' \f$
 REAL(c_double), VALUE, INTENT(in) :: pax_target !< Target axis pressure [Pa]
 REAL(c_double), VALUE, INTENT(in) :: estore_target !< Target stored energy [J]
+REAL(c_double), VALUE, INTENT(in) :: dflux_target !< Target dflux [J]
 REAL(c_double), VALUE, INTENT(in) :: R0_target !< Target major radius for magnetic axis
 REAL(c_double), VALUE, INTENT(in) :: Z0_target !< Target vertical position for magnetic axis
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
@@ -1493,6 +1494,7 @@ tMaker_obj%gs_equil%R0_target=R0_target
 tMaker_obj%gs_equil%Z0_target=Z0_target
 tMaker_obj%gs_equil%pax_target=pax_target*mu0
 tMaker_obj%gs_equil%estore_target=estore_target*mu0
+tMaker_obj%gs_equil%dflux_target=dflux_target
 tMaker_obj%gs_equil%itor_target=ip_target*mu0
 tMaker_obj%gs_equil%ip_ratio_target=ip_ratio_target
 END SUBROUTINE tokamaker_set_targets

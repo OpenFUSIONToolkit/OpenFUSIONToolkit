@@ -397,6 +397,7 @@ IF(self%R0_target>0.d0)CALL hdf5_write(self%R0_target,filename,'tokamaker/R0_TAR
 IF(self%Z0_target>-1.d98)CALL hdf5_write(self%Z0_target,filename,'tokamaker/Z0_TARGET')
 IF(self%pax_target>0.d0)CALL hdf5_write(self%pax_target,filename,'tokamaker/PAX_TARGET')
 IF(self%estore_target>0.d0)CALL hdf5_write(self%estore_target,filename,'tokamaker/ESTORE_TARGET')
+IF(self%dflux_target>0.d0)CALL hdf5_write(self%dflux_target,filename,'tokamaker/DFLUX_TARGET')
 IF(self%isoflux_ntargets>0)CALL hdf5_write(self%isoflux_targets,filename,'tokamaker/ISOFLUX_TARGETS')
 IF(self%flux_ntargets>0)CALL hdf5_write(self%flux_targets,filename,'tokamaker/FLUX_TARGETS')
 IF(self%saddle_ntargets>0)CALL hdf5_write(self%saddle_targets,filename,'tokamaker/SADDLE_TARGETS')
@@ -649,6 +650,13 @@ IF(hdf5_field_exist(filename,'tokamaker/ESTORE_TARGET'))THEN
   CALL hdf5_read(self%estore_target,filename,'tokamaker/ESTORE_TARGET',success=success)
   IF(.NOT.success)THEN
     error_string='Failed to read stored energy target.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/DFLUX_TARGET'))THEN
+  CALL hdf5_read(self%dflux_target,filename,'tokamaker/DFLUX_TARGET',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read dflux target.'
     RETURN
   END IF
 END IF
