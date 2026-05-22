@@ -281,7 +281,7 @@ TYPE :: gs_equil
   REAL(r8) :: mirror_zthroat = 0.d0 !< Mirror peak field point
   REAL(r8) :: Itor_target = -1.d0 !< Toroidal current target
   REAL(r8) :: estore_target = -1.d0 !< Stored energy target
-  REAL(r8) :: dflux_target = -1.d0 !< Diamagnetic flux target
+  REAL(r8) :: dflux_target = -1.d99 !< Diamagnetic flux target
   REAL(r8) :: pax_target = -1.d0 !< On-axis pressure target
   REAL(r8) :: Ip_ratio_target = -1.d99 !< Ip ratio target
   REAL(r8) :: R0_target = -1.d0 !< Magnetic axis radial target
@@ -1799,7 +1799,7 @@ device=>self%device
 ncon_plasma=0
 ndof_plasma=0
 IF(PRESENT(plasma_terms))THEN
-  IF((.NOT.PRESENT(plasma_targets)).AND.(.NOT.PRESENT(plasma_psi)))CALL oft_abort("Must provide all terms, targets, and fluxes for plasma", &
+  IF(.NOT.(PRESENT(plasma_targets).AND.PRESENT(plasma_psi)))CALL oft_abort("Must provide all terms, targets, and fluxes for plasma", &
     "gs_fit_isoflux",__FILE__)
   ncon_plasma=SIZE(plasma_terms,1)
   ndof_plasma=SIZE(plasma_terms,2)
@@ -1982,7 +1982,7 @@ DO i=1,self%nregularize
 END DO
 !---Add plasma terms
 IF(PRESENT(plasma_terms))THEN
-  DO j=1,nDof_plasma
+  DO j=1,nCon_plasma
     err_mat(nCon-nCon_plasma+j,nDof-nDof_plasma+1:nDof)=-plasma_terms(j,:)*self%device%target_weights(j)
     rhs(nCon-ncon_plasma+j)=plasma_targets(j)*self%device%target_weights(j)
   END DO
@@ -2092,7 +2092,7 @@ ELSE
   END DO
 END IF
 IF(PRESENT(plasma_terms))THEN
-  plasma_targets=-currs(nDof-ndof_plasma+1:nDof)
+  plasma_targets(1:nDof_plasma)=-currs(nDof-ndof_plasma+1:nDof)
 END IF
 DEALLOCATE(err_mat,err_inv,rhs,currs,cells)
 CALL psi_eval%delete
@@ -2231,7 +2231,7 @@ IF((equil%estore_target>0.d0).AND.((equil%dflux_target>-1.d98).OR.(equil%pax_tar
 END IF
 IF((equil%dflux_target>-1.d98).AND.((equil%pax_target>0.d0).OR.(equil%Ip_ratio_target>-1.d98)))THEN
   CALL oft_warn("Conflicting pressure targets specified, ignoring dflux_target")
-  equil%dflux_target=-1.d0
+  equil%dflux_target=-1.d99
 END IF
 IF((equil%pax_target>0.d0).AND.(equil%Ip_ratio_target>-1.d98))THEN
   CALL oft_warn("Conflicting pressure targets specified, ignoring pax_target")

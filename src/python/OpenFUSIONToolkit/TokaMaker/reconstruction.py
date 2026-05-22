@@ -54,11 +54,11 @@ coil_current_con_id = 12
 class Mirnov_con:
     '''! TokaMaker equilibrium reconstruction Mirnov sensor constraint'''
     def __init__(self, loc=None, phi=0., norm=None, val=None, err=None):
-        '''! Create Mirnov sensor constraint
+        r'''! Create Mirnov sensor constraint
         
         @param loc Location of Mirnov in R-Z plane [2]
         @param phi Toroidal location [rad] (only meaningful with 3D fields)
-        @param norm Unit normal in R-Z plane [2]
+        @param norm Unit normal \f$ (R,\phi,Z) \f$ [3]
         @param val Value of constraint
         @param err Error in constraint
         '''
@@ -642,7 +642,7 @@ class reconstruction():
         '''
         if len(ax) != 4:
             raise ValueError("Must provide list of 4 axes for plotting flux loop, Mirnov, saddle, and pressure constraint errors")
-        err_output = numpy.loadtxt('fit.out')
+        err_output = numpy.loadtxt(self.out_file)
         # Plot signals for "main" diagnostics
         i = 0
         ax[0].set_title('Flux Loop Constraints')
@@ -698,7 +698,7 @@ class reconstruction():
             names = ['Flux loops', 'Mirnovs', 'Saddle loops', 'Pressure', r'$I_C$', r'$I_p$', r'$\Delta \Phi$']
             ax_1d.set_title(r'Signal $\chi^2$ contributions')
             ax_1d.set_xlabel('Signal Index')
-            ax_1d.set_ylabel('$\chi^2_i$')
+            ax_1d.set_ylabel(r'$\chi^2_i$')
             for i in range(err_ind.shape[0]-1):
                 if err_ind[i+1] == err_ind[i]:
                     continue

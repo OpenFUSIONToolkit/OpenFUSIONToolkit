@@ -1483,7 +1483,7 @@ REAL(c_double), VALUE, INTENT(in) :: ip_target !< Target plasma current [A]
 REAL(c_double), VALUE, INTENT(in) :: ip_ratio_target !< Ratio of net plasma current contribution from \f$F F'\f$ compared to \f$ P' \f$
 REAL(c_double), VALUE, INTENT(in) :: pax_target !< Target axis pressure [Pa]
 REAL(c_double), VALUE, INTENT(in) :: estore_target !< Target stored energy [J]
-REAL(c_double), VALUE, INTENT(in) :: dflux_target !< Target dflux [J]
+REAL(c_double), VALUE, INTENT(in) :: dflux_target !< Target dflux [Wb]
 REAL(c_double), VALUE, INTENT(in) :: R0_target !< Target major radius for magnetic axis
 REAL(c_double), VALUE, INTENT(in) :: Z0_target !< Target vertical position for magnetic axis
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
