@@ -2208,6 +2208,16 @@ class TokaMaker():
             raise ValueError(f"ffp_prof 'type' must be 'jphi-split-bootstrap' (got {ffp_prof['type']!r})")
         ffp_prof.setdefault('type', 'jphi-split-bootstrap')
 
+        # Check temperature profiles are KeV
+        for _prof, _name in ((te_prof, 'te_prof'), (ti_prof, 'ti_prof')):
+            if numpy.max(_prof['y']) > 500.0:
+                warn(
+                    f"{_name}: maximum value ({numpy.max(_prof['y']):.1f}) exceeds 500 — "
+                    "assuming input is in eV and converting to keV.",
+                    UserWarning, stacklevel=2,
+                )
+                _prof['y'] = numpy.asarray(_prof['y']) / 1e3
+
         # Evaluate pprime from kinetic profiles on the same psi 'x' grid as ffp_prof
         psi_sample = numpy.asarray(ffp_prof['x'])
         Te_eV = Akima1DInterpolator(te_prof['x'], te_prof['y'])(psi_sample) * 1e3

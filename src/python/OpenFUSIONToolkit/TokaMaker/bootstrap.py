@@ -876,20 +876,18 @@ def solve_with_bootstrap(mygs,
             )
         if inductive_jphi is None:
             raise ValueError("inductive_jphi must be provided for method='internal'")
-        _ne = numpy.asarray(ne)
-        _Te = numpy.asarray(Te)
-        _ni = numpy.asarray(ni)
-        _Ti = numpy.asarray(Ti)
-        _psi = numpy.linspace(0., 1., len(_ne))
-        _Zeff = numpy.asarray(Zeff)
-        Zeff_arg = ({'x': _psi, 'y': _Zeff} if _Zeff.ndim > 0 and _Zeff.size > 1
-                    else float(_Zeff))
+        _ne   = ne if isinstance(ne, dict) else {'x': numpy.linspace(0., 1., len(numpy.asarray(ne))), 'y': numpy.asarray(ne)}
+        _Te   = Te if isinstance(Te, dict) else {'x': numpy.linspace(0., 1., len(numpy.asarray(Te))), 'y': numpy.asarray(Te) / 1e3}
+        _ni   = ni if isinstance(ni, dict) else {'x': numpy.linspace(0., 1., len(numpy.asarray(ni))), 'y': numpy.asarray(ni)}
+        _Ti   = Ti if isinstance(Ti, dict) else {'x': numpy.linspace(0., 1., len(numpy.asarray(Ti))), 'y': numpy.asarray(Ti) / 1e3}
+        _ffp  = inductive_jphi if isinstance(inductive_jphi, dict) else {'x': numpy.linspace(0., 1., len(numpy.asarray(inductive_jphi))), 'y': numpy.asarray(inductive_jphi)}
+        Zeff_arg = Zeff if isinstance(Zeff, dict) else ({'x': numpy.linspace(0., 1., len(numpy.asarray(Zeff))), 'y': numpy.asarray(Zeff)} if numpy.ndim(Zeff) > 0 and numpy.size(Zeff) > 1 else float(Zeff))
         _results = mygs.solve_bootstrap(
-            ffp_prof={'type': 'jphi-split-bootstrap', 'x': _psi, 'y': numpy.asarray(inductive_jphi)},
-            te_prof={'type': 'linterp', 'x': _psi, 'y': _Te / 1e3},
-            ne_prof={'type': 'linterp', 'x': _psi, 'y': _ne},
-            ti_prof={'type': 'linterp', 'x': _psi, 'y': _Ti / 1e3},
-            ni_prof={'type': 'linterp', 'x': _psi, 'y': _ni},
+            ffp_prof=_ffp,
+            te_prof=_Te,
+            ne_prof=_ne,
+            ti_prof=_Ti,
+            ni_prof=_ni,
             Zeff=Zeff_arg,
             Ip_target=Ip_target,
             scale_jBS=scale_jBS,
