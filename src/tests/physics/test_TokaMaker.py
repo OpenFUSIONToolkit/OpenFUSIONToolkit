@@ -626,27 +626,27 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
         # Setup constraints
         random.seed(42)
         myrecon = reconstruction(mygs)
-        noise_amp = random.gauss()
+        noise_amp = random.gauss(0.0,1.0)
         Ip_noised = eq_info['Ip']*(1.0+noise_amp*0.05)
         myrecon.set_Ip(Ip_noised, err=0.05*eq_info['Ip'])
         flux_vals = []
         field_eval = mygs.get_field_eval('PSI')
         for i in range(B_locs.shape[0]):
             B_tmp = field_eval.eval(B_locs[i,:])
-            noise_amp = random.gauss()
+            noise_amp = random.gauss(0.0,1.0)
             flux_vals.append(B_tmp[0])
             psi_val = B_tmp[0]*2.0*np.pi
             myrecon.add_flux_loop(B_locs[i,:], psi_val*(1.0 + noise_amp*0.05), err=abs(psi_val*0.05))
         field_eval = mygs.get_field_eval('B')
         for i in range(B_locs.shape[0]):
             B_tmp = field_eval.eval(B_locs[i,:])
-            noise_amp = random.gauss()
+            noise_amp = random.gauss(0.0,1.0)
             myrecon.add_Mirnov(B_locs[i,:], np.r_[1.0,0.0,0.0], B_tmp[0] + noise_amp*abs(B_tmp[0]*0.05), err=abs(B_tmp[0]*0.05))
-            noise_amp = random.gauss()
+            noise_amp = random.gauss(0.0,1.0)
             myrecon.add_Mirnov(B_locs[i,:], np.r_[0.0,0.0,1.0], B_tmp[2] + noise_amp*abs(B_tmp[2]*0.05), err=abs(B_tmp[2]*0.05))
         coil_currents, _ = mygs.get_coil_currents()
         for key in coil_currents:
-            noise_amp = random.gauss()
+            noise_amp = random.gauss(0.0,1.0)
             coil_currents[key] *= 1.0+noise_amp*0.05
         # Compute starting equilibrium
         mygs.set_isoflux(None)
