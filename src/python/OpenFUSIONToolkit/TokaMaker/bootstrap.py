@@ -871,8 +871,7 @@ def solve_with_bootstrap(mygs,
         if non_default:
             warn(
                 "solve_with_bootstrap(use_python_solve=False): the following kwargs have no effect "
-                f"with the internal Fortran solver: {non_default}. "
-                "Pass method='external' to use them.",
+                f"with the internal Fortran solver: {non_default}. ",
                 UserWarning, stacklevel=2,
             )
         if inductive_jphi is None:
