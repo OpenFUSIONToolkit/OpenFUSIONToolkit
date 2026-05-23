@@ -264,6 +264,20 @@ class ThinCurr():
         else:
             self.Lmat = numpy.ctypeslib.as_array(ctypes.cast(Lmat_loc, c_double_ptr),shape=(self.nelems,self.nelems))
     
+    def apply_Lmat(self,field):
+        '''! Apply inductance matrix to a field
+
+        @param field Field to apply matrix to
+        @result Result of matrix application
+        '''
+        field_in = numpy.ascontiguousarray(field.copy(), dtype=numpy.float64)
+        if self.Lmat_hodlr:
+            thincurr_apply_Lmat(self.tw_obj,field_in,self.Lmat_hodlr)
+            
+        else:
+            thincurr_apply_Lmat(self.tw_obj,field_in,c_void_p())
+        return field_in
+    
     def compute_Bmat(self,cache_file=None):
         '''! Compute magnetic field reconstruction operators for this model
 

@@ -24,6 +24,7 @@ USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem, native_read_nodesets, native_read_sidesets
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector
+USE oft_native_la, ONLY: oft_native_dense_matrix
 !---
 USE fem_utils, ONLY: fem_interp
 USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, &
@@ -467,6 +468,37 @@ ELSE
   vals_tmp = vals_tmp*tw_obj%mesh%va
 END IF
 END SUBROUTINE thincurr_scale_va
+!---------------------------------------------------------------------------------
+!> Needs docs
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_apply_Lmat(tw_ptr,vals,hodlr_ptr) BIND(C,NAME="thincurr_apply_Lmat")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Needs docs
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+CLASS(oft_vector), POINTER :: a,b
+TYPE(tw_type), POINTER :: tw_obj
+TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
+TYPE(oft_native_dense_matrix) :: Lmat_dense
+CALL c_f_pointer(tw_ptr, tw_obj)
+CALL c_f_pointer(vals, vals_tmp, [tw_obj%nelems])
+CALL tw_obj%Uloc%new(a)
+CALL tw_obj%Uloc%new(b)
+CALL a%restore_local(vals_tmp)
+IF(c_associated(hodlr_ptr))THEN
+  CALL c_f_pointer(hodlr_ptr, hodlr_op)
+  CALL hodlr_op%apply(a,b)
+ELSE
+  Lmat_dense%nr=tw_obj%nelems; Lmat_dense%nc=tw_obj%nelems
+  Lmat_dense%nrg=tw_obj%nelems; Lmat_dense%ncg=tw_obj%nelems
+  Lmat_dense%M=>tw_obj%Lmat
+  CALL Lmat_dense%apply(a,b)
+END IF
+CALL b%get_local(vals_tmp)
+CALL a%delete()
+CALL b%delete()
+DEALLOCATE(a,b)
+END SUBROUTINE thincurr_apply_Lmat
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------

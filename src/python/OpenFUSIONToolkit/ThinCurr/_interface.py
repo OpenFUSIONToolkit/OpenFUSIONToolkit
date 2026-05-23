@@ -42,6 +42,10 @@ thincurr_save_scalar = ctypes_subroutine(oftpy_lib.thincurr_save_scalar,
 thincurr_scale_va = ctypes_subroutine(oftpy_lib.thincurr_scale_va,
     [c_void_p, ctypes_numpy_array(float64,1), c_bool])
 
+# thincurr_apply_Lmat(tw_ptr,field,hodlr_ptr)
+thincurr_apply_Lmat = ctypes_subroutine(oftpy_lib.thincurr_apply_Lmat,
+    [c_void_p, ctypes_numpy_array(float64,1), c_void_p])
+
 # Compute mutual coupling between models thincurr_cross_coupling(tw_ptr1,tw_ptr2,Mmat,error_str)
 thincurr_cross_coupling = ctypes_subroutine(oftpy_lib.thincurr_cross_coupling,
     [c_void_p, c_void_p, ctypes_numpy_array(float64,2), c_char_p, c_char_p])
