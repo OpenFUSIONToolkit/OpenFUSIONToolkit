@@ -2254,14 +2254,14 @@ class TokaMaker():
             ni_prof=ni_prof,
             Zeff=Zeff,
         )
-        self.set_profiles(
-            ffp_prof=ffp_prof,
-            pp_prof=pp_prof
-        )
         self.set_boot_ops(**kwargs)
         self.set_targets(Ip=Ip_target, pax=pax)
         self.settings.pm = True
         self.update_settings()
+        self.set_profiles(
+            ffp_prof=ffp_prof,
+            pp_prof=pp_prof
+        )
         self.solve()
 
         # Extract bootstrap profiles
