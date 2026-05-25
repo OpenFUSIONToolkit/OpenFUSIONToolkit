@@ -64,8 +64,17 @@ spack develop --path /path/to/oft openfusiontoolkit
 Now add OFT to the environment, being sure to modify the spec options (`+spec`/`~spec`) and
 compilers (`gcc@15.2.0`) accordingly. Please note, that at this point OFT requires the same
 compiler vendor to be used for both C/C++ and Fortran compilers.
+
 ```shell
-spack add openfusiontoolkit+superlu %c,cxx=gcc@15.2.0 %fortran=gcc@15.2.0 # Example with GCC 15.2
+# Example for SuperLU
+spack add superlu+fortran %c=gcc@15.2.0 %fortran=gcc@15.2.0
+spack add openfusiontoolkit+superlu %c,cxx=gcc@15.2.0 %fortran=gcc@15.2.0
+```
+
+```shell
+# Example for built MPI and SuperLU-DIST
+spack add superlu+fortran %c=gcc@15.2.0 %fortran=gcc@15.2.0
+spack add openfusiontoolkit+mpi+superlu %c,cxx=gcc@15.2.0 %fortran=gcc@15.2.0
 ```
 
 ### Environment usage
@@ -100,4 +109,19 @@ or manually
 ```shell
 OFT_ROOTPATH=$(spack location -i openfusiontoolkit)
 PYTHONPATH=$(spack location -i openfusiontoolkit)/python:$PYTHONPATH
+```
+
+### To run tests
+Make sure to add `+tests` to the spec list when adding `openfusiontoolkit` and that you have an
+active python environment with `pytest` available.
+```shell
+spack install --keep-stage openfusiontoolkit
+cd $(spack location -b openfusiontoolkit)
+make test
+```
+
+Or to run tests silently using Spack's built-in testing
+```shell
+spack install --test=root openfusiontoolkit
+# TODO: Add capability to save test result file
 ```
