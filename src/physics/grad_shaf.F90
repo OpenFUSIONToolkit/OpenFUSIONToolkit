@@ -283,7 +283,7 @@ END TYPE boot_ops
 !! destroyed.  Units are A/m² (before the mu0 normalisation used internally).
 !------------------------------------------------------------------------------
 TYPE :: boot_profs
-  REAL(r8), POINTER, DIMENSION(:) :: psi_n => NULL() !< Normalized flux values for these current profiles (0=axis,1=LCFS), set by 'x' from ffp_prof
+  REAL(r8), POINTER, DIMENSION(:) :: psi_n => NULL() !< Normalised psi_N values for these current profiles in OFT convention (0=LCFS, 1=axis); index 0 is the LCFS boundary
   REAL(r8), POINTER, DIMENSION(:) :: j_bs_raw => NULL() !< Raw bootstrap current density output directly from Redl PoP 2021 formula [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: total_j_phi => NULL() !< Total toroidal current density = j_ind_final + j_bs_final [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: j_ind_final => NULL() !< Input jphi, re-scaled & optionally tapered [A/m²]

@@ -788,8 +788,7 @@ class TokaMaker():
 
         @result Dictionary with keys `'psi_n'`, `'total_j_phi'`, `'j_bs_final'`, `'j_ind_final'`
           and (when available) `'j_bs_raw'`.  Returns `None` if no profiles have been computed.
-          All arrays are 1-D numpy arrays of length *npsi*.  `'psi_n'` is in standard convention
-          (0 = axis, 1 = LCFS).  Current densities are in A/m².
+          `'psi_n'` is in standard convention (0=axis, 1=LCFS). Current densities are in A/m².
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -2810,6 +2809,16 @@ class TokaMaker_equilibrium():
             result['j_ind_final'] = numpy.ctypeslib.as_array(j_ind_final_ptr, shape=(n.value,)).copy()
         if n_raw.value > 0:
             result['j_bs_raw'] = numpy.ctypeslib.as_array(j_bs_raw_ptr, shape=(n_raw.value,)).copy()
+        if result and (self.psi_convention == 0):
+            # Convert from OFT convention (0=LCFS, ascending toward axis) to
+            # standard convention (0=axis, ascending toward LCFS)
+            if 'psi_n' in result:
+                result['psi_n'] = (1.0 - result['psi_n'])[::-1].copy()
+                result['total_j_phi'] = result['total_j_phi'][::-1].copy()
+                result['j_bs_final'] = result['j_bs_final'][::-1].copy()
+                result['j_ind_final'] = result['j_ind_final'][::-1].copy()
+            if 'j_bs_raw' in result:
+                result['j_bs_raw'] = result['j_bs_raw'][::-1].copy()
         return result if result else None
 
     def set_resistivity(self, eta_prof=None):

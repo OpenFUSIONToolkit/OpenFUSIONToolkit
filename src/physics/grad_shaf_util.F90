@@ -621,13 +621,13 @@ IF(hdf5_field_exist(filename,'tokamaker/BOOT_PROFS'))THEN
   IF(hdf5_field_exist(filename,'tokamaker/BOOT_PROFS/TOTAL_J_PHI'))THEN
     CALL hdf5_field_get_sizes(filename,'tokamaker/BOOT_PROFS/TOTAL_J_PHI',ndims,dim_sizes)
     IF(ASSOCIATED(self%boot_profs%psi_n))DEALLOCATE(self%boot_profs%psi_n)
-    ALLOCATE(self%boot_profs%psi_n(dim_sizes(1)))
+    ALLOCATE(self%boot_profs%psi_n(0:dim_sizes(1)-1))
     IF(ASSOCIATED(self%boot_profs%total_j_phi))DEALLOCATE(self%boot_profs%total_j_phi)
-    ALLOCATE(self%boot_profs%total_j_phi(dim_sizes(1)))
+    ALLOCATE(self%boot_profs%total_j_phi(0:dim_sizes(1)-1))
     IF(ASSOCIATED(self%boot_profs%j_ind_final))DEALLOCATE(self%boot_profs%j_ind_final)
-    ALLOCATE(self%boot_profs%j_ind_final(dim_sizes(1)))
+    ALLOCATE(self%boot_profs%j_ind_final(0:dim_sizes(1)-1))
     IF(ASSOCIATED(self%boot_profs%j_bs_final))DEALLOCATE(self%boot_profs%j_bs_final)
-    ALLOCATE(self%boot_profs%j_bs_final(dim_sizes(1)))
+    ALLOCATE(self%boot_profs%j_bs_final(0:dim_sizes(1)-1))
     DEALLOCATE(dim_sizes)
     CALL hdf5_read(self%boot_profs%psi_n,filename,'tokamaker/BOOT_PROFS/PSI_N',success=success)
     CALL hdf5_read(self%boot_profs%total_j_phi,filename,'tokamaker/BOOT_PROFS/TOTAL_J_PHI',success=success)
@@ -636,7 +636,7 @@ IF(hdf5_field_exist(filename,'tokamaker/BOOT_PROFS'))THEN
     IF(hdf5_field_exist(filename,'tokamaker/BOOT_PROFS/J_BS_RAW'))THEN
       CALL hdf5_field_get_sizes(filename,'tokamaker/BOOT_PROFS/J_BS_RAW',ndims,dim_sizes)
       IF(ASSOCIATED(self%boot_profs%j_bs_raw))DEALLOCATE(self%boot_profs%j_bs_raw)
-      ALLOCATE(self%boot_profs%j_bs_raw(dim_sizes(1)))
+      ALLOCATE(self%boot_profs%j_bs_raw(0:dim_sizes(1)-1))
       DEALLOCATE(dim_sizes)
       CALL hdf5_read(self%boot_profs%j_bs_raw,filename,'tokamaker/BOOT_PROFS/J_BS_RAW',success=success)
     END IF

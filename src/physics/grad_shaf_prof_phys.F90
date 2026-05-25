@@ -918,15 +918,21 @@ jphi_total = alpha * jphi_ind + j_BS
 IF(.NOT.ASSOCIATED(self%jphi_total_last)) ALLOCATE(self%jphi_total_last(self%npsi))
 self%jphi_total_last = jphi_total
 IF(.NOT.ASSOCIATED(gseq%boot_profs%total_j_phi))THEN
-  ALLOCATE(gseq%boot_profs%psi_n(self%npsi))
-  ALLOCATE(gseq%boot_profs%total_j_phi(self%npsi))
-  ALLOCATE(gseq%boot_profs%j_bs_final(self%npsi))
-  ALLOCATE(gseq%boot_profs%j_ind_final(self%npsi))
+  ALLOCATE(gseq%boot_profs%psi_n(0:self%npsi))
+  ALLOCATE(gseq%boot_profs%total_j_phi(0:self%npsi))
+  ALLOCATE(gseq%boot_profs%j_bs_final(0:self%npsi))
+  ALLOCATE(gseq%boot_profs%j_ind_final(0:self%npsi))
 END IF
-gseq%boot_profs%psi_n = 1.0_r8 - self%x ! Convert back to standard psi convention (0=axis,1=LCFS) for output
-gseq%boot_profs%total_j_phi = jphi_total
-gseq%boot_profs%j_bs_final = j_BS
-gseq%boot_profs%j_ind_final = alpha * jphi_ind
+! LCFS boundary (OFT psi=0; self%j0 is jphi_ind at LCFS; j_BS=0 at LCFS)
+gseq%boot_profs%psi_n(0)       = 0.0_r8
+gseq%boot_profs%total_j_phi(0) = alpha*self%j0
+gseq%boot_profs%j_bs_final(0)  = 0.0_r8
+gseq%boot_profs%j_ind_final(0) = alpha*self%j0
+! Interior knots (OFT psi convention: self%x(1) near LCFS, self%x(npsi) near axis)
+gseq%boot_profs%psi_n(1:)       = self%x
+gseq%boot_profs%total_j_phi(1:) = jphi_total
+gseq%boot_profs%j_bs_final(1:)  = j_BS
+gseq%boot_profs%j_ind_final(1:) = alpha * jphi_ind
 !--- Compute updated F*F' profile
 IF(ASSOCIATED(gseq%P_ani)) &
   CALL oft_abort('Jphi profiles do not support anisotropic pressure', &
@@ -1208,8 +1214,9 @@ END WHERE
 ! Guard NaN (where F -> 0)
 WHERE(.NOT.(ABS(j_BS) < 1.0e99_r8)) j_BS = 0.0_r8
 ! Save raw bootstrap output
-IF(.NOT.ASSOCIATED(gseq%boot_profs%j_bs_raw)) ALLOCATE(gseq%boot_profs%j_bs_raw(n_psi))
-gseq%boot_profs%j_bs_raw = j_BS
+IF(.NOT.ASSOCIATED(gseq%boot_profs%j_bs_raw)) ALLOCATE(gseq%boot_profs%j_bs_raw(0:n_psi))
+gseq%boot_profs%j_bs_raw(0)  = 0.0_r8  ! j_BS = 0 at LCFS (OFT psi = 0)
+gseq%boot_profs%j_bs_raw(1:) = j_BS
 IF(gseq%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A)') '  [calculate_bootstrap] geometry & collisionality sample (i=1,mid,n):'
   WRITE(*,'(A,3ES12.4)') '    <R>      : ', r_avgs_saut(1,1), r_avgs_saut(n_psi/2,1), r_avgs_saut(n_psi,1)
