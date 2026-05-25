@@ -1,28 +1,46 @@
 #!/bin/bash
+
 # Setup python environment
-source /usr/local/OFT_venv/bin/activate
+source $OFT_PYENV/bin/activate
 export PYTHONPATH=$OFT_ROOTPATH/python:$PYTHONPATH
 
+print_help() {
+  echo "Usage: container_entrypoint.sh [options]
+  
+  -h Print this help message
+  -j Run Jupyter lab server on port 8888
+  -s Path to the script to run
+  -n Path to the Jupyter notebook to execute"
+  return 0  # Success
+}
+
 # Parse arguments
-LAUNCH_JUPYTER=true
+LAUNCH_JUPYTER=false
 RUN_NOTEBOOK=false
-while getopts ":hs:j:" opt; do
+while getopts ":hjs:n:" opt; do
   case $opt in
-    h) echo "Usage: script -h (help) or -s (script)"; exit 0;;
-    s) SCRIPT=$OPTARG; LAUNCH_JUPYTER=false;;
-    j) SCRIPT=$OPTARG; LAUNCH_JUPYTER=false; RUN_NOTEBOOK=true;;
-    \?) echo -e "Invalid option\n\nUsage: script -h (help) or -s (script)"; exit 1;;
+    h) print_help; exit 0;;
+    j) LAUNCH_JUPYTER=true;;
+    s) SCRIPT=$OPTARG;;
+    n) SCRIPT=$OPTARG; RUN_NOTEBOOK=true;;
+    \?) echo "Invalid option"; echo ""; print_help; exit 1;;
   esac
 done
 
-# Excecute desired function
+# Execute desired function
 if [ "$LAUNCH_JUPYTER" = true ]; then
-  jupyter lab --no-browser --ip=''
+  exec jupyter lab --no-browser --ip=''
 else
   if [ "$RUN_NOTEBOOK" = true ]; then
-    jupyter nbconvert --execute --to notebook --inplace --ExecutePreprocessor.kernel_name=Python3 $SCRIPT
+    exec jupyter nbconvert --execute --to notebook --inplace --ExecutePreprocessor.kernel_name=Python3 $SCRIPT
   else
+    if [[ -z "$SCRIPT" ]]; then
+      echo "No options provided"
+      echo ""
+      print_help
+      exit 1
+    fi
     # Run script passed as argument
-    python $SCRIPT
+    exec python $SCRIPT
   fi
 fi

@@ -1,16 +1,27 @@
 #!/bin/bash
 
+print_help() {
+  echo "Usage: build_container.sh [options]
+  
+  -h Print this help message
+  -d Use docker instead of podman
+  -n Force no-cache build
+  -f Path to the Dockerfile
+  -t Image tag"
+  return 0  # Success
+}
+
 # Parse arguments
 USE_DOCKER=false
 USE_CACHE=true
-while getopts ":dnf:t:" opt; do
+while getopts ":hdnf:t:" opt; do
   case $opt in
-      h) echo "Usage: script -h (help) or -s (script)"; exit 0;;
-      d) USE_DOCKER=false;;
+      h) print_help; exit 0;;
+      d) USE_DOCKER=true;;
       n) USE_CACHE=false;;
       f) FILE_PATH=$OPTARG;;
       t) IMAGE_TAG=$OPTARG;;
-      \?) echo -e "Invalid option\n\nUsage: build_container.sh -h (help), -d (use docker), or -n (no-cache)"; exit 1;;
+      \?) echo "Invalid option"; echo ""; print_help; exit 1;;
   esac
 done
 
