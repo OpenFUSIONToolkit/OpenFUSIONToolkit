@@ -46,6 +46,7 @@ class Openfusiontoolkit(CMakePackage):
     variant("mumps", default=False, description="Whether to build with MUMPS support")
     variant("superlu", default=False, description="Whether to build with SuperLU support")
     variant("superlu-dist", default=False, description="Whether to build with SuperLU-DIST support")
+    variant("petsc", default=True, description="Whether to build with PETSc support")
 
     # Language dependencies
     depends_on("c", type="build")
@@ -65,11 +66,19 @@ class Openfusiontoolkit(CMakePackage):
     # MPI support
     depends_on("mpi", when="+mpi")
 
+    # PETSc support
+    depends_on("petsc", when="+petsc")
+    conflicts("+umfpack", when="+petsc")
+    conflicts("+superlu", when="+petsc")
+    conflicts("+superlu-dist", when="+petsc")
+    conflicts("+mumps", when="+petsc")
+
     # LU solvers
     depends_on("suite-sparse", when="+umfpack")
-    depends_on("superlu@7:", when="+superlu")
+    depends_on("superlu@7:+fortran", when="+superlu")
     depends_on("superlu-dist", when="+superlu-dist")
     conflicts("+superlu-dist", when="~mpi")
+    conflicts("+superlu-dist", when="platform=darwin")
     with when("+mpi"):
         depends_on("mumps~complex+mpi", when="+mumps")
     with when("~mpi"):
