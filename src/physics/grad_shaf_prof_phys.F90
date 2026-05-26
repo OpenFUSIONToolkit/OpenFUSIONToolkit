@@ -63,7 +63,7 @@ type, extends(linterp_flux_func) :: jphi_flux_func
   real(8) :: rescale_last = 1.d0 !< Damped jphi_rescale from previous NL iteration, to ensure Ip target is met
   logical :: freeze_j_BS = .FALSE. !< Set .TRUE. once j_BS stagnates for 2 steps; skips Sauter call (big speedup)
   logical :: freeze_alpha = .FALSE.   !< Set .TRUE. once dalpha stagnates for 2 steps; skips alpha re-solve (speedup)
-  real(8) :: djBS_tol(2) = [1.0e-6_r8, 1.0e-3_r8] !< RMS tolerances: (1) hard freeze threshold, (2) reset no-improve counter if above this
+  real(8) :: djBS_tol(2) = [1.0e-4_r8, 1.0e-3_r8] !< RMS tolerances: (1) hard freeze threshold, (2) reset no-improve counter if above this
   real(8) :: dalpha_tol(2) = [1.0e-6_r8, 1.0e-3_r8]   !< Hard tolerance; (1) freeze if below this, (2) reset no-improve counter if above this
   integer(4) :: djBS_no_improve = 0   !< Consecutive steps with non-decreasing djBS
   real(8) :: djBS_min = huge(1.0d0)  !< Running minimum djBS seen so far
