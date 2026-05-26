@@ -444,7 +444,7 @@ IF(TRIM(tmp_str)/='none')THEN
   CALL gs_profile_load(tmp_str,prof_tmp)
   IF(ASSOCIATED(tMaker_equil_obj%I))THEN
     prof_tmp%f_offset=tMaker_equil_obj%I%f_offset ! Persist F0 with profile changes
-    CALL prof_tmp%update(tMaker_equil_obj)        ! Initialize new profile with current EQ
+    IF(prof_tmp%update_on_load)CALL prof_tmp%update(tMaker_equil_obj) ! Initialize new profile with current EQ
   END IF
   tMaker_equil_obj%I=>prof_tmp
 END IF

@@ -522,6 +522,7 @@ SELECT TYPE(self=>func)
   self%j0=y0
   self%y0=0.d0
   IF(PRESENT(bootstrap_mode))self%bootstrap_mode = bootstrap_mode
+  IF(self%bootstrap_mode==1)self%update_on_load = .FALSE. ! Don't update on load to prevent errors from missing kinetic profiles
   DO i=1,self%npsi
     self%x(i) = psivals(i)
     self%jphi(i) = yvals(i)

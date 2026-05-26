@@ -65,6 +65,7 @@ TYPE, ABSTRACT :: flux_func
   INTEGER(i4) :: ncofs = 0 !< Number of free coefficients
   REAL(r8) :: f_offset = 0.d0 !< Offset value
   REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Current plasma bounds (for normalization)
+  LOGICAL :: update_on_load = .TRUE. 
 CONTAINS
   !> Delete profile
   PROCEDURE(flux_func_delete), DEFERRED :: delete
