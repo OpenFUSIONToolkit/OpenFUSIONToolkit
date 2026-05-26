@@ -29,7 +29,7 @@ USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, sauter_fc, sauter_interp
 USE oft_gs_profiles
-USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
+USE grad_shaf_prof_phys, ONLY: jphi_flux_func
 IMPLICIT NONE
 #include "local.h"
 !
