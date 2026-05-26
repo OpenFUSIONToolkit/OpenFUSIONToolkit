@@ -423,12 +423,15 @@ subroutine jphi_save_hdf5(self,filename,path)
 class(jphi_flux_func), intent(inout) :: self
 character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
-IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('jphi-linterp',filename,path//'/TYPE')
+IF(self%bootstrap_mode==1)THEN ! Should override any existing type
+  CALL hdf5_write('jphi-split-bootstrap',filename,path//'/TYPE')
+ELSE
+  CALL hdf5_write('jphi-linterp',filename,path//'/TYPE')
+END IF
 CALL hdf5_write(self%npsi,filename,path//'/NPSI')
 CALL hdf5_write(self%x,filename,path//'/XVALS')
 CALL hdf5_write(self%jphi,filename,path//'/YVALS')
 CALL hdf5_write(self%j0,filename,path//'/J0')
-CALL hdf5_write(self%bootstrap_mode,filename,path//'/BOOTSTRAP_MODE')
 end subroutine jphi_save_hdf5
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -436,8 +439,12 @@ end subroutine jphi_save_hdf5
 subroutine jphi_save_txt(self,io_unit)
 class(jphi_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'jphi-linterp'
-WRITE(io_unit,*)self%npsi,self%j0,self%bootstrap_mode
+IF(self%bootstrap_mode==1)THEN
+  WRITE(io_unit,*)'jphi-split-bootstrap'
+ELSE
+  WRITE(io_unit,*)'jphi-linterp'
+END IF
+WRITE(io_unit,*)self%npsi,self%j0
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%jphi
 end subroutine jphi_save_txt
@@ -449,10 +456,9 @@ class(jphi_flux_func), intent(inout) :: self
 character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
 logical, intent(out) :: success
-integer(i4) :: npsi, bootstrap_mode_tmp
+integer(i4) :: npsi
 real(r8) :: J0
 real(r8), allocatable :: xvals(:),yvals(:)
-logical :: ok
 CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
 IF(.NOT.success)RETURN
 ALLOCATE(xvals(npsi),yvals(npsi))
@@ -462,13 +468,7 @@ CALL hdf5_read(yvals,filename,path//'/YVALS',success=success)
 IF(.NOT.success)RETURN
 CALL hdf5_read(J0,filename,path//'/J0',success=success)
 IF(.NOT.success)RETURN
-bootstrap_mode_tmp = 0
-CALL hdf5_read(bootstrap_mode_tmp,filename,path//'/BOOTSTRAP_MODE',success=ok)
-IF(ok)THEN
-  CALL create_jphi_ff(self,npsi,xvals,yvals,J0,bootstrap_mode_tmp)
-ELSE
-  CALL create_jphi_ff(self,npsi,xvals,yvals,J0)
-END IF
+CALL create_jphi_ff(self,npsi,xvals,yvals,J0)
 DEALLOCATE(xvals,yvals)
 end subroutine jphi_load_hdf5
 !------------------------------------------------------------------------------
@@ -477,35 +477,25 @@ end subroutine jphi_load_hdf5
 subroutine jphi_load_txt(self,io_unit)
 class(jphi_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-integer(i4) :: npsi, bootstrap_mode_tmp, ios
+integer(i4) :: npsi
 real(r8) :: J0
 real(r8), allocatable :: xvals(:),yvals(:)
-character(len=256) :: line
-! Try to read npsi, j0, bootstrap_mode; fall back to (npsi, j0) if absent
-bootstrap_mode_tmp = 0
-READ(io_unit,'(A)')line
-READ(line,*,IOSTAT=ios)npsi,J0,bootstrap_mode_tmp
-IF(ios/=0)READ(line,*)npsi,J0
+READ(io_unit,*)npsi,J0
 ALLOCATE(xvals(npsi),yvals(npsi))
 READ(io_unit,*)xvals
 READ(io_unit,*)yvals
-IF(ios==0)THEN
-  CALL create_jphi_ff(self,npsi,xvals,yvals,J0,bootstrap_mode_tmp)
-ELSE
-  CALL create_jphi_ff(self,npsi,xvals,yvals,J0)
-END IF
+CALL create_jphi_ff(self,npsi,xvals,yvals,J0)
 DEALLOCATE(xvals,yvals)
 end subroutine jphi_load_txt
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals,y0,bootstrap_mode)
+SUBROUTINE create_jphi_ff(func,npsi,psivals,yvals,y0)
 CLASS(flux_func), INTENT(inout) :: func
 INTEGER(4), INTENT(in) :: npsi
 REAL(8), INTENT(in) :: psivals(npsi)
 REAL(8), INTENT(in) :: yvals(npsi)
 REAL(8), INTENT(in) :: y0
-INTEGER(4), OPTIONAL, INTENT(in) :: bootstrap_mode
 INTEGER(4) :: i,ierr
 ! IF(.NOT.ASSOCIATED(func))ALLOCATE(jphi_flux_func::func)
 SELECT TYPE(self=>func)
@@ -521,7 +511,6 @@ SELECT TYPE(self=>func)
   !---
   self%j0=y0
   self%y0=0.d0
-  IF(PRESENT(bootstrap_mode))self%bootstrap_mode = bootstrap_mode
   IF(self%bootstrap_mode==1)self%update_on_load = .FALSE. ! Don't update on load to prevent errors from missing kinetic profiles
   DO i=1,self%npsi
     self%x(i) = psivals(i)
