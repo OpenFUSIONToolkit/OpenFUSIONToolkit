@@ -67,14 +67,12 @@ compiler vendor to be used for both C/C++ and Fortran compilers.
 
 ```shell
 # Example for SuperLU
-spack add superlu+fortran %c=gcc@15.2.0 %fortran=gcc@15.2.0
-spack add openfusiontoolkit+superlu %c,cxx=gcc@15.2.0 %fortran=gcc@15.2.0
+spack add openfusiontoolkit+superlu %c,cxx,fortran=gcc@15.2.0 ^superlu+fortran
 ```
 
 ```shell
 # Example for built MPI and SuperLU-DIST
-spack add superlu+fortran %c=gcc@15.2.0 %fortran=gcc@15.2.0
-spack add openfusiontoolkit+mpi+superlu %c,cxx=gcc@15.2.0 %fortran=gcc@15.2.0
+spack add openfusiontoolkit+mpi+superlu %c,cxx,fortran=gcc@15.2.0 ^mpich+fortran ^superlu-dist
 ```
 
 ### Environment usage

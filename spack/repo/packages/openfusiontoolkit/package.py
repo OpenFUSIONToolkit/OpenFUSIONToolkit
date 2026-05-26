@@ -54,7 +54,7 @@ class Openfusiontoolkit(CMakePackage):
     depends_on("python@3.7:", when="+python")
 
     # Build system dependencies
-    depends_on("cmake", type="build")
+    depends_on("cmake@3.27:", type="build")
 
     # Core dependencies
     depends_on("libxml2")
@@ -63,11 +63,11 @@ class Openfusiontoolkit(CMakePackage):
     depends_on("hdf5+fortran~mpi")
 
     # MPI support
-    depends_on("mpi+fortran", when="+mpi")
+    depends_on("mpi", when="+mpi")
 
     # LU solvers
     depends_on("suite-sparse", when="+umfpack")
-    depends_on("superlu", when="+superlu")
+    depends_on("superlu@7:", when="+superlu")
     depends_on("superlu-dist", when="+superlu-dist")
     conflicts("+superlu-dist", when="~mpi")
     with when("+mpi"):
