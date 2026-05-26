@@ -840,14 +840,10 @@ ALLOCATE(jphi_total(self%npsi))
 !   No Ip target: rescale jphi_total so the integrated current matches the
 !   FEM solution (gs_itor_nl) rather than the profile quadrature (gs_flux_int).
 jphi_rescale = self%rescale_last
-IF(gseq%Itor_target < 0.d0 .AND. .NOT. self%freeze_j_BS) THEN
+IF(ASSOCIATED(self%jphi_total_last) .AND. (.NOT. self%freeze_j_BS)) THEN
   CALL gs_itor_nl(gseq, itor_nl)
-  IF(ASSOCIATED(self%jphi_total_last)) THEN
-    CALL gs_flux_int(gseq, self%x, self%jphi_total_last/qtmp, self%npsi, itor_flint)
-    IF(ABS(itor_flint) > 0.d0) THEN
-      jphi_rescale = (itor_nl/itor_flint + self%rescale_last) / 2.0_r8
-    END IF
-  END IF
+  CALL gs_flux_int(gseq, self%x, self%jphi_total_last/qtmp, self%npsi, itor_flint)
+  jphi_rescale = (itor_nl/itor_flint + self%rescale_last) / 2.0_r8
   self%rescale_last = jphi_rescale
 END IF
 !--- 5. Solve analytically for alpha.
