@@ -588,9 +588,10 @@ END SUBROUTINE tokamaker_recon_run
 !---------------------------------------------------------------------------------
 !> Perform an equilibrium reconstruction using TokaMaker
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_recon_setup(tMaker_ptr,settings,error_flag) BIND(C,NAME="tokamaker_recon_setup")
+SUBROUTINE tokamaker_recon_setup(tMaker_ptr,settings,ncons,error_flag) BIND(C,NAME="tokamaker_recon_setup")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(tokamaker_recon_settings_type), VALUE, INTENT(in) :: settings !< Reconstruction settings struct
+INTEGER(c_int), INTENT(out) :: ncons !< Number of constraints
 INTEGER(c_int), INTENT(out) :: error_flag !< Error flag (0 if no error)
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c
 CHARACTER(LEN=OFT_PATH_SLEN) :: infile
@@ -607,15 +608,18 @@ error_flag=0
 CALL c_f_pointer(settings%infile,infile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(infile_c,infile)
 CALL fit_gs_setup(tMaker_obj%gs_equil,tMaker_obj%recon_constraints,infile)
+ncons=SIZE(tMaker_obj%recon_constraints)
 END SUBROUTINE tokamaker_recon_setup
 !---------------------------------------------------------------------------------
 !> Perform an equilibrium reconstruction using TokaMaker
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_recon_err(tMaker_ptr,vacuum,settings,error_flag) BIND(C,NAME="tokamaker_recon_err")
+SUBROUTINE tokamaker_recon_err(tMaker_ptr,vacuum,settings,error_mat,error_flag) BIND(C,NAME="tokamaker_recon_err")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Reconstruct vacuum equilibrium (no plasma)?
 TYPE(tokamaker_recon_settings_type), VALUE, INTENT(in) :: settings !< Reconstruction settings struct
+TYPE(c_ptr), VALUE, INTENT(in) :: error_mat !< Pointer to error matrix or void to write to file
 INTEGER(c_int), INTENT(out) :: error_flag !< Error flag (0 if no error)
+REAL(r8), POINTER :: error_mat_tmp(:,:)
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
 CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -634,7 +638,12 @@ CALL c_f_pointer(settings%outfile,outfile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(infile_c,infile)
 CALL copy_string_rev(outfile_c,outfile)
 tMaker_obj%device%timing=0.d0
-CALL fit_gs_error(tMaker_obj%gs_equil,tMaker_obj%recon_constraints,infile,outfile)
+IF(c_associated(error_mat))THEN
+  CALL c_f_pointer(error_mat, error_mat_tmp, [4,SIZE(tMaker_obj%recon_constraints)])
+  CALL fit_gs_error(tMaker_obj%gs_equil,tMaker_obj%recon_constraints,infile,outfile,error_mat=error_mat_tmp)
+ELSE
+  CALL fit_gs_error(tMaker_obj%gs_equil,tMaker_obj%recon_constraints,infile,outfile)
+END IF
 tMaker_obj%gs_equil%has_plasma=.TRUE.
 END SUBROUTINE tokamaker_recon_err
 !---------------------------------------------------------------------------------

@@ -32,13 +32,13 @@ class tokamaker_recon_settings_cstruct(c_struct):
 tokamaker_recon_run = ctypes_subroutine(oftpy_lib.tokamaker_recon_run,
     [c_void_p, c_bool, tokamaker_recon_settings_cstruct, c_int_ptr])
 
-# tokamaker_recon_err(tMaker_ptr,vacuum,settings,error_flag)
+# tokamaker_recon_err(tMaker_ptr,vacuum,settings,error_mat,error_flag)
 tokamaker_recon_err = ctypes_subroutine(oftpy_lib.tokamaker_recon_err,
-    [c_void_p, c_bool, tokamaker_recon_settings_cstruct, c_int_ptr])
+    [c_void_p, c_bool, tokamaker_recon_settings_cstruct, c_double_ptr, c_int_ptr])
 
-# tokamaker_recon_setup(tMaker_ptr,settings,error_flag)
+# tokamaker_recon_setup(tMaker_ptr,settings,ncons,error_flag)
 tokamaker_recon_setup = ctypes_subroutine(oftpy_lib.tokamaker_recon_setup,
-    [c_void_p, tokamaker_recon_settings_cstruct, c_int_ptr])
+    [c_void_p, tokamaker_recon_settings_cstruct, c_int_ptr, c_int_ptr])
 ## @endcond
 
 Mirnov_con_id = 1
@@ -460,6 +460,8 @@ class reconstruction():
         self.con_file = in_filename
         ## Name of reconstruction output file
         self.out_file = out_filename
+        ## Number of constraints in underlying Fortran object
+        self._ncons = 0
         # Update settings
         self.settings.infile = self.con_file
         self.settings.outfile = self.out_file
@@ -633,45 +635,55 @@ class reconstruction():
             for press_con in self._pressure_cons:
                 ax.plot(press_con.loc[0], press_con.loc[1], 'm.', zorder=base_zorder+1)
     
-    def plot_error(self, ax, coil_ax=None, ax_1d=None):
+    def plot_error(self, ax, error_mat=None, error_file=None, coil_ax=None, chi_ax=None):
         '''! Plot constraint values and reconstructed signals for current equilibrium from reconstruction output file
         
         @param ax Matplotlib axis to plot on
+        @param error_mat Error matrix, if `None` `eval_error` will be called
+        @param error_file File containing error data
         @param coil_ax Matplotlib axis to plot coil current constraints on
-        @param ax_1d Matplotlib axis to plot 1D error spectrum on
+        @param chi_ax Matplotlib axis to plot chi-squared values on
         '''
         if len(ax) != 4:
             raise ValueError("Must provide list of 4 axes for plotting flux loop, Mirnov, saddle, and pressure constraint errors")
-        err_output = numpy.loadtxt(self.out_file)
+        if error_file is not None:
+            error_mat = numpy.loadtxt(error_file)[:,1:]
+        if error_mat is None:
+            error_mat = self.eval_error()
+        else:
+            if error_mat.shape[1] != 4:
+                raise ValueError("Error matrix must have 4 columns (weighted error, reconstructed signal, constraint value, 3D correction)")
+            if error_mat.shape[0] != self._ncons:
+                raise ValueError("Error matrix must have same number of rows as number of constraints in reconstruction")
         # Plot signals for "main" diagnostics
         i = 0
         ax[0].set_title('Flux Loop Constraints')
         ax[0].set_xlabel('Constraint Index')
         ax[0].set_ylabel('Signal [Wb]')
         for flux_loop in self._flux_loops:
-            ax[0].errorbar(i,err_output[i,3], yerr=flux_loop.err, color='r', capsize=2)
-            ax[0].plot(i,err_output[i,2], 'bx')
+            ax[0].errorbar(i,error_mat[i,2], yerr=flux_loop.err, color='r', capsize=2)
+            ax[0].plot(i,error_mat[i,1], 'bx')
             i += 1
         ax[1].set_title('Mirnov Constraints')
         ax[1].set_xlabel('Constraint Index')
         ax[1].set_ylabel('Signal [T]')
         for mirnov in self._mirnovs:
-            ax[1].errorbar(i,err_output[i,3], yerr=mirnov.err, color='r', capsize=2)
-            ax[1].plot(i,err_output[i,2], 'bx')
+            ax[1].errorbar(i,error_mat[i,2], yerr=mirnov.err, color='r', capsize=2)
+            ax[1].plot(i,error_mat[i,1], 'bx')
             i += 1
         ax[2].set_title('Saddle Constraints')
         ax[2].set_xlabel('Constraint Index')
         ax[2].set_ylabel('Signal [Wb]')
         for saddle in self._saddles:
-            ax[2].errorbar(i,err_output[i,3], yerr=saddle.err, color='r', capsize=2)
-            ax[2].plot(i,err_output[i,2], 'bx')
+            ax[2].errorbar(i,error_mat[i,2], yerr=saddle.err, color='r', capsize=2)
+            ax[2].plot(i,error_mat[i,1], 'bx')
             i += 1
         ax[3].set_title('Pressure Constraints')
         ax[3].set_xlabel('Constraint Index')
         ax[3].set_ylabel('Signal [Pa]')
         for press_con in self._pressure_cons:
-            ax[3].errorbar(i,err_output[i,3], yerr=press_con.err, color='r', capsize=2)
-            ax[3].plot(i,err_output[i,2], 'bx')
+            ax[3].errorbar(i,error_mat[i,2], yerr=press_con.err, color='r', capsize=2)
+            ax[3].plot(i,error_mat[i,1], 'bx')
             i += 1
         # Plot coil signals
         if (coil_ax is not None) and (len(self._coil_current_cons) > 0):
@@ -681,12 +693,12 @@ class reconstruction():
             coil_ax.set_ylabel('Current [A]')
             for coil_con in self._coil_current_cons:
                 coil_ax.errorbar(coil_con.ind, coil_con.val, yerr=coil_con.err, color='r', capsize=2)
-                coil_ax.plot(coil_con.ind, err_output[i,2], 'bx')
+                coil_ax.plot(coil_con.ind, error_mat[i,1], 'bx')
                 i += 1
             coil_ax.set_xticks(range(len(ind_to_name)), labels=[ind_to_name[j] for j in sorted(ind_to_name.keys())],
                 rotation=45, ha="right", rotation_mode="anchor")
         # Plot error contributions
-        if ax_1d is not None:
+        if chi_ax is not None:
             err_ind = numpy.cumsum([0,
                                     len(self._flux_loops),
                                     len(self._mirnovs),
@@ -696,14 +708,14 @@ class reconstruction():
                                     1 if self._Ip_con is not None else 0,
                                     1 if self._Dflux_con is not None else 0])
             names = ['Flux loops', 'Mirnovs', 'Saddle loops', 'Pressure', r'$I_C$', r'$I_p$', r'$\Delta \Phi$']
-            ax_1d.set_title(r'Signal $\chi^2$ contributions')
-            ax_1d.set_xlabel('Signal Index')
-            ax_1d.set_ylabel(r'$\chi^2_i$')
+            chi_ax.set_title(r'Signal $\chi^2$ contributions')
+            chi_ax.set_xlabel('Signal Index')
+            chi_ax.set_ylabel(r'$\chi^2_i$')
             for i in range(err_ind.shape[0]-1):
                 if err_ind[i+1] == err_ind[i]:
                     continue
-                ax_1d.plot(numpy.arange(err_ind[i],err_ind[i+1])+1,numpy.power(err_output[err_ind[i]:err_ind[i+1],1],2),label=names[i])
-            ax_1d.legend()
+                chi_ax.plot(numpy.arange(err_ind[i],err_ind[i+1])+1,numpy.power(error_mat[err_ind[i]:err_ind[i+1],0],2),label=names[i])
+            chi_ax.legend()
     
     def setup_constraints(self):
         '''! Set up constraints in TokaMaker for current equilibrium without performing reconstruction
@@ -713,20 +725,30 @@ class reconstruction():
         # Modify input file
         self.write_fit_in()
         # Run setup
+        ncons = c_int()
         error_flag = c_int()
-        tokamaker_recon_setup(self._tMaker_obj._tMaker_ptr,self.settings.get_c_struct(self._tMaker_obj._oft_env),ctypes.byref(error_flag))
-        return error_flag.value
+        tokamaker_recon_setup(self._tMaker_obj._tMaker_ptr,self.settings.get_c_struct(self._tMaker_obj._oft_env),ctypes.byref(ncons),ctypes.byref(error_flag))
+        if error_flag.value != 0:
+            raise ValueError("Constraint setup failed with error code {0:d}".format(error_flag.value))
+        self._ncons = ncons.value
 
-    def eval_error(self, vacuum=False):
+    def eval_error(self, vacuum=False, save_to_file=False):
         '''! Evaluate error in current equilibrium for specified constraints without performing reconstruction
         
         @param vacuum Perform vacuum reconstruction
-        @result Error flag
+        @param save_to_file Save error matrix to file specified in `settings.outfile`
+        @result Error matrix if `save_to_file=False`, otherwise None (error matrix will be saved to file)
         '''
         # Run error evaluation
+        mat_ptr = None
+        if not save_to_file:
+            error_mat = numpy.zeros((self._ncons, 4), dtype=numpy.float64)
+            mat_ptr = error_mat.ctypes.data_as(c_double_ptr)
         error_flag = c_int()
-        tokamaker_recon_err(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings.get_c_struct(self._tMaker_obj._oft_env),ctypes.byref(error_flag))
-        return error_flag.value
+        tokamaker_recon_err(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings.get_c_struct(self._tMaker_obj._oft_env),mat_ptr,ctypes.byref(error_flag))
+        if error_flag.value != 0:
+            raise ValueError("Error evaluation failed with error code {0:d}".format(error_flag.value))
+        return error_mat if not save_to_file else None
 
     def reconstruct(self, vacuum=False, linearized_fit=False, maxits=100, eps=1.E-3, ftol=1.E-3, xtol=1.E-3, gtol=1.E-3):
         '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.

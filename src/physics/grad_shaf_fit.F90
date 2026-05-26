@@ -221,20 +221,30 @@ END SUBROUTINE fit_gs_setup
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE fit_gs_error(gs,constraints,inpath,outpath)
+SUBROUTINE fit_gs_error(gs,constraints,inpath,outpath,error_mat)
 TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
 TYPE(fit_constraint_ptr), POINTER, DIMENSION(:), INTENT(in) :: constraints !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: inpath !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: outpath !< Needs docs
+REAL(r8), OPTIONAL, INTENT(inout) :: error_mat(:,:) !< Error matrix
 integer(4) :: i,io_unit
 !---Evaluate errors
 gs_active=>gs
-OPEN(NEWUNIT=io_unit,FILE=TRIM(outpath))
-DO i=1,SIZE(constraints)
-  WRITE(io_unit,'(I8,4ES20.12)')i,constraints(i)%con%error(gs),constraints(i)%con%eval(gs),constraints(i)%con%val, &
-  constraints(i)%con%get_nax(gs)
-END DO
-CLOSE(io_unit)
+IF(PRESENT(error_mat))THEN
+  DO i=1,SIZE(constraints)
+    error_mat(1,i)=constraints(i)%con%error(gs)
+    error_mat(2,i)=constraints(i)%con%eval(gs)
+    error_mat(3,i)=constraints(i)%con%val
+    error_mat(4,i)=constraints(i)%con%get_nax(gs)
+  END DO
+ELSE
+  OPEN(NEWUNIT=io_unit,FILE=TRIM(outpath))
+  DO i=1,SIZE(constraints)
+    WRITE(io_unit,'(I8,4ES20.12)')i,constraints(i)%con%error(gs),constraints(i)%con%eval(gs),constraints(i)%con%val, &
+    constraints(i)%con%get_nax(gs)
+  END DO
+  CLOSE(io_unit)
+END IF
 END SUBROUTINE fit_gs_error
 !---------------------------------------------------------------------------------
 !> Needs Docs
