@@ -21,6 +21,7 @@ jobs:
       CXX: ${{ matrix.config.cxx }}
       FC: ${{ matrix.config.fc }}
       OMP_NUM_THREADS: 2
+      OMPI_MCA_pmix_tool_remote_connections: 0 # Fix occasional OpenMPI error 
     
     strategy:
       fail-fast: false
@@ -166,6 +167,7 @@ jobs:
 
     - name: Setup PyVista
       if: ${{ !startsWith(matrix.config.os, 'macos') }}
+      timeout-minutes: 5
       uses: pyvista/setup-headless-display-action@v3
 
     - name: Cache external libraries
