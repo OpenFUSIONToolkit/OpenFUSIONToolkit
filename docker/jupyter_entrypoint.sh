@@ -39,7 +39,7 @@ if [ "$LAUNCH_JUPYTER" = true ]; then
   exec jupyter lab --no-browser --ip=''
 else
   if [ "$RUN_NOTEBOOK" = true ]; then
-    exec jupyter nbconvert --execute --to notebook --inplace --ExecutePreprocessor.kernel_name=Python3 $SCRIPT
+    exec jupyter nbconvert --execute --to notebook --inplace --ExecutePreprocessor.kernel_name=python3 $SCRIPT
   else
     if [[ -z "$SCRIPT" ]]; then
       echo "No options provided"

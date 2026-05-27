@@ -58,7 +58,7 @@ COPY --from=builder --chown=${OFT_USER}:${OFT_USER}  /usr/local/OFT/lib_build /u
 COPY --from=builder --chown=${OFT_USER}:${OFT_USER} ${OFT_ROOTPATH} ${OFT_ROOTPATH}
 
 # Set entrypoint
-COPY --chown=${OFT_USER}:${OFT_USER} docker/container_entrypoint.sh /usr/local/OFT/container_entrypoint.sh
-RUN chmod +x /usr/local/OFT/container_entrypoint.sh
+COPY --chown=${OFT_USER}:${OFT_USER} docker/python_entrypoint.sh /usr/local/OFT/python_entrypoint.sh
+RUN chmod +x /usr/local/OFT/python_entrypoint.sh
 WORKDIR /work
-ENTRYPOINT ["/usr/local/OFT/container_entrypoint.sh"]
+ENTRYPOINT ["/usr/local/OFT/python_entrypoint.sh"]
