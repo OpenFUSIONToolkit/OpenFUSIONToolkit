@@ -192,6 +192,12 @@ TYPE :: edge_jbs_fit_ctx
   REAL(r8) :: ub(7) = 1.0_r8        !< Upper bounds for the 7 parameters
 END TYPE edge_jbs_fit_ctx
 TYPE(edge_jbs_fit_ctx) :: active_edge_jbs !< Module-level context for lmdif callback
+REAL(r8) :: itortol = 0.05 !< Tolerance for agreement between gs_itor_nl and gs_flux_int
+REAL(r8) :: itorval = 0.0_r8 !< Value for tracking agreement between gs_itor_nl and gs_flux_int
+INTEGER :: itorfails = 0 !< Counter for how many times the gs_itor_nl failed to match gs_flux_int
+INTEGER :: itorflim = 3 !< Number of gs_itor_nl failures before giving up
+INTEGER :: itorcool = 3, itorcool_i = 0 !< Number of NL iterations to use gs_flux_int after a gs_itor_nl failure
+INTEGER :: ibs = 0 !< Counter for consecutive bootstrap runs
 contains
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -578,8 +584,10 @@ class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 IF(self%bootstrap_mode==1 .AND. gseq%Itor_target<=0.d0)THEN
   CALL jphi_bs_update(self,gseq)
+  ibs = ibs+1
 ELSE
   CALL jphi_update_default(self,gseq)
+  ibs = 0
 END IF
 end subroutine jphi_update
 !------------------------------------------------------------------------------
@@ -636,26 +644,43 @@ subroutine jphi_update_default(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
-REAL(r8) :: jphi_norm,pscale,pprime
+REAL(r8) :: jphi_norm,pscale,pprime,itor_flint=0.d0,itor_nl=0.d0
 REAL(r8), ALLOCATABLE :: qtmp(:)
 type(spline_type) :: R_spline
+CHARACTER(LEN=256) :: char_buf
 self%plasma_bounds=gseq%plasma_bounds
 IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
 ! IF(gseq%Itor_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
 !---Get updated flux surface geometry for Jphi -> F*F' mapping
 CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
-!---Update jphi normalization to match Ip target
+!---Calculate total toroidal current two ways to avoid gs_itor_nl intermittent bug
 IF(gseq%Itor_target>0.d0)THEN
-  ALLOCATE(qtmp(self%npsi))
-  CALL eval_R_qtmp(R_spline, self%x, self%npsi, qtmp)
-  CALL gs_flux_int(gseq,self%x,self%jphi/qtmp,self%npsi,jphi_norm)
-  DEALLOCATE(qtmp)
-  jphi_norm=ABS(gseq%Itor_target)/jphi_norm
+  itorfails=0 ! Reset counter first run
+  itorcool_i=0
+END IF
+ALLOCATE(qtmp(self%npsi))
+CALL eval_R_qtmp(R_spline, self%x, self%npsi, qtmp)
+CALL gs_flux_int(gseq,self%x,self%jphi/qtmp,self%npsi,itor_flint)
+DEALLOCATE(qtmp)
+IF(itorfails < itorflim .AND. (itorcool_i <= 0))THEN
+  CALL gs_itor_nl(gseq,itor_nl)
+  itorval = ABS(itor_flint - itor_nl/mu0)/ABS(itor_flint)
+  IF(itorval >= itortol)THEN
+    itorfails = itorfails + 1
+    itorcool_i = itorcool
+    WRITE(char_buf,'(A,ES12.4)') 'gs_itor_nl/gs_flux_int mismatch, rel.err =', itorval
+    IF(itorfails == itorflim) char_buf = TRIM(char_buf)//' (defaulting to gs_flux_int)'
+    CALL oft_warn(TRIM(char_buf))
+  END IF
+END IF
+!---Update jphi normalization to match Ip target
+IF(gseq%Itor_target>0.d0 .OR. (itorfails == itorflim) .OR. (itorcool_i > 0))THEN
+  jphi_norm=ABS(gseq%Itor_target)/itor_flint
   self%norm_last=jphi_norm
+  itorcool_i = itorcool_i - 1
 ELSE
-  CALL gs_itor_nl(gseq,jphi_norm)
-  jphi_norm=(ABS(gseq%Itor_target)*mu0/jphi_norm + self%norm_last)/2.d0
+  jphi_norm=(ABS(gseq%Itor_target)*mu0/itor_nl + self%norm_last)/2.d0
   self%norm_last=jphi_norm
 END IF
 !---Get pressure profile
@@ -673,7 +698,11 @@ DO i=1,self%npsi
   self%yp(i) = 2.d0*(self%jphi(i)*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 END DO
 ! Disable Ip matching and fix F*F' scale (matching is done here instead)
-IF(gseq%Itor_target>0.d0)gseq%Itor_target=-gseq%Itor_target
+IF(gseq%Itor_target>0.d0)THEN
+  gseq%Itor_target=-gseq%Itor_target
+  itorfails=0   ! Reset for jphi_bs_update
+  itorcool_i=0  ! Reset for jphi_bs_update
+END IF
 gseq%ffp_scale=1.d0
 !---Clean up
 CALL spline_dealloc(R_spline)
@@ -788,6 +817,8 @@ ELSE
   END IF
   !   calculate_bootstrap returns j_BS in raw A/m², multiply by mu0.
   j_BS = j_BS * mu0
+  IF(MAXVAL(ABS(j_BS))==0) &
+    CALL oft_abort('Zero bootstrap current','jphi_bs_update',__FILE__)
   !--- 2a. Freeze check: freeze j_BS if RMS change drops below tol, or stagnates.
   IF(ASSOCIATED(self%j_BS_last)) THEN
     djBS = SQRT(SUM((j_BS - self%j_BS_last)**2) / REAL(self%npsi,r8)) / &
@@ -840,11 +871,27 @@ ALLOCATE(jphi_total(self%npsi))
 !   No Ip target: rescale jphi_total so the integrated current matches the
 !   FEM solution (gs_itor_nl) rather than the profile quadrature (gs_flux_int).
 jphi_rescale = self%rescale_last
-IF(ASSOCIATED(self%jphi_total_last) .AND. (.NOT. self%freeze_j_BS)) THEN
+IF(ASSOCIATED(self%jphi_total_last) .AND. (.NOT. self%freeze_j_BS) .AND. &
+   (itorfails < itorflim)) THEN
   CALL gs_itor_nl(gseq, itor_nl)
   CALL gs_flux_int(gseq, self%x, self%jphi_total_last/qtmp, self%npsi, itor_flint)
-  jphi_rescale = (itor_nl/itor_flint + self%rescale_last) / 2.0_r8
-  self%rescale_last = jphi_rescale
+  itorval = ABS(itor_nl - itor_flint)/ABS(itor_flint)
+  IF(itorval < itortol) THEN
+    jphi_rescale = (itor_nl/(itor_flint) + self%rescale_last) / 2.0_r8
+    self%rescale_last = jphi_rescale
+  ELSEIF(itorcool_i <= 0 .AND. ibs > 2) THEN
+    itorfails = itorfails + 1
+    itorcool_i = itorcool
+    WRITE(char_buf,'(A,ES12.4)') 'gs_itor_nl/gs_flux_int mismatch, rel.err =', itorval
+    IF (itorfails == itorflim) THEN
+      jphi_rescale = 1.0_r8
+      self%rescale_last = jphi_rescale
+      char_buf = TRIM(char_buf)//' (defaulting to gs_flux_int))'
+    END IF
+    CALL oft_warn(TRIM(char_buf))
+  ELSE ! Keep jphi_rescale = self%rescale_last (last computed when itorval < itortol)
+    itorcool_i = itorcool_i - 1
+  END IF
 END IF
 !--- 5. Solve analytically for alpha.
 !   gs_flux_int is linear in alpha; two evaluations (alpha=0 and alpha=1) give
