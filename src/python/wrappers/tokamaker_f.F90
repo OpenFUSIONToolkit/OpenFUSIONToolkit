@@ -35,7 +35,7 @@ USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_de
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
   sauter_fc, gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
-USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_constraint_ptr, fit_pm
+USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
 USE diagnostic, ONLY: bscal_surf_int
@@ -611,6 +611,24 @@ CALL copy_string_rev(infile_c,infile)
 CALL fit_gs_setup(tMaker_obj%gs_equil,tMaker_obj%recon_constraints,infile)
 ncons=SIZE(tMaker_obj%recon_constraints)
 END SUBROUTINE tokamaker_recon_setup
+!---------------------------------------------------------------------------------
+!> Perform an equilibrium reconstruction using TokaMaker
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_recon_destroy(tMaker_ptr,error_flag) BIND(C,NAME="tokamaker_recon_destroy")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+INTEGER(c_int), INTENT(out) :: error_flag !< Error flag (0 if no error)
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj))THEN
+  error_flag=-100
+  RETURN
+END IF
+IF(.NOT.tokamaker_require_equil(tMaker_obj))THEN
+  error_flag=-101
+  RETURN
+END IF
+error_flag=0
+CALL fit_gs_destroy(tMaker_obj%gs_equil,tMaker_obj%recon_constraints)
+END SUBROUTINE tokamaker_recon_destroy
 !---------------------------------------------------------------------------------
 !> Perform an equilibrium reconstruction using TokaMaker
 !---------------------------------------------------------------------------------

@@ -39,6 +39,10 @@ tokamaker_recon_err = ctypes_subroutine(oftpy_lib.tokamaker_recon_err,
 # tokamaker_recon_setup(tMaker_ptr,settings,ncons,error_flag)
 tokamaker_recon_setup = ctypes_subroutine(oftpy_lib.tokamaker_recon_setup,
     [c_void_p, tokamaker_recon_settings_cstruct, c_int_ptr, c_int_ptr])
+
+# tokamaker_recon_destroy(tMaker_ptr,error_flag)
+tokamaker_recon_destroy = ctypes_subroutine(oftpy_lib.tokamaker_recon_destroy,
+    [c_void_p, c_int_ptr])
 ## @endcond
 
 Mirnov_con_id = 1
@@ -480,6 +484,7 @@ class reconstruction():
     
     def __del__(self):
         '''! Destroy reconstruction object'''
+        self.destroy_constraints()
         self._tMaker_obj = None
         self.settings = None
         self._Ip_con = None
@@ -489,6 +494,9 @@ class reconstruction():
         self._saddles = []
         self._pressure_cons = []
         self._coil_current_cons = []
+        self.con_file = None
+        self.out_file = None
+        self._ncons = 0
     
     def set_Ip(self,Ip,err):
         '''! Set plasma current constraint
@@ -731,6 +739,15 @@ class reconstruction():
         if error_flag.value != 0:
             raise ValueError("Constraint setup failed with error code {0:d}".format(error_flag.value))
         self._ncons = ncons.value
+    
+    def destroy_constraints(self):
+        '''! Destroy constraints in TokaMaker'''
+        if self._ncons == 0:
+            return
+        error_flag = c_int()
+        tokamaker_recon_destroy(self._tMaker_obj._tMaker_ptr,ctypes.byref(error_flag))
+        if error_flag.value != 0:
+            raise ValueError("Constraint destruction failed with error code {0:d}".format(error_flag.value))
 
     def eval_error(self, vacuum=False, save_to_file=False):
         '''! Evaluate error in current equilibrium for specified constraints without performing reconstruction

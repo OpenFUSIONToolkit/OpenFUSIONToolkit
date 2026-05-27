@@ -50,6 +50,8 @@ CONTAINS
   PROCEDURE :: get_nax => fit_dummy_nax_corr
   !> Does constraint use parallelism in calculation?
   PROCEDURE :: is_parallel => fit_dummy_parallel
+  !> Destructor
+  PROCEDURE :: destroy => fit_destroy
 END TYPE fit_constraint
 !---------------------------------------------------------------------------------
 !> Coil current constraint
@@ -204,7 +206,7 @@ LOGICAL, PRIVATE :: linearized_fit = .FALSE. !< Needs docs
 TYPE(fit_constraint_ptr), POINTER, DIMENSION(:) :: conlist => NULL() !< Needs docs
 !---
 PUBLIC fit_constraint, field_constraint, itor_constraint, fit_pm
-PUBLIC fit_constraint_ptr, fit_gs, fit_gs_error, fit_load, fit_gs_setup
+PUBLIC fit_constraint_ptr, fit_gs, fit_gs_error, fit_load, fit_gs_setup, fit_gs_destroy
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Needs Docs
@@ -218,6 +220,21 @@ integer(4) :: i,io_unit
 gs_active=>gs
 CALL fit_load(inpath,constraints)
 END SUBROUTINE fit_gs_setup
+!---------------------------------------------------------------------------------
+!> Needs Docs
+!---------------------------------------------------------------------------------
+SUBROUTINE fit_gs_destroy(gs,constraints)
+TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
+TYPE(fit_constraint_ptr), POINTER, DIMENSION(:), INTENT(inout) :: constraints !< Needs docs
+integer(4) :: i
+DO i=1,SIZE(constraints)
+  IF(ASSOCIATED(constraints(i)%con))THEN
+    CALL constraints(i)%con%destroy()
+    DEALLOCATE(constraints(i)%con)
+  END IF
+END DO
+DEALLOCATE(constraints)
+END SUBROUTINE fit_gs_destroy
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -491,6 +508,13 @@ WRITE(io_unit,*)cofs
 WRITE(io_unit,*)gs_active%p_scale,gs_active%vcontrol_val
 CLOSE(io_unit)
 !---Cleanup
+DO i=1,ncons
+  IF(ASSOCIATED(conlist(i)%con))THEN
+    CALL conlist(i)%con%destroy()
+    DEALLOCATE(conlist(i)%con)
+  END IF
+END DO
+DEALLOCATE(conlist)
 CALL psi_best%delete
 DEALLOCATE(cofs,cofs_scale,cofs_best,error,psi_best)
 DEALLOCATE(fjac,qtf,wa1,wa2,wa3,wa4,ipvt)
@@ -1249,6 +1273,15 @@ CLASS(fit_constraint), INTENT(inout) :: self !< Needs docs
 LOGICAL :: is_parallel !< Needs docs
 is_parallel=.FALSE.
 END FUNCTION fit_dummy_parallel
+!---------------------------------------------------------------------------------
+!> Needs Docs
+!---------------------------------------------------------------------------------
+SUBROUTINE fit_destroy(self)
+CLASS(fit_constraint), INTENT(inout) :: self !< Needs docs
+IF(ASSOCIATED(self%nax_corr))DEALLOCATE(self%nax_corr)
+IF(ASSOCIATED(self%comp_r))DEALLOCATE(self%comp_r)
+IF(ASSOCIATED(self%comp_n))DEALLOCATE(self%comp_n)
+END SUBROUTINE fit_destroy
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
