@@ -772,10 +772,12 @@ class reconstruction():
         if self._tMaker_obj._tMaker_equil.Saddle_constraints is not None:
             oft_warning('Removing conflicting saddle targets from equilibrium object via `.set_saddle_constraints(None)`')
             self._tMaker_obj.set_saddle_constraints(None)
-        if (self._tMaker_obj.settings.ffp_target_weight > 0.0) or (self._tMaker_obj.settings.pp_target_weight > 0.0):
+        weight_chk = [self._tMaker_obj.settings.ffp_target_weight > 0.0, self._tMaker_obj.settings.pp_target_weight > 0.0, self._tMaker_obj.settings.opoint_target_weight > 0.0]
+        if any(weight_chk):
             oft_warning('Removing conflicting soft targets from equilibrium solve via `.settings.*_target_weight = -1.0; .update_settings()`')
             self._tMaker_obj.settings.ffp_target_weight = -1.0
             self._tMaker_obj.settings.pp_target_weight = -1.0
+            self._tMaker_obj.settings.opoint_target_weight = -1.0
             self._tMaker_obj.update_settings()
         # Modify input file
         self.write_fit_in()

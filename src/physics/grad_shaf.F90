@@ -181,7 +181,7 @@ TYPE :: gs_factory
   REAL(r8) :: lim_zmax = 1.d99 !< Vertical position cutoff for limiter points
   REAL(r8) :: lim_area = -1.d0 !< Area inside the limiter
   REAL(r8) :: timing(4) = 0.d0 !< Timing for each phase of solve
-  REAL(r8) :: target_weights(2) = -1.d0 !< Weight for global targets when treated as soft constraints (negative for hard constraints)
+  REAL(r8) :: target_weights(3) = -1.d0 !< Weight for global targets when treated as soft constraints (negative for hard constraints)
   REAL(r8) :: isoflux_grad_wt_lim = -1.d0 !< Limit for isoflux inverse gradient weighting (negative to disable)
   LOGICAL, POINTER, DIMENSION(:) :: axis_flag => NULL() !< FE boundary flag for on-axis nodes
   LOGICAL, POINTER, DIMENSION(:) :: saddle_pmask => NULL() !< Point mask for saddle search
@@ -2115,6 +2115,7 @@ real(8) :: opoint(2),R0_in,f(3),Z0_in,Z0_tmp,estored
 REAL(8) :: nl_res,psimax,ffp_scale_in,ffp_scale_prev,itor,pnorm0,pnormp,itor_ffp,itor_press,dflux_ffp
 REAL(8) :: R0_tmp,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3),t0,t1
 REAL(8) :: param_mat(3,3),mat_save(2,2),param_vec(3),param_rhs(3)
+REAL(r8), POINTER :: saddle_save(:,:)
 integer(4) :: i,ii,j,k,error_flag,cell,ierr_loc
 integer(4), save :: eq_count = 0
 CHARACTER(LEN=40) :: err_reason
@@ -2237,12 +2238,20 @@ IF((equil%pax_target>0.d0).AND.(equil%Ip_ratio_target>-1.d98))THEN
   CALL oft_warn("Conflicting pressure targets specified, ignoring pax_target")
   equil%pax_target=-1.d0
 END IF
-IF(equil%Z0_target>-1.d98)THEN
+IF((equil%Z0_target>-1.d98).AND.ALL(self%target_weights<0.d0))THEN
   IF(equil%isoflux_ntargets>0.OR.equil%flux_ntargets>0)THEN
     CALL oft_warn("Z0_target and isoflux_targets specified, ignoring Z0_target")
     equil%Z0_target=-1.d99
     equil%vcontrol_val=0.d0
   END IF
+END IF
+NULLIFY(saddle_save)
+IF(((equil%R0_target>0.d0).OR.(equil%Z0_target>-1.d98)).AND.ALL(self%target_weights>0.d0))THEN
+  saddle_save=>equil%saddle_targets
+  equil%saddle_ntargets=equil%saddle_ntargets+1
+  ALLOCATE(equil%saddle_targets(3,equil%saddle_ntargets))
+  equil%saddle_targets(:,1:equil%saddle_ntargets-1)=saddle_save
+  equil%saddle_targets(3,equil%saddle_ntargets)=self%target_weights(3)
 END IF
 !---
 IF(oft_env%pm)THEN
@@ -2320,22 +2329,26 @@ DO i=1,self%maxits
     END IF
   ELSE
     IF(equil%R0_target>0.d0)THEN
-      !
-      psi_geval%u=>psi_vac
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-      param_rhs(2)=-gpsi0(1)
-      !
-      psi_geval%u=>psi_vcont
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-      psi_geval%u=>psi_ffp
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi1)
-      psi_geval%u=>psi_press
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi2)
-      param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
+      IF(ALL(self%target_weights>0.d0))THEN
+        equil%saddle_targets(1:2,equil%saddle_ntargets)=pt
+      ELSE
+        !
+        psi_geval%u=>psi_vac
+        CALL psi_geval%setup(self%fe_rep)
+        CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+        param_rhs(2)=-gpsi0(1)
+        !
+        psi_geval%u=>psi_vcont
+        CALL psi_geval%setup(self%fe_rep)
+        CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+        psi_geval%u=>psi_ffp
+        CALL psi_geval%setup(self%fe_rep)
+        CALL psi_geval%interp(cell,f,goptmp,gpsi1)
+        psi_geval%u=>psi_press
+        CALL psi_geval%setup(self%fe_rep)
+        CALL psi_geval%interp(cell,f,goptmp,gpsi2)
+        param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
+      END IF
     ELSE IF(equil%dflux_target>-1.d98)THEN
       param_rhs(2)=SIGN(equil%dflux_target**2,equil%dflux_target)
       param_mat(2,:)=[SIGN(dflux_ffp**2,dflux_ffp)/equil%ffp_scale,0.d0,0.d0]
@@ -2356,24 +2369,28 @@ DO i=1,self%maxits
 
   !---Add row for vertical control
   IF(equil%Z0_target>-1.d98)THEN
-    ! 
-    CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
-    CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
-    psi_geval%u=>psi_vac
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-    param_rhs(3)=-gpsi0(2)
-    ! 
-    psi_geval%u=>psi_vcont
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-    psi_geval%u=>psi_ffp
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi1)
-    psi_geval%u=>psi_press
-    CALL psi_geval%setup(self%fe_rep)
-    CALL psi_geval%interp(cell,f,goptmp,gpsi2)
-    param_mat(3,:)=[gpsi1(2),gpsi2(2),gpsi0(2)]
+    IF(ALL(self%target_weights>0.d0))THEN
+      equil%saddle_targets(1:2,equil%saddle_ntargets)=pt
+    ELSE
+      ! 
+      CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
+      CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
+      psi_geval%u=>psi_vac
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+      param_rhs(3)=-gpsi0(2)
+      ! 
+      psi_geval%u=>psi_vcont
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+      psi_geval%u=>psi_ffp
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi1)
+      psi_geval%u=>psi_press
+      CALL psi_geval%setup(self%fe_rep)
+      CALL psi_geval%interp(cell,f,goptmp,gpsi2)
+      param_mat(3,:)=[gpsi1(2),gpsi2(2),gpsi0(2)]
+    END IF
   ELSE
     param_mat(3,3)=1.d0
     param_rhs(3)=0.d0
@@ -2403,7 +2420,7 @@ DO i=1,self%maxits
   IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
     CALL equil%psi%add(1.d0,1.d0,psi_eddy)
     CALL equil%psi%add(1.d0,1.d0,psi_bc)
-    IF(ALL(self%target_weights>0.d0))THEN
+    IF(ALL(self%target_weights(1:2)>0.d0))THEN
       param_psi(1)%f=>psi_ffp
       param_psi(2)%f=>psi_press
       CALL equil%fit_isoflux(psip,ierr_loc,mat_save,param_rhs,param_psi)
@@ -2651,6 +2668,11 @@ IF(self%dt>0.d0)THEN
     DEALLOCATE(psi_aug,tmp_aug)
   END IF
   DEALLOCATE(psi_dt)
+END IF
+IF(ASSOCIATED(saddle_save))THEN
+  DEALLOCATE(equil%saddle_targets)
+  equil%saddle_ntargets=equil%saddle_ntargets-1
+  IF(equil%saddle_ntargets>0)equil%saddle_targets=>saddle_save
 END IF
 !---
 IF(self%compute_chi)CALL equil%get_chi

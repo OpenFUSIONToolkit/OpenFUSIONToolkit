@@ -134,10 +134,12 @@ class tokamaker_settings:
         self.rmin = 0.0
         ## Maximum vertical range for limiter points, can be used to exclude complex diverter regions
         self.lim_zmax = 1.E99
-        ## Weight for global targets when treated as soft constraints (negative for hard constraints)
+        ## Weight for global F*F' targets when treated as soft constraints (negative for hard constraints)
         self.ffp_target_weight = -1.0
-        ## Weight for global targets when treated as soft constraints (negative for hard constraints)
+        ## Weight for global P' targets when treated as soft constraints (negative for hard constraints)
         self.pp_target_weight = -1.0
+        ## Weight for global O-point targets when treated as soft constraints (negative for hard constraints)
+        self.opoint_target_weight = -1.0
         ## File containing additional limiter points not included in mesh (default: 'none')
         self.limiter_file = None
         # Must be added last
@@ -152,7 +154,9 @@ class tokamaker_settings:
     def get_c_struct(self,oft_env):
         r'''! Get C struct representation of settings for passing to TokaMaker Fortran API'''
         if self.ffp_target_weight*self.pp_target_weight < 0.0:
-            raise ValueError("Both ffp_target_weight and pp_target_weight must be negative (hard constraint) or positive (soft constraint)")
+            raise ValueError("Both `ffp_target_weight` and `pp_target_weight` must be negative (hard constraint) or positive (soft constraint)")
+        if (self.ffp_target_weight < 0.0) and (self.opoint_target_weight > 0.0):
+            raise ValueError("If `opoint_target_weight` is positive, both `ffp_target_weight` and `pp_target_weight` must be positive as well (soft constraint)")
         c_struct_instance = tokamaker_settings_cstruct()
         c_struct_instance.pm = self.pm
         c_struct_instance.free_boundary = self.free_boundary
@@ -167,6 +171,7 @@ class tokamaker_settings:
         c_struct_instance.lim_zmax = self.lim_zmax
         c_struct_instance.ffp_target_weight = self.ffp_target_weight
         c_struct_instance.pp_target_weight = self.pp_target_weight
+        c_struct_instance.opoint_target_weight = self.opoint_target_weight
         c_struct_instance.limiter_file = oft_env.path2c(self.limiter_file) if self.limiter_file else None
         return c_struct_instance
 
