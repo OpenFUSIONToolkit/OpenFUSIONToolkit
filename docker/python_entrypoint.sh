@@ -16,7 +16,7 @@ print_help() {
 # Parse arguments
 LAUNCH_JUPYTER=false
 RUN_NOTEBOOK=false
-while getopts ":hjs:n:r:" opt; do
+while getopts ":hs:r:" opt; do
   case $opt in
     h) print_help; exit 0;;
     s) SCRIPT=$OPTARG;;
@@ -27,7 +27,7 @@ done
 
 # Install dependencies if requirements.txt provided
 if [[ -n "$REQUIREMENTS" ]]; then
-  pip install --no-cache-dir -r $REQUIREMENTS
+  pip install --no-cache-dir -r "$REQUIREMENTS"
 fi
 
 # Execute desired function
@@ -38,4 +38,4 @@ if [[ -z "$SCRIPT" ]]; then
   exit 1
 fi
 # Run script passed as argument
-exec python $SCRIPT
+exec python "$SCRIPT"

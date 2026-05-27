@@ -31,7 +31,7 @@ done
 
 # Install dependencies if requirements.txt provided
 if [[ -n "$REQUIREMENTS" ]]; then
-  pip install --no-cache-dir -r $REQUIREMENTS
+  pip install --no-cache-dir -r "$REQUIREMENTS"
 fi
 
 # Execute desired function
@@ -39,7 +39,7 @@ if [ "$LAUNCH_JUPYTER" = true ]; then
   exec jupyter lab --no-browser --ip=''
 else
   if [ "$RUN_NOTEBOOK" = true ]; then
-    exec jupyter nbconvert --execute --to notebook --inplace --ExecutePreprocessor.kernel_name=python3 $SCRIPT
+    exec jupyter nbconvert --execute --to notebook --inplace --ExecutePreprocessor.kernel_name=python3 "$SCRIPT"
   else
     if [[ -z "$SCRIPT" ]]; then
       echo "No options provided"
@@ -48,6 +48,6 @@ else
       exit 1
     fi
     # Run script passed as argument
-    exec python $SCRIPT
+    exec python "$SCRIPT"
   fi
 fi

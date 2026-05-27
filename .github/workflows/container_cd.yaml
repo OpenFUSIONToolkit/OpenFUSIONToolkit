@@ -74,6 +74,9 @@ jobs:
           context: .
           file: docker/Dockerfile.${{ matrix.image_name }}
           platforms: linux/${{ env.ARCH_SUFFIX }}
+          build-args: |
+            GITBRANCH=${{ github.ref_name }}
+            GITVERSION=${{ github.sha }}
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/container_release' }}
           tags: ${{ env.REGISTRY }}/openfusiontoolkit/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version_tag }}-${{ env.ARCH_SUFFIX }}
 
