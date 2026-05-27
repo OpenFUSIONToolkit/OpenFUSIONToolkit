@@ -340,7 +340,7 @@ else() # Check for packages also provided by PETSc
   if( OFT_SUPERLU_ROOT )
     find_package( OFT_SUPERLU )
   endif()
-  if( OFT_OFT_SUPERLU_DIST_ROOT )
+  if( OFT_SUPERLU_DIST_ROOT )
     find_package( OFT_SUPERLU_DIST )
   endif()
   if( OFT_UMFPACK_ROOT )

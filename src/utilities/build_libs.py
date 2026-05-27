@@ -1337,10 +1337,10 @@ int main(int argc, char** argv) {
         else:
             make_thread = ['MAKE_NB_JOBS={MAKE_THREADS}']
         if self.threaded:
-            oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1', 'FCOMMON_OPT="-frecursive {OMP_FLAGS} -fPIC"']
+            oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1']
         else:
-            oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1', 'FCOMMON_OPT="-frecursive -fPIC"']
-        if self.no_avx:
+            oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1']
+        if self.no_avx or (self.config_dict['OS_ARCH'] == 'arm64'):
             oblas_options += ['NO_AVX=1', 'NO_AVX2=1']
         else:
             if self.config_dict['OS_TYPE'] == 'Darwin':
