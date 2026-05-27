@@ -8,6 +8,10 @@ on:
     paths:
       - .github/workflows/container_cd.yaml
 
+concurrency:
+  group: cd_container-${{ github.ref }}
+  cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
+
 env:
   REGISTRY: ghcr.io
 

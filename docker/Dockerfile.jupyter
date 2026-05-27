@@ -14,7 +14,7 @@ WORKDIR /usr/local/OFT/lib_build
 ENV CC=gcc
 ENV CXX=g++
 ENV FC=gfortran
-RUN python3 /usr/local/OFT/src/utilities/build_libs.py --nthread=3 --build_arpack=1 --build_superlu=1 \
+RUN python3 /usr/local/OFT/src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --build_superlu=1 \
   && rm -rf build
 
 # Build OFT
