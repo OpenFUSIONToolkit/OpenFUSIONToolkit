@@ -67,7 +67,11 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
         else:
             return False
     if std_out.find('WARNING:') > -1:
-        warnings.warn("WARNING: OFT emitted a warning during execution")
+        print("FAILED: detected OFT warning!")
+        if return_stdout:
+            return False, std_out
+        else:
+            return False
     if return_stdout:
         return True, std_out
     else:

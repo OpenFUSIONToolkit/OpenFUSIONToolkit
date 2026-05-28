@@ -1,0 +1,64 @@
+FROM ubuntu:24.04 AS builder
+
+ARG GITBRANCH
+ARG GITVERSION
+
+# Install build dependencies
+RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y git zlib1g-dev gcc g++ gfortran python3-venv cmake \
+  && rm -rf /var/lib/apt/lists/*
+
+# Build 3rd party libraries
+COPY src/utilities /usr/local/OFT/src/utilities
+WORKDIR /usr/local/OFT/lib_build
+ENV CC=gcc
+ENV CXX=g++
+ENV FC=gfortran
+RUN python3 /usr/local/OFT/src/utilities/build_libs.py --no_dl_progress --nthread=2 --build_arpack=1 --build_superlu=1 \
+  && rm -rf build
+
+# Build OFT
+COPY src /usr/local/OFT/src
+WORKDIR /usr/local/OFT
+RUN cp /usr/local/OFT/lib_build/config_cmake.sh .
+RUN $CC --version
+RUN $FC --version
+RUN bash config_cmake.sh
+WORKDIR /usr/local/OFT/build_release
+RUN make -j3
+RUN make install
+
+## Stage II
+FROM ubuntu:24.04
+
+# Install runtime dependencies
+RUN apt-get update \
+  && DEBIAN_FRONTEND=noninteractive apt-get install -y libgfortran5 libgomp1 python3-venv \
+  && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+ENV OFT_USER=oftuser
+RUN useradd --shell /bin/bash --create-home ${OFT_USER}
+RUN mkdir -p /usr/local/OFT && chown -R ${OFT_USER}:${OFT_USER} /usr/local/OFT
+RUN mkdir -p /work && chown -R ${OFT_USER}:${OFT_USER} /work
+USER ${OFT_USER}
+
+# Setup environment variables
+ENV OFT_ROOTPATH="/usr/local/OFT/install_release"
+ENV OFT_PYENV="/usr/local/OFT/venv"
+ENV PATH="${OFT_ROOTPATH}/bin:${PATH}"
+
+# Setup python environment
+RUN python3 -m venv ${OFT_PYENV}
+RUN . ${OFT_PYENV}/bin/activate && pip install --no-cache-dir numpy h5py netcdf4 xarray scipy matplotlib jupyterlab
+RUN . ${OFT_PYENV}/bin/activate && python -c "import matplotlib.pyplot"
+
+# Copy over OFT build
+COPY --from=builder --chown=${OFT_USER}:${OFT_USER}  /usr/local/OFT/lib_build /usr/local/OFT/lib_build
+COPY --from=builder --chown=${OFT_USER}:${OFT_USER} ${OFT_ROOTPATH} ${OFT_ROOTPATH}
+
+# Set entrypoint
+COPY --chown=${OFT_USER}:${OFT_USER} docker/jupyter_entrypoint.sh /usr/local/OFT/jupyter_entrypoint.sh
+RUN chmod +x /usr/local/OFT/jupyter_entrypoint.sh
+WORKDIR /work
+ENTRYPOINT ["/usr/local/OFT/jupyter_entrypoint.sh"]
