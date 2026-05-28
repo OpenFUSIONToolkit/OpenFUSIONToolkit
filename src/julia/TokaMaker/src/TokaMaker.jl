@@ -63,9 +63,12 @@ export TokamakerSettings, tokamaker_default_settings
 export TokamakerReconSettings, tokamaker_recon_default_settings
 export Tokamaker, TokaMakerEquilibrium
 export setup_mesh!, setup_regions!, setup!, init_psi!, solve!, vac_solve!, reset!,
+       copy_eq, replace_eq!,
        update_settings!, set_profiles!, set_targets!, get_targets,
        set_isoflux_constraints!, set_psi_constraints!, set_saddle_constraints!,
        set_coil_currents!, set_coil_bounds!, set_coil_vsc!, set_coil_reg!,
+       set_resistivity!, set_coil_current_dist!,
+       abspsi_to_normalized, psinorm_to_absolute,
        get_coil_currents, get_psi, set_psi!,
        compute_area_integral, compute_flux_integral,
        get_conductor_currents, get_conductor_source,

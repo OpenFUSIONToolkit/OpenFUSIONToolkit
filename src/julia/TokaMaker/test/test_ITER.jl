@@ -127,7 +127,7 @@ function run_ITER_case(fe_order::Integer)
     stats["LCS1"] = gs.Lcoils[cs1u_id + 1, cs1u_id + 1]
     stats["MCS1_plasma"] = M_pc[cs1u_id + 1]
     stats["Lplasma"] = Lp
-    return stats
+    return gs, stats
 end
 
 @testset "ITER baseline" begin
@@ -137,10 +137,44 @@ end
     else
         for order in (2,)
             @testset "order=$order" begin
-                stats = run_ITER_case(order)
+                gs, stats = run_ITER_case(order)
                 bad = _check_within_tol(stats, ITER_EQ_DICT)
                 isempty(bad) || foreach(b -> @info("FAIL: $b"), bad)
                 @test isempty(bad)
+
+                # --- Milestone C helpers, exercised on a free-boundary equilibrium ---
+                @testset "abspsi/psinorm conversions" begin
+                    pb = psi_bounds(gs)
+                    @test all(isfinite, pb) && pb[1] != pb[2]   # real (non-sentinel) bounds
+                    psi_abs = get_psi(gs; normalized=false)
+                    # Round-trip is the identity for finite bounds.
+                    @test psinorm_to_absolute(gs, abspsi_to_normalized(gs, psi_abs)) ≈ psi_abs rtol = 1e-10
+                    @test psinorm_to_absolute(gs, abspsi_to_normalized(gs, psi_abs[1])) ≈ psi_abs[1] rtol = 1e-10
+                    # Endpoints map as in Python abspsi_to_normalized (tokamak, conv 0):
+                    # edge bound → 0, axis bound → 1.
+                    @test abspsi_to_normalized(gs, pb[2]) ≈ 0.0 atol = 1e-12
+                    @test abspsi_to_normalized(gs, pb[1]) ≈ 1.0 atol = 1e-12
+                    # eq-object method agrees with the Tokamaker forward.
+                    @test abspsi_to_normalized(gs.equilibrium, psi_abs) ≈ abspsi_to_normalized(gs, psi_abs)
+                    # get_psi(normalized) must agree with abspsi_to_normalized (both match
+                    # Python); regression guard for the tokamak-convention flip.
+                    @test get_psi(gs; normalized=true) ≈ abspsi_to_normalized(gs, psi_abs) rtol = 1e-10
+                end
+
+                @testset "set_coil_current_dist!" begin
+                    coil_name = first(keys(gs.coil_sets))
+                    # Uniform distribution; should record a per-point array.
+                    @test set_coil_current_dist!(gs, coil_name;
+                                                  curr_dist=ones(Float64, gs.np)) === gs
+                    @test haskey(gs.dist_coils, coil_name)
+                    @test length(gs.dist_coils[coil_name]) == gs.np
+                    # Disable → removed from dist_coils.
+                    @test set_coil_current_dist!(gs, coil_name; curr_dist=nothing) === gs
+                    @test !haskey(gs.dist_coils, coil_name)
+                    # Wrong length and unknown coil are rejected.
+                    @test_throws ErrorException set_coil_current_dist!(gs, coil_name; curr_dist=ones(3))
+                    @test_throws KeyError set_coil_current_dist!(gs, "NoSuchCoil")
+                end
             end
         end
     end

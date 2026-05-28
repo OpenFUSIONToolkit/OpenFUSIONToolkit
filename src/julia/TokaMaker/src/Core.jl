@@ -6,6 +6,7 @@ using ..SettingsModule
 using ..CInterface
 using ..OFTEnvModule: OFTEnv
 using ..EquilibriumModule
+import ..EquilibriumModule: abspsi_to_normalized, psinorm_to_absolute
 using ..Profiles: write_profile_file
 
 export Tokamaker, setup_mesh!, setup_regions!, setup!, init_psi!, solve!,
@@ -15,6 +16,8 @@ export Tokamaker, setup_mesh!, setup_regions!, setup!, init_psi!, solve!,
        vac_solve!, compute_area_integral, compute_flux_integral,
        get_conductor_currents, get_conductor_source,
        reset!, update_settings!, get_psi, set_psi!,
+       copy_eq, replace_eq!, set_resistivity!, set_coil_current_dist!,
+       abspsi_to_normalized, psinorm_to_absolute,
        coil_dict2vec, coil_vec2dict, set_coil_bounds!, set_coil_vsc!, set_coil_reg!
 
 const _MU0 = 4π * 1e-7
@@ -53,6 +56,11 @@ mutable struct Tokamaker
     lim_contours::Vector{Matrix{Float64}}
 
     targets::OrderedDict{String,Float64}
+    # Cached shape constraints (mirror of what was last pushed to Fortran), so
+    # `copy_eq`/`replace_eq!` can snapshot them onto an equilibrium object.
+    isoflux_constraints::Union{Nothing,NamedTuple}
+    psi_constraints::Union{Nothing,NamedTuple}
+    saddle_constraints::Union{Nothing,NamedTuple}
 
     finalized::Bool
 
@@ -78,7 +86,8 @@ mutable struct Tokamaker
             zeros(Float64, 0, 0),
             zeros(Float64, 0, 0),
             Matrix{Float64}[],
-            OrderedDict{String,Float64}(),
+            OrderedDict{String,Float64}(),  # targets
+            nothing, nothing, nothing,       # isoflux/psi/saddle constraint caches
             false,
             )
     end
@@ -138,6 +147,10 @@ function reset!(t::Tokamaker)
     t.Lcoils = zeros(Float64, 0, 0)
     t.lim_contour = zeros(Float64, 0, 0)
     empty!(t.lim_contours)
+    empty!(t.targets)
+    t.isoflux_constraints = nothing
+    t.psi_constraints = nothing
+    t.saddle_constraints = nothing
     return nothing
 end
 
@@ -583,6 +596,8 @@ o_point(t::Tokamaker) = EquilibriumModule.o_point(t.equilibrium)
 lim_point(t::Tokamaker) = EquilibriumModule.lim_point(t.equilibrium)
 psi_bounds(t::Tokamaker) = EquilibriumModule.psi_bounds(t.equilibrium)
 diverted(t::Tokamaker) = EquilibriumModule.diverted(t.equilibrium)
+abspsi_to_normalized(t::Tokamaker, psi_in) = EquilibriumModule.abspsi_to_normalized(t.equilibrium, psi_in)
+psinorm_to_absolute(t::Tokamaker, psi_in) = EquilibriumModule.psinorm_to_absolute(t.equilibrium, psi_in)
 
 function _bounds_from_limiter(t::Tokamaker, dim::Int)
     isempty(t.lim_contour) && error("save_eqdsk: lim_contour empty; pass rbounds/zbounds explicitly")
@@ -645,6 +660,34 @@ end
 
 # ----------------------------------------------------------------------------
 # Targets and constraints
+
+"""
+    set_resistivity!(t; eta_prof=nothing, keep_files=false)
+
+Set the resistivity flux-function profile ``\\eta`` from a piecewise-linear
+profile dict (same `{"type"=>"linterp", "x"=>..., "y"=>...}` format as
+`set_profiles!`); `nothing` clears it. Mirrors Python `set_resistivity`.
+"""
+function set_resistivity!(t::Tokamaker;
+                          eta_prof::Union{Nothing,AbstractDict}=nothing,
+                          keep_files::Bool=false)
+    t.equilibrium === nothing && error("Equilibrium not initialized; call setup! first")
+    eta_file = "none"
+    if eta_prof !== nothing
+        eta_file = "tokamaker_eta.prof"
+        write_profile_file(eta_file, eta_prof, "eta"; psi_convention=t.psi_convention)
+    end
+    buf = errbuf()
+    c_tokamaker_load_profiles(t.equilibrium.eq_ptr,
+                              padpath("none"), t.F0,
+                              padpath("none"), padpath(eta_file),
+                              padpath("none"), buf)
+    check_err(buf, "set_resistivity")
+    if !keep_files && eta_file != "none" && isfile(eta_file)
+        rm(eta_file; force=true)
+    end
+    return t
+end
 
 function set_targets!(t::Tokamaker;
                       Ip::Union{Nothing,Real}=nothing,
@@ -717,6 +760,9 @@ function set_isoflux_constraints!(t::Tokamaker, isoflux::AbstractMatrix;
     buf = errbuf()
     c_tokamaker_set_isoflux(t.tmaker_ptr, iso_f, refs_f, w, n, Float64(grad_wt_lim), buf)
     check_err(buf, "set_isoflux")
+    # Snapshot the (reference-resolved) constraint so copy_eq/replace_eq! can carry it.
+    t.isoflux_constraints = (points=copy(iso), ref_points=copy(refs),
+                             weights=copy(w), grad_wt_lim=Float64(grad_wt_lim))
     return t
 end
 
@@ -731,6 +777,8 @@ function set_psi_constraints!(t::Tokamaker, locations::AbstractMatrix,
     buf = errbuf()
     c_tokamaker_set_flux(t.tmaker_ptr, locs, Vector{Float64}(targets), w, n, -1.0, buf)
     check_err(buf, "set_flux")
+    t.psi_constraints = (locations=Matrix{Float64}(locations),
+                         targets=Vector{Float64}(targets), weights=copy(w))
     return t
 end
 
@@ -743,7 +791,87 @@ function set_saddle_constraints!(t::Tokamaker, saddles::AbstractMatrix;
     buf = errbuf()
     c_tokamaker_set_saddles(t.tmaker_ptr, locs, w, n, buf)
     check_err(buf, "set_saddles")
+    t.saddle_constraints = (saddles=Matrix{Float64}(saddles), weights=copy(w))
     return t
+end
+
+# ----------------------------------------------------------------------------
+# Equilibrium copy / replace (mirrors Python copy_eq / replace_eq)
+
+# Deep-copy the arrays inside a constraint snapshot so the copy is independent
+# of live solver state. `nothing` passes through unchanged.
+_copy_constraint(::Nothing) = nothing
+_copy_constraint(nt::NamedTuple) = map(v -> v isa AbstractArray ? copy(v) : v, nt)
+
+"""
+    copy_eq(t; skip_targets=false, skip_constraints=false) -> TokaMakerEquilibrium
+
+Create an independent copy of the current equilibrium, including a frozen
+snapshot of the targets/constraints that produced it. Mirrors Python
+`TokaMaker.copy_eq`. The returned equilibrium is standalone — it does not
+replace `t`'s active equilibrium — so multiple copies may coexist for one
+`Tokamaker`.
+"""
+function copy_eq(t::Tokamaker; skip_targets::Bool=false, skip_constraints::Bool=false)
+    t.equilibrium === nothing && error("Equilibrium not initialized; call setup! first")
+    new_ptr = Ref{Ptr{Cvoid}}(C_NULL)
+    buf = errbuf()
+    c_tokamaker_equil_copy(t.tmaker_ptr, t.equilibrium.eq_ptr, new_ptr, buf)
+    check_err(buf, "copy_eq")
+    return TokaMakerEquilibrium(t.tmaker_ptr, new_ptr[];
+        psi_convention=t.psi_convention, F0=t.F0, np=t.np, ncoils=t.ncoils,
+        targets=skip_targets ? OrderedDict{String,Float64}() : copy(t.targets),
+        isoflux_constraints=skip_constraints ? nothing : _copy_constraint(t.isoflux_constraints),
+        psi_constraints=skip_constraints ? nothing : _copy_constraint(t.psi_constraints),
+        saddle_constraints=skip_constraints ? nothing : _copy_constraint(t.saddle_constraints))
+end
+
+"""
+    replace_eq!(t; source_eq=nothing, source_file=nothing,
+                skip_targets=false, skip_constraints=false) -> TokaMakerEquilibrium
+
+Replace `t`'s active equilibrium with a copy of `source_eq`, or with one loaded
+from `source_file` (native TokaMaker HDF5). Exactly one of `source_eq` /
+`source_file` must be given. Mirrors Python `TokaMaker.replace_eq`. The live
+`Tokamaker` targets/constraints are synced to the new equilibrium's snapshot.
+"""
+function replace_eq!(t::Tokamaker;
+                     source_eq::Union{Nothing,TokaMakerEquilibrium}=nothing,
+                     source_file::Union{Nothing,AbstractString}=nothing,
+                     skip_targets::Bool=false, skip_constraints::Bool=false)
+    t.equilibrium === nothing && error("Equilibrium not initialized; call setup! first")
+    (source_eq !== nothing) == (source_file !== nothing) &&
+        error("Specify exactly one of `source_eq` or `source_file`")
+    # For a file load, copy the current equilibrium's Fortran state first (then
+    # overwrite it from file) — matching Python's behavior.
+    src = source_eq === nothing ? t.equilibrium : source_eq
+    new_ptr = Ref{Ptr{Cvoid}}(C_NULL)
+    buf = errbuf()
+    c_tokamaker_equil_copy(t.tmaker_ptr, src.eq_ptr, new_ptr, buf)
+    check_err(buf, "replace_eq")
+    src_targets = source_eq === nothing ? t.targets : source_eq.targets
+    src_iso = source_eq === nothing ? t.isoflux_constraints : source_eq.isoflux_constraints
+    src_psi = source_eq === nothing ? t.psi_constraints : source_eq.psi_constraints
+    src_sad = source_eq === nothing ? t.saddle_constraints : source_eq.saddle_constraints
+    tmp = TokaMakerEquilibrium(t.tmaker_ptr, new_ptr[];
+        psi_convention=t.psi_convention, F0=t.F0, np=t.np, ncoils=t.ncoils,
+        targets=skip_targets ? OrderedDict{String,Float64}() : copy(src_targets),
+        isoflux_constraints=skip_constraints ? nothing : _copy_constraint(src_iso),
+        psi_constraints=skip_constraints ? nothing : _copy_constraint(src_psi),
+        saddle_constraints=skip_constraints ? nothing : _copy_constraint(src_sad))
+    if source_file !== nothing
+        EquilibriumModule.load_tokamaker(tmp, source_file)
+    end
+    buf = errbuf()
+    c_tokamaker_equil_set(t.tmaker_ptr, tmp.eq_ptr, buf)
+    check_err(buf, "equil_set")
+    t.equilibrium = tmp
+    # Sync live Tokamaker targets/constraints to the now-active equilibrium.
+    empty!(t.targets); merge!(t.targets, tmp.targets)
+    t.isoflux_constraints = _copy_constraint(tmp.isoflux_constraints)
+    t.psi_constraints = _copy_constraint(tmp.psi_constraints)
+    t.saddle_constraints = _copy_constraint(tmp.saddle_constraints)
+    return t.equilibrium
 end
 
 # ----------------------------------------------------------------------------
@@ -853,6 +981,41 @@ function set_coil_vsc!(t::Tokamaker, coil_gains::AbstractDict)
     c_tokamaker_set_coil_vsc(t.tmaker_ptr, Vector{Float64}(gains), buf)
     check_err(buf, "set_coil_vsc")
     t.virtual_coils["#VSC"]["facs"] = Dict{String,Float64}(String(k) => Float64(v) for (k, v) in coil_gains)
+    return t
+end
+
+"""
+    set_coil_current_dist!(t, coil_name; curr_dist=nothing, normalize=false)
+
+Overwrite a coil with a non-uniform current distribution `curr_dist` (relative
+current density, length `t.np`). Pass `curr_dist=nothing` to disable the
+non-uniform distribution and return the coil to uniform current. Mirrors Python
+`set_coil_current_dist`.
+"""
+function set_coil_current_dist!(t::Tokamaker, coil_name::AbstractString;
+                                curr_dist::Union{Nothing,AbstractVector}=nothing,
+                                normalize::Bool=false)
+    skey = String(coil_name)
+    haskey(t.coil_sets, skey) || throw(KeyError("Unknown coil \"$skey\""))
+    id = t.coil_sets[skey]["id"]::Int   # 0-based
+    if curr_dist === nothing
+        dist = ones(Float64, t.np)
+        iCoil = -(id + 1)
+    else
+        length(curr_dist) == t.np ||
+            error("curr_dist length $(length(curr_dist)) must equal number of mesh points (t.np=$(t.np))")
+        dist = Vector{Float64}(curr_dist)
+        iCoil = id + 1
+    end
+    dist_ptr = Ref{Ptr{Float64}}(C_NULL)
+    buf = errbuf()
+    c_tokamaker_set_coil_current_dist(t.tmaker_ptr, iCoil, dist, dist_ptr, normalize, buf)
+    check_err(buf, "set_coil_current_dist")
+    if iCoil > 0 && dist_ptr[] != C_NULL
+        t.dist_coils[skey] = copy(unsafe_wrap(Array, dist_ptr[], (t.np,); own=false))
+    else
+        delete!(t.dist_coils, skey)
+    end
     return t
 end
 

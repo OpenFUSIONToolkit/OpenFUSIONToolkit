@@ -1,5 +1,6 @@
 module EquilibriumModule
 
+using OrderedCollections: OrderedDict
 using ..LibPath: OFT_PATH_SLEN
 using ..CInterface
 using ..SettingsModule
@@ -13,6 +14,14 @@ mutable struct TokaMakerEquilibrium
     F0::Float64
     np::Int
     ncoils::Int
+    # Frozen snapshots of the targets/constraints that produced this
+    # equilibrium (mirrors the attributes on Python's TokaMaker_equilibrium).
+    # Populated by `copy_eq`/`replace_eq!`; empty/`nothing` for the live solver
+    # equilibrium created in `setup!`.
+    targets::OrderedDict{String,Float64}
+    isoflux_constraints::Union{Nothing,NamedTuple}
+    psi_constraints::Union{Nothing,NamedTuple}
+    saddle_constraints::Union{Nothing,NamedTuple}
     # Pointer caches populated lazily via tokamaker_get_refs. These point at
     # the Fortran-owned scalars/arrays so writes mutate solver state directly.
     ffp_scale_ptr::Ptr{Float64}
@@ -28,8 +37,13 @@ mutable struct TokaMakerEquilibrium
 
     function TokaMakerEquilibrium(tmaker_ptr::Ptr{Cvoid}, eq_ptr::Ptr{Cvoid};
                                    psi_convention::Int=0, F0::Float64=0.0,
-                                   np::Int=0, ncoils::Int=0)
+                                   np::Int=0, ncoils::Int=0,
+                                   targets::OrderedDict{String,Float64}=OrderedDict{String,Float64}(),
+                                   isoflux_constraints::Union{Nothing,NamedTuple}=nothing,
+                                   psi_constraints::Union{Nothing,NamedTuple}=nothing,
+                                   saddle_constraints::Union{Nothing,NamedTuple}=nothing)
         eq = new(tmaker_ptr, eq_ptr, psi_convention, F0, np, ncoils,
+                 targets, isoflux_constraints, psi_constraints, saddle_constraints,
                  C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, C_NULL,
                  false, false)
         finalizer(_destroy_equil!, eq)
@@ -95,6 +109,38 @@ function has_plasma(eq::TokaMakerEquilibrium)
     load_refs!(eq); return unsafe_load(eq.has_plasma_ptr) != 0
 end
 
+"""
+    abspsi_to_normalized(eq, psi_in)
+
+Convert unnormalized ``\\psi`` to normalized ``\\hat{\\psi}`` using the
+equilibrium's flux bounds. Accepts a scalar or array. Mirrors Python
+`TokaMaker_equilibrium.abspsi_to_normalized`.
+"""
+function abspsi_to_normalized(eq::TokaMakerEquilibrium, psi_in)
+    pb = psi_bounds(eq)
+    if eq.psi_convention == 0
+        return (psi_in .- pb[2]) ./ (pb[1] - pb[2])
+    else
+        return (psi_in .- pb[1]) ./ (pb[2] - pb[1])
+    end
+end
+
+"""
+    psinorm_to_absolute(eq, psi_in)
+
+Convert normalized ``\\hat{\\psi}`` to unnormalized ``\\psi`` using the
+equilibrium's flux bounds. Accepts a scalar or array. Mirrors Python
+`TokaMaker_equilibrium.psinorm_to_absolute`.
+"""
+function psinorm_to_absolute(eq::TokaMakerEquilibrium, psi_in)
+    pb = psi_bounds(eq)
+    if eq.psi_convention == 0
+        return psi_in .* (pb[1] - pb[2]) .+ pb[2]
+    else
+        return psi_in .* (pb[2] - pb[1]) .+ pb[1]
+    end
+end
+
 function _destroy_equil!(eq::TokaMakerEquilibrium)
     eq.finalized && return
     if eq.eq_ptr != C_NULL
@@ -114,9 +160,10 @@ end
     get_psi(eq; normalized=true)
 
 Return the poloidal flux on mesh vertices [np]. When `normalized=true` the
-values are scaled to `[0,1]` (psi_axis=0, psi_edge=1) using the spheromak
-convention (psi_convention=1) or to `[1,0]` for tokamak (psi_convention=0)
-matching `_core.py:abspsi_to_normalized`.
+values are scaled by the flux bounds: for the tokamak convention
+(psi_convention=0) the result has psi_axis=0, psi_edge=1; for the spheromak
+convention (psi_convention=1) the raw `(psi-psi_lim)/(psi_max-psi_lim)` scaling
+is returned. Matches Python `_core.py:get_psi`.
 """
 function get_psi(eq::TokaMakerEquilibrium; normalized::Bool=true)
     psi = zeros(Float64, eq.np)
@@ -129,6 +176,11 @@ function get_psi(eq::TokaMakerEquilibrium; normalized::Bool=true)
         denom = psi_max[] - psi_lim[]
         if abs(denom) > 0
             @. psi = (psi - psi_lim[]) / denom
+        end
+        # Tokamak convention (0): flip so axis->0, edge->1. Matches Python
+        # `get_psi` and the input-psi flip used by get_q/get_profiles/calc_sauter_fc.
+        if eq.psi_convention == 0
+            @. psi = 1.0 - psi
         end
     end
     return psi
@@ -517,6 +569,21 @@ function save_tokamaker(eq::TokaMakerEquilibrium, filename::AbstractString)
     c_tokamaker_save_tokamaker(eq.eq_ptr, padpath(filename), buf)
     check_err(buf, "save_tokamaker")
     return filename
+end
+
+"""
+    load_tokamaker(eq, filename)
+
+Load equilibrium state from a native TokaMaker HDF5 file into `eq` in place
+(Python equivalent: the `tokamaker_load_tokamaker` path used by `replace_eq`).
+Typically driven via `replace_eq!(t; source_file=...)` rather than called
+directly. Returns `eq`.
+"""
+function load_tokamaker(eq::TokaMakerEquilibrium, filename::AbstractString)
+    buf = errbuf()
+    c_tokamaker_load_tokamaker(eq.eq_ptr, padpath(filename), buf)
+    check_err(buf, "load_tokamaker")
+    return eq
 end
 
 end # module
