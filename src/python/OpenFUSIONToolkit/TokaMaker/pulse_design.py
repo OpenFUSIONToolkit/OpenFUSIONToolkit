@@ -4399,7 +4399,7 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.set_xlabel('Time [s]')
     ax.set_ylabel('beta_N')
     ax.legend(fontsize=8)
-    ax.grid(True, alphaf=0.3)
+    ax.grid(True, alpha=0.3)
 
     # (2,2): l_i
     ax = axes[2, 2]
