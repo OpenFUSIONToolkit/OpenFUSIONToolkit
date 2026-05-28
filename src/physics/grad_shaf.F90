@@ -808,7 +808,6 @@ END IF
 IF(.NOT.ASSOCIATED(self%mrop))CALL build_mrop(self%fe_rep,self%mrop,"none")
 IF(.NOT.ASSOCIATED(self%mop))CALL oft_blag_getmop(self%fe_rep,self%mop)
 !---Setup boundary conditions
-print *, 'Setup bc...'
 ALLOCATE(self%gs_zerob_bc)
 self%gs_zerob_bc%fe_rep=>self%fe_rep
 ALLOCATE(self%gs_zerob_bc%node_flag(self%fe_rep%ne),cdofs(self%fe_rep%nce))
@@ -868,7 +867,6 @@ END DO
 NULLIFY(tmp_vec,psi_vals)
 CALL self%fe_rep%vec_create(tmp_vec)
 !---Compute coil fields
-print *, 'Compute coil fields 1...'
 IF(self%ncoils==0)THEN
   self%ncoils=self%ncoil_regs+self%ncoils_ext
   ALLOCATE(self%coil_nturns(smesh%nreg+self%ncoils_ext,self%ncoils))
@@ -888,29 +886,22 @@ ELSE
       self%coil_nturns(self%coil_regions(i)%id,:)/self%coil_regions(i)%area ! Normalize turns by coil area
   END DO
 END IF
-print *, 'Compute coil fields 2...'
 ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils,self%ncoils),self%dist_coil(self%ncoils))
 ALLOCATE(self%Rcoils(self%ncoils+1),self%coils_dt(self%ncoils+1),self%coils_volt(self%ncoils+1))
 self%Rcoils=-1.d0
 self%coils_dt=0.d0
 self%coils_volt=0.d0
 self%Lcoils=0.d0
-print *, 'Compute coil fields 3...'
 DO i=1,self%ncoils
   NULLIFY(self%dist_coil(i)%v)
   CALL self%fe_rep%vec_create(self%psi_coil(i)%f)
-  print *, 'About to call gs_source'
   CALL gs_coil_source(self,i,tmp_vec)
-  print *, 'Finished calling gs_source'
   CALL self%zerob_bc%apply(tmp_vec)
-  print *, 'About to call vacuum solve'
   CALL gs_vacuum_solve(self,self%psi_coil(i)%f,tmp_vec)
-  print *, 'Finished calling vacuum solve'
   CALL self%psi_coil(i)%f%get_local(psi_vals)
   WRITE(coil_tag,'(I3.3)')i
   IF(self%save_visit)CALL smesh%save_vertex_scalar(psi_vals,self%xdmf,'Psi_coil'//coil_tag)
 END DO
-print *, 'Finished loop 1'
 DO i=1,self%ncoils
   DO j=i,self%ncoils
     CALL gs_coil_mutual(self,i,self%psi_coil(j)%f,self%Lcoils(i,j))
@@ -921,7 +912,6 @@ DO i=1,self%ncoils
     END IF
   END DO
 END DO
-print *, 'Compute coil fields 4...'
 CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
 !---Create coil vector
@@ -1312,22 +1302,16 @@ END IF
 !---Create worker vectors
 CALL pol_flux%new(rhs)
 !---Solve
-print *, 'Start solve!'
 CALL rhs%add(0.d0,1.d0,source)
 CALL pol_flux%set(0.d0)
 CALL self%zerob_bc%apply(rhs)
-print *, 'End solve!'
 !---Solve linear system
-print *, 'Linear solve!'
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 CALL self%lu_solver%apply(pol_flux,rhs)
-print *, 'End linear solve!'
 oft_env%pm=pm_save
 !---Cleanup
-print *, 'Cleanup'
 CALL rhs%delete()
 DEALLOCATE(rhs)
-print *, 'End cleanup'
 END SUBROUTINE gs_vacuum_solve
 !------------------------------------------------------------------------------
 !> Compute RHS source from an arbitrary current distribution \f$ J_{\phi} \f$

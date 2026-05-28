@@ -382,7 +382,6 @@ ELSE
   mat_vals=>A_native%M
 END IF
 !---Initialize solvers
-print *, 'Init solvers'
 IF(.NOT.self%initialized)THEN
   !---
   SELECT CASE(TRIM(self%package))
@@ -464,7 +463,6 @@ IF(.NOT.self%initialized)THEN
   self%initialized=.TRUE.
 END IF
 !---Call factorization
-print *, 'Call factorization'
 ALLOCATE(vals(u%n,self%nrhs))
 nrhs=1
 vtmp=>vals(:,1)

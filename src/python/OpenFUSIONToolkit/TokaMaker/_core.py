@@ -335,7 +335,6 @@ class TokaMaker():
         @param order Order of FE representation to use
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
         '''
-        print('Starting setup')
         if self.np != -1:
             raise ValueError('G-S instance already setup')
         self.update_settings()
@@ -398,7 +397,6 @@ class TokaMaker():
         self.lc = numpy.ctypeslib.as_array(lc_loc,shape=(self.nc, 3))
         ## Mesh regions [nc] 
         self.reg = numpy.ctypeslib.as_array(reg_loc,shape=(self.nc,))
-        print('Finished setup')
 
     @property
     def c_ptr(self):
