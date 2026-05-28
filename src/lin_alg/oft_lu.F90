@@ -365,7 +365,6 @@ CLASS(oft_native_matrix), POINTER :: A_native
 TYPE(oft_timer) :: mytimer
 TYPE(oft_graph) :: csr_graph
 TYPE(oft_graph) :: csc_graph
-print *, 'Calling lusolver_apply...'
 DEBUG_STACK_PUSH
 IF(TRIM(self%package)=='pardiso')self%package='mkl'
 IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting LU solver: ',self%package,self%refactor
@@ -652,7 +651,6 @@ IF(self%nrhs>1)THEN
 END IF
 DEALLOCATE(vals)
 DEBUG_STACK_POP
-print *, 'End lusolver_apply'
 END SUBROUTINE lusolver_apply
 !------------------------------------------------------------------------------
 !> Update solver after changing settings/operators
