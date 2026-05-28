@@ -12,7 +12,7 @@ r'''! TokaMaker + TORAX Coupled Pulse Design and Simulation Workflow (TokaMaker_
     TokaMaker_TORAX workflow couples the two codes for pulse planning, predictive kinetic equilibria, 
         and other integrated modeling applications.
     
-    @authors Freddie Sheehan and John Lhote
+    @authors Freddie Sheehan and John Lhota
     @date May 2026
     @ingroup doxy_oft_python
 '''
@@ -1103,7 +1103,8 @@ class TokaMaker_TORAX:
         self._evolve_Ti = Ti
         self._evolve_Te = Te
 
-    def set_fueling(self, gas_puff_S_total=None, gas_puff_decay_length=None, pellet_deposition_location=None, pellet_width=None, pellet_S_total=None):
+    def set_fueling(self, gas_puff_S_total=None, gas_puff_decay_length=None, pellet_deposition_location=None, pellet_width=None, pellet_S_total=None,
+                    generic_particle_location=None, generic_particle_width=None, generic_particle_S_total=None):
         r'''! Set gas puff and pellet fueling particle sources for TORAX.
                 TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#sources
                 @param gas_puff_S_total Gas puff particle source (particles/s).
@@ -1111,12 +1112,22 @@ class TokaMaker_TORAX:
                 @param pellet_deposition_location Pellet deposition location (normalized rho).
                 @param pellet_width Pellet deposition width (normalized rho).
                 @param pellet_S_total Pellet particle source (particles/s).
+                @param generic_particle_location Generic particle source location (normalized rho).
+                @param generic_particle_width Generic particle source width (normalized rho).
+                @param generic_particle_width Generic particle source amount (particles/s).
         '''
         self._gp_s = gas_puff_S_total
         self._gp_dl = gas_puff_decay_length
         self._pellet_deposition_location = pellet_deposition_location
         self._pellet_width = pellet_width
         self._pellet_s_total = pellet_S_total
+
+        if [generic_particle_location, generic_particle_width, generic_particle_S_total].count(None) in [1,2]:
+            raise ValueError("Must specify all three generic particle parameters or none of them.")
+        
+        self._generic_particle_location = generic_particle_location
+        self._generic_particle_width = generic_particle_width
+        self._generic_particle_s_total = generic_particle_S_total
 
     def set_transport_coefs(self, chi_min=None, chi_max=None, De_min=None, De_max=None, Ve_min=None, Ve_max=None):
         r'''! Set transport coefficient bounds for TORAX.
@@ -1499,6 +1510,12 @@ class TokaMaker_TORAX:
                 myconfig['sources']['generic_current']['I_generic'] = (nbi_times, _NBI_W_TO_MA * np.array(nbi_pow))
                 myconfig['sources']['generic_current']['gaussian_location'] = self._generic_heat_loc
 
+        if self._generic_particle_location is not None:
+            myconfig['sources']['generic_particle'] = {}
+            myconfig['sources']['generic_particle']['deposition_location'] = self._generic_particle_location
+            myconfig['sources']['generic_particle']['particle_width'] = self._generic_particle_width
+            myconfig['sources']['generic_particle']['S_total'] = self._generic_particle_s_total
+            
         if self._pedestal_config is not None:
             # Full pedestal dict replacement requested via load_pedestal_config().
             myconfig['pedestal'] = copy.deepcopy(self._pedestal_config)
