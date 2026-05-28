@@ -62,6 +62,7 @@ end type circular_curr
 !> Abstract flux function prototype
 !------------------------------------------------------------------------------
 TYPE, ABSTRACT :: flux_func
+  LOGICAL :: include_sol = .FALSE. !< Allow source evaluation in SOL
   INTEGER(i4) :: ncofs = 0 !< Number of free coefficients
   REAL(r8) :: f_offset = 0.d0 !< Offset value
   REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Current plasma bounds (for normalization)
@@ -807,6 +808,7 @@ END IF
 IF(.NOT.ASSOCIATED(self%mrop))CALL build_mrop(self%fe_rep,self%mrop,"none")
 IF(.NOT.ASSOCIATED(self%mop))CALL oft_blag_getmop(self%fe_rep,self%mop)
 !---Setup boundary conditions
+print *, 'Setup bc...'
 ALLOCATE(self%gs_zerob_bc)
 self%gs_zerob_bc%fe_rep=>self%fe_rep
 ALLOCATE(self%gs_zerob_bc%node_flag(self%fe_rep%ne),cdofs(self%fe_rep%nce))
@@ -866,6 +868,7 @@ END DO
 NULLIFY(tmp_vec,psi_vals)
 CALL self%fe_rep%vec_create(tmp_vec)
 !---Compute coil fields
+print *, 'Compute coil fields 1...'
 IF(self%ncoils==0)THEN
   self%ncoils=self%ncoil_regs+self%ncoils_ext
   ALLOCATE(self%coil_nturns(smesh%nreg+self%ncoils_ext,self%ncoils))
@@ -885,22 +888,29 @@ ELSE
       self%coil_nturns(self%coil_regions(i)%id,:)/self%coil_regions(i)%area ! Normalize turns by coil area
   END DO
 END IF
+print *, 'Compute coil fields 2...'
 ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils,self%ncoils),self%dist_coil(self%ncoils))
 ALLOCATE(self%Rcoils(self%ncoils+1),self%coils_dt(self%ncoils+1),self%coils_volt(self%ncoils+1))
 self%Rcoils=-1.d0
 self%coils_dt=0.d0
 self%coils_volt=0.d0
 self%Lcoils=0.d0
+print *, 'Compute coil fields 3...'
 DO i=1,self%ncoils
   NULLIFY(self%dist_coil(i)%v)
   CALL self%fe_rep%vec_create(self%psi_coil(i)%f)
+  print *, 'About to call gs_source'
   CALL gs_coil_source(self,i,tmp_vec)
+  print *, 'Finished calling gs_source'
   CALL self%zerob_bc%apply(tmp_vec)
+  print *, 'About to call vacuum solve'
   CALL gs_vacuum_solve(self,self%psi_coil(i)%f,tmp_vec)
+  print *, 'Finished calling vacuum solve'
   CALL self%psi_coil(i)%f%get_local(psi_vals)
   WRITE(coil_tag,'(I3.3)')i
   IF(self%save_visit)CALL smesh%save_vertex_scalar(psi_vals,self%xdmf,'Psi_coil'//coil_tag)
 END DO
+print *, 'Finished loop 1'
 DO i=1,self%ncoils
   DO j=i,self%ncoils
     CALL gs_coil_mutual(self,i,self%psi_coil(j)%f,self%Lcoils(i,j))
@@ -911,6 +921,7 @@ DO i=1,self%ncoils
     END IF
   END DO
 END DO
+print *, 'Compute coil fields 4...'
 CALL tmp_vec%delete()
 DEALLOCATE(tmp_vec)
 !---Create coil vector
@@ -1301,16 +1312,22 @@ END IF
 !---Create worker vectors
 CALL pol_flux%new(rhs)
 !---Solve
+print *, 'Start solve!'
 CALL rhs%add(0.d0,1.d0,source)
 CALL pol_flux%set(0.d0)
 CALL self%zerob_bc%apply(rhs)
+print *, 'End solve!'
 !---Solve linear system
+print *, 'Linear solve!'
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 CALL self%lu_solver%apply(pol_flux,rhs)
+print *, 'End linear solve!'
 oft_env%pm=pm_save
 !---Cleanup
+print *, 'Cleanup'
 CALL rhs%delete()
 DEALLOCATE(rhs)
+print *, 'End cleanup'
 END SUBROUTINE gs_vacuum_solve
 !------------------------------------------------------------------------------
 !> Compute RHS source from an arbitrary current distribution \f$ J_{\phi} \f$
@@ -3106,7 +3123,7 @@ CLASS(oft_vector), intent(inout) :: b2 !< F*F' component of source (including `f
 CLASS(oft_vector), intent(inout) :: b3 !< P' component of source (without `p_scale`)
 REAL(8), INTENT(out) :: itor_ffp,itor_press,estore
 real(r8), pointer, dimension(:) :: atmp,btmp,b2tmp,b3tmp
-real(8) :: psitmp,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),pani(2)
+real(8) :: psitmp,psidiff,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),pani(2)
 real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:)
 integer(4) :: j,m,l
 integer(4), allocatable :: j_lag(:)
@@ -3136,7 +3153,7 @@ END IF
 itor_ffp=0.d0
 itor_press=0.d0
 estore=0.d0
-!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp) &
+!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,psidiff,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp) &
 !$omp reduction(+:itor_ffp) reduction(+:itor_press) reduction(+:estore)
 allocate(rhs_loc(device%fe_rep%nce,3))
 allocate(rop(device%fe_rep%nce),vcache(device%fe_rep%nce))
@@ -3185,6 +3202,27 @@ do j=1,device%fe_rep%mesh%nc
         estore = estore + (self%P%F(psitmp))*v*device%fe_rep%quad%wts(m)*pt(1)
         itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*device%fe_rep%quad%wts(m)
       END IF
+    END IF
+    IF((SUM(ABS(ffp))<1.d-10).AND.self%I%include_sol)THEN
+      psitmp=0.d0
+      !$omp simd reduction(+:psitmp)
+      DO l=1,device%fe_rep%nce
+        psitmp=psitmp+vcache(l)*rop(l)
+      END DO
+      IF(psitmp > self%plasma_bounds(1))THEN
+        psidiff = psitmp - self%plasma_bounds(1)
+        psitmp = self%plasma_bounds(1) - psidiff
+      END IF
+      IF(self%mode==0)THEN
+        ffp(1:2)=((self%ffp_scale**2)*self%I%f(psitmp)+self%ffp_scale*self%I%f_offset)*self%I%fp(psitmp)
+        itor_ffp = itor_ffp + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)
+      ELSE
+        ffp(1:2)=0.5d0*self%ffp_scale*self%I%fp(psitmp)
+        itor_ffp = itor_ffp + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+      END IF
+      ! ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
+      ! estore = estore + (self%P%F(psitmp))*v*self%fe_rep%quad%wts(m)*pt(1)
+      itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*device%fe_rep%quad%wts(m)
     END IF
     pt(1) = MAX(pt(1),gs_epsilon)
     ffp = ffp*det/pt(1)
@@ -3380,6 +3418,17 @@ do i=1,device%fe_rep%mesh%nc
       END IF
       itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
       curr_cent = curr_cent + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
+    END IF
+    IF(self%I%include_sol)THEN
+     IF(self%mode==0)THEN
+        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
+        + (self%ffp_scale**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%ffp_scale)/(pt(1)+gs_epsilon))
+      ELSE
+        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
+        + .5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+      END IF
+      curr_cent = curr_cent + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
+      itor = itor + pt(1)*self%P%Fp(psitmp(1))*v*device%fe_rep%quad%wts(m)
     END IF
   end do
 end do
