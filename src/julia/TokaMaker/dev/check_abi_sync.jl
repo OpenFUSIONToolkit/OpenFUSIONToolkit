@@ -47,8 +47,18 @@ for f in jl_extras
     isfile(f) && union!(jl_syms, collect_symbols(f, JL_RE))
 end
 
+# Base-OFT symbols intentionally not yet bound on the Julia side. These are
+# shared mesh getters (not TokaMaker entry points) that return Fortran-allocated
+# arrays via double-pointer outputs; they are deferred to the meshing/plot_mesh
+# work (PORT_PLAN.md Milestone F). Listing them here keeps the checker meaningful
+# for TokaMaker-owned symbols. Remove an entry once it is wrapped in CInterface.jl.
+const DEFERRED = Set([
+    "oft_smesh_get",
+    "oft_vmesh_get",
+])
+
 # Symbols Python exposes but Julia doesn't bind (yet)
-missing_in_jl = setdiff(py_syms, jl_syms)
+missing_in_jl = setdiff(py_syms, jl_syms, DEFERRED)
 # Symbols Julia binds but Python doesn't expose (likely typo or dead code)
 missing_in_py = setdiff(jl_syms, py_syms)
 

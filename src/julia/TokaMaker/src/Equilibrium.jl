@@ -504,4 +504,19 @@ function save_mug(eq::TokaMakerEquilibrium, filename::AbstractString)
     return filename
 end
 
+"""
+    save_tokamaker(eq, filename)
+
+Save the equilibrium to an HDF5 file in TokaMaker's native format for later
+reload (Python equivalent: `TokaMaker_equilibrium.save_TokaMaker`). The companion
+loader (`load_tokamaker`) is provided as part of the equilibrium copy/replace
+flow; see PORT_PLAN.md Milestone B.
+"""
+function save_tokamaker(eq::TokaMakerEquilibrium, filename::AbstractString)
+    buf = errbuf()
+    c_tokamaker_save_tokamaker(eq.eq_ptr, padpath(filename), buf)
+    check_err(buf, "save_tokamaker")
+    return filename
+end
+
 end # module

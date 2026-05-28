@@ -33,6 +33,7 @@ export errbuf, check_err, padpath,
        c_tokamaker_set_coil_currents, c_tokamaker_set_coil_regmat,
        c_tokamaker_set_coil_bounds, c_tokamaker_set_coil_vsc, c_tokamaker_set_vcoil,
        c_tokamaker_save_eqdsk, c_tokamaker_save_ifile, c_tokamaker_save_mug,
+       c_tokamaker_save_tokamaker, c_tokamaker_load_tokamaker,
        c_tokamaker_set_coil_current_dist
 
 # ---------------------------------------------------------------------------
@@ -488,6 +489,18 @@ c_tokamaker_save_ifile(eq_ptr::Ptr{Cvoid}, filename::Vector{UInt8}, npsi::Intege
 c_tokamaker_save_mug(eq_ptr::Ptr{Cvoid}, filename::Vector{UInt8},
                     error_str::Vector{UInt8}) =
     ccall((:tokamaker_save_mug, liboftpy[]), Cvoid,
+          (Ptr{Cvoid}, Ptr{UInt8}, Ptr{UInt8}),
+          eq_ptr, filename, error_str)
+
+c_tokamaker_save_tokamaker(eq_ptr::Ptr{Cvoid}, filename::Vector{UInt8},
+                          error_str::Vector{UInt8}) =
+    ccall((:tokamaker_save_tokamaker, liboftpy[]), Cvoid,
+          (Ptr{Cvoid}, Ptr{UInt8}, Ptr{UInt8}),
+          eq_ptr, filename, error_str)
+
+c_tokamaker_load_tokamaker(eq_ptr::Ptr{Cvoid}, filename::Vector{UInt8},
+                          error_str::Vector{UInt8}) =
+    ccall((:tokamaker_load_tokamaker, liboftpy[]), Cvoid,
           (Ptr{Cvoid}, Ptr{UInt8}, Ptr{UInt8}),
           eq_ptr, filename, error_str)
 

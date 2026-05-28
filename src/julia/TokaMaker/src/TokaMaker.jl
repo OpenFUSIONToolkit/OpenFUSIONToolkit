@@ -77,14 +77,14 @@ export create_isoflux, create_power_flux_fun, create_spline_flux_fun,
 import .EquilibriumModule: get_globals, get_refs, get_xpoints, get_profiles,
                             get_q, calc_sauter_fc, calc_loopvoltage,
                             calc_delstar_curr, calc_jtor_plasma,
-                            save_eqdsk, save_ifile, save_mug, load_refs!,
+                            save_eqdsk, save_ifile, save_mug, save_tokamaker, load_refs!,
                             get_stats, calc_inductance, trace_surf
 import .CoreModule: ffp_scale, set_ffp_scale!, p_scale, set_p_scale!,
                     o_point, lim_point, psi_bounds, diverted
 
 export get_globals, get_refs, get_xpoints, get_profiles, get_q, calc_sauter_fc,
        calc_loopvoltage, calc_delstar_curr, calc_jtor_plasma,
-       save_eqdsk, save_ifile, save_mug, get_stats, calc_inductance, trace_surf
+       save_eqdsk, save_ifile, save_mug, save_tokamaker, get_stats, calc_inductance, trace_surf
 export ffp_scale, set_ffp_scale!, p_scale, set_p_scale!,
        o_point, lim_point, psi_bounds, diverted
 export TokamakerFieldInterpolator, get_field_eval
