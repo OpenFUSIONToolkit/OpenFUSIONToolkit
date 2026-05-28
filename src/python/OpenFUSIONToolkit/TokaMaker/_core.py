@@ -2825,7 +2825,7 @@ class TokaMaker_equilibrium():
         tokamaker_get_dels_curr(self._equil_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return curr/mu0
+        return curr
     
     def calc_jtor_plasma(self):
         r'''! Get plasma toroidal current density for current equilibrium
