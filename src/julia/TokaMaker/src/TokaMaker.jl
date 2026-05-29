@@ -40,7 +40,8 @@ using .Reconstruction: MirnovCon, IpCon, FluxLoopCon, DFluxCon, PressCon,
 include("Bootstrap.jl")
 using .Bootstrap: Hmode_profiles, parameterize_edge_jBS, calculate_ln_lambda,
                    redl_bootstrap, get_jphi_from_GS, find_peaks, peak_widths,
-                   analyze_bootstrap_edge_spike, find_optimal_scale, solve_jphi
+                   analyze_bootstrap_edge_spike, find_optimal_scale, solve_jphi,
+                   solve_with_bootstrap
 
 # Wire Bootstrap's runtime callbacks now that Core/Equilibrium are loaded.
 function __init__()
@@ -50,6 +51,9 @@ function __init__()
     Bootstrap.get_profiles_anon[]   = (eq; npsi, psi_pad) -> EquilibriumModule.get_profiles(eq; npsi=npsi, psi_pad=psi_pad)
     Bootstrap.get_q_anon[]          = (eq; npsi, psi_pad) -> EquilibriumModule.get_q(eq; npsi=npsi, psi_pad=psi_pad, compute_geo=true)
     Bootstrap.get_stats_anon[]      = (eq; lcfs_pad) -> EquilibriumModule.get_stats(eq; lcfs_pad=lcfs_pad)
+    Bootstrap.sauter_fc_anon[]      = (eq; npsi, psi_pad) -> EquilibriumModule.calc_sauter_fc(eq; npsi=npsi, psi_pad=psi_pad)
+    Bootstrap.psi_bounds_anon[]     = (gs) -> CoreModule.psi_bounds(gs)
+    Bootstrap.compute_flux_integral_anon[] = (gs, psi, field) -> CoreModule.compute_flux_integral(gs, psi, field)
     return nothing
 end
 
@@ -96,7 +100,8 @@ export MirnovCon, IpCon, FluxLoopCon, DFluxCon, PressCon, QCon, SaddleCon,
        ReconConstraints, run_reconstruction!, write_constraints_file
 export Hmode_profiles, parameterize_edge_jBS, calculate_ln_lambda,
        redl_bootstrap, get_jphi_from_GS, find_peaks, peak_widths,
-       analyze_bootstrap_edge_spike, find_optimal_scale, solve_jphi
+       analyze_bootstrap_edge_spike, find_optimal_scale, solve_jphi,
+       solve_with_bootstrap
 export save_gs_mesh, load_gs_mesh, GsDomain, define_region!,
        add_polygon!, add_rectangle!, add_annulus!, add_enclosed!,
        build_mesh!, get_coils, get_conductors

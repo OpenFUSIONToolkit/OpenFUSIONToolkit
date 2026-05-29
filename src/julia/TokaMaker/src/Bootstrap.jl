@@ -7,16 +7,16 @@ module Bootstrap
 #   - redl_bootstrap (Redl et al. PoP 28, 022502 (2021))
 #
 # `analyze_bootstrap_edge_spike`, `solve_jphi`, `find_optimal_scale`, and
-# `solve_with_bootstrap` are stubbed for incremental implementation — they
-# couple to the Grad-Shafranov solver and to scipy's curve_fit / find_peaks
-# which need careful rebuilding on Julia primitives. Each stub clearly
-# states what's missing.
+# `solve_with_bootstrap` couple to the Grad-Shafranov solver via the callback
+# Refs wired by the top-level TokaMaker module. `solve_with_bootstrap` uses the
+# native Redl model; the OMFIT-Sauter path and the curve-fit `parameterized_spike`
+# are not ported (they raise).
 
 using Distributions: SkewNormal, pdf
 using Roots: find_zero, Brent
 
 export Hmode_profiles, parameterize_edge_jBS, calculate_ln_lambda,
-       redl_bootstrap, get_jphi_from_GS
+       redl_bootstrap, get_jphi_from_GS, solve_with_bootstrap
 
 const _MU0 = 4π * 1e-7
 const _EC = 1.602176634e-19
@@ -358,9 +358,9 @@ function solve_jphi(gs, ffp_prof::AbstractDict, pp_prof::AbstractDict,
                     Ip_target::Real, pax_target::Real)
     ffp_prof["type"] = "jphi-linterp"
     # Late binding to avoid Bootstrap → Core dependency at module load
-    Base.invokelatest(set_targets!_anon, gs, Ip_target, pax_target)
-    Base.invokelatest(set_profiles!_anon, gs, ffp_prof, pp_prof)
-    Base.invokelatest(solve!_anon, gs)
+    Base.invokelatest(set_targets!_anon[], gs, Ip_target, pax_target)
+    Base.invokelatest(set_profiles!_anon[], gs, ffp_prof, pp_prof)
+    Base.invokelatest(solve!_anon[], gs)
     return nothing
 end
 
@@ -373,6 +373,8 @@ const get_profiles_anon = Ref{Function}()
 const get_q_anon = Ref{Function}()
 const get_stats_anon = Ref{Function}()
 const compute_flux_integral_anon = Ref{Function}()
+const sauter_fc_anon = Ref{Function}()
+const psi_bounds_anon = Ref{Function}()
 
 """
     find_optimal_scale(gs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
@@ -554,6 +556,195 @@ function analyze_bootstrap_edge_spike(psi_N::AbstractVector, j_BS::AbstractVecto
         "peak_psi" => peak_psi,
         "peak_height" => peak_height,
         "masked_spike" => masked_spike,
+    )
+end
+
+# ----------------------------------------------------------------------------
+# Self-consistent bootstrap + Grad-Shafranov solve.
+
+"`numpy.gradient` with unit spacing: 2nd-order central in the interior, 1st-order at the edges."
+function _np_gradient(f::AbstractVector)
+    n = length(f)
+    g = zeros(Float64, n)
+    n == 1 && return g
+    g[1] = f[2] - f[1]
+    g[n] = f[n] - f[n-1]
+    @inbounds for i in 2:n-1
+        g[i] = (f[i+1] - f[i-1]) / 2
+    end
+    return g
+end
+
+_nan_to_zero(x::AbstractVector) = map(v -> isnan(v) ? 0.0 : v, x)
+
+# Match NumPy: a negative base raised to a fractional power yields NaN (which is
+# later nan_to_num'd) rather than throwing, as Julia's `^` would.
+_pownan(x::Real, p::Real) = x < 0 ? NaN : float(x)^p
+
+"""
+    solve_with_bootstrap(gs; ne, Te, ni, Ti, Zeff, Ip_target, inductive_jphi,
+                         Zis=[1.0], scale_jBS=1.0, isolate_edge_jBS=false,
+                         psi_pad=1e-3, iterations=3, parameterize_jBS=false,
+                         use_OMFIT_sauter=false, verbose=true) -> Dict
+
+Self-consistently compute the bootstrap current from H-mode profiles and iterate
+the Grad-Shafranov equilibrium. Port of `bootstrap.solve_with_bootstrap` using
+the native Redl (2021) model.
+
+Profiles `ne` [m^-3], `Te`/`Ti` [eV], `ni` [m^-3], `Zeff` are sampled uniformly
+in normalized psi on `[0,1]`. `inductive_jphi` (the inductive toroidal current
+profile) is required.
+
+Returns a `Dict` with `"total_j_phi"`, `"j_BS"`, `"j_inductive"`,
+`"isolated_j_BS"`, `"scale_j0"`, `"scale_Ip"`.
+
+Not supported (vs Python): `use_OMFIT_sauter` (needs the `omfit_classes` Python
+package) and `parameterize_jBS` (the curve-fit `parameterized_spike` is not
+ported); both raise. Diagnostic plotting is omitted.
+"""
+function solve_with_bootstrap(gs; ne, Te, ni, Ti, Zeff, Ip_target,
+                              inductive_jphi=nothing, Zis=[1.0], scale_jBS::Real=1.0,
+                              isolate_edge_jBS::Bool=false, psi_pad::Real=1e-3,
+                              iterations::Integer=3, parameterize_jBS::Bool=false,
+                              use_OMFIT_sauter::Bool=false, verbose::Bool=true)
+    use_OMFIT_sauter && error("use_OMFIT_sauter is not supported in the Julia port (requires the omfit_classes Python package); use the native Redl model.")
+    inductive_jphi === nothing && error("inductive_jphi must be specified.")
+
+    ne = Vector{Float64}(ne); Te = Vector{Float64}(Te)
+    ni = Vector{Float64}(ni); Ti = Vector{Float64}(Ti)
+    Zeff = Vector{Float64}(Zeff)
+    ind_jphi = Vector{Float64}(inductive_jphi)
+
+    pressure = (_EC .* ne .* Te) .+ (_EC .* ni .* Ti)   # [Pa]
+    n_psi = length(pressure)
+    psi_N = collect(range(0.0, 1.0; length=n_psi))
+
+    function calculate_profiles_and_bootstrap(include_jBS::Bool)
+        eq = gs.equilibrium
+        gp = get_profiles_anon[](eq; npsi=n_psi, psi_pad=psi_pad)
+        f = gp.F
+        sf = sauter_fc_anon[](eq; npsi=n_psi, psi_pad=psi_pad)
+        ft = 1.0 .- sf.fc
+        # Negative inverse-aspect-ratio can occur at degenerate edge samples;
+        # NumPy turns the downstream sqrt/^1.5 into NaN (later zeroed) rather than
+        # erroring, so mirror that by mapping negatives to NaN.
+        eps = map(e -> e < 0 ? NaN : e, sf.r_avgs[3, :] ./ sf.r_avgs[1, :])
+        qr = get_q_anon[](eq; npsi=n_psi, psi_pad=psi_pad)
+        qvals = qr.q
+        R_avg = qr.ravgs[1, :]
+
+        pb = psi_bounds_anon[](gs)
+        psi_range = pb[2] - pb[1]
+        d_psi_eff = _np_gradient(psi_N) .* psi_range
+        d_psi_eff[d_psi_eff .== 0] .= 1e-9
+        pprime_local = _np_gradient(pressure) ./ d_psi_eff
+
+        j_BS_final = zeros(Float64, n_psi)
+        if include_jBS
+            dn_e_dpsi = _np_gradient(ne) ./ d_psi_eff
+            dT_e_dpsi = _np_gradient(Te) ./ d_psi_eff
+            dn_i_dpsi = _np_gradient(ni) ./ d_psi_eff
+            dT_i_dpsi = _np_gradient(Ti) ./ d_psi_eff
+            ln_le, ln_lii = calculate_ln_lambda(Te, Ti, ne, ni; Zeff=Zeff,
+                electron_lnLambda_model="NRL", ion_lnLambda_model="Zavg")
+            Zdom = 1.0
+            Zavg = ne ./ ni
+            Zion = _pownan.(Zdom^2 .* Zavg .* Zeff, 0.25)
+            eps15 = _pownan.(eps, 1.5)
+            nu_i_star = 4.90e-18 .* abs.(qvals) .* R_avg .* ni .* Zion .^ 4 .* ln_lii ./
+                        (Ti .^ 2 .* eps15)
+            nu_e_star = 6.921e-18 .* abs.(qvals) .* R_avg .* ne .* Zeff .* ln_le ./
+                        (Te .^ 2 .* eps15)
+            # A negative collisionality (e.g. NRL ln_Λ turning negative at some
+            # samples) yields NaN under NumPy's sqrt downstream; mirror that
+            # rather than letting Julia's sqrt throw.
+            nu_i_star = map(v -> v < 0 ? NaN : v, nu_i_star)
+            nu_e_star = map(v -> v < 0 ? NaN : v, nu_e_star)
+            j_BS_neo, _ = redl_bootstrap(; psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
+                pe=_EC .* (ne .* Te), pi=_EC .* (ni .* Ti), Zeff=Zeff, R=R_avg,
+                q=qvals, eps=eps, fT=ft, I_psi=f,
+                dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
+                dn_e_dpsi=dn_e_dpsi, dn_i_dpsi=dn_i_dpsi,
+                ln_lambda_e=ln_le, ln_lambda_ii=ln_lii,
+                nu_e_star_override=nu_e_star, nu_i_star_override=nu_i_star,
+                use_legacy_L34=false, use_sign_q=true, formula_form="jboot1")
+            j_BS_final = _nan_to_zero(j_BS_neo .* (R_avg ./ f))
+        end
+
+        spike_prof = zeros(Float64, n_psi)
+        if include_jBS
+            if isolate_edge_jBS
+                parameterize_jBS && error("parameterize_jBS=true is not supported (parameterized_spike not ported; see PORT_PLAN.md).")
+                res = analyze_bootstrap_edge_spike(psi_N, j_BS_final)
+                masked = res === nothing ? zeros(Float64, n_psi) : Vector{Float64}(res["masked_spike"])
+                spike_prof = masked .* scale_jBS
+            else
+                spike_prof = j_BS_final .* scale_jBS
+            end
+        end
+
+        # Scale the inductive current so total Ip matches the target.
+        obj(alpha) = compute_flux_integral_anon[](gs, psi_N, alpha .* ind_jphi .+ spike_prof) - Ip_target
+        alpha_opt = try
+            find_zero(obj, (1.0, 10.0 * Ip_target), Brent(); rtol=1e-6)
+        catch
+            verbose && @warn "Root scalar failed to bracket. Defaulting to alpha=1.0"
+            1.0
+        end
+        matched_j_inductive = alpha_opt .* ind_jphi
+        matched_jphi = matched_j_inductive .+ spike_prof
+
+        pp_dict = Dict{String,Any}("type" => "linterp", "x" => copy(psi_N),
+                                   "y" => pprime_local ./ pprime_local[1])
+        ffp_dict = Dict{String,Any}("type" => "jphi-linterp", "x" => copy(psi_N),
+                                    "y" => _nan_to_zero(matched_jphi))
+        return pp_dict, ffp_dict, j_BS_final, matched_j_inductive, spike_prof
+    end
+
+    set_targets!_anon[](gs, Ip_target, pressure[1])
+
+    verbose && @info ">>> Matching input core j_phi with G-S solution"
+    pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof =
+        calculate_profiles_and_bootstrap(true)
+    pp_prof["y"][end] = 0.0
+    ffp_prof["type"] = "jphi-linterp"
+    ffp_prof["y"] = matched_j_inductive .+ spike_prof
+    solve_jphi(gs, ffp_prof, pp_prof, Ip_target, pressure[1])
+
+    pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof =
+        calculate_profiles_and_bootstrap(true)
+    pp_prof["y"][end] = 0.0
+
+    verbose && @info ">>> Finding optimal j_phi scale factor"
+    final_scale_j0, _ = find_optimal_scale(gs, psi_N, pressure, ffp_prof, pp_prof,
+        matched_j_inductive, Ip_target; psi_pad=psi_pad, spike_prof=spike_prof,
+        find_j0=true, verbose=verbose)
+    verbose && @info ">>> Finding optimal Ip scale factor"
+    final_scale_Ip, _ = find_optimal_scale(gs, psi_N, pressure, ffp_prof, pp_prof,
+        matched_j_inductive, Ip_target; psi_pad=psi_pad, spike_prof=spike_prof,
+        find_j0=false, scale_j0=final_scale_j0, tolerance=0.001, verbose=verbose)
+
+    verbose && @info ">>> Iterating on H-mode equilibrium solution"
+    tmp_jphi = _nan_to_zero(final_scale_j0 .* matched_j_inductive .+ spike_prof)
+    for _ in 1:iterations
+        pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof =
+            calculate_profiles_and_bootstrap(true)
+        pp_prof["y"][end] = 0.0
+        ffp_prof["type"] = "jphi-linterp"
+        ffp_prof["y"] = final_scale_j0 .* matched_j_inductive .+ spike_prof
+        solve_jphi(gs, ffp_prof, pp_prof, Ip_target * final_scale_Ip, pressure[1])
+        gp = get_profiles_anon[](gs.equilibrium; npsi=n_psi, psi_pad=psi_pad)
+        qr = get_q_anon[](gs.equilibrium; npsi=n_psi, psi_pad=psi_pad)
+        tmp_jphi = get_jphi_from_GS(gp.F .* gp.Fp, gp.Pp, qr.ravgs[1, :], qr.ravgs[2, :])
+    end
+
+    return Dict{String,Any}(
+        "total_j_phi" => tmp_jphi,
+        "j_BS" => j_bs_curr,
+        "j_inductive" => matched_j_inductive,
+        "isolated_j_BS" => spike_prof,
+        "scale_j0" => final_scale_j0,
+        "scale_Ip" => final_scale_Ip,
     )
 end
 

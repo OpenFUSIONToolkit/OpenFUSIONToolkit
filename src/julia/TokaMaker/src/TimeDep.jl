@@ -60,11 +60,14 @@ end
 function eig_td(t::Tokamaker; omega::Real=-1e4, neigs::Integer=4,
                 include_bounds::Bool=true, eta_plasma::Real=-1.0,
                 pm::Bool=false)
+    t.equilibrium === nothing && error("eig_td: no equilibrium; call solve! first")
     n_psi = t.np
     eigs = zeros(Float64, 2, neigs)
     eig_vecs = zeros(Float64, n_psi, neigs)
     buf = errbuf()
-    c_tokamaker_eig_td(t.tmaker_ptr, Float64(omega), neigs, eigs, eig_vecs,
+    # tokamaker_eig_td operates on the equilibrium object (mirrors Python, which
+    # passes self._equil_ptr) — not the factory pointer.
+    c_tokamaker_eig_td(t.equilibrium.eq_ptr, Float64(omega), neigs, eigs, eig_vecs,
                        include_bounds, Float64(eta_plasma), pm, buf)
     check_err(buf, "eig_td")
     return (eigs=permutedims(eigs), eig_vecs=eig_vecs)

@@ -73,13 +73,15 @@ function c_oft_setup_smesh(ndim, np, r_loc::Matrix{Float64}, npc, nc,
           lc_loc, reg_loc, order_out, mesh_ptr)
 end
 
-function c_oft_setup_vmesh(ndim, np, r_loc::Matrix{Float64}, npc, nc,
+# Volume-mesh setter (unused by the 2D TokaMaker, kept for completeness). The C
+# entry takes no ndim argument (unlike oft_setup_smesh) — matches _interface.py.
+function c_oft_setup_vmesh(np, r_loc::Matrix{Float64}, npc, nc,
                            lc_loc::Matrix{Int32}, reg_loc::Vector{Int32},
                            order_out::Ref{Int32}, mesh_ptr::Ref{Ptr{Cvoid}})
     ccall((:oft_setup_vmesh, liboftpy[]), Cvoid,
-          (Cint, Cint, Ptr{Float64}, Cint, Cint, Ptr{Int32}, Ptr{Int32},
+          (Cint, Ptr{Float64}, Cint, Cint, Ptr{Int32}, Ptr{Int32},
            Ptr{Int32}, Ptr{Ptr{Cvoid}}),
-          Int32(ndim), Int32(np), r_loc, Int32(npc), Int32(nc),
+          Int32(np), r_loc, Int32(npc), Int32(nc),
           lc_loc, reg_loc, order_out, mesh_ptr)
 end
 
@@ -158,10 +160,11 @@ c_tokamaker_init_psi(tMaker_ptr::Ptr{Cvoid}, r0, z0, a, kappa, delta,
           tMaker_ptr, Float64(r0), Float64(z0), Float64(a), Float64(kappa),
           Float64(delta), rhs_source, error_str)
 
-c_tokamaker_solve(tMaker_ptr::Ptr{Cvoid}, vacuum::Bool, error_str::Vector{UInt8}) =
+c_tokamaker_solve(tMaker_ptr::Ptr{Cvoid}, vacuum::Bool, nl_its::Ref{Cint},
+                  error_str::Vector{UInt8}) =
     ccall((:tokamaker_solve, liboftpy[]), Cvoid,
-          (Ptr{Cvoid}, Cuchar, Ptr{UInt8}),
-          tMaker_ptr, UInt8(vacuum), error_str)
+          (Ptr{Cvoid}, Cuchar, Ptr{Cint}, Ptr{UInt8}),
+          tMaker_ptr, UInt8(vacuum), nl_its, error_str)
 
 c_tokamaker_vac_solve(tMaker_ptr::Ptr{Cvoid}, psi_in::Vector{Float64},
                       rhs_source::Ptr{Float64}, error_str::Vector{UInt8}) =

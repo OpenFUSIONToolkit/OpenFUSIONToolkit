@@ -327,6 +327,16 @@ function setup!(t::Tokamaker; order::Integer=2, F0::Real=0.0, full_domain::Bool=
     check_err(buf, "equil_set")
     t.equilibrium = eq
 
+    # Mirror Python TokaMaker_equilibrium.__init__: seed default flux profiles
+    # (and scales) so routines that read FF'/P — eig_wall, eig_td, etc. — have
+    # non-null profiles even before the user calls set_profiles!. Without this,
+    # those operations dereference null profile pointers in the Fortran core.
+    set_ffp_scale!(t, 0.1)
+    set_p_scale!(t, 0.1)
+    set_profiles!(t;
+        ffp_prof=Dict{String,Any}("type" => "linterp", "x" => [0.0, 1.0], "y" => [1.0, 0.0]),
+        pp_prof=Dict{String,Any}("type" => "linterp", "x" => [0.0, 1.0], "y" => [1.0, 0.0]))
+
     # Get limiter contours
     npts = Ref{Int32}(0); nloops = Ref{Int32}(0)
     rloc = Ref{Ptr{Float64}}(C_NULL); loop_ptr = Ref{Ptr{Int32}}(C_NULL)
@@ -395,7 +405,8 @@ _libpath() = LibPath.liboftpy[]
 
 function solve!(t::Tokamaker; vacuum::Bool=false)
     buf = errbuf()
-    c_tokamaker_solve(t.tmaker_ptr, vacuum, buf)
+    nl_its = Ref{Cint}(0)
+    c_tokamaker_solve(t.tmaker_ptr, vacuum, nl_its, buf)
     check_err(buf, "solve")
     return t.equilibrium
 end
