@@ -46,7 +46,7 @@ class Openfusiontoolkit(CMakePackage):
     variant("mumps", default=False, description="Whether to build with MUMPS support")
     variant("superlu", default=False, description="Whether to build with SuperLU support")
     variant("superlu-dist", default=False, description="Whether to build with SuperLU-DIST support")
-    variant("petsc", default=True, description="Whether to build with PETSc support")
+    variant("petsc", default=False, description="Whether to build with PETSc support")
 
     # Language dependencies
     depends_on("c", type="build")
@@ -65,6 +65,7 @@ class Openfusiontoolkit(CMakePackage):
 
     # MPI support
     depends_on("mpi", when="+mpi")
+    conflicts("^mpich@5.0.0", msg="MPICH 5.0.0 has a bug in AllReduce with MPI_LOGICAL")
 
     # PETSc support
     depends_on("petsc", when="+petsc")
@@ -78,7 +79,6 @@ class Openfusiontoolkit(CMakePackage):
     depends_on("superlu@7:+fortran", when="+superlu")
     depends_on("superlu-dist", when="+superlu-dist")
     conflicts("+superlu-dist", when="~mpi")
-    conflicts("+superlu-dist", when="platform=darwin")
     with when("+mpi"):
         depends_on("mumps~complex+mpi", when="+mumps")
     with when("~mpi"):
@@ -105,16 +105,18 @@ class Openfusiontoolkit(CMakePackage):
             args.append(self.define("OFT_HDF5_HL", True))
         if "+netcdf" in self.spec:
             args.append(self.define("OFT_NETCDF_ROOT", "{0}".format(self.spec["netcdf"].prefix)))
-        if "arpack" in self.spec:
+        if "+arpack" in self.spec:
             args.append(self.define("OFT_ARPACK_ROOT", "{0}".format(self.spec["arpack-ng"].prefix)))
-        if "umfpack" in self.spec:
+        if "+umfpack" in self.spec:
             args.append(self.define("OFT_UMFPACK_ROOT", "{0}".format(self.spec["suite-sparse"].prefix)))
-        if "mumps" in self.spec:
+        if "+mumps" in self.spec:
             args.append(self.define("OFT_MUMPS_ROOT", "{0}".format(self.spec["mumps"].prefix)))
-        if "superlu" in self.spec:
+        if "+superlu" in self.spec:
             args.append(self.define("OFT_SUPERLU_ROOT", "{0}".format(self.spec["superlu"].prefix)))
-        if "superlu-dist" in self.spec:
+        if "+superlu-dist" in self.spec:
             args.append(self.define("OFT_SUPERLU_DIST_ROOT", "{0}".format(self.spec["superlu-dist"].prefix)))
+        if "+petsc" in self.spec:
+            args.append(self.define("OFT_PETSc_ROOT", "{0}".format(self.spec["petsc"].prefix)))
         return args
     
     def setup_run_environment(self, env: EnvironmentModifications) -> None:

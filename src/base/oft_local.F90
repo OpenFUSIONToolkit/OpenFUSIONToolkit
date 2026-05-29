@@ -18,10 +18,6 @@ USE, INTRINSIC :: iso_c_binding, only: c_int, c_ptr, c_long
 #ifdef __INTEL_COMPILER
 USE ifport ! Intel fortran portability library
 #endif
-! #ifdef HAVE_XML
-! USE fox_dom, ONLY: xml_node => node, xml_parsefile => parsefile, xml_hasAttribute => hasAttribute, &
-!   xml_extractDataAttribute => extractDataAttribute, xml_extractDataContent => extractDataContent
-! #endif
 IMPLICIT NONE
 !---Local types sizes
 INTEGER, PARAMETER :: i4=SELECTED_INT_KIND(9)           !< 4-Byte integer spec
