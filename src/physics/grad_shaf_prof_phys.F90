@@ -958,14 +958,14 @@ IF(.NOT.ASSOCIATED(gseq%boot_profs%total_j_phi))THEN
 END IF
 ! LCFS boundary (OFT psi=0; self%j0 is jphi_ind at LCFS; j_BS=0 at LCFS)
 gseq%boot_profs%psi_n(0)       = 0.0_r8
-gseq%boot_profs%total_j_phi(0) = alpha*self%j0
+gseq%boot_profs%total_j_phi(0) = alpha*self%j0/mu0
 gseq%boot_profs%j_bs_final(0)  = 0.0_r8
-gseq%boot_profs%j_ind_final(0) = alpha*self%j0
+gseq%boot_profs%j_ind_final(0) = alpha*self%j0/mu0
 ! Interior knots (OFT psi convention: self%x(1) near LCFS, self%x(npsi) near axis)
 gseq%boot_profs%psi_n(1:)       = self%x
-gseq%boot_profs%total_j_phi(1:) = jphi_total
-gseq%boot_profs%j_bs_final(1:)  = j_BS
-gseq%boot_profs%j_ind_final(1:) = alpha * jphi_ind
+gseq%boot_profs%total_j_phi(1:) = jphi_total/mu0
+gseq%boot_profs%j_bs_final(1:)  = j_BS/mu0
+gseq%boot_profs%j_ind_final(1:) = alpha * jphi_ind/mu0
 !--- Compute updated F*F' profile
 IF(ASSOCIATED(gseq%P_ani)) &
   CALL oft_abort('Jphi profiles do not support anisotropic pressure', &
