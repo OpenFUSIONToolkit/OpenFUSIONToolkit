@@ -6,9 +6,10 @@ using ..EquilibriumModule: TokaMakerEquilibrium
 export TokamakerFieldInterpolator, get_field_eval
 
 # Field type → (imode, dim_return)
-# Mirrors the imode mapping in _core.py:get_field_eval.
+# Mirrors the imode mapping in _core.py:get_field_eval, where imode==1 (B) has
+# field_dim=3 ([B_R, B_Z, B_phi]), imode>=5 (gradients) has 2, else 1.
 const _FIELD_TYPES = Dict{String,Tuple{Int,Int}}(
-    "B"   => (1, 2),
+    "B"   => (1, 3),
     "psi" => (2, 1),
     "F"   => (3, 1),
     "P"   => (4, 1),

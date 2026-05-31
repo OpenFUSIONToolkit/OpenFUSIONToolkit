@@ -18,7 +18,7 @@ using Triangulate: TriangulateIO, triangulate
 
 export save_gs_mesh, load_gs_mesh, GsDomain, define_region!,
        add_polygon!, add_rectangle!, add_annulus!, add_enclosed!,
-       build_mesh!, get_coils, get_conductors
+       build_mesh!, get_coils, get_conductors, save_json
 
 # ----------------------------------------------------------------------------
 # HDF5 / JSON I/O (unchanged from earlier)
@@ -837,6 +837,42 @@ function build_mesh!(dom::GsDomain; debug::Bool=false,
     minimum(reg) <= 0 && error("Meshing error: unclaimed region detected")
     dom.r = pts; dom.lc = lc; dom.reg = reg
     return pts, lc, reg
+end
+
+"""
+    save_json(dom::GsDomain, filename)
+
+Write a JSON description of the mesh domain (extents, padding, region type
+counts, per-region geometry, and region info). Mirrors Python
+`gs_Domain.save_json` — but uses each region's `get_json`-equivalent fields
+(the Python version references a nonexistent `get_dict` method and is broken).
+Region `points` are written as a list of `[r, z]` rows.
+"""
+function save_json(dom::GsDomain, filename::AbstractString)
+    regions = [OrderedDict{String,Any}(
+                   "points" => [collect(r.points[i, :]) for i in 1:size(r.points, 1)],
+                   "segments" => r.segments,
+                   "id" => r.id,
+                   "dx_curve" => r.dx_curve,
+                   "dx_vol" => r.dx_vol)
+               for r in dom.regions]
+    output = OrderedDict{String,Any}(
+        "rextent" => dom.rextent,
+        "zextents" => dom.zextents,
+        "rpad" => dom.rpad,
+        "zpad" => dom.zpad,
+        "rmax" => dom.rmax,
+        "zmin" => dom.zmin,
+        "zmax" => dom.zmax,
+        "boundary_reg" => dom.boundary_reg,
+        "reg_type_counts" => dom.reg_type_counts,
+        "regions" => regions,
+        "region_info" => dom.region_info,
+    )
+    open(filename, "w") do io
+        JSON3.write(io, output)
+    end
+    return filename
 end
 
 end # module

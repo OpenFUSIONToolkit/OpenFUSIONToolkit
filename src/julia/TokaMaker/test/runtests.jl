@@ -99,6 +99,9 @@ using TokaMaker
         @test spl["y"][1] ≈ 1.0
     end
 
+    # Pure-ASCII GEQDSK COCOS/serialization tests (no liboftpy required).
+    include("test_eqdsk.jl")
+
     # Tests below require liboftpy to be built; they short-circuit otherwise.
     if !isempty(TokaMaker.LibPath.liboftpy[])
         include("test_solovev.jl")
@@ -112,6 +115,11 @@ using TokaMaker
         include("test_tier1_basics.jl")
         include("test_eq_lifecycle.jl")
         include("test_solver_helpers.jl")
+        include("test_bootstrap.jl")
+        include("test_spheromak.jl")
+        include("test_coil.jl")
+        include("test_LTX.jl")
+        include("test_session_io.jl")
     else
         @info "Skipping runtime tests: liboftpy not located. Build OFT with -DOFT_BUILD_PYTHON=ON."
     end

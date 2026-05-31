@@ -33,8 +33,8 @@ copy/replace, a few utility/machine-file helpers, and test-suite parity. See
 
 Tracked against `src/python/OpenFUSIONToolkit/TokaMaker/`:
 
-- **Session I/O**: `save_tokamaker`/`load_tokamaker` (HDF5) C wrappers unbound;
-  equilibrium `save_TokaMaker` not ported.
+- **Session I/O**: done (`save_tokamaker`/`load_tokamaker`, `replace_eq!`); see
+  the HDF5 setup note below — liboftpy and HDF5.jl must share one libhdf5.
 - **Equilibrium lifecycle**: `copy_eq` / `replace_eq` / equilibrium `copy()` missing.
 - **Bootstrap**: self-consistent `solve_with_bootstrap` loop not ported.
 - **Utilities**: `read_mhdin`, `read_kfile`, `compute_forces_components`,
@@ -46,9 +46,9 @@ Tracked against `src/python/OpenFUSIONToolkit/TokaMaker/`:
   validation, EQDSK/COCOS round-trip, and concurrent multi-threaded solve not
   yet mirrored.
 
-Run `julia --project=. dev/check_abi_sync.jl` to re-check FFI drift; currently
-4 unbound C symbols (`oft_smesh_get`, `oft_vmesh_get`, `tokamaker_save_tokamaker`,
-`tokamaker_load_tokamaker`).
+Run `julia --project=. dev/check_abi_sync.jl` to re-check FFI drift;
+`tokamaker_save_tokamaker`/`tokamaker_load_tokamaker` are now bound, leaving
+`oft_smesh_get`/`oft_vmesh_get` deferred (tessellated-mesh getters).
 
 ## Library resolution
 
@@ -61,6 +61,30 @@ Run `julia --project=. dev/check_abi_sync.jl` to re-check FFI drift; currently
 
 Build OFT with `cmake -DOFT_BUILD_PYTHON=ON` (which also produces `liboftpy`)
 before using this package end-to-end.
+
+## HDF5 setup (required for session I/O)
+
+`TokaMaker.jl` uses HDF5.jl (for mesh I/O), and liboftpy also calls HDF5
+internally (`save_tokamaker`/`load_tokamaker`, `save_mug`). By default HDF5.jl
+loads its own libhdf5 (from HDF5_jll) while liboftpy links a *different* one
+(from the OFT build). Two libhdf5 copies in one process split HDF5's global
+state, so liboftpy's HDF5 writes silently produce an empty file and reads fail
+("Failed to read FE order") — even on valid files.
+
+Fix: point HDF5.jl at liboftpy's libhdf5 by adding a `LocalPreferences.toml` in
+the package directory (it is gitignored — the path is machine-specific):
+
+```toml
+[HDF5]
+libhdf5 = "<repo>/builds/.../lib/libhdf5.dylib"
+libhdf5_hl = "<repo>/builds/.../lib/libhdf5.dylib"
+```
+
+Find the exact path with `otool -L <liboftpy.dylib> | grep libhdf5` (macOS) or
+`ldd` (Linux), then use the unversioned `libhdf5.{dylib,so}` in that directory
+for both keys (the OFT build omits a separate high-level library; HDF5.jl
+resolves HL symbols lazily). Restart Julia after creating the file. Without it,
+the session-I/O tests skip with a reminder.
 
 ## Quick start
 

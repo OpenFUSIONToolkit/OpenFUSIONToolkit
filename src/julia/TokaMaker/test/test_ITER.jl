@@ -175,6 +175,49 @@ end
                     @test_throws ErrorException set_coil_current_dist!(gs, coil_name; curr_dist=ones(3))
                     @test_throws KeyError set_coil_current_dist!(gs, "NoSuchCoil")
                 end
+
+                @testset "compute_forces_components" begin
+                    # No Python golden (untested there); check structure +
+                    # finiteness + that conductor cells are masked and carry B.
+                    psi = get_psi(gs; normalized=false)
+                    J, B, mask, R = compute_forces_components(gs, psi)
+                    @test length(J) == gs.np
+                    @test size(B) == (gs.np, 3)
+                    @test length(mask) == gs.nc
+                    @test size(R) == (gs.np, 3)
+                    @test count(mask) > 0                  # ITER has conductors
+                    @test all(isfinite, B)
+                    # psi is restored afterward (no net change to the equilibrium)
+                    @test get_psi(gs; normalized=false) ≈ psi rtol = 1e-12
+                    # cell-centered variant returns per-cell arrays
+                    Jc, Bc, maskc, Rc = compute_forces_components(gs, psi; cell_centered=true)
+                    @test length(Jc) == gs.nc
+                    @test size(Bc) == (gs.nc, 3)
+                    @test size(Rc) == (gs.nc, 3)
+                end
+
+                @testset "EQDSK save/read round-trip" begin
+                    gs.equilibrium.F0 = gs.F0
+                    mktempdir() do d
+                        fn = joinpath(d, "iter.geqdsk")
+                        save_eqdsk(gs.equilibrium, fn; nr=65, nz=65,
+                                   rbounds=[3.0, 9.0], zbounds=[-5.0, 5.0])
+                        @test isfile(fn)
+                        e = read_eqdsk(fn)
+                        @test e["nr"] == 65 && e["nz"] == 65
+                        @test length(e["fpol"]) == 65
+                        @test length(e["pres"]) == 65
+                        @test length(e["qpsi"]) == 65
+                        @test all(isfinite, e["fpol"])
+                        @test all(isfinite, e["qpsi"])
+                        # Magnetic axis matches the equilibrium o-point.
+                        op = o_point(gs)
+                        @test e["raxis"] ≈ op[1] rtol = 1e-2
+                        @test e["zaxis"] ≈ op[2] rtol = 1e-2
+                        # Edge F = vacuum F0 = R0*B0.
+                        @test e["fpol"][end] ≈ gs.F0 rtol = 1e-2
+                    end
+                end
             end
         end
     end

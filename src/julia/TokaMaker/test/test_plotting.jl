@@ -52,5 +52,23 @@ using TokaMaker
             @test fig isa Makie.Figure
             @test ax isa Makie.Axis
         end
+
+        @testset "plot_mesh returns Figure" begin
+            @test length(methods(plot_mesh)) > 0
+            fig, ax = plot_mesh(gs)
+            @test fig isa Makie.Figure
+            @test ax isa Makie.Axis
+            fig2 = Makie.Figure(); ax2 = Makie.Axis(fig2[1, 1])
+            @test plot_mesh(ax2, gs; show_regions=false) === nothing
+        end
+
+        @testset "plot_topology returns Figure" begin
+            @test length(methods(plot_topology)) > 0
+            fig, ax = plot_topology(dom)
+            @test fig isa Makie.Figure
+            @test ax isa Makie.Axis
+            fig2 = Makie.Figure(); ax2 = Makie.Axis(fig2[1, 1])
+            @test plot_topology(ax2, dom; rotate=true) === nothing
+        end
     end
 end

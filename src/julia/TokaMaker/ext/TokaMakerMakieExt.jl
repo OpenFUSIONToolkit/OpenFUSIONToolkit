@@ -220,6 +220,77 @@ function TokaMaker.plot_machine(gs::Tokamaker; kwargs...)
 end
 
 # ---------------------------------------------------------------------------
+# plot_mesh — computational mesh + region coloring (Python plot_mesh, the
+# non-tessellated path: uses the raw triangle mesh held in gs.r/gs.lc/gs.reg).
+
+function TokaMaker.plot_mesh(fig, ax::Makie.AbstractAxis, gs::Tokamaker;
+                             lw::Real=0.5, show_regions::Bool=true,
+                             region_colormap=:tab20)
+    isempty(gs.lc) && error("plot_mesh: no mesh; call setup_mesh! first")
+    r, z = _rzplot(gs)
+    faces = _faces1(gs)
+    if show_regions
+        _tripcolor!(ax, r, z, faces, fill(true, gs.nc), Float64.(gs.reg);
+                    colormap=region_colormap)
+    end
+    pts = [Point2f(r[i], z[i]) for i in eachindex(r)]
+    tris = [GeometryBasics.TriangleFace{Int}(faces[k, 1], faces[k, 2], faces[k, 3])
+            for k in 1:size(faces, 1)]
+    Makie.wireframe!(ax, GeometryBasics.Mesh(pts, tris); color=(:black, 0.5),
+                     linewidth=lw)
+    ax.aspect = Makie.DataAspect()
+    return nothing
+end
+
+TokaMaker.plot_mesh(ax::Makie.AbstractAxis, gs::Tokamaker; kwargs...) =
+    TokaMaker.plot_mesh(nothing, ax, gs; kwargs...)
+
+function TokaMaker.plot_mesh(gs::Tokamaker; kwargs...)
+    fig = Makie.Figure()
+    ax = Makie.Axis(fig[1, 1]; xlabel="R (m)", ylabel="Z (m)")
+    TokaMaker.plot_mesh(fig, ax, gs; kwargs...)
+    return fig, ax
+end
+
+# ---------------------------------------------------------------------------
+# plot_topology — region-defining contours (Python `gs_Domain.plot_topology`,
+# which plots each region's boundary segments before meshing). Operates on a
+# `GsDomain` and draws each region's contour from its `points`/`segments`.
+
+function TokaMaker.plot_topology(fig, ax::Makie.AbstractAxis, dom::TokaMaker.GsDomain;
+                                 linewidth::Real=1.0, rotate::Bool=false)
+    for region in dom.regions
+        pts = region.points
+        for seg in region.segments
+            x = [pts[i, 1] for i in seg]
+            y = [pts[i, 2] for i in seg]
+            if rotate
+                Makie.lines!(ax, y, x; linewidth=linewidth)
+            else
+                Makie.lines!(ax, x, y; linewidth=linewidth)
+            end
+        end
+    end
+    ax.aspect = Makie.DataAspect()
+    if rotate
+        ax.xlabel = "Z (m)"; ax.ylabel = "R (m)"
+    else
+        ax.xlabel = "R (m)"; ax.ylabel = "Z (m)"
+    end
+    return nothing
+end
+
+TokaMaker.plot_topology(ax::Makie.AbstractAxis, dom::TokaMaker.GsDomain; kwargs...) =
+    TokaMaker.plot_topology(nothing, ax, dom; kwargs...)
+
+function TokaMaker.plot_topology(dom::TokaMaker.GsDomain; kwargs...)
+    fig = Makie.Figure()
+    ax = Makie.Axis(fig[1, 1]; xlabel="R (m)", ylabel="Z (m)")
+    TokaMaker.plot_topology(fig, ax, dom; kwargs...)
+    return fig, ax
+end
+
+# ---------------------------------------------------------------------------
 # plot_psi
 
 function TokaMaker.plot_psi(fig, ax::Makie.AbstractAxis, gs::Tokamaker;

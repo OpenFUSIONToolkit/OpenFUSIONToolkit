@@ -92,4 +92,25 @@ end
     else
         @info "ITER_geom.json not found at $ITER_GEOM; skipping ITER mesh test"
     end
+
+    @testset "save_json round-trips the domain description" begin
+        dom = GsDomain()
+        define_region!(dom, "plasma", 0.02, "plasma")
+        add_rectangle!(dom, 1.0, 0.0, 0.4, 0.6, "plasma")
+        mktempdir() do d
+            fn = joinpath(d, "dom.json")
+            @test save_json(dom, fn) == fn
+            @test isfile(fn)
+            parsed = JSON3.read(read(fn, String))
+            for k in ("rextent", "zextents", "rpad", "zpad", "rmax", "zmin",
+                      "zmax", "boundary_reg", "reg_type_counts", "regions",
+                      "region_info")
+                @test haskey(parsed, Symbol(k))
+            end
+            @test length(parsed["regions"]) == length(dom.regions)
+            @test haskey(parsed["regions"][1], :points)
+            # Region names are upper-cased by define_region! ("plasma" -> "PLASMA").
+            @test haskey(parsed["region_info"], :PLASMA)
+        end
+    end
 end

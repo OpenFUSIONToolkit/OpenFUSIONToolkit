@@ -438,13 +438,17 @@ function get_q(eq::TokaMakerEquilibrium;
     psi_call = eq.psi_convention == 0 ? (1.0 .- psi_user) : copy(psi_user)
     n = length(psi_call)
     qvals = zeros(Float64, n)
-    ravgs = zeros(Float64, 3, n)
+    # Fortran fills ravgs(npsi,3) (column-major: <R>,<1/R>,dV/dPsi contiguous per
+    # column). Allocate matching (n,3), then permute to the (3,n) return shape so
+    # ravgs[1,:]=<R>, [2,:]=<1/R>, [3,:]=dV/dPsi.
+    ravgs = zeros(Float64, n, 3)
     dl = Ref{Float64}(compute_geo ? 1.0 : -1.0)
     rbounds = zeros(Float64, 2, 2)
     zbounds = zeros(Float64, 2, 2)
     buf = errbuf()
     c_tokamaker_get_q(eq.eq_ptr, n, psi_call, qvals, ravgs, dl, rbounds, zbounds, buf)
     check_err(buf, "get_q")
+    ravgs = permutedims(ravgs)
     psi_save = psi_user
     # Transpose rbounds/zbounds so the Julia view uses Python's [i,j] indexing
     # convention: [minmax_index, coord_index]. Index 1 = min, 2 = max.
@@ -477,12 +481,20 @@ function calc_sauter_fc(eq::TokaMakerEquilibrium;
         collect(range(Float64(psi_pad), 1.0 - Float64(psi_pad); length=npsi)) :
         Vector{Float64}(psi)
     n = length(psi_in)
+    # Tokamak convention (0): sample at 1-psi so results are axis-first, matching
+    # Python calc_sauter_fc / get_q / get_profiles.
+    psi_call = eq.psi_convention == 0 ? (1.0 .- psi_in) : copy(psi_in)
     fc = zeros(Float64, n)
-    r_avgs = zeros(Float64, 3, n)
-    modb_avgs = zeros(Float64, 2, n)
+    # Fortran fills r_avgs(npsi,3) and modb_avgs(npsi,2) column-major; allocate
+    # matching (n,k) then permute to (k,n) return shape (r_avgs[1,:]=<R>,
+    # [2,:]=<1/R>, [3,:]=<a>).
+    r_avgs = zeros(Float64, n, 3)
+    modb_avgs = zeros(Float64, n, 2)
     buf = errbuf()
-    c_tokamaker_sauter_fc(eq.eq_ptr, n, psi_in, fc, r_avgs, modb_avgs, buf)
+    c_tokamaker_sauter_fc(eq.eq_ptr, n, psi_call, fc, r_avgs, modb_avgs, buf)
     check_err(buf, "sauter_fc")
+    r_avgs = permutedims(r_avgs)
+    modb_avgs = permutedims(modb_avgs)
     return (psi=psi_in, fc=fc, r_avgs=r_avgs, modb_avgs=modb_avgs)
 end
 

@@ -440,7 +440,12 @@ function vac_solve!(t::Tokamaker;
         c_tokamaker_vac_solve(t.tmaker_ptr, psi_vec, rhs_ptr, buf)
     end
     check_err(buf, "vac_solve")
-    return t.equilibrium
+    # tokamaker_vac_solve writes the solution into psi_vec. Mirror Python:
+    # return a standalone equilibrium copy holding the vacuum psi (the active
+    # equilibrium is left unchanged).
+    vac_eq = copy_eq(t; skip_targets=true, skip_constraints=true)
+    EquilibriumModule.set_psi!(vac_eq, psi_vec; update_bounds=false)
+    return vac_eq
 end
 
 """
