@@ -342,9 +342,7 @@ class TokaMaker():
         ncoils = c_int()
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        print('About to call tokamaker_setup')
         tokamaker_setup(self._tMaker_ptr,order,full_domain,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
-        print('Finished calling tokamaker_setup')
         if error_string.value != b'':
             raise Exception(error_string.value)
         # Update vacuum flux
@@ -353,6 +351,7 @@ class TokaMaker():
         self.ncoils = ncoils.value
         self.Lcoils = numpy.ctypeslib.as_array(Lmat_loc,shape=(self.ncoils,self.ncoils))
         # Create equilibirum object
+        print('Creating EQ object')
         self._tMaker_equil = TokaMaker_equilibrium(self)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_equil_set(self._tMaker_ptr,self._tMaker_equil.c_ptr,error_string)
@@ -2389,7 +2388,7 @@ class TokaMaker_equilibrium():
         pp_file = 'none'
         if pp_prof is not None:
             pp_file = self._oft_env.unique_tmpfile('tokamaker_p.prof')
-            create_prof_file(self, pp_file, pp_prof, "P'")
+            create_prof_file(self, pp_file, pp_prof, "P'", self._F_SOL)
             delete_files.append(pp_file)
         ffp_NI_file = 'none'
         if ffp_NI_prof is not None:
