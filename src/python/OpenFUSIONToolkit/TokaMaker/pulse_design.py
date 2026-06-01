@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import platform
+from pathlib import Path
 import pprint
 import shutil
 import subprocess
@@ -132,6 +133,16 @@ BASE_CONFIG = {
         'chi_pereverzev': 30,
         'D_pereverzev': 15,
         'use_pereverzev': True,
+        # Loosened from TORAX defaults (n_max=30, residual_tol=1e-5,
+        # residual_coarse_tol=1e-2) since the outer TX-TM coupling loop already
+        # iterates to self-consistency - per-step inner tolerance does not need
+        # to be machine-precision. Benchmarked on ITER 15 MA flattop + 60 s
+        # rampdown: identical Te/ne/q0/li to 4 sig figs vs strict tols, ~5x
+        # faster per inner solve, 19/19 raw_tx in both coupling loops. Users
+        # with very stiff scenarios can re-tighten via their own solver block.
+        'n_max_iterations': 10,
+        'residual_tol': 1e-3,
+        'residual_coarse_tol': 1e-1,
     },
     'time_step_calculator': {
         'calculator_type': 'fixed',
@@ -597,6 +608,7 @@ class TokaMaker_TORAX:
         self._x_point_targets = None
         self._x_point_weight = 100.0
         self._strike_point_targets = None
+        self._trim_lcfs = True
 
         self._eqdsk_skip = []
 
@@ -1143,15 +1155,19 @@ class TokaMaker_TORAX:
         if Ve_max is not None:
             self._Ve_max = Ve_max
 
-    def set_x_points(self, diverted_times=None, x_point_targets=None, x_point_weight=100.0, strike_point_targets=None):
+    def set_x_points(self, diverted_times=None, x_point_targets=None, x_point_weight=100.0, strike_point_targets=None,
+                     trim_lcfs=True):
         r'''! Configure diverted window, X-point targets, and optional strike points.
-        
+
                 @param diverted_times Tuple (t_start, t_end) defining the diverted plasma window.
                 @param x_point_targets X-point target locations, shape (n_xpoints, 2) with [R, Z] pairs.
                 @param x_point_weight Weight for saddle-point constraints.
                 @param strike_point_targets Strike point locations, shape (n_points, 2) with [R, Z] pairs,
                                             or None to disable.
-                
+                @param trim_lcfs When True (default) and X-points are active, LCFS isoflux targets near
+                                 the X-point(s) are removed. When False, all defined isoflux (LCFS) points
+                                 are used together with the defined X-point(s).
+
         '''
         if diverted_times is not None and len(diverted_times) != 2:
             raise ValueError('diverted_times must be a (t_start, t_end) tuple.')
@@ -1160,6 +1176,7 @@ class TokaMaker_TORAX:
         self._x_point_targets = None if x_point_targets is None else np.atleast_2d(x_point_targets)
         self._x_point_weight = x_point_weight
         self._strike_point_targets = None if strike_point_targets is None else np.atleast_2d(strike_point_targets)
+        self._trim_lcfs = trim_lcfs
 
 
     # ─── TORAX (TX) Methods ───────────────────────────────────────────────────
@@ -2095,17 +2112,19 @@ class TokaMaker_TORAX:
                     self._log(f'steady_state_mode: could not capture t_final profiles for next loop: {_e}')
             return consumed_flux, consumed_flux_integral
 
-    def _tx_update(self, i, data_tree):
+    def _tx_update(self, i, data_tree, tx_time=None):
         r'''! Update the simulation state from TORAX results at timestep i.
         
                 If sawtooth averaging is enabled, all profile and scalar extractions 
                 use time-averaged methods to smooth sawtooth oscillations.
         
-                @param i Timestep index.
+                @param i Timestep index (TokaMaker time index; TM comparison fields in plots use this key).
                 @param data_tree Result object from Torax.
+                @param tx_time If not None, use this time (s) for all TORAX extractions instead of
+                       self._tm_times[i] (e.g. last TORAX output time after a failed run).
                 
         '''
-        t = self._tm_times[i]
+        t = float(tx_time) if tx_time is not None else self._tm_times[i]
 
         # ── Scalars ─────────────────────────────────────────────────────────
         self._state['Ip'][i]        = self._extract_tx_scalar(data_tree, 'Ip', t)
@@ -2394,15 +2413,16 @@ class TokaMaker_TORAX:
                     self._tm.set_saddle_constraints(self._x_point_targets, saddle_weights)
 
                     # trims lcfs targets near X-point(s)
-                    perc_limit = 0.60       # LCFS points above percentage limit* max(abs(Z)) are removed from isoflux targets
-                    Z_max_abs = np.max(np.abs(lcfs[:, 1]))
-                    Z_lim = perc_limit * Z_max_abs
-                    if np.shape(self._x_point_targets)[0] == 1 and self._x_point_targets[0][1] > 0: # upper single null
-                        lcfs = lcfs[lcfs[:, 1] <= Z_lim]   
-                    elif np.shape(self._x_point_targets)[0] == 1 and self._x_point_targets[0][1] < 0: # lower single null
-                        lcfs = lcfs[lcfs[:, 1] >= -Z_lim]
-                    elif np.shape(self._x_point_targets)[0] == 2: # double null
-                        lcfs = lcfs[np.abs(lcfs[:, 1]) <= Z_lim]
+                    if self._trim_lcfs:
+                        perc_limit = 0.60       # LCFS points above percentage limit* max(abs(Z)) are removed from isoflux targets
+                        Z_max_abs = np.max(np.abs(lcfs[:, 1]))
+                        Z_lim = perc_limit * Z_max_abs
+                        if np.shape(self._x_point_targets)[0] == 1 and self._x_point_targets[0][1] > 0: # upper single null
+                            lcfs = lcfs[lcfs[:, 1] <= Z_lim]
+                        elif np.shape(self._x_point_targets)[0] == 1 and self._x_point_targets[0][1] < 0: # lower single null
+                            lcfs = lcfs[lcfs[:, 1] >= -Z_lim]
+                        elif np.shape(self._x_point_targets)[0] == 2: # double null
+                            lcfs = lcfs[np.abs(lcfs[:, 1]) <= Z_lim]
 
                 # When diverted, add manually specified strike points to isoflux targets
                 if use_x_points and self._strike_point_targets is not None:
@@ -2522,10 +2542,10 @@ class TokaMaker_TORAX:
                             torax_accepted = True
                             if _attempt_idx > 0 and self._output_mode == 'debug':
                                 base_nz = EQDSK_SAVE_NR_NZ_SEQUENCE[0]
-                                self._print(
-                                    f'    EQDSK {os.path.basename(eq_name)}: base nr=nz={base_nz} rejected by TORAX; '
-                                    f'accepted at nr=nz={nr_nz}.'
-                                )
+                                # self._print(
+                                #     f'    EQDSK {os.path.basename(eq_name)}: base nr=nz={base_nz} rejected by TORAX; '
+                                #     f'accepted at nr=nz={nr_nz}.'
+                                # )
                             break
                     if not torax_accepted:
                         # Same coupling outcome as a failed TM solve: skip this time for TORAX geometry
@@ -2953,22 +2973,6 @@ class TokaMaker_TORAX:
         self._run_timestamp = None if run_name == 'tmp' else dt_str
         self._output_file_tag = None if run_name == 'tmp' else f'{run_name}_{dt_str}'
 
-        # ── Log file: same directory as TokaMaker_TORAX_outputs (i.e. cwd / './') ──
-        if run_name == 'tmp':
-            self._log_file = os.path.abspath('TokaMaker_TORAX_log_tmp.log')
-        else:
-            self._log_file = os.path.abspath(f'TokaMaker_TORAX_log_{run_name}_{dt_str}.log')
-        with open(self._log_file, 'w'):
-            pass
-        print(f'  Log file: {self._log_file}', flush=True)
-        self._log(f'Log file: {self._log_file}')
-
-        # In debug mode, attach file handler to Python logging so library
-        # messages (TORAX, JAX, etc.) are captured in the log file.
-        if self._debug_mode:
-            self._logging_configured = False
-            self.configure_redirect_to_log()
-
         # ── Output directory ──
         if self._output_mode is not False:
             if run_name == 'tmp':
@@ -2987,6 +2991,24 @@ class TokaMaker_TORAX:
             self._fname_out = None
             self._output_file_tag = None
             self._run_timestamp = None
+
+        # ── Log file: saved in the output directory if there is one, otherwise
+        #    in the script's run directory (cwd). ──
+        log_dir = self._out_dir if self._out_dir is not None else '.'
+        if run_name == 'tmp':
+            self._log_file = os.path.abspath(os.path.join(log_dir, 'TokaMaker_TORAX_log_tmp.log'))
+        else:
+            self._log_file = os.path.abspath(os.path.join(log_dir, f'TokaMaker_TORAX_log_{run_name}_{dt_str}.log'))
+        with open(self._log_file, 'w'):
+            pass
+        print(f'  Log file: {self._log_file}', flush=True)
+        self._log(f'Log file: {self._log_file}')
+
+        # In debug mode, attach file handler to Python logging so library
+        # messages (TORAX, JAX, etc.) are captured in the log file.
+        if self._debug_mode:
+            self._logging_configured = False
+            self.configure_redirect_to_log()
 
         # ── EQDSK directory: persisted only for debug mode ──
         if self._output_mode == 'debug':
@@ -3062,7 +3084,8 @@ class TokaMaker_TORAX:
                     # On any TORAX failure (e.g. temperature collapse), save the scalar
                     # plot so the user has TM/TX time-series up to the failure point.
                     # TokaMaker entries plot as zeros / prior-loop values; that's expected.
-                    if self._output_mode in ('normal', 'minimal', 'debug') and self._out_dir is not None:
+                    # Save whenever fly() created an output directory (any non-False output_mode).
+                    if self._out_dir is not None:
                         scalars_name = f'scalars_loop{self._current_loop:03d}_torax_failed.png'
                         if self._output_file_tag is not None:
                             scalars_name = f'{self._output_file_tag}_{scalars_name}'
@@ -3073,11 +3096,95 @@ class TokaMaker_TORAX:
                                 f'TORAX failed at loop {self._current_loop} ({_tx_exc}); '
                                 f'scalars plot saved to {_scalars_path}'
                             )
-                            self._print(f'  TORAX failed; scalars plot saved to {_scalars_path}')
+                            self._print(
+                                '  TORAX failed; scalars plot saved to '
+                                f'{_fmt_saved_artifact_link(_scalars_path)}'
+                            )
                         except Exception as _e:
                             self._log(
                                 f'plot_scalars failed after TORAX failure at loop '
                                 f'{self._current_loop}: {_e}'
+                            )
+                            self._print(
+                                f'  TORAX failed; scalars plot not saved: {_e}'
+                            )
+                        # Same layout as profile_plot at the last TORAX save (e.g. low-T stop).
+                        try:
+                            dt_fail = getattr(self, '_data_tree', None)
+                            if (
+                                dt_fail is not None
+                                and hasattr(dt_fail, 'profiles')
+                                and hasattr(dt_fail.profiles, 'psi')
+                            ):
+                                tx_times_fail = dt_fail.profiles.psi.coords['time'].values
+                                if len(tx_times_fail) > 0:
+                                    t_final_tx = float(tx_times_fail[-1])
+                                    _tm_arr = np.asarray(self._tm_times, dtype=float)
+                                    pp_tm = self._state.get('pp_prof_tm') or {}
+                                    if pp_tm:
+                                        i_prof = int(
+                                            min(
+                                                pp_tm.keys(),
+                                                key=lambda idx: abs(float(_tm_arr[idx]) - t_final_tx),
+                                            )
+                                        )
+                                    else:
+                                        i_prof = int(np.argmin(np.abs(_tm_arr - t_final_tx)))
+                                        if not _seed_tm_profiles_for_failure_profile_plot(self, i_prof):
+                                            self._log(
+                                                f'TORAX failed at loop {self._current_loop}: could not seed '
+                                                f'TM profiles for failure profile plot (t_idx={i_prof}).'
+                                            )
+                                            self._print(
+                                                '  TORAX failed; profile plot (last TORAX save) skipped '
+                                                '(no TM profiles and no seed EQDSK profiles for this index).'
+                                            )
+                                            i_prof = None
+                                    if i_prof is not None:
+                                        self._tx_update(i_prof, dt_fail, tx_time=t_final_tx)
+                                        prof_name = (
+                                            f'profile_loop{self._current_loop:03d}_torax_failed_tfinal.png'
+                                        )
+                                        if self._output_file_tag is not None:
+                                            prof_name = f'{self._output_file_tag}_{prof_name}'
+                                        _prof_path = os.path.join(self._out_dir, prof_name)
+                                        profile_plot(
+                                            self, i_prof, t_final_tx,
+                                            save_path=_prof_path, display=False,
+                                        )
+                                        self._log(
+                                            f'TORAX failed at loop {self._current_loop} ({_tx_exc}); '
+                                            f'profile plot (last TORAX time t={t_final_tx:.6g} s, TM idx {i_prof}) '
+                                            f'saved to {_prof_path}'
+                                        )
+                                        self._print(
+                                            '  TORAX failed; profile plot (last TORAX save) saved to '
+                                            f'{_fmt_saved_artifact_link(_prof_path)}'
+                                        )
+                                else:
+                                    self._log(
+                                        f'TORAX failed at loop {self._current_loop}: no TORAX time coordinates '
+                                        f'in data_tree; skipping failure profile plot.'
+                                    )
+                                    self._print(
+                                        '  TORAX failed; profile plot (last TORAX save) skipped '
+                                        '(no times in TORAX output).'
+                                    )
+                            else:
+                                self._log(
+                                    f'TORAX failed at loop {self._current_loop}: no partial data_tree; '
+                                    f'skipping failure profile plot.'
+                                )
+                                self._print(
+                                    '  TORAX failed; profile plot (last TORAX save) skipped '
+                                    '(no partial TORAX data_tree).'
+                                )
+                        except Exception as _e:
+                            self._log(
+                                f'profile_plot after TORAX failure at loop {self._current_loop}: {_e}'
+                            )
+                            self._print(
+                                f'  TORAX failed; profile plot (last TORAX save) not saved: {_e}'
                             )
                     raise
 
@@ -3108,9 +3215,11 @@ class TokaMaker_TORAX:
                         self._log(f'plot_scalars failed at loop {self._current_loop}: {_e}')
 
                 if self._output_mode == 'debug':
+                    _loop_elapsed = time.perf_counter() - _t_coupling_loop0
+                    _loop_mins, _loop_secs = divmod(_loop_elapsed, 60)
                     self._print(
                         f'  Loop {self._current_loop} wall time: '
-                        f'{time.perf_counter() - _t_coupling_loop0:.3f} s'
+                        f'{int(_loop_mins)}m {_loop_secs:.1f}s'
                     )
 
                 cflux_tx_prev = cflux_tx
@@ -3470,6 +3579,44 @@ def _make_temp_dir_viz():
     return tempfile.mkdtemp(prefix='TokaMaker_TORAX_viz_')
 
 
+def _fmt_saved_artifact_link(path):
+    r'''! Absolute path as a file:// URI when possible (terminal / IDE hyperlink), else abs path.'''
+    abs_path = os.path.abspath(path)
+    try:
+        return Path(abs_path).as_uri()
+    except ValueError:
+        return abs_path
+
+
+def _seed_tm_profiles_for_failure_profile_plot(tt, i):
+    r'''! Fill TM comparison fields for profile_plot from seed EQDSK/GS inputs when TM has not run at index i.'''
+    s = tt._state
+    if i in s.get('pp_prof_tm', {}):
+        return True
+    if i not in s.get('pp_prof', {}):
+        return False
+    s.setdefault('pp_prof_tm', {})
+    s.setdefault('ffp_prof_tm', {})
+    s.setdefault('p_prof_tm', {})
+    s.setdefault('psi_tm', {})
+    s.setdefault('q_prof_tm', {})
+    s['pp_prof_tm'][i] = copy.deepcopy(s['pp_prof'][i])
+    s['ffp_prof_tm'][i] = copy.deepcopy(s['ffp_prof'][i])
+    p_axis = float(s['pax'][i])
+    p_tm = copy.deepcopy(s['p_prof_eqdsk'][i])
+    p_tm['y'] = np.asarray(p_tm['y'], dtype=float) * max(p_axis, 1e-300)
+    s['p_prof_tm'][i] = p_tm
+    psi_a = float(s['psi_axis_tm'][i])
+    psi_l = float(s['psi_lcfs_tm'][i])
+    s['psi_tm'][i] = {
+        'x': tt._psi_N.copy(),
+        'y': psi_a + (psi_l - psi_a) * tt._psi_N,
+        'type': 'linterp',
+    }
+    s['q_prof_tm'][i] = copy.deepcopy(s['q_prof_eqdsk'][i])
+    return True
+
+
 def _x_points_active(tt, i, t=None):
     r'''! Return True when X-point targets should be applied at timestep index i.'''
     diverted = getattr(tt, '_diverted_times', None)
@@ -3505,8 +3652,6 @@ def profile_plot(tt, i, t, save_path=None, display=True):
     r'''! Detailed profile comparison at a single timestep.'''
     s = tt._state
     psi_N = tt._psi_N
-
-    tm_psi, tm_f_prof, tm_fp_prof, tm_p_prof, tm_pp_prof = tt._tm.get_profiles(npsi=len(tt._psi_N))
 
     fig, axes = plt.subplots(6, 3, figsize=(20, 24))
     plt.suptitle(f'loop {tt._current_loop} - t-idx {i}/{len(tt._tm_times)-1} - t = {t:.1f} s', fontsize=14)
@@ -4462,8 +4607,56 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # (2,0): slot freed (power channels moved to bottom row); keep axis for future use.
-    axes[2, 0].axis('off')
+    # (2,0): scalar resistance R = eta * plasma cross-sectional area + TORAX v_loop
+    ax = axes[2, 0]
+    ax.set_title(r'Scalar resistance $R$ & $V_{loop}$ (TX)')
+    area_tm = np.pi * np.asarray(s['a'], dtype=float) ** 2 * np.asarray(s['kappa'], dtype=float)
+    eta_tm_scalar = np.full(len(times), np.nan, dtype=float)
+    for ii in range(len(times)):
+        eta_entry = s.get('eta_prof', {}).get(ii)
+        if eta_entry is None:
+            continue
+        x_eta = np.asarray(eta_entry.get('x', []), dtype=float)
+        y_eta = np.asarray(eta_entry.get('y', []), dtype=float)
+        if y_eta.size == 0:
+            continue
+        if x_eta.size == y_eta.size and x_eta.size > 0:
+            eta_tm_scalar[ii] = y_eta[np.argmin(np.abs(x_eta))]
+        else:
+            eta_tm_scalar[ii] = y_eta[0]
+    r_tm_scalar = eta_tm_scalar * area_tm
+    if np.any(np.isfinite(r_tm_scalar)):
+        ax.plot(
+            times, r_tm_scalar, color=COLOR_TM, ls='-', marker='o', ms=MK_SZ, lw=1,
+            label=r'$R$ TM ($\psi_N \approx 0$)',
+        )
+    tx_eta_names = ('eta', 'eta_parallel')
+    for tx_eta_name in tx_eta_names:
+        t_eta_tx, y_eta_tx = _tx_scalar(tt, tx_eta_name)
+        if t_eta_tx is None:
+            continue
+        area_tx = np.interp(t_eta_tx, times, area_tm)
+        r_tx = np.asarray(y_eta_tx, dtype=float) * area_tx
+        ax.plot(
+            t_eta_tx, r_tx, color=COLOR_TX, ls='-', lw=1.1, label=r'$R$ TX',
+        )
+        break
+    ax.set_xlabel('Time [s]')
+    ax.set_ylabel(r'$R$ [$\Omega$]')
+    r_positive = np.isfinite(r_tm_scalar) & (r_tm_scalar > 0)
+    if np.any(r_positive):
+        ax.set_yscale('log')
+    ax.grid(True, alpha=0.3)
+    ax2_eta = ax.twinx()
+    t_vl_tx, y_vl_tx = _tx_scalar(tt, 'v_loop_lcfs')
+    if t_vl_tx is not None:
+        ax2_eta.plot(t_vl_tx, y_vl_tx, color='tab:green', ls='--', lw=1, label=r'$V_{loop}$ TX')
+    ax2_eta.set_ylabel(r'$V_{loop}$ [V]')
+    ax2_eta.tick_params(axis='y')
+    h1_eta, l1_eta = ax.get_legend_handles_labels()
+    h2_eta, l2_eta = ax2_eta.get_legend_handles_labels()
+    if h1_eta or h2_eta:
+        ax.legend(h1_eta + h2_eta, l1_eta + l2_eta, fontsize=8, loc='upper left')
 
     # (2,1): beta_N
     ax = axes[2, 1]
@@ -4566,17 +4759,30 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # Bottom row (right): L–H transition power threshold.
+    # Bottom row (right): L–H transition power threshold, showing the high- and
+    # low-density branches of the Martin and Delabie scalings. The selected P_LH
+    # rides whichever branch is active; the crossover is at n_e_min_P_LH.
     ax = ax_plh
-    ax.set_title(r'$P_{\mathrm{LH}}$ [W] (log scale)')
+    ax.set_title(r'$P_{\mathrm{LH}}$ [W]')
     t_plh, y_plh = _tx_scalar(tt, 'P_LH')
     if t_plh is not None:
-        y = np.asarray(y_plh, dtype=float)
-        y_plot = np.where((y > 0) & np.isfinite(y), y, np.nan)
-        ax.plot(t_plh, y_plot, 'k-', linewidth=1.2, label=r'$P_{\mathrm{LH}}$ TX')
-        if np.any(np.isfinite(y_plot) & (y_plot > 0)):
-            ax.set_yscale('log')
-        ax.legend(fontsize=8, loc='upper left')
+        ax.plot(t_plh, y_plh, 'k-', linewidth=1.4, label=r'$P_{\mathrm{LH}}$ Martin', zorder=6)
+        t_m_hd, y_m_hd = _tx_scalar(tt, 'P_LH_high_density')
+        t_m_ld, y_m_ld = _tx_scalar(tt, 'P_LH_low_density')
+        if t_m_hd is not None:
+            ax.plot(t_m_hd, y_m_hd, color='tab:blue', ls='--', lw=1, label='Martin high-n')
+        if t_m_ld is not None:
+            ax.plot(t_m_ld, y_m_ld, color='tab:cyan', ls=':', lw=1, label='Martin low-n')
+        t_d, y_d = _tx_scalar(tt, 'P_LH_delabie')
+        t_d_hd, y_d_hd = _tx_scalar(tt, 'P_LH_delabie_high_density')
+        t_d_ld, y_d_ld = _tx_scalar(tt, 'P_LH_delabie_low_density')
+        if t_d is not None:
+            ax.plot(t_d, y_d, color='tab:red', ls='-', lw=1.4, label='Delabie', zorder=5)
+        if t_d_hd is not None:
+            ax.plot(t_d_hd, y_d_hd, color='tab:orange', ls='--', lw=1, label='Delabie high-n')
+        if t_d_ld is not None:
+            ax.plot(t_d_ld, y_d_ld, color='tab:pink', ls=':', lw=1, label='Delabie low-n')
+        ax.legend(fontsize=7, loc='upper left', ncol=2)
     else:
         ax.text(
             0.5, 0.5, r'$P_{\mathrm{LH}}$ not in TORAX output',
