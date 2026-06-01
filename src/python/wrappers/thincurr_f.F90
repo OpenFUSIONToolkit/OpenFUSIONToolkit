@@ -246,7 +246,7 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string_rev(basepath,pathprefix)
 !---Setup I/0
 IF(TRIM(pathprefix)/='')THEN
-  tw_obj%rst_prefix=TRIM(pathprefix)//'/'
+  tw_obj%rst_prefix=TRIM(pathprefix)
   CALL tw_obj%xdmf%setup('thincurr',pathprefix,.NOT.LOGICAL(legacy_hdf5))
   CALL tw_obj%mesh%setup_io(tw_obj%xdmf,1)
 ELSE
