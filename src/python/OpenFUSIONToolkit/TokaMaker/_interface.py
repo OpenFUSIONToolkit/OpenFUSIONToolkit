@@ -61,6 +61,18 @@ tokamaker_equil_destroy = ctypes_subroutine(oftpy_lib.tokamaker_equil_destroy,
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
     [c_void_p, c_char_p, c_double, c_char_p, c_char_p, c_char_p, c_char_p])
 
+# tokamaker_get_profile_ndofs(tMaker_equil_ptr,prof_type,ndofs,error_str)
+tokamaker_get_profile_ndofs = ctypes_subroutine(oftpy_lib.tokamaker_get_profile_ndofs,
+    [c_void_p, c_int, c_int_ptr, c_char_p])
+
+# tokamaker_get_profile_dofs(tMaker_equil_ptr,prof_type,dofs,error_str)
+tokamaker_get_profile_dofs = ctypes_subroutine(oftpy_lib.tokamaker_get_profile_dofs,
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_char_p])
+
+# tokamaker_set_profile_dofs(tMaker_equil_ptr,prof_type,dofs,error_str)
+tokamaker_set_profile_dofs = ctypes_subroutine(oftpy_lib.tokamaker_set_profile_dofs,
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_char_p])
+
 # tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double_ptr, c_char_p])

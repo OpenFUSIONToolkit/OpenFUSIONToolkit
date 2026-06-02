@@ -449,6 +449,93 @@ CALL copy_string_rev(f_NI_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%I_NI)
 END SUBROUTINE tokamaker_load_profiles
 !---------------------------------------------------------------------------------
+!> Retrieve degrees of freedom for desired flux profile
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_profile_ndofs(tMaker_equil_ptr,prof_type,ndofs,error_str) BIND(C,NAME="tokamaker_get_profile_ndofs")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+INTEGER(c_int), VALUE, INTENT(in) :: prof_type !< Type of profile (1: F*F', 2: P')
+INTEGER(c_int), INTENT(out) :: ndofs !< Number of degrees of freedom
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(r8), POINTER :: dofs_tmp(:)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+SELECT CASE(prof_type)
+CASE(1)
+  IF(.NOT.ASSOCIATED(tMaker_equil_obj%I))THEN
+    CALL copy_string("Profile not allocated",error_str)
+  END IF
+  ndofs=tMaker_equil_obj%I%ndofs
+CASE(2)
+  IF(.NOT.ASSOCIATED(tMaker_equil_obj%P))THEN
+    CALL copy_string("Profile not allocated",error_str)
+  END IF
+  ndofs=tMaker_equil_obj%P%ndofs
+CASE DEFAULT
+  CALL copy_string("Invalid profile type specified",error_str)
+END SELECT
+END SUBROUTINE tokamaker_get_profile_ndofs
+!---------------------------------------------------------------------------------
+!> Retrieve degrees of freedom for desired flux profile
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_profile_dofs(tMaker_equil_ptr,prof_type,dofs,error_str) BIND(C,NAME="tokamaker_get_profile_dofs")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+INTEGER(c_int), VALUE, INTENT(in) :: prof_type !< Type of profile (1: F*F', 2: P')
+TYPE(c_ptr), VALUE, INTENT(in) :: dofs !< Array of degrees of freedom
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(r8), POINTER :: dofs_tmp(:)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+SELECT CASE(prof_type)
+CASE(1)
+  IF(.NOT.ASSOCIATED(tMaker_equil_obj%I))THEN
+    CALL copy_string("Profile not allocated",error_str)
+  END IF
+  CALL c_f_pointer(dofs, dofs_tmp, [tMaker_equil_obj%I%ndofs])
+  CALL tMaker_equil_obj%I%get_cofs(dofs_tmp)
+CASE(2)
+  IF(.NOT.ASSOCIATED(tMaker_equil_obj%P))THEN
+    CALL copy_string("Profile not allocated",error_str)
+  END IF
+  CALL c_f_pointer(dofs, dofs_tmp, [tMaker_equil_obj%P%ndofs])
+  CALL tMaker_equil_obj%P%get_cofs(dofs_tmp)
+CASE DEFAULT
+  CALL copy_string("Invalid profile type specified",error_str)
+END SELECT
+END SUBROUTINE tokamaker_get_profile_dofs
+!---------------------------------------------------------------------------------
+!> Set degrees of freedom for desired flux profile
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_set_profile_dofs(tMaker_equil_ptr,prof_type,dofs,error_str) BIND(C,NAME="tokamaker_set_profile_dofs")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+INTEGER(c_int), VALUE, INTENT(in) :: prof_type !< Type of profile (1: F*F', 2: P')
+TYPE(c_ptr), VALUE, INTENT(in) :: dofs !< Array of degrees of freedom
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+INTEGER(i4) :: ierr
+REAL(r8), POINTER :: dofs_tmp(:)
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+SELECT CASE(prof_type)
+CASE(1)
+  IF(.NOT.ASSOCIATED(tMaker_equil_obj%I))THEN
+    CALL copy_string("Profile not allocated",error_str)
+  END IF
+  IF(tMaker_equil_obj%I%ndofs==0)RETURN
+  CALL c_f_pointer(dofs, dofs_tmp, [tMaker_equil_obj%I%ndofs])
+  ierr=tMaker_equil_obj%I%set_cofs(dofs_tmp)
+  IF(ierr/=0)CALL copy_string("Error setting profile degrees of freedom",error_str)
+CASE(2)
+  IF(.NOT.ASSOCIATED(tMaker_equil_obj%P))THEN
+    CALL copy_string("Profile not allocated",error_str)
+  END IF
+  IF(tMaker_equil_obj%P%ndofs==0)RETURN
+  CALL c_f_pointer(dofs, dofs_tmp, [tMaker_equil_obj%P%ndofs])
+  ierr=tMaker_equil_obj%P%set_cofs(dofs_tmp)
+  IF(ierr/=0)CALL copy_string("Error setting profile degrees of freedom",error_str)
+CASE DEFAULT
+  CALL copy_string("Invalid profile type specified",error_str)
+END SELECT
+END SUBROUTINE tokamaker_set_profile_dofs
+!---------------------------------------------------------------------------------
 !> Initialize \f$ \psi \f$ using a uniform or specified current source
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str) BIND(C,NAME="tokamaker_init_psi")

@@ -330,13 +330,13 @@ ELSE
   IF(fit_FFPscale)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
   'fit_gs',__FILE__)
 END IF
-IF(gs_active%I%ncofs>0.AND.fit_I)THEN
-  ncofs = ncofs+gs_active%I%ncofs
+IF(gs_active%I%ndofs>0.AND.fit_I)THEN
+  ncofs = ncofs+gs_active%I%ndofs
 END IF
 IF(fit_Pscale.OR.fit_R0)ncofs = ncofs+1
 IF(fit_Z0)ncofs = ncofs + 1
-IF(gs_active%P%ncofs>0.AND.fit_P)THEN
-  ncofs = ncofs+gs_active%P%ncofs
+IF(gs_active%P%ndofs>0.AND.fit_P)THEN
+  ncofs = ncofs+gs_active%P%ndofs
 END IF
 ncond_active = 0
 IF(fit_coils)ncofs = ncofs + gs_active%device%ncoils
@@ -364,8 +364,8 @@ ELSE
   IF(fit_FFPscale)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
   'fit_gs',__FILE__)
 END IF
-IF(gs_active%I%ncofs>0.AND.fit_I)THEN
-  js = offset; je = offset+gs_active%I%ncofs
+IF(gs_active%I%ndofs>0.AND.fit_I)THEN
+  js = offset; je = offset+gs_active%I%ndofs
   CALL gs_active%I%get_cofs(cofs(js+1:je))
   offset = je
 END IF
@@ -387,8 +387,8 @@ IF(fit_Z0)THEN
   cofs_scale(offset+1)=40.d0/(gs_active%device%spatial_bounds(2,2)-gs_active%device%spatial_bounds(1,2))
   offset=offset+1
 END IF
-IF(gs_active%P%ncofs>0.AND.fit_P)THEN
-  js = offset; je = offset+gs_active%P%ncofs
+IF(gs_active%P%ndofs>0.AND.fit_P)THEN
+  js = offset; je = offset+gs_active%P%ndofs
   CALL gs_active%P%get_cofs(cofs(js+1:je))
   offset = je
 END IF
@@ -681,8 +681,8 @@ IF(iflag==1)THEN
       gs_active%psiscale=cofs(1)
     END IF
   END IF
-  IF(gs_active%I%ncofs>0.AND.fit_I)THEN
-    js = offset; je = offset+gs_active%I%ncofs
+  IF(gs_active%I%ndofs>0.AND.fit_I)THEN
+    js = offset; je = offset+gs_active%I%ndofs
     ierr=gs_active%I%set_cofs(cofs(js+1:je))
     IF(ierr<0)THEN
       WRITE(*,'(2A)')oft_indent,'Invalid I coefficients'
@@ -713,8 +713,8 @@ IF(iflag==1)THEN
     gs_active%Z0_target=cofs(offset+1)
     offset=offset+1
   END IF
-  IF(gs_active%P%ncofs>0.AND.fit_P)THEN
-    js = offset; je = offset+gs_active%P%ncofs
+  IF(gs_active%P%ndofs>0.AND.fit_P)THEN
+    js = offset; je = offset+gs_active%P%ndofs
     ierr=gs_active%P%set_cofs(cofs(js+1:je))
     IF(ierr<0)THEN
       WRITE(*,'(2A)')oft_indent,'Invalid P coefficients'
@@ -813,8 +813,8 @@ IF(iflag==1)THEN
       END IF
       offset=offset+1
     END IF
-    IF(gs_active%I%ncofs>0.AND.fit_I)THEN
-      js = offset; je = offset+gs_active%I%ncofs
+    IF(gs_active%I%ndofs>0.AND.fit_I)THEN
+      js = offset; je = offset+gs_active%I%ndofs
       WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'F_cofs            ='
       DO i=js+1,je
         WRITE(*,'(ES11.3)',ADVANCE="NO")cofs(i)
@@ -824,8 +824,8 @@ IF(iflag==1)THEN
     END IF
     IF(fit_Pscale.OR.fit_R0.OR.(gs_active%estore_target>0.d0))offset=offset+1
     IF(fit_Z0)offset=offset+1
-    IF(gs_active%P%ncofs>0.AND.fit_P)THEN
-      js = offset; je = offset+gs_active%P%ncofs
+    IF(gs_active%P%ndofs>0.AND.fit_P)THEN
+      js = offset; je = offset+gs_active%P%ndofs
       WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'P_cofs            ='
       DO i=js+1,je
         WRITE(*,'(ES11.3)',ADVANCE="NO")cofs(i)
@@ -912,8 +912,8 @@ ELSE
     END IF
     offset=1
   END IF
-  IF(gs_active%I%ncofs>0.AND.fit_I)THEN
-    js = offset; je = offset+gs_active%I%ncofs
+  IF(gs_active%I%ndofs>0.AND.fit_I)THEN
+    js = offset; je = offset+gs_active%I%ndofs
     cof_tmp(1:je-js)=cofs(js+1:je)
     DO j=1,je-js
       CALL reset_eq
@@ -975,8 +975,8 @@ ELSE
     gs_active%Z0_target=cofs(offset+1)
     offset=offset+1
   END IF
-  IF(gs_active%P%ncofs>0.AND.fit_P)THEN
-    js = offset; je = offset+gs_active%P%ncofs
+  IF(gs_active%P%ndofs>0.AND.fit_P)THEN
+    js = offset; je = offset+gs_active%P%ndofs
     cof_tmp(1:je-js)=cofs(js+1:je)
     DO j=1,je-js
       CALL reset_eq

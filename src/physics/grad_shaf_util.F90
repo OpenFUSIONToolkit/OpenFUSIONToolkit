@@ -178,7 +178,7 @@ OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 !     ! WRITE(io_unit,*)this%jphi
 !   TYPE IS(wesson_flux_func)
 !     WRITE(io_unit,*)"wesson"
-!     ! WRITE(io_unit,*)this%ncofs
+!     ! WRITE(io_unit,*)this%ndofs
 !     ! WRITE(io_unit,*)this%gamma
 !   CLASS DEFAULT
 !     CALL oft_abort('Invalid profile type.','gs_profile_save',__FILE__)

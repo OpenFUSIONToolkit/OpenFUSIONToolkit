@@ -77,8 +77,8 @@ def create_prof_file(self, filename, profile_dict, name):
             raise KeyError('No array "weights" for multi-linear profile.')
         else:
             weights = numpy.array(weights).copy()
-        if y_basis.shape[0] != weights.shape[0]:
-            raise ValueError('Dimension 0 of "y_basis" must match length of "weights" for multi-linear profile.')
+        if y_basis.shape[0] != weights.shape[0]+1:
+            raise ValueError('Dimension 0 of "y_basis" must be 1 larger than the length of "weights" for multi-linear profile.')
         if numpy.min(numpy.diff(x)) < 0.0:
             raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
         if (x[0] < 0.0) or (x[-1] > 1.0):
@@ -90,7 +90,7 @@ def create_prof_file(self, filename, profile_dict, name):
             ynew = []
             for y in y_basis:
                 ynew.append(y[sort_inds])
-            y_basis = ynew
+            y_basis = numpy.array(ynew)
         elif self.psi_convention == 1:
             pass
         else:
@@ -98,7 +98,7 @@ def create_prof_file(self, filename, profile_dict, name):
         file_lines += [
             "{0}".format(x.shape[0]-1),
             "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
-            "{0}".format(weights.shape[0]),
+            "{0}".format(y_basis.shape[0]),
             "{0}".format(" ".join(["{0}".format(val) for val in weights]))
         ]
         for y in y_basis:
@@ -791,6 +791,26 @@ class TokaMaker():
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files)
+    
+    def get_profile_dofs(self, prof_type):
+        r'''! Retrieve degrees of freedom for desired flux profile
+
+        @param prof_type Profile type ('ffp' or 'pp')
+        @returns Values for profile degrees of freedom
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_profile_dofs(prof_type)
+    
+    def set_profile_dofs(self, prof_type, values):
+        r'''! Set degrees of freedom for desired flux profile
+
+        @param prof_type Profile type ('ffp' or 'pp')
+        @param values New values for profile degrees of freedom
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.set_profile_dofs(prof_type, values)
 
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
@@ -966,6 +986,9 @@ class TokaMaker():
         @param targets Target \f$ \psi \f$ value in Wb at each point [:]
         @param weights Weight to be applied to each constraint point [:] (default: 1)
         '''
+        if (weights is None) and (locations is not None):
+            weights = numpy.ones((locations.shape[0],), dtype=numpy.float64)
+        weights = weights*(2.0*numpy.pi) if weights is not None else None
         self.set_psi_constraints(locations,targets/(2.0*numpy.pi),weights)
     
     def set_psi_constraints(self,locations,targets,weights=None):
@@ -2508,6 +2531,50 @@ class TokaMaker_equilibrium():
                     os.remove(file)
                 except:
                     print('Warning: unable to delete temporary file "{0}"'.format(file))
+
+    def get_profile_dofs(self, prof_type):
+        r'''! Retrieve degrees of freedom for desired flux profile
+
+        @param prof_type Profile type ('ffp' or 'pp')
+        @returns Values for profile degrees of freedom
+        '''
+        if prof_type not in ['ffp', 'pp']:
+            raise ValueError('Unknown profile type "{0}", should be "ffp" or "pp"'.format(prof_type))
+        n_dofs = c_int()
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_profile_ndofs(self.c_ptr,c_int({'ffp':1,'pp':2}[prof_type]),ctypes.byref(n_dofs),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        dofs = numpy.zeros((n_dofs.value,), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_profile_dofs(self.c_ptr,c_int({'ffp':1,'pp':2}[prof_type]),dofs,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        if n_dofs.value == 0:
+            return None
+        else:
+            return dofs
+    
+    def set_profile_dofs(self, prof_type, dofs):
+        r'''! Set degrees of freedom for desired flux profile
+
+        @param prof_type Profile type ('ffp' or 'pp')
+        @param values New values for profile degrees of freedom
+        '''
+        if prof_type not in ['ffp', 'pp']:
+            raise ValueError('Unknown profile type "{0}", should be "ffp" or "pp"'.format(prof_type))
+        n_dofs = c_int()
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_profile_ndofs(self.c_ptr,c_int({'ffp':1,'pp':2}[prof_type]),ctypes.byref(n_dofs),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        if dofs.shape[0] != n_dofs.value:
+            raise ValueError('Incorrect number of DoF, should be ({0},)'.format(n_dofs.value))
+        dofs = numpy.ascontiguousarray(dofs, dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_set_profile_dofs(self.c_ptr,c_int({'ffp':1,'pp':2}[prof_type]),dofs,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
     
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition

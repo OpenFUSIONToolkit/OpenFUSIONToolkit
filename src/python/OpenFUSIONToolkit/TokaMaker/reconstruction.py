@@ -15,7 +15,7 @@ from ..util import oft_warning
 
 ## @cond
 class tokamaker_recon_settings_cstruct(c_struct):
-    _fields_ = [("fitI", c_bool),
+    _fields_ = [("fitF", c_bool),
                 ("fitP", c_bool),
                 ("fit_Pscale", c_bool),
                 ("fit_FFPscale", c_bool),
@@ -365,13 +365,13 @@ class tokamaker_recon_settings:
     r'''! TokaMaker reconstruction settings class'''
     def __init__(self):
         ## Adjust \f$ F*F' \f$ parameterization coefficients?
-        self.fitI = False
+        self.fitF = False
         ## Adjust \f$ P' \f$ parameterization coefficients?
         self.fitP = False
         ## Adjust \f$ P' \f$ scale factor?
-        self.fit_Pscale = True
+        self.fit_Pscale = False
         ## Adjust \f$ F*F' \f$ scale factor?
-        self.fit_FFPscale = True
+        self.fit_FFPscale = False
         ## Utilize and adjust \f$ R_0 \f$ constraint?
         self.fitR0 = False
         ## Utilize and adjust \f$ Z_0 \f$ constraint?
@@ -382,6 +382,8 @@ class tokamaker_recon_settings:
         self.fitF0 = False
         ## Do not update centering (initial guess for NL solve) as solve progresses
         self.fixedCentering = False
+        ## Relative step size for finite difference Jacobian calculation
+        self.dx = 1.E-2
         ## Show detailed progress output?
         self.pm = False
         ## File containing constraint definitions
@@ -418,7 +420,7 @@ class tokamaker_recon_settings:
     def get_c_struct(self,oft_env):
         r'''! Get C struct representation of settings for passing to TokaMaker Fortran API'''
         c_struct_instance = tokamaker_recon_settings_cstruct()
-        c_struct_instance.fitI = self.fitI
+        c_struct_instance.fitF = self.fitF
         c_struct_instance.fitP = self.fitP
         c_struct_instance.fit_Pscale = self.fit_Pscale
         c_struct_instance.fit_FFPscale = self.fit_FFPscale
@@ -668,30 +670,30 @@ class reconstruction():
         ax[0].set_title('Flux Loop Constraints')
         ax[0].set_xlabel('Constraint Index')
         ax[0].set_ylabel('Signal [Wb]')
-        for flux_loop in self._flux_loops:
-            ax[0].errorbar(i,error_mat[i,2], yerr=flux_loop.err, color='r', capsize=2)
-            ax[0].plot(i,error_mat[i,1], 'bx')
+        for j, flux_loop in enumerate(self._flux_loops):
+            ax[0].errorbar(j,error_mat[i,2], yerr=flux_loop.err, color='r', capsize=2)
+            ax[0].plot(j,error_mat[i,1], 'bx')
             i += 1
         ax[1].set_title('Mirnov Constraints')
         ax[1].set_xlabel('Constraint Index')
         ax[1].set_ylabel('Signal [T]')
-        for mirnov in self._mirnovs:
-            ax[1].errorbar(i,error_mat[i,2], yerr=mirnov.err, color='r', capsize=2)
-            ax[1].plot(i,error_mat[i,1], 'bx')
+        for j, mirnov in enumerate(self._mirnovs):
+            ax[1].errorbar(j,error_mat[i,2], yerr=mirnov.err, color='r', capsize=2)
+            ax[1].plot(j,error_mat[i,1], 'bx')
             i += 1
         ax[2].set_title('Saddle Constraints')
         ax[2].set_xlabel('Constraint Index')
         ax[2].set_ylabel('Signal [Wb]')
-        for saddle in self._saddles:
-            ax[2].errorbar(i,error_mat[i,2], yerr=saddle.err, color='r', capsize=2)
-            ax[2].plot(i,error_mat[i,1], 'bx')
+        for j, saddle in enumerate(self._saddles):
+            ax[2].errorbar(j,error_mat[i,2], yerr=saddle.err, color='r', capsize=2)
+            ax[2].plot(j,error_mat[i,1], 'bx')
             i += 1
         ax[3].set_title('Pressure Constraints')
         ax[3].set_xlabel('Constraint Index')
         ax[3].set_ylabel('Signal [Pa]')
-        for press_con in self._pressure_cons:
-            ax[3].errorbar(i,error_mat[i,2], yerr=press_con.err, color='r', capsize=2)
-            ax[3].plot(i,error_mat[i,1], 'bx')
+        for j, press_con in enumerate(self._pressure_cons):
+            ax[3].errorbar(j,error_mat[i,2], yerr=press_con.err, color='r', capsize=2)
+            ax[3].plot(j,error_mat[i,1], 'bx')
             i += 1
         # Plot coil signals
         if (coil_ax is not None) and (len(self._coil_current_cons) > 0):
@@ -730,6 +732,8 @@ class reconstruction():
         
         @result Error flag
         '''
+        if self._ncons > 0:
+            self.destroy_constraints()
         # Modify input file
         self.write_fit_in()
         # Run setup
@@ -766,6 +770,131 @@ class reconstruction():
         if error_flag.value != 0:
             raise ValueError("Error evaluation failed with error code {0:d}".format(error_flag.value))
         return error_mat if not save_to_file else None
+    
+    def setup_get_opt(self,fail_factor=1.E2,pp_target_weight=1.E5,opoint_target_weight=1.E2):
+        r''' Setup object for use with general optimization routines, such as `scipy.optimize.minimize`,
+        which will call `opt_error` and, optionally, `opt_error_jacobian` with appropriate arguments.
+        This function should be called after setting up constraints with `setup_constraints` and before calling optimization routines.
+
+        @param fail_factor Factor to multiply initial error by for failed solves
+        @param pp_target_weight Weight for global P' targets when treated as soft constraints and fit_Pscale is True
+        @param opoint_target_weight Weight for R0 and Z0 targets when treated as soft constraints and `fitR0` or `fitZ0` is True
+        @returns Initial DoF vector for optimization, error vector for initial DoFs
+        '''
+        x0_nl = self.opt_get_dofs()
+        self._err_min = 1.E99
+        self._EQ_center = self._tMaker_obj.copy_eq()
+        error0  = self.opt_error(x0_nl,self,False)
+        self._fail_error = error0*fail_factor
+
+        # Make sure settings are up to date
+        soft_targets_active = any([self._tMaker_obj.settings.ffp_target_weight > 0.0, self._tMaker_obj.settings.pp_target_weight > 0.0, self._tMaker_obj.settings.opoint_target_weight > 0.0])
+        if (self.settings.fitR0 or self.settings.fitZ0) and (soft_targets_active):
+            self._tMaker_obj.settings.opoint_target_weight=opoint_target_weight
+        if self.settings.fit_Pscale and soft_targets_active:
+            self._tMaker_obj.settings.pp_target_weight=pp_target_weight
+        self._tMaker_obj.update_settings()
+
+        return x0_nl, error0
+    
+    def opt_get_dofs(self):
+        r''' Get DoF vector for general optimization routines using `opt_error` and `opt_error_jacobian`.
+
+        @returns DoF vector
+        '''
+        dofs = []
+        if self.settings.fitR0:
+            dofs.append(self._tMaker_obj.o_point[0])
+        if self.settings.fitZ0:
+            dofs.append(self._tMaker_obj.o_point[1])
+        if self.settings.fit_Pscale:
+            dofs.append(self._tMaker_obj.p_scale)
+        if self.settings.fitF:
+            f_dofs = self._tMaker_obj.get_profile_dofs('ffp')
+            if f_dofs is not None:
+                dofs.extend(f_dofs.tolist())
+        if self.settings.fitP:
+            p_dofs = self._tMaker_obj.get_profile_dofs('pp')
+            if p_dofs is not None:
+                dofs.extend(p_dofs.tolist())
+        return numpy.array(dofs)
+
+    @staticmethod
+    def opt_error(cofs,recon_obj,in_jac):
+        r''' Compute weighted constraint error for given DoF vector `cofs` and reconstruction object `recon_obj`.
+        This function is designed to be called by general optimization routines, such as `scipy.optimize.minimize`.
+
+        @param cofs DoF vector
+        @param recon_obj `TokaMaker.reconstrucion.reconstruction` object to be used
+        @param in_jac Flag indicating whether this function is being called from a Jacobian calculation to make print statements during finite differencing
+        @returns Weighted error vector for current DoFs
+        '''
+        offset = 0
+        if recon_obj.settings.fitR0:
+            recon_obj._tMaker_obj.set_targets(R0=cofs[offset],retain_previous=True)
+            offset += 1
+        if recon_obj.settings.fitZ0:
+            recon_obj._tMaker_obj.set_targets(Z0=cofs[offset],retain_previous=True)
+            offset += 1
+        if recon_obj.settings.fit_Pscale:
+            recon_obj._tMaker_obj.p_scale=cofs[offset]
+            offset += 1
+        if recon_obj.settings.fitF:
+            f_dofs = recon_obj._tMaker_obj.get_profile_dofs('ffp')
+            if f_dofs is not None:
+                f_dofs = cofs[offset:offset+f_dofs.shape[0]]
+                recon_obj._tMaker_obj.set_profile_dofs('ffp', f_dofs)
+                offset += f_dofs.shape[0]
+        if recon_obj.settings.fitP:
+            p_dofs = recon_obj._tMaker_obj.get_profile_dofs('pp')
+            if p_dofs is not None:
+                p_dofs = cofs[offset:offset+p_dofs.shape[0]]
+                recon_obj._tMaker_obj.set_profile_dofs('pp', p_dofs)
+                offset += p_dofs.shape[0]
+        
+        # Re-solve
+        try:
+            recon_obj._tMaker_obj.solve()
+            if recon_obj._tMaker_obj.alam == 0.0:
+                recon_obj._tMaker_obj.replace_eq(recon_obj._EQ_center)
+                return recon_obj._fail_error
+        except:
+            recon_obj._tMaker_obj.replace_eq(recon_obj._EQ_center)
+            return recon_obj._fail_error
+        
+        # Compute error
+        err_out = recon_obj.eval_error()
+        total_err = numpy.power(numpy.linalg.norm(err_out[:,0]),2)
+        if not in_jac:
+            print('chi_rms = {0:.4E}; chi_max = {1:.4E}'.format(numpy.sqrt(total_err/err_out.shape[0]), abs(err_out[:,0]).max()))
+            if total_err < recon_obj._err_min:
+                if not recon_obj.settings.fixedCentering:
+                    recon_obj._EQ_center = recon_obj._tMaker_obj.copy_eq()
+                recon_obj._err_min = total_err
+        return err_out[:,0]
+
+
+    @staticmethod
+    def opt_error_jacobian(cofs,recon_obj,in_jac):
+        r''' Compute Jacobian matrix corresponding by differencing `opt_error` for given DoF vector `cofs` and reconstruction object `recon_obj`.
+
+        @param cofs DoF vector
+        @param recon_obj `TokaMaker.reconstrucion.reconstruction` object to be used
+        @param in_jac Ignored flag just to match signature with `opt_error`
+        @returns Jacobian matrix for current DoFs
+        '''
+        recon_obj._tMaker_obj.replace_eq(recon_obj._EQ_center)
+        center_err = reconstruction.opt_error(cofs,recon_obj,True)
+        jac = numpy.zeros((len(recon_obj._fail_error),len(cofs)))
+        center_EQ = recon_obj._tMaker_obj.copy_eq()
+        center_err = reconstruction.opt_error(cofs,recon_obj,True)
+        for i, cof_val in enumerate(cofs):
+            cof_tmp = cofs.copy()
+            cof_tmp[i] += recon_obj.settings.dx*abs(cof_val)
+            pert_err = reconstruction.opt_error(cof_tmp,recon_obj,True)
+            jac[:,i] = (pert_err-center_err)/(recon_obj.settings.dx*abs(cof_val))
+            recon_obj._tMaker_obj.replace_eq(center_EQ)
+        return jac
 
     def reconstruct(self, vacuum=False, linearized_fit=False, maxits=100, eps=1.E-3, ftol=1.E-3, xtol=1.E-3, gtol=1.E-3):
         '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.

@@ -62,7 +62,7 @@ end type circular_curr
 !> Abstract flux function prototype
 !------------------------------------------------------------------------------
 TYPE, ABSTRACT :: flux_func
-  INTEGER(i4) :: ncofs = 0 !< Number of free coefficients
+  INTEGER(i4) :: ndofs = 0 !< Number of free coefficients
   REAL(r8) :: f_offset = 0.d0 !< Offset value
   REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Current plasma bounds (for normalization)
 CONTAINS
@@ -2537,11 +2537,11 @@ DO i=1,self%maxits
   fail_test=fail_test.OR.((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)
   fail_test=fail_test.OR.((equil%o_point(1) < self%rmin).AND.equil%has_plasma)
   IF(fail_test)THEN
-    WRITE(*,*)psimax,equil%plasma_bounds,equil%o_point
+    ! WRITE(*,*)psimax,equil%plasma_bounds,equil%o_point
     IF(psimax<gs_epsilon)error_flag=-2
     IF((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)error_flag=-3
     IF((equil%o_point(1) < self%rmin).AND.equil%has_plasma)error_flag=-4
-    WRITE(*,*)error_flag
+    ! WRITE(*,*)error_flag
     EXIT
   END IF
   !---Under-relax solution
@@ -3864,6 +3864,12 @@ DO i=1,smesh%np
         CALL oft_warn("Failed to refine candidate stationary point at "//loc_str)
       END IF
       CYCLE
+    ELSE IF(stype==11)THEN
+      IF(oft_debug_print(1))THEN
+        WRITE(loc_str,'(2ES10.2)')smesh%r(1:2,i)
+        CALL oft_warn("Ignoring candidate O-point outside plasma "//loc_str)
+      END IF
+      CYCLE
     END IF
     IF(saddle_psi>-1.d98)THEN
       DO m=1,n_unique
@@ -3873,12 +3879,14 @@ DO i=1,smesh%np
               o_psi = MAX(o_psi,saddle_psi)
               stypes(m)=1
             END IF
-            WRITE(loc_str2,'(2ES10.2)')unique_saddles(1:2,m)
-            IF(stype==1)THEN
-              CALL oft_warn("Candidate O-point converged to an existing X-point location "//loc_str//" "//loc_str2)
-            ELSE
-              CALL oft_warn("Candidate X-point converged to the existing O-point location "//loc_str//" "//loc_str2)
-            ENDIF
+            IF(oft_debug_print(1))THEN
+              WRITE(loc_str2,'(2ES10.2)')unique_saddles(1:2,m)
+              IF(stype==1)THEN
+                CALL oft_warn("Candidate O-point converged to an existing X-point location "//loc_str//" "//loc_str2)
+              ELSE
+                CALL oft_warn("Candidate X-point converged to the existing O-point location "//loc_str//" "//loc_str2)
+              ENDIF
+            END IF
           END IF
           EXIT
         END IF
@@ -3949,7 +3957,7 @@ device=>self%device
 !---Determine initial guess from cell search
 ! psi_eval%u=>self%psi
 ! psi_geval%u=>self%psi
-stype=stype
+stype=-ABS(stype)
 f=1.d0/3.d0
 mag_min=1.d99
 psi_x=-1.d99
@@ -3957,6 +3965,10 @@ goptmp=1.d0
 active_targets%cell=0
 CALL bmesh_findcell(device%fe_rep%mesh,active_targets%cell,pt,f)
 IF((active_targets%cell==0).OR.(minval(f)<-1.d-3).OR.(maxval(f)>1.d0+1.d-3))RETURN
+IF((stype==-1).AND.(device%fe_rep%mesh%reg(active_targets%cell)/=1))THEN
+  stype=11
+  RETURN
+END IF
 !---Use MINPACK to find maximum (zero gradient)
 ncons=2
 ncofs=2
