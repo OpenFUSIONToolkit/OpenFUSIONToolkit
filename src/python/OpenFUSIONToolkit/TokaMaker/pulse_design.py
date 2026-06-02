@@ -48,7 +48,9 @@ _NBI_W_TO_MA = 1/16e6
 mu_0 = 4.0 * np.pi * 1e-7
 # EQDSK sampling for save_eqdsk when validating with TORAX in _run_tm:
 # start at nr=nz=100, increase by 50 up to 500 until TORAX accepts eqdsk.
-EQDSK_SAVE_NR_NZ_SEQUENCE = (100, 150, 200, 250, 300, 350, 400, 450, 500)
+EQDSK_SAVE_NR_NZ_SEQUENCE = (250, 300, 350, 400, 450, 500)
+# EQDSK_SAVE_NR_NZ_SEQUENCE = (500, 750, 1000)
+
 # Default TORAX radial face count for loop 0 coarse runs (evenly spaced normalized rho).
 DEFAULT_LOOP0_TX_FACE_POINTS = 51
 
@@ -1694,26 +1696,55 @@ class TokaMaker_TORAX:
                     )
 
             if not self._steady_state_mode or n_tm == 0:
+                # Build a geometry entry for EVERY tm_time so a failed TM solve can
+                # never leave a gap (a gap makes TORAX silently interpolate geometry
+                # across the failure, which can corrupt a/R/B_0 over the whole time
+                # series — e.g. a failed t=0 once flattened the entire ramp). Fallback
+                # priority per failed time: (1) the most-recent EARLIER tm_time that
+                # solved this loop (carry-forward last-good equilibrium), else
+                # (2) the nearest seed EQDSK (by eqtime), else (3) the next later
+                # solved tm_time. Each fallback is TORAX-validated before use.
                 full_eqdsk_map = {}
                 n_tm = 0
+                solved = {}  # i -> eqdsk path for TM solves that succeeded
                 for i, t in enumerate(self._tm_times):
                     eqdsk = os.path.join(self._eqdsk_dir, f'{self._current_loop - 1:03d}.{i:03d}.eqdsk')
                     # TM stage already saved and validated each EQDSK with TORAX (_run_tm).
-                    tm_ok = eqdsk not in self._eqdsk_skip and os.path.isfile(eqdsk)
-                    if tm_ok:
-                        full_eqdsk_map[t] = eqdsk
+                    if eqdsk not in self._eqdsk_skip and os.path.isfile(eqdsk):
+                        solved[i] = eqdsk
+
+                def _nearest_seed(t):
+                    j = int(np.argmin(np.abs(np.asarray(self._eqtimes, float) - t)))
+                    return self._init_files[j]
+
+                last_good = None  # most-recent solved eqdsk (carry-forward)
+                n_fallback = 0
+                for i, t in enumerate(self._tm_times):
+                    if i in solved:
+                        full_eqdsk_map[t] = solved[i]
+                        last_good = solved[i]
                         n_tm += 1
-            # If i=0 TM failed, always fall back to the seed EQDSK so TORAX
-            # has a valid initial geometry. Other failed timesteps are left out of the
-            # map and TORAX interpolates from neighboring solved entries.
-            t0 = self._tm_times[0]
-            if t0 not in full_eqdsk_map:
-                seed_eqdsk = self._init_files[0]
-                if self._test_eqdsk_tx_config(seed_eqdsk):
-                    full_eqdsk_map[t0] = seed_eqdsk
-                    self._log(f'Loop {self._current_loop}: TM failed at t=0, falling back to seed EQDSK for t=0.')
-                else:
-                    self._log(f'Warning: Loop {self._current_loop}: TM failed at t=0 and seed EQDSK is also invalid.')
+                        continue
+                    # Failed solve at this time — pick a valid fallback in priority order.
+                    candidates = []
+                    if last_good is not None:
+                        candidates.append(last_good)                 # (1) last-good
+                    candidates.append(_nearest_seed(t))              # (2) nearest seed
+                    nxt = next((solved[k] for k in sorted(solved) if k > i), None)
+                    if nxt is not None:
+                        candidates.append(nxt)                       # (3) next solved
+                    chosen = next((c for c in candidates
+                                   if self._test_eqdsk_tx_config(c)), None)
+                    if chosen is not None:
+                        full_eqdsk_map[t] = chosen
+                        n_fallback += 1
+                    else:
+                        self._log(f'Warning: Loop {self._current_loop}: TM failed at '
+                                  f't={t:.2f} and no valid fallback EQDSK found; '
+                                  f'leaving gap (TORAX will interpolate).')
+                if n_fallback:
+                    self._log(f'Loop {self._current_loop}: {n_fallback} failed TM '
+                              f'timestep(s) filled by last-good/seed fallback.')
 
             # Injected psi from initial relax used the seed EQDSK.  If we used
             # the TM EQDSK at t_init without a loop N re-relax, the metric changes
@@ -3213,6 +3244,14 @@ class TokaMaker_TORAX:
                         plot_scalars(self, save_path=_scalars_path, display=False)
                     except Exception as _e:
                         self._log(f'plot_scalars failed at loop {self._current_loop}: {_e}')
+
+                    plh_name = f'PLH_components_loop{self._current_loop:03d}.png'
+                    if self._output_file_tag is not None:
+                        plh_name = f'{self._output_file_tag}_{plh_name}'
+                    try:
+                        plot_PLH_components(self, save_path=os.path.join(self._out_dir, plh_name), display=False)
+                    except Exception as _e:
+                        self._log(f'plot_PLH_components failed at loop {self._current_loop}: {_e}')
 
                 if self._output_mode == 'debug':
                     _loop_elapsed = time.perf_counter() - _t_coupling_loop0
@@ -4753,8 +4792,11 @@ def plot_scalars(tt, save_path=None, display=True):
             pad = 0.05 * span if span > 0 else 0.05 * max(abs(hi), abs(lo), 1.0)
             ax.set_ylim(lo - pad, hi + pad)
     t_plh_pc, y_plh_pc = _tx_scalar(tt, 'P_LH')
+    t_plh_pc_d, y_plh_pc_d = _tx_scalar(tt, 'P_LH_delabie')
     if t_plh_pc is not None:
-        ax.plot(t_plh_pc, y_plh_pc, 'k-', linewidth=1, label='P_LH', zorder=5)
+        ax.plot(t_plh_pc, y_plh_pc, 'k-', linewidth=1, label='P_LH_martin', zorder=5)
+    if t_plh_pc_d is not None:
+        ax.plot(t_plh_pc_d, y_plh_pc_d, 'k--', linewidth=1, label='P_LH_delabie', zorder=4)
     ax.set_xlabel('Time [s]')
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
@@ -4848,6 +4890,185 @@ def plot_scalars(tt, save_path=None, display=True):
     plt.suptitle('Scalars', fontsize=14)
     plt.tight_layout()
     plt.subplots_adjust(top=0.92)
+    _save_or_display(fig, save_path, display)
+
+
+# ── P_LH component plot ───────────────────────────────────────────────────────
+def plot_PLH_components(tt, save_path=None, display=True):
+    r'''! Decompose the L->H transition power into every ingredient, for the
+    current loop's TORAX run. 3x3 grid (all from tt._data_tree at full TORAX
+    resolution; B_T is ~constant and printed in the title):
+
+      (0,0) line-avg n_e vs n_e_min (Ryter) — which density BRANCH is active.
+      (0,1) Ip [MA]            (drives n_min ∝ Ip^0.34).
+      (0,2) S = g0_face[-1] [m^2] (LCFS surface area; P_LH ∝ S^0.941).
+      (1,0) a_minor, R_major [m] (set n_min; a also via R/a).
+      (1,1) the multiplicative P_LH factors: B^0.803, n̄^0.717, S^0.941, (2/Meff).
+      (1,2) P_LH branch decomposition (selected / high-n / low-n n^-2 / floor).
+      (2,0) f_GW (line-avg)    — headroom to the density limit.
+      (2,1) P_SOL vs P_LH      — the transition gate (H-mode where P_SOL>P_LH).
+      (2,2) the governing equations (LaTeX).
+
+    Isolates why the L->H transition can fire in one loop but not another even
+    when geometry/Ip are nearly identical: the branch crossover is set by
+    line-avg n_e vs n_min, and the low-density n^-2 branch is hypersensitive there.
+    '''
+    if getattr(tt, '_data_tree', None) is None:
+        return
+
+    # Scaling exponents (torax scaling_laws._P_LH_SCALING_PARAMS). Prefactors
+    # (Martin 0.0488 / Delabie 0.0441) only appear in the LaTeX panel.
+    # Martin:  B^0.803 n^0.717 (2/Meff)^1.0   S^0.941
+    # Delabie: B^0.580 n^1.08  (2/Meff)^0.975 S^1.0   (x divertor factor D)
+    aB, an, aM, aS = 0.803, 0.717, 1.0, 0.941          # Martin
+    aB_d, an_d, aM_d, aS_d = 0.580, 1.08, 0.975, 1.0   # Delabie
+    Meff = 2.0  # (2/Meff)^aM factor; main-ion mass [amu], ~2-2.5 for D-T.
+    try:
+        Meff = float(np.asarray(getattr(tt._data_tree.scalars, 'A_i').to_numpy()).mean())
+    except Exception:
+        pass
+
+    def geom_face(name, scale=1.0):
+        # LCFS (rho=1) value of a profile geometry field vs time.
+        try:
+            return _tx_profile_at_rho(tt, name, 1.0, scale=scale)
+        except Exception:
+            return None, None
+
+    t_n,  y_n  = _tx_scalar(tt, 'n_e_line_avg', scale=1e-20)   # 1e20 m^-3
+    t_nm, y_nm = _tx_scalar(tt, 'n_e_min_P_LH', scale=1e-20)
+    t_Ip, y_Ip = _tx_scalar(tt, 'Ip', scale=1e-6)             # MA
+    t_a,  y_a  = _tx_scalar(tt, 'a_minor')
+    t_R,  y_R  = _tx_scalar(tt, 'R_major')
+    t_B,  y_B  = _tx_scalar(tt, 'B_0')
+    if t_B is None:
+        t_B, y_B = geom_face('R_major_profile')  # fallback; B handled below
+    t_S,  y_S  = geom_face('g0')                              # surface area [m^2]
+    t_fg, y_fg = _tx_scalar(tt, 'fgw_n_e_line_avg')
+    B0 = float(np.nanmean(y_B)) if (y_B is not None) else float(getattr(tt, '_B0', np.nan))
+
+    fig, axes = plt.subplots(3, 3, figsize=(17, 13))
+
+    # (0,0) density vs branch threshold
+    ax = axes[0, 0]
+    if t_n is not None:
+        ax.plot(t_n, y_n, color=COLOR_TX, ls='-', marker='o', ms=MK_SZ, lw=1, label=r'$\bar n_e$ (line-avg)')
+    if t_nm is not None:
+        ax.plot(t_nm, y_nm, color='tab:red', ls='--', lw=1.2, label=r'$n_{e,\min}$ (Ryter)')
+    if t_n is not None and t_nm is not None:
+        ax.fill_between(t_n, y_n, y_nm, where=(np.asarray(y_n) < np.asarray(y_nm)),
+                        color='tab:red', alpha=0.15, label=r'$\bar n_e<n_{e,\min}$ ($n^{-2}$ branch)')
+    ax.set_title(r'density vs branch threshold'); ax.set_ylabel(r'$n_e$ [$10^{20}$ m$^{-3}$]'); ax.legend(fontsize=8)
+
+    # (0,1) Ip
+    ax = axes[0, 1]
+    if t_Ip is not None:
+        ax.plot(t_Ip, y_Ip, color=COLOR_TX, ls='-', marker='o', ms=MK_SZ, lw=1)
+    ax.set_title(r'$I_p$  (sets $n_{e,\min}\propto I_p^{0.34}$)'); ax.set_ylabel('[MA]')
+
+    # (0,2) S = surface area
+    ax = axes[0, 2]
+    if t_S is not None:
+        ax.plot(t_S, y_S, color=COLOR_TX, ls='-', marker='o', ms=MK_SZ, lw=1)
+    ax.set_title(r'$S$ = g0_face[-1]  ($P_{LH}\propto S^{0.941}$)'); ax.set_ylabel(r'[m$^2$]')
+
+    # (1,0) a_minor, R_major
+    ax = axes[1, 0]
+    if t_a is not None:
+        ax.plot(t_a, y_a, color='tab:blue', ls='-', marker='o', ms=MK_SZ, lw=1, label=r'$a$ (minor)')
+    if t_R is not None:
+        ax.plot(t_R, y_R, color='tab:purple', ls='-', marker='s', ms=MK_SZ, lw=1, label=r'$R$ (major)')
+    ax.set_title(r'$a$, $R$  (enter $n_{e,\min}$)'); ax.set_ylabel('[m]'); ax.legend(fontsize=8)
+
+    # (1,1) the multiplicative P_LH factors (Martin solid, Delabie dashed)
+    ax = axes[1, 1]
+    if t_n is not None:
+        ax.plot(t_n, (np.asarray(y_n)) ** an,   'C0-',  lw=1.2, label=r'M $\bar n_{e,20}^{0.717}$')
+        ax.plot(t_n, (np.asarray(y_n)) ** an_d, 'C0--', lw=1.0, label=r'D $\bar n_{e,20}^{1.08}$')
+    if t_S is not None:
+        ax.plot(t_S, (np.asarray(y_S)) ** aS,   'C1-',  lw=1.2, label=r'M $S^{0.941}$')
+        ax.plot(t_S, (np.asarray(y_S)) ** aS_d, 'C1--', lw=1.0, label=r'D $S^{1.0}$')
+    ax.axhline(B0 ** aB,   color='C2', ls='-',  lw=1, label=fr'M $B_T^{{0.803}}={B0**aB:.1f}$')
+    ax.axhline(B0 ** aB_d, color='C2', ls='--', lw=1, label=fr'D $B_T^{{0.580}}={B0**aB_d:.1f}$')
+    ax.axhline((2.0 / Meff) ** aM, color='C3', ls=':', lw=1, label=fr'$(2/M_{{eff}})\approx{(2.0/Meff)**aM:.2f}$')
+    ax.set_title('mult. $P_{LH}$ factors (M solid / D dashed)'); ax.set_ylabel('factor'); ax.set_yscale('log'); ax.legend(fontsize=7, ncol=2)
+
+    # (1,2) P_LH branch decomposition (log) — Martin AND Delabie
+    ax = axes[1, 2]
+    for name, color, ls, lw, lab in [
+        ('P_LH',                       'k',          '-',  1.6, r'$P_{LH}$ Martin (sel.)'),
+        ('P_LH_high_density',          'C0',         '--', 1.0, 'M high-n'),
+        ('P_LH_low_density',           'C1',         ':',  1.0, r'M low-n ($n^{-2}$)'),
+        ('P_LH_min',                   'C2',         '-.', 1.0, 'M floor'),
+        ('P_LH_delabie',               'tab:red',    '-',  1.6, r'$P_{LH}$ Delabie (sel.)'),
+        ('P_LH_delabie_high_density',  'tab:orange', '--', 1.0, 'D high-n'),
+        ('P_LH_delabie_low_density',   'tab:pink',   ':',  1.0, r'D low-n ($n^{-2}$)'),
+        ('P_LH_delabie_min',           'tab:brown',  '-.', 1.0, 'D floor'),
+    ]:
+        t, y = _tx_scalar(tt, name, scale=1e-6)
+        if t is not None:
+            ax.plot(t, y, color=color, ls=ls, lw=lw, label=lab)
+    ax.set_title('P_LH branch decomposition (Martin + Delabie)'); ax.set_ylabel('[MW]'); ax.set_yscale('log'); ax.legend(fontsize=7, ncol=2)
+
+    # (2,0) Greenwald fraction
+    ax = axes[2, 0]
+    if t_fg is not None:
+        ax.plot(t_fg, y_fg, color=COLOR_TX, ls='-', marker='o', ms=MK_SZ, lw=1)
+    ax.axhline(1.0, color='tab:red', ls='--', lw=1, label='Greenwald limit')
+    ax.set_title(r'$f_{GW}$ (line-avg)'); ax.set_ylabel(r'$f_{GW}$'); ax.legend(fontsize=8)
+
+    # (2,1) P_SOL vs P_LH gate (Delabie is what the formation model uses here)
+    ax = axes[2, 1]
+    t_lh, y_lh = _tx_scalar(tt, 'P_LH', scale=1e-6)
+    t_lhd, y_lhd = _tx_scalar(tt, 'P_LH_delabie', scale=1e-6)
+    t_sol, y_sol = _tx_scalar(tt, 'P_SOL_total', scale=1e-6)
+    if t_lh is not None:
+        ax.plot(t_lh, y_lh, 'k--', lw=1, label=r'$P_{LH}$ Martin')
+    if t_lhd is not None:
+        ax.plot(t_lhd, y_lhd, color='tab:red', ls='-', marker='o', ms=MK_SZ, lw=1.4, label=r'$P_{LH}$ Delabie (used)')
+    if t_sol is not None:
+        ax.plot(t_sol, y_sol, color='tab:green', ls='-', marker='o', ms=MK_SZ, lw=1, label=r'$P_{SOL}$')
+    # H-mode shading vs the Delabie threshold (the one the formation model gates on)
+    t_gate, y_gate = (t_lhd, y_lhd) if t_lhd is not None else (t_lh, y_lh)
+    if t_gate is not None and t_sol is not None:
+        ax.fill_between(t_sol, y_sol, y_gate, where=(np.asarray(y_sol) > np.asarray(y_gate)),
+                        color='tab:green', alpha=0.2, label=r'$P_{SOL}>P_{LH}$ (H-mode)')
+    ax.set_title(r'transition gate: $P_{SOL}$ vs $P_{LH}$'); ax.set_ylabel('[MW]'); ax.legend(fontsize=8)
+
+    # (2,2) the governing equations (LaTeX)
+    ax = axes[2, 2]; ax.axis('off')
+    # NOTE: matplotlib mathtext (not a full LaTeX engine) — no \mathbf, \begin{cases},
+    # \! or \qquad. Use plain-text headers and split the piecewise into two lines.
+    eqn_lines = [
+        ('High-density branch:', False),
+        (r'$P_{LH}^{hi}[MW] = C\, B_T^{a_B}\, \bar{n}_{e,20}^{a_n}\, (2/M_{eff})^{a_M}\, D\, S^{a_S}$', True),
+        ('  Martin:  C=0.0488, a_B=0.803, a_n=0.717, a_M=1.0, a_S=0.941, D=1', False),
+        ('  Delabie: C=0.0441, a_B=0.580, a_n=1.08, a_M=0.975, a_S=1.0', False),
+        ('           D=1 (HT) / 1.93 (VT)', False),
+        ('', False),
+        ('Ryter density minimum:', False),
+        (r'$n_{e,min} = 0.7\,(I_p/MA)^{0.34}\,a^{-0.95}\,B_0^{0.62}\,(R/a)^{0.4}\times 10^{19}$', True),
+        ('', False),
+        ('Branch selection:', False),
+        (r'$\bar{n}_e > n_{e,min}:\ \ P_{LH} = P_{LH}^{hi}(\bar{n}_e)$', True),
+        (r'$\bar{n}_e < n_{e,min}:\ \ P_{LH} = P_{LH}^{hi}(n_{e,min})\,(n_{e,min}/\bar{n}_e)^{2}$  ($n^{-2}$)', True),
+        ('', False),
+        (r'Transition: H-mode when  $P_{SOL} > P_{LH}\cdot$prefactor', True),
+    ]
+    y = 0.99
+    for txt, is_math in eqn_lines:
+        ax.text(0.0, y, txt, transform=ax.transAxes, va='top', ha='left',
+                fontsize=10 if is_math else 9.5,
+                fontweight=('normal' if is_math else 'bold') if txt.endswith(':') else 'normal')
+        y -= 0.072 if txt else 0.04
+
+    for ax in axes.flat:
+        if ax is not axes[2, 2]:
+            ax.grid(True, alpha=0.3); ax.set_xlabel('Time [s]')
+
+    _loop = getattr(tt, '_current_loop', '?')
+    plt.suptitle(fr'P_LH components — loop {_loop}   ($B_T \approx {B0:.2f}$ T,  $M_{{eff}}\approx{Meff:.2f}$)', fontsize=14)
+    plt.tight_layout()
     _save_or_display(fig, save_path, display)
 
 
