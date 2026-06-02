@@ -355,7 +355,7 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
 
     return results
 
-def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
+def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target, F0=None):
     r'''! Solve Grad-Shafranov equilibrium for given profiles
 
     @param mygs Grad-Shafranov solver object
@@ -369,7 +369,7 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
     ffp_prof['type'] = 'jphi-linterp'
 
     mygs.set_targets(Ip=Ip_target, pax=pax_target)
-    mygs.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof)
+    mygs.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof, foffset=F0)
 
     # Solve Grad-Shafranov
     mygs.solve()
@@ -903,6 +903,8 @@ def solve_with_bootstrap(mygs,
                     'scale_j0' : 1.0,
                     'scale_Ip' : 1.0}
         return results
+    else:
+        F0_local = kwargs.get('F0_local', None)
 
     warn(
         "The python solve_with_bootstrap() is deprecated by mygs.solve_bootstrap() (internal fortran-solve)."
@@ -1119,7 +1121,7 @@ def solve_with_bootstrap(mygs,
         pax_target = pressure[0]
 
         # Run through once for better profile convergence
-        solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target)
+        solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target,F0=F0_local)
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
@@ -1166,7 +1168,7 @@ def solve_with_bootstrap(mygs,
             scaled_Ip_target = Ip_target*final_scale_Ip
             pax_target = pressure[0]
 
-            solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target)
+            solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target,F0=F0_local)
 
             # Check Convergence
             _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)

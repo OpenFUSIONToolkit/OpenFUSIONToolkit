@@ -2153,7 +2153,7 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
-    def solve_bootstrap(self, ffp_prof, te_prof, ne_prof, ti_prof, ni_prof, Zeff, Ip_target, pres_prof=None, **kwargs):
+    def solve_bootstrap(self, ffp_prof, te_prof, ne_prof, ti_prof, ni_prof, Zeff, Ip_target, F0=None, pres_prof=None, **kwargs):
         r'''! Solve G-S equilibrium with self-consistent bootstrap current from kinetic profiles
 
         Derives a pressure-gradient profile \f$P'(\hat{\psi})\f$ from the supplied kinetic
@@ -2259,7 +2259,8 @@ class TokaMaker():
         self.update_settings()
         self.set_profiles(
             ffp_prof=ffp_prof,
-            pp_prof=pp_prof
+            pp_prof=pp_prof,
+            foffset=F0,
         )
         self.solve()
 
