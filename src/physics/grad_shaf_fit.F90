@@ -50,6 +50,8 @@ CONTAINS
   PROCEDURE :: get_nax => fit_dummy_nax_corr
   !> Does constraint use parallelism in calculation?
   PROCEDURE :: is_parallel => fit_dummy_parallel
+  !> Destructor
+  PROCEDURE :: destroy => fit_destroy
 END TYPE fit_constraint
 !---------------------------------------------------------------------------------
 !> Coil current constraint
@@ -204,8 +206,63 @@ LOGICAL, PRIVATE :: linearized_fit = .FALSE. !< Needs docs
 TYPE(fit_constraint_ptr), POINTER, DIMENSION(:) :: conlist => NULL() !< Needs docs
 !---
 PUBLIC fit_constraint, field_constraint, itor_constraint, fit_pm
-PUBLIC fit_constraint_ptr, fit_gs, fit_load
+PUBLIC fit_constraint_ptr, fit_gs, fit_gs_error, fit_load, fit_gs_setup, fit_gs_destroy
 CONTAINS
+!---------------------------------------------------------------------------------
+!> Needs Docs
+!---------------------------------------------------------------------------------
+SUBROUTINE fit_gs_setup(gs,constraints,inpath)
+TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
+TYPE(fit_constraint_ptr), POINTER, DIMENSION(:), INTENT(out) :: constraints !< Needs docs
+CHARACTER(LEN=*), INTENT(in) :: inpath !< Needs docs
+integer(4) :: i,io_unit
+!---Load constraints
+gs_active=>gs
+CALL fit_load(inpath,constraints)
+END SUBROUTINE fit_gs_setup
+!---------------------------------------------------------------------------------
+!> Needs Docs
+!---------------------------------------------------------------------------------
+SUBROUTINE fit_gs_destroy(gs,constraints)
+TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
+TYPE(fit_constraint_ptr), POINTER, DIMENSION(:), INTENT(inout) :: constraints !< Needs docs
+integer(4) :: i
+IF(.NOT.ASSOCIATED(constraints))RETURN
+DO i=1,SIZE(constraints)
+  IF(ASSOCIATED(constraints(i)%con))THEN
+    CALL constraints(i)%con%destroy()
+    DEALLOCATE(constraints(i)%con)
+  END IF
+END DO
+DEALLOCATE(constraints)
+END SUBROUTINE fit_gs_destroy
+!---------------------------------------------------------------------------------
+!> Needs Docs
+!---------------------------------------------------------------------------------
+SUBROUTINE fit_gs_error(gs,constraints,outpath,error_mat)
+TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
+TYPE(fit_constraint_ptr), POINTER, DIMENSION(:), INTENT(in) :: constraints !< Needs docs
+CHARACTER(LEN=*), INTENT(in) :: outpath !< Needs docs
+REAL(r8), OPTIONAL, INTENT(inout) :: error_mat(:,:) !< Error matrix
+integer(4) :: i,io_unit
+!---Evaluate errors
+gs_active=>gs
+IF(PRESENT(error_mat))THEN
+  DO i=1,SIZE(constraints)
+    error_mat(1,i)=constraints(i)%con%error(gs)
+    error_mat(2,i)=constraints(i)%con%eval(gs)
+    error_mat(3,i)=constraints(i)%con%val
+    error_mat(4,i)=constraints(i)%con%get_nax(gs)
+  END DO
+ELSE
+  OPEN(NEWUNIT=io_unit,FILE=TRIM(outpath))
+  DO i=1,SIZE(constraints)
+    WRITE(io_unit,'(I8,4ES20.12)')i,constraints(i)%con%error(gs),constraints(i)%con%eval(gs),constraints(i)%con%val, &
+    constraints(i)%con%get_nax(gs)
+  END DO
+  CLOSE(io_unit)
+END IF
+END SUBROUTINE fit_gs_error
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -273,13 +330,13 @@ ELSE
   IF(fit_FFPscale)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
   'fit_gs',__FILE__)
 END IF
-IF(gs_active%I%ncofs>0.AND.fit_I)THEN
-  ncofs = ncofs+gs_active%I%ncofs
+IF(gs_active%I%ndofs>0.AND.fit_I)THEN
+  ncofs = ncofs+gs_active%I%ndofs
 END IF
 IF(fit_Pscale.OR.fit_R0)ncofs = ncofs+1
 IF(fit_Z0)ncofs = ncofs + 1
-IF(gs_active%P%ncofs>0.AND.fit_P)THEN
-  ncofs = ncofs+gs_active%P%ncofs
+IF(gs_active%P%ndofs>0.AND.fit_P)THEN
+  ncofs = ncofs+gs_active%P%ndofs
 END IF
 ncond_active = 0
 IF(fit_coils)ncofs = ncofs + gs_active%device%ncoils
@@ -307,8 +364,8 @@ ELSE
   IF(fit_FFPscale)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
   'fit_gs',__FILE__)
 END IF
-IF(gs_active%I%ncofs>0.AND.fit_I)THEN
-  js = offset; je = offset+gs_active%I%ncofs
+IF(gs_active%I%ndofs>0.AND.fit_I)THEN
+  js = offset; je = offset+gs_active%I%ndofs
   CALL gs_active%I%get_cofs(cofs(js+1:je))
   offset = je
 END IF
@@ -330,8 +387,8 @@ IF(fit_Z0)THEN
   cofs_scale(offset+1)=40.d0/(gs_active%device%spatial_bounds(2,2)-gs_active%device%spatial_bounds(1,2))
   offset=offset+1
 END IF
-IF(gs_active%P%ncofs>0.AND.fit_P)THEN
-  js = offset; je = offset+gs_active%P%ncofs
+IF(gs_active%P%ndofs>0.AND.fit_P)THEN
+  js = offset; je = offset+gs_active%P%ndofs
   CALL gs_active%P%get_cofs(cofs(js+1:je))
   offset = je
 END IF
@@ -451,6 +508,13 @@ WRITE(io_unit,*)cofs
 WRITE(io_unit,*)gs_active%p_scale,gs_active%vcontrol_val
 CLOSE(io_unit)
 !---Cleanup
+DO i=1,ncons
+  IF(ASSOCIATED(conlist(i)%con))THEN
+    CALL conlist(i)%con%destroy()
+    DEALLOCATE(conlist(i)%con)
+  END IF
+END DO
+DEALLOCATE(conlist)
 CALL psi_best%delete
 DEALLOCATE(cofs,cofs_scale,cofs_best,error,psi_best)
 DEALLOCATE(fjac,qtf,wa1,wa2,wa3,wa4,ipvt)
@@ -617,8 +681,8 @@ IF(iflag==1)THEN
       gs_active%psiscale=cofs(1)
     END IF
   END IF
-  IF(gs_active%I%ncofs>0.AND.fit_I)THEN
-    js = offset; je = offset+gs_active%I%ncofs
+  IF(gs_active%I%ndofs>0.AND.fit_I)THEN
+    js = offset; je = offset+gs_active%I%ndofs
     ierr=gs_active%I%set_cofs(cofs(js+1:je))
     IF(ierr<0)THEN
       WRITE(*,'(2A)')oft_indent,'Invalid I coefficients'
@@ -649,8 +713,8 @@ IF(iflag==1)THEN
     gs_active%Z0_target=cofs(offset+1)
     offset=offset+1
   END IF
-  IF(gs_active%P%ncofs>0.AND.fit_P)THEN
-    js = offset; je = offset+gs_active%P%ncofs
+  IF(gs_active%P%ndofs>0.AND.fit_P)THEN
+    js = offset; je = offset+gs_active%P%ndofs
     ierr=gs_active%P%set_cofs(cofs(js+1:je))
     IF(ierr<0)THEN
       WRITE(*,'(2A)')oft_indent,'Invalid P coefficients'
@@ -749,8 +813,8 @@ IF(iflag==1)THEN
       END IF
       offset=offset+1
     END IF
-    IF(gs_active%I%ncofs>0.AND.fit_I)THEN
-      js = offset; je = offset+gs_active%I%ncofs
+    IF(gs_active%I%ndofs>0.AND.fit_I)THEN
+      js = offset; je = offset+gs_active%I%ndofs
       WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'F_cofs            ='
       DO i=js+1,je
         WRITE(*,'(ES11.3)',ADVANCE="NO")cofs(i)
@@ -760,8 +824,8 @@ IF(iflag==1)THEN
     END IF
     IF(fit_Pscale.OR.fit_R0.OR.(gs_active%estore_target>0.d0))offset=offset+1
     IF(fit_Z0)offset=offset+1
-    IF(gs_active%P%ncofs>0.AND.fit_P)THEN
-      js = offset; je = offset+gs_active%P%ncofs
+    IF(gs_active%P%ndofs>0.AND.fit_P)THEN
+      js = offset; je = offset+gs_active%P%ndofs
       WRITE(*,'(2A)',ADVANCE="NO")oft_indent,'P_cofs            ='
       DO i=js+1,je
         WRITE(*,'(ES11.3)',ADVANCE="NO")cofs(i)
@@ -848,8 +912,8 @@ ELSE
     END IF
     offset=1
   END IF
-  IF(gs_active%I%ncofs>0.AND.fit_I)THEN
-    js = offset; je = offset+gs_active%I%ncofs
+  IF(gs_active%I%ndofs>0.AND.fit_I)THEN
+    js = offset; je = offset+gs_active%I%ndofs
     cof_tmp(1:je-js)=cofs(js+1:je)
     DO j=1,je-js
       CALL reset_eq
@@ -911,8 +975,8 @@ ELSE
     gs_active%Z0_target=cofs(offset+1)
     offset=offset+1
   END IF
-  IF(gs_active%P%ncofs>0.AND.fit_P)THEN
-    js = offset; je = offset+gs_active%P%ncofs
+  IF(gs_active%P%ndofs>0.AND.fit_P)THEN
+    js = offset; je = offset+gs_active%P%ndofs
     cof_tmp(1:je-js)=cofs(js+1:je)
     DO j=1,je-js
       CALL reset_eq
@@ -1049,21 +1113,21 @@ OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,*)n
 !---
 ncons=n
-IF(fit_coils)ncons=n+gs_active%device%ncoils
+! IF(fit_coils)ncons=n+gs_active%device%ncoils
 ! IF(gs_active%Z0_target>-1.d98)ncons=ncons+1
 ALLOCATE(cons(ncons))
 j=1
 !---
-IF(fit_coils)THEN
-  DO i=1,gs_active%device%ncoils
-    ALLOCATE(coil_con)
-    coil_con%coil=i
-    coil_con%val=gs_active%coil_currs(i)/mu0
-    coil_con%wt=ABS(1.d0/(.05d0*coil_con%val))
-    cons(j)%con=>coil_con
-    j=j+1
-  END DO
-END IF
+! IF(fit_coils)THEN
+!   DO i=1,gs_active%device%ncoils
+!     ALLOCATE(coil_con)
+!     coil_con%coil=i
+!     coil_con%val=gs_active%coil_currs(i)/mu0
+!     coil_con%wt=ABS(1.d0/(.05d0*coil_con%val))
+!     cons(j)%con=>coil_con
+!     j=j+1
+!   END DO
+! END IF
 ! IF(gs_active%Z0_target>-1.d98)THEN
 !   ALLOCATE(vcont_constraint::cons(j)%con)
 !   cons(j)%con%val=0.d0
@@ -1124,6 +1188,11 @@ DO i=1,n
       READ(io_unit,*,END=300)saddle_con%val,saddle_con%wt
       neddy=neddy+1
       cons(j)%con=>saddle_con
+    CASE(12)
+      ALLOCATE(coil_con)
+      READ(io_unit,*,END=300)coil_con%coil
+      READ(io_unit,*,END=300)coil_con%val,coil_con%wt
+      cons(j)%con=>coil_con
     CASE DEFAULT
       CALL oft_abort('Invalid constraint type.','fit_load',__FILE__)
   END SELECT
@@ -1204,6 +1273,15 @@ CLASS(fit_constraint), INTENT(inout) :: self !< Needs docs
 LOGICAL :: is_parallel !< Needs docs
 is_parallel=.FALSE.
 END FUNCTION fit_dummy_parallel
+!---------------------------------------------------------------------------------
+!> Needs Docs
+!---------------------------------------------------------------------------------
+SUBROUTINE fit_destroy(self)
+CLASS(fit_constraint), INTENT(inout) :: self !< Needs docs
+IF(ASSOCIATED(self%nax_corr))DEALLOCATE(self%nax_corr)
+IF(ASSOCIATED(self%comp_r))DEALLOCATE(self%comp_r)
+IF(ASSOCIATED(self%comp_n))DEALLOCATE(self%comp_n)
+END SUBROUTINE fit_destroy
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
