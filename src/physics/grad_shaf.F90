@@ -2131,6 +2131,8 @@ ELSE
     ALLOCATE(self%lu_solver%sec_rhs(equil%psi%n,2))
   END IF
 END IF
+!---Prevent NaNs with Dflux target and zero initial FFP scale
+IF(equil%dflux_target>-1.d98.AND.ABS(equil%ffp_scale)<1.d-8)equil%ffp_scale=1.d0
 !---
 ALLOCATE(vals_tmp(equil%psi%n))
 CALL equil%psi%new(tmp_vec)
