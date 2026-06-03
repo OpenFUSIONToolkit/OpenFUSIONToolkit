@@ -108,7 +108,7 @@ def mp_run(target,args,timeout=180):
     return test_result
 
 
-def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,mp_q):
+def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,basepath,mp_q):
     result = True
     try:
         from OpenFUSIONToolkit import OFT_env
@@ -122,7 +122,7 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
             tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
         else:
             tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
-        tw_model.setup_io()
+        tw_model.setup_io(basepath=basepath)
         if floops is not None:
             from OpenFUSIONToolkit.ThinCurr.sensor import circular_flux_loop, save_sensors
             sensors = []
@@ -140,8 +140,27 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
         tw_model.compute_Mcoil()
         tw_model.compute_Lmat(use_hodlr=use_aca,cache_file='Lmat.save')
         tw_model.compute_Rmat()
+        rst_before = set(glob.glob('pThinCurr_*.rst'))
+        hist_before = os.path.exists('floops.hist')
         tw_model.run_td(2.E-5,200,direct=(direct_flag == 'T'),lin_tol=lin_tol,coil_currs=curr_waveform,coil_volts=volt_waveform,sensor_obj=sensor_obj)
         tw_model.plot_td(200,sensor_obj=sensor_obj)
+        if basepath is not None:
+            # Verify output files landed in basepath, not CWD
+            rst_in_outdir = glob.glob(os.path.join(basepath, 'pThinCurr_*.rst'))
+            new_rst_in_cwd = set(glob.glob('pThinCurr_*.rst')) - rst_before
+            if len(rst_in_outdir) == 0:
+                print("FAILED: No .rst files found in output directory")
+                result = False
+            if len(new_rst_in_cwd) > 0:
+                print("FAILED: {0} .rst file(s) written to CWD instead of output directory".format(len(new_rst_in_cwd)))
+                result = False
+            if floops is not None:
+                if not os.path.exists(os.path.join(basepath, 'floops.hist')):
+                    print("FAILED: floops.hist not found in output directory")
+                    result = False
+                if not hist_before and os.path.exists('floops.hist'):
+                    print("FAILED: floops.hist written to CWD instead of output directory")
+                    result = False
         if run_reduced:
             eig_vals, eig_vecs = tw_model.get_eigs(30,direct=(direct_flag == 'T'))
             tw_reduced = tw_model.build_reduced_model(eig_vecs, compute_B=True, sensor_obj=sensor_obj, filename='tCurr_reduced.h5')
@@ -154,6 +173,9 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
     except BaseException as e:
         print(e)
         result = False
+    finally:
+        if basepath is not None and os.path.isdir(basepath):
+            shutil.rmtree(basepath)
     oftpy_dump_cov()
     mp_q.put(result)
 
@@ -302,7 +324,7 @@ def run_td_for_Mirnov(meshfile,direct_flag,curr_waveform,lin_tol,mp_q):
 
 def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,use_aca=False,
                     icoils=None,vcoils=None,floops=None,curr_waveform=None,volt_waveform=None,
-                    python=False,lin_tol=1.E-9,jumper_start=0,run_reduced=False):
+                    python=False,lin_tol=1.E-9,jumper_start=0,run_reduced=False,basepath=None):
     """
     Common setup and run operations for thin-wall physics module test cases
     """
@@ -393,7 +415,7 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
     # Run thin-wall model
     if run_type == 1:
         if python:
-            return mp_run(run_td,(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced))
+            return mp_run(run_td,(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,basepath))
         else:
             return run_OFT("../../bin/thincurr_td oft.in oft_in.xml", 1, 180)
     elif run_type == 2:
@@ -1186,6 +1208,19 @@ def test_td_passive_volt(direct_flag,python):
                           volt_waveform=((0.0, 0.0, 1.0), (1.0, 0.0, 1.0)),
                           python=python)
    assert validate_td(sigs_final, jumpers_final)
+
+#============================================================================
+# Test for output directory (basepath) support in run_td / plot_td
+@pytest.mark.coverage
+@pytest.mark.parametrize("python", (True,))
+def test_td_output_dir(python):
+    assert ThinCurr_setup("tw_test-plate.h5", 1, 'F',
+                           icoils=((0.5, 0.1),),
+                           floops=((0.5, -0.05), (0.5, -0.1)),
+                           curr_waveform=((0.0, 0.0), (1.0, 1.0)),
+                           python=python,
+                           basepath='td_output_dir_test')
+
 
 #============================================================================
 # Test runners for large cylinder (w/ ACA+)
