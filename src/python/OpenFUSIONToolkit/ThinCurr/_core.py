@@ -145,7 +145,9 @@ class ThinCurr():
     def setup_io(self,basepath=None,save_debug=False,legacy_hdf5=False):
         '''! Setup XDMF+HDF5 I/O for 3D visualization
 
-        @param basepath Path to root directory to use for I/O
+        @param basepath Path to root directory to use for I/O. When set, all output files
+          produced by run_td() and plot_td() (.rst, .hist, XDMF, HDF5) are written to this
+          directory. The directory is created if it does not already exist.
         @param save_debug Save model debug information?
         @param legacy_hdf5 Use legacy HDF5 format (required for VisIt)
         '''
@@ -570,11 +572,15 @@ class ThinCurr():
         @param full_volts Voltage vs time array for Vcoils `(:,nelems+1)` (first column is time)
         @param direct Use direct solver?
         @param status_freq Frequency to print status information
-        @param plot_freq Frequency to save plot files
+        @param plot_freq Frequency to save plot files (.rst restart files are written at this frequency)
         @param sensor_obj Sensor object to use
         @param lin_tol Tolerance for linear solver when `direct=False`
         @param lin_rtol Relative tolerance for linear solver when `direct=False`
         @param timestep_cn Use Crank-Nicolson timestep?
+
+        @note Output files (.rst, floops.hist, jumpers.hist) are written to the directory
+          specified by setup_io(basepath=...). By default they are written to the current
+          working directory.
         '''
         vec_ic = numpy.zeros((self.nelems,), dtype=numpy.float64)
         if coil_currs is None:
@@ -632,8 +638,11 @@ class ThinCurr():
         @param nsteps Number of steps to take
         @param compute_B Compute B-field on grid vertices
         @param rebuild_sensors Recompute sensor signals (overwriting if present)
-        @param plot_freq Frequency to load plot files
+        @param plot_freq Frequency to load plot files (must match plot_freq used in run_td())
         @param sensor_obj Sensor object to use
+
+        @note Reads .rst files from the directory specified by setup_io(basepath=...). Must
+          match the basepath used when run_td() was called.
         '''
         sensor_ptr = c_void_p()
         if sensor_obj is not None:
