@@ -398,7 +398,7 @@ class TokaMaker():
 
     @property
     def c_ptr(self):
-        r'''C pointer to Fortran-side TokaMaker object'''
+        r'''! C pointer to Fortran-side TokaMaker object'''
         return self._tMaker_ptr
 
     @property
@@ -408,13 +408,11 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.ffp_scale
     
-    # @cond
     @ffp_scale.setter
     def ffp_scale(self,value):
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         self._tMaker_equil.ffp_scale = value
-    # @endcond
     
     @property
     def p_scale(self):
@@ -423,13 +421,11 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.p_scale
     
-    # @cond
     @p_scale.setter
     def p_scale(self,value):
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         self._tMaker_equil.p_scale = value
-    # @endcond
 
     @property
     def alam(self):
@@ -438,11 +434,9 @@ class TokaMaker():
         @deprecated Use `ffp_scale` property instead.'''
         return self.ffp_scale
     
-    # @cond
     @alam.setter
     def alam(self,value):
         self.ffp_scale = value
-    # @endcond
     
     @property
     def pnorm(self):
@@ -451,11 +445,9 @@ class TokaMaker():
         @deprecated Use `p_scale` property instead.'''
         return self.p_scale
     
-    # @cond
     @pnorm.setter
     def pnorm(self,value):
         self.p_scale = value
-    # @endcond
     
     @property
     def diverted(self):
@@ -2213,60 +2205,62 @@ class TokaMaker_equilibrium():
         
     @property
     def c_ptr(self):
-        r'''C pointer to Fortran-side equilibrium object'''
+        r'''! C pointer to Fortran-side equilibrium object
+        
+        @property c_ptr'''
         return self._equil_ptr
     
     @property
     def ffp_scale(self):
-        r'''! F*F' scale value'''
+        r'''! F*F' scale value
+        
+        @property ffp_scale'''
         return self._ffp_scale[0]
     
-    # @cond
     @ffp_scale.setter
     def ffp_scale(self,value):
         self._ffp_scale[0] = value
-    # endcond
     
     @property
     def p_scale(self):
-        r'''! Pressure scale value'''
+        r'''! Pressure scale value
+        
+        @property p_scale'''
         return self._p_scale[0]
     
-    # @cond
     @p_scale.setter
     def p_scale(self,value):
         self._p_scale[0] = value
-    # endcond
     
     @property
     def alam(self):
         r'''! F*F' scale value
         
-        @deprecated Use `ffp_scale` property instead.'''
+        @deprecated Use `ffp_scale` property instead.
+        @property alam'''
         return self.ffp_scale
     
-    # @cond
     @alam.setter
     def alam(self,value):
         self.ffp_scale = value
-    # endcond
 
     @property
     def pnorm(self):
         r'''! Pressure scale value
         
-        @deprecated Use `p_scale` property instead.'''
+        @deprecated Use `p_scale` property instead.
+        @property pnorm'''
         return self.p_scale
     
-    # @cond
     @pnorm.setter
     def pnorm(self,value):
         self.p_scale = value
-    # @endcond
     
     @property
     def diverted(self):
-        r'''! Diverted flag (limited if `False`)'''
+        r'''! Diverted flag (limited if `False`)
+        
+        @property diverted'''
         return self._diverted[0]
         
     @property
