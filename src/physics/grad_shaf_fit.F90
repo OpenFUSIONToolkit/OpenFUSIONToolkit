@@ -227,6 +227,7 @@ SUBROUTINE fit_gs_destroy(gs,constraints)
 TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
 TYPE(fit_constraint_ptr), POINTER, DIMENSION(:), INTENT(inout) :: constraints !< Needs docs
 integer(4) :: i
+IF(.NOT.ASSOCIATED(constraints))RETURN
 DO i=1,SIZE(constraints)
   IF(ASSOCIATED(constraints(i)%con))THEN
     CALL constraints(i)%con%destroy()
@@ -238,10 +239,9 @@ END SUBROUTINE fit_gs_destroy
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE fit_gs_error(gs,constraints,inpath,outpath,error_mat)
+SUBROUTINE fit_gs_error(gs,constraints,outpath,error_mat)
 TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
 TYPE(fit_constraint_ptr), POINTER, DIMENSION(:), INTENT(in) :: constraints !< Needs docs
-CHARACTER(LEN=*), INTENT(in) :: inpath !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: outpath !< Needs docs
 REAL(r8), OPTIONAL, INTENT(inout) :: error_mat(:,:) !< Error matrix
 integer(4) :: i,io_unit

@@ -2405,7 +2405,7 @@ DO i=1,self%maxits
 
   ! Create plasma poloidal flux
   CALL equil%psi%set(0.d0)
-  IF(ALL(self%target_weights<0.d0))THEN
+  IF(ALL(self%target_weights<=0.d0))THEN
     ! Solve for parameters
     pm_save=oft_env%pm; oft_env%pm=.FALSE.
     CALL lapack_matinv(3,param_mat,ierr_loc)

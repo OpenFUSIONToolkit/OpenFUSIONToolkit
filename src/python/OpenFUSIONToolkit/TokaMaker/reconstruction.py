@@ -891,9 +891,10 @@ class reconstruction():
         @returns Jacobian matrix for current DoFs
         '''
         recon_obj._tMaker_obj.replace_eq(recon_obj._EQ_center)
-        center_err = reconstruction.opt_error(cofs,recon_obj,True)
+        _ = reconstruction.opt_error(cofs,recon_obj,True)
         jac = numpy.zeros((len(recon_obj._fail_error),len(cofs)))
         center_EQ = recon_obj._tMaker_obj.copy_eq()
+        # Resolve for center point to capture "one more step" converged result as achieved in small diffs below
         center_err = reconstruction.opt_error(cofs,recon_obj,True)
         for i, cof_val in enumerate(cofs):
             cof_tmp = cofs.copy()
