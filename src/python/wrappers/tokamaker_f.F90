@@ -693,6 +693,7 @@ IF(.NOT.tokamaker_require_equil(tMaker_obj))THEN
   RETURN
 END IF
 error_flag=0
+IF(ASSOCIATED(tMaker_obj%recon_constraints))CALL tokamaker_recon_destroy(tMaker_ptr,error_flag)
 CALL c_f_pointer(settings%infile,infile_c,[OFT_PATH_SLEN])
 CALL copy_string_rev(infile_c,infile)
 CALL fit_gs_setup(tMaker_obj%gs_equil,tMaker_obj%recon_constraints,infile)
