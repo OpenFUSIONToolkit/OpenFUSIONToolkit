@@ -1297,7 +1297,7 @@ INTEGER(4), INTENT(in) :: npsi
 REAL(8), INTENT(in) :: psivals(npsi)
 INTEGER(4), INTENT(in) :: nbasis
 REAL(8), INTENT(in) :: yvals(npsi+1,nbasis)
-REAL(8), INTENT(in) :: weights(nbasis)
+REAL(8), INTENT(in) :: weights(nbasis-1)
 INTEGER(4) :: i,ierr
 SELECT TYPE(self=>func)
   TYPE IS(mlinterp_flux_func)
@@ -1324,7 +1324,7 @@ SELECT TYPE(self=>func)
   ierr=self%set_cofs(self%weights)
   IF(oft_debug_print(1))WRITE(*,*)'Multi-linear interpolator Created',self%ndofs,self%x,self%y0
 class default
-  CALL oft_abort('Invalid flux function type in create_linterp_ff','create_linterp_ff',__FILE__)
+  CALL oft_abort('Invalid flux function type in create_mlinterp_ff','create_mlinterp_ff',__FILE__)
 END SELECT
 END SUBROUTINE create_mlinterp_ff
 !------------------------------------------------------------------------------
@@ -1346,7 +1346,7 @@ SELECT TYPE(new)
     new%yp=self%yp
     new%y=self%y
     new%nbasis=self%nbasis
-    ALLOCATE(new%weights(new%nbasis),new%yp_basis(new%npsi+1,new%nbasis))
+    ALLOCATE(new%weights(new%nbasis-1),new%yp_basis(new%npsi+1,new%nbasis))
     new%weights=self%weights
     new%yp_basis=self%yp_basis
 END SELECT

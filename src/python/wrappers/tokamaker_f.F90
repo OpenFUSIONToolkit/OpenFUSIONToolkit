@@ -459,15 +459,18 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 REAL(r8), POINTER :: dofs_tmp(:)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+ndofs=-1
 SELECT CASE(prof_type)
 CASE(1)
   IF(.NOT.ASSOCIATED(tMaker_equil_obj%I))THEN
     CALL copy_string("Profile not allocated",error_str)
+    RETURN
   END IF
   ndofs=tMaker_equil_obj%I%ndofs
 CASE(2)
   IF(.NOT.ASSOCIATED(tMaker_equil_obj%P))THEN
     CALL copy_string("Profile not allocated",error_str)
+    RETURN
   END IF
   ndofs=tMaker_equil_obj%P%ndofs
 CASE DEFAULT
@@ -489,12 +492,14 @@ SELECT CASE(prof_type)
 CASE(1)
   IF(.NOT.ASSOCIATED(tMaker_equil_obj%I))THEN
     CALL copy_string("Profile not allocated",error_str)
+    RETURN
   END IF
   CALL c_f_pointer(dofs, dofs_tmp, [tMaker_equil_obj%I%ndofs])
   CALL tMaker_equil_obj%I%get_cofs(dofs_tmp)
 CASE(2)
   IF(.NOT.ASSOCIATED(tMaker_equil_obj%P))THEN
     CALL copy_string("Profile not allocated",error_str)
+    RETURN
   END IF
   CALL c_f_pointer(dofs, dofs_tmp, [tMaker_equil_obj%P%ndofs])
   CALL tMaker_equil_obj%P%get_cofs(dofs_tmp)
@@ -518,6 +523,7 @@ SELECT CASE(prof_type)
 CASE(1)
   IF(.NOT.ASSOCIATED(tMaker_equil_obj%I))THEN
     CALL copy_string("Profile not allocated",error_str)
+    RETURN
   END IF
   IF(tMaker_equil_obj%I%ndofs==0)RETURN
   CALL c_f_pointer(dofs, dofs_tmp, [tMaker_equil_obj%I%ndofs])
@@ -526,6 +532,7 @@ CASE(1)
 CASE(2)
   IF(.NOT.ASSOCIATED(tMaker_equil_obj%P))THEN
     CALL copy_string("Profile not allocated",error_str)
+    RETURN
   END IF
   IF(tMaker_equil_obj%P%ndofs==0)RETURN
   CALL c_f_pointer(dofs, dofs_tmp, [tMaker_equil_obj%P%ndofs])

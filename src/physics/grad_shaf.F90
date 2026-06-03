@@ -2249,10 +2249,14 @@ IF((equil%Z0_target>-1.d98).AND.ALL(self%target_weights<0.d0))THEN
 END IF
 NULLIFY(saddle_save)
 IF(((equil%R0_target>0.d0).OR.(equil%Z0_target>-1.d98)).AND.ALL(self%target_weights>0.d0))THEN
-  saddle_save=>equil%saddle_targets
+  IF(equil%saddle_ntargets>0)THEN
+    saddle_save=>equil%saddle_targets
+  ELSE
+    ALLOCATE(saddle_save(1,1))
+  END IF
   equil%saddle_ntargets=equil%saddle_ntargets+1
   ALLOCATE(equil%saddle_targets(3,equil%saddle_ntargets))
-  equil%saddle_targets(:,1:equil%saddle_ntargets-1)=saddle_save
+  IF(equil%saddle_ntargets>1)equil%saddle_targets(:,1:equil%saddle_ntargets-1)=saddle_save
   equil%saddle_targets(3,equil%saddle_ntargets)=self%target_weights(3)
 END IF
 !---
@@ -2674,7 +2678,11 @@ END IF
 IF(ASSOCIATED(saddle_save))THEN
   DEALLOCATE(equil%saddle_targets)
   equil%saddle_ntargets=equil%saddle_ntargets-1
-  IF(equil%saddle_ntargets>0)equil%saddle_targets=>saddle_save
+  IF(equil%saddle_ntargets>0)THEN
+    equil%saddle_targets=>saddle_save
+  ELSE
+    DEALLOCATE(saddle_save)
+  END IF
 END IF
 !---
 IF(self%compute_chi)CALL equil%get_chi

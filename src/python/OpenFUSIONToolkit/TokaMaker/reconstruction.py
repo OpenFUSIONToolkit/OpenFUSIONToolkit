@@ -384,6 +384,8 @@ class tokamaker_recon_settings:
         self.fixedCentering = False
         ## Relative step size for finite difference Jacobian calculation
         self.dx = 1.E-2
+        ## Minimum absolute step size for finite difference Jacobian calculation
+        self.dx_min = 1.E-8
         ## Show detailed progress output?
         self.pm = False
         ## File containing constraint definitions
@@ -486,7 +488,10 @@ class reconstruction():
     
     def __del__(self):
         '''! Destroy reconstruction object'''
-        self.destroy_constraints()
+        try:
+            self.destroy_constraints()
+        except Exception:
+            pass
         self._tMaker_obj = None
         self.settings = None
         self._Ip_con = None
@@ -752,6 +757,7 @@ class reconstruction():
         tokamaker_recon_destroy(self._tMaker_obj._tMaker_ptr,ctypes.byref(error_flag))
         if error_flag.value != 0:
             raise ValueError("Constraint destruction failed with error code {0:d}".format(error_flag.value))
+        self._ncons = 0
 
     def eval_error(self, vacuum=False, save_to_file=False):
         '''! Evaluate error in current equilibrium for specified constraints without performing reconstruction
@@ -760,7 +766,8 @@ class reconstruction():
         @param save_to_file Save error matrix to file specified in `settings.outfile`
         @result Error matrix if `save_to_file=False`, otherwise None (error matrix will be saved to file)
         '''
-        # Run error evaluation
+        if self._ncons == 0:
+            raise ValueError("Constraints are not set up; call `setup_constraints()` before `eval_error()`. ")
         mat_ptr = None
         if not save_to_file:
             error_mat = numpy.zeros((self._ncons, 4), dtype=numpy.float64)
@@ -890,9 +897,10 @@ class reconstruction():
         center_err = reconstruction.opt_error(cofs,recon_obj,True)
         for i, cof_val in enumerate(cofs):
             cof_tmp = cofs.copy()
-            cof_tmp[i] += recon_obj.settings.dx*abs(cof_val)
+            cof_diff = max(recon_obj.settings.dx_min,recon_obj.settings.dx*abs(cof_val))
+            cof_tmp[i] += cof_diff
             pert_err = reconstruction.opt_error(cof_tmp,recon_obj,True)
-            jac[:,i] = (pert_err-center_err)/(recon_obj.settings.dx*abs(cof_val))
+            jac[:,i] = (pert_err-center_err)/cof_diff
             recon_obj._tMaker_obj.replace_eq(center_EQ)
         return jac
 
