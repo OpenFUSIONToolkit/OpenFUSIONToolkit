@@ -644,7 +644,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Reconstruct vacuum equilibrium (no plasma)?
 TYPE(tokamaker_recon_settings_type), VALUE, INTENT(in) :: settings !< Reconstruction settings struct
 INTEGER(c_int), INTENT(out) :: error_flag !< Error flag (0 if no error)
-LOGICAL :: fitI,fitP,fit_Pscale,fit_FFPscale,fitR0,fitZ0,fitCoils,fitF0,fixedCentering
+LOGICAL :: fitI,fitP,fit_Pscale,fit_FFPscale,fitR0,fitZ0,fitCoils,fitF0,fixedCentering,vac_save
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
 CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -657,6 +657,7 @@ IF(.NOT.tokamaker_require_equil(tMaker_obj))THEN
   RETURN
 END IF
 error_flag=0
+vac_save=tMaker_obj%gs_equil%has_plasma
 IF(vacuum)tMaker_obj%gs_equil%has_plasma=.FALSE.
 fitI=settings%fitI
 fitP=settings%fitP
@@ -678,7 +679,7 @@ CALL fit_gs(tMaker_obj%gs_equil,infile,outfile,fitI,fitP,fit_Pscale,&
             fixedCentering)
 CALL gs_profile_save(TRIM(outfile)//'_fprof',tMaker_obj%gs_equil%I)
 CALL gs_profile_save(TRIM(outfile)//'_pprof',tMaker_obj%gs_equil%P)
-tMaker_obj%gs_equil%has_plasma=.TRUE.
+tMaker_obj%gs_equil%has_plasma=vac_save
 END SUBROUTINE tokamaker_recon_run
 !---------------------------------------------------------------------------------
 !> Perform an equilibrium reconstruction using TokaMaker

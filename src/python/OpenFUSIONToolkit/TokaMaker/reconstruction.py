@@ -832,7 +832,7 @@ class reconstruction():
         This function is designed to be called by general optimization routines, such as `scipy.optimize.minimize`.
 
         @param cofs DoF vector
-        @param recon_obj `TokaMaker.reconstrucion.reconstruction` object to be used
+        @param recon_obj `TokaMaker.reconstruction.reconstruction` object to be used
         @param in_jac Flag indicating whether this function is being called from a Jacobian calculation to make print statements during finite differencing
         @returns Weighted error vector for current DoFs
         '''
@@ -886,7 +886,7 @@ class reconstruction():
         r''' Compute Jacobian matrix corresponding by differencing `opt_error` for given DoF vector `cofs` and reconstruction object `recon_obj`.
 
         @param cofs DoF vector
-        @param recon_obj `TokaMaker.reconstrucion.reconstruction` object to be used
+        @param recon_obj `TokaMaker.reconstruction.reconstruction` object to be used
         @param in_jac Ignored flag just to match signature with `opt_error`
         @returns Jacobian matrix for current DoFs
         '''
