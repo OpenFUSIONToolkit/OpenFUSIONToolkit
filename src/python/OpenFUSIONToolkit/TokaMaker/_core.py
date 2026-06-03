@@ -2837,7 +2837,7 @@ class TokaMaker_equilibrium():
         tokamaker_get_jtor(self._equil_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return curr/mu0
+        return curr
 
     def calc_conductor_currents(self,psi,cell_centered=False,include_Vcoils=False):
         r'''! Get toroidal current density in conducting regions for a given \f$ \psi \f$
