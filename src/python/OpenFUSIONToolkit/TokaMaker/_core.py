@@ -16,7 +16,7 @@ from warnings import warn
 import numpy
 import matplotlib
 from matplotlib.patches import Polygon
-from matplotlib.clors import ListedColorMap
+from matplotlib.colors import ListedColormap
 from ._interface import *
 
 
