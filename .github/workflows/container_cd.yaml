@@ -1,0 +1,115 @@
+name: Build and publish OFT container images
+
+on:
+  push:
+    branches:
+      - container_release
+  pull_request:
+    paths:
+      - .github/workflows/container_cd.yaml
+      - docker/Dockerfile.*
+
+concurrency:
+  group: cd_container-${{ github.ref }}
+  cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  prepare-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version_tag: ${{ steps.version.outputs.version_tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine image tag
+        id: version
+        run: |
+          TAG_NAME="$(git tag --points-at "$GITHUB_SHA" | head -n 1)"
+          if [ -n "$TAG_NAME" ]; then
+            SAFE_TAG="${TAG_NAME//\//-}"
+            echo "version_tag=$SAFE_TAG" >> "$GITHUB_OUTPUT"
+          else
+            echo "version_tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-images:
+    needs: prepare-version
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+        image_name: [base, jupyter, extras]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Get build architecture
+        run: echo "ARCH_SUFFIX=$(dpkg --print-architecture)" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push' && github.ref == 'refs/heads/container_release'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and optionally publish image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.${{ matrix.image_name }}
+          platforms: linux/${{ env.ARCH_SUFFIX }}
+          build-args: |
+            GITBRANCH=${{ github.ref_name }}
+            GITVERSION=${{ github.sha }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/container_release' }}
+          tags: ${{ env.REGISTRY }}/openfusiontoolkit/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version_tag }}-${{ env.ARCH_SUFFIX }}
+
+  publish-manifests:
+    needs:
+      - prepare-version
+      - build-images
+    if: github.event_name == 'push' && github.ref == 'refs/heads/container_release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        image_name: [base, jupyter, extras]
+
+    steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish multi-platform manifest
+        run: |
+          docker buildx imagetools create \
+            -t "${{ env.REGISTRY }}/openfusiontoolkit/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version_tag }}" \
+            "${{ env.REGISTRY }}/openfusiontoolkit/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version_tag }}-amd64" \
+            "${{ env.REGISTRY }}/openfusiontoolkit/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version_tag }}-arm64"

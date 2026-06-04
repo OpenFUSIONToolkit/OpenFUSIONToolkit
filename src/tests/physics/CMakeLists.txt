@@ -22,6 +22,10 @@ if( OFT_BUILD_TESTS )
   configure_file( test_alfven_lag.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( cube.inp ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( cube.t3d ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  oft_add_test( test_alfven_2d.F90 test_phys_helpers )
+  configure_file( test_alfven_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  oft_add_test( test_sound_2d.F90 test_phys_helpers )
+  configure_file( test_sound_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
   # ThinCurr tests
   configure_file( test_ThinCurr.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
@@ -44,6 +48,10 @@ if( OFT_BUILD_TESTS )
   configure_file( ITER_test.eqdsk ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( ITER_test.ifile ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( LTX_geom.json ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( D3Dlike_Hmode_test.peqdsk ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( eqdsk_gfile_expected.json ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( eqdsk_gfile_tol.json ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( eqdsk_pfile_expected.json ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
   # Combined tests
   configure_file( test_python_comb.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
