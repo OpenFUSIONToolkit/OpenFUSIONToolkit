@@ -2216,8 +2216,10 @@ class TokaMaker():
         currents = self.get_delstar_curr(psi)
         curr_densities = numpy.zeros(self.nc)
 
-        max_cd = 2.5E6 # TODO: remove hardcoded value
+        max_cd = 0.0 # TODO: remove hardcoded value
+        min_cd = 0.0
         plasma_area = 0.0
+        cmap = matplotlib.pyplot.get_cmap('spring')
 
         for i in range(self.nc):
             if self.reg[i] not in [1, 3]:
@@ -2230,28 +2232,36 @@ class TokaMaker():
             cell_area = numpy.linalg.norm(numpy.cross(rz2 - rz1, rz3 - rz1))/2.0
             if self.reg[i] == 1:
                 plasma_area += cell_area
+            
+            max_cd = max(max_cd, curr_densities[idx1])
+            min_cd = min(min_cd, curr_densities[idx1])
 
-        curr_densities = curr_densities / plasma_area
+        # Convert to MA
+        max_cd /= 1.0E6
+        min_cd /= 1.0E6
+        curr_densities /= 1.0E6
+
+        # Get densities
+        max_cd /= plasma_area
+        min_cd /= plasma_area
+        curr_densities /= plasma_area
 
         for i in range(self.nc):
+            if self.reg[i] not in [1, 3]:
+                continue # Ignore all regions except plasma and vacuum
             idx1, idx2, idx3 = self.lc[i]
             rz1 = self.r[idx1][:2]
             rz2 = self.r[idx2][:2]
             rz3 = self.r[idx3][:2]
-            if numpy.abs(curr_densities[i]) > max_cd:
-                color = [1.0, 0.0, 1.0, 1.0]
-            elif curr_densities[i] > 0:
-                color = [0.0, 1.0, 0.0, curr_densities[i] / max_cd]
-            else:
-                color = [0.0, 0.0, 1.0, numpy.abs(curr_densities[i]) / max_cd]
+            color_idx = (curr_densities[i] - min_cd) / (max_cd - min_cd)
+            color = cmap(color_idx)
             poly = Polygon([rz1, rz2, rz3], facecolor=color)
             ax.add_patch(poly)
         
-        cmap = ListedColormap([[0.0, 0.0, 1.0, 1.0], [0.0, 0.0, 1.0, 0.5], [1.0, 1.0, 1.0, 1.0], [0.0, 1.0, 0.0, 0.5], [0.0, 1.0, 0.0, 1.0]])
-        bounds = numpy.linspace(-5.0, 5.0, 6)
-        norm = matplotlib.colors.BoundaryNorm(bounds, 5)
-        # formatter = mticker.ScalarFormatter()
-        fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap),
+        bounds = numpy.linspace(min_cd, max_cd, 10)
+        norm = matplotlib.colors.BoundaryNorm(boundaries=bounds, ncolors=cmap.N)
+
+        fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap), format='%.2f',
              ax=ax, orientation='vertical', label='Current Density [MA/m2]')
 
 class TokaMaker_equilibrium():
