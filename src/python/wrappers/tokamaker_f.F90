@@ -602,7 +602,7 @@ REAL(r8), PARAMETER :: jphi_ip_ratio_hi = 3.0d0
 REAL(r8) :: itor_target_orig, ip_phys, ip_phys_target, correction, rel_err
 REAL(r8) :: cent_dummy(2), v_dummy, pv_dummy, df_dummy, tf_dummy, bv_dummy
 INTEGER(i4) :: nl_its_total
-LOGICAL :: ip_phys_bad
+LOGICAL :: ip_phys_bad, ip_phys_bail
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
 IF(ANY(tMaker_obj%device%rcoils>0.d0).AND.(tMaker_obj%device%dt>0.d0))THEN
@@ -669,6 +669,7 @@ ip_phys_target = itor_target_orig
 nl_its_total = 0
 ierr = 0
 rel_err = 0.d0
+ip_phys_bail = .FALSE.
 IF(oft_debug_print(1))WRITE(*,'(A,ES16.8)') &
   '  [JPHI_IP] outer-loop entry  target_internal=', ip_phys_target
 DO outer_it = 1, jphi_ip_max_outer
@@ -722,11 +723,12 @@ DO outer_it = 1, jphi_ip_max_outer
     ip_phys_bad = .TRUE.
   END IF
   IF(ip_phys_bad)THEN
+    ip_phys_bail = .TRUE.
     IF(oft_debug_print(1))WRITE(*,'(A,I0,A,2ES16.8)') &
       '  [JPHI_IP] iter ', outer_it, &
-      ' SAFETY BAIL -- ip_phys out of sane range, ip_phys/target =', &
+      ' SAFETY BAIL -- ip_phys out of sane range, ip_phys, target =', &
       ABS(ip_phys), ip_phys_target
-    EXIT  ! caller will see equilibrium as solver produced it; restore handled below
+    EXIT  ! signalled as a hard error below so the caller's rollback can recover
   END IF
   rel_err = (ABS(ip_phys) - ip_phys_target) / ip_phys_target
   IF(oft_debug_print(1))WRITE(*,'(A,I0,A,3ES16.8)') &
@@ -754,14 +756,24 @@ END DO
 tMaker_obj%gs_equil%Itor_target = SIGN(itor_target_orig, &
                                         tMaker_obj%gs_equil%Itor_target)
 
-IF(ierr == 0 .AND. ABS(rel_err) >= jphi_ip_tol)THEN
+IF(ierr == 0 .AND. .NOT.ip_phys_bail .AND. ABS(rel_err) >= jphi_ip_tol)THEN
   ! Did not converge within max_outer; not an error, but worth noting
   IF(oft_debug_print(1))WRITE(*,*) &
     '  tokamaker_solve: jphi-linterp Ip-corr did not converge, final rel_err =', rel_err
 END IF
 
 IF(vacuum)tMaker_obj%gs_equil%has_plasma=vac_save
-IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
+IF(ip_phys_bail)THEN
+  ! The inner solve returned ierr==0 but gs_comp_globals reported a corrupted /
+  ! non-physical Ip (<=0, NaN, or far outside the sane window).  Report this as
+  ! a hard failure so the Python wrapper raises and the caller's rollback /
+  ! restore-and-resolve path is triggered -- otherwise a garbage equilibrium
+  ! would be returned as a nominal success.  (ierr is local to this routine;
+  ! error_str is what the wrapper inspects.)
+  CALL copy_string('jphi-linterp Ip-correction bailed: physical Ip out of valid range (corrupted equilibrium)',error_str)
+ELSE IF(ierr/=0)THEN
+  CALL copy_string(gs_err_reason(ierr),error_str)
+END IF
 nl_its = nl_its_total
 END SUBROUTINE tokamaker_solve
 !---------------------------------------------------------------------------------
