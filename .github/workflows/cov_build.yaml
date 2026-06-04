@@ -87,7 +87,7 @@ jobs:
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/oft_venv/bin/activate
-        make test_cov
+        make test
     
     - name: Fixup cache
       shell: bash

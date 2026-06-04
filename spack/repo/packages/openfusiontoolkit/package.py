@@ -118,7 +118,7 @@ class Openfusiontoolkit(CMakePackage):
         if "+petsc" in self.spec:
             args.append(self.define("OFT_PETSc_ROOT", "{0}".format(self.spec["petsc"].prefix)))
         return args
-    
+
     def setup_run_environment(self, env: EnvironmentModifications) -> None:
         '''Set environment variables for runtime use of Open FUSION Toolkit in Python'''
         if self.spec.satisfies("+python"):

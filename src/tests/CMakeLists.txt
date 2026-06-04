@@ -44,14 +44,22 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   set( OFT_DEBUG_TEST "1" )
     # set( OFT_TEST_ENV "${OFT_TEST_ENV};OFT_DEBUG_TEST=1")
 endif()
-# Add testing command to Makefile
+# Add testing commands to Makefile
 add_custom_target(test)
+add_custom_target(test_full)
 if( OFT_COVERAGE )
   configure_file( .coveragerc ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   add_custom_command(
       TARGET test
       POST_BUILD
       COMMAND PATH=${OFT_TEST_PATH} COVERAGE_PROCESS_START=.coveragerc OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=1 coverage run -m pytest -m \"coverage\" base grid lin_alg fem physics
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
+      POST_BUILD
+  )
+  add_custom_command(
+      TARGET test_full
+      POST_BUILD
+      COMMAND PATH=${OFT_TEST_PATH} COVERAGE_PROCESS_START=.coveragerc OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=1 coverage run -m pytest base grid lin_alg fem physics
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
       POST_BUILD
   )
@@ -63,16 +71,14 @@ else()
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
       POST_BUILD
   )
+  add_custom_command(
+      TARGET test_full
+      POST_BUILD
+      COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} --junitxml=OFT.junit.xml base grid lin_alg fem physics
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
+      POST_BUILD
+  )
 endif()
-# Add "full" testing command to Makefile
-add_custom_target(test_full)
-add_custom_command(
-    TARGET test_full
-    POST_BUILD
-    COMMAND PATH=${OFT_TEST_PATH} OFT_HAVE_MPI=${OFT_MPI_TEST} OFT_DEBUG_TEST=${OFT_DEBUG_TEST} ${OFT_PYTEST_EXE} --junitxml=OFT.junit.xml base grid lin_alg fem physics
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/tests
-    POST_BUILD
-)
 # Add "full" testing command to Makefile
 if( OFT_BUILD_EXAMPLES OR OFT_BUILD_PYTHON )
   add_custom_target(test_examples)
