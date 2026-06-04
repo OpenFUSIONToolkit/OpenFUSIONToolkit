@@ -62,6 +62,7 @@ end type circular_curr
 !> Abstract flux function prototype
 !------------------------------------------------------------------------------
 TYPE, ABSTRACT :: flux_func
+  LOGICAL :: include_sol = .FALSE. !< Allow source evaluation in SOL
   INTEGER(i4) :: ndofs = 0 !< Number of free coefficients
   REAL(r8) :: f_offset = 0.d0 !< Offset value
   REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Current plasma bounds (for normalization)
@@ -3264,7 +3265,7 @@ CLASS(oft_vector), intent(inout) :: b2 !< F*F' component of source (including `f
 CLASS(oft_vector), intent(inout) :: b3 !< P' component of source (without `p_scale`)
 REAL(8), INTENT(out) :: itor_ffp,itor_press,estore,dflux_ffp
 real(r8), pointer, dimension(:) :: atmp,btmp,b2tmp,b3tmp
-real(8) :: psitmp,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),pani(2)
+real(8) :: psitmp,psidiff,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),pani(2)
 real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:)
 integer(4) :: j,m,l
 integer(4), allocatable :: j_lag(:)
@@ -3295,7 +3296,7 @@ itor_ffp=0.d0
 itor_press=0.d0
 estore=0.d0
 dflux_ffp=0.d0
-!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp) &
+!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,psidiff,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp) &
 !$omp reduction(+:itor_ffp) reduction(+:itor_press) reduction(+:estore) reduction(+:dflux_ffp)
 allocate(rhs_loc(device%fe_rep%nce,3))
 allocate(rop(device%fe_rep%nce),vcache(device%fe_rep%nce))
@@ -3347,6 +3348,27 @@ do j=1,device%fe_rep%mesh%nc
         estore = estore + (self%P%F(psitmp))*v*device%fe_rep%quad%wts(m)*pt(1)
         itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*device%fe_rep%quad%wts(m)
       END IF
+    END IF
+    IF((SUM(ABS(ffp))<1.d-10).AND.self%I%include_sol)THEN
+      psitmp=0.d0
+      !$omp simd reduction(+:psitmp)
+      DO l=1,device%fe_rep%nce
+        psitmp=psitmp+vcache(l)*rop(l)
+      END DO
+      IF(psitmp > self%plasma_bounds(1))THEN
+        psidiff = psitmp - self%plasma_bounds(1)
+        psitmp = self%plasma_bounds(1) - psidiff
+      END IF
+      IF(self%mode==0)THEN
+        ffp(1:2)=((self%ffp_scale**2)*self%I%f(psitmp)+self%ffp_scale*self%I%f_offset)*self%I%fp(psitmp)
+        itor_ffp = itor_ffp + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)
+      ELSE
+        ffp(1:2)=0.5d0*self%ffp_scale*self%I%fp(psitmp)
+        itor_ffp = itor_ffp + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+      END IF
+      ! ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
+      ! estore = estore + (self%P%F(psitmp))*v*self%fe_rep%quad%wts(m)*pt(1)
+      itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*device%fe_rep%quad%wts(m)
     END IF
     pt(1) = MAX(pt(1),gs_epsilon)
     ffp = ffp*det/pt(1)
@@ -3543,6 +3565,17 @@ do i=1,device%fe_rep%mesh%nc
       END IF
       itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
       curr_cent = curr_cent + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
+    END IF
+    IF(self%I%include_sol)THEN
+     IF(self%mode==0)THEN
+        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
+        + (self%ffp_scale**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%ffp_scale)/(pt(1)+gs_epsilon))
+      ELSE
+        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
+        + .5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+      END IF
+      curr_cent = curr_cent + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
+      itor = itor + pt(1)*self%P%Fp(psitmp(1))*v*device%fe_rep%quad%wts(m)
     END IF
   end do
 end do
