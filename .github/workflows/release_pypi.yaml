@@ -185,7 +185,6 @@ jobs:
         $FC --version
 
     - name: Create build directory
-      if: ${{ !steps.cache-ext-libs.outputs.cache-hit }}
       run: mkdir libs
 
     - name: Build external (Nightly)
