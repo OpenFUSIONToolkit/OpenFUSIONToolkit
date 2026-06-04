@@ -2213,39 +2213,26 @@ class TokaMaker():
 
     def plot_current_density(self, fig, ax):
         psi = self.get_psi(normalized=True)
-        currents = self.get_delstar_curr(psi)
-        curr_densities = numpy.zeros(self.nc)
+        jphi = self.calc_delstar_curr(psi)
+        jphi_plot = numpy.zeros(self.nc)
 
-        max_cd = 0.0 # TODO: remove hardcoded value
-        min_cd = 0.0
-        plasma_area = 0.0
-        cmap = matplotlib.pyplot.get_cmap('spring')
+        max_jphi = 0.0
+        min_jphi = 0.0
 
         for i in range(self.nc):
             if self.reg[i] not in [1, 3]:
                 continue # Ignore all regions except plasma and vacuum
-            idx1, idx2, idx3 = self.lc[i]
-            rz1 = self.r[idx1][:2]
-            rz2 = self.r[idx2][:2]
-            rz3 = self.r[idx3][:2]
-            curr_densities[i] = currents[idx1]
-            cell_area = numpy.linalg.norm(numpy.cross(rz2 - rz1, rz3 - rz1))/2.0
-            if self.reg[i] == 1:
-                plasma_area += cell_area
-            
-            max_cd = max(max_cd, curr_densities[idx1])
-            min_cd = min(min_cd, curr_densities[idx1])
+            idx1, _, _ = self.lc[i]
+            jphi_plot[i] = jphi[idx1]            
+            max_jphi = max(max_jphi, jphi_plot[i])
+            min_jphi = min(min_jphi, jphi_plot[i])
 
         # Convert to MA
-        max_cd /= 1.0E6
-        min_cd /= 1.0E6
-        curr_densities /= 1.0E6
+        max_jphi /= 1.0E6
+        min_jphi /= 1.0E6
+        jphi_plot /= 1.0E6
 
-        # Get densities
-        max_cd /= plasma_area
-        min_cd /= plasma_area
-        curr_densities /= plasma_area
-
+        cmap = matplotlib.pyplot.get_cmap('spring')
         for i in range(self.nc):
             if self.reg[i] not in [1, 3]:
                 continue # Ignore all regions except plasma and vacuum
@@ -2253,12 +2240,12 @@ class TokaMaker():
             rz1 = self.r[idx1][:2]
             rz2 = self.r[idx2][:2]
             rz3 = self.r[idx3][:2]
-            color_idx = (curr_densities[i] - min_cd) / (max_cd - min_cd)
+            color_idx = (jphi_plot[i] - min_jphi) / (max_jphi - min_jphi)
             color = cmap(color_idx)
             poly = Polygon([rz1, rz2, rz3], facecolor=color)
             ax.add_patch(poly)
         
-        bounds = numpy.linspace(min_cd, max_cd, 10)
+        bounds = numpy.linspace(min_jphi, max_jphi, 10)
         norm = matplotlib.colors.BoundaryNorm(boundaries=bounds, ncolors=cmap.N)
 
         fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap), format='%.2f',
