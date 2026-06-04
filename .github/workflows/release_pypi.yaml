@@ -271,6 +271,9 @@ jobs:
       uses: actions/download-artifact@v6
       with:
         path: dist/
+    
+    - name: View distribution files
+      run: ls -l dist/
 
     - name: Publish distribution to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
