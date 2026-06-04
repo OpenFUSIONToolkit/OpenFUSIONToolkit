@@ -15,7 +15,7 @@ from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.util import mu0
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
-from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun
+from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun, create_isoflux_xpts, xpoints_from_moments
 
 
 def mp_run(target,args,timeout=30):
@@ -1726,6 +1726,56 @@ def test_pfile_bytes_roundtrip():
         d_ref = np.asarray(pf._get_data(key))
         d_rt  = np.asarray(pf_rt._get_data(key))
         assert np.allclose(d_ref, d_rt, rtol=1e-6, atol=1e-10), key
+
+
+# -----------------------------------------------------------------------
+# Test: X-point isoflux boundary helpers in TokaMaker.util
+#
+# These helpers check the generated boundary from 'create_isoflux_xpts' 
+# against the reference `isoflux_xpts_expected.json`.
+# -----------------------------------------------------------------------
+isoflux_xpts_expected = _load_eqdsk_fixture('isoflux_xpts_expected.json')
+
+
+def test_xpoints_from_moments():
+    """X-points are exact analytic Miller-moment coordinates."""
+    r0, z0, a = 6.2, 0.3, 2.0
+    kU, dU, kL, dL = 1.7, 0.33, 2.0, 0.5
+    # Up-down symmetric (lower defaults to upper)
+    xpts = xpoints_from_moments(r0, z0, a, kU, dU)
+    assert xpts.shape == (2, 2)
+    assert np.allclose(xpts[0], [r0 - a * dU, z0 + a * kU])
+    assert np.allclose(xpts[1], [r0 - a * dU, z0 - a * kU])
+    # Asymmetric
+    xpts = xpoints_from_moments(r0, z0, a, kU, dU, kappa_lower=kL, delta_lower=dL)
+    assert np.allclose(xpts[0], [r0 - a * dU, z0 + a * kU])
+    assert np.allclose(xpts[1], [r0 - a * dL, z0 - a * kL])
+
+
+@pytest.mark.parametrize('case', ['symmetric', 'asymmetric'])
+def test_create_isoflux_xpts(case):
+    """Generated boundary matches the reference contour, has exactly npts
+    unique points, and passes through both X-points."""
+    ref = isoflux_xpts_expected[case]
+    params = ref['params']
+    pts = create_isoflux_xpts(**params)
+    # Shape: exactly npts points, no duplicate closing point
+    assert pts.shape == (params['npts'], 2)
+    closed = np.vstack([pts, pts[0]])
+    gaps = np.linalg.norm(np.diff(closed, axis=0), axis=1)
+    assert np.all(gaps > 1e-9), "boundary contains a duplicate point"
+    # Both X-points must appear on the contour
+    xpts = np.asarray(ref['xpoints'])
+    for xpt in xpts:
+        assert np.min(np.linalg.norm(pts - xpt, axis=1)) < 1e-8
+    # Regression against the stored reference contour
+    assert np.allclose(pts, np.asarray(ref['points']), rtol=1e-10, atol=1e-12)
+
+
+def test_create_isoflux_xpts_requires_min_npts():
+    """npts < 3 must raise rather than allocate invalid segment counts."""
+    with pytest.raises(ValueError):
+        create_isoflux_xpts(2, 6.2, 0.0, 2.0, 1.7, 0.33)
 
 
 # # Example of how to run single test without pytest
