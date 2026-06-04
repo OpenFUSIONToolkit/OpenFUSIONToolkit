@@ -137,7 +137,7 @@ def create_isoflux_xpts(npts, r0, z0, a, kappa_upper, delta_upper,
 
     Generates a closed boundary contour suitable for use with
     \ref OpenFUSIONToolkit.TokaMaker.TokaMaker.set_isoflux_constraints "set_isoflux_constraints()"
-    and \ref OpenFUSIONToolkit.TokaMaker.TokaMaker.set_saddles "set_saddles()".
+    and \ref OpenFUSIONToolkit.TokaMaker.TokaMaker.set_saddle_constraints "set_saddle_constraints()".
     The outer (low-field-side) arc uses the INTOR analytic formula centered on the magnetic
     axis; the inner arcs use an inverted-INTOR formula that gives a smooth vertical tangent
     at the inner midplane.  Supports non-up-down-symmetric equilibria via independent upper
