@@ -216,10 +216,11 @@ def create_isoflux_xpts(npts, r0, z0, a, kappa_upper, delta_upper,
     r_iu, z_iu = _inner_arc(r_xu, z_xu, r_inner_mid, zsurf, ziu, n_inner_u + 1)
     r_iu, z_iu = r_iu[1:], z_iu[1:]
 
-    # Lower inner arc: midplane → X-point (reversed)
-    r_il_raw, z_il_raw = _inner_arc(r_xl, z_xl, r_inner_mid, zsurf, zil, n_inner_l)
-    r_il = r_il_raw[::-1]
-    z_il = z_il_raw[::-1]
+    # Lower inner arc: midplane → X-point (reversed; drop the final X-point,
+    # which is already the first point of the outer arc, to avoid a duplicate)
+    r_il_raw, z_il_raw = _inner_arc(r_xl, z_xl, r_inner_mid, zsurf, zil, n_inner_l + 1)
+    r_il = r_il_raw[::-1][:-1]
+    z_il = z_il_raw[::-1][:-1]
 
     return numpy.column_stack([numpy.concatenate([r_outer, r_iu, r_il]),
                                numpy.concatenate([z_outer, z_iu, z_il])])
