@@ -163,14 +163,19 @@ def create_isoflux_xpts(npts, r0, z0, a, kappa_upper, delta_upper,
     '''
     if npts < 3:
         raise ValueError("\"npts\" must be at least 3")
-    kU = float(kappa_upper);  dU = float(delta_upper)
-    kL = float(kappa_lower)  if kappa_lower  is not None else kU
-    dL = float(delta_lower)  if delta_lower  is not None else dU
-    zou = float(zeta_outer_upper);  zol = float(zeta_outer_lower)
-    ziu = float(zeta_inner_upper);  zil = float(zeta_inner_lower)
+    kU = float(kappa_upper)
+    dU = float(delta_upper)
+    kL = float(kappa_lower) if kappa_lower is not None else kU
+    dL = float(delta_lower) if delta_lower is not None else dU
+    zou = float(zeta_outer_upper)
+    zol = float(zeta_outer_lower)
+    ziu = float(zeta_inner_upper)
+    zil = float(zeta_inner_lower)
 
-    r_xu = r0 - a * dU;  z_xu = z0 + a * kU
-    r_xl = r0 - a * dL;  z_xl = z0 - a * kL
+    r_xu = r0 - a * dU
+    z_xu = z0 + a * kU
+    r_xl = r0 - a * dL
+    z_xl = z0 - a * kL
     zsurf = (z_xu + z_xl) / 2.0
 
     if r_inner_mid is None:
