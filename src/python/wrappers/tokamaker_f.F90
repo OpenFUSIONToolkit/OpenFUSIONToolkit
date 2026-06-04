@@ -37,7 +37,8 @@ USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile
   sauter_fc, gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
-USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
+USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh, &
+  jphi_flux_func
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -576,8 +577,32 @@ LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Perform vacuum solve?
 INTEGER(c_int), INTENT(out) :: nl_its !< Number of nonlinear iterations
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ntargets,ierr
-LOGICAL :: vac_save
+LOGICAL :: vac_save,is_jphi_linterp
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+! ---- jphi-linterp Ip-correction outer-iteration state ----
+INTEGER(i4) :: outer_it
+INTEGER(i4), PARAMETER :: jphi_ip_max_outer = 5
+REAL(r8), PARAMETER :: jphi_ip_tol = 5.0d-4   ! relative
+REAL(r8), PARAMETER :: jphi_ip_damp = 0.7d0   ! correction^damp
+REAL(r8), PARAMETER :: jphi_ip_min = 0.7d0    ! correction clamp
+REAL(r8), PARAMETER :: jphi_ip_max = 1.3d0    ! correction clamp
+! Sanity bounds on ip_phys / ip_phys_target -- if gs_comp_globals
+! reports an Ip ratio outside [jphi_ip_ratio_lo, jphi_ip_ratio_hi]
+! after a nominally-successful inner solve, the equilibrium has
+! corrupted (e.g. axis collapsed to device center because a tight-
+! bound QP went singular but still returned ierr=0).  Applying the
+! standard multiplicative correction in that state would inflate
+! Itor_target by a meaningless factor and corrupt downstream solves.
+! Bail without correction; the caller's exception/rollback handler
+! will recover.  The window is intentionally wide (0.3-3.0x) -- a
+! healthy iter 1 lands at ~0.994x for typical D-shape, so 0.3x is
+! ~50 standard deviations of the normal first-iter undershoot.
+REAL(r8), PARAMETER :: jphi_ip_ratio_lo = 0.3d0
+REAL(r8), PARAMETER :: jphi_ip_ratio_hi = 3.0d0
+REAL(r8) :: itor_target_orig, ip_phys, ip_phys_target, correction, rel_err
+REAL(r8) :: cent_dummy(2), v_dummy, pv_dummy, df_dummy, tf_dummy, bv_dummy
+INTEGER(i4) :: nl_its_total
+LOGICAL :: ip_phys_bad
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
 IF(ANY(tMaker_obj%device%rcoils>0.d0).AND.(tMaker_obj%device%dt>0.d0))THEN
@@ -592,10 +617,152 @@ IF(vacuum)THEN
   tMaker_obj%gs_equil%has_plasma=.FALSE.
 END IF
 tMaker_obj%device%timing=0.d0
-CALL tMaker_obj%device%solve(tMaker_obj%gs_equil,ierr)
+
+! Detect whether the active FFP profile is jphi-linterp.  Only that
+! profile type has the cut-cell + flux-averaging Ip discretization
+! mismatch that this outer loop corrects.  PP'/FF' profiles set
+! directly do not need this loop.
+is_jphi_linterp = .FALSE.
+IF(ASSOCIATED(tMaker_obj%gs_equil%I))THEN
+  SELECT TYPE(I_prof => tMaker_obj%gs_equil%I)
+  CLASS IS(jphi_flux_func)
+    is_jphi_linterp = .TRUE.
+  END SELECT
+END IF
+
+! Single solve when not jphi-linterp (preserves original behaviour
+! exactly for PP'/FF' users).  Also when vacuum=True (no Ip target).
+IF(.NOT.is_jphi_linterp .OR. vacuum)THEN
+  CALL tMaker_obj%device%solve(tMaker_obj%gs_equil,ierr)
+  IF(vacuum)tMaker_obj%gs_equil%has_plasma=vac_save
+  IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
+  nl_its=tMaker_obj%device%nl_its
+  RETURN
+END IF
+
+! ---- jphi-linterp outer iteration ----
+! TokaMaker's jphi-linterp profile type normalizes FFP via a flux-
+! surface-averaged integral (gs_flux_int of jphi/(<R>·<1/R>)), but
+! gs_comp_globals reports Ip via the *physical* integral (R·P' +
+! 0.5·FFP/R over plasma area).  The two disagree by ~0.5-1% on D-
+! shaped plasmas due to <R>·<1/R> ≠ R·(1/R) pointwise.  Result: a
+! call with set_targets(Ip=X) lands at get_globals returning X·(1-ε).
+!
+! Fix: iterate the inner Picard with progressively scaled Itor_target
+! until get_globals matches the user's nominal target within
+! jphi_ip_tol.  jphi_update remains stateless from the caller's
+! perspective -- only Itor_target is rescaled at the OFT solve level.
+!
+! ip_phys_target stays at the user's original ask; itor_target is
+! temporarily inflated to compensate for the per-iter mismatch.  At
+! convergence the inflation factor stops growing and ip_phys ~ user's
+! original target.
+
+! Save user's original Itor_target so we can restore it before returning.
+! jphi_update flips sign of Itor_target inside the Picard, but the magnitude
+! always equals the user's set_targets(Ip=...) value when this routine is
+! entered.  We need to restore the same magnitude (with whatever sign
+! jphi_update last left it) so subsequent solves don't see compounding
+! inflation from prior outer-loop scaling.
+itor_target_orig = ABS(tMaker_obj%gs_equil%Itor_target)
+ip_phys_target = itor_target_orig
+nl_its_total = 0
+ierr = 0
+rel_err = 0.d0
+IF(oft_debug_print(1))WRITE(*,'(A,ES16.8)') &
+  '  [JPHI_IP] outer-loop entry  target_internal=', ip_phys_target
+DO outer_it = 1, jphi_ip_max_outer
+  CALL tMaker_obj%device%solve(tMaker_obj%gs_equil,ierr)
+  nl_its_total = nl_its_total + tMaker_obj%device%nl_its
+  IF(ierr /= 0)THEN
+    IF(oft_debug_print(1))WRITE(*,'(A,I0,A,I0)') &
+      '  [JPHI_IP] iter ', outer_it, ' inner solve FAILED ierr=', ierr
+    EXIT
+  END IF
+  ! Compute physical Ip from current equilibrium
+  CALL gs_comp_globals(tMaker_obj%gs_equil, ip_phys, cent_dummy, &
+                        v_dummy, pv_dummy, df_dummy, tf_dummy, bv_dummy)
+  ! ip_phys here has same internal units as Itor_target (both mu0*Ip)
+  !
+  ! Sanity-check ip_phys before computing a correction factor.  Three
+  ! failure modes are guarded against here, all of which have been
+  ! observed under tight coil-bound homotopy at low j_phi-pinning:
+  !
+  ! (1) ABS(ip_phys) <= 0  -- degenerate; can't form ratio.  (Original
+  !     guard, preserved.)
+  ! (2) ip_phys is NaN/Inf -- happens when the inner solve produced
+  !     a singular flux state that gs_flux_int couldn't integrate
+  !     cleanly.  The Fortran idiom (x /= x) is the portable NaN
+  !     test; combined with the finite-range check below it also
+  !     catches Inf.
+  ! (3) ABS(ip_phys) far outside [jphi_ip_ratio_lo, jphi_ip_ratio_hi]
+  !     x target -- inner solve returned ierr=0 but the equilibrium is
+  !     corrupted (typically: QP at tight bounds went singular,
+  !     plasma collapsed to mesh boundary, ip_phys reflects the
+  !     bogus integral over a "no plasma" region).  Applying a
+  !     correction factor computed from this rel_err would inflate
+  !     Itor_target to nonsense and the next iter's solve would also
+  !     fail.  Better to bail now and let the caller's rollback (e.g.
+  !     bouquet's homotopy pass restore-and-resolve) recover.
+  !
+  ! Observed example (2026-05 PIN_JPHI sweep, homotopy pass 3
+  ! F=+/-1% VSC=+/-1%): inner solve returned ierr=0 but axis was
+  ! at (R, Z) = (0.5, 0.0) (device-center default for "no plasma");
+  ! gs_comp_globals then reported a nonsense ip_phys, and the next
+  ! outer iter scaled Itor_target by the clamped jphi_ip_max=1.3
+  ! before finally failing with ierr=-6.
+  ip_phys_bad = .FALSE.
+  IF(ABS(ip_phys) <= 0.d0)THEN
+    ip_phys_bad = .TRUE.
+  ELSE IF(ip_phys /= ip_phys)THEN  ! Fortran NaN test (NaN != NaN)
+    ip_phys_bad = .TRUE.
+  ELSE IF(ABS(ip_phys) < jphi_ip_ratio_lo * ip_phys_target)THEN
+    ip_phys_bad = .TRUE.
+  ELSE IF(ABS(ip_phys) > jphi_ip_ratio_hi * ip_phys_target)THEN
+    ip_phys_bad = .TRUE.
+  END IF
+  IF(ip_phys_bad)THEN
+    IF(oft_debug_print(1))WRITE(*,'(A,I0,A,2ES16.8)') &
+      '  [JPHI_IP] iter ', outer_it, &
+      ' SAFETY BAIL -- ip_phys out of sane range, ip_phys/target =', &
+      ABS(ip_phys), ip_phys_target
+    EXIT  ! caller will see equilibrium as solver produced it; restore handled below
+  END IF
+  rel_err = (ABS(ip_phys) - ip_phys_target) / ip_phys_target
+  IF(oft_debug_print(1))WRITE(*,'(A,I0,A,3ES16.8)') &
+    '  [JPHI_IP] iter ', outer_it, &
+    ' ip_phys / target / rel_err = ', ABS(ip_phys), ip_phys_target, rel_err
+  IF(ABS(rel_err) < jphi_ip_tol) EXIT  ! converged
+  ! Damped multiplicative correction toward target
+  correction = (ip_phys_target / ABS(ip_phys)) ** jphi_ip_damp
+  ! Hard clamp for safety
+  IF(correction > jphi_ip_max) correction = jphi_ip_max
+  IF(correction < jphi_ip_min) correction = jphi_ip_min
+  ! Apply correction to Itor_target (preserve sign convention -- jphi_update
+  ! flips Itor_target negative; ABS-based scaling preserves that).
+  tMaker_obj%gs_equil%Itor_target = SIGN(ABS(tMaker_obj%gs_equil%Itor_target) * correction, &
+                                          tMaker_obj%gs_equil%Itor_target)
+END DO
+
+! CRITICAL: restore Itor_target to its original magnitude (preserving
+! the sign jphi_update left it with).  Otherwise the cumulative outer-
+! loop scaling compounds across successive mygs.solve() calls, drifting
+! Itor_target far from the user's set_targets value (observed: 2% drift
+! over a recon flow with dozens of internal solves).  The current FFP
+! is calibrated for the inflated target, so the equilibrium correctly
+! has Ip ~ user_target; only the bookkeeping target is reset.
+tMaker_obj%gs_equil%Itor_target = SIGN(itor_target_orig, &
+                                        tMaker_obj%gs_equil%Itor_target)
+
+IF(ierr == 0 .AND. ABS(rel_err) >= jphi_ip_tol)THEN
+  ! Did not converge within max_outer; not an error, but worth noting
+  IF(oft_debug_print(1))WRITE(*,*) &
+    '  tokamaker_solve: jphi-linterp Ip-corr did not converge, final rel_err =', rel_err
+END IF
+
 IF(vacuum)tMaker_obj%gs_equil%has_plasma=vac_save
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
-nl_its=tMaker_obj%device%nl_its
+nl_its = nl_its_total
 END SUBROUTINE tokamaker_solve
 !---------------------------------------------------------------------------------
 !> Perform linear solve to find vacuum solution for given BCs and current sources
