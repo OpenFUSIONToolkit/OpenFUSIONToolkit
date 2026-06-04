@@ -152,7 +152,7 @@ jobs:
             cc: "gcc-15", cxx: "g++-15", fc: "gfortran-15",
             python: "python3.12",
             xcode_path: "/Applications/Xcode_16.2.app/Contents/Developer",
-            build_libs_flags: "--nthread=3 --oblas_dynamic_arch --build_umfpack=1",
+            build_libs_flags: "--nthread=3 --build_umfpack=1",
             cache_key: "openmp",
             deployment_target: "14.0"
         }
