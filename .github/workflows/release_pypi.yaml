@@ -162,14 +162,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-
-    - name: Cache external libraries
-      id: cache-ext-libs
-      uses: actions/cache@v4
-      with:
-        path: libs
-        key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.config.cache_key }}-${{ hashFiles('src/utilities/build_libs.py') }}
-
+    
     - name: Get OS version
       run: |
         sw_vers -productVersion
