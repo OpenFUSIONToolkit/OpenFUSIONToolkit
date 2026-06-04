@@ -38,8 +38,14 @@ jobs:
 
       - name: Install prerequisites
         run: |
-          sudo apt-get -y install doxygen graphviz
+          sudo apt-get -y install graphviz
           pip3 install jupyter nbconvert
+      
+      - name: Install Doxygen
+        run: |
+          wget https://github.com/doxygen/doxygen/releases/download/Release_1_17_0/doxygen-1.17.0.linux.bin.tar.gz
+          tar -xzf doxygen-1.17.0.linux.bin.tar.gz
+          echo "$(pwd)/doxygen-1.17.0/bin" >> $GITHUB_PATH
 
       - name: Setup Pages
         id: pages
