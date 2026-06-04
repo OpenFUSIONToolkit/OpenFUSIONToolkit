@@ -161,6 +161,8 @@ def create_isoflux_xpts(npts, r0, z0, a, kappa_upper, delta_upper,
     @param zeta_inner_lower INTOR squareness of the lower inner corner (default: 0)
     @result Point list [npts, 2]
     '''
+    if npts < 3:
+        raise ValueError("\"npts\" must be at least 3")
     kU = float(kappa_upper);  dU = float(delta_upper)
     kL = float(kappa_lower)  if kappa_lower  is not None else kU
     dL = float(delta_lower)  if delta_lower  is not None else dU
