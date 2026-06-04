@@ -2211,7 +2211,13 @@ class TokaMaker():
             prev_psi = psi
         return strike_pts
 
-    def plot_current_density(self, fig, ax):
+    def plot_current_density(self, fig, ax, window=None):
+        '''! Plot current density
+
+        @param fig Figure (matplotlib)
+        @param ax Axis (matplotlib)
+        @param window 4-element array (r_min, r_max, z_min, z_max)
+        '''
         psi = self.get_psi(normalized=True)
         jphi = self.calc_delstar_curr(psi)
         jphi_plot = numpy.zeros(self.nc)
@@ -2222,7 +2228,11 @@ class TokaMaker():
         for i in range(self.nc):
             if self.reg[i] not in [1, 3]:
                 continue # Ignore all regions except plasma and vacuum
+            # if window is not None:
             idx1, _, _ = self.lc[i]
+            rz1 = self.r[idx1][:2]
+            if window is not None and (rz1[0] < window[0] or rz1[0] > window[1] or rz1[1] < window[2] or rz1[1] > window[3]):
+                continue
             jphi_plot[i] = jphi[idx1]            
             max_jphi = max(max_jphi, jphi_plot[i])
             min_jphi = min(min_jphi, jphi_plot[i])
@@ -2240,6 +2250,8 @@ class TokaMaker():
             rz1 = self.r[idx1][:2]
             rz2 = self.r[idx2][:2]
             rz3 = self.r[idx3][:2]
+            if window is not None and (rz1[0] < window[0] or rz1[0] > window[1] or rz1[1] < window[2] or rz1[1] > window[3]):
+                continue
             color_idx = (jphi_plot[i] - min_jphi) / (max_jphi - min_jphi)
             color = cmap(color_idx)
             poly = Polygon([rz1, rz2, rz3], facecolor=color)
