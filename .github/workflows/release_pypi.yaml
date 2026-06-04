@@ -37,7 +37,7 @@ jobs:
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         fetch-depth: 0
     
@@ -76,7 +76,7 @@ jobs:
         python ../src/utilities/build_libs.py --no_dl_progress --nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_arpack=1 --oft_package --oft_package_release
 
     - name: Upload library failure log
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: failure()
       with:
         name: Library failure log
@@ -116,7 +116,7 @@ jobs:
         bash make_package.sh
     
     - name: Upload PYPI artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{ matrix.config.name }}-${{ github.sha }}
         path: builds/install_release/python/dist/*.whl
@@ -159,7 +159,7 @@ jobs:
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         fetch-depth: 0
     
@@ -204,7 +204,7 @@ jobs:
         python ../src/utilities/build_libs.py --no_dl_progress --build_arpack=1 --oft_package --oft_package_release ${{ matrix.config.build_libs_flags }}
 
     - name: Upload library failure log
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: failure()
       with:
         name: Library failure log
@@ -244,7 +244,7 @@ jobs:
         bash make_package.sh
     
     - name: Upload PYPI artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{ matrix.config.name }}-${{ github.sha }}
         path: libs/install_release/python/dist/*.whl

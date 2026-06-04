@@ -26,7 +26,7 @@ jobs:
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Install prerequisites
       run: |
@@ -63,7 +63,7 @@ jobs:
         --build_cmake=1 --oft_build_tests=1 --oft_build_coverage
 
     - name: Upload library failure log
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: failure()
       with:
         name: Library failure log

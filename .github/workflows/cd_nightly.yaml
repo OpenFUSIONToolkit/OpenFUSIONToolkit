@@ -80,7 +80,7 @@ jobs:
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         fetch-depth: 0
 
@@ -161,7 +161,7 @@ jobs:
         python ../src/utilities/build_libs.py --no_dl_progress --build_arpack=1 --oft_package --oft_package_release --oft_build_docs=1 ${{ matrix.config.build_libs_flags }}
 
     - name: Upload library failure log
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: failure()
       with:
         name: Library failure log
@@ -201,7 +201,7 @@ jobs:
         make package
     
     - name: Upload package artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{ matrix.config.name }}-${{ github.sha }}
         path: builds/build_release/OpenFUSIONToolkit_*

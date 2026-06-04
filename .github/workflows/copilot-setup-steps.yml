@@ -18,7 +18,7 @@ jobs:
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Get OS version
       run: lsb_release -d
@@ -67,7 +67,7 @@ jobs:
         python ../src/utilities/build_libs.py --build_umfpack=1 --build_superlu=1 --no_dl_progress --nthread=4 --build_arpack=1 --oft_build_tests=1 --build_mpich=1
 
     - name: Upload library failure log
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: failure()
       with:
         name: Library_failure_log-ubuntu-24.04_openmp
