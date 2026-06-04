@@ -270,10 +270,21 @@ jobs:
     - name: Download all the dists
       uses: actions/download-artifact@v6
       with:
-        path: dist/
+        path: staging/
     
-    - name: View distribution files
-      run: ls -l dist/
+    - name: View staging files
+      run: |
+        ls -l staging/
+        ls -l staging/*/
+    
+    - name: Combine all dists into one directory
+      run: |
+        mkdir dist
+        cp staging/*/*.whl dist/
+
+    - name: View dist files
+      run: |
+        ls -l dist/
 
     - name: Publish distribution to TestPyPI
       uses: pypa/gh-action-pypi-publish@release/v1
