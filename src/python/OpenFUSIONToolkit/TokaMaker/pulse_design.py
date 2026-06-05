@@ -48,8 +48,7 @@ _NBI_W_TO_MA = 1/16e6
 mu_0 = 4.0 * np.pi * 1e-7
 # EQDSK sampling for save_eqdsk when validating with TORAX in _run_tm:
 # start at nr=nz=100, increase by 50 up to 500 until TORAX accepts eqdsk.
-EQDSK_SAVE_NR_NZ_SEQUENCE = (250, 300, 350, 400, 450, 500)
-# EQDSK_SAVE_NR_NZ_SEQUENCE = (500, 750, 1000)
+EQDSK_SAVE_NR_NZ_SEQUENCE = (350, 500, 650, 800)
 
 # Default TORAX radial face count for loop 0 coarse runs (evenly spaced normalized rho).
 DEFAULT_LOOP0_TX_FACE_POINTS = 51
@@ -1158,7 +1157,7 @@ class TokaMaker_TORAX:
             self._Ve_max = Ve_max
 
     def set_x_points(self, diverted_times=None, x_point_targets=None, x_point_weight=100.0, strike_point_targets=None,
-                     trim_lcfs=True):
+                     trim_lcfs=True, trim_lcfs_perc_limit=0.80):
         r'''! Configure diverted window, X-point targets, and optional strike points.
 
                 @param diverted_times Tuple (t_start, t_end) defining the diverted plasma window.
@@ -1179,6 +1178,7 @@ class TokaMaker_TORAX:
         self._x_point_weight = x_point_weight
         self._strike_point_targets = None if strike_point_targets is None else np.atleast_2d(strike_point_targets)
         self._trim_lcfs = trim_lcfs
+        self._trim_lcfs_perc_limit = trim_lcfs_perc_limit
 
 
     # ─── TORAX (TX) Methods ───────────────────────────────────────────────────
@@ -2445,7 +2445,7 @@ class TokaMaker_TORAX:
 
                     # trims lcfs targets near X-point(s)
                     if self._trim_lcfs:
-                        perc_limit = 0.60       # LCFS points above percentage limit* max(abs(Z)) are removed from isoflux targets
+                        perc_limit = self._trim_lcfs_perc_limit       # LCFS points above percentage limit* max(abs(Z)) are removed from isoflux targets
                         Z_max_abs = np.max(np.abs(lcfs[:, 1]))
                         Z_lim = perc_limit * Z_max_abs
                         if np.shape(self._x_point_targets)[0] == 1 and self._x_point_targets[0][1] > 0: # upper single null
@@ -2536,10 +2536,14 @@ class TokaMaker_TORAX:
                         self._tm.set_psi(self._state['psi_grid_prev_tm'][prev_tm_idx], update_bounds=True)
 
                     try:
-                        with self._quiet_tm():
-                            self._tm.set_profiles(ffp_prof=ffp_level, pp_prof=pp_level,
-                                                  ffp_NI_prof=self._state['ffp_ni_prof'][i])
-                            self._state['equil'][i] = self._tm.solve()
+                        # with self._quiet_tm():
+                        #     self._tm.set_profiles(ffp_prof=ffp_level, pp_prof=pp_level,
+                        #                           ffp_NI_prof=self._state['ffp_ni_prof'][i])
+                        #     self._state['equil'][i] = self._tm.solve()
+                        
+                        self._tm.set_profiles(ffp_prof=ffp_level, pp_prof=pp_level,
+                                                ffp_NI_prof=self._state['ffp_ni_prof'][i])
+                        self._state['equil'][i] = self._tm.solve()
 
                         level_attempts.append({'level': level_idx, 'name': level_name,
                                               'ffp': ffp_level, 'pp': pp_level,
@@ -2557,6 +2561,16 @@ class TokaMaker_TORAX:
                     skip_coil_update = True
                     self._log(f'\tTM: Solve failed at t={t} (all levels attempted).')
                     self._state['psi_grid_prev_tm'][i] = None  # if solve failed, set psi grid to None
+                    if self._out_dir is not None:
+                        diag_name = f'tm_diag_loop{self._current_loop:03d}_tidx{i:03d}.png'
+                        if self._output_file_tag is not None:
+                            diag_name = f'{self._output_file_tag}_{diag_name}'
+                        _diag_path = os.path.join(self._out_dir, diag_name)
+                        tm_diagnostic_plot(
+                            self, i, t, level_attempts, solve_succeeded,
+                            save_path=_diag_path, display=False,
+                            tm_gs_ok=tm_gs_ok, step_error=_log_err,
+                        )
 
                 tm_gs_ok = solve_succeeded
                 if solve_succeeded:
@@ -2597,6 +2611,16 @@ class TokaMaker_TORAX:
                         if not hasattr(self, '_diverted_flags'):
                             self._diverted_flags = {}
                         self._diverted_flags[i] = self._state['equil'][i].diverted
+                        # Log it: a timestep that should be diverted (inside the
+                        # diverted window) but solves LIMITED means the X-point was
+                        # not held -> shape targets missed for that frame.
+                        _in_div_window = (
+                            self._diverted_times is not None
+                            and self._diverted_times[0] <= t <= self._diverted_times[1]
+                        )
+                        if _in_div_window and not self._state['equil'][i].diverted:
+                            self._log(f'  [shape] t={t:.2f}s: in diverted window but '
+                                      f'solved LIMITED (X-point not held).')
 
                         # Store psi on nodes for later movie generation
                         self._tm_psi_on_nodes.setdefault(self._current_loop, {})[i] = self._state['equil'][i].get_psi(normalized=False)
@@ -2906,7 +2930,45 @@ class TokaMaker_TORAX:
                        runs loop 0 (if enabled) then loops 1, 2, and 3 before stopping unless
                        convergence ends earlier.
                 @param run_name Name for this run (used in output directory and log file).
-                @param output_mode Output level selector: False (or None), 'minimal', 'normal', or 'debug'.
+                @param output_mode Output level selector: False (or None), True (alias for 'normal'),
+                       'minimal', 'normal', or 'debug'. String values 'false'/'none'/'off'/'no' map to False.
+                       When not False, artifacts go under ./TokaMaker_TORAX_outputs/ (tmp/ for
+                       run_name='tmp', else {run_name}_{timestamp}/). Unless run_name='tmp', saved
+                       filenames are prefixed {run_name}_{timestamp}_. A log file is always written
+                       (into the output directory when one exists, otherwise the current working directory).
+                       results.json path is set on the instance (self._fname_out) but is not
+                       written automatically; call save_res() to persist it. In-memory self._results
+                       is updated after each successful TORAX pass for any non-False mode.
+                       End-of-run PNG/MP4 saves are skipped inside Jupyter notebooks.
+                
+                       False / None — No output directory. Log only (TokaMaker_TORAX_log_tmp.log or
+                       TokaMaker_TORAX_log_{run_name}_{timestamp}.log in cwd). No plots or config files.
+                       TokaMaker gEQDSK files use a temporary directory and are deleted at exit.
+                
+                       'minimal' — Per completed coupling loop: scalars_loop{N}.png,
+                       PLH_components_loop{N}.png. At end of run (non-Jupyter): profile_evolution.png,
+                       lcfs_evolution.png, movie_loop{N}.mp4 (N = last completed loop index).
+                       On TokaMaker GS failure at a timestep: tm_diag_loop{N}_tidx{i}.png. On TORAX
+                       failure: scalars_loop{N}_torax_failed.png and, if partial TORAX data exist,
+                       profile_loop{N}_torax_failed_tfinal.png. No TORAX config .py files, no
+                       per-timestep profile plots, no relax-profile figures, no persisted gEQDSK files
+                       (temporary EQDSK dir removed at exit).
+                
+                       'normal' (also output_mode=True) — Per loop: scalars_loop{N}.png,
+                       PLH_components_loop{N}.png; tx_config_loop{N}.py; initial / inter-loop relax
+                       configs tx_config_relax000_initial.py and tx_config_relax_inter_{N}.py; each
+                       successful TokaMaker timestep profile_loop{N}_tidx{i}.png. At end (non-Jupyter):
+                       profile_evolution.png and movie_loop{N}.mp4 (no lcfs_evolution.png).
+                       Same failure plots as minimal. No tm_diag on successful solves, no
+                       relax-profile figures, no tm_summary_loop{N}.png, no persisted gEQDSK files.
+                
+                       'debug' — All normal artifacts plus lcfs_evolution.png at end of run. gEQDSK files
+                       {loop:03d}.{i:03d}.eqdsk are kept in the output directory (not deleted).
+                       Initial / inter-loop relax: tx_relax_profiles_initial.png,
+                       tx_relax_profiles_inter_loop{N}.png. Every TokaMaker timestep (success or fail):
+                       tm_diag_loop{N}_tidx{i}.png (successful solves also get profile_loop{N}_tidx{i}.png).
+                       After each loop: tm_summary_loop{N}.png. Python logging (TORAX, JAX, etc.) is
+                       redirected to the log file; per-loop wall time is printed.
                 @param skip_bad_init_eqdsks If True, skip broken initial gEQDSK files instead of raising.
                 @param initial_relax If True (default), run a short TORAX relax on the seed EQDSK before
                        the first coupling TM-TORAX pass (flattened user inputs; psi from geometry unless an
@@ -3275,33 +3337,34 @@ class TokaMaker_TORAX:
 
         self._current_loop -= 1 # adjust back to last completed loop for reporting
         # ── End-of-run mode-specific outputs ──
-        if self._output_mode is not False and not _in_jupyter():
-            if self._output_mode in ('minimal', 'debug') and self._out_dir is not None:
-                profile_evo_name = 'profile_evolution.png'
+        if self._output_mode is not False and not _in_jupyter() and self._out_dir is not None:
+            profile_evo_name = 'profile_evolution.png'
+            if self._output_file_tag is not None:
+                profile_evo_name = f'{self._output_file_tag}_{profile_evo_name}'
+            _profile_evo_path = os.path.join(self._out_dir, profile_evo_name)
+            try:
+                plot_profile_evolution(self, save_path=_profile_evo_path, display=False)
+            except Exception as _e:
+                self._log(f'plot_profile_evolution failed: {_e}')
+
+            if self._output_mode in ('minimal', 'debug'):
                 lcfs_evo_name = 'lcfs_evolution.png'
                 if self._output_file_tag is not None:
-                    profile_evo_name = f'{self._output_file_tag}_{profile_evo_name}'
                     lcfs_evo_name = f'{self._output_file_tag}_{lcfs_evo_name}'
-                _profile_evo_path = os.path.join(self._out_dir, profile_evo_name)
                 _lcfs_evo_path = os.path.join(self._out_dir, lcfs_evo_name)
-                try:
-                    plot_profile_evolution(self, save_path=_profile_evo_path, display=False)
-                except Exception as _e:
-                    self._log(f'plot_profile_evolution failed: {_e}')
                 try:
                     plot_lcfs_evolution(self, save_path=_lcfs_evo_path, display=False)
                 except Exception as _e:
                     self._log(f'plot_lcfs_evolution failed: {_e}')
 
-            if self._output_mode in ('normal', 'minimal', 'debug') and self._out_dir is not None:
-                movie_name = f'movie_loop{self._current_loop:03d}.mp4'
-                if self._output_file_tag is not None:
-                    movie_name = f'{self._output_file_tag}_{movie_name}'
-                _movie_path = os.path.join(self._out_dir, movie_name)
-                try:
-                    self.make_movie(save_path=_movie_path, display=False)
-                except Exception as _e:
-                    self._log(f'make_movie failed: {_e}')
+            movie_name = f'movie_loop{self._current_loop:03d}.mp4'
+            if self._output_file_tag is not None:
+                movie_name = f'{self._output_file_tag}_{movie_name}'
+            _movie_path = os.path.join(self._out_dir, movie_name)
+            try:
+                self.make_movie(save_path=_movie_path, display=False)
+            except Exception as _e:
+                self._log(f'make_movie failed: {_e}')
 
         # ── Summary table ──
         _sim_elapsed = time.time() - _sim_start_time
@@ -3551,6 +3614,7 @@ DIAG_FS = 13
 
 MOVIE_FIG_W, MOVIE_FIG_H = 19.2, 10.8
 MOVIE_DPI = 200
+MOVIE_EQUIL_PSI_PLASMA_NLEVELS = 16
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -5329,7 +5393,7 @@ def _render_equil_frames(tt, loop, equil_dir):
                     transform=ax.transAxes, fontsize=16,
                     ha='center', va='center', color='darkred', fontweight='bold')
             ax.axis('off')
-            fig.savefig(out_path, dpi=150, bbox_inches='tight', pad_inches=0.0)
+            fig.savefig(out_path, dpi=MOVIE_DPI, bbox_inches='tight', pad_inches=0.0)
             plt.close(fig)
             continue
 
@@ -5340,7 +5404,10 @@ def _render_equil_frames(tt, loop, equil_dir):
         tt._tm.plot_constraints(fig, ax, equilibrium=equil)
         if cb is not None:
             cb.mappable.set_clim(min_bound * 1e-6, max_bound * 1e-6)
-        tt._tm.plot_psi(fig, ax, equilibrium=equil, xpoint_color='r', vacuum_nlevels=4)
+        tt._tm.plot_psi(
+            fig, ax, equilibrium=equil, xpoint_color='r', vacuum_nlevels=4,
+            plasma_nlevels=MOVIE_EQUIL_PSI_PLASMA_NLEVELS,
+        )
         x_pt = getattr(tt, '_x_point_targets', None)
         if x_pt is not None and _x_points_active(tt, i, t=tt._tm_times[i]):
             ax.plot(x_pt[:, 0], x_pt[:, 1], 'x', color='purple', markersize=10, markeredgewidth=2, label='Saddle point targets')
@@ -5354,7 +5421,7 @@ def _render_equil_frames(tt, loop, equil_dir):
         ax.tick_params(labelsize=11)
         if cb is not None:
             cb.ax.tick_params(labelsize=11)
-        fig.savefig(out_path, dpi=150, bbox_inches='tight', pad_inches=0.0)
+        fig.savefig(out_path, dpi=MOVIE_DPI, bbox_inches='tight', pad_inches=0.0)
         plt.close(fig)
 
 
