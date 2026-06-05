@@ -49,9 +49,18 @@ class OFT_env():
         self.ncpus = None
         if self.os == 'Darwin':
             try:
-                result, errcode = run_shell_command('sysctl -n hw.perflevel0.physicalcpu')
-                if errcode == 0:
-                    self.ncpus = int(result)
+                core_dict = {}
+                for i in range(2):
+                    try:
+                        result, errcode = run_shell_command('sysctl -n hw.perflevel{0}.physicalcpu'.format(i))
+                        name_result, name_errcode = run_shell_command('sysctl -n hw.perflevel{0}.name'.format(i))
+                        if (errcode == 0) and (name_errcode == 0):
+                            core_dict[name_result.strip().lower()] = int(result)
+                    except:
+                        pass
+                self.ncpus = core_dict.get('performance',0) + core_dict.get('super',0)
+                if self.ncpus == 0:
+                    self.ncpus = None
             except:
                 pass
         elif self.os == 'Linux':

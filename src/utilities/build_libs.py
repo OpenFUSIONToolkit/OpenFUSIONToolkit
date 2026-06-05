@@ -1272,9 +1272,9 @@ class NETCDF_Fortran(package):
 class OpenBLAS(package):
     def __init__(self, build_threaded=False, dynamic_arch=False, no_avx=False, shared_libs=False):
         self.name = "OpenBLAS"
-        self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.30.tar.gz"
-        self.build_dir = "OpenBLAS-0.3.30"
-        self.install_dir = "OpenBLAS-0_3_30"
+        self.url = "https://github.com/xianyi/OpenBLAS/archive/refs/tags/v0.3.33.tar.gz"
+        self.build_dir = "OpenBLAS-0.3.33"
+        self.install_dir = "OpenBLAS-0_3_33"
         self.threaded = build_threaded
         self.dynamic_arch = dynamic_arch
         self.no_avx = no_avx

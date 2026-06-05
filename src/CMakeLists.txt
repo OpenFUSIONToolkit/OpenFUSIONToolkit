@@ -34,7 +34,7 @@ set(OFT_SLEN "80" CACHE STRING "General string length")
 # Internal variables
 set(OFT_SHARED_LIBS CACHE INTERNAL "package_shared_libs")
 set(OFT_PYTHON_BINS CACHE INTERNAL "package_python_binaries")
-if(OFT_PACKAGE_NIGHTLY)
+if(OFT_PACKAGE_BUILD AND OFT_PACKAGE_NIGHTLY)
   execute_process(
     COMMAND git describe --tags --abbrev=0
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
