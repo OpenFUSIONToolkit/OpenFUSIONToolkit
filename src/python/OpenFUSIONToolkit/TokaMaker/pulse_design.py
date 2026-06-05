@@ -2553,14 +2553,13 @@ class TokaMaker_TORAX:
                         self._tm.set_psi(self._state['psi_grid_prev_tm'][prev_tm_idx], update_bounds=True)
 
                     try:
-                        # with self._quiet_tm():
-                        #     self._tm.set_profiles(ffp_prof=ffp_level, pp_prof=pp_level,
-                        #                           ffp_NI_prof=self._state['ffp_ni_prof'][i])
-                        #     self._state['equil'][i] = self._tm.solve()
-                        
-                        self._tm.set_profiles(ffp_prof=ffp_level, pp_prof=pp_level,
-                                                ffp_NI_prof=self._state['ffp_ni_prof'][i])
-                        self._state['equil'][i] = self._tm.solve()
+                        self._tm.set_profiles(ffp_prof=ffp_level, pp_prof=pp_level, ffp_NI_prof=self._state['ffp_ni_prof'][i])
+
+                        if self._output_mode == 'debug': # allows TM terminal outputs in debug mode
+                            self._state['equil'][i] = self._tm.solve()
+                        else:
+                            with self._quiet_tm(): # silences TM terminal outputs
+                                self._state['equil'][i] = self._tm.solve()
 
                         level_attempts.append({'level': level_idx, 'name': level_name,
                                               'ffp': ffp_level, 'pp': pp_level,
