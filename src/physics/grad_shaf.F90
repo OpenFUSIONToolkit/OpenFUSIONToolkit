@@ -263,7 +263,7 @@ END TYPE gs_factory
 TYPE :: gs_equil
   LOGICAL :: diverted = .FALSE. !< Equilibrium is diverted?
   LOGICAL :: has_plasma = .TRUE. !< Solve with plasma? (otherwise vacuum)
-  LOGICAL :: Ip_target_skip = .FALSE. !< Skip toroidal current target in non-linear solve?
+  LOGICAL :: skip_targets = .FALSE. !< Skip toroidal current target in non-linear solve?
   INTEGER(i4) :: mode = 0 !< RHS source mode (0 -> F*F', 1 -> F')
   INTEGER(i4) :: nx_points = 0 !< Number of X-points in current solution
   INTEGER(i4) :: nregularize = 0 !< Number of regularization terms
@@ -1047,7 +1047,7 @@ self%dipole_a=source%dipole_a
 self%mirror_n=source%mirror_n
 self%mirror_bturn=source%mirror_bturn
 self%mirror_zthroat=source%mirror_zthroat
-self%Ip_target_skip=source%Ip_target_skip
+self%skip_targets=source%skip_targets
 self%Ip_target=source%Ip_target
 self%estore_target=source%estore_target
 self%pax_target=source%pax_target
@@ -2021,7 +2021,7 @@ logical :: pm_save,fail_test
 !---
 error_flag=0
 self%nl_its=0
-equil%Ip_target_skip=.FALSE.
+equil%skip_targets=.FALSE.
 IF(TRIM(self%lu_solver%package)=='none')THEN
   CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 ELSE
@@ -2180,12 +2180,17 @@ DO i=1,self%maxits
     param_mat(1,1)=1.d0
     param_rhs(1)=0.d0
   ELSE
-    IF((equil%Ip_target>0.d0).AND.(.NOT.equil%Ip_target_skip))THEN
-      param_mat(1,:)=[itor_ffp,itor_press,0.d0]
-      param_rhs(1)=equil%Ip_target
-    ELSE
+    IF(equil%skip_targets)THEN
       param_mat(1,1)=1.d0
       param_rhs(1)=equil%ffp_scale
+    ELSE
+      IF(equil%Ip_target>0.d0)THEN
+        param_mat(1,:)=[itor_ffp,itor_press,0.d0]
+        param_rhs(1)=equil%Ip_target
+      ELSE
+        param_mat(1,1)=1.d0
+        param_rhs(1)=equil%ffp_scale
+      END IF
     END IF
   END IF
 
@@ -2215,35 +2220,40 @@ DO i=1,self%maxits
       param_rhs(2)=equil%p_scale
     END IF
   ELSE
-    IF(equil%R0_target>0.d0)THEN
-      !
-      psi_geval%u=>psi_vac
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-      param_rhs(2)=-gpsi0(1)
-      !
-      psi_geval%u=>psi_vcont
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-      psi_geval%u=>psi_ffp
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi1)
-      psi_geval%u=>psi_press
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi2)
-      param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
-    ELSE IF(equil%estore_target>0.d0)THEN
-      param_rhs(2)=equil%estore_target
-      param_mat(2,2)=estored*3.d0/2.d0
-    ELSE IF((equil%pax_target>0.d0).AND.(.NOT.equil%Ip_target_skip))THEN
-      param_mat(2,2)=equil%P%f(equil%plasma_bounds(2))
-      param_rhs(2)=equil%pax_target
-    ELSE IF(equil%Ip_ratio_target>-1.d98)THEN
-      param_rhs(2)=0.d0
-      param_mat(2,:)=[itor_ffp,-itor_press*equil%Ip_ratio_target,0.d0]
-    ELSE
+    IF(equil%skip_targets)THEN
       param_mat(2,2)=1.d0
       param_rhs(2)=equil%p_scale
+    ELSE
+      IF(equil%R0_target>0.d0)THEN
+        !
+        psi_geval%u=>psi_vac
+        CALL psi_geval%setup(self%fe_rep)
+        CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+        param_rhs(2)=-gpsi0(1)
+        !
+        psi_geval%u=>psi_vcont
+        CALL psi_geval%setup(self%fe_rep)
+        CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+        psi_geval%u=>psi_ffp
+        CALL psi_geval%setup(self%fe_rep)
+        CALL psi_geval%interp(cell,f,goptmp,gpsi1)
+        psi_geval%u=>psi_press
+        CALL psi_geval%setup(self%fe_rep)
+        CALL psi_geval%interp(cell,f,goptmp,gpsi2)
+        param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
+      ELSE IF(equil%estore_target>0.d0)THEN
+        param_rhs(2)=equil%estore_target
+        param_mat(2,2)=estored*3.d0/2.d0
+      ELSE IF(equil%pax_target>0.d0)THEN
+        param_mat(2,2)=equil%P%f(equil%plasma_bounds(2))
+        param_rhs(2)=equil%pax_target
+      ELSE IF(equil%Ip_ratio_target>-1.d98)THEN
+        param_rhs(2)=0.d0
+        param_mat(2,:)=[itor_ffp,-itor_press*equil%Ip_ratio_target,0.d0]
+      ELSE
+        param_mat(2,2)=1.d0
+        param_rhs(2)=equil%p_scale
+      END IF
     END IF
   END IF
 

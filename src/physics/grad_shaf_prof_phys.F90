@@ -553,7 +553,7 @@ CALL spline_fit(R_spline,"extrap")
 DEALLOCATE(ravgs,psi_q,qtmp)
 !---Update jphi normalization to match Ip target
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
-IF(gseq%Ip_target_skip)THEN
+IF(gseq%skip_targets)THEN
   CALL gs_itor_nl(gseq,jphi_norm)
   dnorm=gseq%Ip_target/jphi_norm
   jphi_norm=(1.d0+dnorm)*self%norm_last/2.d0
@@ -583,7 +583,7 @@ DO i=1,self%npsi
   self%yp(i) = 2.d0*(self%jphi(i)*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 END DO
 ! Disable Ip matching and fix F*F' scale (matching is done here instead)
-gseq%Ip_target_skip=.TRUE.
+gseq%skip_targets=.TRUE.
 ! IF(gseq%Ip_target>0.d0)gseq%Ip_target=-gseq%Ip_target
 gseq%ffp_scale=1.d0
 gseq%p_scale=pscale
