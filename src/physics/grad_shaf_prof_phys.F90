@@ -465,7 +465,7 @@ SELECT TYPE(self=>func)
   TYPE IS(jphi_flux_func)
   !---
   self%npsi=npsi
-  self%ncofs=self%npsi
+  self%ndofs=self%npsi
   !---
   ALLOCATE(self%x(self%npsi))
   ALLOCATE(self%yp(self%npsi))
@@ -481,7 +481,7 @@ SELECT TYPE(self=>func)
   END DO
   self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
   ierr=self%set_cofs(self%yp)
-  IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ncofs,self%x,self%j0
+  IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ndofs,self%x,self%j0
 class default
   CALL oft_abort('Invalid flux function type in create_jphi_ff','create_jphi_ff',__FILE__)
 END SELECT
