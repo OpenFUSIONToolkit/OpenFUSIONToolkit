@@ -523,7 +523,7 @@ subroutine jphi_update(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
-REAL(r8) :: jphi_norm,pscale,pprime
+REAL(r8) :: jphi_norm,pscale,pprime,dnorm
 REAL(r8), ALLOCATABLE :: ravgs(:,:),qtmp(:),psi_q(:)
 type(spline_type) :: R_spline
 self%plasma_bounds=gseq%plasma_bounds
@@ -552,11 +552,12 @@ R_spline%fs(0:self%ngeom-2,2)=ravgs(1:self%ngeom-1,2); R_spline%fs(self%ngeom-1,
 CALL spline_fit(R_spline,"extrap")
 DEALLOCATE(ravgs,psi_q,qtmp)
 !---Update jphi normalization to match Ip target
+CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(gseq%Ip_target_skip)THEN
   CALL gs_itor_nl(gseq,jphi_norm)
-  jphi_norm=(ABS(gseq%Ip_target)*mu0/jphi_norm + self%norm_last)/2.d0
+  dnorm=gseq%Ip_target/jphi_norm
+  jphi_norm=(1.d0+dnorm)*self%norm_last/2.d0
   self%norm_last=jphi_norm
-  ! WRITE(*,*)'Ip NL: ',jphi_norm
 ELSE
   ALLOCATE(qtmp(self%npsi))
   DO i=1,self%npsi
@@ -567,12 +568,8 @@ ELSE
   DEALLOCATE(qtmp)
   jphi_norm=ABS(gseq%Ip_target)/jphi_norm
   self%norm_last=jphi_norm
-  ! WRITE(*,*)'Ip flux: ',jphi_norm
 END IF
-! jphi_norm=ABS(gseq%Ip_target)/jphi_norm
-! WRITE(*,*)'Ip flux: ',jphi_norm
 !---Get pressure profile
-CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__) !CALL gseq%P_ani%update(gseq)
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
@@ -589,6 +586,7 @@ END DO
 gseq%Ip_target_skip=.TRUE.
 ! IF(gseq%Ip_target>0.d0)gseq%Ip_target=-gseq%Ip_target
 gseq%ffp_scale=1.d0
+gseq%p_scale=pscale
 !---Clean up
 CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)

@@ -2235,7 +2235,7 @@ DO i=1,self%maxits
     ELSE IF(equil%estore_target>0.d0)THEN
       param_rhs(2)=equil%estore_target
       param_mat(2,2)=estored*3.d0/2.d0
-    ELSE IF(equil%pax_target>0.d0)THEN
+    ELSE IF((equil%pax_target>0.d0).AND.(.NOT.equil%Ip_target_skip))THEN
       param_mat(2,2)=equil%P%f(equil%plasma_bounds(2))
       param_rhs(2)=equil%pax_target
     ELSE IF(equil%Ip_ratio_target>-1.d98)THEN
