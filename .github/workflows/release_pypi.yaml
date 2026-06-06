@@ -253,12 +253,11 @@ jobs:
         overwrite: true
   
   publish-to-testpypi:
-    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: Publish Python distribution to TestPyPI
     needs:
       - macos-build
       - linux-build
-    if: github.event_name == 'push'
+    if: (github.event_name == 'push') && (github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit')
     runs-on: ubuntu-latest
 
     environment:
