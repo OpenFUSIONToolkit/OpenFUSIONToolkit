@@ -288,12 +288,11 @@ jobs:
         repository-url: https://test.pypi.org/legacy/
   
   publish-to-pypi:
-    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: Publish Python distribution to PyPI
     needs:
       - macos-build
       - linux-build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/pypi_release'
+    if: (github.event_name == 'push') && (github.ref == 'refs/heads/pypi_release') && (github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit')
     runs-on: ubuntu-latest
 
     environment:

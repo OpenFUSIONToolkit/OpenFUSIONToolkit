@@ -84,11 +84,10 @@ jobs:
           tags: ${{ env.REGISTRY }}/openfusiontoolkit/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version_tag }}-${{ env.ARCH_SUFFIX }}
 
   publish-manifests:
-    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     needs:
       - prepare-version
       - build-images
-    if: github.event_name == 'push' && github.ref == 'refs/heads/container_release'
+    if: (github.event_name == 'push') && (github.ref == 'refs/heads/container_release') && (github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit')
     runs-on: ubuntu-latest
 
     environment:
