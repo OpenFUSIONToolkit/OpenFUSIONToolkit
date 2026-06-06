@@ -15,9 +15,14 @@ on:
         description: 'Release build?'
         required: false
         type: boolean
-  
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
+
 jobs:
   build:
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: ${{ format('Nightly ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 45

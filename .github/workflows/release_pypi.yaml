@@ -10,9 +10,14 @@ on:
     paths:
       - .github/workflows/release_pypi.yaml
       - src/utilities/build_libs.py
+
+concurrency:
+  group: cd_pypi-${{ github.ref }}
+  cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
   
 jobs:
   linux-build:
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: ${{ format('PYPI Linux CD ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     container: ${{ matrix.config.image }}
@@ -123,6 +128,7 @@ jobs:
         overwrite: true
   
   macos-build:
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: ${{ format('PYPI macOS CD ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 45
@@ -255,7 +261,7 @@ jobs:
     needs:
       - macos-build
       - linux-build
-    if: github.event_name == 'push'
+    if: (github.event_name == 'push') && (github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit')
     runs-on: ubuntu-latest
 
     environment:
@@ -289,7 +295,7 @@ jobs:
     needs:
       - macos-build
       - linux-build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/pypi_release'
+    if: (github.event_name == 'push') && (github.ref == 'refs/heads/pypi_release') && (github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit')
     runs-on: ubuntu-latest
 
     environment:
