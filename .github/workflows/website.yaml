@@ -101,7 +101,7 @@ jobs:
 
   # Deployment job
   deploy:
-    if: github.ref == 'refs/heads/gh-pages'
+    if: ${{ (github.ref == 'refs/heads/gh-pages') && (github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit') }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
