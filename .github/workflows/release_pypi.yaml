@@ -10,6 +10,10 @@ on:
     paths:
       - .github/workflows/release_pypi.yaml
       - src/utilities/build_libs.py
+
+concurrency:
+  group: cd_pypi-${{ github.ref }}
+  cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
   
 jobs:
   linux-build:
