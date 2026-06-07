@@ -53,6 +53,8 @@ SELECT CASE(TRIM(profType))
     ALLOCATE(poly_flux_func::F)
   CASE("linterp")
     ALLOCATE(linterp_flux_func::F)
+  CASE("mlinterp")
+    ALLOCATE(mlinterp_flux_func::F)
   CASE("jphi-linterp")
     ALLOCATE(jphi_flux_func::F)
   CASE("jphi-split-bootstrap")
@@ -170,7 +172,7 @@ OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 !     ! WRITE(io_unit,*)this%jphi
 !   TYPE IS(wesson_flux_func)
 !     WRITE(io_unit,*)"wesson"
-!     ! WRITE(io_unit,*)this%ncofs
+!     ! WRITE(io_unit,*)this%ndofs
 !     ! WRITE(io_unit,*)this%gamma
 !   CLASS DEFAULT
 !     CALL oft_abort('Invalid profile type.','gs_profile_save',__FILE__)
@@ -404,15 +406,17 @@ CALL hdf5_write(self%o_point,filename,'tokamaker/O_POINT')
 CALL hdf5_write(self%lim_point,filename,'tokamaker/LIM_POINT')
 CALL hdf5_write(self%diverted,filename,'tokamaker/DIVERTED')
 !---
-IF(self%Itor_target/=-1.d0)CALL hdf5_write(self%Itor_target,filename,'tokamaker/IP_TARGET')
+IF(self%Ip_target/=-1.d0)CALL hdf5_write(self%Ip_target,filename,'tokamaker/IP_TARGET')
 IF(self%Ip_ratio_target>-1.d98)CALL hdf5_write(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET')
 IF(self%R0_target>0.d0)CALL hdf5_write(self%R0_target,filename,'tokamaker/R0_TARGET')
 IF(self%Z0_target>-1.d98)CALL hdf5_write(self%Z0_target,filename,'tokamaker/Z0_TARGET')
 IF(self%pax_target>0.d0)CALL hdf5_write(self%pax_target,filename,'tokamaker/PAX_TARGET')
 IF(self%estore_target>0.d0)CALL hdf5_write(self%estore_target,filename,'tokamaker/ESTORE_TARGET')
+IF(self%dflux_target>-1.d98)CALL hdf5_write(self%dflux_target,filename,'tokamaker/DFLUX_TARGET')
 IF(self%isoflux_ntargets>0)CALL hdf5_write(self%isoflux_targets,filename,'tokamaker/ISOFLUX_TARGETS')
 IF(self%flux_ntargets>0)CALL hdf5_write(self%flux_targets,filename,'tokamaker/FLUX_TARGETS')
 IF(self%saddle_ntargets>0)CALL hdf5_write(self%saddle_targets,filename,'tokamaker/SADDLE_TARGETS')
+IF(self%mirnov_ntargets>0)CALL hdf5_write(self%mirnov_targets,filename,'tokamaker/MIRNOV_TARGETS')
 !---Save boot_ops (only when initialized)
 IF(self%boot_ops%initialized)THEN
   CALL hdf5_create_group(filename,'tokamaker/BOOT_OPS')
@@ -777,7 +781,7 @@ IF(logical_tmp.NEQV.self%diverted)THEN
 END IF
 !---Load targets and coil currents
 IF(hdf5_field_exist(filename,'tokamaker/IP_TARGET'))THEN
-  CALL hdf5_read(self%Itor_target,filename,'tokamaker/IP_TARGET',success=success)
+  CALL hdf5_read(self%Ip_target,filename,'tokamaker/IP_TARGET',success=success)
   IF(.NOT.success)THEN
     error_string='Failed to read Ip target.'
     RETURN
@@ -819,6 +823,13 @@ IF(hdf5_field_exist(filename,'tokamaker/ESTORE_TARGET'))THEN
     RETURN
   END IF
 END IF
+IF(hdf5_field_exist(filename,'tokamaker/DFLUX_TARGET'))THEN
+  CALL hdf5_read(self%dflux_target,filename,'tokamaker/DFLUX_TARGET',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read dflux target.'
+    RETURN
+  END IF
+END IF
 IF(hdf5_field_exist(filename,'tokamaker/ISOFLUX_TARGETS'))THEN
   CALL hdf5_field_get_sizes(filename,'tokamaker/ISOFLUX_TARGETS',ndims,dim_sizes)
   IF(dim_sizes(1)/=5)CALL oft_abort('Invalid first dimension for isoflux targets', 'gs_load_tokamaker', __FILE__)
@@ -855,6 +866,19 @@ IF(hdf5_field_exist(filename,'tokamaker/SADDLE_TARGETS'))THEN
   CALL hdf5_read(self%saddle_targets,filename,'tokamaker/SADDLE_TARGETS',success=success)
   IF(.NOT.success)THEN
     error_string='Failed to read saddle targets.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/MIRNOV_TARGETS'))THEN
+  CALL hdf5_field_get_sizes(filename,'tokamaker/MIRNOV_TARGETS',ndims,dim_sizes)
+  IF(dim_sizes(1)/=6)CALL oft_abort('Invalid first dimension for mirnov targets', 'gs_load_tokamaker', __FILE__)
+  self%mirnov_ntargets=dim_sizes(2)
+  IF(ASSOCIATED(self%mirnov_targets))DEALLOCATE(self%mirnov_targets)
+  ALLOCATE(self%mirnov_targets(6,self%mirnov_ntargets))
+  DEALLOCATE(dim_sizes)
+  CALL hdf5_read(self%mirnov_targets,filename,'tokamaker/MIRNOV_TARGETS',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read mirnov targets.'
     RETURN
   END IF
 END IF

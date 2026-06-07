@@ -654,7 +654,7 @@ TYPE(oft_timer) :: solve_timer
 LOGICAL :: exists,volt_full,pm_save
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=15) :: fmt_str
-CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name
+CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Starting time-domain simulation'
 CALL oft_increase_indent
@@ -774,9 +774,10 @@ IF(ntimes_curr>0)THEN
 END IF
 !---
 WRITE(pltnum,'(I4.4)')0
-CALL tw_rst_save(self,u,'pThinCurr_'//pltnum//'.rst','U')
-CALL hdf5_write(t,'pThinCurr_'//pltnum//'.rst','time')
-CALL hdf5_write(icoil_curr,'pThinCurr_'//pltnum//'.rst','coil_currents')
+rst_file=TRIM(self%rst_prefix)//'pThinCurr_'//pltnum//'.rst'
+CALL tw_rst_save(self,u,TRIM(rst_file),'U')
+CALL hdf5_write(t,TRIM(rst_file),'time')
+CALL hdf5_write(icoil_curr,TRIM(rst_file),'coil_currents')
 !---Save sensor data for t=0
 CALL u%get_local(vals)
 IF(sensors%nfloops>0)THEN
@@ -796,7 +797,7 @@ IF(sensors%nfloops>0)THEN
   !---Setup history file
   IF(oft_env%head_proc)THEN
     floop_hist%filedesc = 'ThinCurr flux loop history file'
-    CALL floop_hist%setup('floops.hist')
+    CALL floop_hist%setup(TRIM(self%rst_prefix)//'floops.hist')
     CALL floop_hist%add_field('time', 'r8', desc="Simulation time [s]")
     DO i=1,sensors%nfloops
       CALL floop_hist%add_field(sensors%floops(i)%name, 'r8')
@@ -835,7 +836,7 @@ IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
   !---Setup history file
   IF(oft_env%head_proc)THEN
     jumper_hist%filedesc = 'ThinCurr current jumper history file'
-    CALL jumper_hist%setup('jumpers.hist')
+    CALL jumper_hist%setup(TRIM(self%rst_prefix)//'jumpers.hist')
     CALL jumper_hist%add_field('time', 'r8', desc="Simulation time [s]")
     DO i=1,sensors%njumpers
       CALL jumper_hist%add_field(sensors%jumpers(i)%name, 'r8')
@@ -938,9 +939,10 @@ DO i=1,nsteps
   IF(MOD(i,nstatus)==0)WRITE(*,'(2X,I6,ES16.6,ES14.4,2X,I6,F12.2)')i,t,uu,nits,elapsed_time
   IF(MOD(i,nplot)==0)THEN
     WRITE(pltnum,'(I4.4)')i
-    CALL tw_rst_save(self,u,'pThinCurr_'//pltnum//'.rst','U')
-    CALL hdf5_write(t,'pThinCurr_'//pltnum//'.rst','time')
-    CALL hdf5_write(icoil_curr,'pThinCurr_'//pltnum//'.rst','coil_currents')
+    rst_file=TRIM(self%rst_prefix)//'pThinCurr_'//pltnum//'.rst'
+    CALL tw_rst_save(self,u,TRIM(rst_file),'U')
+    CALL hdf5_write(t,TRIM(rst_file),'time')
+    CALL hdf5_write(icoil_curr,TRIM(rst_file),'coil_currents')
   END IF
   IF(ntimes_curr>0)THEN
     DO j=1,self%n_icoils
@@ -1040,7 +1042,7 @@ CLASS(oft_vector), POINTER :: u,Bx,By,Bz
 TYPE(oft_bin_file) :: floop_hist,jumper_hist
 LOGICAL :: exists
 CHARACTER(LEN=4) :: pltnum
-CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name
+CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Post-processing time-domain simulation'
 CALL oft_increase_indent
@@ -1055,7 +1057,7 @@ IF(rebuild_sensors)THEN
     !---Setup history file
     IF(oft_env%head_proc)THEN
       floop_hist%filedesc = 'ThinCurr flux loop history file'
-      CALL floop_hist%setup('floops.hist')
+      CALL floop_hist%setup(TRIM(self%rst_prefix)//'floops.hist')
       CALL floop_hist%add_field('time', 'r8', desc="Simulation time [s]")
       DO i=1,sensors%nfloops
         CALL floop_hist%add_field(sensors%floops(i)%name, 'r8')
@@ -1070,7 +1072,7 @@ IF(rebuild_sensors)THEN
     !---Setup history file
     IF(oft_env%head_proc)THEN
       jumper_hist%filedesc = 'ThinCurr current jumper history file'
-      CALL jumper_hist%setup('jumpers.hist')
+      CALL jumper_hist%setup(TRIM(self%rst_prefix)//'jumpers.hist')
       CALL jumper_hist%add_field('time', 'r8', desc="Simulation time [s]")
       DO i=1,sensors%njumpers
         CALL jumper_hist%add_field(sensors%jumpers(i)%name, 'r8')
@@ -1105,9 +1107,10 @@ DO i=0,nsteps
   IF(MOD(i,nplot)/=0)CYCLE
   !
   WRITE(pltnum,'(I4.4)')i
-  CALL tw_rst_load(u,'pThinCurr_'//pltnum//'.rst','U')
-  CALL hdf5_read(t,'pThinCurr_'//pltnum//'.rst','time')
-  IF(self%n_icoils>0)CALL hdf5_read(coil_vec,'pThinCurr_'//pltnum//'.rst','coil_currents')
+  rst_file=TRIM(self%rst_prefix)//'pThinCurr_'//pltnum//'.rst'
+  CALL tw_rst_load(u,TRIM(rst_file),'U')
+  CALL hdf5_read(t,TRIM(rst_file),'time')
+  IF(self%n_icoils>0)CALL hdf5_read(coil_vec,TRIM(rst_file),'coil_currents')
   !
   CALL self%xdmf%add_timestep(t)
   CALL u%get_local(vals)

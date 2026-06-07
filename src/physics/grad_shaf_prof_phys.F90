@@ -502,7 +502,7 @@ SELECT TYPE(self=>func)
   TYPE IS(jphi_flux_func)
   !---
   self%npsi=npsi
-  self%ncofs=self%npsi
+  self%ndofs=self%npsi
   !---
   ALLOCATE(self%x(self%npsi))
   ALLOCATE(self%yp(self%npsi))
@@ -519,7 +519,7 @@ SELECT TYPE(self=>func)
   END DO
   self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
   ierr=self%set_cofs(self%yp)
-  IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ncofs,self%x,self%j0
+  IF(oft_debug_print(1))WRITE(*,*)'Jphi linear interpolator Created',self%ndofs,self%x,self%j0
 class default
   CALL oft_abort('Invalid flux function type in create_jphi_ff','create_jphi_ff',__FILE__)
 END SELECT
@@ -636,30 +636,31 @@ subroutine jphi_update_default(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
-REAL(r8) :: jphi_norm,pscale,pprime
+REAL(r8) :: jphi_norm,pscale,pprime,dnorm
 REAL(r8), ALLOCATABLE :: qtmp(:)
 type(spline_type) :: R_spline
 self%plasma_bounds=gseq%plasma_bounds
 IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
-! IF(gseq%Itor_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
+IF(gseq%Ip_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
 !---Get updated flux surface geometry for Jphi -> F*F' mapping
 CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
 !---Update jphi normalization to match Ip target
-IF(gseq%Itor_target>0.d0)THEN
+CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
+IF(gseq%skip_targets)THEN
+  CALL gs_itor_nl(gseq,jphi_norm)
+  dnorm=gseq%Ip_target/jphi_norm
+  jphi_norm=(1.d0+dnorm)*self%norm_last/2.d0
+  self%norm_last=jphi_norm
+ELSE
   ALLOCATE(qtmp(self%npsi))
   CALL eval_R_qtmp(R_spline, self%x, self%npsi, qtmp)
   CALL gs_flux_int(gseq,self%x,self%jphi/qtmp,self%npsi,jphi_norm)
   DEALLOCATE(qtmp)
-  jphi_norm=ABS(gseq%Itor_target)/jphi_norm
-  self%norm_last=jphi_norm
-ELSE
-  CALL gs_itor_nl(gseq,jphi_norm)
-  jphi_norm=(ABS(gseq%Itor_target)*mu0/jphi_norm + self%norm_last)/2.d0
+  jphi_norm=ABS(gseq%Ip_target)/jphi_norm
   self%norm_last=jphi_norm
 END IF
 !---Get pressure profile
-CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__) !CALL gseq%P_ani%update(gseq)
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
@@ -673,8 +674,10 @@ DO i=1,self%npsi
   self%yp(i) = 2.d0*(self%jphi(i)*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 END DO
 ! Disable Ip matching and fix F*F' scale (matching is done here instead)
-IF(gseq%Itor_target>0.d0)gseq%Itor_target=-gseq%Itor_target
+gseq%skip_targets=.TRUE.
+! IF(gseq%Ip_target>0.d0)gseq%Ip_target=-gseq%Ip_target
 gseq%ffp_scale=1.d0
+gseq%p_scale=pscale
 !---Clean up
 CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)
