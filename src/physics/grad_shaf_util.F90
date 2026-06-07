@@ -786,7 +786,7 @@ IF(hdf5_field_exist(filename,'tokamaker/IP_TARGET'))THEN
     error_string='Failed to read Ip target.'
     RETURN
   END IF
-  self%Itor_target=ABS(self%Itor_target)
+  self%Ip_target=ABS(self%Ip_target)
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/IP_RATIO_TARGET'))THEN
   CALL hdf5_read(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET',success=success)

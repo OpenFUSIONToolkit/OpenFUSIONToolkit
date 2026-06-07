@@ -576,7 +576,7 @@ end subroutine jphi_delete
 subroutine jphi_update(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
-IF(self%bootstrap_mode==1 .AND. gseq%Itor_target<=0.d0)THEN
+IF(self%bootstrap_mode==1 .AND. gseq%skip_targets)THEN
   CALL jphi_bs_update(self,gseq)
 ELSE
   CALL jphi_update_default(self,gseq)
@@ -748,9 +748,9 @@ DO i = 1, self%npsi
   CALL spline_eval(R_spline, self%x(i), 0)
   qtmp(i) = R_spline%f(1) * R_spline%f(2)
 END DO
+CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 !--- 2. Bootstrap current on self%x grid.
 ALLOCATE(j_BS(self%npsi))
-CALL gseq%P%update(gseq)
 IF(self%freeze_j_BS .AND. ASSOCIATED(self%j_BS_last)) THEN
   !--- Frozen: reuse cached j_BS.
   j_BS = self%j_BS_last
@@ -839,7 +839,7 @@ IF (gseq%boot_ops%taper_edge_jBS) THEN
                         oft_psi_conv=.TRUE.)
 END IF
 ALLOCATE(jphi_total(self%npsi))
-!--- 4. Reconcile gs_itor_nl vs gs_flux_int when Itor_target < 0.
+!--- 4. Reconcile gs_itor_nl vs gs_flux_int.
 !   No Ip target: rescale jphi_total so the integrated current matches the
 !   FEM solution (gs_itor_nl) rather than the profile quadrature (gs_flux_int).
 jphi_rescale = self%rescale_last
@@ -852,7 +852,7 @@ END IF
 !--- 5. Solve analytically for alpha.
 !   gs_flux_int is linear in alpha; two evaluations (alpha=0 and alpha=1) give
 !   alpha = (Ip_target - Ip_lo) / (Ip_hi - Ip_lo).  Skip once frozen.
-ip_target = ABS(gseq%Itor_target)/jphi_rescale
+ip_target = ABS(gseq%Ip_target)/jphi_rescale
 IF(self%freeze_j_BS .OR. self%freeze_alpha) THEN
   !--- Frozen: reuse last converged alpha.
   alpha = self%alpha_last
@@ -938,10 +938,10 @@ DO i = 1, self%npsi
                                   gseq%plasma_bounds(1))
   self%yp(i) = 2.d0*(jphi_total(i) - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 END DO
-CALL spline_dealloc(R_spline)
-! Disable Ip matching; scale is enforced above.
-IF(gseq%Itor_target>0.d0)gseq%Itor_target=-gseq%Itor_target
+! Fix F*F' scale (matching is done here instead)
+! gseq%skip_targets is already true when jphi_bs_update called
 gseq%ffp_scale=1.d0
+gseq%p_scale=pscale
 !--- 7. Diagnostics.
 IF(gseq%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] ip_target   = ', ip_target
@@ -964,6 +964,7 @@ IF(gseq%boot_ops%diagnose_bs)THEN
 END IF
 !--- Clean up
 DEALLOCATE(j_BS, jphi_total, jphi_ind, qtmp)
+CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)
 END SUBROUTINE jphi_bs_update
 !------------------------------------------------------------------------------
