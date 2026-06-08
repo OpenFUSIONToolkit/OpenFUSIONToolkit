@@ -2375,7 +2375,6 @@ class TokaMaker():
         )
         self.set_boot_ops(**kwargs)
         self.set_targets(Ip=Ip_target, pax=pax)
-        self.settings.pm = True
         self.update_settings()
         self.set_profiles(
             ffp_prof=ffp_prof,
