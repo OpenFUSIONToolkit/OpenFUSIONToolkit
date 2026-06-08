@@ -1147,6 +1147,12 @@ end if
 next=cell
 do i=1,self%nc
   cell=next
+  if(( cell<=0 ).OR.( cell>self%nc ))then
+    ! handle invalid cell guess rather than indexing self%lcc(:,0) out of bounds
+    cell=0
+    f=-1.d0
+    exit
+  end if
   CALL self%phys2log(cell,pttmp,f)
   fmin=minval(f)
   fmax=maxval(f)

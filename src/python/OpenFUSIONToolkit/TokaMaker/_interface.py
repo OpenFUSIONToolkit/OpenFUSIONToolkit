@@ -24,6 +24,9 @@ class tokamaker_settings_cstruct(c_struct):
                 ("nl_tol", c_double),
                 ("rmin", c_double),
                 ("lim_zmax", c_double),
+                ("ffp_target_weight", c_double),
+                ("pp_target_weight", c_double),
+                ("opoint_target_weight", c_double),
                 ("limiter_file", ctypes.c_char_p)]
 
 # tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str)
@@ -57,6 +60,18 @@ tokamaker_equil_destroy = ctypes_subroutine(oftpy_lib.tokamaker_equil_destroy,
 # tokamaker_load_profiles(tMaker_equil_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str)
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
     [c_void_p, c_char_p, c_double, c_char_p, c_char_p, c_char_p, c_char_p])
+
+# tokamaker_get_profile_ndofs(tMaker_equil_ptr,prof_type,ndofs,error_str)
+tokamaker_get_profile_ndofs = ctypes_subroutine(oftpy_lib.tokamaker_get_profile_ndofs,
+    [c_void_p, c_int, c_int_ptr, c_char_p])
+
+# tokamaker_get_profile_dofs(tMaker_equil_ptr,prof_type,dofs,error_str)
+tokamaker_get_profile_dofs = ctypes_subroutine(oftpy_lib.tokamaker_get_profile_dofs,
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_char_p])
+
+# tokamaker_set_profile_dofs(tMaker_equil_ptr,prof_type,dofs,error_str)
+tokamaker_set_profile_dofs = ctypes_subroutine(oftpy_lib.tokamaker_set_profile_dofs,
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
 # tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
@@ -187,9 +202,9 @@ tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,
 tokamaker_set_mirror_slosh = ctypes_subroutine(oftpy_lib.tokamaker_set_mirror_slosh,
     [c_void_p, c_double, c_double, c_double, c_char_p])
 
-# tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,R0_target,Z0_target,error_str)
+# tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,dflux_target,R0_target,Z0_target,error_str)
 tokamaker_set_targets = ctypes_subroutine(oftpy_lib.tokamaker_set_targets,
-    [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double, c_char_p])
+    [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double, c_double, c_char_p])
 
 # tokamaker_set_isoflux(tMaker_ptr,targets,ref_points,weights,ntargets,grad_wt_lim,error_str)
 tokamaker_set_isoflux = ctypes_subroutine(oftpy_lib.tokamaker_set_isoflux,
@@ -198,6 +213,10 @@ tokamaker_set_isoflux = ctypes_subroutine(oftpy_lib.tokamaker_set_isoflux,
 # tokamaker_set_flux(tMaker_ptr,locations,targets,weights,ntargets,grad_wt_lim,error_str)
 tokamaker_set_flux = ctypes_subroutine(oftpy_lib.tokamaker_set_flux,
     [c_void_p, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_int, c_double, c_char_p])
+
+# tokamaker_set_mirnov(tMaker_ptr,locations,norms,targets,weights,ntargets,error_str)
+tokamaker_set_mirnov = ctypes_subroutine(oftpy_lib.tokamaker_set_mirnov,
+    [c_void_p, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_int, c_char_p])
 
 # tokamaker_set_saddles(tMaker_ptr,targets,weights,ntargets,error_str)
 tokamaker_set_saddles = ctypes_subroutine(oftpy_lib.tokamaker_set_saddles,

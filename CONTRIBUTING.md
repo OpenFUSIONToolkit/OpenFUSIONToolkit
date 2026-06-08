@@ -86,7 +86,8 @@ Oak Nelson (@nelsonand)\
 Matthew Pharr (@matt-pharr)\
 Jeremy Salm (@jeremslm)\
 Benjy Smith (@benjysmith)\
-Thomas Wang (@ThomasWangAPAM)
+Thomas Wang (@ThomasWangAPAM)\
+Yunfei Zhao (@SeaWolfYFZ)
 
 ### Contributors to predecessor codes
 Thomas Benedett\

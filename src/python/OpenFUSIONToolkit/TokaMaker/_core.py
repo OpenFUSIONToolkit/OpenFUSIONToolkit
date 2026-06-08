@@ -57,6 +57,52 @@ def create_prof_file(self, filename, profile_dict, name):
             "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
             "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
         ]
+    elif (profile_dict['type'] == 'mlinterp') or (profile_dict['type'] == 'jphi-mlinterp'):
+        if profile_dict['type'] == 'jphi-mlinterp':
+            raise NotImplementedError('jphi-mlinterp profile type not currently implemented')
+        x = profile_dict.get('x',None)
+        if x is None:
+            raise KeyError('No array "x" for piecewise linear profile.')
+        else:
+            x = numpy.array(x).copy()
+        y_basis = profile_dict.get('y_basis',None)
+        if y_basis is None:
+            raise KeyError('No array "y_basis" for multi-linear profile.')
+        else:
+            y_basis = numpy.array(y_basis).copy()
+        if y_basis.shape[1] != x.shape[0]:
+            raise ValueError('Dimension 1 of "y_basis" must match length of "x" for multi-linear profile.')
+        weights = profile_dict.get('weights',None)
+        if weights is None:
+            raise KeyError('No array "weights" for multi-linear profile.')
+        else:
+            weights = numpy.array(weights).copy()
+        if y_basis.shape[0] != weights.shape[0]+1:
+            raise ValueError('Dimension 0 of "y_basis" must be 1 larger than the length of "weights" for multi-linear profile.')
+        if numpy.min(numpy.diff(x)) < 0.0:
+            raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
+        if (x[0] < 0.0) or (x[-1] > 1.0):
+            raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
+        if self.psi_convention == 0:
+            x = 1.0 - x
+            sort_inds = x.argsort()
+            x = x[sort_inds]
+            ynew = []
+            for y in y_basis:
+                ynew.append(y[sort_inds])
+            y_basis = numpy.array(ynew)
+        elif self.psi_convention == 1:
+            pass
+        else:
+            raise ValueError('Unknown convention type, must be 0 (tokamak) or 1 (spheromak)')
+        file_lines += [
+            "{0}".format(x.shape[0]-1),
+            "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
+            "{0}".format(y_basis.shape[0]),
+            "{0}".format(" ".join(["{0}".format(val) for val in weights]))
+        ]
+        for y in y_basis:
+            file_lines += ["{0}".format(" ".join(["{0}".format(val) for val in y]))]
     else:
         raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp")')
     with open(filename, 'w+') as fid:
@@ -88,6 +134,12 @@ class tokamaker_settings:
         self.rmin = 0.0
         ## Maximum vertical range for limiter points, can be used to exclude complex diverter regions
         self.lim_zmax = 1.E99
+        ## Weight for global F*F' targets when treated as soft constraints (negative for hard constraints)
+        self.ffp_target_weight = -1.0
+        ## Weight for global P' targets when treated as soft constraints (negative for hard constraints)
+        self.pp_target_weight = -1.0
+        ## Weight for global O-point targets when treated as soft constraints (negative for hard constraints)
+        self.opoint_target_weight = -1.0
         ## File containing additional limiter points not included in mesh (default: 'none')
         self.limiter_file = None
         # Must be added last
@@ -101,6 +153,10 @@ class tokamaker_settings:
     
     def get_c_struct(self,oft_env):
         r'''! Get C struct representation of settings for passing to TokaMaker Fortran API'''
+        if self.ffp_target_weight*self.pp_target_weight <= 0.0:
+            raise ValueError("Both `ffp_target_weight` and `pp_target_weight` must be negative (hard constraint) or positive (soft constraint)")
+        if (self.ffp_target_weight <= 0.0) and (self.opoint_target_weight > 0.0):
+            raise ValueError("If `opoint_target_weight` is positive, both `ffp_target_weight` and `pp_target_weight` must be positive as well (soft constraint)")
         c_struct_instance = tokamaker_settings_cstruct()
         c_struct_instance.pm = self.pm
         c_struct_instance.free_boundary = self.free_boundary
@@ -113,6 +169,9 @@ class tokamaker_settings:
         c_struct_instance.nl_tol = self.nl_tol
         c_struct_instance.rmin = self.rmin
         c_struct_instance.lim_zmax = self.lim_zmax
+        c_struct_instance.ffp_target_weight = self.ffp_target_weight
+        c_struct_instance.pp_target_weight = self.pp_target_weight
+        c_struct_instance.opoint_target_weight = self.opoint_target_weight
         c_struct_instance.limiter_file = oft_env.path2c(self.limiter_file) if self.limiter_file else None
         return c_struct_instance
 
@@ -398,7 +457,7 @@ class TokaMaker():
 
     @property
     def c_ptr(self):
-        r'''C pointer to Fortran-side TokaMaker object'''
+        r'''! C pointer to Fortran-side TokaMaker object'''
         return self._tMaker_ptr
 
     @property
@@ -408,14 +467,14 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.ffp_scale
     
-    # @cond
+    ## @cond
     @ffp_scale.setter
     def ffp_scale(self,value):
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         self._tMaker_equil.ffp_scale = value
-    # @endcond
-    
+    ## @endcond
+
     @property
     def p_scale(self):
         r'''! Pressure scale value'''
@@ -423,13 +482,13 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.p_scale
     
-    # @cond
+    ## @cond
     @p_scale.setter
     def p_scale(self,value):
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         self._tMaker_equil.p_scale = value
-    # @endcond
+    ## @endcond
 
     @property
     def alam(self):
@@ -438,11 +497,11 @@ class TokaMaker():
         @deprecated Use `ffp_scale` property instead.'''
         return self.ffp_scale
     
-    # @cond
+    ## @cond
     @alam.setter
     def alam(self,value):
         self.ffp_scale = value
-    # @endcond
+    ## @endcond
     
     @property
     def pnorm(self):
@@ -451,11 +510,11 @@ class TokaMaker():
         @deprecated Use `p_scale` property instead.'''
         return self.p_scale
     
-    # @cond
+    ## @cond
     @pnorm.setter
     def pnorm(self,value):
         self.p_scale = value
-    # @endcond
+    ## @endcond
     
     @property
     def diverted(self):
@@ -732,6 +791,26 @@ class TokaMaker():
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files)
+    
+    def get_profile_dofs(self, prof_type):
+        r'''! Retrieve degrees of freedom for desired flux profile
+
+        @param prof_type Profile type ('ffp' or 'pp')
+        @returns Values for profile degrees of freedom
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_profile_dofs(prof_type)
+    
+    def set_profile_dofs(self, prof_type, values):
+        r'''! Set degrees of freedom for desired flux profile
+
+        @param prof_type Profile type ('ffp' or 'pp')
+        @param values New values for profile degrees of freedom
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.set_profile_dofs(prof_type, values)
 
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
@@ -907,6 +986,9 @@ class TokaMaker():
         @param targets Target \f$ \psi \f$ value in Wb at each point [:]
         @param weights Weight to be applied to each constraint point [:] (default: 1)
         '''
+        if (weights is None) and (locations is not None):
+            weights = numpy.ones((locations.shape[0],), dtype=numpy.float64)
+        weights = weights*(2.0*numpy.pi) if weights is not None else None
         self.set_psi_constraints(locations,targets/(2.0*numpy.pi),weights)
     
     def set_psi_constraints(self,locations,targets,weights=None):
@@ -978,7 +1060,40 @@ class TokaMaker():
                 raise Exception(error_string.value)
             self._tMaker_equil._saddle_targets = saddles.copy()
     
-    def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,R0=None,V0=None,Z0=None,retain_previous=False):
+    def set_mirnov_constraints(self,locations,norms,targets,weights=None):
+        r'''! Set explicit mirnov constraint points \f$ B \cdot \hat{n} \f$ [T]
+
+        @param locations List of points defining constraints [:,2]
+        @param norms List of normal vectors (\f$ \hat{n} \f$) at each constraint point [:,2]
+        @param targets Target \f$ B \cdot \hat{n} \f$ value in T at each point [:]
+        @param weights Weight to be applied to each constraint point [:] (default: 1)
+        '''
+        if locations is None:
+            error_string = self._oft_env.get_c_errorbuff()
+            tokamaker_set_mirnov(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,1)),numpy.zeros((1,)),numpy.zeros((1,)),0,error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
+            self._tMaker_equil._mirnov_constraints = None
+        else:
+            if norms.shape[0] != locations.shape[0]:
+                raise ValueError('Shape of "norms" does not match first dimension of "locations"')
+            if targets.shape[0] != locations.shape[0]:
+                raise ValueError('Shape of "targets" does not match first dimension of "locations"')
+            if weights is None:
+                weights = numpy.ones((locations.shape[0],), dtype=numpy.float64)
+            if weights.shape[0] != locations.shape[0]:
+                raise ValueError('Shape of "weights" does not match first dimension of "locations"')
+            locations = numpy.ascontiguousarray(locations, dtype=numpy.float64)
+            norms = numpy.ascontiguousarray(norms, dtype=numpy.float64)
+            targets = numpy.ascontiguousarray(targets, dtype=numpy.float64)
+            weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
+            error_string = self._oft_env.get_c_errorbuff()
+            tokamaker_set_mirnov(self._tMaker_ptr,locations,norms,targets,weights,locations.shape[0],error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
+            self._tMaker_equil._mirnov_constraints = (locations.copy(), norms.copy(), targets.copy())
+    
+    def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,Dflux=None,R0=None,V0=None,Z0=None,retain_previous=False):
         r'''! Set global target values
 
         @note Values that are not specified are reset to their defaults on each call unless `retain_previous=True`.
@@ -987,6 +1102,7 @@ class TokaMaker():
         @param Ip_ratio Amplitude of net plasma current contribution from FF' compared to P'
         @param pax Target axis pressure [Pa]
         @param estore Target sotred energy [J]
+        @param Dflux Target diamagnetic flux [Wb]
         @param R0 Target major radius for magnetic axis
         @param V0 Target vertical position for magnetic axis
         @param Z0 Target vertical position for magnetic axis
@@ -1001,6 +1117,7 @@ class TokaMaker():
         if not retain_previous:
             self._tMaker_equil._Ip_target = None
             self._tMaker_equil._estored_target = None
+            self._tMaker_equil._dflux_target = None
             self._tMaker_equil._pax_target = None
             self._tMaker_equil._Ip_ratio_target = None
             self._tMaker_equil._R0_target = None
@@ -1014,6 +1131,8 @@ class TokaMaker():
             if (estore <= 0.0) and (not self._oft_env.float_is_disabled(estore)):
                 raise ValueError("`estore` must be positive or set to `OFT_env.float_disable_flag` to disable")
             self._tMaker_equil._estored_target = copy.copy(estore)
+        if Dflux is not None:
+            self._tMaker_equil._dflux_target = copy.copy(Dflux)
         if pax is not None:
             if (pax <= 0.0) and (not self._oft_env.float_is_disabled(pax)):
                 raise ValueError("`pax` must be positive or set to `OFT_env.float_disable_flag` to disable")
@@ -1039,6 +1158,7 @@ class TokaMaker():
                               float_to_c(self._tMaker_equil._Ip_ratio_target),
                               float_to_c(self._tMaker_equil._pax_target),
                               float_to_c(self._tMaker_equil._estored_target),
+                              float_to_c(self._tMaker_equil._dflux_target),
                               float_to_c(self._tMaker_equil._R0_target),
                               float_to_c(self._tMaker_equil._Z0_target),
                               error_string
@@ -2099,6 +2219,8 @@ class TokaMaker_equilibrium():
             self._pax_target = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Estored_target "Estored_target" property)
             self._estored_target = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Dflux_target "Dflux_target" property)
+            self._dflux_target = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.R0_target "R0_target" property)
             self._R0_target = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Z0_target "Z0_target" property)
@@ -2109,6 +2231,8 @@ class TokaMaker_equilibrium():
             self._psi_constraints = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Saddle_constraints "Saddle_constraints" property)
             self._saddle_targets = None
+            ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Mirnov_constraints "Mirnov_constraints" property)
+            self._mirnov_constraints = None
         else:
             self._F0 = copy.copy(source_eq._F0)
             if skip_targets:
@@ -2116,6 +2240,7 @@ class TokaMaker_equilibrium():
                 self._Ip_ratio_target = None
                 self._pax_target = None
                 self._estored_target = None
+                self._dflux_target = None
                 self._R0_target = None
                 self._Z0_target = None
             else:
@@ -2123,16 +2248,19 @@ class TokaMaker_equilibrium():
                 self._Ip_ratio_target = source_eq._Ip_ratio_target
                 self._pax_target = source_eq._pax_target
                 self._estored_target = source_eq._estored_target
+                self._dflux_target = source_eq._dflux_target
                 self._R0_target = source_eq._R0_target
                 self._Z0_target = source_eq._Z0_target
             if skip_constraints:
                 self._isoflux_constraints = None
                 self._saddle_targets = None
                 self._psi_constraints = None
+                self._mirnov_constraints = None
             else:
                 self._isoflux_constraints = source_eq._isoflux_constraints.copy() if source_eq._isoflux_constraints is not None else None
                 self._saddle_targets = source_eq._saddle_targets.copy() if source_eq._saddle_targets is not None else None
                 self._psi_constraints = (source_eq._psi_constraints[0].copy(), source_eq._psi_constraints[1].copy()) if source_eq._psi_constraints is not None else None
+                self._mirnov_constraints = (source_eq._mirnov_constraints[0].copy(), source_eq._mirnov_constraints[1].copy(), source_eq._mirnov_constraints[2].copy()) if source_eq._mirnov_constraints is not None else None
         ## Normalized flux convention (0 -> tokamak, 1 -> spheromak)
         self.psi_convention = self._tMaker.psi_convention
         ## Free or fixed boundary flag
@@ -2213,7 +2341,7 @@ class TokaMaker_equilibrium():
         
     @property
     def c_ptr(self):
-        r'''C pointer to Fortran-side equilibrium object'''
+        r'''! C pointer to Fortran-side equilibrium object'''
         return self._equil_ptr
     
     @property
@@ -2221,23 +2349,23 @@ class TokaMaker_equilibrium():
         r'''! F*F' scale value'''
         return self._ffp_scale[0]
     
-    # @cond
+    ## @cond
     @ffp_scale.setter
     def ffp_scale(self,value):
         self._ffp_scale[0] = value
-    # endcond
+    ## @endcond
     
     @property
     def p_scale(self):
         r'''! Pressure scale value'''
         return self._p_scale[0]
     
-    # @cond
+    ## @cond
     @p_scale.setter
     def p_scale(self,value):
         self._p_scale[0] = value
-    # endcond
-    
+    ## @endcond
+
     @property
     def alam(self):
         r'''! F*F' scale value
@@ -2245,11 +2373,11 @@ class TokaMaker_equilibrium():
         @deprecated Use `ffp_scale` property instead.'''
         return self.ffp_scale
     
-    # @cond
+    ## @cond
     @alam.setter
     def alam(self,value):
         self.ffp_scale = value
-    # endcond
+    ## @endcond
 
     @property
     def pnorm(self):
@@ -2258,11 +2386,11 @@ class TokaMaker_equilibrium():
         @deprecated Use `p_scale` property instead.'''
         return self.p_scale
     
-    # @cond
+    ## @cond
     @pnorm.setter
     def pnorm(self,value):
         self.p_scale = value
-    # @endcond
+    ## @endcond
     
     @property
     def diverted(self):
@@ -2315,6 +2443,11 @@ class TokaMaker_equilibrium():
         return self._estored_target
     
     @property
+    def Dflux_target(self):
+        r'''! Dflux target'''
+        return self._dflux_target
+
+    @property
     def R0_target(self):
         r'''! Magnetic axis radial position target'''
         return self._R0_target.value
@@ -2341,6 +2474,11 @@ class TokaMaker_equilibrium():
         r'''! Saddle constraint points'''
         return self._saddle_targets
     
+    @property
+    def Mirnov_constraints(self):
+        r'''! Mirnov constraint points'''
+        return self._mirnov_constraints
+
     def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
@@ -2393,6 +2531,50 @@ class TokaMaker_equilibrium():
                     os.remove(file)
                 except:
                     print('Warning: unable to delete temporary file "{0}"'.format(file))
+
+    def get_profile_dofs(self, prof_type):
+        r'''! Retrieve degrees of freedom for desired flux profile
+
+        @param prof_type Profile type ('ffp' or 'pp')
+        @returns Values for profile degrees of freedom
+        '''
+        if prof_type not in ['ffp', 'pp']:
+            raise ValueError('Unknown profile type "{0}", should be "ffp" or "pp"'.format(prof_type))
+        n_dofs = c_int()
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_profile_ndofs(self.c_ptr,c_int({'ffp':1,'pp':2}[prof_type]),ctypes.byref(n_dofs),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        dofs = numpy.zeros((n_dofs.value,), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_profile_dofs(self.c_ptr,c_int({'ffp':1,'pp':2}[prof_type]),dofs,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        if n_dofs.value == 0:
+            return None
+        else:
+            return dofs
+    
+    def set_profile_dofs(self, prof_type, dofs):
+        r'''! Set degrees of freedom for desired flux profile
+
+        @param prof_type Profile type ('ffp' or 'pp')
+        @param values New values for profile degrees of freedom
+        '''
+        if prof_type not in ['ffp', 'pp']:
+            raise ValueError('Unknown profile type "{0}", should be "ffp" or "pp"'.format(prof_type))
+        n_dofs = c_int()
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_profile_ndofs(self.c_ptr,c_int({'ffp':1,'pp':2}[prof_type]),ctypes.byref(n_dofs),error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        if dofs.shape[0] != n_dofs.value:
+            raise ValueError('Incorrect number of DoF, should be ({0},)'.format(n_dofs.value))
+        dofs = numpy.ascontiguousarray(dofs, dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_set_profile_dofs(self.c_ptr,c_int({'ffp':1,'pp':2}[prof_type]),dofs,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
     
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
@@ -2825,7 +3007,7 @@ class TokaMaker_equilibrium():
         tokamaker_get_dels_curr(self._equil_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return curr/mu0
+        return curr
     
     def calc_jtor_plasma(self):
         r'''! Get plasma toroidal current density for current equilibrium
@@ -2837,7 +3019,7 @@ class TokaMaker_equilibrium():
         tokamaker_get_jtor(self._equil_ptr,curr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        return curr/mu0
+        return curr
 
     def calc_conductor_currents(self,psi,cell_centered=False,include_Vcoils=False):
         r'''! Get toroidal current density in conducting regions for a given \f$ \psi \f$

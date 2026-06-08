@@ -14,6 +14,7 @@ concurrency:
   
 jobs:
   build:
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: ${{ format('{0} ({1})', matrix.config.name, matrix.parallel) }}
     runs-on: ${{ matrix.config.os }}
     env:
@@ -21,6 +22,7 @@ jobs:
       CXX: ${{ matrix.config.cxx }}
       FC: ${{ matrix.config.fc }}
       OMP_NUM_THREADS: 2
+      OMPI_MCA_pmix_tool_remote_connections: 0 # Fix occasional OpenMPI error
     
     strategy:
       fail-fast: false
@@ -113,7 +115,7 @@ jobs:
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Get OS version (Linux)
       if: startsWith(matrix.config.os, 'ubuntu')
@@ -166,11 +168,12 @@ jobs:
 
     - name: Setup PyVista
       if: ${{ !startsWith(matrix.config.os, 'macos') }}
+      timeout-minutes: 5
       uses: pyvista/setup-headless-display-action@v3
 
     - name: Cache external libraries
       id: cache-ext-libs
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: builds
         key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py', 'compiler_id.txt') }}
@@ -207,7 +210,7 @@ jobs:
         python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --build_arpack=1 --oft_build_tests=1 --build_openmpi=1
 
     - name: Upload library failure log
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: failure()
       with:
         name: Library_failure_log-${{ matrix.config.os }}_${{ matrix.parallel }}
@@ -261,7 +264,7 @@ jobs:
     
     - name: Upload test results to Codecov
       if: ${{ !cancelled() && (matrix.config.os == 'ubuntu-24.04') }}
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v6
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         report_type: test_results

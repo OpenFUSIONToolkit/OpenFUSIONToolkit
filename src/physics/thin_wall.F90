@@ -132,6 +132,7 @@ TYPE :: tw_type
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bel => NULL()
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL()
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: qbasis => NULL() !< Basis function pre-evaluated at cell centers
+  CHARACTER(LEN=OFT_PATH_SLEN) :: rst_prefix = '' !< Path prefix for .rst and .hist output files
   TYPE(xdmf_plot_file) :: xdmf
   CLASS(oft_vector), POINTER :: Uloc => NULL() !< FE vector for thin-wall model
   CLASS(oft_vector), POINTER :: Uloc_pts => NULL() !< Needs docs
@@ -2210,8 +2211,8 @@ IF(TRIM(save_file)/='none')THEN
       IF(exists)THEN
         ALLOCATE(self%Bdr(self%mesh%np,self%n_icoils,3))
         CALL hdf5_read(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X',success=exists)
-        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_X',success=exists)
-        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_Y',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_Z',success=exists)
       END IF
     END IF
     IF(exists)RETURN

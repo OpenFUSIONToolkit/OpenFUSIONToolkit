@@ -50,6 +50,187 @@ def create_isoflux(npts, r0, z0, a, kappa, delta, kappaL=None, deltaL=None):
     return isoflux_pts
 
 
+def xpoints_from_moments(r0, z0, a, kappa_upper, delta_upper,
+                         kappa_lower=None, delta_lower=None):
+    r'''! Compute X-point locations from Miller shaping moments
+
+    Upper: \f$(r_0 - a\,\delta_U,\; z_0 + a\,\kappa_U)\f$.
+    Lower: \f$(r_0 - a\,\delta_L,\; z_0 - a\,\kappa_L)\f$.
+
+    @param r0 Major radial position for magnetic axis
+    @param z0 Vertical position for magnetic axis
+    @param a Minor radius
+    @param kappa_upper Upper elongation
+    @param delta_upper Upper triangularity
+    @param kappa_lower Lower elongation (default: kappa_upper)
+    @param delta_lower Lower triangularity (default: delta_upper)
+    @result X-point array, shape (2, 2): [[R_upper, Z_upper], [R_lower, Z_lower]]
+    '''
+    if kappa_lower is None:
+        kappa_lower = kappa_upper
+    if delta_lower is None:
+        delta_lower = delta_upper
+    return numpy.array([
+        [r0 - a * delta_upper, z0 + a * kappa_upper],
+        [r0 - a * delta_lower, z0 - a * kappa_lower],
+    ])
+
+
+def _intor_arc(r0, z0_arc, a, kappa_eff, theta_x, r_x, zeta, n, endpoint=False, sign=1):
+    r'''! Generate one half of the INTOR outer arc
+
+    Arc spans \f$\theta\f$ from 0 (outboard midplane) to
+    \f$\mathrm{sign}\cdot\theta_x\f$ (X-point).
+    sign=+1 gives the upper half (Z > z0_arc); sign=-1 gives the lower half.
+    delta_eff is solved so the arc passes exactly through r_x at theta_x.
+
+    @param r0 Major radial position for magnetic axis
+    @param z0_arc Vertical center for this arc half (typically the magnetic axis Z)
+    @param a Minor radius
+    @param kappa_eff Elongation for this half
+    @param theta_x Poloidal angle at the X-point
+    @param r_x R coordinate of the X-point
+    @param zeta INTOR squareness parameter
+    @param n Number of points to generate
+    @param endpoint Whether to include the final endpoint (default: False)
+    @param sign +1 for upper half, -1 for lower half (default: +1)
+    @result r, z arrays for the arc segment
+    '''
+    arccos_val = numpy.arccos(numpy.clip((r_x - r0) / a, -1.0, 1.0))
+    delta_eff = (arccos_val - theta_x + zeta * numpy.sin(2 * theta_x)) / max(numpy.sin(theta_x), 1e-8)
+    theta = sign * numpy.linspace(0.0, theta_x, n, endpoint=endpoint)
+    r = r0 + a * numpy.cos(theta + delta_eff * numpy.sin(theta) - zeta * numpy.sin(2 * theta))
+    z = z0_arc + a * kappa_eff * numpy.sin(theta + zeta * numpy.sin(2 * theta))
+    return r, z
+
+
+def _inner_arc(r_x, z_x, r_inner_mid, z_inner_mid, zeta, n):
+    r'''! Generate an inverted-INTOR inner arc from X-point to inner midplane
+
+    Uses \f$R(\alpha) = r_x - a_\mathrm{in}\cos(\alpha - \zeta\sin 2\alpha)\f$,
+    \f$Z(\alpha) = z_\mathrm{mid} + a_\mathrm{in}\kappa_\mathrm{in}\sin(\alpha + \zeta\sin 2\alpha)\f$
+    with \f$\alpha\f$ from \f$\pi/2\f$ (X-point) to 0 (midplane, excluded).
+    The tangent is vertical at the midplane, so joining upper and lower halves is kink-free.
+
+    @param r_x R coordinate of the X-point
+    @param z_x Z coordinate of the X-point
+    @param r_inner_mid R at the inner midplane
+    @param z_inner_mid Z at the inner midplane
+    @param zeta INTOR squareness parameter
+    @param n Number of points (midplane endpoint excluded)
+    @result r, z arrays for the arc segment
+    '''
+    a_in = max(r_x - r_inner_mid, 1e-10)
+    kappa_in = (z_x - z_inner_mid) / a_in
+    alpha = numpy.linspace(numpy.pi / 2, 0.0, n, endpoint=False)
+    r = r_x - a_in * numpy.cos(alpha - zeta * numpy.sin(2 * alpha))
+    z = z_inner_mid + a_in * kappa_in * numpy.sin(alpha + zeta * numpy.sin(2 * alpha))
+    return r, z
+
+
+def create_isoflux_xpts(npts, r0, z0, a, kappa_upper, delta_upper,
+                        kappa_lower=None, delta_lower=None,
+                        r_inner_mid=None,
+                        zeta_outer_upper=0.0, zeta_outer_lower=0.0,
+                        zeta_inner_upper=0.0, zeta_inner_lower=0.0):
+    r'''! Create isoflux boundary points for single-null configurations with X-points
+
+    Generates a closed boundary contour suitable for use with
+    \ref OpenFUSIONToolkit.TokaMaker.TokaMaker.set_isoflux_constraints "set_isoflux_constraints()"
+    and \ref OpenFUSIONToolkit.TokaMaker.TokaMaker.set_saddle_constraints "set_saddle_constraints()".
+    The outer (low-field-side) arc uses the INTOR analytic formula centered on the magnetic
+    axis; the inner arcs use an inverted-INTOR formula that gives a smooth vertical tangent
+    at the inner midplane.  Supports non-up-down-symmetric equilibria via independent upper
+    and lower shaping moments and squareness values.
+
+    Use \ref xpoints_from_moments "xpoints_from_moments()" with the same kappa/delta
+    arguments to obtain the matching saddle-constraint array.
+
+    @param npts Total number of boundary points
+    @param r0 Major radial position for magnetic axis
+    @param z0 Vertical position for magnetic axis
+    @param a Minor radius
+    @param kappa_upper Upper elongation (sets X-point height and outer arc shape)
+    @param delta_upper Upper triangularity
+    @param kappa_lower Lower elongation (default: kappa_upper)
+    @param delta_lower Lower triangularity (default: delta_upper)
+    @param r_inner_mid R at the inner midplane (default: r0 - a)
+    @param zeta_outer_upper INTOR squareness of the upper outer corner (default: 0)
+    @param zeta_outer_lower INTOR squareness of the lower outer corner (default: 0)
+    @param zeta_inner_upper INTOR squareness of the upper inner corner (default: 0)
+    @param zeta_inner_lower INTOR squareness of the lower inner corner (default: 0)
+    @result Point list [npts, 2]
+    '''
+    if npts < 3:
+        raise ValueError("\"npts\" must be at least 3")
+    kU = float(kappa_upper)
+    dU = float(delta_upper)
+    kL = float(kappa_lower) if kappa_lower is not None else kU
+    dL = float(delta_lower) if delta_lower is not None else dU
+    zou = float(zeta_outer_upper)
+    zol = float(zeta_outer_lower)
+    ziu = float(zeta_inner_upper)
+    zil = float(zeta_inner_lower)
+
+    r_xu = r0 - a * dU
+    z_xu = z0 + a * kU
+    r_xl = r0 - a * dL
+    z_xl = z0 - a * kL
+    zsurf = (z_xu + z_xl) / 2.0
+
+    if r_inner_mid is None:
+        r_inner_mid = r0 - a
+
+    # Outer arc: INTOR centered on z0; each half spans θ = π/2 by the moment definition
+    n_seed = max(8 * npts, 800)
+    n_su = n_seed // 2
+    n_sl = n_seed - n_su
+
+    r_seed_u, z_seed_u = _intor_arc(r0, z0, a, kU, numpy.pi / 2, r_xu, zou, n_su, endpoint=True, sign=+1)
+    r_seed_l, z_seed_l = _intor_arc(r0, z0, a, kL, numpy.pi / 2, r_xl, zol, n_sl, endpoint=True, sign=-1)
+
+    r_arc = numpy.concatenate([r_seed_l[::-1], r_seed_u[1:]])
+    z_arc = numpy.concatenate([z_seed_l[::-1], z_seed_u[1:]])
+    r_arc[0],  z_arc[0]  = r_xl, z_xl
+    r_arc[-1], z_arc[-1] = r_xu, z_xu
+
+    outer_segs = numpy.hypot(numpy.diff(r_arc), numpy.diff(z_arc))
+    outer_len  = float(outer_segs.sum())
+
+    # Estimate inner arc lengths for proportional point allocation
+    n_est = 400
+    r_ui_e, z_ui_e = _inner_arc(r_xu, z_xu, r_inner_mid, zsurf, ziu, n_est)
+    r_li_e, z_li_e = _inner_arc(r_xl, z_xl, r_inner_mid, zsurf, zil, n_est)
+    len_ui = float(numpy.sum(numpy.hypot(numpy.diff(r_ui_e), numpy.diff(z_ui_e))))
+    len_li = float(numpy.sum(numpy.hypot(numpy.diff(r_li_e), numpy.diff(z_li_e))))
+    inner_len = len_ui + len_li
+
+    n_outer   = max(2, round(npts * outer_len / (outer_len + inner_len)))
+    n_inner   = npts - n_outer
+    n_inner_u = max(1, round(n_inner * len_ui / inner_len))
+    n_inner_l = n_inner - n_inner_u
+
+    # Resample outer arc; upper X-point is the last point
+    outer_cum = numpy.concatenate([[0.0], numpy.cumsum(outer_segs)])
+    t_sample  = numpy.linspace(0.0, outer_cum[-1], n_outer, endpoint=True)
+    r_outer   = numpy.interp(t_sample, outer_cum, r_arc)
+    z_outer   = numpy.interp(t_sample, outer_cum, z_arc)
+    r_outer[-1], z_outer[-1] = r_xu, z_xu
+
+    # Upper inner arc: X-point → midplane (skip X-point, already last in outer arc)
+    r_iu, z_iu = _inner_arc(r_xu, z_xu, r_inner_mid, zsurf, ziu, n_inner_u + 1)
+    r_iu, z_iu = r_iu[1:], z_iu[1:]
+
+    # Lower inner arc: midplane → X-point (reversed; drop the final X-point,
+    # which is already the first point of the outer arc, to avoid a duplicate)
+    r_il_raw, z_il_raw = _inner_arc(r_xl, z_xl, r_inner_mid, zsurf, zil, n_inner_l + 1)
+    r_il = r_il_raw[::-1][:-1]
+    z_il = z_il_raw[::-1][:-1]
+
+    return numpy.column_stack([numpy.concatenate([r_outer, r_iu, r_il]),
+                               numpy.concatenate([z_outer, z_iu, z_il])])
+
+
 def create_spline_flux_fun(npts,x,y,axis_bc=[1,0.0],edge_bc=[1,0.0],normalize=True):
     r'''! Build cubic spline flux function
 
