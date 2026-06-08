@@ -18,7 +18,7 @@ concurrency:
 jobs:
   linux-build:
     if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
-    name: ${{ format('PYPI Linux CD ({0})', matrix.config.name) }}
+    name: ${{ format('Linux CD ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     container: ${{ matrix.config.image }}
     timeout-minutes: 45
@@ -144,7 +144,7 @@ jobs:
   
   macos-build:
     if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
-    name: ${{ format('PYPI macOS CD ({0})', matrix.config.name) }}
+    name: ${{ format('macOS CD ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 45
     env:
