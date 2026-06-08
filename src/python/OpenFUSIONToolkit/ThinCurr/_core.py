@@ -12,6 +12,7 @@
 import ctypes
 import numpy
 import h5py
+import scipy
 from ._interface import *
 from ..io import build_XDMF
 from warnings import warn
@@ -265,7 +266,7 @@ class ThinCurr():
             self.Lmat = numpy.ctypeslib.as_array(ctypes.cast(Lmat_loc, c_double_ptr),shape=(self.nelems,self.nelems))
     
     def apply_Lmat(self,field):
-        '''! Apply inductance matrix to a field
+        '''! Apply inductance matrix to a ThinCurr field
 
         @param field Field to apply matrix to
         @result Result of matrix application
@@ -305,7 +306,7 @@ class ThinCurr():
                 numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
     
     def compute_Mcoil(self,cache_file=None):
-        '''! Compute the mutual inductance between passive (mesh+vcoils) and active elements (icoils)
+        '''! Compute the mutual inductance between passive (mesh+Vcoils) and active elements (Icoils)
 
         @param cache_file Path to cache file to store/load matrix
         @result Mutual inductance matrix `(:,:)`
@@ -351,7 +352,7 @@ class ThinCurr():
         sensor_names = []
         for i in range(nsensors.value):
             sensor_name = ctypes.create_string_buffer(b"",40)
-            error_string = ctypes.create_string_buffer(b"",200)
+            error_string = self._oft_env.get_c_errorbuff()
             thincurr_get_sensor_name(sensor_loc,c_int(i+1),sensor_name,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value.decode())
@@ -462,20 +463,29 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         return thickness
 
-    def compute_Rmat(self,copy_out=False):
+    def compute_Rmat(self,copy_out=None):
         '''! Compute the resistance matrix for this model
 
-        @param copy_out Copy matrix to python and store in `self.Rmat`?
+        @param copy_out DEPRECATED: Copy matrix to python and store in `self.Rmat`?
         '''
-        if copy_out:
-            self.Rmat = numpy.zeros((self.nelems,self.nelems), dtype=numpy.float64)
-            Rmat_tmp = self.Rmat
-        else:
-            Rmat_tmp = numpy.zeros((1,1), dtype=numpy.float64)
+        if copy_out is not None:
+            warn(
+                "`copy_out` argument is deprecated, as the matrix is now always constructed. This function will be removed in a future version.",
+                DeprecationWarning,
+                stacklevel=2
+            )
+        kr_loc = c_int_ptr()
+        lc_loc = c_int_ptr()
+        mat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        thincurr_curr_Rmat(self.tw_obj,c_bool(copy_out),Rmat_tmp,error_string)
+        thincurr_Rmat(self.tw_obj,ctypes.byref(kr_loc),ctypes.byref(lc_loc),ctypes.byref(mat_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
+        kr = numpy.ctypeslib.as_array(kr_loc,shape=(self.nelems+1,))
+        nnz = kr[-1]-1
+        lc = numpy.ctypeslib.as_array(lc_loc,shape=(nnz,))
+        data = numpy.ctypeslib.as_array(mat_loc,shape=(nnz,))
+        self.Rmat = scipy.sparse.csr_array((data.copy(), lc-1, kr-1))
     
     def cross_coupling(self,model2,cache_file=None):
         '''! Compute the mutual inductance between this and another ThinCurr model

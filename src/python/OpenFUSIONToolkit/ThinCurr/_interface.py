@@ -74,9 +74,9 @@ thincurr_Msensor = ctypes_subroutine(oftpy_lib.thincurr_Msensor,
 thincurr_get_sensor_name = ctypes_subroutine(oftpy_lib.thincurr_get_sensor_name,
     [c_void_p, c_int, c_char_p, c_char_p])
 
-# Compute model resistivity matrix thincurr_curr_Rmat(tw_ptr,copy_out,Rmat,error_str)
-thincurr_curr_Rmat = ctypes_subroutine(oftpy_lib.thincurr_Rmat,
-    [c_void_p, c_bool, ctypes_numpy_array(float64,2), c_char_p])
+# Compute model resistivity matrix thincurr_Rmat(tw_ptr,kr_ptr,lc_ptr,mat_ptr,error_str)
+thincurr_Rmat = ctypes_subroutine(oftpy_lib.thincurr_Rmat,
+    [c_void_p, c_int_ptr_ptr, c_int_ptr_ptr, c_double_ptr_ptr, c_char_p])
 
 # thincurr_get_eta(tw_ptr,eta_ptr,error_string)
 thincurr_get_eta = ctypes_subroutine(oftpy_lib.thincurr_get_eta,
@@ -115,7 +115,7 @@ thincurr_time_domain = ctypes_subroutine(oftpy_lib.thincurr_time_domain,
 thincurr_time_domain_plot = ctypes_subroutine(oftpy_lib.thincurr_time_domain_plot,
     [c_void_p, c_bool, c_bool, c_int, c_int, c_void_p, ctypes_numpy_array(float64,2), c_int, c_void_p, c_char_p])
 
-# thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,compute_B,sensor_ptr,hodlr_ptr,error_str)
+# thincurr_reduce_model(tw_ptr,filename,nbasis,basis_vecs,compute_B,sensor_ptr,hodlr_ptr,error_str)
 thincurr_reduce_model = ctypes_subroutine(oftpy_lib.thincurr_reduce_model,
     [c_void_p, c_char_p, c_int, ctypes_numpy_array(float64,2), c_bool, c_void_p, c_void_p, c_char_p])
 ## @endcond

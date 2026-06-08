@@ -836,13 +836,13 @@ def run_eta_only_matches_surface_resistivity_with_thickness(mp_q):
 
         model_surface = _build_dummy_model(xml_filename)
         model_surface.set_eta_values(eta_values=eta_surface)
-        model_surface.compute_Rmat(copy_out=True)
-        R_surface = model_surface.Rmat
+        model_surface.compute_Rmat()
+        R_surface = model_surface.Rmat.toarray()
 
         model_bulk = _build_dummy_model(xml_filename)
         model_bulk.set_eta_values(eta_vol=eta_bulk, thickness=thickness_values)
-        model_bulk.compute_Rmat(copy_out=True)
-        R_bulk = model_bulk.Rmat
+        model_bulk.compute_Rmat()
+        R_bulk = model_bulk.Rmat.toarray()
 
         if not np.allclose(R_surface, R_bulk, rtol=1.E-10, atol=1.E-12):
             result = False
