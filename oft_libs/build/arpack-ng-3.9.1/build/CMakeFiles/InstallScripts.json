@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/arpack-ng-3.9.1/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

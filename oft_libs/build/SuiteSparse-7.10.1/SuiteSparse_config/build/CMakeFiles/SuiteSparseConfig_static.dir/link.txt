@@ -1,0 +1,2 @@
+/usr/bin/ar qc libsuitesparseconfig.a CMakeFiles/SuiteSparseConfig_static.dir/SuiteSparse_config.c.o
+/usr/bin/ranlib libsuitesparseconfig.a

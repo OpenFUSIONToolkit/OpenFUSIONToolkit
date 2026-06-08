@@ -1,0 +1,34 @@
+syntax: glob
+
+.gitignore
+
+Makefile
+
+*.o
+*.lo
+*.la
+.libs/
+SRC/.libs/
+UTIL/.libs/
+arpack.pc
+autom4te.cache/
+config.log
+config.status
+libtool
+*.lib
+*.def
+*.dll
+*.bak
+*.exp
+*.u2d
+*.suo
+VISUAL_STUDIO/Release MKL/
+VISUAL_STUDIO/bin/
+TESTS/dnsimp
+PARPACK/EXAMPLES/MPI/pcndrv1
+PARPACK/EXAMPLES/MPI/pdndrv1
+PARPACK/EXAMPLES/MPI/pdndrv3
+PARPACK/EXAMPLES/MPI/pdsdrv1
+PARPACK/EXAMPLES/MPI/psndrv3
+PARPACK/EXAMPLES/MPI/pssdrv1
+PARPACK/EXAMPLES/MPI/pzndrv1

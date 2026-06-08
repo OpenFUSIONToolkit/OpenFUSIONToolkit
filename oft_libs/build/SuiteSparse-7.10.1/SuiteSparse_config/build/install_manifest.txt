@@ -1,0 +1,14 @@
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/libsuitesparseconfig.a
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/include/suitesparse/SuiteSparse_config.h
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparseBLAS.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparseBLAS32.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparseBLAS64.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparseLAPACK.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparsePolicy.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparseReport.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparse__thread.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse_config/SuiteSparse_configTargets.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse_config/SuiteSparse_configTargets-release.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse_config/SuiteSparse_configConfig.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse_config/SuiteSparse_configConfigVersion.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/pkgconfig/SuiteSparse_config.pc

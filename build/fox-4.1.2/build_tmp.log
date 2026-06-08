@@ -1,0 +1,190 @@
+if test -d wkml; then (cd wkml; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/wkml clean) fi
+rm -f *.  *. libFoX_wkml.
+if test -d wxml; then (cd wxml; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/wxml clean) fi
+rm -f *. *. libFoX_wxml.
+if test -d wcml; then (cd wcml; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/wcml clean) fi
+rm -f *.  *. libFoX_wcml.
+if test -d common; then (cd common; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/common clean) fi
+rm -f *.  *. libFoX_common.
+if test -d fsys; then (cd fsys; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/fsys clean) fi
+rm -f *. *. libFoX_fsys.
+if test -d sax; then (cd sax; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/sax clean) fi
+rm -f *.  *. libFoX_sax.
+if test -d dom; then (cd dom; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/dom clean) fi
+rm -f *.  *. libFoX_dom.
+if test -d utils; then (cd utils; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/utils clean) fi
+rm -f *.  *. libFoX_utils.
+if test -d examples; then (cd examples; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/examples clean) fi
+rm -f *. *. dom_example_2 dom_example_3 sax_example sax_example_2 wcml_example wxml_example wkml_example wkml_example.kml
+rm -rf objs .FoX check.out *_check *_check.out
+rm -f FoX-config arch.make config.log config.status .config check.out
+touch arch.make
+checking build system type... arm-apple-darwin24.6.0
+checking host system type... arm-apple-darwin24.6.0
+checking for linker flag to name executables... -o 
+checking for Fortran compiler default output file name... conftest
+checking whether the Fortran compiler works... yes
+checking whether we are cross compiling... no
+checking for suffix of executables... 
+checking for suffix of object files... o
+checking whether we are using the GNU Fortran compiler... yes
+checking whether gfortran-15 accepts -g... yes
+checking for Fortran flag needed to allow free-form source for .f90 suffix... none
+checking for gcc... gcc-15
+checking whether we are using the GNU C compiler... yes
+checking whether gcc-15 accepts -g... yes
+checking for gcc-15 option to accept ISO C89... none needed
+checking for fixed form Fortran preprocessor features... done.
+checking whether gfortran-15 compiles programs with cpp directives... yes
+checking whether gfortran-15 accepts -D... yes
+checking whether gfortran-15 accepts -I... yes
+checking whether gfortran-15 fulfils requested features... yes
+checking preprocessing mode we may therefore use... direct
+checking for Fortran flag needed to allow free-form preprocessed source for .F90 suffix... none
+checking for ranlib... ranlib
+configure: gfortran-15 seems to be a Gfortran compiler
+checking for kind number produced by kind(1.0)... 4
+checking for kind number produced by kind(1.0d0)... 8
+checking for kind number produced by selected_real_kind(6,34)... 4
+checking for kind number produced by selected_real_kind(15,300)... 8
+checking how to compile a call to FLUSH... default
+checking how to compile a call to ABORT... default
+checking for EOR character used by gfortran-15... LF
+checking for ASSOCIATED in restricted expression bug... no
+checking for a BSD-compatible install... /usr/bin/install -c
+checking for a thread-safe mkdir -p... config/install-sh -c -d
+checking for flag to alter module search path... -I
+checking for suffix of module files... mod
+checking whether module filenames are uppercased... no
+configure: creating ./config.status
+config.status: creating arch.make
+config.status: creating FoX-config
+mkdir -p objs/lib objs/finclude
+(cd fsys; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/fsys)
+gfortran-15 -c -fPIC   -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  fox_m_fsys_abort_flush.F90 
+gfortran-15 -c -fPIC   -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  fox_m_fsys_array_str.F90 
+gfortran-15 -c -fPIC     fox_m_fsys_realtypes.f90
+gfortran-15 -c -fPIC   -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  fox_m_fsys_string.F90 
+gfortran-15 -c -fPIC   -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  fox_m_fsys_string_list.F90 
+gfortran-15 -c -fPIC   -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  fox_m_fsys_format.F90 
+gfortran-15 -c -fPIC   -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  fox_m_fsys_parse_input.F90 
+gfortran-15 -c -fPIC   -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  fox_m_fsys_count_parse_input.F90 
+  ==> Creating libFoX_fsys.a with fox_m_fsys_abort_flush.o fox_m_fsys_array_str.o fox_m_fsys_format.o fox_m_fsys_parse_input.o fox_m_fsys_count_parse_input.o fox_m_fsys_string.o fox_m_fsys_string_list.o fox_m_fsys_realtypes.o
+cp -p libFoX_fsys.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib 
+for i in *.mod; do \
+      	    cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude; done
+(cd utils; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/utils)
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  fox_m_utils_mtprng.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  fox_m_utils_uri.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  fox_m_utils_uuid.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude   FoX_utils.f90
+  ==> Creating libFoX_utils.a with FoX_utils.o fox_m_utils_mtprng.o fox_m_utils_uuid.o fox_m_utils_uri.o
+cp -p libFoX_utils.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib 
+for i in *.mod; do \
+      	    cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude; done
+(cd common; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/common)
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_charset.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_content_model.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_error.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_namecheck.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_buffer.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_entities.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_notations.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_elstack.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_io.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_element.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_attrs.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_struct.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_entity_expand.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_common_namespaces.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  FoX_common.F90 
+  ==> Creating libFoX_common.a with m_common_attrs.o m_common_buffer.o m_common_charset.o m_common_namespaces.o m_common_error.o m_common_elstack.o m_common_io.o FoX_common.o m_common_namecheck.o m_common_entities.o m_common_notations.o m_common_element.o m_common_struct.o m_common_entity_expand.o m_common_content_model.o
+cp -p libFoX_common.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib 
+for i in *.mod; do \
+      	    cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude; done
+(cd sax; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/sax)
+(cd wxml; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/wxml)
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_wxml_escape.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_sax_xml_source.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_wxml_core.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_sax_reader.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_sax_types.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_sax_tokenizer.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_wxml_overloads.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_sax_parser.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude   FoX_wxml.f90
+==> Creating libFoX_wxml.a with m_wxml_escape.o m_wxml_core.o m_wxml_overloads.o FoX_wxml.o
+ar  cru libFoX_wxml.a m_wxml_escape.o m_wxml_core.o m_wxml_overloads.o FoX_wxml.o
+ranlib libFoX_wxml.a
+cp -p libFoX_wxml.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib
+for i in *.mod; do \
+	  cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude; done
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_sax_operate.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude   FoX_sax.f90
+  ==> Creating libFoX_sax.a with m_sax_types.o m_sax_tokenizer.o m_sax_reader.o m_sax_parser.o m_sax_operate.o m_sax_xml_source.o FoX_sax.o
+cp -p libFoX_sax.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib 
+for i in *.mod ; do  \
+           cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude;done
+(cd dom; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/dom)
+gfortran-15 -c -fPIC  -I../objs/finclude   m_dom_error.f90
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_dom_dom.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude   m_dom_parse.f90
+gfortran-15 -c -fPIC  -I../objs/finclude   m_dom_utils.f90
+gfortran-15 -c -fPIC  -I../objs/finclude -DFC_HAVE_FLUSH -DFC_HAVE_ABORT -DFC_EOR_LF  m_dom_extras.F90 
+gfortran-15 -c -fPIC  -I../objs/finclude   FoX_dom.f90
+  ==> Creating libFoX_dom.a with m_dom_error.o m_dom_parse.o m_dom_utils.o m_dom_extras.o m_dom_dom.o FoX_dom.o
+ar  cru libFoX_dom.a m_dom_error.o m_dom_parse.o m_dom_utils.o m_dom_extras.o m_dom_dom.o FoX_dom.o
+ranlib libFoX_dom.a
+cp -p libFoX_dom.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib
+for i in *.mod ; do  \
+           cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude; done
+if test -d examples; then (cd examples; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/examples) fi
+gfortran-15 -c -fPIC  `../FoX-config --fcflags`   sax_example.f90
+gfortran-15 -c -fPIC  `../FoX-config --fcflags`   sax_example_2.f90
+gfortran-15 -c -fPIC  `../FoX-config --fcflags`   wxml_example.f90
+gfortran-15 -c -fPIC  `../FoX-config --fcflags`   dom_example_2.f90
+gfortran-15 -c -fPIC  `../FoX-config --fcflags`   dom_example_3.f90
+gfortran-15 -fPIC   -o  sax_example sax_example.o $(../FoX-config --libs --sax)
+gfortran-15 -fPIC   -o  sax_example_2 sax_example_2.o $(../FoX-config --libs --sax)
+gfortran-15 -fPIC   -o  wxml_example wxml_example.o $(../FoX-config --libs --wxml)
+gfortran-15 -fPIC   -o  dom_example_2 dom_example_2.o $(../FoX-config --libs --dom)
+gfortran-15 -fPIC   -o  dom_example_3 dom_example_3.o $(../FoX-config --libs --dom)
+mkdir -p objs/lib objs/finclude
+(cd fsys; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/fsys)
+  ==> Creating libFoX_fsys.a with fox_m_fsys_abort_flush.o fox_m_fsys_array_str.o fox_m_fsys_format.o fox_m_fsys_parse_input.o fox_m_fsys_count_parse_input.o fox_m_fsys_string.o fox_m_fsys_string_list.o fox_m_fsys_realtypes.o
+cp -p libFoX_fsys.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib 
+for i in *.mod; do \
+      	    cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude; done
+(cd utils; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/utils)
+  ==> Creating libFoX_utils.a with FoX_utils.o fox_m_utils_mtprng.o fox_m_utils_uuid.o fox_m_utils_uri.o
+cp -p libFoX_utils.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib 
+for i in *.mod; do \
+      	    cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude; done
+(cd common; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/common)
+  ==> Creating libFoX_common.a with m_common_attrs.o m_common_buffer.o m_common_charset.o m_common_namespaces.o m_common_error.o m_common_elstack.o m_common_io.o FoX_common.o m_common_namecheck.o m_common_entities.o m_common_notations.o m_common_element.o m_common_struct.o m_common_entity_expand.o m_common_content_model.o
+cp -p libFoX_common.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib 
+for i in *.mod; do \
+      	    cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude; done
+(cd sax; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/sax)
+  ==> Creating libFoX_sax.a with m_sax_types.o m_sax_tokenizer.o m_sax_reader.o m_sax_parser.o m_sax_operate.o m_sax_xml_source.o FoX_sax.o
+cp -p libFoX_sax.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib 
+for i in *.mod ; do  \
+           cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude;done
+(cd wxml; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/wxml)
+==> Creating libFoX_wxml.a with m_wxml_escape.o m_wxml_core.o m_wxml_overloads.o FoX_wxml.o
+ar  cru libFoX_wxml.a m_wxml_escape.o m_wxml_core.o m_wxml_overloads.o FoX_wxml.o
+ranlib libFoX_wxml.a
+cp -p libFoX_wxml.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib
+for i in *.mod; do \
+	  cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude; done
+(cd dom; /Library/Developer/CommandLineTools/usr/bin/make VPATH=/dom)
+  ==> Creating libFoX_dom.a with m_dom_error.o m_dom_parse.o m_dom_utils.o m_dom_extras.o m_dom_dom.o FoX_dom.o
+ar  cru libFoX_dom.a m_dom_error.o m_dom_parse.o m_dom_utils.o m_dom_extras.o m_dom_dom.o FoX_dom.o
+ranlib libFoX_dom.a
+cp -p libFoX_dom.a /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/lib
+for i in *.mod ; do  \
+           cp -p $i /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/fox-4.1.2/objs/finclude; done
+config/install-sh -c -d /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/fox-4_1_2/lib /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/fox-4_1_2/finclude /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/fox-4_1_2/bin
+/usr/bin/install -c objs/lib/* /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/fox-4_1_2/lib
+/usr/bin/install -c -m 644 objs/finclude/* /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/fox-4_1_2/finclude
+/usr/bin/install -c FoX-config /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/fox-4_1_2/bin

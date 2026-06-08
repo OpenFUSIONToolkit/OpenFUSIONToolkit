@@ -1,0 +1,9 @@
+# Ignore these files:
+*.o
+*.a
+*.so
+rmm_log.txt
+
+# Do not ignore this file
+!.gitignore
+

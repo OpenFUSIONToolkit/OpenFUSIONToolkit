@@ -1,0 +1,21 @@
+reset
+undo off
+
+#{mesh_size=0.05}
+
+# Create simple 1x1 plate
+create surface rectangle width 1 height 1 zplane 
+
+# Generate mesh
+set trimesher geometry sizing off
+surface all scheme trimesh
+surface all size {mesh_size}
+mesh surface all
+
+# Create mesh blocks
+set duplicate block elements off
+block 1 add surface 1 
+
+# Export grid
+set large exodus file on
+export Genesis  "thincurr_ex-plate.g" overwrite block 1

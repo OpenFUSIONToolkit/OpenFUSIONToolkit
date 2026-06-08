@@ -1,0 +1,1 @@
+/opt/homebrew/bin/gcc-15 -O2 -Werror=trampolines -arch arm64 -dynamiclib -Wl,-headerpad_max_install_names -o ../bin/liboft_triangle.dylib -install_name @rpath/liboft_triangle.dylib CMakeFiles/oft_triangle.dir/triangle.c.o

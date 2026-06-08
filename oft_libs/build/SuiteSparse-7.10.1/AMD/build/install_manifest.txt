@@ -1,0 +1,7 @@
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/libamd.a
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/include/suitesparse/amd.h
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/AMD/AMDTargets.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/AMD/AMDTargets-release.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/AMD/AMDConfig.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/AMD/AMDConfigVersion.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/pkgconfig/AMD.pc

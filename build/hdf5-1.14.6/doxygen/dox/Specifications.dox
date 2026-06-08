@@ -1,0 +1,21 @@
+/** \page SPEC Specifications
+
+\section sec_spec_ddl DDL
+
+\li \ref DDLBNF110
+\li \ref DDLBNF112
+\li \ref DDLBNF114
+
+\section sec_spec_ff File Format
+
+\li \ref FMT1
+\li \ref FMT11
+\li \ref FMT2
+
+\section sec_spec_other Other
+
+\li \ref IMG
+\li \ref TBLSPEC
+\li \ref sec_dim_scales_spec
+
+*/

@@ -1,0 +1,1461 @@
+checking for a BSD-compatible install... /usr/bin/install -c
+checking whether build environment is sane... yes
+checking for a race-free mkdir -p... ../bin/install-sh -c -d
+checking for gawk... no
+checking for mawk... no
+checking for nawk... no
+checking for awk... awk
+checking whether make sets $(MAKE)... yes
+checking whether make supports nested variables... yes
+checking whether make supports nested variables... (cached) yes
+checking whether to enable maintainer-specific portions of Makefiles... no
+checking build system type... aarch64-apple-darwin24.6.0
+checking host system type... aarch64-apple-darwin24.6.0
+checking shell variables initial values... done
+checking if basename works... yes
+checking if xargs works... yes
+checking for cached host... none
+checking enable warnings as errors... no
+checking for config aarch64-apple-darwin24.6.0... no
+checking for config aarch64-apple-darwin24.6.0... no
+checking for config apple-darwin24.6.0... no
+checking for config apple-darwin24.6.0... no
+checking for config aarch64-darwin24.6.0... no
+checking for config aarch64-darwin24.6.0... no
+checking for config aarch64-apple... no
+checking for config darwin24.6.0... no
+checking for config darwin24.6.0... no
+checking for config apple... found
+compiler 'gcc-15' is GNU gcc-15.2.0
+compiler 'gfortran-15' is GNU gfortran-15.2.0
+compiler 'g++-15' is GNU g++-15.2.0
+checking for config ../config/site-specific/host-Talias-MacBook-Air-1549.local... no
+checking for config ../config/site-specific/host-local... no
+checking for clang sanitizer checks... checking build mode... production
+checking for gcc... gcc-15
+checking whether the C compiler works... yes
+checking for C compiler default output file name... a.out
+checking for suffix of executables... 
+checking whether we are cross compiling... no
+checking for suffix of object files... o
+checking whether the compiler supports GNU C... yes
+checking whether gcc-15 accepts -g... yes
+checking for gcc-15 option to enable C11 features... none needed
+checking whether gcc-15 understands -c and -o together... yes
+checking whether make supports the include directive... yes (GNU style)
+checking dependency style of gcc-15... gcc3
+checking if unsupported combinations of configure options are allowed... no
+checking for stdio.h... yes
+checking for stdlib.h... yes
+checking for string.h... yes
+checking for inttypes.h... yes
+checking for stdint.h... yes
+checking for strings.h... yes
+checking for sys/stat.h... yes
+checking for sys/types.h... yes
+checking for unistd.h... yes
+checking for off_t... yes
+checking for ssize_t... yes
+checking whether byte ordering is bigendian... no
+checking size of char... 1
+checking size of short... 2
+checking size of int... 4
+checking size of unsigned... 4
+checking size of long... 8
+checking size of long long... 8
+checking size of float... 4
+checking size of double... 8
+checking size of long double... 8
+checking if non-standard feature support is enabled... yes
+checking if _Float16 support is enabled... yes
+configure: checking if _Float16 support is available
+checking size of _Float16... 2
+checking for gcc-15 options needed to detect all undeclared functions... none needed
+checking whether FLT16_EPSILON is declared... yes
+checking whether FLT16_MIN is declared... yes
+checking whether FLT16_MAX is declared... yes
+checking whether FLT16_MIN_10_EXP is declared... yes
+checking whether FLT16_MAX_10_EXP is declared... yes
+checking whether FLT16_MANT_DIG is declared... yes
+checking if compiler can correctly compile and run a test program which converts _Float16 to other types with casts... yes
+checking if compiler can correctly compile and run a test program which converts _Float16 to other types with casts (without CFLAGS)... yes
+checking if compiler can correctly convert long double values to _Float16... yes
+checking if compiler can correctly convert long double values to _Float16 (without CFLAGS)... yes
+checking for fabsf16... no
+checking if _Float16 support is enabled... yes
+checking if Fortran interface enabled... yes
+checking if __float128 exists... yes
+checking for quadmath.h... yes
+checking maximum decimal precision for C... 33 (__float128)
+checking if __float128 will be used in the Fortran wrappers... yes
+checking whether the compiler supports GNU Fortran... yes
+checking whether gfortran-15 accepts -g... yes
+checking for Fortran flag to compile .f90 files... none
+checking whether the compiler supports GNU Fortran... (cached) yes
+checking whether gfortran-15 accepts -g... (cached) yes
+checking what gfortran-15 does with modules... MODULE.mod
+checking how gfortran-15 finds modules... -I
+checking if Fortran compiler version compatible with Fortran 2003... yes
+checking if Fortran compiler supports allocatable character... yes
+checking how to get verbose linking output from gfortran-15... -v
+checking for Fortran libraries of gfortran-15...  -L/opt/homebrew/Cellar/gcc/15.2.0_1/bin/../lib/gcc/current/gcc/aarch64-apple-darwin24/15 -L/opt/homebrew/Cellar/gcc/15.2.0_1/bin/../lib/gcc/current/gcc -L/opt/homebrew/Cellar/gcc/15.2.0_1/bin/../lib/gcc/current/gcc/aarch64-apple-darwin24/15/../../.. -lemutls_w -lheapt_w -lgfortran -lquadmath
+checking for dummy main to link with Fortran libraries... none
+checking for Fortran name-mangling scheme... lower case, underscore, no extra underscore
+checking if Fortran compiler supports intrinsic SIZEOF... yes
+checking if Fortran compiler supports intrinsic C_SIZEOF... yes
+checking if Fortran compiler supports intrinsic STORAGE_SIZE... yes
+checking if Fortran compiler supports intrinsic module ISO_FORTRAN_ENV (F08)... yes
+1,2,4,8,16
+4,8,16
+33
+5
+3
+checking for Number of Fortran INTEGER KINDs... 5
+checking for Fortran INTEGER KINDs... {1,2,4,8,16}
+checking for Fortran REAL KINDs... {4,8,16}
+checking for Fortran REALs maximum decimal precision... 33
+checking sizeof of native KINDS... 
+1,2,4,8,16
+4,8,16
+33
+5
+3
+5
+1,2,4,8,16
+checking for Number of Fortran INTEGER KINDs... 5
+checking for Fortran INTEGER KINDs... {1,2,4,8,16}
+checking for Fortran REAL KINDs... {4,8,16}
+checking for Fortran REALs maximum decimal precision... 33
+checking for Number of Fortran LOGICAL KINDs... 5
+checking for Fortran LOGICAL KINDs... {1,2,4,8,16}
+checking sizeof of available INTEGER KINDs... {1,2,4,8,16}
+checking sizeof of available REAL KINDs... {4,8,16}
+checking if Fortran compiler supports intrinsic C_LONG_DOUBLE... yes
+checking if Fortran C_LONG_DOUBLE is different from C_DOUBLE... no
+checking if Fortran C_BOOL is different from default LOGICAL... yes
+configure: WARNING:
+           Fortran REAL(KIND=16) is 16 Bytes, but no corresponding C float type exists of that size
+                     !!! Fortran interfaces will not be generated for REAL(KIND=16) !!!
+          
+checking for Fortran interoperable KINDS with C... {4,8,16}
+checking whether the compiler supports GNU C++... yes
+checking whether g++-15 accepts -g... yes
+checking for g++-15 option to enable C++11 features... none needed
+checking dependency style of g++-15... gcc3
+checking how to run the C++ preprocessor... g++-15 -E
+checking if c++ interface enabled... no
+checking if the high-level library is enabled... no
+checking whether to use new references with dimension scales... no
+checking for ar... ar
+checking whether make sets $(MAKE)... (cached) yes
+checking for tr... /usr/bin/tr
+checking if srcdir= and time commands work together... yes
+checking if Java JNI interface enabled... no
+checking if shared Fortran libraries are supported... yes
+checking if building tests is disabled... no
+checking if HDF5 testing intensity level is set... 3
+checking if building tools is enabled... yes
+checking if the high-level GIF tools are enabled... no
+checking if building doxygen is enabled... no
+checking if doxygen warnings as errors is enabled... FAIL_ON_WARNINGS
+checking how to print strings... printf
+checking for a sed that does not truncate output... /usr/bin/sed
+checking for grep that handles long lines and -e... /usr/bin/grep
+checking for egrep... /usr/bin/grep -E
+checking for fgrep... /usr/bin/grep -F
+checking for ld used by gcc-15... /usr/bin/ld
+checking if the linker (/usr/bin/ld) is GNU ld... no
+checking for BSD- or MS-compatible name lister (nm)... /usr/bin/nm -B
+checking the name lister (/usr/bin/nm -B) interface... BSD nm
+checking whether ln -s works... yes
+checking the maximum length of command line arguments... 786432
+checking how to convert aarch64-apple-darwin24.6.0 file names to aarch64-apple-darwin24.6.0 format... func_convert_file_noop
+checking how to convert aarch64-apple-darwin24.6.0 file names to toolchain format... func_convert_file_noop
+checking for /usr/bin/ld option to reload object files... -r
+checking for objdump... objdump
+checking how to recognize dependent libraries... pass_all
+checking for dlltool... no
+checking how to associate runtime and link libraries... printf %s\n
+checking for archiver @FILE support... no
+checking for strip... strip
+checking for ranlib... ranlib
+checking command to parse /usr/bin/nm -B output from gcc-15 object... ok
+checking for sysroot... no
+checking for a working dd... /bin/dd
+checking how to truncate binary pipes... /bin/dd bs=4096 count=1
+checking for mt... no
+checking if : is a manifest tool... no
+checking for dsymutil... dsymutil
+checking for nmedit... nmedit
+checking for lipo... lipo
+checking for otool... otool
+checking for otool64... no
+checking for -single_module linker flag... ld: warning: -single_module is obsolete
+no
+checking for -exported_symbols_list linker flag... yes
+checking for -force_load linker flag... yes
+checking for dlfcn.h... yes
+checking for objdir... .libs
+checking if gcc-15 supports -fno-rtti -fno-exceptions... no
+checking for gcc-15 option to produce PIC... -fno-common -DPIC
+checking if gcc-15 PIC flag -fno-common -DPIC works... yes
+checking if gcc-15 static flag -static works... no
+checking if gcc-15 supports -c -o file.o... yes
+checking if gcc-15 supports -c -o file.o... (cached) yes
+checking whether the gcc-15 linker (/usr/bin/ld) supports shared libraries... yes
+checking dynamic linker characteristics... darwin24.6.0 dyld
+checking how to hardcode library paths into programs... immediate
+checking for dlopen in -ldl... yes
+checking whether a program can dlopen itself... yes
+checking whether a statically linked program can dlopen itself... yes
+checking whether stripping libraries is possible... yes
+checking if libtool supports shared libraries... yes
+checking whether to build shared libraries... yes
+checking whether to build static libraries... no
+checking if libtool supports shared libraries... yes
+checking whether to build shared libraries... yes
+checking whether to build static libraries... no
+checking for gfortran-15 option to produce PIC... -fno-common
+checking if gfortran-15 PIC flag -fno-common works... yes
+checking if gfortran-15 static flag -static works... no
+checking if gfortran-15 supports -c -o file.o... yes
+checking if gfortran-15 supports -c -o file.o... (cached) yes
+checking whether the gfortran-15 linker (/usr/bin/ld) supports shared libraries... yes
+checking dynamic linker characteristics... darwin24.6.0 dyld
+checking how to hardcode library paths into programs... immediate
+checking if we should install only statically linked executables... no
+checking if -Wl,-rpath should be used to link shared libs in nondefault directories... yes
+checking for ceil in -lm... yes
+checking for dlopen in -ldl... (cached) yes
+checking for dirent.h... yes
+checking for features.h... no
+checking for pwd.h... yes
+checking for unistd.h... (cached) yes
+checking for sys/file.h... yes
+checking for sys/ioctl.h... yes
+checking for sys/resource.h... yes
+checking for sys/stat.h... (cached) yes
+checking for sys/time.h... yes
+checking for sys/types.h... (cached) yes
+checking for arpa/inet.h... yes
+checking for netdb.h... yes
+checking for netinet/in.h... yes
+checking for sys/socket.h... yes
+checking if libtool needs -no-undefined flag to build shared libraries... no
+checking for _FILE_OFFSET_BITS value needed for large files... no
+checking size of int8_t... 1
+checking size of uint8_t... 1
+checking size of int_least8_t... 1
+checking size of uint_least8_t... 1
+checking size of int_fast8_t... 1
+checking size of uint_fast8_t... 1
+checking size of int16_t... 2
+checking size of uint16_t... 2
+checking size of int_least16_t... 2
+checking size of uint_least16_t... 2
+checking size of int_fast16_t... 2
+checking size of uint_fast16_t... 2
+checking size of int32_t... 4
+checking size of uint32_t... 4
+checking size of int_least32_t... 4
+checking size of uint_least32_t... 4
+checking size of int_fast32_t... 4
+checking size of uint_fast32_t... 4
+checking size of int64_t... 8
+checking size of uint64_t... 8
+checking size of int_least64_t... 8
+checking size of uint_least64_t... 8
+checking size of int_fast64_t... 8
+checking size of uint_fast64_t... 8
+checking size of bool... 1
+checking size of off_t... 8
+checking size of ptrdiff_t... 8
+checking size of size_t... 8
+checking size of ssize_t... 8
+checking size of time_t... 8
+checking if dev_t is scalar... yes
+checking for zlib.h... yes
+checking for compress2 in -lz... yes
+checking for compress2... yes
+checking for szlib.h... no
+checking for thread safe support... no
+checking whether CLOCK_MONOTONIC is declared... yes
+checking for tm_gmtoff in struct tm... yes
+checking for global timezone variable... yes
+checking for st_blocks in struct stat... yes
+checking for _getvideoconfig... no
+checking for gettextinfo... no
+checking for GetConsoleScreenBufferInfo... no
+checking for _scrsize... no
+checking for ioctl... yes
+checking for struct videoconfig... no
+checking for struct text_info... no
+checking for TIOCGWINSZ... yes
+checking for TIOCGETD... yes
+checking for library containing clock_gettime... none required
+checking for asprintf... yes
+checking for clock_gettime... yes
+checking for fcntl... yes
+checking for flock... yes
+checking for fork... yes
+checking for gethostname... yes
+checking for getrusage... yes
+checking for gettimeofday... yes
+checking for rand_r... yes
+checking for random... yes
+checking for strcasestr... yes
+checking for strdup... yes
+checking for symlink... yes
+checking for tmpfile... yes
+checking for vasprintf... yes
+checking for waitpid... yes
+checking for alarm... yes
+checking for __attribute__ extension... yes
+checking if compiler supports the __builtin_expect() extension... yes
+checking enable build diagnostics... no
+checking enable debugging symbols... no
+checking enable asserts... no
+checking enable developer warnings... no
+checking whether showing all compiler warnings is enabled... no
+checking profiling... no
+checking optimization level... high
+checking enable file locking... best-effort
+checking for internal debug output... none
+checking for API tracing... no
+checking whether a memory checking tool will be used... no
+checking for parallel support files... skipped
+checking parallel tools... no
+checking if the map API (H5M) is enabled... no
+checking if the subfiling I/O virtual file driver (VFD) is enabled... no
+checking whether O_DIRECT is declared... no
+checking for posix_memalign... yes
+checking if the direct I/O virtual file driver (VFD) is enabled... no
+checking if the Mirror virtual file driver (VFD) is enabled... no
+checking if the Read-Only S3 virtual file driver (VFD) is enabled... no
+checking for libhdfs... suppressed
+checking for custom examples path definition... ${prefix}/share/hdf5_examples
+checking for custom plugin default path definition... /usr/local/hdf5/lib/plugin
+checking whether exception handling functions are checked during data conversions... yes
+checking whether data accuracy is guaranteed during data conversions... yes
+checking if the machine has window style path name... no
+checking if using special algorithm to convert long double to (unsigned) long values... no
+checking if using special algorithm to convert (unsigned) long to long double values... no
+checking if correctly converting long double to (unsigned) long long values... yes
+checking if correctly converting (unsigned) long long to long double values... yes
+checking if the system is IBM ppc64le and cannot correctly convert some long double values... no
+checking additional programs should be built... no
+checking if deprecated public symbols are available... yes
+checking which version of public symbols to use by default... v114
+checking whether to perform strict file format checks... no
+checking for pread... yes
+checking for pwrite... yes
+checking whether to use pread/pwrite instead of read/write in certain VFDs... yes
+checking whether to have library information embedded in the executables... yes
+configure: creating ./config.lt
+config.lt: creating libtool
+checking that generated files are newer than configure... done
+configure: creating ./config.status
+config.status: creating Makefile
+config.status: creating doxygen/Doxyfile
+config.status: creating src/Makefile
+config.status: creating src/libhdf5.settings
+config.status: creating src/H5build_settings.c
+config.status: creating test/Makefile
+config.status: creating test/H5srcdir_str.h
+config.status: creating test/test_abort_fail.sh
+config.status: creating test/test_check_version.sh
+config.status: creating test/test_error.sh
+config.status: creating test/test_external_env.sh
+config.status: creating test/test_flush_refresh.sh
+config.status: creating test/test_libinfo.sh
+config.status: creating test/test_links_env.sh
+config.status: creating test/test_mirror.sh
+config.status: creating test/test_plugin.sh
+config.status: creating test/test_swmr.sh
+config.status: creating test/test_use_cases.sh
+config.status: creating test/test_vds_env.sh
+config.status: creating test/test_vds_swmr.sh
+config.status: creating testpar/Makefile
+config.status: creating testpar/testpflush.sh
+config.status: creating utils/Makefile
+config.status: creating utils/mirror_vfd/Makefile
+config.status: creating utils/test/Makefile
+config.status: creating utils/tools/Makefile
+config.status: creating utils/tools/h5dwalk/Makefile
+config.status: creating utils/tools/test/Makefile
+config.status: creating utils/tools/test/h5dwalk/Makefile
+config.status: creating utils/tools/test/h5dwalk/copy_demo_files.sh
+config.status: creating utils/tools/test/h5dwalk/testh5dwalk.sh
+config.status: creating tools/Makefile
+config.status: creating tools/lib/Makefile
+config.status: creating tools/libtest/Makefile
+config.status: creating tools/src/Makefile
+config.status: creating tools/src/h5dump/Makefile
+config.status: creating tools/src/h5import/Makefile
+config.status: creating tools/src/h5diff/Makefile
+config.status: creating tools/src/h5jam/Makefile
+config.status: creating tools/src/h5repack/Makefile
+config.status: creating tools/src/h5ls/Makefile
+config.status: creating tools/src/h5copy/Makefile
+config.status: creating tools/src/misc/Makefile
+config.status: creating tools/src/h5stat/Makefile
+config.status: creating tools/test/Makefile
+config.status: creating tools/test/h5dump/Makefile
+config.status: creating tools/test/h5dump/h5dump_plugin.sh
+config.status: creating tools/test/h5dump/testh5dump.sh
+config.status: creating tools/test/h5dump/testh5dumppbits.sh
+config.status: creating tools/test/h5dump/testh5dumpvds.sh
+config.status: creating tools/test/h5dump/testh5dumpxml.sh
+config.status: creating tools/test/h5ls/Makefile
+config.status: creating tools/test/h5ls/h5ls_plugin.sh
+config.status: creating tools/test/h5ls/testh5ls.sh
+config.status: creating tools/test/h5ls/testh5lsvds.sh
+config.status: creating tools/test/h5import/Makefile
+config.status: creating tools/test/h5import/h5importtestutil.sh
+config.status: creating tools/test/h5diff/Makefile
+config.status: creating tools/test/h5diff/h5diff_plugin.sh
+config.status: creating tools/test/h5diff/testh5diff.sh
+config.status: creating tools/test/h5diff/testph5diff.sh
+config.status: creating tools/src/h5format_convert/Makefile
+config.status: creating tools/test/h5format_convert/Makefile
+config.status: creating tools/test/h5format_convert/testh5fc.sh
+config.status: creating tools/test/h5jam/Makefile
+config.status: creating tools/test/h5jam/testh5jam.sh
+config.status: creating tools/test/h5repack/Makefile
+config.status: creating tools/test/h5repack/h5repack.sh
+config.status: creating tools/test/h5repack/h5repack_plugin.sh
+config.status: creating tools/test/h5copy/Makefile
+config.status: creating tools/test/h5copy/testh5copy.sh
+config.status: creating tools/test/misc/Makefile
+config.status: creating tools/test/misc/testh5clear.sh
+config.status: creating tools/test/misc/testh5mkgrp.sh
+config.status: creating tools/test/misc/testh5repart.sh
+config.status: creating tools/test/misc/vds/Makefile
+config.status: creating tools/test/h5stat/Makefile
+config.status: creating tools/test/h5stat/testh5stat.sh
+config.status: creating tools/src/h5perf/Makefile
+config.status: creating tools/test/perform/Makefile
+config.status: creating bin/h5cc
+config.status: creating bin/Makefile
+config.status: creating c++/Makefile
+config.status: creating c++/src/Makefile
+config.status: creating c++/src/h5c++
+config.status: creating c++/test/Makefile
+config.status: creating c++/test/H5srcdir_str.h
+config.status: creating fortran/Makefile
+config.status: creating fortran/src/h5fc
+config.status: creating fortran/src/Makefile
+config.status: creating fortran/src/H5fort_type_defines.h
+config.status: creating fortran/test/Makefile
+config.status: creating fortran/testpar/Makefile
+config.status: creating java/Makefile
+config.status: creating java/src/Makefile
+config.status: creating java/src/jni/Makefile
+config.status: creating java/test/Makefile
+config.status: creating java/test/junit.sh
+config.status: creating hl/Makefile
+config.status: creating hl/src/Makefile
+config.status: creating hl/test/Makefile
+config.status: creating hl/test/H5srcdir_str.h
+config.status: creating hl/tools/Makefile
+config.status: creating hl/tools/gif2h5/Makefile
+config.status: creating hl/tools/gif2h5/h52giftest.sh
+config.status: creating hl/tools/h5watch/Makefile
+config.status: creating hl/tools/h5watch/testh5watch.sh
+config.status: creating hl/examples/Makefile
+config.status: creating hl/examples/run-hlc-ex.sh
+config.status: creating hl/c++/Makefile
+config.status: creating hl/c++/src/Makefile
+config.status: creating hl/c++/test/Makefile
+config.status: creating hl/c++/examples/Makefile
+config.status: creating hl/c++/examples/run-hlc++-ex.sh
+config.status: creating hl/fortran/Makefile
+config.status: creating hl/fortran/src/Makefile
+config.status: creating hl/fortran/test/Makefile
+config.status: creating hl/fortran/examples/Makefile
+config.status: creating hl/fortran/examples/run-hlfortran-ex.sh
+config.status: creating utils/subfiling_vfd/h5fuse
+config.status: creating src/H5config.h
+config.status: creating fortran/src/H5config_f.inc
+sed: 1: "fortran/src/H5config_f. ...": invalid command code f
+config.status: executing pubconf commands
+creating src/H5pubconf.h
+Post process src/libhdf5.settings
+Post process src/H5build_settings.c
+config.status: executing depfiles commands
+config.status: executing libtool commands
+        SUMMARY OF THE HDF5 CONFIGURATION
+        =================================
+
+General Information:
+-------------------
+                   HDF5 Version: 1.14.6
+                  Configured on: Fri Feb 13 16:05:50 EST 2026
+                  Configured by: taliaangles@Talias-MacBook-Air-1549.local
+                    Host system: aarch64-apple-darwin24.6.0
+              Uname information: Darwin Talias-MacBook-Air-1549.local 24.6.0 Darwin Kernel Version 24.6.0: Mon Jul 14 11:30:40 PDT 2025; root:xnu-11417.140.69~1/RELEASE_ARM64_T8132 arm64
+                       Byte sex: little-endian
+             Installation point: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6
+
+Compiling Options:
+------------------
+                     Build Mode: production
+              Debugging Symbols: no
+                        Asserts: no
+                      Profiling: no
+             Optimization Level: high
+
+Linking Options:
+----------------
+                      Libraries: shared
+  Statically Linked Executables: 
+                        LDFLAGS: 
+                     H5_LDFLAGS: 
+                     AM_LDFLAGS: 
+                Extra libraries: -lz -ldl -lm 
+                       Archiver: ar
+                       AR_FLAGS: cr
+                         Ranlib: ranlib
+
+Languages:
+----------
+                              C: yes
+                     C Compiler: /opt/homebrew/bin/gcc-15 ( gcc-15 (Homebrew GCC 15.2.0_1) 15.2.0)
+                       CPPFLAGS: 
+                    H5_CPPFLAGS:   -DNDEBUG -UH5_DEBUG_API -I/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/hdf5-1.14.6/src/H5FDsubfiling
+                    AM_CPPFLAGS: 
+                        C Flags: 
+                     H5 C Flags:  -std=c99  -Wall -Wcast-qual -Wconversion -Wextra -Wfloat-equal -Wformat=2 -Winit-self -Winvalid-pch -Wmissing-include-dirs -Wshadow -Wundef -Wwrite-strings -pedantic -Wno-c++-compat -Wlarger-than=2560 -Wlogical-op -Wframe-larger-than=16384 -Wpacked-bitfield-compat -Wsync-nand -Wno-unsuffixed-float-constants -Wdouble-promotion -Wtrampolines -Wstack-usage=8192 -Wmaybe-uninitialized -Wdate-time -Warray-bounds=2 -Wc99-c11-compat -Wduplicated-cond -Whsa -Wnormalized -Wnull-dereference -Wunused-const-variable -Walloca -Walloc-zero -Wduplicated-branches -Wformat-overflow=2 -Wformat-truncation=1 -Wattribute-alias -Wshift-overflow=2 -Wattribute-alias=2 -Wmissing-profile -Wc11-c2x-compat -fstdarg-opt -fdiagnostics-urls=never -fno-diagnostics-color -s  -Wbad-function-cast -Wcast-align -Wformat -Wimplicit-function-declaration -Wint-to-pointer-cast -Wmissing-declarations -Wmissing-prototypes -Wnested-externs -Wold-style-definition -Wpacked -Wpointer-sign -Wpointer-to-int-cast -Wredundant-decls -Wstrict-prototypes -Wswitch -Wunused-but-set-variable -Wunused-variable -Wunused-function -Wunused-parameter -Wincompatible-pointer-types -Wint-conversion -Wshadow -Wrestrict -Wcast-function-type -Wmaybe-uninitialized -Wcast-align=strict -Wno-aggregate-return -Wno-inline -Wno-missing-format-attribute -Wno-missing-noreturn -Wno-overlength-strings -Wno-jump-misses-init -Wstrict-overflow=2 -Wno-suggest-attribute=const -Wno-suggest-attribute=noreturn -Wno-suggest-attribute=pure -Wno-suggest-attribute=format -Wno-suggest-attribute=cold -Wno-suggest-attribute=malloc -O3
+                     AM C Flags: 
+               Shared C Library: yes
+               Static C Library: no
+
+
+                        Fortran: yes
+               Fortran Compiler: /opt/homebrew/bin/gfortran-15 ( GNU Fortran (Homebrew GCC 15.2.0_1) 15.2.0)
+                  Fortran Flags: 
+               H5 Fortran Flags:  -std=f2008  -Waliasing -Wall -Wcharacter-truncation -Wextra -Wimplicit-interface -Wsurprising -Wunderflow -pedantic -Wintrinsics-std -Wimplicit-procedure -Wreal-q-constant -Wfunction-elimination -Wrealloc-lhs -Wrealloc-lhs-all -Wno-c-binding-type -Winteger-division -Wfrontend-loop-interchange  -fdiagnostics-urls=never -fno-diagnostics-color -s  -Wno-unused-dummy-argument -Wno-array-temporaries -O3
+               AM Fortran Flags: 
+         Shared Fortran Library: yes
+         Static Fortran Library: no
+               Module Directory: ${includedir}
+
+                            C++: no
+
+                           Java: no
+
+
+Features:
+---------
+                     Parallel HDF5: no
+  Parallel Filtered Dataset Writes: no
+                Large Parallel I/O: no
+                High-level library: no
+Dimension scales w/ new references: no
+                  Build HDF5 Tests: no
+                  Build HDF5 Tools: yes
+                   Build GIF Tools: no
+                      Threadsafety: no
+               Default API mapping: v114
+    With deprecated public symbols: yes
+            I/O filters (external): deflate(zlib)
+                  _Float16 support: yes
+                     Map (H5M) API: no
+                        Direct VFD: no
+                        Mirror VFD: no
+                     Subfiling VFD: no
+                (Read-Only) S3 VFD: no
+              (Read-Only) HDFS VFD: no
+    Packages w/ extra debug output: none
+                       API tracing: no
+              Using memory checker: no
+                  Use file locking: best-effort
+         Strict file format checks: no
+      Optimization instrumentation: no
+Making all in src
+/Library/Developer/CommandLineTools/usr/bin/make  all-am
+  CC       H5build_settings.lo
+  CC       H5.lo
+  CC       H5checksum.lo
+  CC       H5dbg.lo
+  CC       H5system.lo
+  CC       H5timer.lo
+  CC       H5trace.lo
+  CC       H5A.lo
+  CC       H5Abtree2.lo
+  CC       H5Adense.lo
+  CC       H5Adeprec.lo
+  CC       H5Aint.lo
+  CC       H5Atest.lo
+  CC       H5AC.lo
+  CC       H5ACdbg.lo
+  CC       H5ACproxy_entry.lo
+  CC       H5B.lo
+  CC       H5Bcache.lo
+In file included from ../../src/H5B.c:100:
+../../src/H5B.c: In function 'H5B__remove_helper':
+../../src/H5B.c:1427:46: warning: potential null pointer dereference [-Wnull-dereference]
+ 1427 |     if (*lt_key_changed && H5_addr_defined(bt->left)) {
+../../src/H5private.h:449:36: note: in definition of macro 'H5_addr_defined'
+  449 | #define H5_addr_defined(X)       ((X) != HADDR_UNDEF)
+      |                                    ^
+../../src/H5B.c:1442:51: warning: potential null pointer dereference [-Wnull-dereference]
+ 1442 |     else if (*rt_key_changed && H5_addr_defined(bt->right)) {
+../../src/H5private.h:449:36: note: in definition of macro 'H5_addr_defined'
+  449 | #define H5_addr_defined(X)       ((X) != HADDR_UNDEF)
+      |                                    ^
+  CC       H5Bdbg.lo
+  CC       H5B2.lo
+  CC       H5B2cache.lo
+  CC       H5B2dbg.lo
+  CC       H5B2hdr.lo
+  CC       H5B2int.lo
+  CC       H5B2internal.lo
+  CC       H5B2leaf.lo
+  CC       H5B2stat.lo
+  CC       H5B2test.lo
+  CC       H5C.lo
+  CC       H5Cdbg.lo
+  CC       H5Centry.lo
+  CC       H5Cepoch.lo
+  CC       H5Cimage.lo
+  CC       H5Cint.lo
+  CC       H5Clog.lo
+  CC       H5Clog_json.lo
+  CC       H5Clog_trace.lo
+  CC       H5Cprefetched.lo
+  CC       H5Cquery.lo
+  CC       H5Ctag.lo
+  CC       H5Ctest.lo
+  CC       H5CX.lo
+  CC       H5D.lo
+  CC       H5Dbtree.lo
+  CC       H5Dbtree2.lo
+  CC       H5Dchunk.lo
+  CC       H5Dcompact.lo
+  CC       H5Dcontig.lo
+  CC       H5Ddbg.lo
+  CC       H5Ddeprec.lo
+  CC       H5Dearray.lo
+  CC       H5Defl.lo
+  CC       H5Dfarray.lo
+  CC       H5Dfill.lo
+  CC       H5Dint.lo
+  CC       H5Dio.lo
+  CC       H5Dlayout.lo
+  CC       H5Dnone.lo
+  CC       H5Doh.lo
+  CC       H5Dscatgath.lo
+  CC       H5Dselect.lo
+  CC       H5Dsingle.lo
+  CC       H5Dtest.lo
+  CC       H5Dvirtual.lo
+  CC       H5E.lo
+  CC       H5Edeprec.lo
+  CC       H5Eint.lo
+  CC       H5EA.lo
+  CC       H5EAcache.lo
+  CC       H5EAdbg.lo
+  CC       H5EAdblkpage.lo
+  CC       H5EAdblock.lo
+  CC       H5EAhdr.lo
+  CC       H5EAiblock.lo
+  CC       H5EAint.lo
+  CC       H5EAsblock.lo
+  CC       H5EAstat.lo
+  CC       H5EAtest.lo
+  CC       H5ES.lo
+  CC       H5ESevent.lo
+  CC       H5ESint.lo
+  CC       H5ESlist.lo
+  CC       H5F.lo
+  CC       H5Faccum.lo
+  CC       H5Fcwfs.lo
+  CC       H5Fdbg.lo
+  CC       H5Fdeprec.lo
+  CC       H5Fefc.lo
+  CC       H5Ffake.lo
+  CC       H5Fint.lo
+  CC       H5Fio.lo
+  CC       H5Fmount.lo
+  CC       H5Fquery.lo
+  CC       H5Fsfile.lo
+  CC       H5Fspace.lo
+  CC       H5Fsuper.lo
+  CC       H5Fsuper_cache.lo
+  CC       H5Ftest.lo
+  CC       H5FA.lo
+  CC       H5FAcache.lo
+  CC       H5FAdbg.lo
+  CC       H5FAdblock.lo
+  CC       H5FAdblkpage.lo
+  CC       H5FAhdr.lo
+  CC       H5FAint.lo
+  CC       H5FAstat.lo
+  CC       H5FAtest.lo
+  CC       H5FD.lo
+  CC       H5FDcore.lo
+  CC       H5FDfamily.lo
+  CC       H5FDint.lo
+  CC       H5FDlog.lo
+  CC       H5FDmulti.lo
+  CC       H5FDonion.lo
+  CC       H5FDonion_header.lo
+  CC       H5FDonion_history.lo
+  CC       H5FDonion_index.lo
+  CC       H5FDperform.lo
+  CC       H5FDsec2.lo
+  CC       H5FDspace.lo
+  CC       H5FDsplitter.lo
+  CC       H5FDstdio.lo
+  CC       H5FDtest.lo
+  CC       H5FDwindows.lo
+  CC       H5FL.lo
+  CC       H5FO.lo
+  CC       H5FS.lo
+  CC       H5FScache.lo
+  CC       H5FSdbg.lo
+  CC       H5FSint.lo
+  CC       H5FSsection.lo
+  CC       H5FSstat.lo
+  CC       H5FStest.lo
+  CC       H5G.lo
+  CC       H5Gbtree2.lo
+  CC       H5Gcache.lo
+  CC       H5Gcompact.lo
+  CC       H5Gdense.lo
+  CC       H5Gdeprec.lo
+  CC       H5Gent.lo
+  CC       H5Gint.lo
+  CC       H5Glink.lo
+  CC       H5Gloc.lo
+  CC       H5Gname.lo
+  CC       H5Gnode.lo
+  CC       H5Gobj.lo
+  CC       H5Goh.lo
+  CC       H5Groot.lo
+  CC       H5Gstab.lo
+  CC       H5Gtest.lo
+  CC       H5Gtraverse.lo
+  CC       H5HF.lo
+  CC       H5HFbtree2.lo
+  CC       H5HFcache.lo
+  CC       H5HFdbg.lo
+  CC       H5HFdblock.lo
+  CC       H5HFdtable.lo
+  CC       H5HFhdr.lo
+  CC       H5HFhuge.lo
+  CC       H5HFiblock.lo
+  CC       H5HFiter.lo
+  CC       H5HFman.lo
+  CC       H5HFsection.lo
+  CC       H5HFspace.lo
+  CC       H5HFstat.lo
+  CC       H5HFtest.lo
+  CC       H5HFtiny.lo
+  CC       H5HG.lo
+  CC       H5HGcache.lo
+  CC       H5HGdbg.lo
+  CC       H5HGquery.lo
+  CC       H5HL.lo
+  CC       H5HLcache.lo
+  CC       H5HLdbg.lo
+  CC       H5HLint.lo
+  CC       H5HLprfx.lo
+  CC       H5HLdblk.lo
+  CC       H5I.lo
+  CC       H5Idbg.lo
+  CC       H5Iint.lo
+  CC       H5Itest.lo
+  CC       H5L.lo
+  CC       H5Ldeprec.lo
+  CC       H5Lexternal.lo
+  CC       H5Lint.lo
+  CC       H5M.lo
+  CC       H5MF.lo
+  CC       H5MFaggr.lo
+  CC       H5MFdbg.lo
+  CC       H5MFsection.lo
+  CC       H5MM.lo
+  CC       H5O.lo
+  CC       H5Odeprec.lo
+  CC       H5Oainfo.lo
+  CC       H5Oalloc.lo
+  CC       H5Oattr.lo
+  CC       H5Oattribute.lo
+  CC       H5Obogus.lo
+  CC       H5Obtreek.lo
+  CC       H5Ocache.lo
+  CC       H5Ocache_image.lo
+  CC       H5Ochunk.lo
+  CC       H5Ocont.lo
+  CC       H5Ocopy.lo
+  CC       H5Ocopy_ref.lo
+  CC       H5Odbg.lo
+  CC       H5Odrvinfo.lo
+  CC       H5Odtype.lo
+  CC       H5Oefl.lo
+  CC       H5Ofill.lo
+  CC       H5Oflush.lo
+  CC       H5Ofsinfo.lo
+  CC       H5Oginfo.lo
+  CC       H5Oint.lo
+  CC       H5Olayout.lo
+  CC       H5Olinfo.lo
+  CC       H5Olink.lo
+  CC       H5Omessage.lo
+  CC       H5Omtime.lo
+  CC       H5Oname.lo
+  CC       H5Onull.lo
+  CC       H5Opline.lo
+  CC       H5Orefcount.lo
+  CC       H5Osdspace.lo
+  CC       H5Oshared.lo
+  CC       H5Oshmesg.lo
+  CC       H5Ostab.lo
+  CC       H5Otest.lo
+  CC       H5Ounknown.lo
+  CC       H5P.lo
+  CC       H5Pacpl.lo
+  CC       H5Pdapl.lo
+  CC       H5Pdcpl.lo
+  CC       H5Pdeprec.lo
+  CC       H5Pdxpl.lo
+  CC       H5Pencdec.lo
+  CC       H5Pfapl.lo
+  CC       H5Pfcpl.lo
+  CC       H5Pfmpl.lo
+  CC       H5Pgcpl.lo
+  CC       H5Pint.lo
+  CC       H5Plapl.lo
+  CC       H5Plcpl.lo
+  CC       H5Pmapl.lo
+  CC       H5Pmcpl.lo
+  CC       H5Pocpl.lo
+  CC       H5Pocpypl.lo
+  CC       H5Pstrcpl.lo
+  CC       H5Ptest.lo
+  CC       H5PB.lo
+  CC       H5PL.lo
+  CC       H5PLint.lo
+  CC       H5PLpath.lo
+  CC       H5PLplugin_cache.lo
+  CC       H5R.lo
+  CC       H5Rdeprec.lo
+  CC       H5Rint.lo
+  CC       H5UC.lo
+  CC       H5RS.lo
+  CC       H5S.lo
+  CC       H5Sall.lo
+  CC       H5Sdbg.lo
+  CC       H5Sdeprec.lo
+  CC       H5Shyper.lo
+  CC       H5Snone.lo
+  CC       H5Spoint.lo
+  CC       H5Sselect.lo
+  CC       H5Stest.lo
+  CC       H5SL.lo
+  CC       H5SM.lo
+  CC       H5SMbtree2.lo
+  CC       H5SMcache.lo
+  CC       H5SMmessage.lo
+  CC       H5SMtest.lo
+  CC       H5T.lo
+  CC       H5Tarray.lo
+  CC       H5Tbit.lo
+  CC       H5Tcommit.lo
+  CC       H5Tcompound.lo
+  CC       H5Tconv.lo
+  CC       H5Tconv_integer.lo
+../../src/H5Tconv_integer.c: In function 'H5T__conv_ushort__Float16':
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+ 1746 |     H5T_CONV_Xf(USHORT, FLOAT16, unsigned short, H5__Float16, -FLT16_MAX, FLT16_MAX);
+      |     ^~~~~~~~~~~
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1746:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c: In function 'H5T__conv_int__Float16':
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+ 1975 |     H5T_CONV_Xf(INT, FLOAT16, int, H5__Float16, -FLT16_MAX, FLT16_MAX);
+      |     ^~~~~~~~~~~
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:1975:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c: In function 'H5T__conv_uint__Float16':
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+ 2204 |     H5T_CONV_Xf(UINT, FLOAT16, unsigned int, H5__Float16, -FLT16_MAX, FLT16_MAX);
+      |     ^~~~~~~~~~~
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2204:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c: In function 'H5T__conv_long__Float16':
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+ 2433 |     H5T_CONV_Xf(LONG, FLOAT16, long, H5__Float16, -FLT16_MAX, FLT16_MAX);
+      |     ^~~~~~~~~~~
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2433:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c: In function 'H5T__conv_ulong__Float16':
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+ 2662 |     H5T_CONV_Xf(ULONG, FLOAT16, unsigned long, H5__Float16, -FLT16_MAX, FLT16_MAX);
+      |     ^~~~~~~~~~~
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2662:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c: In function 'H5T__conv_llong__Float16':
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+ 2891 |     H5T_CONV_Xf(LLONG, FLOAT16, long long, H5__Float16, -FLT16_MAX, FLT16_MAX);
+      |     ^~~~~~~~~~~
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:2891:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c: In function 'H5T__conv_ullong__Float16':
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+ 3122 |     H5T_CONV_Xf(ULLONG, FLOAT16, unsigned long long, H5__Float16, -FLT16_MAX, FLT16_MAX);
+      |     ^~~~~~~~~~~
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_integer.c:3122:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+  CC       H5Tconv_float.lo
+../../src/H5Tconv_float.c: In function 'H5T__conv_float__Float16':
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+ 1735 |     H5T_CONV_Ff(FLOAT, FLOAT16, float, H5__Float16, -FLT16_MAX, FLT16_MAX);
+      |     ^~~~~~~~~~~
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1735:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c: In function 'H5T__conv_double__Float16':
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+ 1994 |     H5T_CONV_Ff(DOUBLE, FLOAT16, double, H5__Float16, -FLT16_MAX, FLT16_MAX);
+      |     ^~~~~~~~~~~
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:1994:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c: In function 'H5T__conv_ldouble__Float16':
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+ 2258 |     H5T_CONV_Ff(LDOUBLE, FLOAT16, long double, H5__Float16, -FLT16_MAX, FLT16_MAX);
+      |     ^~~~~~~~~~~
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+../../src/H5Tconv_float.c:2258:5: warning: non-standard suffix on floating constant before C23 [-Wc11-c23-compat]
+  CC       H5Tconv_string.lo
+  CC       H5Tconv_bitfield.lo
+  CC       H5Tconv_compound.lo
+  CC       H5Tconv_reference.lo
+  CC       H5Tconv_enum.lo
+  CC       H5Tconv_vlen.lo
+  CC       H5Tconv_array.lo
+  CC       H5Tcset.lo
+  CC       H5Tdbg.lo
+  CC       H5Tdeprec.lo
+  CC       H5Tenum.lo
+  CC       H5Tfields.lo
+  CC       H5Tfixed.lo
+  CC       H5Tfloat.lo
+  CC       H5Tinit_float.lo
+  CC       H5Tnative.lo
+../../src/H5Tnative.c: In function 'H5T__get_native_float':
+../../src/H5Tnative.c:724:23: warning: duplicated 'if' condition [-Wduplicated-cond]
+  724 |         else if (size <= sizeof(long double)) {
+      |                  ~~~~~^~~~~~~~~~~~~~~~~~~~~~
+../../src/H5Tnative.c:720:23: note: previously used here
+  720 |         else if (size <= sizeof(double)) {
+      |                  ~~~~~^~~~~~~~~~~~~~~~~
+  CC       H5Toffset.lo
+  CC       H5Toh.lo
+  CC       H5Topaque.lo
+  CC       H5Torder.lo
+  CC       H5Tref.lo
+  CC       H5Tpad.lo
+  CC       H5Tprecis.lo
+  CC       H5Tstrpad.lo
+  CC       H5Tvisit.lo
+  CC       H5Tvlen.lo
+  CC       H5TS.lo
+  CC       H5VL.lo
+  CC       H5VLcallback.lo
+  CC       H5VLdyn_ops.lo
+  CC       H5VLint.lo
+  CC       H5VLnative.lo
+  CC       H5VLnative_attr.lo
+  CC       H5VLnative_blob.lo
+  CC       H5VLnative_dataset.lo
+  CC       H5VLnative_datatype.lo
+  CC       H5VLnative_file.lo
+  CC       H5VLnative_group.lo
+  CC       H5VLnative_link.lo
+  CC       H5VLnative_introspect.lo
+  CC       H5VLnative_object.lo
+  CC       H5VLnative_token.lo
+  CC       H5VLpassthru.lo
+  CC       H5VLtest.lo
+  CC       H5VM.lo
+  CC       H5WB.lo
+  CC       H5Z.lo
+  CC       H5Zdeflate.lo
+  CC       H5Zfletcher32.lo
+  CC       H5Znbit.lo
+  CC       H5Zshuffle.lo
+  CC       H5Zscaleoffset.lo
+  CC       H5Zszip.lo
+  CC       H5Ztrans.lo
+  CCLD     libhdf5.la
+ld: warning: -undefined suppress is deprecated
+Making all in bin
+Making all in tools
+Making all in lib
+  CC       h5tools.lo
+  CC       h5tools_dump.lo
+  CC       h5tools_str.lo
+../../../tools/lib/h5tools_str.c: In function 'h5tools_str_sprint':
+../../../tools/lib/h5tools_str.c:727:46: warning: duplicated 'if' condition [-Wduplicated-cond]
+  727 |                 else if (sizeof(long double) == nsize) {
+      |                          ~~~~~~~~~~~~~~~~~~~~^~~~~~~~
+../../../tools/lib/h5tools_str.c:720:41: note: previously used here
+  720 |                 else if (sizeof(double) == nsize) {
+      |                          ~~~~~~~~~~~~~~~^~~~~~~~
+  CC       h5tools_utils.lo
+  CC       h5diff.lo
+  CC       h5diff_array.lo
+  CC       h5diff_attr.lo
+  CC       h5diff_dset.lo
+  CC       h5diff_util.lo
+  CC       h5trav.lo
+  CC       h5tools_filters.lo
+  CC       h5tools_ref.lo
+  CC       h5tools_type.lo
+  CC       io_timer.lo
+  CCLD     libh5tools.la
+Making all in src
+Making all in h5diff
+  CC       h5diff_main.o
+  CC       h5diff_common.o
+  CCLD     h5diff
+ld: warning: -s is obsolete
+Making all in h5ls
+  CC       h5ls.o
+  CCLD     h5ls
+ld: warning: -s is obsolete
+Making all in h5dump
+  CC       h5dump_ddl.o
+  CC       h5dump.o
+  CC       h5dump_xml.o
+  CCLD     h5dump
+ld: warning: -s is obsolete
+Making all in misc
+  CC       h5debug.o
+  CC       h5repart.o
+  CC       h5mkgrp.o
+  CC       h5clear.o
+  CC       h5delete.o
+  CCLD     h5debug
+  CCLD     h5repart
+ld: warning: -s is obsolete
+  CCLD     h5mkgrp
+ld: warning: -s is obsolete
+  CCLD     h5clear
+ld: warning: -s is obsolete
+  CCLD     h5delete
+ld: warning: -s is obsolete
+ld: warning: -s is obsolete
+Making all in h5import
+  CC       h5import.o
+  CCLD     h5import
+ld: warning: -s is obsolete
+Making all in h5repack
+  CC       h5repack_main.o
+  CC       h5repack.lo
+../../../../tools/src/h5repack/h5repack.c: In function 'check_options':
+../../../../tools/src/h5repack/h5repack.c:755:82: warning: format '%ld' expects argument of type 'long int', but argument 2 has type 'hsize_t' {aka 'long long unsigned int'} [-Wformat=]
+  755 |             printf("Warning: user block file name missing. Reserving a size of %ld...\n",
+      |                                                                                ~~^
+      |                                                                                  |
+      |                                                                                  long int
+      |                                                                                %lld
+  756 |                    options->ublock_size);
+      |                    ~~~~~~~~~~~~~~~~~~~~                                           
+      |                           |
+      |                           hsize_t {aka long long unsigned int}
+  CC       h5repack_copy.lo
+  CC       h5repack_filters.lo
+  CC       h5repack_opttable.lo
+  CC       h5repack_parse.lo
+  CC       h5repack_refs.lo
+../../../../tools/src/h5repack/h5repack_refs.c: In function 'do_copy_refobjs':
+../../../../tools/src/h5repack/h5repack_refs.c:249:71: warning: 'calloc' sizes specified with 'sizeof' in the earlier argument and not in the later argument [-Wcalloc-transposed-args]
+  249 |                             refbuf = (hdset_reg_ref_t *)calloc(sizeof(hdset_reg_ref_t),
+      |                                                                       ^~~~~~~~~~~~~~~
+../../../../tools/src/h5repack/h5repack_refs.c:249:71: note: earlier argument should specify number of elements, later size of each element
+../../../../tools/src/h5repack/h5repack_refs.c: In function 'copy_refs_attr':
+../../../../tools/src/h5repack/h5repack_refs.c:635:59: warning: 'calloc' sizes specified with 'sizeof' in the earlier argument and not in the later argument [-Wcalloc-transposed-args]
+  635 |                 refbuf = (hdset_reg_ref_t *)calloc(sizeof(hdset_reg_ref_t), (size_t)nelmts); /*init to zero */
+      |                                                           ^~~~~~~~~~~~~~~
+../../../../tools/src/h5repack/h5repack_refs.c:635:59: note: earlier argument should specify number of elements, later size of each element
+  CC       h5repack_verify.lo
+  CCLD     libh5repack.la
+  CCLD     h5repack
+ld: warning: -s is obsolete
+Making all in h5jam
+  CC       h5jam.o
+  CC       h5unjam.o
+  CCLD     h5unjam
+  CCLD     h5jam
+ld: warning: -s is obsolete
+ld: warning: -s is obsolete
+Making all in h5copy
+  CC       h5copy.o
+  CCLD     h5copy
+ld: warning: -s is obsolete
+Making all in h5format_convert
+  CC       h5format_convert.o
+  CCLD     h5format_convert
+ld: warning: -s is obsolete
+Making all in h5stat
+  CC       h5stat.o
+  CCLD     h5stat
+ld: warning: -s is obsolete
+Making all in h5perf
+  CC       sio_perf.o
+  CC       sio_engine.o
+  CCLD     h5perf_serial
+ld: warning: -s is obsolete
+make[3]: Nothing to be done for `all-am'.
+make[2]: Nothing to be done for `all-am'.
+Making all in utils
+Making all in tools
+make[3]: Nothing to be done for `all-am'.
+make[2]: Nothing to be done for `all-am'.
+Making all in .
+make[1]: Nothing to be done for `all-am'.
+Making all in fortran
+Making all in src
+  CC       H5match_types.o
+In file included from /opt/homebrew/Cellar/gcc/15.2.0_1/lib/gcc/current/gcc/aarch64-apple-darwin24/15/include-fixed/_stdio.h:522,
+                 from /opt/homebrew/Cellar/gcc/15.2.0_1/lib/gcc/current/gcc/aarch64-apple-darwin24/15/include-fixed/stdio.h:75,
+                 from ../../../fortran/src/H5match_types.c:30:
+../../../fortran/src/H5match_types.c: In function 'main':
+../../../fortran/src/H5match_types.c:360:42: warning: '%s' directive output may be truncated writing up to 319 bytes into a region of size 51 [-Wformat-truncation=]
+  360 |             snprintf(chrA, sizeof(chrA), "Fortran_REAL_%s", Real_C_TYPES[i]);
+      |                                          ^~~~~~~~~~~~~~~~~
+../../../fortran/src/H5match_types.c:360:56: note: format string is defined here
+  360 |             snprintf(chrA, sizeof(chrA), "Fortran_REAL_%s", Real_C_TYPES[i]);
+      |                                                        ^~
+../../../fortran/src/H5match_types.c:360:13: note: '__builtin_snprintf' output between 14 and 333 bytes into a destination of size 64
+  360 |             snprintf(chrA, sizeof(chrA), "Fortran_REAL_%s", Real_C_TYPES[i]);
+      |             ^~~~~~~~
+../../../fortran/src/H5match_types.c:361:42: warning: '%s' directive output may be truncated writing up to 319 bytes into a region of size 59 [-Wformat-truncation=]
+  361 |             snprintf(chrB, sizeof(chrB), "real_%s_f", Real_C_TYPES[i]);
+      |                                          ^~~~~~~~~~~
+../../../fortran/src/H5match_types.c:361:48: note: format string is defined here
+  361 |             snprintf(chrB, sizeof(chrB), "real_%s_f", Real_C_TYPES[i]);
+      |                                                ^~
+../../../fortran/src/H5match_types.c:361:13: note: '__builtin_snprintf' output between 8 and 327 bytes into a destination of size 64
+  361 |             snprintf(chrB, sizeof(chrB), "real_%s_f", Real_C_TYPES[i]);
+      |             ^~~~~~~~
+  CCLD     H5match_types
+ld: warning: -s is obsolete
+./H5match_types
+
+                      **** HDF5 WARNING ****
+Fortran REAL(KIND=16) is 16 Bytes, but no corresponding C float type exists of that size
+     !!! Fortran interfaces will not be generated for REAL(KIND=16) !!!
+
+/Library/Developer/CommandLineTools/usr/bin/make  all-am
+  PPFC     H5fortran_types.lo
+  PPFC     H5_buildiface.o
+  CC       H5f90kit.lo
+  CC       H5_f.lo
+  CC       H5Af.lo
+  CC       H5Df.lo
+  CC       H5Ef.lo
+  CC       H5Ff.lo
+  CC       H5Gf.lo
+  CC       H5If.lo
+  CC       H5Lf.lo
+  CC       H5Of.lo
+  CC       H5Pf.lo
+  CC       H5Rf.lo
+  CC       H5Sf.lo
+  CC       H5Tf.lo
+  CC       H5Zf.lo
+  FCLD     H5_buildiface
+ld: warning: -s is obsolete
+  PPFC     H5f90global.lo
+  PPFC     H5fortkit.lo
+./H5_buildiface
+  PPFC     H5Fff.lo
+  PPFC     H5Aff.lo
+  PPFC     H5Sff.lo
+  PPFC     H5Eff.lo
+  PPFC     H5ESff.lo
+  PPFC     H5Pff.lo
+  PPFC     H5Iff.lo
+  PPFC     H5Lff.lo
+  PPFC     H5Off.lo
+  PPFC     H5Rff.lo
+  PPFC     H5Tff.lo
+  PPFC     H5VLff.lo
+  PPFC     H5Zff.lo
+  PPFC     H5_ff.lo
+  PPFC     H5Gff.lo
+  PPFC     H5Dff.lo
+  PPFC     H5_gen.lo
+  PPFC     HDF5.lo
+  FCLD     libhdf5_fortran.la
+ld: warning: -undefined suppress is deprecated
+make[2]: Nothing to be done for `all-am'.
+Making install in src
+ ../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib'
+ /bin/sh ../libtool   --mode=install /usr/bin/install -c   libhdf5.la '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib'
+libtool: install: /usr/bin/install -c .libs/libhdf5.310.dylib /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib/libhdf5.310.dylib
+libtool: install: (cd /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib && { ln -s -f libhdf5.310.dylib libhdf5.dylib || { rm -f libhdf5.dylib && ln -s libhdf5.310.dylib libhdf5.dylib; }; })
+libtool: install: /usr/bin/install -c .libs/libhdf5.lai /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib/libhdf5.la
+ ../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/include'
+ /usr/bin/install -c -m 644 ../../src/hdf5.h ../../src/H5api_adpt.h ../../src/H5overflow.h H5pubconf.h ../../src/H5public.h ../../src/H5version.h ../../src/H5Apublic.h ../../src/H5ACpublic.h ../../src/H5Cpublic.h ../../src/H5Dpublic.h ../../src/H5Epubgen.h ../../src/H5Epublic.h ../../src/H5ESpublic.h ../../src/H5Fpublic.h ../../src/H5FDpublic.h ../../src/H5FDcore.h ../../src/H5FDdirect.h ../../src/H5FDfamily.h ../../src/H5FDhdfs.h ../../src/H5FDlog.h ../../src/H5FDmirror.h ../../src/H5FDmpi.h ../../src/H5FDmpio.h ../../src/H5FDmulti.h ../../src/H5FDonion.h ../../src/H5FDros3.h ../../src/H5FDsec2.h ../../src/H5FDsplitter.h ../../src/H5FDstdio.h ../../src/H5FDsubfiling/H5FDsubfiling.h ../../src/H5FDsubfiling/H5FDioc.h ../../src/H5FDwindows.h ../../src/H5Gpublic.h ../../src/H5Ipublic.h ../../src/H5Lpublic.h ../../src/H5Mpublic.h ../../src/H5MMpublic.h ../../src/H5Opublic.h ../../src/H5Ppublic.h ../../src/H5PLextern.h '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/include'
+ /usr/bin/install -c -m 644 ../../src/H5PLpublic.h ../../src/H5Rpublic.h ../../src/H5Spublic.h ../../src/H5Tpublic.h ../../src/H5VLconnector.h ../../src/H5VLconnector_passthru.h ../../src/H5VLnative.h ../../src/H5VLpassthru.h ../../src/H5VLpublic.h ../../src/H5Zpublic.h ../../src/H5ESdevelop.h ../../src/H5FDdevelop.h ../../src/H5Idevelop.h ../../src/H5Ldevelop.h ../../src/H5Tdevelop.h ../../src/H5TSdevelop.h ../../src/H5Zdevelop.h '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/include'
+ ../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib'
+ /usr/bin/install -c -m 644 libhdf5.settings '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib'
+Making install in bin
+ ../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+ /usr/bin/install -c h5redeploy '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+make[2]: Nothing to be done for `install-data-am'.
+Making install in tools
+Making install in lib
+make[3]: Nothing to be done for `install-exec-am'.
+make[3]: Nothing to be done for `install-data-am'.
+Making install in src
+Making install in h5diff
+ ../../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+  /bin/sh ../../../libtool   --mode=install /usr/bin/install -c h5diff '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+libtool: install: /usr/bin/install -c .libs/h5diff /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5diff
+make[4]: Nothing to be done for `install-data-am'.
+Making install in h5ls
+ ../../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+  /bin/sh ../../../libtool   --mode=install /usr/bin/install -c h5ls '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+libtool: install: /usr/bin/install -c .libs/h5ls /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5ls
+make[4]: Nothing to be done for `install-data-am'.
+Making install in h5dump
+ ../../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+  /bin/sh ../../../libtool   --mode=install /usr/bin/install -c h5dump '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+libtool: install: /usr/bin/install -c .libs/h5dump /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5dump
+make[4]: Nothing to be done for `install-data-am'.
+Making install in misc
+ ../../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+  /bin/sh ../../../libtool   --mode=install /usr/bin/install -c h5debug h5repart h5mkgrp h5clear h5delete '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+libtool: install: /usr/bin/install -c .libs/h5debug /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5debug
+libtool: install: /usr/bin/install -c .libs/h5repart /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5repart
+libtool: install: /usr/bin/install -c .libs/h5mkgrp /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5mkgrp
+libtool: install: /usr/bin/install -c .libs/h5clear /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5clear
+libtool: install: /usr/bin/install -c .libs/h5delete /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5delete
+make[4]: Nothing to be done for `install-data-am'.
+Making install in h5import
+ ../../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+  /bin/sh ../../../libtool   --mode=install /usr/bin/install -c h5import '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+libtool: install: /usr/bin/install -c .libs/h5import /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5import
+make[4]: Nothing to be done for `install-data-am'.
+Making install in h5repack
+ ../../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+  /bin/sh ../../../libtool   --mode=install /usr/bin/install -c h5repack '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+libtool: install: /usr/bin/install -c .libs/h5repack /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5repack
+make[4]: Nothing to be done for `install-data-am'.
+Making install in h5jam
+ ../../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+  /bin/sh ../../../libtool   --mode=install /usr/bin/install -c h5jam h5unjam '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+libtool: install: /usr/bin/install -c .libs/h5jam /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5jam
+libtool: install: /usr/bin/install -c .libs/h5unjam /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5unjam
+make[4]: Nothing to be done for `install-data-am'.
+Making install in h5copy
+ ../../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+  /bin/sh ../../../libtool   --mode=install /usr/bin/install -c h5copy '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+libtool: install: /usr/bin/install -c .libs/h5copy /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5copy
+make[4]: Nothing to be done for `install-data-am'.
+Making install in h5format_convert
+ ../../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+  /bin/sh ../../../libtool   --mode=install /usr/bin/install -c h5format_convert '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+libtool: install: /usr/bin/install -c .libs/h5format_convert /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5format_convert
+make[4]: Nothing to be done for `install-data-am'.
+Making install in h5stat
+ ../../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+  /bin/sh ../../../libtool   --mode=install /usr/bin/install -c h5stat '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+libtool: install: /usr/bin/install -c .libs/h5stat /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5stat
+make[4]: Nothing to be done for `install-data-am'.
+Making install in h5perf
+ ../../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+  /bin/sh ../../../libtool   --mode=install /usr/bin/install -c h5perf_serial '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+libtool: install: /usr/bin/install -c .libs/h5perf_serial /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin/h5perf_serial
+make[4]: Nothing to be done for `install-data-am'.
+make[4]: Nothing to be done for `install-exec-am'.
+make[4]: Nothing to be done for `install-data-am'.
+make[3]: Nothing to be done for `install-exec-am'.
+make[3]: Nothing to be done for `install-data-am'.
+Making install in utils
+Making install in tools
+make[4]: Nothing to be done for `install-exec-am'.
+make[4]: Nothing to be done for `install-data-am'.
+ ../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+ /usr/bin/install -c subfiling_vfd/h5fuse '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/bin'
+make[3]: Nothing to be done for `install-data-am'.
+Making install in .
+make[2]: Nothing to be done for `install-exec-am'.
+make[2]: Nothing to be done for `install-data-am'.
+Making install in fortran
+Making install in src
+/Library/Developer/CommandLineTools/usr/bin/make  install-am
+ ../../../bin/install-sh -c -d '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib'
+ /bin/sh ../../libtool   --mode=install /usr/bin/install -c   libhdf5_fortran.la '/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib'
+libtool: install: /usr/bin/install -c .libs/libhdf5_fortran.310.dylib /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib/libhdf5_fortran.310.dylib
+libtool: install: (cd /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib && { ln -s -f libhdf5_fortran.310.dylib libhdf5_fortran.dylib || { rm -f libhdf5_fortran.dylib && ln -s libhdf5_fortran.310.dylib libhdf5_fortran.dylib; }; })
+libtool: install: /usr/bin/install -c .libs/libhdf5_fortran.lai /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/lib/libhdf5_fortran.la
+cp ../../fortran/src/H5f90i_gen.h /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/include/.
+cp ../../../fortran/src/H5f90i.h /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/include/.
+cp ../../fortran/src/H5config_f.inc /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/hdf5-1_14_6/include/.
+make[3]: Nothing to be done for `install-exec-am'.
+make[3]: Nothing to be done for `install-data-am'.

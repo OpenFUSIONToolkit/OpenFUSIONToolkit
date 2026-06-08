@@ -1,0 +1,25 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/include/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/ext_libs/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/base/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/grid/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/lin_alg/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/fem/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/physics/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/utilities/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/python/wrappers/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/python/OpenFUSIONToolkit/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/python/OpenFUSIONToolkit/TokaMaker/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/python/OpenFUSIONToolkit/ThinCurr/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/python/OpenFUSIONToolkit/Marklin/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/examples/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/examples/TokaMaker/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/examples/ThinCurr/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/examples/Marklin/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build_release/bin/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

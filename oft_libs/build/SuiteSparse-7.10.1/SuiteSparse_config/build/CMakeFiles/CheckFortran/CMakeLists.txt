@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 4.2.3)
+set(CMAKE_MODULE_PATH "/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config/cmake_modules;/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config/cmake_modules;/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config/../lib/cmake")
+set(_CMAKE_CHECK_ENABLED_LANGUAGES "C")
+set(CMAKE_C_COMPILER "/opt/homebrew/bin/gcc-15")
+set(CMAKE_C_COMPILER_ID "GNU")
+set(CMAKE_C_COMPILER_LOADED 1)
+set(CMAKE_C_COMPILER_VERSION "15.2.0")
+
+project(CheckFortran LANGUAGES Fortran)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/result.cmake" "set(CMAKE_Fortran_COMPILER \"${CMAKE_Fortran_COMPILER}\")
+")

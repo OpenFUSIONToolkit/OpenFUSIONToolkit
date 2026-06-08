@@ -1,0 +1,762 @@
+( cd SuiteSparse_config && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp
+( cd AMD && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex*
+( cd COLAMD && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex* timelog.m
+( cd SPEX && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex*
+rm -f Tcov/*.o Tcov/*.bbg Tcov/*.da Tcov/*.gcov Tcov/*.gcda Tcov/*gcno
+rm -f Tcov/tcov_for_lu  Tcov/spex_demo_lu_extended Tcov/*.out Tcov/*.a Tcov/out Tcov/tcov_for_lu2 Tcov/tcov_for_other
+rm -f Tcov/tcov_for_update Tcov/out Tcov/Mats4Tcov/SPEX_Update/mat.txt
+rm -f -r Tcov/SPEX_*.c Tcov/spex_*.c Tcov/*.dSYM
+rm -f -r Tcov/tcov_for_cholesky
+( cd Mongoose  && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Version/*.tmp MATLAB/*.o MATLAB/*.mex*
+rm -f -r Doc/*.out Doc/*.aux Doc/*.log Doc/*.bbl Doc/*.blg Doc/*.toc Doc/*.idx
+( cd CAMD && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex*
+( cd BTF && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex*
+( cd KLU && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex*
+( cd Tcov && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f klutest klultest *.out klu_*.c user_*.c btf_*.c *.o *.gcda \
+            klu.c *.gcno *.gcov gmon.out
+( cd LDL && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex*
+( cd CCOLAMD && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex*
+( cd UMFPACK && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex* timelog.m
+rm -f -rf MATLAB/*/*.o MATLAB/*/*.mex*
+( cd Tcov && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f umf*.c *.o ut_?? *.gcno *.gcda *.gcov debug.amd *.umf A500 *.out
+( cd CHOLMOD && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex* timelog.m
+rm -f -rf MATLAB/*/*.o MATLAB/*/*.mex*
+( cd Tcov && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f di_test dl_test si_test sl_test di_demo dl_demo si_demo sl_demo di_read dl_read si_read sl_read
+rm -f *.c.gcov *.out
+rm -f leak zz_*.c z_*.c *.a l_*.c zl_*.c cov.sort
+rm -f -r *.profile ../build/T
+rm -f temp*.mtx timelog.m l_*.cu
+rm -f si_demo.c sl_demo.c
+rm -f di_demo.c dl_demo.c
+rm -f ui_*.c ul_*.c u_*.c n_*.c
+rm -f -r *.so* *.a *.dll *.dylib *.dSYM
+rm -f -r *.o *.obj *.ln *.bb *.bbg *.da *.tcov *.gcov gmon.out *.bak *.d *.gcda *.gcno *.aux *.bbl *.blg *.log *.toc *.dvi *.lof *.lot
+( cd CSparse && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex* timelog.m
+rm -f -rf MATLAB/*/*.o MATLAB/*/*.mex*
+( cd Tcov && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f *.o *.bbg *.da *.gcov *.gcda *.gcno
+rm -f cs_demo1 cs_demo2 *.out *.a cs_demo3 cstcov_test cov.sort
+rm -f -r cs_*.c *.dSYM csparse_version.c
+( cd CXSparse && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex* timelog.m
+rm -f -rf MATLAB/*/*.o MATLAB/*/*.mex*
+( cd Tcov && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f *.o *.bbg *.da *.gcov *.gcda *.gcno
+rm -f *.out *.a cov.sort
+rm -f cs_demo1_di cs_demo2_di cs_demo3_di cstcov_test_di
+rm -f cs_demo1_dl cs_demo2_dl cs_demo3_dl cstcov_test_dl
+rm -f cs_demo1_ci cs_demo2_ci cs_demo3_ci cstcov_test_ci
+rm -f cs_demo1_cl cs_demo2_cl cs_demo3_cl cstcov_test_cl
+rm -f cs_idemo cs_ldemo
+rm -f -r cs_*.c *.dSYM cxsparse_version.c
+( cd RBio && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp RBio/*.o RBio/*.mex* timelog.m temp.rb
+( cd Tcov ; /Library/Developer/CommandLineTools/usr/bin/make clean )
+rm -f temp*.rb *.gcov *.o *.gcda *.gcno
+( cd SPQR && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex* timelog.m
+rm -f -rf MATLAB/*/*.o MATLAB/*/*.mex*
+rm -f -rf Demo/o_* Demo/A.mtx  Demo/X.mtx Demo/gpu_results.txt
+( cd Tcov && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -r *.o *.obj *.ln *.bb *.bbg *.da *.tcov *.gcov gmon.out *.bak *.d *.gcda *.gcno *.aux *.bbl *.blg *.log *.toc *.dvi *.lof *.lot
+rm -f qrtest qrtest32 qrtest_out.txt pfile tfile cov.out 
+rm -f gpuqrengine_demo troll.m qrdemo_gpu gpu_results.txt X.mtx
+rm -f qrtest_out32.txt qrtest_out1.txt
+rm -f -r *.so* *.a *.dll *.dylib *.dSYM
+rm -f MATLAB_Tools/*/*.mex* MATLAB_Tools/*/*/*.mex*
+rm -f MATLAB_Tools/*/*.o    MATLAB_Tools/*/*/*.o
+rm -f -r Example/build/*
+( cd GraphBLAS && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -rf build/* Demo/*.out Demo/complex_demo_out*.m Tcov/log.txt
+rm -rf Config/*.tmp Source/control.m4
+rm -rf Doc/html/* Doc/*.tmp
+rm -rf JITpackage/build/*
+( cd GraphBLAS && /Library/Developer/CommandLineTools/usr/bin/make distclean )
+rm -rf build/*
+( cd test/tcov ; /Library/Developer/CommandLineTools/usr/bin/make distclean )
+rm -f -rf tmp/*
+( cd @GrB/private ; /Library/Developer/CommandLineTools/usr/bin/make distclean )
+rm -f -rf *.o *.mex*
+( cd Test && /Library/Developer/CommandLineTools/usr/bin/make distclean )
+rm -f -r *.o *.obj *.out
+rm -f *.mex* errlog*.txt spok/*.mex* log.txt fprint.txt spok/*/*.mex*
+( cd Tcov && /Library/Developer/CommandLineTools/usr/bin/make distclean )
+rm -f *.o *.d
+rm -f *.mex* tmp*/* errlog*.txt grbstat.mat fprint.txt
+rm -f libgraphblas_tcov.* log_GB_mex_test21.txt
+( cd Doc  && /Library/Developer/CommandLineTools/usr/bin/make distclean )
+rm -f -r *.out *.aux *.log *.bbl *.blg *.toc
+( cd ParU && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* Config/*.tmp MATLAB/*.o MATLAB/*.mex* timelog.m
+rm -f -rf MATLAB/*/*.o MATLAB/*/*.mex*
+( cd Tcov && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f cov.out parutest_out.txt *.o *.gcno  *.gcov *.gcda gmon.out
+rm -f paru_brutal_test paru_c_test paru_quick_test
+( cd LAGraph && /Library/Developer/CommandLineTools/usr/bin/make purge )
+rm -f -rf build/* config/*.tmp
+rm -f -r include/* bin/* lib/*
+( cd build && cmake -DCMAKE_INSTALL_PREFIX=/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5 -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON -DBUILD_SHARED_LIBS:BOOL=OFF -DBUILD_STATIC_LIBS:BOOL=ON -DBLAS_ROOT:PATH=/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/OpenBLAS-0_3_30 -DBLA_VENDOR:STRING=OpenBLAS .. && cmake --build . --config Release -j2 )
+-- Building SuiteSparse_config version: v7.10.1 (Mar 6, 2025)
+-- The C compiler identification is GNU 15.2.0
+-- Checking whether C compiler has -isysroot
+-- Checking whether C compiler has -isysroot - yes
+-- Checking whether C compiler supports OSX deployment target flag
+-- Checking whether C compiler supports OSX deployment target flag - yes
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /opt/homebrew/bin/gcc-15 - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Source:           /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config 
+-- Build:            /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config/build 
+-- Install lib:      lib
+-- Install include:  include/suitesparse
+-- Install bin:      bin
+-- Install pkg-file: lib
+-- Install rpath:    $ORIGIN
+-- Build   rpath:    
+-- Build type:       Release 
+-- Looking for a Fortran compiler
+-- Looking for a Fortran compiler - /opt/homebrew/bin/gfortran-15
+-- The Fortran compiler identification is GNU 15.2.0
+-- Checking whether Fortran compiler has -isysroot
+-- Checking whether Fortran compiler has -isysroot - yes
+-- Checking whether Fortran compiler supports OSX deployment target flag
+-- Checking whether Fortran compiler supports OSX deployment target flag - yes
+-- Detecting Fortran compiler ABI info
+-- Detecting Fortran compiler ABI info - done
+-- Check for working Fortran compiler: /opt/homebrew/bin/gfortran-15 - skipped
+-- Fortran:          /opt/homebrew/bin/gfortran-15
+-- Looking for a CUDA compiler
+-- Looking for a CUDA compiler - NOTFOUND
+-- CUDA:             not found
+-- CUDA:             not enabled
+-- Detecting Fortran/C Interface
+-- Detecting Fortran/C Interface - Found GLOBAL and MODULE mangling
+-- C to Fortran calling protocol: 
+--     SUITESPARSE_HAS_FORTRAN  : ON
+--     FortranCInterface_GLOBAL_MACRO  : (name,NAME) name##_
+--     FortranCInterface_GLOBAL__MACRO : (name,NAME) name##_
+-- Found OpenMP_C: -fopenmp (found version "4.5")
+-- Found OpenMP: TRUE (found version "4.5") found components: C
+-- SuiteSparse_config has OpenMP: ON
+-- Looking for clock_gettime
+-- Looking for clock_gettime - found
+-- Using clock_gettime without librt
+-- Looking for 32-BLAS: OpenBLAS
+-- Looking for Fortran sgemm
+-- Looking for Fortran sgemm - found
+-- Found BLAS: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/OpenBLAS-0_3_30/lib/libopenblas.a
+-- Found OpenBLAS 32-bit BLAS
+-- Specific BLAS: OpenBLAS found: TRUE
+-- BLAS integer size: 4
+-- Looking for fmax
+-- Looking for fmax - found
+-- OpenMP C libraries:      /opt/homebrew/Cellar/gcc/15.2.0_1/lib/gcc/current/libgomp.dylib 
+-- OpenMP C include:         
+-- OpenMP C flags:          -fopenmp 
+-- BLAS libraries:      /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/OpenBLAS-0_3_30/lib/libopenblas.a 
+-- BLAS linker flags:    
+-- BLAS include:         
+-- ------------------------------------------------------------------------
+-- SuiteSparse CMAKE report for: SuiteSparseConfig
+-- ------------------------------------------------------------------------
+-- inside common SuiteSparse root:  OFF
+-- install in SuiteSparse/lib and SuiteSparse/include: OFF
+-- build type:           Release
+-- BUILD_SHARED_LIBS:    OFF
+-- BUILD_STATIC_LIBS:    ON
+-- C compiler:           /opt/homebrew/bin/gcc-15 
+-- C flags:              
+-- C++ compiler:         
+-- C++ flags:            
+-- C Flags release:      -O3 -DNDEBUG 
+-- C++ Flags release:     
+-- Fortran compiler:     /opt/homebrew/bin/gfortran-15 
+-- compile definitions:  BLAS_OpenBLAS
+-- BLAS integer:         int32_t
+-- ------------------------------------------------------------------------
+-- Configuring done (6.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config/build
+[ 50%] Building C object CMakeFiles/SuiteSparseConfig_static.dir/SuiteSparse_config.c.o
+[100%] Linking C static library libsuitesparseconfig.a
+[100%] Built target SuiteSparseConfig_static
+( cd build && cmake --install . )
+-- Install configuration: "Release"
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/libsuitesparseconfig.a
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/include/suitesparse/SuiteSparse_config.h
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparseBLAS.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparseBLAS32.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparseBLAS64.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparseLAPACK.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparsePolicy.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparseReport.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse/SuiteSparse__thread.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse_config/SuiteSparse_configTargets.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse_config/SuiteSparse_configTargets-release.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse_config/SuiteSparse_configConfig.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/SuiteSparse_config/SuiteSparse_configConfigVersion.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/pkgconfig/SuiteSparse_config.pc
+( cd build && cmake -DCMAKE_INSTALL_PREFIX=/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5 -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON -DBUILD_SHARED_LIBS:BOOL=OFF -DBUILD_STATIC_LIBS:BOOL=ON .. && cmake --build . --config Release -j2 )
+-- Building AMD version: v3.3.3 (June 20, 2024)
+-- The C compiler identification is GNU 15.2.0
+-- Checking whether C compiler has -isysroot
+-- Checking whether C compiler has -isysroot - yes
+-- Checking whether C compiler supports OSX deployment target flag
+-- Checking whether C compiler supports OSX deployment target flag - yes
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /opt/homebrew/bin/gcc-15 - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Source:           /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD 
+-- Build:            /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/build 
+-- Install lib:      lib
+-- Install include:  include/suitesparse
+-- Install bin:      bin
+-- Install pkg-file: lib
+-- Install rpath:    $ORIGIN
+-- Build   rpath:    
+-- Build type:       Release 
+-- Looking for a Fortran compiler
+-- Looking for a Fortran compiler - /opt/homebrew/bin/gfortran-15
+-- The Fortran compiler identification is GNU 15.2.0
+-- Checking whether Fortran compiler has -isysroot
+-- Checking whether Fortran compiler has -isysroot - yes
+-- Checking whether Fortran compiler supports OSX deployment target flag
+-- Checking whether Fortran compiler supports OSX deployment target flag - yes
+-- Detecting Fortran compiler ABI info
+-- Detecting Fortran compiler ABI info - done
+-- Check for working Fortran compiler: /opt/homebrew/bin/gfortran-15 - skipped
+-- Fortran:          /opt/homebrew/bin/gfortran-15
+-- Looking for a CUDA compiler
+-- Looking for a CUDA compiler - NOTFOUND
+-- CUDA:             not found
+-- CUDA:             not enabled
+-- Found OpenMP_C: -fopenmp (found version "4.5")
+-- Found OpenMP: TRUE (found version "4.5") found components: C
+-- SuiteSparse_config version: 7.10.1
+-- SuiteSparse_config include: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config
+-- SuiteSparse_config library: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config/build/libsuitesparseconfig.a
+-- SuiteSparse_config static:  /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config/build/libsuitesparseconfig.a
+-- Skipping the demos in AMD/Demo
+-- ------------------------------------------------------------------------
+-- SuiteSparse CMAKE report for: AMD
+-- ------------------------------------------------------------------------
+-- inside common SuiteSparse root:  OFF
+-- install in SuiteSparse/lib and SuiteSparse/include: OFF
+-- build type:           Release
+-- BUILD_SHARED_LIBS:    OFF
+-- BUILD_STATIC_LIBS:    ON
+-- C compiler:           /opt/homebrew/bin/gcc-15 
+-- C flags:              
+-- C++ compiler:         
+-- C++ flags:            
+-- C Flags release:      -O3 -DNDEBUG 
+-- C++ Flags release:     
+-- Fortran compiler:     /opt/homebrew/bin/gfortran-15 
+-- compile definitions:  
+-- ------------------------------------------------------------------------
+-- Configuring done (2.4s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/build
+[  7%] Building C object CMakeFiles/AMD_static.dir/Source/amd_1.c.o
+[  7%] Building Fortran object CMakeFiles/AMD_static.dir/Source/amd.f.o
+[ 10%] Building C object CMakeFiles/AMD_static.dir/Source/amd_2.c.o
+[ 14%] Building C object CMakeFiles/AMD_static.dir/Source/amd_aat.c.o
+[ 17%] Building C object CMakeFiles/AMD_static.dir/Source/amd_control.c.o
+[ 21%] Building C object CMakeFiles/AMD_static.dir/Source/amd_defaults.c.o
+[ 25%] Building C object CMakeFiles/AMD_static.dir/Source/amd_dump.c.o
+[ 28%] Building C object CMakeFiles/AMD_static.dir/Source/amd_info.c.o
+[ 32%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l1.c.o
+[ 35%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l2.c.o
+[ 39%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l_aat.c.o
+[ 42%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l_control.c.o
+[ 46%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l_defaults.c.o
+[ 50%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l_dump.c.o
+[ 53%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l_info.c.o
+[ 57%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l_order.c.o
+[ 60%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l_post_tree.c.o
+[ 64%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l_postorder.c.o
+[ 67%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l_preprocess.c.o
+[ 71%] Building C object CMakeFiles/AMD_static.dir/Source/amd_l_valid.c.o
+[ 75%] Building C object CMakeFiles/AMD_static.dir/Source/amd_order.c.o
+[ 78%] Building C object CMakeFiles/AMD_static.dir/Source/amd_post_tree.c.o
+[ 82%] Building C object CMakeFiles/AMD_static.dir/Source/amd_postorder.c.o
+[ 85%] Building C object CMakeFiles/AMD_static.dir/Source/amd_preprocess.c.o
+[ 89%] Building C object CMakeFiles/AMD_static.dir/Source/amd_valid.c.o
+[ 92%] Building C object CMakeFiles/AMD_static.dir/Source/amd_version.c.o
+[ 96%] Building Fortran object CMakeFiles/AMD_static.dir/Source/amdbar.f.o
+[100%] Linking C static library libamd.a
+[100%] Built target AMD_static
+( cd build && cmake --install . )
+-- Install configuration: "Release"
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/libamd.a
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/include/suitesparse/amd.h
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/AMD/AMDTargets.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/AMD/AMDTargets-release.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/AMD/AMDConfig.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/AMD/AMDConfigVersion.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/pkgconfig/AMD.pc
+( cd build && cmake -DCMAKE_INSTALL_PREFIX=/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5 -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON -DBUILD_SHARED_LIBS:BOOL=OFF -DBUILD_STATIC_LIBS:BOOL=ON -DBLAS_ROOT:PATH=/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/OpenBLAS-0_3_30 -DBLA_VENDOR:STRING=OpenBLAS -DUMFPACK_USE_CHOLMOD:BOOL=OFF -DCMAKE_SHARED_LINKER_FLAGS:STRING=-lgfortran .. && cmake --build . --config Release -j2 )
+-- Building UMFPACK version: v6.3.5 (Sept 23, 2024)
+-- The C compiler identification is GNU 15.2.0
+-- Checking whether C compiler has -isysroot
+-- Checking whether C compiler has -isysroot - yes
+-- Checking whether C compiler supports OSX deployment target flag
+-- Checking whether C compiler supports OSX deployment target flag - yes
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /opt/homebrew/bin/gcc-15 - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Source:           /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/UMFPACK 
+-- Build:            /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/UMFPACK/build 
+-- Install lib:      lib
+-- Install include:  include/suitesparse
+-- Install bin:      bin
+-- Install pkg-file: lib
+-- Install rpath:    $ORIGIN
+-- Build   rpath:    
+-- Build type:       Release 
+-- Looking for a Fortran compiler
+-- Looking for a Fortran compiler - /opt/homebrew/bin/gfortran-15
+-- The Fortran compiler identification is GNU 15.2.0
+-- Checking whether Fortran compiler has -isysroot
+-- Checking whether Fortran compiler has -isysroot - yes
+-- Checking whether Fortran compiler supports OSX deployment target flag
+-- Checking whether Fortran compiler supports OSX deployment target flag - yes
+-- Detecting Fortran compiler ABI info
+-- Detecting Fortran compiler ABI info - done
+-- Check for working Fortran compiler: /opt/homebrew/bin/gfortran-15 - skipped
+-- Fortran:          /opt/homebrew/bin/gfortran-15
+-- Looking for a CUDA compiler
+-- Looking for a CUDA compiler - NOTFOUND
+-- CUDA:             not found
+-- CUDA:             not enabled
+-- Found OpenMP_C: -fopenmp (found version "4.5")
+-- Found OpenMP: TRUE (found version "4.5") found components: C
+-- SuiteSparse_config version: 7.10.1
+-- SuiteSparse_config include: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config
+-- SuiteSparse_config library: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config/build/libsuitesparseconfig.a
+-- SuiteSparse_config static:  /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config/build/libsuitesparseconfig.a
+-- AMD version: 3.3.3
+-- AMD include: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/Include
+-- AMD library: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/build/libamd.a
+-- AMD static:  /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/build/libamd.a
+-- Looking for 32-BLAS: OpenBLAS
+-- Looking for Fortran sgemm
+-- Looking for Fortran sgemm - found
+-- Found BLAS: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/OpenBLAS-0_3_30/lib/libopenblas.a
+-- Found OpenBLAS 32-bit BLAS
+-- Specific BLAS: OpenBLAS found: TRUE
+-- BLAS integer size: 4
+-- CHOLMOD not found or not requested
+-- Looking for fmax
+-- Looking for fmax - found
+-- BLAS libraries:      /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/OpenBLAS-0_3_30/lib/libopenblas.a
+-- BLAS include:        
+-- BLAS linker flags:   
+-- Performing Test HAVE_UNKNOWN_PRAGMAS
+-- Performing Test HAVE_UNKNOWN_PRAGMAS - Success
+-- Performing Test HAVE_PRAGMA_GCC_IVDEP
+-- Performing Test HAVE_PRAGMA_GCC_IVDEP - Success
+-- Performing Test HAVE_PRAGMA_GCC_NOVECTOR
+-- Performing Test HAVE_PRAGMA_GCC_NOVECTOR - Success
+-- Skipping the demos in UMFPACK/Demo
+-- ------------------------------------------------------------------------
+-- SuiteSparse CMAKE report for: UMFPACK
+-- ------------------------------------------------------------------------
+-- inside common SuiteSparse root:  OFF
+-- install in SuiteSparse/lib and SuiteSparse/include: OFF
+-- build type:           Release
+-- BUILD_SHARED_LIBS:    OFF
+-- BUILD_STATIC_LIBS:    ON
+-- C compiler:           /opt/homebrew/bin/gcc-15 
+-- C flags:              
+-- C++ compiler:         
+-- C++ flags:            
+-- C Flags release:      -O3 -DNDEBUG 
+-- C++ Flags release:     
+-- Fortran compiler:     /opt/homebrew/bin/gfortran-15 
+-- compile definitions:  BLAS_OpenBLAS
+-- BLAS integer:         int32_t
+-- ------------------------------------------------------------------------
+-- Configuring done (3.1s)
+-- Generating done (0.1s)
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_SHARED_LINKER_FLAGS
+
+
+-- Build files have been written to: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/UMFPACK/build
+[  0%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_assemble_fixq.c.o
+[  0%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_assemble.c.o
+[  0%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_blas3_update.c.o
+[  1%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_build_tuples.c.o
+[  1%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_create_element.c.o
+[  1%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_dump.c.o
+[  2%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_extend_front.c.o
+[  2%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_garbage_collection.c.o
+[  2%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_get_memory.c.o
+[  2%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_grow_front.c.o
+[  3%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_init_front.c.o
+[  3%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_kernel.c.o
+[  3%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_kernel_init.c.o
+[  4%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_kernel_wrapup.c.o
+[  4%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_lhsolve.c.o
+[  4%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_local_search.c.o
+[  4%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_lsolve.c.o
+[  5%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_ltsolve.c.o
+[  5%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_mem_alloc_element.c.o
+[  5%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_mem_alloc_head_block.c.o
+[  6%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_mem_alloc_tail_block.c.o
+[  6%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_mem_free_tail_block.c.o
+[  6%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_mem_init_memoryspace.c.o
+[  7%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_report_vector.c.o
+[  7%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_row_search.c.o
+[  7%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_scale.c.o
+[  7%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_scale_column.c.o
+[  8%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_set_stats.c.o
+[  8%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_solve.c.o
+[  8%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_start_front.c.o
+[  9%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_store_lu.c.o
+[  9%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_store_lu_drop.c.o
+[  9%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_symbolic_usage.c.o
+[  9%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_transpose.c.o
+[ 10%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_triplet_map_nox.c.o
+[ 10%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_triplet_map_x.c.o
+[ 10%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_triplet_nomap_nox.c.o
+[ 11%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_triplet_nomap_x.c.o
+[ 11%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_tuple_lengths.c.o
+[ 11%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_uhsolve.c.o
+[ 11%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_usolve.c.o
+[ 12%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_utsolve.c.o
+[ 12%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_valid_numeric.c.o
+[ 12%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_di_valid_symbolic.c.o
+[ 13%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_assemble.c.o
+[ 13%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_assemble_fixq.c.o
+[ 13%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_blas3_update.c.o
+[ 14%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_build_tuples.c.o
+[ 14%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_create_element.c.o
+[ 14%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_dump.c.o
+[ 14%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_extend_front.c.o
+[ 15%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_garbage_collection.c.o
+[ 15%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_get_memory.c.o
+[ 15%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_grow_front.c.o
+[ 16%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_init_front.c.o
+[ 16%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_kernel.c.o
+[ 16%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_kernel_init.c.o
+[ 16%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_kernel_wrapup.c.o
+[ 17%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_lhsolve.c.o
+[ 17%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_local_search.c.o
+[ 17%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_lsolve.c.o
+[ 18%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_ltsolve.c.o
+[ 18%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_mem_alloc_element.c.o
+[ 18%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_mem_alloc_head_block.c.o
+[ 19%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_mem_alloc_tail_block.c.o
+[ 19%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_mem_free_tail_block.c.o
+[ 19%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_mem_init_memoryspace.c.o
+[ 19%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_report_vector.c.o
+[ 20%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_row_search.c.o
+[ 20%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_scale.c.o
+[ 20%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_scale_column.c.o
+[ 21%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_set_stats.c.o
+[ 21%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_solve.c.o
+[ 21%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_start_front.c.o
+[ 21%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_store_lu.c.o
+[ 22%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_store_lu_drop.c.o
+[ 22%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_symbolic_usage.c.o
+[ 22%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_transpose.c.o
+[ 23%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_triplet_map_nox.c.o
+[ 23%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_triplet_map_x.c.o
+[ 23%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_triplet_nomap_nox.c.o
+[ 23%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_triplet_nomap_x.c.o
+[ 24%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_tuple_lengths.c.o
+[ 24%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_uhsolve.c.o
+[ 24%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_usolve.c.o
+[ 25%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_utsolve.c.o
+[ 25%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_valid_numeric.c.o
+[ 25%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_dl_valid_symbolic.c.o
+[ 26%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_i_analyze.c.o
+[ 26%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_i_apply_order.c.o
+[ 26%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_i_cholmod.c.o
+[ 26%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_i_colamd.c.o
+[ 27%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_i_free.c.o
+[ 27%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_i_fsize.c.o
+[ 27%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_i_is_permutation.c.o
+[ 28%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_i_malloc.c.o
+[ 28%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_i_realloc.c.o
+[ 28%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_i_report_perm.c.o
+[ 28%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_i_singletons.c.o
+[ 29%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_l_analyze.c.o
+[ 29%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_l_apply_order.c.o
+[ 29%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_l_cholmod.c.o
+[ 30%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_l_colamd.c.o
+[ 30%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_l_free.c.o
+[ 30%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_l_fsize.c.o
+[ 30%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_l_is_permutation.c.o
+[ 31%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_l_malloc.c.o
+[ 31%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_l_realloc.c.o
+[ 31%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_l_report_perm.c.o
+[ 32%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_l_singletons.c.o
+[ 32%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_assemble.c.o
+[ 32%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_assemble_fixq.c.o
+[ 33%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_blas3_update.c.o
+[ 33%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_build_tuples.c.o
+[ 33%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_create_element.c.o
+[ 33%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_dump.c.o
+[ 34%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_extend_front.c.o
+[ 34%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_garbage_collection.c.o
+[ 34%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_get_memory.c.o
+[ 35%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_grow_front.c.o
+[ 35%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_init_front.c.o
+[ 35%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_kernel.c.o
+[ 35%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_kernel_init.c.o
+[ 36%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_kernel_wrapup.c.o
+[ 36%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_lhsolve.c.o
+[ 36%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_local_search.c.o
+[ 37%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_lsolve.c.o
+[ 37%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_ltsolve.c.o
+[ 37%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_mem_alloc_element.c.o
+[ 38%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_mem_alloc_head_block.c.o
+[ 38%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_mem_alloc_tail_block.c.o
+[ 38%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_mem_free_tail_block.c.o
+[ 38%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_mem_init_memoryspace.c.o
+[ 39%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_report_vector.c.o
+[ 39%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_row_search.c.o
+[ 39%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_scale.c.o
+[ 40%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_scale_column.c.o
+[ 40%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_set_stats.c.o
+[ 40%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_solve.c.o
+[ 40%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_start_front.c.o
+[ 41%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_store_lu.c.o
+[ 41%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_store_lu_drop.c.o
+[ 41%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_symbolic_usage.c.o
+[ 42%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_transpose.c.o
+[ 42%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_triplet_map_nox.c.o
+[ 42%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_triplet_map_x.c.o
+[ 42%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_triplet_nomap_nox.c.o
+[ 43%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_triplet_nomap_x.c.o
+[ 43%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_tuple_lengths.c.o
+[ 43%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_uhsolve.c.o
+[ 44%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_usolve.c.o
+[ 44%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_utsolve.c.o
+[ 44%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_valid_numeric.c.o
+[ 45%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zi_valid_symbolic.c.o
+[ 45%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_assemble.c.o
+[ 45%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_assemble_fixq.c.o
+[ 45%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_blas3_update.c.o
+[ 46%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_build_tuples.c.o
+[ 46%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_create_element.c.o
+[ 46%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_dump.c.o
+[ 47%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_extend_front.c.o
+[ 47%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_garbage_collection.c.o
+[ 47%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_get_memory.c.o
+[ 47%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_grow_front.c.o
+[ 48%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_init_front.c.o
+[ 48%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_kernel_init.c.o
+[ 48%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_kernel.c.o
+[ 49%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_kernel_wrapup.c.o
+[ 49%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_lhsolve.c.o
+[ 49%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_local_search.c.o
+[ 50%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_lsolve.c.o
+[ 50%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_ltsolve.c.o
+[ 50%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_mem_alloc_element.c.o
+[ 50%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_mem_alloc_head_block.c.o
+[ 51%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_mem_alloc_tail_block.c.o
+[ 51%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_mem_init_memoryspace.c.o
+[ 51%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_mem_free_tail_block.c.o
+[ 52%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_report_vector.c.o
+[ 52%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_row_search.c.o
+[ 52%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_scale.c.o
+[ 52%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_scale_column.c.o
+[ 53%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_set_stats.c.o
+[ 53%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_solve.c.o
+[ 53%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_start_front.c.o
+[ 54%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_store_lu.c.o
+[ 54%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_store_lu_drop.c.o
+[ 54%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_symbolic_usage.c.o
+[ 54%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_transpose.c.o
+[ 55%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_triplet_map_nox.c.o
+[ 55%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_triplet_map_x.c.o
+[ 55%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_triplet_nomap_nox.c.o
+[ 56%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_triplet_nomap_x.c.o
+[ 56%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_tuple_lengths.c.o
+[ 56%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_uhsolve.c.o
+[ 57%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_usolve.c.o
+[ 57%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_utsolve.c.o
+[ 57%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_valid_numeric.c.o
+[ 57%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umf_zl_valid_symbolic.c.o
+[ 58%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_col_to_triplet.c.o
+[ 58%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_copy_numeric.c.o
+[ 58%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_copy_symbolic.c.o
+[ 59%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_defaults.c.o
+[ 59%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_deserialize_numeric.c.o
+[ 59%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_deserialize_symbolic.c.o
+[ 59%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_free_numeric.c.o
+[ 60%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_free_symbolic.c.o
+[ 60%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_get_determinant.c.o
+[ 60%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_get_lunz.c.o
+[ 61%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_get_numeric.c.o
+[ 61%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_get_symbolic.c.o
+[ 61%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_load_numeric.c.o
+[ 61%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_load_symbolic.c.o
+[ 62%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_numeric.c.o
+[ 62%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_qsymbolic.c.o
+[ 62%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_report_control.c.o
+[ 63%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_report_info.c.o
+[ 63%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_report_matrix.c.o
+[ 63%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_report_numeric.c.o
+[ 64%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_report_perm.c.o
+[ 64%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_report_status.c.o
+[ 64%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_report_symbolic.c.o
+[ 64%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_report_triplet.c.o
+[ 65%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_report_vector.c.o
+[ 65%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_save_numeric.c.o
+[ 65%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_save_symbolic.c.o
+[ 66%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_scale.c.o
+[ 66%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_serialize_numeric.c.o
+[ 66%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_serialize_symbolic.c.o
+[ 66%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_solve.c.o
+[ 66%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_transpose.c.o
+[ 67%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_symbolic.c.o
+[ 67%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_triplet_to_col.c.o
+[ 68%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_di_wsolve.c.o
+[ 68%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_col_to_triplet.c.o
+[ 68%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_copy_numeric.c.o
+[ 69%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_copy_symbolic.c.o
+[ 69%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_defaults.c.o
+[ 69%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_deserialize_numeric.c.o
+[ 69%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_deserialize_symbolic.c.o
+[ 70%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_free_numeric.c.o
+[ 70%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_free_symbolic.c.o
+[ 70%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_get_determinant.c.o
+[ 71%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_get_lunz.c.o
+[ 71%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_get_numeric.c.o
+[ 71%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_get_symbolic.c.o
+[ 71%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_load_numeric.c.o
+[ 72%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_load_symbolic.c.o
+[ 72%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_numeric.c.o
+[ 72%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_qsymbolic.c.o
+[ 73%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_report_control.c.o
+[ 73%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_report_info.c.o
+[ 73%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_report_matrix.c.o
+[ 73%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_report_numeric.c.o
+[ 74%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_report_perm.c.o
+[ 74%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_report_status.c.o
+[ 74%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_report_symbolic.c.o
+[ 75%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_report_triplet.c.o
+[ 75%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_report_vector.c.o
+[ 75%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_save_numeric.c.o
+[ 76%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_save_symbolic.c.o
+[ 76%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_scale.c.o
+[ 76%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_serialize_numeric.c.o
+[ 76%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_serialize_symbolic.c.o
+[ 76%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_symbolic.c.o
+[ 77%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_solve.c.o
+[ 77%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_transpose.c.o
+[ 78%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_triplet_to_col.c.o
+[ 78%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_dl_wsolve.c.o
+[ 78%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_gn_tictoc.c.o
+[ 78%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_gn_timer.c.o
+[ 79%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_version.c.o
+[ 79%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_col_to_triplet.c.o
+[ 79%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_copy_numeric.c.o
+[ 80%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_copy_symbolic.c.o
+[ 80%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_defaults.c.o
+[ 80%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_deserialize_numeric.c.o
+[ 80%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_deserialize_symbolic.c.o
+[ 81%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_free_numeric.c.o
+[ 81%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_free_symbolic.c.o
+[ 81%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_get_determinant.c.o
+[ 82%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_get_lunz.c.o
+[ 82%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_get_numeric.c.o
+[ 82%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_get_symbolic.c.o
+[ 83%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_load_numeric.c.o
+[ 83%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_load_symbolic.c.o
+[ 83%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_numeric.c.o
+[ 83%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_qsymbolic.c.o
+[ 84%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_report_control.c.o
+[ 84%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_report_info.c.o
+[ 84%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_report_matrix.c.o
+[ 85%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_report_numeric.c.o
+[ 85%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_report_perm.c.o
+[ 85%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_report_status.c.o
+[ 85%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_report_symbolic.c.o
+[ 86%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_report_triplet.c.o
+[ 86%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_report_vector.c.o
+[ 86%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_save_numeric.c.o
+[ 87%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_save_symbolic.c.o
+[ 87%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_scale.c.o
+[ 87%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_serialize_numeric.c.o
+[ 88%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_serialize_symbolic.c.o
+[ 88%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_solve.c.o
+[ 88%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_symbolic.c.o
+[ 88%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_transpose.c.o
+[ 89%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_wsolve.c.o
+[ 89%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zi_triplet_to_col.c.o
+[ 89%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_col_to_triplet.c.o
+[ 90%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_copy_numeric.c.o
+[ 90%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_copy_symbolic.c.o
+[ 90%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_defaults.c.o
+[ 90%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_deserialize_numeric.c.o
+[ 91%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_deserialize_symbolic.c.o
+[ 91%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_free_numeric.c.o
+[ 91%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_free_symbolic.c.o
+[ 91%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_get_lunz.c.o
+[ 92%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_get_determinant.c.o
+[ 92%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_get_numeric.c.o
+[ 92%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_get_symbolic.c.o
+[ 93%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_load_numeric.c.o
+[ 93%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_load_symbolic.c.o
+[ 93%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_numeric.c.o
+[ 94%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_qsymbolic.c.o
+[ 94%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_report_control.c.o
+[ 94%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_report_info.c.o
+[ 95%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_report_matrix.c.o
+[ 95%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_report_numeric.c.o
+[ 95%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_report_perm.c.o
+[ 95%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_report_status.c.o
+[ 96%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_report_symbolic.c.o
+[ 96%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_report_triplet.c.o
+[ 96%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_report_vector.c.o
+[ 97%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_save_numeric.c.o
+[ 97%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_save_symbolic.c.o
+[ 97%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_scale.c.o
+[ 97%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_serialize_numeric.c.o
+[ 98%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_serialize_symbolic.c.o
+[ 98%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_solve.c.o
+[ 98%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_symbolic.c.o
+[ 99%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_transpose.c.o
+[ 99%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_triplet_to_col.c.o
+[ 99%] Building C object CMakeFiles/UMFPACK_static.dir/Source2/umfpack_zl_wsolve.c.o
+[100%] Linking C static library libumfpack.a
+[100%] Built target UMFPACK_static
+( cd build && cmake --install . )
+-- Install configuration: "Release"
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/libumfpack.a
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/include/suitesparse/umfpack.h
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/UMFPACK/UMFPACKTargets.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/UMFPACK/UMFPACKTargets-release.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/UMFPACK/UMFPACKConfig.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/UMFPACK/UMFPACKConfigVersion.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/pkgconfig/UMFPACK.pc

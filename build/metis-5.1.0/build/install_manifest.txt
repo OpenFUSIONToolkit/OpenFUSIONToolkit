@@ -1,0 +1,8 @@
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/include/metis.h
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/lib/libmetis.a
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/gpmetis
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/ndmetis
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/mpmetis
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/m2gmetis
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/graphchk
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/cmpfillin

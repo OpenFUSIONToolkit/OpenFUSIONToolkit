@@ -1,0 +1,22 @@
+# The fortran modules provided by this target.
+provides
+ axi_green.mod
+ diagnostic.mod
+ grad_shaf_prof_phys.mod
+ gs_eq.mod
+ mhd_utils.mod
+ oft_gs.mod
+ oft_gs_fit.mod
+ oft_gs_profiles.mod
+ oft_gs_td.mod
+ oft_gs_util.mod
+ oft_scalar_inits.mod
+ oft_vector_inits.mod
+ taylor.mod
+ thin_wall.mod
+ thin_wall_hodlr.mod
+ thin_wall_solvers.mod
+ tracing.mod
+ tracing_2d.mod
+ xmhd.mod
+ xmhd_lag.mod

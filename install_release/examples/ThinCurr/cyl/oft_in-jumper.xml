@@ -1,0 +1,11 @@
+<oft>
+  <thincurr>
+    <eta>1.257E-5</eta>
+    <icoils>
+      <coil_set>
+        <coil scale="1.0">1.1, 0.25</coil>
+        <coil scale="1.0">1.1, -0.25</coil>
+      </coil_set>
+    </icoils>
+  </thincurr>
+</oft>

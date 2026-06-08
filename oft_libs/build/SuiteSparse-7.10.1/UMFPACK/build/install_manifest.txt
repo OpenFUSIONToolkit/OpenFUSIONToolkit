@@ -1,0 +1,7 @@
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/libumfpack.a
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/include/suitesparse/umfpack.h
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/UMFPACK/UMFPACKTargets.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/UMFPACK/UMFPACKTargets-release.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/UMFPACK/UMFPACKConfig.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/cmake/UMFPACK/UMFPACKConfigVersion.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/UMFPACK-6_3_5/lib/pkgconfig/UMFPACK.pc

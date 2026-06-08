@@ -1,0 +1,144 @@
+CMake Deprecation Warning at CMakeLists.txt:1 (cmake_minimum_required):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+
+
+-- The C compiler identification is GNU 15.2.0
+-- The Fortran compiler identification is GNU 15.2.0
+-- Checking whether C compiler has -isysroot
+-- Checking whether C compiler has -isysroot - yes
+-- Checking whether C compiler supports OSX deployment target flag
+-- Checking whether C compiler supports OSX deployment target flag - yes
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /opt/homebrew/bin/gcc-15 - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Checking whether Fortran compiler has -isysroot
+-- Checking whether Fortran compiler has -isysroot - yes
+-- Checking whether Fortran compiler supports OSX deployment target flag
+-- Checking whether Fortran compiler supports OSX deployment target flag - yes
+-- Detecting Fortran compiler ABI info
+-- Detecting Fortran compiler ABI info - done
+-- Check for working Fortran compiler: /opt/homebrew/bin/gfortran-15 - skipped
+-- Found BLAS: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/OpenBLAS-0_3_30/lib/libopenblas.a
+-- Found LAPACK: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/OpenBLAS-0_3_30/lib/libopenblas.a
+-- Configuration summary for arpack-ng-3.9.1:
+   -- prefix: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1
+   -- MPI: OFF (ICB provided )
+   -- ICB: OFF
+   -- INTERFACE64: 0
+   -- FC:      /opt/homebrew/bin/gfortran-15
+   -- FCFLAGS: -O3 -fallow-argument-mismatch
+   -- BLAS:
+      -- link:    /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/OpenBLAS-0_3_30/lib/libopenblas.a
+   -- LAPACK:
+      -- link:    /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/OpenBLAS-0_3_30/lib/libopenblas.a
+-- Configuring done (1.3s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/arpack-ng-3.9.1/build
+[  2%] Building Fortran object CMakeFiles/arpack.dir/UTIL/icnteq.f.o
+[  2%] Building Fortran object CMakeFiles/arpack.dir/UTIL/icopy.f.o
+[  4%] Building Fortran object CMakeFiles/arpack.dir/UTIL/iswap.f.o
+[  4%] Building Fortran object CMakeFiles/arpack.dir/UTIL/iset.f.o
+[  5%] Building Fortran object CMakeFiles/arpack.dir/UTIL/ivout.f.o
+[  7%] Building Fortran object CMakeFiles/arpack.dir/UTIL/second_NONE.f.o
+[  8%] Building Fortran object CMakeFiles/arpack.dir/UTIL/svout.f.o
+[  9%] Building Fortran object CMakeFiles/arpack.dir/UTIL/smout.f.o
+[ 10%] Building Fortran object CMakeFiles/arpack.dir/UTIL/dvout.f.o
+[ 11%] Building Fortran object CMakeFiles/arpack.dir/UTIL/dmout.f.o
+[ 12%] Building Fortran object CMakeFiles/arpack.dir/UTIL/cvout.f.o
+[ 15%] Building Fortran object CMakeFiles/arpack.dir/UTIL/cmout.f.o
+[ 15%] Building Fortran object CMakeFiles/arpack.dir/UTIL/zvout.f.o
+[ 16%] Building Fortran object CMakeFiles/arpack.dir/UTIL/zmout.f.o
+[ 17%] Building Fortran object CMakeFiles/arpack.dir/SRC/ccdotc.f.o
+[ 18%] Building Fortran object CMakeFiles/arpack.dir/SRC/cgetv0.f.o
+[ 20%] Building Fortran object CMakeFiles/arpack.dir/SRC/cnaitr.f.o
+[ 21%] Building Fortran object CMakeFiles/arpack.dir/SRC/cnapps.f.o
+[ 22%] Building Fortran object CMakeFiles/arpack.dir/SRC/cnaup2.f.o
+[ 23%] Building Fortran object CMakeFiles/arpack.dir/SRC/cnaupd.f.o
+[ 24%] Building Fortran object CMakeFiles/arpack.dir/SRC/cneigh.f.o
+[ 25%] Building Fortran object CMakeFiles/arpack.dir/SRC/cneupd.f.o
+[ 27%] Building Fortran object CMakeFiles/arpack.dir/SRC/cngets.f.o
+[ 28%] Building Fortran object CMakeFiles/arpack.dir/SRC/csortc.f.o
+[ 30%] Building Fortran object CMakeFiles/arpack.dir/SRC/cstatn.f.o
+[ 30%] Building Fortran object CMakeFiles/arpack.dir/SRC/dgetv0.f.o
+[ 31%] Building Fortran object CMakeFiles/arpack.dir/SRC/dnaitr.f.o
+[ 32%] Building Fortran object CMakeFiles/arpack.dir/SRC/dnapps.f.o
+[ 34%] Building Fortran object CMakeFiles/arpack.dir/SRC/dnaup2.f.o
+[ 35%] Building Fortran object CMakeFiles/arpack.dir/SRC/dnaupd.f.o
+[ 36%] Building Fortran object CMakeFiles/arpack.dir/SRC/dnconv.f.o
+[ 37%] Building Fortran object CMakeFiles/arpack.dir/SRC/dneigh.f.o
+[ 38%] Building Fortran object CMakeFiles/arpack.dir/SRC/dneupd.f.o
+[ 40%] Building Fortran object CMakeFiles/arpack.dir/SRC/dngets.f.o
+[ 41%] Building Fortran object CMakeFiles/arpack.dir/SRC/dsaitr.f.o
+[ 42%] Building Fortran object CMakeFiles/arpack.dir/SRC/dsapps.f.o
+[ 43%] Building Fortran object CMakeFiles/arpack.dir/SRC/dsaup2.f.o
+[ 44%] Building Fortran object CMakeFiles/arpack.dir/SRC/dsaupd.f.o
+[ 45%] Building Fortran object CMakeFiles/arpack.dir/SRC/dsconv.f.o
+[ 47%] Building Fortran object CMakeFiles/arpack.dir/SRC/dseigt.f.o
+[ 48%] Building Fortran object CMakeFiles/arpack.dir/SRC/dsesrt.f.o
+[ 49%] Building Fortran object CMakeFiles/arpack.dir/SRC/dseupd.f.o
+[ 50%] Building Fortran object CMakeFiles/arpack.dir/SRC/dsgets.f.o
+[ 51%] Building Fortran object CMakeFiles/arpack.dir/SRC/dsortc.f.o
+[ 52%] Building Fortran object CMakeFiles/arpack.dir/SRC/dsortr.f.o
+[ 54%] Building Fortran object CMakeFiles/arpack.dir/SRC/dstatn.f.o
+[ 55%] Building Fortran object CMakeFiles/arpack.dir/SRC/dstats.f.o
+[ 56%] Building Fortran object CMakeFiles/arpack.dir/SRC/dstqrb.f.o
+[ 57%] Building Fortran object CMakeFiles/arpack.dir/SRC/sgetv0.f.o
+[ 58%] Building Fortran object CMakeFiles/arpack.dir/SRC/snaitr.f.o
+[ 60%] Building Fortran object CMakeFiles/arpack.dir/SRC/snapps.f.o
+[ 61%] Building Fortran object CMakeFiles/arpack.dir/SRC/snaup2.f.o
+[ 62%] Building Fortran object CMakeFiles/arpack.dir/SRC/snaupd.f.o
+[ 63%] Building Fortran object CMakeFiles/arpack.dir/SRC/snconv.f.o
+[ 65%] Building Fortran object CMakeFiles/arpack.dir/SRC/sneupd.f.o
+[ 65%] Building Fortran object CMakeFiles/arpack.dir/SRC/sneigh.f.o
+[ 67%] Building Fortran object CMakeFiles/arpack.dir/SRC/sngets.f.o
+[ 68%] Building Fortran object CMakeFiles/arpack.dir/SRC/ssaitr.f.o
+[ 69%] Building Fortran object CMakeFiles/arpack.dir/SRC/ssapps.f.o
+[ 70%] Building Fortran object CMakeFiles/arpack.dir/SRC/ssaup2.f.o
+[ 71%] Building Fortran object CMakeFiles/arpack.dir/SRC/ssaupd.f.o
+[ 72%] Building Fortran object CMakeFiles/arpack.dir/SRC/ssconv.f.o
+[ 74%] Building Fortran object CMakeFiles/arpack.dir/SRC/sseigt.f.o
+[ 75%] Building Fortran object CMakeFiles/arpack.dir/SRC/ssesrt.f.o
+[ 76%] Building Fortran object CMakeFiles/arpack.dir/SRC/sseupd.f.o
+[ 77%] Building Fortran object CMakeFiles/arpack.dir/SRC/ssgets.f.o
+[ 78%] Building Fortran object CMakeFiles/arpack.dir/SRC/ssortc.f.o
+[ 80%] Building Fortran object CMakeFiles/arpack.dir/SRC/ssortr.f.o
+[ 81%] Building Fortran object CMakeFiles/arpack.dir/SRC/sstatn.f.o
+[ 82%] Building Fortran object CMakeFiles/arpack.dir/SRC/sstats.f.o
+[ 83%] Building Fortran object CMakeFiles/arpack.dir/SRC/sstqrb.f.o
+[ 84%] Building Fortran object CMakeFiles/arpack.dir/SRC/zgetv0.f.o
+[ 85%] Building Fortran object CMakeFiles/arpack.dir/SRC/znaitr.f.o
+[ 87%] Building Fortran object CMakeFiles/arpack.dir/SRC/znapps.f.o
+[ 88%] Building Fortran object CMakeFiles/arpack.dir/SRC/znaup2.f.o
+[ 89%] Building Fortran object CMakeFiles/arpack.dir/SRC/znaupd.f.o
+[ 90%] Building Fortran object CMakeFiles/arpack.dir/SRC/zneigh.f.o
+[ 91%] Building Fortran object CMakeFiles/arpack.dir/SRC/zneupd.f.o
+[ 92%] Building Fortran object CMakeFiles/arpack.dir/SRC/zngets.f.o
+[ 94%] Building Fortran object CMakeFiles/arpack.dir/SRC/zsortc.f.o
+[ 95%] Building Fortran object CMakeFiles/arpack.dir/SRC/zstatn.f.o
+[ 96%] Building Fortran object CMakeFiles/arpack.dir/SRC/zzdotc.f.o
+[ 97%] Building Fortran object CMakeFiles/arpack.dir/dbgini.f.o
+[ 98%] Building Fortran object CMakeFiles/arpack.dir/staini.f.o
+[100%] Linking Fortran static library libarpack.a
+[100%] Built target arpack
+[100%] Built target arpack
+Install the project...
+-- Install configuration: "Release"
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/libarpack.a
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/pkgconfig/arpack.pc
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/debug.h
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/debugF90.h
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/stat.h
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/statF90.h
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/arpackdef.h
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/arpackicb.h
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/cmake/arpackng/arpackngTargets.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/cmake/arpackng/arpackngTargets-release.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/cmake/arpackng/arpackng-config.cmake
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/cmake/arpackng/arpackng-config-version.cmake

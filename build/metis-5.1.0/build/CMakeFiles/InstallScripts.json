@@ -1,0 +1,10 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/build/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/build/include/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/build/libmetis/cmake_install.cmake",
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/build/programs/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

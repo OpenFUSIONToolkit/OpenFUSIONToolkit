@@ -1,0 +1,1 @@
+No pull request can be accepted unless you first sign the Contributor License Agreement (see the PDF agreement in the `Contributor_License` folder). Sign the PDF and email it to me (digital signature OK).  Submit all PRs to the dev2 branch only.

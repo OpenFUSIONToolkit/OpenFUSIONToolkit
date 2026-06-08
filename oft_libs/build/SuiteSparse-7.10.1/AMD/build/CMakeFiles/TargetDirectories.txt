@@ -1,0 +1,7 @@
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/build/CMakeFiles/AMD_static.dir
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/build/CMakeFiles/edit_cache.dir
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/build/CMakeFiles/rebuild_cache.dir
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/build/CMakeFiles/list_install_components.dir
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/build/CMakeFiles/install.dir
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/build/CMakeFiles/install/local.dir
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/AMD/build/CMakeFiles/install/strip.dir

@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/build/SuiteSparse-7.10.1/SuiteSparse_config/build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

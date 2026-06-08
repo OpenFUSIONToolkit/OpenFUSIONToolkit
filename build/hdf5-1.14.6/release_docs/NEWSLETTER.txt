@@ -1,0 +1,22 @@
+HDF5 version 1.14.6 released on 2025-02-05
+
+This is a maintenance release with a few changes and updates:
+----------------------------------------------------------------------------
+
+* Reverted a change to the library's handling of UTF-8 file names. A change was
+  made in the HDF5 1.14.4 release to address some issues with the library's
+  handling of code pages and file paths on Windows. This change introduced
+  other issues with handling UTF-8 file names that caused breakage for software
+  using the 1.14.4 and 1.14.5 releases of HDF5.
+
+  The change has been reverted for this release and will be addressed
+  differently in a future release.
+
+  If you use 1.14.4 or 1.14.5 and are happy with how UTF-8 file names are
+  handled in those versions, do not update to 1.14.6. 
+
+* Updated CMake find_package(ZLIB) defaults to find most system zlib installs.
+
+----------------------------------------------------------------------------
+Please see the full release notes for detailed information regarding this release,
+including a detailed list of changes.

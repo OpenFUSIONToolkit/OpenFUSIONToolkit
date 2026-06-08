@@ -1,0 +1,12 @@
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/libarpack.a
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/pkgconfig/arpack.pc
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/debug.h
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/debugF90.h
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/stat.h
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/statF90.h
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/arpackdef.h
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/include/arpack/arpackicb.h
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/cmake/arpackng/arpackngTargets.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/cmake/arpackng/arpackngTargets-release.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/cmake/arpackng/arpackng-config.cmake
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/oft_libs/arpack-ng-3_9_1/lib/cmake/arpackng/arpackng-config-version.cmake

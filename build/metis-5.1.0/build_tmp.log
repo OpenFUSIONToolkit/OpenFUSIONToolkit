@@ -1,0 +1,181 @@
+CMake Deprecation Warning at CMakeLists.txt:1 (cmake_minimum_required):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+
+
+-- The C compiler identification is GNU 15.2.0
+-- The CXX compiler identification is GNU 15.2.0
+-- Checking whether C compiler has -isysroot
+-- Checking whether C compiler has -isysroot - yes
+-- Checking whether C compiler supports OSX deployment target flag
+-- Checking whether C compiler supports OSX deployment target flag - yes
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /opt/homebrew/bin/gcc-15 - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Checking whether CXX compiler has -isysroot
+-- Checking whether CXX compiler has -isysroot - yes
+-- Checking whether CXX compiler supports OSX deployment target flag
+-- Checking whether CXX compiler supports OSX deployment target flag - yes
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /opt/homebrew/bin/g++-15 - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- Looking for execinfo.h
+-- Looking for execinfo.h - found
+-- Looking for getline
+-- Looking for getline - found
+-- checking for thread-local storage - found
+-- Configuring done (1.6s)
+-- Generating done (0.1s)
+-- Build files have been written to: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/build
+[  2%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/b64.c.o
+[  2%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/blas.c.o
+[  3%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/csr.c.o
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/GKlib/csr.c: In function 'gk_csr_Normalize':
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/GKlib/csr.c:1344:14: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1344 |         else if (norm == 1)
+      |              ^~
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/GKlib/csr.c:1346:11: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1346 |           for (j=ptr[i]; j<ptr[i+1]; j++)
+      |           ^~~
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/GKlib/csr.c:1371:14: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+ 1371 |         else if (norm == 1)
+      |              ^~
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/GKlib/csr.c:1373:11: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+ 1373 |           for (j=ptr[i]; j<ptr[i+1]; j++)
+      |           ^~~
+[  4%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/error.c.o
+[  5%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/evaluate.c.o
+[  6%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/fkvkselect.c.o
+[  7%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/fs.c.o
+[  9%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/getopt.c.o
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/GKlib/getopt.c: In function 'gk_getopt_internal':
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/GKlib/getopt.c:343:5: warning: this 'if' clause does not guard... [-Wmisleading-indentation]
+  343 |     if (gk_optind == 0)
+      |     ^~
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/GKlib/getopt.c:345:7: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'if'
+  345 |       optstring = gk_getopt_initialize (argc, argv, optstring);
+      |       ^~~~~~~~~
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/GKlib/getopt.c:700:9: warning: this 'else' clause does not guard... [-Wmisleading-indentation]
+  700 |         else
+      |         ^~~~
+/Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/build/metis-5.1.0/GKlib/getopt.c:703:11: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'else'
+  703 |           nextchar = NULL;
+      |           ^~~~~~~~
+[ 10%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/gkregex.c.o
+[ 11%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/graph.c.o
+[ 12%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/htable.c.o
+[ 13%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/io.c.o
+[ 14%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/itemsets.c.o
+[ 15%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/mcore.c.o
+[ 17%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/memory.c.o
+[ 18%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/omp.c.o
+[ 19%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/pdb.c.o
+[ 20%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/pqueue.c.o
+[ 21%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/random.c.o
+[ 22%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/rw.c.o
+[ 23%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/seq.c.o
+[ 25%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/sort.c.o
+[ 26%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/string.c.o
+[ 27%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/timers.c.o
+[ 28%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/tokenizer.c.o
+[ 29%] Building C object libmetis/CMakeFiles/metis.dir/__/GKlib/util.c.o
+[ 30%] Building C object libmetis/CMakeFiles/metis.dir/auxapi.c.o
+[ 31%] Building C object libmetis/CMakeFiles/metis.dir/balance.c.o
+[ 32%] Building C object libmetis/CMakeFiles/metis.dir/bucketsort.c.o
+[ 34%] Building C object libmetis/CMakeFiles/metis.dir/checkgraph.c.o
+[ 35%] Building C object libmetis/CMakeFiles/metis.dir/coarsen.c.o
+[ 36%] Building C object libmetis/CMakeFiles/metis.dir/compress.c.o
+[ 37%] Building C object libmetis/CMakeFiles/metis.dir/contig.c.o
+[ 38%] Building C object libmetis/CMakeFiles/metis.dir/debug.c.o
+[ 39%] Building C object libmetis/CMakeFiles/metis.dir/fm.c.o
+[ 40%] Building C object libmetis/CMakeFiles/metis.dir/fortran.c.o
+[ 42%] Building C object libmetis/CMakeFiles/metis.dir/frename.c.o
+[ 43%] Building C object libmetis/CMakeFiles/metis.dir/gklib.c.o
+[ 44%] Building C object libmetis/CMakeFiles/metis.dir/graph.c.o
+[ 45%] Building C object libmetis/CMakeFiles/metis.dir/initpart.c.o
+[ 46%] Building C object libmetis/CMakeFiles/metis.dir/kmetis.c.o
+[ 47%] Building C object libmetis/CMakeFiles/metis.dir/kwayfm.c.o
+[ 48%] Building C object libmetis/CMakeFiles/metis.dir/kwayrefine.c.o
+[ 50%] Building C object libmetis/CMakeFiles/metis.dir/mcutil.c.o
+[ 51%] Building C object libmetis/CMakeFiles/metis.dir/mesh.c.o
+[ 52%] Building C object libmetis/CMakeFiles/metis.dir/meshpart.c.o
+[ 53%] Building C object libmetis/CMakeFiles/metis.dir/minconn.c.o
+[ 54%] Building C object libmetis/CMakeFiles/metis.dir/mincover.c.o
+[ 55%] Building C object libmetis/CMakeFiles/metis.dir/mmd.c.o
+[ 56%] Building C object libmetis/CMakeFiles/metis.dir/ometis.c.o
+[ 57%] Building C object libmetis/CMakeFiles/metis.dir/options.c.o
+[ 59%] Building C object libmetis/CMakeFiles/metis.dir/parmetis.c.o
+[ 60%] Building C object libmetis/CMakeFiles/metis.dir/pmetis.c.o
+[ 61%] Building C object libmetis/CMakeFiles/metis.dir/refine.c.o
+[ 62%] Building C object libmetis/CMakeFiles/metis.dir/separator.c.o
+[ 63%] Building C object libmetis/CMakeFiles/metis.dir/sfm.c.o
+[ 64%] Building C object libmetis/CMakeFiles/metis.dir/srefine.c.o
+[ 65%] Building C object libmetis/CMakeFiles/metis.dir/stat.c.o
+[ 67%] Building C object libmetis/CMakeFiles/metis.dir/timing.c.o
+[ 68%] Building C object libmetis/CMakeFiles/metis.dir/util.c.o
+[ 69%] Building C object libmetis/CMakeFiles/metis.dir/wspace.c.o
+[ 70%] Linking C static library libmetis.a
+[ 70%] Built target metis
+[ 72%] Building C object programs/CMakeFiles/gpmetis.dir/gpmetis.c.o
+[ 72%] Building C object programs/CMakeFiles/ndmetis.dir/ndmetis.c.o
+[ 73%] Building C object programs/CMakeFiles/ndmetis.dir/cmdline_ndmetis.c.o
+[ 75%] Building C object programs/CMakeFiles/gpmetis.dir/cmdline_gpmetis.c.o
+[ 76%] Building C object programs/CMakeFiles/ndmetis.dir/io.c.o
+[ 77%] Building C object programs/CMakeFiles/gpmetis.dir/io.c.o
+[ 79%] Building C object programs/CMakeFiles/gpmetis.dir/stat.c.o
+[ 79%] Building C object programs/CMakeFiles/ndmetis.dir/smbfactor.c.o
+[ 80%] Linking C executable gpmetis
+[ 81%] Linking C executable ndmetis
+ld: warning: search path '/home/karypis/local/lib' not found
+[ 81%] Built target gpmetis
+ld: warning: search path '/home/karypis/local/lib' not found
+[ 82%] Building C object programs/CMakeFiles/mpmetis.dir/mpmetis.c.o
+[ 82%] Built target ndmetis
+[ 84%] Building C object programs/CMakeFiles/m2gmetis.dir/m2gmetis.c.o
+[ 85%] Building C object programs/CMakeFiles/mpmetis.dir/cmdline_mpmetis.c.o
+[ 86%] Building C object programs/CMakeFiles/m2gmetis.dir/cmdline_m2gmetis.c.o
+[ 87%] Building C object programs/CMakeFiles/mpmetis.dir/io.c.o
+[ 88%] Building C object programs/CMakeFiles/m2gmetis.dir/io.c.o
+[ 89%] Building C object programs/CMakeFiles/mpmetis.dir/stat.c.o
+[ 90%] Linking C executable m2gmetis
+ld: warning: search path '/home/karypis/local/lib' not found
+[ 90%] Built target m2gmetis
+[ 92%] Building C object programs/CMakeFiles/graphchk.dir/graphchk.c.o
+[ 93%] Linking C executable mpmetis
+ld: warning: search path '/home/karypis/local/lib' not found
+[ 93%] Built target mpmetis
+[ 94%] Building C object programs/CMakeFiles/graphchk.dir/io.c.o
+[ 95%] Building C object programs/CMakeFiles/cmpfillin.dir/cmpfillin.c.o
+[ 96%] Building C object programs/CMakeFiles/cmpfillin.dir/io.c.o
+[ 97%] Linking C executable graphchk
+ld: warning: search path '/home/karypis/local/lib' not found
+[ 97%] Built target graphchk
+[ 98%] Building C object programs/CMakeFiles/cmpfillin.dir/smbfactor.c.o
+[100%] Linking C executable cmpfillin
+ld: warning: search path '/home/karypis/local/lib' not found
+[100%] Built target cmpfillin
+[ 70%] Built target metis
+[ 76%] Built target gpmetis
+[ 81%] Built target ndmetis
+[ 87%] Built target mpmetis
+[ 92%] Built target m2gmetis
+[ 95%] Built target graphchk
+[100%] Built target cmpfillin
+Install the project...
+-- Install configuration: ""
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/include/metis.h
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/lib/libmetis.a
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/gpmetis
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/ndmetis
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/mpmetis
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/m2gmetis
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/graphchk
+-- Installing: /Users/taliaangles/Documents/GitHub/OpenFUSIONToolkit/metis-5_1_0/bin/cmpfillin

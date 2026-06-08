@@ -1,0 +1,13 @@
+# The fortran modules provided by this target.
+provides
+ oft_arpack.mod
+ oft_deriv_matrices.mod
+ oft_la_base.mod
+ oft_la_utils.mod
+ oft_lu.mod
+ oft_native_la.mod
+ oft_native_solvers.mod
+ oft_petsc_la.mod
+ oft_petsc_solvers.mod
+ oft_solver_base.mod
+ oft_solver_utils.mod
