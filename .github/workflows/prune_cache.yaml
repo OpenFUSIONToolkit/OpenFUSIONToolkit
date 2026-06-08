@@ -12,6 +12,7 @@ on:
 
 jobs:
   cleanup:
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     runs-on: ubuntu-latest
     permissions:
       # `actions:write` permission is required to delete caches
@@ -20,7 +21,7 @@ jobs:
       contents: read
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Cleanup cache
         run: |

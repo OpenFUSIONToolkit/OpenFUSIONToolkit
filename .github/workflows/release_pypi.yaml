@@ -10,9 +10,14 @@ on:
     paths:
       - .github/workflows/release_pypi.yaml
       - src/utilities/build_libs.py
+
+concurrency:
+  group: cd_pypi-${{ github.ref }}
+  cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
   
 jobs:
   linux-build:
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: ${{ format('PYPI Linux CD ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     container: ${{ matrix.config.image }}
@@ -37,7 +42,7 @@ jobs:
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         fetch-depth: 0
     
@@ -76,7 +81,7 @@ jobs:
         python ../src/utilities/build_libs.py --no_dl_progress --nthread=4 --oblas_dynamic_arch --build_umfpack=1 --build_arpack=1 --oft_package --oft_package_release
 
     - name: Upload library failure log
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: failure()
       with:
         name: Library failure log
@@ -116,13 +121,14 @@ jobs:
         bash make_package.sh
     
     - name: Upload PYPI artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{ matrix.config.name }}-${{ github.sha }}
         path: builds/install_release/python/dist/*.whl
         overwrite: true
   
   macos-build:
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: ${{ format('PYPI macOS CD ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 45
@@ -159,7 +165,7 @@ jobs:
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         fetch-depth: 0
     
@@ -204,7 +210,7 @@ jobs:
         python ../src/utilities/build_libs.py --no_dl_progress --build_arpack=1 --oft_package --oft_package_release ${{ matrix.config.build_libs_flags }}
 
     - name: Upload library failure log
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: failure()
       with:
         name: Library failure log
@@ -244,7 +250,7 @@ jobs:
         bash make_package.sh
     
     - name: Upload PYPI artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{ matrix.config.name }}-${{ github.sha }}
         path: libs/install_release/python/dist/*.whl
@@ -255,7 +261,7 @@ jobs:
     needs:
       - macos-build
       - linux-build
-    if: github.event_name == 'push'
+    if: (github.event_name == 'push') && (github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit')
     runs-on: ubuntu-latest
 
     environment:
@@ -289,7 +295,7 @@ jobs:
     needs:
       - macos-build
       - linux-build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/pypi_release'
+    if: (github.event_name == 'push') && (github.ref == 'refs/heads/pypi_release') && (github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit')
     runs-on: ubuntu-latest
 
     environment:
