@@ -1132,10 +1132,10 @@ def test_torus_fourier_sensor(direct_flag):
     from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
     import netCDF4
     R_0 = 1.0
-    with netCDF4.Dataset("torus_gpec_control_output_n1_nc.nc") as file:
-        R_gpec = np.asarray(file["R"][:-1])
-        Z_gpec = np.asarray(file["Z"][:-1])
-        delta_phi = np.asarray(file["delta_phi"][:-1])
+    with netCDF4.Dataset(os.path.join(test_dir,"torus_gpec_control_output_n1_nc.nc"), "r") as file:
+        R_gpec = np.asarray(file.variables["R"][:-1])
+        Z_gpec = np.asarray(file.variables["z"][:-1])
+        delta_phi = np.asarray(file.variables["delta_phi"][:-1])
     interface_h1 = torus_fourier_sensor(R_gpec,Z_gpec,R_0,1)
     interface_h1.place_normal_sensors(nphi=15,filename='floops.loc')
     interface_hminus1 = torus_fourier_sensor(R_gpec,Z_gpec,R_0,-1)
