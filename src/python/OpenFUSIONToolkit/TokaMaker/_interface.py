@@ -29,6 +29,25 @@ class tokamaker_settings_cstruct(c_struct):
                 ("opoint_target_weight", c_double),
                 ("limiter_file", ctypes.c_char_p)]
 
+class tokamaker_boot_ops_struct(c_struct):
+    r'''! Bootstrap current options for the jphi-split-bootstrap current profile update.
+
+     - `isolate_edge_jBS` Isolate the edge bootstrap spike from the bulk bootstrap current?
+     - `parameterize_jBS` Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true.
+     - `scale_jBS` Scaling factor applied to the spike profile (default 1.0)
+     - `diagnose_bs` Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration?
+     - `taper_edge_jBS` Smooth taper of toroidal current to zero at the plasma edge (guards against numerical issues at the separatrix; default True)
+     - `taper_edge_psi0` psi_N where the taper begins (standard: 0=axis, 1=LCFS; default 0.999)
+     - `taper_edge_shape` Taper shape: 1=cos²/Hann, 2=quintic smoothstep (default), 3=cubic power
+    '''
+    _fields_ = [('isolate_edge_jBS', c_bool),
+                ('parameterize_jBS', c_bool),
+                ('scale_jBS', c_double),
+                ('diagnose_bs', c_bool),
+                ('taper_edge_jBS', c_bool),
+                ('taper_edge_psi0', c_double),
+                ('taper_edge_shape', c_int)]
+
 # tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str)
 tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr, c_void_p, c_char_p])
@@ -284,26 +303,6 @@ tokamaker_load_tokamaker = ctypes_subroutine(oftpy_lib.tokamaker_load_tokamaker,
 # tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,dist_pointer,normalize,error_str)
 tokamaker_set_coil_current_dist = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_current_dist,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_double_ptr_ptr, c_bool, c_char_p])
-
-
-class tokamaker_boot_ops_struct(c_struct):
-    r'''! Bootstrap current options for the jphi-split-bootstrap current profile update.
-
-     - `isolate_edge_jBS` Isolate the edge bootstrap spike from the bulk bootstrap current?
-     - `parameterize_jBS` Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true.
-     - `scale_jBS` Scaling factor applied to the spike profile (default 1.0)
-     - `diagnose_bs` Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration?
-     - `taper_edge_jBS` Smooth taper of toroidal current to zero at the plasma edge (guards against numerical issues at the separatrix; default True)
-     - `taper_edge_psi0` psi_N where the taper begins (standard: 0=axis, 1=LCFS; default 0.999)
-     - `taper_edge_shape` Taper shape: 1=cos²/Hann, 2=quintic smoothstep (default), 3=cubic power
-    '''
-    _fields_ = [('isolate_edge_jBS', c_bool),
-                ('parameterize_jBS', c_bool),
-                ('scale_jBS', c_double),
-                ('diagnose_bs', c_bool),
-                ('taper_edge_jBS', c_bool),
-                ('taper_edge_psi0', c_double),
-                ('taper_edge_shape', c_int)]
 
 class TokaMaker_field_interpolator():
     '''! Interpolation class for Grad-Shafranov fields'''
