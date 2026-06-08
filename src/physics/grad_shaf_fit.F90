@@ -324,7 +324,7 @@ CALL fit_load(inpath,conlist)
 !---Count coefficients
 ncofs=0
 IF(gs%device%free)THEN
-  IF(fit_FFPscale.OR.(gs_active%Itor_target>0.d0))ncofs = ncofs+1
+  IF(fit_FFPscale.OR.(gs_active%Ip_target>0.d0))ncofs = ncofs+1
 ELSE
   ncofs=ncofs+1
   IF(fit_FFPscale)CALL oft_abort('Lambda cannot be fit in fixed boundary mode.', &
@@ -349,14 +349,14 @@ IF(gs%device%free)THEN
   IF(fit_FFPscale)THEN
     offset=1
     cofs(1)=gs_active%ffp_scale
-  ELSE IF(gs_active%Itor_target>0.d0)THEN
+  ELSE IF(gs_active%Ip_target>0.d0)THEN
     offset=1
-    cofs(1)=gs_active%Itor_target
+    cofs(1)=gs_active%Ip_target
   END IF
 ELSE
   offset=1
-  IF(gs_active%Itor_target>0.d0)THEN
-    cofs(1)=gs_active%Itor_target
+  IF(gs_active%Ip_target>0.d0)THEN
+    cofs(1)=gs_active%Ip_target
   ELSE
     cofs(1)=gs_active%psiscale
     cofs_scale(1)=1.d0/ABS(gs_active%psiscale)
@@ -466,7 +466,7 @@ IF(maxfev>0)THEN
   geval_count=0
   !---Initialize
   CALL fit_error(ncons,ncofs,cofs,error,info)
-  ! gs_active%Itor_target=-1.d0
+  ! gs_active%Ip_target=-1.d0
   ! IF(fit_FFPscale)cofs(1)=gs_active%ffp_scale
   IF(gs_active%device%ierr<0)CALL oft_abort('Initial equilibrium solve failed to converge','fit_gs',__FILE__)
   !---
@@ -635,7 +635,7 @@ IF(.NOT.ASSOCIATED(psi_center))THEN
   ALLOCATE(cofs_in(n))
   cofs_in=cofs
   ffp_scale_in=gs_active%ffp_scale
-  ip_target_in=gs_active%Itor_target
+  ip_target_in=gs_active%Ip_target
   p_scale_in=gs_active%p_scale
   estore_target_in=gs_active%estore_target
   ! bounds_in=gs_active%spatial_bounds
@@ -669,14 +669,14 @@ IF(iflag==1)THEN
     IF(fit_FFPscale)THEN
       offset=1
       gs_active%ffp_scale=cofs(1)
-    ELSE IF(gs_active%Itor_target>0.d0)THEN
+    ELSE IF(gs_active%Ip_target>0.d0)THEN
       offset=1
-      gs_active%Itor_target=cofs(1)
+      gs_active%Ip_target=cofs(1)
     END IF
   ELSE
     offset=1
-    IF(gs_active%Itor_target>0.d0)THEN
-      gs_active%Itor_target=cofs(1)
+    IF(gs_active%Ip_target>0.d0)THEN
+      gs_active%Ip_target=cofs(1)
     ELSE
       gs_active%psiscale=cofs(1)
     END IF
@@ -741,7 +741,7 @@ IF(iflag==1)THEN
   IF(fit_F0)gs_active%I%f_offset = cofs(offset+1)
   ! !---Centering
   ! ffp_scale_in=gs_active%ffp_scale
-  ! ip_target_in=gs_active%Itor_target
+  ! ip_target_in=gs_active%Ip_target
   ! p_scale_in=gs_active%p_scale
   ! estore_target_in=gs_active%estore_target
   ! bounds_in=gs_active%spatial_bounds
@@ -777,7 +777,7 @@ IF(iflag==1)THEN
       CALL psi_best%add(0.d0,1.d0,gs_active%psi)
     END IF
     ffp_scale_in=gs_active%ffp_scale
-    ip_target_in=gs_active%Itor_target
+    ip_target_in=gs_active%Ip_target
     p_scale_in=gs_active%p_scale
     estore_target_in=gs_active%estore_target
     ! bounds_in=gs_active%spatial_bounds
@@ -801,13 +801,13 @@ IF(iflag==1)THEN
     IF(gs_active%device%free)THEN
       IF(fit_FFPscale)THEN
         offset=offset+1
-      ELSE IF(gs_active%Itor_target>0.d0)THEN
-        WRITE(*,'(2A,ES11.3)')oft_indent,'Itor_target       =',gs_active%Itor_target/mu0
+      ELSE IF(gs_active%Ip_target>0.d0)THEN
+        WRITE(*,'(2A,ES11.3)')oft_indent,'Ip_target       =',gs_active%Ip_target/mu0
         offset=offset+1
       END IF
     ELSE
-      IF(gs_active%Itor_target>0.d0)THEN
-        WRITE(*,'(2A,ES11.3)')oft_indent,'Itor_target       =',gs_active%Itor_target/mu0
+      IF(gs_active%Ip_target>0.d0)THEN
+        WRITE(*,'(2A,ES11.3)')oft_indent,'Ip_target       =',gs_active%Ip_target/mu0
       ELSE
         WRITE(*,'(2A,ES11.3)')oft_indent,'Psi_scale         =',gs_active%psiscale
       END IF
@@ -890,18 +890,18 @@ ELSE
       jac_mat(:,offset+1)=(jac_mat(:,offset+1)-err)/dx
       gs_active%ffp_scale=cofs(offset+1)
       offset=1
-    ELSE IF(gs_active%Itor_target>0.d0)THEN
+    ELSE IF(gs_active%Ip_target>0.d0)THEN
       CALL reset_eq
       dx = dxi/cofs_scale(offset+1)
-      gs_active%Itor_target=cofs(offset+1) + dx
+      gs_active%Ip_target=cofs(offset+1) + dx
       CALL run_err(.FALSE.,jac_mat(:,offset+1),m,ierr)
       jac_mat(:,offset+1)=(jac_mat(:,offset+1)-err)/dx
-      gs_active%Itor_target=cofs(offset+1)
+      gs_active%Ip_target=cofs(offset+1)
       offset=1
     END IF
   ELSE
-    IF(gs_active%Itor_target>0.d0)THEN
-      gs_active%Itor_target=cofs(1)
+    IF(gs_active%Ip_target>0.d0)THEN
+      gs_active%Ip_target=cofs(1)
     ELSE
       CALL reset_eq
       dx = dxi/cofs_scale(offset+1)
@@ -1039,7 +1039,7 @@ CONTAINS
 !
 SUBROUTINE reset_eq
 gs_active%ffp_scale=ffp_scale_in
-gs_active%Itor_target=ip_target_in
+gs_active%Ip_target=ip_target_in
 gs_active%p_scale=p_scale_in
 gs_active%estore_target=estore_target_in
 ! gs_active%spatial_bounds=bounds_in

@@ -391,7 +391,7 @@ CALL hdf5_write(self%o_point,filename,'tokamaker/O_POINT')
 CALL hdf5_write(self%lim_point,filename,'tokamaker/LIM_POINT')
 CALL hdf5_write(self%diverted,filename,'tokamaker/DIVERTED')
 !---
-IF(self%Itor_target>0.d0)CALL hdf5_write(self%Itor_target,filename,'tokamaker/IP_TARGET')
+IF(self%Ip_target>0.d0)CALL hdf5_write(self%Ip_target,filename,'tokamaker/IP_TARGET')
 IF(self%Ip_ratio_target>-1.d98)CALL hdf5_write(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET')
 IF(self%R0_target>0.d0)CALL hdf5_write(self%R0_target,filename,'tokamaker/R0_TARGET')
 IF(self%Z0_target>-1.d98)CALL hdf5_write(self%Z0_target,filename,'tokamaker/Z0_TARGET')
@@ -612,7 +612,7 @@ IF(logical_tmp.NEQV.self%diverted)THEN
 END IF
 !---Load targets and coil currents
 IF(hdf5_field_exist(filename,'tokamaker/IP_TARGET'))THEN
-  CALL hdf5_read(self%Itor_target,filename,'tokamaker/IP_TARGET',success=success)
+  CALL hdf5_read(self%Ip_target,filename,'tokamaker/IP_TARGET',success=success)
   IF(.NOT.success)THEN
     error_string='Failed to read Ip target.'
     RETURN
