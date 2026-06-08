@@ -271,11 +271,14 @@ class ThinCurr():
         @param field Field to apply matrix to
         @result Result of matrix application
         '''
+        if field.shape[0] != self.nelems:
+            raise IndexError('Incorrect shape of "field", should be [nelems]')
         field_in = numpy.ascontiguousarray(field.copy(), dtype=numpy.float64)
         if self.Lmat_hodlr:
             thincurr_apply_Lmat(self.tw_obj,field_in,self.Lmat_hodlr)
-            
         else:
+            if self.Lmat is None:
+                raise ValueError('Lmat not computed, call `compute_Lmat()` first')
             thincurr_apply_Lmat(self.tw_obj,field_in,c_void_p())
         return field_in
     
@@ -510,11 +513,11 @@ class ThinCurr():
 
         @param model2 The second model for mutual calculation
         @param field One or more current fields
-        @result Flux on `model2` from `field` on `self` `(field.shape[0],:)`
+        @result Flux on `model2` from `field` on `self` `[field.shape[0],model2.nelems]`
         '''
         nrhs = field.shape[0]
         if field.shape[1] != self.nelems:
-            raise IndexError('Incorrect shape of "field", should be [nelems]')
+            raise IndexError('Incorrect shape of "field", should be [:,nelems]')
         vec_out = numpy.zeros((nrhs,model2.nelems), dtype=numpy.float64)
         vec_in = numpy.ascontiguousarray(field.copy(), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()

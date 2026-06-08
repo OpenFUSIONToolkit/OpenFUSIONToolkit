@@ -36,7 +36,7 @@ classifiers = [
 ]
 dependencies = [
     "numpy",
-    "scipy",
+    "scipy >= 1.11.0",
     "matplotlib",
     "h5py",
     "netCDF4"
