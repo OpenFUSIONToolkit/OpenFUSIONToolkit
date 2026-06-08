@@ -180,6 +180,12 @@ log_redirect_setup()
 
 # Now import "noisy" packages, after running log_redirect_setup:
 import torax  # noqa: E402
+# Internal TORAX APIs for running the loop ourselves so we can keep the raw
+# list[SimState] (run_simulation() drops the pedestal confinement_mode).
+from torax._src.pedestal_model.pedestal_transition_state import ConfinementMode  # noqa: E402
+from torax._src.orchestration import run_simulation as run_sim_lib  # noqa: E402
+from torax._src.orchestration import run_loop as run_loop_lib  # noqa: E402
+from torax._src.output_tools import output as output_lib  # noqa: E402
 
 
 @contextmanager
@@ -302,6 +308,10 @@ class TokaMaker_TORAX:
         self._state['vloop_tx'] = np.zeros(N)
         self._state['f_GW']     = np.zeros(N)
         self._state['f_GW_vol'] = np.zeros(N)
+
+        # H-mode flag at each tm_time (True=H-mode, False=L-mode); filled from the
+        # TORAX pedestal confinement_mode when the L/H state machine is active.
+        self._state['confinement_mode'] = np.zeros(N, dtype=bool)
 
         # ── Safety factor scalars ────────────────────────────────────────────────
         self._state['q0']    = np.zeros(N)
@@ -567,6 +577,45 @@ class TokaMaker_TORAX:
 
         # Optional full replacement for the TORAX pedestal section.
         self._pedestal_config = None
+
+        # ── Pedestal config mode (set_pedestal) ──────────────────────────────
+        # 'ADAPTIVE_SOURCE' | 'ADAPTIVE_TRANSPORT' | 'internal_manual'.
+        self._ped_mode = 'off'
+        # Enable the L/H formation model under ADAPTIVE_SOURCE (new-API pedestals only).
+        self._ped_formation_model = False
+        # internal_manual pedestal knobs (heights in keV / m^-3; widths/times in rho_norm / s).
+        self._ped_height_Te = None
+        self._ped_height_Ti = None
+        self._ped_height_ne = None
+        self._ped_width = 0.15
+        self._ped_transition_time = 0.5
+        self._ped_timing = 'detect'      # 'detect' (loop-1 ADAPTIVE_SOURCE) or 'input'
+        self._lh_time = None             # L->H transition time (s); set by user or detection
+        self._hl_time = None             # H->L back-transition time (s); None if none
+        self._ped_formation_model_name = 'delabie_scaling'  # L/H formation model for detect loop
+        # IBC penalty stiffness (TORAX numerics.adaptive_{T,n}_source_prefactor); None = TORAX default.
+        # IBCs are soft penalties: higher = evolved tracks the imposed pedestal more exactly,
+        # lower = TORAX transport smooths the imposed shape more.
+        self._ped_T_source_prefactor = None
+        self._ped_n_source_prefactor = None
+        # Per-tm-time inner-edge (value, slope) matched to the evolved core after the first IBC
+        # loop, {field: {tm_time: (value, slope)}}; empty until _smooth_ibc_inner_edge runs.
+        self._ped_smoothed = {}
+        # Shape params used to build the current loop's IBC (for the debug figure); None until built.
+        self._ped_ibc_snapshot = None
+        # Core-band L->H transition IBC (internal_manual): when a core_height is set, a band over
+        # the core (rho 0->ped_rho) ramps the evolved L-mode core into a smooth H-mode-like core
+        # shape during [lh, lh+transition], then retreats to the pedestal-only band. Off if None.
+        self._core_height_Te = None
+        self._core_height_Ti = None
+        self._core_height_ne = None
+        self._core_exp_a = 2.0    # core-shape exponents: f = ped + (core-ped)*(1-(rho/ped_rho)^a)^b
+        self._core_exp_b = 2.0    # a>=2,b>=2 -> flat at core AND flat into the pedestal top
+        # Evolved L-mode core near t=lh, {field: {rho: value}} on the core grid; captured per loop.
+        self._ped_lmode_profile = {}
+        # Relaxed on-axis value read back after the transition retreats, {field: value}; used as the
+        # core target on the next loop (loop 1 uses the user core_height_*).
+        self._ped_core_relaxed = {}
 
         self._Te_right_bc = None
         self._Ti_right_bc = None
@@ -1061,24 +1110,116 @@ class TokaMaker_TORAX:
         self._enable_fusion = fusion
         self._enable_ei_exchange = ei_exchange
 
-    def set_pedestal(self, set_pedestal=False, T_i_ped=None, T_e_ped=None, n_e_ped=None, ped_top=0.90):
-        r'''! Set pedestals for ion/electron temperatures and density (legacy API).
+    def set_pedestal(self, config_mode='off', config=None,
+                     ped_height_Te=None, ped_height_Ti=None, ped_height_ne=None,
+                     ped_width=0.15, transition_time=0.5, timing='detect',
+                     lh_time=None, hl_time=None, formation_model='delabie_scaling',
+                     T_source_prefactor=None, n_source_prefactor=None,
+                     core_height_Te=None, core_height_Ti=None, core_height_ne=None,
+                     core_exp_a=2.0, core_exp_b=2.0,
+                     set_pedestal=None, T_i_ped=None, T_e_ped=None, n_e_ped=None, ped_top=0.90):
+        r'''! Configure the TORAX pedestal model.
                 TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#pedestal
-                This preserves the original behavior:
-                - set_pedestal=True uses model_name='set_T_ped_n_ped'
-                - set_pedestal=False uses model_name='no_pedestal'
-        
-                @param set_pedestal Toggle pedestal model on/off.
-                @param T_i_ped Ion temperature pedestal (time-varying scalar allowed).
-                @param T_e_ped Electron temperature pedestal (time-varying scalar allowed).
-                @param n_e_ped Electron density pedestal (time-varying scalar allowed).
-                @param ped_top Pedestal-top location rho_norm_ped_top.
-                
-        '''
-        # Using legacy setter disables full pedestal dict replacement.
-        self._pedestal_config = None
 
-        self._set_pedestal = set_pedestal
+                Three modes via config_mode:
+                - 'off'                   : no pedestal (default).
+                - 'ADAPTIVE_SOURCE'    : TORAX set_T_ped_n_ped pedestal in ADAPTIVE_SOURCE mode,
+                                            with use_formation_model_with_adaptive_source enabled by
+                                            default (gives the L/H state machine). This is the legacy
+                                            behavior; pass set_pedestal/T_*_ped/n_e_ped/ped_top as before.
+                - 'ADAPTIVE_TRANSPORT' : same pedestal model in ADAPTIVE_TRANSPORT mode.
+                - 'internal_manual'       : pedestal imposed by us as a TORAX internal boundary
+                                            condition (IBC), not a TORAX pedestal model. The pedestal
+                                            top sits at rho = 1 - ped_width and an mtanh shape is imposed
+                                            out to rho=1, ramped over transition_time across each L<->H
+                                            edge. Edge (rho=1) values come from set_ne/set_Te/set_Ti.
+                                            If a core_height_* is given, the IBC additionally spans the
+                                            CORE (rho 0->ped_rho) during the L->H transition only,
+                                            ramping the TORAX-evolved L-mode core into a smooth
+                                            H-mode-like core shape, then retreating to the pedestal band.
+
+                @param config_mode 'off', 'ADAPTIVE_SOURCE', 'ADAPTIVE_TRANSPORT', or 'internal_manual'.
+                @param config Optional full pedestal-section dict (tx_adaptive modes only); overrides defaults.
+                @param ped_height_Te Electron-temperature pedestal-top value (keV), internal_manual mode.
+                @param ped_height_Ti Ion-temperature pedestal-top value (keV), internal_manual mode (defaults to Te).
+                @param ped_height_ne Electron-density pedestal-top value (m^-3), internal_manual mode.
+                @param ped_width Pedestal width in rho_norm; inner edge is at 1 - ped_width.
+                @param transition_time Ramp duration (s) over which the pedestal rises from L-mode.
+                @param timing 'detect' (find L/H times from a loop-1 ADAPTIVE_SOURCE run) or 'input'.
+                @param lh_time L->H transition time (s); required when timing='input'.
+                @param hl_time H->L back-transition time (s); None means the pedestal stays on.
+                @param formation_model L/H formation-model name used by the internal_manual 'detect' loop
+                                       (e.g. 'delabie_scaling', 'martin_scaling').
+                @param T_source_prefactor Stiffness of the internal_manual T_e/T_i IBC (TORAX
+                                       numerics.adaptive_T_source_prefactor). The IBC is a soft
+                                       penalty, not a hard BC: higher = the evolved T tracks the
+                                       imposed pedestal more exactly; lower = TORAX transport smooths
+                                       the imposed shape more. None = TORAX default (2e10).
+                @param n_source_prefactor Same for the n_e IBC (numerics.adaptive_n_source_prefactor;
+                                       TORAX default 2e8). None = TORAX default.
+                @param core_height_Te On-axis (rho=0) H-mode T_e target (keV) for the full-domain L->H
+                                       transition IBC; None disables the full-domain ramp for T_e.
+                                       Loop 1 uses this value; loops 2+ use the relaxed evolved core.
+                @param core_height_Ti On-axis H-mode T_i target (keV); None disables it for T_i.
+                @param core_height_ne On-axis H-mode n_e target (m^-3); None disables it for n_e.
+                @param core_exp_a/core_exp_b Core-shape exponents for the transition core profile
+                                       f = ped + (core-ped)*(1-(rho/ped_rho)^a)^b. a>=2,b>=2 (default
+                                       2,2) give a flat core and a flat hand-off into the pedestal top.
+                @param set_pedestal Legacy tx_adaptive toggle (True=set_T_ped_n_ped, False=no_pedestal).
+                @param T_i_ped Legacy ion-temperature pedestal (tx_adaptive).
+                @param T_e_ped Legacy electron-temperature pedestal (tx_adaptive).
+                @param n_e_ped Legacy electron-density pedestal (tx_adaptive).
+                @param ped_top Legacy pedestal-top location rho_norm_ped_top (tx_adaptive).
+        '''
+        if config_mode not in ('off', 'ADAPTIVE_SOURCE', 'ADAPTIVE_TRANSPORT', 'internal_manual'):
+            raise ValueError("config_mode must be 'off', 'ADAPTIVE_SOURCE', 'ADAPTIVE_TRANSPORT', or 'internal_manual'.")
+        self._ped_mode = config_mode
+
+        if config_mode == 'off':
+            # No pedestal: clear both the tx_adaptive and internal_manual state so a prior
+            # set_pedestal() call doesn't leak a pedestal section into the config.
+            self._pedestal_config = None
+            self._set_pedestal = None
+            self._ped_formation_model = False
+            return
+
+        if config_mode == 'internal_manual':
+            if timing not in ('detect', 'input'):
+                raise ValueError("timing must be 'detect' or 'input'.")
+            if timing == 'input' and lh_time is None:
+                raise ValueError("timing='input' requires lh_time.")
+            self._pedestal_config = None
+            self._set_pedestal = None
+            self._ped_height_Te = ped_height_Te
+            self._ped_height_Ti = ped_height_Ti if ped_height_Ti is not None else ped_height_Te
+            self._ped_height_ne = ped_height_ne
+            self._ped_width = ped_width
+            self._ped_transition_time = transition_time
+            self._ped_timing = timing
+            self._lh_time = lh_time
+            self._hl_time = hl_time
+            self._ped_formation_model_name = formation_model
+            self._ped_T_source_prefactor = T_source_prefactor
+            self._ped_n_source_prefactor = n_source_prefactor
+            self._ped_smoothed = {}
+            # Core-band L->H transition IBC (optional, per field via core_height_*).
+            self._core_height_Te = core_height_Te
+            self._core_height_Ti = core_height_Ti if core_height_Ti is not None else core_height_Te
+            self._core_height_ne = core_height_ne
+            self._core_exp_a = core_exp_a   # core-shape exponents (>=2 = flat core & flat into ped)
+            self._core_exp_b = core_exp_b
+            self._ped_lmode_profile = {}
+            self._ped_core_relaxed = {}
+            return
+
+        # ── ADAPTIVE_SOURCE / ADAPTIVE_TRANSPORT ──
+        # A full pedestal dict overrides everything else (former load_pedestal_config).
+        self._pedestal_config = copy.deepcopy(config) if config is not None else None
+        # Legacy default: pedestal off unless explicitly enabled.
+        self._set_pedestal = False if set_pedestal is None else set_pedestal
+        # Enable the L/H formation model for ADAPTIVE_SOURCE via the new API only; the
+        # legacy set_pedestal=... toggle keeps TORAX's default (off) so old runs are unchanged.
+        self._ped_formation_model = set_pedestal is None
         if T_i_ped is not None:
             self._T_i_ped = T_i_ped
         if T_e_ped is not None:
@@ -1088,14 +1229,8 @@ class TokaMaker_TORAX:
         self._ped_top = ped_top
 
     def load_pedestal_config(self, pedestal_config):
-        r'''! Load pedestal config dict and fully replace 'pedestal' in TORAX config.
-                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#pedestal
-                If provided, this dict is copied to 'myconfig['pedestal']' directly,
-                replacing the full pedestal section from BASE_CONFIG and load_TORAX_config().
-        
-                @param pedestal_config Dictionary in TORAX pedestal config format, or
-                                       None to clear and fall back to set_pedestal().
-                
+        r'''! Deprecated: use set_pedestal(config=...). Fully replaces the TORAX pedestal section.
+                @param pedestal_config Dictionary in TORAX pedestal config format, or None to clear.
         '''
         if pedestal_config is None:
             self._pedestal_config = None
@@ -1539,9 +1674,34 @@ class TokaMaker_TORAX:
             myconfig['sources']['generic_particle']['particle_width'] = self._generic_particle_width
             myconfig['sources']['generic_particle']['S_total'] = self._generic_particle_s_total
             
-        if self._pedestal_config is not None:
-            # Full pedestal dict replacement requested via load_pedestal_config().
+        if self._ped_mode == 'off' and self._pedestal_config is None:
+            # No pedestal: leave myconfig['pedestal'] unset (TORAX default no_pedestal).
+            pass
+        elif self._pedestal_config is not None:
+            # Full pedestal dict replacement (set_pedestal(config=...)).
             myconfig['pedestal'] = copy.deepcopy(self._pedestal_config)
+        elif self._ped_mode == 'internal_manual':
+            if self._manual_ibc_active():
+                # Timing is known: TORAX pedestal off, impose the pedestal as an IBC.
+                myconfig['pedestal'] = {'model_name': 'no_pedestal'}
+                myconfig['profile_conditions']['internal_boundary_conditions'] = self._build_manual_ibc()
+                # IBC penalty stiffness (soft target, not a hard BC): higher tracks the imposed
+                # pedestal more exactly, lower lets TORAX transport smooth the imposed shape.
+                if self._ped_T_source_prefactor is not None:
+                    myconfig['numerics']['adaptive_T_source_prefactor'] = self._ped_T_source_prefactor
+                if self._ped_n_source_prefactor is not None:
+                    myconfig['numerics']['adaptive_n_source_prefactor'] = self._ped_n_source_prefactor
+            else:
+                # Detection loop: ADAPTIVE_SOURCE + formation model gives the L/H state
+                # machine; set_pedestal=False so the (later) IBC solely owns the edge.
+                myconfig['pedestal'] = {
+                    'model_name': 'set_T_ped_n_ped',
+                    'set_pedestal': False,
+                    'mode': 'ADAPTIVE_SOURCE',
+                    'use_formation_model_with_adaptive_source': True,
+                    'transition_time_width': self._ped_transition_time,
+                    'formation_model': {'model_name': self._ped_formation_model_name},
+                }
         else:
             ped_enabled = (
                 self._set_pedestal is not None
@@ -1553,10 +1713,13 @@ class TokaMaker_TORAX:
 
             if ped_enabled:
                 # Build in required key order:
-                # model_name -> set_pedestal -> rho_norm_ped_top -> T_i/T_e/n_e.
+                # model_name -> set_pedestal -> mode -> rho_norm_ped_top -> T_i/T_e/n_e.
                 ped_cfg = {}
                 ped_cfg['model_name'] = 'set_T_ped_n_ped'
                 ped_cfg['set_pedestal'] = self._set_pedestal
+                ped_cfg['mode'] = self._ped_mode
+                if self._ped_mode == 'ADAPTIVE_SOURCE' and self._ped_formation_model:
+                    ped_cfg['use_formation_model_with_adaptive_source'] = True
                 if self._ped_top is not None:
                     ped_cfg['rho_norm_ped_top'] = self._ped_top
                 if self._T_i_ped is not None:
@@ -1919,6 +2082,279 @@ class TokaMaker_TORAX:
             seed[_name] = ([self._t_init], _rho.tolist(), [_arr.tolist()])
         self._steady_state_tx_seed = seed
 
+    def _manual_ibc_active(self):
+        r'''! True when the internal_manual pedestal IBC should be imposed this loop, i.e. the
+                L/H timing is known: timing='input' (always), or timing='detect' once the
+                detection loop (loop 1) has run and found an L->H time.'''
+        if self._ped_mode != 'internal_manual':
+            return False
+        if self._ped_timing == 'input':
+            return True
+        return self._current_loop > 1 and self._lh_time is not None
+
+    def _build_manual_ibc(self):
+        r'''! Build the internal_boundary_conditions block for T_e, T_i, n_e from the MANUAL
+                pedestal knobs. The pedestal foot (rho=1) is the edge BC from set_ne/set_Te/set_Ti
+                (so n_e_right_bc and the IBC agree there); the inner-edge gradient uses the
+                smoothed slope from _smooth_ibc_inner_edge when available, else a
+                straight line from ped_top down to foot.
+
+                If a core_height is set for a field, a CORE band (rho 0->just inside ped_rho) is
+                merged in that ramps the evolved L-mode core into a smooth H-mode-like core shape
+                over the L->H transition, then retreats. The two bands are disjoint (the pedestal
+                band owns [ped_rho,1] at all times); they meet at ped_rho with the same value.
+
+                @return {field: SparseTimeVaryingArray} for the fields with a height set.
+        '''
+        if self._lh_time is None:
+            return {}   # no L->H transition: no pedestal to impose
+        windows = [(self._lh_time, self._hl_time)]
+        ped_rho = 1.0 - self._ped_width
+        lh = self._lh_time
+        transition = self._ped_transition_time
+        # Shape params scaled to ped_width (match the notebook's 0.93/0.025/0.015 at width 0.15):
+        # the steep tanh edge is a narrow band near the separatrix, so the inner edge sits on the
+        # flat core line (value ~ ped_top) and the foot saturates to the edge BC.
+        w = self._ped_width
+        knee = 1.0 - 0.47 * w
+        hwid = 0.17 * w
+        blend = 0.10 * w
+        # Core transition-band grid: ends ONE cell short of ped_rho so the band location
+        # (0, core_hi) is strictly disjoint from the pedestal band (ped_rho, 1) -- TORAX rejects
+        # bands that even touch at an endpoint. The tiny (core_hi, ped_rho) gap is bridged by
+        # interpolation; both sides equal ped_height there, so it's seamless.
+        core_dx = ped_rho / PED_N_SAMPLE
+        rhos_core = np.linspace(0.0, ped_rho - core_dx, PED_N_SAMPLE)
+        ibc = {}
+        # Snapshot of the shape params actually used to build this loop's IBC, for the
+        # debug figure (IBC_debug): per field the ped_top/slope and whether
+        # they came from the previous loop's smoothing or the user-height fallback.
+        # IBC penalty stiffness actually in effect (None -> TORAX default), for the figure label.
+        T_pref = self._ped_T_source_prefactor if self._ped_T_source_prefactor is not None else 2.0e10
+        n_pref = self._ped_n_source_prefactor if self._ped_n_source_prefactor is not None else 2.0e8
+        self._ped_ibc_snapshot = {'ped_rho': ped_rho, 'knee': knee, 'hwid': hwid,
+                                   'blend': blend, 'transition': self._ped_transition_time,
+                                   'windows': windows, 'T_pref': T_pref, 'n_pref': n_pref,
+                                   'fields': {}}
+        for field, height, right_bc, core_height in (
+            ('T_e', self._ped_height_Te, self._Te_right_bc, self._core_height_Te),
+            ('T_i', self._ped_height_Ti, self._Ti_right_bc, self._core_height_Ti),
+            ('n_e', self._ped_height_ne, self._ne_right_bc, self._core_height_ne),
+        ):
+            if height is None:
+                continue
+            # Per-tm-time inner-edge (ped_top, slope) from the previous loop's evolved core
+            # (_smooth_ibc_inner_edge); empty on the first IBC loop -> default_shape (user height
+            # with a flat top, slope=0) is used at all times. Matching the evolved value+slope per
+            # time removes the inner-edge kink (which would spike p' and fail TM).
+            # Loop-1 default = flat core line at ped_top: the value drops to the foot through the
+            # tanh edge band only (per the mtanh design above), a gentler seed than a full-width
+            # linear ramp; loops 2+ replace it with the evolved per-time slope.
+            shape_by_time = self._ped_smoothed.get(field, {})
+            default_shape = (height, 0.0)
+            # Foot (rho=1) tracks the edge BC; _pedestal_ibc evaluates it per ON time so the
+            # IBC always agrees with right_bc at rho=1.
+            spec = _pedestal_ibc(ped_rho, right_bc, shape_by_time, default_shape,
+                                 self._ped_transition_time, windows, knee, hwid, blend)
+            snap = {'shape_by_time': shape_by_time, 'default_shape': default_shape,
+                    'right_bc': right_bc, 'smoothed': bool(shape_by_time), 'user_height': height,
+                    'transition_active': False}
+
+            # ── Core (0 -> ped_rho) L->H transition band (optional, per field via core_height) ──
+            if core_height is not None:
+                # Core target: user value on loop 1; the relaxed evolved on-axis value on loops 2+.
+                core = self._ped_core_relaxed.get(field, core_height)
+                # Smooth core shape over [0, ped_rho] that flattens INTO the pedestal top (no edge
+                # roll-off -> no second pedestal). Ends at ped_height, so it lines up with the
+                # pedestal band at ped_rho. exp_a/exp_b set the core curvature (>=2 = flat ends).
+                hmode = _core_transition_profile(rhos_core, ped_rho, height, core,
+                                                 self._core_exp_a, self._core_exp_b)
+                hmode_target = {float(r): float(v) for r, v in zip(rhos_core, hmode)}
+                # L-mode start of the ramp = the evolved core near lh (captured last loop); if not
+                # available yet, fall back to a flat line at the pedestal top (degenerate but safe).
+                lmode = self._ped_lmode_profile.get(field)
+                if lmode is None:
+                    lmode = {float(r): height for r in rhos_core}
+                trans_loc = (0.0, float(rhos_core[-1]))   # strictly below ped_rho (no overlap)
+                trans_spec = _transition_ibc(trans_loc, lmode, hmode_target, lh, transition)
+                # Merge: the core band (0, core_hi) and the pedestal band (ped_rho, 1) are keyed by
+                # different, disjoint (lo,hi) locations, so combine the per-time dicts (union).
+                spec = _merge_ibc_specs(spec, trans_spec)
+                snap.update({'transition_active': True, 'core': core,
+                             'lmode_profile': lmode, 'hmode_target': hmode_target,
+                             'trans_loc': trans_loc,
+                             'core_source': 'relaxed' if field in self._ped_core_relaxed else 'user'})
+
+            ibc[field] = spec
+            self._ped_ibc_snapshot['fields'][field] = snap
+        return ibc
+
+    def _smooth_ibc_inner_edge(self):
+        r'''! Match the imposed pedestal inner-edge value AND gradient to the TORAX-evolved core
+                PER TM-TIME, so the next loop's IBC tracks the evolving profile time-point by
+                time-point and joins the core smoothly (no kink/jog -> p' spike -> TM GS failure).
+                Reads the evolved profile from self._data_tree (rho_norm grid): at each H-mode
+                tm_time the inner-edge value is the core value just inside the edge and the gradient
+                is a least-squares fit over a small core-side window (multi-cell fit is less noisy
+                than a single-cell diff, esp. for density). Stored as {field: {tm_time: (value, slope)}}.
+
+                NOT time-averaged: the few transition-region tm_times have anomalous steep slopes
+                (density still filling in) that would poison a single average and flip its sign.
+                L-mode tm_times are skipped (no IBC there). The fitted slope is clamped to <= 0
+                (rho increases outward, so a physical pedestal falls from core to foot => slope<0):
+                a positive slope would mean the imposed value rises above the pedestal top toward
+                the edge, which is non-physical; flooring positives to 0 keeps the core->pedestal
+                connection flat-or-falling.
+        '''
+        dt = getattr(self, '_data_tree', None)
+        if dt is None:
+            return
+        # Ensure the H-mode mask is set (timing='input' has no detection state machine).
+        self._set_confinement_from_window()
+        ped_rho = 1.0 - self._ped_width
+        # Fit window: core-side cells within PED_GRAD_WINDOW of the inner edge (min 3 cells).
+        lo_rho = ped_rho - PED_GRAD_WINDOW
+        heights = {'T_e': self._ped_height_Te, 'T_i': self._ped_height_Ti, 'n_e': self._ped_height_ne}
+        for field, height in heights.items():
+            if height is None:
+                continue
+            da = getattr(dt.profiles, field)
+            rho = da.coords['rho_norm'].values
+            hi = int(np.argmin(np.abs(rho - ped_rho)))           # IBC inner-edge cell
+            lo = min(int(np.searchsorted(rho, lo_rho)), hi - 2)  # >= 3 cells in the fit
+            if lo < 0:
+                continue
+            by_time = {}
+            for i, t in enumerate(self._tm_times):
+                if not self._state['confinement_mode'][i]:
+                    continue   # skip pure-L-mode points (no IBC there)
+                y = da.sel(time=t, method='nearest').values
+                slope = float(np.polyfit(rho[lo:hi + 1], y[lo:hi + 1], 1)[0])
+
+                # Clamp to <= 0: rho increases outward, so a physical pedestal falls from the core
+                # to the foot (slope < 0). Floor any positive fitted slope to 0 so the imposed value
+                # never rises above the pedestal top toward the edge.
+                slope = min(slope, 0.0)
+                by_time[float(t)] = (float(y[hi]), slope)
+            if by_time:
+                self._ped_smoothed[field] = by_time
+
+            # Core transition: read the relaxed on-axis (rho~0) value after the transition band has
+            # retreated and the core has relaxed, for the next loop's core target. dwell = one fit
+            # window past lh+transition.
+            core_height = {'T_e': self._core_height_Te, 'T_i': self._core_height_Ti,
+                           'n_e': self._core_height_ne}[field]
+            if core_height is not None and self._lh_time is not None:
+                t_read = self._lh_time + self._ped_transition_time + PED_GRAD_WINDOW
+                axis = int(np.argmin(rho))   # rho ~ 0 cell
+                y_read = da.sel(time=t_read, method='nearest').values
+                self._ped_core_relaxed[field] = float(y_read[axis])
+                # Evolved core at ~lh = the start of next loop's transition ramp, on the same core
+                # grid as _build_manual_ibc (ends one cell short of ped_rho, disjoint from pedestal).
+                core_dx = ped_rho / PED_N_SAMPLE
+                rhos_core = np.linspace(0.0, ped_rho - core_dx, PED_N_SAMPLE)
+                y_lh = da.sel(time=self._lh_time, method='nearest').values
+                prof = np.interp(rhos_core, rho, y_lh)
+                self._ped_lmode_profile[field] = {float(r): float(v) for r, v in zip(rhos_core, prof)}
+
+    def _run_torax(self, config):
+        r'''! Run TORAX via prepare_simulation + run_loop so we keep the raw list[SimState]
+                (torax.run_simulation() drops the pedestal confinement_mode). Returns the same
+                (data_tree, history) that run_simulation() would, plus the SimState list.
+
+                @param config TORAX config as a dict or a ToraxConfig.
+                @return Tuple (data_tree, state_history, state_list).
+        '''
+        tx_config = config if isinstance(config, torax.ToraxConfig) else torax.ToraxConfig.from_dict(config)
+        initial_state, post_processed, step_fn = run_sim_lib.prepare_simulation(tx_config)
+        state_list, pp_history, sim_error = run_loop_lib.run_loop(
+            initial_state=initial_state,
+            initial_post_processed_outputs=post_processed,
+            step_fn=step_fn,
+            progress_bar=True,
+        )
+        history = output_lib.StateHistory(
+            state_history=state_list,
+            post_processed_outputs_history=pp_history,
+            sim_error=sim_error,
+            torax_config=tx_config,
+        )
+        return history.simulation_output_to_xr(), history, state_list
+
+    def _capture_confinement_mode(self, state_list):
+        r'''! Map per-step pedestal confinement_mode to an H-mode bool series, store it per
+                tm_time in _state['confinement_mode'], and record the H-mode start/end times.
+                H_MODE and TRANSITIONING_TO_H_MODE -> True; L_MODE and TRANSITIONING_TO_L_MODE
+                -> False. No-op (leaves all False) if the L/H state machine is inactive.
+
+                The confinement_mode can dither around a transition, so a transition is only
+                accepted once the new state persists for at least the pedestal transition_time
+                (dwell debounce): a brief L dip inside H-mode is not read as the back-transition,
+                and a brief H blip in L-mode is not read as the L->H transition.
+
+                @param state_list list[SimState] from _run_torax.
+        '''
+        h_codes = {int(ConfinementMode.H_MODE), int(ConfinementMode.TRANSITIONING_TO_H_MODE)}
+        tx_times, is_h = [], []
+        for s in state_list:
+            pts = s.pedestal_transition_state
+            if pts is None:
+                continue
+            tx_times.append(float(s.t))
+            is_h.append(int(pts.confinement_mode) in h_codes)
+        if not tx_times:
+            return
+        tx_times = np.array(tx_times)
+        is_h = np.array(is_h, dtype=bool)
+        dwell = self._ped_transition_time
+
+        # First L->H that stays H for at least `dwell` (ignores brief H blips in L-mode).
+        lh = self._first_sustained(tx_times, is_h, True, 0, dwell)
+        if lh is None:
+            return
+        self._lh_time = float(tx_times[lh])
+        # First H->L after LH that stays L for at least `dwell` (ignores brief L dips in H-mode);
+        # if none, H-mode persists to the end and there is no back-transition.
+        hl = self._first_sustained(tx_times, is_h, False, lh, dwell)
+        self._hl_time = None if hl is None else float(tx_times[hl])
+
+        self._set_confinement_from_window(end_fallback=float(tx_times[-1]))
+
+        hl_str = f'{self._hl_time:.4g} s' if self._hl_time is not None else 'none (H-mode to t_final)'
+        self._log(f'Loop {self._current_loop}: L->H at {self._lh_time:.4g} s, H->L at {hl_str}.')
+        self._print(f'  TORAX: L->H transition at {self._lh_time:.4g} s, H->L back-transition at {hl_str}')
+
+    def _set_confinement_from_window(self, end_fallback=None):
+        r'''! Fill the per-tm-time H-mode flag from the known [lh, hl] window. Used by both the
+                detection path and timing='input' (where there is no detection state machine, so
+                the flag would otherwise stay all-False and the IBC smoothing would skip every
+                point). No-op if no L->H time is known.'''
+        if self._lh_time is None:
+            return
+        hl_t = self._hl_time
+        if hl_t is None:
+            hl_t = end_fallback if end_fallback is not None else self._t_final
+        for i, t in enumerate(self._tm_times):
+            self._state['confinement_mode'][i] = self._lh_time <= t <= hl_t
+
+    @staticmethod
+    def _first_sustained(times, flags, target, start, dwell):
+        r'''! Index of the first step at/after `start` where `flags == target` and that value
+                holds continuously for at least `dwell` seconds. Returns None if never sustained.'''
+        n = len(flags)
+        i = start
+        while i < n:
+            if flags[i] == target:
+                j = i
+                while j + 1 < n and flags[j + 1] == target:
+                    j += 1
+                if times[j] - times[i] >= dwell or j == n - 1:
+                    return i
+                i = j + 1   # too brief: skip this run and keep looking
+            else:
+                i += 1
+        return None
+
     def _run_tx_relax(self, *, stage, eqdsk_path, prescribed_profiles):
         r'''! Short TORAX relax: initial run on the seed EQDSK, or inter-loop on TM i=0 EQDSK.
         
@@ -2021,8 +2457,7 @@ class TokaMaker_TORAX:
                     f.write(pprint.pformat(self._numpy_to_plain_python(init_config), width=100, sort_dicts=False))
 
             self._log(f'{tag}: running TORAX...')
-            tx_config = torax.ToraxConfig.from_dict(init_config)
-            data_tree, hist = torax.run_simulation(tx_config, log_timestep_info=False)
+            data_tree, hist, _ = self._run_torax(init_config)
 
             if hist.sim_error != torax.SimError.NO_ERROR:
                 raise ValueError(f'TORAX relax ({stage}) failed: {hist.sim_error}')
@@ -2115,7 +2550,7 @@ class TokaMaker_TORAX:
             myconfig = self._get_tx_config()
             self._print('  TORAX: running simulation...')
             try:
-                data_tree, hist = torax.run_simulation(myconfig, log_timestep_info=False)
+                data_tree, hist, state_list = self._run_torax(myconfig)
             except Exception as e:
                 self._print(f'  TORAX: config/init FAILED — {e}')
                 raise
@@ -2126,6 +2561,9 @@ class TokaMaker_TORAX:
             if hist.sim_error != torax.SimError.NO_ERROR:
                 self._print(f'  TORAX: sim FAILED ({hist.sim_error})')
                 raise ValueError(f'TORAX failed to run the simulation: {hist.sim_error}')
+
+            # Capture the L/H confinement state (active in ADAPTIVE_SOURCE + formation model).
+            self._capture_confinement_mode(state_list)
 
             try:
                 self._capture_relax_tx_profiles_from_datatree(data_tree, self._t_init)
@@ -2143,6 +2581,11 @@ class TokaMaker_TORAX:
             for i, t in enumerate(self._tm_times):
                 self._tx_update(i, data_tree)
                 v_loops[i] = data_tree.scalars.v_loop_lcfs.sel(time=t, method='nearest')
+
+            # internal_manual pedestal: after an IBC-on loop, match the imposed inner-edge
+            # value+gradient to the TORAX-evolved core so the next loop's IBC is smooth.
+            if self._manual_ibc_active():
+                self._smooth_ibc_inner_edge()
 
             if self._save_outputs:
                 self._res_update(data_tree)
@@ -2571,13 +3014,27 @@ class TokaMaker_TORAX:
                         level_attempts.append({'level': level_idx, 'name': level_name,
                                               'ffp': ffp_level, 'pp': pp_level,
                                               'succeeded': False, 'error': str(e)})
+                        if self._output_mode == 'debug' and self._out_dir is not None:
+                            _ldiag_name = f'tm_diag_loop{self._current_loop:03d}_tidx{i:03d}_lv{level_idx:02d}.png'
+                            if self._output_file_tag is not None:
+                                _ldiag_name = f'{self._output_file_tag}_{_ldiag_name}'
+                            try:
+                                tm_diagnostic_plot(
+                                    self, i, t, level_attempts, solve_succeeded=False,
+                                    save_path=os.path.join(self._out_dir, _ldiag_name),
+                                    display=False, tm_gs_ok=False, step_error=str(e),
+                                )
+                            except Exception as _le:
+                                self._log(f'tm_diagnostic_plot (level {level_idx}) failed at i={i}: {_le}')
 
                 if not solve_succeeded:
                     self._eqdsk_skip.append(eq_name)
                     skip_coil_update = True
                     self._log(f'\tTM: Solve failed at t={t} (all levels attempted).')
                     self._state['psi_grid_prev_tm'][i] = None  # if solve failed, set psi grid to None
-                    if self._out_dir is not None:
+                    # In debug mode per-level plots are already saved inside the except block above.
+                    if self._out_dir is not None and self._output_mode != 'debug':
+                        _last_err = level_attempts[-1].get('error') if level_attempts else None
                         diag_name = f'tm_diag_loop{self._current_loop:03d}_tidx{i:03d}.png'
                         if self._output_file_tag is not None:
                             diag_name = f'{self._output_file_tag}_{diag_name}'
@@ -2585,7 +3042,7 @@ class TokaMaker_TORAX:
                         tm_diagnostic_plot(
                             self, i, t, level_attempts, solve_succeeded,
                             save_path=_diag_path, display=False,
-                            tm_gs_ok=tm_gs_ok, step_error=_log_err,
+                            tm_gs_ok=False, step_error=_last_err,
                         )
 
                 tm_gs_ok = solve_succeeded
@@ -2655,7 +3112,9 @@ class TokaMaker_TORAX:
                 })
 
                 if self._output_mode in ('debug', 'normal') and self._out_dir is not None:
-                    if self._output_mode == 'debug':
+                    # In debug mode, per-level failure plots are saved inside the solve loop above;
+                    # only emit the combined summary plot here on success.
+                    if self._output_mode == 'debug' and solve_succeeded:
                         diag_name = f'tm_diag_loop{self._current_loop:03d}_tidx{i:03d}.png'
                         if self._output_file_tag is not None:
                             diag_name = f'{self._output_file_tag}_{diag_name}'
@@ -2677,6 +3136,18 @@ class TokaMaker_TORAX:
                             profile_plot(self, i, t, save_path=_prof_path, display=False)
                         except Exception as _e:
                             self._log(f'profile_plot failed at i={i}: {_e}')
+
+                    # Manual-pedestal IBC diagnostic (debug mode, when the IBC is active).
+                    if (self._output_mode == 'debug' and solve_succeeded
+                            and self._ped_mode == 'internal_manual' and self._manual_ibc_active()):
+                        ped_name = f'IBC_debug_loop{self._current_loop:03d}_tidx{i:03d}.png'
+                        if self._output_file_tag is not None:
+                            ped_name = f'{self._output_file_tag}_{ped_name}'
+                        try:
+                            IBC_debug(self, i, t,
+                                      save_path=os.path.join(self._out_dir, ped_name))
+                        except Exception as _e:
+                            self._log(f'IBC_debug failed at i={i}: {_e}')
 
                 # Update progress bar postfix; print FAIL messages above the bar
                 if solve_succeeded:
@@ -3635,6 +4106,209 @@ MOVIE_EQUIL_PSI_PLASMA_NLEVELS = 16
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+# Number of rho points the imposed manual pedestal shape is sampled onto in
+# [ped_rho, 1]. TORAX linearly interpolates between them, so the IBC follows the shape.
+PED_N_SAMPLE = 24
+
+# rho_norm span (core-side of the IBC inner edge) over which the evolved gradient is
+# least-squares fit for inner-edge smoothing. Wider = smoother slope, esp. for density.
+PED_GRAD_WINDOW = 0.03
+
+
+def _mtanh_pedestal(rho, ped_top, foot, core_slope, knee, hwid, blend):
+    r'''! Linear core gradient smoothly blended into a tanh pedestal.
+
+        A line of slope core_slope through (ped_rho, ped_top) owns the core; a
+        tanh dropping from ped_top to foot owns the edge; a sigmoid (centred at
+        knee, width blend) hands off between them. Because the sigmoid weight is
+        ~0 at the inner edge, the gradient there is exactly core_slope.
+
+        @param rho Normalized rho array.
+        @param ped_top Value at the inner (left) edge.
+        @param foot Separatrix value at rho=1.
+        @param core_slope d(value)/d(rho_norm) imposed at the inner edge.
+        @param knee Rho where the core hands off to the pedestal.
+        @param hwid Pedestal (tanh) half-width.
+        @param blend Sharpness of the core->pedestal handoff.
+    '''
+    A = (ped_top - foot) / 2.0
+    B = (ped_top + foot) / 2.0
+    ped = A * np.tanh((knee - rho) / hwid) + B
+    core_line = ped_top + core_slope * (rho - rho[0])
+    w = 1.0 / (1.0 + np.exp(-(rho - knee) / blend))
+    return (1.0 - w) * core_line + w * ped
+
+
+def _bc_at(right_bc, t):
+    r'''! Evaluate an edge (rho=1) BC at time t: a scalar as-is, or a {time: value} map
+        linearly interpolated in time (constant-extrapolated past the ends).'''
+    if not isinstance(right_bc, dict):
+        return float(right_bc or 0.0)
+    ts = sorted(right_bc)
+    return float(np.interp(t, ts, [right_bc[k] for k in ts]))
+
+
+def _ped_top_slope_at(shape_by_time, t, default):
+    r'''! Interpolate (ped_top, slope) in time from a {tm_time: (ped_top, slope)} dict
+        (constant-extrapolated past the ends). Returns `default` if the dict is empty.'''
+    if not shape_by_time:
+        return default
+    ts = sorted(shape_by_time)
+    tops = [shape_by_time[k][0] for k in ts]
+    slopes = [shape_by_time[k][1] for k in ts]
+    return float(np.interp(t, ts, tops)), float(np.interp(t, ts, slopes))
+
+
+def _pedestal_ibc(ped_rho, right_bc, shape_by_time, default_shape, transition, windows,
+                  knee, hwid, blend):
+    r'''! Build a TORAX internal-boundary-condition SparseTimeVaryingArray for one
+        field: {time: {(ped_rho, 1.0): {rho: value}}}.
+
+        Three band states:
+          - OFF: all-zero -> ignored by TORAX (L-mode, TORAX evolves freely to the edge).
+          - L-MODE EDGE: flat at the edge BC across the whole band -> agrees with
+            n_e_right_bc at rho=1 and imposes no interior gradient.
+          - ON: the mtanh pedestal, foot = edge BC at that time.
+        The same (ped_rho, 1.0) location is present at every listed time (the "zero-off
+        trick") so TORAX does not constant-extrapolate the band on backwards.
+
+        PER-TM-TIME shape: the mtanh ped_top and inner-edge slope are taken from
+        `shape_by_time` ({tm_time: (ped_top, slope)}, from the previous loop's evolved
+        profile at each tm_time) and the band is listed at EVERY tm_time in the H-mode
+        window, so the imposed pedestal tracks the evolving profile time-point by
+        time-point. (A single time-averaged shape is wrong: the few transition-region
+        tm_times have anomalous steep slopes that poison the average.) Before any
+        smoothing exists, `default_shape` (ped_top, slope) is used at all times.
+
+        The transition ramps L-MODE EDGE -> ON (NOT OFF -> ON), so the foot stays at the
+        edge BC throughout the ramp (only the pedestal height above the foot grows in);
+        ramping from zeros instead would spike rho=1 and notch just inside.
+
+        @param ped_rho Inner edge rho of the imposed pedestal.
+        @param right_bc Edge (rho=1) BC: scalar or {time: value} map; sets the foot per time.
+        @param shape_by_time {tm_time: (ped_top, slope)} per-time mtanh shape (may be empty).
+        @param default_shape (ped_top, slope) used when shape_by_time is empty / outside it.
+        @param transition Ramp duration [s] at each L<->H edge.
+        @param windows List of (lh_time, hl_time) H-mode windows; hl_time may be None (stays on).
+        @param knee/hwid/blend mtanh shape parameters.
+    '''
+    rhos = np.linspace(ped_rho, 1.0, PED_N_SAMPLE)
+    loc = (ped_rho, 1.0)
+    off = {float(r): 0.0 for r in rhos}
+    # Times at which to (re)list the ON shape inside the window: every smoothed tm_time,
+    # plus any edge-BC breakpoints (so the foot tracks a ramping right_bc).
+    shape_times = sorted(shape_by_time)
+    bc_times = sorted(right_bc) if isinstance(right_bc, dict) else []
+
+    def lmode_edge(t):
+        # Flat at the edge BC across the band: agrees with n_e_right_bc at rho=1, no gradient.
+        return {float(r): _bc_at(right_bc, t) for r in rhos}
+
+    def on(t):
+        ped_top, core_slope = _ped_top_slope_at(shape_by_time, t, default_shape)
+        foot = _bc_at(right_bc, t)
+        return {float(r): float(v) for r, v in
+                zip(rhos, _mtanh_pedestal(rhos, ped_top, foot, core_slope, knee, hwid, blend))}
+
+    eps = 1.0e-6   # tiny step so OFF->flat-edge is abrupt (band genuinely OFF through L-mode)
+    spec = {0.0: {loc: off}}
+    for lh, hl in windows:
+        on_start = lh + transition
+        on_end = hl if hl is not None else float('inf')
+        spec[lh - eps] = {loc: off}                  # OFF right up to lh: TORAX free in L-mode
+        spec[lh] = {loc: lmode_edge(lh)}             # flat at edge BC, then ramp UP to the pedestal
+        spec[on_start] = {loc: on(on_start)}
+        # List the ON shape at every smoothed tm_time and edge-BC breakpoint inside the window,
+        # so the imposed pedestal tracks the per-time evolved shape and the ramping edge BC.
+        for tt in sorted(set(shape_times) | set(bc_times)):
+            if on_start < tt < on_end:
+                spec[tt] = {loc: on(tt)}
+        if hl is not None:
+            spec[hl] = {loc: on(hl)}
+            spec[hl + transition] = {loc: lmode_edge(hl + transition)}   # ramp DOWN to flat edge BC
+            spec[hl + transition + eps] = {loc: off}                     # then OFF: TORAX free again
+    return spec
+
+
+def _core_transition_profile(rhos, ped_rho, ped, core, exp_a=2.0, exp_b=2.0):
+    r'''! Smooth CORE-only H-mode-like profile over [0, ped_rho] that joins the pedestal top
+        WITHOUT its own edge roll-off (so it doesn't create a second pedestal):
+
+            f(rho) = ped + (core - ped) * (1 - (rho/ped_rho)^a)^b
+
+        With a>=2, b>=2 this has ~zero gradient at rho=0 (flat core), monotonically falls through
+        mid-radius, and FLATTENS into ped at rho=ped_rho (zero gradient there too), so it hands off
+        smoothly to the pedestal band (whose inner-edge slope is ~0). Unlike Hmode_profiles it has
+        NO tanh edge inside the core grid -- the drop ends exactly at ped_rho = ped_height, so the
+        only pedestal is the [ped_rho,1] band. Looks like the H-mode core (steepest mid-radius,
+        gentle at both ends).
+
+        @param rhos Normalized rho array over [0, ped_rho] to sample onto.
+        @param ped_rho Inner pedestal edge (where the core meets the pedestal top).
+        @param ped Pedestal-top value (= ped_height); the core endpoint at ped_rho.
+        @param core On-axis (rho=0) value.
+        @param exp_a/exp_b Core-shape exponents (a>=2, b>=2 for flat ends). Default 2/2.
+        @return core profile evaluated on `rhos`.
+    '''
+    x = np.clip(np.asarray(rhos, dtype=float) / ped_rho, 0.0, 1.0)
+    return ped + (core - ped) * (1.0 - x ** exp_a) ** exp_b
+
+
+def _merge_ibc_specs(spec_a, spec_b):
+    r'''! Merge two single-field IBC SparseTimeVaryingArrays that use DIFFERENT band locations
+        (e.g. the pedestal band (ped_rho,1) and the core band (0,core_hi)) into one
+        {time: {(lo,hi): {rho: value}}}.
+
+        TORAX groups IBC entries BY LOCATION (interpolated_param_2d): each band (lo,hi) becomes its
+        own TimeVaryingArray from only the times IT was listed at, interpolated independently of the
+        other band. So we just take the per-time union of whatever each spec actually lists -- a band
+        absent at some time is NOT carried forward here (it doesn't need to be; TORAX interpolates it
+        from its own listed times). This keeps each band sparse: e.g. the core band stays at its ~5
+        natural times even when the pedestal band is listed at every H-mode tm_time. Listing the
+        absent band at every union time would bloat the spec with redundant all-zero entries and
+        slow TORAX, with no effect on the result.
+
+        @param spec_a/spec_b {time: {(lo,hi): {rho: value}}} specs with distinct band keys.
+        @return merged {time: {(lo,hi): {rho: value}}}.
+    '''
+    merged = {}
+    for t in sorted(set(spec_a) | set(spec_b)):
+        entry = {}
+        if t in spec_a:
+            entry.update(spec_a[t])
+        if t in spec_b:
+            entry.update(spec_b[t])
+        merged[t] = entry
+    return merged
+
+
+def _transition_ibc(loc, lmode_profile, hmode_target, lh, transition):
+    r'''! Build a CORE (rho 0 -> ped_rho) internal-boundary-condition SparseTimeVaryingArray for
+        one field, active ONLY across the L->H transition window [lh, lh+transition]:
+        {time: {loc: {rho: value}}} where loc = (0.0, ped_rho).
+
+        The band ramps (TORAX linearly interpolates in time) from the TORAX-evolved L-mode core
+        at t=lh to the H-mode core at t=lh+transition, then retreats (OFF). The pedestal band owns
+        [ped_rho,1] at all times, so the two bands meet at ped_rho with no overlap. NO H->L entry.
+
+        @param loc Band location (0.0, ped_rho).
+        @param lmode_profile {rho: value} evolved L-mode core shape at ~lh (start of the ramp).
+        @param hmode_target {rho: value} H-mode core profile (end of the ramp).
+        @param lh L->H transition time [s].
+        @param transition Ramp duration [s].
+        @return {time: {loc: {rho: value}}} spec.
+    '''
+    off = {r: 0.0 for r in lmode_profile}
+    eps = 1.0e-6
+    return {
+        0.0:                    {loc: off},          # OFF from t=0 (zero-off trick anchor)
+        lh - eps:               {loc: off},          # OFF right up to lh: TORAX free in L-mode
+        lh:                     {loc: lmode_profile}, # ramp starts at the evolved L-mode core
+        lh + transition:        {loc: hmode_target},  # ramp ends at the H-mode core
+        lh + transition + eps:  {loc: off},           # band retreats; pedestal band stays on
+    }
+
+
 def _in_jupyter():
     r'''! Return True if running inside a Jupyter notebook.'''
     try:
@@ -3976,6 +4650,145 @@ def profile_plot(tt, i, t, save_path=None, display=True):
     _save_or_display(fig, save_path, display)
 
 
+def IBC_debug(tt, i, t, save_path=None):
+    r'''! Debug figure for the internal_manual IBC technique (debug mode, one per TM solve).
+            Always saved to save_path, never displayed. Three rows (T_e, T_i, n_e), all in rho_norm,
+            zoomed on the pedestal region (or the whole domain during the L->H transition):
+              - the TORAX-evolved profile (solid),
+              - the IBC target (soft) imposed at this time (x markers),
+              - the edge BC point at rho=1 (square),
+              - the inner-edge slope fit from THIS loop's evolved profile (dashed line over the
+                fit window),
+              - the slope used to BUILD this loop's IBC, i.e. last loop's smoothed slope (dotted
+                line extending beyond the fit window),
+              - during the L->H transition: the core IBC target (rho 0->ped_rho) and core target point,
+              - text of both slopes, the ped-top value, and the IBC stiffness prefactor.
+            NOTE: TORAX applies IBCs as a SOFT adaptive source/sink with stiffness
+            adaptive_{T,n}_source_prefactor, not a hard Dirichlet BC. The evolved profile relaxes
+            toward the target with that stiffness, so a target<->evolved gap (esp. for T, whose
+            default stiffness is weaker relative to heat transport) is expected behaviour, not a
+            bug; raise T_source_prefactor in set_pedestal to track the target more exactly.
+            Shows nothing useful unless the IBC is active (timing known); harmless otherwise.
+    '''
+    snap = getattr(tt, '_ped_ibc_snapshot', None)
+    dt = getattr(tt, '_data_tree', None)
+    if snap is None or dt is None:
+        return
+    ped_rho = snap['ped_rho']
+    ped_x0 = max(0.0, ped_rho - 0.10)   # zoom: a bit inside the inner edge out to rho=1
+    fields = [('T_e', 'T_e [keV]', 1.0), ('T_i', 'T_i [keV]', 1.0),
+              ('n_e', r'n_e [m$^{-3}$]', 1.0)]
+    # During the L->H transition the full-domain IBC is active; zoom out to the whole domain so the
+    # imposed core profile + constraints are visible. Detect it from any field's transition band.
+    lh = (snap['windows'][0][0] if snap.get('windows') else None)
+    in_transition = (lh is not None and lh <= t <= lh + snap['transition']
+                     and any(f.get('transition_active') for f in snap['fields'].values()))
+    x0 = 0.0 if in_transition else ped_x0
+
+    # IBCs are SOFT penalties (TORAX adaptive_{T,n}_source_prefactor): the evolved profile relaxes
+    # toward the imposed target with this stiffness, so a gap target<->evolved is expected, not a bug.
+    fig, axes = plt.subplots(3, 1, figsize=(10, 13), sharex=True)
+    plt.suptitle(f'Manual pedestal IBC debug (soft target) — loop {tt._current_loop} - '
+                 f't-idx {i}/{len(tt._tm_times)-1} - t = {t:.2f} s\n'
+                 f'IBC stiffness: T_source_prefactor={snap["T_pref"]:.2g}, '
+                 f'n_source_prefactor={snap["n_pref"]:.2g}', fontsize=12)
+
+    for ax, (field, ylabel, scale) in zip(axes, fields):
+        fcfg = snap['fields'].get(field)
+        pref = snap['n_pref'] if field == 'n_e' else snap['T_pref']
+        da = getattr(dt.profiles, field, None)
+        if da is not None:
+            rho = da.coords['rho_norm'].values
+            y = da.sel(time=t, method='nearest').values * scale
+            m = rho >= x0
+            ax.plot(rho[m], y[m], 'k-', lw=1.8, label='TORAX evolved (relaxes to target)')
+        ax.set_ylabel(ylabel)
+        ax.grid(True, alpha=0.3)
+        ax.axvline(ped_rho, color='grey', ls=':', alpha=0.7, label=f'inner edge (rho={ped_rho:.3f})')
+
+        if fcfg is None:
+            ax.set_title(f'{field}: no pedestal height set')
+            ax.legend(fontsize=8)
+            continue
+
+        # Per-time IBC shape (ped_top, slope) interpolated at THIS time t (same as the IBC build).
+        used_top, used_slope = _ped_top_slope_at(fcfg['shape_by_time'], t, fcfg['default_shape'])
+        # IBC sample points imposed at this time (rebuild the same mtanh samples).
+        spec = _pedestal_ibc(ped_rho, fcfg['right_bc'], fcfg['shape_by_time'], fcfg['default_shape'],
+                             snap['transition'], snap['windows'],
+                             snap['knee'], snap['hwid'], snap['blend'])
+        # Evaluate the spec at time t (linear-in-time per location, same as TORAX).
+        ibc_pts = _eval_ibc_at_time(spec, t)
+        if ibc_pts is not None:
+            rr, vv = ibc_pts
+            ax.plot(rr, np.array(vv) * scale, 'x', color='tab:orange', ms=7, mew=1.6,
+                    label='IBC target (soft)')
+        # Edge BC point at rho=1.
+        bc = _bc_at(fcfg['right_bc'], t) * scale
+        ax.plot(1.0, bc, 's', color='tab:red', ms=8, label='edge BC (rho=1)')
+
+        # Core L->H transition: overlay the imposed core IBC target (rho 0 -> ped_rho) + constraints.
+        if fcfg.get('transition_active'):
+            trans_spec = _transition_ibc(fcfg['trans_loc'], fcfg['lmode_profile'],
+                                         fcfg['hmode_target'], lh, snap['transition'])
+            tpts = _eval_ibc_at_time(trans_spec, t)
+            if tpts is not None:   # band active (ramping) at this time
+                rr, vv = tpts
+                ax.plot(rr, np.array(vv) * scale, '.', color='tab:purple', ms=6,
+                        label='transition IBC target (core, soft)')
+                core_src = fcfg.get('core_source', 'user')
+                ax.plot(0.0, fcfg['core'] * scale, 'D', color='tab:purple', ms=8,
+                        label=f'core target = {fcfg["core"]:.3g} ({core_src})')
+
+        # Slope used to BUILD this IBC at THIS time (prev-loop smoothed slope, interpolated to t),
+        # as a line through (ped_rho, ped_top) extending beyond the fit window so it's visible.
+        xs = np.array([ped_rho - 0.06, ped_rho + 0.04])
+        ax.plot(xs, (used_top + used_slope * (xs - ped_rho)) * scale,
+                ls=':', color='tab:blue', lw=1.6,
+                label=f'slope used (prev loop) = {used_slope:.3g}')
+
+        # Slope freshly fit from THIS loop's evolved profile near the inner edge (what next loop
+        # will use at this time), over the fit window only. Should match 'slope used' once converged.
+        if da is not None:
+            hi = int(np.argmin(np.abs(rho - ped_rho)))
+            lo = min(int(np.searchsorted(rho, ped_rho - PED_GRAD_WINDOW)), hi - 2)
+            if lo >= 0 and hi > lo:
+                fit_slope = float(np.polyfit(rho[lo:hi + 1], y[lo:hi + 1], 1)[0])
+                xf = rho[lo:hi + 1]
+                yf = y[hi] + fit_slope * (xf - rho[hi])
+                ax.plot(xf, yf, '--', color='tab:green', lw=2.0,
+                        label=f'slope fit (this loop) = {fit_slope:.3g}')
+
+        tag = 'smoothed' if fcfg['smoothed'] else 'user-height fallback'
+        ax.set_title(f'{field}:  ped_top={used_top:.3g} ({tag}),  '
+                     f'edge BC={bc:.3g},  stiffness={pref:.2g}', fontsize=10)
+        ax.legend(fontsize=8, loc='best')
+
+    axes[-1].set_xlabel(r'$\rho_\mathrm{norm}$')
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.94, hspace=0.18)
+    # Always save, never display (this figure is only written during the sim).
+    _save_or_display(fig, save_path, display=False)
+
+
+def _eval_ibc_at_time(spec, t):
+    r'''! Evaluate a single-field IBC SparseTimeVaryingArray spec at time t -> (rhos, values),
+            linearly interpolating each rho's value in time between listed times (matching TORAX).
+            Returns None if the band is OFF (all zero) at t.'''
+    loc = next(iter(next(iter(spec.values()))))   # the (lo, hi) location key
+    times = sorted(spec)
+    lo_t = max([x for x in times if x <= t], default=times[0])
+    hi_t = min([x for x in times if x >= t], default=times[-1])
+    dlo = spec[lo_t][loc]
+    dhi = spec[hi_t][loc]
+    w = 0.0 if hi_t == lo_t else (t - lo_t) / (hi_t - lo_t)
+    rhos = sorted(dlo)
+    vals = [(1.0 - w) * dlo[r] + w * dhi[r] for r in rhos]
+    if all(v == 0.0 for v in vals):
+        return None
+    return np.array(rhos), vals
+
+
 # ── TokaMaker diagnostic plot ─────────────────────────────────────────────────
 
 def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None, display=True,
@@ -4107,6 +4920,16 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
     ax_eta.grid(True, alpha=0.3)
 
     if solve_succeeded:
+        _beta_pol_tm_ok_str = '\u2014'
+        try:
+            _equil_snap_ok = s.get('equil', {}).get(i)
+            if _equil_snap_ok is not None:
+                _ok_stats = _equil_snap_ok.get_stats()
+                if 'beta_pol' in _ok_stats:
+                    _beta_pol_tm_ok_str = f"{float(_ok_stats['beta_pol']) / 100.0:.4f}"
+        except Exception:
+            pass
+
         input_rows = [
             ['Parameter', 'Init EQDSK', 'TORAX', 'TokaMaker'],
             ['Ip', f'{Ip_seed / 1e6:.3f} MA', f'{Ip_tx / 1e6:.3f} MA', f'{float(s["Ip_tm"][i]) / 1e6:.3f} MA'],
@@ -4118,7 +4941,7 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
             ['q95', f'{q95_seed_eq:.3f}', f'{q95_tx:.3f}', f'{float(s["q95_tm"][i]):.3f}'],
             ['q0', f'{q0_seed_eq:.3f}', f'{q0_tx:.3f}', f'{float(s["q0_tm"][i]):.3f}'],
             ['v_loop', '\u2014', f'{vloop_tx:.3f} V', f'{float(s["vloop_tm"][i]):.3f} V'],
-            ['beta_pol', '\u2014', f'{beta_pol_tx:.4f}', '\u2014'],
+            ['beta_pol', '\u2014', f'{beta_pol_tx:.4f}', _beta_pol_tm_ok_str],
             ['beta_N', '\u2014', f'{beta_n_tx:.4f}', f'{float(s["beta_N_tm"][i]):.4f}'],
             ['l_i', '\u2014', '\u2014', f'{float(s["l_i_tm"][i]):.4f}'],
         ]
@@ -4172,19 +4995,43 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
             fontsize=13, color='darkgreen',
         )
     else:
+        _tm_nl_tol = getattr(getattr(tt._tm, 'settings', None), 'nl_tol', None)
+        _tol_str = f'{_tm_nl_tol:.2e}' if _tm_nl_tol is not None else '\u2014'
+        _raw_err = _last.get('error') or (fail_msg if fail_msg else 'Unknown')
+        # Strip the generic "Error in solve: " prefix so only the specific reason shows.
+        _fail_reason_str = _raw_err.removeprefix('Error in solve: ') if _raw_err else 'Unknown'
+
+        _beta_pol_tm_str = '\u2014'
+        try:
+            _tm_stats = tt._tm.get_stats()
+            if 'beta_pol' in _tm_stats:
+                _beta_pol_tm_str = f"{float(_tm_stats['beta_pol']) / 100.0:.4f}"
+        except Exception:
+            pass
+
+        _psi_lcfs_tm_achieved_str = '\u2014'
+        try:
+            _pb = tt._tm.psi_bounds  # [psi_axis, psi_lcfs] in TM-native sign
+            _psi_lcfs_tm_achieved_str = f'{float(_pb[1]):.4f} Wb/rad'
+        except Exception:
+            pass
+
         input_rows = [
             ['Parameter', 'Init EQDSK', 'TORAX'],
             ['Ip', f'{Ip_seed / 1e6:.3f} MA', f'{Ip_tx / 1e6:.3f} MA'],
             ['pax', f'{pax_seed / 1e3:.2f} kPa', f'{pax_tx / 1e3:.2f} kPa'],
-            ['psi_lcfs', f'{psi_lcfs_seed:.4f} Wb/rad', f'{psi_lcfs_tx:.4f} Wb/rad'],
+            ['psi_lcfs tgt', f'{psi_lcfs_seed:.4f} Wb/rad', f'{psi_lcfs_tx:.4f} Wb/rad'],
+            ['psi_lcfs TM', _psi_lcfs_tm_achieved_str, ''],
         ]
         diag_rows = [
             ['Parameter', 'Init EQDSK', 'TORAX'],
             ['q95', f'{q95_seed_eq:.3f}', f'{q95_tx:.3f}'],
             ['q0', f'{q0_seed_eq:.3f}', f'{q0_tx:.3f}'],
             ['v_loop', '\u2014', f'{vloop_tx:.3f} V'],
-            ['beta_pol', '\u2014', f'{beta_pol_tx:.4f}'],
+            ['beta_pol (TX)', '\u2014', f'{beta_pol_tx:.4f}'],
+            ['beta_pol (TM)', '\u2014', _beta_pol_tm_str],
             ['beta_N', '\u2014', f'{beta_n_tx:.4f}'],
+            ['TM nl_tol', _tol_str, ''],
         ]
 
         for blank_ax in [ax_ffp_tm, ax_pp_tm, ax_q_tm]:
@@ -4193,9 +5040,13 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
                           transform=blank_ax.transAxes, fontweight='bold')
 
         render_table(ax_tbl1, input_rows, 'Scalar Inputs (Init EQDSK vs TORAX)')
-        diag_rows.append(['', '', ''])
-        diag_rows.append(['Failure Reason:', fail_msg if fail_msg else 'Unknown', ''])
         render_table(ax_tbl2, diag_rows, 'TORAX Diagnostics & Failure Info')
+        ax_tbl2.text(
+            0.5, -0.04,
+            f'Fail: {_fail_reason_str}',
+            transform=ax_tbl2.transAxes, fontsize=8, ha='center', va='top',
+            color='darkred', fontweight='bold', wrap=True,
+        )
 
         if _gs_ok:
             plt.suptitle(
@@ -4227,12 +5078,35 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
         ax_mini_eq.set_aspect('equal')
         ax_mini_eq.set_title('TM equilibrium', fontsize=9)
         ax_mini_eq.tick_params(labelsize=6)
+    elif not _gs_ok:
+        # TM failed to converge — current psi state may still be instructive
+        _psi_plotted = False
+        try:
+            tt._tm.plot_machine(
+                fig, ax_mini_eq, coil_colormap='seismic', coil_symmap=False,
+                coil_scale=1.E-6, coil_clabel=None,
+            )
+            tt._tm.plot_psi(fig, ax_mini_eq, xpoint_color='r', vacuum_nlevels=3)
+            ax_mini_eq.set_aspect('equal')
+            ax_mini_eq.tick_params(labelsize=6)
+            ax_mini_eq.text(
+                0.02, 0.98, 'unconverged psi', transform=ax_mini_eq.transAxes, fontsize=7,
+                ha='left', va='top', color='darkred', fontweight='bold',
+            )
+            _psi_plotted = True
+        except Exception:
+            pass
+        if not _psi_plotted:
+            ax_mini_eq.axis('off')
+            ax_mini_eq.text(
+                0.5, 0.5, 'TokaMaker did not converge\n(no psi available)',
+                transform=ax_mini_eq.transAxes, fontsize=8,
+                ha='center', va='center', color='darkred', fontweight='bold',
+            )
+        ax_mini_eq.set_title('TM psi (unconverged)', fontsize=9)
     else:
         ax_mini_eq.axis('off')
-        if not _gs_ok:
-            _mini_msg = 'TokaMaker did not converge'
-            _mini_color = 'darkred'
-        elif not solve_succeeded:
+        if not solve_succeeded:
             _mini_msg = 'TM converged; EQDSK rejected by TORAX'
             _mini_color = 'darkorange'
         else:
