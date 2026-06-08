@@ -2765,6 +2765,7 @@ IF(ASSOCIATED(saddle_save))THEN
     DEALLOCATE(saddle_save)
   END IF
 END IF
+equil%skip_targets=.FALSE.
 !---
 IF(self%compute_chi)CALL equil%get_chi
 self%ierr=error_flag

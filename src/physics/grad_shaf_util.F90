@@ -406,7 +406,7 @@ CALL hdf5_write(self%o_point,filename,'tokamaker/O_POINT')
 CALL hdf5_write(self%lim_point,filename,'tokamaker/LIM_POINT')
 CALL hdf5_write(self%diverted,filename,'tokamaker/DIVERTED')
 !---
-IF(self%Ip_target/=-1.d0)CALL hdf5_write(self%Ip_target,filename,'tokamaker/IP_TARGET')
+IF(self%Ip_target>0.d0)CALL hdf5_write(self%Ip_target,filename,'tokamaker/IP_TARGET')
 IF(self%Ip_ratio_target>-1.d98)CALL hdf5_write(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET')
 IF(self%R0_target>0.d0)CALL hdf5_write(self%R0_target,filename,'tokamaker/R0_TARGET')
 IF(self%Z0_target>-1.d98)CALL hdf5_write(self%Z0_target,filename,'tokamaker/Z0_TARGET')
@@ -786,7 +786,7 @@ IF(hdf5_field_exist(filename,'tokamaker/IP_TARGET'))THEN
     error_string='Failed to read Ip target.'
     RETURN
   END IF
-  self%Ip_target=ABS(self%Ip_target)
+  self%Ip_target=self%Ip_target
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/IP_RATIO_TARGET'))THEN
   CALL hdf5_read(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET',success=success)
