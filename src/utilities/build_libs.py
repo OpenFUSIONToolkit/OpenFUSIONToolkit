@@ -6,6 +6,7 @@
 #------------------------------------------------------------------------------
 from __future__ import print_function
 import os
+import platform
 import shutil
 import sys
 import time
@@ -317,14 +318,14 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
         config_dict['CHK_FLAGS'] = "-O0 -check bounds,pointers,shape,uninit"
         config_dict['OPT_FLAGS'] = ""
     # Determine OS type
-    import platform
-    config_dict['OS_TYPE'] = platform.uname()[0]
+    config_dict['OS_TYPE'] = platform.uname().system
+    config_dict['OS_ARCH'] = platform.uname().machine
     if config_dict['OS_TYPE'] == 'Darwin':
         result, errcode = run_command('sw_vers -productVersion')
         config_dict['OS_VER'] = result
         config_dict['DYN_EXT'] = '.dylib'
     else:
-        config_dict['OS_VER'] = platform.uname()[2]
+        config_dict['OS_VER'] = platform.uname().release
         config_dict['DYN_EXT'] = '.so'
     # Return dictionary
     return config_dict
@@ -341,7 +342,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
     # Create "config_cmake.sh" file containing library and build information
     tmp_dict = mydict.copy()
     tmp_dict['date'] = time.strftime("%c")
-    tmp_dict['machine'] = os.uname()[1]
+    tmp_dict['machine'] = platform.uname().node
     tmp_dict['script_args'] = ' '.join(sys.argv[1:])
     tmp_dict['LD'] = mydict['FC']
     tmp_dict['cmake_install_dir'] = os.path.join("$ROOT_PATH","install_debug" if build_debug else "install_release")
@@ -849,17 +850,21 @@ class MPICH(package):
         if self.config_dict['OS_TYPE'] == 'Darwin':
             print("  macOS detected: Looking for required packages with homebrew")
             # Search for HWLOC
-            result, errcode = run_command("brew --prefix hwloc")
+            result, errcode = run_command("brew --prefix --installed hwloc")
             if errcode == 0:
                 hwloc_path = result.strip()
                 print("    Using hwloc from homebrew: {0}".format(hwloc_path))
                 config_options.append('--with-hwloc={0}'.format(hwloc_path))
+            else:
+                print("    Could not find hwloc, using MPICH-bundled version")
             # # Search for PMIx (If external PMIx is used mpiexec is not built)
-            # result, errcode = run_command("brew --prefix pmix")
+            # result, errcode = run_command("brew --prefix --installed pmix")
             # if errcode == 0:
             #     pmix_path = result.strip()
             #     print("    Using pmix from homebrew: {0}".format(pmix_path))
             #     config_options.append('--with-pmix={0}'.format(pmix_path))
+            # else:
+            #     print("    Could not find pmix, using MPICH-bundled version")
         build_lines += [
             "../configure " + " ".join(config_options),
             "make -j{MAKE_THREADS}",
@@ -1332,10 +1337,10 @@ int main(int argc, char** argv) {
         else:
             make_thread = ['MAKE_NB_JOBS={MAKE_THREADS}']
         if self.threaded:
-            oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1', 'FCOMMON_OPT="-frecursive {OMP_FLAGS} -fPIC"']
+            oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1']
         else:
-            oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1', 'FCOMMON_OPT="-frecursive -fPIC"']
-        if self.no_avx:
+            oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1']
+        if self.no_avx or (self.config_dict['OS_ARCH'] == 'arm64'):
             oblas_options += ['NO_AVX=1', 'NO_AVX2=1']
         else:
             if self.config_dict['OS_TYPE'] == 'Darwin':
