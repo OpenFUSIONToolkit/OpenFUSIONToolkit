@@ -313,7 +313,6 @@ END IF
 print_header=(oft_env%rank==0)
 IF(PRESENT(quiet))print_header=print_header.AND.(.NOT.quiet)
 IF(print_header)THEN
-  WRITE(*,*)
   WRITE(*,'(A)')'   ____'
   WRITE(*,'(A)')'  / __ \____  ___  ____'
   WRITE(*,'(A)')' / / / / __ \/ _ \/ __ \'
