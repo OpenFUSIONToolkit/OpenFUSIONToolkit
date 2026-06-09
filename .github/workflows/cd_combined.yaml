@@ -1,4 +1,4 @@
-name: PYPI CD Build and Deployment
+name: CD Build and Deployment
 
 on:
   push:
@@ -12,13 +12,13 @@ on:
       - src/utilities/build_libs.py
 
 concurrency:
-  group: cd_pypi-${{ github.ref }}
+  group: cd_comb-${{ github.ref }}
   cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
-  
+
 jobs:
   linux-build:
     if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
-    name: ${{ format('PYPI Linux CD ({0})', matrix.config.name) }}
+    name: ${{ format('Linux CD ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     container: ${{ matrix.config.image }}
     timeout-minutes: 45
@@ -45,7 +45,7 @@ jobs:
       uses: actions/checkout@v5
       with:
         fetch-depth: 0
-    
+
     - name: Install prerequisites
       run: |
         dnf -y update
@@ -57,7 +57,7 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         python -m pip install -U pip
         python -m pip install jupyter nbconvert build wheel
-    
+
     - name: Mark repository as safe
       run: git config --global --add safe.directory $GITHUB_WORKSPACE
 
@@ -86,7 +86,7 @@ jobs:
       with:
         name: Library failure log
         path: builds/build/build_error.log
-    
+
     - name: Remove external build directory
       shell: bash
       working-directory: builds
@@ -105,7 +105,7 @@ jobs:
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make
-    
+
     - name: Install OFT
       shell: bash
       working-directory: builds/build_release
@@ -113,23 +113,38 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         make install
 
+    - name: Package OFT
+      shell: bash
+      working-directory: builds/build_release
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        make package
+
+    - name: Upload binary artifacts
+      uses: actions/upload-artifact@v6
+      with:
+        name: ${{ matrix.config.name }}-${{ github.sha }}
+        path: builds/build_release/OpenFUSIONToolkit_*
+        overwrite: true
+
     - name: Build Python Wheels
       shell: bash
       working-directory: builds/install_release/python
       run: |
         source ${{ github.workspace }}/setup_env.sh
         bash make_package.sh
-    
+
     - name: Upload PYPI artifacts
       uses: actions/upload-artifact@v6
       with:
-        name: ${{ matrix.config.name }}-${{ github.sha }}
+        name: ${{ matrix.config.name }}-wheel
         path: builds/install_release/python/dist/*.whl
         overwrite: true
-  
+        retention-days: 2
+
   macos-build:
     if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
-    name: ${{ format('PYPI macOS CD ({0})', matrix.config.name) }}
+    name: ${{ format('macOS CD ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 45
     env:
@@ -168,14 +183,14 @@ jobs:
       uses: actions/checkout@v5
       with:
         fetch-depth: 0
-    
+
     - name: Get OS version
       run: |
         sw_vers -productVersion
         pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
         sudo xcode-select -s ${{ matrix.config.xcode_path }}
         xcode-select -p
-    
+
     - name: Install prerequisites
       run: |
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
@@ -191,12 +206,12 @@ jobs:
         $FC --version
 
     - name: Create build directory
-      run: mkdir libs
+      run: mkdir builds
 
     - name: Build external (Nightly)
       if: github.ref != 'refs/heads/pypi_release'
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py --no_dl_progress --build_arpack=1 --oft_package ${{ matrix.config.build_libs_flags }}
@@ -204,7 +219,7 @@ jobs:
     - name: Build external (Release)
       if: github.event_name == 'push' && github.ref == 'refs/heads/pypi_release'
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py --no_dl_progress --build_arpack=1 --oft_package --oft_package_release ${{ matrix.config.build_libs_flags }}
@@ -214,48 +229,63 @@ jobs:
       if: failure()
       with:
         name: Library failure log
-        path: libs/build/build_error.log
-    
+        path: builds/build/build_error.log
+
     - name: Remove external build directory
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: rm -rf build
 
     - name: Configure OFT
       shell: bash
-      working-directory: libs
+      working-directory: builds
       run: |
         source ${{ github.workspace }}/setup_env.sh
         bash config_cmake.sh
 
     - name: Build OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make
-    
+
     - name: Install OFT
       shell: bash
-      working-directory: libs/build_release
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make install
 
-    - name: Build Python Wheels
+    - name: Package OFT
       shell: bash
-      working-directory: libs/install_release/python
+      working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        bash make_package.sh
-    
-    - name: Upload PYPI artifacts
+        make package
+
+    - name: Upload binary artifacts
       uses: actions/upload-artifact@v6
       with:
         name: ${{ matrix.config.name }}-${{ github.sha }}
-        path: libs/install_release/python/dist/*.whl
+        path: builds/build_release/OpenFUSIONToolkit_*
         overwrite: true
-  
+
+    - name: Build Python Wheels
+      shell: bash
+      working-directory: builds/install_release/python
+      run: |
+        source ${{ github.workspace }}/setup_env.sh
+        bash make_package.sh
+
+    - name: Upload PYPI artifacts
+      uses: actions/upload-artifact@v6
+      with:
+        name: ${{ matrix.config.name }}-wheel
+        path: builds/build_release/OpenFUSIONToolkit_*
+        overwrite: true
+        retention-days: 2
+
   publish-to-testpypi:
     name: Publish Python distribution to TestPyPI
     needs:
@@ -276,7 +306,7 @@ jobs:
       uses: actions/download-artifact@v6
       with:
         path: staging/
-    
+
     - name: Combine all dists into one directory
       run: |
         ls -l staging/
@@ -289,7 +319,7 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         repository-url: https://test.pypi.org/legacy/
-  
+
   publish-to-pypi:
     name: Publish Python distribution to PyPI
     needs:
@@ -310,7 +340,7 @@ jobs:
       uses: actions/download-artifact@v6
       with:
         path: staging/
-    
+
     - name: Combine all dists into one directory
       run: |
         ls -l staging/
