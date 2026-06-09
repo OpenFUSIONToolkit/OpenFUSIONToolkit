@@ -34,7 +34,7 @@ jobs:
         sudo apt-get -y install lcov
         python3 -m venv ${{ github.workspace }}/oft_venv
         source ${{ github.workspace }}/oft_venv/bin/activate
-        python -m pip install pytest coverage numpy scipy h5py xarray matplotlib
+        python -m pip install pytest coverage numpy scipy h5py netcdf4 matplotlib
 
     - name: Cache external libraries
       id: cache-ext-libs

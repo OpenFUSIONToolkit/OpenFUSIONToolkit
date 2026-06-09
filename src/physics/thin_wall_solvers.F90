@@ -486,7 +486,7 @@ IF(nlocal>1)THEN
     ! parts(i)%n=0
   END DO
   !---Get matrix slice
-  !$omp parallel do private(j,k) schedule(static,1)
+  !$omp parallel do private(j,k) schedule(static)
   DO i=1,nlocal
     DO j=1,parts(i)%n
       DO k=1,parts(i)%n
@@ -533,7 +533,7 @@ DO j=1,ncoils
   DO i=1,nrits
   !---Precondition search direction
   IF(nlocal>1)THEN
-      !$omp parallel do private(kk) schedule(static,1)
+      !$omp parallel do private(kk) schedule(static)
       DO k=1,nlocal
         DO kk=1,parts(k)%n
           parts(k)%b(kk)=v(ABS(parts(k)%ind(kk)),i)

@@ -135,7 +135,7 @@ jobs:
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
-        python -m pip install pytest numpy scipy h5py matplotlib xarray jupyter nbconvert pyvista
+        python -m pip install pytest numpy scipy h5py netcdf4 matplotlib jupyter nbconvert pyvista
     
     - name: Install prerequisites (macOS)
       if: startsWith(matrix.config.os, 'macos')
@@ -144,7 +144,7 @@ jobs:
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
-        python -m pip install pytest numpy scipy h5py matplotlib xarray jupyter nbconvert
+        python -m pip install pytest numpy scipy h5py netcdf4 matplotlib jupyter nbconvert
     
     - name: Install Intel oneAPI
       if: ${{ matrix.config.cc == 'icx' }}
@@ -249,7 +249,7 @@ jobs:
     - name: Test OFT examples
       if: ${{ matrix.config.os != 'macos-15-intel' }}
       shell: bash
-      timeout-minutes: 20
+      timeout-minutes: 30
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh

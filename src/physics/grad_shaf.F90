@@ -1345,7 +1345,7 @@ CALL b%get_local(btmp)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!!$omp do schedule(static,1)
+!!$omp do schedule(static)
 DO j=1,self%fe_rep%mesh%nc
   IF(self%fe_rep%mesh%reg(j)/=1)CYCLE
   call self%fe_rep%ncdofs(j,j_lag)
@@ -1401,7 +1401,7 @@ CALL b%get_local(btmp)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,self%fe_rep%mesh%nc
   nturns=self%coil_nturns(self%fe_rep%mesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
@@ -1456,7 +1456,7 @@ CALL b%get_local(btmp)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,smesh%nc
   nturns=self%coil_nturns(smesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
@@ -1536,7 +1536,7 @@ END IF
 allocate(rhs_loc(self%fe_rep%nce+self%ncoils))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,self%fe_rep%mesh%nc
   nturns = MAXVAL(ABS(self%coil_nturns(self%fe_rep%mesh%reg(j),:)))
   IF(eta_reg(self%fe_rep%mesh%reg(j))<0.d0.AND.nturns<1.d-8)CYCLE
@@ -1620,7 +1620,7 @@ mutual=0.d0
 !$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psi_tmp,l,rop,nturns) reduction(+:mutual)
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,self%fe_rep%mesh%nc
   nturns=self%coil_nturns(self%fe_rep%mesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
@@ -1667,7 +1667,7 @@ mutual=0.d0
 !$omp parallel private(j,j_lag,curved,goptmp,v,m,det,l,rop,nturns,j_phi,psi_tmp) reduction(+:mutual)
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,smesh%nc
   nturns=self%coil_nturns(smesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
@@ -1729,7 +1729,7 @@ itor=0.d0
 !$omp reduction(+:itor)
 allocate(rop(device%fe_rep%nce))
 allocate(j_lag(device%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(j)/=1)CYCLE
   call device%fe_rep%ncdofs(j,j_lag)
@@ -3316,7 +3316,7 @@ dflux_ffp=0.d0
 allocate(rhs_loc(device%fe_rep%nce,3))
 allocate(rop(device%fe_rep%nce),vcache(device%fe_rep%nce))
 allocate(j_lag(device%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 do j=1,device%fe_rep%mesh%nc
   ! IF(self%cflag(j)==3)CYCLE ! Vacuum region (no source)
   IF(device%fe_rep%mesh%reg(j)/=1)CYCLE ! Only compute in plasma region
@@ -5583,7 +5583,7 @@ END IF
 !!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psitmp,l,rop,nturns) reduction(+:mutual)
 allocate(rop(self%fe_rep%nce),row_tmp(self%fe_rep%nce,1))
 allocate(j_lag(self%fe_rep%nce),col_tmp(1,self%fe_rep%nce))
-!!$omp do schedule(static,1)
+!!$omp do schedule(static)
 DO j=1,smesh%nc
   nturns=self%coil_nturns(smesh%reg(j),iCoil)
   eta_wt=0.d0
@@ -5937,7 +5937,7 @@ ALLOCATE(rop1(self%fe_rep%nce),gop1(3,self%fe_rep%nce))
 ALLOCATE(el2(self%fe_rep%nce),loc_map2(self%fe_rep%nce))
 ALLOCATE(rop2(self%fe_rep%nce),gop2(3,self%fe_rep%nce))
 active_targets%device=>self
-!$omp do schedule(static,10)
+!$omp do schedule(static)
 DO i=1,self%bc_nrhs
   IF(self%fe_rep%be(self%bc_rhs_list(i)))CYCLE
   cell1 = self%fe_rep%lec(self%fe_rep%kec(self%bc_rhs_list(i)))
@@ -5984,7 +5984,7 @@ END DO
 !$omp end do nowait
 !---Compute inductance and mass matrices for boundary
 ALLOCATE(ltmp(self%fe_rep%nbe))
-!$omp do schedule(static,10)
+!$omp do schedule(static)
 DO i=1,smesh%nbe
   cell1=elist(2,i)
   ed1=elist(1,i)
