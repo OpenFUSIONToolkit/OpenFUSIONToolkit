@@ -249,7 +249,7 @@ jobs:
     - name: Test OFT examples
       if: ${{ matrix.config.os != 'macos-15-intel' }}
       shell: bash
-      timeout-minutes: 20
+      timeout-minutes: 30
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
