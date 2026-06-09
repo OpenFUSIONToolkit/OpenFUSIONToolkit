@@ -282,7 +282,7 @@ jobs:
       uses: actions/upload-artifact@v6
       with:
         name: ${{ matrix.config.name }}-wheel
-        path: builds/build_release/OpenFUSIONToolkit_*
+        path: builds/install_release/python/dist/*.whl
         overwrite: true
         retention-days: 2
 
