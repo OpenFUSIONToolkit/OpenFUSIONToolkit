@@ -14,7 +14,7 @@ on:
 concurrency:
   group: cd_comb-${{ github.ref }}
   cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
-  
+
 jobs:
   linux-build:
     if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
@@ -45,7 +45,7 @@ jobs:
       uses: actions/checkout@v5
       with:
         fetch-depth: 0
-    
+
     - name: Install prerequisites
       run: |
         dnf -y update
@@ -57,7 +57,7 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         python -m pip install -U pip
         python -m pip install jupyter nbconvert build wheel
-    
+
     - name: Mark repository as safe
       run: git config --global --add safe.directory $GITHUB_WORKSPACE
 
@@ -86,7 +86,7 @@ jobs:
       with:
         name: Library failure log
         path: builds/build/build_error.log
-    
+
     - name: Remove external build directory
       shell: bash
       working-directory: builds
@@ -105,21 +105,21 @@ jobs:
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make
-    
+
     - name: Install OFT
       shell: bash
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make install
-    
+
     - name: Package OFT
       shell: bash
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make package
-    
+
     - name: Upload binary artifacts
       uses: actions/upload-artifact@v6
       with:
@@ -133,7 +133,7 @@ jobs:
       run: |
         source ${{ github.workspace }}/setup_env.sh
         bash make_package.sh
-    
+
     - name: Upload PYPI artifacts
       uses: actions/upload-artifact@v6
       with:
@@ -141,7 +141,7 @@ jobs:
         path: builds/install_release/python/dist/*.whl
         overwrite: true
         retention-days: 2
-  
+
   macos-build:
     if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: ${{ format('macOS CD ({0})', matrix.config.name) }}
@@ -183,14 +183,14 @@ jobs:
       uses: actions/checkout@v5
       with:
         fetch-depth: 0
-    
+
     - name: Get OS version
       run: |
         sw_vers -productVersion
         pkgutil --pkg-info=com.apple.pkg.CLTools_Executables
         sudo xcode-select -s ${{ matrix.config.xcode_path }}
         xcode-select -p
-    
+
     - name: Install prerequisites
       run: |
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
@@ -230,7 +230,7 @@ jobs:
       with:
         name: Library failure log
         path: builds/build/build_error.log
-    
+
     - name: Remove external build directory
       shell: bash
       working-directory: builds
@@ -249,26 +249,26 @@ jobs:
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make
-    
+
     - name: Install OFT
       shell: bash
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make install
-    
+
     - name: Package OFT
       shell: bash
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make package
-    
+
     - name: Upload binary artifacts
       uses: actions/upload-artifact@v6
       with:
         name: ${{ matrix.config.name }}-${{ github.sha }}
-        path: builds/install_release/python/dist/*.whl
+        path: builds/build_release/OpenFUSIONToolkit_*
         overwrite: true
 
     - name: Build Python Wheels
@@ -277,7 +277,7 @@ jobs:
       run: |
         source ${{ github.workspace }}/setup_env.sh
         bash make_package.sh
-    
+
     - name: Upload PYPI artifacts
       uses: actions/upload-artifact@v6
       with:
@@ -285,7 +285,7 @@ jobs:
         path: builds/build_release/OpenFUSIONToolkit_*
         overwrite: true
         retention-days: 2
-  
+
   publish-to-testpypi:
     name: Publish Python distribution to TestPyPI
     needs:
@@ -306,7 +306,7 @@ jobs:
       uses: actions/download-artifact@v6
       with:
         path: staging/
-    
+
     - name: Combine all dists into one directory
       run: |
         ls -l staging/
@@ -319,7 +319,7 @@ jobs:
       uses: pypa/gh-action-pypi-publish@release/v1
       with:
         repository-url: https://test.pypi.org/legacy/
-  
+
   publish-to-pypi:
     name: Publish Python distribution to PyPI
     needs:
@@ -340,7 +340,7 @@ jobs:
       uses: actions/download-artifact@v6
       with:
         path: staging/
-    
+
     - name: Combine all dists into one directory
       run: |
         ls -l staging/
