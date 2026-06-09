@@ -50,7 +50,7 @@ ENV PATH="${OFT_ROOTPATH}/bin:${PATH}"
 
 # Setup python environment
 RUN python3 -m venv ${OFT_PYENV}
-RUN . ${OFT_PYENV}/bin/activate && pip install --no-cache-dir numpy h5py netcdf4 xarray scipy matplotlib pyvista jupyterlab
+RUN . ${OFT_PYENV}/bin/activate && pip install --no-cache-dir numpy h5py netcdf4 scipy matplotlib pyvista jupyterlab
 RUN . ${OFT_PYENV}/bin/activate && python -c "import matplotlib.pyplot"
 
 # Copy over OFT build
