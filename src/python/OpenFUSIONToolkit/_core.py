@@ -143,7 +143,7 @@ class OFT_env():
 
         @param italic Print italicized logo?'''
         if italic:
-            print('''
+            print(r'''
    ____
   / __ \____  ___  ____
  / / / / __ \/ _ \/ __ \
@@ -162,7 +162,7 @@ class OFT_env():
 /_/  \____/\____/_/_/|_/_/\__/
 ''')
         else:
-            print('''
+            print(r'''
   ___
  / _ \ _ __   ___ _ __
 | | | | '_ \ / _ \ '_ \

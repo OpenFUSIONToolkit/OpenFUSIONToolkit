@@ -100,7 +100,7 @@ class Marklin():
 
         @param italic Print italicized logo?'''
         if italic:
-            print('''
+            print(r'''
     __  ___           __   ___
    /  |/  /___ ______/ /__/ (_)___
   / /|_/ / __ `/ ___/ //_/ / / __ \
@@ -108,7 +108,7 @@ class Marklin():
 /_/  /_/\__,_/_/  /_/|_/_/_/_/ /_/
 ''')
         else:
-            print('''
+            print(r'''
  __  __            _    _ _
 |  \/  | __ _ _ __| | _| (_)_ __
 | |\/| |/ _` | '__| |/ / | | '_ \

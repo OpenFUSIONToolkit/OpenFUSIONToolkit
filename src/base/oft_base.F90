@@ -313,8 +313,25 @@ END IF
 print_header=(oft_env%rank==0)
 IF(PRESENT(quiet))print_header=print_header.AND.(.NOT.quiet)
 IF(print_header)THEN
-  WRITE(*,'(A)')    '#----------------------------------------------'
-  WRITE(*,'(A)')    'Open FUSION Toolkit Initialized'
+  WRITE(*,*)
+  WRITE(*,'(A)')'   ____'
+  WRITE(*,'(A)')'  / __ \____  ___  ____'
+  WRITE(*,'(A)')' / / / / __ \/ _ \/ __ \'
+  WRITE(*,'(A)')'/ /_/ / /_/ /  __/ / / /'
+  WRITE(*,'(A)')'\____/ .___/\___/_/ /_/'
+  WRITE(*,'(A)')'    /_/'
+  WRITE(*,'(A)')'    ________  _______ ________  _   __'
+  WRITE(*,'(A)')'   / ____/ / / / ___//  _/ __ \/ | / /'
+  WRITE(*,'(A)')'  / /_  / / / /\__ \ / // / / /  |/ /'
+  WRITE(*,'(A)')' / __/ / /_/ /___/ // // /_/ / /|  /'
+  WRITE(*,'(A)')'/_/    \____//____/___/\____/_/ |_/'
+  WRITE(*,'(A)')'  ______            ____   _ __'
+  WRITE(*,'(A)')' /_  __/___  ____  / / /__(_) /_'
+  WRITE(*,'(A)')'  / / / __ \/ __ \/ / //_/ / __/'
+  WRITE(*,'(A)')' / / / /_/ / /_/ / / ,< / / /_'
+  WRITE(*,'(A)')'/_/  \____/\____/_/_/|_/_/\__/'
+  WRITE(*,*)
+  WRITE(*,'(A)')'#----------------------------------------------'
   CALL oft_print_git()
   WRITE(*,'(2A)')   'Parallelization Info:'
 #ifdef HAVE_MPI
@@ -548,7 +565,7 @@ TYPE(mpi_request), INTENT(inout) :: req(n) !< Array of requests
 #else
 INTEGER(i4), INTENT(inout) :: req(n) !< Array of requests
 #endif
-INTEGER(i4), INTENT(out) :: j !< Next completed request 
+INTEGER(i4), INTENT(out) :: j !< Next completed request
 INTEGER(i4), INTENT(out) :: ierr !< Error flag
 INTEGER(i8) :: timein
 #ifdef HAVE_MPI
