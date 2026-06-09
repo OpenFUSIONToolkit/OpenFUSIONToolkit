@@ -137,7 +137,50 @@ class OFT_env():
         self.oft_error_slen = slens[3]
         ## Value for marking a float quantity as disabled
         self.float_disable_flag = -1.E99
-    
+
+    def print_ascii_logo(self, italic=True):
+        '''! Print OFT ASCII logo
+
+        @param italic Print italicized logo?'''
+        if italic:
+            print('''
+   ____
+  / __ \____  ___  ____
+ / / / / __ \/ _ \/ __ \
+/ /_/ / /_/ /  __/ / / /
+\____/ .___/\___/_/ /_/
+    /_/
+    ________  _______ ________  _   __
+   / ____/ / / / ___//  _/ __ \/ | / /
+  / /_  / / / /\__ \ / // / / /  |/ /
+ / __/ / /_/ /___/ // // /_/ / /|  /
+/_/    \____//____/___/\____/_/ |_/
+  ______            ____   _ __
+ /_  __/___  ____  / / /__(_) /_
+  / / / __ \/ __ \/ / //_/ / __/
+ / / / /_/ / /_/ / / ,< / / /_
+/_/  \____/\____/_/_/|_/_/\__/
+''')
+        else:
+            print('''
+  ___
+ / _ \ _ __   ___ _ __
+| | | | '_ \ / _ \ '_ \
+| |_| | |_) |  __/ | | |
+ \___/| .__/ \___|_| |_|
+      |_|
+ _____ _   _ ____ ___ ___  _   _
+|  ___| | | / ___|_ _/ _ \| \ | |
+| |_  | | | \___ \| | | | |  \| |
+|  _| | |_| |___) | | |_| | |\  |
+|_|    \___/|____/___\___/|_| \_|
+ _____           _ _    _ _
+|_   _|__   ___ | | | _(_) |_
+  | |/ _ \ / _ \| | |/ / | __|
+  | | (_) | (_) | |   <| | |_
+  |_|\___/ \___/|_|_|\_\_|\__|
+''')
+
     def float_is_disabled(self,val):
         '''! Check if float is set to a value indicated its usage is "disabled"
 
@@ -145,10 +188,10 @@ class OFT_env():
         @returns Value is within 10% of `self.float_disable_flag`
         '''
         return val < self.float_disable_flag*0.1
-    
+
     def set_debug_level(self,debug_level):
         '''! Set debug verbosity level
-        
+
         @param debug_level New value for debug level (must be in range [0,3])
         '''
         if (debug_level < 0) or (debug_level > 3):
@@ -157,14 +200,14 @@ class OFT_env():
 
     def set_num_threads(self,nthreads):
         '''! Set the number of OpenMP threads to use
-        
+
         @param nthreads Number of threads to use for subsequent OpenMP parallel regions
         '''
         oftpy_set_nthreads(c_int(nthreads))
-    
+
     def unique_tmpfile(self,filename):
         '''! Get unique temporary filename
-        
+
         @param filename Base non-unique filename
         @result Unique filepath in suitable temporary location
         '''
@@ -178,7 +221,7 @@ class OFT_env():
 
     def path2c(self,path):
         '''! Convert general strings to C-compatible objects calls to OFT compiled API
-        
+
         @param path Python path string
         @result `c_char_p` object containing path string value
         '''
@@ -188,7 +231,7 @@ class OFT_env():
 
     def string2c(self,string):
         '''! Convert general strings to C-compatible objects calls to OFT compiled API
-        
+
         @param string Python string
         @result `c_char_p` object containing string value
         '''
@@ -208,7 +251,7 @@ class OFT_env():
                 for option_name, option_value in options.items():
                     fid.write("  {0}={1}\n".format(option_name,option_value))
                 fid.write("/\n\n")
-    
+
     @staticmethod
     def write_oft_xml(xml_blocks,path):
         r"""! Write OFT XML file from a list of XML block objects

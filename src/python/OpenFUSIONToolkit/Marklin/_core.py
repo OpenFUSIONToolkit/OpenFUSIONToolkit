@@ -33,7 +33,7 @@ class Marklin_field_interpolator():
         self.marklin_obj = marklin_obj
         self._int_ptr = int_ptr
         self.fbary_tol = fbary_tol
-    
+
     def __del__(self):
         '''Destroy underlying interpolation object'''
         pt_eval = numpy.zeros((3,), dtype=numpy.float64)
@@ -86,7 +86,7 @@ class Marklin():
         self.eig_vals = None
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
-    
+
     def __del__(self):
         if not self._marklin_ptr:
             return # Nothing to do
@@ -94,6 +94,27 @@ class Marklin():
         marklin_destroy(self._marklin_ptr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+
+    def print_ascii_logo(self, italic=True):
+        '''! Print Marklin ASCII logo
+
+        @param italic Print italicized logo?'''
+        if italic:
+            print('''
+    __  ___           __   ___
+   /  |/  /___ ______/ /__/ (_)___
+  / /|_/ / __ `/ ___/ //_/ / / __ \
+ / /  / / /_/ / /  / ,< / / / / / /
+/_/  /_/\__,_/_/  /_/|_/_/_/_/ /_/
+''')
+        else:
+            print('''
+ __  __            _    _ _
+|  \/  | __ _ _ __| | _| (_)_ __
+| |\/| |/ _` | '__| |/ / | | '_ \
+| |  | | (_| | |  |   <| | | | | |
+|_|  |_|\__,_|_|  |_|\_\_|_|_| |_|
+''')
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None,grid_order=1):
         '''! Setup mesh for Marklin force-free equilibrium calculations
@@ -136,7 +157,7 @@ class Marklin():
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
         self.nregs = nregs.value
-    
+
     def setup(self,order=2,minlev=-1):
         '''! Needs docs
         '''
@@ -144,7 +165,7 @@ class Marklin():
         marklin_setup(ctypes.byref(self._marklin_ptr),self._mesh_ptr,order,minlev,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
-    
+
     def setup_io(self,basepath=None,legacy_hdf5=False):
         '''! Setup XDMF+HDF5 I/O for 3D visualization
 
@@ -163,7 +184,7 @@ class Marklin():
         marklin_setup_io(self._marklin_ptr,basepath_c,c_bool(legacy_hdf5),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
-    
+
     def build_XDMF(self,repeat_static=False,pretty=False):
         '''! Build XDMF plot metadata files for model
 
@@ -196,7 +217,7 @@ class Marklin():
             raise Exception(error_string.value)
         self.nm = nmodes
         self.eig_vals = eig_vals
-    
+
     def compute_vac(self,nh,hcpc,hcpv,cache_file=None):
         r'''! Compute vacuum field with specified fluxes through jump planes
 
@@ -224,7 +245,7 @@ class Marklin():
         self.nh = nh
         self.hcpc = hcpc
         self.hcpv = hcpv
-    
+
     def compute_par_diff(self,interpolator,k_perp):
         r'''! Compute parallel diffusion with specified vector field and diffusivity
 
@@ -238,7 +259,7 @@ class Marklin():
 
     def save_field(self,field,tag):
         '''! Save field to XDMF files for VisIt/Paraview
-        
+
         @param field Field interpolation object
         @param tag Name for field in XDMF files
         '''
