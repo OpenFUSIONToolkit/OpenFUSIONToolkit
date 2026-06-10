@@ -74,6 +74,27 @@ class ThinCurr():
         ## I/O basepath for plotting/XDMF output
         self._io_basepath = "."
 
+    def print_ascii_logo(self, italic=True):
+        '''! Print ThinCurr ASCII logo
+
+        @param italic Print italicized logo?'''
+        if italic:
+            print(r'''
+  ________    _       ______
+ /_  __/ /_  (_)___  / ____/_  ____________
+  / / / __ \/ / __ \/ /   / / / / ___/ ___/
+ / / / / / / / / / / /___/ /_/ / /  / /
+/_/ /_/ /_/_/_/ /_/\____/\__,_/_/  /_/
+''')
+        else:
+            print(r'''
+ _____ _     _        ____
+|_   _| |__ (_)_ __  / ___|   _ _ __ _ __
+  | | | '_ \| | '_ \| |  | | | | '__| '__|
+  | | | | | | | | | | |__| |_| | |  | |
+  |_| |_| |_|_|_| |_|\____\__,_|_|  |_|
+''')
+
     def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0):
         '''! Setup ThinCurr model
 
@@ -142,7 +163,7 @@ class ThinCurr():
         self.n_vcoils = sizes[6]
         self.nelems = sizes[7]
         self.n_icoils = sizes[8]
-    
+
     def setup_io(self,basepath=None,save_debug=False,legacy_hdf5=False):
         '''! Setup XDMF+HDF5 I/O for 3D visualization
 
@@ -165,7 +186,7 @@ class ThinCurr():
         thincurr_setup_io(self.tw_obj,basepath_c,c_bool(save_debug),c_bool(legacy_hdf5),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
-    
+
     def reconstruct_current(self,potential,centering='cell'):
         '''! Reconstruct current field on mesh
 
@@ -184,7 +205,7 @@ class ThinCurr():
         potential = numpy.ascontiguousarray(potential, dtype=numpy.float64)
         thincurr_recon_curr(self.tw_obj,potential,curr,cent_key)
         return curr/mu0
-    
+
     def reconstruct_Bfield(self,potential,coil_currs=None):
         '''! Reconstruct magnetic field on original grid
 
@@ -200,7 +221,7 @@ class ThinCurr():
         else:
             thincurr_recon_field(self.tw_obj,potential,coil_currs,field,c_void_p())
         return field/mu0
-    
+
     def save_current(self,potential,tag):
         '''! Save current field from ThinCurr to plot files
 
@@ -212,7 +233,7 @@ class ThinCurr():
         potential = numpy.ascontiguousarray(potential, dtype=numpy.float64)
         ctag = self._oft_env.path2c(tag)
         thincurr_save_field(self.tw_obj,potential,ctag)
-    
+
     def save_scalar(self,field,tag):
         '''! Save scalar field to plot files
 
@@ -224,7 +245,7 @@ class ThinCurr():
         field = numpy.ascontiguousarray(field, dtype=numpy.float64)
         ctag = self._oft_env.path2c(tag)
         thincurr_save_scalar(self.tw_obj,field,ctag)
-    
+
     def build_XDMF(self,repeat_static=False,pretty=False):
         '''! Build XDMF plot metadata files for model
 
@@ -232,7 +253,7 @@ class ThinCurr():
         @param pretty Use pretty printing (indentation) in XDMF files?
         '''
         return build_XDMF(path=self._io_basepath,repeat_static=repeat_static,pretty=pretty)
-    
+
     def scale_va(self,data,div_flag=False):
         '''! Scale a vertex array by vertex areas (eg. B_n -> flux)
 
@@ -243,7 +264,7 @@ class ThinCurr():
         data_in = numpy.ascontiguousarray(data.copy(), dtype=numpy.float64)
         thincurr_scale_va(self.tw_obj,data_in,div_flag)
         return data_in
-    
+
     def compute_Lmat(self,cache_file=None,use_hodlr=False):
         '''! Compute the self-inductance matrix for this model
 
@@ -264,7 +285,7 @@ class ThinCurr():
             self.Lmat_hodlr = Lmat_loc
         else:
             self.Lmat = numpy.ctypeslib.as_array(ctypes.cast(Lmat_loc, c_double_ptr),shape=(self.nelems,self.nelems))
-    
+
     def apply_Lmat(self,field):
         '''! Apply inductance matrix to a ThinCurr field
 
@@ -281,7 +302,7 @@ class ThinCurr():
                 raise ValueError('Lmat not computed, call `compute_Lmat()` first')
             thincurr_apply_Lmat(self.tw_obj,field_in,c_void_p())
         return field_in
-    
+
     def compute_Bmat(self,cache_file=None):
         '''! Compute magnetic field reconstruction operators for this model
 
@@ -307,7 +328,7 @@ class ThinCurr():
         else:
             return numpy.ctypeslib.as_array(ctypes.cast(Bmat_loc, c_double_ptr),shape=(3,self.nelems,self.np)), \
                 numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
-    
+
     def compute_Mcoil(self,cache_file=None):
         '''! Compute the mutual inductance between passive (mesh+Vcoils) and active elements (Icoils)
 
@@ -348,7 +369,7 @@ class ThinCurr():
         njumpers = c_int()
         sensor_loc = c_void_p()
         error_string = self._oft_env.get_c_errorbuff()
-        thincurr_Msensor(self.tw_obj,sensor_string,ctypes.byref(Ms_loc),ctypes.byref(Msc_loc), 
+        thincurr_Msensor(self.tw_obj,sensor_string,ctypes.byref(Ms_loc),ctypes.byref(Msc_loc),
                          ctypes.byref(nsensors),ctypes.byref(njumpers),ctypes.byref(sensor_loc),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
@@ -363,7 +384,7 @@ class ThinCurr():
         return numpy.ctypeslib.as_array(ctypes.cast(Ms_loc, c_double_ptr),shape=(self.nelems,nsensors.value)), \
                numpy.ctypeslib.as_array(ctypes.cast(Msc_loc, c_double_ptr),shape=(self.n_icoils,nsensors.value)), \
                {'names': sensor_names, 'ptr': sensor_loc}
-    
+
     def get_eta_values(self,include_eta_vol=False):
         '''! Get model resistivity values.
 
@@ -389,7 +410,7 @@ class ThinCurr():
 
         warn("Default behavior of get_eta_values() returning only eta_surf is deprecated; pass include_eta_vol=True to retrieve (eta_surf, eta_vol).", DeprecationWarning, stacklevel=2)
         return eta_surf
-    
+
     def set_eta_values(self,eta_values=None,eta_surf=None,eta_vol=None,thickness=None):
         '''! Set resistivity and thickness values for model.
 
@@ -440,7 +461,7 @@ class ThinCurr():
         eta_surf_ptr = c_void_p()
         eta_vol_ptr = c_void_p()
         thickness_ptr = c_void_p()
-        
+
         if eta_surf_input is not None:
             eta_surf_ptr = eta_surf_input.ctypes.data_as(c_void_p)
         if eta_vol_input is not None:
@@ -489,7 +510,7 @@ class ThinCurr():
         lc = numpy.ctypeslib.as_array(lc_loc,shape=(nnz,))
         data = numpy.ctypeslib.as_array(mat_loc,shape=(nnz,))
         self.Rmat = scipy.sparse.csr_array((data.copy(), lc-1, kr-1))
-    
+
     def cross_coupling(self,model2,cache_file=None):
         '''! Compute the mutual inductance between this and another ThinCurr model
 
@@ -507,7 +528,7 @@ class ThinCurr():
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         return Mmat
-    
+
     def cross_eval(self,model2,field):
         '''! Compute the voltage/flux induced on another ThinCurr model from a current structure on this model
 
@@ -525,7 +546,7 @@ class ThinCurr():
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         return vec_out
-    
+
     def get_regmat(self):
         '''! Compute the current regularization matrix for this model
 
@@ -537,7 +558,7 @@ class ThinCurr():
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         return Rmat
-    
+
     def get_eigs(self,neigs,direct=False):
         '''! Compute eigenmodes of this model
 
@@ -587,7 +608,7 @@ class ThinCurr():
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         return result
-    
+
     def run_td(self,dt,nsteps,coil_currs=None,coil_volts=None,full_volts=None,direct=False,
                status_freq=10,plot_freq=10,sensor_obj=None,sensor_values=None,lin_tol=1.E-6,lin_rtol=1.E-4,timestep_cn=True):
         '''! Perform a time-domain simulation
@@ -658,7 +679,7 @@ class ThinCurr():
                                  sensor_values_ptr,c_void_p(),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
-    
+
     def plot_td(self,nsteps,compute_B=False,rebuild_sensors=False,plot_freq=10,sensor_obj=None,sensor_values=None):
         '''! Generate plot files for a time domain simulation that has already been run.
 
@@ -727,7 +748,7 @@ class ThinCurr_reduced:
         with h5py.File(filename,'r') as file:
             mu0_scale = mu0 # Prior to addition of version flag magnetic units were saved for coils
             if 'ThinCurr_Version' in file:
-                mu0_scale = 1.0 
+                mu0_scale = 1.0
             ## Current potential basis set
             self.Basis = numpy.asarray(file['Basis'])
             ## Self-inductance matrix for reduced model
@@ -738,7 +759,7 @@ class ThinCurr_reduced:
             self.B = None
             if 'Bx' in file:
                 self.B = [numpy.asarray(file['Bx']), numpy.asarray(file['By']), numpy.asarray(file['Bz'])]
-            ## Model-sensor mutual inductance matrix 
+            ## Model-sensor mutual inductance matrix
             self.Ms = None
             if 'Ms' in file:
                 self.Ms = numpy.asarray(file['Ms'])
@@ -754,7 +775,7 @@ class ThinCurr_reduced:
             self.Msc = None
             if 'Msc' in file:
                 self.Msc = mu0_scale*numpy.asarray(file['Msc'])
-    
+
     def reconstruct_potential(self,weights):
         r'''! Reconstruct full current potential on original grid
 
@@ -765,7 +786,7 @@ class ThinCurr_reduced:
         @result Full current potential on original grid `(:)`
         '''
         return numpy.dot(weights,self.Basis)
-    
+
     def reconstruct_Bfield(self,weights,coil_currs=None):
         '''! Reconstruct magnetic field on original grid
 
@@ -806,7 +827,7 @@ class ThinCurr_reduced:
         @param status_freq Frequency to print status information
         @param plot_freq Frequency to save plot files
         @result Sensor signals dictionary
-          - `time` Timebase [s] `(:)`, 
+          - `time` Timebase [s] `(:)`,
           - `sensors` Sensor signals `(:,:)`
         @result Current history dictionary
           - `time` Timebase [s] `(:)`
