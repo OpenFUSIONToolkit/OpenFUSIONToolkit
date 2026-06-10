@@ -2,11 +2,10 @@ Open Flexible Unstructured Simulation Infrastructure with Open Numerics (FUSION)
 =====================================
 
 [![CI status](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/ci_build.yaml/badge.svg?branch=main)](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/ci_build.yaml)
-[![CD status](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/cd_nightly.yaml/badge.svg)](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/cd_nightly.yaml)
-[![PyPI CD status](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/release_pypi.yaml/badge.svg)](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/release_pypi.yaml)
+[![CD status](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/cd_combined.yaml/badge.svg)](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/cd_combined.yaml)
 [![Container CD status](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/container_cd.yaml/badge.svg)](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/container_cd.yaml)
 [![codecov](https://codecov.io/gh/openfusiontoolkit/OpenFUSIONToolkit/graph/badge.svg?token=GG282HKNAO)](https://codecov.io/gh/openfusiontoolkit/OpenFUSIONToolkit)
-[![DOI](https://zenodo.org/badge/710415041.svg)](https://zenodo.org/doi/10.5281/zenodo.10306801)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.10306801.svg)](https://doi.org/10.5281/zenodo.10306801)
 
 <img src="https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit/raw/main/logos/oft_logo_bg.png" width="300px" />
 
