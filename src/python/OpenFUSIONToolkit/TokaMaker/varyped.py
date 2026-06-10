@@ -1,24 +1,31 @@
+'''! Functions and helpers to run varyped equilibrium scan on TokaMaker instance 
+
+Runs equilibrium scan over range of scaling values using profiles from 
+input an g-File and p-File. Pedestal of pressure and edge spike of 
+current density profiles are scaled self-consistently, and the results 
+are saved to new g-files and p-files generated with TokaMaker.
+
+@authors Kevin Clavijo
+@date June 2026
+'''
+
 import os
 import copy
 import numpy as np
+
 from scipy.signal import find_peaks, peak_widths
 from scipy.optimize import curve_fit, leastsq
 from scipy.stats import skewnorm
 from scipy.optimize import root_scalar, least_squares
 from scipy.constants import constants
-import geqdsk
 
+from OpenFUSIONToolkit.TokaMaker import eqdsk
 
 #=============================================================================
 #                       PRESSURE SCALING METHODS
 #=============================================================================
 
 def locate_pedestal_start(t_object, psi_n, pressure):
-    """
-    Locate the pedestal start by finding zero crossings in the shifted pressure derivative.
-    Mimics the original best_profiles.py algorithm but uses sign changes instead of exact zeros,
-    which is more robust for floating-point numpy gradients.
-    """
     psi_n_6_idx = np.where(np.isclose(psi_n, 0.6, atol=0.01) == True)[0][0]
 
     pprime = np.gradient(pressure) / (np.gradient(psi_n) * (t_object.psi_bounds[1] - t_object.psi_bounds[0]))
@@ -66,13 +73,10 @@ def pressure_objective_function(norm_factor, t_object, psi_n, pressure, pedestal
 
 def scale_pressure(t_object, psi_n, pressure, pedestal_factor):
     w_0 = (1.5e3)*t_object.flux_integral(psi_n, pressure)
-    if pedestal_factor == 1.0:
-        pressure = np.asarray(pressure, dtype=float)
-        return pressure.copy(), np.ones_like(pressure), 0.0, w_0, w_0
     norm_factor_0 = [0.0]
     pedestal_start = locate_pedestal_start(t_object, psi_n, pressure)
 
-    # Use leastsq with tight tolerances (matches pressure_scaling_1111.py approach for excellent conservation)
+    # Use leastsq with tight tolerances 
     result_lsq = leastsq(pressure_objective_function, 
                          norm_factor_0, 
                          args=(t_object, psi_n, pressure, pedestal_factor, pedestal_start),
@@ -93,14 +97,11 @@ def scale_pressure(t_object, psi_n, pressure, pedestal_factor):
         norm_factor = result_lsq[0]
         method = "leastsq"
     
-    print(f"[LEASTSQ-V2] Normalizing factor: {norm_factor[0]:.6f}. Method: {method}. imerit={result_lsq[4]}")
-
     psf = pressure_scaling_function(psi_n, pedestal_factor, norm_factor, pedestal_start)
     scaled_pressure = pressure*psf
     w_1 = (1.5e3)*t_object.flux_integral(psi_n, scaled_pressure)
     w_diff = w_1 - w_0
-
-    return scaled_pressure, psf, w_diff, w_0, w_1
+    return scaled_pressure, psf, w_diff, w_0, w_1, method
 
 
 #=============================================================================
@@ -242,13 +243,6 @@ def current_objective_function(alpha, t_object, jtor_prof, psi_n, Ip_target):
 
 def scale_curr(t_object, psi_n, j_tor, scale_c):
 
-    if scale_c == 1.0:
-        j_tor = np.asarray(j_tor, dtype=float)
-        Ip_target = t_object.flux_integral(psi_n, j_tor)
-        Ip_final = t_object.flux_integral(psi_n, j_tor)
-        Ip_diff = Ip_final - Ip_target
-        return j_tor.copy(), Ip_diff, Ip_final
-
     j_tor_copy = j_tor.copy()
     fit_jphi = fit_jphi_from_input_jtor(psi_n, j_tor_copy, scale_c)
     
@@ -277,7 +271,6 @@ def scale_curr(t_object, psi_n, j_tor, scale_c):
 def scale_current(t_object, psi_n, j_tor, scale_c):
     try:
 
-        
         if scale_c <= 0:
             raise ValueError(f"scale_c must be positive, got {scale_c}")
         
@@ -335,35 +328,34 @@ def resample_gfile_profiles(gfile, psi_n):
     psi_n_gfile = np.asarray(gfile.psi_N, dtype=float)
     remapped_profiles['psi_n_gfile'] = psi_n_gfile
     remapped_profiles['Ip'] = float(gfile.Ip)
-    remapped_profiles['j_tor_averaged_direct'] = np.interp(remapped_profiles['psi_n'], psi_n_gfile, gfile.j_tor_averaged_direct)
+    
+    jtor_tmp = -np.interp(remapped_profiles['psi_n'], psi_n_gfile, gfile.j_tor_averaged_direct) if gfile.j_tor_averaged_direct[0] < 0 else gfile.j_tor_averaged_direct
+    remapped_profiles['j_tor_averaged_direct']  = jtor_tmp
 
     psi_gfile_len = len(gfile.R_grid)
     psi_gfile = np.linspace(gfile.psi_axis, gfile.psi_boundary, psi_gfile_len)
 
     remapped_profiles['psi'] = np.interp(remapped_profiles['psi_n'], psi_n_gfile, psi_gfile)
     # Resample all g-file profiles used downstream onto unified psi_n.
-    for key in ['R', 'Bp', 'Bt']:
+    for key in ['R', 'Bp', 'Bt', 'Z', 'a', 'kappa', 'delta']:
         if key in gfile.averages:
             profile_data = np.asarray(gfile.averages[key])
+        elif key in gfile.geometry:
+            profile_data = np.asarray(gfile.geometry[key])
         else:
-            # Fallback: try accessing through a geometry method or property
             raise AttributeError(f"gfile object does not have attribute '{key}'")
-        
         remapped_profiles[key] = np.interp(remapped_profiles['psi_n'], psi_n_gfile, profile_data)
 
+ 
+            
     remapped_profiles['dpsi'] = np.gradient(remapped_profiles['psi'], remapped_profiles['psi_n'])
     return remapped_profiles
-
-def ensure_profile(pfile, key, data, psi_n):
-    if data is None:
-        data = np.zeros_like(psi_n)
-    pfile.set_profile(key, psi_n, data)
 
 def update_impurity_species(pfile, resampled_gfile_profiles, psi_n):
     """
     Function to update the density, toroidal velocity, and poloidal velocity of a given ion impurity species
     Renormalizes the profiles to maintain quasineutrality and net charge balance
-    [nz{i}, vtor{i}, vpol{i}]
+    Profiles updated: [nz{i}, vtor{i}, vpol{i}]
     """
 
     num_impurity_species = 0
@@ -412,16 +404,16 @@ def update_main_profiles(pfile, psf, psi_n):
     Profiles updated: [ne,ni,te,ti]
     """
     ne = pfile['ne']['data']*(psf**(2./3.))
-    ensure_profile(pfile, 'ne', ne, psi_n)
+    pfile.set_profile('ne',psi_n, ne)
 
     ni = pfile['ni']['data']*(psf**(2./3.))
-    ensure_profile(pfile, 'ni', ni, psi_n)
+    pfile.set_profile('ni', psi_n, ni)
 
     te = pfile['te']['data']*(psf**(1./3.))
-    ensure_profile(pfile, 'te', te, psi_n)
+    pfile.set_profile('te', psi_n, te)
 
     ti = pfile['ti']['data']*(psf**(1./3.))
-    ensure_profile(pfile, 'ti', ti, psi_n)
+    pfile.set_profile('ti', psi_n, ti)
 
 def update_fast_ion_profiles(pfile, psf, psi_n):
     """
@@ -448,12 +440,14 @@ def update_total_pressure(pfile, resampled_gfile_profiles, psi_n):
     """
     kb = constants.eV
     num_impurity_species = resampled_gfile_profiles['n_imps']
+    
     p_electron = pfile['ne']['data'] * pfile['te']['data'] * kb * 1e20
-    p_ions = (pfile['ni']['data'] + sum(pfile[f'nz{i+1}']['data'] for i in range(num_impurity_species))) * pfile['ti']['data'] * kb * 1e20
+    nzs = sum(pfile[f'nz{i+1}']['data'] for i in range(num_impurity_species))
+
+    p_ions = (pfile['ni']['data'] + nzs) * pfile['ti']['data'] * kb * 1e20
     p_beam = pfile['pb']['data'] 
 
     pfile.set_profile('ptot', psi_n, (p_electron + p_ions + p_beam))
-
 
 def update_rotation_profiles(pfile, resampled_gfile_profiles, psi_n):
     """
@@ -486,49 +480,7 @@ def update_rotation_profiles(pfile, resampled_gfile_profiles, psi_n):
         omegp = np.zeros_like(psi_n)
     pfile.set_profile('omegp', psi_n, omegp)
 
-def update_diamagnetic_rotations(pfile, resampled_gfile_profiles, psi_n):
-    """
-    Function to update diamagnetic-pressure rotation frequency terms 
-    Profiles updated: [omgpp, ommpp, omepp]
-    """
-    eC = constants.e
-    kb = constants.eV
-    dpsi = resampled_gfile_profiles['dpsi']
-    
-    num_imps = resampled_gfile_profiles.get('n_imps', 0)
-    ZIs = resampled_gfile_profiles.get('ZIs', [])
-
-    # Impurity diamagnetic term (only if impurities exist)
-    if num_imps > 0 and profile_exists(pfile, 'nz1') and len(ZIs) > 0:
-        nz1_Z = ZIs[0]
-        p_impurities = pfile['nz1']['data']*pfile['ti']['data']*kb*1e20
-        p_impurities_prime = np.gradient(p_impurities, psi_n)
-        omgpp = -1 * abs((p_impurities_prime/dpsi) /(eC * (pfile['nz1']['data'] + 1e-14) *  nz1_Z))
-    else:
-        # No impurities: use zero or fallback
-        omgpp = np.zeros_like(psi_n)
-    pfile.set_profile('omgpp', psi_n, omgpp)
-
-    # Main ion diamagnetic term
-    if profile_exists(pfile, 'ni'):
-        p_ion = pfile['ni']['data']*pfile['ti']['data']*kb*1e20
-        p_ion_prime = np.gradient(p_ion, psi_n)
-        ommpp = -1 * abs((p_ion_prime/dpsi)/(eC * (pfile['ni']['data'] + 1e-14)))
-    else:
-        ommpp = np.zeros_like(psi_n)
-    pfile.set_profile('ommpp', psi_n, ommpp)
-
-    # Electron diamagnetic term
-    if profile_exists(pfile, 'ne'):
-        p_electron = pfile['ne']['data']*pfile['te']['data']*kb*1e20    
-        p_electron_prime = np.gradient(p_electron, psi_n)
-        omepp = abs((p_electron_prime/dpsi) / (eC*(pfile['ne']['data'] + 1e-14)))
-    else:
-        omepp = np.zeros_like(psi_n)
-    pfile.set_profile('omepp', psi_n, omepp)
-
-
-def _effective_impurity_density_for_pfile_methods(pfile, num_imps, ZIs):
+def effective_impurity_density(pfile, num_imps, ZIs):
     """Build an effective nz1-equivalent density for pfile compute methods.
 
     The pfile compute_diamagnetic_rotations method accepts a single impurity
@@ -554,10 +506,10 @@ def _effective_impurity_density_for_pfile_methods(pfile, num_imps, ZIs):
 
 
 def update_diamagnetic_and_rotation_decomposition(pfile, resampled_gfile_profiles):
-    """Use pfile.py built-ins for diamagnetic terms and rotation decomposition.
-
-    Keeps workflow-compatible behavior by seeding omgvb = omeg + omegp before
-    calling compute_rotation_decomposition.
+    """Function to update diamagnetic rotation and rotation decomposition terms
+    
+    Uses the methods built into eqdsk.py to compute the profiles.
+    Profiles updated: [omgpp, ommpp, omepp, omgvb, omgeb, ommvb, omevb, er, omghb]
     """
     psi_n = np.asarray(resampled_gfile_profiles['psi_n'], dtype=float)
 
@@ -569,7 +521,7 @@ def update_diamagnetic_and_rotation_decomposition(pfile, resampled_gfile_profile
 
     num_imps = int(resampled_gfile_profiles.get('n_imps', 0))
     ZIs = resampled_gfile_profiles.get('ZIs', [])
-    nI_eff = _effective_impurity_density_for_pfile_methods(pfile, num_imps, ZIs)
+    nI_eff = effective_impurity_density(pfile, num_imps, ZIs)
 
     psi = np.asarray(resampled_gfile_profiles['psi'], dtype=float)
     ti = np.asarray(pfile['ti']['data'], dtype=float) if profile_exists(pfile, 'ti') else None
@@ -584,66 +536,6 @@ def update_diamagnetic_and_rotation_decomposition(pfile, resampled_gfile_profile
         Bt=np.asarray(resampled_gfile_profiles['Bt'], dtype=float),
         psi=psi,
     )
-
-def update_affected_rotations(pfile, resampled_gfile_profiles, psi_n):
-    """
-    Function to update affected rotation profiles that depend on VxB and diamagnetic-pressure frequency
-    Profiles updated: [omgvb, omgeb, ommvb, omevb]
-    """
-    if profile_exists(pfile, 'omeg') and profile_exists(pfile, 'omegp'):
-        omgvb = pfile['omeg']['data'] + pfile['omegp']['data']
-    elif profile_exists(pfile, 'omgvb'):
-        omgvb = np.interp(psi_n, np.asarray(pfile.psinorm_for('omgvb'), dtype=float), pfile['omgvb']['data'])
-    else:
-        omgvb = np.zeros_like(psi_n)
-    pfile.set_profile('omgvb', psi_n, omgvb)
-
-    if profile_exists(pfile, 'omgvb') and profile_exists(pfile, 'omgpp'):
-        omgeb = pfile['omgvb']['data'] + pfile['omgpp']['data']
-    elif profile_exists(pfile, 'omgeb'):
-        omgeb = np.interp(psi_n, np.asarray(pfile.psinorm_for('omgeb'), dtype=float), pfile['omgeb']['data'])
-    else:
-        omgeb = np.zeros_like(psi_n)
-    pfile.set_profile('omgeb', psi_n, omgeb)
-
-    if profile_exists(pfile, 'omgeb') and profile_exists(pfile, 'ommpp'):
-        ommvb = pfile['omgeb']['data'] - pfile['ommpp']['data']
-    elif profile_exists(pfile, 'ommvb'):
-        ommvb = np.interp(psi_n, np.asarray(pfile.psinorm_for('ommvb'), dtype=float), pfile['ommvb']['data'])
-    else:
-        ommvb = np.zeros_like(psi_n)
-    pfile.set_profile('ommvb', psi_n, ommvb)
-
-    if profile_exists(pfile, 'omgeb') and profile_exists(pfile, 'omepp'):
-        omevb = pfile['omgeb']['data'] - pfile['omepp']['data']
-    elif profile_exists(pfile, 'omevb'):
-        omevb = np.interp(psi_n, np.asarray(pfile.psinorm_for('omevb'), dtype=float), pfile['omevb']['data'])
-    else:
-        omevb = np.zeros_like(psi_n)
-    pfile.set_profile('omevb', psi_n, omevb)
-
-def update_er_omghb(pfile, resampled_gfile_profiles, psi_n):
-    """
-    Function to update radial electric field and Hahm-Burrel shearing rate using gfile quantities 
-    and already updated pfile quantities
-    Profiles updated: [er, omghb] 
-    """    
-    if profile_exists(pfile, 'omgeb'):
-        er = pfile['omgeb']['data'] * resampled_gfile_profiles['R'] * resampled_gfile_profiles['Bp']
-        pfile.set_profile('er', psi_n, er)
-    elif profile_exists(pfile, 'er'):
-        er = np.interp(psi_n, np.asarray(pfile.psinorm_for('er'), dtype=float), pfile['er']['data'])
-        pfile.set_profile('er', psi_n, er)
-    else:
-        pfile.set_profile('er', psi_n, np.zeros_like(psi_n))
-
-    if profile_exists(pfile, 'omgeb'):
-        domgeb = pfile['omgeb']['derivative']
-        dpsi = resampled_gfile_profiles['dpsi']
-        omghb = ((resampled_gfile_profiles['R'] * resampled_gfile_profiles['Bp'])**2 / resampled_gfile_profiles['Bt']) * (domgeb/dpsi)
-        pfile.set_profile('omghb', psi_n, omghb)
-    else:
-        pfile.set_profile('omghb', psi_n, np.zeros_like(psi_n))
 
 
 def make_updated_pfile(pfile, resampled_gfile_profiles, psf, psi_n):
@@ -691,21 +583,28 @@ def make_updated_pfile(pfile, resampled_gfile_profiles, psf, psi_n):
 #                       RUN VARYPED SCAN METHODS
 #=============================================================================
 
-def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = None):
-    r"""! Run equilibrium scan scaling pressure and current from unsolved TokaMaker state
-
-    Unified psi_n coordinate: The scan uses the higher-resolution psi_n from either
-    the pfile (ptot profile) or gfile. All pfile profiles (which may have different
-    psi_n grids) are remapped onto the unified coordinate.
+def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = None, filenames = None):
+    r"""! Run equilibrium scan scaling pressure and current density from TokaMaker instance
 
     @param t_object Grad-Shafranov solver object
     @param pfile Osborne p-File object storing kinetic and rotational profiles
     @param gfile EFIT EQDSK g-File object storing equilibrium solution data
     @param scaling_values array-like object of non-decreasing positive scalar values
     @param path_to_output (str) path to directory where outputs will be created, defaults to cwd
+    @param filenames (str) name for output files (typically of the form #####.####, where # are integers), defaults to 10000.0000
+
+    returns:
+    List: List object containing output filenames, current targets, work targets, and scaling factors used.
     """
-    
-    # === Step 1: Extract psi_n from pfile (reference: ptot profile, using built-in method) ===
+    import pprint
+
+    results = []
+
+    #ensure scaling_values is array-like
+    if type(scaling_values) is int or type(scaling_values) is float:
+        scaling_values = [scaling_values]
+
+   #Extract psi_n from pfile 
     if not profile_exists(pfile, 'ptot'):
         raise ValueError("pfile must contain 'ptot' (total pressure) profile")
     psi_n_pfile = pfile.psinorm_for('ptot')
@@ -713,15 +612,15 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = No
         raise ValueError("Could not extract psinorm for 'ptot' profile")
     psi_n_pfile = np.asarray(psi_n_pfile, dtype=float)
     
-    # === Step 2: Remap ALL pfile profiles onto ptot's psi_n (each profile has unique psi_n) ===
-    # This ensures all profiles share a common coordinate system before selection.
+    # Remap all pfile profiles onto ptot's psi_n 
+    # ensures all profiles share a common coordinate system
     pfile_copy = pfile.remap(psi_n_pfile)
     
-    # === Step 3: Get psi_n from gfile (using built-in property) ===
+    # Get psi_n from gfile 
     psi_n_gfile = np.asarray(gfile.psi_N, dtype=float)
     
-    # === Step 4: Select unified psi_n: higher resolution wins ===
-    # If resolutions are equal, prefer gfile's coordinate system.
+    # Select unified psi_n as one with higher resolution
+    # If resolutions are equal, prefer gfile's coordinate system
     if len(psi_n_pfile) > len(psi_n_gfile):
         psi_n = psi_n_pfile
         print(f"[equilibrium_scan] Using pfile psi_n: {len(psi_n)} points (pfile has higher resolution than gfile: {len(psi_n_gfile)})")
@@ -730,19 +629,27 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = No
         pfile_copy = pfile_copy.remap(psi_n)
         print(f"[equilibrium_scan] Using gfile psi_n: {len(psi_n)} points (gfile has greater than or equal resolution to pfile: {len(psi_n_pfile)})")
     
-    # === Step 5: Resample all needed gfile profiles onto unified psi_n ===
+    # Resample all needed gfile profiles onto unified psi_n 
     gfile_profiles = resample_gfile_profiles(gfile, psi_n)
     refit_jtor = gfile_profiles['j_tor_averaged_direct']
-    
-    # === Step 6: Get Ip target from gfile ===
+    # Get Ip target from gfile 
     Ip_target = gfile_profiles['Ip']
+
+    R0 = gfile_profiles['R'][0]
+    Z0 = gfile_profiles['Z'][0]
+    a = gfile_profiles['a'][-1]
+    kappa = gfile_profiles['kappa'][0]
+    delta = gfile_profiles['delta'][0]
+    
+    t_object.init_psi(R0, Z0, a, kappa, delta)
 
     for scale_p in scaling_values:
 
         for scale_j in scaling_values:
-
+            
             #get scaled pressure profile, psf and pprime from scaled pressure profile
-            ptot_scaled, psf, _, _, _ = scale_pressure(t_object, psi_n, pfile_copy['ptot']['data'], scale_p)
+            ptot_scaled, psf, _, W_target, W_final, _ = scale_pressure(t_object, psi_n, pfile_copy['ptot']['data'], scale_p)
+                      
             ptot_scaled_prime = np.gradient(ptot_scaled, psi_n)
 
             #make tokamaker pprime_profile
@@ -752,7 +659,7 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = No
                               }
             
             #get scaled current profile
-            jtor_scaled, _, _ = scale_current(t_object, psi_n, refit_jtor, scale_j)
+            jtor_scaled, _, Ip_final = scale_current(t_object, psi_n, refit_jtor, scale_j)
     
             #make tokamaker ffprime_profile 
             ffprime_profile = {'type': 'jphi-linterp',
@@ -775,8 +682,10 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = No
             if path_to_output is None:
                 path_to_output = os.getcwd()
 
+            if filenames is None:
+                filenames = '10000.0000'
             #save output gfile by calling save_eqdsk
-            path_to_output_gfile = os.path.join(path_to_output, f'g10000.0000_{scale_p}_{scale_j}' + '.geqdsk')
+            path_to_output_gfile = os.path.join(path_to_output, f'g{filenames}_{scale_p}_{scale_j}' + '.geqdsk')
             t_object.save_eqdsk(path_to_output_gfile, 
                                 nr = len(psi_n),
                                 nz = len(psi_n),
@@ -786,11 +695,102 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = No
             #call make_updated_pfile with psf and scaled_ptot
                 #make_updated_pfile deepcopies provided pfile and updates every profile within 
                 #used newly created gfile to update pfile
-
-            output_gfile = geqdsk.read_geqdsk(path_to_output_gfile)
+            output_gfile = eqdsk.read_geqdsk(path_to_output_gfile)
             output_gfile_profiles = resample_gfile_profiles(output_gfile, psi_n)
             output_pfile = make_updated_pfile(pfile_copy, output_gfile_profiles, psf, psi_n)
 
-            path_to_output_pfile = os.path.join(path_to_output, f'p10000.0000_{scale_p}_{scale_j}')
+            path_to_output_pfile = os.path.join(path_to_output, f'p{filenames}_{scale_p}_{scale_j}')
             output_pfile.save(path_to_output_pfile)
+            print(f'Saving pFile: {path_to_output_pfile}' )
+            results.append({'scale_p':scale_p, 
+                            'scale_j': scale_j,
+                            'gfile_name': f'g{filenames}_{scale_p}_{scale_j}' + '.geqdsk',
+                            'pfile_name': f'p{filenames}_{scale_p}_{scale_j}',
+                            'Ip_target': Ip_target,
+                            'Ip_final': Ip_final,
+                            'pax_target': f'{float(pax_target)} kPa',
+                            'W_target': W_target,
+                            'W_final': W_final
+                            })
 
+    for i in range(len(results)):
+        pprint.pprint(f'Run ({results[i]['scale_p']},{results[i]['scale_j']}) Quick Results: {results[i]}')
+    return results
+
+
+def plot_pressure_results(results, scaling_values, path_to_results=None, pfile_0 = None, gfile_0 = None):
+    from matplotlib import pyplot as plt
+    from matplotlib.colors import Normalize
+    import matplotlib.cm as cm
+    scaling_values = np.asarray(scaling_values)
+    norm = Normalize(vmin=(scaling_values.min()**2 - scaling_values.max()**2), vmax=(scaling_values.max()))
+    cmap = cm.plasma
+
+    if path_to_results is None:
+        path_to_results = os.getcwd()    
+
+    for result in results:
+        color = cmap(norm(float(result['scale_p'])**2 - float(result['scale_j'])**2))    
+        path_to_result_pfile = os.path.join(path_to_results, result['pfile_name'])
+        result_pfile = eqdsk.read_pfile(path_to_result_pfile)
+        plt.plot(result_pfile.psinorm_for('ptot'), result_pfile.ptot, color = color, label = f'Pres Scaled by: {result['scale_p']}; Curr Scaled by: {result['scale_j']}')
+    plt.plot(label = "(Pressure Scale Factor, Current Scale Factor)")
+    if pfile_0 is not None:
+        plt.plot(pfile_0.psinorm_for('ptot'), pfile_0.ptot, color = 'black', label = 'Input Pressure Profile', linestyle = '--', linewidth = 4)
+    else: print("Original pFile Not Provided, Initial Pressure Profile Not Plotted")
+
+    plt.xlabel('Normalized ψ')
+    plt.ylabel('Total Pressure [kPa]')
+    plt.title('Scaled Pressures')
+    plt.legend()
+    plt.show()
+
+    for result in results:
+        color = cmap(norm(float(result['scale_p'])**2 - float(result['scale_j'])**2))    
+        path_to_result_pfile = os.path.join(path_to_results, result['pfile_name'])
+        result_pfile = eqdsk.read_pfile(path_to_result_pfile)
+        plt.plot(result_pfile.psinorm_for('ptot'), result_pfile.derivative_for('ptot'), color = color, label = f'Pres Scaled by: {result['scale_p']}; Curr Scaled by: {result['scale_j']}')
+
+    if pfile_0 is not None:
+        plt.plot(pfile_0.psinorm_for('ptot'), pfile_0.derivative_for('ptot'),  color = 'black', label = 'Input Pressure Derivative Profile', linestyle = '--', linewidth = 4)
+    else: print("Original pFile Not Provided, Initial P\' Profile Not Plotted")
+    
+    plt.xlabel('Normalized ψ')
+    plt.ylabel('P\' Profile')
+    plt.title('Scaled Pressure Derivatives')
+    plt.legend()
+    plt.show()
+
+def plot_current_results(results, scaling_values, path_to_results=None, pfile_0 = None, gfile_0 = None):
+    
+    from matplotlib import pyplot as plt
+    from matplotlib.colors import Normalize
+    import matplotlib.cm as cm
+    scaling_values = np.asarray(scaling_values)
+    norm = Normalize(vmin=(scaling_values.min()**2 - scaling_values.max()**2), vmax=(scaling_values.max()))
+    cmap = cm.plasma
+
+    if path_to_results is None:
+        path_to_results = os.getcwd()    
+
+    for result in results:
+        color = cmap(norm(float(result['scale_p'])**2 - float(result['scale_j'])**2))    
+        path_to_result_gfile = os.path.join(path_to_results, result['gfile_name'])
+        result_gfile = eqdsk.read_geqdsk(path_to_result_gfile)
+        plt.plot(result_gfile.psi_N, -result_gfile.j_tor_averaged_direct, color = color, label = f'Pres Scaled by: {result['scale_p']}; Curr Scaled by: {result['scale_j']}')
+
+    if gfile_0 is not None:
+        plt.plot(gfile_0.psi_N, -gfile_0.j_tor_averaged_direct, color = 'black', label = 'Input Current Density Profile', linestyle = '--', linewidth = 4)
+    else: print("Original gFile Not Provided, Initial Current Density Profile Not Plotted")
+
+    plt.xlabel('Normalized ψ')
+    plt.ylabel('Current Density [Ampere/m^2]')
+    plt.title('Scaled Current Densities')
+    plt.legend()
+    plt.show()
+
+def plot_varyped_results(results, scaling_values, path_to_results=None, pfile_0 = None, gfile_0 = None):
+    '''! Plots VARYPED results from an equilibrium scan.'''
+    
+    plot_pressure_results(results, scaling_values, path_to_results, pfile_0, gfile_0)
+    plot_current_results(results, scaling_values, path_to_results, pfile_0, gfile_0)
