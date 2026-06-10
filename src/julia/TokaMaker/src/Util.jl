@@ -1,9 +1,11 @@
 module Util
 
+using Printf
 using ..LibPath: liboftpy
 
 export create_isoflux, create_power_flux_fun, create_spline_flux_fun,
-       eval_green, read_eqdsk, read_ifile
+       eval_green, read_eqdsk, read_ifile,
+       read_fortran_namelist, read_mhdin, read_kfile
 
 const _MU0 = 4π * 1e-7
 
@@ -236,6 +238,195 @@ function read_ifile(filename::AbstractString)
         out["Z"] = reshape(Z, npsi, ntheta)
         return out
     end
+end
+
+# ----------------------------------------------------------------------------
+# Fortran namelist reader + EFIT machine/k-file parsers (port of
+# OpenFUSIONToolkit.util.read_fortran_namelist and TokaMaker.util.read_mhdin /
+# read_kfile). The `b_arr` (bottom-array) path is not ported.
+
+"""
+    read_fortran_namelist(file; silent=true) -> Dict{String,Any}
+
+Parse a Fortran namelist file into a dict keyed by variable name. Numeric
+values become `Float64`/`Int` (scalars) or `Vector{Float64}` (arrays); the
+`N*value` repetition syntax is expanded; non-numeric values are kept as the raw
+`String`. Mirrors `read_fortran_namelist(file, b_arr=False)`.
+"""
+function read_fortran_namelist(file::AbstractString; silent::Bool=true)
+    lines = readlines(file)
+    # End the file at a trailing "comment:" marker, if present.
+    end_idx = length(lines) + 1
+    for (i, ln) in enumerate(lines)
+        if occursin("comment:", ln)
+            end_idx = i
+            break
+        end
+    end
+    # Strip commas/quotes/comments; drop header (&) and break (/) lines.
+    datalines = String[]
+    for i in 1:(end_idx-1)
+        lu = replace(lines[i], "," => " ")
+        lu = replace(lu, "\"" => "")
+        cpos = findfirst('!', lu)
+        bpos = findfirst('/', lu)
+        hpos = findfirst('&', lu)
+        (hpos === nothing && bpos === nothing) || continue
+        if cpos === nothing
+            s = strip(lu)
+            isempty(s) || push!(datalines, String(s))
+        else
+            s = strip(lu[1:cpos-1])
+            isempty(s) || push!(datalines, String(s))
+        end
+    end
+    # Identify "key = ..." block starts.
+    block_idx = Int[]
+    keys_list = String[]
+    for (i, dl) in enumerate(datalines)
+        eq = findfirst('=', dl)
+        if eq !== nothing && eq > 1
+            push!(block_idx, i)
+            push!(keys_list, String(strip(dl[1:eq-1])))
+        end
+    end
+    data = Dict{String,Any}()
+    nkeys = length(keys_list)
+    for i in 1:nkeys
+        stop = i < nkeys ? block_idx[i+1] - 1 : length(datalines)
+        block = join(datalines[block_idx[i]:stop], " ")
+        eq = findfirst('=', block)
+        rhs = strip(block[eq+1:end])
+        data[keys_list[i]] = _parse_namelist_value(String(rhs))
+    end
+    if !silent
+        for (k, v) in data
+            println(k, " = ", v)
+        end
+    end
+    return data
+end
+
+# Expand `N*value` repetitions then parse a namelist RHS to Float64 vector /
+# scalar / raw string (matching the Python type inference).
+function _parse_namelist_value(rhs::AbstractString)
+    toks = split(rhs)
+    if any(occursin('*', t) for t in toks)
+        expanded = String[]
+        for t in toks
+            if occursin('*', t)
+                parts = split(t, '*')
+                n = tryparse(Int, parts[1])
+                if n === nothing || length(parts) < 2
+                    push!(expanded, t)        # leave as-is (matches Python `continue`)
+                else
+                    for _ in 1:n
+                        push!(expanded, parts[2])
+                    end
+                end
+            else
+                push!(expanded, t)
+            end
+        end
+        nums = tryparse.(Float64, expanded)
+        return any(isnothing, nums) ? rhs : Float64.(nums)
+    end
+    if length(toks) > 1
+        nums = tryparse.(Float64, toks)
+        return any(isnothing, nums) ? rhs : Float64.(nums)
+    else
+        s = toks[1]
+        iv = tryparse(Int, s)
+        iv !== nothing && return iv
+        fv = tryparse(Float64, s)
+        fv !== nothing && return fv
+        return rhs
+    end
+end
+
+"""
+    read_mhdin(path; e_coil_names=nothing, f_coil_names=nothing) -> (machine_dict, raw)
+
+Read an EFIT `mhdin.dat` machine-description file. Returns `machine_dict`
+(coil coordinates/turns keyed by name, probe/loop names, probe angles) and the
+raw namelist dict. Mirrors `TokaMaker.util.read_mhdin`.
+"""
+function read_mhdin(path::AbstractString; e_coil_names=nothing, f_coil_names=nothing)
+    raw = read_fortran_namelist(path)
+    machine = Dict{String,Any}()
+    for key in ("MPNAM2", "LPNAME")
+        names = split(replace(String(raw[key]), "'" => " "))
+        machine[key] = String.(names)
+    end
+    ecid = raw["ECID"]; RE = raw["RE"]; ZE = raw["ZE"]; WE = raw["WE"]; HE = raw["HE"]
+    e_coil = Dict{String,Vector{Vector{Float64}}}()
+    e_order = String[]
+    for i in 1:length(ecid)
+        idx = Int(ecid[i]) - 1
+        name = e_coil_names === nothing ? @sprintf("ECOIL%03d", idx + 1) : e_coil_names[idx+1]
+        if !haskey(e_coil, name)
+            e_coil[name] = Vector{Float64}[]
+            push!(e_order, name)
+        end
+        push!(e_coil[name], Float64[RE[i], ZE[i], WE[i], HE[i]])
+    end
+    machine["ECOIL"] = e_coil
+    machine["ECOIL_order"] = e_order
+    fcid = raw["FCID"]; RF = raw["RF"]; ZF = raw["ZF"]; WF = raw["WF"]; HF = raw["HF"]; TURNFC = raw["TURNFC"]
+    f_coil = Dict{String,Vector{Float64}}()
+    f_order = String[]
+    for i in 1:length(fcid)
+        name = f_coil_names === nothing ? @sprintf("FCOIL%03d", i) : f_coil_names[i]
+        f_coil[name] = Float64[RF[i], ZF[i], WF[i], HF[i], TURNFC[i]]
+        push!(f_order, name)
+    end
+    machine["FCOIL"] = f_coil
+    machine["FCOIL_order"] = f_order
+    amp2 = raw["AMP2"]
+    probe_angles = Dict{String,Float64}()
+    for (i, pname) in enumerate(machine["MPNAM2"])
+        probe_angles[pname] = Float64(amp2[i])
+    end
+    machine["AMP2"] = probe_angles
+    return machine, raw
+end
+
+"""
+    read_kfile(path, machine_dict; e_coil_names=nothing, f_coil_names=nothing)
+
+Read an EFIT k-file of measured constraints. Returns
+`(probes, loops, e_coils, f_coils, raw)`, each a name -> `[value, weight]` dict
+(plus the raw namelist). `machine_dict` is the result of [`read_mhdin`](@ref).
+Mirrors `TokaMaker.util.read_kfile`.
+"""
+function read_kfile(path::AbstractString, machine_dict::AbstractDict;
+                    e_coil_names=nothing, f_coil_names=nothing)
+    raw = read_fortran_namelist(path)
+    probe_names = machine_dict["MPNAM2"]
+    probes = Dict{String,Vector{Float64}}()
+    pv = raw["EXPMP2"]; pw = raw["FWTMP2"]
+    for i in 1:length(probe_names)
+        probes[probe_names[i]] = Float64[pv[i], pw[i]]
+    end
+    loop_names = machine_dict["LPNAME"]
+    loops = Dict{String,Vector{Float64}}()
+    lv = raw["COILS"]; lw = raw["FWTSI"]
+    for i in 1:length(loop_names)
+        loops[loop_names[i]] = Float64[lv[i], lw[i]]
+    end
+    enames = e_coil_names === nothing ? sort(collect(keys(machine_dict["ECOIL"]))) : e_coil_names
+    ev = raw["ECURRT"]; ew = raw["FWTEC"]
+    e_coils = Dict{String,Vector{Float64}}()
+    for i in 1:length(enames)
+        e_coils[enames[i]] = Float64[ev[i], ew[i]]
+    end
+    fnames = f_coil_names === nothing ? sort(collect(keys(machine_dict["FCOIL"]))) : f_coil_names
+    fv = raw["BRSP"]; fw = raw["FWTFC"]
+    f_coils = Dict{String,Vector{Float64}}()
+    for i in 1:length(fnames)
+        f_coils[fnames[i]] = Float64[fv[i], fw[i]]
+    end
+    return probes, loops, e_coils, f_coils, raw
 end
 
 end # module

@@ -14,11 +14,12 @@ export Tokamaker, setup_mesh!, setup_regions!, setup!, init_psi!, solve!,
        set_psi_constraints!, set_saddle_constraints!,
        set_coil_currents!, get_coil_currents,
        vac_solve!, compute_area_integral, compute_flux_integral,
-       get_conductor_currents, get_conductor_source,
+       get_conductor_currents, calc_conductor_currents, get_conductor_source,
        reset!, update_settings!, get_psi, set_psi!,
        copy_eq, replace_eq!, set_resistivity!, set_coil_current_dist!,
        abspsi_to_normalized, psinorm_to_absolute,
-       coil_dict2vec, coil_vec2dict, set_coil_bounds!, set_coil_vsc!, set_coil_reg!
+       coil_dict2vec, coil_vec2dict, set_coil_bounds!, set_coil_vsc!, set_coil_reg!,
+       set_vcoils!
 
 const _MU0 = 4π * 1e-7
 
@@ -521,6 +522,17 @@ function get_conductor_currents(t::Tokamaker, psi::AbstractVector;
 end
 
 """
+    calc_conductor_currents(t, psi; cell_centered=false, include_Vcoils=false)
+
+Toroidal current density in conducting regions for a given `psi` (e.g. from a
+time-dependent run). Returns `(mask, currents)` over cells. Canonical name for
+[`get_conductor_currents`](@ref), mirroring Python `calc_conductor_currents`
+(`get_conductor_currents` is the deprecated alias).
+"""
+calc_conductor_currents(t::Tokamaker, psi::AbstractVector; kwargs...) =
+    get_conductor_currents(t, psi; kwargs...)
+
+"""
     get_conductor_source(t, dpsi_dt) -> (mask::BitVector, mesh_currents::Vector{Float64})
 
 For a `dpsi/dt` source (e.g. from linear stability eigenvectors), return
@@ -997,6 +1009,26 @@ function set_coil_vsc!(t::Tokamaker, coil_gains::AbstractDict)
     c_tokamaker_set_coil_vsc(t.tmaker_ptr, Vector{Float64}(gains), buf)
     check_err(buf, "set_coil_vsc")
     t.virtual_coils["#VSC"]["facs"] = Dict{String,Float64}(String(k) => Float64(v) for (k, v) in coil_gains)
+    return t
+end
+
+"""
+    set_vcoils!(t, coil_resistances::AbstractDict)
+
+Set (or unset) coils as voltage coils ("Vcoils") by defining their lumped
+resistances [Ohms]. `coil_resistances` maps coil-set name -> resistance; coils
+omitted from the dict are unset (resistance -1). Replaces any prior Vcoil
+definitions. Mirrors Python `TokaMaker.set_vcoils`.
+"""
+function set_vcoils!(t::Tokamaker, coil_resistances::AbstractDict)
+    res = Vector{Float64}(coil_dict2vec(t, coil_resistances; default_value=-1.0))
+    buf = errbuf()
+    c_tokamaker_set_vcoil(t.tmaker_ptr, res, buf)
+    check_err(buf, "set_vcoils")
+    empty!(t.vcoils)
+    for (k, v) in coil_resistances
+        t.vcoils[String(k)] = Float64(v)
+    end
     return t
 end
 

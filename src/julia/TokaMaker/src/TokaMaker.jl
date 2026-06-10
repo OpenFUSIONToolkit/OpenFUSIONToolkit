@@ -24,7 +24,8 @@ using .CoreModule
 
 include("Util.jl")
 using .Util: create_isoflux, create_power_flux_fun, create_spline_flux_fun,
-             eval_green, read_eqdsk, read_ifile
+             eval_green, read_eqdsk, read_ifile,
+             read_fortran_namelist, read_mhdin, read_kfile
 
 include("FieldEval.jl")
 using .FieldEvalModule: TokamakerFieldInterpolator, get_field_eval
@@ -124,14 +125,15 @@ export setup_mesh!, setup_regions!, setup!, init_psi!, solve!, vac_solve!, reset
        update_settings!, set_profiles!, set_targets!, get_targets,
        set_isoflux_constraints!, set_psi_constraints!, set_saddle_constraints!,
        set_coil_currents!, set_coil_bounds!, set_coil_vsc!, set_coil_reg!,
-       set_resistivity!, set_coil_current_dist!,
+       set_vcoils!, set_resistivity!, set_coil_current_dist!,
        abspsi_to_normalized, psinorm_to_absolute,
        get_coil_currents, get_psi, set_psi!,
        compute_area_integral, compute_flux_integral,
-       get_conductor_currents, get_conductor_source,
+       get_conductor_currents, calc_conductor_currents, get_conductor_source,
        coil_dict2vec, coil_vec2dict
 export create_isoflux, create_power_flux_fun, create_spline_flux_fun,
-       eval_green, read_eqdsk, read_ifile
+       eval_green, read_eqdsk, read_ifile,
+       read_fortran_namelist, read_mhdin, read_kfile
 export GEQDSKEquilibrium, read_geqdsk, cocos_params, cocosify, cocosify!,
        flip_Bt_Ip, flip_Bt_Ip!, save_geqdsk, eqdsk_to_bytes, eqdsk_from_bytes,
        eqdsk_from_raw

@@ -101,6 +101,8 @@ using TokaMaker
 
     # Pure-ASCII GEQDSK COCOS/serialization tests (no liboftpy required).
     include("test_eqdsk.jl")
+    # EFIT namelist / mhdin / k-file parsers (no liboftpy required).
+    include("test_efit.jl")
 
     # Tests below require liboftpy to be built; they short-circuit otherwise.
     if !isempty(TokaMaker.LibPath.liboftpy[])

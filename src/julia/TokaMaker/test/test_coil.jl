@@ -133,3 +133,30 @@ end
         end
     end
 end
+
+# set_vcoils! (voltage coils) + calc_conductor_currents (canonical alias).
+@testset "set_vcoils! / calc_conductor_currents" begin
+    if !isfile(COIL_MESH)
+        @test_skip true
+    else
+        pts, lc, reg, coil_dict, cond_dict = load_gs_mesh(COIL_MESH)
+        env = OFTEnv(nthreads=2, quiet=true, use_abort_callback=false)
+        gs = Tokamaker(env)
+        setup_mesh!(gs; r=pts, lc=lc, reg=reg)
+        setup_regions!(gs; cond_dict=cond_dict, coil_dict=coil_dict)
+        setup!(gs; order=2)
+        set_vcoils!(gs, Dict("COIL1" => 1.0e-3))
+        @test haskey(gs.vcoils, "COIL1")
+        @test gs.vcoils["COIL1"] ≈ 1.0e-3
+        set_vcoils!(gs, Dict{String,Float64}())   # unset all
+        @test isempty(gs.vcoils)
+        # calc_conductor_currents must match get_conductor_currents exactly.
+        set_coil_currents!(gs, Dict("COIL1" => 0.01))
+        vac_eq = vac_solve!(gs)
+        psi = TokaMaker.EquilibriumModule.get_psi(vac_eq; normalized=false)
+        m1, c1 = get_conductor_currents(gs, psi)
+        m2, c2 = calc_conductor_currents(gs, psi)
+        @test m1 == m2
+        @test c1 == c2
+    end
+end
