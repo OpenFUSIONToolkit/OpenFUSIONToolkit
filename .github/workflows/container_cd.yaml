@@ -86,7 +86,7 @@ jobs:
           build-args: |
             GITBRANCH=${{ github.ref_name }}
             GITVERSION=${{ github.sha }}
-            GITTAG=${{ steps.version.outputs.release_tag }}
+            GITTAG=${{ needs.prepare-version.outputs.release_tag }}
             IS_RELEASE=${{ needs.prepare-version.outputs.is_release }}
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/container_release' }}
           tags: ${{ env.REGISTRY }}/openfusiontoolkit/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version_tag }}-${{ env.ARCH_SUFFIX }}
