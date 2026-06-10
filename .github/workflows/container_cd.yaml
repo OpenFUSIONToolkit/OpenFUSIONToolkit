@@ -23,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version_tag: ${{ steps.version.outputs.version_tag }}
+      is_release: ${{ steps.version.outputs.is_release }}
+      release_tag: ${{ steps.version.outputs.release_tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -33,11 +35,14 @@ jobs:
         id: version
         run: |
           TAG_NAME="$(git tag --points-at "$GITHUB_SHA" | head -n 1)"
+          echo "release_tag=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/\r//g')" >> "$GITHUB_OUTPUT"
           if [ -n "$TAG_NAME" ]; then
             SAFE_TAG="${TAG_NAME//\//-}"
             echo "version_tag=$SAFE_TAG" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
           else
             echo "version_tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
           fi
 
   build-images:
@@ -81,6 +86,8 @@ jobs:
           build-args: |
             GITBRANCH=${{ github.ref_name }}
             GITVERSION=${{ github.sha }}
+            GITTAG=${{ needs.prepare-version.outputs.release_tag }}
+            IS_RELEASE=${{ needs.prepare-version.outputs.is_release }}
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/container_release' }}
           tags: ${{ env.REGISTRY }}/openfusiontoolkit/${{ matrix.image_name }}:${{ needs.prepare-version.outputs.version_tag }}-${{ env.ARCH_SUFFIX }}
 
