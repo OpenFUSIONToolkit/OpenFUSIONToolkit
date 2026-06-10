@@ -27,8 +27,9 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
-  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, sauter_fc, sauter_interp
+  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
 USE oft_gs_profiles
+USE grad_shaf_bootstrap, ONLY: sauter_fc, sauter_interp
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
 IMPLICIT NONE
 #include "local.h"
