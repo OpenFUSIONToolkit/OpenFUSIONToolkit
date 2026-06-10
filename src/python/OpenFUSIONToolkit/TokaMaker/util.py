@@ -421,11 +421,11 @@ def compute_forces_components(tMaker_obj,psi,cell_centered=False):
     '''
     # Get conductor currents at cell centers
     mask, J_cond = tMaker_obj.get_conductor_currents(psi,cell_centered=cell_centered)
-    
+
     # Find points inside conducting regions
     pt_mask = numpy.zeros((tMaker_obj.r.shape[0],), dtype=numpy.int32)
     pt_mask[tMaker_obj.lc[mask,:]] = 1
-    
+
     # Set psi and evaluate B-field in conducting regions
     psi_save = tMaker_obj.get_psi(normalized=False)
     tMaker_obj.set_psi(psi)
@@ -444,7 +444,7 @@ def compute_forces_components(tMaker_obj,psi,cell_centered=False):
         return J_cond, Bv_cond, mask, rcc
     else:
         return J_cond, B_cond, mask, tMaker_obj.r
-    
+
 def read_mhdin(path, e_coil_names=None, f_coil_names=None):
     r'''Read mhdin.dat file.
 
@@ -456,14 +456,14 @@ def read_mhdin(path, e_coil_names=None, f_coil_names=None):
     '''
     raw = read_fortran_namelist(path)
     machine_dict = OrderedDict()
-    
+
     # Expand later
     keys = ['MPNAM2', 'LPNAME']
     for key in keys:
         names = raw[key].replace("'", " ")
         names = names.split()
-        machine_dict[key] = names        
-        
+        machine_dict[key] = names
+
     e_coil_dict = OrderedDict()
 
     for i in range(len(raw['ECID'])):
@@ -508,7 +508,7 @@ def read_kfile(path, machine_dict, e_coil_names=None, f_coil_names=None):
     @result raw Dictionary containing all other data from k-file.
     '''
     raw = read_fortran_namelist(path)
-    
+
     probe_names = machine_dict['MPNAM2']
     probe_vals = raw['EXPMP2']
     probe_weights = raw['FWTMP2']
@@ -522,7 +522,7 @@ def read_kfile(path, machine_dict, e_coil_names=None, f_coil_names=None):
     loops_dict = OrderedDict()
     for i in range(len(loop_names)):
         loops_dict[loop_names[i]] = [loop_vals[i], loop_weights[i]]
-        
+
     if e_coil_names is None:
         e_coil_names = sorted(machine_dict['ECOIL'].keys())
     e_coil_vals = raw['ECURRT']
@@ -530,7 +530,7 @@ def read_kfile(path, machine_dict, e_coil_names=None, f_coil_names=None):
     e_coil_dict = OrderedDict()
     for i in range(len(e_coil_names)):
         e_coil_dict[e_coil_names[i]] = [e_coil_vals[i], e_coil_weights[i]]
-    
+
     if f_coil_names is None:
         f_coil_names = sorted(machine_dict['FCOIL'].keys())
     f_coil_vals = raw['BRSP']
