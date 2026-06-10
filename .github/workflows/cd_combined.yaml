@@ -5,10 +5,9 @@ on:
     branches:
       - main
       - pypi_release
-      - cd_debug
   pull_request:
     paths:
-      - .github/workflows/release_pypi.yaml
+      - .github/workflows/cd_combined.yaml
       - src/utilities/build_libs.py
       - src/python/pyproject.toml.in
       - src/python/make_package.sh.in
