@@ -2,7 +2,7 @@
 
 root = true
 
-[*.{c,h,cxx,F,F90,yaml,yml,json,md}]
+[*.{c,h,cxx,F,F90,py,yaml,yml,json,md}]
 charset = utf-8
 end_of_line = lf
 insert_final_newline = false
@@ -14,7 +14,7 @@ indent_size = 2
 [*.{py}]
 indent_size = 4
 
-[*.{c,h,cxx,F,F90,py,json}]
+[*.{c,h,cxx,F,F90,py,yaml,yml,json}]
 trim_trailing_whitespace = true
 
 [*.{md}]
