@@ -313,26 +313,16 @@ END IF
 print_header=(oft_env%rank==0)
 IF(PRESENT(quiet))print_header=print_header.AND.(.NOT.quiet)
 IF(print_header)THEN
-  WRITE(*,'(A)')'   ____'
-  WRITE(*,'(A)')'  / __ \____  ___  ____'
-  WRITE(*,'(A)')' / / / / __ \/ _ \/ __ \'
-  WRITE(*,'(A)')'/ /_/ / /_/ /  __/ / / /'
-  WRITE(*,'(A)')'\____/ .___/\___/_/ /_/'
-  WRITE(*,'(A)')'    /_/'
-  WRITE(*,'(A)')'    ________  _______ ________  _   __'
-  WRITE(*,'(A)')'   / ____/ / / / ___//  _/ __ \/ | / /'
-  WRITE(*,'(A)')'  / /_  / / / /\__ \ / // / / /  |/ /'
-  WRITE(*,'(A)')' / __/ / /_/ /___/ // // /_/ / /|  /'
-  WRITE(*,'(A)')'/_/    \____//____/___/\____/_/ |_/'
-  WRITE(*,'(A)')'  ______            ____   _ __'
-  WRITE(*,'(A)')' /_  __/___  ____  / / /__(_) /_'
-  WRITE(*,'(A)')'  / / / __ \/ __ \/ / //_/ / __/'
-  WRITE(*,'(A)')' / / / /_/ / /_/ / / ,< / / /_'
-  WRITE(*,'(A)')'/_/  \____/\____/_/_/|_/_/\__/'
-  WRITE(*,*)
   WRITE(*,'(A)')'#----------------------------------------------'
+  WRITE(*,'(10X,A)')'   ____  ____________'
+  WRITE(*,'(10X,A)')'  / __ \/ ____/_  __/'
+  WRITE(*,'(10X,A)')' / / / / /_    / /'
+  WRITE(*,'(10X,A)')'/ /_/ / __/   / /'
+  WRITE(*,'(10X,A)')'\____/_/     /_/'
+  WRITE(*,*)
   CALL oft_print_git()
-  WRITE(*,'(2A)')   'Parallelization Info:'
+  WRITE(*,*)
+  WRITE(*,'(A)')   'Parallelization Info:'
 #ifdef HAVE_MPI
   WRITE(*,'(A,I4)') '  # of MPI tasks      = ',oft_env%nprocs
   WRITE(*,'(A,I4)') '  # of NUMA nodes     = ',oft_env%nnodes
@@ -345,17 +335,22 @@ IF(print_header)THEN
   WRITE(*,'(A)')    '  Not compiled with OpenMP'
 #endif
 IF(.NOT.from_api)THEN
-  WRITE(*,'(2A)')   'Fortran input file    = ',TRIM(oft_env%ifile)
-  WRITE(*,'(2A)')   'XML input file        = ',TRIM(oft_env%xml_file)
+  WRITE(*,*)
+  WRITE(*,'(2A)')   'Fortran input file     = ',TRIM(oft_env%ifile)
+  WRITE(*,'(2A)')   'XML input file         = ',TRIM(oft_env%xml_file)
 END IF
-  WRITE(*,'(A,3I4)')'Integer Precisions    = ',i4,i8
-  WRITE(*,'(A,3I4)')'Float Precisions      = ',r4,r8,r10
-  WRITE(*,'(A,3I4)')'Complex Precisions    = ',c4,c8
+  ! WRITE(*,*)
+  ! WRITE(*,'(A)')    'Data Type Sizes:'
+  ! WRITE(*,'(A,3I4)')'  Integer:  ',i4,i8
+  ! WRITE(*,'(A,3I4)')'  Float:    ',r4,r8,r10
+  ! WRITE(*,'(A,3I4)')'  Complex:  ',c4,c8
+  WRITE(*,*)
 IF(use_petsc)THEN
-  WRITE(*,'(A)')    'LA backend            = PETSc'
+  WRITE(*,'(A)')    'Linear Algebra backend: PETSc'
 ELSE
-  WRITE(*,'(A)')    'LA backend            = native'
+  WRITE(*,'(A)')    'Linear Algebra backend: native'
 END IF
+  WRITE(*,*)
   WRITE(*,'(A)')    '#----------------------------------------------'
   WRITE(*,*)
 END IF
