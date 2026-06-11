@@ -261,6 +261,7 @@ if run_internal:
 
     manual = True
     if not manual:
+        mygs.settings.pm = True
         mygs.solve_bootstrap(
             ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
             te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},

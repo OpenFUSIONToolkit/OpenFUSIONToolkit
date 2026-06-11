@@ -817,6 +817,7 @@ ELSE
            MAX(SQRT(SUM(j_BS**2) / REAL(self%npsi,r8)), 1.0e-30_r8)
     IF(djBS < gseq%boot_ops%djBS_tol .OR. self%freeze_alpha) THEN
       self%freeze_j_BS = .TRUE.
+      IF(oft_env%pm)WRITE(*,*)' Freezing bootstrap solution.'
     ELSE IF(djBS >= self%djBS_min) THEN
       self%djBS_no_improve = self%djBS_no_improve + 1
       IF(self%djBS_no_improve >= 2) THEN
@@ -830,7 +831,7 @@ ELSE
           self%freeze_j_BS = .TRUE.
           char_buf = TRIM(char_buf) // ' Freezing bootstrap solution.'
         END IF
-        CALL oft_warn(TRIM(char_buf))
+        IF(oft_env%pm)CALL oft_warn(TRIM(char_buf))
       END IF
     ELSE
       self%djBS_no_improve = 0
@@ -900,6 +901,7 @@ ELSE
   IF(dalpha < self%dalpha_tol(1)) THEN
     self%freeze_alpha = .TRUE.
     self%freeze_j_BS = .TRUE.
+    IF(oft_env%pm)WRITE(*,*)' Freezing inductive current scale.'
   ELSE IF(dalpha >= self%dalpha_min) THEN
     self%dalpha_no_improve = self%dalpha_no_improve + 1
     IF(self%dalpha_no_improve >= 2) THEN
@@ -914,7 +916,7 @@ ELSE
         self%freeze_j_BS = .TRUE.
         char_buf = TRIM(char_buf) // ' Freezing alpha solution.'
       END IF
-      CALL oft_warn(TRIM(char_buf))
+      IF(oft_env%pm)CALL oft_warn(TRIM(char_buf))
     END IF
   ELSE
     self%dalpha_no_improve = 0
