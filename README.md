@@ -14,8 +14,7 @@ framework, for problems in plasma and fusion research and engineering in arbitra
 The underlying framework and its component tools support the use of variable order finite element methods on
 unstructured tetrahedral (triangular) or hexahedral (quadralateral) grids.
 
-**NOTE:** This project is current in a beta status as the transition to a fully open source code, including
-associated documentation and examples is completed. For more information see [v1.0 release status](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/milestone/1) for more information.
+**NOTE:** This project is under active development, please watch [releases](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/releases) for any new features and breaking changes that may be introduced.
 
 Component tools
 ------------
@@ -51,6 +50,6 @@ See [CONTRIBUTING.md](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/blo
 Copyright
 ---------
 
-Open FUSION Toolkit code development project, up to version 1.0 Copyright (c) 2023, Open FUSION Toolkit team.
+Open FUSION Toolkit code development project, up to version 26.6 Copyright (c) 2023 - 2026, Open FUSION Toolkit team.
 
 Written by Open FUSION Toolkit team and collaborators with Christopher J. Hansen as principle developer. All rights reserved.
