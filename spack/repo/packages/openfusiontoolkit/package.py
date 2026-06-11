@@ -12,7 +12,7 @@ class Openfusiontoolkit(CMakePackage):
     framework, for problems in plasma and fusion research and engineering in arbitrary 2D and 3D geometries.
     The underlying framework and its component tools support the use of variable order finite element methods on
     unstructured tetrahedral (triangular) or hexahedral (quadralateral) grids.
-    
+
     Component tools:
       - TokaMaker: A time-dependent free-boundary Grad-Shafranov equilibrium code
       - ThinCurr: A 3D thin-wall electromagnetic simulation package
@@ -21,7 +21,7 @@ class Openfusiontoolkit(CMakePackage):
 
     # Project and repo information
     homepage = "https://openfusiontoolkit.github.io/OpenFUSIONToolkit/"
-    url = "https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit/archive/refs/tags/26.6.tar.gz"
+    url = "https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit/archive/refs/tags/v26.6.tar.gz"
     git = "https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit.git"
     maintainers("hansec")
     license("LGPL-3.0-only", checked_by="hansec")
