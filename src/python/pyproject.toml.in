@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools"]
-#requires = ["setuptools>=68"] # For new license format (requires Python 3.8+)
+#requires = ["setuptools>=77"] # For new license format (PEP 639; requires Python 3.9+)
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -13,9 +13,11 @@ readme = "README.md"
 requires-python = ">=3.7"
 keywords = ["Fusion", "Plasma", "TokaMaker", "ThinCurr"]
 license = "LGPL-3.0-only"
-license-files = ["LICENSE"]
+#license-files = ["LICENSE"]  # Uncomment when Python 3.7 requirement is removed (see above)
 classifiers = [
     "Development Status :: 5 - Production/Stable",
+    "Programming Language :: C",
+    "Programming Language :: Fortran",
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Physics"
 ]
