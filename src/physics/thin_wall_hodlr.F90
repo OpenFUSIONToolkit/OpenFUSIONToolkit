@@ -913,7 +913,7 @@ WRITE(*,*)'  Building diagonal blocks'
 nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
 !$omp end single
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO i=1,self%ndense
   level = self%dense_blocks(1,i)
   j = self%dense_blocks(2,i)
@@ -1589,7 +1589,7 @@ mat_updated=.FALSE.
 nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
 !$omp end single
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO i=1,self%ndense
   level = self%dense_blocks(1,i)
   j = self%dense_blocks(2,i)
@@ -2309,7 +2309,7 @@ DO j=1,self%nsparse
   END IF
 END DO
 !$omp end do nowait
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,self%ndense
   level = self%dense_blocks(1,j)
   iblock = self%dense_blocks(2,j)
@@ -2416,7 +2416,7 @@ DO j=1,self%nsparse
   END DO
 END DO
 ! !$omp end do nowait
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,self%ndense
   level = self%dense_blocks(1,j)
   iblock = self%dense_blocks(2,j)
@@ -2942,7 +2942,7 @@ CALL g%get_local(gtmp)
 utmp=(0.d0,0.d0)
 !$omp parallel private(uloc,gloc,i,level,iblock,n,j)
 ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO i=1,self%mf_obj%ndense
   level=self%mf_obj%dense_blocks(1,i)
   iblock=self%mf_obj%dense_blocks(2,i)
@@ -3084,7 +3084,7 @@ CALL g%get_local(gtmp)
 utmp=0.d0
 !$omp parallel private(uloc,gloc,i,level,iblock,n,j)
 ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO i=1,self%mf_obj%ndense
   level=self%mf_obj%dense_blocks(1,i)
   iblock=self%mf_obj%dense_blocks(2,i)

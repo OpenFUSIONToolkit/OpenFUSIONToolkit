@@ -836,13 +836,13 @@ def run_eta_only_matches_surface_resistivity_with_thickness(mp_q):
 
         model_surface = _build_dummy_model(xml_filename)
         model_surface.set_eta_values(eta_values=eta_surface)
-        model_surface.compute_Rmat(copy_out=True)
-        R_surface = model_surface.Rmat
+        model_surface.compute_Rmat()
+        R_surface = model_surface.Rmat.toarray()
 
         model_bulk = _build_dummy_model(xml_filename)
         model_bulk.set_eta_values(eta_vol=eta_bulk, thickness=thickness_values)
-        model_bulk.compute_Rmat(copy_out=True)
-        R_bulk = model_bulk.Rmat
+        model_bulk.compute_Rmat()
+        R_bulk = model_bulk.Rmat.toarray()
 
         if not np.allclose(R_surface, R_bulk, rtol=1.E-10, atol=1.E-12):
             result = False
@@ -1130,12 +1130,12 @@ def test_td_torus_volt(direct_flag,python):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_torus_fourier_sensor(direct_flag):
     from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
-    import xarray as xr
+    import netCDF4
     R_0 = 1.0
-    ds = xr.open_dataset("torus_gpec_control_output_n1_nc.nc")
-    R_gpec=ds.R.to_dataframe().values[:,0][:-1]
-    Z_gpec=ds.z.to_dataframe().values[:,0][:-1]
-    delta_phi = ds.delta_phi.to_dataframe().values[:,0][:-1]
+    with netCDF4.Dataset(os.path.join(test_dir,"torus_gpec_control_output_n1_nc.nc"), "r") as file:
+        R_gpec = np.asarray(file.variables["R"][:-1])
+        Z_gpec = np.asarray(file.variables["z"][:-1])
+        delta_phi = np.asarray(file.variables["delta_phi"][:-1])
     interface_h1 = torus_fourier_sensor(R_gpec,Z_gpec,R_0,1)
     interface_h1.place_normal_sensors(nphi=15,filename='floops.loc')
     interface_hminus1 = torus_fourier_sensor(R_gpec,Z_gpec,R_0,-1)

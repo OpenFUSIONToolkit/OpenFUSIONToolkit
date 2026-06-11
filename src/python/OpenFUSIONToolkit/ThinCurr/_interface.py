@@ -42,6 +42,10 @@ thincurr_save_scalar = ctypes_subroutine(oftpy_lib.thincurr_save_scalar,
 thincurr_scale_va = ctypes_subroutine(oftpy_lib.thincurr_scale_va,
     [c_void_p, ctypes_numpy_array(float64,1), c_bool])
 
+# thincurr_apply_Lmat(tw_ptr,field,hodlr_ptr)
+thincurr_apply_Lmat = ctypes_subroutine(oftpy_lib.thincurr_apply_Lmat,
+    [c_void_p, ctypes_numpy_array(float64,1), c_void_p])
+
 # Compute mutual coupling between models thincurr_cross_coupling(tw_ptr1,tw_ptr2,Mmat,error_str)
 thincurr_cross_coupling = ctypes_subroutine(oftpy_lib.thincurr_cross_coupling,
     [c_void_p, c_void_p, ctypes_numpy_array(float64,2), c_char_p, c_char_p])
@@ -70,9 +74,9 @@ thincurr_Msensor = ctypes_subroutine(oftpy_lib.thincurr_Msensor,
 thincurr_get_sensor_name = ctypes_subroutine(oftpy_lib.thincurr_get_sensor_name,
     [c_void_p, c_int, c_char_p, c_char_p])
 
-# Compute model resistivity matrix thincurr_curr_Rmat(tw_ptr,copy_out,Rmat,error_str)
-thincurr_curr_Rmat = ctypes_subroutine(oftpy_lib.thincurr_Rmat,
-    [c_void_p, c_bool, ctypes_numpy_array(float64,2), c_char_p])
+# Compute model resistivity matrix thincurr_Rmat(tw_ptr,kr_ptr,lc_ptr,mat_ptr,error_str)
+thincurr_Rmat = ctypes_subroutine(oftpy_lib.thincurr_Rmat,
+    [c_void_p, c_int_ptr_ptr, c_int_ptr_ptr, c_double_ptr_ptr, c_char_p])
 
 # thincurr_get_eta(tw_ptr,eta_ptr,error_string)
 thincurr_get_eta = ctypes_subroutine(oftpy_lib.thincurr_get_eta,
@@ -111,7 +115,7 @@ thincurr_time_domain = ctypes_subroutine(oftpy_lib.thincurr_time_domain,
 thincurr_time_domain_plot = ctypes_subroutine(oftpy_lib.thincurr_time_domain_plot,
     [c_void_p, c_bool, c_bool, c_int, c_int, c_void_p, ctypes_numpy_array(float64,2), c_int, c_void_p, c_char_p])
 
-# thincurr_reduce_model(tw_ptr,filename,neigs,eig_vec,compute_B,sensor_ptr,hodlr_ptr,error_str)
+# thincurr_reduce_model(tw_ptr,filename,nbasis,basis_vecs,compute_B,sensor_ptr,hodlr_ptr,error_str)
 thincurr_reduce_model = ctypes_subroutine(oftpy_lib.thincurr_reduce_model,
     [c_void_p, c_char_p, c_int, ctypes_numpy_array(float64,2), c_bool, c_void_p, c_void_p, c_char_p])
 ## @endcond
