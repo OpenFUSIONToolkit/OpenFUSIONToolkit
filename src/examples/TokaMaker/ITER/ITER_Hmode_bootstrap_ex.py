@@ -49,6 +49,8 @@ parser.add_argument('--parameterize-edge', action='store_true',
                     help='Fit edge spike with parametrised skew-normal (implies --isolate-edge)')
 parser.add_argument('--scale-jBS', type=float, default=1.0,
                     help='Scale factor applied to the bootstrap current (default 1.0)')
+parser.add_argument('--djBS-tol', type=float, default=1.0e-4,
+                    help='Threshold on relative change in j_BS to freeze bootstrap solve (default 1e-4)')
 parser.add_argument('--diagnose-bs', action='store_true',
                     help='Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration')
 parser.add_argument('--taper-edge', action='store_true',
@@ -274,6 +276,7 @@ if run_internal:
             taper_edge_jBS=args.taper_edge,
             taper_edge_psi0=args.taper_edge_psi0,
             taper_edge_shape=args.taper_edge_shape,
+            djBS_tol=args.djBS_tol
         )
     else:
         mygs.set_kinetic_profiles(
@@ -291,6 +294,7 @@ if run_internal:
             taper_edge_jBS=args.taper_edge,
             taper_edge_psi0=args.taper_edge_psi0,
             taper_edge_shape=args.taper_edge_shape,
+            djBS_tol=args.djBS_tol,
         )
         mygs.set_profiles(
             ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
