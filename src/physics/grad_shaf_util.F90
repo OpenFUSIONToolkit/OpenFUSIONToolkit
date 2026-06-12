@@ -29,8 +29,8 @@ USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
 USE oft_gs_profiles
-USE grad_shaf_bootstrap, ONLY: sauter_fc, sauter_interp
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
+USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func
 IMPLICIT NONE
 #include "local.h"
 !
@@ -59,11 +59,7 @@ SELECT CASE(TRIM(profType))
   CASE("jphi-linterp")
     ALLOCATE(jphi_flux_func::F)
   CASE("jphi-split-bootstrap")
-    ALLOCATE(jphi_flux_func::F)
-    SELECT TYPE(F)
-      TYPE IS(jphi_flux_func)
-        F%bootstrap_mode = 1
-    END SELECT
+    ALLOCATE(jphi_bs_flux_func::F)
   CASE("wesson")
     ALLOCATE(wesson_flux_func::F)
   CASE DEFAULT
