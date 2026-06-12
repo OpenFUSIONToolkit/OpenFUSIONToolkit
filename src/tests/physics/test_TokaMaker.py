@@ -1548,7 +1548,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
     eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
 
-    # --- Verify that boot_ops round-trip correctly through save/load, and that
+    # --- Verify that boot_ops, boot_profs round-trips correctly through save/load, and that
     #     replace_eq(source_file=...) correctly syncs the _boot_ops shadow dict ---
     save_file = 'ITER_boot_ops_test.h5'
     try:
@@ -1596,6 +1596,63 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
                 idx = int(np.argmax(reldiff))
                 raise AssertionError(
                     f"boot_profs['{key}'] does not match after replace_eq(source_file=...) "
+                    f"max_reldiff={reldiff.max():.3e} at idx={idx} "
+                    f"(expected={expected_arr[idx]:.6e}, got={boot_profs[key][idx]:.6e})"
+                )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        mp_q.put(None)
+        return
+
+    # --- Verify that boot_ops, boot_profs round-trips correctly through copy, and that
+    #     replace_eq(source_eq=...) correctly syncs the _boot_ops shadow dict ---
+    try:
+        # Capture expected state before copy so we can check all fields
+        expected_boot_ops = dict(mygs._tMaker_equil._boot_ops)
+        expected_boot_profs = mygs.get_boot_profs()
+        mygs_copied = mygs.copy_eq()
+        # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
+        mygs._tMaker_equil._boot_ops['scale_jBS'] = -999.0
+        mygs.replace_eq(source_eq=mygs_copied)
+        boot_ops = mygs._tMaker_equil._boot_ops
+        if boot_ops is None:
+            raise AssertionError("_boot_ops is None after replace_eq(source_eq=...)")
+        # Verify all fields round-trip correctly through save/load
+        for key, expected in expected_boot_ops.items():
+            val = boot_ops[key]
+            if isinstance(expected, bool):
+                if val != expected:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_eq=...)"
+                    )
+            elif isinstance(expected, float):
+                if abs(val - expected) > 1e-10:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_eq=...)"
+                    )
+            elif isinstance(expected, int):
+                if val != expected:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_eq=...)"
+                    )
+            print(key,val,expected)
+        # Verify BOOT_PROFS arrays round-trip correctly through save/load
+        if expected_boot_profs is None:
+            raise AssertionError("get_boot_profs() returned None before save")
+        boot_profs = mygs.get_boot_profs()
+        if boot_profs is None:
+            raise AssertionError("get_boot_profs() returned None after replace_eq(source_eq=...)")
+        for key, expected_arr in expected_boot_profs.items():
+            if key not in boot_profs:
+                raise AssertionError(
+                    f"boot_profs key '{key}' missing after replace_eq(source_eq=...)"
+                )
+            if not np.allclose(boot_profs[key], expected_arr, rtol=1e-3):
+                reldiff = np.abs(boot_profs[key] - expected_arr) / (np.abs(expected_arr) + 1e-30)
+                idx = int(np.argmax(reldiff))
+                raise AssertionError(
+                    f"boot_profs['{key}'] does not match after replace_eq(source_eq=...) "
                     f"max_reldiff={reldiff.max():.3e} at idx={idx} "
                     f"(expected={expected_arr[idx]:.6e}, got={boot_profs[key][idx]:.6e})"
                 )
