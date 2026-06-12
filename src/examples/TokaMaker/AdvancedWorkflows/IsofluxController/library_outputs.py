@@ -466,6 +466,9 @@ def save_simulation_results(inputs, mygs, PCS, STATES):
         return line,
     
     ani = animation.FuncAnimation(fig, update, frames=N_frames, interval=100)
-    ani.save(odir + 'evolution.mp4') # Save as mp4, requires ffmpeg
+    try:
+        ani.save(odir + 'evolution.mp4') # Save as mp4, requires ffmpeg
+    except ValueError:
+        ani.save(odir + 'evolution.gif') # Fall back to GIF
     print('Post Processing Complete')
     #####################################################

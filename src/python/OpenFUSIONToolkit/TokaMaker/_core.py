@@ -183,7 +183,7 @@ class TokaMaker():
 
         @param OFT_env OFT runtime environment object (See @ref OpenFUSIONToolkit._core.OFT_env "OFT_env")
         '''
-        # Create OFT execution environment
+        ## OFT execution environment
         self._oft_env = OFT_env
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_factory "gs_factory")
         self._tMaker_ptr = c_void_p()
@@ -488,13 +488,11 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.ffp_scale
 
-    ## @cond
     @ffp_scale.setter
     def ffp_scale(self,value):
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         self._tMaker_equil.ffp_scale = value
-    ## @endcond
 
     @property
     def p_scale(self):
@@ -503,13 +501,11 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.p_scale
 
-    ## @cond
     @p_scale.setter
     def p_scale(self,value):
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         self._tMaker_equil.p_scale = value
-    ## @endcond
 
     @property
     def alam(self):
@@ -518,11 +514,9 @@ class TokaMaker():
         @deprecated Use `ffp_scale` property instead.'''
         return self.ffp_scale
 
-    ## @cond
     @alam.setter
     def alam(self,value):
         self.ffp_scale = value
-    ## @endcond
 
     @property
     def pnorm(self):
@@ -531,11 +525,9 @@ class TokaMaker():
         @deprecated Use `p_scale` property instead.'''
         return self.p_scale
 
-    ## @cond
     @pnorm.setter
     def pnorm(self,value):
         self.p_scale = value
-    ## @endcond
 
     @property
     def diverted(self):
@@ -2370,22 +2362,18 @@ class TokaMaker_equilibrium():
         r'''! F*F' scale value'''
         return self._ffp_scale[0]
 
-    ## @cond
     @ffp_scale.setter
     def ffp_scale(self,value):
         self._ffp_scale[0] = value
-    ## @endcond
 
     @property
     def p_scale(self):
         r'''! Pressure scale value'''
         return self._p_scale[0]
 
-    ## @cond
     @p_scale.setter
     def p_scale(self,value):
         self._p_scale[0] = value
-    ## @endcond
 
     @property
     def alam(self):
@@ -2394,11 +2382,9 @@ class TokaMaker_equilibrium():
         @deprecated Use `ffp_scale` property instead.'''
         return self.ffp_scale
 
-    ## @cond
     @alam.setter
     def alam(self,value):
         self.ffp_scale = value
-    ## @endcond
 
     @property
     def pnorm(self):
@@ -2407,11 +2393,9 @@ class TokaMaker_equilibrium():
         @deprecated Use `p_scale` property instead.'''
         return self.p_scale
 
-    ## @cond
     @pnorm.setter
     def pnorm(self,value):
         self.p_scale = value
-    ## @endcond
 
     @property
     def diverted(self):

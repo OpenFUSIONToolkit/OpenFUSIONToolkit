@@ -25,8 +25,9 @@ class ThinCurr():
 
         @param OFT_env OFT runtime environment object (See @ref OpenFUSIONToolkit._core.OFT_env "OFT_env")
         '''
-        # Create OFT execution environment
+        ## OFT execution environment
         self._oft_env = OFT_env
+        # Setup necessary option groups
         self._oft_env.oft_in_groups['mesh_options'] = {'cad_type': "0"}
         self._oft_env.oft_in_groups['thincurr_hodlr_options'] = {
             'target_size': '1200',

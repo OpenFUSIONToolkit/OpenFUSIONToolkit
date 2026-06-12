@@ -56,7 +56,7 @@ class Marklin():
 
         @param OFT_env OFT runtime environment object (See @ref OpenFUSIONToolkit._core.OFT_env "OFT_env")
         '''
-        # Create OFT execution environment
+        ## OFT execution environment
         self._oft_env = OFT_env
         ## Internal Marklin solver object
         self._marklin_ptr = c_void_p()
