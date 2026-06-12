@@ -857,8 +857,8 @@ class TokaMaker():
                      diagnose_bs=None, taper_edge_jBS=None, taper_edge_psi0=None, taper_edge_shape=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
 
-        Must be called before solving with a `jphi-split-bootstrap` current profile.
-        Parameters default to `None`; any `None` value is left at the Fortran-side default.
+        Call after setting a `jphi-split-bootstrap`-type ffp_prof profile, and before mygs.solve().
+        Any `None` value is left unchanged from its current state (for default values see Tokamaker_equilibrium.set_boot_ops).
 
         @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
         @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true. (Internal default: False)
@@ -2389,7 +2389,6 @@ class TokaMaker():
             ni_prof=ni_prof,
             Zeff=Zeff,
         )
-        self.set_boot_ops(**kwargs)
         self.set_targets(Ip=Ip_target, pax=pax)
         self.update_settings()
         self.set_profiles(
@@ -2397,6 +2396,7 @@ class TokaMaker():
             pp_prof=pp_prof,
             foffset=F0,
         )
+        self.set_boot_ops(**kwargs) # Must come after set_profiles
         self.solve()
 
         # Extract bootstrap profiles
@@ -2910,8 +2910,8 @@ class TokaMaker_equilibrium():
                      diagnose_bs=None, taper_edge_jBS=None, taper_edge_psi0=None, taper_edge_shape=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
 
-        Must be called before solving with a `jphi-split-bootstrap` current profile.
-        Parameters default to `None`; any `None` value is left at the Fortran-side default.
+        Call after setting a `jphi-split-bootstrap`-type ffp_prof profile, and before mygs.solve().
+        Any `None` value is left unchanged from current state (see initialisations in dict. below).
 
         @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
         @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true. (Internal default: False)
