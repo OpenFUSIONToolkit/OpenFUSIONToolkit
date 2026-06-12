@@ -259,52 +259,24 @@ if run_internal:
 
     t0 = time.perf_counter()
 
-    manual = True
-    if not manual:
-        mygs.settings.pm = True
-        mygs.solve_bootstrap(
-            ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
-            te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
-            ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
-            ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
-            ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
-            Zeff=Zeff_val,
-            Ip_target=Ip_target,
-            isolate_edge_jBS=args.isolate_edge,
-            parameterize_jBS=args.parameterize_edge,
-            scale_jBS=args.scale_jBS,
-            diagnose_bs=args.diagnose_bs,
-            taper_edge_jBS=args.taper_edge,
-            taper_edge_psi0=args.taper_edge_psi0,
-            taper_edge_shape=args.taper_edge_shape,
-            djBS_tol=args.djBS_tol
-        )
-    else:
-        mygs.set_kinetic_profiles(
-            te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
-            ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
-            ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
-            ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
-            Zeff=Zeff_val,
-        )
-        mygs.set_boot_ops(
-            isolate_edge_jBS=args.isolate_edge,
-            parameterize_jBS=args.parameterize_edge,
-            scale_jBS=args.scale_jBS,
-            diagnose_bs=args.diagnose_bs,
-            taper_edge_jBS=args.taper_edge,
-            taper_edge_psi0=args.taper_edge_psi0,
-            taper_edge_shape=args.taper_edge_shape,
-            djBS_tol=args.djBS_tol,
-        )
-        mygs.set_profiles(
-            ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
-            pp_prof={'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_vals[0]}
-        )
-        mygs.set_targets(Ip=Ip_target, pax=float(pressure[0]))
-        mygs.settings.pm = True
-        mygs.update_settings()
-        mygs.solve()
+    mygs.settings.pm = True
+    mygs.solve_bootstrap(
+        ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
+        te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
+        ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
+        ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
+        ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
+        Zeff=Zeff_val,
+        Ip_target=Ip_target,
+        isolate_edge_jBS=args.isolate_edge,
+        parameterize_jBS=args.parameterize_edge,
+        scale_jBS=args.scale_jBS,
+        diagnose_bs=args.diagnose_bs,
+        taper_edge_jBS=args.taper_edge,
+        taper_edge_psi0=args.taper_edge_psi0,
+        taper_edge_shape=args.taper_edge_shape,
+        djBS_tol=args.djBS_tol
+    )
 
     elapsed_int = time.perf_counter() - t0
 
