@@ -34,10 +34,11 @@ USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_de
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source, gs_coil_source_distributed, gs_vacuum_solve, &
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
-  sauter_fc, gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
+  gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
+USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func, sauter_fc
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -581,11 +582,11 @@ CALL copy_string_rev(zeff_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%Zeff)
 END SUBROUTINE tokamaker_load_kinetic_profiles
 !---------------------------------------------------------------------------------
-!> Set bootstrap current options on the equilibrium object.
+!> Set bootstrap current options on the jphi_bs_flux_func object inside gs_equil.
 !!
 !! Must be called before solving with a `jphi-split-bootstrap` current profile.
 !! Fields in @p bops correspond to the optional arguments of
-!! @ref calculate_bootstrap in grad_shaf_prof_phys.F90.
+!! @ref jphi_bs_update in grad_shaf_bootstrap.F90.
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_boot_ops(tMaker_equil_ptr,bops,error_str) BIND(C,NAME="tokamaker_set_boot_ops")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
@@ -593,18 +594,23 @@ TYPE(tokamaker_boot_ops_type), INTENT(in) :: bops !< Bootstrap options to apply
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-tMaker_equil_obj%boot_ops%initialized = .TRUE.
-tMaker_equil_obj%boot_ops%isolate_edge_jBS = bops%isolate_edge_jBS
-tMaker_equil_obj%boot_ops%parameterize_jBS = bops%parameterize_jBS
-tMaker_equil_obj%boot_ops%scale_jBS = bops%scale_jBS
-tMaker_equil_obj%boot_ops%djBS_tol = bops%djBS_tol
-tMaker_equil_obj%boot_ops%diagnose_bs = bops%diagnose_bs
-tMaker_equil_obj%boot_ops%taper_edge_jBS = bops%taper_edge_jBS
-tMaker_equil_obj%boot_ops%taper_edge_psi0 = bops%taper_edge_psi0
-tMaker_equil_obj%boot_ops%taper_edge_shape = bops%taper_edge_shape
+SELECT TYPE(I => tMaker_equil_obj%I)
+TYPE IS (jphi_bs_flux_func)
+  I%boot_ops%initialized = .TRUE.
+  I%boot_ops%isolate_edge_jBS = bops%isolate_edge_jBS
+  I%boot_ops%parameterize_jBS = bops%parameterize_jBS
+  I%boot_ops%scale_jBS = bops%scale_jBS
+  I%boot_ops%djBS_tol = bops%djBS_tol
+  I%boot_ops%diagnose_bs = bops%diagnose_bs
+  I%boot_ops%taper_edge_jBS = bops%taper_edge_jBS
+  I%boot_ops%taper_edge_psi0 = bops%taper_edge_psi0
+  I%boot_ops%taper_edge_shape = bops%taper_edge_shape
+CLASS DEFAULT
+  CALL oft_warn('Run set_profiles with a jphi-split-bootstrap profile before calling set_boot_ops.')
+END SELECT
 END SUBROUTINE tokamaker_set_boot_ops
 !---------------------------------------------------------------------------------
-!> Get bootstrap current options from the equilibrium object.
+!> Get bootstrap current options from the jphi_bs_flux_func object.
 !!
 !! Returns the current Fortran-side state of the bootstrap options and whether
 !! they have been initialized (e.g. loaded from file or set via tokamaker_set_boot_ops).
@@ -616,15 +622,22 @@ LOGICAL(c_bool), INTENT(out) :: initialized !< .TRUE. if boot_ops have been init
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-initialized = tMaker_equil_obj%boot_ops%initialized
-bops%isolate_edge_jBS = tMaker_equil_obj%boot_ops%isolate_edge_jBS
-bops%parameterize_jBS = tMaker_equil_obj%boot_ops%parameterize_jBS
-bops%scale_jBS = tMaker_equil_obj%boot_ops%scale_jBS
-bops%djBS_tol = tMaker_equil_obj%boot_ops%djBS_tol
-bops%diagnose_bs = tMaker_equil_obj%boot_ops%diagnose_bs
-bops%taper_edge_jBS = tMaker_equil_obj%boot_ops%taper_edge_jBS
-bops%taper_edge_psi0 = tMaker_equil_obj%boot_ops%taper_edge_psi0
-bops%taper_edge_shape = tMaker_equil_obj%boot_ops%taper_edge_shape
+SELECT TYPE(I => tMaker_equil_obj%I)
+TYPE IS (jphi_bs_flux_func)
+  initialized = I%boot_ops%initialized
+  bops%isolate_edge_jBS = I%boot_ops%isolate_edge_jBS
+  bops%parameterize_jBS = I%boot_ops%parameterize_jBS
+  bops%scale_jBS = I%boot_ops%scale_jBS
+  bops%djBS_tol = I%boot_ops%djBS_tol
+  bops%diagnose_bs = I%boot_ops%diagnose_bs
+  bops%taper_edge_jBS = I%boot_ops%taper_edge_jBS
+  bops%taper_edge_psi0 = I%boot_ops%taper_edge_psi0
+  bops%taper_edge_shape = I%boot_ops%taper_edge_shape
+CLASS DEFAULT
+  CALL oft_warn('tokamaker_get_boot_ops: ffp_prof is not of type jphi-split-bootstrap. ' // &
+    'Bootstrap options are not available.')
+  initialized = .FALSE.
+END SELECT
 END SUBROUTINE tokamaker_get_boot_ops
 !---------------------------------------------------------------------------------
 !> Get cached bootstrap current profiles from the last jphi_bs_update call.
@@ -646,24 +659,30 @@ TYPE(c_ptr), INTENT(out) :: j_bs_raw_ptr !< Pointer to j_bs_raw array (c_null_pt
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-n = 0
-n_raw = 0
-psi_n_ptr = c_null_ptr
-total_j_phi_ptr = c_null_ptr
-j_bs_final_ptr = c_null_ptr
-j_ind_final_ptr = c_null_ptr
-j_bs_raw_ptr = c_null_ptr
-IF(ASSOCIATED(tMaker_equil_obj%boot_profs%total_j_phi))THEN
-  n = SIZE(tMaker_equil_obj%boot_profs%total_j_phi, KIND=c_int)
-  psi_n_ptr = c_loc(tMaker_equil_obj%boot_profs%psi_n)
-  total_j_phi_ptr = c_loc(tMaker_equil_obj%boot_profs%total_j_phi)
-  j_bs_final_ptr = c_loc(tMaker_equil_obj%boot_profs%j_bs_final)
-  j_ind_final_ptr = c_loc(tMaker_equil_obj%boot_profs%j_ind_final)
-END IF
-IF(ASSOCIATED(tMaker_equil_obj%boot_profs%j_bs_raw))THEN
-  n_raw = SIZE(tMaker_equil_obj%boot_profs%j_bs_raw, KIND=c_int)
-  j_bs_raw_ptr = c_loc(tMaker_equil_obj%boot_profs%j_bs_raw)
-END IF
+SELECT TYPE(I => tMaker_equil_obj%I)
+TYPE IS (jphi_bs_flux_func)
+  n = 0
+  n_raw = 0
+  psi_n_ptr = c_null_ptr
+  total_j_phi_ptr = c_null_ptr
+  j_bs_final_ptr = c_null_ptr
+  j_ind_final_ptr = c_null_ptr
+  j_bs_raw_ptr = c_null_ptr
+  IF(ASSOCIATED(I%boot_profs%total_j_phi))THEN
+    n = SIZE(I%boot_profs%total_j_phi, KIND=c_int)
+    psi_n_ptr = c_loc(I%boot_profs%psi_n)
+    total_j_phi_ptr = c_loc(I%boot_profs%total_j_phi)
+    j_bs_final_ptr = c_loc(I%boot_profs%j_bs_final)
+    j_ind_final_ptr = c_loc(I%boot_profs%j_ind_final)
+  END IF
+  IF(ASSOCIATED(I%boot_profs%j_bs_raw))THEN
+    n_raw = SIZE(I%boot_profs%j_bs_raw, KIND=c_int)
+    j_bs_raw_ptr = c_loc(I%boot_profs%j_bs_raw)
+  END IF
+CLASS DEFAULT
+  CALL oft_warn('tokamaker_get_boot_profs: ffp_prof is not of type jphi-split-bootstrap. ' // &
+    'Bootstrap profiles are not available.')
+END SELECT
 END SUBROUTINE tokamaker_get_boot_profs
 !---------------------------------------------------------------------------------
 !> Initialize \f$ \psi \f$ using a uniform or specified current source
