@@ -19,7 +19,8 @@ from scipy.stats import skewnorm
 from scipy.optimize import root_scalar, least_squares
 from scipy.constants import constants
 
-from OpenFUSIONToolkit.TokaMaker import eqdsk
+from OpenFUSIONToolkit.TokaMaker import eqdsk 
+
 
 #=============================================================================
 #                       PRESSURE SCALING METHODS
@@ -583,7 +584,7 @@ def make_updated_pfile(pfile, resampled_gfile_profiles, psf, psi_n):
 #                       RUN VARYPED SCAN METHODS
 #=============================================================================
 
-def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = None, filenames = None):
+def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = None, filenames = None, file_output = True):
     r"""! Run equilibrium scan scaling pressure and current density from TokaMaker instance
 
     @param t_object Grad-Shafranov solver object
@@ -592,6 +593,7 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = No
     @param scaling_values array-like object of non-decreasing positive scalar values
     @param path_to_output (str) path to directory where outputs will be created, defaults to cwd
     @param filenames (str) name for output files (typically of the form #####.####, where # are integers), defaults to 10000.0000
+    @param file_output (bool) If True, equilibrium scan generates output files.
 
     returns:
     List: List object containing output filenames, current targets, work targets, and scaling factors used.
@@ -599,11 +601,12 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = No
     import pprint
 
     results = []
+    eq_snapshots = {}
 
     #ensure scaling_values is array-like
     if type(scaling_values) is int or type(scaling_values) is float:
         scaling_values = [scaling_values]
-
+    print(f'Scaling Values Array: {scaling_values}')
    #Extract psi_n from pfile 
     if not profile_exists(pfile, 'ptot'):
         raise ValueError("pfile must contain 'ptot' (total pressure) profile")
@@ -643,6 +646,12 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = No
     
     t_object.init_psi(R0, Z0, a, kappa, delta)
 
+    results.append({'input_gfile': gfile,
+                    'input_pfile': pfile,
+                    'eq_snapshot': t_object.copy_eq(),
+                    'scaling_values': scaling_values
+                    })
+
     for scale_p in scaling_values:
 
         for scale_j in scaling_values:
@@ -651,6 +660,8 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = No
             ptot_scaled, psf, _, W_target, W_final, _ = scale_pressure(t_object, psi_n, pfile_copy['ptot']['data'], scale_p)
                       
             ptot_scaled_prime = np.gradient(ptot_scaled, psi_n)
+
+            pprime_input_to_solver = ptot_scaled_prime.copy()
 
             #make tokamaker pprime_profile
             pprime_profile = {'type': 'linterp',
@@ -684,24 +695,30 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = No
 
             if filenames is None:
                 filenames = '10000.0000'
-            #save output gfile by calling save_eqdsk
-            path_to_output_gfile = os.path.join(path_to_output, f'g{filenames}_{scale_p}_{scale_j}' + '.geqdsk')
-            t_object.save_eqdsk(path_to_output_gfile, 
-                                nr = len(psi_n),
-                                nz = len(psi_n),
-                                truncate_eq=False,
-                                lcfs_pad=1e-2)
-            
-            #call make_updated_pfile with psf and scaled_ptot
-                #make_updated_pfile deepcopies provided pfile and updates every profile within 
-                #used newly created gfile to update pfile
-            output_gfile = eqdsk.read_geqdsk(path_to_output_gfile)
-            output_gfile_profiles = resample_gfile_profiles(output_gfile, psi_n)
-            output_pfile = make_updated_pfile(pfile_copy, output_gfile_profiles, psf, psi_n)
 
-            path_to_output_pfile = os.path.join(path_to_output, f'p{filenames}_{scale_p}_{scale_j}')
-            output_pfile.save(path_to_output_pfile)
-            print(f'Saving pFile: {path_to_output_pfile}' )
+            if file_output:
+                #save output gfile by calling save_eqdsk
+                path_to_output_gfile = os.path.join(path_to_output, f'g{filenames}_{scale_p}_{scale_j}' + '.geqdsk')
+                t_object.save_eqdsk(path_to_output_gfile, 
+                                    nr = len(psi_n),
+                                    nz = len(psi_n),
+                                    truncate_eq=False,
+                                    lcfs_pad=1e-2)
+                
+                #call make_updated_pfile with psf and scaled_ptot
+                    #make_updated_pfile deepcopies provided pfile and updates every profile within 
+                    #used newly created gfile to update pfile
+                output_gfile = eqdsk.read_geqdsk(path_to_output_gfile)
+                output_gfile_profiles = resample_gfile_profiles(output_gfile, psi_n)
+                output_pfile = make_updated_pfile(pfile_copy, output_gfile_profiles, psf, psi_n)
+
+                path_to_output_pfile = os.path.join(path_to_output, f'p{filenames}_{scale_p}_{scale_j}')
+                output_pfile.save(path_to_output_pfile)
+                print(f'Saving pFile: {path_to_output_pfile}' )
+
+
+            eq_snapshots[f'({scale_p}:{scale_j})'] = t_object.copy_eq()
+
             results.append({'scale_p':scale_p, 
                             'scale_j': scale_j,
                             'gfile_name': f'g{filenames}_{scale_p}_{scale_j}' + '.geqdsk',
@@ -710,87 +727,99 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output = No
                             'Ip_final': Ip_final,
                             'pax_target': f'{float(pax_target)} kPa',
                             'W_target': W_target,
-                            'W_final': W_final
+                            'W_final': W_final,
+                            'eq_snapshot': t_object.copy_eq(),
+                            'input_pprime': pprime_input_to_solver
                             })
-
-    for i in range(len(results)):
-        pprint.pprint(f'Run ({results[i]['scale_p']},{results[i]['scale_j']}) Quick Results: {results[i]}')
+            
+    results[0]['eq_snapshots'] = eq_snapshots
+    for i in range(1,len(results)):
+        summary = dict(results[i])
+        summary.pop('input_pprime', None)
+        print(f'\n Varyped Equilibrium Run ({results[i]['scale_p']},{results[i]['scale_j']}) Quick Results:')
+        pprint.pprint(summary)
     return results
 
 
-def plot_pressure_results(results, scaling_values, path_to_results=None, pfile_0 = None, gfile_0 = None):
+def plot_pressure_results(results):
     from matplotlib import pyplot as plt
+    from matplotlib.lines import Line2D
     from matplotlib.colors import Normalize
     import matplotlib.cm as cm
-    scaling_values = np.asarray(scaling_values)
+    scaling_values = np.asarray(results[0]["scaling_values"])
     norm = Normalize(vmin=(scaling_values.min()**2 - scaling_values.max()**2), vmax=(scaling_values.max()))
     cmap = cm.plasma
 
-    if path_to_results is None:
-        path_to_results = os.getcwd()    
-
-    for result in results:
+    for i in range(1,len(results)):
+        result = results[i]
         color = cmap(norm(float(result['scale_p'])**2 - float(result['scale_j'])**2))    
-        path_to_result_pfile = os.path.join(path_to_results, result['pfile_name'])
-        result_pfile = eqdsk.read_pfile(path_to_result_pfile)
-        plt.plot(result_pfile.psinorm_for('ptot'), result_pfile.ptot, color = color, label = f'Pres Scaled by: {result['scale_p']}; Curr Scaled by: {result['scale_j']}')
-    plt.plot(label = "(Pressure Scale Factor, Current Scale Factor)")
-    if pfile_0 is not None:
-        plt.plot(pfile_0.psinorm_for('ptot'), pfile_0.ptot, color = 'black', label = 'Input Pressure Profile', linestyle = '--', linewidth = 4)
-    else: print("Original pFile Not Provided, Initial Pressure Profile Not Plotted")
+        psi_n, _, _, ptot, _ = result['eq_snapshot'].get_profiles(npsi=514,psi_pad=1e-3)
+        plt.plot(psi_n, ptot, color = color, label = f'{result['scale_p']}, {result['scale_j']}')
 
+    pfile_0 = results[0]['input_pfile']
+    input_ptot = pfile_0.ptot
+    input_psi_n = pfile_0.psinorm_for('ptot')
+    plt.plot(input_psi_n, input_ptot, color = 'black', label = 'Input Pressure Profile', linestyle = '--', linewidth = 4)
+
+    # plt.legend(title='(Pressure Scale Factor, Current Scale Factor)')
     plt.xlabel('Normalized ψ')
     plt.ylabel('Total Pressure [kPa]')
     plt.title('Scaled Pressures')
-    plt.legend()
     plt.show()
 
-    for result in results:
+    for i in range(1,len(results)):
+        result = results[i]
         color = cmap(norm(float(result['scale_p'])**2 - float(result['scale_j'])**2))    
-        path_to_result_pfile = os.path.join(path_to_results, result['pfile_name'])
-        result_pfile = eqdsk.read_pfile(path_to_result_pfile)
-        plt.plot(result_pfile.psinorm_for('ptot'), result_pfile.derivative_for('ptot'), color = color, label = f'Pres Scaled by: {result['scale_p']}; Curr Scaled by: {result['scale_j']}')
+        pprime = result['input_pprime']
+        psi_n = np.linspace(0,1,len(pprime))
+        plt.plot(psi_n, pprime, color = color, label = f'{result['scale_p']}, {result['scale_j']}')
 
-    if pfile_0 is not None:
-        plt.plot(pfile_0.psinorm_for('ptot'), pfile_0.derivative_for('ptot'),  color = 'black', label = 'Input Pressure Derivative Profile', linestyle = '--', linewidth = 4)
-    else: print("Original pFile Not Provided, Initial P\' Profile Not Plotted")
-    
+    input_pprime = pfile_0.derivative_for('ptot')
+    plt.plot(input_psi_n, input_pprime, color = 'black', label = 'Input Pressure Derivative Profile', linestyle = '--', linewidth = 4)
+
+    # plt.legend(title='(Pressure Scale Factor, Current Scale Factor)')
     plt.xlabel('Normalized ψ')
     plt.ylabel('P\' Profile')
     plt.title('Scaled Pressure Derivatives')
-    plt.legend()
     plt.show()
-
-def plot_current_results(results, scaling_values, path_to_results=None, pfile_0 = None, gfile_0 = None):
+    
+def plot_current_results(results):
     
     from matplotlib import pyplot as plt
     from matplotlib.colors import Normalize
     import matplotlib.cm as cm
-    scaling_values = np.asarray(scaling_values)
+    scaling_values = np.asarray(results[0]["scaling_values"])
     norm = Normalize(vmin=(scaling_values.min()**2 - scaling_values.max()**2), vmax=(scaling_values.max()))
     cmap = cm.plasma
 
-    if path_to_results is None:
-        path_to_results = os.getcwd()    
-
-    for result in results:
+    for i in range(1,len(results)):
+        result = results[i]
         color = cmap(norm(float(result['scale_p'])**2 - float(result['scale_j'])**2))    
-        path_to_result_gfile = os.path.join(path_to_results, result['gfile_name'])
-        result_gfile = eqdsk.read_geqdsk(path_to_result_gfile)
-        plt.plot(result_gfile.psi_N, -result_gfile.j_tor_averaged_direct, color = color, label = f'Pres Scaled by: {result['scale_p']}; Curr Scaled by: {result['scale_j']}')
+        
+        psi_n,f,fp,pres,pprime = result['eq_snapshot'].get_profiles(npsi=514,psi_pad=1e-3)
+        _, _, ravgs, _, _, _ = result['eq_snapshot'].get_q(npsi=514,psi_pad=1e-3) # get flux averaged R and 1/R from equilibrium solution
+        R_avg = ravgs[0] # R
+        one_over_R_avg = ravgs[1] # 1/R
+        mu0 = np.pi * 4.E-7
+        jtor = R_avg * pprime + one_over_R_avg * (f * fp) / mu0 # Jtor = R*P' + FF' / (mu0*R), calculated jtor using same method tokamaker uses
 
-    if gfile_0 is not None:
-        plt.plot(gfile_0.psi_N, -gfile_0.j_tor_averaged_direct, color = 'black', label = 'Input Current Density Profile', linestyle = '--', linewidth = 4)
-    else: print("Original gFile Not Provided, Initial Current Density Profile Not Plotted")
+        plt.plot(psi_n, jtor, color = color, label = f'{result['scale_p']}, {result['scale_j']}')
+    
+    gfile_0 = results[0]['input_gfile']
+    input_jtor = -gfile_0.j_tor_averaged_direct
+    input_psi_n = gfile_0.psi_N
+    plt.plot(input_psi_n, input_jtor, color = 'black', label = 'Input Current Density Profile', linestyle = '--', linewidth = 4)
 
+    # plt.legend(title='(Pressure Scale Factor, Current Scale Factor)')
     plt.xlabel('Normalized ψ')
     plt.ylabel('Current Density [Ampere/m^2]')
     plt.title('Scaled Current Densities')
-    plt.legend()
     plt.show()
 
-def plot_varyped_results(results, scaling_values, path_to_results=None, pfile_0 = None, gfile_0 = None):
+
+
+def plot_varyped_results(results):
     '''! Plots VARYPED results from an equilibrium scan.'''
     
-    plot_pressure_results(results, scaling_values, path_to_results, pfile_0, gfile_0)
-    plot_current_results(results, scaling_values, path_to_results, pfile_0, gfile_0)
+    plot_pressure_results(results)
+    plot_current_results(results)
