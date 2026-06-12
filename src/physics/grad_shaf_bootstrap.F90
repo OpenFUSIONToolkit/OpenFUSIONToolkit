@@ -901,9 +901,10 @@ END SUBROUTINE apply_edge_taper
 !> @param psi_N    Normalised psi grid [0,1], arbitrary spacing
 !> @param j_BS Output: average toroidal bootstrap current density [A/m^2] on psi_N grid
 !------------------------------------------------------------------------------
-SUBROUTINE calculate_bootstrap(gseq, n_psi, psi_N, j_BS, &
+SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, j_BS, &
                                isolate_edge_jBS, parameterize_jBS, scale_jBS, &
                                j_spike, j_spike_masked)
+CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 INTEGER(i4), INTENT(in) :: n_psi
 REAL(r8), INTENT(in) :: psi_N(n_psi)  !< Normalised psi grid [0,1], arbitrary spacing
@@ -1027,10 +1028,10 @@ END WHERE
 ! Guard NaN (where F -> 0)
 WHERE(.NOT.(ABS(j_BS) < 1.0e99_r8)) j_BS = 0.0_r8
 ! Save raw bootstrap output
-IF(.NOT.ASSOCIATED(gseq%boot_profs%j_bs_raw)) ALLOCATE(gseq%boot_profs%j_bs_raw(0:n_psi))
-gseq%boot_profs%j_bs_raw(0)  = 0.0_r8  ! j_BS = 0 at LCFS (OFT psi = 0)
-gseq%boot_profs%j_bs_raw(1:) = j_BS
-IF(gseq%boot_ops%diagnose_bs)THEN
+IF(.NOT.ASSOCIATED(self%boot_profs%j_bs_raw)) ALLOCATE(self%boot_profs%j_bs_raw(0:n_psi))
+self%boot_profs%j_bs_raw(0)  = 0.0_r8  ! j_BS = 0 at LCFS (OFT psi = 0)
+self%boot_profs%j_bs_raw(1:) = j_BS
+IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A)') '  [calculate_bootstrap] geometry & collisionality sample (i=1,mid,n):'
   WRITE(*,'(A,3ES12.4)') '    <R>      : ', r_avgs_saut(1,1), r_avgs_saut(n_psi/2,1), r_avgs_saut(n_psi,1)
   WRITE(*,'(A,3ES12.4)') '    <1/R>    : ', r_avgs_saut(1,2), r_avgs_saut(n_psi/2,2), r_avgs_saut(n_psi,2)
@@ -1061,7 +1062,7 @@ IF (PRESENT(j_spike)) THEN
     j_BS_std  = j_BS(n_psi:1:-1)
     IF (do_parametrize) THEN
       CALL analyze_bootstrap_edge_spike(n_psi, psi_N_std, j_BS_std, mask_std, &
-                                      param_std, diagnose=gseq%boot_ops%diagnose_bs)
+                                      param_std, diagnose=self%boot_ops%diagnose_bs)
       IF (PRESENT(j_spike))        j_spike        = scl_jBS * param_std(n_psi:1:-1)
       IF (PRESENT(j_spike_masked)) j_spike_masked = scl_jBS * mask_std(n_psi:1:-1)
       DEALLOCATE(param_std)
@@ -1743,7 +1744,7 @@ IF (PRESENT(parameterized_spike)) THEN
   ! Evaluate fitted profile on the full n-point grid
   CALL parametrise_edge_jbs(n, psi_N, amp_fit, center_fit, width_fit, &
       offset_fit, sk_fit, y_sep_fit, bw_fit, 1.5_r8, parameterized_spike)
-  ! Optional verbose output for diagnostics if gseq%boot_ops%diagnose_bs
+  ! Optional verbose output for diagnostics if boot_ops%diagnose_bs
   IF (PRESENT(diagnose) .AND. diagnose) THEN
     WRITE(*,'(A,7(A,ES12.4))') '  [edge_spike_fit]', &
       ' amp=',    amp_fit,    ' center=', center_fit, ' width=',  width_fit, &
