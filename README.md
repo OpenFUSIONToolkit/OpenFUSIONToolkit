@@ -39,7 +39,7 @@ Pre-built Python packages are available on [PyPI](https://pypi.org/project/openf
 Binaries are available for Linux (x86 and arm64) and macOS (x86 and arm64) for each [release on GitHub](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/releases) as well as recent commits to `main` via the [CD workflow](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/cd_combined.yaml) (see artifacts on each run).
 
 ### Container images
-Pre-built container images capable of running Open FUSION Toolkit via python scripts and/or Jupyter notebooks are available on the [GitHub Package Registry](https://github.com/orgs/OpenFUSIONToolkit/packages) and can be used by [Docker](https://www.docker.com/) or other container runtimes at `ghcr.io/openfusiontoolkit/{base|jupyter|extras}` (see registry for available images/tags).
+Pre-built container images capable of running Open FUSION Toolkit via python scripts and/or Jupyter notebooks are available on the [GitHub Container Registry](https://github.com/orgs/OpenFUSIONToolkit/packages) and can be used by [Docker](https://www.docker.com/) or other container runtimes at `ghcr.io/openfusiontoolkit/{base|jupyter|extras}` (see registry for available images/tags).
 
 ### Installation from source
 The framework and its components can also be built from source using the instructions provided on [the wiki](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/wiki).
