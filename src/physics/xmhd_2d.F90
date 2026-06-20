@@ -106,8 +106,8 @@ TYPE, public :: oft_xmhd_2d_sim
   TYPE(oft_mf_matrix), POINTER :: mf_mat => NULL() !< Matrix free operator
   TYPE(xmhd_2d_nlfun), POINTER :: nlfun => NULL() !< Nonlinear function
   TYPE(xmhd_2d_mfun), POINTER :: mfun => NULL() !< mass matrix function
-  TYPE(xml_node), POINTER :: xml_root => NULL() !< XML root element
-  TYPE(xml_node), POINTER :: xml_pre_def => NULL() !< XML element for preconditioner definition
+  TYPE(xml_node):: xml_root !< XML root element
+  TYPE(xml_node):: xml_pre_def !< XML element for preconditioner definition
   contains
   !> Setup
   PROCEDURE :: setup => setup
@@ -219,7 +219,7 @@ solver%itplot=1
 solver%nrits=40
 solver%pm=oft_env%pm
 NULLIFY(solver%pre)
-IF(ASSOCIATED(self%xml_pre_def))THEN
+IF(self%xml_pre_def%associated())THEN
   CALL create_solver_xml(solver%pre,self%xml_pre_def)
 ELSE
   CALL create_diag_pre(solver%pre)
@@ -415,7 +415,7 @@ solver%itplot=1
 solver%nrits=20
 solver%pm=oft_env%pm
 NULLIFY(solver%pre)
-IF(ASSOCIATED(self%xml_pre_def))THEN
+IF(self%xml_pre_def%associated()) THEN
   CALL create_solver_xml(solver%pre,self%xml_pre_def)
 ELSE
   CALL create_diag_pre(solver%pre)
@@ -1547,18 +1547,13 @@ IF(ASSOCIATED(self%fe_rep))CALL oft_abort("Setup can only be called once","setup
 IF(ASSOCIATED(oft_blagrange))CALL oft_abort("FE space already built","setup",__FILE__)
 
 !---Look for XML defintion elements
-#ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"xmhd2d",self%xml_root,ierr)
   IF(ierr==0)THEN
     !---Look for pre node
     CALL xml_get_element(self%xml_root,"pre",self%xml_pre_def,ierr)
-    IF(ierr/=0)NULLIFY(self%xml_pre_def)
-  ELSE
-    NULLIFY(self%xml_root)
   END IF
 END IF
-#endif
 
 !---Setup FE representation
 IF(oft_debug_print(1))WRITE(*,'(2X,A)')'Building lagrange FE space'
