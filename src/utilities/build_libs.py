@@ -348,7 +348,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     for compiler_key in ('CC', 'CXX', 'FC'):
         target = detect_compiler_target(config_dict[compiler_key])
         if target != config_dict['TARGET_ARCH']:
-            error_exit('Detected compiler target "{0}" does not match target architecture "{1}"'.format(target, config_dict['TARGET_ARCH']),
+            error_exit('Detected compiler "{0}" target "{1}" does not match target architecture "{2}"'.format(config_dict[compiler_key], target, config_dict['TARGET_ARCH']),
                        ["If cross-compiling, specify target architecture with --cross_compile_arch (e.g. --cross_compile_arch=arm64)"])
     # Return dictionary
     return config_dict
