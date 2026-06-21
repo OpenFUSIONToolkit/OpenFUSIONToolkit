@@ -225,7 +225,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
                     else:
                         return arch.split('-')[0]
         # Try "-dumpmachine" option if "-v" did not work
-        result, errcode = run_command("{0} -v".format(compiler))
+        result, errcode = run_command("{0} -dumpmachine".format(compiler))
         if errcode != 0:
             return 'unknown'
         else:
