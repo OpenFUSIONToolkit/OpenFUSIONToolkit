@@ -214,17 +214,30 @@ def check_fortran_compiles_and_runs(source, flags, config_dict, compiler_key='FC
 def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_target=None):
     def detect_compiler_target(compiler):
         result, errcode = run_command("{0} -v".format(compiler))
+        if errcode == 0:
+            for line in result.splitlines():
+                if line.find("Target:") >= 0:
+                    arch = line.split("Target:")[1].strip()
+                    if arch.startswith('arm64') or arch.startswith('aarch64'):
+                        return 'arm64'
+                    elif arch.startswith('x86_64'):
+                        return 'x86_64'
+                    else:
+                        return arch.split('-')[0]
+        # Try "-dumpmachine" option if "-v" did not work
+        result, errcode = run_command("{0} -v".format(compiler))
         if errcode != 0:
             return 'unknown'
-        for line in result.splitlines():
-            if line.find("Target:") >= 0:
-                arch = line.split("Target:")[1].strip()
-                if arch.startswith('arm64') or arch.startswith('aarch64'):
-                    return 'arm64'
-                elif arch.startswith('x86_64'):
-                    return 'x86_64'
-                else:
-                    return arch.split('-')[0]
+        else:
+            arch = result.strip()
+            if arch.startswith('arm64') or arch.startswith('aarch64'):
+                return 'arm64'
+            elif arch.startswith('x86_64'):
+                return 'x86_64'
+            else:
+                return arch.split('-')[0]
+
+
     # Setup build environment
     # Set defaults
     config_dict = {"CC": "gcc", "CXX": "g++", "FC": "gfortran", "LD": None,
