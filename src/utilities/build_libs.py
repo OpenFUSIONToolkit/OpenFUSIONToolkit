@@ -211,7 +211,7 @@ def check_fortran_compiles_and_runs(source, flags, config_dict, compiler_key='FC
         return True, compile_out, run_out
 
 
-def setup_build_env(build_dir="build", build_cmake_ver=None):
+def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_target=None):
     def detect_compiler_target(compiler):
         result, errcode = run_command("{0} -v".format(compiler))
         if errcode != 0:
@@ -224,7 +224,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
                 elif arch.startswith('x86_64'):
                     return 'x86_64'
                 else:
-                    return 'unknown'
+                    return arch.split('-')[0]
     # Setup build environment
     # Set defaults
     config_dict = {"CC": "gcc", "CXX": "g++", "FC": "gfortran", "LD": None,
@@ -335,7 +335,8 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
         config_dict['OPT_FLAGS'] = ""
     # Determine OS type
     config_dict['OS_TYPE'] = platform.uname().system
-    config_dict['OS_ARCH'] = platform.uname().machine
+    config_dict['HOST_ARCH'] = platform.uname().machine
+    config_dict['TARGET_ARCH'] = cross_compile_target if cross_compile_target is not None else config_dict['HOST_ARCH']
     if config_dict['OS_TYPE'] == 'Darwin':
         result, errcode = run_command('sw_vers -productVersion')
         config_dict['OS_VER'] = result
@@ -346,8 +347,9 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
     # Check compiler targets
     for compiler_key in ('CC', 'CXX', 'FC'):
         target = detect_compiler_target(config_dict[compiler_key])
-        if target != config_dict['OS_ARCH']:
-            print('Warning: Detected compiler target "{0}" does not match host architecture "{1}"'.format(target, config_dict['OS_ARCH']))
+        if target != config_dict['TARGET_ARCH']:
+            error_exit('Detected compiler target "{0}" does not match target architecture "{1}"'.format(target, config_dict['TARGET_ARCH']),
+                       ["If cross-compiling, specify target architecture with --cross_compile_arch (e.g. --cross_compile_arch=arm64)"])
     # Return dictionary
     return config_dict
 
@@ -1391,7 +1393,7 @@ int main(int argc, char** argv) {
             oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1']
         else:
             oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1']
-        if self.no_avx or (self.config_dict['OS_ARCH'] == 'arm64'):
+        if self.no_avx or (self.config_dict['TARGET_ARCH'] == 'arm64'):
             oblas_options += ['NO_AVX=1', 'NO_AVX2=1']
         else:
             if self.config_dict['OS_TYPE'] == 'Darwin':
@@ -2110,7 +2112,7 @@ parser.add_argument("--opt_flags", default=None, type=str, help="Compiler optimi
 parser.add_argument("--ld_flags", default=None, type=str, help="Linker flags")
 parser.add_argument("--macos_sdk_path", default=None, type=str, help="Path to macOS SDK to use for building")
 parser.add_argument("--macos_deployment_target", default=None, type=str, help="macOS deployment target version, required for python package builds (e.g. 10.15)")
-parser.add_argument("--cross_compile_host", default=None, type=str, help="Host type for cross-compilation (unused)")
+parser.add_argument("--cross_compile_arch", default=None, type=str, help="Architecture type for cross-compilation")
 parser.add_argument("--no_dl_progress", action="store_false", default=True, help="Do not report progress during file download")
 #
 group = parser.add_argument_group("CMAKE", "CMAKE configure options for the Open FUSION Toolkit")
@@ -2206,7 +2208,7 @@ fetch_progress = options.no_dl_progress
 build_cmake_ver = None
 if options.build_cmake == 1:
     build_cmake_ver = CMAKE().version
-config_dict = setup_build_env(build_cmake_ver=build_cmake_ver)
+config_dict = setup_build_env(build_cmake_ver=build_cmake_ver,cross_compile_target=options.cross_compile_arch)
 config_dict['DOWN_ONLY'] = options.download_only
 config_dict['SETUP_ONLY'] = options.setup_only
 if options.nthread > 1:
@@ -2215,8 +2217,6 @@ if options.opt_flags is not None:
     config_dict['OPT_FLAGS'] = options.opt_flags
 if options.ld_flags is not None:
     config_dict['LD_FLAGS'] = options.ld_flags
-if options.cross_compile_host is not None:
-    config_dict['CROSS_COMPILE_HOST'] = options.cross_compile_host
 if config_dict['OS_TYPE'] == 'Darwin':
     if options.macos_sdk_path is not None:
         if not os.path.isdir(options.macos_sdk_path):
