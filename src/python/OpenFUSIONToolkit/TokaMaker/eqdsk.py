@@ -1123,7 +1123,7 @@ class GEQDSKEquilibrium:
                 avg["Bt"][k] = Bt_axis
                 avg["Bt**2"][k] = Bt_axis**2
                 avg["Btot**2"][k] = Bt_axis**2
-                Jt0 = float(Jt_interp.ev(Z0, R0))
+                Jt0 = float(Jt_interp.ev(Z0, R0).item())
                 avg["Jt"][k] = Jt0
                 avg["Jt/R_num"][k] = Jt0 / R0
                 avg["vp"][k] = 0.0
