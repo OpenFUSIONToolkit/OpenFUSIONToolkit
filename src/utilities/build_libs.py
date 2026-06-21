@@ -358,10 +358,16 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
         config_dict['OS_VER'] = platform.uname().release
         config_dict['DYN_EXT'] = '.so'
     # Check compiler targets
+    if config_dict['TARGET_ARCH'] == 'x86_64':
+        match_archs = ['x86_64', 'amd64']
+    elif config_dict['TARGET_ARCH'] == 'arm64':
+        match_archs = ['arm64', 'aarch64']
+    else:
+        match_archs = []
     for compiler_key in ('CC', 'CXX', 'FC'):
-        target = detect_compiler_target(config_dict[compiler_key])
-        if target != config_dict['TARGET_ARCH']:
-            error_exit('Detected compiler "{0}" target "{1}" does not match target architecture "{2}"'.format(config_dict[compiler_key], target, config_dict['TARGET_ARCH']),
+        target_arch = detect_compiler_target(config_dict[compiler_key])
+        if target_arch not in match_archs:
+            error_exit('Detected compiler "{0}" target "{1}" does not match target architecture "{2}"'.format(config_dict[compiler_key], target_arch, ', '.join(match_archs)),
                        ["If cross-compiling, specify target architecture with --cross_compile_arch (e.g. --cross_compile_arch=arm64)"])
     # Return dictionary
     return config_dict
