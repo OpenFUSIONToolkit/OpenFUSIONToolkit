@@ -2134,10 +2134,356 @@ subroutine destroy_gs_solver
 end subroutine destroy_gs_solver
 
 subroutine gs_step(self,equil,ierr)
-class(oft_gs_solver), intent(inout) :: self !< G-S factory/device object
+class(oft_gs_solver), intent(inout) :: self !< G-S solver object
+class(gs_factory), intent(inout) :: factory!< G-S factory/device object
 class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
 integer(4), optional, intent(out) :: ierr !< Error flag
 print *, 'Running GS step...'
+
+!---Ramp R0 target
+self%R0_tmp=(i-1)*(equil%R0_target-self%R0_in)/REAL(factory%nR0_ramp,8) + self%R0_in
+self%Z0_tmp=(i-1)*(equil%Z0_target-self%Z0_in)/REAL(factory%nR0_ramp,8) + self%Z0_in
+IF(i>factory%nR0_ramp)self%R0_tmp=equil%R0_target
+IF(i>factory%nR0_ramp)self%Z0_tmp=equil%Z0_target
+!---
+CALL self%psip%add(0.d0,1.d0,equil%psi)
+
+!---Compute toroidal flux contribution
+CALL self%rhs%add(0.d0,1.d0,psi_ffp)
+CALL factory%zerob_bc%apply(self%rhs)
+!---Solve linear system
+CALL self%rhs%get_local(self%vals_tmp)
+factory%lu_solver%sec_rhs(:,1) = self%vals_tmp
+!---Compute pressure contribution
+CALL self%rhs%add(0.d0,1.d0,self%psi_press)
+CALL factory%zerob_bc%apply(self%rhs)
+self%pm_save=self%oft_env%pm; self%oft_env%pm=.FALSE.
+self%t1=omp_get_wtime()
+factory%lu_solver%nrhs=2
+CALL self%psi_press%set(0.d0)
+CALL factory%lu_solver%apply(psi_press,rhs)
+CALL self%psi_ffp%restore_local(factory%lu_solver%sec_rhs(:,1))
+IF(ABS(equil%ffp_scale)>TINY(equil%ffp_scale)*1.d2)CALL self%psi_ffp%scale(1.d0/equil%ffp_scale)
+factory%lu_solver%nrhs=1
+factory%timing(3)=factory%timing(3)+(omp_get_wtime()-self%t1)
+self%oft_env%pm=pm_save
+
+self%param_mat=0.d0
+self%param_rhs=0.d0
+IF(factory%dipole_mode.OR.self%mirror_mode)THEN
+  self%param_mat(1,1)=1.d0
+  self%param_rhs(1)=0.d0
+ELSE
+  IF(equil%Itor_target>0.d0)THEN
+    self%param_mat(1,:)=[self%itor_ffp,self%itor_press,0.d0]
+    self%param_rhs(1)=equil%Itor_target
+  ELSE
+    self%param_mat(1,1)=1.d0
+    self%param_rhs(1)=equil%ffp_scale
+  END IF
+END IF
+
+!---Get desired O-point location for linear fit
+self%cell=0
+self%pt=equil%o_point
+IF(equil%R0_target>0.d0)self%pt(1)=self%R0_tmp
+IF(equil%Z0_target>-1.d98)self%pt(2)=self%Z0_tmp
+CALL bmesh_findcell(factory%fe_rep%mesh,self%cell,self%pt,self%f)
+CALL factory%fe_rep%mesh%jacobian(self%cell,self%f,self%goptmp,self%v)
+
+!---Add row for radial control (beta)
+IF(factory%dipole_mode)THEN
+  IF(equil%pax_target>0.d0)THEN
+    self%param_mat(2,2)=-1.d99
+    self%param_rhs(2)=equil%plasma_bounds(2)
+    DO j=1,101
+      IF(self%param_mat(2,2)<ABS(equil%P%f((equil%plasma_bounds(1)-equil%plasma_bounds(2))*REAL(j-1,8)/1.d2+equil%plasma_bounds(2))))THEN
+        self%param_mat(2,2)=ABS(equil%P%f((equil%plasma_bounds(1)-equil%plasma_bounds(2))*REAL(j-1,8)/1.d2+equil%plasma_bounds(2)))
+        self%param_rhs(2)=(equil%plasma_bounds(1)-equil%plasma_bounds(2))*REAL(j-1,8)/1.d2+equil%plasma_bounds(2)
+      END IF
+    END DO
+    self%param_mat(2,2)=equil%P%f(self%param_rhs(2))
+    self%param_rhs(2)=equil%pax_target
+  ELSE
+    self%param_mat(2,2)=1.d0
+    self%param_rhs(2)=equil%p_scale
+  END IF
+ELSE
+  IF(equil%R0_target>0.d0)THEN
+    IF(ALL(factory%target_weights>0.d0))THEN
+      equil%saddle_targets(1:2,equil%saddle_ntargets)=self%pt
+    ELSE
+      !
+      self%psi_geval%u=>self%psi_vac
+      CALL self%psi_geval%setup(factory%fe_rep)
+      CALL self%psi_geval%interp(self%cell,self%f,self%goptmp,self%gpsi0)
+      self%param_rhs(2)=-self%gpsi0(1)
+      !
+      self%psi_geval%u=>self%psi_vcont
+      CALL self%psi_geval%setup(factory%fe_rep)
+      CALL self%psi_geval%interp(self%cell,self%f,self%goptmp,self%gpsi0)
+      self%psi_geval%u=>self%psi_ffp
+      CALL self%psi_geval%setup(factory%fe_rep)
+      CALL self%psi_geval%interp(self%cell,self%f,self%goptmp,self%gpsi1)
+      self%psi_geval%u=>self%psi_press
+      CALL self%psi_geval%setup(factory%fe_rep)
+      CALL self%psi_geval%interp(self%cell,self%f,self%goptmp,self%gpsi2)
+      self%param_mat(2,:)=[self%gpsi1(1),self%gpsi2(1),self%gpsi0(1)]
+    END IF
+  ELSE IF(equil%dflux_target>-1.d98)THEN
+    self%param_rhs(2)=SIGN(equil%dflux_target**2,equil%dflux_target)
+    self%param_mat(2,:)=[SIGN(self%dflux_ffp**2,self%dflux_ffp)/equil%ffp_scale,0.d0,0.d0]
+  ELSE IF(equil%estore_target>0.d0)THEN
+    self%param_rhs(2)=equil%estore_target
+    self%param_mat(2,2)=self%estored*3.d0/2.d0
+  ELSE IF(equil%pax_target>0.d0)THEN
+    self%param_mat(2,2)=equil%P%f(equil%plasma_bounds(2))
+    self%param_rhs(2)=equil%pax_target
+  ELSE IF(equil%Ip_ratio_target>-1.d98)THEN
+    self%param_rhs(2)=0.d0
+    self%param_mat(2,:)=[self%itor_ffp,-self%itor_press*equil%Ip_ratio_target,0.d0]
+  ELSE
+    self%param_mat(2,2)=1.d0
+    self%param_rhs(2)=equil%p_scale
+  END IF
+END IF
+
+!---Add row for vertical control
+IF(equil%Z0_target>-1.d98)THEN
+  IF(ALL(factory%target_weights>0.d0))THEN
+    equil%saddle_targets(1:2,equil%saddle_ntargets)=self%pt
+  ELSE
+    ! 
+    CALL bmesh_findcell(factory%fe_rep%mesh,self%cell,self%pt,self%f)
+    CALL factory%fe_rep%mesh%jacobian(self%cell,self%f,self%goptmp,self%v)
+    self%psi_geval%u=>self%psi_vac
+    CALL self%psi_geval%setup(factory%fe_rep)
+    CALL self%psi_geval%interp(self%cell,self%f,self%goptmp,self%gpsi0)
+    self%param_rhs(3)=-self%gpsi0(2)
+    ! 
+    self%psi_geval%u=>self%psi_vcont
+    CALL self%psi_geval%setup(factory%fe_rep)
+    CALL self%psi_geval%interp(self%cell,self%f,self%goptmp,self%gpsi0)
+    self%psi_geval%u=>self%psi_ffp
+    CALL self%psi_geval%setup(factory%fe_rep)
+    CALL self%psi_geval%interp(self%cell,self%f,self%goptmp,self%gpsi1)
+    self%psi_geval%u=>self%psi_press
+    CALL self%psi_geval%setup(factory%fe_rep)
+    CALL self%psi_geval%interp(self%cell,self%f,self%goptmp,self%gpsi2)
+    self%param_mat(3,:)=[self%gpsi1(2),self%gpsi2(2),self%gpsi0(2)]
+  END IF
+ELSE
+  self%param_mat(3,3)=1.d0
+  self%param_rhs(3)=0.d0
+END IF
+self%mat_save=self%param_mat(1:2,1:2)
+
+! Create plasma poloidal flux
+CALL equil%psi%set(0.d0)
+IF(ALL(factory%target_weights<=0.d0))THEN
+  ! Solve for parameters
+  self%pm_save=self%oft_env%pm; self%oft_env%pm=.FALSE.
+  CALL lapack_matinv(3,self%param_mat,ierr_loc)
+  self%oft_env%pm=self%pm_save
+  IF(ierr_loc/=0)THEN
+    error_flag=-6
+    EXIT
+  END IF
+  self%param_vec=MATMUL(self%param_mat,self%param_rhs)
+  equil%ffp_scale=self%param_vec(1)
+  equil%p_scale=self%param_vec(2)
+  equil%vcontrol_val=self%param_vec(3)
+  ! Add to solution
+  CALL equil%psi%add(1.d0,equil%ffp_scale,self%psi_ffp,equil%p_scale,self%psi_press)
+END IF
+
+! Fit coils if operating in isoflux mode
+IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
+  CALL equil%psi%add(1.d0,1.d0,psi_eddy)
+  CALL equil%psi%add(1.d0,1.d0,psi_bc)
+  IF(ALL(factory%target_weights(1:2)>0.d0))THEN
+    self%param_psi(1)%f=>self%psi_ffp
+    self%param_psi(2)%f=>self%psi_press
+    CALL equil%fit_isoflux(self%psip,ierr_loc,self%mat_save,self%param_rhs,self%param_psi)
+    IF(ierr_loc/=0)THEN
+      error_flag=-7
+      EXIT
+    END IF
+    equil%ffp_scale=self%param_rhs(1)
+    equil%p_scale=self%param_rhs(2)
+    CALL equil%psi%add(1.d0,equil%ffp_scale,self%psi_ffp,equil%p_scale,self%psi_press)
+  ELSE
+    CALL equil%fit_isoflux(self%psip,ierr_loc)
+    IF(ierr_loc/=0)THEN
+      error_flag=-7
+      EXIT
+    END IF
+  END IF
+  CALL equil%psi%add(1.d0,-1.d0,self%psi_eddy)
+  CALL equil%psi%add(1.d0,-1.d0,self%psi_bc)
+END IF
+!---Update vacuum field part
+CALL self%psi_vac%set(0.d0)
+CALL self%psi_vac%add(1.d0,1.d0,psi_bc)
+DO j=1,factory%ncoils
+  IF((factory%Rcoils(j)<=0.d0).OR.(factory%dt<0.d0))CALL self%psi_vac%add(1.d0,equil%coil_currs(j),factory%psi_coil(j)%f)
+END DO
+
+! Add fixed wall eddy contributions
+IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
+  !---Update vacuum field part
+  CALL self%psi_eddy%set(0.d0)
+  CALL self%psi_vac%add(1.d0,1.d0,psi_eddy)
+END IF
+
+! Add vacuum fields to solution
+CALL equil%psi%add(1.d0,1.d0,self%psi_vac)
+CALL equil%psi%add(1.d0,equil%vcontrol_val,self%psi_vcont)
+
+! Compute passive eddy currents
+IF(factory%dt>0.d0)THEN
+  CALL self%psi_dt%set(0.d0)
+  CALL self%psi_dt%add(0.d0,-1.d0/factory%dt,equil%psi,1.d0/factory%dt,factory%psi_dt)
+  IF(factory%ncoils>0)THEN
+    !---Set Vcoil currents at previous step and remove associated flux
+    CALL self%psi_dt%get_local(self%vals_tmp)
+    IF(ANY(factory%Rcoils>0.d0))THEN
+      DO j=1,factory%ncoils
+        self%vals_tmp(j)=factory%coils_dt(j)/factory%dt
+        IF(factory%Rcoils(j)<=0.d0)CALL self%psi_dt%add(1.d0,equil%coil_currs(j)/factory%dt,factory%psi_coil(j)%f)
+      END DO
+      self%vals_tmp(factory%ncoils+1)=(factory%coils_dt(factory%ncoils+1)-equil%vcontrol_val)/factory%dt
+    ELSE
+      self%vals_tmp=0.d0
+    END IF
+    CALL self%psi_aug%restore_local(self%vals_tmp(1:factory%ncoils+1),2)
+    CALL self%psi_dt%get_local(self%vals_tmp)
+    CALL self%psi_aug%restore_local(self%vals_tmp,1)
+    CALL gs_wall_source(factory,self%psi_aug,self%tmp_aug)
+    !---Add voltages for Vcoils
+    CALL self%tmp_aug%get_local(self%vals_tmp,2)
+    IF(ANY(factory%Rcoils>0.d0))THEN
+      DO j=1,factory%ncoils
+        IF(factory%Rcoils(j)>0.d0)THEN
+          self%vals_tmp(j)=self%vals_tmp(j)+factory%coils_volt(j)
+        ELSE
+          self%vals_tmp(j)=equil%coil_currs(j)
+        END IF
+      END DO
+      self%vals_tmp(factory%ncoils+1)=0.d0
+    ELSE
+      self%vals_tmp=0.d0
+    END IF
+    CALL self%tmp_aug%restore_local(self%vals_tmp(1:factory%ncoils+1),2)
+    CALL factory%zerob_bc%apply(self%tmp_aug)
+    !---Solve in augmented space (flux + coils)
+    CALL self%psi_aug%set(0.d0)
+    self%pm_save=self%oft_env%pm; self%oft_env%pm=.FALSE.
+    CALL factory%lu_solver_dt%apply(self%psi_aug,self%tmp_aug)
+    self%oft_env%pm=self%pm_save
+    CALL self%psi_aug%get_local(self%vals_tmp,1)
+    CALL self%psi_dt%restore_local(self%vals_tmp)
+    CALL self%psi_eddy%add(1.d0,1.d0,self%psi_dt) ! Set eddy field before coils are added
+    CALL self%psi_aug%get_local(self%vals_tmp,2)
+    !---Update coil currents in solution for Vcoils
+    DO j=1,factory%ncoils
+      IF(factory%Rcoils(j)>0.d0)THEN
+        equil%coil_currs(j)=self%vals_tmp(j)
+        CALL self%psi_dt%add(1.d0,equil%coil_currs(j),factory%psi_coil(j)%f)
+      END IF
+    END DO
+    IF(factory%Rcoils(factory%ncoils+1)>0.d0)THEN
+      equil%vcontrol_val=self%vals_tmp(factory%ncoils+1)
+      CALL self%psi_dt%add(1.d0,equil%vcontrol_val,self%psi_vcont)
+    END IF
+  ELSE
+    CALL gs_wall_source(factory,self%psi_dt,self%tmp_vec)
+    CALL factory%zerob_bc%apply(self%tmp_vec)
+    !---Solve in augmented space (flux + coils)
+    CALL self%psi_dt%set(0.d0)
+    self%pm_save=self%oft_env%pm; self%oft_env%pm=.FALSE.
+    CALL factory%lu_solver_dt%apply(self%psi_dt,self%tmp_vec)
+    self%oft_env%pm=self%pm_save
+    CALL self%psi_eddy%add(1.d0,1.d0,self%psi_dt)
+  END IF
+  !---Add flux to solution
+  CALL self%psi_vac%add(1.d0,1.d0,self%psi_dt)
+  CALL equil%psi%add(1.d0,1.d0,self%psi_dt)
+END IF
+
+!---Check for scale issues
+CALL equil%psi%get_local(vals_tmp)
+psimax=maxval(ABS(vals_tmp))
+fail_test=self%psimax<gs_epsilon
+fail_test=fail_test.OR.((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)
+fail_test=fail_test.OR.((equil%o_point(1) < factory%rmin).AND.equil%has_plasma)
+IF(fail_test)THEN
+  ! WRITE(*,*)psimax,equil%plasma_bounds,equil%o_point
+  IF(self%psimax<gs_epsilon)error_flag=-2
+  IF((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)error_flag=-3
+  IF((equil%o_point(1) < factory%rmin).AND.equil%has_plasma)error_flag=-4
+  ! WRITE(*,*)error_flag
+  EXIT
+END IF
+!---Under-relax solution
+CALL equil%psi%add(1.d0-factory%urf,factory%urf,self%psip)
+!---Update flux scale for free and fixed boundary
+IF(.NOT.factory%free)THEN
+  CALL equil%psi%add(1.d0,-1.d0,self%psi_vac)
+  CALL equil%psi%add(1.d0,-equil%vcontrol_val,self%psi_vcont)
+  CALL factory%zerob_bc%apply(equil%psi)
+  IF(equil%I%f_offset==0.d0)THEN
+    CALL equil%psi%get_local(self%vals_tmp)
+    equil%psimax=MAXVAL(self%vals_tmp)
+    CALL equil%psi%scale(1.d0/equil%psimax)
+    equil%ffp_scale=SQRT((equil%ffp_scale**2)/equil%psimax)
+    equil%psimax=1.d0
+  END IF
+  CALL equil%psi%add(1.d0,1.d0,self%psi_vac)
+  CALL equil%psi%add(1.d0,equil%vcontrol_val,self%psi_vcont)
+  self%ffp_scale_prev=equil%ffp_scale
+END IF
+!---Update flux functions
+CALL gs_update_bounds(equil)
+CALL equil%I%update(equil)
+CALL equil%p%update(equil)
+IF(ASSOCIATED(equil%P_ani))CALL equil%P_ani%update(equil)
+!---Output
+IF(factory%save_visit.AND.factory%plot_step)THEN
+  self%eq_count=self%eq_count+1
+  CALL factory%xdmf%add_timestep(REAL(self%eq_count,8))
+  CALL equil%psi%get_local(self%vals_tmp)
+  IF(equil%plasma_bounds(1)<-1.d98)THEN
+    CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi')
+  ELSE
+    CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp-equil%plasma_bounds(1),factory%xdmf,'Psi')
+  END IF
+  CALL self%psi_vac%get_local(self%vals_tmp)
+  CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi_vac')
+  CALL self%psi_eddy%get_local(self%vals_tmp)
+  CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi_eddy')
+  CALL self%psi_vcont%get_local(self%vals_tmp)
+  self%vals_tmp=self%vals_tmp*equil%vcontrol_val
+  CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi_vcont')
+END IF
+!---Update vacuum field part
+CALL gs_source(equil,equil%psi,self%rhs,self%psi_ffp,self%psi_press,self%itor_ffp,self%itor_press,self%estored,self%dflux_ffp)
+!---Compute error in NL function
+CALL self%tmp_vec%set(0.d0)
+CALL self%tmp_vec%add(0.d0,1.d0,equil%psi,-1.d0,self%psi_vac)
+CALL self%tmp_vec%add(1.d0,-equil%vcontrol_val,self%psi_vcont)
+CALL factory%dels%apply(self%tmp_vec,self%psip)
+CALL self%psip%add(1.d0,-1.d0,self%rhs)
+CALL factory%zerob_bc%apply(self%psip)
+self%nl_res=self%psip%dot(self%psip)
+!---Output progress
+IF(self%oft_env%pm)WRITE(*,'(A,I4,6ES12.4)')self%oft_indent,self%i,equil%ffp_scale,equil%p_scale, &
+  SQRT(nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
+!---Check if converged
+IF((equil%R0_target>0.d0).AND.(ABS(self%R0_tmp-equil%R0_target)>1.d-8))CYCLE
+IF((equil%Z0_target>-1.d98).AND.(ABS(self%Z0_tmp-equil%Z0_target)>1.d-8))CYCLE
+! IF((equil%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
+IF(SQRT(self%nl_res)<factory%nl_tol)EXIT
 end subroutine gs_step
 
 subroutine gs_solve(self,equil,ierr)
@@ -2304,359 +2650,7 @@ IF(oft_env%pm)THEN
   CALL oft_increase_indent
 END IF
 DO i=1,self%maxits
-  !---Ramp R0 target
-  R0_tmp=(i-1)*(equil%R0_target-R0_in)/REAL(self%nR0_ramp,8) + R0_in
-  Z0_tmp=(i-1)*(equil%Z0_target-Z0_in)/REAL(self%nR0_ramp,8) + Z0_in
-  IF(i>self%nR0_ramp)R0_tmp=equil%R0_target
-  IF(i>self%nR0_ramp)Z0_tmp=equil%Z0_target
-  !---
-  CALL psip%add(0.d0,1.d0,equil%psi)
 
-  !---Compute toroidal flux contribution
-  CALL rhs%add(0.d0,1.d0,psi_ffp)
-  CALL self%zerob_bc%apply(rhs)
-  !---Solve linear system
-  CALL rhs%get_local(vals_tmp)
-  self%lu_solver%sec_rhs(:,1) = vals_tmp
-  !---Compute pressure contribution
-  CALL rhs%add(0.d0,1.d0,psi_press)
-  CALL self%zerob_bc%apply(rhs)
-  pm_save=oft_env%pm; oft_env%pm=.FALSE.
-  t1=omp_get_wtime()
-  self%lu_solver%nrhs=2
-  CALL psi_press%set(0.d0)
-  CALL self%lu_solver%apply(psi_press,rhs)
-  CALL psi_ffp%restore_local(self%lu_solver%sec_rhs(:,1))
-  IF(ABS(equil%ffp_scale)>TINY(equil%ffp_scale)*1.d2)CALL psi_ffp%scale(1.d0/equil%ffp_scale)
-  self%lu_solver%nrhs=1
-  self%timing(3)=self%timing(3)+(omp_get_wtime()-t1)
-  oft_env%pm=pm_save
-
-  param_mat=0.d0
-  param_rhs=0.d0
-  IF(self%dipole_mode.OR.self%mirror_mode)THEN
-    param_mat(1,1)=1.d0
-    param_rhs(1)=0.d0
-  ELSE
-    IF(equil%Itor_target>0.d0)THEN
-      param_mat(1,:)=[itor_ffp,itor_press,0.d0]
-      param_rhs(1)=equil%Itor_target
-    ELSE
-      param_mat(1,1)=1.d0
-      param_rhs(1)=equil%ffp_scale
-    END IF
-  END IF
-
-  !---Get desired O-point location for linear fit
-  cell=0
-  pt=equil%o_point
-  IF(equil%R0_target>0.d0)pt(1)=R0_tmp
-  IF(equil%Z0_target>-1.d98)pt(2)=Z0_tmp
-  CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
-  CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
-
-  !---Add row for radial control (beta)
-  IF(self%dipole_mode)THEN
-    IF(equil%pax_target>0.d0)THEN
-      param_mat(2,2)=-1.d99
-      param_rhs(2)=equil%plasma_bounds(2)
-      DO j=1,101
-        IF(param_mat(2,2)<ABS(equil%P%f((equil%plasma_bounds(1)-equil%plasma_bounds(2))*REAL(j-1,8)/1.d2+equil%plasma_bounds(2))))THEN
-          param_mat(2,2)=ABS(equil%P%f((equil%plasma_bounds(1)-equil%plasma_bounds(2))*REAL(j-1,8)/1.d2+equil%plasma_bounds(2)))
-          param_rhs(2)=(equil%plasma_bounds(1)-equil%plasma_bounds(2))*REAL(j-1,8)/1.d2+equil%plasma_bounds(2)
-        END IF
-      END DO
-      param_mat(2,2)=equil%P%f(param_rhs(2))
-      param_rhs(2)=equil%pax_target
-    ELSE
-      param_mat(2,2)=1.d0
-      param_rhs(2)=equil%p_scale
-    END IF
-  ELSE
-    IF(equil%R0_target>0.d0)THEN
-      IF(ALL(self%target_weights>0.d0))THEN
-        equil%saddle_targets(1:2,equil%saddle_ntargets)=pt
-      ELSE
-        !
-        psi_geval%u=>psi_vac
-        CALL psi_geval%setup(self%fe_rep)
-        CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-        param_rhs(2)=-gpsi0(1)
-        !
-        psi_geval%u=>psi_vcont
-        CALL psi_geval%setup(self%fe_rep)
-        CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-        psi_geval%u=>psi_ffp
-        CALL psi_geval%setup(self%fe_rep)
-        CALL psi_geval%interp(cell,f,goptmp,gpsi1)
-        psi_geval%u=>psi_press
-        CALL psi_geval%setup(self%fe_rep)
-        CALL psi_geval%interp(cell,f,goptmp,gpsi2)
-        param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
-      END IF
-    ELSE IF(equil%dflux_target>-1.d98)THEN
-      param_rhs(2)=SIGN(equil%dflux_target**2,equil%dflux_target)
-      param_mat(2,:)=[SIGN(dflux_ffp**2,dflux_ffp)/equil%ffp_scale,0.d0,0.d0]
-    ELSE IF(equil%estore_target>0.d0)THEN
-      param_rhs(2)=equil%estore_target
-      param_mat(2,2)=estored*3.d0/2.d0
-    ELSE IF(equil%pax_target>0.d0)THEN
-      param_mat(2,2)=equil%P%f(equil%plasma_bounds(2))
-      param_rhs(2)=equil%pax_target
-    ELSE IF(equil%Ip_ratio_target>-1.d98)THEN
-      param_rhs(2)=0.d0
-      param_mat(2,:)=[itor_ffp,-itor_press*equil%Ip_ratio_target,0.d0]
-    ELSE
-      param_mat(2,2)=1.d0
-      param_rhs(2)=equil%p_scale
-    END IF
-  END IF
-
-  !---Add row for vertical control
-  IF(equil%Z0_target>-1.d98)THEN
-    IF(ALL(self%target_weights>0.d0))THEN
-      equil%saddle_targets(1:2,equil%saddle_ntargets)=pt
-    ELSE
-      ! 
-      CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
-      CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
-      psi_geval%u=>psi_vac
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-      param_rhs(3)=-gpsi0(2)
-      ! 
-      psi_geval%u=>psi_vcont
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-      psi_geval%u=>psi_ffp
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi1)
-      psi_geval%u=>psi_press
-      CALL psi_geval%setup(self%fe_rep)
-      CALL psi_geval%interp(cell,f,goptmp,gpsi2)
-      param_mat(3,:)=[gpsi1(2),gpsi2(2),gpsi0(2)]
-    END IF
-  ELSE
-    param_mat(3,3)=1.d0
-    param_rhs(3)=0.d0
-  END IF
-  mat_save=param_mat(1:2,1:2)
-
-  ! Create plasma poloidal flux
-  CALL equil%psi%set(0.d0)
-  IF(ALL(self%target_weights<=0.d0))THEN
-    ! Solve for parameters
-    pm_save=oft_env%pm; oft_env%pm=.FALSE.
-    CALL lapack_matinv(3,param_mat,ierr_loc)
-    oft_env%pm=pm_save
-    IF(ierr_loc/=0)THEN
-      error_flag=-6
-      EXIT
-    END IF
-    param_vec=MATMUL(param_mat,param_rhs)
-    equil%ffp_scale=param_vec(1)
-    equil%p_scale=param_vec(2)
-    equil%vcontrol_val=param_vec(3)
-    ! Add to solution
-    CALL equil%psi%add(1.d0,equil%ffp_scale,psi_ffp,equil%p_scale,psi_press)
-  END IF
-
-  ! Fit coils if operating in isoflux mode
-  IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
-    CALL equil%psi%add(1.d0,1.d0,psi_eddy)
-    CALL equil%psi%add(1.d0,1.d0,psi_bc)
-    IF(ALL(self%target_weights(1:2)>0.d0))THEN
-      param_psi(1)%f=>psi_ffp
-      param_psi(2)%f=>psi_press
-      CALL equil%fit_isoflux(psip,ierr_loc,mat_save,param_rhs,param_psi)
-      IF(ierr_loc/=0)THEN
-        error_flag=-7
-        EXIT
-      END IF
-      equil%ffp_scale=param_rhs(1)
-      equil%p_scale=param_rhs(2)
-      CALL equil%psi%add(1.d0,equil%ffp_scale,psi_ffp,equil%p_scale,psi_press)
-    ELSE
-      CALL equil%fit_isoflux(psip,ierr_loc)
-      IF(ierr_loc/=0)THEN
-        error_flag=-7
-        EXIT
-      END IF
-    END IF
-    CALL equil%psi%add(1.d0,-1.d0,psi_eddy)
-    CALL equil%psi%add(1.d0,-1.d0,psi_bc)
-  END IF
-  !---Update vacuum field part
-  CALL psi_vac%set(0.d0)
-  CALL psi_vac%add(1.d0,1.d0,psi_bc)
-  DO j=1,self%ncoils
-    IF((self%Rcoils(j)<=0.d0).OR.(self%dt<0.d0))CALL psi_vac%add(1.d0,equil%coil_currs(j),self%psi_coil(j)%f)
-  END DO
-
-  ! Add fixed wall eddy contributions
-  IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
-    !---Update vacuum field part
-    CALL psi_eddy%set(0.d0)
-    CALL psi_vac%add(1.d0,1.d0,psi_eddy)
-  END IF
-
-  ! Add vacuum fields to solution
-  CALL equil%psi%add(1.d0,1.d0,psi_vac)
-  CALL equil%psi%add(1.d0,equil%vcontrol_val,psi_vcont)
-
-  ! Compute passive eddy currents
-  IF(self%dt>0.d0)THEN
-    CALL psi_dt%set(0.d0)
-    CALL psi_dt%add(0.d0,-1.d0/self%dt,equil%psi,1.d0/self%dt,self%psi_dt)
-    IF(self%ncoils>0)THEN
-      !---Set Vcoil currents at previous step and remove associated flux
-      CALL psi_dt%get_local(vals_tmp)
-      IF(ANY(self%Rcoils>0.d0))THEN
-        DO j=1,self%ncoils
-          vals_tmp(j)=self%coils_dt(j)/self%dt
-          IF(self%Rcoils(j)<=0.d0)CALL psi_dt%add(1.d0,equil%coil_currs(j)/self%dt,self%psi_coil(j)%f)
-        END DO
-        vals_tmp(self%ncoils+1)=(self%coils_dt(self%ncoils+1)-equil%vcontrol_val)/self%dt
-      ELSE
-        vals_tmp=0.d0
-      END IF
-      CALL psi_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
-      CALL psi_dt%get_local(vals_tmp)
-      CALL psi_aug%restore_local(vals_tmp,1)
-      CALL gs_wall_source(self,psi_aug,tmp_aug)
-      !---Add voltages for Vcoils
-      CALL tmp_aug%get_local(vals_tmp,2)
-      IF(ANY(self%Rcoils>0.d0))THEN
-        DO j=1,self%ncoils
-          IF(self%Rcoils(j)>0.d0)THEN
-            vals_tmp(j)=vals_tmp(j)+self%coils_volt(j)
-          ELSE
-            vals_tmp(j)=equil%coil_currs(j)
-          END IF
-        END DO
-        vals_tmp(self%ncoils+1)=0.d0
-      ELSE
-        vals_tmp=0.d0
-      END IF
-      CALL tmp_aug%restore_local(vals_tmp(1:self%ncoils+1),2)
-      CALL self%zerob_bc%apply(tmp_aug)
-      !---Solve in augmented space (flux + coils)
-      CALL psi_aug%set(0.d0)
-      pm_save=oft_env%pm; oft_env%pm=.FALSE.
-      CALL self%lu_solver_dt%apply(psi_aug,tmp_aug)
-      oft_env%pm=pm_save
-      CALL psi_aug%get_local(vals_tmp,1)
-      CALL psi_dt%restore_local(vals_tmp)
-      CALL psi_eddy%add(1.d0,1.d0,psi_dt) ! Set eddy field before coils are added
-      CALL psi_aug%get_local(vals_tmp,2)
-      !---Update coil currents in solution for Vcoils
-      DO j=1,self%ncoils
-        IF(self%Rcoils(j)>0.d0)THEN
-          equil%coil_currs(j)=vals_tmp(j)
-          CALL psi_dt%add(1.d0,equil%coil_currs(j),self%psi_coil(j)%f)
-        END IF
-      END DO
-      IF(self%Rcoils(self%ncoils+1)>0.d0)THEN
-        equil%vcontrol_val=vals_tmp(self%ncoils+1)
-        CALL psi_dt%add(1.d0,equil%vcontrol_val,psi_vcont)
-      END IF
-    ELSE
-      CALL gs_wall_source(self,psi_dt,tmp_vec)
-      CALL self%zerob_bc%apply(tmp_vec)
-      !---Solve in augmented space (flux + coils)
-      CALL psi_dt%set(0.d0)
-      pm_save=oft_env%pm; oft_env%pm=.FALSE.
-      CALL self%lu_solver_dt%apply(psi_dt,tmp_vec)
-      oft_env%pm=pm_save
-      CALL psi_eddy%add(1.d0,1.d0,psi_dt)
-    END IF
-    !---Add flux to solution
-    CALL psi_vac%add(1.d0,1.d0,psi_dt)
-    CALL equil%psi%add(1.d0,1.d0,psi_dt)
-  END IF
-
-  !---Check for scale issues
-  CALL equil%psi%get_local(vals_tmp)
-  psimax=maxval(ABS(vals_tmp))
-  fail_test=psimax<gs_epsilon
-  fail_test=fail_test.OR.((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)
-  fail_test=fail_test.OR.((equil%o_point(1) < self%rmin).AND.equil%has_plasma)
-  IF(fail_test)THEN
-    ! WRITE(*,*)psimax,equil%plasma_bounds,equil%o_point
-    IF(psimax<gs_epsilon)error_flag=-2
-    IF((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)error_flag=-3
-    IF((equil%o_point(1) < self%rmin).AND.equil%has_plasma)error_flag=-4
-    ! WRITE(*,*)error_flag
-    EXIT
-  END IF
-  !---Under-relax solution
-  CALL equil%psi%add(1.d0-self%urf,self%urf,psip)
-  !---Update flux scale for free and fixed boundary
-  IF(.NOT.self%free)THEN
-    CALL equil%psi%add(1.d0,-1.d0,psi_vac)
-    CALL equil%psi%add(1.d0,-equil%vcontrol_val,psi_vcont)
-    CALL self%zerob_bc%apply(equil%psi)
-    IF(equil%I%f_offset==0.d0)THEN
-      CALL equil%psi%get_local(vals_tmp)
-      equil%psimax=MAXVAL(vals_tmp)
-      CALL equil%psi%scale(1.d0/equil%psimax)
-      equil%ffp_scale=SQRT((equil%ffp_scale**2)/equil%psimax)
-      equil%psimax=1.d0
-    ! ELSE IF(self%Itor_target>0.d0)THEN
-    !   itor=self%itor()
-    !   IF(itor<=0.d0)THEN
-    !     error_flag=-5
-    !     EXIT
-    !   END IF
-    !   ffp_scale_prev=itor/self%Itor_target
-    !   CALL self%psi%scale(1.d0/ffp_scale_prev)
-    !   self%ffp_scale=SQRT((self%ffp_scale**2)/ffp_scale_prev)
-    END IF
-    CALL equil%psi%add(1.d0,1.d0,psi_vac)
-    CALL equil%psi%add(1.d0,equil%vcontrol_val,psi_vcont)
-    ffp_scale_prev=equil%ffp_scale
-  END IF
-  !---Update flux functions
-  CALL gs_update_bounds(equil)
-  CALL equil%I%update(equil)
-  CALL equil%p%update(equil)
-  IF(ASSOCIATED(equil%P_ani))CALL equil%P_ani%update(equil)
-  !---Output
-  IF(self%save_visit.AND.self%plot_step)THEN
-    eq_count=eq_count+1
-    CALL self%xdmf%add_timestep(REAL(eq_count,8))
-    CALL equil%psi%get_local(vals_tmp)
-    IF(equil%plasma_bounds(1)<-1.d98)THEN
-      CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi')
-    ELSE
-      CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp-equil%plasma_bounds(1),self%xdmf,'Psi')
-    END IF
-    CALL psi_vac%get_local(vals_tmp)
-    CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vac')
-    CALL psi_eddy%get_local(vals_tmp)
-    CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_eddy')
-    CALL psi_vcont%get_local(vals_tmp)
-    vals_tmp=vals_tmp*equil%vcontrol_val
-    CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vcont')
-  END IF
-  !---Update vacuum field part
-  CALL gs_source(equil,equil%psi,rhs,psi_ffp,psi_press,itor_ffp,itor_press,estored,dflux_ffp)
-  !---Compute error in NL function
-  CALL tmp_vec%set(0.d0)
-  CALL tmp_vec%add(0.d0,1.d0,equil%psi,-1.d0,psi_vac)
-  CALL tmp_vec%add(1.d0,-equil%vcontrol_val,psi_vcont)
-  CALL self%dels%apply(tmp_vec,psip)
-  CALL psip%add(1.d0,-1.d0,rhs)
-  CALL self%zerob_bc%apply(psip)
-  nl_res=psip%dot(psip)
-  !---Output progress
-  IF(oft_env%pm)WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,equil%ffp_scale,equil%p_scale, &
-    SQRT(nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
-  !---Check if converged
-  IF((equil%R0_target>0.d0).AND.(ABS(R0_tmp-equil%R0_target)>1.d-8))CYCLE
-  IF((equil%Z0_target>-1.d98).AND.(ABS(Z0_tmp-equil%Z0_target)>1.d-8))CYCLE
-  ! IF((equil%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
-  IF(SQRT(nl_res)<self%nl_tol)EXIT
 end do
 IF(oft_env%pm)CALL oft_decrease_indent
 IF(i>self%maxits)error_flag=-1
