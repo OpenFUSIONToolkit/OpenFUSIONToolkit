@@ -152,6 +152,29 @@ contains
   !> Needs docs
   procedure(ani_press_update), deferred :: update
 end type gs_ani_press
+
+TYPE :: oft_gs_solver
+  class(gs_factory), intent(inout) :: factory !< G-S factory/device object
+  class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
+  class(oft_vector), pointer :: rhs,rhs_bc,psip,psiin,psi_bc,psi_eddy,psi_dt
+  class(oft_vector), pointer :: tmp_vec,psi_ffp,psi_press,psi_vac,psi_vcont,psi_aug,tmp_aug
+  type(oft_vector_ptr) :: param_psi(2)
+  real(r8), pointer, DIMENSION(:) :: vals_tmp
+  type(oft_lag_bginterp), target :: psi_geval
+  real(8) :: goptmp(3,3),pt(2),v,pmax,pmin,dpnorm,curr
+  real(8) :: opoint(2),R0_in,f(3),Z0_in,Z0_tmp,estored
+  REAL(8) :: nl_res,psimax,ffp_scale_in,ffp_scale_prev,itor,pnorm0,pnormp,itor_ffp,itor_press,dflux_ffp
+  REAL(8) :: R0_tmp,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3),t0,t1
+  REAL(8) :: param_mat(3,3),mat_save(2,2),param_vec(3),param_rhs(3)
+  REAL(r8), POINTER :: saddle_save(:,:)
+  integer(4) :: i,ii,j,k,error_flag,cell,ierr_loc
+  integer(4), save :: eq_count = 0
+  logical :: pm_save,fail_test
+CONTAINS
+  PROCEDURE :: step => gs_step
+  PROCEDURE :: new => create_gs_solver
+  PROCEDURE :: delete => destroy_gs_solver
+END TYPE oft_gs_solver
 !------------------------------------------------------------------------------
 !> Grad-Shafranov equilibrium object
 !------------------------------------------------------------------------------
@@ -217,6 +240,7 @@ TYPE :: gs_factory
   TYPE(xdmf_plot_file) :: xdmf !< XDMF plotting object
   TYPE(oft_lusolver) :: lu_solver !< \f$ \frac{1}{R} \Delta^* \f$ inverse solver
   TYPE(oft_lusolver) :: lu_solver_dt !< LHS inverse solver with time dependence
+  TYPE(oft_gs_solver) :: gs_solver !< LHS inverse solver with time dependence
   TYPE(axi_coil_set), POINTER, DIMENSION(:) :: coils_ext => NULL() !< External coil definitions
   TYPE(coil_region), POINTER, DIMENSION(:) :: coil_regions => NULL() !< Meshed coil regions
   TYPE(oft_1d_real), POINTER, DIMENSION(:) :: dist_coil => NULL() !< Current distribution for each coil (if defined)
@@ -2101,6 +2125,21 @@ end subroutine gs_fit_isoflux
 !------------------------------------------------------------------------------
 !> Compute Grad-Shafranov solution for current flux function definitions and targets
 !------------------------------------------------------------------------------
+subroutine create_gs_solver
+
+end subroutine create_gs_solver
+
+subroutine destroy_gs_solver
+
+end subroutine destroy_gs_solver
+
+subroutine gs_step(self,equil,ierr)
+class(oft_gs_solver), intent(inout) :: self !< G-S factory/device object
+class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
+integer(4), optional, intent(out) :: ierr !< Error flag
+print *, 'Running GS step...'
+end subroutine gs_step
+
 subroutine gs_solve(self,equil,ierr)
 class(gs_factory), intent(inout) :: self !< G-S factory/device object
 class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
