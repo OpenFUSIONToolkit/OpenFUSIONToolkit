@@ -2455,12 +2455,12 @@ class TokaMaker_equilibrium():
     @property
     def R0_target(self):
         r'''! Magnetic axis radial position target'''
-        return self._R0_target.value
+        return self._R0_target.value if self._R0_target is not None else None
 
     @property
     def Z0_target(self):
         r'''! Magnetic axis vertical position target'''
-        return self._Z0_target.value
+        return self._Z0_target.value if self._Z0_target is not None else None
 
     @property
     def Isoflux_constraints(self):
