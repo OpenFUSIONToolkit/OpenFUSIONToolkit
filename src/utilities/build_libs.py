@@ -325,8 +325,6 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
             cc_version = '12.0.0'
     elif (line.find('icc') >= 0) or (line.find('oneAPI') >= 0):
         cc_vendor = 'intel'
-    # Determine compiler targets
-
     # Make sure we are using compaitble C and Fortran compilers
     if cc_vendor != fc_vendor:
         error_exit("C and FORTRAN compilers appear to be from different vendors!",
