@@ -2271,7 +2271,82 @@ END IF
 end subroutine create_gs_solver
 
 subroutine destroy_gs_solver
-
+IF(self%oft_env%pm)CALL oft_decrease_indent
+IF(i>factory%maxits)error_flag=-1
+IF(error_flag==0)THEN
+  self%nl_its=i
+ELSE
+  self%nl_its=-i
+END IF
+!---Output
+IF(factory%save_visit.AND.factory%plot_final)THEN
+  self%eq_count=self%eq_count+1
+  CALL factory%xdmf%add_timestep(REAL(self%eq_count,8))
+  CALL equil%psi%get_local(self%vals_tmp)
+  IF(equil%plasma_bounds(1)<-1.d98)THEN
+    CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi')
+  ELSE
+    CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp-equil%plasma_bounds(1),factory%xdmf,'Psi')
+  END IF
+  CALL self%psi_vac%get_local(self%vals_tmp)
+  CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi_vac')
+  CALL self%psi_eddy%get_local(self%vals_tmp)
+  CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi_eddy')
+  CALL self%psi_vcont%get_local(self%vals_tmp)
+  self%vals_tmp=self%vals_tmp*equil%vcontrol_val
+  CALL fctory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi_vcont')
+END IF
+factory%timing(1)=factory%timing(1)+(omp_get_wtime()-self%t0)
+IF(self%oft_env%pm)THEN
+  WRITE(*,*)'Timing:',factory%timing(1)
+  WRITE(*,*)'  Source:  ',factory%timing(2)
+  WRITE(*,*)'  Solve:   ',factory%timing(3)
+  WRITE(*,*)'  Boundary:',factory%timing(4)
+  WRITE(*,*)'  Other:   ',factory%timing(1)-SUM(factory%timing(2:4))
+END IF
+!---
+CALL self%rhs%delete
+CALL self%psip%delete
+CALL self%psiin%delete
+CALL self%rhs_bc%delete
+CALL self%psi_bc%delete
+CALL self%psi_vac%delete
+CALL self%psi_vcont%delete
+CALL self%psi_eddy%delete
+CALL self%psi_ffp%delete
+CALL self%psi_press%delete
+DEALLOCATE(self%rhs,self%psip,self%psiin)
+DEALLOCATE(self%rhs_bc,self%psi_bc,self%psi_ffp,self%psi_press,self%psi_vac,self%psi_vcont)
+DEALLOCATE(self%vals_tmp,self%psi_eddy)
+IF(factory%dt>0.d0)THEN
+  CALL self%psi_dt%delete
+  IF(factory%ncoils>0)THEN
+    CALL self%psi_aug%delete
+    CALL self%tmp_aug%delete
+    DEALLOCATE(self%psi_aug,self%tmp_aug)
+  END IF
+  DEALLOCATE(self%psi_dt)
+END IF
+IF(ASSOCIATED(self%saddle_save))THEN
+  DEALLOCATE(equil%saddle_targets)
+  equil%saddle_ntargets=equil%saddle_ntargets-1
+  IF(equil%saddle_ntargets>0)THEN
+    equil%saddle_targets=>self%saddle_save
+  ELSE
+    DEALLOCATE(self%saddle_save)
+  END IF
+END IF
+!---
+IF(factory%compute_chi)CALL equil%get_chi
+self%ierr=error_flag
+IF(PRESENT(self%ierr))THEN
+  self%ierr=error_flag
+ELSE
+  IF(error_flag<0)THEN
+    err_reason=gs_err_reason(error_flag)
+    WRITE(*,'(3A)')oft_indent,'Equilibrium solve Failed: ',TRIM(err_reason)
+  END IF
+END IF
 end subroutine destroy_gs_solver
 
 subroutine gs_step(self,equil,ierr)
@@ -2628,7 +2703,6 @@ IF(SQRT(self%nl_res)<factory%nl_tol)EXIT
 end subroutine gs_step
 
 subroutine gs_solve(self,equil,ierr)
-
 IF(oft_env%pm)THEN
   WRITE(*,'(2A)')oft_indent,'Starting non-linear GS solver'
   CALL oft_increase_indent
@@ -2636,82 +2710,6 @@ END IF
 DO i=1,self%maxits
   self%step()
 end do
-IF(oft_env%pm)CALL oft_decrease_indent
-IF(i>self%maxits)error_flag=-1
-IF(error_flag==0)THEN
-  self%nl_its=i
-ELSE
-  self%nl_its=-i
-END IF
-!---Output
-IF(self%save_visit.AND.self%plot_final)THEN
-  eq_count=eq_count+1
-  CALL self%xdmf%add_timestep(REAL(eq_count,8))
-  CALL equil%psi%get_local(vals_tmp)
-  IF(equil%plasma_bounds(1)<-1.d98)THEN
-    CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi')
-  ELSE
-    CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp-equil%plasma_bounds(1),self%xdmf,'Psi')
-  END IF
-  CALL psi_vac%get_local(vals_tmp)
-  CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vac')
-  CALL psi_eddy%get_local(vals_tmp)
-  CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_eddy')
-  CALL psi_vcont%get_local(vals_tmp)
-  vals_tmp=vals_tmp*equil%vcontrol_val
-  CALL self%fe_rep%mesh%save_vertex_scalar(vals_tmp,self%xdmf,'Psi_vcont')
-END IF
-self%timing(1)=self%timing(1)+(omp_get_wtime()-t0)
-IF(oft_env%pm)THEN
-  WRITE(*,*)'Timing:',self%timing(1)
-  WRITE(*,*)'  Source:  ',self%timing(2)
-  WRITE(*,*)'  Solve:   ',self%timing(3)
-  WRITE(*,*)'  Boundary:',self%timing(4)
-  WRITE(*,*)'  Other:   ',self%timing(1)-SUM(self%timing(2:4))
-END IF
-!---
-CALL rhs%delete
-CALL psip%delete
-CALL psiin%delete
-CALL rhs_bc%delete
-CALL psi_bc%delete
-CALL psi_vac%delete
-CALL psi_vcont%delete
-CALL psi_eddy%delete
-CALL psi_ffp%delete
-CALL psi_press%delete
-DEALLOCATE(rhs,psip,psiin)
-DEALLOCATE(rhs_bc,psi_bc,psi_ffp,psi_press,psi_vac,psi_vcont)
-DEALLOCATE(vals_tmp,psi_eddy)
-IF(self%dt>0.d0)THEN
-  CALL psi_dt%delete
-  IF(self%ncoils>0)THEN
-    CALL psi_aug%delete
-    CALL tmp_aug%delete
-    DEALLOCATE(psi_aug,tmp_aug)
-  END IF
-  DEALLOCATE(psi_dt)
-END IF
-IF(ASSOCIATED(saddle_save))THEN
-  DEALLOCATE(equil%saddle_targets)
-  equil%saddle_ntargets=equil%saddle_ntargets-1
-  IF(equil%saddle_ntargets>0)THEN
-    equil%saddle_targets=>saddle_save
-  ELSE
-    DEALLOCATE(saddle_save)
-  END IF
-END IF
-!---
-IF(self%compute_chi)CALL equil%get_chi
-self%ierr=error_flag
-IF(PRESENT(ierr))THEN
-  ierr=error_flag
-ELSE
-  IF(error_flag<0)THEN
-    err_reason=gs_err_reason(error_flag)
-    WRITE(*,'(3A)')oft_indent,'Equilibrium solve Failed: ',TRIM(err_reason)
-  END IF
-END IF
 end subroutine gs_solve
 !------------------------------------------------------------------------------
 !> Compute solution to linearized Grad-Shafranov without updating \f$ \psi \f$ for RHS
