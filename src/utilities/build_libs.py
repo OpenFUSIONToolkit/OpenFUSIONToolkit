@@ -358,12 +358,12 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
         config_dict['OS_VER'] = platform.uname().release
         config_dict['DYN_EXT'] = '.so'
     # Check compiler targets
-    if config_dict['TARGET_ARCH'] == 'x86_64':
+    if (config_dict['TARGET_ARCH'] == 'x86_64') or (config_dict['TARGET_ARCH'] == 'amd64'):
         match_archs = ['x86_64', 'amd64']
-    elif config_dict['TARGET_ARCH'] == 'arm64':
+    elif (config_dict['TARGET_ARCH'] == 'arm64') or (config_dict['TARGET_ARCH'] == 'aarch64'):
         match_archs = ['arm64', 'aarch64']
     else:
-        match_archs = []
+        match_archs = [config_dict['TARGET_ARCH'],]
     for compiler_key in ('CC', 'CXX', 'FC'):
         target_arch = detect_compiler_target(config_dict[compiler_key])
         if target_arch not in match_archs:
