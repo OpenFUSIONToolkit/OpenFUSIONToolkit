@@ -15,6 +15,7 @@ import tarfile
 import re
 import argparse
 import math
+import hashlib
 import http.client
 import urllib.request
 from urllib.error import URLError
@@ -54,14 +55,14 @@ def fetch_file(url, file, headers={'User-Agent' : "Magic Browser"}):
     # Download file from url
     original_url = url
     try:
-        req = urllib.request.Request(url, headers=headers) 
+        req = urllib.request.Request(url, headers=headers)
         response = urllib.request.urlopen(req)
         resolved_url = response.geturl()
         for _ in range(10): # Handle redirects
             if resolved_url == url:
                 break
             url = resolved_url
-            redirect_req = urllib.request.Request(resolved_url, headers=headers) 
+            redirect_req = urllib.request.Request(resolved_url, headers=headers)
             response = urllib.request.urlopen(redirect_req)
             resolved_url = response.geturl()
         try:
@@ -210,7 +211,33 @@ def check_fortran_compiles_and_runs(source, flags, config_dict, compiler_key='FC
         return True, compile_out, run_out
 
 
-def setup_build_env(build_dir="build", build_cmake_ver=None):
+def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_target=None):
+    def detect_compiler_target(compiler):
+        result, errcode = run_command("{0} -v".format(compiler))
+        if errcode == 0:
+            for line in result.splitlines():
+                if line.find("Target:") >= 0:
+                    arch = line.split("Target:")[1].strip()
+                    if arch.startswith('arm64') or arch.startswith('aarch64'):
+                        return 'arm64'
+                    elif arch.startswith('x86_64'):
+                        return 'x86_64'
+                    else:
+                        return arch.split('-')[0]
+        # Try "-dumpmachine" option if "-v" did not work
+        result, errcode = run_command("{0} -dumpmachine".format(compiler))
+        if errcode != 0:
+            return 'unknown'
+        else:
+            arch = result.strip()
+            if arch.startswith('arm64') or arch.startswith('aarch64'):
+                return 'arm64'
+            elif arch.startswith('x86_64'):
+                return 'x86_64'
+            else:
+                return arch.split('-')[0]
+
+
     # Setup build environment
     # Set defaults
     config_dict = {"CC": "gcc", "CXX": "g++", "FC": "gfortran", "LD": None,
@@ -319,7 +346,8 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
         config_dict['OPT_FLAGS'] = ""
     # Determine OS type
     config_dict['OS_TYPE'] = platform.uname().system
-    config_dict['OS_ARCH'] = platform.uname().machine
+    config_dict['HOST_ARCH'] = platform.uname().machine
+    config_dict['TARGET_ARCH'] = cross_compile_target if cross_compile_target is not None else config_dict['HOST_ARCH']
     if config_dict['OS_TYPE'] == 'Darwin':
         result, errcode = run_command('sw_vers -productVersion')
         config_dict['OS_VER'] = result
@@ -327,11 +355,23 @@ def setup_build_env(build_dir="build", build_cmake_ver=None):
     else:
         config_dict['OS_VER'] = platform.uname().release
         config_dict['DYN_EXT'] = '.so'
+    # Check compiler targets
+    if (config_dict['TARGET_ARCH'] == 'x86_64') or (config_dict['TARGET_ARCH'] == 'amd64'):
+        match_archs = ['x86_64', 'amd64']
+    elif (config_dict['TARGET_ARCH'] == 'arm64') or (config_dict['TARGET_ARCH'] == 'aarch64'):
+        match_archs = ['arm64', 'aarch64']
+    else:
+        match_archs = [config_dict['TARGET_ARCH'],]
+    for compiler_key in ('CC', 'CXX', 'FC'):
+        target_arch = detect_compiler_target(config_dict[compiler_key])
+        if target_arch not in match_archs:
+            error_exit('Detected compiler "{0}" target "{1}" does not match target architecture "{2}"'.format(config_dict[compiler_key], target_arch, ', '.join(match_archs)),
+                       ["If cross-compiling, specify target architecture with --cross_compile_arch (e.g. --cross_compile_arch=arm64)"])
     # Return dictionary
     return config_dict
 
 
-def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=False,build_tests=False, 
+def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=False,build_tests=False,
                        build_examples=False,build_docs=False,build_coverage=False,package_build=False,
                        package_release=False,enable_debug_stack=False,enable_profiling=False):
     def bool_to_string(val):
@@ -501,13 +541,13 @@ class package:
     def post_child_setup(self, config_dict):
         return config_dict
 
-    def build(self):
+    def setup_build(self):
         error_exit("No build method defined for package!")
 
-    def install(self, config_dict, force=False):
+    def install(self, config_dict, keep_build_dirs=False, force=False):
         def handle_children(config_dict):
             for child in self.children:
-                config_dict = child.install(config_dict, force)
+                config_dict = child.install(config_dict, keep_build_dirs, force)
             return self.post_child_setup(config_dict)
         #
         if self.url is not None:
@@ -523,13 +563,12 @@ class package:
             self.root_path = config_dict['base_dir']
             self.root_build_path = config_dict['build_dir']
         config_dict = self.setup(config_dict)
-        if self.install_dir is not None:
-            if os.path.isdir(self.install_dir) and (not force):
-                config_dict = self.post_install(config_dict)
-                if self.check_install(do_abort=False):
-                    return handle_children(config_dict)
         if self.skip:
             return handle_children(config_dict)
+        if self.install_dir is None:
+            error_exit("No install directory specified for package: " + self.name)
+        if self.build_dir is None:
+            error_exit("No build directory specified for package: " + self.name)
         print("=========================================================")
         print("Building library: {0}".format(self.name if self.display_name is None else self.display_name))
         #
@@ -542,10 +581,34 @@ class package:
         else:
             print("  Using existing folder: {0}".format(self.build_dir))
         #
+        build_dir_abspath = os.path.abspath(os.path.join(self.root_build_path, self.build_dir))
         os.chdir(self.build_dir)
-        print("  Excecuting build (this may take a few minutes)")
+        self.setup_build()
+        with open("build_tmp.sh", "r") as fid:
+            build_hash = hashlib.sha256((fid.read()+self.build_dir+self.install_dir).encode('utf-8')).hexdigest()
+        # Check hash against existing install if present
+        install_dir_abspath = os.path.abspath(os.path.join(self.root_path, self.install_dir))
+        if os.path.isdir(install_dir_abspath) and (not force):
+            try:
+                with open(os.path.join(install_dir_abspath, "OFT_build_hash.txt"), "r") as fid:
+                    existing_hash = fid.read().strip()
+            except Exception:
+                existing_hash = ''
+            if existing_hash == build_hash:
+                print("  Using existing installation: {0}".format(install_dir_abspath))
+                os.chdir(self.root_path)
+                config_dict = self.post_install(config_dict)
+                if self.check_install(do_abort=False):
+                    config_dict = handle_children(config_dict)
+                    # Remove build directory to save space
+                    if not keep_build_dirs:
+                        shutil.rmtree(build_dir_abspath)
+                    return config_dict
+            else:
+                print("  Ignoring existing installation due to hash mismatch")
+        print("  Executing build (this may take a few minutes)")
         build_start = time.time()
-        self.build()
+        self.run_build(self.config_dict)
         build_duration = time.time() - build_start
         build_minutes = math.floor(build_duration/60)
         print("    Elapsed Time = {0}:{1:02d}".format(build_minutes,int(build_duration-build_minutes*60)))
@@ -553,7 +616,14 @@ class package:
         # Check to make sure Installation succeeded
         config_dict = self.post_install(config_dict)
         self.check_install()
-        return handle_children(config_dict)
+        config_dict = handle_children(config_dict)
+        # Put hash of build script in install directory for tracking
+        with open(os.path.join(install_dir_abspath, "OFT_build_hash.txt"), "w+") as fid:
+            fid.write(build_hash)
+        # Remove build directory to save space
+        if not keep_build_dirs:
+            shutil.rmtree(build_dir_abspath)
+        return config_dict
 
     def post_install(self, config_dict):
         return config_dict
@@ -628,8 +698,8 @@ class package:
         self.config_dict[self.name + '_INCLUDE'] = os.path.join(self.config_dict[self.name + '_ROOT'], inc_path)
         self.config_dict[self.name + '_BIN'] = os.path.join(self.config_dict[self.name + '_ROOT'], bin_path)
 
-    def run_build(self, build_lines, config_dict):
-        # Run build script
+    def setup_build_script(self, build_lines, config_dict):
+        # Setup build script
         # Write build script to file and add step status checks
         script_lines = ['build_base=$(pwd)', 'rm -f $build_base/build_tmp.stat']
         for line in build_lines:
@@ -641,13 +711,16 @@ class package:
                     script_lines += ['{0}; echo $? >> $build_base/build_tmp.stat'.format(line.format(**config_dict))]
         with open("build_tmp.sh", "w+") as fid:
             fid.write("\n".join(script_lines))
-        if self.config_dict['SETUP_ONLY']:
+
+    def run_build(self, config_dict):
+        # Run build script
+        if config_dict['SETUP_ONLY']:
             return
         addl_envs = {}
         if 'MACOS_SDK_PATH' in config_dict:
-            addl_envs['SDKROOT'] = self.config_dict['MACOS_SDK_PATH']
+            addl_envs['SDKROOT'] = config_dict['MACOS_SDK_PATH']
         if 'MACOSX_DEPLOYMENT_TARGET' in config_dict:
-            addl_envs['MACOSX_DEPLOYMENT_TARGET'] = self.config_dict['MACOSX_DEPLOYMENT_TARGET']
+            addl_envs['MACOSX_DEPLOYMENT_TARGET'] = config_dict['MACOSX_DEPLOYMENT_TARGET']
         result, _ = run_command("bash build_tmp.sh", timeout=self.build_timeout*60, env_vars=addl_envs)
         with open("build_tmp.log", "w+") as fid:
             fid.write(result)
@@ -698,7 +771,7 @@ class CMAKE(package):
         self.config_dict['CMAKE_VERSION'] = self.version
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         build_lines = [
             "rm -rf build",
             "mkdir build",
@@ -710,7 +783,7 @@ class CMAKE(package):
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
 
 class METIS(package):
@@ -757,7 +830,7 @@ class METIS(package):
         #
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         build_dir = os.getcwd()
         cmake_options = [
             '-DCMAKE_INSTALL_PREFIX={METIS_ROOT}',
@@ -780,7 +853,7 @@ class METIS(package):
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
 
 class MPICH(package):
@@ -820,7 +893,7 @@ class MPICH(package):
         self.install_chk_files = [self.config_dict['MPI_CC'], self.config_dict['MPI_FC']]
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         build_lines = [
             "rm -rf build",
             "mkdir build",
@@ -870,7 +943,7 @@ class MPICH(package):
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
     def post_install(self, config_dict):
         # Add MPI bin directory to path for following builds
@@ -909,7 +982,7 @@ class OpenMPI(package):
         self.install_chk_files = [self.config_dict['MPI_CC'], self.config_dict['MPI_FC']]
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         build_lines = [
             "rm -rf build",
             "mkdir build",
@@ -970,7 +1043,7 @@ class OpenMPI(package):
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
     def post_install(self, config_dict):
         # Add MPI bin directory to path for following builds
@@ -1007,7 +1080,7 @@ class HDF5(package):
         self.install_chk_files = [self.config_dict['HDF5_CC'], self.config_dict['HDF5_FC']]
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         build_lines = [
             "rm -rf build",
             "mkdir build",
@@ -1096,7 +1169,7 @@ class HDF5(package):
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
 
 class NETCDF(package):
@@ -1135,7 +1208,7 @@ class NETCDF(package):
         ])
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         if self.cmake_build:
             cmake_options = [
                 '-DCMAKE_INSTALL_PREFIX:PATH={NETCDF_ROOT}',
@@ -1189,7 +1262,7 @@ class NETCDF(package):
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
 
 class NETCDF_Fortran(package):
@@ -1216,7 +1289,7 @@ class NETCDF_Fortran(package):
             self.install_chk_files = [os.path.join(self.config_dict['NETCDF_Fortran_LIB'], 'libnetcdff.a')]
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         if self.cmake_build:
             cmake_options = [
                 '-DCMAKE_INSTALL_PREFIX:PATH={NETCDF_Fortran_ROOT}',
@@ -1271,7 +1344,7 @@ class NETCDF_Fortran(package):
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
 
 class OpenBLAS(package):
@@ -1308,7 +1381,7 @@ class OpenBLAS(package):
         #
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         avx_test_source = """
 #include <immintrin.h>
 int main(int argc, char** argv) {
@@ -1340,7 +1413,7 @@ int main(int argc, char** argv) {
             oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1']
         else:
             oblas_options += ['USE_THREAD=0', 'USE_LOCKING=1']
-        if self.no_avx or (self.config_dict['OS_ARCH'] == 'arm64'):
+        if self.no_avx or (self.config_dict['TARGET_ARCH'] == 'arm64'):
             oblas_options += ['NO_AVX=1', 'NO_AVX2=1']
         else:
             if self.config_dict['OS_TYPE'] == 'Darwin':
@@ -1359,7 +1432,7 @@ int main(int argc, char** argv) {
             'make {0}'.format(' '.join(oblas_options + make_thread)),
             'make {0} install'.format(' '.join(oblas_options + ['NO_PARALLEL_MAKE=1', 'PREFIX={OpenBLAS_ROOT}']))
         ]
-        self.run_build(build_lines, tmp_dict)
+        self.setup_build_script(build_lines, tmp_dict)
 
 
 class MKL(package):
@@ -1432,9 +1505,9 @@ class BLAS_LAPACK(package):
         #
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         fflags = []
-        if (config_dict['CC_VENDOR'] == 'gnu') and (int(config_dict['CC_VERSION'].split(".")[0]) > 9):
+        if (self.config_dict['CC_VENDOR'] == 'gnu') and (int(self.config_dict['CC_VERSION'].split(".")[0]) > 9):
             fflags.append("-fallow-argument-mismatch")
         build_lines = [
             "rm -rf build",
@@ -1457,12 +1530,12 @@ class BLAS_LAPACK(package):
         ]
         if 'MACOS_SDK_PATH' in self.config_dict:
             cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
-        build_lines += [    
+        build_lines += [
             "{CMAKE} " + " ".join(cmake_options) + " .. ",
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
 
 class ARPACK(package):
@@ -1489,7 +1562,7 @@ class ARPACK(package):
         #
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         tmp_dict = self.config_dict.copy()
         cmake_options = [
             "-DCMAKE_INSTALL_PREFIX:PATH={ARPACK_ROOT}",
@@ -1556,7 +1629,7 @@ class ARPACK(package):
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, tmp_dict)
+        self.setup_build_script(build_lines, tmp_dict)
 
 
 class SUPERLU(package):
@@ -1583,7 +1656,7 @@ class SUPERLU(package):
         #
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         cmake_options = [
             "-DCMAKE_INSTALL_PREFIX:PATH={SUPERLU_ROOT}",
             "-Denable_blaslib:BOOL=TRUE",
@@ -1615,7 +1688,7 @@ class SUPERLU(package):
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
 
 class SUPERLU_DIST(package):
@@ -1642,7 +1715,7 @@ class SUPERLU_DIST(package):
             self.install_chk_files = [os.path.join(self.config_dict['SUPERLU_DIST_LIB'], "libsuperlu_dist.a")]
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         #
         tmp_dict = self.config_dict.copy()
         if 'MPI_CXX' not in self.config_dict:
@@ -1692,7 +1765,7 @@ class SUPERLU_DIST(package):
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, tmp_dict)
+        self.setup_build_script(build_lines, tmp_dict)
 
 
 class UMFPACK(package):
@@ -1720,7 +1793,7 @@ class UMFPACK(package):
         #
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         if ver_lt(self.config_dict.get('CMAKE_VERSION','0.0'),"3.22"):
             error_exit('CMAKE >= 3.22 required for UMFPACK', ('Update or retry with "--build_cmake=1" to build a compatible version',))
         AMD_CMAKE_options = [
@@ -1785,7 +1858,7 @@ class UMFPACK(package):
                 build_lines += ["rm -f {UMFPACK_ROOT}/lib/lib*.dylib*"]
             else:
                 build_lines += ["rm -f {UMFPACK_ROOT}/lib/lib*.so*"]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
 
 class LIBXML2(package):
@@ -1808,7 +1881,7 @@ class LIBXML2(package):
         #
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         build_lines = [
             "rm -rf build",
             "mkdir build",
@@ -1835,7 +1908,7 @@ class LIBXML2(package):
             "make -j{MAKE_THREADS}",
             "make install"
         ]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
 
 class ONURBS(package):
@@ -1856,7 +1929,7 @@ class ONURBS(package):
         #
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         with open("makefile.in", "r") as fid:
             contents = fid.read()
         with open("makefile", "w+") as fid:
@@ -1870,7 +1943,7 @@ class ONURBS(package):
             "cp *.h {ONURBS_INCLUDE}",
             "cp -r zlib {ONURBS_INCLUDE}/"
         ]
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
 
 class PETSC(package):
@@ -1970,7 +2043,7 @@ class PETSC(package):
         # self.config_dict['COMP_DEFS'].append('-DHAVE_PETSC -DPETSC_VERSION_MAJOR={0} -DPETSC_VERSION_MINOR={1}'.format(ver_major, ver_minor))
         return self.config_dict
 
-    def build(self):
+    def setup_build(self):
         if ver_gt(self.config_dict.get('CMAKE_VERSION','0.0'),"3.99"):
             error_exit('CMAKE >= 4.0 not presently supported with PETSc', ('Update or retry with "--build_cmake=1" to build a compatible version',))
         #
@@ -2045,7 +2118,7 @@ class PETSC(package):
             "make install"
         ]
         run_command("make distclean", timeout=30)
-        self.run_build(build_lines, self.config_dict)
+        self.setup_build_script(build_lines, self.config_dict)
 
 
 # Start of main script
@@ -2053,12 +2126,13 @@ parser = argparse.ArgumentParser()
 parser.description = "Third-party library build script for the Open FUSION Toolkit"
 parser.add_argument("--download_only", action="store_true", default=False, help="Only download packages")
 parser.add_argument("--setup_only", action="store_true", default=False, help="Download and setup build, but do not actually build")
+parser.add_argument("--keep_build_dirs", action="store_true", default=False, help="Keep build directories after successful build (default: False)")
 parser.add_argument("--nthread", "--nthreads", default=1, type=int, help="Number of threads to use for make (default=1)")
 parser.add_argument("--opt_flags", default=None, type=str, help="Compiler optimization flags")
 parser.add_argument("--ld_flags", default=None, type=str, help="Linker flags")
 parser.add_argument("--macos_sdk_path", default=None, type=str, help="Path to macOS SDK to use for building")
 parser.add_argument("--macos_deployment_target", default=None, type=str, help="macOS deployment target version, required for python package builds (e.g. 10.15)")
-parser.add_argument("--cross_compile_host", default=None, type=str, help="Host type for cross-compilation (unused)")
+parser.add_argument("--cross_compile_arch", default=None, type=str, help="Architecture type for cross-compilation")
 parser.add_argument("--no_dl_progress", action="store_false", default=True, help="Do not report progress during file download")
 #
 group = parser.add_argument_group("CMAKE", "CMAKE configure options for the Open FUSION Toolkit")
@@ -2154,7 +2228,7 @@ fetch_progress = options.no_dl_progress
 build_cmake_ver = None
 if options.build_cmake == 1:
     build_cmake_ver = CMAKE().version
-config_dict = setup_build_env(build_cmake_ver=build_cmake_ver)
+config_dict = setup_build_env(build_cmake_ver=build_cmake_ver,cross_compile_target=options.cross_compile_arch)
 config_dict['DOWN_ONLY'] = options.download_only
 config_dict['SETUP_ONLY'] = options.setup_only
 if options.nthread > 1:
@@ -2163,8 +2237,6 @@ if options.opt_flags is not None:
     config_dict['OPT_FLAGS'] = options.opt_flags
 if options.ld_flags is not None:
     config_dict['LD_FLAGS'] = options.ld_flags
-if options.cross_compile_host is not None:
-    config_dict['CROSS_COMPILE_HOST'] = options.cross_compile_host
 if config_dict['OS_TYPE'] == 'Darwin':
     if options.macos_sdk_path is not None:
         if not os.path.isdir(options.macos_sdk_path):
@@ -2275,9 +2347,8 @@ else:
         packages.append(UMFPACK(options.umfpack_wrapper))
 #
 for package in packages:
-    config_dict = package.install(config_dict)
+    config_dict = package.install(config_dict, keep_build_dirs=options.keep_build_dirs)
 #
-# print(config_dict)
 if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
     config_dict['OFT_PY_KERNEL'] = options.oft_py_kernel
     build_cmake_script(config_dict,
