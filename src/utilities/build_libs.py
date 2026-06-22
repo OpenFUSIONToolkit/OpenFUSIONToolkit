@@ -567,6 +567,10 @@ class package:
         config_dict = self.setup(config_dict)
         if self.skip:
             return handle_children(config_dict)
+        if self.install_dir is None:
+            error_exit("No install directory specified for package: " + self.name)
+        if self.build_dir is None:
+            error_exit("No build directory specified for package: " + self.name)
         print("=========================================================")
         print("Building library: {0}".format(self.name if self.display_name is None else self.display_name))
         #
@@ -585,27 +589,26 @@ class package:
         with open("build_tmp.sh", "r") as fid:
             build_hash = hashlib.sha256((fid.read()+self.build_dir+self.install_dir).encode('utf-8')).hexdigest()
         # Check hash against existing install if present
-        if self.install_dir is not None:
-            install_dir_abspath = os.path.abspath(os.path.join(self.root_path, self.install_dir))
-            if os.path.isdir(install_dir_abspath) and (not force):
-                try:
-                    with open(os.path.join(install_dir_abspath, "OFT_build_hash.txt"), "r") as fid:
-                        existing_hash = fid.read()
-                except Exception:
-                    existing_hash = ''
-                if existing_hash == build_hash:
-                    print("  Using existing installation: {0}".format(install_dir_abspath))
-                    os.chdir(self.root_path)
-                    config_dict = self.post_install(config_dict)
-                    if self.check_install(do_abort=False):
-                        config_dict = handle_children(config_dict)
-                        # Remove build directory to save space
-                        if not keep_build_dirs:
-                            shutil.rmtree(build_dir_abspath)
-                        return config_dict
-                else:
-                    print("  Ignoring existing installation due to configuration change")
-        print("  Excecuting build (this may take a few minutes)")
+        install_dir_abspath = os.path.abspath(os.path.join(self.root_path, self.install_dir))
+        if os.path.isdir(install_dir_abspath) and (not force):
+            try:
+                with open(os.path.join(install_dir_abspath, "OFT_build_hash.txt"), "r") as fid:
+                    existing_hash = fid.read().strip()
+            except Exception:
+                existing_hash = ''
+            if existing_hash == build_hash:
+                print("  Using existing installation: {0}".format(install_dir_abspath))
+                os.chdir(self.root_path)
+                config_dict = self.post_install(config_dict)
+                if self.check_install(do_abort=False):
+                    config_dict = handle_children(config_dict)
+                    # Remove build directory to save space
+                    if not keep_build_dirs:
+                        shutil.rmtree(build_dir_abspath)
+                    return config_dict
+            else:
+                print("  Ignoring existing installation due to configuration change")
+        print("  Executing build (this may take a few minutes)")
         build_start = time.time()
         self.run_build(self.config_dict)
         build_duration = time.time() - build_start
@@ -617,7 +620,7 @@ class package:
         self.check_install()
         config_dict = handle_children(config_dict)
         # Put hash of build script in install directory for tracking
-        with open(os.path.join(self.install_dir, "OFT_build_hash.txt"), "w+") as fid:
+        with open(os.path.join(install_dir_abspath, "OFT_build_hash.txt"), "w+") as fid:
             fid.write(build_hash)
         # Remove build directory to save space
         if not keep_build_dirs:
@@ -713,13 +716,13 @@ class package:
 
     def run_build(self, config_dict):
         # Run build script
-        if self.config_dict['SETUP_ONLY']:
+        if config_dict['SETUP_ONLY']:
             return
         addl_envs = {}
         if 'MACOS_SDK_PATH' in config_dict:
-            addl_envs['SDKROOT'] = self.config_dict['MACOS_SDK_PATH']
+            addl_envs['SDKROOT'] = config_dict['MACOS_SDK_PATH']
         if 'MACOSX_DEPLOYMENT_TARGET' in config_dict:
-            addl_envs['MACOSX_DEPLOYMENT_TARGET'] = self.config_dict['MACOSX_DEPLOYMENT_TARGET']
+            addl_envs['MACOSX_DEPLOYMENT_TARGET'] = config_dict['MACOSX_DEPLOYMENT_TARGET']
         result, _ = run_command("bash build_tmp.sh", timeout=self.build_timeout*60, env_vars=addl_envs)
         with open("build_tmp.log", "w+") as fid:
             fid.write(result)
