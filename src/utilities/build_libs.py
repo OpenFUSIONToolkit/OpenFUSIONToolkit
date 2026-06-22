@@ -607,7 +607,7 @@ class package:
                         shutil.rmtree(build_dir_abspath)
                     return config_dict
             else:
-                print("  Ignoring existing installation due to configuration change")
+                print("  Ignoring existing installation due to hash mismatch")
         print("  Executing build (this may take a few minutes)")
         build_start = time.time()
         self.run_build(self.config_dict)
@@ -1509,7 +1509,7 @@ class BLAS_LAPACK(package):
 
     def setup_build(self):
         fflags = []
-        if (config_dict['CC_VENDOR'] == 'gnu') and (int(config_dict['CC_VERSION'].split(".")[0]) > 9):
+        if (self.config_dict['CC_VENDOR'] == 'gnu') and (int(self.config_dict['CC_VERSION'].split(".")[0]) > 9):
             fflags.append("-fallow-argument-mismatch")
         build_lines = [
             "rm -rf build",
