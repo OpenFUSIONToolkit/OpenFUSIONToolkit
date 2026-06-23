@@ -43,6 +43,7 @@ from scipy.signal import savgol_filter
 from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk, create_power_flux_fun
 
 LCFS_WEIGHT = 100.0
+PSI_LCFS_WEIGHT = 10
 N_PSI = 1000
 _NBI_W_TO_MA = 1/16e6
 mu_0 = 4.0 * np.pi * 1e-7
@@ -348,6 +349,8 @@ class TokaMaker_TORAX:
         self._state['pp_prof_tx']     = {}  # p' from TORAX
         self._state['ffp_prof_tm']    = {}  # FF' from TM solve (FF, not FF')
         self._state['pp_prof_tm']     = {}  # p' from TM solve
+        self._state['ffp_prof_tm_prev'] = {}  # ffp_prof_tm from the previous loop (blend reference)
+        self._state['pp_prof_tm_prev']  = {}  # pp_prof_tm from the previous loop (blend reference)
         self._state['p_prof_tm']      = {}  # pressure from TM solve
         self._state['p_prof_tx']      = {}  # pressure from TORAX
         self._state['f_prof_tm']      = {}  # F=RBphi from TM solve
@@ -544,6 +547,7 @@ class TokaMaker_TORAX:
         self._state['pax_tm'] = self._state['pax'].copy()
 
         self._psi_init = None
+        self._psi_init_seed = None  # frozen copy of the very first relax seed psi (never overwritten)
         self._n_e_init = None
         self._T_e_init = None
         self._T_i_init = None
@@ -1893,38 +1897,20 @@ class TokaMaker_TORAX:
                     if eqdsk not in self._eqdsk_skip and os.path.isfile(eqdsk):
                         solved[i] = eqdsk
 
-                def _nearest_seed(t):
-                    j = int(np.argmin(np.abs(np.asarray(self._eqtimes, float) - t)))
-                    return self._init_files[j]
-
-                last_good = None  # most-recent solved eqdsk (carry-forward)
-                n_fallback = 0
+                n_failed = 0
                 for i, t in enumerate(self._tm_times):
                     if i in solved:
                         full_eqdsk_map[t] = solved[i]
-                        last_good = solved[i]
                         n_tm += 1
-                        continue
-                    # Failed solve at this time — pick a valid fallback in priority order.
-                    candidates = []
-                    if last_good is not None:
-                        candidates.append(last_good)                 # (1) last-good
-                    candidates.append(_nearest_seed(t))              # (2) nearest seed
-                    nxt = next((solved[k] for k in sorted(solved) if k > i), None)
-                    if nxt is not None:
-                        candidates.append(nxt)                       # (3) next solved
-                    chosen = next((c for c in candidates
-                                   if self._test_eqdsk_tx_config(c)), None)
-                    if chosen is not None:
-                        full_eqdsk_map[t] = chosen
-                        n_fallback += 1
                     else:
-                        self._log(f'Warning: Loop {self._current_loop}: TM failed at '
-                                  f't={t:.2f} and no valid fallback EQDSK found; '
-                                  f'leaving gap (TORAX will interpolate).')
-                if n_fallback:
-                    self._log(f'Loop {self._current_loop}: {n_fallback} failed TM '
-                              f'timestep(s) filled by last-good/seed fallback.')
+                        # Failed solve — leave this time out of the map so TORAX
+                        # interpolates geometry across it from its neighbours.
+                        n_failed += 1
+                        self._log(f'Loop {self._current_loop}: TM failed at t={t:.2f}s; '
+                                  f'skipping timepoint in TORAX geometry (TORAX will interpolate).')
+                if n_failed:
+                    self._log(f'Loop {self._current_loop}: {n_failed} failed TM '
+                              f'timestep(s) skipped in TORAX geometry map.')
 
             # Injected psi from initial relax used the seed EQDSK.  If we used
             # the TM EQDSK at t_init without a loop N re-relax, the metric changes
@@ -2116,8 +2102,8 @@ class TokaMaker_TORAX:
         # the steep tanh edge is a narrow band near the separatrix, so the inner edge sits on the
         # flat core line (value ~ ped_top) and the foot saturates to the edge BC.
         w = self._ped_width
-        knee = 1.0 - 0.47 * w
-        hwid = 0.17 * w
+        knee = 1.0 - 0.5 * w
+        hwid = 0.5 * w
         blend = 0.10 * w
         # Core transition-band grid: ends ONE cell short of ped_rho so the band location
         # (0, core_hi) is strictly disjoint from the pedestal band (ped_rho, 1) -- TORAX rejects
@@ -2193,49 +2179,50 @@ class TokaMaker_TORAX:
         r'''! Match the imposed pedestal inner-edge value AND gradient to the TORAX-evolved core
                 PER TM-TIME, so the next loop's IBC tracks the evolving profile time-point by
                 time-point and joins the core smoothly (no kink/jog -> p' spike -> TM GS failure).
-                Reads the evolved profile from self._data_tree (rho_norm grid): at each H-mode
-                tm_time the inner-edge value is the core value just inside the edge and the gradient
-                is a least-squares fit over a small core-side window (multi-cell fit is less noisy
-                than a single-cell diff, esp. for density). Stored as {field: {tm_time: (value, slope)}}.
 
-                NOT time-averaged: the few transition-region tm_times have anomalous steep slopes
-                (density still filling in) that would poison a single average and flip its sign.
-                L-mode tm_times are skipped (no IBC there). The fitted slope is clamped to <= 0
-                (rho increases outward, so a physical pedestal falls from core to foot => slope<0):
-                a positive slope would mean the imposed value rises above the pedestal top toward
-                the edge, which is non-physical; flooring positives to 0 keeps the core->pedestal
-                connection flat-or-falling.
+                For each H-mode tm_time: takes a window of the TORAX profile just inside ped_rho
+                (width PED_GRAD_WINDOW), fits a cubic polynomial to smooth it, then evaluates the
+                smoothed curve at ped_rho to obtain the inner-edge value and gradient. The smoothed
+                profile chunk is stored for plotting in IBC_debug.
+
+                Stored as {field: {tm_time: (value, slope, rho_chunk, y_chunk_smoothed)}}.
+                L-mode tm_times are skipped. Slope clamped to <= 0.
         '''
         dt = getattr(self, '_data_tree', None)
         if dt is None:
             return
-        # Ensure the H-mode mask is set (timing='input' has no detection state machine).
         self._set_confinement_from_window()
         ped_rho = 1.0 - self._ped_width
-        # Fit window: core-side cells within PED_GRAD_WINDOW of the inner edge (min 3 cells).
         lo_rho = ped_rho - PED_GRAD_WINDOW
+        hi_rho = min(1.0, ped_rho + PED_GRAD_WINDOW)
         heights = {'T_e': self._ped_height_Te, 'T_i': self._ped_height_Ti, 'n_e': self._ped_height_ne}
         for field, height in heights.items():
             if height is None:
                 continue
             da = getattr(dt.profiles, field)
             rho = da.coords['rho_norm'].values
-            hi = int(np.argmin(np.abs(rho - ped_rho)))           # IBC inner-edge cell
-            lo = min(int(np.searchsorted(rho, lo_rho)), hi - 2)  # >= 3 cells in the fit
+            idx_mid = int(np.argmin(np.abs(rho - ped_rho)))
+            lo = min(int(np.searchsorted(rho, lo_rho)), idx_mid - 2)
+            hi = max(int(np.searchsorted(rho, hi_rho, side='right')) - 1, idx_mid + 2)
+            hi = min(hi, len(rho) - 1)
             if lo < 0:
                 continue
+            rho_win = rho[lo:hi + 1]
             by_time = {}
             for i, t in enumerate(self._tm_times):
                 if not self._state['confinement_mode'][i]:
-                    continue   # skip pure-L-mode points (no IBC there)
+                    continue
                 y = da.sel(time=t, method='nearest').values
-                slope = float(np.polyfit(rho[lo:hi + 1], y[lo:hi + 1], 1)[0])
-
-                # Clamp to <= 0: rho increases outward, so a physical pedestal falls from the core
-                # to the foot (slope < 0). Floor any positive fitted slope to 0 so the imposed value
-                # never rises above the pedestal top toward the edge.
-                slope = min(slope, 0.0)
-                by_time[float(t)] = (float(y[hi]), slope)
+                y_win = y[lo:hi + 1]
+                # Cubic fit spanning both sides of ped_rho — the slope at ped_rho bridges core and pedestal.
+                deg = min(3, len(rho_win) - 1)
+                coeffs = np.polyfit(rho_win, y_win, deg)
+                poly = np.poly1d(coeffs)
+                value = float(poly(ped_rho))
+                slope = min(float(poly.deriv()(ped_rho)), 0.0)
+                rho_plot = np.linspace(rho_win[0], rho_win[-1], max(len(rho_win) * 3, 20))
+                y_plot = poly(rho_plot)
+                by_time[float(t)] = (value, slope, rho_plot.tolist(), y_plot.tolist())
             if by_time:
                 self._ped_smoothed[field] = by_time
 
@@ -2468,6 +2455,8 @@ class TokaMaker_TORAX:
             rho_psi_arr = psi_xr.coords['rho_norm'].to_numpy()
             psi_arr = psi_xr.to_numpy()
             self._psi_init = ([self._t_init], rho_psi_arr.tolist(), [psi_arr.tolist()])
+            if self._psi_init_seed is None:
+                self._psi_init_seed = self._psi_init
 
             if getattr(self, '_relax_kinetics', False):
                 for _name, _attr in (('n_e', '_n_e_init'), ('T_e', '_T_e_init'), ('T_i', '_T_i_init')):
@@ -2826,6 +2815,11 @@ class TokaMaker_TORAX:
             self._print(f'  TokaMaker: solving {len(self._tm_times)} equilibria...')
 
         # ── Per-loop initialization (before timestep sweep) ──────────────────
+        # Snapshot previous loop's TM-solved profiles before they are overwritten,
+        # so _tm_prof_blend can blend toward the previous loop rather than analytic.
+        self._state['ffp_prof_tm_prev']  = copy.deepcopy(self._state.get('ffp_prof_tm', {}))
+        self._state['pp_prof_tm_prev']   = copy.deepcopy(self._state.get('pp_prof_tm', {}))
+        self._state['ffp_ni_prof_prev']  = copy.deepcopy(self._state.get('ffp_ni_prof', {}))
         self._state['psi_grid_prev_tm'] = {}
 
         if (self._steady_state_mode
@@ -2934,7 +2928,7 @@ class TokaMaker_TORAX:
                 omp_point = lcfs[omp_idx:omp_idx+1, :]  # shape (1, 2)
                 # Set lcfs psi value target (from TORAX) only at midplane outboard side of lcfs.
                 self._tm.set_psi_constraints(omp_point, targets=np.array([lcfs_psi_target]),
-                                             weights=np.array([LCFS_WEIGHT * 10.])) # psi value target
+                                             weights=np.array([PSI_LCFS_WEIGHT])) # psi value target
         
         
                 self._tm.update_settings()
@@ -2954,32 +2948,62 @@ class TokaMaker_TORAX:
                 solve_succeeded = False
                 level_attempts = []
 
-                ffp_prof_raw = copy.deepcopy(ffp_prof)
-                pp_prof_raw  = copy.deepcopy(pp_prof)
+                # set increasing tolerance requirements for TM solves
+                if self._current_loop <=1:
+                    self._tm.settings.nl_tol = 1e-2
+                    self._tm.update_settings()
+                elif self._current_loop == 2:
+                    self._tm.settings.nl_tol = 1e-4
+                #     self._tm.update_settings()
+                # elif self._current_loop >= 3:
+                #     self._tm.settings.nl_tol = 1e-6
+                #     self._tm.update_settings()
+
+                ffp_prof_raw    = copy.deepcopy(ffp_prof)
+                pp_prof_raw     = copy.deepcopy(pp_prof)
+                ffp_ni_prof_raw = copy.deepcopy(self._state['ffp_ni_prof'][i])
         
-                # Pre-calculate all level profiles
+                # Pre-calculate all level profiles: 5 convex blends from pure TORAX (alpha=0)
+                # to pure analytic (alpha=1) with independent ffp/pp alpha stepping.
+                _blend_alphas = [
+                    (0.00, 0.00),
+                    (0.05, 0.05),
+                    (0.10, 0.10),
+                    (0.15, 0.15),
+                    (0.20, 0.20),
+                    (0.30, 0.30),
+                    (0.40, 0.40),
+                    (0.50, 0.50),
+                    (0.60, 0.60),
+                    (0.70, 0.70),
+                    (0.80, 0.80),
+                    (0.90, 0.90),
+                    (1.00, 1.00),
+                ]
                 level_profiles = []
 
-                # Level 0: jphi
-                # ffp_0 = self._state['j_tot'][i]
-                # pp_0 = pp_prof
-                # level_profiles.append({'ffp': ffp_0, 'pp': pp_0, 'name': 'lv0: jphi'})
+                # level_profiles.append({'ffp': self._state['j_tot'][i], 'pp': pp_prof_raw, 'ffp_ni': ffp_ni_prof_raw, 'name': 'j_phi_and_raw'})
 
-                # Level 1: raw
-                ffp_1, pp_1 = self._tm_prof_input_raw(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
-                level_profiles.append({'ffp': ffp_1, 'pp': pp_1, 'name': 'raw tx profs'})
-        
-                # Level 2: sign flip
-                ffp_2, pp_2 = self._tm_prof_input_sign_flip(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
-                level_profiles.append({'ffp': ffp_2, 'pp': pp_2, 'name': 'sign_flip'})
-        
-                # Level 3: pedestal smoothing (takes p_profile as input) # TODO: read in actual n_rho_ped_top, have to add to state first
-                ffp_3, pp_3 = self._tm_prof_input_ped_smooth(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw), copy.deepcopy(self._state['p_prof_tx'][i])) 
-                level_profiles.append({'ffp': ffp_3, 'pp': pp_3, 'name': 'ped_smoothing'})
-        
-                # Level 4: power flux
-                ffp_4, pp_4 = self._tm_prof_input_power_flux(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
-                level_profiles.append({'ffp': ffp_4, 'pp': pp_4, 'name': 'analytic'})
+                lv_idx = 1
+                for _a_ffp, _a_pp in _blend_alphas:
+                    _ffp_b, _pp_b, _ffp_ni_b = self._tm_prof_blend(
+                        copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw),
+                        copy.deepcopy(ffp_ni_prof_raw),
+                        i, alpha_ffp=_a_ffp, alpha_pp=_a_pp,
+                    )
+                    if _a_ffp < 1.0 or _a_pp < 1.0:
+                        lv_name = f'blend_ffp{_a_ffp:.2f}_pp{_a_pp:.2f}'
+                    elif _a_ffp == 1.0 and _a_pp == 1.0:
+                        lv_name = 'lv99_analytic_profiles'
+                    elif _a_ffp == 0.0 and _a_pp == 0.0:
+                        lv_name = 'lv00_raw_torax_profiles'
+                    else:
+                        print(f'TM: Profile convolution received unexpected alpha values: {_a_ffp}, {_a_pp}')
+                    level_profiles.append({
+                        'ffp': _ffp_b, 'pp': _pp_b, 'ffp_ni': _ffp_ni_b,
+                        'name': lv_name,
+                    })
+                    lv_idx += 1
 
                 # Try each level
                 for level_idx, level_prof in enumerate(level_profiles):
@@ -2996,23 +3020,35 @@ class TokaMaker_TORAX:
                         self._tm.set_psi(self._state['psi_grid_prev_tm'][prev_tm_idx], update_bounds=True)
 
                     try:
-                        self._tm.set_profiles(ffp_prof=ffp_level, pp_prof=pp_level, ffp_NI_prof=self._state['ffp_ni_prof'][i])
-
+                        self._tm.set_profiles(ffp_prof=ffp_level, pp_prof=pp_level, ffp_NI_prof=level_prof['ffp_ni'])
+                        
                         if self._output_mode == 'debug': # allows TM terminal outputs in debug mode
-                            self._state['equil'][i] = self._tm.solve()
+                            self._state['equil'][i], _nl_its = self._tm.solve(return_its=True)
                         else:
                             with self._quiet_tm(): # silences TM terminal outputs
-                                self._state['equil'][i] = self._tm.solve()
+                                self._state['equil'][i], _nl_its = self._tm.solve(return_its=True)
+
+                        # DGETRF and similar Fortran failures print to stdout but don't raise.
+                        # Detect the resulting degenerate equilibrium (psi_lcfs == psi_axis,
+                        # or non-finite bounds) before accepting the solve.
+                        _pb = self._state['equil'][i].psi_bounds
+                        if not np.all(np.isfinite(_pb)) or abs(_pb[0] - _pb[1]) < 1e-12:
+                            raise ValueError(
+                                f'Degenerate equilibrium: psi_bounds={_pb} '
+                                f'(likely silent LAPACK failure in GS Newton solver)'
+                            )
 
                         level_attempts.append({'level': level_idx, 'name': level_name,
                                               'ffp': ffp_level, 'pp': pp_level,
-                                              'succeeded': True, 'error': None})
+                                              'ffp_ni': level_prof['ffp_ni'],
+                                              'succeeded': True, 'error': None, 'nl_its': _nl_its})
                         ffp_prof, pp_prof = ffp_level, pp_level
                         solve_succeeded = True
                         break
                     except Exception as e:
                         level_attempts.append({'level': level_idx, 'name': level_name,
                                               'ffp': ffp_level, 'pp': pp_level,
+                                              'ffp_ni': level_prof['ffp_ni'],
                                               'succeeded': False, 'error': str(e)})
                         if self._output_mode == 'debug' and self._out_dir is not None:
                             _ldiag_name = f'tm_diag_loop{self._current_loop:03d}_tidx{i:03d}_lv{level_idx:02d}.png'
@@ -3048,14 +3084,28 @@ class TokaMaker_TORAX:
                 tm_gs_ok = solve_succeeded
                 if solve_succeeded:
                     torax_accepted = False
+                    _eqdsk_save_err = None   # last error string if save_eqdsk raised
                     _n_attempts = len(EQDSK_SAVE_NR_NZ_SEQUENCE)
                     for _attempt_idx, nr_nz in enumerate(EQDSK_SAVE_NR_NZ_SEQUENCE):
                         quiet_test = (_attempt_idx < _n_attempts - 1)
-                        with self._quiet_tm():
-                            self._state['equil'][i].save_eqdsk(eq_name,
-                                lcfs_pad=1-self._last_surface_factor, run_info='TokaMaker EQDSK',
-                                cocos=self._cocos, nr=nr_nz, nz=nr_nz,
-                                truncate_eq=self._truncate_eq)
+                        # The gEQDSK core write can fail on a pathological equilibrium
+                        # (e.g. the on-axis grid: "Tracing failed at psi = 0.0029"); the
+                        # Fortran routine reports it via the error buffer and save_eqdsk
+                        # re-raises. Treat that as a failed attempt: try the next resolution,
+                        # and if every resolution raises, fall through to the _eqdsk_skip
+                        # path below (skip this timestep, TORAX interpolates neighbors)
+                        # instead of aborting the whole fly().
+                        try:
+                            with self._quiet_tm():
+                                self._state['equil'][i].save_eqdsk(eq_name,
+                                    lcfs_pad=1-self._last_surface_factor, run_info='TokaMaker EQDSK',
+                                    cocos=self._cocos, nr=nr_nz, nz=nr_nz,
+                                    truncate_eq=self._truncate_eq)
+                        except Exception as _eqdsk_exc:
+                            _eqdsk_save_err = _eqdsk_exc
+                            self._log(f'\tTM: save_eqdsk failed at nr=nz={nr_nz} for '
+                                      f'{os.path.basename(eq_name)}: {_eqdsk_exc}')
+                            continue
                         if self._test_eqdsk_tx_config(eq_name, quiet=quiet_test):
                             torax_accepted = True
                             if _attempt_idx > 0 and self._output_mode == 'debug':
@@ -3071,10 +3121,17 @@ class TokaMaker_TORAX:
                         self._eqdsk_skip.append(eq_name)
                         skip_coil_update = True
                         self._state['psi_grid_prev_tm'][i] = None
-                        step_fail_msg = (
-                            f'TORAX rejected EQDSK after save attempts nr=nz in '
-                            f'{EQDSK_SAVE_NR_NZ_SEQUENCE}: {os.path.basename(eq_name)}'
-                        )
+                        if _eqdsk_save_err is not None:
+                            step_fail_msg = (
+                                f'save_eqdsk raised at every nr=nz in '
+                                f'{EQDSK_SAVE_NR_NZ_SEQUENCE} ({_eqdsk_save_err}): '
+                                f'{os.path.basename(eq_name)}'
+                            )
+                        else:
+                            step_fail_msg = (
+                                f'TORAX rejected EQDSK after save attempts nr=nz in '
+                                f'{EQDSK_SAVE_NR_NZ_SEQUENCE}: {os.path.basename(eq_name)}'
+                            )
                         self._log(f'\tTM: {step_fail_msg}')
                         solve_succeeded = False
                     else:
@@ -3185,7 +3242,8 @@ class TokaMaker_TORAX:
             f' Skipped: {n_skip}.'
             if n_skip and n_gs >= len(self._tm_times) else ''
         )
-        self._print(f'\tTM summary: {n_ok}/{n_gs} solved. Levels: {_lvl_summary}.'
+        _tm_nl_tol = getattr(getattr(self._tm, 'settings', None), 'nl_tol', None)
+        self._print(f'\tTM summary: {n_ok}/{n_gs} solved at tol: {_tm_nl_tol:.2e}. Levels: {_lvl_summary}.'
                   + _skip_note
                   + (f' Failures: {n_fail}.' if n_fail else ''))
 
@@ -3255,6 +3313,44 @@ class TokaMaker_TORAX:
         ffp_out = create_power_flux_fun(N_PSI, 1.5, 2.0)
         pp_out  = create_power_flux_fun(N_PSI, 4.0, 1.0)
         return ffp_out, pp_out
+
+    def _tm_prof_blend(self, ffp_prof, pp_prof, ffp_ni_prof, i, alpha_ffp=0.5, alpha_pp=0.5):
+        r'''! Convex blend between the current TORAX profiles (alpha=0) and a reference
+        profile (alpha=1).
+
+        Reference is the previous loop's profile at timestep i when available; falls back
+        to an analytic power-flux shape (ffp/pp) or zeros (ffp_ni) on loop 1 or when the
+        previous loop has no entry for this timestep. Blending is in normalized shape space
+        (peak abs = 1) so the reference never adds amplitude — only smooths shape. Result
+        is rescaled to the TORAX amplitude and sign.
+        '''
+        ffp_prev    = self._state['ffp_prof_tm_prev'].get(i)
+        pp_prev     = self._state['pp_prof_tm_prev'].get(i)
+        ffp_ni_prev = self._state['ffp_ni_prof_prev'].get(i)
+
+        ffp_ref    = ffp_prev    if ffp_prev    is not None else create_power_flux_fun(N_PSI, 1.5, 2.0)
+        pp_ref     = pp_prev     if pp_prev     is not None else create_power_flux_fun(N_PSI, 4.0, 1.0)
+        ffp_ni_ref = ffp_ni_prev if ffp_ni_prev is not None else {'x': self._psi_N.copy(), 'y': np.zeros_like(self._psi_N), 'type': 'linterp'}
+
+        def _blend_one(torax_prof, ref_prof, alpha):
+            y_tx = np.interp(self._psi_N, torax_prof['x'], torax_prof['y'])
+            y_ref = np.interp(self._psi_N, ref_prof['x'], ref_prof['y'])
+
+            sign = -1.0 if np.sum(y_tx < 0) > np.sum(y_tx > 0) else 1.0
+            scale = np.max(np.abs(y_tx))
+            if scale == 0.0:
+                scale = 1.0
+
+            y_tx_norm  = y_tx  / (sign * scale)
+            ref_peak   = np.max(np.abs(y_ref))
+            y_ref_norm = y_ref / (ref_peak if ref_peak > 0 else 1.0)
+
+            y_mix = sign * scale * ((1.0 - alpha) * y_tx_norm + alpha * y_ref_norm)
+            return {'x': self._psi_N.copy(), 'y': y_mix, 'type': 'linterp'}
+
+        return (_blend_one(ffp_prof, ffp_ref, alpha_ffp),
+                _blend_one(pp_prof, pp_ref, alpha_pp),
+                _blend_one(ffp_ni_prof, ffp_ni_ref, alpha_ffp))
 
     def _tm_update(self, i):
         r'''! Update internal state and coil current results based on results of GS solver.
@@ -3642,6 +3738,7 @@ class TokaMaker_TORAX:
                 self._run_tx_relax(stage='initial', eqdsk_path=init_seed, prescribed_profiles=None)
             else:
                 self._psi_init = None
+                self._psi_init_seed = None
                 self._n_e_init = None
                 self._T_e_init = None
                 self._T_i_init = None
@@ -4100,8 +4197,8 @@ INFO_FS = 13
 DIAG_FS = 13
 
 MOVIE_FIG_W, MOVIE_FIG_H = 19.2, 10.8
-MOVIE_DPI = 200
-MOVIE_EQUIL_PSI_PLASMA_NLEVELS = 16
+MOVIE_DPI = 300
+MOVIE_EQUIL_PSI_PLASMA_NLEVELS = 8
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -4110,9 +4207,11 @@ MOVIE_EQUIL_PSI_PLASMA_NLEVELS = 16
 # [ped_rho, 1]. TORAX linearly interpolates between them, so the IBC follows the shape.
 PED_N_SAMPLE = 24
 
-# rho_norm span (core-side of the IBC inner edge) over which the evolved gradient is
-# least-squares fit for inner-edge smoothing. Wider = smoother slope, esp. for density.
-PED_GRAD_WINDOW = 0.03
+# rho_norm span (core-side of the IBC inner edge) over which the cubic smoothing fit is
+# performed to extract the inner-edge value and gradient. Wide enough for the cubic to
+# capture real curvature in the profile (not just noise), but narrow enough to stay in
+# the core region and not straddle the pedestal shoulder.
+PED_GRAD_WINDOW = 0.1
 
 
 def _mtanh_pedestal(rho, ped_top, foot, core_slope, knee, hwid, blend):
@@ -4131,8 +4230,12 @@ def _mtanh_pedestal(rho, ped_top, foot, core_slope, knee, hwid, blend):
         @param hwid Pedestal (tanh) half-width.
         @param blend Sharpness of the core->pedestal handoff.
     '''
-    A = (ped_top - foot) / 2.0
-    B = (ped_top + foot) / 2.0
+    # Pin tanh exactly to foot at rho=1 and ped_top at the inner edge, regardless of hwid,
+    # so hwid/knee can be tuned freely without lifting the foot off the edge BC.
+    t_inner = np.tanh((knee - rho[0]) / hwid)
+    t_foot  = np.tanh((knee - 1.0)   / hwid)
+    A = (ped_top - foot) / (t_inner - t_foot)
+    B = foot - A * t_foot
     ped = A * np.tanh((knee - rho) / hwid) + B
     core_line = ped_top + core_slope * (rho - rho[0])
     w = 1.0 / (1.0 + np.exp(-(rho - knee) / blend))
@@ -4657,8 +4760,7 @@ def IBC_debug(tt, i, t, save_path=None):
               - the TORAX-evolved profile (solid),
               - the IBC target (soft) imposed at this time (x markers),
               - the edge BC point at rho=1 (square),
-              - the inner-edge slope fit from THIS loop's evolved profile (dashed line over the
-                fit window),
+              - the cubic smooth fit from THIS loop's evolved profile over the fit window (dashed),
               - the slope used to BUILD this loop's IBC, i.e. last loop's smoothed slope (dotted
                 line extending beyond the fit window),
               - during the L->H transition: the core IBC target (rho 0->ped_rho) and core target point,
@@ -4742,22 +4844,28 @@ def IBC_debug(tt, i, t, save_path=None):
 
         # Slope used to BUILD this IBC at THIS time (prev-loop smoothed slope, interpolated to t),
         # as a line through (ped_rho, ped_top) extending beyond the fit window so it's visible.
-        xs = np.array([ped_rho - 0.06, ped_rho + 0.04])
+        xs = np.array([ped_rho - PED_GRAD_WINDOW, ped_rho + PED_GRAD_WINDOW])
         ax.plot(xs, (used_top + used_slope * (xs - ped_rho)) * scale,
                 ls=':', color='tab:blue', lw=1.6,
                 label=f'slope used (prev loop) = {used_slope:.3g}')
 
-        # Slope freshly fit from THIS loop's evolved profile near the inner edge (what next loop
-        # will use at this time), over the fit window only. Should match 'slope used' once converged.
+        # Cubic smooth fit from THIS loop's evolved profile (what next loop will use).
         if da is not None:
-            hi = int(np.argmin(np.abs(rho - ped_rho)))
-            lo = min(int(np.searchsorted(rho, ped_rho - PED_GRAD_WINDOW)), hi - 2)
+            idx_mid = int(np.argmin(np.abs(rho - ped_rho)))
+            lo = min(int(np.searchsorted(rho, ped_rho - PED_GRAD_WINDOW)), idx_mid - 2)
+            hi = max(int(np.searchsorted(rho, min(1.0, ped_rho + PED_GRAD_WINDOW), side='right')) - 1,
+                     idx_mid + 2)
+            hi = min(hi, len(rho) - 1)
             if lo >= 0 and hi > lo:
-                fit_slope = float(np.polyfit(rho[lo:hi + 1], y[lo:hi + 1], 1)[0])
-                xf = rho[lo:hi + 1]
-                yf = y[hi] + fit_slope * (xf - rho[hi])
-                ax.plot(xf, yf, '--', color='tab:green', lw=2.0,
-                        label=f'slope fit (this loop) = {fit_slope:.3g}')
+                rho_win = rho[lo:hi + 1]
+                y_win = y[lo:hi + 1]
+                deg = min(3, len(rho_win) - 1)
+                coeffs = np.polyfit(rho_win, y_win, deg)
+                poly = np.poly1d(coeffs)
+                fit_slope = min(float(poly.deriv()(ped_rho)), 0.0)
+                rho_plot = np.linspace(rho_win[0], rho_win[-1], max(len(rho_win) * 3, 20))
+                ax.plot(rho_plot, poly(rho_plot) * scale, '--', color='tab:green', lw=2.0,
+                        label=f'smoothed fit (this loop, slope={fit_slope:.3g})')
 
         tag = 'smoothed' if fcfg['smoothed'] else 'user-height fallback'
         ax.set_title(f'{field}:  ped_top={used_top:.3g} ({tag}),  '
@@ -4818,8 +4926,9 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
         for attempt in level_attempts:
             color = _level_colors[attempt['level'] % len(_level_colors)]
             y_data = attempt[key]['y'].copy()
-            if y_data[0] != 0:
-                y_data = y_data / y_data[0]
+            peak = np.max(np.abs(y_data))
+            if peak > 0:
+                y_data = y_data / peak
             if attempt['succeeded']:
                 ax.plot(attempt[key]['x'], y_data, color=color, linewidth=2.5, zorder=5,
                         label=f"Level {attempt['level']}: {attempt['name']} \u2713",
@@ -4874,6 +4983,10 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
         if _seed_pp_x.size == 0 or _seed_pp_norm.size == 0:
             _seed_pp_x, _seed_pp_norm = None, None
 
+    # Previous-loop TM profiles (blend reference; real units, same as ffp_prof_tm/pp_prof_tm).
+    _prev_ffp_prof = s.get('ffp_prof_tm_prev', {}).get(i)
+    _prev_pp_prof  = s.get('pp_prof_tm_prev',  {}).get(i)
+
     q0_seed_eq = np.nan
     q95_seed_eq = np.nan
     if _seed_q_prof is not None:
@@ -4888,7 +5001,8 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
 
     ax_ffp_tx = fig.add_subplot(gs_layout[0, 0:2])
     ax_pp_tx = fig.add_subplot(gs_layout[1, 0:2])
-    ax_eta = fig.add_subplot(gs_layout[2, 0:2])
+    ax_eta = fig.add_subplot(gs_layout[2, 0:1])
+    ax_ffp_ni = fig.add_subplot(gs_layout[2, 1:2])
     ax_ffp_tm = fig.add_subplot(gs_layout[0, 2:4])
     ax_pp_tm = fig.add_subplot(gs_layout[1, 2:4])
     ax_q_tm = fig.add_subplot(gs_layout[2, 2:4])
@@ -4898,18 +5012,30 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
     ax_mini_eq = fig.add_subplot(gs_tbl_eq[0, 1])
 
     _plot_levels(ax_ffp_tx, 'ffp', seed_x=_seed_ffp_x, seed_y=_seed_ffp_norm, seed_label="FF' seed EQDSK (norm)")
+    if _prev_ffp_prof is not None:
+        _pffp_y = np.asarray(_prev_ffp_prof['y'], dtype=float)
+        _pffp_peak = np.max(np.abs(_pffp_y))
+        if _pffp_peak > 0:
+            _pffp_y = _pffp_y / _pffp_peak
+        ax_ffp_tx.plot(_prev_ffp_prof['x'], _pffp_y, color='tab:purple', lw=1.5, ls='-.', alpha=0.85,
+                       label=f"FF' loop {tt._current_loop - 1} TM (norm)")
     ax_ffp_tx.set_title("FF' tried levels (norm)", fontsize=10)
     ax_ffp_tx.set_xlabel(r'$\hat{\psi}$')
     ax_ffp_tx.set_ylabel("FF' (norm)")
-    ax_ffp_tx.legend(fontsize=8, loc='upper center', bbox_to_anchor=(0.5, -0.20), ncol=2)
     ax_ffp_tx.grid(True, alpha=0.3)
     ax_ffp_tx.axhline(0, color='k', linewidth=0.5)
 
     _plot_levels(ax_pp_tx, 'pp', seed_x=_seed_pp_x, seed_y=_seed_pp_norm, seed_label="p' seed EQDSK (norm)")
+    if _prev_pp_prof is not None:
+        _ppp_y = np.asarray(_prev_pp_prof['y'], dtype=float)
+        _ppp_peak = np.max(np.abs(_ppp_y))
+        if _ppp_peak > 0:
+            _ppp_y = _ppp_y / _ppp_peak
+        ax_pp_tx.plot(_prev_pp_prof['x'], _ppp_y, color='tab:purple', lw=1.5, ls='-.', alpha=0.85,
+                      label=f"p' loop {tt._current_loop - 1} TM (norm)")
     ax_pp_tx.set_title("p' tried levels (normalized)", fontsize=10)
     ax_pp_tx.set_xlabel(r'$\hat{\psi}$')
     ax_pp_tx.set_ylabel("p' (norm)")
-    ax_pp_tx.legend(fontsize=8, loc='upper center', bbox_to_anchor=(0.5, -0.20), ncol=2)
     ax_pp_tx.grid(True, alpha=0.3)
 
     ax_eta.plot(s['eta_prof'][i]['x'], s['eta_prof'][i]['y'], 'r-', linewidth=2)
@@ -4918,6 +5044,27 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
     ax_eta.set_xlabel(r'$\hat{\psi}$')
     ax_eta.set_ylabel(r'$\eta$ [$\Omega\cdot$m]')
     ax_eta.grid(True, alpha=0.3)
+
+    _prev_ffp_ni_prof = s.get('ffp_ni_prof_prev', {}).get(i)
+    _plot_levels(ax_ffp_ni, 'ffp_ni')
+    if _prev_ffp_ni_prof is not None:
+        _prev_ni_y = np.asarray(_prev_ffp_ni_prof['y'], dtype=float)
+        _prev_ni_peak = np.max(np.abs(_prev_ni_y))
+        if _prev_ni_peak > 0:
+            _prev_ni_y = _prev_ni_y / _prev_ni_peak
+        ax_ffp_ni.plot(_prev_ffp_ni_prof['x'], _prev_ni_y, color='tab:purple', lw=1.5, ls='-.', alpha=0.85,
+                       label=f"FF'_NI loop {tt._current_loop - 1} (norm)")
+    ax_ffp_ni.set_title("FF'_NI tried levels (norm)", fontsize=10)
+    ax_ffp_ni.set_xlabel(r'$\hat{\psi}$')
+    ax_ffp_ni.set_ylabel("FF'_NI (norm)")
+    ax_ffp_ni.grid(True, alpha=0.3)
+    ax_ffp_ni.axhline(0, color='k', linewidth=0.5)
+
+    # Single shared legend for the left three profile panels, placed below ax_ffp_tx.
+    _legend_handles, _legend_labels = ax_ffp_tx.get_legend_handles_labels()
+    ax_ffp_tx.legend(_legend_handles, _legend_labels,
+                     fontsize=7, loc='upper center',
+                     bbox_to_anchor=(0.5, -0.30), ncol=2, framealpha=0.92)
 
     if solve_succeeded:
         _beta_pol_tm_ok_str = '\u2014'
@@ -4929,6 +5076,11 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
                     _beta_pol_tm_ok_str = f"{float(_ok_stats['beta_pol']) / 100.0:.4f}"
         except Exception:
             pass
+
+        _winning_its = _winning.get('nl_its') if _winning else None
+        _its_str = str(_winning_its) if _winning_its is not None else '\u2014'
+        _tm_nl_tol = getattr(getattr(tt._tm, 'settings', None), 'nl_tol', None)
+        _tol_str = f'{_tm_nl_tol:.2e}' if _tm_nl_tol is not None else '\u2014'
 
         input_rows = [
             ['Parameter', 'Init EQDSK', 'TORAX', 'TokaMaker'],
@@ -4944,10 +5096,14 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
             ['beta_pol', '\u2014', f'{beta_pol_tx:.4f}', _beta_pol_tm_ok_str],
             ['beta_N', '\u2014', f'{beta_n_tx:.4f}', f'{float(s["beta_N_tm"][i]):.4f}'],
             ['l_i', '\u2014', '\u2014', f'{float(s["l_i_tm"][i]):.4f}'],
+            ['GS iters', '\u2014', '\u2014', f'Lvl {_winning["level"]}: {_its_str}' if _winning else '\u2014'],
+            ['nl_tol', '\u2014', '\u2014', _tol_str],
         ]
 
-        ax_ffp_tm.plot(s['ffp_prof_tx'][i]['x'], s['ffp_prof_tx'][i]['y'], 'b--', linewidth=1.5, label="FF' TX (real)")
-        ax_ffp_tm.plot(s['ffp_prof_tm'][i]['x'], s['ffp_prof_tm'][i]['y'], 'r-', linewidth=2, label="FF' TM (real)")
+        ax_ffp_tm.plot(s['ffp_prof_tx'][i]['x'], s['ffp_prof_tx'][i]['y'], 'b--', linewidth=1.5, label=f"FF' loop {tt._current_loop} TX")
+        ax_ffp_tm.plot(s['ffp_prof_tm'][i]['x'], s['ffp_prof_tm'][i]['y'], 'r-', linewidth=2, label=f"FF' loop {tt._current_loop} TM")
+        if _prev_ffp_prof is not None:
+            ax_ffp_tm.plot(_prev_ffp_prof['x'], _prev_ffp_prof['y'], color='tab:purple', lw=1.2, ls='-.', alpha=0.75, label=f"FF' loop {tt._current_loop - 1} TM")
         ax_ffp_tm.set_title("FF' TM output vs TX input", fontsize=10)
         ax_ffp_tm.set_xlabel(r'$\hat{\psi}$')
         ax_ffp_tm.set_ylabel("FF'")
@@ -4955,8 +5111,10 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
         ax_ffp_tm.grid(True, alpha=0.3)
         ax_ffp_tm.axhline(0, color='k', linewidth=0.5)
 
-        ax_pp_tm.plot(s['pp_prof_tx'][i]['x'], s['pp_prof_tx'][i]['y'], 'b--', linewidth=1.5, label="p' TX (real)")
-        ax_pp_tm.plot(s['pp_prof_tm'][i]['x'], s['pp_prof_tm'][i]['y'], 'r-', linewidth=2, label="p' TM (real)")
+        ax_pp_tm.plot(s['pp_prof_tx'][i]['x'], s['pp_prof_tx'][i]['y'], 'b--', linewidth=1.5, label=f"p' loop {tt._current_loop} TX")
+        ax_pp_tm.plot(s['pp_prof_tm'][i]['x'], s['pp_prof_tm'][i]['y'], 'r-', linewidth=2, label=f"p' loop {tt._current_loop} TM")
+        if _prev_pp_prof is not None:
+            ax_pp_tm.plot(_prev_pp_prof['x'], _prev_pp_prof['y'], color='tab:purple', lw=1.2, ls='-.', alpha=0.75, label=f"p' loop {tt._current_loop - 1} TM")
         ax_pp_tm.set_title("p' TM output vs TX input", fontsize=10)
         ax_pp_tm.set_xlabel(r'$\hat{\psi}$')
         ax_pp_tm.set_ylabel("p'")
@@ -5021,7 +5179,6 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
             ['Ip', f'{Ip_seed / 1e6:.3f} MA', f'{Ip_tx / 1e6:.3f} MA'],
             ['pax', f'{pax_seed / 1e3:.2f} kPa', f'{pax_tx / 1e3:.2f} kPa'],
             ['psi_lcfs tgt', f'{psi_lcfs_seed:.4f} Wb/rad', f'{psi_lcfs_tx:.4f} Wb/rad'],
-            ['psi_lcfs TM', _psi_lcfs_tm_achieved_str, ''],
         ]
         diag_rows = [
             ['Parameter', 'Init EQDSK', 'TORAX'],
@@ -5032,6 +5189,7 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
             ['beta_pol (TM)', '\u2014', _beta_pol_tm_str],
             ['beta_N', '\u2014', f'{beta_n_tx:.4f}'],
             ['TM nl_tol', _tol_str, ''],
+            ['psi_lcfs TM', _psi_lcfs_tm_achieved_str, ''],
         ]
 
         for blank_ax in [ax_ffp_tm, ax_pp_tm, ax_q_tm]:
@@ -5082,11 +5240,13 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
         # TM failed to converge — current psi state may still be instructive
         _psi_plotted = False
         try:
-            tt._tm.plot_machine(
-                fig, ax_mini_eq, coil_colormap='seismic', coil_symmap=False,
-                coil_scale=1.E-6, coil_clabel=None,
-            )
-            tt._tm.plot_psi(fig, ax_mini_eq, xpoint_color='r', vacuum_nlevels=3)
+            with tt._quiet_tm():
+                tt._tm.plot_machine(
+                    fig, ax_mini_eq, coil_colormap='seismic', coil_symmap=False,
+                    coil_scale=1.E-6, coil_clabel=None,
+                )
+                tt._tm.plot_constraints(fig, ax_mini_eq)
+                tt._tm.plot_psi(fig, ax_mini_eq, xpoint_color='r', vacuum_nlevels=3)
             ax_mini_eq.set_aspect('equal')
             ax_mini_eq.tick_params(labelsize=6)
             ax_mini_eq.text(
@@ -5137,17 +5297,29 @@ def tm_loop_summary_plot(tt, loop_level_log, save_path=None, display=True):
     ax_table.axis('off')
     ax_legend.axis('off')
 
+    # Color succeeded rows on a green->red gradient by GS fallback level
+    # (green = level 0, red = the highest level actually used this sim).
+    # Failures are gray.
+    _succ_levels = [int(e['level']) for e in loop_level_log if e['succeeded']]
+    _max_level = max(_succ_levels) if _succ_levels else 0
+    _grad_cmap = cm.RdYlGn_r  # 0 -> green, 1 -> red
+
+    def _level_color(level):
+        frac = 0.0 if _max_level == 0 else level / _max_level
+        # Pull toward the lighter end of the colormap so text stays readable.
+        return _grad_cmap(0.12 + 0.76 * frac)
+
     col_labels = ['t-idx', 't (s)', 'Result']
     rows = []
     cell_colors = []
     for entry in loop_level_log:
         if entry['succeeded']:
             result = f"Lvl {entry['level']}"
-            row_color = ['#d4edda'] * 3
+            row_color = [_level_color(int(entry['level']))] * 3
         else:
             error_msg = entry['error'] if entry['error'] else 'Unknown error'
             result = error_msg[:47] + '...' if len(error_msg) > 50 else error_msg
-            row_color = ['#f8d7da'] * 3
+            row_color = ['#bfbfbf'] * 3
         rows.append([str(entry['i']), f"{entry['t']:.3f}", result])
         cell_colors.append(row_color)
 
@@ -5162,7 +5334,9 @@ def tm_loop_summary_plot(tt, loop_level_log, save_path=None, display=True):
             cell.set_text_props(fontweight='bold')
 
     legend_text = ("Levels: Level 0: Raw TORAX profiles | Level 1: Sign-flip clipping | "
-                   "Level 2: Pedestal smoothing | Level 3: Power-flux shape")
+                   "Level 2: Pedestal smoothing | Level 3: Power-flux shape\n"
+                   "Row shading: green = lowest level → red = highest level used this sim | "
+                   "gray = failed")
     ax_legend.text(0.5, 0.5, legend_text, ha='center', va='center', fontsize=9,
                    transform=ax_legend.transAxes,
                    bbox=dict(boxstyle='round,pad=0.8', facecolor='#f0f0f0', edgecolor='gray', linewidth=1))
@@ -5309,6 +5483,9 @@ def plot_profile_evolution(tt, save_path=None, display=True, one_plot=False):
                 )
         ax.set_xlim([0, 1])
 
+        # Add horizontal space between columns so y-axis labels don't collide
+        # with the neighbouring panel, then attach the colorbar.
+        fig.subplots_adjust(wspace=0.45, hspace=0.3)
         sm = cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
         cbar = fig.colorbar(sm, ax=axes.ravel().tolist(), shrink=0.8, aspect=30, pad=0.02)
@@ -5412,21 +5589,22 @@ def plot_tx_relax_profiles(
             except Exception:
                 pass
         elif var_name == 'psi':
-            try:
-                xr_geo = getattr(data_tree.profiles, 'psi').sel(**_sel_init)
-                r_g = xr_geo.coords['rho_norm'].to_numpy()
-                y_g = np.asarray(xr_geo.to_numpy())
-                ax.plot(
-                    r_g,
-                    y_g,
-                    lw=1.25,
-                    ls='-.',
-                    color=_eqdsk_psi_color,
-                    alpha=0.95,
-                    label=r'init EQDSK $\psi$ (t_init)',
-                )
-            except Exception:
-                pass
+            seed = getattr(tt, '_psi_init_seed', None)
+            if seed is not None:
+                try:
+                    r_g = np.asarray(seed[1], dtype=float)
+                    y_g = np.asarray(seed[2][0], dtype=float)
+                    ax.plot(
+                        r_g,
+                        y_g,
+                        lw=1.25,
+                        ls='-.',
+                        color=_eqdsk_psi_color,
+                        alpha=0.95,
+                        label=r'init EQDSK $\psi$ (seed)',
+                    )
+                except Exception:
+                    pass
 
         xr_post = getattr(data_tree.profiles, var_name).sel(**_sel_kw)
         r_post = xr_post.coords['rho_norm'].to_numpy()
@@ -5906,7 +6084,7 @@ def plot_PLH_components(tt, save_path=None, display=True):
     # (0,0) density vs branch threshold
     ax = axes[0, 0]
     if t_n is not None:
-        ax.plot(t_n, y_n, color=COLOR_TX, ls='-', marker='o', ms=MK_SZ, lw=1, label=r'$\bar n_e$ (line-avg)')
+        ax.plot(t_n, y_n, color=COLOR_TX, ls='-', lw=1, label=r'$\bar n_e$ (line-avg)')
     if t_nm is not None:
         ax.plot(t_nm, y_nm, color='tab:red', ls='--', lw=1.2, label=r'$n_{e,\min}$ (Ryter)')
     if t_n is not None and t_nm is not None:
@@ -5917,25 +6095,40 @@ def plot_PLH_components(tt, save_path=None, display=True):
     # (0,1) Ip
     ax = axes[0, 1]
     if t_Ip is not None:
-        ax.plot(t_Ip, y_Ip, color=COLOR_TX, ls='-', marker='o', ms=MK_SZ, lw=1)
-    ax.set_title(r'$I_p$  (sets $n_{e,\min}\propto I_p^{0.34}$)'); ax.set_ylabel('[MA]')
+        ax.plot(t_Ip, y_Ip, color=COLOR_TX, ls='-', lw=1)
+    ax.set_title(r'$I_p$'); ax.set_ylabel('[MA]')
 
     # (0,2) S = surface area
     ax = axes[0, 2]
     if t_S is not None:
-        ax.plot(t_S, y_S, color=COLOR_TX, ls='-', marker='o', ms=MK_SZ, lw=1)
+        ax.plot(t_S, y_S, color=COLOR_TX, ls='-', lw=1)
     ax.set_title(r'$S$ = g0_face[-1]  ($P_{LH}\propto S^{0.941}$)'); ax.set_ylabel(r'[m$^2$]')
 
     # (1,0) a_minor, R_major
     ax = axes[1, 0]
     if t_a is not None:
-        ax.plot(t_a, y_a, color='tab:blue', ls='-', marker='o', ms=MK_SZ, lw=1, label=r'$a$ (minor)')
+        ax.plot(t_a, y_a, color='tab:blue', ls='-', lw=1, label=r'$a$ (minor)')
     if t_R is not None:
-        ax.plot(t_R, y_R, color='tab:purple', ls='-', marker='s', ms=MK_SZ, lw=1, label=r'$R$ (major)')
+        ax.plot(t_R, y_R, color='tab:purple', ls='-', lw=1, label=r'$R$ (major)')
     ax.set_title(r'$a$, $R$  (enter $n_{e,\min}$)'); ax.set_ylabel('[m]'); ax.legend(fontsize=8)
 
-    # (1,1) the multiplicative P_LH factors (Martin solid, Delabie dashed)
+
+    # (1,1) P_LH branch decomposition (log)
     ax = axes[1, 1]
+    for name, color, ls, lw, zord, lab in [
+        ('P_LH_delabie',              'k',          '-',  2.5, 1, r'$P_{LH}$ Delabie (selected)'),
+        ('P_LH_high_density',         'C0',         '--', 1.2, 2, 'Martin high-n'),
+        ('P_LH_delabie_high_density', 'tab:red',    '--', 1.2, 2, 'Delabie high-n'),
+        ('P_LH_delabie_low_density',  'tab:purple', ':',  1.2, 2, r'Delabie low-n ($n^{-2}$)'),
+    ]:
+        t, y = _tx_scalar(tt, name, scale=1e-6)
+        if t is not None:
+            ax.plot(t, y, color=color, ls=ls, lw=lw, zorder=zord, label=lab)
+    ax.set_title('P_LH branches'); ax.set_ylabel('[MW]'); ax.set_yscale('log'); ax.legend(fontsize=8)
+
+
+    # (1,2) the multiplicative P_LH factors (Martin solid, Delabie dashed)
+    ax = axes[1, 2]
     if t_n is not None:
         ax.plot(t_n, (np.asarray(y_n)) ** an,   'C0-',  lw=1.2, label=r'M $\bar n_{e,20}^{0.717}$')
         ax.plot(t_n, (np.asarray(y_n)) ** an_d, 'C0--', lw=1.0, label=r'D $\bar n_{e,20}^{1.08}$')
@@ -5947,27 +6140,10 @@ def plot_PLH_components(tt, save_path=None, display=True):
     ax.axhline((2.0 / Meff) ** aM, color='C3', ls=':', lw=1, label=fr'$(2/M_{{eff}})\approx{(2.0/Meff)**aM:.2f}$')
     ax.set_title('mult. $P_{LH}$ factors (M solid / D dashed)'); ax.set_ylabel('factor'); ax.set_yscale('log'); ax.legend(fontsize=7, ncol=2)
 
-    # (1,2) P_LH branch decomposition (log) — Martin AND Delabie
-    ax = axes[1, 2]
-    for name, color, ls, lw, lab in [
-        ('P_LH',                       'k',          '-',  1.6, r'$P_{LH}$ Martin (sel.)'),
-        ('P_LH_high_density',          'C0',         '--', 1.0, 'M high-n'),
-        ('P_LH_low_density',           'C1',         ':',  1.0, r'M low-n ($n^{-2}$)'),
-        ('P_LH_min',                   'C2',         '-.', 1.0, 'M floor'),
-        ('P_LH_delabie',               'tab:red',    '-',  1.6, r'$P_{LH}$ Delabie (sel.)'),
-        ('P_LH_delabie_high_density',  'tab:orange', '--', 1.0, 'D high-n'),
-        ('P_LH_delabie_low_density',   'tab:pink',   ':',  1.0, r'D low-n ($n^{-2}$)'),
-        ('P_LH_delabie_min',           'tab:brown',  '-.', 1.0, 'D floor'),
-    ]:
-        t, y = _tx_scalar(tt, name, scale=1e-6)
-        if t is not None:
-            ax.plot(t, y, color=color, ls=ls, lw=lw, label=lab)
-    ax.set_title('P_LH branch decomposition (Martin + Delabie)'); ax.set_ylabel('[MW]'); ax.set_yscale('log'); ax.legend(fontsize=7, ncol=2)
-
     # (2,0) Greenwald fraction
     ax = axes[2, 0]
     if t_fg is not None:
-        ax.plot(t_fg, y_fg, color=COLOR_TX, ls='-', marker='o', ms=MK_SZ, lw=1)
+        ax.plot(t_fg, y_fg, color=COLOR_TX, ls='-', lw=1)
     ax.axhline(1.0, color='tab:red', ls='--', lw=1, label='Greenwald limit')
     ax.set_title(r'$f_{GW}$ (line-avg)'); ax.set_ylabel(r'$f_{GW}$'); ax.legend(fontsize=8)
 
@@ -5979,15 +6155,15 @@ def plot_PLH_components(tt, save_path=None, display=True):
     if t_lh is not None:
         ax.plot(t_lh, y_lh, 'k--', lw=1, label=r'$P_{LH}$ Martin')
     if t_lhd is not None:
-        ax.plot(t_lhd, y_lhd, color='tab:red', ls='-', marker='o', ms=MK_SZ, lw=1.4, label=r'$P_{LH}$ Delabie (used)')
+        ax.plot(t_lhd, y_lhd, color='tab:red', ls='-', lw=1.4, label=r'$P_{LH}$ Delabie (used)')
     if t_sol is not None:
-        ax.plot(t_sol, y_sol, color='tab:green', ls='-', marker='o', ms=MK_SZ, lw=1, label=r'$P_{SOL}$')
+        ax.plot(t_sol, y_sol, color='tab:green', ls='-', lw=1, label=r'$P_{SOL}$')
     # H-mode shading vs the Delabie threshold (the one the formation model gates on)
     t_gate, y_gate = (t_lhd, y_lhd) if t_lhd is not None else (t_lh, y_lh)
     if t_gate is not None and t_sol is not None:
         ax.fill_between(t_sol, y_sol, y_gate, where=(np.asarray(y_sol) > np.asarray(y_gate)),
-                        color='tab:green', alpha=0.2, label=r'$P_{SOL}>P_{LH}$ (H-mode)')
-    ax.set_title(r'transition gate: $P_{SOL}$ vs $P_{LH}$'); ax.set_ylabel('[MW]'); ax.legend(fontsize=8)
+                        color='tab:green', alpha=0.2, label=r'$P_{SOL}>P_{LH}$')
+    ax.set_title(r'$P_{SOL}$ vs $P_{LH}$'); ax.set_ylabel('[MW]'); ax.legend(fontsize=8)
 
     # (2,2) the governing equations (LaTeX)
     ax = axes[2, 2]; ax.axis('off')
@@ -6207,7 +6383,7 @@ def plot_lcfs_evolution(tt, save_path=None, display=True, one_plot=False):
 
 # ── Movie generation ──────────────────────────────────────────────────────────
 
-def make_movie(tt, save_path=None, display=True, speed_factor=1.0, loop=None, notebook_mode=None):
+def make_movie(tt, save_path=None, display=True, speed_factor=5.0, loop=None, notebook_mode=None):
     r'''! Create pulse movie from simulation data.
     
         Renders equilibrium plots from stored equilibrium snapshots, generates
@@ -6254,13 +6430,15 @@ def make_movie(tt, save_path=None, display=True, speed_factor=1.0, loop=None, no
                           flux_con_tm, flux_con_tx, fpath, tt._run_name, equil_dir)
             plt.close('all')
 
-        total_time = times[-1] - times[0] if len(times) > 1 else 1.0
-        fps = max(1, speed_factor * n / total_time)
+        # sim_fps = simulated seconds per wall-clock second. Each frame gets a
+        # duration = its simulated time gap / sim_fps, so the movie plays at a
+        # constant simulated-time rate regardless of where frames are clustered.
+        sim_fps = max(1e-3, float(speed_factor))
 
         if save_path is None:
             save_path = os.path.join(os.getcwd(), f'TokaMaker_TORAX_pulse_loop{loop:03d}.mp4')
 
-        _encode_video_from_dir(tmp_dir, save_path, fps=fps)
+        _encode_video_from_dir(tmp_dir, save_path, fps=sim_fps, frame_times=times)
 
         show_in_nb = notebook_mode if notebook_mode is not None else (display and _in_jupyter())
         if show_in_nb:
@@ -6295,7 +6473,7 @@ def _render_equil_frames(tt, loop, equil_dir):
         if cb is not None:
             cb.mappable.set_clim(min_bound * 1e-6, max_bound * 1e-6)
         tt._tm.plot_psi(
-            fig, ax, equilibrium=equil, xpoint_color='r', vacuum_nlevels=4,
+            fig, ax, equilibrium=equil, xpoint_color='r', vacuum_nlevels=2,
             plasma_nlevels=MOVIE_EQUIL_PSI_PLASMA_NLEVELS,
         )
         x_pt = getattr(tt, '_x_point_targets', None)
@@ -6429,10 +6607,9 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
     ax.legend(fontsize=LEGEND_FS, loc='upper left')
     _style(ax)
     ax2 = ax.twinx()
-    if s.get('l_i_tm', None) is not None:
-        ax2.plot(times, s['l_i_tm'], color=COLOR_TM, ls=LS_SEC, lw=LW, marker=MK_TM, ms=MK_SZ, label='l_i TM')
-    if s.get('l_i_tx', None) is not None:
-        ax2.plot(times, s['l_i_tx'], color=COLOR_TX, ls=LS_SEC, lw=LW, label='l_i TX')
+    t_li, y_li = _tx_scalar(tt, 'li3')
+    if len(t_li) > 0:
+        ax2.plot(t_li, y_li, color=COLOR_TX, ls=LS_SEC, lw=LW, label='l_i TX')
     ax2.set_ylabel('l_i', fontsize=LABEL_FS)
     ax2.tick_params(labelsize=TICK_FS)
     ax2.legend(fontsize=LEGEND_FS, loc='upper right')
@@ -6476,7 +6653,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
     ax2.plot(times, flux_con_tx, color='seagreen', ls='-.', lw=LW, label='Flux TX')
     ax2.set_ylabel('Flux Consumed [Wb]', fontsize=LABEL_FS)
     ax2.tick_params(labelsize=TICK_FS)
-    ax2.legend(fontsize=LEGEND_FS, loc='upper right')
+    ax2.legend(fontsize=LEGEND_FS, loc='lower left')
 
     coil_data = tt._results.get('COIL', {})
     cs_coils = []
@@ -6496,7 +6673,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
             n_turns = _coil_net_turns(tt, cname)
             ci_vals = [cvals[t_v] * n_turns * 1e-6 for t_v in ct]
             ax.plot(ct, ci_vals, ls=LS_PRI, lw=LW * 0.8, color=cs_colors[ci], label=cname)
-        ax.legend(fontsize=LEGEND_FS - 2, loc='upper left', ncol=2)
+        ax.legend(fontsize=LEGEND_FS - 2, loc='lower left', ncol=2)
     else:
         ax.text(0.5, 0.5, 'No CS coils', transform=ax.transAxes,
                 ha='center', va='center', fontsize=LABEL_FS)
@@ -6511,7 +6688,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
             n_turns = _coil_net_turns(tt, cname)
             ci_vals = [cvals[t_v] * n_turns * 1e-6 for t_v in ct]
             ax.plot(ct, ci_vals, ls=LS_PRI, lw=LW * 0.75, color=oth_colors[ci], label=cname)
-        ax.legend(fontsize=LEGEND_FS - 3, loc='upper left', ncol=2)
+        ax.legend(fontsize=LEGEND_FS - 3, loc='lower left', ncol=2)
     else:
         ax.text(0.5, 0.5, 'No PF/other coils', transform=ax.transAxes,
                 ha='center', va='center', fontsize=LABEL_FS)
@@ -6542,17 +6719,17 @@ def _draw_profiles_movie(axes, tt, idx):
     ax = axes[1]
     x, y = _prof(s.get('n_e', {}), idx)
     if x is not None:
-        ax.plot(x, y, color=COLOR_TX, ls=LS_PRI, lw=LW, label='ne TX')
+        ax.plot(x, y, color='tab:blue', ls=LS_PRI, lw=LW, label='ne TX')
     ax.set_ylabel('ne [m\u207b\u00b3]', fontsize=LABEL_FS)
     ax.legend(fontsize=LEGEND_FS, loc='lower left')
     _style(ax)
     x, y = _prof(s.get('T_e', {}), idx)
     if x is not None:
         ax2 = ax.twinx()
-        ax2.plot(x, y, color=COLOR_TX, ls=LS_SEC, lw=LW, label='Te TX')
+        ax2.plot(x, y, color='tab:red', ls='-', lw=LW, label='Te TX')
         x_ti, y_ti = _prof(s.get('T_i', {}), idx)
         if x_ti is not None:
-            ax2.plot(x_ti, y_ti, color='forestgreen', ls='--', lw=LW, label='Ti TX')
+            ax2.plot(x_ti, y_ti, color='tab:red', ls='--', lw=LW, label='Ti TX')
         ax2.set_ylabel('T [keV]', fontsize=LABEL_FS)
         ax2.tick_params(labelsize=TICK_FS)
         ax2.legend(fontsize=LEGEND_FS, loc='upper right')
@@ -6562,27 +6739,16 @@ def _draw_profiles_movie(axes, tt, idx):
         ('j_tot', 'j_tot', COLORS_MULTI[0]),
         ('j_ohmic', 'j_ohm', COLORS_MULTI[1]),
         ('j_ni', 'j_ni', COLORS_MULTI[2]),
-        ('j_bootstrap', 'j_BS', COLORS_MULTI[3]),
-        ('j_ecrh', 'j_EC', COLORS_MULTI[4]),
-        ('j_generic_current', 'j_gen', COLORS_MULTI[5]),
+        ('j_ecrh', 'j_EC', COLORS_MULTI[3]),
+        ('j_generic_current', 'j_gen', COLORS_MULTI[4]),
     ]
     for skey, label, clr in j_keys:
         x, y = _prof(s.get(skey, {}), idx)
-        if x is not None:
+        if x is not None and not np.allclose(y, 0.0):
             ax.plot(x, y / 1e6, color=clr, ls=LS_PRI, lw=LW, label=label)
     ax.set_ylabel('j [MA/m\u00b2]', fontsize=LABEL_FS)
-    ax.legend(fontsize=LEGEND_FS - 1, loc='upper left', ncol=2)
+    ax.legend(fontsize=LEGEND_FS - 1, loc='upper center', ncol=2)
     _style(ax)
-    ax2 = ax.twinx()
-    x, y = _prof(s.get('ffp_prof_tm', {}), idx)
-    if x is not None:
-        ax2.plot(x, y, color=COLOR_TM, ls=LS_SEC, lw=LW, marker=MK_TM, ms=MK_SZ, label="FF' TM")
-    x, y = _prof(s.get('ffp_prof_tx', {}), idx)
-    if x is not None:
-        ax2.plot(x, y, color=COLOR_TX, ls=LS_SEC, lw=LW, label="FF' TX")
-    ax2.set_ylabel("FF'", fontsize=LABEL_FS)
-    ax2.tick_params(labelsize=TICK_FS)
-    ax2.legend(fontsize=LEGEND_FS, loc='upper right')
 
     ax = axes[3]
     x, y = _prof(s.get('pp_prof_tm', {}), idx)
@@ -6592,7 +6758,7 @@ def _draw_profiles_movie(axes, tt, idx):
     if x is not None:
         ax.plot(x, y, color=COLOR_TX, ls=LS_PRI, lw=LW, label="p' TX")
     ax.set_ylabel("p'", fontsize=LABEL_FS)
-    ax.legend(fontsize=LEGEND_FS, loc='center')
+    ax.legend(fontsize=LEGEND_FS, loc='upper center')
     _style(ax)
     ax2 = ax.twinx()
     x, y = _prof(s.get('p_prof_tm', {}), idx)
@@ -6636,18 +6802,48 @@ def _draw_profiles_movie(axes, tt, idx):
     _style(ax)
 
 
-def _encode_video_from_dir(frame_dir, out_path, fps=2):
-    r'''! Encode frames from a directory into an MP4 file.'''
-    pattern = os.path.join(frame_dir, 'frame_%04d.png')
+def _encode_video_from_dir(frame_dir, out_path, fps=2, frame_times=None):
+    r'''! Encode frames from a directory into an MP4 file.
+
+    If frame_times is provided (array of simulated times, one per frame),
+    each frame is given a wall-clock duration proportional to its simulated
+    time gap so the movie plays at constant simulated-time rate regardless of
+    frame clustering. fps is then interpreted as simulated-seconds per
+    wall-clock-second. If frame_times is None, falls back to a fixed fps.
+    '''
+    devnull = open(os.devnull, 'w')
     try:
-        subprocess.run(
-            ['ffmpeg', '-y', '-framerate', str(int(fps)),
-             '-i', pattern,
-             '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18',
-             out_path],
-            check=True, capture_output=True)
+        if frame_times is not None and len(frame_times) > 1:
+            concat_path = os.path.join(frame_dir, 'concat.txt')
+            times = np.asarray(frame_times, dtype=float)
+            dts = np.diff(times)
+            durations = np.append(dts, dts[-1]) / fps
+            with open(concat_path, 'w') as f:
+                for idx, dur in enumerate(durations):
+                    fpath = os.path.join(frame_dir, f'frame_{idx:04d}.png')
+                    f.write(f"file '{fpath}'\n")
+                    f.write(f'duration {dur:.6f}\n')
+            subprocess.run(
+                ['ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+                 '-i', concat_path,
+                 '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18',
+                 '-fps_mode', 'vfr',
+                 out_path],
+                check=True, stdout=devnull, stderr=devnull, timeout=300)
+        else:
+            pattern = os.path.join(frame_dir, 'frame_%04d.png')
+            subprocess.run(
+                ['ffmpeg', '-y', '-framerate', str(int(fps)),
+                 '-i', pattern,
+                 '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18',
+                 out_path],
+                check=True, stdout=devnull, stderr=devnull, timeout=300)
+    except subprocess.TimeoutExpired:
+        print('Warning: ffmpeg timed out after 300 s — no movie produced.')
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f'Warning: ffmpeg failed to encode MP4: {e}')
+    finally:
+        devnull.close()
 
 
 def _embed_video_jupyter(video_path):
