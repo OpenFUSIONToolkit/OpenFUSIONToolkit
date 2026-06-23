@@ -2723,7 +2723,7 @@ class TokaMaker_equilibrium():
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param compute_geo Compute geometric values for LCFS
-        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f$[<R>,<1/R>,dV/dPsi]\f$, length of last surface,
+        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f$[<R>,<1/R>,<1/R^2>,dV/dPsi]\f$, length of last surface,
         [r(R_min),r(R_max)], [r(z_min),r(z_max)]
         '''
         if psi is None:
@@ -2736,7 +2736,7 @@ class TokaMaker_equilibrium():
                 psi_save = numpy.copy(psi)
                 psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
-        ravgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
+        ravgs = numpy.zeros((4,psi.shape[0]), dtype=numpy.float64)
         if compute_geo:
             dl = c_double(1.0)
         else:

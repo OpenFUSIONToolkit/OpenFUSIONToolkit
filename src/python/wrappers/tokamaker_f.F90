@@ -1210,7 +1210,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equil
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Number of evaluation points
 REAL(c_double), INTENT(in) :: psi_q(npsi) !< \f$ \psi \f$ values to compute q and other fields
 REAL(c_double), INTENT(out) :: qvals(npsi) !< q values
-REAL(c_double), INTENT(out) :: ravgs(npsi,3) !< <R>, <1/R>, and dV/dPsi
+REAL(c_double), INTENT(out) :: ravgs(npsi,4) !< <R>, <1/R>, <1/R^2>, and dV/dPsi
 REAL(c_double), INTENT(inout) :: dl !< Length of LCFS flux surface (psi_q(1))
 REAL(c_double), INTENT(out) :: rbounds(2,2) !< Radial bounds of LCFS
 REAL(c_double), INTENT(out) :: zbounds(2,2) !< Vertical bounds of LCFS
@@ -1218,7 +1218,7 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 IF(dl>0.d0)THEN
-  CALL gs_get_qprof(tMaker_equil_obj,npsi,psi_q,qvals,dl,rbounds,zbounds,ravgs)
+  CALL gs_get_qprof(tMaker_equil_obj,npsi,psi_q,qvals,dl,rbounds,zbounds,ravgs=ravgs)
 ELSE
   CALL gs_get_qprof(tMaker_equil_obj,npsi,psi_q,qvals,ravgs=ravgs)
   dl = -1.d0

@@ -191,7 +191,7 @@ TYPE :: gs_factory
   INTEGER(i4), POINTER, DIMENSION(:) :: bc_rhs_list => NULL() !< List of terms interacting with free-boundary BC
   INTEGER(i4), POINTER, DIMENSION(:) :: olbp => NULL() !< Oriented list of boundary points
   INTEGER(i4), POINTER, DIMENSION(:) :: lim_con => NULL() !< Limiter contour list (contains all limiters)
-  INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Pointer to start of each 
+  INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Pointer to start of each
   REAL(r8), POINTER, DIMENSION(:) :: cond_weights => NULL() !< Needs docs
   REAL(r8), POINTER, DIMENSION(:) :: coil_vcont => NULL() !< Virtual VSC definition as weighted sum of other coils
   REAL(r8), POINTER, DIMENSION(:) :: Rcoils => NULL() !< Lumped resistance [Ohms] of each coil (negative for Icoils)
@@ -781,7 +781,7 @@ type(oft_native_cg_eigsolver) :: eigsolver
 class(oft_vector), pointer :: tmp_vec,tmp_vec2
 integer(4), pointer, dimension(:) :: cdofs
 real(r8), pointer, dimension(:) :: psi_vals
-type(oft_lag_brinterp) :: psi_eval 
+type(oft_lag_brinterp) :: psi_eval
 integer(4) :: i,j,k,mind,nCon,ierr
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
@@ -1095,7 +1095,7 @@ class(oft_vector), pointer :: tmp_vec
 integer(4), pointer, dimension(:) :: cdofs
 real(r8), pointer, dimension(:) :: psi_vals
 type(circular_curr) :: circle_init
-type(oft_lag_brinterp) :: psi_eval 
+type(oft_lag_brinterp) :: psi_eval
 integer(4) :: i,j,k,mind,nCon
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
@@ -2393,14 +2393,14 @@ DO i=1,self%maxits
     IF(ALL(self%target_weights>0.d0))THEN
       equil%saddle_targets(1:2,equil%saddle_ntargets)=pt
     ELSE
-      ! 
+      !
       CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
       CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
       psi_geval%u=>psi_vac
       CALL psi_geval%setup(self%fe_rep)
       CALL psi_geval%interp(cell,f,goptmp,gpsi0)
       param_rhs(3)=-gpsi0(2)
-      ! 
+      !
       psi_geval%u=>psi_vcont
       CALL psi_geval%setup(self%fe_rep)
       CALL psi_geval%interp(cell,f,goptmp,gpsi0)
@@ -2819,14 +2819,14 @@ END IF
 
 !---Add row for vertical control
 IF((equil%Z0_target>-1.d98).AND.adjust_r0)THEN
-  ! 
+  !
   CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
   CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
   psi_geval%u=>psi_vac
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
   param_rhs(3)=-gpsi0(2)
-  ! 
+  !
   psi_geval%u=>psi_vcont
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
@@ -4339,7 +4339,7 @@ real(8), intent(out) :: prof(nr) !< q value at each sampling location
 real(8), optional, intent(out) :: dl !< Arc length of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)` (should be LCFS)
-real(8), optional, intent(out) :: ravgs(nr,3) !< Flux surface averages <R>, <1/R>, and dV/dPsi
+real(8), optional, intent(out) :: ravgs(nr,4) !< Flux surface averages <R>, <1/R>, <1/R^2>, and dV/dPsi
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
@@ -4402,7 +4402,7 @@ field%u=>gseq%psi
 CALL field%setup(gseq%device%fe_rep)
 IF(PRESENT(ravgs))THEN
   field%compute_geom=.TRUE.
-  active_tracer%neq=5
+  active_tracer%neq=6
 ELSE
   field%compute_geom=.FALSE.
   active_tracer%neq=3
@@ -4486,7 +4486,8 @@ do j=1,nr
   IF(PRESENT(ravgs))THEN
     ravgs(j,1)=active_tracer%v(4)/active_tracer%v(2)
     ravgs(j,2)=active_tracer%v(5)/active_tracer%v(2)
-    ravgs(j,3)=-2.d0*pi*active_tracer%v(2) ! First derivative of FS volume (V')
+    ravgs(j,3)=active_tracer%v(6)/active_tracer%v(2)
+    ravgs(j,4)=-2.d0*pi*active_tracer%v(2) ! First derivative of FS volume (V')
   END IF
 end do
 CALL active_tracer%delete
@@ -4849,6 +4850,7 @@ val(3)=val(2)/pt(1)**2
 IF(self%compute_geom)THEN
   val(4)=pt(1)*val(2)
   val(5)=val(2)/pt(1)
+  val(6)=val(2)/(pt(1)**2)
 END IF
 ! val(3:8)=val(3:8)
 deallocate(j)
