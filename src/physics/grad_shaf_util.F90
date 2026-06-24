@@ -29,21 +29,10 @@ USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
 USE oft_gs_profiles
-USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
+USE grad_shaf_prof_phys, ONLY: jphi_flux_func
+USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func
 IMPLICIT NONE
 #include "local.h"
-!------------------------------------------------------------------------------
-!> Need docs
-!------------------------------------------------------------------------------
-type, extends(gsinv_interp) :: sauter_interp
-  logical :: stage_1 = .FALSE.
-  real(8) :: f_surf = 0.d0
-  real(8) :: bmax = -1.d0
-  real(8) :: mag_axis(2) = 0.d0
-contains
-  !> Reconstruct the gradient of a Lagrange scalar field
-  procedure :: interp => sauter_apply
-end type sauter_interp
 !
 CLASS(gs_factory), POINTER :: gs_fit => NULL()
 CLASS(flux_func), POINTER :: ff_fit => NULL()
@@ -69,6 +58,8 @@ SELECT CASE(TRIM(profType))
     ALLOCATE(mlinterp_flux_func::F)
   CASE("jphi-linterp")
     ALLOCATE(jphi_flux_func::F)
+  CASE("jphi-split-bootstrap")
+    ALLOCATE(jphi_bs_flux_func::F)
   CASE("wesson")
     ALLOCATE(wesson_flux_func::F)
   CASE DEFAULT
@@ -87,7 +78,7 @@ INTEGER(4) :: io_unit
 ! REAL(8), ALLOCATABLE, DIMENSION(:) :: cofs,yvals
 ! INTEGER(4) :: ncofs,npsi,io_unit
 ! LOGICAL :: zero_grad
-CHARACTER(LEN=15) :: profType
+CHARACTER(LEN=32) :: profType
 !---
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,*)profType
@@ -381,6 +372,27 @@ IF(ASSOCIATED(self%eta))THEN
   CALL hdf5_create_group(filename,'tokamaker/ETA_PROFILE')
   CALL self%eta%save(filename,'tokamaker/ETA_PROFILE')
 END IF
+!---Save kinetic profiles (Te, Ti, ne, ni, Zeff) if set
+IF(ASSOCIATED(self%Te))THEN
+  CALL hdf5_create_group(filename,'tokamaker/TE_PROFILE')
+  CALL self%Te%save(filename,'tokamaker/TE_PROFILE')
+END IF
+IF(ASSOCIATED(self%Ti))THEN
+  CALL hdf5_create_group(filename,'tokamaker/TI_PROFILE')
+  CALL self%Ti%save(filename,'tokamaker/TI_PROFILE')
+END IF
+IF(ASSOCIATED(self%ne))THEN
+  CALL hdf5_create_group(filename,'tokamaker/NE_PROFILE')
+  CALL self%ne%save(filename,'tokamaker/NE_PROFILE')
+END IF
+IF(ASSOCIATED(self%ni))THEN
+  CALL hdf5_create_group(filename,'tokamaker/NI_DENS_PROFILE')
+  CALL self%ni%save(filename,'tokamaker/NI_DENS_PROFILE')
+END IF
+IF(ASSOCIATED(self%Zeff))THEN
+  CALL hdf5_create_group(filename,'tokamaker/ZEFF_PROFILE')
+  CALL self%Zeff%save(filename,'tokamaker/ZEFF_PROFILE')
+END IF
 ! IF(ASSOCIATED(self%P_ani))THEN
 !   CALL hdf5_create_group(filename,'tokamaker/P_ANI')
 !   CALL self%P_ani%save(filename,'tokamaker/P_ANI')
@@ -473,6 +485,98 @@ IF(.NOT.success)THEN
   RETURN
 END IF
 CALL gs_update_bounds(self)
+!---Load kinetic profiles (Te, Ti, ne, ni) before flux functions so they are
+!   available when flux function update() calls (e.g. jphi_bs_update) are made below
+IF(hdf5_field_exist(filename,'tokamaker/TE_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/TE_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Te profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%Te))THEN
+    CALL self%Te%delete()
+    DEALLOCATE(self%Te)
+  END IF
+  CALL gs_profile_alloc(profType,self%Te)
+  DEALLOCATE(profType)
+  CALL self%Te%load(filename,'tokamaker/TE_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load Te profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/TI_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/TI_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Ti profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%Ti))THEN
+    CALL self%Ti%delete()
+    DEALLOCATE(self%Ti)
+  END IF
+  CALL gs_profile_alloc(profType,self%Ti)
+  DEALLOCATE(profType)
+  CALL self%Ti%load(filename,'tokamaker/TI_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load Ti profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/NE_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/NE_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read ne profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%ne))THEN
+    CALL self%ne%delete()
+    DEALLOCATE(self%ne)
+  END IF
+  CALL gs_profile_alloc(profType,self%ne)
+  DEALLOCATE(profType)
+  CALL self%ne%load(filename,'tokamaker/NE_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load ne profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/NI_DENS_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/NI_DENS_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read ni profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%ni))THEN
+    CALL self%ni%delete()
+    DEALLOCATE(self%ni)
+  END IF
+  CALL gs_profile_alloc(profType,self%ni)
+  DEALLOCATE(profType)
+  CALL self%ni%load(filename,'tokamaker/NI_DENS_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load ni profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/ZEFF_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/ZEFF_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Zeff profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%Zeff))THEN
+    CALL self%Zeff%delete()
+    DEALLOCATE(self%Zeff)
+  END IF
+  CALL gs_profile_alloc(profType,self%Zeff)
+  DEALLOCATE(profType)
+  CALL self%Zeff%load(filename,'tokamaker/ZEFF_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load Zeff profile.'
+    RETURN
+  END IF
+END IF
 !---Load flux functions
 CALL hdf5_read(self%ffp_scale,filename,'tokamaker/FFP_SCALE',success=success)
 IF(.NOT.success)THEN
@@ -491,7 +595,6 @@ END IF
 CALL gs_profile_alloc(profType,self%I)
 DEALLOCATE(profType)
 CALL self%I%load(filename,'tokamaker/FFP_PROFILE',success=success)
-CALL self%I%update(self)
 IF(.NOT.success)THEN
   error_string="Failed to load F*F' profile."
   RETURN
@@ -518,7 +621,6 @@ END IF
 CALL gs_profile_alloc(profType,self%P)
 DEALLOCATE(profType)
 CALL self%P%load(filename,'tokamaker/PP_PROFILE',success=success)
-CALL self%P%update(self)
 IF(.NOT.success)THEN
   error_string="Failed to load P' profile."
   RETURN
@@ -540,7 +642,6 @@ IF(hdf5_field_exist(filename,'tokamaker/NI_PROFILE'))THEN
     error_string='Failed to load non-inductive current profile.'
     RETURN
   END IF
-  CALL self%I_NI%update(self)
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/ETA_PROFILE'))THEN
   CALL hdf5_read(profType,filename,'tokamaker/ETA_PROFILE/TYPE',success=success)
@@ -559,7 +660,6 @@ IF(hdf5_field_exist(filename,'tokamaker/ETA_PROFILE'))THEN
     error_string='Failed to load ETA profile.'
     RETURN
   END IF
-  CALL self%eta%update(self)
 END IF
 ! IF(hdf5_field_exist(filename,'tokamaker/P_ANI'))THEN
 !   CALL hdf5_read(profType,filename,'tokamaker/P_ANI/TYPE',success=success)
@@ -617,6 +717,7 @@ IF(hdf5_field_exist(filename,'tokamaker/IP_TARGET'))THEN
     error_string='Failed to read Ip target.'
     RETURN
   END IF
+  self%Ip_target=self%Ip_target
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/IP_RATIO_TARGET'))THEN
   CALL hdf5_read(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET',success=success)
@@ -712,6 +813,11 @@ IF(hdf5_field_exist(filename,'tokamaker/MIRNOV_TARGETS'))THEN
     RETURN
   END IF
 END IF
+!---Update all flux functions now that all fields (F0, targets, kinetics) are loaded
+CALL self%I%update(self)
+CALL self%P%update(self)
+IF(ASSOCIATED(self%I_NI))CALL self%I_NI%update(self)
+IF(ASSOCIATED(self%eta))CALL self%eta%update(self)
 end subroutine gs_load_tokamaker
 !---------------------------------------------------------------------------
 !> Needs docs
@@ -1282,174 +1388,4 @@ CALL oft_decrease_indent
 DEALLOCATE(rout,zout,rlim,zlim)
 DEALLOCATE(fpol,pres,ffprim,pprime,qpsi,psirz)
 end subroutine gs_save_eqdsk
-!------------------------------------------------------------------------------
-!> Evaluate terms in augmented tracing ODE for computing Sauter factors (see @ref sauter_fc)
-!------------------------------------------------------------------------------
-subroutine sauter_apply(self,cell,f,gop,val)
-class(sauter_interp), intent(inout) :: self !< Interpolation object
-integer(4), intent(in) :: cell !< Cell for interpolation
-real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
-real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
-real(8), intent(out) :: val(:) !< Reconstructed field at f [8]
-integer(4), allocatable :: j(:)
-integer(4) :: jc
-real(8) :: rop(3),d2op(6),pt(3),grad(3),tmp
-real(8) :: s,c,Bp2,Bt2,mod_B,bratio
-!---Get dofs
-allocate(j(self%lag_rep%nce))
-call self%lag_rep%ncdofs(cell,j)
-!---Reconstruct gradient
-grad=0.d0
-do jc=1,self%lag_rep%nce
-  call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
-  grad=grad+self%uvals(j(jc))*rop
-end do
-!---Get radial position
-pt=self%mesh%log2phys(cell,f)
-!---
-s=SIN(self%t)
-c=COS(self%t)
-Bp2 = (grad(1)**2 + grad(2)**2)/pt(1)**2
-Bt2 = (self%f_surf/pt(1))**2
-mod_B = SQRT(Bp2+Bt2)
-!---Position
-val(1)=(self%rho*(grad(1)*s-grad(2)*c))/(grad(1)*c+grad(2)*s)
-val(2)=pt(1)*SQRT((self%rho**2+val(1)**2)/SUM(grad**2))
-!---Geometric factors
-val(3)=val(2)*pt(1)         ! <R>
-val(4)=val(2)/pt(1)         ! <1/R>
-val(5)=val(2)*SQRT((pt(1)-self%mag_axis(1))**2+(pt(2)-self%mag_axis(2))**2)  ! <a>
-!---Magnetic field averages
-val(6)=val(2)*SQRT(Bp2+Bt2) ! <|B|>
-val(7)=val(2)*(Bp2+Bt2)     ! <|B|^2>
-IF(self%stage_1)THEN
-  self%bmax = MAX(self%bmax,mod_B)
-ELSE
-  bratio = MIN(1.d0,mod_B/self%bmax)
-  val(8)=val(2)*((1.d0 - SQRT(1.d0 - bratio) * (1.d0 + bratio / 2.d0)) / bratio**2)
-END IF
-deallocate(j)
-end subroutine sauter_apply
-!------------------------------------------------------------------------------
-!> Compute factors required for Sauter bootstrap formula
-!------------------------------------------------------------------------------
-subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs)
-class(gs_equil), intent(inout) :: gseq !< G-S object
-integer(4), intent(in) :: nr !< Number of flux sample points
-real(8), intent(in) :: psi_q(nr) !< Location of flux sample points
-real(8), intent(out) :: fc(nr) !< Trapped particle fraction \f$ f_c \f$
-real(8), intent(out) :: r_avgs(nr,3) !< Flux surface averaged radial coordinates \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
-real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field strength \f$<|B|>\f$, \f$<|B|^2>\f$
-real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi,h,h2,hf,ftu,ftl
-real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
-type(oft_lag_brinterp) :: psi_int
-real(8), pointer :: ptout(:,:)
-real(8), parameter :: tol=1.d-10
-integer(4) :: i,j,cell
-type(sauter_interp), target :: field
-type(gs_factory), pointer :: device
-!---
-device=>gseq%device
-raxis=gseq%o_point(1)
-zaxis=gseq%o_point(2)
-x1=0.d0; x2=1.d0
-IF(gseq%plasma_bounds(1)>-1.d98)THEN
-  x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
-!   x1 = x1 + (x2-x1)*2.d-2
-!   x2 = x2 + (x1-x2)*2.d-2
-END IF
-! IF(.NOT.gseq%free)x1 = x1 + (x2-x1)*2.d-2
-psi_int%u=>gseq%psi
-CALL psi_int%setup(device%fe_rep)
-!---Find Rmax along Zaxis
-rmax=raxis
-cell=0
-DO j=1,100
-  pt=[(device%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(device%mesh,cell,pt,f)
-  IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
-  CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF( psi_tmp(1) < x1)EXIT
-  rmax=pt(1)
-END DO
-pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]
-!---
-IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A)')oft_indent,'Axis Position:'
-  CALL oft_increase_indent
-  WRITE(*,'(2A,ES11.3)')oft_indent,'R    = ',raxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
-  CALL oft_decrease_indent
-END IF
-!---Trace
-call set_tracer(1)
-! !$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
-field%u=>gseq%psi
-field%mag_axis=gseq%o_point
-CALL field%setup(device%fe_rep)
-active_tracer%neq=8
-active_tracer%B=>field
-active_tracer%maxsteps=8e4
-active_tracer%raxis=raxis
-active_tracer%zaxis=zaxis
-active_tracer%inv=.TRUE.
-ALLOCATE(ptout(3,active_tracer%maxsteps+1))
-! !$omp do schedule(dynamic,1)
-do j=1,nr
-  !------------------------------------------------------------------------------
-  ! Trace contour
-  !------------------------------------------------------------------------------
-  psi_surf=psi_q(j)*(x2-x1) + x1
-  IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN ! Use higher tracing tolerance near divertor
-    active_tracer%tol=1.d-10
-  ELSE
-    active_tracer%tol=1.d-8
-  END IF
-  !
-  pt=pt_last
-  ! !$omp critical
-  CALL gs_psi2r(gseq,psi_surf,pt,psi_int=psi_int)
-  ! !$omp end critical
-  IF(gseq%mode==0)THEN
-    field%f_surf=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
-  ELSE
-    field%f_surf=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
-  END IF
-  field%bmax=0.d0
-  field%stage_1=.TRUE.
-  CALL tracinginv_fs(device%mesh,pt(1:2))
-  field%stage_1=.FALSE.
-  CALL tracinginv_fs(device%mesh,pt(1:2))
-  pt_last=pt
-  !---Skip point if trace fails
-  if(active_tracer%status/=1)THEN
-    WRITE(*,*)j,pt
-    CALL oft_warn("sauter_fc: Trace did not complete")
-    CYCLE
-  end if
-  !---Get flux variables
-  r_avgs(j,1)=active_tracer%v(3)/active_tracer%v(2)
-  r_avgs(j,2)=active_tracer%v(4)/active_tracer%v(2)
-  r_avgs(j,3)=active_tracer%v(5)/active_tracer%v(2)
-  modb_avgs(j,1)=active_tracer%v(6)/active_tracer%v(2)
-  modb_avgs(j,2)=active_tracer%v(7)/active_tracer%v(2)
-  !---Sauter formula
-  ! Equation 4
-  h = modb_avgs(j,1)/field%bmax
-  h2 = modb_avgs(j,2)/field%bmax**2
-  ftu = 1.d0 - h2 / (h**2) * (1.d0 - SQRT(1.d0 - h) * (1.d0 + 0.5d0 * h))
-  ! Equation 7
-  hf = active_tracer%v(8)/active_tracer%v(2)
-  ftl = 1.d0 - h2 * hf
-  ! Equation 18,19
-  fc(j) = 1.d0 - (0.75d0 * ftu + 0.25d0 * ftl)
-end do
-CALL field%delete
-CALL active_tracer%delete
-DEALLOCATE(ptout)
-! !$omp end parallel
-CALL psi_int%delete()
-end subroutine sauter_fc
 END MODULE oft_gs_util

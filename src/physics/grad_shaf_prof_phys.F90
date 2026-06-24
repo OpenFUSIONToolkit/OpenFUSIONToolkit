@@ -71,7 +71,7 @@ contains
   procedure :: copy => jphi_copy
   !> Needs docs
   procedure :: delete => jphi_delete
-  !> Update F*F' profile from Jphi, P', and current equilibrium
+  !> Update F*F' profile from Jphi and current equilibrium state
   procedure :: update => jphi_update
 end type jphi_flux_func
 !------------------------------------------------------------------------------
@@ -524,33 +524,14 @@ class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
 REAL(r8) :: jphi_norm,pscale,pprime,dnorm
-REAL(r8), ALLOCATABLE :: ravgs(:,:),qtmp(:),psi_q(:)
+REAL(r8), ALLOCATABLE :: qtmp(:)
 type(spline_type) :: R_spline
 self%plasma_bounds=gseq%plasma_bounds
 IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
 IF(gseq%Ip_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
 !---Get updated flux surface geometry for Jphi -> F*F' mapping
-ALLOCATE(ravgs(self%ngeom+1,3),psi_q(self%ngeom+1),qtmp(self%ngeom+1))
-IF(gseq%diverted)THEN
-  psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
-  psi_q(1)=psi_q(2)
-  CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
-  psi_q(1)=0.d0
-  ravgs(1,1)=gseq%lim_point(1)
-  ravgs(1,2)=1.d0/gseq%lim_point(1)
-ELSE
-  psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
-  CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
-END IF
-! WRITE(*,*)'  <R>     = ',ravgs(2,1),ravgs(self%ngeom-2,1)
-! WRITE(*,*)'  <1/R>   = ',ravgs(2,2),ravgs(self%ngeom-2,2)
-CALL spline_alloc(R_spline,self%ngeom-1,2)
-R_spline%xs(0:self%ngeom-2)=psi_q; R_spline%xs(self%ngeom-1)=1.d0
-R_spline%fs(0:self%ngeom-2,1)=ravgs(1:self%ngeom-1,1); R_spline%fs(self%ngeom-1,1)=gseq%o_point(1)
-R_spline%fs(0:self%ngeom-2,2)=ravgs(1:self%ngeom-1,2); R_spline%fs(self%ngeom-1,2)=1.d0/gseq%o_point(1)
-CALL spline_fit(R_spline,"extrap")
-DEALLOCATE(ravgs,psi_q,qtmp)
+CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
 !---Update jphi normalization to match Ip target
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(gseq%skip_targets)THEN
@@ -560,10 +541,7 @@ IF(gseq%skip_targets)THEN
   self%norm_last=jphi_norm
 ELSE
   ALLOCATE(qtmp(self%npsi))
-  DO i=1,self%npsi
-    CALL spline_eval(R_spline,self%x(i),0)
-    qtmp(i) = R_spline%f(1)*R_spline%f(2)
-  END DO
+  CALL eval_R_qtmp(R_spline, self%x, self%npsi, qtmp)
   CALL gs_flux_int(gseq,self%x,self%jphi/qtmp,self%npsi,jphi_norm)
   DEALLOCATE(qtmp)
   jphi_norm=ABS(gseq%Ip_target)/jphi_norm
@@ -624,6 +602,53 @@ result=oft_mpi_sum(result)
 CALL prof_interp_obj%delete()
 ! DEBUG_STACK_POP
 END SUBROUTINE gs_flux_int
+!------------------------------------------------------------------------------
+!> Build the <R> / <1/R> spline needed for jphi -> F*F' mapping.
+!> Allocates and fits R_spline on ngeom points from the current equilibrium.
+!> Caller is responsible for calling spline_dealloc(R_spline) when done.
+!------------------------------------------------------------------------------
+SUBROUTINE build_Ravg_spline(gseq, ngeom, R_spline)
+CLASS(gs_equil), INTENT(inout) :: gseq
+INTEGER(i4), INTENT(in) :: ngeom
+TYPE(spline_type), INTENT(out) :: R_spline
+INTEGER(i4) :: i
+REAL(r8), ALLOCATABLE :: ravgs(:,:), psi_q(:), qprof(:)
+REAL(r8), PARAMETER :: psi_pad = 1.d-3
+ALLOCATE(ravgs(ngeom,3), psi_q(ngeom), qprof(ngeom))
+psi_q = [(REAL(i-1,r8)/REAL(ngeom,r8), i=1,ngeom)]
+IF(gseq%diverted)THEN
+  psi_q(1) = MIN(psi_q(2), psi_pad)
+  CALL gs_get_qprof(gseq, ngeom, psi_q, qprof, ravgs=ravgs)
+  psi_q(1) = 0.d0
+  ravgs(1,1) = gseq%lim_point(1)
+  ravgs(1,2) = 1.d0/gseq%lim_point(1)
+ELSE
+  CALL gs_get_qprof(gseq, ngeom, psi_q, qprof, ravgs=ravgs)
+END IF
+CALL spline_alloc(R_spline, ngeom-1, 2)
+R_spline%xs(0:ngeom-2) = psi_q(1:ngeom-1); R_spline%xs(ngeom-1) = 1.d0
+R_spline%fs(0:ngeom-2,1) = ravgs(1:ngeom-1,1)
+R_spline%fs(ngeom-1,1) = gseq%o_point(1)
+R_spline%fs(0:ngeom-2,2) = ravgs(1:ngeom-1,2)
+R_spline%fs(ngeom-1,2) = 1.d0/gseq%o_point(1)
+CALL spline_fit(R_spline, "extrap")
+DEALLOCATE(ravgs, psi_q, qprof)
+END SUBROUTINE build_Ravg_spline
+!------------------------------------------------------------------------------
+!> Evaluate the geometric factor qtmp(i) = <R>(psi_i) * <1/R>(psi_i) on an
+!> arbitrary psi_N grid by calling spline_eval on a pre-built R_spline.
+!------------------------------------------------------------------------------
+SUBROUTINE eval_R_qtmp(R_spline, psi_vals, n, qtmp)
+TYPE(spline_type), INTENT(inout) :: R_spline
+INTEGER(i4), INTENT(in) :: n
+REAL(r8), INTENT(in) :: psi_vals(n)
+REAL(r8), INTENT(out) :: qtmp(n)
+INTEGER(i4) :: i
+DO i = 1, n
+  CALL spline_eval(R_spline, psi_vals(i), 0)
+  qtmp(i) = R_spline%f(1) * R_spline%f(2)
+END DO
+END SUBROUTINE eval_R_qtmp
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
