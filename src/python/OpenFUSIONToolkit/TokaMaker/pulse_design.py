@@ -516,6 +516,10 @@ class TokaMaker_TORAX:
                 'type': 'linterp',
             }
             
+        self._qsign = np.sign(self._state['q_prof_eqdsk'][0]['y'][-1])
+        print('Calculating q sign')
+        print(self._state['q_prof_eqdsk'][0]['y'][-1])
+
         # Save seed values from initial equilibria
         self._psi_axis_seed = self._state['psi_axis_tm'].copy()
         self._psi_lcfs_seed = self._state['psi_lcfs_tm'].copy()
@@ -2225,7 +2229,9 @@ class TokaMaker_TORAX:
             self._results['T_e'][t] = self._state['T_e'][i]
             self._results['T_i'][t] = self._state['T_i'][i]
             self._results['n_e'][t] = self._state['n_e'][i]
-            self._results['q'][t]   = self._state['q_prof_tx'][i]
+            self._results['q'][t]   = {'x': self._state['q_prof_tx'][i]['x'],
+                                       'y': self._qsign * np.abs(self._state['q_prof_tx'][i]['y']),
+                                       'type': 'linterp'}
 
         # ── Scalar time-series (with time-averaging) ────────────────────────
         self._results['E_fusion']      = self._extract_tx_scalar_timeseries(data_tree, 'E_fusion')
@@ -2235,7 +2241,10 @@ class TokaMaker_TORAX:
         self._results['n_e_line_avg']  = self._extract_tx_scalar_timeseries(data_tree, 'n_e_line_avg')
         self._results['n_i_line_avg']  = self._extract_tx_scalar_timeseries(data_tree, 'n_i_line_avg')
         self._results['beta_N']        = self._extract_tx_scalar_timeseries(data_tree, 'beta_N')
-        self._results['q95']           = self._extract_tx_scalar_timeseries(data_tree, 'q95')
+        q95_ts = self._extract_tx_scalar_timeseries(data_tree, 'q95')
+        self._results['q95']           = {'x': q95_ts['x'],
+                                          'y': self._qsign * np.abs(q95_ts['y']),
+                                          'type': 'linterp'}
         self._results['H98']           = self._extract_tx_scalar_timeseries(data_tree, 'H98')
         self._results['v_loop_lcfs']   = self._extract_tx_scalar_timeseries(data_tree, 'v_loop_lcfs')
         self._results['li3']           = self._extract_tx_scalar_timeseries(data_tree, 'li3')
@@ -2291,8 +2300,8 @@ class TokaMaker_TORAX:
         self._results['vloop_tx']    = {'x': list(self._tm_times), 'y': np.array(self._state['vloop_tx'])}
         self._results['beta_N_tm']   = {'x': list(self._tm_times), 'y': np.array(self._state['beta_N_tm'])}
         self._results['l_i_tm']      = {'x': list(self._tm_times), 'y': np.array(self._state['l_i_tm'])}
-        self._results['q95_tm']      = {'x': list(self._tm_times), 'y': np.array(self._state['q95_tm'])}
-        self._results['q0_tm']       = {'x': list(self._tm_times), 'y': np.array(self._state['q0_tm'])}
+        self._results['q95_tm']      = {'x': list(self._tm_times), 'y': self._qsign * np.abs(self._state['q95_tm'])}
+        self._results['q0_tm']       = {'x': list(self._tm_times), 'y': self._qsign * np.abs(self._state['q0_tm'])}
         self._results['pax']         = {'x': list(self._tm_times), 'y': np.array(self._state['pax'])}
         self._results['pax_tm']      = {'x': list(self._tm_times), 'y': np.array(self._state['pax_tm'])}
 
@@ -4418,12 +4427,12 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.set_title('Safety Factor q')
     t_q95, y_q95 = _tx_scalar(tt, 'q95')
     t_q0, y_q0 = _tx_profile_at_rho(tt, 'q', 0.0, rho_coord='rho_face_norm')
-    ax.plot(times, s['q95_tm'], color=COLOR_TM, ls='-', marker='o', ms=MK_SZ, lw=1, label='q95 TM')
-    ax.plot(times, s['q0_tm'], color=COLOR_TM, ls='--', marker='o', ms=MK_SZ, lw=1, label='q0 TM')
+    ax.plot(times, tt._qsign * np.abs(s['q95_tm']), color=COLOR_TM, ls='-', marker='o', ms=MK_SZ, lw=1, label='q95 TM')
+    ax.plot(times, tt._qsign * np.abs(s['q0_tm']), color=COLOR_TM, ls='--', marker='o', ms=MK_SZ, lw=1, label='q0 TM')
     if t_q95 is not None:
-        ax.plot(t_q95, y_q95, color=COLOR_TX, ls='-', lw=1, label='q95 TX')
+        ax.plot(t_q95, tt._qsign * np.abs(y_q95), color=COLOR_TX, ls='-', lw=1, label='q95 TX')
     if t_q0 is not None:
-        ax.plot(t_q0, y_q0, color=COLOR_TX, ls='--', lw=1, label='q0 TX')
+        ax.plot(t_q0, tt._qsign * np.abs(y_q0), color=COLOR_TX, ls='--', lw=1, label='q0 TX')
     ax.set_xlabel('Time [s]')
     ax.set_ylabel('Safety Factor')
     ax.legend(fontsize=8)
