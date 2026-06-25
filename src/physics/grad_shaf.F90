@@ -182,7 +182,6 @@ END TYPE oft_gs_solver
 TYPE :: gs_factory
   INTEGER(i4) :: ierr = 0 !< Error flag from most recent solve
   INTEGER(i4) :: maxits = 30 !< Maximum number of iterations for nonlinear solve
-  INTEGER(i4) :: nl_its = 0 !< Number of nonlinear iterations to converge most recent solve
   INTEGER(i4) :: nR0_ramp = 6 !< Number of iterations for R0 ramp if R0 target is used
   INTEGER(i4) :: ncoils = 0 !< Number of coils in device
   INTEGER(i4) :: ncoils_ext = 0 !< Number of external (non-meshed) coils in device
@@ -2678,7 +2677,7 @@ IF(i>factory%maxits)error_flag=-1
 IF(error_flag==0)THEN
   self%nl_its=i
 ELSE
-  self%nl_its=-i !< TODO: change?
+  self%nl_its=-i
 END IF
 
 IF(PRESENT(ierr))THEN

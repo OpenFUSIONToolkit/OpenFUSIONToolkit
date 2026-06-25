@@ -595,7 +595,7 @@ tMaker_obj%device%timing=0.d0
 CALL tMaker_obj%device%solve(tMaker_obj%gs_equil,ierr)
 IF(vacuum)tMaker_obj%gs_equil%has_plasma=vac_save
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
-nl_its=tMaker_obj%device%nl_its
+nl_its=tMaker_obj%device%gs_solver%nl_its
 END SUBROUTINE tokamaker_solve
 !---------------------------------------------------------------------------------
 !> Perform linear solve to find vacuum solution for given BCs and current sources
