@@ -10,6 +10,7 @@
 @ingroup doxy_oft_python
 '''
 import numpy
+import warnings
 from ._interface import *
 from OpenFUSIONToolkit.TokaMaker.util import get_jphi_from_GS
 
@@ -207,10 +208,25 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     psi_edge = psi_N[edge_mask]
     j_edge = j_bootstrap[edge_mask]
 
+    def _no_edge_spike_result(reason):
+        # No isolable edge spike was found. Fall back to the un-isolated
+        # bootstrap profile (identical to the isolate_edge_jBS=False path)
+        # rather than returning None, which would break the documented dict
+        # contract and crash subscripting callers (res['masked_spike']).
+        warnings.warn(reason + "; using bootstrap profile without edge isolation",
+                      RuntimeWarning, stacklevel=2)
+        j_full = numpy.array(j_bootstrap, dtype=float)
+        return {
+            'sigma': 0.0,
+            'background': 0.0,
+            'gaussian_params': None,
+            'parameterized_spike': j_full,
+            'masked_spike': j_full.copy(),
+        }
+
     # Guard an empty edge slice (psi_N may not reach the edge region)
     if j_edge.size == 0:
-        print("No edge region (psi_N >= 0.7) in profile")
-        return None
+        return _no_edge_spike_result("No edge region (psi_N >= 0.7) in profile")
 
     # Find edge peak (prominence filter rejects noise oscillations)
     j_edge_max = numpy.max(j_edge)
@@ -218,8 +234,7 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     peaks, properties = find_peaks(j_edge, height=0., prominence=min_prominence)
 
     if len(peaks) == 0:
-        print("No clear peak found in the edge region")
-        return None
+        return _no_edge_spike_result("No clear peak found in the edge region")
 
     # Tallest peak in the far edge (psi_N > 0.85), else the rightmost
     far_edge = psi_edge[peaks] > 0.85
@@ -345,9 +360,9 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
         amp, center, width, offset, sk, y_sep, blend_width = popt
         spike_only = parameterize_edge_jBS(psi_N, amp, center, width, offset, sk, y_sep, blend_width)
     except Exception as _edge_fit_exc:
-        import warnings as _warnings
-        _warnings.warn("parameterize_edge_jBS fit failed (%s); falling back to "
-                       "masked_spike (unused unless parameterize_jBS=True)" % _edge_fit_exc)
+        warnings.warn("parameterize_edge_jBS fit failed (%s); falling back to "
+                      "masked_spike (unused unless parameterize_jBS=True)" % _edge_fit_exc,
+                      RuntimeWarning, stacklevel=2)
         popt = numpy.asarray(p0, dtype=float)
         amp, center, width, offset, sk, y_sep, blend_width = popt
         spike_only = masked_spike.copy()
@@ -378,7 +393,7 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
 
     @param mygs Grad-Shafranov solver object
     @param ffp_prof Toroidal current profile (\f$j_\phi(\hat{\psi})\f$), type 'jphi-linterp'
-    @param pp_prof Pressure gradient profile (\f{P'}\f$)
+    @param pp_prof Pressure gradient profile (\f$P'\f$)
     @param Ip_target Target plasma current \f$I_p\f$ [A]
     @param pax_target Target on-axis pressure \f$p_{axis}\f$ [Pa]
     @result None (updates equilibrium in-place)
@@ -401,7 +416,7 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     @param psi_N Normalized poloidal flux profile \f$\hat{\psi}\f$
     @param pressure Plasma pressure profile \f$p(\hat{\psi})\f$ [Pa]
     @param ffp_prof Toroidal current profile (\f$j_\phi(\hat{\psi})\f$)
-    @param pp_prof Pressure gradient profile (\f{P\'}\f$)
+    @param pp_prof Pressure gradient profile (\f$P'\f$)
     @param j_inductive Inductive/total toroidal current profile \f$j_{ind}(\hat{\psi})\f$ [A/m^2]
     @param Ip_target Target plasma current \f$I_p\f$ [A]
     @param psi_pad Padding for flux surface calculations
