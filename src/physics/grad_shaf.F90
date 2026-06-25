@@ -2317,15 +2317,16 @@ subroutine gs_step(self,factory,equil,i,converged,ierr)
 class(oft_gs_solver), intent(inout) :: self !< G-S solver object
 class(gs_factory), intent(inout) :: factory!< G-S factory/device object
 class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
-integer(i4), intent(in) :: i !< Error flag
+integer(i4), intent(in) :: i !< Loop iteration
 integer(i4), optional, intent(out) :: ierr !< Error flag
 logical, intent(out) :: converged
 integer(i4) :: j
 logical :: fail_test
 logical :: pm_save
-integer(i4) :: ierr_loc
+integer(i4) :: ierr_loc, error_flag
 ierr = 0
 ierr_loc = 0
+error_flag = 0
 !---Ramp R0 target
 self%R0_tmp=(i-1)*(equil%R0_target-self%R0_in)/REAL(factory%nR0_ramp,8) + self%R0_in
 self%Z0_tmp=(i-1)*(equil%Z0_target-self%Z0_in)/REAL(factory%nR0_ramp,8) + self%Z0_in
@@ -2472,7 +2473,7 @@ IF(ALL(factory%target_weights<=0.d0))THEN
   CALL lapack_matinv(3,self%param_mat,ierr_loc)
   oft_env%pm=self%pm_save
   IF(ierr_loc/=0)THEN
-    ierr=-6
+    error_flag=-6
     RETURN
   END IF
   self%param_vec=MATMUL(self%param_mat,self%param_rhs)
@@ -2492,7 +2493,7 @@ IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
     self%param_psi(2)%f=>self%psi_press
     CALL equil%fit_isoflux(self%psip,ierr_loc,self%mat_save,self%param_rhs,self%param_psi)
     IF(ierr_loc/=0)THEN
-      ierr=-7
+      error_flag=-7
       RETURN
     END IF
     equil%ffp_scale=self%param_rhs(1)
@@ -2501,7 +2502,7 @@ IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
   ELSE
     CALL equil%fit_isoflux(self%psip,ierr_loc)
     IF(ierr_loc/=0)THEN
-      ierr=-7
+      error_flag=-7
       RETURN
     END IF
   END IF
@@ -2605,10 +2606,10 @@ fail_test=fail_test.OR.((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.eq
 fail_test=fail_test.OR.((equil%o_point(1) < factory%rmin).AND.equil%has_plasma)
 IF(fail_test)THEN
   ! WRITE(*,*)psimax,equil%plasma_bounds,equil%o_point
-  IF(self%psimax<gs_epsilon)ierr=-2
-  IF((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)ierr=-3
-  IF((equil%o_point(1) < factory%rmin).AND.equil%has_plasma)ierr=-4
-  ! WRITE(*,*)ierr
+  IF(self%psimax<gs_epsilon)error_flag=-2
+  IF((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)error_flag=-3
+  IF((equil%o_point(1) < factory%rmin).AND.equil%has_plasma)error_flag=-4
+  ! WRITE(*,*)error_flag
   RETURN
 END IF
 !---Under-relax solution
@@ -2662,9 +2663,7 @@ CALL factory%dels%apply(self%tmp_vec,self%psip)
 CALL self%psip%add(1.d0,-1.d0,self%rhs)
 CALL factory%zerob_bc%apply(self%psip)
 self%nl_res=self%psip%dot(self%psip)
-!---Output progress
-IF(oft_env%pm)WRITE(*,'(A,I4,6ES12.4)')oft_indent,self%i,equil%ffp_scale,equil%p_scale, &
-  SQRT(self%nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
+
 !---Check if converged
 IF((equil%R0_target>0.d0).AND.(ABS(self%R0_tmp-equil%R0_target)>1.d-8))RETURN
 IF((equil%Z0_target>-1.d98).AND.(ABS(self%Z0_tmp-equil%Z0_target)>1.d-8))RETURN
@@ -2674,40 +2673,17 @@ IF(SQRT(self%nl_res)<factory%nl_tol)THEN
   RETURN
 END IF
 
-IF(oft_env%pm)CALL oft_decrease_indent
-IF(i>factory%maxits)ierr=-1
-IF(ierr==0)THEN
+! IF(oft_env%pm)CALL oft_decrease_indent
+IF(i>factory%maxits)error_flag=-1
+IF(error_flag==0)THEN
   self%nl_its=i
 ELSE
-  self%nl_its=-i
+  self%nl_its=-i !< TODO: change?
 END IF
-!---Output
-IF(factory%save_visit.AND.factory%plot_final)THEN
-  self%eq_count=self%eq_count+1
-  CALL factory%xdmf%add_timestep(REAL(self%eq_count,8))
-  CALL equil%psi%get_local(self%vals_tmp)
-  IF(equil%plasma_bounds(1)<-1.d98)THEN
-    CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi')
-  ELSE
-    CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp-equil%plasma_bounds(1),factory%xdmf,'Psi')
-  END IF
-  CALL self%psi_vac%get_local(self%vals_tmp)
-  CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi_vac')
-  CALL self%psi_eddy%get_local(self%vals_tmp)
-  CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi_eddy')
-  CALL self%psi_vcont%get_local(self%vals_tmp)
-  self%vals_tmp=self%vals_tmp*equil%vcontrol_val
-  CALL factory%fe_rep%mesh%save_vertex_scalar(self%vals_tmp,factory%xdmf,'Psi_vcont')
+
+IF(PRESENT(ierr))THEN
+  ierr=error_flag
 END IF
-factory%timing(1)=factory%timing(1)+(omp_get_wtime()-self%t0)
-IF(oft_env%pm)THEN
-  WRITE(*,*)'Timing:',factory%timing(1)
-  WRITE(*,*)'  Source:  ',factory%timing(2)
-  WRITE(*,*)'  Solve:   ',factory%timing(3)
-  WRITE(*,*)'  Boundary:',factory%timing(4)
-  WRITE(*,*)'  Other:   ',factory%timing(1)-SUM(factory%timing(2:4))
-END IF
-!---
 end subroutine gs_step
 
 subroutine gs_solve(self,equil,ierr)
@@ -2722,7 +2698,7 @@ CHARACTER(LEN=40) :: err_reason
 ierr = 0
 
 IF(oft_env%pm)THEN
-  WRITE(*,'(2A)')oft_indent,'Starting non-linear GS solver'
+  WRITE(*,'(2A)')oft_indent,'Starting non-linear GS solver (update)'
   CALL oft_increase_indent
 END IF
 ! ALLOCATE(self%gs_solver)
@@ -2742,6 +2718,32 @@ DO i=1,self%maxits
     EXIT
   END IF
   IF(converged)THEN
+    !---Output
+    IF(self%save_visit.AND.self%plot_final)THEN
+      self%gs_solver%eq_count=self%gs_solver%eq_count+1
+      CALL self%xdmf%add_timestep(REAL(self%gs_solver%eq_count,8))
+      CALL equil%psi%get_local(self%gs_solver%vals_tmp)
+      IF(equil%plasma_bounds(1)<-1.d98)THEN
+        CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solver%vals_tmp,self%xdmf,'Psi')
+      ELSE
+        CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solver%vals_tmp-equil%plasma_bounds(1),self%xdmf,'Psi')
+      END IF
+      CALL self%gs_solver%psi_vac%get_local(self%gs_solver%vals_tmp)
+      CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solver%vals_tmp,self%xdmf,'Psi_vac')
+      CALL self%gs_solver%psi_eddy%get_local(self%gs_solver%vals_tmp)
+      CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solver%vals_tmp,self%xdmf,'Psi_eddy')
+      CALL self%gs_solver%psi_vcont%get_local(self%gs_solver%vals_tmp)
+      self%gs_solver%vals_tmp=self%gs_solver%vals_tmp*equil%vcontrol_val
+      CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solver%vals_tmp,self%xdmf,'Psi_vcont')
+    END IF
+    self%timing(1)=self%timing(1)+(omp_get_wtime()-self%gs_solver%t0)
+    CALL oft_decrease_indent
+    WRITE(*,*)'Timing:',self%timing(1)
+    WRITE(*,*)'  Source:  ',self%timing(2)
+    WRITE(*,*)'  Solve:   ',self%timing(3)
+    WRITE(*,*)'  Boundary:',self%timing(4)
+    WRITE(*,*)'  Other:   ',self%timing(1)-SUM(self%timing(2:4))
+    !---
     EXIT
   END IF
 END DO
