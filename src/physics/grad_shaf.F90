@@ -2326,9 +2326,6 @@ logical :: pm_save
 integer(i4) :: ierr_loc
 ierr = 0
 ierr_loc = 0
-
-print *, 'Running GS step...'
-
 !---Ramp R0 target
 self%R0_tmp=(i-1)*(equil%R0_target-self%R0_in)/REAL(factory%nR0_ramp,8) + self%R0_in
 self%Z0_tmp=(i-1)*(equil%Z0_target-self%Z0_in)/REAL(factory%nR0_ramp,8) + self%Z0_in
@@ -2719,7 +2716,7 @@ class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
 integer(i4), optional, intent(out) :: ierr !< Error flag
 integer(i4) :: setup_err
 integer(i4) :: step_err
-logical :: converged
+logical :: converged = .FALSE.
 integer(i4) :: i
 CHARACTER(LEN=40) :: err_reason
 ierr = 0
@@ -2729,23 +2726,25 @@ IF(oft_env%pm)THEN
   CALL oft_increase_indent
 END IF
 ! ALLOCATE(self%gs_solver)
-WRITE(*,'(2A)')oft_indent,'Setup non-linear GS solver'
 CALL self%gs_solver%setup(self, equil, setup_err)
 IF(setup_err /= 0)THEN
   ierr = setup_err
   RETURN
 END IF
-WRITE(*,'(2A)')oft_indent,'Begin GS solver loop'
 DO i=1,self%maxits
   CALL self%gs_solver%step(self, equil, i, converged, step_err)
+  WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,equil%ffp_scale,equil%p_scale, &
+      SQRT(self%gs_solver%nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
   IF(step_err /= 0)THEN
+    ierr = step_err
     err_reason=gs_err_reason(step_err)
     WRITE(*,'(3A)')oft_indent,'Equilibrium solve Failed: ',TRIM(err_reason)
     EXIT
   END IF
-  IF(converged)EXIT
+  IF(converged)THEN
+    EXIT
+  END IF
 END DO
-WRITE(*,'(2A)')oft_indent,'Deleting GS solver loop'
 CALL self%gs_solver%delete(self, equil)
 end subroutine gs_solve
 !------------------------------------------------------------------------------
