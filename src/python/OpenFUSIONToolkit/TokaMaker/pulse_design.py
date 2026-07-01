@@ -43,13 +43,12 @@ from scipy.signal import savgol_filter
 from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk, create_power_flux_fun, create_isoflux
 
 LCFS_WEIGHT = 100.0
-PSI_LCFS_WEIGHT = 10
+PSI_LCFS_WEIGHT = 100
 N_PSI = 1000
 _NBI_W_TO_MA = 1/16e6
 mu_0 = 4.0 * np.pi * 1e-7
 # EQDSK sampling for save_eqdsk when validating with TORAX in _run_tm:
-# start at nr=nz=100, increase by 50 up to 500 until TORAX accepts eqdsk.
-EQDSK_SAVE_NR_NZ_SEQUENCE = (350, 500, 650, 800)
+EQDSK_SAVE_NR_NZ_SEQUENCE = (300, 900)
 
 # Default TORAX radial face count for loop 0 coarse runs (evenly spaced normalized rho).
 DEFAULT_LOOP0_TX_FACE_POINTS = 51
@@ -972,21 +971,44 @@ class TokaMaker_TORAX:
             if active:
                 self._pop_tx_grid()
 
+    def _coil_net_turns(self, cname):
+        r'''! Number of turns for a coil set (from the mesh coil definition); 1 if unknown.'''
+        return self._tm.coil_sets.get(cname, {}).get('net_turns', 1.0)
+
+    def _aturn_bounds_to_aperturn(self, coil_bounds_aturn):
+        r'''! Convert a {coil: [lo, hi]} bounds dict from A-turns to A/turn for TokaMaker.
+
+                TokaMaker's set_coil_bounds expects the per-winding current [A/turn]; the public
+                TokaMaker_TORAX API works in total A-turns. I[A/turn] = I[A-turns] / net_turns.
+        '''
+        out = {}
+        for cname, (lo, hi) in coil_bounds_aturn.items():
+            n = self._coil_net_turns(cname)
+            out[cname] = [lo / n, hi / n]
+        return out
+
+    def _push_coil_bounds(self, coil_bounds_aturn):
+        r'''! Store bounds (A-turns, single source of truth) and apply to TokaMaker (A/turn).'''
+        self._coil_bounds = copy.deepcopy(coil_bounds_aturn)
+        self._tm.set_coil_bounds(self._aturn_bounds_to_aperturn(coil_bounds_aturn))
+
     def set_TokaMaker_coil_reg(self, coil_bounds=None, updownsym=False,
                      default_weight=1.0E-1, disable_coils=None,
                      disable_weight=1.0E4, symmetry_weight=1.0E3,
                      disable_virtual_vsc=True, vsc_weight=1.0E4):
         r'''! Set coil regularization using the dict-based TokaMaker reg_terms API.
-        
-                Coil bounds are hard current limits in Amperes per turn (A/turn). The total
-                current in a coil region is I_coil [A/turn] * n_turns, where n_turns comes
-                from the mesh file coil definition.
-        
+
+                Coil bounds are hard current limits in total Amp-turns (A-turns) — the public
+                TokaMaker_TORAX unit for everything coil-current related. Internally the bound
+                is converted to the per-winding current TokaMaker expects (A/turn) using the
+                mesh turn count: I[A/turn] = I[A-turns] / n_turns.
+
                 During the pulse, coil current targets are set automatically: the initial
                 equilibrium currents seed i=0, and each subsequent timestep uses the previous
                 timestep's solved currents as loose targets.
-        
-                @param coil_bounds Dict of {coil_name: [min, max]} hard current bounds [A/turn]. Default ±5 MA/turn.
+
+                @param coil_bounds Dict of {coil_name: [min, max]} hard current bounds [A-turns].
+                       Default ±45 MA-turns for every coil.
                 @param updownsym Enforce up-down symmetry for coil pairs (U/L naming convention).
                 @param default_weight Regularization weight for normal coils (default 0.1).
                 @param disable_coils List of coil name prefixes to disable (e.g. ['DV1', 'DV2']).
@@ -994,12 +1016,11 @@ class TokaMaker_TORAX:
                 @param symmetry_weight Regularization weight for symmetry constraints (default 1e3).
                 @param disable_virtual_vsc Disable the virtual VSC coil (default True).
                 @param vsc_weight Regularization weight for disabled VSC (default 1e4).
-                
+
         '''
         if coil_bounds is None:
-            coil_bounds = {key: [-5.0E6, 5.0E6] for key in self._tm.coil_sets}
-        self._tm.set_coil_bounds(coil_bounds)
-        self._coil_bounds = coil_bounds  # store for re-application after solve
+            coil_bounds = {key: [-45.0E6, 45.0E6] for key in self._tm.coil_sets}
+        self._push_coil_bounds(coil_bounds)   # A-turns in, A/turn pushed to TM
 
         if disable_coils is None:
             disable_coils = []
@@ -1054,6 +1075,148 @@ class TokaMaker_TORAX:
         reg_terms.append(self._tm.coil_reg_term({'#VSC': 1.0}, target=0.0, weight=vsc_w))
 
         self._tm.set_coil_reg(reg_terms=reg_terms)
+
+    # ─── Coil current rate limiting (per-solve dynamic bounds) ──────────────────
+
+    def _expand_coil_setting(self, arg, name):
+        r'''! Normalize a scalar-or-dict per-coil setting to a {coil: value} dict.
+
+                A bare scalar is applied to every (real) coil set; a dict is validated
+                against the known coil names. The virtual VSC coil (#VSC) is excluded.
+
+                @param arg None, a scalar, or a {coil_name: value} dict.
+                @param name Human-readable setting name for error messages.
+                @return Dict {coil_name: float} (empty if arg is None).
+        '''
+        coils = [c for c in self._tm.coil_sets]   # excludes virtual #VSC
+        if arg is None:
+            return {}
+        if isinstance(arg, dict):
+            unknown = [k for k in arg if k not in self._tm.coil_sets]
+            if unknown:
+                raise KeyError(f'{name}: unknown coil(s) {unknown}; '
+                               f'valid coils are {coils}')
+            return {k: float(v) for k, v in arg.items()}
+        # scalar -> all coils
+        return {c: float(arg) for c in coils}
+
+    def set_coil_rate_limits(self, dIdt=None, V=None, R=None,
+                             global_bounds=(-45.0E6, 45.0E6), dt_floor=0.5):
+        r'''! Constrain how fast each coil current may change between TokaMaker solves.
+
+                Before each GS solve the coil's hard bounds are tightened to a window around
+                the last successfully solved current:
+
+                    bound = I_prev_good ± (dIdt * max(dt, dt_floor)),
+                    dt = t[i] - t[last good solve]
+
+                then clipped to the global bounds. This caps the realized dI/dt of every coil
+                so the pulse stays within power-supply / engineering limits.
+
+                dt_floor avoids an unenforceably narrow bound box when two solves are very
+                close in time: at tiny dt the box [I_ref ± dIdt*dt] becomes so small that
+                TokaMaker's bounded solve can overshoot it, producing a spurious large
+                realized dI/dt. Flooring dt keeps the box wide enough to enforce; the price
+                is that across a sub-floor gap the realized rate may exceed the nominal limit
+                by up to dt_floor/dt. Set dt_floor=0 to disable.
+
+                Units are total Amp-turns (A-turns) and A-turns/s, matching the rest of the
+                TokaMaker_TORAX coil API. For each coil supply EITHER a dI/dt limit OR a
+                voltage limit (with a resistance) — never both for the same coil.
+
+                  - dI/dt path: dIdt [A-turns/s].
+                  - Voltage path: V [Volts] and R [Ohms] for that coil. The per-winding
+                    current rate is V/R [A/turn/s]; multiplied by n_turns this gives the
+                    A-turns/s rate: dIdt = (V / R) * n_turns.
+
+                Each of dIdt, V, R may be a single scalar (applied to all coils) or a
+                {coil_name: value} dict (per coil). Coils not given any limit keep the
+                global bounds (unconstrained rate). The virtual VSC coil is not rate limited.
+
+                @param dIdt Max |dI/dt| per coil [A-turns/s]; scalar or {coil: value}.
+                @param V Max coil voltage [V]; scalar or {coil: value}. Requires matching R.
+                @param R Coil resistance [Ohms]; scalar or {coil: value}. Used with V.
+                @param global_bounds (min, max) hard clip applied to every rate-limited
+                       bound [A-turns]. Default ±45 MA-turns.
+                @param dt_floor Minimum dt [s] used in the budget so close-spaced solves get
+                       an enforceable bound box. Default 0.5 s; set 0 to disable.
+        '''
+        dIdt_map = self._expand_coil_setting(dIdt, 'dIdt')
+        V_map    = self._expand_coil_setting(V, 'V')
+        R_map    = self._expand_coil_setting(R, 'R')
+
+        both = set(dIdt_map) & set(V_map)
+        if both:
+            raise ValueError('set_coil_rate_limits: coil(s) given both a dI/dt and a '
+                             f'voltage limit (choose one per coil): {sorted(both)}')
+        missing_R = set(V_map) - set(R_map)
+        if missing_R:
+            raise ValueError('set_coil_rate_limits: voltage-limited coil(s) missing a '
+                             f'resistance R: {sorted(missing_R)}')
+
+        # Unified per-coil rate budget in A-turns/s.
+        coil_dIdt = dict(dIdt_map)
+        for c, v in V_map.items():
+            r = R_map[c]
+            if r <= 0.0:
+                raise ValueError(f'set_coil_rate_limits: R for coil "{c}" must be > 0 '
+                                 f'(got {r}).')
+            coil_dIdt[c] = (v / r) * self._coil_net_turns(c)   # A-turns/s
+
+        self._coil_dIdt = coil_dIdt
+        self._coil_rate_global = (float(global_bounds[0]), float(global_bounds[1]))
+        self._coil_rate_dt_floor = max(0.0, float(dt_floor))
+        self._rate_limit_active = bool(coil_dIdt)
+
+        # Stored for save_tmtx_config() round-trip (plain JSON-able scalars/dicts).
+        self._coil_rate_limit_config = {
+            'dIdt': dIdt, 'V': V, 'R': R,
+            'global_bounds': list(self._coil_rate_global),
+            'dt_floor': self._coil_rate_dt_floor,
+        }
+
+    def _global_bounds_dict(self):
+        r'''! Per-coil global bounds dict [A-turns] from the rate-limit global clip.'''
+        lo, hi = getattr(self, '_coil_rate_global', (-45.0E6, 45.0E6))
+        return {c: [lo, hi] for c in self._tm.coil_sets}
+
+    def _apply_rate_limited_bounds(self, i, t):
+        r'''! Tighten coil bounds around the last good solved currents for this solve.
+
+                No-op (leaves the current bounds in place) when rate limiting is inactive
+                or there is no last-good current yet (first solve / no prior success). The
+                per-step bounds [A-turns] are recorded in self._coil_bounds_history[i] for
+                the tunnel diagnostic.
+
+                @param i Timestep index.
+                @param t Current solve time [s].
+        '''
+        if not getattr(self, '_rate_limit_active', False):
+            return
+        last = getattr(self, '_last_good_coil_currents', None)
+        if last is None or self._last_good_t is None:
+            return
+
+        lo_g, hi_g = self._coil_rate_global
+        dt = float(t) - float(self._last_good_t)
+        # Floor dt so close-spaced solves still get an enforceable (non-degenerate) box.
+        dt_eff = max(dt, getattr(self, '_coil_rate_dt_floor', 0.0))
+        bounds = {}
+        for c in self._tm.coil_sets:
+            if c in self._coil_dIdt and c in last:
+                dI = abs(self._coil_dIdt[c]) * dt_eff
+                I_ref = last[c]
+                lo = max(lo_g, I_ref - dI)
+                hi = min(hi_g, I_ref + dI)
+            else:
+                lo, hi = lo_g, hi_g
+            bounds[c] = [lo, hi]
+
+        self._coil_bounds_history[i] = copy.deepcopy(bounds)
+        # Record the rate-limit reference for the post-solve audit. Keep both the actual dt
+        # (for the realized-rate check) and the floored dt that sized the box.
+        self._rate_ref_for[i] = {'dt': dt, 'dt_eff': dt_eff, 'I_ref': dict(last)}
+        self._push_coil_bounds(bounds)   # A-turns stored, A/turn pushed to TM
 
 
     # ─── Property Setters ───────────────────────────────────────────────────────
@@ -2908,6 +3071,16 @@ class TokaMaker_TORAX:
             self._print(f'  TokaMaker: solving {len(self._tm_times)} equilibria...')
 
         # ── Per-loop initialization (before timestep sweep) ──────────────────
+        # Coil rate limiting: reset last-good tracking and per-step bounds history,
+        # and restore the global (untightened) bounds so a new loop is not permanently
+        # constrained by a stale tight bound from the previous loop's last step.
+        self._last_good_coil_currents = None
+        self._last_good_t = None
+        self._coil_bounds_history = {}
+        self._rate_ref_for = {}
+        if getattr(self, '_rate_limit_active', False):
+            self._push_coil_bounds(self._global_bounds_dict())
+
         # Snapshot previous loop's TM-solved profiles before they are overwritten,
         # so _convolve_prof can convolve toward the previous successful solution.
         self._state['ffp_prof_tm_prev']  = copy.deepcopy(self._state.get('ffp_prof_tm', {}))
@@ -2934,12 +3107,12 @@ class TokaMaker_TORAX:
                     self._log(f'TM: could not read initial equilibrium coil currents: {e}')
             self._apply_tm_coil_reg(targets=init_targets)
 
-        # Debug: log coil bounds at the start of each loop
+        # Debug: log coil bounds at the start of each loop (stored in A-turns)
         if self._debug_mode and hasattr(self, '_coil_bounds') and self._coil_bounds:
-            self._log('  TM coil bounds [A/turn] (turns * A/turn = total A-turns):')
+            _rl = ' (rate-limited)' if getattr(self, '_rate_limit_active', False) else ''
+            self._log(f'  TM coil bounds [A-turns]{_rl}:')
             for cname, (lo, hi) in self._coil_bounds.items():
-                n_turns = self._tm.coil_sets.get(cname, {}).get('net_turns', 1.0)
-                self._log(f'    {cname}: [{lo:.3g}, {hi:.3g}] A/turn  x {n_turns:.0f} turns = [{lo*n_turns:.3g}, {hi*n_turns:.3g}] A-turns')
+                self._log(f'    {cname}: [{lo:.3g}, {hi:.3g}] A-turns')
 
 
         if 0 in self._psi_warm_start and self._psi_warm_start[0] is not None:
@@ -2969,9 +3142,13 @@ class TokaMaker_TORAX:
                 Ip_target = abs(self._state['Ip'][i])
                 P0_target = abs(self._state['pax'][i])
         
-                self._tm.set_targets(Ip=Ip_target, pax=P0_target) # using pax target with j_phi inputs 
+                self._tm.set_targets(Ip=Ip_target, pax=P0_target) # using pax target with j_phi inputs
                 self._tm.set_resistivity(eta_prof=self._state['eta_prof'][i])
-        
+
+                # Tighten coil bounds to the per-solve rate-limited window (A-turns),
+                # centered on the last good solved currents (no-op if rate limiting off).
+                self._apply_rate_limited_bounds(i, t)
+
                 ffp_prof = {'x': self._state['ffp_prof'][i]['x'].copy(),
                                'y': self._state['ffp_prof'][i]['y'].copy(),
                                'type': self._state['ffp_prof'][i]['type']}
@@ -3032,7 +3209,8 @@ class TokaMaker_TORAX:
                     if _psi_prev is not None:
                         self._tm.set_psi_dt(
                             psi0=_psi_prev,
-                            dt=self._tm_times[i] - self._tm_times[prev_tm_idx],
+                            # dt=self._tm_times[i] - self._tm_times[prev_tm_idx],
+                            dt=1.0e10, # deactivated
                         )
 
                 skip_coil_update = False
@@ -3043,12 +3221,12 @@ class TokaMaker_TORAX:
                 level_attempts = []
 
                 # set increasing tolerance requirements for TM solves
-                if self._current_loop <=1:
-                    self._tm.settings.nl_tol = 1e-2
-                    self._tm.update_settings()
-                elif self._current_loop == 2:
-                    self._tm.settings.nl_tol = 1e-4
+                # if self._current_loop <=1:
+                #     self._tm.settings.nl_tol = 1e-6
                 #     self._tm.update_settings()
+                # elif self._current_loop == 2:
+                #     self._tm.settings.nl_tol = 1e-6
+                # #     self._tm.update_settings()
                 # elif self._current_loop >= 3:
                 #     self._tm.settings.nl_tol = 1e-6
                 #     self._tm.update_settings()
@@ -3077,7 +3255,8 @@ class TokaMaker_TORAX:
                 # loop's jphi over a few alphas, from pure TORAX (alpha=0) to mostly
                 # previous (alpha=1). p' and FF'_NI are convolved at the same alpha and
                 # passed alongside (normal linterp type), matching the FF'/p' levels below.
-                _jphi_alphas = [0.00, 0.25, 0.50, 0.75, 1.00]
+                # _jphi_alphas = [0.00, 0.25, 0.50, 0.75, 1.00]
+                _jphi_alphas = [0.00, 0.50, 1.00]
                 for _a in _jphi_alphas:
                     _jphi_c   = self._convolve_prof(
                         copy.deepcopy(jphi_prof_raw), jphi_ref, _a, out_type='jphi-linterp',
@@ -3094,15 +3273,15 @@ class TokaMaker_TORAX:
                 # from pure TORAX (alpha=0) to pure analytic/previous (alpha=1).
                 _conv_alphas = [
                     (0.00, 0.00),
-                    (0.05, 0.05),
+                    # (0.05, 0.05),
                     (0.10, 0.10),
-                    (0.15, 0.15),
+                    # (0.15, 0.15),
                     (0.20, 0.20),
-                    (0.30, 0.30),
+                    # (0.30, 0.30),
                     (0.40, 0.40),
-                    (0.50, 0.50),
+                    # (0.50, 0.50),
                     (0.60, 0.60),
-                    (0.75, 0.75),
+                    # (0.75, 0.75),
                     (1.00, 1.00),
                 ]
                 for _a_ffp, _a_pp in _conv_alphas:
@@ -3498,13 +3677,38 @@ class TokaMaker_TORAX:
         self._state['R_inv_avg_tm'][i] = {'x': self._psi_N.copy(), 'y': np.interp(self._psi_N, psi_geo, np.array(geo[1])), 'type': 'linterp'}
 
         # Update Results
+        # get_coil_currents() returns the per-winding current [A/turn]; store and track
+        # everything in total Amp-turns (A-turns), the public TokaMaker_TORAX coil unit.
         coils, _ = self._state['equil'][i].get_coil_currents()
+        coils_aturn = {c: cur * self._coil_net_turns(c) for c, cur in coils.items()}
         if 'COIL' not in self._results:
-            self._results['COIL'] = {coil: {} for coil in coils}
-        for coil, current in coils.items():
+            self._results['COIL'] = {coil: {} for coil in coils_aturn}
+        for coil, current in coils_aturn.items():
             if coil not in self._results['COIL']:
                 self._results['COIL'][coil] = {}
             self._results['COIL'][coil][self._tm_times[i]] = current
+
+        # Coil rate-limit audit: compare the realized change against the budget that was
+        # applied for this solve (relative to the last-good currents). A breach here means
+        # the hard bound did not actually constrain the coil (debug only).
+        if self._debug_mode and getattr(self, '_rate_limit_active', False):
+            ref = getattr(self, '_rate_ref_for', {}).get(i)
+            if ref is not None and ref.get('dt_eff', 0) > 0:
+                for c, dIdt in self._coil_dIdt.items():
+                    if c in coils_aturn and c in ref['I_ref']:
+                        # Compare the actual change to the box budget (dIdt*dt_eff). Exceeding
+                        # it means the solver did not honor the hard bound — a real breach.
+                        change = abs(coils_aturn[c] - ref['I_ref'][c])
+                        box = abs(dIdt) * ref['dt_eff']
+                        if change > box * 1.001:   # 0.1% tolerance
+                            self._log(
+                                f'    RATE BREACH t={self._tm_times[i]:.2f}s {c}: '
+                                f'ΔI {change*1e-6:.3f} > box {box*1e-6:.3f} MA-turns '
+                                f'(dt={ref["dt"]:.3f}s, dt_eff={ref["dt_eff"]:.3f}s)')
+
+        # Record last successful solve for coil rate limiting (A-turns).
+        self._last_good_coil_currents = dict(coils_aturn)
+        self._last_good_t = self._tm_times[i]
 
         # get psi to use in next timestep
         self._state['psi_grid_prev_tm'][i] = self._state['equil'][i].get_psi(normalized=False)
@@ -4004,6 +4208,18 @@ class TokaMaker_TORAX:
                     except Exception as _e:
                         self._log(f'plot_PLH_components failed at loop {self._current_loop}: {_e}')
 
+                # Coil current "tunnel": current vs the per-solve rate-limited bounds.
+                # Emitted every loop (debug/normal/minimal) so it survives interruptions.
+                if self._output_mode in ('debug', 'normal', 'minimal') and self._out_dir is not None:
+                    tunnel_name = f'coil_current_tunnel_loop{self._current_loop:03d}.png'
+                    if self._output_file_tag is not None:
+                        tunnel_name = f'{self._output_file_tag}_{tunnel_name}'
+                    try:
+                        plot_coil_current_tunnel(self, save_path=os.path.join(self._out_dir, tunnel_name),
+                                                 display=False)
+                    except Exception as _e:
+                        self._log(f'plot_coil_current_tunnel failed at loop {self._current_loop}: {_e}')
+
                 if self._output_mode == 'debug':
                     _loop_elapsed = time.perf_counter() - _t_coupling_loop0
                     _loop_mins, _loop_secs = divmod(_loop_elapsed, 60)
@@ -4076,6 +4292,12 @@ class TokaMaker_TORAX:
             self._print(f'  {_idx:<6} {tx_cflux_psi[s]:<16.4f} {tm_cflux_psi[s]:<16.4f} {diff_pct:<14.4f}')
         self._print(f'{"="*60}')
 
+        # ── End-of-flattop physics summary (always printed to terminal + log) ──
+        try:
+            self._log_flattop_summary(flux_consumed=tx_cflux_psi[-1] if tx_cflux_psi else None)
+        except Exception as _e:
+            self._log(f'_log_flattop_summary failed: {_e}')
+
         # ── Elapsed time ──
         _mins, _secs = divmod(_sim_elapsed, 60)
         self._print(f'  Total sim time: {int(_mins)}m {_secs:.1f}s')
@@ -4091,6 +4313,112 @@ class TokaMaker_TORAX:
             self.save_tmtx_config()
         except Exception as _e:
             self._log(f'save_tmtx_config failed: {_e}')
+
+    def _log_flattop_summary(self, flux_consumed=None):
+        r'''! Print a table of key physics parameters evaluated at the end of flattop.
+
+                Always emitted to both the terminal and the log file (via _print). Values are
+                taken from the last TORAX timepoint that falls inside the detected flattop
+                window (and a flattop-window average is shown alongside for context). Fusion
+                energy is cumulative, so its end-of-flattop value is the energy gained up to
+                that point. Flux consumed is the last completed loop's TORAX consumed flux.
+
+                @param flux_consumed Consumed flux [Wb] from the last completed loop, or None.
+        '''
+        dt = getattr(self, '_data_tree', None)
+        flattop = np.asarray(getattr(self, '_flattop', np.zeros(0, dtype=bool)), dtype=bool)
+
+        # Determine the end-of-flattop TORAX time. Fall back to the last TORAX time if
+        # there is no detected flattop window (e.g. very short / non-flattop pulse).
+        ft_t_end = None
+        tm_times = np.asarray(self._tm_times, dtype=float)
+        if flattop.size == tm_times.size and np.any(flattop):
+            ft_t_end = float(tm_times[np.nonzero(flattop)[0][-1]])
+            ft_t_start = float(tm_times[np.nonzero(flattop)[0][0]])
+        else:
+            ft_t_start = None
+
+        def _scalar_at_end_and_avg(name, scale=1.0):
+            r'''Return (value at end-of-flattop, flattop-window average) for a TORAX scalar.'''
+            t, y = _tx_scalar(self, name, scale=scale)
+            if t is None or y is None or len(y) == 0:
+                return None, None
+            t = np.asarray(t, dtype=float)
+            y = np.asarray(y, dtype=float)
+            if ft_t_end is None:
+                return float(y[-1]), float(np.nanmean(y))
+            i_end = int(np.argmin(np.abs(t - ft_t_end)))
+            val_end = float(y[i_end])
+            if ft_t_start is not None:
+                mask = (t >= ft_t_start) & (t <= ft_t_end)
+                val_avg = float(np.nanmean(y[mask])) if np.any(mask) else val_end
+            else:
+                val_avg = float(np.nanmean(y))
+            return val_end, val_avg
+
+        def _core_at_end_and_avg(name, scale=1.0):
+            r'''Return (end-of-flattop, flattop-avg) for a rho=0 profile value.'''
+            t, y = _tx_profile_at_rho(self, name, 0.0, scale=scale)
+            if t is None or y is None or len(y) == 0:
+                return None, None
+            t = np.asarray(t, dtype=float)
+            y = np.asarray(y, dtype=float)
+            if ft_t_end is None:
+                return float(y[-1]), float(np.nanmean(y))
+            i_end = int(np.argmin(np.abs(t - ft_t_end)))
+            val_end = float(y[i_end])
+            if ft_t_start is not None:
+                mask = (t >= ft_t_start) & (t <= ft_t_end)
+                val_avg = float(np.nanmean(y[mask])) if np.any(mask) else val_end
+            else:
+                val_avg = float(np.nanmean(y))
+            return val_end, val_avg
+
+        # (label, value_end, flattop_avg, unit, fmt)
+        rows = []
+
+        def _add(label, pair, unit, fmt='{:.3f}'):
+            v_end, v_avg = pair
+            rows.append((label, v_end, v_avg, unit, fmt))
+
+        if dt is None:
+            self._print('\n  End-of-flattop summary: TORAX data tree unavailable; skipped.')
+            return
+
+        E_fus_end, _ = _scalar_at_end_and_avg('E_fusion', scale=1e-6)  # J -> MJ
+        rows.append(('Fusion energy gained', E_fus_end, None, 'MJ', '{:.2f}'))
+        rows.append(('Flux consumed',
+                     float(flux_consumed) if flux_consumed is not None else None,
+                     None, 'Wb', '{:.3f}'))
+        _add('P_fusion',        _scalar_at_end_and_avg('P_fusion', scale=1e-6),       'MW', '{:.2f}')
+        _add('P_alpha',         _scalar_at_end_and_avg('P_alpha_total', scale=1e-6),  'MW', '{:.2f}')
+        _add('Q',               _scalar_at_end_and_avg('Q_fusion'),                   '',   '{:.3f}')
+        _add('H98',             _scalar_at_end_and_avg('H98'),                        '',   '{:.3f}')
+        _add('tau_E',           _scalar_at_end_and_avg('tau_E'),                      's',  '{:.4f}')
+        _add('q95',             _scalar_at_end_and_avg('q95'),                        '',   '{:.3f}')
+        _add('l_i',             _scalar_at_end_and_avg('li3'),                        '',   '{:.3f}')
+        _add('<T_e> (vol)',     _scalar_at_end_and_avg('T_e_volume_avg'),             'keV', '{:.3f}')
+        _add('<T_i> (vol)',     _scalar_at_end_and_avg('T_i_volume_avg'),             'keV', '{:.3f}')
+        _add('<n_e> (vol)',     _scalar_at_end_and_avg('n_e_volume_avg', scale=1e-20),'1e20 m^-3', '{:.3f}')
+        _add('T_e core',        _core_at_end_and_avg('T_e'),                          'keV', '{:.3f}')
+        _add('T_i core',        _core_at_end_and_avg('T_i'),                          'keV', '{:.3f}')
+        _add('n_e core',        _core_at_end_and_avg('n_e', scale=1e-20),             '1e20 m^-3', '{:.3f}')
+
+        # ── Emit ──
+        if ft_t_end is not None:
+            hdr = (f'  End-of-flattop summary  (t = {ft_t_end:.2f} s; '
+                   f'flattop window [{ft_t_start:.2f}, {ft_t_end:.2f}] s)')
+        else:
+            hdr = '  End-of-flattop summary  (no flattop detected; using last TORAX time)'
+        self._print(f'\n{"="*60}')
+        self._print(hdr)
+        self._print(f'  {"-"*56}')
+        self._print(f'  {"Parameter":<22} {"End-of-flattop":>16}   {"Flattop avg":>14}')
+        for label, v_end, v_avg, unit, fmt in rows:
+            end_str = (fmt.format(v_end) + (f' {unit}' if unit else '')) if v_end is not None else 'n/a'
+            avg_str = (fmt.format(v_avg)) if v_avg is not None else '—'
+            self._print(f'  {label:<22} {end_str:>16}   {avg_str:>14}')
+        self._print(f'{"="*60}')
 
     def save_tmtx_config(self, save_path=None):
         r'''! Write a self-contained reproduction config file: tmtx_config_{run}_{ts}.py
@@ -4461,6 +4789,13 @@ class TokaMaker_TORAX:
                 
         '''
         return plot_coils(self, save_path=save_path, display=display, **kwargs)
+
+    def plot_coil_current_tunnel(self, save_path=None, display=True, **kwargs):
+        r'''! Plot coil currents inside their rate-limited bounds "tunnel" over the pulse.
+                @param save_path Path to save figure. If None, does not save.
+                @param display Whether to show the plot.
+        '''
+        return plot_coil_current_tunnel(self, save_path=save_path, display=display, **kwargs)
 
     def plot_lcfs_evolution(self, save_path=None, display=True, one_plot=False, **kwargs):
         r'''! Plot time evolution of the LCFS for each pulse phase (rampup, flattop, rampdown).
@@ -5709,9 +6044,7 @@ def tm_loop_summary_plot(tt, loop_level_log, save_path=None, display=True):
             cell.set_facecolor('#d0e4f7')
             cell.set_text_props(fontweight='bold')
 
-    legend_text = ("Levels: Level 0: Raw TORAX profiles | Level 1: Sign-flip clipping | "
-                   "Level 2: Pedestal smoothing | Level 3: Power-flux shape\n"
-                   "Row shading: green = lowest level → red = highest level used this sim | "
+    legend_text = ("Row shading: green = lowest level → red = highest level used this sim | "
                    "gray = failed")
     ax_legend.text(0.5, 0.5, legend_text, ha='center', va='center', fontsize=9,
                    transform=ax_legend.transAxes,
@@ -6309,49 +6642,36 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # Bottom row (right): L–H transition power threshold, showing the high- and
-    # low-density branches of the Martin and Delabie scalings. The selected P_LH
-    # rides whichever branch is active; the crossover is at n_e_min_P_LH.
+    # Bottom row (right): L–H transition gate over the full pulse — Delabie P_LH
+    # (the threshold the formation model uses) vs P_SOL, shaded where P_SOL > P_LH
+    # (H-mode access satisfied).
     ax = ax_plh
-    ax.set_title(r'$P_{\mathrm{LH}}$ [W]')
-    t_plh, y_plh = _tx_scalar(tt, 'P_LH')
-    if t_plh is not None:
-        ax.plot(t_plh, y_plh, 'k-', linewidth=1.4, label=r'$P_{\mathrm{LH}}$ Martin', zorder=6)
-        t_m_hd, y_m_hd = _tx_scalar(tt, 'P_LH_high_density')
-        t_m_ld, y_m_ld = _tx_scalar(tt, 'P_LH_low_density')
-        if t_m_hd is not None:
-            ax.plot(t_m_hd, y_m_hd, color='tab:blue', ls='--', lw=1, label='Martin high-n')
-        if t_m_ld is not None:
-            ax.plot(t_m_ld, y_m_ld, color='tab:cyan', ls=':', lw=1, label='Martin low-n')
-        t_d, y_d = _tx_scalar(tt, 'P_LH_delabie')
-        t_d_hd, y_d_hd = _tx_scalar(tt, 'P_LH_delabie_high_density')
-        t_d_ld, y_d_ld = _tx_scalar(tt, 'P_LH_delabie_low_density')
-        if t_d is not None:
-            ax.plot(t_d, y_d, color='tab:red', ls='-', lw=1.4, label='Delabie', zorder=5)
-        if t_d_hd is not None:
-            ax.plot(t_d_hd, y_d_hd, color='tab:orange', ls='--', lw=1, label='Delabie high-n')
-        if t_d_ld is not None:
-            ax.plot(t_d_ld, y_d_ld, color='tab:pink', ls=':', lw=1, label='Delabie low-n')
-        ax.legend(fontsize=7, loc='upper left', ncol=2)
+    ax.set_title(r'$P_{\mathrm{LH}}$ (Delabie) vs $P_{\mathrm{SOL}}$ [W]')
+    t_d, y_d = _tx_scalar(tt, 'P_LH_delabie')
+    t_sol, y_sol = _tx_scalar(tt, 'P_SOL_total')
+    if t_d is not None and t_sol is not None:
+        ax.plot(t_d, y_d, color='tab:red', ls='-', lw=1.4, label=r'$P_{\mathrm{LH}}$ Delabie', zorder=5)
+        ax.plot(t_sol, y_sol, color='tab:blue', ls='-', lw=1.4, label=r'$P_{\mathrm{SOL}}$', zorder=4)
+        # Shade where P_SOL > P_LH (interpolate P_SOL onto the P_LH time base).
+        t_d_a = np.asarray(t_d, dtype=float)
+        y_d_a = np.asarray(y_d, dtype=float)
+        y_sol_i = np.interp(t_d_a, np.asarray(t_sol, dtype=float), np.asarray(y_sol, dtype=float))
+        ax.fill_between(t_d_a, y_d_a, y_sol_i, where=(y_sol_i > y_d_a), interpolate=True,
+                        color='tab:green', alpha=0.2, label=r'$P_{\mathrm{SOL}}>P_{\mathrm{LH}}$')
+        ax.legend(fontsize=7, loc='upper left')
     else:
         ax.text(
-            0.5, 0.5, r'$P_{\mathrm{LH}}$ not in TORAX output',
+            0.5, 0.5, r'$P_{\mathrm{LH}}$ / $P_{\mathrm{SOL}}$ not in TORAX output',
             transform=ax.transAxes, ha='center', va='center', fontsize=9, color='gray',
         )
     ax.set_xlabel('Time [s]')
     ax.set_ylabel('Power [W]')
     ax.grid(True, alpha=0.3)
 
-    # By default zoom this panel to +/-15 s around the L->H transition (clamped to the
-    # simulation window) so the crossover is readable; falls back to full range if no LH.
+    # Mark the L->H transition but keep the full simulation window (no zoom).
     _lh = getattr(tt, '_lh_time', None)
-    if _lh is not None and t_plh is not None:
-        _zoom = 15.0
-        _lo = max(float(tt._t_init), _lh - _zoom)
-        _hi = min(float(tt._t_final), _lh + _zoom)
-        if _hi > _lo:
-            ax.set_xlim(_lo, _hi)
-            ax.axvline(_lh, color='magenta', ls='--', lw=1, alpha=0.7, zorder=4)
+    if _lh is not None and t_d is not None:
+        ax.axvline(_lh, color='magenta', ls='--', lw=1, alpha=0.7, zorder=6)
 
     def _tx_scalar_if_nonzero(name, scale=1.0):
         t, y = _tx_scalar(tt, name, scale=scale)
@@ -6424,11 +6744,11 @@ def plot_PLH_components(tt, save_path=None, display=True):
       (0,1) Ip [MA]            (drives n_min ∝ Ip^0.34).
       (0,2) S = g0_face[-1] [m^2] (LCFS surface area; P_LH ∝ S^0.941).
       (1,0) a_minor, R_major [m] (set n_min; a also via R/a).
-      (1,1) the multiplicative P_LH factors: B^0.803, n̄^0.717, S^0.941, (2/Meff).
-      (1,2) P_LH branch decomposition (selected / high-n / low-n n^-2 / floor).
+      (1,1) P_LH branch decomposition (selected / high-n / low-n n^-2 / floor).
+      (1,2) the governing equations (LaTeX).
       (2,0) f_GW (line-avg)    — headroom to the density limit.
-      (2,1) P_SOL vs P_LH      — the transition gate (H-mode where P_SOL>P_LH).
-      (2,2) the governing equations (LaTeX).
+      (2,1) P_SOL vs P_LH (transition) — the transition gate, zoomed to L->H.
+      (2,2) P_SOL vs P_LH (full pulse) — same gate over the whole pulse duration.
 
     Isolates why the L->H transition can fire in one loop but not another even
     when geometry/Ip are nearly identical: the branch crossover is set by
@@ -6437,13 +6757,7 @@ def plot_PLH_components(tt, save_path=None, display=True):
     if getattr(tt, '_data_tree', None) is None:
         return
 
-    # Scaling exponents (torax scaling_laws._P_LH_SCALING_PARAMS). Prefactors
-    # (Martin 0.0488 / Delabie 0.0441) only appear in the LaTeX panel.
-    # Martin:  B^0.803 n^0.717 (2/Meff)^1.0   S^0.941
-    # Delabie: B^0.580 n^1.08  (2/Meff)^0.975 S^1.0   (x divertor factor D)
-    aB, an, aM, aS = 0.803, 0.717, 1.0, 0.941          # Martin
-    aB_d, an_d, aM_d, aS_d = 0.580, 1.08, 0.975, 1.0   # Delabie
-    Meff = 2.0  # (2/Meff)^aM factor; main-ion mass [amu], ~2-2.5 for D-T.
+    Meff = 2.0  # (2/Meff) factor; main-ion mass [amu], ~2-2.5 for D-T.
     try:
         Meff = float(np.asarray(getattr(tt._data_tree.scalars, 'A_i').to_numpy()).mean())
     except Exception:
@@ -6516,46 +6830,8 @@ def plot_PLH_components(tt, save_path=None, display=True):
     ax.set_title('P_LH branches'); ax.set_ylabel('[MW]'); ax.set_yscale('log'); ax.legend(fontsize=8)
 
 
-    # (1,2) the multiplicative P_LH factors (Martin solid, Delabie dashed)
-    ax = axes[1, 2]
-    if t_n is not None:
-        ax.plot(t_n, (np.asarray(y_n)) ** an,   'C0-',  lw=1.2, label=r'M $\bar n_{e,20}^{0.717}$')
-        ax.plot(t_n, (np.asarray(y_n)) ** an_d, 'C0--', lw=1.0, label=r'D $\bar n_{e,20}^{1.08}$')
-    if t_S is not None:
-        ax.plot(t_S, (np.asarray(y_S)) ** aS,   'C1-',  lw=1.2, label=r'M $S^{0.941}$')
-        ax.plot(t_S, (np.asarray(y_S)) ** aS_d, 'C1--', lw=1.0, label=r'D $S^{1.0}$')
-    ax.axhline(B0 ** aB,   color='C2', ls='-',  lw=1, label=fr'M $B_T^{{0.803}}={B0**aB:.1f}$')
-    ax.axhline(B0 ** aB_d, color='C2', ls='--', lw=1, label=fr'D $B_T^{{0.580}}={B0**aB_d:.1f}$')
-    ax.axhline((2.0 / Meff) ** aM, color='C3', ls=':', lw=1, label=fr'$(2/M_{{eff}})\approx{(2.0/Meff)**aM:.2f}$')
-    ax.set_title('mult. $P_{LH}$ factors (M solid / D dashed)'); ax.set_ylabel('factor'); ax.set_yscale('log'); ax.legend(fontsize=7, ncol=2)
-
-    # (2,0) Greenwald fraction
-    ax = axes[2, 0]
-    if t_fg is not None:
-        ax.plot(t_fg, y_fg, color=COLOR_TX, ls='-', lw=1)
-    ax.axhline(1.0, color='tab:red', ls='--', lw=1, label='Greenwald limit')
-    ax.set_title(r'$f_{GW}$ (line-avg)'); ax.set_ylabel(r'$f_{GW}$'); ax.legend(fontsize=8)
-
-    # (2,1) P_SOL vs P_LH gate (Delabie is what the formation model uses here)
-    ax = axes[2, 1]
-    t_lh, y_lh = _tx_scalar(tt, 'P_LH', scale=1e-6)
-    t_lhd, y_lhd = _tx_scalar(tt, 'P_LH_delabie', scale=1e-6)
-    t_sol, y_sol = _tx_scalar(tt, 'P_SOL_total', scale=1e-6)
-    if t_lh is not None:
-        ax.plot(t_lh, y_lh, 'k--', lw=1, label=r'$P_{LH}$ Martin')
-    if t_lhd is not None:
-        ax.plot(t_lhd, y_lhd, color='tab:red', ls='-', lw=1.4, label=r'$P_{LH}$ Delabie (used)')
-    if t_sol is not None:
-        ax.plot(t_sol, y_sol, color='tab:green', ls='-', lw=1, label=r'$P_{SOL}$')
-    # H-mode shading vs the Delabie threshold (the one the formation model gates on)
-    t_gate, y_gate = (t_lhd, y_lhd) if t_lhd is not None else (t_lh, y_lh)
-    if t_gate is not None and t_sol is not None:
-        ax.fill_between(t_sol, y_sol, y_gate, where=(np.asarray(y_sol) > np.asarray(y_gate)),
-                        color='tab:green', alpha=0.2, label=r'$P_{SOL}>P_{LH}$')
-    ax.set_title(r'$P_{SOL}$ vs $P_{LH}$'); ax.set_ylabel('[MW]'); ax.legend(fontsize=8)
-
-    # (2,2) the governing equations (LaTeX)
-    ax = axes[2, 2]; ax.axis('off')
+    # (1,2) the governing equations (LaTeX)
+    ax = axes[1, 2]; ax.axis('off')
     # NOTE: matplotlib mathtext (not a full LaTeX engine) — no \mathbf, \begin{cases},
     # \! or \qquad. Use plain-text headers and split the piecewise into two lines.
     eqn_lines = [
@@ -6581,9 +6857,64 @@ def plot_PLH_components(tt, save_path=None, display=True):
                 fontweight=('normal' if is_math else 'bold') if txt.endswith(':') else 'normal')
         y -= 0.072 if txt else 0.04
 
+    # (2,0) Greenwald fraction
+    ax = axes[2, 0]
+    if t_fg is not None:
+        ax.plot(t_fg, y_fg, color=COLOR_TX, ls='-', lw=1)
+    ax.axhline(1.0, color='tab:red', ls='--', lw=1, label='Greenwald limit')
+    ax.set_title(r'$f_{GW}$ (line-avg)'); ax.set_ylabel(r'$f_{GW}$'); ax.legend(fontsize=8)
+
+    # P_SOL vs P_LH gate (Delabie is what the formation model uses here). Drawn twice:
+    # zoomed to the transition at (2,1) and over the whole pulse at (2,2).
+    t_lh, y_lh = _tx_scalar(tt, 'P_LH', scale=1e-6)
+    t_lhd, y_lhd = _tx_scalar(tt, 'P_LH_delabie', scale=1e-6)
+    t_sol, y_sol = _tx_scalar(tt, 'P_SOL_total', scale=1e-6)
+
+    def _plot_psol_vs_plh(ax):
+        if t_lh is not None:
+            ax.plot(t_lh, y_lh, 'k--', lw=1, label=r'$P_{LH}$ Martin')
+        if t_lhd is not None:
+            ax.plot(t_lhd, y_lhd, color='tab:red', ls='-', lw=1.4, label=r'$P_{LH}$ Delabie (used)')
+        if t_sol is not None:
+            ax.plot(t_sol, y_sol, color='tab:green', ls='-', lw=1, label=r'$P_{SOL}$')
+        # H-mode shading vs the Delabie threshold (the one the formation model gates on)
+        t_gate, y_gate = (t_lhd, y_lhd) if t_lhd is not None else (t_lh, y_lh)
+        if t_gate is not None and t_sol is not None:
+            ax.fill_between(t_sol, y_sol, y_gate, where=(np.asarray(y_sol) > np.asarray(y_gate)),
+                            color='tab:green', alpha=0.2, label=r'$P_{SOL}>P_{LH}$')
+        ax.set_ylabel('[MW]'); ax.legend(fontsize=8)
+
+    # (2,1) zoomed to the L->H transition (the per-panel zoom loop below clamps the x-range)
+    _plot_psol_vs_plh(axes[2, 1])
+    axes[2, 1].set_title(r'$P_{SOL}$ vs $P_{LH}$ (transition)')
+
+    # (2,2) same plot but for the whole pulse duration (never zoomed)
+    _plot_psol_vs_plh(axes[2, 2])
+    axes[2, 2].set_title(r'$P_{SOL}$ vs $P_{LH}$ (full pulse)')
+
+    # Zoom every time-series panel to +/-15 s around the L->H transition (clamped to the
+    # simulation window) and mark the transition, matching the scalar-plot P_LH panel.
+    # (1,2) is the equations panel (axes off) and (2,2) shows the whole pulse, so both are
+    # left unzoomed.
+    _no_zoom = (axes[1, 2], axes[2, 2])
+    _lh = getattr(tt, '_lh_time', None)
+    _xlim = None
+    if _lh is not None:
+        _zoom = 15.0
+        _lo = max(float(tt._t_init), _lh - _zoom)
+        _hi = min(float(tt._t_final), _lh + _zoom)
+        if _hi > _lo:
+            _xlim = (_lo, _hi)
+
     for ax in axes.flat:
-        if ax is not axes[2, 2]:
+        if ax is not axes[1, 2]:
             ax.grid(True, alpha=0.3); ax.set_xlabel('Time [s]')
+        if ax not in _no_zoom and _xlim is not None:
+            ax.set_xlim(*_xlim)
+            ax.axvline(_lh, color='magenta', ls='--', lw=1, alpha=0.7, zorder=4)
+    # Mark the transition on the full-pulse panel too, without zooming.
+    if _lh is not None:
+        axes[2, 2].axvline(_lh, color='magenta', ls='--', lw=1, alpha=0.7, zorder=4)
 
     _loop = getattr(tt, '_current_loop', '?')
     plt.suptitle(fr'P_LH components — loop {_loop}   ($B_T \approx {B0:.2f}$ T,  $M_{{eff}}\approx{Meff:.2f}$)', fontsize=14)
@@ -6599,19 +6930,18 @@ def _coil_net_turns(tt, cname):
 
 
 def _coil_aturn_clim(tt):
-    r'''! Return (min, max) colormap limits in A-turns from _coil_bounds (A/turn * turns).'''
+    r'''! Return (min, max) colormap limits in A-turns from _coil_bounds (stored in A-turns).'''
     coil_bounds = getattr(tt, '_coil_bounds', {})
     if not coil_bounds:
         return -1.0, 1.0
     vals = []
-    for cname, (lo, hi) in coil_bounds.items():
-        n = _coil_net_turns(tt, cname)
-        vals.extend([lo * n, hi * n])
+    for lo, hi in coil_bounds.values():
+        vals.extend([lo, hi])
     return min(vals), max(vals)
 
 
 def plot_coils(tt, save_path=None, display=True):
-    r'''! Plot coil current traces in MA-turns with limit bands.'''
+    r'''! Plot coil current traces in MA-turns with limit bands (data stored in A-turns).'''
     coil_data = tt._results.get('COIL', {})
     if not coil_data:
         return
@@ -6622,15 +6952,14 @@ def plot_coils(tt, save_path=None, display=True):
     fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3 * nrows), squeeze=False)
     for k, cname in enumerate(coil_names):
         ax = axes[k // ncols, k % ncols]
-        n_turns = _coil_net_turns(tt, cname)
         t_vals = sorted(coil_data[cname].keys())
-        i_vals = [coil_data[cname][t_v] * n_turns * 1e-3 for t_v in t_vals]
+        i_vals = [coil_data[cname][t_v] * 1e-6 for t_v in t_vals]   # A-turns -> MA-turns
         ax.plot(t_vals, i_vals, '-o', ms=2, lw=1.2)
         if hasattr(tt, '_coil_bounds') and cname in tt._coil_bounds:
             lo, hi = tt._coil_bounds[cname]
-            lo_ka, hi_ka = lo * n_turns * 1e-6, hi * n_turns * 1e-6
-            ax.axhline(lo_ka, color='r', ls='--', lw=0.8, label=f'limit {lo_ka:.0f} MA-t')
-            ax.axhline(hi_ka, color='r', ls='--', lw=0.8, label=f'limit {hi_ka:.0f} MA-t')
+            lo_ma, hi_ma = lo * 1e-6, hi * 1e-6
+            ax.axhline(lo_ma, color='r', ls='--', lw=0.8, label=f'limit {lo_ma:.0f} MA-t')
+            ax.axhline(hi_ma, color='r', ls='--', lw=0.8, label=f'limit {hi_ma:.0f} MA-t')
         ax.set_title(cname, fontsize=9)
         ax.set_ylabel('I [MA-turns]', fontsize=8)
         ax.set_xlabel('Time [s]', fontsize=8)
@@ -6642,6 +6971,121 @@ def plot_coils(tt, save_path=None, display=True):
     plt.suptitle(f'Coil Currents (loop {tt._current_loop})', fontsize=12)
     plt.tight_layout()
     plt.subplots_adjust(top=0.92)
+    _save_or_display(fig, save_path, display)
+
+
+def plot_coil_current_tunnel(tt, save_path=None, display=True):
+    r'''! Per-coil current vs time inside the rate-limited bounds "tunnel".
+
+            One subplot per real coil: the solved coil current (dots connected by lines,
+            MA-turns) overlaid on the per-solve bounds. Forbidden regions (above the upper
+            limit and below the lower limit) are shaded gray; the allowed corridor between
+            the limits is left white, so the current trace should ride through the white
+            tunnel. The band at each solve time is the window [I_prev ± dIdt·dt] applied to
+            that solve (centered on the previous good current, drawn at the current time).
+
+            A final subplot shows every coil's realized |dI/dt| (MA-turns/s) between
+            consecutive solves, with each coil's configured rate limit as a dashed reference.
+
+            Requires set_coil_rate_limits() to have populated tt._coil_bounds_history during
+            the solve loop; falls back to a message if no history is present.
+
+            @param tt TokaMaker_TORAX instance.
+            @param save_path Output path (or None to display).
+            @param display Show interactively instead of saving.
+    '''
+    coil_data = tt._results.get('COIL', {})
+    history = getattr(tt, '_coil_bounds_history', {}) or {}
+    if not coil_data:
+        return
+
+    # Map timestep index -> time for the stored per-step bounds.
+    tm_times = tt._tm_times
+    # Per-coil bounds tunnel: {cname: (t_arr, lo_arr, hi_arr)} in MA-turns, sorted by time.
+    tunnel = {}
+    for cname in coil_data:
+        pts = []
+        for i, bounds in history.items():
+            if cname in bounds and 0 <= i < len(tm_times):
+                lo, hi = bounds[cname]
+                pts.append((tm_times[i], lo * 1e-6, hi * 1e-6))
+        pts.sort()
+        if pts:
+            t_arr = np.array([p[0] for p in pts])
+            lo_arr = np.array([p[1] for p in pts])
+            hi_arr = np.array([p[2] for p in pts])
+            tunnel[cname] = (t_arr, lo_arr, hi_arr)
+
+    coil_names = sorted(coil_data.keys())
+    n_coils = len(coil_names)
+    ncols = 3
+    # +1 panel for the combined dI/dt subplot.
+    nrows = max(1, (n_coils + 1 + ncols - 1) // ncols)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3 * nrows), squeeze=False)
+
+    for k, cname in enumerate(coil_names):
+        ax = axes[k // ncols, k % ncols]
+        t_vals = np.array(sorted(coil_data[cname].keys()))
+        i_vals = np.array([coil_data[cname][t_v] * 1e-6 for t_v in t_vals])  # MA-turns
+
+        # Gray-outside tunnel: shade above hi and below lo, leave the corridor white.
+        if cname in tunnel:
+            t_b, lo_b, hi_b = tunnel[cname]
+            # y-range for the gray fill: pad around both the trace and the bounds.
+            stack = np.concatenate([i_vals, lo_b, hi_b]) if i_vals.size else np.concatenate([lo_b, hi_b])
+            ymin = float(np.min(stack)); ymax = float(np.max(stack))
+            pad = 0.08 * (ymax - ymin if ymax > ymin else max(abs(ymax), 1.0))
+            ymin -= pad; ymax += pad
+            ax.fill_between(t_b, hi_b, ymax, color='gray', alpha=0.3, step=None, lw=0,
+                            label='forbidden')
+            ax.fill_between(t_b, ymin, lo_b, color='gray', alpha=0.3, step=None, lw=0)
+            ax.plot(t_b, hi_b, color='dimgray', lw=0.7)
+            ax.plot(t_b, lo_b, color='dimgray', lw=0.7)
+            ax.set_ylim(ymin, ymax)
+
+        ax.plot(t_vals, i_vals, '-o', ms=3, lw=1.3, color='C0', label='I_coil', zorder=5)
+        ax.set_title(cname, fontsize=9)
+        ax.set_ylabel('I [MA-turns]', fontsize=8)
+        ax.set_xlabel('Time [s]', fontsize=8)
+        ax.tick_params(labelsize=7)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=6, loc='best')
+
+    # Combined dI/dt subplot. The rate budget is enforced over the floored interval
+    # dt_eff = max(dt, dt_floor) — that is what the limit actually constrains — so we
+    # divide by dt_eff, not the raw consecutive dt. Dividing by a sub-floor dt would
+    # show spurious super-limit spikes even when the coil stayed inside its bound box.
+    ax = axes[n_coils // ncols, n_coils % ncols]
+    coil_dIdt = getattr(tt, '_coil_dIdt', {}) or {}
+    dt_floor = float(getattr(tt, '_coil_rate_dt_floor', 0.0))
+    colors = plt.cm.tab20(np.linspace(0, 1, max(n_coils, 1)))
+    plotted = False
+    for ci, cname in enumerate(coil_names):
+        t_vals = np.array(sorted(coil_data[cname].keys()))
+        if t_vals.size < 2:
+            continue
+        i_vals = np.array([coil_data[cname][t_v] for t_v in t_vals])  # A-turns
+        dt = np.diff(t_vals)
+        dt_eff = np.maximum(dt, dt_floor)
+        rate = np.abs(np.diff(i_vals)) / np.where(dt_eff == 0, np.nan, dt_eff) * 1e-6  # MA-turns/s
+        t_mid = 0.5 * (t_vals[1:] + t_vals[:-1])
+        ax.plot(t_mid, rate, '-o', ms=2, lw=1.0, color=colors[ci], label=cname)
+        plotted = True
+        if cname in coil_dIdt:
+            ax.axhline(abs(coil_dIdt[cname]) * 1e-6, color=colors[ci], ls='--', lw=0.7, alpha=0.7)
+    _floor_note = f' (rate over max(dt, {dt_floor:g}s))' if dt_floor > 0 else ''
+    ax.set_title(f'Realized |dI/dt| (dashed = limit){_floor_note}', fontsize=9)
+    ax.set_ylabel('|dI/dt| [MA-turns/s]', fontsize=8)
+    ax.set_xlabel('Time [s]', fontsize=8)
+    ax.tick_params(labelsize=7)
+    ax.grid(True, alpha=0.3)
+    if plotted:
+        ax.legend(fontsize=5, loc='best', ncol=2)
+
+    for k in range(n_coils + 1, nrows * ncols):
+        axes[k // ncols, k % ncols].axis('off')
+    plt.suptitle(f'Coil Current Tunnel (loop {tt._current_loop})', fontsize=13, y=1.0)
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
     _save_or_display(fig, save_path, display)
 
 
@@ -7059,8 +7503,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
         cs_colors = plt.cm.tab10(np.linspace(0, 1, max(len(cs_coils), 1)))
         for ci, (cname, cvals) in enumerate(cs_coils):
             ct = sorted(cvals.keys())
-            n_turns = _coil_net_turns(tt, cname)
-            ci_vals = [cvals[t_v] * n_turns * 1e-6 for t_v in ct]
+            ci_vals = [cvals[t_v] * 1e-6 for t_v in ct]   # A-turns -> MA-turns
             ax.plot(ct, ci_vals, ls=LS_PRI, lw=LW * 0.8, color=cs_colors[ci], label=cname)
         ax.legend(fontsize=LEGEND_FS - 2, loc='lower left', ncol=2)
     else:
@@ -7074,8 +7517,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
         oth_colors = plt.cm.tab20(np.linspace(0, 1, max(len(other_coils), 1)))
         for ci, (cname, cvals) in enumerate(other_coils):
             ct = sorted(cvals.keys())
-            n_turns = _coil_net_turns(tt, cname)
-            ci_vals = [cvals[t_v] * n_turns * 1e-6 for t_v in ct]
+            ci_vals = [cvals[t_v] * 1e-6 for t_v in ct]   # A-turns -> MA-turns
             ax.plot(ct, ci_vals, ls=LS_PRI, lw=LW * 0.75, color=oth_colors[ci], label=cname)
         ax.legend(fontsize=LEGEND_FS - 3, loc='lower left', ncol=2)
     else:
@@ -7656,7 +8098,13 @@ def _init_TM_object(tmtx_config):
     vsc = tm_inputs.get('vsc', None)
     if vsc is not None:
         mygs.set_coil_vsc({f"{vsc}U": 1.0, f"{vsc}L": -1.0})
-    coil_bounds = {key: tm_inputs['coil_bounds'] for key in mygs.coil_sets}
+    # tm_inputs['coil_bounds'] is [min, max] in total A-turns (public unit); convert to the
+    # per-winding current [A/turn] TokaMaker expects: I[A/turn] = I[A-turns] / n_turns.
+    _lo_at, _hi_at = tm_inputs['coil_bounds']
+    coil_bounds = {}
+    for key in mygs.coil_sets:
+        nt = mygs.coil_sets[key].get('net_turns', 1.0)
+        coil_bounds[key] = [_lo_at / nt, _hi_at / nt]
     mygs.set_coil_bounds(coil_bounds)
 
     ffp_prof = create_power_flux_fun(40, 1.5, 2.0)
@@ -7736,6 +8184,8 @@ def _create_seed_eqdsks(tmtx_config, mygs, save_dir=None):
     R_mag_traj = sc.get('R_mag', None)
 
     psi_lcfs_weight = sc.get('psi_lcfs_weight', 10.0)
+    isoflux_weight  = sc.get('isoflux_weight', 100.0)
+    saddle_weight   = sc.get('saddle_weight', 10.0)
     diverted_window = sc.get('diverted_window', None)
     x_points        = sc.get('x_points', None)
     diverted_lcfs   = sc.get('diverted_lcfs', None)
@@ -7772,16 +8222,14 @@ def _create_seed_eqdsks(tmtx_config, mygs, save_dir=None):
         if diverted:
             if x_points is None or diverted_lcfs is None:
                 raise ValueError("diverted_window requires both 'x_points' and 'diverted_lcfs' in seed_eqdsk_config.")
-            mygs.set_saddle_constraints(np.asarray(x_points))
+            mygs.set_saddle_constraints(np.asarray(x_points), weights=np.full(x_points.shape[0], saddle_weight))
             isoflux_pts = np.asarray(diverted_lcfs)
         else:
             mygs.set_saddle_constraints(None)
             isoflux_pts = create_isoflux(n_isoflux, R_mag, Z0, a, kappa, delta)
 
-        mygs.set_isoflux_constraints(isoflux_pts)
-        mygs.set_psi_constraints(isoflux_pts,
-                                 np.full(isoflux_pts.shape[0], psi_lcfs_target),
-                                 weights=np.full(isoflux_pts.shape[0], psi_lcfs_weight))
+        mygs.set_isoflux_constraints(isoflux_pts, weights=np.full(isoflux_pts.shape[0], isoflux_weight))
+        mygs.set_psi_constraints(isoflux_pts, np.full(isoflux_pts.shape[0], psi_lcfs_target), weights=np.full(isoflux_pts.shape[0], psi_lcfs_weight))
         mygs.set_targets(Ip=Ip, pax=pax)
         mygs.init_psi(R_mag, Z0, a, kappa, delta)
 
@@ -7907,6 +8355,9 @@ def _init_TMTX_from_configs(tmtx_config, torax_config, mygs):
 
     if 'coil_reg' in tmtx_config:
         tmtx.set_TokaMaker_coil_reg(**tmtx_config['coil_reg'])
+
+    if 'coil_rate_limits' in tmtx_config:
+        tmtx.set_coil_rate_limits(**tmtx_config['coil_rate_limits'])
 
     if 'evolve' in tmtx_config:
         tmtx.set_evolve(**tmtx_config['evolve'])
