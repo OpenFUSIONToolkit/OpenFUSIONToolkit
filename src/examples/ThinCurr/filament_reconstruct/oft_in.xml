@@ -1,0 +1,13 @@
+<oft>
+  <thincurr>
+    <eta>1.257E-5</eta>
+    <icoils>
+      <coil_set name="Example Coil">
+        <coil scale="1.0">1.6, 0.0</coil>
+      </coil_set>
+      <coil_set name="Plasma Filament">
+        <coil scale="1.0">1.0, 0.0</coil>
+      </coil_set>
+    </icoils>
+  </thincurr>
+</oft>
