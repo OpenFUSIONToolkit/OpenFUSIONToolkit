@@ -168,7 +168,7 @@ TYPE :: oft_gs_solver
   REAL(8) :: param_mat(3,3),mat_save(2,2),param_vec(3),param_rhs(3)
   REAL(r8), POINTER :: saddle_save(:,:)
   integer(i4) :: i,ii,j,k,cell
-  integer(i4) :: nl_its
+  integer(i4) :: nl_its,ierr
   integer(i4) :: eq_count = 0
   logical :: pm_save,fail_test
 CONTAINS
@@ -240,7 +240,7 @@ TYPE :: gs_factory
   TYPE(xdmf_plot_file) :: xdmf !< XDMF plotting object
   TYPE(oft_lusolver) :: lu_solver !< \f$ \frac{1}{R} \Delta^* \f$ inverse solver
   TYPE(oft_lusolver) :: lu_solver_dt !< LHS inverse solver with time dependence
-  TYPE(oft_gs_solver) :: gs_solver !< LHS inverse solver with time dependence
+  TYPE(oft_gs_solver) :: gs_solver !< GS solver object
   TYPE(axi_coil_set), POINTER, DIMENSION(:) :: coils_ext => NULL() !< External coil definitions
   TYPE(coil_region), POINTER, DIMENSION(:) :: coil_regions => NULL() !< Meshed coil regions
   TYPE(oft_1d_real), POINTER, DIMENSION(:) :: dist_coil => NULL() !< Current distribution for each coil (if defined)
@@ -2472,7 +2472,8 @@ IF(ALL(factory%target_weights<=0.d0))THEN
   CALL lapack_matinv(3,self%param_mat,ierr_loc)
   oft_env%pm=self%pm_save
   IF(ierr_loc/=0)THEN
-    error_flag=-6
+    IF(PRESENT(ierr))ierr=-6
+    self%ierr = ierr
     RETURN
   END IF
   self%param_vec=MATMUL(self%param_mat,self%param_rhs)
@@ -2492,7 +2493,8 @@ IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
     self%param_psi(2)%f=>self%psi_press
     CALL equil%fit_isoflux(self%psip,ierr_loc,self%mat_save,self%param_rhs,self%param_psi)
     IF(ierr_loc/=0)THEN
-      error_flag=-7
+      IF(PRESENT(ierr))ierr=-7
+      self%ierr = ierr
       RETURN
     END IF
     equil%ffp_scale=self%param_rhs(1)
@@ -2501,7 +2503,8 @@ IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
   ELSE
     CALL equil%fit_isoflux(self%psip,ierr_loc)
     IF(ierr_loc/=0)THEN
-      error_flag=-7
+      IF(PRESENT(ierr))ierr=-7
+      self%ierr = ierr
       RETURN
     END IF
   END IF
@@ -2673,7 +2676,9 @@ IF(SQRT(self%nl_res)<factory%nl_tol)THEN
 END IF
 
 ! IF(oft_env%pm)CALL oft_decrease_indent
-IF(i>factory%maxits)error_flag=-1
+IF(i>factory%maxits)THEN
+  error_flag=-1
+END IF
 IF(error_flag==0)THEN
   self%nl_its=i
 ELSE
@@ -2683,6 +2688,7 @@ END IF
 IF(PRESENT(ierr))THEN
   ierr=error_flag
 END IF
+self%ierr = ierr
 end subroutine gs_step
 
 subroutine gs_solve(self,equil,ierr)
