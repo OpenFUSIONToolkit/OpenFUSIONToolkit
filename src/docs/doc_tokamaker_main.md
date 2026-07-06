@@ -38,6 +38,7 @@ new meshes, see \ref doc_gs_main_mesh_ex.
  - \subpage doc_tMaker_LTX_ex2
  - \subpage doc_tMaker_ITER_ex3
  - \subpage doc_tMaker_MANTA_ex2
+ - \subpage doc_tMaker_ARC_ex2
 
 ### Equilibrium Reconstruction
  - \subpage doc_tMaker_ITER_ex4
@@ -81,3 +82,4 @@ The following examples illustrate usage of \ref OpenFUSIONToolkit.TokaMaker.mesh
  - \subpage doc_tMaker_MANTA_ex1
  - \subpage doc_tMaker_LTX_ex1
  - \subpage doc_tMaker_dipole_ex1
+ - \subpage doc_tMaker_ARC_ex1
