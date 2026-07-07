@@ -4,7 +4,7 @@ install(DIRECTORY torus DESTINATION examples/ThinCurr COMPONENT examples)
 install(DIRECTORY ports DESTINATION examples/ThinCurr COMPONENT examples)
 install(DIRECTORY REGCOIL DESTINATION examples/ThinCurr COMPONENT examples)
 install(DIRECTORY xml DESTINATION examples/ThinCurr COMPONENT examples)
-install(DIRECTORY filament-reconstruct DESTINATION examples/ThinCurr COMPONENT examples)
+install(DIRECTORY filament_reconstruct DESTINATION examples/ThinCurr COMPONENT examples)
 
 
 if( OFT_BUILD_TESTS )
