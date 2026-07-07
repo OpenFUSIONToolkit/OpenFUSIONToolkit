@@ -753,13 +753,13 @@ IF(has_eta_vol) count_provided = count_provided + 1
 IF(has_thickness) count_provided = count_provided + 1
 
 ! Allow eta_surf alone, any two parameters, or all three parameters.
-IF(count_provided == 0) THEN
+IF(count_provided == 0)THEN
   CALL copy_string('Provide eta_surf alone, or any two of "eta_surf", "eta_vol", and "thickness" to thincurr_set_eta',error_str)
   RETURN
 END IF
 
-IF(count_provided == 1) THEN
-  IF(.NOT.has_eta_surf) THEN
+IF(count_provided == 1)THEN
+  IF(.NOT.has_eta_surf)THEN
     CALL copy_string('"eta_surf" must be provided alone, or with one of "eta_vol" or "thickness"',error_str)
     RETURN
   END IF
@@ -780,7 +780,7 @@ IF(count_provided == 1) THEN
   RETURN
 END IF
 
-IF(count_provided == 3) THEN
+IF(count_provided == 3)THEN
   CALL oft_warn('All three of "eta_surf", "eta_vol", and "thickness" were provided; eta_surf will be recomputed from eta_vol and thickness.')
   CALL c_f_pointer(eta_vol_ptr, eta_vol_tmp, [tw_obj%mesh%nreg])
   CALL c_f_pointer(thickness_ptr, thickness_tmp, [tw_obj%mesh%nreg])
@@ -805,7 +805,7 @@ IF(count_provided == 3) THEN
 END IF
 
 ! Exactly two parameters provided: derive the third
-IF(has_eta_surf .AND. has_eta_vol) THEN
+IF(has_eta_surf .AND. has_eta_vol)THEN
   ! Derive thickness = eta_vol / eta_surf
   CALL c_f_pointer(eta_surf_ptr, eta_surf_tmp, [tw_obj%mesh%nreg])
   CALL c_f_pointer(eta_vol_ptr, eta_vol_tmp, [tw_obj%mesh%nreg])
@@ -829,7 +829,7 @@ IF(has_eta_surf .AND. has_eta_vol) THEN
   RETURN
 END IF
 
-IF(has_eta_surf .AND. has_thickness) THEN
+IF(has_eta_surf .AND. has_thickness)THEN
   ! Derive eta_vol = eta_surf * thickness
   CALL c_f_pointer(eta_surf_ptr, eta_surf_tmp, [tw_obj%mesh%nreg])
   CALL c_f_pointer(thickness_ptr, thickness_tmp, [tw_obj%mesh%nreg])
@@ -853,7 +853,7 @@ IF(has_eta_surf .AND. has_thickness) THEN
   RETURN
 END IF
 
-IF(has_eta_vol .AND. has_thickness) THEN
+IF(has_eta_vol .AND. has_thickness)THEN
   ! Derive eta_surf = eta_vol / thickness
   CALL c_f_pointer(eta_vol_ptr, eta_vol_tmp, [tw_obj%mesh%nreg])
   CALL c_f_pointer(thickness_ptr, thickness_tmp, [tw_obj%mesh%nreg])
@@ -890,7 +890,7 @@ TYPE(tw_type), POINTER :: tw_obj ! Pointer to the ThinCurr object
 CALL copy_string('',error_str) ! Initialize error string to empty
 CALL c_f_pointer(tw_ptr, tw_obj) ! Associate the ThinCurr object pointer with a pointer
 CALL c_f_pointer(thickness_ptr, thick_tmp, [tw_obj%mesh%nreg]) ! Associate the thickness array pointer with a pointer of the correct size
-IF (ASSOCIATED(tw_obj%Thickness)) THEN
+IF(ASSOCIATED(tw_obj%Thickness))THEN
   thick_tmp = tw_obj%Thickness ! If thickness is set, copy it to the output array
 ELSE
   ! Warn that thickness is not set, returning -1 for all regions. This is the legacy behavior, but users should be aware that this may not be physically correct.
