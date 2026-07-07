@@ -46,8 +46,8 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
         # --- 2. Calculate Internal Amplitude & Left Side ---
 
         # Smoothing factor for the blend
-        k_smooth = (amp / width) * (blend_width / 4.0) 
-        if k_smooth < 1e-5: 
+        k_smooth = (amp / width) * (blend_width / 4.0)
+        if k_smooth < 1e-5:
             k_smooth = 1e-5
 
         # Case A: Standard Spike (Amp > Offset)
@@ -56,11 +56,11 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
             diff = amp - offset
             if diff > 1e-10:
                 argument = 1.0 - numpy.exp((offset - amp) / k_smooth)
-                if argument <= 0: 
+                if argument <= 0:
                     argument = 1e-16
                 internal_amp = amp + k_smooth * numpy.log(argument)
             else:
-                internal_amp = amp 
+                internal_amp = amp
 
             spike_profile = raw_shape(psi) / val_peak_raw * internal_amp
             profile_left = k_smooth * numpy.logaddexp(offset / k_smooth, spike_profile / k_smooth)
@@ -75,7 +75,7 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
         # Model: y = stitch_height * cos(omega * (x - x_peak)) ^ tail_alpha
 
         dist_to_edge = 1.0 - x_peak
-        if dist_to_edge < 1e-5: 
+        if dist_to_edge < 1e-5:
             dist_to_edge = 1e-5
 
         # Determine omega to hit y_sep exactly
@@ -99,7 +99,7 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
             arg = omega * (psi - x_peak)
             base_cos = numpy.cos(arg)
             # Ensure positive base for float power
-            base_cos = numpy.maximum(base_cos, 0) 
+            base_cos = numpy.maximum(base_cos, 0)
 
             profile_right = stitch_height * (base_cos ** tail_alpha)
 
@@ -137,7 +137,7 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
     if offset == 0.0:
         final_profile = generate_baseline_prof(psi, amp, center, width, -1e10, sk, y_sep, blend_width, tail_alpha)
     else:
-        # Find scalar "alpha" that solves 
+        # Find scalar "alpha" that solves
         result = root_scalar(objective_function,
                                 args=(psi, amp, center, width, offset, sk, y_sep, blend_width, tail_alpha),
                                 bracket=[-1e+10, 10*amp],
@@ -259,11 +259,11 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     lmin_j_BS = min(masked_j_BS)
     lmin_arg = numpy.argmin(masked_j_BS)
     fit_mask = (psi_N >= masked_psi_N[lmin_arg])
-    
+
     # Splice j_BS profile edge spike onto flat profile with value set to min(j_BS)
     masked_spike = numpy.ones_like(psi_N)*lmin_j_BS
     masked_spike[fit_mask] = j_bootstrap[fit_mask]
-    
+
     # Define the blend window to smooth out junction of flat core profile and edge j_BS spike
     # Set the total width to be half the distance between splice location and peak
     jBS_min_loc = masked_psi_N[lmin_arg]
@@ -284,7 +284,7 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     # Determine Boundary Conditions
     # Left Boundary (Start): strictly flat, so slope is 0
     y_start  = masked_spike[idx_start]
-    dy_start = 0.0  
+    dy_start = 0.0
 
     # Right Boundary (End): located on the peaked profile
     # Estimate the slope (dy/dx) using a central difference at x_end
@@ -316,7 +316,7 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
 
     # Apply the patch to the main masked j_BS profile
     masked_spike[idx_start : idx_end + 1] = y_patch
-    
+
     # Attempt to fit bootstrap parameterization to calculated profile (deprecated)
     # Initial parameter guess
     sigma_init = fwhm/2.355  # Convert FWHM to sigma
@@ -366,7 +366,7 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
         popt = numpy.asarray(p0, dtype=float)
         amp, center, width, offset, sk, y_sep, blend_width = popt
         spike_only = masked_spike.copy()
-    
+
     if diagnostic_plots:
         plt.figure()
         plt.plot(psi_N[fit_mask],j_bootstrap[fit_mask]/1e6,label='Input j_BS')
@@ -377,7 +377,7 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
         plt.xlim(0.5,1.02)
         plt.legend(loc='best')
         plt.show()
-    
+
     results = {
         'sigma': width,                 # Gaussian width (sigma)
         'background': offset,           # background level
@@ -406,7 +406,7 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
 
     # Solve Grad-Shafranov
     mygs.solve()
-    
+
 def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
                             Ip_target, psi_pad, spike_prof=None,
                             tolerance=0.01, max_iter=5, diagnostic_plots=False, verbose=True):
@@ -450,7 +450,7 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
         _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
 
-        tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs[0], ravgs[1])
+        tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 
         if diagnostic_plots:
             plt.figure()
@@ -556,7 +556,7 @@ def calculate_ln_lambda(Te, Ti, ne, ni, Zeff=1.0,
     @result Tuple (\f$\ln\Lambda_e\f$, \f$\ln\Lambda_{ii}\f$)
     '''
     if electron_lnLambda_model == 'NRL':
-        ln_lambda_e = (23.5 
+        ln_lambda_e = (23.5
                        - numpy.log(numpy.sqrt(ne / 1e6) * Te**(-5.0/4.0))
                        - numpy.sqrt(1e-5 + (numpy.log(Te) - 2)**2 / 16.0))
     else:
@@ -624,10 +624,10 @@ def redl_bootstrap(
     @param nu_i_star_override Override ion collisionality if set
     @result Tuple (bootstrap current profile \f$j_{BS}(\hat{\psi})\f$, coefficient dictionary)
     '''
-    
+
     # Apply Zeff override if requested
     if Zeff_override is not None:
-        Zeff = (numpy.full_like(Zeff, Zeff_override) 
+        Zeff = (numpy.full_like(Zeff, Zeff_override)
                 if numpy.isscalar(Zeff_override) else Zeff_override)
 
     inputs = [Te, Ti, ne, ni, pe, pi, Zeff, R, q, eps, fT, I_psi,
@@ -640,7 +640,7 @@ def redl_bootstrap(
     EC = 1.602176634e-19
     p_total = pe + pi
     R_pe = pe / p_total
-        
+
     # =====================================================================
     # 1. Collisionality
     # =====================================================================
@@ -780,7 +780,7 @@ def redl_bootstrap(
         j_bootstrap *= numpy.sign(q)
         for k in term_decomp:
             term_decomp[k] *= numpy.sign(q)
-    
+
     coeffs = {
         'L31': L31, 'L32': L32, 'L34': L34,
         'alpha': alpha, 'alpha0': alpha0,
@@ -840,9 +840,9 @@ def solve_with_bootstrap(mygs,
             from omfit_classes.utils_fusion import sauter_bootstrap
         except ImportError:
             raise ImportError('omfit_classes.utils_fusion not installed')
-    
+
     EC = 1.602176634e-19
-    
+
     # Handle mutable default argument
     if Zis is None:
         Zis = [1.]
@@ -852,14 +852,14 @@ def solve_with_bootstrap(mygs,
     ni = numpy.asarray(ni)
     Ti = numpy.asarray(Ti)
     Zeff = numpy.asarray(Zeff)
-    
+
     if inductive_jphi is not None:
         inductive_jphi = numpy.asarray(inductive_jphi).copy()
-    
+
     # Calculate Pressure [Pa]
     # p = n * T * k_B. Since T is in eV, k_B is essentially elementary charge e
     pressure = (EC * ne * Te) + (EC * ni * Ti)
-    
+
     # Reconstruct normalized psi grid based on input pressure length
     # Note: Assumes inputs are evenly sampled in psi_norm 0..1
     n_psi = len(pressure)
@@ -882,25 +882,25 @@ def solve_with_bootstrap(mygs,
         # Get geometry and flux functions
         _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
         _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
-        
+
         # Geometry terms
-        ft = 1 - fc 
-        eps = r_avgs[2] / r_avgs[0]
+        ft = 1 - fc
+        eps = r_avgs['<a>'] / r_avgs['<R>']
         _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
-        R_avg = ravgs_q[0]
+        R_avg = ravgs_q['<R>']
 
         # Gradients (using raw psi for derivatives)
         psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
         d_psi = numpy.gradient(psi_N)
-        
+
         # Avoid division by zero in gradients
         d_psi_eff = d_psi * psi_range
         d_psi_eff[d_psi_eff == 0] = 1e-9
 
         pprime_local = numpy.gradient(pressure) / d_psi_eff
-        
+
         j_BS_final = numpy.zeros_like(pressure)
-        
+
         if include_jBS:
             dn_e_dpsi = numpy.gradient(ne) / d_psi_eff
             dT_e_dpsi = numpy.gradient(Te) / d_psi_eff
@@ -932,13 +932,13 @@ def solve_with_bootstrap(mygs,
                 Zdom = 1.0  # deuterium
                 Zavg = ne / ni
                 Zion = (Zdom**2 * Zavg * Zeff)**0.25
-                nu_i_star = (4.90e-18 * numpy.abs(qvals) * R_avg * ni 
+                nu_i_star = (4.90e-18 * numpy.abs(qvals) * R_avg * ni
                             * Zion**4 * ln_lii / (Ti**2 * eps**1.5))
 
                 # Electron collisionality
-                nu_e_star = (6.921e-18 * numpy.abs(qvals) * R_avg * ne 
+                nu_e_star = (6.921e-18 * numpy.abs(qvals) * R_avg * ne
                             * Zeff * ln_le / (Te**2 * eps**1.5))
-                
+
                 j_BS_neo, _ = redl_bootstrap( # native re-implementation of Redl 2021
                     psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
                     pe=EC*(ne*Te), pi=EC*(ni*Ti),
@@ -953,7 +953,7 @@ def solve_with_bootstrap(mygs,
                     use_sign_q=True, # convention-dependent
                     formula_form='jboot1', # no d(ln ne)=d(ln ni) assumption
                 )
-            
+
             # Convert to A/m^2
             j_BS_final = j_BS_neo * (R_avg / f)
             j_BS_final = numpy.nan_to_num(j_BS_final, nan=0.0)
@@ -964,7 +964,7 @@ def solve_with_bootstrap(mygs,
         current_jphi_target = inductive_jphi if inductive_jphi is not None else numpy.zeros_like(pressure)
 
         spike_prof = numpy.zeros_like(j_BS_final)
-        
+
         if include_jBS:
             if isolate_edge_jBS:
                 if parameterize_jBS:
@@ -975,7 +975,7 @@ def solve_with_bootstrap(mygs,
                     spike_prof = res['masked_spike'] * scale_jBS
             else:
                 spike_prof = j_BS_final * scale_jBS
-        
+
         # Solve for alpha: integral(alpha * j_ind + j_spike) = Ip_target
         try:
             sol = root_scalar(current_scaling_objective,
@@ -990,18 +990,18 @@ def solve_with_bootstrap(mygs,
 
         matched_j_inductive = alpha_opt * current_jphi_target
         matched_jphi = matched_j_inductive + spike_prof
-        
+
         # Package results
         pp_dict = {'type': 'linterp', 'x': psi_N, 'y': pprime_local / pprime_local[0]}
         ffp_dict = {'type': 'jphi-linterp', 'x': psi_N, 'y': numpy.nan_to_num(matched_jphi)}
-        
+
         return pp_dict, ffp_dict, j_BS_final, matched_j_inductive, spike_prof
 
     # --- Main Execution Flow ---
     mygs.set_targets(Ip=Ip_target, pax=pressure[0])
 
     if inductive_jphi is not None:
-        
+
         if verbose:
             print('\n >>> Matching input core j_phi with G-S solution')
 
@@ -1028,7 +1028,7 @@ def solve_with_bootstrap(mygs,
 
         # Enforce P' edge condition
         pp_prof['y'][-1] = 0.
-        
+
         if verbose:
             print('\n >>> Finding optimal j_phi scale factor')
         # Find optimal jphi scale
@@ -1039,11 +1039,11 @@ def solve_with_bootstrap(mygs,
         )
         # Ip-scale secant removed as redundant; core-j0 scaling retained.
         final_scale_Ip = 1.0
-        
+
         if verbose:
             print('\n >>> Iterating on H-mode equilibrium solution')
 
-        for n in range(iterations):            
+        for n in range(iterations):
             # Calculate new profiles
             pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
                 psi_N, include_jBS=True
@@ -1055,7 +1055,7 @@ def solve_with_bootstrap(mygs,
             matched_input_jphi = final_scale_j0*matched_j_inductive + spike_prof
             ffp_prof['type'] = 'jphi-linterp'
             ffp_prof['y'] = matched_input_jphi
-            
+
             scaled_Ip_target = Ip_target*final_scale_Ip
             pax_target = pressure[0]
 
@@ -1065,7 +1065,7 @@ def solve_with_bootstrap(mygs,
             _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
             _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
 
-            tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs[0], ravgs[1])
+            tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 
             if diagnostic_plots:
                 plt.figure()
@@ -1086,5 +1086,5 @@ def solve_with_bootstrap(mygs,
                 'isolated_j_BS' : spike_prof,
                 'scale_j0' : final_scale_j0,
                 'scale_Ip' : final_scale_Ip}
-    
+
     return results
