@@ -830,7 +830,7 @@ def calc_lcfs_geo(lcfs_points):
 
     return area, (R_c, Z_c) 
 
-def calc_current_centroid(R_fil, Z_fil, I):
+def calc_current_centroid(R_fil, Z_fil, I_fil):
     '''! Calculate the current centroid of a filament grid using signed current weights
         This variant uses signed currents as weights, so opposing currents can partially
         cancel out the centroid position. Useful for computing the net moment of the
@@ -839,27 +839,27 @@ def calc_current_centroid(R_fil, Z_fil, I):
         Calculation: R_c = sum(I_i * R_i) / sum(I_i)
                     Z_c = sum(I_i * Z_i) / sum(I_i)
         
-        @param R 1D or 2D array of R (radial) coordinates of filament points `[m]`
-        @param Z 1D or 2D array of Z (vertical) coordinates of filament points `[m]`
-        @param I 1D or 2D array of currents at each filament point `[A]`, must match shape of R and Z
+        @param R_fil 1D or 2D array of R (radial) coordinates of filament points `[m]`
+        @param Z_fil 1D or 2D array of Z (vertical) coordinates of filament points `[m]`
+        @param I_fil 1D or 2D array of currents at each filament point `[A]`, must match shape of R and Z
         @result R coordinate of the current centroid `[m]`
         @result Z coordinate of the current centroid `[m]`
         @result Net current (algebraic sum) `[A]`
     '''
     R = numpy.asarray(R_fil)  # Ensure inumpyuts are numpy arrays
     Z = numpy.asarray(Z_fil)
-    I = numpy.asarray(I)
+    I_fil = numpy.asarray(I_fil)
     
     # Verify shapes match
-    if not (R.shape == Z.shape == I.shape):
+    if not (R.shape == Z.shape == I_fil.shape):
         raise ValueError(
             f"R, Z, and I must have the same shape. "
-            f"Got R: {R.shape}, Z: {Z.shape}, I: {I.shape}"
+            f"Got R: {R.shape}, Z: {Z.shape}, I: {I_fil.shape}"
         )
     
     R_flat = R.ravel()
     Z_flat = Z.ravel()
-    I_flat = I.ravel()
+    I_flat = I_fil.ravel()
     
     I_net = numpy.sum(I_flat)
     if I_net == 0:
