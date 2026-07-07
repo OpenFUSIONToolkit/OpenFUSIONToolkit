@@ -1072,7 +1072,7 @@ ELSE
   psihat=(psi-self%plasma_bounds(1))/(self%plasma_bounds(2)-self%plasma_bounds(1))
 END IF
 b=0.d0
-IF(psihat<0.d0)RETURN
+IF(psihat<MIN(0.d0,self%x(1)).AND.(.NOT.self%include_sol))RETURN
 !
 if(psihat<=self%x(1))then
   b = psihat*(.5d0*psihat)/self%x(1)*(self%yp(1)-self%y0) + psihat*self%y0
@@ -1104,7 +1104,7 @@ ELSE
   psihat=(psi-self%plasma_bounds(1))/(self%plasma_bounds(2)-self%plasma_bounds(1))
 END IF
 b=0.d0
-IF(psihat<0.d0)RETURN
+IF(psihat<MIN(0.d0,self%x(1)).AND.(.NOT.self%include_sol))RETURN
 !
 if(psihat<=self%x(1))then
   x = psihat/self%x(1)
@@ -1134,7 +1134,7 @@ ELSE
   psihat=(psi-self%plasma_bounds(1))/(self%plasma_bounds(2)-self%plasma_bounds(1))
 END IF
 b=0.d0
-IF(psihat<0.d0)RETURN
+IF(psihat<MIN(0.d0,self%x(1)).AND.(.NOT.self%include_sol))RETURN
 !
 if(psihat<=self%x(1))then
   x = 1.d0/(self%plasma_bounds(2)-self%plasma_bounds(1))/self%x(1)
@@ -1178,7 +1178,11 @@ DO i=1,self%npsi
   x=self%x(i)
   !---
   IF(i==1)THEN
-    self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
+    IF(self%include_sol)THEN
+      self%y(i)=0.d0
+    ELSE
+      self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
+    END IF
   ELSE
     xp=self%x(i-1)
     self%y(i-1)=self%y(i-1) - (xp*(.5d0*xp-xp)/(x-xp)*(self%yp(i)-self%yp(i-1)) &
@@ -1396,7 +1400,11 @@ END DO
 DO i=1,self%npsi
   x=self%x(i)
   IF(i==1)THEN
-    self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
+    IF(self%include_sol)THEN
+      self%y(i)=0.d0
+    ELSE
+      self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
+    END IF
   ELSE
     xp=self%x(i-1)
     self%y(i-1)=self%y(i-1) - (xp*(.5d0*xp-xp)/(x-xp)*(self%yp(i)-self%yp(i-1)) &

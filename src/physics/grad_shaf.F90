@@ -4754,36 +4754,44 @@ class(gs_j_interp), intent(inout) :: self !< Interpolation object
 integer(4), intent(in) :: cell !< Cell for interpolation
 real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
 real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
-real(8), intent(out) :: val(:) !< Reconstructed field at f [3]
-real(8) :: psitmp(1),gpsitmp(3),pt(3),pani(2),bcross_kappa(1)
+real(8), intent(out) :: val(:) !< Reconstructed field at f [1]
+real(8) :: psitmp(1),pt(3),pani(2),bcross_kappa(1),psidiff
 logical :: in_plasma
+val(1)=0.d0
+IF(self%equil%device%fe_rep%mesh%reg(cell)/=1)RETURN
 pt=self%equil%device%fe_rep%mesh%log2phys(cell,f)
-in_plasma=.TRUE.
-IF(gs_test_bounds(self%equil,pt).AND.(self%equil%device%fe_rep%mesh%reg(cell)==1))THEN
-  in_plasma=.TRUE.
-ELSE
-  in_plasma=.FALSE.
-END IF
 ! Sample fields
 CALL self%psi_eval%interp(cell,f,gop,psitmp)
-CALL self%psi_geval%interp(cell,f,gop,gpsitmp)
 ! Evaluate J_tor
-IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
+IF(gs_test_bounds(self%equil,pt))THEN
+  IF(psitmp(1)>self%equil%plasma_bounds(1))THEN
+    IF(self%equil%mode==0)THEN
+      val(1)=self%equil%I%Fp(psitmp(1))*((self%equil%ffp_scale**2)*self%equil%I%f(psitmp(1))+self%equil%ffp_scale*self%equil%I%f_offset)/(pt(1)+gs_epsilon)
+    ELSE
+      val(1)=0.5d0*self%equil%ffp_scale*self%equil%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
+    END IF
+    ! Handle anisotropic pressure
+    IF(ASSOCIATED(self%equil%P_ani))THEN
+      CALL self%equil%P_ani%interp(cell,f,gop,pani)
+      CALL self%bcross_kappa_fun%interp(cell,f,gop,bcross_kappa)
+      val(1) = val(1) + self%equil%p_scale*pt(1)*(self%equil%P%fp(psitmp(1))*pani(2)+self%equil%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
+    ELSE
+      val(1) = val(1) + self%equil%p_scale*pt(1)*self%equil%P%Fp(psitmp(1))
+    END IF
+    RETURN
+  END IF
+END IF
+!---Evaluate J_phi in SOL
+IF(self%equil%I%include_sol)THEN
+  IF(psitmp(1) > self%equil%plasma_bounds(1))THEN
+    psidiff = psitmp(1) - self%equil%plasma_bounds(1)
+    psitmp(1) = self%equil%plasma_bounds(1) - psidiff
+  END IF
   IF(self%equil%mode==0)THEN
     val(1)=self%equil%I%Fp(psitmp(1))*((self%equil%ffp_scale**2)*self%equil%I%f(psitmp(1))+self%equil%ffp_scale*self%equil%I%f_offset)/(pt(1)+gs_epsilon)
   ELSE
     val(1)=0.5d0*self%equil%ffp_scale*self%equil%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
   END IF
-  ! Handle anisotropic pressure
-  IF(ASSOCIATED(self%equil%P_ani))THEN
-    CALL self%equil%P_ani%interp(cell,f,gop,pani)
-    CALL self%bcross_kappa_fun%interp(cell,f,gop,bcross_kappa)
-    val(1) = val(1) + self%equil%p_scale*pt(1)*(self%equil%P%fp(psitmp(1))*pani(2)+self%equil%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
-  ELSE
-    val(1) = val(1) + self%equil%p_scale*pt(1)*self%equil%P%Fp(psitmp(1))
-  END IF
-ELSE
-  val(1)=0.d0
 END IF
 end subroutine gs_j_interp_apply
 !------------------------------------------------------------------------------

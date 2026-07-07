@@ -37,6 +37,7 @@ USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile
   sauter_fc, gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
+USE oft_gs_profiles, ONLY: linterp_flux_func, mlinterp_flux_func
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
@@ -442,7 +443,18 @@ IF(TRIM(tmp_str)/='none')THEN
   tMaker_equil_obj%I=>prof_tmp
 END IF
 IF(f_offset>-1.d98)tMaker_equil_obj%I%f_offset=f_offset
-tMaker_equil_obj%I%include_sol=f_sol
+IF(f_sol)THEN
+  SELECT TYPE(this=>tMaker_equil_obj%I)
+  TYPE IS(linterp_flux_func)
+    ! Do nothing, this profile supports SOL current flag
+  TYPE IS(mlinterp_flux_func)
+    ! Do nothing, this profile supports SOL current flag
+  CLASS DEFAULT
+    CALL copy_string("F*F' profile type does not support SOL current flag",error_str)
+    RETURN
+  END SELECT
+  tMaker_equil_obj%I%include_sol=f_sol
+END IF
 CALL copy_string_rev(p_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%P)
 CALL copy_string_rev(eta_file,tmp_str)

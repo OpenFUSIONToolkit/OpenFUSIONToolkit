@@ -28,6 +28,8 @@ def create_prof_file(self, filename, profile_dict, name, include_sol=False):
     in normalized Psi ['x']
     @param filename Name of input quantity, see options in set_profiles()
     '''
+    if include_sol and (profile_dict['type'] != 'linterp' and profile_dict['type'] != 'mlinterp'):
+        raise ValueError('Only "linterp" and "mlinterp" profile types support SOL current flag')
     file_lines = [profile_dict['type']]
     if profile_dict['type'] == 'flat':
         pass
@@ -107,7 +109,7 @@ def create_prof_file(self, filename, profile_dict, name, include_sol=False):
         for y in y_basis:
             file_lines += ["{0}".format(" ".join(["{0}".format(val) for val in y]))]
     else:
-        raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp")')
+        raise KeyError('Invalid profile type ("flat", "linterp", "mlinterp", "jphi-linterp", "jphi-mlinterp")')
     with open(filename, 'w+') as fid:
         fid.write("\n".join(file_lines))
 
