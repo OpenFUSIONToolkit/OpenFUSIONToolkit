@@ -178,7 +178,7 @@ class tokamaker_settings:
 
 class TokaMaker():
     '''! TokaMaker G-S solver class'''
-    def __init__(self,OFT_env):
+    def __init__(self,OFT_env,n_eq=1):
         '''! Initialize TokaMaker object
 
         @param OFT_env OFT runtime environment object (See @ref OpenFUSIONToolkit._core.OFT_env "OFT_env")
@@ -235,6 +235,8 @@ class TokaMaker():
         self.lim_contours = None
         ## Coil self-inductance matrix [ncoils]
         self.Lcoils = None
+        # Number of equilibria
+        self.n_eq = n_eq
     
     def __del__(self):
         '''! Free Fortran-side objects by calling `reset()` before object is deleted or GC'd'''
@@ -401,7 +403,7 @@ class TokaMaker():
         ncoils = c_int()
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup(self._tMaker_ptr,order,full_domain,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
+        tokamaker_setup(self._tMaker_ptr,order,full_domain,self.n_eq,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         # Update vacuum flux
@@ -1093,7 +1095,7 @@ class TokaMaker():
                 raise Exception(error_string.value)
             self._tMaker_equil._mirnov_constraints = (locations.copy(), norms.copy(), targets.copy())
     
-    def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,Dflux=None,R0=None,V0=None,Z0=None,retain_previous=False):
+    def set_targets(self,Ip=None,Ip_ratio=None,pax=None,estore=None,Dflux=None,R0=None,V0=None,Z0=None,retain_previous=False,eq_idx=0):
         r'''! Set global target values
 
         @note Values that are not specified are reset to their defaults on each call unless `retain_previous=True`.
@@ -1161,6 +1163,7 @@ class TokaMaker():
                               float_to_c(self._tMaker_equil._dflux_target),
                               float_to_c(self._tMaker_equil._R0_target),
                               float_to_c(self._tMaker_equil._Z0_target),
+                              eq_idx,
                               error_string
         )
         if error_string.value != b'':

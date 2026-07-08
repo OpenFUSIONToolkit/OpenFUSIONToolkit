@@ -180,7 +180,6 @@ END TYPE oft_gs_solver
 !> Grad-Shafranov equilibrium object
 !------------------------------------------------------------------------------
 TYPE :: gs_factory
-  INTEGER(i4) :: ierr = 0 !< Error flag from most recent solve
   INTEGER(i4) :: maxits = 30 !< Maximum number of iterations for nonlinear solve
   INTEGER(i4) :: nR0_ramp = 6 !< Number of iterations for R0 ramp if R0 target is used
   INTEGER(i4) :: ncoils = 0 !< Number of coils in device
@@ -345,6 +344,11 @@ CONTAINS
   !> Destory G-S object
   PROCEDURE :: delete => equil_destroy
 END TYPE gs_equil
+
+TYPE :: gs_eq_ptr
+  TYPE(gs_equil), POINTER :: eq => NULL()
+END TYPE gs_eq_ptr
+
 !------------------------------------------------------------------------------
 !> Interpolate G-S profiles at a specific point in space
 !------------------------------------------------------------------------------
@@ -548,9 +552,10 @@ end function dummy_fpp
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-subroutine gs_setup(self,ML_lag_2d)
+subroutine gs_setup(self,ML_lag_2d, n_eq)
 class(gs_factory), intent(inout) :: self !< G-S object
 class(oft_ml_fem_type), target, intent(inout) :: ML_lag_2d
+INTEGER(i4), VALUE, INTENT(IN) :: n_eq
 SELECT TYPE(this=>ML_lag_2d%current_level)
   CLASS IS(oft_scalar_bfem)
     self%ML_fe_rep=>ML_lag_2d
@@ -2125,13 +2130,11 @@ end subroutine gs_fit_isoflux
 !------------------------------------------------------------------------------
 !> Compute Grad-Shafranov solution for current flux function definitions and targets
 !------------------------------------------------------------------------------
-subroutine create_gs_solver(self, factory, equil, ierr)
+subroutine create_gs_solver(self, factory, equil)
 class(oft_gs_solver), intent(inout) :: self !< G-S factory/device object
 class(gs_factory), intent(inout) :: factory !< G-S factory/device object
 class(gs_equil), intent(inout) :: equil !< G-S factory/device object
-integer(i4), optional, intent(out) :: ierr !< Error flag
 integer(i4) :: j
-ierr = 0
 self%nl_its=0
 
 IF(TRIM(factory%lu_solver%package)=='none')THEN
@@ -2695,7 +2698,6 @@ subroutine gs_solve(self,equil,ierr)
 class(gs_factory), intent(inout) :: self !< G-S factory/device object
 class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
 integer(i4), optional, intent(out) :: ierr !< Error flag
-integer(i4) :: setup_err
 integer(i4) :: step_err
 logical :: converged = .FALSE.
 integer(i4) :: i
@@ -2707,11 +2709,7 @@ IF(oft_env%pm)THEN
   CALL oft_increase_indent
 END IF
 ! ALLOCATE(self%gs_solver)
-CALL self%gs_solver%setup(self, equil, setup_err)
-IF(setup_err /= 0)THEN
-  ierr = setup_err
-  RETURN
-END IF
+CALL self%gs_solver%setup(self, equil)
 DO i=1,self%maxits
   CALL self%gs_solver%step(self, equil, i, converged, step_err)
   WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,equil%ffp_scale,equil%p_scale, &

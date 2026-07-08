@@ -468,7 +468,7 @@ IF(maxfev>0)THEN
   CALL fit_error(ncons,ncofs,cofs,error,info)
   ! gs_active%Itor_target=-1.d0
   ! IF(fit_FFPscale)cofs(1)=gs_active%ffp_scale
-  IF(gs_active%device%ierr<0)CALL oft_abort('Initial equilibrium solve failed to converge','fit_gs',__FILE__)
+  IF(gs_active%device%gs_solver%ierr<0)CALL oft_abort('Initial equilibrium solve failed to converge','fit_gs',__FILE__)
   !---
   call lmder(fit_error_grad,ncons,ncofs,cofs,error,fjac,ldfjac, &
              ftol,xtol,gtol,maxfev,cofs_scale,mode,factor,nprint,info,nfev,njev, &
