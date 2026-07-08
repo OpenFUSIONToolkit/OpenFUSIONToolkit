@@ -856,7 +856,7 @@ def run_LTX_case(fe_order,test_type,mp_q):
         for key, coil in LTX_geom['coils'].items():
             if key.startswith('OH'):
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'],coil_set='OH')
-            else:    
+            else:
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'])
         #
         gs_mesh.add_polygon(LTX_geom['limiter'],'plasma',parent_name='air')
@@ -1322,9 +1322,9 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
 
     ft = 1 - fc
-    eps = r_avgs[2] / r_avgs[0]
+    eps = r_avgs['<a>'] / r_avgs['<R>']
     _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
-    R_avg = ravgs_q[0]
+    R_avg = ravgs_q['<R>']
 
     # --- Gradients (same as solve_with_bootstrap) ---
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
@@ -1731,7 +1731,7 @@ def test_pfile_bytes_roundtrip():
 # -----------------------------------------------------------------------
 # Test: X-point isoflux boundary helpers in TokaMaker.util
 #
-# These helpers check the generated boundary from 'create_isoflux_xpts' 
+# These helpers check the generated boundary from 'create_isoflux_xpts'
 # against the reference `isoflux_xpts_expected.json`.
 # -----------------------------------------------------------------------
 isoflux_xpts_expected = _load_eqdsk_fixture('isoflux_xpts_expected.json')

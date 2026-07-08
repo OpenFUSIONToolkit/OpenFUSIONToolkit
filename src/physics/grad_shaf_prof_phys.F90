@@ -531,7 +531,7 @@ IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_
 IF(gseq%Ip_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
 !---Get updated flux surface geometry for Jphi -> F*F' mapping
-ALLOCATE(ravgs(self%ngeom+1,3),psi_q(self%ngeom+1),qtmp(self%ngeom+1))
+ALLOCATE(ravgs(self%ngeom+1,4),psi_q(self%ngeom+1),qtmp(self%ngeom+1))
 IF(gseq%diverted)THEN
   psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
   psi_q(1)=psi_q(2)

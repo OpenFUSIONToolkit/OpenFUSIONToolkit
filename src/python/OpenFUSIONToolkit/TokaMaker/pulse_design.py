@@ -9,9 +9,9 @@ r'''! TokaMaker + TORAX Coupled Pulse Design and Simulation Workflow (TokaMaker_
     TORAX (tx) = Python Jax transport solver (developed by Google DeepMind)
         https://github.com/google-deepmind/torax
 
-    TokaMaker_TORAX workflow couples the two codes for pulse planning, predictive kinetic equilibria, 
+    TokaMaker_TORAX workflow couples the two codes for pulse planning, predictive kinetic equilibria,
         and other integrated modeling applications.
-    
+
     @authors Freddie Sheehan and John Lhota
     @date May 2026
     @ingroup doxy_oft_python
@@ -150,15 +150,15 @@ def log_redirect_setup():
         - Removes any handlers pre-configured by libraries.
         - Sets the root logger's level to capture all desired messages.
         - Adds a console handler for critical errors only.
-        
+
     '''
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)  # Capture INFO level and above
-    
+
     # Remove any pre-existing handlers
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
-    
+
     # Add a handler to show ONLY errors on the console
     console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(logging.ERROR)
@@ -174,10 +174,10 @@ import torax  # noqa: E402
 
 @contextmanager
 def redirect_outputs_to_log(filename):
-    r'''! Step 2/3 of setup to redirect noisy outputs to log file. 
+    r'''! Step 2/3 of setup to redirect noisy outputs to log file.
         A context manager to temporarily redirect stdout and stderr to a file.
         @param filename Name of log file (self._log_file)
-        
+
     '''
     if not filename:
         # If no filename is provided, do nothing.
@@ -229,7 +229,7 @@ class TokaMaker_TORAX:
                 @param truncate_eq Whether to truncate equilibrium when saving TokaMaker output to EQDSK.
                 @brief Coupling fly() option loop0: if True, the first coupling pass uses a coarse
                        TORAX grid and subsampled TokaMaker times; if False, that pass is skipped (see fly()).
-                
+
         '''
         self._tm = tokamaker_obj
         self._cocos = 2 # only cocos=2 works currently.
@@ -391,7 +391,7 @@ class TokaMaker_TORAX:
 
 
         R = []
-        Z = []  
+        Z = []
         a = []
         kappa = []
         delta = []
@@ -441,7 +441,7 @@ class TokaMaker_TORAX:
             a.append(minor_radius)
             kappa.append((zmax - zmin) / (2.0 * minor_radius))
             delta.append((delta_upper + delta_lower) / 2.0)
-            
+
             B0.append(g['bcentr'])
             pax.append(g['pres'][0])
             Ip.append(abs(g['ip']))
@@ -515,7 +515,7 @@ class TokaMaker_TORAX:
                 'y': np.zeros(N_PSI),
                 'type': 'linterp',
             }
-            
+
         # Save seed values from initial equilibria
         self._psi_axis_seed = self._state['psi_axis_tm'].copy()
         self._psi_lcfs_seed = self._state['psi_lcfs_tm'].copy()
@@ -623,10 +623,10 @@ class TokaMaker_TORAX:
     @staticmethod
     def _numpy_to_plain_python(obj):
         r'''! Recursively convert numpy scalars/arrays to plain Python types.
-        
+
                 Used before pformat-saving config dicts so the saved .py files are
                 loadable without numpy (no array([...]) references).
-                
+
         '''
         if isinstance(obj, dict):
             return {TokaMaker_TORAX._numpy_to_plain_python(k): TokaMaker_TORAX._numpy_to_plain_python(v) for k, v in obj.items()}
@@ -644,16 +644,16 @@ class TokaMaker_TORAX:
     @staticmethod
     def _tx_config_merge(base, override):
         r'''! Recursively merge override into base TORAX config (in-place).
-        
+
                 For every key in override:
                   - If both values are dicts, recurse.
                   - Otherwise the override value wins.
                 Keys in base that are absent from override are kept as-is.
-        
+
                 @param base     Dict to merge into (modified in-place).
                 @param override Dict whose keys take precedence.
                 @return base (for convenience).
-                
+
         '''
         for key, val in override.items():
             if key in base and isinstance(base[key], dict) and isinstance(val, dict):
@@ -665,12 +665,12 @@ class TokaMaker_TORAX:
     @staticmethod
     def _flatten_time_dependent(config):
         r'''! Recursively flatten time-dependent config values to their initial value only.
-        
+
                 A dict whose keys are ALL numeric (int/float) is treated as time-dependent:
                 only the entry with the smallest key is retained.
                 Structural dicts (with any string keys) are recursed into.
                 Tuples of form (times_array, values_array) are flattened to the first entry.
-                
+
         '''
         for key in list(config.keys()):
             val = config[key]
@@ -721,12 +721,12 @@ class TokaMaker_TORAX:
     @staticmethod
     def _relax_flat_profile_to_rho_y(profile_val):
         r'''! (rho_norm, y) from a profile_conditions value after merge + flatten.
-        
+
                 Handles:
                   - nested {time: inner} (TORAX time-sliced profiles; flatten keeps one key);
                   - (rho, y) static radial tuples;
                   - (times, rho, [profiles]) including a single time index.
-                
+
         '''
         if profile_val is None:
             return None, None
@@ -797,12 +797,12 @@ class TokaMaker_TORAX:
                 simulation config is built.  Any key present in the loaded config
                 will override the corresponding BASE_CONFIG key; keys only in
                 BASE_CONFIG are kept as-is.  Geometry is always overwritten (eqdsk-based).
-        
+
                 Explicit set_*() calls made AFTER load_TORAX_config() will
                 override both the base and the loaded config.
-        
+
                 @param config Dictionary (TORAX config format).
-                
+
         '''
         self._loaded_config = copy.deepcopy(config)
 
@@ -811,14 +811,14 @@ class TokaMaker_TORAX:
                 TORAX grid documentation: https://torax.readthedocs.io/en/latest/configuration.html#geometry
                 @param grid_type Grid type ('n_rho' or 'face_centers').
                 @param grid Grid points (integer or np.array).
-                
+
         '''
         self._tx_grid_type = grid_type
         self._tx_grid = grid
         if grid_type not in ['n_rho', 'face_centers']:
             raise ValueError(f'Invalid grid type: {type}. Must be "n_rho" or "face_centers".')
 
-    def _push_tx_grid(self): 
+    def _push_tx_grid(self):
         r'''! Save current TORAX grid onto stack for later _pop_tx_grid. Used for reducing grid in loop0.'''
         g = self._tx_grid
         if isinstance(g, np.ndarray):
@@ -885,15 +885,15 @@ class TokaMaker_TORAX:
                      disable_weight=1.0E4, symmetry_weight=1.0E3,
                      disable_virtual_vsc=True, vsc_weight=1.0E4):
         r'''! Set coil regularization using the dict-based TokaMaker reg_terms API.
-        
+
                 Coil bounds are hard current limits in Amperes per turn (A/turn). The total
                 current in a coil region is I_coil [A/turn] * n_turns, where n_turns comes
                 from the mesh file coil definition.
-        
+
                 During the pulse, coil current targets are set automatically: the initial
                 equilibrium currents seed i=0, and each subsequent timestep uses the previous
                 timestep's solved currents as loose targets.
-        
+
                 @param coil_bounds Dict of {coil_name: [min, max]} hard current bounds [A/turn]. Default ±5 MA/turn.
                 @param updownsym Enforce up-down symmetry for coil pairs (U/L naming convention).
                 @param default_weight Regularization weight for normal coils (default 0.1).
@@ -902,7 +902,7 @@ class TokaMaker_TORAX:
                 @param symmetry_weight Regularization weight for symmetry constraints (default 1e3).
                 @param disable_virtual_vsc Disable the virtual VSC coil (default True).
                 @param vsc_weight Regularization weight for disabled VSC (default 1e4).
-                
+
         '''
         if coil_bounds is None:
             coil_bounds = {key: [-5.0E6, 5.0E6] for key in self._tm.coil_sets}
@@ -924,7 +924,7 @@ class TokaMaker_TORAX:
     def _apply_tm_coil_reg(self, targets=None):
         r'''! Internal: build and apply reg_terms from stored config plus per-timestep targets.
                 @param targets Dict of {coil_name: current [A/turn]} to use as soft targets, or None for zeros.
-                
+
         '''
         cfg = self._coil_reg_config
         updownsym    = cfg['updownsym']
@@ -969,7 +969,7 @@ class TokaMaker_TORAX:
     def set_Ip(self, Ip):
         r'''! Set plasma current (Amps), used for both codes and not evolved by either.
                 @param ip Plasma current.
-                
+
         '''
         self._Ip = Ip
 
@@ -1041,7 +1041,7 @@ class TokaMaker_TORAX:
             self._ecrh_width = ecrh_width
         if ohmic is not None:
             self._ohmic_power = ohmic
-        
+
         self._use_nbi_current = nbi_current
         self._enable_fusion = fusion
         self._enable_ei_exchange = ei_exchange
@@ -1052,13 +1052,13 @@ class TokaMaker_TORAX:
                 This preserves the original behavior:
                 - set_pedestal=True uses model_name='set_T_ped_n_ped'
                 - set_pedestal=False uses model_name='no_pedestal'
-        
+
                 @param set_pedestal Toggle pedestal model on/off.
                 @param T_i_ped Ion temperature pedestal (time-varying scalar allowed).
                 @param T_e_ped Electron temperature pedestal (time-varying scalar allowed).
                 @param n_e_ped Electron density pedestal (time-varying scalar allowed).
                 @param ped_top Pedestal-top location rho_norm_ped_top.
-                
+
         '''
         # Using legacy setter disables full pedestal dict replacement.
         self._pedestal_config = None
@@ -1077,10 +1077,10 @@ class TokaMaker_TORAX:
                 TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#pedestal
                 If provided, this dict is copied to 'myconfig['pedestal']' directly,
                 replacing the full pedestal section from BASE_CONFIG and load_TORAX_config().
-        
+
                 @param pedestal_config Dictionary in TORAX pedestal config format, or
                                        None to clear and fall back to set_pedestal().
-                
+
         '''
         if pedestal_config is None:
             self._pedestal_config = None
@@ -1096,7 +1096,7 @@ class TokaMaker_TORAX:
                 @param Ti Evolve ion temperature.
                 @param Te Evolve electron temperature.
                 @param current Evolve current.
-                
+
         '''
         self._evolve_density = density
         self._evolve_current = current
@@ -1124,7 +1124,7 @@ class TokaMaker_TORAX:
 
         if [generic_particle_location, generic_particle_width, generic_particle_S_total].count(None) in [1,2]:
             raise ValueError("Must specify all three generic particle parameters or none of them.")
-        
+
         self._generic_particle_location = generic_particle_location
         self._generic_particle_width = generic_particle_width
         self._generic_particle_s_total = generic_particle_S_total
@@ -1154,13 +1154,13 @@ class TokaMaker_TORAX:
 
     def set_x_points(self, diverted_times=None, x_point_targets=None, x_point_weight=100.0, strike_point_targets=None):
         r'''! Configure diverted window, X-point targets, and optional strike points.
-        
+
                 @param diverted_times Tuple (t_start, t_end) defining the diverted plasma window.
                 @param x_point_targets X-point target locations, shape (n_xpoints, 2) with [R, Z] pairs.
                 @param x_point_weight Weight for saddle-point constraints.
                 @param strike_point_targets Strike point locations, shape (n_points, 2) with [R, Z] pairs,
                                             or None to disable.
-                
+
         '''
         if diverted_times is not None and len(diverted_times) != 2:
             raise ValueError('diverted_times must be a (t_start, t_end) tuple.')
@@ -1177,15 +1177,15 @@ class TokaMaker_TORAX:
 
     def _get_time_window(self, time, tx_times):
         r'''! Return the (t_start, t_end) averaging window for a given timepoint.
-        
+
                 Respects self._t_ave_toggle, self._t_ave_window, self._t_ave_causal,
                 and self._t_ave_ignore_start.  If averaging is disabled for this
                 timepoint the returned window collapses to (time, time).
-        
+
                 @param time     The target timepoint (seconds).
                 @param tx_times Sorted numpy array of all available TORAX times.
                 @return (t_start, t_end) — inclusive bounds for the averaging window.
-                
+
         '''
         # Check if averaging is active for this timepoint
         if self._t_ave_toggle == 'off':
@@ -1226,10 +1226,10 @@ class TokaMaker_TORAX:
 
     def _interp_tx_profile_onto_psi(self, data_tree, var_name, time, profile_type='linterp'):
         r'''! Interpolate a single TORAX profile snapshot onto self._psi_N.
-        
+
                 No averaging, just one timeslice.
                 Returns a plain numpy array on self._psi_N.
-                
+
         '''
         var = getattr(data_tree.profiles, var_name)
         var_data = var.sel(time=time, method='nearest').to_numpy()
@@ -1269,18 +1269,18 @@ class TokaMaker_TORAX:
     def _extract_tx_profile(self, data_tree, var_name, time, load_into_state='state',
                             normalize=False, profile_type='linterp'):
         r'''! Extract a TORAX profile onto self._psi_N with optional time-averaging.
-        
+
                 Replaces the former _pull_tx_onto_psi.  When time-averaging is active
                 the profile is interpolated at every TORAX timestep inside the window
                 and the results are averaged pointwise on the psi_N grid.
-        
+
                 @param data_tree     TORAX output data tree.
                 @param var_name      Name of variable (e.g., 'T_i', 'j_ohmic', 'FFprime').
                 @param time          Target time value.
                 @param load_into_state  'state' → return dict; else return plain array.
                 @param normalize     If True, normalize profile by the core value.
                 @param profile_type  'linterp' or 'jphi-linterp'.
-                
+
         '''
         tx_times = data_tree.profiles.psi.coords['time'].values
         t_start, t_end = self._get_time_window(time, tx_times)
@@ -1324,14 +1324,14 @@ class TokaMaker_TORAX:
 
     def _extract_tx_scalar(self, data_tree, var_name, time, source='scalars', scale=1.0):
         r'''! Extract a scalar value from TORAX with optional time-averaging.
-        
+
                 @param data_tree  TORAX output data tree.
                 @param var_name   Attribute name on data_tree.scalars (or .profiles).
                 @param time       Target time (seconds).
                 @param source     'scalars' or 'profiles' — which subtree to read from.
                 @param scale      Multiplicative factor applied after extraction.
                 @return float — the (optionally averaged) scalar value.
-                
+
         '''
         container = getattr(data_tree, source)
         var = getattr(container, var_name)
@@ -1352,7 +1352,7 @@ class TokaMaker_TORAX:
 
     def _extract_tx_scalar_at_rho(self, data_tree, var_name, time, rho_val, rho_coord='rho_norm', scale=1.0):
         r'''! Extract a profile value at a specific rho location as a scalar, with time-averaging.
-        
+
                 @param data_tree   TORAX output data tree.
                 @param var_name    Attribute name on data_tree.profiles.
                 @param time        Target time (seconds).
@@ -1360,7 +1360,7 @@ class TokaMaker_TORAX:
                 @param rho_coord   Name of the rho coordinate ('rho_norm', 'rho_face_norm', etc.).
                 @param scale       Multiplicative factor applied after extraction.
                 @return float — the (optionally averaged) scalar value.
-                
+
         '''
         var = getattr(data_tree.profiles, var_name)
         tx_times = var.coords['time'].values
@@ -1380,14 +1380,14 @@ class TokaMaker_TORAX:
 
     def _extract_tx_scalar_timeseries(self, data_tree, var_name, source='scalars', scale=1.0):
         r'''! Extract a full time-series scalar from TORAX with time-averaging applied at each point.
-        
+
                 Returns dict {'x': times_list, 'y': values_array} suitable for self._results.
-        
+
                 @param data_tree  TORAX output data tree.
                 @param var_name   Attribute name on data_tree.scalars (or .profiles).
                 @param source     'scalars' or 'profiles'.
                 @param scale      Multiplicative factor applied after extraction.
-                
+
         '''
         container = getattr(data_tree, source)
         var = getattr(container, var_name)
@@ -1415,9 +1415,9 @@ class TokaMaker_TORAX:
     def _extract_tx_scalar_at_rho_timeseries(self, data_tree, var_name, rho_val,
                                                rho_coord='rho_norm', scale=1.0):
         r'''! Extract a profile-at-fixed-rho time-series with time-averaging.
-        
+
                 Returns dict {'x': times_list, 'y': values_array}.
-                
+
         '''
         var = getattr(data_tree.profiles, var_name)
         tx_times = var.coords['time'].values
@@ -1440,19 +1440,19 @@ class TokaMaker_TORAX:
 
     def _apply_tx_set_overrides(self, myconfig):
         r'''! Apply user set_*() overrides to a TORAX config dict (in place).
-        
+
                 Only applied when the corresponding attribute is not None (i.e. the user
                 called the setter explicitly; None means fall through to the loaded/base
                 config). Used by both _get_tx_config (coupling loop 0+) and _run_tx_relax
                 so each relax simulation sees the same plasma
                 conditions as the main sim.
-        
+
                 Does NOT touch geometry, numerics.{t_initial, t_final, fixed_dt},
                 or profile_conditions.{psi, initial_psi_mode, initial_psi_from_j} —
                 those are loop-specific and set by the calling method.
-        
+
                 @param myconfig Config dict (modified in place).
-                
+
         '''
         myconfig.setdefault('profile_conditions', {})
         myconfig.setdefault('numerics', {})
@@ -1515,7 +1515,7 @@ class TokaMaker_TORAX:
             myconfig['sources']['generic_particle']['deposition_location'] = self._generic_particle_location
             myconfig['sources']['generic_particle']['particle_width'] = self._generic_particle_width
             myconfig['sources']['generic_particle']['S_total'] = self._generic_particle_s_total
-            
+
         if self._pedestal_config is not None:
             # Full pedestal dict replacement requested via load_pedestal_config().
             myconfig['pedestal'] = copy.deepcopy(self._pedestal_config)
@@ -1607,7 +1607,7 @@ class TokaMaker_TORAX:
 
     def _get_tx_config(self):
         r'''! Generate config object for Torax simulation.
-        
+
                 Build order
                 -----------
                 1. Deep-copy BASE_CONFIG.
@@ -1627,9 +1627,9 @@ class TokaMaker_TORAX:
                 8. If fly(..., steady_state_mode=True) and this is not the first loop,
                    override psi and kinetic profiles with profiles saved from the previous main TORAX run at
                    t_final (see _capture_steady_state_tx_seed).
-        
+
                 @return Torax config object.
-                
+
         '''
 
         # ── 1. Start from base config ──────────────────────────────────────
@@ -1731,7 +1731,7 @@ class TokaMaker_TORAX:
                 self._log(f'Warning: Loop {self._current_loop}: no valid TM EQDSKs from loop {self._current_loop-1}, using all seed EQDSKs.')
             else:
                 self._log(f'Loop {self._current_loop}: using {n_tm}/{len(self._tm_times)} TM-solved EQDSKs, {len(self._tm_times)-n_tm} seed fallbacks.')
-            
+
             myconfig['geometry']['geometry_configs'] = {
                 t: {'geometry_file': eqdsk_f, 'cocos': self._cocos} for t, eqdsk_f in full_eqdsk_map.items()
             }
@@ -1805,11 +1805,11 @@ class TokaMaker_TORAX:
 
     def _test_eqdsk_tx_config(self, eqdsk, *, quiet=False):
         r'''! Return whether TORAX accepts eqdsk as ToraxConfig geometry.
-        
+
                 @param quiet If True, do not print or append to the coupling log on failure
                        (used for intermediate-resolution retries in _run_tm). If False,
                        failure is only reported when output_mode is 'debug'.
-                
+
         '''
         myconfig = copy.deepcopy(BASE_CONFIG)
         if self._loaded_config is not None:
@@ -1833,11 +1833,11 @@ class TokaMaker_TORAX:
 
     def _capture_relax_tx_profiles_from_datatree(self, data_tree, time_val=None):
         r'''! Store psi, n_e, T_e, T_i at time_val for debug relax figures / history.
-        
+
                 Updates _relax_profiles_snapshot temporarily so the caller can append a copy
                 to _relax_mainrun_profile_history. Not used to seed inter-loop relax runs
                 (those profiles come from the user config each time).
-                
+
         '''
         if time_val is None:
             time_val = self._t_init
@@ -1852,10 +1852,10 @@ class TokaMaker_TORAX:
 
     def _capture_steady_state_tx_seed(self, data_tree):
         r'''! Store psi, n_e, T_e, T_i at t_final for steady_state_mode next coupling loop.
-        
+
                 Profile tuples use t_init as the time key (TORAX profile_conditions convention),
                 matching _psi_init / relax snapshots.
-                
+
         '''
         t_fin = float(self._t_final)
         _sel = dict(time=t_fin, method='nearest')
@@ -1869,17 +1869,17 @@ class TokaMaker_TORAX:
 
     def _run_tx_relax(self, *, stage, eqdsk_path, prescribed_profiles):
         r'''! Short TORAX relax: initial run on the seed EQDSK, or inter-loop on TM i=0 EQDSK.
-        
+
                 Uses flattened user inputs (_apply_tx_set_overrides + _flatten_time_dependent).
                 If prescribed_profiles is None, psi follows EQDSK initial_psi_mode='geometry'
                 and n_e, T_e, T_i stay as already merged from base / loaded config and
                 _apply_tx_set_overrides (user inputs). If a dict is passed, it must supply
                 psi, n_e, T_e, T_i tuples (advanced; loop N relax uses None so kinetics are always user-specified).
-        
+
                 @param stage 'initial' or 'interloop' (logging / output names only).
                 @param eqdsk_path Path to gEQDSK for geometry_configs at t_initial.
                 @param prescribed_profiles None, or dict with keys psi, n_e, T_e, T_i (3-tuples).
-                
+
         '''
         runtime = float(self._relax_duration)
         dt_relax = RELAX_FIXED_DT
@@ -2022,7 +2022,7 @@ class TokaMaker_TORAX:
     def _run_tx(self):
         r'''! Run the TORAX transport simulation.
                 @return Tuple (consumed_flux, consumed_flux_integral).
-                
+
         '''
 
         if (self._current_loop >= 1 and self._relax
@@ -2071,7 +2071,7 @@ class TokaMaker_TORAX:
             if hist.sim_error != torax.SimError.NO_ERROR:
                 self._print(f'  TORAX: sim FAILED ({hist.sim_error})')
                 raise ValueError(f'TORAX failed to run the simulation: {hist.sim_error}')
-        
+
             self._data_tree = data_tree  # store for visualization at full TORAX resolution
 
             try:
@@ -2109,13 +2109,13 @@ class TokaMaker_TORAX:
 
     def _tx_update(self, i, data_tree):
         r'''! Update the simulation state from TORAX results at timestep i.
-        
-                If sawtooth averaging is enabled, all profile and scalar extractions 
+
+                If sawtooth averaging is enabled, all profile and scalar extractions
                 use time-averaged methods to smooth sawtooth oscillations.
-        
+
                 @param i Timestep index.
                 @param data_tree Result object from Torax.
-                
+
         '''
         t = self._tm_times[i]
 
@@ -2196,17 +2196,17 @@ class TokaMaker_TORAX:
 
     def _calc_tx_ffp_ni(self, i):
         r'''! Calculate non-inductive FF' profile from TORAX current densities.
-                
+
                 The full GS relation is:
                     FF'_total = 2 * mu_0 * (j_tor + p' * <R>) / <1/R>
-                
+
                 To avoid double-counting p' when decomposing into inductive/non-inductive:
                     FF'_NI = 2 * mu_0 * j_NI / <1/R>
                     FF'_I  = 2 * mu_0 * (j_I + p' * <R>) / <1/R>
-                
+
                 @param i Time index
                 @return FF'_NI profile array
-                
+
         '''
         R_inv_avg = self._state['R_inv_avg_tx'][i]['y']
 
@@ -2302,7 +2302,7 @@ class TokaMaker_TORAX:
     def _run_tm(self):
         r'''! Run the GS solve across n timesteps using TokaMaker.
                 @return Tuple (consumed_flux, consumed_flux_integral).
-                
+
         '''
         from tqdm import tqdm # creates progress bars
         self._log(f"Loop {self._current_loop} TokaMaker:")
@@ -2382,17 +2382,17 @@ class TokaMaker_TORAX:
 
                 Ip_target = abs(self._state['Ip'][i])
                 P0_target = abs(self._state['pax'][i])
-        
-                self._tm.set_targets(Ip=Ip_target, pax=P0_target) # using pax target with j_phi inputs 
+
+                self._tm.set_targets(Ip=Ip_target, pax=P0_target) # using pax target with j_phi inputs
                 self._tm.set_resistivity(eta_prof=self._state['eta_prof'][i])
-        
+
                 ffp_prof = {'x': self._state['ffp_prof'][i]['x'].copy(),
                                'y': self._state['ffp_prof'][i]['y'].copy(),
                                'type': self._state['ffp_prof'][i]['type']}
                 pp_prof = {'x': self._state['pp_prof'][i]['x'].copy(),
                               'y': self._state['pp_prof'][i]['y'].copy(),
                               'type': self._state['pp_prof'][i]['type']}
-        
+
                 lcfs = self._state['lcfs_geo'][i]
 
                 # Set saddle-point (X-point) constraints during diverted phase
@@ -2410,7 +2410,7 @@ class TokaMaker_TORAX:
                     Z_max_abs = np.max(np.abs(lcfs[:, 1]))
                     Z_lim = perc_limit * Z_max_abs
                     if np.shape(self._x_point_targets)[0] == 1 and self._x_point_targets[0][1] > 0: # upper single null
-                        lcfs = lcfs[lcfs[:, 1] <= Z_lim]   
+                        lcfs = lcfs[lcfs[:, 1] <= Z_lim]
                     elif np.shape(self._x_point_targets)[0] == 1 and self._x_point_targets[0][1] < 0: # lower single null
                         lcfs = lcfs[lcfs[:, 1] >= -Z_lim]
                     elif np.shape(self._x_point_targets)[0] == 2: # double null
@@ -2436,8 +2436,8 @@ class TokaMaker_TORAX:
                 # Set lcfs psi value target (from TORAX) only at midplane outboard side of lcfs.
                 self._tm.set_psi_constraints(omp_point, targets=np.array([lcfs_psi_target]),
                                              weights=np.array([LCFS_WEIGHT * 10.])) # psi value target
-        
-        
+
+
                 self._tm.update_settings()
 
                 if prev_tm_idx is not None:
@@ -2456,7 +2456,7 @@ class TokaMaker_TORAX:
 
                 ffp_prof_raw = copy.deepcopy(ffp_prof)
                 pp_prof_raw  = copy.deepcopy(pp_prof)
-        
+
                 # Pre-calculate all level profiles
                 level_profiles = []
 
@@ -2468,15 +2468,15 @@ class TokaMaker_TORAX:
                 # Level 1: raw
                 ffp_1, pp_1 = self._tm_prof_input_raw(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
                 level_profiles.append({'ffp': ffp_1, 'pp': pp_1, 'name': 'raw tx profs'})
-        
+
                 # Level 2: sign flip
                 ffp_2, pp_2 = self._tm_prof_input_sign_flip(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
                 level_profiles.append({'ffp': ffp_2, 'pp': pp_2, 'name': 'sign_flip'})
-        
+
                 # Level 3: pedestal smoothing (takes p_profile as input) # TODO: read in actual n_rho_ped_top, have to add to state first
-                ffp_3, pp_3 = self._tm_prof_input_ped_smooth(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw), copy.deepcopy(self._state['p_prof_tx'][i])) 
+                ffp_3, pp_3 = self._tm_prof_input_ped_smooth(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw), copy.deepcopy(self._state['p_prof_tx'][i]))
                 level_profiles.append({'ffp': ffp_3, 'pp': pp_3, 'name': 'ped_smoothing'})
-        
+
                 # Level 4: power flux
                 ffp_4, pp_4 = self._tm_prof_input_power_flux(copy.deepcopy(ffp_prof_raw), copy.deepcopy(pp_prof_raw))
                 level_profiles.append({'ffp': ffp_4, 'pp': pp_4, 'name': 'analytic'})
@@ -2517,7 +2517,7 @@ class TokaMaker_TORAX:
                     skip_coil_update = True
                     self._log(f'\tTM: Solve failed at t={t} (all levels attempted).')
                     self._state['psi_grid_prev_tm'][i] = None  # if solve failed, set psi grid to None
-        
+
                 if solve_succeeded:
                     torax_accepted = False
                     _n_attempts = len(EQDSK_SAVE_NR_NZ_SEQUENCE)
@@ -2659,14 +2659,14 @@ class TokaMaker_TORAX:
 
     def _tm_prof_input_ped_smooth(self, ffp_prof, pp_prof, p_prof, transition_psi_N = 0.6, gauss_sigma=8, blend_width=0.02, sav_window=41, sav_order=3):
         r'''! Edge smoothing with Gaussian filter: smooth p profile and take derivative for pp_prof.'''
-        
+
         # Extract pressure 'y' values and ensure they're 1D
         p = np.atleast_1d(p_prof['y'])
-        
+
         # Handle case where input is empty or scalar
         if p.size == 0:
             return ffp_prof, pp_prof
-        
+
         # First smooth entire profile
         p_smooth = gaussian_filter1d(p, gauss_sigma, mode='nearest')
 
@@ -2692,7 +2692,7 @@ class TokaMaker_TORAX:
     def _tm_update(self, i):
         r'''! Update internal state and coil current results based on results of GS solver.
                 @param i Timestep of the solve.
-                
+
         '''
         eq_stats = self._state['equil'][i].get_stats(li_normalization='iter')
         self._state['Ip'][i] = eq_stats['Ip']
@@ -2727,8 +2727,8 @@ class TokaMaker_TORAX:
         self._state['q95_tm'][i] = np.interp(0.95, psi_geo, q_tm) if len(psi_geo) > 0 and len(q_tm) > 0 else np.nan
         self._state['q_prof_tm'][i] = {'x': self._psi_N.copy(), 'y': np.interp(self._psi_N, psi_geo, q_tm), 'type': 'linterp'}
 
-        self._state['R_avg_tm'][i] =     {'x': self._psi_N.copy(), 'y': np.interp(self._psi_N, psi_geo, np.array(geo[0])), 'type': 'linterp'}
-        self._state['R_inv_avg_tm'][i] = {'x': self._psi_N.copy(), 'y': np.interp(self._psi_N, psi_geo, np.array(geo[1])), 'type': 'linterp'}
+        self._state['R_avg_tm'][i] =     {'x': self._psi_N.copy(), 'y': np.interp(self._psi_N, psi_geo, np.array(geo['<R>'])), 'type': 'linterp'}
+        self._state['R_inv_avg_tm'][i] = {'x': self._psi_N.copy(), 'y': np.interp(self._psi_N, psi_geo, np.array(geo['<1/R>'])), 'type': 'linterp'}
 
         # Update Results
         coils, _ = self._state['equil'][i].get_coil_currents()
@@ -2745,15 +2745,15 @@ class TokaMaker_TORAX:
 
         # Extract LCFS contour and X-points from the solved equilibrium
         try:
-            lcfs_tm = self._state['equil'][i].trace_surf(1.0)    
+            lcfs_tm = self._state['equil'][i].trace_surf(1.0)
         except Exception:
             try:
-                lcfs_tm = self._state['equil'][i].trace_lcfs(0.99)  
+                lcfs_tm = self._state['equil'][i].trace_lcfs(0.99)
             except Exception:
                 self._state['lcfs_geo_tm'][i] = None
 
-        self._state['lcfs_geo_tm'][i] = np.asarray(lcfs_tm) if lcfs_tm is not None else None    
-        
+        self._state['lcfs_geo_tm'][i] = np.asarray(lcfs_tm) if lcfs_tm is not None else None
+
         try:
             x_pts, _ = self._state['equil'][i].get_xpoints()
             self._state['x_pts_tm'][i] = np.asarray(x_pts) if x_pts is not None else None
@@ -2766,7 +2766,7 @@ class TokaMaker_TORAX:
     def save_state(self, fname):
         r'''! Save intermediate simulation state to JSON.
                 @param fname Filename to save to.
-                
+
         '''
         with open(fname, 'w') as f:
             json.dump(self._state, f, cls=MyEncoder)
@@ -2790,7 +2790,7 @@ class TokaMaker_TORAX:
 
     def _quiet_tm(self):
         r'''! Context manager: redirect C/Fortran-level stdout+stderr to /dev/null.
-                
+
         '''
         @contextmanager
         def _cm():
@@ -2814,7 +2814,7 @@ class TokaMaker_TORAX:
     def configure_redirect_to_log(self):
         r'''! Step 3/3 of setup to divert noisy outputs to log file.
                 Captures INFO-level and above.
-                
+
         '''
         if self._logging_configured or not self._log_file:
             return
@@ -2842,7 +2842,7 @@ class TokaMaker_TORAX:
             t_ave_toggle='off', t_ave_window=0.5, t_ave_causal=True, t_ave_ignore_start=0.25,
             loop0=False, steady_state_mode=False): # TODO: separate steady_state_mode?
         r'''! Run TokaMaker_TORAX coupled pulse design loop.
-        
+
                 @param convergence_threshold Max fractional change in consumed flux between loops for convergence.
                 @param max_loop Highest **counted** coupling index to run (inclusive): full-resolution passes
                        use indices 1 … max_loop. The optional cheap pass at index 0 (when loop0=True)
@@ -2886,7 +2886,7 @@ class TokaMaker_TORAX:
                        previous loop for all TORAX geometry times (flat equilibrium shape in time), warm-starts
                        TokaMaker at i=0 from the previous loop's final psi grid, and runs inter-loop relax
                        on that final EQDSK when relax is True.
-                
+
         '''
         import tempfile
 
@@ -3156,7 +3156,7 @@ class TokaMaker_TORAX:
     def results(self):
         r'''! Access simulation results dict.'''
         return self._results
-    
+
     @property
     def state(self):
         r'''! Access simulation state dict.'''
@@ -3164,19 +3164,19 @@ class TokaMaker_TORAX:
 
     def get_final_timepoint_results(self, eqdsk_save_dir=None):
         r'''! Profiles and scalars at the last TokaMaker timepoint of the last completed coupling loop.
-        
+
                 Call after fly() when TokaMaker has populated state['equil'] at every timestep index.
-        
+
                 Profiles use the usual TokaMaker_TORAX flux-surface dict form {'x', 'y', 'type'} (x =
                 normalized poloidal flux when applicable). TokaMaker p_prime and FF_prime are
                 P' and F F' from get_profiles(npsi=...) on the same grid as stored in state.
                 Kinetic profiles and eta come from the TORAX-updated state at that timestep; current
                 densities j_* are TORAX flux-surface profiles (sources for the GS solve).
-        
+
                 Scalars: fusion Q from TORAX (last save or live data tree); q95 and q0 from
                 TokaMaker get_q (l_i likewise from get_stats); V_loop from TORAX
                 v_loop_lcfs; Ip is the TokaMaker equilibrium value.
-        
+
                 @param eqdsk_save_dir If set (non-empty str or path-like), write the final TokaMaker
                        equilibrium gEQDSK with save_eqdsk into this directory (created if needed).
                        If None (default), no file is written.
@@ -3185,7 +3185,7 @@ class TokaMaker_TORAX:
                         tokamaker_equilibrium (TokaMaker equilibrium instance at this timestep — same
                         reference as state['equil'][tm_time_index]), and eqdsk_path (absolute path
                         string when saved, else None).
-                
+
         '''
         def _snap(prof):
             if prof is None:
@@ -3291,7 +3291,7 @@ class TokaMaker_TORAX:
     def make_movie(self, save_path=None, **kwargs):
         r'''! Generate pulse movie from stored psi snapshots.
                 @param save_path Path to save MP4 file. If None, does not save.
-                
+
         '''
         return make_movie(self, save_path=save_path, **kwargs)
 
@@ -3299,7 +3299,7 @@ class TokaMaker_TORAX:
         r'''! Plot scalar time traces (Ip, Q, Te, ne, power channels, etc.).
                 @param save_path Path to save figure. If None, does not save.
                 @param display Whether to show the plot.
-                
+
         '''
         return plot_scalars(self, save_path=save_path, display=display, **kwargs)
 
@@ -3312,7 +3312,7 @@ class TokaMaker_TORAX:
                 @param save_path Path to save figure. If None, does not save.
                 @param display Whether to show the plot.
                 @param one_plot If True, combine all pulse phases into one figure.
-                
+
         '''
         return plot_profile_evolution(self, save_path=save_path, display=display, one_plot=one_plot, **kwargs)
 
@@ -3320,7 +3320,7 @@ class TokaMaker_TORAX:
         r'''! Plot coil current traces over the pulse.
                 @param save_path Path to save figure. If None, does not save.
                 @param display Whether to show the plot.
-                
+
         '''
         return plot_coils(self, save_path=save_path, display=display, **kwargs)
 
@@ -3329,7 +3329,7 @@ class TokaMaker_TORAX:
                 @param save_path Path prefix to save figures. If None, does not save.
                 @param display Whether to show the plots.
                 @param one_plot If True, combine all pulse phases into one figure.
-                
+
         '''
         return plot_lcfs_evolution(self, save_path=save_path, display=display, one_plot=one_plot, **kwargs)
 
@@ -4107,12 +4107,12 @@ def plot_tx_relax_profiles(
     display=False,
 ):
     r'''! Plot psi, n_e, T_e, T_i vs rho_norm after a short TORAX relax.
-    
+
         Shows main-run history (tt._relax_mainrun_profile_history), **user** kinetic
         profiles from flattened profile_conditions, **init EQDSK** psi at t_initial
         when psi is not prescribed (initial_psi_mode='geometry'), and the profile at
         t_final_relax. Used when TokaMaker_TORAX.fly(..., output_mode='debug').
-        
+
     '''
     t_init = tt._t_init
     _sel_kw = dict(time=t_final_relax, method='nearest')
@@ -4540,10 +4540,10 @@ def _trace_lcfs_for_evolution_plot(equil):
 
 def plot_lcfs_evolution(tt, save_path=None, display=True, one_plot=False):
     r'''! Plot time evolution of the last closed flux surface for each phase.
-    
+
         Produces phase-split figures by default (rampup, flattop, rampdown),
         or one combined figure when one_plot=True.
-        
+
     '''
     s = tt._state
     times = np.array(tt._tm_times)
@@ -4650,10 +4650,10 @@ def plot_lcfs_evolution(tt, save_path=None, display=True, one_plot=False):
 
 def make_movie(tt, save_path=None, display=True, speed_factor=1.0, loop=None, notebook_mode=None):
     r'''! Create pulse movie from simulation data.
-    
+
         Renders equilibrium plots from stored equilibrium snapshots, generates
         composite frames in a temp directory, encodes to MP4, then cleans up.
-    
+
         Parameters
         ----------
         tt : TokaMaker_TORAX
@@ -4670,7 +4670,7 @@ def make_movie(tt, save_path=None, display=True, speed_factor=1.0, loop=None, no
             True  → embed video in notebook after saving.
             False → save to file only, do not embed.
             None  → auto-detect (embed if in Jupyter and display=True).
-        
+
     '''
     if loop is None:
         loop = tt._current_loop
@@ -5179,7 +5179,7 @@ def plot_profiles_interactive(tt):
 
 def plot_equil_interactive(tt, loop=None, notebook_mode=None, save_path=None):
     r'''! Equilibrium viewer — widget slider in notebook, saved PNGs otherwise.
-    
+
         Parameters
         ----------
         notebook_mode : bool or None
@@ -5189,7 +5189,7 @@ def plot_equil_interactive(tt, loop=None, notebook_mode=None, save_path=None):
         save_path : str, optional
             Directory for PNG files when notebook_mode=False.
             Defaults to ./equil_loop<N>/ in the current directory.
-        
+
     '''
     if notebook_mode is None:
         notebook_mode = _in_jupyter()

@@ -27,7 +27,7 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
-  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
+  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
 IMPLICIT NONE
@@ -286,7 +286,7 @@ type(oft_lag_bginterp), target :: psi_geval
 real(8) :: itor_loc ! local toroidal current in integration
 real(8) :: itor ! toroidal current
 real(8) :: I_NI ! non-inductive F*F'
-real(8) :: eta_jsq ! eta*j_NI**2 
+real(8) :: eta_jsq ! eta*j_NI**2
 real(8) :: goptmp(3,3)
 real(8) :: v ! volume
 real(8) :: pt(3) ! radial coordinate

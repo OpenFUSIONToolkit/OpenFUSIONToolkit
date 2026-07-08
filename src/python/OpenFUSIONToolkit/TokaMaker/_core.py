@@ -1386,7 +1386,7 @@ class TokaMaker():
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param compute_geo Compute geometric values for LCFS
-        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f$[<R>,<1/R>,dV/dPsi]\f$, length of last surface,
+        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f${<R>,<1/R>,dV/dPsi}\f$, length of last surface,
         [r(R_min),r(R_max)], [r(z_min),r(z_max)]
         '''
         if self._tMaker_equil is None:
@@ -1399,7 +1399,7 @@ class TokaMaker():
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
-        @result \f$ f_c \f$, [\f$<R>,<1/R>,<a>\f$], [\f$<|B|>,<|B|^2>\f$]
+        @result \f$ f_c \f$, \f${<R>,<1/R>,<a>}\f$, \f$[<|B|>,<|B|^2>]\f$
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -2723,7 +2723,7 @@ class TokaMaker_equilibrium():
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param compute_geo Compute geometric values for LCFS
-        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f$[<R>,<1/R>,dV/dPsi]\f$, length of last surface,
+        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f${<R>,<1/R>,<1/R^2>,dV/dPsi}\f$, length of last surface,
         [r(R_min),r(R_max)], [r(z_min),r(z_max)]
         '''
         if psi is None:
@@ -2736,7 +2736,7 @@ class TokaMaker_equilibrium():
                 psi_save = numpy.copy(psi)
                 psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
-        ravgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
+        ravgs = numpy.zeros((4,psi.shape[0]), dtype=numpy.float64)
         if compute_geo:
             dl = c_double(1.0)
         else:
@@ -2747,16 +2747,22 @@ class TokaMaker_equilibrium():
         tokamaker_get_q(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,ctypes.byref(dl),rbounds,zbounds,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        ravg_dict = {
+            '<R>': ravgs[0,:],
+            '<1/R>': ravgs[1,:],
+            '<1/R^2>': ravgs[2,:],
+            'dV/dPsi': ravgs[3,:]
+        }
         if self.psi_convention == 0:
             if compute_geo:
-                return psi_save,qvals,ravgs,dl.value,rbounds,zbounds
+                return psi_save,qvals,ravg_dict,dl.value,rbounds,zbounds
             else:
-                return psi_save,qvals,ravgs,None,None,None
+                return psi_save,qvals,ravg_dict,None,None,None
         else:
             if compute_geo:
-                return psi,qvals,ravgs,dl.value,rbounds,zbounds
+                return psi,qvals,ravg_dict,dl.value,rbounds,zbounds
             else:
-                return psi,qvals,ravgs,None,None,None
+                return psi,qvals,ravg_dict,None,None,None
 
     def trace_surf(self,psi):
         r'''! Trace surface for a given poloidal flux
@@ -2849,7 +2855,7 @@ class TokaMaker_equilibrium():
             lcfs_pad = 0.0
             if self.diverted or (not self.free_boundary):
                 lcfs_pad = 0.01
-        _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,axis_pad],compute_geo=True) # Given backward so last point is LCFS (for dl)
+        _, qvals, _, dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,axis_pad],compute_geo=True) # Given backward so last point is LCFS (for dl)
         # Get diverted topology information
         if self.diverted:
             x_points, _ = self.get_xpoints()
@@ -2978,7 +2984,7 @@ class TokaMaker_equilibrium():
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
-        @result \f$ f_c \f$, [\f$<R>,<1/R>,<a>\f$], [\f$<|B|>,<|B|^2>\f$]
+        @result \f$ f_c \f$, \f${<R>,<1/R>,<a>}\f$, \f$[<|B|>,<|B|^2>]\f$
         '''
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
@@ -2996,10 +3002,15 @@ class TokaMaker_equilibrium():
         tokamaker_sauter_fc(self._equil_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        ravg_dict = {
+            '<R>': r_avgs[0,:],
+            '<1/R>': r_avgs[1,:],
+            '<a>': r_avgs[2,:]
+        }
         if self.psi_convention == 0:
-            return psi_save,fc,r_avgs,modb_avgs
+            return psi_save,fc,ravg_dict,modb_avgs
         else:
-            return psi,fc,r_avgs,modb_avgs
+            return psi,fc,ravg_dict,modb_avgs
 
     def calc_delstar_curr(self,psi):
         r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator
