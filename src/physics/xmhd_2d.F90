@@ -343,6 +343,14 @@ CALL u%delete()
 CALL up%delete()
 CALL v%delete()
 DEALLOCATE(u,up,v)
+!---extrapolation fields
+IF(maxextrap>0)THEN
+  DO i=1,maxextrap
+    CALL extrap_fields(i)%f%delete
+    DEALLOCATE(extrap_fields(i)%f)
+  END DO
+  DEALLOCATE(extrap_fields,extrapt)
+END IF
 end subroutine run_simulation
 !---------------------------------------------------------------------------
 !> Main driver for 2D MHD linear time advance
@@ -522,6 +530,14 @@ IF(self%timestep_cn)THEN
   CALL un1%delete()
   CALL un2%delete()
   DEALLOCATE(un1,un2)
+END IF
+!---extrapolation fields
+IF(maxextrap>0)THEN
+  DO i=1,maxextrap
+    CALL extrap_fields(i)%f%delete
+    DEALLOCATE(extrap_fields(i)%f)
+  END DO
+  DEALLOCATE(extrap_fields,extrapt)
 END IF
 END SUBROUTINE run_lin_simulation
 !---------------------------------------------------------------------------

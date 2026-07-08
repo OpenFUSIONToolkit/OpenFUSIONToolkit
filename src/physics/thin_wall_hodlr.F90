@@ -2513,23 +2513,6 @@ TYPE :: tw_oct_tree
   TYPE(tw_oct_tree), POINTER, DIMENSION(:) :: children => NULL()
   TYPE(tw_oct_tree), POINTER :: parent => NULL()
 END TYPE tw_oct_tree
-!---------------------------------------------------------------------------------
-!> Need docs
-!---------------------------------------------------------------------------------
-TYPE :: tw_oct_tree_level
-  INTEGER(4) :: nblocks = 0
-  INTEGER(4) :: nc_dense = 0
-  INTEGER(4) :: nc_sparse = 0
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kr_dense => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lc_dense => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kc_dense => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lr_dense => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lrm_dense => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kr_sparse => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lc_sparse => NULL()
-  INTEGER(4), POINTER, DIMENSION(:,:) :: dense_mask => NULL()
-  TYPE(tw_oct_tree), POINTER, DIMENSION(:) :: block => NULL()
-END TYPE tw_oct_tree_level
 
 TYPE(tw_oct_tree) :: mesh_tree
 
@@ -2628,6 +2611,8 @@ IF(leaf%nchildren>0)THEN
   DO j=1,leaf%nchildren
     CALL fill_levels(leaf%children(j),depth+1,block_id)
   END DO
+  DEALLOCATE(leaf%children)
+  NULLIFY(leaf%parent)
 ELSE
   DO j=depth+1,nlevels
     levels(j)%nblocks=levels(j)%nblocks+1

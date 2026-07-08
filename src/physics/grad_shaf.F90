@@ -148,6 +148,8 @@ end type oft_gs_zerob
 type, abstract, extends(bfem_interp) :: gs_ani_press
   TYPE(gs_equil), POINTER :: gs => NULL() !< Equilibrium object
 contains
+  !> Destroy object
+  PROCEDURE(ani_press_delete), DEFERRED :: delete
   !> Copy object
   PROCEDURE(ani_press_copy), DEFERRED :: copy
   !> Needs docs
@@ -394,14 +396,14 @@ end type gsinv_interp
 !---
 abstract interface
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Destroy flux function object and free associated memory
   !------------------------------------------------------------------------------
   subroutine flux_func_delete(self)
     import flux_func
     class(flux_func), intent(inout) :: self
   end subroutine flux_func_delete
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Create a copy of a flux function object
   !------------------------------------------------------------------------------
   subroutine flux_func_copy(self,new)
     import flux_func
@@ -409,7 +411,7 @@ abstract interface
     class(flux_func), pointer, intent(inout) :: new
   end subroutine flux_func_copy
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Evaluate flux function at given value of \f$ \psi \f$
   !------------------------------------------------------------------------------
   function flux_func_eval(self,psi) result(b)
     import flux_func, r8
@@ -418,7 +420,7 @@ abstract interface
     real(r8) :: b
   end function flux_func_eval
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Update flux function with new equilibrium state
   !------------------------------------------------------------------------------
   subroutine flux_func_update(self,gseq)
     import flux_func, gs_equil
@@ -426,7 +428,7 @@ abstract interface
     class(gs_equil), intent(inout) :: gseq
   end subroutine flux_func_update
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Set the value of free flux function parametrizing coefficients
   !------------------------------------------------------------------------------
   function flux_cofs_set(self,c) result(ierr)
     import flux_func, r8, i4
@@ -435,7 +437,7 @@ abstract interface
     integer(i4) :: ierr
   end function flux_cofs_set
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Get the value of free flux function parametrizing coefficients
   !------------------------------------------------------------------------------
   subroutine flux_cofs_get(self,c)
     import flux_func, r8
@@ -443,7 +445,7 @@ abstract interface
     real(r8), intent(out) :: c(:)
   end subroutine flux_cofs_get
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Save flux function to HDF5 file
   !------------------------------------------------------------------------------
   subroutine flux_save_hdf5(self,filename,path)
     import flux_func
@@ -452,7 +454,10 @@ abstract interface
     character(LEN=*), intent(in) :: path
   end subroutine flux_save_hdf5
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Save flux function to text file
+  !!
+  !! @note This may not capture all state information, but is intended for
+  !! initial creation of flux functions.
   !------------------------------------------------------------------------------
   subroutine flux_save_txt(self,io_unit)
     import flux_func
@@ -460,7 +465,7 @@ abstract interface
     integer, intent(in) :: io_unit
   end subroutine flux_save_txt
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Load flux function from HDF5 file
   !------------------------------------------------------------------------------
   subroutine flux_load_hdf5(self,filename,path,success)
     import flux_func
@@ -470,7 +475,7 @@ abstract interface
     logical, intent(out) :: success
   end subroutine flux_load_hdf5
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Load flux function from text file
   !------------------------------------------------------------------------------
   subroutine flux_load_txt(self,io_unit)
     import flux_func
@@ -478,7 +483,14 @@ abstract interface
     integer, intent(in) :: io_unit
   end subroutine flux_load_txt
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Destroy anisotropic pressure object and free associated memory
+  !------------------------------------------------------------------------------
+  subroutine ani_press_delete(self)
+    import gs_ani_press
+    class(gs_ani_press), intent(inout) :: self
+  end subroutine ani_press_delete
+  !------------------------------------------------------------------------------
+  !> Create a copy of an anisotropic pressure object
   !------------------------------------------------------------------------------
   subroutine ani_press_copy(self,new,new_gs)
     import gs_ani_press, gs_equil
@@ -487,7 +499,7 @@ abstract interface
     class(gs_equil), target, intent(inout) :: new_gs
   end subroutine ani_press_copy
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Update anisotropic pressure object with new equilibrium state
   !------------------------------------------------------------------------------
   subroutine ani_press_update(self,gseq)
     import gs_ani_press, gs_equil
@@ -516,7 +528,9 @@ TYPE(opt_targets) :: active_targets !< Active target values/ptrs for external fu
 real(r8), PARAMETER :: gs_epsilon = 1.d-12 !< Epsilon used for radial coordinate
 real(r8) :: qp_int_tol = 1.d-12
 contains
-!
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
 function dummy_fpp(self,psi) result(b)
 class(flux_func), intent(inout) :: self
 real(r8), intent(in) :: psi
@@ -3479,6 +3493,8 @@ call rhs%delete
 call psihat%delete
 call dels_grnd%delete
 DEALLOCATE(rhs,psihat,dels_grnd)
+CALL solver%delete(.TRUE.)
+DEALLOCATE(solver)
 end subroutine gs_get_chi
 !------------------------------------------------------------------------------
 !> Compute toroidal current for Grad-Shafranov equilibrium
@@ -4605,6 +4621,7 @@ else
 end if
 CALL active_tracer%delete
 DEALLOCATE(ptout)
+CALL field%delete()
 !!$omp end parallel
 CALL psi_int%delete
 end subroutine gs_trace_surf
@@ -5855,7 +5872,10 @@ IF(ASSOCIATED(self%eta))THEN
   CALL self%eta%delete()
   DEALLOCATE(self%eta)
 END IF
-! TODO: Destroy P_ani
+IF(ASSOCIATED(self%P_ani))THEN
+  CALL self%P_ani%delete()
+  DEALLOCATE(self%P_ani)
+END IF
 end subroutine equil_destroy
 !------------------------------------------------------------------------------
 !> Compute boundary condition matrix for free-boundary case
@@ -6183,6 +6203,7 @@ DO i=1,self%fe_rep%nbe
   END IF
 END DO
 CALL quad%delete()
+CALL quad_hp%delete()
 CALL sing_quad%delete()
 DEALLOCATE(massmat,marker,bemap,vflux_mat)
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Complete'
