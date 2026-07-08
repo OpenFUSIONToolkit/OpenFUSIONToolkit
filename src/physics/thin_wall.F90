@@ -50,7 +50,7 @@ TYPE :: hole_mesh
   INTEGER(i4), POINTER, DIMENSION(:) :: sort_ind => NULL() !< Index from sorted list
   INTEGER(i4), POINTER, DIMENSION(:) :: kpc => NULL() !< Pointer to point-cell linkage
   INTEGER(i4), POINTER, DIMENSION(:) :: lpc => NULL() !< List of cells tied to each point
-  ! REAL(r8), POINTER, DIMENSION(:) :: fsign => NULL() !< Sign of 
+  ! REAL(r8), POINTER, DIMENSION(:) :: fsign => NULL() !< Sign of
   REAL(r8) :: ptcc(3) = 0.d0
 END TYPE hole_mesh
 !---------------------------------------------------------------------------------
@@ -2201,7 +2201,7 @@ IF(TRIM(save_file)/='none')THEN
     hash_tmp(2) = self%mesh%nc
     hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
     hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
-    WRITE(*,'(2A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
+    WRITE(*,'(3A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
     CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
     IF(exists.AND.ALL(file_counts==hash_tmp))THEN
       ALLOCATE(self%Bel(self%nelems,self%mesh%np,3))
@@ -2433,7 +2433,7 @@ DO i=1,ncoils
   IF(xml_hasAttribute(coil_set,"res_per_len"))THEN
     CALL xml_read_attribute(coil_set,"res_per_len",res_per_len,iostat=ierr)
     IF(ierr/=0)THEN
-      WRITE(coil_ind,'(I6,2X,I6)')i
+      WRITE(coil_ind,'(I6)')i
       CALL oft_xml_abort('Error reading "res_per_len" for coil set '//coil_ind,'tw_load_coils',__FILE__)
     END IF
     coil_tmp%res_per_len=res_per_len
@@ -2442,7 +2442,7 @@ DO i=1,ncoils
   IF(xml_hasAttribute(coil_set,"radius"))THEN
     CALL xml_read_attribute(coil_set,"radius",radius,iostat=ierr)
     IF(ierr/=0)THEN
-      WRITE(coil_ind,'(I6,2X,I6)')i
+      WRITE(coil_ind,'(I6)')i
       CALL oft_xml_abort('Error reading "radius" for coil set '//coil_ind,'tw_load_coils',__FILE__)
     END IF
     coil_tmp%radius=radius
@@ -2451,7 +2451,7 @@ DO i=1,ncoils
   IF(xml_hasAttribute(coil_set,"sens_mask"))THEN
     CALL xml_read_attribute(coil_set,"sens_mask",coil_tmp%sens_mask,iostat=ierr)
     IF(ierr/=0)THEN
-      WRITE(coil_ind,'(I6,2X,I6)')i
+      WRITE(coil_ind,'(I6)')i
       CALL oft_xml_abort('Error reading "sens_mask" for coil set '//coil_ind,'tw_load_coils',__FILE__)
     END IF
     IF(coil_tmp%sens_mask)THEN
@@ -2623,7 +2623,7 @@ IF(exists)THEN
   OPEN(NEWUNIT=io_unit, FILE=TRIM(filename))
   ierr=skip_comment_lines(io_unit)
   READ(io_unit,*)sensors%nfloops
-  WRITE(*,'(2A)')oft_indent,'  # of floops =',sensors%nfloops
+  WRITE(*,'(2A,I6)')oft_indent,'  # of floops =',sensors%nfloops
   ALLOCATE(sensors%floops(sensors%nfloops))
   DO i=1,sensors%nfloops
     READ(io_unit,*)
@@ -2807,9 +2807,9 @@ REAL(r8), POINTER :: eta_tmp(:),eta_vol_tmp(:),thickness_tmp(:)
 LOGICAL, POINTER :: sens_mask_tmp(:)
 nreg_mesh=MAXVAL(self%mesh%reg)
 !--- Deallocate if already set
-IF (ASSOCIATED(self%Eta_vol)) DEALLOCATE(self%Eta_vol) 
-IF (ASSOCIATED(self%Thickness)) DEALLOCATE(self%Thickness) 
-IF (ASSOCIATED(self%Eta_surf)) DEALLOCATE(self%Eta_surf)
+IF(ASSOCIATED(self%Eta_vol))DEALLOCATE(self%Eta_vol)
+IF(ASSOCIATED(self%Thickness))DEALLOCATE(self%Thickness)
+IF(ASSOCIATED(self%Eta_surf))DEALLOCATE(self%Eta_surf)
 ALLOCATE(self%Eta_vol(nreg_mesh))
 ALLOCATE(self%Thickness(nreg_mesh))
 ALLOCATE(self%Eta_surf(nreg_mesh))
@@ -2896,9 +2896,9 @@ IF(has_eta_surf)THEN
   ELSE IF((.NOT.has_eta_vol).AND.has_thickness)THEN
     self%Eta_vol=self%Eta_surf*self%Thickness
   END IF
-ELSE IF (has_eta_vol.AND.has_thickness)THEN
+ELSE IF(has_eta_vol.AND.has_thickness)THEN
   self%Eta_surf=self%Eta_vol/self%Thickness
-ELSE IF (has_eta_vol.AND.(.NOT.has_thickness))THEN
+ELSE IF(has_eta_vol.AND.(.NOT.has_thickness))THEN
   CALL oft_warn('"eta_vol" specified without "thickness" nor "eta_surf" in XML. Please specify "eta_surf" or both "eta_vol" and "thickness".')
 ELSE
   CALL oft_warn('Cannot gather or infer surface resisitivity from XML. Ignore this warning if resistivity is specified later or is not needed.')
@@ -2919,7 +2919,7 @@ IF(ierr==0)THEN
 END IF
 end subroutine tw_load_eta
 !------------------------------------------------------------------------------
-!> Load forcing mesh and fields for an MHD-style mode 
+!> Load forcing mesh and fields for an MHD-style mode
 !------------------------------------------------------------------------------
 subroutine tw_load_mode(filename,self,driver)
 CHARACTER(LEN=*) :: filename !< Filename containing mode definition

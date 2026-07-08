@@ -191,7 +191,7 @@ TYPE :: gs_factory
   INTEGER(i4), POINTER, DIMENSION(:) :: bc_rhs_list => NULL() !< List of terms interacting with free-boundary BC
   INTEGER(i4), POINTER, DIMENSION(:) :: olbp => NULL() !< Oriented list of boundary points
   INTEGER(i4), POINTER, DIMENSION(:) :: lim_con => NULL() !< Limiter contour list (contains all limiters)
-  INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Pointer to start of each 
+  INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Pointer to start of each
   REAL(r8), POINTER, DIMENSION(:) :: cond_weights => NULL() !< Needs docs
   REAL(r8), POINTER, DIMENSION(:) :: coil_vcont => NULL() !< Virtual VSC definition as weighted sum of other coils
   REAL(r8), POINTER, DIMENSION(:) :: Rcoils => NULL() !< Lumped resistance [Ohms] of each coil (negative for Icoils)
@@ -549,7 +549,7 @@ class(gs_factory), intent(inout) :: self !< G-S object
 !---
 INTEGER(4) :: i,io_unit,iostat
 IF(TRIM(self%limiter_file)=='none')RETURN
-IF(oft_debug_print(1))WRITE(*,'(2A,I4,A)')oft_indent,'Loading limiters'
+IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Loading limiters'
 OPEN(NEWUNIT=io_unit,FILE=TRIM(self%limiter_file))
 READ(io_unit,*)self%nlimiter_pts
 ALLOCATE(self%limiter_pts(2,self%nlimiter_pts))
@@ -781,7 +781,7 @@ type(oft_native_cg_eigsolver) :: eigsolver
 class(oft_vector), pointer :: tmp_vec,tmp_vec2
 integer(4), pointer, dimension(:) :: cdofs
 real(r8), pointer, dimension(:) :: psi_vals
-type(oft_lag_brinterp) :: psi_eval 
+type(oft_lag_brinterp) :: psi_eval
 integer(4) :: i,j,k,mind,nCon,ierr
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
@@ -1095,7 +1095,7 @@ class(oft_vector), pointer :: tmp_vec
 integer(4), pointer, dimension(:) :: cdofs
 real(r8), pointer, dimension(:) :: psi_vals
 type(circular_curr) :: circle_init
-type(oft_lag_brinterp) :: psi_eval 
+type(oft_lag_brinterp) :: psi_eval
 integer(4) :: i,j,k,mind,nCon
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
@@ -2393,14 +2393,14 @@ DO i=1,self%maxits
     IF(ALL(self%target_weights>0.d0))THEN
       equil%saddle_targets(1:2,equil%saddle_ntargets)=pt
     ELSE
-      ! 
+      !
       CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
       CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
       psi_geval%u=>psi_vac
       CALL psi_geval%setup(self%fe_rep)
       CALL psi_geval%interp(cell,f,goptmp,gpsi0)
       param_rhs(3)=-gpsi0(2)
-      ! 
+      !
       psi_geval%u=>psi_vcont
       CALL psi_geval%setup(self%fe_rep)
       CALL psi_geval%interp(cell,f,goptmp,gpsi0)
@@ -2819,14 +2819,14 @@ END IF
 
 !---Add row for vertical control
 IF((equil%Z0_target>-1.d98).AND.adjust_r0)THEN
-  ! 
+  !
   CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
   CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
   psi_geval%u=>psi_vac
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
   param_rhs(3)=-gpsi0(2)
-  ! 
+  !
   psi_geval%u=>psi_vcont
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)

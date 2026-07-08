@@ -384,7 +384,7 @@ END FUNCTION xml_hasAttribute
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_xml_free(doc_ptr)
 TYPE(c_ptr), INTENT(inout) :: doc_ptr !< C pointer to xmlDoc to free
-IF (c_associated(doc_ptr)) THEN
+IF(c_associated(doc_ptr))THEN
   CALL oft_xml_free_doc_c(doc_ptr)
   doc_ptr=c_null_ptr
 END IF

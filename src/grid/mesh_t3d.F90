@@ -248,16 +248,16 @@ IF(oft_env%head_proc)THEN
   WRITE(*,'(3A)')oft_indent,'Mesh File = ',TRIM(filename)
   WRITE(*,'(3A)')oft_indent,'Geom File = ',TRIM(inpname)
   IF(lenreflag>0)THEN
-    WRITE(*,'(2X,A)')oft_indent,'Reflection:'
+    WRITE(*,'(2X,2A)')oft_indent,'Reflection:'
     CALL oft_increase_indent
     DO i=1,lenreflag
       SELECT CASE(reflect(i:i))
         CASE('x')
-          WRITE(*,'(4X,A,L1)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
+          WRITE(*,'(4X,2A,L1)')oft_indent,'YZ-plane, periodic = ',ref_per(1)
         CASE('y')
-          WRITE(*,'(4X,A,L1)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
+          WRITE(*,'(4X,2A,L1)')oft_indent,'XZ-plane, periodic = ',ref_per(2)
         CASE('z')
-          WRITE(*,'(4X,A,L1)')oft_indent,'XY-plane, periodic = ',ref_per(3)
+          WRITE(*,'(4X,2A,L1)')oft_indent,'XY-plane, periodic = ',ref_per(3)
       END SELECT
     END DO
     CALL oft_decrease_indent

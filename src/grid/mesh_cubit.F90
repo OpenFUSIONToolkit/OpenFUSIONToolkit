@@ -255,7 +255,7 @@ IF(TRIM(inpname)/='none')THEN
   call mesh_cubit_read_surface
   call mesh_cubit_geom
 ELSE
-  IF(oft_debug_print(2))WRITE(*,'(A)')oft_indent,'No Cubit geometry file specified'
+  IF(oft_debug_print(2))WRITE(*,'(2A)')oft_indent,'No Cubit geometry file specified'
 END IF
 #endif
 !---Load mesh vertices
@@ -1090,8 +1090,8 @@ do i=1,ngwc
   IF(oft_debug_print(3))THEN
     WRITE(*,'(2A)')oft_indent,'============================'
     WRITE(*,'(3A)')oft_indent,'Found CAD Curve: id = ',TRIM(obj_name)
-    WRITE(*,'(2A,L)')oft_indent,'Linear: ',wf_curves(i)%linear
-    WRITE(*,'(2A,L)')oft_indent,'Periodic: ',wf_curves(i)%periodic
+    WRITE(*,'(2A,L1)')oft_indent,'Linear: ',wf_curves(i)%linear
+    WRITE(*,'(2A,L1)')oft_indent,'Periodic: ',wf_curves(i)%periodic
     WRITE(*,'(2A,2ES12.4)')oft_indent,'Domain: ',wf_curves(i)%domain
     WRITE(*,'(2A,3ES12.4)')oft_indent,'Start Point: ',pt1
     WRITE(*,'(2A,3ES12.4)')oft_indent,'End Point:   ',pt2
@@ -1128,9 +1128,9 @@ do i=1,ngws
   IF(oft_debug_print(3))THEN
     WRITE(*,'(2A)')oft_indent,'============================'
     WRITE(*,'(3A)')oft_indent,'Found CAD surface: id = ',TRIM(obj_name)
-    WRITE(*,'(2A,L)')oft_indent,'Planar: ',wf_surfs(i)%planar
-    WRITE(*,'(2A,2L)')oft_indent,'Periodic: ',wf_surfs(i)%periodic
-    WRITE(*,'(2A,4L)')oft_indent,'Singular: ',wf_surfs(i)%singular(:,1),wf_surfs(i)%singular(:,2)
+    WRITE(*,'(2A,L1)')oft_indent,'Planar: ',wf_surfs(i)%planar
+    WRITE(*,'(2A,2L1)')oft_indent,'Periodic: ',wf_surfs(i)%periodic
+    WRITE(*,'(2A,4L1)')oft_indent,'Singular: ',wf_surfs(i)%singular(:,1),wf_surfs(i)%singular(:,2)
     WRITE(*,'(2A,4ES12.4)')oft_indent,'Domain: ',wf_surfs(i)%domain(:,1),wf_surfs(i)%domain(:,2)
     WRITE(*,'(2A)')oft_indent,'============================'
   END IF
@@ -1779,8 +1779,8 @@ IF(j<=cad_link%nce)THEN
     TYPE IS(nurbs_curve)
       WRITE(*,'(2A)')oft_indent,'Entity is NURBS curve'
       call oft_increase_indent
-      WRITE(*,'(2A,L)')oft_indent,'Linear:   ',obj%linear
-      WRITE(*,'(2A,L)')oft_indent,'Periodic: ',obj%periodic
+      WRITE(*,'(2A,L1)')oft_indent,'Linear:   ',obj%linear
+      WRITE(*,'(2A,L1)')oft_indent,'Periodic: ',obj%periodic
       WRITE(*,'(2A,2ES14.6)')oft_indent,'Domain:   ',obj%domain
       WRITE(*,'(2A,6ES14.6)')oft_indent,'Extent:   ',obj%rgrid(:,1),obj%rgrid(:,20)
       call oft_decrease_indent
@@ -1793,11 +1793,11 @@ IF(j<=cad_link%nce)THEN
       call nurbs_curve_midpoint(obj,pt,mesh%r(:,mesh%le(1,i)),mesh%r(:,mesh%le(2,i)), &
       2.d0/3,1.d0/3,ierr)
     TYPE IS(nurbs_surf)
-      WRITE(*,'(2A)')oft_indent,'Entity is NURBS surface',obj%sid
+      WRITE(*,'(2A,I8)')oft_indent,'Entity is NURBS surface',obj%sid
       call oft_increase_indent
-      WRITE(*,'(2A,L)')oft_indent,'Planar:   ',obj%planar
-      WRITE(*,'(2A,L,1X,L)')oft_indent,'Periodic: ',obj%periodic
-      WRITE(*,'(2A,L,1X,L,1X,L,1X,L)')oft_indent,'Singular: ',obj%singular(:,1),obj%singular(:,2)
+      WRITE(*,'(2A,L1)')oft_indent,'Planar:   ',obj%planar
+      WRITE(*,'(2A,L1,1X,L1)')oft_indent,'Periodic: ',obj%periodic
+      WRITE(*,'(2A,L1,1X,L1,1X,L1,1X,L1)')oft_indent,'Singular: ',obj%singular(:,1),obj%singular(:,2)
       WRITE(*,'(2A,4ES14.6)')oft_indent,'Domain:   ',obj%domain(:,1),obj%domain(:,2)
       WRITE(*,'(2A,6ES14.6)')oft_indent,'Edge 1:   ',obj%rgrid(:,1,1),obj%rgrid(:,2,1)
       WRITE(*,'(2A,6ES14.6)')oft_indent,'Edge 2:   ',obj%rgrid(:,20,1),obj%rgrid(:,20,2)
@@ -1829,7 +1829,7 @@ end subroutine mesh_cubit_test_edge
 !---------------------------------------------------------------------------------
 subroutine mesh_cubit_error(status)
 integer(i4), intent(in) :: status
-if(status /= nf90_noerr) THEN
+if(status /= nf90_noerr)THEN
   WRITE(*,'(A,I8.8)')'NETCDF-ERROR_CODE: ',status
   call oft_abort(TRIM(nf90_strerror(status)),'mesh_cubit_error',__FILE__)
 end if
