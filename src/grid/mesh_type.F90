@@ -1166,7 +1166,7 @@ end do
 if(present(fout))fout=f
 if(i>=self%nc)then
   cell=0
-  fout=-1.d0
+  if(present(fout))fout=-1.d0
 endif
 end subroutine bmesh_findcell
 !------------------------------------------------------------------------------

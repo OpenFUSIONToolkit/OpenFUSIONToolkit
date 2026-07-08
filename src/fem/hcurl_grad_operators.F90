@@ -1320,7 +1320,7 @@ uu=a%dot(a)
 self%solver%atol=MAX(self%solver%atol,SQRT(uu*1.d-20))
 call u%set(0.d0)
 IF(ASSOCIATED(self%bnorm))CALL g%add(1.d0,-1.d0,self%bnorm)
-call self%bc%apply(g)
+IF(ASSOCIATED(self%bc))call self%bc%apply(g)
 !---
 pm_save=oft_env%pm; oft_env%pm=self%pm
 call self%solver%apply(u,g)

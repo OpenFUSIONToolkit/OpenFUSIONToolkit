@@ -793,7 +793,7 @@ self%estored=diag(2)/mu0*3.d0/2.d0
 ! eta_source=b%dot(b)
 ! WRITE(*,*)'CHK',eta_source
 ! WRITE(*,*)self%ip
-DEALLOCATE(pol_vals,rhs_vals,ptmp,alam_vals)
+DEALLOCATE(pol_vals,rhs_vals,alam_vals)
 !---Report time
 ! IF(oft_debug_print(1))THEN
 

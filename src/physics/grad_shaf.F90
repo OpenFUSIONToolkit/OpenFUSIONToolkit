@@ -148,8 +148,6 @@ end type oft_gs_zerob
 type, abstract, extends(bfem_interp) :: gs_ani_press
   TYPE(gs_equil), POINTER :: gs => NULL() !< Equilibrium object
 contains
-  !> Destroy object
-  PROCEDURE(ani_press_delete), DEFERRED :: delete
   !> Copy object
   PROCEDURE(ani_press_copy), DEFERRED :: copy
   !> Needs docs
@@ -482,13 +480,6 @@ abstract interface
     class(flux_func), intent(inout) :: self
     integer, intent(in) :: io_unit
   end subroutine flux_load_txt
-  !------------------------------------------------------------------------------
-  !> Destroy anisotropic pressure object and free associated memory
-  !------------------------------------------------------------------------------
-  subroutine ani_press_delete(self)
-    import gs_ani_press
-    class(gs_ani_press), intent(inout) :: self
-  end subroutine ani_press_delete
   !------------------------------------------------------------------------------
   !> Create a copy of an anisotropic pressure object
   !------------------------------------------------------------------------------
