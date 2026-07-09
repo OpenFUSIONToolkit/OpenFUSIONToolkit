@@ -636,7 +636,7 @@ class TokaMaker():
                 raise KeyError('Unknown coil "{0}"'.format(key))
         return coil_reg_term(coffs,target,weight)
     
-    def set_coil_reg(self,reg_mat=None,reg_targets=None,reg_weights=None,reg_terms=None):
+    def set_coil_reg(self,reg_mat=None,reg_targets=None,reg_weights=None,reg_terms=None, eq_idx=0):
         '''! Set regularization matrix for coil currents when isoflux and/or saddle constraints are used
 
         Can be used to enforce "soft" constraints on coil currents. For hard constraints see
@@ -695,7 +695,7 @@ class TokaMaker():
         reg_targets = numpy.ascontiguousarray(reg_targets, dtype=numpy.float64)
         reg_weights = numpy.ascontiguousarray(reg_weights, dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_coil_regmat(self._tMaker_ptr,nregularize,reg_mat,reg_targets,reg_weights,error_string)
+        tokamaker_set_coil_regmat(self._tMaker_ptr,nregularize,reg_mat,reg_targets,reg_weights,eq_idx+1,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
@@ -747,7 +747,7 @@ class TokaMaker():
             raise Exception(error_string.value)
         self._vcoils = copy.deepcopy(coil_resistances)
 
-    def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0, curr_source=None):
+    def init_psi(self, r0=-1.0, z0=0.0, a=0.0, kappa=0.0, delta=0.0, curr_source=None, eq_idx=0):
         r'''! Initialize \f$\psi\f$ using uniform current distributions
 
         If r0>0 then a uniform current density inside a surface bounded by
@@ -768,7 +768,7 @@ class TokaMaker():
             curr_source = numpy.ascontiguousarray(curr_source, dtype=numpy.float64)
             curr_ptr = curr_source.ctypes.data_as(c_double_ptr)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_init_psi(self._tMaker_ptr,c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),curr_ptr,error_string)
+        tokamaker_init_psi(self._tMaker_ptr,c_double(r0),c_double(z0),c_double(a),c_double(kappa),c_double(delta),curr_ptr,eq_idx,error_string)
         if error_string.value != b'':
             raise ValueError("Error in initialization: {0}".format(error_string.value.decode()))
 
@@ -927,7 +927,7 @@ class TokaMaker():
         )
         self.set_isoflux_constraints(isoflux,weights,grad_wt_lim,ref_points)
     
-    def set_isoflux_constraints(self,isoflux,weights=None,grad_wt_lim=-1.0,ref_points=None):
+    def set_isoflux_constraints(self,isoflux,weights=None,grad_wt_lim=-1.0,ref_points=None,eq_idx=0):
         r'''! Set isoflux constraint points (all points lie on a flux surface)
 
         To constraint points more uniformly in space additional weighting based on
@@ -964,7 +964,7 @@ class TokaMaker():
             weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             ref_points = numpy.ascontiguousarray(ref_points, dtype=numpy.float64)
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_isoflux(self._tMaker_ptr,isoflux,ref_points,weights,isoflux.shape[0],grad_wt_lim,error_string)
+            tokamaker_set_isoflux(self._tMaker_ptr,isoflux,ref_points,weights,isoflux.shape[0],grad_wt_lim,eq_idx+1,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._tMaker_equil._isoflux_constraints = isoflux.copy()
@@ -1167,7 +1167,7 @@ class TokaMaker():
                               float_to_c(self._tMaker_equil._dflux_target),
                               float_to_c(self._tMaker_equil._R0_target),
                               float_to_c(self._tMaker_equil._Z0_target),
-                              eq_idx,
+                              eq_idx+1,
                               error_string
         )
         if error_string.value != b'':
