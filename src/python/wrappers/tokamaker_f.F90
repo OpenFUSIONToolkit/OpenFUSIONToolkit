@@ -374,7 +374,9 @@ TYPE(tokamaker_instance), POINTER :: tMaker_obj
 
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 ! Define n_eq
+print *, 'Setting n_eq'
 tMaker_obj%n_eq = n_eq
+print *, 'Set n_eq'
 
 !------------------------------------------------------------------------------
 ! Check input files

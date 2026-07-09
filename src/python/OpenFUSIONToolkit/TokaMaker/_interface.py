@@ -47,7 +47,7 @@ tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
 
 # tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,coil_Lmat,error_str)
 tokamaker_setup = ctypes_subroutine(oftpy_lib.tokamaker_setup,
-    [c_void_p, c_int, c_int, c_bool, c_int_ptr, c_double_ptr_ptr, c_char_p])
+    [c_void_p, c_int, c_bool, c_int, c_int_ptr, c_double_ptr_ptr, c_char_p])
 
 # tokamaker_destroy(tMaker_ptr,error_str)
 tokamaker_destroy = ctypes_subroutine(oftpy_lib.tokamaker_destroy,
