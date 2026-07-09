@@ -237,6 +237,8 @@ class TokaMaker():
         self.Lcoils = None
         # Number of equilibria
         self.n_eq = n_eq
+
+        print('Finished TM constructor')
     
     def __del__(self):
         '''! Free Fortran-side objects by calling `reset()` before object is deleted or GC'd'''
@@ -403,7 +405,9 @@ class TokaMaker():
         ncoils = c_int()
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
+        print('Calling setup wrapper')
         tokamaker_setup(self._tMaker_ptr,order,full_domain,self.n_eq,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
+        print('Called setup wrapper')
         if error_string.value != b'':
             raise Exception(error_string.value)
         # Update vacuum flux

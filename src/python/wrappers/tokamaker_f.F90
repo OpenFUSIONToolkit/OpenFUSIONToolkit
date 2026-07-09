@@ -91,7 +91,7 @@ TYPE :: tokamaker_instance
   TYPE(multigrid_mesh), POINTER :: ml_mesh => NULL() !< ML mesh container
   TYPE(oft_ml_fem_type), POINTER :: ML_oft_blagrange => NULL() !< Finite element container
   TYPE(gs_factory), POINTER :: device => NULL() !< G-S device object
-  TYPE(gs_eq_ptr), POINTER, DIMENSION(:) :: gs_equils => NULL() !< Active G-S equilibrium objects
+  TYPE(gs_eq_ptr), ALLOCATABLE :: gs_equils(:) !< Active G-S equilibrium objects
   TYPE(fit_constraint_ptr), POINTER, DIMENSION(:) :: recon_constraints => NULL() !< Constraints for equilibrium reconstruction
   TYPE(oft_tmaker_td), POINTER :: gs_td => NULL() !< Time-dependent G-S object
 END TYPE tokamaker_instance
@@ -199,7 +199,7 @@ CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Er
 LOGICAL :: success
 !---Clear error flag
 IF(PRESENT(error_str))CALL copy_string('',error_str)
-IF(.NOT.ASSOCIATED(tMaker_obj%gs_equils))THEN
+IF(.NOT.ASSOCIATED(tMaker_obj%gs_equils(1)%eq))THEN
   IF(PRESENT(error_str))CALL copy_string('Equilibrium object not allocated',error_str)
   success=.FALSE.
   RETURN
@@ -374,9 +374,7 @@ TYPE(tokamaker_instance), POINTER :: tMaker_obj
 
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 ! Define n_eq
-print *, 'Setting n_eq'
 tMaker_obj%n_eq = n_eq
-print *, 'Set n_eq'
 
 !------------------------------------------------------------------------------
 ! Check input files
@@ -1532,7 +1530,7 @@ tMaker_obj%device%urf=settings%urf
 tMaker_obj%device%maxits=settings%maxits
 tMaker_obj%device%nl_tol=settings%nl_tol
 tMaker_obj%mode=settings%mode
-IF(ASSOCIATED(tMaker_obj%gs_equils))tMaker_obj%gs_equils(1)%eq%mode=tMaker_obj%mode
+IF(ASSOCIATED(tMaker_obj%gs_equils(1)%eq))tMaker_obj%gs_equils(1)%eq%mode=tMaker_obj%mode
 IF((.NOT.tMaker_obj%device%dipole_mode).AND.settings%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution and report bugs")
 tMaker_obj%device%dipole_mode=settings%dipole_mode
 IF((.NOT.tMaker_obj%device%mirror_mode).AND.settings%mirror_mode)CALL oft_warn("TokaMaker's mirror functionality is experimental, use with caution and report bugs")

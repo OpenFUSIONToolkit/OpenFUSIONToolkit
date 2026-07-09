@@ -137,6 +137,7 @@ class OFT_env():
         self.oft_error_slen = slens[3]
         ## Value for marking a float quantity as disabled
         self.float_disable_flag = -1.E99
+        print('Finished OFT constructor')
     
     def float_is_disabled(self,val):
         '''! Check if float is set to a value indicated its usage is "disabled"
