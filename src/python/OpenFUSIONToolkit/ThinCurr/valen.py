@@ -60,17 +60,10 @@ class VALENSystem:
         self.Mdw = mode_drive @ Mdw_full[:mode_start,:torus_start]
         self.Mwd = self.Mdw.T
 
-        '''
-        Mdw_full = tw_mode.cross_eval(tw_torus, mode_drive)
-        self.Mdw = Mdw_full[:,:torus_start]
-        self.Mwd = self.Mdw.T '''
-        
-        # mode_drive = mode_drive[:,:mode_start]
         self.Ld = mode_drive @ Ld_full @ mode_drive.T
         self.Mdc = mode_drive @ Mdc_full
         self.Mcd = self.Mdc.T
         
-    
         tw_torus.compute_Rmat(copy_out=True)
         tw_mode.compute_Rmat(copy_out=True)        
 
@@ -104,7 +97,6 @@ class VALENSystem:
         Lwc_ef = self.Mwc + self.Mwd @ rho @ self.Mdc
         Ldc_ef = self.Mdc + self.Ld @ rho @ self.Mdc
         Lcw_ef = Lwc_ef.T 
-        '''using my version of Lc, assuming the Lc equation in Battey is a typo!!!'''
         Lc_ef = self.Lc + self.Mcd @ rho @ self.Mdc
         Lcd_ef = Ldc_ef.T 
 
@@ -115,6 +107,7 @@ class VALENSystem:
             [Ldw_ef, Ldc_ef, Ld_ef]
         ])
 
+    
     def eigenvalues(self,k=20):
         '''! Compute eigenvalues of the homogeneous equation 9 system
 
