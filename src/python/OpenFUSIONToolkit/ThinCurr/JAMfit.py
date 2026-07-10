@@ -33,11 +33,14 @@ class JAMfit():
     both ThinCurr and TokaMaker.
     '''
 
-    def __init__(self, xml_file, thincurr_meshfile, nthreads=None, oft_env=None):
+    def __init__(self, xml_file, thincurr_meshfile, tokamaker_meshfile, B0, R0, nthreads=None, oft_env=None):
         '''! Initialize the JAMfit object.
 
         @param xml_file str, path to the XML configuration file
         @param thincurr_meshfile str, path to the ThinCurr mesh file
+        @param tokamaker_meshfile str, path to the TokaMaker mesh file
+        @param B0 float, reference magnetic field strength `[T]`
+        @param R0 float, reference major radius `[m]`
         @param nthreads int, number of threads to use (required if oft_env is None)
         @param oft_env OFT_env, an existing OFT environment instance (optional)
         '''
@@ -50,7 +53,16 @@ class JAMfit():
 
         self.xml_file = xml_file
         self.thincurr_meshfile = thincurr_meshfile
+        self.tokamaker_meshfile = tokamaker_meshfile
         self.reduced_created_flag = False
+
+        #intialize tokamaker  
+        self.mygs = TokaMaker(self.myOFT)
+        mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh(self.tokamaker_meshfile)
+        self.mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
+        self.mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
+        self.mygs.setup(order=2, F0= R0*B0)# F0 = self.F0 
+
 
     # =====================================
     # JAMfit Creation Relevant Classes
@@ -571,60 +583,50 @@ class JAMfit():
         wall_psi_at_time = solution_wall_at_time @ wall_psi_probes
         return wall_psi_at_time 
     
-    def post_process_tidx(self, filaments_at_time, wall_psi, coil_curr_dict, rgrid, zgrid, meshfile_tokamaker, B0, R0, myOFT, verbose = False):
+    def post_process_tidx(self, filaments_at_time, wall_psi, coil_curr_dict, rgrid, zgrid, verbose = False):
         '''! Post-process the results at a given time index to compute plasma parameters and visualize.
         
         @param filaments_at_time numpy.ndarray, filament currents at the given time index
         @param coil_curr_dict dict, dictionary of coil currents at the given time index
         @param rgrid numpy.ndarray, R coordinates of the filament mesh
         @param zgrid numpy.ndarray, Z coordinates of the filament mesh
-        @param meshfile_tokamaker str, path to the Tokamaker mesh file for equilibrium reconstruction
         @param wall_psi numpy.ndarray, precomputed wall contribution to the flux
-        @param B0 float, reference magnetic field strength for equilibrium reconstruction
-        @param R0 float, reference major radius for equilibrium reconstruction
-        @param myOFT OFT_env, the Open FUSION Toolkit environment instance
         @param verbose bool, if True, plots the equilibrium and LCFS (default: False)
         @result tuple, containing LCFS points, limiting points, psi at LCFS, total psi, q values, q95, internal inductance, current centroid, area centroid, and area'''
-
-        #intialize tokamaker 
-        mygs = TokaMaker(myOFT)
-        mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh(meshfile_tokamaker)
-        mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-        mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
-        mygs.setup(order=2, F0= B0 * R0)# F0 = B0 * R0 
-        limiter = mygs.lim_contour
-
+        # reset mygs in case there are left over coil currents from previous runs
+        self.mygs.set_coil_currents()
+        limiter = self.mygs.lim_contour
         # calculate psi from plasmas
         fil_points = list(zip(rgrid, zgrid))
         psi_fil = []
         for filcount, (r, z) in enumerate(fil_points):
-            mygs.set_coil_currents()
+            self.mygs.set_coil_currents()
             if filaments_at_time[filcount] > 0:
-                mygs.set_targets(Ip=filaments_at_time[filcount])
-                mygs.init_psi(r, z, 0.3, 1.0, 0.0) 
-                psi_fil.append(mygs.get_psi(False))
+                self.mygs.set_targets(Ip=filaments_at_time[filcount])
+                self.mygs.init_psi(r, z, 0.3, 1.0, 0.0) 
+                psi_fil.append(self.mygs.get_psi(False))
         psi_fil = numpy.array(psi_fil)
         psi_total_fil = numpy.sum(psi_fil, axis=0)
         ip = numpy.sum(filaments_at_time)
         
         # Calculate psi from coils 
-        mygs.set_coil_currents(coil_curr_dict)
-        psi_vf_eq_obj = mygs.vac_solve()
+        self.mygs.set_coil_currents(coil_curr_dict)
+        psi_vf_eq_obj = self.mygs.vac_solve()
         psi_vf = psi_vf_eq_obj.get_psi(normalized=False) 
 
 
         # Summate Psis 
         total_psi = psi_total_fil + psi_vf + wall_psi
-        mygs.set_psi(total_psi, update_bounds = True)
+        self.mygs.set_psi(total_psi, update_bounds = True)
 
         # getting relevant values 
-        lcfs_points = mygs.trace_surf(1) # Trace LCFS
+        lcfs_points = self.mygs.trace_surf(1) # Trace LCFS
         if lcfs_points is not None:
-            psiatlcfs = mygs.psinorm_to_absolute(1)
+            psiatlcfs = self.mygs.psinorm_to_absolute(1)
 
         if lcfs_points is None: 
-            lcfs_points = mygs.trace_surf(0.99)
-            psiatlcfs = mygs.psinorm_to_absolute(0.99) 
+            lcfs_points = self.mygs.trace_surf(0.99)
+            psiatlcfs = self.mygs.psinorm_to_absolute(0.99) 
 
         limiting_pts = [] 
         q_vals = None 
@@ -637,15 +639,15 @@ class JAMfit():
         if lcfs_points is not None:
             lim_R, lim_Z, _ = find_limiting_point(lcfs_points, limiter, touch_tol=0.0005)
             limiting_pts.append([lim_R, lim_Z])
-            _, q_vals, _, _, _, _= mygs.get_q() 
+            _, q_vals, _, _, _, _= self.mygs.get_q() 
 
             try:
-                internal_inductance = mygs.get_stats(beta_Ip = ip)['l_i']
+                internal_inductance = self.mygs.get_stats(beta_Ip = ip)['l_i']
             except ZeroDivisionError:
                 print(f"Couldn't compute li, Ip was {ip}, skipping this one")
                 internal_inductance = numpy.nan
 
-            _, q95, _ , _, _, _ = mygs.get_q(psi=0.95)
+            _, q95, _ , _, _, _ = self.mygs.get_q(psi=0.95)
             area, area_cent = calc_lcfs_geo(lcfs_points) 
         else: 
             psiatlcfs = None 
@@ -653,8 +655,8 @@ class JAMfit():
 
         if verbose: 
             fig, ax = plt.subplots(1,1) 
-            mygs.plot_machine(fig,ax, cond_color='blue') 
-            mygs.plot_psi(fig,ax ,plasma_nlevels = 75, normalized=False)
+            self.mygs.plot_machine(fig,ax, cond_color='blue') 
+            self.mygs.plot_psi(fig,ax ,plasma_nlevels = 75, normalized=False)
             plt.gca().set_aspect('equal', adjustable='box')
             if lcfs_points is not None:
                 ax.plot(lcfs_points[:,0], lcfs_points[:,1], 'r--', label='LCFS')
@@ -870,6 +872,51 @@ def calc_current_centroid(R_fil, Z_fil, I_fil):
 
     return (R_centroid, Z_centroid)
 
+def get_bbox_grid_pts(meshfile_tokamaker, myOFT, n_r=10, n_z=10, verbose=False):
+    ''' ! Build a uniform rectangular grid spanning the bounding box of the TokaMaker
+    evaluation grid, for later interpolation of measured wall values onto the grid.
+    
+    @param meshfile_tokamaker str, path to the Tokamaker mesh file
+    @param myOFT OFT_env, the Open FUSION Toolkit environment instance
+    @param n_r int, number of points along R (default: 10)
+    @param n_z int, number of points along Z (default: 10)
+    @param verbose bool, if True, plots the bounding box grid and limiter contour (default: False)
+    @result tuple, containing the bbox grid points (n_r*n_z, 2), the R meshgrid, the Z meshgrid, and the full TokaMaker grid points
+    '''
+    mygs = TokaMaker(myOFT)
+    mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh(meshfile_tokamaker)
+    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
+    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
+    mygs.setup(order=2, F0=1 * 1)
+
+    r_pts_grid = mygs.r[:, 0]
+    z_pts_grid = mygs.r[:, 1]
+
+    r_min, r_max = r_pts_grid.min(), r_pts_grid.max()
+    z_min, z_max = z_pts_grid.min(), z_pts_grid.max()
+
+    r_vals = numpy.linspace(r_min, r_max, n_r)
+    z_vals = numpy.linspace(z_min, z_max, n_z)
+    R, Z = numpy.meshgrid(r_vals, z_vals, indexing='xy')
+
+    bbox_pts = numpy.column_stack([R.ravel(), Z.ravel()])
+
+    if verbose:
+        fig, ax = plt.subplots()
+        ax.scatter(r_pts_grid, z_pts_grid, c='lightgray', s=5, alpha=0.5, label='TokaMaker grid')
+        ax.scatter(bbox_pts[:, 0], bbox_pts[:, 1], c='tab:blue', s=15, label='Bbox grid pts')
+        r_pts_lim = mygs.lim_contour[:, 0]
+        z_pts_lim = mygs.lim_contour[:, 1]
+        ax.plot(r_pts_lim, z_pts_lim, 'k-', label='Limiter Contour')
+        ax.set_xlabel('R')
+        ax.set_ylabel('Z')
+        ax.set_title(f'Bounding Box Grid ({n_r} x {n_z} points)')
+        ax.legend()
+        plt.tight_layout()
+        plt.gca().set_aspect('equal', adjustable='box')
+        plt.show()
+
+    return bbox_pts, R, Z, mygs.r
 
 
 def get_inside_limiter_pts(meshfile_tokamaker, myOFT, stride=1, verbose=False):
