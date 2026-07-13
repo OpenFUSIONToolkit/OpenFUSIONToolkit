@@ -286,12 +286,12 @@ c_tokamaker_get_refs(eq_ptr::Ptr{Cvoid}, o_point::Ref{Ptr{Float64}},
           eq_ptr, o_point, lim_point, x_points, diverted, plasma_bounds,
           ffp_scale, p_scale, has_plasma, error_str)
 
-c_tokamaker_trace_surf(tMaker_ptr::Ptr{Cvoid}, psi_surf::Float64,
+c_tokamaker_trace_surf(eq_ptr::Ptr{Cvoid}, psi_surf::Float64,
                       points::Ref{Ptr{Float64}}, npoints::Ref{Int32},
                       error_str::Vector{UInt8}) =
     ccall((:tokamaker_trace_surf, liboftpy[]), Cvoid,
           (Ptr{Cvoid}, Cdouble, Ptr{Ptr{Float64}}, Ptr{Int32}, Ptr{UInt8}),
-          tMaker_ptr, psi_surf, points, npoints, error_str)
+          eq_ptr, psi_surf, points, npoints, error_str)
 
 c_tokamaker_get_q(eq_ptr::Ptr{Cvoid}, npsi::Integer, psi_q::Vector{Float64},
                  qvals::Vector{Float64}, ravgs::Matrix{Float64},

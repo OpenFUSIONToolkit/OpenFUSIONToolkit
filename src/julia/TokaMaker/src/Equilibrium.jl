@@ -467,7 +467,7 @@ function trace_surf(eq::TokaMakerEquilibrium, psi::Real)
     pts = Ref{Ptr{Float64}}(C_NULL)
     npts = Ref{Int32}(0)
     buf = errbuf()
-    c_tokamaker_trace_surf(eq.tmaker_ptr, psi_call, pts, npts, buf)
+    c_tokamaker_trace_surf(eq.eq_ptr, psi_call, pts, npts, buf)
     check_err(buf, "trace_surf")
     npts[] <= 0 && return nothing
     raw = unsafe_wrap(Array, pts[], (2, Int(npts[])); own=false)
