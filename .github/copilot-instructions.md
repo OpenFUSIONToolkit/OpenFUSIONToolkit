@@ -83,7 +83,7 @@ make install                 # install to builds/install_release/
 - The project uses a Python virtual environment at `oft_venv/`. **Always** `source setup_env.sh` before running builds or tests.
 - The `copilot-setup-steps.yml` workflow mirrors the Ubuntu 24.04 GCC 14 + OpenMP CI configuration and pre-builds external libraries in a cached `builds/` directory. After this workflow runs, the agent environment has:
   - Compilers: `gcc-14`, `g++-14`, `gfortran-14`
-  - Python venv with: `pytest`, `numpy`, `scipy`, `h5py`, `matplotlib`, `xarray`
+  - Python venv with: `pytest`, `numpy`, `scipy`, `h5py`, `netcdf4`, `matplotlib`
   - Pre-built external libraries in `builds/`
   - OFT compiled and installed in `builds/install_release/`
 

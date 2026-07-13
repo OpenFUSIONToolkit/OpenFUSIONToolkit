@@ -12,9 +12,10 @@ test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
+from OpenFUSIONToolkit.util import mu0
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
-from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun
+from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun, create_isoflux_xpts, xpoints_from_moments
 
 
 def mp_run(target,args,timeout=30):
@@ -614,7 +615,7 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
         eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
         eq_info['Lplasma'] = Lmat[-1,-1]
         eq_info['nl_its'] = nl_its
-    if test_type == 'recon':
+    if test_type.startswith('recon'):
         import random
         from OpenFUSIONToolkit.TokaMaker.reconstruction import reconstruction
         # Sample constraint locations
@@ -633,57 +634,89 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
         # Setup constraints
         random.seed(42)
         myrecon = reconstruction(mygs)
-        noise_amp = (random.random()-0.5)*2.0
+        noise_amp = random.gauss(0.0,1.0)
         Ip_noised = eq_info['Ip']*(1.0+noise_amp*0.05)
         myrecon.set_Ip(Ip_noised, err=0.05*eq_info['Ip'])
         flux_vals = []
         field_eval = mygs.get_field_eval('PSI')
         for i in range(B_locs.shape[0]):
             B_tmp = field_eval.eval(B_locs[i,:])
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss(0.0,1.0)
             flux_vals.append(B_tmp[0])
             psi_val = B_tmp[0]*2.0*np.pi
             myrecon.add_flux_loop(B_locs[i,:], psi_val*(1.0 + noise_amp*0.05), err=abs(psi_val*0.05))
         field_eval = mygs.get_field_eval('B')
         for i in range(B_locs.shape[0]):
             B_tmp = field_eval.eval(B_locs[i,:])
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss(0.0,1.0)
             myrecon.add_Mirnov(B_locs[i,:], np.r_[1.0,0.0,0.0], B_tmp[0] + noise_amp*abs(B_tmp[0]*0.05), err=abs(B_tmp[0]*0.05))
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss(0.0,1.0)
             myrecon.add_Mirnov(B_locs[i,:], np.r_[0.0,0.0,1.0], B_tmp[2] + noise_amp*abs(B_tmp[2]*0.05), err=abs(B_tmp[2]*0.05))
         coil_currents, _ = mygs.get_coil_currents()
         for key in coil_currents:
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss(0.0,1.0)
             coil_currents[key] *= 1.0+noise_amp*0.05
         # Compute starting equilibrium
         mygs.set_isoflux(None)
         mygs.set_saddles(None)
         mygs.set_targets(Ip=Ip_noised,Ip_ratio=2.0)
+        if test_type == 'recon':
+            mygs.settings.ffp_target_weight=1.0/((0.05*abs(Ip_noised))*mu0)
+            mygs.settings.pp_target_weight=1.0
+            mygs.update_settings()
         mygs.set_flux(B_locs,np.array(flux_vals))
         regularization_terms = []
         for name in coil_currents:
             regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=coil_currents[name],weight=1.E-1))
         regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0},target=0.0,weight=1.E2))
         mygs.set_coil_reg(reg_terms=regularization_terms)
+        coil_err = {name: 0.05*abs(current) for name, current in coil_currents.items()}
+        myrecon.set_coil_currents(coil_currents,coil_err)
         R0 = 6.3
         Z0 = 0.5
         a = 1.0
         kappa = 1.0
         delta = 0.0
         mygs.init_psi(R0, Z0, a, kappa, delta)
-        mygs.settings.maxits=100
+        if test_type == 'recon':
+            mygs.settings.maxits=300
+        elif test_type == 'recon_legacy':
+            mygs.settings.maxits=100
         mygs.update_settings()
         mygs.solve()
         # Perform reconstruction
-        mygs.set_isoflux(None)
-        mygs.set_flux(None,None)
-        mygs.set_saddles(None)
-        mygs.set_targets(R0=mygs.o_point[0],V0=mygs.o_point[1])
-        myrecon.settings.fit_Pscale = False
-        myrecon.settings.fitR0 = True
-        myrecon.settings.fitCoils = True
-        myrecon.settings.pm = False
-        _ = myrecon.reconstruct()
+        if test_type == 'recon':
+            mygs.settings.pm = False
+            mygs.update_settings()
+            mygs.set_isoflux(None)
+            mygs.set_saddles(None)
+            mygs.set_targets(Ip=Ip_noised)
+            mygs.settings.ffp_target_weight=1.0/((0.05*abs(Ip_noised))*mu0)
+            myrecon.setup_constraints()
+            # Configure reconstruction settings
+            myrecon.settings.fitF = False
+            myrecon.settings.fitP = False
+            myrecon.settings.fit_Pscale = True
+            myrecon.settings.fit_FFPscale = False
+            myrecon.settings.fitR0 = False
+            myrecon.settings.fitZ0 = False
+            myrecon.settings.fixedCentering = False
+            myrecon.settings.dx = 1.E-2
+            x0_nl, _ = myrecon.setup_get_opt()
+            from scipy.optimize import least_squares
+            opt_result = least_squares(myrecon.opt_error, x0_nl, jac=myrecon.opt_error_jacobian, method='lm', ftol=1.E-3, args=(myrecon,False))
+            mygs.settings.pm = True
+            mygs.update_settings()
+        elif test_type == 'recon_legacy':
+            mygs.set_isoflux(None)
+            mygs.set_flux(None,None)
+            mygs.set_saddles(None)
+            mygs.set_targets(R0=mygs.o_point[0],V0=mygs.o_point[1])
+            myrecon.settings.fit_Pscale = False
+            myrecon.settings.fitR0 = True
+            myrecon.settings.fitCoils = True
+            myrecon.settings.pm = False
+            _ = myrecon.reconstruct()
         #
         eq_info = mygs.get_stats(li_normalization='ITER')
         eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
@@ -772,14 +805,31 @@ def test_ITER_eq_io(order):
 @pytest.mark.coverage
 def test_ITER_recon():
     ITER_recon_dict = ITER_eq_dict.copy()
-    ITER_recon_dict['q_95'] = 2.7274510732722375
-    ITER_recon_dict['P_ax'] = 655693.6031014244
-    ITER_recon_dict['W_MHD'] = 257915984.01397622
-    ITER_recon_dict['l_i'] = 0.895954395982195
-    ITER_recon_dict['beta_pol'] = 44.16835089714342
-    ITER_recon_dict['beta_tor'] = 1.8950360948919174
-    ITER_recon_dict['beta_n'] = 1.2576100533550467
+    ITER_recon_dict['q_0'] = 0.8417344
+    ITER_recon_dict['P_ax'] = 6.575446E5
+    ITER_recon_dict['W_MHD'] = 2.591990E8
+    ITER_recon_dict['beta_pol'] = 46.02736
+    ITER_recon_dict['dflux'] = 1.440565
+    ITER_recon_dict['l_i'] = 0.8872565
+    ITER_recon_dict['beta_tor'] = 1.906180
+    ITER_recon_dict['beta_n'] = 1.284312
     results = mp_run(run_ITER_case,(1.0,(2,),'recon'))
+    assert validate_dict(results,ITER_recon_dict)
+
+@pytest.mark.coverage
+def test_ITER_recon_legacy():
+    ITER_recon_dict = ITER_eq_dict.copy()
+    ITER_recon_dict['vol'] = 8.119402E2
+    ITER_recon_dict['q_95'] = 2.718779
+    ITER_recon_dict['P_ax'] = 6.656184E5
+    ITER_recon_dict['W_MHD'] = 2.607023E8
+    ITER_recon_dict['beta_pol'] = 45.63260
+    ITER_recon_dict['dflux'] = 1.462672
+    ITER_recon_dict['tflux'] = 1.201402E2
+    ITER_recon_dict['l_i'] = 0.8906732
+    ITER_recon_dict['beta_tor'] = 1.934024
+    ITER_recon_dict['beta_n'] = 1.294385
+    results = mp_run(run_ITER_case,(1.0,(2,),'recon_legacy'))
     assert validate_dict(results,ITER_recon_dict)
 
 def test_ITER_concurrent():
@@ -806,7 +856,7 @@ def run_LTX_case(fe_order,test_type,mp_q):
         for key, coil in LTX_geom['coils'].items():
             if key.startswith('OH'):
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'],coil_set='OH')
-            else:    
+            else:
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'])
         #
         gs_mesh.add_polygon(LTX_geom['limiter'],'plasma',parent_name='air')
@@ -1272,9 +1322,9 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
 
     ft = 1 - fc
-    eps = r_avgs[2] / r_avgs[0]
+    eps = r_avgs['<a>'] / r_avgs['<R>']
     _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
-    R_avg = ravgs_q[0]
+    R_avg = ravgs_q['<R>']
 
     # --- Gradients (same as solve_with_bootstrap) ---
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
@@ -1676,6 +1726,56 @@ def test_pfile_bytes_roundtrip():
         d_ref = np.asarray(pf._get_data(key))
         d_rt  = np.asarray(pf_rt._get_data(key))
         assert np.allclose(d_ref, d_rt, rtol=1e-6, atol=1e-10), key
+
+
+# -----------------------------------------------------------------------
+# Test: X-point isoflux boundary helpers in TokaMaker.util
+#
+# These helpers check the generated boundary from 'create_isoflux_xpts'
+# against the reference `isoflux_xpts_expected.json`.
+# -----------------------------------------------------------------------
+isoflux_xpts_expected = _load_eqdsk_fixture('isoflux_xpts_expected.json')
+
+
+def test_xpoints_from_moments():
+    """X-points are exact analytic Miller-moment coordinates."""
+    r0, z0, a = 6.2, 0.3, 2.0
+    kU, dU, kL, dL = 1.7, 0.33, 2.0, 0.5
+    # Up-down symmetric (lower defaults to upper)
+    xpts = xpoints_from_moments(r0, z0, a, kU, dU)
+    assert xpts.shape == (2, 2)
+    assert np.allclose(xpts[0], [r0 - a * dU, z0 + a * kU])
+    assert np.allclose(xpts[1], [r0 - a * dU, z0 - a * kU])
+    # Asymmetric
+    xpts = xpoints_from_moments(r0, z0, a, kU, dU, kappa_lower=kL, delta_lower=dL)
+    assert np.allclose(xpts[0], [r0 - a * dU, z0 + a * kU])
+    assert np.allclose(xpts[1], [r0 - a * dL, z0 - a * kL])
+
+
+@pytest.mark.parametrize('case', ['symmetric', 'asymmetric'])
+def test_create_isoflux_xpts(case):
+    """Generated boundary matches the reference contour, has exactly npts
+    unique points, and passes through both X-points."""
+    ref = isoflux_xpts_expected[case]
+    params = ref['params']
+    pts = create_isoflux_xpts(**params)
+    # Shape: exactly npts points, no duplicate closing point
+    assert pts.shape == (params['npts'], 2)
+    closed = np.vstack([pts, pts[0]])
+    gaps = np.linalg.norm(np.diff(closed, axis=0), axis=1)
+    assert np.all(gaps > 1e-9), "boundary contains a duplicate point"
+    # Both X-points must appear on the contour
+    xpts = np.asarray(ref['xpoints'])
+    for xpt in xpts:
+        assert np.min(np.linalg.norm(pts - xpt, axis=1)) < 1e-8
+    # Regression against the stored reference contour
+    assert np.allclose(pts, np.asarray(ref['points']), rtol=1e-10, atol=1e-12)
+
+
+def test_create_isoflux_xpts_requires_min_npts():
+    """npts < 3 must raise rather than allocate invalid segment counts."""
+    with pytest.raises(ValueError):
+        create_isoflux_xpts(2, 6.2, 0.0, 2.0, 1.7, 0.33)
 
 
 # # Example of how to run single test without pytest

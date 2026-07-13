@@ -12,6 +12,7 @@
 # Python artifacts
 *.pyc
 __pycache__
+.ipynb_checkpoints
 
 # Editor Items
 .settings
@@ -19,6 +20,12 @@ __pycache__
 .project
 .pydevproject
 .vscode
+
+# Spack build artifacts
+/.spack-env
+/spack.lock
+/spack.yaml
+/build-*
 
 # Build/environment artifacts
 /builds/

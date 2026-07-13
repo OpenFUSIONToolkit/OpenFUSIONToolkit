@@ -52,6 +52,7 @@ if( OFT_BUILD_TESTS )
   configure_file( eqdsk_gfile_expected.json ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( eqdsk_gfile_tol.json ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( eqdsk_pfile_expected.json ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( isoflux_xpts_expected.json ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
   # Combined tests
   configure_file( test_python_comb.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )

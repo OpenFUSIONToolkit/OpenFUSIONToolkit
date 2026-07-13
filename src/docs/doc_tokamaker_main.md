@@ -38,6 +38,7 @@ new meshes, see \ref doc_gs_main_mesh_ex.
  - \subpage doc_tMaker_LTX_ex2
  - \subpage doc_tMaker_ITER_ex3
  - \subpage doc_tMaker_MANTA_ex2
+ - \subpage doc_tMaker_ARC_ex2
 
 ### Equilibrium Reconstruction
  - \subpage doc_tMaker_ITER_ex4
@@ -48,6 +49,10 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 ### Other workflows/examples
  - \subpage doc_tMaker_ITER_ex5
  - \subpage doc_tMaker_HBT_ex3
+ - \subpage doc_tMaker_CUTE_ex3
+
+### Deprecated workflows
+ - \subpage doc_tMaker_ITER_ex4-legacy
 
 \section doc_gs_main_mesh Building meshes using gs_Domain
 TokaMaker includes built-in meshing functionality through the \ref OpenFUSIONToolkit.TokaMaker.meshing.gs_Domain "gs_Domain" class,
@@ -78,3 +83,4 @@ The following examples illustrate usage of \ref OpenFUSIONToolkit.TokaMaker.mesh
  - \subpage doc_tMaker_MANTA_ex1
  - \subpage doc_tMaker_LTX_ex1
  - \subpage doc_tMaker_dipole_ex1
+ - \subpage doc_tMaker_ARC_ex1

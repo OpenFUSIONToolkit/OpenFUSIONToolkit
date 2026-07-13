@@ -7,13 +7,13 @@ Created on Mon Oct  6 14:34:26 2025
 """
 
 import sys
-OFT_ROOT = '/Applications/OpenFUSIONToolkit/python'
-if(not OFT_ROOT in sys.path):
-    sys.path.insert(0,OFT_ROOT)
-
 from OpenFUSIONToolkit.TokaMaker.meshing import load_gs_mesh
-from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk
-from omfit_shape_generator import boundaryShape
+from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk, create_isoflux_xpts
+try:
+    from omfit_classes.omfit_eqdsk import boundaryShape
+    have_omfit = True
+except ImportError:
+    have_omfit = False
 import numpy as np
 import matplotlib.tri as tri
 
@@ -268,25 +268,41 @@ class PSP:
             
 
         # Shape
-        R_ISO, Z_ISO, Z_ref = boundaryShape(
-                a=self.a,
-                eps=self.a/self.R0,
-                kapu=self.kappa_upper,
-                kapl=self.kappa_lower,
-                delu=self.delta_upper,
-                dell=self.delta_lower,
-                zetaou=self.zeta_upper_outer,
-                zetaiu=self.zeta_upper_inner,
-                zetail=self.zeta_lower_inner,
-                zetaol=self.zeta_lower_outer,
-                zoffset=self.Z0,
-                doPlot=False,
-                npts=N_points,
-                upnull=upnull_flag,
-                lonull=lonull_flag
+        if have_omfit:
+            R_ISO, Z_ISO, Z_ref = boundaryShape(
+                    a=self.a,
+                    eps=self.a/self.R0,
+                    kapu=self.kappa_upper,
+                    kapl=self.kappa_lower,
+                    delu=self.delta_upper,
+                    dell=self.delta_lower,
+                    zetaou=self.zeta_upper_outer,
+                    zetaiu=self.zeta_upper_inner,
+                    zetail=self.zeta_lower_inner,
+                    zetaol=self.zeta_lower_outer,
+                    zoffset=self.Z0,
+                    doPlot=False,
+                    npts=N_points,
+                    upnull=upnull_flag,
+                    lonull=lonull_flag
+                )
+            shape_trace = np.transpose(np.array([R_ISO, Z_ISO]))
+        else:
+            shape_trace = create_isoflux_xpts(
+                    npts=N_points*4,
+                    r0=self.R0,
+                    z0=self.Z0,
+                    a=self.a,
+                    kappa_upper=self.kappa_upper,
+                    kappa_lower=self.kappa_lower,
+                    delta_upper=self.delta_upper,
+                    delta_lower=self.delta_lower,
+                    r_inner_mid=None,
+                    zeta_outer_upper=self.zeta_upper_outer,
+                    zeta_outer_lower=self.zeta_lower_outer,
+                    zeta_inner_upper=self.zeta_upper_inner,
+                    zeta_inner_lower=self.zeta_lower_inner
             )
-        
-        shape_trace = np.transpose(np.array([R_ISO, Z_ISO]))
         
         return shape_trace
     
