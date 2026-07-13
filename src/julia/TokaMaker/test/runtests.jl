@@ -4,7 +4,7 @@ using TokaMaker
 @testset "TokaMaker.jl" begin
     @testset "Settings struct ABI" begin
         s = tokamaker_default_settings()
-        @test sizeof(s) == 56
+        @test sizeof(s) == 80
         @test s.pm == true
         @test s.free_boundary == true
         @test s.limited_only == false
@@ -13,6 +13,9 @@ using TokaMaker
         @test s.urf == 0.2
         @test s.nl_tol ≈ 1e-6
         @test s.lim_zmax ≈ 1e99
+        @test s.ffp_target_weight ≈ -1.0
+        @test s.pp_target_weight ≈ -1.0
+        @test s.opoint_target_weight ≈ -1.0
 
         s.pm = false
         @test s.pm == false

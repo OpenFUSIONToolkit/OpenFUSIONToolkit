@@ -393,11 +393,11 @@ c_tokamaker_set_mirror_slosh(tMaker_ptr::Ptr{Cvoid}, mirror_n::Float64,
           tMaker_ptr, mirror_n, mirror_bturn, mirror_zthroat, error_str)
 
 c_tokamaker_set_targets(tMaker_ptr::Ptr{Cvoid}, ip::Float64, ip_ratio::Float64,
-                       pax::Float64, estore::Float64, R0::Float64, V0::Float64,
+                       pax::Float64, estore::Float64, dflux::Float64, R0::Float64, V0::Float64,
                        error_str::Vector{UInt8}) =
     ccall((:tokamaker_set_targets, liboftpy[]), Cvoid,
-          (Ptr{Cvoid}, Cdouble, Cdouble, Cdouble, Cdouble, Cdouble, Cdouble, Ptr{UInt8}),
-          tMaker_ptr, ip, ip_ratio, pax, estore, R0, V0, error_str)
+          (Ptr{Cvoid}, Cdouble, Cdouble, Cdouble, Cdouble, Cdouble, Cdouble, Cdouble, Ptr{UInt8}),
+          tMaker_ptr, ip, ip_ratio, pax, estore, dflux, R0, V0, error_str)
 
 c_tokamaker_set_isoflux(tMaker_ptr::Ptr{Cvoid}, targets::Matrix{Float64},
                        ref_points::Matrix{Float64}, weights::Vector{Float64},

@@ -722,6 +722,7 @@ function set_targets!(t::Tokamaker;
                       Ip_ratio::Union{Nothing,Real}=nothing,
                       pax::Union{Nothing,Real}=nothing,
                       estore::Union{Nothing,Real}=nothing,
+                      Dflux::Union{Nothing,Real}=nothing,
                       R0::Union{Nothing,Real}=nothing,
                       V0::Union{Nothing,Real}=nothing,
                       Z0::Union{Nothing,Real}=nothing,
@@ -736,6 +737,7 @@ function set_targets!(t::Tokamaker;
     Ip_ratio === nothing || (t.targets["Ip_ratio"] = Float64(Ip_ratio))
     pax      === nothing || (t.targets["pax"]      = Float64(pax))
     estore   === nothing || (t.targets["estore"]   = Float64(estore))
+    Dflux    === nothing || (t.targets["Dflux"]    = Float64(Dflux))
     R0       === nothing || (t.targets["R0"]       = Float64(R0))
     if v0 !== nothing
         t.targets["V0"] = v0
@@ -747,6 +749,7 @@ function set_targets!(t::Tokamaker;
         get(t.targets, "Ip_ratio", DISABLED),
         get(t.targets, "pax",      DISABLED),
         get(t.targets, "estore",   DISABLED),
+        get(t.targets, "Dflux",    DISABLED),
         get(t.targets, "R0",       DISABLED),
         get(t.targets, "V0",       DISABLED),
         buf)

@@ -7,8 +7,9 @@ export TokamakerSettings, tokamaker_default_settings, TokamakerReconSettings,
 #   bool pm, free_boundary, limited_only, dipole_mode, mirror_mode  (5 bytes + 3 pad)
 #   int32 maxits, mode                                               (8 bytes)
 #   double urf, nl_tol, rmin, lim_zmax                               (32 bytes)
+#   double ffp_target_weight, pp_target_weight, opoint_target_weight (24 bytes)
 #   char* limiter_file                                                (8 bytes)
-# Total: 56 bytes on 64-bit.
+# Total: 80 bytes on 64-bit.
 #
 # Julia mutable structs do not auto-pad mid-struct, so we pack the 5 bools as
 # UInt8 and emit explicit 3-byte padding to match the C ABI. We expose property
@@ -29,6 +30,9 @@ mutable struct TokamakerSettings
     nl_tol::Float64
     rmin::Float64
     lim_zmax::Float64
+    ffp_target_weight::Float64
+    pp_target_weight::Float64
+    opoint_target_weight::Float64
     limiter_file::Ptr{UInt8}
 end
 
@@ -53,7 +57,8 @@ function Base.setproperty!(s::TokamakerSettings, name::Symbol, value)
 end
 
 function Base.propertynames(::TokamakerSettings, private::Bool=false)
-    public = (_BOOL_FIELDS..., :maxits, :mode, :urf, :nl_tol, :rmin, :lim_zmax, :limiter_file)
+    public = (_BOOL_FIELDS..., :maxits, :mode, :urf, :nl_tol, :rmin, :lim_zmax,
+              :ffp_target_weight, :pp_target_weight, :opoint_target_weight, :limiter_file)
     private && return (fieldnames(TokamakerSettings)..., public...)
     return public
 end
@@ -81,6 +86,9 @@ function tokamaker_default_settings()
         1.0e-6,      # nl_tol
         0.0,         # rmin
         1.0e99,      # lim_zmax
+        -1.0,        # ffp_target_weight (negative = hard constraint)
+        -1.0,        # pp_target_weight
+        -1.0,        # opoint_target_weight
         pointer(_NONE_PATH),  # limiter_file -> "none"
     )
 end

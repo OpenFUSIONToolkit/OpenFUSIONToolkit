@@ -438,10 +438,10 @@ function get_q(eq::TokaMakerEquilibrium;
     psi_call = eq.psi_convention == 0 ? (1.0 .- psi_user) : copy(psi_user)
     n = length(psi_call)
     qvals = zeros(Float64, n)
-    # Fortran fills ravgs(npsi,3) (column-major: <R>,<1/R>,dV/dPsi contiguous per
-    # column). Allocate matching (n,3), then permute to the (3,n) return shape so
-    # ravgs[1,:]=<R>, [2,:]=<1/R>, [3,:]=dV/dPsi.
-    ravgs = zeros(Float64, n, 3)
+    # Fortran fills ravgs(npsi,4) (column-major: <R>,<1/R>,<1/R^2>,dV/dPsi
+    # contiguous per column). Allocate matching (n,4), then permute to the (4,n)
+    # return shape so ravgs[1,:]=<R>, [2,:]=<1/R>, [3,:]=<1/R^2>, [4,:]=dV/dPsi.
+    ravgs = zeros(Float64, n, 4)
     dl = Ref{Float64}(compute_geo ? 1.0 : -1.0)
     rbounds = zeros(Float64, 2, 2)
     zbounds = zeros(Float64, 2, 2)
