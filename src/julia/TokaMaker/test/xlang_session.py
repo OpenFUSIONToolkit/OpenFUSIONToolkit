@@ -14,7 +14,15 @@ Usage:
 
 ``psi`` is written one raw (un-normalized) value per line. The mesh is loaded
 from the shared fixture so both languages solve/load on an identical mesh.
+
+Run via ``uv run --script`` (the Julia test does this) so the dependencies in
+the PEP 723 block below are provisioned automatically; ``PYTHONPATH`` still
+points the ephemeral env at the in-repo ``OpenFUSIONToolkit`` package.
 """
+# /// script
+# requires-python = ">=3.9"
+# dependencies = ["numpy", "scipy", "h5py"]
+# ///
 import sys
 
 import numpy as np
@@ -50,7 +58,12 @@ def _solve_spheromak(gs):
 
 
 def main():
-    mode, mesh_file, session_file, psi_file = sys.argv[1:5]
+    args = sys.argv[1:]
+    if args and args[0] == 'probe':
+        # Module-level imports (numpy + OpenFUSIONToolkit) already succeeded;
+        # exit 0 so the Julia harness knows the binding is usable.
+        return
+    mode, mesh_file, session_file, psi_file = args[:4]
     gs = _build(mesh_file)
     if mode == 'save':
         _solve_spheromak(gs)

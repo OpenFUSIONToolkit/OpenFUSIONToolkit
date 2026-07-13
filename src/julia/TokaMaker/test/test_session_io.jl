@@ -55,16 +55,24 @@ end
 
 _read_psi(path) = parse.(Float64, readlines(path))
 
-# Detect a usable Python + OpenFUSIONToolkit install sharing the same lib.
+# Build a `uv run --script` command for the cross-language helper. `uv`
+# provisions the helper's PEP 723 dependencies (numpy/scipy/h5py) in an
+# ephemeral env; PYTHONPATH points that env at the in-repo OpenFUSIONToolkit
+# package. Returns `nothing` when `uv` is not on PATH.
+function _uv_cmd(args...)
+    uv = Sys.which("uv")
+    uv === nothing && return nothing
+    return addenv(Cmd(String[uv, "run", "--script", XLANG_PY, args...]),
+                  "PYTHONPATH" => PY_PKG)
+end
+
+# Detect a usable uv + Python + OpenFUSIONToolkit binding sharing the same lib.
 function _python_available()
-    py = Sys.which("python3")
-    py === nothing && return nothing
+    _uv_cmd() === nothing && return false
     try
-        ok = success(addenv(`$py -c "import OpenFUSIONToolkit.TokaMaker"`,
-                            "PYTHONPATH" => PY_PKG))
-        return ok ? py : nothing
+        return success(_uv_cmd("probe"))
     catch
-        return nothing
+        return false
     end
 end
 
@@ -109,13 +117,11 @@ Skipping session-I/O tests."""
             end
 
             # --- Cross-language (gated on a usable Python install) --------
-            py = _python_available()
-            if py === nothing
-                @info "Skipping cross-language session tests: no usable python3 + OpenFUSIONToolkit on PYTHONPATH=$PY_PKG"
+            if !_python_available()
+                @info "Skipping cross-language session tests: no usable uv + OpenFUSIONToolkit on PYTHONPATH=$PY_PKG"
                 @test_skip true
             else
-                runpy(args...) = run(addenv(Cmd(String[py, XLANG_PY, args...]),
-                                            "PYTHONPATH" => PY_PKG))
+                runpy(args...) = run(_uv_cmd(args...))
 
                 @testset "Julia save -> Python load" begin
                     psi_PJ = joinpath(dir, "psi_py_from_julia.txt")
