@@ -1030,19 +1030,20 @@ def solve_with_bootstrap(mygs,
         # non-uniform or partially-duplicated psi_N grids.
         psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
 
-        # Avoid division by zero in gradients
-        if psi_range == 0:
-            psi_range = 1e-9
+        # Avoid division by zero in derivative scaling only; psi_range itself
+        # is reused downstream (e.g. building psiraw for the OMFIT Sauter
+        # call) and must not be clamped
+        psi_range_safe = psi_range if psi_range != 0 else 1e-9
 
-        pprime_local = _pchip_deriv(psi_N, pressure) / psi_range
+        pprime_local = _pchip_deriv(psi_N, pressure) / psi_range_safe
 
         j_BS_final = numpy.zeros_like(pressure)
 
         if include_jBS:
-            dn_e_dpsi = _pchip_deriv(psi_N, ne) / psi_range
-            dT_e_dpsi = _pchip_deriv(psi_N, Te) / psi_range
-            dn_i_dpsi = _pchip_deriv(psi_N, ni) / psi_range
-            dT_i_dpsi = _pchip_deriv(psi_N, Ti) / psi_range
+            dn_e_dpsi = _pchip_deriv(psi_N, ne) / psi_range_safe
+            dT_e_dpsi = _pchip_deriv(psi_N, Te) / psi_range_safe
+            dn_i_dpsi = _pchip_deriv(psi_N, ni) / psi_range_safe
+            dT_i_dpsi = _pchip_deriv(psi_N, Ti) / psi_range_safe
 
             if use_OMFIT_sauter:
                 j_BS_neo = sauter_bootstrap( # legacy OMFIT implementation

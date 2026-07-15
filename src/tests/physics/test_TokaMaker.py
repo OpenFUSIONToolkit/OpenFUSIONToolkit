@@ -1191,7 +1191,7 @@ def test_ITER_bootstrap(order):
 # -----------------------------------------------------------------------
 def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     from OpenFUSIONToolkit.TokaMaker.bootstrap import (
-        redl_bootstrap, calculate_ln_lambda, Hmode_profiles
+        redl_bootstrap, calculate_ln_lambda, Hmode_profiles, _pchip_deriv
     )
 
     # --- Mesh creation (identical to run_ITER_bootstrap_case) ---
@@ -1327,15 +1327,15 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     R_avg = ravgs_q['<R>']
 
     # --- Gradients (same as solve_with_bootstrap) ---
+    # Shape-preserving PCHIP derivatives on the native psi_N grid, matching
+    # the derivative path used by solve_with_bootstrap
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
-    d_psi = np.gradient(psi_N)
-    d_psi_eff = d_psi * psi_range
-    d_psi_eff[d_psi_eff == 0] = 1e-9
+    psi_range_safe = psi_range if psi_range != 0 else 1e-9
 
-    dn_e_dpsi = np.gradient(ne) / d_psi_eff
-    dT_e_dpsi = np.gradient(Te) / d_psi_eff
-    dn_i_dpsi = np.gradient(ni) / d_psi_eff
-    dT_i_dpsi = np.gradient(Ti) / d_psi_eff
+    dn_e_dpsi = _pchip_deriv(psi_N, ne) / psi_range_safe
+    dT_e_dpsi = _pchip_deriv(psi_N, Te) / psi_range_safe
+    dn_i_dpsi = _pchip_deriv(psi_N, ni) / psi_range_safe
+    dT_i_dpsi = _pchip_deriv(psi_N, Ti) / psi_range_safe
 
     # --- Coulomb logarithms (same as solve_with_bootstrap) ---
     ln_le, ln_lii = calculate_ln_lambda(
