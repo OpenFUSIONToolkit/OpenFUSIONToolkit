@@ -14,6 +14,12 @@ import warnings
 from ._interface import *
 from OpenFUSIONToolkit.TokaMaker.util import get_jphi_from_GS
 
+class DerivativeSanityWarning(UserWarning):
+    r'''! Warning category for suspicious (but recoverable) inputs to profile
+    derivative calculations, e.g. duplicated or unsorted \f$\hat{\psi}\f$ grid
+    points or unphysically sharp features in a kinetic profile.'''
+    pass
+
 def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_width=0.03, tail_alpha=1.5):
     r'''! Generate parameterized edge bootstrap current profile with tunable concave fall-off
 
@@ -387,6 +393,135 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     }
 
     return results
+
+def _pchip_deriv(x, y):
+    r'''! Compute dy/dx via shape-preserving PCHIP on the native grid
+
+    Duplicate x points are dropped before fitting (stepwise-artifact guard
+    for partially-duplicated \f$\hat{\psi}\f$ grids) and the analytic PCHIP
+    derivative is evaluated back on the full input grid. This avoids the
+    piecewise-constant/stepped derivative artifacts that numpy.gradient can
+    produce on non-uniform or partially-duplicated grids.
+
+    Sanity guards (two tiers):
+     - Hard errors (ValueError): non-finite x/y input, fewer than 2 unique
+       x points after deduplication, non-finite computed derivative, or a
+       shape-guarantee violation (monotone y but wrong-sign derivative --
+       "impossible" for PCHIP, so it firing indicates internal breakage).
+     - Warnings (DerivativeSanityWarning): duplicated x points dropped,
+       unsorted x (sorted internally), and derivative spikes far exceeding
+       the median secant slope (possible unphysical input feature).
+
+    @param x Independent variable (e.g. \f$\hat{\psi}\f$); expected sorted ascending
+    @param y Dependent variable sampled on x
+    @result Array of dy/dx evaluated at each point in x
+    '''
+    from scipy.interpolate import PchipInterpolator
+
+    x = numpy.asarray(x, dtype=float)
+    y = numpy.asarray(y, dtype=float)
+
+    # --- Tier 1: non-finite input is a hard error ---
+    if not numpy.all(numpy.isfinite(x)):
+        bad = numpy.flatnonzero(~numpy.isfinite(x))
+        raise ValueError("_pchip_deriv: non-finite values in x at indices %s"
+                         % (bad[:5].tolist(),))
+    if not numpy.all(numpy.isfinite(y)):
+        bad = numpy.flatnonzero(~numpy.isfinite(y))
+        raise ValueError("_pchip_deriv: non-finite values in y at indices %s"
+                         % (bad[:5].tolist(),))
+
+    # --- Tier 2: unsorted x (sorted internally) ---
+    if numpy.any(numpy.diff(x) < 0):
+        warnings.warn("_pchip_deriv: x (psi_N) grid is not sorted ascending; "
+                      "sorting internally -- check upstream grid construction",
+                      DerivativeSanityWarning, stacklevel=2)
+        sort_idx = numpy.argsort(x, kind='stable')
+        x_sorted = x[sort_idx]
+        y_sorted = y[sort_idx]
+    else:
+        x_sorted = x
+        y_sorted = y
+
+    # --- Tier 2: duplicate x points dropped (stepwise-artifact guard) ---
+    x_unique, unique_idx = numpy.unique(x_sorted, return_index=True)
+    n_dropped = x_sorted.size - x_unique.size
+    if n_dropped > 0:
+        dup_mask = numpy.ones(x_sorted.size, dtype=bool)
+        dup_mask[unique_idx] = False
+        dup_locs = x_sorted[dup_mask][:5]
+        frac_dropped = n_dropped / float(x_sorted.size)
+        if frac_dropped > 0.05:
+            warnings.warn("_pchip_deriv: dropped %d of %d grid points (%.1f%%) as "
+                          "duplicated psi_N values (first few at psi_N=%s) -- this "
+                          "many duplicates strongly suggests a corrupted or "
+                          "degenerate upstream psi_N grid; results may be unreliable"
+                          % (n_dropped, x_sorted.size, 100.0 * frac_dropped,
+                             numpy.array2string(dup_locs, precision=6)),
+                          DerivativeSanityWarning, stacklevel=2)
+        else:
+            warnings.warn("_pchip_deriv: dropped %d duplicated psi_N grid point(s) "
+                          "(first few at psi_N=%s) -- upstream grid issue; this was "
+                          "the stepwise-j_BS trigger"
+                          % (n_dropped, numpy.array2string(dup_locs, precision=6)),
+                          DerivativeSanityWarning, stacklevel=2)
+
+    # --- Tier 1: degenerate grid after dedup is a hard error ---
+    if x_unique.size < 2:
+        raise ValueError("_pchip_deriv: fewer than 2 unique x points after "
+                         "dropping duplicates (%d of %d unique) -- psi_N grid is "
+                         "degenerate; refusing to return silent zeros"
+                         % (x_unique.size, x_sorted.size))
+
+    y_unique = y_sorted[unique_idx]
+    pchip = PchipInterpolator(x_unique, y_unique, extrapolate=True)
+    dydx = pchip(x, 1)
+
+    # --- Tier 1: non-finite derivative is a hard error ---
+    if not numpy.all(numpy.isfinite(dydx)):
+        bad = numpy.flatnonzero(~numpy.isfinite(dydx))
+        raise ValueError("_pchip_deriv: non-finite values in computed derivative "
+                         "at indices %s" % (bad[:5].tolist(),))
+
+    # --- Tier 1: shape-guarantee tripwire ---
+    # PCHIP is monotonicity-preserving, so a monotone y must never produce a
+    # wrong-sign derivative. If this fires something is internally broken.
+    y_scale = numpy.max(numpy.abs(y_unique))
+    y_tol = 1e-12 * y_scale
+    dy_unique = numpy.diff(y_unique)
+    d_scale = numpy.max(numpy.abs(dydx))
+    d_tol = 1e-12 * d_scale
+    if numpy.all(dy_unique >= -y_tol) and numpy.any(dydx < -d_tol):
+        raise ValueError("_pchip_deriv: shape-guarantee violation -- y is "
+                         "non-decreasing but derivative has negative entries "
+                         "(min %g); internal breakage" % numpy.min(dydx))
+    if numpy.all(dy_unique <= y_tol) and numpy.any(dydx > d_tol):
+        raise ValueError("_pchip_deriv: shape-guarantee violation -- y is "
+                         "non-increasing but derivative has positive entries "
+                         "(max %g); internal breakage" % numpy.max(dydx))
+
+    # --- Tier 2: spike detector ---
+    secant_slopes = numpy.abs(dy_unique / numpy.diff(x_unique))
+    median_slope = numpy.median(secant_slopes)
+    max_idx = int(numpy.argmax(numpy.abs(dydx)))
+    max_deriv = numpy.abs(dydx[max_idx])
+    if median_slope > 0.0:
+        ratio = max_deriv / median_slope
+        if ratio > 50.0:
+            warnings.warn("_pchip_deriv: derivative spike at psi_N=%.6g is %.1fx "
+                          "the median secant slope -- possible unphysical input "
+                          "feature" % (x[max_idx], ratio),
+                          DerivativeSanityWarning, stacklevel=2)
+    elif max_deriv > 0.0:
+        # Median secant slope is exactly zero but the derivative is not:
+        # a flat profile with an isolated sharp feature (extreme spike)
+        warnings.warn("_pchip_deriv: derivative spike at psi_N=%.6g (max |dy/dx| "
+                      "= %g) on an otherwise flat profile (median secant slope "
+                      "is zero) -- possible unphysical input feature"
+                      % (x[max_idx], max_deriv),
+                      DerivativeSanityWarning, stacklevel=2)
+
+    return dydx
 
 def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
     r'''! Solve Grad-Shafranov equilibrium for given profiles
@@ -890,22 +1025,24 @@ def solve_with_bootstrap(mygs,
         R_avg = ravgs_q['<R>']
 
         # Gradients (using raw psi for derivatives)
+        # Shape-preserving PCHIP derivatives on the native psi_N grid avoid the
+        # piecewise-constant/stepped artifacts numpy.gradient can produce on
+        # non-uniform or partially-duplicated psi_N grids.
         psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
-        d_psi = numpy.gradient(psi_N)
 
         # Avoid division by zero in gradients
-        d_psi_eff = d_psi * psi_range
-        d_psi_eff[d_psi_eff == 0] = 1e-9
+        if psi_range == 0:
+            psi_range = 1e-9
 
-        pprime_local = numpy.gradient(pressure) / d_psi_eff
+        pprime_local = _pchip_deriv(psi_N, pressure) / psi_range
 
         j_BS_final = numpy.zeros_like(pressure)
 
         if include_jBS:
-            dn_e_dpsi = numpy.gradient(ne) / d_psi_eff
-            dT_e_dpsi = numpy.gradient(Te) / d_psi_eff
-            dn_i_dpsi = numpy.gradient(ni) / d_psi_eff
-            dT_i_dpsi = numpy.gradient(Ti) / d_psi_eff
+            dn_e_dpsi = _pchip_deriv(psi_N, ne) / psi_range
+            dT_e_dpsi = _pchip_deriv(psi_N, Te) / psi_range
+            dn_i_dpsi = _pchip_deriv(psi_N, ni) / psi_range
+            dT_i_dpsi = _pchip_deriv(psi_N, Ti) / psi_range
 
             if use_OMFIT_sauter:
                 j_BS_neo = sauter_bootstrap( # legacy OMFIT implementation
