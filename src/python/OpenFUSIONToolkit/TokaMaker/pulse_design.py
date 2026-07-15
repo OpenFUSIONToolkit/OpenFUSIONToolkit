@@ -43,7 +43,7 @@ from scipy.signal import savgol_filter
 from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk, create_power_flux_fun, create_isoflux
 
 LCFS_WEIGHT = 100.0
-PSI_LCFS_WEIGHT = 100
+PSI_LCFS_WEIGHT = 1000.0
 N_PSI = 1000
 _NBI_W_TO_MA = 1/16e6
 mu_0 = 4.0 * np.pi * 1e-7
@@ -669,8 +669,9 @@ class TokaMaker_TORAX:
         self._tx_config_snapshot = None
 
         self._diverted_times = None
-        self._x_point_targets = None
-        self._x_point_weight = 100.0
+        self._x_point_targets = None            # primary (active) nulls
+        self._x_point_weight = 1000.0
+        self._secondary_x_point_targets = None  # optional corner nulls; excluded from trim_lcfs
         self._strike_point_targets = None
         self._trim_lcfs = True
 
@@ -972,8 +973,14 @@ class TokaMaker_TORAX:
                 self._pop_tx_grid()
 
     def _coil_net_turns(self, cname):
-        r'''! Number of turns for a coil set (from the mesh coil definition); 1 if unknown.'''
-        return self._tm.coil_sets.get(cname, {}).get('net_turns', 1.0)
+        r'''! Number of turns for a coil set (from the mesh coil definition); 1 if unknown or zero.
+
+                A virtual coil (e.g. the vertical-stability VS coil) has net_turns = 0 in the
+                mesh; for the A-turns <-> A/turn conversion there is no physical winding count to
+                divide by, so treat it as 1 turn (total A-turns == A/turn for such a coil).
+        '''
+        n = self._tm.coil_sets.get(cname, {}).get('net_turns', 1.0)
+        return n if n else 1.0
 
     def _aturn_bounds_to_aperturn(self, coil_bounds_aturn):
         r'''! Convert a {coil: [lo, hi]} bounds dict from A-turns to A/turn for TokaMaker.
@@ -1318,10 +1325,14 @@ class TokaMaker_TORAX:
 
                 Three modes via config_mode:
                 - 'off'                   : no pedestal (default).
-                - 'ADAPTIVE_SOURCE'    : TORAX set_T_ped_n_ped pedestal in ADAPTIVE_SOURCE mode,
-                                            with use_formation_model_with_adaptive_source enabled by
-                                            default (gives the L/H state machine). This is the legacy
-                                            behavior; pass set_pedestal/T_*_ped/n_e_ped/ped_top as before.
+                - 'ADAPTIVE_SOURCE'    : TORAX set_T_ped_n_ped pedestal in ADAPTIVE_SOURCE mode.
+                                            ped_height_* are the H-mode pedestal-top targets and
+                                            use_formation_model_with_adaptive_source is enabled, so
+                                            TORAX's L/H state machine owns the timing: the pedestal
+                                            appears when P_SOL > P_LH and is removed when
+                                            P_SOL < 0.8*P_LH, ramped over transition_time. Passing the
+                                            legacy set_pedestal toggle instead prescribes the on/off
+                                            schedule by hand and disables the formation model.
                 - 'ADAPTIVE_TRANSPORT' : same pedestal model in ADAPTIVE_TRANSPORT mode.
                 - 'internal_manual'       : pedestal imposed by us as a TORAX internal boundary
                                             condition (IBC), not a TORAX pedestal model. The pedestal
@@ -1335,15 +1346,18 @@ class TokaMaker_TORAX:
 
                 @param config_mode 'off', 'ADAPTIVE_SOURCE', 'ADAPTIVE_TRANSPORT', or 'internal_manual'.
                 @param config Optional full pedestal-section dict (tx_adaptive modes only); overrides defaults.
-                @param ped_height_Te Electron-temperature pedestal-top value (keV), internal_manual mode.
-                @param ped_height_Ti Ion-temperature pedestal-top value (keV), internal_manual mode (defaults to Te).
-                @param ped_height_ne Electron-density pedestal-top value (m^-3), internal_manual mode.
-                @param ped_width Pedestal width in rho_norm; inner edge is at 1 - ped_width.
-                @param transition_time Ramp duration (s) over which the pedestal rises from L-mode.
+                @param ped_height_Te Electron-temperature pedestal-top value (keV); all modes.
+                @param ped_height_Ti Ion-temperature pedestal-top value (keV); all modes (defaults to Te).
+                @param ped_height_ne Electron-density pedestal-top value (m^-3); all modes.
+                @param ped_width Pedestal width in rho_norm; inner edge is at 1 - ped_width
+                                 (internal_manual; the tx_adaptive modes use ped_top instead).
+                @param transition_time Ramp duration (s) over which the pedestal rises from L-mode
+                                       (TORAX transition_time_width in the tx_adaptive modes).
                 @param timing 'detect' (find L/H times from a loop-1 ADAPTIVE_SOURCE run) or 'input'.
                 @param lh_time L->H transition time (s); required when timing='input'.
                 @param hl_time H->L back-transition time (s); None means the pedestal stays on.
-                @param formation_model L/H formation-model name used by the internal_manual 'detect' loop
+                @param formation_model L/H formation-model name driving the transitions in
+                                       ADAPTIVE_SOURCE mode and the internal_manual 'detect' loop
                                        (e.g. 'delabie_scaling', 'martin_scaling').
                 @param adaptive_T_source_prefactor Stiffness of the internal_manual T_e/T_i IBC (TORAX
                                        numerics.adaptive_T_source_prefactor). The IBC is a soft
@@ -1360,6 +1374,7 @@ class TokaMaker_TORAX:
                 @param core_exp_a/core_exp_b Core-shape exponents for the transition core profile
                                        f = ped + (core-ped)*(1-(rho/ped_rho)^a)^b. a>=2,b>=2 (default
                                        2,2) give a flat core and a flat hand-off into the pedestal top.
+                                       
                 @param set_pedestal Legacy tx_adaptive toggle (True=set_T_ped_n_ped, False=no_pedestal).
                 @param T_i_ped Legacy ion-temperature pedestal (tx_adaptive).
                 @param T_e_ped Legacy electron-temperature pedestal (tx_adaptive).
@@ -1368,6 +1383,11 @@ class TokaMaker_TORAX:
         '''
         if config_mode not in ('off', 'ADAPTIVE_SOURCE', 'ADAPTIVE_TRANSPORT', 'internal_manual'):
             raise ValueError("config_mode must be 'off', 'ADAPTIVE_SOURCE', 'ADAPTIVE_TRANSPORT', or 'internal_manual'.")
+        # Legacy signature (pedestal requested through the tx_adaptive args, before config_mode
+        # existed): honor it as ADAPTIVE_SOURCE rather than silently building no pedestal.
+        if config_mode == 'off' and any(arg is not None for arg in
+                                        (config, set_pedestal, T_i_ped, T_e_ped, n_e_ped)):
+            config_mode = 'ADAPTIVE_SOURCE'
         self._ped_mode = config_mode
 
         if config_mode == 'off':
@@ -1410,17 +1430,29 @@ class TokaMaker_TORAX:
         # ── ADAPTIVE_SOURCE / ADAPTIVE_TRANSPORT ──
         # A full pedestal dict overrides everything else (former load_pedestal_config).
         self._pedestal_config = copy.deepcopy(config) if config is not None else None
-        # Legacy default: pedestal off unless explicitly enabled.
-        self._set_pedestal = False if set_pedestal is None else set_pedestal
-        # Enable the L/H formation model for ADAPTIVE_SOURCE via the new API only; the
-        # legacy set_pedestal=... toggle keeps TORAX's default (off) so old runs are unchanged.
-        self._ped_formation_model = set_pedestal is None
-        if T_i_ped is not None:
-            self._T_i_ped = T_i_ped
-        if T_e_ped is not None:
-            self._T_e_ped = T_e_ped
-        if n_e_ped is not None:
-            self._n_e_ped = n_e_ped
+        # TORAX gates the whole pedestal model on its `set_pedestal` flag, so it must be True
+        # for a pedestal to exist at all — including when the formation model owns the L/H
+        # timing (the formation model only decides *when* the pedestal values are applied).
+        # New API (no legacy toggle): pedestal on, formation model drives L->H off P_SOL vs P_LH.
+        # Legacy toggle given: it is the pedestal on/off schedule and the formation model stays
+        # off, so old runs are unchanged.
+        self._set_pedestal = True if set_pedestal is None else set_pedestal
+        self._ped_formation_model = (set_pedestal is None)
+        self._ped_transition_time = transition_time
+        self._ped_formation_model_name = formation_model
+        # Pedestal-top values: ped_height_* are the mode-independent names, T_*_ped/n_e_ped the
+        # legacy tx-adaptive aliases. Keep both in sync so save_tmtx_config round-trips.
+        self._ped_height_Te = ped_height_Te if ped_height_Te is not None else T_e_ped
+        self._ped_height_Ti = ped_height_Ti if ped_height_Ti is not None else T_i_ped
+        if self._ped_height_Ti is None:
+            self._ped_height_Ti = self._ped_height_Te
+        self._ped_height_ne = ped_height_ne if ped_height_ne is not None else n_e_ped
+        if self._ped_height_Te is not None:
+            self._T_e_ped = self._ped_height_Te
+        if self._ped_height_Ti is not None:
+            self._T_i_ped = self._ped_height_Ti
+        if self._ped_height_ne is not None:
+            self._n_e_ped = self._ped_height_ne
         self._ped_top = ped_top
 
     def load_pedestal_config(self, pedestal_config):
@@ -1498,17 +1530,28 @@ class TokaMaker_TORAX:
             self._Ve_max = Ve_max
 
     def set_x_points(self, diverted_times=None, x_point_targets=None, x_point_weight=100.0, strike_point_targets=None,
-                     trim_lcfs=True, trim_lcfs_perc_limit=0.80):
+                     trim_lcfs=True, trim_lcfs_perc_limit=0.80, secondary_x_point_targets=None):
         r'''! Configure diverted window, X-point targets, and optional strike points.
 
                 @param diverted_times Tuple (t_start, t_end) defining the diverted plasma window.
-                @param x_point_targets X-point target locations, shape (n_xpoints, 2) with [R, Z] pairs.
-                @param x_point_weight Weight for saddle-point constraints.
+                @param x_point_targets PRIMARY (active) X-point target locations, shape (n_xpoints, 2)
+                                       with [R, Z] pairs. These are the nulls that sit on the plasma
+                                       boundary and define the topology (1 = single null, 2 = double
+                                       null); only these drive the `trim_lcfs` geometry below.
+                @param x_point_weight Weight for saddle-point constraints (applied to primary and
+                                      secondary targets alike).
                 @param strike_point_targets Strike point locations, shape (n_points, 2) with [R, Z] pairs,
                                             or None to disable.
                 @param trim_lcfs When True (default) and X-points are active, LCFS isoflux targets near
                                  the X-point(s) are removed. When False, all defined isoflux (LCFS) points
                                  are used together with the defined X-point(s).
+                @param secondary_x_point_targets Optional SECONDARY X-point locations, shape (n_points, 2)
+                                                 with [R, Z] pairs. These get saddle constraints like the
+                                                 primaries, but are deliberately EXCLUDED from the
+                                                 `trim_lcfs` calculation: they are nulls out in the
+                                                 divertor corners, far off the plasma boundary, so they
+                                                 must not change which LCFS isoflux points get trimmed
+                                                 nor which single/double-null branch is taken.
 
         '''
         if diverted_times is not None and len(diverted_times) != 2:
@@ -1517,6 +1560,10 @@ class TokaMaker_TORAX:
         self._diverted_times = diverted_times
         self._x_point_targets = None if x_point_targets is None else np.atleast_2d(x_point_targets)
         self._x_point_weight = x_point_weight
+        self._secondary_x_point_targets = (None if secondary_x_point_targets is None
+                                           else np.atleast_2d(secondary_x_point_targets))
+        if self._secondary_x_point_targets is not None and self._x_point_targets is None:
+            raise ValueError('secondary_x_point_targets requires x_point_targets (the primary nulls).')
         self._strike_point_targets = None if strike_point_targets is None else np.atleast_2d(strike_point_targets)
         self._trim_lcfs = trim_lcfs
         self._trim_lcfs_perc_limit = trim_lcfs_perc_limit
@@ -1897,6 +1944,7 @@ class TokaMaker_TORAX:
                     'model_name': 'set_T_ped_n_ped',
                     'set_pedestal': False,
                     'mode': 'ADAPTIVE_SOURCE',
+                    'pedestal_profile_form': 'MTANH',
                     'use_formation_model_with_adaptive_source': True,
                     'transition_time_width': self._ped_transition_time,
                     'formation_model': {'model_name': self._ped_formation_model_name},
@@ -1918,7 +1966,12 @@ class TokaMaker_TORAX:
                 ped_cfg['set_pedestal'] = self._set_pedestal
                 ped_cfg['mode'] = self._ped_mode
                 if self._ped_mode == 'ADAPTIVE_SOURCE' and self._ped_formation_model:
+                    # L/H state machine: the pedestal values below are the H-mode targets, and
+                    # TORAX applies them only once P_SOL > P_LH (and removes them below
+                    # P_LH_hysteresis_factor * P_LH), ramped over transition_time_width.
                     ped_cfg['use_formation_model_with_adaptive_source'] = True
+                    ped_cfg['transition_time_width'] = self._ped_transition_time
+                    ped_cfg['formation_model'] = {'model_name': self._ped_formation_model_name}
                 if self._ped_top is not None:
                     ped_cfg['rho_norm_ped_top'] = self._ped_top
                 if self._T_i_ped is not None:
@@ -3165,10 +3218,21 @@ class TokaMaker_TORAX:
                     and self._diverted_times[0] <= t <= self._diverted_times[1]
                 )
                 if use_x_points:
-                    saddle_weights = self._x_point_weight * np.ones(self._x_point_targets.shape[0])
-                    self._tm.set_saddle_constraints(self._x_point_targets, saddle_weights)
+                    # Saddle constraints are applied to the primary nulls plus any secondary
+                    # (divertor-corner) nulls. The trim below deliberately sees ONLY the
+                    # primaries: the secondaries lie far off the plasma boundary, so letting
+                    # them into the topology test would silently skip trimming altogether,
+                    # and letting them into the |Z| band would strip the whole top/bottom of
+                    # the LCFS.
+                    if self._secondary_x_point_targets is None:
+                        saddle_targets = self._x_point_targets
+                    else:
+                        saddle_targets = np.vstack([self._x_point_targets,
+                                                    self._secondary_x_point_targets])
+                    saddle_weights = self._x_point_weight * np.ones(saddle_targets.shape[0])
+                    self._tm.set_saddle_constraints(saddle_targets, saddle_weights)
 
-                    # trims lcfs targets near X-point(s)
+                    # trims lcfs targets near X-point(s) -- primary nulls only
                     if self._trim_lcfs:
                         perc_limit = self._trim_lcfs_perc_limit       # LCFS points above percentage limit* max(abs(Z)) are removed from isoflux targets
                         Z_max_abs = np.max(np.abs(lcfs[:, 1]))
@@ -3255,7 +3319,6 @@ class TokaMaker_TORAX:
                 # loop's jphi over a few alphas, from pure TORAX (alpha=0) to mostly
                 # previous (alpha=1). p' and FF'_NI are convolved at the same alpha and
                 # passed alongside (normal linterp type), matching the FF'/p' levels below.
-                # _jphi_alphas = [0.00, 0.25, 0.50, 0.75, 1.00]
                 _jphi_alphas = [0.00, 0.50, 1.00]
                 for _a in _jphi_alphas:
                     _jphi_c   = self._convolve_prof(
@@ -3404,8 +3467,8 @@ class TokaMaker_TORAX:
                             continue
                         if self._test_eqdsk_tx_config(eq_name, quiet=quiet_test):
                             torax_accepted = True
-                            if _attempt_idx > 0 and self._output_mode == 'debug':
-                                base_nz = EQDSK_SAVE_NR_NZ_SEQUENCE[0]
+                            # if _attempt_idx > 0 and self._output_mode == 'debug':
+                                # base_nz = EQDSK_SAVE_NR_NZ_SEQUENCE[0]
                                 # self._print(
                                 #     f'    EQDSK {os.path.basename(eq_name)}: base nr=nz={base_nz} rejected by TORAX; '
                                 #     f'accepted at nr=nz={nr_nz}.'
@@ -4484,6 +4547,7 @@ class TokaMaker_TORAX:
             'ped_height_Ti': self._ped_height_Ti,
             'ped_height_ne': self._ped_height_ne,
             'ped_width': self._ped_width,
+            'ped_top': self._ped_top,
             'core_height_Te': self._core_height_Te,
             'core_height_Ti': self._core_height_Ti,
             'core_height_ne': self._core_height_ne,
@@ -4500,6 +4564,8 @@ class TokaMaker_TORAX:
             'x_point_targets': (None if self._x_point_targets is None
                                 else np.asarray(self._x_point_targets)),
             'x_point_weight': float(self._x_point_weight),
+            'secondary_x_point_targets': (None if self._secondary_x_point_targets is None
+                                          else np.asarray(self._secondary_x_point_targets)),
             'strike_point_targets': (None if self._strike_point_targets is None
                                      else np.asarray(self._strike_point_targets)),
             'trim_lcfs': bool(self._trim_lcfs),
@@ -4562,7 +4628,6 @@ class TokaMaker_TORAX:
             f.write(self._format_config_literal(torax_dict))
             f.write('\n')
 
-        # self._print(f'  Reproduction config -> {save_path}')
         return save_path
 
     @staticmethod
@@ -4805,7 +4870,14 @@ class TokaMaker_TORAX:
                 
         '''
         return plot_lcfs_evolution(self, save_path=save_path, display=display, one_plot=one_plot, **kwargs)
-
+    
+    def plot_PLH_components(self, save_path=None, display=True, **kwargs):
+        r'''! Plot the components of the PLH model (pedestal height, width, and core gradient) over time.
+                @param save_path Path to save figure. If None, does not save.
+                @param display Whether to show the plot.
+        '''
+        return plot_PLH_components(self, save_path=save_path, display=display)
+    
     def summary(self, **kwargs):
         r'''! Print/display a physics summary of the simulation.'''
         return summary(self, **kwargs)
@@ -5155,6 +5227,17 @@ def _seed_tm_profiles_for_failure_profile_plot(tt, i):
     }
     s['q_prof_tm'][i] = copy.deepcopy(s['q_prof_eqdsk'][i])
     return True
+
+
+def _saddle_targets(tt):
+    r'''! Every point given a saddle constraint: primary nulls plus any secondary nulls.'''
+    primary = getattr(tt, '_x_point_targets', None)
+    secondary = getattr(tt, '_secondary_x_point_targets', None)
+    if primary is None:
+        return None
+    if secondary is None or len(secondary) == 0:
+        return primary
+    return np.vstack([primary, secondary])
 
 
 def _x_points_active(tt, i, t=None):
@@ -5602,7 +5685,9 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
     Ip_seed = abs(float(tt._Ip_seed[i]))
     pax_seed = abs(float(tt._pax_seed[i]))
     psi_lcfs_seed = float(tt._psi_lcfs_seed[i])
-    Ip_tx = abs(float(s['Ip'][i]))
+    # 'Ip_tx' holds the TORAX value; 'Ip' is overwritten with the TM result by _tm_update, which
+    # runs before this plot -- reading it here would report TokaMaker against itself.
+    Ip_tx = abs(float(s['Ip_tx'][i]))
     pax_tx = abs(float(s['pax'][i]))
     psi_lcfs_tx = float(s['psi_lcfs_tx'][i])
     q95_tx = float(s['q95'][i])
@@ -5677,7 +5762,9 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
 
     # FF'/p'/FF'_NI panels show only the FF'-family levels; the jphi-convolution levels
     # (also stored under 'ffp') get their own panel below so the two are not conflated.
-    _not_jphi = lambda att: not _is_jphi_attempt(att)
+    def _not_jphi(att):
+        return not _is_jphi_attempt(att)
+
     _plot_levels(ax_ffp_tx, 'ffp', seed_x=_seed_ffp_x, seed_y=_seed_ffp_norm, seed_label="FF' seed EQDSK (norm)", level_filter=_not_jphi)
     if _prev_ffp_prof is not None:
         _pffp_y = np.asarray(_prev_ffp_prof['y'], dtype=float)
@@ -5938,7 +6025,7 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
         )
         tt._tm.plot_constraints(fig, ax_mini_eq, equilibrium=equil_snap)
         tt._tm.plot_psi(fig, ax_mini_eq, equilibrium=equil_snap, xpoint_color='r', vacuum_nlevels=3)
-        x_pt = getattr(tt, '_x_point_targets', None)
+        x_pt = _saddle_targets(tt)   # primary + secondary nulls
         if x_pt is not None and _x_points_active(tt, i, t=t):
             ax_mini_eq.plot(x_pt[:, 0], x_pt[:, 1], 'x', color='purple', markersize=4, markeredgewidth=1)
         sp = s.get('strike_pts', {}).get(i)
@@ -6793,19 +6880,23 @@ def plot_PLH_components(tt, save_path=None, display=True):
     if t_n is not None and t_nm is not None:
         ax.fill_between(t_n, y_n, y_nm, where=(np.asarray(y_n) < np.asarray(y_nm)),
                         color='tab:red', alpha=0.15, label=r'$\bar n_e<n_{e,\min}$ ($n^{-2}$ branch)')
-    ax.set_title(r'density vs branch threshold'); ax.set_ylabel(r'$n_e$ [$10^{20}$ m$^{-3}$]'); ax.legend(fontsize=8)
+    ax.set_title(r'density vs branch threshold')
+    ax.set_ylabel(r'$n_e$ [$10^{20}$ m$^{-3}$]')
+    ax.legend(fontsize=8)
 
     # (0,1) Ip
     ax = axes[0, 1]
     if t_Ip is not None:
         ax.plot(t_Ip, y_Ip, color=COLOR_TX, ls='-', lw=1)
-    ax.set_title(r'$I_p$'); ax.set_ylabel('[MA]')
+    ax.set_title(r'$I_p$')
+    ax.set_ylabel('[MA]')
 
     # (0,2) S = surface area
     ax = axes[0, 2]
     if t_S is not None:
         ax.plot(t_S, y_S, color=COLOR_TX, ls='-', lw=1)
-    ax.set_title(r'$S$ = g0_face[-1]  ($P_{LH}\propto S^{0.941}$)'); ax.set_ylabel(r'[m$^2$]')
+    ax.set_title(r'$S$ = g0_face[-1]  ($P_{LH}\propto S^{0.941}$)')
+    ax.set_ylabel(r'[m$^2$]')
 
     # (1,0) a_minor, R_major
     ax = axes[1, 0]
@@ -6813,7 +6904,9 @@ def plot_PLH_components(tt, save_path=None, display=True):
         ax.plot(t_a, y_a, color='tab:blue', ls='-', lw=1, label=r'$a$ (minor)')
     if t_R is not None:
         ax.plot(t_R, y_R, color='tab:purple', ls='-', lw=1, label=r'$R$ (major)')
-    ax.set_title(r'$a$, $R$  (enter $n_{e,\min}$)'); ax.set_ylabel('[m]'); ax.legend(fontsize=8)
+    ax.set_title(r'$a$, $R$  (enter $n_{e,\min}$)')
+    ax.set_ylabel('[m]')
+    ax.legend(fontsize=8)
 
 
     # (1,1) P_LH branch decomposition (log)
@@ -6827,11 +6920,15 @@ def plot_PLH_components(tt, save_path=None, display=True):
         t, y = _tx_scalar(tt, name, scale=1e-6)
         if t is not None:
             ax.plot(t, y, color=color, ls=ls, lw=lw, zorder=zord, label=lab)
-    ax.set_title('P_LH branches'); ax.set_ylabel('[MW]'); ax.set_yscale('log'); ax.legend(fontsize=8)
+    ax.set_title('P_LH branches')
+    ax.set_ylabel('[MW]')
+    ax.set_yscale('log')
+    ax.legend(fontsize=8)
 
 
     # (1,2) the governing equations (LaTeX)
-    ax = axes[1, 2]; ax.axis('off')
+    ax = axes[1, 2]
+    ax.axis('off')
     # NOTE: matplotlib mathtext (not a full LaTeX engine) — no \mathbf, \begin{cases},
     # \! or \qquad. Use plain-text headers and split the piecewise into two lines.
     eqn_lines = [
@@ -6862,7 +6959,9 @@ def plot_PLH_components(tt, save_path=None, display=True):
     if t_fg is not None:
         ax.plot(t_fg, y_fg, color=COLOR_TX, ls='-', lw=1)
     ax.axhline(1.0, color='tab:red', ls='--', lw=1, label='Greenwald limit')
-    ax.set_title(r'$f_{GW}$ (line-avg)'); ax.set_ylabel(r'$f_{GW}$'); ax.legend(fontsize=8)
+    ax.set_title(r'$f_{GW}$ (line-avg)')
+    ax.set_ylabel(r'$f_{GW}$')
+    ax.legend(fontsize=8)
 
     # P_SOL vs P_LH gate (Delabie is what the formation model uses here). Drawn twice:
     # zoomed to the transition at (2,1) and over the whole pulse at (2,2).
@@ -6882,7 +6981,8 @@ def plot_PLH_components(tt, save_path=None, display=True):
         if t_gate is not None and t_sol is not None:
             ax.fill_between(t_sol, y_sol, y_gate, where=(np.asarray(y_sol) > np.asarray(y_gate)),
                             color='tab:green', alpha=0.2, label=r'$P_{SOL}>P_{LH}$')
-        ax.set_ylabel('[MW]'); ax.legend(fontsize=8)
+        ax.set_ylabel('[MW]')
+        ax.legend(fontsize=8)
 
     # (2,1) zoomed to the L->H transition (the per-panel zoom loop below clamps the x-range)
     _plot_psol_vs_plh(axes[2, 1])
@@ -6908,7 +7008,8 @@ def plot_PLH_components(tt, save_path=None, display=True):
 
     for ax in axes.flat:
         if ax is not axes[1, 2]:
-            ax.grid(True, alpha=0.3); ax.set_xlabel('Time [s]')
+            ax.grid(True, alpha=0.3)
+            ax.set_xlabel('Time [s]')
         if ax not in _no_zoom and _xlim is not None:
             ax.set_xlim(*_xlim)
             ax.axvline(_lh, color='magenta', ls='--', lw=1, alpha=0.7, zorder=4)
@@ -7033,9 +7134,11 @@ def plot_coil_current_tunnel(tt, save_path=None, display=True):
             t_b, lo_b, hi_b = tunnel[cname]
             # y-range for the gray fill: pad around both the trace and the bounds.
             stack = np.concatenate([i_vals, lo_b, hi_b]) if i_vals.size else np.concatenate([lo_b, hi_b])
-            ymin = float(np.min(stack)); ymax = float(np.max(stack))
+            ymin = float(np.min(stack))
+            ymax = float(np.max(stack))
             pad = 0.08 * (ymax - ymin if ymax > ymin else max(abs(ymax), 1.0))
-            ymin -= pad; ymax += pad
+            ymin -= pad
+            ymax += pad
             ax.fill_between(t_b, hi_b, ymax, color='gray', alpha=0.3, step=None, lw=0,
                             label='forbidden')
             ax.fill_between(t_b, ymin, lo_b, color='gray', alpha=0.3, step=None, lw=0)
@@ -7249,9 +7352,9 @@ def make_movie(tt, save_path=None, display=True, speed_factor=5.0, loop=None, no
         n = len(times)
 
         psi_lcfs_tm = np.array(tt._state['psi_lcfs_tm'])
-        psi_lcfs_tx = np.array(tt._state['psi_lcfs_tx'])
         flux_con_tm = -(psi_lcfs_tm - psi_lcfs_tm[0]) * 2.0 * np.pi
-        flux_con_tx = -(psi_lcfs_tx - psi_lcfs_tx[0]) * 2.0 * np.pi
+        # Flux consumed TX is derived inside _draw_scalars_movie from the full-resolution
+        # TORAX psi_lcfs, so there is no tm_times-sampled version to precompute here.
 
         equil_dir = os.path.join(tmp_dir, 'equil')
         os.makedirs(equil_dir, exist_ok=True)
@@ -7260,7 +7363,7 @@ def make_movie(tt, save_path=None, display=True, speed_factor=5.0, loop=None, no
         for idx in range(n):
             fpath = os.path.join(tmp_dir, f'frame_{idx:04d}.png')
             _render_frame(tt, loop, idx, times[idx], times,
-                          flux_con_tm, flux_con_tx, fpath, tt._run_name, equil_dir)
+                          flux_con_tm, fpath, tt._run_name, equil_dir)
             plt.close('all')
 
         # sim_fps = simulated seconds per wall-clock second. Each frame gets a
@@ -7309,7 +7412,7 @@ def _render_equil_frames(tt, loop, equil_dir):
             fig, ax, equilibrium=equil, xpoint_color='r', vacuum_nlevels=2,
             plasma_nlevels=MOVIE_EQUIL_PSI_PLASMA_NLEVELS,
         )
-        x_pt = getattr(tt, '_x_point_targets', None)
+        x_pt = _saddle_targets(tt)   # primary + secondary nulls
         if x_pt is not None and _x_points_active(tt, i, t=tt._tm_times[i]):
             ax.plot(x_pt[:, 0], x_pt[:, 1], 'x', color='purple', markersize=10, markeredgewidth=2, label='Saddle point targets')
         sp = tt._state.get('strike_pts', {}).get(i)
@@ -7326,7 +7429,7 @@ def _render_equil_frames(tt, loop, equil_dir):
         plt.close(fig)
 
 
-def _render_frame(tt, loop, idx, t_now, times, flux_con_tm, flux_con_tx, out_path, run_name, equil_dir):
+def _render_frame(tt, loop, idx, t_now, times, flux_con_tm, out_path, run_name, equil_dir):
     r'''! Create a single movie frame.'''
     fig = plt.figure(figsize=(MOVIE_FIG_W, MOVIE_FIG_H), dpi=MOVIE_DPI)
     gs = GridSpec(6, 3, figure=fig, width_ratios=[1.2, 1.0, 1.0],
@@ -7339,7 +7442,7 @@ def _render_frame(tt, loop, idx, t_now, times, flux_con_tm, flux_con_tx, out_pat
     _draw_equil_from_dir(ax_equil, tt, loop, idx, t_now, equil_dir)
 
     sax = [fig.add_subplot(gs[j, 1]) for j in range(6)]
-    _draw_scalars_movie(sax, tt, times, t_now, flux_con_tm, flux_con_tx)
+    _draw_scalars_movie(sax, tt, times, t_now, flux_con_tm)
     for ax in sax[:-1]:
         ax.tick_params(labelbottom=False)
     sax[-1].set_xlabel('Time [s]', fontsize=LABEL_FS)
@@ -7421,21 +7524,33 @@ def _draw_equil_from_dir(ax, tt, loop, idx, t_now, equil_dir):
         ax.set_title(f't = {t_now:.2f} s  (FAILED)', fontsize=TITLE_FS + 2, color='darkred')
 
 
-def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
-    r'''! Draw the 6 scalar time-series panels for a movie frame.'''
+def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm):
+    r'''! Draw the 6 scalar time-series panels for a movie frame.
+
+            TokaMaker traces are per-solve (at tm_times); TORAX traces are drawn straight from
+            the data tree at full TORAX resolution, matching plot_scalars. Reading them from
+            _state instead would show them subsampled onto tm_times and passed through the
+            t_ave window averaging, which distorts ramps and hides sub-window structure.
+    '''
     s = tt._state
 
     ax = axes[0]
     ax.plot(times, np.array(s['Ip_tm']) / 1e6, color=COLOR_TM, ls=LS_PRI, lw=LW, marker=MK_TM, ms=MK_SZ, label='Ip TM')
-    ax.plot(times, np.array(s['Ip_tx']) / 1e6, color=COLOR_TX, ls=LS_PRI, lw=LW, label='Ip TX')
-    ax.plot(times, np.array(s['Ip_ni_tx']) / 1e6, color=COLOR_TX, ls=LS_SEC, lw=LW, label='Ip_ni TX')
+    t_Ip, y_Ip = _tx_scalar(tt, 'Ip', scale=1e-6)
+    if t_Ip is not None:
+        ax.plot(t_Ip, y_Ip, color=COLOR_TX, ls=LS_PRI, lw=LW, label='Ip TX')
+    t_Ini, y_Ini = _tx_scalar(tt, 'I_non_inductive', scale=1e-6)
+    if t_Ini is not None:
+        ax.plot(t_Ini, y_Ini, color=COLOR_TX, ls=LS_SEC, lw=LW, label='Ip_ni TX')
     ax.set_ylabel('Ip [MA]', fontsize=LABEL_FS)
     ax.set_title('Scalars', fontsize=TITLE_FS)
     ax.legend(fontsize=LEGEND_FS, loc='upper left')
     _style(ax)
 
     ax = axes[1]
-    ax.plot(times, s['vloop_tx'], color=COLOR_TX, ls=LS_PRI, lw=LW, label='Vloop TX')
+    t_vl, y_vl = _tx_scalar(tt, 'v_loop_lcfs')
+    if t_vl is not None:
+        ax.plot(t_vl, y_vl, color=COLOR_TX, ls=LS_PRI, lw=LW, label='Vloop TX')
     ax.set_ylabel('V_loop [V]', fontsize=LABEL_FS)
     ax.legend(fontsize=LEGEND_FS, loc='upper left')
     _style(ax)
@@ -7473,17 +7588,24 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm, flux_con_tx):
     ax2.legend(fontsize=LEGEND_FS, loc='upper right')
 
     ax = axes[3]
+    # TORAX psi is COCOS-11 Wb; -1/(2*pi) puts it in the TM Wb/rad convention (as in plot_scalars).
+    t_psi_lcfs, y_psi_lcfs = _tx_profile_at_rho(tt, 'psi', 1.0, scale=-1.0 / (2.0 * np.pi))
+    t_psi_axis, y_psi_axis = _tx_profile_at_rho(tt, 'psi', 0.0, scale=-1.0 / (2.0 * np.pi))
     ax.plot(times, s['psi_axis_tm'], color=COLOR_TM, ls=LS_PRI, lw=LW, marker=MK_TM, ms=MK_SZ, label='\u03c8_axis TM')
-    ax.plot(times, s['psi_axis_tx'], color=COLOR_TX, ls=LS_PRI, lw=LW, label='\u03c8_axis TX')
+    if t_psi_axis is not None:
+        ax.plot(t_psi_axis, y_psi_axis, color=COLOR_TX, ls=LS_PRI, lw=LW, label='\u03c8_axis TX')
     ax.set_ylabel('\u03c8 [Wb/rad]', fontsize=LABEL_FS)
     ax.plot(times, s['psi_lcfs_tm'], color=COLOR_TM, ls=LS_SEC, lw=LW, marker=MK_TM, ms=MK_SZ, label='\u03c8_lcfs TM')
-    ax.plot(times, s['psi_lcfs_tx'], color=COLOR_TX, ls=LS_SEC, lw=LW, label='\u03c8_lcfs TX')
+    if t_psi_lcfs is not None:
+        ax.plot(t_psi_lcfs, y_psi_lcfs, color=COLOR_TX, ls=LS_SEC, lw=LW, label='\u03c8_lcfs TX')
     ax.tick_params(labelsize=TICK_FS)
     _style(ax)
     ax.legend(fontsize=LEGEND_FS, loc='upper left')
     ax2 = ax.twinx()
     ax2.plot(times, flux_con_tm, color='darkorange', ls='-.', lw=LW, marker=MK_TM, ms=MK_SZ, label='Flux TM')
-    ax2.plot(times, flux_con_tx, color='seagreen', ls='-.', lw=LW, label='Flux TX')
+    if t_psi_lcfs is not None:
+        ax2.plot(t_psi_lcfs, -(y_psi_lcfs - y_psi_lcfs[0]) * 2.0 * np.pi,
+                 color='seagreen', ls='-.', lw=LW, label='Flux TX')
     ax2.set_ylabel('Flux Consumed [Wb]', fontsize=LABEL_FS)
     ax2.tick_params(labelsize=TICK_FS)
     ax2.legend(fontsize=LEGEND_FS, loc='lower left')
@@ -7803,7 +7925,7 @@ def plot_equil_interactive(tt, loop=None, notebook_mode=None, save_path=None):
                 cb.mappable.set_clim(min_bound, max_bound)
             tt._tm.plot_constraints(fig, ax, equilibrium=equil)
             tt._tm.plot_psi(fig, ax, equilibrium=equil, xpoint_color='r', vacuum_nlevels=4)
-            x_pt = getattr(tt, '_x_point_targets', None)
+            x_pt = _saddle_targets(tt)   # primary + secondary nulls
             if x_pt is not None and _x_points_active(tt, i, t=t):
                 ax.plot(x_pt[:, 0], x_pt[:, 1], 'rx', markersize=10, markeredgewidth=2,
                         label='Saddle point targets')
@@ -7996,7 +8118,11 @@ def run_tmtx_from_config(tmtx_config=None, torax_config=None, config_file=None, 
             # Staging folder the seeds were written into (parent of the first seed file).
             if tmtx_config['g_eqdsk_arr']:
                 seed_dir = os.path.dirname(tmtx_config['g_eqdsk_arr'][0])
-                seed_tmp_parent = os.path.dirname(seed_dir)  # the mkdtemp() parent to clean up
+                # In debug mode the seeds are staged directly in the cwd (not a temp dir), so
+                # there is no temp parent to remove — the folder is only ever moved into the
+                # output dir below. Otherwise track the mkdtemp() parent for finally cleanup.
+                if not _output_mode_is_debug(tmtx_config.get('fly_kwargs', {}).get('output_mode')):
+                    seed_tmp_parent = os.path.dirname(seed_dir)  # the mkdtemp() parent to clean up
         elif not tmtx_config.get('g_eqdsk_arr'):
             raise ValueError(
                 "seed_eqdsk_config['create_seed_eqdsks'] is False but no 'g_eqdsk_arr' "
@@ -8010,8 +8136,9 @@ def run_tmtx_from_config(tmtx_config=None, torax_config=None, config_file=None, 
         # If a run output dir exists, move the freshly created seed eqdsks into a
         # same-named subfolder, so they live alongside the run outputs. The reproduction
         # config (written once by fly()) regenerates seeds from trajectories on replay, so
-        # it embeds no file paths and needs no rewrite here. When there is no output dir
-        # the seeds stay in the temp folder and are removed by the finally cleanup below.
+        # it embeds no file paths and needs no rewrite here. When there is no output dir the
+        # seeds are left where they were staged: removed by the finally cleanup below for temp
+        # staging, or left in the cwd seed_eqdsks_{run_name}/ folder for debug staging.
         out_dir = getattr(tmtx, '_out_dir', None)
         if seed_dir is not None and os.path.isdir(seed_dir) and out_dir:
             dest = os.path.join(out_dir, os.path.basename(seed_dir))
@@ -8131,6 +8258,19 @@ def _init_TM_object(tmtx_config):
     return mygs
 
 
+def _output_mode_is_debug(output_mode):
+    r'''! Whether a fly() output_mode value selects debug mode, using the same normalization
+            as TokaMaker_TORAX.fly() (True -> 'normal'; strings stripped/lowercased).
+            @param output_mode Raw output_mode value (as passed to fly()).
+            @return True if this resolves to 'debug'.
+    '''
+    if output_mode is True:
+        return False  # alias for 'normal'
+    if isinstance(output_mode, str):
+        return output_mode.strip().lower() == 'debug'
+    return False
+
+
 def _create_seed_eqdsks(tmtx_config, mygs, save_dir=None):
     r'''! Create the seed gEQDSK files that seed the TokaMaker_TORAX coupling.
 
@@ -8160,8 +8300,10 @@ def _create_seed_eqdsks(tmtx_config, mygs, save_dir=None):
         @param tmtx_config TMTX config dict.
         @param mygs Configured TokaMaker object (from _init_TM_object).
         @param save_dir Directory for the seed files. None -> a seed_eqdsks_{run_name}/
-                        subfolder inside a fresh temp dir (caller moves it into the run
-                        output dir or cleans up the temp parent).
+                        subfolder. In debug mode this subfolder is created in the cwd (so the
+                        seeds are visible during the run); otherwise it is placed inside a
+                        fresh temp dir. Either way the caller moves it into the run output dir
+                        (or cleans up the temp parent) after the run.
         @return List of absolute gEQDSK file paths, ordered by eq_times.
     '''
     sc = tmtx_config['seed_eqdsk_config']
@@ -8194,11 +8336,15 @@ def _create_seed_eqdsks(tmtx_config, mygs, save_dir=None):
     eqdsk_nz        = sc.get('eqdsk_nz', 900)
 
     if save_dir is None:
-        # Stage seeds in a temp dir (not cwd). The seed_eqdsks_{run_name} subfolder name is
-        # preserved so run_tmtx_from_config can move it into the run output dir if needed;
-        # otherwise the whole temp parent is cleaned up at end of run.
-        _tmp_parent = tempfile.mkdtemp(prefix='TokaMaker_TORAX_seeds_')
-        save_dir = os.path.join(_tmp_parent, f'seed_eqdsks_{run_name}')
+        # The seed_eqdsks_{run_name} subfolder name is preserved so run_tmtx_from_config can
+        # move it into the run output dir if needed. In debug mode stage the seeds directly in
+        # the cwd so they are visible while the run is in progress; otherwise stage them inside
+        # a fresh temp dir (cleaned up at end of run when there is no output dir to move into).
+        if _output_mode_is_debug(tmtx_config.get('fly_kwargs', {}).get('output_mode')):
+            save_dir = os.path.abspath(f'seed_eqdsks_{run_name}')
+        else:
+            _tmp_parent = tempfile.mkdtemp(prefix='TokaMaker_TORAX_seeds_')
+            save_dir = os.path.join(_tmp_parent, f'seed_eqdsks_{run_name}')
     if os.path.exists(save_dir):
         shutil.rmtree(save_dir)
     os.makedirs(save_dir)
