@@ -14,9 +14,6 @@ import collections
 import ctypes
 from warnings import warn
 import numpy
-import matplotlib
-from matplotlib.patches import Polygon
-from matplotlib.colors import ListedColormap
 from ._interface import *
 
 
@@ -2220,51 +2217,29 @@ class TokaMaker():
         @param ax Axis (matplotlib)
         @param window 4-element array (r_min, r_max, z_min, z_max)
         '''
+        import matplotlib.tri as tri
         psi = self.get_psi(normalized=True)
         jphi = self.calc_delstar_curr(psi)
         jphi_plot = numpy.zeros(self.nc)
 
-        max_jphi = 0.0
-        min_jphi = 0.0
-
         for i in range(self.nc):
             if self.reg[i] not in [1, 3]:
+                jphi_plot[i] = 0
                 continue # Ignore all regions except plasma and vacuum
             # if window is not None:
             idx1, _, _ = self.lc[i]
             rz1 = self.r[idx1][:2]
             if window is not None and (rz1[0] < window[0] or rz1[0] > window[1] or rz1[1] < window[2] or rz1[1] > window[3]):
+                jphi_plot[i] = 0
                 continue
-            jphi_plot[i] = jphi[idx1]            
-            max_jphi = max(max_jphi, jphi_plot[i])
-            min_jphi = min(min_jphi, jphi_plot[i])
+            jphi_plot[i] = jphi[idx1]      
 
         # Convert to MA
-        max_jphi /= 1.0E6
-        min_jphi /= 1.0E6
         jphi_plot /= 1.0E6
 
-        cmap = matplotlib.pyplot.get_cmap('spring')
-        for i in range(self.nc):
-            if self.reg[i] not in [1, 3]:
-                continue # Ignore all regions except plasma and vacuum
-            idx1, idx2, idx3 = self.lc[i]
-            rz1 = self.r[idx1][:2]
-            rz2 = self.r[idx2][:2]
-            rz3 = self.r[idx3][:2]
-            if window is not None and (rz1[0] < window[0] or rz1[0] > window[1] or rz1[1] < window[2] or rz1[1] > window[3]):
-                continue
-            color_idx = (jphi_plot[i] - min_jphi) / (max_jphi - min_jphi)
-            color = cmap(color_idx)
-            poly = Polygon([rz1, rz2, rz3], facecolor=color)
-            ax.add_patch(poly)
+        triangulation = tri.Triangulation(self.r[:,0], self.r[:,1], self.lc)
+        ax.tripcolor(triangulation, jphi_plot, cmap="spring", shading="flat")
         
-        bounds = numpy.linspace(min_jphi, max_jphi, 10)
-        norm = matplotlib.colors.BoundaryNorm(boundaries=bounds, ncolors=cmap.N)
-
-        fig.colorbar(matplotlib.cm.ScalarMappable(norm=norm,cmap=cmap), format='%.2f',
-             ax=ax, orientation='vertical', label='Current Density [MA/m2]')
-
 class TokaMaker_equilibrium():
     '''! TokaMaker G-S equilibrium class'''
     def __init__(self,TokaMaker_obj=None,source_eq=None,skip_targets=False,skip_constraints=False):
