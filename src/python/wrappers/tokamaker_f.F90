@@ -444,6 +444,7 @@ IF(TRIM(tmp_str)/='none')THEN
 END IF
 IF(f_offset>-1.d98)tMaker_equil_obj%I%f_offset=f_offset
 IF(f_sol)THEN
+  CALL oft_warn("Scrape-Off Layer support is experimental. Use with caution.")
   SELECT TYPE(this=>tMaker_equil_obj%I)
   TYPE IS(linterp_flux_func)
     ! Do nothing, this profile supports SOL current flag
