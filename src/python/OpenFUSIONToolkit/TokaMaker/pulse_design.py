@@ -674,6 +674,7 @@ class TokaMaker_TORAX:
         self._secondary_x_point_targets = None  # optional corner nulls; excluded from trim_lcfs
         self._strike_point_targets = None
         self._trim_lcfs = True
+        self._diverted_lcfs_shape = None        # optional user LCFS shape target for the diverted window
 
         self._eqdsk_skip = []
 
@@ -1529,9 +1530,11 @@ class TokaMaker_TORAX:
         if Ve_max is not None:
             self._Ve_max = Ve_max
 
-    def set_x_points(self, diverted_times=None, x_point_targets=None, x_point_weight=100.0, strike_point_targets=None,
-                     trim_lcfs=True, trim_lcfs_perc_limit=0.80, secondary_x_point_targets=None):
-        r'''! Configure diverted window, X-point targets, and optional strike points.
+    def set_diverted_shape_targets(self, diverted_times=None, x_point_targets=None, x_point_weight=100.0,
+                                   strike_point_targets=None, trim_lcfs=True, trim_lcfs_perc_limit=0.80,
+                                   secondary_x_point_targets=None, shape_target=None):
+        r'''! Configure the diverted window: X-point targets, strike points, and the optional
+                LCFS shape target.
 
                 @param diverted_times Tuple (t_start, t_end) defining the diverted plasma window.
                 @param x_point_targets PRIMARY (active) X-point target locations, shape (n_xpoints, 2)
@@ -1545,6 +1548,8 @@ class TokaMaker_TORAX:
                 @param trim_lcfs When True (default) and X-points are active, LCFS isoflux targets near
                                  the X-point(s) are removed. When False, all defined isoflux (LCFS) points
                                  are used together with the defined X-point(s).
+                @param trim_lcfs_perc_limit LCFS points above this fraction of max(|Z|) are trimmed near
+                                            the X-point(s) when `trim_lcfs` is True.
                 @param secondary_x_point_targets Optional SECONDARY X-point locations, shape (n_points, 2)
                                                  with [R, Z] pairs. These get saddle constraints like the
                                                  primaries, but are deliberately EXCLUDED from the
@@ -1552,6 +1557,14 @@ class TokaMaker_TORAX:
                                                  divertor corners, far off the plasma boundary, so they
                                                  must not change which LCFS isoflux points get trimmed
                                                  nor which single/double-null branch is taken.
+                @param shape_target Optional LCFS shape target, shape (n_points, 2) with [R, Z] pairs.
+                                    When given, it OVERRIDES the seed-gEQDSK LCFS isoflux (shape) targets
+                                    for timepoints inside the diverted window; timepoints outside the
+                                    window are unaffected and still use the seed shape. The isoflux
+                                    weights are unchanged (same `LCFS_WEIGHT` as the seed targets), and
+                                    X-point trimming plus any strike points still apply on top of the
+                                    overridden shape. None (default) keeps the back-compatible behavior
+                                    of pulling the shape from the seed gEQDSKs everywhere.
 
         '''
         if diverted_times is not None and len(diverted_times) != 2:
@@ -1567,6 +1580,39 @@ class TokaMaker_TORAX:
         self._strike_point_targets = None if strike_point_targets is None else np.atleast_2d(strike_point_targets)
         self._trim_lcfs = trim_lcfs
         self._trim_lcfs_perc_limit = trim_lcfs_perc_limit
+
+        # LCFS shape-target override (applied only inside the diverted window; see _run_tm).
+        if shape_target is None:
+            self._diverted_lcfs_shape = None
+        else:
+            shape = np.atleast_2d(np.asarray(shape_target, dtype=float))
+            if shape.ndim != 2 or shape.shape[1] != 2:
+                raise ValueError('shape_target must be an (n_points, 2) array of [R, Z] pairs.')
+            if shape.shape[0] < 3:
+                raise ValueError('shape_target needs at least 3 [R, Z] points to define an LCFS shape.')
+            self._diverted_lcfs_shape = shape
+            if self._diverted_times is None:
+                print(
+                    'set_diverted_shape_targets WARNING: shape_target was given but no diverted '
+                    'window is defined (diverted_times is None), so the shape override will never '
+                    'be applied.'
+                )
+
+
+    def set_x_points(self, *args, **kwargs):
+        r'''! Deprecated: use set_diverted_shape_targets() instead.
+
+                This name is retained only to emit a clear error; it no longer configures
+                anything. set_diverted_shape_targets() is a drop-in superset (same X-point,
+                strike-point, and trim arguments) plus the new `shape_target` override.
+        '''
+        raise NotImplementedError(
+            'set_x_points() has been replaced by set_diverted_shape_targets(). It accepts the '
+            'same arguments (diverted_times, x_point_targets, x_point_weight, strike_point_targets, '
+            'trim_lcfs, trim_lcfs_perc_limit, secondary_x_point_targets) plus an optional '
+            'shape_target for the diverted LCFS shape. Update your call to '
+            'set_diverted_shape_targets(...).'
+        )
 
 
     # ─── TORAX (TX) Methods ───────────────────────────────────────────────────
@@ -3211,6 +3257,15 @@ class TokaMaker_TORAX:
         
                 lcfs = self._state['lcfs_geo'][i]
 
+                # Optional user-prescribed diverted LCFS shape (set_diverted_shape_targets): inside
+                # the diverted window, override the seed-EQDSK shape targets with the user's
+                # shape. Weights are unchanged, and the X-point trim / strike points below
+                # still apply on top. Outside the window (or if unset), the seed shape stands.
+                if (self._diverted_lcfs_shape is not None
+                        and self._diverted_times is not None
+                        and self._diverted_times[0] <= t <= self._diverted_times[1]):
+                    lcfs = self._diverted_lcfs_shape.copy()
+
                 # Set saddle-point (X-point) constraints during diverted phase
                 use_x_points = (
                     self._x_point_targets is not None
@@ -4065,7 +4120,7 @@ class TokaMaker_TORAX:
             self._eqdsk_dir = tempfile.mkdtemp(prefix='TokaMaker_TORAX_equil_')
             self._eqdsk_dir_is_temp = True
 
-        # ── Diverted / saddle-point configuration (set via set_x_points) ──
+        # ── Diverted / saddle-point configuration (set via set_diverted_shape_targets) ──
         if self._diverted_times is not None and self._x_point_targets is not None:
             t_div_start, t_div_end = self._diverted_times
             n_diverted = int(np.sum([(t_div_start <= t <= t_div_end) for t in self._tm_times]))
@@ -4557,8 +4612,9 @@ class TokaMaker_TORAX:
             'adaptive_n_source_prefactor': self._ped_n_source_prefactor,
         }
 
-        # X-points / diverted window.
-        tmtx_dict['x_points'] = {
+        # Diverted window: X-points, strike points, trim, and optional LCFS shape override
+        # (shape_target=None => seed-EQDSK shape everywhere). Mirrors set_diverted_shape_targets.
+        tmtx_dict['diverted_shape_targets'] = {
             'diverted_times': (None if self._diverted_times is None
                                else tuple(float(t) for t in self._diverted_times)),
             'x_point_targets': (None if self._x_point_targets is None
@@ -4570,7 +4626,12 @@ class TokaMaker_TORAX:
                                      else np.asarray(self._strike_point_targets)),
             'trim_lcfs': bool(self._trim_lcfs),
             'trim_lcfs_perc_limit': float(getattr(self, '_trim_lcfs_perc_limit', 0.80)),
+            'shape_target': (None if self._diverted_lcfs_shape is None
+                             else np.asarray(self._diverted_lcfs_shape)),
         }
+        # Drop any stale keys carried over from an older stashed config.
+        tmtx_dict.pop('x_points', None)
+        tmtx_dict.pop('diverted_shape', None)
 
         # Evolve flags (None = use whatever the TORAX config carried).
         tmtx_dict['evolve'] = {
@@ -8496,8 +8557,15 @@ def _init_TMTX_from_configs(tmtx_config, torax_config, mygs):
     if 'pedestal' in tmtx_config:
         tmtx.set_pedestal(**tmtx_config['pedestal'])
 
-    if 'x_points' in tmtx_config:
-        tmtx.set_x_points(**tmtx_config['x_points'])
+    if 'diverted_shape_targets' in tmtx_config:
+        tmtx.set_diverted_shape_targets(**tmtx_config['diverted_shape_targets'])
+    elif 'x_points' in tmtx_config:
+        # Back-compat: older configs used a separate 'x_points' (and optional
+        # 'diverted_shape') block; fold both into set_diverted_shape_targets().
+        legacy = dict(tmtx_config['x_points'])
+        if 'diverted_shape' in tmtx_config:
+            legacy.update(tmtx_config['diverted_shape'])
+        tmtx.set_diverted_shape_targets(**legacy)
 
     if 'coil_reg' in tmtx_config:
         tmtx.set_TokaMaker_coil_reg(**tmtx_config['coil_reg'])
