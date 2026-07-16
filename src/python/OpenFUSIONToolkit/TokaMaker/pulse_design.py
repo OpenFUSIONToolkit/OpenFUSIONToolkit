@@ -995,28 +995,65 @@ class TokaMaker_TORAX:
             out[cname] = [lo / n, hi / n]
         return out
 
+    def _aperturn_bounds_to_aturn(self, coil_bounds_aperturn):
+        r'''! Convert a {coil: [lo, hi]} bounds dict from A/turn to total A-turns.
+
+                Inverse of _aturn_bounds_to_aperturn: I[A-turns] = I[A/turn] * net_turns.
+                Lets a user specify coil bounds in the per-winding current TokaMaker uses
+                natively; they are stored internally in A-turns (the single source of truth).
+        '''
+        out = {}
+        for cname, (lo, hi) in coil_bounds_aperturn.items():
+            n = self._coil_net_turns(cname)
+            out[cname] = [lo * n, hi * n]
+        return out
+
+    @staticmethod
+    def _normalize_coil_bounds_units(units):
+        r'''! Validate/normalize a coil-bounds units string to 'A-turns' or 'A/turn'.
+
+                Accepts common spellings (case/spacing insensitive, optional 'M' magnitude
+                prefix): 'A-turns', 'Aturns', 'MA-turns', ... map to 'A-turns' (total winding
+                current); 'A/turn', 'A-per-turn', 'MA/turn', ... map to 'A/turn' (per-winding
+                current, TokaMaker's native unit). The 'M' prefix is cosmetic — values are
+                always plain Amps; only the total vs per-turn distinction changes the math.
+        '''
+        key = str(units).strip().lower().replace(' ', '').replace('_', '')
+        if key.startswith('m'):            # strip cosmetic MA-/M magnitude prefix
+            key = key[1:]
+        if key in ('a-turns', 'aturns', 'aturn', 'a-turn', 'total'):
+            return 'A-turns'
+        if key in ('a/turn', 'a/turns', 'aperturn', 'a-per-turn', 'perturn', 'a-perturn'):
+            return 'A/turn'
+        raise ValueError(f"coil bounds units must be 'A-turns' or 'A/turn' (got {units!r}).")
+
     def _push_coil_bounds(self, coil_bounds_aturn):
         r'''! Store bounds (A-turns, single source of truth) and apply to TokaMaker (A/turn).'''
         self._coil_bounds = copy.deepcopy(coil_bounds_aturn)
         self._tm.set_coil_bounds(self._aturn_bounds_to_aperturn(coil_bounds_aturn))
 
-    def set_TokaMaker_coil_reg(self, coil_bounds=None, updownsym=False,
-                     default_weight=1.0E-1, disable_coils=None,
+    def set_TokaMaker_coil_reg(self, coil_bounds=None, coil_bounds_units='A-turns',
+                     updownsym=False, default_weight=1.0E-1, disable_coils=None,
                      disable_weight=1.0E4, symmetry_weight=1.0E3,
                      disable_virtual_vsc=True, vsc_weight=1.0E4):
         r'''! Set coil regularization using the dict-based TokaMaker reg_terms API.
 
-                Coil bounds are hard current limits in total Amp-turns (A-turns) — the public
-                TokaMaker_TORAX unit for everything coil-current related. Internally the bound
-                is converted to the per-winding current TokaMaker expects (A/turn) using the
-                mesh turn count: I[A/turn] = I[A-turns] / n_turns.
+                Coil bounds are hard current limits. By default they are given in total
+                Amp-turns (A-turns) — the public TokaMaker_TORAX unit for everything
+                coil-current related. Set coil_bounds_units='A/turn' to instead supply the
+                per-winding current TokaMaker uses natively; such inputs are multiplied by the
+                mesh turn count and stored internally in A-turns (I[A-turns] = I[A/turn] *
+                n_turns), so all downstream state, plots, and rate limits stay in A-turns.
+                Whatever the input unit, the bound pushed to TokaMaker is A/turn.
 
                 During the pulse, coil current targets are set automatically: the initial
                 equilibrium currents seed i=0, and each subsequent timestep uses the previous
                 timestep's solved currents as loose targets.
 
-                @param coil_bounds Dict of {coil_name: [min, max]} hard current bounds [A-turns].
-                       Default ±45 MA-turns for every coil.
+                @param coil_bounds Dict of {coil_name: [min, max]} hard current bounds, in the
+                       unit given by coil_bounds_units. Default ±45 MA-turns for every coil.
+                @param coil_bounds_units Unit of coil_bounds: 'A-turns' (default, total winding
+                       current) or 'A/turn' (per-winding current, TokaMaker's native unit).
                 @param updownsym Enforce up-down symmetry for coil pairs (U/L naming convention).
                 @param default_weight Regularization weight for normal coils (default 0.1).
                 @param disable_coils List of coil name prefixes to disable (e.g. ['DV1', 'DV2']).
@@ -1026,8 +1063,12 @@ class TokaMaker_TORAX:
                 @param vsc_weight Regularization weight for disabled VSC (default 1e4).
 
         '''
+        units = self._normalize_coil_bounds_units(coil_bounds_units)
         if coil_bounds is None:
+            # Default is defined in A-turns regardless of the requested input unit.
             coil_bounds = {key: [-45.0E6, 45.0E6] for key in self._tm.coil_sets}
+        elif units == 'A/turn':
+            coil_bounds = self._aperturn_bounds_to_aturn(coil_bounds)   # -> A-turns (stored unit)
         self._push_coil_bounds(coil_bounds)   # A-turns in, A/turn pushed to TM
 
         if disable_coils is None:
@@ -8286,13 +8327,20 @@ def _init_TM_object(tmtx_config):
     vsc = tm_inputs.get('vsc', None)
     if vsc is not None:
         mygs.set_coil_vsc({f"{vsc}U": 1.0, f"{vsc}L": -1.0})
-    # tm_inputs['coil_bounds'] is [min, max] in total A-turns (public unit); convert to the
-    # per-winding current [A/turn] TokaMaker expects: I[A/turn] = I[A-turns] / n_turns.
-    _lo_at, _hi_at = tm_inputs['coil_bounds']
+    # tm_inputs['coil_bounds'] is [min, max]; default unit is total A-turns (public unit),
+    # converted to the per-winding current [A/turn] TokaMaker expects (I[A/turn] =
+    # I[A-turns] / n_turns). Set tm_inputs['coil_bounds_units']='A/turn' to instead pass the
+    # per-winding current straight through (applied identically to every coil, no turn scaling).
+    _lo, _hi = tm_inputs['coil_bounds']
+    _bounds_units = TokaMaker_TORAX._normalize_coil_bounds_units(
+        tm_inputs.get('coil_bounds_units', 'A-turns'))
     coil_bounds = {}
     for key in mygs.coil_sets:
-        nt = mygs.coil_sets[key].get('net_turns', 1.0)
-        coil_bounds[key] = [_lo_at / nt, _hi_at / nt]
+        nt = mygs.coil_sets[key].get('net_turns', 1.0) or 1.0
+        if _bounds_units == 'A/turn':
+            coil_bounds[key] = [_lo, _hi]                # already per-winding current
+        else:
+            coil_bounds[key] = [_lo / nt, _hi / nt]      # A-turns -> A/turn
     mygs.set_coil_bounds(coil_bounds)
 
     ffp_prof = create_power_flux_fun(40, 1.5, 2.0)
