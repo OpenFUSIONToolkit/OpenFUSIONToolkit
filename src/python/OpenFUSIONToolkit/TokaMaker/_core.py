@@ -2210,7 +2210,7 @@ class TokaMaker():
             prev_psi = psi
         return strike_pts
 
-    def plot_current_density(self, fig, ax, window=None):
+    def plot_current_density(self, fig, ax, window=None, cmap='spring'):
         '''! Plot current density
 
         @param fig Figure (matplotlib)
@@ -2226,7 +2226,6 @@ class TokaMaker():
             if self.reg[i] not in [1, 3]:
                 jphi_plot[i] = 0
                 continue # Ignore all regions except plasma and vacuum
-            # if window is not None:
             idx1, _, _ = self.lc[i]
             rz1 = self.r[idx1][:2]
             if window is not None and (rz1[0] < window[0] or rz1[0] > window[1] or rz1[1] < window[2] or rz1[1] > window[3]):
@@ -2238,7 +2237,7 @@ class TokaMaker():
         jphi_plot /= 1.0E6
 
         triangulation = tri.Triangulation(self.r[:,0], self.r[:,1], self.lc)
-        ax.tripcolor(triangulation, jphi_plot, cmap="spring", shading="flat")
+        ax.tripcolor(triangulation, jphi_plot, cmap=cmap, shading="flat")
         
 class TokaMaker_equilibrium():
     '''! TokaMaker G-S equilibrium class'''
