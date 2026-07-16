@@ -396,6 +396,11 @@ class TokaMaker_TORAX:
         # ── TokaMaker equilibrium objects and strike points {i: ...} ────────────
         self._state['equil']      = {}  # {i: TokaMaker equilibrium object}
         self._state['strike_pts'] = {}  # {i: (N,2) [R,Z] strike points, or empty}
+        # The constraint points actually handed to TokaMaker for each solve (post-trim, with
+        # strike points folded in). Recorded so diagnostics plot the targets the solve really
+        # used, identically whether or not it converged, rather than re-deriving them.
+        self._state['isoflux_targets'] = {}  # {i: (N,2) LCFS shape targets as set}
+        self._state['saddle_targets']  = {}  # {i: (N,2) X-point targets as set, or empty}
         self._state['lcfs_geo_tm']= {}  # {i: (N,2) LCFS contour traced from TM solve}
         self._state['x_pts_tm']   = {}  # {i: (n_xpts,2) X-point locations from TM solve, or None}
 
@@ -672,9 +677,16 @@ class TokaMaker_TORAX:
         self._x_point_targets = None            # primary (active) nulls
         self._x_point_weight = 1000.0
         self._secondary_x_point_targets = None  # optional corner nulls; excluded from trim_lcfs
+        self._secondary_x_point_weight = None   # None -> falls back to _x_point_weight
         self._strike_point_targets = None
+        self._strike_point_weight = None        # None -> falls back to _isoflux_weight
         self._trim_lcfs = True
         self._diverted_lcfs_shape = None        # optional user LCFS shape target for the diverted window
+
+        # GS constraint weights applied at EVERY timepoint (limited and diverted alike);
+        # set via set_TokaMaker_constraint_weights() / the tm_inputs config keys.
+        self._isoflux_weight = LCFS_WEIGHT
+        self._psi_lcfs_weight = PSI_LCFS_WEIGHT
 
         self._eqdsk_skip = []
 
@@ -685,6 +697,9 @@ class TokaMaker_TORAX:
         self._out_dir = None
         self._eqdsk_dir = None
         self._eqdsk_dir_is_temp = False
+        # {(loop, i): diverted?} for each gEQDSK written; a gEQDSK carries no topology flag,
+        # so this is what lets a later loop report the topology of the file it reads back.
+        self._eqdsk_topology = {}
         self._save_outputs = False
         self._debug_mode = False
         self._output_mode = False
@@ -1031,18 +1046,6 @@ class TokaMaker_TORAX:
         lo, hi = float(bounds[0]), float(bounds[1])
         return {key: [lo, hi] for key in self._tm.coil_sets}
 
-    def _inherited_global_bounds(self):
-        r'''! (lo, hi) clip [A-turns] inherited from the configured hard coil bounds.
-
-                The rate-limit clip is not a separate input: it is the single global coil
-                bounds set by set_TokaMaker_coil_reg() / tm_inputs['coil_bounds']. Falls back
-                to +/-45 MA-turns if bounds were never configured.
-        '''
-        cb = getattr(self, '_coil_bounds', None)
-        if not cb:
-            return (-45.0E6, 45.0E6)
-        return (min(v[0] for v in cb.values()), max(v[1] for v in cb.values()))
-
     @staticmethod
     def _normalize_coil_bounds_units(units):
         r'''! Validate/normalize a coil-bounds units string to 'A-turns' or 'A/turn'.
@@ -1062,8 +1065,54 @@ class TokaMaker_TORAX:
             return 'A/turn'
         raise ValueError(f"coil bounds units must be 'A-turns' or 'A/turn' (got {units!r}).")
 
+    @staticmethod
+    def _normalize_coil_rate_units(units):
+        r'''! Validate/normalize a dI/dt units string to 'A-turns/s' or 'A/turn/s'.
+
+                Accepts the same spellings as _normalize_coil_bounds_units plus an optional
+                per-second suffix ('/s', '/sec', 'ps', ...): 'A-turns/s' is the total winding
+                rate; 'A/turn/s' is the per-winding rate, which is multiplied by each coil's
+                turn count and so gives a different A-turns/s budget per coil.
+        '''
+        key = str(units).strip().lower().replace(' ', '').replace('_', '')
+        for suffix in ('/sec', '/s', 'persecond', 'persec', 'ps'):
+            if key.endswith(suffix):
+                key = key[:-len(suffix)]
+                break
+        try:
+            return TokaMaker_TORAX._normalize_coil_bounds_units(key) + '/s'
+        except ValueError:
+            raise ValueError(f"coil dI/dt units must be 'A-turns/s' or 'A/turn/s' "
+                             f"(got {units!r}).") from None
+
+    def set_TokaMaker_constraint_weights(self, isoflux_weight=LCFS_WEIGHT,
+                                         psi_lcfs_weight=PSI_LCFS_WEIGHT):
+        r'''! Set the GS constraint weights applied at EVERY timepoint of the coupled solve.
+
+                These two constraints exist for both limited and diverted plasmas, so they are
+                configured here rather than on set_diverted_shape_targets(), which owns the
+                weights of the diverted-only constraints (primary/secondary X-points and
+                strike points).
+
+                From a config, set these via the tm_inputs keys of the same name rather than
+                calling this method directly (see run_tmtx_from_config).
+
+                @param isoflux_weight Weight on the LCFS shape (isoflux) targets — the seed-gEQDSK
+                       boundary, or the set_diverted_shape_targets() shape_target override while
+                       diverted. Also the fallback weight for strike points. Default 100.0.
+                @param psi_lcfs_weight Weight on the LCFS psi-value constraint, applied at the
+                       single outboard-midplane point using the TORAX psi_lcfs. Default 1000.0.
+        '''
+        self._isoflux_weight = float(isoflux_weight)
+        self._psi_lcfs_weight = float(psi_lcfs_weight)
+
     def _push_coil_bounds(self, coil_bounds_aturn):
-        r'''! Store bounds (A-turns, single source of truth) and apply to TokaMaker (A/turn).'''
+        r'''! Store the currently active bounds (A-turns) and apply them to TokaMaker (A/turn).
+
+                These are the bounds in force for the next solve, which the rate limiter
+                tightens per step. The configured hard limit they are derived from lives in
+                self._coil_bounds_global and is never overwritten here.
+        '''
         self._coil_bounds = copy.deepcopy(coil_bounds_aturn)
         self._tm.set_coil_bounds(self._aturn_bounds_to_aperturn(coil_bounds_aturn))
 
@@ -1073,9 +1122,9 @@ class TokaMaker_TORAX:
                      disable_virtual_vsc=True, vsc_weight=1.0E4):
         r'''! Set coil regularization using the dict-based TokaMaker reg_terms API.
 
-                Coil bounds are the single global hard current limit: the same bounds are
-                used for seed-eqdsk generation, the coupled GS solves, and as the clip for
-                set_coil_rate_limits(). By default they are given in total Amp-turns
+                Coil bounds are the one definition of the hard current limit: the same bounds
+                are used for seed-eqdsk generation, the coupled GS solves, and as the per-coil
+                clip for set_coil_rate_limits(). By default they are given in total Amp-turns
                 (A-turns) — the public TokaMaker_TORAX unit for everything coil-current
                 related. Set coil_bounds_units='A/turn' to instead supply the per-winding
                 current TokaMaker uses natively; such inputs are multiplied by the mesh turn
@@ -1113,6 +1162,9 @@ class TokaMaker_TORAX:
             coil_bounds = self._normalize_coil_bounds_dict(coil_bounds)   # pair or dict -> dict
             if units == 'A/turn':
                 coil_bounds = self._aperturn_bounds_to_aturn(coil_bounds)   # -> A-turns (stored unit)
+        # The configured hard limit: the one definition of the global bounds, per coil. Kept
+        # separate from _coil_bounds because the rate limiter overwrites that every step.
+        self._coil_bounds_global = copy.deepcopy(coil_bounds)
         self._push_coil_bounds(coil_bounds)   # A-turns in, A/turn pushed to TM
 
         if disable_coils is None:
@@ -1193,8 +1245,8 @@ class TokaMaker_TORAX:
         # scalar -> all coils
         return {c: float(arg) for c in coils}
 
-    def set_coil_rate_limits(self, dIdt=None, V=None, R=None,
-                             global_bounds=None, dt_floor=0.5):
+    def set_coil_rate_limits(self, dIdt=None, dIdt_units='A-turns/s', V=None, R=None,
+                             dt_floor=0.5):
         r'''! Constrain how fast each coil current may change between TokaMaker solves.
 
                 Before each GS solve the coil's hard bounds are tightened to a window around
@@ -1203,12 +1255,13 @@ class TokaMaker_TORAX:
                     bound = I_prev_good ± (dIdt * max(dt, dt_floor)),
                     dt = t[i] - t[last good solve]
 
-                then clipped to the global bounds. This caps the realized dI/dt of every coil
-                so the pulse stays within power-supply / engineering limits.
+                then clipped to that coil's global bounds. This caps the realized dI/dt of
+                every coil so the pulse stays within power-supply / engineering limits.
 
-                The global clip is NOT a separate limit: by default it is inherited from the
-                single global coil bounds already configured by set_TokaMaker_coil_reg() /
-                tm_inputs['coil_bounds'], so the hard limit is only ever specified once.
+                The clip is NOT a separate limit and cannot be set here: each coil is clipped
+                to its own entry in the coil_bounds configured by set_TokaMaker_coil_reg() /
+                tm_inputs['coil_bounds'], so the hard limit is defined exactly once and
+                per-coil bounds are preserved.
 
                 dt_floor avoids an unenforceably narrow bound box when two solves are very
                 close in time: at tiny dt the box [I_ref ± dIdt*dt] becomes so small that
@@ -1217,26 +1270,29 @@ class TokaMaker_TORAX:
                 is that across a sub-floor gap the realized rate may exceed the nominal limit
                 by up to dt_floor/dt. Set dt_floor=0 to disable.
 
-                Units are total Amp-turns (A-turns) and A-turns/s, matching the rest of the
+                Rates are stored internally in total A-turns/s, matching the rest of the
                 TokaMaker_TORAX coil API. For each coil supply EITHER a dI/dt limit OR a
                 voltage limit (with a resistance) — never both for the same coil.
 
-                  - dI/dt path: dIdt [A-turns/s].
+                  - dI/dt path: dIdt, in the unit given by dIdt_units. Set
+                    dIdt_units='A/turn/s' to give the per-winding rate instead; it is
+                    multiplied by each coil's turn count (dIdt[A-turns/s] =
+                    dIdt[A/turn/s] * n_turns), so even a single scalar then yields a
+                    different A-turns/s budget for every coil, which is expected.
                   - Voltage path: V [Volts] and R [Ohms] for that coil. The per-winding
                     current rate is V/R [A/turn/s]; multiplied by n_turns this gives the
-                    A-turns/s rate: dIdt = (V / R) * n_turns.
+                    A-turns/s rate: dIdt = (V / R) * n_turns. dIdt_units does not apply
+                    here — this path is always per-winding by construction.
 
                 Each of dIdt, V, R may be a single scalar (applied to all coils) or a
                 {coil_name: value} dict (per coil). Coils not given any limit keep the
                 global bounds (unconstrained rate). The virtual VSC coil is not rate limited.
 
-                @param dIdt Max |dI/dt| per coil [A-turns/s]; scalar or {coil: value}.
+                @param dIdt Max |dI/dt| per coil in dIdt_units; scalar or {coil: value}.
+                @param dIdt_units Unit of dIdt: 'A-turns/s' (default, total winding rate) or
+                       'A/turn/s' (per-winding rate). Does not affect the V/R path.
                 @param V Max coil voltage [V]; scalar or {coil: value}. Requires matching R.
                 @param R Coil resistance [Ohms]; scalar or {coil: value}. Used with V.
-                @param global_bounds Advanced override for the (min, max) hard clip applied to
-                       every rate-limited bound [A-turns]. Default None = inherit the single
-                       global coil bounds (set_TokaMaker_coil_reg / tm_inputs['coil_bounds']),
-                       which is what configs use; ±45 MA-turns if bounds were never set.
                 @param dt_floor Minimum dt [s] used in the budget so close-spaced solves get
                        an enforceable bound box. Default 0.5 s; set 0 to disable.
         '''
@@ -1255,6 +1311,9 @@ class TokaMaker_TORAX:
 
         # Unified per-coil rate budget in A-turns/s.
         coil_dIdt = dict(dIdt_map)
+        if self._normalize_coil_rate_units(dIdt_units) == 'A/turn/s':
+            coil_dIdt = {c: v * self._coil_net_turns(c) for c, v in coil_dIdt.items()}
+        # The V/R path is per-winding by construction, so it converts regardless of dIdt_units.
         for c, v in V_map.items():
             r = R_map[c]
             if r <= 0.0:
@@ -1263,25 +1322,28 @@ class TokaMaker_TORAX:
             coil_dIdt[c] = (v / r) * self._coil_net_turns(c)   # A-turns/s
 
         self._coil_dIdt = coil_dIdt
-        # None -> inherit the single global coil bounds (no separate hard-limit input).
-        if global_bounds is None:
-            global_bounds = self._inherited_global_bounds()
-        self._coil_rate_global = (float(global_bounds[0]), float(global_bounds[1]))
         self._coil_rate_dt_floor = max(0.0, float(dt_floor))
         self._rate_limit_active = bool(coil_dIdt)
 
         # Resolved settings, for debugging/introspection (save_tmtx_config() reproduces the
         # rate limits from the stashed tm_inputs coil_* keys, not from this).
         self._coil_rate_limit_config = {
-            'dIdt': dIdt, 'V': V, 'R': R,
-            'global_bounds': list(self._coil_rate_global),
+            'dIdt': dIdt, 'dIdt_units': dIdt_units, 'V': V, 'R': R,
             'dt_floor': self._coil_rate_dt_floor,
         }
 
     def _global_bounds_dict(self):
-        r'''! Per-coil global bounds dict [A-turns] from the rate-limit global clip.'''
-        lo, hi = getattr(self, '_coil_rate_global', (-45.0E6, 45.0E6))
-        return {c: [lo, hi] for c in self._tm.coil_sets}
+        r'''! The configured per-coil hard bounds [A-turns], as set by set_TokaMaker_coil_reg().
+
+                Read fresh on each use rather than snapshotted, so it does not matter whether
+                the bounds or the rate limits were configured first. Coils absent from the
+                configured dict are absent here too, leaving them unbounded in TokaMaker.
+                Falls back to +/-45 MA-turns for every coil if bounds were never configured.
+        '''
+        cb = getattr(self, '_coil_bounds_global', None)
+        if not cb:
+            return {c: [-45.0E6, 45.0E6] for c in self._tm.coil_sets}
+        return copy.deepcopy(cb)
 
     def _apply_rate_limited_bounds(self, i, t):
         r'''! Tighten coil bounds around the last good solved currents for this solve.
@@ -1300,20 +1362,24 @@ class TokaMaker_TORAX:
         if last is None or self._last_good_t is None:
             return
 
-        lo_g, hi_g = self._coil_rate_global
+        global_bounds = self._global_bounds_dict()
         dt = float(t) - float(self._last_good_t)
         # Floor dt so close-spaced solves still get an enforceable (non-degenerate) box.
         dt_eff = max(dt, getattr(self, '_coil_rate_dt_floor', 0.0))
         bounds = {}
         for c in self._tm.coil_sets:
-            if c in self._coil_dIdt and c in last:
+            rate_limited = c in self._coil_dIdt and c in last
+            if c not in global_bounds and not rate_limited:
+                continue    # no hard bound and no rate limit: leave the coil unconstrained
+            lo_g, hi_g = global_bounds.get(c, (-np.inf, np.inf))
+            if rate_limited:
                 dI = abs(self._coil_dIdt[c]) * dt_eff
                 I_ref = last[c]
                 lo = max(lo_g, I_ref - dI)
                 hi = min(hi_g, I_ref + dI)
             else:
                 lo, hi = lo_g, hi_g
-            bounds[c] = [lo, hi]
+            bounds[c] = [float(lo), float(hi)]
 
         self._coil_bounds_history[i] = copy.deepcopy(bounds)
         # Record the rate-limit reference for the post-solve audit. Keep both the actual dt
@@ -1625,19 +1691,22 @@ class TokaMaker_TORAX:
         if Ve_max is not None:
             self._Ve_max = Ve_max
 
-    def set_diverted_shape_targets(self, diverted_times=None, x_point_targets=None, x_point_weight=100.0,
+    def set_diverted_shape_targets(self, diverted_times=None, x_point_targets=None, x_point_weight=1000.0,
                                    strike_point_targets=None, trim_lcfs=True, trim_lcfs_perc_limit=0.80,
-                                   secondary_x_point_targets=None, shape_target=None):
+                                   secondary_x_point_targets=None, shape_target=None,
+                                   secondary_x_point_weight=None, strike_point_weight=None):
         r'''! Configure the diverted window: X-point targets, strike points, and the optional
-                LCFS shape target.
+                LCFS shape target — plus the weights of the constraints that only exist while
+                diverted. The always-on weights (LCFS shape isoflux and the outboard-midplane
+                psi value) are set separately by set_TokaMaker_constraint_weights().
 
                 @param diverted_times Tuple (t_start, t_end) defining the diverted plasma window.
                 @param x_point_targets PRIMARY (active) X-point target locations, shape (n_xpoints, 2)
                                        with [R, Z] pairs. These are the nulls that sit on the plasma
                                        boundary and define the topology (1 = single null, 2 = double
                                        null); only these drive the `trim_lcfs` geometry below.
-                @param x_point_weight Weight for saddle-point constraints (applied to primary and
-                                      secondary targets alike).
+                @param x_point_weight Weight for the PRIMARY saddle-point (X-point) constraints.
+                                      Default 1000.0.
                 @param strike_point_targets Strike point locations, shape (n_points, 2) with [R, Z] pairs,
                                             or None to disable.
                 @param trim_lcfs When True (default) and X-points are active, LCFS isoflux targets near
@@ -1656,10 +1725,19 @@ class TokaMaker_TORAX:
                                     When given, it OVERRIDES the seed-gEQDSK LCFS isoflux (shape) targets
                                     for timepoints inside the diverted window; timepoints outside the
                                     window are unaffected and still use the seed shape. The isoflux
-                                    weights are unchanged (same `LCFS_WEIGHT` as the seed targets), and
-                                    X-point trimming plus any strike points still apply on top of the
+                                    weights are unchanged (the same isoflux_weight as the seed targets),
+                                    and X-point trimming plus any strike points still apply on top of the
                                     overridden shape. None (default) keeps the back-compatible behavior
                                     of pulling the shape from the seed gEQDSKs everywhere.
+                @param secondary_x_point_weight Weight for the SECONDARY saddle-point constraints.
+                                                None (default) reuses x_point_weight, matching the
+                                                previous single-weight behavior; set it to weight the
+                                                far-corner nulls independently of the primaries.
+                @param strike_point_weight Weight for the strike-point isoflux constraints. None
+                                           (default) reuses the isoflux_weight applied to the LCFS
+                                           shape targets, matching the previous behavior (strike
+                                           points are appended to the shape targets); set it to pull
+                                           on the strike points independently of the shape.
 
         '''
         if diverted_times is not None and len(diverted_times) != 2:
@@ -1672,7 +1750,11 @@ class TokaMaker_TORAX:
                                            else np.atleast_2d(secondary_x_point_targets))
         if self._secondary_x_point_targets is not None and self._x_point_targets is None:
             raise ValueError('secondary_x_point_targets requires x_point_targets (the primary nulls).')
+        self._secondary_x_point_weight = (None if secondary_x_point_weight is None
+                                          else float(secondary_x_point_weight))
         self._strike_point_targets = None if strike_point_targets is None else np.atleast_2d(strike_point_targets)
+        self._strike_point_weight = (None if strike_point_weight is None
+                                     else float(strike_point_weight))
         self._trim_lcfs = trim_lcfs
         self._trim_lcfs_perc_limit = trim_lcfs_perc_limit
 
@@ -3367,6 +3449,7 @@ class TokaMaker_TORAX:
                     and self._diverted_times is not None
                     and self._diverted_times[0] <= t <= self._diverted_times[1]
                 )
+                self._state['saddle_targets'][i] = np.empty((0, 2))
                 if use_x_points:
                     # Saddle constraints are applied to the primary nulls plus any secondary
                     # (divertor-corner) nulls. The trim below deliberately sees ONLY the
@@ -3376,11 +3459,20 @@ class TokaMaker_TORAX:
                     # the LCFS.
                     if self._secondary_x_point_targets is None:
                         saddle_targets = self._x_point_targets
+                        saddle_weights = self._x_point_weight * np.ones(saddle_targets.shape[0])
                     else:
                         saddle_targets = np.vstack([self._x_point_targets,
                                                     self._secondary_x_point_targets])
-                    saddle_weights = self._x_point_weight * np.ones(saddle_targets.shape[0])
+                        # Secondaries get their own weight when set, else the primary weight
+                        # (the previous single-weight behavior).
+                        sec_weight = (self._x_point_weight if self._secondary_x_point_weight is None
+                                      else self._secondary_x_point_weight)
+                        saddle_weights = np.concatenate([
+                            self._x_point_weight * np.ones(self._x_point_targets.shape[0]),
+                            sec_weight * np.ones(self._secondary_x_point_targets.shape[0]),
+                        ])
                     self._tm.set_saddle_constraints(saddle_targets, saddle_weights)
+                    self._state['saddle_targets'][i] = np.asarray(saddle_targets).copy()
 
                     # trims lcfs targets near X-point(s) -- primary nulls only
                     if self._trim_lcfs:
@@ -3394,18 +3486,29 @@ class TokaMaker_TORAX:
                         elif np.shape(self._x_point_targets)[0] == 2: # double null
                             lcfs = lcfs[np.abs(lcfs[:, 1]) <= Z_lim]
 
-                # When diverted, add manually specified strike points to isoflux targets
+                # When diverted, add manually specified strike points to isoflux targets.
+                # n_shape marks where the LCFS shape targets end and the strike points begin,
+                # so the two groups can carry different isoflux weights below.
+                n_shape = len(lcfs)
                 if use_x_points and self._strike_point_targets is not None:
                     self._state['strike_pts'][i] = self._strike_point_targets
                     lcfs = np.vstack([lcfs, self._strike_point_targets])
                 else:
                     self._state['strike_pts'][i] = np.empty((0, 2))
 
-                isoflux_weights = LCFS_WEIGHT * np.ones(len(lcfs))
+                # Strike points take their own weight when set, else the shape weight (the
+                # previous behavior, where they inherited it by being appended to the shape).
+                strike_weight = (self._isoflux_weight if self._strike_point_weight is None
+                                 else self._strike_point_weight)
+                isoflux_weights = np.concatenate([
+                    self._isoflux_weight * np.ones(n_shape),
+                    strike_weight * np.ones(len(lcfs) - n_shape),
+                ])
                 lcfs_psi_target = self._state['psi_lcfs_tx'][i] # _state in Wb/rad, TM uses Wb/rad (AKA Wb-rad)
 
                 # set_isoflux on all LCFS points for lcfs shape targets
                 self._tm.set_isoflux_constraints(lcfs, isoflux_weights) # shape targets
+                self._state['isoflux_targets'][i] = np.asarray(lcfs).copy()
 
                 # Pick outboard midplane point (largest R at approx Z = Z_axis)
                 z_axis = self._state['Z'][i]
@@ -3413,7 +3516,7 @@ class TokaMaker_TORAX:
                 omp_point = lcfs[omp_idx:omp_idx+1, :]  # shape (1, 2)
                 # Set lcfs psi value target (from TORAX) only at midplane outboard side of lcfs.
                 self._tm.set_psi_constraints(omp_point, targets=np.array([lcfs_psi_target]),
-                                             weights=np.array([PSI_LCFS_WEIGHT])) # psi value target
+                                             weights=np.array([self._psi_lcfs_weight])) # psi value target
         
         
                 self._tm.update_settings()
@@ -3592,6 +3695,17 @@ class TokaMaker_TORAX:
 
                 tm_gs_ok = solve_succeeded
                 if solve_succeeded:
+                    # Topology is not recorded in a gEQDSK, so key it to the file being written
+                    # here: it is the only way a later loop can report whether the EQDSK it is
+                    # reading back was diverted or limited. Keyed by (loop, i) rather than i
+                    # alone so a stale value from an earlier loop can never be mistaken for
+                    # this file's. Recorded before the TORAX check, so it also covers an EQDSK
+                    # that gets written and then rejected.
+                    try:
+                        self._eqdsk_topology[(self._current_loop, i)] = \
+                            bool(self._state['equil'][i].diverted)
+                    except Exception as _te:
+                        self._log(f'\tTM: could not record topology at i={i}: {_te}')
                     torax_accepted = False
                     _eqdsk_save_err = None   # last error string if save_eqdsk raised
                     _n_attempts = len(EQDSK_SAVE_NR_NZ_SEQUENCE)
@@ -4717,8 +4831,12 @@ class TokaMaker_TORAX:
             'x_point_weight': float(self._x_point_weight),
             'secondary_x_point_targets': (None if self._secondary_x_point_targets is None
                                           else np.asarray(self._secondary_x_point_targets)),
+            'secondary_x_point_weight': (None if self._secondary_x_point_weight is None
+                                         else float(self._secondary_x_point_weight)),
             'strike_point_targets': (None if self._strike_point_targets is None
                                      else np.asarray(self._strike_point_targets)),
+            'strike_point_weight': (None if self._strike_point_weight is None
+                                    else float(self._strike_point_weight)),
             'trim_lcfs': bool(self._trim_lcfs),
             'trim_lcfs_perc_limit': float(getattr(self, '_trim_lcfs_perc_limit', 0.80)),
             'shape_target': (None if self._diverted_lcfs_shape is None
@@ -4727,6 +4845,15 @@ class TokaMaker_TORAX:
         # Drop any stale keys carried over from an older stashed config.
         tmtx_dict.pop('x_points', None)
         tmtx_dict.pop('diverted_shape', None)
+
+        # Always-on GS constraint weights live in tm_inputs (alongside the coil settings).
+        # Re-emit from state so a value set via set_TokaMaker_constraint_weights() is
+        # captured, not just whatever the original config happened to carry. Only touched
+        # when tm_inputs already exists (a config-built object); a directly-built object
+        # has no mesh_file etc. and cannot produce a replayable tm_inputs anyway.
+        if isinstance(tmtx_dict.get('tm_inputs'), dict):
+            tmtx_dict['tm_inputs']['isoflux_weight'] = float(self._isoflux_weight)
+            tmtx_dict['tm_inputs']['psi_lcfs_weight'] = float(self._psi_lcfs_weight)
 
         # Evolve flags (None = use whatever the TORAX config carried).
         tmtx_dict['evolve'] = {
@@ -5782,9 +5909,238 @@ def _eval_ibc_at_time(spec, t):
 
 # ── TokaMaker diagnostic plot ─────────────────────────────────────────────────
 
+def _eqdsk_shape_stats(rz):
+    r'''! Geometric shape parameters (R_geo, a_geo, kappa, delta) from an LCFS contour [:,2].
+
+        Uses the LCFS-extrema convention, matching TokaMaker `get_stats(geom_type='max')`, so
+        values derived here for an EQDSK are comparable to TokaMaker's own. Returns an empty
+        dict for a contour that is missing or degenerate.
+    '''
+    if rz is None:
+        return {}
+    rz = np.asarray(rz, dtype=float)
+    if rz.ndim != 2 or rz.shape[0] < 3:
+        return {}
+    rmin, rmax = float(np.min(rz[:, 0])), float(np.max(rz[:, 0]))
+    zmin, zmax = float(np.min(rz[:, 1])), float(np.max(rz[:, 1]))
+    a_geo = (rmax - rmin) / 2.0
+    if a_geo <= 0.0:
+        return {}
+    R_geo = (rmax + rmin) / 2.0
+    r_at_zmax = float(rz[np.argmax(rz[:, 1]), 0])
+    r_at_zmin = float(rz[np.argmin(rz[:, 1]), 0])
+    return {
+        'R_geo': R_geo,
+        'a_geo': a_geo,
+        'kappa': (zmax - zmin) / (2.0 * a_geo),
+        'delta': (R_geo - (r_at_zmax + r_at_zmin) / 2.0) / a_geo,
+    }
+
+
+def _last_solve_eqdsk_stats(tt, i):
+    r'''! Scalars read back from the gEQDSK the previous loop's TM solve wrote at timestep i.
+
+        That file is the geometry TORAX consumed for the current loop, so it is the "last solve"
+        reference the diagnostic table compares against. Returns an empty dict on loop 1, or when
+        the file is absent because the solve failed before it could be written.
+    '''
+    eq_dir = getattr(tt, '_eqdsk_dir', None)
+    if eq_dir is None or tt._current_loop < 2:
+        return {}
+    path = os.path.join(eq_dir, f'{tt._current_loop - 1:03d}.{i:03d}.eqdsk')
+    if not os.path.isfile(path):
+        return {}
+    try:
+        g = read_eqdsk(path)
+    except Exception:
+        return {}
+    q = np.asarray(g['qpsi'], dtype=float)
+    psi_eqdsk = np.linspace(0.0, 1.0, g['nr'])
+    out = {
+        'Ip': abs(float(g['ip'])),
+        'pax': abs(float(g['pres'][0])),
+        # Written by save_eqdsk(cocos=2), which negates TM-native psi; flip back to match _state.
+        'psi_lcfs': -float(g['psibry']),
+        'q0': float(q[0]),
+        'q95': float(np.interp(0.95, psi_eqdsk, q)),
+    }
+    out.update(_eqdsk_shape_stats(g['rzout']))
+    # A gEQDSK stores no topology flag, so take it from what TokaMaker reported when it wrote
+    # this file (keyed by the same loop and timestep).
+    _div = getattr(tt, '_eqdsk_topology', {}).get((tt._current_loop - 1, i))
+    if _div is not None:
+        out['topology'] = 'diverted' if _div else 'limited'
+    return out
+
+
+def _tm_diag_tm_column(tt, i, gs_ok, solve_succeeded, succeeded_profile):
+    r'''! TokaMaker column values for the diagnostic table at timestep i.
+
+        Everything is read from this timestep's equilibrium object rather than the `*_tm` state
+        arrays, because `_tm_update` only runs once the EQDSK is also accepted -- on a rejected
+        EQDSK the state arrays still hold the previous loop's values for this index. Keys absent
+        from the returned dict render blank, so a failed GS solve yields only the solver settings.
+    '''
+    out = {}
+    nl_tol = getattr(getattr(tt._tm, 'settings', None), 'nl_tol', None)
+    if nl_tol is not None:
+        out['nl_tol'] = float(nl_tol)
+    if succeeded_profile is not None and succeeded_profile.get('nl_its') is not None:
+        out['gs_its'] = f"Lvl {succeeded_profile['level']}: {succeeded_profile['nl_its']}"
+    if not gs_ok:
+        return out
+    equil = tt._state.get('equil', {}).get(i)
+    if equil is None:
+        return out
+    try:
+        st = equil.get_stats(li_normalization='iter')
+    except Exception:
+        st = {}
+    out.update({
+        'Ip': abs(st['Ip']) if 'Ip' in st else None,
+        'pax': abs(st['P_ax']) if 'P_ax' in st else None,
+        'q0': st.get('q_0'),
+        'q95': st.get('q_95'),
+        # get_stats reports beta_pol as a percentage; the TORAX values are fractions.
+        'beta_pol': st['beta_pol'] / 100.0 if 'beta_pol' in st else None,
+        'beta_N': st.get('beta_n'),
+        'l_i': st.get('l_i'),
+        'R_geo': st.get('R_geo'),
+        'a_geo': st.get('a_geo'),
+        'kappa': st.get('kappa'),
+        'delta': st.get('delta'),
+    })
+    try:
+        # psi_convention 0 orders psi_bounds as (psi_lcfs, psi_axis), same as _tm_update reads it.
+        out['psi_lcfs'] = float(equil.psi_bounds[0])
+    except Exception:
+        pass
+    try:
+        out['topology'] = 'diverted' if equil.diverted else 'limited'
+    except Exception:
+        pass
+    if solve_succeeded:
+        out['vloop'] = float(tt._state['vloop_tm'][i])
+    return out
+
+
+def _tm_diag_equil_targets(tt, ax, i, equil):
+    r'''! Draw the constraint targets this timestep's solve was given, plus what it achieved.
+
+        The targets come from _state, recorded as they were handed to TokaMaker, rather than
+        from a TokaMaker equilibrium object -- a failed solve leaves no equilibrium to read
+        them back from, and reading the live object instead showed a different (untrimmed) set
+        than the succeeded plots. Both paths therefore draw identical points.
+
+        @param equil Equilibrium for the achieved X-points, or None if the solve did not converge.
+        @result Legend handles for what was drawn.
+    '''
+    handles = []
+    iso = tt._state.get('isoflux_targets', {}).get(i)
+    if iso is not None and len(iso) > 0:
+        iso = np.asarray(iso)
+        h, = ax.plot(iso[:, 0], iso[:, 1], marker='+', color='tab:red', ms=5, mew=1.0,
+                     ls='none', label='isoflux target')
+        handles.append(h)
+    sad = tt._state.get('saddle_targets', {}).get(i)
+    if sad is not None and len(sad) > 0:
+        sad = np.asarray(sad)
+        h, = ax.plot(sad[:, 0], sad[:, 1], marker='s', mfc='none', mec='purple', ms=8, mew=1.5,
+                     ls='none', label='X-point target')
+        handles.append(h)
+    sp = tt._state.get('strike_pts', {}).get(i)
+    if sp is not None and len(sp) > 0:
+        sp = np.asarray(sp)
+        h, = ax.plot(sp[:, 0], sp[:, 1], marker='^', color='green', ms=7, ls='none',
+                     label='strike point')
+        handles.append(h)
+    # plot_psi draws the achieved X-points itself (red 'x'), so this is a proxy handle for the
+    # legend -- only added when the equilibrium actually has X-points to show.
+    if equil is not None:
+        try:
+            xpts, _ = equil.get_xpoints()
+        except Exception:
+            xpts = None
+        if xpts is not None and len(xpts) > 0:
+            handles.append(plt.Line2D([], [], color='r', marker='x', ls='none', ms=7, mew=1.5,
+                                      label='X-point achieved'))
+    return handles
+
+
+def _tm_diag_coil_panel(tt, ax, i):
+    r'''! Solved coil currents against the bounds enforced on this solve, in MA-turns.
+
+        Draws the per-step rate-limited box when one was recorded for this timestep, else the
+        global bounds; the forbidden regions outside the box are shaded. Coils resting on a bound
+        are circled -- those are the ones the solve could not move further to hit its targets.
+    '''
+    ax.set_title('Coil currents vs limits', fontsize=9)
+    equil = tt._state.get('equil', {}).get(i)
+    currents = None
+    for src in (equil, tt._tm):
+        if src is None:
+            continue
+        try:
+            currents, _ = src.get_coil_currents()
+        except Exception:
+            continue
+        if currents:
+            break
+    if not currents:
+        ax.axis('off')
+        ax.text(0.5, 0.5, 'no coil currents available', transform=ax.transAxes,
+                ha='center', va='center', fontsize=8, color='gray')
+        return
+
+    bounds = (getattr(tt, '_coil_bounds_history', {}) or {}).get(i)
+    bounds_label = 'rate-limited' if bounds else 'global'
+    if not bounds:
+        bounds = getattr(tt, '_coil_bounds', None) or {}
+
+    names = sorted(currents)
+    x = np.arange(len(names))
+    # get_coil_currents returns the per-winding current [A/turn]; plot in the public A-turns unit.
+    I = np.array([currents[c] * tt._coil_net_turns(c) for c in names]) / 1.0E6
+    lo = np.array([bounds[c][0] / 1.0E6 if c in bounds else np.nan for c in names])
+    hi = np.array([bounds[c][1] / 1.0E6 if c in bounds else np.nan for c in names])
+
+    stack = np.concatenate([I, lo[np.isfinite(lo)], hi[np.isfinite(hi)]])
+    ymin, ymax = float(np.min(stack)), float(np.max(stack))
+    pad = 0.08 * max(ymax - ymin, 1.0E-9)
+    ymin, ymax = ymin - pad, ymax + pad
+
+    if np.any(np.isfinite(lo)):
+        ax.fill_between(x, hi, ymax, step='mid', color='0.85', lw=0, zorder=0)
+        ax.fill_between(x, ymin, lo, step='mid', color='0.85', lw=0, zorder=0)
+        ax.step(x, hi, where='mid', color='k', ls='--', lw=1.0, zorder=2, label=f'limits ({bounds_label})')
+        ax.step(x, lo, where='mid', color='k', ls='--', lw=1.0, zorder=2)
+    ax.plot(x, I, '-o', color='r', lw=1.4, ms=3, zorder=3, label='TokaMaker')
+
+    span = hi - lo
+    with np.errstate(invalid='ignore'):
+        tol = np.maximum(0.01 * span, 1.0E-6)
+        at_lim = np.isfinite(span) & (np.minimum(np.abs(I - lo), np.abs(hi - I)) <= tol)
+    if np.any(at_lim):
+        ax.plot(x[at_lim], I[at_lim], 'o', mfc='none', mec='darkred', ms=9, mew=1.5, zorder=4,
+                label='at limit')
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, rotation=90, fontsize=6)
+    ax.set_xlim(-0.5, len(names) - 0.5)
+    ax.set_ylim(ymin, ymax)
+    ax.set_ylabel('I [MA-turns]', fontsize=8)
+    ax.tick_params(axis='y', labelsize=7)
+    ax.grid(True, alpha=0.3, axis='y')
+    ax.legend(fontsize=6, loc='best', framealpha=0.9, ncol=3)
+    ax.set_title(f'Coil currents vs limits ({int(np.sum(at_lim))} at limit)', fontsize=9)
+
+
 def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None, display=True,
                        tm_gs_ok=None, step_error=None):
     r'''! TokaMaker input/output diagnostic plot for a single timestep.
+
+        Success and failure produce the same layout; cells with no value available (all TokaMaker
+        results on a failed GS solve) render as an em dash.
 
         @param solve_succeeded Whether the full TM timestep succeeded including EQDSK validation
                for TORAX (same flag as after `_run_tm` updates).
@@ -5826,15 +6182,15 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
 
     def render_table(ax, rows, title):
         ax.axis('off')
-        ax.set_title(title, fontsize=10, fontweight='bold', pad=4)
+        ax.set_title(title, fontsize=11, fontweight='bold', pad=6)
         tbl = ax.table(cellText=rows[1:], colLabels=rows[0], loc='center', cellLoc='left',
-                       bbox=[0.0, 0.0, 1.0, 0.92])
+                       colWidths=[0.30, 0.175, 0.175, 0.175, 0.175], bbox=[0.0, 0.0, 1.0, 0.96])
         tbl.auto_set_font_size(False)
-        tbl.set_fontsize(9)
-        tbl.scale(1, 1.5)
+        tbl.set_fontsize(8)
         for (row, col), cell in tbl.get_celld().items():
             if row == 0:
                 cell.set_facecolor('#d0e4f7')
+                cell.set_text_props(fontweight='bold', fontsize=7)
             elif row % 2 == 0:
                 cell.set_facecolor('#f5f5f5')
 
@@ -5899,8 +6255,8 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
             q0_seed_eq = float(np.interp(0.0, _seed_q_x, _seed_q_y))
             q95_seed_eq = float(np.interp(0.95, _seed_q_x, _seed_q_y))
 
-    fig = plt.figure(figsize=(22, 15))
-    gs_layout = fig.add_gridspec(4, 6, hspace=0.70, wspace=0.55)
+    fig = plt.figure(figsize=(27, 15))
+    gs_layout = fig.add_gridspec(4, 9, hspace=0.70, wspace=0.55)
 
     ax_ffp_tx = fig.add_subplot(gs_layout[0, 0:2])
     ax_pp_tx = fig.add_subplot(gs_layout[1, 0:2])
@@ -5911,10 +6267,9 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
     ax_pp_tm = fig.add_subplot(gs_layout[1, 2:4])
     ax_q_tm = fig.add_subplot(gs_layout[2, 2:4])
     ax_jphi_in = fig.add_subplot(gs_layout[3, 2:4])
-    ax_tbl1 = fig.add_subplot(gs_layout[0, 4:6])
-    gs_tbl_eq = gs_layout[1:3, 4:6].subgridspec(1, 2, width_ratios=[1.15, 0.85], wspace=0.12)
-    ax_tbl2 = fig.add_subplot(gs_tbl_eq[0, 0])
-    ax_mini_eq = fig.add_subplot(gs_tbl_eq[0, 1])
+    ax_tbl = fig.add_subplot(gs_layout[0:4, 4:6])
+    ax_eq = fig.add_subplot(gs_layout[0:3, 6:9])
+    ax_coil = fig.add_subplot(gs_layout[3, 6:9])
 
     # FF'/p'/FF'_NI panels show only the FF'-family levels; the jphi-convolution levels
     # (also stored under 'ffp') get their own panel below so the two are not conflated.
@@ -6020,40 +6375,75 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
                      fontsize=7, loc='upper center',
                      bbox_to_anchor=(0.5, -0.30), ncol=2, framealpha=0.92)
 
-    if solve_succeeded:
-        _beta_pol_tm_ok_str = '\u2014'
+    # ── Unified scalar table (same rows and columns whether or not the solve succeeded;
+    #    a column simply has no value to report for some rows, which renders as an em dash) ──
+    col_seed = {
+        'Ip': Ip_seed,
+        'pax': pax_seed,
+        'psi_lcfs': psi_lcfs_seed,
+        'q95': q95_seed_eq,
+        'q0': q0_seed_eq,
+    }
+    col_seed.update(_eqdsk_shape_stats(s.get('lcfs_geo', {}).get(i)))
+    col_last = _last_solve_eqdsk_stats(tt, i)
+    col_tx = {
+        'Ip': Ip_tx,
+        'pax': pax_tx,
+        'psi_lcfs': psi_lcfs_tx,
+        'q95': q95_tx,
+        'q0': q0_tx,
+        'vloop': vloop_tx,
+        'beta_pol': beta_pol_tx,
+        'beta_N': beta_n_tx,
+    }
+    col_tm = _tm_diag_tm_column(tt, i, _gs_ok, solve_succeeded, _succeeded_profile)
+
+    _div_times = getattr(tt, '_diverted_times', None)
+    if _div_times is None:
+        _topo_label = 'topology'
+    else:
+        _topo_label = 'topology\n(tgt: %s)' % ('diverted' if _div_times[0] <= t <= _div_times[1] else 'limited')
+
+    _rows_spec = [
+        (_topo_label,         'topology', None),
+        ('Ip [MA]',           'Ip',       lambda v: f'{v / 1e6:.3f}'),
+        ('p_ax [kPa]',        'pax',      lambda v: f'{v / 1e3:.2f}'),
+        ('psi_lcfs [Wb/rad]', 'psi_lcfs', lambda v: f'{v:.4f}'),
+        ('q95',               'q95',      lambda v: f'{v:.3f}'),
+        ('q0',                'q0',       lambda v: f'{v:.3f}'),
+        ('v_loop [V]',        'vloop',    lambda v: f'{v:.3f}'),
+        ('beta_pol',          'beta_pol', lambda v: f'{v:.4f}'),
+        ('beta_N',            'beta_N',   lambda v: f'{v:.4f}'),
+        ('l_i',               'l_i',      lambda v: f'{v:.4f}'),
+        ('R [m]',             'R_geo',    lambda v: f'{v:.3f}'),
+        ('a [m]',             'a_geo',    lambda v: f'{v:.3f}'),
+        ('kappa',             'kappa',    lambda v: f'{v:.3f}'),
+        ('delta',             'delta',    lambda v: f'{v:.3f}'),
+        ('GS iters',          'gs_its',   None),
+        ('nl_tol',            'nl_tol',   lambda v: f'{v:.2e}'),
+    ]
+
+    def _cell(col, key, fmt):
+        v = col.get(key)
+        if v is None or (isinstance(v, float) and not np.isfinite(v)):
+            return '\u2014'
+        if fmt is None:
+            return str(v)
         try:
-            _equil_snap_ok = s.get('equil', {}).get(i)
-            if _equil_snap_ok is not None:
-                _ok_stats = _equil_snap_ok.get_stats()
-                if 'beta_pol' in _ok_stats:
-                    _beta_pol_tm_ok_str = f"{float(_ok_stats['beta_pol']) / 100.0:.4f}"
-        except Exception:
-            pass
+            return fmt(v)
+        except (TypeError, ValueError):
+            return '\u2014'
 
-        _succeeded_profile_its = _succeeded_profile.get('nl_its') if _succeeded_profile else None
-        _its_str = str(_succeeded_profile_its) if _succeeded_profile_its is not None else '\u2014'
-        _tm_nl_tol = getattr(getattr(tt._tm, 'settings', None), 'nl_tol', None)
-        _tol_str = f'{_tm_nl_tol:.2e}' if _tm_nl_tol is not None else '\u2014'
+    _table_rows = [[
+        'Parameter', 'Seed\nEQDSK', f'Last EQDSK\n(loop {tt._current_loop - 1})',
+        f'TORAX\n(loop {tt._current_loop})', f'TokaMaker\n(loop {tt._current_loop})',
+    ]]
+    for _label, _key, _fmt in _rows_spec:
+        _table_rows.append([_label] + [_cell(c, _key, _fmt)
+                                       for c in (col_seed, col_last, col_tx, col_tm)])
+    render_table(ax_tbl, _table_rows, 'Scalar comparison')
 
-        input_rows = [
-            ['Parameter', 'Init EQDSK', 'TORAX', 'TokaMaker'],
-            ['Ip', f'{Ip_seed / 1e6:.3f} MA', f'{Ip_tx / 1e6:.3f} MA', f'{float(s["Ip_tm"][i]) / 1e6:.3f} MA'],
-            ['pax', f'{pax_seed / 1e3:.2f} kPa', f'{pax_tx / 1e3:.2f} kPa', f'{float(s["pax_tm"][i]) / 1e3:.2f} kPa'],
-            ['psi_lcfs', f'{psi_lcfs_seed:.4f} Wb/rad', f'{psi_lcfs_tx:.4f} Wb/rad', f'{float(s["psi_lcfs_tm"][i]):.4f} Wb/rad'],
-        ]
-        diag_rows = [
-            ['Parameter', 'Init EQDSK', 'TORAX', 'TokaMaker'],
-            ['q95', f'{q95_seed_eq:.3f}', f'{q95_tx:.3f}', f'{float(s["q95_tm"][i]):.3f}'],
-            ['q0', f'{q0_seed_eq:.3f}', f'{q0_tx:.3f}', f'{float(s["q0_tm"][i]):.3f}'],
-            ['v_loop', '\u2014', f'{vloop_tx:.3f} V', f'{float(s["vloop_tm"][i]):.3f} V'],
-            ['beta_pol', '\u2014', f'{beta_pol_tx:.4f}', _beta_pol_tm_ok_str],
-            ['beta_N', '\u2014', f'{beta_n_tx:.4f}', f'{float(s["beta_N_tm"][i]):.4f}'],
-            ['l_i', '\u2014', '\u2014', f'{float(s["l_i_tm"][i]):.4f}'],
-            ['GS iters', '\u2014', '\u2014', f'Lvl {_succeeded_profile["level"]}: {_its_str}' if _succeeded_profile else '\u2014'],
-            ['nl_tol', '\u2014', '\u2014', _tol_str],
-        ]
-
+    if solve_succeeded:
         ax_ffp_tm.plot(s['ffp_prof_tx'][i]['x'], s['ffp_prof_tx'][i]['y'], 'b--', linewidth=1.5, label=f"FF' loop {tt._current_loop} TX")
         ax_ffp_tm.plot(s['ffp_prof_tm'][i]['x'], s['ffp_prof_tm'][i]['y'], 'r-', linewidth=2, label=f"FF' loop {tt._current_loop} TM")
         if _prev_ffp_prof is not None:
@@ -6098,139 +6488,92 @@ def tm_diagnostic_plot(tt, i, t, level_attempts, solve_succeeded, save_path=None
         ax_q_tm.legend(fontsize=8)
         ax_q_tm.grid(True, alpha=0.3)
 
-        render_table(ax_tbl1, input_rows, 'Scalar Inputs vs TokaMaker Outputs')
-        render_table(ax_tbl2, diag_rows, 'TORAX Diagnostics vs TokaMaker')
-
-        plt.suptitle(
-            f'TM Diagnostic \u2014 loop {tt._current_loop}, t-idx {i}/{len(tt._tm_times) - 1}, t = {t:.2f} s'
-            f'  |  TokaMaker: SUCCESS',
-            fontsize=13, color='darkgreen', y=0.995,
-        )
     else:
-        _tm_nl_tol = getattr(getattr(tt._tm, 'settings', None), 'nl_tol', None)
-        _tol_str = f'{_tm_nl_tol:.2e}' if _tm_nl_tol is not None else '\u2014'
         _raw_err = _last.get('error') or (fail_msg if fail_msg else 'Unknown')
         # Strip the generic "Error in solve: " prefix so only the specific reason shows.
         _fail_reason_str = _raw_err.removeprefix('Error in solve: ') if _raw_err else 'Unknown'
-
-        _beta_pol_tm_str = '\u2014'
-        try:
-            _tm_stats = tt._tm.get_stats()
-            if 'beta_pol' in _tm_stats:
-                _beta_pol_tm_str = f"{float(_tm_stats['beta_pol']) / 100.0:.4f}"
-        except Exception:
-            pass
-
-        _psi_lcfs_tm_achieved_str = '\u2014'
-        try:
-            _pb = tt._tm.psi_bounds  # [psi_axis, psi_lcfs] in TM-native sign
-            _psi_lcfs_tm_achieved_str = f'{float(_pb[1]):.4f} Wb/rad'
-        except Exception:
-            pass
-
-        input_rows = [
-            ['Parameter', 'Init EQDSK', 'TORAX'],
-            ['Ip', f'{Ip_seed / 1e6:.3f} MA', f'{Ip_tx / 1e6:.3f} MA'],
-            ['pax', f'{pax_seed / 1e3:.2f} kPa', f'{pax_tx / 1e3:.2f} kPa'],
-            ['psi_lcfs tgt', f'{psi_lcfs_seed:.4f} Wb/rad', f'{psi_lcfs_tx:.4f} Wb/rad'],
-        ]
-        diag_rows = [
-            ['Parameter', 'Init EQDSK', 'TORAX'],
-            ['q95', f'{q95_seed_eq:.3f}', f'{q95_tx:.3f}'],
-            ['q0', f'{q0_seed_eq:.3f}', f'{q0_tx:.3f}'],
-            ['v_loop', '\u2014', f'{vloop_tx:.3f} V'],
-            ['beta_pol (TX)', '\u2014', f'{beta_pol_tx:.4f}'],
-            ['beta_pol (TM)', '\u2014', _beta_pol_tm_str],
-            ['beta_N', '\u2014', f'{beta_n_tx:.4f}'],
-            ['TM nl_tol', _tol_str, ''],
-            ['psi_lcfs TM', _psi_lcfs_tm_achieved_str, ''],
-        ]
 
         for blank_ax in [ax_ffp_tm, ax_pp_tm, ax_q_tm]:
             blank_ax.axis('off')
             blank_ax.text(0.5, 0.5, 'N/A', ha='center', va='center', fontsize=11, color='gray',
                           transform=blank_ax.transAxes, fontweight='bold')
 
-        render_table(ax_tbl1, input_rows, 'Scalar Inputs (Init EQDSK vs TORAX)')
-        render_table(ax_tbl2, diag_rows, 'TORAX Diagnostics & Failure Info')
-        ax_tbl2.text(
-            0.5, -0.04,
+        ax_tbl.text(
+            0.5, -0.02,
             f'Fail: {_fail_reason_str}',
-            transform=ax_tbl2.transAxes, fontsize=8, ha='center', va='top',
+            transform=ax_tbl.transAxes, fontsize=8, ha='center', va='top',
             color='darkred', fontweight='bold', wrap=True,
         )
 
-        if _gs_ok:
-            plt.suptitle(
-                f'TM Diagnostic \u2014 loop {tt._current_loop}, t-idx {i}/{len(tt._tm_times) - 1}, t = {t:.2f} s'
-                f'  |  TM GS OK \u2014 coupling failed (e.g. TORAX rejected EQDSK)',
-                fontsize=13, color='darkorange', fontweight='bold', y=0.995,
-            )
-        else:
-            plt.suptitle(
-                f'TM Diagnostic \u2014 loop {tt._current_loop}, t-idx {i}/{len(tt._tm_times) - 1}, t = {t:.2f} s'
-                f'  |  TokaMaker: FAILED',
-                fontsize=13, color='darkred', fontweight='bold', y=0.995,
-            )
+    if solve_succeeded:
+        _status, _status_color = 'TokaMaker: SUCCESS', 'darkgreen'
+    elif _gs_ok:
+        _status, _status_color = 'TM GS OK \u2014 coupling failed (e.g. TORAX rejected EQDSK)', 'darkorange'
+    else:
+        _status, _status_color = 'TokaMaker: FAILED', 'darkred'
+    plt.suptitle(
+        f'TM Diagnostic \u2014 loop {tt._current_loop}, t-idx {i}/{len(tt._tm_times) - 1}, t = {t:.2f} s'
+        f'  |  {_status}',
+        fontsize=13, color=_status_color, fontweight='bold', y=0.995,
+    )
 
+    # Coil-current colorbar: plot_machine adds one when given a label (coil_scale=1e-6 puts the
+    # region currents, which are A-turns, into MA-turns).
+    _coil_clabel = r'$I_C$ [MA-turns]'
     equil_snap = s.get('equil', {}).get(i)
     if _gs_ok and equil_snap is not None:
         tt._tm.plot_machine(
-            fig, ax_mini_eq, equilibrium=equil_snap, coil_colormap='seismic', coil_symmap=False,
-            coil_scale=1.E-6, coil_clabel=None,
+            fig, ax_eq, equilibrium=equil_snap, coil_colormap='seismic', coil_symmap=False,
+            coil_scale=1.E-6, coil_clabel=_coil_clabel,
         )
-        tt._tm.plot_constraints(fig, ax_mini_eq, equilibrium=equil_snap)
-        tt._tm.plot_psi(fig, ax_mini_eq, equilibrium=equil_snap, xpoint_color='r', vacuum_nlevels=3)
-        x_pt = _saddle_targets(tt)   # primary + secondary nulls
-        if x_pt is not None and _x_points_active(tt, i, t=t):
-            ax_mini_eq.plot(x_pt[:, 0], x_pt[:, 1], 'x', color='purple', markersize=4, markeredgewidth=1)
-        sp = s.get('strike_pts', {}).get(i)
-        if sp is not None and len(sp) > 0:
-            ax_mini_eq.plot(sp[:, 0], sp[:, 1], 'g^', markersize=4, markeredgewidth=1)
-        ax_mini_eq.set_aspect('equal')
-        ax_mini_eq.set_title('TM equilibrium', fontsize=9)
-        ax_mini_eq.tick_params(labelsize=6)
+        tt._tm.plot_psi(fig, ax_eq, equilibrium=equil_snap, xpoint_color='r', vacuum_nlevels=3)
+        _eq_handles = _tm_diag_equil_targets(tt, ax_eq, i, equil_snap)
+        ax_eq.set_aspect('equal')
+        ax_eq.set_title('TM equilibrium', fontsize=11)
+        ax_eq.tick_params(labelsize=8)
+        if _eq_handles:
+            ax_eq.legend(handles=_eq_handles, fontsize=7, loc='upper right', framealpha=0.9)
     elif not _gs_ok:
         # TM failed to converge — current psi state may still be instructive
         _psi_plotted = False
         try:
             with tt._quiet_tm():
                 tt._tm.plot_machine(
-                    fig, ax_mini_eq, coil_colormap='seismic', coil_symmap=False,
-                    coil_scale=1.E-6, coil_clabel=None,
+                    fig, ax_eq, coil_colormap='seismic', coil_symmap=False,
+                    coil_scale=1.E-6, coil_clabel=_coil_clabel,
                 )
-                tt._tm.plot_constraints(fig, ax_mini_eq)
-                tt._tm.plot_psi(fig, ax_mini_eq, xpoint_color='r', vacuum_nlevels=3)
-            ax_mini_eq.set_aspect('equal')
-            ax_mini_eq.tick_params(labelsize=6)
-            ax_mini_eq.text(
-                0.02, 0.98, 'unconverged psi', transform=ax_mini_eq.transAxes, fontsize=7,
+                tt._tm.plot_psi(fig, ax_eq, xpoint_color='r', vacuum_nlevels=3)
+            ax_eq.set_aspect('equal')
+            ax_eq.tick_params(labelsize=8)
+            ax_eq.text(
+                0.02, 0.98, 'unconverged psi', transform=ax_eq.transAxes, fontsize=9,
                 ha='left', va='top', color='darkred', fontweight='bold',
             )
+            # Same targets as the succeeded path. There is no converged equilibrium, so no
+            # achieved X-points to pair with them.
+            _eq_handles = _tm_diag_equil_targets(tt, ax_eq, i, None)
+            if _eq_handles:
+                ax_eq.legend(handles=_eq_handles, fontsize=7, loc='upper right', framealpha=0.9)
             _psi_plotted = True
         except Exception:
             pass
         if not _psi_plotted:
-            ax_mini_eq.axis('off')
-            ax_mini_eq.text(
+            ax_eq.axis('off')
+            ax_eq.text(
                 0.5, 0.5, 'TokaMaker did not converge\n(no psi available)',
-                transform=ax_mini_eq.transAxes, fontsize=8,
+                transform=ax_eq.transAxes, fontsize=10,
                 ha='center', va='center', color='darkred', fontweight='bold',
             )
-        ax_mini_eq.set_title('TM psi (unconverged)', fontsize=9)
+        ax_eq.set_title('TM psi (unconverged)', fontsize=11)
     else:
-        ax_mini_eq.axis('off')
-        if not solve_succeeded:
-            _mini_msg = 'TM converged; EQDSK rejected by TORAX'
-            _mini_color = 'darkorange'
-        else:
-            _mini_msg = 'No equilibrium snapshot'
-            _mini_color = 'gray'
-        ax_mini_eq.text(
-            0.5, 0.5, _mini_msg, transform=ax_mini_eq.transAxes, fontsize=8,
-            ha='center', va='center', color=_mini_color, fontweight='bold',
+        ax_eq.axis('off')
+        ax_eq.text(
+            0.5, 0.5, 'No equilibrium snapshot', transform=ax_eq.transAxes, fontsize=10,
+            ha='center', va='center', color='gray', fontweight='bold',
         )
-        ax_mini_eq.set_title('TM equilibrium', fontsize=9)
+        ax_eq.set_title('TM equilibrium', fontsize=11)
+
+    _tm_diag_coil_panel(tt, ax_coil, i)
 
     _save_or_display(fig, save_path, display)
 
@@ -7315,7 +7658,6 @@ def plot_coil_current_tunnel(tt, save_path=None, display=True):
     # divide by dt_eff, not the raw consecutive dt. Dividing by a sub-floor dt would
     # show spurious super-limit spikes even when the coil stayed inside its bound box.
     ax = axes[n_coils // ncols, n_coils % ncols]
-    coil_dIdt = getattr(tt, '_coil_dIdt', {}) or {}
     dt_floor = float(getattr(tt, '_coil_rate_dt_floor', 0.0))
     colors = plt.cm.tab20(np.linspace(0, 1, max(n_coils, 1)))
     plotted = False
@@ -7330,10 +7672,11 @@ def plot_coil_current_tunnel(tt, save_path=None, display=True):
         t_mid = 0.5 * (t_vals[1:] + t_vals[:-1])
         ax.plot(t_mid, rate, '-o', ms=2, lw=1.0, color=colors[ci], label=cname)
         plotted = True
-        if cname in coil_dIdt:
-            ax.axhline(abs(coil_dIdt[cname]) * 1e-6, color=colors[ci], ls='--', lw=0.7, alpha=0.7)
+    # No limit reference here: each coil may carry its own dI/dt budget (always so when it is
+    # given in A/turn/s), which would need a separate line per coil. The per-coil bound box
+    # in the subplots above is where a breach shows up.
     _floor_note = f' (rate over max(dt, {dt_floor:g}s))' if dt_floor > 0 else ''
-    ax.set_title(f'Realized |dI/dt| (dashed = limit){_floor_note}', fontsize=9)
+    ax.set_title(f'Realized |dI/dt|{_floor_note}', fontsize=9)
     ax.set_ylabel('|dI/dt| [MA-turns/s]', fontsize=8)
     ax.set_xlabel('Time [s]', fontsize=8)
     ax.tick_params(labelsize=7)
@@ -8614,10 +8957,35 @@ _COIL_REG_KEY_MAP = {
 #: deliberately absent: it is inherited from tm_inputs['coil_bounds'].
 _COIL_RATE_KEY_MAP = {
     'coil_dIdt': 'dIdt',
+    'coil_dIdt_units': 'dIdt_units',
     'coil_V': 'V',
     'coil_R': 'R',
     'coil_dt_floor': 'dt_floor',
 }
+
+#: tm_inputs keys -> set_TokaMaker_constraint_weights() kwargs. These are the GS constraint
+#: weights that apply at every timepoint; the diverted-only weights (X-point, secondary
+#: X-point, strike point) live with their targets in the diverted_shape_targets block.
+_TM_WEIGHT_KEY_MAP = {
+    'isoflux_weight': 'isoflux_weight',
+    'psi_lcfs_weight': 'psi_lcfs_weight',
+}
+
+
+def _apply_tm_weight_config(tmtx, tm_inputs):
+    r'''! Apply the tm_inputs GS constraint weights that hold at every timepoint.
+
+            Covers isoflux_weight (LCFS shape targets) and psi_lcfs_weight (the
+            outboard-midplane psi value). The diverted-only weights are configured with
+            their targets via set_diverted_shape_targets().
+
+            @param tmtx TokaMaker_TORAX object.
+            @param tm_inputs The tmtx_config['tm_inputs'] dict.
+    '''
+    kwargs = {dst: tm_inputs[src] for src, dst in _TM_WEIGHT_KEY_MAP.items()
+              if src in tm_inputs}
+    if kwargs:
+        tmtx.set_TokaMaker_constraint_weights(**kwargs)
 
 
 def _apply_coil_config(tmtx, tm_inputs):
@@ -8722,6 +9090,9 @@ def _init_TMTX_from_configs(tmtx_config, torax_config, mygs):
     # ── Coil bounds / regularization / rate limits (all from tm_inputs coil_* keys) ──
     _apply_coil_config(tmtx, tmtx_config.get('tm_inputs', {}))
 
+    # ── Always-on GS constraint weights (isoflux / psi_lcfs) from tm_inputs ──
+    _apply_tm_weight_config(tmtx, tmtx_config.get('tm_inputs', {}))
+
     # Back-compat: older configs carried standalone 'coil_reg' / 'coil_rate_limits' blocks
     # (each with its own coil bounds). Honor them, overriding the tm_inputs-derived setup.
     for _legacy in ('coil_reg', 'coil_rate_limits'):
@@ -8732,7 +9103,15 @@ def _init_TMTX_from_configs(tmtx_config, torax_config, mygs):
     if 'coil_reg' in tmtx_config:
         tmtx.set_TokaMaker_coil_reg(**tmtx_config['coil_reg'])
     if 'coil_rate_limits' in tmtx_config:
-        tmtx.set_coil_rate_limits(**tmtx_config['coil_rate_limits'])
+        _rate_cfg = dict(tmtx_config['coil_rate_limits'])
+        # global_bounds is gone: every coil is clipped to its own coil_bounds entry. Drop it
+        # rather than raising, so an old config still runs -- but say so, since a config that
+        # set it was overriding the coil bounds and no longer will.
+        if _rate_cfg.pop('global_bounds', None) is not None:
+            print("NOTICE: tmtx_config['coil_rate_limits']['global_bounds'] is no longer "
+                  "supported and is being ignored; each coil is now clipped to its own "
+                  "tm_inputs['coil_bounds'] entry.")
+        tmtx.set_coil_rate_limits(**_rate_cfg)
 
     if 'evolve' in tmtx_config:
         tmtx.set_evolve(**tmtx_config['evolve'])
