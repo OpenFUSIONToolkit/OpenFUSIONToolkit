@@ -1008,6 +1008,41 @@ class TokaMaker_TORAX:
             out[cname] = [lo * n, hi * n]
         return out
 
+    def _normalize_coil_bounds_dict(self, coil_bounds):
+        r'''! Normalize a coil-bounds input to a {coil: [lo, hi]} dict (input units preserved).
+
+                Accepts either a single [lo, hi] pair — the usual form, broadcast to every
+                coil set, matching tm_inputs['coil_bounds'] — or an explicit
+                {coil_name: [lo, hi]} dict for per-coil limits.
+
+                @param coil_bounds A [lo, hi] pair or a {coil_name: [lo, hi]} dict.
+                @return Dict {coil_name: [lo, hi]}.
+        '''
+        if isinstance(coil_bounds, dict):
+            unknown = [k for k in coil_bounds if k not in self._tm.coil_sets]
+            if unknown:
+                raise KeyError(f'coil_bounds: unknown coil(s) {unknown}; '
+                               f'valid coils are {list(self._tm.coil_sets)}')
+            return {k: [float(v[0]), float(v[1])] for k, v in coil_bounds.items()}
+        bounds = list(coil_bounds)
+        if len(bounds) != 2:
+            raise ValueError('coil_bounds must be a [min, max] pair (applied to every coil) '
+                             f'or a {{coil_name: [min, max]}} dict (got {coil_bounds!r}).')
+        lo, hi = float(bounds[0]), float(bounds[1])
+        return {key: [lo, hi] for key in self._tm.coil_sets}
+
+    def _inherited_global_bounds(self):
+        r'''! (lo, hi) clip [A-turns] inherited from the configured hard coil bounds.
+
+                The rate-limit clip is not a separate input: it is the single global coil
+                bounds set by set_TokaMaker_coil_reg() / tm_inputs['coil_bounds']. Falls back
+                to +/-45 MA-turns if bounds were never configured.
+        '''
+        cb = getattr(self, '_coil_bounds', None)
+        if not cb:
+            return (-45.0E6, 45.0E6)
+        return (min(v[0] for v in cb.values()), max(v[1] for v in cb.values()))
+
     @staticmethod
     def _normalize_coil_bounds_units(units):
         r'''! Validate/normalize a coil-bounds units string to 'A-turns' or 'A/turn'.
@@ -1038,20 +1073,27 @@ class TokaMaker_TORAX:
                      disable_virtual_vsc=True, vsc_weight=1.0E4):
         r'''! Set coil regularization using the dict-based TokaMaker reg_terms API.
 
-                Coil bounds are hard current limits. By default they are given in total
-                Amp-turns (A-turns) — the public TokaMaker_TORAX unit for everything
-                coil-current related. Set coil_bounds_units='A/turn' to instead supply the
-                per-winding current TokaMaker uses natively; such inputs are multiplied by the
-                mesh turn count and stored internally in A-turns (I[A-turns] = I[A/turn] *
-                n_turns), so all downstream state, plots, and rate limits stay in A-turns.
-                Whatever the input unit, the bound pushed to TokaMaker is A/turn.
+                Coil bounds are the single global hard current limit: the same bounds are
+                used for seed-eqdsk generation, the coupled GS solves, and as the clip for
+                set_coil_rate_limits(). By default they are given in total Amp-turns
+                (A-turns) — the public TokaMaker_TORAX unit for everything coil-current
+                related. Set coil_bounds_units='A/turn' to instead supply the per-winding
+                current TokaMaker uses natively; such inputs are multiplied by the mesh turn
+                count and stored internally in A-turns (I[A-turns] = I[A/turn] * n_turns), so
+                all downstream state, plots, and rate limits stay in A-turns. Whatever the
+                input unit, the bound pushed to TokaMaker is A/turn.
+
+                From a config, these are set via the coil_* keys of tm_inputs rather than by
+                calling this method directly (see run_tmtx_from_config).
 
                 During the pulse, coil current targets are set automatically: the initial
                 equilibrium currents seed i=0, and each subsequent timestep uses the previous
                 timestep's solved currents as loose targets.
 
-                @param coil_bounds Dict of {coil_name: [min, max]} hard current bounds, in the
-                       unit given by coil_bounds_units. Default ±45 MA-turns for every coil.
+                @param coil_bounds Hard current bounds in the unit given by coil_bounds_units:
+                       either a single [min, max] pair applied to every coil (the usual form)
+                       or a {coil_name: [min, max]} dict for per-coil limits. Default
+                       ±45 MA-turns for every coil.
                 @param coil_bounds_units Unit of coil_bounds: 'A-turns' (default, total winding
                        current) or 'A/turn' (per-winding current, TokaMaker's native unit).
                 @param updownsym Enforce up-down symmetry for coil pairs (U/L naming convention).
@@ -1067,8 +1109,10 @@ class TokaMaker_TORAX:
         if coil_bounds is None:
             # Default is defined in A-turns regardless of the requested input unit.
             coil_bounds = {key: [-45.0E6, 45.0E6] for key in self._tm.coil_sets}
-        elif units == 'A/turn':
-            coil_bounds = self._aperturn_bounds_to_aturn(coil_bounds)   # -> A-turns (stored unit)
+        else:
+            coil_bounds = self._normalize_coil_bounds_dict(coil_bounds)   # pair or dict -> dict
+            if units == 'A/turn':
+                coil_bounds = self._aperturn_bounds_to_aturn(coil_bounds)   # -> A-turns (stored unit)
         self._push_coil_bounds(coil_bounds)   # A-turns in, A/turn pushed to TM
 
         if disable_coils is None:
@@ -1150,7 +1194,7 @@ class TokaMaker_TORAX:
         return {c: float(arg) for c in coils}
 
     def set_coil_rate_limits(self, dIdt=None, V=None, R=None,
-                             global_bounds=(-45.0E6, 45.0E6), dt_floor=0.5):
+                             global_bounds=None, dt_floor=0.5):
         r'''! Constrain how fast each coil current may change between TokaMaker solves.
 
                 Before each GS solve the coil's hard bounds are tightened to a window around
@@ -1161,6 +1205,10 @@ class TokaMaker_TORAX:
 
                 then clipped to the global bounds. This caps the realized dI/dt of every coil
                 so the pulse stays within power-supply / engineering limits.
+
+                The global clip is NOT a separate limit: by default it is inherited from the
+                single global coil bounds already configured by set_TokaMaker_coil_reg() /
+                tm_inputs['coil_bounds'], so the hard limit is only ever specified once.
 
                 dt_floor avoids an unenforceably narrow bound box when two solves are very
                 close in time: at tiny dt the box [I_ref ± dIdt*dt] becomes so small that
@@ -1185,8 +1233,10 @@ class TokaMaker_TORAX:
                 @param dIdt Max |dI/dt| per coil [A-turns/s]; scalar or {coil: value}.
                 @param V Max coil voltage [V]; scalar or {coil: value}. Requires matching R.
                 @param R Coil resistance [Ohms]; scalar or {coil: value}. Used with V.
-                @param global_bounds (min, max) hard clip applied to every rate-limited
-                       bound [A-turns]. Default ±45 MA-turns.
+                @param global_bounds Advanced override for the (min, max) hard clip applied to
+                       every rate-limited bound [A-turns]. Default None = inherit the single
+                       global coil bounds (set_TokaMaker_coil_reg / tm_inputs['coil_bounds']),
+                       which is what configs use; ±45 MA-turns if bounds were never set.
                 @param dt_floor Minimum dt [s] used in the budget so close-spaced solves get
                        an enforceable bound box. Default 0.5 s; set 0 to disable.
         '''
@@ -1213,11 +1263,15 @@ class TokaMaker_TORAX:
             coil_dIdt[c] = (v / r) * self._coil_net_turns(c)   # A-turns/s
 
         self._coil_dIdt = coil_dIdt
+        # None -> inherit the single global coil bounds (no separate hard-limit input).
+        if global_bounds is None:
+            global_bounds = self._inherited_global_bounds()
         self._coil_rate_global = (float(global_bounds[0]), float(global_bounds[1]))
         self._coil_rate_dt_floor = max(0.0, float(dt_floor))
         self._rate_limit_active = bool(coil_dIdt)
 
-        # Stored for save_tmtx_config() round-trip (plain JSON-able scalars/dicts).
+        # Resolved settings, for debugging/introspection (save_tmtx_config() reproduces the
+        # rate limits from the stashed tm_inputs coil_* keys, not from this).
         self._coil_rate_limit_config = {
             'dIdt': dIdt, 'V': V, 'R': R,
             'global_bounds': list(self._coil_rate_global),
@@ -8543,14 +8597,64 @@ def _create_seed_eqdsks(tmtx_config, mygs, save_dir=None):
     return eqdsk_paths
 
 
+#: tm_inputs coil-regularization keys -> set_TokaMaker_coil_reg() kwargs.
+_COIL_REG_KEY_MAP = {
+    'coil_bounds': 'coil_bounds',
+    'coil_bounds_units': 'coil_bounds_units',
+    'coil_updownsym': 'updownsym',
+    'coil_default_weight': 'default_weight',
+    'coil_disable_coils': 'disable_coils',
+    'coil_disable_weight': 'disable_weight',
+    'coil_symmetry_weight': 'symmetry_weight',
+    'coil_disable_virtual_vsc': 'disable_virtual_vsc',
+    'coil_vsc_weight': 'vsc_weight',
+}
+
+#: tm_inputs coil rate-limit keys -> set_coil_rate_limits() kwargs. The global clip is
+#: deliberately absent: it is inherited from tm_inputs['coil_bounds'].
+_COIL_RATE_KEY_MAP = {
+    'coil_dIdt': 'dIdt',
+    'coil_V': 'V',
+    'coil_R': 'R',
+    'coil_dt_floor': 'dt_floor',
+}
+
+
+def _apply_coil_config(tmtx, tm_inputs):
+    r'''! Apply the unified tm_inputs coil settings to a TokaMaker_TORAX object.
+
+            All coil configuration lives in tm_inputs under coil_* keys: the single global
+            hard bounds (coil_bounds / coil_bounds_units), the regularization weights, and
+            the optional rate limits. The same coil_bounds is used for seed-eqdsk
+            generation (_init_TM_object), the coupled GS solves, and the rate-limit clip,
+            so the hard limit is specified exactly once.
+
+            Absent keys fall back to the set_*() method defaults. Rate limiting is applied
+            only if at least one of coil_dIdt / coil_V / coil_R is given.
+
+            @param tmtx TokaMaker_TORAX object.
+            @param tm_inputs The tmtx_config['tm_inputs'] dict.
+    '''
+    reg_kwargs = {dst: tm_inputs[src] for src, dst in _COIL_REG_KEY_MAP.items()
+                  if src in tm_inputs}
+    tmtx.set_TokaMaker_coil_reg(**reg_kwargs)
+
+    rate_kwargs = {dst: tm_inputs[src] for src, dst in _COIL_RATE_KEY_MAP.items()
+                   if src in tm_inputs}
+    if any(rate_kwargs.get(k) is not None for k in ('dIdt', 'V', 'R')):
+        tmtx.set_coil_rate_limits(**rate_kwargs)
+
+
 def _init_TMTX_from_configs(tmtx_config, torax_config, mygs):
     r'''! Build a TokaMaker_TORAX object from the TMTX and TORAX config dicts.
 
             tmtx_config carries everything that is TokaMaker-specific or shared between the
-            two codes (Ip, time window, tm_times, seed eqdsk paths, pedestal, x_points,
-            coil regularization, evolve flags). torax_config is the raw TORAX config and is
-            handed to load_TORAX_config() (which also picks up the TORAX grid from its
-            geometry.n_rho / geometry.face_centers).
+            two codes (Ip, time window, tm_times, seed eqdsk paths, pedestal,
+            diverted_shape_targets, evolve flags). All coil settings — the single global
+            hard bounds, regularization weights, and rate limits — live in tm_inputs under
+            coil_* keys and are applied by _apply_coil_config(). torax_config is the raw
+            TORAX config and is handed to load_TORAX_config() (which also picks up the TORAX
+            grid from its geometry.n_rho / geometry.face_centers).
 
             Required tmtx_config keys: 'R0', 'B0', 'Ip', 't_sim_start', 't_sim_end',
             'tx_dt', and seed eqdsk paths in 'g_eqdsk_arr' with matching seed times in
@@ -8615,9 +8719,18 @@ def _init_TMTX_from_configs(tmtx_config, torax_config, mygs):
             legacy.update(tmtx_config['diverted_shape'])
         tmtx.set_diverted_shape_targets(**legacy)
 
+    # ── Coil bounds / regularization / rate limits (all from tm_inputs coil_* keys) ──
+    _apply_coil_config(tmtx, tmtx_config.get('tm_inputs', {}))
+
+    # Back-compat: older configs carried standalone 'coil_reg' / 'coil_rate_limits' blocks
+    # (each with its own coil bounds). Honor them, overriding the tm_inputs-derived setup.
+    for _legacy in ('coil_reg', 'coil_rate_limits'):
+        if _legacy in tmtx_config:
+            print(f"NOTICE: tmtx_config['{_legacy}'] is deprecated; its settings now live in "
+                  f"tmtx_config['tm_inputs'] under coil_* keys (see _apply_coil_config). "
+                  f"The legacy block is being applied and overrides tm_inputs.")
     if 'coil_reg' in tmtx_config:
         tmtx.set_TokaMaker_coil_reg(**tmtx_config['coil_reg'])
-
     if 'coil_rate_limits' in tmtx_config:
         tmtx.set_coil_rate_limits(**tmtx_config['coil_rate_limits'])
 
