@@ -144,15 +144,16 @@ END SUBROUTINE tokamaker_equil_copy
 !---------------------------------------------------------------------------------
 !> Set TokaMaker equilibrium object for use in TokaMaker wrapper object
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_equil_set(tMaker_ptr,new_equil_ptr,error_str) BIND(C,NAME="tokamaker_equil_set")
+SUBROUTINE tokamaker_equil_set(tMaker_ptr,new_equil_ptr,eq_idx,error_str) BIND(C,NAME="tokamaker_equil_set")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: new_equil_ptr !< Pointer to old equilibrium object
 CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 TYPE(gs_equil), POINTER :: new_equil
+INTEGER(i4), VALUE, INTENT(in) :: eq_idx
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_equil_ccast(new_equil_ptr,new_equil,error_str))RETURN
-tMaker_obj%gs_equils(1)%eq=>new_equil
+tMaker_obj%gs_equils(eq_idx)%eq=>new_equil
 END SUBROUTINE tokamaker_equil_set
 !---------------------------------------------------------------------------------
 !> Cast C pointer to TokaMaker wrapper object

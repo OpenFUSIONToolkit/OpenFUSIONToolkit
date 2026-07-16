@@ -39,7 +39,7 @@ tokamaker_equil_copy = ctypes_subroutine(oftpy_lib.tokamaker_equil_copy,
 
 # tokamaker_equil_set(tMaker_ptr,new_equil_ptr,error_str)
 tokamaker_equil_set = ctypes_subroutine(oftpy_lib.tokamaker_equil_set,
-    [c_void_p, c_void_p, c_char_p])
+    [c_void_p, c_void_p, c_int, c_char_p])
 
 # tokamaker_setup_regions(tMaker_ptr,coil_file,reg_eta,contig_flag,xpoint_mask,coil_nturns,ncoils,error_str)
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
@@ -59,7 +59,7 @@ tokamaker_equil_destroy = ctypes_subroutine(oftpy_lib.tokamaker_equil_destroy,
 
 # tokamaker_load_profiles(tMaker_equil_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str)
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
-    [c_void_p, c_char_p, c_double, c_char_p, c_char_p, c_char_p, c_char_p])
+    [c_void_p, c_char_p, c_double, c_char_p, c_char_p, c_char_p, c_int, c_char_p])
 
 # tokamaker_get_profile_ndofs(tMaker_equil_ptr,prof_type,ndofs,error_str)
 tokamaker_get_profile_ndofs = ctypes_subroutine(oftpy_lib.tokamaker_get_profile_ndofs,

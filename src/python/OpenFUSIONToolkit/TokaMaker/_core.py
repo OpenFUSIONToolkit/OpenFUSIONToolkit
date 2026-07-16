@@ -188,7 +188,7 @@ class TokaMaker():
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_factory "gs_factory")
         self._tMaker_ptr = c_void_p()
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_equil "gs_equil")
-        self._tMaker_equil = None
+        self._tMaker_equil = []
         ## Internal mesh object
         self._mesh_ptr = c_void_p()
         ## General settings object
@@ -258,7 +258,7 @@ class TokaMaker():
         self.np = -1
         # Reset defaults
         self._tMaker_ptr = c_void_p()
-        self._tMaker_equil = None
+        self._tMaker_equil = []
         self._mesh_ptr = c_void_p()
         self.settings = tokamaker_settings()
         self._cond_dict = {}
@@ -405,9 +405,7 @@ class TokaMaker():
         ncoils = c_int()
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        print('Calling setup wrapper')
         tokamaker_setup(self._tMaker_ptr,order,full_domain,self.n_eq,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
-        print('Called setup wrapper')
         if error_string.value != b'':
             raise Exception(error_string.value)
         # Update vacuum flux
@@ -416,9 +414,10 @@ class TokaMaker():
         self.ncoils = ncoils.value
         self.Lcoils = numpy.ctypeslib.as_array(Lmat_loc,shape=(self.ncoils,self.ncoils))
         # Create equilibirum object
-        self._tMaker_equil = TokaMaker_equilibrium(self)
+        self._tMaker_equil = [TokaMaker_equilibrium(self) for _ in range(self.n_eq)]
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_equil_set(self._tMaker_ptr,self._tMaker_equil.c_ptr,error_string)
+        for eq_idx in range(self.n_eq):
+            tokamaker_equil_set(self._tMaker_ptr,self._tMaker_equil[eq_idx].c_ptr,eq_idx+1,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         # Get limiter contour
@@ -785,7 +784,7 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.load_profiles(f_file,foffset,p_file,eta_file,f_NI_file)
 
-    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
+    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False, eq_idx=0):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
         @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations in normalized Psi ['x']
@@ -796,7 +795,7 @@ class TokaMaker():
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files)
+        return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files, eq_idx=eq_idx)
     
     def get_profile_dofs(self, prof_type):
         r'''! Retrieve degrees of freedom for desired flux profile
@@ -1121,34 +1120,34 @@ class TokaMaker():
                 return c_double(value)
         # Reset all targets unless specified
         if not retain_previous:
-            self._tMaker_equil._Ip_target = None
-            self._tMaker_equil._estored_target = None
-            self._tMaker_equil._dflux_target = None
-            self._tMaker_equil._pax_target = None
-            self._tMaker_equil._Ip_ratio_target = None
-            self._tMaker_equil._R0_target = None
-            self._tMaker_equil._Z0_target = None
+            self._tMaker_equil[eq_idx]._Ip_target = None
+            self._tMaker_equil[eq_idx]._estored_target = None
+            self._tMaker_equil[eq_idx]._dflux_target = None
+            self._tMaker_equil[eq_idx]._pax_target = None
+            self._tMaker_equil[eq_idx]._Ip_ratio_target = None
+            self._tMaker_equil[eq_idx]._R0_target = None
+            self._tMaker_equil[eq_idx]._Z0_target = None
         # Set new targets
         if Ip is not None:
             if (Ip <= 0.0) and (not self._oft_env.float_is_disabled(Ip)):
                 raise ValueError("`Ip_target` must be positive or set to `OFT_env.float_disable_flag` to disable")
-            self._tMaker_equil._Ip_target = copy.copy(Ip)
+            self._tMaker_equil[eq_idx]._Ip_target = copy.copy(Ip)
         if estore is not None:
             if (estore <= 0.0) and (not self._oft_env.float_is_disabled(estore)):
                 raise ValueError("`estore` must be positive or set to `OFT_env.float_disable_flag` to disable")
-            self._tMaker_equil._estored_target = copy.copy(estore)
+            self._tMaker_equil[eq_idx]._estored_target = copy.copy(estore)
         if Dflux is not None:
-            self._tMaker_equil._dflux_target = copy.copy(Dflux)
+            self._tMaker_equil[eq_idx]._dflux_target = copy.copy(Dflux)
         if pax is not None:
             if (pax <= 0.0) and (not self._oft_env.float_is_disabled(pax)):
                 raise ValueError("`pax` must be positive or set to `OFT_env.float_disable_flag` to disable")
-            self._tMaker_equil._pax_target = copy.copy(pax)
+            self._tMaker_equil[eq_idx]._pax_target = copy.copy(pax)
         if Ip_ratio is not None:
             self._tMaker_equil._Ip_ratio_target = copy.copy(Ip_ratio)
         if R0 is not None:
             if (R0 <= 0.0) and (not self._oft_env.float_is_disabled(R0)):
                 raise ValueError("`R0` must be positive or set to `OFT_env.float_disable_flag` to disable")
-            self._tMaker_equil._R0_target = copy.copy(R0)
+            self._tMaker_equil[eq_idx]._R0_target = copy.copy(R0)
         if V0 is not None:
             warn(
                 "`V0` is deprecated, use `Z0` instead. This argument will be removed in a future version.",
@@ -1157,16 +1156,16 @@ class TokaMaker():
             )
             Z0 = V0
         if Z0 is not None:
-            self._tMaker_equil._Z0_target = copy.copy(Z0)
+            self._tMaker_equil[eq_idx]._Z0_target = copy.copy(Z0)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_targets(self._tMaker_ptr,
-                              float_to_c(self._tMaker_equil._Ip_target),
-                              float_to_c(self._tMaker_equil._Ip_ratio_target),
-                              float_to_c(self._tMaker_equil._pax_target),
-                              float_to_c(self._tMaker_equil._estored_target),
-                              float_to_c(self._tMaker_equil._dflux_target),
-                              float_to_c(self._tMaker_equil._R0_target),
-                              float_to_c(self._tMaker_equil._Z0_target),
+                              float_to_c(self._tMaker_equil[eq_idx]._Ip_target),
+                              float_to_c(self._tMaker_equil[eq_idx]._Ip_ratio_target),
+                              float_to_c(self._tMaker_equil[eq_idx]._pax_target),
+                              float_to_c(self._tMaker_equil[eq_idx]._estored_target),
+                              float_to_c(self._tMaker_equil[eq_idx]._dflux_target),
+                              float_to_c(self._tMaker_equil[eq_idx]._R0_target),
+                              float_to_c(self._tMaker_equil[eq_idx]._Z0_target),
                               eq_idx+1,
                               error_string
         )
@@ -2486,7 +2485,7 @@ class TokaMaker_equilibrium():
         r'''! Mirnov constraint points'''
         return self._mirnov_constraints
 
-    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
+    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none', eq_idx=0):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
@@ -2502,11 +2501,11 @@ class TokaMaker_equilibrium():
         eta_file_c = self._oft_env.path2c(eta_file)
         f_NI_file_c = self._oft_env.path2c(f_NI_file)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_load_profiles(self.c_ptr,f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c,error_string)
+        tokamaker_load_profiles(self.c_ptr,f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c,eq_idx+1,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
+    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False,eq_idx=0):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
         @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations in normalized Psi ['x']
@@ -2531,7 +2530,7 @@ class TokaMaker_equilibrium():
             ffp_NI_file = self._oft_env.unique_tmpfile('tokamaker_ffp_NI.prof')
             create_prof_file(self, ffp_NI_file, ffp_NI_prof, "ffp_NI")
             delete_files.append(ffp_NI_file)
-        self.load_profiles(f_file=ffp_file,foffset=foffset,p_file=pp_file,f_NI_file=ffp_NI_file)
+        self.load_profiles(f_file=ffp_file,foffset=foffset,p_file=pp_file,f_NI_file=ffp_NI_file,eq_idx=eq_idx)
         if not keep_files:
             for file in delete_files:
                 try:
