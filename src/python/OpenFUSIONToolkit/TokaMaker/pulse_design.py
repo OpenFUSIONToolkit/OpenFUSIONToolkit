@@ -263,6 +263,10 @@ class TokaMaker_TORAX:
 
         self._current_loop = 0
 
+        self._coupling_cost_history = []
+
+        self._error_history = []
+
         if tm_times is None:
             self._tm_times = sorted(eqtimes)
         else:
@@ -304,6 +308,7 @@ class TokaMaker_TORAX:
         self._state['beta_N_tx']= np.zeros(N)
         self._state['beta_pol'] = np.zeros(N)
         self._state['l_i_tm']   = np.zeros(N)
+        self._state['l_i_tx']   = np.zeros(N)   # TX internal inductance (li3), for l_i error
         self._state['vloop_tm'] = np.zeros(N)
         self._state['vloop_tx'] = np.zeros(N)
         self._state['f_GW']     = np.zeros(N)
@@ -325,6 +330,14 @@ class TokaMaker_TORAX:
         self._state['psi_axis_tx']     = np.zeros(N)
         self._state['psi_lcfs_tx']     = np.zeros(N)
         self._state['psi_grid_prev_tm']= np.zeros(N)  # psi on nodes from previous TM solve, for warm-starting
+
+        # ── Coupling error metrics (TM achieved vs TORAX target) ─────────────────
+        for _ek in _ERROR_KEYS:
+            self._state[_ek] = np.full(N, np.nan)
+
+        # Per-time coupling-convergence cost (flavor-2 aggregate); overwritten each loop
+        # like the err_* arrays. The per-loop history lives in _coupling_cost_history.
+        self._state['coupling_cost'] = np.full(N, np.nan)
 
         # ── Safety factor profiles {i: {'x':..., 'y':..., 'type':...}} ─────────
         self._state['q_prof_eqdsk'] = {}
@@ -434,7 +447,7 @@ class TokaMaker_TORAX:
         psi_lcfs = []
         pres_prof = []
 
-        def interp_tm_lcfs(lcfs, n=N_PSI):
+        def interp_tm_lcfs(lcfs, n=50):
             r'''! Interpolates LCFS geometry points between input eqtimes to fill in all tm_times.'''
             x = lcfs[:, 0]
             y = lcfs[:, 1]
@@ -3145,6 +3158,10 @@ class TokaMaker_TORAX:
         self._state['pax'][i]       = self._extract_tx_scalar_at_rho(data_tree, 'pressure_thermal_total', t, 0.0)
         self._state['beta_pol'][i]  = self._extract_tx_scalar(data_tree, 'beta_pol', t)
         self._state['beta_N_tx'][i] = self._extract_tx_scalar(data_tree, 'beta_N', t)
+        try:
+            self._state['l_i_tx'][i] = self._extract_tx_scalar(data_tree, 'li3', t)
+        except Exception:
+            self._state['l_i_tx'][i] = np.nan
         self._state['vloop_tx'][i]  = self._extract_tx_scalar(data_tree, 'v_loop_lcfs', t)
         self._state['f_GW'][i]      = self._extract_tx_scalar(data_tree, 'fgw_n_e_line_avg', t)
         self._state['f_GW_vol'][i]  = self._extract_tx_scalar(data_tree, 'fgw_n_e_volume_avg', t)
@@ -4041,22 +4058,198 @@ class TokaMaker_TORAX:
         self._state['psi_grid_prev_tm'][i] = self._state['equil'][i].get_psi(normalized=False)
         self._psi_warm_start[i] = self._state['equil'][i].get_psi(normalized=False)  # persist across steps
 
-        # Extract LCFS contour and X-points from the solved equilibrium
-        try:
-            lcfs_tm = self._state['equil'][i].trace_surf(1.0)    
-        except Exception:
-            try:
-                lcfs_tm = self._state['equil'][i].trace_lcfs(0.99)  
-            except Exception:
-                self._state['lcfs_geo_tm'][i] = None
-
-        self._state['lcfs_geo_tm'][i] = np.asarray(lcfs_tm) if lcfs_tm is not None else None    
+        # Extract LCFS contour and X-points from the solved equilibrium. Tracing exactly
+        # at the separatrix (psi_N=1.0) is unreliable for diverted equilibria (the surface
+        # is singular at the X-point), so fall through successive inner surfaces — the same
+        # robust helper the LCFS-evolution plot uses. Doing this here keeps lcfs_geo_tm dense
+        # through the diverted phase (previously it went None, breaking the LCFS shape error).
+        lcfs_tm = _trace_lcfs_for_evolution_plot(self._state['equil'][i])
+        self._state['lcfs_geo_tm'][i] = np.asarray(lcfs_tm) if lcfs_tm is not None else None
         
         try:
             x_pts, _ = self._state['equil'][i].get_xpoints()
             self._state['x_pts_tm'][i] = np.asarray(x_pts) if x_pts is not None else None
         except Exception:
             self._state['x_pts_tm'][i] = None
+
+
+    def _compute_errors(self):
+        r'''! Compute per-timestep coupling error metrics (TokaMaker achieved vs TORAX
+                target) and store them in the err_* state arrays. Called once per loop,
+                after all TM solves, just before plotting. All error arrays have one entry
+                per tm_time and are overwritten each loop (they reflect the latest loop only).
+                NaN marks a time where the channel is undefined: no TM/TX data yet for that
+                time, or X-points outside the diverted window.
+
+                Sign convention for the raw scalar differences is (TM - TX). RMS profile
+                errors are in the profiles' native (real) units on the TM psi_N grid. LCFS
+                and X-point errors are geometric distances in metres.
+        '''
+        s = self._state
+        times = np.asarray(self._tm_times, dtype=float)
+        N = len(times)
+
+        # Reset every channel to NaN so a channel that is not populated this loop (e.g.
+        # a failed solve, or X-points outside the diverted window) reads as "no data".
+        for _ek in _ERROR_KEYS:
+            s[_ek] = np.full(N, np.nan)
+
+        div = getattr(self, '_diverted_times', None)
+        for i in range(N):
+            t = times[i]
+
+            # ── Raw scalar differences (TM - TX) ──
+            s['err_psi_lcfs'][i] = s['psi_lcfs_tm'][i] - s['psi_lcfs_tx'][i]
+            s['err_psi_axis'][i] = s['psi_axis_tm'][i] - s['psi_axis_tx'][i]
+            s['err_q0'][i]       = s['q0_tm'][i]  - s['q0'][i]
+            s['err_q95'][i]      = s['q95_tm'][i] - s['q95'][i]
+            s['err_Ip'][i]       = s['Ip_tm'][i]  - s['Ip_tx'][i]
+            s['err_vloop'][i]    = s['vloop_tm'][i] - s['vloop_tx'][i]
+            s['err_beta_N'][i]   = s['beta_N_tm'][i] - s['beta_N_tx'][i]
+            s['err_l_i'][i]      = s['l_i_tm'][i] - s['l_i_tx'][i]
+
+            # ── RMS profile differences (real units, on the TM psi_N grid) ──
+            s['err_q_rms'][i]   = _rms_prof_diff(s['q_prof_tm'].get(i),   s['q_prof_tx'].get(i))
+            s['err_ffp_rms'][i] = _rms_prof_diff(s['ffp_prof_tm'].get(i), s['ffp_prof_tx'].get(i))
+            s['err_pp_rms'][i]  = _rms_prof_diff(s['pp_prof_tm'].get(i),  s['pp_prof_tx'].get(i))
+            s['err_p_rms'][i]   = _rms_prof_diff(s['p_prof_tm'].get(i),   s['p_prof_tx'].get(i))
+
+            # ── LCFS shape RMS: min distance of each isoflux target (as actually set —
+            #    trimmed near X-points, strike points folded in) to the achieved LCFS ──
+            s['err_lcfs_rms'][i] = _lcfs_shape_rms(
+                s['isoflux_targets'].get(i), s['lcfs_geo_tm'].get(i))
+
+            # ── X-point RMS: only meaningful inside the diverted window, where the
+            #    saddle constraints are active. Primary and secondary reported separately,
+            #    each target null paired to its nearest achieved X-point. ──
+            if div is not None and div[0] <= t <= div[1]:
+                s['err_xpt_primary_rms'][i] = _xpt_rms(
+                    self._x_point_targets, s['x_pts_tm'].get(i))
+                s['err_xpt_secondary_rms'][i] = _xpt_rms(
+                    self._secondary_x_point_targets, s['x_pts_tm'].get(i))
+
+        # ── Flux-consumption error [Wb], referenced (like plot_scalars) to each series'
+        #    own first solved time; TM and TX each use their own reference. ──
+        psi_lcfs_tm = np.asarray(s['psi_lcfs_tm'], dtype=float)
+        psi_lcfs_tx = np.asarray(s['psi_lcfs_tx'], dtype=float)
+
+        def _first_valid(a):
+            idx = np.where(np.isfinite(a) & (a != 0.0))[0]
+            return int(idx[0]) if idx.size else None
+
+        ref_tm = _first_valid(psi_lcfs_tm)
+        ref_tx = _first_valid(psi_lcfs_tx)
+        if ref_tm is not None and ref_tx is not None:
+            flux_tm = -(psi_lcfs_tm - psi_lcfs_tm[ref_tm]) * 2.0 * np.pi
+            flux_tx = -(psi_lcfs_tx - psi_lcfs_tx[ref_tx]) * 2.0 * np.pi
+            err_flux = flux_tm - flux_tx
+            bad = ((psi_lcfs_tm == 0.0) | (psi_lcfs_tx == 0.0)
+                   | ~np.isfinite(psi_lcfs_tm) | ~np.isfinite(psi_lcfs_tx))
+            err_flux[bad] = np.nan
+            s['err_flux'] = err_flux
+
+
+    def _compute_coupling_cost(self):
+        r'''! Flavor-2 coupling-convergence cost: a single dimensionless scalar per
+                timestep (stored in state['coupling_cost'], overwritten each loop) plus a
+                per-loop aggregate appended to self._coupling_cost_history (the trend that
+                is the point of this metric). Requires _compute_errors() to have run first.
+
+                Each physics channel's error is normalized by a characteristic TORAX scale
+                to a dimensionless fraction, then channels are combined as a weight-
+                normalized RMS. Weights live in _COUPLING_COST_WEIGHTS and floors in
+                _COUPLING_COST_FLOORS (both module-level; see the tuning notes there).
+        '''
+        s = self._state
+        N = len(self._tm_times)
+
+        def _prof_scale(dct, reducer):
+            r'''Per-time characteristic scale from a {i: {'x','y'}} TORAX profile dict.'''
+            out = np.full(N, np.nan)
+            for i in range(N):
+                p = dct.get(i)
+                if p is None:
+                    continue
+                y = np.abs(np.asarray(p['y'], dtype=float))
+                if y.size:
+                    out[i] = reducer(y)
+            return out
+
+        # Characteristic per-time TORAX scale for each channel (matches the err_* units).
+        psi_scale = np.abs(np.asarray(s['psi_lcfs_tx'], float) - np.asarray(s['psi_axis_tx'], float))
+        flux_tx = np.asarray(s['psi_lcfs_tx'], float)
+        _fin = np.where(np.isfinite(flux_tx) & (flux_tx != 0.0))[0]
+        if _fin.size:
+            flux_swing = np.abs((flux_tx - flux_tx[int(_fin[0])]) * 2.0 * np.pi)
+            flux_ref = np.full(N, np.nanmax(flux_swing) if np.any(np.isfinite(flux_swing)) else np.nan)
+        else:
+            flux_ref = np.full(N, np.nan)
+
+        scales = {
+            'err_psi_lcfs': psi_scale,
+            'err_psi_axis': psi_scale,
+            'err_flux':     flux_ref,
+            'err_q0':       np.abs(np.asarray(s['q0'], float)),
+            'err_q95':      np.abs(np.asarray(s['q95'], float)),
+            'err_q_rms':    _prof_scale(s['q_prof_tx'],   np.mean),
+            'err_ffp_rms':  _prof_scale(s['ffp_prof_tx'], np.max),
+            'err_pp_rms':   _prof_scale(s['pp_prof_tx'],  np.max),
+            'err_p_rms':    _prof_scale(s['p_prof_tx'],   np.max),
+            'err_Ip':       np.abs(np.asarray(s['Ip_tx'], float)),
+            'err_vloop':    np.abs(np.asarray(s['vloop_tx'], float)),
+            'err_beta_N':   np.abs(np.asarray(s['beta_N_tx'], float)),
+            'err_l_i':      np.abs(np.asarray(s['l_i_tx'], float)),
+            # Geometric errors are metres; normalize by the minor radius so they read as
+            # a fraction of machine size, comparable to the dimensionless physics channels.
+            'err_lcfs_rms':          np.abs(np.asarray(s['a'], float)),
+            'err_xpt_primary_rms':   np.abs(np.asarray(s['a'], float)),
+            'err_xpt_secondary_rms': np.abs(np.asarray(s['a'], float)),
+        }
+
+        # Normalized (dimensionless) per-time error for each weighted channel.
+        norm = {}
+        for ch in _COUPLING_COST_WEIGHTS:
+            err = np.abs(np.asarray(s[ch], dtype=float))
+            scale = scales[ch]
+            floor = _COUPLING_COST_FLOORS.get(ch, 0.0)
+            ok = np.isfinite(err) & np.isfinite(scale) & (scale > floor)
+            n = np.full(N, np.nan)
+            n[ok] = err[ok] / scale[ok]
+            norm[ch] = n
+
+        # Weight-normalized RMS across the contributing channels at each time.
+        cost = np.full(N, np.nan)
+        for i in range(N):
+            num = 0.0
+            den = 0.0
+            for ch, w in _COUPLING_COST_WEIGHTS.items():
+                if w == 0.0:
+                    continue
+                v = norm[ch][i]
+                if not np.isfinite(v):
+                    continue
+                num += w * v * v
+                den += w
+            if den > 0.0:
+                cost[i] = np.sqrt(num / den)
+        s['coupling_cost'] = cost
+
+        finite = cost[np.isfinite(cost)]
+        cost_mean = float(np.mean(finite)) if finite.size else np.nan
+        cost_max = float(np.max(finite)) if finite.size else np.nan
+        per_channel_mean = {}
+        for ch, n in norm.items():
+            nf = n[np.isfinite(n)]
+            per_channel_mean[ch] = float(np.mean(nf)) if nf.size else np.nan
+
+        self._coupling_cost_history.append({
+            'loop': int(self._current_loop),
+            'cost_mean': cost_mean,
+            'cost_max': cost_max,
+            'per_channel_mean': per_channel_mean,
+        })
+        self._log(f'Loop {self._current_loop}: coupling-convergence cost '
+                  f'mean={cost_mean:.4f} max={cost_max:.4f}')
 
 
     # ─── I/O & Logging ──────────────────────────────────────────────────────────
@@ -4517,6 +4710,32 @@ class TokaMaker_TORAX:
                 self._log(f'TX Convergence error = {err*100.0:.3f} %')
                 self._log(f'Difference Convergence error = {cflux_diff:.4f} %')
 
+                # Coupling error metrics: compute once per loop (fills the err_* state
+                # arrays) so they are available to plot_errors and to save_state, even
+                # when plotting is off.
+                try:
+                    self._compute_errors()
+                except Exception as _e:
+                    self._log(f'_compute_errors failed at loop {self._current_loop}: {_e}')
+
+                # Flavor-2 aggregate: single coupling-convergence cost + per-loop history.
+                # Runs after _compute_errors (which fills the err_* arrays it normalizes).
+                try:
+                    self._compute_coupling_cost()
+                except Exception as _e:
+                    self._log(f'_compute_coupling_cost failed at loop {self._current_loop}: {_e}')
+
+                # Snapshot this loop's per-time error traces so plot_errors can overlay all
+                # loops. Taken after both compute steps so coupling_cost is included.
+                try:
+                    self._error_history.append({
+                        'loop': int(self._current_loop),
+                        'arrays': {k: np.array(self._state[k], dtype=float).copy()
+                                   for k in (_ERROR_KEYS + ['coupling_cost'])},
+                    })
+                except Exception as _e:
+                    self._log(f'error-history snapshot failed at loop {self._current_loop}: {_e}')
+
                 if self._output_mode in ('normal', 'minimal', 'debug') and self._out_dir is not None:
                     scalars_name = f'scalars_loop{self._current_loop:03d}.png'
                     if self._output_file_tag is not None:
@@ -4526,6 +4745,26 @@ class TokaMaker_TORAX:
                         plot_scalars(self, save_path=_scalars_path, display=False)
                     except Exception as _e:
                         self._log(f'plot_scalars failed at loop {self._current_loop}: {_e}')
+
+                    errors_name = f'errors_loop{self._current_loop:03d}.png'
+                    if self._output_file_tag is not None:
+                        errors_name = f'{self._output_file_tag}_{errors_name}'
+                    _errors_path = os.path.join(self._out_dir, errors_name)
+                    try:
+                        plot_errors(self, save_path=_errors_path, display=False)
+                    except Exception as _e:
+                        self._log(f'plot_errors failed at loop {self._current_loop}: {_e}')
+
+                    # Coupling-convergence trend across loops (overwritten each loop; shows
+                    # every loop completed so far).
+                    conv_name = 'coupling_convergence.png'
+                    if self._output_file_tag is not None:
+                        conv_name = f'{self._output_file_tag}_{conv_name}'
+                    _conv_path = os.path.join(self._out_dir, conv_name)
+                    try:
+                        plot_coupling_convergence(self, save_path=_conv_path, display=False)
+                    except Exception as _e:
+                        self._log(f'plot_coupling_convergence failed at loop {self._current_loop}: {_e}')
 
                     plh_name = f'PLH_components_loop{self._current_loop:03d}.png'
                     if self._output_file_tag is not None:
@@ -5116,6 +5355,24 @@ class TokaMaker_TORAX:
                 
         '''
         return plot_scalars(self, save_path=save_path, display=display, **kwargs)
+
+    def plot_errors(self, save_path=None, display=True, **kwargs):
+        r'''! Plot per-timestep TokaMaker-vs-TORAX coupling error metrics (one figure per
+                loop; layout mirrors plot_scalars). Reads the err_* arrays populated by
+                _compute_errors(); call fly() (or _compute_errors()) first.
+                @param save_path Path to save figure. If None, does not save.
+                @param display Whether to show the plot.
+        '''
+        return plot_errors(self, save_path=save_path, display=display, **kwargs)
+
+    def plot_coupling_convergence(self, save_path=None, display=True, **kwargs):
+        r'''! Plot the coupling-convergence cost vs loop (the loop-over-loop trend of the
+                flavor-2 aggregate). Reads _coupling_cost_history, populated once per loop
+                during fly(); does nothing if no loops have completed.
+                @param save_path Path to save figure. If None, does not save.
+                @param display Whether to show the plot.
+        '''
+        return plot_coupling_convergence(self, save_path=save_path, display=display, **kwargs)
 
     def plot_profiles(self, **kwargs):
         r'''! Interactive profile viewer (ipywidgets slider in Jupyter, static otherwise).'''
@@ -6062,7 +6319,7 @@ def _tm_diag_equil_targets(tt, ax, i, equil):
         except Exception:
             xpts = None
         if xpts is not None and len(xpts) > 0:
-            handles.append(plt.Line2D([], [], color='r', marker='x', ls='none', ms=7, mew=1.5,
+            handles.append(plt.Line2D([], [], color='purple', marker='x', ls='none', ms=7, mew=1.5,
                                       label='X-point achieved'))
     return handles
 
@@ -7184,6 +7441,7 @@ def plot_scalars(tt, save_path=None, display=True):
     t_h98, y_h98 = _tx_scalar(tt, 'H98')
     if t_tau is not None:
         ax.plot(t_tau, y_tau, color=COLOR_TX, ls='-', lw=1, label=r'$\tau_E$')
+        ax.set_ylim(0, 1.5)
     ax.set_xlabel('Time [s]')
     ax.set_ylabel(r'$\tau_E$ [s]')
     ax.grid(True, alpha=0.3)
@@ -7317,6 +7575,316 @@ def plot_scalars(tt, save_path=None, display=True):
     # UserWarning). The gridspec hspace/wspace above already set the spacing; just reserve
     # the top margin for the suptitle.
     plt.subplots_adjust(top=0.92)
+    _save_or_display(fig, save_path, display)
+
+
+# ── Coupling error metrics (TM achieved vs TORAX target) ──────────────────────
+# One (state_key, title, y-axis label) per error channel. _ERROR_KEYS drives both
+# the state-array initialization and _compute_errors(); _ERROR_SPECS additionally
+# drives the plot_errors() layout (filled row-major into a 4-column grid). Keep the
+# ordering grouped: flux/psi, safety factor, source & pressure profiles, geometry,
+# global consistency.
+_ERROR_SPECS = [
+    ('err_psi_lcfs',          r'$\psi_{lcfs}$ error (TM$-$TX)',      r'$\Delta\psi$ [Wb/rad]'),
+    ('err_psi_axis',          r'$\psi_{axis}$ error (TM$-$TX)',      r'$\Delta\psi$ [Wb/rad]'),
+    ('err_flux',              'Flux consumption error (TM$-$TX)',    r'$\Delta$ flux [Wb]'),
+    ('err_Ip',                'Ip error (TM$-$TX)',                  r'$\Delta I_p$ [A]'),
+    ('err_q0',                r'$q_0$ error (TM$-$TX)',              r'$\Delta q_0$'),
+    ('err_q95',               r'$q_{95}$ error (TM$-$TX)',           r'$\Delta q_{95}$'),
+    ('err_q_rms',             'q profile RMS error',                 r'RMS $\Delta q$'),
+    ('err_vloop',             r'$V_{loop}$ error (TM$-$TX)',         r'$\Delta V_{loop}$ [V]'),
+    ('err_ffp_rms',           "FF' profile RMS error",               r"RMS $\Delta$FF'"),
+    ('err_pp_rms',            "p' profile RMS error",                r"RMS $\Delta$p'"),
+    ('err_p_rms',             'p profile RMS error',                 r'RMS $\Delta p$ [Pa]'),
+    ('err_beta_N',            r'$\beta_N$ error (TM$-$TX)',          r'$\Delta\beta_N$'),
+    ('err_lcfs_rms',          'LCFS shape RMS error',                'RMS dist [m]'),
+    ('err_xpt_primary_rms',   'Primary X-point RMS error',           'RMS dist [m]'),
+    ('err_xpt_secondary_rms', 'Secondary X-point RMS error',         'RMS dist [m]'),
+    ('err_l_i',               r'$l_i$ error (TM$-$TX)',              r'$\Delta l_i$'),
+]
+_ERROR_KEYS = [spec[0] for spec in _ERROR_SPECS]
+
+
+# ── Coupling-convergence cost (flavor 2) ──────────────────────────────────────
+# A single dimensionless scalar per timestep (and per loop) measuring how well the
+# TokaMaker equilibrium and the TORAX transport solution AGREE — i.e. the quantity
+# the fixed-point coupling drives toward zero loop-over-loop. Each physics channel's
+# error is normalized by a characteristic TORAX scale (so metres, Wb/rad, q, Pa … all
+# become comparable dimensionless fractions), then combined as a weight-normalized RMS:
+#
+#     cost(i) = sqrt( Σ_c w_c · (|err_c(i)| / scale_c(i))²  /  Σ_c w_c )
+#
+# cost ≈ 0 means TM and TX agree on the weighted channels; cost ~ 1 means ~100%
+# fractional mismatch. Only channels with a finite, above-floor scale at time i
+# contribute there (the Σw is over the contributing channels), so a missing/zero
+# TORAX reference simply drops that channel rather than blowing up.
+#
+# ── HOW TO TUNE (internal — deliberately NOT a public API argument) ──
+#   • To reweight: edit a value in _COUPLING_COST_WEIGHTS below. Larger = that channel
+#     matters more to the reported convergence; 0.0 removes it. Only the RATIOS matter
+#     (the Σw normalization makes the overall scale weight-invariant), so e.g. doubling
+#     every weight changes nothing.
+#   • Defaults: primary coupled quantities (q profile, FF'/p' sources, boundary flux)
+#     at 1.0; derived/secondary scalars and the geometric shape/X-point errors at 0.5;
+#     the Ip sanity check at 0.25 (TM is constrained to Ip, so its error should be ~0).
+#   • The geometric channels (err_lcfs_rms, err_xpt_*) are constraint-SATISFACTION, not
+#     TM↔TX coupling: they are set by the TM constraints each solve and are roughly loop-
+#     independent, so they add a near-constant floor to the trend rather than converging.
+#     They are included so their normalized rms appears in the per-channel convergence
+#     plot; set their weight to 0.0 if you want a pure coupling-convergence cost. (A
+#     weight-0 channel is still normalized and plotted, it just does not enter the cost.)
+#   • The _COUPLING_COST_FLOORS values only guard against divide-by-zero on a tiny/zero
+#     scale; leave them unless a channel's normalization is misbehaving. A larger floor
+#     makes that channel's fractional error smaller (less sensitive).
+_COUPLING_COST_WEIGHTS = {
+    'err_q_rms':    1.0,   # safety-factor profile agreement (primary)
+    'err_ffp_rms':  1.0,   # FF' source agreement (primary)
+    'err_pp_rms':   1.0,   # p' source agreement (primary)
+    'err_psi_lcfs': 1.0,   # boundary poloidal flux (primary)
+    'err_flux':     1.0,   # flux consumption (primary)
+    'err_q0':       0.5,
+    'err_q95':      0.5,
+    'err_p_rms':    0.5,
+    'err_psi_axis': 0.5,
+    'err_beta_N':   0.5,
+    'err_l_i':      0.5,
+    'err_vloop':    0.5,
+    'err_lcfs_rms':          0.5,  # geometric (constraint satisfaction); normalized by a
+    'err_xpt_primary_rms':   0.5,  # geometric; NaN outside the diverted window
+    'err_xpt_secondary_rms': 0.5,  # geometric; NaN outside the diverted window
+    'err_Ip':       0.25,  # sanity check: TM is constrained to Ip, should stay ~0
+}
+
+# Minimum characteristic scale per channel; below it the channel is dropped at that
+# time (avoids dividing a small error by a ~0 reference). Units match each channel's
+# TORAX scale (see _compute_coupling_cost). Tune only if a channel misbehaves.
+_COUPLING_COST_FLOORS = {
+    'err_psi_lcfs': 1e-9,  # Wb/rad (poloidal-flux swing)
+    'err_psi_axis': 1e-9,  # Wb/rad
+    'err_flux':     1e-6,  # Wb (peak TX flux consumption over the pulse)
+    'err_q0':       1e-3,
+    'err_q95':      1e-3,
+    'err_q_rms':    1e-3,
+    'err_ffp_rms':  0.0,   # skip only if the TX FF' profile is identically zero
+    'err_pp_rms':   0.0,
+    'err_p_rms':    0.0,
+    'err_Ip':       1e3,   # A
+    'err_vloop':    5e-2,  # V — floor matters: V_loop legitimately passes near 0
+    'err_beta_N':   1e-3,
+    'err_l_i':      1e-3,
+    'err_lcfs_rms':          1e-3,  # m (normalized by minor radius a)
+    'err_xpt_primary_rms':   1e-3,  # m
+    'err_xpt_secondary_rms': 1e-3,  # m
+}
+
+# Panel spec (same tuple shape as _ERROR_SPECS) for the per-time cost, appended to the
+# plot_errors grid.
+_COUPLING_COST_SPEC = ('coupling_cost',
+                       'Coupling convergence cost\n(weighted, normalized)',
+                       'cost [-]')
+
+
+def _rms_prof_diff(prof_a, prof_b):
+    r'''! RMS of (prof_a - prof_b) after interpolating prof_b onto prof_a's x grid.
+            Each profile is a {'x','y'} dict (or None). Returns NaN if either is missing
+            or empty, or no overlapping finite samples remain.'''
+    if prof_a is None or prof_b is None:
+        return np.nan
+    xa = np.asarray(prof_a['x'], dtype=float)
+    ya = np.asarray(prof_a['y'], dtype=float)
+    xb = np.asarray(prof_b['x'], dtype=float)
+    yb = np.asarray(prof_b['y'], dtype=float)
+    if xa.size == 0 or xb.size < 1:
+        return np.nan
+    yb_on_a = np.interp(xa, xb, yb)
+    d = ya - yb_on_a
+    d = d[np.isfinite(d)]
+    if d.size == 0:
+        return np.nan
+    return float(np.sqrt(np.mean(d ** 2)))
+
+
+def _lcfs_shape_rms(targets, contour):
+    r'''! RMS over each target point of its minimum distance to the achieved LCFS
+            contour (treated as a polyline of segments). targets is (K,2) [R,Z], contour
+            is (M,2) [R,Z]. Returns NaN if either is missing/degenerate. Units: metres.'''
+    if targets is None or contour is None:
+        return np.nan
+    targets = np.asarray(targets, dtype=float)
+    contour = np.asarray(contour, dtype=float)
+    if targets.ndim != 2 or targets.shape[0] == 0 or targets.shape[1] < 2:
+        return np.nan
+    if contour.ndim != 2 or contour.shape[0] < 2 or contour.shape[1] < 2:
+        return np.nan
+    targets = targets[:, :2]
+    contour = contour[:, :2]
+    p0 = contour[:-1]
+    seg = contour[1:] - p0
+    seg_len2 = np.einsum('ij,ij->i', seg, seg)
+    seg_len2 = np.where(seg_len2 == 0.0, 1e-30, seg_len2)
+    dmin = np.empty(targets.shape[0])
+    for k in range(targets.shape[0]):
+        w = targets[k] - p0
+        tproj = np.clip(np.einsum('ij,ij->i', w, seg) / seg_len2, 0.0, 1.0)
+        proj = p0 + tproj[:, None] * seg
+        diff = targets[k] - proj
+        dmin[k] = np.sqrt(np.min(np.einsum('ij,ij->i', diff, diff)))
+    return float(np.sqrt(np.mean(dmin ** 2)))
+
+
+def _xpt_rms(targets, achieved):
+    r'''! RMS over each target X-point of its distance to the nearest achieved X-point.
+            targets is (n,2) [R,Z] (or None), achieved is (P,>=2) [R,Z,...] (or None).
+            Returns NaN if either is missing/empty. Units: metres.'''
+    if targets is None or achieved is None:
+        return np.nan
+    targets = np.atleast_2d(np.asarray(targets, dtype=float))
+    achieved = np.asarray(achieved, dtype=float)
+    if targets.shape[0] == 0 or targets.shape[1] < 2:
+        return np.nan
+    if achieved.ndim != 2 or achieved.shape[0] == 0 or achieved.shape[1] < 2:
+        return np.nan
+    achieved = achieved[:, :2]
+    d = np.empty(targets.shape[0])
+    for k in range(targets.shape[0]):
+        diff = achieved - targets[k, :2]
+        d[k] = np.sqrt(np.min(np.einsum('ij,ij->i', diff, diff)))
+    return float(np.sqrt(np.mean(d ** 2)))
+
+
+def plot_errors(tt, save_path=None, display=True):
+    r'''! Plot per-timestep TokaMaker-vs-TORAX coupling error metrics, one panel per
+            channel in a 4-column grid (layout mirrors plot_scalars). Every completed
+            coupling loop is overlaid (colour-coded oldest→newest via viridis, newest
+            emphasized) so convergence over loops is visible in one figure; the RMS
+            annotation and legend track the latest loop. Reads the per-loop snapshots in
+            tt._error_history; if that is empty, falls back to the current-loop err_*
+            arrays in state.'''
+    s = tt._state
+    times = np.asarray(tt._tm_times, dtype=float)
+
+    # Raw error channels plus the flavor-2 per-time coupling-convergence cost as a
+    # final panel.
+    specs = list(_ERROR_SPECS) + [_COUPLING_COST_SPEC]
+
+    # One (loop_number, {key: array}) series per completed loop; fall back to the current
+    # state arrays if no snapshots have been taken yet (e.g. called before fly()).
+    history = getattr(tt, '_error_history', None)
+    if history:
+        series = [(h['loop'], h['arrays']) for h in history]
+    else:
+        cur = {key: np.asarray(s.get(key, np.full(len(times), np.nan)), dtype=float)
+               for key, _, _ in specs}
+        series = [(getattr(tt, '_current_loop', 0), cur)]
+    n_series = len(series)
+
+    # Colour by loop: viridis oldest→newest. Single loop keeps the familiar TM colour.
+    if n_series > 1:
+        cmap = plt.get_cmap('viridis')
+        colors = [cmap(0.12 + 0.85 * (k / (n_series - 1))) for k in range(n_series)]
+    else:
+        colors = [COLOR_TM]
+
+    ncol = 4
+    nrow = int(np.ceil(len(specs) / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(4.0 * ncol, 3.0 * nrow), squeeze=False)
+    flat = axes.flat
+
+    for ax_idx, (key, title, ylabel) in enumerate(specs):
+        ax = flat[ax_idx]
+        ax.axhline(0.0, color='gray', lw=0.8, ls=':')
+        for si, (lp, arrs) in enumerate(series):
+            y = np.asarray(arrs.get(key, np.full(len(times), np.nan)), dtype=float)
+            is_last = (si == n_series - 1)
+            ax.plot(times, y, color=colors[si], ls='-',
+                    marker='o', ms=(MK_SZ if is_last else 2),
+                    lw=(1.4 if is_last else 0.9),
+                    alpha=(1.0 if is_last else 0.55))
+        # RMS annotation tracks the latest loop.
+        y_last = np.asarray(series[-1][1].get(key, np.full(len(times), np.nan)), dtype=float)
+        finite = y_last[np.isfinite(y_last)]
+        if finite.size:
+            rms = np.sqrt(np.mean(finite ** 2))
+            ax.text(0.97, 0.95, f'rms={rms:.3g}', transform=ax.transAxes,
+                    ha='right', va='top', fontsize=7,
+                    bbox=dict(boxstyle='round', fc='white', alpha=0.7, ec='none'))
+        else:
+            ax.text(0.5, 0.5, 'no data', transform=ax.transAxes,
+                    ha='center', va='center', fontsize=8, color='gray')
+        ax.set_title(title, fontsize=9)
+        ax.set_xlabel('Time [s]', fontsize=8)
+        ax.set_ylabel(ylabel, fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    # Loop legend in the first unused cell (only when more than one loop is shown).
+    next_idx = len(specs)
+    if n_series > 1 and next_idx < nrow * ncol:
+        lax = flat[next_idx]
+        lax.axis('off')
+        handles = [plt.Line2D([0], [0], color=colors[si], lw=2.5) for si in range(n_series)]
+        labels = [f'loop {lp}' for lp, _ in series]
+        lax.legend(handles, labels, loc='center', fontsize=9, ncol=2,
+                   title='Coupling loop (newest emphasized)')
+        next_idx += 1
+
+    for ax_idx in range(next_idx, nrow * ncol):
+        flat[ax_idx].set_visible(False)
+
+    fig.suptitle(f'TokaMaker − TORAX coupling errors (through loop {tt._current_loop})', fontsize=14)
+    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    _save_or_display(fig, save_path, display)
+
+
+def plot_coupling_convergence(tt, save_path=None, display=True):
+    r'''! Plot the flavor-2 coupling-convergence cost vs coupling loop — the loop-over-loop
+            trend that is the whole point of the aggregate metric. Left panel: total cost
+            (mean and max over time) per loop on a log axis. Right panel: the mean normalized
+            error of each contributing channel per loop, so it is clear which channel
+            dominates and whether the coupling is settling. Reads
+            tt._coupling_cost_history (appended once per loop by _compute_coupling_cost).'''
+    hist = getattr(tt, '_coupling_cost_history', [])
+    if not hist:
+        return
+
+    loops = [h['loop'] for h in hist]
+    cost_mean = [h['cost_mean'] for h in hist]
+    cost_max = [h['cost_max'] for h in hist]
+
+    fig, (ax_tot, ax_ch) = plt.subplots(1, 2, figsize=(13, 4.5))
+
+    ax_tot.plot(loops, cost_mean, color=COLOR_TM, marker='o', ms=5, lw=1.5, label='mean over time')
+    ax_tot.plot(loops, cost_max, color='crimson', marker='s', ms=4, lw=1.2, ls='--', label='max over time')
+    ax_tot.set_title('Coupling-convergence cost per loop')
+    ax_tot.set_xlabel('Coupling loop')
+    ax_tot.set_ylabel('cost [-]')
+    if np.any(np.asarray(cost_mean, dtype=float) > 0):
+        ax_tot.set_yscale('log')
+    ax_tot.grid(True, alpha=0.3, which='both')
+    ax_tot.legend(fontsize=8)
+    if len(loops) > 1:
+        ax_tot.set_xticks(loops)
+
+    # Per-channel mean normalized error, one line per channel.
+    channels = list(_COUPLING_COST_WEIGHTS.keys())
+    cmap = plt.get_cmap('tab20')
+    for ci, ch in enumerate(channels):
+        y = [h['per_channel_mean'].get(ch, np.nan) for h in hist]
+        if not np.any(np.isfinite(y)):
+            continue
+        label = ch.replace('err_', '')
+        ax_ch.plot(loops, y, marker='o', ms=3, lw=1, color=cmap(ci % 20), label=label)
+    ax_ch.set_title('Mean normalized error by channel')
+    ax_ch.set_xlabel('Coupling loop')
+    ax_ch.set_ylabel('normalized error [-]')
+    if np.any(np.isfinite([h['per_channel_mean'].get(c, np.nan) for h in hist for c in channels])):
+        ax_ch.set_yscale('log')
+    ax_ch.grid(True, alpha=0.3, which='both')
+    ax_ch.legend(fontsize=7, ncol=2, loc='upper right')
+    if len(loops) > 1:
+        ax_ch.set_xticks(loops)
+
+    fig.suptitle('TokaMaker ↔ TORAX coupling convergence', fontsize=13)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
     _save_or_display(fig, save_path, display)
 
 
