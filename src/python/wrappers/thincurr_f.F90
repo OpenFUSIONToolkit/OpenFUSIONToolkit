@@ -660,13 +660,16 @@ CALL c_f_pointer(tw_ptr, tw_obj)
 IF(c_associated(sensor_ptr))THEN
   CALL c_f_pointer(sensor_ptr, sensors)
   DO i=1,sensors%nfloops
-    DEALLOCATE(sensors%floops(i)%r)
+    IF(ASSOCIATED(sensors%floops(i)%r))DEALLOCATE(sensors%floops(i)%r)
   END DO
-  DEALLOCATE(sensors%floops)
+  IF(ASSOCIATED(sensors%floops))DEALLOCATE(sensors%floops)
   DO i=1,sensors%njumpers
-    DEALLOCATE(sensors%jumpers(i)%hole_facs,sensors%jumpers(i)%points)
+    IF(ASSOCIATED(sensors%jumpers(i)%hole_facs))DEALLOCATE(sensors%jumpers(i)%hole_facs)
+    IF(ASSOCIATED(sensors%jumpers(i)%points))DEALLOCATE(sensors%jumpers(i)%points)
   END DO
-  DEALLOCATE(sensors%jumpers)
+  IF(ASSOCIATED(sensors%jumpers))DEALLOCATE(sensors%jumpers)
+  DEALLOCATE(sensors)
+  sensor_ptr=c_null_ptr
 END IF
 ALLOCATE(sensors)
 !
