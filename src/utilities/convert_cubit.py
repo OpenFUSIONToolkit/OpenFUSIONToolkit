@@ -10,6 +10,7 @@ import os
 import numpy as np
 import h5py
 import netCDF4
+from OpenFUSIONToolkit.meshing import write_native_mesh
 
 tri_ed_map = np.array([
     [0,1],
@@ -225,44 +226,6 @@ This may be normal or could indicate an error""".format(np_total-np_orig))
     #
     return mesh_type, r_new, lc_new, reg, node_sets, side_sets, ho_info, block_attrs, block_names
 
-def write_file(filename, mesh_type, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, block_attrs=None, block_names=None, periodic_info=None):
-    print()
-    print("Saving mesh: {0}".format(filename))
-    with h5py.File(filename, 'w') as h5_file:
-        # Write out basic mesh information
-        h5_file.create_dataset('mesh/R', data=r, dtype='f8')
-        dset = h5_file.create_dataset('mesh/LC', data=lc, dtype='i4')
-        dset.attrs["TYPE"] = mesh_type.split('_')[0].encode('ascii')
-        h5_file.create_dataset('mesh/REG', data=reg, dtype='i4')
-        # Write out high-order mesh information (nodes and indexing information)
-        if ho_info is not None:
-            h5_file.create_dataset('mesh/ho_info/R', data=ho_info[0], dtype='f8')
-            h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1], dtype='i4')
-            if ho_info[2] is not None:
-                h5_file.create_dataset('mesh/ho_info/LF', data=ho_info[2], dtype='i4')
-        # Write block names
-        if block_names is not None:
-            max_len = max(map(len, block_names))
-            h5_file.create_dataset('mesh/reg_attr/BLOCK_NAMES', data=np.array(block_names, dtype=f"S{max_len}"))
-        # Write block attributes
-        if len(block_attrs) > 0:
-            h5_file.create_dataset('mesh/reg_attr/NUM_ATTR', data=[len(block_attrs),], dtype='i4')
-            for i, block_attr in enumerate(block_attrs):
-                h5_file.create_dataset('mesh/reg_attr/ATTR{0:04d}'.format(i+1), data=block_attr, dtype='f8')
-        # Write nodesets
-        if len(node_sets) > 0:
-            h5_file.create_dataset('mesh/NUM_NODESETS', data=[len(node_sets),], dtype='i4')
-            for i, node_set in enumerate(node_sets):
-                h5_file.create_dataset('mesh/NODESET{0:04d}'.format(i+1), data=node_set, dtype='i4')
-        # Write sidesets (2D entity blocks)
-        if len(side_sets) > 0:
-            h5_file.create_dataset('mesh/NUM_SIDESETS', data=[len(side_sets),], dtype='i4')
-            for i, side_set in enumerate(side_sets):
-                h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(i+1), data=side_set, dtype='i4')
-        # Write flag for periodic nodes following mesh reflection
-        if periodic_info is not None:
-            h5_file.create_dataset('mesh/periodicity/nodes', data=periodic_info, dtype='i4')
-
 
 parser = argparse.ArgumentParser()
 parser.description = "Pre-processing script for mesh files"
@@ -287,4 +250,5 @@ if options.periodic_nodeset is not None:
     periodic_info = node_sets.pop(options.periodic_nodeset-1)
 
 # Write output file
-write_file(out_file, mesh_type, r, lc, reg, node_sets, side_sets, ho_info, block_attrs, block_names, periodic_info)
+write_native_mesh(out_file, mesh_type, r, lc, reg, nodesets=node_sets, sidesets=side_sets,
+                  ho_info=ho_info, periodic_info=periodic_info, block_attrs=block_attrs, block_names=block_names)

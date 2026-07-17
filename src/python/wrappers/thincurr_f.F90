@@ -160,9 +160,9 @@ ELSE
   i=MAXVAL(tw_obj%mesh%reg)
   tw_obj%mesh%nreg=oft_mpi_max(i)
   !
-  IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/pmap'))THEN
+  IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/PMAP'))THEN
     ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
-    CALL hdf5_read(tw_obj%pmap,TRIM(filename),'thincurr/periodicity/pmap',success)
+    CALL hdf5_read(tw_obj%pmap,TRIM(filename),'thincurr/periodicity/PMAP',success)
     IF(.NOT.success)THEN
       CALL copy_string('Error reading periodicity information from mesh file',error_str)
       RETURN

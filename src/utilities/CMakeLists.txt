@@ -18,6 +18,7 @@ set( OFT_PY_BINS
   scripts/plot_mug_hist.py
   scripts/plot_tokamaker_psi.py
   scripts/ThinCurr_compute_holes.py
+  scripts/ThinCurr_mesh_tool.py
 )
 
 foreach( path ${OFT_PY_BINS} )

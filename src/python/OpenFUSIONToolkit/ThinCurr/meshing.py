@@ -11,10 +11,11 @@
 '''
 import numpy
 import h5py
-from ..util import write_native_mesh, oft_warning
+from ..util import oft_warning
+from ..meshing import write_native_mesh, read_native_mesh
 
 
-def write_ThinCurr_mesh(filename, r, lc, reg, holes=[], closures=[], pmap=None, nfp=None):
+def write_ThinCurr_mesh(filename, r, lc, reg, holes=[], closures=[], eta_surf=None, eta_vol=None, thickness=None, pmap=None, nfp=None):
     r'''! Create a native HDF5 mesh file for ThinCurr from the given mesh information
 
     @param filename Filename for mesh file
@@ -23,20 +24,60 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=[], closures=[], pmap=None, 
     @param reg Region list [nc]
     @param holes List of node sets for hole definitions
     @param closures List of closures
+    @param eta_surf Surface electrical conductivity
+    @param eta_vol Volumetric electrical conductivity
+    @param thickness Thickness of the mesh elements
     @param pmap Point mapping for periodic meshes (single surface only)
     @param nfp Number of field periods for periodic meshes (single surface only)
     '''
-    write_native_mesh(filename, r, lc, reg, nodesets=holes, sidesets=[closures,])
+    if (eta_vol is not None) and (thickness is None):
+        raise ValueError("Must specify `thickness` if `eta_vol` is specified")
+    if (eta_vol is not None) and (eta_surf is not None):
+        oft_warning("Both `eta_vol` and `eta_surf` are specified. `eta_surf` will be ignored.")
+        eta_surf = None
+    write_native_mesh(filename, 'tri', r, lc, reg, nodesets=holes, sidesets=[closures,])
     with h5py.File(filename, 'r+') as h5_file:
         if pmap is not None:
-            h5_file.create_dataset('thincurr/periodicity/pmap', data=pmap, dtype='i4')
+            h5_file.create_dataset('thincurr/periodicity/PMAP', data=pmap, dtype='i4')
         if nfp is not None:
-            h5_file.create_dataset('thincurr/periodicity/nfp', data=[nfp,], dtype='i4')
+            h5_file.create_dataset('thincurr/periodicity/NFP', data=[nfp,], dtype='i4')
+        if eta_surf is not None:
+            h5_file.create_dataset('thincurr/ETA_SURF', data=eta_surf, dtype='f8')
+        if eta_vol is not None:
+            h5_file.create_dataset('thincurr/ETA_VOL', data=eta_vol, dtype='f8')
+        if thickness is not None:
+            h5_file.create_dataset('thincurr/THICKNESS', data=thickness, dtype='f8')
+
+
+def read_ThinCurr_mesh(filename):
+    r'''! Read mesh information and ThinCurr parameters from a native HDF5 mesh file
+
+    @param filename Filename for mesh file
+
+    @returns Dictionary containing the mesh information and ThinCurr parameters
+    '''
+    mesh_info = read_native_mesh(filename)
+    with h5py.File(filename, 'r') as h5_file:
+        if 'thincurr' in h5_file:
+            thincurr = h5_file['thincurr']
+            if 'ETA_SURF' in thincurr:
+                mesh_info['eta_surf'] = thincurr['ETA_SURF'][()]
+            if 'ETA_VOL' in thincurr:
+                mesh_info['eta_vol'] = thincurr['ETA_VOL'][()]
+            if 'THICKNESS' in thincurr:
+                mesh_info['thickness'] = thincurr['THICKNESS'][()]
+            if 'periodicity' in thincurr:
+                periodicity = thincurr['periodicity']
+                if 'PMAP' in periodicity:
+                    mesh_info['pmap'] = periodicity['PMAP'][()]
+                if 'NFP' in periodicity:
+                    mesh_info['nfp'] = periodicity['NFP'][0]
+    return mesh_info
 
 
 def build_ThinCurr_dummy(center,size=1.0,nsplit=0):
     '''! Build simple square dummy mesh for ThinCurr (1 active node)
-    
+
     @param center Center of mesh [3]
     @param size Physical size of dummy mesh in X and Y
     @param nsplit Number of refinement iterations to perform on grid (starting mesh is `np=5`, `nc=4`)
@@ -274,7 +315,7 @@ class ThinCurr_periodic_toroid:
             self.pnodesets = [pnodeset]
             for i in range(1,nfp):
                 self.pnodesets.append(pnodeset+i*(nphi-1)*ntheta)
-    
+
     def plot_mesh(self,fig,equal_aspect=True,surf_alpha=0.1,surf_cmap='viridis'):
         '''! Plot mesh and holes
 
@@ -296,7 +337,7 @@ class ThinCurr_periodic_toroid:
         ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lc, cmap=surf_cmap, antialiased=False)
         if equal_aspect:
             ax.set_box_aspect(mesh_range)
-    
+
     def write_to_file(self,filename,reg=None,include_closures=True):
         '''! Save mesh to file in ThinCurr format
 
@@ -346,7 +387,7 @@ class ThinCurr_periodic_toroid:
             return matrix_new
         else:
             return matrix
-    
+
     def nodes_to_unique(self,vector,tor_val=0.0,pol_val=0.0,remove_closure=True):
         '''! Maps a vector of values on all nodes within a single field period
         to unique DOFs
@@ -417,18 +458,18 @@ def build_triangles_from_grid(data_grid,wrap_n=True,wrap_m=True):
     else:
         mwrap = m-1
     for i in range(nwrap):
-        i1 = (i + 1) % n 
+        i1 = (i + 1) % n
         nodeset_n.append(i*m)
         for j in range(mwrap):
             # Wrap around the indices when at the borders
-            j1 = (j + 1) % m  
+            j1 = (j + 1) % m
             if i == 0:
                 nodeset_m.append(j)
             # Get the indices of the vertices of the two triangles
             # that divide the current grid square
             tri1 = [i * m + j, i * m + j1, i1 * m + j]
             tri2 = [i1 * m + j1, i1 * m + j, i * m + j1]
-    
+
             # Add the two triangles to the list
             triangles += [tri1, tri2]
     if not wrap_n:

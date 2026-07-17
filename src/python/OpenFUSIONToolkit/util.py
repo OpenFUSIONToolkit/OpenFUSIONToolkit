@@ -59,43 +59,9 @@ def run_shell_command(command, timeout=10, env_vars={}):
     return result, errcode
 
 
-def write_native_mesh(filename, r, lc, reg, nodesets=[], sidesets=[], ho_info=None, periodic_info=None):
-    r'''Create a native HDF5 mesh file for OFT from the given mesh information
-
-    @param filename Filename for mesh file
-    @param r Points list [np,3]
-    @param lc Cell list [nc,3] (1-based)
-    @param reg Region list [nc]
-    @param nodesets List of node sets
-    @param sidesets List of side sets
-    @param ho_info High-order grid information
-    @param periodic_info Information for mesh periodicity
-    '''
-    print()
-    print("Saving mesh: {0}".format(filename))
-    with h5py.File(filename, 'w') as h5_file:
-        h5_file.create_dataset('mesh/R', data=r, dtype='f8')
-        h5_file.create_dataset('mesh/LC', data=lc, dtype='i4')
-        h5_file.create_dataset('mesh/REG', data=reg, dtype='i4')
-        if len(nodesets) > 0:
-            h5_file.create_dataset('mesh/NUM_NODESETS', data=[len(nodesets),], dtype='i4')
-            for i, node_set in enumerate(nodesets):
-                h5_file.create_dataset('mesh/NODESET{0:04d}'.format(i+1), data=node_set, dtype='i4')
-        if len(sidesets) > 0:
-            h5_file.create_dataset('mesh/NUM_SIDESETS', data=[len(sidesets),], dtype='i4')
-            for i, side_set in enumerate(sidesets):
-                h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(i+1), data=side_set, dtype='i4')
-        if ho_info is not None:
-            h5_file.create_dataset('mesh/ho_info/R', data=ho_info[0], dtype='f8')
-            h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1], dtype='i4')
-            if ho_info[2] is not None:
-                h5_file.create_dataset('mesh/ho_info/LF', data=ho_info[2], dtype='i4')
-        if periodic_info is not None:
-            h5_file.create_dataset('mesh/periodicity/nodes', data=periodic_info, dtype='i4')
-
 def read_fortran_namelist(file0, silent=True, b_arr=False):
 	r'''Return a dictionary with the parameters in the namelist file (file0)
-	
+
 	@param file0 File to read from
 	@param silent If false, print dictionary entries after reading
 	@param b_arr Refers to an array at the bottom of the file, if one exists
@@ -123,7 +89,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 
 		f_lines[brk_idx[numpy.argmin(abs(brk_idx-numpy.max(equal_idx)))]] = 'b_arr = '
 
-	#Prune everything after the comments and remove line breaks 
+	#Prune everything after the comments and remove line breaks
 	end_idx = len(f_lines)
 
 	for i in range(len(f_lines)):
@@ -140,7 +106,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 		headr_loc = line_update.find('&') #and list headers (& symbols)
 
 		if i < end_idx: #Only include lines before the end comment
-			if headr_loc < 0: #Remove hardcoded linebreaks and list headers 
+			if headr_loc < 0: #Remove hardcoded linebreaks and list headers
 				if brk_loc < 0:
 					if comment_loc < 0:  #If there are no comments in the line (-1)
 						if line_update.strip() != '':
@@ -203,7 +169,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 					except:
 						data_dict[key_list[i]] = mult_block
 
-			#Try the same process for the last entry		
+			#Try the same process for the last entry
 			else:
 				mult_block = ' '.join(datalines[block_idx[i]:len(datalines)])  #On the last block, go to the end of the file
 				equal_loc = mult_block.find('=')
@@ -221,7 +187,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 							continue
 						mult_block[star_idx[j]] = dupl_arr
 
-					mult_block = ' '.join(mult_block) 
+					mult_block = ' '.join(mult_block)
 					try:
 						data_dict[key_list[i]] = numpy.array(mult_block.split()).astype('float')
 					except:
@@ -245,7 +211,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 					for k in range(len(b_line)):
 						if b_line[k].isspace():
 							b_line_space_idx.append(k)
-					
+
 					b_line_space_len = (lambda x:[len(k) for k in x])(b_line[b_line_space_idx])
 
 					for k in range(len(b_line_space_idx)):
@@ -257,7 +223,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 					b_line = numpy.delete(b_line, b_line_rmv_idx)
 
 					#b_line = numpy.array(datalines[block_idx[i]+1+j].split()).astype('float')
-					data_dict['b_arr'][j][0:len(b_line)] = b_line 
+					data_dict['b_arr'][j][0:len(b_line)] = b_line
 
 
 				except:
@@ -299,7 +265,7 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 						if 'RF' in data_dict.keys():
 							EC_idx_start = len(data_dict['TURNFC'])
 						else:
-							EC_idx_start = 0	
+							EC_idx_start = 0
 
 						if RVS_in_barr:
 							EC_idx_end = VS_idx_start
@@ -319,5 +285,5 @@ def read_fortran_namelist(file0, silent=True, b_arr=False):
 	if not silent:
 		for key in data_dict:
 			print(key, data_dict[key])
-			
+
 	return data_dict

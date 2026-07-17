@@ -18,6 +18,7 @@ import subprocess
 import xml.etree.ElementTree as ET
 import numpy
 import h5py
+from .meshing import convert_mesh_to_pyvista
 eol_byte = '\n'.encode()
 
 
@@ -48,7 +49,7 @@ class histfile:
         def decode_list(list):
             '''! Decode list for Python 3 compatibility'''
             return [val.decode("utf-8") for val in list]
-        
+
         def setup_sizes(data_reg):
             r'''! Reader header information and setup binary reads'''
             base_dict = {}
@@ -262,7 +263,7 @@ class histfile:
 
     def __getitem__(self, key):
         return self._data[key]
-    
+
     def __iter__(self):
         return iter(self._data)
 
@@ -322,7 +323,7 @@ class XDMF_plot_mesh:
                 step_dict[field_name] = numpy.asarray(field_obj)
             self.time_fields.append(step_dict)
         self.times = numpy.array(self.times)
-        
+
     def get_field(self,name,time=None,timestep=None):
         '''! Get raw data associated with field at a given time or timestep
 
@@ -357,37 +358,13 @@ class XDMF_plot_mesh:
             if name not in self.static_fields:
                 raise KeyError('"{0}" is not one of the static fields'.format(name))
             return self.static_fields[name]
-    
+
     def get_pyvista_grid(self):
         '''! Get pyvista representation of grid
 
         @returns `pyvista.UnstructuredGrid` object for grid
         '''
-        import pyvista
-        if self.type == 31:
-            celltype = pyvista.CellType.TETRA
-            ncv = 4
-        elif self.type == 32:
-            celltype = pyvista.CellType.QUADRATIC_TETRA
-            ncv = 10
-        elif self.type == 33:
-            celltype = pyvista.CellType.HEXAHEDRON
-            ncv = 8
-        elif self.type == 21:
-            celltype = pyvista.CellType.TRIANGLE
-            ncv = 3
-        elif self.type == 22:
-            celltype = pyvista.CellType.QUADRATIC_TRIANGLE
-            ncv = 6
-        elif self.type == 23:
-            celltype = pyvista.CellType.QUAD
-            ncv = 4
-        elif self.type == 10:
-            celltype = pyvista.CellType.LINE
-            ncv = 2
-        celltypes = numpy.array([celltype for _ in range(self.lc.shape[0])], dtype=numpy.int8)
-        cells = numpy.insert(self.lc, [0,], ncv, axis=1)
-        return pyvista.UnstructuredGrid(cells, celltypes, self.r)
+        return convert_mesh_to_pyvista(self.type, self.r, self.lc)
 
 
 class XDMF_plot_file:
@@ -404,7 +381,7 @@ class XDMF_plot_file:
                 self._groups[group_key.lower()] = {}
                 for mesh_key, mesh_obj in group_obj.items():
                     self._groups[group_key.lower()][mesh_key.lower()] = XDMF_plot_mesh(mesh_obj)
-    
+
     def get(self, keyname, value=None):
         '''! Get plotting group (list of @ref XDMF_plot_mesh "meshes")
 
@@ -423,13 +400,13 @@ class XDMF_plot_file:
 
     def __getitem__(self, key):
         return self._groups[key.lower()]
-    
+
     def __iter__(self):
         return iter(self._groups)
 
 
 def build_XDMF(path='.',repeat_static=False,pretty=False,legacy=False):
-    '''! Build XDMF plot metadata files 
+    '''! Build XDMF plot metadata files
 
     @param path Folder to build XDMF files in (must include `oft_xdmf.XXXX.h5` or `dump.dat` files)
     @param repeat_static Repeat static fields (0-th timestep) in all timesteps?
