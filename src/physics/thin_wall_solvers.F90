@@ -811,24 +811,7 @@ END IF
 IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
   ALLOCATE(jumpout(sensors%njumpers+self%nholes+self%n_vcoils+1))
   DO j=1,sensors%njumpers
-    tmp=0.d0
-    val_prev=0.d0
-    ind1=self%pmap(sensors%jumpers(j)%points(1))
-    IF(ind1>0)val_prev=vals(ind1)
-    DO k=1,sensors%jumpers(j)%np-1
-      ind1=self%pmap(sensors%jumpers(j)%points(k+1))
-      IF(ind1>0)THEN
-        tmp=tmp+vals(ind1)-val_prev
-        val_prev=vals(ind1)
-      ELSE
-        tmp=tmp-val_prev
-        val_prev=0.d0
-      END IF
-    END DO
-    DO k=1,self%nholes
-      tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
-    END DO
-    jumpout(j+1)=tmp/mu0
+    jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
   END DO
   DO j=1,self%nholes+self%n_vcoils
     jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
@@ -967,24 +950,7 @@ DO i=1,nsteps
   END IF
   IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
     DO j=1,sensors%njumpers
-      tmp=0.d0
-      val_prev=0.d0
-      ind1=self%pmap(sensors%jumpers(j)%points(1))
-      IF(ind1>0)val_prev=vals(ind1)
-      DO k=1,sensors%jumpers(j)%np-1
-        ind1=self%pmap(sensors%jumpers(j)%points(k+1))
-        IF(ind1>0)THEN
-          tmp=tmp+vals(ind1)-val_prev
-          val_prev=vals(ind1)
-        ELSE
-          tmp=tmp-val_prev
-          val_prev=0.d0
-        END IF
-      END DO
-      DO k=1,self%nholes
-        tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
-      END DO
-      jumpout(j+1)=tmp/mu0
+      jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
     END DO
     DO j=1,self%nholes+self%n_vcoils
       jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
@@ -1174,24 +1140,7 @@ DO i=0,nsteps
     END IF
     IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
       DO j=1,sensors%njumpers
-        tmp=0.d0
-        val_prev=0.d0
-        ind1=self%pmap(sensors%jumpers(j)%points(1))
-        IF(ind1>0)val_prev=vals(ind1)
-        DO k=1,sensors%jumpers(j)%np-1
-          ind1=self%pmap(sensors%jumpers(j)%points(k+1))
-          IF(ind1>0)THEN
-            tmp=tmp+vals(ind1)-val_prev
-            val_prev=vals(ind1)
-          ELSE
-            tmp=tmp-val_prev
-            val_prev=0.d0
-          END IF
-        END DO
-        DO k=1,self%nholes
-          tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
-        END DO
-        jumpout(j+1)=tmp/mu0
+        jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
       END DO
       DO j=1,self%nholes+self%n_vcoils
         jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0

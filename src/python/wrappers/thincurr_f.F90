@@ -664,7 +664,8 @@ IF(c_associated(sensor_ptr))THEN
   END DO
   DEALLOCATE(sensors%floops)
   DO i=1,sensors%njumpers
-    DEALLOCATE(sensors%jumpers(i)%hole_facs,sensors%jumpers(i)%points)
+    IF(ASSOCIATED(sensors%jumpers(i)%hole_facs))DEALLOCATE(sensors%jumpers(i)%hole_facs)
+    IF(ASSOCIATED(sensors%jumpers(i)%points))DEALLOCATE(sensors%jumpers(i)%points)
   END DO
   DEALLOCATE(sensors%jumpers)
 END IF
