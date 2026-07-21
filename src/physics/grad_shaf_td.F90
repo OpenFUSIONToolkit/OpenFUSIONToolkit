@@ -536,6 +536,8 @@ allocate(j(lag_rep%nce),vals_loc(lag_rep%nce+self%gs_device%ncoils)) ! Local DOF
 allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
 !$omp do schedule(static)
 do i=1,mesh%nc
+    !---Skip cell if in 'ignore' region
+    IF(self%gs_device%ignore_rmask(mesh%reg(i))) CYCLE
     IF(mesh%reg(i)==1)CYCLE
     !---Get local to global DOF mapping
     call lag_rep%ncdofs(i,j)
