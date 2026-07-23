@@ -2237,12 +2237,13 @@ class TokaMaker():
         # Convert to MA
         jphi_plot /= 1.0E6
         mask = jphi_plot != 0
-        plt.tripcolor(
+        heatmap = plt.tripcolor(
             self.r[:,0], self.r[:,1],
             self.lc[mask],
             facecolors=jphi_plot[mask],
             cmap=cmap
         )
+        fig.colorbar(heatmap, ax=ax)
         
 class TokaMaker_equilibrium():
     '''! TokaMaker G-S equilibrium class'''
