@@ -2210,14 +2210,15 @@ class TokaMaker():
             prev_psi = psi
         return strike_pts
 
-    def plot_current_density(self, fig, ax, window=None, cmap='spring'):
+    def plot_current_density(self, fig, ax, window=None, cmap='viridis'):
         '''! Plot current density
 
         @param fig Figure (matplotlib)
         @param ax Axis (matplotlib)
         @param window 4-element array (r_min, r_max, z_min, z_max)
         '''
-        import matplotlib.tri as tri
+        import matplotlib.pyplot as plt
+
         psi = self.get_psi(normalized=True)
         jphi = self.calc_delstar_curr(psi)
         jphi_plot = numpy.zeros(self.nc)
@@ -2235,9 +2236,13 @@ class TokaMaker():
 
         # Convert to MA
         jphi_plot /= 1.0E6
-
-        triangulation = tri.Triangulation(self.r[:,0], self.r[:,1], self.lc)
-        ax.tripcolor(triangulation, jphi_plot, cmap=cmap, shading="flat")
+        mask = jphi_plot != 0
+        plt.tripcolor(
+            self.r[:,0], self.r[:,1],
+            self.lc[mask],
+            facecolors=jphi_plot[mask],
+            cmap=cmap
+        )
         
 class TokaMaker_equilibrium():
     '''! TokaMaker G-S equilibrium class'''
