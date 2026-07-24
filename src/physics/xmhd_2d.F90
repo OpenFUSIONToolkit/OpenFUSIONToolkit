@@ -1027,7 +1027,7 @@ DO i=1,mesh%nc
       IF(cyl_flag)THEN
         res_loc(jr,7) = res_loc(jr,7) &
         + basis_vals(jr)*by*int_factor/(coords(1)+gs_epsilon) &
-        - self%dt*basis_vals(jr)*tmp1(2)*int_factor/(coords(1)+gs_epsilon) &
+        + self%dt*basis_vals(jr)*tmp1(2)*int_factor/(coords(1)+gs_epsilon) &
         + self%dt*basis_vals(jr)*dvel(1,1)*by*int_factor/(coords(1)+gs_epsilon) &
         + self%dt*basis_vals(jr)*dvel(3,3)*by*int_factor/(coords(1)+gs_epsilon) &
         + self%dt*basis_vals(jr)*DOT_PRODUCT(vel, dby)*int_factor/(coords(1)+gs_epsilon) &
@@ -1036,7 +1036,7 @@ DO i=1,mesh%nc
       ELSE
         res_loc(jr, 7) = res_loc(jr, 7) &
         + basis_vals(jr)*by*int_factor &
-        - basis_vals(jr)*self%dt*tmp1(2)*int_factor &
+        + basis_vals(jr)*self%dt*tmp1(2)*int_factor &
         + basis_vals(jr)*self%dt*DOT_PRODUCT(vel, dby)*int_factor &
         + basis_vals(jr)*self%dt*by*div_vel*int_factor &
         + self%dt*eta(1)*DOT_PRODUCT(basis_grads(:,jr), dby)*int_factor
@@ -1615,7 +1615,7 @@ DO i=1,mesh%nc
           jac_loc(7,2)%m(jr,jc) = jac_loc(7, 2)%m(jr,jc) &
           + basis_vals(jr)*dt_fac*by*basis_vals(jc)*int_factor/(coords(1)+gs_epsilon)**2
           jac_loc(7,3)%m(jr,jc) = jac_loc(7, 3)%m(jr,jc) &
-          -basis_vals(jr)*dt_fac*tmp2(2)*int_factor/(coords(1)+gs_epsilon)
+          + basis_vals(jr)*dt_fac*tmp2(2)*int_factor/(coords(1)+gs_epsilon)
         ELSE
           DO l=1,3
             jac_loc(7,l+1)%m(jr,jc) = jac_loc(7, l+1)%m(jr,jc) &
@@ -1623,7 +1623,7 @@ DO i=1,mesh%nc
             + basis_vals(jr)*dt_fac*by*basis_grads(l,jc)*int_factor
             IF(l==2)THEN
               jac_loc(7,l+1)%m(jr,jc) = jac_loc(7, l+1)%m(jr,jc) &
-              - basis_vals(jr)*dt_fac*tmp2(l)*int_factor
+              + basis_vals(jr)*dt_fac*tmp2(l)*int_factor
             END IF
           END DO
         END IF
@@ -1631,10 +1631,10 @@ DO i=1,mesh%nc
         tmp2 = cross_product(basis_grads(:,jc),dvel(2,:))
         IF(cyl_flag)THEN
           jac_loc(7, 6)%m(jr,jc) = jac_loc(7, 6)%m(jr,jc) &
-          - basis_vals(jr)*dt_fac*tmp2(2)*int_factor/(coords(1)+gs_epsilon)
+          + basis_vals(jr)*dt_fac*tmp2(2)*int_factor/(coords(1)+gs_epsilon)
         ELSE
           jac_loc(7, 6)%m(jr,jc) = jac_loc(7, 6)%m(jr,jc) &
-          - basis_vals(jr)*dt_fac*tmp2(2)*int_factor
+          + basis_vals(jr)*dt_fac*tmp2(2)*int_factor
         END IF
         !-- by, by
         IF(cyl_flag)THEN
