@@ -187,8 +187,6 @@ class TokaMaker():
         self._oft_env = OFT_env
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_factory "gs_factory")
         self._tMaker_ptr = c_void_p()
-        ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_equil "gs_equil")
-        self._tMaker_equil = []
         ## Internal mesh object
         self._mesh_ptr = c_void_p()
         ## General settings object
@@ -237,6 +235,8 @@ class TokaMaker():
         self.Lcoils = None
         # Number of equilibria
         self.n_eq = n_eq
+        ## Internal Grad-Shafranov eq object (@ref psi_grad_shaf.gs_equil "gs_equil")
+        self._tMaker_equil = [TokaMaker_equilibrium(self) for _ in range(n_eq)]
 
         print('Finished TM constructor')
     
@@ -405,7 +405,7 @@ class TokaMaker():
         ncoils = c_int()
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup(self._tMaker_ptr,order,full_domain,self.n_eq,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
+        tokamaker_setup(self._tMaker_ptr,order,full_domain,self._tMaker_equil,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         # Update vacuum flux
@@ -771,7 +771,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise ValueError("Error in initialization: {0}".format(error_string.value.decode()))
 
-    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
+    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none', eq_idx=0):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
@@ -780,9 +780,9 @@ class TokaMaker():
         @param eta_file File containing $\eta$ definition
         @param f_NI_file File containing non-inductive \f$F*F'\f$ definition
         '''
-        if self._tMaker_equil is None:
+        if len(self._tMaker_equil) == 0:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.load_profiles(f_file,foffset,p_file,eta_file,f_NI_file)
+        return self._tMaker_equil[eq_idx].load_profiles(f_file,foffset,p_file,eta_file,f_NI_file)
 
     def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False, eq_idx=0):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
@@ -795,7 +795,7 @@ class TokaMaker():
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files, eq_idx=eq_idx)
+        return self._tMaker_equil[eq_idx].set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files)
     
     def get_profile_dofs(self, prof_type):
         r'''! Retrieve degrees of freedom for desired flux profile
@@ -966,7 +966,7 @@ class TokaMaker():
             tokamaker_set_isoflux(self._tMaker_ptr,isoflux,ref_points,weights,isoflux.shape[0],grad_wt_lim,eq_idx+1,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
-            self._tMaker_equil._isoflux_constraints = isoflux.copy()
+            self._tMaker_equil[eq_idx]._isoflux_constraints = isoflux.copy()
     
     def set_flux(self,locations,targets,weights=None):
         r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$ [Wb/rad]
@@ -2191,7 +2191,7 @@ class TokaMaker():
 
 class TokaMaker_equilibrium():
     '''! TokaMaker G-S equilibrium class'''
-    def __init__(self,TokaMaker_obj=None,source_eq=None,skip_targets=False,skip_constraints=False):
+    def __init__(self,TokaMaker_obj=None,source_eq=None,skip_targets=False,skip_constraints=False,eq_idx=0):
         '''! Initialize TokaMaker equilibrium object
 
         @param TokaMaker_obj TokaMaker object (See @ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker "TokaMaker")
@@ -2485,7 +2485,7 @@ class TokaMaker_equilibrium():
         r'''! Mirnov constraint points'''
         return self._mirnov_constraints
 
-    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none', eq_idx=0):
+    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
@@ -2501,11 +2501,12 @@ class TokaMaker_equilibrium():
         eta_file_c = self._oft_env.path2c(eta_file)
         f_NI_file_c = self._oft_env.path2c(f_NI_file)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_load_profiles(self.c_ptr,f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c,eq_idx+1,error_string)
+
+        tokamaker_load_profiles(self.c_ptr,f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False,eq_idx=0):
+    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
         @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations in normalized Psi ['x']
@@ -2530,7 +2531,7 @@ class TokaMaker_equilibrium():
             ffp_NI_file = self._oft_env.unique_tmpfile('tokamaker_ffp_NI.prof')
             create_prof_file(self, ffp_NI_file, ffp_NI_prof, "ffp_NI")
             delete_files.append(ffp_NI_file)
-        self.load_profiles(f_file=ffp_file,foffset=foffset,p_file=pp_file,f_NI_file=ffp_NI_file,eq_idx=eq_idx)
+        self.load_profiles(f_file=ffp_file,foffset=foffset,p_file=pp_file,f_NI_file=ffp_NI_file)
         if not keep_files:
             for file in delete_files:
                 try:

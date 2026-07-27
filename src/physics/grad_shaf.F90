@@ -552,10 +552,10 @@ end function dummy_fpp
 !------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------
-subroutine gs_setup(self,ML_lag_2d, n_eq)
+subroutine gs_setup(self,ML_lag_2d, eqs)
 class(gs_factory), intent(inout) :: self !< G-S object
 class(oft_ml_fem_type), target, intent(inout) :: ML_lag_2d
-INTEGER(i4), VALUE, INTENT(IN) :: n_eq
+type(gs_eq_ptr), allocatable, eqs
 SELECT TYPE(this=>ML_lag_2d%current_level)
   CLASS IS(oft_scalar_bfem)
     self%ML_fe_rep=>ML_lag_2d
