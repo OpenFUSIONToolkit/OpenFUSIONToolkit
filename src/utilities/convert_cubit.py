@@ -110,9 +110,9 @@ def read_mesh(filename, ignore_attrs):
             else:
                 block_attrs.append(None)
         elif varname.startswith('node_ns'):
-            node_sets.append(np.asarray(variable))
+            node_sets.append(np.asarray(variable)-1) # Convert to 0-based indexing
         elif varname.startswith('elem_ss'):
-            side_sets.append(np.asarray(variable))
+            side_sets.append(np.asarray(variable)-1) # Convert to 0-based indexing
     # Read block names if present
     if 'eb_names' in ncdf_file.variables:
         block_names = ["".join(block_name.compressed().astype(str)) for block_name in ncdf_file.variables['eb_names']]
@@ -151,7 +151,8 @@ def read_mesh(filename, ignore_attrs):
     for i, nodeset in enumerate(node_sets):
         node_sets[i] = np.array([node for node in nodeset if reindex_flag[node] == 1])
     rindexed_pts = np.cumsum(reindex_flag)
-    lc_new = rindexed_pts[lc[:,:ncp_lin]]
+    lc_new = rindexed_pts[lc[:,:ncp_lin]] - 1 # Convert back to 0-based indexing
+    print('LC CHK',lc_new.min(axis=None))
     node_sets = [rindexed_pts[nodeset] for nodeset in node_sets]
     # Build high-order information
     if mesh_order > 1: # Handle high-order if present
@@ -250,5 +251,5 @@ if options.periodic_nodeset is not None:
     periodic_info = node_sets.pop(options.periodic_nodeset-1)
 
 # Write output file
-write_native_mesh(out_file, mesh_type, r, lc, reg, nodesets=node_sets, sidesets=side_sets,
-                  ho_info=ho_info, periodic_info=periodic_info, block_attrs=block_attrs, block_names=block_names)
+write_native_mesh(out_file, mesh_type.split('_')[0], r, lc, reg, nodesets=node_sets, sidesets=side_sets,
+                  ho_info=ho_info, periodic_info=periodic_info, reg_attrs=block_attrs, reg_names=block_names)

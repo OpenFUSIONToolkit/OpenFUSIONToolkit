@@ -13,40 +13,67 @@ import numpy
 import h5py
 from ..util import oft_warning
 from ..meshing import write_native_mesh, read_native_mesh
+from .coils import coil_from_hdf5
 
 
-def write_ThinCurr_mesh(filename, r, lc, reg, holes=[], closures=[], eta_surf=None, eta_vol=None, thickness=None, pmap=None, nfp=None):
+def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures=None, eta_surf=None, eta_vol=None,
+                        thickness=None, coil_sets=None, pmap=None, nfp=None, reg_attrs=None, reg_names=None):
     r'''! Create a native HDF5 mesh file for ThinCurr from the given mesh information
 
     @param filename Filename for mesh file
     @param r Points list [np,3]
-    @param lc Cell list [nc,3] (1-based)
+    @param lc Cell list [nc,3]
     @param reg Region list [nc]
     @param holes List of node sets for hole definitions
+    @param jumpers List of jumper sets
     @param closures List of closures
     @param eta_surf Surface electrical conductivity
     @param eta_vol Volumetric electrical conductivity
     @param thickness Thickness of the mesh elements
+    @param coil_sets List of ThinCurr_coil_set objects to include in the mesh file
     @param pmap Point mapping for periodic meshes (single surface only)
     @param nfp Number of field periods for periodic meshes (single surface only)
+    @param reg_attrs List of region attributes
+    @param reg_names List of region names
     '''
     if (eta_vol is not None) and (thickness is None):
         raise ValueError("Must specify `thickness` if `eta_vol` is specified")
     if (eta_vol is not None) and (eta_surf is not None):
         oft_warning("Both `eta_vol` and `eta_surf` are specified. `eta_surf` will be ignored.")
         eta_surf = None
-    write_native_mesh(filename, 'tri', r, lc, reg, nodesets=holes, sidesets=[closures,])
+    write_native_mesh(filename, 'tri', r, lc, reg, reg_attrs=reg_attrs, reg_names=reg_names)
     with h5py.File(filename, 'r+') as h5_file:
-        if pmap is not None:
-            h5_file.create_dataset('thincurr/periodicity/PMAP', data=pmap, dtype='i4')
-        if nfp is not None:
-            h5_file.create_dataset('thincurr/periodicity/NFP', data=[nfp,], dtype='i4')
+        # Write resistance information
         if eta_surf is not None:
             h5_file.create_dataset('thincurr/ETA_SURF', data=eta_surf, dtype='f8')
         if eta_vol is not None:
             h5_file.create_dataset('thincurr/ETA_VOL', data=eta_vol, dtype='f8')
         if thickness is not None:
             h5_file.create_dataset('thincurr/THICKNESS', data=thickness, dtype='f8')
+        # Write holes
+        if (holes is not None) and (len(holes) > 0):
+            h5_file.create_dataset('thincurr/holes/NHOLES', data=[len(holes),], dtype='i4')
+            for i, hole in enumerate(holes):
+                h5_file.create_dataset('thincurr/holes/HOLE{0:04d}'.format(i+1), data=hole+1, dtype='i4') # Convert to 1-based indexing for storage
+        # Write jumpers
+        if (jumpers is not None) and (len(jumpers) > 0):
+            h5_file.create_dataset('thincurr/jumpers/NJUMPERS', data=[len(jumpers),], dtype='i4')
+            for i, jumper in enumerate(jumpers):
+                h5_file.create_dataset('thincurr/jumpers/JUMPER{0:04d}'.format(i+1), data=jumper+1, dtype='i4') # Convert to 1-based indexing for storage
+        # Write closures
+        if (closures is not None) and (len(closures) > 0):
+            h5_file.create_dataset('thincurr/CLOSURES', data=closures+1, dtype='i4') # Convert to 1-based indexing for storage
+        # Write coil sets
+        if coil_sets is not None:
+            h5_file.create_dataset('thincurr/coils/NCOILSETS', data=[len(coil_sets),], dtype='i4')
+            for i, coil_set in enumerate(coil_sets):
+                coil_group = h5_file.create_group('thincurr/coils/coilset{0:04d}'.format(i+1))
+                coil_set.save_hdf5(coil_group)
+        # Write mesh periodicity information
+        if nfp is not None:
+            h5_file.create_dataset('thincurr/periodicity/NFP', data=[nfp,], dtype='i4')
+        if pmap is not None:
+            h5_file.create_dataset('thincurr/periodicity/PMAP', data=pmap+1, dtype='i4') # Convert to 1-based indexing for storage
 
 
 def read_ThinCurr_mesh(filename):
@@ -57,21 +84,46 @@ def read_ThinCurr_mesh(filename):
     @returns Dictionary containing the mesh information and ThinCurr parameters
     '''
     mesh_info = read_native_mesh(filename)
+    if mesh_info['type'] != 'tri':
+        raise ValueError("ThinCurr meshes must be triangular, but loaded mesh is of type '{0}'".format(mesh_info['type']))
     with h5py.File(filename, 'r') as h5_file:
         if 'thincurr' in h5_file:
             thincurr = h5_file['thincurr']
+            thincurr_info = {}
+            # Read resistance information
             if 'ETA_SURF' in thincurr:
-                mesh_info['eta_surf'] = thincurr['ETA_SURF'][()]
+                thincurr_info['eta_surf'] = thincurr['ETA_SURF'][()]
             if 'ETA_VOL' in thincurr:
-                mesh_info['eta_vol'] = thincurr['ETA_VOL'][()]
+                thincurr_info['eta_vol'] = thincurr['ETA_VOL'][()]
             if 'THICKNESS' in thincurr:
-                mesh_info['thickness'] = thincurr['THICKNESS'][()]
+                thincurr_info['thickness'] = thincurr['THICKNESS'][()]
+            # Read hole
+            if 'holes' in thincurr:
+                nholes = thincurr['holes/NHOLES'][0]
+                thincurr_info['holes'] = [thincurr['holes/HOLE{0:04d}'.format(i+1)][()] - 1 for i in range(nholes)] # Convert to 0-based indexing
+            # Read jumpers
+            if 'jumpers' in thincurr:
+                njumpers = thincurr['jumpers/NJUMPERS'][0]
+                thincurr_info['jumpers'] = [thincurr['jumpers/JUMPER{0:04d}'.format(i+1)][()] - 1 for i in range(njumpers)] # Convert to 0-based indexing
+            # Read closures
+            if 'CLOSURES' in thincurr:
+                thincurr_info['closures'] = thincurr['CLOSURES'][()] - 1 # Convert to 0-based indexing
+            # Read coil sets
+            if 'coils' in thincurr:
+                coils_group = thincurr['coils']
+                ncoilsets = coils_group['NCOILSETS'][0]
+                thincurr_info['coil_sets'] = []
+                for i in range(ncoilsets):
+                    coilset_group = coils_group['coilset{0:04d}'.format(i+1)]
+                    thincurr_info['coil_sets'].append(coil_from_hdf5(coilset_group))
+            # Read periodicity information
             if 'periodicity' in thincurr:
                 periodicity = thincurr['periodicity']
-                if 'PMAP' in periodicity:
-                    mesh_info['pmap'] = periodicity['PMAP'][()]
                 if 'NFP' in periodicity:
-                    mesh_info['nfp'] = periodicity['NFP'][0]
+                    thincurr_info['nfp'] = periodicity['NFP'][0]
+                if 'PMAP' in periodicity:
+                    thincurr_info['pmap'] = periodicity['PMAP'][()] - 1 # Convert to 0-based indexing
+            mesh_info['thincurr'] = thincurr_info
     return mesh_info
 
 

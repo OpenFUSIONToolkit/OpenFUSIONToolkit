@@ -8,10 +8,12 @@ import os
 import sys
 import shutil
 import argparse
+import time
 import numpy as np
 import scipy
 import h5py
 import matplotlib.pyplot as plt
+from OpenFUSIONToolkit.ThinCurr.meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
 
 tri_ed = np.asarray([[2,1], [0,2], [1,0]]) # Triangle edge list
 indent_level = ''
@@ -50,7 +52,7 @@ class trimesh:
             print(indent_level+"  # of vertices = {0} ({1})".format(self.np, self.nbp))
             print(indent_level+"  # of edges    = {0} ({1})".format(self.ne, self.nbe))
             print(indent_level+"  # of faces    = {0} ({1})".format(self.nf, self.nbf))
-    
+
     def _setup_edges(self):
         '''Construct edges from mesh, building `klpe`, `llpe`, `le`, and `lfe`
         '''
@@ -126,7 +128,7 @@ class trimesh:
                 self.lfe[i,j] += jp+1
                 if k[tri_ed[j,1]]-k[tri_ed[j,0]]<0:
                     self.lfe[i,j] *= -1 # apply orientation
-    
+
     def _setup_neighbors(self):
         '''Build topology neighbor lists `kpf`, `lpf`, `lef`, and `lff`
         '''
@@ -168,7 +170,7 @@ class trimesh:
             for j in range(3):       # loop over edges
                 k=abs(self.lfe[i,j])-1 # edge numbers
                 self.lff[i,j]=np.sum(self.lef[k,:])-i
-    
+
     def _setup_boundary(self):
         '''Locate and mark boundary elements
         '''
@@ -202,7 +204,7 @@ class trimesh:
             if self.bp[i]:
                 self.lbp[j]=i
                 j+=1
-    
+
     def _orient_surface(self):
         '''Orient surface(s) in mesh to ensure consistency
         '''
@@ -242,7 +244,7 @@ class trimesh:
                 orient_neighbors(i,oriented)
         sys.setrecursionlimit(recur_lim)
         return np.array(oriented)
-    
+
     def get_face_edge_bop(self):
         r''' Compute face to edge boundary operator \partial_2
         '''
@@ -251,7 +253,7 @@ class trimesh:
         V = np.sign(J, dtype=np.int32)
         J = abs(J)-1
         return scipy.sparse.csc_matrix((V, (I, J)), dtype=np.int32)
-    
+
     def get_loop_edge_vec(self,path):
         ''' Convert vertex chains to edges and compute path length
         '''
@@ -273,7 +275,7 @@ class trimesh:
             else:
                 edges[edge] = 1
         return edges, distance
-    
+
     def boundary_cycles(self):
         '''Identify all distinct boundary vertex chains
         '''
@@ -349,7 +351,7 @@ class trimesh:
             k += len(cycle_list)
         print(indent_level+'  Found {0} boundary cycles'.format(k))
         return cycle_lists
-    
+
     def merge_cells(self,eflag):
         ''' Merge all possible cells while retaining marked edge features
         '''
@@ -379,7 +381,15 @@ class trimesh:
                 flag_cells(i,cell_group)
         sys.setrecursionlimit(recur_lim)
         cell_group = np.array(cell_group)
-        return cell_group, np.where(cell_group[self.lef[:,0]]!=cell_group[self.lef[:,1]])[0]
+        # return cell_group, np.where(cell_group[self.lef[:,0]]!=cell_group[self.lef[:,1]])[0]
+        keep_edges = np.where(cell_group[self.lef[:,0]]!=cell_group[self.lef[:,1]])[0]
+        pt_flag = np.zeros((self.np,), dtype=np.int32)
+        for i in keep_edges:
+            pt_flag[self.le[i,0]] += 1
+            pt_flag[self.le[i,1]] += 1
+        keep_edges = np.where(np.logical_and(cell_group[self.lef[:,0]]!=cell_group[self.lef[:,1]], np.logical_or(pt_flag[self.le[:,0]]>2, pt_flag[self.le[:,1]]>2)))[0]
+        return cell_group, keep_edges
+
 
 def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     '''Compute the single-point Homotopy basis using the greedy method
@@ -407,7 +417,7 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     _, _, V = scipy.sparse.find(tmp_mat)
     _, _, V2 = scipy.sparse.find(tmp_mat.transpose())
     eif = np.vstack((V2[ind],V[ind])) - 1
-    
+
     # Compute edge length-weighted graph
     I, J, _ = scipy.sparse.find(am)
     el = np.sqrt(np.linalg.norm(vertex[I,:]-vertex[J,:],axis=1))
@@ -418,7 +428,7 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
         el2 = 1.E2*np.ones((I.shape[0],))
         G += scipy.sparse.csr_matrix((el2, (I, J)),shape=(nv,nv))
     G += G.transpose()
-    
+
     # Compute tree (T) of shortest paths in G using Dijkstra's algorithm
     distance,pred = scipy.sparse.csgraph.dijkstra(G,indices=bi,return_predecessors=True)
     path = []
@@ -429,7 +439,7 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
             v = pred[v]
             path_tmp.append(v)
         path.append(np.flip(path_tmp))
-    
+
     # Compute dual graph G*
     ind = np.logical_and(eif[0,:]>=0,eif[1,:]>=0)
     eif2 = eif[:,ind]
@@ -448,7 +458,7 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     J2 = J2[ind]-1
     Gs[I2,J2] = 0
     Gs[J2,I2] = 0
-    
+
     # Build spanning tree (T*) of (G\T)*
     I,J,_ = scipy.sparse.find(Gs)
     ind1 = np.hstack((eif[0,:],eif[1,:]))
@@ -460,7 +470,7 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     V = -((distance[ei[0,:]]+distance[ei[1,:]]).flatten()+np.linalg.norm(dvi[0,:,:],axis=1))
     GTs = scipy.sparse.csc_matrix((V, (I, J)),shape=(nf,nf))
     tree = scipy.sparse.csgraph.minimum_spanning_tree(GTs)
-    
+
     # Modify graph G, to contain only edges neither in T nor crossed by edges in T*
     # Remove edges in T
     I = np.arange(nv)
@@ -473,7 +483,7 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     ei = np.vstack((F2E[I,J]-1,F2E[J,I]-1))
     G[ei[0,:],ei[1,:]] = 0
     G[ei[1,:],ei[0,:]] = 0
-    
+
     # The homotopy basis consists of all loops (e), where e is an edge of G
     G = scipy.sparse.tril(G)
     I,J,_ = scipy.sparse.find(G)
@@ -543,6 +553,43 @@ def fixup_loop(cycle,mesh,boundary_cycles,debug):
     return cycle
 
 
+def update_svd_with_row(U, S, V_T, new_row):
+    """
+    Updates SVD (U, S, V_T) when a new row is appended to the matrix.
+    Assumes matrix shape is (m, n) where rows are added.
+    """
+    # Project new row into the current V space (V_T is k x n)
+    q = V_T @ new_row.reshape(-1, 1)
+
+    # Compute orthogonal residual (projection error)
+    residual = new_row.reshape(-1, 1) - V_T.T @ q
+    p = np.linalg.norm(residual)
+
+    if p > 1e-10:
+        P = residual / p
+    else:
+        P = np.zeros_like(residual)
+        p = 0.0
+
+    # Construct the small core matrix K (size: (k+1) x (k+1))
+    upper = np.hstack([np.diag(S), np.zeros((len(S), 1))])
+    lower = np.hstack([q.T, [[p]]])
+    K_mat = np.vstack([upper, lower])
+
+    # Compute SVD of the small core matrix
+    u_k, s_k, vt_k = np.linalg.svd(K_mat, full_matrices=False)
+
+    # Expand U to accommodate the new row index
+    u_ext = np.pad(U, ((0, 1), (0, 1)), mode='constant')
+    u_ext[-1, -1] = 1.0
+    U_new = u_ext @ u_k
+
+    # Update V_T
+    V_T_new = vt_k @ np.vstack([V_T, P.T])
+
+    return U_new, s_k, V_T_new
+
+
 parser = argparse.ArgumentParser()
 parser.description = "Compute holes and closures for ThinCurr meshes using a Greedy Homotopy approach"
 parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
@@ -557,6 +604,10 @@ parser.add_argument("--ref_point", default=None, type=float, nargs='+', help='Re
 parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes?")
 options = parser.parse_args()
 
+#
+if options.keep_nodeset_start is not None:
+    parser.exit(-1, '"--keep_nodeset_start" is deprecated please use `ThinCurr_mesh_tool.py` to convert non-hole nodsets before running this script.')
+
 out_file = options.out_file
 if out_file is None:
     out_file = os.path.splitext(options.in_file)[0] + "-homology.h5"
@@ -569,27 +620,10 @@ else:
     ref_point = np.r_[0.0,0.0,0.0]
 
 # Load mesh
-with h5py.File(options.in_file) as fid:
-    vertex_full = np.asarray(fid['mesh/R'])
-    face_full = np.asarray(fid['mesh/LC'])-1
-    reg_full = np.asarray(fid['mesh/REG'])
-    keep_nodesets = []
-    if options.keep_nodeset_start is not None:
-        if 'mesh/NUM_NODESETS' not in fid:
-            parser.exit(-1, '"--keep_nodeset_start" specified but no nodesets available')
-        num_nodesets = fid['mesh/NUM_NODESETS'][0]
-        if options.keep_nodeset_start < 0:
-            if options.keep_nodeset_start < -num_nodesets:
-                parser.exit(-1, '"--keep_nodeset_start" exceeds the number of available nodesets')
-            options.keep_nodeset_start = num_nodesets + 1 + options.keep_nodeset_start
-        if options.keep_nodeset_start > num_nodesets:
-            parser.exit(-1, '"--keep_nodeset_start" exceeds the number of available nodesets')
-        for j in range(num_nodesets):
-            if j+1 >= options.keep_nodeset_start:
-                try:
-                    keep_nodesets.append(np.asarray(fid['mesh/NODESET{0:04d}'.format(j+1)])-1)
-                except:
-                    parser.exit(-1, 'Failed to read nodeset {0}'.format(j+1))
+input_model = read_ThinCurr_mesh(options.in_file)
+vertex_full = input_model['r']
+face_full = input_model['lc']
+reg_full = input_model['reg']
 
 # Setup full mesh
 full_mesh = trimesh(vertex_full,face_full)
@@ -627,7 +661,7 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
         new_lc = []
         cycle_max = [0, 0]
         for k, cycle in enumerate(boundary_cycles[surf_id]):
-            new_bcycles.append(rindexed_pts[cycle+1]-1) 
+            new_bcycles.append(rindexed_pts[cycle+1]-1)
             cycle_lc = []
             for i in range(1,len(cycle)-2):
                 cycle_lc.append([cycle[i+1], cycle[i], cycle[0]])
@@ -655,7 +689,7 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
     print("    # of internal cycles = {0}".format(len(hb)))
     for i in range(len(hb)):
         hb[i] = fixup_loop(hb[i],mesh,new_bcycles,options.debug)
-    
+
     for k, cycle in enumerate(boundary_cycles[surf_id]):
         if k == cycle_max[1]:
             skipped_holes.append(cycle)
@@ -677,7 +711,7 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
             ind2 = hb[j][int(len(hb[j])/2)]
             hb2 = compute_greedy_homotopy_basis(face_covered,vertex,ind2,face_sweight=mesh.nf)
             for i in range(len(hb2)):
-                hb2[i] = fixup_loop(hb2[i],mesh,new_bcycles,options.debug)        
+                hb2[i] = fixup_loop(hb2[i],mesh,new_bcycles,options.debug)
             minima_sets += hb2
 
             # Build edge operator for comparison
@@ -689,22 +723,35 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
                 he.append(evec)
                 minima_counts.append(distance)
                 he_mark[abs(evec)>0] = 1
-            
+
             # Shrink graph by grouping cells that don't cross cycles
             cell_flags, keep_edges = mesh_covered.merge_cells(he_mark)
             ncoarse = np.max(cell_flags)+1
-            print(indent_level + "[{2}/{3}] Reducing mesh to {0} macro cells with {1} edges".format(ncoarse,keep_edges.shape[0],j+1,len(hb)))
+            print(indent_level + "[{2}/{3}] Reducing mesh to {0} macro cells with {1} macro edges".format(ncoarse,keep_edges.shape[0],j+1,len(hb)))
             bmat_tmp = bmat_dense_base[:,keep_edges]
             bmat_dense = np.zeros((ncoarse,keep_edges.shape[0]))
             for i in range(ncoarse):
                 bmat_dense[i,:] = np.sum(bmat_tmp[cell_flags==i,:],axis=0)
-            
+
             # Build list of cycles from smallest to largest
-            intial_rank = np.linalg.matrix_rank(bmat_dense)
+            # intial_rank = np.linalg.matrix_rank(bmat_dense)
+            U, S, V_T = np.linalg.svd(bmat_dense, full_matrices=False)
+            intial_rank = np.sum(S > 1e-10)
             hb_out = []
+            do_check = False
             for i in np.argsort(minima_counts):
                 bmat_tmp = np.vstack((bmat_dense,he[i][keep_edges]))
-                aug_rank = np.linalg.matrix_rank(bmat_tmp)
+                if (not do_check) and (i >= len(hb)): # Only start checking once we are looking at new cycles
+                    do_check = True
+                if do_check:
+                    # aug_rank = np.linalg.matrix_rank(bmat_tmp)
+                    try:
+                        U, S, V_T = update_svd_with_row(U, S, V_T, he[i][keep_edges])
+                    except np.linalg.LinAlgError: # Fall back to full factorization
+                        U, S, V_T = np.linalg.svd(bmat_tmp, full_matrices=False)
+                    aug_rank = np.sum(S > 1.e-10)
+                else:
+                    aug_rank = intial_rank + 1
                 if aug_rank != intial_rank:
                     if options.debug:
                         print("Adding cycle {0}".format(i))
@@ -717,7 +764,7 @@ for surf_id in range(np.max(full_mesh.surf_tag)+1):
                     if options.debug:
                         print("Skipping cycle {0}".format(i))
         indent_level = indent_level[:-2]
-    
+
     # Save computed internal cycles to hole list
     for basis_cycle in hb_out:
         internal_holes.append(reindex_inv[basis_cycle])
@@ -747,36 +794,23 @@ print()
 print("Final model:")
 print("    # of holes = {0}".format(len(all_cycles)))
 print("    # of closures = {0}".format(len(closures)))
-print("    # of additional nodesets = {0}".format(len(keep_nodesets)))
+# print("    # of additional nodesets = {0}".format(len(keep_nodesets)))
 
 # Copy mesh to new file and replace holes/closures
-shutil.copyfile(options.in_file,out_file)
-with h5py.File(out_file,'r+') as h5_file:
-    # Replace nodesets
-    if 'mesh/NUM_NODESETS' in h5_file:
-        for j in range(h5_file['mesh/NUM_NODESETS'][0]):
-            del h5_file['mesh/NODESET{0:04d}'.format(j+1)]
-        del h5_file['mesh/NUM_NODESETS']
-    nodesets = []
-    if len(all_cycles) > 0:
-        for k, cycle in enumerate(all_cycles):
-            nodesets.append(cycle[:-1])
-    nodesets = nodesets + keep_nodesets
-    if len(nodesets) > 0:
-        h5_file.create_dataset('mesh/NUM_NODESETS', data=[len(nodesets),], dtype='i4')
-        j=0
-        for k, nodeset in enumerate(nodesets):
-            j+=1
-            h5_file.create_dataset('mesh/NODESET{0:04d}'.format(j), data=nodeset+1, dtype='i4')
-    # Replace sidesets
-    if 'mesh/NUM_SIDESETS' in h5_file:
-        for j in range(h5_file['mesh/NUM_SIDESETS'][0]):
-            del h5_file['mesh/SIDESET{0:04d}'.format(j+1)]
-        del h5_file['mesh/NUM_SIDESETS']
-    if len(closures) > 0:
-        closures = [closure+1 for closure in closures]
-        h5_file.create_dataset('mesh/NUM_SIDESETS', data=[1,], dtype='i4')
-        h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(1), data=closures, dtype='i4')
+holes = []
+if len(all_cycles) > 0:
+    for k, cycle in enumerate(all_cycles):
+        holes.append(cycle[:-1])
+if 'thincurr' not in input_model:
+    input_model['thincurr'] = {}
+write_ThinCurr_mesh(out_file, input_model['r'], input_model['lc'], input_model['reg'],
+                    holes=holes,
+                    jumpers=input_model['thincurr'].get('jumpers'), closures=closures,
+                    eta_surf=input_model['thincurr'].get('eta_surf'),
+                    eta_vol=input_model['thincurr'].get('eta_vol'),
+                    thickness=input_model['thincurr'].get('thickness'),
+                    coil_sets=input_model['thincurr'].get('coil_sets'),
+                    reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'))
 
 # Plot final cycles
 if options.plot_final:
@@ -790,8 +824,6 @@ if options.plot_final:
             ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='k')
     for k, cycle in enumerate(internal_holes):
         ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='tab:orange')
-    for k, cycle in enumerate(keep_nodesets):
-        ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='tab:green')
     for closure_cell in closures:
         closure = full_mesh.lf[closure_cell,0]
         ax.plot(vertex_full[closure,0], vertex_full[closure,1], vertex_full[closure,2], 'o', color='k')

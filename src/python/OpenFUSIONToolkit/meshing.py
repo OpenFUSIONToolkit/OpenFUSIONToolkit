@@ -14,7 +14,7 @@ import h5py
 from .util import oft_warning
 
 
-def write_native_mesh(filename, mesh_type, r, lc, reg, nodesets=[], sidesets=[], ho_info=None, periodic_info=None, block_attrs=None, block_names=None):
+def write_native_mesh(filename, mesh_type, r, lc, reg, nodesets=None, sidesets=None, ho_info=None, periodic_info=None, reg_attrs=None, reg_names=None):
     r'''Create a native HDF5 mesh file for OFT from the given mesh information
 
     @param filename Filename for mesh file
@@ -26,7 +26,7 @@ def write_native_mesh(filename, mesh_type, r, lc, reg, nodesets=[], sidesets=[],
     @param sidesets List of side sets
     @param ho_info High-order grid information
     @param periodic_info Information for mesh periodicity
-    @param block_attrs List of block attributes
+    @param reg_attrs List of region attributes
     @param block_names List of block names
     '''
     print()
@@ -34,37 +34,37 @@ def write_native_mesh(filename, mesh_type, r, lc, reg, nodesets=[], sidesets=[],
     with h5py.File(filename, 'w') as h5_file:
         # Write out basic mesh information
         h5_file.create_dataset('mesh/R', data=r, dtype='f8')
-        dset = h5_file.create_dataset('mesh/LC', data=lc, dtype='i4')
-        dset.attrs["TYPE"] = mesh_type.encode('ascii')
+        dset = h5_file.create_dataset('mesh/LC', data=lc+1, dtype='i4') # Convert to 1-based indexing for storage
+        dset.attrs["TYPE"] = mesh_type.lower().encode('ascii')
         h5_file.create_dataset('mesh/REG', data=reg, dtype='i4')
         # Write out high-order mesh information (nodes and indexing information)
         if ho_info is not None:
             h5_file.create_dataset('mesh/ho_info/R', data=ho_info[0], dtype='f8')
-            h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1], dtype='i4')
+            h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1]+1, dtype='i4') # Convert to 1-based indexing for storage
             if ho_info[2] is not None:
-                h5_file.create_dataset('mesh/ho_info/LF', data=ho_info[2], dtype='i4')
-        # Write block names
-        if block_names is not None:
-            max_len = max(map(len, block_names))
-            h5_file.create_dataset('mesh/reg_attr/BLOCK_NAMES', data=numpy.array(block_names, dtype=f"S{max_len}"))
-        # Write block attributes
-        if len(block_attrs) > 0:
-            h5_file.create_dataset('mesh/reg_attr/NUM_ATTR', data=[len(block_attrs),], dtype='i4')
-            for i, block_attr in enumerate(block_attrs):
-                h5_file.create_dataset('mesh/reg_attr/ATTR{0:04d}'.format(i+1), data=block_attr, dtype='f8')
+                h5_file.create_dataset('mesh/ho_info/LF', data=ho_info[2]+1, dtype='i4') # Convert to 1-based indexing for storage
+        # Write region names
+        if reg_names is not None:
+            max_len = max(map(len, reg_names))
+            h5_file.create_dataset('mesh/REG_NAMES', data=numpy.array(reg_names, dtype=f"S{max_len}"))
+        # Write region attributes
+        if (reg_attrs is not None) and (len(reg_attrs) > 0):
+            h5_file.create_dataset('mesh/reg_attrs/NUM_ATTR', data=[len(reg_attrs),], dtype='i4')
+            for i, reg_attr in enumerate(reg_attrs):
+                h5_file.create_dataset('mesh/reg_attrs/ATTR{0:04d}'.format(i+1), data=reg_attr, dtype='f8')
         # Write nodesets
-        if len(nodesets) > 0:
+        if (nodesets is not None) and (len(nodesets) > 0):
             h5_file.create_dataset('mesh/NUM_NODESETS', data=[len(nodesets),], dtype='i4')
             for i, node_set in enumerate(nodesets):
-                h5_file.create_dataset('mesh/NODESET{0:04d}'.format(i+1), data=node_set, dtype='i4')
+                h5_file.create_dataset('mesh/NODESET{0:04d}'.format(i+1), data=node_set+1, dtype='i4') # Convert to 1-based indexing for storage
         # Write sidesets (2D entity blocks)
-        if len(sidesets) > 0:
+        if (sidesets is not None) and (len(sidesets) > 0):
             h5_file.create_dataset('mesh/NUM_SIDESETS', data=[len(sidesets),], dtype='i4')
             for i, side_set in enumerate(sidesets):
-                h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(i+1), data=side_set, dtype='i4')
+                h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(i+1), data=side_set+1, dtype='i4') # Convert to 1-based indexing for storage
         # Write flag for periodic nodes following mesh reflection
         if periodic_info is not None:
-            h5_file.create_dataset('mesh/periodicity/nodes', data=periodic_info, dtype='i4')
+            h5_file.create_dataset('mesh/periodicity/NODES', data=periodic_info+1, dtype='i4') # Convert to 1-based indexing for storage
 
 
 def read_native_mesh(filename):
@@ -77,45 +77,60 @@ def read_native_mesh(filename):
     with h5py.File(filename, 'r') as h5_file:
         # Read basic mesh information
         mesh = h5_file['mesh']
-        mesh_type = mesh['LC'].attrs['TYPE']
-        if isinstance(mesh_type, bytes):
-            mesh_type = mesh_type.decode('ascii')
+        lc = mesh['LC'][()] - 1 # Convert to 0-based indexing
+        if 'TYPE' in mesh['LC'].attrs:
+            mesh_type = mesh['LC'].attrs['TYPE']
+            if isinstance(mesh_type, bytes):
+                mesh_type = mesh_type.decode('ascii')
+        else:
+            if lc.shape[1] == 2:
+                mesh_type = 'line'
+            elif lc.shape[1] == 3:
+                mesh_type = 'tri'
+            elif lc.shape[1] == 4:
+                print('Warning: Mesh type not specified in file, assuming tetrahedral mesh with 4-node cells')
+                mesh_type = 'tet'
+            elif lc.shape[1] == 6:
+                mesh_type = 'hex'
         mesh_info = {
-            'mesh_type': mesh_type,
+            'type': mesh_type,
             'r': mesh['R'][()],
-            'lc': mesh['LC'][()],
+            'lc': mesh['LC'][()] - 1, # Convert to 0-based indexing
             'reg': mesh['REG'][()],
         }
         # Read high-order mesh information (nodes and indexing information)
         if 'ho_info' in mesh:
             ho_group = mesh['ho_info']
-            ho_info = [ho_group['R'][()], ho_group['LE'][()], None]
+            ho_info = [ho_group['R'][()], ho_group['LE'][()] - 1, None] # Convert to 0-based indexing
             if 'LF' in ho_group:
-                ho_info[2] = ho_group['LF'][()]
+                ho_info[2] = ho_group['LF'][()] - 1 # Convert to 0-based indexing
             mesh_info['ho_info'] = tuple(ho_info)
-        if 'reg_attr' in mesh:
-            reg_attr = mesh['reg_attr']
-            # Read block names
-            if 'BLOCK_NAMES' in reg_attr:
-                mesh_info['block_names'] = [name.decode('utf-8') if isinstance(name, bytes) else str(name)
-                                            for name in reg_attr['BLOCK_NAMES'][()]]
-            # Read block attributes
-            if 'NUM_ATTR' in reg_attr:
-                mesh_info['block_attrs'] = [reg_attr['ATTR{0:04d}'.format(i+1)][()]
-                                            for i in range(reg_attr['NUM_ATTR'][0])]
+        # Read region names
+        if 'REG_NAMES' in mesh:
+            mesh_info['reg_names'] = [name.decode('utf-8') if isinstance(name, bytes) else str(name)
+                                        for name in mesh['REG_NAMES'][()]]
+        # Read region attributes
+        if 'reg_attrs' in mesh:
+            reg_attrs = mesh['reg_attrs']
+            if 'NUM_ATTR' in reg_attrs:
+                mesh_info['reg_attrs'] = [reg_attrs['ATTR{0:04d}'.format(i+1)][()]
+                                            for i in range(reg_attrs['NUM_ATTR'][0])]
+                # Drop if all attributes are empty (h5py.Empty), to avoid unnecessary data in the output
+                if all([isinstance(val, h5py.Empty) for val in mesh_info['reg_attrs']]):
+                    del mesh_info['reg_attrs']
         # Read nodesets
         if 'NUM_NODESETS' in mesh:
-            mesh_info['nodesets'] = [mesh['NODESET{0:04d}'.format(i+1)][()]
+            mesh_info['nodesets'] = [mesh['NODESET{0:04d}'.format(i+1)][()] - 1 # Convert to 0-based indexing
                                      for i in range(mesh['NUM_NODESETS'][0])]
         # Read sidesets (2D entity blocks)
         if 'NUM_SIDESETS' in mesh:
-            mesh_info['sidesets'] = [mesh['SIDESET{0:04d}'.format(i+1)][()]
+            mesh_info['sidesets'] = [mesh['SIDESET{0:04d}'.format(i+1)][()] - 1 # Convert to 0-based indexing
                                      for i in range(mesh['NUM_SIDESETS'][0])]
         # Read flag for periodic nodes following mesh reflection
         if 'periodicity' in mesh:
             periodicity = mesh['periodicity']
-            if 'nodes' in periodicity:
-                mesh_info['periodic_info'] = periodicity['nodes'][()]
+            if 'NODES' in periodicity:
+                mesh_info['periodic_info'] = periodicity['NODES'][()] - 1 # Convert to 0-based indexing
     return mesh_info
 
 
@@ -129,6 +144,21 @@ def convert_mesh_to_pyvista(mesh_type, r, lc):
     @returns `pyvista.UnstructuredGrid` object for grid
     '''
     import pyvista
+    if isinstance(mesh_type, str):
+        mesh_type = mesh_type.lower()
+        if mesh_type == 'line':
+            mesh_type = 10
+        elif mesh_type == 'tri':
+            mesh_type = 21
+        elif mesh_type == 'quad':
+            mesh_type = 23
+        elif mesh_type == 'tet':
+            mesh_type = 31
+        elif mesh_type == 'hex':
+            mesh_type = 33
+        else:
+            raise ValueError("Unsupported mesh type: {0}".format(mesh_type))
+    #
     if mesh_type == 31:
         celltype = pyvista.CellType.TETRA
         ncv = 4
