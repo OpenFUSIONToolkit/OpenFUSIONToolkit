@@ -1302,7 +1302,7 @@ DO i=1,npsi
     fp(i)=tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%fp(r)
     f(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%f(r) + tMaker_equil_obj%I%f_offset
   ELSE
-    f(i)=SQRT(tMaker_equil_obj%psiscale*tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%f(r) + tMaker_equil_obj%I%f_offset**2)
+    f(i)=SIGN(1.d0,tMaker_equil_obj%I%f_offset)*SQRT(tMaker_equil_obj%psiscale*tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%f(r) + tMaker_equil_obj%I%f_offset**2)
     fp(i)=tMaker_equil_obj%ffp_scale*tMaker_equil_obj%I%fp(r)/(2.d0*f(i))
   END IF
   pp(i)=tMaker_equil_obj%psiscale*tMaker_equil_obj%p_scale*tMaker_equil_obj%P%fp(r)

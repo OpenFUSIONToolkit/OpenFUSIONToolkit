@@ -3451,7 +3451,7 @@ do j=1,device%fe_rep%mesh%nc
     IF(self%mode==0)THEN
       f=self%ffp_scale*self%I%f(psitmp(1))+self%I%f_offset
     ELSE
-      f=SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2)
+      f=SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2)
     END IF
     do l=1,device%fe_rep%nce
       call oft_blag_eval(device%fe_rep,j,l,device%fe_rep%quad%pts(:,m),rop)
@@ -4084,7 +4084,7 @@ DO i=1,npts
   IF(self%mode==0)THEN
     B(2)=(self%ffp_scale*self%I%f(psitmp(1))+self%I%f_offset)/pts(1,i)
   ELSE
-    B(2)=SQRT(self%ffp_scale*self%I%f(psitmp(1)) + self%I%f_offset**2)/pts(1,i)
+    B(2)=SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%f(psitmp(1)) + self%I%f_offset**2)/pts(1,i)
   END IF
   B=B*self%psiscale
   ! Handle anisotropic pressure
@@ -4477,8 +4477,7 @@ do j=1,nr
   IF(gseq%mode==0)THEN
     fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
   ELSE
-    fpol=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-    + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    fpol=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
   END IF
   !---Safety Factor (q)
   qpsi=fpol*active_tracer%v(3)/(2*pi)
@@ -4640,7 +4639,7 @@ SELECT CASE(self%mode)
       IF(self%equil%mode==0)THEN
         val(1)=self%equil%psiscale*(self%equil%ffp_scale*self%equil%I%f(psitmp(1))+self%equil%I%f_offset)
       ELSE
-        val(1)=self%equil%psiscale*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)
+        val(1)=self%equil%psiscale*SIGN(1.d0,self%equil%I%f_offset)*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)
       END IF
     ELSE
       val(1)=self%equil%psiscale*self%equil%I%f_offset
@@ -4698,7 +4697,7 @@ IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
   IF(self%equil%mode==0)THEN
     val(2)=self%equil%psiscale*(self%equil%ffp_scale*self%equil%I%f(psitmp(1))+self%equil%I%f_offset)/(pt(1)+gs_epsilon)
   ELSE
-    val(2)=self%equil%psiscale*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)/(pt(1)+gs_epsilon)
+    val(2)=self%equil%psiscale*SIGN(1.d0,self%equil%I%f_offset)*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)/(pt(1)+gs_epsilon)
   END IF
 ELSE
   val(2)=self%equil%psiscale*self%equil%I%f_offset/(pt(1)+gs_epsilon)
@@ -5156,7 +5155,7 @@ DO i=0,m
     outtmp(2)=self%ffp_scale*self%I%fp(r)
     outtmp(3)=self%psiscale*self%ffp_scale*self%I%f(r) + self%I%f_offset
   ELSE
-    outtmp(3)=SQRT(self%psiscale*self%ffp_scale*self%I%f(r) + self%I%f_offset**2)
+    outtmp(3)=SIGN(1.d0,self%I%f_offset)*SQRT(self%psiscale*self%ffp_scale*self%I%f(r) + self%I%f_offset**2)
     outtmp(2)=self%ffp_scale*self%I%fp(r)/(2.d0*outtmp(3))
   END IF
   outtmp(4)=self%psiscale*self%p_scale*self%P%fp(r)
