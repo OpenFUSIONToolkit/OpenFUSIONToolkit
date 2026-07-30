@@ -799,7 +799,7 @@ def test_ITER_eq(order,helicity):
     eq_dict['tflux'] *= helicity
     eq_dict['dflux'] *= helicity
     results = mp_run(run_ITER_case,(1.0,(order,),'',helicity))
-    assert validate_dict(results,ITER_tmp_dict)
+    assert validate_dict(results,eq_dict)
     assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)
     assert validate_ifile('tokamaker.ifile','ITER_test.ifile',helicity)
 
