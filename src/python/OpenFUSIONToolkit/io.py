@@ -18,6 +18,7 @@ import subprocess
 import xml.etree.ElementTree as ET
 import numpy
 import h5py
+from ._xdmf import build_xdmf_files
 eol_byte = '\n'.encode()
 
 
@@ -48,7 +49,7 @@ class histfile:
         def decode_list(list):
             '''! Decode list for Python 3 compatibility'''
             return [val.decode("utf-8") for val in list]
-        
+
         def setup_sizes(data_reg):
             r'''! Reader header information and setup binary reads'''
             base_dict = {}
@@ -244,7 +245,6 @@ class histfile:
 
     def save_to_hdf5(self,filename):
         r'''! Convert data to HDF5 format'''
-        import h5py
         print("Converting file to HDF5 format")
         with h5py.File(filename, 'w') as fid:
             for (ind, field) in enumerate(self.field_tags):
@@ -262,7 +262,7 @@ class histfile:
 
     def __getitem__(self, key):
         return self._data[key]
-    
+
     def __iter__(self):
         return iter(self._data)
 
@@ -279,6 +279,27 @@ class histfile:
             if field is not None:
                 result += '    {0}: {3} ({1}{2})\n'.format(field, self.field_types[ind], self.field_repeats[ind], self.field_descriptions[field])
         return result
+
+
+def _convert_hist_cli():
+    r'''! Command line interface for converting OFT history files to MATLAB or HDF5'''
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.description = "Pre-processing script for mesh files"
+    parser.add_argument("--files", type=str, default=None, nargs='+', required=True, help="Files to view or convert")
+    parser.add_argument("--convert_hdf5", action="store_true", default=False, help="Convert files to HDF5? (default: False)")
+    parser.add_argument("--convert_matlab", action="store_true", default=False, help="Convert files to MATLAB? (default: False)")
+    options = parser.parse_args()
+
+    for file in options.files:
+        hist_file = histfile(file)
+        file_prefix = file.split('.')[0]
+        if options.convert_hdf5:
+            hist_file.save_to_hdf5(file_prefix + ".h5")
+        if options.convert_matlab:
+            hist_file.save_to_matlab(file_prefix + ".mat")
+        if not (options.convert_hdf5 or options.convert_matlab):
+            print(hist_file)
 
 
 class XDMF_plot_mesh:
@@ -322,7 +343,7 @@ class XDMF_plot_mesh:
                 step_dict[field_name] = numpy.asarray(field_obj)
             self.time_fields.append(step_dict)
         self.times = numpy.array(self.times)
-        
+
     def get_field(self,name,time=None,timestep=None):
         '''! Get raw data associated with field at a given time or timestep
 
@@ -357,7 +378,7 @@ class XDMF_plot_mesh:
             if name not in self.static_fields:
                 raise KeyError('"{0}" is not one of the static fields'.format(name))
             return self.static_fields[name]
-    
+
     def get_pyvista_grid(self):
         '''! Get pyvista representation of grid
 
@@ -404,7 +425,7 @@ class XDMF_plot_file:
                 self._groups[group_key.lower()] = {}
                 for mesh_key, mesh_obj in group_obj.items():
                     self._groups[group_key.lower()][mesh_key.lower()] = XDMF_plot_mesh(mesh_obj)
-    
+
     def get(self, keyname, value=None):
         '''! Get plotting group (list of @ref XDMF_plot_mesh "meshes")
 
@@ -423,13 +444,13 @@ class XDMF_plot_file:
 
     def __getitem__(self, key):
         return self._groups[key.lower()]
-    
+
     def __iter__(self):
         return iter(self._groups)
 
 
 def build_XDMF(path='.',repeat_static=False,pretty=False,legacy=False):
-    '''! Build XDMF plot metadata files 
+    '''! Build XDMF plot metadata files
 
     @param path Folder to build XDMF files in (must include `oft_xdmf.XXXX.h5` or `dump.dat` files)
     @param repeat_static Repeat static fields (0-th timestep) in all timesteps?
@@ -437,21 +458,6 @@ def build_XDMF(path='.',repeat_static=False,pretty=False,legacy=False):
     @param legacy Use legacy XDMF script for processing `dump.dat` files?
     '''
     if legacy:
-        cmd = [
-            "{0}".format(sys.executable),
-            "{0}".format(os.path.join(os.path.dirname(__file__),'..','build_xdmf-legacy.py'))
-        ]
-    else:
-        cmd = [
-            "{0}".format(sys.executable),
-            "{0}".format(os.path.join(os.path.dirname(__file__),'..','build_xdmf.py'))
-        ]
-    if repeat_static:
-        cmd.append("--repeat_static")
-    if pretty:
-        cmd.append("--pretty")
-    subprocess.run(cmd,cwd=path)
-    if legacy:
-        return None
-    else:
-        return XDMF_plot_file(os.path.join(path,'oft_xdmf.0001.h5'))
+        raise NotImplementedError("Legacy XDMF processing is only supported via the standalone script `build_xdmf-legacy.py`")
+    build_xdmf_files(directory=path,pretty=pretty,repeat_static=repeat_static)
+    return XDMF_plot_file(os.path.join(path,'oft_xdmf.0001.h5'))

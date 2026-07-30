@@ -16,7 +16,6 @@ set( OFT_PY_BINS
   convert_cubit.py
   convert_gmsh.py
   scripts/plot_mug_hist.py
-  scripts/plot_tokamaker_psi.py
   scripts/ThinCurr_compute_holes.py
 )
 

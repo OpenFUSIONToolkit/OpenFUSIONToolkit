@@ -198,102 +198,105 @@ class xdmf_doc:
             ET.indent(tree, space="  ", level=0)
         tree.write(self.filename)
 
-# ===============================================================
-# Input parameters
-# ===============================================================
-parser = argparse.ArgumentParser()
-parser.description = "Create Xdmf file for VisIt from Open FUSION Toolkit output."
-parser.add_argument('-i', '--inprefix', type=str, default='oft_xdmf', help='Input file name prefix, default="oft_xdmf"')
-parser.add_argument('-v', '--verbose', action="store_true", default=False, help='Display debug information during Xdmf write.')
-parser.add_argument('-s', '--size', type=int, default=20, help='Size of XML file cache before flush.')
-parser.add_argument('-p', '--pretty', action="store_true", default=False, help='Print nicely formatted XML documents.')
-parser.add_argument('-k', '--keep', action="store_true", default=False, help='Keep existing output files.')
-parser.add_argument('--block_padding', type=int, default=4, help='Size block index padding.')
-parser.add_argument('--repeat_static', action="store_true", default=False, help='Insert static fields into all timesteps.')
-args = parser.parse_args()
 
-inprefix=args.inprefix
-verbose=args.verbose
-cacheSize=args.size
-repeatStatic=args.repeat_static
-padSize=args.block_padding
+def build_xdmf_files(directory,inprefix='oft_xdmf',pretty=False,keep=False,padSize=4,repeat_static=False):
+    print()
+    print('Creating output files: {0}.{1}.h5'.format(inprefix,'X'*padSize))
 
+    if not keep:
+        import os
+        import glob
+        print('  Removing old Xdmf files')
+        files = glob.glob(os.path.join(directory,'*.xmf'))
+        for filename in files:
+            os.remove(filename)
+        print('    Removed {0} files'.format(len(files)))
 
-print()
-print('Creating output files: {0}.{1}.h5'.format(inprefix,'X'*padSize))
-
-if not args.keep:
-    import os
-    import glob
-    print('  Removing old Xdmf files')
-    files = glob.glob('*.xmf')
-    for filename in files:
-        os.remove(filename)
-    print('    Removed {0} files'.format(len(files)))
-
-xml_docs = []
-with h5py.File("{0}.{1}.h5".format(inprefix,str(1).zfill(padSize)),'r') as h5_file:
-    for group_key, group_obj in h5_file.items():
-        print('  Found Group: {0}'.format(group_key))
-        for mesh_key, mesh_obj in group_obj.items():
-            print('    Found Mesh: {0}'.format(mesh_key))
-            mesh_type = mesh_obj['TYPE'][()]
-            # Create mesh description
-            np = mesh_obj['R'].shape[0]
-            nc = mesh_obj['LC'].shape[0]
-            mesh=xdmf_mesh('0001',inprefix,np,nc,int(0),'{0}/{1}'.format(group_key,mesh_key),'R','LC')
-            mesh.set_type(mesh_type)
-            meshes = [mesh,]
-            # Get other blocks if present
-            nblocks_ds = mesh_obj.get('NBLOCKS')
-            if nblocks_ds is not None:
-                nblocks = nblocks_ds[0]
-                print('      # of blocks: {0}'.format(nblocks))
-                for i in range(nblocks):
-                    if i == 0:
-                        continue
-                    with h5py.File("{0}.{1}.h5".format(inprefix,str(i+1).zfill(padSize)),'r') as h5_file2:
-                        block_group = h5_file2.get(group_key,None)
-                        if block_group is None:
-                            raise ValueError("Group not found in block {0}".format(i+1))
-                        block_mesh = block_group.get(mesh_key,None)
-                        if block_mesh is None:
+    xml_docs = []
+    with h5py.File(os.path.join(directory,"{0}.{1}.h5".format(inprefix,str(1).zfill(padSize))),'r') as h5_file:
+        for group_key, group_obj in h5_file.items():
+            print('  Found Group: {0}'.format(group_key))
+            for mesh_key, mesh_obj in group_obj.items():
+                print('    Found Mesh: {0}'.format(mesh_key))
+                mesh_type = mesh_obj['TYPE'][()]
+                # Create mesh description
+                np = mesh_obj['R'].shape[0]
+                nc = mesh_obj['LC'].shape[0]
+                mesh=xdmf_mesh('0001',inprefix,np,nc,int(0),'{0}/{1}'.format(group_key,mesh_key),'R','LC')
+                mesh.set_type(mesh_type)
+                meshes = [mesh,]
+                # Get other blocks if present
+                nblocks_ds = mesh_obj.get('NBLOCKS')
+                if nblocks_ds is not None:
+                    nblocks = nblocks_ds[0]
+                    print('      # of blocks: {0}'.format(nblocks))
+                    for i in range(nblocks):
+                        if i == 0:
                             continue
-                            # raise ValueError("Mesh not found in block {0}".format(i+1))
-                        np = block_mesh['R'].shape[0]
-                        nc = block_mesh['LC'].shape[0]
-                        mesh=xdmf_mesh('{0:04d}'.format(i+1),inprefix,np,nc,int(0),'{0}/{1}'.format(group_key,mesh_key),'R','LC')
-                        mesh.set_type(mesh_type)
-                        meshes.append(mesh)
-            # Add static fields
-            static_fields = []
-            xml_doc = xdmf_doc('{0}_{1}-static.xmf'.format(group_key,mesh_key),padSize,args.pretty)
-            for mesh in meshes:
-                xml_doc.add_mesh(mesh)
-            for field_name, field_obj in mesh_obj.get('0000',{}).items():
-                field=xdmf_fields(field_name,field_obj.attrs)
-                xml_doc.add_field(field)
-                static_fields.append(field)
-            xml_docs.append(xml_doc)
-            # Add timesteps
-            for i in range(9998):
-                xml_doc = xdmf_doc('{0}_{1}-{2:04d}.xmf'.format(group_key,mesh_key,i+1),padSize,args.pretty)
+                        with h5py.File("{0}.{1}.h5".format(inprefix,str(i+1).zfill(padSize)),'r') as h5_file2:
+                            block_group = h5_file2.get(group_key,None)
+                            if block_group is None:
+                                raise ValueError("Group not found in block {0}".format(i+1))
+                            block_mesh = block_group.get(mesh_key,None)
+                            if block_mesh is None:
+                                continue
+                                # raise ValueError("Mesh not found in block {0}".format(i+1))
+                            np = block_mesh['R'].shape[0]
+                            nc = block_mesh['LC'].shape[0]
+                            mesh=xdmf_mesh('{0:04d}'.format(i+1),inprefix,np,nc,int(0),'{0}/{1}'.format(group_key,mesh_key),'R','LC')
+                            mesh.set_type(mesh_type)
+                            meshes.append(mesh)
+                # Add static fields
+                static_fields = []
+                xml_doc = xdmf_doc(os.path.join(directory,'{0}_{1}-static.xmf'.format(group_key,mesh_key)),padSize,pretty)
                 for mesh in meshes:
                     xml_doc.add_mesh(mesh)
-                timestep = mesh_obj.get('{0:04d}'.format(i+1),None)
-                if timestep is None:
-                    break
-                xml_doc.set_time(timestep['TIME'][0])
-                for field_name, field_obj in timestep.items():
-                    if field_name == 'TIME':
-                        continue
-                    field=xdmf_fields(field_name,field_obj.attrs,i+1)
+                for field_name, field_obj in mesh_obj.get('0000',{}).items():
+                    field=xdmf_fields(field_name,field_obj.attrs)
                     xml_doc.add_field(field)
-                if repeatStatic:
-                    for field in static_fields:
+                    static_fields.append(field)
+                xml_docs.append(xml_doc)
+                # Add timesteps
+                for i in range(9998):
+                    xml_doc = xdmf_doc(os.path.join(directory,'{0}_{1}-{2:04d}.xmf'.format(group_key,mesh_key,i+1)),padSize,pretty)
+                    for mesh in meshes:
+                        xml_doc.add_mesh(mesh)
+                    timestep = mesh_obj.get('{0:04d}'.format(i+1),None)
+                    if timestep is None:
+                        break
+                    xml_doc.set_time(timestep['TIME'][0])
+                    for field_name, field_obj in timestep.items():
+                        if field_name == 'TIME':
+                            continue
+                        field=xdmf_fields(field_name,field_obj.attrs,i+1)
                         xml_doc.add_field(field)
-                if len(xml_doc.fields) > 0:
-                    xml_docs.append(xml_doc)
+                    if repeat_static:
+                        for field in static_fields:
+                            xml_doc.add_field(field)
+                    if len(xml_doc.fields) > 0:
+                        xml_docs.append(xml_doc)
 
-for xml_doc in xml_docs:
-    xml_doc.write_file()
+    for xml_doc in xml_docs:
+        xml_doc.write_file()
+
+
+def script_entry():
+    # ===============================================================
+    # Input parameters
+    # ===============================================================
+    parser = argparse.ArgumentParser()
+    parser.description = "Create Xdmf file for VisIt from Open FUSION Toolkit output."
+    parser.add_argument('-i', '--inprefix', type=str, default='oft_xdmf', help='Input file name prefix, default="oft_xdmf"')
+    # parser.add_argument('-v', '--verbose', action="store_true", default=False, help='Display debug information during Xdmf write.')
+    # parser.add_argument('-s', '--size', type=int, default=20, help='Size of XML file cache before flush.')
+    parser.add_argument('-p', '--pretty', action="store_true", default=False, help='Print nicely formatted XML documents.')
+    parser.add_argument('-k', '--keep', action="store_true", default=False, help='Keep existing output files.')
+    parser.add_argument('--block_padding', type=int, default=4, help='Size block index padding.')
+    parser.add_argument('--repeat_static', action="store_true", default=False, help='Insert static fields into all timesteps.')
+    args = parser.parse_args()
+
+    build_xdmf_files('.',args.inprefix,args.pretty,args.keep,args.block_padding,args.repeat_static)
+
+
+
+
