@@ -798,6 +798,8 @@ def test_ITER_eq(order,helicity):
     eq_dict = ITER_eq_dict.copy()
     eq_dict['tflux'] *= helicity
     eq_dict['dflux'] *= helicity
+    eq_dict['q_0'] *= helicity
+    eq_dict['q_95'] *= helicity
     results = mp_run(run_ITER_case,(1.0,(order,),'',helicity))
     assert validate_dict(results,eq_dict)
     assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)
@@ -811,6 +813,8 @@ def test_ITER_eq_io(order,helicity):
     eq_dict['nl_its'] = 1
     eq_dict['tflux'] *= helicity
     eq_dict['dflux'] *= helicity
+    eq_dict['q_0'] *= helicity
+    eq_dict['q_95'] *= helicity
     results = mp_run(run_ITER_case,(1.0,(order,),'io',helicity))
     assert validate_dict(results,eq_dict)
 
