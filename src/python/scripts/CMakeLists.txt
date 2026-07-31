@@ -1,17 +1,10 @@
-# Python modules
-set( OFT_PY_HELPER_MODS
-  oft_mpl.py
-)
-foreach( file ${OFT_PY_HELPER_MODS} )
-  configure_file( ${file} ${CMAKE_BINARY_DIR}/python/${file} COPYONLY )
-  install(FILES ${file} DESTINATION python COMPONENT app)
-endforeach()
-
 # Python scripts
 set( OFT_PY_BINS
-  scripts/plot_mug_hist.py
-  scripts/ThinCurr_mesh_tool.py
-  build_xdmf-legacy.py
+  OFT_build_xdmf.py
+  OFT_convert_hist.py
+  OFT_convert_cubit.py
+  OFT_convert_gmsh.py
+  OFT_ThinCurr_holes.py
 )
 
 foreach( path ${OFT_PY_BINS} )

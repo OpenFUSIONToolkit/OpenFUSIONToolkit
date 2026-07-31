@@ -9,16 +9,14 @@
 @date July 2024
 @ingroup doxy_oft_python
 '''
-from __future__ import print_function
 import os
-import sys
 import struct
 import re
-import subprocess
 import xml.etree.ElementTree as ET
 import numpy
 import h5py
 from .meshing import convert_mesh_to_pyvista
+from ._xdmf_cli import build_xdmf_files
 eol_byte = '\n'.encode()
 
 
@@ -245,7 +243,6 @@ class histfile:
 
     def save_to_hdf5(self,filename):
         r'''! Convert data to HDF5 format'''
-        import h5py
         print("Converting file to HDF5 format")
         with h5py.File(filename, 'w') as fid:
             for (ind, field) in enumerate(self.field_tags):
@@ -280,6 +277,27 @@ class histfile:
             if field is not None:
                 result += '    {0}: {3} ({1}{2})\n'.format(field, self.field_types[ind], self.field_repeats[ind], self.field_descriptions[field])
         return result
+
+
+def _convert_hist_cli():
+    r'''! Command line entry point for converting OFT history files to MATLAB or HDF5'''
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.description = "Convert OFT history files to MATLAB or HDF5"
+    parser.add_argument("--files", type=str, default=None, nargs='+', required=True, help="Files to view or convert")
+    parser.add_argument("--convert_hdf5", action="store_true", default=False, help="Convert files to HDF5? (default: False)")
+    parser.add_argument("--convert_matlab", action="store_true", default=False, help="Convert files to MATLAB? (default: False)")
+    options = parser.parse_args()
+
+    for file in options.files:
+        hist_file = histfile(file)
+        file_prefix = os.path.splitext(file)[0]
+        if options.convert_hdf5:
+            hist_file.save_to_hdf5(file_prefix + ".h5")
+        if options.convert_matlab:
+            hist_file.save_to_matlab(file_prefix + ".mat")
+        if not (options.convert_hdf5 or options.convert_matlab):
+            print(hist_file)
 
 
 class XDMF_plot_mesh:
@@ -414,21 +432,7 @@ def build_XDMF(path='.',repeat_static=False,pretty=False,legacy=False):
     @param legacy Use legacy XDMF script for processing `dump.dat` files?
     '''
     if legacy:
-        cmd = [
-            "{0}".format(sys.executable),
-            "{0}".format(os.path.join(os.path.dirname(__file__),'..','build_xdmf-legacy.py'))
-        ]
-    else:
-        cmd = [
-            "{0}".format(sys.executable),
-            "{0}".format(os.path.join(os.path.dirname(__file__),'..','build_xdmf.py'))
-        ]
-    if repeat_static:
-        cmd.append("--repeat_static")
-    if pretty:
-        cmd.append("--pretty")
-    subprocess.run(cmd,cwd=path)
-    if legacy:
-        return None
-    else:
-        return XDMF_plot_file(os.path.join(path,'oft_xdmf.0001.h5'))
+        raise NotImplementedError("""Legacy XDMF processing is only supported via the standalone script `build_xdmf-legacy.py`.
+This argument will be removed in a future release.""")
+    build_xdmf_files(directory=path,pretty=pretty,repeat_static=repeat_static)
+    return XDMF_plot_file(os.path.join(path,'oft_xdmf.0001.h5'))

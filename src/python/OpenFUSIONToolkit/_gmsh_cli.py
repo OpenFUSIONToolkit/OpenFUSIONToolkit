@@ -4,11 +4,15 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-from __future__ import print_function
-import argparse
+'''! Python cli for GMSH to native Open FUSION Toolkit mesh conversion
+
+@authors Chris Hansen
+@date July 2026
+@ingroup doxy_oft_python
+'''
 import os
 import numpy as np
-import h5py
+from .meshing import write_native_mesh
 
 ed_map_tri = np.array([
     [0,1],
@@ -168,35 +172,49 @@ def read_mesh(filename):
         ho_info = (r_ho, le_ho)
     else:
         ho_info = None
-    print("  Dimension    = {0}".format(mesh_dim))
-    print("  Mesh order   = {0}".format(mesh_order))
+    mesh_type = 'TRI' if mesh_dim == 2 else 'TET'
+    if mesh_order == 1:
+        mesh_type += '_P1'
+    else:
+        mesh_type += '_P2'
+    print("  Mesh type: {0}".format(mesh_type))
+    print("  Dimension: {0}D".format(mesh_dim))
     print("  # of points  = {0} ({1})".format(r_new.shape[0],r_ho.shape[0]))
     print("  # of cells   = {0}".format(mesh_nc))
     print("  # of regions = {0}".format(nReg))
     #
-    return r_new, lc_new, lc_reg, ho_info
-
-def write_file(filename, r, lc, reg, ho_info=None):
-    print()
-    print("Saving mesh: {0}".format(filename))
-    h5_file = h5py.File(filename, 'w')
-    h5_file.create_dataset('mesh/R', data=r, dtype='f8')
-    h5_file.create_dataset('mesh/LC', data=lc, dtype='i4')
-    h5_file.create_dataset('mesh/REG', data=reg, dtype='i4')
-    if ho_info is not None:
-        h5_file.create_dataset('mesh/ho_info/R', data=ho_info[0], dtype='f8')
-        h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1], dtype='i4')
+    return mesh_type, r_new, lc_new, lc_reg, ho_info
 
 
-parser = argparse.ArgumentParser()
-parser.description = "Pre-processing script for Gmsh mesh files"
-parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
-parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
-options = parser.parse_args()
+def convert_gmsh_to_native(in_file, out_file=None):
+    '''! Convert GMSH mesh to native Open FUSION Toolkit mesh
 
-out_file = options.out_file
-if out_file is None:
-    out_file = os.path.splitext(options.in_file)[0] + ".h5"
+    @param in_file Input mesh file
+    @param out_file Output mesh file (optional, default is `in_file` with `.h5` extension)
+    '''
+    if out_file is None:
+        out_file = os.path.splitext(in_file)[0] + ".h5"
 
-r, lc, reg, ho_info = read_mesh(options.in_file)
-write_file(out_file, r, lc, reg, ho_info)
+    # Read input GMSH file
+    mesh_type, r, lc, reg, ho_info = read_mesh(in_file)
+
+    # Write output file
+    write_native_mesh(out_file, mesh_type.split('_')[0], r, lc, reg, ho_info=ho_info)
+
+
+def script_entry():
+    '''! Command line interface for GMSH to native Open FUSION Toolkit mesh conversion
+
+    options:
+      -h, --help            show this help message and exit
+      --in_file IN_FILE     Input mesh file
+      --out_file OUT_FILE   Ouput mesh file
+    '''
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.description = "Convert a GMSH mesh file to native Open FUSION Toolkit mesh format"
+    parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
+    parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
+    options = parser.parse_args()
+
+    convert_gmsh_to_native(options.in_file, options.out_file)

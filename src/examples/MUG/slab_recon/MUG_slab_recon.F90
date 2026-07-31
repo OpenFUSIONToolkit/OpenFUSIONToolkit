@@ -15,7 +15,7 @@
 !!\section doc_mug_recon_ex_code_helper Code Walk Through
 !!
 !! The code consists of two components. First, a helper module is defined that includes
-!! class implementations and other components for initialization and post-processing and 
+!! class implementations and other components for initialization and post-processing and
 !! the main run program.
 !!
 !!\section doc_mug_recon_ex_code_helper Helper module
@@ -93,7 +93,7 @@ SELECT CASE(TRIM(self%field))
     val = 1.d0/(COSH(pt(3)/self%lam))**2 + self%den_inf
   CASE('b0') ! Equilibrium magnetic field
     Beq = (/TANH(pt(3)/self%lam), 0.d0, 0.d0/)
-    val = Beq 
+    val = Beq
   CASE('db') ! Perturbed magnetic field
     Bper(1) = -pi*COS(2.d0*pi*pt(1)/self%Lx)*SIN(pi*pt(3)/self%Lz)/self%Lz
     Bper(2) = 0.d0
@@ -605,7 +605,7 @@ END PROGRAM MUG_slab_recon
 !!/
 !!\endverbatim
 !!
-!! Once the post-processing run is complete `bin/build_xdmf.py` can be used to generate `*.xmf` files that can be loaded by
+!! Once the post-processing run is complete `bin/OFT_build_xdmf.py` can be used to generate `*.xmf` files that can be loaded by
 !! [VisIt](https://visit-dav.github.io/visit-website/index.html), [ParaView](https://www.paraview.org/), or other visualization programs.
 !!
 !! \image html MUG_gem_ex-J.png "Resulting current distribution at final time"

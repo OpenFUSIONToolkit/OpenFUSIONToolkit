@@ -492,8 +492,9 @@ if( OFT_BUILD_PYTHON )
     set(OFT_SHARED_LIBS ${ARGV0} ${OFT_SHARED_LIBS} CACHE INTERNAL "package_shared_libs")
   endfunction(oft_add_shared)
   # Library directories
-  add_subdirectory( python/wrappers )
   add_subdirectory( python/OpenFUSIONToolkit )
+  add_subdirectory( python/wrappers )
+  add_subdirectory( python/scripts )
 endif()
 
 ########################
