@@ -14,7 +14,6 @@ import os
 import sys
 import shutil
 import argparse
-import time
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
@@ -425,7 +424,12 @@ def update_svd_with_row(U, S, V_T, new_row):
     K_mat = np.vstack([upper, lower])
 
     # Compute SVD of the small core matrix
-    u_k, s_k, vt_k = np.linalg.svd(K_mat, full_matrices=False)
+    # u_k, s_k, vt_k = np.linalg.svd(K_mat, full_matrices=False)
+    u_k, s_k, vt_k, info = scipy.linalg.lapack.sgesdd(K_mat, full_matrices=0)
+    if info != 0:
+        u_k, s_k, vt_k, info = scipy.linalg.lapack.sgesvd(K_mat, full_matrices=0)
+        if info != 0:
+            raise np.linalg.LinAlgError("SVD did not converge")
 
     # Expand U to accommodate the new row index
     u_ext = np.pad(U, ((0, 1), (0, 1)), mode='constant')
@@ -442,6 +446,21 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     '''Compute the single-point Homotopy basis using the greedy method
     of Erickson and Whittlesey
     '''
+    def get_path(istart, pred, path):
+        if path[istart] is None:
+            # Build path from vertex i to root bi
+            v = istart
+            path_tmp = [v]
+            while pred[v] >= 0:
+                v = pred[v]
+                path_tmp.append(v)
+            # Populate subpaths for all vertices in path_tmp
+            for j, v in enumerate(path_tmp):
+                if path[v] is not None:
+                    break
+                path[v] = path_tmp[j:]
+        return path[istart]
+
     nf = face.shape[0]
     nv = vertex.shape[0]
 
@@ -481,15 +500,7 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     G += G.transpose()
 
     # Compute tree (T) of shortest paths in G using Dijkstra's algorithm
-    distance,pred = scipy.sparse.csgraph.dijkstra(G,indices=bi,return_predecessors=True)
-    path = []
-    for i in range(nv):
-        v = i
-        path_tmp = [v]
-        while pred[v] >= 0:
-            v = pred[v]
-            path_tmp.append(v)
-        path.append(np.flip(path_tmp))
+    distance, pred = scipy.sparse.csgraph.dijkstra(G,indices=bi,return_predecessors=True)
 
     # Compute dual graph G*
     ind = np.logical_and(eif[0,:]>=0,eif[1,:]>=0)
@@ -539,10 +550,11 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     G = scipy.sparse.tril(G)
     I,J,_ = scipy.sparse.find(G)
     basis_cycles = []
+    path = [None for _ in range(nv)]
     for i in range(len(I)):
-        pi = path[I[i]]
-        pj = path[J[i]]
-        basis_cycles.append(np.hstack((pi,np.flip(pj))))
+        pi = get_path(I[i], pred, path)
+        pj = get_path(J[i], pred, path)
+        basis_cycles.append(np.hstack((np.flip(pi),pj)))
     return basis_cycles
 
 def fixup_loop(cycle,mesh,boundary_cycles,debug):
@@ -632,8 +644,8 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
 
     # Load mesh
     input_model = read_ThinCurr_mesh(in_file)
-    vertex_full = input_model['r']
-    face_full = input_model['lc']
+    vertex_full = input_model['r'].copy()
+    face_full = input_model['lc'].copy()
     reg_full = input_model['reg']
 
     # Setup full mesh
@@ -740,13 +752,14 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
                 ncoarse = np.max(cell_flags)+1
                 print(indent_level + "[{2}/{3}] Reducing mesh to {0} macro cells with {1} macro edges".format(ncoarse,keep_edges.shape[0],j+1,len(hb)))
                 bmat_tmp = bmat_dense_base[:,keep_edges]
-                bmat_dense = np.zeros((ncoarse,keep_edges.shape[0]))
+                bmat_dense = np.zeros((ncoarse,keep_edges.shape[0]), np.float32)
                 for i in range(ncoarse):
                     bmat_dense[i,:] = np.sum(bmat_tmp[cell_flags==i,:],axis=0)
 
                 # Build list of cycles from smallest to largest
                 # intial_rank = np.linalg.matrix_rank(bmat_dense)
-                U, S, V_T = np.linalg.svd(bmat_dense, full_matrices=False)
+                # U, S, V_T = np.linalg.svd(bmat_dense, full_matrices=False)
+                U, S, V_T, info = scipy.linalg.lapack.sgesdd(bmat_dense, full_matrices=0)
                 intial_rank = np.sum(S > 1e-10)
                 hb_out = []
                 do_check = False
@@ -759,7 +772,8 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
                         try:
                             U, S, V_T = update_svd_with_row(U, S, V_T, he[i][keep_edges])
                         except np.linalg.LinAlgError: # Fall back to full factorization
-                            U, S, V_T = np.linalg.svd(bmat_tmp, full_matrices=False)
+                            # U, S, V_T = np.linalg.svd(bmat_tmp, full_matrices=False)
+                            U, S, V_T, info = scipy.linalg.lapack.sgesdd(bmat_tmp, full_matrices=0)
                         aug_rank = np.sum(S > 1.e-10)
                     else:
                         aug_rank = intial_rank + 1
@@ -805,7 +819,6 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     print("Final model:")
     print("    # of holes = {0}".format(len(all_cycles)))
     print("    # of closures = {0}".format(len(closures)))
-    # print("    # of additional nodesets = {0}".format(len(keep_nodesets)))
 
     # Copy mesh to new file and replace holes/closures
     holes = []
