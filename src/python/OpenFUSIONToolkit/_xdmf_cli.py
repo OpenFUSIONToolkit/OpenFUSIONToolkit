@@ -10,6 +10,8 @@
 @date July 2026
 @ingroup doxy_oft_python
 '''
+import os
+import glob
 import argparse
 try:
     import xml.etree.cElementTree as ET
@@ -205,8 +207,6 @@ def build_xdmf_files(directory,inprefix='oft_xdmf',pretty=False,keep=False,padSi
     print('Creating output files: {0}.{1}.h5'.format(inprefix,'X'*padSize))
 
     if not keep:
-        import os
-        import glob
         print('  Removing old Xdmf files')
         files = glob.glob(os.path.join(directory,'*.xmf'))
         for filename in files:
@@ -234,7 +234,7 @@ def build_xdmf_files(directory,inprefix='oft_xdmf',pretty=False,keep=False,padSi
                     for i in range(nblocks):
                         if i == 0:
                             continue
-                        with h5py.File("{0}.{1}.h5".format(inprefix,str(i+1).zfill(padSize)),'r') as h5_file2:
+                        with h5py.File(os.path.join(directory,"{0}.{1}.h5".format(inprefix,str(i+1).zfill(padSize))),'r') as h5_file2:
                             block_group = h5_file2.get(group_key,None)
                             if block_group is None:
                                 raise ValueError("Group not found in block {0}".format(i+1))

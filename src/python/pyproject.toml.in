@@ -38,7 +38,7 @@ Issues = "https://github.com/openfusiontoolkit/OpenFUSIONToolkit/issues"
 
 [project.scripts]
 OFT_convert_hist = "OpenFUSIONToolkit.io:_convert_hist_cli"
-OFT_build_XDMF = "OpenFUSIONToolkit._xdmf_cli:script_entry"
+OFT_build_xdmf = "OpenFUSIONToolkit._xdmf_cli:script_entry"
 OFT_convert_cubit = "OpenFUSIONToolkit._cubit_cli:script_entry"
 OFT_convert_gmsh = "OpenFUSIONToolkit._gmsh_cli:script_entry"
 OFT_ThinCurr_holes = "OpenFUSIONToolkit.ThinCurr._homology_cli:script_entry"

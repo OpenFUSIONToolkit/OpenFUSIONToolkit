@@ -6,7 +6,7 @@
 #------------------------------------------------------------------------------
 '''! @file OFT_build_xdmf.py
 
- Stub wrapper for script to build XDMF files from OFT mesh files'
+ Stub wrapper for script to build XDMF files from OFT mesh files
 '''
 from OpenFUSIONToolkit._xdmf_cli import script_entry
 
