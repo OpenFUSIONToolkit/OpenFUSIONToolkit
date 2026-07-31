@@ -188,15 +188,16 @@ def write_file(filename, r, lc, reg, ho_info=None):
         h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1], dtype='i4')
 
 
-parser = argparse.ArgumentParser()
-parser.description = "Pre-processing script for Gmsh mesh files"
-parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
-parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
-options = parser.parse_args()
+def script_entry():
+    parser = argparse.ArgumentParser()
+    parser.description = "Pre-processing script for Gmsh mesh files"
+    parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
+    parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
+    options = parser.parse_args()
 
-out_file = options.out_file
-if out_file is None:
-    out_file = os.path.splitext(options.in_file)[0] + ".h5"
+    out_file = options.out_file
+    if out_file is None:
+        out_file = os.path.splitext(options.in_file)[0] + ".h5"
 
-r, lc, reg, ho_info = read_mesh(options.in_file)
-write_file(out_file, r, lc, reg, ho_info)
+    r, lc, reg, ho_info = read_mesh(options.in_file)
+    write_file(out_file, r, lc, reg, ho_info)

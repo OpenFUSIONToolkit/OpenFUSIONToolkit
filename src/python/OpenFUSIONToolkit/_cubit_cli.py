@@ -250,24 +250,25 @@ def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, b
             h5_file.create_dataset('mesh/periodicity/nodes', data=periodic_info, dtype='i4')
 
 
-parser = argparse.ArgumentParser()
-parser.description = "Pre-processing script for mesh files"
-parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
-parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
-parser.add_argument("--periodic_nodeset", type=int, default=None, help="Index of perioidic nodeset")
-parser.add_argument("--ignore_attr", default=False, action="store_true", help="Ignore block attributes")
-options = parser.parse_args()
+def script_entry():
+    parser = argparse.ArgumentParser()
+    parser.description = "Pre-processing script for mesh files"
+    parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
+    parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
+    parser.add_argument("--periodic_nodeset", type=int, default=None, help="Index of perioidic nodeset")
+    parser.add_argument("--ignore_attr", default=False, action="store_true", help="Ignore block attributes")
+    options = parser.parse_args()
 
-out_file = options.out_file
-if out_file is None:
-    out_file = os.path.splitext(options.in_file)[0] + ".h5"
+    out_file = options.out_file
+    if out_file is None:
+        out_file = os.path.splitext(options.in_file)[0] + ".h5"
 
-r, lc, reg, node_sets, side_sets, ho_info, block_attrs = read_mesh(options.in_file, options.ignore_attr)
+    r, lc, reg, node_sets, side_sets, ho_info, block_attrs = read_mesh(options.in_file, options.ignore_attr)
 
-periodic_info = None
-if options.periodic_nodeset is not None:
-    if options.periodic_nodeset > len(node_sets):
-        raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(options.periodic_nodeset, len(node_sets)))
-    periodic_info = node_sets.pop(options.periodic_nodeset-1)
+    periodic_info = None
+    if options.periodic_nodeset is not None:
+        if options.periodic_nodeset > len(node_sets):
+            raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(options.periodic_nodeset, len(node_sets)))
+        periodic_info = node_sets.pop(options.periodic_nodeset-1)
 
-write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info, block_attrs, periodic_info)
+    write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info, block_attrs, periodic_info)
