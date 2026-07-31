@@ -11,12 +11,12 @@ endforeach()
 # Python scripts
 set( OFT_PY_BINS
   OFT_build_xdmf.py
-  build_xdmf-legacy.py
   OFT_convert_hist.py
   OFT_convert_cubit.py
   OFT_convert_gmsh.py
-  scripts/plot_mug_hist.py
   OFT_ThinCurr_holes.py
+  scripts/plot_mug_hist.py
+  build_xdmf-legacy.py
 )
 
 foreach( path ${OFT_PY_BINS} )
