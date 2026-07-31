@@ -256,8 +256,17 @@ def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, b
 
 
 def script_entry():
+    '''! Command line interface for Cubit (exodus) to native Open FUSION Toolkit mesh conversion
+    options:
+      -h, --help            show this help message and exit
+      --in_file IN_FILE     Input mesh file
+      --out_file OUT_FILE   Ouput mesh file
+      --periodic_nodeset PERIODIC_NODESET
+                            Index of perioidic nodeset
+      --ignore_attr         Ignore block attributes
+    '''
     parser = argparse.ArgumentParser()
-    parser.description = "Pre-processing script for mesh files"
+    parser.description = "Convert a Cubit (exodus) mesh file to native Open FUSION Toolkit mesh format"
     parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
     parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
     parser.add_argument("--periodic_nodeset", type=int, default=None, help="Index of perioidic nodeset")

@@ -282,8 +282,20 @@ def build_xdmf_files(directory,inprefix='oft_xdmf',pretty=False,keep=False,padSi
 
 
 def script_entry():
+    '''! Command line interface for XDMF file creation for the Open FUSION Toolkit
+
+    options:
+      -h, --help            show this help message and exit
+      -i, --inprefix INPREFIX
+                            Input file name prefix, default="oft_xdmf"
+      -p, --pretty          Print nicely formatted XML documents.
+      -k, --keep            Keep existing output files.
+      --block_padding BLOCK_PADDING
+                            Size block index padding.
+      --repeat_static       Insert static fields into all timesteps.
+    '''
     parser = argparse.ArgumentParser()
-    parser.description = "Create Xdmf file for VisIt from Open FUSION Toolkit output."
+    parser.description = "Create Xdmf files for ParaView or other visualization tools from Open FUSION Toolkit output."
     parser.add_argument('-i', '--inprefix', type=str, default='oft_xdmf', help='Input file name prefix, default="oft_xdmf"')
     # parser.add_argument('-v', '--verbose', action="store_true", default=False, help='Display debug information during Xdmf write.')
     # parser.add_argument('-s', '--size', type=int, default=20, help='Size of XML file cache before flush.')

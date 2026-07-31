@@ -15,9 +15,9 @@ import sys
 import shutil
 import argparse
 import numpy as np
+import matplotlib.pyplot as plt
 import scipy
 import h5py
-import matplotlib.pyplot as plt
 
 tri_ed = np.asarray([[2,1], [0,2], [1,0]]) # Triangle edge list
 indent_level = ''
@@ -558,6 +558,23 @@ def fixup_loop(cycle,mesh,boundary_cycles,debug):
 
 
 def script_entry():
+    '''! Command line interface for computing holes and closures for ThinCurr meshes using a Greedy Homotopy approach
+
+    options:
+      -h, --help            show this help message and exit
+      --in_file IN_FILE     Input mesh file
+      --out_file OUT_FILE   Ouput mesh file (default: Input file name with "-homology" appended)
+      --keep_nodeset_start KEEP_NODESET_START
+                            Starting index of nodesets to keep from input file
+      --plot_final          Show final homology basis?
+      --plot_steps          Show intermediate bases for each distinct surface?
+      --show_omitted        Show boundary cycles that are omitted?
+      --show_covering       Show covering triangles for boundary cycles (only used if `--plot_steps`)?
+      --debug               Print additional debug information?
+      --ref_point REF_POINT [REF_POINT ...]
+                            Reference location for base point [x,y,z] (default: [0,0,0])
+      --optimize_holes      Sample additional points to attempt to optimize holes?
+    '''
     parser = argparse.ArgumentParser()
     parser.description = "Compute holes and closures for ThinCurr meshes using a Greedy Homotopy approach"
     parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
