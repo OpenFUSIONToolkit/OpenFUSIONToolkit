@@ -10,7 +10,6 @@ endforeach()
 # Python scripts
 set( OFT_PY_BINS
   scripts/plot_mug_hist.py
-  scripts/ThinCurr_mesh_tool.py
   build_xdmf-legacy.py
 )
 

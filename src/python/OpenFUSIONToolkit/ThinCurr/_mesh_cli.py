@@ -73,8 +73,6 @@ dropped by structural operations (region removal, combination, replication).
 @authors Open FUSION Toolkit contributors
 @date July 2026
 '''
-from __future__ import print_function
-import argparse
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -624,6 +622,7 @@ def _add_common_out(parser):
 
 def build_parser():
     '''!Construct the command-line argument parser'''
+    import argparse
     parser = argparse.ArgumentParser(
         description="Manipulate and combine native-format 3-node triangular ThinCurr meshes")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -703,7 +702,7 @@ def _parse_rotate(val):
     return (str(axis).lower(), float(angle))
 
 
-def main(argv=None):
+def script_entry(argv=None):
     '''!Command-line entry point'''
     parser = build_parser()
     options = parser.parse_args(argv)
@@ -807,7 +806,3 @@ def main(argv=None):
             print("Adding coil sets...")
             mesh.coil_sets = mesh.coil_sets + coil_sets if mesh.coil_sets is not None else coil_sets
         mesh.save(out_file)
-
-
-if __name__ == "__main__":
-    main()

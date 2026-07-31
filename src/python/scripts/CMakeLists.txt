@@ -5,6 +5,7 @@ set( OFT_PY_BINS
   OFT_convert_cubit.py
   OFT_convert_gmsh.py
   OFT_ThinCurr_holes.py
+  OFT_ThinCurr_mesh_tool.py
 )
 
 foreach( path ${OFT_PY_BINS} )
