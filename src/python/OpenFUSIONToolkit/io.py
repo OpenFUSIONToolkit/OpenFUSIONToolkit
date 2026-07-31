@@ -17,7 +17,7 @@ import subprocess
 import xml.etree.ElementTree as ET
 import numpy
 import h5py
-from ._xdmf import build_xdmf_files
+from ._xdmf_cli import build_xdmf_files
 eol_byte = '\n'.encode()
 
 
@@ -284,7 +284,7 @@ def _convert_hist_cli():
     r'''! Command line entry point for converting OFT history files to MATLAB or HDF5'''
     import argparse
     parser = argparse.ArgumentParser()
-    parser.description = "Pre-processing script for mesh files"
+    parser.description = "Convert OFT history files to MATLAB or HDF5"
     parser.add_argument("--files", type=str, default=None, nargs='+', required=True, help="Files to view or convert")
     parser.add_argument("--convert_hdf5", action="store_true", default=False, help="Convert files to HDF5? (default: False)")
     parser.add_argument("--convert_matlab", action="store_true", default=False, help="Convert files to MATLAB? (default: False)")
@@ -292,7 +292,7 @@ def _convert_hist_cli():
 
     for file in options.files:
         hist_file = histfile(file)
-        file_prefix = file.split('.')[0]
+        file_prefix = os.path.splitext(file)[0]
         if options.convert_hdf5:
             hist_file.save_to_hdf5(file_prefix + ".h5")
         if options.convert_matlab:
