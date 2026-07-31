@@ -4,12 +4,16 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-from __future__ import print_function
+'''! Python cli for Cubit to native Open FUSION Toolkit mesh conversion
+
+@authors Chris Hansen
+@date July 2026
+@ingroup doxy_oft_python
+'''
 import argparse
 import os
 import numpy as np
 import h5py
-import netCDF4
 
 tri_ed_map = np.array([
     [0,1],
@@ -68,6 +72,7 @@ element_type_map['QUAD'] = element_type_map['QUAD4']
 element_type_map['HEX'] = element_type_map['HEX8']
 
 def read_mesh(filename, ignore_attrs):
+    import netCDF4
     print()
     print("Reading mesh: {0}".format(filename))
     ncdf_file = netCDF4.Dataset(filename, "r")
@@ -250,24 +255,45 @@ def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, b
             h5_file.create_dataset('mesh/periodicity/nodes', data=periodic_info, dtype='i4')
 
 
-parser = argparse.ArgumentParser()
-parser.description = "Pre-processing script for mesh files"
-parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
-parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
-parser.add_argument("--periodic_nodeset", type=int, default=None, help="Index of perioidic nodeset")
-parser.add_argument("--ignore_attr", default=False, action="store_true", help="Ignore block attributes")
-options = parser.parse_args()
+def convert_cubit_to_native(in_file, out_file=None, periodic_nodeset=None, ignore_attr=False):
+    '''! Convert Cubit (exodus) mesh to native Open FUSION Toolkit mesh
 
-out_file = options.out_file
-if out_file is None:
-    out_file = os.path.splitext(options.in_file)[0] + ".h5"
+    @param in_file Input mesh file
+    @param out_file Output mesh file (optional, default is `in_file` with `.h5` extension)
+    @param periodic_nodeset Index of periodic nodeset (optional)
+    @param ignore_attr Ignore block attributes (optional)
+    '''
+    out_file = out_file
+    if out_file is None:
+        out_file = os.path.splitext(in_file)[0] + ".h5"
 
-r, lc, reg, node_sets, side_sets, ho_info, block_attrs = read_mesh(options.in_file, options.ignore_attr)
+    r, lc, reg, node_sets, side_sets, ho_info, block_attrs = read_mesh(in_file, ignore_attr)
 
-periodic_info = None
-if options.periodic_nodeset is not None:
-    if options.periodic_nodeset > len(node_sets):
-        raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(options.periodic_nodeset, len(node_sets)))
-    periodic_info = node_sets.pop(options.periodic_nodeset-1)
+    periodic_info = None
+    if periodic_nodeset is not None:
+        if periodic_nodeset > len(node_sets):
+            raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(periodic_nodeset, len(node_sets)))
+        periodic_info = node_sets.pop(periodic_nodeset-1)
 
-write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info, block_attrs, periodic_info)
+    write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info, block_attrs, periodic_info)
+
+
+def script_entry():
+    '''! Command line interface for Cubit (exodus) to native Open FUSION Toolkit mesh conversion
+    options:
+      -h, --help            show this help message and exit
+      --in_file IN_FILE     Input mesh file
+      --out_file OUT_FILE   Ouput mesh file
+      --periodic_nodeset PERIODIC_NODESET
+                            Index of perioidic nodeset
+      --ignore_attr         Ignore block attributes
+    '''
+    parser = argparse.ArgumentParser()
+    parser.description = "Convert a Cubit (exodus) mesh file to native Open FUSION Toolkit mesh format"
+    parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
+    parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
+    parser.add_argument("--periodic_nodeset", type=int, default=None, help="Index of perioidic nodeset")
+    parser.add_argument("--ignore_attr", default=False, action="store_true", help="Ignore block attributes")
+    options = parser.parse_args()
+
+    convert_cubit_to_native(options.in_file, out_file=options.out_file, periodic_nodeset=options.periodic_nodeset, ignore_attr=options.ignore_attr)
