@@ -10,10 +10,8 @@
 @ingroup doxy_oft_python
 '''
 import os
-import sys
 import struct
 import re
-import subprocess
 import xml.etree.ElementTree as ET
 import numpy
 import h5py

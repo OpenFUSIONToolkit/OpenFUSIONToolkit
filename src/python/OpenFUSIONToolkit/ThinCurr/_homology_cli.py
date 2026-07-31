@@ -252,7 +252,11 @@ class trimesh:
     def get_face_edge_bop(self):
         r''' Compute face to edge boundary operator \partial_2
         '''
-        I = np.zeros((self.nf*3,),dtype=np.int32); I[::3] = np.arange(self.nf); I[1::3] = np.arange(self.nf); I[2::3] = np.arange(self.nf)
+        I = np.zeros((self.nf*3,),dtype=np.int32)
+        I[::3] = np.arange(self.nf)
+        I[1::3] = np.arange(self.nf)
+        I[2::3] = np.arange(self.nf)
+
         J = self.lfe.reshape((self.nf*3,))
         V = np.sign(J, dtype=np.int32)
         J = abs(J)-1
@@ -397,7 +401,11 @@ def compute_greedy_homotopy_basis(face,vertex,bi,face_sweight=None):
     # Compute adjacency matrices
     I = face.reshape((nf*3,))
     J = face[:,[1,2,0]].reshape((nf*3,))
-    V = np.zeros((nf*3,),dtype=np.int32); V[::3] = np.arange(nf); V[1::3] = np.arange(nf); V[2::3] = np.arange(nf)
+    V = np.zeros((nf*3,),dtype=np.int32)
+    V[::3] = np.arange(nf)
+    V[1::3] = np.arange(nf)
+    V[2::3] = np.arange(nf)
+
     amd = scipy.sparse.csc_matrix((V+1, (I, J)),shape=(3*nf,3*nf),dtype=np.int32)
     am = amd.copy()
     am.data.fill(1)
@@ -579,7 +587,7 @@ def script_entry():
     with h5py.File(options.in_file) as fid:
         vertex_full = np.asarray(fid['mesh/R'])
         face_full = np.asarray(fid['mesh/LC'])-1
-        reg_full = np.asarray(fid['mesh/REG'])
+        # reg_full = np.asarray(fid['mesh/REG'])
         keep_nodesets = []
         if options.keep_nodeset_start is not None:
             if 'mesh/NUM_NODESETS' not in fid:
