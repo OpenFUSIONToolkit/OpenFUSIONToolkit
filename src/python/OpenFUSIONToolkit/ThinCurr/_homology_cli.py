@@ -4,6 +4,12 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
+'''! Python cli for ThinCurr hole construction using homology computations
+
+@authors Chris Hansen
+@date July 2026
+@ingroup doxy_oft_python
+'''
 import os
 import sys
 import shutil

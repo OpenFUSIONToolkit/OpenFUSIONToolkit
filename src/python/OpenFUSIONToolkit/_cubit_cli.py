@@ -4,12 +4,17 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
+'''! Python cli for Cubit to native Open FUSION Toolkit mesh conversion
+
+@authors Chris Hansen
+@date July 2026
+@ingroup doxy_oft_python
+'''
 from __future__ import print_function
 import argparse
 import os
 import numpy as np
 import h5py
-import netCDF4
 
 tri_ed_map = np.array([
     [0,1],
@@ -68,6 +73,7 @@ element_type_map['QUAD'] = element_type_map['QUAD4']
 element_type_map['HEX'] = element_type_map['HEX8']
 
 def read_mesh(filename, ignore_attrs):
+    import netCDF4
     print()
     print("Reading mesh: {0}".format(filename))
     ncdf_file = netCDF4.Dataset(filename, "r")

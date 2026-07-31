@@ -4,6 +4,12 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
+'''! Python cli for GMSH to native Open FUSION Toolkit mesh conversion
+
+@authors Chris Hansen
+@date July 2026
+@ingroup doxy_oft_python
+'''
 from __future__ import print_function
 import argparse
 import os

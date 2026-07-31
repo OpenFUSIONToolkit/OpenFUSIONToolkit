@@ -4,10 +4,12 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-#
-# Driver script for creating XDMF descriptor files for Open FUSION Toolkit output
-#
-#------------------------------------------------------------------------------
+'''! Python cli for XDMF file creation for the Open FUSION Toolkit
+
+@authors Chris Hansen
+@date July 2026
+@ingroup doxy_oft_python
+'''
 from __future__ import print_function
 import argparse
 try:
@@ -281,9 +283,6 @@ def build_xdmf_files(directory,inprefix='oft_xdmf',pretty=False,keep=False,padSi
 
 
 def script_entry():
-    # ===============================================================
-    # Input parameters
-    # ===============================================================
     parser = argparse.ArgumentParser()
     parser.description = "Create Xdmf file for VisIt from Open FUSION Toolkit output."
     parser.add_argument('-i', '--inprefix', type=str, default='oft_xdmf', help='Input file name prefix, default="oft_xdmf"')

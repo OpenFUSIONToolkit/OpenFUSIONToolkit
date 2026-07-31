@@ -282,7 +282,7 @@ class histfile:
 
 
 def _convert_hist_cli():
-    r'''! Command line interface for converting OFT history files to MATLAB or HDF5'''
+    r'''! Command line entry point for converting OFT history files to MATLAB or HDF5'''
     import argparse
     parser = argparse.ArgumentParser()
     parser.description = "Pre-processing script for mesh files"

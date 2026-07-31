@@ -4,7 +4,7 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-'''! @file convert_hist.py
+'''! @file OFT_convert_hist.py
 
  Stub wrapper for script to convert OFT history files to MATLAB or HDF5
 '''

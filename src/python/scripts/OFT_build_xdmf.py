@@ -4,7 +4,7 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-'''! @file build_xdmf.py
+'''! @file OFT_build_xdmf.py
 
  Stub wrapper for script to build XDMF files from OFT mesh files'
 '''
