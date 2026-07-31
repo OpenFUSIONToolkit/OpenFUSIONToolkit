@@ -9,7 +9,6 @@
 @date July 2024
 @ingroup doxy_oft_python
 '''
-from __future__ import print_function
 import os
 import sys
 import struct

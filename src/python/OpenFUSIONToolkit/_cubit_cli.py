@@ -10,7 +10,6 @@
 @date July 2026
 @ingroup doxy_oft_python
 '''
-from __future__ import print_function
 import argparse
 import os
 import numpy as np
