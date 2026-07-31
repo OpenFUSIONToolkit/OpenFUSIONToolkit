@@ -10,9 +10,9 @@ endforeach()
 
 # Python scripts
 set( OFT_PY_BINS
-  build_xdmf.py
+  OFT_build_xdmf.py
   build_xdmf-legacy.py
-  convert_hist.py
+  OFT_convert_hist.py
   convert_cubit.py
   convert_gmsh.py
   scripts/plot_mug_hist.py

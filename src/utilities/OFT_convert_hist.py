@@ -6,10 +6,8 @@
 #------------------------------------------------------------------------------
 '''! @file convert_hist.py
 
- Script to convert OFT history files to MATLAB or HDF5'
+ Stub wrapper for script to convert OFT history files to MATLAB or HDF5
 '''
-from __future__ import print_function
-import argparse
 from OpenFUSIONToolkit.io import _convert_hist_cli
 
 
