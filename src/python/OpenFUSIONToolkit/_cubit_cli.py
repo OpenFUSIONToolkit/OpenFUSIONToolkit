@@ -255,6 +255,29 @@ def write_file(filename, r, lc, reg, node_sets=[], side_sets=[], ho_info=None, b
             h5_file.create_dataset('mesh/periodicity/nodes', data=periodic_info, dtype='i4')
 
 
+def convert_cubit_to_native(in_file, out_file=None, periodic_nodeset=None, ignore_attr=False):
+    '''! Convert Cubit (exodus) mesh to native Open FUSION Toolkit mesh
+
+    @param in_file Input mesh file
+    @param out_file Output mesh file (optional, default is `in_file` with `.h5` extension)
+    @param periodic_nodeset Index of periodic nodeset (optional)
+    @param ignore_attr Ignore block attributes (optional)
+    '''
+    out_file = out_file
+    if out_file is None:
+        out_file = os.path.splitext(in_file)[0] + ".h5"
+
+    r, lc, reg, node_sets, side_sets, ho_info, block_attrs = read_mesh(in_file, ignore_attr)
+
+    periodic_info = None
+    if periodic_nodeset is not None:
+        if periodic_nodeset > len(node_sets):
+            raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(periodic_nodeset, len(node_sets)))
+        periodic_info = node_sets.pop(periodic_nodeset-1)
+
+    write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info, block_attrs, periodic_info)
+
+
 def script_entry():
     '''! Command line interface for Cubit (exodus) to native Open FUSION Toolkit mesh conversion
     options:
@@ -273,16 +296,4 @@ def script_entry():
     parser.add_argument("--ignore_attr", default=False, action="store_true", help="Ignore block attributes")
     options = parser.parse_args()
 
-    out_file = options.out_file
-    if out_file is None:
-        out_file = os.path.splitext(options.in_file)[0] + ".h5"
-
-    r, lc, reg, node_sets, side_sets, ho_info, block_attrs = read_mesh(options.in_file, options.ignore_attr)
-
-    periodic_info = None
-    if options.periodic_nodeset is not None:
-        if options.periodic_nodeset > len(node_sets):
-            raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(options.periodic_nodeset, len(node_sets)))
-        periodic_info = node_sets.pop(options.periodic_nodeset-1)
-
-    write_file(out_file, r, lc, reg, node_sets, side_sets, ho_info, block_attrs, periodic_info)
+    convert_cubit_to_native(options.in_file, out_file=options.out_file, periodic_nodeset=options.periodic_nodeset, ignore_attr=options.ignore_attr)

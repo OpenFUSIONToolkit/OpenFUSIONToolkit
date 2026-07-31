@@ -193,8 +193,22 @@ def write_file(filename, r, lc, reg, ho_info=None):
             h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1], dtype='i4')
 
 
+def convert_gmsh_to_native(in_file, out_file=None):
+    '''! Convert GMSH mesh to native Open FUSION Toolkit mesh
+
+    @param in_file Input mesh file
+    @param out_file Output mesh file (optional, default is `in_file` with `.h5` extension)
+    '''
+    if out_file is None:
+        out_file = os.path.splitext(in_file)[0] + ".h5"
+
+    r, lc, reg, ho_info = read_mesh(in_file)
+    write_file(out_file, r, lc, reg, ho_info)
+
+
 def script_entry():
     '''! Command line interface for GMSH to native Open FUSION Toolkit mesh conversion
+
     options:
       -h, --help            show this help message and exit
       --in_file IN_FILE     Input mesh file
@@ -206,9 +220,4 @@ def script_entry():
     parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
     options = parser.parse_args()
 
-    out_file = options.out_file
-    if out_file is None:
-        out_file = os.path.splitext(options.in_file)[0] + ".h5"
-
-    r, lc, reg, ho_info = read_mesh(options.in_file)
-    write_file(out_file, r, lc, reg, ho_info)
+    convert_gmsh_to_native(options.in_file, options.out_file)

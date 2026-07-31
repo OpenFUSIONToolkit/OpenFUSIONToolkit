@@ -557,71 +557,53 @@ def fixup_loop(cycle,mesh,boundary_cycles,debug):
     return cycle
 
 
-def script_entry():
-    '''! Command line interface for computing holes and closures for ThinCurr meshes using a Greedy Homotopy approach
+def compute_homology(in_file, out_file=None, keep_nodeset_start=None, plot_final=False, plot_steps=False,
+                     show_omitted=False, show_covering=False, debug=False, ref_point=None, optimize_holes=False):
+    '''! Compute holes and closures for ThinCurr meshes using a Greedy Homotopy approach
 
-    options:
-      -h, --help            show this help message and exit
-      --in_file IN_FILE     Input mesh file
-      --out_file OUT_FILE   Ouput mesh file (default: Input file name with "-homology" appended)
-      --keep_nodeset_start KEEP_NODESET_START
-                            Starting index of nodesets to keep from input file
-      --plot_final          Show final homology basis?
-      --plot_steps          Show intermediate bases for each distinct surface?
-      --show_omitted        Show boundary cycles that are omitted?
-      --show_covering       Show covering triangles for boundary cycles (only used if `--plot_steps`)?
-      --debug               Print additional debug information?
-      --ref_point REF_POINT [REF_POINT ...]
-                            Reference location for base point [x,y,z] (default: [0,0,0])
-      --optimize_holes      Sample additional points to attempt to optimize holes?
+    @param in_file Input mesh file
+    @param out_file Ouput mesh file (default: Input file name with "-homology" appended)
+    @param keep_nodeset_start Starting index of nodesets to keep from input file
+    @param plot_final Show final homology basis?
+    @param plot_steps Show intermediate bases for each distinct surface?
+    @param show_omitted Show boundary cycles that are omitted?
+    @param show_covering Show covering triangles for boundary cycles (only used if `plot_steps`)?
+    @param debug Print additional debug information?
+    @param ref_point Reference location for base point [x,y,z] (default: [0,0,0])
+    @param optimize_holes Sample additional points to attempt to optimize holes?
     '''
-    parser = argparse.ArgumentParser()
-    parser.description = "Compute holes and closures for ThinCurr meshes using a Greedy Homotopy approach"
-    parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
-    parser.add_argument("--out_file", type=str, default=None, help='Ouput mesh file (default: Input file name with "-homology" appended)')
-    parser.add_argument("--keep_nodeset_start", type=int, default=None, help="Starting index of nodesets to keep from input file")
-    parser.add_argument("--plot_final", action="store_true", default=False, help="Show final homology basis?")
-    parser.add_argument("--plot_steps", action="store_true", default=False, help="Show intermediate bases for each distinct surface?")
-    parser.add_argument("--show_omitted", action="store_true", default=False, help="Show boundary cycles that are omitted?")
-    parser.add_argument("--show_covering", action="store_true", default=False, help="Show covering triangles for boundary cycles (only used if `--plot_steps`)?")
-    parser.add_argument("--debug", action="store_true", default=False, help="Print additional debug information?")
-    parser.add_argument("--ref_point", default=None, type=float, nargs='+', help='Reference location for base point [x,y,z] (default: [0,0,0])')
-    parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes?")
-    options = parser.parse_args()
-
-    out_file = options.out_file
     if out_file is None:
-        out_file = os.path.splitext(options.in_file)[0] + "-homology.h5"
+        out_file = os.path.splitext(in_file)[0] + "-homology.h5"
 
-    if options.ref_point is not None:
-        ref_point = np.asarray(options.ref_point)
+    if ref_point is not None:
+        ref_point = np.asarray(ref_point)
         if ref_point.shape[0] != 3:
-            parser.exit(-1, '"--ref_point" must have 3 values')
+            raise ValueError('`ref_point` must be a 3-vector')
     else:
         ref_point = np.r_[0.0,0.0,0.0]
 
     # Load mesh
-    with h5py.File(options.in_file) as fid:
+    with h5py.File(in_file) as fid:
         vertex_full = np.asarray(fid['mesh/R'])
         face_full = np.asarray(fid['mesh/LC'])-1
         # reg_full = np.asarray(fid['mesh/REG'])
         keep_nodesets = []
-        if options.keep_nodeset_start is not None:
+        if keep_nodeset_start is not None:
             if 'mesh/NUM_NODESETS' not in fid:
-                parser.exit(-1, '"--keep_nodeset_start" specified but no nodesets available')
+                raise ValueError('`keep_nodeset_start` specified but no nodesets available')
             num_nodesets = fid['mesh/NUM_NODESETS'][0]
-            if options.keep_nodeset_start < 0:
-                if options.keep_nodeset_start < -num_nodesets:
-                    parser.exit(-1, '"--keep_nodeset_start" exceeds the number of available nodesets')
-                options.keep_nodeset_start = num_nodesets + 1 + options.keep_nodeset_start
-            if options.keep_nodeset_start > num_nodesets:
-                parser.exit(-1, '"--keep_nodeset_start" exceeds the number of available nodesets')
+            if keep_nodeset_start < 0:
+                if keep_nodeset_start < -num_nodesets:
+                    raise ValueError('`keep_nodeset_start` exceeds the number of available nodesets')
+                keep_nodeset_start = num_nodesets + 1 + keep_nodeset_start
+            if keep_nodeset_start > num_nodesets:
+                raise ValueError('`keep_nodeset_start` exceeds the number of available nodesets')
             for j in range(num_nodesets):
-                if j+1 >= options.keep_nodeset_start:
+                if j+1 >= keep_nodeset_start:
                     try:
                         keep_nodesets.append(np.asarray(fid['mesh/NODESET{0:04d}'.format(j+1)])-1)
                     except:
-                        parser.exit(-1, 'Failed to read nodeset {0}'.format(j+1))
+                        raise ValueError('Failed to read nodeset {0}'.format(j+1))
 
     # Setup full mesh
     full_mesh = trimesh(vertex_full,face_full)
@@ -644,7 +626,7 @@ def script_entry():
         rindexed_pts = np.cumsum(reindex_flag)
         face = rindexed_pts[face_full[face_mask,:]+1]-1
 
-        mesh = trimesh(vertex,face,info=options.debug)
+        mesh = trimesh(vertex,face,info=debug)
         reindex_inv = [0 for _ in range(mesh.np)]
         for i in range(full_mesh.np):
             if reindex_flag[i+1] == 1:
@@ -686,7 +668,7 @@ def script_entry():
         hb = compute_greedy_homotopy_basis(face_covered,vertex,ind,face_sweight=mesh.nf)
         print("    # of internal cycles = {0}".format(len(hb)))
         for i in range(len(hb)):
-            hb[i] = fixup_loop(hb[i],mesh,new_bcycles,options.debug)
+            hb[i] = fixup_loop(hb[i],mesh,new_bcycles,debug)
 
         for k, cycle in enumerate(boundary_cycles[surf_id]):
             if k == cycle_max[1]:
@@ -696,10 +678,10 @@ def script_entry():
 
         hb_out = hb
         # Optimize over cycles from basepoint homotopy to produce better looking basis
-        if options.optimize_holes and (len(hb) > 0):
+        if optimize_holes and (len(hb) > 0):
             print("  Optimizing internal cycles")
             indent_level += '  '
-            mesh_covered = trimesh(vertex,face_covered,info=options.debug)
+            mesh_covered = trimesh(vertex,face_covered,info=debug)
             bmat_dense_base = mesh_covered.get_face_edge_bop().todense()
 
             # Compute several additional basis sets
@@ -709,7 +691,7 @@ def script_entry():
                 ind2 = hb[j][int(len(hb[j])/2)]
                 hb2 = compute_greedy_homotopy_basis(face_covered,vertex,ind2,face_sweight=mesh.nf)
                 for i in range(len(hb2)):
-                    hb2[i] = fixup_loop(hb2[i],mesh,new_bcycles,options.debug)
+                    hb2[i] = fixup_loop(hb2[i],mesh,new_bcycles,debug)
                 minima_sets += hb2
 
                 # Build edge operator for comparison
@@ -738,7 +720,7 @@ def script_entry():
                     bmat_tmp = np.vstack((bmat_dense,he[i][keep_edges]))
                     aug_rank = np.linalg.matrix_rank(bmat_tmp)
                     if aug_rank != intial_rank:
-                        if options.debug:
+                        if debug:
                             print("Adding cycle {0}".format(i))
                         bmat_dense = bmat_tmp
                         hb_out.append(minima_sets[i])
@@ -746,7 +728,7 @@ def script_entry():
                         if len(hb_out) == len(hb):
                             break
                     else:
-                        if options.debug:
+                        if debug:
                             print("Skipping cycle {0}".format(i))
             indent_level = indent_level[:-2]
 
@@ -755,15 +737,15 @@ def script_entry():
             internal_holes.append(reindex_inv[basis_cycle])
 
         # Plot intermediate cycles
-        if options.plot_steps:
+        if plot_steps:
             fig = plt.figure()
             ax = fig.add_subplot(1, 1, 1, projection='3d')
             ax.plot_trisurf(vertex[:,0], vertex[:,1], vertex[:,2], triangles=face, color=[0.0, 0.0, 0.0, 0.1])
-            if options.show_covering and (len(new_lc) > 0):
+            if show_covering and (len(new_lc) > 0):
                 ax.plot_trisurf(vertex[:,0], vertex[:,1], vertex[:,2], triangles=new_lc, color='g')
             for k, cycle in enumerate(new_bcycles):
                 if k == cycle_max[1]:
-                    if options.show_omitted:
+                    if show_omitted:
                         ax.plot(vertex[cycle,0], vertex[cycle,1], vertex[cycle,2], color='k')
                 else:
                     ax.plot(vertex[cycle,0], vertex[cycle,1], vertex[cycle,2], color='tab:blue')
@@ -782,7 +764,7 @@ def script_entry():
     print("    # of additional nodesets = {0}".format(len(keep_nodesets)))
 
     # Copy mesh to new file and replace holes/closures
-    shutil.copyfile(options.in_file,out_file)
+    shutil.copyfile(in_file,out_file)
     with h5py.File(out_file,'r+') as h5_file:
         # Replace nodesets
         if 'mesh/NUM_NODESETS' in h5_file:
@@ -811,13 +793,13 @@ def script_entry():
             h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(1), data=closures, dtype='i4')
 
     # Plot final cycles
-    if options.plot_final:
+    if plot_final:
         fig = plt.figure()
         ax = fig.add_subplot(1, 1, 1, projection='3d')
         ax.plot_trisurf(vertex_full[:,0], vertex_full[:,1], vertex_full[:,2], triangles=face_full, color=[0.0, 0.0, 0.0, 0.1])
         for k, cycle in enumerate(holes):
             ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='tab:blue')
-        if options.show_omitted:
+        if show_omitted:
             for k, cycle in enumerate(skipped_holes):
                 ax.plot(vertex_full[cycle,0], vertex_full[cycle,1], vertex_full[cycle,2], color='k')
         for k, cycle in enumerate(internal_holes):
@@ -829,3 +811,49 @@ def script_entry():
             ax.plot(vertex_full[closure,0], vertex_full[closure,1], vertex_full[closure,2], 'o', color='k')
         ax.set_aspect('equal','box')
         plt.show()
+
+
+def script_entry():
+    '''! Command line interface for computing holes and closures for ThinCurr meshes using a Greedy Homotopy approach
+
+    options:
+      -h, --help            show this help message and exit
+      --in_file IN_FILE     Input mesh file
+      --out_file OUT_FILE   Ouput mesh file (default: Input file name with "-homology" appended)
+      --keep_nodeset_start KEEP_NODESET_START
+                            Starting index of nodesets to keep from input file
+      --plot_final          Show final homology basis?
+      --plot_steps          Show intermediate bases for each distinct surface?
+      --show_omitted        Show boundary cycles that are omitted?
+      --show_covering       Show covering triangles for boundary cycles (only used if `--plot_steps`)?
+      --debug               Print additional debug information?
+      --ref_point REF_POINT [REF_POINT ...]
+                            Reference location for base point [x,y,z] (default: [0,0,0])
+      --optimize_holes      Sample additional points to attempt to optimize holes?
+    '''
+    parser = argparse.ArgumentParser()
+    parser.description = "Compute holes and closures for ThinCurr meshes using a Greedy Homotopy approach"
+    parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
+    parser.add_argument("--out_file", type=str, default=None, help='Ouput mesh file (default: Input file name with "-homology" appended)')
+    parser.add_argument("--keep_nodeset_start", type=int, default=None, help="Starting index of nodesets to keep from input file")
+    parser.add_argument("--plot_final", action="store_true", default=False, help="Show final homology basis?")
+    parser.add_argument("--plot_steps", action="store_true", default=False, help="Show intermediate bases for each distinct surface?")
+    parser.add_argument("--show_omitted", action="store_true", default=False, help="Show boundary cycles that are omitted?")
+    parser.add_argument("--show_covering", action="store_true", default=False, help="Show covering triangles for boundary cycles (only used if `--plot_steps`)?")
+    parser.add_argument("--debug", action="store_true", default=False, help="Print additional debug information?")
+    parser.add_argument("--ref_point", default=None, type=float, nargs='+', help='Reference location for base point [x,y,z] (default: [0,0,0])')
+    parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes?")
+    options = parser.parse_args()
+
+    compute_homology(
+        in_file=options.in_file,
+        out_file=options.out_file,
+        keep_nodeset_start=options.keep_nodeset_start,
+        plot_final=options.plot_final,
+        plot_steps=options.plot_steps,
+        show_omitted=options.show_omitted,
+        show_covering=options.show_covering,
+        debug=options.debug,
+        ref_point=options.ref_point,
+        optimize_holes=options.optimize_holes
+    )

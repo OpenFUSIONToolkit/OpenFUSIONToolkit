@@ -203,6 +203,15 @@ class xdmf_doc:
 
 
 def build_xdmf_files(directory,inprefix='oft_xdmf',pretty=False,keep=False,padSize=4,repeat_static=False):
+    '''! Build XDMF files for ParaView or other visualization tools from Open FUSION Toolkit output.
+
+    @param directory Directory containing the Open FUSION Toolkit output files
+    @param inprefix Input file name prefix, default="oft_xdmf"
+    @param pretty Print nicely formatted XML documents.
+    @param keep Keep existing output files.
+    @param padSize Size block index padding.
+    @param repeat_static Insert static fields into all timesteps.
+    '''
     print()
     print('Creating output files: {0}.{1}.h5'.format(inprefix,'X'*padSize))
 
@@ -306,7 +315,3 @@ def script_entry():
     args = parser.parse_args()
 
     build_xdmf_files('.',args.inprefix,args.pretty,args.keep,args.block_padding,args.repeat_static)
-
-
-
-
