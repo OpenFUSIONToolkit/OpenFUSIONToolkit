@@ -10,6 +10,9 @@ flowing in thin conducting structures (2D sheets in 3D geometry)
 
 \f[ \mathrm{L} \frac{\partial I}{\partial t} + \mathrm{R} I = V. \f]
 
+ThinCurr should primarily be used through the python interface using the \ref OpenFUSIONToolkit.ThinCurr "OpenFUSIONToolkit.ThinCurr" python module
+and the \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr "OpenFUSIONToolkit.ThinCurr.ThinCurr" class.
+
 \section doc_tw_main_ex ThinCurr Examples
 The following examples illustrate usage of ThinCurr to perform calculations using the thin-wall model.
 

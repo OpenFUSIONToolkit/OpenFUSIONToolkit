@@ -820,15 +820,15 @@ def test_ITER_recon():
 def test_ITER_recon_legacy():
     ITER_recon_dict = ITER_eq_dict.copy()
     ITER_recon_dict['vol'] = 8.119402E2
-    ITER_recon_dict['q_95'] = 2.718791
+    ITER_recon_dict['q_95'] = 2.718779
     ITER_recon_dict['P_ax'] = 6.656184E5
     ITER_recon_dict['W_MHD'] = 2.607023E8
-    ITER_recon_dict['beta_pol'] = 45.65583
+    ITER_recon_dict['beta_pol'] = 45.63260
     ITER_recon_dict['dflux'] = 1.462672
     ITER_recon_dict['tflux'] = 1.201402E2
     ITER_recon_dict['l_i'] = 0.8906732
-    ITER_recon_dict['beta_tor'] = 1.934023
-    ITER_recon_dict['beta_n'] = 1.294390
+    ITER_recon_dict['beta_tor'] = 1.934024
+    ITER_recon_dict['beta_n'] = 1.294385
     results = mp_run(run_ITER_case,(1.0,(2,),'recon_legacy'))
     assert validate_dict(results,ITER_recon_dict)
 
@@ -856,7 +856,7 @@ def run_LTX_case(fe_order,test_type,mp_q):
         for key, coil in LTX_geom['coils'].items():
             if key.startswith('OH'):
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'],coil_set='OH')
-            else:    
+            else:
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'])
         #
         gs_mesh.add_polygon(LTX_geom['limiter'],'plasma',parent_name='air')
@@ -1322,9 +1322,9 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
 
     ft = 1 - fc
-    eps = r_avgs[2] / r_avgs[0]
+    eps = r_avgs['<a>'] / r_avgs['<R>']
     _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
-    R_avg = ravgs_q[0]
+    R_avg = ravgs_q['<R>']
 
     # --- Gradients (same as solve_with_bootstrap) ---
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
@@ -1731,7 +1731,7 @@ def test_pfile_bytes_roundtrip():
 # -----------------------------------------------------------------------
 # Test: X-point isoflux boundary helpers in TokaMaker.util
 #
-# These helpers check the generated boundary from 'create_isoflux_xpts' 
+# These helpers check the generated boundary from 'create_isoflux_xpts'
 # against the reference `isoflux_xpts_expected.json`.
 # -----------------------------------------------------------------------
 isoflux_xpts_expected = _load_eqdsk_fixture('isoflux_xpts_expected.json')

@@ -10,6 +10,7 @@
 @ingroup doxy_oft_python
 '''
 import numpy
+import warnings
 from ._interface import *
 from OpenFUSIONToolkit.TokaMaker.util import get_jphi_from_GS
 
@@ -45,8 +46,8 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
         # --- 2. Calculate Internal Amplitude & Left Side ---
 
         # Smoothing factor for the blend
-        k_smooth = (amp / width) * (blend_width / 4.0) 
-        if k_smooth < 1e-5: 
+        k_smooth = (amp / width) * (blend_width / 4.0)
+        if k_smooth < 1e-5:
             k_smooth = 1e-5
 
         # Case A: Standard Spike (Amp > Offset)
@@ -55,11 +56,11 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
             diff = amp - offset
             if diff > 1e-10:
                 argument = 1.0 - numpy.exp((offset - amp) / k_smooth)
-                if argument <= 0: 
+                if argument <= 0:
                     argument = 1e-16
                 internal_amp = amp + k_smooth * numpy.log(argument)
             else:
-                internal_amp = amp 
+                internal_amp = amp
 
             spike_profile = raw_shape(psi) / val_peak_raw * internal_amp
             profile_left = k_smooth * numpy.logaddexp(offset / k_smooth, spike_profile / k_smooth)
@@ -74,7 +75,7 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
         # Model: y = stitch_height * cos(omega * (x - x_peak)) ^ tail_alpha
 
         dist_to_edge = 1.0 - x_peak
-        if dist_to_edge < 1e-5: 
+        if dist_to_edge < 1e-5:
             dist_to_edge = 1e-5
 
         # Determine omega to hit y_sep exactly
@@ -98,7 +99,7 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
             arg = omega * (psi - x_peak)
             base_cos = numpy.cos(arg)
             # Ensure positive base for float power
-            base_cos = numpy.maximum(base_cos, 0) 
+            base_cos = numpy.maximum(base_cos, 0)
 
             profile_right = stitch_height * (base_cos ** tail_alpha)
 
@@ -136,7 +137,7 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
     if offset == 0.0:
         final_profile = generate_baseline_prof(psi, amp, center, width, -1e10, sk, y_sep, blend_width, tail_alpha)
     else:
-        # Find scalar "alpha" that solves 
+        # Find scalar "alpha" that solves
         result = root_scalar(objective_function,
                                 args=(psi, amp, center, width, offset, sk, y_sep, blend_width, tail_alpha),
                                 bracket=[-1e+10, 10*amp],
@@ -207,15 +208,41 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     psi_edge = psi_N[edge_mask]
     j_edge = j_bootstrap[edge_mask]
 
-    # Find peak in the edge region
-    peaks, properties = find_peaks(j_edge, height=0.)#0.5*numpy.max(j_edge))
+    def _no_edge_spike_result(reason):
+        # No isolable edge spike was found. Fall back to the un-isolated
+        # bootstrap profile (identical to the isolate_edge_jBS=False path)
+        # rather than returning None, which would break the documented dict
+        # contract and crash subscripting callers (res['masked_spike']).
+        warnings.warn(reason + "; using bootstrap profile without edge isolation",
+                      RuntimeWarning, stacklevel=2)
+        j_full = numpy.array(j_bootstrap, dtype=float)
+        return {
+            'sigma': 0.0,
+            'background': 0.0,
+            'gaussian_params': None,
+            'parameterized_spike': j_full,
+            'masked_spike': j_full.copy(),
+        }
+
+    # Guard an empty edge slice (psi_N may not reach the edge region)
+    if j_edge.size == 0:
+        return _no_edge_spike_result("No edge region (psi_N >= 0.7) in profile")
+
+    # Find edge peak (prominence filter rejects noise oscillations)
+    j_edge_max = numpy.max(j_edge)
+    min_prominence = 0.05 * j_edge_max if j_edge_max > 0 else 0.0
+    peaks, properties = find_peaks(j_edge, height=0., prominence=min_prominence)
 
     if len(peaks) == 0:
-        print("No clear peak found in the edge region")
-        return None
+        return _no_edge_spike_result("No clear peak found in the edge region")
 
-    # Choose peak closest to psi_N = 1 if multiple peaks exist
-    peak_idx = peaks[numpy.argmax(psi_edge[peaks])]
+    # Tallest peak in the far edge (psi_N > 0.85), else the rightmost
+    far_edge = psi_edge[peaks] > 0.85
+    if numpy.any(far_edge):
+        far_peaks = peaks[far_edge]
+        peak_idx = far_peaks[numpy.argmax(j_edge[far_peaks])]
+    else:
+        peak_idx = peaks[numpy.argmax(psi_edge[peaks])]
     peak_psi = psi_edge[peak_idx]
     peak_height = j_edge[peak_idx]
 
@@ -232,11 +259,11 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     lmin_j_BS = min(masked_j_BS)
     lmin_arg = numpy.argmin(masked_j_BS)
     fit_mask = (psi_N >= masked_psi_N[lmin_arg])
-    
+
     # Splice j_BS profile edge spike onto flat profile with value set to min(j_BS)
     masked_spike = numpy.ones_like(psi_N)*lmin_j_BS
     masked_spike[fit_mask] = j_bootstrap[fit_mask]
-    
+
     # Define the blend window to smooth out junction of flat core profile and edge j_BS spike
     # Set the total width to be half the distance between splice location and peak
     jBS_min_loc = masked_psi_N[lmin_arg]
@@ -257,7 +284,7 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     # Determine Boundary Conditions
     # Left Boundary (Start): strictly flat, so slope is 0
     y_start  = masked_spike[idx_start]
-    dy_start = 0.0  
+    dy_start = 0.0
 
     # Right Boundary (End): located on the peaked profile
     # Estimate the slope (dy/dx) using a central difference at x_end
@@ -289,7 +316,7 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
 
     # Apply the patch to the main masked j_BS profile
     masked_spike[idx_start : idx_end + 1] = y_patch
-    
+
     # Attempt to fit bootstrap parameterization to calculated profile (deprecated)
     # Initial parameter guess
     sigma_init = fwhm/2.355  # Convert FWHM to sigma
@@ -324,15 +351,22 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
                     ysep_hi,
                     0.2]
 
-    # Perform the fit
-    popt, pcov = curve_fit(parameterize_edge_jBS, psi_N[fit_mask], j_bootstrap[fit_mask], p0=p0,
-                            bounds=(lower_bounds, upper_bounds),
-                            maxfev=10000)
+    # The parameterized fit is only used when parameterize_jBS=True; its internal
+    # root_scalar can fail to bracket on some equilibria, so keep it non-fatal.
+    try:
+        popt, pcov = curve_fit(parameterize_edge_jBS, psi_N[fit_mask], j_bootstrap[fit_mask], p0=p0,
+                                bounds=(lower_bounds, upper_bounds),
+                                maxfev=10000)
+        amp, center, width, offset, sk, y_sep, blend_width = popt
+        spike_only = parameterize_edge_jBS(psi_N, amp, center, width, offset, sk, y_sep, blend_width)
+    except Exception as _edge_fit_exc:
+        warnings.warn("parameterize_edge_jBS fit failed (%s); falling back to "
+                      "masked_spike (unused unless parameterize_jBS=True)" % _edge_fit_exc,
+                      RuntimeWarning, stacklevel=2)
+        popt = numpy.asarray(p0, dtype=float)
+        amp, center, width, offset, sk, y_sep, blend_width = popt
+        spike_only = masked_spike.copy()
 
-    amp, center, width, offset, sk, y_sep, blend_width = popt
-
-    spike_only = parameterize_edge_jBS(psi_N, amp, center, width, offset, sk, y_sep, blend_width)
-    
     if diagnostic_plots:
         plt.figure()
         plt.plot(psi_N[fit_mask],j_bootstrap[fit_mask]/1e6,label='Input j_BS')
@@ -343,7 +377,7 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
         plt.xlim(0.5,1.02)
         plt.legend(loc='best')
         plt.show()
-    
+
     results = {
         'sigma': width,                 # Gaussian width (sigma)
         'background': offset,           # background level
@@ -359,7 +393,7 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
 
     @param mygs Grad-Shafranov solver object
     @param ffp_prof Toroidal current profile (\f$j_\phi(\hat{\psi})\f$), type 'jphi-linterp'
-    @param pp_prof Pressure gradient profile (\f{P'}\f$)
+    @param pp_prof Pressure gradient profile (\f$P'\f$)
     @param Ip_target Target plasma current \f$I_p\f$ [A]
     @param pax_target Target on-axis pressure \f$p_{axis}\f$ [Pa]
     @result None (updates equilibrium in-place)
@@ -372,23 +406,21 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
 
     # Solve Grad-Shafranov
     mygs.solve()
-    
+
 def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
-                            Ip_target, psi_pad, spike_prof=None, find_j0=True, scale_j0=1.0,
+                            Ip_target, psi_pad, spike_prof=None,
                             tolerance=0.01, max_iter=5, diagnostic_plots=False, verbose=True):
-    r'''! Optimize scaling to match input/output \f$j_0\f$ or \f$I_p\f$
+    r'''! Optimize core-\f$j_0\f$ scaling so input/output \f$j_0\f$ match
 
     @param mygs Grad-Shafranov solver object
     @param psi_N Normalized poloidal flux profile \f$\hat{\psi}\f$
     @param pressure Plasma pressure profile \f$p(\hat{\psi})\f$ [Pa]
     @param ffp_prof Toroidal current profile (\f$j_\phi(\hat{\psi})\f$)
-    @param pp_prof Pressure gradient profile (\f{P'}\f$)
+    @param pp_prof Pressure gradient profile (\f$P'\f$)
     @param j_inductive Inductive/total toroidal current profile \f$j_{ind}(\hat{\psi})\f$ [A/m^2]
     @param Ip_target Target plasma current \f$I_p\f$ [A]
     @param psi_pad Padding for flux surface calculations
     @param spike_prof Optional bootstrap current profile \f$j_{BS}(\hat{\psi})\f$ [A/m^2]
-    @param find_j0 If True, rescale core \f$j_\phi\f$; else, rescale \f$I_p\f$
-    @param scale_j0 Used if find_j0=False; rescaling factor for \f$j_0\f$
     @param tolerance Relative error tolerance for secant method
     @param max_iter Maximum number of secant iterations
     @param diagnostic_plots If True, plot input/output \f$j_\phi\f$
@@ -397,15 +429,15 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     import matplotlib.pyplot as plt
 
     n_psi = len(psi_N)
-    
+
     if spike_prof is None:
         spike_prof = numpy.zeros_like(j_inductive)
-    
+
     # We want: Input_J0 - Output_J0 ~ 0
     def get_j0_error(scale_val, n):
         if verbose:
             print(f"\n--- Checking scale_j0 = {scale_val:.4f} ---")
-        
+
         matched_input_jphi = scale_val*j_inductive + spike_prof
         ffp_prof['type'] = 'jphi-linterp'
         ffp_prof['y'] = matched_input_jphi
@@ -413,12 +445,12 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         pax_target = pressure[0]
 
         solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target)
-        
+
         # Check Convergence
         _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
         _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
 
-        tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs[0], ravgs[1])
+        tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 
         if diagnostic_plots:
             plt.figure()
@@ -430,61 +462,27 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
             plt.ylabel(r'$j_\phi$ [MA/m$^2$]')
             plt.grid(ls=':')
             plt.show()
-            
+
         # Input j_0 at this scale
         input_j0 = scale_val * j_inductive[0] + spike_prof[0]
-        
+
         # Output j_0 from solver
         output_j0 = tmp_jphi[0]
-        
+
         # Calculate residual (difference) and relative error
         diff = input_j0 - output_j0
         rel_err = abs(diff) / output_j0
-        
+
         if verbose:
             print(f"   Input j_0:  {input_j0:.4e}")
             print(f"   Output j_0: {output_j0:.4e}")
             print(f"   Mismatch:  {rel_err*100:.3f}%")
-        
+
         return diff, rel_err, tmp_jphi
-    
-    # We want: Input_Ip - Output_Ip ~ 0
-    def get_Ip_error(scale_val, scale_j0, n):
-        if verbose:
-            print(f"\n--- Checking scale_Ip = {scale_val:.4f} ---")
-        
-        ffp_prof['type'] = 'jphi-linterp'
-        ffp_prof['y'] = scale_j0*j_inductive + spike_prof
-
-        scaled_Ip_target = Ip_target*scale_val
-        pax_target = pressure[0]
-
-        solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target)
-    
-        eq_stats = mygs.get_stats(lcfs_pad=psi_pad)
-        output_Ip = eq_stats['Ip']
-        
-        # Calculate residual (difference) and relative error
-        diff = output_Ip - Ip_target
-        # Use magnitude of Ip_target and guard against zero to avoid sign/zero issues
-        eps = numpy.finfo(float).eps
-        denom = max(abs(Ip_target), eps)
-        rel_err = abs(diff) / denom
-        
-        if verbose:
-            print(f"   Input Ip target:  {Ip_target/1e6:.4e}")
-            print(f"   Trial Ip target:  {Ip_target*scale_val/1e6:.4e}")
-            print(f"   Output Ip: {output_Ip/1e6:.4e}")
-            print(f"   Mismatch:  {rel_err*100:.4f}%")
-        
-        return diff, rel_err, None
 
     # --- Step 1: Initial Guess (1.0) ---
     p0 = 1.0
-    if find_j0:
-        err0, rel_err0, res_jphi = get_j0_error(p0, 0)
-    else:
-        err0, rel_err0, res_jphi = get_Ip_error(p0, scale_j0, 0)
+    err0, rel_err0, res_jphi = get_j0_error(p0, 0)
 
     # Check if we got lucky immediately
     if rel_err0 < tolerance:
@@ -493,22 +491,12 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     # --- Step 2: Second Guess (Directional) ---
     # If Input < Output (err0 < 0), we need more current -> Try 1.2
     # If Input > Output (err0 > 0), we have too much -> Try 0.8
-    
-    if find_j0:
-        if err0 < 0:
-            p1 = 1.2
-        else:
-            p1 = 0.8
+    if err0 < 0:
+        p1 = 1.2
     else:
-        if err0 < 0:
-            p1 = 1.01
-        else:
-            p1 = 0.99
-    
-    if find_j0:
-        err1, rel_err1, res_jphi = get_j0_error(p1, 1)
-    else:
-        err1, rel_err1, res_jphi = get_Ip_error(p1, scale_j0, 1)
+        p1 = 0.8
+
+    err1, rel_err1, res_jphi = get_j0_error(p1, 1)
 
     if rel_err1 < tolerance:
         return p1, res_jphi
@@ -518,7 +506,7 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     for i in range(max_iter):
         if verbose:
             print(f"--- Optimization Iteration {i+1} ---")
-        
+
         # Avoid division by zero
         if abs(err1 - err0) < 1e-9:
             if verbose:
@@ -528,25 +516,22 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         # Secant formula: x_new = x1 - f(x1) * (x1 - x0) / (f(x1) - f(x0))
         # This projects the line between (p0, err0) and (p1, err1) to zero.
         p_new = p1 - err1 * (p1 - p0) / (err1 - err0)
-        
+
         # Safety clamp: If the projection is wild (negative or huge), constrain it
         # This acts as a loose bracket to prevent the solver from crashing
-        if p_new < 0.1: 
+        if p_new < 0.1:
             p_new = 0.1
-        if p_new > 5.0: 
+        if p_new > 5.0:
             p_new = 5.0
-        
+
         # Execute Solver at new point
-        if find_j0:
-            err_new, rel_err_new, res_jphi = get_j0_error(p_new, i+2)
-        else:
-            err_new, rel_err_new, res_jphi = get_Ip_error(p_new, scale_j0, i+2)
+        err_new, rel_err_new, res_jphi = get_j0_error(p_new, i+2)
 
         if rel_err_new < tolerance:
             if verbose:
                 print(f"Converged! Optimal scale factor: {p_new:.4f}")
             return p_new, res_jphi
-        
+
         # Update points for next step (move window forward)
         p0, err0 = p1, err1
         p1, err1 = p_new, err_new
@@ -554,6 +539,7 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     if verbose:
         print("Max iterations reached. Returning best last effort.")
     return p1, res_jphi
+
 
 def calculate_ln_lambda(Te, Ti, ne, ni, Zeff=1.0,
                         electron_lnLambda_model='sauter',
@@ -570,7 +556,7 @@ def calculate_ln_lambda(Te, Ti, ne, ni, Zeff=1.0,
     @result Tuple (\f$\ln\Lambda_e\f$, \f$\ln\Lambda_{ii}\f$)
     '''
     if electron_lnLambda_model == 'NRL':
-        ln_lambda_e = (23.5 
+        ln_lambda_e = (23.5
                        - numpy.log(numpy.sqrt(ne / 1e6) * Te**(-5.0/4.0))
                        - numpy.sqrt(1e-5 + (numpy.log(Te) - 2)**2 / 16.0))
     else:
@@ -638,10 +624,10 @@ def redl_bootstrap(
     @param nu_i_star_override Override ion collisionality if set
     @result Tuple (bootstrap current profile \f$j_{BS}(\hat{\psi})\f$, coefficient dictionary)
     '''
-    
+
     # Apply Zeff override if requested
     if Zeff_override is not None:
-        Zeff = (numpy.full_like(Zeff, Zeff_override) 
+        Zeff = (numpy.full_like(Zeff, Zeff_override)
                 if numpy.isscalar(Zeff_override) else Zeff_override)
 
     inputs = [Te, Ti, ne, ni, pe, pi, Zeff, R, q, eps, fT, I_psi,
@@ -654,7 +640,7 @@ def redl_bootstrap(
     EC = 1.602176634e-19
     p_total = pe + pi
     R_pe = pe / p_total
-        
+
     # =====================================================================
     # 1. Collisionality
     # =====================================================================
@@ -794,7 +780,7 @@ def redl_bootstrap(
         j_bootstrap *= numpy.sign(q)
         for k in term_decomp:
             term_decomp[k] *= numpy.sign(q)
-    
+
     coeffs = {
         'L31': L31, 'L32': L32, 'L34': L34,
         'alpha': alpha, 'alpha0': alpha0,
@@ -854,9 +840,9 @@ def solve_with_bootstrap(mygs,
             from omfit_classes.utils_fusion import sauter_bootstrap
         except ImportError:
             raise ImportError('omfit_classes.utils_fusion not installed')
-    
+
     EC = 1.602176634e-19
-    
+
     # Handle mutable default argument
     if Zis is None:
         Zis = [1.]
@@ -866,14 +852,14 @@ def solve_with_bootstrap(mygs,
     ni = numpy.asarray(ni)
     Ti = numpy.asarray(Ti)
     Zeff = numpy.asarray(Zeff)
-    
+
     if inductive_jphi is not None:
         inductive_jphi = numpy.asarray(inductive_jphi).copy()
-    
+
     # Calculate Pressure [Pa]
     # p = n * T * k_B. Since T is in eV, k_B is essentially elementary charge e
     pressure = (EC * ne * Te) + (EC * ni * Ti)
-    
+
     # Reconstruct normalized psi grid based on input pressure length
     # Note: Assumes inputs are evenly sampled in psi_norm 0..1
     n_psi = len(pressure)
@@ -896,25 +882,25 @@ def solve_with_bootstrap(mygs,
         # Get geometry and flux functions
         _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
         _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
-        
+
         # Geometry terms
-        ft = 1 - fc 
-        eps = r_avgs[2] / r_avgs[0]
+        ft = 1 - fc
+        eps = r_avgs['<a>'] / r_avgs['<R>']
         _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
-        R_avg = ravgs_q[0]
+        R_avg = ravgs_q['<R>']
 
         # Gradients (using raw psi for derivatives)
         psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
         d_psi = numpy.gradient(psi_N)
-        
+
         # Avoid division by zero in gradients
         d_psi_eff = d_psi * psi_range
         d_psi_eff[d_psi_eff == 0] = 1e-9
 
         pprime_local = numpy.gradient(pressure) / d_psi_eff
-        
+
         j_BS_final = numpy.zeros_like(pressure)
-        
+
         if include_jBS:
             dn_e_dpsi = numpy.gradient(ne) / d_psi_eff
             dT_e_dpsi = numpy.gradient(Te) / d_psi_eff
@@ -946,13 +932,13 @@ def solve_with_bootstrap(mygs,
                 Zdom = 1.0  # deuterium
                 Zavg = ne / ni
                 Zion = (Zdom**2 * Zavg * Zeff)**0.25
-                nu_i_star = (4.90e-18 * numpy.abs(qvals) * R_avg * ni 
+                nu_i_star = (4.90e-18 * numpy.abs(qvals) * R_avg * ni
                             * Zion**4 * ln_lii / (Ti**2 * eps**1.5))
 
                 # Electron collisionality
-                nu_e_star = (6.921e-18 * numpy.abs(qvals) * R_avg * ne 
+                nu_e_star = (6.921e-18 * numpy.abs(qvals) * R_avg * ne
                             * Zeff * ln_le / (Te**2 * eps**1.5))
-                
+
                 j_BS_neo, _ = redl_bootstrap( # native re-implementation of Redl 2021
                     psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
                     pe=EC*(ne*Te), pi=EC*(ni*Ti),
@@ -967,7 +953,7 @@ def solve_with_bootstrap(mygs,
                     use_sign_q=True, # convention-dependent
                     formula_form='jboot1', # no d(ln ne)=d(ln ni) assumption
                 )
-            
+
             # Convert to A/m^2
             j_BS_final = j_BS_neo * (R_avg / f)
             j_BS_final = numpy.nan_to_num(j_BS_final, nan=0.0)
@@ -978,7 +964,7 @@ def solve_with_bootstrap(mygs,
         current_jphi_target = inductive_jphi if inductive_jphi is not None else numpy.zeros_like(pressure)
 
         spike_prof = numpy.zeros_like(j_BS_final)
-        
+
         if include_jBS:
             if isolate_edge_jBS:
                 if parameterize_jBS:
@@ -989,7 +975,7 @@ def solve_with_bootstrap(mygs,
                     spike_prof = res['masked_spike'] * scale_jBS
             else:
                 spike_prof = j_BS_final * scale_jBS
-        
+
         # Solve for alpha: integral(alpha * j_ind + j_spike) = Ip_target
         try:
             sol = root_scalar(current_scaling_objective,
@@ -1004,18 +990,18 @@ def solve_with_bootstrap(mygs,
 
         matched_j_inductive = alpha_opt * current_jphi_target
         matched_jphi = matched_j_inductive + spike_prof
-        
+
         # Package results
         pp_dict = {'type': 'linterp', 'x': psi_N, 'y': pprime_local / pprime_local[0]}
         ffp_dict = {'type': 'jphi-linterp', 'x': psi_N, 'y': numpy.nan_to_num(matched_jphi)}
-        
+
         return pp_dict, ffp_dict, j_BS_final, matched_j_inductive, spike_prof
 
     # --- Main Execution Flow ---
     mygs.set_targets(Ip=Ip_target, pax=pressure[0])
 
     if inductive_jphi is not None:
-        
+
         if verbose:
             print('\n >>> Matching input core j_phi with G-S solution')
 
@@ -1042,29 +1028,22 @@ def solve_with_bootstrap(mygs,
 
         # Enforce P' edge condition
         pp_prof['y'][-1] = 0.
-        
+
         if verbose:
             print('\n >>> Finding optimal j_phi scale factor')
         # Find optimal jphi scale
         final_scale_j0, final_jphi = find_optimal_scale(mygs,
             psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive,
-            Ip_target, psi_pad, spike_prof=spike_prof, find_j0=True,
+            Ip_target, psi_pad, spike_prof=spike_prof,
             diagnostic_plots=diagnostic_plots, verbose=verbose
         )
-        if verbose:
-            print('\n >>> Finding optimal Ip scale factor')
-        # Find optimal Ip_target scale
-        final_scale_Ip, _ = find_optimal_scale(mygs,
-            psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive,
-            Ip_target, psi_pad, spike_prof=spike_prof, find_j0=False,
-            scale_j0=final_scale_j0,
-            tolerance=0.001, diagnostic_plots=diagnostic_plots, verbose=verbose
-        )
-        
+        # Ip-scale secant removed as redundant; core-j0 scaling retained.
+        final_scale_Ip = 1.0
+
         if verbose:
             print('\n >>> Iterating on H-mode equilibrium solution')
 
-        for n in range(iterations):            
+        for n in range(iterations):
             # Calculate new profiles
             pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
                 psi_N, include_jBS=True
@@ -1076,7 +1055,7 @@ def solve_with_bootstrap(mygs,
             matched_input_jphi = final_scale_j0*matched_j_inductive + spike_prof
             ffp_prof['type'] = 'jphi-linterp'
             ffp_prof['y'] = matched_input_jphi
-            
+
             scaled_Ip_target = Ip_target*final_scale_Ip
             pax_target = pressure[0]
 
@@ -1086,7 +1065,7 @@ def solve_with_bootstrap(mygs,
             _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
             _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
 
-            tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs[0], ravgs[1])
+            tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 
             if diagnostic_plots:
                 plt.figure()
@@ -1107,5 +1086,5 @@ def solve_with_bootstrap(mygs,
                 'isolated_j_BS' : spike_prof,
                 'scale_j0' : final_scale_j0,
                 'scale_Ip' : final_scale_Ip}
-    
+
     return results
