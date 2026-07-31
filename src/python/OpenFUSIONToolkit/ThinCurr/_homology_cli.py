@@ -572,6 +572,8 @@ def compute_homology(in_file, out_file=None, keep_nodeset_start=None, plot_final
     @param ref_point Reference location for base point [x,y,z] (default: [0,0,0])
     @param optimize_holes Sample additional points to attempt to optimize holes?
     '''
+    global indent_level
+
     if out_file is None:
         out_file = os.path.splitext(in_file)[0] + "-homology.h5"
 

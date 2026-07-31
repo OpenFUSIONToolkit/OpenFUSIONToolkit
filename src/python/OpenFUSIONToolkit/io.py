@@ -455,6 +455,7 @@ def build_XDMF(path='.',repeat_static=False,pretty=False,legacy=False):
     @param legacy Use legacy XDMF script for processing `dump.dat` files?
     '''
     if legacy:
-        raise NotImplementedError("Legacy XDMF processing is only supported via the standalone script `build_xdmf-legacy.py`")
+        raise NotImplementedError("""Legacy XDMF processing is only supported via the standalone script `build_xdmf-legacy.py`.
+This argument will be removed in a future release.""")
     build_xdmf_files(directory=path,pretty=pretty,repeat_static=repeat_static)
     return XDMF_plot_file(os.path.join(path,'oft_xdmf.0001.h5'))
