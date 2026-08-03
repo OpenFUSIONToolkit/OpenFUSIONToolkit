@@ -142,6 +142,7 @@ class ThinCurr_Icoil(ThinCurr_coil_set):
         h5_group.create_dataset('NCOILS', data=[len(self.subcoils),], dtype='i4')
         if self.sens_mask:
             h5_group.create_dataset('SENS_MASK', data=[1,], dtype='i4')
+        scales = numpy.ones((len(self.subcoils),))
         for i, subcoil in enumerate(self.subcoils):
             subcoil_group = h5_group.create_group('coil{0:04d}'.format(i+1))
             if 'pts' in subcoil:
@@ -152,7 +153,8 @@ class ThinCurr_Icoil(ThinCurr_coil_set):
                 with h5py.File(source_filepath, 'r') as source_file:
                     subcoil_group.create_dataset('PTS', data=source_file[source_dataset][()], dtype='f8')
             if subcoil['scale'] is not None:
-                subcoil_group.create_dataset('SCALE', data=[subcoil['scale'],], dtype='f8')
+                scales[i] = subcoil['scale']
+        h5_group.create_dataset('SCALES', data=scales, dtype='f8')
 
 
 class ThinCurr_Vcoil(ThinCurr_coil_set):
@@ -233,7 +235,8 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
                 with h5py.File(source_filepath, 'r') as source_file:
                     subcoil_group.create_dataset('PTS', data=source_file[source_dataset][()], dtype='f8')
             if subcoil['scale'] is not None:
-                subcoil_group.create_dataset('SCALE', data=[subcoil['scale'],], dtype='f8')
+                scales[i] = subcoil['scale']
+        h5_group.create_dataset('SCALES', data=scales, dtype='f8')
 
 
 def coil_from_hdf5(h5_group):

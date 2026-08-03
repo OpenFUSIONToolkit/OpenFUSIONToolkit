@@ -2437,6 +2437,10 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
       coil_tmp%name=str_tmp
       IF(.NOT.success)CALL oft_abort('Failed to read name for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
     END IF
+    IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/SCALES'))THEN
+      CALL hdf5_read(coil_tmp%scales,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/SCALES',success)
+      IF(.NOT.success)CALL oft_abort('Failed to read scales for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
+    END IF
     IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/SENS_MASK'))THEN
       CALL hdf5_read(coil_tmp%sens_mask,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/SENS_MASK',success)
       IF(.NOT.success)CALL oft_abort('Failed to read sens_mask for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
@@ -2458,10 +2462,6 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
       END IF
       IF(ndims/=1)THEN
         CALL oft_abort('Failed to read coil points for coilset/coil '//coil_ind,'tw_load_coils_hdf5',__FILE__)
-      END IF
-      IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/SCALE'))THEN
-        CALL hdf5_read(coil_tmp%scales(1),TRIM(filepath),'thincurr/coils/coilset'//blknum//'/SCALE',success)
-        IF(.NOT.success)CALL oft_abort('Failed to read scale for coilset/coil '//coil_ind,'tw_load_coils_hdf5',__FILE__)
       END IF
     END DO
   END DO
@@ -3228,168 +3228,6 @@ IF(ierr==0)THEN
   ! WRITE(*,*)'  Sens mask = ',self%sens_mask
 END IF
 end subroutine tw_load_eta
-!------------------------------------------------------------------------------
-!> Load forcing mesh and fields for an MHD-style mode
-!------------------------------------------------------------------------------
-subroutine tw_load_mode(filename,self,driver)
-CHARACTER(LEN=*) :: filename !< Filename containing mode definition
-TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model of mode
-REAL(8), POINTER, INTENT(out) :: driver(:,:) !< Sin/Cos pair corresponding to mode
-!---
-INTEGER(4) :: i,j,k,l,face,io_unit,ierr,ndim
-INTEGER(4), ALLOCATABLE :: kfh_tmp(:),dim_sizes(:)
-REAL(8) :: rgop(3,3),norm_i(3),f(3),area_i
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Loading mode forcing mesh:'
-WRITE(*,'(3A)')oft_indent,'  filename    = ',TRIM(filename)
-!---Save to file
-ALLOCATE(oft_trimesh::self%mesh)
-CALL self%mesh%setup(-1,.FALSE.)
-!
-CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/R',ndim,dim_sizes)
-self%mesh%np=dim_sizes(2)
-DEALLOCATE(dim_sizes)
-ALLOCATE(self%mesh%r(3,self%mesh%np))
-CALL hdf5_read(self%mesh%r,'tCurr_mode_model.h5','mesh/R')
-!
-CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/LC',ndim,dim_sizes)
-self%mesh%nc=dim_sizes(2)
-DEALLOCATE(dim_sizes)
-ALLOCATE(self%mesh%lc(3,self%mesh%nc))
-CALL hdf5_read(self%mesh%lc,'tCurr_mode_model.h5','mesh/LC')
-!
-self%nclosures=1
-ALLOCATE(self%closures(self%nclosures))
-CALL hdf5_read(self%closures(1),'tCurr_mode_model.h5','mesh/SIDESET0001')
-! OPEN(NEWUNIT=io_unit, FILE=TRIM(filename))
-! READ(io_unit,*)self%mesh%np
-! ALLOCATE(self%mesh%r(3,self%mesh%np))
-! DO i=1,self%mesh%np
-!   READ(io_unit,*)self%mesh%r(:,i)
-! END DO
-! self%nclosures=1
-! ALLOCATE(self%closures(self%nclosures))
-! READ(io_unit,*)self%closures(1)
-! !
-! READ(io_unit,*)self%mesh%nc
-! ALLOCATE(self%mesh%lc(3,self%mesh%nc),self%mesh%reg(self%mesh%nc))
-! self%mesh%reg=1
-! DO i=1,self%mesh%nc
-!   READ(io_unit,*)self%mesh%lc(:,i)
-! END DO
-CALL bmesh_local_init(self%mesh)
-!---
-self%nholes=2
-! READ(io_unit,*)self%nholes
-ALLOCATE(self%hmesh(self%nholes))
-CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/NODESET0001',ndim,dim_sizes)
-self%hmesh(1)%n=dim_sizes(1)
-DEALLOCATE(dim_sizes)
-ALLOCATE(self%hmesh(1)%lp(self%hmesh(1)%n))
-CALL hdf5_read(self%hmesh(1)%lp,'tCurr_mode_model.h5','mesh/SIDESET0001')
-CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/NODESET0002',ndim,dim_sizes)
-self%hmesh(2)%n=dim_sizes(1)
-DEALLOCATE(dim_sizes)
-ALLOCATE(self%hmesh(2)%lp(self%hmesh(2)%n))
-CALL hdf5_read(self%hmesh(2)%lp,'tCurr_mode_model.h5','mesh/SIDESET0002')
-ALLOCATE(self%kfh(self%mesh%nc+1))
-self%kfh=0
-DO i=1,self%nholes
-  ! READ(io_unit,*)self%hmesh(i)%n
-  ! ALLOCATE(self%hmesh(i)%lp(self%hmesh(i)%n))
-  ! DO j=1,self%hmesh(i)%n
-  !   READ(io_unit,*)self%hmesh(i)%lp(j)
-  ! END DO
-  CALL tw_setup_hole(self%mesh, self%hmesh(i))
-END DO
-!---Build cell list
-DO i=1,self%nholes
-  DO j=1,self%hmesh(i)%n
-    DO k=self%hmesh(i)%kpc(j),self%hmesh(i)%kpc(j+1)-1
-      face=ABS(self%hmesh(i)%lpc(k))
-      self%kfh(face)=self%kfh(face)+1
-    END DO
-  END DO
-END DO
-self%nfh=SUM(self%kfh)
-self%kfh(self%mesh%nc+1)=self%nfh+1
-do i=self%mesh%nc,1,-1 ! cumulative count
-  self%kfh(i) = self%kfh(i+1) - self%kfh(i)
-end do
-if(self%kfh(1)/=1)call oft_abort('Bad element to element count','tw_setup',__FILE__)
-ALLOCATE(self%lfh(2,self%nfh),kfh_tmp(self%mesh%nc+1))
-self%lfh=0
-kfh_tmp=0
-DO i=1,self%nholes
-  DO j=1,self%hmesh(i)%n
-    DO k=self%hmesh(i)%kpc(j),self%hmesh(i)%kpc(j+1)-1
-      face=ABS(self%hmesh(i)%lpc(k))
-      DO l=1,3
-        IF(self%mesh%lc(l,face)==self%hmesh(i)%lp(j))EXIT
-      END DO
-      self%lfh(:,self%kfh(face)+kfh_tmp(face))=[SIGN(i,self%hmesh(i)%lpc(k)),l]
-      kfh_tmp(face)=kfh_tmp(face)+1
-    END DO
-  END DO
-END DO
-DEALLOCATE(kfh_tmp)
-self%nelems = self%mesh%np + self%nholes - 1
-!
-! READ(io_unit,*)
-ALLOCATE(driver(self%nelems,2))
-CALL hdf5_read(driver,'tCurr_mode_model.h5','thincurr/driver')
-! DO i=1,self%nelems
-!   READ(io_unit,*)driver(i,:)
-! END DO
-! CLOSE(io_unit)
-WRITE(*,'(2A,I8)')oft_indent,'  # of points = ',self%mesh%np
-WRITE(*,'(2A,I8)')oft_indent,'  # of edges  = ',self%mesh%ne
-WRITE(*,'(2A,I8)')oft_indent,'  # of faces  = ',self%mesh%nc
-WRITE(*,'(2A,I8)')oft_indent,'  # of holes  = ',self%nholes
-!
-ALLOCATE(self%pmap(self%mesh%np))
-self%pmap=0
-self%np_active=0
-DO i=1,self%mesh%np
-  IF(self%mesh%bp(i))CYCLE
-  self%np_active=self%np_active+1
-  self%pmap(i)=self%np_active
-END DO
-! Mark closure vertex for removal
-DO i=1,self%nclosures
-  self%pmap(self%closures(i))=-i
-END DO
-self%nclosures=-self%nclosures
-! Reindex, removing closure vertex
-self%np_active=0
-DO i=1,self%mesh%np
-  IF(self%pmap(i)>0)THEN
-    self%np_active=self%np_active+1
-    self%pmap(i)=self%np_active
-  ELSE
-    self%pmap(i)=0
-  END IF
-END DO
-!
-ALLOCATE(self%kpmap_inv(self%np_active+1),self%lpmap_inv(self%np_active))
-self%kpmap_inv=[(i,i=1,self%np_active+1)]
-DO i=1,self%mesh%np
-  IF(self%pmap(i)/=0)self%lpmap_inv(self%pmap(i))=i
-END DO
-self%nelems = self%np_active + self%nholes
-!---Build basis array
-ALLOCATE(self%qbasis(3,3,self%mesh%nc))
-f=1.d0/3.d0
-DO i=1,self%mesh%nc
-  CALL self%mesh%jacobian(i,f,rgop,area_i)
-  CALL self%mesh%norm(i,f,norm_i)
-  DO j=1,3
-    self%qbasis(:,j,i)=cross_product(rgop(:,j),norm_i)
-  END DO
-END DO
-ALLOCATE(self%sens_mask(1))
-self%sens_mask=.FALSE.
-end subroutine tw_load_mode
 !---------------------------------------------------------------------------------
 !> Save solution vector for thin-wall model for plotting in VisIt
 !---------------------------------------------------------------------------------

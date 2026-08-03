@@ -81,7 +81,7 @@ from .coils import ThinCurr_XML
 
 
 class ThinCurrMesh:
-    '''!Container for a 3-node triangular ThinCurr surface mesh.
+    '''! Container for a 3-node triangular ThinCurr surface mesh.
 
     Connectivity is stored 0-based, matching the read_ThinCurr_mesh /
     write_ThinCurr_mesh library routines, which handle the 1-based on-disk
@@ -107,91 +107,97 @@ class ThinCurrMesh:
     _PROP_KEYS = ('eta_surf', 'eta_vol', 'thickness') # Ignore 'pmap' and 'nfp' for now (only limited uses)
     _MESH_PROP_KEYS = ('reg_names', 'reg_attrs')
 
-    def __init__(self, r, lc, reg, nodesets=None, sidesets=None, props=None,
-                 mesh_props=None, is_jumper=None, had_native_nodesets=False, coil_sets=None):
-        '''!Construct a mesh from its component arrays
+    def __init__(self, r, lc, reg, holes=None, jumpers=None, closures=None,
+                 nodesets=None, props=None, mesh_props=None,
+                 coil_sets=None):
+        '''! Construct a mesh from its component arrays
 
         @param r Vertex list [np,3]
         @param lc Triangle vertex list [nc,3], 0-based
         @param reg Per-cell region index [nc]
         @param nodesets List of 0-based node-index arrays (optional)
-        @param sidesets List of 0-based cell-index arrays (optional)
         @param props Dict of ThinCurr properties to carry through (optional)
         @param mesh_props Dict of base mesh properties to carry through (optional)
-        @param is_jumper Parallel bool list marking jumper nodesets (optional)
-        @param had_native_nodesets Whether the source file had native NODESETs
         @param coil_sets List of ThinCurr coil sets (optional)
         '''
         self.r = np.ascontiguousarray(r, dtype=np.float64)
-        self.lc = np.ascontiguousarray(lc, dtype=np.int32)
-        self.reg = np.ascontiguousarray(reg, dtype=np.int32).reshape(-1)
-        if self.lc.ndim != 2 or self.lc.shape[1] != 3:
-            raise ValueError("Cell list must have shape [nc,3] (3-node triangles)")
         if self.r.ndim != 2 or self.r.shape[1] not in (2, 3):
             raise ValueError("Vertex list must have shape [np,2] or [np,3]")
         if self.r.shape[1] == 2:  # Upgrade 2D point list to 3D (Z=0)
             self.r = np.hstack((self.r, np.zeros((self.r.shape[0], 1))))
+        #
+        self.lc = np.ascontiguousarray(lc, dtype=np.int32)
+        if self.lc.ndim != 2 or self.lc.shape[1] != 3:
+            raise ValueError("Cell list must have shape [nc,3] (3-node triangles)")
+        #
+        self.reg = np.ascontiguousarray(reg, dtype=np.int32).reshape(-1)
         if self.reg.shape[0] != self.lc.shape[0]:
             raise ValueError("Region list length must match number of cells")
-        self.nodesets = [np.asarray(ns, dtype=np.int32).reshape(-1) for ns in (nodesets or [])]
-        self.sidesets = [np.asarray(ss, dtype=np.int32).reshape(-1) for ss in (sidesets or [])]
-        if is_jumper is None:
-            self.is_jumper = [False] * len(self.nodesets)
-        else:
-            self.is_jumper = [bool(x) for x in is_jumper]
-            if len(self.is_jumper) != len(self.nodesets):
-                raise ValueError("is_jumper length must match number of nodesets")
+        #
+        if nodesets is not None and (holes is not None or jumpers is not None):
+            raise ValueError("Cannot supply both nodesets and holes/jumpers")
+        #
+        self.holes = [np.ascontiguousarray(v, dtype=np.int32).reshape(-1) for v in holes] if holes is not None else None
+        self.jumpers = [np.ascontiguousarray(v, dtype=np.int32).reshape(-1) for v in jumpers] if jumpers is not None else None
+        self.closures = np.ascontiguousarray(closures, dtype=np.int32) if closures is not None else None
+        self.nodesets = [np.ascontiguousarray(v, dtype=np.int32).reshape(-1) for v in nodesets] if nodesets is not None else None
+        #
         self.props = dict(props) if props else {}
         self.mesh_props = dict(mesh_props) if mesh_props else {}
-        self._had_native_nodesets = had_native_nodesets
         self.coil_sets = coil_sets
 
     @property
     def np(self):
-        '''!Number of vertices'''
+        '''! Number of vertices'''
         return self.r.shape[0]
 
     @property
     def nc(self):
-        '''!Number of cells (triangles)'''
+        '''! Number of cells (triangles)'''
         return self.lc.shape[0]
 
     @property
     def nregions(self):
-        '''!Number of regions (maximum region index)'''
-        if self.nc == 0:
-            return 0
-        return int(self.reg.max())
+        '''! Number of regions (maximum region index)'''
+        return self.reg.max()
 
     @property
     def nholes(self):
-        '''!Number of hole nodesets'''
-        return sum(1 for j in self.is_jumper if not j)
+        '''! Number of hole nodesets'''
+        if self.nodesets is not None:
+            return len(self.nodesets)
+        else:
+            return len(self.holes) if self.holes is not None else 0
+
+    @property
+    def nclosures(self):
+        '''! Number of closure nodesets'''
+        return self.closures.shape[0] if self.closures is not None else 0
 
     @property
     def njumpers(self):
-        '''!Number of jumper nodesets'''
-        return sum(1 for j in self.is_jumper if j)
+        '''! Number of jumper nodesets'''
+        return len(self.jumpers) if self.jumpers is not None else 0
 
     def copy(self):
-        '''!Return a deep copy of the mesh'''
+        '''! Return a deep copy of the mesh'''
         new = ThinCurrMesh(
-            self.r.copy(), self.lc.copy(), self.reg.copy(),
-            [ns.copy() for ns in self.nodesets],
-            [ss.copy() for ss in self.sidesets],
-            {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in self.props.items()},
+            self.r.copy(),
+            self.lc.copy(),
+            self.reg.copy(),
+            holes=[h.copy() for h in self.holes] if self.holes is not None else None,
+            jumpers=[j.copy() for j in self.jumpers] if self.jumpers is not None else None,
+            closures=self.closures.copy() if self.closures is not None else None,
+            nodesets=[ns.copy() for ns in self.nodesets],
+            props={k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in self.props.items()},
             mesh_props={k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in self.mesh_props.items()},
-            is_jumper=list(self.is_jumper), had_native_nodesets=self._had_native_nodesets, coil_sets=self.coil_sets)
+            coil_sets=self.coil_sets)
         return new
 
     # ------------------------------------------------------------------ I/O
     @classmethod
     def load(cls, filename):
-        '''!Load a mesh using @ref OpenFUSIONToolkit.ThinCurr.meshing.read_ThinCurr_mesh
-
-        Native ``NODESETXXXX`` loops are read (defaulting to holes) along with any
-        ThinCurr holes/jumpers already stored in the file; ThinCurr closures or
-        native side sets are read as closures. All indices are already 0-based.
+        '''! Load a mesh using @ref OpenFUSIONToolkit.ThinCurr.meshing.read_ThinCurr_mesh
 
         @param filename Path to input mesh file
         @result New @ref ThinCurrMesh instance
@@ -202,45 +208,52 @@ class ThinCurrMesh:
         if 'ho_info' in mesh_info:
             raise ValueError("High-order meshes are not supported (found high-order node info)")
         mesh_type = mesh_info.get('type', 'tri')
-        if mesh_type != 'tri':
-            raise ValueError("Only 3-node triangular ('tri') meshes are supported "
-                             "(found '{0}')".format(mesh_type))
-        r = np.asarray(mesh_info.pop('r'))
-        lc = np.asarray(mesh_info.pop('lc'))  # already 0-based
-        reg = np.asarray(mesh_info.pop('reg'))
-        if lc.ndim != 2 or lc.shape[1] != 3:
-            raise ValueError("Only 3-node triangular meshes are supported "
-                             "(found {0} nodes/cell)".format(lc.shape[1]))
+        r = mesh_info.pop('r')
+        lc = mesh_info.pop('lc')
+        reg = mesh_info.pop('reg')
         if r.ndim == 2 and r.shape[1] == 2:
             print("  Note: input mesh is 2D; padding point list to 3D (Z=0)")
         tc = mesh_info.get('thincurr', {})
 
-        def _nonempty(seq):
-            return [np.asarray(a) for a in seq if np.asarray(a).shape[0] > 0]
-
-        # Ordered loop list: native NODESETs (holes by default), then any stored
-        # ThinCurr holes, then any stored ThinCurr jumpers.
-        native = _nonempty(mesh_info.get('nodesets', []))
-        stored_holes = _nonempty(tc.get('holes', []))
-        stored_jumpers = _nonempty(tc.get('jumpers', []))
-        nodesets = native + stored_holes + stored_jumpers
-        is_jumper = ([False] * (len(native) + len(stored_holes))) + ([True] * len(stored_jumpers))
-        # Closures: prefer ThinCurr closures, else native side sets
-        if 'closures' in tc and np.asarray(tc['closures']).shape[0] > 0:
-            sidesets = [np.asarray(tc['closures'])]
+        # Read holes and jumpers, falling back to nodesets for old meshes
+        nodesets = None
+        holes = None
+        jumpers = None
+        if 'nodesets' in mesh_info:
+            if ('holes' in tc) or ('jumpers' in tc):
+                raise ValueError("Input mesh contains both native NODESETs and ThinCurr holes/jumpers")
+            nodesets = mesh_info.get('nodesets')
         else:
-            sidesets = _nonempty(mesh_info.get('sidesets', []))
+            holes = tc.get('holes')
+            jumpers = tc.get('jumpers')
+
+        # Read closures, falling back to sideset 1 for old meshes
+        closures = None
+        if 'sidesets' in mesh_info:
+            if 'closures' in tc:
+                raise ValueError("Input mesh contains both native side sets and ThinCurr closures")
+            closures = mesh_info['sidesets'][0]
+        else:
+            closures = tc.get('closures')
+
+        # Copy other fields to keep
         props = {k: tc[k] for k in cls._PROP_KEYS if k in tc}
         mesh_props = {k: mesh_info[k] for k in cls._MESH_PROP_KEYS if k in mesh_info}
-        mesh = cls(r, lc, reg, nodesets, sidesets, props,
-                   coil_sets=tc.get('coil_sets'),
+
+        # Create mesh object
+        mesh = cls(r, lc, reg,
+                   holes=holes, jumpers=jumpers, closures=closures,
+                   nodesets=nodesets,
+                   props=props,
                    mesh_props=mesh_props,
-                   is_jumper=is_jumper, had_native_nodesets=len(native) > 0)
+                   coil_sets=tc.get('coil_sets'))
+
+        # Display info and return
         mesh.print_info()
         return mesh
 
     def save(self, filename):
-        '''!Save the mesh using @ref OpenFUSIONToolkit.ThinCurr.meshing.write_ThinCurr_mesh
+        '''! Save the mesh using @ref OpenFUSIONToolkit.ThinCurr.meshing.write_ThinCurr_mesh
 
         Nodesets are split into ThinCurr holes and jumpers per `is_jumper`, and
         side sets are merged into a single ThinCurr closure set. All indices are
@@ -248,19 +261,14 @@ class ThinCurrMesh:
 
         @param filename Path to output mesh file
         '''
-        holes = [ns for ns, j in zip(self.nodesets, self.is_jumper) if not j]
-        jumpers = [ns for ns, j in zip(self.nodesets, self.is_jumper) if j]
-        if len(self.sidesets) == 0:
-            closures = None
-        elif len(self.sidesets) == 1:
-            closures = self.sidesets[0]
-        else:
-            print("  Note: merging {0} side sets into a single closure set".format(len(self.sidesets)))
-            closures = np.concatenate(self.sidesets)
+        # Convert from legacy to modern ThinCurr representation if needed
+        if self.holes is None:
+            self.holes = self.nodesets
+            self.nodesets = None
         write_ThinCurr_mesh(filename, self.r, self.lc, self.reg,
                             reg_attrs=self.mesh_props.get('reg_attrs'),
                             reg_names=self.mesh_props.get('reg_names'),
-                            holes=holes, jumpers=jumpers, closures=closures,
+                            holes=self.holes, jumpers=self.jumpers, closures=self.closures,
                             eta_surf=self.props.get('eta_surf'),
                             eta_vol=self.props.get('eta_vol'),
                             thickness=self.props.get('thickness'),
@@ -270,13 +278,13 @@ class ThinCurrMesh:
         self.print_info()
 
     def print_info(self):
-        '''!Print a short summary of the mesh contents'''
+        '''! Print a short summary of the mesh contents'''
         print("  # of points   = {0}".format(self.np))
         print("  # of cells    = {0}".format(self.nc))
         print("  # of regions  = {0}".format(self.nregions))
         print("  # of holes    = {0}".format(self.nholes))
         print("  # of jumpers  = {0}".format(self.njumpers))
-        print("  # of closures = {0}".format(len(self.sidesets)))
+        print("  # of closures = {0}".format(self.nclosures))
         print("  # of coils    = {0}".format(len(self.coil_sets) if self.coil_sets is not None else 0))
         if self.props:
             print("  ThinCurr props: {0}".format(", ".join(sorted(self.props))))
@@ -284,7 +292,7 @@ class ThinCurrMesh:
             print("  Mesh props: {0}".format(", ".join(sorted(self.mesh_props))))
 
     def _drop_props(self, operation):
-        '''!Clear ThinCurr properties that a structural operation would invalidate'''
+        '''! Clear ThinCurr properties that a structural operation would invalidate'''
         if self.props:
             print("  Warning: dropping ThinCurr properties ({0}) that cannot be "
                   "remapped through {1}".format(", ".join(sorted(self.props)), operation))
@@ -292,13 +300,13 @@ class ThinCurrMesh:
 
     # ------------------------------------------------------------- editing
     def transform(self, shift=None, rotate=None, scale=None, center=None):
-        '''!Apply a transform to the vertex coordinates (in place)
+        '''! Apply a transform to the vertex coordinates (in place)
 
         Operations, if supplied, are applied in the order rotate, scale, shift:
-        ``r' = S R (r - center) + center + shift`` (scaling is about the origin).
+        `r' = S R (r - center) + center + shift` (scaling is about the origin).
 
         @param shift Translation vector [3] (optional)
-        @param rotate Tuple ``(axis, angle_deg)`` where axis is 'x', 'y', or 'z' (optional)
+        @param rotate Tuple `(axis, angle_deg)` where axis is `'x'`, `'y'`, or `'z'` (optional)
         @param scale Per-axis scale factors [3] applied about the origin (optional)
         @param center Center of rotation [3] (default: origin)
         '''
@@ -314,7 +322,7 @@ class ThinCurrMesh:
         return self
 
     def set_resistivity(self, eta_surf=None, eta_vol=None, thickness=None):
-        '''!Set per-region resistivity (and optional thickness) on the mesh (in place)
+        '''! Set per-region resistivity (and optional thickness) on the mesh (in place)
 
         Resistivity may be stored as surface resistivity (`eta_surf`, with
         `thickness` optional) or volumetric resistivity (`eta_vol`, which requires
@@ -355,16 +363,17 @@ class ThinCurrMesh:
             self.props.pop(key, None)
             if resolved[key] is not None:
                 self.props[key] = resolved[key]
-        return self
 
     def set_jumpers(self, indices):
-        '''!Mark the given nodesets as jumpers (all others become holes; in place)
+        '''! Mark the given nodesets as jumpers (all others become holes; in place)
 
         Indices are 0-based positions into the ordered `nodesets` list and may be
         negative (Python-style backward indexing).
 
         @param indices Iterable of nodeset indices to mark as jumpers
         '''
+        if self.nodesets is None:
+            raise ValueError("Cannot set jumpers on a mesh with no nodesets")
         n = len(self.nodesets)
         flags = [False] * n
         for raw in indices:
@@ -372,11 +381,13 @@ class ThinCurrMesh:
             if i < -n or i >= n:
                 raise ValueError("jumper index {0} is out of range for {1} nodeset(s)".format(raw, n))
             flags[i % n if n > 0 else 0] = True
-        self.is_jumper = flags
-        return self
+        # Perform conversion
+        self.holes = [ns for i, ns in enumerate(self.nodesets) if not flags[i]]
+        self.jumpers = [ns for i, ns in enumerate(self.nodesets) if flags[i]]
+        self.nodesets = None
 
     def remove_regions(self, regions):
-        '''!Remove all cells belonging to the specified regions (in place)
+        '''! Remove all cells belonging to the specified regions (in place)
 
         Surviving regions are renumbered contiguously (1..N), unreferenced
         vertices are dropped, and nodesets/sidesets are remapped, dropping any
@@ -384,6 +395,11 @@ class ThinCurrMesh:
 
         @param regions Iterable of region indices to remove
         '''
+        if self.nodesets is not None:
+            raise ValueError(
+                "Mesh contains native NODESET entries; region removal does not support "
+                "uncategorized nodesets. Run 'modify' on it first to convert them "
+                "into ThinCurr holes/jumpers.")
         remove = set(int(x) for x in regions)
         missing = remove - set(int(x) for x in np.unique(self.reg))
         if missing:
@@ -391,21 +407,26 @@ class ThinCurrMesh:
         keep_cell = np.array([r not in remove for r in self.reg], dtype=bool)
         n_removed = int(np.sum(~keep_cell))
         print("  Removing {0} cell(s) in region(s) {1}".format(n_removed, sorted(remove)))
-        self._drop_props("region removal")
+        # self._drop_props("region removal")
         # Renumber surviving regions to a contiguous 1..N range
         surviving = np.unique(self.reg[keep_cell]) if np.any(keep_cell) else np.array([], dtype=np.int32)
         remap = {int(old): new + 1 for new, old in enumerate(surviving)}
         self.lc = self.lc[keep_cell, :]
         self.reg = np.array([remap[int(r)] for r in self.reg[keep_cell]], dtype=np.int32)
+        # Remap eta_surf, eta_vol, thickness properties (if any)
+        for key in ('eta_surf', 'eta_vol', 'thickness'):
+            if key in self.props:
+                arr = self.props[key]
+                self.props[key] = np.array([arr[old - 1] for old in surviving], dtype=np.float64)
         # Remap sidesets (cell indices)
         cell_new = -np.ones((keep_cell.shape[0],), dtype=np.int64)
         cell_new[keep_cell] = np.arange(int(np.sum(keep_cell)))
-        self.sidesets = _remap_index_sets(self.sidesets, cell_new, "sideset")
+        self.closures = _remap_index_sets(self.closures, cell_new, "closures")
+        # Remove unreferenced vertices and remap connectivity/nodesets (in place)
         self._reindex_vertices()
-        return self
 
     def _reindex_vertices(self):
-        '''!Drop unreferenced vertices and remap connectivity/nodesets (in place)'''
+        '''! Drop unreferenced vertices and remap connectivity/nodesets (in place)'''
         used = np.zeros((self.np,), dtype=bool)
         if self.nc > 0:
             used[self.lc.reshape(-1)] = True
@@ -414,12 +435,12 @@ class ThinCurrMesh:
         self.r = self.r[used, :]
         if self.nc > 0:
             self.lc = new_of_old[self.lc].astype(np.int32)
-        # Remap nodesets, keeping the parallel is_jumper flags in sync
-        self.nodesets, self.is_jumper = _remap_index_sets(
-            self.nodesets, new_of_old, "nodeset", parallel=self.is_jumper)
+        # Remap holes/jumpers
+        self.holes = _remap_index_sets(self.holes, new_of_old, "holes")
+        self.jumpers = _remap_index_sets(self.jumpers, new_of_old, "jumpers")
 
     def append(self, other, distinct_regions=True):
-        '''!Append another mesh onto this one (in place)
+        '''! Append another mesh onto this one (in place)
 
         @param other The @ref ThinCurrMesh to append
         @param distinct_regions If True, offset the appended mesh's region indices
@@ -432,19 +453,35 @@ class ThinCurrMesh:
         self.r = np.vstack((self.r, other.r)) if self.np > 0 else other.r.copy()
         self.lc = np.vstack((self.lc, other.lc + np_offset)) if nc_offset > 0 else (other.lc + np_offset)
         self.reg = np.concatenate((self.reg, other.reg + reg_offset))
-        for ns, j in zip(other.nodesets, other.is_jumper):
-            self.nodesets.append(ns + np_offset)
-            self.is_jumper.append(j)
-        for ss in other.sidesets:
-            self.sidesets.append(ss + nc_offset)
-        self._had_native_nodesets = self._had_native_nodesets or other._had_native_nodesets
-        if self.props or other.props:
-            self._drop_props("mesh combination")
-        return self
+        # Append holes
+        if self.holes is None:
+            self.holes = [ns.copy() for ns in other.holes] if other.holes is not None else None
+        else:
+            self.holes = [ns+np_offset for ns in other.holes] if other.holes is not None else self.holes
+        # Append jumpers
+        if self.jumpers is None:
+            self.jumpers = [ns.copy() for ns in other.jumpers] if other.jumpers is not None else None
+        else:
+            self.jumpers = [ns+np_offset for ns in other.jumpers] if other.jumpers is not None else self.jumpers
+        # Append closures
+        if self.closures is None:
+            self.closures = other.closures.copy() if other.closures is not None else None
+        else:
+            self.closures = np.concatenate((self.closures, other.closures + nc_offset)) if other.closures is not None else self.closures
+        # Append resistivity properties (if any) and warn if they exist in either mesh
+        if distinct_regions:
+            if 'eta_surf' in self.props and 'eta_surf' in other.props:
+                self.props['eta_surf'] = np.concatenate((self.props['eta_surf'], other.props['eta_surf']))
+            if 'eta_vol' in self.props and 'eta_vol' in other.props:
+                self.props['eta_vol'] = np.concatenate((self.props['eta_vol'], other.props['eta_vol']))
+            if 'thickness' in self.props and 'thickness' in other.props:
+                self.props['thickness'] = np.concatenate((self.props['thickness'], other.props['thickness']))
+        else:
+            self._drop_props("append with non-distinct regions")
 
 
 def rotation_matrix(axis, angle_deg):
-    '''!Build a rotation matrix about a principal Cartesian axis
+    '''! Build a rotation matrix about a principal Cartesian axis
 
     @param axis Rotation axis: 'x', 'y', or 'z' (case-insensitive)
     @param angle_deg Rotation angle in degrees (right-handed about `axis`)
@@ -462,40 +499,8 @@ def rotation_matrix(axis, angle_deg):
     raise ValueError("Rotation axis must be one of 'x', 'y', or 'z' (got '{0}')".format(axis))
 
 
-def read_resistivity_xml(filename):
-    '''!Read per-region resistivity values from an ``<oft><thincurr>`` XML file
-
-    Values are read from child elements of ``<thincurr>``: surface resistivity
-    from ``<eta_surf>`` (or ``<eta>`` as an alias), volumetric resistivity from
-    ``<eta_vol>``, and thickness from ``<thickness>``. Each element holds a
-    whitespace- or comma-separated list of values (one per region).
-
-    @param filename Path to the XML input file
-    @result Tuple ``(eta_surf, eta_vol, thickness)``; each is a list of floats or None
-    '''
-    xml_doc = ThinCurr_XML.load(filename)
-
-    return xml_doc.eta, xml_doc.eta_vol, xml_doc.thickness
-
-
-def read_coils_xml(filename):
-    '''!Read per-region resistivity values from an ``<oft><thincurr>`` XML file
-
-    Values are read from child elements of ``<thincurr>``: surface resistivity
-    from ``<eta_surf>`` (or ``<eta>`` as an alias), volumetric resistivity from
-    ``<eta_vol>``, and thickness from ``<thickness>``. Each element holds a
-    whitespace- or comma-separated list of values (one per region).
-
-    @param filename Path to the XML input file
-    @result Tuple ``(eta_surf, eta_vol, thickness)``; each is a list of floats or None
-    '''
-    xml_doc = ThinCurr_XML.load(filename)
-
-    return xml_doc.icoils+xml_doc.vcoils
-
-
-def _remap_index_sets(sets, old_to_new, label, parallel=None):
-    '''!Remap and filter a list of index arrays using an old->new lookup
+def _remap_index_sets(sets, old_to_new, label):
+    '''! Remap and filter a list of index arrays using an old->new lookup
 
     Entries mapped to a negative value (removed) are dropped. Empty sets that
     result are discarded with a warning. An optional `parallel` list (one entry
@@ -504,12 +509,9 @@ def _remap_index_sets(sets, old_to_new, label, parallel=None):
     @param sets List of index arrays (0-based)
     @param old_to_new Lookup array mapping old index -> new index (<0 = removed)
     @param label Name used in warning messages
-    @param parallel Optional list of per-set metadata to filter alongside `sets`
-    @result Filtered/remapped list of index arrays; or ``(sets, parallel)`` if
-        `parallel` was supplied
+    @result Filtered/remapped list of index arrays
     '''
     out = []
-    out_parallel = []
     for i, s in enumerate(sets):
         mapped = old_to_new[s]
         keep = mapped >= 0
@@ -519,17 +521,13 @@ def _remap_index_sets(sets, old_to_new, label, parallel=None):
         mapped = mapped[keep].astype(np.int32)
         if mapped.shape[0] > 0:
             out.append(mapped)
-            if parallel is not None:
-                out_parallel.append(parallel[i])
         else:
             print("  Warning: {0} {1} became empty and was dropped".format(label, i + 1))
-    if parallel is not None:
-        return out, out_parallel
     return out
 
 
 def resolve_jumper_indices(nnodesets, explicit=None, index_range=None):
-    '''!Resolve jumper nodeset indices from CLI options
+    '''! Resolve jumper nodeset indices from CLI options
 
     @param nnodesets Number of nodesets available to categorize
     @param explicit Iterable of explicit 0-based indices (negative allowed)
@@ -556,7 +554,7 @@ def resolve_jumper_indices(nnodesets, explicit=None, index_range=None):
 
 
 def combine_meshes(filenames, distinct_regions=True):
-    '''!Combine multiple mesh files into a single mesh
+    '''! Combine multiple mesh files into a single mesh
 
     Aborts if any input file contains native ``NODESETXXXX`` entries, since such
     uncategorized loops cannot be meaningfully combined; run the `modify` workflow
@@ -569,7 +567,7 @@ def combine_meshes(filenames, distinct_regions=True):
     meshes = []
     for fn in filenames:
         mesh = ThinCurrMesh.load(fn)
-        if mesh._had_native_nodesets:
+        if mesh.nodesets is not None:
             raise ValueError(
                 "'{0}' contains native NODESET entries; combine does not support "
                 "uncategorized nodesets. Run 'modify' on it first to convert them "
@@ -578,12 +576,16 @@ def combine_meshes(filenames, distinct_regions=True):
     combined = meshes[0].copy()
     for mesh in meshes[1:]:
         combined.append(mesh, distinct_regions=distinct_regions)
+        # Warn about uncombined coils
+        if combined.coil_sets is not None:
+            print("  Warning: Multiple input meshes contain ThinCurr coil sets; "
+                  "these are not combined and only the first mesh's coil sets are preserved.")
     return combined
 
 
 def replicate_mesh(mesh, ncopies, shift=None, rotate=None, center=None,
                    distinct_regions=True):
-    '''!Generate an output mesh consisting of the original plus transformed copies
+    '''! Generate an output mesh consisting of the original plus transformed copies
 
     The untransformed original is always kept. Copy ``k`` (k = 1 .. ncopies) is
     the input mesh with the incremental transform applied ``k`` times: shifted by
@@ -598,6 +600,11 @@ def replicate_mesh(mesh, ncopies, shift=None, rotate=None, center=None,
     @param distinct_regions If True, offset region IDs so every copy is distinct
     @result Replicated @ref ThinCurrMesh
     '''
+    if self.nodesets is not None:
+        raise ValueError(
+            "Mesh contains native NODESET entries; replication does not support "
+            "uncategorized nodesets. Run 'modify' on it first to convert them "
+            "into ThinCurr holes/jumpers.")
     if ncopies < 1:
         raise ValueError("Number of copies must be >= 1")
     if shift is None and rotate is None:
@@ -734,28 +741,28 @@ def script_entry(argv=None):
         if options.jumper_range is not None and not 1 <= len(options.jumper_range) <= 2:
             parser.error("--jumper_range takes START or START STOP (1 or 2 values)")
         # Resolve resistivity specification (direct flags or from an XML file)
-        direct_eta = (options.eta_surf, options.eta_vol, options.thickness)
-        res_spec = None
+        res_spec = (options.eta_surf, options.eta_vol, options.thickness)
         if options.eta_from_xml is not None:
-            if any(v is not None for v in direct_eta):
+            if any(v is not None for v in res_spec):
                 parser.error("--eta_from_xml cannot be combined with "
                              "--eta_surf/--eta_vol/--thickness")
             try:
-                res_spec = read_resistivity_xml(options.eta_from_xml)
+                xml_doc = ThinCurr_XML.load(options.eta_from_xml)
             except (ValueError, OSError, ET.ParseError) as err:
                 parser.error("Failed to read resistivity from XML: {0}".format(err))
-            if res_spec[0] is None and res_spec[1] is None:
+            if (xml_doc.eta is None) and (xml_doc.eta_vol is None):
                 parser.error("No <eta>/<eta_surf> or <eta_vol> found in "
                              "'{0}'".format(options.eta_from_xml))
-        elif any(v is not None for v in direct_eta):
-            res_spec = direct_eta
+            res_spec = (xml_doc.eta, xml_doc.eta_vol, xml_doc.thickness)
         #
         coil_sets = None
         if options.coils_from_xml is not None:
             try:
-                coil_sets = read_coils_xml(options.coils_from_xml)
+                xml_doc = ThinCurr_XML.load(options.coils_from_xml)
+                coil_sets = xml_doc.icoils+xml_doc.vcoils
             except (ValueError, OSError, ET.ParseError) as err:
                 parser.error("Failed to read coils from XML: {0}".format(err))
+
         out_file = options.out_file
         if out_file is None:
             out_file = os.path.splitext(options.in_file)[0] + "-modified.h5"
