@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #------------------------------------------------------------------------------
 # Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 #
@@ -285,7 +284,7 @@ class trimesh:
                 edges[edge] = 1
         return edges, distance
 
-    def boundary_cycles(self):
+    def boundary_cycles(self, info=True):
         '''Identify all distinct boundary vertex chains
         '''
         edge_marker = -np.ones((self.ne,))
@@ -351,14 +350,16 @@ class trimesh:
                 else:
                     raise ValueError("Could not find suitable starting point for boundary cycle")
                 if i > 0:
-                    print("Shifting boundary cycle to {0}".format(i))
+                    if info:
+                        print("Shifting boundary cycle to {0}".format(i))
                     cycle_tmp = np.hstack((cycle_tmp[i:-1], cycle_tmp[:i+1]))
                 #
                 cycle_lists[self.surf_tag[face]].append(cycle_tmp)
         k = 0
         for cycle_list in cycle_lists:
             k += len(cycle_list)
-        print(indent_level+'  Found {0} boundary cycles'.format(k))
+        if info:
+            print(indent_level+'  Found {0} boundary cycles'.format(k))
         return cycle_lists
 
     def merge_cells(self,eflag):
@@ -617,7 +618,7 @@ def fixup_loop(cycle,mesh,boundary_cycles,debug):
 
 
 def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False, show_omitted=False,
-                     show_covering=False, debug=False, ref_point=None, optimize_holes=False):
+                     show_covering=False, debug=False, ref_point=None, optimize_holes=False, verify_only=False):
     '''! Compute holes and closures for ThinCurr meshes using a Greedy Homotopy approach
 
     @param in_file Input mesh file
@@ -629,6 +630,7 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     @param debug Print additional debug information?
     @param ref_point Reference location for base point [x,y,z] (default: [0,0,0])
     @param optimize_holes Sample additional points to attempt to optimize holes?
+    @param verify_only Verify the correct number of holes and closures are found, but do not write output file?
     '''
     global indent_level
 
@@ -642,15 +644,21 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     else:
         ref_point = np.r_[0.0,0.0,0.0]
 
+    if optimize_holes and verify_only:
+        raise ValueError('Optimizing holes not necessary or permitted when `verify_only` is True')
+    print_info = debug or (not verify_only)
+
     # Load mesh
     input_model = read_ThinCurr_mesh(in_file)
     vertex_full = input_model['r'].copy()
     face_full = input_model['lc'].copy()
     reg_full = input_model['reg']
+    if 'thincurr' not in input_model:
+        input_model['thincurr'] = {}
 
     # Setup full mesh
-    full_mesh = trimesh(vertex_full,face_full)
-    boundary_cycles = full_mesh.boundary_cycles()
+    full_mesh = trimesh(vertex_full,face_full,info=print_info)
+    boundary_cycles = full_mesh.boundary_cycles(info=print_info)
     indent_level = '  '
 
     internal_holes = []
@@ -658,8 +666,9 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     skipped_holes = []
     closures = []
     for surf_id in range(np.max(full_mesh.surf_tag)+1):
-        print()
-        print("Analyzing surface {0} of {1}".format(surf_id+1,np.max(full_mesh.surf_tag)+1))
+        if print_info:
+            print()
+            print("Analyzing surface {0} of {1}".format(surf_id+1,np.max(full_mesh.surf_tag)+1))
 
         # Isolate surface from full mesh
         face_mask = (full_mesh.surf_tag==surf_id)
@@ -700,16 +709,19 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
             new_bcycles = []
             face_covered = face
             ind = np.argmax(face_mask)
-            print("  No boundary cycles, adding closure element at face {0}".format(ind))
+            if print_info:
+                print("  No boundary cycles, adding closure element at face {0}".format(ind))
             closures.append(ind)
 
         # Compute Homotopy basis from basepoint
-        print("  Computing Homology Basis")
-        print('    Euler Characteristic (covered) = {0} ({1})'.format(mesh.np-mesh.ne+mesh.nf,mesh.np-(mesh.ne+new_ne)+(mesh.nf+new_nf)))
-        print("    # of boundary cycles = {0}".format(len(boundary_cycles[surf_id])))
+        if print_info:
+            print("  Computing Homology Basis")
+            print('    Euler Characteristic (covered) = {0} ({1})'.format(mesh.np-mesh.ne+mesh.nf,mesh.np-(mesh.ne+new_ne)+(mesh.nf+new_nf)))
+            print("    # of boundary cycles = {0}".format(len(boundary_cycles[surf_id])))
         ind = np.linalg.norm(vertex-ref_point[np.newaxis,:],axis=1).argmin()
         hb = compute_greedy_homotopy_basis(face_covered,vertex,ind,face_sweight=mesh.nf)
-        print("    # of internal cycles = {0}".format(len(hb)))
+        if print_info:
+            print("    # of internal cycles = {0}".format(len(hb)))
         for i in range(len(hb)):
             hb[i] = fixup_loop(hb[i],mesh,new_bcycles,debug)
 
@@ -815,18 +827,50 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
 
     # Display final stats
     all_cycles = holes + internal_holes
-    print()
-    print("Final model:")
-    print("    # of holes = {0}".format(len(all_cycles)))
-    print("    # of closures = {0}".format(len(closures)))
+    if print_info:
+        print()
+        print("Final model:")
+        print("    # of holes = {0}".format(len(all_cycles)))
+        print("    # of closures = {0}".format(len(closures)))
+
+    # Verify if requested
+    if verify_only:
+        # Check holes
+        if 'holes' in input_model['thincurr']:
+            if len(input_model['thincurr']['holes']) != len(all_cycles):
+                raise ValueError("Incorrect number of holes found {1} in file (expected {0})".format(len(all_cycles), len(input_model['thincurr']['holes'])))
+        else:
+            if 'nodesets' in input_model:
+                if len(input_model['nodesets']) >= len(all_cycles):
+                    print("""
+  Note: Input file appears to be an older ThinCurr mesh file.
+    Found {0} nodesets, expected {1} hole(s).
+    More nodesets than holes may indicate the presence of jumpers instead of an issue.""".format(len(input_model['nodesets']), len(all_cycles)))
+            else:
+                if len(all_cycles) > 0:
+                    raise ValueError("Incorrect number of holes found 0 in file (expected {0})".format(len(all_cycles)))
+        # Check closures
+        if 'closures' in input_model['thincurr']:
+            if len(input_model['thincurr']['closures']) != len(closures):
+                raise ValueError("Incorrect number of closures found {1} in file (expected {0})".format(len(closures), len(input_model['thincurr']['closures'])))
+        else:
+            if 'sidesets' in input_model:
+                if len(input_model['sidesets'][0]) == len(closures):
+                    print("""
+  Note: Input file appears to be an older ThinCurr mesh file.
+    Found {0} entries in first sideset, expected {1} closure(s).""".format(len(input_model['sidesets'][0]), len(closures)))
+                else:
+                    raise ValueError("No closures found and incorrect number of sidesets found {1} in file (expected {0})".format(len(closures), len(input_model['sidesets'])))
+            else:
+                if len(closures) > 0:
+                    raise ValueError("Incorrect number of closures found 0 in file (expected {0})".format(len(closures)))
+        return
 
     # Copy mesh to new file and replace holes/closures
     holes = []
     if len(all_cycles) > 0:
         for k, cycle in enumerate(all_cycles):
             holes.append(cycle[:-1])
-    if 'thincurr' not in input_model:
-        input_model['thincurr'] = {}
     write_ThinCurr_mesh(out_file, input_model['r'], input_model['lc'], input_model['reg'],
                         holes=holes,
                         jumpers=input_model['thincurr'].get('jumpers'), closures=closures,

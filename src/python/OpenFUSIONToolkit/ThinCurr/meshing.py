@@ -86,6 +86,8 @@ def read_ThinCurr_mesh(filename):
     mesh_info = read_native_mesh(filename)
     if mesh_info['type'] != 'tri':
         raise ValueError("ThinCurr meshes must be triangular, but loaded mesh is of type '{0}'".format(mesh_info['type']))
+    if mesh_info['r'].shape[1] == 2:  # Upgrade 2D point list to 3D (Z=0)
+        mesh_info['r'] = numpy.hstack((mesh_info['r'], numpy.zeros((mesh_info['r'].shape[0], 1))))
     with h5py.File(filename, 'r') as h5_file:
         if 'thincurr' in h5_file:
             thincurr = h5_file['thincurr']

@@ -187,7 +187,7 @@ IF(.NOT.self%xml%associated().AND.ASSOCIATED(oft_env%xml))CALL xml_get_element(o
 IF(self%n_vcoils==0)THEN
   CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
   IF(error_flag==0)THEN
-    WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils'
+    WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils from XML file'
     CALL tw_load_coils_xml(coil_element,'VCOIL',self%n_vcoils,self%vcoils)
   ELSE
     WRITE(*,'(2A)')oft_indent,'No V(t) driver coils found'
@@ -205,7 +205,7 @@ END IF
 IF(self%n_icoils==0)THEN
   CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
   IF(error_flag==0)THEN
-    WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils'
+    WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils from XML file'
     CALL tw_load_coils_xml(coil_element,'ICOIL',self%n_icoils,self%icoils)
   ELSE
     WRITE(*,'(2A)')oft_indent,'No I(t) driver coils found'
@@ -220,7 +220,7 @@ ELSE
   IF(error_flag==0)CALL oft_warn("I-coils specified in mesh and XML files, ignoring XML definitions")
 END IF
 !---Analyze mesh to construct holes
-WRITE(*,'(2A)')oft_indent,'Building holes'
+WRITE(*,'(2A)')oft_indent,'Creating hole elements'
 ALLOCATE(self%hmesh(self%nholes))
 ALLOCATE(self%kfh(self%mesh%nc+1))
 self%kfh=0
@@ -294,6 +294,7 @@ IF(self%nholes>0)THEN
     END DO
   END DO
 END IF
+!---Build mapping from mesh vertices to active vertices
 IF(.NOT.ASSOCIATED(self%pmap))THEN
   ALLOCATE(self%pmap(self%mesh%np))
   self%pmap=0
@@ -2381,8 +2382,10 @@ CHARACTER(LEN=OFT_PATH_SLEN) :: coil_path
 CHARACTER(LEN=:), ALLOCATABLE :: str_tmp
 TYPE(tw_coil_set), POINTER :: coil_tmp
 nmasked=0
+CALL oft_increase_indent
 !---Count coil sets
 IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
+  WRITE(*,'(2A)')oft_indent,'Loading driver coils from mesh file'
   CALL hdf5_read(ncoil_sets,TRIM(filepath),'thincurr/coils/NCOILSETS',success=success)
   self%n_icoils=0
   self%n_vcoils=0
@@ -2464,7 +2467,7 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
   END DO
 END IF
 !---
-IF(.NOT.oft_debug_print(2))WRITE(*,'(2A,I6,A)')oft_indent,'Masked ',nmasked,' coils from sensors'
+IF(nmasked>0)WRITE(*,'(2A,I6,A)')oft_indent,'Masked ',nmasked,' coils from sensors'
 IF(oft_debug_print(1))THEN
   IF(self%n_vcoils>0)THEN
     WRITE(*,*)
@@ -2832,7 +2835,7 @@ DO i=1,ncoils
 END DO
 IF(ASSOCIATED(coil_sets%nodes))DEALLOCATE(coil_sets%nodes)
 !---
-IF(.NOT.oft_debug_print(2))WRITE(*,'(2A,I6,A)')oft_indent,'Masked ',nmasked,' coils from sensors'
+IF(nmasked>0)WRITE(*,'(2A,I6,A)')oft_indent,'Masked ',nmasked,' coils from sensors'
 IF(oft_debug_print(1))THEN
   WRITE(*,*)
   WRITE(*,'(2A)')oft_indent,'Coils set definitions'

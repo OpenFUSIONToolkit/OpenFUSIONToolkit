@@ -14,6 +14,7 @@ import numpy
 import h5py
 import scipy
 from ._interface import *
+from ._homology_cli import compute_homology
 from ..io import build_XDMF
 from warnings import warn
 
@@ -96,7 +97,7 @@ class ThinCurr():
   |_| |_| |_|_|_| |_|\____\__,_|_|  |_|
 ''')
 
-    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0):
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0,no_verify_holes=False):
         '''! Setup ThinCurr model
 
         @param r Point list `(np,3)`
@@ -106,6 +107,7 @@ class ThinCurr():
         @param pmap Point map for periodic grids
         @param xml_filename Path to XML file for model
         @param jumper_start Index of first jumper nodeset in meshfile (positive values Fortran style, negative values Python style)
+        @param no_verify Skip verification of mesh and model
         '''
         if self.nregs != -1:
             raise ValueError('Mesh already setup, delete or create new instance for new model')
@@ -115,6 +117,12 @@ class ThinCurr():
         if mesh_file is not None:
             if (r is not None) or (lc is not None) or (reg is not None):
                 raise ValueError('Specification of "mesh_file" is incompatible with specification of "r", "lc", and "reg"')
+            if no_verify_holes:
+                print('Skipping mesh hole and closure verification...')
+            else:
+                print('Verifying mesh holes and closures...')
+                compute_homology(mesh_file, verify_only=True)
+                print()
             idummy = c_int(-1)
             rfake = numpy.ones((1,1),dtype=numpy.float64)
             lcfake = numpy.ones((1,1),dtype=numpy.int32)

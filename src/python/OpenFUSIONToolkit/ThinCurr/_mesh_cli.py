@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #------------------------------------------------------------------------------
 # Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 #
@@ -77,8 +76,8 @@ import os
 import re
 import xml.etree.ElementTree as ET
 import numpy as np
-from OpenFUSIONToolkit.ThinCurr.meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
-from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_XML
+from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
+from .coils import ThinCurr_XML
 
 
 class ThinCurrMesh:

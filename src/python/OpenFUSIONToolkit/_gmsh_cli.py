@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #------------------------------------------------------------------------------
 # Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 #
