@@ -37,6 +37,7 @@ class ThinCurr():
             'L_aca_rel_tol': '0.05',
             'B_svd_tol': '1.E-3',
             'B_aca_rel_tol': '0.05',
+            'B_dx': '1.E-3'
         }
         self._oft_env.update_oft_in()
         ## Thin-wall model object
@@ -273,6 +274,34 @@ class ThinCurr():
         data_in = numpy.ascontiguousarray(data.copy(), dtype=numpy.float64)
         thincurr_scale_va(self.tw_obj,data_in,div_flag)
         return data_in
+
+    def set_hodlr_options(self,target_size=None,aca_min_its=None,L_svd_tol=None,
+                          L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,B_dx=None):
+        '''! Set HODLR options for ThinCurr model
+
+        @param target_size Target size for HODLR blocks
+        @param aca_min_its Minimum number of ACA iterations
+        @param L_svd_tol Tolerance for SVD compression of L-matrix blocks
+        @param L_aca_rel_tol Relative tolerance for ACA compression of L-matrix blocks
+        @param B_svd_tol Tolerance for SVD compression of B-matrix blocks
+        @param B_aca_rel_tol Relative tolerance for ACA compression of B-matrix blocks
+        @param B_dx Spatial step size for finite difference evaluation of B-field
+        '''
+        if target_size is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
+        if aca_min_its is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['aca_min_its'] = '{0:d}'.format(aca_min_its)
+        if L_svd_tol is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['L_svd_tol'] = '{0:.4E}'.format(L_svd_tol)
+        if L_aca_rel_tol is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['L_aca_rel_tol'] = '{0:.4E}'.format(L_aca_rel_tol)
+        if B_svd_tol is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['B_svd_tol'] = '{0:.4E}'.format(B_svd_tol)
+        if B_aca_rel_tol is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['B_aca_rel_tol'] = '{0:.4E}'.format(B_aca_rel_tol)
+        if B_dx is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['B_dx'] = '{0:.4E}'.format(B_dx)
+        self._oft_env.update_oft_in()
 
     def compute_Lmat(self,cache_file=None,use_hodlr=False):
         '''! Compute the self-inductance matrix for this model

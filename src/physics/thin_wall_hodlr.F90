@@ -55,6 +55,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: L_aca_tol = -1.d0 !< ACA+ tolerance for inductance matrix
   REAL(8) :: B_svd_tol = -1.d0 !< SVD tolerance for B-field operators
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
+  REAL(8) :: B_dx = 1.d-3 !< Spatial step size for finite difference evaluation of B-field
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_blocks => NULL() !< Indices of compressed off-diagonal interactions
   TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:) :: aca_U_mats => NULL() !< U matrices for compressed off-diagonal interactions (L)
@@ -405,14 +406,14 @@ END SUBROUTINE tw_compute_Lmatblock
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Bops_hole(self,Bop,Bop_dr)
+SUBROUTINE tw_compute_Bops_hole(self,Bop,Bop_dr,B_dx)
 TYPE(tw_type), INTENT(inout) :: self
 REAL(8), INTENT(out) :: Bop(:,:,:) !< Magnetic field evaluation matrix
 REAL(8), INTENT(out) :: Bop_dr(:,:,:) !< Magnetic field evaluation matrix
+REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
 REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-REAL(8), PARAMETER :: B_dx = 1.d-6
 INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
 LOGICAL :: is_neighbor
 CLASS(oft_bmesh), POINTER :: bmesh
@@ -577,16 +578,16 @@ END SUBROUTINE tw_compute_Bops_hole
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Bops_block(self,Bop,row_block,col_block,dir)
+SUBROUTINE tw_compute_Bops_block(self,Bop,row_block,col_block,dir,B_dx)
 TYPE(tw_type), INTENT(inout) :: self
 REAL(8), INTENT(out) :: Bop(:,:) !< Magnetic field evaluation matrix
 TYPE(oft_tw_block), INTENT(in) :: row_block !< Block of rows to compute
 TYPE(oft_tw_block), INTENT(in) :: col_block !< Block of columns to compute
-INTEGER(4), INTENT(in) :: dir
+INTEGER(4), INTENT(in) :: dir !< Direction of B-field to compute (1=x,2=y,3=z)
+REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
 REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-REAL(8), PARAMETER :: B_dx = 1.d-6
 INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad,irow,jcol
 LOGICAL :: is_neighbor
 CLASS(oft_bmesh), POINTER :: bmesh
@@ -715,8 +716,9 @@ REAL(8) :: L_svd_tol = -1.d0
 REAL(8) :: L_aca_rel_tol = -1.d0
 REAL(8) :: B_svd_tol = -1.d0
 REAL(8) :: B_aca_rel_tol = -1.d0
+REAL(8) :: B_dx = 1.d-3
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,L_svd_tol,L_aca_rel_tol, &
-  B_svd_tol,B_aca_rel_tol
+  B_svd_tol,B_aca_rel_tol,B_dx
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -747,6 +749,7 @@ self%L_svd_tol=L_svd_tol
 IF(L_aca_rel_tol>0.d0)self%L_aca_tol=L_aca_rel_tol*self%L_svd_tol
 self%B_svd_tol=B_svd_tol
 IF(B_aca_rel_tol>0.d0)self%B_aca_tol=B_aca_rel_tol*self%B_svd_tol
+self%B_dx=B_dx
 IF((self%L_svd_tol<0.d0).AND.(self%B_svd_tol<0.d0))RETURN
 !---Partition mesh
 WRITE(*,*)'Partitioning grid for block low rank compressed operators'
@@ -1575,7 +1578,7 @@ WRITE(*,*)'  Building hole and Vcoil columns'
 IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
   ALLOCATE(self%hole_Vcoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%nholes+self%tw_obj%n_vcoils),3))
   ALLOCATE(self%Icoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%n_icoils),3))
-  CALL tw_compute_Bops_hole(self%tw_obj,self%hole_Vcoil_Bmat,self%Icoil_Bmat)
+  CALL tw_compute_Bops_hole(self%tw_obj,self%hole_Vcoil_Bmat,self%Icoil_Bmat,self%B_dx)
   self%tw_obj%Bdr=>self%Icoil_Bmat
 END IF
 !
@@ -1600,7 +1603,7 @@ DO i=1,self%ndense
       mat_updated=.TRUE.
       ALLOCATE(self%dense_B_mats(i,dim)%M(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems))
       CALL tw_compute_Bops_block(self%tw_obj,self%dense_B_mats(i,dim)%M, &
-        self%levels(level)%blocks(k),self%levels(level)%blocks(j),dim)
+        self%levels(level)%blocks(k),self%levels(level)%blocks(j),dim,self%B_dx)
     END IF
   END DO
   compressed_size = compressed_size + 3*self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
@@ -1650,7 +1653,7 @@ DO i=1,self%nsparse
         IF(size_out<0)THEN
           ALLOCATE(self%aca_B_dense(ii,dim)%M(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems))
           CALL tw_compute_Bops_block(self%tw_obj,self%aca_B_dense(ii,dim)%M, &
-            self%levels(level)%blocks(j),self%levels(level)%blocks(k),dim)
+            self%levels(level)%blocks(j),self%levels(level)%blocks(k),dim,self%B_dx)
           CALL compress_block(ii,j,k,dim,self%B_svd_tol,size_out)
           ! size_out = self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
         END IF
@@ -1976,7 +1979,7 @@ k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
 tmp_block%ncells=k2-k1+1
 tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
 CALL tw_compute_Bops_block(self%tw_obj,RIref, &
-  tmp_block,self%levels(ilevel)%blocks(jblock),dim)
+  tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%B_dx)
 ! DO i=1,nterms
 !   RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
 ! END DO
@@ -1986,7 +1989,7 @@ CALL tw_compute_Bops_block(self%tw_obj,RIref, &
 ! END DO
 tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jref)
 CALL tw_compute_Bops_block(self%tw_obj,RJref, &
-  self%levels(ilevel)%blocks(iblock),tmp_block,dim)
+  self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%B_dx)
 ! DO i=1,nterms
 !   RJref(:,1) = RJref(:,1) - us(:,i)*vs(i,Jref)
 ! END DO
@@ -2013,7 +2016,7 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIstar, &
-      tmp_block,self%levels(ilevel)%blocks(jblock),dim)
+      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%B_dx)
     DO i=1,nterms
       RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
     END DO
@@ -2025,7 +2028,7 @@ DO k=1,max_iter
     ! Calculate the corresponding residual column!
     tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jstar)
     CALL tw_compute_Bops_block(self%tw_obj,RJstar, &
-      self%levels(ilevel)%blocks(iblock),tmp_block,dim)
+      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%B_dx)
     DO i=1,nterms
       RJstar(1,:) = RJstar(1,:) - us(:,i)*vs(i,Jstar)
     END DO
@@ -2034,7 +2037,7 @@ DO k=1,max_iter
     ! of the residual matrix.
     tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jstar)
     CALL tw_compute_Bops_block(self%tw_obj,RJstar, &
-      self%levels(ilevel)%blocks(iblock),tmp_block,dim)
+      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%B_dx)
     DO i=1,nterms
       RJstar(1,:) = RJstar(1,:) - us(:,i)*vs(i,Jstar)
     END DO
@@ -2052,7 +2055,7 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIstar, &
-      tmp_block,self%levels(ilevel)%blocks(jblock),dim)
+      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%B_dx)
     DO i=1,nterms
       RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
     END DO
@@ -2096,7 +2099,7 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIref, &
-      tmp_block,self%levels(ilevel)%blocks(jblock),dim)
+      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%B_dx)
     DO i=1,nterms
       RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
     END DO
@@ -2113,7 +2116,7 @@ DO k=1,max_iter
     END DO
     tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jref)
     CALL tw_compute_Bops_block(self%tw_obj,RJref, &
-      self%levels(ilevel)%blocks(iblock),tmp_block,dim)
+      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%B_dx)
     DO i=1,nterms
       RJref(1,:) = RJref(1,:) - us(:,i)*vs(i,Jref)
     END DO

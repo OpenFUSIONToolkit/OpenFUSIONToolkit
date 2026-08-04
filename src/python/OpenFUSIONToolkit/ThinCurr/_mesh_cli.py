@@ -622,10 +622,6 @@ def replicate_mesh(mesh, ncopies, shift=None, rotate=None, center=None,
     return out
 
 
-def _add_common_out(parser):
-    parser.add_argument("--out_file", type=str, default=None, help="Output mesh file")
-
-
 def build_parser():
     '''!Construct the command-line argument parser'''
     import argparse
@@ -637,14 +633,15 @@ def build_parser():
     p_comb = sub.add_parser("combine", help="Combine two or more mesh files")
     p_comb.add_argument("--in_files", type=str, nargs='+', required=True,
                         help="Input mesh files (two or more)")
+    p_comb.add_argument("--out_file", type=str, default=None, help="Output mesh file")
     p_comb.add_argument("--merge_regions", action="store_true", default=False,
                         help="Merge identical region IDs across inputs instead of "
                              "keeping them distinct (default: keep distinct)")
-    _add_common_out(p_comb)
 
     # --- modify ---
     p_mod = sub.add_parser("modify", help="Remove regions, transform, and/or replicate a mesh")
     p_mod.add_argument("--in_file", type=str, required=True, help="Input mesh file")
+    p_mod.add_argument("--out_file", type=str, default=None, help="Output mesh file")
     p_mod.add_argument("--remove_regions", type=int, nargs='+', default=None,
                        help="Region indices to remove")
     xform = p_mod.add_mutually_exclusive_group()
