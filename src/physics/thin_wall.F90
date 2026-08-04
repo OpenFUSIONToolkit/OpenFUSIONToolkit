@@ -220,6 +220,7 @@ ELSE
   IF(error_flag==0)CALL oft_warn("I-coils specified in mesh and XML files, ignoring XML definitions")
 END IF
 !---Analyze mesh to construct holes
+IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)
 WRITE(*,'(2A)')oft_indent,'Creating hole elements'
 ALLOCATE(self%hmesh(self%nholes))
 ALLOCATE(self%kfh(self%mesh%nc+1))
