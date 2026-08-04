@@ -1076,7 +1076,7 @@ def test_td_output_dir():
 #============================================================================
 # Test runners for large cylinder (w/ ACA+)
 @pytest.mark.coverage
-def test_eig_aca):
+def test_eig_aca():
     eigs = (2.659575E-2, 1.254552E-2, 1.254536E-2, 1.208636E-2)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",2,'F',use_aca=True,jumper_start=2)
     assert validate_eigs(eigs)
