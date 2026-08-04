@@ -161,103 +161,7 @@ ELSE
   END IF
   i=MAXVAL(tw_obj%mesh%reg)
   tw_obj%mesh%nreg=oft_mpi_max(i)
-  ! !---Read periodicity information
-  ! IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/PMAP'))THEN
-  !   ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
-  !   CALL hdf5_read(tw_obj%pmap,TRIM(filename),'thincurr/periodicity/PMAP',success)
-  !   IF(.NOT.success)THEN
-  !     CALL copy_string('Error reading periodicity information from mesh file',error_str)
-  !     RETURN
-  !   END IF
-  ! END IF
-  ! !---Read surface resistivity
-  ! IF(hdf5_field_exist(TRIM(filename),'thincurr/ETA_SURF'))THEN
-  !   ALLOCATE(tw_obj%Eta_surf(tw_obj%mesh%nreg))
-  !   CALL hdf5_read(tw_obj%Eta_surf,TRIM(filename),'thincurr/ETA_SURF',success)
-  !   IF(.NOT.success)THEN
-  !     CALL copy_string('Error reading surface resistivity from mesh file',error_str)
-  !     RETURN
-  !   END IF
-  ! END IF
-  ! !---Read volume resistivity
-  ! IF(hdf5_field_exist(TRIM(filename),'thincurr/ETA_VOL'))THEN
-  !   IF(ASSOCIATED(tw_obj%Eta_surf))THEN
-  !     CALL copy_string('Volume resistivity and surface resistivity cannot both be present in mesh file',error_str)
-  !     RETURN
-  !   END IF
-  !   ALLOCATE(tw_obj%Eta_vol(tw_obj%mesh%nreg))
-  !   CALL hdf5_read(tw_obj%Eta_vol,TRIM(filename),'thincurr/ETA_VOL',success)
-  !   IF(.NOT.success)THEN
-  !     CALL copy_string('Error reading volume resistivity from mesh file',error_str)
-  !     RETURN
-  !   END IF
-  ! END IF
-  ! !---Read thickness
-  ! IF(hdf5_field_exist(TRIM(filename),'thincurr/THICKNESS'))THEN
-  !   ALLOCATE(tw_obj%thickness(tw_obj%mesh%nreg))
-  !   CALL hdf5_read(tw_obj%thickness,TRIM(filename),'thincurr/THICKNESS',success)
-  !   IF(.NOT.success)THEN
-  !     CALL copy_string('Error reading thickness from mesh file',error_str)
-  !     RETURN
-  !   END IF
-  !   IF(ASSOCIATED(tw_obj%Eta_vol))THEN
-  !     ALLOCATE(tw_obj%Eta_surf(tw_obj%mesh%nreg))
-  !     tw_obj%Eta_surf=tw_obj%Eta_vol/tw_obj%thickness
-  !   END IF
-  ! ELSE
-  !   IF(ASSOCIATED(tw_obj%Eta_vol))THEN
-  !     CALL copy_string('Volume resistivity requires thickness to be present in mesh file',error_str)
-  !     RETURN
-  !   END IF
-  ! END IF
-  ! !---Read holes and jumpers
-  ! IF(hdf5_field_exist(TRIM(filename),'thincurr/holes').OR.hdf5_field_exist(TRIM(filename),'thincurr/jumpers'))THEN
-  !   CALL hdf5_read(n_holes,TRIM(filename),'thincurr/holes/NHOLES',success)
-  !   IF(.NOT.success)THEN
-  !     CALL copy_string('Error reading number of holes from mesh file',error_str)
-  !     RETURN
-  !   END IF
-  !   ALLOCATE(hole_nsets(n_holes))
-  !   DO i=1,n_holes
-  !     WRITE(blknum,'(I4.4)')i
-  !     CALL hdf5_field_get_sizes(TRIM(filename),'thincurr/holes/HOLE'//blknum,ndims,dim_sizes)
-  !     IF(ndims==1)THEN
-  !       hole_nsets(i)%n=dim_sizes(1)
-  !       ALLOCATE(hole_nsets(i)%v(hole_nsets(i)%n))
-  !       CALL hdf5_read(hole_nsets(i)%v,TRIM(filename),'thincurr/holes/HOLE'//blknum,success)
-  !       IF(.NOT.success)ndims=-1
-  !     ELSE
-  !       ndims=-1
-  !     END IF
-  !     IF(ndims>0)THEN
-  !       CALL copy_string('Error reading hole nodeset from mesh file',error_str)
-  !       RETURN
-  !     END IF
-  !   END DO
-  !   !---
-  !   CALL hdf5_read(n_holes,TRIM(filename),'thincurr/jumpers/NJUMPERS',success)
-  !   IF(.NOT.success)THEN
-  !     CALL copy_string('Error reading number of jumpers from mesh file',error_str)
-  !     RETURN
-  !   END IF
-  !   ALLOCATE(tw_obj%jumper_nsets(n_jumpers))
-  !   DO i=1,n_jumpers
-  !     WRITE(blknum,'(I4.4)')i
-  !     CALL hdf5_field_get_sizes(TRIM(filename),'thincurr/jumpers/JUMPER'//blknum,ndims,dim_sizes)
-  !     IF(ndims==1)THEN
-  !       tw_obj%jumper_nsets(i)%n=dim_sizes(1)
-  !       ALLOCATE(tw_obj%jumper_nsets(i)%v(tw_obj%jumper_nsets(i)%n))
-  !       CALL hdf5_read(tw_obj%jumper_nsets(i)%v,TRIM(filename),'thincurr/jumpers/JUMPER'//blknum,success)
-  !       IF(.NOT.success)ndims=-1
-  !     ELSE
-  !       ndims=-1
-  !     END IF
-  !     IF(ndims>0)THEN
-  !       CALL copy_string('Error reading jumper nodeset from mesh file',error_str)
-  !       RETURN
-  !     END IF
-  !   END DO
-  ! ELSE
+  !---
   NULLIFY(hole_nsets)
   CALL native_read_nodesets(mesh_nsets,native_filename=TRIM(filename))
   jumper_start=jumper_start_in
@@ -278,23 +182,7 @@ ELSE
   ELSE
     hole_nsets=>mesh_nsets
   END IF
-  ! END IF
-  !---Read sidesets and copy to closures
-  ! IF(hdf5_field_exist(TRIM(filename),'thincurr/CLOSURES'))THEN
-  !   CALL hdf5_field_get_sizes(TRIM(filename),'thincurr/CLOSURES',ndims,dim_sizes)
-  !   IF(ndims==1)THEN
-  !     tw_obj%nclosures=dim_sizes(1)
-  !     ALLOCATE(tw_obj%closures(tw_obj%nclosures))
-  !     CALL hdf5_read(tw_obj%closures,TRIM(filename),'thincurr/CLOSURES',success)
-  !     IF(.NOT.success)ndims=-1
-  !   ELSE
-  !     ndims=-1
-  !   END IF
-  !   IF(ndims>0)THEN
-  !     CALL copy_string('Error reading closures from mesh file',error_str)
-  !     RETURN
-  !   END IF
-  ! ELSE
+  !---
   CALL native_read_sidesets(mesh_ssets,native_filename=TRIM(filename))
   IF(ASSOCIATED(mesh_ssets))THEN
     IF(mesh_ssets(1)%n>0)THEN
@@ -308,7 +196,6 @@ ELSE
     END DO
     DEALLOCATE(mesh_ssets)
   END IF
-  ! END IF
 END IF
 IF(c_associated(xml_ptr))THEN
   CALL c_f_pointer(xml_ptr, thincurr_node)
