@@ -12,7 +12,7 @@ class Openfusiontoolkit(CMakePackage):
     framework, for problems in plasma and fusion research and engineering in arbitrary 2D and 3D geometries.
     The underlying framework and its component tools support the use of variable order finite element methods on
     unstructured tetrahedral (triangular) or hexahedral (quadralateral) grids.
-    
+
     Component tools:
       - TokaMaker: A time-dependent free-boundary Grad-Shafranov equilibrium code
       - ThinCurr: A 3D thin-wall electromagnetic simulation package
@@ -21,7 +21,7 @@ class Openfusiontoolkit(CMakePackage):
 
     # Project and repo information
     homepage = "https://openfusiontoolkit.github.io/OpenFUSIONToolkit/"
-    url = "https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit/archive/refs/tags/v1.0.0-beta6.tar.gz"
+    url = "https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit/archive/refs/tags/v26.6.tar.gz"
     git = "https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit.git"
     maintainers("hansec")
     license("LGPL-3.0-only", checked_by="hansec")
@@ -29,9 +29,9 @@ class Openfusiontoolkit(CMakePackage):
     # CMakeLists.txt is in the src/ directory
     root_cmakelists_dir = "src"
 
-    # Version list supported by spack build (needs 1.0.0-beta8 or newer)
+    # Version list supported by spack build (needs 26.6 or newer)
     version("main", branch="main")
-    # version("1.0.0-beta8", sha256="d687c788f05118e88b3bcb78c14fbf726286b5359b122ecdb9829fc26084f3c4") # FIXME: Uncomment and update hash when available
+    # version("26.6", sha256="d687c788f05118e88b3bcb78c14fbf726286b5359b122ecdb9829fc26084f3c4") # FIXME: Uncomment and update hash when available
 
     # Build variants
     variant("build_type",default="Release",description="The build type to build",values=("Debug", "Release"))

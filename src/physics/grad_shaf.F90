@@ -191,7 +191,7 @@ TYPE :: gs_factory
   INTEGER(i4), POINTER, DIMENSION(:) :: bc_rhs_list => NULL() !< List of terms interacting with free-boundary BC
   INTEGER(i4), POINTER, DIMENSION(:) :: olbp => NULL() !< Oriented list of boundary points
   INTEGER(i4), POINTER, DIMENSION(:) :: lim_con => NULL() !< Limiter contour list (contains all limiters)
-  INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Pointer to start of each 
+  INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Pointer to start of each
   REAL(r8), POINTER, DIMENSION(:) :: cond_weights => NULL() !< Needs docs
   REAL(r8), POINTER, DIMENSION(:) :: coil_vcont => NULL() !< Virtual VSC definition as weighted sum of other coils
   REAL(r8), POINTER, DIMENSION(:) :: Rcoils => NULL() !< Lumped resistance [Ohms] of each coil (negative for Icoils)
@@ -264,6 +264,7 @@ END TYPE gs_factory
 TYPE :: gs_equil
   LOGICAL :: diverted = .FALSE. !< Equilibrium is diverted?
   LOGICAL :: has_plasma = .TRUE. !< Solve with plasma? (otherwise vacuum)
+  LOGICAL :: skip_targets = .FALSE. !< Skip toroidal current target in non-linear solve?
   INTEGER(i4) :: mode = 0 !< RHS source mode (0 -> F*F', 1 -> F')
   INTEGER(i4) :: nx_points = 0 !< Number of X-points in current solution
   INTEGER(i4) :: nregularize = 0 !< Number of regularization terms
@@ -279,7 +280,7 @@ TYPE :: gs_equil
   REAL(r8) :: mirror_n = -1.d0 !< Anisotropy exponent for mirror pressure profiles
   REAL(r8) :: mirror_bturn = 0.d0 !< Turning point for mirror pressure profiles
   REAL(r8) :: mirror_zthroat = 0.d0 !< Mirror peak field point
-  REAL(r8) :: Itor_target = -1.d0 !< Toroidal current target
+  REAL(r8) :: Ip_target = -1.d0 !< Toroidal current target
   REAL(r8) :: estore_target = -1.d0 !< Stored energy target
   REAL(r8) :: dflux_target = -1.d99 !< Diamagnetic flux target
   REAL(r8) :: pax_target = -1.d0 !< On-axis pressure target
@@ -548,7 +549,7 @@ class(gs_factory), intent(inout) :: self !< G-S object
 !---
 INTEGER(4) :: i,io_unit,iostat
 IF(TRIM(self%limiter_file)=='none')RETURN
-IF(oft_debug_print(1))WRITE(*,'(2A,I4,A)')oft_indent,'Loading limiters'
+IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Loading limiters'
 OPEN(NEWUNIT=io_unit,FILE=TRIM(self%limiter_file))
 READ(io_unit,*)self%nlimiter_pts
 ALLOCATE(self%limiter_pts(2,self%nlimiter_pts))
@@ -780,7 +781,7 @@ type(oft_native_cg_eigsolver) :: eigsolver
 class(oft_vector), pointer :: tmp_vec,tmp_vec2
 integer(4), pointer, dimension(:) :: cdofs
 real(r8), pointer, dimension(:) :: psi_vals
-type(oft_lag_brinterp) :: psi_eval 
+type(oft_lag_brinterp) :: psi_eval
 integer(4) :: i,j,k,mind,nCon,ierr
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
@@ -1052,7 +1053,8 @@ self%dipole_a=source%dipole_a
 self%mirror_n=source%mirror_n
 self%mirror_bturn=source%mirror_bturn
 self%mirror_zthroat=source%mirror_zthroat
-self%Itor_target=source%Itor_target
+self%skip_targets=source%skip_targets
+self%Ip_target=source%Ip_target
 self%estore_target=source%estore_target
 self%dflux_target=source%dflux_target
 self%pax_target=source%pax_target
@@ -1093,7 +1095,7 @@ class(oft_vector), pointer :: tmp_vec
 integer(4), pointer, dimension(:) :: cdofs
 real(r8), pointer, dimension(:) :: psi_vals
 type(circular_curr) :: circle_init
-type(oft_lag_brinterp) :: psi_eval 
+type(oft_lag_brinterp) :: psi_eval
 integer(4) :: i,j,k,mind,nCon
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
@@ -1121,13 +1123,13 @@ IF(PRESENT(r0))THEN
   CALL equil%psi%set(0.d0)
   CALL gs_vacuum_solve(self,equil%psi,tmp_vec)
   itor=equil%itor()
-  IF(equil%Itor_target>0.d0)CALL equil%psi%scale(equil%Itor_target/itor)
+  IF(equil%Ip_target>0.d0)CALL equil%psi%scale(equil%Ip_target/itor)
 ELSE IF(PRESENT(curr_source))THEN
   CALL equil%psi%set(0.d0)
   CALL tmp_vec%restore_local(curr_source)
   CALL gs_vacuum_solve(self,equil%psi,tmp_vec)
   itor=equil%itor()
-  IF(equil%Itor_target>0.d0)CALL equil%psi%scale(equil%Itor_target/itor)
+  IF(equil%Ip_target>0.d0)CALL equil%psi%scale(equil%Ip_target/itor)
 ELSE
   !---Setup Solver
   eigsolver%A=>self%dels
@@ -1153,9 +1155,9 @@ ELSE
     call equil%psi%scale(1.d0/psi_vals(mind))
     equil%psimax=1.d0
   END IF
-  IF(equil%Itor_target>0.d0)THEN
+  IF(equil%Ip_target>0.d0)THEN
     itor=equil%itor()
-    CALL equil%psi%scale(equil%Itor_target/itor)
+    CALL equil%psi%scale(equil%Ip_target/itor)
   END IF
   !---Cleanup
   CALL eigsolver%pre%delete
@@ -1343,7 +1345,7 @@ CALL b%get_local(btmp)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!!$omp do schedule(static,1)
+!!$omp do schedule(static)
 DO j=1,self%fe_rep%mesh%nc
   IF(self%fe_rep%mesh%reg(j)/=1)CYCLE
   call self%fe_rep%ncdofs(j,j_lag)
@@ -1399,7 +1401,7 @@ CALL b%get_local(btmp)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,self%fe_rep%mesh%nc
   nturns=self%coil_nturns(self%fe_rep%mesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
@@ -1454,7 +1456,7 @@ CALL b%get_local(btmp)
 allocate(rhs_loc(self%fe_rep%nce))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,smesh%nc
   nturns=self%coil_nturns(smesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
@@ -1534,7 +1536,7 @@ END IF
 allocate(rhs_loc(self%fe_rep%nce+self%ncoils))
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,self%fe_rep%mesh%nc
   nturns = MAXVAL(ABS(self%coil_nturns(self%fe_rep%mesh%reg(j),:)))
   IF(eta_reg(self%fe_rep%mesh%reg(j))<0.d0.AND.nturns<1.d-8)CYCLE
@@ -1618,7 +1620,7 @@ mutual=0.d0
 !$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psi_tmp,l,rop,nturns) reduction(+:mutual)
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,self%fe_rep%mesh%nc
   nturns=self%coil_nturns(self%fe_rep%mesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
@@ -1665,7 +1667,7 @@ mutual=0.d0
 !$omp parallel private(j,j_lag,curved,goptmp,v,m,det,l,rop,nturns,j_phi,psi_tmp) reduction(+:mutual)
 allocate(rop(self%fe_rep%nce))
 allocate(j_lag(self%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,smesh%nc
   nturns=self%coil_nturns(smesh%reg(j),iCoil)
   IF(ABS(nturns)<1.d-10)CYCLE
@@ -1727,7 +1729,7 @@ itor=0.d0
 !$omp reduction(+:itor)
 allocate(rop(device%fe_rep%nce))
 allocate(j_lag(device%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(j)/=1)CYCLE
   call device%fe_rep%ncdofs(j,j_lag)
@@ -2123,6 +2125,7 @@ logical :: pm_save,fail_test
 !---
 error_flag=0
 self%nl_its=0
+equil%skip_targets=.FALSE.
 IF(TRIM(self%lu_solver%package)=='none')THEN
   CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 ELSE
@@ -2299,12 +2302,17 @@ DO i=1,self%maxits
     param_mat(1,1)=1.d0
     param_rhs(1)=0.d0
   ELSE
-    IF(equil%Itor_target>0.d0)THEN
-      param_mat(1,:)=[itor_ffp,itor_press,0.d0]
-      param_rhs(1)=equil%Itor_target
-    ELSE
+    IF(equil%skip_targets)THEN
       param_mat(1,1)=1.d0
       param_rhs(1)=equil%ffp_scale
+    ELSE
+      IF(equil%Ip_target>0.d0)THEN
+        param_mat(1,:)=[itor_ffp,itor_press,0.d0]
+        param_rhs(1)=equil%Ip_target
+      ELSE
+        param_mat(1,1)=1.d0
+        param_rhs(1)=equil%ffp_scale
+      END IF
     END IF
   END IF
 
@@ -2334,42 +2342,49 @@ DO i=1,self%maxits
       param_rhs(2)=equil%p_scale
     END IF
   ELSE
-    IF(equil%R0_target>0.d0)THEN
-      IF(ALL(self%target_weights>0.d0))THEN
-        equil%saddle_targets(1:2,equil%saddle_ntargets)=pt
-      ELSE
-        !
-        psi_geval%u=>psi_vac
-        CALL psi_geval%setup(self%fe_rep)
-        CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-        param_rhs(2)=-gpsi0(1)
-        !
-        psi_geval%u=>psi_vcont
-        CALL psi_geval%setup(self%fe_rep)
-        CALL psi_geval%interp(cell,f,goptmp,gpsi0)
-        psi_geval%u=>psi_ffp
-        CALL psi_geval%setup(self%fe_rep)
-        CALL psi_geval%interp(cell,f,goptmp,gpsi1)
-        psi_geval%u=>psi_press
-        CALL psi_geval%setup(self%fe_rep)
-        CALL psi_geval%interp(cell,f,goptmp,gpsi2)
-        param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
-      END IF
-    ELSE IF(equil%dflux_target>-1.d98)THEN
-      param_rhs(2)=SIGN(equil%dflux_target**2,equil%dflux_target)
-      param_mat(2,:)=[SIGN(dflux_ffp**2,dflux_ffp)/equil%ffp_scale,0.d0,0.d0]
-    ELSE IF(equil%estore_target>0.d0)THEN
-      param_rhs(2)=equil%estore_target
-      param_mat(2,2)=estored*3.d0/2.d0
-    ELSE IF(equil%pax_target>0.d0)THEN
-      param_mat(2,2)=equil%P%f(equil%plasma_bounds(2))
-      param_rhs(2)=equil%pax_target
-    ELSE IF(equil%Ip_ratio_target>-1.d98)THEN
-      param_rhs(2)=0.d0
-      param_mat(2,:)=[itor_ffp,-itor_press*equil%Ip_ratio_target,0.d0]
-    ELSE
+    IF(equil%skip_targets)THEN
+      IF(ALL(self%target_weights>0.d0))CALL oft_abort("Soft targets are not compatible with externally-handled targets", &
+        "gs_solve",__FILE__)
       param_mat(2,2)=1.d0
       param_rhs(2)=equil%p_scale
+    ELSE
+      IF(equil%R0_target>0.d0)THEN
+        IF(ALL(self%target_weights>0.d0))THEN
+          equil%saddle_targets(1:2,equil%saddle_ntargets)=pt
+        ELSE
+          !
+          psi_geval%u=>psi_vac
+          CALL psi_geval%setup(self%fe_rep)
+          CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+          param_rhs(2)=-gpsi0(1)
+          !
+          psi_geval%u=>psi_vcont
+          CALL psi_geval%setup(self%fe_rep)
+          CALL psi_geval%interp(cell,f,goptmp,gpsi0)
+          psi_geval%u=>psi_ffp
+          CALL psi_geval%setup(self%fe_rep)
+          CALL psi_geval%interp(cell,f,goptmp,gpsi1)
+          psi_geval%u=>psi_press
+          CALL psi_geval%setup(self%fe_rep)
+          CALL psi_geval%interp(cell,f,goptmp,gpsi2)
+          param_mat(2,:)=[gpsi1(1),gpsi2(1),gpsi0(1)]
+        END IF
+      ELSE IF(equil%dflux_target>-1.d98)THEN
+        param_rhs(2)=SIGN(equil%dflux_target**2,equil%dflux_target)
+        param_mat(2,:)=[SIGN(dflux_ffp**2,dflux_ffp)/equil%ffp_scale,0.d0,0.d0]
+      ELSE IF(equil%estore_target>0.d0)THEN
+        param_rhs(2)=equil%estore_target
+        param_mat(2,2)=estored*3.d0/2.d0
+      ELSE IF(equil%pax_target>0.d0)THEN
+        param_mat(2,2)=equil%P%f(equil%plasma_bounds(2))
+        param_rhs(2)=equil%pax_target
+      ELSE IF(equil%Ip_ratio_target>-1.d98)THEN
+        param_rhs(2)=0.d0
+        param_mat(2,:)=[itor_ffp,-itor_press*equil%Ip_ratio_target,0.d0]
+      ELSE
+        param_mat(2,2)=1.d0
+        param_rhs(2)=equil%p_scale
+      END IF
     END IF
   END IF
 
@@ -2378,14 +2393,14 @@ DO i=1,self%maxits
     IF(ALL(self%target_weights>0.d0))THEN
       equil%saddle_targets(1:2,equil%saddle_ntargets)=pt
     ELSE
-      ! 
+      !
       CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
       CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
       psi_geval%u=>psi_vac
       CALL psi_geval%setup(self%fe_rep)
       CALL psi_geval%interp(cell,f,goptmp,gpsi0)
       param_rhs(3)=-gpsi0(2)
-      ! 
+      !
       psi_geval%u=>psi_vcont
       CALL psi_geval%setup(self%fe_rep)
       CALL psi_geval%interp(cell,f,goptmp,gpsi0)
@@ -2563,13 +2578,13 @@ DO i=1,self%maxits
       CALL equil%psi%scale(1.d0/equil%psimax)
       equil%ffp_scale=SQRT((equil%ffp_scale**2)/equil%psimax)
       equil%psimax=1.d0
-    ! ELSE IF(self%Itor_target>0.d0)THEN
+    ! ELSE IF(self%Ip_target>0.d0)THEN
     !   itor=self%itor()
     !   IF(itor<=0.d0)THEN
     !     error_flag=-5
     !     EXIT
     !   END IF
-    !   ffp_scale_prev=itor/self%Itor_target
+    !   ffp_scale_prev=itor/self%Ip_target
     !   CALL self%psi%scale(1.d0/ffp_scale_prev)
     !   self%ffp_scale=SQRT((self%ffp_scale**2)/ffp_scale_prev)
     END IF
@@ -2684,6 +2699,7 @@ IF(ASSOCIATED(saddle_save))THEN
     DEALLOCATE(saddle_save)
   END IF
 END IF
+equil%skip_targets=.FALSE.
 !---
 IF(self%compute_chi)CALL equil%get_chi
 self%ierr=error_flag
@@ -2760,11 +2776,11 @@ END DO
 
 param_mat=0.d0
 param_rhs=0.d0
-IF(equil%Itor_target>0.d0)THEN
+IF(equil%Ip_target>0.d0)THEN
   itor_ffp=equil%itor(psi_ffp)
   itor_press=equil%itor(psi_press)
   param_mat(1,:)=[itor_ffp,itor_press,0.d0]
-  param_rhs(1)=equil%Itor_target
+  param_rhs(1)=equil%Ip_target
 ELSE
   param_mat(1,1)=1.d0
   param_rhs(1)=equil%ffp_scale
@@ -2803,14 +2819,14 @@ END IF
 
 !---Add row for vertical control
 IF((equil%Z0_target>-1.d98).AND.adjust_r0)THEN
-  ! 
+  !
   CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
   CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
   psi_geval%u=>psi_vac
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
   param_rhs(3)=-gpsi0(2)
-  ! 
+  !
   psi_geval%u=>psi_vcont
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
@@ -3300,7 +3316,7 @@ dflux_ffp=0.d0
 allocate(rhs_loc(device%fe_rep%nce,3))
 allocate(rop(device%fe_rep%nce),vcache(device%fe_rep%nce))
 allocate(j_lag(device%fe_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 do j=1,device%fe_rep%mesh%nc
   ! IF(self%cflag(j)==3)CYCLE ! Vacuum region (no source)
   IF(device%fe_rep%mesh%reg(j)/=1)CYCLE ! Only compute in plasma region
@@ -3435,7 +3451,7 @@ do j=1,device%fe_rep%mesh%nc
     IF(self%mode==0)THEN
       f=self%ffp_scale*self%I%f(psitmp(1))+self%I%f_offset
     ELSE
-      f=SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2)
+      f=SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2)
     END IF
     do l=1,device%fe_rep%nce
       call oft_blag_eval(device%fe_rep,j,l,device%fe_rep%quad%pts(:,m),rop)
@@ -4068,7 +4084,7 @@ DO i=1,npts
   IF(self%mode==0)THEN
     B(2)=(self%ffp_scale*self%I%f(psitmp(1))+self%I%f_offset)/pts(1,i)
   ELSE
-    B(2)=SQRT(self%ffp_scale*self%I%f(psitmp(1)) + self%I%f_offset**2)/pts(1,i)
+    B(2)=SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%f(psitmp(1)) + self%I%f_offset**2)/pts(1,i)
   END IF
   B=B*self%psiscale
   ! Handle anisotropic pressure
@@ -4323,7 +4339,7 @@ real(8), intent(out) :: prof(nr) !< q value at each sampling location
 real(8), optional, intent(out) :: dl !< Arc length of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)` (should be LCFS)
-real(8), optional, intent(out) :: ravgs(nr,3) !< Flux surface averages <R>, <1/R>, and dV/dPsi
+real(8), optional, intent(out) :: ravgs(nr,4) !< Flux surface averages <R>, <1/R>, <1/R^2>, and dV/dPsi
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
@@ -4386,7 +4402,7 @@ field%u=>gseq%psi
 CALL field%setup(gseq%device%fe_rep)
 IF(PRESENT(ravgs))THEN
   field%compute_geom=.TRUE.
-  active_tracer%neq=5
+  active_tracer%neq=6
 ELSE
   field%compute_geom=.FALSE.
   active_tracer%neq=3
@@ -4461,8 +4477,7 @@ do j=1,nr
   IF(gseq%mode==0)THEN
     fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
   ELSE
-    fpol=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-    + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    fpol=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
   END IF
   !---Safety Factor (q)
   qpsi=fpol*active_tracer%v(3)/(2*pi)
@@ -4470,7 +4485,8 @@ do j=1,nr
   IF(PRESENT(ravgs))THEN
     ravgs(j,1)=active_tracer%v(4)/active_tracer%v(2)
     ravgs(j,2)=active_tracer%v(5)/active_tracer%v(2)
-    ravgs(j,3)=-2.d0*pi*active_tracer%v(2) ! First derivative of FS volume (V')
+    ravgs(j,3)=active_tracer%v(6)/active_tracer%v(2)
+    ravgs(j,4)=-2.d0*pi*active_tracer%v(2) ! First derivative of FS volume (V')
   END IF
 end do
 CALL active_tracer%delete
@@ -4623,7 +4639,7 @@ SELECT CASE(self%mode)
       IF(self%equil%mode==0)THEN
         val(1)=self%equil%psiscale*(self%equil%ffp_scale*self%equil%I%f(psitmp(1))+self%equil%I%f_offset)
       ELSE
-        val(1)=self%equil%psiscale*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)
+        val(1)=self%equil%psiscale*SIGN(1.d0,self%equil%I%f_offset)*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)
       END IF
     ELSE
       val(1)=self%equil%psiscale*self%equil%I%f_offset
@@ -4681,7 +4697,7 @@ IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
   IF(self%equil%mode==0)THEN
     val(2)=self%equil%psiscale*(self%equil%ffp_scale*self%equil%I%f(psitmp(1))+self%equil%I%f_offset)/(pt(1)+gs_epsilon)
   ELSE
-    val(2)=self%equil%psiscale*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)/(pt(1)+gs_epsilon)
+    val(2)=self%equil%psiscale*SIGN(1.d0,self%equil%I%f_offset)*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)/(pt(1)+gs_epsilon)
   END IF
 ELSE
   val(2)=self%equil%psiscale*self%equil%I%f_offset/(pt(1)+gs_epsilon)
@@ -4833,6 +4849,7 @@ val(3)=val(2)/pt(1)**2
 IF(self%compute_geom)THEN
   val(4)=pt(1)*val(2)
   val(5)=val(2)/pt(1)
+  val(6)=val(2)/(pt(1)**2)
 END IF
 ! val(3:8)=val(3:8)
 deallocate(j)
@@ -5138,7 +5155,7 @@ DO i=0,m
     outtmp(2)=self%ffp_scale*self%I%fp(r)
     outtmp(3)=self%psiscale*self%ffp_scale*self%I%f(r) + self%I%f_offset
   ELSE
-    outtmp(3)=SQRT(self%psiscale*self%ffp_scale*self%I%f(r) + self%I%f_offset**2)
+    outtmp(3)=SIGN(1.d0,self%I%f_offset)*SQRT(self%psiscale*self%ffp_scale*self%I%f(r) + self%I%f_offset**2)
     outtmp(2)=self%ffp_scale*self%I%fp(r)/(2.d0*outtmp(3))
   END IF
   outtmp(4)=self%psiscale*self%p_scale*self%P%fp(r)
@@ -5567,7 +5584,7 @@ END IF
 !!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psitmp,l,rop,nturns) reduction(+:mutual)
 allocate(rop(self%fe_rep%nce),row_tmp(self%fe_rep%nce,1))
 allocate(j_lag(self%fe_rep%nce),col_tmp(1,self%fe_rep%nce))
-!!$omp do schedule(static,1)
+!!$omp do schedule(static)
 DO j=1,smesh%nc
   nturns=self%coil_nturns(smesh%reg(j),iCoil)
   eta_wt=0.d0
@@ -5921,7 +5938,7 @@ ALLOCATE(rop1(self%fe_rep%nce),gop1(3,self%fe_rep%nce))
 ALLOCATE(el2(self%fe_rep%nce),loc_map2(self%fe_rep%nce))
 ALLOCATE(rop2(self%fe_rep%nce),gop2(3,self%fe_rep%nce))
 active_targets%device=>self
-!$omp do schedule(static,10)
+!$omp do schedule(static)
 DO i=1,self%bc_nrhs
   IF(self%fe_rep%be(self%bc_rhs_list(i)))CYCLE
   cell1 = self%fe_rep%lec(self%fe_rep%kec(self%bc_rhs_list(i)))
@@ -5968,7 +5985,7 @@ END DO
 !$omp end do nowait
 !---Compute inductance and mass matrices for boundary
 ALLOCATE(ltmp(self%fe_rep%nbe))
-!$omp do schedule(static,10)
+!$omp do schedule(static)
 DO i=1,smesh%nbe
   cell1=elist(2,i)
   ed1=elist(1,i)

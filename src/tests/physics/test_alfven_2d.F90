@@ -111,7 +111,7 @@ CALL u%get_local(vec_vals)
 mhd_sim%den_scale = den_scale
 vec_vals = vec_vals / den_scale
 CALL mhd_sim%u%restore_local(vec_vals,1)
-IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,1)
+IF(linear) CALL mhd_sim%u0%restore_local(vec_vals,1)
 
 !---Project v_x initial condition onto scalar Lagrange basis
 field_init%func=>velx_alf
@@ -137,7 +137,7 @@ CALL vx_ic%restore_local(vec_vals)
 CALL u%set(t0)
 CALL u%get_local(vec_vals)
 CALL mhd_sim%u%restore_local(vec_vals,5)
-IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,5)
+IF(linear) CALL mhd_sim%u0%restore_local(vec_vals,5)
 
 !---Project psi initial condition onto scalar Lagrange basis
 field_init%func=>psi_alf
