@@ -663,6 +663,8 @@ LOGICAL :: fitI,fitP,fit_Pscale,fit_FFPscale,fitR0,fitZ0,fitCoils,fitF0,fixedCen
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
 CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+INTEGER(i4) :: ierr
+ierr = 0
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj))THEN
   error_flag=-100
   RETURN
@@ -691,7 +693,8 @@ CALL copy_string_rev(outfile_c,outfile)
 tMaker_obj%device%timing=0.d0
 CALL fit_gs(tMaker_obj%gs_equil,infile,outfile,fitI,fitP,fit_Pscale,&
             fit_FFPscale,fitR0,fitZ0,fitCoils,fitF0, &
-            fixedCentering)
+            fixedCentering, ierr)
+if(ierr /= 0)error_flag = ierr
 CALL gs_profile_save(TRIM(outfile)//'_fprof',tMaker_obj%gs_equil%I)
 CALL gs_profile_save(TRIM(outfile)//'_pprof',tMaker_obj%gs_equil%P)
 tMaker_obj%gs_equil%has_plasma=vac_save

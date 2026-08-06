@@ -266,7 +266,7 @@ END SUBROUTINE fit_gs_error
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fit_p_scale,fit_ffp_scale,fitR0,fitZ0,fitCoils,fitF0,fixedCentering)
+SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fit_p_scale,fit_ffp_scale,fitR0,fitZ0,fitCoils,fitF0,fixedCentering,ierr)
 TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: inpath !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: outpath !< Needs docs
@@ -306,8 +306,10 @@ fit_F0 = .FALSE.
 IF(PRESENT(fitF0))fit_F0=fitF0
 fixed_centering = .FALSE.
 IF(PRESENT(fixedCentering))fixed_centering=fixedCentering
-IF(fit_Pscale.AND.fit_R0)CALL oft_abort('R0 or p_scale fitting cannot be used together', &
-'fit_gs',__FILE__)
+IF(fit_Pscale.AND.fit_R0)THEN
+  ierr = -1
+  RETURN
+END IF
 IF(fit_Pscale.AND.gs%R0_target>0.d0)THEN
   gs%R0_target=-1.d0
   CALL oft_warn('P_norm adjustment requested, disabling R0 target')
