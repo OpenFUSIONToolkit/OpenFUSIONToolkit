@@ -1,4 +1,3 @@
-from __future__ import print_function
 import os
 import sys
 import time
@@ -86,7 +85,7 @@ def validate_dict(results,dict_exp,tol_dict=None):
     return test_result
 
 
-def validate_eqdsk(file_test,file_ref):
+def validate_eqdsk(file_test,file_ref,helicity=1.0):
     from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk
     try:
         test_data = read_eqdsk(file_test)
@@ -98,6 +97,9 @@ def validate_eqdsk(file_test,file_ref):
     except:
         print("FAILED: Could not read reference EQDSK")
         return False
+    ref_data['bcentr'] *= helicity
+    ref_data['fpol'] *= helicity
+    ref_data['qpsi'] *= helicity
     test_result = True
     for key, exp_val in ref_data.items():
         result_val = test_data.get(key,None)
@@ -121,7 +123,7 @@ def validate_eqdsk(file_test,file_ref):
     return test_result
 
 
-def validate_ifile(ifile_test,ifile_ref):
+def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile
     try:
         test_data = read_ifile(ifile_test)
@@ -133,6 +135,8 @@ def validate_ifile(ifile_test,ifile_ref):
     except:
         print("FAILED: Could not read reference i-file")
         return False
+    ref_data['f'] *= helicity
+    ref_data['q'] *= helicity
     test_result = True
     for key, exp_val in ref_data.items():
         result_val = test_data.get(key,None)
@@ -467,7 +471,7 @@ def test_coil_h3(order,dist_coil):
 
 
 #============================================================================
-def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
+def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
     def create_mesh():
         with open('ITER_geom.json','r') as fid:
             ITER_geom = json.load(fid)
@@ -515,7 +519,7 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
         mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
         mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
         mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-        mygs.setup(order=fe_order,F0=5.3*6.2)
+        mygs.setup(order=fe_order,F0=helicity*5.3*6.2)
         #
         if test_type.startswith('eig'):
             if test_type == 'eig_dep':
@@ -740,10 +744,10 @@ def test_ITER_eig(order):
     exp_dict = {
         'Tau_w': [6.619977E-01, 3.479492E-01, 2.554444E-01, 1.910381E-01, 1.782464E-01]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),'eig'))
+    results = mp_run(run_ITER_case,(1.0,(order,),'eig',1.0))
     assert validate_dict(results,exp_dict)
     # Test deprecated interface
-    results = mp_run(run_ITER_case,(1.0,(order,),'eig_dep'))
+    results = mp_run(run_ITER_case,(1.0,(order,),'eig_dep',1.0))
     assert validate_dict(results,exp_dict)
 
 @pytest.mark.coverage
@@ -753,10 +757,10 @@ def test_ITER_stability(order):
         'gamma': [12.3620, -1.83981, -3.41613, -5.12470, -6.53393],
         'nl_change': [225.4421413167051, 338.0113029638385][order-2]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),'stab'))
+    results = mp_run(run_ITER_case,(1.0,(order,),'stab',1.0))
     assert validate_dict(results,exp_dict)
     # Test deprecated interface
-    results = mp_run(run_ITER_case,(1.0,(order,),'stab_dep'))
+    results = mp_run(run_ITER_case,(1.0,(order,),'stab_dep',1.0))
     assert validate_dict(results,exp_dict)
 
 ITER_eq_dict = {
@@ -788,18 +792,29 @@ ITER_eq_dict = {
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
-def test_ITER_eq(order):
-    results = mp_run(run_ITER_case,(1.0,(order,),''))
-    assert validate_dict(results,ITER_eq_dict)
-    assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk')
-    assert validate_ifile('tokamaker.ifile','ITER_test.ifile')
+@pytest.mark.parametrize("helicity", (1.0,-1.0))
+def test_ITER_eq(order,helicity):
+    eq_dict = ITER_eq_dict.copy()
+    eq_dict['tflux'] *= helicity
+    eq_dict['dflux'] *= helicity
+    eq_dict['q_0'] *= helicity
+    eq_dict['q_95'] *= helicity
+    results = mp_run(run_ITER_case,(1.0,(order,),'',helicity))
+    assert validate_dict(results,eq_dict)
+    assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)
+    assert validate_ifile('tokamaker.ifile','ITER_test.ifile',helicity)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
-def test_ITER_eq_io(order):
+@pytest.mark.parametrize("helicity", (1.0,-1.0))
+def test_ITER_eq_io(order,helicity):
     eq_dict = ITER_eq_dict.copy()
     eq_dict['nl_its'] = 1
-    results = mp_run(run_ITER_case,(1.0,(order,),'io'))
+    eq_dict['tflux'] *= helicity
+    eq_dict['dflux'] *= helicity
+    eq_dict['q_0'] *= helicity
+    eq_dict['q_95'] *= helicity
+    results = mp_run(run_ITER_case,(1.0,(order,),'io',helicity))
     assert validate_dict(results,eq_dict)
 
 @pytest.mark.coverage
@@ -813,7 +828,7 @@ def test_ITER_recon():
     ITER_recon_dict['l_i'] = 0.8872565
     ITER_recon_dict['beta_tor'] = 1.906180
     ITER_recon_dict['beta_n'] = 1.284312
-    results = mp_run(run_ITER_case,(1.0,(2,),'recon'))
+    results = mp_run(run_ITER_case,(1.0,(2,),'recon',1.0))
     assert validate_dict(results,ITER_recon_dict)
 
 @pytest.mark.coverage
@@ -829,11 +844,11 @@ def test_ITER_recon_legacy():
     ITER_recon_dict['l_i'] = 0.8906732
     ITER_recon_dict['beta_tor'] = 1.934024
     ITER_recon_dict['beta_n'] = 1.294385
-    results = mp_run(run_ITER_case,(1.0,(2,),'recon_legacy'))
+    results = mp_run(run_ITER_case,(1.0,(2,),'recon_legacy',1.0))
     assert validate_dict(results,ITER_recon_dict)
 
 def test_ITER_concurrent():
-    results = mp_run(run_ITER_case,(1.0,(2,3),''))
+    results = mp_run(run_ITER_case,(1.0,(2,3),'',1.0))
     assert validate_dict(results,ITER_eq_dict)
 
 #============================================================================
@@ -856,7 +871,7 @@ def run_LTX_case(fe_order,test_type,mp_q):
         for key, coil in LTX_geom['coils'].items():
             if key.startswith('OH'):
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'],coil_set='OH')
-            else:    
+            else:
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'])
         #
         gs_mesh.add_polygon(LTX_geom['limiter'],'plasma',parent_name='air')
@@ -1323,9 +1338,9 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
 
     ft = 1 - fc
-    eps = r_avgs[2] / r_avgs[0]
+    eps = r_avgs['<a>'] / r_avgs['<R>']
     _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
-    R_avg = ravgs_q[0]
+    R_avg = ravgs_q['<R>']
 
     # --- Gradients (same as solve_with_bootstrap) ---
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
@@ -2045,7 +2060,7 @@ def test_pfile_bytes_roundtrip():
 # -----------------------------------------------------------------------
 # Test: X-point isoflux boundary helpers in TokaMaker.util
 #
-# These helpers check the generated boundary from 'create_isoflux_xpts' 
+# These helpers check the generated boundary from 'create_isoflux_xpts'
 # against the reference `isoflux_xpts_expected.json`.
 # -----------------------------------------------------------------------
 isoflux_xpts_expected = _load_eqdsk_fixture('isoflux_xpts_expected.json')

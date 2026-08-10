@@ -137,7 +137,7 @@ CALL solver%apply(u,lambda)
 !!\ref oft_io::hdf5_spdata "hdf5_spdata" subroutine. When the program has completed
 !!\ref oft_base::oft_finalize "oft_finalize" is called to cleanup the runtime environment and terminate
 !!the process. This subroutine calls any required MPI and PETSc finalize subroutines as well. After
-!!completing the run, the `build_xdmf` script may be used to construct VisIt files and view the solution
+!!completing the run, the `OFT_build_xdmf` script may be used to construct VisIt files and view the solution
 !!field, saved as tag `T`.
 CALL u%get_local(vtmp)
 CALL mg_mesh%mesh%save_vertex_scalar(vtmp,plot_file,'T')

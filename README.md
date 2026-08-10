@@ -21,20 +21,30 @@ Component tools
 
 The suite currently includes the following tools:
 
-* **TokaMaker:** Axisymmetric statice and time-dependent ideal MHD equilibria
+* **TokaMaker:** A time-dependent free-boundary Grad-Shafranov equilibrium code
 
-* **ThinCurr:** Inductively-excited currents in the thin-wall limit
+* **ThinCurr:** A 3D thin-wall electromagnetic simulation package
 
-* **MUG:** Time-dependent nonlinear (linear) extendend MHD
+* **MUG:** A 2D/3D linear/nonlinear extended MHD simulation package
 
-* **Marklin:** 3D force-free ideal MHD equilibria
+* **Marklin:** A 3D force-free, uniform &lambda; equilibrium solver
 
 Installation
 ------------
 
-Binaries are available for Linux (x86) and macOS (x86 and arm64) for each [release on GitHub](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/releases). The framework and its components can also be built from source using the instructions provided on [the wiki](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/wiki).
+### PyPI packages
+Pre-built Python packages are available on [PyPI](https://pypi.org/project/openfusiontoolkit/) and can be installed using `pip install openfusiontoolkit` (using a virtual environment is strongly recommended).
 
-To use the python interfaces add the `python` directory for your installation to your `PYTHONPATH` environment variable.
+### Binary packages
+Binaries are available for Linux (x86 and arm64) and macOS (x86 and arm64) for each [release on GitHub](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/releases) as well as recent commits to `main` via the [CD workflow](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/actions/workflows/cd_combined.yaml) (see artifacts on each run).
+
+### Container images
+Pre-built container images capable of running Open FUSION Toolkit via python scripts and/or Jupyter notebooks are available on the [GitHub Container Registry](https://github.com/orgs/OpenFUSIONToolkit/packages) and can be used by [Docker](https://www.docker.com/) or other container runtimes at `ghcr.io/openfusiontoolkit/{base|jupyter|extras}` (see registry for available images/tags).
+
+### Installation from source
+The framework and its components can also be built from source using the instructions provided on [the wiki](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/wiki).
+
+**NOTE:** To use the python interfaces for a binary or source install add the `python` directory for your installation to your `PYTHONPATH` environment variable.
 
 Documentation
 ------------

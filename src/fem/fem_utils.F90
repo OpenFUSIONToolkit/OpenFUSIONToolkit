@@ -327,7 +327,7 @@ INTEGER(i4) :: i,j,k,nloc,offset,mycounts(4)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: tloc
 TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: tloc_p,tloc_e,tloc_f,tloc_c
 DEBUG_STACK_PUSH
-IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Partitioning FE weights',nparts
+IF(oft_debug_print(2))WRITE(*,'(2X,A,I8)')'Partitioning FE weights',nparts
 !---Partition mesh
 ALLOCATE(tloc_p(nparts),tloc_e(nparts))
 ALLOCATE(tloc_f(nparts),tloc_c(nparts))

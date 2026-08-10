@@ -1468,7 +1468,7 @@ class TokaMaker():
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param compute_geo Compute geometric values for LCFS
-        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f$[<R>,<1/R>,dV/dPsi]\f$, length of last surface,
+        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f${<R>,<1/R>,dV/dPsi}\f$, length of last surface,
         [r(R_min),r(R_max)], [r(z_min),r(z_max)]
         '''
         if self._tMaker_equil is None:
@@ -1485,9 +1485,8 @@ class TokaMaker():
         @result Tuple `(psi, fc, r_avgs, modb_avgs)`, or `(psi, fc, r_avgs, modb_avgs, eps)` when `return_eps=True`
           - `psi` [npsi] — normalised poloidal flux \f$\hat{\psi}\f$ of each sample
           - `fc` [npsi] — circulating-particle fraction \f$f_c\f$ (Sauter 1999)
-          - `r_avgs` [3, npsi] — flux-surface-averaged radial coordinates:
-            row 0: \f$\langle R \rangle\f$, row 1: \f$\langle 1/R \rangle\f$, row 2: \f$\langle a \rangle\f$ (minor radius)
-          - `modb_avgs` [2, npsi] — flux-surface-averaged field:
+          - `r_avgs` dict — flux-surface averaged values \f${<R>,<1/R>,<a>}\f$ where a is minor radius
+          - `modb_avgs` [2, npsi] — flux-surface-averaged magnetic field values:
             row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
           - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
             \f$\varepsilon = (R_{\max} - R_{\min}) / (2 \langle R \rangle)\f$,
@@ -2665,12 +2664,12 @@ class TokaMaker_equilibrium():
     @property
     def R0_target(self):
         r'''! Magnetic axis radial position target'''
-        return self._R0_target.value
+        return self._R0_target.value if self._R0_target is not None else None
 
     @property
     def Z0_target(self):
         r'''! Magnetic axis vertical position target'''
-        return self._Z0_target.value
+        return self._Z0_target.value if self._Z0_target is not None else None
 
     @property
     def Isoflux_constraints(self):
@@ -3158,7 +3157,7 @@ class TokaMaker_equilibrium():
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param compute_geo Compute geometric values for LCFS
-        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f$[<R>,<1/R>,dV/dPsi]\f$, length of last surface,
+        @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f${<R>,<1/R>,<1/R^2>,dV/dPsi}\f$, length of last surface,
         [r(R_min),r(R_max)], [r(z_min),r(z_max)]
         '''
         if psi is None:
@@ -3171,7 +3170,7 @@ class TokaMaker_equilibrium():
                 psi_save = numpy.copy(psi)
                 psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
         qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
-        ravgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
+        ravgs = numpy.zeros((4,psi.shape[0]), dtype=numpy.float64)
         if compute_geo:
             dl = c_double(1.0)
         else:
@@ -3182,16 +3181,22 @@ class TokaMaker_equilibrium():
         tokamaker_get_q(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,ctypes.byref(dl),rbounds,zbounds,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        ravg_dict = {
+            '<R>': ravgs[0,:],
+            '<1/R>': ravgs[1,:],
+            '<1/R^2>': ravgs[2,:],
+            'dV/dPsi': ravgs[3,:]
+        }
         if self.psi_convention == 0:
             if compute_geo:
-                return psi_save,qvals,ravgs,dl.value,rbounds,zbounds
+                return psi_save,qvals,ravg_dict,dl.value,rbounds,zbounds
             else:
-                return psi_save,qvals,ravgs,None,None,None
+                return psi_save,qvals,ravg_dict,None,None,None
         else:
             if compute_geo:
-                return psi,qvals,ravgs,dl.value,rbounds,zbounds
+                return psi,qvals,ravg_dict,dl.value,rbounds,zbounds
             else:
-                return psi,qvals,ravgs,None,None,None
+                return psi,qvals,ravg_dict,None,None,None
 
     def trace_surf(self,psi):
         r'''! Trace surface for a given poloidal flux
@@ -3284,7 +3289,7 @@ class TokaMaker_equilibrium():
             lcfs_pad = 0.0
             if self.diverted or (not self.free_boundary):
                 lcfs_pad = 0.01
-        _,qvals,_,dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,axis_pad],compute_geo=True) # Given backward so last point is LCFS (for dl)
+        _, qvals, _, dl,rbounds,zbounds = self.get_q(numpy.r_[1.0-lcfs_pad,0.95,axis_pad],compute_geo=True) # Given backward so last point is LCFS (for dl)
         # Get diverted topology information
         if self.diverted:
             x_points, _ = self.get_xpoints()
@@ -3417,9 +3422,8 @@ class TokaMaker_equilibrium():
         @result Tuple `(psi, fc, r_avgs, modb_avgs)`, or `(psi, fc, r_avgs, modb_avgs, eps)` when `return_eps=True`
           - `psi` [npsi] — normalised poloidal flux \f$\hat{\psi}\f$ of each sample
           - `fc` [npsi] — circulating-particle fraction \f$f_c\f$ (Sauter 1999)
-          - `r_avgs` [3, npsi] — flux-surface-averaged values:
-            row 0: \f$\langle R \rangle\f$, row 1: \f$\langle 1/R \rangle\f$, row 2: \f$\langle a \rangle\f$ (minor radius)
-          - `modb_avgs` [2, npsi] — flux-surface-averaged field values:
+          - `r_avgs` dict — flux-surface averaged values \f${<R>,<1/R>,<a>}\f$ where a is minor radius
+          - `modb_avgs` [2, npsi] — flux-surface-averaged magnetic field values:
             row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
           - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
             \f$\varepsilon = (R_{\max} - R_{\min}) / (2 \langle R \rangle)\f$,
@@ -3443,12 +3447,18 @@ class TokaMaker_equilibrium():
         tokamaker_sauter_fc(self._equil_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,eps,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        ravg_dict = {
+            '<R>': r_avgs[0,:],
+            '<1/R>': r_avgs[1,:],
+            '<a>': r_avgs[2,:]
+        }
         if self.psi_convention == 0:
-            result = (psi_save, fc, r_avgs, modb_avgs)
+            result = (psi_save, fc, ravg_dict, modb_avgs)
         else:
-            result = (psi, fc, r_avgs, modb_avgs)
+            result = (psi, fc, ravg_dict, modb_avgs)
         return result + (eps,) if return_eps else result
     
+
     def calc_delstar_curr(self,psi):
         r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator
 

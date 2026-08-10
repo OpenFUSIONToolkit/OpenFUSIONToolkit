@@ -1,4 +1,3 @@
-from __future__ import print_function
 import os
 import sys
 import time
@@ -296,7 +295,7 @@ def run_mode(meshfile,freq,mp_q):
         result = False
     oftpy_dump_cov()
     mp_q.put(result)
-    
+
 
 def run_td_for_Mirnov(meshfile,direct_flag,curr_waveform,lin_tol,mp_q):
     result = True
@@ -335,11 +334,11 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
     if curr_waveform is None:
         coil_file_line=""
     else:
-        coil_file_line='curr_file="curr.drive"' 
+        coil_file_line='curr_file="curr.drive"'
     if volt_waveform is None:
         volt_file_line=""
     else:
-        volt_file_line='volt_file="volt.drive"' 
+        volt_file_line='volt_file="volt.drive"'
     neigs = 4
     reduce_model_flag = 'F'
     if run_type == 4:
@@ -633,7 +632,7 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
     except BaseException as e:
         print(e)
         return False
-    
+
     result_val = True
     import matplotlib.pyplot as plt
     _,ax=plt.subplots(1,1,figsize=(8,6))
@@ -662,7 +661,7 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
         os.remove(file)
     save_files = [f for f in os.listdir('.') if f.startswith('mesh') or f.startswith('vector') or f.startswith('scalar') or f.startswith('dump.dat')]
     for file in save_files:
-        os.remove(file)  
+        os.remove(file)
     return result_val
 
 
@@ -685,14 +684,14 @@ def run_thickness_api_roundtrip_and_validation(mp_q):
         tw_model = _build_dummy_model(xml_filename)
 
         tw_model.set_eta_values(eta_surf=eta_values, thickness=thickness_values)
-        
+
         # Verify get_eta_values() without flag shows deprecation warning
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             eta_returned = tw_model.get_eta_values()
             if len(w) == 0 or not issubclass(w[-1].category, DeprecationWarning):
                 print("WARNING: Expected DeprecationWarning for get_eta_values() not found")
-        
+
         if not np.allclose(eta_returned, eta_values):
             result = False
         eta_surf_out, eta_vol_out = tw_model.get_eta_values(include_eta_vol=True)
@@ -900,7 +899,7 @@ def run_get_eta_values_deprecation_warning(mp_q):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             eta = tw_model.get_eta_values()
-            
+
             # Should get a DeprecationWarning
             if len(w) == 0 or not issubclass(w[-1].category, DeprecationWarning):
                 print("ERROR: Expected DeprecationWarning not found")
@@ -943,7 +942,7 @@ def run_get_eta_values_with_flag_returns_tuple(mp_q):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             result_tuple = tw_model.get_eta_values(include_eta_vol=True)
-            
+
             # Should not get DeprecationWarning
             for warning in w:
                 if issubclass(warning.category, DeprecationWarning):

@@ -192,7 +192,7 @@ TYPE :: gs_factory
   INTEGER(i4), POINTER, DIMENSION(:) :: bc_rhs_list => NULL() !< List of terms interacting with free-boundary BC
   INTEGER(i4), POINTER, DIMENSION(:) :: olbp => NULL() !< Oriented list of boundary points
   INTEGER(i4), POINTER, DIMENSION(:) :: lim_con => NULL() !< Limiter contour list (contains all limiters)
-  INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Pointer to start of each 
+  INTEGER(i4), POINTER, DIMENSION(:) :: lim_ptr => NULL() !< Pointer to start of each
   REAL(r8), POINTER, DIMENSION(:) :: cond_weights => NULL() !< Needs docs
   REAL(r8), POINTER, DIMENSION(:) :: coil_vcont => NULL() !< Virtual VSC definition as weighted sum of other coils
   REAL(r8), POINTER, DIMENSION(:) :: Rcoils => NULL() !< Lumped resistance [Ohms] of each coil (negative for Icoils)
@@ -555,7 +555,7 @@ class(gs_factory), intent(inout) :: self !< G-S object
 !---
 INTEGER(4) :: i,io_unit,iostat
 IF(TRIM(self%limiter_file)=='none')RETURN
-IF(oft_debug_print(1))WRITE(*,'(2A,I4,A)')oft_indent,'Loading limiters'
+IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Loading limiters'
 OPEN(NEWUNIT=io_unit,FILE=TRIM(self%limiter_file))
 READ(io_unit,*)self%nlimiter_pts
 ALLOCATE(self%limiter_pts(2,self%nlimiter_pts))
@@ -787,7 +787,7 @@ type(oft_native_cg_eigsolver) :: eigsolver
 class(oft_vector), pointer :: tmp_vec,tmp_vec2
 integer(4), pointer, dimension(:) :: cdofs
 real(r8), pointer, dimension(:) :: psi_vals
-type(oft_lag_brinterp) :: psi_eval 
+type(oft_lag_brinterp) :: psi_eval
 integer(4) :: i,j,k,mind,nCon,ierr
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
@@ -1106,7 +1106,7 @@ class(oft_vector), pointer :: tmp_vec
 integer(4), pointer, dimension(:) :: cdofs
 real(r8), pointer, dimension(:) :: psi_vals
 type(circular_curr) :: circle_init
-type(oft_lag_brinterp) :: psi_eval 
+type(oft_lag_brinterp) :: psi_eval
 integer(4) :: i,j,k,mind,nCon
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
@@ -2404,14 +2404,14 @@ DO i=1,self%maxits
     IF(ALL(self%target_weights>0.d0))THEN
       equil%saddle_targets(1:2,equil%saddle_ntargets)=pt
     ELSE
-      ! 
+      !
       CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
       CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
       psi_geval%u=>psi_vac
       CALL psi_geval%setup(self%fe_rep)
       CALL psi_geval%interp(cell,f,goptmp,gpsi0)
       param_rhs(3)=-gpsi0(2)
-      ! 
+      !
       psi_geval%u=>psi_vcont
       CALL psi_geval%setup(self%fe_rep)
       CALL psi_geval%interp(cell,f,goptmp,gpsi0)
@@ -2830,14 +2830,14 @@ END IF
 
 !---Add row for vertical control
 IF((equil%Z0_target>-1.d98).AND.adjust_r0)THEN
-  ! 
+  !
   CALL bmesh_findcell(self%fe_rep%mesh,cell,pt,f)
   CALL self%fe_rep%mesh%jacobian(cell,f,goptmp,v)
   psi_geval%u=>psi_vac
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
   param_rhs(3)=-gpsi0(2)
-  ! 
+  !
   psi_geval%u=>psi_vcont
   CALL psi_geval%setup(self%fe_rep)
   CALL psi_geval%interp(cell,f,goptmp,gpsi0)
@@ -3462,7 +3462,7 @@ do j=1,device%fe_rep%mesh%nc
     IF(self%mode==0)THEN
       f=self%ffp_scale*self%I%f(psitmp(1))+self%I%f_offset
     ELSE
-      f=SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2)
+      f=SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2)
     END IF
     do l=1,device%fe_rep%nce
       call oft_blag_eval(device%fe_rep,j,l,device%fe_rep%quad%pts(:,m),rop)
@@ -4095,7 +4095,7 @@ DO i=1,npts
   IF(self%mode==0)THEN
     B(2)=(self%ffp_scale*self%I%f(psitmp(1))+self%I%f_offset)/pts(1,i)
   ELSE
-    B(2)=SQRT(self%ffp_scale*self%I%f(psitmp(1)) + self%I%f_offset**2)/pts(1,i)
+    B(2)=SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%f(psitmp(1)) + self%I%f_offset**2)/pts(1,i)
   END IF
   B=B*self%psiscale
   ! Handle anisotropic pressure
@@ -4350,7 +4350,7 @@ real(8), intent(out) :: prof(nr) !< q value at each sampling location
 real(8), optional, intent(out) :: dl !< Arc length of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)` (should be LCFS)
-real(8), optional, intent(out) :: ravgs(nr,3) !< Flux surface averages <R>, <1/R>, and dV/dPsi
+real(8), optional, intent(out) :: ravgs(nr,4) !< Flux surface averages <R>, <1/R>, <1/R^2>, and dV/dPsi
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
@@ -4413,7 +4413,7 @@ field%u=>gseq%psi
 CALL field%setup(gseq%device%fe_rep)
 IF(PRESENT(ravgs))THEN
   field%compute_geom=.TRUE.
-  active_tracer%neq=5
+  active_tracer%neq=6
 ELSE
   field%compute_geom=.FALSE.
   active_tracer%neq=3
@@ -4488,8 +4488,7 @@ do j=1,nr
   IF(gseq%mode==0)THEN
     fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
   ELSE
-    fpol=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-    + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    fpol=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
   END IF
   !---Safety Factor (q)
   qpsi=fpol*active_tracer%v(3)/(2*pi)
@@ -4497,7 +4496,8 @@ do j=1,nr
   IF(PRESENT(ravgs))THEN
     ravgs(j,1)=active_tracer%v(4)/active_tracer%v(2)
     ravgs(j,2)=active_tracer%v(5)/active_tracer%v(2)
-    ravgs(j,3)=-2.d0*pi*active_tracer%v(2) ! First derivative of FS volume (V')
+    ravgs(j,3)=active_tracer%v(6)/active_tracer%v(2)
+    ravgs(j,4)=-2.d0*pi*active_tracer%v(2) ! First derivative of FS volume (V')
   END IF
 end do
 CALL active_tracer%delete
@@ -4650,7 +4650,7 @@ SELECT CASE(self%mode)
       IF(self%equil%mode==0)THEN
         val(1)=self%equil%psiscale*(self%equil%ffp_scale*self%equil%I%f(psitmp(1))+self%equil%I%f_offset)
       ELSE
-        val(1)=self%equil%psiscale*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)
+        val(1)=self%equil%psiscale*SIGN(1.d0,self%equil%I%f_offset)*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)
       END IF
     ELSE
       val(1)=self%equil%psiscale*self%equil%I%f_offset
@@ -4708,7 +4708,7 @@ IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
   IF(self%equil%mode==0)THEN
     val(2)=self%equil%psiscale*(self%equil%ffp_scale*self%equil%I%f(psitmp(1))+self%equil%I%f_offset)/(pt(1)+gs_epsilon)
   ELSE
-    val(2)=self%equil%psiscale*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)/(pt(1)+gs_epsilon)
+    val(2)=self%equil%psiscale*SIGN(1.d0,self%equil%I%f_offset)*SQRT(self%equil%ffp_scale*self%equil%I%f(psitmp(1)) + self%equil%I%f_offset**2)/(pt(1)+gs_epsilon)
   END IF
 ELSE
   val(2)=self%equil%psiscale*self%equil%I%f_offset/(pt(1)+gs_epsilon)
@@ -4860,6 +4860,7 @@ val(3)=val(2)/pt(1)**2
 IF(self%compute_geom)THEN
   val(4)=pt(1)*val(2)
   val(5)=val(2)/pt(1)
+  val(6)=val(2)/(pt(1)**2)
 END IF
 ! val(3:8)=val(3:8)
 deallocate(j)
@@ -5165,7 +5166,7 @@ DO i=0,m
     outtmp(2)=self%ffp_scale*self%I%fp(r)
     outtmp(3)=self%psiscale*self%ffp_scale*self%I%f(r) + self%I%f_offset
   ELSE
-    outtmp(3)=SQRT(self%psiscale*self%ffp_scale*self%I%f(r) + self%I%f_offset**2)
+    outtmp(3)=SIGN(1.d0,self%I%f_offset)*SQRT(self%psiscale*self%ffp_scale*self%I%f(r) + self%I%f_offset**2)
     outtmp(2)=self%ffp_scale*self%I%fp(r)/(2.d0*outtmp(3))
   END IF
   outtmp(4)=self%psiscale*self%p_scale*self%P%fp(r)

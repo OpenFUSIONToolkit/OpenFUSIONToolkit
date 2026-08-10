@@ -15,9 +15,9 @@ Contents of the input files are provided below and in the examples directory und
 
 # Post processing
 
-Once complete you can now generate XDMF files suitable for visualization of results using the [VisIt](https://visit-dav.github.io/visit-website/index.html) code. For frequency-response calculations we do not need to do a separate plotting run, so once complete, you just need to run the `build_xdmf.py` script, which generates XDMF metadata files that tells VisIt how to read the data. This can be done using the following command
+Once complete you can now generate XDMF files suitable for visualization of results using the [VisIt](https://visit-dav.github.io/visit-website/index.html) code. For frequency-response calculations we do not need to do a separate plotting run, so once complete, you just need to run the `OFT_build_xdmf.py` script, which generates XDMF metadata files that tells VisIt how to read the data. This can be done using the following command
 
-    python /path/to/oft/bin/build_xdmf.py
+    python /path/to/oft/bin/OFT_build_xdmf.py
 
 Next use VisIt to open the `surf_static.xmf` file, which will contain two vector fields `JRe` and `JIm` that correspond to the current distributions for the real and imaginary components of the solution in the frequency-domain. If you are running this example remotely and using VisIt locally you will need to copy the `mesh.*.h5`, `scalar_dump.*.h5`, `vector_dump.*.h5`, and `*.xmf` files to your local computer for visualization. The real component `JRe` should look like the figure below.
 
@@ -97,8 +97,8 @@ set large exodus file on
 export Genesis  "thincurr_ex-torus.g" overwrite block 1
 ```
 
-The file can then be converted to OFT's native mesh format using the `convert_cubit.py` script as
+The file can then be converted to OFT's native mesh format using the `OFT_convert_cubit.py` script as
 
-    python /path/to/OFT/bin/convert_cubit.py --in_file=thincurr_ex-torus.g
+    python /path/to/OFT/bin/OFT_convert_cubit.py --in_file=thincurr_ex-torus.g
 
 which will yield the converted file `thincurr_ex-torus.h5`.
