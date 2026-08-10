@@ -1205,7 +1205,7 @@ def test_ITER_bootstrap(order):
 # -----------------------------------------------------------------------
 # Test: redl_bootstrap() directly (same equilibrium as test_ITER_bootstrap)
 # -----------------------------------------------------------------------
-def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
+def run_Redl_jBS_case(mesh_resolution, fe_order, mode_old, mp_q):
     from OpenFUSIONToolkit.TokaMaker.bootstrap import (
         redl_bootstrap, calculate_ln_lambda, Hmode_profiles
     )
@@ -1335,10 +1335,11 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
 
     # --- Extract geometry from equilibrium (same as solve_with_bootstrap) ---
     _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-    _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
+    _, fc, r_avgs, _, eps = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad, return_eps=True)
 
     ft = 1 - fc
-    eps = r_avgs['<a>'] / r_avgs['<R>']
+    if mode_old:
+        eps = r_avgs['<a>'] / r_avgs['<R>']
     _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
     R_avg = ravgs_q['<R>']
 
@@ -1409,6 +1410,16 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
 
 
 Redl_jBS_eq_dict = {
+    'j_BS_max': 190105.9818066194,
+    'j_BS_axis': 7067.543831089362,
+    'j_BS_edge': 100532.81373131038,
+    'L31_axis': 0.10849481301194958,
+    'L32_axis': -0.014581267675566556,
+    'alpha_axis': -0.6150406171285213,
+    'nu_e_star_axis': 0.3420647094964808,
+    'nu_i_star_axis': 0.2975729435421919,
+}
+Redl_jBS_eq_dict_old = {
     'j_BS_max': 186871.6671880487,
     'j_BS_axis': 6884.411685375865,
     'j_BS_edge': 99805.65713701912,
@@ -1422,9 +1433,11 @@ Redl_jBS_eq_dict = {
 
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,))
-def test_Redl_jBS(order):
-    results = mp_run(run_Redl_jBS_case, (1.0, order), timeout=300)
-    assert validate_dict(results, Redl_jBS_eq_dict)
+@pytest.mark.parametrize("mode_old", (False, True))
+def test_Redl_jBS(mode_old, order):
+    results = mp_run(run_Redl_jBS_case, (1.0, order, mode_old), timeout=300)
+    expected = Redl_jBS_eq_dict_old if mode_old else Redl_jBS_eq_dict
+    assert validate_dict(results, expected)
 
 #============================================================================
 # Internal bootstrap test (ITER-based)
