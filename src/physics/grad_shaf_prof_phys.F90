@@ -614,7 +614,7 @@ TYPE(spline_type), INTENT(out) :: R_spline
 INTEGER(i4) :: i
 REAL(r8), ALLOCATABLE :: ravgs(:,:), psi_q(:), qprof(:)
 REAL(r8), PARAMETER :: psi_pad = 1.d-3
-ALLOCATE(ravgs(ngeom,3), psi_q(ngeom), qprof(ngeom))
+ALLOCATE(ravgs(ngeom,4), psi_q(ngeom), qprof(ngeom))
 psi_q = [(REAL(i-1,r8)/REAL(ngeom,r8), i=1,ngeom)]
 IF(gseq%diverted)THEN
   psi_q(1) = MIN(psi_q(2), psi_pad)
