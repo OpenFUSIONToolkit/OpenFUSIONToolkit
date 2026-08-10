@@ -109,7 +109,7 @@ inductive_jphi = create_power_flux_fun(n_sample, 2.25, 2.5)['y']
 # ---------------------------------------------------------------------------
 def build_gs(mygs):
     mygs.reset()
-    mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('ITER_mesh.h5')
+    mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('../../examples/TokaMaker/ITER/ITER_mesh.h5')
     mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
     mygs.settings.maxits = 100
