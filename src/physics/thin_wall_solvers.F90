@@ -639,8 +639,9 @@ REAL(8), POINTER, INTENT(in) :: sensor_vals(:,:)
 TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
 !---
 INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits,int_inds(2)
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: its_hist
 REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op,int_facs(2),elapsed_time
-REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check
+REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
 CLASS(oft_vector), POINTER :: u,g,up,du
@@ -839,6 +840,9 @@ IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
 END IF
 !---Advance system in time
 CALL up%add(0.d0,1.d0,u)
+ALLOCATE(its_hist(nstatus),time_hist(nstatus))
+its_hist=0
+time_hist=0.d0
 DO i=1,nsteps
   !---Update driven coil dI/dt waveforms
   IF(use_cn)THEN
@@ -917,9 +921,20 @@ DO i=1,nsteps
     nits=linv%cits
   END IF
   elapsed_time=solve_timer%tock()
+  IF(PRESENT(hodlr_op))THEN
+    ! WRITE(*,'(A,5ES12.3)')'Timing: ',hodlr_op%times,linv_pre%times
+    hodlr_op%times=0.d0
+    linv_pre%times=0.d0
+  END IF
   uu=SQRT(u%dot(u))
   t=t+dt
-  IF(MOD(i,nstatus)==0)WRITE(*,'(2X,I6,ES16.6,ES14.4,2X,I6,F12.2)')i,t,uu,nits,elapsed_time
+  its_hist(MOD(i,nstatus))=nits
+  time_hist(MOD(i,nstatus))=elapsed_time
+  IF(MOD(i,nstatus)==0)THEN
+    nits=INT(SUM(its_hist)/REAL(nstatus,8),4)
+    elapsed_time=SUM(time_hist)/REAL(nstatus,8)
+    WRITE(*,'(2X,I6,ES16.6,ES14.4,2X,I6,F12.2)')i,t,uu,nits,elapsed_time
+  END IF
   IF(MOD(i,nplot)==0)THEN
     WRITE(pltnum,'(I4.4)')i
     rst_file=TRIM(self%rst_prefix)//'pThinCurr_'//pltnum//'.rst'

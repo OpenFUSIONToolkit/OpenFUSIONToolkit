@@ -33,6 +33,7 @@ class ThinCurr():
         self._oft_env.oft_in_groups['thincurr_hodlr_options'] = {
             'target_size': '1200',
             'aca_min_its': '20',
+            'aca_sep_thresh': '1.1,1.1',
             'L_svd_tol': '1.E-8',
             'L_aca_rel_tol': '0.05',
             'B_svd_tol': '1.E-3',
@@ -275,12 +276,13 @@ class ThinCurr():
         thincurr_scale_va(self.tw_obj,data_in,div_flag)
         return data_in
 
-    def set_hodlr_options(self,target_size=None,aca_min_its=None,L_svd_tol=None,
+    def set_hodlr_options(self,target_size=None,aca_min_its=None,aca_sep_thresh=None,L_svd_tol=None,
                           L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,B_dx=None):
         '''! Set HODLR options for ThinCurr model
 
         @param target_size Target size for HODLR blocks
         @param aca_min_its Minimum number of ACA iterations
+        @param aca_sep_thresh Separation threshold for ACA vs SVD (tuple of 2 values: [lowest level, all other levels])
         @param L_svd_tol Tolerance for SVD compression of L-matrix blocks
         @param L_aca_rel_tol Relative tolerance for ACA compression of L-matrix blocks
         @param B_svd_tol Tolerance for SVD compression of B-matrix blocks
@@ -291,6 +293,10 @@ class ThinCurr():
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
         if aca_min_its is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['aca_min_its'] = '{0:d}'.format(aca_min_its)
+        if aca_sep_thresh is not None:
+            if len(aca_sep_thresh) != 2:
+                raise ValueError('"aca_sep_thresh" must be a tuple of 2 values')
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['aca_sep_thresh'] = '{0:.4E}, {1:.4E}'.format(aca_sep_thresh[0],aca_sep_thresh[1])
         if L_svd_tol is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['L_svd_tol'] = '{0:.4E}'.format(L_svd_tol)
         if L_aca_rel_tol is not None:

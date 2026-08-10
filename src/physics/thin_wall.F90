@@ -22,6 +22,7 @@ USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_bmesh
 USE oft_mesh_local, ONLY: bmesh_local_init
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
+USE oft_mesh_global_util, ONLY: mesh_global_resolution
 USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_tet_quadrature, ONLY: set_quad_2d
@@ -176,6 +177,7 @@ TYPE(xml_node) :: coil_element
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Creating thin-wall model'
 CALL oft_increase_indent
+CALL mesh_global_resolution(self%mesh)
 CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
 !---Load ThinCurr-specific mesh information
 IF(PRESENT(filepath))THEN
