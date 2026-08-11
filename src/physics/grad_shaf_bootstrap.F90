@@ -7,7 +7,7 @@
 !
 !> Physics-scripts used in the bootstrap calculation inside the Grad-Sharfranov solve
 !!
-!! @authors Stuart Benjamin (fortranisation of bootstrap.py, Daniel Burgess)
+!! @authors Stuart Benjamin, fortranisation of Daniel Burgess' bootstrap.py
 !! @date June 2026
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
@@ -1424,12 +1424,14 @@ END SUBROUTINE edge_jbs_residual
 !> @param p0       Initial parameter guess (7 elements)
 !> @param popt     Output: optimised parameters (7 elements)
 !------------------------------------------------------------------------------
-SUBROUTINE curve_fit_edge_jbs(n_fit, psi_fit, j_BS_fit, p0, popt, lb_in, ub_in)
+SUBROUTINE curve_fit_edge_jbs(n_fit, psi_fit, j_BS_fit, p0, popt, &
+    lb_in, ub_in, success)
 INTEGER(i4), INTENT(in)  :: n_fit
 REAL(r8),    INTENT(in)  :: psi_fit(n_fit), j_BS_fit(n_fit)
 REAL(r8),    INTENT(in)  :: p0(7)
 REAL(r8),    INTENT(out) :: popt(7)
 REAL(r8),    INTENT(in)  :: lb_in(7), ub_in(7)
+LOGICAL, OPTIONAL, INTENT(out) :: success  !< lmdif convergence flag
 !---MINPACK variables (same pattern as gs_psi2pt / circle_interp)
 INTEGER(4), PARAMETER :: NPARAMS = 7
 REAL(8) :: ftol, xtol, gtol, epsfcn, factor
@@ -1488,6 +1490,9 @@ IF (info <= 0 .OR. info >= 5) THEN
   WRITE(char_buf,'(A,I0,A,I0)') '[curve_fit_edge_jbs] lmdif did not converge; info=', info, &
     '; nfev=', nfev
   CALL oft_warn(TRIM(char_buf))
+  IF (PRESENT(success)) success = .FALSE.
+ELSE
+  IF (PRESENT(success)) success = .TRUE.
 END IF
 ! Inverse transform: recover bounded parameters from internal lmdif solution
 DO k = 1, NPARAMS
@@ -1535,7 +1540,7 @@ LOGICAL,  OPTIONAL, INTENT(in)  :: diagnose               !< If .TRUE., print fi
 !---
 INTEGER(i4) :: i, peak_idx, lmin_idx, left_idx, right_idx, idx_start, idx_end
 INTEGER(i4) :: n_fit
-REAL(r8)    :: best_psi, best_height, half_max, dist_tmp
+LOGICAL     :: has_edge, fit_ok
 REAL(r8)    :: peak_psi, peak_height, lmin_j_BS, fwhm
 REAL(r8)    :: jBS_min_loc, dist_to_peak, blend_width_val, x_start, x_end
 REAL(r8)    :: dist_start, dist_end
@@ -1732,28 +1737,37 @@ IF (PRESENT(parameterized_spike)) THEN
   p0(6) = MAX(0.0_r8, j_BS(n))            ! y_sep
   p0(7) = 0.05_r8                             ! blend_width
   ! Levenberg-Marquardt fit (pass bounds for internal tan-transform)
-  CALL curve_fit_edge_jbs(n_fit, psi_fit, j_fit, p0, popt, lb, ub)
+  CALL curve_fit_edge_jbs(n_fit, psi_fit, j_fit, p0, popt, &
+    lb, ub, fit_ok)
   DEALLOCATE(psi_fit, j_fit)
-  amp_fit    = popt(1)
-  center_fit = popt(2)
-  width_fit  = popt(3)
-  offset_fit = popt(4)
-  sk_fit     = popt(5)
-  y_sep_fit  = popt(6)
-  bw_fit     = popt(7)
-  ! Evaluate fitted profile on the full n-point grid
-  CALL parametrise_edge_jbs(n, psi_N, amp_fit, center_fit, width_fit, &
-      offset_fit, sk_fit, y_sep_fit, bw_fit, 1.5_r8, parameterized_spike)
-  ! Optional verbose output for diagnostics if boot_ops%diagnose_bs
-  IF (PRESENT(diagnose) .AND. diagnose) THEN
-    WRITE(*,'(A,7(A,ES12.4))') '  [edge_spike_fit]', &
-      ' amp=',    amp_fit,    ' center=', center_fit, ' width=',  width_fit, &
-      ' offset=', offset_fit, ' sk=',     sk_fit,     ' y_sep=',  y_sep_fit, &
-      ' bw=',     bw_fit
-    WRITE(*,'(A)') '  [edge_spike_profile] i  psi_N(std)    parameterized_spike[A/m2]'
-    DO i = 1, n
-      WRITE(*,'(A,I4,2ES15.5)') '  ', i, psi_N(i), parameterized_spike(i)
-    END DO
+  IF (.NOT. fit_ok) THEN
+    ! Non-fatal fit failure: fall back to masked_spike.
+    CALL oft_warn('[analyze_bootstrap_edge_spike] '// &
+      'parametrise_edge_jbs fit failed; '// &
+      'falling back to masked_spike')
+    parameterized_spike = masked_spike
+  ELSE
+    amp_fit    = popt(1)
+    center_fit = popt(2)
+    width_fit  = popt(3)
+    offset_fit = popt(4)
+    sk_fit     = popt(5)
+    y_sep_fit  = popt(6)
+    bw_fit     = popt(7)
+    ! Evaluate fitted profile on the full n-point grid
+    CALL parametrise_edge_jbs(n, psi_N, amp_fit, center_fit, width_fit, &
+        offset_fit, sk_fit, y_sep_fit, bw_fit, 1.5_r8, parameterized_spike)
+    ! Optional verbose output for diagnostics if boot_ops%diagnose_bs
+    IF (PRESENT(diagnose) .AND. diagnose) THEN
+      WRITE(*,'(A,7(A,ES12.4))') '  [edge_spike_fit]', &
+        ' amp=',    amp_fit,    ' center=', center_fit, ' width=',  width_fit, &
+        ' offset=', offset_fit, ' sk=',     sk_fit,     ' y_sep=',  y_sep_fit, &
+        ' bw=',     bw_fit
+      WRITE(*,'(A)') '  [edge_spike_profile] i  psi_N(std)    parameterized_spike[A/m2]'
+      DO i = 1, n
+        WRITE(*,'(A,I4,2ES15.5)') '  ', i, psi_N(i), parameterized_spike(i)
+      END DO
+    END IF
   END IF
 END IF
 END SUBROUTINE analyze_bootstrap_edge_spike
