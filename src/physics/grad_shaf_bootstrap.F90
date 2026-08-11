@@ -888,6 +888,195 @@ DO i = 1, n
 END DO
 END SUBROUTINE apply_edge_taper
 !------------------------------------------------------------------------------
+!> Compute dy/dx via shape-preserving monotone PCHIP on the native grid.
+!>
+!> Port of bootstrap.py:_pchip_deriv.  Sorts and de-duplicates x, computes
+!> Fritsch-Carlson node slopes, and scatters them back to the input ordering.
+!> Aborts on n < 2, non-finite input, < 2 distinct x, or a non-finite slope.
+!> Warns on unsorted x and on collapsed duplicates (y averaged over each
+!> group, so double-point jumps are smoothed).
+!>
+!> Assumes the smallest legitimate x spacing exceeds dedup_rtol times the
+!> x span; anything finer is treated as a duplicate and averaged.
+!>
+!> @param n     Number of input points (>= 2)
+!> @param x     Independent variable (e.g. psi); expected sorted ascending
+!> @param y     Dependent variable sampled on x
+!> @param dydx  Output: dy/dx at each point in x
+!> @param quiet Optional: suppress warnings
+!------------------------------------------------------------------------------
+SUBROUTINE pchip_deriv(n, x, y, dydx, quiet)
+USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
+INTEGER(i4), INTENT(in) :: n
+REAL(r8), INTENT(in) :: x(n)
+REAL(r8), INTENT(in) :: y(n)
+REAL(r8), INTENT(out) :: dydx(n)
+LOGICAL, OPTIONAL, INTENT(in) :: quiet
+!---
+REAL(r8), PARAMETER :: dedup_rtol = 1.0e-12_r8 !< Duplicate x, as a fraction of the span
+INTEGER(i4) :: i, j, key, nu
+INTEGER(i4) :: order(n)  !< Stable ascending sort permutation of x
+INTEGER(i4) :: grp(n)    !< Sorted point -> unique-node index
+REAL(r8) :: xs(n), ys(n) !< x, y reordered ascending
+REAL(r8) :: xu(n), yu(n) !< De-duplicated grid, y averaged over each group
+REAL(r8) :: du(n)        !< Node slopes on the de-duplicated grid
+REAL(r8) :: dx_tol
+LOGICAL :: talk
+CHARACTER(len=512) :: char_buf
+talk = oft_env%pm
+IF(PRESENT(quiet))THEN
+  IF(quiet) talk = .FALSE.
+END IF
+IF(n < 2) &
+  CALL oft_abort('fewer than 2 input points; dy/dx undefined', &
+    'pchip_deriv', __FILE__)
+DO i = 1, n
+  IF(.NOT.IEEE_IS_FINITE(x(i)) .OR. .NOT.IEEE_IS_FINITE(y(i)))THEN
+    WRITE(char_buf,'(A,I0,A,ES12.5,A,ES12.5)') 'non-finite input at i=', i, &
+      ': x=', x(i), ', y=', y(i)
+    CALL oft_abort(TRIM(char_buf), 'pchip_deriv', __FILE__)
+  END IF
+END DO
+dx_tol = dedup_rtol*(MAXVAL(x) - MINVAL(x))
+!--- Fast path: already strictly increasing, no sort or dedup needed
+IF(ALL(x(2:n) - x(1:n-1) > dx_tol))THEN
+  CALL pchip_slopes(n, x, y, dydx)
+  CALL pchip_verify(n, x, dydx)
+  RETURN
+END IF
+!--- Stable insertion sort
+IF(ANY(x(2:n) < x(1:n-1)) .AND. talk) &
+  CALL oft_warn('pchip_deriv: x grid not sorted ascending; sorting internally')
+order = [(i, i=1,n)]
+DO i = 2, n
+  key = order(i)
+  j = i - 1
+  DO WHILE (j >= 1)
+    IF(x(order(j)) <= x(key)) EXIT
+    order(j+1) = order(j)
+    j = j - 1
+  END DO
+  order(j+1) = key
+END DO
+xs = x(order)
+ys = y(order)
+!--- Collapse duplicates.  Compared against the group anchor xs(i) so that
+!   near-duplicates cannot chain into an arbitrarily wide group.
+nu = 0
+i = 1
+DO WHILE (i <= n)
+  j = i
+  DO WHILE (j < n)
+    IF(xs(j+1) - xs(i) > dx_tol) EXIT
+    j = j + 1
+  END DO
+  nu = nu + 1
+  xu(nu) = xs(i)
+  yu(nu) = SUM(ys(i:j)) / REAL(j-i+1, r8)
+  grp(i:j) = nu
+  i = j + 1
+END DO
+IF(nu < 2)THEN
+  WRITE(char_buf,'(A,I0,A,ES12.5,A,ES12.5,A)') 'fewer than 2 distinct x '// &
+    'points after collapsing duplicates (n=', n, ', x range ', MINVAL(x), &
+    ' to ', MAXVAL(x), '); x grid is degenerate'
+  CALL oft_abort(TRIM(char_buf), 'pchip_deriv', __FILE__)
+END IF
+IF(nu < n .AND. talk)THEN
+  WRITE(char_buf,'(A,I0,A,I0,A,F5.1,A)') 'pchip_deriv: collapsed ', n-nu, &
+    ' of ', n, ' grid points (', 100.0_r8*REAL(n-nu, r8)/REAL(n, r8), &
+    '%) as duplicate x values, y averaged -- upstream grid issue'
+  CALL oft_warn(TRIM(char_buf))
+END IF
+CALL pchip_slopes(nu, xu(1:nu), yu(1:nu), du(1:nu))
+CALL pchip_verify(nu, xu(1:nu), du(1:nu))
+DO i = 1, n
+  dydx(order(i)) = du(grp(i))
+END DO
+END SUBROUTINE pchip_deriv
+!------------------------------------------------------------------------------
+!> PCHIP (Fritsch-Carlson) node slopes, matching scipy's _find_derivatives.
+!>
+!> @param m Number of nodes (>= 2)
+!> @param x Strictly increasing abscissae (caller's responsibility)
+!> @param y Ordinates
+!> @param d Output: node slopes
+!------------------------------------------------------------------------------
+PURE SUBROUTINE pchip_slopes(m, x, y, d)
+INTEGER(i4), INTENT(in) :: m
+REAL(r8), INTENT(in) :: x(m)
+REAL(r8), INTENT(in) :: y(m)
+REAL(r8), INTENT(out) :: d(m)
+!---
+INTEGER(i4) :: i
+REAL(r8) :: h(m-1)   !< Interval widths
+REAL(r8) :: del(m-1) !< Secant slopes
+REAL(r8) :: w1, w2
+h   = x(2:m) - x(1:m-1)
+del = (y(2:m) - y(1:m-1)) / h
+IF(m == 2)THEN
+  d = del(1)
+  RETURN
+END IF
+!--- Interior: weighted harmonic mean, zeroed at local extrema.  Signs are
+!   tested directly; del(i-1)*del(i) can under/overflow.
+DO i = 2, m-1
+  IF(del(i-1) == 0.0_r8 .OR. del(i) == 0.0_r8 .OR. &
+     ((del(i-1) < 0.0_r8) .NEQV. (del(i) < 0.0_r8)))THEN
+    d(i) = 0.0_r8
+  ELSE
+    w1 = 2.0_r8*h(i) + h(i-1)
+    w2 = h(i) + 2.0_r8*h(i-1)
+    d(i) = (w1 + w2) / (w1/del(i-1) + w2/del(i))
+  END IF
+END DO
+!--- Endpoints; note the deliberate argument reversal at the right end
+d(1) = pchip_edge(h(1),   h(2),   del(1),   del(2))
+d(m) = pchip_edge(h(m-1), h(m-2), del(m-1), del(m-2))
+END SUBROUTINE pchip_slopes
+!------------------------------------------------------------------------------
+!> Shape-limited one-sided PCHIP endpoint slope (scipy _edge_case).
+!------------------------------------------------------------------------------
+PURE FUNCTION pchip_edge(h0, h1, m0, m1) RESULT(d)
+REAL(r8), INTENT(in) :: h0 !< Width of the edge interval
+REAL(r8), INTENT(in) :: h1 !< Width of the next interval in
+REAL(r8), INTENT(in) :: m0 !< Secant slope of the edge interval
+REAL(r8), INTENT(in) :: m1 !< Secant slope of the next interval in
+REAL(r8) :: d
+d = ((2.0_r8*h0 + h1)*m0 - h0*m1) / (h0 + h1)
+IF(SIGN(1.0_r8, d) /= SIGN(1.0_r8, m0))THEN
+  d = 0.0_r8       ! wrong sign vs. edge secant -> flatten
+ELSE IF((SIGN(1.0_r8, m0) /= SIGN(1.0_r8, m1)) .AND. &
+        (ABS(d) > 3.0_r8*ABS(m0)))THEN
+  d = 3.0_r8*m0    ! overshoot limiter at a turning point
+END IF
+END FUNCTION pchip_edge
+!------------------------------------------------------------------------------
+!> Guards on a computed PCHIP slope set: pchip_slopes' precondition (for the
+!> benefit of direct callers; pchip_deriv already guarantees it) and finiteness
+!> of the result, which finite input does not guarantee -- del can overflow for
+!> large y on a fine grid, and the endpoint formula then yields Inf - Inf.
+!------------------------------------------------------------------------------
+SUBROUTINE pchip_verify(m, x, d)
+USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
+INTEGER(i4), INTENT(in) :: m
+REAL(r8), INTENT(in) :: x(m)
+REAL(r8), INTENT(in) :: d(m)
+!---
+INTEGER(i4) :: i
+CHARACTER(len=512) :: char_buf
+IF(ANY(x(2:m) <= x(1:m-1))) &
+  CALL oft_abort('x not strictly increasing; pchip_slopes precondition '// &
+    'violated', 'pchip_verify', __FILE__)
+DO i = 1, m
+  IF(.NOT.IEEE_IS_FINITE(d(i)))THEN
+    WRITE(char_buf,'(A,I0,A,ES12.5)') 'non-finite derivative at node ', i, &
+      ', x=', x(i)
+    CALL oft_abort(TRIM(char_buf), 'pchip_verify', __FILE__)
+  END IF
+END DO
+END SUBROUTINE pchip_verify
+!------------------------------------------------------------------------------
 !> Computes the bootstrap current on a uniform psi_N grid.
 !>
 !> Translated from Python bootstrap.py: calculate_profiles_and_bootstrap
@@ -973,22 +1162,14 @@ ft = 1.0_r8 - fc
 ! Pressures [Pa]
 pe = EC * ne * Te
 pi_arr = EC * ni * Ti
-! Gradients d/dpsi [Wb^-1] via non-uniform finite differences
-! (one-sided at endpoints, central at interior points)
-dT_e_dpsi(1)     = (Te(2)     - Te(1))       / (psi_abs(2)     - psi_abs(1))
-dT_e_dpsi(n_psi) = (Te(n_psi) - Te(n_psi-1)) / (psi_abs(n_psi) - psi_abs(n_psi-1))
-dT_i_dpsi(1)     = (Ti(2)     - Ti(1))       / (psi_abs(2)     - psi_abs(1))
-dT_i_dpsi(n_psi) = (Ti(n_psi) - Ti(n_psi-1)) / (psi_abs(n_psi) - psi_abs(n_psi-1))
-dn_e_dpsi(1)     = (ne(2)     - ne(1))       / (psi_abs(2)     - psi_abs(1))
-dn_e_dpsi(n_psi) = (ne(n_psi) - ne(n_psi-1)) / (psi_abs(n_psi) - psi_abs(n_psi-1))
-dn_i_dpsi(1)     = (ni(2)     - ni(1))       / (psi_abs(2)     - psi_abs(1))
-dn_i_dpsi(n_psi) = (ni(n_psi) - ni(n_psi-1)) / (psi_abs(n_psi) - psi_abs(n_psi-1))
-DO i = 2, n_psi-1
-  dT_e_dpsi(i) = (Te(i+1) - Te(i-1)) / (psi_abs(i+1) - psi_abs(i-1))
-  dT_i_dpsi(i) = (Ti(i+1) - Ti(i-1)) / (psi_abs(i+1) - psi_abs(i-1))
-  dn_e_dpsi(i) = (ne(i+1) - ne(i-1)) / (psi_abs(i+1) - psi_abs(i-1))
-  dn_i_dpsi(i) = (ni(i+1) - ni(i-1)) / (psi_abs(i+1) - psi_abs(i-1))
-END DO
+! Gradients d/dpsi [Wb^-1] via shape-preserving monotone PCHIP.
+! pchip_deriv guards against duplicate/non-monotone psi_abs points and NaNs,
+! and avoids the stepped-derivative artifacts that plain finite differences
+! produce on non-uniform or partially-duplicated grids.
+CALL pchip_deriv(n_psi, psi_abs, Te, dT_e_dpsi)
+CALL pchip_deriv(n_psi, psi_abs, Ti, dT_i_dpsi)
+CALL pchip_deriv(n_psi, psi_abs, ne, dn_e_dpsi)
+CALL pchip_deriv(n_psi, psi_abs, ni, dn_i_dpsi)
 ! In the Fortran internal convention psi increases LCFS→axis (opposite to the
 ! standard Sauter/Redl derivation where psi increases axis→LCFS).  Negate
 ! all gradients so the bootstrap formula sees the conventional sign.
