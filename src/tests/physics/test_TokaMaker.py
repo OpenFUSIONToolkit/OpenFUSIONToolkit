@@ -1554,7 +1554,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     # --- Extract 1D profiles ---
     psi_i, F_i, Fp_i, P_i, Pp_i = mygs.get_profiles(npsi=n_sample, psi_pad=1e-3)
     _, q_i, ravgs_i, _, _, _     = mygs.get_q(npsi=n_sample, psi_pad=1e-3)
-    jtor_i = F_i * Fp_i * ravgs_i[1] / mu0 + Pp_i * ravgs_i[0]
+    jtor_i = F_i * Fp_i * ravgs_i['<1/R>'] / mu0 + Pp_i * ravgs_i['<R>']
 
     eq_info['jphi_axis'] = float(jtor_i[0])
     eq_info['jphi_max']  = float(np.max(np.abs(jtor_i)))

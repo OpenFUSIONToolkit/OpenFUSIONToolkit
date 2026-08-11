@@ -242,7 +242,7 @@ if run_external:
     # --- Extract 1D profiles ---
     psi_e, F_e, Fp_e, P_e, Pp_e = mygs.get_profiles(npsi=n_sample_plot, psi_pad=1e-3)
     _, q_e, ravgs_e, _, _, _     = mygs.get_q(npsi=n_sample_plot, psi_pad=1e-3)
-    jtor_e = F_e * Fp_e * ravgs_e[1] / mu0 + Pp_e * ravgs_e[0]
+    jtor_e = F_e * Fp_e * ravgs_e['<1/R>'] / mu0 + Pp_e * ravgs_e['<R>']
 
 # ---------------------------------------------------------------------------
 # Run internal bootstrap
@@ -298,7 +298,7 @@ if run_internal:
     # --- Extract 1D profiles ---
     psi_i, F_i, Fp_i, P_i, Pp_i = mygs.get_profiles(npsi=n_sample_plot, psi_pad=1e-3)
     _, q_i, ravgs_i, _, _, _     = mygs.get_q(npsi=n_sample_plot, psi_pad=1e-3)
-    jtor_i = F_i * Fp_i * ravgs_i[1] / mu0 + Pp_i * ravgs_i[0]
+    jtor_i = F_i * Fp_i * ravgs_i['<1/R>'] / mu0 + Pp_i * ravgs_i['<R>']
 
 
 # ---------------------------------------------------------------------------
