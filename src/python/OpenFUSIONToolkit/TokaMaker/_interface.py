@@ -37,7 +37,7 @@ class tokamaker_boot_ops_struct(c_struct):
      - `scale_jBS` Scaling factor applied to the spike profile (default 1.0)
      - `djBS_tol` Threshold on relative change in j_BS to freeze bootstrap values (default 1e-4)
      - `diagnose_bs` Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration?
-     - `taper_edge_jBS` Smooth taper of toroidal current to zero at the plasma edge (guards against numerical issues at the separatrix; default True)
+     - `taper_edge_jBS` Smooth taper of toroidal current to zero at the plasma edge (guards against numerical issues at the separatrix; default False)
      - `taper_edge_psi0` psi_N where the taper begins (standard: 0=axis, 1=LCFS; default 0.999)
      - `taper_edge_shape` Taper shape: 1=cos²/Hann, 2=quintic smoothstep (default), 3=cubic power
     '''

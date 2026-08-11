@@ -41,7 +41,7 @@ TYPE :: boot_ops
   REAL(r8) :: scale_jBS = 1.0_r8 !< Scaling factor applied to the spike profile (default 1)
   REAL(r8) :: djBS_tol = 1.0e-4_r8 !< Threshold on rel. change in bootstrap current to stop recalculation (increasing solve speed)
   LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration
-  LOGICAL :: taper_edge_jBS = .TRUE. !< Smooth taper of toroidal current to zero at plasma edge (guards against numerical issues at the separatrix)
+  LOGICAL :: taper_edge_jBS = .FALSE. !< Smooth taper of toroidal current to zero at plasma edge (guards against numerical issues at the separatrix)
   REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
   INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
 END TYPE boot_ops

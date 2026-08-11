@@ -865,7 +865,7 @@ class TokaMaker():
         @param scale_jBS Scaling factor applied to the spike profile. (Internal default: 1.0)
         @param djBS_tol Threshold on relative change in j_BS to freeze bootstrap values. (Internal default: 1e-4)
         @param diagnose_bs Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration. (Internal default: False)
-        @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge. (Internal default: True)
+        @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge. (Internal default: False)
         @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
         @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
         '''
@@ -2316,7 +2316,7 @@ class TokaMaker():
         @param scale_jBS Scaling factor applied to the bootstrap current profile (default: 1.0)
         @param djBS_tol Threshold on relative change in j_BS to freeze bootstrap values (influences solve speed) (default: 1e-4)
         @param diagnose_bs Print detailed output at each NL iteration (default: False)
-        @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge (default: True)
+        @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge (default: False)
         @param taper_edge_psi0 \f$\hat{\psi_n}\f$ (0=axis, 1=LCFS) where the taper begins (default: 0.999)
         @param taper_edge_shape Taper shape: 1=cos\f$^2\f$/Hann, 2=quintic smoothstep, 3=cubic power
           (default: 2)
@@ -2917,7 +2917,7 @@ class TokaMaker_equilibrium():
         @param scale_jBS Scaling factor applied to the spike profile. (Internal default: 1.0)
         @param djBS_tol Threshold on relative change in j_BS to freeze bootstrap values. Influences bootstrap solve walltime (Internal default: 1e-4)
         @param diagnose_bs Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration. (Internal default: False)
-        @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge. (Internal default: True)
+        @param taper_edge_jBS Smoothly taper toroidal current to zero at the plasma edge. (Internal default: False)
         @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
         @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
         '''
@@ -2929,7 +2929,7 @@ class TokaMaker_equilibrium():
                 'scale_jBS': 1.0,
                 'djBS_tol': 1.0e-4,
                 'diagnose_bs': False,
-                'taper_edge_jBS': True,
+                'taper_edge_jBS': False,
                 'taper_edge_psi0': 0.999,
                 'taper_edge_shape': 2,
             }

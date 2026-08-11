@@ -89,7 +89,7 @@ TYPE, BIND(C) :: tokamaker_boot_ops_type
   REAL(c_double)  :: scale_jBS = 1.0d0           !< Scaling factor for j_BS
   REAL(c_double)  :: djBS_tol = 1.0d-4            !< Threshold on rel. change in j_BS to freeze values
   LOGICAL(c_bool) :: diagnose_bs = .FALSE.        !< Print diagnostic output
-  LOGICAL(c_bool) :: taper_edge_jBS = .TRUE.      !< Taper j_BS at edge (guards against separatrix issues)
+  LOGICAL(c_bool) :: taper_edge_jBS = .FALSE.      !< Taper j_BS at edge (guards against separatrix issues)
   REAL(c_double)  :: taper_edge_psi0 = 0.999d0   !< Taper onset psi_N (default 0.999)
   INTEGER(c_int)  :: taper_edge_shape = 2         !< Taper shape: 2 = quintic smoothstep (default)
 END TYPE tokamaker_boot_ops_type
