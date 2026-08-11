@@ -1506,10 +1506,10 @@ END SUBROUTINE curve_fit_edge_jbs
 !> Translated from Python bootstrap.py: analyze_bootstrap_edge_spike
 !>
 !> The routine performs the following steps:
-!>   1. Locates the dominant local peak with j_BS > 0 in the edge region
-!>      (psi_N > 0.7).  When several peaks exist the one closest to the
-!>      separatrix (largest psi_N) is chosen.  A warning is emitted if
-!>      that peak is not also the tallest among qualifying peaks.
+!>   1. Locates the highest local peak (whose prominence exceeds 5%)
+!>      in psi_N in [0.85,1.0], else the rightmost peak for psi_N > 0.7.  
+!>      With no edge region or no qualifying peak the un-isolated profile 
+!>      is returned (with a warning) rather than zeros.
 !>   2. Finds the minimum of j_BS between psi_N = 0.5 and the peak (the
 !>      flat-core stitching level, lmin_j_BS).
 !>   3. Builds masked_spike: flat at lmin_j_BS for psi_N below the minimum
@@ -1538,9 +1538,12 @@ REAL(r8),    INTENT(out) :: masked_spike(n)        !< Isolated edge spike splice
 REAL(r8), OPTIONAL, INTENT(out) :: parameterized_spike(n) !< parametrise_edge_jbs fit on full grid [A/m^2]
 LOGICAL,  OPTIONAL, INTENT(in)  :: diagnose               !< If .TRUE., print fit parameters and profile table
 !---
-INTEGER(i4) :: i, peak_idx, lmin_idx, left_idx, right_idx, idx_start, idx_end
+INTEGER(i4) :: i, k, peak_idx, far_idx, lmin_idx, left_idx, right_idx
+INTEGER(i4) :: idx_start, idx_end
 INTEGER(i4) :: n_fit
 LOGICAL     :: has_edge, fit_ok
+REAL(r8)    :: far_height, half_max, dist_tmp
+REAL(r8)    :: j_edge_max, min_prominence, prom, left_base, right_base
 REAL(r8)    :: peak_psi, peak_height, lmin_j_BS, fwhm
 REAL(r8)    :: jBS_min_loc, dist_to_peak, blend_width_val, x_start, x_end
 REAL(r8)    :: dist_start, dist_end
@@ -1551,38 +1554,73 @@ REAL(r8)    :: lb(7), ub(7)
 REAL(r8)    :: amp_lo, amp_hi, off_lo, off_hi, ysep_hi, eps_tmp
 REAL(r8)    :: amp_fit, center_fit, width_fit, offset_fit, sk_fit, y_sep_fit, bw_fit
 REAL(r8), ALLOCATABLE :: psi_fit(:), j_fit(:)
-CHARACTER(len=256) :: char_buf
 ! =====================================================================
-! 1. Find the dominant local peak in the edge region (psi_N > 0.7)
-!    with j_BS > 0.  Among all qualifying peaks choose the one with
-!    the largest psi_N value (closest to the separatrix).
-!    Warn if that peak is not also the tallest.
-!    Mirrors: peaks[numpy.argmax(psi_edge[peaks])] in Python.
+! 1. Find the highest local peak (whose prominence exceeds 5%)
+!    in psi_N in [0.85,1.0], else the rightmost peak for psi_N > 0.7.  
+!    Fall back to the input j_BS if no edge region or no qualifying peak.
 ! =====================================================================
-peak_idx    = -1
-best_psi    = -1.0_r8
-best_height = -1.0_r8
-DO i = 2, n-1
-  IF (psi_N(i) < 0.7_r8)          CYCLE
-  IF (j_BS(i) <= 0.0_r8)      CYCLE
-  IF (j_BS(i) <= j_BS(i-1)) CYCLE
-  IF (j_BS(i) <= j_BS(i+1)) CYCLE
-  IF (j_BS(i) > best_height) best_height = j_BS(i)
-  IF (psi_N(i) > best_psi) THEN
-    peak_idx = i
-    best_psi = psi_N(i)
+has_edge   = .FALSE.
+j_edge_max = 0.0_r8
+DO i = 1, n
+  IF (psi_N(i) >= 0.7_r8) THEN
+    IF (has_edge) THEN
+      j_edge_max = MAX(j_edge_max, j_BS(i))
+    ELSE
+      j_edge_max = j_BS(i)
+      has_edge   = .TRUE.
+    END IF
   END IF
 END DO
-IF (peak_idx >= 1 .AND. j_BS(peak_idx) < best_height) THEN
-  WRITE(char_buf,'(A,ES12.4,A,ES12.4)') &
-    '[analyze_bootstrap_edge_spike] dominant (rightmost) peak height=', j_BS(peak_idx), &
-    ' is not the tallest peak; tallest=', best_height
-  CALL oft_warn(TRIM(char_buf))
+IF (.NOT. has_edge) THEN
+  CALL oft_warn('[analyze_bootstrap_edge_spike] no edge '// &
+    'region (psi_N >= 0.7) in profile; using '// &
+    'bootstrap profile without edge isolation')
+  masked_spike = j_BS
+  IF (PRESENT(parameterized_spike)) parameterized_spike = j_BS
+  RETURN
 END IF
+IF (j_edge_max > 0.0_r8) THEN
+  min_prominence = 0.05_r8 * j_edge_max
+ELSE
+  min_prominence = 0.0_r8
+END IF
+peak_idx   = -1        ! rightmost qualifying peak
+far_idx    = -1        ! tallest far-edge peak (psi_N > 0.85)
+far_height = -1.0_r8
+DO i = 2, n-1
+  IF (psi_N(i) < 0.7_r8)    CYCLE
+  IF (j_BS(i) <= 0.0_r8)    CYCLE
+  IF (j_BS(i) <= j_BS(i-1)) CYCLE
+  IF (j_BS(i) <= j_BS(i+1)) CYCLE
+  ! Prominence = peak minus the higher of the two bases (nearest minima
+  ! before a taller point on each side, within the psi_N >= 0.7 slice).
+  left_base = j_BS(i)
+  DO k = i-1, 1, -1
+    IF (psi_N(k) < 0.7_r8)  EXIT
+    IF (j_BS(k) > j_BS(i))  EXIT
+    left_base = MIN(left_base, j_BS(k))
+  END DO
+  right_base = j_BS(i)
+  DO k = i+1, n
+    IF (j_BS(k) > j_BS(i))  EXIT
+    right_base = MIN(right_base, j_BS(k))
+  END DO
+  prom = j_BS(i) - MAX(left_base, right_base)
+  IF (prom < min_prominence) CYCLE
+  peak_idx = i
+  IF (psi_N(i) > 0.85_r8 .AND. j_BS(i) > far_height) THEN
+    far_idx    = i
+    far_height = j_BS(i)
+  END IF
+END DO
+! Prefer the tallest far-edge peak, else the rightmost.
+IF (far_idx >= 1) peak_idx = far_idx
 IF (peak_idx < 1) THEN
-  ! No clear peak found: return flat-zero profiles
-  masked_spike = 0.0_r8
-  IF (PRESENT(parameterized_spike)) parameterized_spike = 0.0_r8
+  CALL oft_warn('[analyze_bootstrap_edge_spike] no clear '// &
+    'edge peak found; using bootstrap profile '// &
+    'without edge isolation')
+  masked_spike = j_BS
+  IF (PRESENT(parameterized_spike)) parameterized_spike = j_BS
   RETURN
 END IF
 peak_psi    = psi_N(peak_idx)
