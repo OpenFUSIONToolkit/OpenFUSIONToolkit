@@ -42,7 +42,7 @@ OFT_build_xdmf = "OpenFUSIONToolkit._xdmf_cli:script_entry"
 OFT_convert_cubit = "OpenFUSIONToolkit._cubit_cli:script_entry"
 OFT_convert_gmsh = "OpenFUSIONToolkit._gmsh_cli:script_entry"
 OFT_ThinCurr_holes = "OpenFUSIONToolkit.ThinCurr._homology_cli:script_entry"
-OFT_ThinCurr_mesh_tool = "OpenFUSIONToolkit.ThinCurr._mesh_cli::script_entry"
+OFT_ThinCurr_mesh_tool = "OpenFUSIONToolkit.ThinCurr._mesh_cli:script_entry"
 
 [project.optional-dependencies]
 viz = ["pyvista"]

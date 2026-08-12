@@ -56,15 +56,13 @@ if(OFT_PACKAGE_BUILD AND OFT_PACKAGE_NIGHTLY)
   set( OFT_VER_SUFFIX "-${GIT_REV_HASH}" CACHE INTERNAL "Version suffix" )
 endif()
 
-if(OFT_BUILD_DOCS OR OFT_PACKAGE_BUILD OR OFT_DEBUG_STACK)
-  if(OFT_PACKAGE_BUILD AND OFT_PACKAGE_PYTHON)
-    if(APPLE AND (NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET))
-      message( FATAL_ERROR "Python package build on macOS requires the MACOSX_DEPLOYMENT_TARGET environment variable to be set" )
-    endif()
-    set(Python3_FIND_VIRTUALENV ONLY)
+if(OFT_PACKAGE_BUILD AND OFT_PACKAGE_PYTHON)
+  if(APPLE AND (NOT DEFINED CMAKE_OSX_DEPLOYMENT_TARGET))
+    message( FATAL_ERROR "Python package build on macOS requires the MACOSX_DEPLOYMENT_TARGET environment variable to be set" )
   endif()
-  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  set(Python3_FIND_VIRTUALENV ONLY)
 endif()
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
 ########################
 # Build documentation
@@ -492,9 +490,7 @@ if( OFT_BUILD_PYTHON )
     set(OFT_SHARED_LIBS ${ARGV0} ${OFT_SHARED_LIBS} CACHE INTERNAL "package_shared_libs")
   endfunction(oft_add_shared)
   # Library directories
-  add_subdirectory( python/OpenFUSIONToolkit )
-  add_subdirectory( python/wrappers )
-  add_subdirectory( python/scripts )
+  add_subdirectory( python )
 endif()
 
 ########################
