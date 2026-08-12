@@ -597,7 +597,11 @@ TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
 CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string('',error_str)
 !
-IF(B_dx>0.d0)tw_obj%B_dx=B_dx
+IF(B_dx>0.d0)THEN
+  tw_obj%B_dx=B_dx
+ELSE
+  tw_obj%B_dx=ABS(B_dx)*tw_obj%mesh%hrms
+END IF
 CALL copy_string_rev(cache_file,filename)
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr,hodlr_op)

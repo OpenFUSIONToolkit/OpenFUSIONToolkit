@@ -33,10 +33,10 @@ class ThinCurr():
         self._oft_env.oft_in_groups['thincurr_hodlr_options'] = {
             'target_size': '1200',
             'aca_min_its': '20',
-            'aca_sep_thresh': '1.1,1.1',
-            'L_svd_tol': '1.E-8',
+            'aca_sep_thresh': '1.0,1.1',
+            'L_svd_tol': '-1.E-5',
             'L_aca_rel_tol': '0.05',
-            'B_svd_tol': '1.E-3',
+            'B_svd_tol': '-1.E-5',
             'B_aca_rel_tol': '0.05'
         }
         self._oft_env.update_oft_in()
@@ -343,11 +343,11 @@ class ThinCurr():
             thincurr_apply_Lmat(self.tw_obj,field_in,c_void_p())
         return field_in
 
-    def compute_Bmat(self,cache_file=None,B_dx=1.E-3):
+    def compute_Bmat(self,cache_file=None,B_dx=-1.E-2):
         '''! Compute magnetic field reconstruction operators for this model
 
         @param cache_file Path to cache file to store/load matrix
-        @param B_dx Spatial step size for finite difference evaluation of B-field
+        @param B_dx Spatial step size for finite difference evaluation of B-field (negative values for relative sizing)
         @result Element B-field reconstruction matrix (`(:,:)` if HODLR is available else `None`)
         @result Icoil B-field reconstruction matrix `(:,:)`
         '''
