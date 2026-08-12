@@ -1079,7 +1079,7 @@ IF(compute_B)THEN
     CALL self%Uloc_pts%new(By)
     CALL self%Uloc_pts%new(Bz)
   ELSE
-    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self)
+    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self,self%B_dx)
   END IF
 END IF
 !
@@ -1334,7 +1334,7 @@ IF(compute_B)THEN
     END DO
     DEALLOCATE(pvals)
   ELSE
-    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self)
+    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self,self%B_dx)
     CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &
       self%Bel(:,:,1),self%mesh%np,eig_vec,self%nelems,0.d0,Bxtmp,self%mesh%np)
     CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &

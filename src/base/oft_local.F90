@@ -56,12 +56,13 @@ INTERFACE
 !------------------------------------------------------------------------------
 !> Simple in-memory hashing function for dataset checksumming
 !------------------------------------------------------------------------------
-  FUNCTION oft_simple_hash(key,length)  BIND(C)
+  FUNCTION oft_simple_hash_c(key,length,starting_value)  BIND(C)
     IMPORT c_int, c_long, c_ptr
-    INTEGER(c_int) :: oft_simple_hash !< Hash of data
+    INTEGER(c_int) :: oft_simple_hash_c !< Hash of data
     TYPE(c_ptr), VALUE, INTENT(in) :: key !< Location of data
     INTEGER(c_long), VALUE, INTENT(in) :: length !< Length of data to hash in bytes
-  END FUNCTION oft_simple_hash
+    INTEGER(c_int), VALUE, INTENT(in) :: starting_value !< Starting value for the hash
+  END FUNCTION oft_simple_hash_c
 END INTERFACE
 !------------------------------------------------------------------------------
 !> One dimensional integer set
@@ -129,6 +130,20 @@ CONTAINS
 END TYPE oft_timer
 PRIVATE oft_timer_start, oft_timer_elapsed, oft_timer_intelapsed, oft_timer_timeout
 CONTAINS
+!------------------------------------------------------------------------------
+!> Simple in-memory hashing function for dataset checksumming
+!------------------------------------------------------------------------------
+FUNCTION oft_simple_hash(key,length,starting_value) RESULT(data_hash)
+TYPE(c_ptr), INTENT(in) :: key !< Location of data
+INTEGER(c_long), INTENT(in) :: length !< Length of data to hash in bytes
+INTEGER(c_int), OPTIONAL, INTENT(in) :: starting_value !< Starting value for the hash
+INTEGER(c_int) :: data_hash !< Hash of data
+IF(PRESENT(starting_value))THEN
+  data_hash=oft_simple_hash_c(key,length,starting_value)
+ELSE
+  data_hash=oft_simple_hash_c(key,length,0)
+END IF
+END FUNCTION oft_simple_hash
 !---------------------------------------------------------------------------------
 !> Returns the corresponding lowercase letter, if `c` is an uppercase
 !! ASCII character, otherwise `c` itself.

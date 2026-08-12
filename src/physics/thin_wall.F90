@@ -116,6 +116,7 @@ TYPE :: tw_type
   INTEGER(i4) :: nholes = 0 !< Number of "holes" in model
   INTEGER(i4) :: nclosures = 0 !< Number of "closures" in model
   INTEGER(i4) :: nfh = 0 !< Number of face-hole interactions
+  REAL(r8) :: B_dx = 1.d-3 !< Spatial step size for finite difference evaluation of B-field
   LOGICAL, POINTER, DIMENSION(:) :: sens_mask => NULL() !< Mask array for sensors [nreg]
   INTEGER(i4), POINTER, DIMENSION(:) :: pmap => NULL() !< Map from mesh vertices to active vertices [mesh%np]
   INTEGER(i4), POINTER, DIMENSION(:) :: kpmap_inv => NULL() !< Map from active vertices to mesh vertices [np_active]
@@ -2004,13 +2005,13 @@ END FUNCTION tw_compute_phipot
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Bops(self,save_file)
+SUBROUTINE tw_compute_Bops(self,B_dx,save_file)
 TYPE(tw_type), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: B_dx
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-REAL(8), PARAMETER :: B_dx = 1.d-6
 INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
 LOGICAL :: is_neighbor,load_success
 CLASS(oft_bmesh), POINTER :: bmesh

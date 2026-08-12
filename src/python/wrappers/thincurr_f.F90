@@ -583,9 +583,10 @@ END SUBROUTINE thincurr_Lmat
 !---------------------------------------------------------------------------------
 !> Compute magnetic field reconstruction operators for a ThinCurr model
 !---------------------------------------------------------------------------------
-SUBROUTINE thincurr_Bmat(tw_ptr,hodlr_ptr,Bmat_ptr,Bdr_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Bmat")
+SUBROUTINE thincurr_Bmat(tw_ptr,hodlr_ptr,B_dx,Bmat_ptr,Bdr_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Bmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< ThinCurr object
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< HODLR operator or null
+REAL(KIND=c_double), VALUE, INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
 TYPE(c_ptr), INTENT(out) :: Bmat_ptr !< Magnetic field reconstruction operator
 TYPE(c_ptr), INTENT(out) :: Bdr_ptr !< Magnetic field reconstruction operator for Icoils
 CHARACTER(KIND=c_char), INTENT(in) :: cache_file(OFT_PATH_SLEN) !< Path to cache file
@@ -596,6 +597,7 @@ TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
 CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string('',error_str)
 !
+IF(B_dx>0.d0)tw_obj%B_dx=B_dx
 CALL copy_string_rev(cache_file,filename)
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr,hodlr_op)
@@ -608,9 +610,9 @@ IF(c_associated(hodlr_ptr))THEN
   Bdr_ptr=C_LOC(hodlr_op%Icoil_Bmat)
 ELSE
   IF(TRIM(filename)=='')THEN
-    CALL tw_compute_Bops(tw_obj)
+    CALL tw_compute_Bops(tw_obj,tw_obj%B_dx)
   ELSE
-    CALL tw_compute_Bops(tw_obj,save_file=filename)
+    CALL tw_compute_Bops(tw_obj,tw_obj%B_dx,save_file=filename)
   END IF
   Bmat_ptr=C_LOC(tw_obj%Bel)
   Bdr_ptr=C_LOC(tw_obj%Bdr)

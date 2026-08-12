@@ -14,6 +14,7 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 MODULE thin_wall_hodlr
+USE, INTRINSIC :: iso_c_binding, ONLY: c_int, c_float, c_sizeof
 USE thin_wall
 IMPLICIT NONE
 #include "local.h"
@@ -57,7 +58,6 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: L_aca_tol = -1.d0 !< ACA+ tolerance for inductance matrix
   REAL(8) :: B_svd_tol = -1.d0 !< SVD tolerance for B-field operators
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
-  REAL(8) :: B_dx = 1.d-3 !< Spatial step size for finite difference evaluation of B-field
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_blocks => NULL() !< Indices of compressed off-diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: L_thread_ptr => NULL()
@@ -135,6 +135,12 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => rbjprecond_delete
 END TYPE oft_tw_hodlr_rbjpre
+! Helper struct for HODLR matrices settings hash
+TYPE, BIND(c) :: HODLR_hash
+  INTEGER(c_int) :: nsparse
+  REAL(c_float) :: svd_tol
+  REAL(c_float) :: aca_tol
+END TYPE HODLR_hash
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
@@ -722,9 +728,8 @@ REAL(8) :: L_svd_tol = -1.d0
 REAL(8) :: L_aca_rel_tol = -1.d0
 REAL(8) :: B_svd_tol = -1.d0
 REAL(8) :: B_aca_rel_tol = -1.d0
-REAL(8) :: B_dx = 1.d-3
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
-  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,B_dx
+  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -763,7 +768,6 @@ B_approx_scale = 0.5d0/self%tw_obj%mesh%hrms
 IF(B_svd_tol<0.d0)B_svd_tol=ABS(B_svd_tol)*B_approx_scale
 self%B_svd_tol=B_svd_tol
 self%B_aca_tol=B_aca_rel_tol*self%B_svd_tol
-self%B_dx=B_dx
 !---Partition mesh
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Partitioning grid for block low rank compressed operators'
@@ -854,8 +858,8 @@ WRITE(*,'(2A,I6)')oft_indent,'Avg block size = ',INT(avg_size/REAL(self%nblocks,
 IF(self%L_aca_tol<=0.d0)THEN
   sparse_count=[0,sparse_count(1)+sparse_count(2)]
 END IF
-WRITE(*,'(2A,I6)')oft_indent,'# of SVD =       ',sparse_count(2)
-WRITE(*,'(2A,I6)')oft_indent,'# of ACA =       ',sparse_count(1)
+WRITE(*,'(2A,I6)')oft_indent,'# of SVD  =      ',sparse_count(2)
+WRITE(*,'(2A,I6)')oft_indent,'# of ACA+ =      ',sparse_count(1)
 CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')
 ALLOCATE(cell_mark(self%tw_obj%mesh%nc))
 DO j=1,self%nlevels
@@ -913,6 +917,8 @@ type(oft_timer) :: mytimer
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Building block low rank inductance operator'
 CALL oft_increase_indent
+WRITE(*,'(2A,ES9.2)')oft_indent,'SVD tolerance:  ',self%L_svd_tol
+WRITE(*,'(2A,ES9.2)')oft_indent,'ACA+ tolerance: ',self%L_aca_tol
 IF(self%L_svd_tol<0.d0)CALL oft_abort('"L_svd_tol" must be > 0','tw_Lmat_MF_Lcompute',__FILE__)
 !---Build matrix with ACA+ or SVD compression of off-diagonal blocks
 CALL mytimer%tick()
@@ -929,7 +935,6 @@ IF(PRESENT(save_file))CALL load_from_file()
 compressed_size=0
 mat_updated=.FALSE.
 WRITE(*,'(2A)')oft_indent,'Building diagonal blocks'
-costs=0.d0
 ALLOCATE(dense_sizes(self%ndense),sparse_sizes(self%nsparse))
 dense_sizes=0
 sparse_sizes=0
@@ -1044,12 +1049,19 @@ CONTAINS
 SUBROUTINE save_to_file()
 INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
 CHARACTER(LEN=5) :: matrix_id
+TYPE(HODLR_hash), TARGET :: sparse_hash
 !---Save computed matrix to file
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%tw_obj%nelems
   hash_tmp(2) = self%tw_obj%mesh%nc
   hash_tmp(3) = self%ndense
-  hash_tmp(4) = self%nsparse
+  sparse_hash%nsparse = self%nsparse
+  sparse_hash%aca_tol = REAL(self%L_aca_tol,c_float)
+  sparse_hash%svd_tol = REAL(self%L_svd_tol,c_float)
+  hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+  DO i=1,self%nlevels
+    hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
+  END DO
   hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
   WRITE(*,'(3A)')oft_indent,'Saving HODLR matrix to file: ',TRIM(save_file)
@@ -1099,6 +1111,7 @@ SUBROUTINE load_from_file()
 LOGICAL :: exists
 INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
 CHARACTER(LEN=5) :: matrix_id
+TYPE(HODLR_hash), TARGET :: sparse_hash
 !---Try to load from file
 IF(TRIM(save_file)/='none')THEN
   INQUIRE(FILE=TRIM(save_file),EXIST=exists)
@@ -1106,7 +1119,13 @@ IF(TRIM(save_file)/='none')THEN
     hash_tmp(1) = self%tw_obj%nelems
     hash_tmp(2) = self%tw_obj%mesh%nc
     hash_tmp(3) = self%ndense
-    hash_tmp(4) = self%nsparse
+    sparse_hash%nsparse = self%nsparse
+    sparse_hash%aca_tol = REAL(self%L_aca_tol,c_float)
+    sparse_hash%svd_tol = REAL(self%L_svd_tol,c_float)
+    hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+    DO i=1,self%nlevels
+      hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
+    END DO
     hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
     hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
     WRITE(*,'(3A)')oft_indent,'Reading HODLR matrix from file: ',TRIM(save_file)
@@ -1159,6 +1178,10 @@ IF(TRIM(save_file)/='none')THEN
       END DO
     ELSE
       WRITE(*,'(3A)')oft_indent,'Ignoring stored matrix, Model hashes do not match'
+      IF(oft_debug_print(1))THEN
+        WRITE(*,*)'File: ',file_counts
+        WRITE(*,*)'Model:',hash_tmp
+      END IF
     END IF
     CALL oft_decrease_indent
   END IF
@@ -1623,6 +1646,8 @@ type(oft_timer) :: mytimer
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Building block low rank magnetic field operator'
 CALL oft_increase_indent
+WRITE(*,'(2A,ES9.2)')oft_indent,'SVD tolerance:  ',self%B_svd_tol
+WRITE(*,'(2A,ES9.2)')oft_indent,'ACA+ tolerance: ',self%B_aca_tol
 IF(self%B_svd_tol<0.d0)CALL oft_abort('"B_svd_tol" must be > 0','tw_Lmat_MF_Bcompute',__FILE__)
 !---Build matrix with SVD compression of off-diagonal blocks
 ! approximation with ACA+ planned
@@ -1636,7 +1661,7 @@ WRITE(*,'(2A)')oft_indent,'Building hole, Vcoil and Icoil columns'
 IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
   ALLOCATE(self%hole_Vcoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%nholes+self%tw_obj%n_vcoils),3))
   ALLOCATE(self%Icoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%n_icoils),3))
-  CALL tw_compute_Bops_hole(self%tw_obj,self%hole_Vcoil_Bmat,self%Icoil_Bmat,self%B_dx)
+  CALL tw_compute_Bops_hole(self%tw_obj,self%hole_Vcoil_Bmat,self%Icoil_Bmat,self%tw_obj%B_dx)
   self%tw_obj%Bdr=>self%Icoil_Bmat
 END IF
 !
@@ -1664,7 +1689,7 @@ DO i=1,self%ndense
       mat_updated=.TRUE.
       ALLOCATE(self%dense_B_mats(i,dim)%M(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems))
       CALL tw_compute_Bops_block(self%tw_obj,self%dense_B_mats(i,dim)%M, &
-        self%levels(level)%blocks(k),self%levels(level)%blocks(j),dim,self%B_dx)
+        self%levels(level)%blocks(k),self%levels(level)%blocks(j),dim,self%tw_obj%B_dx)
     END IF
   END DO
   dense_sizes(i) = 3*self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
@@ -1715,7 +1740,7 @@ DO i=1,self%nsparse
         IF(size_out<0)THEN
           ALLOCATE(self%aca_B_dense(ii,dim)%M(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems))
           CALL tw_compute_Bops_block(self%tw_obj,self%aca_B_dense(ii,dim)%M, &
-            self%levels(level)%blocks(j),self%levels(level)%blocks(k),dim,self%B_dx)
+            self%levels(level)%blocks(j),self%levels(level)%blocks(k),dim,self%tw_obj%B_dx)
           CALL compress_block(ii,j,k,dim,self%B_svd_tol,size_out)
           ! size_out = self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
         END IF
@@ -1772,12 +1797,19 @@ SUBROUTINE save_to_file()
 INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
 CHARACTER(LEN=1) :: dim_id
 CHARACTER(LEN=5) :: matrix_id
+TYPE(HODLR_hash), TARGET :: sparse_hash
 !---Save computed matrix to file
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%tw_obj%nelems
   hash_tmp(2) = self%tw_obj%mesh%nc
   hash_tmp(3) = self%ndense
-  hash_tmp(4) = self%nsparse
+  sparse_hash%nsparse = self%nsparse
+  sparse_hash%aca_tol = REAL(self%B_aca_tol,c_float)
+  sparse_hash%svd_tol = REAL(self%B_svd_tol,c_float)
+  hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+  DO i=1,self%nlevels
+    hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
+  END DO
   hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
   WRITE(*,'(3A)')oft_indent,'Saving HODLR matrix from file: ',TRIM(save_file)
@@ -1840,6 +1872,7 @@ INTEGER(4) :: ierr,io_unit,hash_tmp(6),file_counts(6)
 LOGICAL :: exists
 CHARACTER(LEN=1) :: dim_id
 CHARACTER(LEN=5) :: matrix_id
+TYPE(HODLR_hash), TARGET :: sparse_hash
 !---Try to load from file
 IF(TRIM(save_file)/='none')THEN
   INQUIRE(FILE=TRIM(save_file),EXIST=exists)
@@ -1847,7 +1880,13 @@ IF(TRIM(save_file)/='none')THEN
     hash_tmp(1) = self%tw_obj%nelems
     hash_tmp(2) = self%tw_obj%mesh%nc
     hash_tmp(3) = self%ndense
-    hash_tmp(4) = self%nsparse
+    sparse_hash%nsparse = self%nsparse
+    sparse_hash%aca_tol = REAL(self%B_aca_tol,c_float)
+    sparse_hash%svd_tol = REAL(self%B_svd_tol,c_float)
+    hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+    DO i=1,self%nlevels
+      hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
+    END DO
     hash_tmp(5) = oft_simple_hash(C_LOC(self%tw_obj%mesh%lc),INT(4*3*self%tw_obj%mesh%nc,8))
     hash_tmp(6) = oft_simple_hash(C_LOC(self%tw_obj%mesh%r),INT(8*3*self%tw_obj%mesh%np,8))
     WRITE(*,'(3A)')oft_indent,'Reading HODLR matrix from file: ',TRIM(save_file)
@@ -1922,6 +1961,10 @@ IF(TRIM(save_file)/='none')THEN
       ! CLOSE(io_unit)
     ELSE
       WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Model hashes do not match'
+      IF(oft_debug_print(1))THEN
+        WRITE(*,*)'File: ',file_counts
+        WRITE(*,*)'Model:',hash_tmp
+      END IF
       ! CLOSE(io_unit)
     END IF
     CALL oft_decrease_indent
@@ -2072,7 +2115,7 @@ k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
 tmp_block%ncells=k2-k1+1
 tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
 CALL tw_compute_Bops_block(self%tw_obj,RIref, &
-  tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%B_dx)
+  tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%tw_obj%B_dx)
 ! DO i=1,nterms
 !   RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
 ! END DO
@@ -2082,7 +2125,7 @@ CALL tw_compute_Bops_block(self%tw_obj,RIref, &
 ! END DO
 tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jref)
 CALL tw_compute_Bops_block(self%tw_obj,RJref, &
-  self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%B_dx)
+  self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%tw_obj%B_dx)
 ! DO i=1,nterms
 !   RJref(:,1) = RJref(:,1) - us(:,i)*vs(i,Jref)
 ! END DO
@@ -2109,7 +2152,7 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIstar, &
-      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%B_dx)
+      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%tw_obj%B_dx)
     DO i=1,nterms
       RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
     END DO
@@ -2121,7 +2164,7 @@ DO k=1,max_iter
     ! Calculate the corresponding residual column!
     tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jstar)
     CALL tw_compute_Bops_block(self%tw_obj,RJstar, &
-      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%B_dx)
+      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%tw_obj%B_dx)
     DO i=1,nterms
       RJstar(1,:) = RJstar(1,:) - us(:,i)*vs(i,Jstar)
     END DO
@@ -2130,7 +2173,7 @@ DO k=1,max_iter
     ! of the residual matrix.
     tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jstar)
     CALL tw_compute_Bops_block(self%tw_obj,RJstar, &
-      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%B_dx)
+      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%tw_obj%B_dx)
     DO i=1,nterms
       RJstar(1,:) = RJstar(1,:) - us(:,i)*vs(i,Jstar)
     END DO
@@ -2148,7 +2191,7 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIstar, &
-      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%B_dx)
+      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%tw_obj%B_dx)
     DO i=1,nterms
       RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
     END DO
@@ -2192,7 +2235,7 @@ DO k=1,max_iter
     tmp_block%ncells=k2-k1+1
     tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
     CALL tw_compute_Bops_block(self%tw_obj,RIref, &
-      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%B_dx)
+      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%tw_obj%B_dx)
     DO i=1,nterms
       RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
     END DO
@@ -2209,7 +2252,7 @@ DO k=1,max_iter
     END DO
     tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jref)
     CALL tw_compute_Bops_block(self%tw_obj,RJref, &
-      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%B_dx)
+      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%tw_obj%B_dx)
     DO i=1,nterms
       RJref(1,:) = RJref(1,:) - us(:,i)*vs(i,Jref)
     END DO
