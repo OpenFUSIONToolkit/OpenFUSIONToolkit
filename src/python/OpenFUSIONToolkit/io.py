@@ -279,8 +279,29 @@ class histfile:
         return result
 
 
+## @page convert_hist `OFT_convert_hist`: Convert OFT history files to MATLAB or HDF5
+#
+# @section convert_hist_desc Description and options
+# This script converts OFT history files to MATLAB or HDF5
+#
+#```shell
+# usage: OFT_convert_hist [-h] --files FILES [FILES ...] [--convert_hdf5] [--convert_matlab]
+#
+# Convert OFT history files to MATLAB or HDF5
+#
+# options:
+#   -h, --help            show this help message and exit
+#   --files FILES [FILES ...]
+#                         Files to view or convert
+#   --convert_hdf5        Convert files to HDF5? (default: False)
+#   --convert_matlab      Convert files to MATLAB? (default: False)
+#```
+
 def _convert_hist_cli():
-    r'''! Command line entry point for converting OFT history files to MATLAB or HDF5'''
+    r'''! Command line entry point for converting OFT history files to MATLAB or HDF5
+
+    See @ref convert_hist
+    '''
     import argparse
     parser = argparse.ArgumentParser()
     parser.description = "Convert OFT history files to MATLAB or HDF5"

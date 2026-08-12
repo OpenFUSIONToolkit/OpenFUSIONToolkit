@@ -13,10 +13,13 @@ flowing in thin conducting structures (2D sheets in 3D geometry)
 ThinCurr should primarily be used through the python interface using the \ref OpenFUSIONToolkit.ThinCurr "OpenFUSIONToolkit.ThinCurr" python module
 and the \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr "OpenFUSIONToolkit.ThinCurr.ThinCurr" class.
 
+\section doc_tw_scripts ThinCurr helper scripts
+ - \subpage thincurr_holes_tool
+ - \subpage thincurr_mesh_tool
+
 \section doc_tw_main_ex ThinCurr Examples
 The following examples illustrate usage of ThinCurr to perform calculations using the thin-wall model.
 
-**Python interface (recommended)**
  - \subpage doc_tCurr_plate_eig
  - \subpage doc_tCurr_cyl_td
  - \subpage doc_tCurr_cyl_td-jumpers

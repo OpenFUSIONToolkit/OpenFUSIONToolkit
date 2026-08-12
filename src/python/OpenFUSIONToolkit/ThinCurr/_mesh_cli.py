@@ -3,75 +3,120 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-'''!Utility for manipulating and combining ThinCurr surface meshes.
-
-This script operates on 3-node (linear) triangular surface meshes stored in the
-Open FUSION Toolkit "native" HDF5 mesh format. Mesh I/O is delegated to
-@ref OpenFUSIONToolkit.ThinCurr.meshing.read_ThinCurr_mesh "read_ThinCurr_mesh"
-and @ref OpenFUSIONToolkit.ThinCurr.meshing.write_ThinCurr_mesh "write_ThinCurr_mesh",
-so ThinCurr properties (holes, closures, conductivity, thickness, periodicity) are
-read and written through the standard library routines. It supports two top-level
-workflows via sub-commands:
-
-Combine two (or more) existing mesh files into a single mesh:
-
-    python ThinCurr_mesh_tool.py combine --in_files a.h5 b.h5 --out_file combined.h5
-
-Modify a single mesh file by removing regions, applying a rigid transform, and/or
-generating multiple shifted/rotated copies:
-
-    # Remove regions 2 and 3
-    python ThinCurr_mesh_tool.py modify --in_file a.h5 --remove_regions 2 3
-
-    # Shift the whole mesh by (0,0,0.5)
-    python ThinCurr_mesh_tool.py modify --in_file a.h5 --shift 0 0 0.5
-
-    # Stretch the mesh by 2x along x (scale about the origin)
-    python ThinCurr_mesh_tool.py modify --in_file a.h5 --scale 2 1 1
-
-    # Build a 6-fold toroidal array (60 deg spacing about z):
-    # the original plus 5 rotated copies at 60,120,180,240,300 deg
-    python ThinCurr_mesh_tool.py modify --in_file segment.h5 --copies 5 --rotate z 60
-
-    # Set a uniform surface resistivity on all regions
-    python ThinCurr_mesh_tool.py modify --in_file a.h5 --eta_surf 1.257E-5
-
-    # Set per-region volumetric resistivity with thickness (2 regions)
-    python ThinCurr_mesh_tool.py modify --in_file a.h5 \
-        --eta_vol 1.257E-5 2.5E-5 --thickness 1.0E-3 2.0E-3
-
-    # Read resistivity from an <oft><thincurr> XML input file
-    python ThinCurr_mesh_tool.py modify --in_file a.h5 --eta_from_xml oft_in.xml
-
-    # Treat the last two nodesets as jumpers; all others become holes
-    python ThinCurr_mesh_tool.py modify --in_file a.h5 --jumpers -1 -2
-
-    # Treat nodesets 2 and 3 as jumpers (half-open range [2:4))
-    python ThinCurr_mesh_tool.py modify --in_file a.h5 --jumper_range 2 4
-
-    # Treat nodesets 3 onward as jumpers (STOP omitted -> to the end)
-    python ThinCurr_mesh_tool.py modify --in_file a.h5 --jumper_range 3
-
-    # Mark every nodeset as a jumper
-    python ThinCurr_mesh_tool.py modify --in_file a.h5 --jumper_range 0
-
-By default the modify workflow treats every native NODESET loop as a hole and
-writes them as ThinCurr holes; --jumpers/--jumper_range reclassify selected
-nodesets (0-based, negative indexing allowed) as jumpers instead. The combine
-workflow aborts if any input still contains native NODESET entries.
-
-Only one of --shift, --rotate, or --scale may be given at a time. When --copies
-is given, --shift or --rotate defines the per-copy increment (--scale is not
-allowed); otherwise the transform is applied once to the whole mesh.
-
-@note Only linear 3-node triangular meshes are supported. High-order meshes or
-non-triangular cells will be rejected. ThinCurr properties (conductivity,
-thickness, periodicity) are preserved through geometry-only transforms but are
-dropped by structural operations (region removal, combination, replication).
+'''! ThinCurr mesh manipulation and combination utility script and supporting functions
 
 @authors Open FUSION Toolkit contributors
 @date July 2026
 '''
+
+## @page thincurr_mesh_tool `OFT_ThinCurr_mesh_tool`: ThinCurr mesh manipulation utility
+#
+# @tableofcontents
+#
+# @section thincurr_mesh_tool_desc Description
+# This script supports a variety of operations to add/modify information about ThinCurr models
+# as well as combining multiple models. It supports two top-level
+# workflows via sub-commands:
+#
+# Modify a single mesh file by removing regions, applying a rigid transform, and/or
+# generating multiple shifted/rotated copies:
+#
+#```shell
+# # Convert every nodeset in the file to a jumper
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --jumper_range 0
+#
+# # Set a uniform surface resistivity on all regions
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --eta_surf 1.257E-5
+#
+# # Copy resistivity from a ThinCurr XML input file
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --eta_from_xml oft_in.xml
+#
+# # Set per-region volumetric resistivity with thickness (2 regions)
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --eta_vol 1.257E-5 2.5E-5 --thickness 1.0E-3 2.0E-3
+#
+# # Remove regions 2 and 3
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --remove_regions 2 3
+#
+# # Shift the whole mesh by (0,0,0.5)
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --shift 0 0 0.5
+#
+# # Stretch the mesh by 2x along x (scale about the origin)
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --scale 2 1 1
+#
+# # Build a 6-fold toroidal array (60 deg spacing about z):
+# # the original plus 5 rotated copies at 60,120,180,240,300 deg
+# OFT_ThinCurr_mesh_tool modify --in_file segment_model.h5 --copies 5 --rotate z 60
+#```
+#
+# Combine two (or more) existing mesh files into a single mesh:
+#
+#```shell
+#OFT_ThinCurr_mesh_tool combine --in_files model1.h5 model2.h5 --out_file combined_model.h5
+#```
+#
+# In general, the \ref thincurr_compute_holes "OFT_thincurr_holes" utility should be used on the final
+# model to compute holes and colusures from the combined geometry. For compatibility with older models,
+# this script treats all NODESETs as holes by default, which will be overriden by the `OFT_thincurr_holes`
+# if run. For future meshes only NODESETs corresponding to jumpers should be specified, which can
+# be converted to jumpers instead of holes using the `--jumpers` or `--jumper_range` options.
+#
+# Only one of `--shift`, `--rotate`, or `--scale` may be given at a time. When `--copies`
+# is given, `--shift` or `--rotate` defines the per-copy increment (`--scale` is not
+# allowed); otherwise the transform is applied once to the whole mesh.
+#
+# @section thincurr_mesh_tool_opts Script Options
+# Script options for `modify` workflow:
+#
+#```shell
+#usage: OFT_ThinCurr_mesh_tool modify [-h] --in_file IN_FILE [--out_file OUT_FILE] [--remove_regions REMOVE_REGIONS [REMOVE_REGIONS ...]] [--shift X Y Z |
+#                                        --rotate AXIS ANGLE | --scale SX SY SZ] [--rotate_center X Y Z] [--copies COPIES] [--persist_regions]
+#                                        [--eta_surf ETA_SURF [ETA_SURF ...]] [--eta_vol ETA_VOL [ETA_VOL ...]] [--thickness THICKNESS [THICKNESS ...]]
+#                                        [--eta_from_xml ETA_FROM_XML] [--coils_from_xml COILS_FROM_XML] [--jumpers IDX [IDX ...] | --jumper_range N [N ...]]
+#
+#options:
+#  -h, --help            show this help message and exit
+#  --in_file IN_FILE     Input mesh file
+#  --out_file OUT_FILE   Output mesh file
+#  --remove_regions REMOVE_REGIONS [REMOVE_REGIONS ...]
+#                        Region indices to remove
+#  --shift X Y Z         Translation [X Y Z]. Applied once to the whole mesh, or as the per-copy increment when --copies is given
+#  --rotate AXIS ANGLE   Rotation of ANGLE degrees about AXIS (x|y|z). Applied once to the whole mesh, or as the per-copy increment when --copies is given
+#  --scale SX SY SZ      Scale factors along X, Y, Z about the origin. Cannot be combined with --copies
+#  --rotate_center X Y Z
+#                        Center of rotation (default: origin)
+#  --copies COPIES       Add this many transformed copies, not counting the original (which is always kept), applying --shift or --rotate incrementally to each
+#                        (requires --shift or --rotate; not valid with --scale)
+#  --persist_regions     Keep the original region IDs on every copy instead of offsetting them so each copy is distinct (default: offset so each copy gets its own
+#                        distinct regions)
+#  --eta_surf ETA_SURF [ETA_SURF ...]
+#                        Surface resistivity per region (one value, or one per region); thickness is optional
+#  --eta_vol ETA_VOL [ETA_VOL ...]
+#                        Volumetric resistivity per region (one value, or one per region); requires --thickness
+#  --thickness THICKNESS [THICKNESS ...]
+#                        Region thickness (one value, or one per region)
+#  --eta_from_xml ETA_FROM_XML
+#                        Read eta/eta_surf, eta_vol, and thickness from an <oft><thincurr> XML file instead of the flags above
+#  --coils_from_xml COILS_FROM_XML
+#                        Read coil sets from an <oft><thincurr> XML file and add to the output mesh
+#  --jumpers IDX [IDX ...]
+#                        Nodeset indices to treat as jumpers instead of holes (0-based; negative indices count from the end). All other nodesets are holes
+#  --jumper_range N [N ...]
+#                        Range of nodeset indices to treat as jumpers, given as START [STOP] with Python slice semantics [START:STOP) (0-based; negative allowed;
+#                        omit STOP to run to the end). Use '0' to mark every nodeset as a jumper
+#```
+#
+# Script options for `combine` workflow:
+#
+#```shell
+#usage: OFT_ThinCurr_mesh_tool combine [-h] --in_files IN_FILES [IN_FILES ...] [--out_file OUT_FILE] [--merge_regions]
+#
+#options:
+#  -h, --help            show this help message and exit
+#  --in_files IN_FILES [IN_FILES ...]
+#                        Input mesh files (two or more)
+#  --out_file OUT_FILE   Output mesh file
+#  --merge_regions       Merge identical region IDs across inputs instead of keeping them distinct (default: keep distinct)
+#```
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -81,42 +126,25 @@ from .coils import ThinCurr_XML
 
 
 class ThinCurrMesh:
-    '''! Container for a 3-node triangular ThinCurr surface mesh.
-
-    Connectivity is stored 0-based, matching the read_ThinCurr_mesh /
-    write_ThinCurr_mesh library routines, which handle the 1-based on-disk
-    conversion internally.
-
-    Nodeset loops (holes and jumpers) are held in a single ordered `nodesets`
-    list with a parallel boolean `is_jumper` list recording each one's role;
-    on save they are split into ThinCurr holes and jumpers accordingly.
-
-    Attributes:
-      r          Vertex coordinate list, shape [np,3] (float64); a 2D [np,2]
-                 list supplied at construction is upgraded to 3D with Z=0
-      lc         Cell (triangle) vertex list, shape [nc,3], 0-based (int32)
-      reg        Per-cell region index, shape [nc], values in 1..nregions (int32)
-      nodesets   List of node-index arrays (0-based) for hole/jumper loops
-      is_jumper  Parallel bool list; True marks a nodeset as a jumper (else hole)
-      sidesets   List of cell-index arrays (0-based); ThinCurr "closures"
-      props      Dict of ThinCurr properties carried through unchanged
-                 (eta_surf, eta_vol, thickness, pmap, nfp)
-    '''
+    '''! Container for a 3-node triangular ThinCurr surface mesh'''
 
     #: ThinCurr properties preserved verbatim on a geometry-only round-trip
     _PROP_KEYS = ('eta_surf', 'eta_vol', 'thickness') # Ignore 'pmap' and 'nfp' for now (only limited uses)
     _MESH_PROP_KEYS = ('reg_names', 'reg_attrs')
 
     def __init__(self, r, lc, reg, holes=None, jumpers=None, closures=None,
-                 nodesets=None, props=None, mesh_props=None,
+                 nodesets=None, tc_props=None, mesh_props=None,
                  coil_sets=None):
         '''! Construct a mesh from its component arrays
 
         @param r Vertex list [np,3]
         @param lc Triangle vertex list [nc,3], 0-based
         @param reg Per-cell region index [nc]
-        @param nodesets List of 0-based node-index arrays (optional)
-        @param props Dict of ThinCurr properties to carry through (optional)
+        @param holes List of 0-based node-index arrays for holes (optional)
+        @param jumpers List of 0-based node-index arrays for jumpers (optional)
+        @param closures List of 0-based cell-index arrays for closures (optional)
+        @param nodesets List of 0-based node-index arrays for unclassified nodesets (optional)
+        @param tc_props Dict of ThinCurr properties to carry through (optional)
         @param mesh_props Dict of base mesh properties to carry through (optional)
         @param coil_sets List of ThinCurr coil sets (optional)
         '''
@@ -142,7 +170,7 @@ class ThinCurrMesh:
         self.closures = np.ascontiguousarray(closures, dtype=np.int32) if closures is not None else None
         self.nodesets = [np.ascontiguousarray(v, dtype=np.int32).reshape(-1) for v in nodesets] if nodesets is not None else None
         #
-        self.props = dict(props) if props else {}
+        self.tc_props = dict(tc_props) if tc_props else {}
         self.mesh_props = dict(mesh_props) if mesh_props else {}
         self.coil_sets = coil_sets
 
@@ -189,7 +217,7 @@ class ThinCurrMesh:
             jumpers=[j.copy() for j in self.jumpers] if self.jumpers is not None else None,
             closures=self.closures.copy() if self.closures is not None else None,
             nodesets=[ns.copy() for ns in self.nodesets],
-            props={k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in self.props.items()},
+            tc_props={k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in self.tc_props.items()},
             mesh_props={k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in self.mesh_props.items()},
             coil_sets=self.coil_sets)
         return new
@@ -197,7 +225,8 @@ class ThinCurrMesh:
     # ------------------------------------------------------------------ I/O
     @classmethod
     def load(cls, filename):
-        '''! Load a mesh using @ref OpenFUSIONToolkit.ThinCurr.meshing.read_ThinCurr_mesh
+        '''! Load a mesh using @ref OpenFUSIONToolkit.ThinCurr.meshing.read_ThinCurr_mesh "read_ThinCurr_mesh" and
+        create instance of @ref ThinCurrMesh.
 
         @param filename Path to input mesh file
         @result New @ref ThinCurrMesh instance
@@ -207,7 +236,7 @@ class ThinCurrMesh:
         mesh_info = read_ThinCurr_mesh(filename)
         if 'ho_info' in mesh_info:
             raise ValueError("High-order meshes are not supported (found high-order node info)")
-        mesh_type = mesh_info.get('type', 'tri')
+        # mesh_type = mesh_info.get('type', 'tri')
         r = mesh_info.pop('r')
         lc = mesh_info.pop('lc')
         reg = mesh_info.pop('reg')
@@ -237,14 +266,14 @@ class ThinCurrMesh:
             closures = tc.get('closures')
 
         # Copy other fields to keep
-        props = {k: tc[k] for k in cls._PROP_KEYS if k in tc}
+        tc_props = {k: tc[k] for k in cls._PROP_KEYS if k in tc}
         mesh_props = {k: mesh_info[k] for k in cls._MESH_PROP_KEYS if k in mesh_info}
 
         # Create mesh object
         mesh = cls(r, lc, reg,
                    holes=holes, jumpers=jumpers, closures=closures,
                    nodesets=nodesets,
-                   props=props,
+                   tc_props=tc_props,
                    mesh_props=mesh_props,
                    coil_sets=tc.get('coil_sets'))
 
@@ -253,11 +282,8 @@ class ThinCurrMesh:
         return mesh
 
     def save(self, filename):
-        '''! Save the mesh using @ref OpenFUSIONToolkit.ThinCurr.meshing.write_ThinCurr_mesh
-
-        Nodesets are split into ThinCurr holes and jumpers per `is_jumper`, and
-        side sets are merged into a single ThinCurr closure set. All indices are
-        passed 0-based (the library converts to 1-based for storage).
+        '''! Save the mesh contained in this object using
+        @ref OpenFUSIONToolkit.ThinCurr.meshing.write_ThinCurr_mesh "write_ThinCurr_mesh"
 
         @param filename Path to output mesh file
         '''
@@ -269,12 +295,12 @@ class ThinCurrMesh:
                             reg_attrs=self.mesh_props.get('reg_attrs'),
                             reg_names=self.mesh_props.get('reg_names'),
                             holes=self.holes, jumpers=self.jumpers, closures=self.closures,
-                            eta_surf=self.props.get('eta_surf'),
-                            eta_vol=self.props.get('eta_vol'),
-                            thickness=self.props.get('thickness'),
+                            eta_surf=self.tc_props.get('eta_surf'),
+                            eta_vol=self.tc_props.get('eta_vol'),
+                            thickness=self.tc_props.get('thickness'),
                             coil_sets=self.coil_sets,
-                            pmap=self.props.get('pmap'),
-                            nfp=self.props.get('nfp'))
+                            pmap=self.tc_props.get('pmap'),
+                            nfp=self.tc_props.get('nfp'))
         self.print_info()
 
     def print_info(self):
@@ -286,24 +312,24 @@ class ThinCurrMesh:
         print("  # of jumpers  = {0}".format(self.njumpers))
         print("  # of closures = {0}".format(self.nclosures))
         print("  # of coils    = {0}".format(len(self.coil_sets) if self.coil_sets is not None else 0))
-        if self.props:
-            print("  ThinCurr props: {0}".format(", ".join(sorted(self.props))))
+        if self.tc_props:
+            print("  ThinCurr props: {0}".format(", ".join(sorted(self.tc_props))))
         if self.mesh_props:
             print("  Mesh props: {0}".format(", ".join(sorted(self.mesh_props))))
 
     def _drop_props(self, operation):
         '''! Clear ThinCurr properties that a structural operation would invalidate'''
-        if self.props:
+        if self.tc_props:
             print("  Warning: dropping ThinCurr properties ({0}) that cannot be "
-                  "remapped through {1}".format(", ".join(sorted(self.props)), operation))
-            self.props = {}
+                  "remapped through {1}".format(", ".join(sorted(self.tc_props)), operation))
+            self.tc_props = {}
 
     # ------------------------------------------------------------- editing
     def transform(self, shift=None, rotate=None, scale=None, center=None):
-        '''! Apply a transform to the vertex coordinates (in place)
+        '''! Apply a transform to the mesh coordinates (in place)
 
-        Operations, if supplied, are applied in the order rotate, scale, shift:
-        `r' = S R (r - center) + center + shift` (scaling is about the origin).
+        Multiple operations, if supplied, are applied in the order `rotate`, `scale`, `shift`
+        (scaling is always about the origin)
 
         @param shift Translation vector [3] (optional)
         @param rotate Tuple `(axis, angle_deg)` where axis is `'x'`, `'y'`, or `'z'` (optional)
@@ -360,9 +386,9 @@ class ThinCurrMesh:
                     'thickness': _resolve('thickness', thickness)}
         # Replace any previously carried resistivity with the requested values
         for key in ('eta_surf', 'eta_vol', 'thickness'):
-            self.props.pop(key, None)
+            self.tc_props.pop(key, None)
             if resolved[key] is not None:
-                self.props[key] = resolved[key]
+                self.tc_props[key] = resolved[key]
 
     def set_jumpers(self, indices):
         '''! Mark the given nodesets as jumpers (all others become holes; in place)
@@ -395,6 +421,21 @@ class ThinCurrMesh:
 
         @param regions Iterable of region indices to remove
         '''
+        def _remap_index_sets(sets, old_to_new, label):
+            out = []
+            for i, s in enumerate(sets):
+                mapped = old_to_new[s]
+                keep = mapped >= 0
+                if not np.all(keep):
+                    print("  Warning: dropping {0} entrie(s) from {1} {2}".format(
+                        int(np.sum(~keep)), label, i + 1))
+                mapped = mapped[keep].astype(np.int32)
+                if mapped.shape[0] > 0:
+                    out.append(mapped)
+                else:
+                    print("  Warning: {0} {1} became empty and was dropped".format(label, i + 1))
+            return out
+        #
         if self.nodesets is not None:
             raise ValueError(
                 "Mesh contains native NODESET entries; region removal does not support "
@@ -407,7 +448,7 @@ class ThinCurrMesh:
         keep_cell = np.array([r not in remove for r in self.reg], dtype=bool)
         n_removed = int(np.sum(~keep_cell))
         print("  Removing {0} cell(s) in region(s) {1}".format(n_removed, sorted(remove)))
-        # self._drop_props("region removal")
+
         # Renumber surviving regions to a contiguous 1..N range
         surviving = np.unique(self.reg[keep_cell]) if np.any(keep_cell) else np.array([], dtype=np.int32)
         remap = {int(old): new + 1 for new, old in enumerate(surviving)}
@@ -415,18 +456,15 @@ class ThinCurrMesh:
         self.reg = np.array([remap[int(r)] for r in self.reg[keep_cell]], dtype=np.int32)
         # Remap eta_surf, eta_vol, thickness properties (if any)
         for key in ('eta_surf', 'eta_vol', 'thickness'):
-            if key in self.props:
-                arr = self.props[key]
-                self.props[key] = np.array([arr[old - 1] for old in surviving], dtype=np.float64)
+            if key in self.tc_props:
+                arr = self.tc_props[key]
+                self.tc_props[key] = np.array([arr[old - 1] for old in surviving], dtype=np.float64)
         # Remap sidesets (cell indices)
         cell_new = -np.ones((keep_cell.shape[0],), dtype=np.int64)
         cell_new[keep_cell] = np.arange(int(np.sum(keep_cell)))
         self.closures = _remap_index_sets(self.closures, cell_new, "closures")
-        # Remove unreferenced vertices and remap connectivity/nodesets (in place)
-        self._reindex_vertices()
 
-    def _reindex_vertices(self):
-        '''! Drop unreferenced vertices and remap connectivity/nodesets (in place)'''
+        # Remove unreferenced vertices and remap connectivity/nodesets (in place)
         used = np.zeros((self.np,), dtype=bool)
         if self.nc > 0:
             used[self.lc.reshape(-1)] = True
@@ -445,7 +483,6 @@ class ThinCurrMesh:
         @param other The @ref ThinCurrMesh to append
         @param distinct_regions If True, offset the appended mesh's region indices
             so its regions remain distinct from this mesh's regions
-        @result self
         '''
         np_offset = self.np
         nc_offset = self.nc
@@ -470,12 +507,12 @@ class ThinCurrMesh:
             self.closures = np.concatenate((self.closures, other.closures + nc_offset)) if other.closures is not None else self.closures
         # Append resistivity properties (if any) and warn if they exist in either mesh
         if distinct_regions:
-            if 'eta_surf' in self.props and 'eta_surf' in other.props:
-                self.props['eta_surf'] = np.concatenate((self.props['eta_surf'], other.props['eta_surf']))
-            if 'eta_vol' in self.props and 'eta_vol' in other.props:
-                self.props['eta_vol'] = np.concatenate((self.props['eta_vol'], other.props['eta_vol']))
-            if 'thickness' in self.props and 'thickness' in other.props:
-                self.props['thickness'] = np.concatenate((self.props['thickness'], other.props['thickness']))
+            if 'eta_surf' in self.tc_props and 'eta_surf' in other.tc_props:
+                self.tc_props['eta_surf'] = np.concatenate((self.tc_props['eta_surf'], other.tc_props['eta_surf']))
+            if 'eta_vol' in self.tc_props and 'eta_vol' in other.tc_props:
+                self.tc_props['eta_vol'] = np.concatenate((self.tc_props['eta_vol'], other.tc_props['eta_vol']))
+            if 'thickness' in self.tc_props and 'thickness' in other.tc_props:
+                self.tc_props['thickness'] = np.concatenate((self.tc_props['thickness'], other.tc_props['thickness']))
         else:
             self._drop_props("append with non-distinct regions")
 
@@ -499,39 +536,12 @@ def rotation_matrix(axis, angle_deg):
     raise ValueError("Rotation axis must be one of 'x', 'y', or 'z' (got '{0}')".format(axis))
 
 
-def _remap_index_sets(sets, old_to_new, label):
-    '''! Remap and filter a list of index arrays using an old->new lookup
-
-    Entries mapped to a negative value (removed) are dropped. Empty sets that
-    result are discarded with a warning. An optional `parallel` list (one entry
-    per set) is filtered identically to keep it aligned with the surviving sets.
-
-    @param sets List of index arrays (0-based)
-    @param old_to_new Lookup array mapping old index -> new index (<0 = removed)
-    @param label Name used in warning messages
-    @result Filtered/remapped list of index arrays
-    '''
-    out = []
-    for i, s in enumerate(sets):
-        mapped = old_to_new[s]
-        keep = mapped >= 0
-        if not np.all(keep):
-            print("  Warning: dropping {0} entrie(s) from {1} {2}".format(
-                int(np.sum(~keep)), label, i + 1))
-        mapped = mapped[keep].astype(np.int32)
-        if mapped.shape[0] > 0:
-            out.append(mapped)
-        else:
-            print("  Warning: {0} {1} became empty and was dropped".format(label, i + 1))
-    return out
-
-
 def resolve_jumper_indices(nnodesets, explicit=None, index_range=None):
     '''! Resolve jumper nodeset indices from CLI options
 
     @param nnodesets Number of nodesets available to categorize
     @param explicit Iterable of explicit 0-based indices (negative allowed)
-    @param index_range ``(start, stop)`` half-open range with Python slice
+    @param index_range `(start, stop)` half-open range with Python slice
         semantics (negative allowed)
     @result Sorted list of resolved 0-based jumper indices
     '''
@@ -541,7 +551,7 @@ def resolve_jumper_indices(nnodesets, explicit=None, index_range=None):
         out = set()
         for raw in explicit:
             i = int(raw)
-            if i < -nnodesets or i >= nnodesets:
+            if (i < -nnodesets) or (i >= nnodesets):
                 raise ValueError("jumper index {0} is out of range for {1} "
                                  "nodeset(s)".format(raw, nnodesets))
             out.add(i % nnodesets)
@@ -556,7 +566,7 @@ def resolve_jumper_indices(nnodesets, explicit=None, index_range=None):
 def combine_meshes(filenames, distinct_regions=True):
     '''! Combine multiple mesh files into a single mesh
 
-    Aborts if any input file contains native ``NODESETXXXX`` entries, since such
+    Aborts if any input file contains native `NODESET` entries, since such
     uncategorized loops cannot be meaningfully combined; run the `modify` workflow
     first to convert them into ThinCurr holes/jumpers.
 
@@ -587,20 +597,20 @@ def replicate_mesh(mesh, ncopies, shift=None, rotate=None, center=None,
                    distinct_regions=True):
     '''! Generate an output mesh consisting of the original plus transformed copies
 
-    The untransformed original is always kept. Copy ``k`` (k = 1 .. ncopies) is
-    the input mesh with the incremental transform applied ``k`` times: shifted by
-    ``k*shift`` and/or rotated by ``k*angle`` about `center`. The output therefore
-    contains ``ncopies + 1`` instances.
+    The untransformed original is always kept. Copy `k` (`k = 1..ncopies`) is
+    the input mesh with the incremental transform applied `k` times: shifted by
+    `k*shift` and/or rotated by `k*angle` about `center`. The output therefore
+    contains `ncopies + 1` instances.
 
     @param mesh Input @ref ThinCurrMesh
     @param ncopies Number of transformed copies to add (excludes the original)
     @param shift Per-copy incremental translation [3] (optional)
-    @param rotate Per-copy incremental rotation ``(axis, angle_deg)`` (optional)
+    @param rotate Per-copy incremental rotation `(axis, angle_deg)` (optional)
     @param center Center of rotation [3] (default: origin)
     @param distinct_regions If True, offset region IDs so every copy is distinct
     @result Replicated @ref ThinCurrMesh
     '''
-    if self.nodesets is not None:
+    if mesh.nodesets is not None:
         raise ValueError(
             "Mesh contains native NODESET entries; replication does not support "
             "uncategorized nodesets. Run 'modify' on it first to convert them "
@@ -692,7 +702,6 @@ def build_parser():
                             "START [STOP] with Python slice semantics [START:STOP) "
                             "(0-based; negative allowed; omit STOP to run to the end). "
                             "Use '0' to mark every nodeset as a jumper")
-    _add_common_out(p_mod)
     return parser
 
 
@@ -706,7 +715,10 @@ def _parse_rotate(val):
 
 
 def script_entry(argv=None):
-    '''!Command-line entry point'''
+    '''!Command-line entry point
+
+    See @ref thincurr_mesh_tool
+    '''
     parser = build_parser()
     options = parser.parse_args(argv)
 
