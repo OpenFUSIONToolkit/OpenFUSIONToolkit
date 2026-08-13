@@ -1023,10 +1023,9 @@ curr_size=0.d0
 i=1
 DO j=1,self%nsparse
   curr_size=curr_size+sparse_sizes(j)
-  IF(curr_size>target_size)THEN
+  IF(curr_size>REAL(i,8)*target_size)THEN
     self%L_thread_ptr(1,i+1)=j+1
     i=i+1
-    curr_size=0.d0
   END IF
 END DO
 target_size=SUM(dense_sizes)/REAL(oft_env%nthreads,8)
@@ -1034,10 +1033,9 @@ curr_size=0.d0
 i=1
 DO j=1,self%ndense
   curr_size=curr_size+dense_sizes(j)
-  IF(curr_size>target_size)THEN
+  IF(curr_size>REAL(i,8)*target_size)THEN
     self%L_thread_ptr(2,i+1)=j+1
     i=i+1
-    curr_size=0.d0
   END IF
 END DO
 self%L_thread_ptr(:,oft_env%nthreads+1)=[self%nsparse,self%ndense]+1
@@ -1770,10 +1768,9 @@ curr_size=0.d0
 i=1
 DO j=1,self%nsparse
   curr_size=curr_size+sparse_sizes(j)
-  IF(curr_size>target_size)THEN
+  IF(curr_size>REAL(i,8)*target_size)THEN
     self%B_thread_ptr(1,i+1)=j+1
     i=i+1
-    curr_size=0.d0
   END IF
 END DO
 target_size=SUM(dense_sizes)/REAL(oft_env%nthreads,8)
@@ -1781,10 +1778,9 @@ curr_size=0.d0
 i=1
 DO j=1,self%ndense
   curr_size=curr_size+dense_sizes(j)
-  IF(curr_size>target_size)THEN
+  IF(curr_size>REAL(i,8)*target_size)THEN
     self%B_thread_ptr(2,i+1)=j+1
     i=i+1
-    curr_size=0.d0
   END IF
 END DO
 self%B_thread_ptr(:,oft_env%nthreads+1)=[self%nsparse,self%ndense]+1
