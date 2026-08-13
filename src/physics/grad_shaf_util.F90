@@ -27,7 +27,7 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
-  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
+  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
 IMPLICIT NONE
@@ -286,7 +286,7 @@ type(oft_lag_bginterp), target :: psi_geval
 real(8) :: itor_loc ! local toroidal current in integration
 real(8) :: itor ! toroidal current
 real(8) :: I_NI ! non-inductive F*F'
-real(8) :: eta_jsq ! eta*j_NI**2 
+real(8) :: eta_jsq ! eta*j_NI**2
 real(8) :: goptmp(3,3)
 real(8) :: v ! volume
 real(8) :: pt(3) ! radial coordinate
@@ -391,7 +391,7 @@ CALL hdf5_write(self%o_point,filename,'tokamaker/O_POINT')
 CALL hdf5_write(self%lim_point,filename,'tokamaker/LIM_POINT')
 CALL hdf5_write(self%diverted,filename,'tokamaker/DIVERTED')
 !---
-IF(self%Itor_target>0.d0)CALL hdf5_write(self%Itor_target,filename,'tokamaker/IP_TARGET')
+IF(self%Ip_target>0.d0)CALL hdf5_write(self%Ip_target,filename,'tokamaker/IP_TARGET')
 IF(self%Ip_ratio_target>-1.d98)CALL hdf5_write(self%Ip_ratio_target,filename,'tokamaker/IP_RATIO_TARGET')
 IF(self%R0_target>0.d0)CALL hdf5_write(self%R0_target,filename,'tokamaker/R0_TARGET')
 IF(self%Z0_target>-1.d98)CALL hdf5_write(self%Z0_target,filename,'tokamaker/Z0_TARGET')
@@ -612,7 +612,7 @@ IF(logical_tmp.NEQV.self%diverted)THEN
 END IF
 !---Load targets and coil currents
 IF(hdf5_field_exist(filename,'tokamaker/IP_TARGET'))THEN
-  CALL hdf5_read(self%Itor_target,filename,'tokamaker/IP_TARGET',success=success)
+  CALL hdf5_read(self%Ip_target,filename,'tokamaker/IP_TARGET',success=success)
   IF(.NOT.success)THEN
     error_string='Failed to read Ip target.'
     RETURN

@@ -177,9 +177,7 @@ CALL u%set(1.d0)
 CALL mop%apply(u,v)
 CALL lag_zerob%apply(v)
 CALL u%set(0.d0)
-WRITE(*,*)'Solve In'
 CALL linv%apply(u,v)
-WRITE(*,*)'Solve Out'
 uu=SQRT(u%dot(u))
 IF(oft_env%head_proc)THEN
   OPEN(NEWUNIT=io_unit,FILE='bjacobi.results')
@@ -187,22 +185,17 @@ IF(oft_env%head_proc)THEN
   WRITE(io_unit,*)uu
   CLOSE(io_unit)
 END IF
-WRITE(*,*)'Cleanup Vec'
 !---Destroy vectors
 CALL u%delete
 CALL v%delete
 DEALLOCATE(u,v)
-WRITE(*,*)'Cleanup Mat'
 !---Destroy matrices
 CALL lop%delete
 CALL mop%delete
 DEALLOCATE(lop,mop)
-WRITE(*,*)'Cleanup Pre'
 !---Destory preconditioner
 CALL linv_pre%delete
-WRITE(*,*)'Cleanup Solver'
 !---Destory solver
 CALL linv%delete
-WRITE(*,*)'Done'
 END SUBROUTINE test_lap
 END PROGRAM test_native_bjacobi

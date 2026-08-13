@@ -78,11 +78,11 @@ tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double_ptr, c_int, c_char_p])
 
 # tokamaker_solve(tMaker_ptr,vacuum,nl_its,error_str)
-tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve, 
+tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve,
     [c_void_p, c_bool, c_int_ptr, c_char_p])
 
 # tokamaker_vac_solve(tMaker_ptr,psi_in,rhs_source,error_str)
-tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve, 
+tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve,
     [c_void_p, ctypes_numpy_array(float64,1), c_double_ptr,  c_char_p])
 
 # tokamaker_setup_td(tMaker_ptr,dt,lin_tol,nl_tol,pre_plasma,error_str)
@@ -166,7 +166,7 @@ tokamaker_gs_calc_vloop = ctypes_subroutine(oftpy_lib.tokamaker_gs_calc_vloop,
 
 # tokamaker_get_profs(tMaker_equil_ptr,npsi,psi_in,f,fp,p,pp,error_str)
 tokamaker_get_profs = ctypes_subroutine(oftpy_lib.tokamaker_get_profs,
-    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), 
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1),
      ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p])
 
 # tokamaker_get_vfixed(tMaker_equil_ptr,npts,pts,fluxes,error_str)
@@ -202,7 +202,7 @@ tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,
 tokamaker_set_mirror_slosh = ctypes_subroutine(oftpy_lib.tokamaker_set_mirror_slosh,
     [c_void_p, c_double, c_double, c_double, c_char_p])
 
-# tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,dflux_target,R0_target,Z0_target,error_str)
+# tokamaker_set_targets(tMaker_ptr,ip_target,ip_ratio_target,pax_target,estore_target,dflux_target,R0_target,Z0_target,eq_idx,error_str)
 tokamaker_set_targets = ctypes_subroutine(oftpy_lib.tokamaker_set_targets,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double, c_double, c_int, c_char_p])
 
@@ -291,7 +291,7 @@ class TokaMaker_field_interpolator():
         self._tMaker_equil_obj = tMaker_equil_obj
         self._int_obj = int_obj
         self.fbary_tol = fbary_tol
-    
+
     def __del__(self):
         '''Destroy underlying interpolation object'''
         pt_eval = numpy.zeros((3,), dtype=numpy.float64)
