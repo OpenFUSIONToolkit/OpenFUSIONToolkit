@@ -17,7 +17,8 @@ USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
 !
-USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_matrix, oft_graph
+USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_matrix, oft_graph, &
+  vector_extrapolate
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
 USE oft_native_la, ONLY: oft_native_dense_matrix, partition_graph
 USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
@@ -644,7 +645,7 @@ REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op,int_facs(2),elapsed_time
 REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
-CLASS(oft_vector), POINTER :: u,g,up,du
+CLASS(oft_vector), POINTER :: u,g,up
 CLASS(oft_matrix), POINTER :: Lmat
 TYPE(oft_native_dense_matrix), TARGET :: Lmat_dense,Minv
 TYPE(oft_sum_matrix), TARGET :: fmat,bmat
@@ -656,6 +657,10 @@ LOGICAL :: exists,volt_full,pm_save
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=15) :: fmt_str
 CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
+!---Extrapolation fields
+integer(i4) :: nextrap,maxextrap
+real(r8), allocatable, dimension(:) :: extrapt
+type(oft_vector_ptr), allocatable, dimension(:) :: extrap_fields
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Starting time-domain simulation'
 CALL oft_increase_indent
@@ -699,7 +704,6 @@ END IF
 !---
 CALL self%Uloc%new(u)
 CALL self%Uloc%new(up)
-CALL self%Uloc%new(du)
 CALL self%Uloc%new(g)
 !---Setup inductance matrix wrapper
 IF(PRESENT(hodlr_op))THEN
@@ -745,7 +749,18 @@ IF(.NOT.direct)THEN
   ELSE
     CALL create_diag_pre(linv%pre)
   END IF
+  !---Setup extrapolation fields
+  maxextrap=2 ! Number of points for extrapolation (0: No extrapolation, 2: Linear, 3: Quadratic)
+  IF(maxextrap>0)THEN
+    ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
+    DO i=1,maxextrap
+      CALL self%Uloc%new(extrap_fields(i)%f)
+      extrapt(i)=0.d0
+    END DO
+    nextrap=0
+  END IF
 ELSE
+  maxextrap=-1
   !---Setup dense matrix for inverse
   Minv%nr=self%nelems; Minv%nc=self%nelems
   Minv%nrg=self%nelems; Minv%ncg=self%nelems
@@ -844,6 +859,16 @@ ALLOCATE(its_hist(nstatus),time_hist(nstatus))
 its_hist=0
 time_hist=0.d0
 DO i=1,nsteps
+  !---Update extrapolation fields
+  IF(maxextrap>0)THEN
+    DO j=maxextrap,2,-1
+      CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
+      extrapt(j)=extrapt(j-1)
+    END DO
+    IF(nextrap<maxextrap)nextrap=nextrap+1
+    CALL extrap_fields(1)%f%add(0.d0,1.d0,u)
+    extrapt(1)=t
+  END IF
   !---Update driven coil dI/dt waveforms
   IF(use_cn)THEN
     CALL bmat%apply(u,g)
@@ -913,10 +938,12 @@ DO i=1,nsteps
     CALL Minv%apply(g,u)
     nits=1
   ELSE
-    CALL du%add(0.d0,1.d0,u)
-    CALL du%add(1.d0,-1.d0,up)
-    CALL up%add(0.d0,1.d0,u)
-    CALL u%add(1.d0,1.d0,du)
+    ! CALL du%add(0.d0,1.d0,u)
+    ! CALL du%add(1.d0,-1.d0,up)
+    ! CALL up%add(0.d0,1.d0,u)
+    ! CALL u%add(1.d0,1.d0,du)
+    !---Extrapolate solution
+    IF(maxextrap>0)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,t+dt,u)
     CALL linv%apply(u,g)
     nits=linv%cits
   END IF
@@ -988,9 +1015,14 @@ IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
 END IF
 CALL u%delete()
 CALL up%delete()
-CALL du%delete()
 CALL g%delete()
-DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,up,du,g)
+DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,up,g)
+IF(maxextrap>0)THEN
+  DO i=1,maxextrap
+    CALL extrap_fields(i)%f%delete()
+  END DO
+  DEALLOCATE(extrap_fields,extrapt)
+END IF
 IF(direct)THEN
   DEALLOCATE(minv%m)
 ELSE
