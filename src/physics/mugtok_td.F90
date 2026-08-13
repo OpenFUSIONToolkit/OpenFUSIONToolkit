@@ -483,16 +483,18 @@ CLASS(oft_matrix), pointer :: pre
 
 current_sim=>self
 
-!Update plasma time advance operator
-CALL self%tkmr%update()
-
 !Update timestep if it has changed since setup, and build approximate jacobian for preconditioning
 IF(dt/=self%nlfun%dt)THEN
     dt=ABS(dt)
     self%nlfun%dt=dt
     self%mug%dt = dt
+    self%tkmr%dt = dt
+    !Update plasma time advance operator
+    CALL self%tkmr%update()
     CALL build_mugtok_td_jacobian(self, self%nlfun%jac_op, self%u, update_vac = .TRUE.)
 ELSE
+    !Update plasma time advance operator
+    CALL self%tkmr%update()
     CALL build_mugtok_td_jacobian(self, self%nlfun%jac_op, self%u, update_vac = .FALSE.)
 END IF
 
