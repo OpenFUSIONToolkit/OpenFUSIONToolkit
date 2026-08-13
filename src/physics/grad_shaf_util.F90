@@ -37,7 +37,6 @@ IMPLICIT NONE
 !------------------------------------------------------------------------------
 type, extends(gsinv_interp) :: sauter_interp
   logical :: stage_1 = .FALSE.
-  real(8) :: f_surf = 0.d0
   real(8) :: bmax = -1.d0
   real(8) :: mag_axis(2) = 0.d0
 contains

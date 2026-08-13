@@ -1393,6 +1393,20 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.get_q(psi,psi_pad,npsi,compute_geo)
 
+    def get_fsa(self,psi=None,psi_pad=0.02,npsi=50):
+        r'''! Get flux surface averages and per-surface shape parameters
+
+        See @ref TokaMaker.TokaMaker_equilibrium.get_fsa "get_fsa"
+
+        @param psi Explicit sampling locations in \f$\hat{\psi}\f$
+        @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
+        @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
+        @result Dictionary of flux surface profiles and scalars
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_fsa(psi,psi_pad,npsi)
+
     def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50):
         r'''! Evaluate Sauter trapped particle fractions at specified or uniformly spaced points
 
@@ -2763,6 +2777,77 @@ class TokaMaker_equilibrium():
                 return psi,qvals,ravg_dict,dl.value,rbounds,zbounds
             else:
                 return psi,qvals,ravg_dict,None,None,None
+
+    def get_fsa(self,psi=None,psi_pad=0.02,npsi=50):
+        r'''! Get flux surface averages and per-surface shape parameters
+
+        Traces each requested surface once and accumulates all quantities in the
+        tracing ODE, so every returned profile shares the same quadrature. This
+        extends @ref TokaMaker.TokaMaker_equilibrium.get_q "get_q" with the
+        averages needed to close a 1D transport formulation.
+
+        Note \f$ \left< B^2 \right> \f$ is not returned as it follows exactly from
+        \f$ \left< B_p^2 \right> + F^2 \left< 1/R^2 \right> \f$, since \f$ F \f$ is
+        constant on a flux surface.
+
+        Poloidal flux is returned in TokaMaker's convention (Wb/rad), where
+        \f$ B_p = \left| \nabla \psi \right| / R \f$.
+
+        @param psi Explicit sampling locations in \f$\hat{\psi}\f$
+        @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
+        @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
+        @result Dictionary of flux surface profiles and scalars
+        '''
+        if psi is None:
+            psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
+            if self.psi_convention == 0:
+                psi = numpy.ascontiguousarray(numpy.flip(psi), dtype=numpy.float64)
+                psi_save = 1.0-psi
+        else:
+            psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
+            if self.psi_convention == 0:
+                psi_save = numpy.copy(psi)
+                psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
+        if self.psi_convention != 0:
+            psi_save = psi
+        qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
+        fpol = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
+        ravgs = numpy.zeros((4,psi.shape[0]), dtype=numpy.float64)
+        fsa_avgs = numpy.zeros((4,psi.shape[0]), dtype=numpy.float64)
+        shape_geo = numpy.zeros((6,psi.shape[0]), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_fsa(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,fsa_avgs,shape_geo,fpol,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        # F on axis cannot be traced, but the source profile is defined there.
+        F_axis = self.get_profiles(psi=numpy.zeros((1,), dtype=numpy.float64))[1][0]
+        return {
+            'psi_norm': psi_save,
+            'psi': self.psinorm_to_absolute(psi_save),
+            'q': qvals,
+            'F': fpol,
+            '<R>': ravgs[0,:],
+            '<1/R>': ravgs[1,:],
+            '<1/R^2>': ravgs[2,:],
+            'dV/dPsi': ravgs[3,:],
+            '<|grad psi|>': fsa_avgs[0,:],
+            '<|grad psi|^2>': fsa_avgs[1,:],
+            '<Bp^2>': fsa_avgs[2,:],
+            '<1/B^2>': fsa_avgs[3,:],
+            'R_min': shape_geo[0,:],
+            'R_max': shape_geo[1,:],
+            'Z_min': shape_geo[2,:],
+            'Z_max': shape_geo[3,:],
+            'R_at_Zmin': shape_geo[4,:],
+            'R_at_Zmax': shape_geo[5,:],
+            'psi_axis': float(self.psinorm_to_absolute(0.0)),
+            'psi_boundary': float(self.psinorm_to_absolute(1.0)),
+            'R_axis': float(self.o_point[0]),
+            'Z_axis': float(self.o_point[1]),
+            'F_axis': float(F_axis),
+            'F0': float(self.F0),
+            'diverted': bool(self.diverted),
+        }
 
     def trace_surf(self,psi):
         r'''! Trace surface for a given poloidal flux
