@@ -1180,19 +1180,19 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
 # Expected values dictionary
 # -----------------------------------------------------------------------
 ITER_bootstrap_eq_dict = {
-    'Ip': 15594539.331678607,
-    'kappa': 1.8761570200433755,
-    'R_geo': 6.222339207453032,
-    'a_geo': 1.9813522055622799,
-    'q_0': 0.9851523937518619,
-    'q_95': 2.8491812875178417,
-    'P_ax': 739971.5926805125,
-    'j_BS_max': 186641.47498828912,
-    'j_BS_axis': 7714.709104621541,
-    'jphi_axis': 1473706.4888532837,
-    'jphi_max': 1564594.9242556696,
-    'j_ind_axis': 1381720.445624954,
-    'bs_fraction': 0.1503662957914187,
+    'Ip': 15599995.005297558,
+    'kappa': 1.8756201041390395,
+    'R_geo': 6.222398878914673,
+    'a_geo': 1.9812095318679077,
+    'q_0': 1.0003453863455334,
+    'q_95': 2.850975301589531,
+    'P_ax': 740025.054814244,
+    'j_BS_max': 194617.71663981146,
+    'j_BS_axis': 5463.030180037696,
+    'jphi_axis': 1449201.5709280553,
+    'jphi_max': 1546301.0419844517,
+    'j_ind_axis': 1359327.795694679,
+    'bs_fraction': 0.15830066097468243,
 }
 
 @pytest.mark.slow
@@ -1207,7 +1207,7 @@ def test_ITER_bootstrap(order):
 # -----------------------------------------------------------------------
 def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     from OpenFUSIONToolkit.TokaMaker.bootstrap import (
-        redl_bootstrap, calculate_ln_lambda, Hmode_profiles
+        redl_bootstrap, calculate_ln_lambda, Hmode_profiles, _pchip_deriv
     )
 
     # --- Mesh creation (identical to run_ITER_bootstrap_case) ---
@@ -1342,15 +1342,15 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     R_avg = ravgs_q['<R>']
 
     # --- Gradients (same as solve_with_bootstrap) ---
+    # Shape-preserving PCHIP derivatives on the native psi_N grid, matching
+    # the derivative path used by solve_with_bootstrap
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
-    d_psi = np.gradient(psi_N)
-    d_psi_eff = d_psi * psi_range
-    d_psi_eff[d_psi_eff == 0] = 1e-9
+    psi_range_safe = psi_range if psi_range != 0 else 1e-9
 
-    dn_e_dpsi = np.gradient(ne) / d_psi_eff
-    dT_e_dpsi = np.gradient(Te) / d_psi_eff
-    dn_i_dpsi = np.gradient(ni) / d_psi_eff
-    dT_i_dpsi = np.gradient(Ti) / d_psi_eff
+    dn_e_dpsi = _pchip_deriv(psi_N, ne) / psi_range_safe
+    dT_e_dpsi = _pchip_deriv(psi_N, Te) / psi_range_safe
+    dn_i_dpsi = _pchip_deriv(psi_N, ni) / psi_range_safe
+    dT_i_dpsi = _pchip_deriv(psi_N, Ti) / psi_range_safe
 
     # --- Coulomb logarithms (same as solve_with_bootstrap) ---
     ln_le, ln_lii = calculate_ln_lambda(
@@ -1408,14 +1408,14 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
 
 
 Redl_jBS_eq_dict = {
-    'j_BS_max': 190105.9818066194,
-    'j_BS_axis': 7067.543831089362,
-    'j_BS_edge': 100532.81373131038,
-    'L31_axis': 0.10849481301194958,
-    'L32_axis': -0.014581267675566556,
-    'alpha_axis': -0.6150406171285213,
-    'nu_e_star_axis': 0.3420647094964808,
-    'nu_i_star_axis': 0.2975729435421919,
+    'j_BS_max': 186852.37639066574,
+    'j_BS_axis': 4947.428045838814,
+    'j_BS_edge': 95960.3268758662,
+    'L31_axis': 0.11422862302537663,
+    'L32_axis': -0.02358142633558105,
+    'alpha_axis': -0.6541022585240726,
+    'nu_e_star_axis': 0.25167544799360553,
+    'nu_i_star_axis': 0.2189404571637855,
 }
 
 
