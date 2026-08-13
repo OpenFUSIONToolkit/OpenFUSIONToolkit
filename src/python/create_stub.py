@@ -31,7 +31,7 @@ except ImportError:
             if found_scripts:
                 if line.strip() == "":
                     break
-                scripts[line.split("=")[0].strip()] = line.split("=")[1].strip()
+                scripts[line.split("=")[0].strip()] = line.split("=")[1].replace('"','').strip()
             else:
                 if line.startswith("[project.scripts]"):
                     found_scripts = True
