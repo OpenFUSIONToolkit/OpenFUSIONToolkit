@@ -749,8 +749,7 @@ do j=1,nr
     IF(gseq%mode==0)THEN
       fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
     ELSE
-      fpol=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-        + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+      fpol=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
     END IF
     r_avgs(j,1)    = raxis
     r_avgs(j,2)    = 1.d0 / raxis
@@ -772,8 +771,7 @@ do j=1,nr
   IF(gseq%mode==0)THEN
     fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
   ELSE
-    fpol=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    fpol=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
   END IF
   field%f_surf=fpol
   field%bmax=0.d0
@@ -1149,8 +1147,7 @@ DO i = 1, n_psi
   IF(gseq%mode==0)THEN
     f(i) = gseq%ffp_scale * gseq%I%f(psi_abs(i)) + gseq%I%f_offset
   ELSE
-    f(i) = SQRT(gseq%ffp_scale * gseq%I%f(psi_abs(i)) + gseq%I%f_offset**2) &
-           + gseq%I%f_offset * (1.0_r8 - SIGN(1.0_r8, gseq%I%f_offset))
+    f(i) = SIGN(1.0_r8, gseq%I%f_offset) * SQRT(gseq%ffp_scale * gseq%I%f(psi_abs(i)) + gseq%I%f_offset**2)
   END IF
 END DO
 ! Get flux-surface geometry: fc, eps, q, and <R> in one tracing pass
