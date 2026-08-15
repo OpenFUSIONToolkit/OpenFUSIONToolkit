@@ -1014,7 +1014,7 @@ class OpenMPI(package):
         if self.config_dict['OS_TYPE'] == 'Darwin':
             print("  macOS detected: Looking for required packages with homebrew")
             # Search for HWLOC
-            result, errcode = run_command("brew --prefix hwloc")
+            result, errcode = run_command("brew --prefix --installed hwloc")
             if errcode == 0:
                 hwloc_path = result.strip()
                 print("    Using hwloc from homebrew: {0}".format(hwloc_path))
@@ -1022,7 +1022,7 @@ class OpenMPI(package):
             else:
                 print("    Could not find hwloc, build may fail")
             # Search for PMIx
-            result, errcode = run_command("brew --prefix pmix")
+            result, errcode = run_command("brew --prefix --installed pmix")
             if errcode == 0:
                 result, errcode = run_command("brew list --versions pmix")
                 if errcode == 0:
@@ -1037,7 +1037,7 @@ class OpenMPI(package):
             else:
                 print("    Could not find pmix, build may fail")
             # Search for libevent
-            result, errcode = run_command("brew --prefix libevent")
+            result, errcode = run_command("brew --prefix --installed libevent")
             if errcode == 0:
                 libevent_path = result.strip()
                 print("    Using libevent from homebrew: {0}".format(libevent_path))
