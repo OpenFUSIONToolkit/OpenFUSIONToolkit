@@ -238,41 +238,38 @@ class trimesh:
     def _orient_surface(self):
         '''Orient surface(s) in mesh to ensure consistency
         '''
-        def orient_neighbors(face,oriented):
-            next_faces = []
-            for j in range(3):
-                face2 = self.lff[face,j]
-                if face2 < 0:
-                    continue
-                if oriented[face2] >= 0:
-                    continue
-                ed = self.lf[face,tri_ed[j,:]]
-                # Ensure same sense as neighbor (opposite direction of shared edge)
-                for k in range(3):
-                    if(self.lff[face2,k]==face):
-                        break
-                else:
-                    raise ValueError("Could not find face!!")
-                ed2 = self.lf[face2,tri_ed[k,:]]
-                if (ed[0]==ed2[0]) and (ed[1]==ed2[1]):
-                    self.lf[face2,[1,2]] = self.lf[face2,[2,1]]
-                    self.lfe[face2,:] = -self.lfe[face2,[0,2,1]]
-                    self.lff[face2,:] = self.lff[face2,[0,2,1]]
-                oriented[face2] = surf_id
-                next_faces.append(face2)
-            for face2 in next_faces:
-                orient_neighbors(face2,oriented)
+        def orient_neighbors(starting_face,oriented):
+            stack = [starting_face]
+            while len(stack) > 0:
+                face = stack.pop()
+                for j in range(3):
+                    face2 = self.lff[face,j]
+                    if face2 < 0:
+                        continue
+                    if oriented[face2] >= 0:
+                        continue
+                    ed = self.lf[face,tri_ed[j,:]]
+                    # Ensure same sense as neighbor (opposite direction of shared edge)
+                    for k in range(3):
+                        if(self.lff[face2,k]==face):
+                            break
+                    else:
+                        raise ValueError("Could not find face!!")
+                    ed2 = self.lf[face2,tri_ed[k,:]]
+                    if (ed[0]==ed2[0]) and (ed[1]==ed2[1]):
+                        self.lf[face2,[1,2]] = self.lf[face2,[2,1]]
+                        self.lfe[face2,:] = -self.lfe[face2,[0,2,1]]
+                        self.lff[face2,:] = self.lff[face2,[0,2,1]]
+                    oriented[face2] = surf_id
+                    stack.append(face2)
         #
         oriented = [-1 for _ in range(self.nf)]
-        recur_lim = sys.getrecursionlimit()
-        sys.setrecursionlimit(self.nf)
         surf_id=-1
         for i in range(self.nf):
             if oriented[i]<0:
                 surf_id += 1
                 oriented[i] = surf_id
                 orient_neighbors(i,oriented)
-        sys.setrecursionlimit(recur_lim)
         return np.array(oriented)
 
     def get_face_edge_bop(self):
