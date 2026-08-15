@@ -650,12 +650,13 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         return result
 
-    def run_td(self,dt,nsteps,coil_currs=None,coil_volts=None,full_volts=None,direct=False,
+    def run_td(self,dt=None,nsteps=None,times=None,coil_currs=None,coil_volts=None,full_volts=None,direct=False,
                status_freq=10,plot_freq=10,sensor_obj=None,sensor_values=None,lin_tol=1.E-6,lin_rtol=1.E-4,timestep_cn=True):
         '''! Perform a time-domain simulation
 
         @param dt Time step for simulation
         @param nsteps Number of steps to take
+        @param times Simulation time array [s]
         @param coil_currs Current vs time array for Icoils `(:,n_icoils+1)` (first column is time)
         @param coil_volts Voltage vs time array for Vcoils `(:,n_vcoils+1)` (first column is time)
         @param full_volts Voltage vs time array for Vcoils `(:,nelems+1)` (first column is time)
@@ -709,13 +710,25 @@ class ThinCurr():
                 raise ValueError("# of voltages in waveform does not match # of vcoils")
             nvolt = c_int(coil_volts.shape[0])
             coil_volts = numpy.ascontiguousarray(coil_volts.transpose(), dtype=numpy.float64)
+        if times is not None:
+            times = numpy.ascontiguousarray(times, dtype=numpy.float64)
+            if nsteps is not None:
+                raise ValueError('"nsteps" should not be specified if "times" is specified')
+            nsteps = times.shape[0]-1
+        else:
+            if dt is not None:
+                if nsteps is None:
+                    raise ValueError('"nsteps" must be specified if "dt" is specified')
+                times = numpy.arange(0.0,dt*(nsteps+1),dt,dtype=numpy.float64)
+            else:
+                raise ValueError('Either "dt" or "times" must be specified')
         error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
-            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_double(lin_tol),c_double(lin_rtol),c_bool(timestep_cn),
+            thincurr_time_domain(self.tw_obj,c_bool(direct),times,c_int(nsteps),c_double(lin_tol),c_double(lin_rtol),c_bool(timestep_cn),
                                  c_int(status_freq),c_int(plot_freq),vec_ic,sensor_ptr,ncurr,coil_currs,nvolt,coil_volts,volts_full,
                                  sensor_values_ptr,self.Lmat_hodlr,error_string)
         else:
-            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_double(lin_tol),c_double(lin_rtol),c_bool(timestep_cn),
+            thincurr_time_domain(self.tw_obj,c_bool(direct),times,c_int(nsteps),c_double(lin_tol),c_double(lin_rtol),c_bool(timestep_cn),
                                  c_int(status_freq),c_int(plot_freq),vec_ic,sensor_ptr,ncurr,coil_currs,nvolt,coil_volts,volts_full,
                                  sensor_values_ptr,c_void_p(),error_string)
         if error_string.value != b'':

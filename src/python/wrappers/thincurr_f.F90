@@ -1062,11 +1062,11 @@ END SUBROUTINE thincurr_freq_response
 !---------------------------------------------------------------------------------
 !> Perform a time-domain simulation
 !---------------------------------------------------------------------------------
-SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_atol,cg_rtol,timestep_cn,nstatus,nplot, &
+SUBROUTINE thincurr_time_domain(tw_ptr,direct,times_ptr,nsteps,cg_atol,cg_rtol,timestep_cn,nstatus,nplot, &
   vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,volts_full,sensor_vals_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< ThinCurr object pointer
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Use direct solver?
-REAL(KIND=c_double), VALUE, INTENT(in) :: dt !< Time step [s]
+TYPE(c_ptr), VALUE, INTENT(in) :: times_ptr !< Time step values [s]
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsteps !< Number of time steps
 REAL(KIND=c_double), VALUE, INTENT(in) :: cg_atol !< CG solver absolute tolerance
 REAL(KIND=c_double), VALUE, INTENT(in) :: cg_rtol !< CG solver relative tolerance
@@ -1084,7 +1084,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: sensor_vals_ptr !< Sensor values pointer
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< HODLR operator pointer
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 LOGICAL :: pm_save
-REAL(8), CONTIGUOUS, POINTER :: ic_tmp(:),curr_waveform(:,:),volt_waveform(:,:),sensor_waveform(:,:)
+REAL(8), CONTIGUOUS, POINTER :: ic_tmp(:),times(:),curr_waveform(:,:),volt_waveform(:,:),sensor_waveform(:,:)
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(tw_sensors), POINTER :: sensors
 TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
@@ -1139,14 +1139,15 @@ ELSE
   NULLIFY(sensor_waveform)
 END IF
 CALL c_f_pointer(vec_ic, ic_tmp, [tw_obj%nelems])
-!---Run eigenvalue analysis
+!---Run time-domain simulation
+CALL c_f_pointer(times_ptr, times, [nsteps+1])
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr, hodlr_op)
-  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
+  CALL run_td_sim(tw_obj,times,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
     nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_waveform,hodlr_op=hodlr_op)
 ELSE
-  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
+  CALL run_td_sim(tw_obj,times,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
     nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_waveform)
 END IF
 oft_env%pm=pm_save

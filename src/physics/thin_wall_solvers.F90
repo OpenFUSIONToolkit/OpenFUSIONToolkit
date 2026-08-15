@@ -623,10 +623,10 @@ END SUBROUTINE frequency_response
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE run_td_sim(self,dt,nsteps,vec,direct,lin_tols,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_vals,hodlr_op)
+SUBROUTINE run_td_sim(self,times,nsteps,vec,direct,lin_tols,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_vals,hodlr_op)
 TYPE(tw_type), INTENT(in) :: self
-REAL(8), INTENT(in) :: dt
 INTEGER(4), INTENT(in) :: nsteps
+REAL(8), INTENT(in) :: times(nsteps+1)
 REAL(8), INTENT(inout) :: vec(:)
 LOGICAL, INTENT(in) :: direct
 REAL(8), INTENT(in) :: lin_tols(2)
@@ -641,7 +641,7 @@ TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L ma
 !---
 INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits,int_inds(2)
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: its_hist
-REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op,int_facs(2),elapsed_time
+REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt,dt_old,dt_op,int_facs(2),elapsed_time
 REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
@@ -705,6 +705,8 @@ END IF
 CALL self%Uloc%new(u)
 CALL self%Uloc%new(up)
 CALL self%Uloc%new(g)
+!---Get first timestep size
+dt=times(2)-times(1)
 !---Setup inductance matrix wrapper
 IF(PRESENT(hodlr_op))THEN
   Lmat=>hodlr_op
@@ -782,7 +784,7 @@ END IF
 ALLOCATE(vals(self%nelems))
 vals=vec
 CALL u%restore_local(vals)
-t=0.d0
+t=times(1)
 IF(ntimes_curr>0)THEN
   DO j=1,self%n_icoils
     icoil_curr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t,1)
@@ -859,6 +861,29 @@ ALLOCATE(its_hist(nstatus),time_hist(nstatus))
 its_hist=0
 time_hist=0.d0
 DO i=1,nsteps
+  dt_old = dt
+  dt = times(i+1)-times(i)
+  !---Update matrices if timestep has changed
+  IF(ABS((dt_old-dt)/dt_old)>1.d-6)THEN
+    WRITE(*,'(2X,A,1ES10.2)')'Updating matrices with new timestep = ',dt
+    IF(use_cn)THEN
+      bmat%alam = -dt/2.d0  ! Update backward matrix timestep
+      dt_op = dt/2.d0
+    ELSE
+      dt_op = dt
+    END IF
+    IF(direct)THEN
+      CALL oft_abort('Time steps must be uniform for direct solver','run_td_sim',__FILE__)
+    ELSE
+      fmat%alam = dt_op ! Update forward matrix timestep
+      CALL fmat%assemble()
+      IF(PRESENT(hodlr_op))THEN
+        linv_pre%beta=fmat%alam ! Update preconditioner timestep
+        linv_pre%refactor=.TRUE.
+      END IF
+    END IF
+  END IF
+
   !---Update extrapolation fields
   IF(maxextrap>0)THEN
     DO j=maxextrap,2,-1
@@ -938,10 +963,6 @@ DO i=1,nsteps
     CALL Minv%apply(g,u)
     nits=1
   ELSE
-    ! CALL du%add(0.d0,1.d0,u)
-    ! CALL du%add(1.d0,-1.d0,up)
-    ! CALL up%add(0.d0,1.d0,u)
-    ! CALL u%add(1.d0,1.d0,du)
     !---Extrapolate solution
     IF(maxextrap>0)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,t+dt,u)
     CALL linv%apply(u,g)
@@ -954,9 +975,9 @@ DO i=1,nsteps
     linv_pre%times=0.d0
   END IF
   uu=SQRT(u%dot(u))
-  t=t+dt
-  its_hist(MOD(i,nstatus))=nits
-  time_hist(MOD(i,nstatus))=elapsed_time
+  t=times(i+1)
+  its_hist(MOD(i,nstatus)+1)=nits
+  time_hist(MOD(i,nstatus)+1)=elapsed_time
   IF(MOD(i,nstatus)==0)THEN
     nits=INT(SUM(its_hist)/REAL(nstatus,8),4)
     elapsed_time=SUM(time_hist)/REAL(nstatus,8)

@@ -100,6 +100,7 @@ END TYPE
 !> Complex block-Jacobi preconditioner for ThinCurr HODLR matrices
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_csolver) :: oft_tw_hodlr_bjpre
+  LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
   INTEGER(4) :: max_block_size = 0
   COMPLEX(c8) :: alpha = (1.d0,0.d0)
   COMPLEX(c8) :: beta =  (1.d0,0.d0)
@@ -122,6 +123,7 @@ END TYPE
 !> Real block-Jacobi preconditioner for ThinCurr HODLR matrices
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
+  LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
   INTEGER(4) :: max_block_size = 0
   REAL(r8) :: alpha = 1.d0
   REAL(r8) :: beta = 1.d0
@@ -2989,16 +2991,16 @@ INTEGER(4) :: i,j,k,l,n,info,level,iblock
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap
 COMPLEX(8), POINTER, DIMENSION(:) :: utmp,gtmp,uloc,gloc
 DEBUG_STACK_PUSH
-IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
+IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
+IF(self%refactor)THEN
   ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
   self%max_block_size = 0
-  ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
   DO i=1,self%mf_obj%ndense
     level=self%mf_obj%dense_blocks(1,i)
     iblock=self%mf_obj%dense_blocks(2,i)
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
     self%max_block_size = MAX(self%max_block_size,n)
-    ALLOCATE(self%inverse_mats(i)%M(n,n))
+    IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
     self%inverse_mats(i)%M=self%alpha*self%mf_obj%dense_mats(i)%M
     imap=0
     DO j=1,n
@@ -3019,7 +3021,7 @@ IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
   IF(n>0)THEN
     i = self%mf_obj%ndense+1
     self%max_block_size = MAX(self%max_block_size,n)
-    ALLOCATE(self%inverse_mats(i)%M(n,n))
+    IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
     imap=0
     DO j=1,n
       DO k=1,n
@@ -3054,6 +3056,7 @@ IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
     IF(info/=0)CALL oft_abort("factorization failed","",__FILE__)
     ! oft_env%pm=.FALSE.
   END DO
+  self%refactor=.FALSE.
 END IF
 !
 NULLIFY(utmp,gtmp)
@@ -3131,7 +3134,8 @@ INTEGER(4) :: i,j,k,l,n,info,level,iblock,jblock
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap
 REAL(8), POINTER, DIMENSION(:) :: utmp,gtmp,uloc,gloc
 DEBUG_STACK_PUSH
-IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
+IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
+IF(self%refactor)THEN
   ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
   self%max_block_size = 0
   ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
@@ -3140,7 +3144,7 @@ IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
     iblock=self%mf_obj%dense_blocks(2,i)
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
     self%max_block_size = MAX(self%max_block_size,n)
-    ALLOCATE(self%inverse_mats(i)%M(n,n))
+    IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
     self%inverse_mats(i)%M=self%alpha*self%mf_obj%dense_mats(i)%M
     imap=0
     DO j=1,n
@@ -3161,7 +3165,7 @@ IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
   IF(n>0)THEN
     i = self%mf_obj%ndense+1
     self%max_block_size = MAX(self%max_block_size,n)
-    ALLOCATE(self%inverse_mats(i)%M(n,n))
+    IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
     imap=0
     DO j=1,n
       DO k=1,n
@@ -3196,6 +3200,7 @@ IF(.NOT.ASSOCIATED(self%inverse_mats))THEN
     IF(info/=0)CALL oft_abort("factorization failed","",__FILE__)
     ! oft_env%pm=.FALSE.
   END DO
+  self%refactor=.FALSE.
 END IF
 !
 NULLIFY(utmp,gtmp)
