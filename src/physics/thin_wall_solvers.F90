@@ -895,18 +895,14 @@ DO i=1,nsteps
     extrapt(1)=t
   END IF
   !---Update driven coil dI/dt waveforms
+  IF(ntimes_curr>0)THEN
+    DO j=1,self%n_icoils
+      icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt,1)
+      icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t,1)
+    END DO
+  END IF
   IF(use_cn)THEN
     CALL bmat%apply(u,g)
-    IF(ntimes_curr>0)THEN
-      DO j=1,self%n_icoils
-        ! Start of step
-        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt/4.d0,1)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t-dt/4.d0,1)
-        ! End of step
-        icoil_dcurr(j)=icoil_dcurr(j)+linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0,1)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0,1)
-      END DO
-    END IF
     IF(ntimes_volt>0)THEN
       IF(volt_full)THEN
         CALL linterp_facs(volt_waveform(:,1),ntimes_volt,t,int_inds,int_facs,1)
@@ -926,13 +922,6 @@ DO i=1,nsteps
     END IF
   ELSE
     CALL Lmat%apply(u,g)
-    IF(ntimes_curr>0)THEN
-      DO j=1,self%n_icoils
-        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0,1)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0,1)
-      END DO
-      icoil_dcurr=icoil_dcurr*2.d0
-    END IF
     IF(ntimes_volt>0)THEN
       IF(volt_full)THEN
         CALL linterp_facs(volt_waveform(:,1),ntimes_volt,t+dt,int_inds,int_facs,1)
