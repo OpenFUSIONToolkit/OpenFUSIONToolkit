@@ -13,6 +13,7 @@
 !------------------------------------------------------------------------------
 MODULE oft_gs
 USE oft_base
+USE spline_mod
 USE oft_sort, ONLY: sort_matrix, sort_array
 USE oft_io, ONLY: hdf5_field_exist, hdf5_read, hdf5_write, &
   xdmf_plot_file, hdf5_create_file, hdf5_create_group
@@ -4113,7 +4114,6 @@ real(8), intent(in) :: cofs(n)
 real(8), intent(out) :: err(m)
 integer(4), intent(inout) :: iflag
 real(8) :: f(3),goptmp(3,3),psitmp(1),pt(2)
-real(8), parameter :: tol=1.d-10
 !---
 pt=cofs(1)*active_targets%vec + active_targets%pt
 call bmesh_findcell(active_targets%psi_eval%mesh,active_targets%cell,pt,f)
@@ -4346,8 +4346,10 @@ type(oft_lag_brinterp), target :: psi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
+integer(4), parameter :: nlcfs=1000
 logical :: lcfs_all,lcfs_any
 type(gsinv_interp), pointer :: field
+TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
 lcfs_any = PRESENT(dl).OR.PRESENT(rbounds).OR.PRESENT(zbounds)
 lcfs_all = PRESENT(dl).AND.PRESENT(rbounds).AND.PRESENT(zbounds)
@@ -4444,9 +4446,27 @@ do j=1,nr
     CYCLE
   end if
   IF((j==1).AND.PRESENT(dl))THEN
+    !------------------------------------------------------------------------------
+    ! Reinterpolate LCFS to get uniform spacing and compute geometric parameters
+    !------------------------------------------------------------------------------
+    !---Allocate and fit spline
+    CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
+    lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
+    lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
+    lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
+    CALL spline_fit(lcfs_rz,"periodic")
+    !---Resample trace
+    DO i=0,nlcfs-1
+      CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
+      ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
+      ptout(2,i+1)=lcfs_rz%f(1)
+      ptout(3,i+1)=lcfs_rz%f(2)
+    END DO
+    !---Destroy Spline
+    CALL spline_dealloc(lcfs_rz)
     !---Extrapolate to real LCFS
     IF(psi_q(1)<0.05d0)THEN
-      DO i=1,active_tracer%nsteps
+      DO i=1,nlcfs
         pt(1:2)=ptout(2:3,i)
         pt_proj(1:2)=pt(1:2)-gseq%o_point
         pt_proj=pt_proj/SQRT(SUM(pt_proj(1:2)**2))
@@ -4458,7 +4478,7 @@ do j=1,nr
     dl = 0.d0
     rbounds(:,1)=ptout(2:3,1); rbounds(:,2)=ptout(2:3,1)
     zbounds(:,1)=ptout(2:3,1); zbounds(:,2)=ptout(2:3,1)
-    DO i=2,active_tracer%nsteps
+    DO i=2,nlcfs
       dl = dl + SQRT(SUM((ptout(2:3,i)-ptout(2:3,i-1))**2))
       IF(ptout(2,i)<rbounds(1,1))THEN
         rbounds(:,1)=ptout(2:3,i)
