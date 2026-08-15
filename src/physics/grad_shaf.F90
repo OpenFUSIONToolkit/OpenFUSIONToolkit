@@ -4414,7 +4414,6 @@ active_tracer%maxsteps=8e4
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
-IF(PRESENT(dl))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,nr
   !------------------------------------------------------------------------------
@@ -4435,6 +4434,7 @@ do j=1,nr
   !!$omp end critical
   pt_last=pt
   IF(j==1.AND.PRESENT(dl))THEN
+    ALLOCATE(ptout(3,active_tracer%maxsteps+1))
     CALL tracinginv_fs(gseq%device%fe_rep%mesh,pt(1:2),ptout)
   ELSE
     CALL tracinginv_fs(gseq%device%fe_rep%mesh,pt(1:2))
@@ -4495,6 +4495,7 @@ do j=1,nr
       END IF
     END DO
     IF(active_tracer%status/=1)dl=-1.d0
+    DEALLOCATE(ptout)
   END IF
   !---Get flux variables
   IF(gseq%mode==0)THEN
@@ -4513,7 +4514,6 @@ do j=1,nr
   END IF
 end do
 CALL active_tracer%delete
-IF(PRESENT(dl))DEALLOCATE(ptout)
 CALL field%delete()
 DEALLOCATE(field)
 !$omp end parallel
