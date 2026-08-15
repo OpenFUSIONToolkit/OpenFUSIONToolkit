@@ -4449,24 +4449,27 @@ do j=1,nr
     !------------------------------------------------------------------------------
     ! Reinterpolate LCFS to get uniform spacing and compute geometric parameters
     !------------------------------------------------------------------------------
-    !---Allocate and fit spline
-    CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
-    lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
-    lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
-    lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
-    CALL spline_fit(lcfs_rz,"periodic")
-    !---Resample trace
-    DO i=0,nlcfs-1
-      CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
-      ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
-      ptout(2,i+1)=lcfs_rz%f(1)
-      ptout(3,i+1)=lcfs_rz%f(2)
-    END DO
-    !---Destroy Spline
-    CALL spline_dealloc(lcfs_rz)
+    IF(active_tracer%nsteps>nlcfs)THEN
+      !---Allocate and fit spline
+      CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
+      lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
+      lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
+      lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
+      CALL spline_fit(lcfs_rz,"periodic")
+      !---Resample trace
+      DO i=0,nlcfs-1
+        CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
+        ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
+        ptout(2,i+1)=lcfs_rz%f(1)
+        ptout(3,i+1)=lcfs_rz%f(2)
+      END DO
+      !---Destroy Spline
+      CALL spline_dealloc(lcfs_rz)
+      active_tracer%nsteps=nlcfs
+    END IF
     !---Extrapolate to real LCFS
     IF(psi_q(1)<0.05d0)THEN
-      DO i=1,nlcfs
+      DO i=1,active_tracer%nsteps
         pt(1:2)=ptout(2:3,i)
         pt_proj(1:2)=pt(1:2)-gseq%o_point
         pt_proj=pt_proj/SQRT(SUM(pt_proj(1:2)**2))
@@ -4478,7 +4481,7 @@ do j=1,nr
     dl = 0.d0
     rbounds(:,1)=ptout(2:3,1); rbounds(:,2)=ptout(2:3,1)
     zbounds(:,1)=ptout(2:3,1); zbounds(:,2)=ptout(2:3,1)
-    DO i=2,nlcfs
+    DO i=2,active_tracer%nsteps
       dl = dl + SQRT(SUM((ptout(2:3,i)-ptout(2:3,i-1))**2))
       IF(ptout(2,i)<rbounds(1,1))THEN
         rbounds(:,1)=ptout(2:3,i)

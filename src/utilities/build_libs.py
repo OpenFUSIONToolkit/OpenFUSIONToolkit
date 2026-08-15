@@ -125,6 +125,8 @@ def run_command(command, timeout=10, env_vars={}):
 
 
 def ver_lt(ver_string, ver_test):
+    ver_string = ver_string.split("-")[0].split("_")[0]  # Needed if patch release
+    ver_test = ver_test.split("-")[0].split("_")[0]  # Needed if patch release
     v1 = ver_test.split('.')
     v2 = ver_string.split('.')
     if int(v2[0]) < int(v1[0]):
@@ -136,6 +138,8 @@ def ver_lt(ver_string, ver_test):
 
 
 def ver_gt(ver_string, ver_test):
+    ver_string = ver_string.split("-")[0].split("_")[0]  # Needed if patch release
+    ver_test = ver_test.split("-")[0].split("_")[0]  # Needed if patch release
     v1 = ver_test.split('.')
     v2 = ver_string.split('.')
     if int(v2[0]) > int(v1[0]):
@@ -1024,9 +1028,9 @@ class OpenMPI(package):
             # Search for PMIx
             result, errcode = run_command("brew --prefix --installed pmix")
             if errcode == 0:
-                result, errcode = run_command("brew list --versions pmix")
+                ver_result, errcode = run_command("brew list --versions pmix")
                 if errcode == 0:
-                    pmix_ver = result.split()[-1].strip()
+                    pmix_ver = ver_result.split()[-1].strip()
                     if not ver_lt(pmix_ver, "6.0"):
                         print("  Found pmix version {0}, which is not compatible with OpenMPI 5.x".format(pmix_ver))
                         config_options.append('--with-pmix=internal')

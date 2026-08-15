@@ -32,7 +32,7 @@ type, abstract :: tracer
   real(r8) :: tol = 1.d-4 !< Tolerance for ODE solver
   real(r8) :: t = 0.d0 !< Current time
   real(r8) :: dt = 0.d0 !< Timestep (for fixed step methods)
-  real(r8) :: tout = 0.d0 !< Needs docs
+  real(r8) :: tmax = 0.d0 !< Maximum time for integration
   real(r8) :: y(2) = 0.d0 !< Position in real coordinates (eg. X,Y)
   real(r8) :: dy(2) = 0.d0 !< Change in position in real coordinates (eg. X,Y)
   real(r8) :: f(3) = 0.d0 !< Logical position in cell
@@ -280,7 +280,7 @@ self%v=0.d0
 self%dv=0.d0
 !---
 self%t=0.d0
-self%tout=2.d0*pi
+self%tmax=2.d0*pi
 self%nsteps=0
 !---Find starting point
 self%cell=0
@@ -299,7 +299,7 @@ self%dy=0.d0
 pttmp=[self%y(1),self%y(2),0.d0]
 call bmesh_findcell(self%mesh,self%cell,pttmp,self%f)
 self%initialized=.TRUE.
-active_tracer%status=0
+self%status=0
 end subroutine trace_setup_lsode
 !------------------------------------------------------------------------------
 !> Advance the tracer one step using LSODE
@@ -307,11 +307,11 @@ end subroutine trace_setup_lsode
 subroutine trace_advance_lsode(self)
 class(tracer_lsode), intent(inout) :: self !< LSODE tracer object
 IF(self%inv)THEN
-  call dlsode(tracing_eval_Binv,self%neq,self%v,self%t,self%tout,1,self%tol, &
+  call dlsode(tracing_eval_Binv,self%neq,self%v,self%t,self%tmax,1,self%tol, &
     self%tol,self%itask,self%istate,0,self%rwork,self%lrw,self%iwork,self%liw, &
     tracing_eval_Binv,10)
 ELSE
-  call dlsode(tracing_eval_B,self%neq,self%v,self%t,self%tout,1,self%tol, &
+  call dlsode(tracing_eval_B,self%neq,self%v,self%t,self%tmax,1,self%tol, &
     self%tol,self%itask,self%istate,0,self%rwork,self%lrw,self%iwork,self%liw, &
     tracing_eval_B,10)
 END IF
@@ -350,8 +350,8 @@ self%dv=0.d0
 self%dv_last=0.d0
 !---
 self%t=0.d0
-self%tout=2.d0*pi
-self%dt=self%tout/1.d4
+self%tmax=2.d0*pi
+self%dt=self%tmax/1.d4
 self%nsteps=0
 !---Find starting point
 self%cell=0
@@ -368,10 +368,10 @@ self%dy=0.d0
 pttmp=[self%y(1),self%y(2),0.d0]
 call bmesh_findcell(self%mesh,self%cell,pttmp,self%f)
 self%initialized=.TRUE.
-active_tracer%status=0
+self%status=0
 end subroutine trace_setup_euler
 !------------------------------------------------------------------------------
-!> Advance the tracer one step using a foward Euler method with adaptive timestep control
+!> Advance the tracer one step using a forward Euler method with adaptive timestep control
 !------------------------------------------------------------------------------
 subroutine trace_advance_euler(self)
 class(tracer_euler), intent(inout) :: self !< Tracer object
@@ -384,7 +384,7 @@ END IF
 IF(self%t>0.d0)THEN ! Approximate error over last step and update timestep
   self%dv_last=self%dt*(self%dv - self%dv_last)/2.d0 ! LTE = h^2 * y'' / 2 = h^2 * (yd_1 - yd_0)/(2*h)
   self%dt=MIN(self%tol/SQRT(SUM(self%dv_last**2)),2.d0*self%dt)
-  IF(self%t+self%dt>self%tout)self%dt=self%tout-self%t ! Don't overshoot target time
+  IF(self%t+self%dt>self%tmax)self%dt=self%tmax-self%t ! Don't overshoot target time
 END IF
 self%v=self%v+self%dt*self%dv
 self%t=self%t+self%dt
