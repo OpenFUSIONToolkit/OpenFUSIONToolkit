@@ -2895,6 +2895,7 @@ class TokaMaker_equilibrium():
         else:
             raise ValueError('Invalid "geom_type"')
         # Build dictionary
+        print("CHK: pvol = {0}, vol = {1}, Ip = {2}, dl = {3}".format(pvol,vol,Ip,dl))
         eq_stats = {
             'Ip': Ip,
             'Ip_centroid': centroid,
