@@ -5,29 +5,12 @@
 #------------------------------------------------------------------------------
 '''! Python cli for Cubit to native Open FUSION Toolkit mesh conversion
 
+See @ref convert_cubit
+
 @authors Chris Hansen
 @date July 2026
 @ingroup doxy_oft_python
 '''
-
-## @page convert_cubit `OFT_convert_cubit`: Cubit to native Open FUSION Toolkit mesh conversion
-#
-# @section convert_cubit_desc Description and options
-# This script converts a Cubit (exodus) mesh file to native Open FUSION Toolkit mesh format.
-#
-#```shell
-# usage: OFT_convert_cubit [-h] --in_file IN_FILE [--out_file OUT_FILE] [--periodic_nodeset PERIODIC_NODESET] [--ignore_attr]
-#
-# Convert a Cubit (exodus) mesh file to native Open FUSION Toolkit mesh format
-#
-# options:
-#   -h, --help            show this help message and exit
-#   --in_file IN_FILE     Input mesh file
-#   --out_file OUT_FILE   Ouput mesh file
-#   --periodic_nodeset PERIODIC_NODESET
-#                         Index of perioidic nodeset
-#   --ignore_attr         Ignore block attributes
-#```
 import os
 import numpy as np
 from .meshing import write_native_mesh
@@ -291,3 +274,23 @@ def script_entry():
     options = parser.parse_args()
 
     convert_cubit_to_native(options.in_file, out_file=options.out_file, periodic_nodeset=options.periodic_nodeset, ignore_attr=options.ignore_attr)
+
+
+## @page convert_cubit `OFT_convert_cubit`: Cubit to native Open FUSION Toolkit mesh conversion
+#
+# @section convert_cubit_desc Description and options
+# This script converts a Cubit (exodus) mesh file to native Open FUSION Toolkit mesh format.
+#
+#```shell
+# usage: OFT_convert_cubit [-h] --in_file IN_FILE [--out_file OUT_FILE] [--periodic_nodeset PERIODIC_NODESET] [--ignore_attr]
+#
+# Convert a Cubit (exodus) mesh file to native Open FUSION Toolkit mesh format
+#
+# options:
+#   -h, --help            show this help message and exit
+#   --in_file IN_FILE     Input mesh file
+#   --out_file OUT_FILE   Ouput mesh file
+#   --periodic_nodeset PERIODIC_NODESET
+#                         Index of perioidic nodeset
+#   --ignore_attr         Ignore block attributes
+#```

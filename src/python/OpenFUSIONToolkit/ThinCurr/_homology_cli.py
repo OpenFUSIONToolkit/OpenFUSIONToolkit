@@ -5,39 +5,14 @@
 #------------------------------------------------------------------------------
 '''! Python cli for ThinCurr hole construction using homology computations
 
+See @ref thincurr_homology_tool
+
 @authors Chris Hansen
 @date July 2026
 @ingroup doxy_oft_python
 '''
-
-## @page thincurr_holes_tool `OFT_ThinCurr_holes`: ThinCurr hole/closure script
-#
-# @section OFT_ThinCurr_holes_desc Description and options
-# This script identifies holes and closures in a ThinCurr surface mesh using
-# homology computations.
-#
-#```shell
-# usage: OFT_ThinCurr_holes [-h] --in_file IN_FILE [--out_file OUT_FILE] [--keep_nodeset_start KEEP_NODESET_START] [--plot_final] [--plot_steps] [--show_omitted]
-#                                 [--show_covering] [--debug] [--ref_point REF_POINT [REF_POINT ...]] [--optimize_holes]
-#
-# options:
-#     -h, --help            show this help message and exit
-#     --in_file IN_FILE     Input mesh file
-#     --out_file OUT_FILE   Ouput mesh file (default: Input file name with "-homology" appended)
-#     --keep_nodeset_start KEEP_NODESET_START
-#                           REMOVED
-#     --plot_final          Show final homology basis?
-#     --plot_steps          Show intermediate bases for each distinct surface?
-#     --show_omitted        Show boundary cycles that are omitted?
-#     --show_covering       Show covering triangles for boundary cycles (only used if `--plot_steps`)?
-#     --debug               Print additional debug information?
-#     --ref_point REF_POINT [REF_POINT ...]
-#                           Reference location for base point [x,y,z] (default: [0,0,0])
-#     --optimize_holes      Sample additional points to attempt to optimize holes?
-#```
 import os
 import sys
-import shutil
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
@@ -955,3 +930,30 @@ def script_entry():
         ref_point=options.ref_point,
         optimize_holes=options.optimize_holes
     )
+
+
+## @page thincurr_holes_tool `OFT_ThinCurr_holes`: ThinCurr hole/closure script
+#
+# @section OFT_ThinCurr_holes_desc Description and options
+# This script identifies holes and closures in a ThinCurr surface mesh using
+# homology computations.
+#
+#```shell
+# usage: OFT_ThinCurr_holes [-h] --in_file IN_FILE [--out_file OUT_FILE] [--keep_nodeset_start KEEP_NODESET_START] [--plot_final] [--plot_steps] [--show_omitted]
+#                                 [--show_covering] [--debug] [--ref_point REF_POINT [REF_POINT ...]] [--optimize_holes]
+#
+# options:
+#     -h, --help            show this help message and exit
+#     --in_file IN_FILE     Input mesh file
+#     --out_file OUT_FILE   Ouput mesh file (default: Input file name with "-homology" appended)
+#     --keep_nodeset_start KEEP_NODESET_START
+#                           REMOVED
+#     --plot_final          Show final homology basis?
+#     --plot_steps          Show intermediate bases for each distinct surface?
+#     --show_omitted        Show boundary cycles that are omitted?
+#     --show_covering       Show covering triangles for boundary cycles (only used if `--plot_steps`)?
+#     --debug               Print additional debug information?
+#     --ref_point REF_POINT [REF_POINT ...]
+#                           Reference location for base point [x,y,z] (default: [0,0,0])
+#     --optimize_holes      Sample additional points to attempt to optimize holes?
+#```

@@ -5,32 +5,12 @@
 #------------------------------------------------------------------------------
 '''! Python cli for XDMF file creation for the Open FUSION Toolkit
 
+See @ref build_xdmf
+
 @authors Chris Hansen
 @date July 2026
 @ingroup doxy_oft_python
 '''
-
-## @page build_xdmf `OFT_build_xdmf`: Build XDMF files for visualization
-#
-# @section build_xdmf_desc Description and options
-# This script builds XDMF descriptor files for ParaView or other visualization tools
-# from Open FUSION Toolkit output.
-#
-#```shell
-# usage: OFT_build_xdmf [-h] [-i INPREFIX] [-p] [-k] [--block_padding BLOCK_PADDING] [--repeat_static]
-#
-# Create Xdmf files for ParaView or other visualization tools from Open FUSION Toolkit output.
-#
-# options:
-#   -h, --help            show this help message and exit
-#   -i, --inprefix INPREFIX
-#                         Input file name prefix, default="oft_xdmf"
-#   -p, --pretty          Print nicely formatted XML documents.
-#   -k, --keep            Keep existing output files.
-#   --block_padding BLOCK_PADDING
-#                         Size block index padding.
-#   --repeat_static       Insert static fields into all timesteps.
-#```
 import os
 import glob
 import argparse
@@ -328,3 +308,26 @@ def script_entry():
     args = parser.parse_args()
 
     build_xdmf_files('.',args.inprefix,args.pretty,args.keep,args.block_padding,args.repeat_static)
+
+
+## @page build_xdmf `OFT_build_xdmf`: Build XDMF files for visualization
+#
+# @section build_xdmf_desc Description and options
+# This script builds XDMF descriptor files for ParaView or other visualization tools
+# from Open FUSION Toolkit output.
+#
+#```shell
+# usage: OFT_build_xdmf [-h] [-i INPREFIX] [-p] [-k] [--block_padding BLOCK_PADDING] [--repeat_static]
+#
+# Create Xdmf files for ParaView or other visualization tools from Open FUSION Toolkit output.
+#
+# options:
+#   -h, --help            show this help message and exit
+#   -i, --inprefix INPREFIX
+#                         Input file name prefix, default="oft_xdmf"
+#   -p, --pretty          Print nicely formatted XML documents.
+#   -k, --keep            Keep existing output files.
+#   --block_padding BLOCK_PADDING
+#                         Size block index padding.
+#   --repeat_static       Insert static fields into all timesteps.
+#```

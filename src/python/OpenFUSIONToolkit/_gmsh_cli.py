@@ -5,26 +5,12 @@
 #------------------------------------------------------------------------------
 '''! Python cli for GMSH to native Open FUSION Toolkit mesh conversion
 
+See @ref convert_gmsh
+
 @authors Chris Hansen
 @date July 2026
 @ingroup doxy_oft_python
 '''
-
-## @page convert_gmsh `OFT_convert_gmsh`: GMSH to native Open FUSION Toolkit mesh conversion
-#
-# @section convert_gmsh_desc Description and options
-# This script converts a GMSH mesh file to native Open FUSION Toolkit mesh format.
-#
-#```shell
-# usage: OFT_convert_gmsh [-h] --in_file IN_FILE [--out_file OUT_FILE]
-#
-# Convert a GMSH mesh file to native Open FUSION Toolkit mesh format
-#
-# options:
-#   -h, --help           show this help message and exit
-#   --in_file IN_FILE    Input mesh file
-#   --out_file OUT_FILE  Ouput mesh file
-#```
 import os
 import numpy as np
 from .meshing import write_native_mesh
@@ -230,3 +216,20 @@ def script_entry():
     options = parser.parse_args()
 
     convert_gmsh_to_native(options.in_file, options.out_file)
+
+
+## @page convert_gmsh `OFT_convert_gmsh`: GMSH to native Open FUSION Toolkit mesh conversion
+#
+# @section convert_gmsh_desc Description and options
+# This script converts a GMSH mesh file to native Open FUSION Toolkit mesh format.
+#
+#```shell
+# usage: OFT_convert_gmsh [-h] --in_file IN_FILE [--out_file OUT_FILE]
+#
+# Convert a GMSH mesh file to native Open FUSION Toolkit mesh format
+#
+# options:
+#   -h, --help           show this help message and exit
+#   --in_file IN_FILE    Input mesh file
+#   --out_file OUT_FILE  Ouput mesh file
+#```

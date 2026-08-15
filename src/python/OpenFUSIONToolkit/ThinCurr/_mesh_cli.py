@@ -5,118 +5,11 @@
 #------------------------------------------------------------------------------
 '''! ThinCurr mesh manipulation and combination utility script and supporting functions
 
+See @ref thincurr_mesh_tool
+
 @authors Open FUSION Toolkit contributors
 @date July 2026
 '''
-
-## @page thincurr_mesh_tool `OFT_ThinCurr_mesh_tool`: ThinCurr mesh manipulation utility
-#
-# @tableofcontents
-#
-# @section thincurr_mesh_tool_desc Description
-# This script supports a variety of operations to add/modify information about ThinCurr models
-# as well as combining multiple models. It supports two top-level
-# workflows via sub-commands:
-#
-# Modify a single mesh file by removing regions, applying a rigid transform, and/or
-# generating multiple shifted/rotated copies:
-#
-#```shell
-# # Convert every nodeset in the file to a jumper
-# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --jumper_range 0
-#
-# # Set a uniform surface resistivity on all regions
-# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --eta_surf 1.257E-5
-#
-# # Copy resistivity from a ThinCurr XML input file
-# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --eta_from_xml oft_in.xml
-#
-# # Set per-region volumetric resistivity with thickness (2 regions)
-# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --eta_vol 1.257E-5 2.5E-5 --thickness 1.0E-3 2.0E-3
-#
-# # Remove regions 2 and 3
-# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --remove_regions 2 3
-#
-# # Shift the whole mesh by (0,0,0.5)
-# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --shift 0 0 0.5
-#
-# # Stretch the mesh by 2x along x (scale about the origin)
-# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --scale 2 1 1
-#
-# # Build a 6-fold toroidal array (60 deg spacing about z):
-# # the original plus 5 rotated copies at 60,120,180,240,300 deg
-# OFT_ThinCurr_mesh_tool modify --in_file segment_model.h5 --copies 5 --rotate z 60
-#```
-#
-# Combine two (or more) existing mesh files into a single mesh:
-#
-#```shell
-#OFT_ThinCurr_mesh_tool combine --in_files model1.h5 model2.h5 --out_file combined_model.h5
-#```
-#
-# In general, the \ref thincurr_compute_holes "OFT_thincurr_holes" utility should be used on the final
-# model to compute holes and colusures from the combined geometry. For compatibility with older models,
-# this script treats all NODESETs as holes by default, which will be overriden by the `OFT_thincurr_holes`
-# if run. For future meshes only NODESETs corresponding to jumpers should be specified, which can
-# be converted to jumpers instead of holes using the `--jumpers` or `--jumper_range` options.
-#
-# Only one of `--shift`, `--rotate`, or `--scale` may be given at a time. When `--copies`
-# is given, `--shift` or `--rotate` defines the per-copy increment (`--scale` is not
-# allowed); otherwise the transform is applied once to the whole mesh.
-#
-# @section thincurr_mesh_tool_opts Script Options
-# Script options for `modify` workflow:
-#
-#```shell
-#usage: OFT_ThinCurr_mesh_tool modify [-h] --in_file IN_FILE [--out_file OUT_FILE] [--remove_regions REMOVE_REGIONS [REMOVE_REGIONS ...]] [--shift X Y Z |
-#                                        --rotate AXIS ANGLE | --scale SX SY SZ] [--rotate_center X Y Z] [--copies COPIES] [--persist_regions]
-#                                        [--eta_surf ETA_SURF [ETA_SURF ...]] [--eta_vol ETA_VOL [ETA_VOL ...]] [--thickness THICKNESS [THICKNESS ...]]
-#                                        [--eta_from_xml ETA_FROM_XML] [--coils_from_xml COILS_FROM_XML] [--jumpers IDX [IDX ...] | --jumper_range N [N ...]]
-#
-#options:
-#  -h, --help            show this help message and exit
-#  --in_file IN_FILE     Input mesh file
-#  --out_file OUT_FILE   Output mesh file
-#  --remove_regions REMOVE_REGIONS [REMOVE_REGIONS ...]
-#                        Region indices to remove
-#  --shift X Y Z         Translation [X Y Z]. Applied once to the whole mesh, or as the per-copy increment when --copies is given
-#  --rotate AXIS ANGLE   Rotation of ANGLE degrees about AXIS (x|y|z). Applied once to the whole mesh, or as the per-copy increment when --copies is given
-#  --scale SX SY SZ      Scale factors along X, Y, Z about the origin. Cannot be combined with --copies
-#  --rotate_center X Y Z
-#                        Center of rotation (default: origin)
-#  --copies COPIES       Add this many transformed copies, not counting the original (which is always kept), applying --shift or --rotate incrementally to each
-#                        (requires --shift or --rotate; not valid with --scale)
-#  --persist_regions     Keep the original region IDs on every copy instead of offsetting them so each copy is distinct (default: offset so each copy gets its own
-#                        distinct regions)
-#  --eta_surf ETA_SURF [ETA_SURF ...]
-#                        Surface resistivity per region (one value, or one per region); thickness is optional
-#  --eta_vol ETA_VOL [ETA_VOL ...]
-#                        Volumetric resistivity per region (one value, or one per region); requires --thickness
-#  --thickness THICKNESS [THICKNESS ...]
-#                        Region thickness (one value, or one per region)
-#  --eta_from_xml ETA_FROM_XML
-#                        Read eta/eta_surf, eta_vol, and thickness from an <oft><thincurr> XML file instead of the flags above
-#  --coils_from_xml COILS_FROM_XML
-#                        Read coil sets from an <oft><thincurr> XML file and add to the output mesh
-#  --jumpers IDX [IDX ...]
-#                        Nodeset indices to treat as jumpers instead of holes (0-based; negative indices count from the end). All other nodesets are holes
-#  --jumper_range N [N ...]
-#                        Range of nodeset indices to treat as jumpers, given as START [STOP] with Python slice semantics [START:STOP) (0-based; negative allowed;
-#                        omit STOP to run to the end). Use '0' to mark every nodeset as a jumper
-#```
-#
-# Script options for `combine` workflow:
-#
-#```shell
-#usage: OFT_ThinCurr_mesh_tool combine [-h] --in_files IN_FILES [IN_FILES ...] [--out_file OUT_FILE] [--merge_regions]
-#
-#options:
-#  -h, --help            show this help message and exit
-#  --in_files IN_FILES [IN_FILES ...]
-#                        Input mesh files (two or more)
-#  --out_file OUT_FILE   Output mesh file
-#  --merge_regions       Merge identical region IDs across inputs instead of keeping them distinct (default: keep distinct)
-#```
 import os
 import re
 import xml.etree.ElementTree as ET
@@ -821,3 +714,113 @@ def script_entry(argv=None):
             print("Adding coil sets...")
             mesh.coil_sets = mesh.coil_sets + coil_sets if mesh.coil_sets is not None else coil_sets
         mesh.save(out_file)
+
+
+## @page thincurr_mesh_tool `OFT_ThinCurr_mesh_tool`: ThinCurr mesh manipulation utility
+#
+# @tableofcontents
+#
+# @section thincurr_mesh_tool_desc Description
+# This script supports a variety of operations to add/modify information about ThinCurr models
+# as well as combining multiple models. It supports two top-level
+# workflows via sub-commands:
+#
+# Modify a single mesh file by removing regions, applying a rigid transform, and/or
+# generating multiple shifted/rotated copies:
+#
+#```shell
+# # Convert every nodeset in the file to a jumper
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --jumper_range 0
+#
+# # Set a uniform surface resistivity on all regions
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --eta_surf 1.257E-5
+#
+# # Copy resistivity from a ThinCurr XML input file
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --eta_from_xml oft_in.xml
+#
+# # Set per-region volumetric resistivity with thickness (2 regions)
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --eta_vol 1.257E-5 2.5E-5 --thickness 1.0E-3 2.0E-3
+#
+# # Remove regions 2 and 3
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --remove_regions 2 3
+#
+# # Shift the whole mesh by (0,0,0.5)
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --shift 0 0 0.5
+#
+# # Stretch the mesh by 2x along x (scale about the origin)
+# OFT_ThinCurr_mesh_tool modify --in_file input_model.h5 --scale 2 1 1
+#
+# # Build a 6-fold toroidal array (60 deg spacing about z):
+# # the original plus 5 rotated copies at 60,120,180,240,300 deg
+# OFT_ThinCurr_mesh_tool modify --in_file segment_model.h5 --copies 5 --rotate z 60
+#```
+#
+# Combine two (or more) existing mesh files into a single mesh:
+#
+#```shell
+#OFT_ThinCurr_mesh_tool combine --in_files model1.h5 model2.h5 --out_file combined_model.h5
+#```
+#
+# In general, the \ref thincurr_compute_holes "OFT_thincurr_holes" utility should be used on the final
+# model to compute holes and colusures from the combined geometry. For compatibility with older models,
+# this script treats all NODESETs as holes by default, which will be overriden by the `OFT_thincurr_holes`
+# if run. For future meshes only NODESETs corresponding to jumpers should be specified, which can
+# be converted to jumpers instead of holes using the `--jumpers` or `--jumper_range` options.
+#
+# Only one of `--shift`, `--rotate`, or `--scale` may be given at a time. When `--copies`
+# is given, `--shift` or `--rotate` defines the per-copy increment (`--scale` is not
+# allowed); otherwise the transform is applied once to the whole mesh.
+#
+# @section thincurr_mesh_tool_opts Script Options
+# Script options for `modify` workflow:
+#
+#```shell
+#usage: OFT_ThinCurr_mesh_tool modify [-h] --in_file IN_FILE [--out_file OUT_FILE] [--remove_regions REMOVE_REGIONS [REMOVE_REGIONS ...]] [--shift X Y Z |
+#                                        --rotate AXIS ANGLE | --scale SX SY SZ] [--rotate_center X Y Z] [--copies COPIES] [--persist_regions]
+#                                        [--eta_surf ETA_SURF [ETA_SURF ...]] [--eta_vol ETA_VOL [ETA_VOL ...]] [--thickness THICKNESS [THICKNESS ...]]
+#                                        [--eta_from_xml ETA_FROM_XML] [--coils_from_xml COILS_FROM_XML] [--jumpers IDX [IDX ...] | --jumper_range N [N ...]]
+#
+#options:
+#  -h, --help            show this help message and exit
+#  --in_file IN_FILE     Input mesh file
+#  --out_file OUT_FILE   Output mesh file
+#  --remove_regions REMOVE_REGIONS [REMOVE_REGIONS ...]
+#                        Region indices to remove
+#  --shift X Y Z         Translation [X Y Z]. Applied once to the whole mesh, or as the per-copy increment when --copies is given
+#  --rotate AXIS ANGLE   Rotation of ANGLE degrees about AXIS (x|y|z). Applied once to the whole mesh, or as the per-copy increment when --copies is given
+#  --scale SX SY SZ      Scale factors along X, Y, Z about the origin. Cannot be combined with --copies
+#  --rotate_center X Y Z
+#                        Center of rotation (default: origin)
+#  --copies COPIES       Add this many transformed copies, not counting the original (which is always kept), applying --shift or --rotate incrementally to each
+#                        (requires --shift or --rotate; not valid with --scale)
+#  --persist_regions     Keep the original region IDs on every copy instead of offsetting them so each copy is distinct (default: offset so each copy gets its own
+#                        distinct regions)
+#  --eta_surf ETA_SURF [ETA_SURF ...]
+#                        Surface resistivity per region (one value, or one per region); thickness is optional
+#  --eta_vol ETA_VOL [ETA_VOL ...]
+#                        Volumetric resistivity per region (one value, or one per region); requires --thickness
+#  --thickness THICKNESS [THICKNESS ...]
+#                        Region thickness (one value, or one per region)
+#  --eta_from_xml ETA_FROM_XML
+#                        Read eta/eta_surf, eta_vol, and thickness from an <oft><thincurr> XML file instead of the flags above
+#  --coils_from_xml COILS_FROM_XML
+#                        Read coil sets from an <oft><thincurr> XML file and add to the output mesh
+#  --jumpers IDX [IDX ...]
+#                        Nodeset indices to treat as jumpers instead of holes (0-based; negative indices count from the end). All other nodesets are holes
+#  --jumper_range N [N ...]
+#                        Range of nodeset indices to treat as jumpers, given as START [STOP] with Python slice semantics [START:STOP) (0-based; negative allowed;
+#                        omit STOP to run to the end). Use '0' to mark every nodeset as a jumper
+#```
+#
+# Script options for `combine` workflow:
+#
+#```shell
+#usage: OFT_ThinCurr_mesh_tool combine [-h] --in_files IN_FILES [IN_FILES ...] [--out_file OUT_FILE] [--merge_regions]
+#
+#options:
+#  -h, --help            show this help message and exit
+#  --in_files IN_FILES [IN_FILES ...]
+#                        Input mesh files (two or more)
+#  --out_file OUT_FILE   Output mesh file
+#  --merge_regions       Merge identical region IDs across inputs instead of keeping them distinct (default: keep distinct)
+#```
