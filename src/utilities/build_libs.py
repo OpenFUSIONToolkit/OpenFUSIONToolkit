@@ -1024,9 +1024,16 @@ class OpenMPI(package):
             # Search for PMIx
             result, errcode = run_command("brew --prefix pmix")
             if errcode == 0:
-                pmix_path = result.strip()
-                print("    Using pmix from homebrew: {0}".format(pmix_path))
-                config_options.append('--with-pmix={0}'.format(pmix_path))
+                result, errcode = run_command("brew list --versions pmix")
+                if errcode == 0:
+                    pmix_ver = result.split()[-1].strip()
+                    if not ver_lt(pmix_ver, "6.0"):
+                        print("  Found pmix version {0}, which is not compatible with OpenMPI 5.x".format(pmix_ver))
+                        config_options.append('--with-pmix=internal')
+                    else:
+                        pmix_path = result.strip()
+                        print("    Using pmix from homebrew: {0}".format(pmix_path))
+                        config_options.append('--with-pmix={0}'.format(pmix_path))
             else:
                 print("    Could not find pmix, build may fail")
             # Search for libevent
