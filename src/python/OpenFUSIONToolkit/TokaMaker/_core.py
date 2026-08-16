@@ -343,14 +343,9 @@ class TokaMaker():
                     raise ValueError('Invalid "reg" array, values must be >= 0')
                 reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
 
-            print('About to call oft_setup_smesh...', flush=True)
             oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
-            print('Finished calling oft_setup_smesh...', flush=True)
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
-        print('About to run tokamaker_alloc...', flush=True)
-        import sys
-        sys.stdout.flush()
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_alloc(ctypes.byref(self._tMaker_ptr),self._mesh_ptr,self.n_eq,error_string)
         if error_string.value != b'':
