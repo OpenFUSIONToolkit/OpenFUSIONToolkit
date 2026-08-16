@@ -408,7 +408,7 @@ CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
 CALL eval_R_qtmp(R_spline, self%x, self%npsi, qtmp)
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 !--- 2. Bootstrap current on self%x grid.
-ALLOCATE(j_BS(self%npsi))
+ALLOCATE(j_BS(0:self%npsi))
 IF(self%freeze_j_BS .AND. ASSOCIATED(self%j_BS_last)) THEN
   !--- Frozen: reuse cached j_BS.
   j_BS = self%j_BS_last
@@ -416,7 +416,7 @@ IF(self%freeze_j_BS .AND. ASSOCIATED(self%j_BS_last)) THEN
 ELSE
   !--- Not frozen: run full bootstrap calculation (Sauter).
   IF (self%boot_ops%isolate_edge_jBS .OR. self%boot_ops%parameterize_jBS) THEN
-    ALLOCATE(j_spike_tmp(self%npsi), j_spike_mask_tmp(self%npsi))
+    ALLOCATE(j_spike_tmp(0:self%npsi), j_spike_mask_tmp(0:self%npsi))
     CALL calculate_bootstrap(self, gseq, self%npsi, self%x, j_BS, &
         isolate_edge_jBS=self%boot_ops%isolate_edge_jBS, &
         parameterize_jBS=self%boot_ops%parameterize_jBS, &
@@ -451,8 +451,8 @@ ELSE
   j_BS = j_BS * mu0
   !--- 2a. Freeze check: freeze j_BS if RMS change drops below tol, or stagnates.
   IF(ASSOCIATED(self%j_BS_last)) THEN
-    djBS = SQRT(SUM((j_BS - self%j_BS_last)**2) / REAL(self%npsi,r8)) / &
-           MAX(SQRT(SUM(j_BS**2) / REAL(self%npsi,r8)), 1.0e-30_r8)
+    djBS = SQRT(SUM((j_BS - self%j_BS_last)**2) / REAL(self%npsi+1,r8)) / &
+           MAX(SQRT(SUM(j_BS**2) / REAL(self%npsi+1,r8)), 1.0e-30_r8)
     IF(djBS < self%boot_ops%djBS_tol .OR. self%freeze_alpha) THEN
       self%freeze_j_BS = .TRUE.
       IF(oft_env%pm)WRITE(*,*)' Freezing bootstrap solution.'
@@ -478,7 +478,7 @@ ELSE
   ELSE
     djBS = HUGE(1.0_r8)
   END IF
-  IF(.NOT.ASSOCIATED(self%j_BS_last)) ALLOCATE(self%j_BS_last(self%npsi))
+  IF(.NOT.ASSOCIATED(self%j_BS_last)) ALLOCATE(self%j_BS_last(0:self%npsi))
   self%j_BS_last = j_BS
 END IF
 !--- 3. Apply edge taper to j_BS and jphi_ind.
@@ -488,7 +488,7 @@ END IF
 ALLOCATE(jphi_ind(self%npsi))
 jphi_ind = self%jphi
 IF (self%boot_ops%taper_edge_jBS) THEN
-  CALL apply_edge_taper(self%npsi, self%x, j_BS, &
+  CALL apply_edge_taper(self%npsi, self%x, j_BS(1:), &
                         1.0_r8 - self%boot_ops%taper_edge_psi0, &
                         self%boot_ops%taper_edge_shape, &
                         oft_psi_conv=.TRUE.)
@@ -520,9 +520,9 @@ IF(self%freeze_alpha) THEN
   ip_result_hi = 0.0_r8
 ELSE
   !--- Not yet frozen: exact linear solve for alpha.
-  jphi_total = j_BS
+  jphi_total = j_BS(1:)
   CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result_lo)
-  jphi_total = jphi_ind + j_BS
+  jphi_total = jphi_ind + j_BS(1:)
   CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result_hi)
   ip_ind = ip_result_hi - ip_result_lo
   IF(ABS(ip_ind) > 0.0_r8)THEN
@@ -563,7 +563,7 @@ ELSE
 END IF
 self%alpha_last = alpha
 !--- 6. Assemble jphi_total, save profiles
-jphi_total = alpha * jphi_ind + j_BS
+jphi_total = alpha * jphi_ind + j_BS(1:)
 IF(.NOT.ASSOCIATED(self%jphi_total_last)) ALLOCATE(self%jphi_total_last(self%npsi))
 self%jphi_total_last = jphi_total
 IF(.NOT.ASSOCIATED(self%boot_profs%total_j_phi))THEN
@@ -574,13 +574,13 @@ IF(.NOT.ASSOCIATED(self%boot_profs%total_j_phi))THEN
 END IF
 ! LCFS boundary (OFT psi=0; self%j0 is jphi_ind at LCFS; j_BS=0 at LCFS)
 self%boot_profs%psi_n(0)       = 0.0_r8
-self%boot_profs%total_j_phi(0) = alpha*self%j0/mu0
-self%boot_profs%j_bs_final(0)  = 0.0_r8
+self%boot_profs%total_j_phi(0) = (alpha*self%j0+j_BS(0))/mu0
+self%boot_profs%j_bs_final(0)  = j_BS(0)/mu0
 self%boot_profs%j_ind_final(0) = alpha*self%j0/mu0
 ! Interior knots (OFT psi convention: self%x(1) near LCFS, self%x(npsi) near axis)
 self%boot_profs%psi_n(1:)       = self%x
 self%boot_profs%total_j_phi(1:) = jphi_total/mu0
-self%boot_profs%j_bs_final(1:)  = j_BS/mu0
+self%boot_profs%j_bs_final(1:)  = j_BS(1:)/mu0
 self%boot_profs%j_ind_final(1:) = alpha * jphi_ind/mu0
 !--- Compute updated F*F' profile
 IF(ASSOCIATED(gseq%P_ani)) &
@@ -590,7 +590,7 @@ pscale = gseq%P%f(gseq%plasma_bounds(2))
 pscale = gseq%pax_target / pscale
 CALL spline_eval(R_spline, 0.d0, 0) ! LCFS point for y0 calculation
 pprime = gseq%P%fp(gseq%plasma_bounds(1))
-self%y0 = 2.d0*(self%j0*alpha - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
+self%y0 = 2.d0*((alpha*self%j0+j_BS(0)) - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 DO i = 1, self%npsi
   CALL spline_eval(R_spline, self%x(i), 0)
   pprime = gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2) - &
@@ -1094,13 +1094,13 @@ SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, j_BS, &
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 INTEGER(i4), INTENT(in) :: n_psi
-REAL(r8), INTENT(in) :: psi_N(n_psi)  !< Normalised psi grid [0,1], arbitrary spacing
-REAL(r8), INTENT(out) :: j_BS(n_psi)
+REAL(r8), INTENT(in) :: psi_N(1:n_psi)  !< Normalised psi grid (0,1], arbitrary spacing. psi_N(1)>0.0
+REAL(r8), INTENT(out) :: j_BS(0:n_psi) ! j_BS(0) the LCFS value (extrapolated)
 LOGICAL,  OPTIONAL, INTENT(in)  :: isolate_edge_jBS  !< If .TRUE., isolate edge spike from core
 LOGICAL,  OPTIONAL, INTENT(in)  :: parameterize_jBS  !< If .TRUE., use parametrised skew-normal fit
 REAL(r8), OPTIONAL, INTENT(in)  :: scale_jBS         !< Scaling factor applied to spike profile (default 1)
-REAL(r8), OPTIONAL, INTENT(out) :: j_spike(n_psi)        !< Processed spike profile [A/m^2]
-REAL(r8), OPTIONAL, INTENT(out) :: j_spike_masked(n_psi) !< Raw masked (pre-fit) spike profile [A/m^2]
+REAL(r8), OPTIONAL, INTENT(out) :: j_spike(0:n_psi)        !< Processed spike profile [A/m^2]
+REAL(r8), OPTIONAL, INTENT(out) :: j_spike_masked(0:n_psi) !< Raw masked (pre-fit) spike profile [A/m^2]
 !---
 INTEGER(i4) :: i
 REAL(r8) :: psi_abs(n_psi)
@@ -1159,10 +1159,7 @@ ft = 1.0_r8 - fc
 ! Pressures [Pa]
 pe = EC * ne * Te
 pi_arr = EC * ni * Ti
-! Gradients d/dpsi [Wb^-1] via shape-preserving monotone PCHIP.
-! pchip_deriv guards against duplicate/non-monotone psi_abs points and NaNs,
-! and avoids the stepped-derivative artifacts that plain finite differences
-! produce on non-uniform or partially-duplicated grids.
+! Gradients d/dpsi [Wb^-1]
 CALL pchip_deriv(n_psi, psi_abs, Te, dT_e_dpsi)
 CALL pchip_deriv(n_psi, psi_abs, Ti, dT_i_dpsi)
 CALL pchip_deriv(n_psi, psi_abs, ne, dn_e_dpsi)
@@ -1198,17 +1195,19 @@ CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, qvals, eps, ft, f, 
     dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &
     ln_le, ln_lii, nu_e_star, nu_i_star, B_times_Jbs)
 ! Convert parallel bootstrap to phi component: j_phi = B_times_Jbs * <R> / F
+j_BS(0) = 0.0_r8 ! Placeholder until extrap_jBS_boundaries sets the real LCFS value below
 WHERE(ABS(f) > 0.0_r8)
-  j_BS = B_times_Jbs / B_avg
+  j_BS(1:) = B_times_Jbs / B_avg
 ELSEWHERE
-  j_BS = 0.0_r8
+  j_BS(1:) = 0.0_r8
 END WHERE
 ! Guard NaN (where F -> 0)
 WHERE(.NOT.(ABS(j_BS) < 1.0e99_r8)) j_BS = 0.0_r8
+! Extrapolate to LCFS/axis where q is undefined. Sets LCFS value j_BS(0).
+CALL extrap_jBS_boundaries(n_psi, psi_N, j_BS)
 ! Save raw bootstrap output
 IF(.NOT.ASSOCIATED(self%boot_profs%j_bs_raw)) ALLOCATE(self%boot_profs%j_bs_raw(0:n_psi))
-self%boot_profs%j_bs_raw(0)  = 0.0_r8  ! j_BS = 0 at LCFS (OFT psi = 0)
-self%boot_profs%j_bs_raw(1:) = j_BS
+self%boot_profs%j_bs_raw = j_BS
 IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A)') '  [calculate_bootstrap] geometry & collisionality sample (i=1,mid,n):'
   WRITE(*,'(A,3ES12.4)') '    <R>      : ', r_avgs_saut(1,1), r_avgs_saut(n_psi/2,1), r_avgs_saut(n_psi,1)
@@ -1234,25 +1233,56 @@ IF (PRESENT(j_spike)) THEN
     ! analyze_bootstrap_edge_spike uses standard psi_N convention (0=axis, 1=LCFS).
     ! OFT internal convention is reversed (0=LCFS, 1=axis).
     ! Flip arrays before calling, then flip outputs back.
-    ALLOCATE(psi_N_std(n_psi), j_BS_std(n_psi), mask_std(n_psi))
-    IF (do_parametrize) ALLOCATE(param_std(n_psi))
-    psi_N_std = 1.0_r8 - psi_N(n_psi:1:-1)
-    j_BS_std  = j_BS(n_psi:1:-1)
+    ALLOCATE(psi_N_std(0:n_psi), j_BS_std(0:n_psi), mask_std(0:n_psi))
+    IF (do_parametrize) ALLOCATE(param_std(0:n_psi))
+    psi_N_std(0:n_psi-1) = 1.0_r8 - psi_N(n_psi:1:-1)
+    psi_N_std(n_psi) = 1.0_r8
+    j_BS_std  = j_BS(n_psi:0:-1)
     IF (do_parametrize) THEN
-      CALL analyze_bootstrap_edge_spike(n_psi, psi_N_std, j_BS_std, mask_std, &
+      CALL analyze_bootstrap_edge_spike((n_psi+1), psi_N_std, j_BS_std, mask_std, &
                                       param_std, diagnose=self%boot_ops%diagnose_bs)
-      IF (PRESENT(j_spike))        j_spike        = scl_jBS * param_std(n_psi:1:-1)
-      IF (PRESENT(j_spike_masked)) j_spike_masked = scl_jBS * mask_std(n_psi:1:-1)
+      IF (PRESENT(j_spike))        j_spike        = scl_jBS * param_std(n_psi:0:-1)
+      IF (PRESENT(j_spike_masked)) j_spike_masked = scl_jBS * mask_std(n_psi:0:-1)
       DEALLOCATE(param_std)
     ELSE
-      CALL analyze_bootstrap_edge_spike(n_psi, psi_N_std, j_BS_std, mask_std)
-      IF (PRESENT(j_spike))        j_spike        = scl_jBS * mask_std(n_psi:1:-1)
-      IF (PRESENT(j_spike_masked)) j_spike_masked = scl_jBS * mask_std(n_psi:1:-1)
+      CALL analyze_bootstrap_edge_spike((n_psi+1), psi_N_std, j_BS_std, mask_std)
+      IF (PRESENT(j_spike))        j_spike        = scl_jBS * mask_std(n_psi:0:-1)
+      IF (PRESENT(j_spike_masked)) j_spike_masked = scl_jBS * mask_std(n_psi:0:-1)
     END IF
     DEALLOCATE(psi_N_std, j_BS_std, mask_std)
   END IF
 END IF
 END SUBROUTINE calculate_bootstrap
+!------------------------------------------------------------------------------
+!> Linearly extrapolate j_BS to LCFS/axis points where q is undefined, using
+!> the PCHIP gradient at the nearest well-defined point.
+!------------------------------------------------------------------------------
+SUBROUTINE extrap_jBS_boundaries(n_psi, psi_N, j_BS)
+INTEGER(i4), INTENT(in) :: n_psi
+REAL(r8), INTENT(in) :: psi_N(1:n_psi)
+REAL(r8), INTENT(inout) :: j_BS(0:n_psi)
+INTEGER(i4) :: n_lo, n_hi
+REAL(r8) :: djBS_dpsi(n_psi)
+! psi_N(0) = 0.0 at the LCFS is implicit.
+n_lo = 1
+n_hi = MERGE(n_psi-1, n_psi, psi_N(n_psi) == 1.0_r8)
+IF(n_hi-n_lo+1 < 2) CALL oft_abort('extrap_jBS_boundaries: too few '// &
+  'points with well-defined q to extrapolate j_BS to the LCFS', &
+  'extrap_jBS_boundaries', __FILE__)
+CALL pchip_deriv(n_hi-n_lo+1, psi_N(n_lo:n_hi), j_BS(n_lo:n_hi), &
+  djBS_dpsi(n_lo:n_hi))
+j_BS(0) = j_BS(n_lo) + djBS_dpsi(n_lo) * (0.0_r8 - psi_N(n_lo))
+IF(psi_N(n_psi) == 1.0_r8)THEN
+  n_lo = 1
+  n_hi = n_psi-1
+  IF(n_hi-n_lo+1 < 2) CALL oft_abort('extrap_jBS_boundaries: too few '// &
+    'points with well-defined q to extrapolate j_BS to the axis', &
+    'extrap_jBS_boundaries', __FILE__)
+  CALL pchip_deriv(n_hi-n_lo+1, psi_N(n_lo:n_hi), j_BS(n_lo:n_hi), &
+    djBS_dpsi(n_lo:n_hi))
+  j_BS(n_psi) = j_BS(n_hi) + djBS_dpsi(n_hi) * (psi_N(n_psi) - psi_N(n_hi))
+ENDIF
+END SUBROUTINE extrap_jBS_boundaries
 !------------------------------------------------------------------------------
 !> Evaluate the skew-normal PDF at a single point.
 !>
