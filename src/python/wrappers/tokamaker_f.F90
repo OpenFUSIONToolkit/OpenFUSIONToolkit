@@ -99,11 +99,17 @@ CONTAINS
 !---------------------------------------------------------------------------------
 !> Allocate TokaMaker wrapper object and initialize with mesh information
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str) BIND(C,NAME="tokamaker_alloc")
+SUBROUTINE tokamaker_alloc(tMaker_ptr,mesh_ptr,n_eq,error_str) BIND(C,NAME="tokamaker_alloc")
 TYPE(c_ptr), INTENT(out) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Pointer to mesh object
+INTEGER(i4), VALUE, INTENT(in) :: n_eq
 CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+INTEGER(i4) :: i
+
+write(6, '(A)', advance='no') 'Processing, please wait...'
+call flush(6)
+
 CALL copy_string('',error_str)
 IF(.NOT.c_associated(mesh_ptr))THEN
   CALL copy_string('Mesh object not associated',error_str)
@@ -111,8 +117,14 @@ IF(.NOT.c_associated(mesh_ptr))THEN
 END IF
 ALLOCATE(tMaker_obj)
 ALLOCATE(tMaker_obj%device)
+ALLOCATE(tMaker_obj%gs_equils(n_eq))
 print *, 'About to allocate gs_equils'
-ALLOCATE(tMaker_obj%gs_equils(tMaker_obj%n_eq))
+! Define n_eq
+tMaker_obj%n_eq = n_eq
+! Allocate eqs
+DO i=1, n_eq
+  ALLOCATE(tMaker_obj%gs_equils(i)%eq)
+END DO
 print *, 'Finished allocating gs_equils'
 tMaker_ptr=C_LOC(tMaker_obj)
 CALL c_f_pointer(mesh_ptr,tMaker_obj%ml_mesh)
@@ -374,8 +386,6 @@ real(r8), POINTER :: vals_tmp(:)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-! Define n_eq
-tMaker_obj%n_eq = n_eq
 
 !------------------------------------------------------------------------------
 ! Check input files
@@ -408,7 +418,7 @@ END IF
 tMaker_obj%ml_mesh%smesh%tess_order=order
 ALLOCATE(tMaker_obj%ML_oft_blagrange)
 CALL oft_lag_setup(tMaker_obj%ml_mesh,order,ML_blag_obj=tMaker_obj%ML_oft_blagrange,minlev=-1)
-CALL tMaker_obj%device%setup(tMaker_obj%ML_oft_blagrange, n_eq)
+CALL tMaker_obj%device%setup(tMaker_obj%ML_oft_blagrange)
 !------------------------------------------------------------------------------
 ! Setup experimental geometry
 !------------------------------------------------------------------------------
@@ -1637,7 +1647,7 @@ tMaker_obj%gs_equils(eq_idx)%eq%Z0_target=Z0_target
 tMaker_obj%gs_equils(eq_idx)%eq%pax_target=pax_target*mu0
 tMaker_obj%gs_equils(eq_idx)%eq%estore_target=estore_target*mu0
 tMaker_obj%gs_equils(eq_idx)%eq%dflux_target=dflux_target
-tMaker_obj%gs_equils(eq_idx)%eq%itor_target=ip_target*mu0
+tMaker_obj%gs_equils(eq_idx)%eq%ip_target=ip_target*mu0
 tMaker_obj%gs_equils(eq_idx)%eq%ip_ratio_target=ip_ratio_target
 END SUBROUTINE tokamaker_set_targets
 !---------------------------------------------------------------------------------

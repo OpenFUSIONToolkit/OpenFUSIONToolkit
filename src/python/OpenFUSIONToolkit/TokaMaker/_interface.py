@@ -31,7 +31,7 @@ class tokamaker_settings_cstruct(c_struct):
 
 # tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str)
 tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
-    [c_void_ptr_ptr, c_void_p, c_char_p])
+    [c_void_ptr_ptr, c_void_p, c_int, c_char_p])
 
 # tokamaker_equil_copy(tMaker_ptr,old_equil_ptr,new_equil_ptr,error_str)
 tokamaker_equil_copy = ctypes_subroutine(oftpy_lib.tokamaker_equil_copy,
@@ -47,7 +47,7 @@ tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
 
 # tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,coil_Lmat,error_str)
 tokamaker_setup = ctypes_subroutine(oftpy_lib.tokamaker_setup,
-    [c_void_p, c_int, c_bool, c_void_p, c_int_ptr, c_double_ptr_ptr, c_char_p])
+    [c_void_p, c_int, c_bool, c_int_ptr, c_double_ptr_ptr, c_char_p])
 
 # tokamaker_destroy(tMaker_ptr,error_str)
 tokamaker_destroy = ctypes_subroutine(oftpy_lib.tokamaker_destroy,

@@ -236,7 +236,7 @@ class TokaMaker():
         # Number of equilibria
         self.n_eq = n_eq
         ## Internal Grad-Shafranov eq object (@ref psi_grad_shaf.gs_equil "gs_equil")
-        self._tMaker_equil = [TokaMaker_equilibrium(self) for _ in range(n_eq)]
+        # self._tMaker_equil = [TokaMaker_equilibrium(self) for _ in range(n_eq)]
 
         print('Finished TM constructor')
 
@@ -315,6 +315,8 @@ class TokaMaker():
         @param reg Mesh region list [nc] (base one)
         @param mesh_file Filename containing mesh to load (native format only)
         '''
+        print('Running setup_mesh...', flush=True)
+
         if self.nregs != -1:
             raise ValueError('Mesh already setup, must call "reset" before loading new mesh')
         nregs = c_int()
@@ -340,11 +342,17 @@ class TokaMaker():
                 if reg.min() <= 0:
                     raise ValueError('Invalid "reg" array, values must be >= 0')
                 reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
+
+            print('About to call oft_setup_smesh...', flush=True)
             oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
+            print('Finished calling oft_setup_smesh...', flush=True)
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
+        print('About to run tokamaker_alloc...', flush=True)
+        import sys
+        sys.stdout.flush()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_alloc(ctypes.byref(self._tMaker_ptr),self._mesh_ptr,error_string)
+        tokamaker_alloc(ctypes.byref(self._tMaker_ptr),self._mesh_ptr,self.n_eq,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         self.update_settings()
@@ -419,23 +427,27 @@ class TokaMaker():
         @param order Order of FE representation to use
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
         '''
+        print('Starting setup', flush=True)
         if self.np != -1:
             raise ValueError('G-S instance already setup')
         self.update_settings()
-        #
+        
         ncoils = c_int()
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup(self._tMaker_ptr,order,full_domain,self._tMaker_equil,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
+        print('Calling setup', flush=True)
+        tokamaker_setup(self._tMaker_ptr,order,full_domain,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        print('Called setup', flush=True)
         # Update vacuum flux
         self._F0 = F0
         # Get coil count and reference to coil self-inductance matrix
         self.ncoils = ncoils.value
         self.Lcoils = numpy.ctypeslib.as_array(Lmat_loc,shape=(self.ncoils,self.ncoils))
-        # Create equilibirum object
+        # Create eq array
         self._tMaker_equil = [TokaMaker_equilibrium(self) for _ in range(self.n_eq)]
+        # Create equilibirum object
         error_string = self._oft_env.get_c_errorbuff()
         for eq_idx in range(self.n_eq):
             tokamaker_equil_set(self._tMaker_ptr,self._tMaker_equil[eq_idx].c_ptr,eq_idx+1,error_string)
