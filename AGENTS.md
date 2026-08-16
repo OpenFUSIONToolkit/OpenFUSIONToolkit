@@ -215,14 +215,10 @@ A representative build environment that can be used for creating a testing sandb
 
 1. **Single OFT_env instance**: The Python `OFT_env` class enforces a singleton. Tests use `multiprocessing.Process` to work around this. Never create two `OFT_env` instances in the same process.
 
-2. **Source setup_env.sh**: Always source this before any build/test commands. It activates the Python venv. In CI, this file is generated during prerequisites setup.
+2. **Tests run from build tree**: Tests must be run from `builds/build_release/tests/` (or via `make test` from `builds/build_release/`), not from the source tree, because compiled Fortran test executables are in the build tree.
 
-3. **Build from `builds/` directory**: The `build_libs.py` script must run from the `builds/` directory. It creates `config_cmake.sh` there. CMake then creates `build_release/` and `install_release/` inside `builds/`.
+3. **ext_libs/ is bundled third-party code**: Do not modify files in `src/ext_libs/`. These are upstream sources (triangle, minpack, bvls, dlsode).
 
-4. **Tests run from build tree**: Tests must be run from `builds/build_release/tests/` (or via `make test` from `builds/build_release/`), not from the source tree, because compiled Fortran test executables are in the build tree.
+4. **Fortran/Python interop**: The Python package calls compiled Fortran via `ctypes`. The Fortran-side wrappers are in `src/python/wrappers/` and use `ISO_C_BINDING`. Changes to Fortran function signatures require corresponding updates to both `wrappers/*_f.F90` and `python/OpenFUSIONToolkit/*/_interface.py`.
 
-5. **ext_libs/ is bundled third-party code**: Do not modify files in `src/ext_libs/`. These are upstream sources (triangle, minpack, bvls, dlsode).
-
-6. **Fortran/Python interop**: The Python package calls compiled Fortran via `ctypes`. The Fortran-side wrappers are in `src/python/wrappers/` and use `ISO_C_BINDING`. Changes to Fortran function signatures require corresponding updates to both `wrappers/*_f.F90` and `python/OpenFUSIONToolkit/*/_interface.py`.
-
-7. **CMake template files**: Some files use `@VARIABLE@` CMake substitution (e.g., `__init__.py`, `pyproject.toml.in`, `run_test.sh.in`). Edit the `.in` template, not the generated file.
+5. **CMake template files**: Some files use `@VARIABLE@` CMake substitution (e.g., `__init__.py`, `pyproject.toml.in`, `run_test.sh.in`). Edit the `.in` template, not the generated file.
