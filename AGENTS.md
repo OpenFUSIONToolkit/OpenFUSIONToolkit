@@ -1,4 +1,4 @@
-# Copilot Instructions for OpenFUSIONToolkit
+# AI Agent Instructions for OpenFUSIONToolkit
 
 ## Project Overview
 
@@ -29,7 +29,7 @@ src/
 ├── physics/        # Physics modules (Grad-Shafranov, thin-wall, Taylor, xMHD, tracing)
 ├── bin/            # Standalone Fortran executables
 ├── python/
-│   ├── OpenFUSIONToolkit/         # Python package (ctypes wrappers)
+│   ├── OpenFUSIONToolkit/        # Python package (ctypes wrappers)
 │   │   ├── TokaMaker/            # TokaMaker Python API
 │   │   ├── ThinCurr/             # ThinCurr Python API
 │   │   └── Marklin/              # Marklin Python API
@@ -87,6 +87,10 @@ make install                 # install to builds/install_release/
   - Pre-built external libraries in `builds/`
   - OFT compiled and installed in `builds/install_release/`
 
+### Python packaging information
+
+Python packaging is handled by a dedicated script template at `src/python/make_package.sh.in` and associated `src/python/pyproject.toml.in`, which are configured/installed during the CMAKE build process if the `OFT_PACKAGE_PYTHON` option is set. Dependencies, scripts, and other information are available in this file a supersede the lint-only file `src/python/pyproject.toml`. 
+
 ## Testing
 
 Tests use **pytest** and are organized under `src/tests/` in subdirectories matching the source layout: `base/`, `grid/`, `lin_alg/`, `fem/`, `physics/`.
@@ -123,6 +127,12 @@ cd builds/build_release/tests
 ../../run_test.sh physics/test_TokaMaker.py --collect-only
 ```
 
+To run a specific test `test_name`, optionally with arguments (`test_args`), wihin a specific file `test_file.py` (current working director must contain `test_file.py`):
+
+```bash
+python -c "from test_file import test_name; test_name(*test_args)"
+```
+
 ### Test conventions
 
 - Tests marked `@pytest.mark.slow` are excluded from default CI runs
@@ -136,7 +146,7 @@ cd builds/build_release/tests
 
 ### Python linting
 
-Python code is linted with **ruff**. Configuration is in `src/python/pyproject.toml`:
+Python code is linted with **ruff**. Configuration is in `src/python/pyproject.toml` (superseded by `src/python/pyproject.toml.in` for python packaging):
 
 ```bash
 cd src/python && ruff check
@@ -154,18 +164,22 @@ cd src && python utilities/generate_stack.py -l
 
 This validates that all `SUBROUTINE`/`FUNCTION` entries have matching debug stack annotations. Run from the `src/` directory.
 
-## CI Workflows
+## CI Workflows (utilizing GitHub actions)
 
 | Workflow | File | Trigger | Purpose |
 |---|---|---|---|
 | **CI Build** | `ci_build.yaml` | push to main, PRs | Full matrix build (GCC, Intel, macOS) × (OpenMP, MPICH, OpenMPI) |
 | **Lint** | `lint.yaml` | push to main, PRs | ruff check + Fortran stack check |
 | **Coverage** | `cov_build.yaml` | push to main | Build with `--coverage`, upload to Codecov |
-| **CD Nightly** | `cd_nightly.yaml` | schedule | Nightly package builds |
-| **Copilot Setup** | `copilot-setup-steps.yml` | manual/PR | Agent environment setup |
+| **CD Build and Deployment** | `cd_combined.yaml` | push to main, pypi_release, PRs | Release and nightly package/PyPI builds (deploy from `pypi_release`) |
+| **Container CD Build and Deployment** | `container_cd.yaml` | push to main, container_release, PRs | Container release builds (deploy from `container_release`) |
+| **GitHub Pages Build** | `website.yml` | push to main, gh-pages, PRs | Documentation/website build (deploy from `gh-pages`) |
+| **Copilot Agent Setup** | `copilot-setup-steps.yml` | manual/PR | Copilot agent environment setup |
+| **Copilot Review Setup** | `copilot-code-review.yml` | manual/PR | Copilot code review agent environment setup |
 
-### CI configuration used in copilot-setup-steps
+### Representative build environment
 
+A representative build environment that can be used for creating a testing sandbox as used in `copilot-setup-steps.yml` is as follows:
 - **OS**: Ubuntu 24.04
 - **Compilers**: `gcc-14` / `g++-14` / `gfortran-14`
 - **Parallel**: OpenMP + MPICH (MPI enabled)
