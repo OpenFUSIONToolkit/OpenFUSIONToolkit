@@ -403,9 +403,9 @@ IF(.NOT.ASSOCIATED(gseq%Zeff)) &
                  "jphi_bs_update",__FILE__)
 !--- 1. Build <R>/<1/R> spline; pre-compute qtmp = <R>*<1/R> on self%x.
 !   R_spline stays alive until after the F*F' loop (step 6).
-ALLOCATE(qtmp(self%npsi))
+ALLOCATE(qtmp(0:self%npsi))
 CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
-CALL eval_R_qtmp(R_spline, self%x, self%npsi, qtmp)
+CALL eval_R_qtmp(R_spline, [0.0_r8, self%x], self%npsi+1, qtmp)
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 !--- 2. Bootstrap current on self%x grid.
 ALLOCATE(j_BS(0:self%npsi))
@@ -485,26 +485,26 @@ END IF
 !   self%j_BS_last caches the un-tapered j_BS so freeze comparisons track physics.
 !   taper_edge_psi0 is in standard convention (0=axis,1=LCFS);
 !   threshold in OFT convention (0=LCFS,1=axis) is (1 - taper_edge_psi0).
-ALLOCATE(jphi_ind(self%npsi))
-jphi_ind = self%jphi
+ALLOCATE(jphi_ind(0:self%npsi))
+jphi_ind = [self%j0, self%jphi]
 IF (self%boot_ops%taper_edge_jBS) THEN
-  CALL apply_edge_taper(self%npsi, self%x, j_BS(1:), &
+  CALL apply_edge_taper(self%npsi+1, [0.0_r8, self%x], j_BS, &
                         1.0_r8 - self%boot_ops%taper_edge_psi0, &
                         self%boot_ops%taper_edge_shape, &
                         oft_psi_conv=.TRUE.)
-  CALL apply_edge_taper(self%npsi, self%x, jphi_ind, &
+  CALL apply_edge_taper(self%npsi+1, [0.0_r8, self%x], jphi_ind, &
                         1.0_r8 - self%boot_ops%taper_edge_psi0, &
                         self%boot_ops%taper_edge_shape, &
                         oft_psi_conv=.TRUE.)
 END IF
-ALLOCATE(jphi_total(self%npsi))
+ALLOCATE(jphi_total(0:self%npsi))
 !--- 4. Reconcile gs_itor_nl vs gs_flux_int.
 !   No Ip target: rescale jphi_total so the integrated current matches the
 !   FEM solution (gs_itor_nl) rather than the profile quadrature (gs_flux_int).
 jphi_rescale = self%rescale_last
 IF(ASSOCIATED(self%jphi_total_last) .AND. .NOT. self%freeze_alpha) THEN
   CALL gs_itor_nl(gseq, itor_nl)
-  CALL gs_flux_int(gseq, self%x, self%jphi_total_last/qtmp, self%npsi, itor_flint)
+  CALL gs_flux_int(gseq, [0.0_r8, self%x], self%jphi_total_last/qtmp, self%npsi+1, itor_flint)
   jphi_rescale = (itor_nl/itor_flint + self%rescale_last) / 2.0_r8
   self%rescale_last = jphi_rescale
 END IF
@@ -520,10 +520,10 @@ IF(self%freeze_alpha) THEN
   ip_result_hi = 0.0_r8
 ELSE
   !--- Not yet frozen: exact linear solve for alpha.
-  jphi_total = j_BS(1:)
-  CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result_lo)
-  jphi_total = jphi_ind + j_BS(1:)
-  CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, ip_result_hi)
+  jphi_total = j_BS
+  CALL gs_flux_int(gseq, [0.0_r8, self%x], jphi_total/qtmp, self%npsi+1, ip_result_lo)
+  jphi_total = jphi_ind + j_BS
+  CALL gs_flux_int(gseq, [0.0_r8, self%x], jphi_total/qtmp, self%npsi+1, ip_result_hi)
   ip_ind = ip_result_hi - ip_result_lo
   IF(ABS(ip_ind) > 0.0_r8)THEN
     alpha = (ip_target - ip_result_lo) / ip_ind
@@ -563,8 +563,8 @@ ELSE
 END IF
 self%alpha_last = alpha
 !--- 6. Assemble jphi_total, save profiles
-jphi_total = alpha * jphi_ind + j_BS(1:)
-IF(.NOT.ASSOCIATED(self%jphi_total_last)) ALLOCATE(self%jphi_total_last(self%npsi))
+jphi_total = alpha * jphi_ind + j_BS
+IF(.NOT.ASSOCIATED(self%jphi_total_last)) ALLOCATE(self%jphi_total_last(0:self%npsi))
 self%jphi_total_last = jphi_total
 IF(.NOT.ASSOCIATED(self%boot_profs%total_j_phi))THEN
   ALLOCATE(self%boot_profs%psi_n(0:self%npsi))
@@ -572,16 +572,10 @@ IF(.NOT.ASSOCIATED(self%boot_profs%total_j_phi))THEN
   ALLOCATE(self%boot_profs%j_bs_final(0:self%npsi))
   ALLOCATE(self%boot_profs%j_ind_final(0:self%npsi))
 END IF
-! LCFS boundary (OFT psi=0; self%j0 is jphi_ind at LCFS; j_BS=0 at LCFS)
-self%boot_profs%psi_n(0)       = 0.0_r8
-self%boot_profs%total_j_phi(0) = (alpha*self%j0+j_BS(0))/mu0
-self%boot_profs%j_bs_final(0)  = j_BS(0)/mu0
-self%boot_profs%j_ind_final(0) = alpha*self%j0/mu0
-! Interior knots (OFT psi convention: self%x(1) near LCFS, self%x(npsi) near axis)
-self%boot_profs%psi_n(1:)       = self%x
-self%boot_profs%total_j_phi(1:) = jphi_total/mu0
-self%boot_profs%j_bs_final(1:)  = j_BS(1:)/mu0
-self%boot_profs%j_ind_final(1:) = alpha * jphi_ind/mu0
+self%boot_profs%psi_n       = [0.0_r8, self%x]
+self%boot_profs%total_j_phi = jphi_total/mu0
+self%boot_profs%j_bs_final  = j_BS/mu0
+self%boot_profs%j_ind_final = alpha * jphi_ind/mu0
 !--- Compute updated F*F' profile
 IF(ASSOCIATED(gseq%P_ani)) &
   CALL oft_abort('Jphi profiles do not support anisotropic pressure', &
@@ -590,7 +584,7 @@ pscale = gseq%P%f(gseq%plasma_bounds(2))
 pscale = gseq%pax_target / pscale
 CALL spline_eval(R_spline, 0.d0, 0) ! LCFS point for y0 calculation
 pprime = gseq%P%fp(gseq%plasma_bounds(1))
-self%y0 = 2.d0*((alpha*self%j0+j_BS(0)) - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
+self%y0 = 2.d0*(jphi_total(0) - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 DO i = 1, self%npsi
   CALL spline_eval(R_spline, self%x(i), 0)
   pprime = gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2) - &
@@ -617,7 +611,7 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi_rescale= ', jphi_rescale
   !--- Side-by-side Ip comparison: FEM nonlinear solve vs profile flux integral
   CALL gs_itor_nl(gseq, itor_nl)
-  CALL gs_flux_int(gseq, self%x, jphi_total/qtmp, self%npsi, itor_flint)
+  CALL gs_flux_int(gseq, [0.0_r8, self%x], jphi_total/qtmp, self%npsi+1, itor_flint)
   WRITE(*,'(A)') '  [jphi_bs_update] --- Ip comparison (current jphi_total) ---'
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] Ip(gs_itor_nl)    = ', itor_nl/mu0
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] Ip(flux_int/qtmp) = ', itor_flint/mu0
