@@ -524,6 +524,27 @@ def _pchip_deriv(x, y):
 
     return dydx
 
+def _extrap_jBS_boundaries(psi_N, j_BS):
+    r'''! Linearly extrapolate j_BS to the axis/LCFS endpoints where q is
+    undefined, using the PCHIP gradient at the nearest well-defined
+    (interior) point.
+
+    @param psi_N Normalised poloidal flux grid [0, 1], standard convention
+    @param j_BS Bootstrap current profile on psi_N
+    @result j_BS with the axis/LCFS endpoints replaced by extrapolated values
+    '''
+    n_psi = len(psi_N)
+    if n_psi - 2 < 2:
+        raise ValueError(
+            "_extrap_jBS_boundaries: too few points with well-defined q "
+            "(%d) to extrapolate j_BS to the axis/LCFS" % max(0, n_psi - 2))
+
+    j_BS = j_BS.copy()
+    djBS_dpsi = _pchip_deriv(psi_N[1:-1], j_BS[1:-1])
+    j_BS[0] = j_BS[1] + djBS_dpsi[0] * (psi_N[0] - psi_N[1])
+    j_BS[-1] = j_BS[-2] + djBS_dpsi[-1] * (psi_N[-1] - psi_N[-2])
+    return j_BS
+
 def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target, F0=None):
     r'''! Solve Grad-Shafranov equilibrium for given profiles
 
@@ -1173,7 +1194,8 @@ def solve_with_bootstrap(mygs,
             j_BS_final = j_BS_neo / b_avgs[0]
             j_BS_final = numpy.nan_to_num(j_BS_final, nan=0.0)
 
-            # to-do: project j_BS_parallel to j_phi more accurately?
+            # Extrapolate to LCFS/axis where q is undefined
+            j_BS_final = _extrap_jBS_boundaries(psi_N, j_BS_final)
 
         # Scale Currents to match Ip
         current_jphi_target = inductive_jphi if inductive_jphi is not None else numpy.zeros_like(pressure)
