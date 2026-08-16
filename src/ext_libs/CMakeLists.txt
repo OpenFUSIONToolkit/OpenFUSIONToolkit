@@ -11,6 +11,9 @@ add_library( oftext
   bvls.f90
   ${QUADPACK_OBJS}
 )
+if( OFT_USE_LTO )
+  target_compile_options(oftext PRIVATE -fno-lto)
+endif()
 
 # Local copy of triangle
 if( OFT_BUILD_PYTHON )
