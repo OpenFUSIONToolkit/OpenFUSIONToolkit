@@ -5,6 +5,11 @@ on:
     branches:
       - container_release
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
     paths:
       - .github/workflows/container_cd.yaml
       - src/utilities/build_libs.py
@@ -46,7 +51,7 @@ jobs:
           fi
 
   build-images:
-    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
+    if: github.event.pull_request.draft == false && github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     needs: prepare-version
     runs-on: ${{ matrix.runner }}
     permissions:
