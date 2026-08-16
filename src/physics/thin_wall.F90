@@ -50,7 +50,7 @@ TYPE :: hole_mesh
   INTEGER(i4), POINTER, DIMENSION(:) :: sort_ind => NULL() !< Index from sorted list
   INTEGER(i4), POINTER, DIMENSION(:) :: kpc => NULL() !< Pointer to point-cell linkage
   INTEGER(i4), POINTER, DIMENSION(:) :: lpc => NULL() !< List of cells tied to each point
-  ! REAL(r8), POINTER, DIMENSION(:) :: fsign => NULL() !< Sign of 
+  ! REAL(r8), POINTER, DIMENSION(:) :: fsign => NULL() !< Sign of
   REAL(r8) :: ptcc(3) = 0.d0
 END TYPE hole_mesh
 !---------------------------------------------------------------------------------
@@ -70,6 +70,9 @@ TYPE :: jumper_sensor
   CHARACTER(LEN=40) :: name = '' !< Name of sensor
   INTEGER(i4), POINTER, DIMENSION(:) :: points => NULL() !< List of points on jumper
   REAL(r8), POINTER, DIMENSION(:) :: hole_facs => NULL() !< Coupling weight to "holes"
+CONTAINS
+  !> Compute current [A] through jumper from thin-wall solution vector
+  PROCEDURE :: compute_current => jumper_compute_current
 END TYPE jumper_sensor
 !---------------------------------------------------------------------------------
 !> Structure containing sensor sets
@@ -2201,7 +2204,7 @@ IF(TRIM(save_file)/='none')THEN
     hash_tmp(2) = self%mesh%nc
     hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
     hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
-    WRITE(*,'(2A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
+    WRITE(*,'(3A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
     CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
     IF(exists.AND.ALL(file_counts==hash_tmp))THEN
       ALLOCATE(self%Bel(self%nelems,self%mesh%np,3))
@@ -2433,7 +2436,7 @@ DO i=1,ncoils
   IF(xml_hasAttribute(coil_set,"res_per_len"))THEN
     CALL xml_read_attribute(coil_set,"res_per_len",res_per_len,iostat=ierr)
     IF(ierr/=0)THEN
-      WRITE(coil_ind,'(I6,2X,I6)')i
+      WRITE(coil_ind,'(I6)')i
       CALL oft_xml_abort('Error reading "res_per_len" for coil set '//coil_ind,'tw_load_coils',__FILE__)
     END IF
     coil_tmp%res_per_len=res_per_len
@@ -2442,7 +2445,7 @@ DO i=1,ncoils
   IF(xml_hasAttribute(coil_set,"radius"))THEN
     CALL xml_read_attribute(coil_set,"radius",radius,iostat=ierr)
     IF(ierr/=0)THEN
-      WRITE(coil_ind,'(I6,2X,I6)')i
+      WRITE(coil_ind,'(I6)')i
       CALL oft_xml_abort('Error reading "radius" for coil set '//coil_ind,'tw_load_coils',__FILE__)
     END IF
     coil_tmp%radius=radius
@@ -2451,7 +2454,7 @@ DO i=1,ncoils
   IF(xml_hasAttribute(coil_set,"sens_mask"))THEN
     CALL xml_read_attribute(coil_set,"sens_mask",coil_tmp%sens_mask,iostat=ierr)
     IF(ierr/=0)THEN
-      WRITE(coil_ind,'(I6,2X,I6)')i
+      WRITE(coil_ind,'(I6)')i
       CALL oft_xml_abort('Error reading "sens_mask" for coil set '//coil_ind,'tw_load_coils',__FILE__)
     END IF
     IF(coil_tmp%sens_mask)THEN
@@ -2623,7 +2626,7 @@ IF(exists)THEN
   OPEN(NEWUNIT=io_unit, FILE=TRIM(filename))
   ierr=skip_comment_lines(io_unit)
   READ(io_unit,*)sensors%nfloops
-  WRITE(*,'(2A)')oft_indent,'  # of floops =',sensors%nfloops
+  WRITE(*,'(2A,I6)')oft_indent,'  # of floops =',sensors%nfloops
   ALLOCATE(sensors%floops(sensors%nfloops))
   DO i=1,sensors%nfloops
     READ(io_unit,*)
@@ -2647,8 +2650,9 @@ IF(ASSOCIATED(self%jumper_nsets))THEN
   DO i=1,sensors%njumpers
     WRITE(sensors%jumpers(i)%name,'(A,I4.4)')'JUMPER_',i
     sensors%jumpers(i)%np=self%jumper_nsets(i)%n
-    ALLOCATE(sensors%jumpers(i)%points(sensors%jumpers(i)%np))
+    ALLOCATE(sensors%jumpers(i)%points(sensors%jumpers(i)%np+1))
     CALL order_jumper_list(self%jumper_nsets(i)%v,sensors%jumpers(i)%points,self%jumper_nsets(i)%n)
+    IF(sensors%jumpers(i)%points(sensors%jumpers(i)%np+1)>0)sensors%jumpers(i)%np=sensors%jumpers(i)%np+1
     ! Setup hole couplings
     hole_facs=0.d0
     DO j=1,sensors%jumpers(i)%np-1
@@ -2691,6 +2695,11 @@ IF(ASSOCIATED(self%jumper_nsets))THEN
     norm=norm/magnitude(norm)
     WRITE(io_unit,'(3ES24.15)')norm
     IF(oft_debug_print(1))WRITE(*,'(A,I8,3ES24.15)')oft_indent,i,norm
+    ! Close loop, remove points and only use holes
+    IF(sensors%jumpers(i)%points(1)==sensors%jumpers(i)%points(sensors%jumpers(i)%np))THEN
+      DEALLOCATE(sensors%jumpers(i)%points)
+      sensors%jumpers(i)%np=0
+    END IF
   END DO
   DEALLOCATE(hole_facs)
   CLOSE(io_unit)
@@ -2703,7 +2712,7 @@ CONTAINS
 SUBROUTINE order_jumper_list(list_in,list_out,n)
 INTEGER(4), INTENT(in) :: n !< Number of vertices in jumper definition
 INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
-INTEGER(4), INTENT(out) :: list_out(n) !< Reordered vertex list
+INTEGER(4), INTENT(out) :: list_out(n+1) !< Reordered vertex list
 INTEGER(4) :: ii,jj,k,l,nlinks,ipt,eprev,ed,ed2,ptp2,ptp,candidate,candidate2,last_item(3),i0
 INTEGER(4), ALLOCATABLE :: lloop_tmp(:),flag_list(:)
 !---Find loop points and edges
@@ -2777,7 +2786,12 @@ DO jj=1,n
     END IF
   END IF
 END DO
-flag_list(i0)=1 ! Ok to not be a full loop
+IF(flag_list(i0)==1)THEN
+  list_out(n+1)=lloop_tmp(i0)
+ELSE
+  list_out(n+1)=0
+  flag_list(i0)=1 ! Ok to not be a full loop
+END IF
 IF(ANY(flag_list==0))THEN
   WRITE(*,'(2A)')oft_indent,"No matching edges for following points:"
   CALL oft_increase_indent
@@ -2791,6 +2805,38 @@ END IF
 DEALLOCATE(lloop_tmp,flag_list)
 END SUBROUTINE order_jumper_list
 end subroutine tw_load_sensors
+!------------------------------------------------------------------------------
+!> Compute current [A] through a jumper given a ThinCurr solution vector
+!------------------------------------------------------------------------------
+FUNCTION jumper_compute_current(self,tw_obj,vals) RESULT(jumper_current)
+CLASS(jumper_sensor), INTENT(IN) :: self !< Jumper sensor object
+CLASS(tw_type), INTENT(IN) :: tw_obj !< Thin-wall model object
+REAL(r8), INTENT(IN) :: vals(:) !< Solution vector
+REAL(r8) :: jumper_current !< Computed current through jumper  [A]
+INTEGER(i4) :: k,ind1
+REAL(r8) :: val_prev
+!---
+jumper_current=0.d0
+IF(self%np>0)THEN
+  val_prev=0.d0
+  ind1=tw_obj%pmap(self%points(1))
+  IF(ind1>0)val_prev=vals(ind1)
+  DO k=1,self%np-1
+    ind1=tw_obj%pmap(self%points(k+1))
+    IF(ind1>0)THEN
+      jumper_current=jumper_current+vals(ind1)-val_prev
+      val_prev=vals(ind1)
+    ELSE
+      jumper_current=jumper_current-val_prev
+      val_prev=0.d0
+    END IF
+  END DO
+END IF
+DO k=1,tw_obj%nholes
+  jumper_current=jumper_current+vals(tw_obj%np_active+k)*self%hole_facs(k)
+END DO
+jumper_current=jumper_current/mu0
+END FUNCTION jumper_compute_current
 !------------------------------------------------------------------------------
 !> Load resistivity and sensor mask from "oft_in.xml" file
 !------------------------------------------------------------------------------
@@ -2807,9 +2853,9 @@ REAL(r8), POINTER :: eta_tmp(:),eta_vol_tmp(:),thickness_tmp(:)
 LOGICAL, POINTER :: sens_mask_tmp(:)
 nreg_mesh=MAXVAL(self%mesh%reg)
 !--- Deallocate if already set
-IF (ASSOCIATED(self%Eta_vol)) DEALLOCATE(self%Eta_vol) 
-IF (ASSOCIATED(self%Thickness)) DEALLOCATE(self%Thickness) 
-IF (ASSOCIATED(self%Eta_surf)) DEALLOCATE(self%Eta_surf)
+IF(ASSOCIATED(self%Eta_vol))DEALLOCATE(self%Eta_vol)
+IF(ASSOCIATED(self%Thickness))DEALLOCATE(self%Thickness)
+IF(ASSOCIATED(self%Eta_surf))DEALLOCATE(self%Eta_surf)
 ALLOCATE(self%Eta_vol(nreg_mesh))
 ALLOCATE(self%Thickness(nreg_mesh))
 ALLOCATE(self%Eta_surf(nreg_mesh))
@@ -2896,9 +2942,9 @@ IF(has_eta_surf)THEN
   ELSE IF((.NOT.has_eta_vol).AND.has_thickness)THEN
     self%Eta_vol=self%Eta_surf*self%Thickness
   END IF
-ELSE IF (has_eta_vol.AND.has_thickness)THEN
+ELSE IF(has_eta_vol.AND.has_thickness)THEN
   self%Eta_surf=self%Eta_vol/self%Thickness
-ELSE IF (has_eta_vol.AND.(.NOT.has_thickness))THEN
+ELSE IF(has_eta_vol.AND.(.NOT.has_thickness))THEN
   CALL oft_warn('"eta_vol" specified without "thickness" nor "eta_surf" in XML. Please specify "eta_surf" or both "eta_vol" and "thickness".')
 ELSE
   CALL oft_warn('Cannot gather or infer surface resisitivity from XML. Ignore this warning if resistivity is specified later or is not needed.')
@@ -2919,7 +2965,7 @@ IF(ierr==0)THEN
 END IF
 end subroutine tw_load_eta
 !------------------------------------------------------------------------------
-!> Load forcing mesh and fields for an MHD-style mode 
+!> Load forcing mesh and fields for an MHD-style mode
 !------------------------------------------------------------------------------
 subroutine tw_load_mode(filename,self,driver)
 CHARACTER(LEN=*) :: filename !< Filename containing mode definition

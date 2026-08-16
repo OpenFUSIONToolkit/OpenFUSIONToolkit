@@ -27,7 +27,7 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
-  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
+  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
 IMPLICIT NONE
@@ -286,7 +286,7 @@ type(oft_lag_bginterp), target :: psi_geval
 real(8) :: itor_loc ! local toroidal current in integration
 real(8) :: itor ! toroidal current
 real(8) :: I_NI ! non-inductive F*F'
-real(8) :: eta_jsq ! eta*j_NI**2 
+real(8) :: eta_jsq ! eta*j_NI**2
 real(8) :: goptmp(3,3)
 real(8) :: v ! volume
 real(8) :: pt(3) ! radial coordinate
@@ -867,8 +867,7 @@ do j=2,npsi
   IF(gseq%mode==0)THEN
     cout(j,2)=gseq%ffp_scale*gseq%I%f(psi_surf(1))+gseq%I%f_offset
   ELSE
-    cout(j,2)=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2) &
-    + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    cout(j,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2)
   END IF
   cout(j,3)=gseq%p_scale*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
   cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
@@ -891,8 +890,7 @@ cout(1,1)=x2
 IF(gseq%mode==0)THEN
   cout(1,2)=(gseq%ffp_scale*gseq%I%f(x2)+gseq%I%f_offset)
 ELSE
-  cout(1,2)=SQRT(gseq%ffp_scale*gseq%I%f(x2) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+  cout(1,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(x2) + gseq%I%f_offset**2)
 END IF
 cout(1,3)=gseq%p_scale*gseq%P%f(x2)/mu0
 cout(1,4)=(cout(3,4)-cout(2,4))*(x2-cout(2,1))/(cout(3,1)-cout(2,1)) + cout(2,4)
@@ -1132,10 +1130,8 @@ do j=1,nr
     fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
     ffprim(j)=gseq%I%fp(psi_surf)*((gseq%ffp_scale**2)*gseq%I%f(psi_surf)+gseq%ffp_scale*gseq%I%f_offset)
   ELSE
-    fptmp=SQRT(gseq%ffp_scale*gseq%I%f(psi_trace) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
-    fpol(j)=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    fptmp=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_trace) + gseq%I%f_offset**2)
+    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
     ffprim(j)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi_surf)
   END IF
   pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0
@@ -1414,8 +1410,7 @@ do j=1,nr
   IF(gseq%mode==0)THEN
     field%f_surf=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
   ELSE
-    field%f_surf=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    field%f_surf=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
   END IF
   field%bmax=0.d0
   field%stage_1=.TRUE.

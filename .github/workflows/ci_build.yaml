@@ -11,7 +11,7 @@ on:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
-  
+
 jobs:
   build:
     if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
@@ -23,7 +23,7 @@ jobs:
       FC: ${{ matrix.config.fc }}
       OMP_NUM_THREADS: 2
       OMPI_MCA_pmix_tool_remote_connections: 0 # Fix occasional OpenMPI error
-    
+
     strategy:
       fail-fast: false
       matrix:
@@ -136,16 +136,15 @@ jobs:
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
         python -m pip install pytest numpy scipy h5py netcdf4 matplotlib jupyter nbconvert pyvista
-    
+
     - name: Install prerequisites (macOS)
       if: startsWith(matrix.config.os, 'macos')
       run: |
-        brew install pmix
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
         python -m pip install pytest numpy scipy h5py netcdf4 matplotlib jupyter nbconvert
-    
+
     - name: Install Intel oneAPI
       if: ${{ matrix.config.cc == 'icx' }}
       run: |
@@ -157,7 +156,7 @@ jobs:
         echo "source /opt/intel/oneapi/compiler/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
         echo "source /opt/intel/oneapi/mkl/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
         echo "ulimit -s unlimited" >> ${{ github.workspace }}/setup_env.sh
-    
+
     - name: Check compilers
       run: |
         source ${{ github.workspace }}/setup_env.sh
@@ -190,7 +189,7 @@ jobs:
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py ${{ matrix.config.build_flags }} --no_dl_progress --build_arpack=1 --oft_build_tests=1
-    
+
     - name: Build external (MPICH+OpenMP)
       if: startsWith(matrix.parallel, 'mpich')
       shell: bash
@@ -229,7 +228,7 @@ jobs:
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make
-    
+
     - name: Install OFT
       shell: bash
       working-directory: builds/build_release
@@ -261,7 +260,7 @@ jobs:
       run: |
         rm -rf build
         rm -rf petsc*
-    
+
     - name: Upload test results to Codecov
       if: ${{ !cancelled() && (matrix.config.os == 'ubuntu-24.04') }}
       uses: codecov/codecov-action@v6

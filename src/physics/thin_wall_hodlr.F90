@@ -69,7 +69,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8), POINTER, DIMENSION(:,:,:) :: hole_Vcoil_Bmat => NULL() !< Dense coupling matrix to holes and Vcoils (B-field)
   REAL(8), POINTER, DIMENSION(:,:,:) :: Icoil_Bmat => NULL() !< Dense coupling matrix to Icoils (B-fieldß)
   TYPE(oft_tw_block), POINTER, DIMENSION(:) :: blocks => NULL() !< REMOVE
-  TYPE(oft_tw_level), POINTER, DIMENSION(:) :: levels => NULL() !< Block heirarchy 
+  TYPE(oft_tw_level), POINTER, DIMENSION(:) :: levels => NULL() !< Block heirarchy
   type(tw_type), pointer :: tw_obj => NULL()
 contains
   !> Setup HODLR by performing partitioning and tagging block-block interactions
@@ -1173,7 +1173,7 @@ ELSE
   size_out=full_size
 END IF
 !
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_block",__FILE__)
 END IF
 ! CALL oft_abort("","",__FILE__)
@@ -1502,7 +1502,7 @@ ALLOCATE(S(MIN_DIM),U(LDU,MIN_DIM),VT(LDVT,K))
 LWORK = -1
 ALLOCATE(WORK(1),IWORK(8*MIN_DIM))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 LWORK = INT(WORK(1))
@@ -1510,7 +1510,7 @@ DEALLOCATE(WORK)
 !---Compute SVD of matrix block
 ALLOCATE(WORK(LWORK))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 !---Truncate at desired accuracy
@@ -1886,7 +1886,7 @@ ELSE
   size_out=full_size
 END IF
 !
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_Bsetup::compress_block",__FILE__)
 END IF
 DEALLOCATE(WORK,IWORK,S,U,VT,Atmp)
@@ -2183,7 +2183,7 @@ ALLOCATE(S(MIN_DIM),U(LDU,MIN_DIM),VT(LDVT,K))
 LWORK = -1
 ALLOCATE(WORK(1),IWORK(8*MIN_DIM))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 LWORK = INT(WORK(1))
@@ -2191,7 +2191,7 @@ DEALLOCATE(WORK)
 !---Compute SVD of matrix block
 ALLOCATE(WORK(LWORK))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 !---Truncate at desired accuracy
