@@ -50,8 +50,8 @@ jobs:
             os: ubuntu-24.04,
             cc: "icx", cxx: "icx", fc: "ifx",
             python: "python3",
-            build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
-            mpi_build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
+            build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT --oft_use_lto=0",
+            mpi_build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT --oft_use_lto=0",
             oneapi_ver: "-2025.2"
           }
         - {
