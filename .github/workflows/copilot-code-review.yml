@@ -10,7 +10,7 @@ on:
       - src/utilities/build_libs.py
 
 jobs:
-  copilot-code-review:
+  copilot-setup-steps:
     runs-on: ubuntu-latest
     permissions:
       contents: read
