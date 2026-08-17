@@ -1240,6 +1240,7 @@ deallocate(j_hcurl,j_hgrad,rop_curl,rop_grad)
 call x%restore_local(xcurl,1,add=.TRUE.,wait=.TRUE.)
 call x%restore_local(xgrad,2,add=.TRUE.)
 deallocate(xcurl,xgrad)
+CALL quad%delete
 DEBUG_STACK_POP
 END SUBROUTINE oft_hcurl_grad_cross_sint
 !------------------------------------------------------------------------------
@@ -1273,7 +1274,7 @@ ELSE
   self%internal_solver=.TRUE.
 END IF
 !
-SELECT CASE(TRIM(bc)) 
+SELECT CASE(TRIM(bc))
   CASE('grnd')
     ALLOCATE(bc_zerogrnd)
     bc_zerogrnd%ML_H1_rep=>self%ML_grad
@@ -1319,7 +1320,7 @@ uu=a%dot(a)
 self%solver%atol=MAX(self%solver%atol,SQRT(uu*1.d-20))
 call u%set(0.d0)
 IF(ASSOCIATED(self%bnorm))CALL g%add(1.d0,-1.d0,self%bnorm)
-call self%bc%apply(g)
+IF(ASSOCIATED(self%bc))call self%bc%apply(g)
 !---
 pm_save=oft_env%pm; oft_env%pm=self%pm
 call self%solver%apply(u,g)
@@ -1856,7 +1857,7 @@ CALL oft_abort("Subroutine requires ARPACK", "lag_lop_eigs", __FILE__)
 #endif
 END SUBROUTINE hcurl_grad_mop_eigs
 !------------------------------------------------------------------------------
-!> Compute eigenvalues and smoothing coefficients for the H(Curl) + Grad(H^1) 
+!> Compute eigenvalues and smoothing coefficients for the H(Curl) + Grad(H^1)
 !! mass matrix
 !------------------------------------------------------------------------------
 SUBROUTINE hcurl_grad_getmop_pre(ML_hcurl_aug_obj,pre,mats,level,nlevels)
@@ -2043,6 +2044,9 @@ reg_energy=oft_mpi_sum(reg_energy)
 error=SQRT(reg_jump/reg_energy)
 !---Delete quadrature object
 CALL quad%delete
+!---Delete temporary mesh
+CALL mesh_tmp%delete
+DEALLOCATE(mesh_tmp)
 DEBUG_STACK_POP
 END FUNCTION hcurl_grad_jump_error
 end module oft_hcurl_grad_operators

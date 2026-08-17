@@ -125,6 +125,8 @@ def run_command(command, timeout=10, env_vars={}):
 
 
 def ver_lt(ver_string, ver_test):
+    ver_string = ver_string.split("-")[0].split("_")[0]  # Needed if patch release
+    ver_test = ver_test.split("-")[0].split("_")[0]  # Needed if patch release
     v1 = ver_test.split('.')
     v2 = ver_string.split('.')
     if int(v2[0]) < int(v1[0]):
@@ -136,6 +138,8 @@ def ver_lt(ver_string, ver_test):
 
 
 def ver_gt(ver_string, ver_test):
+    ver_string = ver_string.split("-")[0].split("_")[0]  # Needed if patch release
+    ver_test = ver_test.split("-")[0].split("_")[0]  # Needed if patch release
     v1 = ver_test.split('.')
     v2 = ver_string.split('.')
     if int(v2[0]) > int(v1[0]):
@@ -1014,7 +1018,7 @@ class OpenMPI(package):
         if self.config_dict['OS_TYPE'] == 'Darwin':
             print("  macOS detected: Looking for required packages with homebrew")
             # Search for HWLOC
-            result, errcode = run_command("brew --prefix hwloc")
+            result, errcode = run_command("brew --prefix --installed hwloc")
             if errcode == 0:
                 hwloc_path = result.strip()
                 print("    Using hwloc from homebrew: {0}".format(hwloc_path))
@@ -1022,15 +1026,22 @@ class OpenMPI(package):
             else:
                 print("    Could not find hwloc, build may fail")
             # Search for PMIx
-            result, errcode = run_command("brew --prefix pmix")
+            result, errcode = run_command("brew --prefix --installed pmix")
             if errcode == 0:
-                pmix_path = result.strip()
-                print("    Using pmix from homebrew: {0}".format(pmix_path))
-                config_options.append('--with-pmix={0}'.format(pmix_path))
+                ver_result, errcode = run_command("brew list --versions pmix")
+                if errcode == 0:
+                    pmix_ver = ver_result.split()[-1].strip()
+                    if not ver_lt(pmix_ver, "6.0"):
+                        print("  Found pmix version {0}, which is not compatible with OpenMPI 5.x".format(pmix_ver))
+                        config_options.append('--with-pmix=internal')
+                    else:
+                        pmix_path = result.strip()
+                        print("    Using pmix from homebrew: {0}".format(pmix_path))
+                        config_options.append('--with-pmix={0}'.format(pmix_path))
             else:
                 print("    Could not find pmix, build may fail")
             # Search for libevent
-            result, errcode = run_command("brew --prefix libevent")
+            result, errcode = run_command("brew --prefix --installed libevent")
             if errcode == 0:
                 libevent_path = result.strip()
                 print("    Using libevent from homebrew: {0}".format(libevent_path))

@@ -363,6 +363,7 @@ CALL hdf5_write(self%device%ncoils,filename,'tokamaker/NCOILS')
 NULLIFY(vals_tmp)
 CALL self%psi%get_local(vals_tmp)
 CALL hdf5_write(vals_tmp,filename,'tokamaker/PSI')
+DEALLOCATE(vals_tmp)
 CALL hdf5_write(self%coil_currs,filename,'tokamaker/COIL_CURRENTS')
 !---
 CALL hdf5_write(self%ffp_scale,filename,'tokamaker/FFP_SCALE')
@@ -466,6 +467,7 @@ IF(.NOT.success)THEN
   RETURN
 END IF
 CALL self%psi%restore_local(vals_tmp)
+DEALLOCATE(vals_tmp)
 CALL hdf5_read(self%coil_currs,filename,'tokamaker/COIL_CURRENTS',success=success)
 IF(.NOT.success)THEN
   error_string='Failed to read coil currents.'
