@@ -24,7 +24,7 @@ env:
 
 jobs:
   prepare-version:
-    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
+    if: github.event.pull_request.draft == false && github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     runs-on: ubuntu-latest
     outputs:
       version_tag: ${{ steps.version.outputs.version_tag }}
@@ -51,7 +51,7 @@ jobs:
           fi
 
   build-images:
-    if: github.event.pull_request.draft == false && github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     needs: prepare-version
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -67,7 +67,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-      
+
       - name: Get build architecture
         run: echo "ARCH_SUFFIX=$(dpkg --print-architecture)" >> "$GITHUB_ENV"
 
