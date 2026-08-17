@@ -307,6 +307,7 @@ x=(0.d0,0.d0)
 IF(direct)THEN
   CALL lapack_matinv(self%nelems,Mmat,info)
   CALL zgemv('N',self%nelems,self%nelems,(1.d0,0.d0),Mmat,self%nelems,b,1,(0.d0,0.d0),x,1)
+  DEALLOCATE(Mmat)
 ELSE
   IF(PRESENT(hodlr_op))THEN
     frinv%pre=>frinv_pre
