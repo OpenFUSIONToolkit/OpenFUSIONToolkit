@@ -12,7 +12,7 @@ add_library( oftext
   ${QUADPACK_OBJS}
 )
 if( OFT_USE_LTO )
-  set_property(TARGET oftext PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
+  set_property(TARGET oftext PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF)
 endif()
 
 # Local copy of triangle
