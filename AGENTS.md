@@ -127,7 +127,7 @@ cd builds/build_release/tests
 ../../run_test.sh physics/test_TokaMaker.py --collect-only
 ```
 
-To run a specific test `test_name`, optionally with arguments (`test_args`), wihin a specific file `test_file.py` (current working director must contain `test_file.py`):
+To run a specific test `test_name`, optionally with arguments (`test_args`), within a specific file `test_file.py` (current working director must contain `test_file.py`):
 
 ```bash
 python -c "from test_file import test_name; test_name(*test_args)"

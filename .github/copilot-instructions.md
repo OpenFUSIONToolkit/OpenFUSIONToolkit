@@ -9,7 +9,7 @@ When reviewing code, please consider and explicitly highlight any issues in the 
 
  - **Code Style:** Ensure that the code adheres to the project's coding standards and style guidelines. This includes consistent naming conventions, indentation, and formatting. Check for any deviations from the established code style and provide suggestions for improvement.
 
- - **Tests:** Significant new functionaliity or changes should be accompanied by appropriate tests. Check for the presence of relevant test cases.
+ - **Tests:** Significant new functionality or changes should be accompanied by appropriate tests. Check for the presence of relevant test cases.
 
 ## Common Pitfalls
 
