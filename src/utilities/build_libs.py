@@ -15,7 +15,6 @@ import re
 import argparse
 import math
 import hashlib
-import socket
 import http.client
 import urllib.request
 import urllib.error
@@ -642,7 +641,7 @@ class package:
             for i in range(nretry+1):
                 try:
                     fetch_file(self.url, self.file)
-                except (urllib.error.URLError, http.client.HTTPException, socket.error):
+                except (urllib.error.URLError, http.client.HTTPException, OSError):
                     if i == nretry:
                         raise
                     else:
@@ -663,7 +662,7 @@ class package:
                 for i in range(nretry+1):
                     try:
                         fetch_file(url, tmp_file)
-                    except (urllib.error.URLError, http.client.HTTPException, socket.error):
+                    except (urllib.error.URLError, http.client.HTTPException, OSError):
                         if i == nretry:
                             raise
                         else:
