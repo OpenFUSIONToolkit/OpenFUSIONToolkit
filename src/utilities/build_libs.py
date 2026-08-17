@@ -641,10 +641,11 @@ class package:
             for i in range(nretry+1):
                 try:
                     fetch_file(self.url, self.file)
-                except (urllib.error.URLError, http.client.HTTPException, OSError):
+                except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
                     if i == nretry:
                         raise
                     else:
+                        print(repr(e))
                         print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
                         continue
                 break
@@ -662,10 +663,11 @@ class package:
                 for i in range(nretry+1):
                     try:
                         fetch_file(url, tmp_file)
-                    except (urllib.error.URLError, http.client.HTTPException, OSError):
+                    except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
                         if i == nretry:
                             raise
                         else:
+                            print(repr(e))
                             print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
                             continue
                     break
