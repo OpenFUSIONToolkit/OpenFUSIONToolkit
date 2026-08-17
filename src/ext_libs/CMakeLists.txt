@@ -12,7 +12,7 @@ add_library( oftext
   ${QUADPACK_OBJS}
 )
 if( OFT_USE_LTO )
-  target_compile_options(oftext PRIVATE -fno-lto)
+  set_property(TARGET oftext PROPERTY INTERPROCEDURAL_OPTIMIZATION FALSE)
 endif()
 
 # Local copy of triangle

@@ -375,7 +375,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
 def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=False,build_tests=False,
                        build_examples=False,build_docs=False,build_coverage=False,package_build=False,
                        package_release=False,enable_debug_stack=False,enable_profiling=False,
-                       use_lto=True,debug_check_flags=True,debug_msanitizer=False):
+                       use_lto=True,debug_check_flags=True,debug_asanitizer=False):
     def bool_to_string(val):
         if val:
             return "TRUE"
@@ -406,7 +406,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DOFT_COVERAGE:BOOL={0}".format(bool_to_string(build_coverage)),
         "-DOFT_DEBUG_STACK:BOOL={0}".format(bool_to_string(enable_debug_stack)),
         "-DOFT_DEBUG_CHECK:BOOL={0}".format(bool_to_string(debug_check_flags)),
-        "-DOFT_DEBUG_SANITIZER:BOOL={0}".format(bool_to_string(debug_msanitizer)),
+        "-DOFT_DEBUG_SANITIZER:BOOL={0}".format(bool_to_string(debug_asanitizer)),
         "-DOFT_PROFILING:BOOL={0}".format(bool_to_string(enable_profiling)),
         "-DOFT_THINCURR_LEGACY:BOOL=FALSE",
         "-DCMAKE_C_COMPILER:FILEPATH={CC}",
@@ -2162,7 +2162,7 @@ group.add_argument("--oft_package_python", default=1, type=int, choices=(0,1), h
 group.add_argument("--oft_package_release", action="store_true", default=False, help="Perform a release package of OFT?")
 group.add_argument("--oft_build_coverage", action="store_true", default=False, help="Build OFT with code coverage flags?")
 group.add_argument("--oft_debug_checks", default=1, type=int, choices=(0,1), help="Build OFT with compiler runtime checks (requires Debug build)? (default: 1)")
-group.add_argument("--oft_debug_msanitizer", default=0, type=int, choices=(0,1), help="Build OFT with memory sanitizer checks (requires Debug build)? (default: 0)")
+group.add_argument("--oft_debug_asanitizer", default=0, type=int, choices=(0,1), help="Build OFT with address sanitizer checks (requires Debug build)? (default: 0)")
 group.add_argument("--oft_debug_stack", action="store_true", default=False, help="Enable internal debug stack?")
 group.add_argument("--oft_profiling", action="store_true", default=False, help="Enable internal profiling?")
 #
@@ -2380,5 +2380,5 @@ if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
         enable_profiling=options.oft_profiling,
         use_lto=(options.oft_use_lto==1),
         debug_check_flags=(options.oft_debug_checks==1),
-        debug_msanitizer=(options.oft_debug_msanitizer==1)
+        debug_asanitizer=(options.oft_debug_asanitizer==1)
     )
