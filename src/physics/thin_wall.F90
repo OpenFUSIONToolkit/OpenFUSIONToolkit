@@ -152,29 +152,6 @@ CONTAINS
   !> Save debug information for model
   PROCEDURE :: save_debug => tw_save_debug
 END TYPE tw_type
-
-!---------------------------------------------------------------------------------
-!> Class for thin-wall simulation
-!---------------------------------------------------------------------------------
-TYPE :: tw_plasma_boozer
-  CLASS(tw_type), POINTER :: wall => NULL() !< Thin-wall model for structures
-  CLASS(tw_type), POINTER :: plasma => NULL() !< Thin-wall model for plasma
-  REAL(8) :: s = 0.d0
-  REAL(8) :: alpha = 0.d0
-  COMPLEX(8), POINTER, DIMENSION(:,:) :: rho => NULL()
-  COMPLEX(8), POINTER, DIMENSION(:,:) :: L_w => NULL()
-  COMPLEX(8), POINTER, DIMENSION(:,:) :: L_wc => NULL()
-  COMPLEX(8), POINTER, DIMENSION(:,:) :: L_wd => NULL()
-  COMPLEX(8), POINTER, DIMENSION(:,:) :: L_cw => NULL()
-  COMPLEX(8), POINTER, DIMENSION(:,:) :: L_c => NULL()
-  COMPLEX(8), POINTER, DIMENSION(:,:) :: L_cd => NULL()
-  COMPLEX(8), POINTER, DIMENSION(:,:) :: L_dw => NULL()
-  COMPLEX(8), POINTER, DIMENSION(:,:) :: L_dc => NULL()
-  COMPLEX(8), POINTER, DIMENSION(:,:) :: L_d => NULL()
-CONTAINS
-  !> Setup thin-wall model
-  PROCEDURE :: setup => tw_build_boozer
-END TYPE tw_plasma_boozer
 ! REAL(r8) :: mag_dx = 1.d-5
 REAL(r8) :: quad_tols(3) = [0.75d0, 0.95d0, 0.995d0] !< Distance tolerances for quadrature order selection
 INTEGER(i4) :: quad_orders(3) = [18, 10, 6] !< Quadrature order for each tolerance
@@ -1661,6 +1638,7 @@ IF(nsensors>0.AND.ncoils_tot>0)THEN
 ELSE
   WRITE(*,'(2A)')oft_indent,'No magnetic sensors or coils, skipping...'
 END IF
+DEALLOCATE(coils_tot)
 CALL oft_decrease_indent
 !---Unpack passive and driver coils
 ! IF(ASSOCIATED(tw_obj%Acoil2sen))DEALLOCATE(tw_obj%Acoil2sen)
@@ -3126,73 +3104,6 @@ END DO
 ALLOCATE(self%sens_mask(1))
 self%sens_mask=.FALSE.
 end subroutine tw_load_mode
-!---------------------------------------------------------------------------------
-!> Needs Docs
-!---------------------------------------------------------------------------------
-SUBROUTINE tw_build_boozer(self,s,alpha)
-CLASS(tw_plasma_boozer), INTENT(INOUT) :: self !< Thin-wall model for structures
-REAL(8), INTENT(in) :: s,alpha
-!
-INTEGER(4) :: i,j,k,l,info,nwall,nplasma,ncoils
-COMPLEX(8) :: tmp
-REAL(8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: M_wp,M_pw
-COMPLEX(8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: tmp_pc,tmp_pw
-!---Build helper matrices
-nwall=self%wall%nelems-self%wall%n_vcoils
-nplasma=self%plasma%nelems-self%plasma%n_vcoils
-ncoils=self%plasma%n_vcoils
-NULLIFY(M_wp,M_pw)
-CALL tw_compute_LmatDirect(self%plasma,M_wp,col_model=self%wall)
-ALLOCATE(M_pw(nplasma,nwall))
-M_pw=TRANSPOSE(M_wp)
-! !---Build rho matrix
-! ALLOCATE(self%rho(nplasma,nplasma))
-! self%rho=self%plasma%Lmat(1:nplasma,1:nplasma)*(1.d0,0.d0)
-! CALL lapack_matinv(nplasma,self%rho,info)
-! DO i=1,nplasma
-!   DO j=1,nplasma
-!     ! self%rho(i,j)=self%rho(i,j)*(-1.d0/(s,alpha)-1.d0)
-!   END DO
-! END DO
-! !---Build l_w = L_w + M_wp * rho * M_pw
-! ALLOCATE(self%L_w(nwall,nwall))
-! self%L_w=self%wall%Lmat(1:nwall,1:nwall) &
-!   + MATMUL(M_wp,MATMUL(rho,M_pw))
-
-! !---Build l_wc = M_wc + M_wp * rho * M_pc
-! ALLOCATE(self%L_wc(nwall,self%wall%n_vcoils))
-! self%L_wc=self%wall%Lmat(1:nwall,nwall+1:nwall+ncoils) &
-!   + MATMUL(M_wp,MATMUL(rho,M_pc))
-
-! !---Build l_wd = M_wp + M_wp * rho * L_p
-! ALLOCATE(self%L_wd(nwall,nplasma))
-! self%L_wd=M_wp
-
-! !---Build l_cw = M_cw + M_cp * rho * M_pw
-! ALLOCATE(self%L_cw(ncoils,nwall))
-! self%L_cw=self%wall%Lmat(nwall+1:nwall+ncoils,1:nwall)
-
-! !---Build l_c = L_c + M_cp * rho * M_pc
-! ALLOCATE(self%L_c(ncoils,ncoils))
-! self%L_c=self%wall%Lmat(nwall+1:nwall+ncoils,nwall+1:nwall+ncoils)
-
-! !---Build l_cd = M_cp + M_cp * rho * L_p
-! ALLOCATE(self%L_cd(ncoils,nplasma))
-! self%L_cd=self%plasma%Lmat(nplasma+1:nplasma+ncoils,1:nplasma)
-
-! !---Build l_dw = M_pw + L_p * rho * M_pw
-! ALLOCATE(self%L_dw(nplasma,nwall))
-! self%L_dw=M_pw
-
-! !---Build l_dc = M_pc + L_p * rho * M_pc
-! ALLOCATE(self%L_dc(nplasma,ncoils))
-! self%L_dc=self%plasma%Lmat(1:nplasma,nplasma+1:nplasma+ncoils)
-
-! !---Build l_d = L_p + L_p * rho * L_p
-! ALLOCATE(self%L_d(nplasma,nplasma))
-! self%L_d=self%plasma%Lmat(1:nplasma,1:nplasma)
-
-END SUBROUTINE tw_build_boozer
 !---------------------------------------------------------------------------------
 !> Save solution vector for thin-wall model for plotting in VisIt
 !---------------------------------------------------------------------------------

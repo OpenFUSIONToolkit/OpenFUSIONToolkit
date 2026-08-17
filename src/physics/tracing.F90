@@ -1115,7 +1115,7 @@ end subroutine tracer_euler_step
 subroutine tracer_euler_delete(self)
 class(oft_tracer_euler), intent(inout) :: self !< Tracer object
 DEBUG_STACK_PUSH
-IF(ASSOCIATED(self%y))DEALLOCATE(self%y,self%dy,self%rsend)
+IF(ASSOCIATED(self%y))DEALLOCATE(self%y,self%dy,self%dyp,self%rsend)
 self%nsteps=0
 self%ntrans=0
 self%dt=0.d0

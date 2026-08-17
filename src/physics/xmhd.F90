@@ -3561,7 +3561,8 @@ deallocate(j_lag,j_hgrad,j_hcurl)
 deallocate(lag_rop,hgrad_rop,hcurl_rop)
 deallocate(bc_loc,bg_loc,lag_loc)
 IF(xmhd_two_temp)deallocate(te_loc)
-NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
+DEALLOCATE(xmhd_lag_gop)
+NULLIFY(xmhd_lag_rop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 !$omp end parallel
 !------------------------------------------------------------------------------
 ! Boundary conditions
@@ -3737,7 +3738,8 @@ end do
 !---Delete temporary matrices
 deallocate(j_lag,j_hgrad,j_hcurl)
 deallocate(lag_rop,hgrad_rop,hcurl_rop)
-NULLIFY(xmhd_lag_rop,xmhd_lag_gop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
+DEALLOCATE(xmhd_lag_gop)
+NULLIFY(xmhd_lag_rop,xmhd_hgrad_rop,xmhd_hcurl_rop,xmhd_hcurl_cop)
 !$omp end parallel
 !---Pack diagnostics
 diag_vals(2)=diag_vals(2)
@@ -5001,6 +5003,9 @@ CALL u%delete
 CALL uc%delete
 CALL up%delete
 DEALLOCATE(u,uc,up)
+CALL lminv%delete(propogate=.TRUE.)
+CALL lmop%delete
+DEALLOCATE(lminv,lmop)
 !--- plotting fields
 CALL x%delete
 CALL ap%delete

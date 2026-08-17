@@ -35,6 +35,7 @@ IMPLICIT NONE
 #include "local.h"
 PRIVATE
 PUBLIC cell_is_curved, oft_init_seam, mesh_findcell, mesh_findcell2, bmesh_findcell
+PUBLIC mesh_destroy, bmesh_destroy
 !---------------------------------------------------------------------------------
 !> Global mesh information and indicies
 !!
@@ -276,7 +277,7 @@ CONTAINS
   PROCEDURE(bmesh_hessian), DEFERRED :: hessian
   !> Get surface unit normal
   PROCEDURE(bmesh_norm), DEFERRED :: norm
-  !> Get surface tangent basis 
+  !> Get surface tangent basis
   PROCEDURE(bmesh_tang), DEFERRED :: tang
   !> Needs docs
   PROCEDURE(bmesh_vlog), DEFERRED :: vlog
@@ -300,7 +301,7 @@ CONTAINS
   PROCEDURE :: save_vertex_vector => bmesh_save_vertex_vector
   !> Compute surface area of mesh
   PROCEDURE :: area => bmesh_area
-  !> Delete mesh object
+  !> Destroy mesh object
   PROCEDURE :: delete => bmesh_destroy
 END TYPE oft_bmesh
 ! Class procedure interfaces
@@ -932,6 +933,7 @@ DEBUG_STACK_PUSH
 CALL amesh_destroy(self)
 self%nf = 0
 !---Deallocate integer arrays
+IF(ASSOCIATED(self%lf))DEALLOCATE(self%lf)
 IF(ASSOCIATED(self%bf))DEALLOCATE(self%bf)
 IF(ASSOCIATED(self%lbf))DEALLOCATE(self%lbf)
 IF(ASSOCIATED(self%klef))DEALLOCATE(self%klef)
@@ -1164,7 +1166,7 @@ end do
 if(present(fout))fout=f
 if(i>=self%nc)then
   cell=0
-  fout=-1.d0
+  if(present(fout))fout=-1.d0
 endif
 end subroutine bmesh_findcell
 !------------------------------------------------------------------------------

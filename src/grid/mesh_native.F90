@@ -133,6 +133,7 @@ mesh=>mg_mesh%meshes(1)
 smesh=>mg_mesh%smeshes(1)
 mesh%nc=dim_sizes(2)
 !
+DEALLOCATE(dim_sizes)
 IF(np_mem>0)THEN
     ALLOCATE(dim_sizes(2))
     dim_sizes=SHAPE(r_mem)
