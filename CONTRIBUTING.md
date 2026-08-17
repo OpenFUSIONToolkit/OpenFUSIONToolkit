@@ -87,6 +87,7 @@ Matthew Pharr (@matt-pharr)\
 Jeremy Salm (@jeremslm)\
 Benjy Smith (@benjysmith)\
 Thomas Wang (@ThomasWangAPAM)\
+Stuart Benjamin (@StuartBenjamin)
 Yunfei Zhao (@SeaWolfYFZ)
 
 ### Contributors to predecessor codes
