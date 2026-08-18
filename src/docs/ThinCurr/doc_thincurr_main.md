@@ -10,6 +10,9 @@ flowing in thin conducting structures (2D sheets in 3D geometry)
 
 \f[ \mathrm{L} \frac{\partial I}{\partial t} + \mathrm{R} I = V. \f]
 
+ThinCurr should primarily be used through the python interface using the \ref OpenFUSIONToolkit.ThinCurr "OpenFUSIONToolkit.ThinCurr" python module
+and the \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr "OpenFUSIONToolkit.ThinCurr.ThinCurr" class.
+
 \section doc_tw_main_ex ThinCurr Examples
 The following examples illustrate usage of ThinCurr to perform calculations using the thin-wall model.
 
@@ -33,22 +36,6 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
 
 \section doc_tw_main_settings ThinCurr settings groups
 
-\subsection doc_tw_main_settings_fortran Fortran option groups
-Driver-specific settings groups are defined for each of the programs above (eg. `thincurr_td`), follow links for description
-of available settings.
-
-The following driver-wide settings are also available:
-
-**Option group:** `thincurr_hodlr_options` (see \ref doc_tw_main_hodlr "HODLR")
-|  Option                 |  Description  | Type [dim] |
-|-------------------------|---------------|------------|
-|  `target_size=1500`     |  Target size for mesh partitioning | int |
-|  `aca_min_its=20`       |  Minimum nuber of ACA+ iterations to perfom (if used) | int |
-|  `L_svd_tol=-1.0`       |  SVD tolerance for HODLR compression of \f$ \textrm{L} \f$ matrix (negative to disable) | int |
-|  `L_aca_rel_tol=-1.0`   |  ACA tolerance (relative to SVD) for HODLR compression of \f$ \textrm{L} \f$ matrix (negative to disable) | int |
-|  `B_svd_tol=T`          |  SVD tolerance for HODLR compression of B reconstruction operator (negative to disable) | int |
-|  `B_aca_rel_tol=F`      |  ACA tolerance (relative to SVD) for HODLR compression of B reconstruction operator (negative to disable) | int |
-
 \subsection doc_tw_main_settings_xml XML input settings
 Settings for ThinCurr runs are contained in the `oft->thincurr` element, with the following elements:
   * `eta`: Comma separated values for surface resistivity (\f$ \eta_s = \eta / t \f$) in each region
@@ -70,6 +57,22 @@ Settings for ThinCurr runs are contained in the `oft->thincurr` element, with th
   </thincurr>
 </oft>
 ```
+
+\subsection doc_tw_main_settings_fortran Fortran option groups
+Driver-specific settings groups are defined for each of the programs above (eg. `thincurr_td`), follow links for description
+of available settings.
+
+The following driver-wide settings are also available:
+
+**Option group:** `thincurr_hodlr_options` (see \ref doc_tw_main_hodlr "HODLR")
+|  Option                 |  Description  | Type [dim] |
+|-------------------------|---------------|------------|
+|  `target_size=1500`     |  Target size for mesh partitioning | int |
+|  `aca_min_its=20`       |  Minimum nuber of ACA+ iterations to perfom (if used) | int |
+|  `L_svd_tol=-1.0`       |  SVD tolerance for HODLR compression of \f$ \textrm{L} \f$ matrix (negative to disable) | int |
+|  `L_aca_rel_tol=-1.0`   |  ACA tolerance (relative to SVD) for HODLR compression of \f$ \textrm{L} \f$ matrix (negative to disable) | int |
+|  `B_svd_tol=T`          |  SVD tolerance for HODLR compression of B reconstruction operator (negative to disable) | int |
+|  `B_aca_rel_tol=F`      |  ACA tolerance (relative to SVD) for HODLR compression of B reconstruction operator (negative to disable) | int |
 
 
 \section doc_tw_main_num Description of numerics
@@ -207,9 +210,14 @@ correct this two holes must be added, corresponding to loops in each of these tw
 This use of jumps and a single-valued potential to represent a multivalued potential is common practice in numerical methods.
 
 \subsubsection doc_tw_main_holes_def Defining holes
-Holes can be defined using the `ThinCurr_compute_holes.py` script. This script analyzes the toplogy of a given
+Holes can be defined using the `OFT_ThinCurr_holes.py` script. This script analyzes the toplogy of a given
 mesh and automatically locates and defines needed hole elements. This is now the recommended way of defining holes in
 ThinCurr models, although \ref doc_tw_dep_leg_holes "manual definition" is also still supported.
+
+The script should be available in one of two ways depending on the installation/build setup:
+ - If OFT is installed via `pip` or similar, then it should be available via command line as `OFT_ThinCurr_holes` in any environment where OFT is also available (eg. virtual environment)
+ - If OFT is installed any other way, including installation from source, the `OFT_ThinCurr_holes.py` script will be located in the `python` directory of the install or build folder
+
 
 \subsection doc_tw_main_close "Closure" elements
 As stated above the fact that the solution depends only on the gradient and not on the absolute value of \f$ \phi \f$ itself can
@@ -220,7 +228,7 @@ potential to zero at that point. We call these elements "closure" elements as th
 solveable.
 
 \subsubsection doc_tw_main_close_def Defining closures
-As with holes, closures can also be defined using the `ThinCurr_compute_holes.py` script. This is now the recommended way of defining
+As with holes, closures can also be defined using the `OFT_ThinCurr_holes.py` script. This is now the recommended way of defining
 closures in ThinCurr models, although \ref doc_tw_dep_leg_holes "manual definition" is also still supported.
 
 \subsection doc_tw_main_hodlr Hierarchical Off-Diagonal Low-Rank (HODLR) approximation

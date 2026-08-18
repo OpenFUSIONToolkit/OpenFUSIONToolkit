@@ -20,10 +20,10 @@ mesh definition files that mark the nodes corresponding to a given hole. There a
  will then generate an ordered loop from this list.
 
 Nodesets are stored in the `mesh/NODESET****` fields in native mesh files. These can be converted from nodesets defined via the
-Cubit meshing software, through the Exodus II mesh format, and `convert_cubit.py` or other mesh inputs with suitable interfacing
+Cubit meshing software, through the Exodus II mesh format, and `OFT_convert_cubit.py` or other mesh inputs with suitable interfacing
 scripts.
 
 Closures can also be manually defined using "sidesets" in mesh definition files that mark the triangles where an element should be removed to
 avoid singularities in the system. Sidesets are stored in the `mesh/SIDESET****` fields in native mesh files. These can be
-converted from nodesets defined via the Cubit meshing software, through the Exodus II mesh format, and `convert_cubit.py` or other
+converted from nodesets defined via the Cubit meshing software, through the Exodus II mesh format, and `OFT_convert_cubit.py` or other
 mesh inputs with suitable interfacing scripts.

@@ -1,24 +1,10 @@
 [build-system]
 requires = ["setuptools"]
-#requires = ["setuptools>=68"] # For new license format (requires Python 3.8+)
+#requires = ["setuptools>=77"] # For new license format (PEP 639; requires Python 3.9+)
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "OpenFUSIONToolkit"
-authors = [
-    {name = "Anson Braun"},
-    {name = "Daniel Burgess"},
-    {name = "Samuel Freiberger"},
-    {name = "Sophia Guizzo"},
-    {name = "Chris Hansen"},
-    {name = "Julia Kirby"},
-    {name = "John Lhota"},
-    {name = "Francois Logak"},
-    {name = "Oak Nelson"},
-    {name = "Matthew Pharr"},
-    {name = "Benjy Smith"},
-    {name = "Thomas Wang"},
-]
 maintainers = [
   {name = "Chris Hansen", email = "christopher.hansen@columbia.edu"}
 ]
@@ -27,16 +13,17 @@ readme = "README.md"
 requires-python = ">=3.7"
 keywords = ["Fusion", "Plasma", "TokaMaker", "ThinCurr"]
 license = "LGPL-3.0-only"
-#License-Expression = "LGPL-3.0-only"
-#License-files = ["LICENSE"]
+#license-files = ["LICENSE"]  # Uncomment when Python 3.7 requirement is removed (see above)
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
+    "Programming Language :: C",
+    "Programming Language :: Fortran",
     "Programming Language :: Python :: 3",
     "Topic :: Scientific/Engineering :: Physics"
 ]
 dependencies = [
     "numpy",
-    "scipy",
+    "scipy >= 1.11.0",
     "matplotlib",
     "h5py",
     "netCDF4"
@@ -48,6 +35,13 @@ Homepage = "https://openfusiontoolkit.github.io/OpenFUSIONToolkit/"
 Documentation = "https://openfusiontoolkit.github.io/OpenFUSIONToolkit/docs/index.html"
 Repository = "https://github.com/openfusiontoolkit/OpenFUSIONToolkit"
 Issues = "https://github.com/openfusiontoolkit/OpenFUSIONToolkit/issues"
+
+[project.scripts]
+OFT_convert_hist = "OpenFUSIONToolkit.io:_convert_hist_cli"
+OFT_build_xdmf = "OpenFUSIONToolkit._xdmf_cli:script_entry"
+OFT_convert_cubit = "OpenFUSIONToolkit._cubit_cli:script_entry"
+OFT_convert_gmsh = "OpenFUSIONToolkit._gmsh_cli:script_entry"
+OFT_ThinCurr_holes = "OpenFUSIONToolkit.ThinCurr._homology_cli:script_entry"
 
 [project.optional-dependencies]
 viz = ["pyvista"]

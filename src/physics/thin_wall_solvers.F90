@@ -307,6 +307,7 @@ x=(0.d0,0.d0)
 IF(direct)THEN
   CALL lapack_matinv(self%nelems,Mmat,info)
   CALL zgemv('N',self%nelems,self%nelems,(1.d0,0.d0),Mmat,self%nelems,b,1,(0.d0,0.d0),x,1)
+  DEALLOCATE(Mmat)
 ELSE
   IF(PRESENT(hodlr_op))THEN
     frinv%pre=>frinv_pre
@@ -486,7 +487,7 @@ IF(nlocal>1)THEN
     ! parts(i)%n=0
   END DO
   !---Get matrix slice
-  !$omp parallel do private(j,k) schedule(static,1)
+  !$omp parallel do private(j,k) schedule(static)
   DO i=1,nlocal
     DO j=1,parts(i)%n
       DO k=1,parts(i)%n
@@ -533,7 +534,7 @@ DO j=1,ncoils
   DO i=1,nrits
   !---Precondition search direction
   IF(nlocal>1)THEN
-      !$omp parallel do private(kk) schedule(static,1)
+      !$omp parallel do private(kk) schedule(static)
       DO k=1,nlocal
         DO kk=1,parts(k)%n
           parts(k)%b(kk)=v(ABS(parts(k)%ind(kk)),i)
@@ -811,24 +812,7 @@ END IF
 IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
   ALLOCATE(jumpout(sensors%njumpers+self%nholes+self%n_vcoils+1))
   DO j=1,sensors%njumpers
-    tmp=0.d0
-    val_prev=0.d0
-    ind1=self%pmap(sensors%jumpers(j)%points(1))
-    IF(ind1>0)val_prev=vals(ind1)
-    DO k=1,sensors%jumpers(j)%np-1
-      ind1=self%pmap(sensors%jumpers(j)%points(k+1))
-      IF(ind1>0)THEN
-        tmp=tmp+vals(ind1)-val_prev
-        val_prev=vals(ind1)
-      ELSE
-        tmp=tmp-val_prev
-        val_prev=0.d0
-      END IF
-    END DO
-    DO k=1,self%nholes
-      tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
-    END DO
-    jumpout(j+1)=tmp/mu0
+    jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
   END DO
   DO j=1,self%nholes+self%n_vcoils
     jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
@@ -967,24 +951,7 @@ DO i=1,nsteps
   END IF
   IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
     DO j=1,sensors%njumpers
-      tmp=0.d0
-      val_prev=0.d0
-      ind1=self%pmap(sensors%jumpers(j)%points(1))
-      IF(ind1>0)val_prev=vals(ind1)
-      DO k=1,sensors%jumpers(j)%np-1
-        ind1=self%pmap(sensors%jumpers(j)%points(k+1))
-        IF(ind1>0)THEN
-          tmp=tmp+vals(ind1)-val_prev
-          val_prev=vals(ind1)
-        ELSE
-          tmp=tmp-val_prev
-          val_prev=0.d0
-        END IF
-      END DO
-      DO k=1,self%nholes
-        tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
-      END DO
-      jumpout(j+1)=tmp/mu0
+      jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
     END DO
     DO j=1,self%nholes+self%n_vcoils
       jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
@@ -1174,24 +1141,7 @@ DO i=0,nsteps
     END IF
     IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
       DO j=1,sensors%njumpers
-        tmp=0.d0
-        val_prev=0.d0
-        ind1=self%pmap(sensors%jumpers(j)%points(1))
-        IF(ind1>0)val_prev=vals(ind1)
-        DO k=1,sensors%jumpers(j)%np-1
-          ind1=self%pmap(sensors%jumpers(j)%points(k+1))
-          IF(ind1>0)THEN
-            tmp=tmp+vals(ind1)-val_prev
-            val_prev=vals(ind1)
-          ELSE
-            tmp=tmp-val_prev
-            val_prev=0.d0
-          END IF
-        END DO
-        DO k=1,self%nholes
-          tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
-        END DO
-        jumpout(j+1)=tmp/mu0
+        jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
       END DO
       DO j=1,self%nholes+self%n_vcoils
         jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
