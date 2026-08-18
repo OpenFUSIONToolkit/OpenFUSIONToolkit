@@ -249,10 +249,10 @@ def convert_cubit_to_native(in_file, out_file=None, periodic_nodeset=None, ignor
 
     # Map periodicity information
     periodic_info = None
-    if options.periodic_nodeset is not None:
-        if options.periodic_nodeset > len(node_sets):
-            raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(options.periodic_nodeset, len(node_sets)))
-        periodic_info = node_sets.pop(options.periodic_nodeset-1)
+    if periodic_nodeset is not None:
+        if periodic_nodeset > len(node_sets):
+            raise ValueError("Periodic nodeset ({0}) is out of bounds ({1})".format(periodic_nodeset, len(node_sets)))
+        periodic_info = node_sets.pop(periodic_nodeset-1)
 
     # Write output file
     write_native_mesh(out_file, mesh_type.split('_')[0], r, lc, reg, nodesets=node_sets, sidesets=side_sets,

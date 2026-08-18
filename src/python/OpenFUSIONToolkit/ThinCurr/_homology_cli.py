@@ -17,7 +17,6 @@ import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy
-import h5py
 from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
 
 tri_ed = np.asarray([[2,1], [0,2], [1,0]]) # Triangle edge list
@@ -650,7 +649,6 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     input_model = read_ThinCurr_mesh(in_file)
     vertex_full = input_model['r'].copy()
     face_full = input_model['lc'].copy()
-    reg_full = input_model['reg']
     if 'thincurr' not in input_model:
         input_model['thincurr'] = {}
 

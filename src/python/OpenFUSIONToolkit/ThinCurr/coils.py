@@ -225,6 +225,7 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
         h5_group.create_dataset('RES_PER_LEN', data=[self.resistivity_per_length,], dtype='f8')
         if self.sens_mask:
             h5_group.create_dataset('SENS_MASK', data=[1,], dtype='i4')
+        scales = numpy.ones((len(self.subcoils),))
         for i, subcoil in enumerate(self.subcoils):
             subcoil_group = h5_group.create_group('coil{0:04d}'.format(i+1))
             if 'pts' in subcoil:

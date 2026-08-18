@@ -13,7 +13,6 @@ import os
 import subprocess
 import re
 import numpy
-import h5py
 from collections import OrderedDict
 
 # Common parameters

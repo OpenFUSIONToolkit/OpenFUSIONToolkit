@@ -11,7 +11,6 @@
 '''
 import numpy
 import h5py
-from .util import oft_warning
 
 
 def write_native_mesh(filename, mesh_type, r, lc, reg, nodesets=None, sidesets=None, ho_info=None, periodic_info=None, reg_attrs=None, reg_names=None):

@@ -11,7 +11,6 @@ See @ref thincurr_mesh_tool
 @date July 2026
 '''
 import os
-import re
 import xml.etree.ElementTree as ET
 import numpy as np
 from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
