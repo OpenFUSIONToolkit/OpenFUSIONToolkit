@@ -106,10 +106,6 @@ INTEGER(i4), VALUE, INTENT(in) :: n_eq
 CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 INTEGER(i4) :: i
-
-write(6, '(A)', advance='no') 'Processing, please wait...'
-call flush(6)
-
 CALL copy_string('',error_str)
 IF(.NOT.c_associated(mesh_ptr))THEN
   CALL copy_string('Mesh object not associated',error_str)
@@ -371,11 +367,10 @@ END SUBROUTINE tokamaker_equil_destroy
 !---------------------------------------------------------------------------------
 !> Complete setup of TokaMaker device/wrapper object and build FE representation
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup(tMaker_ptr,order,full_domain,n_eq,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
+SUBROUTINE tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< FE order for Lagrange elements
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Plasma covers full domain (eg. fixed-boundary solves)?
-INTEGER(KIND=c_int), VALUE, INTENT(in) :: n_eq
 INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Number of coils in model
 TYPE(c_ptr), INTENT(out) :: coil_Lmat !< Pointer to coil inductance matrix
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
@@ -436,6 +431,8 @@ CALL tMaker_obj%device%init()
 ! END IF
 ncoils=tMaker_obj%device%ncoils
 coil_Lmat=C_LOC(tMaker_obj%device%Lcoils)
+
+print *, 'fortran has ncoils=', ncoils
 END SUBROUTINE tokamaker_setup
 !---------------------------------------------------------------------------------
 !> Load profile specification files
