@@ -200,8 +200,8 @@ class torus_fourier_sensor():
 
         if self.hist_file is None:
             raise AttributeError('Probe information not available, see "load_histfile".')
-        elif t > len(self.hist_file['B_1_1']):
-            raise ValueError(f'Time step is larger than the maximum time step ran in the simulation ({len(self.hist_file["B_1_1"])}).')
+        elif t >= len(self.hist_file['B_1_1']):
+            raise ValueError(f'Time step is larger than the maximum time step ran in the simulation ({len(self.hist_file["B_1_1"])-1}).')
         else:
             sensor_mesh = np.zeros((self.ntheta,self.nphi))
             for i in range(self.ntheta):
@@ -369,7 +369,7 @@ class torus_fourier_sensor():
         @param t The time step at which the magnetic values are desired
         @param filename Filename of the file
         @param eliminate_negative_n Whether values of negative n modes should be written to the file
-        @param scale The scaling of the values in the file (ignored for `data_format='vac3d'`, which GPEC reads with scale=1.0, i.e. Tesla)
+        @param scale The scaling of the values in the file (ignored for `data_type='vac3d'`, which GPEC reads with scale=1.0, i.e. Tesla)
         @param hamada_dphi Hamada phase shifts [ntheta]
         @param sensor_mesh Customized sensor signal mesh to be written to the file (often from frequency response calculation) [ntheta, nphi]
         @param data_type GPEC `data_type` the file is written for: 'surfmn' (fixed-point Gauss, `(1x,25f12.6)`, ~6 decimals absolute)
@@ -947,7 +947,9 @@ def make_drive_and_xml_from_eqdsks(time_arr,eqdsk_filenames,xml_filename,drive_f
     @param time_arr Array of time points corresponding to each gEQDSK file
     @param eqdsk_filenames List of paths to gEQDSK files
     @param xml_filename Path to save the xml file defining plasma current filaments
-    @param drive_filename Path to save the time-dependent current drive file
+    @param drive_filename Path to save the time-dependent current drive file. Only
+           filaments inside the last closed flux surface at one or more time points are
+           written (in the same order as the xml `coil_set` entries)
     @param eta_values Resistivities for the conducting mesh, one per mesh region [nregions]
     @param fig Matplotlib figure for plotting
     @param ax Matplotlib axis for plotting
@@ -973,16 +975,8 @@ def make_drive_and_xml_from_eqdsks(time_arr,eqdsk_filenames,xml_filename,drive_f
         raise ValueError("plot_crosect_time index is out of bounds for the time array.")
     print('Creating xml and driver files...')
 
-    fid = open(xml_filename,'w')
-    
-    fid.write('<oft>\n')
-    fid.write('  <thincurr>\n')
-    fid.write('    <eta>%s</eta>\n' % ', '.join('%.3e' % eta for eta in eta_values))
-    fid.write('    <icoils>\n')
-    
-    
-    fid0 = open(drive_filename, 'w')
     print('Number of drivers: %d' % (len(eqdsk_filenames)))
+    I_mesh_list = []
     zero_time = False
     index = 0
     Ip_list = []
@@ -1050,26 +1044,8 @@ def make_drive_and_xml_from_eqdsks(time_arr,eqdsk_filenames,xml_filename,drive_f
             Ip_list.append(Ip_tot)
         print(f'Ip from eqdsk: {ip}; Ip from sum of currents on grids: {Ip_tot}')
 
-        # Write to the xml file
-        if not zero_time:
-            for i in range(Z_grid_under.shape[0]):
-                for j in range(R_grid_under.shape[1]):
-                    fid.write('      <coil_set sens_mask="%d">\n' % (coil_mask))
-                    fid.write('        <coil>%2.16f, %2.16f</coil>\n' % (R_grid_under[i,j], Z_grid_under[i,j]))
-                    fid.write('      </coil_set>\n')
-            fid.write('    </icoils>\n')
-            fid.write('  </thincurr>\n')
-            fid.write('</oft>\n')
-            fid.close()
-            
-            # ThinCurr expects 'ncols ntimes' (thincurr_td.F90: READ ncols,ntimes then ALLOCATE(ntimes,ncols))
-            fid0.write('%d %d\n' % (Z_grid_under.shape[0]*R_grid_under.shape[1]+1,len(eqdsk_filenames)+1))
-            fid0.write('%f' % (0.0))
-            for i in range(Z_grid_under.shape[0]):
-                for j in range(R_grid_under.shape[1]):
-                    fid0.write(' %f' % (I_mesh[i,j]))
-            fid0.write('\n')
-            zero_time = True
+        I_mesh_list.append(I_mesh.copy())
+        zero_time = True
         if index == plot_crosect_time_index:
             if ax is not None and fig is not None:
                 def _edges_from_centers(arr1d):
@@ -1097,12 +1073,45 @@ def make_drive_and_xml_from_eqdsks(time_arr,eqdsk_filenames,xml_filename,drive_f
                 cbar = fig.colorbar(pcm,ax=ax,pad=0.02,label="Flat-top filament current (kA)")
             elif (ax is not None and fig is None) or (ax is None and fig is not None):
                 raise ValueError("Both ax and fig must be provided for plotting, or neither.")
-        fid0.write('%f' % (time_arr[index]))
+        index += 1
+
+    # Only keep filaments that carry current inside the LCFS at any time point, so the
+    # model does not include (60*60 - kept) zero-current coil_sets
+    active = np.zeros(R_grid_under.shape, dtype=bool)
+    for I_mesh in I_mesh_list:
+        active |= (I_mesh != 0.0)
+    n_active = int(np.count_nonzero(active))
+    print('Retaining %d of %d filaments inside the LCFS across all time points' % (n_active, active.size))
+
+    # Write the xml file (coil_set order defines the drive column order)
+    fid = open(xml_filename,'w')
+    fid.write('<oft>\n')
+    fid.write('  <thincurr>\n')
+    fid.write('    <eta>%s</eta>\n' % ', '.join('%.3e' % eta for eta in eta_values))
+    fid.write('    <icoils>\n')
+    for i in range(Z_grid_under.shape[0]):
+        for j in range(R_grid_under.shape[1]):
+            if not active[i,j]:
+                continue
+            fid.write('      <coil_set sens_mask="%d">\n' % (coil_mask))
+            fid.write('        <coil>%2.16f, %2.16f</coil>\n' % (R_grid_under[i,j], Z_grid_under[i,j]))
+            fid.write('      </coil_set>\n')
+    fid.write('    </icoils>\n')
+    fid.write('  </thincurr>\n')
+    fid.write('</oft>\n')
+    fid.close()
+
+    # Write the drive file: a hold row at t=0 followed by one row per time point
+    fid0 = open(drive_filename, 'w')
+    # ThinCurr expects 'ncols ntimes' (thincurr_td.F90: READ ncols,ntimes then ALLOCATE(ntimes,ncols))
+    fid0.write('%d %d\n' % (n_active+1,len(eqdsk_filenames)+1))
+    for row_time, I_mesh in zip([0.0]+list(time_arr), [I_mesh_list[0]]+I_mesh_list):
+        fid0.write('%f' % (row_time))
         for i in range(Z_grid_under.shape[0]):
             for j in range(R_grid_under.shape[1]):
-                fid0.write(' %f' % (I_mesh[i,j]))
+                if active[i,j]:
+                    fid0.write(' %f' % (I_mesh[i,j]))
         fid0.write('\n')
-        index += 1
     fid0.close()
     if plot_ip:
         plt.figure(figsize=(10, 8))
