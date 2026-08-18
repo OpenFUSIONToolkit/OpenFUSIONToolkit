@@ -1658,6 +1658,7 @@ IF(nsensors>0.AND.ncoils_tot>0)THEN
 ELSE
   WRITE(*,'(2A)')oft_indent,'No magnetic sensors or coils, skipping...'
 END IF
+DEALLOCATE(coils_tot)
 CALL oft_decrease_indent
 !---Unpack passive and driver coils
 ! IF(ASSOCIATED(tw_obj%Acoil2sen))DEALLOCATE(tw_obj%Acoil2sen)

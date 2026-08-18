@@ -13,6 +13,7 @@
 !------------------------------------------------------------------------------
 MODULE oft_gs
 USE oft_base
+USE spline_mod
 USE oft_sort, ONLY: sort_matrix, sort_array
 USE oft_io, ONLY: hdf5_field_exist, hdf5_read, hdf5_write, &
   xdmf_plot_file, hdf5_create_file, hdf5_create_group
@@ -393,14 +394,14 @@ end type gsinv_interp
 !---
 abstract interface
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Destroy flux function object and free associated memory
   !------------------------------------------------------------------------------
   subroutine flux_func_delete(self)
     import flux_func
     class(flux_func), intent(inout) :: self
   end subroutine flux_func_delete
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Create a copy of a flux function object
   !------------------------------------------------------------------------------
   subroutine flux_func_copy(self,new)
     import flux_func
@@ -408,7 +409,7 @@ abstract interface
     class(flux_func), pointer, intent(inout) :: new
   end subroutine flux_func_copy
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Evaluate flux function at given value of \f$ \psi \f$
   !------------------------------------------------------------------------------
   function flux_func_eval(self,psi) result(b)
     import flux_func, r8
@@ -417,7 +418,7 @@ abstract interface
     real(r8) :: b
   end function flux_func_eval
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Update flux function with new equilibrium state
   !------------------------------------------------------------------------------
   subroutine flux_func_update(self,gseq)
     import flux_func, gs_equil
@@ -425,7 +426,7 @@ abstract interface
     class(gs_equil), intent(inout) :: gseq
   end subroutine flux_func_update
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Set the value of free flux function parametrizing coefficients
   !------------------------------------------------------------------------------
   function flux_cofs_set(self,c) result(ierr)
     import flux_func, r8, i4
@@ -434,7 +435,7 @@ abstract interface
     integer(i4) :: ierr
   end function flux_cofs_set
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Get the value of free flux function parametrizing coefficients
   !------------------------------------------------------------------------------
   subroutine flux_cofs_get(self,c)
     import flux_func, r8
@@ -442,7 +443,7 @@ abstract interface
     real(r8), intent(out) :: c(:)
   end subroutine flux_cofs_get
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Save flux function to HDF5 file
   !------------------------------------------------------------------------------
   subroutine flux_save_hdf5(self,filename,path)
     import flux_func
@@ -451,7 +452,10 @@ abstract interface
     character(LEN=*), intent(in) :: path
   end subroutine flux_save_hdf5
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Save flux function to text file
+  !!
+  !! @note This may not capture all state information, but is intended for
+  !! initial creation of flux functions.
   !------------------------------------------------------------------------------
   subroutine flux_save_txt(self,io_unit)
     import flux_func
@@ -459,7 +463,7 @@ abstract interface
     integer, intent(in) :: io_unit
   end subroutine flux_save_txt
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Load flux function from HDF5 file
   !------------------------------------------------------------------------------
   subroutine flux_load_hdf5(self,filename,path,success)
     import flux_func
@@ -469,7 +473,7 @@ abstract interface
     logical, intent(out) :: success
   end subroutine flux_load_hdf5
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Load flux function from text file
   !------------------------------------------------------------------------------
   subroutine flux_load_txt(self,io_unit)
     import flux_func
@@ -477,7 +481,7 @@ abstract interface
     integer, intent(in) :: io_unit
   end subroutine flux_load_txt
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Create a copy of an anisotropic pressure object
   !------------------------------------------------------------------------------
   subroutine ani_press_copy(self,new,new_gs)
     import gs_ani_press, gs_equil
@@ -486,7 +490,7 @@ abstract interface
     class(gs_equil), target, intent(inout) :: new_gs
   end subroutine ani_press_copy
   !------------------------------------------------------------------------------
-  !> Needs Docs
+  !> Update anisotropic pressure object with new equilibrium state
   !------------------------------------------------------------------------------
   subroutine ani_press_update(self,gseq)
     import gs_ani_press, gs_equil
@@ -515,7 +519,9 @@ TYPE(opt_targets) :: active_targets !< Active target values/ptrs for external fu
 real(r8), PARAMETER :: gs_epsilon = 1.d-12 !< Epsilon used for radial coordinate
 real(r8) :: qp_int_tol = 1.d-12
 contains
-!
+!------------------------------------------------------------------------------
+!> Needs Docs
+!------------------------------------------------------------------------------
 function dummy_fpp(self,psi) result(b)
 class(flux_func), intent(inout) :: self
 real(r8), intent(in) :: psi
@@ -3478,6 +3484,8 @@ call rhs%delete
 call psihat%delete
 call dels_grnd%delete
 DEALLOCATE(rhs,psihat,dels_grnd)
+CALL solver%delete(.TRUE.)
+DEALLOCATE(solver)
 end subroutine gs_get_chi
 !------------------------------------------------------------------------------
 !> Compute toroidal current for Grad-Shafranov equilibrium
@@ -4113,7 +4121,6 @@ real(8), intent(in) :: cofs(n)
 real(8), intent(out) :: err(m)
 integer(4), intent(inout) :: iflag
 real(8) :: f(3),goptmp(3,3),psitmp(1),pt(2)
-real(8), parameter :: tol=1.d-10
 !---
 pt=cofs(1)*active_targets%vec + active_targets%pt
 call bmesh_findcell(active_targets%psi_eval%mesh,active_targets%cell,pt,f)
@@ -4346,8 +4353,10 @@ type(oft_lag_brinterp), target :: psi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
+integer(4), parameter :: nlcfs=1000
 logical :: lcfs_all,lcfs_any
 type(gsinv_interp), pointer :: field
+TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
 lcfs_any = PRESENT(dl).OR.PRESENT(rbounds).OR.PRESENT(zbounds)
 lcfs_all = PRESENT(dl).AND.PRESENT(rbounds).AND.PRESENT(zbounds)
@@ -4412,7 +4421,6 @@ active_tracer%maxsteps=8e4
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
-IF(PRESENT(dl))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,nr
   !------------------------------------------------------------------------------
@@ -4433,6 +4441,7 @@ do j=1,nr
   !!$omp end critical
   pt_last=pt
   IF(j==1.AND.PRESENT(dl))THEN
+    ALLOCATE(ptout(3,active_tracer%maxsteps+1))
     CALL tracinginv_fs(gseq%device%fe_rep%mesh,pt(1:2),ptout)
   ELSE
     CALL tracinginv_fs(gseq%device%fe_rep%mesh,pt(1:2))
@@ -4444,6 +4453,27 @@ do j=1,nr
     CYCLE
   end if
   IF((j==1).AND.PRESENT(dl))THEN
+    !------------------------------------------------------------------------------
+    ! Reinterpolate LCFS to get uniform spacing and compute geometric parameters
+    !------------------------------------------------------------------------------
+    IF(active_tracer%nsteps>nlcfs)THEN
+      !---Allocate and fit spline
+      CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
+      lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
+      lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
+      lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
+      CALL spline_fit(lcfs_rz,"periodic")
+      !---Resample trace
+      DO i=0,nlcfs-1
+        CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
+        ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
+        ptout(2,i+1)=lcfs_rz%f(1)
+        ptout(3,i+1)=lcfs_rz%f(2)
+      END DO
+      !---Destroy Spline
+      CALL spline_dealloc(lcfs_rz)
+      active_tracer%nsteps=nlcfs
+    END IF
     !---Extrapolate to real LCFS
     IF(psi_q(1)<0.05d0)THEN
       DO i=1,active_tracer%nsteps
@@ -4472,6 +4502,7 @@ do j=1,nr
       END IF
     END DO
     IF(active_tracer%status/=1)dl=-1.d0
+    DEALLOCATE(ptout)
   END IF
   !---Get flux variables
   IF(gseq%mode==0)THEN
@@ -4490,7 +4521,6 @@ do j=1,nr
   END IF
 end do
 CALL active_tracer%delete
-IF(PRESENT(dl))DEALLOCATE(ptout)
 CALL field%delete()
 DEALLOCATE(field)
 !$omp end parallel
@@ -4582,6 +4612,7 @@ else
 end if
 CALL active_tracer%delete
 DEALLOCATE(ptout)
+CALL field%delete()
 !!$omp end parallel
 CALL psi_int%delete
 end subroutine gs_trace_surf
@@ -5832,7 +5863,10 @@ IF(ASSOCIATED(self%eta))THEN
   CALL self%eta%delete()
   DEALLOCATE(self%eta)
 END IF
-! TODO: Destroy P_ani
+IF(ASSOCIATED(self%P_ani))THEN
+  CALL self%P_ani%delete()
+  DEALLOCATE(self%P_ani)
+END IF
 end subroutine equil_destroy
 !------------------------------------------------------------------------------
 !> Compute boundary condition matrix for free-boundary case
@@ -6160,6 +6194,7 @@ DO i=1,self%fe_rep%nbe
   END IF
 END DO
 CALL quad%delete()
+CALL quad_hp%delete()
 CALL sing_quad%delete()
 DEALLOCATE(massmat,marker,bemap,vflux_mat)
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Complete'

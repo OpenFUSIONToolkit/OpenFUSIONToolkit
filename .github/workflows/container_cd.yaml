@@ -5,6 +5,11 @@ on:
     branches:
       - container_release
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
     paths:
       - .github/workflows/container_cd.yaml
       - src/utilities/build_libs.py
@@ -19,7 +24,7 @@ env:
 
 jobs:
   prepare-version:
-    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
+    if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     runs-on: ubuntu-latest
     outputs:
       version_tag: ${{ steps.version.outputs.version_tag }}
@@ -62,7 +67,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-      
+
       - name: Get build architecture
         run: echo "ARCH_SUFFIX=$(dpkg --print-architecture)" >> "$GITHUB_ENV"
 
