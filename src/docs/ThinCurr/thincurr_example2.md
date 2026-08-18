@@ -21,9 +21,9 @@ Contents of the input files are provided below and in the examples directory und
 
 # Post processing
 
-Once complete you can now generate VisIt files to visualize the solution as above. First, rerun the code as above but with "plot_run=T" in the `thincurr_td_options` group. Once complete, you need to run the `build_xdmf.py` script, which generates XDMF metadata files that tells VisIt how to read the data. This can be done using the following command
+Once complete you can now generate VisIt files to visualize the solution as above. First, rerun the code as above but with "plot_run=T" in the `thincurr_td_options` group. Once complete, you need to run the `OFT_build_xdmf.py` script, which generates XDMF metadata files that tells VisIt how to read the data. This can be done using the following command
 
-    python /path/to/oft/bin/build_xdmf.py
+    python /path/to/oft/bin/OFT_build_xdmf.py
 
 Next use VisIt to open the `surf_out_XXXX.xmf` database, which will contain a series timepoints with the vector field `J`. If you are running this example remotely and using VisIt locally you will need to copy the `mesh.*.h5`, `scalar_dump.*.h5`, `vector_dump.*.h5`, and `*.xmf` files to your local computer for visualization. The solution `J` at the first time point should look like the figure below.
 
@@ -114,8 +114,8 @@ set large exodus file on
 export Genesis  "thincurr_ex-cyl.g" overwrite block 1
 ```
 
-The file can then be converted to OFT's native mesh format using the `convert_cubit.py` script as
+The file can then be converted to OFT's native mesh format using the `OFT_convert_cubit.py` script as
 
-    python /path/to/OFT/bin/convert_cubit.py --in_file=thincurr_ex-cyl.g
+    python /path/to/OFT/bin/OFT_convert_cubit.py --in_file=thincurr_ex-cyl.g
 
 which will yield the converted file `thincurr_ex-cyl.h5`.

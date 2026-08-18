@@ -8,7 +8,6 @@
 # high order Lagrange nodes to a linear representation by subdividing elements.
 #
 #------------------------------------------------------------------------------
-from __future__ import print_function
 try:
     import numpy
 except:

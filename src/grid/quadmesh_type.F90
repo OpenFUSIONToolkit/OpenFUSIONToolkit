@@ -16,7 +16,7 @@ USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_field_get_sizes, hdf5_write, hdf5_create_file, hdf5_create_group
 USE oft_gauss_quadrature, ONLY: oft_quad_type, set_quad_2d
 USE oft_lag_poly
-USE oft_mesh_type, ONLY: oft_bmesh
+USE oft_mesh_type, ONLY: oft_bmesh, bmesh_destroy
 IMPLICIT NONE
 #include "local.h"
 PRIVATE
@@ -51,6 +51,8 @@ CONTAINS
   PROCEDURE :: quad_rule => quadmesh_quad_rule
   PROCEDURE :: tessellate => quadmesh_tessellate
   PROCEDURE :: tessellated_sizes => quadmesh_tessellated_sizes
+  !> Destroy mesh object
+  PROCEDURE :: delete => quadmesh_destroy
 END TYPE oft_quadmesh
 INTEGER(i4), PARAMETER :: quad_ed(2,4)=RESHAPE((/1,2, 2,3, 3,4, 4,1/),(/2,4/)) !< Quad edge list
 INTEGER(i4), PARAMETER :: quad_bary_map(4) = [-2,1,2,-1]
@@ -66,6 +68,17 @@ INTEGER(i4), PARAMETER :: inodes2f(2) = (/2,2/)
 !
 PUBLIC quad_2d_grid, quad_grid_orient
 CONTAINS
+!------------------------------------------------------------------------------
+!> Destroy mesh object
+!------------------------------------------------------------------------------
+SUBROUTINE quadmesh_destroy(self)
+CLASS(oft_quadmesh), INTENT(inout) :: self
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%inodese))DEALLOCATE(self%inodese,self%inodesf)
+IF(ASSOCIATED(self%xnodes))DEALLOCATE(self%xnodes)
+CALL bmesh_destroy(self)
+DEBUG_STACK_POP
+END SUBROUTINE quadmesh_destroy
 !------------------------------------------------------------------------------
 !> Load trimesh from transfer file
 !------------------------------------------------------------------------------

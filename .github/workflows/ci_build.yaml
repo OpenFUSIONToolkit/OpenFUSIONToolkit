@@ -11,9 +11,10 @@ on:
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ contains(github.ref, 'pull/')}}
-  
+
 jobs:
   build:
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: ${{ format('{0} ({1})', matrix.config.name, matrix.parallel) }}
     runs-on: ${{ matrix.config.os }}
     env:
@@ -21,7 +22,8 @@ jobs:
       CXX: ${{ matrix.config.cxx }}
       FC: ${{ matrix.config.fc }}
       OMP_NUM_THREADS: 2
-    
+      OMPI_MCA_pmix_tool_remote_connections: 0 # Fix occasional OpenMPI error
+
     strategy:
       fail-fast: false
       matrix:
@@ -48,8 +50,8 @@ jobs:
             os: ubuntu-24.04,
             cc: "icx", cxx: "icx", fc: "ifx",
             python: "python3",
-            build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
-            mpi_build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
+            build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT --oft_use_lto=0",
+            mpi_build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT --oft_use_lto=0",
             oneapi_ver: "-2025.2"
           }
         - {
@@ -108,12 +110,12 @@ jobs:
               os: ubuntu-22.04,
               cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
               python: "python3",
-              mpi_build_flags: "--nthread=2 --oblas_dynamic_arch --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 --build_cmake=1"
+              mpi_build_flags: "--nthread=2 --oblas_dynamic_arch --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 --build_cmake=1 --oft_use_lto=0"
             }
 
     steps:
     - name: Checkout repo
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Get OS version (Linux)
       if: startsWith(matrix.config.os, 'ubuntu')
@@ -133,17 +135,16 @@ jobs:
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
-        python -m pip install pytest numpy scipy h5py matplotlib xarray jupyter nbconvert pyvista
-    
+        python -m pip install pytest numpy scipy h5py netcdf4 matplotlib jupyter nbconvert pyvista
+
     - name: Install prerequisites (macOS)
       if: startsWith(matrix.config.os, 'macos')
       run: |
-        brew install pmix
         ${{ matrix.config.python }} -m venv ${{ github.workspace }}/oft_venv
         echo "source ${{ github.workspace }}/oft_venv/bin/activate" > ${{ github.workspace }}/setup_env.sh
         source ${{ github.workspace }}/setup_env.sh
-        python -m pip install pytest numpy scipy h5py matplotlib xarray jupyter nbconvert
-    
+        python -m pip install pytest numpy scipy h5py netcdf4 matplotlib jupyter nbconvert
+
     - name: Install Intel oneAPI
       if: ${{ matrix.config.cc == 'icx' }}
       run: |
@@ -155,7 +156,7 @@ jobs:
         echo "source /opt/intel/oneapi/compiler/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
         echo "source /opt/intel/oneapi/mkl/latest/env/vars.sh" >> ${{ github.workspace }}/setup_env.sh
         echo "ulimit -s unlimited" >> ${{ github.workspace }}/setup_env.sh
-    
+
     - name: Check compilers
       run: |
         source ${{ github.workspace }}/setup_env.sh
@@ -166,11 +167,12 @@ jobs:
 
     - name: Setup PyVista
       if: ${{ !startsWith(matrix.config.os, 'macos') }}
+      timeout-minutes: 5
       uses: pyvista/setup-headless-display-action@v3
 
     - name: Cache external libraries
       id: cache-ext-libs
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: builds
         key: ${{ matrix.config.os }}-${{ matrix.config.cc }}-${{ matrix.parallel }}-${{ hashFiles('src/utilities/build_libs.py', 'compiler_id.txt') }}
@@ -187,7 +189,7 @@ jobs:
       run: |
         source ${{ github.workspace }}/setup_env.sh
         python ../src/utilities/build_libs.py ${{ matrix.config.build_flags }} --no_dl_progress --build_arpack=1 --oft_build_tests=1
-    
+
     - name: Build external (MPICH+OpenMP)
       if: startsWith(matrix.parallel, 'mpich')
       shell: bash
@@ -207,7 +209,7 @@ jobs:
         python ../src/utilities/build_libs.py ${{ matrix.config.mpi_build_flags }} --no_dl_progress --build_arpack=1 --oft_build_tests=1 --build_openmpi=1
 
     - name: Upload library failure log
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       if: failure()
       with:
         name: Library_failure_log-${{ matrix.config.os }}_${{ matrix.parallel }}
@@ -226,7 +228,7 @@ jobs:
       run: |
         source ${{ github.workspace }}/setup_env.sh
         make
-    
+
     - name: Install OFT
       shell: bash
       working-directory: builds/build_release
@@ -246,7 +248,7 @@ jobs:
     - name: Test OFT examples
       if: ${{ matrix.config.os != 'macos-15-intel' }}
       shell: bash
-      timeout-minutes: 20
+      timeout-minutes: 30
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
@@ -258,10 +260,10 @@ jobs:
       run: |
         rm -rf build
         rm -rf petsc*
-    
+
     - name: Upload test results to Codecov
       if: ${{ !cancelled() && (matrix.config.os == 'ubuntu-24.04') }}
-      uses: codecov/codecov-action@v5
+      uses: codecov/codecov-action@v6
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         report_type: test_results

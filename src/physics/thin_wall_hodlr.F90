@@ -69,7 +69,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8), POINTER, DIMENSION(:,:,:) :: hole_Vcoil_Bmat => NULL() !< Dense coupling matrix to holes and Vcoils (B-field)
   REAL(8), POINTER, DIMENSION(:,:,:) :: Icoil_Bmat => NULL() !< Dense coupling matrix to Icoils (B-fieldß)
   TYPE(oft_tw_block), POINTER, DIMENSION(:) :: blocks => NULL() !< REMOVE
-  TYPE(oft_tw_level), POINTER, DIMENSION(:) :: levels => NULL() !< Block heirarchy 
+  TYPE(oft_tw_level), POINTER, DIMENSION(:) :: levels => NULL() !< Block heirarchy
   type(tw_type), pointer :: tw_obj => NULL()
 contains
   !> Setup HODLR by performing partitioning and tagging block-block interactions
@@ -913,7 +913,7 @@ WRITE(*,*)'  Building diagonal blocks'
 nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
 !$omp end single
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO i=1,self%ndense
   level = self%dense_blocks(1,i)
   j = self%dense_blocks(2,i)
@@ -1173,7 +1173,7 @@ ELSE
   size_out=full_size
 END IF
 !
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_block",__FILE__)
 END IF
 ! CALL oft_abort("","",__FILE__)
@@ -1502,7 +1502,7 @@ ALLOCATE(S(MIN_DIM),U(LDU,MIN_DIM),VT(LDVT,K))
 LWORK = -1
 ALLOCATE(WORK(1),IWORK(8*MIN_DIM))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 LWORK = INT(WORK(1))
@@ -1510,7 +1510,7 @@ DEALLOCATE(WORK)
 !---Compute SVD of matrix block
 ALLOCATE(WORK(LWORK))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 !---Truncate at desired accuracy
@@ -1589,7 +1589,7 @@ mat_updated=.FALSE.
 nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
 nblocks_complete = 0
 !$omp end single
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO i=1,self%ndense
   level = self%dense_blocks(1,i)
   j = self%dense_blocks(2,i)
@@ -1886,7 +1886,7 @@ ELSE
   size_out=full_size
 END IF
 !
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_Bsetup::compress_block",__FILE__)
 END IF
 DEALLOCATE(WORK,IWORK,S,U,VT,Atmp)
@@ -2183,7 +2183,7 @@ ALLOCATE(S(MIN_DIM),U(LDU,MIN_DIM),VT(LDVT,K))
 LWORK = -1
 ALLOCATE(WORK(1),IWORK(8*MIN_DIM))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 LWORK = INT(WORK(1))
@@ -2191,7 +2191,7 @@ DEALLOCATE(WORK)
 !---Compute SVD of matrix block
 ALLOCATE(WORK(LWORK))
 CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 ) THEN
+IF( INFO.NE.0 )THEN
   CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
 END IF
 !---Truncate at desired accuracy
@@ -2309,7 +2309,7 @@ DO j=1,self%nsparse
   END IF
 END DO
 !$omp end do nowait
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,self%ndense
   level = self%dense_blocks(1,j)
   iblock = self%dense_blocks(2,j)
@@ -2416,7 +2416,7 @@ DO j=1,self%nsparse
   END DO
 END DO
 ! !$omp end do nowait
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO j=1,self%ndense
   level = self%dense_blocks(1,j)
   iblock = self%dense_blocks(2,j)
@@ -2513,23 +2513,6 @@ TYPE :: tw_oct_tree
   TYPE(tw_oct_tree), POINTER, DIMENSION(:) :: children => NULL()
   TYPE(tw_oct_tree), POINTER :: parent => NULL()
 END TYPE tw_oct_tree
-!---------------------------------------------------------------------------------
-!> Need docs
-!---------------------------------------------------------------------------------
-TYPE :: tw_oct_tree_level
-  INTEGER(4) :: nblocks = 0
-  INTEGER(4) :: nc_dense = 0
-  INTEGER(4) :: nc_sparse = 0
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kr_dense => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lc_dense => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kc_dense => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lr_dense => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lrm_dense => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: kr_sparse => NULL()
-  INTEGER(4), CONTIGUOUS, POINTER, DIMENSION(:) :: lc_sparse => NULL()
-  INTEGER(4), POINTER, DIMENSION(:,:) :: dense_mask => NULL()
-  TYPE(tw_oct_tree), POINTER, DIMENSION(:) :: block => NULL()
-END TYPE tw_oct_tree_level
 
 TYPE(tw_oct_tree) :: mesh_tree
 
@@ -2628,6 +2611,8 @@ IF(leaf%nchildren>0)THEN
   DO j=1,leaf%nchildren
     CALL fill_levels(leaf%children(j),depth+1,block_id)
   END DO
+  DEALLOCATE(leaf%children)
+  NULLIFY(leaf%parent)
 ELSE
   DO j=depth+1,nlevels
     levels(j)%nblocks=levels(j)%nblocks+1
@@ -2942,7 +2927,7 @@ CALL g%get_local(gtmp)
 utmp=(0.d0,0.d0)
 !$omp parallel private(uloc,gloc,i,level,iblock,n,j)
 ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO i=1,self%mf_obj%ndense
   level=self%mf_obj%dense_blocks(1,i)
   iblock=self%mf_obj%dense_blocks(2,i)
@@ -3084,7 +3069,7 @@ CALL g%get_local(gtmp)
 utmp=0.d0
 !$omp parallel private(uloc,gloc,i,level,iblock,n,j)
 ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 DO i=1,self%mf_obj%ndense
   level=self%mf_obj%dense_blocks(1,i)
   iblock=self%mf_obj%dense_blocks(2,i)

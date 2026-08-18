@@ -60,7 +60,7 @@ type, extends(oft_noop_matrix) :: oft_tmaker_td_mfop
 contains
     !> Setup operator, allocating internal storage
     procedure :: setup => setup_mfop
-    !> Update operator with new targets, etc. 
+    !> Update operator with new targets, etc.
     procedure :: update => update_mfop
     !> Delete operator, deallocating internal storage
     procedure :: delete => delete_mfop
@@ -182,6 +182,8 @@ END IF
 call psi_tmp%get_local(vals_out)
 CALL self%psi_sol%restore_local(vals_out,1)
 DEALLOCATE(vals_out)
+CALL psi_tmp%delete()
+DEALLOCATE(psi_tmp)
 !------------------------------------------------------------------------------
 ! Create extrapolation fields (Unused)
 !------------------------------------------------------------------------------
@@ -534,7 +536,7 @@ END IF
 !$omp parallel private(j,vals_loc,rop,gop,det,curved,goptmp,m,vol,jr,jc,pt,eta_tmp,psi_tmp,eta_source,nturns,cond_norm)
 allocate(j(lag_rep%nce),vals_loc(lag_rep%nce+self%gs_device%ncoils)) ! Local DOF and matrix indices
 allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 do i=1,mesh%nc
     IF(mesh%reg(i)==1)CYCLE
     !---Get local to global DOF mapping
@@ -603,7 +605,7 @@ INTEGER(4) :: i,j,k
 DEBUG_STACK_PUSH
 self%gs_equil=>eq_in
 self%gs_device=>eq_in%device
-self%ip_target=self%gs_equil%Itor_target
+self%ip_target=self%gs_equil%Ip_target
 self%ip_ratio_target=self%gs_equil%Ip_ratio_target
 self%f_scale=self%gs_equil%ffp_scale
 self%p_scale=self%gs_equil%p_scale
@@ -632,7 +634,7 @@ DEBUG_STACK_PUSH
 self%F=>self%gs_equil%I
 self%P=>self%gs_equil%P
 ! Update current target and sync scale factors
-self%ip_target=self%gs_equil%Itor_target
+self%ip_target=self%gs_equil%Ip_target
 self%ip_ratio_target=self%gs_equil%Ip_ratio_target
 self%f_scale=self%gs_equil%ffp_scale
 self%p_scale=self%gs_equil%p_scale
@@ -674,7 +676,7 @@ integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),alam_new,psi_tmp,diag(3),f(3),vcont_val
 real(r8) :: dpsi_tmp(2),p_source,f_source,psi_lim,psi_max,eta_source,max_tmp,lim_tmp
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),vals_loc(:,:)
-real(r8), pointer, dimension(:) :: pol_vals,rhs_vals,alam_vals,pvals
+real(r8), pointer, dimension(:) :: pol_vals,rhs_vals,alam_vals
 class(oft_vector), pointer :: ptmp
 type(oft_lag_brinterp) :: psi_interp
 logical :: curved,in_bounds
@@ -688,7 +690,7 @@ CALL mytimer%tick()
 !------------------------------------------------------------------------------
 ! Get local vector values
 !------------------------------------------------------------------------------
-NULLIFY(pol_vals,rhs_vals,ptmp,pvals)
+NULLIFY(pol_vals,rhs_vals,ptmp)
 CALL a%get_local(pol_vals)
 !---
 ! self%gs_equil%psi=>a ! HERE
@@ -708,7 +710,6 @@ self%F%plasma_bounds=self%gs_equil%plasma_bounds
 self%P%plasma_bounds=self%gs_equil%plasma_bounds
 CALL b%set(0.d0)
 CALL b%get_local(rhs_vals)
-CALL b%new(ptmp)
 ALLOCATE(alam_vals(b%n))
 alam_vals=0.d0
 !------------------------------------------------------------------------------
@@ -720,7 +721,7 @@ diag=0.d0
 !$omp reduction(+:diag)
 allocate(j(lag_rep%nce),vals_loc(lag_rep%nce,2)) ! Local DOF and matrix indices
 allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 !ordered
 do i=1,mesh%nc
     IF(mesh%reg(i)/=1)CYCLE
@@ -786,12 +787,13 @@ CALL b%new(ptmp)
 CALL self%vac_op%apply(a,ptmp)
 CALL b%add(1.d0,1.d0,ptmp)
 CALL ptmp%delete
+DEALLOCATE(ptmp)
 self%ip=(diag(1)+diag(2))/mu0
 self%estored=diag(2)/mu0*3.d0/2.d0
 ! eta_source=b%dot(b)
 ! WRITE(*,*)'CHK',eta_source
 ! WRITE(*,*)self%ip
-DEALLOCATE(pol_vals,rhs_vals,ptmp,alam_vals)
+DEALLOCATE(pol_vals,rhs_vals,alam_vals)
 !---Report time
 ! IF(oft_debug_print(1))THEN
 
@@ -1036,7 +1038,7 @@ psi_norm=self%gs_equil%plasma_bounds(2)-self%gs_equil%plasma_bounds(1)
 allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
 allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
 allocate(lop(lag_rep%nce,lag_rep%nce),lim_loc(lag_rep%nce),ax_loc(lag_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 !ordered
 do i=1,mesh%nc
     ! IF(mesh%reg(i)==1)CYCLE
@@ -1277,7 +1279,7 @@ allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
 allocate(lhs_vals(lag_rep%nce,lag_rep%nce),lim_loc(lag_rep%nce))
 allocate(rhs_vals(lag_rep%nce,lag_rep%nce),ax_loc(lag_rep%nce))
 IF(nnonaxi>0)allocate(nonaxi_tmp(lag_rep%nce))
-!$omp do schedule(static,1)
+!$omp do schedule(static)
 !ordered
 do i=1,lag_rep%mesh%nc
     ! IF(smesh%reg(i)==1)CYCLE

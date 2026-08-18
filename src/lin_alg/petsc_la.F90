@@ -935,7 +935,10 @@ CALL MatAssemblyBegin(self%M,MAT_FINAL_ASSEMBLY,ierr)
 CALL MatAssemblyEnd(self%M,MAT_FINAL_ASSEMBLY,ierr)
 !---Setup diagonal scaling
 if(PRESENT(diag))then
-  IF(associated(self%D))CALL self%D%delete
+  IF(associated(self%D))THEN
+    CALL self%D%delete
+    DEALLOCATE(self%D)
+  END IF
   CALL diag%new(self%D)
   SELECT TYPE(this=>self%D)
     CLASS IS(oft_petsc_vector)
@@ -994,7 +997,7 @@ CALL MatDestroy(self%M,ierr)
 ! CALL VecDestroy(self%Md,ierr)
 IF(ASSOCIATED(self%D))THEN
   CALL self%D%delete
-  NULLIFY(self%D)
+  DEALLOCATE(self%D)
 END IF
 CALL ISLocalToGlobalMappingDestroy(self%r_lis,ierr)
 CALL ISLocalToGlobalMappingDestroy(self%c_lis,ierr)
