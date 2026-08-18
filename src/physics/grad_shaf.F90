@@ -4411,17 +4411,8 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Trace
 call set_tracer(1)
-! With `shape_geo` requested, `i` and the extremum indices become per-surface scratch that
-! every thread writes on every iteration; left shared, each thread would index its own
-! (private) `ptout` with another thread's value. `lcfs_rz` likewise: the LCFS resample
-! used to run for one surface on one thread, but with `shape_geo` every surface hits it,
-! and `spline_type` carries its own allocations and evaluation buffers. `error_str` was
-! already shared before this, so concurrent trace failures could interleave a warning.
 !$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field,i,imin_r,imax_r, &
 !$omp                  imin_z,imax_z,error_str,lcfs_rz) firstprivate(pt_last)
-! The private copy of a pointer starts with undefined association status, so `ptout` must be
-! nullified before the cleanup below can test it: threads that never allocate it (any call
-! without `shape_geo`) would otherwise deallocate a garbage address.
 NULLIFY(ptout)
 ALLOCATE(field)
 field%u=>gseq%psi
