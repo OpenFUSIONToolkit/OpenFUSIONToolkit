@@ -520,7 +520,6 @@ TYPE(opt_targets) :: active_targets !< Active target values/ptrs for external fu
 !$omp threadprivate(active_targets)
 real(r8), PARAMETER :: gs_epsilon = 1.d-12 !< Epsilon used for radial coordinate
 real(r8) :: qp_int_tol = 1.d-12
-PRIVATE :: refine_extremum
 contains
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -4341,7 +4340,7 @@ end subroutine psimax_error_grad
 !------------------------------------------------------------------------------
 !> Get q profile for equilibrium
 !------------------------------------------------------------------------------
-subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs,fsa_avgs,shape_geo,fpol_out)
+subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs,fsa_avgs,shape_geo)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux surfaces to sample
 real(8), intent(in) :: psi_q(nr) !< Locations to sample in normalized flux
@@ -4352,13 +4351,13 @@ real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `ps
 real(8), optional, intent(out) :: ravgs(nr,4) !< Flux surface averages <R>, <1/R>, <1/R^2>, and dV/dPsi
 real(8), optional, intent(out) :: fsa_avgs(nr,4) !< Flux surface averages <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
 real(8), optional, intent(out) :: shape_geo(nr,6) !< Per-surface R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
-real(8), optional, intent(out) :: fpol_out(nr) !< \f$ F = R B_{\phi} \f$ at each sampling location
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
-real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3),dummy
+real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
+integer(4), parameter :: nlcfs=1000
 logical :: lcfs_all,lcfs_any
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: lcfs_rz
@@ -4367,9 +4366,6 @@ lcfs_any = PRESENT(dl).OR.PRESENT(rbounds).OR.PRESENT(zbounds)
 lcfs_all = PRESENT(dl).AND.PRESENT(rbounds).AND.PRESENT(zbounds)
 IF(lcfs_any.AND.(.NOT.lcfs_all))CALL oft_abort('All LCFS arguments must be passed if any are','gs_get_qprof',__FILE__)
 IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but "psi_q(1)" far from LCFS, not projecting')
-! The LCFS projection below rewrites the R,Z of each traced point but not its tracing
-! angle, which "shape_geo" fits against. Reject the combination rather than fit
-! projected positions against unprojected angles.
 IF(PRESENT(shape_geo).AND.lcfs_any)CALL oft_abort('"shape_geo" cannot be combined with LCFS arguments', &
   'gs_get_qprof',__FILE__)
 !---
@@ -4417,10 +4413,16 @@ END IF
 call set_tracer(1)
 ! With `shape_geo` requested, `i` and the extremum indices become per-surface scratch that
 ! every thread writes on every iteration; left shared, each thread would index its own
-! (private) `ptout` with another thread's value. `error_str` was already shared before
-! this, so concurrent trace failures could interleave a warning.
+! (private) `ptout` with another thread's value. `lcfs_rz` likewise: the LCFS resample
+! used to run for one surface on one thread, but with `shape_geo` every surface hits it,
+! and `spline_type` carries its own allocations and evaluation buffers. `error_str` was
+! already shared before this, so concurrent trace failures could interleave a warning.
 !$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field,i,imin_r,imax_r, &
-!$omp                  imin_z,imax_z,dummy,error_str) firstprivate(pt_last)
+!$omp                  imin_z,imax_z,error_str,lcfs_rz) firstprivate(pt_last)
+! The private copy of a pointer starts with undefined association status, so `ptout` must be
+! nullified before the cleanup below can test it: threads that never allocate it (any call
+! without `shape_geo`) would otherwise deallocate a garbage address.
+NULLIFY(ptout)
 ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%device%fe_rep)
@@ -4513,14 +4515,9 @@ do j=1,nr
         IF(ptout(3,i)<ptout(3,imin_z))imin_z=i
         IF(ptout(3,i)>ptout(3,imax_z))imax_z=i
       END DO
-      ! The traced points bracket each extremum but rarely land on it. At a Z extremum Z is
-      ! stationary in theta while R is not, so R there is only first-order accurate if the
-      ! nearest point is used; a parabolic fit in theta restores second-order accuracy.
-      ! spline interpolation fills entries 1 through nsteps, the last closing back onto the first.
-      CALL refine_extremum(ptout,active_tracer%nsteps,imin_r,2,3,shape_geo(j,1),dummy)
-      CALL refine_extremum(ptout,active_tracer%nsteps,imax_r,2,3,shape_geo(j,2),dummy)
-      CALL refine_extremum(ptout,active_tracer%nsteps,imin_z,3,2,shape_geo(j,3),shape_geo(j,5))
-      CALL refine_extremum(ptout,active_tracer%nsteps,imax_z,3,2,shape_geo(j,4),shape_geo(j,6))
+      shape_geo(j,1)=ptout(2,imin_r); shape_geo(j,2)=ptout(2,imax_r)
+      shape_geo(j,3)=ptout(3,imin_z); shape_geo(j,4)=ptout(3,imax_z)
+      shape_geo(j,5)=ptout(2,imin_z); shape_geo(j,6)=ptout(2,imax_z)
     END IF
     !---LCFS length and spatial bounds
     IF(PRESENT(dl).AND.(j==1))THEN
@@ -4558,7 +4555,6 @@ do j=1,nr
   !---Safety Factor (q)
   qpsi=fpol*active_tracer%v(3)/(2*pi)
   prof(j)=qpsi
-  IF(PRESENT(fpol_out))fpol_out(j)=fpol
   IF(PRESENT(ravgs))THEN
     ravgs(j,1)=active_tracer%v(4)/active_tracer%v(2)     ! <R>
     ravgs(j,2)=active_tracer%v(5)/active_tracer%v(2)     ! <1/R>
@@ -4579,44 +4575,6 @@ DEALLOCATE(field)
 !$omp end parallel
 CALL psi_int%delete()
 end subroutine gs_get_qprof
-!------------------------------------------------------------------------------
-!> Refine a discrete extremum of a traced contour by 3-point parabolic fit
-!!
-!! The traced points bracket but rarely land on an extremum. Fitting a parabola
-!! in the tracing parameter locates the extremum to second order and allows the
-!! companion coordinate, which varies linearly there, to be interpolated with
-!! the same accuracy.
-!------------------------------------------------------------------------------
-subroutine refine_extremum(pts,npts,idx,icomp,jcomp,ext_val,comp_val)
-real(8), intent(in) :: pts(:,:) !< Traced points, (theta, R, Z) by step [3,:]
-integer(4), intent(in) :: npts !< Number of valid points in `pts`
-integer(4), intent(in) :: idx !< Index of the discrete extremum
-integer(4), intent(in) :: icomp !< Row of the component being extremized (2=R, 3=Z)
-integer(4), intent(in) :: jcomp !< Row of the companion component
-real(8), intent(out) :: ext_val !< Refined extremal value
-real(8), intent(out) :: comp_val !< Companion component at the refined location
-real(8) :: t1,t2,t3,y1,y2,y3,d1,d2,a,b,c,tstar
-ext_val=pts(icomp,idx)
-comp_val=pts(jcomp,idx)
-IF((idx<=1).OR.(idx>=npts))RETURN
-t1=pts(1,idx-1); t2=pts(1,idx); t3=pts(1,idx+1)
-IF((t2<=t1).OR.(t3<=t2))RETURN
-y1=pts(icomp,idx-1); y2=pts(icomp,idx); y3=pts(icomp,idx+1)
-d1=(y2-y1)/(t2-t1); d2=(y3-y2)/(t3-t2)
-a=(d2-d1)/(t3-t1)
-IF(ABS(a)<1.d-30)RETURN
-b=d1-a*(t1+t2)
-c=y1-a*t1**2-b*t1
-tstar=-b/(2.d0*a)
-!---Reject a vertex outside the bracketing interval (non-parabolic local shape)
-IF((tstar<t1).OR.(tstar>t3))RETURN
-ext_val=a*tstar**2+b*tstar+c
-!---3-point Lagrange interpolation of the companion coordinate at `tstar`
-y1=pts(jcomp,idx-1); y2=pts(jcomp,idx); y3=pts(jcomp,idx+1)
-comp_val=y1*(tstar-t2)*(tstar-t3)/((t1-t2)*(t1-t3)) &
-        +y2*(tstar-t1)*(tstar-t3)/((t2-t1)*(t2-t3)) &
-        +y3*(tstar-t1)*(tstar-t2)/((t3-t1)*(t3-t2))
-end subroutine refine_extremum
 !------------------------------------------------------------------------------
 !> Trace a single specified flux surface
 !------------------------------------------------------------------------------

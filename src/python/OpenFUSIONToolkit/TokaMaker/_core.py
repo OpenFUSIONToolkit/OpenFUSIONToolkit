@@ -2811,16 +2811,18 @@ class TokaMaker_equilibrium():
         if self.psi_convention != 0:
             psi_save = psi
         qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
-        fpol = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         ravgs = numpy.zeros((4,psi.shape[0]), dtype=numpy.float64)
         fsa_avgs = numpy.zeros((4,psi.shape[0]), dtype=numpy.float64)
         shape_geo = numpy.zeros((6,psi.shape[0]), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_fsa(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,fsa_avgs,shape_geo,fpol,error_string)
+        tokamaker_get_fsa(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,fsa_avgs,shape_geo,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        # F on axis cannot be traced, but the source profile is defined there.
-        F_axis = self.get_profiles(psi=numpy.zeros((1,), dtype=numpy.float64))[1][0]
+        # F is a flux function, so it comes straight from the source profile rather
+        # than the trace. The leading zero picks up the axis value, which cannot be traced.
+        fpol = self.get_profiles(psi=numpy.concatenate(([0.0], psi_save)))[1]
+        F_axis = fpol[0]
+        fpol = numpy.ascontiguousarray(fpol[1:])
         return {
             'psi_norm': psi_save,
             'psi': self.psinorm_to_absolute(psi_save),

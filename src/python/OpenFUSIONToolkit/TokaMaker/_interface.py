@@ -151,10 +151,10 @@ tokamaker_get_q = ctypes_subroutine(oftpy_lib.tokamaker_get_q,
     [c_void_p, c_int,ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,2),
      c_double_ptr, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_char_p])
 
-# tokamaker_get_fsa(tMaker_equil_ptr,npsi,psi_q,qvals,ravgs,fsa_avgs,shape_geo,fpol,error_str)
+# tokamaker_get_fsa(tMaker_equil_ptr,npsi,psi_q,qvals,ravgs,fsa_avgs,shape_geo,error_str)
 tokamaker_get_fsa = ctypes_subroutine(oftpy_lib.tokamaker_get_fsa,
     [c_void_p, c_int,ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,2),
-     ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), c_char_p])
+     ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_char_p])
 
 # tokamaker_sauter_fc(tMaker_equil_ptr,npsi,psi_saut,fc,r_avgs,modb_avgs,error_str)
 tokamaker_sauter_fc = ctypes_subroutine(oftpy_lib.tokamaker_sauter_fc,

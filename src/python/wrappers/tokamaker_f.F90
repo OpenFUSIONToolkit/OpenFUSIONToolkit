@@ -1229,7 +1229,7 @@ END SUBROUTINE tokamaker_get_q
 !---------------------------------------------------------------------------------
 !> Evaluate flux surface averages, per-surface shape parameters, and q
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_fsa(tMaker_equil_ptr,npsi,psi_q,qvals,ravgs,fsa_avgs,shape_geo,fpol,error_str) BIND(C,NAME="tokamaker_get_fsa")
+SUBROUTINE tokamaker_get_fsa(tMaker_equil_ptr,npsi,psi_q,qvals,ravgs,fsa_avgs,shape_geo,error_str) BIND(C,NAME="tokamaker_get_fsa")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Number of evaluation points
 REAL(c_double), INTENT(in) :: psi_q(npsi) !< \f$ \psi \f$ values to compute averages at
@@ -1237,12 +1237,11 @@ REAL(c_double), INTENT(out) :: qvals(npsi) !< q values
 REAL(c_double), INTENT(out) :: ravgs(npsi,4) !< <R>, <1/R>, <1/R^2>, and dV/dPsi
 REAL(c_double), INTENT(out) :: fsa_avgs(npsi,4) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
 REAL(c_double), INTENT(out) :: shape_geo(npsi,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
-REAL(c_double), INTENT(out) :: fpol(npsi) !< F = R*B_phi
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL gs_get_qprof(tMaker_equil_obj,npsi,psi_q,qvals,ravgs=ravgs,fsa_avgs=fsa_avgs, &
-                  shape_geo=shape_geo,fpol_out=fpol)
+                  shape_geo=shape_geo)
 END SUBROUTINE tokamaker_get_fsa
 !---------------------------------------------------------------------------------
 !> Evaluate Sauter trapped particle fraction and related quantities
