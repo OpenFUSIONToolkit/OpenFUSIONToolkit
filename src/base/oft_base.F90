@@ -200,6 +200,7 @@ CHARACTER(LEN=OFT_PATH_SLEN) :: ifile
 LOGICAL :: called_from_lib
 LOGICAL :: rst,print_header
 NAMELIST/runtime_options/ppn,omp_nthreads,debug,oft_stack_disabled,use_petsc,test_run,nparts
+
 !---Initialize MPI
 #ifdef HAVE_MPI
 CALL MPI_INIT_THREAD(MPI_THREAD_FUNNELED,thrdtype,ierr)
