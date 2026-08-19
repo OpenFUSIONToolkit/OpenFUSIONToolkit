@@ -665,6 +665,7 @@ class TokaMaker():
         @param reg_targets Regularization targets [nregularize] (default: 0)
         @param reg_weights Weights for regularization terms [nregularize] (default: 1)
         @param reg_terms List of regularization terms created with @ref coil_reg_term
+        @param eq_idx Index of equilibrium for which we are setting the coil reg
         '''
         if reg_terms is not None:
             if reg_mat is not None:
@@ -778,6 +779,7 @@ class TokaMaker():
         @param a Minor radius for flux surface-based approach
         @param kappa Elongation for flux surface-based approach
         @param delta Triangularity for flux surface-based approach
+        @param eq_idx Index of equilibrium for which we are setting the flux.
         @param curr_source Current source for arbitrary current distribution
         '''
         curr_ptr = None
@@ -1132,6 +1134,7 @@ class TokaMaker():
         @param V0 Target vertical position for magnetic axis
         @param Z0 Target vertical position for magnetic axis
         @param retain_previous Keep previously set targets unless explicitly updated? (default: False)
+        @param eq_idx Index of equilibrium for which we are setting targets.
         '''
         def float_to_c(value):
             if value is None:
