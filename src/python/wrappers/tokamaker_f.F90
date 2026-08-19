@@ -1662,7 +1662,7 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
-IF(ASSOCIATED(tMaker_obj%gs_equils(1)%eq%isoflux_targets))DEALLOCATE(tMaker_obj%gs_equils(eq_idx)%eq%isoflux_targets)
+IF(ASSOCIATED(tMaker_obj%gs_equils(eq_idx)%eq%isoflux_targets))DEALLOCATE(tMaker_obj%gs_equils(eq_idx)%eq%isoflux_targets)
 tMaker_obj%gs_equils(eq_idx)%eq%isoflux_ntargets=ntargets
 IF(ntargets>0)THEN
   ALLOCATE(tMaker_obj%gs_equils(1)%eq%isoflux_targets(5,tMaker_obj%gs_equils(1)%eq%isoflux_ntargets))
