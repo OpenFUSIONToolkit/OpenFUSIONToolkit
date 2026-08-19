@@ -113,15 +113,6 @@ IF(.NOT.c_associated(mesh_ptr))THEN
 END IF
 ALLOCATE(tMaker_obj)
 ALLOCATE(tMaker_obj%device)
-ALLOCATE(tMaker_obj%gs_equils(n_eq))
-print *, 'About to allocate gs_equils'
-! Define n_eq
-tMaker_obj%n_eq = n_eq
-! Allocate eqs
-DO i=1, n_eq
-  ALLOCATE(tMaker_obj%gs_equils(i)%eq)
-END DO
-print *, 'Finished allocating gs_equils'
 tMaker_ptr=C_LOC(tMaker_obj)
 CALL c_f_pointer(mesh_ptr,tMaker_obj%ml_mesh)
 END SUBROUTINE tokamaker_alloc
@@ -381,6 +372,15 @@ real(r8), POINTER :: vals_tmp(:)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+
+!------------------------------------------------------------------------------
+! Allocate GS equilibria
+!------------------------------------------------------------------------------
+tMaker_obj%n_eq = n_eq
+ALLOCATE(tMaker_obj%gs_equils(n_eq))
+DO i=1, n_eq
+  ALLOCATE(tMaker_obj%gs_equils(i)%eq)
+END DO
 
 !------------------------------------------------------------------------------
 ! Check input files
