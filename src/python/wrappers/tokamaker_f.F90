@@ -84,7 +84,7 @@ END TYPE tokamaker_recon_settings_type
 !---------------------------------------------------------------------------------
 TYPE :: tokamaker_instance
   INTEGER(i4) :: mode = 1 !< Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
-  INTEGER(i4) :: n_eq
+  INTEGER(i4) :: n_eq = 1 !< Number of GS equilibrium objects (size of gs_equils)
   INTEGER(i4), POINTER, DIMENSION(:) :: reg_plot => NULL() !< Region index on tesselated plotting mesh
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_plot => NULL() !< Cell list for tesselated plotting mesh
   REAL(r8), POINTER, DIMENSION(:,:) :: r_plot => NULL() !< Point list for tesselated plotting mesh
