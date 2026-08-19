@@ -2764,7 +2764,7 @@ DO jj=1,n
     END IF
   END IF
 END DO
-IF(flag_list(i0)==1)THEN
+IF((flag_list(i0)==1).AND.(n>2))THEN
   list_out(n+1)=lloop_tmp(i0)
 ELSE
   list_out(n+1)=0
