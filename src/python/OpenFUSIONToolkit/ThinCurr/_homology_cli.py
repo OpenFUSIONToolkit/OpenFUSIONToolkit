@@ -840,8 +840,9 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
                 if len(input_model['nodesets']) >= len(all_cycles):
                     print("""
   Note: Input file appears to be an older ThinCurr mesh file.
-    Found {0} nodesets, expected {1} hole(s).
-    More nodesets than holes may indicate the presence of jumpers instead of an issue.""".format(len(input_model['nodesets']), len(all_cycles)))
+    Found {0} nodesets, expected {1} hole(s).""")
+                    if len(input_model['nodesets']) > len(all_cycles):
+                        print("More nodesets than holes may indicate the presence of jumpers instead of an issue.".format(len(input_model['nodesets']), len(all_cycles)))
             else:
                 if len(all_cycles) > 0:
                     raise ValueError("Incorrect number of holes found 0 in file (expected {0})".format(len(all_cycles)))
