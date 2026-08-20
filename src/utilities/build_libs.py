@@ -17,7 +17,7 @@ import math
 import hashlib
 import http.client
 import urllib.request
-from urllib.error import URLError
+import urllib.error
 
 
 def error_exit(error_str, extra_info=None, exception=None):
@@ -336,8 +336,6 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     config_dict['CC_VENDOR'] = cc_vendor
     config_dict['CC_VERSION'] = cc_version
     if cc_vendor == 'gnu':
-        if int(config_dict['CC_VERSION'].split(".")[0]) > 9:
-            config_dict['BASE_FFLAGS'] = "-fallow-argument-mismatch"
         config_dict['OMP_FLAGS'] = "-fopenmp"
         config_dict['DEBUG_FLAGS'] = "-g"
         config_dict['CHK_FLAGS'] = "-O0 -fcheck=all"
@@ -376,7 +374,8 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
 
 def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=False,build_tests=False,
                        build_examples=False,build_docs=False,build_coverage=False,package_build=False,
-                       package_release=False,enable_debug_stack=False,enable_profiling=False):
+                       package_release=False,enable_debug_stack=False,enable_profiling=False,
+                       use_lto=True,debug_check_flags=True,debug_asanitizer=False):
     def bool_to_string(val):
         if val:
             return "TRUE"
@@ -401,10 +400,13 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DOFT_BUILD_PYTHON:BOOL={0}".format(bool_to_string(build_python)),
         "-DOFT_BUILD_DOCS:BOOL={0}".format(bool_to_string(build_docs)),
         "-DOFT_USE_OpenMP:BOOL={0}".format(bool_to_string(use_openmp)),
+        "-DOFT_USE_LTO:BOOL={0}".format(bool_to_string(use_lto)),
         "-DOFT_PACKAGE_BUILD:BOOL={0}".format(bool_to_string(package_build)),
         "-DOFT_PACKAGE_NIGHTLY:BOOL={0}".format(bool_to_string(not package_release)),
         "-DOFT_COVERAGE:BOOL={0}".format(bool_to_string(build_coverage)),
         "-DOFT_DEBUG_STACK:BOOL={0}".format(bool_to_string(enable_debug_stack)),
+        "-DOFT_DEBUG_CHECK:BOOL={0}".format(bool_to_string(debug_check_flags)),
+        "-DOFT_DEBUG_SANITIZER:BOOL={0}".format(bool_to_string(debug_asanitizer)),
         "-DOFT_PROFILING:BOOL={0}".format(bool_to_string(enable_profiling)),
         "-DOFT_THINCURR_LEGACY:BOOL=FALSE",
         "-DCMAKE_C_COMPILER:FILEPATH={CC}",
@@ -639,10 +641,11 @@ class package:
             for i in range(nretry+1):
                 try:
                     fetch_file(self.url, self.file)
-                except http.client.HTTPException:
+                except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
                     if i == nretry:
                         raise
                     else:
+                        print(repr(e))
                         print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
                         continue
                 break
@@ -660,10 +663,11 @@ class package:
                 for i in range(nretry+1):
                     try:
                         fetch_file(url, tmp_file)
-                    except http.client.HTTPException:
+                    except (urllib.error.URLError, http.client.HTTPException, OSError) as e:
                         if i == nretry:
                             raise
                         else:
+                            print(repr(e))
                             print('Warning: Retrying download ({0}/{1})'.format(i+1,nretry+1))
                             continue
                     break
@@ -2150,6 +2154,7 @@ group.add_argument("--build_cmake", default=0, type=int, choices=(0,1), help="Bu
 group.add_argument("--oft_build_debug", default=0, type=int, choices=(0,1), help="Build debug version of OFT? (default: 0)")
 group.add_argument("--oft_build_python", default=1, type=int, choices=(0,1), help="Build OFT Python libraries? (default: 1)")
 group.add_argument("--oft_use_openmp", default=1, type=int, choices=(0,1), help="Build OFT with OpenMP support? (default: 1)")
+group.add_argument("--oft_use_lto", default=1, type=int, choices=(0,1), help="Build OFT with Link-Time Optimization? (default: 1)")
 group.add_argument("--oft_build_tests", default=0, type=int, choices=(0,1), help="Build OFT tests? (default: 0)")
 group.add_argument("--oft_py_kernel", default="python3", type=str, help="Name of Jupyter kernel for testing Python examples (default: python3)")
 group.add_argument("--oft_build_examples", default=0, type=int, choices=(0,1), help="Build OFT examples? (default: 0)")
@@ -2158,6 +2163,8 @@ group.add_argument("--oft_package", action="store_true", default=False, help="Pe
 group.add_argument("--oft_package_python", default=1, type=int, choices=(0,1), help="Setup for build of PYPI wheels when packaging?")
 group.add_argument("--oft_package_release", action="store_true", default=False, help="Perform a release package of OFT?")
 group.add_argument("--oft_build_coverage", action="store_true", default=False, help="Build OFT with code coverage flags?")
+group.add_argument("--oft_debug_checks", default=1, type=int, choices=(0,1), help="Build OFT with compiler runtime checks (requires Debug build)? (default: 1)")
+group.add_argument("--oft_debug_asanitizer", default=0, type=int, choices=(0,1), help="Build OFT with address sanitizer checks (requires Debug build)? (default: 0)")
 group.add_argument("--oft_debug_stack", action="store_true", default=False, help="Enable internal debug stack?")
 group.add_argument("--oft_profiling", action="store_true", default=False, help="Enable internal profiling?")
 #
@@ -2373,4 +2380,7 @@ if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
         package_release=options.oft_package_release,
         enable_debug_stack=options.oft_debug_stack,
         enable_profiling=options.oft_profiling,
+        use_lto=(options.oft_use_lto==1),
+        debug_check_flags=(options.oft_debug_checks==1),
+        debug_asanitizer=(options.oft_debug_asanitizer==1)
     )

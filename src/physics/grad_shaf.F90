@@ -380,6 +380,8 @@ end type gs_curvature_interp
 !------------------------------------------------------------------------------
 type, extends(cylinv_interp) :: gsinv_interp
   LOGICAL :: compute_geom = .FALSE. !< Needs docs
+  LOGICAL :: compute_fsa = .FALSE. !< Compute additional flux surface averages (see @ref gsinv_apply)
+  real(8) :: f_surf = 0.d0 !< \f$ F = R B_{\phi} \f$ on the surface being traced (required if `compute_fsa`)
   real(8), pointer, dimension(:) :: uvals => NULL() !< Needs docs
   class(oft_vector), pointer :: u => NULL() !< Field for interpolation
   class(oft_scalar_bfem), pointer :: lag_rep => NULL() !< Lagrange FE representation
@@ -4338,7 +4340,7 @@ end subroutine psimax_error_grad
 !------------------------------------------------------------------------------
 !> Get q profile for equilibrium
 !------------------------------------------------------------------------------
-subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs)
+subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs,fsa_avgs,shape_geo)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux surfaces to sample
 real(8), intent(in) :: psi_q(nr) !< Locations to sample in normalized flux
@@ -4347,12 +4349,14 @@ real(8), optional, intent(out) :: dl !< Arc length of surface `psi_q(1)` (should
 real(8), optional, intent(out) :: rbounds(2,2) !< Radial bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `psi_q(1)` (should be LCFS)
 real(8), optional, intent(out) :: ravgs(nr,4) !< Flux surface averages <R>, <1/R>, <1/R^2>, and dV/dPsi
+real(8), optional, intent(out) :: fsa_avgs(nr,4) !< Flux surface averages <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
+real(8), optional, intent(out) :: shape_geo(nr,6) !< Per-surface R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
 real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
-integer(4) :: i,j,cell
+integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
 integer(4), parameter :: nlcfs=1000
 logical :: lcfs_all,lcfs_any
 type(gsinv_interp), pointer :: field
@@ -4362,6 +4366,8 @@ lcfs_any = PRESENT(dl).OR.PRESENT(rbounds).OR.PRESENT(zbounds)
 lcfs_all = PRESENT(dl).AND.PRESENT(rbounds).AND.PRESENT(zbounds)
 IF(lcfs_any.AND.(.NOT.lcfs_all))CALL oft_abort('All LCFS arguments must be passed if any are','gs_get_qprof',__FILE__)
 IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but "psi_q(1)" far from LCFS, not projecting')
+IF(PRESENT(shape_geo).AND.lcfs_any)CALL oft_abort('"shape_geo" cannot be combined with LCFS arguments', &
+  'gs_get_qprof',__FILE__)
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -4405,11 +4411,17 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Trace
 call set_tracer(1)
-!$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field) firstprivate(pt_last)
+!$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field,i,imin_r,imax_r, &
+!$omp                  imin_z,imax_z,error_str,lcfs_rz) firstprivate(pt_last)
+NULLIFY(ptout)
 ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(gseq%device%fe_rep)
-IF(PRESENT(ravgs))THEN
+IF(PRESENT(fsa_avgs))THEN
+  field%compute_geom=.TRUE.
+  field%compute_fsa=.TRUE.
+  active_tracer%neq=10
+ELSE IF(PRESENT(ravgs))THEN
   field%compute_geom=.TRUE.
   active_tracer%neq=6
 ELSE
@@ -4421,6 +4433,7 @@ active_tracer%maxsteps=8e4
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
+IF(PRESENT(shape_geo))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,nr
   !------------------------------------------------------------------------------
@@ -4440,8 +4453,18 @@ do j=1,nr
   CALL gs_psi2r(gseq,psi_surf,pt,psi_int)
   !!$omp end critical
   pt_last=pt
-  IF(j==1.AND.PRESENT(dl))THEN
-    ALLOCATE(ptout(3,active_tracer%maxsteps+1))
+  !---Get flux variables. F is constant on the surface, so it must be known
+  !---before tracing when <1/B^2> is accumulated in the tracing ODE.
+  IF(gseq%mode==0)THEN
+    fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
+  ELSE
+    fpol=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
+  END IF
+  field%f_surf=fpol
+  !---Record the traced path only where it is consumed: every surface for `shape_geo`,
+  !---but just the first for the LCFS parameters.
+  IF(PRESENT(shape_geo).OR.(PRESENT(dl).AND.(j==1)))THEN
+    IF(.NOT.PRESENT(shape_geo))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
     CALL tracinginv_fs(gseq%device%fe_rep%mesh,pt(1:2),ptout)
   ELSE
     CALL tracinginv_fs(gseq%device%fe_rep%mesh,pt(1:2))
@@ -4452,10 +4475,10 @@ do j=1,nr
     CALL oft_warn(error_str)
     CYCLE
   end if
-  IF((j==1).AND.PRESENT(dl))THEN
-    !------------------------------------------------------------------------------
-    ! Reinterpolate LCFS to get uniform spacing and compute geometric parameters
-    !------------------------------------------------------------------------------
+  !------------------------------------------------------------------------------
+  ! If shape information is requested, reinterpolate LCFS to get uniform spacing for geometric parameters
+  !------------------------------------------------------------------------------
+  IF(PRESENT(shape_geo).OR.(PRESENT(dl).AND.(j==1)))THEN
     IF(active_tracer%nsteps>nlcfs)THEN
       !---Allocate and fit spline
       CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
@@ -4474,53 +4497,70 @@ do j=1,nr
       CALL spline_dealloc(lcfs_rz)
       active_tracer%nsteps=nlcfs
     END IF
-    !---Extrapolate to real LCFS
-    IF(psi_q(1)<0.05d0)THEN
-      DO i=1,active_tracer%nsteps
-        pt(1:2)=ptout(2:3,i)
-        pt_proj(1:2)=pt(1:2)-gseq%o_point
-        pt_proj=pt_proj/SQRT(SUM(pt_proj(1:2)**2))
-        CALL gs_psi2pt(gseq,x1,pt,gseq%o_point,pt_proj,psi_int)
-        ptout(2:3,i)=pt(1:2)
+    !---Per-surface extrema, used for elongation and triangularity
+    IF(PRESENT(shape_geo))THEN
+      imin_r=1; imax_r=1; imin_z=1; imax_z=1
+      DO i=2,active_tracer%nsteps
+        IF(ptout(2,i)<ptout(2,imin_r))imin_r=i
+        IF(ptout(2,i)>ptout(2,imax_r))imax_r=i
+        IF(ptout(3,i)<ptout(3,imin_z))imin_z=i
+        IF(ptout(3,i)>ptout(3,imax_z))imax_z=i
       END DO
+      shape_geo(j,1)=ptout(2,imin_r); shape_geo(j,2)=ptout(2,imax_r)
+      shape_geo(j,3)=ptout(3,imin_z); shape_geo(j,4)=ptout(3,imax_z)
+      shape_geo(j,5)=ptout(2,imin_z); shape_geo(j,6)=ptout(2,imax_z)
     END IF
-    !---Compute geometric parameters
-    dl = 0.d0
-    rbounds(:,1)=ptout(2:3,1); rbounds(:,2)=ptout(2:3,1)
-    zbounds(:,1)=ptout(2:3,1); zbounds(:,2)=ptout(2:3,1)
-    DO i=2,active_tracer%nsteps
-      dl = dl + SQRT(SUM((ptout(2:3,i)-ptout(2:3,i-1))**2))
-      IF(ptout(2,i)<rbounds(1,1))THEN
-        rbounds(:,1)=ptout(2:3,i)
-      ELSE IF(ptout(2,i)>rbounds(1,2))THEN
-        rbounds(:,2)=ptout(2:3,i)
+    !---LCFS length and spatial bounds
+    IF(PRESENT(dl).AND.(j==1))THEN
+      !---Extrapolate to real LCFS if diverted
+      IF(gseq%diverted.AND.(psi_q(1)<0.05d0))THEN
+        DO i=1,active_tracer%nsteps
+          pt(1:2)=ptout(2:3,i)
+          pt_proj(1:2)=pt(1:2)-gseq%o_point
+          pt_proj=pt_proj/SQRT(SUM(pt_proj(1:2)**2))
+          CALL gs_psi2pt(gseq,x1,pt,gseq%o_point,pt_proj,psi_int)
+          ptout(2:3,i)=pt(1:2)
+        END DO
       END IF
-      IF(ptout(3,i)<zbounds(2,1))THEN
-        zbounds(:,1)=ptout(2:3,i)
-      ELSE IF(ptout(3,i)>zbounds(2,2))THEN
-        zbounds(:,2)=ptout(2:3,i)
-      END IF
-    END DO
-    IF(active_tracer%status/=1)dl=-1.d0
-    DEALLOCATE(ptout)
-  END IF
-  !---Get flux variables
-  IF(gseq%mode==0)THEN
-    fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
-  ELSE
-    fpol=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
+      !---Compute geometric parameters
+      dl = 0.d0
+      rbounds(:,1)=ptout(2:3,1); rbounds(:,2)=ptout(2:3,1)
+      zbounds(:,1)=ptout(2:3,1); zbounds(:,2)=ptout(2:3,1)
+      DO i=2,active_tracer%nsteps
+        dl = dl + SQRT(SUM((ptout(2:3,i)-ptout(2:3,i-1))**2))
+        IF(ptout(2,i)<rbounds(1,1))THEN
+          rbounds(:,1)=ptout(2:3,i)
+        ELSE IF(ptout(2,i)>rbounds(1,2))THEN
+          rbounds(:,2)=ptout(2:3,i)
+        END IF
+        IF(ptout(3,i)<zbounds(2,1))THEN
+          zbounds(:,1)=ptout(2:3,i)
+        ELSE IF(ptout(3,i)>zbounds(2,2))THEN
+          zbounds(:,2)=ptout(2:3,i)
+        END IF
+      END DO
+      IF(active_tracer%status/=1)dl=-1.d0
+      IF(.NOT.PRESENT(shape_geo))DEALLOCATE(ptout)
+    END IF
   END IF
   !---Safety Factor (q)
   qpsi=fpol*active_tracer%v(3)/(2*pi)
   prof(j)=qpsi
   IF(PRESENT(ravgs))THEN
-    ravgs(j,1)=active_tracer%v(4)/active_tracer%v(2)
-    ravgs(j,2)=active_tracer%v(5)/active_tracer%v(2)
-    ravgs(j,3)=active_tracer%v(6)/active_tracer%v(2)
-    ravgs(j,4)=-2.d0*pi*active_tracer%v(2) ! First derivative of FS volume (V')
+    ravgs(j,1)=active_tracer%v(4)/active_tracer%v(2)     ! <R>
+    ravgs(j,2)=active_tracer%v(5)/active_tracer%v(2)     ! <1/R>
+    ravgs(j,3)=active_tracer%v(6)/active_tracer%v(2)     ! <1/R^2>
+    ravgs(j,4)=-2.d0*pi*active_tracer%v(2)               ! First derivative of FS volume (V')
+  END IF
+  IF(PRESENT(fsa_avgs))THEN
+    fsa_avgs(j,1)=active_tracer%v(7)/active_tracer%v(2)  ! <|grad(psi)|>
+    fsa_avgs(j,2)=active_tracer%v(8)/active_tracer%v(2)  ! <|grad(psi)|^2>
+    fsa_avgs(j,3)=active_tracer%v(9)/active_tracer%v(2)  ! <B_p^2>
+    fsa_avgs(j,4)=active_tracer%v(10)/active_tracer%v(2) ! <1/B^2>
   END IF
 end do
 CALL active_tracer%delete
+IF(ASSOCIATED(ptout))DEALLOCATE(ptout)
 CALL field%delete()
 DEALLOCATE(field)
 !$omp end parallel
@@ -4857,7 +4897,7 @@ real(8), intent(out) :: val(:)
 integer(4), allocatable :: j(:)
 integer(4) :: jc
 real(8) :: rop(3),d2op(6),pt(3),grad(3),tmp
-real(8) :: s,c
+real(8) :: s,c,grad_psi2,Bp2,Bt2
 !---Get dofs
 allocate(j(self%lag_rep%nce))
 call self%lag_rep%ncdofs(cell,j)
@@ -4881,6 +4921,17 @@ IF(self%compute_geom)THEN
   val(4)=pt(1)*val(2)
   val(5)=val(2)/pt(1)
   val(6)=val(2)/(pt(1)**2)
+END IF
+IF(self%compute_fsa)THEN
+  ! B_p = |grad(psi)|/R and B_t = F/R, with F constant on the surface. Note that
+  ! <B^2> is not accumulated here as it follows exactly from <B_p^2> + F^2<1/R^2>.
+  grad_psi2 = grad(1)**2 + grad(2)**2
+  Bp2 = grad_psi2/pt(1)**2
+  Bt2 = (self%f_surf/pt(1))**2
+  val(7)=val(2)*SQRT(grad_psi2) ! <|grad(psi)|>
+  val(8)=val(2)*grad_psi2       ! <|grad(psi)|^2>
+  val(9)=val(2)*Bp2             ! <B_p^2>
+  val(10)=val(2)/(Bp2+Bt2)      ! <1/B^2>
 END IF
 ! val(3:8)=val(3:8)
 deallocate(j)
