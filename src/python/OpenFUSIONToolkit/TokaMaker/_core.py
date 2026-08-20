@@ -808,7 +808,7 @@ class TokaMaker():
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.set_profiles(ffp_prof,foffset,f_SOL,pp_prof,ffp_NI_prof,keep_files)
+        return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files,f_SOL=f_SOL)
     
     def get_profile_dofs(self, prof_type):
         r'''! Retrieve degrees of freedom for desired flux profile
