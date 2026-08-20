@@ -395,7 +395,7 @@ def validate_fr(fr_real, fr_imag):
     return retval
 
 
-def validate_td(sigs_final, jumpers_final=None, tols=(1.E-8, 1.E-3)):
+def validate_td(sigs_final, jumpers_final=None):
     """
     Helper function to validate time-dependent results against test case.
     """
@@ -446,49 +446,6 @@ def validate_td(sigs_final, jumpers_final=None, tols=(1.E-8, 1.E-3)):
                 print("  Actual =   {0}".format(td_sigs_final[i+1]))
                 retval = False
     return retval
-
-
-def validate_model_red(eigs, tols=(1.E-5, 1.E-9)):
-    """
-    Helper function to validate eigenvalues against test case.
-    """
-    import h5py
-    with h5py.File('tCurr_reduced.h5','r') as file:
-        L = np.asarray(file['L'])
-        R = np.asarray(file['R'])
-    eigs_run_real, _ = np.linalg.eig(np.dot(np.linalg.inv(R),L))
-    eigs_run_real = -np.sort(-eigs_run_real)
-    retval = True
-    for (i, val) in enumerate(eigs):
-        if abs((val-eigs_run_real[i])/val) > tols[0]:
-            print("FAILED: Reduced model eigenvalue {0} incorrect!".format(i+1))
-            print("  Expected = {0}".format(val))
-            print("  Actual =   {0}".format(eigs_run_real[i]))
-            retval = False
-    return retval
-
-
-def validate_mode(drive_exp,result_exp):
-    try:
-        with open('thincurr_mode.dat','r') as fid:
-            drive_amps = [float(val) for val in fid.readline().split()]
-            result_amps = [float(val) for val in fid.readline().split()]
-    except BaseException as e:
-        print(e)
-        return False
-    result_val = True
-    for i in range(2):
-        if abs((drive_exp[i]-drive_amps[i])/drive_exp[i]) > 1.E-4:
-            print("FAILED: driver {0} incorrect!".format(i+1))
-            print("  Expected = {0}".format(drive_exp[i]))
-            print("  Actual =   {0}".format(drive_amps[i]))
-            result_val = False
-        if abs((result_exp[i]-result_amps[i])/result_exp[i]) > 1.E-4:
-            print("FAILED: result {0} incorrect!".format(i+1))
-            print("  Expected = {0}".format(result_exp[i]))
-            print("  Actual =   {0}".format(result_amps[i]))
-            result_val = False
-    return result_val
 
 
 def _write_thincurr_xml(xml_filename, eta_values=None, thickness_values=None, eta_vol_values=None):
