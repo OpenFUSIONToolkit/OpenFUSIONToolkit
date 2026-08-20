@@ -1154,6 +1154,162 @@ def test_torus_fourier_sensor(direct_flag):
     sigs_mnmodes_2D_PEST = np.load('sigs_mnmodes_2D_PEST-hminus1.npy')
     sigs_mnmodes_2D_Hamada = np.load('sigs_mnmodes_2D_Hamada-hminus1.npy')
     assert validate_torus_fourier_sensor(interface_hminus1,sigs_nmodes_1D_PEST,sigs_nmodes_1D_Hamada,sigs_mnmodes_2D_PEST,sigs_mnmodes_2D_Hamada,t,delta_phi)
+    # save_spectrum: default (surfmn) output, injected-mesh path, and vac3d format
+    interface_h1.save_spectrum(t,'tmp_spec_a',hamada_dphi=delta_phi)
+    interface_h1.save_spectrum(t,'tmp_spec_b',hamada_dphi=delta_phi,data_type='vac3d')
+    interface_h1.save_spectrum(t,'tmp_spec_c',hamada_dphi=delta_phi,sensor_mesh=interface_h1.get_B_mesh(t))
+    with open('tmp_spec_a.dat','r') as fid:
+        content_a = fid.read()
+    with open('tmp_spec_b.dat','r') as fid:
+        content_b = fid.read()
+    with open('tmp_spec_c.dat','r') as fid:
+        content_c = fid.read()
+    assert len(content_a) > 0
+    assert content_c == content_a  # injecting the mesh the file is built from is a no-op
+    assert content_b != content_a  # vac3d uses a different (scientific) format
+    assert 'E' in content_b.upper()
+    for tmp_file in ('tmp_spec_a.dat','tmp_spec_b.dat','tmp_spec_c.dat'):
+        os.remove(tmp_file)
+
+
+@pytest.mark.coverage
+def test_torus_fourier_sensor_from_eqdsk():
+    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
+    from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
+    eqdsk_file = os.path.join(test_dir,'ITER_test.eqdsk')
+    eq = read_geqdsk(eqdsk_file)
+    theta = np.linspace(0.0,2.0*np.pi,65)
+    R = 6.2+2.0*np.cos(theta)
+    Z = 2.0*np.sin(theta)
+    dphi = 0.3*np.sin(theta)+0.1*np.cos(2.0*theta)
+    # major_radius and helicity are derived from the g-file
+    interface = torus_fourier_sensor.from_eqdsk(R,Z,eqdsk_file,hamada_dphi=dphi,verbose=False)
+    assert abs(interface.major_radius-float(eq.R_mag)) < 1.E-12
+    assert interface.helicity == (1 if float(eq.B_center)*float(eq.Ip) > 0.0 else -1)
+    # duplicate endpoint is trimmed from the surface and hamada_dphi together
+    assert interface.ntheta == 64
+    assert interface.hamada_dphi.shape[0] == 64
+    # selectable poloidal-angle origin
+    interface_c = torus_fourier_sensor.from_eqdsk(R,Z,eqdsk_file,center='rcentr',verbose=False)
+    assert abs(interface_c.major_radius-float(eq.R_center)) < 1.E-12
+    interface_g = torus_fourier_sensor.from_eqdsk(R,Z,eqdsk_file,center='geometric',verbose=False)
+    assert abs(interface_g.major_radius-0.5*(R.max()+R.min())) < 1.E-12
+    with pytest.raises(ValueError):
+        torus_fourier_sensor.from_eqdsk(R,Z,eqdsk_file,center='unknown',verbose=False)
+
+@pytest.mark.coverage
+def test_torus_fourier_sensor_hamada_alignment():
+    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
+    R_0 = 3.0
+    theta = np.linspace(0.0,2.0*np.pi,65)
+    R = R_0+1.0*np.cos(theta)
+    Z = 1.0*np.sin(theta)
+    dphi = 0.3*np.sin(theta)+0.1*np.cos(2.0*theta)
+    base = torus_fourier_sensor(R,Z,R_0,1,hamada_dphi=dphi)
+    # the same surface supplied in a rotated point order must produce the same
+    # object: hamada_dphi is reordered together with the surface points
+    roll = 17
+    rolled = torus_fourier_sensor(np.roll(R[:-1],roll),np.roll(Z[:-1],roll),R_0,1,
+                                  hamada_dphi=np.roll(dphi[:-1],roll))
+    assert np.allclose(base.radial_positions,rolled.radial_positions)
+    assert np.allclose(base.axial_positions,rolled.axial_positions)
+    assert np.allclose(base.hamada_dphi,rolled.hamada_dphi)
+    # methods fall back to the stored hamada_dphi and give identical spectra
+    B = np.random.default_rng(1).normal(size=(base.ntheta,8))
+    B_n_base, _, _ = base.fft2(B)
+    B_n_rolled, _, _ = rolled.fft2(B)
+    assert np.allclose(B_n_base,B_n_rolled)
+    B_n_expl, _, _ = base.fft2(B,hamada_dphi=base.hamada_dphi)
+    assert np.allclose(B_n_base,B_n_expl)
+
+@pytest.mark.coverage
+def test_thincurr_model_prep_utils(tmp_path):
+    import netCDF4
+    from OpenFUSIONToolkit.ThinCurr.util import (drive_to_array, triangular_waveform,
+                                                 shift_coils_in_xml, parse_coils_xml,
+                                                 find_coil_current_column, add_gpec_coils_to_xml)
+    # triangular_waveform: 3-point ramp holding the requested peak at twidth/2
+    curr = np.array([14.0, 0.0, 2.0, -4.0])
+    tri = triangular_waveform(1.E-2,0.015,curr)
+    assert tri.shape == (3,4)
+    assert np.allclose(tri[:,0],[0.0,5.E-3,1.E-2])
+    assert np.allclose(tri[1,1:],curr[1:]*1.015)
+    assert np.allclose(tri[2,1:],curr[1:])
+    # drive_to_array: header is 'ncols ntimes', rows are the waveform
+    drive_file = tmp_path / 'test.drive'
+    drive_file.write_text('3 2\n0.0 1.0 2.0\n1.0 3.0 4.0\n')
+    waveform = drive_to_array(str(drive_file))
+    assert waveform.shape == (2,3)
+    assert np.allclose(waveform[1],[1.0,3.0,4.0])
+    # shift_coils_in_xml/parse_coils_xml round-trip
+    xml_file = tmp_path / 'coils.xml'
+    xml_file.write_text('<oft><thincurr><icoils><coil_set><coil npts="2">\n'
+                        '1.0, 2.0, 3.0\n4.0, 5.0, 6.0\n</coil></coil_set>'
+                        '</icoils></thincurr></oft>\n')
+    shifted_file = tmp_path / 'coils_shifted.xml'
+    nshifted = shift_coils_in_xml(str(xml_file),str(shifted_file),dx=0.5,dz=-1.0)
+    assert nshifted == (1,2)
+    coils = parse_coils_xml(str(shifted_file))
+    assert len(coils) == 1
+    assert np.allclose(coils[0],[[1.5,2.0,2.0],[4.5,5.0,5.0]])
+    bad_file = tmp_path / 'coils_bad.xml'
+    bad_file.write_text('<oft><thincurr><icoils><coil_set><coil>\n1.0, 2.0, 3.0\n'
+                        '</coil></coil_set></icoils></thincurr></oft>\n')
+    with pytest.raises(ValueError):
+        shift_coils_in_xml(str(bad_file),str(tmp_path / 'unused.xml'),dx=0.5)
+    # find_coil_current_column: exact, suffix-stripped, and numbered fallbacks
+    header_to_idx = {'cs1u current [a/turn]': 3, 'divl_1 current [a/turn]': 7}
+    assert find_coil_current_column('CS1U_feed_2',header_to_idx) == 3
+    assert find_coil_current_column('divl_1',header_to_idx) == 7
+    assert find_coil_current_column('unknown',header_to_idx) is None
+    # add_gpec_coils_to_xml: split coil groups from a GPEC-style netCDF
+    nc_file = tmp_path / 'coils.nc'
+    with netCDF4.Dataset(str(nc_file),'w',format='NETCDF3_CLASSIC') as ds:
+        ds.createDimension('npts',5)
+        ds.createDimension('nsub',1)
+        ds.createDimension('ncoil',2)
+        pts = np.linspace(0.0,1.0,5)
+        for name, vals in (('divl_x',pts), ('divl_y',pts+1.0), ('divl_z',pts-1.0)):
+            var = ds.createVariable(name,'f8',('npts','nsub','ncoil'))
+            var[:,0,0] = vals
+            var[:,0,1] = vals+10.0
+        ds.createVariable('divl_nw','f8',())[...] = 2.0
+        ds.createVariable('divl_current','f8',('ncoil',))[:] = [1.0,2.0]
+    base_xml = tmp_path / 'base.xml'
+    base_xml.write_text('<oft><thincurr><eta>1.0</eta></thincurr></oft>\n')
+    out_xml = tmp_path / 'with_coils.xml'
+    names = add_gpec_coils_to_xml(str(base_xml),str(nc_file),str(out_xml),verbose=False)
+    assert names == ['divl_1','divl_2']
+    coils = parse_coils_xml(str(out_xml))
+    assert len(coils) == 2
+    assert coils[0].shape == (5,3)
+    with pytest.raises(ValueError):
+        add_gpec_coils_to_xml(str(base_xml),str(nc_file),str(out_xml),
+                              prefixes={'missing'},verbose=False)
+
+@pytest.mark.coverage
+def test_make_drive_and_xml_from_eqdsks(tmp_path):
+    pytest.importorskip('shapely')
+    import matplotlib
+    matplotlib.use('Agg')
+    from OpenFUSIONToolkit.ThinCurr.util import make_drive_and_xml_from_eqdsks, drive_to_array, parse_coils_xml
+    from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk
+    eqdsk_file = os.path.join(test_dir,'ITER_test.eqdsk')
+    xml_file = tmp_path / 'filaments.xml'
+    drive_file = tmp_path / 'filaments.drive'
+    make_drive_and_xml_from_eqdsks(1.0,eqdsk_file,str(xml_file),str(drive_file),[1.E-5,2.E-5])
+    coils = parse_coils_xml(str(xml_file))
+    waveform = drive_to_array(str(drive_file))
+    # filaments outside the LCFS are excluded and columns match the coil_sets
+    assert len(coils) > 0
+    assert waveform.shape == (2,len(coils)+1)
+    assert np.all(waveform[1,1:] != 0.0)
+    # first row holds the initial currents at t=0
+    assert waveform[0,0] == 0.0
+    assert np.allclose(waveform[0,1:],waveform[1,1:])
+    # total filament current approximates the equilibrium plasma current
+    eqdsk_obj = read_eqdsk(eqdsk_file)
+    assert abs(np.sum(waveform[1,1:])-eqdsk_obj['ip'])/abs(eqdsk_obj['ip']) < 0.05
 
 #============================================================================
 # Test runners for filament model
