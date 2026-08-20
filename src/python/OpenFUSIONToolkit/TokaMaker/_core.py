@@ -342,12 +342,12 @@ class TokaMaker():
                 if reg.min() <= 0:
                     raise ValueError('Invalid "reg" array, values must be >= 0')
                 reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
-
-            oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
+            oft_setup_smesh(1,1,numpy.array([[1.0]],dtype=numpy.float64),1,1,numpy.array([[1]],dtype=numpy.int32),numpy.array([1],dtype=numpy.int32),ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
+            # oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_alloc(ctypes.byref(self._tMaker_ptr),self._mesh_ptr,self.n_eq,error_string)
+        tokamaker_alloc(ctypes.byref(self._tMaker_ptr),self._mesh_ptr,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         self.update_settings()
@@ -431,7 +431,7 @@ class TokaMaker():
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
         print('Calling setup', flush=True)
-        tokamaker_setup(self._tMaker_ptr,order,full_domain,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
+        tokamaker_setup(self._tMaker_ptr,order,full_domain,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),self.n_eq,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         print('Called setup', flush=True)

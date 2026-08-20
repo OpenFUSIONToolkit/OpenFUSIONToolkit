@@ -99,13 +99,11 @@ CONTAINS
 !---------------------------------------------------------------------------------
 !> Allocate TokaMaker wrapper object and initialize with mesh information
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_alloc(tMaker_ptr,mesh_ptr,n_eq,error_str) BIND(C,NAME="tokamaker_alloc")
+SUBROUTINE tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str) BIND(C,NAME="tokamaker_alloc")
 TYPE(c_ptr), INTENT(out) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), VALUE, INTENT(in) :: mesh_ptr !< Pointer to mesh object
-INTEGER(i4), VALUE, INTENT(in) :: n_eq
 CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
-INTEGER(i4) :: i
 CALL copy_string('',error_str)
 IF(.NOT.c_associated(mesh_ptr))THEN
   CALL copy_string('Mesh object not associated',error_str)
@@ -358,12 +356,13 @@ END SUBROUTINE tokamaker_equil_destroy
 !---------------------------------------------------------------------------------
 !> Complete setup of TokaMaker device/wrapper object and build FE representation
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
+SUBROUTINE tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,coil_Lmat,n_eq,error_str) BIND(C,NAME="tokamaker_setup")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< FE order for Lagrange elements
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Plasma covers full domain (eg. fixed-boundary solves)?
 INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Number of coils in model
 TYPE(c_ptr), INTENT(out) :: coil_Lmat !< Pointer to coil inductance matrix
+INTEGER(i4), INTENT(in) :: n_eq !< Number of equilibriums to setup
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 REAL(8) :: theta
