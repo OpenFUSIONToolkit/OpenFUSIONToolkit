@@ -782,7 +782,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise ValueError("Error in initialization: {0}".format(error_string.value.decode()))
 
-    def load_profiles(self, f_file='none', foffset=None, f_SOL=None, p_file='none', eta_file='none', f_NI_file='none'):
+    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none', f_SOL=None):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
@@ -790,6 +790,7 @@ class TokaMaker():
         @param p_file File containing \f$P'\f$ definition
         @param eta_file File containing $\eta$ definition
         @param f_NI_file File containing non-inductive \f$F*F'\f$ definition
+        @param f_SOL Use Scrape-Off Layer current (boolean).
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -2548,7 +2549,7 @@ class TokaMaker_equilibrium():
         r'''! Mirnov constraint points'''
         return self._mirnov_constraints
 
-    def load_profiles(self, f_file='none', foffset=None, f_SOL=None, p_file='none', eta_file='none', f_NI_file='none'):
+    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none', f_SOL=None):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
@@ -2556,6 +2557,7 @@ class TokaMaker_equilibrium():
         @param p_file File containing \f$P'\f$ definition
         @param eta_file File containing $\eta$ definition
         @param f_NI_file File containing non-inductive \f$F*F'\f$ definition
+        @param f_SOL Use Scrape-Off Layer current (boolean).
         '''
         if foffset is not None:
             self._F0 = foffset
