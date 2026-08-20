@@ -2213,11 +2213,11 @@ class TokaMaker():
 
         for pt in lim:
             psi = psi_eval.eval(pt)[0]
-            if prev_psi < psi_LCFS and psi > psi_LCFS:
+            if prev_psi < psi_LCFS and psi >= psi_LCFS:
                 psi_diff = (psi_LCFS - prev_psi) / (psi - prev_psi)
                 strike_pt = (1.0-psi_diff) * prev_pt + psi_diff * pt
                 strike_pts.append(strike_pt)
-            elif prev_psi > psi_LCFS and psi < psi_LCFS:
+            elif prev_psi > psi_LCFS and psi <= psi_LCFS:
                 psi_diff = (psi_LCFS - psi) / (prev_psi - psi)
                 strike_pt = (1.0-psi_diff) * pt + psi_diff * prev_pt
                 strike_pts.append(strike_pt)
