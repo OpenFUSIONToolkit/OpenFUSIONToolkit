@@ -2230,7 +2230,7 @@ class TokaMaker():
         @param ax Axis (matplotlib)
         @param window 4-element array (r_min, r_max, z_min, z_max)
         '''
-        psi = self.get_psi(normalized=True)
+        psi = self.get_psi(normalized=False)
         jphi = self.calc_delstar_curr(psi)
         jphi_plot = numpy.zeros(self.nc)
 
