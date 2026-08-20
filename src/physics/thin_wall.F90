@@ -2632,7 +2632,7 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/CLOSURES'))THEN
   ELSE
     ndims=-1
   END IF
-  IF(ndims>0)THEN
+  IF(ndims<0)THEN
     error_string='Error reading closures from mesh file'
     RETURN
   END IF

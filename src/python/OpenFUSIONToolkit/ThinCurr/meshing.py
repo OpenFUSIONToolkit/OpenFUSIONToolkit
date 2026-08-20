@@ -400,17 +400,19 @@ class ThinCurr_periodic_toroid:
         @param include_closures Include closure defitions in file?
         '''
         if include_closures:
-            closures = numpy.arange(self.nfp)*int(self.lc.shape[0]/self.nfp)+1
+            closures = numpy.arange(self.nfp)*int(self.lc.shape[0]/self.nfp)
         else:
             closures = []
         if reg is None:
             reg = numpy.ones((self.lc.shape[0],))
         if self.nfp == 1:
-            write_ThinCurr_mesh(filename, self.r, self.lc+1, reg,
-                holes=[self.tnodeset+1, self.pnodesets[0]+1], closures=closures)
+            write_ThinCurr_mesh(filename, self.r, self.lc, reg,
+                holes=[self.tnodeset, self.pnodesets[0]], closures=closures)
         else:
-            write_ThinCurr_mesh(filename, self.r, self.lc+1, reg,
-                holes=[self.tnodeset+1] + [pnodeset+1 for pnodeset in self.pnodesets], closures=closures, pmap=self.r_map, nfp=self.nfp)
+            # r_map-1 is to remove the first node (<=0 is removed), which is the closure node as specifying pmap
+            # replaces the internal mapping contruction/closure removal
+            write_ThinCurr_mesh(filename, self.r, self.lc, reg,
+                holes=[self.tnodeset] + [pnodeset for pnodeset in self.pnodesets], closures=closures, pmap=self.r_map-1, nfp=self.nfp)
 
     def condense_matrix(self,matrix,axis=None):
         '''! Condense matrix to unique DOF only by combining poloidal nodesets

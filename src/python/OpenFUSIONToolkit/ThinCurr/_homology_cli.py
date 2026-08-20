@@ -649,8 +649,16 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     input_model = read_ThinCurr_mesh(in_file)
     vertex_full = input_model['r'].copy()
     face_full = input_model['lc'].copy()
-    if 'thincurr' not in input_model:
+    if 'thincurr' in input_model:
+        if 'nfp' in input_model['thincurr']:
+            if verify_only:
+                print("Periodic ThinCurr model detected (nfp > 0), skipping homology calculation")
+                return
+            else:
+                raise ValueError('Homology calculation does not support periodic ThinCurr meshes (nfp > 0) at this time')
+    else:
         input_model['thincurr'] = {}
+
 
     # Setup full mesh
     full_mesh = trimesh(vertex_full,face_full,info=print_info)
