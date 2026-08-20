@@ -237,6 +237,8 @@ contains
   procedure :: zero => dense_mat_zero
   !> Zero all elements in a given row
   procedure :: zero_rows => dense_mat_zero_rows
+  !> Delete matrix
+  procedure :: delete => dense_mat_delete
 end type oft_native_dense_matrix
 !---------------------------------------------------------------------------------
 !> Native dense complex matrix implementation
@@ -260,6 +262,8 @@ contains
   procedure :: zero => dense_cmat_zero
   !> Zero all elements in a given row
   procedure :: zero_rows => dense_cmat_zero_rows
+  !> Delete matrix
+  procedure :: delete => dense_cmat_delete
 end type oft_native_dense_cmatrix
 INTERFACE
 !------------------------------------------------------------------------------
@@ -2301,7 +2305,7 @@ INTEGER(i8), ALLOCATABLE, DIMENSION(:) :: lg !< global index of each element
 DEBUG_STACK_PUSH
 IF(oft_env%nprocs>1)CALL oft_abort('Not supported for nprocs>1','mat_save',__FILE__)
 ALLOCATE(lg(self%nr))
-IF(PRESENT(bc_flags)) THEN
+IF(PRESENT(bc_flags))THEN
   ALLOCATE(bit_flags(size(bc_flags)))
   bit_flags=0
   bit_flags=MERGE(1,0,bc_flags)

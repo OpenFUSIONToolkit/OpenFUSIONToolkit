@@ -529,6 +529,8 @@ end subroutine fem_mat_add_local
 !------------------------------------------------------------------------------
 subroutine fem_comp_delete(self)
 class(oft_fem_comp_type), intent(inout) :: self
+IF(ASSOCIATED(self%fields))DEALLOCATE(self%fields)
+IF(ASSOCIATED(self%field_tags))DEALLOCATE(self%field_tags)
 ! NULLIFY(self%linkage%be,self%linkage%lbe)
 IF(ASSOCIATED(self%linkage))THEN
   CALL destory_seam(self%linkage)

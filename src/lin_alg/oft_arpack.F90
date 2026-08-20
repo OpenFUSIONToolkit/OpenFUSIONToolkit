@@ -610,10 +610,10 @@ DO i=1,4000
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    CALL self%bc%apply(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     !---Compute y' = A*x
     CALL self%A%apply(tmp1,tmp2)
-    CALL self%bc%apply(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     CALL tmp1%set(0.d0)
     IF(bmat=='G')THEN
       !---Compute y = inv(M)*y'
@@ -632,14 +632,14 @@ DO i=1,4000
     vslice=>workd(ipntr(1):ipntr(1)+nslice-1)
     CALL tmp1%restore_slice(vslice)
     !---Apply BC
-    CALL self%bc%apply(tmp1)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp1)
     IF(bmat=='G')THEN
       !---Compute y = M*x
       CALL self%M%apply(tmp1,tmp2)
     ELSE
       CALL tmp2%add(0.d0,1.d0,tmp1)
     END IF
-    CALL self%bc%apply(tmp2)
+    IF(ASSOCIATED(self%bc))CALL self%bc%apply(tmp2)
     !---Copy local slice into work vector
     vslice=>workd(ipntr(2):ipntr(2)+nslice-1)
     CALL tmp2%get_slice(vslice)

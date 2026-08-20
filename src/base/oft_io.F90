@@ -434,8 +434,10 @@ DO i=istart,self%n_ts
 END DO
 self%n_ts=0
 IF(istart==0)THEN
-  hdf5_path=TRIM(self%group_name)//"/"//TRIM(self%grid_names(j))
-  CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path)//"/"//hdf5_ts_str(0))
+  DO j=1,self%n_grids
+    hdf5_path=TRIM(self%group_name)//"/"//TRIM(self%grid_names(j))
+    CALL hdf5_create_group(TRIM(self%file_path),TRIM(hdf5_path)//"/"//hdf5_ts_str(0))
+  END DO
 END IF
 if(oft_debug_print(2))THEN
   file_sizes = hdf5_file_size(TRIM(self%file_path))
