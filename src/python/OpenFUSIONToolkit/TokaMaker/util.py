@@ -452,6 +452,7 @@ def read_mhdin(path, e_coil_names=None, f_coil_names=None):
     @param e_coil_names Names of E coils (hardcoded, generates indexed names if None)
     @param f_coil_names Names of F coils (hardcoded, generates indexed names if None)
     @result machine_dict Dictionary containing coil coordinates and turns, loop names, and probe names and angles.
+            machine_dict['PROBE] contains Mirnov probe locations and machine_dict['LOOP'] contains flux loop locations.
     @result raw Dictionary containing all other data from mhdin.dat
     '''
     raw = read_fortran_namelist(path)
@@ -498,7 +499,7 @@ def read_kfile(path, machine_dict, e_coil_names=None, f_coil_names=None):
     @param machine_dict Result from read_mhdin (contents of mhdin.dat file)
     @result probes_dict Dictionary containing probe values and weights (0 if not selected).
     @result loops_dict Dictionary containing loop values and weights (0 if not selected).
-    @result e_coil_dict Dictionary containing E copil values and weights (0 if not selected).
+    @result e_coil_dict Dictionary containing E coil values and weights (0 if not selected).
     @result f_coil_dict Dictionary containing F coil values and weights (0 if not selected).
     @result raw Dictionary containing all other data from k-file.
     '''
