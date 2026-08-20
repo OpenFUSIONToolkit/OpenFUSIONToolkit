@@ -2231,6 +2231,7 @@ class TokaMaker():
         @param fig Figure (matplotlib)
         @param ax Axis (matplotlib)
         @param window 4-element array (r_min, r_max, z_min, z_max)
+        @param cmap Colormap to use for plot.
         '''
         psi = self.get_psi(normalized=False)
         jphi = self.calc_delstar_curr(psi)
