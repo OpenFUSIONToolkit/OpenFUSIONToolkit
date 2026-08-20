@@ -1403,44 +1403,53 @@ def _solve_point(
     t_object, ptot, jtor, psi_n, scale_p, scale_j,
     anchor_scales, anchor_eq, Ip_target,
     energy_target=None, energy_geometry_factor=1.0,
-    pressure_midpoint=None, last_converged_scales=None):
+    midpoint_scales=None, last_converged_scales=None):
 
     target_scales = (scale_p, scale_j)
-    midpoint_reference = (
+    continuation_scales = (
         anchor_scales
         if last_converged_scales is None
         else last_converged_scales
     )
-    current_midpoint = _interpolate_scales(target_scales, midpoint_reference)[1]
-    if pressure_midpoint is None:
-        pressure_midpoint = scale_p
-    midpoint_scales = (float(pressure_midpoint), current_midpoint)
-    
-    print(f"MID-STEP: (SCALE_P = {midpoint_scales[0]}, "
-        f"SCALE_J = {midpoint_scales[1]})")
 
-    _solve_with_retries(
-        t_object, ptot, jtor, psi_n, midpoint_scales,
-        anchor_scales,
-        anchor_eq, Ip_target,
-        max_attempts=2,
-        initial_settings=(0.3, 1.0e-5, 20),
-        energy_target=energy_target,
-        energy_geometry_factor=energy_geometry_factor)
+    if midpoint_scales is None:
+        solve_result = _solve_with_retries(
+            t_object, ptot, jtor, psi_n, target_scales,
+            continuation_scales, anchor_eq, Ip_target,
+            return_settings=True,
+            max_attempts=3,
+            initial_settings=(0.3, 1.0e-6, 20),
+            energy_target=energy_target,
+            energy_geometry_factor=energy_geometry_factor,
+        )
+    else:
+        print(f"MID-STEP: (SCALE_P = {midpoint_scales[0]}, "
+            f"SCALE_J = {midpoint_scales[1]})")
 
-    midpoint_eq = t_object.copy_eq()
-    pressure_geometry = _predicted_pressure_geometry(anchor_eq, midpoint_eq, psi_n,
-        anchor_scales, midpoint_scales, target_scales)
+        _solve_with_retries(
+            t_object, ptot, jtor, psi_n, midpoint_scales,
+            continuation_scales, anchor_eq, Ip_target,
+            max_attempts=2,
+            initial_settings=(0.3, 1.0e-5, 20),
+            energy_target=energy_target,
+            energy_geometry_factor=energy_geometry_factor,
+        )
 
-    solve_result = _solve_with_retries(
-        t_object, ptot, jtor, psi_n, target_scales,
-        midpoint_scales,
-        t_object.copy_eq(), Ip_target, return_settings=True,
-        max_attempts=3,
-        initial_settings=(0.3, 1.0e-6, 20),
-        energy_target=energy_target,
-        pressure_geometry=pressure_geometry,
-        energy_geometry_factor=energy_geometry_factor)
+        midpoint_eq = t_object.copy_eq()
+        pressure_geometry = _predicted_pressure_geometry(
+            anchor_eq, midpoint_eq, psi_n,
+            continuation_scales, midpoint_scales, target_scales,
+        )
+        solve_result = _solve_with_retries(
+            t_object, ptot, jtor, psi_n, target_scales,
+            midpoint_scales, midpoint_eq, Ip_target,
+            return_settings=True,
+            max_attempts=3,
+            initial_settings=(0.3, 1.0e-6, 20),
+            energy_target=energy_target,
+            pressure_geometry=pressure_geometry,
+            energy_geometry_factor=energy_geometry_factor,
+        )
 
     if energy_target is None or not hasattr(t_object, 'get_stats'):
         return solve_result
@@ -1662,11 +1671,18 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
         )
         prev_scale_p = scale_p
         target_scales = np.asarray((scale_p, scale_j), dtype=float)
-        pressure_midpoint = (
-            float(scale_p)
-            if not pressure_transition
-            else 0.5 * (float(scale_p) + float(row_anchor_scales[0]))
-        )
+        pressure_midpoint = None
+        if teqs > 0:
+            if pressure_transition:
+                pressure_midpoint = (
+                    0.5 * (float(last_conv[0]) + float(scale_p)),
+                    float(scale_j),
+                )
+            else:
+                pressure_midpoint = (
+                    float(scale_p),
+                    0.5 * (float(last_conv[1]) + float(scale_j)),
+                )
         anchor_scales, anchor_eq = min(
             converged_anchors,
             key=lambda item: np.linalg.norm(
@@ -1693,7 +1709,7 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
                     candidate_scales, candidate_eq, Ip_target,
                     energy_target=W_target,
                     energy_geometry_factor=energy_geometry_factor,
-                    pressure_midpoint=pressure_midpoint,
+                    midpoint_scales=pressure_midpoint,
                     last_converged_scales=last_conv,
                 )
             except _NonConvergenceError as error:
