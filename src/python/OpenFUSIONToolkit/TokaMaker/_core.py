@@ -2230,8 +2230,6 @@ class TokaMaker():
         @param ax Axis (matplotlib)
         @param window 4-element array (r_min, r_max, z_min, z_max)
         '''
-        import matplotlib.pyplot as plt
-
         psi = self.get_psi(normalized=True)
         jphi = self.calc_delstar_curr(psi)
         jphi_plot = numpy.zeros(self.nc)
@@ -2250,7 +2248,7 @@ class TokaMaker():
         # Convert to MA
         jphi_plot /= 1.0E6
         mask = jphi_plot != 0
-        heatmap = plt.tripcolor(
+        heatmap = ax.tripcolor(
             self.r[:,0], self.r[:,1],
             self.lc[mask],
             facecolors=jphi_plot[mask],
