@@ -17,7 +17,8 @@ USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
 !
-USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_matrix, oft_graph
+USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_matrix, oft_graph, &
+  vector_extrapolate
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
 USE oft_native_la, ONLY: oft_native_dense_matrix, partition_graph
 USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
@@ -623,10 +624,10 @@ END SUBROUTINE frequency_response
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE run_td_sim(self,dt,nsteps,vec,direct,lin_tols,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_vals,hodlr_op)
+SUBROUTINE run_td_sim(self,times,nsteps,vec,direct,lin_tols,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_vals,hodlr_op)
 TYPE(tw_type), INTENT(in) :: self
-REAL(8), INTENT(in) :: dt
 INTEGER(4), INTENT(in) :: nsteps
+REAL(8), INTENT(in) :: times(nsteps+1)
 REAL(8), INTENT(inout) :: vec(:)
 LOGICAL, INTENT(in) :: direct
 REAL(8), INTENT(in) :: lin_tols(2)
@@ -640,11 +641,12 @@ REAL(8), POINTER, INTENT(in) :: sensor_vals(:,:)
 TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
 !---
 INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits,int_inds(2)
-REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op,int_facs(2),elapsed_time
-REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: its_hist
+REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt,dt_old,dt_op,int_facs(2),elapsed_time
+REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
-CLASS(oft_vector), POINTER :: u,g,up,du
+CLASS(oft_vector), POINTER :: u,g,up
 CLASS(oft_matrix), POINTER :: Lmat
 TYPE(oft_native_dense_matrix), TARGET :: Lmat_dense,Minv
 TYPE(oft_sum_matrix), TARGET :: fmat,bmat
@@ -656,6 +658,10 @@ LOGICAL :: exists,volt_full,pm_save
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=15) :: fmt_str
 CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
+!---Extrapolation fields
+integer(i4) :: nextrap,maxextrap
+real(r8), allocatable, dimension(:) :: extrapt
+type(oft_vector_ptr), allocatable, dimension(:) :: extrap_fields
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Starting time-domain simulation'
 CALL oft_increase_indent
@@ -699,8 +705,9 @@ END IF
 !---
 CALL self%Uloc%new(u)
 CALL self%Uloc%new(up)
-CALL self%Uloc%new(du)
 CALL self%Uloc%new(g)
+!---Get first timestep size
+dt=times(2)-times(1)
 !---Setup inductance matrix wrapper
 IF(PRESENT(hodlr_op))THEN
   Lmat=>hodlr_op
@@ -745,7 +752,18 @@ IF(.NOT.direct)THEN
   ELSE
     CALL create_diag_pre(linv%pre)
   END IF
+  !---Setup extrapolation fields
+  maxextrap=2 ! Number of points for extrapolation (0: No extrapolation, 2: Linear, 3: Quadratic)
+  IF(maxextrap>0)THEN
+    ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
+    DO i=1,maxextrap
+      CALL self%Uloc%new(extrap_fields(i)%f)
+      extrapt(i)=0.d0
+    END DO
+    nextrap=0
+  END IF
 ELSE
+  maxextrap=-1
   !---Setup dense matrix for inverse
   Minv%nr=self%nelems; Minv%nc=self%nelems
   Minv%nrg=self%nelems; Minv%ncg=self%nelems
@@ -767,7 +785,7 @@ END IF
 ALLOCATE(vals(self%nelems))
 vals=vec
 CALL u%restore_local(vals)
-t=0.d0
+t=times(1)
 IF(ntimes_curr>0)THEN
   DO j=1,self%n_icoils
     icoil_curr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t,1)
@@ -840,20 +858,52 @@ IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
 END IF
 !---Advance system in time
 CALL up%add(0.d0,1.d0,u)
+ALLOCATE(its_hist(nstatus),time_hist(nstatus))
+its_hist=0
+time_hist=0.d0
 DO i=1,nsteps
+  dt_old = dt
+  dt = times(i+1)-times(i)
+  !---Update matrices if timestep has changed
+  IF(ABS((dt_old-dt)/dt_old)>1.d-6)THEN
+    WRITE(*,'(2X,A,1ES10.2)')'Updating matrices with new timestep = ',dt
+    IF(use_cn)THEN
+      bmat%alam = -dt/2.d0  ! Update backward matrix timestep
+      dt_op = dt/2.d0
+    ELSE
+      dt_op = dt
+    END IF
+    IF(direct)THEN
+      CALL oft_abort('Time steps must be uniform for direct solver','run_td_sim',__FILE__)
+    ELSE
+      fmat%alam = dt_op ! Update forward matrix timestep
+      CALL fmat%assemble()
+      IF(PRESENT(hodlr_op))THEN
+        linv_pre%beta=fmat%alam ! Update preconditioner timestep
+        linv_pre%refactor=.TRUE.
+      END IF
+    END IF
+  END IF
+
+  !---Update extrapolation fields
+  IF(maxextrap>0)THEN
+    DO j=maxextrap,2,-1
+      CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
+      extrapt(j)=extrapt(j-1)
+    END DO
+    IF(nextrap<maxextrap)nextrap=nextrap+1
+    CALL extrap_fields(1)%f%add(0.d0,1.d0,u)
+    extrapt(1)=t
+  END IF
   !---Update driven coil dI/dt waveforms
+  IF(ntimes_curr>0)THEN
+    DO j=1,self%n_icoils
+      icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt,1)
+      icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t,1)
+    END DO
+  END IF
   IF(use_cn)THEN
     CALL bmat%apply(u,g)
-    IF(ntimes_curr>0)THEN
-      DO j=1,self%n_icoils
-        ! Start of step
-        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt/4.d0,1)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t-dt/4.d0,1)
-        ! End of step
-        icoil_dcurr(j)=icoil_dcurr(j)+linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0,1)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0,1)
-      END DO
-    END IF
     IF(ntimes_volt>0)THEN
       IF(volt_full)THEN
         CALL linterp_facs(volt_waveform(:,1),ntimes_volt,t,int_inds,int_facs,1)
@@ -873,13 +923,6 @@ DO i=1,nsteps
     END IF
   ELSE
     CALL Lmat%apply(u,g)
-    IF(ntimes_curr>0)THEN
-      DO j=1,self%n_icoils
-        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0,1)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0,1)
-      END DO
-      icoil_dcurr=icoil_dcurr*2.d0
-    END IF
     IF(ntimes_volt>0)THEN
       IF(volt_full)THEN
         CALL linterp_facs(volt_waveform(:,1),ntimes_volt,t+dt,int_inds,int_facs,1)
@@ -910,17 +953,26 @@ DO i=1,nsteps
     CALL Minv%apply(g,u)
     nits=1
   ELSE
-    CALL du%add(0.d0,1.d0,u)
-    CALL du%add(1.d0,-1.d0,up)
-    CALL up%add(0.d0,1.d0,u)
-    CALL u%add(1.d0,1.d0,du)
+    !---Extrapolate solution
+    IF(maxextrap>0)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,t+dt,u)
     CALL linv%apply(u,g)
     nits=linv%cits
   END IF
   elapsed_time=solve_timer%tock()
+  IF(PRESENT(hodlr_op))THEN
+    ! WRITE(*,'(A,5ES12.3)')'Timing: ',hodlr_op%times,linv_pre%times
+    hodlr_op%times=0.d0
+    linv_pre%times=0.d0
+  END IF
   uu=SQRT(u%dot(u))
-  t=t+dt
-  IF(MOD(i,nstatus)==0)WRITE(*,'(2X,I6,ES16.6,ES14.4,2X,I6,F12.2)')i,t,uu,nits,elapsed_time
+  t=times(i+1)
+  its_hist(MOD(i,nstatus)+1)=nits
+  time_hist(MOD(i,nstatus)+1)=elapsed_time
+  IF(MOD(i,nstatus)==0)THEN
+    nits=INT(SUM(its_hist)/REAL(nstatus,8),4)
+    elapsed_time=SUM(time_hist)/REAL(nstatus,8)
+    WRITE(*,'(2X,I6,ES16.6,ES14.4,2X,I6,F12.2)')i,t,uu,nits,elapsed_time
+  END IF
   IF(MOD(i,nplot)==0)THEN
     WRITE(pltnum,'(I4.4)')i
     rst_file=TRIM(self%rst_prefix)//'pThinCurr_'//pltnum//'.rst'
@@ -974,9 +1026,14 @@ IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
 END IF
 CALL u%delete()
 CALL up%delete()
-CALL du%delete()
 CALL g%delete()
-DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,up,du,g)
+DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,up,g)
+IF(maxextrap>0)THEN
+  DO i=1,maxextrap
+    CALL extrap_fields(i)%f%delete()
+  END DO
+  DEALLOCATE(extrap_fields,extrapt)
+END IF
 IF(direct)THEN
   DEALLOCATE(minv%m)
 ELSE
@@ -1065,7 +1122,7 @@ IF(compute_B)THEN
     CALL self%Uloc_pts%new(By)
     CALL self%Uloc_pts%new(Bz)
   ELSE
-    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self)
+    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self,self%B_dx)
   END IF
 END IF
 !
@@ -1320,7 +1377,7 @@ IF(compute_B)THEN
     END DO
     DEALLOCATE(pvals)
   ELSE
-    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self)
+    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self,self%B_dx)
     CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &
       self%Bel(:,:,1),self%mesh%np,eig_vec,self%nelems,0.d0,Bxtmp,self%mesh%np)
     CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &

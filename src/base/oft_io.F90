@@ -611,8 +611,6 @@ DEBUG_STACK_POP
 end function hdf5_field_exist
 !------------------------------------------------------------------------------
 !> Test for exitence of a field in a HDF5 file
-!!
-!! @result Logical flag indicating existence of field and file
 !------------------------------------------------------------------------------
 subroutine hdf5_field_get_sizes(filepath,path,ndims,dim_sizes)
 character(LEN=*), intent(in) :: filepath !< Path to file
@@ -634,14 +632,25 @@ IF(error==0)THEN
   CALL h5dopen_f(file_id, "/"//TRIM(path), dset_id, error)
   IF(error==0)THEN
     CALL h5dget_space_f(dset_id, dspace_id, error)
-    CALL h5sget_simple_extent_ndims_f(dspace_id, ndims, error)
-    ALLOCATE(dim_sizes(ndims),tmp_sizes(ndims),maxdims(ndims))
-    CALL h5sget_simple_extent_dims_f(dspace_id, tmp_sizes, maxdims, error)
-    dim_sizes=INT(tmp_sizes,4)
-    DEALLOCATE(tmp_sizes,maxdims)
-    !---Close dataspace/set
-    call h5sclose_f(dspace_id, error)
-    call h5dclose_f(dset_id, error)
+    IF(error==0)THEN
+      CALL h5sget_simple_extent_ndims_f(dspace_id, ndims, error)
+      IF(error==0)THEN
+        ALLOCATE(dim_sizes(ndims),tmp_sizes(ndims),maxdims(ndims))
+        CALL h5sget_simple_extent_dims_f(dspace_id, tmp_sizes, maxdims, error)
+        IF(error>=0)THEN
+          dim_sizes=INT(tmp_sizes,4)
+        ELSE
+          ndims=-1
+          DEALLOCATE(dim_sizes)
+        END IF
+        DEALLOCATE(tmp_sizes,maxdims)
+        !---Close dataspace/set
+        call h5sclose_f(dspace_id, error)
+      ELSE
+        ndims=-1
+      END IF
+      call h5dclose_f(dset_id, error)
+    END IF
   END IF
 END IF
 !---Close file and finalize HDF5

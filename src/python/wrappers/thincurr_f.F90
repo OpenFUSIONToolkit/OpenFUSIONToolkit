@@ -60,12 +60,14 @@ TYPE(c_ptr), INTENT(out) :: tw_ptr !< Pointer to ThinCurr object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 TYPE(c_ptr), VALUE, INTENT(in) :: xml_ptr !< Pointer to ThinCurr XML node
 LOGICAL :: success,is_2d
-INTEGER(4) :: i,ndims,ierr,jumper_start
+INTEGER(4) :: i,ndims,ierr,jumper_start,n_holes,n_jumpers
 integer(i4), allocatable, dimension(:) :: dim_sizes
 INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp,pmap_tmp,reg_tmp
 INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_tmp
 REAL(8), POINTER, DIMENSION(:,:) :: r_tmp
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none'
+CHARACTER(LEN=4) :: blknum
+CHARACTER(LEN=:), ALLOCATABLE :: error_string
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
@@ -159,16 +161,8 @@ ELSE
   END IF
   i=MAXVAL(tw_obj%mesh%reg)
   tw_obj%mesh%nreg=oft_mpi_max(i)
-  !
-  IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/pmap'))THEN
-    ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
-    CALL hdf5_read(tw_obj%pmap,TRIM(filename),'thincurr/periodicity/pmap',success)
-    IF(.NOT.success)THEN
-      CALL copy_string('Error reading periodicity information from mesh file',error_str)
-      RETURN
-    END IF
-  END IF
-  !---Read nodesets and define holes and jumpers
+  !---
+  NULLIFY(hole_nsets)
   CALL native_read_nodesets(mesh_nsets,native_filename=TRIM(filename))
   jumper_start=jumper_start_in
   IF(jumper_start/=0)THEN
@@ -188,7 +182,7 @@ ELSE
   ELSE
     hole_nsets=>mesh_nsets
   END IF
-  !---Read sidesets and copy to closures
+  !---
   CALL native_read_sidesets(mesh_ssets,native_filename=TRIM(filename))
   IF(ASSOCIATED(mesh_ssets))THEN
     IF(mesh_ssets(1)%n>0)THEN
@@ -211,7 +205,11 @@ IF(c_associated(xml_ptr))THEN
     RETURN
   END IF
 END IF
-CALL tw_obj%setup(hole_nsets)
+IF(np>0)THEN
+   CALL tw_obj%setup(hole_nsets, error_string)
+ELSE
+  CALL tw_obj%setup(hole_nsets, error_string, filepath=TRIM(filename))
+END IF
 !---Deallocate nodesets
 IF(ASSOCIATED(mesh_nsets))THEN
   ndims=SIZE(mesh_nsets)
@@ -219,6 +217,10 @@ IF(ASSOCIATED(mesh_nsets))THEN
     IF(ASSOCIATED(mesh_nsets(i)%v))DEALLOCATE(mesh_nsets(i)%v)
   END DO
   DEALLOCATE(mesh_nsets)
+END IF
+IF(ALLOCATED(error_string))THEN
+  CALL copy_string(error_string,error_str)
+  RETURN
 END IF
 !
 tw_ptr=C_LOC(tw_obj)
@@ -563,7 +565,6 @@ IF(use_hodlr)THEN
   ALLOCATE(hodlr_op)
   hodlr_op%tw_obj=>tw_obj
   CALL hodlr_op%setup(.TRUE.)
-  WRITE(*,*)
   IF(TRIM(filename)=='')THEN
     CALL hodlr_op%compute_L()
   ELSE
@@ -582,9 +583,10 @@ END SUBROUTINE thincurr_Lmat
 !---------------------------------------------------------------------------------
 !> Compute magnetic field reconstruction operators for a ThinCurr model
 !---------------------------------------------------------------------------------
-SUBROUTINE thincurr_Bmat(tw_ptr,hodlr_ptr,Bmat_ptr,Bdr_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Bmat")
+SUBROUTINE thincurr_Bmat(tw_ptr,hodlr_ptr,B_dx,Bmat_ptr,Bdr_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Bmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< ThinCurr object
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< HODLR operator or null
+REAL(KIND=c_double), VALUE, INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
 TYPE(c_ptr), INTENT(out) :: Bmat_ptr !< Magnetic field reconstruction operator
 TYPE(c_ptr), INTENT(out) :: Bdr_ptr !< Magnetic field reconstruction operator for Icoils
 CHARACTER(KIND=c_char), INTENT(in) :: cache_file(OFT_PATH_SLEN) !< Path to cache file
@@ -595,6 +597,11 @@ TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
 CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string('',error_str)
 !
+IF(B_dx>0.d0)THEN
+  tw_obj%B_dx=B_dx
+ELSE
+  tw_obj%B_dx=ABS(B_dx)*tw_obj%mesh%hrms
+END IF
 CALL copy_string_rev(cache_file,filename)
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr,hodlr_op)
@@ -607,9 +614,9 @@ IF(c_associated(hodlr_ptr))THEN
   Bdr_ptr=C_LOC(hodlr_op%Icoil_Bmat)
 ELSE
   IF(TRIM(filename)=='')THEN
-    CALL tw_compute_Bops(tw_obj)
+    CALL tw_compute_Bops(tw_obj,tw_obj%B_dx)
   ELSE
-    CALL tw_compute_Bops(tw_obj,save_file=filename)
+    CALL tw_compute_Bops(tw_obj,tw_obj%B_dx,save_file=filename)
   END IF
   Bmat_ptr=C_LOC(tw_obj%Bel)
   Bdr_ptr=C_LOC(tw_obj%Bdr)
@@ -1055,11 +1062,11 @@ END SUBROUTINE thincurr_freq_response
 !---------------------------------------------------------------------------------
 !> Perform a time-domain simulation
 !---------------------------------------------------------------------------------
-SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_atol,cg_rtol,timestep_cn,nstatus,nplot, &
+SUBROUTINE thincurr_time_domain(tw_ptr,direct,times_ptr,nsteps,cg_atol,cg_rtol,timestep_cn,nstatus,nplot, &
   vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,volts_full,sensor_vals_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< ThinCurr object pointer
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Use direct solver?
-REAL(KIND=c_double), VALUE, INTENT(in) :: dt !< Time step [s]
+TYPE(c_ptr), VALUE, INTENT(in) :: times_ptr !< Time step values [s]
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsteps !< Number of time steps
 REAL(KIND=c_double), VALUE, INTENT(in) :: cg_atol !< CG solver absolute tolerance
 REAL(KIND=c_double), VALUE, INTENT(in) :: cg_rtol !< CG solver relative tolerance
@@ -1077,7 +1084,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: sensor_vals_ptr !< Sensor values pointer
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< HODLR operator pointer
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 LOGICAL :: pm_save
-REAL(8), CONTIGUOUS, POINTER :: ic_tmp(:),curr_waveform(:,:),volt_waveform(:,:),sensor_waveform(:,:)
+REAL(8), CONTIGUOUS, POINTER :: ic_tmp(:),times(:),curr_waveform(:,:),volt_waveform(:,:),sensor_waveform(:,:)
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(tw_sensors), POINTER :: sensors
 TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
@@ -1132,14 +1139,15 @@ ELSE
   NULLIFY(sensor_waveform)
 END IF
 CALL c_f_pointer(vec_ic, ic_tmp, [tw_obj%nelems])
-!---Run eigenvalue analysis
+!---Run time-domain simulation
+CALL c_f_pointer(times_ptr, times, [nsteps+1])
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr, hodlr_op)
-  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
+  CALL run_td_sim(tw_obj,times,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
     nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_waveform,hodlr_op=hodlr_op)
 ELSE
-  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
+  CALL run_td_sim(tw_obj,times,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
     nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_waveform)
 END IF
 oft_env%pm=pm_save

@@ -11,32 +11,127 @@
 '''
 import numpy
 import h5py
-from ..util import write_native_mesh, oft_warning
+from ..util import oft_warning
+from ..meshing import write_native_mesh, read_native_mesh
+from .coils import coil_from_hdf5
 
 
-def write_ThinCurr_mesh(filename, r, lc, reg, holes=[], closures=[], pmap=None, nfp=None):
+def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures=None, eta_surf=None, eta_vol=None,
+                        thickness=None, coil_sets=None, pmap=None, nfp=None, reg_attrs=None, reg_names=None):
     r'''! Create a native HDF5 mesh file for ThinCurr from the given mesh information
 
     @param filename Filename for mesh file
     @param r Points list [np,3]
-    @param lc Cell list [nc,3] (1-based)
+    @param lc Cell list [nc,3]
     @param reg Region list [nc]
     @param holes List of node sets for hole definitions
+    @param jumpers List of jumper sets
     @param closures List of closures
+    @param eta_surf Surface electrical conductivity
+    @param eta_vol Volumetric electrical conductivity
+    @param thickness Thickness of the mesh elements
+    @param coil_sets List of ThinCurr_coil_set objects to include in the mesh file
     @param pmap Point mapping for periodic meshes (single surface only)
     @param nfp Number of field periods for periodic meshes (single surface only)
+    @param reg_attrs List of region attributes
+    @param reg_names List of region names
     '''
-    write_native_mesh(filename, r, lc, reg, nodesets=holes, sidesets=[closures,])
+    if (eta_vol is not None) and (thickness is None):
+        raise ValueError("Must specify `thickness` if `eta_vol` is specified")
+    if (eta_vol is not None) and (eta_surf is not None):
+        oft_warning("Both `eta_vol` and `eta_surf` are specified. `eta_surf` will be ignored.")
+        eta_surf = None
+    write_native_mesh(filename, 'tri', r, lc, reg, reg_attrs=reg_attrs, reg_names=reg_names)
     with h5py.File(filename, 'r+') as h5_file:
-        if pmap is not None:
-            h5_file.create_dataset('thincurr/periodicity/pmap', data=pmap, dtype='i4')
+        # Write resistance information
+        if eta_surf is not None:
+            h5_file.create_dataset('thincurr/ETA_SURF', data=eta_surf, dtype='f8')
+        if eta_vol is not None:
+            h5_file.create_dataset('thincurr/ETA_VOL', data=eta_vol, dtype='f8')
+        if thickness is not None:
+            h5_file.create_dataset('thincurr/THICKNESS', data=thickness, dtype='f8')
+        # Write holes
+        if (holes is not None) and (len(holes) > 0):
+            h5_file.create_dataset('thincurr/holes/NHOLES', data=[len(holes),], dtype='i4')
+            for i, hole in enumerate(holes):
+                h5_file.create_dataset('thincurr/holes/HOLE{0:04d}'.format(i+1), data=hole+1, dtype='i4') # Convert to 1-based indexing for storage
+        # Write jumpers
+        if (jumpers is not None) and (len(jumpers) > 0):
+            h5_file.create_dataset('thincurr/jumpers/NJUMPERS', data=[len(jumpers),], dtype='i4')
+            for i, jumper in enumerate(jumpers):
+                h5_file.create_dataset('thincurr/jumpers/JUMPER{0:04d}'.format(i+1), data=jumper+1, dtype='i4') # Convert to 1-based indexing for storage
+        # Write closures
+        if (closures is not None) and (len(closures) > 0):
+            h5_file.create_dataset('thincurr/CLOSURES', data=closures+1, dtype='i4') # Convert to 1-based indexing for storage
+        # Write coil sets
+        if coil_sets is not None:
+            h5_file.create_dataset('thincurr/coils/NCOILSETS', data=[len(coil_sets),], dtype='i4')
+            for i, coil_set in enumerate(coil_sets):
+                coil_group = h5_file.create_group('thincurr/coils/coilset{0:04d}'.format(i+1))
+                coil_set.save_hdf5(coil_group)
+        # Write mesh periodicity information
         if nfp is not None:
-            h5_file.create_dataset('thincurr/periodicity/nfp', data=[nfp,], dtype='i4')
+            h5_file.create_dataset('thincurr/periodicity/NFP', data=[nfp,], dtype='i4')
+        if pmap is not None:
+            h5_file.create_dataset('thincurr/periodicity/PMAP', data=pmap+1, dtype='i4') # Convert to 1-based indexing for storage
+
+
+def read_ThinCurr_mesh(filename):
+    r'''! Read mesh information and ThinCurr parameters from a native HDF5 mesh file
+
+    @param filename Filename for mesh file
+
+    @returns Dictionary containing the mesh information and ThinCurr parameters
+    '''
+    mesh_info = read_native_mesh(filename)
+    if mesh_info['type'] != 'tri':
+        raise ValueError("ThinCurr meshes must be triangular, but loaded mesh is of type '{0}'".format(mesh_info['type']))
+    if mesh_info['r'].shape[1] == 2:  # Upgrade 2D point list to 3D (Z=0)
+        mesh_info['r'] = numpy.hstack((mesh_info['r'], numpy.zeros((mesh_info['r'].shape[0], 1))))
+    with h5py.File(filename, 'r') as h5_file:
+        if 'thincurr' in h5_file:
+            thincurr = h5_file['thincurr']
+            thincurr_info = {}
+            # Read resistance information
+            if 'ETA_SURF' in thincurr:
+                thincurr_info['eta_surf'] = thincurr['ETA_SURF'][()]
+            if 'ETA_VOL' in thincurr:
+                thincurr_info['eta_vol'] = thincurr['ETA_VOL'][()]
+            if 'THICKNESS' in thincurr:
+                thincurr_info['thickness'] = thincurr['THICKNESS'][()]
+            # Read hole
+            if 'holes' in thincurr:
+                nholes = thincurr['holes/NHOLES'][0]
+                thincurr_info['holes'] = [thincurr['holes/HOLE{0:04d}'.format(i+1)][()] - 1 for i in range(nholes)] # Convert to 0-based indexing
+            # Read jumpers
+            if 'jumpers' in thincurr:
+                njumpers = thincurr['jumpers/NJUMPERS'][0]
+                thincurr_info['jumpers'] = [thincurr['jumpers/JUMPER{0:04d}'.format(i+1)][()] - 1 for i in range(njumpers)] # Convert to 0-based indexing
+            # Read closures
+            if 'CLOSURES' in thincurr:
+                thincurr_info['closures'] = thincurr['CLOSURES'][()] - 1 # Convert to 0-based indexing
+            # Read coil sets
+            if 'coils' in thincurr:
+                coils_group = thincurr['coils']
+                ncoilsets = coils_group['NCOILSETS'][0]
+                thincurr_info['coil_sets'] = []
+                for i in range(ncoilsets):
+                    coilset_group = coils_group['coilset{0:04d}'.format(i+1)]
+                    thincurr_info['coil_sets'].append(coil_from_hdf5(coilset_group))
+            # Read periodicity information
+            if 'periodicity' in thincurr:
+                periodicity = thincurr['periodicity']
+                if 'NFP' in periodicity:
+                    thincurr_info['nfp'] = periodicity['NFP'][0]
+                if 'PMAP' in periodicity:
+                    thincurr_info['pmap'] = periodicity['PMAP'][()] - 1 # Convert to 0-based indexing
+            mesh_info['thincurr'] = thincurr_info
+    return mesh_info
 
 
 def build_ThinCurr_dummy(center,size=1.0,nsplit=0):
     '''! Build simple square dummy mesh for ThinCurr (1 active node)
-    
+
     @param center Center of mesh [3]
     @param size Physical size of dummy mesh in X and Y
     @param nsplit Number of refinement iterations to perform on grid (starting mesh is `np=5`, `nc=4`)
@@ -274,7 +369,7 @@ class ThinCurr_periodic_toroid:
             self.pnodesets = [pnodeset]
             for i in range(1,nfp):
                 self.pnodesets.append(pnodeset+i*(nphi-1)*ntheta)
-    
+
     def plot_mesh(self,fig,equal_aspect=True,surf_alpha=0.1,surf_cmap='viridis'):
         '''! Plot mesh and holes
 
@@ -296,7 +391,7 @@ class ThinCurr_periodic_toroid:
         ax.plot_trisurf(self.r[:,0], self.r[:,1], self.r[:,2], triangles=self.lc, cmap=surf_cmap, antialiased=False)
         if equal_aspect:
             ax.set_box_aspect(mesh_range)
-    
+
     def write_to_file(self,filename,reg=None,include_closures=True):
         '''! Save mesh to file in ThinCurr format
 
@@ -305,17 +400,19 @@ class ThinCurr_periodic_toroid:
         @param include_closures Include closure defitions in file?
         '''
         if include_closures:
-            closures = numpy.arange(self.nfp)*int(self.lc.shape[0]/self.nfp)+1
+            closures = numpy.arange(self.nfp)*int(self.lc.shape[0]/self.nfp)
         else:
             closures = []
         if reg is None:
             reg = numpy.ones((self.lc.shape[0],))
         if self.nfp == 1:
-            write_ThinCurr_mesh(filename, self.r, self.lc+1, reg,
-                holes=[self.tnodeset+1, self.pnodesets[0]+1], closures=closures)
+            write_ThinCurr_mesh(filename, self.r, self.lc, reg,
+                holes=[self.tnodeset, self.pnodesets[0]], closures=closures)
         else:
-            write_ThinCurr_mesh(filename, self.r, self.lc+1, reg,
-                holes=[self.tnodeset+1] + [pnodeset+1 for pnodeset in self.pnodesets], closures=closures, pmap=self.r_map, nfp=self.nfp)
+            # r_map-1 is to remove the first node (<=0 is removed), which is the closure node as specifying pmap
+            # replaces the internal mapping contruction/closure removal
+            write_ThinCurr_mesh(filename, self.r, self.lc, reg,
+                holes=[self.tnodeset] + [pnodeset for pnodeset in self.pnodesets], closures=closures, pmap=self.r_map-1, nfp=self.nfp)
 
     def condense_matrix(self,matrix,axis=None):
         '''! Condense matrix to unique DOF only by combining poloidal nodesets
@@ -346,7 +443,7 @@ class ThinCurr_periodic_toroid:
             return matrix_new
         else:
             return matrix
-    
+
     def nodes_to_unique(self,vector,tor_val=0.0,pol_val=0.0,remove_closure=True):
         '''! Maps a vector of values on all nodes within a single field period
         to unique DOFs
@@ -417,18 +514,18 @@ def build_triangles_from_grid(data_grid,wrap_n=True,wrap_m=True):
     else:
         mwrap = m-1
     for i in range(nwrap):
-        i1 = (i + 1) % n 
+        i1 = (i + 1) % n
         nodeset_n.append(i*m)
         for j in range(mwrap):
             # Wrap around the indices when at the borders
-            j1 = (j + 1) % m  
+            j1 = (j + 1) % m
             if i == 0:
                 nodeset_m.append(j)
             # Get the indices of the vertices of the two triangles
             # that divide the current grid square
             tri1 = [i * m + j, i * m + j1, i1 * m + j]
             tri2 = [i1 * m + j1, i1 * m + j, i * m + j1]
-    
+
             # Add the two triangles to the list
             triangles += [tri1, tri2]
     if not wrap_n:

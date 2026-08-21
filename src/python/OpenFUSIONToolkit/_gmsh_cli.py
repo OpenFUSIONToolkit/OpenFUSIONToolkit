@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 #------------------------------------------------------------------------------
 # Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
 #
@@ -6,14 +5,15 @@
 #------------------------------------------------------------------------------
 '''! Python cli for GMSH to native Open FUSION Toolkit mesh conversion
 
+See @ref convert_gmsh
+
 @authors Chris Hansen
 @date July 2026
 @ingroup doxy_oft_python
 '''
-import argparse
 import os
 import numpy as np
-import h5py
+from .meshing import write_native_mesh
 
 ed_map_tri = np.array([
     [0,1],
@@ -73,18 +73,18 @@ def read_legacy(fid):
         ncp_lin = 3
         mesh_nc = mesh_nf
         lc = lf
-        lc_reg = lf_reg
+        reg = lf_reg
     else:
         ncp_lin = 4
         mesh_nc = int(fid.readline())
         lc = np.zeros((mesh_nc,ncp), dtype=np.int32)
-        lc_reg = np.zeros((mesh_nc,), dtype=np.int32)
+        reg = np.zeros((mesh_nc,), dtype=np.int32)
         for i in range(mesh_nc):
             line_split = fid.readline().split()
             lc[i,:] = [int(val) for val in line_split[:ncp]]
-            lc_reg[i] = int(line_split[ncp])
+            reg[i] = int(line_split[ncp])
         fid.readline() # Should be "End"
-    return r, lc, lc_reg, ncp_lin
+    return r, lc, reg, ncp_lin
 
 
 def read_new(fid):
@@ -123,8 +123,8 @@ def read_new(fid):
     else:
         lc = np.array(lc, dtype=np.int32)
         ncp_lin = 4
-    lc_reg = np.ones((lc.shape[0],), dtype=np.int32)
-    return r, lc, lc_reg, ncp_lin
+    reg = np.ones((lc.shape[0],), dtype=np.int32)
+    return r, lc, reg, ncp_lin
 
 
 def read_mesh(filename):
@@ -133,13 +133,13 @@ def read_mesh(filename):
     with open(filename,'r') as fid:
         mesh_format_line = fid.readline()
         if mesh_format_line.strip() == '$MeshFormat':
-            r, lc, lc_reg, ncp_lin = read_new(fid)
+            r, lc, reg, ncp_lin = read_new(fid)
         else:
-            r, lc, lc_reg, ncp_lin = read_legacy(fid)
+            r, lc, reg, ncp_lin = read_legacy(fid)
     #
     mesh_np = r.shape[0]
     mesh_nc = lc.shape[0]
-    nReg = lc_reg.max()
+    nReg = reg.max()
     mesh_order = 1
     if lc.shape[1] != ncp_lin:
         mesh_order = 2
@@ -162,7 +162,7 @@ def read_mesh(filename):
     reindex_flag[lc[:,:ncp_lin].flatten()] = 1
     r_new = r[reindex_flag[1:] == 1]
     rindexed_pts = np.cumsum(reindex_flag)
-    lc_new = rindexed_pts[lc[:,:ncp_lin]]
+    lc_new = rindexed_pts[lc[:,:ncp_lin]] - 1 # Convert back to 0-based indexing
     # Build high-order information
     if mesh_order > 1: # Handle high-order if present
         le_ho = np.zeros((r_ho.shape[0],2), dtype=np.int32)
@@ -173,24 +173,18 @@ def read_mesh(filename):
         ho_info = (r_ho, le_ho)
     else:
         ho_info = None
-    print("  Dimension    = {0}".format(mesh_dim))
-    print("  Mesh order   = {0}".format(mesh_order))
+    mesh_type = 'TRI' if mesh_dim == 2 else 'TET'
+    if mesh_order == 1:
+        mesh_type += '_P1'
+    else:
+        mesh_type += '_P2'
+    print("  Mesh type: {0}".format(mesh_type))
+    print("  Dimension: {0}D".format(mesh_dim))
     print("  # of points  = {0} ({1})".format(r_new.shape[0],r_ho.shape[0]))
     print("  # of cells   = {0}".format(mesh_nc))
     print("  # of regions = {0}".format(nReg))
     #
-    return r_new, lc_new, lc_reg, ho_info
-
-def write_file(filename, r, lc, reg, ho_info=None):
-    print()
-    print("Saving mesh: {0}".format(filename))
-    with h5py.File(filename, 'w') as h5_file:
-        h5_file.create_dataset('mesh/R', data=r, dtype='f8')
-        h5_file.create_dataset('mesh/LC', data=lc, dtype='i4')
-        h5_file.create_dataset('mesh/REG', data=reg, dtype='i4')
-        if ho_info is not None:
-            h5_file.create_dataset('mesh/ho_info/R', data=ho_info[0], dtype='f8')
-            h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1], dtype='i4')
+    return mesh_type, r_new, lc_new, reg, ho_info
 
 
 def convert_gmsh_to_native(in_file, out_file=None):
@@ -202,18 +196,19 @@ def convert_gmsh_to_native(in_file, out_file=None):
     if out_file is None:
         out_file = os.path.splitext(in_file)[0] + ".h5"
 
-    r, lc, reg, ho_info = read_mesh(in_file)
-    write_file(out_file, r, lc, reg, ho_info)
+    # Read input GMSH file
+    mesh_type, r, lc, reg, ho_info = read_mesh(in_file)
+
+    # Write output file
+    write_native_mesh(out_file, mesh_type.split('_')[0], r, lc, reg, ho_info=ho_info)
 
 
 def script_entry():
     '''! Command line interface for GMSH to native Open FUSION Toolkit mesh conversion
 
-    options:
-      -h, --help            show this help message and exit
-      --in_file IN_FILE     Input mesh file
-      --out_file OUT_FILE   Ouput mesh file
+    See @ref @convert_gmsh
     '''
+    import argparse
     parser = argparse.ArgumentParser()
     parser.description = "Convert a GMSH mesh file to native Open FUSION Toolkit mesh format"
     parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
@@ -221,3 +216,20 @@ def script_entry():
     options = parser.parse_args()
 
     convert_gmsh_to_native(options.in_file, options.out_file)
+
+
+## @page convert_gmsh `OFT_convert_gmsh`: GMSH to native Open FUSION Toolkit mesh conversion
+#
+# @section convert_gmsh_desc Description and options
+# This script converts a GMSH mesh file to native Open FUSION Toolkit mesh format.
+#
+#```shell
+# usage: OFT_convert_gmsh [-h] --in_file IN_FILE [--out_file OUT_FILE]
+#
+# Convert a GMSH mesh file to native Open FUSION Toolkit mesh format
+#
+# options:
+#   -h, --help           show this help message and exit
+#   --in_file IN_FILE    Input mesh file
+#   --out_file OUT_FILE  Ouput mesh file
+#```
