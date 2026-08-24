@@ -640,18 +640,24 @@ IF(error==0)THEN
         IF(error>=0)THEN
           dim_sizes=INT(tmp_sizes,4)
         ELSE
-          ndims=-1
+          ndims=-6
           DEALLOCATE(dim_sizes)
         END IF
         DEALLOCATE(tmp_sizes,maxdims)
         !---Close dataspace/set
         call h5sclose_f(dspace_id, error)
       ELSE
-        ndims=-1
+        ndims=-5
       END IF
       call h5dclose_f(dset_id, error)
+    ELSE
+      ndims=-4
     END IF
+  ELSE
+    ndims=-3
   END IF
+ELSE
+  ndims=-2
 END IF
 !---Close file and finalize HDF5
 call h5fclose_f(file_id, error)

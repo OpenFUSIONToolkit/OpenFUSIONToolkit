@@ -1520,15 +1520,6 @@ ALLOCATE(quads(18))
 DO i=1,18
   CALL set_quad_2d(quads(i),i)
 END DO
-!---Build temporary coil set from all filaments in model
-ncoils_tot=tw_obj%n_vcoils+tw_obj%n_icoils
-ALLOCATE(coils_tot(ncoils_tot))
-DO i=1,tw_obj%n_vcoils
-  CALL tw_copy_coil(tw_obj%vcoils(i),coils_tot(i))
-END DO
-DO i=1,tw_obj%n_icoils
-  CALL tw_copy_coil(tw_obj%icoils(i),coils_tot(i+tw_obj%n_vcoils))
-END DO
 bmesh=>tw_obj%mesh
 !---Compute coupling between vertices and sensors
 f=1.d0/3.d0
@@ -1621,6 +1612,15 @@ ELSE
   WRITE(*,'(2A)')oft_indent,'No magnetic sensors, skipping...'
 END IF
 CALL oft_decrease_indent
+!---Build temporary coil set from all filaments in model
+ncoils_tot=tw_obj%n_vcoils+tw_obj%n_icoils
+ALLOCATE(coils_tot(ncoils_tot))
+DO i=1,tw_obj%n_vcoils
+  CALL tw_copy_coil(tw_obj%vcoils(i),coils_tot(i))
+END DO
+DO i=1,tw_obj%n_icoils
+  CALL tw_copy_coil(tw_obj%icoils(i),coils_tot(i+tw_obj%n_vcoils))
+END DO
 !---Compute coupling between coils and sensors
 ALLOCATE(Acoil2sen_tmp(nsensors,ncoils_tot))
 Acoil2sen_tmp=0.d0
@@ -2417,6 +2417,7 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
     IF(.NOT.success)CALL oft_abort('Failed to read coils for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
     coil_tmp=>self%coils(i)
     coil_tmp%ncoils=ncoils
+    ALLOCATE(coil_tmp%coils(coil_tmp%ncoils))
     ALLOCATE(coil_tmp%scales(coil_tmp%ncoils))
     ALLOCATE(coil_tmp%res_per_len(coil_tmp%ncoils))
     ALLOCATE(coil_tmp%radius(coil_tmp%ncoils))
@@ -2460,14 +2461,14 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
     !
     DO j=1,ncoils
       WRITE(blknum2,'(I4.4)')j
-      CALL hdf5_field_get_sizes(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/coil'//blknum2//'PTS',ndims,dim_sizes)
-      IF(ndims==1)THEN
-        coil_tmp%coils(j)%npts=dim_sizes(1)
+      CALL hdf5_field_get_sizes(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/coil'//blknum2//'/PTS',ndims,dim_sizes)
+      IF(ndims==2)THEN
+        coil_tmp%coils(j)%npts=dim_sizes(2)
         ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
-        CALL hdf5_read(coil_tmp%coils(j)%pts,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/coil'//blknum2//'PTS',success)
+        CALL hdf5_read(coil_tmp%coils(j)%pts,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/coil'//blknum2//'/PTS',success)
         IF(.NOT.success)ndims=-1
       END IF
-      IF(ndims/=1)THEN
+      IF(ndims/=2)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
         CALL oft_abort('Failed to read coil points for coilset/coil '//coil_ind,'tw_load_coils_hdf5',__FILE__)
       END IF
@@ -2525,6 +2526,7 @@ IF(oft_debug_print(1))THEN
   END IF
 END IF
 CALL oft_decrease_indent
+ALLOCATE(self%sens_mask(self%mesh%nreg))
 !---Read periodicity information
 IF(hdf5_field_exist(TRIM(filepath),'thincurr/periodicity/PMAP'))THEN
   ALLOCATE(self%pmap(self%mesh%np))
