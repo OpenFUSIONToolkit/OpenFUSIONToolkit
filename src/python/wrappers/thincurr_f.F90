@@ -29,7 +29,7 @@ USE oft_native_la, ONLY: oft_native_dense_matrix
 USE fem_utils, ONLY: fem_interp
 USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, &
   tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF, &
-  tw_recon_curr, tw_compute_Bops
+  tw_recon_curr, tw_compute_Bops, tw_copy_coil
 USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op
 USE thin_wall_solvers, ONLY: lr_eigenmodes_arpack, lr_eigenmodes_direct, frequency_response, &
   tw_reduce_model, run_td_sim, plot_td_sim
@@ -43,6 +43,24 @@ integer(i4), POINTER :: lc_plot(:,:) !< Needs docs
 integer(i4), POINTER :: reg_plot(:) !< Needs docs
 real(r8), POINTER :: r_plot(:,:) !< Needs docs
 CONTAINS
+!---------------------------------------------------------------------------------
+!> Cast C pointer to ThinCurr object
+!---------------------------------------------------------------------------------
+FUNCTION thincurr_ccast(tCurr_cptr,tCurr_obj,error_str) RESULT(success)
+TYPE(c_ptr), INTENT(in) :: tCurr_cptr !< C pointer to ThinCurr object
+TYPE(tw_type), POINTER, INTENT(out) :: tCurr_obj !< Fortran ThinCurr object
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+LOGICAL :: success
+!---Clear error flag
+IF(PRESENT(error_str))CALL copy_string('',error_str)
+IF(.NOT.c_associated(tCurr_cptr))THEN
+  IF(PRESENT(error_str))CALL copy_string('ThinCurr object not associated',error_str)
+  success=.FALSE.
+  RETURN
+END IF
+CALL c_f_pointer(tCurr_cptr,tCurr_obj)
+success=.TRUE.
+END FUNCTION thincurr_ccast
 !---------------------------------------------------------------------------------
 !> Setup ThinCurr model
 !---------------------------------------------------------------------------------
@@ -643,6 +661,66 @@ ELSE
 END IF
 Mc_ptr=C_LOC(tw_obj%Ael2dr)
 END SUBROUTINE thincurr_Mcoil
+!---------------------------------------------------------------------------------
+!> Get the name of a given coil
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_get_coil_name(tw_ptr,coil_ind,coil_name,vcoil_flag,error_str) BIND(C,NAME="thincurr_get_coil_name")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< ThinCurr object
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: coil_ind !< Index of the coil
+CHARACTER(KIND=c_char), INTENT(out) :: coil_name(40) !< Name of the coil
+LOGICAL(KIND=c_bool), INTENT(out) :: vcoil_flag !< Flag indicating if the coil is a virtual coil
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error message
+TYPE(tw_type), POINTER :: tw_obj
+IF(.NOT.thincurr_ccast(tw_ptr,tw_obj,error_str))RETURN
+IF((coil_ind<1).OR.(coil_ind>tw_obj%n_coils))THEN
+  CALL copy_string('Invalid coil index',error_str)
+  RETURN
+END IF
+CALL copy_string(tw_obj%coils(coil_ind)%name,coil_name)
+vcoil_flag=tw_obj%coils(coil_ind)%is_vcoil
+END SUBROUTINE thincurr_get_coil_name
+!---------------------------------------------------------------------------------
+!> Set the types of the coils
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_set_coil_types(tw_ptr,vcoil_flags,error_string) BIND(C,NAME="thincurr_set_coil_types")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< ThinCurr object
+TYPE(c_ptr), VALUE, INTENT(in) :: vcoil_flags !< Array of coil types
+CHARACTER(KIND=c_char), INTENT(out) :: error_string(OFT_ERROR_SLEN) !< Error message
+TYPE(tw_type), POINTER :: tw_obj
+INTEGER(i4) :: i
+INTEGER(i4), POINTER :: flag_tmp(:)
+IF(.NOT.thincurr_ccast(tw_ptr,tw_obj,error_string))RETURN
+CALL c_f_pointer(vcoil_flags, flag_tmp, [tw_obj%n_coils])
+IF(ASSOCIATED(tw_obj%Ael2dr).OR.ASSOCIATED(tw_obj%Ael2coil))THEN
+  CALL copy_string('Cannot adjust coil types after computing coil mutuals',error_string)
+  RETURN
+END IF
+!---
+IF(ASSOCIATED(tw_obj%vcoils))DEALLOCATE(tw_obj%vcoils)
+IF(ASSOCIATED(tw_obj%icoils))DEALLOCATE(tw_obj%icoils)
+IF(tw_obj%n_vcoils>0)ALLOCATE(tw_obj%vcoils(tw_obj%n_vcoils))
+IF(tw_obj%n_icoils>0)ALLOCATE(tw_obj%icoils(tw_obj%n_icoils))
+tw_obj%n_icoils=0
+tw_obj%n_vcoils=0
+DO i=1,tw_obj%n_coils
+  IF(flag_tmp(i)==1)THEN
+    tw_obj%n_vcoils=tw_obj%n_vcoils+1
+    tw_obj%coils(i)%is_vcoil=.TRUE.
+    CALL tw_copy_coil(tw_obj%coils(i),tw_obj%vcoils(tw_obj%n_vcoils))
+  ELSE
+    tw_obj%n_icoils=tw_obj%n_icoils+1
+    tw_obj%coils(i)%is_vcoil=.FALSE.
+    CALL tw_copy_coil(tw_obj%coils(i),tw_obj%icoils(tw_obj%n_icoils))
+  END IF
+END DO
+!---Print update summary
+WRITE(*,*)
+WRITE(*,'(2A)')oft_indent,'Updating coil types:'
+CALL oft_increase_indent
+WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',tw_obj%n_vcoils
+WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',tw_obj%n_icoils
+CALL oft_decrease_indent
+END SUBROUTINE thincurr_set_coil_types
 !---------------------------------------------------------------------------------
 !> Compute the mutual inductance between model and sensors
 !---------------------------------------------------------------------------------

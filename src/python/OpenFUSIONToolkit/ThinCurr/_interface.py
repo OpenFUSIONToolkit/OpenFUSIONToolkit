@@ -66,6 +66,14 @@ thincurr_Bmat = ctypes_subroutine(oftpy_lib.thincurr_Bmat,
 thincurr_Mcoil = ctypes_subroutine(oftpy_lib.thincurr_Mcoil,
     [c_void_p, c_void_ptr_ptr, c_char_p, c_char_p])
 
+# thincurr_get_coil_name(tw_ptr,coil_ind,coil_name,vcoil_flag,error_str)
+thincurr_get_coil_name = ctypes_subroutine(oftpy_lib.thincurr_get_coil_name,
+    [c_void_p, c_int, c_char_p, c_bool_ptr, c_char_p])
+
+# thincurr_set_coil_types(tw_ptr,vcoil_flags,error_string)
+thincurr_set_coil_types = ctypes_subroutine(oftpy_lib.thincurr_set_coil_types,
+    [c_void_p, ctypes_numpy_array(int32,1), c_char_p])
+
 # thincurr_Msensor(tw_ptr,sensor_file,Ms_ptr,Msc_ptr,nsensors,njumpers,sensor_ptr,cache_file,error_str)
 thincurr_Msensor = ctypes_subroutine(oftpy_lib.thincurr_Msensor,
     [c_void_p, c_char_p, c_void_ptr_ptr, c_void_ptr_ptr, c_int_ptr, c_int_ptr, c_void_p, c_char_p, c_char_p])

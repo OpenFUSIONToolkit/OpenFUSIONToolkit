@@ -173,6 +173,53 @@ class ThinCurr():
         self.n_vcoils = sizes[6]
         self.nelems = sizes[7]
         self.n_icoils = sizes[8]
+        #
+        self.n_coils = self.n_vcoils + self.n_icoils
+        self.coils = {}
+        for i in range(self.n_coils):
+            coil_name = ctypes.create_string_buffer(b"",40)
+            vcoil_flag = c_bool()
+            error_string = self._oft_env.get_c_errorbuff()
+            thincurr_get_coil_name(self.tw_obj,c_int(i+1),coil_name,ctypes.byref(vcoil_flag),error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value.decode())
+            self.coils[coil_name.value.decode()] = {
+                'id': i+1,
+                'type': 'vcoil' if vcoil_flag.value else 'icoil'
+            }
+
+    def update_coil_types(self,vcoils=[],icoils=[]):
+        '''! Update coil types for ThinCurr model
+
+        @note Any coil names not specified in `vcoils` or `icoils` will be left unchanged.
+
+        @note Must be called after `setup_model()` and before `compute_Mcoil()` to be effective.
+
+        @param vcoils List of names of voltage-specified coils
+        @param icoils List of names of current-specified coils
+        '''
+        vcoil_flags = numpy.array([self.coils[coil_name]['type'] == 'vcoil' for coil_name in self.coils], dtype=numpy.int32)
+        for coil_name in vcoils:
+            if coil_name not in self.coils:
+                raise ValueError('Coil name "{0}" not found in model'.format(coil_name))
+            vcoil_flags[self.coils[coil_name]['id']-1] = 1
+        for coil_name in icoils:
+            if coil_name not in self.coils:
+                raise ValueError('Coil name "{0}" not found in model'.format(coil_name))
+            vcoil_flags[self.coils[coil_name]['id']-1] = 0
+        error_string = self._oft_env.get_c_errorbuff()
+        thincurr_set_coil_types(self.tw_obj,vcoil_flags,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
+        # Resync with Fortran model
+        for i in range(self.n_coils):
+            coil_name = ctypes.create_string_buffer(b"",40)
+            vcoil_flag = c_bool()
+            error_string = self._oft_env.get_c_errorbuff()
+            thincurr_get_coil_name(self.tw_obj,i+1,coil_name,ctypes.byref(vcoil_flag),error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value.decode())
+            self.coils[coil_name.value.decode()]['type'] = 'vcoil' if vcoil_flag.value else 'icoil'
 
     def setup_io(self,basepath=None,save_debug=False,legacy_hdf5=False):
         '''! Setup XDMF+HDF5 I/O for 3D visualization
