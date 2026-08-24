@@ -319,7 +319,7 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
         if (icoils is not None) or (vcoils is not None):
             mesh_tool_args += ["--coils_from_xml", "oft_in.xml"]
         if jumper_start > 0:
-            mesh_tool_args.append("--jumper_range {0}".format(jumper_start))
+            mesh_tool_args += ["--jumper_range", "{0}".format(jumper_start-1)]
         result = subprocess.run([sys.executable, os.path.join(python_dir, "OFT_ThinCurr_mesh_tool.py"), "modify"] + mesh_tool_args,
                                 capture_output=True, text=True)
         if result.returncode != 0:
