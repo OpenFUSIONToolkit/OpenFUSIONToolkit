@@ -57,7 +57,7 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
     try:
         from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        myOFT = OFT_env(nthreads=-1,debug_level=3)
+        myOFT = OFT_env(nthreads=-1)
         tw_model = ThinCurr(myOFT)
         if meshfile is None:
             from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
@@ -315,9 +315,9 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
                 xml.add_Vcoil(test_Vcoil)
     write_oft_xml([xml], "oft_in.xml")
     if convert_xml:
-        mesh_tool_args = ["--in_file={0}".format(meshfile), "--out_file=test.h5", "--eta_from_xml", "oft_in.xml"]
+        mesh_tool_args = ["--in_file={0}".format(meshfile), "--out_file=test.h5", "--eta_from_xml=oft_in.xml"]
         if (icoils is not None) or (vcoils is not None):
-            mesh_tool_args += ["--coils_from_xml", "oft_in.xml"]
+            mesh_tool_args += ["--coils_from_xml=oft_in.xml"]
         if jumper_start > 0:
             mesh_tool_args += ["--jumper_range", "{0}".format(jumper_start-1)]
         result = subprocess.run([sys.executable, os.path.join(python_dir, "OFT_ThinCurr_mesh_tool.py"), "modify"] + mesh_tool_args,
@@ -1020,20 +1020,18 @@ def test_torus_fourier_sensor(direct_flag):
 # Test runners for filament model
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("convert_xml", (False, True))
-def test_eig_passive(direct_flag,convert_xml):
+def test_eig_passive(direct_flag):
     eigs = approx_list((1.503561E-1, 6.420533E-2, 3.188782E-2, 2.941118E-2), rel=1.E-5)
-    assert ThinCurr_setup(None,2,direct_flag,eta=1.E4,convert_xml=convert_xml,
+    assert ThinCurr_setup(None,2,direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)))
     assert validate_eigs(eigs)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("convert_xml", (False, True))
-def test_td_passive(direct_flag,convert_xml):
+def test_td_passive(direct_flag):
     sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((8.326557E-4, 8.347735E-4), rel=1.E-3)
-    assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,convert_xml=convert_xml,
+    assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
                           icoils=((0.5, 0.1),),
                           vcoils=((0.5, 0.0),),
                           floops=((0.5, -0.05), (0.5, -0.1)),
@@ -1042,11 +1040,10 @@ def test_td_passive(direct_flag,convert_xml):
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("convert_xml", (False, True))
-def test_fr_passive(direct_flag,convert_xml):
+def test_fr_passive(direct_flag):
     fr_real = approx_list((1.947713E-1, 1.990873E-1), rel=1.E-4)
     fr_imag = approx_list((-2.175942E-4, -1.560726E-4), rel=1.E-4)
-    assert ThinCurr_setup(None,3,direct_flag,eta=1.E4,freq=5.E3,fr_limit=0,convert_xml=convert_xml,
+    assert ThinCurr_setup(None,3,direct_flag,eta=1.E4,freq=5.E3,fr_limit=0,
                            icoils=((0.5, 0.1),),
                            vcoils=((0.5, 0.0),),
                            floops=((0.5, -0.05), (0.5, -0.1)))
@@ -1054,11 +1051,10 @@ def test_fr_passive(direct_flag,convert_xml):
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
-@pytest.mark.parametrize("convert_xml", (False, True))
-def test_td_passive_volt(direct_flag,convert_xml):
+def test_td_passive_volt(direct_flag):
     sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.379235E-4, 4.389248E-4), rel=1.E-3)
     jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([-641.4736, 1673.2893], rel=1.E-3)
-    assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,convert_xml=convert_xml,
+    assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
                           vcoils=((0.5, 0.0), (0.5, 0.1)),
                           floops=((0.5, -0.05), (0.5, -0.1)),
                           volt_waveform=((0.0, 0.0, 1.0), (1.0, 0.0, 1.0)))

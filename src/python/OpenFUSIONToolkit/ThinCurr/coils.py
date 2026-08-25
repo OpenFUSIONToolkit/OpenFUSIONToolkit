@@ -57,8 +57,9 @@ class ThinCurr_coil_set:
         if pts is not None: # General 3D coil
             if (RZ is not None) or (hdf5_path is not None):
                 raise ValueError("Only one of `RZ`, `pts`, or `hdf5_path` should be provided")
+            pts = numpy.asarray(pts)
             if npoints is None:
-                npoints = len(pts)
+                npoints = pts.shape[0]
             self.subcoils.append({'pts': pts,'scale': scale,'npts': npoints})
         elif hdf5_path is not None: # Coil points from HDF5 dataset
             if (RZ is not None) or (pts is not None):
@@ -128,7 +129,7 @@ class ThinCurr_Icoil(ThinCurr_coil_set):
                 pts_text = subcoil_elem.text.strip()
                 pts_lines = pts_text.splitlines()
                 pts = numpy.array([_split_delimited_float(line) for line in pts_lines])
-                if (npts == 0) or ((pts.shape[0] != 1) and (pts.shape[0] != 2)):
+                if (npts == 0) or (pts.shape[0] == 1):
                     icoil.add_circular_subcoil(RZ=pts[0], scale=scale)
                 else:
                     icoil.add_subcoil(pts=pts, scale=scale, npoints=npts)
@@ -209,7 +210,7 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
                 pts_text = subcoil_elem.text.strip()
                 pts_lines = pts_text.splitlines()
                 pts = numpy.array([_split_delimited_float(line) for line in pts_lines])
-                if (npts == 0) or ((pts.shape[0] != 1) and (pts.shape[0] != 2)):
+                if (npts == 0) or (pts.shape[0] == 1):
                     vcoil.add_circular_subcoil(RZ=pts[0], scale=scale)
                 else:
                     vcoil.add_subcoil(pts=pts, scale=scale, npoints=npts)

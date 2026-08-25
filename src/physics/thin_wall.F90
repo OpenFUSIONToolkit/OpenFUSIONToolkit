@@ -2527,6 +2527,7 @@ IF(oft_debug_print(1))THEN
 END IF
 CALL oft_decrease_indent
 ALLOCATE(self%sens_mask(self%mesh%nreg))
+self%sens_mask=.FALSE.
 !---Read periodicity information
 IF(hdf5_field_exist(TRIM(filepath),'thincurr/periodicity/PMAP'))THEN
   ALLOCATE(self%pmap(self%mesh%np))
