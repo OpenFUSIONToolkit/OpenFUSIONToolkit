@@ -695,6 +695,18 @@ IF(ASSOCIATED(tw_obj%Ael2dr).OR.ASSOCIATED(tw_obj%Ael2coil))THEN
   CALL copy_string('Cannot adjust coil types after computing coil mutuals',error_string)
   RETURN
 END IF
+DO i=1,tw_obj%n_coils
+  IF(flag_tmp(i)==1)THEN
+    IF(tw_obj%coils(i)%radius<=0.d0)THEN
+      CALL copy_string('Cannot use coil '//TRIM(tw_obj%coils(i)%name)//' as Vcoil: radius not defined',error_string)
+      RETURN
+    END IF
+    IF(tw_obj%coils(i)%res_per_len<=0.d0)THEN
+      CALL copy_string('Cannot use coil '//TRIM(tw_obj%coils(i)%name)//' as Vcoil: resistance not defined',error_string)
+      RETURN
+    END IF
+  END IF
+END DO
 !---
 IF(ASSOCIATED(tw_obj%vcoils))DEALLOCATE(tw_obj%vcoils)
 IF(ASSOCIATED(tw_obj%icoils))DEALLOCATE(tw_obj%icoils)
