@@ -262,6 +262,17 @@ do i=1,smesh%nc
       END IF
       dflux = dflux + Btor*v*device%fe_rep%quad%wts(m)
     END IF
+    IF(self%I%include_sol)THEN
+     IF(self%mode==0)THEN
+        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
+        + (self%ffp_scale**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%ffp_scale)/(pt(1)+gs_epsilon))
+      ELSE
+        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
+        + .5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+      END IF
+      curr_cent = curr_cent + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
+      itor = itor + pt(1)*self%P%Fp(psitmp(1))*v*device%fe_rep%quad%wts(m)
+    END IF
   end do
 end do
 centroid = centroid/itor
