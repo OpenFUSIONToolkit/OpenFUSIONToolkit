@@ -597,6 +597,7 @@ ELSE
   END IF
   Lmat_ptr=C_LOC(tw_obj%Lmat)
 END IF
+tw_obj%model_frozen=.TRUE.
 END SUBROUTINE thincurr_Lmat
 !---------------------------------------------------------------------------------
 !> Compute magnetic field reconstruction operators for a ThinCurr model
@@ -640,6 +641,7 @@ ELSE
   Bmat_ptr=C_LOC(tw_obj%Bel)
   Bdr_ptr=C_LOC(tw_obj%Bdr)
 END IF
+tw_obj%model_frozen=.TRUE.
 END SUBROUTINE thincurr_Bmat
 !---------------------------------------------------------------------------------
 !> Compute the mutual inductance between passive (mesh+Vcoils) and active elements (Icoils)
@@ -661,6 +663,7 @@ ELSE
   CALL tw_compute_Ael2dr(tw_obj,save_file=filename)
 END IF
 Mc_ptr=C_LOC(tw_obj%Ael2dr)
+tw_obj%model_frozen=.TRUE.
 END SUBROUTINE thincurr_Mcoil
 !---------------------------------------------------------------------------------
 !> Get the name of a given coil
@@ -692,8 +695,8 @@ INTEGER(i4) :: i
 INTEGER(i4), POINTER :: flag_tmp(:)
 IF(.NOT.thincurr_ccast(tw_ptr,tw_obj,error_string))RETURN
 CALL c_f_pointer(vcoil_flags, flag_tmp, [tw_obj%n_coils])
-IF(ASSOCIATED(tw_obj%Ael2dr).OR.ASSOCIATED(tw_obj%Ael2coil))THEN
-  CALL copy_string('Cannot adjust coil types after computing coil mutuals',error_string)
+IF(tw_obj%model_frozen)THEN
+  CALL copy_string('Coil types must be set before computing any matrices',error_string)
   RETURN
 END IF
 DO i=1,tw_obj%n_coils
@@ -713,6 +716,7 @@ IF(ASSOCIATED(tw_obj%vcoils))DEALLOCATE(tw_obj%vcoils)
 IF(ASSOCIATED(tw_obj%icoils))DEALLOCATE(tw_obj%icoils)
 tw_obj%n_vcoils=COUNT(flag_tmp==1)
 tw_obj%n_icoils=tw_obj%n_coils-tw_obj%n_vcoils
+tw_obj%nelems=tw_obj%np_active+tw_obj%nholes+tw_obj%n_vcoils
 IF(tw_obj%n_vcoils>0)ALLOCATE(tw_obj%vcoils(tw_obj%n_vcoils))
 IF(tw_obj%n_icoils>0)ALLOCATE(tw_obj%icoils(tw_obj%n_icoils))
 tw_obj%n_icoils=0
@@ -787,6 +791,7 @@ Msc_ptr=C_LOC(tw_obj%Adr2sen)
 sensor_ptr=C_LOC(sensors)
 nsensors=sensors%nfloops
 njumpers=sensors%njumpers
+tw_obj%model_frozen=.TRUE.
 END SUBROUTINE thincurr_Msensor
 !---------------------------------------------------------------------------------
 !> Get the name of a given sensor
@@ -1018,6 +1023,7 @@ CALL tw_compute_Rmat(tw_obj,.TRUE.)
 kr_ptr=C_LOC(tw_obj%Rmat%kr)
 lc_ptr=C_LOC(tw_obj%Rmat%lc)
 mat_ptr=C_LOC(tw_obj%Rmat%M)
+tw_obj%model_frozen=.TRUE.
 END SUBROUTINE thincurr_Rmat
 !---------------------------------------------------------------------------------
 !> Compute the current regularization matrix for a ThinCurr model

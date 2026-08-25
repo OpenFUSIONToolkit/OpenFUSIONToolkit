@@ -54,14 +54,17 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures
         if (holes is not None) and (len(holes) > 0):
             h5_file.create_dataset('thincurr/holes/NHOLES', data=[len(holes),], dtype='i4')
             for i, hole in enumerate(holes):
+                hole = numpy.asarray(hole, dtype=numpy.int32)
                 h5_file.create_dataset('thincurr/holes/HOLE{0:04d}'.format(i+1), data=hole+1, dtype='i4') # Convert to 1-based indexing for storage
         # Write jumpers
         if (jumpers is not None) and (len(jumpers) > 0):
             h5_file.create_dataset('thincurr/jumpers/NJUMPERS', data=[len(jumpers),], dtype='i4')
             for i, jumper in enumerate(jumpers):
+                jumper = numpy.asarray(jumper, dtype=numpy.int32)
                 h5_file.create_dataset('thincurr/jumpers/JUMPER{0:04d}'.format(i+1), data=jumper+1, dtype='i4') # Convert to 1-based indexing for storage
         # Write closures
         if (closures is not None) and (len(closures) > 0):
+            closures = numpy.asarray(closures, dtype=numpy.int32)
             h5_file.create_dataset('thincurr/CLOSURES', data=closures+1, dtype='i4') # Convert to 1-based indexing for storage
         # Write coil sets
         if coil_sets is not None:
@@ -73,6 +76,7 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures
         if nfp is not None:
             h5_file.create_dataset('thincurr/periodicity/NFP', data=[nfp,], dtype='i4')
         if pmap is not None:
+            pmap = numpy.asarray(pmap, dtype=numpy.int32)
             h5_file.create_dataset('thincurr/periodicity/PMAP', data=pmap+1, dtype='i4') # Convert to 1-based indexing for storage
 
 

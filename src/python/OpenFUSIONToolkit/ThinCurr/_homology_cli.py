@@ -781,7 +781,7 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
                 do_check = False
                 for i in np.argsort(minima_counts):
                     bmat_tmp = np.vstack((bmat_dense,he[i][keep_edges]))
-                    if (not do_check) and (i == len(hb)): # Only start checking once we are looking at new cycles
+                    if (not do_check) and (i >= len(hb)): # Only start checking once we are looking at new cycles
                         do_check = True
                         # Update SVD with final set of previously accepted cycles
                         U, S, V_T, _ = scipy.linalg.lapack.sgesdd(bmat_dense, full_matrices=0)

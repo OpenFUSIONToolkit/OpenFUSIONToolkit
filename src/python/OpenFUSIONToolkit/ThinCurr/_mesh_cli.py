@@ -354,7 +354,8 @@ class ThinCurrMesh:
         # Remap closures (cell indices)
         cell_new = -np.ones((keep_cell.shape[0],), dtype=np.int64)
         cell_new[keep_cell] = np.arange(int(np.sum(keep_cell)))
-        self.closures = _remap_index_sets([self.closures], cell_new, "closures")[0] if self.closures is not None else None
+        remapped_closures = _remap_index_sets([self.closures], cell_new, "closures")[0] if self.closures is not None else None
+        self.closures = remapped_closures[0] if remapped_closures else None
 
         # Remove unreferenced vertices and remap connectivity/nodesets (in place)
         used = np.zeros((self.np,), dtype=bool)
@@ -387,22 +388,21 @@ class ThinCurrMesh:
             existing_holes = self.holes if self.holes is not None else []
             self.holes = existing_holes + [ns + np_offset for ns in other.holes]
         # Append jumpers
-        if self.jumpers is None:
-            self.jumpers = [ns.copy() for ns in other.jumpers] if other.jumpers is not None else None
-        else:
-            self.jumpers = [ns+np_offset for ns in other.jumpers] if other.jumpers is not None else self.jumpers
+        if other.jumpers is not None:
+            existing_jumpers = self.jumpers if self.jumpers is not None else []
+            self.jumpers = existing_jumpers + [ns + np_offset for ns in other.jumpers]
         # Append closures
         if other.closures is not None:
             appended_closures = other.closures + nc_offset
             self.closures = appended_closures if self.closures is None else np.concatenate((self.closures, appended_closures))
         # Append resistivity properties (if any) and warn if they exist in either mesh
         if distinct_regions:
-            if 'eta_surf' in self.tc_props and 'eta_surf' in other.tc_props:
-                self.tc_props['eta_surf'] = np.concatenate((self.tc_props['eta_surf'], other.tc_props['eta_surf']))
-            if 'eta_vol' in self.tc_props and 'eta_vol' in other.tc_props:
-                self.tc_props['eta_vol'] = np.concatenate((self.tc_props['eta_vol'], other.tc_props['eta_vol']))
-            if 'thickness' in self.tc_props and 'thickness' in other.tc_props:
-                self.tc_props['thickness'] = np.concatenate((self.tc_props['thickness'], other.tc_props['thickness']))
+            for key in ('eta_surf', 'eta_vol', 'thickness'):
+                 if (key in self.tc_props) and (key in other.tc_props):
+                     self.tc_props[key] = np.concatenate((self.tc_props[key], other.tc_props[key]))
+                 elif (key in self.tc_props) or (key in other.tc_props):
+                     print("  Warning: dropping {0}; it is not defined on both meshes".format(key))
+                     self.tc_props.pop(key, None)
         else:
             self._drop_props("append with non-distinct regions")
 

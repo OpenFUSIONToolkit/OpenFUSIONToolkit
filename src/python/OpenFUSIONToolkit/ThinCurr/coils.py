@@ -37,7 +37,7 @@ class ThinCurr_coil_set:
         @param scale Scaling factor for coil current (`1.0` if not specified)
         @param npoints Number of points for circular coil discretization
         """
-        theta = numpy.linspace(0, 2*numpy.pi, npoints, endpoint=False)
+        theta = numpy.linspace(0, 2*numpy.pi, npoints)
         pts = numpy.column_stack([RZ[0] * numpy.cos(theta), RZ[0] * numpy.sin(theta), numpy.full(npoints, RZ[1])])
         self.add_subcoil(pts=pts, scale=scale, attr=attr)
 
@@ -52,7 +52,7 @@ class ThinCurr_coil_set:
         if RZ is not None: # Circular coil
             if (pts is not None) or (hdf5_path is not None):
                 raise ValueError("Only one of `RZ`, `pts`, or `hdf5_path` should be provided")
-            self.add_circular_subcoil(RZ=RZ, scale=scale, attr=attr)
+            self.add_circular_subcoil(RZ=RZ, scale=scale, npoints=npoints, attr=attr)
             return
         if attr is None:
             attr = {}
@@ -218,8 +218,8 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
             attr['radius'] = radius
         super().add_subcoil(RZ=RZ, pts=pts, scale=scale, npoints=npoints, hdf5_path=hdf5_path, attr=attr)
         if len(self.resistivity_per_length_list) < len(self.subcoils):
-            self.resistivity_per_length_list.append(resistivity_per_length)
-            self.radius_list.append(radius)
+            self.resistivity_per_length_list.append(attr.get('res_per_len'))
+            self.radius_list.append(attr.get('radius'))
 
     def build_XML(self, parent_tag):
         """! Build XML structure for this V-coil

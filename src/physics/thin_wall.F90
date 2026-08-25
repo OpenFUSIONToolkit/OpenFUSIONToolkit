@@ -110,6 +110,7 @@ END TYPE tw_coil_set
 !> Class for thin-wall simulation
 !---------------------------------------------------------------------------------
 TYPE :: tw_type
+  LOGICAL :: model_frozen = .FALSE. !< Flag indicating if model is frozen (no more shape changes allowed)
   INTEGER(i4) :: nelems = 0 !< Number of elements in model (np_active+nholes+n_vcoils)
   INTEGER(i4) :: np_active = 0 !< Number of active vertices in model
   INTEGER(i4) :: n_coils = 0 !< Number of general coils in model

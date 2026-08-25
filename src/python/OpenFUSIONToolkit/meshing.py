@@ -39,9 +39,11 @@ def write_native_mesh(filename, mesh_type, r, lc, reg, nodesets=None, sidesets=N
         # Write out high-order mesh information (nodes and indexing information)
         if ho_info is not None:
             h5_file.create_dataset('mesh/ho_info/R', data=ho_info[0], dtype='f8')
-            h5_file.create_dataset('mesh/ho_info/LE', data=ho_info[1]+1, dtype='i4') # Convert to 1-based indexing for storage
+            tmp_array = numpy.asarray(ho_info[1], dtype=numpy.int32)
+            h5_file.create_dataset('mesh/ho_info/LE', data=tmp_array+1, dtype='i4') # Convert to 1-based indexing for storage
             if ho_info[2] is not None:
-                h5_file.create_dataset('mesh/ho_info/LF', data=ho_info[2]+1, dtype='i4') # Convert to 1-based indexing for storage
+                tmp_array = numpy.asarray(ho_info[2], dtype=numpy.int32)
+                h5_file.create_dataset('mesh/ho_info/LF', data=tmp_array+1, dtype='i4') # Convert to 1-based indexing for storage
         # Write region names
         if reg_names is not None:
             max_len = max(map(len, reg_names))
@@ -55,14 +57,17 @@ def write_native_mesh(filename, mesh_type, r, lc, reg, nodesets=None, sidesets=N
         if (nodesets is not None) and (len(nodesets) > 0):
             h5_file.create_dataset('mesh/NUM_NODESETS', data=[len(nodesets),], dtype='i4')
             for i, node_set in enumerate(nodesets):
+                node_set = numpy.asarray(node_set, dtype=numpy.int32)
                 h5_file.create_dataset('mesh/NODESET{0:04d}'.format(i+1), data=node_set+1, dtype='i4') # Convert to 1-based indexing for storage
         # Write sidesets (2D entity blocks)
         if (sidesets is not None) and (len(sidesets) > 0):
             h5_file.create_dataset('mesh/NUM_SIDESETS', data=[len(sidesets),], dtype='i4')
             for i, side_set in enumerate(sidesets):
+                side_set = numpy.asarray(side_set, dtype=numpy.int32)
                 h5_file.create_dataset('mesh/SIDESET{0:04d}'.format(i+1), data=side_set+1, dtype='i4') # Convert to 1-based indexing for storage
         # Write flag for periodic nodes following mesh reflection
         if periodic_info is not None:
+            periodic_info = numpy.asarray(periodic_info, dtype=numpy.int32)
             h5_file.create_dataset('mesh/periodicity/NODES', data=periodic_info+1, dtype='i4') # Convert to 1-based indexing for storage
 
 

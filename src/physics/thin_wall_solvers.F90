@@ -874,7 +874,18 @@ DO i=1,nsteps
       dt_op = dt
     END IF
     IF(direct)THEN
-      CALL oft_abort('Time steps must be uniform for direct solver','run_td_sim',__FILE__)
+      !---Re-build forward matrix [L + dt_op*R] (overwritten with inverse)
+      Minv%M=self%Lmat
+      DO k=1,self%Rmat%nr
+        DO j=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
+          Minv%M(k,self%Rmat%lc(j))=Minv%M(k,self%Rmat%lc(j)) + dt_op*self%Rmat%M(j)
+        END DO
+      END DO
+      WRITE(*,'(2A)')oft_indent,'Starting factorization'
+      pm_save=oft_env%pm; oft_env%pm=.TRUE.
+      ! CALL lapack_matinv(Minv%nr,Minv%M,info)
+      CALL lapack_cholesky(Minv%nr,Minv%M,info)
+      oft_env%pm=pm_save
     ELSE
       fmat%alam = dt_op ! Update forward matrix timestep
       CALL fmat%assemble()

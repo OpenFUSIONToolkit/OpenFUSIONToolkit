@@ -183,7 +183,10 @@ class ThinCurr():
             thincurr_get_coil_name(self.tw_obj,c_int(i+1),coil_name,ctypes.byref(vcoil_flag),error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value.decode())
-            self.coils[coil_name.value.decode()] = {
+            coil_name = coil_name.value.decode()
+            if coil_name in self.coils:
+                raise ValueError('Duplicate coil name "{0}" in model'.format(coil_name))
+            self.coils[coil_name] = {
                 'id': i+1,
                 'type': 'vcoil' if vcoil_flag.value else 'icoil'
             }
