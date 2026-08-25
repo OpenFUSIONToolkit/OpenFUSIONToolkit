@@ -111,6 +111,7 @@ END INTERFACE hdf5_write
 !------------------------------------------------------------------------------
 INTERFACE hdf5_read
   MODULE PROCEDURE hdf5_read_string
+  MODULE PROCEDURE hdf5_read_strings
   MODULE PROCEDURE hdf5_read_scalar_r8
   MODULE PROCEDURE hdf5_read_scalar_i4
   MODULE PROCEDURE hdf5_read_scalar_l
@@ -1234,10 +1235,34 @@ character(LEN=:), allocatable, intent(inout) :: string !< String to read from fi
 character(LEN=*), intent(in) :: filename !< Path to file
 character(LEN=*), intent(in) :: path !< Variable path in file
 logical, optional, intent(out) :: success !< Successful read?
+character(LEN=:), allocatable :: strings(:)
+IF(ALLOCATED(string))DEALLOCATE(string)
+CALL hdf5_read_strings(strings,filename,path,success)
+IF(.NOT.success)RETURN
+IF(SIZE(strings)/=1)THEN
+  IF(PRESENT(success))THEN
+    success=.FALSE.
+    RETURN
+  ELSE
+    CALL oft_abort('Error reading string from file: '//TRIM(filename)//' path: '//TRIM(path), &
+      'hdf5_read_string',__FILE__)
+  END IF
+END IF
+string = strings(1)
+DEALLOCATE(strings)
+end subroutine hdf5_read_string
+!------------------------------------------------------------------------------
+!> String implementation of \ref oft_io::hdf5_read
+!------------------------------------------------------------------------------
+subroutine hdf5_read_strings(strings,filename,path,success)
+character(LEN=:), allocatable, intent(inout) :: strings(:) !< String to read from file
+character(LEN=*), intent(in) :: filename !< Path to file
+character(LEN=*), intent(in) :: path !< Variable path in file
+logical, optional, intent(out) :: success !< Successful read?
 integer(i4) :: error
 integer(i4), parameter :: one=1,zero=0
-INTEGER(HSIZE_T) :: space_count
-integer(HID_T) :: file_id,dset_id,dspace_id
+INTEGER(HSIZE_T) :: space_count,string_size
+integer(HID_T) :: file_id,dset_id,dspace_id,type_id
 INTEGER(HSIZE_T), DIMENSION(1) :: dims
 ! DEBUG_STACK_PUSH
 IF(PRESENT(success))THEN
@@ -1247,19 +1272,25 @@ END IF
 !---Initialize HDF5 and open file
 call h5open_f(error)
 call h5fopen_f(TRIM(filename), H5F_ACC_RDONLY_F, file_id, error)
-IF(error/=0)GOTO 103
+IF(error/=0)GOTO 104
 CALL h5dopen_f(file_id, "/"//TRIM(path), dset_id, error)
+IF(error/=0)GOTO 103
+!---Get string size
+CALL H5Dget_type_f(dset_id, type_id, error)
 IF(error/=0)GOTO 102
-!---
+CALL H5Tget_size_f(type_id, string_size, error)
+IF(error/=0)GOTO 101
+!---Get dataset size (should be 1)
 CALL h5dget_space_f(dset_id, dspace_id, error)
 IF(error/=0)GOTO 101
 CALL h5sget_simple_extent_npoints_f(dspace_id, space_count, error)
 IF(error/=0)GOTO 100
 dims = space_count
-ALLOCATE(CHARACTER(LEN=dims(1)) :: string)
-call h5dread_f(dset_id, H5T_NATIVE_CHARACTER, string, dims, error)
+IF(ALLOCATED(strings))DEALLOCATE(strings)
+ALLOCATE(CHARACTER(LEN=string_size) :: strings(dims(1)))
+call h5dread_f(dset_id, type_id, strings, dims, error)
 IF(error/=0)THEN
-  DEALLOCATE(string)
+  DEALLOCATE(strings)
   GOTO 100
 END IF
 !---Close and finalize HDF5
@@ -1274,11 +1305,12 @@ IF(PRESENT(success))THEN
 END IF
 RETURN
 100 CALL h5sclose_f(dspace_id, error)
-101 CALL h5dclose_f(dset_id, error)
-102 CALL h5fclose_f(file_id, error)
-103 CALL h5close_f(error)
+101 CALL h5tclose_f(type_id, error)
+102 CALL h5dclose_f(dset_id, error)
+103 CALL h5fclose_f(file_id, error)
+104 CALL h5close_f(error)
 IF(PRESENT(success))CALL h5eset_auto_f(one, error)
-end subroutine hdf5_read_string
+end subroutine hdf5_read_strings
 !------------------------------------------------------------------------------
 !> real(r8) scalar implementation of \ref oft_io::hdf5_read
 !------------------------------------------------------------------------------

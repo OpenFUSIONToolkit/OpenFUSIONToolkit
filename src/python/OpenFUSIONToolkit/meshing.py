@@ -19,10 +19,10 @@ def write_native_mesh(filename, mesh_type, r, lc, reg, nodesets=None, sidesets=N
     @param filename Filename for mesh file
     @param mesh_type Mesh type string ( "tri", "quad", "tet", "hex")
     @param r Points list [np,3]
-    @param lc Cell list [nc,3] (1-based)
+    @param lc Cell list [nc,np_per_cell] (0-based)
     @param reg Region list [nc]
-    @param nodesets List of node sets
-    @param sidesets List of side sets
+    @param nodesets List of node sets (0-based)
+    @param sidesets List of side sets (0-based)
     @param ho_info High-order grid information
     @param periodic_info Information for mesh periodicity
     @param reg_attrs List of region attributes
@@ -89,7 +89,7 @@ def read_native_mesh(filename):
             elif lc.shape[1] == 4:
                 print('Warning: Mesh type not specified in file, assuming tetrahedral mesh with 4-node cells')
                 mesh_type = 'tet'
-            elif lc.shape[1] == 6:
+            elif lc.shape[1] == 8:
                 mesh_type = 'hex'
         mesh_info = {
             'type': mesh_type,

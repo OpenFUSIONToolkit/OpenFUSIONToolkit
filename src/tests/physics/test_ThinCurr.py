@@ -460,7 +460,7 @@ def validate_td(sigs_final, jumpers_final=None):
             print(e)
             return False
         if len(td_sigs_final) != len(jumpers_final):
-            print("FAILED: Number of jumpers does not match")
+            print("FAILED: Number of jumpers does not match {0} != {1}".format(len(td_sigs_final), len(jumpers_final)))
             return False
         retval = True
         if jumpers_final[0] != td_sigs_final[0]:

@@ -144,7 +144,8 @@ class ThinCurr_Icoil(ThinCurr_coil_set):
         """! Save I-coil information to HDF5 group
         @param h5_group HDF5 group to save the coil information into
         """
-        h5_group.attrs['NAME'] = self.name.encode('ascii')
+        name_len = len(self.name)
+        h5_group.create_dataset('NAME', data=numpy.array(self.name.encode('ascii'), dtype=f"S{name_len}"))
         h5_group.create_dataset('NCOILS', data=[len(self.subcoils),], dtype='i4')
         if self.sens_mask:
             h5_group.create_dataset('SENS_MASK', data=[1,], dtype='i4')
@@ -158,8 +159,8 @@ class ThinCurr_Icoil(ThinCurr_coil_set):
                 source_dataset = subcoil['hdf5_path'].split(':')[1]
                 with h5py.File(source_filepath, 'r') as source_file:
                     subcoil_group.create_dataset('PTS', data=source_file[source_dataset][()], dtype='f8')
-            if subcoil.get('scale') is not None:
-                scales[i] = subcoil['scale']
+            if subcoil.get('attr', {}).get('scale') is not None:
+                scales[i] = subcoil['attr']['scale']
         h5_group.create_dataset('SCALES', data=scales, dtype='f8')
 
 
@@ -180,29 +181,41 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
         self.resistivity_per_length_list = []
         self.radius_list = []
 
-    def add_circular_subcoil(self, RZ, scale=None, npoints=180, resistivity_per_length=None, radius=None):
+    def add_circular_subcoil(self, RZ, scale=None, npoints=180, attr=None, resistivity_per_length=None, radius=None):
         """! Add a circular subcoil to this coil set
         @param RZ [R, Z] position (for circular coils; centered on Z-axis)
         @param scale Scaling factor for coil current (`1.0` if not specified)
         @param npoints Number of points for circular coil discretization
+        @param attr Additional attributes for the subcoil
         @param resistivity_per_length Resistivity per unit length for the subcoil
         @param radius Radius of the subcoil
         """
-        super().add_circular_subcoil(RZ=RZ, scale=scale, npoints=npoints)
+        attr = attr if attr is not None else {}
+        if resistivity_per_length is not None:
+            attr['res_per_len'] = resistivity_per_length
+        if radius is not None:
+            attr['radius'] = radius
+        super().add_circular_subcoil(RZ=RZ, scale=scale, npoints=npoints, attr=attr)
         self.resistivity_per_length_list.append(resistivity_per_length)
         self.radius_list.append(radius)
 
-    def add_subcoil(self, RZ=None, pts=None, scale=None, npoints=None, hdf5_path=None, resistivity_per_length=None, radius=None):
+    def add_subcoil(self, RZ=None, pts=None, scale=None, npoints=None, hdf5_path=None, attr=None, resistivity_per_length=None, radius=None):
         """! Add a subcoil to this V-coil set
         @param RZ [R, Z] position (for circular coils; centered on Z-axis)
         @param pts Array of [x, y, z] positions (for general coils)
         @param scale Scaling factor for coil current (`1.0` if not specified)
         @param npoints Number of points (for general coils)
         @param hdf5_path Path to HDF5 dataset containing coil points (alternative to `pts` and `RZ`)
+        @param attr Additional attributes for the subcoil
         @param resistivity_per_length Resistivity per unit length for the subcoil
         @param radius Radius of the subcoil
         """
-        super().add_subcoil(RZ=RZ, pts=pts, scale=scale, npoints=npoints, hdf5_path=hdf5_path)
+        attr = attr if attr is not None else {}
+        if resistivity_per_length is not None:
+            attr['res_per_len'] = resistivity_per_length
+        if radius is not None:
+            attr['radius'] = radius
+        super().add_subcoil(RZ=RZ, pts=pts, scale=scale, npoints=npoints, hdf5_path=hdf5_path, attr=attr)
         self.resistivity_per_length_list.append(resistivity_per_length)
         self.radius_list.append(radius)
 
@@ -211,7 +224,7 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
         @param parent_tag Parent XML element to attach to
         """
         # Build attributes for coil_set
-        attrib = {"name": self.name,"radius": str(self.radius), "res_per_len": str(self.resistivity_per_length)}
+        attrib = {"name": self.name, "radius": str(self.radius), "res_per_len": str(self.resistivity_per_length)}
         if self.sens_mask:
             attrib["sens_mask"] = bool_to_string(self.sens_mask)
         coil_set = ET.SubElement(parent_tag, "coil_set", attrib=attrib)
@@ -255,7 +268,8 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
         """! Save V-coil information to HDF5 group
         @param h5_group HDF5 group to save the coil information into
         """
-        h5_group.attrs['NAME'] = self.name.encode('ascii')
+        name_len = len(self.name)
+        h5_group.create_dataset('NAME', data=numpy.array(self.name.encode('ascii'), dtype=f"S{name_len}"))
         h5_group.create_dataset('NCOILS', data=[len(self.subcoils),], dtype='i4')
         radius = [r if r is not None else self.radius for r in self.radius_list]
         h5_group.create_dataset('RADIUS', data=radius, dtype='f8')
@@ -273,8 +287,8 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
                 source_dataset = subcoil['hdf5_path'].split(':')[1]
                 with h5py.File(source_filepath, 'r') as source_file:
                     subcoil_group.create_dataset('PTS', data=source_file[source_dataset][()], dtype='f8')
-            if subcoil.get('scale') is not None:
-                scales[i] = subcoil['scale']
+            if subcoil.get('attr', {}).get('scale') is not None:
+                scales[i] = subcoil['attr']['scale']
         h5_group.create_dataset('SCALES', data=scales, dtype='f8')
 
 
@@ -282,7 +296,7 @@ def coil_from_hdf5(h5_group):
     """! Load coil information from HDF5 group
     @param h5_group HDF5 group containing the coil information
     """
-    name = h5_group.attrs['NAME']
+    name = h5_group['NAME'][()]
     if isinstance(name, bytes):
         name = name.decode('ascii')
     if 'RES_PER_LEN' in h5_group:
@@ -297,7 +311,7 @@ def coil_from_hdf5(h5_group):
         radius_list = None
     for i in range(h5_group['NCOILS'][0]):
         subcoil_group = h5_group['coil{0:04d}'.format(i+1)]
-        scale = subcoil_group['SCALES'][i] if 'SCALES' in subcoil_group else None
+        scale = h5_group['SCALES'][i] if 'SCALES' in h5_group else None
         if resistivity_per_length_list is not None:
             coil.add_subcoil(pts=subcoil_group['PTS'][()],scale=scale,
                              resistivity_per_length=resistivity_per_length_list[i], radius=radius_list[i])

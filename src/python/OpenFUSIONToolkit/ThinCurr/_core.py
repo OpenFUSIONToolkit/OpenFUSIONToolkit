@@ -108,7 +108,7 @@ class ThinCurr():
         @param pmap Point map for periodic grids
         @param xml_filename Path to XML file for model
         @param jumper_start Index of first jumper nodeset in meshfile (positive values Fortran style, negative values Python style)
-        @param no_verify Skip verification of mesh and model
+        @param no_verify_holes Skip verification of mesh and model
         '''
         if self.nregs != -1:
             raise ValueError('Mesh already setup, delete or create new instance for new model')

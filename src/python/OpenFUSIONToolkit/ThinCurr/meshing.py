@@ -22,16 +22,16 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures
 
     @param filename Filename for mesh file
     @param r Points list [np,3]
-    @param lc Cell list [nc,3]
+    @param lc Cell list [nc,3] (0-based)
     @param reg Region list [nc]
-    @param holes List of node sets for hole definitions
-    @param jumpers List of jumper sets
-    @param closures List of closures
-    @param eta_surf Surface electrical conductivity
-    @param eta_vol Volumetric electrical conductivity
-    @param thickness Thickness of the mesh elements
+    @param holes List of node sets for hole definitions (0-based)
+    @param jumpers List of jumper sets (0-based)
+    @param closures List of closures (0-based)
+    @param eta_surf Surface electrical resistivity [Ohm]
+    @param eta_vol Volumetric electrical resistivity [Ohm-m]
+    @param thickness Thickness of the mesh elements [m]
     @param coil_sets List of ThinCurr_coil_set objects to include in the mesh file
-    @param pmap Point mapping for periodic meshes (single surface only)
+    @param pmap Point mapping for periodic meshes (0-based,single surface only)
     @param nfp Number of field periods for periodic meshes (single surface only)
     @param reg_attrs List of region attributes
     @param reg_names List of region names

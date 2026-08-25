@@ -620,6 +620,10 @@ IF(B_dx>0.d0)THEN
 ELSE
   tw_obj%B_dx=ABS(B_dx)*tw_obj%mesh%hrms
 END IF
+IF(B_dx<1.d-4*tw_obj%mesh%hrms)THEN
+  CALL oft_warn('Small step size for B-field evaluation detected. This may lead to numerical errors.')
+  RETURN
+END IF
 CALL copy_string_rev(cache_file,filename)
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr,hodlr_op)
@@ -697,11 +701,11 @@ IF(ASSOCIATED(tw_obj%Ael2dr).OR.ASSOCIATED(tw_obj%Ael2coil))THEN
 END IF
 DO i=1,tw_obj%n_coils
   IF(flag_tmp(i)==1)THEN
-    IF(tw_obj%coils(i)%radius<=0.d0)THEN
+    IF(ANY(tw_obj%coils(i)%radius<=0.d0))THEN
       CALL copy_string('Cannot use coil '//TRIM(tw_obj%coils(i)%name)//' as Vcoil: radius not defined',error_string)
       RETURN
     END IF
-    IF(tw_obj%coils(i)%res_per_len<=0.d0)THEN
+    IF(ANY(tw_obj%coils(i)%res_per_len<=0.d0))THEN
       CALL copy_string('Cannot use coil '//TRIM(tw_obj%coils(i)%name)//' as Vcoil: resistance not defined',error_string)
       RETURN
     END IF
@@ -710,6 +714,8 @@ END DO
 !---
 IF(ASSOCIATED(tw_obj%vcoils))DEALLOCATE(tw_obj%vcoils)
 IF(ASSOCIATED(tw_obj%icoils))DEALLOCATE(tw_obj%icoils)
+tw_obj%n_vcoils=COUNT(flag_tmp==1)
+tw_obj%n_icoils=tw_obj%n_coils-tw_obj%n_vcoils
 IF(tw_obj%n_vcoils>0)ALLOCATE(tw_obj%vcoils(tw_obj%n_vcoils))
 IF(tw_obj%n_icoils>0)ALLOCATE(tw_obj%icoils(tw_obj%n_icoils))
 tw_obj%n_icoils=0
