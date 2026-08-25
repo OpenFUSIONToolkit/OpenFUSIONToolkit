@@ -196,8 +196,9 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
         if radius is not None:
             attr['radius'] = radius
         super().add_circular_subcoil(RZ=RZ, scale=scale, npoints=npoints, attr=attr)
-        self.resistivity_per_length_list.append(resistivity_per_length)
-        self.radius_list.append(radius)
+        if len(self.resistivity_per_length_list) < len(self.subcoils):
+            self.resistivity_per_length_list.append(resistivity_per_length)
+            self.radius_list.append(radius)
 
     def add_subcoil(self, RZ=None, pts=None, scale=None, npoints=None, hdf5_path=None, attr=None, resistivity_per_length=None, radius=None):
         """! Add a subcoil to this V-coil set
@@ -216,8 +217,9 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
         if radius is not None:
             attr['radius'] = radius
         super().add_subcoil(RZ=RZ, pts=pts, scale=scale, npoints=npoints, hdf5_path=hdf5_path, attr=attr)
-        self.resistivity_per_length_list.append(resistivity_per_length)
-        self.radius_list.append(radius)
+        if len(self.resistivity_per_length_list) < len(self.subcoils):
+            self.resistivity_per_length_list.append(resistivity_per_length)
+            self.radius_list.append(radius)
 
     def build_XML(self, parent_tag):
         """! Build XML structure for this V-coil
@@ -299,14 +301,16 @@ def coil_from_hdf5(h5_group):
     name = h5_group['NAME'][()]
     if isinstance(name, bytes):
         name = name.decode('ascii')
+    sens_mask = bool(h5_group['SENS_MASK'][0]) if 'SENS_MASK' in h5_group else None
     if 'RES_PER_LEN' in h5_group:
         coil = ThinCurr_Vcoil(name=name,
                                 resistivity_per_length=h5_group['RES_PER_LEN'][0],
-                                radius=h5_group['RADIUS'][0])
+                                radius=h5_group['RADIUS'][0],
+                                sens_mask=sens_mask)
         resistivity_per_length_list = h5_group['RES_PER_LEN'][()]
         radius_list = h5_group['RADIUS'][()]
     else:
-        coil = ThinCurr_Icoil(name=name)
+        coil = ThinCurr_Icoil(name=name,sens_mask=sens_mask)
         resistivity_per_length_list = None
         radius_list = None
     for i in range(h5_group['NCOILS'][0]):

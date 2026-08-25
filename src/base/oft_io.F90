@@ -1235,11 +1235,23 @@ character(LEN=:), allocatable, intent(inout) :: string !< String to read from fi
 character(LEN=*), intent(in) :: filename !< Path to file
 character(LEN=*), intent(in) :: path !< Variable path in file
 logical, optional, intent(out) :: success !< Successful read?
+integer(i4) :: i
 character(LEN=:), allocatable :: strings(:)
 IF(ALLOCATED(string))DEALLOCATE(string)
 CALL hdf5_read_strings(strings,filename,path,success)
-IF(.NOT.success)RETURN
+IF(PRESENT(success))THEN
+  IF(.NOT.success)RETURN
+END IF
 IF(SIZE(strings)/=1)THEN
+  !---Handle strings stored as a character array
+  IF(LEN(strings(1))==1)THEN
+    ALLOCATE(character(LEN=SIZE(strings)) :: string)
+    DO i=1,SIZE(strings)
+      string(i:i)=strings(i) ! Concatenate single-characters into one string
+    END DO
+    DEALLOCATE(strings)
+    RETURN
+  END IF
   IF(PRESENT(success))THEN
     success=.FALSE.
     RETURN
@@ -1295,6 +1307,7 @@ IF(error/=0)THEN
 END IF
 !---Close and finalize HDF5
 CALL h5sclose_f(dspace_id, error)
+CALL h5tclose_f(type_id, error)
 call h5dclose_f(dset_id, error)
 call h5fclose_f(file_id, error)
 call h5close_f(error)

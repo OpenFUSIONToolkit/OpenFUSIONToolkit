@@ -620,10 +620,7 @@ IF(B_dx>0.d0)THEN
 ELSE
   tw_obj%B_dx=ABS(B_dx)*tw_obj%mesh%hrms
 END IF
-IF(B_dx<1.d-4*tw_obj%mesh%hrms)THEN
-  CALL oft_warn('Small step size for B-field evaluation detected. This may lead to numerical errors.')
-  RETURN
-END IF
+IF(tw_obj%B_dx<1.d-4*tw_obj%mesh%hrms)CALL oft_warn('Small step size for B-field evaluation detected. This may lead to numerical errors.')
 CALL copy_string_rev(cache_file,filename)
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr,hodlr_op)
@@ -671,7 +668,7 @@ END SUBROUTINE thincurr_Mcoil
 SUBROUTINE thincurr_get_coil_name(tw_ptr,coil_ind,coil_name,vcoil_flag,error_str) BIND(C,NAME="thincurr_get_coil_name")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< ThinCurr object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: coil_ind !< Index of the coil
-CHARACTER(KIND=c_char), INTENT(out) :: coil_name(40) !< Name of the coil
+CHARACTER(KIND=c_char), INTENT(out) :: coil_name(41) !< Name of the coil
 LOGICAL(KIND=c_bool), INTENT(out) :: vcoil_flag !< Flag indicating if the coil is a virtual coil
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error message
 TYPE(tw_type), POINTER :: tw_obj

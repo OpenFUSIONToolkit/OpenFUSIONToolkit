@@ -775,21 +775,23 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
                 # Build list of cycles from smallest to largest
                 # intial_rank = np.linalg.matrix_rank(bmat_dense)
                 # U, S, V_T = np.linalg.svd(bmat_dense, full_matrices=False)
-                U, S, V_T, info = scipy.linalg.lapack.sgesdd(bmat_dense, full_matrices=0)
+                U, S, V_T, _ = scipy.linalg.lapack.sgesdd(bmat_dense, full_matrices=0)
                 intial_rank = np.sum(S > 1e-10)
                 hb_out = []
                 do_check = False
                 for i in np.argsort(minima_counts):
                     bmat_tmp = np.vstack((bmat_dense,he[i][keep_edges]))
-                    if (not do_check) and (i >= len(hb)): # Only start checking once we are looking at new cycles
+                    if (not do_check) and (i == len(hb)): # Only start checking once we are looking at new cycles
                         do_check = True
+                        # Update SVD with final set of previously accepted cycles
+                        U, S, V_T, _ = scipy.linalg.lapack.sgesdd(bmat_dense, full_matrices=0)
                     if do_check:
                         # aug_rank = np.linalg.matrix_rank(bmat_tmp)
                         try:
                             U, S, V_T = update_svd_with_row(U, S, V_T, he[i][keep_edges])
                         except np.linalg.LinAlgError: # Fall back to full factorization
                             # U, S, V_T = np.linalg.svd(bmat_tmp, full_matrices=False)
-                            U, S, V_T, info = scipy.linalg.lapack.sgesdd(bmat_tmp, full_matrices=0)
+                            U, S, V_T, _ = scipy.linalg.lapack.sgesdd(bmat_tmp, full_matrices=0)
                         aug_rank = np.sum(S > 1.e-10)
                     else:
                         aug_rank = intial_rank + 1

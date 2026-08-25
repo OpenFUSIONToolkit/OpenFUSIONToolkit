@@ -114,7 +114,7 @@ def read_mesh(filename, ignore_attrs):
             else:
                 block_attrs.append(None)
         elif varname.startswith('node_ns'):
-            node_sets.append(np.asarray(variable)-1) # Convert to 0-based indexing
+            node_sets.append(np.asarray(variable)) # Keep 1-based indexing for now
         elif varname.startswith('elem_ss'):
             side_sets.append(np.asarray(variable)-1) # Convert to 0-based indexing
     # Read block names if present
@@ -156,7 +156,7 @@ def read_mesh(filename, ignore_attrs):
         node_sets[i] = np.array([node for node in nodeset if reindex_flag[node] == 1])
     rindexed_pts = np.cumsum(reindex_flag)
     lc_new = rindexed_pts[lc[:,:ncp_lin]] - 1 # Convert back to 0-based indexing
-    node_sets = [rindexed_pts[nodeset] for nodeset in node_sets]
+    node_sets = [rindexed_pts[nodeset] - 1 for nodeset in node_sets] # Convert back to 0-based indexing
     # Build high-order information
     if mesh_order > 1: # Handle high-order if present
         ed_map = block_types[0]['ed_map']
