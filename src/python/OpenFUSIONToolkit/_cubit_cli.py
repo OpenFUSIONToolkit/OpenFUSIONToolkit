@@ -103,7 +103,7 @@ def read_mesh(filename, ignore_attrs):
                     block_type_info = element_type_map.get(block_type,{'type': block_type, 'dim': -1})
                     max_logical_dim = max(max_logical_dim,block_type_info['dim'])
                     block_types.append(block_type_info)
-            lc_tmp = np.asarray(variable)
+            lc_tmp = np.asarray(variable) # Keep 1-based indexing for now
             lc.append(lc_tmp)
             # Retrieve attributes if present
             attr_name = 'attrib' + varname[7:]
@@ -156,7 +156,6 @@ def read_mesh(filename, ignore_attrs):
         node_sets[i] = np.array([node for node in nodeset if reindex_flag[node] == 1])
     rindexed_pts = np.cumsum(reindex_flag)
     lc_new = rindexed_pts[lc[:,:ncp_lin]] - 1 # Convert back to 0-based indexing
-    print('LC CHK',lc_new.min(axis=None))
     node_sets = [rindexed_pts[nodeset] for nodeset in node_sets]
     # Build high-order information
     if mesh_order > 1: # Handle high-order if present

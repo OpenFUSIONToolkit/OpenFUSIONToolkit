@@ -108,7 +108,7 @@ class ThinCurrMesh:
             holes=[h.copy() for h in self.holes] if self.holes is not None else None,
             jumpers=[j.copy() for j in self.jumpers] if self.jumpers is not None else None,
             closures=self.closures.copy() if self.closures is not None else None,
-            nodesets=[ns.copy() for ns in self.nodesets],
+            nodesets=[ns.copy() for ns in self.nodesets] if self.nodesets is not None else None,
             tc_props={k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in self.tc_props.items()},
             mesh_props={k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in self.mesh_props.items()},
             coil_sets=self.coil_sets)
@@ -317,10 +317,10 @@ class ThinCurrMesh:
             out = []
             for i, s in enumerate(sets):
                 mapped = old_to_new[s]
-                keep = mapped >= 0
+                keep = (mapped >= 0)
                 if not np.all(keep):
-                    print("  Warning: dropping {0} entrie(s) from {1} {2}".format(
-                        int(np.sum(~keep)), label, i + 1))
+                    print("  Warning: dropping {0} entries from {1} {2}".format(
+                          int(np.sum(~keep)), label, i + 1))
                 mapped = mapped[keep].astype(np.int32)
                 if mapped.shape[0] > 0:
                     out.append(mapped)
@@ -351,10 +351,10 @@ class ThinCurrMesh:
             if key in self.tc_props:
                 arr = self.tc_props[key]
                 self.tc_props[key] = np.array([arr[old - 1] for old in surviving], dtype=np.float64)
-        # Remap sidesets (cell indices)
+        # Remap closures (cell indices)
         cell_new = -np.ones((keep_cell.shape[0],), dtype=np.int64)
         cell_new[keep_cell] = np.arange(int(np.sum(keep_cell)))
-        self.closures = _remap_index_sets(self.closures, cell_new, "closures")
+        self.closures = _remap_index_sets([self.closures], cell_new, "closures")[0] if self.closures is not None else None
 
         # Remove unreferenced vertices and remap connectivity/nodesets (in place)
         used = np.zeros((self.np,), dtype=bool)
@@ -366,8 +366,8 @@ class ThinCurrMesh:
         if self.nc > 0:
             self.lc = new_of_old[self.lc].astype(np.int32)
         # Remap holes/jumpers
-        self.holes = _remap_index_sets(self.holes, new_of_old, "holes")
-        self.jumpers = _remap_index_sets(self.jumpers, new_of_old, "jumpers")
+        self.holes = _remap_index_sets(self.holes, new_of_old, "holes") if self.holes is not None else None
+        self.jumpers = _remap_index_sets(self.jumpers, new_of_old, "jumpers") if self.jumpers is not None else None
 
     def append(self, other, distinct_regions=True):
         '''! Append another mesh onto this one (in place)
@@ -383,20 +383,18 @@ class ThinCurrMesh:
         self.lc = np.vstack((self.lc, other.lc + np_offset)) if nc_offset > 0 else (other.lc + np_offset)
         self.reg = np.concatenate((self.reg, other.reg + reg_offset))
         # Append holes
-        if self.holes is None:
-            self.holes = [ns.copy() for ns in other.holes] if other.holes is not None else None
-        else:
-            self.holes = [ns+np_offset for ns in other.holes] if other.holes is not None else self.holes
+        if other.holes is not None:
+            existing_holes = self.holes if self.holes is not None else []
+            self.holes = existing_holes + [ns + np_offset for ns in other.holes]
         # Append jumpers
         if self.jumpers is None:
             self.jumpers = [ns.copy() for ns in other.jumpers] if other.jumpers is not None else None
         else:
             self.jumpers = [ns+np_offset for ns in other.jumpers] if other.jumpers is not None else self.jumpers
         # Append closures
-        if self.closures is None:
-            self.closures = other.closures.copy() if other.closures is not None else None
-        else:
-            self.closures = np.concatenate((self.closures, other.closures + nc_offset)) if other.closures is not None else self.closures
+        if other.closures is not None:
+            appended_closures = other.closures + nc_offset
+            self.closures = appended_closures if self.closures is None else np.concatenate((self.closures, appended_closures))
         # Append resistivity properties (if any) and warn if they exist in either mesh
         if distinct_regions:
             if 'eta_surf' in self.tc_props and 'eta_surf' in other.tc_props:
@@ -699,7 +697,7 @@ def script_entry(argv=None):
                 parser.error(str(err))
             print("  {0} hole(s), {1} jumper(s)".format(mesh.nholes, mesh.njumpers))
         # Set resistivity last, matched against the final region count
-        if res_spec is not None:
+        if any(value is not None for value in res_spec):
             print()
             print("Setting resistivity...")
             try:

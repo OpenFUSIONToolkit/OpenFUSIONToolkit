@@ -589,7 +589,8 @@ character(LEN=*), intent(in) :: filepath !< Path to file
 character(LEN=*), intent(in) :: path !< Path of field in file
 integer :: access_flag,error,subpath
 integer(HID_T) :: file_id,dset_id
-logical :: exists
+logical :: exists,exists_lc
+character(LEN=:), allocatable :: path_lc
 exists=oft_file_exist(filepath)
 IF(.NOT.exists)RETURN
 DEBUG_STACK_PUSH
@@ -604,6 +605,20 @@ DO subpath=1,LEN_TRIM(path)
   IF(subpath<LEN_TRIM(path).AND.path(subpath:subpath)/="/")CYCLE
   CALL h5lexists_f(file_id, "/"//path(1:subpath), exists, error)
 END DO
+!---Check for lowercase variant of path (HDF5 is case sensitive)
+IF(.NOT.exists)THEN
+  path_lc=TRIM(path)
+  CALL string_to_lower(path_lc)
+  exists_lc=.TRUE.
+  DO subpath=1,LEN_TRIM(path)
+    IF(.NOT.exists_lc)EXIT
+    IF(subpath<LEN_TRIM(path).AND.path(subpath:subpath)/="/")CYCLE
+    CALL h5lexists_f(file_id, "/"//path_lc(1:subpath), exists_lc, error)
+  END DO
+  IF(exists_lc)THEN
+    CALL oft_warn('Case variant of path exists in HDF5 file: '//TRIM(path))
+  END IF
+END IF
 !---Close file and finalize HDF5
 call h5fclose_f(file_id, error)
 call h5close_f(error)

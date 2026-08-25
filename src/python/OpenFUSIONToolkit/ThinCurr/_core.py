@@ -758,7 +758,10 @@ class ThinCurr():
             nvolt = c_int(coil_volts.shape[0])
             coil_volts = numpy.ascontiguousarray(coil_volts.transpose(), dtype=numpy.float64)
         if times is not None:
-            times = numpy.ascontiguousarray(times, dtype=numpy.float64)
+            times = numpy.asarray(times, dtype=numpy.float64)
+            if (times.ndim != 1) or (times.size < 2) or not numpy.all(numpy.isfinite(times)) or numpy.any(numpy.diff(times) <= 0.0):
+                raise ValueError('"times" must be a finite, strictly increasing 1D array with at least two entries')
+            times = numpy.ascontiguousarray(times)
             if nsteps is not None:
                 raise ValueError('"nsteps" should not be specified if "times" is specified')
             nsteps = times.shape[0]-1

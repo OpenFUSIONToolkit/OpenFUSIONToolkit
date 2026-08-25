@@ -170,7 +170,7 @@ def read_mesh(filename):
         for i in range(lc.shape[0]):
             for j in range(nce):
                 le_ho[rindexed_pts_ho[lc[i,ncp_lin+j]]-1,:] = lc_new[i,ed_map[j,:]]
-        ho_info = (r_ho, le_ho)
+        ho_info = (r_ho, le_ho, None)
     else:
         ho_info = None
     mesh_type = 'TRI' if mesh_dim == 2 else 'TET'
