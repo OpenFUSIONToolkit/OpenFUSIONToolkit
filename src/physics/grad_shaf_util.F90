@@ -201,7 +201,7 @@ real(8), intent(out) :: bp_vol !< \f$ \int B_p^2 dV \f$
 type(oft_lag_brinterp) :: psi_eval
 type(oft_lag_bginterp) :: psi_geval
 real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
-real(8) :: pt(3),curr_cent(2),Btor,Bpol(2)
+real(8) :: pt(3),psi_sol,Btor,Bpol(2)
 integer(4) :: i,m
 class(oft_bmesh), pointer :: smesh
 type(gs_factory), pointer :: device
@@ -219,7 +219,7 @@ vol = 0.d0
 dflux = 0.d0
 tflux = 0.d0
 bp_vol = 0.d0
-!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,Btor,Bpol) &
+!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,psi_sol,itor_loc,Btor,Bpol) &
 !$omp reduction(+:itor) reduction(+:centroid) reduction(+:pvol) reduction(+:vol) reduction(+:dflux) &
 !$omp reduction(+:tflux) reduction(+:bp_vol)
 do i=1,smesh%nc
@@ -227,10 +227,10 @@ do i=1,smesh%nc
   do m=1,device%fe_rep%quad%np
     call smesh%jacobian(i,device%fe_rep%quad%pts(:,m),goptmp,v)
     call psi_eval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
-    IF(psitmp(1)<self%plasma_bounds(1))CYCLE
+    IF((psitmp(1)<self%plasma_bounds(1)).AND.(.NOT.self%I%include_sol))CYCLE
     pt=smesh%log2phys(i,device%fe_rep%quad%pts(:,m))
     !---Compute Magnetic Field
-    IF(gs_test_bounds(self,pt))THEN
+    IF(gs_test_bounds(self,pt).AND.(psitmp(1)>self%plasma_bounds(1)))THEN
       IF(self%mode==0)THEN
         itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
         + self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon))
@@ -261,17 +261,22 @@ do i=1,smesh%nc
         - self%I%f_offset)/pt(1)
       END IF
       dflux = dflux + Btor*v*device%fe_rep%quad%wts(m)
-    END IF
-    IF(self%I%include_sol)THEN
-     IF(self%mode==0)THEN
-        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
-        + (self%ffp_scale**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%ffp_scale)/(pt(1)+gs_epsilon))
+    ELSE IF(self%I%include_sol)THEN
+      !---SOL current: FF' only, matching the source term applied in `gs_source`
+      ! Reflect private-flux psi across the separatrix (also matches `gs_source`)
+      psi_sol=psitmp(1)
+      IF(psi_sol>self%plasma_bounds(1))psi_sol=2.d0*self%plasma_bounds(1)-psi_sol
+      IF(self%mode==0)THEN
+        itor_loc = self%I%Fp(psi_sol)*((self%ffp_scale**2)*self%I%f(psi_sol) &
+          + self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
-        + .5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+        itor_loc = 0.5d0*self%ffp_scale*self%I%Fp(psi_sol)/(pt(1)+gs_epsilon)
       END IF
-      curr_cent = curr_cent + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
-      itor = itor + pt(1)*self%P%Fp(psitmp(1))*v*device%fe_rep%quad%wts(m)
+      itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
+      centroid = centroid + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
+      ! NOTE: `vol`, `pvol`, `dflux`, `tflux` and `bp_vol` remain confined-region
+      ! integrals, so l_i and beta use a denominator that excludes SOL current
+      ! while `itor` includes it.
     END IF
   end do
 end do

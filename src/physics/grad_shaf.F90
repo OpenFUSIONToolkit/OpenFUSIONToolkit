@@ -3542,7 +3542,7 @@ real(8), optional, intent(out) :: centroid(2) !< Current centroid (optional) [2]
 type(oft_lag_brinterp), target :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp), target :: psi_geval
 real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),bcross_kappa(1),H,ani_fac,pani(2)
-real(8) :: pt(3),curr_cent(2)
+real(8) :: pt(3),curr_cent(2),psi_sol
 integer(4) :: i,m
 type(gs_factory), pointer :: device
 IF(.NOT.self%has_plasma)THEN
@@ -3589,17 +3589,19 @@ do i=1,device%fe_rep%mesh%nc
       END IF
       itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
       curr_cent = curr_cent + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
-    END IF
-    IF(self%I%include_sol)THEN
-     IF(self%mode==0)THEN
-        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
-        + (self%ffp_scale**2)*self%I%Fp(psitmp(1))*(self%I%f(psitmp(1))+self%I%f_offset/self%ffp_scale)/(pt(1)+gs_epsilon))
+    ELSE IF(self%I%include_sol)THEN
+      !---SOL current: FF' only, matching the source term applied in `gs_source`
+      ! Reflect private-flux psi across the separatrix (also matches `gs_source`)
+      psi_sol=psitmp(1)
+      IF(psi_sol>self%plasma_bounds(1))psi_sol=2.d0*self%plasma_bounds(1)-psi_sol
+      IF(self%mode==0)THEN
+        itor_loc = self%I%Fp(psi_sol)*((self%ffp_scale**2)*self%I%f(psi_sol) &
+          + self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
-        + .5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+        itor_loc = 0.5d0*self%ffp_scale*self%I%Fp(psi_sol)/(pt(1)+gs_epsilon)
       END IF
+      itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
       curr_cent = curr_cent + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
-      itor = itor + pt(1)*self%P%Fp(psitmp(1))*v*device%fe_rep%quad%wts(m)
     END IF
   end do
 end do
