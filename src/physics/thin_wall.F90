@@ -195,6 +195,7 @@ IF(ALLOCATED(error_string))RETURN
 !---Load coils from XML for backwards compatibility
 IF(.NOT.self%xml%associated().AND.ASSOCIATED(oft_env%xml))CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
 IF(coils_xml)THEN
+  !---Read V(t) driver coils from XML file
   CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
   IF(error_flag==0)THEN
     WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils from XML file'
@@ -208,11 +209,7 @@ IF(coils_xml)THEN
     IF(ANY(self%vcoils(i)%radius<coil_min_rad))CALL oft_abort("Invalid radius for passive coil", &
       "tw_setup", __FILE__)
   END DO
-ELSE
-  CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
-  IF(error_flag==0)CALL oft_warn("V-coils specified in mesh and XML files, ignoring XML definitions")
-END IF
-IF(coils_xml)THEN
+  !---Read I(t) driver coils from XML file
   CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
   IF(error_flag==0)THEN
     WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils from XML file'
@@ -225,12 +222,7 @@ IF(coils_xml)THEN
       self%icoils(i)%radius(j)=MAX(coil_min_rad,self%icoils(i)%radius(j)) ! Remove dummy radius on Icoils
     END DO
   END DO
-ELSE
-  CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
-  IF(error_flag==0)CALL oft_warn("I-coils specified in mesh and XML files, ignoring XML definitions")
-END IF
-!---TEMPORARY to match new behavior of storing all coils together
-IF(coils_xml)THEN
+  !---TEMPORARY to match new behavior of storing all coils together
   self%n_coils=self%n_vcoils+self%n_icoils
   IF(self%n_coils>0)ALLOCATE(self%coils(self%n_coils))
   DO i=1,self%n_vcoils
@@ -241,6 +233,23 @@ IF(coils_xml)THEN
     CALL tw_copy_coil(self%icoils(i),self%coils(i+self%n_vcoils))
     self%coils(i+self%n_vcoils)%is_vcoil=.FALSE.
   END DO
+ELSE
+  CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
+  IF(error_flag==0)THEN
+    IF(self%n_vcoils>0)THEN
+      CALL oft_warn("V-coils specified in mesh and XML files, ignoring XML definitions")
+    ELSE
+      CALL oft_warn("V-coils specified in XML file, but not in mesh file, ignoring XML definitions")
+    END IF
+  END IF
+  CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
+  IF(error_flag==0)THEN
+    IF(self%n_icoils>0)THEN
+      CALL oft_warn("I-coils specified in mesh and XML files, ignoring XML definitions")
+    ELSE
+      CALL oft_warn("I-coils specified in XML file, but not in mesh file, ignoring XML definitions")
+    END IF
+  END IF
 END IF
 !---Analyze mesh to construct holes
 IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)

@@ -71,7 +71,7 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures
             h5_file.create_dataset('thincurr/coils/NCOILSETS', data=[len(coil_sets),], dtype='i4')
             for i, coil_set in enumerate(coil_sets):
                 coil_group = h5_file.create_group('thincurr/coils/coilset{0:04d}'.format(i+1))
-                coil_set.save_hdf5(coil_group)
+                coil_set.save_hdf5(coil_group,fallback_name="coilset{0:04d}".format(i+1))
         # Write mesh periodicity information
         if nfp is not None:
             h5_file.create_dataset('thincurr/periodicity/NFP', data=[nfp,], dtype='i4')

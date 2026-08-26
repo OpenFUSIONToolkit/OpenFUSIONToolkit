@@ -10,56 +10,69 @@
 import xml.etree.ElementTree as ET
 import numpy
 import h5py
-from .._core import bool_to_string
+from .._interface import bool_to_string, string_to_bool
+
 
 def _split_delimited_float(string):
     if ',' in string:
         return [float(x.strip()) for x in string.split(',')]
     else:
         return [float(x.strip()) for x in string.split()]
-# ===============================
-# Icoil and Vcoil classes
-# ===============================
+
 
 class ThinCurr_coil_set:
-    def __init__(self, name, sens_mask=False):
+    def __init__(self, name, sens_mask=False, resistivity_per_length=None, radius=None):
         """! Initialize general coil set
         @param name Name of the coil set
         @param sens_mask Masking flag for coil (if `True`, coil is masked from sensors)
+        @param resistivity_per_length Resistivity per unit length (required if used as Vcoil)
+        @param radius Coil radius (required if used as Vcoil)
         """
         self.name = name
         self.sens_mask = sens_mask
         self.subcoils = []  # List of subcoil dictionaries
+        self.resistivity_per_length = resistivity_per_length
+        self.radius = radius
+        self.resistivity_per_length_list = []
+        self.radius_list = []
 
-    def add_circular_subcoil(self, RZ, scale=None, npoints=None, attr=None):
+    def add_circular_subcoil(self, RZ, scale=None, npoints=None, attr=None, resistivity_per_length=None, radius=None):
         """! Add a circular subcoil to this coil set
         @param RZ [R, Z] position (for circular coils; centered on Z-axis)
         @param scale Scaling factor for coil current (`1.0` if not specified)
-        @param npoints Number of points for circular coil discretization (default: 180)
+        @param npoints Number of points for circular coil discretization (default: 181)
+        @param resistivity_per_length Resistivity per unit length (required if used as Vcoil)
+        @param radius Coil radius (required if used as Vcoil)
         """
         if npoints is None:
-            npoints = 180  # Default number of points for circular coil
+            npoints = 181  # Default number of points for circular coil
         theta = numpy.linspace(0, 2*numpy.pi, npoints)
         pts = numpy.column_stack([RZ[0] * numpy.cos(theta), RZ[0] * numpy.sin(theta), numpy.full(npoints, RZ[1])])
-        self.add_subcoil(pts=pts, scale=scale, attr=attr)
+        self.add_subcoil(pts=pts, scale=scale, attr=attr, resistivity_per_length=resistivity_per_length, radius=radius)
 
-    def add_subcoil(self, RZ=None, pts=None, scale=None, npoints=None, hdf5_path=None, attr=None):
+    def add_subcoil(self, RZ=None, pts=None, scale=None, npoints=None, hdf5_path=None, attr=None, resistivity_per_length=None, radius=None):
         """! Add a subcoil to this V-coil set
         @param RZ [R, Z] position (for circular coils; centered on Z-axis)
         @param pts Array of [x, y, z] positions (for general coils)
         @param scale Scaling factor for coil current (`1.0` if not specified)
-        @param npoints Number of points (for general coils)
+        @param npoints Number of points
         @param hdf5_path Path to HDF5 dataset containing coil points (alternative to `pts` and `RZ`)
+        @param resistivity_per_length Resistivity per unit length (required if used as Vcoil)
+        @param radius Coil radius (required if used as Vcoil)
         """
         if RZ is not None: # Circular coil
             if (pts is not None) or (hdf5_path is not None):
                 raise ValueError("Only one of `RZ`, `pts`, or `hdf5_path` should be provided")
-            self.add_circular_subcoil(RZ=RZ, scale=scale, npoints=npoints, attr=attr)
+            self.add_circular_subcoil(RZ=RZ, scale=scale, npoints=npoints, attr=attr, resistivity_per_length=resistivity_per_length, radius=radius)
             return
         if attr is None:
             attr = {}
         if scale is not None:
             attr['scale'] = scale
+        if resistivity_per_length is not None:
+            attr['res_per_len'] = resistivity_per_length
+        if radius is not None:
+            attr['radius'] = radius
         if pts is not None: # General 3D coil
             if (RZ is not None) or (hdf5_path is not None):
                 raise ValueError("Only one of `RZ`, `pts`, or `hdf5_path` should be provided")
@@ -73,6 +86,8 @@ class ThinCurr_coil_set:
             self.subcoils.append({'hdf5_path': hdf5_path, 'attr': attr})
         else:
             raise ValueError("Either `RZ`, `pts`, or `hdf5_path` must be provided")
+        self.resistivity_per_length_list.append(attr.get('res_per_len'))
+        self.radius_list.append(attr.get('radius'))
 
     def build_coil_XML(self, coil_set):
         """! Build XML structure for this V-coil
@@ -94,23 +109,20 @@ class ThinCurr_coil_set:
                 for key, value in subcoil['attr'].items():
                     coil_element.set(key, str(value))
 
-
-class ThinCurr_Icoil(ThinCurr_coil_set):
-    """! I-coil class for defining current-driven coils in OpenFUSIONToolkit"""
-
-    def __init__(self, name, sens_mask=False):
-        """! Initialize I-coil
-        @param name Name of the coil set
-        @param sens_mask Masking flag for coil (if `True`, coil is masked from sensors)
-        """
-        super().__init__(name, sens_mask)
-
     def build_XML(self, parent_tag):
-        """! Build XML structure for this I-coil
+        """! Build XML structure for this V-coil
         @param parent_tag Parent XML element to attach to
         """
+        if len(self.subcoils) == 0:
+            raise ValueError("Coil set must contain at least one subcoil")
         # Build attributes for coil_set
-        attrib = {"name": self.name}
+        attrib = {}
+        if self.name is not None:
+            attrib["name"] = self.name
+        if self.resistivity_per_length is not None:
+            attrib["res_per_len"] = '{0:.6E}'.format(self.resistivity_per_length)
+        if self.radius is not None:
+            attrib["radius"] = '{0:.6E}'.format(self.radius)
         if self.sens_mask:
             attrib["sens_mask"] = bool_to_string(self.sens_mask)
         coil_set = ET.SubElement(parent_tag, "coil_set", attrib=attrib)
@@ -119,38 +131,62 @@ class ThinCurr_Icoil(ThinCurr_coil_set):
 
     @staticmethod
     def load_from_xml(coil_elem, fallback_name):
-        """! Load I-coil from XML element
+        """! Load coil from XML element
         @param coil_elem XML element representing the coil_set
-        @param fallback_name Fallback name for the coil
+        @param fallback_name Fallback name for the coil_set
         """
         name = coil_elem.attrib.get("name", fallback_name)
-        sens_mask = coil_elem.attrib.get("sens_mask", "false").lower() == "true"
-        icoil = ThinCurr_Icoil(name=name, sens_mask=sens_mask)
+        sens_mask = string_to_bool(coil_elem.attrib.get("sens_mask", "false"))
+        radius = float(coil_elem.attrib["radius"]) if "radius" in coil_elem.attrib else None
+        resistivity_per_length = float(coil_elem.attrib["res_per_len"]) if "res_per_len" in coil_elem.attrib else None
+        coil_set = ThinCurr_coil_set(name=name, sens_mask=sens_mask, resistivity_per_length=resistivity_per_length, radius=radius)
         for subcoil_elem in coil_elem.findall("coil"):
-            scale = float(subcoil_elem.attrib.get("scale", 1.0))
+            subcoil_scale = float(subcoil_elem.attrib["scale"]) if "scale" in subcoil_elem.attrib else None
+            subcoil_radius = float(subcoil_elem.attrib["radius"]) if "radius" in subcoil_elem.attrib else None
+            subcoil_resistivity = float(subcoil_elem.attrib["res_per_len"]) if "res_per_len" in subcoil_elem.attrib else None
             if "path" in subcoil_elem.attrib:
                 hdf5_path = subcoil_elem.attrib["path"]
-                icoil.add_subcoil(hdf5_path=hdf5_path, scale=scale)
+                coil_set.add_subcoil(hdf5_path=hdf5_path, scale=subcoil_scale, resistivity_per_length=subcoil_resistivity, radius=subcoil_radius)
             else:
                 npts = int(subcoil_elem.attrib.get("npts", 0))
                 pts_text = subcoil_elem.text.strip()
                 pts_lines = pts_text.splitlines()
                 pts = numpy.array([_split_delimited_float(line) for line in pts_lines])
                 if (npts == 0) or (pts.shape[0] == 1):
-                    icoil.add_circular_subcoil(RZ=pts[0], scale=scale)
+                    coil_set.add_circular_subcoil(RZ=pts[0], scale=subcoil_scale, resistivity_per_length=subcoil_resistivity, radius=subcoil_radius)
                 else:
-                    icoil.add_subcoil(pts=pts, scale=scale, npoints=npts)
-        return icoil
+                    coil_set.add_subcoil(pts=pts, scale=subcoil_scale, npoints=npts, resistivity_per_length=subcoil_resistivity, radius=subcoil_radius)
+        return coil_set
 
-    def save_hdf5(self, h5_group):
-        """! Save I-coil information to HDF5 group
+    def save_hdf5(self, h5_group, fallback_name):
+        """! Save coil information to HDF5 group
         @param h5_group HDF5 group to save the coil information into
+        @param fallback_name Fallback name for the coil_set
         """
-        name_len = len(self.name)
-        h5_group.create_dataset('NAME', data=numpy.array(self.name.encode('ascii'), dtype=f"S{name_len}"))
+        if len(self.subcoils) == 0:
+            raise ValueError("Coil set must contain at least one subcoil")
+        name = self.name if self.name is not None else fallback_name
+        name_len = len(name)
+        h5_group.create_dataset('NAME', data=numpy.array(name.encode('ascii'), dtype=f"S{name_len}"))
         h5_group.create_dataset('NCOILS', data=[len(self.subcoils),], dtype='i4')
         if self.sens_mask:
             h5_group.create_dataset('SENS_MASK', data=[1,], dtype='i4')
+        # Save resistivity and radius information if available
+        radius = [r if r is not None else self.radius for r in self.radius_list]
+        resistivity_per_length = [r if r is not None else self.resistivity_per_length for r in self.resistivity_per_length_list]
+        if any(r is None for r in radius) != any(r is None for r in resistivity_per_length):
+            raise ValueError("Both radius and resistivity_per_length must be specified or neither must be specified.")
+        if any(r is not None for r in radius):
+            if all(r is not None for r in radius):
+                h5_group.create_dataset('RADIUS', data=radius, dtype='f8')
+            else:
+                raise ValueError("Radius specified on only some subcoils, and no coilset value provided.")
+        if any(r is not None for r in resistivity_per_length):
+            if all(r is not None for r in resistivity_per_length):
+                h5_group.create_dataset('RES_PER_LEN', data=resistivity_per_length, dtype='f8')
+            else:
+                raise ValueError("Resistivity per length specified on only some subcoils, and no coilset value provided.")
+        # Save subcoil information
         scales = numpy.ones((len(self.subcoils),))
         for i, subcoil in enumerate(self.subcoils):
             subcoil_group = h5_group.create_group('coil{0:04d}'.format(i+1))
@@ -164,6 +200,17 @@ class ThinCurr_Icoil(ThinCurr_coil_set):
             if subcoil.get('attr', {}).get('scale') is not None:
                 scales[i] = subcoil['attr']['scale']
         h5_group.create_dataset('SCALES', data=scales, dtype='f8')
+
+
+class ThinCurr_Icoil(ThinCurr_coil_set):
+    """! I-coil class for defining current-driven coils in OpenFUSIONToolkit"""
+
+    def __init__(self, name, sens_mask=False):
+        """! Initialize I-coil
+        @param name Name of the coil set
+        @param sens_mask Masking flag for coil (if `True`, coil is masked from sensors)
+        """
+        super().__init__(name, sens_mask)
 
 
 class ThinCurr_Vcoil(ThinCurr_coil_set):
@@ -176,124 +223,7 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
         @param radius Coil radius
         @param sens_mask Masking flag for coil (if `True`, coil is masked from sensors)
         """
-        super().__init__(name, sens_mask)
-        # Vcoil-specific fields
-        self.resistivity_per_length = resistivity_per_length
-        self.radius = radius
-        self.resistivity_per_length_list = []
-        self.radius_list = []
-
-    def add_circular_subcoil(self, RZ, scale=None, npoints=None, attr=None, resistivity_per_length=None, radius=None):
-        """! Add a circular subcoil to this coil set
-        @param RZ [R, Z] position (for circular coils; centered on Z-axis)
-        @param scale Scaling factor for coil current (`1.0` if not specified)
-        @param npoints Number of points for circular coil discretization (default: 180)
-        @param attr Additional attributes for the subcoil
-        @param resistivity_per_length Resistivity per unit length for the subcoil
-        @param radius Radius of the subcoil
-        """
-        attr = attr if attr is not None else {}
-        if resistivity_per_length is not None:
-            attr['res_per_len'] = resistivity_per_length
-        if radius is not None:
-            attr['radius'] = radius
-        super().add_circular_subcoil(RZ=RZ, scale=scale, npoints=npoints, attr=attr)
-        if len(self.resistivity_per_length_list) < len(self.subcoils):
-            self.resistivity_per_length_list.append(resistivity_per_length)
-            self.radius_list.append(radius)
-
-    def add_subcoil(self, RZ=None, pts=None, scale=None, npoints=None, hdf5_path=None, attr=None, resistivity_per_length=None, radius=None):
-        """! Add a subcoil to this V-coil set
-        @param RZ [R, Z] position (for circular coils; centered on Z-axis)
-        @param pts Array of [x, y, z] positions (for general coils)
-        @param scale Scaling factor for coil current (`1.0` if not specified)
-        @param npoints Number of points (for general coils)
-        @param hdf5_path Path to HDF5 dataset containing coil points (alternative to `pts` and `RZ`)
-        @param attr Additional attributes for the subcoil
-        @param resistivity_per_length Resistivity per unit length for the subcoil
-        @param radius Radius of the subcoil
-        """
-        attr = attr if attr is not None else {}
-        if resistivity_per_length is not None:
-            attr['res_per_len'] = resistivity_per_length
-        if radius is not None:
-            attr['radius'] = radius
-        super().add_subcoil(RZ=RZ, pts=pts, scale=scale, npoints=npoints, hdf5_path=hdf5_path, attr=attr)
-        if len(self.resistivity_per_length_list) < len(self.subcoils):
-            self.resistivity_per_length_list.append(attr.get('res_per_len'))
-            self.radius_list.append(attr.get('radius'))
-
-    def build_XML(self, parent_tag):
-        """! Build XML structure for this V-coil
-        @param parent_tag Parent XML element to attach to
-        """
-        # Build attributes for coil_set
-        attrib = {"name": self.name, "radius": str(self.radius), "res_per_len": str(self.resistivity_per_length)}
-        if self.sens_mask:
-            attrib["sens_mask"] = bool_to_string(self.sens_mask)
-        coil_set = ET.SubElement(parent_tag, "coil_set", attrib=attrib)
-        # Build subcoil elements
-        self.build_coil_XML(coil_set)
-
-    @staticmethod
-    def load_from_xml(coil_elem, fallback_name):
-        """! Load V-coil from XML element
-        @param coil_elem XML element representing the coil_set
-        @param fallback_name Fallback name for the coil
-        """
-        if 'radius' not in coil_elem.attrib:
-            raise ValueError("No radius specified for V-coil in XML")
-        if 'res_per_len' not in coil_elem.attrib:
-            raise ValueError("No resistivity per length specified for V-coil in XML")
-        name = coil_elem.attrib.get("name", fallback_name)
-        sens_mask = coil_elem.attrib.get("sens_mask", "false").lower() == "true"
-        radius = float(coil_elem.attrib["radius"])
-        resistivity_per_length = float(coil_elem.attrib["res_per_len"])
-        vcoil = ThinCurr_Vcoil(name=name, resistivity_per_length=resistivity_per_length, radius=radius, sens_mask=sens_mask)
-        for subcoil_elem in coil_elem.findall("coil"):
-            scale = float(subcoil_elem.attrib.get("scale", 1.0))
-            subcoil_radius = float(subcoil_elem.attrib["radius"]) if "radius" in subcoil_elem.attrib else None
-            subcoil_resistivity = float(subcoil_elem.attrib["res_per_len"]) if "res_per_len" in subcoil_elem.attrib else None
-            if "path" in subcoil_elem.attrib:
-                hdf5_path = subcoil_elem.attrib["path"]
-                vcoil.add_subcoil(hdf5_path=hdf5_path, scale=scale, resistivity_per_length=subcoil_resistivity, radius=subcoil_radius)
-            else:
-                npts = int(subcoil_elem.attrib.get("npts", 0))
-                pts_text = subcoil_elem.text.strip()
-                pts_lines = pts_text.splitlines()
-                pts = numpy.array([_split_delimited_float(line) for line in pts_lines])
-                if (npts == 0) or (pts.shape[0] == 1):
-                    vcoil.add_circular_subcoil(RZ=pts[0], scale=scale, resistivity_per_length=subcoil_resistivity, radius=subcoil_radius)
-                else:
-                    vcoil.add_subcoil(pts=pts, scale=scale, npoints=npts, resistivity_per_length=subcoil_resistivity, radius=subcoil_radius)
-        return vcoil
-
-    def save_hdf5(self, h5_group):
-        """! Save V-coil information to HDF5 group
-        @param h5_group HDF5 group to save the coil information into
-        """
-        name_len = len(self.name)
-        h5_group.create_dataset('NAME', data=numpy.array(self.name.encode('ascii'), dtype=f"S{name_len}"))
-        h5_group.create_dataset('NCOILS', data=[len(self.subcoils),], dtype='i4')
-        radius = [r if r is not None else self.radius for r in self.radius_list]
-        h5_group.create_dataset('RADIUS', data=radius, dtype='f8')
-        resistivity_per_length = [r if r is not None else self.resistivity_per_length for r in self.resistivity_per_length_list]
-        h5_group.create_dataset('RES_PER_LEN', data=resistivity_per_length, dtype='f8')
-        if self.sens_mask:
-            h5_group.create_dataset('SENS_MASK', data=[1,], dtype='i4')
-        scales = numpy.ones((len(self.subcoils),))
-        for i, subcoil in enumerate(self.subcoils):
-            subcoil_group = h5_group.create_group('coil{0:04d}'.format(i+1))
-            if 'pts' in subcoil:
-                subcoil_group.create_dataset('PTS', data=subcoil['pts'], dtype='f8')
-            elif 'hdf5_path' in subcoil:
-                source_filepath = subcoil['hdf5_path'].split(':')[0]
-                source_dataset = subcoil['hdf5_path'].split(':')[1]
-                with h5py.File(source_filepath, 'r') as source_file:
-                    subcoil_group.create_dataset('PTS', data=source_file[source_dataset][()], dtype='f8')
-            if subcoil.get('attr', {}).get('scale') is not None:
-                scales[i] = subcoil['attr']['scale']
-        h5_group.create_dataset('SCALES', data=scales, dtype='f8')
+        super().__init__(name, sens_mask=sens_mask, resistivity_per_length=resistivity_per_length, radius=radius)
 
 
 def coil_from_hdf5(h5_group):
@@ -305,6 +235,8 @@ def coil_from_hdf5(h5_group):
         name = name.decode('ascii')
     sens_mask = bool(h5_group['SENS_MASK'][0]) if 'SENS_MASK' in h5_group else None
     if 'RES_PER_LEN' in h5_group:
+        if 'RADIUS' not in h5_group:
+            raise ValueError("RADIUS dataset must be present in HDF5 group if RES_PER_LEN is present")
         coil = ThinCurr_Vcoil(name=name,
                                 resistivity_per_length=h5_group['RES_PER_LEN'][0],
                                 radius=h5_group['RADIUS'][0],
@@ -372,16 +304,21 @@ class ThinCurr_XML:
         """! Add an I-coil to this ThinCurr block
         @param icoil ThinCurr_Icoil object
         """
-        if not isinstance(icoil, ThinCurr_Icoil):
-            raise TypeError("Icoil must be of type ThinCurr_Icoil")
+        if not isinstance(icoil, ThinCurr_coil_set) or isinstance(icoil, ThinCurr_Vcoil):
+            raise TypeError("Icoil must be of type ThinCurr_Icoil or ThinCurr_coil_set")
         self.icoils.append(icoil)
 
     def add_Vcoil(self, vcoil):
         """! Add a V-coil to this ThinCurr block
         @param vcoil ThinCurr_Vcoil object
         """
-        if not isinstance(vcoil, ThinCurr_Vcoil):
-            raise TypeError("Vcoil must be of type ThinCurr_Vcoil")
+        if isinstance(vcoil, ThinCurr_coil_set):
+            radius = [r if r is not None else vcoil.radius for r in vcoil.radius_list]
+            resistivity_per_length = [r if r is not None else vcoil.resistivity_per_length for r in vcoil.resistivity_per_length_list]
+            if any(r is None for r in radius) or any(r is None for r in resistivity_per_length):
+                raise ValueError("Vcoil must have resistivity_per_length and radius defined for all subcoils or at the coilset level")
+        else:
+            raise TypeError("Vcoil must be of type ThinCurr_Vcoil or ThinCurr_coil_set (with resistivity_per_length and radius defined)")
         self.vcoils.append(vcoil)
 
     def set_eta(self, resistivities):
