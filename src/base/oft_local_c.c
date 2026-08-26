@@ -83,9 +83,9 @@ void oft_set_signal_handlers()
 }
 
 // Jenkins's one_at_a_time hash
-uint32_t oft_simple_hash(const uint8_t* key, long length) {
+uint32_t oft_simple_hash_c(const uint8_t* key, long length, uint32_t starting_value) {
   long i = 0;
-  uint32_t hash = 0;
+  uint32_t hash = starting_value;
   while (i != length) {
     hash += key[i++];
     hash += hash << 10;

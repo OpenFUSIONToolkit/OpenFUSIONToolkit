@@ -56,12 +56,13 @@ INTERFACE
 !------------------------------------------------------------------------------
 !> Simple in-memory hashing function for dataset checksumming
 !------------------------------------------------------------------------------
-  FUNCTION oft_simple_hash(key,length)  BIND(C)
+  FUNCTION oft_simple_hash_c(key,length,starting_value)  BIND(C)
     IMPORT c_int, c_long, c_ptr
-    INTEGER(c_int) :: oft_simple_hash !< Hash of data
+    INTEGER(c_int) :: oft_simple_hash_c !< Hash of data
     TYPE(c_ptr), VALUE, INTENT(in) :: key !< Location of data
     INTEGER(c_long), VALUE, INTENT(in) :: length !< Length of data to hash in bytes
-  END FUNCTION oft_simple_hash
+    INTEGER(c_int), VALUE, INTENT(in) :: starting_value !< Starting value for the hash
+  END FUNCTION oft_simple_hash_c
 END INTERFACE
 !------------------------------------------------------------------------------
 !> One dimensional integer set
@@ -116,6 +117,7 @@ END INTERFACE
 !---------------------------------------------------------------------------------
 TYPE :: oft_timer
   INTEGER(i8) :: count = 0 !< Integer value of system clock at last call
+  INTEGER(i8) :: crate = 0 !< Integer value of system clock rate
 CONTAINS
   !> Start or reset timer
   procedure :: tick => oft_timer_start
@@ -128,6 +130,20 @@ CONTAINS
 END TYPE oft_timer
 PRIVATE oft_timer_start, oft_timer_elapsed, oft_timer_intelapsed, oft_timer_timeout
 CONTAINS
+!------------------------------------------------------------------------------
+!> Simple in-memory hashing function for dataset checksumming
+!------------------------------------------------------------------------------
+FUNCTION oft_simple_hash(key,length,starting_value) RESULT(data_hash)
+TYPE(c_ptr), INTENT(in) :: key !< Location of data
+INTEGER(c_long), INTENT(in) :: length !< Length of data to hash in bytes
+INTEGER(c_int), OPTIONAL, INTENT(in) :: starting_value !< Starting value for the hash
+INTEGER(c_int) :: data_hash !< Hash of data
+IF(PRESENT(starting_value))THEN
+  data_hash=oft_simple_hash_c(key,length,starting_value)
+ELSE
+  data_hash=oft_simple_hash_c(key,length,0)
+END IF
+END FUNCTION oft_simple_hash
 !---------------------------------------------------------------------------------
 !> Returns the corresponding lowercase letter, if `c` is an uppercase
 !! ASCII character, otherwise `c` itself.
@@ -141,8 +157,8 @@ INTEGER(i4), PARAMETER :: wp=iachar('a')-iachar('A')
 INTEGER(i4), PARAMETER :: BA=iachar('A')
 INTEGER(i4), PARAMETER :: BZ=iachar('Z')
 INTEGER(i4) :: k
-k = ichar(c) 
-IF(k>=BA.and.k<=BZ)k = k + wp 
+k = ichar(c)
+IF(k>=BA.and.k<=BZ)k = k + wp
 t = char(k)
 END FUNCTION char_to_lower
 !---------------------------------------------------------------------------------
@@ -168,8 +184,8 @@ INTEGER(i4), PARAMETER :: wp=iachar('A')-iachar('a')
 INTEGER(i4), PARAMETER :: BA=iachar('a')
 INTEGER(i4), PARAMETER :: BZ=iachar('z')
 INTEGER(i4) :: k
-k = ichar(c) 
-IF(k>=BA.and.k<=BZ)k = k + wp 
+k = ichar(c)
+IF(k>=BA.and.k<=BZ)k = k + wp
 t = char(k)
 END FUNCTION char_to_upper
 !---------------------------------------------------------------------------------
@@ -187,7 +203,8 @@ END SUBROUTINE string_to_upper
 !---------------------------------------------------------------------------------
 SUBROUTINE oft_timer_start(self)
 CLASS(oft_timer), INTENT(inout) :: self !< Calling timer class
-self%count=oft_time_i8()
+INTEGER(i8) :: cmax
+CALL system_clock(self%count,self%crate,cmax)
 END SUBROUTINE oft_timer_start
 !---------------------------------------------------------------------------------
 !> Set elapsed time since last tick/tock
@@ -204,9 +221,6 @@ self%count=countnew
 END FUNCTION oft_timer_elapsed
 !---------------------------------------------------------------------------------
 !> Get elapsed time since last tick/tock in integer counts
-!!
-!! @param[in,out] self Calling timer class
-!! @return Number of integer counts since last tick/tock
 !---------------------------------------------------------------------------------
 FUNCTION oft_timer_intelapsed(self) result(dt)
 CLASS(oft_timer), INTENT(inout) :: self !< Calling timer class
