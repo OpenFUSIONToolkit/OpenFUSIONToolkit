@@ -14,6 +14,8 @@ import collections
 import ctypes
 from warnings import warn
 import numpy
+from scipy.special import ellipk, ellipe
+from scipy.linalg import lu_factor, lu_solve
 from ._interface import *
 
 
@@ -2109,6 +2111,53 @@ class TokaMaker():
             raise Exception(error_string.value)
         return 1.0/eig_vals[:,0], eig_vecs
 
+    def _compute_tobin_geometry(self):
+        r'''! Precompute the parts of the Tobin calculation that never change over a pulse: the
+        passive-conductor and coil positions (the vessel and coils don't move) and the
+        conductor-conductor mutual inductance matrix M_ss along with its LU factorization.
+        Doing this once instead of once per timepoint changes nothing about the result -- M_ss
+        is exactly the same matrix every call, only the plasma side varies timepoint to
+        timepoint. Cached on first call since the mesh, conductors, and coils never move.
+        @result dict with R_s, Z_s (conductor positions), R_c, Z_c (coil positions), and
+        M_ss_lu (the LU factorization of M_ss, ready for lu_solve).
+        '''
+        if getattr(self, '_tobin_geometry', None) is not None:
+            return self._tobin_geometry
+
+        r, lc, reg = self.r, self.lc, self.reg
+
+        R_s_list, Z_s_list, area_s_list = [], [], []
+        for name, info in self._cond_dict.items():
+            if 'eta' in info:
+                R_j, Z_j, area_j = self._region_geometry(info['reg_id'], r, lc, reg)
+                R_s_list.append(R_j); Z_s_list.append(Z_j); area_s_list.append(area_j)
+        R_s = numpy.concatenate(R_s_list)
+        Z_s = numpy.concatenate(Z_s_list)
+        area_s = numpy.concatenate(area_s_list)
+
+        R_c_list, Z_c_list = [], []
+        for name, info in self._coil_dict.items():
+            R_j, Z_j, area_j = self._region_geometry(info['reg_id'], r, lc, reg)
+            R_c_list.append(numpy.sum(R_j * area_j) / numpy.sum(area_j))
+            Z_c_list.append(numpy.sum(Z_j * area_j) / numpy.sum(area_j))
+        R_c, Z_c = numpy.array(R_c_list), numpy.array(Z_c_list)
+
+        M_ss = self._mutual_inductance(R_s[:, None], Z_s[:, None], R_s[None, :], Z_s[None, :])
+        numpy.fill_diagonal(M_ss, self._self_inductance_ring(R_s, area_s))
+
+        self._tobin_geometry = {'R_s': R_s, 'Z_s': Z_s, 'R_c': R_c, 'Z_c': Z_c, 'M_ss_lu': lu_factor(M_ss)}
+        return self._tobin_geometry
+
+    def get_vde_growth(self,verbose=False):
+        r'''! Compute the Tobin vertical force-gradient stability margin, -F'_z, for the
+        current equilibrium.
+        @param verbose Print filament counts for this snapshot.
+        @result -F'_z [N/m], negative marks the instability threshold.
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_vde_growth(verbose)
+
     def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False,damping_scale=-1.0):
         '''! Compute eigenvalues for the linearized time-dependent system
 
@@ -2195,6 +2244,58 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
+    def _mutual_inductance(self, R1, Z1, R2, Z2):
+        r'''! Mutual inductance between two coaxial circular filaments (Maxwell's formula).
+        @param R1 Major radius of the first filament(s) [m].
+        @param Z1 Vertical position of the first filament(s) [m].
+        @param R2 Major radius of the second filament(s) [m].
+        @param Z2 Vertical position of the second filament(s) [m].
+        @result Mutual inductance [H], broadcasting over array inputs.
+        '''
+        mu0 = 4 * numpy.pi * 1e-7
+        k_sq = 4 * R1 * R2 / ((R1 + R2)**2 + (Z1 - Z2)**2)
+        k = numpy.sqrt(k_sq)
+        return mu0 * numpy.sqrt(R1 * R2) * ((2 / k - k) * ellipk(k_sq) - (2 / k) * ellipe(k_sq))
+
+    def _self_inductance_ring(self, R, area):
+        r'''! Self-inductance of a circular ring with major radius R and cross-sectional area,
+        using the finite-wire-radius formula (Maxwell's formula is singular at zero separation).
+        @param R Major radius of the ring [m].
+        @param area Cross-sectional area of the ring [m^2].
+        @result Self-inductance [H].
+        '''
+        mu0 = 4 * numpy.pi * 1e-7
+        a_eff = numpy.sqrt(area / numpy.pi)
+        return mu0 * R * (numpy.log(8 * R / a_eff) - 2.00)
+
+    def _d_mutual_inductance_dZ1(self, R1, Z1, R2, Z2):
+        # Central finite differences on the exact _mutual_inductance formula, wrt Z1 (the
+        # plasma side, since only the plasma is rigidly displaced). dz is small relative to
+        # the device scale (R ~ few m) but large enough to avoid float64 roundoff noise.
+        dz = 1.E-4
+        return (self._mutual_inductance(R1, Z1 + dz, R2, Z2) - self._mutual_inductance(R1, Z1 - dz, R2, Z2)) / (2 * dz)
+
+    def _d2_mutual_inductance_dZ1(self, R1, Z1, R2, Z2):
+        # Central finite differences on the exact _mutual_inductance formula, wrt Z1 (the
+        # plasma side, since only the plasma is rigidly displaced). dz is small relative to
+        # the device scale (R ~ few m) but large enough to avoid float64 roundoff noise.
+        dz = 1.E-4
+        return (self._mutual_inductance(R1, Z1 + dz, R2, Z2) - 2 * self._mutual_inductance(R1, Z1, R2, Z2)
+                + self._mutual_inductance(R1, Z1 - dz, R2, Z2)) / dz**2
+
+    def _region_geometry(self, reg_id, r, lc, reg):
+        r'''! Centroid R,Z and area of every mesh triangle belonging to a given region id.
+        @param reg_id Region id to select.
+        @param r Node coordinates [n_nodes,>=2].
+        @param lc Triangle connectivity [n_cells,3], 0-indexed.
+        @param reg Per-cell region id [n_cells].
+        @result R, Z, area arrays, one entry per matching triangle.
+        '''
+        tris = lc[reg == reg_id]
+        p0, p1, p2 = r[tris[:, 0], :2], r[tris[:, 1], :2], r[tris[:, 2], :2]
+        area = 0.5 * numpy.abs((p1[:, 0] - p0[:, 0]) * (p2[:, 1] - p0[:, 1]) - (p2[:, 0] - p0[:, 0]) * (p1[:, 1] - p0[:, 1]))
+        centroid = (p0 + p1 + p2) / 3.0
+        return centroid[:, 0], centroid[:, 1], area
 
 class TokaMaker_equilibrium():
     '''! TokaMaker G-S equilibrium class'''
@@ -3036,6 +3137,63 @@ class TokaMaker_equilibrium():
         if error_string.value != b'':
             raise Exception(error_string.value)
         return curr
+
+    def get_vde_growth(self,verbose=False):
+        r'''! Compute the Tobin vertical force-gradient stability margin, -F'_z, for this
+        solved equilibrium snapshot, reusing the fixed vessel/coil geometry and M_ss
+        factorization cached on the parent TokaMaker object.
+        @param verbose Print filament counts for this snapshot.
+        @result -F'_z [N/m], negative marks the instability threshold.
+        '''
+        geom = self._tMaker._compute_tobin_geometry()
+        r, lc, reg = self._tMaker.r, self._tMaker.lc, self._tMaker.reg
+        R_s, Z_s, R_c, Z_c, M_ss_lu = geom['R_s'], geom['Z_s'], geom['R_c'], geom['Z_c'], geom['M_ss_lu']
+
+        # Plasma current per mesh element: nodal J_phi averaged onto each triangle, times its
+        # area. Elements outside the plasma read exactly zero and drop out of every sum below,
+        # so no explicit plasma-region mask is needed.
+        J_node = self.calc_jtor_plasma()
+        J_tri = J_node[lc].mean(axis=1)
+        p0, p1, p2 = r[lc[:, 0], :2], r[lc[:, 1], :2], r[lc[:, 2], :2]
+        area_tri = 0.5 * numpy.abs((p1[:, 0] - p0[:, 0]) * (p2[:, 1] - p0[:, 1]) - (p2[:, 0] - p0[:, 0]) * (p1[:, 1] - p0[:, 1]))
+        centroid_tri = (p0 + p1 + p2) / 3.0
+        plasma_mask = J_tri != 0
+        R_p, Z_p = centroid_tri[plasma_mask, 0], centroid_tri[plasma_mask, 1]
+        I_p = (J_tri * area_tri)[plasma_mask]
+
+        _, currents_reg = self.get_coil_currents()
+        I_c = numpy.array([currents_reg[info['reg_id'] - 1] for info in self._tMaker._coil_dict.values()])
+
+        if verbose:
+            print(f'plasma elements: {len(I_p)}, passive-conductor elements: {len(R_s)}, coil filaments: {len(R_c)}')
+        else:
+            # Quiet TokaMaker's internal solver logging
+            self._tMaker.settings.pm = False
+            self._tMaker.update_settings()
+
+        # Mutual-inductance z-derivatives, broadcast over all pairs at once. Only M'_p,s and
+        # M''_p,c enter F'_z (Eq. 11) -- the zeroth-order M_p,s, M_p,c never appear.
+        Mp_ps = self._tMaker._d_mutual_inductance_dZ1(R_p[:, None], Z_p[:, None], R_s[None, :], Z_s[None, :])
+        Mpp_pc = self._tMaker._d2_mutual_inductance_dZ1(R_p[:, None], Z_p[:, None], R_c[None, :], Z_c[None, :])
+
+        # F'_z = I_p^T [-M'_p,s M_s,s^-1 M'_s,p, M''_p,c] I_(p+c). Reuses the M_ss
+        # factorization cached on the parent TokaMaker object instead of refactorizing
+        # the same matrix every call.
+        #
+        # F_z' = I_p^T . (M* I_(p+c))
+        # M* I_(p+c) = (coupling_term I_p) + (M''_p,c I_c)
+        # F_z' = I_p^T . (coupling_term I_p) + I_p^T . (M''_p,c I_c)
+        # coupling_term = -M'_p,s M_s,s^-1 M'_p,s^T
+        # I_p^T . (coupling_term I_p) = I_p^T . (-M'_p,s M_s,s^-1 M'_p,s^T I_p)
+        #                             = -(I_p^T . (M'_p,s (M_s,s^-1 (M'_p,s^T I_p))))
+
+        flux_drive = Mp_ps.T @ I_p
+        induced_current_response = lu_solve(M_ss_lu, flux_drive)
+        passive_term = -(I_p @ (Mp_ps @ induced_current_response))
+        coil_term = I_p @ (Mpp_pc @ I_c)
+        Fz_prime = passive_term + coil_term
+
+        return -Fz_prime
 
     def calc_conductor_currents(self,psi,cell_centered=False,include_Vcoils=False):
         r'''! Get toroidal current density in conducting regions for a given \f$ \psi \f$
