@@ -24,7 +24,7 @@ USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem, native_read_nodesets, native_read_sidesets
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector
-USE oft_native_la, ONLY: oft_native_dense_matrix
+USE oft_native_la, ONLY: oft_native_vector, oft_native_dense_matrix
 !---
 USE fem_utils, ONLY: fem_interp
 USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, &
@@ -618,6 +618,9 @@ CALL copy_string('',error_str)
 !
 IF(B_dx>0.d0)THEN
   tw_obj%B_dx=B_dx
+ELSE IF(B_dx==0.d0)THEN
+  CALL copy_string('Invalid B_dx value (must not be zero)',error_str)
+  RETURN
 ELSE
   tw_obj%B_dx=ABS(B_dx)*tw_obj%mesh%hrms
 END IF
@@ -732,6 +735,25 @@ DO i=1,tw_obj%n_coils
     CALL tw_copy_coil(tw_obj%coils(i),tw_obj%icoils(tw_obj%n_icoils))
   END IF
 END DO
+!---Recreate Uloc vector for new number of elements
+IF(ASSOCIATED(tw_obj%Uloc))THEN
+  CALL tw_obj%Uloc%delete()
+  DEALLOCATE(tw_obj%Uloc)
+END IF
+ALLOCATE(oft_native_vector::tw_obj%Uloc)
+SELECT TYPE(this=>tw_obj%Uloc)
+  CLASS IS(oft_native_vector)
+    this%n=tw_obj%nelems; this%ng=tw_obj%nelems
+    this%nslice=this%n
+    ALLOCATE(this%v(this%n))
+    ALLOCATE(this%stitch_info)
+    ALLOCATE(this%stitch_info%be(this%n))
+    this%stitch_info%full=.TRUE.
+    this%stitch_info%nbe=0
+    this%stitch_info%be=.FALSE.
+  CLASS DEFAULT
+    CALL oft_abort('Failed to allocate "Uloc" vector','thincurr_set_coil_types',__FILE__)
+END SELECT
 !---Print update summary
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Updating coil types:'

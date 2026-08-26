@@ -46,8 +46,12 @@ def write_native_mesh(filename, mesh_type, r, lc, reg, nodesets=None, sidesets=N
                 h5_file.create_dataset('mesh/ho_info/LF', data=tmp_array+1, dtype='i4') # Convert to 1-based indexing for storage
         # Write region names
         if reg_names is not None:
-            max_len = max(map(len, reg_names))
-            h5_file.create_dataset('mesh/REG_NAMES', data=numpy.array(reg_names, dtype=f"S{max_len}"))
+            try:
+                max_len = max(map(len, reg_names))
+            except ValueError:
+                max_len = 0
+            if max_len > 0:
+                h5_file.create_dataset('mesh/REG_NAMES', data=numpy.array(reg_names, dtype=f"S{max_len}"))
         # Write region attributes
         if (reg_attrs is not None) and (len(reg_attrs) > 0):
             h5_file.create_dataset('mesh/reg_attrs/NUM_ATTR', data=[len(reg_attrs),], dtype='i4')
@@ -96,10 +100,12 @@ def read_native_mesh(filename):
                 mesh_type = 'tet'
             elif lc.shape[1] == 8:
                 mesh_type = 'hex'
+            else:
+                raise ValueError("Mesh type not specified in file and could not be inferred from cell connectivity")
         mesh_info = {
             'type': mesh_type,
             'r': mesh['R'][()],
-            'lc': mesh['LC'][()] - 1, # Convert to 0-based indexing
+            'lc': lc,
             'reg': mesh['REG'][()],
         }
         # Read high-order mesh information (nodes and indexing information)

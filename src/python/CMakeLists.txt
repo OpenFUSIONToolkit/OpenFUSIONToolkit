@@ -14,6 +14,7 @@ set( OFT_PY_BINS
 set( PY_BIN_OUTPUTS "" )
 foreach( path ${OFT_PY_BINS} )
   add_custom_command(
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/create_stub.py ${CMAKE_CURRENT_SOURCE_DIR}/pyproject.toml.in
     OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${path}"
     COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/create_stub.py ${path}
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}

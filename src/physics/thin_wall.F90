@@ -174,6 +174,7 @@ CLASS(tw_type), INTENT(INOUT) :: self !< Thin-wall model object
 TYPE(oft_1d_int), POINTER, INTENT(inout) :: hole_ns(:) !< Hole nodesets
 CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: error_string
 CHARACTER(LEN=*), OPTIONAL, INTENT(IN) :: filepath !< Path to mesh file
+LOGICAL :: coils_xml
 INTEGER(4) :: i,j,k,l,face,ioffset,ed,error_flag
 INTEGER(4), ALLOCATABLE :: kfh_tmp(:),np_inverse(:)
 REAL(8) :: f(3),rgop(3,3),area_i,norm_i(3)
@@ -185,13 +186,15 @@ CALL oft_increase_indent
 CALL mesh_global_resolution(self%mesh)
 CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
 !---Load ThinCurr-specific mesh information
+coils_xml=.TRUE.
 IF(PRESENT(filepath))THEN
   CALL tw_load_hdf5(self,filepath,hole_ns,error_string)
+  IF(self%n_coils>0)coils_xml=.FALSE.
 END IF
 IF(ALLOCATED(error_string))RETURN
 !---Load coils from XML for backwards compatibility
 IF(.NOT.self%xml%associated().AND.ASSOCIATED(oft_env%xml))CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
-IF(self%n_vcoils==0)THEN
+IF(coils_xml)THEN
   CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
   IF(error_flag==0)THEN
     WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils from XML file'
@@ -209,7 +212,7 @@ ELSE
   CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
   IF(error_flag==0)CALL oft_warn("V-coils specified in mesh and XML files, ignoring XML definitions")
 END IF
-IF(self%n_icoils==0)THEN
+IF(coils_xml)THEN
   CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
   IF(error_flag==0)THEN
     WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils from XML file'
@@ -227,16 +230,18 @@ ELSE
   IF(error_flag==0)CALL oft_warn("I-coils specified in mesh and XML files, ignoring XML definitions")
 END IF
 !---TEMPORARY to match new behavior of storing all coils together
-self%n_coils=self%n_vcoils+self%n_icoils
-IF(self%n_coils>0)ALLOCATE(self%coils(self%n_coils))
-DO i=1,self%n_vcoils
-  CALL tw_copy_coil(self%vcoils(i),self%coils(i))
-  self%coils(i)%is_vcoil=.TRUE.
-END DO
-DO i=1,self%n_icoils
-  CALL tw_copy_coil(self%icoils(i),self%coils(i+self%n_vcoils))
-  self%coils(i+self%n_vcoils)%is_vcoil=.FALSE.
-END DO
+IF(coils_xml)THEN
+  self%n_coils=self%n_vcoils+self%n_icoils
+  IF(self%n_coils>0)ALLOCATE(self%coils(self%n_coils))
+  DO i=1,self%n_vcoils
+    CALL tw_copy_coil(self%vcoils(i),self%coils(i))
+    self%coils(i)%is_vcoil=.TRUE.
+  END DO
+  DO i=1,self%n_icoils
+    CALL tw_copy_coil(self%icoils(i),self%coils(i+self%n_vcoils))
+    self%coils(i+self%n_vcoils)%is_vcoil=.FALSE.
+  END DO
+END IF
 !---Analyze mesh to construct holes
 IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)
 WRITE(*,'(2A)')oft_indent,'Creating hole elements'
@@ -399,6 +404,8 @@ SELECT TYPE(this=>self%Uloc)
     this%stitch_info%full=.TRUE.
     this%stitch_info%nbe=0
     this%stitch_info%be=.FALSE.
+  CLASS DEFAULT
+    CALL oft_abort('Failed to allocate "Uloc" vector','tw_setup',__FILE__)
 END SELECT
 !---Create point vector
 ALLOCATE(oft_native_vector::self%Uloc_pts)
@@ -412,6 +419,8 @@ SELECT TYPE(this=>self%Uloc_pts)
     this%stitch_info%full=.TRUE.
     this%stitch_info%nbe=0
     this%stitch_info%be=.FALSE.
+  CLASS DEFAULT
+    CALL oft_abort('Failed to allocate "Uloc_pts" vector','tw_setup',__FILE__)
 END SELECT
 !---Print summary
 WRITE(*,*)
@@ -2456,7 +2465,7 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
       IF(.NOT.success)CALL oft_abort('Failed to read sens_mask for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
       IF(coil_tmp%sens_mask)THEN
         nmasked=nmasked+1
-        IF(.NOT.oft_debug_print(2))WRITE(*,'(2A,I6,A)')oft_indent,'Masked coil set ',i,' from sensors'
+        IF(oft_debug_print(2))WRITE(*,'(2A,I6,A)')oft_indent,'Masked coil set ',i,' from sensors'
       END IF
     END IF
     !

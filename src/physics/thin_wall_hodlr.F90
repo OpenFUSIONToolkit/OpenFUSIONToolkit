@@ -726,9 +726,9 @@ INTEGER(4) :: target_size = 1500
 INTEGER(4) :: aca_min_its = 20
 INTEGER(4) :: min_rank = 10
 REAL(8) :: aca_sep_thresh(2) = [1.1d0,1.1d0]
-REAL(8) :: L_svd_tol = -1.d0
+REAL(8) :: L_svd_tol = -1.d99
 REAL(8) :: L_aca_rel_tol = -1.d0
-REAL(8) :: B_svd_tol = -1.d0
+REAL(8) :: B_svd_tol = -1.d99
 REAL(8) :: B_aca_rel_tol = -1.d0
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
   L_aca_rel_tol,B_svd_tol,B_aca_rel_tol
@@ -762,12 +762,20 @@ self%aca_min_its=aca_min_its
 self%aca_sep_thresh=aca_sep_thresh
 !
 L_approx_scale = 0.5d0*self%tw_obj%mesh%hrms
-IF(L_svd_tol<0.d0)L_svd_tol=ABS(L_svd_tol)*L_approx_scale
+IF(L_svd_tol<0.d0)THEN
+  IF(L_svd_tol<-1.d98)CALL oft_abort('L_svd_tol must be set in thincurr_hodlr_options', &
+    'tw_hodlr_setup',__FILE__)
+  L_svd_tol=ABS(L_svd_tol)*L_approx_scale
+END IF
 self%L_svd_tol=L_svd_tol
 self%L_aca_tol=L_aca_rel_tol*self%L_svd_tol
 !
 B_approx_scale = 0.5d0/self%tw_obj%mesh%hrms
-IF(B_svd_tol<0.d0)B_svd_tol=ABS(B_svd_tol)*B_approx_scale
+IF(B_svd_tol<0.d0)THEN
+  IF(B_svd_tol<-1.d98)CALL oft_abort('B_svd_tol must be set in thincurr_hodlr_options', &
+    'tw_hodlr_setup',__FILE__)
+  B_svd_tol=ABS(B_svd_tol)*B_approx_scale
+END IF
 self%B_svd_tol=B_svd_tol
 self%B_aca_tol=B_aca_rel_tol*self%B_svd_tol
 !---Partition mesh
@@ -1019,6 +1027,7 @@ WRITE(*,'(2A,F6.1,A,ES9.2,A,ES9.2,A)')oft_indent,'Compressed size:',compressed_s
 WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 !---Building thread blocking
 ALLOCATE(self%L_thread_ptr(2,oft_env%nthreads+1))
+self%L_thread_ptr=0
 self%L_thread_ptr(:,1)=1
 target_size=SUM(sparse_sizes)/REAL(oft_env%nthreads,8)
 curr_size=0.d0
@@ -1039,6 +1048,10 @@ DO j=1,self%ndense
     self%L_thread_ptr(2,i+1)=j+1
     i=i+1
   END IF
+END DO
+DO j=1,oft_env%nthreads
+  IF(self%L_thread_ptr(1,j+1)==0)self%L_thread_ptr(1,j+1)=self%nsparse+1
+  IF(self%L_thread_ptr(2,j+1)==0)self%L_thread_ptr(2,j+1)=self%ndense+1
 END DO
 self%L_thread_ptr(:,oft_env%nthreads+1)=[self%nsparse,self%ndense]+1
 DEALLOCATE(sparse_sizes,dense_sizes)
@@ -1715,6 +1728,7 @@ DO i=1,self%nsparse
   level = self%sparse_blocks(1,i)
   j = self%sparse_blocks(2,i)
   k = self%sparse_blocks(3,i)
+  sparse_sizes(i) = 0
   DO flip=1,2
     ii=(i-1)*2+flip
     IF(flip==2)THEN
@@ -1745,10 +1759,10 @@ DO i=1,self%nsparse
           ! size_out = self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
         END IF
       END IF
-      sparse_sizes(i) = size_out
-      compressed_size = compressed_size + sparse_sizes(i)
+      sparse_sizes(i) = sparse_sizes(i) + size_out
     END DO
   END DO
+  compressed_size = compressed_size + sparse_sizes(i)
   !$omp critical
   nblocks_complete = nblocks_complete + 1
   DO k=1,9
@@ -1764,6 +1778,7 @@ WRITE(*,'(2A,F6.1,A,ES9.2,A,ES9.2,A)')oft_indent,'Compressed size:', &
 WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 !---Building thread blocking
 ALLOCATE(self%B_thread_ptr(2,oft_env%nthreads+1))
+self%B_thread_ptr=0
 self%B_thread_ptr(:,1)=1
 target_size=SUM(sparse_sizes)/REAL(oft_env%nthreads,8)
 curr_size=0.d0
@@ -1784,6 +1799,10 @@ DO j=1,self%ndense
     self%B_thread_ptr(2,i+1)=j+1
     i=i+1
   END IF
+END DO
+DO j=1,oft_env%nthreads
+  IF(self%B_thread_ptr(1,j+1)==0)self%B_thread_ptr(1,j+1)=self%nsparse+1
+  IF(self%B_thread_ptr(2,j+1)==0)self%B_thread_ptr(2,j+1)=self%ndense+1
 END DO
 self%B_thread_ptr(:,oft_env%nthreads+1)=[self%nsparse,self%ndense]+1
 DEALLOCATE(sparse_sizes,dense_sizes)
@@ -2375,7 +2394,7 @@ NULLIFY(avals,bvals)
 CALL a%get_local(avals)
 CALL b%set(0.d0)
 CALL b%get_local(bvals)
-!$omp parallel private(k,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
+!$omp parallel private(j,k,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
 ALLOCATE(col_tmp(self%tw_obj%np_active),row_tmp(self%tw_obj%np_active))
 ALLOCATE(int_tmp1(self%tw_obj%np_active),int_tmp2(self%tw_obj%np_active))
 int_tmp2=0.d0
@@ -2492,7 +2511,7 @@ btmp=>bvals(:,2)
 CALL by%get_local(btmp)
 btmp=>bvals(:,3)
 CALL bz%get_local(btmp)
-!$omp parallel private(k,dim,jj,flip,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
+!$omp parallel private(j,k,dim,jj,flip,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
 ALLOCATE(col_tmp(self%tw_obj%np_active),row_tmp(self%tw_obj%mesh%np))
 ALLOCATE(int_tmp1(self%tw_obj%mesh%np),int_tmp2(self%tw_obj%mesh%np,3))
 int_tmp2=0.d0

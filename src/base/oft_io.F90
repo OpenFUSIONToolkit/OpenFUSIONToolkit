@@ -1242,6 +1242,15 @@ CALL hdf5_read_strings(strings,filename,path,success)
 IF(PRESENT(success))THEN
   IF(.NOT.success)RETURN
 END IF
+IF(.NOT.ALLOCATED(strings))THEN
+  IF(PRESENT(success))THEN
+    success=.FALSE.
+    RETURN
+  ELSE
+    CALL oft_abort('Error reading string from file: '//TRIM(filename)//' path: '//TRIM(path), &
+      'hdf5_read_string',__FILE__)
+  END IF
+END IF
 IF(SIZE(strings)/=1)THEN
   !---Handle strings stored as a character array
   IF(LEN(strings(1))==1)THEN

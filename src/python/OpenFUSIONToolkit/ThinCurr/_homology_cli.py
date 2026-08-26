@@ -867,7 +867,7 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
   Note: Input file appears to be an older ThinCurr mesh file.
     Found {0} entries in first sideset, expected {1} closure(s).""".format(len(input_model['sidesets'][0]), len(closures)))
                 else:
-                    raise ValueError("No closures found and incorrect number of sidesets found {1} in file (expected {0})".format(len(closures), len(input_model['sidesets'])))
+                    raise ValueError("No closures found and incorrect number of sidesets found {1} in file (expected {0})".format(len(closures), len(input_model['sidesets'][0])))
             else:
                 if len(closures) > 0:
                     raise ValueError("Incorrect number of closures found 0 in file (expected {0})".format(len(closures)))

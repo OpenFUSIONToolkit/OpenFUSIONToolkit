@@ -157,6 +157,10 @@ class ThinCurrMesh:
         else:
             closures = tc.get('closures')
 
+        # Detect periodicity and throw error for now (not yet supported)
+        if ('pmap' in tc) or ('nfp' in tc):
+            raise ValueError("Input mesh contains periodicity information, which is not yet supported")
+
         # Copy other fields to keep
         tc_props = {k: tc[k] for k in cls._PROP_KEYS if k in tc}
         mesh_props = {k: mesh_info[k] for k in cls._MESH_PROP_KEYS if k in mesh_info}
@@ -354,7 +358,7 @@ class ThinCurrMesh:
         # Remap closures (cell indices)
         cell_new = -np.ones((keep_cell.shape[0],), dtype=np.int64)
         cell_new[keep_cell] = np.arange(int(np.sum(keep_cell)))
-        remapped_closures = _remap_index_sets([self.closures], cell_new, "closures")[0] if self.closures is not None else None
+        remapped_closures = _remap_index_sets([self.closures], cell_new, "closures") if self.closures is not None else None
         self.closures = remapped_closures[0] if remapped_closures else None
 
         # Remove unreferenced vertices and remap connectivity/nodesets (in place)
@@ -477,7 +481,7 @@ def combine_meshes(filenames, distinct_regions=True):
     for mesh in meshes[1:]:
         combined.append(mesh, distinct_regions=distinct_regions)
         # Warn about uncombined coils
-        if combined.coil_sets is not None:
+        if mesh.coil_sets is not None:
             print("  Warning: Multiple input meshes contain ThinCurr coil sets; "
                   "these are not combined and only the first mesh's coil sets are preserved.")
     return combined
@@ -685,7 +689,9 @@ def script_entry(argv=None):
                 mesh.transform(shift=options.shift, rotate=rotate,
                                scale=options.scale, center=options.rotate_center)
         # Categorize jumpers against the final nodeset list (default: all holes)
-        if options.jumpers is not None or options.jumper_range is not None:
+        if (options.jumpers is not None) or (options.jumper_range is not None):
+            if mesh.nodesets is None:
+                parser.error("Mesh contains no nodesets to categorize as jumpers")
             print()
             print("Categorizing jumpers...")
             try:

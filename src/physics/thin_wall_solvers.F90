@@ -888,7 +888,7 @@ DO i=1,nsteps
       oft_env%pm=pm_save
     ELSE
       fmat%alam = dt_op ! Update forward matrix timestep
-      CALL fmat%assemble()
+      CALL fmat%assemble(g)
       IF(PRESENT(hodlr_op))THEN
         linv_pre%beta=fmat%alam ! Update preconditioner timestep
         linv_pre%refactor=.TRUE.

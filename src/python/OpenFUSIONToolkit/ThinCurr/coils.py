@@ -31,12 +31,14 @@ class ThinCurr_coil_set:
         self.sens_mask = sens_mask
         self.subcoils = []  # List of subcoil dictionaries
 
-    def add_circular_subcoil(self, RZ, scale=None, npoints=180, attr=None):
+    def add_circular_subcoil(self, RZ, scale=None, npoints=None, attr=None):
         """! Add a circular subcoil to this coil set
         @param RZ [R, Z] position (for circular coils; centered on Z-axis)
         @param scale Scaling factor for coil current (`1.0` if not specified)
-        @param npoints Number of points for circular coil discretization
+        @param npoints Number of points for circular coil discretization (default: 180)
         """
+        if npoints is None:
+            npoints = 180  # Default number of points for circular coil
         theta = numpy.linspace(0, 2*numpy.pi, npoints)
         pts = numpy.column_stack([RZ[0] * numpy.cos(theta), RZ[0] * numpy.sin(theta), numpy.full(npoints, RZ[1])])
         self.add_subcoil(pts=pts, scale=scale, attr=attr)
@@ -181,11 +183,11 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
         self.resistivity_per_length_list = []
         self.radius_list = []
 
-    def add_circular_subcoil(self, RZ, scale=None, npoints=180, attr=None, resistivity_per_length=None, radius=None):
+    def add_circular_subcoil(self, RZ, scale=None, npoints=None, attr=None, resistivity_per_length=None, radius=None):
         """! Add a circular subcoil to this coil set
         @param RZ [R, Z] position (for circular coils; centered on Z-axis)
         @param scale Scaling factor for coil current (`1.0` if not specified)
-        @param npoints Number of points for circular coil discretization
+        @param npoints Number of points for circular coil discretization (default: 180)
         @param attr Additional attributes for the subcoil
         @param resistivity_per_length Resistivity per unit length for the subcoil
         @param radius Radius of the subcoil

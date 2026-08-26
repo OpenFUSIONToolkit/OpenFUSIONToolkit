@@ -216,6 +216,7 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         self.n_vcoils = numpy.sum(vcoil_flags)
         self.n_icoils = self.n_coils - self.n_vcoils
+        self.nelems = self.np_active + self.nholes + self.n_vcoils
         # Resync with Fortran model
         for i in range(self.n_coils):
             coil_name = ctypes.create_string_buffer(b"",41)
@@ -769,6 +770,8 @@ class ThinCurr():
             times = numpy.ascontiguousarray(times)
             if nsteps is not None:
                 raise ValueError('"nsteps" should not be specified if "times" is specified')
+            if dt is not None:
+                raise ValueError('"dt" should not be specified if "times" is specified')
             nsteps = times.shape[0]-1
         else:
             if dt is not None:
