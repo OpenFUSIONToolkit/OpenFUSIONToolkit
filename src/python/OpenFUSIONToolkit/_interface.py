@@ -19,7 +19,7 @@ import numpy
 from numpy import float64, int32
 
 # Helper datatypes
-## ctypes logical (bool) pointer alias 
+## ctypes logical (bool) pointer alias
 c_bool_ptr = ctypes.POINTER(c_bool)
 ## ctypes logical (bool) double pointer alias
 c_bool_ptr_ptr = ctypes.POINTER(c_bool_ptr)
@@ -59,6 +59,10 @@ def ctypes_subroutine(function, argtypes=None, restype=None):
 def bool_to_string(value):
     '''! Convert boolean value to lowercase string for XML attributes'''
     return 'true' if value else 'false'
+
+def string_to_bool(value):
+    '''! Convert string to boolean for XML attributes'''
+    return (value.lower() == 'true') or (value.lower() == '1')
 
 # Common parameters
 ## Vacuum magnetic permeability

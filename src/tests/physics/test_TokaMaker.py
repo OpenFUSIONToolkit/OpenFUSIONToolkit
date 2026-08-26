@@ -1,4 +1,3 @@
-from __future__ import print_function
 import os
 import sys
 import time
@@ -49,7 +48,11 @@ def validate_dict(results,dict_exp,tol_dict=None):
     default_tol = {
         'delta': 5.E-2,
         'deltaU': 5.E-2,
-        'deltaL': 5.E-2
+        'deltaL': 5.E-2,
+        # R at a Z extremum is taken from the nearest traced point, so it carries
+        # O(dtheta) sampling error and moves with element order and mesh resolution
+        'fsa_R_at_Zmin': 2.E-2,
+        'fsa_R_at_Zmax': 2.E-2
     }
     if tol_dict is None:
         tol_dict = default_tol
@@ -86,7 +89,7 @@ def validate_dict(results,dict_exp,tol_dict=None):
     return test_result
 
 
-def validate_eqdsk(file_test,file_ref):
+def validate_eqdsk(file_test,file_ref,helicity=1.0):
     from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk
     try:
         test_data = read_eqdsk(file_test)
@@ -98,6 +101,9 @@ def validate_eqdsk(file_test,file_ref):
     except:
         print("FAILED: Could not read reference EQDSK")
         return False
+    ref_data['bcentr'] *= helicity
+    ref_data['fpol'] *= helicity
+    ref_data['qpsi'] *= helicity
     test_result = True
     for key, exp_val in ref_data.items():
         result_val = test_data.get(key,None)
@@ -121,7 +127,7 @@ def validate_eqdsk(file_test,file_ref):
     return test_result
 
 
-def validate_ifile(ifile_test,ifile_ref):
+def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile
     try:
         test_data = read_ifile(ifile_test)
@@ -133,6 +139,8 @@ def validate_ifile(ifile_test,ifile_ref):
     except:
         print("FAILED: Could not read reference i-file")
         return False
+    ref_data['f'] *= helicity
+    ref_data['q'] *= helicity
     test_result = True
     for key, exp_val in ref_data.items():
         result_val = test_data.get(key,None)
@@ -467,7 +475,7 @@ def test_coil_h3(order,dist_coil):
 
 
 #============================================================================
-def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
+def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
     def create_mesh():
         with open('ITER_geom.json','r') as fid:
             ITER_geom = json.load(fid)
@@ -515,7 +523,7 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
         mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
         mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
         mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-        mygs.setup(order=fe_order,F0=5.3*6.2)
+        mygs.setup(order=fe_order,F0=helicity*5.3*6.2)
         #
         if test_type.startswith('eig'):
             if test_type == 'eig_dep':
@@ -615,6 +623,11 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,mp_q):
         eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
         eq_info['Lplasma'] = Lmat[-1,-1]
         eq_info['nl_its'] = nl_its
+        # Flux surface averages and per-surface shape parameters (see `get_fsa`)
+        fsa = EQ_obj.get_fsa(psi=np.r_[0.25, 0.5, 0.9])
+        for key in ('q', 'F', 'dV/dPsi', '<|grad psi|>', '<|grad psi|^2>', '<Bp^2>',
+                    '<1/B^2>', 'R_min', 'R_max', 'Z_min', 'Z_max', 'R_at_Zmin', 'R_at_Zmax'):
+            eq_info['fsa_' + key] = fsa[key].tolist()
     if test_type.startswith('recon'):
         import random
         from OpenFUSIONToolkit.TokaMaker.reconstruction import reconstruction
@@ -740,10 +753,10 @@ def test_ITER_eig(order):
     exp_dict = {
         'Tau_w': [6.619977E-01, 3.479492E-01, 2.554444E-01, 1.910381E-01, 1.782464E-01]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),'eig'))
+    results = mp_run(run_ITER_case,(1.0,(order,),'eig',1.0))
     assert validate_dict(results,exp_dict)
     # Test deprecated interface
-    results = mp_run(run_ITER_case,(1.0,(order,),'eig_dep'))
+    results = mp_run(run_ITER_case,(1.0,(order,),'eig_dep',1.0))
     assert validate_dict(results,exp_dict)
 
 @pytest.mark.coverage
@@ -753,10 +766,10 @@ def test_ITER_stability(order):
         'gamma': [12.3620, -1.83981, -3.41613, -5.12470, -6.53393],
         'nl_change': [225.4421413167051, 338.0113029638385][order-2]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),'stab'))
+    results = mp_run(run_ITER_case,(1.0,(order,),'stab',1.0))
     assert validate_dict(results,exp_dict)
     # Test deprecated interface
-    results = mp_run(run_ITER_case,(1.0,(order,),'stab_dep'))
+    results = mp_run(run_ITER_case,(1.0,(order,),'stab_dep',1.0))
     assert validate_dict(results,exp_dict)
 
 ITER_eq_dict = {
@@ -775,7 +788,7 @@ ITER_eq_dict = {
     'q_95': 2.7602989886308738,
     'P_ax': 619225.017325726,
     'W_MHD': 242986393.97329777,
-    'beta_pol': 42.443587820489455,
+    'beta_pol': 42.427927348488936,
     'dflux': 1.540293464599462,
     'tflux': 121.86081608235014,
     'l_i': 0.9054096856166233,
@@ -783,23 +796,58 @@ ITER_eq_dict = {
     'beta_n': 1.1951205307278518,
     'LCS1': 2.4858609418809336e-06,
     'MCS1_plasma': 8.931779419000401e-07,
-    'Lplasma': 1.1900576990802187e-05
+    'Lplasma': 1.1900576990802187e-05,
+    # Flux surface averages and shape at psi_N = [0.25, 0.5, 0.9] (see `get_fsa`)
+    'fsa_q': [0.8957740190095893, 1.0925386896870009, 2.244697561979323],
+    'fsa_F': [33.974461335230956, 33.24150425404669, 32.863767384960504],
+    'fsa_dV/dPsi': [-40.809941802973256, -48.739421299593786, -88.3635676135186],
+    'fsa_<|grad psi|>': [6.631303992418605, 8.12645638205315, 6.722632628048097],
+    'fsa_<|grad psi|^2>': [44.962611735546105, 68.65358375003274, 53.596719328235814],
+    'fsa_<Bp^2>': [1.1232107307935824, 1.7334030132908238, 1.3698497417461675],
+    'fsa_<1/B^2>': [0.03394218780262852, 0.03459374214812227, 0.03358354423001478],
+    'fsa_R_min': [5.462226095551001, 5.036393890349691, 4.409277529477673],
+    'fsa_R_max': [7.220524711028818, 7.593373222623317, 8.085943200676986],
+    'fsa_Z_min': [-0.7383764856169046, -1.3583537534271921, -2.508416991476664],
+    'fsa_Z_max': [1.8005752842848168, 2.414360593511412, 3.5092131308630288],
+    'fsa_R_at_Zmin': [6.304387105351003, 6.204424153705717, 5.796505368206957],
+    'fsa_R_at_Zmax': [6.272540830880864, 6.157453542216596, 5.750257254804224],
 }
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
-def test_ITER_eq(order):
-    results = mp_run(run_ITER_case,(1.0,(order,),''))
-    assert validate_dict(results,ITER_eq_dict)
-    assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk')
-    assert validate_ifile('tokamaker.ifile','ITER_test.ifile')
+@pytest.mark.parametrize("helicity", (1.0,-1.0))
+def test_ITER_eq(order,helicity):
+    eq_dict = ITER_eq_dict.copy()
+    eq_dict['tflux'] *= helicity
+    eq_dict['dflux'] *= helicity
+    eq_dict['q_0'] *= helicity
+    eq_dict['q_95'] *= helicity
+    # `q` and `F` follow the sign of F0; the remaining `fsa_*` entries are invariant.
+    # Rebind rather than scale in place: `ITER_eq_dict.copy()` is shallow, so mutating
+    # these lists would leak into the other parametrized runs.
+    eq_dict['fsa_q'] = [val*helicity for val in eq_dict['fsa_q']]
+    eq_dict['fsa_F'] = [val*helicity for val in eq_dict['fsa_F']]
+    results = mp_run(run_ITER_case,(1.0,(order,),'',helicity))
+    assert validate_dict(results,eq_dict)
+    assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)
+    assert validate_ifile('tokamaker.ifile','ITER_test.ifile',helicity)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
-def test_ITER_eq_io(order):
+@pytest.mark.parametrize("helicity", (1.0,-1.0))
+def test_ITER_eq_io(order,helicity):
     eq_dict = ITER_eq_dict.copy()
     eq_dict['nl_its'] = 1
-    results = mp_run(run_ITER_case,(1.0,(order,),'io'))
+    eq_dict['tflux'] *= helicity
+    eq_dict['dflux'] *= helicity
+    eq_dict['q_0'] *= helicity
+    eq_dict['q_95'] *= helicity
+    # `q` and `F` follow the sign of F0; the remaining `fsa_*` entries are invariant.
+    # Rebind rather than scale in place: `ITER_eq_dict.copy()` is shallow, so mutating
+    # these lists would leak into the other parametrized runs.
+    eq_dict['fsa_q'] = [val*helicity for val in eq_dict['fsa_q']]
+    eq_dict['fsa_F'] = [val*helicity for val in eq_dict['fsa_F']]
+    results = mp_run(run_ITER_case,(1.0,(order,),'io',helicity))
     assert validate_dict(results,eq_dict)
 
 @pytest.mark.coverage
@@ -813,7 +861,7 @@ def test_ITER_recon():
     ITER_recon_dict['l_i'] = 0.8872565
     ITER_recon_dict['beta_tor'] = 1.906180
     ITER_recon_dict['beta_n'] = 1.284312
-    results = mp_run(run_ITER_case,(1.0,(2,),'recon'))
+    results = mp_run(run_ITER_case,(1.0,(2,),'recon',1.0))
     assert validate_dict(results,ITER_recon_dict)
 
 @pytest.mark.coverage
@@ -829,11 +877,11 @@ def test_ITER_recon_legacy():
     ITER_recon_dict['l_i'] = 0.8906732
     ITER_recon_dict['beta_tor'] = 1.934024
     ITER_recon_dict['beta_n'] = 1.294385
-    results = mp_run(run_ITER_case,(1.0,(2,),'recon_legacy'))
+    results = mp_run(run_ITER_case,(1.0,(2,),'recon_legacy',1.0))
     assert validate_dict(results,ITER_recon_dict)
 
 def test_ITER_concurrent():
-    results = mp_run(run_ITER_case,(1.0,(2,3),''))
+    results = mp_run(run_ITER_case,(1.0,(2,3),'',1.0))
     assert validate_dict(results,ITER_eq_dict)
 
 #============================================================================

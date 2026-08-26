@@ -37,7 +37,6 @@ IMPLICIT NONE
 !------------------------------------------------------------------------------
 type, extends(gsinv_interp) :: sauter_interp
   logical :: stage_1 = .FALSE.
-  real(8) :: f_surf = 0.d0
   real(8) :: bmax = -1.d0
   real(8) :: mag_axis(2) = 0.d0
 contains
@@ -364,6 +363,7 @@ CALL hdf5_write(self%device%ncoils,filename,'tokamaker/NCOILS')
 NULLIFY(vals_tmp)
 CALL self%psi%get_local(vals_tmp)
 CALL hdf5_write(vals_tmp,filename,'tokamaker/PSI')
+DEALLOCATE(vals_tmp)
 CALL hdf5_write(self%coil_currs,filename,'tokamaker/COIL_CURRENTS')
 !---
 CALL hdf5_write(self%ffp_scale,filename,'tokamaker/FFP_SCALE')
@@ -467,6 +467,7 @@ IF(.NOT.success)THEN
   RETURN
 END IF
 CALL self%psi%restore_local(vals_tmp)
+DEALLOCATE(vals_tmp)
 CALL hdf5_read(self%coil_currs,filename,'tokamaker/COIL_CURRENTS',success=success)
 IF(.NOT.success)THEN
   error_string='Failed to read coil currents.'
@@ -867,8 +868,7 @@ do j=2,npsi
   IF(gseq%mode==0)THEN
     cout(j,2)=gseq%ffp_scale*gseq%I%f(psi_surf(1))+gseq%I%f_offset
   ELSE
-    cout(j,2)=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2) &
-    + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    cout(j,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2)
   END IF
   cout(j,3)=gseq%p_scale*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
   cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
@@ -891,8 +891,7 @@ cout(1,1)=x2
 IF(gseq%mode==0)THEN
   cout(1,2)=(gseq%ffp_scale*gseq%I%f(x2)+gseq%I%f_offset)
 ELSE
-  cout(1,2)=SQRT(gseq%ffp_scale*gseq%I%f(x2) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+  cout(1,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(x2) + gseq%I%f_offset**2)
 END IF
 cout(1,3)=gseq%p_scale*gseq%P%f(x2)/mu0
 cout(1,4)=(cout(3,4)-cout(2,4))*(x2-cout(2,1))/(cout(3,1)-cout(2,1)) + cout(2,4)
@@ -1132,10 +1131,8 @@ do j=1,nr
     fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
     ffprim(j)=gseq%I%fp(psi_surf)*((gseq%ffp_scale**2)*gseq%I%f(psi_surf)+gseq%ffp_scale*gseq%I%f_offset)
   ELSE
-    fptmp=SQRT(gseq%ffp_scale*gseq%I%f(psi_trace) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
-    fpol(j)=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    fptmp=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_trace) + gseq%I%f_offset**2)
+    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
     ffprim(j)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi_surf)
   END IF
   pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0
@@ -1414,8 +1411,7 @@ do j=1,nr
   IF(gseq%mode==0)THEN
     field%f_surf=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
   ELSE
-    field%f_surf=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    field%f_surf=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
   END IF
   field%bmax=0.d0
   field%stage_1=.TRUE.

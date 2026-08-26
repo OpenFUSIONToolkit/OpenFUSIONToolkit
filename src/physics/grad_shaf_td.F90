@@ -60,7 +60,7 @@ type, extends(oft_noop_matrix) :: oft_tmaker_td_mfop
 contains
     !> Setup operator, allocating internal storage
     procedure :: setup => setup_mfop
-    !> Update operator with new targets, etc. 
+    !> Update operator with new targets, etc.
     procedure :: update => update_mfop
     !> Delete operator, deallocating internal storage
     procedure :: delete => delete_mfop
@@ -182,6 +182,8 @@ END IF
 call psi_tmp%get_local(vals_out)
 CALL self%psi_sol%restore_local(vals_out,1)
 DEALLOCATE(vals_out)
+CALL psi_tmp%delete()
+DEALLOCATE(psi_tmp)
 !------------------------------------------------------------------------------
 ! Create extrapolation fields (Unused)
 !------------------------------------------------------------------------------
@@ -674,7 +676,7 @@ integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,3),elapsed_time,pt(3),alam_new,psi_tmp,diag(3),f(3),vcont_val
 real(r8) :: dpsi_tmp(2),p_source,f_source,psi_lim,psi_max,eta_source,max_tmp,lim_tmp
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),vals_loc(:,:)
-real(r8), pointer, dimension(:) :: pol_vals,rhs_vals,alam_vals,pvals
+real(r8), pointer, dimension(:) :: pol_vals,rhs_vals,alam_vals
 class(oft_vector), pointer :: ptmp
 type(oft_lag_brinterp) :: psi_interp
 logical :: curved,in_bounds
@@ -688,7 +690,7 @@ CALL mytimer%tick()
 !------------------------------------------------------------------------------
 ! Get local vector values
 !------------------------------------------------------------------------------
-NULLIFY(pol_vals,rhs_vals,ptmp,pvals)
+NULLIFY(pol_vals,rhs_vals,ptmp)
 CALL a%get_local(pol_vals)
 !---
 ! self%gs_equil%psi=>a ! HERE
@@ -708,7 +710,6 @@ self%F%plasma_bounds=self%gs_equil%plasma_bounds
 self%P%plasma_bounds=self%gs_equil%plasma_bounds
 CALL b%set(0.d0)
 CALL b%get_local(rhs_vals)
-CALL b%new(ptmp)
 ALLOCATE(alam_vals(b%n))
 alam_vals=0.d0
 !------------------------------------------------------------------------------
@@ -786,12 +787,13 @@ CALL b%new(ptmp)
 CALL self%vac_op%apply(a,ptmp)
 CALL b%add(1.d0,1.d0,ptmp)
 CALL ptmp%delete
+DEALLOCATE(ptmp)
 self%ip=(diag(1)+diag(2))/mu0
 self%estored=diag(2)/mu0*3.d0/2.d0
 ! eta_source=b%dot(b)
 ! WRITE(*,*)'CHK',eta_source
 ! WRITE(*,*)self%ip
-DEALLOCATE(pol_vals,rhs_vals,ptmp,alam_vals)
+DEALLOCATE(pol_vals,rhs_vals,alam_vals)
 !---Report time
 ! IF(oft_debug_print(1))THEN
 
