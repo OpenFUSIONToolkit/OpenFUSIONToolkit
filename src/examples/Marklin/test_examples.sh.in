@@ -1,0 +1,30 @@
+#!/bin/bash
+
+log_path=$1
+ROOT_PATH=$(pwd)
+
+run_test() {
+  cd $1
+  start_time=$SECONDS
+  jupyter nbconvert --execute --to notebook --inplace --ExecutePreprocessor.kernel_name=@OFT_PY_KERNEL@ $2 > tmp.log 2>&1
+  if [ $? -ne 0 ]; then
+    elapsed=$((SECONDS - start_time))
+    echo "Example Marklin/$1/$2 failed in $elapsed seconds."
+    echo "" >> $log_path
+    echo "====== Begin Marklin/$1/$2 output ======" >> $log_path
+    cat tmp.log >> $log_path
+    echo "======  End Marklin/$1/$2 output  ======" >> $log_path
+    echo "" >> $log_path
+  else
+    elapsed=$((SECONDS - start_time))
+    echo "Example Marklin/$1/$2 ran successfully in $elapsed seconds."
+  fi
+  rm tmp.log
+  cd $ROOT_PATH
+}
+
+# Cylinder cases
+run_test cylinder Marklin_ex1.ipynb
+
+# NCSX cases
+run_test NCSX NCSX_vac_ex.ipynb

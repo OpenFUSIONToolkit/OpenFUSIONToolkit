@@ -1,5 +1,6 @@
 set( BASE_OBJS
   oft_local_c.c
+  oft_xml_c.c
   oft_sort_c.cxx
   spline.f
   oft_local.F90
@@ -7,6 +8,7 @@ set( BASE_OBJS
   oft_sort.F90
   oft_io.F90
   oft_stitching.F90
+  oft_xml.F90
 )
 
 add_library( oftbase

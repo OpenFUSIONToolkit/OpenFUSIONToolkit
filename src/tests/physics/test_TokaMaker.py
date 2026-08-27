@@ -1,4 +1,3 @@
-from __future__ import print_function
 import os
 import sys
 import time
@@ -12,9 +11,10 @@ test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
+from OpenFUSIONToolkit.util import mu0
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
-from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun
+from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun, create_isoflux_xpts, xpoints_from_moments
 
 
 def mp_run(target,args,timeout=30):
@@ -44,12 +44,23 @@ def mp_run(target,args,timeout=30):
     return test_result
 
 
-def validate_dict(results,dict_exp):
-    tol_dict = {
+def validate_dict(results,dict_exp,tol_dict=None):
+    default_tol = {
         'delta': 5.E-2,
         'deltaU': 5.E-2,
-        'deltaL': 5.E-2
+        'deltaL': 5.E-2,
+        # R at a Z extremum is taken from the nearest traced point, so it carries
+        # O(dtheta) sampling error and moves with element order and mesh resolution
+        'fsa_R_at_Zmin': 2.E-2,
+        'fsa_R_at_Zmax': 2.E-2
     }
+    if tol_dict is None:
+        tol_dict = default_tol
+    else:
+        # Merge user-provided tolerances on top of the defaults
+        merged = dict(default_tol)
+        merged.update(tol_dict)
+        tol_dict = merged
     if results is None:
         print("FAILED: error in solve!")
         return False
@@ -66,19 +77,19 @@ def validate_dict(results,dict_exp):
                         continue
                     if abs((result_val[i]-exp_val[i])/exp_val[i]) > tol_dict.get(key,1.E-2):
                         print("FAILED: {0} ({1}) error too high!".format(key,i))
-                        print("  Expected = {0}".format(exp_val[i]))
-                        print("  Actual =   {0}".format(result_val[i]))
+                        print("  Expected = {0:E}".format(exp_val[i]))
+                        print("  Actual =   {0:E}".format(result_val[i]))
                         test_result = False
             else:
                 if abs((result_val-exp_val)/exp_val) > tol_dict.get(key,1.E-2):
                     print("FAILED: {0} error too high!".format(key))
-                    print("  Expected = {0}".format(exp_val))
-                    print("  Actual =   {0}".format(result_val))
+                    print("  Expected = {0:E}".format(exp_val))
+                    print("  Actual =   {0:E}".format(result_val))
                     test_result = False
     return test_result
 
 
-def validate_eqdsk(file_test,file_ref):
+def validate_eqdsk(file_test,file_ref,helicity=1.0):
     from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk
     try:
         test_data = read_eqdsk(file_test)
@@ -90,6 +101,9 @@ def validate_eqdsk(file_test,file_ref):
     except:
         print("FAILED: Could not read reference EQDSK")
         return False
+    ref_data['bcentr'] *= helicity
+    ref_data['fpol'] *= helicity
+    ref_data['qpsi'] *= helicity
     test_result = True
     for key, exp_val in ref_data.items():
         result_val = test_data.get(key,None)
@@ -105,7 +119,6 @@ def validate_eqdsk(file_test,file_ref):
                     print("  Actual =   {0}".format(np.linalg.norm(exp_val-result_val)/np.linalg.norm(exp_val)))
                     test_result = False
             else:
-                print(result_val,exp_val)
                 if abs((result_val-exp_val)/exp_val) > 1.E-2:
                     print("FAILED: {0} error too high!".format(key))
                     print("  Expected = {0}".format(exp_val))
@@ -114,7 +127,7 @@ def validate_eqdsk(file_test,file_ref):
     return test_result
 
 
-def validate_ifile(ifile_test,ifile_ref):
+def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile
     try:
         test_data = read_ifile(ifile_test)
@@ -126,6 +139,8 @@ def validate_ifile(ifile_test,ifile_ref):
     except:
         print("FAILED: Could not read reference i-file")
         return False
+    ref_data['f'] *= helicity
+    ref_data['q'] *= helicity
     test_result = True
     for key, exp_val in ref_data.items():
         result_val = test_data.get(key,None)
@@ -173,8 +188,8 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order,F0=1.0,full_domain=True)
-    mygs.pnorm=a
-    mygs.alam=b*R*R*2.0
+    mygs.p_scale=a
+    mygs.ffp_scale=b*R*R*2.0
     mygs.set_profiles(ffp_prof={'type': 'flat'},pp_prof={'type': 'flat'})
     mygs.init_psi()
     psi_solovev_TM, _, rz_x = solovev_psi(mygs.r[:,0], mygs.r[:,1],R,a,b,c0)
@@ -268,7 +283,7 @@ def run_sph_case(mesh_resolution,fe_order,mp_q):
     mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.setup(order=fe_order)
-    mygs.pnorm=0.0
+    mygs.p_scale=0.0
     ffp_prof={
         'type': 'linterp',
         'x': [0.0,1.0],
@@ -331,7 +346,8 @@ def test_spheromak_h3(order):
 def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     px1,py1,pdx,pdy = 0.4,0.4,0.2,0.2
     cx1,cy1,cdx,cdy = 0.8,0.8,0.1,0.1
-    def coil_green(rc,zc,r,z):
+    cx2,cy2 = 0.8,0.4
+    def coil_green(zc,rc,r,z):
         if dist is None:
             return eval_green(np.array([[r,z]]),np.array([rc,zc]))[0]
         else:
@@ -346,13 +362,21 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
         for i in range(bdry_points.shape[0]):
             green[i], _ = dblquad(coil_green,cx1-cdx/2,cx1+cdx/2,cy1-cdy/2,cy1+cdy/2,args=(bdry_points[i,0],bdry_points[i,1]))
         return green, psi_bdry
+    def analytic_mutual():
+        def mutual_integrand(z,r):
+            integrand, _ = dblquad(coil_green,cx1-cdx/2,cx1+cdx/2,cy1-cdy/2,cy1+cdy/2,args=(r,z))
+            return integrand
+        mutual, _ = dblquad(mutual_integrand,cx2-cdx/2,cx2+cdx/2,cy2-cdy/2,cy2+cdy/2)
+        return mutual*2.0*np.pi/(cdx*cdy)/(cdx*cdy)
     # Build mesh
     gs_mesh = gs_Domain(rextent=1.0,zextents=[0.0,1.0])
     gs_mesh.define_region('air',mesh_resolution,'boundary')
     gs_mesh.define_region('plasma',mesh_resolution,'plasma')
-    gs_mesh.define_region('coil',0.01,'coil')
+    gs_mesh.define_region('coil1',0.01,'coil')
+    gs_mesh.define_region('coil2',mesh_resolution,'coil')
     gs_mesh.add_rectangle(px1,py1,pdx,pdy,'plasma')
-    gs_mesh.add_rectangle(cx1,cy1,cdx,cdy,'coil')
+    gs_mesh.add_rectangle(cx1,cy1,cdx,cdy,'coil1')
+    gs_mesh.add_rectangle(cx2,cy2,cdx,cdy,'coil2')
     mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
     coil_dict = gs_mesh.get_coils()
     cond_dict = gs_mesh.get_conductors()
@@ -362,14 +386,19 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order)
-    mygs.set_coil_currents({'COIL': cdx*cdy})
+    mygs.set_coil_currents({'COIL1': cdx*cdy})
     if dist is not None:
-        mygs.set_coil_current_dist('COIL',dist(mygs.r[:,0],mygs.r[:,1]))
+        mygs.set_coil_current_dist('COIL1',dist(mygs.r[:,0],mygs.r[:,1]))
     try:
-        psi0 = mygs.vac_solve()
+        vac_Eq = mygs.vac_solve()
+        psi0 = vac_Eq.get_psi(False)
     except ValueError:
         mp_q.put(None)
         return
+    # Get coil mutual matrix
+    Lmat = mygs.get_coil_Lmat()
+    Mcc = analytic_mutual()
+    mutual_err = abs((Lmat[0,1]+Mcc)/Mcc)
 
     # Get analytic result
     green1, psi1 = masked_err(mygs.r[:,1]==1.0,mygs,psi0,0)
@@ -379,19 +408,24 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     green_full = np.hstack((green1[1:], green2, green3[1:]))
     psi_full = np.hstack((psi1[1:], psi2, psi3[1:]))
     psi_err = np.linalg.norm(green_full+psi_full)/np.linalg.norm(green_full)
-    mp_q.put([psi_err])
+    mp_q.put([psi_err,mutual_err])
     oftpy_dump_cov()
 
 
-def validate_coil(results,psi_err_exp):
+def validate_coil(results,psi_err_exp,mutual_err_exp):
     if results is None:
         print("FAILED: error in solve!")
         return False
     test_result = True
-    if abs(results[0]) > abs(psi_err_exp)*1.1:
+    if abs(results[0]) > 1.1*abs(psi_err_exp):
         print("FAILED: psi error too high!")
-        print("  Expected = {0}".format(psi_err_exp))
-        print("  Actual =   {0}".format(results[0]))
+        print("  Expected = {0:.5E}".format(psi_err_exp))
+        print("  Actual =   {0:.5E}".format(results[0]))
+        test_result = False
+    if abs(results[1]) > 1.1*abs(mutual_err_exp):
+        print("FAILED: coil mutual error too high!")
+        print("  Expected = {0:.5E}".format(mutual_err_exp))
+        print("  Actual =   {0:.5E}".format(results[1]))
         test_result = False
     return test_result
 
@@ -405,38 +439,43 @@ def coil_dist(r,z):
 @pytest.mark.parametrize("dist_coil", (False, True))
 def test_coil_h1(order,dist_coil):
     if dist_coil:
-        errs = np.r_[0.01840042334178343, 0.003450061648683903, 0.0008471927795560409]
+        errs = np.r_[2.34993E-02, 7.68143E-03, 7.54414E-04]
+        mutual_errs = np.r_[9.88100E-03, 5.16977E-03, 3.54599E-04]
         results = mp_run(run_coil_case,(0.1,order,coil_dist))
     else:
-        errs = np.r_[0.010702389576304984, 0.00028240755964702516, 1.7930442330763583e-05]
+        errs = np.r_[9.62847E-03, 7.45252E-04, 4.29408E-05]
+        mutual_errs = np.r_[1.01747E-03, 3.92000E-04, 5.27038E-05]
         results = mp_run(run_coil_case,(0.1,order,None))
-    print('Err = ',results[0])
-    assert validate_coil(results,errs[order-2])
+    assert validate_coil(results,errs[order-2],mutual_errs[order-2])
 @pytest.mark.parametrize("order", (2,3,4))
 @pytest.mark.parametrize("dist_coil", (False, True))
 def test_coil_h2(order,dist_coil):
     if dist_coil:
-        errs = np.r_[0.0036698088466649878, 0.00021755100020083888, 1.736479174843997e-05]
+        errs = np.r_[4.32354E-03, 2.15974E-04, 1.97917E-05]
+        mutual_errs = np.r_[4.54609E-04, 1.25920E-04, 4.84935E-06]
         results = mp_run(run_coil_case,(0.1/2.0,order,coil_dist))
     else:
-        errs = np.r_[0.0032680822197860876, 2.7032824967342426e-05, 8.560758830069598e-07]
+        errs = np.r_[3.70634E-03, 5.16587E-05, 3.55922E-06]
+        mutual_errs = np.r_[1.14499E-03, 2.03449E-05, 1.49148E-06]
         results = mp_run(run_coil_case,(0.1/2.0,order,None))
-    assert validate_coil(results,errs[order-2])
+    assert validate_coil(results,errs[order-2],mutual_errs[order-2])
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,3,4))
 @pytest.mark.parametrize("dist_coil", (False, True))
 def test_coil_h3(order,dist_coil):
     if dist_coil:
-        errs = np.r_[0.001364423661608862, 1.5953386454257285e-05, 9.158565258919996e-07]
+        errs = np.r_[1.30686E-03, 1.00862E-05, 4.33982E-07]
+        mutual_errs = np.r_[4.30803E-04, 3.04001E-06, 1.69941E-07]
         results = mp_run(run_coil_case,(0.1/4.0,order,coil_dist))
     else:
-        errs = np.r_[0.0008094155097004184, 1.8949323808351823e-06, 4.4169705023586007e-07]
+        errs = np.r_[9.12771E-04, 1.58232E-06, 3.04067E-07]
+        mutual_errs = np.r_[3.31022E-04, 2.88318E-07, 2.19675E-07]
         results = mp_run(run_coil_case,(0.1/4.0,order,None))
-    assert validate_coil(results,errs[order-2])
+    assert validate_coil(results,errs[order-2],mutual_errs[order-2])
 
 
 #============================================================================
-def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,mp_q):
+def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
     def create_mesh():
         with open('ITER_geom.json','r') as fid:
             ITER_geom = json.load(fid)
@@ -484,11 +523,15 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
         mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
         mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-        mygs.setup(order=fe_order,F0=5.3*6.2)
+        mygs.setup(order=fe_order,F0=helicity*5.3*6.2)
         #
-        if eig_test:
-            eig_vals, _ = mygs.eig_wall(10)
-            mp_q.put([{'Tau_w': eig_vals[:5,0]}])
+        if test_type.startswith('eig'):
+            if test_type == 'eig_dep':
+                eig_vals, _ = mygs.eig_wall(10)
+                mp_q.put([{'Tau_w': 1.0/eig_vals[:5,0]}])
+            else:
+                eig_vals, _ = mygs.compute_wall_modes(10)
+                mp_q.put([{'Tau_w': eig_vals[:5]}])
             oftpy_dump_cov()
             return
         #
@@ -541,35 +584,51 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         delta = 0.0
         try:
             mygs.init_psi(R0, Z0, a, kappa, delta)
-            mygs.solve()
+            EQ_obj, nl_its = mygs.solve(return_its=True)
         except ValueError:
             mp_q.put(None)
             return
-        if stability_test:
-            eig_vals, eig_vecs = mygs.eig_td(-1.E2,10,False)
+        if test_type.startswith('stab'):
+            if test_type == 'stab_dep':
+                eig_vals, eig_modes = mygs.eig_td(-1.E2,10,False)
+                growth_rates = -eig_vals[:,0]
+            else:
+                growth_rates, eig_modes = mygs.compute_linear_stability(1.E2,10,False)
             # Run brief nonlinear evolution
             psi0 = mygs.get_psi(False)
-            eig_sign = eig_vecs[0,(mygs.r[:,1]-R0)>0.0][abs(eig_vecs[0,(mygs.r[:,1]-R0)>0.0]).argmax()]
-            psi_ic = psi0-0.01*eig_vecs[0,:]*(mygs.psi_bounds[1]-mygs.psi_bounds[0])/eig_sign
+            eig_sign = eig_modes[0,(mygs.r[:,1]-R0)>0.0][abs(eig_modes[0,(mygs.r[:,1]-R0)>0.0]).argmax()]
+            psi_ic = psi0-0.01*eig_modes[0,:]*(mygs.psi_bounds[1]-mygs.psi_bounds[0])/eig_sign
             mygs.set_psi(psi_ic)
             mygs.set_saddles(None)
             mygs.set_isoflux(None)
-            dt = 0.1/abs(eig_vals[0,0])
+            dt = 0.1/abs(growth_rates[0])
             mygs.setup_td(dt,1.E-13,1.E-11)
             sim_time = 0.0
             for i in range(5):
-                sim_time, _, nl_its, lin_its, nretry = mygs.step_td(sim_time,dt)
+                sim_time, _, _, _, _ = mygs.step_td(sim_time,dt)
             psi1 = mygs.get_psi(False)
-            mp_q.put([{'gamma': eig_vals[:5,0], 'nl_change': np.linalg.norm(psi1-psi0)}])
+            mp_q.put([{'gamma': growth_rates[:5], 'nl_change': np.linalg.norm(psi1-psi0)}])
             oftpy_dump_cov()
             return
         mygs.save_eqdsk('test.eqdsk',lcfs_pressure=6.E4)
-        eq_info = mygs.get_stats(li_normalization='ITER')
+        if test_type == 'io':
+            EQ_obj.save_TokaMaker('test_eq.h5')
+            mygs.init_psi(R0, Z0, a, kappa, delta)
+            mygs.replace_eq(source_file='test_eq.h5')
+            EQ_obj = mygs.copy_eq()
+            _, nl_its = mygs.solve(return_its=True)
+        eq_info = EQ_obj.get_stats(li_normalization='ITER')
         Lmat = mygs.get_coil_Lmat()
         eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
         eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
         eq_info['Lplasma'] = Lmat[-1,-1]
-    if test_recon:
+        eq_info['nl_its'] = nl_its
+        # Flux surface averages and per-surface shape parameters (see `get_fsa`)
+        fsa = EQ_obj.get_fsa(psi=np.r_[0.25, 0.5, 0.9])
+        for key in ('q', 'F', 'dV/dPsi', '<|grad psi|>', '<|grad psi|^2>', '<Bp^2>',
+                    '<1/B^2>', 'R_min', 'R_max', 'Z_min', 'Z_max', 'R_at_Zmin', 'R_at_Zmax'):
+            eq_info['fsa_' + key] = fsa[key].tolist()
+    if test_type.startswith('recon'):
         import random
         from OpenFUSIONToolkit.TokaMaker.reconstruction import reconstruction
         # Sample constraint locations
@@ -588,57 +647,89 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
         # Setup constraints
         random.seed(42)
         myrecon = reconstruction(mygs)
-        noise_amp = (random.random()-0.5)*2.0
+        noise_amp = random.gauss(0.0,1.0)
         Ip_noised = eq_info['Ip']*(1.0+noise_amp*0.05)
         myrecon.set_Ip(Ip_noised, err=0.05*eq_info['Ip'])
         flux_vals = []
         field_eval = mygs.get_field_eval('PSI')
         for i in range(B_locs.shape[0]):
             B_tmp = field_eval.eval(B_locs[i,:])
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss(0.0,1.0)
             flux_vals.append(B_tmp[0])
             psi_val = B_tmp[0]*2.0*np.pi
             myrecon.add_flux_loop(B_locs[i,:], psi_val*(1.0 + noise_amp*0.05), err=abs(psi_val*0.05))
         field_eval = mygs.get_field_eval('B')
         for i in range(B_locs.shape[0]):
             B_tmp = field_eval.eval(B_locs[i,:])
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss(0.0,1.0)
             myrecon.add_Mirnov(B_locs[i,:], np.r_[1.0,0.0,0.0], B_tmp[0] + noise_amp*abs(B_tmp[0]*0.05), err=abs(B_tmp[0]*0.05))
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss(0.0,1.0)
             myrecon.add_Mirnov(B_locs[i,:], np.r_[0.0,0.0,1.0], B_tmp[2] + noise_amp*abs(B_tmp[2]*0.05), err=abs(B_tmp[2]*0.05))
         coil_currents, _ = mygs.get_coil_currents()
         for key in coil_currents:
-            noise_amp = (random.random()-0.5)*2.0
+            noise_amp = random.gauss(0.0,1.0)
             coil_currents[key] *= 1.0+noise_amp*0.05
         # Compute starting equilibrium
         mygs.set_isoflux(None)
         mygs.set_saddles(None)
         mygs.set_targets(Ip=Ip_noised,Ip_ratio=2.0)
+        if test_type == 'recon':
+            mygs.settings.ffp_target_weight=1.0/((0.05*abs(Ip_noised))*mu0)
+            mygs.settings.pp_target_weight=1.0
+            mygs.update_settings()
         mygs.set_flux(B_locs,np.array(flux_vals))
         regularization_terms = []
         for name in coil_currents:
             regularization_terms.append(mygs.coil_reg_term({name: 1.0},target=coil_currents[name],weight=1.E-1))
         regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0},target=0.0,weight=1.E2))
         mygs.set_coil_reg(reg_terms=regularization_terms)
+        coil_err = {name: 0.05*abs(current) for name, current in coil_currents.items()}
+        myrecon.set_coil_currents(coil_currents,coil_err)
         R0 = 6.3
         Z0 = 0.5
         a = 1.0
         kappa = 1.0
         delta = 0.0
-        err_flag = mygs.init_psi(R0, Z0, a, kappa, delta)
-        mygs.settings.maxits=100
+        mygs.init_psi(R0, Z0, a, kappa, delta)
+        if test_type == 'recon':
+            mygs.settings.maxits=300
+        elif test_type == 'recon_legacy':
+            mygs.settings.maxits=100
         mygs.update_settings()
         mygs.solve()
         # Perform reconstruction
-        mygs.set_isoflux(None)
-        mygs.set_flux(None,None)
-        mygs.set_saddles(None)
-        mygs.set_targets(R0=mygs.o_point[0],V0=mygs.o_point[1])
-        myrecon.settings.fitPnorm = False
-        myrecon.settings.fitR0 = True
-        myrecon.settings.fitCoils = True
-        myrecon.settings.pm = False
-        err_flag = myrecon.reconstruct()
+        if test_type == 'recon':
+            mygs.settings.pm = False
+            mygs.update_settings()
+            mygs.set_isoflux(None)
+            mygs.set_saddles(None)
+            mygs.set_targets(Ip=Ip_noised)
+            mygs.settings.ffp_target_weight=1.0/((0.05*abs(Ip_noised))*mu0)
+            myrecon.setup_constraints()
+            # Configure reconstruction settings
+            myrecon.settings.fitF = False
+            myrecon.settings.fitP = False
+            myrecon.settings.fit_Pscale = True
+            myrecon.settings.fit_FFPscale = False
+            myrecon.settings.fitR0 = False
+            myrecon.settings.fitZ0 = False
+            myrecon.settings.fixedCentering = False
+            myrecon.settings.dx = 1.E-2
+            x0_nl, _ = myrecon.setup_get_opt()
+            from scipy.optimize import least_squares
+            opt_result = least_squares(myrecon.opt_error, x0_nl, jac=myrecon.opt_error_jacobian, method='lm', ftol=1.E-3, args=(myrecon,False))
+            mygs.settings.pm = True
+            mygs.update_settings()
+        elif test_type == 'recon_legacy':
+            mygs.set_isoflux(None)
+            mygs.set_flux(None,None)
+            mygs.set_saddles(None)
+            mygs.set_targets(R0=mygs.o_point[0],V0=mygs.o_point[1])
+            myrecon.settings.fit_Pscale = False
+            myrecon.settings.fitR0 = True
+            myrecon.settings.fitCoils = True
+            myrecon.settings.pm = False
+            _ = myrecon.reconstruct()
         #
         eq_info = mygs.get_stats(li_normalization='ITER')
         eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
@@ -660,19 +751,25 @@ def run_ITER_case(mesh_resolution,fe_orders,eig_test,stability_test,test_recon,m
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_eig(order):
     exp_dict = {
-        'Tau_w': [1.51083009, 2.87431718, 3.91493237, 5.23482507, 5.61049374]
+        'Tau_w': [6.619977E-01, 3.479492E-01, 2.554444E-01, 1.910381E-01, 1.782464E-01]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),True,False,False))
+    results = mp_run(run_ITER_case,(1.0,(order,),'eig',1.0))
+    assert validate_dict(results,exp_dict)
+    # Test deprecated interface
+    results = mp_run(run_ITER_case,(1.0,(order,),'eig_dep',1.0))
     assert validate_dict(results,exp_dict)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_stability(order):
     exp_dict = {
-        'gamma': [-12.3620, 1.83981, 3.41613, 5.12470, 6.53393],
+        'gamma': [12.3620, -1.83981, -3.41613, -5.12470, -6.53393],
         'nl_change': [225.4421413167051, 338.0113029638385][order-2]
     }
-    results = mp_run(run_ITER_case,(1.0,(order,),False,True,False))
+    results = mp_run(run_ITER_case,(1.0,(order,),'stab',1.0))
+    assert validate_dict(results,exp_dict)
+    # Test deprecated interface
+    results = mp_run(run_ITER_case,(1.0,(order,),'stab_dep',1.0))
     assert validate_dict(results,exp_dict)
 
 ITER_eq_dict = {
@@ -691,7 +788,7 @@ ITER_eq_dict = {
     'q_95': 2.7602989886308738,
     'P_ax': 619225.017325726,
     'W_MHD': 242986393.97329777,
-    'beta_pol': 42.443587820489455,
+    'beta_pol': 42.427927348488936,
     'dflux': 1.540293464599462,
     'tflux': 121.86081608235014,
     'l_i': 0.9054096856166233,
@@ -699,36 +796,96 @@ ITER_eq_dict = {
     'beta_n': 1.1951205307278518,
     'LCS1': 2.4858609418809336e-06,
     'MCS1_plasma': 8.931779419000401e-07,
-    'Lplasma': 1.1900576990802187e-05
+    'Lplasma': 1.1900576990802187e-05,
+    # Flux surface averages and shape at psi_N = [0.25, 0.5, 0.9] (see `get_fsa`)
+    'fsa_q': [0.8957740190095893, 1.0925386896870009, 2.244697561979323],
+    'fsa_F': [33.974461335230956, 33.24150425404669, 32.863767384960504],
+    'fsa_dV/dPsi': [-40.809941802973256, -48.739421299593786, -88.3635676135186],
+    'fsa_<|grad psi|>': [6.631303992418605, 8.12645638205315, 6.722632628048097],
+    'fsa_<|grad psi|^2>': [44.962611735546105, 68.65358375003274, 53.596719328235814],
+    'fsa_<Bp^2>': [1.1232107307935824, 1.7334030132908238, 1.3698497417461675],
+    'fsa_<1/B^2>': [0.03394218780262852, 0.03459374214812227, 0.03358354423001478],
+    'fsa_R_min': [5.462226095551001, 5.036393890349691, 4.409277529477673],
+    'fsa_R_max': [7.220524711028818, 7.593373222623317, 8.085943200676986],
+    'fsa_Z_min': [-0.7383764856169046, -1.3583537534271921, -2.508416991476664],
+    'fsa_Z_max': [1.8005752842848168, 2.414360593511412, 3.5092131308630288],
+    'fsa_R_at_Zmin': [6.304387105351003, 6.204424153705717, 5.796505368206957],
+    'fsa_R_at_Zmax': [6.272540830880864, 6.157453542216596, 5.750257254804224],
 }
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
-def test_ITER_eq(order):
-    results = mp_run(run_ITER_case,(1.0,(order,),False,False,False))
-    assert validate_dict(results,ITER_eq_dict)
-    assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk')
-    assert validate_ifile('tokamaker.ifile','ITER_test.ifile')
+@pytest.mark.parametrize("helicity", (1.0,-1.0))
+def test_ITER_eq(order,helicity):
+    eq_dict = ITER_eq_dict.copy()
+    eq_dict['tflux'] *= helicity
+    eq_dict['dflux'] *= helicity
+    eq_dict['q_0'] *= helicity
+    eq_dict['q_95'] *= helicity
+    # `q` and `F` follow the sign of F0; the remaining `fsa_*` entries are invariant.
+    # Rebind rather than scale in place: `ITER_eq_dict.copy()` is shallow, so mutating
+    # these lists would leak into the other parametrized runs.
+    eq_dict['fsa_q'] = [val*helicity for val in eq_dict['fsa_q']]
+    eq_dict['fsa_F'] = [val*helicity for val in eq_dict['fsa_F']]
+    results = mp_run(run_ITER_case,(1.0,(order,),'',helicity))
+    assert validate_dict(results,eq_dict)
+    assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)
+    assert validate_ifile('tokamaker.ifile','ITER_test.ifile',helicity)
+
+@pytest.mark.coverage
+@pytest.mark.parametrize("order", (2,3))#,4))
+@pytest.mark.parametrize("helicity", (1.0,-1.0))
+def test_ITER_eq_io(order,helicity):
+    eq_dict = ITER_eq_dict.copy()
+    eq_dict['nl_its'] = 1
+    eq_dict['tflux'] *= helicity
+    eq_dict['dflux'] *= helicity
+    eq_dict['q_0'] *= helicity
+    eq_dict['q_95'] *= helicity
+    # `q` and `F` follow the sign of F0; the remaining `fsa_*` entries are invariant.
+    # Rebind rather than scale in place: `ITER_eq_dict.copy()` is shallow, so mutating
+    # these lists would leak into the other parametrized runs.
+    eq_dict['fsa_q'] = [val*helicity for val in eq_dict['fsa_q']]
+    eq_dict['fsa_F'] = [val*helicity for val in eq_dict['fsa_F']]
+    results = mp_run(run_ITER_case,(1.0,(order,),'io',helicity))
+    assert validate_dict(results,eq_dict)
 
 @pytest.mark.coverage
 def test_ITER_recon():
     ITER_recon_dict = ITER_eq_dict.copy()
-    ITER_recon_dict['q_95'] = 2.7274510732722375
-    ITER_recon_dict['P_ax'] = 655693.6031014244
-    ITER_recon_dict['W_MHD'] = 257915984.01397622
-    ITER_recon_dict['l_i'] = 0.895954395982195
-    ITER_recon_dict['beta_pol'] = 44.16835089714342
-    ITER_recon_dict['beta_tor'] = 1.8950360948919174
-    ITER_recon_dict['beta_n'] = 1.2576100533550467
-    results = mp_run(run_ITER_case,(1.0,(2,),False,False,True))
+    ITER_recon_dict['q_0'] = 0.8417344
+    ITER_recon_dict['P_ax'] = 6.575446E5
+    ITER_recon_dict['W_MHD'] = 2.591990E8
+    ITER_recon_dict['beta_pol'] = 46.02736
+    ITER_recon_dict['dflux'] = 1.440565
+    ITER_recon_dict['l_i'] = 0.8872565
+    ITER_recon_dict['beta_tor'] = 1.906180
+    ITER_recon_dict['beta_n'] = 1.284312
+    results = mp_run(run_ITER_case,(1.0,(2,),'recon',1.0))
+    assert validate_dict(results,ITER_recon_dict)
+
+@pytest.mark.coverage
+def test_ITER_recon_legacy():
+    ITER_recon_dict = ITER_eq_dict.copy()
+    ITER_recon_dict['vol'] = 8.119402E2
+    ITER_recon_dict['q_95'] = 2.718779
+    ITER_recon_dict['P_ax'] = 6.656184E5
+    ITER_recon_dict['W_MHD'] = 2.607023E8
+    ITER_recon_dict['beta_pol'] = 45.63260
+    ITER_recon_dict['dflux'] = 1.462672
+    ITER_recon_dict['tflux'] = 1.201402E2
+    ITER_recon_dict['l_i'] = 0.8906732
+    ITER_recon_dict['beta_tor'] = 1.934024
+    ITER_recon_dict['beta_n'] = 1.294385
+    results = mp_run(run_ITER_case,(1.0,(2,),'recon_legacy',1.0))
     assert validate_dict(results,ITER_recon_dict)
 
 def test_ITER_concurrent():
-    results = mp_run(run_ITER_case,(1.0,(2,3),False,False,False))
+    results = mp_run(run_ITER_case,(1.0,(2,3),'',1.0))
     assert validate_dict(results,ITER_eq_dict)
 
 #============================================================================
-def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
+def run_LTX_case(fe_order,test_type,mp_q):
     def create_mesh():
         with open('LTX_geom.json','r') as fid:
             LTX_geom = json.load(fid)
@@ -747,7 +904,7 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
         for key, coil in LTX_geom['coils'].items():
             if key.startswith('OH'):
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'],coil_set='OH')
-            else:    
+            else:
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'])
         #
         gs_mesh.add_polygon(LTX_geom['limiter'],'plasma',parent_name='air')
@@ -778,9 +935,9 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order,F0=0.10752)
     #
-    if eig_test:
-        eig_vals, _ = mygs.eig_wall(10)
-        mp_q.put([{'Tau_w': eig_vals[:5,0]}])
+    if test_type == 'eig':
+        eig_vals, _ = mygs.compute_wall_modes(10)
+        mp_q.put([{'Tau_w': eig_vals[:5]}])
         oftpy_dump_cov()
         return
     #
@@ -815,9 +972,9 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
     mygs.settings.pm=True
     mygs.update_settings()
     mygs.solve()
-    if stability_test:
-        eig_vals, _ = mygs.eig_td(-1.E3,10,False)
-        mp_q.put([{'gamma': eig_vals[:5,0]}])
+    if test_type == 'stab':
+        eig_vals, _ = mygs.compute_linear_stability(1.E3,10,False)
+        mp_q.put([{'gamma': eig_vals[:5]}])
         oftpy_dump_cov()
         return
     #
@@ -836,18 +993,18 @@ def run_LTX_case(fe_order,eig_test,stability_test,mp_q):
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_eig(order):
     exp_dict = {
-        'Tau_w': [195.300148, 253.92961287, 394.26207238, 460.20439568, 539.40856182]
+        'Tau_w': [5.152566E-03, 3.953030E-03, 2.536384E-03, 2.172948E-03, 1.853882E-03]
     }
-    results = mp_run(run_LTX_case,(order,True,False))
+    results = mp_run(run_LTX_case,(order,'eig'))
     assert validate_dict(results,exp_dict)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_stability(order):
     exp_dict = {
-        'gamma': [-234.1051, 214.4196, 282.0877, 388.7592, 388.7592]
+        'gamma': [234.1051, -214.4196, -282.0877, -388.7592, -388.7592]
     }
-    results = mp_run(run_LTX_case,(order,False,True))
+    results = mp_run(run_LTX_case,(order,'stab'))
     assert validate_dict(results,exp_dict)
 
 LTX_eq_dict = {
@@ -877,8 +1034,797 @@ LTX_eq_dict = {
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_eq(order):
-    results = mp_run(run_LTX_case,(order,False,False))
+    results = mp_run(run_LTX_case,(order,''))
     assert validate_dict(results,LTX_eq_dict)
+
+#============================================================================
+# Bootstrap current test (ITER-based)
+#============================================================================
+def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
+    from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap, Hmode_profiles
+
+    # --- Mesh creation (identical to run_ITER_case) ---
+    def create_mesh():
+        with open('ITER_geom.json','r') as fid:
+            ITER_geom = json.load(fid)
+        plasma_dx = 0.15/mesh_resolution
+        coil_dx = 0.2/mesh_resolution
+        vv_dx = 0.3/mesh_resolution
+        vac_dx = 0.6/mesh_resolution
+        gs_mesh = gs_Domain()
+        gs_mesh.define_region('air',vac_dx,'boundary')
+        gs_mesh.define_region('plasma',plasma_dx,'plasma')
+        gs_mesh.define_region('vacuum1',vv_dx,'vacuum')
+        gs_mesh.define_region('vacuum2',vv_dx,'vacuum')
+        gs_mesh.define_region('vv1',vv_dx,'conductor',eta=6.9E-7)
+        gs_mesh.define_region('vv2',vv_dx,'conductor',eta=6.9E-7)
+        for key, coil in ITER_geom['coils'].items():
+            if not key.startswith('VS'):
+                gs_mesh.define_region(key,coil_dx,'coil')
+        gs_mesh.define_region('VSU',coil_dx,'coil',coil_set='VS',nTurns=1.0)
+        gs_mesh.define_region('VSL',coil_dx,'coil',coil_set='VS',nTurns=-1.0)
+        gs_mesh.add_polygon(ITER_geom['limiter'],'plasma',parent_name='vacuum1')
+        gs_mesh.add_annulus(ITER_geom['inner_vv'][0],'vacuum1',ITER_geom['inner_vv'][1],'vv1',parent_name='vacuum2')
+        gs_mesh.add_annulus(ITER_geom['outer_vv'][0],'vacuum2',ITER_geom['outer_vv'][1],'vv2',parent_name='air')
+        for key, coil in ITER_geom['coils'].items():
+            if key.startswith('VS'):
+                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='vacuum1')
+            else:
+                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='air')
+        mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
+        coil_dict = gs_mesh.get_coils()
+        cond_dict = gs_mesh.get_conductors()
+        save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,'ITER_mesh.h5')
+
+    if not os.path.exists('ITER_mesh.h5'):
+        try:
+            create_mesh()
+        except Exception as e:
+            print(e)
+            mp_q.put(None)
+            return
+
+    # --- Set up GS solver (same as run_ITER_case) ---
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
+    mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('ITER_mesh.h5')
+    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
+    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
+    mygs.setup(order=fe_order, F0=5.3*6.2)
+
+    mygs.set_coil_vsc({'VS': 1.0})
+    coil_bounds = {key: [-50.E6, 50.E6] for key in mygs.coil_sets}
+    mygs.set_coil_bounds(coil_bounds)
+
+    Ip_target = 15.6E6
+    P0_target = 6.2E5
+    mygs.set_targets(Ip=Ip_target, pax=P0_target)
+
+    isoflux_pts = np.array([
+        [ 8.20,  0.41],
+        [ 8.06,  1.46],
+        [ 7.51,  2.62],
+        [ 6.14,  3.78],
+        [ 4.51,  3.02],
+        [ 4.26,  1.33],
+        [ 4.28,  0.08],
+        [ 4.49, -1.34],
+        [ 7.28, -1.89],
+        [ 8.00, -0.68]
+    ])
+    x_point = np.array([[5.125, -3.4],])
+    mygs.set_isoflux(np.vstack((isoflux_pts, x_point)))
+    mygs.set_saddles(x_point)
+
+    regularization_terms = []
+    for name in mygs.coil_sets:
+        if name.startswith('CS'):
+            if name.startswith('CS1'):
+                regularization_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=2.E-2))
+            else:
+                regularization_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=1.E-2))
+        elif name.startswith('PF'):
+            regularization_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=1.E-2))
+        elif name.startswith('VS'):
+            regularization_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=1.E-2))
+    regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0}, target=0.0, weight=1.E2))
+    mygs.set_coil_reg(reg_terms=regularization_terms)
+
+    ffp_prof = create_power_flux_fun(40, 1.5, 2.0)
+    pp_prof = create_power_flux_fun(40, 4.0, 1.0)
+    mygs.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof)
+
+    R0 = 6.3
+    Z0 = 0.5
+    a = 2.0
+    kappa = 1.4
+    delta = 0.0
+    try:
+        mygs.init_psi(R0, Z0, a, kappa, delta)
+        mygs.solve()
+    except ValueError:
+        mp_q.put(None)
+        return
+
+    # --- Define kinetic and current profiles for bootstrap solve ---
+    n_sample = 257
+    psi_sample = np.linspace(0.0, 1.0, n_sample)
+    psi_pad = 1.E-3
+
+    # Inductive j_phi profile shape
+    jphi_prof = create_power_flux_fun(len(psi_sample), 2.25, 2.5)
+    inductive_jphi = jphi_prof['y']
+
+    # H-mode kinetic profiles
+    xphalf = 0.965
+    widthp_Te = 0.1
+    widthp_ne = 0.35
+
+    ne = Hmode_profiles(edge=0.35, ped=0.6, core=1.1, rgrid=n_sample,
+                        expin=1.6, expout=1.6, widthp=widthp_ne, xphalf=xphalf) * 1e20
+    Te = Hmode_profiles(edge=1500., ped=5000., core=21000., rgrid=n_sample,
+                        expin=1.3, expout=1.7, widthp=widthp_Te, xphalf=xphalf)
+    ni = ne.copy()       # Assuming quasineutrality
+    Ti = Te.copy()       # Assuming isothermal
+    Zeff = np.full(n_sample, 1.7)
+
+    # --- Solve with bootstrap current ---
+    try:
+        bs_results = solve_with_bootstrap(
+            mygs,
+            ne, Te, ni, Ti, Zeff,
+            Ip_target,
+            inductive_jphi,
+            scale_jBS=1.0,
+            isolate_edge_jBS=False,
+            psi_pad=psi_pad,
+            iterations=2,
+            diagnostic_plots=False
+        )
+    except Exception as e:
+        print("Bootstrap solve failed: {0}".format(e))
+        mp_q.put(None)
+        return
+
+    # --- Collect results ---
+    eq_info = mygs.get_stats(li_normalization='ITER')
+
+    # Bootstrap-specific diagnostics
+    j_BS = bs_results['j_BS']
+    j_total = bs_results['total_j_phi']
+    j_ind = bs_results['j_inductive']
+
+    eq_info['j_BS_max'] = float(np.max(np.abs(j_BS)))
+    eq_info['j_BS_axis'] = float(j_BS[0])
+    eq_info['jphi_axis'] = float(j_total[0])
+    eq_info['jphi_max'] = float(np.max(np.abs(j_total)))
+    eq_info['j_ind_axis'] = float(j_ind[0])
+
+    # Bootstrap fraction (psi-space trapezoid estimate)
+    bs_frac = np.trapezoid(j_BS, psi_sample) / np.trapezoid(j_total, psi_sample) \
+              if np.trapezoid(j_total, psi_sample) != 0 else 0.0
+    eq_info['bs_fraction'] = float(bs_frac)
+
+    mp_q.put([eq_info])
+    oftpy_dump_cov()
+
+# -----------------------------------------------------------------------
+# Expected values dictionary
+# -----------------------------------------------------------------------
+ITER_bootstrap_eq_dict = {
+    'Ip': 15600817.585821694,
+    'kappa': 1.87554142781964,
+    'R_geo': 6.222376807932244,
+    'a_geo': 1.9817209643036526,
+    'q_0': 0.9951304914765554,
+    'q_95': 2.856235920791585,
+    'P_ax': 739971.7132708698,
+    'j_BS_max': 193963.2797949608,
+    'j_BS_axis': 7555.958566625245,
+    'jphi_axis': 1459409.3677809385,
+    'jphi_max': 1551188.1280449552,
+    'j_ind_axis': 1357487.1677957429,
+    'bs_fraction': 0.1575907471180497,
+}
+
+@pytest.mark.slow
+@pytest.mark.parametrize("order", (2,))
+def test_ITER_bootstrap(order):
+    results = mp_run(run_ITER_bootstrap_case, (1.0, order), timeout=300)
+    assert validate_dict(results, ITER_bootstrap_eq_dict)
+
+
+# -----------------------------------------------------------------------
+# Test: redl_bootstrap() directly (same equilibrium as test_ITER_bootstrap)
+# -----------------------------------------------------------------------
+def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
+    from OpenFUSIONToolkit.TokaMaker.bootstrap import (
+        redl_bootstrap, calculate_ln_lambda, Hmode_profiles
+    )
+
+    # --- Mesh creation (identical to run_ITER_bootstrap_case) ---
+    def create_mesh():
+        with open('ITER_geom.json','r') as fid:
+            ITER_geom = json.load(fid)
+        plasma_dx = 0.15/mesh_resolution
+        coil_dx = 0.2/mesh_resolution
+        vv_dx = 0.3/mesh_resolution
+        vac_dx = 0.6/mesh_resolution
+        gs_mesh = gs_Domain()
+        gs_mesh.define_region('air',vac_dx,'boundary')
+        gs_mesh.define_region('plasma',plasma_dx,'plasma')
+        gs_mesh.define_region('vacuum1',vv_dx,'vacuum')
+        gs_mesh.define_region('vacuum2',vv_dx,'vacuum')
+        gs_mesh.define_region('vv1',vv_dx,'conductor',eta=6.9E-7)
+        gs_mesh.define_region('vv2',vv_dx,'conductor',eta=6.9E-7)
+        for key, coil in ITER_geom['coils'].items():
+            if not key.startswith('VS'):
+                gs_mesh.define_region(key,coil_dx,'coil')
+        gs_mesh.define_region('VSU',coil_dx,'coil',coil_set='VS',nTurns=1.0)
+        gs_mesh.define_region('VSL',coil_dx,'coil',coil_set='VS',nTurns=-1.0)
+        gs_mesh.add_polygon(ITER_geom['limiter'],'plasma',parent_name='vacuum1')
+        gs_mesh.add_annulus(ITER_geom['inner_vv'][0],'vacuum1',ITER_geom['inner_vv'][1],'vv1',parent_name='vacuum2')
+        gs_mesh.add_annulus(ITER_geom['outer_vv'][0],'vacuum2',ITER_geom['outer_vv'][1],'vv2',parent_name='air')
+        for key, coil in ITER_geom['coils'].items():
+            if key.startswith('VS'):
+                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='vacuum1')
+            else:
+                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='air')
+        mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
+        coil_dict = gs_mesh.get_coils()
+        cond_dict = gs_mesh.get_conductors()
+        save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,'ITER_mesh.h5')
+
+    if not os.path.exists('ITER_mesh.h5'):
+        try:
+            create_mesh()
+        except Exception as e:
+            print(e)
+            mp_q.put(None)
+            return
+
+    # --- Set up GS solver (same as run_ITER_bootstrap_case) ---
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
+    mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('ITER_mesh.h5')
+    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
+    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
+    mygs.setup(order=fe_order, F0=5.3*6.2)
+
+    mygs.set_coil_vsc({'VS': 1.0})
+    coil_bounds = {key: [-50.E6, 50.E6] for key in mygs.coil_sets}
+    mygs.set_coil_bounds(coil_bounds)
+
+    Ip_target = 15.6E6
+    P0_target = 6.2E5
+    mygs.set_targets(Ip=Ip_target, pax=P0_target)
+
+    isoflux_pts = np.array([
+        [ 8.20,  0.41],
+        [ 8.06,  1.46],
+        [ 7.51,  2.62],
+        [ 6.14,  3.78],
+        [ 4.51,  3.02],
+        [ 4.26,  1.33],
+        [ 4.28,  0.08],
+        [ 4.49, -1.34],
+        [ 7.28, -1.89],
+        [ 8.00, -0.68]
+    ])
+    x_point = np.array([[5.125, -3.4],])
+    mygs.set_isoflux(np.vstack((isoflux_pts, x_point)))
+    mygs.set_saddles(x_point)
+
+    regularization_terms = []
+    for name in mygs.coil_sets:
+        if name.startswith('CS'):
+            if name.startswith('CS1'):
+                regularization_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=2.E-2))
+            else:
+                regularization_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=1.E-2))
+        elif name.startswith('PF'):
+            regularization_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=1.E-2))
+        elif name.startswith('VS'):
+            regularization_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=1.E-2))
+    regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0}, target=0.0, weight=1.E2))
+    mygs.set_coil_reg(reg_terms=regularization_terms)
+
+    ffp_prof = create_power_flux_fun(40, 1.5, 2.0)
+    pp_prof = create_power_flux_fun(40, 4.0, 1.0)
+    mygs.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof)
+
+    R0 = 6.3
+    Z0 = 0.5
+    a = 2.0
+    kappa = 1.4
+    delta = 0.0
+    try:
+        mygs.init_psi(R0, Z0, a, kappa, delta)
+        mygs.solve()
+    except ValueError:
+        mp_q.put(None)
+        return
+
+    # --- Define kinetic profiles (same as run_ITER_bootstrap_case) ---
+    EC = 1.602176634e-19
+    n_psi = 257
+    psi_N = np.linspace(0.0, 1.0, n_psi)
+    psi_pad = 1.E-3
+
+    xphalf = 0.965
+    widthp_Te = 0.1
+    widthp_ne = 0.35
+
+    ne = Hmode_profiles(edge=0.35, ped=0.6, core=1.1, rgrid=n_psi,
+                        expin=1.6, expout=1.6, widthp=widthp_ne, xphalf=xphalf) * 1e20
+    Te = Hmode_profiles(edge=1500., ped=5000., core=21000., rgrid=n_psi,
+                        expin=1.3, expout=1.7, widthp=widthp_Te, xphalf=xphalf)
+    ni = ne.copy()
+    Ti = Te.copy()
+    Zeff = np.full(n_psi, 1.7)
+
+    pressure = (EC * ne * Te) + (EC * ni * Ti)
+
+    # --- Extract geometry from equilibrium (same as solve_with_bootstrap) ---
+    _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
+    _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
+
+    ft = 1 - fc
+    eps = r_avgs['<a>'] / r_avgs['<R>']
+    _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+    R_avg = ravgs_q['<R>']
+
+    # --- Gradients (same as solve_with_bootstrap) ---
+    psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
+    d_psi = np.gradient(psi_N)
+    d_psi_eff = d_psi * psi_range
+    d_psi_eff[d_psi_eff == 0] = 1e-9
+
+    dn_e_dpsi = np.gradient(ne) / d_psi_eff
+    dT_e_dpsi = np.gradient(Te) / d_psi_eff
+    dn_i_dpsi = np.gradient(ni) / d_psi_eff
+    dT_i_dpsi = np.gradient(Ti) / d_psi_eff
+
+    # --- Coulomb logarithms (same as solve_with_bootstrap) ---
+    ln_le, ln_lii = calculate_ln_lambda(
+        Te, Ti, ne, ni, Zeff,
+        electron_lnLambda_model='NRL',
+        ion_lnLambda_model='Zavg',
+    )
+
+    # --- Collisionalities (same as solve_with_bootstrap) ---
+    Zdom = 1.0
+    Zavg = ne / ni
+    Zion = (Zdom**2 * Zavg * Zeff)**0.25
+    nu_i_star = (4.90e-18 * np.abs(qvals) * R_avg * ni
+                 * Zion**4 * ln_lii / (Ti**2 * eps**1.5))
+    nu_e_star = (6.921e-18 * np.abs(qvals) * R_avg * ne
+                 * Zeff * ln_le / (Te**2 * eps**1.5))
+
+    # --- Call redl_bootstrap (same as solve_with_bootstrap) ---
+    try:
+        j_BS_neo, coeffs = redl_bootstrap(
+            psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
+            pe=EC*(ne*Te), pi=EC*(ni*Ti),
+            Zeff=Zeff, R=R_avg, q=qvals, eps=eps, fT=ft, I_psi=f,
+            dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
+            dn_e_dpsi=dn_e_dpsi, dn_i_dpsi=dn_i_dpsi,
+            ln_lambda_e=ln_le, ln_lambda_ii=ln_lii,
+            nu_e_star_override=nu_e_star,
+            nu_i_star_override=nu_i_star,
+            use_legacy_L34=False,
+            use_sign_q=True,
+            formula_form='jboot1',
+        )
+    except Exception as e:
+        print("redl_bootstrap failed: {0}".format(e))
+        mp_q.put(None)
+        return
+
+    # Convert to j_phi (A/m^2) same as solve_with_bootstrap
+    j_BS = j_BS_neo * (R_avg / f)
+    j_BS = np.nan_to_num(j_BS, nan=0.0)
+
+    # --- Collect results ---
+    results = {}
+    results['j_BS_max'] = float(np.max(np.abs(j_BS)))
+    results['j_BS_axis'] = float(j_BS[0])
+    results['j_BS_edge'] = float(j_BS[-1])
+    results['L31_axis'] = float(coeffs['L31'][0])
+    results['L32_axis'] = float(coeffs['L32'][0])
+    results['alpha_axis'] = float(coeffs['alpha'][0])
+    results['nu_e_star_axis'] = float(coeffs['nu_e_star'][0])
+    results['nu_i_star_axis'] = float(coeffs['nu_i_star'][0])
+
+    mp_q.put([results])
+    oftpy_dump_cov()
+
+
+Redl_jBS_eq_dict = {
+    'j_BS_max': 186871.6671880487,
+    'j_BS_axis': 6884.411685375865,
+    'j_BS_edge': 99805.65713701912,
+    'L31_axis': 0.11407690451043999,
+    'L32_axis': -0.02350066144455873,
+    'alpha_axis': -0.6540121192349444,
+    'nu_e_star_axis': 0.2522534932532852,
+    'nu_i_star_axis': 0.2194433170749313,
+}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("order", (2,))
+def test_Redl_jBS(order):
+    results = mp_run(run_Redl_jBS_case, (1.0, order), timeout=300)
+    assert validate_dict(results, Redl_jBS_eq_dict)
+
+
+# -----------------------------------------------------------------------
+# Test: GEQDSK (g-file) reader in TokaMaker.eqdsk
+#
+# Expected values and per-key tolerance overrides live next to the test
+# as JSON fixtures (`eqdsk_gfile_expected.json`, `eqdsk_gfile_tol.json`).
+# They are produced by a one-time offline run of the OMFIT `OMFITgeqdsk`
+# reader (raw parser + fluxSurfaces tracer) on the same ITER_test.eqdsk.
+# The TokaMaker reader was adapted from OMFIT, so:
+#   - Raw scalar/profile quantities match OMFIT to floating-point precision
+#     since both parsers read the same ASCII file (default 1% tolerance
+#     in validate_dict is orders of magnitude more than needed).
+#   - Derived flux-surface quantities (q, geometry, li, betas) come from
+#     OMFIT's fluxSurfaces; per-key tolerances are relaxed in the `_tol`
+#     fixture where the TokaMaker implementation uses a slightly different
+#     algorithm (e.g. OMFIT uses a 4-point triangularity definition, we
+#     use the midplane-point one; edge resampling differs; etc.).
+#   - j_tor_averaged (<Jt/R>/<1/R>), j_tor_averaged_direct
+#     (-(p'<R> + FF'<1/R>/mu0)*(2pi)^exp_Bp, the TokaMaker default), and
+#     q_profile are each sampled at five interior psi_N positions with
+#     tight (0.5%) tolerance.  These are the core analytic Grad-Shafranov
+#     outputs used by bootstrap and reconstruction; alignment with OMFIT
+#     is ~0.004% RMS for the standard j_tor and ~0.01% for j_tor_direct
+#     when the machinery is healthy.
+# Regenerate with tests/physics/generate_eqdsk_expected.py in an env with
+# scipy<1.14 / numpy<2.0 (e.g. the `omfit_env` conda env); the regenerator
+# rewrites both JSON fixtures in place.
+# -----------------------------------------------------------------------
+def _load_eqdsk_fixture(filename):
+    with open(os.path.join(test_dir, filename)) as fh:
+        return json.load(fh)
+
+
+eqdsk_gfile_expected_dict = _load_eqdsk_fixture('eqdsk_gfile_expected.json')
+eqdsk_gfile_tol_dict      = _load_eqdsk_fixture('eqdsk_gfile_tol.json')
+
+
+def run_eqdsk_gfile_case():
+    """Read ITER_test.eqdsk with TokaMaker.eqdsk and produce a result dict
+    with the same keys as eqdsk_gfile_expected_dict."""
+    from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
+    eq = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
+    raw = eq._raw
+    results = {}
+
+    # --- Raw scalars (pulled directly from the parsed dict) ---
+    for key in ['NW','NH','RDIM','ZDIM','RCENTR','RLEFT','ZMID',
+                'RMAXIS','ZMAXIS','SIMAG','SIBRY','BCENTR','CURRENT']:
+        results[key] = float(raw[key])
+
+    # --- 1-D profiles: spot samples + sum + length ---
+    for key in ['FPOL','PRES','FFPRIM','PPRIME','QPSI']:
+        arr = np.asarray(raw[key])
+        results[f'{key}_0']   = float(arr[0])
+        results[f'{key}_mid'] = float(arr[len(arr)//2])
+        results[f'{key}_end'] = float(arr[-1])
+        results[f'{key}_sum'] = float(np.sum(arr))
+        results[f'{key}_len'] = len(arr)
+
+    # --- 2-D PSIRZ spot values ---
+    psi = np.asarray(raw['PSIRZ'])
+    results['PSIRZ_min'] = float(np.min(psi))
+    results['PSIRZ_max'] = float(np.max(psi))
+    results['PSIRZ_sum'] = float(np.sum(psi))
+
+    # --- Boundary and limiter ---
+    for key in ['RBBBS','ZBBBS','RLIM','ZLIM']:
+        arr = np.asarray(raw[key])
+        results[f'{key}_min'] = float(np.min(arr))
+        results[f'{key}_max'] = float(np.max(arr))
+        results[f'{key}_len'] = len(arr)
+
+    # --- Derived FSA quantities ---
+    geo = eq.geometry
+    avg = eq.averages
+    mid = eq.midplane
+    li  = eq.li
+    betas = eq.betas
+    results['Ip_enclosed_edge'] = float(avg['ip'][-1])
+    results['q_axis']           = float(eq.q_profile[0])
+    results['kappa_edge']       = float(geo['kappa'][-1])
+    results['delta_edge']       = float(geo['delta'][-1])
+    results['a_edge']           = float(geo['a'][-1])
+    results['R_geo_edge']       = float(geo['R'][-1])
+    results['vol_edge']         = float(geo['vol'][-1])
+    results['cxArea_edge']      = float(geo['cxArea'][-1])
+    results['li_1']             = float(li['li(1)'])
+    results['li_3']             = float(li['li(3)'])
+    results['R_mid_edge']       = float(mid['R'][-1])
+    results['Btot_mid_edge']    = float(mid['Btot'][-1])
+    results['beta_t']           = float(betas.get('beta_t', 0.0))
+    results['beta_p']           = float(betas.get('beta_p', 0.0))
+    results['beta_n']           = float(betas.get('beta_n', 0.0))
+    results['cocos']            = int(eq.cocos)
+
+    # --- j_tor and q profile sampling at interior psi_N positions ---
+    # FSA quantities live on psi_N_levels (length nlevels), which matches the
+    # raw g-file psi_N grid by default (nlevels=NW) but may differ if a
+    # custom nlevels is supplied at construction.
+    psi_N_lvl  = eq.psi_N_levels
+    j_tor      = eq.j_tor_averaged         # <Jt/R>/<1/R>  standard convention
+    j_tor_dir  = eq.j_tor_averaged_direct  # -(p'<R> + FF'<1/R>/mu0)*(2pi)^exp_Bp
+    q          = eq.q_profile
+    for pct in (10, 25, 50, 75, 90):
+        psin_target = pct / 100.0
+        results[f'j_tor_psiN_{pct:02d}']        = float(np.interp(psin_target, psi_N_lvl, j_tor))
+        results[f'j_tor_direct_psiN_{pct:02d}'] = float(np.interp(psin_target, psi_N_lvl, j_tor_dir))
+        results[f'q_psiN_{pct:02d}']            = float(np.interp(psin_target, psi_N_lvl, q))
+    return results
+
+
+def test_eqdsk_gfile():
+    os.chdir(test_dir)
+    results = run_eqdsk_gfile_case()
+    assert validate_dict([results], eqdsk_gfile_expected_dict,
+                         tol_dict=eqdsk_gfile_tol_dict)
+
+
+# -----------------------------------------------------------------------
+# Test: Osborne p-file reader in TokaMaker.eqdsk
+#
+# Expected values live next to the test as `eqdsk_pfile_expected.json`.
+# They are produced by a one-time offline run of the OMFIT `OMFITpFile`
+# reader on the same D3Dlike_Hmode_test.peqdsk file.  The TokaMaker reader
+# was adapted from the OMFIT code, so raw profile quantities must match
+# to floating-point precision.  Regenerate via
+# tests/physics/generate_eqdsk_expected.py.
+# -----------------------------------------------------------------------
+eqdsk_pfile_expected_dict = _load_eqdsk_fixture('eqdsk_pfile_expected.json')
+
+
+def run_eqdsk_pfile_case():
+    """Read D3Dlike_Hmode_test.peqdsk with TokaMaker.eqdsk and produce a
+    result dict matching the expected-dict keys."""
+    from OpenFUSIONToolkit.TokaMaker.eqdsk import read_pfile
+    pf = read_pfile(os.path.join(test_dir, 'D3Dlike_Hmode_test.peqdsk'))
+    results = {}
+
+    for key in pf.keys:
+        if key == 'N Z A':
+            nza = pf[key]
+            results['N Z A_N_0'] = float(nza['N'][0])
+            results['N Z A_Z_0'] = float(nza['Z'][0])
+            results['N Z A_A_0'] = float(nza['A'][0])
+            results['N Z A_len'] = len(nza['N'])
+            continue
+        d = np.asarray(pf._get_data(key))
+        psin = np.asarray(pf.psinorm_for(key))
+        results[f'{key}_len'] = len(d)
+        results[f'{key}_0']   = float(d[0])
+        results[f'{key}_mid'] = float(d[len(d)//2])
+        results[f'{key}_end'] = float(d[-1])
+        results[f'{key}_min'] = float(np.min(d))
+        results[f'{key}_max'] = float(np.max(d))
+        results[f'{key}_sum'] = float(np.sum(d))
+        results[f'{key}_psinorm_end'] = float(psin[-1])
+    return results
+
+
+def test_eqdsk_pfile():
+    os.chdir(test_dir)
+    results = run_eqdsk_pfile_case()
+    assert validate_dict([results], eqdsk_pfile_expected_dict)
+
+
+# -----------------------------------------------------------------------
+# Tests: COCOS conversion, sign flip, and round-trip serialisation
+#
+# ITER_test.eqdsk ships as COCOS 1.  `cocosify` applies the multiplicative
+# sign / 2pi factors from Sauter & Medvedev, CPC 184 (2013) 293, Eq. 14/23
+# to the raw g-file dict.  The sign table below mirrors `_cocos_params` in
+# the module under test; the round-trip + per-field sign checks exercise
+# every valid COCOS index (1-8 and 11-18).
+# -----------------------------------------------------------------------
+_COCOS_VALID = tuple(list(range(1, 9)) + list(range(11, 19)))
+
+
+def _cocos_params_reference(cocos_index):
+    """Reference copy of `_cocos_params` from eqdsk.py, kept locally so
+    this test is an independent check of the table."""
+    if cocos_index < 1 or cocos_index > 18 or cocos_index in (9, 10):
+        raise ValueError(f'Invalid COCOS index: {cocos_index}')
+    exp_Bp = 0 if cocos_index < 10 else 1
+    base = cocos_index if cocos_index < 10 else cocos_index - 10
+    return dict(
+        sigma_Bp    = +1 if base in (1, 2, 5, 6) else -1,
+        sigma_RpZ   = +1 if base in (1, 2, 7, 8) else -1,
+        sigma_rhotp = +1 if base in (1, 3, 5, 7) else -1,
+        exp_Bp      = exp_Bp,
+    )
+
+
+def _expected_cocos_factors(cocos_in, cocos_out):
+    """Multiplicative factors cocosify() should apply when converting from
+    cocos_in to cocos_out.  Returns a dict keyed by raw g-file field name."""
+    cc_in  = _cocos_params_reference(cocos_in)
+    cc_out = _cocos_params_reference(cocos_out)
+    sBp    = cc_out['sigma_Bp']    * cc_in['sigma_Bp']
+    sRpZ   = cc_out['sigma_RpZ']   * cc_in['sigma_RpZ']
+    srhotp = cc_out['sigma_rhotp'] * cc_in['sigma_rhotp']
+    exp_eff = cc_out['exp_Bp'] - cc_in['exp_Bp']
+    twopi_exp = (2.0 * np.pi) ** exp_eff
+    psi_fac  = sRpZ * sBp * twopi_exp
+    dpsi_fac = sRpZ * sBp / twopi_exp
+    bt_fac   = sRpZ
+    ip_fac   = sRpZ
+    q_fac    = srhotp
+    return {
+        'SIMAG':   psi_fac,
+        'SIBRY':   psi_fac,
+        'PSIRZ':   psi_fac,
+        'PPRIME':  dpsi_fac,
+        'FFPRIM':  dpsi_fac,
+        'FPOL':    bt_fac,
+        'BCENTR':  bt_fac,
+        'CURRENT': ip_fac,
+        'QPSI':    q_fac,
+    }
+
+
+@pytest.mark.parametrize('cocos_out', _COCOS_VALID)
+def test_eqdsk_cocos_roundtrip(cocos_out):
+    """cocosify(1 -> N -> 1) must reproduce the original raw g-file data."""
+    from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
+    os.chdir(test_dir)
+    eq_ref = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
+    eq_rt  = (eq_ref.cocosify(cocos_out, copy=True)
+                    .cocosify(eq_ref.cocos, copy=True))
+    assert eq_rt.cocos == eq_ref.cocos
+    for key in ('SIMAG', 'SIBRY', 'BCENTR', 'CURRENT',
+                'FPOL', 'PRES', 'PPRIME', 'FFPRIM', 'QPSI', 'PSIRZ'):
+        assert np.allclose(eq_rt._raw[key], eq_ref._raw[key],
+                           rtol=1e-12, atol=1e-12), f'{key} mismatch at COCOS {cocos_out}'
+
+
+@pytest.mark.parametrize('cocos_out', _COCOS_VALID)
+def test_eqdsk_cocos_signs(cocos_out):
+    """After cocosify(1 -> N), each converted field equals the original
+    multiplied by the sign/2pi factor predicted by the COCOS table."""
+    from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
+    os.chdir(test_dir)
+    eq_ref = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
+    eq_n   = eq_ref.cocosify(cocos_out, copy=True)
+    assert eq_n.cocos == cocos_out
+    factors = _expected_cocos_factors(eq_ref.cocos, cocos_out)
+    for key, factor in factors.items():
+        expected = np.asarray(eq_ref._raw[key]) * factor
+        assert np.allclose(eq_n._raw[key], expected,
+                           rtol=1e-12, atol=1e-12), (
+            f'{key} expected scale {factor:+g} at COCOS {cocos_out}')
+
+
+@pytest.mark.parametrize('bad', [0, 9, 10, 19, -1])
+def test_eqdsk_cocos_invalid(bad):
+    """Invalid COCOS indices must raise at construction or conversion."""
+    from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
+    os.chdir(test_dir)
+    with pytest.raises(ValueError):
+        read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'), cocos=bad)
+    eq = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
+    with pytest.raises(ValueError):
+        eq.cocosify(bad, copy=True)
+
+
+def test_eqdsk_flip_Bt_Ip_roundtrip():
+    """flip_Bt_Ip twice is the identity on the raw g-file dict."""
+    from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
+    os.chdir(test_dir)
+    eq_ref = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
+    eq_rt  = eq_ref.flip_Bt_Ip(copy=True).flip_Bt_Ip(copy=True)
+    for key in ('BCENTR', 'FPOL', 'CURRENT', 'SIMAG', 'SIBRY',
+                'PSIRZ', 'PPRIME', 'FFPRIM'):
+        assert np.allclose(eq_rt._raw[key], eq_ref._raw[key],
+                           rtol=1e-12, atol=1e-12), f'{key} not invariant under flip^2'
+
+
+def test_eqdsk_save_load_roundtrip(tmp_path):
+    """Write ITER_test back to disk and re-read: raw scalars and 1-D/2-D
+    arrays must round-trip within fixed-format ASCII precision."""
+    from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
+    os.chdir(test_dir)
+    eq = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
+    out_path = tmp_path / 'ITER_roundtrip.eqdsk'
+    eq.save(str(out_path))
+    eq_rt = read_geqdsk(str(out_path))
+    for key in ('NW', 'NH', 'RDIM', 'ZDIM', 'RCENTR', 'RLEFT', 'ZMID',
+                'RMAXIS', 'ZMAXIS', 'SIMAG', 'SIBRY', 'BCENTR', 'CURRENT'):
+        assert np.isclose(eq._raw[key], eq_rt._raw[key], rtol=1e-6, atol=0), key
+    for key in ('FPOL', 'PRES', 'PPRIME', 'FFPRIM', 'QPSI', 'PSIRZ',
+                'RBBBS', 'ZBBBS', 'RLIM', 'ZLIM'):
+        assert np.allclose(eq._raw[key], eq_rt._raw[key],
+                           rtol=1e-6, atol=1e-10), key
+
+
+def test_eqdsk_cocos_bytes_roundtrip():
+    """to_bytes / from_bytes must reproduce the original equilibrium data."""
+    from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk, GEQDSKEquilibrium
+    os.chdir(test_dir)
+    eq = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
+    raw_bytes = eq.to_bytes()
+    eq_rt = GEQDSKEquilibrium.from_bytes(raw_bytes, cocos=eq.cocos)
+    for key in ('FPOL', 'PRES', 'PSIRZ', 'QPSI'):
+        assert np.allclose(eq._raw[key], eq_rt._raw[key],
+                           rtol=1e-6, atol=1e-10), key
+
+
+def test_pfile_bytes_roundtrip():
+    """PFile.to_bytes / from_bytes must reproduce the original profiles."""
+    from OpenFUSIONToolkit.TokaMaker.eqdsk import read_pfile, PFile
+    os.chdir(test_dir)
+    pf = read_pfile(os.path.join(test_dir, 'D3Dlike_Hmode_test.peqdsk'))
+    pf_rt = PFile.from_bytes(pf.to_bytes())
+    for key in ('ne', 'te', 'ni', 'ti'):
+        d_ref = np.asarray(pf._get_data(key))
+        d_rt  = np.asarray(pf_rt._get_data(key))
+        assert np.allclose(d_ref, d_rt, rtol=1e-6, atol=1e-10), key
+
+
+# -----------------------------------------------------------------------
+# Test: X-point isoflux boundary helpers in TokaMaker.util
+#
+# These helpers check the generated boundary from 'create_isoflux_xpts'
+# against the reference `isoflux_xpts_expected.json`.
+# -----------------------------------------------------------------------
+isoflux_xpts_expected = _load_eqdsk_fixture('isoflux_xpts_expected.json')
+
+
+def test_xpoints_from_moments():
+    """X-points are exact analytic Miller-moment coordinates."""
+    r0, z0, a = 6.2, 0.3, 2.0
+    kU, dU, kL, dL = 1.7, 0.33, 2.0, 0.5
+    # Up-down symmetric (lower defaults to upper)
+    xpts = xpoints_from_moments(r0, z0, a, kU, dU)
+    assert xpts.shape == (2, 2)
+    assert np.allclose(xpts[0], [r0 - a * dU, z0 + a * kU])
+    assert np.allclose(xpts[1], [r0 - a * dU, z0 - a * kU])
+    # Asymmetric
+    xpts = xpoints_from_moments(r0, z0, a, kU, dU, kappa_lower=kL, delta_lower=dL)
+    assert np.allclose(xpts[0], [r0 - a * dU, z0 + a * kU])
+    assert np.allclose(xpts[1], [r0 - a * dL, z0 - a * kL])
+
+
+@pytest.mark.parametrize('case', ['symmetric', 'asymmetric'])
+def test_create_isoflux_xpts(case):
+    """Generated boundary matches the reference contour, has exactly npts
+    unique points, and passes through both X-points."""
+    ref = isoflux_xpts_expected[case]
+    params = ref['params']
+    pts = create_isoflux_xpts(**params)
+    # Shape: exactly npts points, no duplicate closing point
+    assert pts.shape == (params['npts'], 2)
+    closed = np.vstack([pts, pts[0]])
+    gaps = np.linalg.norm(np.diff(closed, axis=0), axis=1)
+    assert np.all(gaps > 1e-9), "boundary contains a duplicate point"
+    # Both X-points must appear on the contour
+    xpts = np.asarray(ref['xpoints'])
+    for xpt in xpts:
+        assert np.min(np.linalg.norm(pts - xpt, axis=1)) < 1e-8
+    # Regression against the stored reference contour
+    assert np.allclose(pts, np.asarray(ref['points']), rtol=1e-10, atol=1e-12)
+
+
+def test_create_isoflux_xpts_requires_min_npts():
+    """npts < 3 must raise rather than allocate invalid segment counts."""
+    with pytest.raises(ValueError):
+        create_isoflux_xpts(2, 6.2, 0.0, 2.0, 1.7, 0.33)
+
 
 # # Example of how to run single test without pytest
 # if __name__ == '__main__':

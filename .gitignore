@@ -1,13 +1,18 @@
 # Non-Source directories
-/build*
-/install*
 /src/docs/generated
+
+# Mac specific files
+.DS_Store
 
 # FORTRAN compile objects
 *.o
 *.a
 *.mod
+
+# Python artifacts
 *.pyc
+__pycache__
+.ipynb_checkpoints
 
 # Editor Items
 .settings
@@ -15,3 +20,15 @@
 .project
 .pydevproject
 .vscode
+
+# Spack build artifacts
+/.spack-env
+/spack.lock
+/spack.yaml
+/build-*
+
+# Build/environment artifacts
+/builds/
+/oft_venv/
+/compiler_id.txt
+/setup_env.sh

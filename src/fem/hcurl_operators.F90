@@ -979,7 +979,7 @@ ELSE
   self%internal_solver=.TRUE.
 END IF
 !
-SELECT CASE(TRIM(bc)) 
+SELECT CASE(TRIM(bc))
 CASE('grnd')
   ALLOCATE(bc_zerogrnd)
   bc_zerogrnd%ML_lag_rep=>ML_lag_rep
@@ -1024,7 +1024,7 @@ END IF
 uu=a%dot(a)
 self%solver%atol=MAX(self%solver%atol,SQRT(uu*1.d-20))
 call u%set(0.d0)
-call self%bc%apply(g)
+IF(ASSOCIATED(self%bc))call self%bc%apply(g)
 !---
 pm_save=oft_env%pm; oft_env%pm=self%pm
 call self%solver%apply(u,g)
@@ -1631,11 +1631,9 @@ CHARACTER(LEN=2) :: lev_char
 TYPE(oft_hcurl_zerob), POINTER :: bc_tmp
 TYPE(oft_ml_fe_vecspace), POINTER :: tmp_vecspace
 !---
-TYPE(xml_node), POINTER :: pre_node
-#ifdef HAVE_XML
+TYPE(xml_node) :: pre_node
 integer(i4) :: nnodes
-TYPE(xml_node), POINTER :: hcurl_node
-#endif
+TYPE(xml_node) :: hcurl_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
@@ -1677,13 +1675,10 @@ CALL ML_hcurl_rep%set_level(levin)
 !------------------------------------------------------------------------------
 ! Search for XML-spec
 !------------------------------------------------------------------------------
-NULLIFY(pre_node)
-#ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"hcurl",hcurl_node,ierr)
   IF(ierr==0)CALL xml_get_element(hcurl_node,"wop",pre_node,ierr)
 END IF
-#endif
 !------------------------------------------------------------------------------
 ! Setup preconditioner
 !------------------------------------------------------------------------------
@@ -1725,11 +1720,9 @@ CLASS(oft_vector), POINTER :: oft_hcurl_vec
 TYPE(oft_hcurl_zerob), POINTER :: bc_tmp
 TYPE(oft_ml_fe_vecspace), POINTER :: tmp_vecspace
 !---
-TYPE(xml_node), POINTER :: pre_node
-#ifdef HAVE_XML
+TYPE(xml_node) :: pre_node
 integer(i4) :: nnodes
-TYPE(xml_node), POINTER :: hcurl_node
-#endif
+TYPE(xml_node) :: hcurl_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
@@ -1765,13 +1758,10 @@ CALL ML_hcurl_rep%set_level(levin)
 !------------------------------------------------------------------------------
 ! Search for XML-spec
 !------------------------------------------------------------------------------
-NULLIFY(pre_node)
-#ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"hcurl",hcurl_node,ierr)
   IF(ierr==0)CALL xml_get_element(hcurl_node,"jmlb",pre_node,ierr)
 END IF
-#endif
 !------------------------------------------------------------------------------
 ! Setup preconditioner
 !------------------------------------------------------------------------------

@@ -9,10 +9,9 @@
 @date May 2023
 @ingroup doxy_oft_python
 '''
-import sys
 import json
-import math
 import numpy
+import h5py
 from .._interface import *
 from ..util import oft_warning, run_shell_command
 
@@ -108,7 +107,6 @@ for i,  region in enumerate(mesh_geom):
     reg_segments = []
     for j,  segment in enumerate(region['segments']):
         reg_segments.append([pts_offset+1+vertex for vertex in segment])
-    print(reg_segments)
     reg_pts.append(reg_segments)
     pts_offset += pts_tmp
 
@@ -127,7 +125,16 @@ surf_pts = []
 for i,  eds in enumerate(reg_ed):
     cubit.cmd("create surface curve {0} to {1}".format(*eds))
     surf_last = cubit.surface(cubit.get_last_id("surface"))
-    surf_pts.append(np.asarray(surf_last.position_from_u_v(0.0,0.0)))
+    U_range = surf_last.get_param_range_U()
+    V_range = surf_last.get_param_range_V()
+    surf_corners = []
+    for U_ratio in (0.025,0.975):
+        U_tmp = U_range[0]*U_ratio + U_range[1]*(1.0-U_ratio)
+        for V_ratio in (0.025,0.975):
+            V_tmp = V_range[0]*V_ratio + V_range[1]*(1.0-V_ratio)
+            surf_corners.append(surf_last.position_from_u_v(U_tmp,V_tmp))
+    surf_pts.append(np.asarray(surf_corners))
+    # surf_pts.append(np.asarray(surf_last.position_from_u_v(0.0,0.0)))
 
 cubit.cmd('imprint all')
 cubit.cmd('merge all')
@@ -143,16 +150,24 @@ nblocks = 0
 matches = [-1 for _ in cubit.get_entities( "surface" )]
 for sid in cubit.get_entities( "surface" ):
     surf_test = cubit.surface(sid)
-    for i, surf_pt in enumerate(surf_pts):
-        proj_pt = np.asarray(surf_test.closest_point_trimmed(surf_pt))
-        if np.linalg.norm(proj_pt-surf_pt) < 1.E-10:
-            if matches[i] != -1:
-                raise ValueError('Multiple matches')
-            matches[i] = sid
-            cubit.cmd("surface {0} size {1}".format(sid,mesh_geom[i]['dx_vol']*4.0))
-            cubit.cmd("block {0} add surface {1}".format(mesh_geom[i]['id'],sid))
-            break
-    nblocks += 1
+    nmax = 0
+    imax = -1
+    for i, surf_corners in enumerate(surf_pts):
+        ncount = 0
+        for surf_pt in surf_corners:
+            proj_pt = np.asarray(surf_test.closest_point_trimmed(surf_pt))
+            if np.linalg.norm(proj_pt-surf_pt) < 1.E-10:
+                ncount += 1
+        if ncount > nmax:
+            nmax = ncount
+            imax = i
+    if imax < 0:
+        raise ValueError('No matches')
+    if matches[imax] != -1:
+        raise ValueError('Multiple matches')
+    matches[imax] = sid
+    cubit.cmd("surface {0} size {1}".format(sid,mesh_geom[imax]['dx_vol']))
+    cubit.cmd("block {0} add surface {1}".format(mesh_geom[imax]['id'],sid))
 
 cubit.cmd("mesh surface all")
 
@@ -188,18 +203,9 @@ cubit.cmd('export Genesis "tMaker_cubit.g" overwrite block all')
         os.remove('tMaker_cubit.h5')
     except FileNotFoundError:
         pass
-    convert_cubit_path = os.path.join(root_path,'..','convert_cubit.py')
-    result, _ = run_shell_command(' '.join([sys.executable, convert_cubit_path, '--in_file=tMaker_cubit.g']), timeout=10)
-    result_lines = result.splitlines()
-    if not os.path.isfile('tMaker_cubit.h5'):
-        nlines = min(10,len(result_lines))
-        print('\n'.join(result_lines[-nlines:]))
-        raise RuntimeError('Failed to convert Cubit file to native format')
-    for line in result_lines:
-        if line.strip() != '':
-            print('    '+line)
+    from .._cubit_cli import convert_cubit_to_native
+    convert_cubit_to_native('tMaker_cubit.g')
     # Read mesh from file
-    import h5py
     with h5py.File('tMaker_cubit.h5','r') as h5_file:
         r = numpy.asarray(h5_file['mesh']['R'])
         lc = numpy.asarray(h5_file['mesh']['LC'])-1
@@ -259,7 +265,7 @@ class gs_Domain:
             }
             self.region_info = {}
             self._extra_reg_defs = []
-    
+
     def define_region(self,name,dx,reg_type,eta=None,noncontinuous=None,nTurns=None,coil_set=None,allow_xpoints=False,inner_limiter=False):
         '''! Define a new region and its properties (geometry is given in a separate call)
 
@@ -330,7 +336,7 @@ class gs_Domain:
                 if coil_set[0] == '#':
                     raise ValueError('Invalid value for "coil_set", cannot start with "#"')
                 self.region_info[name]['coil_set'] = coil_set
-        
+
 
     def add_annulus(self,inner_countour,inner_name,outer_contour,annulus_name,parent_name=None,angle_tol=30.0,sliver_tol=120.0,small_thresh=None):
         '''! Add annular geometry defining region boundaries to the mesh
@@ -395,7 +401,7 @@ class gs_Domain:
         self.zmin = min(self.zmin,outer_contour[:,1].min())
         self.regions.append(Region(outer_contour,annulus_dx,outer_dx_curve,angle_tol,sliver_tol,small_thresh,annulus_reg["id"]))
         annulus_reg["count"] += 1
-    
+
     def add_polygon(self,contour,name,parent_name=None,angle_tol=30.0,sliver_tol=120.0,small_thresh=None):
         '''! Add polygon geometry defining region boundaries to the mesh
 
@@ -460,12 +466,12 @@ class gs_Domain:
             rotmat = numpy.asarray([numpy.cos(rot), -numpy.sin(rot), numpy.sin(rot), numpy.cos(rot)]).reshape((2,2))
 
             contour = numpy.dot(contour,rotmat.T)
-        
+
         contour[:,0] += rc
         contour[:,1] += zc
 
         self.add_polygon(contour,name,parent_name)
-    
+
     def add_enclosed(self,in_point,name):
         name = name.upper()
         reg = self.region_info.get(name, None)
@@ -476,7 +482,7 @@ class gs_Domain:
             id = reg['id']
             self._extra_reg_defs.append([in_point[0], in_point[1], id, dx*dx/2.0])
             reg["count"] += 1
-    
+
     def get_coils(self):
         '''! Get dictionary describing coil regions in domain
 
@@ -526,8 +532,8 @@ class gs_Domain:
                     cond_list[key]['inner_limiter'] = self.region_info[key]['inner_limiter']
                 vac_id += 1
         return cond_list
-    
-    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False,cubit_path=None):
+
+    def build_mesh(self,debug=False,merge_thresh=1.E-4,require_boundary=True,setup_only=False,cubit_path=None,cubit_gradation=1.05):
         '''! Build mesh for specified domains
 
         @result Meshed representation (pts[np,2], tris[nc,3], regions[nc])
@@ -592,13 +598,13 @@ class gs_Domain:
             for region in self.regions:
                 json_tmp = region.get_json()
                 for field in json_tmp:
-                    try: 
+                    try:
                         json_tmp[field] = json_tmp[field].tolist()
                     except:
                         pass
                 regions_full.append(json_tmp)
             with open('tMaker_cubit.json', 'w') as json_file:
-                json.dump({'regions': regions_full, 'tri_gradation': 1.05}, json_file)
+                json.dump({'regions': regions_full, 'tri_gradation': cubit_gradation}, json_file)
             if not setup_only:
                 self._r, self._lc, self._reg = run_cubit(cubit_path)
                 if self._reg.min() <= 0:
@@ -612,9 +618,9 @@ class gs_Domain:
                     raise ValueError('Meshing error: unclaimed region detected!')
                 return self._r, self._lc, self._reg
         return None, None, None
-    
+
     def save_json(self,filename):
-        '''! Create a JSON file containing a description of the mesh 
+        '''! Create a JSON file containing a description of the mesh
 
         @param filename Path to create JSON file
         '''
@@ -636,7 +642,7 @@ class gs_Domain:
             output_dict['regions'].append(region.get_dict())
         with open(filename, 'w+') as fid:
             fid.write(json.dumps(output_dict))
-    
+
     def plot_topology(self,fig,ax,linewidth=None,rotate=False):
         '''! Plot mesh topology
 
@@ -654,7 +660,7 @@ class gs_Domain:
         else:
             ax.set_xlabel('R (m)')
             ax.set_ylabel('Z (m)')
-    
+
     def plot_mesh(self,fig,ax,lw=0.5,show_legends=True,col_max=10,split_coil_sets=False,rotate=False):
         '''! Plot machine geometry
 
@@ -663,6 +669,8 @@ class gs_Domain:
         @param lw Width of lines in calls to "triplot()"
         @param show_legends Show legends for plots with more than one region?
         @param col_max Maximum number of entries per column in each legend
+        @param split_coil_sets Split coil sets into sub-coils when plotting
+        @param rotate Flip horizontal and vertical axes as for mirror/FRC configurations
         '''
         if self._r is None:
             raise ValueError('"plot_mesh()" can only be called after "build_mesh()"')
@@ -755,17 +763,17 @@ class gs_Domain:
                 ax_tmp.set_ylabel('Z (m)')
         if show_legends:
             if format_type == 0:
-                ncols = max(1,math.floor((1+nCond+nCoil+nVac)/col_max))
+                ncols = max(1,(1+nCond+nCoil+nVac)//col_max)
                 plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
             elif format_type == 1:
-                ncols = max(1,math.floor((1+nVac)/col_max))
+                ncols = max(1,(1+nVac)//col_max)
                 plasma_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
-                ncols = max(1,math.floor((nCond+nCoil)/col_max))
+                ncols = max(1,(nCond+nCoil)//col_max)
                 cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
             elif format_type == 2:
-                ncols = max(1,math.floor((nCond)/col_max))
+                ncols = max(1,(nCond)//col_max)
                 cond_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
-                ncols = max(1,math.floor((nCoil)/col_max))
+                ncols = max(1,(nCoil)//col_max)
                 coil_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
 
 
@@ -780,7 +788,6 @@ def save_gs_mesh(pts,tris,regions,coil_dict,cond_dict,filename,use_hdf5=True):
         @param filename Path to create HDF5 mesh file
         '''
         if use_hdf5:
-            import h5py
             coil_json = json.dumps(coil_dict)
             cond_json = json.dumps(cond_dict)
             with h5py.File(filename, 'w') as h5_file:
@@ -810,7 +817,6 @@ def load_gs_mesh(filename,use_hdf5=True):
         @result pts[np,2], tris[nc,3], regions[nc], coil_dict, cond_dict
         '''
         if use_hdf5:
-            import h5py
             with h5py.File(filename, 'r') as h5_file:
                 pts = numpy.asarray(h5_file['mesh/r'])
                 tris = numpy.asarray(h5_file['mesh/lc'])
@@ -1047,11 +1053,11 @@ class Mesh:
             region._resampled_points = numpy.asarray(reg_points)
             in_pt = region.get_in_point(imin,dmin)
             self._reg_defs.append([in_pt[0], in_pt[1], region._id, region._dx_vol*region._dx_vol/2.0])
-    
+
     def get_mesh(self):
         '''! Generate mesh using triangle
 
-        @result pts[np,2], tris[nc,3], regions[nc] 
+        @result pts[np,2], tris[nc,3], regions[nc]
         '''
         print('Generating mesh with Triangle:')
         resampled_flat = []
@@ -1141,7 +1147,7 @@ class Region:
             small_thresh = self._dx_curve/2.0
         self._small_thresh = small_thresh
         self._resampled_points = None
-    
+
     def get_resampled_points(self):
         '''! Get resampled points for bounding curve
 
@@ -1194,7 +1200,7 @@ class Region:
         return (ncuts % 2 == 1)
 
     def get_in_point(self,i,dx):
-        '''! Get a suitable point for defining the "inside" of the region for triangle 
+        '''! Get a suitable point for defining the "inside" of the region for triangle
 
         @param i Index of desired nearest boundary point
         @param dx Offset distance from bounding curve
@@ -1217,16 +1223,16 @@ class Region:
         if not self.check_in_poly(pt_out):
             pt_out = self._resampled_points[i,:] - nhat
         return pt_out
-    
+
     def get_segments(self):
         segments = []
         for i in range(len(self._segments)):
             segments.append(self._points[self._segments[i],:])
         return segments
-    
+
     def plot_segments(self,fig,ax,linewidth=None,rotate=False):
         '''! Plot boundary curve
-        
+
         @param fig Figure to add curves to
         @param ax Axis to add curves to
         @param linewidth Line width for plots
@@ -1236,7 +1242,7 @@ class Region:
                 ax.plot(self._points[self._segments[i],1],self._points[self._segments[i],0],linewidth=linewidth)
             else:
                 ax.plot(self._points[self._segments[i],0],self._points[self._segments[i],1],linewidth=linewidth)
-    
+
     def get_json(self):
         return {
             'points': self._points,

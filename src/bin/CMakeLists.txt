@@ -8,12 +8,6 @@ set( MARKLIN_EXES
   marklin_eigs.F90
 )
 
-set( TOKAMAKER_EXES
-  tokamaker_gs.F90
-  tokamaker_fit.F90
-  tokamaker_wall.F90
-)
-
 set( THINCURR_EXES
   thincurr_eig.F90
   thincurr_fr.F90
@@ -22,10 +16,7 @@ set( THINCURR_EXES
   thincurr_coupling.F90
 )
 
-set( BIN_SRCS ${OFT_EXES} ${MARKLIN_EXES} ${THINCURR_EXES} )
-if( OFT_TOKAMAKER_LEGACY )
-  set( BIN_SRCS ${BIN_SRCS} ${TOKAMAKER_EXES} )
-endif()
+set( BIN_SRCS ${OFT_EXES} ${MARKLIN_EXES} )
 
 foreach( file ${BIN_SRCS} )
   oft_add_exe( ${file} )

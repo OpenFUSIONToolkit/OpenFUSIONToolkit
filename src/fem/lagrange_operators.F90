@@ -1273,7 +1273,7 @@ END IF
 !
 !------------------------------------------------------------------------------
 !---Operator integration loop
-!$omp parallel private(j,rop,det,mtmp,nn,mloc,curved,goptmp,m,u,vol,jc,jr,lcache)
+!$omp parallel private(j,rop,det,mtmp,nn,mloc,curved,goptmp,m,u,vol,jc,jr,jp,jn,lcache)
 allocate(j(lag_rep%nce)) ! Local DOF and matrix indices
 allocate(rop(lag_rep%nce)) ! Reconstructed gradient operator
 allocate(lcache(lag_rep%nce,lag_rep%nce))
@@ -2095,11 +2095,9 @@ CHARACTER(LEN=2) :: lev_char
 TYPE(oft_lag_zerob), POINTER :: bc_tmp
 TYPE(oft_ml_fe_vecspace), POINTER :: tmp_vecspace
 !---
-TYPE(xml_node), POINTER :: pre_node
-#ifdef HAVE_XML
+TYPE(xml_node) :: pre_node
 integer(i4) :: nnodes
-TYPE(xml_node), POINTER :: lag_node
-#endif
+TYPE(xml_node) :: lag_node
 DEBUG_STACK_PUSH
 !---
 minlev=1
@@ -2141,13 +2139,10 @@ CALL ML_lag_rep%set_level(levin)
 !------------------------------------------------------------------------------
 ! Search for XML-spec
 !------------------------------------------------------------------------------
-NULLIFY(pre_node)
-#ifdef HAVE_XML
 IF(ASSOCIATED(oft_env%xml))THEN
   CALL xml_get_element(oft_env%xml,"lagrange",lag_node,ierr)
   IF(ierr==0)CALL xml_get_element(lag_node,"lop",pre_node,ierr)
 END IF
-#endif
 !------------------------------------------------------------------------------
 ! Setup preconditioner
 !------------------------------------------------------------------------------

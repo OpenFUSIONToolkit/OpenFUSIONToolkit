@@ -133,6 +133,7 @@ mesh=>mg_mesh%meshes(1)
 smesh=>mg_mesh%smeshes(1)
 mesh%nc=dim_sizes(2)
 !
+DEALLOCATE(dim_sizes)
 IF(np_mem>0)THEN
     ALLOCATE(dim_sizes(2))
     dim_sizes=SHAPE(r_mem)
@@ -191,11 +192,11 @@ ELSE
     END IF
     !---Read periodicity information
     IF(ref_periodic)THEN
-        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))CALL oft_abort( &
-        "Periodic nodeset not found in file","native_load_vmesh",__FILE__)
-        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
+        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/NODES"))CALL oft_abort( &
+          "Periodic nodeset not found in file","native_load_vmesh",__FILE__)
+        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/NODES",ndims,dim_sizes)
         ALLOCATE(per_nodes(dim_sizes(1)))
-        CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
+        CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/NODES",success)
         WRITE(*,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
     END IF
 END IF
@@ -361,11 +362,11 @@ ELSE
     END IF
     !---Read periodicity information
     IF(ref_periodic)THEN
-        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))CALL oft_abort( &
+        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/NODES"))CALL oft_abort( &
         "Periodic nodeset not found in file","native_load_smesh",__FILE__)
-        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
+        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/NODES",ndims,dim_sizes)
         ALLOCATE(per_nodes(dim_sizes(1)))
-        CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
+        CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/NODES",success)
         WRITE(*,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
     END IF
 END IF
@@ -590,6 +591,7 @@ integer(i4) :: npold,neold,nfold,ncold,i,j,ic,is,cid_max,sid_max,nreg,npold_ho,n
 integer(i4), allocatable :: newindex(:),hoindex(:),regtmp(:),ltemp(:,:)
 real(r8), allocatable :: rtemp(:,:),rlftemp(:,:),rctemp(:,:)
 DEBUG_STACK_PUSH
+ref_index=-1
 SELECT TYPE(self)
 CLASS IS(oft_bmesh)
   IF(self%dim==2)THEN
@@ -602,6 +604,8 @@ CLASS IS(oft_bmesh)
 CLASS IS(oft_mesh)
   ref_index=3
   IF(oft_debug_print(1))write(*,'(2A)')oft_indent,'Reflecting 3D volume mesh -> z'
+CLASS DEFAULT
+  CALL oft_abort('Unknown mesh type','native_reflect',__FILE__)
 END SELECT
 CALL oft_increase_indent
 !---Reflect points that are not on reflection plane

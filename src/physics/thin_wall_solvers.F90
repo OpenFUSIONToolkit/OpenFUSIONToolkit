@@ -17,7 +17,8 @@ USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
 !
-USE oft_la_base, ONLY: oft_vector, oft_cvector, oft_matrix, oft_graph
+USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_matrix, oft_graph, &
+  vector_extrapolate
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
 USE oft_native_la, ONLY: oft_native_dense_matrix, partition_graph
 USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
@@ -73,19 +74,21 @@ N = self%nelems
 LDA = N
 LDVL = N
 LDVR = N
-WRITE(*,*)'Starting eigenvalue solve'
+WRITE(*,*)
+WRITE(*,'(2A)')oft_indent,'Starting eigenvalue solve (direct)'
+CALL oft_increase_indent
 CALL loctimer%tick
 ALLOCATE(WR(N),WI(N),VL(LDVL,N),VR(LDVR,N),WORK(1))
 LWORK = -1
 CALL DGEEV(JOBVL, JOBVR, N, Acomp, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
 LWORK = INT(WORK(1),4)
-IF(oft_debug_print(1))WRITE(*,*)'  Block size = ',lwork/N
+IF(oft_debug_print(1))WRITE(*,'(2A,I8)')oft_indent,'LU Block size = ',lwork/N
 DEALLOCATE(work)
 ALLOCATE(work(lwork))
 CALL DGEEV(JOBVL, JOBVR, N, Acomp, LDA, WR, WI, VL, LDVL, VR, LDVR, WORK, LWORK, INFO )
 DEALLOCATE(VL,WORK,Acomp)
 elapsed_time=loctimer%tock()
-WRITE(*,*)'  Time = ',elapsed_time,INFO
+WRITE(*,'(2A,ES12.4,I4)')oft_indent,'Time = ',elapsed_time,INFO
 !---Sort eigenvalues
 ALLOCATE(sort_tmp(N))
 sort_tmp=[(N+1-i,i=1,N)]
@@ -102,10 +105,13 @@ DO i=1,neigs
    eig_vec(:,i)=REAL(VR(:,j),8)
 END DO
 DEALLOCATE(WR,WI,VR,sort_tmp)
-WRITE(*,*)'Eigenvalues'
+WRITE(*,'(2A)')oft_indent,'Eigenvalues'
+CALL oft_increase_indent
 DO i=1,MIN(neigs,5)
-  WRITE(*,*)'  ',eig_rval(i)
+  WRITE(*,'(A,ES14.6)')oft_indent,eig_rval(i)
 END DO
+CALL oft_decrease_indent
+CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE lr_eigenmodes_direct
 !---------------------------------------------------------------------------------
@@ -132,7 +138,9 @@ CLASS(oft_solver), POINTER :: linv
 TYPE(oft_irlm_eigsolver) :: arsolver
 TYPE(oft_timer) :: loctimer
 DEBUG_STACK_PUSH
-WRITE(*,*)'Starting eigenvalue solve'
+WRITE(*,*)
+WRITE(*,'(2A)')oft_indent,'Starting eigenvalue solve (ARPACK)'
+CALL oft_increase_indent
 !---Setup local vectors
 CALL self%Uloc%new(uloc)
 CALL self%Rmat%assemble(uloc)
@@ -143,7 +151,7 @@ CALL create_native_solver(linv,'lu')
 SELECT TYPE(this=>linv)
 CLASS IS(oft_lusolver)
   IF(this%package(1:4)=='none')THEN
-    WRITE(*,*)'  Note: LU solver not available, falling back to CG'
+    WRITE(*,'(2A)')oft_indent,'Note: LU solver not available, falling back to CG'
     CALL linv%delete
     DEALLOCATE(linv)
   END IF
@@ -178,7 +186,7 @@ pm_save=oft_env%pm; oft_env%pm=.false.
 CALL arsolver%apply(uloc,lam0)
 oft_env%pm=pm_save
 elapsed_time=loctimer%tock()
-WRITE(*,*)'  Time = ',elapsed_time
+WRITE(*,'(2A,ES12.4)')oft_indent,'Time = ',elapsed_time
 IF(arsolver%info>=0)THEN
   !---Sort eigenvalues
   ALLOCATE(sort_tmp(arsolver%nev),W_tmp(arsolver%nev))
@@ -198,15 +206,18 @@ IF(arsolver%info>=0)THEN
   ! DO i=1,self%nclosures
   !   eig_vec(self%closures(i),1:neigs)=0.d0
   ! END DO
-  WRITE(*,*)'Eigenvalues'
+  WRITE(*,'(2A)')oft_indent,'Eigenvalues'
+  CALL oft_increase_indent
   DO i=1,MIN(neigs,5)
-    WRITE(*,*)'  ',eig_rval(i)
+    WRITE(*,'(A,ES14.6)')oft_indent,eig_rval(i)
   END DO
+  CALL oft_decrease_indent
 END IF
 !---Cleanup
 CALL uloc%delete()
 CALL arsolver%delete()
 DEALLOCATE(uloc)
+CALL oft_decrease_indent
 #else
 CALL oft_abort("Iterative eigenvalue solve requires ARPACK", "lr_eigenmodes_arpack", __FILE__)
 #endif
@@ -237,26 +248,27 @@ TYPE(oft_bin_file) :: floop_hist
 LOGICAL :: pm_save
 !---
 WRITE(*,*)
-WRITE(*,*)'Starting Frequency-response run'
+WRITE(*,'(2A)')oft_indent,'Starting frequency-domain run'
+CALL oft_increase_indent
 !---Setup matrix
 ALLOCATE(b(self%nelems))
 b=(1.d0,0.d0)*driver(:,1) + (0.d0,1.d0)*driver(:,2)
 IF(PRESENT(hodlr_op))THEN
   SELECT CASE(fr_limit)
   CASE(0)
-    WRITE(*,'(1X,A,ES13.5)')'  Frequency [Hz] = ',freq
+    WRITE(*,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)*freq*2.d0*pi
     aca_Fmat%alam=(1.d0,0.d0)
   CASE(1)
-    WRITE(*,'(1X,A)')'  Frequency -> Inf (L limit)'
+    WRITE(*,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
     aca_Fmat%rJ=>hodlr_op
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,1.d0)
     aca_Fmat%alam=(0.d0,0.d0)
   CASE(2)
-    WRITE(*,'(1X,A)')'  Frequency -> 0   (R limit)'
+    WRITE(*,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
     aca_Fmat%rJ=>self%Rmat
     aca_Fmat%rK=>self%Rmat
     aca_Fmat%beta=(0.d0,0.d0)
@@ -268,7 +280,7 @@ ELSE
   ALLOCATE(Mmat(self%nelems,self%nelems))
   SELECT CASE(fr_limit)
   CASE(0)
-    WRITE(*,'(1X,A,ES13.5)')'  Frequency [Hz] = ',freq
+    WRITE(*,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
     Mmat=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
@@ -276,10 +288,10 @@ ELSE
       END DO
     END DO
   CASE(1)
-    WRITE(*,'(1X,A)')'  Frequency -> Inf (L limit)'
+    WRITE(*,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
     Mmat=(0.d0,1.d0)*self%Lmat
   CASE(2)
-    WRITE(*,'(1X,A)')'  Frequency -> 0   (R limit)'
+    WRITE(*,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
     Mmat=(0.d0,0.d0)
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
@@ -296,6 +308,7 @@ x=(0.d0,0.d0)
 IF(direct)THEN
   CALL lapack_matinv(self%nelems,Mmat,info)
   CALL zgemv('N',self%nelems,self%nelems,(1.d0,0.d0),Mmat,self%nelems,b,1,(0.d0,0.d0),x,1)
+  DEALLOCATE(Mmat)
 ELSE
   IF(PRESENT(hodlr_op))THEN
     frinv%pre=>frinv_pre
@@ -332,6 +345,7 @@ END IF
 driver(:,1)=REAL(x,8)
 driver(:,2)=AIMAG(x)
 DEALLOCATE(b,x)
+CALL oft_decrease_indent
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Dot product with a second vector
@@ -474,7 +488,7 @@ IF(nlocal>1)THEN
     ! parts(i)%n=0
   END DO
   !---Get matrix slice
-  !$omp parallel do private(j,k) schedule(static,1)
+  !$omp parallel do private(j,k) schedule(static)
   DO i=1,nlocal
     DO j=1,parts(i)%n
       DO k=1,parts(i)%n
@@ -495,7 +509,8 @@ IF(nlocal>1)THEN
 END IF
 !---
 IF(pm)THEN
-  WRITE(*,*)'Starting GMRES solver'
+  WRITE(*,'(2A)')oft_indent,'Starting complex GMRES solver'
+  CALL oft_increase_indent
   CALL stimer%tick
 END IF
 !---
@@ -510,9 +525,7 @@ IF(uu>0.d0)CALL mat_comp(ncoils,A,u,w)
 r=g-w
 gg = REAL(vec_comp_dot(ncoils,r,r),8)
 ggin=gg
-100 FORMAT (I6,2ES14.6)
-110 FORMAT (I6,3ES14.6)
-IF(pm)WRITE(*,100)0,SQRT(uu),SQRT(gg)
+IF(pm)WRITE(*,'(A,I6,2ES14.6)')oft_indent,0,SQRT(uu),SQRT(gg)
 nits=0
 DO j=1,ncoils
   IF(gg==0.d0)EXIT
@@ -522,7 +535,7 @@ DO j=1,ncoils
   DO i=1,nrits
   !---Precondition search direction
   IF(nlocal>1)THEN
-      !$omp parallel do private(kk) schedule(static,1)
+      !$omp parallel do private(kk) schedule(static)
       DO k=1,nlocal
         DO kk=1,parts(k)%n
           parts(k)%b(kk)=v(ABS(parts(k)%ind(kk)),i)
@@ -563,7 +576,7 @@ DO j=1,ncoils
     nits=nits+1
     IF(i==nrits)EXIT
     IF(nits==its)EXIT
-    ! IF(pm)WRITE(*,'(I6,14X,ES14.6)')nits,ABS(res(i+1))
+    IF(pm)WRITE(*,'(A,I6,14X,ES14.6)')oft_indent,nits,ABS(res(i+1))
   END DO
   k=i
   DO i=k,2,-1
@@ -581,7 +594,7 @@ DO j=1,ncoils
   ggold=gg; uuold=uu
   gg = REAL(vec_comp_dot(ncoils,r,r),8)
   uu = REAL(vec_comp_dot(ncoils,u,u),8)
-  IF(pm)WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
+  IF(pm)WRITE(*,'(A,I6,3ES14.6)')oft_indent,nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   IF(its==-1.AND.sqrt(gg/uu)<1.d-7)EXIT
   IF(its==-2.AND.sqrt(gg/uu)<1.d-14)EXIT
   IF(nits==its)EXIT
@@ -593,7 +606,8 @@ DEALLOCATE(v,z,r,w)
 !
 IF(pm)THEN
   elapsed_time=stimer%tock()
-  WRITE(*,*)'  Time = ',elapsed_time
+  WRITE(*,'(2A,ES13.5)')oft_indent,'Time = ',elapsed_time
+  CALL oft_decrease_indent
 END IF
 IF(nlocal>1)THEN
   DO i=1,nlocal
@@ -610,13 +624,13 @@ END SUBROUTINE frequency_response
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE run_td_sim(self,dt,nsteps,vec,direct,lin_tol,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_vals,hodlr_op)
+SUBROUTINE run_td_sim(self,times,nsteps,vec,direct,lin_tols,use_cn,nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_vals,hodlr_op)
 TYPE(tw_type), INTENT(in) :: self
-REAL(8), INTENT(in) :: dt
 INTEGER(4), INTENT(in) :: nsteps
+REAL(8), INTENT(in) :: times(nsteps+1)
 REAL(8), INTENT(inout) :: vec(:)
 LOGICAL, INTENT(in) :: direct
-REAL(8), INTENT(in) :: lin_tol
+REAL(8), INTENT(in) :: lin_tols(2)
 LOGICAL, INTENT(in) :: use_cn
 INTEGER(4), INTENT(in) :: nstatus
 INTEGER(4), INTENT(in) :: nplot
@@ -627,8 +641,9 @@ REAL(8), POINTER, INTENT(in) :: sensor_vals(:,:)
 TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
 !---
 INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits,int_inds(2)
-REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt_op,int_facs(2)
-REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: its_hist
+REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt,dt_old,dt_op,int_facs(2),elapsed_time
+REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
 CLASS(oft_vector), POINTER :: u,g,up
@@ -638,12 +653,19 @@ TYPE(oft_sum_matrix), TARGET :: fmat,bmat
 CLASS(oft_solver), POINTER :: linv
 TYPE(oft_tw_hodlr_rbjpre), TARGET :: linv_pre
 TYPE(oft_bin_file) :: floop_hist,jumper_hist
-LOGICAL :: exists,volt_full
+TYPE(oft_timer) :: solve_timer
+LOGICAL :: exists,volt_full,pm_save
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=15) :: fmt_str
-CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name
+CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
+!---Extrapolation fields
+integer(i4) :: nextrap,maxextrap
+real(r8), allocatable, dimension(:) :: extrapt
+type(oft_vector_ptr), allocatable, dimension(:) :: extrap_fields
 WRITE(*,*)
-WRITE(*,*)'Starting simulation'
+WRITE(*,'(2A)')oft_indent,'Starting time-domain simulation'
+CALL oft_increase_indent
+WRITE(*,'(2A)')oft_indent,'timestep    time           sol_norm     nits    solver time'
 !---Setup coil waveform
 IF(ASSOCIATED(curr_waveform))THEN
   ncols=SIZE(curr_waveform,DIM=2)
@@ -684,6 +706,8 @@ END IF
 CALL self%Uloc%new(u)
 CALL self%Uloc%new(up)
 CALL self%Uloc%new(g)
+!---Get first timestep size
+dt=times(2)-times(1)
 !---Setup inductance matrix wrapper
 IF(PRESENT(hodlr_op))THEN
   Lmat=>hodlr_op
@@ -717,7 +741,8 @@ IF(.NOT.direct)THEN
   CALL create_cg_solver(linv)
   linv%A=>fmat
   linv%its=-2
-  linv%atol=lin_tol
+  linv%atol=lin_tols(1)
+  linv%rtol=lin_tols(2)
   IF(PRESENT(hodlr_op))THEN
     linv_pre%mf_obj=>hodlr_op
     linv_pre%Rmat=>self%Rmat
@@ -727,7 +752,18 @@ IF(.NOT.direct)THEN
   ELSE
     CALL create_diag_pre(linv%pre)
   END IF
+  !---Setup extrapolation fields
+  maxextrap=2 ! Number of points for extrapolation (0: No extrapolation, 2: Linear, 3: Quadratic)
+  IF(maxextrap>0)THEN
+    ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
+    DO i=1,maxextrap
+      CALL self%Uloc%new(extrap_fields(i)%f)
+      extrapt(i)=0.d0
+    END DO
+    nextrap=0
+  END IF
 ELSE
+  maxextrap=-1
   !---Setup dense matrix for inverse
   Minv%nr=self%nelems; Minv%nc=self%nelems
   Minv%nrg=self%nelems; Minv%ncg=self%nelems
@@ -739,17 +775,17 @@ ELSE
       Minv%M(i,self%Rmat%lc(j))=Minv%M(i,self%Rmat%lc(j)) + dt_op*self%Rmat%M(j)
     END DO
   END DO
-  WRITE(*,*)'Starting factorization'
-  oft_env%pm=.TRUE.
+  WRITE(*,'(2A)')oft_indent,'Starting factorization'
+  pm_save=oft_env%pm; oft_env%pm=.TRUE.
   ! CALL lapack_matinv(Minv%nr,Minv%M,info)
   CALL lapack_cholesky(Minv%nr,Minv%M,info)
-  oft_env%pm=.FALSE.
+  oft_env%pm=pm_save
 END IF
 !---
 ALLOCATE(vals(self%nelems))
 vals=vec
 CALL u%restore_local(vals)
-t=0.d0
+t=times(1)
 IF(ntimes_curr>0)THEN
   DO j=1,self%n_icoils
     icoil_curr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t,1)
@@ -757,9 +793,10 @@ IF(ntimes_curr>0)THEN
 END IF
 !---
 WRITE(pltnum,'(I4.4)')0
-CALL tw_rst_save(self,u,'pThinCurr_'//pltnum//'.rst','U')
-CALL hdf5_write(t,'pThinCurr_'//pltnum//'.rst','time')
-CALL hdf5_write(icoil_curr,'pThinCurr_'//pltnum//'.rst','coil_currents')
+rst_file=TRIM(self%rst_prefix)//'pThinCurr_'//pltnum//'.rst'
+CALL tw_rst_save(self,u,TRIM(rst_file),'U')
+CALL hdf5_write(t,TRIM(rst_file),'time')
+CALL hdf5_write(icoil_curr,TRIM(rst_file),'coil_currents')
 !---Save sensor data for t=0
 CALL u%get_local(vals)
 IF(sensors%nfloops>0)THEN
@@ -779,7 +816,7 @@ IF(sensors%nfloops>0)THEN
   !---Setup history file
   IF(oft_env%head_proc)THEN
     floop_hist%filedesc = 'ThinCurr flux loop history file'
-    CALL floop_hist%setup('floops.hist')
+    CALL floop_hist%setup(TRIM(self%rst_prefix)//'floops.hist')
     CALL floop_hist%add_field('time', 'r8', desc="Simulation time [s]")
     DO i=1,sensors%nfloops
       CALL floop_hist%add_field(sensors%floops(i)%name, 'r8')
@@ -790,35 +827,18 @@ IF(sensors%nfloops>0)THEN
     CALL floop_hist%write(data_r8=senout)
   END IF
 END IF
-IF(sensors%njumpers+self%nholes>0)THEN
-  ALLOCATE(jumpout(sensors%njumpers+self%nholes+1))
+IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
+  ALLOCATE(jumpout(sensors%njumpers+self%nholes+self%n_vcoils+1))
   DO j=1,sensors%njumpers
-    tmp=0.d0
-    val_prev=0.d0
-    ind1=self%pmap(sensors%jumpers(j)%points(1))
-    IF(ind1>0)val_prev=vals(ind1)
-    DO k=1,sensors%jumpers(j)%np-1
-      ind1=self%pmap(sensors%jumpers(j)%points(k+1))
-      IF(ind1>0)THEN
-        tmp=tmp+vals(ind1)-val_prev
-        val_prev=vals(ind1)
-      ELSE
-        tmp=tmp-val_prev
-        val_prev=0.d0
-      END IF
-    END DO
-    DO k=1,self%nholes
-      tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
-    END DO
-    jumpout(j+1)=tmp/mu0
+    jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
   END DO
-  DO j=1,self%nholes
+  DO j=1,self%nholes+self%n_vcoils
     jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
   END DO
   !---Setup history file
   IF(oft_env%head_proc)THEN
     jumper_hist%filedesc = 'ThinCurr current jumper history file'
-    CALL jumper_hist%setup('jumpers.hist')
+    CALL jumper_hist%setup(TRIM(self%rst_prefix)//'jumpers.hist')
     CALL jumper_hist%add_field('time', 'r8', desc="Simulation time [s]")
     DO i=1,sensors%njumpers
       CALL jumper_hist%add_field(sensors%jumpers(i)%name, 'r8')
@@ -826,6 +846,9 @@ IF(sensors%njumpers+self%nholes>0)THEN
     DO i=1,self%nholes
       WRITE(hole_jumper_name,'(A,I4.4)')'HOLE_',i
       CALL jumper_hist%add_field(hole_jumper_name, 'r8')
+    END DO
+    DO i=1,self%n_vcoils
+      CALL jumper_hist%add_field(self%vcoils(i)%name, 'r8')
     END DO
     CALL jumper_hist%write_header
     CALL jumper_hist%open
@@ -835,20 +858,63 @@ IF(sensors%njumpers+self%nholes>0)THEN
 END IF
 !---Advance system in time
 CALL up%add(0.d0,1.d0,u)
+ALLOCATE(its_hist(nstatus),time_hist(nstatus))
+its_hist=0
+time_hist=0.d0
 DO i=1,nsteps
+  dt_old = dt
+  dt = times(i+1)-times(i)
+  !---Update matrices if timestep has changed
+  IF(ABS((dt_old-dt)/dt_old)>1.d-6)THEN
+    WRITE(*,'(2X,A,1ES10.2)')'Updating matrices with new timestep = ',dt
+    IF(use_cn)THEN
+      bmat%alam = -dt/2.d0  ! Update backward matrix timestep
+      dt_op = dt/2.d0
+    ELSE
+      dt_op = dt
+    END IF
+    IF(direct)THEN
+      !---Re-build forward matrix [L + dt_op*R] (overwritten with inverse)
+      Minv%M=self%Lmat
+      DO k=1,self%Rmat%nr
+        DO j=self%Rmat%kr(k),self%Rmat%kr(k+1)-1
+          Minv%M(k,self%Rmat%lc(j))=Minv%M(k,self%Rmat%lc(j)) + dt_op*self%Rmat%M(j)
+        END DO
+      END DO
+      WRITE(*,'(2A)')oft_indent,'Starting factorization'
+      pm_save=oft_env%pm; oft_env%pm=.TRUE.
+      ! CALL lapack_matinv(Minv%nr,Minv%M,info)
+      CALL lapack_cholesky(Minv%nr,Minv%M,info)
+      oft_env%pm=pm_save
+    ELSE
+      fmat%alam = dt_op ! Update forward matrix timestep
+      CALL fmat%assemble(g)
+      IF(PRESENT(hodlr_op))THEN
+        linv_pre%beta=fmat%alam ! Update preconditioner timestep
+        linv_pre%refactor=.TRUE.
+      END IF
+    END IF
+  END IF
+
+  !---Update extrapolation fields
+  IF(maxextrap>0)THEN
+    DO j=maxextrap,2,-1
+      CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
+      extrapt(j)=extrapt(j-1)
+    END DO
+    IF(nextrap<maxextrap)nextrap=nextrap+1
+    CALL extrap_fields(1)%f%add(0.d0,1.d0,u)
+    extrapt(1)=t
+  END IF
   !---Update driven coil dI/dt waveforms
+  IF(ntimes_curr>0)THEN
+    DO j=1,self%n_icoils
+      icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt,1)
+      icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t,1)
+    END DO
+  END IF
   IF(use_cn)THEN
     CALL bmat%apply(u,g)
-    IF(ntimes_curr>0)THEN
-      DO j=1,self%n_icoils
-        ! Start of step
-        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt/4.d0,1)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t-dt/4.d0,1)
-        ! End of step
-        icoil_dcurr(j)=icoil_dcurr(j)+linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0,1)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0,1)
-      END DO
-    END IF
     IF(ntimes_volt>0)THEN
       IF(volt_full)THEN
         CALL linterp_facs(volt_waveform(:,1),ntimes_volt,t,int_inds,int_facs,1)
@@ -868,13 +934,6 @@ DO i=1,nsteps
     END IF
   ELSE
     CALL Lmat%apply(u,g)
-    IF(ntimes_curr>0)THEN
-      DO j=1,self%n_icoils
-        icoil_dcurr(j)=linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*5.d0/4.d0,1)
-        icoil_dcurr(j)=icoil_dcurr(j)-linterp(curr_waveform(:,1),curr_waveform(:,j+1),ntimes_curr,t+dt*3.d0/4.d0,1)
-      END DO
-      icoil_dcurr=icoil_dcurr*2.d0
-    END IF
     IF(ntimes_volt>0)THEN
       IF(volt_full)THEN
         CALL linterp_facs(volt_waveform(:,1),ntimes_volt,t+dt,int_inds,int_facs,1)
@@ -900,24 +959,37 @@ DO i=1,nsteps
     END DO
   END IF
   CALL g%restore_local(vals)
+  CALL solve_timer%tick()
   IF(direct)THEN
     CALL Minv%apply(g,u)
     nits=1
   ELSE
-    CALL up%add(-1.d0,1.d0,u)
-    CALL u%add(1.d0,1.d0,up)
-    CALL up%add(0.d0,1.d0,u)
+    !---Extrapolate solution
+    IF(maxextrap>0)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,t+dt,u)
     CALL linv%apply(u,g)
     nits=linv%cits
   END IF
+  elapsed_time=solve_timer%tock()
+  IF(PRESENT(hodlr_op))THEN
+    ! WRITE(*,'(A,5ES12.3)')'Timing: ',hodlr_op%times,linv_pre%times
+    hodlr_op%times=0.d0
+    linv_pre%times=0.d0
+  END IF
   uu=SQRT(u%dot(u))
-  t=t+dt
-  IF(MOD(i,nstatus)==0)WRITE(*,*)'Timestep ',i,REAL(t,4),REAL(uu,4),nits
+  t=times(i+1)
+  its_hist(MOD(i,nstatus)+1)=nits
+  time_hist(MOD(i,nstatus)+1)=elapsed_time
+  IF(MOD(i,nstatus)==0)THEN
+    nits=INT(SUM(its_hist)/REAL(nstatus,8),4)
+    elapsed_time=SUM(time_hist)/REAL(nstatus,8)
+    WRITE(*,'(2X,I6,ES16.6,ES14.4,2X,I6,F12.2)')i,t,uu,nits,elapsed_time
+  END IF
   IF(MOD(i,nplot)==0)THEN
     WRITE(pltnum,'(I4.4)')i
-    CALL tw_rst_save(self,u,'pThinCurr_'//pltnum//'.rst','U')
-    CALL hdf5_write(t,'pThinCurr_'//pltnum//'.rst','time')
-    CALL hdf5_write(icoil_curr,'pThinCurr_'//pltnum//'.rst','coil_currents')
+    rst_file=TRIM(self%rst_prefix)//'pThinCurr_'//pltnum//'.rst'
+    CALL tw_rst_save(self,u,TRIM(rst_file),'U')
+    CALL hdf5_write(t,TRIM(rst_file),'time')
+    CALL hdf5_write(icoil_curr,TRIM(rst_file),'coil_currents')
   END IF
   IF(ntimes_curr>0)THEN
     DO j=1,self%n_icoils
@@ -940,28 +1012,11 @@ DO i=1,nsteps
     senout(1)=t
     CALL floop_hist%write(data_r8=senout)
   END IF
-  IF(sensors%njumpers+self%nholes>0)THEN
+  IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
     DO j=1,sensors%njumpers
-      tmp=0.d0
-      val_prev=0.d0
-      ind1=self%pmap(sensors%jumpers(j)%points(1))
-      IF(ind1>0)val_prev=vals(ind1)
-      DO k=1,sensors%jumpers(j)%np-1
-        ind1=self%pmap(sensors%jumpers(j)%points(k+1))
-        IF(ind1>0)THEN
-          tmp=tmp+vals(ind1)-val_prev
-          val_prev=vals(ind1)
-        ELSE
-          tmp=tmp-val_prev
-          val_prev=0.d0
-        END IF
-      END DO
-      DO k=1,self%nholes
-        tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
-      END DO
-      jumpout(j+1)=tmp/mu0
+      jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
     END DO
-    DO j=1,self%nholes
+    DO j=1,self%nholes+self%n_vcoils
       jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
     END DO
     jumpout(1)=t
@@ -976,7 +1031,7 @@ IF(sensors%nfloops>0)THEN
   CALL floop_hist%close
   DEALLOCATE(senout)
 END IF
-IF(sensors%njumpers+self%nholes>0)THEN
+IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
   CALL jumper_hist%close
   DEALLOCATE(jumpout)
 END IF
@@ -984,6 +1039,12 @@ CALL u%delete()
 CALL up%delete()
 CALL g%delete()
 DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,up,g)
+IF(maxextrap>0)THEN
+  DO i=1,maxextrap
+    CALL extrap_fields(i)%f%delete()
+  END DO
+  DEALLOCATE(extrap_fields,extrapt)
+END IF
 IF(direct)THEN
   DEALLOCATE(minv%m)
 ELSE
@@ -992,6 +1053,7 @@ ELSE
   CALL linv%delete()
   DEALLOCATE(linv)
 END IF
+CALL oft_decrease_indent
 END SUBROUTINE run_td_sim
 !---------------------------------------------------------------------------------
 !> Needs Docs
@@ -1015,8 +1077,10 @@ CLASS(oft_vector), POINTER :: u,Bx,By,Bz
 TYPE(oft_bin_file) :: floop_hist,jumper_hist
 LOGICAL :: exists
 CHARACTER(LEN=4) :: pltnum
-CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name
-WRITE(*,*)'Post-processing simulation'
+CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
+WRITE(*,*)
+WRITE(*,'(2A)')oft_indent,'Post-processing time-domain simulation'
+CALL oft_increase_indent
 ALLOCATE(coil_vec(MAX(1,self%n_icoils)))
 CALL self%Uloc%new(u)
 ALLOCATE(vals(self%nelems))
@@ -1028,7 +1092,7 @@ IF(rebuild_sensors)THEN
     !---Setup history file
     IF(oft_env%head_proc)THEN
       floop_hist%filedesc = 'ThinCurr flux loop history file'
-      CALL floop_hist%setup('floops.hist')
+      CALL floop_hist%setup(TRIM(self%rst_prefix)//'floops.hist')
       CALL floop_hist%add_field('time', 'r8', desc="Simulation time [s]")
       DO i=1,sensors%nfloops
         CALL floop_hist%add_field(sensors%floops(i)%name, 'r8')
@@ -1037,13 +1101,13 @@ IF(rebuild_sensors)THEN
       CALL floop_hist%open
     END IF
   END IF
-  IF(sensors%njumpers+self%nholes>0)THEN
-    ALLOCATE(jumpout(sensors%njumpers+self%nholes+1))
+  IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
+    ALLOCATE(jumpout(sensors%njumpers+self%nholes+self%n_vcoils+1))
     jumpout = 0.d0
     !---Setup history file
     IF(oft_env%head_proc)THEN
       jumper_hist%filedesc = 'ThinCurr current jumper history file'
-      CALL jumper_hist%setup('jumpers.hist')
+      CALL jumper_hist%setup(TRIM(self%rst_prefix)//'jumpers.hist')
       CALL jumper_hist%add_field('time', 'r8', desc="Simulation time [s]")
       DO i=1,sensors%njumpers
         CALL jumper_hist%add_field(sensors%jumpers(i)%name, 'r8')
@@ -1051,6 +1115,9 @@ IF(rebuild_sensors)THEN
       DO i=1,self%nholes
         WRITE(hole_jumper_name,'(A,I4.4)')'HOLE_',i
         CALL jumper_hist%add_field(hole_jumper_name, 'r8')
+      END DO
+      DO i=1,self%n_vcoils
+        CALL jumper_hist%add_field(self%vcoils(i)%name, 'r8')
       END DO
       CALL jumper_hist%write_header
       CALL jumper_hist%open
@@ -1066,7 +1133,7 @@ IF(compute_B)THEN
     CALL self%Uloc_pts%new(By)
     CALL self%Uloc_pts%new(Bz)
   ELSE
-    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self)
+    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self,self%B_dx)
   END IF
 END IF
 !
@@ -1075,9 +1142,10 @@ DO i=0,nsteps
   IF(MOD(i,nplot)/=0)CYCLE
   !
   WRITE(pltnum,'(I4.4)')i
-  CALL tw_rst_load(u,'pThinCurr_'//pltnum//'.rst','U')
-  CALL hdf5_read(t,'pThinCurr_'//pltnum//'.rst','time')
-  IF(self%n_icoils>0)CALL hdf5_read(coil_vec,'pThinCurr_'//pltnum//'.rst','coil_currents')
+  rst_file=TRIM(self%rst_prefix)//'pThinCurr_'//pltnum//'.rst'
+  CALL tw_rst_load(u,TRIM(rst_file),'U')
+  CALL hdf5_read(t,TRIM(rst_file),'time')
+  IF(self%n_icoils>0)CALL hdf5_read(coil_vec,TRIM(rst_file),'coil_currents')
   !
   CALL self%xdmf%add_timestep(t)
   CALL u%get_local(vals)
@@ -1139,28 +1207,11 @@ DO i=0,nsteps
       senout(1)=t
       CALL floop_hist%write(data_r8=senout)
     END IF
-    IF(sensors%njumpers+self%nholes>0)THEN
+    IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
       DO j=1,sensors%njumpers
-        tmp=0.d0
-        val_prev=0.d0
-        ind1=self%pmap(sensors%jumpers(j)%points(1))
-        IF(ind1>0)val_prev=vals(ind1)
-        DO k=1,sensors%jumpers(j)%np-1
-          ind1=self%pmap(sensors%jumpers(j)%points(k+1))
-          IF(ind1>0)THEN
-            tmp=tmp+vals(ind1)-val_prev
-            val_prev=vals(ind1)
-          ELSE
-            tmp=tmp-val_prev
-            val_prev=0.d0
-          END IF
-        END DO
-        DO k=1,self%nholes
-          tmp=tmp+vals(self%np_active+k)*sensors%jumpers(j)%hole_facs(k)
-        END DO
-        jumpout(j+1)=tmp/mu0
+        jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
       END DO
-      DO j=1,self%nholes
+      DO j=1,self%nholes+self%n_vcoils
         jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
       END DO
       jumpout(1)=t
@@ -1174,7 +1225,7 @@ IF(sensors%nfloops>0)THEN
   CALL floop_hist%close()
   DEALLOCATE(senout)
 END IF
-IF(sensors%njumpers+self%nholes>0)THEN
+IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
   CALL jumper_hist%close()
   DEALLOCATE(jumpout)
 END IF
@@ -1189,6 +1240,7 @@ IF(compute_B.AND.PRESENT(hodlr_op))THEN
   DEALLOCATE(Bx,By,Bz)
 END IF
 IF(self%n_icoils>0)DEALLOCATE(coil_vec)
+CALL oft_decrease_indent
 END SUBROUTINE plot_td_sim
 !---------------------------------------------------------------------------------
 !> Needs Docs
@@ -1336,7 +1388,7 @@ IF(compute_B)THEN
     END DO
     DEALLOCATE(pvals)
   ELSE
-    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self)
+    IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self,self%B_dx)
     CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &
       self%Bel(:,:,1),self%mesh%np,eig_vec,self%nelems,0.d0,Bxtmp,self%mesh%np)
     CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &

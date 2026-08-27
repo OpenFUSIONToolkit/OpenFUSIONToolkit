@@ -18,21 +18,20 @@ Before running any workflow in this folder, ensure the following:
 AdvancedWorkflows/
 │
 ├── Pulse Design/
-│   ├── etc
-│   ├── etc
-│   └── README.md
-
-├── TokaMax/
-│   ├── etc
-│   ├── etc
-│   └── README.md
+│   ├── CUTE_pulse_ex.ipynb
+│   ├── d3d_pulse_ex.py
+│   ├── README.md
+│   └── ITER_TokaMaker_TORAX/
+│       ├── ITER_TokaMaker_TORAX_pulse_ex.ipynb
+│       └── ITER_mesh.h5
 │
 ├── Poloidal Field Coil Optimization/
 │   ├── etc
 │   ├── etc
 │   └── README.md
 │
-└── Isoflux Controller/
-    ├── etc
-    ├── etc
+├── Isoflux Controller/
+    ├── NSTXU_shape_control_simulator.ipynb
+    ├── NSTXU_shape_generator.ipynb
     └── README.md
+

@@ -4,9 +4,15 @@ on:
     types:
       - closed
   workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'Pull request number to clean up caches for'
+        required: true
+        type: string
 
 jobs:
   cleanup:
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     runs-on: ubuntu-latest
     permissions:
       # `actions:write` permission is required to delete caches
@@ -15,11 +21,13 @@ jobs:
       contents: read
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Cleanup cache
         run: |
           gh extension install actions/gh-actions-cache
+
+          BRANCH="refs/pull/${PR_NUMBER}/merge"
 
           echo "Fetching list of cache key"
           cacheKeysForPR=$(gh actions-cache list -R $REPO -B $BRANCH -L 100 | cut -f 1 )
@@ -35,4 +43,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          BRANCH: refs/pull/${{ github.event.pull_request.number }}/merge
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}

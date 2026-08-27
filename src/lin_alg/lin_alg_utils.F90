@@ -25,13 +25,13 @@ USE oft_native_la, ONLY: oft_native_vector, oft_native_cvector, &
 #ifdef HAVE_PETSC
 USE oft_petsc_la, ONLY: oft_petsc_vector, oft_petsc_vector_cast, oft_petsc_matrix, &
   oft_petsc_matrix_cast
-#include "petsc/finclude/petscmat.h"
-#undef IS
-#undef Mat
-use petscmat
+USE petscmat
 #endif
 IMPLICIT NONE
 #include "local.h"
+#ifdef HAVE_PETSC
+#include "oft_petsc.h"
+#endif
 !------------------------------------------------------------------------------
 !> Create a new vector by combining a set of vectors.
 !!
@@ -79,10 +79,10 @@ CONTAINS
 !> Real implementation for \ref create_vector
 !---------------------------------------------------------------------------------
 SUBROUTINE create_vector_real(vec,stitch_info,maps,native)
-CLASS(oft_vector), POINTER, INTENT(inout) :: vec
-TYPE(seam_list), INTENT(inout) :: stitch_info(:)
-TYPE(map_list), INTENT(inout) :: maps(:)
-LOGICAL, OPTIONAL, INTENT(in) :: native
+CLASS(oft_vector), POINTER, INTENT(inout) :: vec !< Resulting vector
+TYPE(seam_list), INTENT(inout) :: stitch_info(:) !< Array of seam structures
+TYPE(map_list), INTENT(inout) :: maps(:) !< Mapping from sub-vectors into full vector
+LOGICAL, OPTIONAL, INTENT(in) :: native !< Force native representation?
 !---
 LOGICAL :: force_native
 INTEGER(i4) :: i,offset,soffset,nblocks
@@ -210,10 +210,10 @@ END SUBROUTINE create_vector_real
 !> Complex implementation for \ref create_vector
 !---------------------------------------------------------------------------------
 SUBROUTINE create_vector_comp(vec,stitch_info,maps,native)
-CLASS(oft_cvector), POINTER, INTENT(inout) :: vec
-TYPE(seam_list), INTENT(inout) :: stitch_info(:)
-TYPE(map_list), INTENT(inout) :: maps(:)
-LOGICAL, OPTIONAL, INTENT(in) :: native
+CLASS(oft_cvector), POINTER, INTENT(inout) :: vec !< Resulting vector
+TYPE(seam_list), INTENT(inout) :: stitch_info(:) !< Array of seam structures
+TYPE(map_list), INTENT(inout) :: maps(:) !< Mapping from sub-vectors into full vector
+LOGICAL, OPTIONAL, INTENT(in) :: native !< Force native representation?
 !---
 LOGICAL :: force_native
 INTEGER(i4) :: i,offset,soffset,nblocks
@@ -402,10 +402,10 @@ END SUBROUTINE condense_stitch
 !> Real implementation for \ref create_matrix
 !---------------------------------------------------------------------------------
 SUBROUTINE create_matrix_real(mat,ingraphs,row_vec,col_vec,native)
-CLASS(oft_matrix), POINTER, INTENT(inout) :: mat
-TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:)
-CLASS(oft_vector), POINTER, INTENT(in) :: row_vec
-CLASS(oft_vector), POINTER, INTENT(in) :: col_vec
+CLASS(oft_matrix), POINTER, INTENT(inout) :: mat !< Resulting matrix
+TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:) !< Array of graphs representing matix blocks
+CLASS(oft_vector), POINTER, INTENT(in) :: row_vec !< Vector representing matrix rows
+CLASS(oft_vector), POINTER, INTENT(in) :: col_vec !< Vector representing matrix columns
 LOGICAL, OPTIONAL, INTENT(in) :: native
 LOGICAL :: force_native
 INTEGER(i4) :: i,j,ni,nj,offset,soffset
@@ -570,10 +570,10 @@ END SUBROUTINE create_matrix_real
 !> Real implementation for \ref create_matrix
 !---------------------------------------------------------------------------------
 SUBROUTINE create_matrix_comp(mat,ingraphs,row_vec,col_vec,native)
-CLASS(oft_cmatrix), POINTER, INTENT(inout) :: mat
-TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:)
-CLASS(oft_cvector), POINTER, INTENT(in) :: row_vec
-CLASS(oft_cvector), POINTER, INTENT(in) :: col_vec
+CLASS(oft_cmatrix), POINTER, INTENT(inout) :: mat !< Resulting matrix
+TYPE(oft_graph_ptr), INTENT(in) :: ingraphs(:,:) !< Array of graphs representing matix blocks
+CLASS(oft_cvector), POINTER, INTENT(in) :: row_vec !< Vector representing matrix rows
+CLASS(oft_cvector), POINTER, INTENT(in) :: col_vec !< Vector representing matrix columns
 LOGICAL, OPTIONAL, INTENT(in) :: native
 LOGICAL :: force_native
 INTEGER(i4) :: i,j,ni,nj,offset,soffset
@@ -701,13 +701,13 @@ END IF
 END SUBROUTINE setup_native
 END SUBROUTINE create_matrix_comp
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Remove redundant column indices from a CSR graph
 !---------------------------------------------------------------------------------
 SUBROUTINE csr_remove_redundant(nr,kr,nnz,lc)
-INTEGER(4), INTENT(in) :: nr
-INTEGER(4), INTENT(inout) :: kr(nr+1)
-INTEGER(4), INTENT(inout) :: nnz
-INTEGER(4), POINTER, INTENT(inout) :: lc(:)
+INTEGER(4), INTENT(in) :: nr !< Number of rows
+INTEGER(4), INTENT(inout) :: kr(nr+1) !< Row pointer
+INTEGER(4), INTENT(inout) :: nnz !< Number of non-zero entries
+INTEGER(4), POINTER, INTENT(inout) :: lc(:) !< Column indices
 INTEGER(4) :: i,j,nremove,js
 INTEGER(4), POINTER :: lctmp(:)
 nremove=0
@@ -970,9 +970,9 @@ end subroutine graph_add_full_col
 !> Real implementation for \ref combine_matrices
 !---------------------------------------------------------------------------------
 SUBROUTINE combine_matrices_real(mats,nr,nc,mat)
-TYPE(oft_matrix_ptr), INTENT(in) :: mats(:,:)
-INTEGER(i4), INTENT(in) :: nr
-INTEGER(i4), INTENT(in) :: nc
+TYPE(oft_matrix_ptr), INTENT(in) :: mats(:,:) !< Array of sub-matrices to combine
+INTEGER(i4), INTENT(in) :: nr !< Number of row sub-matrices
+INTEGER(i4), INTENT(in) :: nc !< Number of column sub-matrices
 CLASS(oft_matrix), POINTER, INTENT(inout) :: mat
 DEBUG_STACK_PUSH
 SELECT TYPE(this=>mat)
@@ -1019,11 +1019,10 @@ TYPE(oft_petsc_matrix), INTENT(inout) :: this
 TYPE(tmat), ALLOCATABLE :: pmats(:,:)
 INTEGER(i4) :: i,j,ii,jj,ierr,m,n,offset,proc
 INTEGER(i4) :: mcomm,roffset,coffset,rgoffset,cgoffset,ncols,maxcols,rows(1),ncslice
-INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: rstart,cstart,cols,coltmp
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: rstart,cstart
 INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: goffsets,offsets,tmpoff
-REAL(r8), POINTER :: vals(:),varray(:,:)
-INTEGER(i4), POINTER :: int_tmp(:)
-REAL(r8), POINTER :: real_tmp(:)
+INTEGER(i4), POINTER :: int_tmp(:),cols(:),coltmp(:)
+REAL(r8), POINTER :: real_tmp(:),varray(:)
 mcomm=oft_env%COMM
 IF(this%nr==this%nrg)mcomm=PETSC_COMM_SELF
 CALL MatGetOwnershipRange(this%m,m,n,ierr)
@@ -1110,13 +1109,12 @@ DO i=1,nr
           maxcols=MAX(ncols,maxcols)
           CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,int_tmp,real_tmp,ierr)
         END DO
-        ALLOCATE(varray(maxcols,1),cols(maxcols),coltmp(maxcols))
+        ALLOCATE(varray(maxcols),cols(maxcols),coltmp(maxcols))
         cols=0
-        vals=>varray(:,1)
         m=0
         DO ii=1,pmat%i_map(1)%nslice
           rows=ii-1
-          CALL MatGetRow(pmat%m,roffset+ii-1,ncols,cols,vals,ierr)
+          CALL MatGetRow(pmat%m,roffset+ii-1,ncols,cols,varray,ierr)
           proc=1
           DO jj=1,ncols
             DO WHILE(cols(jj)>=offsets(j,proc+1))
@@ -1125,11 +1123,13 @@ DO i=1,nr
             END DO
             coltmp(jj)=cols(jj)-offsets(j,proc)+goffsets(j,proc)
           END DO
-          CALL MatSetValues(this%M,1,rows+rgoffset,ncols, &
+          CALL MatSetValues(this%M,1_i4,rows+rgoffset,ncols, &
             coltmp,varray,ADD_VALUES,ierr)
-          CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,cols,vals,ierr)
+          CALL MatRestoreRow(pmat%m,roffset+ii-1,ncols,cols,varray,ierr)
         END DO
-        DEALLOCATE(varray,cols,coltmp)
+        IF(ASSOCIATED(varray))DEALLOCATE(varray)
+        IF(ASSOCIATED(cols))DEALLOCATE(cols)
+        DEALLOCATE(coltmp)
     END SELECT
     END IF
     cgoffset=cgoffset+cstart(j)
@@ -1145,9 +1145,9 @@ END SUBROUTINE combine_matrices_real
 !> Real implementation for \ref combine_matrices
 !---------------------------------------------------------------------------------
 SUBROUTINE combine_matrices_comp(mats,nr,nc,mat)
-TYPE(oft_cmatrix_ptr), INTENT(in) :: mats(:,:)
-INTEGER(i4), INTENT(in) :: nr
-INTEGER(i4), INTENT(in) :: nc
+TYPE(oft_cmatrix_ptr), INTENT(in) :: mats(:,:) !< Array of matrices representing sub-matrices
+INTEGER(i4), INTENT(in) :: nr !< Number of row sub-matrices
+INTEGER(i4), INTENT(in) :: nc !< Number of column sub-matrices
 CLASS(oft_cmatrix), POINTER, INTENT(inout) :: mat
 DEBUG_STACK_PUSH
 SELECT TYPE(this=>mat)
@@ -1203,4 +1203,110 @@ outgraph%kr=[(i,i=1,outgraph%nr+1)]
 outgraph%lc=[(i,i=1,outgraph%nr)]
 DEBUG_STACK_POP
 END SUBROUTINE create_identity_graph
+!------------------------------------------------------------------------------
+!> Create a tri-diagonal graph for a given vector
+!------------------------------------------------------------------------------
+SUBROUTINE create_tridiag_graph(outgraph,vec,periodic)
+TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
+CLASS(oft_vector), POINTER, INTENT(in) :: vec !< Vector representing matrix rows/columns
+LOGICAL, INTENT(in) :: periodic !< Apply periodic BCs?
+INTEGER(i4) :: i
+DEBUG_STACK_PUSH
+IF(vec%n<3)CALL oft_abort('Vector size must be at least 3 for tridiagonal graph', &
+  'create_tridiag_graph',__FILE__)
+!---Setup graph
+ALLOCATE(outgraph)
+IF(periodic)THEN
+  outgraph%nnz=3*vec%n
+ELSE
+  outgraph%nnz=3*vec%n-2
+END IF
+outgraph%nr=vec%n
+outgraph%nrg=vec%ng
+outgraph%nc=vec%n
+outgraph%ncg=vec%ng
+!---Create indexing
+ALLOCATE(outgraph%kr(outgraph%nr+1))
+ALLOCATE(outgraph%lc(outgraph%nnz))
+outgraph%kr(1)=1
+IF(periodic)THEN
+  outgraph%lc(1:3)=[1,2,vec%n]
+  outgraph%kr(2)=4
+ELSE
+  outgraph%lc(1:2)=[1,2]
+  outgraph%kr(2)=3
+END IF
+DO i=2,vec%n-1
+  outgraph%lc(outgraph%kr(i):outgraph%kr(i)+2)=[i-1,i,i+1]
+  outgraph%kr(i+1)=outgraph%kr(i)+3
+END DO
+IF(periodic)THEN
+  outgraph%lc(outgraph%nnz-2:outgraph%nnz)=[1,vec%n-1,vec%n]
+ELSE
+  outgraph%lc(outgraph%nnz-1:outgraph%nnz)=[vec%n-1,vec%n]
+END IF
+outgraph%kr(vec%n+1)=outgraph%nnz+1
+DEBUG_STACK_POP
+END SUBROUTINE create_tridiag_graph
+!------------------------------------------------------------------------------
+!> Create a dense graph for a given vector
+!------------------------------------------------------------------------------
+SUBROUTINE create_dense_graph(outgraph,rvec,cvec)
+TYPE(oft_graph), POINTER, INTENT(inout) :: outgraph !< Resulting graph
+CLASS(oft_vector), POINTER, INTENT(in) :: rvec !< Vector representing matrix rows
+CLASS(oft_vector), POINTER, OPTIONAL, INTENT(in) :: cvec !< Vector representing matrix columns (optional)
+INTEGER(i4) :: i,j
+CLASS(oft_vector), POINTER :: vec2
+DEBUG_STACK_PUSH
+IF(PRESENT(cvec))THEN
+  vec2=>cvec
+ELSE
+  vec2=>rvec
+END IF
+!---Setup graph
+ALLOCATE(outgraph)
+outgraph%nnz=rvec%n*vec2%n
+outgraph%nr=rvec%n
+outgraph%nrg=rvec%ng
+outgraph%nc=vec2%n
+outgraph%ncg=vec2%ng
+!---Create indexing
+ALLOCATE(outgraph%kr(outgraph%nr+1))
+ALLOCATE(outgraph%lc(outgraph%nnz))
+outgraph%kr(1)=1
+DO i=1,rvec%n
+  outgraph%kr(i+1)=outgraph%kr(i)+vec2%n
+  outgraph%lc(outgraph%kr(i):outgraph%kr(i+1)-1)=[(j,j=1,vec2%n)]
+END DO
+DEBUG_STACK_POP
+END SUBROUTINE create_dense_graph
+!------------------------------------------------------------------------------
+!> Create stitch and map structures for local vector
+!------------------------------------------------------------------------------
+SUBROUTINE create_local_stitch(stitch,map,n)
+TYPE(oft_seam), INTENT(out) :: stitch !< Stitching object
+TYPE(oft_map), INTENT(inout) :: map !< Map object
+INTEGER(i4), INTENT(in) :: n !< Size of local vector
+INTEGER(i4) :: i
+DEBUG_STACK_PUSH
+!---Setup stitching object
+stitch%nproc_con=0
+ALLOCATE(stitch%be(n),stitch%kle(0:stitch%nproc_con+1))
+stitch%full=.TRUE.
+stitch%nbe=0
+stitch%be=.FALSE.
+stitch%kle=0
+!---Setup map
+map%per=.FALSE.
+map%offset=0
+map%n=n
+map%ng=n
+map%nslice=n
+ALLOCATE(map%slice(map%nslice))
+map%slice=[(i,i=1,n)]
+ALLOCATE(map%lge(map%n))
+map%lge=[(i,i=1,n)]
+map%gbe=>stitch%be
+DEBUG_STACK_POP
+END SUBROUTINE create_local_stitch
 END MODULE oft_la_utils

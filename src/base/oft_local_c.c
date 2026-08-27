@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <stdint.h>
+#include "git_info.h"
 
 void oft_stack_print();
 void oft_finalize();
@@ -21,6 +22,17 @@ void dump_cov()
 {
 #ifdef OFT_COVERAGE
 	__gcov_dump();
+#endif
+}
+
+// Print git information
+void oft_print_git() {
+#ifdef GITBRANCH
+  printf("Base release:        %s\n",GITTAG);
+  printf("Development branch:  %s\n",GITBRANCH);
+  printf("Revision id:         %s\n",GITVERSION);
+#else
+  printf("Release version:  %s\n",GITTAG);
 #endif
 }
 
@@ -71,9 +83,9 @@ void oft_set_signal_handlers()
 }
 
 // Jenkins's one_at_a_time hash
-uint32_t oft_simple_hash(const uint8_t* key, long length) {
+uint32_t oft_simple_hash_c(const uint8_t* key, long length, uint32_t starting_value) {
   long i = 0;
-  uint32_t hash = 0;
+  uint32_t hash = starting_value;
   while (i != length) {
     hash += key[i++];
     hash += hash << 10;

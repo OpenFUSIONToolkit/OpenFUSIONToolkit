@@ -41,6 +41,8 @@ FILE_PATTERNS          = *.f90 \
                          *.md \
                          *.html \
                          *.py
+FILTER_SOURCE_FILES    = YES
+FILTER_PATTERNS        = "*.py=@CMAKE_CURRENT_SOURCE_DIR@/docs/filter_python_doxygen.py"
 
 OPTIMIZE_FOR_FORTRAN   = NO
 EXTENSION_MAPPING      = F90=FortranFree
@@ -175,7 +177,6 @@ SEARCH_INCLUDES        = YES
 INCLUDE_PATH           =
 INCLUDE_FILE_PATTERNS  =
 PREDEFINED             = HAVE_MPI=1 \
-                         HAVE_XML=1 \
                          HAVE_PHDF5=1 \
                          HAVE_ONURBS=1 \
                          HAVE_ARPACK=1 \

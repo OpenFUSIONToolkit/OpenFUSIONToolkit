@@ -6,7 +6,6 @@
 # 3D. Designed to be used for FE basis definition in the Open FUSION Toolkit (OFT)
 #
 #------------------------------------------------------------------------------
-from __future__ import print_function
 import sys
 try:
     import numpy

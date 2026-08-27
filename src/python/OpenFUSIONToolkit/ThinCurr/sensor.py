@@ -59,7 +59,7 @@ class circular_flux_loop(flux_loop):
 
 class Mirnov(flux_loop):
     '''! ThinCurr Mirnov sensor class'''
-    def __init__(self, pt, norm, name, dx=1.E-5):
+    def __init__(self, pt, norm, name, dx=1.E-3):
         '''! Initialize Mirnov sensor object
 
         @param pt Location of Mirnov sensor [3]

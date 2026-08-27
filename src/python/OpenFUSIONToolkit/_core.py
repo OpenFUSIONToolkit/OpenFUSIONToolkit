@@ -14,14 +14,24 @@ import platform
 import shutil
 import tempfile
 import ctypes
+from warnings import warn
 import numpy
 from ._interface import *
 from .util import run_shell_command, oft_warning
+from .io import write_oft_xml
 
 
 class OFT_env():
     '''! OpenFUSIONToolkit runtime environment class'''
-    def __init__(self,debug_level=0,nthreads=2,unique_tempfiles='global',abort_callback=True):
+    def __new__(cls, *args, **kwargs):
+        '''! Create OFT runtime object ensuring only single initialization'''
+        if hasattr(cls, 'instance'):
+            raise RuntimeError('Only one instance of `OFT_env` can be created per python kernel')
+        else:
+            cls.instance = super(OFT_env, cls).__new__(cls)
+        return cls.instance
+
+    def __init__(self,debug_level=0,nthreads=2,unique_tempfiles='global',abort_callback=True,quiet=False):
         '''! Initialize OFT runtime object
 
         @param debug_level Level of debug printing (0-3)
@@ -31,6 +41,7 @@ class OFT_env():
         'local_file': Use current working directory and append unique identifier to filenames,
         'none': Use non-unique names in local directory; can lead to conflict with multiple instances)
         @param abort_callback Use callback for "graceful" abort
+        @param quiet If `True`, do not print OFT environment information on initialization
         '''
         ## OS type
         self.os = platform.uname()[0]
@@ -38,9 +49,18 @@ class OFT_env():
         self.ncpus = None
         if self.os == 'Darwin':
             try:
-                result, errcode = run_shell_command('sysctl -n hw.perflevel0.physicalcpu')
-                if errcode == 0:
-                    self.ncpus = int(result)
+                core_dict = {}
+                for i in range(2):
+                    try:
+                        result, errcode = run_shell_command('sysctl -n hw.perflevel{0}.physicalcpu'.format(i))
+                        name_result, name_errcode = run_shell_command('sysctl -n hw.perflevel{0}.name'.format(i))
+                        if (errcode == 0) and (name_errcode == 0):
+                            core_dict[name_result.strip().lower()] = int(result)
+                    except:
+                        pass
+                self.ncpus = core_dict.get('performance',0) + core_dict.get('super',0)
+                if self.ncpus == 0:
+                    self.ncpus = None
             except:
                 pass
         elif self.os == 'Linux':
@@ -106,9 +126,9 @@ class OFT_env():
         slens = numpy.zeros((4,), dtype=numpy.int32)
         ifile_c = c_char_p(self.oft_ifile.encode())
         if abort_callback:
-            oft_init(c_int(nthreads),ifile_c,slens,oft_python_abort)
+            oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,oft_python_abort)
         else:
-            oft_init(c_int(nthreads),ifile_c,slens,c_void_p())
+            oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,c_void_p())
         ## General string size
         self.oft_slen = slens[1]
         ## Path string size
@@ -117,7 +137,50 @@ class OFT_env():
         self.oft_error_slen = slens[3]
         ## Value for marking a float quantity as disabled
         self.float_disable_flag = -1.E99
-    
+
+    def print_ascii_logo(self, italic=True):
+        '''! Print OFT ASCII logo
+
+        @param italic Print italicized logo?'''
+        if italic:
+            print(r'''
+   ____
+  / __ \____  ___  ____
+ / / / / __ \/ _ \/ __ \
+/ /_/ / /_/ /  __/ / / /
+\____/ .___/\___/_/ /_/
+    /_/
+    ________  _______ ________  _   __
+   / ____/ / / / ___//  _/ __ \/ | / /
+  / /_  / / / /\__ \ / // / / /  |/ /
+ / __/ / /_/ /___/ // // /_/ / /|  /
+/_/    \____//____/___/\____/_/ |_/
+  ______            ____   _ __
+ /_  __/___  ____  / / /__(_) /_
+  / / / __ \/ __ \/ / //_/ / __/
+ / / / /_/ / /_/ / / ,< / / /_
+/_/  \____/\____/_/_/|_/_/\__/
+''')
+        else:
+            print(r'''
+  ___
+ / _ \ _ __   ___ _ __
+| | | | '_ \ / _ \ '_ \
+| |_| | |_) |  __/ | | |
+ \___/| .__/ \___|_| |_|
+      |_|
+ _____ _   _ ____ ___ ___  _   _
+|  ___| | | / ___|_ _/ _ \| \ | |
+| |_  | | | \___ \| | | | |  \| |
+|  _| | |_| |___) | | |_| | |\  |
+|_|    \___/|____/___\___/|_| \_|
+ _____           _ _    _ _
+|_   _|__   ___ | | | _(_) |_
+  | |/ _ \ / _ \| | |/ / | __|
+  | | (_) | (_) | |   <| | |_
+  |_|\___/ \___/|_|_|\_\_|\__|
+''')
+
     def float_is_disabled(self,val):
         '''! Check if float is set to a value indicated its usage is "disabled"
 
@@ -125,10 +188,10 @@ class OFT_env():
         @returns Value is within 10% of `self.float_disable_flag`
         '''
         return val < self.float_disable_flag*0.1
-    
+
     def set_debug_level(self,debug_level):
         '''! Set debug verbosity level
-        
+
         @param debug_level New value for debug level (must be in range [0,3])
         '''
         if (debug_level < 0) or (debug_level > 3):
@@ -137,14 +200,14 @@ class OFT_env():
 
     def set_num_threads(self,nthreads):
         '''! Set the number of OpenMP threads to use
-        
+
         @param nthreads Number of threads to use for subsequent OpenMP parallel regions
         '''
         oftpy_set_nthreads(c_int(nthreads))
-    
+
     def unique_tmpfile(self,filename):
         '''! Get unique temporary filename
-        
+
         @param filename Base non-unique filename
         @result Unique filepath in suitable temporary location
         '''
@@ -158,7 +221,7 @@ class OFT_env():
 
     def path2c(self,path):
         '''! Convert general strings to C-compatible objects calls to OFT compiled API
-        
+
         @param path Python path string
         @result `c_char_p` object containing path string value
         '''
@@ -168,7 +231,7 @@ class OFT_env():
 
     def string2c(self,string):
         '''! Convert general strings to C-compatible objects calls to OFT compiled API
-        
+
         @param string Python string
         @result `c_char_p` object containing string value
         '''
@@ -188,7 +251,21 @@ class OFT_env():
                 for option_name, option_value in options.items():
                     fid.write("  {0}={1}\n".format(option_name,option_value))
                 fid.write("/\n\n")
-    
+
+    @staticmethod
+    def write_oft_xml(xml_blocks,path):
+        r"""! Write OFT XML file from a list of XML block objects
+
+        @param xml_blocks List of objects for child nodes, must implement `build_XML` method
+        @param path Output path for XML file
+        """
+        warn(
+            "`OFT_env.write_oft_xml()` is deprecated, use standalone `io.write_oft_xml()` instead. This method will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        write_oft_xml(xml_blocks,path)
+
     def __del__(self):
         '''! Destroy environment and cleanup known temporary files'''
         if self.tempdir is not None:

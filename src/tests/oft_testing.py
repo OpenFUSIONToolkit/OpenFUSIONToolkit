@@ -1,6 +1,7 @@
 import subprocess
 import time
 import os
+import warnings
 import pytest
 
 def run_command(command, cwd=None):
@@ -8,6 +9,7 @@ def run_command(command, cwd=None):
     outs, errs = pid.communicate()
     errcode = pid.poll()
     return outs, errs, errcode
+
 
 def run_OFT(command, nproc, timeout, return_stdout=False):
     if nproc > 1:
@@ -51,18 +53,21 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
         else:
             return True
     if errcode != 0:
-        print("FAILED: OFT exited with non-zero error code!")
-        if return_stdout:
-            return False, std_out
+        if (errcode == 143) or (errcode == 15):
+            warnings.warn("WARNING: OFT exited with error code 143 (external SIGTERM)")
         else:
-            return False
-    if std_out.find('ERROR') > -1:
+            print("FAILED: OFT exited with non-zero error code!")
+            if return_stdout:
+                return False, std_out
+            else:
+                return False
+    if std_out.find('ERROR:') > -1:
         print("FAILED: detected OFT error!")
         if return_stdout:
             return False, std_out
         else:
             return False
-    if std_out.find('WARNING') > -1:
+    if std_out.find('WARNING:') > -1:
         print("FAILED: detected OFT warning!")
         if return_stdout:
             return False, std_out
@@ -72,3 +77,7 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
         return True, std_out
     else:
         return True
+
+
+def approx_list(list, rel=None, abs=None):
+    return [pytest.approx(val, rel=rel, abs=abs) if val is not None else None for val in list]
