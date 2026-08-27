@@ -1198,6 +1198,32 @@ def test_torus_fourier_sensor_from_eqdsk():
         torus_fourier_sensor.from_eqdsk(R,Z,eqdsk_file,center='unknown',verbose=False)
 
 @pytest.mark.coverage
+def test_torus_fourier_sensor_from_gpec_control_output():
+    import netCDF4
+    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
+    control_file = os.path.join(test_dir,'torus_gpec_control_output_n1_nc.nc')
+    with netCDF4.Dataset(control_file,'r') as ds:
+        R_gpec = np.asarray(ds.variables['R'][:])
+        Z_gpec = np.asarray(ds.variables['z'][:])
+        delta_phi = np.asarray(ds.variables['delta_phi'][:])
+        ro = float(ds.getncattr('ro'))
+        expected_helicity = 1 if float(ds.getncattr('bt0'))*float(ds.getncattr('crnt')) > 0.0 else -1
+    interface = torus_fourier_sensor.from_gpec_control_output(control_file,verbose=False)
+    assert abs(interface.major_radius-ro) < 1.E-12
+    assert interface.helicity == expected_helicity
+    # identical to building positionally from the same file contents
+    twin = torus_fourier_sensor(R_gpec,Z_gpec,ro,expected_helicity,hamada_dphi=delta_phi)
+    assert np.allclose(interface.radial_positions,twin.radial_positions)
+    assert np.allclose(interface.axial_positions,twin.axial_positions)
+    assert np.allclose(interface.hamada_dphi,twin.hamada_dphi)
+    # explicit overrides win over the file contents
+    interface_o = torus_fourier_sensor.from_gpec_control_output(control_file,major_radius=1.5,helicity=-1,verbose=False)
+    assert interface_o.major_radius == 1.5
+    assert interface_o.helicity == -1
+    with pytest.raises(ValueError):
+        torus_fourier_sensor.from_gpec_control_output(control_file,center='unknown',verbose=False)
+
+@pytest.mark.coverage
 def test_torus_fourier_sensor_hamada_alignment():
     from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
     R_0 = 3.0

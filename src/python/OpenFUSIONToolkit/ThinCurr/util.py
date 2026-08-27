@@ -106,6 +106,51 @@ class torus_fourier_sensor():
 
         return cls(radial_positions,axial_positions,major_radius,helicity,hamada_dphi=hamada_dphi)
 
+    @classmethod
+    def from_gpec_control_output(cls,control_file,center='ro',major_radius=None,helicity=None,verbose=True):
+        '''! Construct the interface entirely from a GPEC control-surface output file
+
+        Reads the control-surface geometry (`R`, `z`), the toroidal-angle correction
+        (`delta_phi`), the major radius (`ro`) and the helicity (`sign(bt0*crnt)`) from
+        a single netCDF file written by GPEC, so no separate equilibrium file is needed.
+
+        @param control_file Path to a GPEC control-surface output (e.g. `*_control_output_n1_nc.nc`)
+        @param center Poloidal-angle origin: 'ro' (GPEC magnetic axis, default) or
+               'geometric' (midpoint of the supplied surface)
+        @param major_radius Override the major radius instead of reading `ro`
+        @param helicity Override the helicity instead of deriving `sign(bt0*crnt)`
+        @param verbose Print the derived values so they stay visible
+        @result A `torus_fourier_sensor` instance
+        '''
+        import netCDF4
+        with netCDF4.Dataset(control_file,'r') as ds:
+            radial_positions = np.asarray(ds.variables['R'][:])
+            axial_positions = np.asarray(ds.variables['z'][:])
+            hamada_dphi = np.asarray(ds.variables['delta_phi'][:])
+            attrs = {name: ds.getncattr(name) for name in ds.ncattrs()}
+        if major_radius is None:
+            if center == 'ro':
+                if 'ro' not in attrs:
+                    raise KeyError("Control file has no 'ro' attribute; pass `major_radius` explicitly.")
+                major_radius = float(attrs['ro'])
+            elif center == 'geometric':
+                major_radius = 0.5*(np.max(radial_positions)+np.min(radial_positions))
+            else:
+                raise ValueError("center should be one of 'ro' or 'geometric'")
+        if helicity is None:
+            if ('bt0' not in attrs) or ('crnt' not in attrs):
+                raise KeyError("Control file has no 'bt0'/'crnt' attributes; pass `helicity` explicitly.")
+            signed = float(attrs['bt0'])*float(attrs['crnt'])
+            if signed == 0.0:
+                raise ValueError('Cannot determine helicity: bt0*crnt is zero in %s' % control_file)
+            helicity = 1 if signed > 0.0 else -1
+        if verbose:
+            print("torus_fourier_sensor.from_gpec_control_output(%s):" % control_file)
+            print("    major_radius = %.7f  (%s)" % (major_radius,center))
+            print("    helicity     = %+d       (bt0=%+.4f, crnt=%+.4g)"
+                  % (helicity,float(attrs.get('bt0',0.0)),float(attrs.get('crnt',0.0))))
+        return cls(radial_positions,axial_positions,major_radius,helicity,hamada_dphi=hamada_dphi)
+
     def convert_to_polar(self):
         '''!Converts (R,Z) to (theta,r) with respect to a major radius'''
         r = np.sqrt((self.radial_positions-self.major_radius)**2+self.axial_positions**2)
