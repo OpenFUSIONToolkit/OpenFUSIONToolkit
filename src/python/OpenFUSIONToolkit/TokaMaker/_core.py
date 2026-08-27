@@ -3152,9 +3152,9 @@ class TokaMaker_equilibrium():
 
         @result \f$ B \f$
         '''
-        Bfield = numpy.zeros((3,self.np),dtype=numpy.float64)
+        Bfield = numpy.zeros((3,self._tMaker.np),dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_bfield(self._tMaker_ptr,Bfield,error_string)
+        tokamaker_get_bfield(self._equil_ptr,Bfield,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return Bfield
@@ -3169,9 +3169,9 @@ class TokaMaker_equilibrium():
 
         @result \f$ S \f$ on grid points (only valid in plasma region)
         '''
-        shear = numpy.zeros((self.np,), dtype=numpy.float64)
+        shear = numpy.zeros((self._tMaker.np,), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_get_local_shear(self._tMaker_ptr,shear,error_string)
+        tokamaker_get_local_shear(self._equil_ptr,shear,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         return shear

@@ -958,22 +958,22 @@ END SUBROUTINE tokamaker_get_psi
 !---------------------------------------------------------------------------------
 !> Compute B-field over full mesh from \f$ \psi \f$ using \f$ \nabla \psi \f$ operator
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_bfield(tMaker_ptr,b_vals,error_str) BIND(C,NAME="tokamaker_get_bfield")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_get_bfield(tMaker_equil_ptr,b_vals,error_str) BIND(C,NAME="tokamaker_get_bfield")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 TYPE(c_ptr), VALUE, INTENT(in) :: b_vals !< Needs docs
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 REAL(8), POINTER, DIMENSION(:,:) :: bmat_tmp
 CLASS(oft_vector), POINTER :: tmp1,tmp2,tmp3
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 !
-CALL tMaker_obj%gs%psi%new(tmp1)
-CALL tMaker_obj%gs%psi%new(tmp2)
-CALL tMaker_obj%gs%psi%new(tmp3)
-CALL gs_project_b(tMaker_obj%gs,tmp1,tmp2,tmp3)
+CALL tMaker_equil_obj%psi%new(tmp1)
+CALL tMaker_equil_obj%psi%new(tmp2)
+CALL tMaker_equil_obj%psi%new(tmp3)
+CALL gs_project_b(tMaker_equil_obj,tmp1,tmp2,tmp3)
 !
-CALL c_f_pointer(b_vals, bmat_tmp, [tMaker_obj%gs%psi%n,3])
+CALL c_f_pointer(b_vals, bmat_tmp, [tMaker_equil_obj%psi%n,3])
 vals_tmp=>bmat_tmp(:,1)
 CALL tmp1%get_local(vals_tmp)
 CALL tmp1%delete()
@@ -1065,8 +1065,8 @@ END SUBROUTINE tokamaker_get_jtor
 !! \f$ S = -s \cdot \nabla \times s \f$
 !! \f$ s = \frac{\nabla \psi}{|\nabla \psi|} \times \frac{B}{|\nabla \psi|} \f$
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_local_shear(tMaker_ptr,shear,error_str) BIND(C,NAME="tokamaker_get_local_shear")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+SUBROUTINE tokamaker_get_local_shear(tMaker_equil_ptr,shear,error_str) BIND(C,NAME="tokamaker_get_local_shear")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 TYPE(c_ptr), VALUE, INTENT(in) :: shear !< Local shear \f$ S \f$
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i
@@ -1079,27 +1079,27 @@ CLASS(oft_solver), POINTER :: minv
 type(gs_b_interp) :: Bfield
 TYPE(oft_lag_bginterp) :: psi_grad
 TYPE(oft_lag_bvcinterp) :: cyl_curl
-TYPE(tokamaker_instance), POINTER :: tMaker_obj
-IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
-IF(.NOT.ASSOCIATED(tMaker_obj%gs%dels_full))CALL build_dels(tMaker_obj%gs%dels_full,tMaker_obj%gs,"none")
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+IF(.NOT.ASSOCIATED(tMaker_equil_obj%device%dels_full))CALL build_dels(tMaker_equil_obj%device%dels_full,tMaker_equil_obj%device,"none")
 !
-CALL tMaker_obj%gs%psi%new(u)
-CALL tMaker_obj%gs%psi%new(v)
+CALL tMaker_equil_obj%psi%new(u)
+CALL tMaker_equil_obj%psi%new(v)
 DO i=1,3
-  CALL tMaker_obj%gs%psi%new(vec1(i)%f)
-  CALL tMaker_obj%gs%psi%new(vec2(i)%f)
+  CALL tMaker_equil_obj%psi%new(vec1(i)%f)
+  CALL tMaker_equil_obj%psi%new(vec2(i)%f)
 END DO
 ALLOCATE(vec1_vals(u%n,3),vec2_vals(u%n,3))
 !
 NULLIFY(minv)
 CALL create_cg_solver(minv)
-minv%A=>tMaker_obj%gs%mop
+minv%A=>tMaker_equil_obj%device%mop
 minv%its=-2
 CALL create_diag_pre(minv%pre) ! Setup Preconditioner
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 !---Get magnetic field
-CALL Bfield%setup(tMaker_obj%gs)
-CALL oft_blag_vproject(tMaker_obj%gs%fe_rep,Bfield,vec1(1)%f,vec1(2)%f,vec1(3)%f)
+CALL Bfield%setup(tMaker_equil_obj)
+CALL oft_blag_vproject(tMaker_equil_obj%device%fe_rep,Bfield,vec1(1)%f,vec1(2)%f,vec1(3)%f)
 CALL Bfield%delete
 DO i=1,3
   CALL v%add(0.d0,1.d0,vec1(i)%f)
@@ -1109,9 +1109,9 @@ DO i=1,3
   CALL vec1(i)%f%get_local(vals_tmp)
 END DO
 !---Get poloidal flux gradient
-psi_grad%u=>tMaker_obj%gs%psi
-CALL psi_grad%setup(tMaker_obj%gs%fe_rep)
-CALL oft_blag_vproject(tMaker_obj%gs%fe_rep,psi_grad,vec2(1)%f,vec2(2)%f,vec2(3)%f)
+psi_grad%u=>tMaker_equil_obj%psi
+CALL psi_grad%setup(tMaker_equil_obj%device%fe_rep)
+CALL oft_blag_vproject(tMaker_equil_obj%device%fe_rep,psi_grad,vec2(1)%f,vec2(2)%f,vec2(3)%f)
 CALL psi_grad%delete
 DO i=1,3
   CALL v%add(0.d0,1.d0,vec2(i)%f)
@@ -1137,8 +1137,8 @@ cyl_curl%ux=>vec1(1)%f
 cyl_curl%uy=>vec1(2)%f
 cyl_curl%uz=>vec1(3)%f
 cyl_curl%cylindrical=.TRUE.
-CALL cyl_curl%setup(tMaker_obj%gs%fe_rep)
-CALL oft_blag_vproject(tMaker_obj%gs%fe_rep,cyl_curl,vec2(1)%f,vec2(2)%f,vec2(3)%f)
+CALL cyl_curl%setup(tMaker_equil_obj%device%fe_rep)
+CALL oft_blag_vproject(tMaker_equil_obj%device%fe_rep,cyl_curl,vec2(1)%f,vec2(2)%f,vec2(3)%f)
 CALL cyl_curl%delete
 DO i=1,3
   CALL v%add(0.d0,1.d0,vec2(i)%f)
@@ -1148,7 +1148,7 @@ DO i=1,3
   CALL vec2(i)%f%get_local(vals_tmp)
 END DO
 !---Compute local curvature
-CALL c_f_pointer(shear, vals_tmp, [tMaker_obj%gs%psi%n])
+CALL c_f_pointer(shear, vals_tmp, [tMaker_equil_obj%psi%n])
 DO i=1,u%n
   vals_tmp(i)=-DOT_PRODUCT(vec1_vals(i,:),vec2_vals(i,:)) ! -dot(s,curl(s))
 END DO

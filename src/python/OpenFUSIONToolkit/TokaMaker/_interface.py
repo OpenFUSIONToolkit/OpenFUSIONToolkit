@@ -114,7 +114,7 @@ tokamaker_get_limiter = ctypes_subroutine(oftpy_lib.tokamaker_get_limiter,
 tokamaker_get_psi = ctypes_subroutine(oftpy_lib.tokamaker_get_psi,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr, c_char_p])
 
-# tokamaker_get_bfield(tMaker_ptr,b_vals,error_str)
+# tokamaker_get_bfield(tMaker_equil_ptr,b_vals,error_str)
 tokamaker_get_bfield = ctypes_subroutine(oftpy_lib.tokamaker_get_bfield,
     [c_void_p, ctypes_numpy_array(numpy.float64,2), c_char_p])
 
@@ -126,7 +126,7 @@ tokamaker_get_dels_curr = ctypes_subroutine(oftpy_lib.tokamaker_get_dels_curr,
 tokamaker_get_jtor = ctypes_subroutine(oftpy_lib.tokamaker_get_jtor,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
-# tokamaker_get_local_shear(tMaker_ptr,shear,error_str)
+# tokamaker_get_local_shear(tMaker_equil_ptr,shear,error_str)
 tokamaker_get_local_shear = ctypes_subroutine(oftpy_lib.tokamaker_get_local_shear,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
