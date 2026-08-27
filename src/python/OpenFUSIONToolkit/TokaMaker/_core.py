@@ -2148,15 +2148,16 @@ class TokaMaker():
         self._tobin_geometry = {'R_s': R_s, 'Z_s': Z_s, 'R_c': R_c, 'Z_c': Z_c, 'M_ss_lu': lu_factor(M_ss)}
         return self._tobin_geometry
 
-    def get_vde_growth(self,verbose=False):
+    def get_vde_growth(self,verbose=False,return_gradient=False):
         r'''! Compute the Tobin vertical force-gradient stability margin, -F'_z, for the
         current equilibrium.
         @param verbose Print filament counts for this snapshot.
+        @param return_gradient If True, also return the gradient of the stability margin.
         @result -F'_z [N/m], negative marks the instability threshold.
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.get_vde_growth(verbose)
+        return self._tMaker_equil.get_vde_growth(verbose, return_gradient=return_gradient)
 
     def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False,damping_scale=-1.0):
         '''! Compute eigenvalues for the linearized time-dependent system
@@ -3138,11 +3139,12 @@ class TokaMaker_equilibrium():
             raise Exception(error_string.value)
         return curr
 
-    def get_vde_growth(self,verbose=False):
+    def get_vde_growth(self,verbose=False,return_gradient=False):
         r'''! Compute the Tobin vertical force-gradient stability margin, -F'_z, for this
         solved equilibrium snapshot, reusing the fixed vessel/coil geometry and M_ss
         factorization cached on the parent TokaMaker object.
         @param verbose Print filament counts for this snapshot.
+        @param return_gradient If True, also return the gradient of the stability margin.
         @result -F'_z [N/m], negative marks the instability threshold.
         '''
         geom = self._tMaker._compute_tobin_geometry()
@@ -3176,10 +3178,7 @@ class TokaMaker_equilibrium():
         Mp_ps = self._tMaker._d_mutual_inductance_dZ1(R_p[:, None], Z_p[:, None], R_s[None, :], Z_s[None, :])
         Mpp_pc = self._tMaker._d2_mutual_inductance_dZ1(R_p[:, None], Z_p[:, None], R_c[None, :], Z_c[None, :])
 
-        # F'_z = I_p^T [-M'_p,s M_s,s^-1 M'_s,p, M''_p,c] I_(p+c). Reuses the M_ss
-        # factorization cached on the parent TokaMaker object instead of refactorizing
-        # the same matrix every call.
-        #
+        # F'_z = I_p^T [-M'_p,s M_s,s^-1 M'_s,p, M''_p,c] I_(p+c)
         # F_z' = I_p^T . (M* I_(p+c))
         # M* I_(p+c) = (coupling_term I_p) + (M''_p,c I_c)
         # F_z' = I_p^T . (coupling_term I_p) + I_p^T . (M''_p,c I_c)
@@ -3193,7 +3192,19 @@ class TokaMaker_equilibrium():
         coil_term = I_p @ (Mpp_pc @ I_c)
         Fz_prime = passive_term + coil_term
 
-        return -Fz_prime
+        if not return_gradient:
+            return -Fz_prime
+
+        # Compute the gradient of the stability margin with respect to the plasma current
+        # d(-F'_z)/dI_p = 2*(Mp_ps @ induced_current_response) - (Mpp_pc @ I_c), from the
+        # quadratic-form structure of -F'_z in I_p. Converted to dJ_phi by multiplying through each
+        # element's area (I_p = J_phi * area, so dI_p/dJ_phi = area), then applied back
+        # onto the full mesh (zero outside the plasma) to plot the same way J_phi does.
+        dR_dI_p = 2 * (Mp_ps @ induced_current_response) - (Mpp_pc @ I_c)
+        dR_dJ_phi = numpy.zeros(len(lc))
+        dR_dJ_phi[plasma_mask] = dR_dI_p * area_tri[plasma_mask]
+
+        return -Fz_prime, dR_dJ_phi
 
     def calc_conductor_currents(self,psi,cell_centered=False,include_Vcoils=False):
         r'''! Get toroidal current density in conducting regions for a given \f$ \psi \f$

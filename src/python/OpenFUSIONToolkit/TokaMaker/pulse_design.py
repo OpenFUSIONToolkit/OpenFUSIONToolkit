@@ -5420,11 +5420,24 @@ class TokaMaker_TORAX:
 
     def plot_disruptivity_limits(self, scale='linear', **kwargs):
         r'''! Plot disruptivity-proxy limits (Greenwald density, Maris density/radiation
-        limit, Troyon beta, q95, q0) for the current run, real-units 2x3 grid.
+        limit, Troyon beta, q95, q0, Tobin Vertical Stability) for the current run, real-units 2x3 grid.
         @param scale 'linear' or 'log' y-axis scale, applied to every subplot.
         '''
         return plot_disruptivity_limits(self, scale=scale, **kwargs)
-    
+
+    def plot_disruptivity_limits_subset(self, keys, title, scale='linear'):
+        r'''! Plot a subset of disruptivity-proxy limits (Greenwald density, Maris density/radiation 
+        limit, Troyon beta, q95, q0, Tobin Vertical Stability) for the current run, real-units
+        @param scale 'linear' or 'log' y-axis scale, applied to every subplot.
+        '''
+        return plot_disruptivity_limits_subset(self, keys, title, scale=scale)
+
+    def print_disruptivity_limits(self, **kwargs):
+        r'''! Print disruptivity-proxy limits (Greenwald density, Maris density/radiation 
+        limit, Troyon beta, q95, q0, Tobin Vertical Stability) for the current run, real-units.
+        '''
+        return print_disruptivity_limits(self, **kwargs)
+
     def summary(self, **kwargs):
         r'''! Print/display a physics summary of the simulation.'''
         return summary(self, **kwargs)
