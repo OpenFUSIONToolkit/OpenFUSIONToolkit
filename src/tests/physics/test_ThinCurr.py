@@ -1050,13 +1050,6 @@ def test_torus_fourier_sensor_from_eqdsk():
     # duplicate endpoint is trimmed from the surface and hamada_dphi together
     assert interface.ntheta == 64
     assert interface.hamada_dphi.shape[0] == 64
-    # selectable poloidal-angle origin
-    interface_c = torus_fourier_sensor.from_eqdsk(R,Z,eqdsk_file,center='rcentr',verbose=False)
-    assert abs(interface_c.major_radius-float(eq.R_center)) < 1.E-12
-    interface_g = torus_fourier_sensor.from_eqdsk(R,Z,eqdsk_file,center='geometric',verbose=False)
-    assert abs(interface_g.major_radius-0.5*(R.max()+R.min())) < 1.E-12
-    with pytest.raises(ValueError):
-        torus_fourier_sensor.from_eqdsk(R,Z,eqdsk_file,center='unknown',verbose=False)
 
 @pytest.mark.coverage
 def test_torus_fourier_sensor_from_gpec_control_output():
@@ -1081,8 +1074,6 @@ def test_torus_fourier_sensor_from_gpec_control_output():
     interface_o = torus_fourier_sensor.from_gpec_control_output(control_file,major_radius=1.5,helicity=-1,verbose=False)
     assert interface_o.major_radius == 1.5
     assert interface_o.helicity == -1
-    with pytest.raises(ValueError):
-        torus_fourier_sensor.from_gpec_control_output(control_file,center='unknown',verbose=False)
 
 @pytest.mark.coverage
 def test_torus_fourier_sensor_hamada_alignment():

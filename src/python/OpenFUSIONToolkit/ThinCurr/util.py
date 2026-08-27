@@ -58,7 +58,7 @@ class torus_fourier_sensor():
         self.hist_file = None
 
     @classmethod
-    def from_eqdsk(cls,radial_positions,axial_positions,eqdsk_file,center='raxis',hamada_dphi=None,verbose=True):
+    def from_eqdsk(cls,radial_positions,axial_positions,eqdsk_file,hamada_dphi=None,verbose=True):
         '''! Construct the interface, taking `major_radius` and `helicity` from an equilibrium
 
         Avoids hand-entering values that are already defined by the equilibrium. The
@@ -68,9 +68,6 @@ class torus_fourier_sensor():
         @param radial_positions The R coordinates that defines the surface [ntheta]
         @param axial_positions The Z coordinates that defines the surface [ntheta]
         @param eqdsk_file Path to a gEQDSK/eqdsk equilibrium file
-        @param center Origin for the poloidal angle: 'raxis' (magnetic axis, default),
-               'rcentr' (vacuum field reference radius), or 'geometric'
-               (midpoint of the supplied surface, uses no equilibrium geometry)
         @param hamada_dphi Toroidal angle minus magnetic angle at each surface point [ntheta]
         @param verbose Print the derived values so they stay visible
         @result A `torus_fourier_sensor` instance
@@ -79,14 +76,7 @@ class torus_fourier_sensor():
         from ..TokaMaker.eqdsk import read_geqdsk
         eq = read_geqdsk(eqdsk_file)
 
-        if center == 'raxis':
-            major_radius = float(eq.R_mag)
-        elif center == 'rcentr':
-            major_radius = float(eq.R_center)
-        elif center == 'geometric':
-            major_radius = 0.5*(np.max(radial_positions)+np.min(radial_positions))
-        else:
-            raise ValueError("center should be one of 'raxis', 'rcentr' or 'geometric'")
+        major_radius = float(eq.R_mag)
 
         # Helicity is the sign of the product of toroidal field and plasma current. The
         # product is invariant under COCOS conversion and under reversing both Bt and Ip,
@@ -100,14 +90,14 @@ class torus_fourier_sensor():
 
         if verbose:
             print("torus_fourier_sensor.from_eqdsk(%s):" % eqdsk_file)
-            print("    major_radius = %.7f  (%s)" % (major_radius,center))
+            print("    major_radius = %.7f  (magnetic axis)" % (major_radius,))
             print("    helicity     = %+d       (B_center=%+.4f, Ip=%+.4g, COCOS %d)"
                   % (helicity,b_center,plasma_current,eq.cocos))
 
         return cls(radial_positions,axial_positions,major_radius,helicity,hamada_dphi=hamada_dphi)
 
     @classmethod
-    def from_gpec_control_output(cls,control_file,center='ro',major_radius=None,helicity=None,verbose=True):
+    def from_gpec_control_output(cls,control_file,major_radius=None,helicity=None,verbose=True):
         '''! Construct the interface entirely from a GPEC control-surface output file
 
         Reads the control-surface geometry (`R`, `z`), the toroidal-angle correction
@@ -115,8 +105,6 @@ class torus_fourier_sensor():
         a single netCDF file written by GPEC, so no separate equilibrium file is needed.
 
         @param control_file Path to a GPEC control-surface output (e.g. `*_control_output_n1_nc.nc`)
-        @param center Poloidal-angle origin: 'ro' (GPEC magnetic axis, default) or
-               'geometric' (midpoint of the supplied surface)
         @param major_radius Override the major radius instead of reading `ro`
         @param helicity Override the helicity instead of deriving `sign(bt0*crnt)`
         @param verbose Print the derived values so they stay visible
@@ -129,14 +117,9 @@ class torus_fourier_sensor():
             hamada_dphi = np.asarray(ds.variables['delta_phi'][:])
             attrs = {name: ds.getncattr(name) for name in ds.ncattrs()}
         if major_radius is None:
-            if center == 'ro':
-                if 'ro' not in attrs:
-                    raise KeyError("Control file has no 'ro' attribute; pass `major_radius` explicitly.")
-                major_radius = float(attrs['ro'])
-            elif center == 'geometric':
-                major_radius = 0.5*(np.max(radial_positions)+np.min(radial_positions))
-            else:
-                raise ValueError("center should be one of 'ro' or 'geometric'")
+            if 'ro' not in attrs:
+                raise KeyError("Control file has no 'ro' attribute; pass `major_radius` explicitly.")
+            major_radius = float(attrs['ro'])
         if helicity is None:
             if ('bt0' not in attrs) or ('crnt' not in attrs):
                 raise KeyError("Control file has no 'bt0'/'crnt' attributes; pass `helicity` explicitly.")
@@ -146,7 +129,7 @@ class torus_fourier_sensor():
             helicity = 1 if signed > 0.0 else -1
         if verbose:
             print("torus_fourier_sensor.from_gpec_control_output(%s):" % control_file)
-            print("    major_radius = %.7f  (%s)" % (major_radius,center))
+            print("    major_radius = %.7f  (magnetic axis)" % (major_radius,))
             print("    helicity     = %+d       (bt0=%+.4f, crnt=%+.4g)"
                   % (helicity,float(attrs.get('bt0',0.0)),float(attrs.get('crnt',0.0))))
         return cls(radial_positions,axial_positions,major_radius,helicity,hamada_dphi=hamada_dphi)
