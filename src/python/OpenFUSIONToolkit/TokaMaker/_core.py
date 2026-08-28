@@ -236,7 +236,7 @@ class TokaMaker():
         # Number of equilibria
         self.n_eq = n_eq
         ## Internal Grad-Shafranov eq object (@ref psi_grad_shaf.gs_equil "gs_equil")
-        # self._tMaker_equil = [TokaMaker_equilibrium(self) for _ in range(n_eq)]
+        self._tMaker_equil = []
 
         print('Finished TM constructor')
 
@@ -342,8 +342,7 @@ class TokaMaker():
                 if reg.min() <= 0:
                     raise ValueError('Invalid "reg" array, values must be >= 0')
                 reg = numpy.ascontiguousarray(reg, dtype=numpy.int32)
-            oft_setup_smesh(1,1,numpy.array([[1.0]],dtype=numpy.float64),1,1,numpy.array([[1]],dtype=numpy.int32),numpy.array([1],dtype=numpy.int32),ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
-            # oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
+            oft_setup_smesh(ndim,np,r,npc,nc,lc+1,reg,ctypes.byref(nregs),ctypes.byref(self._mesh_ptr))
         else:
             raise ValueError('Mesh filename (native format) or mesh values required')
         error_string = self._oft_env.get_c_errorbuff()
