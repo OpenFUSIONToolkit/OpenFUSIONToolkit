@@ -1850,10 +1850,7 @@ end subroutine setup
 subroutine setup_bc(self)
 class(oft_xmhd_2d_sim), intent(inout) :: self
 IF(.NOT.ASSOCIATED(self%n_bc))THEN
-  !If incompressible the density is not evolved, so freeze it everywhere. Note the
-  !other masks below all default to the SAME shared array (oft_blagrange%global%gbe),
-  !so n_bc must get its OWN storage here: assigning .TRUE. to the shared array would
-  !clobber it and pin every other field too.
+  !If incompressible the density is not evolved
   IF(self%incomp)THEN
     ALLOCATE(self%n_bc(oft_blagrange%ne))
     self%n_bc=.TRUE.
