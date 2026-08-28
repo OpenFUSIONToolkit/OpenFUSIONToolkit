@@ -813,6 +813,13 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
                     else:
                         if debug:
                             print("Skipping cycle {0}".format(i))
+
+                # Verify that final rank matches expected rank for final hole group
+                if j == len(hb)-1:
+                    U, S, V_T, _ = scipy.linalg.lapack.dgesdd(bmat_dense, full_matrices=0)
+                    final_rank = np.sum(S > 1e-10)
+                    if final_rank != initial_rank:
+                        raise ValueError("Error in hole optimization: Final rank {0} does not match expected rank {1}".format(final_rank, initial_rank))
             indent_level = indent_level[:-2]
 
         # Save computed internal cycles to hole list
