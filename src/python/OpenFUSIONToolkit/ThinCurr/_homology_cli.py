@@ -359,7 +359,7 @@ class trimesh:
             print(indent_level+'  Found {0} boundary cycles'.format(k))
         return cycle_lists
 
-    def merge_cells(self,eflag):
+    def merge_cells(self,eflag,pflag):
         ''' Merge all possible cells while retaining marked edge features
         '''
         def flag_cells(face,cell_group):
@@ -390,7 +390,7 @@ class trimesh:
         cell_group = np.array(cell_group)
         # return cell_group, np.where(cell_group[self.lef[:,0]]!=cell_group[self.lef[:,1]])[0]
         keep_edges = np.where(cell_group[self.lef[:,0]]!=cell_group[self.lef[:,1]])[0]
-        pt_flag = np.zeros((self.np,), dtype=np.int32)
+        pt_flag = np.zeros((self.np,), dtype=np.int32) + pflag
         for i in keep_edges:
             pt_flag[self.le[i,0]] += 1
             pt_flag[self.le[i,1]] += 1
@@ -423,9 +423,9 @@ def update_svd_with_row(U, S, V_T, new_row):
 
     # Compute SVD of the small core matrix
     # u_k, s_k, vt_k = np.linalg.svd(K_mat, full_matrices=False)
-    u_k, s_k, vt_k, info = scipy.linalg.lapack.sgesdd(K_mat, full_matrices=0)
+    u_k, s_k, vt_k, info = scipy.linalg.lapack.dgesdd(K_mat, full_matrices=0)
     if info != 0:
-        u_k, s_k, vt_k, info = scipy.linalg.lapack.sgesvd(K_mat, full_matrices=0)
+        u_k, s_k, vt_k, info = scipy.linalg.lapack.dgesvd(K_mat, full_matrices=0)
         if info != 0:
             raise np.linalg.LinAlgError("SVD did not converge")
 
@@ -757,55 +757,69 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
                 minima_counts = []
                 he = []
                 he_mark = np.zeros((mesh_covered.ne,))
+                p_mark = np.zeros((mesh_covered.np,), dtype=np.int32)
                 for i in range(len(minima_sets)):
                     evec, distance = mesh_covered.get_loop_edge_vec(minima_sets[i])
                     he.append(evec)
                     minima_counts.append(distance)
                     he_mark[abs(evec)>0] = 1
+                    p_mark[minima_sets[i][0]] = 1 # Mark base point for each cycle
 
                 # Shrink graph by grouping cells that don't cross cycles
-                cell_flags, keep_edges = mesh_covered.merge_cells(he_mark)
+                cell_flags, keep_edges = mesh_covered.merge_cells(he_mark,p_mark)
                 ncoarse = np.max(cell_flags)+1
                 print(indent_level + "[{2}/{3}] Reducing mesh to {0} macro cells with {1} macro edges".format(ncoarse,keep_edges.shape[0],j+1,len(hb)))
                 bmat_tmp = bmat_dense_base[:,keep_edges]
-                bmat_dense = np.zeros((ncoarse,keep_edges.shape[0]), np.float32)
+                bmat_dense = np.zeros((ncoarse,keep_edges.shape[0]), dtype=np.float64)
                 for i in range(ncoarse):
                     bmat_dense[i,:] = np.sum(bmat_tmp[cell_flags==i,:],axis=0)
 
                 # Build list of cycles from smallest to largest
-                # intial_rank = np.linalg.matrix_rank(bmat_dense)
+                # initial_rank = np.linalg.matrix_rank(bmat_dense)
                 # U, S, V_T = np.linalg.svd(bmat_dense, full_matrices=False)
-                U, S, V_T, _ = scipy.linalg.lapack.sgesdd(bmat_dense, full_matrices=0)
-                intial_rank = np.sum(S > 1e-10)
+                U, S, V_T, _ = scipy.linalg.lapack.dgesdd(bmat_dense, full_matrices=0)
+                initial_rank = np.sum(S > 1e-10)
                 hb_out = []
-                do_check = False
+                do_check = True
                 for i in np.argsort(minima_counts):
                     bmat_tmp = np.vstack((bmat_dense,he[i][keep_edges]))
                     if (not do_check) and (i >= len(hb)): # Only start checking once we are looking at new cycles
                         do_check = True
                         # Update SVD with final set of previously accepted cycles
-                        U, S, V_T, _ = scipy.linalg.lapack.sgesdd(bmat_dense, full_matrices=0)
+                        # U, S, V_T = np.linalg.svd(bmat_tmp, full_matrices=False)
+                        U, S, V_T, _ = scipy.linalg.lapack.dgesdd(bmat_dense, full_matrices=0)
+                        initial_rank = np.sum(S > 1e-10)
                     if do_check:
                         # aug_rank = np.linalg.matrix_rank(bmat_tmp)
+                        # Un, Sn, Vn_T, _ = scipy.linalg.lapack.dgesdd(bmat_tmp, full_matrices=0)
                         try:
-                            U, S, V_T = update_svd_with_row(U, S, V_T, he[i][keep_edges])
+                            Un, Sn, Vn_T = update_svd_with_row(U, S, V_T, he[i][keep_edges])
                         except np.linalg.LinAlgError: # Fall back to full factorization
-                            # U, S, V_T = np.linalg.svd(bmat_tmp, full_matrices=False)
-                            U, S, V_T, _ = scipy.linalg.lapack.sgesdd(bmat_tmp, full_matrices=0)
-                        aug_rank = np.sum(S > 1.e-10)
+                            Un, Sn, Vn_T, _ = scipy.linalg.lapack.dgesdd(bmat_tmp, full_matrices=0)
+                        aug_rank = np.sum(Sn > 1.e-10)
                     else:
-                        aug_rank = intial_rank + 1
-                    if aug_rank != intial_rank:
+                        aug_rank = initial_rank + 1
+                    if aug_rank != initial_rank:
                         if debug:
                             print("Adding cycle {0}".format(i))
                         bmat_dense = bmat_tmp
+                        U = Un
+                        S = Sn
+                        V_T = Vn_T
                         hb_out.append(minima_sets[i])
-                        intial_rank = aug_rank
+                        initial_rank = aug_rank
                         if len(hb_out) == len(hb):
                             break
                     else:
                         if debug:
                             print("Skipping cycle {0}".format(i))
+
+                # Verify that final rank matches expected rank for final hole group
+                if j == len(hb)-1:
+                    U, S, V_T, _ = scipy.linalg.lapack.dgesdd(bmat_dense, full_matrices=0)
+                    final_rank = np.sum(S > 1e-10)
+                    if final_rank != initial_rank:
+                        raise ValueError("Error in hole optimization: Final rank {0} does not match expected rank {1}".format(final_rank, initial_rank))
             indent_level = indent_level[:-2]
 
         # Save computed internal cycles to hole list
