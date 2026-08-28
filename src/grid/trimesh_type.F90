@@ -27,7 +27,7 @@ USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_field_get_sizes, hdf5_write, hdf5_create_file, hdf5_create_group
 USE oft_lag_poly
 USE oft_tet_quadrature, ONLY: oft_quad_type, set_quad_2d
-USE oft_mesh_type, ONLY: oft_bmesh
+USE oft_mesh_type, ONLY: oft_bmesh, bmesh_destroy
 USE trimesh_tessellation, ONLY: tessellate1, tessellate2, tessellate3, tessellate4
 IMPLICIT NONE
 #include "local.h"
@@ -60,8 +60,20 @@ CONTAINS
   PROCEDURE :: quad_rule => trimesh_quad_rule
   PROCEDURE :: tessellate => trimesh_tessellate
   PROCEDURE :: tessellated_sizes => trimesh_tessellated_sizes
+  !> Destroy mesh object
+  PROCEDURE :: delete => trimesh_destroy
 END TYPE oft_trimesh
 CONTAINS
+!------------------------------------------------------------------------------
+!> Destroy mesh object
+!------------------------------------------------------------------------------
+SUBROUTINE trimesh_destroy(self)
+CLASS(oft_trimesh), INTENT(inout) :: self
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%xnodes))DEALLOCATE(self%xnodes)
+CALL bmesh_destroy(self)
+DEBUG_STACK_POP
+END SUBROUTINE trimesh_destroy
 !------------------------------------------------------------------------------
 !> Load trimesh from transfer file
 !------------------------------------------------------------------------------

@@ -1,3 +1,37 @@
+MODULE alfven_2d_helpers
+USE oft_local
+IMPLICIT NONE
+REAL(r8) :: k_dir(3) = (/1.d0,0.d0,0.d0/) !< Direction of wave propagation
+REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
+REAL(r8) :: v_dir(3) = (/1.d0,0.d0,0.d0/) !<Direction of velocity perturbation
+REAL(r8) :: lam = 2.d0 !< Wavelength
+CONTAINS
+!
+SUBROUTINE psi_alf(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)*lam/(2.d0*pi)
+END SUBROUTINE psi_alf
+!
+SUBROUTINE velx_alf(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = v_dir(1)*COS(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+END SUBROUTINE velx_alf
+!
+SUBROUTINE vely_alf(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = v_dir(2)*COS(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+END SUBROUTINE vely_alf
+!
+SUBROUTINE velz_alf(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = v_dir(3)*COS(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+END SUBROUTINE velz_alf
+END MODULE alfven_2d_helpers
+
 PROGRAM test_alfven_2d
 !---Runtime
 USE oft_base
@@ -15,6 +49,7 @@ USE mhd_utils, ONLY: elec_charge, proton_mass, mu0
 USE diagnostic, ONLY: scal_energy_2d
 USE fem_utils, ONLY: diff_interp_2d
 USE xmhd_2d
+USE alfven_2d_helpers
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
 REAL(r8), POINTER :: vec_vals(:)
@@ -50,10 +85,10 @@ REAL(r8) :: D_diff=1.E-12
 REAL(r8) :: gamma=1.67d0
 REAL(r8) :: den_scale=1.d19
 REAL(r8) :: B_0(3)=0.d0
-REAL(r8) :: k_dir(3) = (/1.d0,0.d0,0.d0/) !< Direction of wave propagation
-Real(r8) :: v_dir(3) = (/1.d0,0.d0,0.d0/) !<Direction of velocity perturbation
-REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
-REAL(r8) :: lam = 2.d0 !< Wavelength
+!REAL(r8) :: k_dir(3) = (/1.d0,0.d0,0.d0/) !< Direction of wave propagation
+!Real(r8) :: v_dir(3) = (/1.d0,0.d0,0.d0/) !<Direction of velocity perturbation
+!REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
+!REAL(r8) :: lam = 2.d0 !< Wavelength
 REAL(r8) :: v_alf = 1.d4 !< Alfven speed
 REAL(r8) :: v_delta = 100.d0 !< Relative size of perturbation (<<1)
 REAL(r8) :: B !<Background magnetic field magnitude
@@ -111,7 +146,7 @@ CALL u%get_local(vec_vals)
 mhd_sim%den_scale = den_scale
 vec_vals = vec_vals / den_scale
 CALL mhd_sim%u%restore_local(vec_vals,1)
-IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,1)
+IF(linear) CALL mhd_sim%u0%restore_local(vec_vals,1)
 
 !---Project v_x initial condition onto scalar Lagrange basis
 field_init%func=>velx_alf
@@ -137,7 +172,7 @@ CALL vx_ic%restore_local(vec_vals)
 CALL u%set(t0)
 CALL u%get_local(vec_vals)
 CALL mhd_sim%u%restore_local(vec_vals,5)
-IF (linear) CALL mhd_sim%u0%restore_local(vec_vals,5)
+IF(linear) CALL mhd_sim%u0%restore_local(vec_vals,5)
 
 !---Project psi initial condition onto scalar Lagrange basis
 field_init%func=>psi_alf
@@ -226,31 +261,4 @@ CLOSE(io_unit)
 
 !---Finalize enviroment
 CALL oft_finalize
-CONTAINS
-
-SUBROUTINE psi_alf(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)*lam/(2.d0*pi)
-END SUBROUTINE psi_alf
-
-SUBROUTINE velx_alf(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = v_dir(1)*COS(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
-END SUBROUTINE velx_alf
-
-SUBROUTINE vely_alf(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = v_dir(2)*COS(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
-END SUBROUTINE vely_alf
-
-SUBROUTINE velz_alf(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = v_dir(3)*COS(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
-END SUBROUTINE velz_alf
-
-
 END PROGRAM test_alfven_2d

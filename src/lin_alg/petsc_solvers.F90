@@ -205,6 +205,8 @@ contains
   procedure :: apply => sjacobi_solver_apply
   !> Setup solver from XML node
   procedure :: setup_from_xml => sjacobi_setup_xml
+  !> Delete solver and free memory
+  procedure :: delete => sjacobi_delete
 end type oft_petsc_sjacobi_solver
 !------------------------------------------------------------------------------
 !> PETSc direct solver (LU factorization)
@@ -911,7 +913,7 @@ else ! Up smoother
 end if
 call p%delete
 call q%delete
-nullify(p,q)
+deallocate(p,q)
 DEBUG_STACK_POP
 end subroutine sjacobi_solver_apply
 !------------------------------------------------------------------------------
@@ -969,6 +971,29 @@ IF(oft_debug_print(1))THEN
 END IF
 DEBUG_STACK_POP
 end subroutine sjacobi_setup_xml
+!---------------------------------------------------------------------------------
+!> Delete PETSc solver
+!---------------------------------------------------------------------------------
+subroutine sjacobi_delete(self,propogate)
+class(oft_petsc_sjacobi_solver), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+integer(i4) :: ierr
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%u_save))THEN
+  CALL self%u_save%delete
+  DEALLOCATE(self%u_save)
+END IF
+IF(ASSOCIATED(self%g_save))THEN
+  CALL self%g_save%delete
+  DEALLOCATE(self%g_save)
+END IF
+IF(ASSOCIATED(self%D))THEN
+  CALL self%D%delete
+  DEALLOCATE(self%D)
+END IF
+CALL petsc_solver_delete(self,propogate)
+DEBUG_STACK_POP
+end subroutine sjacobi_delete
 !------------------------------------------------------------------------------
 !> Cast a solver object to a oft_petsc_direct_solver
 !!

@@ -97,7 +97,7 @@ ABSTRACT INTERFACE
   end subroutine afem_setup
 !------------------------------------------------------------------------------
 !> Needs docs
-!------------------------------------------------------------------------------  
+!------------------------------------------------------------------------------
   subroutine afem_ncdofs(self,cell,dofs)
     import oft_afem_type, i4
     class(oft_afem_type), intent(in) :: self
@@ -254,6 +254,7 @@ DEALLOCATE(self%linkage)
 IF(ASSOCIATED(self%global))THEN
   IF(ASSOCIATED(self%global%le))DEALLOCATE(self%global%le)
   IF(ASSOCIATED(self%global%gbe))DEALLOCATE(self%global%gbe)
+  DEALLOCATE(self%global)
 END IF
 !---
 IF(ASSOCIATED(self%map))THEN
