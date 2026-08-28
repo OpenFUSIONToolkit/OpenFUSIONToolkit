@@ -137,8 +137,9 @@ class JAMfit():
         @param p_freq int, frequency of plotting during the run for plot_data (build_XDMF) (default: 10)
         @result returns the hist_file and optionally plot_data if verbose is True
         '''
+
         self.torus.run_td(dt, nsteps, coil_currs=coil_currs, sensor_obj=self.sensor_obj, status_freq= s_freq, plot_freq=p_freq)
-        self.torus.plot_td(nsteps, sensor_obj=self.sensor_obj)
+        self.torus.plot_td(nsteps, plot_freq = p_freq, sensor_obj=self.sensor_obj)
         hist_file = histfile(os.path.join(self.torus._io_basepath, 'floops.hist'))      
         if verbose: 
             plot_data = self.torus.build_XDMF()
