@@ -56,8 +56,8 @@ class MUGToksim():
     '''! Coupled MUG/TokaMaker (mugtok_td) time-dependent simulation.
 
     Built on top of an existing @ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker "TokaMaker"
-    instance, whose mesh, finite-element representation, and active equilibrium are reused
-    (borrowed, not copied). The poloidal flux (`psi`) and coil currents live in the TokaMaker
+    instance, whose mesh, finite-element representation, and active equilibrium are reused.
+    The poloidal flux (`psi`) and coil currents live in the TokaMaker
     equilibrium; the MHD fields (velocity, pressure, F) live in this object.
     '''
 
@@ -149,33 +149,44 @@ class MUGToksim():
         self._load_pmesh()
         return self._preg
 
-    def setup(self, dt, lin_tol, nl_tol, mhd_regions, density, viscosity,
+    def setup(self, dt, lin_tol, nl_tol, mhd_dict,
               incomp=True, allow_toroidal_flow=False):
         '''! Set up the coupled solver
 
         @param dt Timestep [s]
         @param lin_tol Linear solver tolerance
         @param nl_tol Non-linear solver tolerance
-        @param mhd_regions List of region key names where the MHD (MUG) solve is active
-        @param density List of mass densities [kg/m^3], aligned to `mhd_regions`
-        @param viscosity List of dynamic viscosities [Pa-s], aligned to `mhd_regions`
+        @param mhd_dict Dictionary of regions where the MHD (MUG) solve is active,
+                        keyed by region name. Each entry must provide:
+                          'density'   mass density [kg/m^3]
+                          'viscosity' dynamic viscosity [Pa-s]
+                        e.g. {'CHANNEL': {'density': 9.4E3, 'viscosity': 1.5E-3}}
+                        Every named region must also be a TokaMaker conducting
+                        region, since that is where its resistivity comes from.
+                        May be empty, in which case no region is evolved by MUG.
         @param incomp Use incompressible flow (default: True). Compressible flow
                       (`incomp=False`) is not currently supported and will throw an error.
         @param allow_toroidal_flow Allow toroidal (phi) flow in the MHD regions (default:False)
             
         '''
-        if not (len(mhd_regions) == len(density) == len(viscosity)):
-            raise ValueError('"mhd_regions", "density", and "viscosity" must have equal length')
         nreg = self._tokamaker.nregs
         if nreg <= 0:
             raise ValueError('TokaMaker regions are not set up (nregs <= 0)')
         mhd_flag = numpy.zeros((nreg,), dtype=numpy.int32)
         dens_reg = -numpy.ones((nreg,), dtype=numpy.float64)
         visc_reg = -numpy.ones((nreg,), dtype=numpy.float64)
-        for name, dens, visc in zip(mhd_regions, density, viscosity):
+        for name, props in mhd_dict.items():
             # MHD regions are conducting regions, so they live in the TokaMaker cond_dict
             if name not in self._tokamaker._cond_dict:
                 raise KeyError('MHD region "{0}" is not a TokaMaker conducting region'.format(name))
+            for key in ('density', 'viscosity'):
+                if key not in props:
+                    raise KeyError('MHD region "{0}" is missing "{1}"'.format(name, key))
+            dens = props['density']
+            visc = props['viscosity']
+            if dens <= 0.0:
+                raise ValueError('MHD region "{0}" has non-positive density '
+                                 '({1})'.format(name, dens))
             i = self._tokamaker._cond_dict[name]['reg_id'] - 1
             mhd_flag[i] = 1
             dens_reg[i] = dens
@@ -191,6 +202,8 @@ class MUGToksim():
             raise Exception(error_string.value)
         # Remember which regions are MHD so `get_field` can build per-cell field masks
         self._mhd_flag = mhd_flag
+        ## Per-region MHD properties as supplied to `setup()`
+        self._mhd_dict = mhd_dict
 
     def step(self, time, dt, coil_currents=None):
         '''! Advance the coupled solution by one timestep
@@ -245,22 +258,11 @@ class MUGToksim():
             raise Exception(error_string.value)
         return gr, gz
 
-    def _mhd_cell_mask(self, reg):
-        '''! Per-cell boolean mask selecting the MHD regions of a per-cell region array
-
-        @param reg Per-cell region-ID array (e.g. `self.reg` or `self.pressure_reg`)
-        @result Boolean mask, `True` where the cell's region is an MHD (MUG) region
-        '''
-        if self._mhd_flag is None:
-            raise RuntimeError('MHD regions are not defined; call `setup()` first')
-        mhd_ids = numpy.flatnonzero(self._mhd_flag) + 1  # region IDs are 1-based
-        return numpy.isin(reg, mhd_ids)
-
     def get_field(self, name, cell_centered=False):
         '''! Get the present values of a field at node points
 
         @param name One of 'velocity', 'pressure', 'F' (MUG-owned),
-                    'psi' (read from the TokaMaker equilibrium), or 'current density'
+                    'psi', or 'current density'
         @param cell_centered If True, return one value per mesh cell (averaged over the cell's
                     vertices) instead of one per node
         @result A tuple `(mask, field)` where `mask` is a per-cell boolean mask to apply at
@@ -268,7 +270,8 @@ class MUGToksim():
 
         Returned units by field:
           - 'velocity':        [m/s]
-          - 'pressure':        [Pa]   (defined only up to a constant; shifted so min = 0)
+          - 'pressure':        [Pa]   (defined only up to a constant per MHD region;
+                                       each region shifted so its own min = 0)
           - 'F':               [T*m]  
           - 'psi':             [Wb]   
           - 'current density': [A/m^2]
@@ -278,10 +281,14 @@ class MUGToksim():
           - 'F', 'psi': `True` everywhere (defined over the whole mesh).
           - 'current': the conductor mask from the TokaMaker equilibrium.
 
-        Density is not exposed: only incompressible flow is supported, so it is constant.
         '''
+        if name in ('velocity', 'pressure'):
+            # These are defined only where the MUG solve runs
+            if self._mhd_flag is None:
+                raise RuntimeError('MHD regions are not defined; call `setup()` first')
+            mhd_ids = numpy.flatnonzero(self._mhd_flag) + 1  # region IDs are 1-based
+
         if name == 'psi':
-            # psi is defined over the whole mesh, so its mask selects every cell
             field = self._tokamaker.get_psi(normalized=False)
             mask = numpy.ones((self.lc.shape[0],), dtype=bool)
             lc = self.lc
@@ -290,16 +297,22 @@ class MUGToksim():
                                  self._get_mug_field(3),   # phi
                                  self._get_mug_field(4)],  # Z
                                 axis=-1)   # (ndof, 3)
-            mask = self._mhd_cell_mask(self.reg)
+            mask = numpy.isin(self.reg, mhd_ids)
             lc = self.lc
         elif name == 'pressure':
-            # Pressure is block 5; only defined up to a constant, so shift so the minimum is 0
+            # Pressure is block 5. Shift each region by its own minimum so every
+            # region starts at 0, because pressure is defined only up to a constant.
             p = self._get_mug_field(5)
-            field = p - p.min()
-            mask = self._mhd_cell_mask(self.pressure_reg)
-            lc = self.pressure_lc   # pressure is a lower-order field with its own cell list
+            mask = numpy.isin(self.pressure_reg, mhd_ids)
+            field = p.copy()
+            for reg_id in mhd_ids:
+                cells = (self.pressure_reg == reg_id)
+                if not cells.any():
+                    continue
+                nodes = numpy.unique(self.pressure_lc[cells])
+                field[nodes] = p[nodes] - p[nodes].min()
+            lc = self.pressure_lc 
         elif name == 'F':
-            # F is block 7, defined over the whole mesh, so its mask selects every cell
             field = self._get_mug_field(7)
             mask = numpy.ones((self.lc.shape[0],), dtype=bool)
             lc = self.lc
@@ -313,6 +326,130 @@ class MUGToksim():
         if cell_centered:
             field = numpy.mean(field[lc], axis=1)
         return mask, field
+
+    def plot_field(self, fig, ax, name, colormap=None, scale=1.0, clabel=None,
+                   colorbar=True, shared_scale=False, **kwargs):
+        '''! Plot a field on the mesh
+
+        Wraps @ref get_field and draws it with `tripcolor`, applying the field's mask so
+        only the region where it is defined is shaded.
+
+        Vector fields are drawn as three separate colour maps, one per component, 
+        so `ax` must hold three axes for those.
+
+        @param fig Figure the axes belong to (needed for the colorbars)
+        @param ax Axes to draw on. Scalar fields ('pressure', 'F', 'psi') take a single
+                  Axes; vector fields ('velocity', 'current density') take a sequence of three
+        @param name Field name, as accepted by `get_field`
+        @param colormap Colormap to use. By default 'velocity' and 'current density' use
+                  'seismic' with limits symmetric about zero, since their sign carries
+                  direction; every other field uses 'viridis' over its own range.
+        @param scale Multiplier applied to the values before plotting.
+                     Set `clabel` to match: e.g. `scale=1.0E-6, clabel=r'$J$ [MA/m$^2$]'`.
+        @param clabel Label for the colorbars. `None` builds one per component from the
+                  field name and its base units. 
+        @param colorbar Draw colorbars (default True)
+        @param shared_scale For vector fields, put all three components on a common
+                  colour scale so the panels are directly comparable, and draw a single
+                  colorbar. (default False)
+        '''
+        labels = {'velocity': (r'$v_R$', r'$v_\phi$', r'$v_Z$'),
+                  'current density': (r'$J_R$', r'$J_\phi$', r'$J_Z$'),
+                  'pressure': ('p',), 'psi': (r'$\psi$',), 'F': ('F',)}
+        units = {'velocity': 'm/s', 'pressure': 'Pa', 'F': r'T$\cdot$m',
+                 'psi': 'Wb', 'current density': r'A/m$^2$'}
+        # Signed fields, where direction matters and zero is meaningful
+        signed = ('velocity', 'current density')
+        if name not in labels:
+            raise ValueError('Unknown field "{0}"; expected one of {1}'.format(
+                name, ', '.join(sorted(labels))))
+
+        mask, field = self.get_field(name)
+        # 'pressure' is a lower-order field on its own node/cell lists
+        if name == 'pressure':
+            r, lc = self.pressure_r, self.pressure_lc
+        else:
+            r, lc = self.r, self.lc
+
+        if mask.sum() == 0:
+            print('Warning: field "{0}" is not defined in any region'.format(name))
+            return None
+
+        if field.ndim == 2:                      # vector: one panel per component
+            axes = list(numpy.atleast_1d(numpy.asarray(ax, dtype=object)).ravel())
+            if len(axes) < 3:
+                raise ValueError('"{0}" is a vector field; `ax` must hold three axes '
+                                 '(got {1}) so the R, phi and Z components can be drawn '
+                                 'separately'.format(name, len(axes)))
+            columns = [field[:, k]*scale for k in range(3)]
+        else:                                    # scalar: a single panel
+            axes = [ax]
+            columns = [field*scale]
+
+        # Colorbar labels: auto from the field name and its base units, or as given
+        if clabel is None:
+            panel_labels = ['{0} [{1}]'.format(l, units[name]) for l in labels[name]]
+        elif isinstance(clabel, str):
+            panel_labels = [clabel]*len(columns)
+        else:
+            panel_labels = list(clabel)
+
+        user_vmin = kwargs.pop('vmin', None)
+        user_vmax = kwargs.pop('vmax', None)
+        cmap = colormap if colormap is not None else ('seismic' if name in signed else 'viridis')
+        drawn_nodes = numpy.unique(lc[mask])
+
+        def _limits(vals):
+            d = vals[drawn_nodes]
+            if name in signed:
+                span = float(numpy.max(numpy.abs(d)))
+                return -span, span
+            return float(numpy.min(d)), float(numpy.max(d))
+
+        if shared_scale and len(columns) > 1:
+            lims = [_limits(c) for c in columns]
+            limits = [(min(l[0] for l in lims), max(l[1] for l in lims))]*len(columns)
+        else:
+            limits = [_limits(c) for c in columns]
+
+        one_bar = shared_scale and len(columns) > 1
+        handles = []
+        for i, (a, values, label) in enumerate(zip(axes, columns, labels[name])):
+            lo, hi = limits[i]
+            clf = a.tripcolor(r[:, 0], r[:, 1], lc[mask, :], values, cmap=cmap,
+                              vmin=lo if user_vmin is None else user_vmin,
+                              vmax=hi if user_vmax is None else user_vmax,
+                              **kwargs)
+            if colorbar and not one_bar:
+                fig.colorbar(clf, ax=a, label=panel_labels[i])
+            if one_bar:
+                # A single shared colorbar cannot name the components, so title them
+                a.set_title(label, fontsize=11)
+            a.set_aspect('equal', 'box')
+            handles.append(clf)
+        if colorbar and one_bar:
+            # One scale for the row, so one colorbar
+            fig.colorbar(handles[0], ax=axes, label=panel_labels[0])
+        return handles
+
+    def save_to_dict(self, cell_centered=False):
+        '''! Collect every field at the current time into a single dictionary
+
+        @param cell_centered If True, average each field over its cell vertices to give
+                     one value per cell.
+        @result Dictionary keyed by field name ('velocity', 'pressure', 'F', 'psi',
+                'current density'). Each entry is a sub-dictionary:
+                  'field' values, 'mask' per-cell boolean for where the field is defined,
+                  'units' string for the field's base units.
+
+        '''
+        units = {'velocity': 'm/s', 'pressure': 'Pa', 'F': 'T*m',
+                 'psi': 'Wb', 'current density': 'A/m^2'}
+        out = {}
+        for name in units:
+            mask, field = self.get_field(name, cell_centered=cell_centered)
+            out[name] = {'field': field, 'mask': mask, 'units': units[name]}
+        return out
 
     def _get_current(self):
         '''! Current density in the conducting structures, J [A/m^2].
