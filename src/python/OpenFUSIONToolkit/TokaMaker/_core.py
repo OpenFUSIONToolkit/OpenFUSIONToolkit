@@ -2111,21 +2111,11 @@ class TokaMaker():
             raise Exception(error_string.value)
         return 1.0/eig_vals[:,0], eig_vecs
 
-    def _compute_tobin_geometry(self):
-        r'''! Precompute the parts of the Tobin calculation that never change over a pulse: the
-        passive-conductor and coil positions (the vessel and coils don't move) and the
-        conductor-conductor mutual inductance matrix M_ss along with its LU factorization.
-        Doing this once instead of once per timepoint changes nothing about the result -- M_ss
-        is exactly the same matrix every call, only the plasma side varies timepoint to
-        timepoint. Cached on first call since the mesh, conductors, and coils never move.
-        @result dict with R_s, Z_s (conductor positions), R_c, Z_c (coil positions), and
-        M_ss_lu (the LU factorization of M_ss, ready for lu_solve).
-        '''
-        if getattr(self, '_tobin_geometry', None) is not None:
-            return self._tobin_geometry
-
+    def _compute_tobin_geometry_filament(self):
+        r'''! Compute geometry for Tobin filament model'''
+        if getattr(self, '_tobin_geometry_filament', None) is not None:
+            return self._tobin_geometry_filament
         r, lc, reg = self.r, self.lc, self.reg
-
         R_s_list, Z_s_list, area_s_list = [], [], []
         for name, info in self._cond_dict.items():
             if 'eta' in info:
@@ -2134,30 +2124,29 @@ class TokaMaker():
         R_s = numpy.concatenate(R_s_list)
         Z_s = numpy.concatenate(Z_s_list)
         area_s = numpy.concatenate(area_s_list)
-
         R_c_list, Z_c_list = [], []
         for name, info in self._coil_dict.items():
             R_j, Z_j, area_j = self._region_geometry(info['reg_id'], r, lc, reg)
             R_c_list.append(numpy.sum(R_j * area_j) / numpy.sum(area_j))
             Z_c_list.append(numpy.sum(Z_j * area_j) / numpy.sum(area_j))
         R_c, Z_c = numpy.array(R_c_list), numpy.array(Z_c_list)
-
         M_ss = self._mutual_inductance(R_s[:, None], Z_s[:, None], R_s[None, :], Z_s[None, :])
         numpy.fill_diagonal(M_ss, self._self_inductance_ring(R_s, area_s))
+        self._tobin_geometry_filament = {'R_s': R_s, 'Z_s': Z_s, 'R_c': R_c, 'Z_c': Z_c, 'M_ss_lu': lu_factor(M_ss)}
+        return self._tobin_geometry_filament
 
-        self._tobin_geometry = {'R_s': R_s, 'Z_s': Z_s, 'R_c': R_c, 'Z_c': Z_c, 'M_ss_lu': lu_factor(M_ss)}
-        return self._tobin_geometry
-
-    def get_vde_growth(self,verbose=False,return_gradient=False):
+    def get_vde_growth(self,return_gradient=False,use_filament=False):
         r'''! Compute the Tobin vertical force-gradient stability margin, -F'_z, for the
         current equilibrium.
-        @param verbose Print filament counts for this snapshot.
         @param return_gradient If True, also return the gradient of the stability margin.
+        Only supported with use_filament=True.
+        @param use_filament Use the elliptic-integral filament coupling instead of the native
+        flux-drive calculation.
         @result -F'_z [N/m], negative marks the instability threshold.
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.get_vde_growth(verbose, return_gradient=return_gradient)
+        return self._tMaker_equil.get_vde_growth(return_gradient=return_gradient, use_filament=use_filament)
 
     def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False,damping_scale=-1.0):
         '''! Compute eigenvalues for the linearized time-dependent system
@@ -3139,17 +3128,62 @@ class TokaMaker_equilibrium():
             raise Exception(error_string.value)
         return curr
 
-    def get_vde_growth(self,verbose=False,return_gradient=False):
+    def _compute_flux_drive(self, R_s, Z_s):
+        r'''! Plasma-to-passive-structure flux-drive vector calculation
+        Computes dJ_phi/dZ from the plasma current distribution, uses it as a source term in
+        vacuum solve to get the flux-drive vector. vac_solve adds real coil-driven flux 
+        regardless of rhs_source, subtracted it to get just plasma-driven component. 
+        @param R_s, Z_s Passive-structure filament positions (same basis M_ss uses).
+        @result flux_drive [len(R_s)], in the same convention as M_ss.
+        '''
+        r = self._tMaker.r
+        J_p0 = self.calc_jtor_plasma()
+
+        # get dJ_phi/dZ via set_psi
+        psi_save = self.get_psi(normalized=False)
+        try:
+            self.set_psi(J_p0)
+            field_eval = self.get_field_eval('dPSI')
+            dJp_dZ = numpy.zeros(len(r))
+            for i in range(len(r)):
+                dJp_dZ[i] = field_eval.eval(r[i, :2])[1]
+        finally:
+            self.set_psi(psi_save)
+
+        # flux from dJp_dZ alone, subtract active coil baseline
+        psi_with_coils = self._tMaker.vac_solve(psi=numpy.zeros(self._tMaker.np), rhs_source=dJp_dZ)
+        psi_coil_baseline = self._tMaker.vac_solve(psi=numpy.zeros(self._tMaker.np))
+        psi_prime_vals = psi_with_coils.get_psi(normalized=False) - psi_coil_baseline.get_psi(normalized=False)
+
+        # sample at the filament positions and convert to M_ss
+        try:
+            self.set_psi(psi_prime_vals)
+            field_eval2 = self.get_field_eval('psi')
+            flux_drive = numpy.zeros(len(R_s))
+            for i in range(len(R_s)):
+                flux_drive[i] = -field_eval2.eval(numpy.array([R_s[i], Z_s[i]]))[0]
+        finally:
+            self.set_psi(psi_save)
+
+        flux_drive *= 2 * numpy.pi
+        return flux_drive
+
+    def get_vde_growth(self, return_gradient=False, use_filament=False):
         r'''! Compute the Tobin vertical force-gradient stability margin, -F'_z, for this
-        solved equilibrium snapshot, reusing the fixed vessel/coil geometry and M_ss
-        factorization cached on the parent TokaMaker object.
-        @param verbose Print filament counts for this snapshot.
+        solved equilibrium snapshot, reusing the fixed coil geometry and passive-structure
+        self-consistency factorization cached on the parent TokaMaker object.
         @param return_gradient If True, also return the gradient of the stability margin.
+        Only supported with use_filament=True.
+        @param use_filament Use the elliptic-integral filament coupling instead of the 
+        flux-drive calculation. Kept for comparison
         @result -F'_z [N/m], negative marks the instability threshold.
         '''
-        geom = self._tMaker._compute_tobin_geometry()
-        r, lc, reg = self._tMaker.r, self._tMaker.lc, self._tMaker.reg
+        if return_gradient and not use_filament:
+            raise NotImplementedError("return_gradient is only supported with use_filament=True")
+
+        geom = self._tMaker._compute_tobin_geometry_filament()
         R_s, Z_s, R_c, Z_c, M_ss_lu = geom['R_s'], geom['Z_s'], geom['R_c'], geom['Z_c'], geom['M_ss_lu']
+        r, lc, reg = self._tMaker.r, self._tMaker.lc, self._tMaker.reg
 
         # Plasma current per mesh element: nodal J_phi averaged onto each triangle, times its
         # area. Elements outside the plasma read exactly zero and drop out of every sum below,
@@ -3166,29 +3200,34 @@ class TokaMaker_equilibrium():
         _, currents_reg = self.get_coil_currents()
         I_c = numpy.array([currents_reg[info['reg_id'] - 1] for info in self._tMaker._coil_dict.values()])
 
-        if verbose:
-            print(f'plasma elements: {len(I_p)}, passive-conductor elements: {len(R_s)}, coil filaments: {len(R_c)}')
-        else:
-            # Quiet TokaMaker's internal solver logging
-            self._tMaker.settings.pm = False
-            self._tMaker.update_settings()
+        # Quiet TokaMaker's internal solver logging
+        self._tMaker.settings.pm = False
+        self._tMaker.update_settings()
 
-        # Mutual-inductance z-derivatives, broadcast over all pairs at once. Only M'_p,s and
-        # M''_p,c enter F'_z (Eq. 11) -- the zeroth-order M_p,s, M_p,c never appear.
-        Mp_ps = self._tMaker._d_mutual_inductance_dZ1(R_p[:, None], Z_p[:, None], R_s[None, :], Z_s[None, :])
         Mpp_pc = self._tMaker._d2_mutual_inductance_dZ1(R_p[:, None], Z_p[:, None], R_c[None, :], Z_c[None, :])
 
+        # Re-factor F'z equation to avoid matrix-matrix products 
         # F'_z = I_p^T [-M'_p,s M_s,s^-1 M'_s,p, M''_p,c] I_(p+c)
         # F_z' = I_p^T . (M* I_(p+c))
         # M* I_(p+c) = (coupling_term I_p) + (M''_p,c I_c)
         # F_z' = I_p^T . (coupling_term I_p) + I_p^T . (M''_p,c I_c)
         # coupling_term = -M'_p,s M_s,s^-1 M'_p,s^T
         # I_p^T . (coupling_term I_p) = I_p^T . (-M'_p,s M_s,s^-1 M'_p,s^T I_p)
-        #                             = -(I_p^T . (M'_p,s (M_s,s^-1 (M'_p,s^T I_p))))
+        # I_p^T . (coupling_term I_p) = -(I_p^T . (M'_p,s (M_s,s^-1 (M'_p,s^T I_p))))
 
-        flux_drive = Mp_ps.T @ I_p
-        induced_current_response = lu_solve(M_ss_lu, flux_drive)
-        passive_term = -(I_p @ (Mp_ps @ induced_current_response))
+        # If using the filament model, compute the mutual inductance between plasma and passive structures
+        # Otherwise, compute the flux-drive vector from the plasma current distribution and use it to 
+        # compute the induced current response in the passive structures.
+        if use_filament:
+            Mp_ps = self._tMaker._d_mutual_inductance_dZ1(R_p[:, None], Z_p[:, None], R_s[None, :], Z_s[None, :])
+            flux_drive = Mp_ps.T @ I_p
+            induced_current_response = lu_solve(M_ss_lu, flux_drive)
+            passive_term = -(I_p @ (Mp_ps @ induced_current_response))
+        else:
+            flux_drive = self._compute_flux_drive(R_s, Z_s)
+            induced_current_response = lu_solve(M_ss_lu, flux_drive)
+            passive_term = -(flux_drive @ induced_current_response)
+
         coil_term = I_p @ (Mpp_pc @ I_c)
         Fz_prime = passive_term + coil_term
 
