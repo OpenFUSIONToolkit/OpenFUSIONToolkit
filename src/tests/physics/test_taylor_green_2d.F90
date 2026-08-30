@@ -1,3 +1,30 @@
+MODULE taylor_green_helpers
+USE oft_local
+IMPLICIT NONE
+REAL(r8) :: rho_ana
+CONTAINS
+
+
+SUBROUTINE vx_init(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = SIN(2.d0*pi*pt(1))*COS(2.d0*pi*pt(2))
+END SUBROUTINE vx_init
+
+SUBROUTINE vz_init(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = -COS(2.d0*pi*pt(1))*SIN(2.d0*pi*pt(2))
+END SUBROUTINE vz_init
+
+SUBROUTINE p_init(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = 0.25d0*rho_ana*(COS(4.d0*pi*pt(1)) + COS(4.d0*pi*pt(2)))
+END SUBROUTINE p_init
+
+END MODULE taylor_green_helpers
+
 PROGRAM test_taylor_green_2d
 !---------------------------------------------------------------------------
 ! Taylor-Green vortex test for the incompressible 2D xMHD solver.
@@ -30,6 +57,7 @@ USE mhd_utils, ONLY: proton_mass, mu0
 USE diagnostic, ONLY: scal_energy_2d
 USE fem_utils, ONLY: diff_interp_2d
 USE xmhd_2d
+USE taylor_green_helpers, ONLY: rho_ana, vx_init, vz_init, p_init
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
 REAL(r8), POINTER :: vec_vals(:)
@@ -47,7 +75,7 @@ CLASS(oft_vector), POINTER :: up,vp,p_ana,p_num,ones
 REAL(r8), POINTER :: pvec_vals(:)
 !---Errors
 REAL(r8) :: vxerr_i,vzerr_i,vxerr,vzerr,decay
-REAL(r8) :: perr_i,perr,decay_p,rho_ana
+REAL(r8) :: perr_i,perr,decay_p
 !---Runtime options
 INTEGER(i4) :: order = 2
 INTEGER(i4) :: nsteps = 20
@@ -206,7 +234,6 @@ mhd_sim%timestep_cn=timestep_cn
 mhd_sim%ittarget=ittarget
 oft_env%pm=pm
 
-CALL ones%set(1.d0)
 CALL mhd_sim%run_simulation()
 
 !---------------------------------------------------------------------------
@@ -252,8 +279,11 @@ vzerr  =scal_energy_2d(mg_mesh%smesh,err_field,order*2)
 !--- because incompressible pressure only defined up to a constant)
 CALL mhd_sim%u%get_local(pvec_vals,5)
 CALL p_num%restore_local(pvec_vals)
-CALL shift_min_to_zero(p_ana)
-CALL shift_min_to_zero(p_num)
+CALL ones%set(1.d0)
+CALL p_ana%get_local(pvec_vals)
+CALL p_ana%add(1.d0,-MINVAL(pvec_vals),ones)
+CALL p_num%get_local(pvec_vals)
+CALL p_num%add(1.d0,-MINVAL(pvec_vals),ones)
 pana_field%u=>p_ana
 pfinal_field%u=>p_num
 CALL pana_field%setup(ML_oft_blagrange_p%current_level)
@@ -270,34 +300,6 @@ CLOSE(io_unit)
 
 !---Finalize environment
 CALL oft_finalize
-CONTAINS
 
-SUBROUTINE shift_min_to_zero(f)
-!---Shift a field so its minimum is zero
-CLASS(oft_vector), INTENT(inout) :: f
-REAL(r8), POINTER :: fvals(:)
-NULLIFY(fvals)
-CALL f%get_local(fvals)
-CALL f%add(1.d0,-MINVAL(fvals),ones)
-DEALLOCATE(fvals)
-END SUBROUTINE shift_min_to_zero
-
-SUBROUTINE vx_init(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = SIN(2.d0*pi*pt(1))*COS(2.d0*pi*pt(2))
-END SUBROUTINE vx_init
-
-SUBROUTINE vz_init(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = -COS(2.d0*pi*pt(1))*SIN(2.d0*pi*pt(2))
-END SUBROUTINE vz_init
-
-SUBROUTINE p_init(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = 0.25d0*rho_ana*(COS(4.d0*pi*pt(1)) + COS(4.d0*pi*pt(2)))
-END SUBROUTINE p_init
 
 END PROGRAM test_taylor_green_2d
