@@ -281,9 +281,9 @@ CALL mhd_sim%u%get_local(pvec_vals,5)
 CALL p_num%restore_local(pvec_vals)
 CALL ones%set(1.d0)
 CALL p_ana%get_local(pvec_vals)
-CALL p_ana%add(1.d0,-MINVAL(pvec_vals),ones)
+CALL p_ana%add(1.d0,oft_mpi_max(-MINVAL(pvec_vals)),ones)
 CALL p_num%get_local(pvec_vals)
-CALL p_num%add(1.d0,-MINVAL(pvec_vals),ones)
+CALL p_num%add(1.d0,oft_mpi_max(-MINVAL(pvec_vals)),ones)
 pana_field%u=>p_ana
 pfinal_field%u=>p_num
 CALL pana_field%setup(ML_oft_blagrange_p%current_level)

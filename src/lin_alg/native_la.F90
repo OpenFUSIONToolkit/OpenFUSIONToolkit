@@ -2586,7 +2586,7 @@ IF(.NOT.uv%stitch_info%full)THEN
     jp=1
     last=0
     do mm=1,netmp ! Loop over input points
-      IF(letmp(1,mm)==last.AND.periodic)THEN
+      IF(letmp(1,mm)==last)THEN
         m=jp
       ELSE
         last=letmp(1,mm)
@@ -2627,7 +2627,7 @@ IF(jn>0)THEN
   jp=1
   last=0
   do mm=1,neout ! Loop over input points
-    IF(leout(1,mm)==last.AND.periodic)THEN
+    IF(leout(1,mm)==last)THEN
       m=jp
     ELSE
       last=leout(1,mm)

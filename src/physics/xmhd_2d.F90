@@ -1849,6 +1849,7 @@ end subroutine setup
 !---------------------------------------------------------------------------
 subroutine setup_bc(self)
 class(oft_xmhd_2d_sim), intent(inout) :: self
+INTEGER(i4) :: i
 IF(.NOT.ASSOCIATED(self%n_bc))THEN
   !If incompressible the density is not evolved
   IF(self%incomp)THEN
@@ -1863,10 +1864,16 @@ IF(.NOT.ASSOCIATED(self%vely_bc))self%vely_bc=>oft_blagrange%global%gbe
 IF(.NOT.ASSOCIATED(self%velz_bc))self%velz_bc=>oft_blagrange%global%gbe
 IF (self%incomp) THEN
   !Default pressure BC is freezing one node to fix gauge
+  !Only works for single MHD region simulations, must be overwritten if several MHD regions exist
   IF(.NOT.ASSOCIATED(self%T_bc))THEN
     ALLOCATE(self%T_bc(oft_blagrange_p%ne))
     self%T_bc = .FALSE.
-    self%T_bc(1) = .TRUE.
+    DO i=1,oft_blagrange_p%map%nslice
+      IF(oft_blagrange_p%global%le(oft_blagrange_p%map%slice(i))==1)THEN
+        self%T_bc(oft_blagrange_p%map%slice(i)) = .TRUE.
+        EXIT
+      END IF
+    END DO
   END IF
 ELSE
   IF(.NOT.ASSOCIATED(self%T_bc))self%T_bc=>oft_blagrange%global%gbe
