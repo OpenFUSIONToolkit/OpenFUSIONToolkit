@@ -3132,7 +3132,7 @@ class TokaMaker_equilibrium():
         r'''! Plasma-to-passive-structure flux-drive vector calculation
         Computes dJ_phi/dZ from the plasma current distribution, uses it as a source term in
         vacuum solve to get the flux-drive vector. vac_solve adds real coil-driven flux 
-        regardless of rhs_source, subtracted it to get just plasma-driven component. 
+        regardless of rhs_source, subtracted it to get just plasma-driven component.  
         @param R_s, Z_s Passive-structure filament positions (same basis M_ss uses).
         @result flux_drive [len(R_s)], in the same convention as M_ss.
         '''
@@ -3213,7 +3213,7 @@ class TokaMaker_equilibrium():
         # F_z' = I_p^T . (coupling_term I_p) + I_p^T . (M''_p,c I_c)
         # coupling_term = -M'_p,s M_s,s^-1 M'_p,s^T
         # I_p^T . (coupling_term I_p) = I_p^T . (-M'_p,s M_s,s^-1 M'_p,s^T I_p)
-        # I_p^T . (coupling_term I_p) = -(I_p^T . (M'_p,s (M_s,s^-1 (M'_p,s^T I_p))))
+        # I_p^T . (coupling_term I_p) = -(I_p^T . (M'_p,s (M_s,s^-1 (M'_p,s^T I_p)))) + I_p^T . (M''_p,c I_c)
 
         # If using the filament model, compute the mutual inductance between plasma and passive structures
         # Otherwise, compute the flux-drive vector from the plasma current distribution and use it to 

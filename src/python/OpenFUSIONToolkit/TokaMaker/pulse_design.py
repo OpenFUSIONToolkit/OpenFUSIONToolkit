@@ -8129,9 +8129,8 @@ def compute_disruptivity_limits(tt):
     all_limits = {}
 
     def add_limit_units(name, label, value, limit_curve, units):
-        r'''! Adds a new limit to the collection in real physical units, keeping the
-        actual plasma quantity separate from its threshold curve so they can be
-        overplotted rather than reduced to a single normalized margin.
+        r'''! Adds a new limit with units, keeps actual plasma quantity 
+        separate from its threshold curve so they can be overplotted.
         @param name Unique identifier for the limit.
         @param label Human-readable label for the limit.
         @param value Array of the actual physical quantity over time.
@@ -8147,7 +8146,7 @@ def compute_disruptivity_limits(tt):
         return entry
 
     def add_limit(name, label, y, limit):
-        r'''! Adds a new limit to the collection.
+        r'''! Adds new limit.
         @param name Unique identifier for the limit.
         @param label Human-readable label for the limit.
         @param y Array of limit values over time.
@@ -8203,7 +8202,7 @@ def compute_disruptivity_limits(tt):
     n_e_vol  = np.interp(tm, tt_ne_vol,  y_ne_vol)
     n_GW = (np.abs(np.asarray(state['Ip'])) * 1e-6) / (np.pi * np.asarray(state['a'])**2)
 
-    # Maris density/radiation limit (DL26): edge collisionality x edge beta x q_star.
+    # Maris density/radiation limit (DL26): edge collisionality * edge beta * q_star.
     # Edge sampled at rho=0.95 rather than the separatrix, since rho=1 here is pinned to
     # the prescribed boundary condition.
     tt_ne_edge, ne_edge = _tx_profile_at_rho(tt, 'n_e', 0.95)
@@ -8225,7 +8224,7 @@ def compute_disruptivity_limits(tt):
     beta_N_tx = np.asarray(state['beta_N_tx'])
     troyon_limit = 4.0 * np.asarray(state['l_i_tm'])
 
-    # q95 and q0: real safety factor values, compared against their flat thresholds.
+    # q95 and q0: real safety factor values, compared against their thresholds.
     q95_raw = np.asarray(state['q95_tm'])
     q0_raw = np.asarray(state['q0_tm'])
 
@@ -8243,7 +8242,7 @@ def compute_disruptivity_limits(tt):
     add_limit_units('vde', "-F'_z", vde_raw, 0.0, 'N/m')
 
     # Normalized margins, derived from the real quantities above: 1.0 marks the limit,
-    # regardless of the underlying quantity's natural direction or units. q95 and q0 are
+    # regardless of the underlying quantity's units. q95 and q0 are
     # inverted (limit / value) since lower is more dangerous for both.
     f_GW = n_e_line / n_GW
     f_GW_vol = n_e_vol / n_GW
@@ -8264,15 +8263,15 @@ def compute_disruptivity_limits(tt):
 #### Helper functions to allow functions to be called with just the TokaMaker_TORAX instance ####
 def plot_disruptivity_limits(tt, scale='linear'):
     r'''! Compute and plot disruptivity-proxy limits (Greenwald density, Maris
-    density/radiation limit, Troyon beta, q95, q0) on a 2x3 grid, real units.
+    density/radiation limit, Troyon beta, q95, q0) on a 2x3 grid.
     @param scale 'linear' or 'log' y-axis scale, applied to every subplot.
     '''
     return _show_plots_units(compute_disruptivity_limits(tt), scale=scale)
 
 def plot_disruptivity_limits_subset(tt, keys, title, scale='linear'):
     r'''! Compute and plot a chosen subset of disruptivity-proxy limits (by their
-    limits['all_limits_units'] key) on one figure, showing the actual plasma quantity
-    against its threshold curve in real units rather than a normalized margin.
+    limits['all_limits_units'] key) on one figure, showing actual plasma quantity
+    against its threshold curve with units rather than a normalized margin.
     @param keys List of limits['all_limits_units'] keys to include.
     @param title Figure title.
     @param scale 'linear', 'log', or 'both'.
@@ -8281,10 +8280,19 @@ def plot_disruptivity_limits_subset(tt, keys, title, scale='linear'):
     return _plot_subset_units(compute_disruptivity_limits(tt), keys, title, scale=scale)
 
 def print_disruptivity_limits(tt):
-    r'''! Compute and print a summary of all disruptivity-proxy limits in real units, their peak values, and their threshold.'''
+    r'''! Compute and print a summary of all disruptivity-proxy limits with units, 
+    their peak values, and their threshold.
+    '''
     return _print_limits_units(compute_disruptivity_limits(tt))
 
-#### Plotting helpers for the real-units limits, actual value vs threshold ####
+def plot_disruptivity_limits_norm(tt, scale='linear'):
+    r'''! Compute and plot normalized disruptivity-proxy limits (Greenwald density, Maris
+    density/radiation limit, Troyon beta, q95, q0) on a 2x3 grid.
+    @param scale 'linear' or 'log' y-axis scale, applied to every subplot.
+    '''
+    return _show_plots_norm(compute_disruptivity_limits(tt), scale=scale) 
+
+#### Plotting helpers for the limits with units, actual value vs threshold ####
 def _plot_on_units(limits, ax, keys, yscale, title):
     r'''! Plot a subset of real-units limits on a given axis, each key's actual value
     overplotted against its own threshold curve.
@@ -8306,13 +8314,13 @@ def _plot_on_units(limits, ax, keys, yscale, title):
     ax.grid(alpha=0.3, which='both')
 
 def _plot_subset_units(limits, keys, title, scale='linear'):
-    """Plot a chosen subset of real-units limits (by their limits['all_limits_units'] key) on
-    one figure, showing the actual plasma quantity against its threshold curve in
-    real units rather than a normalized margin.
+    r'''! Plot a chosen subset of limits with units (by their limits['all_limits_units'] key) on
+    one figure, showing the actual plasma quantity against its threshold curve 
+    with units rather than a normalized margin.
     @param keys List of limits['all_limits_units'] keys to include.
     @param title Figure title.
     @param scale 'linear', 'log', or 'both'.
-    """
+    '''
     if scale not in ('linear', 'log', 'both'):
         raise ValueError("scale must be 'linear', 'log', or 'both'")
 
@@ -8330,10 +8338,11 @@ def _plot_subset_units(limits, keys, title, scale='linear'):
     plt.tight_layout()
     plt.show()
 
-#### Show plots gives all the limits together on a 2x3 grid, real units, actual value vs threshold ####
+#### Show plots gives all the limits together on a 2x3 grid with units, actual value vs threshold ####
 def _show_plots_units(limits, scale='linear'):
     r'''! Plot all limits together on a 2x3 grid, each subplot in real physical units
     with the actual plasma quantity overplotted against its threshold curve.
+    @param limits Dict returned by compute_disruptivity_limits().
     @param scale 'linear' or 'log' y-axis scale, applied to every subplot.
     '''
     if scale not in ('linear', 'log'):
@@ -8351,7 +8360,7 @@ def _show_plots_units(limits, scale='linear'):
     plt.tight_layout()
     plt.show()
 
-#### Individual limit plots for convenience, real units, each on one figure with linear/log/both option ####
+#### Individual limit plots for convenience with units, each on one figure with linear/log/both option ####
 def _plot_greenwald_units(limits, scale='linear'):
     _plot_subset_units(limits, ['n_e_line', 'n_e_vol'], 'Greenwald density', scale=scale)
 
@@ -8371,14 +8380,14 @@ def _plot_vde_units(limits, scale='linear'):
     _plot_subset_units(limits, ['vde'], 'Vertical stability', scale=scale)
 
 def _print_limits_units(limits):
-    r'''! Print a summary of all limits in real units, their peak values, and their threshold.'''
+    r'''! Print a summary of all limits with units, peak values, and threshold.'''
     print('tm_times [s]:', np.round(limits['tm_times'], 1))
     for entry in limits['all_limits_units'].values():
         print(f'{entry["label"]:14s} {np.array2string(entry["value"], precision=3, max_line_width=200)}')
 
     print()
     print('=======================================================')
-    print('  Disruptivity-Proxy Limits  (real units)')
+    print('  Disruptivity-Proxy Limits  (with units)')
     print('=======================================================')
     for entry in limits['all_limits_units'].values():
         print(f'  {entry["label"]:16s} peak={entry["peak"]:.3f} {entry["units"]}  at t={entry["peak_time"]:.0f}s')
@@ -8386,6 +8395,7 @@ def _print_limits_units(limits):
 
 def _plot_on_norm(limits, ax, keys, yscale, title):
     r'''! Plot a subset of limits on a given axis.
+    @param limits Dict returned by compute_disruptivity_limits().
     @param ax Matplotlib axis to plot on.
     @param keys List of limits['all_limits'] keys to include.
     @param yscale 'linear' or 'log'.
@@ -8402,12 +8412,10 @@ def _plot_on_norm(limits, ax, keys, yscale, title):
 
 def _plot_subset_norm(limits, keys, title, scale='linear'):
     """Plot a chosen subset of limits (by their limits['all_limits'] key) on one figure.
+    @param limits Dict returned by compute_disruptivity_limits().
     @param keys List of limits['all_limits'] keys to include.
     @param title Figure title.
-    @param scale 'linear', 'log', or 'both'. Linear reads naturally near 1.0 (where
-    most of these actually live) but flattens DL_Maris (two orders of magnitude
-    smaller) to nothing. Log shows every trace's own shape but compresses
-    differences near 1.0. Same shared "1.0 = limit" dashed line either way.
+    @param scale 'linear', 'log', or 'both'.
     """
     if scale not in ('linear', 'log', 'both'):
         raise ValueError("scale must be 'linear', 'log', or 'both'")
