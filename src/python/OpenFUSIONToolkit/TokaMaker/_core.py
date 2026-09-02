@@ -2246,13 +2246,21 @@ class TokaMaker():
             if window is not None and (rz1[0] < window[0] or rz1[0] > window[1] or rz1[1] < window[2] or rz1[1] > window[3]):
                 jphi_plot[i] = 0
                 continue
-            jphi_plot[i] = jphi[idx1]      
+            jphi_plot[i] = jphi[idx1]  
+                
+        # Mirror
+        if self.settings.mirror_mode:
+            r_plot = self.r[:,1]
+            z_plot = self.r[:,0]
+        else:
+            r_plot = self.r[:,0]
+            z_plot = self.r[:,1]
 
         # Convert to MA
         jphi_plot /= 1.0E6
         mask = jphi_plot != 0
         heatmap = ax.tripcolor(
-            self.r[:,0], self.r[:,1],
+            r_plot, z_plot,
             self.lc[mask],
             facecolors=jphi_plot[mask],
             cmap=cmap
