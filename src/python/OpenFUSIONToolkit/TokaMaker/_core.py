@@ -2241,13 +2241,12 @@ class TokaMaker():
             if self.reg[i] not in [1, 3]:
                 jphi_plot[i] = 0
                 continue # Ignore all regions except plasma and vacuum
-            idx1, _, _ = self.lc[i]
-            rz1 = self.r[idx1][:2]
+            rz1 = numpy.mean(self.r[self.lc[i]][:2], axis=0)
             if window is not None and (rz1[0] < window[0] or rz1[0] > window[1] or rz1[1] < window[2] or rz1[1] > window[3]):
                 jphi_plot[i] = 0
                 continue
-            jphi_plot[i] = jphi[idx1]  
-                
+            jphi_plot[i] = numpy.mean(jphi[self.lc[i]])
+
         # Mirror
         if self.settings.mirror_mode:
             r_plot = self.r[:,1]
