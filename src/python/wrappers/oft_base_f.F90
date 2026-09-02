@@ -127,13 +127,13 @@ TYPE(multigrid_mesh), POINTER :: mg_mesh
 print *, 'Running oft_setup_smesh (1)...'
 IF(ndim>0)THEN
     ALLOCATE(r_mem(ndim,np))
-    ! CALL c_f_pointer(r_loc, r_tmp, [ndim,np])
+    CALL c_f_pointer(r_loc, r_tmp, [ndim,np])
     r_mem=r_tmp
     ALLOCATE(lc_mem(npc,nc))
-    ! CALL c_f_pointer(lc_loc, lc_tmp, [npc,nc])
+    CALL c_f_pointer(lc_loc, lc_tmp, [npc,nc])
     lc_mem=lc_tmp
     ALLOCATE(reg_mem(nc))
-    ! CALL c_f_pointer(reg_loc, reg_tmp, [nc])
+    CALL c_f_pointer(reg_loc, reg_tmp, [nc])
     reg_mem=reg_tmp
 END IF
 print *, 'Running oft_setup_smesh (2)...'
