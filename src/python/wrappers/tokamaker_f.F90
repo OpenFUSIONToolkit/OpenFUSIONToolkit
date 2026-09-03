@@ -355,8 +355,9 @@ END SUBROUTINE tokamaker_equil_destroy
 !---------------------------------------------------------------------------------
 !> Complete setup of TokaMaker device/wrapper object and build FE representation
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
+SUBROUTINE tokamaker_setup(tMaker_ptr,fe_ptr,order,full_domain,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), INTENT(out) :: fe_ptr !< Pointer to FE representation object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< FE order for Lagrange elements
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Plasma covers full domain (eg. fixed-boundary solves)?
 INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Number of coils in model
@@ -416,6 +417,7 @@ CALL tMaker_obj%device%init()
 ! END IF
 ncoils=tMaker_obj%device%ncoils
 coil_Lmat=C_LOC(tMaker_obj%device%Lcoils)
+fe_ptr=C_LOC(tMaker_obj%device%fe_rep)
 END SUBROUTINE tokamaker_setup
 !---------------------------------------------------------------------------------
 !> Load profile specification files
@@ -958,33 +960,63 @@ END SUBROUTINE tokamaker_get_psi
 !---------------------------------------------------------------------------------
 !> Compute B-field over full mesh from \f$ \psi \f$ using \f$ \nabla \psi \f$ operator
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_bfield(tMaker_equil_ptr,b_vals,error_str) BIND(C,NAME="tokamaker_get_bfield")
+SUBROUTINE tokamaker_get_field(tMaker_equil_ptr,vals,prof_type,error_str) BIND(C,NAME="tokamaker_get_field")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
-TYPE(c_ptr), VALUE, INTENT(in) :: b_vals !< Needs docs
+TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: prof_type !< Type of profile to compute
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 REAL(8), POINTER, DIMENSION(:) :: vals_tmp
 REAL(8), POINTER, DIMENSION(:,:) :: bmat_tmp
 CLASS(oft_vector), POINTER :: tmp1,tmp2,tmp3
+CLASS(oft_solver), POINTER :: solver
+TYPE(gs_prof_interp) :: field
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 !
-CALL tMaker_equil_obj%psi%new(tmp1)
-CALL tMaker_equil_obj%psi%new(tmp2)
-CALL tMaker_equil_obj%psi%new(tmp3)
-CALL gs_project_b(tMaker_equil_obj,tmp1,tmp2,tmp3)
+CALL create_cg_solver(solver)
+solver%A=>tMaker_equil_obj%device%mop
+solver%its=-2
+CALL create_diag_pre(solver%pre)
 !
-CALL c_f_pointer(b_vals, bmat_tmp, [tMaker_equil_obj%psi%n,3])
-vals_tmp=>bmat_tmp(:,1)
-CALL tmp1%get_local(vals_tmp)
-CALL tmp1%delete()
-vals_tmp=>bmat_tmp(:,2)
-CALL tmp2%get_local(vals_tmp)
-CALL tmp2%delete()
-vals_tmp=>bmat_tmp(:,3)
-CALL tmp3%get_local(vals_tmp)
-CALL tmp3%delete()
-DEALLOCATE(tmp1,tmp2,tmp3)
-END SUBROUTINE tokamaker_get_bfield
+IF(prof_type==1)THEN ! Compute B-field at all node points
+  CALL tMaker_equil_obj%psi%new(tmp1)
+  CALL tMaker_equil_obj%psi%new(tmp2)
+  CALL tMaker_equil_obj%psi%new(tmp3)
+  CALL gs_project_b(tMaker_equil_obj,tmp1,tmp2,tmp3)
+  CALL c_f_pointer(vals, bmat_tmp, [tMaker_equil_obj%psi%n,3])
+  vals_tmp=>bmat_tmp(:,1)
+  CALL tmp1%get_local(vals_tmp)
+  CALL tmp1%delete()
+  vals_tmp=>bmat_tmp(:,2)
+  CALL tmp2%get_local(vals_tmp)
+  CALL tmp2%delete()
+  vals_tmp=>bmat_tmp(:,3)
+  CALL tmp3%get_local(vals_tmp)
+  CALL tmp3%delete()
+  DEALLOCATE(tmp1,tmp2,tmp3)
+ELSE IF((prof_type>=2).AND.(prof_type<=4))THEN ! Compute F or P at all node points
+  CALL tMaker_equil_obj%psi%new(tmp1)
+  CALL tMaker_equil_obj%psi%new(tmp2)
+  CALL field%setup(tMaker_equil_obj)
+  IF(prof_type==4)THEN
+    field%mode=5 ! Parallel pressure
+  ELSE
+    field%mode=prof_type ! F or Isotropic/perpendicular pressure
+  END IF
+  CALL oft_blag_project(tMaker_equil_obj%device%fe_rep,field,tmp2)
+  CALL tmp1%set(0.d0)
+  CALL solver%apply(tmp1,tmp2)
+  CALL c_f_pointer(vals, bmat_tmp, [tMaker_equil_obj%psi%n,1])
+  vals_tmp=>bmat_tmp(:,1)
+  CALL tmp1%get_local(vals_tmp)
+  CALL tmp1%delete()
+  CALL tmp2%delete()
+  DEALLOCATE(tmp1,tmp2)
+ELSE
+  CALL copy_string('Invalid profile type for tokamaker_get_field',error_str)
+  RETURN
+END IF
+END SUBROUTINE tokamaker_get_field
 !---------------------------------------------------------------------------------
 !> Compute current density from \f$ \psi \f$ using \f$ \Delta^* \psi \f$ operator
 !---------------------------------------------------------------------------------
@@ -1548,19 +1580,21 @@ END SUBROUTINE tokamaker_get_field_eval
 !> Evaluate a TokaMaker field with an interpolation object created by
 !! \ref tokamaker_f::tokamaker_get_field_eval
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_apply_field_eval(tMaker_equil_ptr,int_obj,int_type,pt,fbary_tol,cell,dim,field) BIND(C,NAME="tokamaker_apply_field_eval")
+SUBROUTINE tokamaker_apply_field_eval(tMaker_equil_ptr,int_obj,int_type,pt_ptr,npts,fbary_tol,dim,field_ptr) BIND(C,NAME="tokamaker_apply_field_eval")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Pointer to interpolation object
 INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Field type (negative to destroy)
-REAL(c_double), INTENT(in) :: pt(3) !< Location for evaluation [R,Z,0]
+TYPE(c_ptr), VALUE, INTENT(in)  :: pt_ptr !< Location for evaluation [X,Y,Z] (3D) or [X,Y,0] (2D)
+INTEGER(c_int), VALUE, INTENT(in) :: npts !< Number of points to evaluate
 REAL(c_double), VALUE, INTENT(in) :: fbary_tol !< Tolerance for physical to logical mapping
-INTEGER(c_int), INTENT(inout) :: cell !< Cell containing `pt` (starting guess on input)
 INTEGER(c_int), VALUE, INTENT(in) :: dim !< Dimension of field
-REAL(c_double), INTENT(out) :: field(dim) !< Field at `pt`
+TYPE(c_ptr), VALUE, INTENT(in) :: field_ptr !< Field at locations specified by `pt_ptr`
 TYPE(oft_lag_bginterp), POINTER :: psi_grad_obj
 TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
+INTEGER(i4) :: i,cell
 REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
+REAL(r8), POINTER, DIMENSION(:,:) :: pts,field
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj))CALL oft_abort("TokaMaker equilibrium object not associated","tokamaker_apply_field_eval",__FILE__)
@@ -1581,24 +1615,29 @@ IF(int_type<0)THEN
   END IF
   RETURN
 END IF
-call bmesh_findcell(tMaker_equil_obj%device%mesh,cell,pt,f)
-IF(cell==0)RETURN
-fmin=MINVAL(f); fmax=MAXVAL(f)
-IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
-  cell=-ABS(cell)
-  RETURN
-END IF
-CALL tMaker_equil_obj%device%mesh%jacobian(cell,f,goptmp,vol)
-IF(int_type==1)THEN
-  CALL c_f_pointer(int_obj, b_interp_obj)
-  CALL b_interp_obj%interp(cell,f,goptmp,field)
-ELSE IF(int_type>=2.AND.int_type<=4)THEN
-  CALL c_f_pointer(int_obj, prof_interp_obj)
-  CALL prof_interp_obj%interp(cell,f,goptmp,field)
-ELSE IF(int_type>=5)THEN
-  CALL c_f_pointer(int_obj, psi_grad_obj)
-  CALL psi_grad_obj%interp(cell,f,goptmp,field)
-END IF
+CALL c_f_pointer(pt_ptr, pts, [3,npts])
+CALL c_f_pointer(field_ptr, field, [dim,npts])
+DO i=1,npts
+  cell=0
+  call bmesh_findcell(tMaker_equil_obj%device%mesh,cell,pts(:,i),f)
+  IF(cell==0)RETURN
+  fmin=MINVAL(f); fmax=MAXVAL(f)
+  IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
+    cell=-ABS(cell)
+    RETURN
+  END IF
+  CALL tMaker_equil_obj%device%mesh%jacobian(cell,f,goptmp,vol)
+  IF(int_type==1)THEN
+    CALL c_f_pointer(int_obj, b_interp_obj)
+    CALL b_interp_obj%interp(cell,f,goptmp,field(:,i))
+  ELSE IF(int_type>=2.AND.int_type<=4)THEN
+    CALL c_f_pointer(int_obj, prof_interp_obj)
+    CALL prof_interp_obj%interp(cell,f,goptmp,field(:,i))
+  ELSE IF(int_type>=5)THEN
+    CALL c_f_pointer(int_obj, psi_grad_obj)
+    CALL psi_grad_obj%interp(cell,f,goptmp,field(:,i))
+  END IF
+END DO
 END SUBROUTINE tokamaker_apply_field_eval
 !---------------------------------------------------------------------------------
 !> Set \f$ \psi \f$ values in TokaMaker equilibrium object

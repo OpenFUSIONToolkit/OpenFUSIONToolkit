@@ -445,6 +445,7 @@ def compute_forces_components(tMaker_obj,psi,cell_centered=False):
     else:
         return J_cond, B_cond, mask, tMaker_obj.r
 
+
 def read_mhdin(path, e_coil_names=None, f_coil_names=None):
     r'''Read mhdin.dat file.
 
@@ -494,6 +495,7 @@ def read_mhdin(path, e_coil_names=None, f_coil_names=None):
 
     return machine_dict, raw
 
+
 def read_kfile(path, machine_dict, e_coil_names=None, f_coil_names=None):
     r'''Read k-file.
 
@@ -541,13 +543,103 @@ def read_kfile(path, machine_dict, e_coil_names=None, f_coil_names=None):
         f_coil_dict[f_coil_names[i]] = [f_coil_vals[i], f_coil_weights[i]]
     return probes_dict, loops_dict, e_coil_dict, f_coil_dict, raw
 
+
 def get_jphi_from_GS(ffprime, pprime, R_avg, one_over_R_avg):
     r'''! Calculate j_phi profile from Grad-Shafranov equation
     @param ffprime FF'(psi_N) profile
     @param pprime P'(psi_N) profile
     @param R_avg <R>(psi_N) profile
     @param one_over_R_avg <1/R>(psi_N) profile
-    Returns:
-    j_phi(\psi_N) profile
+    @result \f$ j_{\phi}(\psi_N) \f$ profile
     '''
     return ffprime * (one_over_R_avg / mu0) + R_avg * pprime
+
+
+def eval_NT_H_proxy(equil, psi_surf=0.9, theta_padding=None, ax_1d=None, ax_2d=None, shear_padding=[None, None]):
+    r'''! Evaluate approximate metric for H-mode accesibility for NT plasmas using relative position of shear and curvature points.
+
+    [A.O. Nelson et al., Nucl. Fusion 62, 096020 (2022)]
+
+    @param equil TokaMaker equilibrium object
+    @param psi_surf Normalized flux surface to evaluate (default: 0.9)
+    @param theta_padding Angular padding to exclude midplane regions from the analysis (default: pi/8)
+    @param ax_1d Optional matplotlib axis to plot 1D information
+    @param ax_2d Optional matplotlib axis to plot 2D information
+    @param shear_padding Padding for the shear plotting if ax_2d is provided (default: [0.05, 0.99])
+    @result Accesibility criterion at top and bottom of the plasma (True = accessible, False = inaccessible)
+    '''
+    # Trace desired flux surface
+    surf_pts = equil.trace_surf(psi_surf,500)
+    if surf_pts is None:
+        raise ValueError("Unable to trace flux surface at psi_surf={}".format(psi_surf))
+    surf_theta = numpy.arctan2(surf_pts[:,1]-equil.o_point[1],surf_pts[:,0]-equil.o_point[0])
+
+    # Compute required quantities
+    shear = equil.calc_local_shear()
+    B_full = equil.get_nodal_field('B')
+    Bsq = numpy.sum(numpy.power(B_full,2),axis=1)
+
+    # Build required interpolators
+    shear_interpolator = equil._tMaker.get_field_eval('eval',values=shear)
+    Bsq_interpolator = equil._tMaker.get_field_eval('grad',values=Bsq)
+    grad_psi_interpolator = equil.get_field_eval('dPSI')
+
+    # Find shear and curvature points on desired flux surface
+    surf_shear = shear_interpolator.eval(surf_pts)
+    surf_curvature = Bsq_interpolator.eval(surf_pts)
+    surf_grad_psi = grad_psi_interpolator.eval(surf_pts)
+    surf_alignment = numpy.sum(surf_curvature*surf_grad_psi,axis=1)
+
+    # Get maxiumum shear points and dot(curvature, grad(psi)) zero crossings at top and bottom
+    if theta_padding is None:
+        theta_padding = numpy.pi/8.0
+    upper_mask = numpy.logical_and(surf_theta > theta_padding, surf_theta < numpy.pi - theta_padding)
+    lower_mask = numpy.logical_and(surf_theta < -theta_padding, surf_theta > -(numpy.pi - theta_padding))
+    iupper_shear = numpy.argmax(surf_shear[upper_mask])
+    ilower_shear = numpy.argmax(surf_shear[lower_mask])
+    iupper_align = numpy.argmin(abs(surf_alignment[upper_mask]))
+    ilower_align = numpy.argmin(abs(surf_alignment[lower_mask]))
+
+    # Evaluate access criterion at top and bottom
+    access_upper = surf_theta[upper_mask][iupper_shear] > surf_theta[upper_mask][iupper_align]
+    access_lower = surf_theta[lower_mask][ilower_shear] < surf_theta[lower_mask][ilower_align]
+
+    if ax_1d is not None:
+        ordered_pts = numpy.argsort(surf_theta)
+        shear_max = abs(surf_shear).max(axis=None)
+        align_max = abs(surf_alignment).max(axis=None)
+        ax_1d.plot(surf_theta[ordered_pts],surf_shear[ordered_pts]/shear_max, label='Shear')
+        ax_1d.plot(surf_theta[ordered_pts],surf_alignment[ordered_pts]/align_max, label=r'$\nabla B^2 \cdot \nabla \psi$')
+        ax_1d.set_xlabel(r'$\theta$')
+        ax_1d.set_ylabel('Normalized values')
+        ax_1d.axvline(surf_theta[upper_mask][iupper_align],color='k')
+        ax_1d.axvline(surf_theta[lower_mask][ilower_align],color='k')
+        ax_1d.grid(True)
+        ax_1d.set_xlim(-numpy.pi,numpy.pi)
+        ax_1d.legend()
+
+    if ax_2d is not None:
+        # Compute dot( grad(B^2), grad(psi)) on all node in the plasma regions
+        pt_mask = numpy.zeros((equil._tMaker.np,), dtype=numpy.bool)
+        pt_mask[equil._tMaker.lc[(equil._tMaker.reg==1),:]] = True
+        Bsq = numpy.zeros((equil._tMaker.np,2))
+        Bsq[pt_mask,:] = Bsq_interpolator.eval(equil._tMaker.r[pt_mask,:2])
+        grad_psi = numpy.zeros((equil._tMaker.np,2))
+        grad_psi[pt_mask,:] = grad_psi_interpolator.eval(equil._tMaker.r[pt_mask,:2])
+        alignment = numpy.sum(Bsq*grad_psi,axis=1)
+        # Plot
+        ax_2d.tricontour(equil._tMaker.r[:,0],equil._tMaker.r[:,1],equil._tMaker.lc[equil._tMaker.reg==1,:],alignment,levels=[0.0],colors='r')
+        psi = equil.get_psi()
+        if shear_padding[0] is None:
+            shear_padding[0] = 0.05
+        if shear_padding[1] is None:
+            shear_padding[1] = 0.99
+        mask = numpy.logical_and(equil._tMaker.reg==1,numpy.any(numpy.logical_and(psi>shear_padding[0], psi<shear_padding[1])[equil._tMaker.lc], axis=1))
+        shear_arc = numpy.arcsinh(shear)
+        ax_2d.tricontourf(equil._tMaker.r[:,0],equil._tMaker.r[:,1],equil._tMaker.lc[mask,:],shear_arc,40)
+        pt_upper = surf_pts[upper_mask][iupper_shear,:]
+        pt_lower = surf_pts[lower_mask][ilower_shear,:]
+        ax_2d.plot(pt_upper[0],pt_upper[1],'k*')
+        ax_2d.plot(pt_lower[0],pt_lower[1],'k*')
+
+    return access_lower, access_upper
