@@ -293,7 +293,6 @@ class TokaMaker_field_interpolator():
         @param dim Dimension of vector field
         @param fbary_tol Tolerance for physical to logical mapping
         '''
-        self.cell = c_int(-1)
         self.int_type = int_type
         self.dim = dim
         if dim == 2:

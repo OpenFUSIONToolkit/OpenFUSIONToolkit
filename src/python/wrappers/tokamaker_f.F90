@@ -368,6 +368,7 @@ REAL(8) :: theta
 LOGICAL :: file_exists
 real(r8), POINTER :: vals_tmp(:)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+fe_ptr=C_NULL_PTR
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 !------------------------------------------------------------------------------
 ! Check input files
@@ -982,7 +983,7 @@ IF(prof_type==1)THEN ! Compute B-field at all node points
   CALL tMaker_equil_obj%psi%new(tmp1)
   CALL tMaker_equil_obj%psi%new(tmp2)
   CALL tMaker_equil_obj%psi%new(tmp3)
-  CALL gs_project_b(tMaker_equil_obj,tmp1,tmp2,tmp3)
+  CALL gs_project_b(tMaker_equil_obj,tmp1,tmp2,tmp3,solver_in=solver)
   CALL c_f_pointer(vals, bmat_tmp, [tMaker_equil_obj%psi%n,3])
   vals_tmp=>bmat_tmp(:,1)
   CALL tmp1%get_local(vals_tmp)
@@ -1009,13 +1010,15 @@ ELSE IF((prof_type>=2).AND.(prof_type<=4))THEN ! Compute F or P at all node poin
   CALL c_f_pointer(vals, bmat_tmp, [tMaker_equil_obj%psi%n,1])
   vals_tmp=>bmat_tmp(:,1)
   CALL tmp1%get_local(vals_tmp)
+  CALL field%delete()
   CALL tmp1%delete()
   CALL tmp2%delete()
   DEALLOCATE(tmp1,tmp2)
 ELSE
   CALL copy_string('Invalid profile type for tokamaker_get_field',error_str)
-  RETURN
 END IF
+CALL solver%delete(.TRUE.)
+DEALLOCATE(solver)
 END SUBROUTINE tokamaker_get_field
 !---------------------------------------------------------------------------------
 !> Compute current density from \f$ \psi \f$ using \f$ \Delta^* \psi \f$ operator
@@ -1113,7 +1116,6 @@ TYPE(oft_lag_bginterp) :: psi_grad
 TYPE(oft_lag_bvcinterp) :: cyl_curl
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-IF(.NOT.ASSOCIATED(tMaker_equil_obj%device%dels_full))CALL build_dels(tMaker_equil_obj%device%dels_full,tMaker_equil_obj%device,"none")
 !
 CALL tMaker_equil_obj%psi%new(u)
 CALL tMaker_equil_obj%psi%new(v)
@@ -1615,26 +1617,35 @@ IF(int_type<0)THEN
   END IF
   RETURN
 END IF
+IF(int_type==1)THEN
+  CALL c_f_pointer(int_obj, b_interp_obj)
+ELSE IF(int_type>=2.AND.int_type<=4)THEN
+  CALL c_f_pointer(int_obj, prof_interp_obj)
+ELSE IF(int_type>=5)THEN
+  CALL c_f_pointer(int_obj, psi_grad_obj)
+END IF
 CALL c_f_pointer(pt_ptr, pts, [3,npts])
 CALL c_f_pointer(field_ptr, field, [dim,npts])
+!$omp parallel do private(cell,f,goptmp,vol,fmin,fmax) if(npts>1000)
 DO i=1,npts
   cell=0
   call bmesh_findcell(tMaker_equil_obj%device%mesh,cell,pts(:,i),f)
-  IF(cell==0)RETURN
+  IF(cell==0)THEN
+    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
+    CYCLE
+  END IF
   fmin=MINVAL(f); fmax=MAXVAL(f)
   IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
-    cell=-ABS(cell)
-    RETURN
+    ! cell=-ABS(cell)
+    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
+    CYCLE
   END IF
   CALL tMaker_equil_obj%device%mesh%jacobian(cell,f,goptmp,vol)
   IF(int_type==1)THEN
-    CALL c_f_pointer(int_obj, b_interp_obj)
     CALL b_interp_obj%interp(cell,f,goptmp,field(:,i))
   ELSE IF(int_type>=2.AND.int_type<=4)THEN
-    CALL c_f_pointer(int_obj, prof_interp_obj)
     CALL prof_interp_obj%interp(cell,f,goptmp,field(:,i))
   ELSE IF(int_type>=5)THEN
-    CALL c_f_pointer(int_obj, psi_grad_obj)
     CALL psi_grad_obj%interp(cell,f,goptmp,field(:,i))
   END IF
 END DO

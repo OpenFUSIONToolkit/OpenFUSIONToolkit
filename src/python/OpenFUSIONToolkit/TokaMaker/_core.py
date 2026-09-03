@@ -3198,9 +3198,10 @@ class TokaMaker_equilibrium():
             raise Exception(error_string.value)
         # Handle gradient of psi, by converting from B-field
         if field_name.upper() == 'DPSI':
-            field_vals[0,:] = field_vals[0,:] / self._tMaker.r[:,0]
-            field_vals[2,:] = field_vals[2,:] / self._tMaker.r[:,0]
-            field_vals = field_vals[[0,2],:].copy() # Force new array instead of view
+            field_old = field_vals
+            field_vals = numpy.zeros((2,self._tMaker.np), dtype=numpy.float64)
+            field_vals[0,:] = field_old[2,:] * self._tMaker.r[:,0]
+            field_vals[1,:] = -field_old[0,:] * self._tMaker.r[:,0]
         if ifield == 1:
             return field_vals.transpose()
         else:

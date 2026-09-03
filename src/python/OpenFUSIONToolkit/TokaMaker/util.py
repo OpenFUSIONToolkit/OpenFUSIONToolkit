@@ -431,10 +431,7 @@ def compute_forces_components(tMaker_obj,psi,cell_centered=False):
     tMaker_obj.set_psi(psi)
     field_eval = tMaker_obj.get_field_eval('B')
     B_cond = numpy.zeros((tMaker_obj.r.shape[0],3))
-    for i in range(tMaker_obj.r.shape[0]):
-        if pt_mask[i] == 0:
-            continue
-        B_cond[i,:] = field_eval.eval(tMaker_obj.r[i,:2])
+    B_cond[pt_mask==1,:] = field_eval.eval(tMaker_obj.r[pt_mask==1,:2])
     tMaker_obj.set_psi(psi_save) # Reset psi
 
     if cell_centered:
@@ -555,7 +552,7 @@ def get_jphi_from_GS(ffprime, pprime, R_avg, one_over_R_avg):
     return ffprime * (one_over_R_avg / mu0) + R_avg * pprime
 
 
-def eval_NT_H_proxy(equil, psi_surf=0.9, theta_padding=None, ax_1d=None, ax_2d=None, shear_padding=[None, None]):
+def eval_NT_H_proxy(equil, psi_surf=0.9, theta_padding=None, ax_1d=None, ax_2d=None, shear_padding=None):
     r'''! Evaluate approximate metric for H-mode accesibility for NT plasmas using relative position of shear and curvature points.
 
     [A.O. Nelson et al., Nucl. Fusion 62, 096020 (2022)]
@@ -566,7 +563,7 @@ def eval_NT_H_proxy(equil, psi_surf=0.9, theta_padding=None, ax_1d=None, ax_2d=N
     @param ax_1d Optional matplotlib axis to plot 1D information
     @param ax_2d Optional matplotlib axis to plot 2D information
     @param shear_padding Padding for the shear plotting if ax_2d is provided (default: [0.05, 0.99])
-    @result Accesibility criterion at top and bottom of the plasma (True = accessible, False = inaccessible)
+    @result Accesibility criterion at bottom and top of the plasma (True = accessible, False = inaccessible)
     '''
     # Trace desired flux surface
     surf_pts = equil.trace_surf(psi_surf,500)
@@ -620,7 +617,7 @@ def eval_NT_H_proxy(equil, psi_surf=0.9, theta_padding=None, ax_1d=None, ax_2d=N
 
     if ax_2d is not None:
         # Compute dot( grad(B^2), grad(psi)) on all node in the plasma regions
-        pt_mask = numpy.zeros((equil._tMaker.np,), dtype=numpy.bool)
+        pt_mask = numpy.zeros((equil._tMaker.np,), dtype=bool)
         pt_mask[equil._tMaker.lc[(equil._tMaker.reg==1),:]] = True
         Bsq = numpy.zeros((equil._tMaker.np,2))
         Bsq[pt_mask,:] = Bsq_interpolator.eval(equil._tMaker.r[pt_mask,:2])
@@ -630,10 +627,8 @@ def eval_NT_H_proxy(equil, psi_surf=0.9, theta_padding=None, ax_1d=None, ax_2d=N
         # Plot
         ax_2d.tricontour(equil._tMaker.r[:,0],equil._tMaker.r[:,1],equil._tMaker.lc[equil._tMaker.reg==1,:],alignment,levels=[0.0],colors='r')
         psi = equil.get_psi()
-        if shear_padding[0] is None:
-            shear_padding[0] = 0.05
-        if shear_padding[1] is None:
-            shear_padding[1] = 0.99
+        if shear_padding is None:
+            shear_padding = [0.05, 0.99]
         mask = numpy.logical_and(equil._tMaker.reg==1,numpy.any(numpy.logical_and(psi>shear_padding[0], psi<shear_padding[1])[equil._tMaker.lc], axis=1))
         shear_arc = numpy.arcsinh(shear)
         ax_2d.tricontourf(equil._tMaker.r[:,0],equil._tMaker.r[:,1],equil._tMaker.lc[mask,:],shear_arc,40)

@@ -238,11 +238,9 @@ do i=1,smesh%nc
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt))THEN
       IF(self%mode==0)THEN
-        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
-        + self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon))
+        itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
-        + .5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+        itor_loc = 0.5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
       END IF
       ! Handle anisotropic pressure
       IF(ASSOCIATED(self%P_ani))THEN

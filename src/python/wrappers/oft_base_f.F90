@@ -312,6 +312,7 @@ IF(int_type<0)THEN
     DEALLOCATE(br_obj)
   CASE(212)
     CALL c_f_pointer(int_obj, bg_obj)
+    CALL bg_obj%u%delete()
     DEALLOCATE(bg_obj%u)
     CALL bg_obj%delete
     DEALLOCATE(bg_obj)
@@ -334,29 +335,32 @@ END SELECT
 !---Sample fields
 CALL c_f_pointer(pt_ptr, pts, [3,npts])
 CALL c_f_pointer(field_ptr, field, [dim,npts])
+!$omp parallel do private(cell,f,goptmp,vol,fmin,fmax) if(npts>1000)
 DO i=1,npts
   cell=0
-  IF(int_type>200.AND.int_type<300)THEN
+  IF((int_type>200).AND.(int_type<300))THEN
     call bmesh_findcell(smesh,cell,pts(:,i),f)
-  ELSE IF(int_type>300.AND.int_type<400)THEN
+  ELSE IF((int_type>300).AND.(int_type<400))THEN
     call mesh_findcell(vmesh,cell,pts(:,i),f)
   ELSE
     CALL oft_abort("Invalid field spatial dimension","oft_apply_field_eval",__FILE__)
   END IF
-  IF(cell==0)RETURN
+  IF(cell==0)THEN
+    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
+    CYCLE
+  END IF
   fmin=MINVAL(f); fmax=MAXVAL(f)
   IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
-    cell=-ABS(cell)
-    RETURN
+    ! cell=-ABS(cell)
+    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
+    CYCLE
   END IF
   SELECT CASE(int_type)
   CASE(211)
     goptmp=0.d0
-    CALL c_f_pointer(int_obj, br_obj)
     CALL br_obj%interp(cell,f,goptmp,field(:,i))
   CASE(212)
     CALL smesh%jacobian(cell,f,goptmp,vol)
-    CALL c_f_pointer(int_obj, bg_obj)
     CALL bg_obj%interp(cell,f,goptmp,field(:,i))
   END SELECT
 END DO

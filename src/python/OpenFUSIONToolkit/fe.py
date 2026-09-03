@@ -54,10 +54,9 @@ class Lagrange_surface_field_interpolator():
     def eval(self,pts):
         '''! Evaluate field at a given location
 
-        @param pts Location for evaluation [3]
+        @param pts Location for evaluation [3] or [n,3]
         @result Field at evaluation point [self.dim]
         '''
-        pts = numpy.ascontiguousarray(pts, dtype=numpy.float64)
         if pts.ndim == 1:
             in_1d = True
             npts = 1
@@ -65,9 +64,11 @@ class Lagrange_surface_field_interpolator():
         else:
             in_1d = False
             npts = pts.shape[0]
-        pts_eval = numpy.zeros((npts,3), dtype=numpy.float64)
+        if pts.shape[1] != 3:
+            raise ValueError('Input points must be 3D coordinates')
+        pts = numpy.ascontiguousarray(pts, dtype=numpy.float64)
         vals_out = numpy.zeros((npts,self._dim_eval), dtype=numpy.float64)
-        oft_apply_field_eval(self._fe_obj,self._int_obj,self._int_type,pts_eval,npts,self.fbary_tol,self._dim_eval,vals_out)
+        oft_apply_field_eval(self._fe_obj,self._int_obj,self._int_type,pts,npts,self.fbary_tol,self._dim_eval,vals_out)
         if in_1d:
             return vals_out[0,:self.dim].copy()
         else:
@@ -92,7 +93,7 @@ class Lagrange_2D_field_interpolator(Lagrange_surface_field_interpolator):
     def eval(self,pts):
         '''! Evaluate field at a given location
 
-        @param pt Location for evaluation [2]
+        @param pts Location for evaluation [2] or [n,2]
         @result Field at evaluation point [self.dim_return]
         '''
         pts = numpy.ascontiguousarray(pts, dtype=numpy.float64)
@@ -103,6 +104,8 @@ class Lagrange_2D_field_interpolator(Lagrange_surface_field_interpolator):
         else:
             in_1d = False
             npts = pts.shape[0]
+        if pts.shape[1] != 2:
+            raise ValueError('Input points must be 2D coordinates')
         pts_eval = numpy.zeros((npts,3), dtype=numpy.float64)
         pts_eval[:,:2] = pts
         vals_out = numpy.zeros((npts,self._dim_eval), dtype=numpy.float64)
