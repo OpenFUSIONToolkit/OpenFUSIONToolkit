@@ -57,9 +57,9 @@ tokamaker_destroy = ctypes_subroutine(oftpy_lib.tokamaker_destroy,
 tokamaker_equil_destroy = ctypes_subroutine(oftpy_lib.tokamaker_equil_destroy,
     [c_void_p, c_char_p])
 
-# tokamaker_load_profiles(tMaker_equil_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str)
+# tokamaker_load_profiles(tMaker_equil_ptr,f_file,f_offset,f_SOL,p_file,eta_file,f_NI_file,error_str)
 tokamaker_load_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_profiles,
-    [c_void_p, c_char_p, c_double, c_char_p, c_char_p, c_char_p, c_char_p])
+    [c_void_p, c_char_p, c_double, c_bool, c_char_p, c_char_p, c_char_p, c_char_p])
 
 # tokamaker_get_profile_ndofs(tMaker_equil_ptr,prof_type,ndofs,error_str)
 tokamaker_get_profile_ndofs = ctypes_subroutine(oftpy_lib.tokamaker_get_profile_ndofs,

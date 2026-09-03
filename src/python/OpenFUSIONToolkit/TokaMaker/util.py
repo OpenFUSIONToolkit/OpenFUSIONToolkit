@@ -452,18 +452,12 @@ def read_mhdin(path, e_coil_names=None, f_coil_names=None):
     @param e_coil_names Names of E coils (hardcoded, generates indexed names if None)
     @param f_coil_names Names of F coils (hardcoded, generates indexed names if None)
     @result machine_dict Dictionary containing coil coordinates and turns, loop names, and probe names and angles.
+            machine_dict['PROBE] contains Mirnov probe locations and machine_dict['LOOP'] contains flux loop locations.
     @result raw Dictionary containing all other data from mhdin.dat
     '''
     raw = read_fortran_namelist(path)
     machine_dict = OrderedDict()
-
-    # Expand later
-    keys = ['MPNAM2', 'LPNAME']
-    for key in keys:
-        names = raw[key].replace("'", " ")
-        names = names.split()
-        machine_dict[key] = names
-
+            
     e_coil_dict = OrderedDict()
 
     for i in range(len(raw['ECID'])):
@@ -484,13 +478,15 @@ def read_mhdin(path, e_coil_names=None, f_coil_names=None):
         f_coil_dict[f_coil_name] = [float(raw['RF'][i]), float(raw['ZF'][i]), float(raw['WF'][i]), float(raw['HF'][i]), float(raw['TURNFC'][i])]
     machine_dict['FCOIL'] = f_coil_dict
 
-    probe_angle_dict = OrderedDict()
-    i = 0
-    probe_angles = raw['AMP2']
-    for probe_name in machine_dict['MPNAM2']:
-        probe_angle_dict[probe_name] = float(probe_angles[i])
-        i = i + 1
-    machine_dict['AMP2'] = probe_angle_dict
+    probe_names = raw['MPNAM2'].replace('\'', '').split()
+    machine_dict['PROBE'] = OrderedDict()
+    for i, probe_name in enumerate(probe_names):
+        machine_dict['PROBE'][probe_name] = [raw['XMP2'][i], raw['YMP2'][i], raw['AMP2'][i]]
+
+    floop_names = raw['LPNAME'].replace('\'', '').split()
+    machine_dict['LOOP'] = OrderedDict()
+    for i, floop_name in enumerate(floop_names):
+        machine_dict['LOOP'][floop_name] = [raw['RSI'][i], raw['ZSI'][i]]
 
     return machine_dict, raw
 
@@ -503,20 +499,20 @@ def read_kfile(path, machine_dict, e_coil_names=None, f_coil_names=None):
     @param machine_dict Result from read_mhdin (contents of mhdin.dat file)
     @result probes_dict Dictionary containing probe values and weights (0 if not selected).
     @result loops_dict Dictionary containing loop values and weights (0 if not selected).
-    @result e_coil_dict Dictionary containing E copil values and weights (0 if not selected).
+    @result e_coil_dict Dictionary containing E coil values and weights (0 if not selected).
     @result f_coil_dict Dictionary containing F coil values and weights (0 if not selected).
     @result raw Dictionary containing all other data from k-file.
     '''
     raw = read_fortran_namelist(path)
-
-    probe_names = machine_dict['MPNAM2']
+    
+    probe_names = list(machine_dict['PROBE'].keys())
     probe_vals = raw['EXPMP2']
     probe_weights = raw['FWTMP2']
     probes_dict = OrderedDict()
     for i in range(len(probe_names)):
         probes_dict[probe_names[i]] = [probe_vals[i], probe_weights[i]]
 
-    loop_names = machine_dict['LPNAME']
+    loop_names = list(machine_dict['LOOP'].keys())
     loop_vals = raw['COILS']
     loop_weights = raw['FWTSI']
     loops_dict = OrderedDict()

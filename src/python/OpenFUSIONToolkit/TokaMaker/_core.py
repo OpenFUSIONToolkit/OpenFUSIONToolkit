@@ -17,7 +17,7 @@ import numpy
 from ._interface import *
 
 
-def create_prof_file(self, filename, profile_dict, name):
+def create_prof_file(self, filename, profile_dict, name, include_sol=False):
     '''! Create profile input file to be read by load_profiles()
 
     @param filename Name of input file, see options in set_profiles()
@@ -25,6 +25,10 @@ def create_prof_file(self, filename, profile_dict, name):
     in normalized Psi ['x']
     @param filename Name of input quantity, see options in set_profiles()
     '''
+    if include_sol and (profile_dict['type'] != 'linterp' and profile_dict['type'] != 'mlinterp'):
+        raise ValueError('Only "linterp" and "mlinterp" profile types support SOL current flag')
+    if name == "P'" and max(profile_dict['x'] > 1.0):
+        raise ValueError("P' profile does not support SOL currents")
     file_lines = [profile_dict['type']]
     if profile_dict['type'] == 'flat':
         pass
@@ -41,7 +45,7 @@ def create_prof_file(self, filename, profile_dict, name):
             y = numpy.array(y.copy())
         if numpy.min(numpy.diff(x)) < 0.0:
             raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
-        if (x[0] < 0.0) or (x[-1] > 1.0):
+        if (x[0] < 0.0) or (x[-1] > 1.0) and not include_sol:
             raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
         if self.psi_convention == 0:
             x = 1.0 - x
@@ -104,7 +108,7 @@ def create_prof_file(self, filename, profile_dict, name):
         for y in y_basis:
             file_lines += ["{0}".format(" ".join(["{0}".format(val) for val in y]))]
     else:
-        raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp")')
+        raise KeyError('Invalid profile type ("flat", "linterp", "mlinterp", "jphi-linterp", "jphi-mlinterp")')
     with open(filename, 'w+') as fid:
         fid.write("\n".join(file_lines))
 
@@ -431,6 +435,7 @@ class TokaMaker():
         self.ncoils = ncoils.value
         self.Lcoils = numpy.ctypeslib.as_array(Lmat_loc,shape=(self.ncoils,self.ncoils))
         # Create equilibirum object
+        print('Creating EQ object')
         self._tMaker_equil = TokaMaker_equilibrium(self)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_equil_set(self._tMaker_ptr,self._tMaker_equil.c_ptr,error_string)
@@ -779,7 +784,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise ValueError("Error in initialization: {0}".format(error_string.value.decode()))
 
-    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
+    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none', f_SOL=None):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
@@ -787,12 +792,13 @@ class TokaMaker():
         @param p_file File containing \f$P'\f$ definition
         @param eta_file File containing $\eta$ definition
         @param f_NI_file File containing non-inductive \f$F*F'\f$ definition
+        @param f_SOL Use Scrape-Off Layer current (boolean).
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.load_profiles(f_file,foffset,p_file,eta_file,f_NI_file)
+        return self._tMaker_equil.load_profiles(f_file,foffset,f_SOL,p_file,eta_file,f_NI_file)
 
-    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
+    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False, f_SOL=None):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
         @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations in normalized Psi ['x']
@@ -800,11 +806,12 @@ class TokaMaker():
         @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations in normalized Psi ['x']
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
+        @param f_SOL Use Scrape-Off Layer current (boolean).
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files)
-
+        return self._tMaker_equil.set_profiles(ffp_prof,foffset,pp_prof,ffp_NI_prof,keep_files,f_SOL=f_SOL)
+    
     def get_profile_dofs(self, prof_type):
         r'''! Retrieve degrees of freedom for desired flux profile
 
@@ -2209,7 +2216,72 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
+    def get_strike_points(self):
+        lim = self.lim_contours[0] # Assume one limiter
+        lim = [numpy.array(pt) for pt in lim]
 
+        psi_eval = self.get_field_eval('PSI')
+        psi_LCFS = self.psi_bounds[0]
+
+        strike_pts = []
+        prev_pt = lim[-1]
+        prev_psi = psi_eval.eval(prev_pt)
+
+        for pt in lim:
+            psi = psi_eval.eval(pt)[0]
+            if prev_psi < psi_LCFS and psi >= psi_LCFS:
+                psi_diff = (psi_LCFS - prev_psi) / (psi - prev_psi)
+                strike_pt = (1.0-psi_diff) * prev_pt + psi_diff * pt
+                strike_pts.append(strike_pt)
+            elif prev_psi > psi_LCFS and psi <= psi_LCFS:
+                psi_diff = (psi_LCFS - psi) / (prev_psi - psi)
+                strike_pt = (1.0-psi_diff) * pt + psi_diff * prev_pt
+                strike_pts.append(strike_pt)
+            prev_pt = pt
+            prev_psi = psi
+        return strike_pts
+
+    def plot_current_density(self, fig, ax, window=None, cmap='viridis'):
+        '''! Plot current density
+
+        @param fig Figure (matplotlib)
+        @param ax Axis (matplotlib)
+        @param window 4-element array (r_min, r_max, z_min, z_max)
+        @param cmap Colormap to use for plot.
+        '''
+        psi = self.get_psi(normalized=False)
+        jphi = self.calc_delstar_curr(psi)
+        jphi_plot = numpy.zeros(self.nc)
+
+        for i in range(self.nc):
+            if self.reg[i] not in [1, 3]:
+                jphi_plot[i] = 0
+                continue # Ignore all regions except plasma and vacuum
+            rz1 = numpy.mean(self.r[self.lc[i]][:2], axis=0)
+            if window is not None and (rz1[0] < window[0] or rz1[0] > window[1] or rz1[1] < window[2] or rz1[1] > window[3]):
+                jphi_plot[i] = 0
+                continue
+            jphi_plot[i] = numpy.mean(jphi[self.lc[i]])
+
+        # Mirror
+        if self.settings.mirror_mode:
+            r_plot = self.r[:,1]
+            z_plot = self.r[:,0]
+        else:
+            r_plot = self.r[:,0]
+            z_plot = self.r[:,1]
+
+        # Convert to MA
+        jphi_plot /= 1.0E6
+        mask = jphi_plot != 0
+        heatmap = ax.tripcolor(
+            r_plot, z_plot,
+            self.lc[mask],
+            facecolors=jphi_plot[mask],
+            cmap=cmap
+        )
+        fig.colorbar(heatmap, ax=ax)
+        
 class TokaMaker_equilibrium():
     '''! TokaMaker G-S equilibrium class'''
     def __init__(self,TokaMaker_obj=None,source_eq=None,skip_targets=False,skip_constraints=False):
@@ -2238,6 +2310,8 @@ class TokaMaker_equilibrium():
         if source_eq is None:
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.F0 "F0" property)
             self._F0 = copy.copy(self._tMaker._F0)
+            # Use scrape-off layer current
+            self._F_SOL = False
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Ip_target "Ip_target" property)
             self._Ip_target = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Ip_ratio_target "Ip_ratio_target" property)
@@ -2263,6 +2337,7 @@ class TokaMaker_equilibrium():
         else:
             self._F0 = copy.copy(source_eq._F0)
             if skip_targets:
+                self._F_SOL = False
                 self._Ip_target = None
                 self._Ip_ratio_target = None
                 self._pax_target = None
@@ -2271,6 +2346,7 @@ class TokaMaker_equilibrium():
                 self._R0_target = None
                 self._Z0_target = None
             else:
+                self._F_SOL = source_eq._F_SOL
                 self._Ip_target = source_eq._Ip_target
                 self._Ip_ratio_target = source_eq._Ip_ratio_target
                 self._pax_target = source_eq._pax_target
@@ -2498,7 +2574,7 @@ class TokaMaker_equilibrium():
         r'''! Mirnov constraint points'''
         return self._mirnov_constraints
 
-    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none'):
+    def load_profiles(self, f_file='none', foffset=None, p_file='none', eta_file='none', f_NI_file='none', f_SOL=None):
         r'''! Load flux function profiles (\f$F*F'\f$ and \f$P'\f$) from files
 
         @param f_file File containing \f$F*F'\f$ (or \f$F'\f$ if `mode=0`) definition
@@ -2506,19 +2582,22 @@ class TokaMaker_equilibrium():
         @param p_file File containing \f$P'\f$ definition
         @param eta_file File containing $\eta$ definition
         @param f_NI_file File containing non-inductive \f$F*F'\f$ definition
+        @param f_SOL Use Scrape-Off Layer current (boolean).
         '''
         if foffset is not None:
             self._F0 = foffset
+        if f_SOL is not None:
+            self._F_SOL = f_SOL
         f_file_c = self._oft_env.path2c(f_file)
         p_file_c = self._oft_env.path2c(p_file)
         eta_file_c = self._oft_env.path2c(eta_file)
         f_NI_file_c = self._oft_env.path2c(f_NI_file)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_load_profiles(self.c_ptr,f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c,error_string)
+        tokamaker_load_profiles(self.c_ptr,f_file_c,c_double(self._F0),c_bool(self._F_SOL),p_file_c,eta_file_c,f_NI_file_c,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
+    def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False, f_SOL=None):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
 
         @param ffp_prof Dictionary object containing FF' profile ['y'] and sampled locations in normalized Psi ['x']
@@ -2526,24 +2605,27 @@ class TokaMaker_equilibrium():
         @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations in normalized Psi ['x']
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
+        @param f_SOL Use Scrape-Off Layer current (boolean).
         '''
         delete_files = []
+        if f_SOL is not None:
+            self._F_SOL = f_SOL
         ffp_file = 'none'
         if ffp_prof is not None:
             ffp_file = self._oft_env.unique_tmpfile('tokamaker_f.prof')
-            create_prof_file(self, ffp_file, ffp_prof, "F*F'")
+            create_prof_file(self, ffp_file, ffp_prof, "F*F'", self._F_SOL)
             delete_files.append(ffp_file)
         pp_file = 'none'
         if pp_prof is not None:
             pp_file = self._oft_env.unique_tmpfile('tokamaker_p.prof')
-            create_prof_file(self, pp_file, pp_prof, "P'")
+            create_prof_file(self, pp_file, pp_prof, "P'", self._F_SOL)
             delete_files.append(pp_file)
         ffp_NI_file = 'none'
         if ffp_NI_prof is not None:
             ffp_NI_file = self._oft_env.unique_tmpfile('tokamaker_ffp_NI.prof')
             create_prof_file(self, ffp_NI_file, ffp_NI_prof, "ffp_NI")
             delete_files.append(ffp_NI_file)
-        self.load_profiles(f_file=ffp_file,foffset=foffset,p_file=pp_file,f_NI_file=ffp_NI_file)
+        self.load_profiles(f_file=ffp_file,foffset=foffset,f_SOL=f_SOL,p_file=pp_file,f_NI_file=ffp_NI_file)
         if not keep_files:
             for file in delete_files:
                 try:

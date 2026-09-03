@@ -37,6 +37,7 @@ USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile
   sauter_fc, gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
+USE oft_gs_profiles, ONLY: linterp_flux_func, mlinterp_flux_func
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
@@ -419,11 +420,12 @@ END SUBROUTINE tokamaker_setup
 !---------------------------------------------------------------------------------
 !> Load profile specification files
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_load_profiles(tMaker_equil_ptr,f_file,f_offset,p_file,eta_file,f_NI_file,error_str) BIND(C,NAME="tokamaker_load_profiles")
+SUBROUTINE tokamaker_load_profiles(tMaker_equil_ptr,f_file,f_offset,f_SOL,p_file,eta_file,f_NI_file,error_str) BIND(C,NAME="tokamaker_load_profiles")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 CHARACTER(KIND=c_char), INTENT(in) :: f_file(OFT_PATH_SLEN) !< F*F' prof.in file
 CHARACTER(KIND=c_char), INTENT(in) :: p_file(OFT_PATH_SLEN) !< P' prof.in file
 REAL(c_double), VALUE, INTENT(in) :: f_offset !< Vacuum F_0 value (must be > -1E98 to update)
+LOGICAL(c_bool), VALUE, INTENT(in) :: f_SOL !< SOL current flag
 CHARACTER(KIND=c_char), INTENT(in) :: eta_file(OFT_PATH_SLEN) !< Resistivity (eta) profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: f_NI_file(OFT_PATH_SLEN) !< Non-inductive F*F' profile specification file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
@@ -441,6 +443,19 @@ IF(TRIM(tmp_str)/='none')THEN
   tMaker_equil_obj%I=>prof_tmp
 END IF
 IF(f_offset>-1.d98)tMaker_equil_obj%I%f_offset=f_offset
+IF(f_sol)THEN
+  CALL oft_warn("Scrape-Off Layer support is experimental. Use with caution.")
+  SELECT TYPE(this=>tMaker_equil_obj%I)
+  TYPE IS(linterp_flux_func)
+    ! Do nothing, this profile supports SOL current flag
+  TYPE IS(mlinterp_flux_func)
+    ! Do nothing, this profile supports SOL current flag
+  CLASS DEFAULT
+    CALL copy_string("F*F' profile type does not support SOL current flag",error_str)
+    RETURN
+  END SELECT
+  tMaker_equil_obj%I%include_sol=f_sol
+END IF
 CALL copy_string_rev(p_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%P)
 CALL copy_string_rev(eta_file,tmp_str)
@@ -648,6 +663,8 @@ LOGICAL :: fitI,fitP,fit_Pscale,fit_FFPscale,fitR0,fitZ0,fitCoils,fitF0,fixedCen
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
 CHARACTER(LEN=OFT_PATH_SLEN) :: infile,outfile
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+INTEGER(i4) :: ierr
+ierr = 0
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj))THEN
   error_flag=-100
   RETURN
@@ -676,7 +693,8 @@ CALL copy_string_rev(outfile_c,outfile)
 tMaker_obj%device%timing=0.d0
 CALL fit_gs(tMaker_obj%gs_equil,infile,outfile,fitI,fitP,fit_Pscale,&
             fit_FFPscale,fitR0,fitZ0,fitCoils,fitF0, &
-            fixedCentering)
+            fixedCentering, ierr)
+if(ierr /= 0)error_flag = ierr
 CALL gs_profile_save(TRIM(outfile)//'_fprof',tMaker_obj%gs_equil%I)
 CALL gs_profile_save(TRIM(outfile)//'_pprof',tMaker_obj%gs_equil%P)
 tMaker_obj%gs_equil%has_plasma=vac_save
