@@ -3390,7 +3390,7 @@ do j=1,device%fe_rep%mesh%nc
       END IF
       ! ffp([1,3]) = ffp([1,3]) + [self%pnorm,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
       ! estore = estore + (self%P%F(psitmp))*v*self%fe_rep%quad%wts(m)*pt(1)
-      itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*device%fe_rep%quad%wts(m)
+      ! itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*device%fe_rep%quad%wts(m)
     END IF
     pt(1) = MAX(pt(1),gs_epsilon)
     ffp = ffp*det/pt(1)

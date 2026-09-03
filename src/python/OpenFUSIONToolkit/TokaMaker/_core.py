@@ -27,6 +27,8 @@ def create_prof_file(self, filename, profile_dict, name, include_sol=False):
     '''
     if include_sol and (profile_dict['type'] != 'linterp' and profile_dict['type'] != 'mlinterp'):
         raise ValueError('Only "linterp" and "mlinterp" profile types support SOL current flag')
+    if name == "P'" and max(profile_dict['x'] > 1.0):
+        raise ValueError("P' profile does not support SOL currents")
     file_lines = [profile_dict['type']]
     if profile_dict['type'] == 'flat':
         pass
