@@ -75,21 +75,16 @@ def test_current_consistent():
 
     x = np.linspace(0.0, 1.0, len(ffprim))
     x_sol = np.linspace(1.01, 1.3, 25)
+    x_ffp = np.append(x, x_sol)
 
-    x = np.linspace(0.0, 1.0, len(ffprim))
-    x_sol = np.linspace(1.01, 1.3, 25)
-    x = np.append(x, x_sol)
-    pprime = np.append(pprime, len(x_sol) * [0.0])
     ffprim = np.append(ffprim, len(x_sol) * [0.0]) 
 
     def supergaussian(psi_n, centr, std=0.05):
         return np.exp(-(psi_n - centr) ** 4 / (2 * std**4))
 
-    ffp_bump = 0.1 * supergaussian(x, 1.15, std=0.12)
+    ffp_bump = 0.1 * supergaussian(x_ffp, 1.15, std=0.12)
     ffprim += ffp_bump
-    pp_bump = 0.1 * supergaussian(x, 1.15, std=0.12)
-    pprime += pp_bump
-    mygs.set_profiles(ffp_prof={'type': 'linterp', 'y': ffprim, 'x': x},pp_prof={'type': 'linterp', 'y': pprime, 'x': x}, f_SOL=True)
+    mygs.set_profiles(ffp_prof={'type': 'linterp', 'y': ffprim, 'x': x_ffp},pp_prof={'type': 'linterp', 'y': pprime, 'x': x}, f_SOL=True)
 
     R0 = 1.7
     Z0 = 0.0
