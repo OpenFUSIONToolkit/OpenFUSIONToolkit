@@ -3,6 +3,7 @@
     <pre type="gmres">
       <its>2</its>
       <nrits>2</nrits>
+      <atol>1E-11</atol>
       <pre type="block_jacobi">
         <nlocal>1</nlocal>
         <solver type="lu"></solver>

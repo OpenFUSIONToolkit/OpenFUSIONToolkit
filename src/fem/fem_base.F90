@@ -2217,20 +2217,23 @@ END IF
 !---Local connectivity
 !---Determine location of boundary points on other processors
 neel=0
-!$omp parallel do private(mm) reduction(+:neel)
-do m=1,self%nbe ! Loop over boundary points
-  do mm=1,self%nbe ! Loop over input points
-    if(m==mm)CYCLE
-    if(leout(m)==leout(mm))then ! Found match
-      !$omp critical
-      ncon(0)=ncon(0)+1
-      linktmp(:,ncon(0),0)=(/mm,m/)
-      !$omp end critical
-      neel=neel+1
-    end if
-    if(leout(mm)==0)exit ! End of input points
+IF(self%mesh%periodic%nper>0)THEN
+  !$omp parallel do private(mm) reduction(+:neel)
+  do m=1,self%nbe ! Loop over boundary points
+    do mm=m+1,self%nbe ! Loop over input points
+      if(leout(m)==leout(mm))then ! Found match
+        !$omp critical
+        ncon(0)=ncon(0)+1
+        linktmp(:,ncon(0),0)=(/mm,m/)
+        ncon(0)=ncon(0)+1
+        linktmp(:,ncon(0),0)=(/m,mm/)
+        !$omp end critical
+        neel=neel+2
+      end if
+      if(leout(mm)==0)exit ! End of input points
+    end do
   end do
-end do
+END IF
 self%linkage%kle(0)=neel
 !---Condense linkage to sparse rep
 self%linkage%nle=sum(self%linkage%kle)
