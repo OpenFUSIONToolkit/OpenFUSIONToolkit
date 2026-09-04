@@ -1212,19 +1212,19 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
 # Expected values dictionary
 # -----------------------------------------------------------------------
 ITER_bootstrap_eq_dict = {
-    'Ip': 15600817.585821694,
-    'kappa': 1.87554142781964,
-    'R_geo': 6.222376807932244,
-    'a_geo': 1.9817209643036526,
-    'q_0': 0.9951304914765554,
-    'q_95': 2.856235920791585,
-    'P_ax': 739971.7132708698,
-    'j_BS_max': 193963.2797949608,
-    'j_BS_axis': 7555.958566625245,
-    'jphi_axis': 1459409.3677809385,
-    'jphi_max': 1551188.1280449552,
-    'j_ind_axis': 1357487.1677957429,
-    'bs_fraction': 0.1575907471180497,
+    'Ip': 15599995.005297558,
+    'kappa': 1.8756201041390395,
+    'R_geo': 6.222398878914673,
+    'a_geo': 1.9812095318679077,
+    'q_0': 1.0003453863455334,
+    'q_95': 2.850975301589531,
+    'P_ax': 740025.054814244,
+    'j_BS_max': 194617.71663981146,
+    'j_BS_axis': 5463.030180037696,
+    'jphi_axis': 1449201.5709280553,
+    'jphi_max': 1546301.0419844517,
+    'j_ind_axis': 1359327.795694679,
+    'bs_fraction': 0.15830066097468243,
 }
 
 @pytest.mark.slow
@@ -1366,24 +1366,27 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     pressure = (EC * ne * Te) + (EC * ni * Ti)
 
     # --- Extract geometry from equilibrium (same as solve_with_bootstrap) ---
-    _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-    _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
+    # Equilibrium quantities on the profile grid (same convention as
+    # solve_with_bootstrap); endpoints clipped for the flux-surface tracer
+    psi_eval = np.clip(psi_N, psi_pad, 1.0 - psi_pad)
+    _, f, _, _, _ = mygs.get_profiles(psi=psi_eval)
+    _, fc, r_avgs, _ = mygs.sauter_fc(psi=psi_eval)
 
     ft = 1 - fc
     eps = r_avgs['<a>'] / r_avgs['<R>']
-    _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+    _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
     R_avg = ravgs_q['<R>']
 
     # --- Gradients (same as solve_with_bootstrap) ---
+    # Second-order one-sided stencils at the axis/edge, matching the derivative
+    # path used by solve_with_bootstrap
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
-    d_psi = np.gradient(psi_N)
-    d_psi_eff = d_psi * psi_range
-    d_psi_eff[d_psi_eff == 0] = 1e-9
+    psi_range_safe = psi_range if psi_range != 0 else 1e-9
 
-    dn_e_dpsi = np.gradient(ne) / d_psi_eff
-    dT_e_dpsi = np.gradient(Te) / d_psi_eff
-    dn_i_dpsi = np.gradient(ni) / d_psi_eff
-    dT_i_dpsi = np.gradient(Ti) / d_psi_eff
+    dn_e_dpsi = np.gradient(ne, psi_N, edge_order=2) / psi_range_safe
+    dT_e_dpsi = np.gradient(Te, psi_N, edge_order=2) / psi_range_safe
+    dn_i_dpsi = np.gradient(ni, psi_N, edge_order=2) / psi_range_safe
+    dT_i_dpsi = np.gradient(Ti, psi_N, edge_order=2) / psi_range_safe
 
     # --- Coulomb logarithms (same as solve_with_bootstrap) ---
     ln_le, ln_lii = calculate_ln_lambda(
@@ -1440,15 +1443,74 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     oftpy_dump_cov()
 
 
+#============================================================================
+# Validation of the optional `psi_N` grid argument to `solve_with_bootstrap`.
+# These exercise input checking only (which happens before the solver object is
+# touched), so they are fast and run in the default CI selection.
+@pytest.mark.coverage
+def test_bootstrap_psi_N_validation():
+    from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap
+    n = 65
+    ne = np.full(n, 1.0e20)
+    Te = np.full(n, 2.0e3)
+    Zeff = np.full(n, 1.7)
+    def call(psi_N):
+        return solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), Zeff,
+                                    1.0e6, psi_N=psi_N)
+    good = np.linspace(0.0, 1.0, n)
+    # wrong length
+    with pytest.raises(ValueError, match="same length"):
+        call(np.linspace(0.0, 1.0, n-1))
+    # duplicated flux label -> undefined derivative
+    dup = good.copy(); dup[32] = dup[31]
+    with pytest.raises(ValueError, match="strictly increasing"):
+        call(dup)
+    # unsorted
+    unsorted_grid = good.copy(); unsorted_grid[10], unsorted_grid[11] = good[11], good[10]
+    with pytest.raises(ValueError, match="strictly increasing"):
+        call(unsorted_grid)
+    # non-finite
+    nan_grid = good.copy(); nan_grid[5] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        call(nan_grid)
+    # out of range
+    with pytest.raises(ValueError, match=r"within \[0,1\]"):
+        call(np.linspace(-0.1, 1.0, n))
+    # psi_pad coarser than the grid would collapse distinct flux surfaces
+    with pytest.raises(ValueError, match="larger than the first/last"):
+        solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), Zeff, 1.0e6,
+                             psi_N=good, psi_pad=0.5)
+
+
+@pytest.mark.coverage
+def test_bootstrap_derivative_edge_order():
+    """Profile derivatives must use a 2nd-order stencil at the axis and edge.
+
+    The first-order default of `numpy.gradient` is badly inaccurate at the
+    magnetic axis, where it propagates directly into on-axis j_BS.
+    """
+    psi = np.linspace(0.0, 1.0, 257)
+    # analytic profile with a known slope
+    y = np.tanh(6.0*(0.9-psi)) + 0.3*np.cos(3.0*psi)
+    exact = -6.0/np.cosh(6.0*(0.9-psi))**2 - 0.9*np.sin(3.0*psi)
+    d2 = np.gradient(y, psi, edge_order=2)
+    d1 = np.gradient(y, psi, edge_order=1)
+    # 2nd-order endpoint is dramatically better at the axis
+    assert abs(d2[0]-exact[0]) < 0.1*abs(d1[0]-exact[0])
+    assert abs(d2[-1]-exact[-1]) < 0.5*abs(d1[-1]-exact[-1])
+    # and matches the analytic slope closely in the interior
+    assert np.linalg.norm(d2[1:-1]-exact[1:-1])/np.linalg.norm(exact[1:-1]) < 5.e-3
+
+
 Redl_jBS_eq_dict = {
-    'j_BS_max': 186871.6671880487,
-    'j_BS_axis': 6884.411685375865,
-    'j_BS_edge': 99805.65713701912,
-    'L31_axis': 0.11407690451043999,
-    'L32_axis': -0.02350066144455873,
-    'alpha_axis': -0.6540121192349444,
-    'nu_e_star_axis': 0.2522534932532852,
-    'nu_i_star_axis': 0.2194433170749313,
+    'j_BS_max': 186852.37639066574,
+    'j_BS_axis': 4947.428045838814,
+    'j_BS_edge': 95960.3268758662,
+    'L31_axis': 0.11422862302537663,
+    'L32_axis': -0.02358142633558105,
+    'alpha_axis': -0.6541022585240726,
+    'nu_e_star_axis': 0.25167544799360553,
+    'nu_i_star_axis': 0.2189404571637855,
 }
 
 
