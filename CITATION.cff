@@ -1,0 +1,119 @@
+cff-version: 1.2.0
+title: Open FUSION Toolkit
+version: '26.9'
+date-released: '2026-09-08'
+type: software
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file -- including the appropriate
+  tool-specific publication(s) listed in the
+  references section.
+authors:
+  - given-names: Anson
+    family-names: Braun
+  - given-names: Daniel
+    family-names: Burgess
+  - given-names: Samuel
+    family-names: Freiberger
+  - given-names: Sophia
+    family-names: Guizzo
+  - given-names: Chris
+    family-names: Hansen
+  - given-names: Joseph
+    family-names: Jerkins
+  - given-names: Julia
+    family-names: Kirby
+  - given-names: John
+    family-names: Lhota
+  - given-names: Francois
+    family-names: Logak
+  - given-names: A. Oak
+    family-names: Nelson
+  - given-names: Matthew
+    family-names: Parsons
+  - given-names: Matthew
+    family-names: Pharr
+  - given-names: Jeremy
+    family-names: Salm
+  - given-names: Benjy
+    family-names: Smith
+  - given-names: Thomas
+    family-names: Wang
+  - given-names: Yunfei
+    family-names: Zhao
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.10306801
+    description: Zenodo DOI for all versions
+  - type: url
+    value: "https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit/releases/tag/v26.9"
+    description: The GitHub release URL for this version (26.9)
+repository-code: 'https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit'
+url: 'https://openfusiontoolkit.github.io/OpenFUSIONToolkit/'
+license: LGPL-3.0
+keywords:
+  - fusion
+  - MHD
+  - Grad-Shafranov
+  - Electromagnetics
+abstract: >-
+  The Open FUSION Toolkit (OFT) is a suite of modeling
+  tools, and their underlying finite element framework, for
+  problems in plasma and fusion research and engineering in
+  arbitrary 2D and 3D geometries. The underlying framework
+  and its component tools support the use of variable order
+  finite element methods on unstructured tetrahedral
+  (triangular) or hexahedral (quadralateral) grids.
+references:
+  - type: article
+    scope: Please cite this paper if you use ThinCurr
+    title: "ThinCurr: A 3D thin-wall eddy current modeling code for the design of magnetic confinement fusion devices"
+    year: 2025
+    journal: Computer Physics Communications
+    volume: 315
+    number: 109713
+    doi: 10.1016/j.cpc.2025.109713
+    authors:
+      - given-names: Christopher
+        family-names: Hansen      
+        orcid: "https://orcid.org/0000-0001-6928-5815"
+      - given-names: Alexander
+        family-names: Battey
+      - given-names: Anson
+        family-names: Braun
+      - given-names: Michael
+        family-names: Lagieski
+      - given-names: Sander
+        family-names: Miller
+      - given-names: Ian
+        family-names: Stewart
+      - given-names: Ryan
+        family-names: Sweeney
+      - given-names: Carlos
+        family-names: Paz-Soldan
+  - type: article
+    scope: Please cite this paper if you use TokaMaker
+    title: "TokaMaker: An open-source time-dependent Grad-Shafranov tool for the design and modeling of axisymmetric fusion devices"
+    year: 2024
+    journal: Computer Physics Communications
+    volume: 289
+    number: 109111
+    doi: 10.1016/j.cpc.2024.109111
+    authors:
+      - given-names: Christopher
+        family-names: Hansen      
+        orcid: "https://orcid.org/0000-0001-6928-5815"
+      - given-names: Ian
+        family-names: Stewart
+      - given-names: Daniel
+        family-names: Burgess
+      - given-names: Matthew
+        family-names: Pharr
+      - given-names: Sophia
+        family-names: Guizzo
+      - given-names: Francois
+        family-names: Logak
+      - given-names: A. Oak
+        family-names: Nelson  
+      - given-names: Carlos
+        family-names: Paz-Soldan
