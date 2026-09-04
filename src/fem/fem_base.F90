@@ -2051,6 +2051,7 @@ CALL oft_abort("Distributed linkage requires MPI","bfem_global_linkage",__FILE__
   DEALLOCATE(lesend,lerecv)
   !---Construct map
   ALLOCATE(self%map)
+  self%map%per=(mesh%periodic%nper>0) ! Not sure if this should be here or not
   self%map%offset=0
   self%map%n=0
   self%map%ng=self%global%ne
@@ -2306,6 +2307,7 @@ DEALLOCATE(lesend(1)%le)
 DEALLOCATE(lesend,lerecv)
 !---Construct map
 ALLOCATE(self%map)
+self%map%per=(mesh%periodic%nper>0)
 self%map%offset=0
 self%map%n=self%ne
 self%map%ng=self%global%ne
