@@ -237,7 +237,7 @@ TYPE :: gs_factory
   CLASS(oft_matrix), POINTER :: mop => NULL() !< Lagrange FE mass matrix
   CLASS(oft_matrix), POINTER :: mop_axis => NULL() !< Lagrange FE mass matrix with Dirichlet BCs on axis
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Mesh
-  CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< Lagrange FE representation
+  TYPE(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< Lagrange FE representation
   TYPE(oft_ml_fem_type), POINTER :: ML_fe_rep => NULL() !< Multi-level Lagrange FE representation (only top level used)
   TYPE(oft_blag_zerob), POINTER :: zerob_bc => NULL() !< BC object for zeroing boundary nodes
   TYPE(oft_blag_zerogrnd), POINTER :: zerogrnd_bc => NULL() !< BC object for zeroing grounding node(s)
@@ -4720,7 +4720,7 @@ SELECT CASE(self%mode)
     ELSE
       val(1)=self%equil%psiscale*self%equil%I%f_offset
     END IF
-  CASE(3)
+  CASE(3) ! Isotropic pressure or perpendicular component for anisotropic pressure
     CALL self%psi_eval%interp(cell,f,gop,psitmp)
     IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
       ! Handle anisotropic pressure
@@ -4738,6 +4738,19 @@ SELECT CASE(self%mode)
     CALL self%psi_eval%interp(cell,f,gop,psitmp)
     IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
       val(1)=(psitmp(1)-self%equil%plasma_bounds(1))/(self%equil%plasma_bounds(2)-self%equil%plasma_bounds(1))
+    ELSE
+      val(1)=0.d0
+    END IF
+  CASE(5) ! Isotropic pressure or parallel component for anisotropic pressure
+    CALL self%psi_eval%interp(cell,f,gop,psitmp)
+    IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
+      ! Handle anisotropic pressure
+      IF(ASSOCIATED(self%equil%P_ani))THEN
+        CALL self%equil%P_ani%interp(cell,f,gop,pani)
+        val(1) = (self%equil%psiscale**2)*self%equil%p_scale*self%equil%P%F(psitmp(1))*pani(1)/mu0
+      ELSE
+        val(1) = (self%equil%psiscale**2)*self%equil%p_scale*self%equil%P%F(psitmp(1))/mu0
+      END IF
     ELSE
       val(1)=0.d0
     END IF

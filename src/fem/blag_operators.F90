@@ -76,6 +76,9 @@ end type oft_lag_bg2interp
 !------------------------------------------------------------------------------
 type, extends(bfem_interp) :: oft_lag_bvrinterp
   class(oft_vector), pointer :: u => NULL() !< Field for interpolation
+  class(oft_vector), pointer :: ux => NULL() !< Field for interpolation
+  class(oft_vector), pointer :: uy => NULL() !< Field for interpolation
+  class(oft_vector), pointer :: uz => NULL() !< Field for interpolation
   real(r8), pointer, dimension(:,:) :: vals => NULL() !< Local values
   class(oft_scalar_bfem), pointer :: lag_rep => NULL() !< Lagrange FE representation
 contains
@@ -86,6 +89,15 @@ contains
   !> Delete reconstruction object
   procedure :: delete => lag_bvrinterp_delete
 end type oft_lag_bvrinterp
+!------------------------------------------------------------------------------
+!> Interpolate \f$ \nabla \f$ of a Lagrange field
+!------------------------------------------------------------------------------
+type, extends(oft_lag_bvrinterp) :: oft_lag_bvcinterp
+  logical :: cylindrical = .FALSE. !< Curl in cylindrical coordinates?
+contains
+  !> Reconstruct field
+  procedure :: interp => lag_bvcinterp
+end type oft_lag_bvcinterp
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -256,12 +268,23 @@ IF(.NOT.oft_2D_lagrange_cast(self%lag_rep,lag_rep))CALL oft_abort("Incorrect FE 
 self%mesh=>self%lag_rep%mesh
 !---Get local slice
 IF(.NOT.ASSOCIATED(self%vals))ALLOCATE(self%vals(3,self%lag_rep%ne))
-vtmp=>self%vals(1,:)
-CALL self%u%get_local(vtmp,1)
-vtmp=>self%vals(2,:)
-CALL self%u%get_local(vtmp,2)
-vtmp=>self%vals(3,:)
-CALL self%u%get_local(vtmp,3)
+IF(ASSOCIATED(self%u))THEN
+  vtmp=>self%vals(1,:)
+  CALL self%u%get_local(vtmp,1)
+  vtmp=>self%vals(2,:)
+  CALL self%u%get_local(vtmp,2)
+  vtmp=>self%vals(3,:)
+  CALL self%u%get_local(vtmp,3)
+ELSE IF(ASSOCIATED(self%ux))THEN
+  vtmp=>self%vals(1,:)
+  CALL self%ux%get_local(vtmp)
+  vtmp=>self%vals(2,:)
+  CALL self%uy%get_local(vtmp)
+  vtmp=>self%vals(3,:)
+  CALL self%uz%get_local(vtmp)
+ELSE
+  CALL oft_abort("No vector associated","lag_bvrinterp_setup",__FILE__)
+END IF
 end subroutine lag_bvrinterp_setup
 !------------------------------------------------------------------------------
 !> Destroy temporary internal storage
@@ -300,6 +323,49 @@ end do
 deallocate(j)
 DEBUG_STACK_POP
 end subroutine lag_bvrinterp
+!------------------------------------------------------------------------------
+!> Reconstruct the curl of a boundary Lagrange vector field
+!------------------------------------------------------------------------------
+subroutine lag_bvcinterp(self,cell,f,gop,val)
+class(oft_lag_bvcinterp), intent(inout) :: self
+integer(i4), intent(in) :: cell !< Cell for interpolation
+real(r8), intent(in) :: f(:) !< Position in cell in logical coord [3]
+real(r8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+real(r8), intent(out) :: val(:) !< Reconstructed field at f [3]
+integer(i4), allocatable :: j(:)
+integer(i4) :: jc
+real(r8) :: rop(3),fop,pt(3)
+DEBUG_STACK_PUSH
+!---
+IF(.NOT.ASSOCIATED(self%vals))CALL oft_abort('Setup has not been called!', &
+  'lag_bvcinterp',__FILE__)
+!---Get dofs
+allocate(j(self%lag_rep%nce))
+call self%lag_rep%ncdofs(cell,j) ! get DOFs
+!---Reconstruct field
+IF(self%cylindrical)THEN
+  val=0.d0
+  pt=self%mesh%log2phys(cell,f)
+  do jc=1,self%lag_rep%nce
+    call oft_blag_eval(self%lag_rep,cell,jc,f,fop)
+    call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
+    rop(3) = rop(2); rop(2) = 0.d0 ! Shuffle 2D gradient to 3D cylindrical
+    val(1) = val(1) + (self%vals(3,j(jc))*rop(2)/pt(1) - self%vals(2,j(jc))*rop(3))
+    val(2) = val(2) + (self%vals(1,j(jc))*rop(3) - self%vals(3,j(jc))*rop(1))
+    val(3) = val(3) + (pt(1)*self%vals(2,j(jc))*rop(1) + self%vals(2,j(jc))*fop - self%vals(1,j(jc))*rop(2))/pt(1)
+  end do
+ELSE
+  val=0.d0
+  do jc=1,self%lag_rep%nce
+    call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
+    val(1) = val(1) + (self%vals(3,j(jc))*rop(2) - self%vals(2,j(jc))*rop(3))
+    val(2) = val(2) + (self%vals(1,j(jc))*rop(3) - self%vals(3,j(jc))*rop(1))
+    val(3) = val(3) + (self%vals(2,j(jc))*rop(1) - self%vals(1,j(jc))*rop(2))
+  end do
+END IF
+deallocate(j)
+DEBUG_STACK_POP
+end subroutine lag_bvcinterp
 !------------------------------------------------------------------------------
 !> Zero a surface Lagrange scalar field at all boundary nodes
 !------------------------------------------------------------------------------
