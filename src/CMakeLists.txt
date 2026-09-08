@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 ########################
 cmake_minimum_required( VERSION 3.27 )
-project( OpenFUSIONToolkit LANGUAGES NONE VERSION "26.6" )
+project( OpenFUSIONToolkit LANGUAGES NONE VERSION "26.9" )
 set( OFT_VER_SUFFIX "" CACHE INTERNAL "Version suffix" )
 set( OFT_PYPI_VER_SUFFIX "" CACHE INTERNAL "Version suffix for PYPI (needs to be pep440)" )
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )

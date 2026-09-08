@@ -60,6 +60,6 @@ See [CONTRIBUTING.md](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/blo
 Copyright
 ---------
 
-Open FUSION Toolkit code development project, up to version 26.6 Copyright (c) 2023 - 2026, Open FUSION Toolkit team.
+Open FUSION Toolkit code development project, up to version 26.9 Copyright (c) 2023 - 2026, Open FUSION Toolkit team.
 
 Written by Open FUSION Toolkit team and collaborators with Christopher J. Hansen as principle developer. All rights reserved.
