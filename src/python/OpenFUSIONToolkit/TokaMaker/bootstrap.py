@@ -526,21 +526,28 @@ def _pchip_deriv(x, y):
 
 def _extrap_jBS_boundaries(psi_N, j_BS):
     r'''! Linearly extrapolate j_BS to the axis/LCFS endpoints where q is
-    undefined, using the PCHIP gradient at the nearest well-defined
+    undefined, using the second-order gradient at the nearest well-defined
     (interior) point.
+
+    `edge_order=2` matters here more than anywhere else in this module: only the
+    first and last entries of the interior derivative are ever used, so the
+    endpoint stencil *is* the result. The numpy default (first order) would put a
+    one-sided difference of the two outermost interior points straight into the
+    extrapolated axis and LCFS values.
 
     @param psi_N Normalised poloidal flux grid [0, 1], standard convention
     @param j_BS Bootstrap current profile on psi_N
     @result j_BS with the axis/LCFS endpoints replaced by extrapolated values
     '''
     n_psi = len(psi_N)
-    if n_psi - 2 < 2:
+    if n_psi - 2 < 3:
         raise ValueError(
             "_extrap_jBS_boundaries: too few points with well-defined q "
-            "(%d) to extrapolate j_BS to the axis/LCFS" % max(0, n_psi - 2))
+            "(%d) to build a second-order derivative for extrapolating j_BS "
+            "to the axis/LCFS" % max(0, n_psi - 2))
 
     j_BS = j_BS.copy()
-    djBS_dpsi = _pchip_deriv(psi_N[1:-1], j_BS[1:-1])
+    djBS_dpsi = numpy.gradient(j_BS[1:-1], psi_N[1:-1], edge_order=2)
     j_BS[0] = j_BS[1] + djBS_dpsi[0] * (psi_N[0] - psi_N[1])
     j_BS[-1] = j_BS[-2] + djBS_dpsi[-1] * (psi_N[-1] - psi_N[-2])
     return j_BS

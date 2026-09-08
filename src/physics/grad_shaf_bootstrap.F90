@@ -862,194 +862,89 @@ DO i = 1, n
 END DO
 END SUBROUTINE apply_edge_taper
 !------------------------------------------------------------------------------
-!> Compute dy/dx via shape-preserving monotone PCHIP on the native grid.
+!> Compute dy/dx with second-order-accurate finite differences on the native grid.
 !>
-!> Port of bootstrap.py:_pchip_deriv.  Sorts and de-duplicates x, computes
-!> Fritsch-Carlson node slopes, and scatters them back to the input ordering.
-!> Aborts on n < 2, non-finite input, < 2 distinct x, or a non-finite slope.
-!> Warns on unsorted x and on collapsed duplicates (y averaged over each
-!> group, so double-point jumps are smoothed).
+!> Port of `numpy.gradient(y, x, edge_order=2)`: the interior uses the
+!> three-point central stencil for the local (possibly non-uniform) spacing,
+!> and both endpoints use the second-order one-sided stencil.  The first-order
+!> endpoint difference numpy uses by default is badly inaccurate at the
+!> magnetic axis and separatrix, where the error propagates straight into
+!> on-axis/edge j_BS.
 !>
-!> Assumes the smallest legitimate x spacing exceeds dedup_rtol times the
-!> x span; anything finer is treated as a duplicate and averaged.
+!> This replaces an earlier shape-preserving PCHIP derivative.  On the uniform
+!> grids this code uses, the PCHIP endpoint formula reduces algebraically to
+!> the second-order one-sided difference, while its monotonicity clipping
+!> flattens the pedestal and makes the interior measurably less accurate.
 !>
-!> @param n     Number of input points (>= 2)
-!> @param x     Independent variable (e.g. psi); expected sorted ascending
+!> The grid is validated rather than repaired: unlike the PCHIP routine it
+!> replaces, this does not sort x or average over duplicated abscissae.
+!> Duplicated or unsorted flux labels give an undefined derivative, so they
+!> abort here instead of being silently smoothed.
+!>
+!> @param n     Number of input points (>= 3)
+!> @param x     Independent variable (e.g. psi); strictly monotonic, either direction
 !> @param y     Dependent variable sampled on x
 !> @param dydx  Output: dy/dx at each point in x
-!> @param quiet Optional: suppress warnings
 !------------------------------------------------------------------------------
-SUBROUTINE pchip_deriv(n, x, y, dydx, quiet)
+SUBROUTINE gradient_(n, x, y, dydx)
 USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
 INTEGER(i4), INTENT(in) :: n
 REAL(r8), INTENT(in) :: x(n)
 REAL(r8), INTENT(in) :: y(n)
 REAL(r8), INTENT(out) :: dydx(n)
-LOGICAL, OPTIONAL, INTENT(in) :: quiet
 !---
-REAL(r8), PARAMETER :: dedup_rtol = 1.0e-12_r8 !< Duplicate x, as a fraction of the span
-INTEGER(i4) :: i, j, key, nu
-INTEGER(i4) :: order(n)  !< Stable ascending sort permutation of x
-INTEGER(i4) :: grp(n)    !< Sorted point -> unique-node index
-REAL(r8) :: xs(n), ys(n) !< x, y reordered ascending
-REAL(r8) :: xu(n), yu(n) !< De-duplicated grid, y averaged over each group
-REAL(r8) :: du(n)        !< Node slopes on the de-duplicated grid
-REAL(r8) :: dx_tol
-LOGICAL :: talk
+INTEGER(i4) :: i
+REAL(r8) :: hs, hd !< Backward and forward interval widths about the stencil centre
 CHARACTER(len=512) :: char_buf
-talk = oft_env%pm
-IF(PRESENT(quiet))THEN
-  IF(quiet) talk = .FALSE.
-END IF
-IF(n < 2) &
-  CALL oft_abort('fewer than 2 input points; dy/dx undefined', &
-    'pchip_deriv', __FILE__)
+IF(n < 3) &
+  CALL oft_abort('fewer than 3 input points; a second-order stencil is undefined', &
+    'gradient_', __FILE__)
 DO i = 1, n
   IF(.NOT.IEEE_IS_FINITE(x(i)) .OR. .NOT.IEEE_IS_FINITE(y(i)))THEN
     WRITE(char_buf,'(A,I0,A,ES12.5,A,ES12.5)') 'non-finite input at i=', i, &
       ': x=', x(i), ', y=', y(i)
-    CALL oft_abort(TRIM(char_buf), 'pchip_deriv', __FILE__)
+    CALL oft_abort(TRIM(char_buf), 'gradient_', __FILE__)
   END IF
 END DO
-dx_tol = dedup_rtol*(MAXVAL(x) - MINVAL(x))
-!--- Fast path: already strictly increasing, no sort or dedup needed
-IF(ALL(x(2:n) - x(1:n-1) > dx_tol))THEN
-  CALL pchip_slopes(n, x, y, dydx)
-  CALL pchip_verify(n, x, dydx)
-  RETURN
-END IF
-!--- Stable insertion sort
-IF(ANY(x(2:n) < x(1:n-1)) .AND. talk) &
-  CALL oft_warn('pchip_deriv: x grid not sorted ascending; sorting internally')
-order = [(i, i=1,n)]
+!--- Strict monotonicity in either direction.  The stencils below are signed,
+!   so a descending x needs no special handling, but a repeated or reversed
+!   abscissa leaves dy/dx undefined.
 DO i = 2, n
-  key = order(i)
-  j = i - 1
-  DO WHILE (j >= 1)
-    IF(x(order(j)) <= x(key)) EXIT
-    order(j+1) = order(j)
-    j = j - 1
-  END DO
-  order(j+1) = key
+  IF((x(i) - x(i-1))*(x(2) - x(1)) > 0.0_r8)CYCLE
+  WRITE(char_buf,'(A,I0,A,ES12.5,A,ES12.5,A)') 'x not strictly monotonic at '// &
+    'i=', i, ' (x=', x(i-1), ' then ', x(i), '); duplicated or unsorted '// &
+    'abscissae give an undefined derivative'
+  CALL oft_abort(TRIM(char_buf), 'gradient_', __FILE__)
 END DO
-xs = x(order)
-ys = y(order)
-!--- Collapse duplicates.  Compared against the group anchor xs(i) so that
-!   near-duplicates cannot chain into an arbitrarily wide group.
-nu = 0
-i = 1
-DO WHILE (i <= n)
-  j = i
-  DO WHILE (j < n)
-    IF(xs(j+1) - xs(i) > dx_tol) EXIT
-    j = j + 1
-  END DO
-  nu = nu + 1
-  xu(nu) = xs(i)
-  yu(nu) = SUM(ys(i:j)) / REAL(j-i+1, r8)
-  grp(i:j) = nu
-  i = j + 1
+!--- Interior: three-point central stencil for the local spacing
+DO i = 2, n-1
+  hs = x(i) - x(i-1)
+  hd = x(i+1) - x(i)
+  dydx(i) = -(hd/(hs*(hs + hd)))*y(i-1) &
+            + ((hd - hs)/(hs*hd))*y(i) &
+            + (hs/(hd*(hs + hd)))*y(i+1)
 END DO
-IF(nu < 2)THEN
-  WRITE(char_buf,'(A,I0,A,ES12.5,A,ES12.5,A)') 'fewer than 2 distinct x '// &
-    'points after collapsing duplicates (n=', n, ', x range ', MINVAL(x), &
-    ' to ', MAXVAL(x), '); x grid is degenerate'
-  CALL oft_abort(TRIM(char_buf), 'pchip_deriv', __FILE__)
-END IF
-IF(nu < n .AND. talk)THEN
-  WRITE(char_buf,'(A,I0,A,I0,A,F5.1,A)') 'pchip_deriv: collapsed ', n-nu, &
-    ' of ', n, ' grid points (', 100.0_r8*REAL(n-nu, r8)/REAL(n, r8), &
-    '%) as duplicate x values, y averaged -- upstream grid issue'
-  CALL oft_warn(TRIM(char_buf))
-END IF
-CALL pchip_slopes(nu, xu(1:nu), yu(1:nu), du(1:nu))
-CALL pchip_verify(nu, xu(1:nu), du(1:nu))
+!--- Endpoints: second-order one-sided stencils (numpy's edge_order=2)
+hs = x(2) - x(1)
+hd = x(3) - x(2)
+dydx(1) = -((2.0_r8*hs + hd)/(hs*(hs + hd)))*y(1) &
+          + ((hs + hd)/(hs*hd))*y(2) &
+          - (hs/(hd*(hs + hd)))*y(3)
+hs = x(n-1) - x(n-2)
+hd = x(n) - x(n-1)
+dydx(n) = (hd/(hs*(hs + hd)))*y(n-2) &
+          - ((hd + hs)/(hs*hd))*y(n-1) &
+          + ((2.0_r8*hd + hs)/(hd*(hs + hd)))*y(n)
+!--- Finite input does not guarantee a finite result: the stencil weights
+!   overflow for large y on a very fine grid.
 DO i = 1, n
-  dydx(order(i)) = du(grp(i))
-END DO
-END SUBROUTINE pchip_deriv
-!------------------------------------------------------------------------------
-!> PCHIP (Fritsch-Carlson) node slopes, matching scipy's _find_derivatives.
-!>
-!> @param m Number of nodes (>= 2)
-!> @param x Strictly increasing abscissae (caller's responsibility)
-!> @param y Ordinates
-!> @param d Output: node slopes
-!------------------------------------------------------------------------------
-PURE SUBROUTINE pchip_slopes(m, x, y, d)
-INTEGER(i4), INTENT(in) :: m
-REAL(r8), INTENT(in) :: x(m)
-REAL(r8), INTENT(in) :: y(m)
-REAL(r8), INTENT(out) :: d(m)
-!---
-INTEGER(i4) :: i
-REAL(r8) :: h(m-1)   !< Interval widths
-REAL(r8) :: del(m-1) !< Secant slopes
-REAL(r8) :: w1, w2
-h   = x(2:m) - x(1:m-1)
-del = (y(2:m) - y(1:m-1)) / h
-IF(m == 2)THEN
-  d = del(1)
-  RETURN
-END IF
-!--- Interior: weighted harmonic mean, zeroed at local extrema.  Signs are
-!   tested directly; del(i-1)*del(i) can under/overflow.
-DO i = 2, m-1
-  IF(del(i-1) == 0.0_r8 .OR. del(i) == 0.0_r8 .OR. &
-     ((del(i-1) < 0.0_r8) .NEQV. (del(i) < 0.0_r8)))THEN
-    d(i) = 0.0_r8
-  ELSE
-    w1 = 2.0_r8*h(i) + h(i-1)
-    w2 = h(i) + 2.0_r8*h(i-1)
-    d(i) = (w1 + w2) / (w1/del(i-1) + w2/del(i))
-  END IF
-END DO
-!--- Endpoints; note the deliberate argument reversal at the right end
-d(1) = pchip_edge(h(1),   h(2),   del(1),   del(2))
-d(m) = pchip_edge(h(m-1), h(m-2), del(m-1), del(m-2))
-END SUBROUTINE pchip_slopes
-!------------------------------------------------------------------------------
-!> Shape-limited one-sided PCHIP endpoint slope (scipy _edge_case).
-!------------------------------------------------------------------------------
-PURE FUNCTION pchip_edge(h0, h1, m0, m1) RESULT(d)
-REAL(r8), INTENT(in) :: h0 !< Width of the edge interval
-REAL(r8), INTENT(in) :: h1 !< Width of the next interval in
-REAL(r8), INTENT(in) :: m0 !< Secant slope of the edge interval
-REAL(r8), INTENT(in) :: m1 !< Secant slope of the next interval in
-REAL(r8) :: d
-d = ((2.0_r8*h0 + h1)*m0 - h0*m1) / (h0 + h1)
-IF(SIGN(1.0_r8, d) /= SIGN(1.0_r8, m0))THEN
-  d = 0.0_r8       ! wrong sign vs. edge secant -> flatten
-ELSE IF((SIGN(1.0_r8, m0) /= SIGN(1.0_r8, m1)) .AND. &
-        (ABS(d) > 3.0_r8*ABS(m0)))THEN
-  d = 3.0_r8*m0    ! overshoot limiter at a turning point
-END IF
-END FUNCTION pchip_edge
-!------------------------------------------------------------------------------
-!> Guards on a computed PCHIP slope set: pchip_slopes' precondition (for the
-!> benefit of direct callers; pchip_deriv already guarantees it) and finiteness
-!> of the result, which finite input does not guarantee -- del can overflow for
-!> large y on a fine grid, and the endpoint formula then yields Inf - Inf.
-!------------------------------------------------------------------------------
-SUBROUTINE pchip_verify(m, x, d)
-USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
-INTEGER(i4), INTENT(in) :: m
-REAL(r8), INTENT(in) :: x(m)
-REAL(r8), INTENT(in) :: d(m)
-!---
-INTEGER(i4) :: i
-CHARACTER(len=512) :: char_buf
-IF(ANY(x(2:m) <= x(1:m-1))) &
-  CALL oft_abort('x not strictly increasing; pchip_slopes precondition '// &
-    'violated', 'pchip_verify', __FILE__)
-DO i = 1, m
-  IF(.NOT.IEEE_IS_FINITE(d(i)))THEN
-    WRITE(char_buf,'(A,I0,A,ES12.5)') 'non-finite derivative at node ', i, &
+  IF(.NOT.IEEE_IS_FINITE(dydx(i)))THEN
+    WRITE(char_buf,'(A,I0,A,ES12.5)') 'non-finite derivative at i=', i, &
       ', x=', x(i)
-    CALL oft_abort(TRIM(char_buf), 'pchip_verify', __FILE__)
+    CALL oft_abort(TRIM(char_buf), 'gradient_', __FILE__)
   END IF
 END DO
-END SUBROUTINE pchip_verify
+END SUBROUTINE gradient_
 !------------------------------------------------------------------------------
 !> Computes the bootstrap current on a uniform psi_N grid.
 !>
@@ -1136,10 +1031,10 @@ ft = 1.0_r8 - fc
 pe = EC * ne * Te
 pi_arr = EC * ni * Ti
 ! Gradients d/dpsi [Wb^-1]
-CALL pchip_deriv(n_psi, psi_abs, Te, dT_e_dpsi)
-CALL pchip_deriv(n_psi, psi_abs, Ti, dT_i_dpsi)
-CALL pchip_deriv(n_psi, psi_abs, ne, dn_e_dpsi)
-CALL pchip_deriv(n_psi, psi_abs, ni, dn_i_dpsi)
+CALL gradient_(n_psi, psi_abs, Te, dT_e_dpsi)
+CALL gradient_(n_psi, psi_abs, Ti, dT_i_dpsi)
+CALL gradient_(n_psi, psi_abs, ne, dn_e_dpsi)
+CALL gradient_(n_psi, psi_abs, ni, dn_i_dpsi)
 ! In the Fortran internal convention psi increases LCFS→axis (opposite to the
 ! standard Sauter/Redl derivation where psi increases axis→LCFS).  Negate
 ! all gradients so the bootstrap formula sees the conventional sign.
@@ -1231,7 +1126,7 @@ END IF
 END SUBROUTINE calculate_bootstrap
 !------------------------------------------------------------------------------
 !> Linearly extrapolate j_BS to LCFS/axis points where q is undefined, using
-!> the PCHIP gradient at the nearest well-defined point.
+!> the second-order gradient at the nearest well-defined point.
 !------------------------------------------------------------------------------
 SUBROUTINE extrap_jBS_boundaries(n_psi, psi_N, j_BS)
 INTEGER(i4), INTENT(in) :: n_psi
@@ -1242,19 +1137,19 @@ REAL(r8) :: djBS_dpsi(n_psi)
 ! psi_N(0) = 0.0 at the LCFS is implicit.
 n_lo = 1
 n_hi = MERGE(n_psi-1, n_psi, psi_N(n_psi) == 1.0_r8)
-IF(n_hi-n_lo+1 < 2) CALL oft_abort('extrap_jBS_boundaries: too few '// &
+IF(n_hi-n_lo+1 < 3) CALL oft_abort('extrap_jBS_boundaries: too few '// &
   'points with well-defined q to extrapolate j_BS to the LCFS', &
   'extrap_jBS_boundaries', __FILE__)
-CALL pchip_deriv(n_hi-n_lo+1, psi_N(n_lo:n_hi), j_BS(n_lo:n_hi), &
+CALL gradient_(n_hi-n_lo+1, psi_N(n_lo:n_hi), j_BS(n_lo:n_hi), &
   djBS_dpsi(n_lo:n_hi))
 j_BS(0) = j_BS(n_lo) + djBS_dpsi(n_lo) * (0.0_r8 - psi_N(n_lo))
 IF(psi_N(n_psi) == 1.0_r8)THEN
   n_lo = 1
   n_hi = n_psi-1
-  IF(n_hi-n_lo+1 < 2) CALL oft_abort('extrap_jBS_boundaries: too few '// &
+  IF(n_hi-n_lo+1 < 3) CALL oft_abort('extrap_jBS_boundaries: too few '// &
     'points with well-defined q to extrapolate j_BS to the axis', &
     'extrap_jBS_boundaries', __FILE__)
-  CALL pchip_deriv(n_hi-n_lo+1, psi_N(n_lo:n_hi), j_BS(n_lo:n_hi), &
+  CALL gradient_(n_hi-n_lo+1, psi_N(n_lo:n_hi), j_BS(n_lo:n_hi), &
     djBS_dpsi(n_lo:n_hi))
   j_BS(n_psi) = j_BS(n_hi) + djBS_dpsi(n_hi) * (psi_N(n_psi) - psi_N(n_hi))
 ENDIF
