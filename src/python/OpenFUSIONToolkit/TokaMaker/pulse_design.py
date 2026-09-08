@@ -8112,8 +8112,7 @@ def plot_PLH_components(tt, save_path=None, display=True):
 # ── Disruptivity limits ───────────────────────────────────────────────────────
 
 def compute_disruptivity_limits(tt):
-    r'''! Compute disruptivity-proxy limits for a TokaMaker_TORAX run and return them as a
-    dict with tm_times, all_limits_units, in_h_mode, and lh_transitions.
+    r'''! Compute disruptivity-proxy limits for a TokaMaker_TORAX run.
 
     @param tt TokaMaker_TORAX instance.
     @return dict with keys tm_times, all_limits_units, in_h_mode, and lh_transitions.
@@ -8289,6 +8288,53 @@ def plot_disruptivity_limits_subset(tt, keys, title, scale='linear'):
     '''
     return _plot_subset_units(compute_disruptivity_limits(tt), keys, title, scale=scale)
 
+def plot_ldl_hdl_with_mode(limits, ax=None):
+    r'''! Plot LDL25 and HDL25, each only where it applies based on L and H transitions.
+
+    @param limits Dict returned by compute_disruptivity_limits().
+    @param ax Optional axes object to plot on.
+    '''
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(10, 6))
+    tm = limits['tm_times']
+    in_h = limits['in_h_mode']
+    ldl = limits['all_limits_units']['LDL25']['value']
+    hdl = limits['all_limits_units']['HDL25']['value']
+
+    ldl_active = np.where(in_h, np.nan, ldl)
+    hdl_active = np.where(in_h, hdl, np.nan)
+
+    ax.plot(tm, ldl_active, 'o-', color='tab:blue', label='LDL25 (L-mode)')
+    ax.plot(tm, hdl_active, 'o-', color='tab:red', label='HDL25 (H-mode)')
+
+    switch_idx = np.where(np.diff(in_h.astype(int)) != 0)[0]
+    for j, i in enumerate(switch_idx):
+        y0 = hdl[i] if in_h[i] else ldl[i]
+        y1 = ldl[i + 1] if in_h[i] else hdl[i + 1]
+        ax.plot([tm[i], tm[i + 1]], [y0, y1], 'k--', alpha=0.6,
+                label='transition' if j == 0 else None)
+
+    ax.set_xlabel('time [s]')
+    ax.set_title('LDL25 / HDL25')
+    ax.legend(fontsize=8)
+    ax.grid(alpha=0.3)
+    return ax
+
+def plot_dl_combined_single_color(limits, ax, color, label):
+    r'''! Plot LDL25/HDL25 combined into one trace based on applicable mode.
+
+    @param limits Dict returned by compute_disruptivity_limits().
+    @param ax Axes object to plot on.
+    @param color Line color.
+    @param label Legend label.
+    '''
+    tm = limits['tm_times']
+    in_h = limits['in_h_mode']
+    ldl = limits['all_limits_units']['LDL25']['value']
+    hdl = limits['all_limits_units']['HDL25']['value']
+    combined = np.where(in_h, hdl, ldl)
+    ax.plot(tm, combined, 'o-', color=color, label=label)
+
 def print_disruptivity_limits(tt):
     r'''! Compute and print a summary of all disruptivity-proxy limits with units, 
     their peak values, and their threshold.
@@ -8379,53 +8425,6 @@ def _plot_greenwald_units(limits, scale='linear'):
 
 def _plot_maris_units(limits, scale='linear'):
     _plot_subset_units(limits, ['LDL25', 'HDL25'], 'Maris LDL/HDL metrics', scale=scale)
-
-def plot_ldl_hdl_with_mode(limits, ax=None):
-    r'''! Plot LDL25 and HDL25, each only where it applies based on L and H transitions.
-
-    @param limits Dict returned by compute_disruptivity_limits().
-    @param ax Optional axes object to plot on.
-    '''
-    if ax is None:
-        fig, ax = plt.subplots(figsize=(10, 6))
-    tm = limits['tm_times']
-    in_h = limits['in_h_mode']
-    ldl = limits['all_limits_units']['LDL25']['value']
-    hdl = limits['all_limits_units']['HDL25']['value']
-
-    ldl_active = np.where(in_h, np.nan, ldl)
-    hdl_active = np.where(in_h, hdl, np.nan)
-
-    ax.plot(tm, ldl_active, 'o-', color='tab:blue', label='LDL25 (L-mode)')
-    ax.plot(tm, hdl_active, 'o-', color='tab:red', label='HDL25 (H-mode)')
-
-    switch_idx = np.where(np.diff(in_h.astype(int)) != 0)[0]
-    for j, i in enumerate(switch_idx):
-        y0 = hdl[i] if in_h[i] else ldl[i]
-        y1 = ldl[i + 1] if in_h[i] else hdl[i + 1]
-        ax.plot([tm[i], tm[i + 1]], [y0, y1], 'k--', alpha=0.6,
-                label='transition' if j == 0 else None)
-
-    ax.set_xlabel('time [s]')
-    ax.set_title('LDL25 / HDL25')
-    ax.legend(fontsize=8)
-    ax.grid(alpha=0.3)
-    return ax
-
-def _plot_dl_combined_single_color(limits, ax, color, label):
-    r'''! Plot LDL25/HDL25 combined into one trace based on applicable mode.
-
-    @param limits Dict returned by compute_disruptivity_limits().
-    @param ax Axes object to plot on.
-    @param color Line color.
-    @param label Legend label.
-    '''
-    tm = limits['tm_times']
-    in_h = limits['in_h_mode']
-    ldl = limits['all_limits_units']['LDL25']['value']
-    hdl = limits['all_limits_units']['HDL25']['value']
-    combined = np.where(in_h, hdl, ldl)
-    ax.plot(tm, combined, 'o-', color=color, label=label)
 
 def _plot_troyon_units(limits, scale='linear'):
     _plot_subset_units(limits, ['troyon'], 'Troyon beta limit', scale=scale)
