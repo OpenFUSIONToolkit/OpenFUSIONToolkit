@@ -15,12 +15,6 @@ import warnings
 from ._interface import *
 from OpenFUSIONToolkit.TokaMaker.util import get_jphi_from_GS
 
-class DerivativeSanityWarning(UserWarning):
-    r'''! Warning category for suspicious (but recoverable) inputs to profile
-    derivative calculations, e.g. duplicated or unsorted \f$\hat{\psi}\f$ grid
-    points or unphysically sharp features in a kinetic profile.'''
-    pass
-
 def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_width=0.03, tail_alpha=1.5):
     r'''! Generate parameterized edge bootstrap current profile with tunable concave fall-off
 
@@ -395,145 +389,12 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
 
     return results
 
-def _pchip_deriv(x, y):
-    r'''! Compute dy/dx via shape-preserving PCHIP on the native grid
-
-    Duplicate x points are dropped before fitting (stepwise-artifact guard
-    for partially-duplicated \f$\hat{\psi}\f$ grids) and the analytic PCHIP
-    derivative is evaluated back on the full input grid. This avoids the
-    piecewise-constant/stepped derivative artifacts that numpy.gradient can
-    produce on non-uniform or partially-duplicated grids.
-
-    Sanity guards (two tiers):
-     - Hard errors (ValueError): non-finite x/y input, fewer than 2 unique
-       x points after deduplication, non-finite computed derivative, or a
-       shape-guarantee violation (monotone y but wrong-sign derivative --
-       "impossible" for PCHIP, so it firing indicates internal breakage).
-     - Warnings (DerivativeSanityWarning): duplicated x points dropped,
-       unsorted x (sorted internally), and derivative spikes far exceeding
-       the median secant slope (possible unphysical input feature).
-
-    @param x Independent variable (e.g. \f$\hat{\psi}\f$); expected sorted ascending
-    @param y Dependent variable sampled on x
-    @result Array of dy/dx evaluated at each point in x
-    '''
-    from scipy.interpolate import PchipInterpolator
-
-    x = numpy.asarray(x, dtype=float)
-    y = numpy.asarray(y, dtype=float)
-
-    # --- Tier 1: non-finite input is a hard error ---
-    if not numpy.all(numpy.isfinite(x)):
-        bad = numpy.flatnonzero(~numpy.isfinite(x))
-        raise ValueError("_pchip_deriv: non-finite values in x at indices %s"
-                         % (bad[:5].tolist(),))
-    if not numpy.all(numpy.isfinite(y)):
-        bad = numpy.flatnonzero(~numpy.isfinite(y))
-        raise ValueError("_pchip_deriv: non-finite values in y at indices %s"
-                         % (bad[:5].tolist(),))
-
-    # --- Tier 2: unsorted x (sorted internally) ---
-    if numpy.any(numpy.diff(x) < 0):
-        warnings.warn("_pchip_deriv: x (psi_N) grid is not sorted ascending; "
-                      "sorting internally -- check upstream grid construction",
-                      DerivativeSanityWarning, stacklevel=2)
-        sort_idx = numpy.argsort(x, kind='stable')
-        x_sorted = x[sort_idx]
-        y_sorted = y[sort_idx]
-    else:
-        x_sorted = x
-        y_sorted = y
-
-    # --- Tier 2: duplicate x points dropped (stepwise-artifact guard) ---
-    x_unique, unique_idx = numpy.unique(x_sorted, return_index=True)
-    n_dropped = x_sorted.size - x_unique.size
-    if n_dropped > 0:
-        dup_mask = numpy.ones(x_sorted.size, dtype=bool)
-        dup_mask[unique_idx] = False
-        dup_locs = x_sorted[dup_mask][:5]
-        frac_dropped = n_dropped / float(x_sorted.size)
-        if frac_dropped > 0.05:
-            warnings.warn("_pchip_deriv: dropped %d of %d grid points (%.1f%%) as "
-                          "duplicated psi_N values (first few at psi_N=%s) -- this "
-                          "many duplicates strongly suggests a corrupted or "
-                          "degenerate upstream psi_N grid; results may be unreliable"
-                          % (n_dropped, x_sorted.size, 100.0 * frac_dropped,
-                             numpy.array2string(dup_locs, precision=6)),
-                          DerivativeSanityWarning, stacklevel=2)
-        else:
-            warnings.warn("_pchip_deriv: dropped %d duplicated psi_N grid point(s) "
-                          "(first few at psi_N=%s) -- upstream grid issue; this was "
-                          "the stepwise-j_BS trigger"
-                          % (n_dropped, numpy.array2string(dup_locs, precision=6)),
-                          DerivativeSanityWarning, stacklevel=2)
-
-    # --- Tier 1: degenerate grid after dedup is a hard error ---
-    if x_unique.size < 2:
-        raise ValueError("_pchip_deriv: fewer than 2 unique x points after "
-                         "dropping duplicates (%d of %d unique) -- psi_N grid is "
-                         "degenerate; refusing to return silent zeros"
-                         % (x_unique.size, x_sorted.size))
-
-    y_unique = y_sorted[unique_idx]
-    pchip = PchipInterpolator(x_unique, y_unique, extrapolate=True)
-    dydx = pchip(x, 1)
-
-    # --- Tier 1: non-finite derivative is a hard error ---
-    if not numpy.all(numpy.isfinite(dydx)):
-        bad = numpy.flatnonzero(~numpy.isfinite(dydx))
-        raise ValueError("_pchip_deriv: non-finite values in computed derivative "
-                         "at indices %s" % (bad[:5].tolist(),))
-
-    # --- Tier 1: shape-guarantee tripwire ---
-    # PCHIP is monotonicity-preserving, so a monotone y must never produce a
-    # wrong-sign derivative. If this fires something is internally broken.
-    y_scale = numpy.max(numpy.abs(y_unique))
-    y_tol = 1e-12 * y_scale
-    dy_unique = numpy.diff(y_unique)
-    d_scale = numpy.max(numpy.abs(dydx))
-    d_tol = 1e-12 * d_scale
-    if numpy.all(dy_unique >= -y_tol) and numpy.any(dydx < -d_tol):
-        raise ValueError("_pchip_deriv: shape-guarantee violation -- y is "
-                         "non-decreasing but derivative has negative entries "
-                         "(min %g); internal breakage" % numpy.min(dydx))
-    if numpy.all(dy_unique <= y_tol) and numpy.any(dydx > d_tol):
-        raise ValueError("_pchip_deriv: shape-guarantee violation -- y is "
-                         "non-increasing but derivative has positive entries "
-                         "(max %g); internal breakage" % numpy.max(dydx))
-
-    # --- Tier 2: spike detector ---
-    secant_slopes = numpy.abs(dy_unique / numpy.diff(x_unique))
-    median_slope = numpy.median(secant_slopes)
-    max_idx = int(numpy.argmax(numpy.abs(dydx)))
-    max_deriv = numpy.abs(dydx[max_idx])
-    if median_slope > 0.0:
-        ratio = max_deriv / median_slope
-        if ratio > 50.0:
-            warnings.warn("_pchip_deriv: derivative spike at psi_N=%.6g is %.1fx "
-                          "the median secant slope -- possible unphysical input "
-                          "feature" % (x[max_idx], ratio),
-                          DerivativeSanityWarning, stacklevel=2)
-    elif max_deriv > 0.0:
-        # Median secant slope is exactly zero but the derivative is not:
-        # a flat profile with an isolated sharp feature (extreme spike)
-        warnings.warn("_pchip_deriv: derivative spike at psi_N=%.6g (max |dy/dx| "
-                      "= %g) on an otherwise flat profile (median secant slope "
-                      "is zero) -- possible unphysical input feature"
-                      % (x[max_idx], max_deriv),
-                      DerivativeSanityWarning, stacklevel=2)
-
-    return dydx
-
 def _extrap_jBS_boundaries(psi_N, j_BS):
     r'''! Linearly extrapolate j_BS to the axis/LCFS endpoints where q is
     undefined, using the second-order gradient at the nearest well-defined
     (interior) point.
 
-    `edge_order=2` matters here more than anywhere else in this module: only the
-    first and last entries of the interior derivative are ever used, so the
-    endpoint stencil *is* the result. The numpy default (first order) would put a
-    one-sided difference of the two outermost interior points straight into the
-    extrapolated axis and LCFS values.
+    Ensures similarity between fortran and python solves.
 
     @param psi_N Normalised poloidal flux grid [0, 1], standard convention
     @param j_BS Bootstrap current profile on psi_N
@@ -592,7 +453,10 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     '''
     import matplotlib.pyplot as plt
 
-    n_psi = len(psi_N)
+    # Sample equilibrium quantities on the profile grid so they can be combined
+    # element-wise with the profiles; endpoints are clipped because the
+    # flux-surface tracer cannot resolve the magnetic axis or separatrix exactly.
+    psi_eval = numpy.clip(psi_N, psi_pad, 1.0 - psi_pad)
 
     if spike_prof is None:
         spike_prof = numpy.zeros_like(j_inductive)
@@ -611,8 +475,8 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target)
 
         # Check Convergence
-        _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-        _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+        _, f, fp, _, pp = mygs.get_profiles(psi=psi_eval)
+        _, _, ravgs, _, _, _ = mygs.get_q(psi=psi_eval)
 
         tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 
@@ -959,6 +823,51 @@ def redl_bootstrap(
 
     return j_bootstrap, coeffs
 
+def _validate_psi_grid(values, name, psi_N=None):
+    r'''! Validate (or build) the normalized flux grid a profile is sampled on
+
+    @param values Profile values
+    @param name Profile name, used in the raised error message
+    @param psi_N Normalized flux grid `values` is sampled on. If `None`, a uniform
+      grid `numpy.linspace(0,1,len(values))` is used. Otherwise must be finite,
+      strictly increasing, within [0,1], and the same length as `values`.
+    @result Validated \f$\hat{\psi}\f$ grid
+    '''
+    values = numpy.asarray(values)
+    if len(values) < 3:
+        raise ValueError("profiles must contain at least 3 points for second-order "
+                         "derivatives (got %d)" % len(values))
+    if psi_N is None:
+        return numpy.linspace(0., 1., len(values))
+    grid = numpy.asarray(psi_N, dtype=float)
+    if grid.ndim != 1 or grid.size != len(values):
+        raise ValueError("psi_N must be 1D with the same length as the '%s' profile "
+                         "(got %s, expected (%d,))" % (name, grid.shape, len(values)))
+    if not numpy.all(numpy.isfinite(grid)):
+        raise ValueError("psi_N contains non-finite values at indices %s for the '%s' profile"
+                         % (numpy.flatnonzero(~numpy.isfinite(grid))[:5].tolist(), name))
+    if numpy.any(numpy.diff(grid) <= 0.):
+        raise ValueError("psi_N must be strictly increasing; found non-increasing "
+                         "steps at indices %s for the '%s' profile (duplicated or "
+                         "unsorted flux labels give undefined profile derivatives)"
+                         % (numpy.flatnonzero(numpy.diff(grid) <= 0.)[:5].tolist(), name))
+    if (grid[0] < 0.) or (grid[-1] > 1.):
+        raise ValueError("psi_N must lie within [0,1] for the '%s' profile (got [%g, %g])"
+                         % (name, grid[0], grid[-1]))
+    return grid
+
+def _default_psi_profile(values, name, psi_N=None, scale=1.0):
+    r'''! Build a {'x','y'} profile dict on the validated `psi_N` grid
+
+    @param values Profile values
+    @param name Profile name, used in the raised error message
+    @param psi_N Normalized flux grid `values` is sampled on (see `_validate_psi_grid`)
+    @param scale Multiplicative scaling applied to `values` (e.g. eV -> keV)
+    @result Profile dict {'x': psi_N, 'y': values * scale}
+    '''
+    values = numpy.asarray(values)
+    return {'x': _validate_psi_grid(values, name, psi_N=psi_N), 'y': values * scale}
+
 def solve_with_bootstrap(mygs,
                          ne,
                          Te,
@@ -976,6 +885,7 @@ def solve_with_bootstrap(mygs,
                          parameterize_jBS = False,
                          use_OMFIT_sauter = False,
                          verbose = True,
+                         psi_N = None,
                          use_sauter_eps = True,
                          diagnose_bs = False,
                          use_python_solve = False,
@@ -998,6 +908,11 @@ def solve_with_bootstrap(mygs,
     @param diagnostic_plots If True, plot diagnostic figures
     @param parameterize_jBS If True, use parameterized edge spike
     @param use_OMFIT_sauter If True, use OMFIT Sauter model
+    @param psi_N Normalized flux grid \f$\hat{\psi}\f$ the input profiles are sampled on.
+    If `None` (default) the profiles are assumed evenly sampled and a uniform grid
+    `numpy.linspace(0,1,len(ne))` is used. Must be finite, strictly increasing, within
+    [0,1], and the same length as the profiles. The number of traced flux surfaces is
+    `len(psi_N)`, so profile resolution sets equilibrium sampling resolution.
     @param use_sauter_eps If True (default), use the geometric inverse aspect ratio
       \f$\varepsilon = (R_{\max}-R_{\min})/(2\langle R\rangle)\f$ from the field-line trace.
       If False, use the formula \f$\varepsilon = \langle a\rangle / \langle R\rangle\f$.
@@ -1025,12 +940,12 @@ def solve_with_bootstrap(mygs,
             )
         if inductive_jphi is None:
             raise ValueError("inductive_jphi must be provided for method='internal'")
-        _ne   = ne if isinstance(ne, dict) else {'x': numpy.linspace(0., 1., len(numpy.asarray(ne))), 'y': numpy.asarray(ne)}
-        _Te   = Te if isinstance(Te, dict) else {'x': numpy.linspace(0., 1., len(numpy.asarray(Te))), 'y': numpy.asarray(Te) / 1e3}
-        _ni   = ni if isinstance(ni, dict) else {'x': numpy.linspace(0., 1., len(numpy.asarray(ni))), 'y': numpy.asarray(ni)}
-        _Ti   = Ti if isinstance(Ti, dict) else {'x': numpy.linspace(0., 1., len(numpy.asarray(Ti))), 'y': numpy.asarray(Ti) / 1e3}
-        _ffp  = inductive_jphi if isinstance(inductive_jphi, dict) else {'x': numpy.linspace(0., 1., len(numpy.asarray(inductive_jphi))), 'y': numpy.asarray(inductive_jphi)}
-        Zeff_arg = Zeff if isinstance(Zeff, dict) else ({'x': numpy.linspace(0., 1., len(numpy.asarray(Zeff))), 'y': numpy.asarray(Zeff)} if numpy.ndim(Zeff) > 0 and numpy.size(Zeff) > 1 else float(Zeff))
+        _ne   = ne if isinstance(ne, dict) else _default_psi_profile(ne, 'ne', psi_N=psi_N)
+        _Te   = Te if isinstance(Te, dict) else _default_psi_profile(Te, 'Te', psi_N=psi_N, scale=1e-3)
+        _ni   = ni if isinstance(ni, dict) else _default_psi_profile(ni, 'ni', psi_N=psi_N)
+        _Ti   = Ti if isinstance(Ti, dict) else _default_psi_profile(Ti, 'Ti', psi_N=psi_N, scale=1e-3)
+        _ffp  = inductive_jphi if isinstance(inductive_jphi, dict) else _default_psi_profile(inductive_jphi, 'inductive_jphi', psi_N=psi_N)
+        Zeff_arg = Zeff if isinstance(Zeff, dict) else (_default_psi_profile(Zeff, 'Zeff', psi_N=psi_N) if numpy.ndim(Zeff) > 0 and numpy.size(Zeff) > 1 else float(Zeff))
         _results = mygs.solve_bootstrap(
             ffp_prof=_ffp,
             te_prof=_Te,
@@ -1089,12 +1004,22 @@ def solve_with_bootstrap(mygs,
 
     # Calculate Pressure [Pa]
     # p = n * T * k_B. Since T is in eV, k_B is essentially elementary charge e
-    pressure = (EC * ne * Te) + (EC * ni * Ti)
+    pressure = (EC * ne * Te) + (EC * ni * Ti) # Kinetic profiles same length
 
-    # Reconstruct normalized psi grid based on input pressure length
-    # Note: Assumes inputs are evenly sampled in psi_norm 0..1
-    n_psi = len(pressure)
-    psi_N = numpy.linspace(0., 1., n_psi)
+    # Normalized flux grid the input profiles are sampled on; `None` means assume
+    # they are evenly sampled in psi_norm 0..1
+    psi_N = _validate_psi_grid(pressure, 'pressure', psi_N=psi_N)
+
+    # Equilibrium quantities are sampled on the *same* grid as the profiles so that
+    # they can be combined element-wise below. The endpoints are clipped because the
+    # flux-surface tracer cannot resolve the magnetic axis or the separatrix exactly;
+    # this clip applies to the sampling points only, never to the profile grid itself.
+    psi_eval = numpy.clip(psi_N, psi_pad, 1.0 - psi_pad)
+    if numpy.any(numpy.diff(psi_eval) <= 0.):
+        raise ValueError("psi_pad (%g) is larger than the first/last psi_N interval "
+                         "(%g, %g); clipping the endpoints would collapse distinct "
+                         "flux surfaces. Reduce psi_pad or coarsen the profile grid."
+                         % (psi_pad, psi_N[1]-psi_N[0], psi_N[-1]-psi_N[-2]))
 
     def current_scaling_objective(alpha, j_inductive, j_spike, psi_N, target_ip):
         '''Objective function to match total Ip.'''
@@ -1111,9 +1036,9 @@ def solve_with_bootstrap(mygs,
         4. Scales inductive current to match Ip_target.
         '''
         # Get geometry and flux functions
-        _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
+        _, f, _, _, _ = mygs.get_profiles(psi=psi_eval)
         if use_sauter_eps:
-            _, fc, r_avgs, b_avgs, eps = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad, return_eps=True)
+            _, fc, r_avgs, b_avgs, eps = mygs.sauter_fc(psi=psi_eval, return_eps=True)
         else:
             warn(
                 "Using use_sauter_eps = False introduces error to the bootstrap calculation in highly elongated plasmas, "
@@ -1121,18 +1046,19 @@ def solve_with_bootstrap(mygs,
                 UserWarning,
                 stacklevel=2,
             )
-            _, fc, r_avgs, b_avgs = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
+            _, fc, r_avgs, b_avgs = mygs.sauter_fc(psi=psi_eval)
             eps = r_avgs['<a>'] / r_avgs['<R>']
         
         # Geometry terms
         ft = 1 - fc 
-        _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+        _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
         R_avg = ravgs_q['<R>']
 
         # Gradients (using raw psi for derivatives)
-        # Shape-preserving PCHIP derivatives on the native psi_N grid avoid the
-        # piecewise-constant/stepped artifacts numpy.gradient can produce on
-        # non-uniform or partially-duplicated psi_N grids.
+        # `edge_order=2` gives a second-order accurate one-sided stencil at the
+        # magnetic axis and separatrix; the numpy default (first order) is badly
+        # inaccurate there and propagates straight into on-axis/edge j_BS. Passing
+        # psi_N explicitly also makes this correct for a non-uniform input grid.
         psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
 
         # Avoid division by zero in derivative scaling only; psi_range itself
@@ -1140,15 +1066,15 @@ def solve_with_bootstrap(mygs,
         # call) and must not be clamped
         psi_range_safe = psi_range if psi_range != 0 else 1e-9
 
-        pprime_local = _pchip_deriv(psi_N, pressure) / psi_range_safe
+        pprime_local = numpy.gradient(pressure, psi_N, edge_order=2) / psi_range_safe
 
         j_BS_final = numpy.zeros_like(pressure)
 
         if include_jBS:
-            dn_e_dpsi = _pchip_deriv(psi_N, ne) / psi_range_safe
-            dT_e_dpsi = _pchip_deriv(psi_N, Te) / psi_range_safe
-            dn_i_dpsi = _pchip_deriv(psi_N, ni) / psi_range_safe
-            dT_i_dpsi = _pchip_deriv(psi_N, Ti) / psi_range_safe
+            dn_e_dpsi = numpy.gradient(ne, psi_N, edge_order=2) / psi_range_safe
+            dT_e_dpsi = numpy.gradient(Te, psi_N, edge_order=2) / psi_range_safe
+            dn_i_dpsi = numpy.gradient(ni, psi_N, edge_order=2) / psi_range_safe
+            dT_i_dpsi = numpy.gradient(Ti, psi_N, edge_order=2) / psi_range_safe
 
             if use_OMFIT_sauter:
                 j_BS_neo = sauter_bootstrap( # legacy OMFIT implementation
@@ -1201,7 +1127,7 @@ def solve_with_bootstrap(mygs,
             j_BS_final = j_BS_neo / b_avgs[0]
             j_BS_final = numpy.nan_to_num(j_BS_final, nan=0.0)
 
-            # Extrapolate to LCFS/axis where q is undefined
+            # Extrapolate to LCFS/axis to match fortran solve
             j_BS_final = _extrap_jBS_boundaries(psi_N, j_BS_final)
 
         # Scale Currents to match Ip
@@ -1317,8 +1243,8 @@ def solve_with_bootstrap(mygs,
             solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target,F0=F0_local)
 
             # Check Convergence
-            _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-            _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+            _, f, fp, _, pp = mygs.get_profiles(psi=psi_eval)
+            _, _, ravgs, _, _, _ = mygs.get_q(psi=psi_eval)
 
             tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 
