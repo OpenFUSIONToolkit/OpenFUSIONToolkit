@@ -24,12 +24,12 @@ USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem, native_read_nodesets, native_read_sidesets
 !---Linear Algebra
 USE oft_la_base, ONLY: oft_vector
-USE oft_native_la, ONLY: oft_native_dense_matrix
+USE oft_native_la, ONLY: oft_native_vector, oft_native_dense_matrix
 !---
 USE fem_utils, ONLY: fem_interp
 USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, &
   tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF, &
-  tw_recon_curr, tw_compute_Bops
+  tw_recon_curr, tw_compute_Bops, tw_copy_coil
 USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op
 USE thin_wall_solvers, ONLY: lr_eigenmodes_arpack, lr_eigenmodes_direct, frequency_response, &
   tw_reduce_model, run_td_sim, plot_td_sim
@@ -43,6 +43,24 @@ integer(i4), POINTER :: lc_plot(:,:) !< Needs docs
 integer(i4), POINTER :: reg_plot(:) !< Needs docs
 real(r8), POINTER :: r_plot(:,:) !< Needs docs
 CONTAINS
+!---------------------------------------------------------------------------------
+!> Cast C pointer to ThinCurr object
+!---------------------------------------------------------------------------------
+FUNCTION thincurr_ccast(tCurr_cptr,tCurr_obj,error_str) RESULT(success)
+TYPE(c_ptr), INTENT(in) :: tCurr_cptr !< C pointer to ThinCurr object
+TYPE(tw_type), POINTER, INTENT(out) :: tCurr_obj !< Fortran ThinCurr object
+CHARACTER(KIND=c_char), OPTIONAL, INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+LOGICAL :: success
+!---Clear error flag
+IF(PRESENT(error_str))CALL copy_string('',error_str)
+IF(.NOT.c_associated(tCurr_cptr))THEN
+  IF(PRESENT(error_str))CALL copy_string('ThinCurr object not associated',error_str)
+  success=.FALSE.
+  RETURN
+END IF
+CALL c_f_pointer(tCurr_cptr,tCurr_obj)
+success=.TRUE.
+END FUNCTION thincurr_ccast
 !---------------------------------------------------------------------------------
 !> Setup ThinCurr model
 !---------------------------------------------------------------------------------
@@ -60,12 +78,14 @@ TYPE(c_ptr), INTENT(out) :: tw_ptr !< Pointer to ThinCurr object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 TYPE(c_ptr), VALUE, INTENT(in) :: xml_ptr !< Pointer to ThinCurr XML node
 LOGICAL :: success,is_2d
-INTEGER(4) :: i,ndims,ierr,jumper_start
+INTEGER(4) :: i,ndims,ierr,jumper_start,n_holes,n_jumpers
 integer(i4), allocatable, dimension(:) :: dim_sizes
 INTEGER(i4), POINTER, DIMENSION(:) :: sizes_tmp,pmap_tmp,reg_tmp
 INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_tmp
 REAL(8), POINTER, DIMENSION(:,:) :: r_tmp
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename = 'none'
+CHARACTER(LEN=4) :: blknum
+CHARACTER(LEN=:), ALLOCATABLE :: error_string
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_nsets => NULL()
 TYPE(oft_1d_int), POINTER, DIMENSION(:) :: mesh_ssets => NULL()
@@ -159,16 +179,8 @@ ELSE
   END IF
   i=MAXVAL(tw_obj%mesh%reg)
   tw_obj%mesh%nreg=oft_mpi_max(i)
-  !
-  IF(hdf5_field_exist(TRIM(filename),'thincurr/periodicity/pmap'))THEN
-    ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
-    CALL hdf5_read(tw_obj%pmap,TRIM(filename),'thincurr/periodicity/pmap',success)
-    IF(.NOT.success)THEN
-      CALL copy_string('Error reading periodicity information from mesh file',error_str)
-      RETURN
-    END IF
-  END IF
-  !---Read nodesets and define holes and jumpers
+  !---
+  NULLIFY(hole_nsets)
   CALL native_read_nodesets(mesh_nsets,native_filename=TRIM(filename))
   jumper_start=jumper_start_in
   IF(jumper_start/=0)THEN
@@ -188,7 +200,7 @@ ELSE
   ELSE
     hole_nsets=>mesh_nsets
   END IF
-  !---Read sidesets and copy to closures
+  !---
   CALL native_read_sidesets(mesh_ssets,native_filename=TRIM(filename))
   IF(ASSOCIATED(mesh_ssets))THEN
     IF(mesh_ssets(1)%n>0)THEN
@@ -211,7 +223,11 @@ IF(c_associated(xml_ptr))THEN
     RETURN
   END IF
 END IF
-CALL tw_obj%setup(hole_nsets)
+IF(np>0)THEN
+   CALL tw_obj%setup(hole_nsets, error_string)
+ELSE
+  CALL tw_obj%setup(hole_nsets, error_string, filepath=TRIM(filename))
+END IF
 !---Deallocate nodesets
 IF(ASSOCIATED(mesh_nsets))THEN
   ndims=SIZE(mesh_nsets)
@@ -219,6 +235,10 @@ IF(ASSOCIATED(mesh_nsets))THEN
     IF(ASSOCIATED(mesh_nsets(i)%v))DEALLOCATE(mesh_nsets(i)%v)
   END DO
   DEALLOCATE(mesh_nsets)
+END IF
+IF(ALLOCATED(error_string))THEN
+  CALL copy_string(error_string,error_str)
+  RETURN
 END IF
 !
 tw_ptr=C_LOC(tw_obj)
@@ -563,7 +583,6 @@ IF(use_hodlr)THEN
   ALLOCATE(hodlr_op)
   hodlr_op%tw_obj=>tw_obj
   CALL hodlr_op%setup(.TRUE.)
-  WRITE(*,*)
   IF(TRIM(filename)=='')THEN
     CALL hodlr_op%compute_L()
   ELSE
@@ -578,13 +597,15 @@ ELSE
   END IF
   Lmat_ptr=C_LOC(tw_obj%Lmat)
 END IF
+tw_obj%model_frozen=.TRUE.
 END SUBROUTINE thincurr_Lmat
 !---------------------------------------------------------------------------------
 !> Compute magnetic field reconstruction operators for a ThinCurr model
 !---------------------------------------------------------------------------------
-SUBROUTINE thincurr_Bmat(tw_ptr,hodlr_ptr,Bmat_ptr,Bdr_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Bmat")
+SUBROUTINE thincurr_Bmat(tw_ptr,hodlr_ptr,B_dx,Bmat_ptr,Bdr_ptr,cache_file,error_str) BIND(C,NAME="thincurr_Bmat")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< ThinCurr object
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< HODLR operator or null
+REAL(KIND=c_double), VALUE, INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
 TYPE(c_ptr), INTENT(out) :: Bmat_ptr !< Magnetic field reconstruction operator
 TYPE(c_ptr), INTENT(out) :: Bdr_ptr !< Magnetic field reconstruction operator for Icoils
 CHARACTER(KIND=c_char), INTENT(in) :: cache_file(OFT_PATH_SLEN) !< Path to cache file
@@ -595,6 +616,15 @@ TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
 CALL c_f_pointer(tw_ptr, tw_obj)
 CALL copy_string('',error_str)
 !
+IF(B_dx>0.d0)THEN
+  tw_obj%B_dx=B_dx
+ELSE IF(B_dx==0.d0)THEN
+  CALL copy_string('Invalid B_dx value (must not be zero)',error_str)
+  RETURN
+ELSE
+  tw_obj%B_dx=ABS(B_dx)*tw_obj%mesh%hrms
+END IF
+IF(tw_obj%B_dx<1.d-4*tw_obj%mesh%hrms)CALL oft_warn('Small step size for B-field evaluation detected. This may lead to numerical errors.')
 CALL copy_string_rev(cache_file,filename)
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr,hodlr_op)
@@ -607,13 +637,14 @@ IF(c_associated(hodlr_ptr))THEN
   Bdr_ptr=C_LOC(hodlr_op%Icoil_Bmat)
 ELSE
   IF(TRIM(filename)=='')THEN
-    CALL tw_compute_Bops(tw_obj)
+    CALL tw_compute_Bops(tw_obj,tw_obj%B_dx)
   ELSE
-    CALL tw_compute_Bops(tw_obj,save_file=filename)
+    CALL tw_compute_Bops(tw_obj,tw_obj%B_dx,save_file=filename)
   END IF
   Bmat_ptr=C_LOC(tw_obj%Bel)
   Bdr_ptr=C_LOC(tw_obj%Bdr)
 END IF
+tw_obj%model_frozen=.TRUE.
 END SUBROUTINE thincurr_Bmat
 !---------------------------------------------------------------------------------
 !> Compute the mutual inductance between passive (mesh+Vcoils) and active elements (Icoils)
@@ -635,7 +666,102 @@ ELSE
   CALL tw_compute_Ael2dr(tw_obj,save_file=filename)
 END IF
 Mc_ptr=C_LOC(tw_obj%Ael2dr)
+tw_obj%model_frozen=.TRUE.
 END SUBROUTINE thincurr_Mcoil
+!---------------------------------------------------------------------------------
+!> Get the name of a given coil
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_get_coil_name(tw_ptr,coil_ind,coil_name,vcoil_flag,error_str) BIND(C,NAME="thincurr_get_coil_name")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< ThinCurr object
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: coil_ind !< Index of the coil
+CHARACTER(KIND=c_char), INTENT(out) :: coil_name(41) !< Name of the coil
+LOGICAL(KIND=c_bool), INTENT(out) :: vcoil_flag !< Flag indicating if the coil is a virtual coil
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error message
+TYPE(tw_type), POINTER :: tw_obj
+IF(.NOT.thincurr_ccast(tw_ptr,tw_obj,error_str))RETURN
+IF((coil_ind<1).OR.(coil_ind>tw_obj%n_coils))THEN
+  CALL copy_string('Invalid coil index',error_str)
+  RETURN
+END IF
+CALL copy_string(tw_obj%coils(coil_ind)%name,coil_name)
+vcoil_flag=tw_obj%coils(coil_ind)%is_vcoil
+END SUBROUTINE thincurr_get_coil_name
+!---------------------------------------------------------------------------------
+!> Set the types of the coils
+!---------------------------------------------------------------------------------
+SUBROUTINE thincurr_set_coil_types(tw_ptr,vcoil_flags,error_string) BIND(C,NAME="thincurr_set_coil_types")
+TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< ThinCurr object
+TYPE(c_ptr), VALUE, INTENT(in) :: vcoil_flags !< Array of coil types
+CHARACTER(KIND=c_char), INTENT(out) :: error_string(OFT_ERROR_SLEN) !< Error message
+TYPE(tw_type), POINTER :: tw_obj
+INTEGER(i4) :: i
+INTEGER(i4), POINTER :: flag_tmp(:)
+IF(.NOT.thincurr_ccast(tw_ptr,tw_obj,error_string))RETURN
+CALL c_f_pointer(vcoil_flags, flag_tmp, [tw_obj%n_coils])
+IF(tw_obj%model_frozen)THEN
+  CALL copy_string('Coil types must be set before computing any matrices',error_string)
+  RETURN
+END IF
+DO i=1,tw_obj%n_coils
+  IF(flag_tmp(i)==1)THEN
+    IF(ANY(tw_obj%coils(i)%radius<=0.d0))THEN
+      CALL copy_string('Cannot use coil '//TRIM(tw_obj%coils(i)%name)//' as Vcoil: radius not defined',error_string)
+      RETURN
+    END IF
+    IF(ANY(tw_obj%coils(i)%res_per_len<=0.d0))THEN
+      CALL copy_string('Cannot use coil '//TRIM(tw_obj%coils(i)%name)//' as Vcoil: resistance not defined',error_string)
+      RETURN
+    END IF
+  END IF
+END DO
+!---
+IF(ASSOCIATED(tw_obj%vcoils))DEALLOCATE(tw_obj%vcoils)
+IF(ASSOCIATED(tw_obj%icoils))DEALLOCATE(tw_obj%icoils)
+tw_obj%n_vcoils=COUNT(flag_tmp==1)
+tw_obj%n_icoils=tw_obj%n_coils-tw_obj%n_vcoils
+tw_obj%nelems=tw_obj%np_active+tw_obj%nholes+tw_obj%n_vcoils
+IF(tw_obj%n_vcoils>0)ALLOCATE(tw_obj%vcoils(tw_obj%n_vcoils))
+IF(tw_obj%n_icoils>0)ALLOCATE(tw_obj%icoils(tw_obj%n_icoils))
+tw_obj%n_icoils=0
+tw_obj%n_vcoils=0
+DO i=1,tw_obj%n_coils
+  IF(flag_tmp(i)==1)THEN
+    tw_obj%n_vcoils=tw_obj%n_vcoils+1
+    tw_obj%coils(i)%is_vcoil=.TRUE.
+    CALL tw_copy_coil(tw_obj%coils(i),tw_obj%vcoils(tw_obj%n_vcoils))
+  ELSE
+    tw_obj%n_icoils=tw_obj%n_icoils+1
+    tw_obj%coils(i)%is_vcoil=.FALSE.
+    CALL tw_copy_coil(tw_obj%coils(i),tw_obj%icoils(tw_obj%n_icoils))
+  END IF
+END DO
+!---Recreate Uloc vector for new number of elements
+IF(ASSOCIATED(tw_obj%Uloc))THEN
+  CALL tw_obj%Uloc%delete()
+  DEALLOCATE(tw_obj%Uloc)
+END IF
+ALLOCATE(oft_native_vector::tw_obj%Uloc)
+SELECT TYPE(this=>tw_obj%Uloc)
+  CLASS IS(oft_native_vector)
+    this%n=tw_obj%nelems; this%ng=tw_obj%nelems
+    this%nslice=this%n
+    ALLOCATE(this%v(this%n))
+    ALLOCATE(this%stitch_info)
+    ALLOCATE(this%stitch_info%be(this%n))
+    this%stitch_info%full=.TRUE.
+    this%stitch_info%nbe=0
+    this%stitch_info%be=.FALSE.
+  CLASS DEFAULT
+    CALL oft_abort('Failed to allocate "Uloc" vector','thincurr_set_coil_types',__FILE__)
+END SELECT
+!---Print update summary
+WRITE(*,*)
+WRITE(*,'(2A)')oft_indent,'Updating coil types:'
+CALL oft_increase_indent
+WRITE(*,'(2A,I12)')oft_indent,'# of Vcoils    = ',tw_obj%n_vcoils
+WRITE(*,'(2A,I12)')oft_indent,'# of Icoils    = ',tw_obj%n_icoils
+CALL oft_decrease_indent
+END SUBROUTINE thincurr_set_coil_types
 !---------------------------------------------------------------------------------
 !> Compute the mutual inductance between model and sensors
 !---------------------------------------------------------------------------------
@@ -687,6 +813,7 @@ Msc_ptr=C_LOC(tw_obj%Adr2sen)
 sensor_ptr=C_LOC(sensors)
 nsensors=sensors%nfloops
 njumpers=sensors%njumpers
+tw_obj%model_frozen=.TRUE.
 END SUBROUTINE thincurr_Msensor
 !---------------------------------------------------------------------------------
 !> Get the name of a given sensor
@@ -918,6 +1045,7 @@ CALL tw_compute_Rmat(tw_obj,.TRUE.)
 kr_ptr=C_LOC(tw_obj%Rmat%kr)
 lc_ptr=C_LOC(tw_obj%Rmat%lc)
 mat_ptr=C_LOC(tw_obj%Rmat%M)
+tw_obj%model_frozen=.TRUE.
 END SUBROUTINE thincurr_Rmat
 !---------------------------------------------------------------------------------
 !> Compute the current regularization matrix for a ThinCurr model
@@ -1055,11 +1183,11 @@ END SUBROUTINE thincurr_freq_response
 !---------------------------------------------------------------------------------
 !> Perform a time-domain simulation
 !---------------------------------------------------------------------------------
-SUBROUTINE thincurr_time_domain(tw_ptr,direct,dt,nsteps,cg_atol,cg_rtol,timestep_cn,nstatus,nplot, &
+SUBROUTINE thincurr_time_domain(tw_ptr,direct,times_ptr,nsteps,cg_atol,cg_rtol,timestep_cn,nstatus,nplot, &
   vec_ic,sensor_ptr,ncurr,curr_ptr,nvolt,volt_ptr,volts_full,sensor_vals_ptr,hodlr_ptr,error_str) BIND(C,NAME="thincurr_time_domain")
 TYPE(c_ptr), VALUE, INTENT(in) :: tw_ptr !< ThinCurr object pointer
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: direct !< Use direct solver?
-REAL(KIND=c_double), VALUE, INTENT(in) :: dt !< Time step [s]
+TYPE(c_ptr), VALUE, INTENT(in) :: times_ptr !< Time step values [s]
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: nsteps !< Number of time steps
 REAL(KIND=c_double), VALUE, INTENT(in) :: cg_atol !< CG solver absolute tolerance
 REAL(KIND=c_double), VALUE, INTENT(in) :: cg_rtol !< CG solver relative tolerance
@@ -1077,7 +1205,7 @@ TYPE(c_ptr), VALUE, INTENT(in) :: sensor_vals_ptr !< Sensor values pointer
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< HODLR operator pointer
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 LOGICAL :: pm_save
-REAL(8), CONTIGUOUS, POINTER :: ic_tmp(:),curr_waveform(:,:),volt_waveform(:,:),sensor_waveform(:,:)
+REAL(8), CONTIGUOUS, POINTER :: ic_tmp(:),times(:),curr_waveform(:,:),volt_waveform(:,:),sensor_waveform(:,:)
 TYPE(tw_type), POINTER :: tw_obj
 TYPE(tw_sensors), POINTER :: sensors
 TYPE(oft_tw_hodlr_op), POINTER :: hodlr_op
@@ -1132,14 +1260,15 @@ ELSE
   NULLIFY(sensor_waveform)
 END IF
 CALL c_f_pointer(vec_ic, ic_tmp, [tw_obj%nelems])
-!---Run eigenvalue analysis
+!---Run time-domain simulation
+CALL c_f_pointer(times_ptr, times, [nsteps+1])
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 IF(c_associated(hodlr_ptr))THEN
   CALL c_f_pointer(hodlr_ptr, hodlr_op)
-  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
+  CALL run_td_sim(tw_obj,times,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
     nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_waveform,hodlr_op=hodlr_op)
 ELSE
-  CALL run_td_sim(tw_obj,dt,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
+  CALL run_td_sim(tw_obj,times,nsteps,ic_tmp,LOGICAL(direct),[cg_atol,cg_rtol],LOGICAL(timestep_cn), &
     nstatus,nplot,sensors,curr_waveform,volt_waveform,sensor_waveform)
 END IF
 oft_env%pm=pm_save

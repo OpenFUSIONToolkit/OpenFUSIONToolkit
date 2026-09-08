@@ -17,9 +17,6 @@ set( THINCURR_EXES
 )
 
 set( BIN_SRCS ${OFT_EXES} ${MARKLIN_EXES} )
-if( OFT_THINCURR_LEGACY )
-  set( BIN_SRCS ${BIN_SRCS} ${THINCURR_EXES} )
-endif()
 
 foreach( file ${BIN_SRCS} )
   oft_add_exe( ${file} )

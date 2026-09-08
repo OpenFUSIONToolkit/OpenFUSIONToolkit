@@ -50,8 +50,8 @@ jobs:
             os: ubuntu-24.04,
             cc: "icx", cxx: "icx", fc: "ifx",
             python: "python3",
-            build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
-            mpi_build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT",
+            build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT --oft_use_lto=0",
+            mpi_build_flags: "--nthread=4 --use_mkl --mkl_root=$MKLROOT --oft_use_lto=0",
             oneapi_ver: "-2025.2"
           }
         - {
@@ -110,7 +110,7 @@ jobs:
               os: ubuntu-22.04,
               cc: "gcc-12", cxx: "g++-12", fc: "gfortran-12",
               python: "python3",
-              mpi_build_flags: "--nthread=2 --oblas_dynamic_arch --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 --build_cmake=1"
+              mpi_build_flags: "--nthread=2 --oblas_dynamic_arch --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1 --build_cmake=1 --oft_use_lto=0"
             }
 
     steps:

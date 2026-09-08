@@ -21,7 +21,7 @@ class Openfusiontoolkit(CMakePackage):
 
     # Project and repo information
     homepage = "https://openfusiontoolkit.github.io/OpenFUSIONToolkit/"
-    url = "https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit/archive/refs/tags/v26.6.tar.gz"
+    url = "https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit/archive/refs/tags/v26.9.tar.gz"
     git = "https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit.git"
     maintainers("hansec")
     license("LGPL-3.0-only", checked_by="hansec")
@@ -31,7 +31,8 @@ class Openfusiontoolkit(CMakePackage):
 
     # Version list supported by spack build (needs 26.6 or newer)
     version("main", branch="main")
-    # version("26.6", sha256="d687c788f05118e88b3bcb78c14fbf726286b5359b122ecdb9829fc26084f3c4") # FIXME: Uncomment and update hash when available
+    # version("26.9", sha256="DUMMY") # FIXME: Uncomment and update hash when available
+    version("26.6", sha256="e456465322f0a0f9097ca49fcf57cc2e983452db879fb5d7a884626df98a198f")
 
     # Build variants
     variant("build_type",default="Release",description="The build type to build",values=("Debug", "Release"))

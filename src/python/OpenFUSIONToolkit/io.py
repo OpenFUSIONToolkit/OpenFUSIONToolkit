@@ -15,6 +15,7 @@ import re
 import xml.etree.ElementTree as ET
 import numpy
 import h5py
+from .meshing import convert_mesh_to_pyvista
 from ._xdmf_cli import build_xdmf_files
 eol_byte = '\n'.encode()
 
@@ -278,27 +279,6 @@ class histfile:
         return result
 
 
-def _convert_hist_cli():
-    r'''! Command line entry point for converting OFT history files to MATLAB or HDF5'''
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.description = "Convert OFT history files to MATLAB or HDF5"
-    parser.add_argument("--files", type=str, default=None, nargs='+', required=True, help="Files to view or convert")
-    parser.add_argument("--convert_hdf5", action="store_true", default=False, help="Convert files to HDF5? (default: False)")
-    parser.add_argument("--convert_matlab", action="store_true", default=False, help="Convert files to MATLAB? (default: False)")
-    options = parser.parse_args()
-
-    for file in options.files:
-        hist_file = histfile(file)
-        file_prefix = os.path.splitext(file)[0]
-        if options.convert_hdf5:
-            hist_file.save_to_hdf5(file_prefix + ".h5")
-        if options.convert_matlab:
-            hist_file.save_to_matlab(file_prefix + ".mat")
-        if not (options.convert_hdf5 or options.convert_matlab):
-            print(hist_file)
-
-
 class XDMF_plot_mesh:
     '''! Class containing data for a single mesh from OFT plot files'''
     def __init__(self,mesh_obj):
@@ -381,31 +361,7 @@ class XDMF_plot_mesh:
 
         @returns `pyvista.UnstructuredGrid` object for grid
         '''
-        import pyvista
-        if self.type == 31:
-            celltype = pyvista.CellType.TETRA
-            ncv = 4
-        elif self.type == 32:
-            celltype = pyvista.CellType.QUADRATIC_TETRA
-            ncv = 10
-        elif self.type == 33:
-            celltype = pyvista.CellType.HEXAHEDRON
-            ncv = 8
-        elif self.type == 21:
-            celltype = pyvista.CellType.TRIANGLE
-            ncv = 3
-        elif self.type == 22:
-            celltype = pyvista.CellType.QUADRATIC_TRIANGLE
-            ncv = 6
-        elif self.type == 23:
-            celltype = pyvista.CellType.QUAD
-            ncv = 4
-        elif self.type == 10:
-            celltype = pyvista.CellType.LINE
-            ncv = 2
-        celltypes = numpy.array([celltype for _ in range(self.lc.shape[0])], dtype=numpy.int8)
-        cells = numpy.insert(self.lc, [0,], ncv, axis=1)
-        return pyvista.UnstructuredGrid(cells, celltypes, self.r)
+        return convert_mesh_to_pyvista(self.type, self.r, self.lc)
 
 
 class XDMF_plot_file:
@@ -459,3 +415,46 @@ def build_XDMF(path='.',repeat_static=False,pretty=False,legacy=False):
 This argument will be removed in a future release.""")
     build_xdmf_files(directory=path,pretty=pretty,repeat_static=repeat_static)
     return XDMF_plot_file(os.path.join(path,'oft_xdmf.0001.h5'))
+
+
+def _convert_hist_cli():
+    r'''! Command line entry point for converting OFT history files to MATLAB or HDF5
+
+    See @ref convert_hist
+    '''
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.description = "Convert OFT history files to MATLAB or HDF5"
+    parser.add_argument("--files", type=str, default=None, nargs='+', required=True, help="Files to view or convert")
+    parser.add_argument("--convert_hdf5", action="store_true", default=False, help="Convert files to HDF5? (default: False)")
+    parser.add_argument("--convert_matlab", action="store_true", default=False, help="Convert files to MATLAB? (default: False)")
+    options = parser.parse_args()
+
+    for file in options.files:
+        hist_file = histfile(file)
+        file_prefix = os.path.splitext(file)[0]
+        if options.convert_hdf5:
+            hist_file.save_to_hdf5(file_prefix + ".h5")
+        if options.convert_matlab:
+            hist_file.save_to_matlab(file_prefix + ".mat")
+        if not (options.convert_hdf5 or options.convert_matlab):
+            print(hist_file)
+
+
+## @page convert_hist `OFT_convert_hist`: Convert OFT history files to MATLAB or HDF5
+#
+# @section convert_hist_desc Description and options
+# This script converts OFT history files to MATLAB or HDF5
+#
+#```shell
+# usage: OFT_convert_hist [-h] --files FILES [FILES ...] [--convert_hdf5] [--convert_matlab]
+#
+# Convert OFT history files to MATLAB or HDF5
+#
+# options:
+#   -h, --help            show this help message and exit
+#   --files FILES [FILES ...]
+#                         Files to view or convert
+#   --convert_hdf5        Convert files to HDF5? (default: False)
+#   --convert_matlab      Convert files to MATLAB? (default: False)
+#```

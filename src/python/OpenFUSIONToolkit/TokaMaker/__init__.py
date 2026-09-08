@@ -10,5 +10,6 @@
 @ingroup doxy_oft_python
 '''
 from ._core import TokaMaker
+from .mug_tok import MUGToksim
 
-__all__ = ["TokaMaker"]
+__all__ = ["TokaMaker", "MUGToksim"]

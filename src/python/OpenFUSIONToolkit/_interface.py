@@ -19,7 +19,7 @@ import numpy
 from numpy import float64, int32
 
 # Helper datatypes
-## ctypes logical (bool) pointer alias 
+## ctypes logical (bool) pointer alias
 c_bool_ptr = ctypes.POINTER(c_bool)
 ## ctypes logical (bool) double pointer alias
 c_bool_ptr_ptr = ctypes.POINTER(c_bool_ptr)
@@ -59,6 +59,10 @@ def ctypes_subroutine(function, argtypes=None, restype=None):
 def bool_to_string(value):
     '''! Convert boolean value to lowercase string for XML attributes'''
     return 'true' if value else 'false'
+
+def string_to_bool(value):
+    '''! Convert string to boolean for XML attributes'''
+    return (value.lower() == 'true') or (value.lower() == '1')
 
 # Common parameters
 ## Vacuum magnetic permeability
@@ -127,6 +131,13 @@ oft_setup_vmesh = ctypes_subroutine(oftpy_lib.oft_setup_vmesh,
 oft_vmesh_get = ctypes_subroutine(oftpy_lib.oft_vmesh_get,
     [c_void_p, c_int_ptr, c_double_ptr_ptr, c_int_ptr, c_int_ptr, c_int_ptr_ptr, c_int_ptr_ptr, c_int_ptr, c_char_p])
 
+# Create general FE interpolation object: oft_get_field_eval(fe_ptr,vals,imode,int_obj,error_str)
+oft_get_field_eval = ctypes_subroutine(oftpy_lib.oft_get_field_eval,
+    [c_void_p, ctypes_numpy_array(float64,1), c_int, c_void_ptr_ptr, c_char_p])
+
+# Create general FE interpolation object: oft_apply_field_eval(fe_ptr,int_obj,int_type,pt_ptr,npts,fbary_tol,dim,field)
+oft_apply_field_eval = ctypes_subroutine(oftpy_lib.oft_apply_field_eval,
+    [c_void_p, c_void_p, c_int, ctypes_numpy_array(numpy.float64,2), c_int, c_double, c_int, ctypes_numpy_array(numpy.float64,2)])
 
 # Dump coverage information if needed
 oftpy_dump_cov = ctypes_subroutine(oftpy_lib.dump_cov)

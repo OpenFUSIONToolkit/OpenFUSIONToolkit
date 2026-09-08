@@ -15,6 +15,7 @@ import ctypes
 from warnings import warn
 import numpy
 from ._interface import *
+from ..fe import Lagrange_2D_field_interpolator
 
 
 def create_prof_file(self, filename, profile_dict, name):
@@ -188,6 +189,8 @@ class TokaMaker():
         self._oft_env = OFT_env
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_factory "gs_factory")
         self._tMaker_ptr = c_void_p()
+        ## Internal FE representation object
+        self._fe_ptr = c_void_p()
         ## Internal Grad-Shafranov object (@ref psi_grad_shaf.gs_equil "gs_equil")
         self._tMaker_equil = None
         ## Internal mesh object
@@ -255,6 +258,7 @@ class TokaMaker():
         self.np = -1
         # Reset defaults
         self._tMaker_ptr = c_void_p()
+        self._fe_ptr = c_void_p()
         self._tMaker_equil = None
         self._mesh_ptr = c_void_p()
         self.settings = tokamaker_settings()
@@ -423,7 +427,7 @@ class TokaMaker():
         ncoils = c_int()
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup(self._tMaker_ptr,order,full_domain,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
+        tokamaker_setup(self._tMaker_ptr,ctypes.byref(self._fe_ptr),order,full_domain,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         # Update vacuum flux
@@ -1311,6 +1315,30 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.calc_jtor_plasma()
 
+    def get_nodal_field(self,field_name):
+        r'''! Get specified field on all node points
+
+        @param field_name Field to return, must be one of ("B", "PSI", "F", "P", "P_PERP", "P_PAR", or "dPSI")
+        @result Desired field on FE nodes
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_nodal_field(field_name)
+
+    def calc_local_shear(self):
+        r'''! Compute local magnetic shear for current equilibrium
+
+        \f$ S = - s \cdot \nabla \times s \f$
+        \f$ s = \frac{\nabla \psi}{|\nabla \psi|} \times \frac{B}{|\nabla \psi|} \f$
+
+        [R. Dewar et al. (1983)]
+
+        @result \f$ S \f$ on grid points (only valid in plasma region)
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.calc_local_shear()
+
     def copy_eq(self,skip_targets=False,skip_constraints=False):
         '''! Create a copy of the current equilibrium object
 
@@ -1414,14 +1442,25 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def get_field_eval(self,field_type):
+    def get_field_eval(self,field_type,values=None):
         r'''! Create field interpolator for vector potential
 
         @param field_type Field to interpolate, must be one of ("B", "psi", "F", "P", "dPSI", "dBr", "dBt", or "dBz")
+        or ('eval', 'grad') if `Values` is specified
+        @param values Optional field values to use for interpolation instead of TokaMaker options
         @result Field interpolation object
         '''
+        if values is not None:
+            if values.shape[0] != self.np:
+                raise IndexError('Incorrect shape of "values", should be [np]')
+            if field_type not in ("eval","grad"):
+                raise ValueError('When specifying "values", field_type must be one of ("eval","grad")')
+            field_type = {"eval": 1, "grad": 2}[field_type]
+            return Lagrange_2D_field_interpolator(self._oft_env,self._fe_ptr,values,field_type)
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
+        if field_type in ("eval","grad"):
+            raise ValueError('field_type must be one of ("B","psi","F","P","dPSI","dBr","dBt","dBz") when `values=None`')
         return self._tMaker_equil.get_field_eval(field_type)
 
     def get_coil_currents(self):
@@ -1451,15 +1490,16 @@ class TokaMaker():
         Lmat[:-1,-1] = M_p_c
         return Lmat
 
-    def trace_surf(self,psi):
+    def trace_surf(self,psi,nresample=None):
         r'''! Trace surface for a given poloidal flux
 
         @param psi Flux surface to trace \f$\hat{\psi}\f$
+        @param nresample Number of points to resample along the traced surface (default: None, return all points)
         @result \f$r(\hat{\psi})\f$
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.trace_surf(psi)
+        return self._tMaker_equil.trace_surf(psi,nresample)
 
     def get_q(self,psi=None,psi_pad=0.02,npsi=50,compute_geo=False):
         r'''! Get q-profile at specified or uniformly spaced points
@@ -1474,6 +1514,20 @@ class TokaMaker():
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.get_q(psi,psi_pad,npsi,compute_geo)
+
+    def get_fsa(self,psi=None,psi_pad=0.02,npsi=50):
+        r'''! Get flux surface averages and per-surface shape parameters
+
+        See @ref TokaMaker.TokaMaker_equilibrium.get_fsa "get_fsa"
+
+        @param psi Explicit sampling locations in \f$\hat{\psi}\f$
+        @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
+        @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
+        @result Dictionary of flux surface profiles and scalars
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_fsa(psi,psi_pad,npsi)
 
     def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50,return_eps=False):
         r'''! Evaluate Sauter trapped particle fractions and flux-surface geometry at specified or uniformly spaced points
@@ -3198,10 +3252,84 @@ class TokaMaker_equilibrium():
             else:
                 return psi,qvals,ravg_dict,None,None,None
 
-    def trace_surf(self,psi):
+    def get_fsa(self,psi=None,psi_pad=0.02,npsi=50):
+        r'''! Get flux surface averages and per-surface shape parameters
+
+        Traces each requested surface once and accumulates all quantities in the
+        tracing ODE, so every returned profile shares the same quadrature. This
+        extends @ref TokaMaker.TokaMaker_equilibrium.get_q "get_q" with the
+        averages needed to close a 1D transport formulation.
+
+        Note \f$ \left< B^2 \right> \f$ is not returned as it follows exactly from
+        \f$ \left< B_p^2 \right> + F^2 \left< 1/R^2 \right> \f$, since \f$ F \f$ is
+        constant on a flux surface.
+
+        Poloidal flux is returned in TokaMaker's convention (Wb/rad), where
+        \f$ B_p = \left| \nabla \psi \right| / R \f$.
+
+        @param psi Explicit sampling locations in \f$\hat{\psi}\f$
+        @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
+        @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
+        @result Dictionary of flux surface profiles and scalars
+        '''
+        if psi is None:
+            psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
+            if self.psi_convention == 0:
+                psi = numpy.ascontiguousarray(numpy.flip(psi), dtype=numpy.float64)
+                psi_save = 1.0-psi
+        else:
+            psi = numpy.ascontiguousarray(psi, dtype=numpy.float64)
+            if self.psi_convention == 0:
+                psi_save = numpy.copy(psi)
+                psi = numpy.ascontiguousarray(1.0-psi, dtype=numpy.float64)
+        if self.psi_convention != 0:
+            psi_save = psi
+        qvals = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
+        ravgs = numpy.zeros((4,psi.shape[0]), dtype=numpy.float64)
+        fsa_avgs = numpy.zeros((4,psi.shape[0]), dtype=numpy.float64)
+        shape_geo = numpy.zeros((6,psi.shape[0]), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_fsa(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,fsa_avgs,shape_geo,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        # F is a flux function, so it comes straight from the source profile rather
+        # than the trace. The leading zero picks up the axis value, which cannot be traced.
+        fpol = self.get_profiles(psi=numpy.concatenate(([0.0], psi_save)))[1]
+        F_axis = fpol[0]
+        fpol = numpy.ascontiguousarray(fpol[1:])
+        return {
+            'psi_norm': psi_save,
+            'psi': self.psinorm_to_absolute(psi_save),
+            'q': qvals,
+            'F': fpol,
+            '<R>': ravgs[0,:],
+            '<1/R>': ravgs[1,:],
+            '<1/R^2>': ravgs[2,:],
+            'dV/dPsi': ravgs[3,:],
+            '<|grad psi|>': fsa_avgs[0,:],
+            '<|grad psi|^2>': fsa_avgs[1,:],
+            '<Bp^2>': fsa_avgs[2,:],
+            '<1/B^2>': fsa_avgs[3,:],
+            'R_min': shape_geo[0,:],
+            'R_max': shape_geo[1,:],
+            'Z_min': shape_geo[2,:],
+            'Z_max': shape_geo[3,:],
+            'R_at_Zmin': shape_geo[4,:],
+            'R_at_Zmax': shape_geo[5,:],
+            'psi_axis': float(self.psinorm_to_absolute(0.0)),
+            'psi_boundary': float(self.psinorm_to_absolute(1.0)),
+            'R_axis': float(self.o_point[0]),
+            'Z_axis': float(self.o_point[1]),
+            'F_axis': float(F_axis),
+            'F0': float(self.F0),
+            'diverted': bool(self.diverted),
+        }
+
+    def trace_surf(self,psi,nresample=None):
         r'''! Trace surface for a given poloidal flux
 
         @param psi Flux surface to trace \f$\hat{\psi}\f$
+        @param nresample Number of points to resample along the traced surface (default: None, return all points)
         @result \f$r(\hat{\psi})\f$
         '''
         if self.psi_convention == 0:
@@ -3213,7 +3341,15 @@ class TokaMaker_equilibrium():
         if error_string.value != b'':
             raise Exception(error_string.value)
         if npoints.value > 0:
-            return numpy.ctypeslib.as_array(points_loc,shape=(npoints.value, 2))
+            pts = numpy.ctypeslib.as_array(points_loc,shape=(npoints.value, 2))
+            if nresample is not None:
+                arclength = numpy.r_[0.0, numpy.cumsum(numpy.linalg.norm(numpy.diff(pts,axis=0),axis=1))]
+                arclength_resample = numpy.linspace(0.0, arclength[-1], nresample)
+                pts_old = pts
+                pts = numpy.zeros((nresample,2),dtype=numpy.float64)
+                pts[:,0] = numpy.interp(arclength_resample, arclength, pts_old[:,0])
+                pts[:,1] = numpy.interp(arclength_resample, arclength, pts_old[:,1])
+            return pts
         else:
             return None
 
@@ -3483,6 +3619,57 @@ class TokaMaker_equilibrium():
         if error_string.value != b'':
             raise Exception(error_string.value)
         return curr
+
+    def get_nodal_field(self,field_name):
+        r'''! Get specified field on all node points
+
+        @param field_name Field to return, must be one of ("B", "PSI", "F", "P", "P_PERP", "P_PAR", or "dPSI")
+        @result Desired field on FE nodes
+        '''
+        field_map = {'B': 1, 'F': 2, 'P': 3, 'P_PERP': 3, 'P_PAR': 4, 'PSI': 5, 'DPSI': 1}
+        ifield = field_map.get(field_name.upper())
+        if ifield is None:
+            raise ValueError('Invalid field type ("B", "PSI", "F", "P", "P_PERP", "P_PAR", "dPSI")')
+        # Just return psi if requested, since it is already stored in the equilibrium object
+        if ifield == 5:
+            return self.get_psi(False)
+        # Allocate array for field values, 3 components for B-field, 1 component for others
+        if ifield == 1:
+            field_vals = numpy.zeros((3,self._tMaker.np), dtype=numpy.float64)
+        else:
+            field_vals = numpy.zeros((1,self._tMaker.np), dtype=numpy.float64)
+        # Get FE projection of field onto nodes
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_field(self._equil_ptr,field_vals,ifield,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        # Handle gradient of psi, by converting from B-field
+        if field_name.upper() == 'DPSI':
+            field_old = field_vals
+            field_vals = numpy.zeros((2,self._tMaker.np), dtype=numpy.float64)
+            field_vals[0,:] = field_old[2,:] * self._tMaker.r[:,0]
+            field_vals[1,:] = -field_old[0,:] * self._tMaker.r[:,0]
+        if ifield == 1:
+            return field_vals.transpose()
+        else:
+            return field_vals.flatten()
+
+    def calc_local_shear(self):
+        r'''! Compute local magnetic shear for current equilibrium
+
+        \f$ S = - s \cdot \nabla \times s \f$
+        \f$ s = \frac{\nabla \psi}{|\nabla \psi|} \times \frac{B}{|\nabla \psi|} \f$
+
+        [R. Dewar et al. (1983)]
+
+        @result \f$ S \f$ on grid points (only valid in plasma region)
+        '''
+        shear = numpy.zeros((self._tMaker.np,), dtype=numpy.float64)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_local_shear(self._equil_ptr,shear,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        return shear
 
     def calc_conductor_currents(self,psi,cell_centered=False,include_Vcoils=False):
         r'''! Get toroidal current density in conducting regions for a given \f$ \psi \f$

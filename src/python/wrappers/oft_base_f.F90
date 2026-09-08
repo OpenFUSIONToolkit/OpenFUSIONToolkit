@@ -18,9 +18,13 @@ MODULE oft_base_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
     c_f_pointer, c_bool, c_null_ptr, c_funptr, c_associated, c_f_procpointer
 USE oft_base
+USE oft_mesh_type, ONLY: oft_bmesh, oft_mesh, bmesh_findcell, mesh_findcell
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
+USE fem_base, ONLY: oft_fem_type, oft_bfem_type
+USE oft_lag_basis, ONLY: oft_scalar_bfem
+USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp
 IMPLICIT NONE
 #include "local.h"
 CONTAINS
@@ -243,4 +247,122 @@ r_loc=C_LOC(mg_mesh%mesh%r)
 lc_loc=C_LOC(mg_mesh%mesh%lc)
 reg_loc=C_LOC(mg_mesh%mesh%reg)
 END SUBROUTINE oft_vmesh_get
+!---------------------------------------------------------------------------------
+!> Create an interpolation object for general FE fields (only 2D Lagrange for now)
+!---------------------------------------------------------------------------------
+SUBROUTINE oft_get_field_eval(fe_ptr,vals,imode,int_obj,error_str) BIND(C,NAME="oft_get_field_eval")
+TYPE(c_ptr), VALUE, INTENT(in) :: fe_ptr !< Pointer to FE object
+TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: imode !< Field type
+TYPE(c_ptr), INTENT(out) :: int_obj !< Pointer to interpolation object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+TYPE(oft_scalar_bfem), POINTER :: lag_rep
+TYPE(oft_lag_brinterp), POINTER :: br_obj
+TYPE(oft_lag_bginterp), POINTER :: bg_obj
+SELECT CASE(imode)
+CASE(211)
+  CALL c_f_pointer(fe_ptr, lag_rep)
+  CALL c_f_pointer(vals, vals_tmp, [lag_rep%ne])
+  ALLOCATE(br_obj)
+  CALL lag_rep%vec_create(br_obj%u)
+  CALL br_obj%u%restore_local(vals_tmp)
+  CALL br_obj%setup(lag_rep)
+  int_obj=C_LOC(br_obj)
+CASE(212)
+  CALL c_f_pointer(fe_ptr, lag_rep)
+  CALL c_f_pointer(vals, vals_tmp, [lag_rep%ne])
+  ALLOCATE(bg_obj)
+  CALL lag_rep%vec_create(bg_obj%u)
+  CALL bg_obj%u%restore_local(vals_tmp)
+  CALL bg_obj%setup(lag_rep)
+  int_obj=C_LOC(bg_obj)
+CASE DEFAULT
+  CALL copy_string('Invalid field type for interpolation',error_str)
+  int_obj=c_null_ptr
+END SELECT
+END SUBROUTINE oft_get_field_eval
+!---------------------------------------------------------------------------------
+!> Evaluate a general FE field with an interpolation object created by
+!! \ref oft_get_field_eval
+!---------------------------------------------------------------------------------
+SUBROUTINE oft_apply_field_eval(fe_ptr,int_obj,int_type,pt_ptr,npts,fbary_tol,dim,field_ptr) BIND(C,NAME="oft_apply_field_eval")
+TYPE(c_ptr), VALUE, INTENT(in) :: fe_ptr !< Pointer to FE object
+TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Pointer to interpolation object
+INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Field type (negative to destroy)
+TYPE(c_ptr), VALUE, INTENT(in)  :: pt_ptr !< Location for evaluation [X,Y,Z] (3D) or [X,Y,0] (2D)
+INTEGER(c_int), VALUE, INTENT(in) :: npts !< Number of points to evaluate
+REAL(c_double), VALUE, INTENT(in) :: fbary_tol !< Tolerance for physical to logical mapping
+INTEGER(c_int), VALUE, INTENT(in) :: dim !< Dimension of field
+TYPE(c_ptr), VALUE, INTENT(in) :: field_ptr !< Field at locations specified by `pt_ptr`
+INTEGER(i4) :: i,cell
+REAL(r8), POINTER, DIMENSION(:,:) :: pts,field
+CLASS(oft_bmesh), POINTER :: smesh
+CLASS(oft_mesh), POINTER :: vmesh
+TYPE(oft_lag_brinterp), POINTER :: br_obj
+TYPE(oft_lag_bginterp), POINTER :: bg_obj
+REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
+IF(int_type<0)THEN
+  SELECT CASE(ABS(int_type))
+  CASE(211)
+    CALL c_f_pointer(int_obj, br_obj)
+    CALL br_obj%u%delete()
+    DEALLOCATE(br_obj%u)
+    CALL br_obj%delete
+    DEALLOCATE(br_obj)
+  CASE(212)
+    CALL c_f_pointer(int_obj, bg_obj)
+    CALL bg_obj%u%delete()
+    DEALLOCATE(bg_obj%u)
+    CALL bg_obj%delete
+    DEALLOCATE(bg_obj)
+  CASE DEFAULT
+    CALL oft_abort("Invalid field type","oft_apply_field_eval",__FILE__)
+  END SELECT
+  RETURN
+END IF
+!---
+SELECT CASE(int_type)
+CASE(211)
+  CALL c_f_pointer(int_obj, br_obj)
+  smesh=>br_obj%mesh
+CASE(212)
+  CALL c_f_pointer(int_obj, bg_obj)
+  smesh=>bg_obj%mesh
+CASE DEFAULT
+  CALL oft_abort("Invalid field type","oft_apply_field_eval",__FILE__)
+END SELECT
+!---Sample fields
+CALL c_f_pointer(pt_ptr, pts, [3,npts])
+CALL c_f_pointer(field_ptr, field, [dim,npts])
+!$omp parallel do private(cell,f,goptmp,vol,fmin,fmax) if(npts>1000)
+DO i=1,npts
+  cell=0
+  IF((int_type>200).AND.(int_type<300))THEN
+    call bmesh_findcell(smesh,cell,pts(:,i),f)
+  ELSE IF((int_type>300).AND.(int_type<400))THEN
+    call mesh_findcell(vmesh,cell,pts(:,i),f)
+  ELSE
+    CALL oft_abort("Invalid field spatial dimension","oft_apply_field_eval",__FILE__)
+  END IF
+  IF(cell==0)THEN
+    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
+    CYCLE
+  END IF
+  fmin=MINVAL(f); fmax=MAXVAL(f)
+  IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
+    ! cell=-ABS(cell)
+    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
+    CYCLE
+  END IF
+  SELECT CASE(int_type)
+  CASE(211)
+    goptmp=0.d0
+    CALL br_obj%interp(cell,f,goptmp,field(:,i))
+  CASE(212)
+    CALL smesh%jacobian(cell,f,goptmp,vol)
+    CALL bg_obj%interp(cell,f,goptmp,field(:,i))
+  END SELECT
+END DO
+END SUBROUTINE oft_apply_field_eval
 END MODULE oft_base_f

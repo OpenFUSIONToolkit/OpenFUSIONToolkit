@@ -989,6 +989,7 @@ DEBUG_STACK_PUSH
 if((cell<=0).OR.(cell>self%nc))then
   !---Find closest point in mesh
   d2min=1.d99
+  next=1
   do i=1,self%np
     d2=SUM((pt-self%r(:,i))**2)
     if(d2<d2min)then
