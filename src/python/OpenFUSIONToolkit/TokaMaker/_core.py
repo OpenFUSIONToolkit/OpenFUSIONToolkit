@@ -2111,43 +2111,6 @@ class TokaMaker():
             raise Exception(error_string.value)
         return 1.0/eig_vals[:,0], eig_vecs
 
-    def _compute_tobin_geometry_filament(self):
-        r'''! Compute geometry for Tobin filament model'''
-        if getattr(self, '_tobin_geometry_filament', None) is not None:
-            return self._tobin_geometry_filament
-        r, lc, reg = self.r, self.lc, self.reg
-        R_s_list, Z_s_list, area_s_list = [], [], []
-        for name, info in self._cond_dict.items():
-            if 'eta' in info:
-                R_j, Z_j, area_j = self._region_geometry(info['reg_id'], r, lc, reg)
-                R_s_list.append(R_j); Z_s_list.append(Z_j); area_s_list.append(area_j)
-        R_s = numpy.concatenate(R_s_list)
-        Z_s = numpy.concatenate(Z_s_list)
-        area_s = numpy.concatenate(area_s_list)
-        R_c_list, Z_c_list = [], []
-        for name, info in self._coil_dict.items():
-            R_j, Z_j, area_j = self._region_geometry(info['reg_id'], r, lc, reg)
-            R_c_list.append(numpy.sum(R_j * area_j) / numpy.sum(area_j))
-            Z_c_list.append(numpy.sum(Z_j * area_j) / numpy.sum(area_j))
-        R_c, Z_c = numpy.array(R_c_list), numpy.array(Z_c_list)
-        M_ss = self._mutual_inductance(R_s[:, None], Z_s[:, None], R_s[None, :], Z_s[None, :])
-        numpy.fill_diagonal(M_ss, self._self_inductance_ring(R_s, area_s))
-        self._tobin_geometry_filament = {'R_s': R_s, 'Z_s': Z_s, 'R_c': R_c, 'Z_c': Z_c, 'M_ss_lu': lu_factor(M_ss)}
-        return self._tobin_geometry_filament
-
-    def get_vde_growth(self,return_gradient=False,use_filament=False):
-        r'''! Compute the Tobin vertical force-gradient stability margin, -F'_z, for the
-        current equilibrium.
-        @param return_gradient If True, also return the gradient of the stability margin.
-        Only supported with use_filament=True.
-        @param use_filament Use the elliptic-integral filament coupling instead of the native
-        flux-drive calculation.
-        @result -F'_z [N/m], negative marks the instability threshold.
-        '''
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.get_vde_growth(return_gradient=return_gradient, use_filament=use_filament)
-
     def eig_td(self,omega=-1.E4,neigs=4,include_bounds=True,pm=False,damping_scale=-1.0):
         '''! Compute eigenvalues for the linearized time-dependent system
 
@@ -2234,8 +2197,48 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
+    def _compute_tobin_geometry_filament(self):
+        r'''! Compute geometry for Tobin filament model
+        '''
+        if getattr(self, '_tobin_geometry_filament', None) is not None:
+            return self._tobin_geometry_filament
+        r, lc, reg = self.r, self.lc, self.reg
+        R_s_list, Z_s_list, area_s_list = [], [], []
+        for name, info in self._cond_dict.items():
+            if 'eta' in info:
+                R_j, Z_j, area_j = self._region_geometry(info['reg_id'], r, lc, reg)
+                R_s_list.append(R_j); Z_s_list.append(Z_j); area_s_list.append(area_j)
+        R_s = numpy.concatenate(R_s_list)
+        Z_s = numpy.concatenate(Z_s_list)
+        area_s = numpy.concatenate(area_s_list)
+        R_c_list, Z_c_list = [], []
+        for name, info in self._coil_dict.items():
+            R_j, Z_j, area_j = self._region_geometry(info['reg_id'], r, lc, reg)
+            R_c_list.append(numpy.sum(R_j * area_j) / numpy.sum(area_j))
+            Z_c_list.append(numpy.sum(Z_j * area_j) / numpy.sum(area_j))
+        R_c, Z_c = numpy.array(R_c_list), numpy.array(Z_c_list)
+        M_ss = self._mutual_inductance(R_s[:, None], Z_s[:, None], R_s[None, :], Z_s[None, :])
+        numpy.fill_diagonal(M_ss, self._self_inductance_ring(R_s, area_s))
+        self._tobin_geometry_filament = {'R_s': R_s, 'Z_s': Z_s, 'R_c': R_c, 'Z_c': Z_c, 'M_ss_lu': lu_factor(M_ss)}
+        return self._tobin_geometry_filament
+    
+    def get_vde_growth(self,return_gradient=False,use_filament=False):
+        r'''! Compute the Tobin vertical force-gradient stability margin, -F'_z, for the
+        current equilibrium.
+
+        @param return_gradient If True, also return the gradient of the stability margin.
+        Only supported with use_filament=True.
+        @param use_filament Use the elliptic-integral filament coupling instead of the native
+        flux-drive calculation.
+        @result -F'_z [N/m], negative marks the instability threshold.
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_vde_growth(return_gradient=return_gradient, use_filament=use_filament)
+
     def _mutual_inductance(self, R1, Z1, R2, Z2):
         r'''! Mutual inductance between two coaxial circular filaments (Maxwell's formula).
+        
         @param R1 Major radius of the first filament(s) [m].
         @param Z1 Vertical position of the first filament(s) [m].
         @param R2 Major radius of the second filament(s) [m].
@@ -2250,6 +2253,7 @@ class TokaMaker():
     def _self_inductance_ring(self, R, area):
         r'''! Self-inductance of a circular ring with major radius R and cross-sectional area,
         using the finite-wire-radius formula (Maxwell's formula is singular at zero separation).
+        
         @param R Major radius of the ring [m].
         @param area Cross-sectional area of the ring [m^2].
         @result Self-inductance [H].
@@ -2259,22 +2263,37 @@ class TokaMaker():
         return mu0 * R * (numpy.log(8 * R / a_eff) - 2.00)
 
     def _d_mutual_inductance_dZ1(self, R1, Z1, R2, Z2):
-        # Central finite differences on the exact _mutual_inductance formula, wrt Z1 (the
-        # plasma side, since only the plasma is rigidly displaced). dz is small relative to
-        # the device scale (R ~ few m) but large enough to avoid float64 roundoff noise.
+        r'''! Central finite differences on the exact _mutual_inductance formula, wrt Z1 (the
+        plasma side, since only the plasma is rigidly displaced). dz is small relative to
+        the device scale, but large enough to avoid float64 roundoff noise.
+        
+        @param R1 Major radius of the first filament(s) [m].
+        @param Z1 Vertical position of the first filament(s) [m].
+        @param R2 Major radius of the second filament(s) [m].
+        @param Z2 Vertical position of the second filament(s) [m].
+        @result dM/dZ1 [H/m], broadcasting over array inputs.
+        '''
         dz = 1.E-4
         return (self._mutual_inductance(R1, Z1 + dz, R2, Z2) - self._mutual_inductance(R1, Z1 - dz, R2, Z2)) / (2 * dz)
 
     def _d2_mutual_inductance_dZ1(self, R1, Z1, R2, Z2):
-        # Central finite differences on the exact _mutual_inductance formula, wrt Z1 (the
-        # plasma side, since only the plasma is rigidly displaced). dz is small relative to
-        # the device scale (R ~ few m) but large enough to avoid float64 roundoff noise.
+        r'''! Central finite differences on the exact _mutual_inductance formula, wrt Z1 (the
+        plasma side, since only the plasma is rigidly displaced). dz is small relative to
+        the device scale, but large enough to avoid float64 roundoff noise.
+
+        @param R1 Major radius of the first filament(s) [m].
+        @param Z1 Vertical position of the first filament(s) [m].
+        @param R2 Major radius of the second filament(s) [m].
+        @param Z2 Vertical position of the second filament(s) [m].
+        @result d2M/dZ12 [H/m^2], broadcasting over array inputs.
+        '''
         dz = 1.E-4
         return (self._mutual_inductance(R1, Z1 + dz, R2, Z2) - 2 * self._mutual_inductance(R1, Z1, R2, Z2)
                 + self._mutual_inductance(R1, Z1 - dz, R2, Z2)) / dz**2
 
     def _region_geometry(self, reg_id, r, lc, reg):
         r'''! Centroid R,Z and area of every mesh triangle belonging to a given region id.
+        
         @param reg_id Region id to select.
         @param r Node coordinates [n_nodes,>=2].
         @param lc Triangle connectivity [n_cells,3], 0-indexed.
@@ -3129,10 +3148,11 @@ class TokaMaker_equilibrium():
         return curr
 
     def _compute_flux_drive(self, R_s, Z_s):
-        r'''! Plasma-to-passive-structure flux-drive vector calculation
-        Computes dJ_phi/dZ from the plasma current distribution, uses it as a source term in
-        vacuum solve to get the flux-drive vector. vac_solve adds real coil-driven flux 
-        regardless of rhs_source, subtracted it to get just plasma-driven component.  
+        r'''! Plasma-to-passive-structure flux-drive vector calculation. Computes dJ_phi/dZ 
+        from the plasma current distribution, uses it as a source term in vacuum solve to 
+        get the flux-drive vector. vac_solve adds real coil-driven flux regardless of 
+        rhs_source, subtracts active coil contribution to get plasma-driven component only.  
+
         @param R_s, Z_s Passive-structure filament positions (same basis M_ss uses).
         @result flux_drive [len(R_s)], in the same convention as M_ss.
         '''
@@ -3172,10 +3192,11 @@ class TokaMaker_equilibrium():
         r'''! Compute the Tobin vertical force-gradient stability margin, -F'_z, for this
         solved equilibrium snapshot, reusing the fixed coil geometry and passive-structure
         self-consistency factorization cached on the parent TokaMaker object.
+
         @param return_gradient If True, also return the gradient of the stability margin.
         Only supported with use_filament=True.
         @param use_filament Use the elliptic-integral filament coupling instead of the 
-        flux-drive calculation. Kept for comparison
+        flux-drive calculation. Kept for comparison.
         @result -F'_z [N/m], negative marks the instability threshold.
         '''
         if return_gradient and not use_filament:
@@ -3185,9 +3206,9 @@ class TokaMaker_equilibrium():
         R_s, Z_s, R_c, Z_c, M_ss_lu = geom['R_s'], geom['Z_s'], geom['R_c'], geom['Z_c'], geom['M_ss_lu']
         r, lc, reg = self._tMaker.r, self._tMaker.lc, self._tMaker.reg
 
-        # Plasma current per mesh element: nodal J_phi averaged onto each triangle, times its
-        # area. Elements outside the plasma read exactly zero and drop out of every sum below,
-        # so no explicit plasma-region mask is needed.
+        # Plasma current per mesh element: nodal J_phi averaged onto each triangle * area. 
+        # Elements outside the plasma cancel out of every sum below, so no explicit 
+        # plasma-region mask needed.
         J_node = self.calc_jtor_plasma()
         J_tri = J_node[lc].mean(axis=1)
         p0, p1, p2 = r[lc[:, 0], :2], r[lc[:, 1], :2], r[lc[:, 2], :2]
