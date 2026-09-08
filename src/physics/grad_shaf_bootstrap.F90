@@ -97,7 +97,6 @@ end type jphi_bs_flux_func
 !------------------------------------------------------------------------------
 type, extends(gsinv_interp) :: sauter_interp
   logical :: stage_1 = .FALSE. !< Stage 1 pass (finding Bmax)
-  real(8) :: f_surf = 0.d0      !< F surface value (R*Bt)
   real(8) :: bmax = -1.d0       !< Maximum |B| on surface (set in stage 1)
   real(8) :: rmax_surf = -1.d30 !< Maximum R on surface (set in stage 1)
   real(8) :: rmin_surf =  1.d30 !< Minimum R on surface (set in stage 1)
