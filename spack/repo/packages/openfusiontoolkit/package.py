@@ -31,7 +31,7 @@ class Openfusiontoolkit(CMakePackage):
 
     # Version list supported by spack build (needs 26.6 or newer)
     version("main", branch="main")
-    # version("26.9", sha256="DUMMY") # FIXME: Uncomment and update hash when available
+    version("26.9", sha256="1002664395ea014f7ba34246b899dafa39711f2c41e8e943e965ec0872a99192")
     version("26.6", sha256="e456465322f0a0f9097ca49fcf57cc2e983452db879fb5d7a884626df98a198f")
 
     # Build variants
