@@ -50,7 +50,7 @@ identifiers:
     description: The GitHub release URL for this version (26.9)
 repository-code: 'https://github.com/OpenFUSIONToolkit/OpenFUSIONToolkit'
 url: 'https://openfusiontoolkit.github.io/OpenFUSIONToolkit/'
-license: LGPL-3.0
+license: LGPL-3.0-only
 keywords:
   - fusion
   - MHD
@@ -63,7 +63,7 @@ abstract: >-
   arbitrary 2D and 3D geometries. The underlying framework
   and its component tools support the use of variable order
   finite element methods on unstructured tetrahedral
-  (triangular) or hexahedral (quadralateral) grids.
+  (triangular) or hexahedral (quadrilateral) grids.
 references:
   - type: article
     scope: Please cite this paper if you use ThinCurr
@@ -75,7 +75,7 @@ references:
     doi: 10.1016/j.cpc.2025.109713
     authors:
       - given-names: Christopher
-        family-names: Hansen      
+        family-names: Hansen
         orcid: "https://orcid.org/0000-0001-6928-5815"
       - given-names: Alexander
         family-names: Battey
@@ -101,7 +101,7 @@ references:
     doi: 10.1016/j.cpc.2024.109111
     authors:
       - given-names: Christopher
-        family-names: Hansen      
+        family-names: Hansen
         orcid: "https://orcid.org/0000-0001-6928-5815"
       - given-names: Ian
         family-names: Stewart
