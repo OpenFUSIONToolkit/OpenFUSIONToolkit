@@ -5,15 +5,7 @@ on:
     branches:
       - container_release
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-    paths:
-      - .github/workflows/container_cd.yaml
-      - src/utilities/build_libs.py
-      - docker/Dockerfile.*
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: cd_container-${{ github.ref }}

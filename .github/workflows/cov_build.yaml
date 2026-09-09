@@ -6,13 +6,7 @@ on:
       - main
       - cov_debug
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-    paths:
-      - .github/workflows/cov_build.yaml
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: cov-${{ github.ref }}
