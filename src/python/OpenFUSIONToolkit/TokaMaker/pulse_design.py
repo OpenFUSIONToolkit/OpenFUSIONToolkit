@@ -2096,24 +2096,24 @@ class TokaMaker_TORAX:
         myconfig.setdefault('numerics', {})
 
         if self._Ip is not None:
-            myconfig['profile_conditions']['Ip'] = self._Ip
+            myconfig['profile_conditions']['Ip'] = copy.deepcopy(self._Ip)
 
         if self._n_e is not None:
-            myconfig['profile_conditions']['n_e'] = self._n_e
+            myconfig['profile_conditions']['n_e'] = copy.deepcopy(self._n_e)
 
         if self._T_e is not None:
-            myconfig['profile_conditions']['T_e'] = self._T_e
+            myconfig['profile_conditions']['T_e'] = copy.deepcopy(self._T_e)
 
         if self._T_i is not None:
-            myconfig['profile_conditions']['T_i'] = self._T_i
+            myconfig['profile_conditions']['T_i'] = copy.deepcopy(self._T_i)
 
         if self._Zeff is not None:
             myconfig.setdefault('plasma_composition', {})
-            myconfig['plasma_composition']['Z_eff'] = self._Zeff
+            myconfig['plasma_composition']['Z_eff'] = copy.deepcopy(self._Zeff)
 
         if self._main_ion is not None:
             myconfig.setdefault('plasma_composition', {})
-            myconfig['plasma_composition']['main_ion'] = self._main_ion
+            myconfig['plasma_composition']['main_ion'] = copy.deepcopy(self._main_ion)
 
         if self._impurity is not None:
             myconfig.setdefault('plasma_composition', {})
@@ -2130,7 +2130,7 @@ class TokaMaker_TORAX:
         if self._ecrh_loc is not None:
             myconfig.setdefault('sources', {})
             myconfig['sources'].setdefault('ecrh', {})
-            myconfig['sources']['ecrh']['P_total'] = self._ecrh_heating
+            myconfig['sources']['ecrh']['P_total'] = copy.deepcopy(self._ecrh_heating)
             myconfig['sources']['ecrh']['gaussian_location'] = self._ecrh_loc
             myconfig['sources']['ecrh']['gaussian_width'] = self._ecrh_width
 
@@ -2154,7 +2154,7 @@ class TokaMaker_TORAX:
             myconfig['sources']['generic_particle'] = {}
             myconfig['sources']['generic_particle']['deposition_location'] = self._generic_particle_location
             myconfig['sources']['generic_particle']['particle_width'] = self._generic_particle_width
-            myconfig['sources']['generic_particle']['S_total'] = self._generic_particle_s_total
+            myconfig['sources']['generic_particle']['S_total'] = copy.deepcopy(self._generic_particle_s_total)
             
         if self._ped_mode == 'off' and self._pedestal_config is None:
             # No pedestal: leave myconfig['pedestal'] unset (TORAX default no_pedestal).
@@ -2170,9 +2170,9 @@ class TokaMaker_TORAX:
                 # IBC penalty stiffness (soft target, not a hard BC): higher tracks the imposed
                 # pedestal more exactly, lower lets TORAX transport smooth the imposed shape.
                 if self._ped_T_source_prefactor is not None:
-                    myconfig['numerics']['adaptive_T_source_prefactor'] = self._ped_T_source_prefactor
+                    myconfig['numerics']['adaptive_T_source_prefactor'] = copy.deepcopy(self._ped_T_source_prefactor)
                 if self._ped_n_source_prefactor is not None:
-                    myconfig['numerics']['adaptive_n_source_prefactor'] = self._ped_n_source_prefactor
+                    myconfig['numerics']['adaptive_n_source_prefactor'] = copy.deepcopy(self._ped_n_source_prefactor)
             else:
                 # Detection loop: ADAPTIVE_SOURCE + formation model gives the L/H state
                 # machine; set_pedestal=False so the (later) IBC solely owns the edge.
@@ -2209,14 +2209,14 @@ class TokaMaker_TORAX:
                     ped_cfg['transition_time_width'] = self._ped_transition_time
                     ped_cfg['formation_model'] = {'model_name': self._ped_formation_model_name}
                 if self._ped_top is not None:
-                    ped_cfg['rho_norm_ped_top'] = self._ped_top
+                    ped_cfg['rho_norm_ped_top'] = copy.deepcopy(self._ped_top)
                 if self._T_i_ped is not None:
-                    ped_cfg['T_i_ped'] = self._T_i_ped
+                    ped_cfg['T_i_ped'] = copy.deepcopy(self._T_i_ped)
                 if self._T_e_ped is not None:
-                    ped_cfg['T_e_ped'] = self._T_e_ped
+                    ped_cfg['T_e_ped'] = copy.deepcopy(self._T_e_ped)
                 if self._n_e_ped is not None:
                     ped_cfg['n_e_ped_is_fGW'] = False
-                    ped_cfg['n_e_ped'] = self._n_e_ped
+                    ped_cfg['n_e_ped'] = copy.deepcopy(self._n_e_ped)
                 myconfig['pedestal'] = ped_cfg
             else:
                 # Replace pedestal section entirely to avoid invalid extra keys
@@ -2224,18 +2224,18 @@ class TokaMaker_TORAX:
                 myconfig['pedestal'] = {'model_name': 'no_pedestal'}
 
         if self._nbar is not None:
-            myconfig['profile_conditions']['nbar'] = self._nbar
+            myconfig['profile_conditions']['nbar'] = copy.deepcopy(self._nbar)
         if self._normalize_to_nbar is not None:
             myconfig['profile_conditions']['normalize_n_e_to_nbar'] = self._normalize_to_nbar
 
         if self._ne_right_bc is not None:
             myconfig['profile_conditions']['n_e_right_bc_is_fGW'] = False
-            myconfig['profile_conditions']['n_e_right_bc'] = self._ne_right_bc
+            myconfig['profile_conditions']['n_e_right_bc'] = copy.deepcopy(self._ne_right_bc)
 
         if self._Te_right_bc is not None:
-            myconfig['profile_conditions']['T_e_right_bc'] = self._Te_right_bc
+            myconfig['profile_conditions']['T_e_right_bc'] = copy.deepcopy(self._Te_right_bc)
         if self._Ti_right_bc is not None:
-            myconfig['profile_conditions']['T_i_right_bc'] = self._Ti_right_bc
+            myconfig['profile_conditions']['T_i_right_bc'] = copy.deepcopy(self._Ti_right_bc)
 
         if self._evolve_density is not None:
             myconfig['numerics']['evolve_density'] = self._evolve_density
@@ -2249,7 +2249,7 @@ class TokaMaker_TORAX:
         if self._gp_s is not None and self._gp_dl is not None:
             myconfig.setdefault('sources', {})
             myconfig['sources']['gas_puff'] = {
-                'S_total': self._gp_s,
+                'S_total': copy.deepcopy(self._gp_s),
                 'puff_decay_length': self._gp_dl,
             }
 
@@ -2260,7 +2260,7 @@ class TokaMaker_TORAX:
         ):
             myconfig.setdefault('sources', {})
             myconfig['sources']['pellet'] = {
-                'S_total': self._pellet_s_total,
+                'S_total': copy.deepcopy(self._pellet_s_total),
                 'pellet_width': self._pellet_width,
                 'pellet_deposition_location': self._pellet_deposition_location,
             }
@@ -2422,9 +2422,9 @@ class TokaMaker_TORAX:
             }
 
         if self._tx_grid_type == 'n_rho':
-            myconfig['geometry']['n_rho'] = self._tx_grid
+            myconfig['geometry']['n_rho'] = copy.deepcopy(self._tx_grid)
         elif self._tx_grid_type == 'face_centers':
-            myconfig['geometry']['face_centers'] = self._tx_grid
+            myconfig['geometry']['face_centers'] = copy.deepcopy(self._tx_grid)
 
         # ── 4. Override t_initial / t_final / fixed_dt from __init__ ───────
         myconfig.setdefault('numerics', {})
@@ -2435,7 +2435,7 @@ class TokaMaker_TORAX:
         # ── 5. Psi profile from last TORAX relax (initial / inter-loop) ───────────────────
         myconfig.setdefault('profile_conditions', {})
         if self._psi_init is not None:
-            myconfig['profile_conditions']['psi'] = self._psi_init
+            myconfig['profile_conditions']['psi'] = copy.deepcopy(self._psi_init)
             myconfig['profile_conditions']['initial_psi_mode'] = 'profile_conditions'
             myconfig['profile_conditions']['initial_psi_from_j'] = False
         else:
@@ -2448,11 +2448,11 @@ class TokaMaker_TORAX:
         # Applied after set_*() so relaxed n_e / T_e / T_i replace the initial
         # slice of user schedules, matching how psi from relax seeds the flux.
         if self._n_e_init is not None:
-            myconfig['profile_conditions']['n_e'] = self._n_e_init
+            myconfig['profile_conditions']['n_e'] = copy.deepcopy(self._n_e_init)
         if self._T_e_init is not None:
-            myconfig['profile_conditions']['T_e'] = self._T_e_init
+            myconfig['profile_conditions']['T_e'] = copy.deepcopy(self._T_e_init)
         if self._T_i_init is not None:
-            myconfig['profile_conditions']['T_i'] = self._T_i_init
+            myconfig['profile_conditions']['T_i'] = copy.deepcopy(self._T_i_init)
 
         # ── 8. Steady-state coupling: previous loop TORAX t_final → IC for this loop ──
         # If an inter-loop relax already ran this loop, its output should define the
@@ -2929,9 +2929,9 @@ class TokaMaker_TORAX:
             }
 
             if self._tx_grid_type == 'n_rho':
-                init_config['geometry']['n_rho'] = self._tx_grid
+                init_config['geometry']['n_rho'] = copy.deepcopy(self._tx_grid)
             elif self._tx_grid_type == 'face_centers':
-                init_config['geometry']['face_centers'] = self._tx_grid
+                init_config['geometry']['face_centers'] = copy.deepcopy(self._tx_grid)
 
             init_config.setdefault('numerics', {})
             init_config['numerics']['t_initial'] = self._t_init
