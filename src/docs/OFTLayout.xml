@@ -17,7 +17,7 @@
       <tab type="hierarchy" visible="no" title="" intro=""/>
       <tab type="classmembers" visible="no" title="" intro=""/>
     </tab>
-    <tab type="files" visible="yes" title="">
+    <tab type="files" visible="no" title="">
       <tab type="filelist" visible="no" title="" intro=""/>
       <tab type="globals" visible="no" title="" intro=""/>
     </tab>
@@ -29,7 +29,7 @@
     <briefdescription visible="no"/>
     <includes visible="$SHOW_INCLUDE_FILES"/>
     <detaileddescription title=""/>
-    <inheritancegraph visible="yes"/>
+    <inheritancegraph visible="$CLASS_GRAPH"/>
     <collaborationgraph visible="$COLLABORATION_GRAPH"/>
     <memberdecl>
       <nestedclasses visible="yes" title=""/>
