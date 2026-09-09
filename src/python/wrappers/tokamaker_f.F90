@@ -362,7 +362,7 @@ INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< FE order for Lagrange element
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Plasma covers full domain (eg. fixed-boundary solves)?
 INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Number of coils in model
 TYPE(c_ptr), INTENT(out) :: coil_Lmat !< Pointer to coil inductance matrix
-INTEGER(i4), INTENT(in) :: n_eq !< Number of equilibriums to setup
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: n_eq !< Number of equilibriums to setup
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(4) :: i,ierr,io_unit,npts,iostat
 REAL(8) :: theta
@@ -1527,6 +1527,8 @@ TYPE(tokamaker_settings_type), VALUE, INTENT(in) :: settings !< Settings object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+INTEGER(i4) :: i
+
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 oft_env%pm=settings%pm
 tMaker_obj%device%free=settings%free_boundary
@@ -1539,7 +1541,15 @@ tMaker_obj%device%urf=settings%urf
 tMaker_obj%device%maxits=settings%maxits
 tMaker_obj%device%nl_tol=settings%nl_tol
 tMaker_obj%mode=settings%mode
-IF(ASSOCIATED(tMaker_obj%gs_equils(1)%eq))tMaker_obj%gs_equils(1)%eq%mode=tMaker_obj%mode
+
+IF(ALLOCATED(tMaker_obj%gs_equils))THEN
+  IF(ASSOCIATED(tMaker_obj%gs_equils(1)%eq))THEN
+    DO i=1, tMaker_obj%n_eq
+      tMaker_obj%gs_equils(1)%eq%mode=tMaker_obj%mode
+    END DO
+  END IF
+END IF
+
 IF((.NOT.tMaker_obj%device%dipole_mode).AND.settings%dipole_mode)CALL oft_warn("TokaMaker's dipole functionality is experimental, use with caution and report bugs")
 tMaker_obj%device%dipole_mode=settings%dipole_mode
 IF((.NOT.tMaker_obj%device%mirror_mode).AND.settings%mirror_mode)CALL oft_warn("TokaMaker's mirror functionality is experimental, use with caution and report bugs")

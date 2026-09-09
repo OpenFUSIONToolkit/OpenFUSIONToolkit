@@ -421,7 +421,6 @@ class TokaMaker():
         @param order Order of FE representation to use
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
         '''
-        print('Starting setup', flush=True)
         if self.np != -1:
             raise ValueError('G-S instance already setup')
         self.update_settings()
