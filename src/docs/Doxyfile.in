@@ -32,7 +32,10 @@ IMAGE_PATH             = @CMAKE_CURRENT_SOURCE_DIR@/docs/images \
                          @CMAKE_CURRENT_SOURCE_DIR@/docs/generated/images \
                          @CMAKE_CURRENT_SOURCE_DIR@/../logos
 RECURSIVE              = YES
-EXCLUDE                = @CMAKE_CURRENT_SOURCE_DIR@/base/oft_sort_c.cxx
+EXCLUDE                = @CMAKE_CURRENT_SOURCE_DIR@/base/oft_sort_c.cxx \
+                         @CMAKE_CURRENT_SOURCE_DIR@/docs/website \
+                         @CMAKE_CURRENT_SOURCE_DIR@/docs/filter_python_doxygen.py \
+                         @CMAKE_CURRENT_SOURCE_DIR@/python/create_stub.py \
 EXCLUDE_PATTERNS       =
 FILE_PATTERNS          = *.f90 \
                          *.F90 \
