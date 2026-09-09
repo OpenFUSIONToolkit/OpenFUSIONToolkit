@@ -428,11 +428,9 @@ class TokaMaker():
         ncoils = c_int()
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        print('Calling setup', flush=True)
         tokamaker_setup(self._tMaker_ptr,order,full_domain,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),self.n_eq,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
-        print('Called setup', flush=True)
         # Update vacuum flux
         self._F0 = F0
         # Get coil count and reference to coil self-inductance matrix
