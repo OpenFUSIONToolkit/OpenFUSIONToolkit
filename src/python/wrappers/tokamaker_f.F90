@@ -431,7 +431,6 @@ CALL tMaker_obj%device%init()
 ncoils=tMaker_obj%device%ncoils
 coil_Lmat=C_LOC(tMaker_obj%device%Lcoils)
 
-print *, 'fortran has ncoils=', ncoils
 END SUBROUTINE tokamaker_setup
 !---------------------------------------------------------------------------------
 !> Load profile specification files
