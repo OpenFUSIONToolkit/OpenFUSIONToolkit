@@ -847,7 +847,7 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_resistivity(eta_prof)
 
-    def solve(self, vacuum=False, return_its=False):
+    def solve(self, vacuum=False, return_its=False, eq_idx=0):
         '''! Solve G-S equation with specified constraints, profiles, etc.
 
         @param vacuum Perform vacuum solve? Plasma-related targets (eg. `Ip`) will be ignored.
@@ -856,7 +856,7 @@ class TokaMaker():
         '''
         nl_its = c_int()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),ctypes.byref(nl_its),error_string)
+        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),eq_idx+1,ctypes.byref(nl_its),error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
         if return_its:
@@ -1261,16 +1261,16 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.calc_jtor_plasma()
 
-    def copy_eq(self,skip_targets=False,skip_constraints=False):
+    def copy_eq(self,skip_targets=False,skip_constraints=False,eq_idx=0):
         '''! Create a copy of the current equilibrium object
 
         @param skip_targets When copying, skip copying target values
         @param skip_constraints When copying, skip copying constraint values
         @result New `TokaMaker_equilibrium` object with copied values
         '''
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        return TokaMaker_equilibrium(source_eq=self._tMaker_equil,skip_targets=skip_targets,skip_constraints=skip_constraints)
+        if len(self._tMaker_equil) == 0:
+            raise ValueError("Equilibrium list is empty")
+        return TokaMaker_equilibrium(source_eq=self._tMaker_equil[eq_idx],skip_targets=skip_targets,skip_constraints=skip_constraints)
 
     def replace_eq(self,source_eq=None,source_file=None,skip_targets=False,skip_constraints=False):
         '''! Replace the current equilibrium object with a copy of another equilibrium object or one loaded from file
@@ -1569,7 +1569,7 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.compute_flux_integral(psi_vals,field_vals)
 
-    def plot_machine(self,fig,ax,equilibrium=None,vacuum_color='whitesmoke',cond_color='gray',limiter_color='k',
+    def plot_machine(self,fig,ax,equilibrium=None,eq_idx=0,vacuum_color='whitesmoke',cond_color='gray',limiter_color='k',
                      coil_color='gray',coil_colormap=None,coil_symmap=False,coil_scale=1.0,coil_clabel=r'$I_C$ [A]',colorbar=None):
         '''! Plot machine geometry
 
@@ -1589,7 +1589,7 @@ class TokaMaker():
         '''
         # Get equilibrium object if not set
         if equilibrium is None:
-            equilibrium = self._tMaker_equil
+            equilibrium = self._tMaker_equil[eq_idx]
         mask_vals = numpy.ones((self.np,))
         if self.settings.mirror_mode:
             r_plot = self.r[:,1]
@@ -1787,7 +1787,7 @@ class TokaMaker():
                 ncols = max(1,(nCoil)//col_max)
                 coil_axis.legend(bbox_to_anchor=(1.05,0.5), loc='center left', ncol=ncols)
 
-    def plot_psi(self,fig,ax,equilibrium=None,psi=None,normalized=True,
+    def plot_psi(self,fig,ax,equilibrium=None,eq_idx=0,psi=None,normalized=True,
         plasma_color=None,plasma_nlevels=8,plasma_levels=None,plasma_colormap=None,plasma_linestyles=None,
         vacuum_color='darkgray',vacuum_nlevels=8,vacuum_levels=None,vacuum_colormap=None,vacuum_linestyles=None,
         xpoint_color='k',xpoint_marker='x',xpoint_inactive_alpha=0.5,opoint_color='k',opoint_marker='*'):
@@ -1822,7 +1822,7 @@ class TokaMaker():
             z_plot = self.r[:,1]
         # Get equilibrium object if not set
         if equilibrium is None:
-            equilibrium = self._tMaker_equil
+            equilibrium = self._tMaker_equil[eq_idx]
         # Plot poloidal flux
         if psi is None:
             psi = equilibrium.get_psi(normalized)

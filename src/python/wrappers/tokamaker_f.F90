@@ -588,9 +588,10 @@ END SUBROUTINE tokamaker_init_psi
 !---------------------------------------------------------------------------------
 !> Perform nonlinear solve to find equilibrium solution for given profiles, targets, etc.
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,nl_its,error_str) BIND(C,NAME="tokamaker_solve")
+SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,eq_idx,nl_its,error_str) BIND(C,NAME="tokamaker_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Perform vacuum solve?
+INTEGER(c_int), vALUE, INTENT(in) :: eq_idx !< Number of nonlinear iterations
 INTEGER(c_int), INTENT(out) :: nl_its !< Number of nonlinear iterations
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ntargets,ierr
