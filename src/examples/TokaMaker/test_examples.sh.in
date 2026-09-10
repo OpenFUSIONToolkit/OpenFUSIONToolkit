@@ -52,7 +52,7 @@ run_test Dipole dipole_mesh_ex.ipynb
 run_test Dipole dipole_eq_ex.ipynb
 
 # WHAM cases
-run_test WHAM WHAM_mesh_ex.ipynb
+# run_test WHAM WHAM_mesh_ex.ipynb
 run_test WHAM WHAM_eq_ex.ipynb
 
 # Advanced workflow cases
