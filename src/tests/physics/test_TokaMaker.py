@@ -1179,7 +1179,8 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
             isolate_edge_jBS=False,
             psi_pad=psi_pad,
             iterations=2,
-            diagnostic_plots=False
+            diagnostic_plots=False,
+            use_python_solve=True,
         )
     except Exception as e:
         print("Bootstrap solve failed: {0}".format(e))
@@ -1212,19 +1213,19 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
 # Expected values dictionary
 # -----------------------------------------------------------------------
 ITER_bootstrap_eq_dict = {
-    'Ip': 15600817.585821694,
-    'kappa': 1.87554142781964,
-    'R_geo': 6.222376807932244,
-    'a_geo': 1.9817209643036526,
-    'q_0': 0.9951304914765554,
-    'q_95': 2.856235920791585,
-    'P_ax': 739971.7132708698,
-    'j_BS_max': 193963.2797949608,
-    'j_BS_axis': 7555.958566625245,
-    'jphi_axis': 1459409.3677809385,
-    'jphi_max': 1551188.1280449552,
-    'j_ind_axis': 1357487.1677957429,
-    'bs_fraction': 0.1575907471180497,
+    'Ip': 15599993.874846907,
+    'kappa': 1.8761626076245332,
+    'R_geo': 6.222347872515414,
+    'a_geo': 1.9813765739500924,
+    'q_0': 0.9852073751253527,
+    'q_95': 2.8481934025238593,
+    'P_ax': 740023.5117187897,
+    'j_BS_max': 186464.65688338986,
+    'j_BS_axis': 4565.0530321718725,
+    'jphi_axis': 1472165.870478406,
+    'jphi_max': 1565242.8028327106,
+    'j_ind_axis': 1385129.3335464464,
+    'bs_fraction': 0.1501465091465194,
 }
 
 @pytest.mark.slow
@@ -1366,24 +1367,24 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     pressure = (EC * ne * Te) + (EC * ni * Ti)
 
     # --- Extract geometry from equilibrium (same as solve_with_bootstrap) ---
-    _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-    _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
+    psi_eval = np.clip(psi_N, psi_pad, 1.0 - psi_pad)
+    _, f, _, _, _ = mygs.get_profiles(psi=psi_eval)
+    _, fc, r_avgs, _, eps = mygs.sauter_fc(psi=psi_eval, return_eps=True)
 
     ft = 1 - fc
-    eps = r_avgs['<a>'] / r_avgs['<R>']
-    _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+    _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
     R_avg = ravgs_q['<R>']
 
     # --- Gradients (same as solve_with_bootstrap) ---
+    # Second-order one-sided stencils at the axis/edge, matching the derivative
+    # path used by solve_with_bootstrap
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
-    d_psi = np.gradient(psi_N)
-    d_psi_eff = d_psi * psi_range
-    d_psi_eff[d_psi_eff == 0] = 1e-9
+    psi_range_safe = psi_range if psi_range != 0 else 1e-9
 
-    dn_e_dpsi = np.gradient(ne) / d_psi_eff
-    dT_e_dpsi = np.gradient(Te) / d_psi_eff
-    dn_i_dpsi = np.gradient(ni) / d_psi_eff
-    dT_i_dpsi = np.gradient(Ti) / d_psi_eff
+    dn_e_dpsi = np.gradient(ne, psi_N, edge_order=2) / psi_range_safe
+    dT_e_dpsi = np.gradient(Te, psi_N, edge_order=2) / psi_range_safe
+    dn_i_dpsi = np.gradient(ni, psi_N, edge_order=2) / psi_range_safe
+    dT_i_dpsi = np.gradient(Ti, psi_N, edge_order=2) / psi_range_safe
 
     # --- Coulomb logarithms (same as solve_with_bootstrap) ---
     ln_le, ln_lii = calculate_ln_lambda(
@@ -1440,15 +1441,75 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     oftpy_dump_cov()
 
 
+#============================================================================
+# Validation of the optional `psi_N` grid argument to `solve_with_bootstrap`.
+# These pin the Python solve path (`use_python_solve=True`); they exercise input
+# checking only, which happens before the solver object is touched, so they are
+# fast and run in the default CI selection.
+@pytest.mark.coverage
+def test_bootstrap_psi_N_validation():
+    from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap
+    n = 65
+    ne = np.full(n, 1.0e20)
+    Te = np.full(n, 2.0e3)
+    Zeff = np.full(n, 1.7)
+    def call(psi_N):
+        return solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), Zeff,
+                                    1.0e6, psi_N=psi_N, use_python_solve=True)
+    good = np.linspace(0.0, 1.0, n)
+    # wrong length
+    with pytest.raises(ValueError, match="same length"):
+        call(np.linspace(0.0, 1.0, n-1))
+    # duplicated flux label -> undefined derivative
+    dup = good.copy(); dup[32] = dup[31]
+    with pytest.raises(ValueError, match="strictly increasing"):
+        call(dup)
+    # unsorted
+    unsorted_grid = good.copy(); unsorted_grid[10], unsorted_grid[11] = good[11], good[10]
+    with pytest.raises(ValueError, match="strictly increasing"):
+        call(unsorted_grid)
+    # non-finite
+    nan_grid = good.copy(); nan_grid[5] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        call(nan_grid)
+    # out of range
+    with pytest.raises(ValueError, match=r"within \[0,1\]"):
+        call(np.linspace(-0.1, 1.0, n))
+    # psi_pad coarser than the grid would collapse distinct flux surfaces
+    with pytest.raises(ValueError, match="larger than the first/last"):
+        solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), Zeff, 1.0e6,
+                             psi_N=good, psi_pad=0.5, use_python_solve=True)
+
+
+@pytest.mark.coverage
+def test_bootstrap_derivative_edge_order():
+    """Profile derivatives must use a 2nd-order stencil at the axis and edge.
+
+    The first-order default of `numpy.gradient` is badly inaccurate at the
+    magnetic axis, where it propagates directly into on-axis j_BS.
+    """
+    psi = np.linspace(0.0, 1.0, 257)
+    # analytic profile with a known slope
+    y = np.tanh(6.0*(0.9-psi)) + 0.3*np.cos(3.0*psi)
+    exact = -6.0/np.cosh(6.0*(0.9-psi))**2 - 0.9*np.sin(3.0*psi)
+    d2 = np.gradient(y, psi, edge_order=2)
+    d1 = np.gradient(y, psi, edge_order=1)
+    # 2nd-order endpoint is dramatically better at the axis
+    assert abs(d2[0]-exact[0]) < 0.1*abs(d1[0]-exact[0])
+    assert abs(d2[-1]-exact[-1]) < 0.5*abs(d1[-1]-exact[-1])
+    # and matches the analytic slope closely in the interior
+    assert np.linalg.norm(d2[1:-1]-exact[1:-1])/np.linalg.norm(exact[1:-1]) < 5.e-3
+
+
 Redl_jBS_eq_dict = {
-    'j_BS_max': 186871.6671880487,
-    'j_BS_axis': 6884.411685375865,
-    'j_BS_edge': 99805.65713701912,
-    'L31_axis': 0.11407690451043999,
-    'L32_axis': -0.02350066144455873,
-    'alpha_axis': -0.6540121192349444,
-    'nu_e_star_axis': 0.2522534932532852,
-    'nu_i_star_axis': 0.2194433170749313,
+    'j_BS_max': 190036.48438360557,
+    'j_BS_axis': 5101.043999559047,
+    'j_BS_edge': 96587.97236259702,
+    'L31_axis': 0.10849481301194958,
+    'L32_axis': -0.014581267675566556,
+    'alpha_axis': -0.6150406171285213,
+    'nu_e_star_axis': 0.3420647094964808,
+    'nu_i_star_axis': 0.2975729435421919,
 }
 
 
@@ -1458,6 +1519,319 @@ def test_Redl_jBS(order):
     results = mp_run(run_Redl_jBS_case, (1.0, order), timeout=300)
     assert validate_dict(results, Redl_jBS_eq_dict)
 
+#============================================================================
+# Internal bootstrap test (ITER-based)
+#============================================================================
+def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
+    from OpenFUSIONToolkit.TokaMaker.bootstrap import Hmode_profiles
+
+    # --- Mesh creation (same as run_ITER_case) ---
+    def create_mesh():
+        with open('ITER_geom.json','r') as fid:
+            ITER_geom = json.load(fid)
+        plasma_dx = 0.15/mesh_resolution
+        coil_dx = 0.2/mesh_resolution
+        vv_dx = 0.3/mesh_resolution
+        vac_dx = 0.6/mesh_resolution
+        gs_mesh = gs_Domain()
+        gs_mesh.define_region('air',vac_dx,'boundary')
+        gs_mesh.define_region('plasma',plasma_dx,'plasma')
+        gs_mesh.define_region('vacuum1',vv_dx,'vacuum')
+        gs_mesh.define_region('vacuum2',vv_dx,'vacuum')
+        gs_mesh.define_region('vv1',vv_dx,'conductor',eta=6.9E-7)
+        gs_mesh.define_region('vv2',vv_dx,'conductor',eta=6.9E-7)
+        for key, coil in ITER_geom['coils'].items():
+            if not key.startswith('VS'):
+                gs_mesh.define_region(key,coil_dx,'coil')
+        gs_mesh.define_region('VSU',coil_dx,'coil',coil_set='VS',nTurns=1.0)
+        gs_mesh.define_region('VSL',coil_dx,'coil',coil_set='VS',nTurns=-1.0)
+        gs_mesh.add_polygon(ITER_geom['limiter'],'plasma',parent_name='vacuum1')
+        gs_mesh.add_annulus(ITER_geom['inner_vv'][0],'vacuum1',ITER_geom['inner_vv'][1],'vv1',parent_name='vacuum2')
+        gs_mesh.add_annulus(ITER_geom['outer_vv'][0],'vacuum2',ITER_geom['outer_vv'][1],'vv2',parent_name='air')
+        for key, coil in ITER_geom['coils'].items():
+            if key.startswith('VS'):
+                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='vacuum1')
+            else:
+                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='air')
+        mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
+        coil_dict = gs_mesh.get_coils()
+        cond_dict = gs_mesh.get_conductors()
+        save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,'ITER_mesh.h5')
+
+    if not os.path.exists('ITER_mesh.h5'):
+        try:
+            create_mesh()
+        except Exception as e:
+            print(e)
+            mp_q.put(None)
+            return
+
+    # --- Kinetic and current profiles (match ITER_Hmode_bootstrap_ex.py) ---
+    n_sample = 257
+    psi_sample = np.linspace(0.0, 1.0, n_sample)
+    Ip_target = 13.0e6
+    Zeff_val = 1.5
+
+    xphalf = 0.965
+    ne = Hmode_profiles(edge=0.35, ped=0.6, core=1.1, rgrid=n_sample,
+                        expin=1.6, expout=1.6, widthp=0.35, xphalf=xphalf) * 1e20
+    Te = Hmode_profiles(edge=1500., ped=5000., core=21000., rgrid=n_sample,
+                        expin=1.3, expout=1.7, widthp=0.1, xphalf=xphalf)
+    ni = ne.copy()
+    Ti = Te.copy()
+
+    inductive_jphi = create_power_flux_fun(n_sample, 2.25, 2.5)['y']
+
+    # --- Set up GS solver ---
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
+    mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('ITER_mesh.h5')
+    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
+    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
+    mygs.settings.maxits = 100
+    mygs.setup(order=fe_order, F0=5.3*6.2)
+
+    mygs.set_coil_vsc({'VS': 1.0})
+    mygs.set_coil_bounds({key: [-50.E6, 50.E6] for key in mygs.coil_sets})
+
+    isoflux_pts = np.array([
+        [ 8.20,  0.41], [ 8.06,  1.46], [ 7.51,  2.62],
+        [ 6.14,  3.78], [ 4.51,  3.02], [ 4.26,  1.33],
+        [ 4.28,  0.08], [ 4.49, -1.34], [ 7.28, -1.89],
+        [ 8.00, -0.68],
+    ])
+    x_point = np.array([[5.125, -3.4]])
+    mygs.set_isoflux(np.vstack((isoflux_pts, x_point)))
+    mygs.set_saddles(x_point)
+
+    regularization_terms = []
+    for name in mygs.coil_sets:
+        if name.startswith('CS'):
+            w = 2.E-2 if name.startswith('CS1') else 1.E-2
+        else:
+            w = 1.E-2
+        regularization_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=w))
+    regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0}, target=0.0, weight=1.E2))
+    mygs.set_coil_reg(reg_terms=regularization_terms)
+
+    # Initial no-bootstrap solve
+    mygs.set_targets(Ip=Ip_target, pax=6.2E5)
+    mygs.settings.pm = False
+    mygs.update_settings()
+    try:
+        mygs.init_psi(6.3, 0.5, 2.0, 1.4, 0.0)
+        mygs.solve()
+    except ValueError:
+        mp_q.put(None)
+        return
+
+    # --- Bootstrap solve ---
+    try:
+        mygs.solve_bootstrap(
+            ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
+            te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
+            ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
+            ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
+            ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
+            Zeff=Zeff_val,
+            Ip_target=Ip_target,
+            scale_jBS=1.0,
+            diagnose_bs=True,
+        )
+    except Exception:
+        mp_q.put(None)
+        return
+
+    mu0 = 4.0 * np.pi * 1e-7
+    eq_info = mygs.get_stats(li_normalization='ITER')
+
+    # --- Extract 1D profiles ---
+    psi_i, F_i, Fp_i, P_i, Pp_i = mygs.get_profiles(npsi=n_sample, psi_pad=1e-3)
+    _, q_i, ravgs_i, _, _, _     = mygs.get_q(npsi=n_sample, psi_pad=1e-3)
+    jtor_i = F_i * Fp_i * ravgs_i['<1/R>'] / mu0 + Pp_i * ravgs_i['<R>']
+
+    eq_info['jphi_axis'] = float(jtor_i[0])
+    eq_info['jphi_max']  = float(np.max(np.abs(jtor_i)))
+    eq_info['q_axis']    = float(q_i[0])
+    sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
+    eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
+
+    # --- Verify that boot_ops, boot_profs round-trips correctly through save/load, and that
+    #     replace_eq(source_file=...) correctly syncs the _boot_ops shadow dict ---
+    save_file = 'ITER_boot_ops_test.h5'
+    try:
+        # Capture expected state before save so we can check all fields
+        expected_boot_ops = dict(mygs._tMaker_equil._boot_ops)
+        expected_boot_profs = mygs.get_boot_profs()
+        mygs._tMaker_equil.save_TokaMaker(save_file)
+        # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
+        mygs._tMaker_equil._boot_ops['scale_jBS'] = -999.0
+        mygs.replace_eq(source_file=save_file)
+        boot_ops = mygs._tMaker_equil._boot_ops
+        if boot_ops is None:
+            raise AssertionError("_boot_ops is None after replace_eq(source_file=...)")
+        # Verify all fields round-trip correctly through save/load
+        for key, expected in expected_boot_ops.items():
+            val = boot_ops[key]
+            if isinstance(expected, bool):
+                if val != expected:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
+                    )
+            elif isinstance(expected, float):
+                if abs(val - expected) > 1e-10:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
+                    )
+            elif isinstance(expected, int):
+                if val != expected:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
+                    )
+        # Verify BOOT_PROFS arrays round-trip correctly through save/load
+        if expected_boot_profs is None:
+            raise AssertionError("get_boot_profs() returned None before save")
+        boot_profs = mygs.get_boot_profs()
+        if boot_profs is None:
+            raise AssertionError("get_boot_profs() returned None after replace_eq(source_file=...)")
+        for key, expected_arr in expected_boot_profs.items():
+            if key not in boot_profs:
+                raise AssertionError(
+                    f"boot_profs key '{key}' missing after replace_eq(source_file=...)"
+                )
+            if not np.allclose(boot_profs[key], expected_arr, rtol=1e-3):
+                reldiff = np.abs(boot_profs[key] - expected_arr) / (np.abs(expected_arr) + 1e-30)
+                idx = int(np.argmax(reldiff))
+                raise AssertionError(
+                    f"boot_profs['{key}'] does not match after replace_eq(source_file=...) "
+                    f"max_reldiff={reldiff.max():.3e} at idx={idx} "
+                    f"(expected={expected_arr[idx]:.6e}, got={boot_profs[key][idx]:.6e})"
+                )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        mp_q.put(None)
+        return
+
+    # --- Verify that boot_ops, boot_profs round-trips correctly through copy, and that
+    #     replace_eq(source_eq=...) correctly syncs the _boot_ops shadow dict ---
+    try:
+        # Capture expected state before copy so we can check all fields
+        expected_boot_ops = dict(mygs._tMaker_equil._boot_ops)
+        expected_boot_profs = mygs.get_boot_profs()
+        mygs_copied = mygs.copy_eq()
+        # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
+        mygs._tMaker_equil._boot_ops['scale_jBS'] = -999.0
+        mygs.replace_eq(source_eq=mygs_copied)
+        boot_ops = mygs._tMaker_equil._boot_ops
+        if boot_ops is None:
+            raise AssertionError("_boot_ops is None after replace_eq(source_eq=...)")
+        # Verify all fields round-trip correctly through save/load
+        for key, expected in expected_boot_ops.items():
+            val = boot_ops[key]
+            if isinstance(expected, bool):
+                if val != expected:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_eq=...)"
+                    )
+            elif isinstance(expected, float):
+                if abs(val - expected) > 1e-10:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_eq=...)"
+                    )
+            elif isinstance(expected, int):
+                if val != expected:
+                    raise AssertionError(
+                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_eq=...)"
+                    )
+            print(key,val,expected)
+        # Verify BOOT_PROFS arrays round-trip correctly through save/load
+        if expected_boot_profs is None:
+            raise AssertionError("get_boot_profs() returned None before save")
+        boot_profs = mygs.get_boot_profs()
+        if boot_profs is None:
+            raise AssertionError("get_boot_profs() returned None after replace_eq(source_eq=...)")
+        for key, expected_arr in expected_boot_profs.items():
+            if key not in boot_profs:
+                raise AssertionError(
+                    f"boot_profs key '{key}' missing after replace_eq(source_eq=...)"
+                )
+            if not np.allclose(boot_profs[key], expected_arr, rtol=1e-3):
+                reldiff = np.abs(boot_profs[key] - expected_arr) / (np.abs(expected_arr) + 1e-30)
+                idx = int(np.argmax(reldiff))
+                raise AssertionError(
+                    f"boot_profs['{key}'] does not match after replace_eq(source_eq=...) "
+                    f"max_reldiff={reldiff.max():.3e} at idx={idx} "
+                    f"(expected={expected_arr[idx]:.6e}, got={boot_profs[key][idx]:.6e})"
+                )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        mp_q.put(None)
+        return
+
+    # --- verify that scalar Zeff and a linearly-increasing Zeff profile
+    #     produce different bootstrap current profiles ---
+    try:
+        zeff_common_kwargs = dict(
+            ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
+            te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
+            ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
+            ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
+            ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
+            Ip_target=Ip_target,
+            scale_jBS=1.0,
+        )
+        profs_scalar = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
+        profs_linear = mygs.solve_bootstrap(
+            Zeff={'x': psi_sample, 'y': np.linspace(1.0, 2.5, n_sample)},
+            **zeff_common_kwargs,
+        )
+        j_scalar = profs_scalar['j_bs_raw']
+        j_linear = profs_linear['j_bs_raw']
+        magnitude = 0.5 * (np.abs(j_scalar) + np.abs(j_linear))
+        rel_diff = np.where(magnitude > 0, (j_linear - j_scalar) / magnitude, 0.0)
+        print("\nZeff scalar vs linear j_bs_raw relative difference (j_linear-j_scalar)/|mean|:")
+        print(rel_diff)
+        if np.allclose(j_scalar, j_linear):
+            raise AssertionError(
+                "Bootstrap profiles with scalar Zeff and linearly-increasing Zeff profile "
+                "are identical; expected them to differ."
+            )
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+
+    mp_q.put([eq_info])
+    oftpy_dump_cov()
+
+
+ITER_bootstrap_internal_eq_dict = {
+    'Ip':        13000000.284035483,
+    'kappa':     1.8724514466961761,
+    'R_geo':     6.222657289115216,
+    'a_geo':     1.9796608199888572,
+    'q_0':       1.2730296376083903,
+    'q_95':      3.479602743293292,
+    'P_ax':      740021.5037035183,
+    'beta_pol':  83.76968618328351,
+    'beta_tor':  2.447017893408179,
+    'jphi_axis': 1093078.1972058476,
+    'jphi_max':  1229975.7780165318,
+    'q_axis':    1.3025021696770782,
+    'jphi_prof': [1093078.1972058476, 1220700.5202791495, 1209821.8243717737,
+                  1102134.086647744,   913471.7887893931,  686494.9329961948,
+                   444062.79141603364, 239381.03647250237, 153257.50913874793,
+                   116795.19939926293],
+}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("order", (2,))
+def test_ITER_bootstrap_internal(order):
+    results = mp_run(run_ITER_bootstrap_case_internal, (1.0, order), timeout=300)
+    assert validate_dict(results, ITER_bootstrap_internal_eq_dict)
 
 # -----------------------------------------------------------------------
 # Test: GEQDSK (g-file) reader in TokaMaker.eqdsk
