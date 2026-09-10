@@ -12,23 +12,20 @@
 # `ballooning_boundary_<case>.json`, which the notebook reads back.
 #
 # Usage:
-#   julia -t auto --project=$GPEC_PROJECT compute_ballooning_boundary.jl <geqdsk> [<geqdsk> ...]
+#   julia -t auto --project=$GPEC_PROJECT compute_ballooning_boundary.jl [--both] <geqdsk> [...]
+#
+# With `--both`, the second (upper) ballooning boundary `alpha_critical2` is
+# computed as well and added to the JSON. This is the slower.
 #
 # `ballooning_alpha_boundary` is the fast first-boundary-only driver: the
 # alpha scan at each surface stops at the first Delta' zero crossing, so the
 # cost scales with the location of the boundary rather than with the full
-# alpha range. That is all the pedestal-height prediction needs -- for
-# negative triangularity the pedestal has no access to the second stable
-# region, so the first boundary is the operative limit.
+# alpha range. 
 # ---------------------------------------------------------------------------
 
 using GeneralizedPerturbedEquilibrium
 using GeneralizedPerturbedEquilibrium: Equilibrium, LocalStability
 
-# [Equilibrium] settings mirroring GPEC's own `DIIID-like_ideal_example`. The
-# `log_asymptotic` auto grid (mpsi=0) packs surfaces toward the edge, which is
-# where the pedestal ballooning boundary lives, and uses far fewer surfaces
-# than a uniform grid of the same edge resolution.
 function make_eq_dict(geqdsk_path)
     return Dict{String,Any}(
         "eq_filename" => geqdsk_path,
@@ -45,24 +42,28 @@ function make_eq_dict(geqdsk_path)
     )
 end
 
-# Standard JSON has no NaN/Inf, so non-finite entries (surfaces with no
-# boundary in range, or a failed surface) are written as `null` and read back
-# as NaN on the python side.
 fmt(v) = isfinite(v) ? repr(v) : "null"
 
-function write_json(path, bnd)
+function write_json(path, psi, alpha, alpha_critical, alpha_critical2)
     open(path, "w") do f
         write(f, "{\n")
-        write(f, "  \"psi\": [", join(fmt.(bnd.psi), ", "), "],\n")
-        write(f, "  \"alpha\": [", join(fmt.(bnd.alpha), ", "), "],\n")
-        write(f, "  \"alpha_critical\": [", join(fmt.(bnd.alpha_critical), ", "), "]\n")
+        write(f, "  \"psi\": [", join(fmt.(psi), ", "), "],\n")
+        write(f, "  \"alpha\": [", join(fmt.(alpha), ", "), "],\n")
+        write(f, "  \"alpha_critical\": [", join(fmt.(alpha_critical), ", "), "]")
+        if alpha_critical2 !== nothing
+            write(f, ",\n  \"alpha_critical2\": [", join(fmt.(alpha_critical2), ", "), "]\n")
+        else
+            write(f, "\n")
+        end
         write(f, "}\n")
     end
 end
 
-isempty(ARGS) && error("Usage: julia -t auto --project=<GPEC repo> compute_ballooning_boundary.jl <geqdsk> [...]")
+both_boundaries = "--both" in ARGS
+geqdsk_files = filter(arg -> arg != "--both", ARGS)
+isempty(geqdsk_files) && error("Usage: julia -t auto --project=<GPEC repo> compute_ballooning_boundary.jl [--both] <geqdsk> [...]")
 
-for geqdsk_file in ARGS
+for geqdsk_file in geqdsk_files
     geqdsk_path = abspath(geqdsk_file)
     isfile(geqdsk_path) || error("File not found: $geqdsk_path")
     case_label = splitext(basename(geqdsk_path))[1]
@@ -71,12 +72,17 @@ for geqdsk_file in ARGS
     eq_config = Equilibrium.EquilibriumConfig(make_eq_dict(geqdsk_path), dirname(geqdsk_path))
     equil = Equilibrium.setup_equilibrium(eq_config)
 
-    # n_scan=64: the pedestal surfaces have closely spaced Delta' poles, where a
-    # coarse scan can step over the first crossing. Early stopping keeps the
-    # cost of the finer scan modest.
-    bnd = LocalStability.ballooning_alpha_boundary(equil; n_scan=64)
+    if both_boundaries
+        bnd = LocalStability.ballooning_alpha_boundaries(equil; n_scan=64)
+        psi, alpha = bnd.psi, bnd.alpha
+        alpha_critical, alpha_critical2 = bnd.alpha_critical1, bnd.alpha_critical2
+    else
+        bnd = LocalStability.ballooning_alpha_boundary(equil; n_scan=64)
+        psi, alpha = bnd.psi, bnd.alpha
+        alpha_critical, alpha_critical2 = bnd.alpha_critical, nothing
+    end
 
     json_path = joinpath(dirname(geqdsk_path), "ballooning_boundary_$(case_label).json")
-    write_json(json_path, bnd)
-    println("  saved: $json_path  ($(length(bnd.psi)) surfaces)")
+    write_json(json_path, psi, alpha, alpha_critical, alpha_critical2)
+    println("  saved: $json_path  ($(length(psi)) surfaces)")
 end
