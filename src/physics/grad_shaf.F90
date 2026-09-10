@@ -193,6 +193,7 @@ TYPE :: gs_factory
   INTEGER(i4) :: bc_nrhs = 0 !< Number of terms in free-boundary BC
   INTEGER(i4) :: nlim_con = 0 !< Number of node points in limiter contour list
   INTEGER(i4) :: lim_nloops = 0 !< Number of limiter loops
+  INTEGER(i4) :: n_eq = 1 !< Number of limiter loops
   REAL(r8) :: rmin = 0.d0 !< Minimum radial coordinate in model
   REAL(r8) :: rmax = 0.d0 !< Maximum radial coordinate in model
   REAL(r8) :: urf = .2d0 !< Under-relaxation factor for Picard iteration
@@ -239,7 +240,7 @@ TYPE :: gs_factory
   TYPE(xdmf_plot_file) :: xdmf !< XDMF plotting object
   TYPE(oft_lusolver) :: lu_solver !< \f$ \frac{1}{R} \Delta^* \f$ inverse solver
   TYPE(oft_lusolver) :: lu_solver_dt !< LHS inverse solver with time dependence
-  TYPE(oft_gs_solver) :: gs_solver !< GS solver object
+  TYPE(oft_gs_solver), POINTER, DIMENSION(:) :: gs_solvers => NULL() !< GS solver object
   TYPE(axi_coil_set), POINTER, DIMENSION(:) :: coils_ext => NULL() !< External coil definitions
   TYPE(coil_region), POINTER, DIMENSION(:) :: coil_regions => NULL() !< Meshed coil regions
   TYPE(oft_1d_real), POINTER, DIMENSION(:) :: dist_coil => NULL() !< Current distribution for each coil (if defined)
@@ -569,6 +570,7 @@ ALLOCATE(self%zerob_bc)
 self%zerob_bc%ML_lag_rep=>self%ML_fe_rep
 ALLOCATE(self%zerogrnd_bc)
 self%zerogrnd_bc%ML_lag_rep=>self%ML_fe_rep
+ALLOCATE(self%gs_solvers(self%n_eq))
 end subroutine gs_setup
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -2322,9 +2324,9 @@ subroutine gs_step(self,factory,equil,i,converged,ierr)
 class(oft_gs_solver), intent(inout) :: self !< G-S solver object
 class(gs_factory), intent(inout) :: factory!< G-S factory/device object
 class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
-integer(i4), intent(in) :: i !< Loop iteration
+integer(i4), optional, intent(in) :: i !< Loop iteration
 integer(i4), optional, intent(out) :: ierr !< Error flag
-logical, intent(out) :: converged
+logical, optional, intent(out) :: converged
 integer(i4) :: j
 logical :: fail_test
 logical :: pm_save
@@ -2723,11 +2725,11 @@ IF(oft_env%pm)THEN
   CALL oft_increase_indent
 END IF
 ! ALLOCATE(self%gs_solver)
-CALL self%gs_solver%setup(self, equil)
+CALL self%gs_solvers(1)%setup(self, equil)
 DO i=1,self%maxits
-  CALL self%gs_solver%step(self, equil, i, converged, step_err)
+  CALL self%gs_solvers(1)%step(self, equil, i, converged, step_err)
   WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,equil%ffp_scale,equil%p_scale, &
-      SQRT(self%gs_solver%nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
+      SQRT(self%gs_solvers(1)%nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
   IF(step_err /= 0)THEN
     ierr = step_err
     err_reason=gs_err_reason(step_err)
@@ -2737,23 +2739,23 @@ DO i=1,self%maxits
   IF(converged)THEN
     !---Output
     IF(self%save_visit.AND.self%plot_final)THEN
-      self%gs_solver%eq_count=self%gs_solver%eq_count+1
-      CALL self%xdmf%add_timestep(REAL(self%gs_solver%eq_count,8))
-      CALL equil%psi%get_local(self%gs_solver%vals_tmp)
+      self%gs_solvers(1)%eq_count=self%gs_solvers(1)%eq_count+1
+      CALL self%xdmf%add_timestep(REAL(self%gs_solvers(1)%eq_count,8))
+      CALL equil%psi%get_local(self%gs_solvers(1)%vals_tmp)
       IF(equil%plasma_bounds(1)<-1.d98)THEN
-        CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solver%vals_tmp,self%xdmf,'Psi')
+        CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solvers(1)%vals_tmp,self%xdmf,'Psi')
       ELSE
-        CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solver%vals_tmp-equil%plasma_bounds(1),self%xdmf,'Psi')
+        CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solvers(1)%vals_tmp-equil%plasma_bounds(1),self%xdmf,'Psi')
       END IF
-      CALL self%gs_solver%psi_vac%get_local(self%gs_solver%vals_tmp)
-      CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solver%vals_tmp,self%xdmf,'Psi_vac')
-      CALL self%gs_solver%psi_eddy%get_local(self%gs_solver%vals_tmp)
-      CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solver%vals_tmp,self%xdmf,'Psi_eddy')
-      CALL self%gs_solver%psi_vcont%get_local(self%gs_solver%vals_tmp)
-      self%gs_solver%vals_tmp=self%gs_solver%vals_tmp*equil%vcontrol_val
-      CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solver%vals_tmp,self%xdmf,'Psi_vcont')
+      CALL self%gs_solvers(1)%psi_vac%get_local(self%gs_solvers(1)%vals_tmp)
+      CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solvers(1)%vals_tmp,self%xdmf,'Psi_vac')
+      CALL self%gs_solvers(1)%psi_eddy%get_local(self%gs_solvers(1)%vals_tmp)
+      CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solvers(1)%vals_tmp,self%xdmf,'Psi_eddy')
+      CALL self%gs_solvers(1)%psi_vcont%get_local(self%gs_solvers(1)%vals_tmp)
+      self%gs_solvers(1)%vals_tmp=self%gs_solvers(1)%vals_tmp*equil%vcontrol_val
+      CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solvers(1)%vals_tmp,self%xdmf,'Psi_vcont')
     END IF
-    self%timing(1)=self%timing(1)+(omp_get_wtime()-self%gs_solver%t0)
+    self%timing(1)=self%timing(1)+(omp_get_wtime()-self%gs_solvers(1)%t0)
     CALL oft_decrease_indent
     WRITE(*,*)'Timing:',self%timing(1)
     WRITE(*,*)'  Source:  ',self%timing(2)
@@ -2764,8 +2766,14 @@ DO i=1,self%maxits
     EXIT
   END IF
 END DO
-CALL self%gs_solver%delete(self, equil)
+CALL self%gs_solvers(1)%delete(self, equil)
 end subroutine gs_solve
+
+subroutine gs_multistep(self)
+class(gs_factory), intent(inout) :: self !< G-S factory/device object
+
+
+end subroutine gs_multistep
 !------------------------------------------------------------------------------
 !> Compute solution to linearized Grad-Shafranov without updating \f$ \psi \f$ for RHS
 !------------------------------------------------------------------------------

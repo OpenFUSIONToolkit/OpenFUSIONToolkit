@@ -81,6 +81,10 @@ tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
 tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve,
     [c_void_p, c_bool, c_int, c_int_ptr, c_char_p])
 
+# tokamaker_multistep(tMaker_ptr,vacuum,nl_its,error_str)
+tokamaker_multistep = ctypes_subroutine(oftpy_lib.tokamaker_multistep,
+    [c_void_p, c_char_p])
+
 # tokamaker_vac_solve(tMaker_ptr,psi_in,rhs_source,error_str)
 tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve,
     [c_void_p, ctypes_numpy_array(float64,1), c_double_ptr,  c_char_p])

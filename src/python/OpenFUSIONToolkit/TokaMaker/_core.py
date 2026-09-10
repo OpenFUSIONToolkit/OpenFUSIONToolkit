@@ -894,6 +894,12 @@ class TokaMaker():
         equil_out.set_psi(psi)
         return equil_out
 
+    def multistep(self):
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_multistep(self._tMaker_ptr,error_string)
+        if error_string.value != b'':
+            raise ValueError("Error in multistep: {0}".format(error_string.value.decode()))
+
     def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
 

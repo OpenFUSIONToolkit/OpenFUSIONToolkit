@@ -376,6 +376,7 @@ IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 ! Allocate GS equilibria
 !------------------------------------------------------------------------------
 tMaker_obj%n_eq = n_eq
+tMaker_obj%device%n_eq = n_eq
 ALLOCATE(tMaker_obj%gs_equils(n_eq))
 DO i=1, n_eq
   ALLOCATE(tMaker_obj%gs_equils(i)%eq)
@@ -614,8 +615,25 @@ tMaker_obj%device%timing=0.d0
 CALL tMaker_obj%device%solve(tMaker_obj%gs_equils(1)%eq,ierr)
 IF(vacuum)tMaker_obj%gs_equils(1)%eq%has_plasma=vac_save
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
-nl_its=tMaker_obj%device%gs_solver%nl_its
+nl_its=tMaker_obj%device%gs_solvers(eq_idx)%nl_its
 END SUBROUTINE tokamaker_solve
+
+SUBROUTINE tokamaker_multistep(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_multistep")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+INTEGER(i4) :: i
+TYPE(gs_equil) :: myeq
+
+TYPE(tokamaker_instance), POINTER :: tMaker_obj
+IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+
+print *, 'Running tokamaker_multistep'
+print *, tMaker_obj%n_eq
+DO i=1, tMaker_obj%n_eq
+  myeq = tMaker_obj%gs_equils(i)%eq
+  CALL tMaker_obj%device%gs_solvers(i)%step(tMaker_obj%device, myeq)
+END DO
+END SUBROUTINE tokamaker_multistep
 !---------------------------------------------------------------------------------
 !> Perform linear solve to find vacuum solution for given BCs and current sources
 !---------------------------------------------------------------------------------
