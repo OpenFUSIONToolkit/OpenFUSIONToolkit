@@ -88,6 +88,9 @@ class JAMfit():
         '''! Set up the ThinCurr model, I/O, and sensor/coil mutual inductance matrices.
         
         @param floops_path str, path to the sensor locations file
+        @param plot_files str, base path for output plots (optional)
+        @param use_legacy_io bool, if True, uses legacy HDF5 I/O (default: False)
+        @param hodlr_path str, path to save/load the HODLR matrices (default: 'full_HOLDR_M.save')
         '''
         self.torus = ThinCurr(self.myOFT)
         self.torus.setup_model(mesh_file=self.thincurr_meshfile, xml_filename=self.xml_file)
@@ -140,14 +143,102 @@ class JAMfit():
 
         self.torus.run_td(dt, nsteps, coil_currs=coil_currs, sensor_obj=self.sensor_obj, status_freq= s_freq, plot_freq=p_freq)
         self.torus.plot_td(nsteps, plot_freq = p_freq, sensor_obj=self.sensor_obj)
-        hist_file = histfile(os.path.join(self.torus._io_basepath, 'floops.hist'))      
         if verbose: 
             plot_data = self.torus.build_XDMF()
+            hist_file = histfile(os.path.join(self.torus._io_basepath, 'floops.hist'))      
             return hist_file, plot_data
         else: 
-            return hist_file 
+            return "done" 
+    def create_from_runTD_top_modes(self,num_modes,reduced_filename,coil_currs,dt,nsteps,initial_num_eigs=50, verbose=False,s_freq=10,p_freq=10,axisymmetric_modes=None):
+        '''! Build a reduced model using the dominant eigenmodes from a full run.
+        Computes eigenvalues, runs a preliminary reduced model to identify the
+        most active modes by current amplitude, then builds a final reduced model
+        using only those dominant modes.
 
-    def create_from_runTD_top_modes(self, num_modes, reduced_filename, coil_currs, dt, nsteps, initial_num_eigs=50, verbose=False, s_freq = 10, p_freq = 10):
+        If axisymmetric_modes is provided, only modes whose indices are in
+        axisymmetric_modes are eligible to be selected as "top modes". If a
+        high-weight mode is not in axisymmetric_modes, it is skipped and the next
+        eligible mode is used instead.
+
+        @param num_modes int, number of dominant modes to retain in the reduced model
+        @param reduced_filename str, output filename for the reduced model (HDF5)
+        @param coil_currs numpy.ndarray, combined coil + plasma current array (with time column)
+        @param dt float, time step size in seconds
+        @param nsteps int, number of time steps for the preliminary run
+        @param initial_num_eigs int, number of eigenmodes to compute initially (default: 50)
+        @param verbose bool, if True, plots mode amplitudes and prints mode info (default: False)
+        @param s_freq int, frequency of sensor data output (default: 10)
+        @param p_freq int, frequency of plotting during the run for plot_data (build_XDMF) (default: 10)
+        @param axisymmetric_modes list or array-like, indices of the axisymmetric modes to allow
+                                (default: None -> allow all computed modes)
+
+        @result ThinCurr_reduced, the constructed reduced model object
+        @result numpy.ndarray, sensor measurements from the time-dependent run
+        @result dict, currents from the time-dependent run
+        @result numpy.ndarray, eigenvectors corresponding to the selected dominant modes (if verbose is True)
+        @result list, indices of the selected dominant modes (if verbose is True)
+        @result list, maximum weight amplitudes of the selected dominant modes (if verbose is True)
+        '''
+        self.eig_vals, self.eig_vecs = self.torus.get_eigs(initial_num_eigs, False)
+
+        torus_first_reduced = self.torus.build_reduced_model(
+            self.eig_vecs,
+            filename='first_reduced_model_temp.h5',
+            sensor_obj=self.sensor_obj
+        )
+
+        sensors_measurement, currents = torus_first_reduced.run_td(
+            dt, nsteps, coil_currs, status_freq=s_freq, plot_freq=p_freq
+        )
+
+        temp_curr = currents['curr']
+        temp_curr = temp_curr[:, 0:initial_num_eigs]  # Only consider the modes we computed
+        max_weights = [abs(temp_curr[:, i]).sum() for i in range(temp_curr.shape[1])]  # total sum over time
+
+        # --- axisymmetric filtering (NEW) ---
+        if axisymmetric_modes is None:
+            eligible = list(range(temp_curr.shape[1]))
+        else:
+            axis_set = set(axisymmetric_modes)
+            # Only consider indices that are within the computed range and allowed
+            eligible = [i for i in range(temp_curr.shape[1]) if i in axis_set]
+
+        if len(eligible) < num_modes:
+            raise ValueError(
+                f"Requested num_modes={num_modes}, but only {len(eligible)} eligible modes are available "
+                f"within axisymmetric_modes (and < initial_num_eigs={initial_num_eigs})."
+            )
+
+        # Pick the top modes *among eligible ones*
+        top_modenum_indices = sorted(eligible, key=lambda i: max_weights[i], reverse=True)[:num_modes]
+
+        eig_inds = []
+        weight_amplitude = []
+
+        if verbose:
+            fig, ax = plt.subplots(1, 1)
+            self.torus.build_XDMF()
+
+        for i in range(temp_curr.shape[1]):
+            if i in top_modenum_indices:
+                eig_inds.append(i)
+                weight_amplitude.append(max_weights[i])
+                if verbose:
+                    ax.semilogy(currents['time'], abs(currents['curr'][:, i]), label=f'Mode {i}')
+                    print(f'Saved mode {i} has max weight {max_weights[i]}')
+            else:
+                if verbose:
+                    ax.semilogy(currents['time'], abs(currents['curr'][:, i]), color='gray', alpha=0.3)
+
+        self.torus_reduced = self.create_reduced_model(self.eig_vecs[eig_inds, :], reduced_filename, compute_B=False)
+        self.reduced_created_flag = True
+
+        if verbose:
+            return self.torus_reduced, sensors_measurement, currents, self.eig_vecs[eig_inds, :], eig_inds, weight_amplitude
+        else:
+            return self.torus_reduced, sensors_measurement, currents
+
+    def create_from_runTD_top_modes_depricated(self, num_modes, reduced_filename, coil_currs, dt, nsteps, initial_num_eigs=50, verbose=False, s_freq = 10, p_freq = 10, axisymmetric_modes = None):
         '''! Build a reduced model using the dominant eigenmodes from a full run.
         Computes eigenvalues, runs a preliminary reduced model to identify the
         most active modes by current amplitude, then builds a final reduced model
@@ -162,6 +253,7 @@ class JAMfit():
         @param verbose bool, if True, plots mode amplitudes and prints mode info (default: False)
         @param s_freq int, frequency of sensor data output (default: 10)
         @param p_freq int, frequency of plotting during the run for plot_data (build_XDMF) (default: 10)
+        @param axisymmetric_modes list, indices of the axisymmetric modes (default: None)
         @result ThinCurr_reduced, the constructed reduced model object
         @result numpy.ndarray, sensor measurements from the time-dependent run
         @result dict, currents from the time-dependent run
