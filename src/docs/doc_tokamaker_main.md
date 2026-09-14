@@ -54,6 +54,7 @@ new meshes, see \ref doc_gs_main_mesh_ex.
  - \subpage doc_tMaker_ITER_ex5
  - \subpage doc_tMaker_HBT_ex3
  - \subpage doc_tMaker_CUTE_ex3
+ - \subpage doc_tMaker_ARC_ex3
 
 ### Deprecated workflows
  - \subpage doc_tMaker_ITER_ex4-legacy
