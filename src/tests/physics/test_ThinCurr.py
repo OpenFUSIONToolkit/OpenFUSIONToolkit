@@ -1189,6 +1189,40 @@ def test_make_drive_and_xml_from_eqdsks(tmp_path):
     eqdsk_obj = read_eqdsk(eqdsk_file)
     assert abs(np.sum(waveform[1,1:])-eqdsk_obj['ip'])/abs(eqdsk_obj['ip']) < 0.05
 
+@pytest.mark.coverage
+def test_save_coils_vtm(tmp_path):
+    pv = pytest.importorskip('pyvista')
+    from OpenFUSIONToolkit.ThinCurr.util import save_coils_vtm
+    # one axisymmetric (R, Z) filament and one 3D polyline coil
+    xml_file = tmp_path / 'coils.xml'
+    xml_file.write_text('<oft><thincurr><icoils>'
+                        '<coil_set><coil>1.5, 0.25</coil></coil_set>'
+                        '<coil_set><coil npts="2">\n1.0, 0.0, 0.0\n0.0, 1.0, 0.0\n</coil></coil_set>'
+                        '</icoils></thincurr></oft>\n')
+    drive_file = tmp_path / 'coils.drive'
+    drive_file.write_text('3 2\n0.0 10.0 20.0\n1.0 30.0 40.0\n')
+    vtm_file = tmp_path / 'coils.vtm'
+    blocks = save_coils_vtm(str(xml_file),str(vtm_file),drive_filename=str(drive_file),nphi=16)
+    assert blocks.n_blocks == 2
+    mb = pv.read(str(vtm_file))
+    assert mb.n_blocks == 2
+    # axisymmetric filament is revolved into a closed loop of radius R at height Z,
+    # carrying the drive current from the last time row
+    loop = mb[0]
+    assert loop.n_points == 16
+    assert np.allclose(np.hypot(loop.points[:,0],loop.points[:,1]),1.5)
+    assert np.allclose(loop.points[:,2],0.25)
+    assert np.allclose(loop.point_data['current_A'],30.0)
+    # 3D coil passes through as a polyline with its own drive current
+    coil3d = mb[1]
+    assert np.allclose(coil3d.points,[[1.0,0.0,0.0],[0.0,1.0,0.0]])
+    assert np.allclose(coil3d.point_data['current_A'],40.0)
+    # a drive file whose column count does not match the coils is rejected
+    bad_drive = tmp_path / 'bad.drive'
+    bad_drive.write_text('2 1\n0.0 1.0\n')
+    with pytest.raises(ValueError):
+        save_coils_vtm(str(xml_file),str(tmp_path / 'unused.vtm'),drive_filename=str(bad_drive))
+
 #============================================================================
 # Test runners for filament model
 @pytest.mark.coverage

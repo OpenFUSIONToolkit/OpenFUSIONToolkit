@@ -1313,6 +1313,48 @@ def parse_coils_xml(filename):
     return coils
 
 
+def save_coils_vtm(xml_filename,vtm_filename,drive_filename=None,time_index=-1,nphi=64):
+    '''! Export the coils of a ThinCurr XML file to a ParaView-viewable VTK MultiBlock (.vtm) file
+
+    Coils whose points have two coordinates (axisymmetric "R, Z" filaments, given by a
+    single point per `<coil>` as written by `make_drive_and_xml_from_eqdsks`) are revolved
+    into closed toroidal loops with `nphi` points. Coils with three or more coordinates
+    per point are exported as polylines, closed when the first and last points coincide.
+
+    @param xml_filename ThinCurr XML file to read (see `parse_coils_xml`)
+    @param vtm_filename Path of the `.vtm` file to write; companion `.vtp` files are
+           placed in a directory named after the file stem next to it
+    @param drive_filename Optional `.drive` file holding one current per coil; when given,
+           a `current_A` point scalar is added to each block (columns must follow the XML
+           coil order, as written by `make_drive_and_xml_from_eqdsks`)
+    @param time_index Row of the drive file to take currents from (-1 = last time point)
+    @param nphi Number of toroidal points used when revolving axisymmetric filaments
+    @result `blocks` The pyvista MultiBlock that was saved
+    '''
+    import pyvista as pv
+    coils = parse_coils_xml(xml_filename)
+    currents = None
+    if drive_filename is not None:
+        curr_arr = drive_to_array(drive_filename)
+        currents = curr_arr[time_index,1:]
+        if currents.shape[0] != len(coils):
+            raise ValueError("Drive file has %d currents, but XML has %d coils" % (currents.shape[0],len(coils)))
+    phi = np.linspace(0.0,2.0*np.pi,nphi)
+    blocks = pv.MultiBlock()
+    for i, points in enumerate(coils):
+        if points.shape[1] == 2:
+            R, Z = points[0]
+            xyz = np.column_stack((R*np.cos(phi),R*np.sin(phi),np.full(nphi,Z)))
+            poly = pv.lines_from_points(xyz,close=True)
+        else:
+            xyz = points[:,:3]
+            poly = pv.lines_from_points(xyz,close=np.allclose(xyz[0],xyz[-1]))
+        if currents is not None:
+            poly.point_data['current_A'] = np.full(poly.n_points,currents[i])
+        blocks.append(poly,"coil_%04d" % (i+1))
+    blocks.save(vtm_filename)
+    print("Wrote %d coil blocks to %s" % (len(coils),vtm_filename))
+    return blocks
 
 
 def find_coil_current_column(coil_name,header_to_idx,header_template='{name} current [a/turn]',
