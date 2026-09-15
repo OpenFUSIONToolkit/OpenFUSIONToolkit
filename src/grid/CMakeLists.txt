@@ -24,8 +24,6 @@ set( TM_CAD_OBJS
   mesh_cube.F90
   mesh_sphere.F90
   mesh_t3d.F90
-  mesh_cubit.F90
-  mesh_gmsh.F90
 )
 set( MG_OBJS
   multigrid.F90

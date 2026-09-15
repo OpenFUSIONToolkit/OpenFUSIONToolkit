@@ -65,13 +65,15 @@ integer(i4) :: i,id,ierr,io_unit,ndims,np_mem,mesh_order
 integer(i4), allocatable, dimension(:) :: dim_sizes
 LOGICAL :: reflect = .FALSE.
 LOGICAL :: ref_periodic = .FALSE.
+REAL(r8) :: zstretch = 1.d0
 class(oft_mesh), pointer :: mesh
 class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
-namelist/native_mesh_options/filename,reflect,ref_periodic!,zstretch
+namelist/native_mesh_options/filename,reflect,ref_periodic,zstretch
 DEBUG_STACK_PUSH
 np_mem=-1
 filename='none'
+zstretch=1.d0
 IF(oft_env%head_proc)THEN
     IF(ALLOCATED(r_mem).AND.ALLOCATED(lc_mem).AND.ALLOCATED(reg_mem))THEN
         np_mem=SIZE(r_mem,DIM=2)
@@ -100,8 +102,8 @@ CALL MPI_Bcast(reflect,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 CALL MPI_Bcast(ref_periodic,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
-! CALL MPI_Bcast(zstretch, 1,OFT_MPI_R8,0,oft_env%COMM,ierr)
-! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
+CALL MPI_Bcast(zstretch, 1,OFT_MPI_R8,0,oft_env%COMM,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 #endif
 !---Read in mesh sizes
 IF(np_mem>0)THEN
@@ -189,6 +191,7 @@ ELSE
             CALL hdf5_read(lf_ho,TRIM(filename),"mesh/ho_info/LF",success)
             IF(.NOT.success)CALL oft_abort('Error reading quadratic faces','native_load_vmesh',__FILE__)
         END IF
+        r_ho(3,:)=r_ho(3,:)*zstretch
     END IF
     !---Read periodicity information
     IF(ref_periodic)THEN
@@ -201,6 +204,7 @@ ELSE
     END IF
 END IF
 !---
+mesh%r(3,:)=mesh%r(3,:)*zstretch
 IF(reflect)THEN
     call mesh_global_resolution(mesh)
     call native_reflect(mesh,.1d0*mesh%hmin)
@@ -223,13 +227,15 @@ integer(i4), allocatable, dimension(:) :: dim_sizes
 real(r8), allocatable, dimension(:,:) :: rtmp
 LOGICAL :: reflect = .FALSE.
 LOGICAL :: ref_periodic = .FALSE.
+REAL(r8) :: zstretch = 1.d0
 class(oft_bmesh), pointer :: smesh
 !---Read in mesh options
-namelist/native_mesh_options/filename,reflect,ref_periodic!,zstretch
+namelist/native_mesh_options/filename,reflect,ref_periodic,zstretch
 DEBUG_STACK_PUSH
 !---
 np_mem=-1
 filename='none'
+zstretch=1.d0
 IF(oft_env%head_proc)THEN
     IF(ALLOCATED(r_mem).AND.ALLOCATED(lc_mem).AND.ALLOCATED(reg_mem))THEN
         np_mem=SIZE(r_mem,DIM=2)
@@ -258,8 +264,8 @@ CALL MPI_Bcast(reflect,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 CALL MPI_Bcast(ref_periodic,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
-! CALL MPI_Bcast(zstretch, 1,OFT_MPI_R8,0,oft_env%COMM,ierr)
-! IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
+CALL MPI_Bcast(zstretch, 1,OFT_MPI_R8,0,oft_env%COMM,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 #endif
 !---Read in mesh sizes
 IF(np_mem>0)THEN
@@ -359,6 +365,7 @@ ELSE
         ALLOCATE(le_ho(2,np_ho))
         CALL hdf5_read(le_ho,TRIM(filename),"mesh/ho_info/LE",success)
         IF(.NOT.success)CALL oft_abort('Error reading quadratic edges','native_load_smesh',__FILE__)
+        r_ho(3,:)=r_ho(3,:)*zstretch
     END IF
     !---Read periodicity information
     IF(ref_periodic)THEN
@@ -370,6 +377,7 @@ ELSE
         WRITE(*,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
     END IF
 END IF
+smesh%r(3,:)=smesh%r(3,:)*zstretch
 !---
 IF(reflect)THEN
     call mesh_global_resolution(smesh)
