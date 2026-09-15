@@ -74,6 +74,10 @@ you install yourself and point the notebook at.
    its own cannot install a direct dependency that is missing from the manifest. GPEC's
    `Manifest.toml` is git-ignored, so regenerating it is a local operation only.
 
+4. Optional: If you would like to use [juliacall](https://juliapy.github.io/PythonCall.jl/stable/) to
+   call GPEC directly from Python you must also ensure that `juliacall` is installed in your
+   python environment _and_ that `PythonCall` is available in your Julia environment.
+
 The notebook locates GPEC by looking, in order, at the `GPEC_PROJECT` environment variable,
 `external/GPEC` in any parent directory (the submodule location above), and a `GPEC` clone
 sitting next to the OpenFUSIONToolkit checkout. Setting `GPEC_PROJECT` explicitly is the
