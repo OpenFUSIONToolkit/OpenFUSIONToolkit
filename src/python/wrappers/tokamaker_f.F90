@@ -18,7 +18,7 @@ USE oft_base
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 USE multigrid, ONLY: multigrid_mesh, multigrid_reset
 !
-USE oft_la_base, ONLY: oft_vector, oft_matrix
+USE oft_la_base, ONLY: oft_vector, oft_matrix, oft_vector_ptr
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
 !
@@ -26,7 +26,8 @@ USE fem_base, ONLY: oft_afem_type, oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_lag_basis, ONLY: oft_lag_setup_bmesh, oft_scalar_bfem, &
   oft_lag_setup
-USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp, oft_blag_project
+USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bginterp, oft_blag_project, oft_lag_bvcinterp, &
+  oft_blag_vproject
 USE mhd_utils, ONLY: mu0
 USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_dels, flux_func, &
@@ -354,8 +355,9 @@ END SUBROUTINE tokamaker_equil_destroy
 !---------------------------------------------------------------------------------
 !> Complete setup of TokaMaker device/wrapper object and build FE representation
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
+SUBROUTINE tokamaker_setup(tMaker_ptr,fe_ptr,order,full_domain,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+TYPE(c_ptr), INTENT(out) :: fe_ptr !< Pointer to FE representation object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< FE order for Lagrange elements
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Plasma covers full domain (eg. fixed-boundary solves)?
 INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Number of coils in model
@@ -366,6 +368,7 @@ REAL(8) :: theta
 LOGICAL :: file_exists
 real(r8), POINTER :: vals_tmp(:)
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+fe_ptr=C_NULL_PTR
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 !------------------------------------------------------------------------------
 ! Check input files
@@ -415,6 +418,7 @@ CALL tMaker_obj%device%init()
 ! END IF
 ncoils=tMaker_obj%device%ncoils
 coil_Lmat=C_LOC(tMaker_obj%device%Lcoils)
+fe_ptr=C_LOC(tMaker_obj%device%fe_rep)
 END SUBROUTINE tokamaker_setup
 !---------------------------------------------------------------------------------
 !> Load profile specification files
@@ -955,6 +959,68 @@ psi_lim = tMaker_equil_obj%plasma_bounds(1)
 psi_max = tMaker_equil_obj%plasma_bounds(2)
 END SUBROUTINE tokamaker_get_psi
 !---------------------------------------------------------------------------------
+!> Compute B-field over full mesh from \f$ \psi \f$ using \f$ \nabla \psi \f$ operator
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_field(tMaker_equil_ptr,vals,prof_type,error_str) BIND(C,NAME="tokamaker_get_field")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+TYPE(c_ptr), VALUE, INTENT(in) :: vals !< Needs docs
+INTEGER(c_int), VALUE, INTENT(in) :: prof_type !< Type of profile to compute
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: bmat_tmp
+CLASS(oft_vector), POINTER :: tmp1,tmp2,tmp3
+CLASS(oft_solver), POINTER :: solver
+TYPE(gs_prof_interp) :: field
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+!
+CALL create_cg_solver(solver)
+solver%A=>tMaker_equil_obj%device%mop
+solver%its=-2
+CALL create_diag_pre(solver%pre)
+!
+IF(prof_type==1)THEN ! Compute B-field at all node points
+  CALL tMaker_equil_obj%psi%new(tmp1)
+  CALL tMaker_equil_obj%psi%new(tmp2)
+  CALL tMaker_equil_obj%psi%new(tmp3)
+  CALL gs_project_b(tMaker_equil_obj,tmp1,tmp2,tmp3,solver_in=solver)
+  CALL c_f_pointer(vals, bmat_tmp, [tMaker_equil_obj%psi%n,3])
+  vals_tmp=>bmat_tmp(:,1)
+  CALL tmp1%get_local(vals_tmp)
+  CALL tmp1%delete()
+  vals_tmp=>bmat_tmp(:,2)
+  CALL tmp2%get_local(vals_tmp)
+  CALL tmp2%delete()
+  vals_tmp=>bmat_tmp(:,3)
+  CALL tmp3%get_local(vals_tmp)
+  CALL tmp3%delete()
+  DEALLOCATE(tmp1,tmp2,tmp3)
+ELSE IF((prof_type>=2).AND.(prof_type<=4))THEN ! Compute F or P at all node points
+  CALL tMaker_equil_obj%psi%new(tmp1)
+  CALL tMaker_equil_obj%psi%new(tmp2)
+  CALL field%setup(tMaker_equil_obj)
+  IF(prof_type==4)THEN
+    field%mode=5 ! Parallel pressure
+  ELSE
+    field%mode=prof_type ! F or Isotropic/perpendicular pressure
+  END IF
+  CALL oft_blag_project(tMaker_equil_obj%device%fe_rep,field,tmp2)
+  CALL tmp1%set(0.d0)
+  CALL solver%apply(tmp1,tmp2)
+  CALL c_f_pointer(vals, bmat_tmp, [tMaker_equil_obj%psi%n,1])
+  vals_tmp=>bmat_tmp(:,1)
+  CALL tmp1%get_local(vals_tmp)
+  CALL field%delete()
+  CALL tmp1%delete()
+  CALL tmp2%delete()
+  DEALLOCATE(tmp1,tmp2)
+ELSE
+  CALL copy_string('Invalid profile type for tokamaker_get_field',error_str)
+END IF
+CALL solver%delete(.TRUE.)
+DEALLOCATE(solver)
+END SUBROUTINE tokamaker_get_field
+!---------------------------------------------------------------------------------
 !> Compute current density from \f$ \psi \f$ using \f$ \Delta^* \psi \f$ operator
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_dels_curr(tMaker_equil_ptr,psi_vals,error_str) BIND(C,NAME="tokamaker_get_dels_curr")
@@ -1028,6 +1094,112 @@ CALL minv%pre%delete()
 CALL minv%delete()
 DEALLOCATE(u,v,minv)
 END SUBROUTINE tokamaker_get_jtor
+!---------------------------------------------------------------------------------
+!> Compute local magnetic shear for current equilibrium
+!!
+!! \f$ S = -s \cdot \nabla \times s \f$
+!! \f$ s = \frac{\nabla \psi}{|\nabla \psi|} \times \frac{B}{|\nabla \psi|} \f$
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_local_shear(tMaker_equil_ptr,shear,error_str) BIND(C,NAME="tokamaker_get_local_shear")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
+TYPE(c_ptr), VALUE, INTENT(in) :: shear !< Local shear \f$ S \f$
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+INTEGER(4) :: i
+REAL(8), POINTER, DIMENSION(:) :: vals_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: vec1_vals,vec2_vals
+LOGICAL :: pm_save
+CLASS(oft_vector), POINTER :: u,v,br,bt,bz
+TYPE(oft_vector_ptr) :: vec1(3),vec2(3)
+CLASS(oft_solver), POINTER :: minv
+type(gs_b_interp) :: Bfield
+TYPE(oft_lag_bginterp) :: psi_grad
+TYPE(oft_lag_bvcinterp) :: cyl_curl
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+!
+CALL tMaker_equil_obj%psi%new(u)
+CALL tMaker_equil_obj%psi%new(v)
+DO i=1,3
+  CALL tMaker_equil_obj%psi%new(vec1(i)%f)
+  CALL tMaker_equil_obj%psi%new(vec2(i)%f)
+END DO
+ALLOCATE(vec1_vals(u%n,3),vec2_vals(u%n,3))
+!
+NULLIFY(minv)
+CALL create_cg_solver(minv)
+minv%A=>tMaker_equil_obj%device%mop
+minv%its=-2
+CALL create_diag_pre(minv%pre) ! Setup Preconditioner
+pm_save=oft_env%pm; oft_env%pm=.FALSE.
+!---Get magnetic field
+CALL Bfield%setup(tMaker_equil_obj)
+CALL oft_blag_vproject(tMaker_equil_obj%device%fe_rep,Bfield,vec1(1)%f,vec1(2)%f,vec1(3)%f)
+CALL Bfield%delete
+DO i=1,3
+  CALL v%add(0.d0,1.d0,vec1(i)%f)
+  CALL vec1(i)%f%set(0.d0)
+  CALL minv%apply(vec1(i)%f,v)
+  vals_tmp=>vec1_vals(:,i)
+  CALL vec1(i)%f%get_local(vals_tmp)
+END DO
+!---Get poloidal flux gradient
+psi_grad%u=>tMaker_equil_obj%psi
+CALL psi_grad%setup(tMaker_equil_obj%device%fe_rep)
+CALL oft_blag_vproject(tMaker_equil_obj%device%fe_rep,psi_grad,vec2(1)%f,vec2(2)%f,vec2(3)%f)
+CALL psi_grad%delete
+DO i=1,3
+  CALL v%add(0.d0,1.d0,vec2(i)%f)
+  CALL vec2(i)%f%set(0.d0)
+  CALL minv%apply(vec2(i)%f,v)
+  vals_tmp=>vec2_vals(:,i)
+  CALL vec2(i)%f%get_local(vals_tmp)
+END DO
+!---Shuffle 2D gradient to 3D cylindrical
+vec2_vals(:,3)=vec2_vals(:,2)
+vec2_vals(:,2)=0.d0
+DO i=1,u%n
+  vec1_vals(i,:)=vec1_vals(i,:)/magnitude(vec2_vals(i,:))     ! B / |grad(psi)|
+  vec2_vals(i,:)=vec2_vals(i,:)/magnitude(vec2_vals(i,:))     ! grad(psi) / |grad(psi)|
+  vec1_vals(i,:)=cross_product(vec2_vals(i,:),vec1_vals(i,:)) ! s = grad(psi) X B / |grad(psi)|^2
+END DO
+DO i=1,3
+  vals_tmp=>vec1_vals(:,i)
+  CALL vec1(i)%f%restore_local(vals_tmp)
+END DO
+!---Get curl of "s"
+cyl_curl%ux=>vec1(1)%f
+cyl_curl%uy=>vec1(2)%f
+cyl_curl%uz=>vec1(3)%f
+cyl_curl%cylindrical=.TRUE.
+CALL cyl_curl%setup(tMaker_equil_obj%device%fe_rep)
+CALL oft_blag_vproject(tMaker_equil_obj%device%fe_rep,cyl_curl,vec2(1)%f,vec2(2)%f,vec2(3)%f)
+CALL cyl_curl%delete
+DO i=1,3
+  CALL v%add(0.d0,1.d0,vec2(i)%f)
+  CALL vec2(i)%f%set(0.d0)
+  CALL minv%apply(vec2(i)%f,v)
+  vals_tmp=>vec2_vals(:,i)
+  CALL vec2(i)%f%get_local(vals_tmp)
+END DO
+!---Compute local curvature
+CALL c_f_pointer(shear, vals_tmp, [tMaker_equil_obj%psi%n])
+DO i=1,u%n
+  vals_tmp(i)=-DOT_PRODUCT(vec1_vals(i,:),vec2_vals(i,:)) ! -dot(s,curl(s))
+END DO
+!
+oft_env%pm=pm_save
+CALL u%delete()
+CALL v%delete()
+DO i=1,3
+  CALL vec1(i)%f%delete
+  CALL vec2(i)%f%delete
+  DEALLOCATE(vec1(i)%f,vec2(i)%f)
+END DO
+DEALLOCATE(vec1_vals,vec2_vals)
+CALL minv%pre%delete()
+CALL minv%delete()
+DEALLOCATE(u,v,minv)
+END SUBROUTINE tokamaker_get_local_shear
 !---------------------------------------------------------------------------------
 !> Compute area integral of a scalar field over a specified region
 !---------------------------------------------------------------------------------
@@ -1410,19 +1582,21 @@ END SUBROUTINE tokamaker_get_field_eval
 !> Evaluate a TokaMaker field with an interpolation object created by
 !! \ref tokamaker_f::tokamaker_get_field_eval
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_apply_field_eval(tMaker_equil_ptr,int_obj,int_type,pt,fbary_tol,cell,dim,field) BIND(C,NAME="tokamaker_apply_field_eval")
+SUBROUTINE tokamaker_apply_field_eval(tMaker_equil_ptr,int_obj,int_type,pt_ptr,npts,fbary_tol,dim,field_ptr) BIND(C,NAME="tokamaker_apply_field_eval")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 TYPE(c_ptr), VALUE, INTENT(in) :: int_obj !< Pointer to interpolation object
 INTEGER(c_int), VALUE, INTENT(in) :: int_type !< Field type (negative to destroy)
-REAL(c_double), INTENT(in) :: pt(3) !< Location for evaluation [R,Z,0]
+TYPE(c_ptr), VALUE, INTENT(in)  :: pt_ptr !< Location for evaluation [X,Y,Z] (3D) or [X,Y,0] (2D)
+INTEGER(c_int), VALUE, INTENT(in) :: npts !< Number of points to evaluate
 REAL(c_double), VALUE, INTENT(in) :: fbary_tol !< Tolerance for physical to logical mapping
-INTEGER(c_int), INTENT(inout) :: cell !< Cell containing `pt` (starting guess on input)
 INTEGER(c_int), VALUE, INTENT(in) :: dim !< Dimension of field
-REAL(c_double), INTENT(out) :: field(dim) !< Field at `pt`
+TYPE(c_ptr), VALUE, INTENT(in) :: field_ptr !< Field at locations specified by `pt_ptr`
 TYPE(oft_lag_bginterp), POINTER :: psi_grad_obj
 TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
+INTEGER(i4) :: i,cell
 REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
+REAL(r8), POINTER, DIMENSION(:,:) :: pts,field
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj))CALL oft_abort("TokaMaker equilibrium object not associated","tokamaker_apply_field_eval",__FILE__)
@@ -1443,24 +1617,38 @@ IF(int_type<0)THEN
   END IF
   RETURN
 END IF
-call bmesh_findcell(tMaker_equil_obj%device%mesh,cell,pt,f)
-IF(cell==0)RETURN
-fmin=MINVAL(f); fmax=MAXVAL(f)
-IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
-  cell=-ABS(cell)
-  RETURN
-END IF
-CALL tMaker_equil_obj%device%mesh%jacobian(cell,f,goptmp,vol)
 IF(int_type==1)THEN
   CALL c_f_pointer(int_obj, b_interp_obj)
-  CALL b_interp_obj%interp(cell,f,goptmp,field)
 ELSE IF(int_type>=2.AND.int_type<=4)THEN
   CALL c_f_pointer(int_obj, prof_interp_obj)
-  CALL prof_interp_obj%interp(cell,f,goptmp,field)
 ELSE IF(int_type>=5)THEN
   CALL c_f_pointer(int_obj, psi_grad_obj)
-  CALL psi_grad_obj%interp(cell,f,goptmp,field)
 END IF
+CALL c_f_pointer(pt_ptr, pts, [3,npts])
+CALL c_f_pointer(field_ptr, field, [dim,npts])
+!$omp parallel do private(cell,f,goptmp,vol,fmin,fmax) if(npts>1000)
+DO i=1,npts
+  cell=0
+  call bmesh_findcell(tMaker_equil_obj%device%mesh,cell,pts(:,i),f)
+  IF(cell==0)THEN
+    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
+    CYCLE
+  END IF
+  fmin=MINVAL(f); fmax=MAXVAL(f)
+  IF(( fmax>1.d0+fbary_tol ).OR.( fmin<-fbary_tol ))THEN
+    ! cell=-ABS(cell)
+    field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
+    CYCLE
+  END IF
+  CALL tMaker_equil_obj%device%mesh%jacobian(cell,f,goptmp,vol)
+  IF(int_type==1)THEN
+    CALL b_interp_obj%interp(cell,f,goptmp,field(:,i))
+  ELSE IF(int_type>=2.AND.int_type<=4)THEN
+    CALL prof_interp_obj%interp(cell,f,goptmp,field(:,i))
+  ELSE IF(int_type>=5)THEN
+    CALL psi_grad_obj%interp(cell,f,goptmp,field(:,i))
+  END IF
+END DO
 END SUBROUTINE tokamaker_apply_field_eval
 !---------------------------------------------------------------------------------
 !> Set \f$ \psi \f$ values in TokaMaker equilibrium object

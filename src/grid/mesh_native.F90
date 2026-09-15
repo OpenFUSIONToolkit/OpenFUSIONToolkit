@@ -192,11 +192,11 @@ ELSE
     END IF
     !---Read periodicity information
     IF(ref_periodic)THEN
-        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))CALL oft_abort( &
-        "Periodic nodeset not found in file","native_load_vmesh",__FILE__)
-        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
+        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/NODES"))CALL oft_abort( &
+          "Periodic nodeset not found in file","native_load_vmesh",__FILE__)
+        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/NODES",ndims,dim_sizes)
         ALLOCATE(per_nodes(dim_sizes(1)))
-        CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
+        CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/NODES",success)
         WRITE(*,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
     END IF
 END IF
@@ -362,11 +362,11 @@ ELSE
     END IF
     !---Read periodicity information
     IF(ref_periodic)THEN
-        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/nodes"))CALL oft_abort( &
+        IF(.NOT.hdf5_field_exist(TRIM(filename),"mesh/periodicity/NODES"))CALL oft_abort( &
         "Periodic nodeset not found in file","native_load_smesh",__FILE__)
-        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/nodes",ndims,dim_sizes)
+        CALL hdf5_field_get_sizes(TRIM(filename),"mesh/periodicity/NODES",ndims,dim_sizes)
         ALLOCATE(per_nodes(dim_sizes(1)))
-        CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/nodes",success)
+        CALL hdf5_read(per_nodes,TRIM(filename),"mesh/periodicity/NODES",success)
         WRITE(*,'(2A,I8)')oft_indent,'Found periodic points',dim_sizes(1)
     END IF
 END IF

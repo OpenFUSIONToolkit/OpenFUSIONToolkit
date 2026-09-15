@@ -16,13 +16,13 @@ MODULE thin_wall
 USE, INTRINSIC :: iso_c_binding, only: c_loc
 USE oft_base
 USE oft_sort, ONLY: sort_array, search_array
-USE oft_io, ONLY: xdmf_plot_file
+USE oft_io, ONLY: xdmf_plot_file, hdf5_field_exist, hdf5_rst, hdf5_write, hdf5_read, &
+  hdf5_rst_destroy, hdf5_create_file, hdf5_field_get_sizes, hdf5_create_group
 USE oft_quadrature
 USE oft_mesh_type, ONLY: oft_bmesh
 USE oft_mesh_local, ONLY: bmesh_local_init
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
-USE oft_io, ONLY: hdf5_rst, hdf5_write, hdf5_read, hdf5_rst_destroy, hdf5_create_file, &
-  hdf5_field_get_sizes, hdf5_create_group
+USE oft_mesh_global_util, ONLY: mesh_global_resolution
 USE oft_tetmesh_type, ONLY: oft_tetmesh
 USE oft_trimesh_type, ONLY: oft_trimesh
 USE oft_tet_quadrature, ONLY: set_quad_2d
@@ -95,6 +95,7 @@ END TYPE tw_gen_coil
 !---------------------------------------------------------------------------------
 TYPE :: tw_coil_set
   LOGICAL :: sens_mask = .FALSE. !< Mask from sensor output?
+  LOGICAL :: is_vcoil = .FALSE. !< Is this a voltage-specified coil set?
   INTEGER(i4) :: ncoils = 0 !< Number of coils in set
   REAL(r8) :: Lself = -1.d0 !< Self inductance of coil set (if required)
   REAL(r8) :: Rself = -1.d0 !< Resistance of coil set (if required)
@@ -109,13 +110,16 @@ END TYPE tw_coil_set
 !> Class for thin-wall simulation
 !---------------------------------------------------------------------------------
 TYPE :: tw_type
+  LOGICAL :: model_frozen = .FALSE. !< Flag indicating if model is frozen (no more shape changes allowed)
   INTEGER(i4) :: nelems = 0 !< Number of elements in model (np_active+nholes+n_vcoils)
   INTEGER(i4) :: np_active = 0 !< Number of active vertices in model
+  INTEGER(i4) :: n_coils = 0 !< Number of general coils in model
   INTEGER(i4) :: n_vcoils = 0 !< Number of voltage-specified coils in model
   INTEGER(i4) :: n_icoils = 0 !< Number of current-specified coils in model
   INTEGER(i4) :: nholes = 0 !< Number of "holes" in model
   INTEGER(i4) :: nclosures = 0 !< Number of "closures" in model
   INTEGER(i4) :: nfh = 0 !< Number of face-hole interactions
+  REAL(r8) :: B_dx = 1.d-3 !< Spatial step size for finite difference evaluation of B-field
   LOGICAL, POINTER, DIMENSION(:) :: sens_mask => NULL() !< Mask array for sensors [nreg]
   INTEGER(i4), POINTER, DIMENSION(:) :: pmap => NULL() !< Map from mesh vertices to active vertices [mesh%np]
   INTEGER(i4), POINTER, DIMENSION(:) :: kpmap_inv => NULL() !< Map from active vertices to mesh vertices [np_active]
@@ -143,8 +147,9 @@ TYPE :: tw_type
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Underlying surface mesh
   TYPE(hole_mesh), POINTER, DIMENSION(:) :: hmesh => NULL() !< Hole definitions
   TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jumper_nsets => NULL() !< Jumper definitions
-  TYPE(tw_coil_set), POINTER, DIMENSION(:) :: vcoils => NULL() !< List of Vcoils
-  TYPE(tw_coil_set), POINTER, DIMENSION(:) :: icoils => NULL() !< List of Icoils
+  TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils => NULL() !< List of general coils
+  TYPE(tw_coil_set), POINTER, DIMENSION(:) :: vcoils => NULL() !< List of voltage-specified coils
+  TYPE(tw_coil_set), POINTER, DIMENSION(:) :: icoils => NULL() !< List of current-specified coils
   TYPE(xml_node) :: xml
 CONTAINS
   !> Setup thin-wall model
@@ -152,6 +157,7 @@ CONTAINS
   !> Save debug information for model
   PROCEDURE :: save_debug => tw_save_debug
 END TYPE tw_type
+!---
 ! REAL(r8) :: mag_dx = 1.d-5
 REAL(r8) :: quad_tols(3) = [0.75d0, 0.95d0, 0.995d0] !< Distance tolerances for quadrature order selection
 INTEGER(i4) :: quad_orders(3) = [18, 10, 6] !< Quadrature order for each tolerance
@@ -163,49 +169,91 @@ CONTAINS
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_setup(self,hole_ns)
+SUBROUTINE tw_setup(self,hole_ns,error_string,filepath)
 CLASS(tw_type), INTENT(INOUT) :: self !< Thin-wall model object
-TYPE(oft_1d_int), POINTER, INTENT(IN) :: hole_ns(:) !< Hole nodesets
+TYPE(oft_1d_int), POINTER, INTENT(inout) :: hole_ns(:) !< Hole nodesets
+CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: error_string
+CHARACTER(LEN=*), OPTIONAL, INTENT(IN) :: filepath !< Path to mesh file
+LOGICAL :: coils_xml
 INTEGER(4) :: i,j,k,l,face,ioffset,ed,error_flag
 INTEGER(4), ALLOCATABLE :: kfh_tmp(:),np_inverse(:)
 REAL(8) :: f(3),rgop(3,3),area_i,norm_i(3)
 TYPE(xml_node) :: coil_element
-!
-IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)
 !---
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Creating thin-wall model'
 CALL oft_increase_indent
+CALL mesh_global_resolution(self%mesh)
 CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
-!---Load coils
+!---Load ThinCurr-specific mesh information
+coils_xml=.TRUE.
+IF(PRESENT(filepath))THEN
+  CALL tw_load_hdf5(self,filepath,hole_ns,error_string)
+  IF(self%n_coils>0)coils_xml=.FALSE.
+END IF
+IF(ALLOCATED(error_string))RETURN
+!---Load coils from XML for backwards compatibility
 IF(.NOT.self%xml%associated().AND.ASSOCIATED(oft_env%xml))CALL xml_get_element(oft_env%xml,"thincurr",self%xml,error_flag)
-CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
-IF(error_flag==0)THEN
-  WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils'
-  CALL tw_load_coils(coil_element,'VCOIL',self%n_vcoils,self%vcoils)
-ELSE
-  WRITE(*,'(2A)')oft_indent,'No V(t) driver coils found'
-END IF
-DO i=1,self%n_vcoils
-  IF(ANY(self%vcoils(i)%res_per_len<0.d0))CALL oft_abort("Invalid resistivity for passive coil", &
-    "tw_setup", __FILE__)
-  IF(ANY(self%vcoils(i)%radius<coil_min_rad))CALL oft_abort("Invalid radius for passive coil", &
-    "tw_setup", __FILE__)
-END DO
-CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
-IF(error_flag==0)THEN
-  WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils'
-  CALL tw_load_coils(coil_element,'ICOIL',self%n_icoils,self%icoils)
-ELSE
-  WRITE(*,'(2A)')oft_indent,'No I(t) driver coils found'
-END IF
-DO i=1,self%n_icoils
-  DO j=1,self%icoils(i)%ncoils
-    self%icoils(i)%radius(j)=MAX(coil_min_rad,self%icoils(i)%radius(j)) ! Remove dummy radius on Icoils
+IF(coils_xml)THEN
+  !---Read V(t) driver coils from XML file
+  CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
+  IF(error_flag==0)THEN
+    WRITE(*,'(2A)')oft_indent,'Loading V(t) driver coils from XML file'
+    CALL tw_load_coils_xml(coil_element,0,self%n_vcoils,self%vcoils)
+  ELSE
+    WRITE(*,'(2A)')oft_indent,'No V(t) driver coils found'
+  END IF
+  DO i=1,self%n_vcoils
+    IF(ANY(self%vcoils(i)%res_per_len<0.d0))CALL oft_abort("Invalid resistivity for passive coil", &
+      "tw_setup", __FILE__)
+    IF(ANY(self%vcoils(i)%radius<coil_min_rad))CALL oft_abort("Invalid radius for passive coil", &
+      "tw_setup", __FILE__)
   END DO
-END DO
+  !---Read I(t) driver coils from XML file
+  CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
+  IF(error_flag==0)THEN
+    WRITE(*,'(2A)')oft_indent,'Loading I(t) driver coils from XML file'
+    CALL tw_load_coils_xml(coil_element,self%n_vcoils,self%n_icoils,self%icoils)
+  ELSE
+    WRITE(*,'(2A)')oft_indent,'No I(t) driver coils found'
+  END IF
+  DO i=1,self%n_icoils
+    DO j=1,self%icoils(i)%ncoils
+      self%icoils(i)%radius(j)=MAX(coil_min_rad,self%icoils(i)%radius(j)) ! Remove dummy radius on Icoils
+    END DO
+  END DO
+  !---TEMPORARY to match new behavior of storing all coils together
+  self%n_coils=self%n_vcoils+self%n_icoils
+  IF(self%n_coils>0)ALLOCATE(self%coils(self%n_coils))
+  DO i=1,self%n_vcoils
+    CALL tw_copy_coil(self%vcoils(i),self%coils(i))
+    self%coils(i)%is_vcoil=.TRUE.
+  END DO
+  DO i=1,self%n_icoils
+    CALL tw_copy_coil(self%icoils(i),self%coils(i+self%n_vcoils))
+    self%coils(i+self%n_vcoils)%is_vcoil=.FALSE.
+  END DO
+ELSE
+  CALL xml_get_element(self%xml,"vcoils",coil_element,error_flag)
+  IF(error_flag==0)THEN
+    IF(self%n_vcoils>0)THEN
+      CALL oft_warn("V-coils specified in mesh and XML files, ignoring XML definitions")
+    ELSE
+      CALL oft_warn("V-coils specified in XML file, but not in mesh file, ignoring XML definitions")
+    END IF
+  END IF
+  CALL xml_get_element(self%xml,"icoils",coil_element,error_flag)
+  IF(error_flag==0)THEN
+    IF(self%n_icoils>0)THEN
+      CALL oft_warn("I-coils specified in mesh and XML files, ignoring XML definitions")
+    ELSE
+      CALL oft_warn("I-coils specified in XML file, but not in mesh file, ignoring XML definitions")
+    END IF
+  END IF
+END IF
 !---Analyze mesh to construct holes
-WRITE(*,'(2A)')oft_indent,'Building holes'
+IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)
+WRITE(*,'(2A)')oft_indent,'Creating hole elements'
 ALLOCATE(self%hmesh(self%nholes))
 ALLOCATE(self%kfh(self%mesh%nc+1))
 self%kfh=0
@@ -279,6 +327,7 @@ IF(self%nholes>0)THEN
     END DO
   END DO
 END IF
+!---Build mapping from mesh vertices to active vertices
 IF(.NOT.ASSOCIATED(self%pmap))THEN
   ALLOCATE(self%pmap(self%mesh%np))
   self%pmap=0
@@ -351,7 +400,7 @@ DO i=1,self%mesh%nc
   END DO
 END DO
 !---Load resistivity
-CALL tw_load_eta(self)
+IF(.NOT.ASSOCIATED(self%Eta_surf))CALL tw_load_eta(self)
 !---Create local vector
 ALLOCATE(oft_native_vector::self%Uloc)
 SELECT TYPE(this=>self%Uloc)
@@ -364,6 +413,8 @@ SELECT TYPE(this=>self%Uloc)
     this%stitch_info%full=.TRUE.
     this%stitch_info%nbe=0
     this%stitch_info%be=.FALSE.
+  CLASS DEFAULT
+    CALL oft_abort('Failed to allocate "Uloc" vector','tw_setup',__FILE__)
 END SELECT
 !---Create point vector
 ALLOCATE(oft_native_vector::self%Uloc_pts)
@@ -377,6 +428,8 @@ SELECT TYPE(this=>self%Uloc_pts)
     this%stitch_info%full=.TRUE.
     this%stitch_info%nbe=0
     this%stitch_info%be=.FALSE.
+  CLASS DEFAULT
+    CALL oft_abort('Failed to allocate "Uloc_pts" vector','tw_setup',__FILE__)
 END SELECT
 !---Print summary
 WRITE(*,*)
@@ -1486,15 +1539,6 @@ ALLOCATE(quads(18))
 DO i=1,18
   CALL set_quad_2d(quads(i),i)
 END DO
-!---Build temporary coil set from all filaments in model
-ncoils_tot=tw_obj%n_vcoils+tw_obj%n_icoils
-ALLOCATE(coils_tot(ncoils_tot))
-DO i=1,tw_obj%n_vcoils
-  CALL tw_copy_coil(tw_obj%vcoils(i),coils_tot(i))
-END DO
-DO i=1,tw_obj%n_icoils
-  CALL tw_copy_coil(tw_obj%icoils(i),coils_tot(i+tw_obj%n_vcoils))
-END DO
 bmesh=>tw_obj%mesh
 !---Compute coupling between vertices and sensors
 f=1.d0/3.d0
@@ -1587,6 +1631,15 @@ ELSE
   WRITE(*,'(2A)')oft_indent,'No magnetic sensors, skipping...'
 END IF
 CALL oft_decrease_indent
+!---Build temporary coil set from all filaments in model
+ncoils_tot=tw_obj%n_vcoils+tw_obj%n_icoils
+ALLOCATE(coils_tot(ncoils_tot))
+DO i=1,tw_obj%n_vcoils
+  CALL tw_copy_coil(tw_obj%vcoils(i),coils_tot(i))
+END DO
+DO i=1,tw_obj%n_icoils
+  CALL tw_copy_coil(tw_obj%icoils(i),coils_tot(i+tw_obj%n_vcoils))
+END DO
 !---Compute coupling between coils and sensors
 ALLOCATE(Acoil2sen_tmp(nsensors,ncoils_tot))
 Acoil2sen_tmp=0.d0
@@ -1986,13 +2039,13 @@ END FUNCTION tw_compute_phipot
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Bops(self,save_file)
+SUBROUTINE tw_compute_Bops(self,B_dx,save_file)
 TYPE(tw_type), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: B_dx
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-REAL(8), PARAMETER :: B_dx = 1.d-6
 INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
 LOGICAL :: is_neighbor,load_success
 CLASS(oft_bmesh), POINTER :: bmesh
@@ -2316,7 +2369,7 @@ DO k=1,10
   END DO
   IF(all_oriented)EXIT
 END DO
-IF(.NOT.all_oriented)CALL oft_abort("Error orienting cells","",__FILE__)
+IF(.NOT.all_oriented)CALL oft_abort("Error orienting cells on hole","tw_setup_hole",__FILE__)
 !---Save orientations
 ALLOCATE(hmesh%kpc(hmesh%n+1))
 hmesh%kpc=0
@@ -2348,11 +2401,294 @@ DEALLOCATE(face_orientation,point_orient)
 DEBUG_STACK_POP
 END SUBROUTINE tw_setup_hole
 !------------------------------------------------------------------------------
+!> Read coil sets for HDF5 mesh file
+!------------------------------------------------------------------------------
+subroutine tw_load_hdf5(self,filepath,hole_ns,error_string)
+TYPE(tw_type), INTENT(inout) :: self !< ThinCurr object
+CHARACTER(LEN=*), INTENT(in) :: filepath !< Path to mesh file
+TYPE(oft_1d_int), POINTER, INTENT(inout) :: hole_ns(:)
+CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: error_string
+integer(4) :: ncoils,ncoil_sets,nread,coil_type,nmasked
+LOGICAL :: success
+INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims,n_jumpers
+INTEGER(4), ALLOCATABLE :: dim_sizes(:)
+REAL(8) :: res_per_len,radius,dl,theta
+REAL(8), POINTER :: pts_tmp(:)
+CHARACTER(LEN=4) :: blknum,blknum2
+CHARACTER(LEN=16) :: coil_ind
+CHARACTER(LEN=OFT_PATH_SLEN) :: coil_path
+CHARACTER(LEN=:), ALLOCATABLE :: str_tmp
+TYPE(tw_coil_set), POINTER :: coil_tmp
+nmasked=0
+CALL oft_increase_indent
+!---Count coil sets
+IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
+  WRITE(*,'(2A)')oft_indent,'Loading driver coils from mesh file'
+  CALL hdf5_read(ncoil_sets,TRIM(filepath),'thincurr/coils/NCOILSETS',success=success)
+  self%n_coils=ncoil_sets
+  ALLOCATE(self%coils(self%n_coils))
+  self%n_icoils=0
+  self%n_vcoils=0
+  DO i=1,ncoil_sets
+    WRITE(blknum,'(I4.4)')i
+    !
+    CALL hdf5_read(ncoils,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/NCOILS',success=success)
+    IF(.NOT.success)CALL oft_abort('Failed to read coils for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
+    coil_tmp=>self%coils(i)
+    coil_tmp%ncoils=ncoils
+    ALLOCATE(coil_tmp%coils(coil_tmp%ncoils))
+    ALLOCATE(coil_tmp%scales(coil_tmp%ncoils))
+    ALLOCATE(coil_tmp%res_per_len(coil_tmp%ncoils))
+    ALLOCATE(coil_tmp%radius(coil_tmp%ncoils))
+    coil_tmp%scales=1.d0
+    coil_tmp%res_per_len=-1.d0
+    coil_tmp%radius=-1.d0
+    coil_tmp%Rself=0.d0
+    !
+    IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/NAME'))THEN
+      CALL hdf5_read(str_tmp,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/NAME',success)
+      IF(.NOT.success)CALL oft_abort('Failed to read name for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
+      IF(LEN(str_tmp)>LEN(coil_tmp%name))THEN
+        WRITE(*,'(3A)')oft_indent,'Coil set name "',str_tmp,'" too long for coil set truncating'
+        coil_tmp%name=str_tmp(1:LEN(coil_tmp%name))
+      ELSE
+        coil_tmp%name=str_tmp
+      END IF
+    ELSE
+      coil_tmp%name='COIL_'//blknum
+    END IF
+    IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/RADIUS'))THEN
+      CALL hdf5_read(coil_tmp%radius,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/RADIUS',success)
+      IF(.NOT.success)CALL oft_abort('Failed to read radius for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
+    END IF
+    IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/RES_PER_LEN'))THEN
+      CALL hdf5_read(coil_tmp%res_per_len,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/RES_PER_LEN',success)
+      IF(.NOT.success)CALL oft_abort('Failed to read res_per_len for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
+    END IF
+    IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/SCALES'))THEN
+      CALL hdf5_read(coil_tmp%scales,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/SCALES',success)
+      IF(.NOT.success)CALL oft_abort('Failed to read scales for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
+    END IF
+    IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/SENS_MASK'))THEN
+      CALL hdf5_read(coil_tmp%sens_mask,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/SENS_MASK',success)
+      IF(.NOT.success)CALL oft_abort('Failed to read sens_mask for coilset '//blknum,'tw_load_coils_hdf5',__FILE__)
+      IF(coil_tmp%sens_mask)THEN
+        nmasked=nmasked+1
+        IF(oft_debug_print(2))WRITE(*,'(2A,I6,A)')oft_indent,'Masked coil set ',i,' from sensors'
+      END IF
+    END IF
+    !
+    DO j=1,ncoils
+      WRITE(blknum2,'(I4.4)')j
+      CALL hdf5_field_get_sizes(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/coil'//blknum2//'/PTS',ndims,dim_sizes)
+      IF(ndims==2)THEN
+        coil_tmp%coils(j)%npts=dim_sizes(2)
+        ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
+        CALL hdf5_read(coil_tmp%coils(j)%pts,TRIM(filepath),'thincurr/coils/coilset'//blknum//'/coil'//blknum2//'/PTS',success)
+        IF(.NOT.success)ndims=-1
+      END IF
+      IF(ndims/=2)THEN
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
+        CALL oft_abort('Failed to read coil points for coilset/coil '//coil_ind,'tw_load_coils_hdf5',__FILE__)
+      END IF
+    END DO
+    !---TEMPORARY to mirror old behavior of separating vcoils and icoils
+    IF(ALL(coil_tmp%res_per_len>0.d0).AND.ALL(coil_tmp%radius>0.d0))THEN
+      self%n_vcoils=self%n_vcoils+1
+    ELSE
+      self%n_icoils=self%n_icoils+1
+    END IF
+  END DO
+  !---TEMPORARY to mirror old behavior of separating vcoils and icoils
+  IF(self%n_vcoils>0)ALLOCATE(self%vcoils(self%n_vcoils))
+  IF(self%n_icoils>0)ALLOCATE(self%icoils(self%n_icoils))
+  self%n_icoils=0
+  self%n_vcoils=0
+  DO i=1,ncoil_sets
+    IF(ALL(self%coils(i)%res_per_len>0.d0).AND.ALL(self%coils(i)%radius>0.d0))THEN
+      self%n_vcoils=self%n_vcoils+1
+      self%coils(i)%is_vcoil=.TRUE.
+      CALL tw_copy_coil(self%coils(i),self%vcoils(self%n_vcoils))
+    ELSE
+      self%n_icoils=self%n_icoils+1
+      self%coils(i)%is_vcoil=.FALSE.
+      CALL tw_copy_coil(self%coils(i),self%icoils(self%n_icoils))
+    END IF
+  END DO
+END IF
+!---
+IF(nmasked>0)WRITE(*,'(2A,I6,A)')oft_indent,'Masked ',nmasked,' coils from sensors'
+IF(oft_debug_print(1))THEN
+  IF(self%n_vcoils>0)THEN
+    WRITE(*,*)
+    WRITE(*,'(2A)')oft_indent,'V-Coils set definitions'
+    WRITE(*,'(2A)')oft_indent,'========================='
+    WRITE(*,'(2A,I6,A)')oft_indent,'Found ',self%n_vcoils,' coil sets'
+    DO i=1,self%n_vcoils
+      WRITE(*,'(2A,I6,A)')oft_indent,'  Set  : ',i
+      WRITE(*,'(2A,I6,A)')oft_indent,'    nCoils  : ',self%vcoils(i)%ncoils
+    END DO
+    WRITE(*,'(2A)')oft_indent,'========================='
+    WRITE(*,*)
+  END IF
+  IF(self%n_icoils>0)THEN
+    WRITE(*,*)
+    WRITE(*,'(2A)')oft_indent,'I-Coils set definitions'
+    WRITE(*,'(2A)')oft_indent,'========================='
+    WRITE(*,'(2A,I6,A)')oft_indent,'Found ',self%n_icoils,' coil sets'
+    DO i=1,self%n_icoils
+      WRITE(*,'(2A,I6,A)')oft_indent,'  Set  : ',i
+      WRITE(*,'(2A,I6,A)')oft_indent,'    nCoils  : ',self%icoils(i)%ncoils
+    END DO
+    WRITE(*,'(2A)')oft_indent,'========================='
+    WRITE(*,*)
+  END IF
+END IF
+CALL oft_decrease_indent
+ALLOCATE(self%sens_mask(self%mesh%nreg))
+self%sens_mask=.FALSE.
+!---Read periodicity information
+IF(hdf5_field_exist(TRIM(filepath),'thincurr/periodicity/PMAP'))THEN
+  ALLOCATE(self%pmap(self%mesh%np))
+  CALL hdf5_read(self%pmap,TRIM(filepath),'thincurr/periodicity/PMAP',success)
+  IF(.NOT.success)THEN
+    error_string='Error reading periodicity information from mesh file'
+    RETURN
+  END IF
+END IF
+!---Read surface resistivity
+IF(hdf5_field_exist(TRIM(filepath),'thincurr/ETA_SURF'))THEN
+  ALLOCATE(self%Eta_surf(self%mesh%nreg))
+  CALL hdf5_read(self%Eta_surf,TRIM(filepath),'thincurr/ETA_SURF',success)
+  IF(.NOT.success)THEN
+    error_string='Error reading surface resistivity from mesh file'
+    RETURN
+  END IF
+  self%Eta_surf=self%Eta_surf/mu0
+END IF
+!---Read volume resistivity
+IF(hdf5_field_exist(TRIM(filepath),'thincurr/ETA_VOL'))THEN
+  IF(ASSOCIATED(self%Eta_surf))THEN
+    error_string='Volume resistivity and surface resistivity cannot both be present in mesh file'
+    RETURN
+  END IF
+  ALLOCATE(self%Eta_vol(self%mesh%nreg))
+  CALL hdf5_read(self%Eta_vol,TRIM(filepath),'thincurr/ETA_VOL',success)
+  IF(.NOT.success)THEN
+    error_string='Error reading volume resistivity from mesh file'
+    RETURN
+  END IF
+  self%Eta_vol=self%Eta_vol/mu0
+END IF
+!---Read thickness
+IF(hdf5_field_exist(TRIM(filepath),'thincurr/THICKNESS'))THEN
+  ALLOCATE(self%thickness(self%mesh%nreg))
+  CALL hdf5_read(self%thickness,TRIM(filepath),'thincurr/THICKNESS',success)
+  IF(.NOT.success)THEN
+    error_string='Error reading thickness from mesh file'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%Eta_vol))THEN
+    ALLOCATE(self%Eta_surf(self%mesh%nreg))
+    self%Eta_surf=self%Eta_vol/self%thickness
+  END IF
+ELSE
+  IF(ASSOCIATED(self%Eta_vol))THEN
+    error_string='Volume resistivity requires thickness to be present in mesh file'
+    RETURN
+  END IF
+END IF
+!---
+IF(hdf5_field_exist(TRIM(filepath),'thincurr/holes'))THEN
+  IF(ASSOCIATED(hole_ns))THEN
+    CALL oft_warn("Holes specified in mesh and XML files, ignoring XML definitions")
+    DO i=1,SIZE(hole_ns)
+      IF(ASSOCIATED(hole_ns(i)%v))DEALLOCATE(hole_ns(i)%v)
+    END DO
+    DEALLOCATE(hole_ns)
+  END IF
+  CALL hdf5_read(self%nholes,TRIM(filepath),'thincurr/holes/NHOLES',success)
+  IF(.NOT.success)THEN
+    error_string='Error reading number of holes from mesh file'
+    RETURN
+  END IF
+  ALLOCATE(hole_ns(self%nholes))
+  DO i=1,self%nholes
+    WRITE(blknum,'(I4.4)')i
+    CALL hdf5_field_get_sizes(TRIM(filepath),'thincurr/holes/HOLE'//blknum,ndims,dim_sizes)
+    IF(ndims==1)THEN
+      hole_ns(i)%n=dim_sizes(1)
+      ALLOCATE(hole_ns(i)%v(hole_ns(i)%n))
+      CALL hdf5_read(hole_ns(i)%v,TRIM(filepath),'thincurr/holes/HOLE'//blknum,success)
+      IF(.NOT.success)ndims=-1
+    ELSE
+      ndims=-1
+    END IF
+    IF(ndims<0)THEN
+      error_string='Error reading hole nodeset from mesh file'
+      RETURN
+    END IF
+  END DO
+END IF
+!---
+IF(hdf5_field_exist(TRIM(filepath),'thincurr/jumpers'))THEN
+  IF(ASSOCIATED(self%jumper_nsets))THEN
+    CALL oft_warn("Jumpers specified in mesh and XML files, ignoring XML definitions")
+    DO i=1,SIZE(self%jumper_nsets)
+      IF(ASSOCIATED(self%jumper_nsets(i)%v))DEALLOCATE(self%jumper_nsets(i)%v)
+    END DO
+    DEALLOCATE(self%jumper_nsets)
+  END IF
+  CALL hdf5_read(n_jumpers,TRIM(filepath),'thincurr/jumpers/NJUMPERS',success)
+  IF(.NOT.success)THEN
+    error_string='Error reading number of jumpers from mesh file'
+    RETURN
+  END IF
+  ALLOCATE(self%jumper_nsets(n_jumpers))
+  DO i=1,n_jumpers
+    WRITE(blknum,'(I4.4)')i
+    CALL hdf5_field_get_sizes(TRIM(filepath),'thincurr/jumpers/JUMPER'//blknum,ndims,dim_sizes)
+    IF(ndims==1)THEN
+      self%jumper_nsets(i)%n=dim_sizes(1)
+      ALLOCATE(self%jumper_nsets(i)%v(self%jumper_nsets(i)%n))
+      CALL hdf5_read(self%jumper_nsets(i)%v,TRIM(filepath),'thincurr/jumpers/JUMPER'//blknum,success)
+      IF(.NOT.success)ndims=-1
+    ELSE
+      ndims=-1
+    END IF
+    IF(ndims<0)THEN
+      error_string='Error reading jumper nodeset from mesh file'
+      RETURN
+    END IF
+  END DO
+END IF
+!---Read closures
+IF(hdf5_field_exist(TRIM(filepath),'thincurr/CLOSURES'))THEN
+  CALL hdf5_field_get_sizes(TRIM(filepath),'thincurr/CLOSURES',ndims,dim_sizes)
+  IF(ndims==1)THEN
+    IF(ASSOCIATED(self%closures))THEN
+      CALL oft_warn("Closures specified in mesh and XML files, ignoring XML definitions")
+      DEALLOCATE(self%closures)
+    END IF
+    self%nclosures=dim_sizes(1)
+    ALLOCATE(self%closures(self%nclosures))
+    CALL hdf5_read(self%closures,TRIM(filepath),'thincurr/CLOSURES',success)
+    IF(.NOT.success)ndims=-1
+  ELSE
+    ndims=-1
+  END IF
+  IF(ndims<0)THEN
+    error_string='Error reading closures from mesh file'
+    RETURN
+  END IF
+END IF
+end subroutine tw_load_hdf5
+!------------------------------------------------------------------------------
 !> Read coil sets for "oft_in.xml" file
 !------------------------------------------------------------------------------
-subroutine tw_load_coils(group_node,name_prefix,ncoils,coils)
+subroutine tw_load_coils_xml(group_node,name_offset,ncoils,coils)
 TYPE(xml_node), INTENT(IN) :: group_node !< XML node relative to base `<thincurr>` node
-CHARACTER(LEN=5), INTENT(IN) :: name_prefix !< Prefix for coil set names (e.g. "icoil" or "vcoil")
+INTEGER(i4), INTENT(IN) :: name_offset !< Offset for coil set names
 INTEGER(4), INTENT(out) :: ncoils !< Number of coil sets found
 TYPE(tw_coil_set), POINTER, INTENT(out) :: coils(:) !< List of coil sets
 !---XML solver fields
@@ -2398,7 +2734,7 @@ DO i=1,ncoils
     CALL xml_read_attribute(coil_set,"name",str_tmp,iostat=ierr)
     IF(ierr/=0)THEN
       WRITE(coil_ind,'(I6)')i
-      CALL oft_xml_abort('Error reading "name" for coil set '//coil_ind,'tw_load_coils',__FILE__)
+      CALL oft_xml_abort('Error reading "name" for coil set '//coil_ind,'tw_load_coils_xml',__FILE__)
     END IF
     IF(LEN(str_tmp)>LEN(coil_tmp%name))THEN
       WRITE(*,'(2A,I6,A)')oft_indent,'Coil set name too long for coil set ',i,', truncating'
@@ -2408,14 +2744,14 @@ DO i=1,ncoils
     END IF
     DEALLOCATE(str_tmp)
   ELSE
-    WRITE(coil_tmp%name,'(A5,A1,I5.5)')name_prefix,'_',i
+    WRITE(coil_tmp%name,'(A5,I4.4)')'COIL_',i+name_offset
   END IF
   !---Get coil set resistivity per unit length (can be overriden)
   IF(xml_hasAttribute(coil_set,"res_per_len"))THEN
     CALL xml_read_attribute(coil_set,"res_per_len",res_per_len,iostat=ierr)
     IF(ierr/=0)THEN
       WRITE(coil_ind,'(I6)')i
-      CALL oft_xml_abort('Error reading "res_per_len" for coil set '//coil_ind,'tw_load_coils',__FILE__)
+      CALL oft_xml_abort('Error reading "res_per_len" for coil set '//coil_ind,'tw_load_coils_xml',__FILE__)
     END IF
     coil_tmp%res_per_len=res_per_len
   END IF
@@ -2424,7 +2760,7 @@ DO i=1,ncoils
     CALL xml_read_attribute(coil_set,"radius",radius,iostat=ierr)
     IF(ierr/=0)THEN
       WRITE(coil_ind,'(I6)')i
-      CALL oft_xml_abort('Error reading "radius" for coil set '//coil_ind,'tw_load_coils',__FILE__)
+      CALL oft_xml_abort('Error reading "radius" for coil set '//coil_ind,'tw_load_coils_xml',__FILE__)
     END IF
     coil_tmp%radius=radius
   END IF
@@ -2433,7 +2769,7 @@ DO i=1,ncoils
     CALL xml_read_attribute(coil_set,"sens_mask",coil_tmp%sens_mask,iostat=ierr)
     IF(ierr/=0)THEN
       WRITE(coil_ind,'(I6)')i
-      CALL oft_xml_abort('Error reading "sens_mask" for coil set '//coil_ind,'tw_load_coils',__FILE__)
+      CALL oft_xml_abort('Error reading "sens_mask" for coil set '//coil_ind,'tw_load_coils_xml',__FILE__)
     END IF
     IF(coil_tmp%sens_mask)THEN
       IF(oft_debug_print(2))WRITE(*,'(2A,I6,A)')oft_indent,'Masking coil ',i,' from sensors'
@@ -2448,21 +2784,21 @@ DO i=1,ncoils
       CALL xml_read_attribute(coil,"path",str_tmp,iostat=ierr)
       IF(ierr/=0)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
-        CALL oft_xml_abort('Error reading "path" in coil '//coil_ind,'tw_load_coils',__FILE__)
+        CALL oft_xml_abort('Error reading "path" in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
       END IF
       ipath=INDEX(str_tmp,":")
       IF(ipath==0)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
-        CALL oft_abort('Misformatted "path" attribute in coil '//coil_ind,'tw_load_coils',__FILE__)
+        CALL oft_abort('Misformatted "path" attribute in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
       END IF
       CALL hdf5_field_get_sizes(str_tmp(1:ipath-1),str_tmp(ipath+1:),ndims,dim_sizes)
       IF(ndims<0)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
-        CALL oft_abort('Failed to read HDF5 data sizes for coil '//coil_ind,'tw_load_coils',__FILE__)
+        CALL oft_abort('Failed to read HDF5 data sizes for coil '//coil_ind,'tw_load_coils_xml',__FILE__)
       END IF
       IF(dim_sizes(1)/=3)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
-        CALL oft_abort('Incorrect first dimension of HDF5 dataset for coil '//coil_ind,'tw_load_coils',__FILE__)
+        CALL oft_abort('Incorrect first dimension of HDF5 dataset for coil '//coil_ind,'tw_load_coils_xml',__FILE__)
       END IF
       coil_tmp%coils(j)%npts=dim_sizes(2)
       DEALLOCATE(dim_sizes)
@@ -2470,7 +2806,7 @@ DO i=1,ncoils
       CALL hdf5_read(coil_tmp%coils(j)%pts,str_tmp(1:ipath-1),str_tmp(ipath+1:),success=success)
       IF(.NOT.success)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
-        CALL oft_abort('Failed to read HDF5 data for coil '//coil_ind,'tw_load_coils',__FILE__)
+        CALL oft_abort('Failed to read HDF5 data for coil '//coil_ind,'tw_load_coils_xml',__FILE__)
       END IF
       DEALLOCATE(str_tmp)
     ELSE
@@ -2479,7 +2815,7 @@ DO i=1,ncoils
         CALL xml_read_attribute(coil,"npts",coil_tmp%coils(j)%npts,iostat=ierr)
         IF(ierr/=0)THEN
           WRITE(coil_ind,'(I6,2X,I6)')i,j
-          CALL oft_xml_abort('Error reading "npts" for coil '//coil_ind,'tw_load_coils',__FILE__)
+          CALL oft_xml_abort('Error reading "npts" for coil '//coil_ind,'tw_load_coils_xml',__FILE__)
         END IF
         coil_type=2
       ELSE
@@ -2490,11 +2826,11 @@ DO i=1,ncoils
           CALL xml_read_content(coil,pts_tmp,iostat=ierr)
           IF(ierr/=0)THEN
             WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_xml_abort('Error reading circular coil '//coil_ind,'tw_load_coils',__FILE__)
+            CALL oft_xml_abort('Error reading circular coil '//coil_ind,'tw_load_coils_xml',__FILE__)
           END IF
           IF(SIZE(pts_tmp,1)/=2)THEN
             WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_abort('Incorrect size of pts in RZ coil '//coil_ind,'tw_load_coils',__FILE__)
+            CALL oft_abort('Incorrect size of pts in RZ coil '//coil_ind,'tw_load_coils_xml',__FILE__)
           END IF
           IF(coil_tmp%coils(j)%npts==0)coil_tmp%coils(j)%npts=181
           ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
@@ -2508,15 +2844,15 @@ DO i=1,ncoils
           CALL xml_read_content(coil,coil_tmp%coils(j)%pts,iostat=ierr)
           IF(ierr/=0)THEN
             WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_xml_abort('Error reading coil '//coil_ind,'tw_load_coils',__FILE__)
+            CALL oft_xml_abort('Error reading coil '//coil_ind,'tw_load_coils_xml',__FILE__)
           END IF
           IF(SIZE(coil_tmp%coils(j)%pts,1)/=3)THEN
             WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_abort('Incorrect first dimension of coil points in coil '//coil_ind,'tw_load_coils',__FILE__)
+            CALL oft_abort('Incorrect first dimension of coil points in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
           END IF
           IF(SIZE(coil_tmp%coils(j)%pts,2)/=coil_tmp%coils(j)%npts)THEN
             WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_abort('Incorrect second dimension of coil points in coil '//coil_ind,'tw_load_coils',__FILE__)
+            CALL oft_abort('Incorrect second dimension of coil points in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
           END IF
       END SELECT
     END IF
@@ -2525,7 +2861,7 @@ DO i=1,ncoils
       CALL xml_read_attribute(coil,"scale",coil_tmp%scales(j),iostat=ierr)
       IF(ierr/=0)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
-        CALL oft_xml_abort('Error reading "scale" for coil '//coil_ind,'tw_load_coils',__FILE__)
+        CALL oft_xml_abort('Error reading "scale" for coil '//coil_ind,'tw_load_coils_xml',__FILE__)
       END IF
     END IF
     !---Get coil resistivity per unit length
@@ -2533,7 +2869,7 @@ DO i=1,ncoils
       CALL xml_read_attribute(coil,"res_per_len",coil_tmp%res_per_len(j),iostat=ierr)
       IF(ierr/=0)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
-        CALL oft_xml_abort('Error reading "res_per_len" for coil '//coil_ind,'tw_load_coils',__FILE__)
+        CALL oft_xml_abort('Error reading "res_per_len" for coil '//coil_ind,'tw_load_coils_xml',__FILE__)
       END IF
     END IF
     !---Get coil radius
@@ -2541,7 +2877,7 @@ DO i=1,ncoils
       CALL xml_read_attribute(coil,"radius",coil_tmp%radius(j),iostat=ierr)
       IF(ierr/=0)THEN
         WRITE(coil_ind,'(I6,2X,I6)')i,j
-        CALL oft_xml_abort('Error reading "radius" for coil '//coil_ind,'tw_load_coils',__FILE__)
+        CALL oft_xml_abort('Error reading "radius" for coil '//coil_ind,'tw_load_coils_xml',__FILE__)
       END IF
     END IF
   END DO
@@ -2549,7 +2885,7 @@ DO i=1,ncoils
 END DO
 IF(ASSOCIATED(coil_sets%nodes))DEALLOCATE(coil_sets%nodes)
 !---
-IF(.NOT.oft_debug_print(2))WRITE(*,'(2A,I6,A)')oft_indent,'Masked ',nmasked,' coils from sensors'
+IF(nmasked>0)WRITE(*,'(2A,I6,A)')oft_indent,'Masked ',nmasked,' coils from sensors'
 IF(oft_debug_print(1))THEN
   WRITE(*,*)
   WRITE(*,'(2A)')oft_indent,'Coils set definitions'
@@ -2563,7 +2899,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,*)
 END IF
 CALL oft_decrease_indent
-end subroutine tw_load_coils
+end subroutine tw_load_coils_xml
 !------------------------------------------------------------------------------
 !> Create a copy (by reference) of a coil set
 !------------------------------------------------------------------------------
@@ -2571,6 +2907,7 @@ SUBROUTINE tw_copy_coil(coil_in,coil_out)
 TYPE(tw_coil_set), INTENT(in) :: coil_in !< Source coil set
 TYPE(tw_coil_set), INTENT(inout) :: coil_out !< Copy of source
 ! coil_out%type=coil_in%type
+coil_out%name=coil_in%name
 coil_out%ncoils=coil_in%ncoils
 coil_out%Lself=coil_in%Lself
 coil_out%Rself=coil_in%Rself
@@ -2942,168 +3279,6 @@ IF(ierr==0)THEN
   ! WRITE(*,*)'  Sens mask = ',self%sens_mask
 END IF
 end subroutine tw_load_eta
-!------------------------------------------------------------------------------
-!> Load forcing mesh and fields for an MHD-style mode
-!------------------------------------------------------------------------------
-subroutine tw_load_mode(filename,self,driver)
-CHARACTER(LEN=*) :: filename !< Filename containing mode definition
-TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model of mode
-REAL(8), POINTER, INTENT(out) :: driver(:,:) !< Sin/Cos pair corresponding to mode
-!---
-INTEGER(4) :: i,j,k,l,face,io_unit,ierr,ndim
-INTEGER(4), ALLOCATABLE :: kfh_tmp(:),dim_sizes(:)
-REAL(8) :: rgop(3,3),norm_i(3),f(3),area_i
-WRITE(*,*)
-WRITE(*,'(2A)')oft_indent,'Loading mode forcing mesh:'
-WRITE(*,'(3A)')oft_indent,'  filename    = ',TRIM(filename)
-!---Save to file
-ALLOCATE(oft_trimesh::self%mesh)
-CALL self%mesh%setup(-1,.FALSE.)
-!
-CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/R',ndim,dim_sizes)
-self%mesh%np=dim_sizes(2)
-DEALLOCATE(dim_sizes)
-ALLOCATE(self%mesh%r(3,self%mesh%np))
-CALL hdf5_read(self%mesh%r,'tCurr_mode_model.h5','mesh/R')
-!
-CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/LC',ndim,dim_sizes)
-self%mesh%nc=dim_sizes(2)
-DEALLOCATE(dim_sizes)
-ALLOCATE(self%mesh%lc(3,self%mesh%nc))
-CALL hdf5_read(self%mesh%lc,'tCurr_mode_model.h5','mesh/LC')
-!
-self%nclosures=1
-ALLOCATE(self%closures(self%nclosures))
-CALL hdf5_read(self%closures(1),'tCurr_mode_model.h5','mesh/SIDESET0001')
-! OPEN(NEWUNIT=io_unit, FILE=TRIM(filename))
-! READ(io_unit,*)self%mesh%np
-! ALLOCATE(self%mesh%r(3,self%mesh%np))
-! DO i=1,self%mesh%np
-!   READ(io_unit,*)self%mesh%r(:,i)
-! END DO
-! self%nclosures=1
-! ALLOCATE(self%closures(self%nclosures))
-! READ(io_unit,*)self%closures(1)
-! !
-! READ(io_unit,*)self%mesh%nc
-! ALLOCATE(self%mesh%lc(3,self%mesh%nc),self%mesh%reg(self%mesh%nc))
-! self%mesh%reg=1
-! DO i=1,self%mesh%nc
-!   READ(io_unit,*)self%mesh%lc(:,i)
-! END DO
-CALL bmesh_local_init(self%mesh)
-!---
-self%nholes=2
-! READ(io_unit,*)self%nholes
-ALLOCATE(self%hmesh(self%nholes))
-CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/NODESET0001',ndim,dim_sizes)
-self%hmesh(1)%n=dim_sizes(1)
-DEALLOCATE(dim_sizes)
-ALLOCATE(self%hmesh(1)%lp(self%hmesh(1)%n))
-CALL hdf5_read(self%hmesh(1)%lp,'tCurr_mode_model.h5','mesh/SIDESET0001')
-CALL hdf5_field_get_sizes('tCurr_mode_model.h5','mesh/NODESET0002',ndim,dim_sizes)
-self%hmesh(2)%n=dim_sizes(1)
-DEALLOCATE(dim_sizes)
-ALLOCATE(self%hmesh(2)%lp(self%hmesh(2)%n))
-CALL hdf5_read(self%hmesh(2)%lp,'tCurr_mode_model.h5','mesh/SIDESET0002')
-ALLOCATE(self%kfh(self%mesh%nc+1))
-self%kfh=0
-DO i=1,self%nholes
-  ! READ(io_unit,*)self%hmesh(i)%n
-  ! ALLOCATE(self%hmesh(i)%lp(self%hmesh(i)%n))
-  ! DO j=1,self%hmesh(i)%n
-  !   READ(io_unit,*)self%hmesh(i)%lp(j)
-  ! END DO
-  CALL tw_setup_hole(self%mesh, self%hmesh(i))
-END DO
-!---Build cell list
-DO i=1,self%nholes
-  DO j=1,self%hmesh(i)%n
-    DO k=self%hmesh(i)%kpc(j),self%hmesh(i)%kpc(j+1)-1
-      face=ABS(self%hmesh(i)%lpc(k))
-      self%kfh(face)=self%kfh(face)+1
-    END DO
-  END DO
-END DO
-self%nfh=SUM(self%kfh)
-self%kfh(self%mesh%nc+1)=self%nfh+1
-do i=self%mesh%nc,1,-1 ! cumulative count
-  self%kfh(i) = self%kfh(i+1) - self%kfh(i)
-end do
-if(self%kfh(1)/=1)call oft_abort('Bad element to element count','tw_setup',__FILE__)
-ALLOCATE(self%lfh(2,self%nfh),kfh_tmp(self%mesh%nc+1))
-self%lfh=0
-kfh_tmp=0
-DO i=1,self%nholes
-  DO j=1,self%hmesh(i)%n
-    DO k=self%hmesh(i)%kpc(j),self%hmesh(i)%kpc(j+1)-1
-      face=ABS(self%hmesh(i)%lpc(k))
-      DO l=1,3
-        IF(self%mesh%lc(l,face)==self%hmesh(i)%lp(j))EXIT
-      END DO
-      self%lfh(:,self%kfh(face)+kfh_tmp(face))=[SIGN(i,self%hmesh(i)%lpc(k)),l]
-      kfh_tmp(face)=kfh_tmp(face)+1
-    END DO
-  END DO
-END DO
-DEALLOCATE(kfh_tmp)
-self%nelems = self%mesh%np + self%nholes - 1
-!
-! READ(io_unit,*)
-ALLOCATE(driver(self%nelems,2))
-CALL hdf5_read(driver,'tCurr_mode_model.h5','thincurr/driver')
-! DO i=1,self%nelems
-!   READ(io_unit,*)driver(i,:)
-! END DO
-! CLOSE(io_unit)
-WRITE(*,'(2A,I8)')oft_indent,'  # of points = ',self%mesh%np
-WRITE(*,'(2A,I8)')oft_indent,'  # of edges  = ',self%mesh%ne
-WRITE(*,'(2A,I8)')oft_indent,'  # of faces  = ',self%mesh%nc
-WRITE(*,'(2A,I8)')oft_indent,'  # of holes  = ',self%nholes
-!
-ALLOCATE(self%pmap(self%mesh%np))
-self%pmap=0
-self%np_active=0
-DO i=1,self%mesh%np
-  IF(self%mesh%bp(i))CYCLE
-  self%np_active=self%np_active+1
-  self%pmap(i)=self%np_active
-END DO
-! Mark closure vertex for removal
-DO i=1,self%nclosures
-  self%pmap(self%closures(i))=-i
-END DO
-self%nclosures=-self%nclosures
-! Reindex, removing closure vertex
-self%np_active=0
-DO i=1,self%mesh%np
-  IF(self%pmap(i)>0)THEN
-    self%np_active=self%np_active+1
-    self%pmap(i)=self%np_active
-  ELSE
-    self%pmap(i)=0
-  END IF
-END DO
-!
-ALLOCATE(self%kpmap_inv(self%np_active+1),self%lpmap_inv(self%np_active))
-self%kpmap_inv=[(i,i=1,self%np_active+1)]
-DO i=1,self%mesh%np
-  IF(self%pmap(i)/=0)self%lpmap_inv(self%pmap(i))=i
-END DO
-self%nelems = self%np_active + self%nholes
-!---Build basis array
-ALLOCATE(self%qbasis(3,3,self%mesh%nc))
-f=1.d0/3.d0
-DO i=1,self%mesh%nc
-  CALL self%mesh%jacobian(i,f,rgop,area_i)
-  CALL self%mesh%norm(i,f,norm_i)
-  DO j=1,3
-    self%qbasis(:,j,i)=cross_product(rgop(:,j),norm_i)
-  END DO
-END DO
-ALLOCATE(self%sens_mask(1))
-self%sens_mask=.FALSE.
-end subroutine tw_load_mode
 !---------------------------------------------------------------------------------
 !> Save solution vector for thin-wall model for plotting in VisIt
 !---------------------------------------------------------------------------------

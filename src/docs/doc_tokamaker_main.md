@@ -47,10 +47,14 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 ### Dipole Equilibria
  - \subpage doc_tMaker_dipole_ex2
 
+### Mirror Equilibria
+ - \subpage doc_tMaker_wham_ex2
+
 ### Other workflows/examples
  - \subpage doc_tMaker_ITER_ex5
  - \subpage doc_tMaker_HBT_ex3
  - \subpage doc_tMaker_CUTE_ex3
+ - \subpage doc_tMaker_ARC_ex3
 
 ### Deprecated workflows
  - \subpage doc_tMaker_ITER_ex4-legacy
@@ -84,5 +88,6 @@ The following examples illustrate usage of \ref OpenFUSIONToolkit.TokaMaker.mesh
  - \subpage doc_tMaker_MANTA_ex1
  - \subpage doc_tMaker_LTX_ex1
  - \subpage doc_tMaker_dipole_ex1
+ - \subpage doc_tMaker_wham_ex1
  - \subpage doc_tMaker_ARC_ex1
  - \subpage doc_tMaker_SPARC_ex1
