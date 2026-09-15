@@ -1,3 +1,10 @@
+	
+ #------------------------------------------------------------------------------
+ # Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+ #
+ # SPDX-License-Identifier: LGPL-3.0-only
+ #------------------------------------------------------------------------------
+
 '''! Functions and helpers to run varyped equilibrium scan on TokaMaker instance 
 
 Runs equilibrium scan over range of scaling values using profiles from 
@@ -7,6 +14,7 @@ are saved to new g-files and p-files generated with TokaMaker.
 
 @authors Kevin Clavijo
 @date June 2026
+@ingroup doxy_oft_python
 '''
 
 from contextlib import contextmanager
@@ -18,7 +26,7 @@ import pprint
 
 import numpy as np
 
-from scipy.constants import constants
+from scipy import constants
 from scipy.integrate import trapezoid
 from scipy.optimize import least_squares
 
@@ -1485,7 +1493,7 @@ def _solve_point(
                 energy_geometry_factor=energy_geometry_factor,
                 pressure_amplitude=feedback_amplitude,
             )
-        except _NonConvergenceError as error:
+        except _NonConvergenceError:
             t_object.replace_eq(source_eq=feedback_eq)
             break
 
