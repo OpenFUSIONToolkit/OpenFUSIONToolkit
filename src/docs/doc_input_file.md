@@ -43,7 +43,7 @@ Physics modules with settings groups:
 
 This group contains options which are common to the OFT hierarchical mesh environment. The settings control the type of mesh, and resulting
 CAD respresentation, used as well as the number of multi-grid levels to be constructed and refinement parameters. Additional mesh settings specific
-to a given CAD representation are specified as part of their documentation: \ref doc_t3d, \ref doc_cubit
+to a given CAD representation are specified as part of their documentation: \ref doc_mesh_native, \ref doc_t3d
 
 The number of mesh levels can be set using the `nlevels` variable. This variable sets the total number of grid levels including the transfer
 level which is created by domain decomposition. The variable `nbase` is used in conjunction with this setting to create a certain number of grid
