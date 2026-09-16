@@ -216,7 +216,7 @@ tokamaker_set_isoflux = ctypes_subroutine(oftpy_lib.tokamaker_set_isoflux,
 
 # tokamaker_set_flux(tMaker_ptr,locations,targets,weights,ntargets,grad_wt_lim,error_str)
 tokamaker_set_flux = ctypes_subroutine(oftpy_lib.tokamaker_set_flux,
-    [c_void_p, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_int, c_double, c_char_p])
+    [c_void_p, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_int, c_double, c_int, c_char_p])
 
 # tokamaker_set_mirnov(tMaker_ptr,locations,norms,targets,weights,ntargets,error_str)
 tokamaker_set_mirnov = ctypes_subroutine(oftpy_lib.tokamaker_set_mirnov,
@@ -224,11 +224,11 @@ tokamaker_set_mirnov = ctypes_subroutine(oftpy_lib.tokamaker_set_mirnov,
 
 # tokamaker_set_saddles(tMaker_ptr,targets,weights,ntargets,error_str)
 tokamaker_set_saddles = ctypes_subroutine(oftpy_lib.tokamaker_set_saddles,
-    [c_void_p, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), c_int, c_char_p])
+    [c_void_p, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), c_int, c_int, c_char_p])
 
 # tokamaker_set_coil_currents(tMaker_ptr,currents,error_str)
 tokamaker_set_coil_currents = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_currents,
-    [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
+    [c_void_p, ctypes_numpy_array(numpy.float64,1), c_int, c_char_p])
 
 # tokamaker_set_coil_regmat(tMaker_ptr,nregularize,coil_reg_mat,coil_reg_targets,coil_reg_weights,error_str)
 tokamaker_set_coil_regmat = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_regmat,

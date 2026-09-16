@@ -240,7 +240,7 @@ TYPE :: gs_factory
   TYPE(xdmf_plot_file) :: xdmf !< XDMF plotting object
   TYPE(oft_lusolver) :: lu_solver !< \f$ \frac{1}{R} \Delta^* \f$ inverse solver
   TYPE(oft_lusolver) :: lu_solver_dt !< LHS inverse solver with time dependence
-  TYPE(oft_gs_solver), POINTER, DIMENSION(:) :: gs_solvers => NULL() !< GS solver object
+  TYPE(oft_gs_solver), ALLOCATABLE :: gs_solvers(:) !< GS solvers
   TYPE(axi_coil_set), POINTER, DIMENSION(:) :: coils_ext => NULL() !< External coil definitions
   TYPE(coil_region), POINTER, DIMENSION(:) :: coil_regions => NULL() !< Meshed coil regions
   TYPE(oft_1d_real), POINTER, DIMENSION(:) :: dist_coil => NULL() !< Current distribution for each coil (if defined)
@@ -570,7 +570,7 @@ ALLOCATE(self%zerob_bc)
 self%zerob_bc%ML_lag_rep=>self%ML_fe_rep
 ALLOCATE(self%zerogrnd_bc)
 self%zerogrnd_bc%ML_lag_rep=>self%ML_fe_rep
-ALLOCATE(self%gs_solvers(self%n_eq))
+! ALLOCATE(self%gs_solvers(self%n_eq))
 end subroutine gs_setup
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -2132,15 +2132,18 @@ CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_fit_isoflux
 !------------------------------------------------------------------------------
-!> Compute Grad-Shafranov solution for current flux function definitions and targets
+!> Setup GS Solver object
 !------------------------------------------------------------------------------
 subroutine create_gs_solver(self, factory, equil)
-class(oft_gs_solver), intent(inout) :: self !< G-S factory/device object
+class(oft_gs_solver), intent(inout) :: self !< G-S solver object
 class(gs_factory), intent(inout) :: factory !< G-S factory/device object
-class(gs_equil), intent(inout) :: equil !< G-S factory/device object
+class(gs_equil), intent(inout) :: equil !< G-S eq object
 integer(i4) :: j
 self%nl_its=0
 equil%skip_targets=.FALSE.
+
+print *, 'Running create_gs_solver'
+
 IF(TRIM(factory%lu_solver%package)=='none')THEN
   CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 ELSE
@@ -2277,6 +2280,7 @@ IF(((equil%R0_target>0.d0).OR.(equil%Z0_target>-1.d98)).AND.ALL(factory%target_w
   IF(equil%saddle_ntargets>1)equil%saddle_targets(:,1:equil%saddle_ntargets-1)=self%saddle_save
   equil%saddle_targets(3,equil%saddle_ntargets)=factory%target_weights(3)
 END IF
+! IF(.NOT.ASSOCIATED(self%psip))CALL equil%psi%new(psip)
 end subroutine create_gs_solver
 
 subroutine destroy_gs_solver(self, factory, equil)
@@ -2324,9 +2328,9 @@ subroutine gs_step(self,factory,equil,i,converged,ierr)
 class(oft_gs_solver), intent(inout) :: self !< G-S solver object
 class(gs_factory), intent(inout) :: factory!< G-S factory/device object
 class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
-integer(i4), optional, intent(in) :: i !< Loop iteration
-integer(i4), optional, intent(out) :: ierr !< Error flag
+integer(i4), intent(in) :: i !< Loop iteration
 logical, optional, intent(out) :: converged
+integer(i4), optional, intent(out) :: ierr !< Error flag
 integer(i4) :: j
 logical :: fail_test
 logical :: pm_save
@@ -2334,12 +2338,15 @@ integer(i4) :: ierr_loc, error_flag
 ierr = 0
 ierr_loc = 0
 error_flag = 0
+
 !---Ramp R0 target
 self%R0_tmp=(i-1)*(equil%R0_target-self%R0_in)/REAL(factory%nR0_ramp,8) + self%R0_in
 self%Z0_tmp=(i-1)*(equil%Z0_target-self%Z0_in)/REAL(factory%nR0_ramp,8) + self%Z0_in
 IF(i>factory%nR0_ramp)self%R0_tmp=equil%R0_target
 IF(i>factory%nR0_ramp)self%Z0_tmp=equil%Z0_target
 !---
+print *, associated(self%psip)
+print *, associated(equil%psi)
 CALL self%psip%add(0.d0,1.d0,equil%psi)
 
 !---Compute toroidal flux contribution
@@ -2768,12 +2775,6 @@ DO i=1,self%maxits
 END DO
 CALL self%gs_solvers(1)%delete(self, equil)
 end subroutine gs_solve
-
-subroutine gs_multistep(self)
-class(gs_factory), intent(inout) :: self !< G-S factory/device object
-
-
-end subroutine gs_multistep
 !------------------------------------------------------------------------------
 !> Compute solution to linearized Grad-Shafranov without updating \f$ \psi \f$ for RHS
 !------------------------------------------------------------------------------

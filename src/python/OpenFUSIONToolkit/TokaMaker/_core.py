@@ -860,9 +860,9 @@ class TokaMaker():
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
         if return_its:
-            return self.copy_eq(), nl_its.value
+            return self.copy_eq(eq_idx=eq_idx), nl_its.value
         else:
-            return self.copy_eq()
+            return self.copy_eq(eq_idx=eq_idx)
 
     def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
@@ -1020,7 +1020,7 @@ class TokaMaker():
         weights = weights*(2.0*numpy.pi) if weights is not None else None
         self.set_psi_constraints(locations,targets/(2.0*numpy.pi),weights)
 
-    def set_psi_constraints(self,locations,targets,weights=None):
+    def set_psi_constraints(self,locations,targets,weights=None,eq_idx=0):
         r'''! Set explicit flux constraint points \f$ \psi(x_i) \f$ [Wb/rad]
 
         @param locations List of points defining constraints [:,2]
@@ -1029,7 +1029,7 @@ class TokaMaker():
         '''
         if locations is None:
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_flux(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,)),numpy.zeros((1,)),0,-1.0,error_string)
+            tokamaker_set_flux(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,)),numpy.zeros((1,)),0,-1.0,eq_idx+1,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._tMaker_equil._psi_constraints = None
@@ -1044,7 +1044,7 @@ class TokaMaker():
             targets = numpy.ascontiguousarray(targets, dtype=numpy.float64)
             weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_flux(self._tMaker_ptr,locations,targets,weights,locations.shape[0],-1.0,error_string)
+            tokamaker_set_flux(self._tMaker_ptr,locations,targets,weights,locations.shape[0],-1.0,eq_idx+1,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._tMaker_equil._psi_constraints = (locations.copy(), targets.copy())
@@ -1064,7 +1064,7 @@ class TokaMaker():
         )
         self.set_saddle_constraints(saddles,weights)
 
-    def set_saddle_constraints(self,saddles,weights=None):
+    def set_saddle_constraints(self,saddles,weights=None, eq_idx=0):
         '''! Set saddle constraint points (poloidal field should vanish at each point)
 
         @param saddles List of points defining constraints [:,2]
@@ -1072,7 +1072,7 @@ class TokaMaker():
         '''
         if saddles is None:
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_saddles(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,)),0,error_string)
+            tokamaker_set_saddles(self._tMaker_ptr,numpy.zeros((1,1)),numpy.zeros((1,)),0,eq_idx+1,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._tMaker_equil._saddle_targets = None
@@ -1084,7 +1084,7 @@ class TokaMaker():
             saddles = numpy.ascontiguousarray(saddles, dtype=numpy.float64)
             weights = numpy.ascontiguousarray(weights, dtype=numpy.float64)
             error_string = self._oft_env.get_c_errorbuff()
-            tokamaker_set_saddles(self._tMaker_ptr,saddles,weights,saddles.shape[0],error_string)
+            tokamaker_set_saddles(self._tMaker_ptr,saddles,weights,saddles.shape[0],eq_idx+1,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
             self._tMaker_equil._saddle_targets = saddles.copy()
@@ -1464,7 +1464,7 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.get_xpoints()
 
-    def set_coil_currents(self, currents=None):
+    def set_coil_currents(self, currents=None, eq_idx=0):
         '''! Set coil currents
 
         @param currents Current in each coil [A]
@@ -1473,7 +1473,7 @@ class TokaMaker():
             currents = {}
         current_array = numpy.ascontiguousarray(self.coil_dict2vec(currents), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_coil_currents(self._tMaker_ptr,current_array,error_string)
+        tokamaker_set_coil_currents(self._tMaker_ptr,current_array,eq_idx+1,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 
