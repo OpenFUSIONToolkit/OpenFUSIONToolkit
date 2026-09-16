@@ -3,7 +3,7 @@ import sys
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
-from oft_testing import run_OFT
+from oft_testing import run_OFT, run_command
 
 # Basic template for input file
 oft_in_template = """
@@ -36,16 +36,31 @@ oft_in_template = """
 # Common setup function and process handling
 def cubit_setup(nbase, nlevels, prefix, grid_order=1,
                 reflect='F', per_ns=-1, zstretch=1., test_2d='F'):
+    #
+    convert_cmd = ["OFT_convert_cubit.py", "--in_file={0}.g".format(prefix)]
     nproc = 1
     if nbase != nlevels:
         nproc = 2
     ref_periodic = 'F'
     if per_ns > 0:
         ref_periodic = 'T'
+        convert_cmd += ["--periodic_nodeset={0}".format(per_ns)]
     #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(nbase, nlevels, prefix, grid_order, reflect, zstretch, test_2d, ref_periodic))
+    # Run mesh conversion script
+    outs, errs, errcode = run_command(" ".join(convert_cmd))
+    if errcode != 0:
+        print("FAILED: OFT_convert_cubit.py exited with non-zero error code!")
+        print("========== STD OUTPUT ==========")
+        print(outs.decode())
+        print("========== ERR OUTPUT ==========")
+        print(errs.decode())
+        print("ERRCODE = {0}".format(errcode))
+        print("========== END OUTPUT ==========")
+        return False
+    #
     return run_OFT("./test_cubit", nproc, 60)
 
 # Validate results against expected values
