@@ -2141,9 +2141,6 @@ class(gs_equil), intent(inout) :: equil !< G-S eq object
 integer(i4) :: j
 self%nl_its=0
 equil%skip_targets=.FALSE.
-
-print *, 'Running create_gs_solver'
-
 IF(TRIM(factory%lu_solver%package)=='none')THEN
   CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 ELSE
@@ -2345,8 +2342,6 @@ self%Z0_tmp=(i-1)*(equil%Z0_target-self%Z0_in)/REAL(factory%nR0_ramp,8) + self%Z
 IF(i>factory%nR0_ramp)self%R0_tmp=equil%R0_target
 IF(i>factory%nR0_ramp)self%Z0_tmp=equil%Z0_target
 !---
-print *, associated(self%psip)
-print *, associated(equil%psi)
 CALL self%psip%add(0.d0,1.d0,equil%psi)
 
 !---Compute toroidal flux contribution
