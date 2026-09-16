@@ -42,7 +42,6 @@ class Openfusiontoolkit(CMakePackage):
     variant("mpi", default=False, description="Whether to enable MPI")
     variant("openmp", default=True, description="Whether to build with OpenMP support")
     variant("arpack", default=True, description="Whether to build with ARPACK support")
-    variant("netcdf", default=False, description="Whether to build with NetCDF support")
     variant("umfpack", default=False, description="Whether to build with UMFPACK support through SuiteSparse")
     variant("mumps", default=False, description="Whether to build with MUMPS support")
     variant("superlu", default=False, description="Whether to build with SuperLU support")
@@ -86,8 +85,6 @@ class Openfusiontoolkit(CMakePackage):
         depends_on("mumps~complex~mpi", when="+mumps")
 
     # Other libraries
-    depends_on("netcdf-c~mpi", when="+netcdf")
-    depends_on("netcdf-fortran", when="+netcdf")
     with when("+mpi"):
         depends_on("arpack-ng+mpi", when="+arpack")
     with when("~mpi"):
@@ -104,8 +101,6 @@ class Openfusiontoolkit(CMakePackage):
         ]
         if '+hl'  in self.spec["hdf5"]:
             args.append(self.define("OFT_HDF5_HL", True))
-        if "+netcdf" in self.spec:
-            args.append(self.define("OFT_NETCDF_ROOT", "{0}".format(self.spec["netcdf"].prefix)))
         if "+arpack" in self.spec:
             args.append(self.define("OFT_ARPACK_ROOT", "{0}".format(self.spec["arpack-ng"].prefix)))
         if "+umfpack" in self.spec:

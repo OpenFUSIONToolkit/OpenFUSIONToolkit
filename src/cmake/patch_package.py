@@ -82,7 +82,6 @@ for i in range(3):
         'libgomp.','libgfortran.','libquadmath.',
         'libmkl','libifport','libifcoremt','libimf','libsvml','libintlc','libirng','libiomp5',
         'libhdf5.','libhdf5_fortran.','libhdf5_hl.', # HDF5 libraries
-        'libnetcdf.','libnetcdff.' # NetCDF libraries
     ]
     keep_keys = []
     for key in full_prequisites:
