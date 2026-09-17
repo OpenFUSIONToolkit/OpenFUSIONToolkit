@@ -245,6 +245,21 @@ def test_stretch_base(top_lev):
     area_cubit =  pytest.approx(12.26295, abs=1.E-4)
     assert cubit_setup(1,top_lev,'ref_tet4_test',zstretch=2.)
     assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
+@pytest.mark.parametrize("top_lev", (2, 3))
+def test_stretch_1ref(top_lev):
+    volume_cubit = pytest.approx(3.111037, abs=1.E-4)
+    area_cubit = pytest.approx(12.489947, abs=1.E-4)
+    minlev = 4 - top_lev
+    assert cubit_setup(minlev,top_lev,'ref_tet10_test',zstretch=2.)
+    assert check_result(volume_cubit, area_cubit)
+@pytest.mark.coverage
+@pytest.mark.parametrize("top_lev", (1, 2))
+def test_stretch_quad(top_lev):
+    volume_cubit = pytest.approx(3.14123, abs=1.E-4)
+    area_cubit = pytest.approx(12.56531, abs=1.E-4)
+    assert cubit_setup(1,top_lev,'ref_tet10_test',grid_order=2,zstretch=2.)
+    assert check_result(volume_cubit, area_cubit)
 
 #============================================================================
 # Test runners for surface meshes

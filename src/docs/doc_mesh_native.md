@@ -12,15 +12,15 @@ scripts \ref doc_mesh_native_conv "described below".
 
 In order to load a native mesh file `cad_type = 0` must be specified in the `mesh_options` group
 (see \ref doc_input_mesh). The mesh filename and some native-specific options are specified at runtime
-in the `cubit_options` group. The options available in this group are listed below.
+in the `native_mesh_options` group. The options available in this group are listed below.
 
 **Option group:** `native_mesh_options`
 |  Option  |  Description  | Type [dim] |
 |----|----|----|
-filename,reflect,ref_periodic
 | `filename=""`  | Name of mesh file | str(OFT_PATH_SLEN) |
 | `reflect=F`    | Reflect mesh about xy-plane? | bool |
 | `ref_periodic=F` | Make mesh periodic in z-direction following reflection? | int |
+| `zstretch=1.`  | Scale for z-direction | float |
 
 \section doc_mesh_native_conv Converting Meshes
 

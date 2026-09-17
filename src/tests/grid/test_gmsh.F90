@@ -21,22 +21,46 @@ USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_native, ONLY: mesh_native_id
 USE multigrid, ONLY: multigrid_mesh
-USE multigrid_build, ONLY: multigrid_construct
+USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
 IMPLICIT NONE
-INTEGER(i4) :: io_unit
+INTEGER(i4) :: io_unit,ierr
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
+LOGICAL :: test_surf = .FALSE.
+NAMELIST/gmsh_test_options/test_surf
 !---Initialize enviroment
 CALL oft_init
-!---Setup grid
-CALL multigrid_construct(mg_mesh)
-IF(mg_mesh%mesh%cad_type/=mesh_native_id)CALL oft_abort('Wrong mesh type.','main',__FILE__)
-CALL plot_file%setup("Test")
-CALL mg_mesh%mesh%setup_io(plot_file,1)
-IF(oft_env%head_proc)OPEN(NEWUNIT=io_unit,FILE='gmsh.results')
-CALL compute_volume
-CALL compute_area
-IF(oft_env%head_proc)CLOSE(io_unit)
+!---Read in options
+OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
+READ(io_unit,gmsh_test_options,IOSTAT=ierr)
+CLOSE(io_unit)
+!---Check inputs
+IF(ierr<0)CALL oft_abort('No "gmsh_test_options" found in input file.', &
+  'test_gmsh',__FILE__)
+IF(ierr>0)CALL oft_abort('Error parsing "gmsh_test_options" in input file.', &
+  'test_gmsh',__FILE__)
+IF(test_surf)THEN
+  CALL multigrid_construct_surf(mg_mesh)
+  IF(mg_mesh%smesh%cad_type/=mesh_native_id)CALL oft_abort('Wrong mesh type.','main',__FILE__)
+  CALL plot_file%setup("Test")
+  CALL mg_mesh%smesh%setup_io(plot_file,1)
+  IF(oft_env%head_proc)THEN
+    OPEN(NEWUNIT=io_unit,FILE='gmsh.results')
+    WRITE(io_unit,*)0.0_r8
+  END IF
+  CALL compute_area
+  IF(oft_env%head_proc)CLOSE(io_unit)
+ELSE
+  !---Setup grid
+  CALL multigrid_construct(mg_mesh)
+  IF(mg_mesh%mesh%cad_type/=mesh_native_id)CALL oft_abort('Wrong mesh type.','main',__FILE__)
+  CALL plot_file%setup("Test")
+  CALL mg_mesh%mesh%setup_io(plot_file,1)
+  IF(oft_env%head_proc)OPEN(NEWUNIT=io_unit,FILE='gmsh.results')
+  CALL compute_volume
+  CALL compute_area
+  IF(oft_env%head_proc)CLOSE(io_unit)
+END IF
 !---Finalize enviroment
 CALL oft_finalize
 CONTAINS

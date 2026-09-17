@@ -1,7 +1,5 @@
 set( UTIL_OBJS
   bezier_cad.F90
-  c_nurbs.cxx
-  nurbs_cad.F90
   metis_bridge.c
   quadrature.F90
   lagrange_poly.F90

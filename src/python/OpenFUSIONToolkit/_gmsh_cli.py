@@ -21,7 +21,16 @@ ed_map_tri = np.array([
     [2,0]
 ])
 
-ed_map_tet = np.array([
+ed_map_tet_old = np.array([
+    [0,1],
+    [1,2],
+    [0,2],
+    [0,3],
+    [1,3],
+    [2,3]
+])
+
+ed_map_tet_new = np.array([
     [0,1],
     [1,2],
     [0,2],
@@ -134,8 +143,10 @@ def read_mesh(filename):
         mesh_format_line = fid.readline()
         if mesh_format_line.strip() == '$MeshFormat':
             r, lc, reg, ncp_lin = read_new(fid)
+            ed_map_tet = ed_map_tet_new
         else:
             r, lc, reg, ncp_lin = read_legacy(fid)
+            ed_map_tet = ed_map_tet_old
     #
     mesh_np = r.shape[0]
     mesh_nc = lc.shape[0]

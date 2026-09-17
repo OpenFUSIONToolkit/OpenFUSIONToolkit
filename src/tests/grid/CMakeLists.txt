@@ -46,5 +46,6 @@ if( OFT_BUILD_TESTS )
   # GMSH tests
   oft_add_test( test_gmsh.F90 )
   configure_file( test_gmsh.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  configure_file( cyl_gmsh.msh ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( cyl_gmsh_2D.msh ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( cyl_gmsh_3D.msh ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 endif()

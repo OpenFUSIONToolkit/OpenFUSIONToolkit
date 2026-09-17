@@ -30,9 +30,6 @@ INTEGER(i4) :: io_unit
 INTEGER(i4) :: ierr
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
-#if !defined(HAVE_NCDF)
-CHARACTER(LEN=OFT_PATH_SLEN) :: inpname = 'none'
-#endif
 LOGICAL :: test_surf = .FALSE.
 NAMELIST/cubit_test_options/test_surf
 !---Initialize enviroment
