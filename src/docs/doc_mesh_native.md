@@ -44,6 +44,9 @@ format with the same name, but `*.h5` extension, in the current working director
 
 \note Currently only Tet/Tri meshes are supported in both linear and quadratic variants.
 
+\note Both the version 1 (`$NOD`/`$ELM`) and version 2 (`$Nodes`/`$Elements`) MSH formats are supported, as is
+the MEDIT format written by Gmsh's `-format mesh` option.
+
 \verbatim
 ~$ python /path/to/oft/bin/OFT_convert_gmsh.py --in_file=/path/to/gmsh_mesh.msh
 \endverbatim
