@@ -67,6 +67,8 @@ def read_node_block(fid, end_tag):
     r = np.zeros((mesh_np,mesh_dim))
     for i in range(mesh_np):
         line_split = fid.readline().split()
+        if int(line_split[0]) != i+1:
+            raise ValueError('Unexpected point index {0} (expected {1}), contiguous numbering is required'.format(int(line_split[0]),i+1))
         r[i,:] = [float(val) for val in line_split[1:mesh_dim+1]]
     check_tag_line(fid, end_tag)
     return r
