@@ -31,7 +31,13 @@ AdvancedWorkflows/
 │   └── README.md
 │
 ├── Isoflux Controller/
-    ├── NSTXU_shape_control_simulator.ipynb
-    ├── NSTXU_shape_generator.ipynb
+│   ├── NSTXU_shape_control_simulator.ipynb
+│   ├── NSTXU_shape_generator.ipynb
+│   └── README.md
+│
+├── NT_Ballooning_GPEC/
+    ├── DIIID_NT_ballooning_GPEC_ex.ipynb
+    ├── compute_ballooning_boundary.jl
+    ├── requirements_NT_Ballooning_GPEC.txt
     └── README.md
 

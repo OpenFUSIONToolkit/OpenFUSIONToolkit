@@ -32,15 +32,6 @@ use oft_mesh_native, only: native_load_vmesh, native_load_smesh, mesh_native_id,
 use oft_mesh_t3d, only: mesh_t3d_load, mesh_t3d_cadsync, mesh_t3d_cadlink, &
   mesh_t3d_add_quad, mesh_t3d_reffix, mesh_t3d_add_quad, &
   mesh_t3d_set_periodic, smesh_t3d_load, mesh_t3d_id
-#ifdef HAVE_NCDF
-use oft_mesh_cubit, only: mesh_cubit_load, mesh_cubit_reffix, mesh_cubit_cadlink, &
-  mesh_cubit_add_quad, mesh_cubit_hobase, mesh_cubit_set_periodic, &
-  mesh_cubit_id, smesh_cubit_load, cubit_finalize_setup
-#else
-use oft_mesh_cubit, only: mesh_cubit_id
-#endif
-use oft_mesh_gmsh, only: mesh_gmsh_load, mesh_gmsh_reffix, mesh_gmsh_cadlink, &
-  mesh_gmsh_add_quad, mesh_gmsh_id, gmsh_finalize_setup
 use oft_mesh_sphere, only: mesh_sphere_load, mesh_sphere_reffix, mesh_sphere_cadlink, &
   mesh_sphere_add_quad, smesh_circle_load, smesh_circle_cadlink, smesh_circle_reffix, &
   smesh_circle_add_quad, mesh_sphere_id
@@ -83,20 +74,6 @@ select case(cad_type)
     CALL mesh_t3d_cadsync(mg_mesh)
     CALL mesh_t3d_cadlink(mg_mesh%mesh)
     CALL mesh_t3d_set_periodic(mg_mesh%mesh)
-  case(mesh_cubit_id) ! Exodus Mesh
-#ifdef HAVE_NCDF
-    CALL mesh_cubit_load(mg_mesh)
-    CALL mesh_global_init(mg_mesh%mesh)
-    CALL mesh_cubit_cadlink(mg_mesh%mesh)
-    CALL mesh_cubit_hobase(mg_mesh%mesh)
-    CALL mesh_cubit_set_periodic(mg_mesh%mesh)
-#else
-    CALL oft_abort('CUBIT interface requires NETCDF','multigrid_load',__FILE__)
-#endif
-  case(mesh_gmsh_id) ! GMSH Mesh
-    CALL mesh_gmsh_load(mg_mesh)
-    CALL mesh_global_init(mg_mesh%mesh)
-    CALL mesh_gmsh_cadlink(mg_mesh%mesh)
   case(mesh_sphere_id) ! Sphere Test Mesh
     CALL mesh_sphere_load(mg_mesh)
     CALL mesh_global_init(mg_mesh%mesh)
@@ -135,12 +112,6 @@ select case(mesh%cad_type)
     ! Do nothing
   case(mesh_t3d_id)
     call mesh_t3d_reffix(mg_mesh)
-  case(mesh_cubit_id)
-#ifdef HAVE_NCDF
-    call mesh_cubit_reffix(mg_mesh)
-#endif
-  case(mesh_gmsh_id)
-    call mesh_gmsh_reffix(mg_mesh)
   case(mesh_sphere_id)
     call mesh_sphere_reffix(mg_mesh)
   case(mesh_cube_id)
@@ -204,12 +175,6 @@ select case(mesh%cad_type)
     ! Do nothing CALL mesh_cube_add_quad
   case(mesh_t3d_id)
     call mesh_t3d_add_quad(mg_mesh)
-  case(mesh_cubit_id)
-#ifdef HAVE_NCDF
-    call mesh_cubit_add_quad(mg_mesh)
-#endif
-  case(mesh_gmsh_id)
-    call mesh_gmsh_add_quad(mg_mesh)
   case(mesh_sphere_id)
     call mesh_sphere_add_quad(mg_mesh%mesh)
   case(mesh_cube_id)
@@ -582,14 +547,6 @@ CALL multigrid_level(mg_mesh,nlevels)
 select case(mg_mesh%mesh%cad_type)
 case(mesh_native_id)
   CALL native_finalize_setup
-case(mesh_cubit_id)
-#ifdef HAVE_NCDF
-  CALL cubit_finalize_setup
-#else
-    CALL oft_abort('CUBIT interface requires NETCDF','multigrid_construct',__FILE__)
-#endif
-case(mesh_gmsh_id)
-  CALL gmsh_finalize_setup
 end select
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP
@@ -819,20 +776,6 @@ select case(cad_type)
   !   CALL mesh_t3d_cadsync
   !   CALL mesh_t3d_cadlink
   !   CALL mesh_t3d_set_periodic
-  case(mesh_cubit_id) ! Exodus Mesh
-#ifdef HAVE_NCDF
-    CALL smesh_cubit_load(mg_mesh)
-    CALL smesh_global_init(mg_mesh%smesh)
-    ! CALL mesh_cubit_cadlink
-    CALL mesh_cubit_hobase(mg_mesh%smesh)
-    ! CALL mesh_cubit_set_periodic
-#else
-    CALL oft_abort('CUBIT interface requires NETCDF','multigrid_load_surf',__FILE__)
-#endif
-  ! case(mesh_gmsh_id) ! GMSH Mesh
-  !   CALL mesh_gmsh_load
-  !   CALL mesh_global_init
-  !   CALL mesh_gmsh_cadlink
   case(mesh_sphere_id) ! Sphere Test Mesh
     CALL smesh_circle_load(mg_mesh)
     CALL smesh_global_init(mg_mesh%smesh)
@@ -868,12 +811,6 @@ select case(mg_mesh%smesh%cad_type)
     ! Do nothing
   case(mesh_t3d_id)
     ! call mesh_t3d_reffix
-  case(mesh_cubit_id)
-#ifdef HAVE_NCDF
-    ! call mesh_cubit_reffix
-#endif
-  case(mesh_gmsh_id)
-    ! call mesh_gmsh_reffix
   case(mesh_sphere_id)
     call smesh_circle_reffix(mg_mesh)
   case(mesh_cube_id)
@@ -919,12 +856,6 @@ select case(smesh%cad_type)
     ! Do nothing
   case(mesh_t3d_id)
     ! call smesh_t3d_add_quad
-  case(mesh_cubit_id)
-#ifdef HAVE_NCDF
-    ! call smesh_cubit_add_quad
-#endif
-  case(mesh_gmsh_id)
-    ! call smesh_gmsh_add_quad
   case(mesh_sphere_id)
     call smesh_circle_add_quad(smesh)
   case(mesh_cube_id)
@@ -1056,14 +987,6 @@ CALL multigrid_level(mg_mesh,nlevels)
 select case(mg_mesh%smesh%cad_type)
 case(mesh_native_id)
   CALL native_finalize_setup
-case(mesh_cubit_id)
-#ifdef HAVE_NCDF
-  CALL cubit_finalize_setup
-#else
-    CALL oft_abort('CUBIT interface requires NETCDF','multigrid_construct_surf',__FILE__)
-#endif
-case(mesh_gmsh_id)
-  CALL gmsh_finalize_setup
 end select
 IF(oft_env%head_proc)WRITE(*,*)
 DEBUG_STACK_POP

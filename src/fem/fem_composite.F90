@@ -304,20 +304,22 @@ END DO
 NULLIFY(lge)
 DEBUG_STACK_POP
 end subroutine fem_vec_load
+
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Generate graph structure for composite FE representation 
 !------------------------------------------------------------------------------
-subroutine fem_mat_create(self,new,mask)
+subroutine fem_graph_create(self, graphs, known_graphs, nknown_graphs, mask)
 CLASS(oft_fem_comp_type), INTENT(inout) :: self
-CLASS(oft_matrix), POINTER, INTENT(out) :: new
+TYPE(oft_graph_ptr), ALLOCATABLE, INTENT(out) :: graphs(:,:)
+TYPE(oft_graph_ptr), ALLOCATABLE, INTENT(out) :: known_graphs(:)
+INTEGER(i4), INTENT(out) :: nknown_graphs
 INTEGER(i4), OPTIONAL, INTENT(in) :: mask(:,:)
-INTEGER(i4) :: i,j,k,nknown_graphs
+INTEGER(i4) :: i,j,k
 INTEGER(i4), ALLOCATABLE, DIMENSION(:,:) :: mat_mask,graph_ids
 CLASS(oft_vector), POINTER :: tmp_vec
-TYPE(oft_graph_ptr), ALLOCATABLE :: graphs(:,:),known_graphs(:)
 DEBUG_STACK_PUSH
 !---
-IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Building composite FE matrix'
+IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Building composite FE graph'
 ALLOCATE(mat_mask(self%nfields,self%nfields))
 mat_mask=1
 IF(PRESENT(mask))mat_mask=mask
@@ -351,7 +353,7 @@ DO i=1,self%nfields
     IF(mat_mask(i,j)==0)CYCLE
     IF(mat_mask(i,j)==2)THEN
       IF(i/=j)CALL oft_abort('Identity only valid on diagonal.', &
-      'fem_mat_create',__FILE__)
+      'fem_graph_create',__FILE__)
       !---Setup identity graph
       CALL self%fields(i)%fe%vec_create(tmp_vec)
       CALL create_identity_graph(graphs(i,j)%g,tmp_vec)
@@ -383,14 +385,41 @@ DO i=1,self%nfields
     END IF
   END DO
 END DO
+DEALLOCATE(mat_mask,graph_ids)
+DEBUG_STACK_POP
+end subroutine fem_graph_create
+
+!------------------------------------------------------------------------------
+!> Generate composite FE matrix from user-provided (or default) graph structure
+!------------------------------------------------------------------------------
+subroutine fem_mat_create(self,new,mask, graphs_in)
+CLASS(oft_fem_comp_type), INTENT(inout) :: self
+CLASS(oft_matrix), POINTER, INTENT(out) :: new
+INTEGER(i4), OPTIONAL, INTENT(in) :: mask(:,:)
+TYPE(oft_graph_ptr), OPTIONAL, INTENT(in) :: graphs_in(:,:)
+INTEGER(i4) :: i,nknown_graphs
+CLASS(oft_vector), POINTER :: tmp_vec
+TYPE(oft_graph_ptr), ALLOCATABLE :: graphs(:,:), known_graphs(:)
+DEBUG_STACK_PUSH
+!---
+IF (PRESENT(graphs_in)) THEN
+  IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Using user-provided graphs for FE matrix'
+  graphs = graphs_in
+ELSE
+  IF(oft_debug_print(2))WRITE(*,'(2X,A)')'Building composite FE matrix'
+  CALL fem_graph_create(self, graphs, known_graphs, nknown_graphs, mask)
+END IF
 !---
 CALL self%vec_create(tmp_vec)
 CALL create_matrix(new,graphs,tmp_vec,tmp_vec)
 CALL tmp_vec%delete
-DO i=1,nknown_graphs
-  DEALLOCATE(known_graphs(i)%g)
-END DO
-DEALLOCATE(graphs,known_graphs,mat_mask,graph_ids,tmp_vec)
+IF (.NOT. PRESENT(graphs_in)) THEN
+  DO i=1,nknown_graphs
+    DEALLOCATE(known_graphs(i)%g)
+  END DO
+  DEALLOCATE(known_graphs)
+END IF
+DEALLOCATE(graphs,tmp_vec)
 DEBUG_STACK_POP
 end subroutine fem_mat_create
 !------------------------------------------------------------------------------

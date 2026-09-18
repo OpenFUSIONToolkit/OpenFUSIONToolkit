@@ -1,7 +1,5 @@
 set( UTIL_OBJS
   bezier_cad.F90
-  c_nurbs.cxx
-  nurbs_cad.F90
   metis_bridge.c
   quadrature.F90
   lagrange_poly.F90
@@ -24,8 +22,6 @@ set( TM_CAD_OBJS
   mesh_cube.F90
   mesh_sphere.F90
   mesh_t3d.F90
-  mesh_cubit.F90
-  mesh_gmsh.F90
 )
 set( MG_OBJS
   multigrid.F90

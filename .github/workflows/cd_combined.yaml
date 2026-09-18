@@ -6,16 +6,7 @@ on:
       - main
       - pypi_release
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-    paths:
-      - .github/workflows/cd_combined.yaml
-      - src/utilities/build_libs.py
-      - src/python/pyproject.toml.in
-      - src/python/make_package.sh.in
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: cd_comb-${{ github.ref }}

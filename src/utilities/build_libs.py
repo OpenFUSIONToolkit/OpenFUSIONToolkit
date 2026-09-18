@@ -408,7 +408,6 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DOFT_DEBUG_CHECK:BOOL={0}".format(bool_to_string(debug_check_flags)),
         "-DOFT_DEBUG_SANITIZER:BOOL={0}".format(bool_to_string(debug_asanitizer)),
         "-DOFT_PROFILING:BOOL={0}".format(bool_to_string(enable_profiling)),
-        "-DOFT_THINCURR_LEGACY:BOOL=FALSE",
         "-DCMAKE_C_COMPILER:FILEPATH={CC}",
         "-DCMAKE_CXX_COMPILER:FILEPATH={CXX}",
         "-DCMAKE_Fortran_COMPILER:FILEPATH={FC}"
@@ -451,8 +450,6 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         cmake_lines.append("-DHDF5_ROOT:PATH={0}".format(mydict["HDF5_ROOT"]))
     if mydict.get("HDF5_HAS_HL",False):
         cmake_lines.append("-DOFT_HDF5_HL:BOOL=TRUE")
-    if "NETCDF_ROOT" in mydict:
-        cmake_lines.append("-DOFT_NETCDF_ROOT:PATH={0}".format(mydict["NETCDF_ROOT"]))
     if "BLAS_ROOT" in mydict:
         cmake_lines.append("-DBLAS_ROOT:PATH={0}".format(mydict["BLAS_ROOT"]))
         cmake_lines.append("-DLAPACK_ROOT:PATH={0}".format(mydict["LAPACK_ROOT"]))
@@ -463,8 +460,6 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         cmake_lines.append("-DOFT_ARPACK_ROOT:PATH={0}".format(mydict["ARPACK_ROOT"]))
     if "LIBXML2_ROOT" in mydict:
         cmake_lines.append("-DLIBXML2_ROOT:PATH={0}".format(mydict["LIBXML2_ROOT"]))
-    if "ONURBS_ROOT" in mydict:
-        cmake_lines.append("-DOFT_OpenNURBS_ROOT:PATH={0}".format(mydict["ONURBS_ROOT"]))
     if "PETSC_ROOT" in mydict:
         cmake_lines.append("-DOFT_PETSc_ROOT:PATH={0}".format(mydict["PETSC_ROOT"]))
     else:
@@ -1186,181 +1181,6 @@ class HDF5(package):
         self.setup_build_script(build_lines, self.config_dict)
 
 
-class NETCDF(package):
-    def __init__(self, comp_wrapper=False, cmake_build=True, shared_libs=True):
-        self.name = "NETCDF"
-        self.url = "https://github.com/Unidata/netcdf-c/archive/refs/tags/v4.9.2.tar.gz" # 4.9.3 has a CMAKE build bug
-        self.build_dir = "netcdf-c-4.9.2"
-        self.install_dir = "netcdf-4_9_2"
-        self.comp_wrapper = comp_wrapper
-        self.cmake_build = cmake_build
-        self.children = [NETCDF_Fortran(comp_wrapper)]
-        self.shared_libs = shared_libs
-
-    def setup(self, config_dict):
-        self.config_dict = config_dict.copy()
-        if self.comp_wrapper:
-            self.skip = True
-            print("NETCDF provided by compiler wrappers: Skipping build")
-            return self.config_dict
-        self.setup_root_struct()
-        self.config_dict['NETCDF_C_LIBS'] = "-lnetcdf"
-        # Installation check files
-        if self.shared_libs:
-            self.install_chk_files = [os.path.join(self.config_dict['NETCDF_LIB'], 'libnetcdf'+self.config_dict['DYN_EXT'])]
-        else:
-            self.install_chk_files = [os.path.join(self.config_dict['NETCDF_LIB'], 'libnetcdf.a')]
-        #
-        return self.config_dict
-
-    def post_child_setup(self, config_dict):
-        if self.comp_wrapper:
-            return self.config_dict
-        self.config_dict['NETCDF_LIBS'] = ' '.join([
-            self.children[0].config_dict['NETCDF_Fortran_LIBS'],
-            self.config_dict['NETCDF_C_LIBS']
-        ])
-        return self.config_dict
-
-    def setup_build(self):
-        if self.cmake_build:
-            cmake_options = [
-                '-DCMAKE_INSTALL_PREFIX:PATH={NETCDF_ROOT}',
-                '-DHDF5_ROOT:PATH={HDF5_ROOT}',
-                '-DNETCDF_ENABLE_HDF5:BOOL=ON',
-                '-DENABLE_DAP:BOOL=OFF',
-                '-DENABLE_BYTERANGE:BOOL=OFF'
-            ]
-            if self.shared_libs:
-                cmake_options += [
-                    '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
-                    '-DBUILD_SHARED_LIBS:BOOL=ON',
-                    '-DBUILD_STATIC_LIBS:BOOL=OFF'
-                ]
-            else:
-                cmake_options += [
-                    '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
-                    '-DBUILD_SHARED_LIBS:BOOL=OFF',
-                    '-DBUILD_STATIC_LIBS:BOOL=ON'
-                ]
-        else:
-            configure_options = [
-                '--prefix={NETCDF_ROOT}',
-                '--enable-netcdf-4',
-                '--disable-dap'
-            ]
-            if self.shared_libs:
-                configure_options += [
-                    "--enable-shared=yes",
-                    "--enable-static=no",
-                    "--with-pic"
-                ]
-            else:
-                configure_options += [
-                    "--enable-shared=no",
-                    "--enable-static=yes",
-                    "--with-pic"
-                ]
-        build_lines = [
-            "rm -rf build",
-            "mkdir build",
-            "cd build",
-            "export CC={CC}",
-            "export FC={FC}"
-        ]
-        if self.cmake_build:
-            build_lines.append("{CMAKE} " + " ".join(cmake_options) + " ..")
-        else:
-            build_lines.append("../configure " + " ".join(configure_options))
-        build_lines += [
-            "make -j{MAKE_THREADS}",
-            "make install"
-        ]
-        self.setup_build_script(build_lines, self.config_dict)
-
-
-class NETCDF_Fortran(package):
-    def __init__(self, comp_wrapper=False, cmake_build=True, shared_libs=True):
-        self.name = "NETCDF_Fortran"
-        self.url = "https://github.com/Unidata/netcdf-fortran/archive/refs/tags/v4.6.1.tar.gz"
-        self.build_dir = "netcdf-fortran-4.6.1"
-        self.install_dir = "netcdf-4_9_2"
-        self.comp_wrapper = comp_wrapper
-        self.cmake_build = cmake_build
-        self.shared_libs = shared_libs
-
-    def setup(self, config_dict):
-        self.config_dict = config_dict.copy()
-        if self.comp_wrapper:
-            self.skip = True
-            return self.config_dict
-        self.setup_root_struct()
-        self.config_dict['NETCDF_Fortran_LIBS'] = "-lnetcdff"
-        # Installation check files
-        if self.shared_libs:
-            self.install_chk_files = [os.path.join(self.config_dict['NETCDF_Fortran_LIB'], 'libnetcdff'+self.config_dict['DYN_EXT'])]
-        else:
-            self.install_chk_files = [os.path.join(self.config_dict['NETCDF_Fortran_LIB'], 'libnetcdff.a')]
-        return self.config_dict
-
-    def setup_build(self):
-        if self.cmake_build:
-            cmake_options = [
-                '-DCMAKE_INSTALL_PREFIX:PATH={NETCDF_Fortran_ROOT}',
-                '-DHDF5_ROOT:PATH={HDF5_ROOT}',
-                '-DNETCDF_ENABLE_HDF5:BOOL=ON'
-            ]
-            if self.shared_libs:
-                cmake_options += [
-                    '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
-                    '-DBUILD_SHARED_LIBS:BOOL=ON',
-                    '-DBUILD_STATIC_LIBS:BOOL=OFF'
-                ]
-            else:
-                cmake_options += [
-                    '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
-                    '-DBUILD_SHARED_LIBS:BOOL=OFF',
-                    '-DBUILD_STATIC_LIBS:BOOL=ON'
-                ]
-        else:
-            configure_options = ["--prefix={NETCDF_Fortran_ROOT}"]
-            if self.shared_libs:
-                configure_options += [
-                    "--enable-shared=yes",
-                    "--enable-static=no",
-                    "--with-pic"
-                ]
-            else:
-                configure_options += [
-                    "--enable-shared=no",
-                    "--enable-static=yes",
-                    "--with-pic"
-                ]
-        build_lines = [
-            "rm -rf build",
-            "mkdir build",
-            "cd build",
-            "export CC={CC}",
-            "export FC={FC}",
-            'export CPPFLAGS="-I{NETCDF_INCLUDE}"',
-            'export LDFLAGS="-L{NETCDF_LIB}"',
-            'export LIBS="{NETCDF_C_LIBS}"'
-        ]
-        if config_dict['CC_VENDOR'] == 'gnu' and int(config_dict['CC_VERSION'].split(".")[0]) > 9:
-            build_lines.append('export FCFLAGS="-fallow-argument-mismatch -I{NETCDF_INCLUDE}"')
-        else:
-            build_lines.append('export FCFLAGS="-I{NETCDF_INCLUDE}"')
-        if self.cmake_build:
-            build_lines.append("{CMAKE} " + " ".join(cmake_options) + " ..")
-        else:
-            build_lines.append("../configure " + " ".join(configure_options))
-        build_lines += [
-            "make -j{MAKE_THREADS}",
-            "make install"
-        ]
-        self.setup_build_script(build_lines, self.config_dict)
-
-
 class OpenBLAS(package):
     def __init__(self, build_threaded=False, dynamic_arch=False, no_avx=False, shared_libs=False):
         self.name = "OpenBLAS"
@@ -1925,41 +1745,6 @@ class LIBXML2(package):
         self.setup_build_script(build_lines, self.config_dict)
 
 
-class ONURBS(package):
-    def __init__(self):
-        self.name = "ONURBS"
-        self.url = "https://hitsi.ap.columbia.edu/hosted/libs/opennurbs-5.0.tar.gz"
-        self.install_dir = "opennurbs-5_0"
-
-    def setup(self, config_dict):
-        self.config_dict = config_dict.copy()
-        install_path = os.path.join(self.root_path, self.install_dir)
-        self.config_dict['ONURBS_ROOT'] = install_path
-        self.config_dict['ONURBS_LIB'] = os.path.join(install_path, "lib")
-        self.config_dict['ONURBS_INCLUDE'] = os.path.join(install_path, "include")
-        self.config_dict["ONURBS_LIBS"] = "-lopenNURBS"
-        # Installation check files
-        self.install_chk_files = [os.path.join(self.config_dict['ONURBS_LIB'], 'libopenNURBS.a')]
-        #
-        return self.config_dict
-
-    def setup_build(self):
-        with open("makefile.in", "r") as fid:
-            contents = fid.read()
-        with open("makefile", "w+") as fid:
-            fid.write(contents.format(**self.config_dict))
-        build_lines = [
-            "make -j{MAKE_THREADS} libopenNURBS.a",
-            "mkdir {ONURBS_ROOT}",
-            "mkdir {ONURBS_LIB}",
-            "mkdir {ONURBS_INCLUDE}",
-            "cp libopenNURBS.a {ONURBS_LIB}",
-            "cp *.h {ONURBS_INCLUDE}",
-            "cp -r zlib {ONURBS_INCLUDE}/"
-        ]
-        self.setup_build_script(build_lines, self.config_dict)
-
-
 class PETSC(package):
     def __init__(self, debug=False, with_openmp=False, with_superlu=False, with_superlu_dist=False, with_umfpack=False,
                  with_mumps=False, version="3.23", comp_wrapper=False, shared_libs=None, mpi_f08=True):
@@ -2204,14 +1989,6 @@ group.add_argument("--metis_wrapper", action="store_true", default=False, help="
 group = parser.add_argument_group("XML", "XML package options")
 group.add_argument("--libxml2_shared", action="store_true", default=False, help="Build and link Libxml2 as a shared library?")
 #
-group = parser.add_argument_group("OpenNURBS", "OpenNURBS package options")
-group.add_argument("--build_onurbs", default=0, type=int, choices=(0,1), help="Build OpenNURBS library? (default: 0)")
-#
-group = parser.add_argument_group("NETCDF", "NETCDF package options")
-group.add_argument("--build_netcdf", default=0, type=int, choices=(0,1), help="Build NETCDF library? (default: 0)")
-group.add_argument("--netcdf_wrapper", action="store_true", default=False, help="NETCDF included in compilers")
-group.add_argument("--netcdf_static", action="store_true", default=False, help="Build and link NETCDF statically?")
-#
 group = parser.add_argument_group("ARPACK", "ARPACK package options")
 group.add_argument("--build_arpack", default=0, type=int, choices=(0,1), help="Build ARPACK library? (default: 0)")
 #
@@ -2328,7 +2105,7 @@ else:
     if (options.build_petsc == 1) or options.petsc_wrapper:
         parser.exit(-1, 'PETSc requires MPI\n')
 # HDF5
-HDF5_HL_required = ((options.build_netcdf == 1) or options.netcdf_wrapper)
+HDF5_HL_required = False
 if (options.hdf5_cc is not None) and (options.hdf5_fc is not None):
     config_dict['HDF5_CC'] = options.hdf5_cc
     config_dict['HDF5_FC'] = options.hdf5_fc
@@ -2337,15 +2114,9 @@ else:
     packages.append(HDF5(parallel=(options.hdf5_parallel and use_mpi),cmake_build=options.hdf5_cmake_build,build_hl=HDF5_HL_required,shared_libs=(not options.hdf5_static)))
 # Always build Libxml2
 packages.append(LIBXML2(not options.libxml2_shared))
-# Are we building OpenNURBS?
-if options.build_onurbs == 1:
-    packages.append(ONURBS())
 # Are we building ARPACK?
 if options.build_arpack == 1:
     packages.append(ARPACK(parallel=use_mpi, link_omp=options.oblas_threads))
-# Are we building NETCDF?
-if (options.build_netcdf == 1) or options.netcdf_wrapper:
-    packages.append(NETCDF(options.netcdf_wrapper,shared_libs=(not options.netcdf_static)))
 # Are we building PETSc?
 if (options.build_petsc == 1) or options.petsc_wrapper:
     packages.append(PETSC(debug=options.petsc_debug, with_openmp=options.petsc_openmp, with_superlu=options.petsc_superlu,

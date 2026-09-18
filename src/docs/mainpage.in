@@ -19,6 +19,17 @@ Currently the framework is used to implement the following physics modules:
  - \ref doc_mhd_main "MUG": 3D linear/nonlinear extended MHD simulation package
  - \ref doc_taylor_main "Marklin": 3D force-free, uniform \f$ \lambda \f$ equilibrium solver
 
+\section doc_main_scripts Utility scripts
+
+A number of scripts are available for utility/supporting functions:
+
+ - \subpage convert_cubit
+ - \subpage convert_gmsh
+ - \subpage build_xdmf
+ - \subpage convert_hist
+ - \ref thincurr_holes_tool
+ - \ref thincurr_mesh_tool
+
 \section doc_main_build Building OFT
 The documentation for [Building OFT](https://github.com/openfusiontoolkit/OpenFUSIONToolkit/wiki) on different platforms
 is maintained on GitHub along with the source code. At present, OFT is actively used both on macOS and Linux.
