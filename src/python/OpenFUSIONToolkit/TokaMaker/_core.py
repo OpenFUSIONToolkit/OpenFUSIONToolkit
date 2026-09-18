@@ -900,7 +900,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise ValueError("Error in multistep: {0}".format(error_string.value.decode()))
 
-    def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
+    def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None,eq_idx=0):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
 
         See eq. 1 for `li_normalization='std'` and eq 2. for `li_normalization='iter'`
@@ -912,9 +912,9 @@ class TokaMaker():
         @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         @result Dictionary of equilibrium parameters
         '''
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.get_stats(lcfs_pad,axis_pad,li_normalization,geom_type,beta_Ip)
+        if len(self._tMaker_equil) == 0:
+            raise ValueError("Equilibrium list is empty")
+        return self._tMaker_equil[eq_idx].get_stats(lcfs_pad,axis_pad,li_normalization,geom_type,beta_Ip)
 
     def print_info(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
         r'''! Print information (Ip, q, etc.) about current G-S equilbirium
@@ -1307,15 +1307,15 @@ class TokaMaker():
             raise Exception(error_string.value)
         self._tMaker_equil = tmp_eq
 
-    def get_psi(self,normalized=True):
+    def get_psi(self,normalized=True,eq_idx=0):
         r'''! Get poloidal flux values on node points
 
         @param normalized Normalize (and offset) poloidal flux
         @result \f$\hat{\psi} = \frac{\psi-\psi_0}{\psi_a-\psi_0} \f$ or \f$\psi\f$
         '''
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.get_psi(normalized)
+        if len(self._tMaker_equil) == 0:
+            raise ValueError("Equilibrium list is empty")
+        return self._tMaker_equil[eq_idx].get_psi(normalized)
 
     def set_psi(self,psi,update_bounds=False):
         '''! Set poloidal flux values on node points
@@ -1360,16 +1360,16 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.get_field_eval(field_type)
 
-    def get_coil_currents(self):
+    def get_coil_currents(self, eq_idx=0):
         '''! Get currents in each coil [A] and coil region [A-turns]
 
         @result Coil currents [ncoils], Coil currents by region [nregs]
         '''
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.get_coil_currents()
+        if len(self._tMaker_equil) == 0:
+            raise ValueError("Equilibrium list is empty")
+        return self._tMaker_equil[eq_idx].get_coil_currents()
 
-    def get_coil_Lmat(self):
+    def get_coil_Lmat(self, eq_idx=0):
         r'''! Get mutual inductance matrix between coils
 
         @note This is the inductance in terms of A-turns. To get in terms of
@@ -1379,9 +1379,9 @@ class TokaMaker():
         '''
         Lmat = numpy.zeros((self.ncoils+1,self.ncoils+1),dtype=numpy.float64)
         Lmat[:-1,:-1] = self.Lcoils
-        if self._tMaker_equil is None:
-            raise ValueError("Equilibrium object is `None`")
-        L_p, M_p_c = self._tMaker_equil.calc_inductance()
+        if len(self._tMaker_equil) == 0:
+            raise ValueError("Equilibrium list is empty")
+        L_p, M_p_c = self._tMaker_equil[eq_idx].calc_inductance()
         Lmat[-1,-1] = L_p
         Lmat[-1,:-1] = M_p_c
         Lmat[:-1,-1] = M_p_c
