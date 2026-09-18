@@ -21,9 +21,7 @@ PROGRAM test_cubit
 USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
-#ifdef HAVE_NCDF
-USE oft_mesh_cubit, ONLY: mesh_cubit_id, inpname
-#endif
+USE oft_mesh_native, ONLY: mesh_native_id
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
 IMPLICIT NONE
@@ -32,12 +30,8 @@ INTEGER(i4) :: io_unit
 INTEGER(i4) :: ierr
 TYPE(xdmf_plot_file) :: plot_file
 TYPE(multigrid_mesh) :: mg_mesh
-#if !defined(HAVE_NCDF)
-CHARACTER(LEN=OFT_PATH_SLEN) :: inpname = 'none'
-#endif
 LOGICAL :: test_surf = .FALSE.
-INTEGER(i4) :: cad_type = 2
-NAMELIST/cubit_test_options/test_surf,cad_type
+NAMELIST/cubit_test_options/test_surf
 !---Initialize enviroment
 CALL oft_init
 !---Read in options
@@ -49,21 +43,9 @@ IF(ierr<0)CALL oft_abort('No "cubit_test_options" found in input file.', &
   'test_cubit',__FILE__)
 IF(ierr>0)CALL oft_abort('Error parsing "cubit_test_options" in input file.', &
   'test_cubit',__FILE__)
-#if !defined(HAVE_NCDF)
-IF(cad_type==2)THEN
-  WRITE(*,*)'SKIP TEST'
-  CALL oft_finalize
-END IF
-#endif
 IF(test_surf)THEN
   CALL multigrid_construct_surf(mg_mesh)
-  IF(mg_mesh%smesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
-#if !defined(HAVE_ONURBS)
-  IF(TRIM(inpname)/='none')THEN
-    WRITE(*,*)'SKIP TEST'
-    CALL oft_finalize
-  END IF
-#endif
+  IF(mg_mesh%smesh%cad_type/=mesh_native_id)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
   CALL plot_file%setup("Test")
   CALL mg_mesh%smesh%setup_io(plot_file,1)
   IF(oft_env%head_proc)THEN
@@ -79,13 +61,7 @@ IF(test_surf)THEN
 ELSE
   !---Setup grid
   CALL multigrid_construct(mg_mesh)
-  IF(mg_mesh%mesh%cad_type/=cad_type)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
-#if !defined(HAVE_ONURBS)
-  IF(TRIM(inpname)/='none')THEN
-    WRITE(*,*)'SKIP TEST'
-    CALL oft_finalize
-  END IF
-#endif
+  IF(mg_mesh%mesh%cad_type/=mesh_native_id)CALL oft_abort('Wrong mesh type.','test_cubit',__FILE__)
   CALL plot_file%setup("Test")
   CALL mg_mesh%mesh%setup_io(plot_file,1)
   IF(oft_env%head_proc)OPEN(NEWUNIT=io_unit,FILE='cubit.results')

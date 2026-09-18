@@ -21,7 +21,8 @@ ed_map_tri = np.array([
     [2,0]
 ])
 
-ed_map_tet = np.array([
+## Quadratic tetrahedron edge ordering used by the MEDIT (`.mesh`) format
+ed_map_tet_medit = np.array([
     [0,1],
     [1,2],
     [0,2],
@@ -30,8 +31,79 @@ ed_map_tet = np.array([
     [2,3]
 ])
 
+## Quadratic tetrahedron edge ordering used by the GMSH (`.msh`) formats
+ed_map_tet_msh = np.array([
+    [0,1],
+    [1,2],
+    [0,2],
+    [0,3],
+    [2,3],
+    [1,3]
+])
 
-def read_legacy(fid):
+
+def check_tag_line(fid, tag):
+    '''! Read the next line and check that it matches the expected GMSH section tag
+
+    @param fid Open file handle
+    @param tag Expected section tag (without the leading "$")
+    '''
+    line = fid.readline().strip()
+    tag = "$" + tag
+    if line.lower() != tag.lower():
+        raise ValueError('Expected line tag "{0}" not found "{1}"'.format(tag,line))
+    return line
+
+
+def read_node_block(fid, end_tag):
+    '''! Read a GMSH node block, whose section tag has already been consumed
+
+    @param fid Open file handle
+    @param end_tag Section tag terminating the node block (without the leading "$")
+    @result Point list [np,3]
+    '''
+    mesh_np = int(fid.readline())
+    mesh_dim = 3
+    r = np.zeros((mesh_np,mesh_dim))
+    for i in range(mesh_np):
+        line_split = fid.readline().split()
+        if int(line_split[0]) != i+1:
+            raise ValueError('Unexpected point index {0} (expected {1}), contiguous numbering is required'.format(int(line_split[0]),i+1))
+        r[i,:] = [float(val) for val in line_split[1:mesh_dim+1]]
+    check_tag_line(fid, end_tag)
+    return r
+
+
+def read_element_block(fid, end_tag):
+    '''! Read a GMSH element block, whose section tag has already been consumed
+
+    Triangles are only used as cells if no tetrahedra are present (surface mesh).
+
+    @param fid Open file handle
+    @param end_tag Section tag terminating the element block (without the leading "$")
+    @result Cell list, region list, and number of linear points per cell
+    '''
+    mesh_nelems = int(fid.readline())
+    lf = []
+    lc = []
+    for i in range(mesh_nelems):
+        line_vals = [int(val) for val in fid.readline().split()]
+        if line_vals[1] in (2,9):
+            lf.append(line_vals[5:])
+        elif line_vals[1] in (4,11):
+            lc.append(line_vals[5:])
+    check_tag_line(fid, end_tag)
+    if len(lc) == 0:
+        lc = np.array(lf, dtype=np.int32)
+        ncp_lin = 3
+    else:
+        lc = np.array(lc, dtype=np.int32)
+        ncp_lin = 4
+    reg = np.ones((lc.shape[0],), dtype=np.int32)
+    return lc, reg, ncp_lin
+
+
+def read_medit(fid):
     fid.readline() # Should be "Dimension"
     mesh_dim = int(fid.readline())
     # Read in vertices
@@ -87,43 +159,36 @@ def read_legacy(fid):
     return r, lc, reg, ncp_lin
 
 
-def read_new(fid):
-    def check_tag_line(tag):
-        line = fid.readline().strip()
-        tag = "$" + tag
-        if line.lower() != tag.lower():
-            raise ValueError('Expected line tag "{0}" not found "{1}"'.format(tag,line))
-        return line
-    fid.readline() # Mesh format numbers
-    check_tag_line("EndMeshFormat")
+def read_msh1(fid):
+    '''! Read a GMSH mesh in the version 1 (`$NOD`/`$ELM`) format
+
+    The leading "$NOD" tag is consumed by @ref read_mesh before this is called.
+
+    @param fid Open file handle
+    '''
     # Read in vertices
-    check_tag_line("Nodes")
-    mesh_np = int(fid.readline())
-    mesh_dim = 3
-    r = np.zeros((mesh_np,mesh_dim))
-    for i in range(mesh_np):
-        line_split = fid.readline().split()
-        r[i,:] = [float(val) for val in line_split[1:mesh_dim+1]]
-    check_tag_line("EndNodes")
+    r = read_node_block(fid, "ENDNOD")
     # Read in cells
-    check_tag_line("Elements")
-    mesh_nelems = int(fid.readline())
-    lf = []
-    lc = []
-    for i in range(mesh_nelems):
-        line_vals = [int(val) for val in fid.readline().split()]
-        if line_vals[1] in (2,9):
-            lf.append(line_vals[5:])
-        elif line_vals[1] in (4,11):
-            lc.append(line_vals[5:])
-    check_tag_line("EndElements")
-    if len(lc) == 0:
-        lc = np.array(lf, dtype=np.int32)
-        ncp_lin = 3
-    else:
-        lc = np.array(lc, dtype=np.int32)
-        ncp_lin = 4
-    reg = np.ones((lc.shape[0],), dtype=np.int32)
+    check_tag_line(fid, "ELM")
+    lc, reg, ncp_lin = read_element_block(fid, "ENDELM")
+    return r, lc, reg, ncp_lin
+
+
+def read_msh2(fid):
+    '''! Read a GMSH mesh in the version 2 (`$Nodes`/`$Elements`) format
+
+    The leading "$MeshFormat" tag is consumed by @ref read_mesh before this is called.
+
+    @param fid Open file handle
+    '''
+    fid.readline() # Mesh format numbers
+    check_tag_line(fid, "EndMeshFormat")
+    # Read in vertices
+    check_tag_line(fid, "Nodes")
+    r = read_node_block(fid, "EndNodes")
+    # Read in cells
+    check_tag_line(fid, "Elements")
+    lc, reg, ncp_lin = read_element_block(fid, "EndElements")
     return r, lc, reg, ncp_lin
 
 
@@ -131,11 +196,16 @@ def read_mesh(filename):
     print()
     print("Reading mesh: {0}".format(filename))
     with open(filename,'r') as fid:
-        mesh_format_line = fid.readline()
-        if mesh_format_line.strip() == '$MeshFormat':
-            r, lc, reg, ncp_lin = read_new(fid)
-        else:
-            r, lc, reg, ncp_lin = read_legacy(fid)
+        mesh_format_line = fid.readline().strip()
+        if mesh_format_line == '$MeshFormat': # GMSH version 2 format
+            r, lc, reg, ncp_lin = read_msh2(fid)
+            ed_map_tet = ed_map_tet_msh
+        elif mesh_format_line == '$NOD': # GMSH version 1 format
+            r, lc, reg, ncp_lin = read_msh1(fid)
+            ed_map_tet = ed_map_tet_msh
+        else: # MEDIT format
+            r, lc, reg, ncp_lin = read_medit(fid)
+            ed_map_tet = ed_map_tet_medit
     #
     mesh_np = r.shape[0]
     mesh_nc = lc.shape[0]

@@ -182,9 +182,7 @@ INCLUDE_PATH           =
 INCLUDE_FILE_PATTERNS  =
 PREDEFINED             = HAVE_MPI=1 \
                          HAVE_PHDF5=1 \
-                         HAVE_ONURBS=1 \
                          HAVE_ARPACK=1 \
-                         HAVE_NCDF=1 \
                          HAVE_PETSC=1
 EXPAND_AS_DEFINED      =
 SKIP_FUNCTION_MACROS   = YES
