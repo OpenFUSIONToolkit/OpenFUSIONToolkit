@@ -59,7 +59,7 @@ class Mirnov_con:
     '''! TokaMaker equilibrium reconstruction Mirnov sensor constraint'''
     def __init__(self, loc=None, phi=0., norm=None, val=None, err=None):
         r'''! Create Mirnov sensor constraint
-        
+
         @param loc Location of Mirnov in R-Z plane [2]
         @param phi Toroidal location [rad] (only meaningful with 3D fields)
         @param norm Unit normal \f$ (R,\phi,Z) \f$ [3]
@@ -74,7 +74,7 @@ class Mirnov_con:
 
     def read(self, file):
         '''! Read Mirnov constraint from file
-        
+
         @param file Open file object containing constraint, must be positioned at start of constraint
         '''
         values = file.readline().split()
@@ -88,7 +88,7 @@ class Mirnov_con:
 
     def write(self, file):
         '''! Write Mirnov constraint to file
-        
+
         @param file Open file object for saving constraints
         '''
         file.write('{0}\n'.format(Mirnov_con_id))
@@ -101,7 +101,7 @@ class Ip_con:
     '''! TokaMaker equilibrium reconstruction plasma current constraint'''
     def __init__(self, val=None, err=None):
         '''! Create plasma current constraint
-        
+
         @param val Value of constraint
         @param err Error in constraint
         '''
@@ -112,7 +112,7 @@ class Ip_con:
 
     def read(self, file):
         '''! Read plasma current constraint from file
-        
+
         @param file Open file object containing constraint, must be positioned at start of constraint
         '''
         values = file.readline().split()
@@ -125,7 +125,7 @@ class Ip_con:
 
     def write(self, file):
         '''! Write plasma current constraint to file
-        
+
         @param file Open file object for saving constraints
         '''
         file.write('{0}\n'.format(Ip_con_id))
@@ -136,7 +136,7 @@ class fluxLoop_con:
     '''! TokaMaker equilibrium reconstruction full flux loop constraint'''
     def __init__(self, loc=None, val=None, err=None):
         '''! Create full flux loop sensor constraint
-        
+
         @param loc Location of Mirnov in R-Z plane [2]
         @param val Value of constraint
         @param err Error in constraint
@@ -147,7 +147,7 @@ class fluxLoop_con:
 
     def read(self, file):
         '''! Read full flux loop constraint from file
-        
+
         @param file Open file object containing constraint, must be positioned at start of constraint
         '''
         values = file.readline().split()
@@ -158,7 +158,7 @@ class fluxLoop_con:
 
     def write(self, file):
         '''! Write full flux loop constraint to file
-        
+
         @param file Open file object for saving constraints
         '''
         file.write('{0}\n'.format(fluxLoop_con_id))
@@ -170,7 +170,7 @@ class dFlux_con:
     '''! TokaMaker equilibrium reconstruction diamagnetic flux constraint'''
     def __init__(self, val=None, err=None):
         '''! Create diamagnetic flux constraint
-        
+
         @param val Value of constraint
         @param err Error in constraint
         '''
@@ -179,7 +179,7 @@ class dFlux_con:
 
     def read(self, file):
         '''! Read diamagnetic flux constraint from file
-        
+
         @param file Open file object containing constraint, must be positioned at start of constraint
         '''
         values = file.readline().split()
@@ -188,7 +188,7 @@ class dFlux_con:
 
     def write(self, file):
         '''! Write diamagnetic flux constraint to file
-        
+
         @param file Open file object for saving constraints
         '''
         file.write('{0}\n'.format(dFlux_con_id))
@@ -199,7 +199,7 @@ class Press_con:
     '''! TokaMaker equilibrium reconstruction plasma pressure constraint'''
     def __init__(self, loc=None, val=None, err=None):
         '''! Create plasma pressure constraint
-        
+
         @param loc Location of measurement in R-Z plane [2]
         @param val Value of pressure constraint
         @param err Error in constraint
@@ -212,7 +212,7 @@ class Press_con:
 
     def read(self, file):
         '''! Read plasma pressure constraint from file
-        
+
         @param file Open file object containing constraint, must be positioned at start of constraint
         '''
         values = file.readline().split()
@@ -226,7 +226,7 @@ class Press_con:
 
     def write(self, file):
         '''! Write plasma pressure constraint to file
-        
+
         @param file Open file object for saving constraints
         '''
         file.write('{0}\n'.format(Press_con_id))
@@ -238,7 +238,7 @@ class q_con:
     '''! TokaMaker equilibrium reconstruction local safety factor constraint'''
     def __init__(self, type=None, loc=0., val=None, err=None):
         r'''! Create local safety factor constraint
-        
+
         @param type Type of constraint
         @param loc Location of constraint in \f$ \hat{\psi} \f$
         @param val Value of constraint
@@ -251,7 +251,7 @@ class q_con:
 
     def read(self, file):
         '''! Read local safety factor constraint from file
-        
+
         @param file Open file object containing constraint, must be positioned at start of constraint
         '''
         values = file.readline().split()
@@ -263,7 +263,7 @@ class q_con:
 
     def write(self, file):
         '''! Write local safety factor constraint to file
-        
+
         @param file Open file object for saving constraints
         '''
         file.write('{0}\n'.format(q_con_id))
@@ -275,7 +275,7 @@ class saddle_con:
     '''! TokaMaker equilibrium reconstruction saddle flux loop constraint '''
     def __init__(self, pt1=None, pt2=None, width=None, val=None, err=None):
         '''! Create saddle flux loop sensor constraint
-        
+
         @param pt1 Location of first toroidal saddle leg in R-Z plane [2]
         @param pt2 Location of second toroidal saddle leg in R-Z plane [2]
         @param width Toroidal extent in radians
@@ -290,7 +290,7 @@ class saddle_con:
 
     def read(self, file):
         '''! Read saddle flux loop constraint from file
-        
+
         @param file Open file object containing constraint, must be positioned at start of constraint
         '''
         values = file.readline().split()
@@ -305,7 +305,7 @@ class saddle_con:
 
     def write(self, file):
         '''! Write saddle flux loop constraint to file
-        
+
         @param file Open file object for saving constraints
         '''
         file.write('{0}\n'.format(saddle_con_id))
@@ -319,7 +319,7 @@ class coil_current_con:
     '''! TokaMaker equilibrium reconstruction coil current constraint'''
     def __init__(self, ind=None, val=None, err=None):
         '''! Create coil current constraint
-        
+
         @param ind Index of coil
         @param val Value of constraint [A]
         @param err Error in constraint [A]
@@ -330,7 +330,7 @@ class coil_current_con:
 
     def read(self, file):
         '''! Read coil current constraint from file
-        
+
         @param file Open file object containing constraint, must be positioned at start of constraint
         '''
         values = file.readline()
@@ -341,7 +341,7 @@ class coil_current_con:
 
     def write(self, file):
         '''! Write coil current constraint to file
-        
+
         @param file Open file object for saving constraints
         '''
         file.write('{0}\n'.format(coil_current_con_id))
@@ -400,7 +400,7 @@ class tokamaker_recon_settings:
         if (name not in self.__dict__) and hasattr(self, '_initialized'):
             raise AttributeError(f"Cannot add new attribute '{name}' to tokamaker_recon_settings")
         super().__setattr__(name, value)
-    
+
     @property
     def fitV0(self):
         warn(
@@ -409,7 +409,7 @@ class tokamaker_recon_settings:
             stacklevel=2
         )
         return self.fitZ0
-    
+
     @fitV0.setter
     def fitV0(self, value):
         warn(
@@ -418,7 +418,7 @@ class tokamaker_recon_settings:
             stacklevel=2
         )
         self.fitZ0 = value
-    
+
     def get_c_struct(self,oft_env):
         r'''! Get C struct representation of settings for passing to TokaMaker Fortran API'''
         c_struct_instance = tokamaker_recon_settings_cstruct()
@@ -441,7 +441,7 @@ class reconstruction():
     '''! TokaMaker equilibrium reconstruction class'''
     def __init__(self,tMaker_obj,in_filename='fit.in',out_filename='fit.out'):
         '''! Create equilibrium reconstruction object
-        
+
         @param tMaker_obj TokaMaker object used for computing G-S equilibria
         @param in_filename Filename to use for reconstruction input
         @param out_filename Filename to use for reconstruction outputs
@@ -452,7 +452,7 @@ class reconstruction():
         self.settings = tokamaker_recon_settings()
         ## Plasma current constraint
         self._Ip_con = None
-        ## Diamagnetic flux constraint 
+        ## Diamagnetic flux constraint
         self._Dflux_con = None
         ## Flux loop constraints
         self._flux_loops = []
@@ -485,7 +485,7 @@ class reconstruction():
             'linearized_fit': 'F'
         }
         self._tMaker_obj._oft_env.update_oft_in()
-    
+
     def __del__(self):
         '''! Destroy reconstruction object'''
         try:
@@ -504,10 +504,10 @@ class reconstruction():
         self.con_file = None
         self.out_file = None
         self._ncons = 0
-    
+
     def set_Ip(self,Ip,err):
         '''! Set plasma current constraint
-        
+
         @param Ip Value of plasma current constraint
         @param err Error in constraint
         '''
@@ -515,15 +515,15 @@ class reconstruction():
 
     def set_DFlux(self,DFlux,err):
         '''! Set diamagnetic flux constraint
-        
+
         @param DFlux Value of diamagnetic flux constraint
         @param err Error in constraint
         '''
         self._Dflux_con = dFlux_con(val=DFlux, err=err)
-    
+
     def set_coil_currents(self,targets,errs):
         '''! Set coil current constraints
-        
+
         @param targets Dictionary of coil current targets
         @param errs Dictionary of coil current constraint errors
         '''
@@ -537,7 +537,7 @@ class reconstruction():
 
     def add_flux_loop(self,loc,val,err):
         '''! Add full poloidal flux loop constraint
-        
+
         @param loc Location of flux loop in R-Z plane [2]
         @param val Value of flux loop constraint
         @param err Error in constraint
@@ -546,17 +546,17 @@ class reconstruction():
 
     def add_Mirnov(self,loc,norm,val,err):
         '''! Add Mirnov sensor constraint
-        
+
         @param loc Location of Mirnov in R-Z plane [2]
         @param norm Unit normal in R-Z plane [2]
         @param val Value of Mirnov constraint
         @param err Error in constraint
         '''
         self._mirnovs.append(Mirnov_con(loc=loc, norm=norm, val=val, err=err))
-    
+
     def add_saddle(self,p1,p2,width,val,err):
         '''! Add saddle loop constraint
-        
+
         @param p1 Location of first toroidal saddle leg in R-Z plane [2]
         @param p2 Location of second toroidal saddle leg in R-Z plane [2]
         @param width Toroidal extent in radians
@@ -564,16 +564,16 @@ class reconstruction():
         @param err Error in constraint
         '''
         self._saddles.append(saddle_con(p1=p1, p2=p2, width=width, val=val, err=err))
-    
+
     def add_pressure(self,loc,val,err):
         '''! Add plasma pressure constraint
-        
+
         @param loc Location of measurement in R-Z plane [2]
         @param val Value of pressure constraint
         @param err Error in constraint
         '''
         self._pressure_cons.append(Press_con(loc=loc,val=val,err=err))
-    
+
     def reset_constraints(self):
         '''! Remove all current constraints'''
         self._Ip_con = None
@@ -582,7 +582,7 @@ class reconstruction():
         self._mirnovs = []
         self._saddles = []
         self._pressure_cons = []
-    
+
     def write_fit_in(self):
         '''! Create reconstruction input file for specified constraints'''
         constraints = self._flux_loops + self._mirnovs + self._saddles + self._pressure_cons + self._coil_current_cons
@@ -595,7 +595,7 @@ class reconstruction():
             fid.write('{0:d}\n\n'.format(ncons))
             for con in constraints:
                 con.write(fid)
-    
+
     def read_fit_in(self):
         '''! Read constraints from existing input file'''
         self.reset_constraints()
@@ -623,10 +623,10 @@ class reconstruction():
                     self._coil_current_cons.append(new_con)
                 else:
                     raise ValueError("Unknown constraint type")
-                
+
     def plot_constraints(self, fig, ax, plot_flux_loops=True, plot_mirnovs=True, plot_saddles=True, plot_pressure=True, mirnov_scale=1.0, base_zorder=0):
         '''! Plot constraint locations in R-Z plane for current constraints
-        
+
         @param fig Matplotlib figure to plot on
         @param ax Matplotlib axis to plot on
         @param plot_flux_loops Whether to plot flux loop constraints
@@ -649,10 +649,10 @@ class reconstruction():
         if plot_pressure:
             for press_con in self._pressure_cons:
                 ax.plot(press_con.loc[0], press_con.loc[1], 'm.', zorder=base_zorder+1)
-    
+
     def plot_error(self, ax, error_mat=None, error_file=None, coil_ax=None, chi_ax=None):
         '''! Plot constraint values and reconstructed signals for current equilibrium from reconstruction output file
-        
+
         @param ax Matplotlib axis to plot on
         @param error_mat Error matrix, if `None` `eval_error` will be called
         @param error_file File containing error data
@@ -731,10 +731,10 @@ class reconstruction():
                     continue
                 chi_ax.plot(numpy.arange(err_ind[i],err_ind[i+1])+1,numpy.power(error_mat[err_ind[i]:err_ind[i+1],0],2),label=names[i])
             chi_ax.legend()
-    
+
     def setup_constraints(self):
         '''! Set up constraints in TokaMaker for current equilibrium without performing reconstruction
-        
+
         @result Error flag
         '''
         if self._ncons > 0:
@@ -748,7 +748,7 @@ class reconstruction():
         if error_flag.value != 0:
             raise ValueError("Constraint setup failed with error code {0:d}".format(error_flag.value))
         self._ncons = ncons.value
-    
+
     def destroy_constraints(self):
         '''! Destroy constraints in TokaMaker'''
         if self._ncons == 0:
@@ -761,7 +761,7 @@ class reconstruction():
 
     def eval_error(self, vacuum=False, save_to_file=False):
         '''! Evaluate error in current equilibrium for specified constraints without performing reconstruction
-        
+
         @param vacuum Perform vacuum reconstruction
         @param save_to_file Save error matrix to file specified in `settings.outfile`
         @result Error matrix if `save_to_file=False`, otherwise None (error matrix will be saved to file)
@@ -777,9 +777,9 @@ class reconstruction():
         if error_flag.value != 0:
             raise ValueError("Error evaluation failed with error code {0:d}".format(error_flag.value))
         return error_mat if not save_to_file else None
-    
+
     def setup_get_opt(self,fail_factor=1.E2,pp_target_weight=1.E5,opoint_target_weight=1.E2):
-        r''' Setup object for use with general optimization routines, such as `scipy.optimize.minimize`,
+        r'''! Setup object for use with general optimization routines, such as `scipy.optimize.minimize`,
         which will call `opt_error` and, optionally, `opt_error_jacobian` with appropriate arguments.
         This function should be called after setting up constraints with `setup_constraints` and before calling optimization routines.
 
@@ -803,9 +803,9 @@ class reconstruction():
         self._tMaker_obj.update_settings()
 
         return x0_nl, error0
-    
+
     def opt_get_dofs(self):
-        r''' Get DoF vector for general optimization routines using `opt_error` and `opt_error_jacobian`.
+        r'''! Get DoF vector for general optimization routines using `opt_error` and `opt_error_jacobian`.
 
         @returns DoF vector
         '''
@@ -828,7 +828,7 @@ class reconstruction():
 
     @staticmethod
     def opt_error(cofs,recon_obj,in_jac):
-        r''' Compute weighted constraint error for given DoF vector `cofs` and reconstruction object `recon_obj`.
+        r'''! Compute weighted constraint error for given DoF vector `cofs` and reconstruction object `recon_obj`.
         This function is designed to be called by general optimization routines, such as `scipy.optimize.minimize`.
 
         @param cofs DoF vector
@@ -858,7 +858,7 @@ class reconstruction():
                 p_dofs = cofs[offset:offset+p_dofs.shape[0]]
                 recon_obj._tMaker_obj.set_profile_dofs('pp', p_dofs)
                 offset += p_dofs.shape[0]
-        
+
         # Re-solve
         try:
             recon_obj._tMaker_obj.solve()
@@ -868,7 +868,7 @@ class reconstruction():
         except:
             recon_obj._tMaker_obj.replace_eq(recon_obj._EQ_center)
             return recon_obj._fail_error
-        
+
         # Compute error
         err_out = recon_obj.eval_error()
         total_err = numpy.power(numpy.linalg.norm(err_out[:,0]),2)
@@ -883,7 +883,7 @@ class reconstruction():
 
     @staticmethod
     def opt_error_jacobian(cofs,recon_obj,in_jac):
-        r''' Compute Jacobian matrix corresponding by differencing `opt_error` for given DoF vector `cofs` and reconstruction object `recon_obj`.
+        r'''! Compute Jacobian matrix corresponding by differencing `opt_error` for given DoF vector `cofs` and reconstruction object `recon_obj`.
 
         @param cofs DoF vector
         @param recon_obj `TokaMaker.reconstruction.reconstruction` object to be used
@@ -907,7 +907,7 @@ class reconstruction():
 
     def reconstruct(self, vacuum=False, linearized_fit=False, maxits=100, eps=1.E-3, ftol=1.E-3, xtol=1.E-3, gtol=1.E-3):
         '''! Reconstruct G-S equation with specified fitting constraints, profiles, etc.
-        
+
         @param vacuum Perform vacuum reconstruction
         @param linearized_fit Use linearized solve for suitable terms
         @param maxits Maximum number of iterations

@@ -11,6 +11,8 @@ add_library( oftext
   bvls.f90
   ${QUADPACK_OBJS}
 )
+# Always turn off IPO to avoid DLSODE common block issue
+set_property(TARGET oftext PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE OFF)
 
 # Local copy of triangle
 if( OFT_BUILD_PYTHON )

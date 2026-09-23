@@ -537,20 +537,20 @@ CHARACTER(LEN=OFT_ERROR_SLEN) :: exit_reason
 !           is at most xtol.
 !
 ! info = 3  conditions for info = 1 and info = 2 both hold.
-! 
+!
 ! info = 4  the cosine of the angle between fvec and any
 !           column of the jacobian is at most gtol in
 !           absolute value.
-! 
+!
 ! info = 5  number of calls to fcn with iflag = 1 has
 !           reached maxfev.
-! 
+!
 ! info = 6  ftol is too small. no further reduction in
 !           the sum of squares is possible.
-! 
+!
 ! info = 7  xtol is too small. no further improvement in
 !           the approximate solution x is possible.
-! 
+!
 ! info = 8  gtol is too small. fvec is orthogonal to the
 !           columns of the jacobian to machine precision.
 SELECT CASE(info)
@@ -1444,7 +1444,7 @@ btmp(1)= -gs%psiscale*gpsi(2)/self%r(1)
 IF(gs%mode==0)THEN
   btmp(2)= gs%psiscale*(gs%ffp_scale*gs%I%f(psi(1))+gs%I%f_offset)/self%r(1)
 ELSE
-  btmp(2)=gs%psiscale*SQRT(gs%ffp_scale*gs%I%f(psi(1)) + gs%I%f_offset**2)/self%r(1)
+  btmp(2)=gs%psiscale*SIGN(1.d0,gs%I%f_offset)*SQRT(gs%ffp_scale*gs%I%f(psi(1)) + gs%I%f_offset**2)/self%r(1)
 END IF
 btmp(3)= gs%psiscale*gpsi(1)/self%r(1)
 !---

@@ -8,7 +8,6 @@
 # Legacy driver script for creating XDMF descriptor files for Open FUSION Toolkit output
 #
 #------------------------------------------------------------------------------
-from __future__ import print_function
 import argparse
 try:
     import xml.etree.cElementTree as ET

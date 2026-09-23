@@ -12,7 +12,6 @@
 # Note: Script must be run from the root "src" directory.
 #
 #------------------------------------------------------------------------------
-from __future__ import print_function
 import sys
 import os
 import pathlib

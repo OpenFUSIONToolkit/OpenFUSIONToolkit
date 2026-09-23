@@ -27,7 +27,7 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
-  gs_get_qprof, gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
+  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
 IMPLICIT NONE
@@ -37,7 +37,6 @@ IMPLICIT NONE
 !------------------------------------------------------------------------------
 type, extends(gsinv_interp) :: sauter_interp
   logical :: stage_1 = .FALSE.
-  real(8) :: f_surf = 0.d0
   real(8) :: bmax = -1.d0
   real(8) :: mag_axis(2) = 0.d0
 contains
@@ -198,10 +197,10 @@ real(8), intent(out) :: pvol !< \f$ \int P dV \f$
 real(8), intent(out) :: dflux !< Diamagnetic flux
 real(8), intent(out) :: tflux !< Contained toroidal flux
 real(8), intent(out) :: bp_vol !< \f$ \int B_p^2 dV \f$
-type(oft_lag_brinterp) :: psi_eval
+type(oft_lag_brinterp) :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp) :: psi_geval
 real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
-real(8) :: pt(3),curr_cent(2),Btor,Bpol(2)
+real(8) :: pt(3),curr_cent(2),Btor,Bpol(2),pani(2),bcross_kappa(1)
 integer(4) :: i,m
 class(oft_bmesh), pointer :: smesh
 type(gs_factory), pointer :: device
@@ -211,6 +210,13 @@ smesh=>device%mesh
 psi_eval%u=>self%psi
 CALL psi_eval%setup(device%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
+IF(ASSOCIATED(self%P_ani))THEN
+  CALL self%psi%new(bcross_kappa_fun%u)
+  CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
+  CALL bcross_kappa_fun%setup(device%fe_rep)
+ELSE
+  NULLIFY(bcross_kappa_fun%u)
+END IF
 !---
 itor = 0.d0
 centroid = 0.d0
@@ -219,7 +225,7 @@ vol = 0.d0
 dflux = 0.d0
 tflux = 0.d0
 bp_vol = 0.d0
-!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,Btor,Bpol) &
+!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,Btor,Bpol,bcross_kappa,pani) &
 !$omp reduction(+:itor) reduction(+:centroid) reduction(+:pvol) reduction(+:vol) reduction(+:dflux) &
 !$omp reduction(+:tflux) reduction(+:bp_vol)
 do i=1,smesh%nc
@@ -232,11 +238,17 @@ do i=1,smesh%nc
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt))THEN
       IF(self%mode==0)THEN
-        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
-        + self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon))
+        itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
-        + .5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+        itor_loc = 0.5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
+      END IF
+      ! Handle anisotropic pressure
+      IF(ASSOCIATED(self%P_ani))THEN
+        CALL self%P_ani%interp(i,device%fe_rep%quad%pts(:,m),goptmp,pani)
+        CALL bcross_kappa_fun%interp(i,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
+        itor_loc = itor_loc + self%p_scale*pt(1)*(self%P%fp(psitmp(1))*pani(2)+self%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
+      ELSE
+        itor_loc = itor_loc + self%p_scale*pt(1)*self%P%Fp(psitmp(1))
       END IF
       itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
       centroid = centroid + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
@@ -272,6 +284,11 @@ pvol=pvol*self%psiscale*self%psiscale
 bp_vol=bp_vol*self%psiscale*self%psiscale
 dflux=dflux*self%psiscale
 tflux=tflux*self%psiscale
+IF(ASSOCIATED(bcross_kappa_fun%u))THEN
+  CALL bcross_kappa_fun%u%delete
+  DEALLOCATE(bcross_kappa_fun%u)
+  CALL bcross_kappa_fun%delete
+END IF
 CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_comp_globals
@@ -286,7 +303,7 @@ type(oft_lag_bginterp), target :: psi_geval
 real(8) :: itor_loc ! local toroidal current in integration
 real(8) :: itor ! toroidal current
 real(8) :: I_NI ! non-inductive F*F'
-real(8) :: eta_jsq ! eta*j_NI**2 
+real(8) :: eta_jsq ! eta*j_NI**2
 real(8) :: goptmp(3,3)
 real(8) :: v ! volume
 real(8) :: pt(3) ! radial coordinate
@@ -364,6 +381,7 @@ CALL hdf5_write(self%device%ncoils,filename,'tokamaker/NCOILS')
 NULLIFY(vals_tmp)
 CALL self%psi%get_local(vals_tmp)
 CALL hdf5_write(vals_tmp,filename,'tokamaker/PSI')
+DEALLOCATE(vals_tmp)
 CALL hdf5_write(self%coil_currs,filename,'tokamaker/COIL_CURRENTS')
 !---
 CALL hdf5_write(self%ffp_scale,filename,'tokamaker/FFP_SCALE')
@@ -467,6 +485,7 @@ IF(.NOT.success)THEN
   RETURN
 END IF
 CALL self%psi%restore_local(vals_tmp)
+DEALLOCATE(vals_tmp)
 CALL hdf5_read(self%coil_currs,filename,'tokamaker/COIL_CURRENTS',success=success)
 IF(.NOT.success)THEN
   error_string='Failed to read coil currents.'
@@ -867,8 +886,7 @@ do j=2,npsi
   IF(gseq%mode==0)THEN
     cout(j,2)=gseq%ffp_scale*gseq%I%f(psi_surf(1))+gseq%I%f_offset
   ELSE
-    cout(j,2)=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2) &
-    + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    cout(j,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2)
   END IF
   cout(j,3)=gseq%p_scale*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
   cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
@@ -891,8 +909,7 @@ cout(1,1)=x2
 IF(gseq%mode==0)THEN
   cout(1,2)=(gseq%ffp_scale*gseq%I%f(x2)+gseq%I%f_offset)
 ELSE
-  cout(1,2)=SQRT(gseq%ffp_scale*gseq%I%f(x2) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+  cout(1,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(x2) + gseq%I%f_offset**2)
 END IF
 cout(1,3)=gseq%p_scale*gseq%P%f(x2)/mu0
 cout(1,4)=(cout(3,4)-cout(2,4))*(x2-cout(2,1))/(cout(3,1)-cout(2,1)) + cout(2,4)
@@ -1132,10 +1149,8 @@ do j=1,nr
     fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
     ffprim(j)=gseq%I%fp(psi_surf)*((gseq%ffp_scale**2)*gseq%I%f(psi_surf)+gseq%ffp_scale*gseq%I%f_offset)
   ELSE
-    fptmp=SQRT(gseq%ffp_scale*gseq%I%f(psi_trace) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
-    fpol(j)=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    fptmp=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_trace) + gseq%I%f_offset**2)
+    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
     ffprim(j)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi_surf)
   END IF
   pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0
@@ -1414,8 +1429,7 @@ do j=1,nr
   IF(gseq%mode==0)THEN
     field%f_surf=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
   ELSE
-    field%f_surf=SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2) &
-      + gseq%I%f_offset*(1.d0-SIGN(1.d0,gseq%I%f_offset))
+    field%f_surf=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
   END IF
   field%bmax=0.d0
   field%stage_1=.TRUE.

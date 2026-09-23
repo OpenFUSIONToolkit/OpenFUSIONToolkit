@@ -433,7 +433,7 @@ end subroutine diagmat_apply_real
 subroutine diagmat_apply_comp(self,a,b)
 class(oft_diagmatrix), intent(inout) :: self
 class(oft_cvector), target, intent(inout) :: a !< Source field
-class(oft_cvector), intent(inout) :: b !< 
+class(oft_cvector), intent(inout) :: b !<
 DEBUG_STACK_PUSH
 if(b%n/=self%nr)call oft_abort('Row mismatch','diagmat_apply_comp',__FILE__)
 if(a%n/=self%nc)call oft_abort('Col mismatch','diagmat_apply_comp',__FILE__)
@@ -519,7 +519,7 @@ subroutine diagmat_delete(self)
 class(oft_diagmatrix), intent(inout) :: self
 IF(ASSOCIATED(self%D))THEN
   CALL self%D%delete
-  NULLIFY(self%D)
+  DEALLOCATE(self%D)
 END IF
 self%nr=0; self%nrg=0
 self%nc=0; self%ncg=0
@@ -644,7 +644,10 @@ if(present(diag))then
   !if(associated(self%D))then
   !  call diag%add(0.d0,1.d0,self%D)
   !else
-    if(associated(self%D))call self%D%delete
+    if(associated(self%D))THEN
+      call self%D%delete
+      DEALLOCATE(self%D)
+    end if
     call diag%new(self%D)
     !---Get diagonal matrix values
     CALL self%J%assemble(self%D)
@@ -811,7 +814,10 @@ DEBUG_STACK_PUSH
 !---
 NULLIFY(rdiag)
 if(present(diag))then
-  if(associated(self%D))call self%D%delete
+  if(associated(self%D))THEN
+    call self%D%delete
+    DEALLOCATE(self%D)
+  end if
   call diag%new(self%D)
   !---Get diagonal matrix values
   IF(ASSOCIATED(self%cJ))THEN

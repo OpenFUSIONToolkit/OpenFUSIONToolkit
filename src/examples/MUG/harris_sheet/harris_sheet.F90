@@ -121,7 +121,7 @@ CALL minv%apply(u,v)
 CALL u%scale(n0)
 CALL u%get_local(vec_vals)
 vec_vals = vec_vals / den_scale
-IF (linear) THEN
+IF(linear)THEN
     CALL mhd_sim%u0%restore_local(vec_vals,1)
     vec_vals = 0.d0
      CALL mhd_sim%u%restore_local(vec_vals,1)
@@ -132,7 +132,7 @@ END IF
 !---Set v_x initial condition
 CALL u%set(velx0)
 CALL u%get_local(vec_vals)
-IF (linear) THEN
+IF(linear)THEN
     CALL mhd_sim%u0%restore_local(vec_vals,2)
     vec_vals = 0.d0
      CALL mhd_sim%u%restore_local(vec_vals,2)
@@ -143,7 +143,7 @@ END IF
 !---Set v_y initial condition
 CALL u%set(vely0)
 CALL u%get_local(vec_vals)
-IF (linear) THEN
+IF(linear)THEN
     CALL mhd_sim%u0%restore_local(vec_vals,3)
     vec_vals = 0.d0
      CALL mhd_sim%u%restore_local(vec_vals,3)
@@ -154,7 +154,7 @@ END IF
 !---Set v_z initial condition
 CALL u%set(velz0)
 CALL u%get_local(vec_vals)
-IF (linear) THEN
+IF(linear)THEN
     CALL mhd_sim%u0%restore_local(vec_vals,4)
     vec_vals = 0.d0
      CALL mhd_sim%u%restore_local(vec_vals,4)
@@ -165,7 +165,7 @@ END IF
 !---Set T initial condition
 CALL u%set(t0)
 CALL u%get_local(vec_vals)
-IF (linear) THEN
+IF(linear)THEN
     CALL mhd_sim%u0%restore_local(vec_vals,5)
     vec_vals = 0.d0
      CALL mhd_sim%u%restore_local(vec_vals,5)
@@ -180,7 +180,7 @@ CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(psi0)
 CALL u%get_local(vec_vals)
-IF (linear) THEN 
+IF(linear)THEN
     CALL mhd_sim%u0%restore_local(vec_vals,6)
 ELSE
     CALL mhd_sim%u%restore_local(vec_vals,6)
@@ -190,7 +190,7 @@ CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
 CALL u%scale(psi0)
-IF (linear) THEN
+IF(linear)THEN
     CALL u%get_local(vec_vals)
     CALL mhd_sim%u%restore_local(vec_vals,6)
 ELSE
@@ -204,7 +204,7 @@ END IF
 !---Set By initial condition
 CALL u%set(by0)
 CALL u%get_local(vec_vals)
-IF (linear) THEN
+IF(linear)THEN
     CALL mhd_sim%u0%restore_local(vec_vals,7)
     vec_vals = 0.d0
      CALL mhd_sim%u%restore_local(vec_vals,7)
@@ -239,9 +239,9 @@ mhd_sim%mfnk=use_mfnk
 mhd_sim%linear=linear
 oft_env%pm=pm
 
-IF (linear) THEN
+IF(linear)THEN
   CALL mhd_sim%run_lin_simulation()
-ELSE 
+ELSE
   CALL mhd_sim%run_simulation()
 END IF
 
@@ -250,7 +250,7 @@ CALL xmhd_2d_plot(mhd_sim)
 CALL oft_finalize
 CONTAINS
 
-!! To set the initial conditions we define a set of functions 
+!! To set the initial conditions we define a set of functions
 !!
 !! The non-uniform initial conditions for this case is given by
 !! \f[ n_0 = (cosh(z / \lambda))^{-2} + n_{\infty} \f]

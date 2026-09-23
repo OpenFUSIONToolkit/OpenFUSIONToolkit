@@ -10,6 +10,7 @@ def run_command(command, cwd=None):
     errcode = pid.poll()
     return outs, errs, errcode
 
+
 def run_OFT(command, nproc, timeout, return_stdout=False):
     if nproc > 1:
         if int(os.environ.get('OFT_HAVE_MPI', 0)) == 1:
@@ -76,3 +77,7 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
         return True, std_out
     else:
         return True
+
+
+def approx_list(list, rel=None, abs=None):
+    return [pytest.approx(val, rel=rel, abs=abs) if val is not None else None for val in list]

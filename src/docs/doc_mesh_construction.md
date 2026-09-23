@@ -21,8 +21,6 @@ In most cases the \subpage doc_mesh_native "Native mesh format" should be used, 
 python conversion scripts to map from other formats. Some direct legacy interfaces are also available,
 but should only be used after interacting with an OFT developer.
   - \subpage doc_t3d
-  - \subpage doc_cubit
-  - \subpage doc_gmsh
 
 \section doc_mesh_construction_local Local Construction
 

@@ -247,18 +247,18 @@ END PROGRAM example3
 !!mesh volume 1
 !!
 !!set duplicate block elements off
-!!block 1 add volume 1 
+!!block 1 add volume 1
 !!block 1 element type tetra10
 !!
 !!set large exodus file on
 !!export Genesis  "cyl.g" overwrite block 1
 !!\endverbatim
 !!
-!! Once complete the mesh should be converted into the native mesh format using the `convert_cubit.py` script as
+!! Once complete the mesh should be converted into the native mesh format using the `OFT_convert_cubit.py` script as
 !! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
 !!
 !!\verbatim
-!!~$ python convert_cubit.py --in_file=cyl.g
+!!~$ python OFT_convert_cubit.py --in_file=cyl.g
 !!\endverbatim
 !!
 !!\subsection doc_marklin_ex1_gmsh Meshing with Gmsh
@@ -291,9 +291,9 @@ END PROGRAM example3
 !!~$ gmsh -3 -format mesh -optimize -clscale .2 -order 2 -o cyl.mesh cyl.geo
 !!\endverbatim
 !!
-!! Once complete the mesh should be converted into the native mesh format using the `convert_gmsh.py` script as
+!! Once complete the mesh should be converted into the native mesh format using the `OFT_convert_gmsh.py` script as
 !! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
 !!
 !!\verbatim
-!!~$ python convert_gmsh.py --in_file=cyl.mesh
+!!~$ python OFT_convert_gmsh.py --in_file=cyl.mesh
 !!\endverbatim

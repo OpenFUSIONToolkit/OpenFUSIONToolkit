@@ -29,7 +29,8 @@ USE oft_hexmesh_type, ONLY: hex_get_bary, hex_get_bary_gop, &
   hex_bary_pfcoords, hex_bary_efcoords, hex_bary_ecoords, hex_bary_fcoords
 USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_la_utils, ONLY: oft_matrix, oft_graph
-USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type, oft_afem_type
+USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type, oft_afem_type, &
+  bfem_delete, fem_delete
 IMPLICIT NONE
 #include "local.h"
 !------------------------------------------------------------------------------
@@ -38,12 +39,18 @@ IMPLICIT NONE
 type, extends(oft_fem_type) :: oft_h1_fem
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL() !< Needs docs
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsc => NULL() !< Needs docs
+CONTAINS
+  !> Delete H^1 FE object and free memory
+  PROCEDURE :: delete => oft_h1_delete
 end type oft_h1_fem
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(oft_bfem_type) :: oft_h1_bfem
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL() !< Needs docs
+CONTAINS
+  !> Delete H^1 FE object and free memory
+  PROCEDURE :: delete => oft_bh1_delete
 end type oft_h1_bfem
 !---Global Variables
 integer(i4), parameter :: oft_h1_id = 2 !< FE type ID
@@ -69,6 +76,17 @@ SELECT TYPE(source)
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_3D_h1_cast
+!------------------------------------------------------------------------------
+!> Destroy FE object
+!------------------------------------------------------------------------------
+SUBROUTINE oft_h1_delete(self)
+CLASS(oft_h1_fem), INTENT(inout) :: self
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%indsf))DEALLOCATE(self%indsf)
+IF(ASSOCIATED(self%indsc))DEALLOCATE(self%indsc)
+CALL fem_delete(self)
+DEBUG_STACK_POP
+END SUBROUTINE oft_h1_delete
 !---------------------------------------------------------------------------------
 !> Cast abstract FE type to 2D H^1 finite element type
 !!
@@ -90,6 +108,16 @@ SELECT TYPE(source)
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_2D_h1_cast
+!------------------------------------------------------------------------------
+!> Destroy FE object
+!------------------------------------------------------------------------------
+SUBROUTINE oft_bh1_delete(self)
+CLASS(oft_h1_bfem), INTENT(inout) :: self
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%indsf))DEALLOCATE(self%indsf)
+CALL bfem_delete(self)
+DEBUG_STACK_POP
+END SUBROUTINE oft_bh1_delete
 !------------------------------------------------------------------------------
 !> Construct H^1 scalar FE on each mesh level
 !!

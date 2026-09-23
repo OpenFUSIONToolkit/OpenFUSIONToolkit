@@ -10,7 +10,6 @@
 # Note: Script must be run from the root "src" directory.
 #
 #------------------------------------------------------------------------------
-from __future__ import print_function
 import sys
 import os
 import glob
@@ -189,7 +188,7 @@ if __name__ == '__main__':
             if (i % 2) == 0:
                 contents_split[i] = re.sub(eq_reg,r'\\f$\1\\f$',content_segment)
         contents = '```'.join(contents_split)
-        contents = contents.replace('```python','~~~~~~~~~~~~~{.py}') 
+        contents = contents.replace('```python','~~~~~~~~~~~~~{.py}')
         contents = contents.replace('```','~~~~~~~~~~~~~')
         # Write updated markdown file to doc directory
         with open("docs/generated/doc_{0}.md".format(file_name), 'w+') as fid:

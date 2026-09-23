@@ -212,7 +212,7 @@ type, public, extends(oft_solver) :: oft_ml_precond
   class(oft_vector), pointer :: r => NULL() !< Temporary vector
   class(oft_vector), pointer :: ucors => NULL() !< Temporary coarse vector
   class(oft_vector), pointer :: gcors => NULL() !< Temporary coarse vector
-  class(oft_ml_vecspace), pointer :: ml_vecspace => NULL() !< Multi-level vector space 
+  class(oft_ml_vecspace), pointer :: ml_vecspace => NULL() !< Multi-level vector space
 contains
   !> Apply smoother
   procedure :: apply => ml_precond_apply
@@ -349,6 +349,10 @@ if(its==0.or.gg==0.d0)then
   call p%delete
   call q%delete
   deallocate(p,q)
+  if(self%precond)then
+    CALL r%delete
+    DEALLOCATE(r)
+  end if
   if(associated(self%pre))then
     call s%delete
     deallocate(s)
@@ -397,6 +401,7 @@ call q%delete
 DEALLOCATE(p,q)
 if(self%precond)then
   call g%add(0.d0,1.d0,r)
+  CALL r%delete
   DEALLOCATE(r)
 end if
 if(associated(self%pre))then
@@ -442,7 +447,7 @@ END IF
 CALL xml_get_element(solver_node,"atol",current_node,ierr)
 IF(ierr==0)THEN
   CALL xml_read_content(current_node,read_real,iostat=ierr)
-  IF(ierr/=0)CALL oft_xml_abort("Error reading `atol` node","cg_setup_xml",__FILE__)    
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `atol` node","cg_setup_xml",__FILE__)
   IF(ASSOCIATED(read_real))THEN
     IF(SIZE(read_real)>1)THEN
       IF(SIZE(read_real)<val_level)CALL oft_abort("Not enough `atol` values specified","cg_setup_xml",__FILE__)

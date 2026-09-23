@@ -354,7 +354,7 @@ END PROGRAM MUG_sph_tilt
 !!/
 !!\endverbatim
 !!
-!! Once the post-processing run is complete `bin/build_xdmf.py` can be used to generate `*.xmf` files that can be loaded by
+!! Once the post-processing run is complete `bin/OFT_build_xdmf.py` can be used to generate `*.xmf` files that can be loaded by
 !! [VisIt](https://visit-dav.github.io/visit-website/index.html), [ParaView](https://www.paraview.org/), or other visualization programs.
 !!
 !! \image html MUG_tilt_ex-Fields.png "Magnetic field distribution of the initial (left) and final (right) states"
@@ -381,18 +381,18 @@ END PROGRAM MUG_sph_tilt
 !!mesh volume 1
 !!
 !!set duplicate block elements off
-!!block 1 add volume 1 
+!!block 1 add volume 1
 !!block 1 element type tetra10
 !!
 !!set large exodus file on
 !!export Genesis  "cyl_tilt.g" overwrite block 1
 !!\endverbatim
 !!
-!! Once complete the mesh should be converted into the native mesh format using the `convert_cubit.py` script as
+!! Once complete the mesh should be converted into the native mesh format using the `OFT_convert_cubit.py` script as
 !! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
 !!
 !!\verbatim
-!!~$ python convert_cubit.py --in_file=cyl_tilt.g
+!!~$ python OFT_convert_cubit.py --in_file=cyl_tilt.g
 !!\endverbatim
 !!
 !!\subsection doc_mug_sph_ex1_gmsh Meshing with Gmsh
@@ -425,9 +425,9 @@ END PROGRAM MUG_sph_tilt
 !!~$ gmsh -3 -format mesh -optimize -clscale .2 -order 2 -o cyl_tilt.mesh cyl_tilt.geo
 !!\endverbatim
 !!
-!! Once complete the mesh should be converted into the native mesh format using the `convert_gmsh.py` script as
+!! Once complete the mesh should be converted into the native mesh format using the `OFT_convert_gmsh.py` script as
 !! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
 !!
 !!\verbatim
-!!~$ python convert_gmsh.py --in_file=cyl_tilt.mesh
+!!~$ python OFT_convert_gmsh.py --in_file=cyl_tilt.mesh
 !!\endverbatim

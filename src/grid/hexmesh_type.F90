@@ -15,7 +15,7 @@ MODULE oft_hexmesh_type
 USE oft_base
 USE oft_gauss_quadrature, ONLY: set_quad_3d, oft_quad_type
 USE oft_lag_poly
-USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
+USE oft_mesh_type, ONLY: oft_mesh, mesh_destroy, cell_is_curved
 IMPLICIT NONE
 #include "local.h"
 PRIVATE
@@ -51,6 +51,8 @@ CONTAINS
   PROCEDURE :: quad_rule => hexmesh_quad_rule
   PROCEDURE :: tessellate => hexmesh_tessellate
   PROCEDURE :: tessellated_sizes => hexmesh_tessellated_sizes
+  !> Destroy mesh object
+  PROCEDURE :: delete => hexmesh_destroy
 END TYPE oft_hexmesh
 !---
 INTEGER(i4), PARAMETER :: hex_ed(2,12)=RESHAPE((/ & !< Hexahedron edge list
@@ -119,9 +121,20 @@ self%cell_ed=hex_ed
 self%cell_fc=hex_fc
 self%cell_fe=ABS(hex_fe)
 ALLOCATE(self%face_ed(2,4))
-self%face_ed=quad_ed  
+self%face_ed=quad_ed
 CALL self%set_order(1)
 END SUBROUTINE hexmesh_setup
+!------------------------------------------------------------------------------
+!> Destroy mesh object
+!------------------------------------------------------------------------------
+SUBROUTINE hexmesh_destroy(self)
+CLASS(oft_hexmesh), INTENT(inout) :: self
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%inodese))DEALLOCATE(self%inodese,self%inodesf,self%inodesc)
+IF(ASSOCIATED(self%xnodes))DEALLOCATE(self%xnodes)
+CALL mesh_destroy(self)
+DEBUG_STACK_POP
+END SUBROUTINE hexmesh_destroy
 !------------------------------------------------------------------------------
 !> Set maximum order of spatial mapping
 !------------------------------------------------------------------------------

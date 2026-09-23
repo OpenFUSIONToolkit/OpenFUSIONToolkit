@@ -19,7 +19,7 @@ package. During a run subroutines are used to output the plotting mesh \ref oft_
 add time steps \ref oft_io::hdf5_create_timestep "hdf5_create_timestep", and output solution fields ex. \ref
 oft_io::hdf5_spdata "hdf5_spdata". Mesh and field information created during these calls are stored in <code>*.h5</code>
 files in the run directory along with a text file `dump.dat` which contains metadata describing the fields. After
-a run has completed the script `build_xdmf.py` can be used to build XML descriptor files which can be read by VisIt
+a run has completed the script `OFT_build_xdmf.py` can be used to build XML descriptor files which can be read by VisIt
 to produce visualization.
 
 \subsection doc_oft_io_plotting_representation Field Representation

@@ -32,6 +32,7 @@ type, abstract :: tracer
   real(r8) :: tol = 1.d-4 !< Tolerance for ODE solver
   real(r8) :: t = 0.d0 !< Current time
   real(r8) :: dt = 0.d0 !< Timestep (for fixed step methods)
+  real(r8) :: tmax = 0.d0 !< Maximum time for integration
   real(r8) :: y(2) = 0.d0 !< Position in real coordinates (eg. X,Y)
   real(r8) :: dy(2) = 0.d0 !< Change in position in real coordinates (eg. X,Y)
   real(r8) :: f(3) = 0.d0 !< Logical position in cell
@@ -72,11 +73,10 @@ end interface
 !> Tracer implementation using LSODE as the ODE solver
 !---------------------------------------------------------------------------------
 type, extends(tracer) :: tracer_lsode
-  integer :: lrw = 0 !< Needs docs
-  integer :: liw = 0 !< Needs docs
-  integer :: itask = 0 !< Needs docs
-  integer :: istate = 0 !< Needs docs
-  real(r8) :: tout = 0.d0 !< Needs docs
+  integer :: lrw = 0 !< Size of LSODE floating point work array
+  integer :: liw = 0 !< Size of LSODE integer work array
+  integer :: itask = 0 !< Task identifier for LSODE
+  integer :: istate = 0 !< Internal state for LSODE
   integer, pointer, dimension(:) :: iwork => NULL() !< LSODE integer work array
   real(r8), pointer, dimension(:) :: rwork => NULL() !< LSODE floating point work array
 contains
@@ -84,6 +84,16 @@ contains
   procedure :: step => trace_advance_lsode
   procedure :: delete => trace_delete_lsode
 end type tracer_lsode
+!---------------------------------------------------------------------------------
+!> Tracer implementation using a simple forward Euler method as the ODE solver
+!---------------------------------------------------------------------------------
+type, extends(tracer) :: tracer_euler
+  real(r8), pointer :: dv_last(:) => NULL() !< ODE LHS at last step (for error estimation)
+contains
+  procedure :: setup => trace_setup_euler
+  procedure :: step => trace_advance_euler
+  procedure :: delete => trace_delete_euler
+end type tracer_euler
 !---------------------------------------------------------------------------------
 !> Abstract interpolation class for inverse mappings
 !---------------------------------------------------------------------------------
@@ -110,38 +120,14 @@ select case(type)
   case(1)
     allocate(tracer_lsode::active_tracer)
     active_tracer%status=0
+  case(2)
+    allocate(tracer_euler::active_tracer)
+    active_tracer%status=0
   case default
     call oft_abort('Invalid tracer type.','set_tracer',__FILE__)
 end select
 !$omp end parallel
 end subroutine set_tracer
-! !------------------------------------------------------------------------------
-! !> Trace field line for one flux surface transit
-! !------------------------------------------------------------------------------
-! subroutine tracing_fs(pt)
-! real(8), intent(in) :: pt(2) !< Starting point [2]
-! real(8) :: z,yp(2)
-! integer(4) :: ncross
-! !---
-! ncross=0
-! call active_tracer%setup(pt)
-! z=pt(2)
-! active_tracer%status=0
-! do while(active_tracer%nsteps<active_tracer%maxsteps)
-!   yp=active_tracer%y
-!   call active_tracer%step
-!   if(active_tracer%cell==0)then
-!     active_tracer%status=2
-!     EXIT
-!   END IF
-!   if(active_tracer%nsteps>1.AND.(active_tracer%y(2)-z)*(yp(2)-z)<0.d0)ncross=ncross+1
-!   if(ncross>1)then
-!     active_tracer%status=1
-!     exit
-!   end if
-! end do
-! if(active_tracer%status==0)active_tracer%status=3
-! end subroutine tracing_fs
 !------------------------------------------------------------------------------
 !> Trace field line for one flux surface transit in inverse coordinates
 !------------------------------------------------------------------------------
@@ -186,106 +172,6 @@ do while(active_tracer%nsteps<active_tracer%maxsteps)
 end do
 IF(active_tracer%nsteps>=active_tracer%maxsteps)active_tracer%status=-1
 end subroutine tracinginv_fs
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! subroutine tracing_surf(pt,filename)
-! real(8), intent(in) :: pt(2)
-! character(*), intent(in) :: filename
-! real(8) :: z,yp(2)
-! integer(4) :: ncross,io_unit
-! !---
-! open(NEWUNIT=io_unit,FILE=TRIM(filename)//".surf")
-! !---
-! ncross=0
-! call active_tracer%setup(pt)
-! z=pt(2)
-! do while(active_tracer%nsteps<active_tracer%maxsteps)
-!     yp=active_tracer%y
-!     call active_tracer%step
-!     if(active_tracer%cell==0)exit
-!     write(io_unit,'(4F14.6)')active_tracer%y,active_tracer%dy
-!     if(active_tracer%nsteps>1.AND.(active_tracer%y(2)-z)*(yp(2)-z)<0.d0)ncross=ncross+1
-!     if(ncross>1)then
-!         active_tracer%status=1
-!         exit
-!     end if
-! end do
-! !---
-! close(io_unit)
-! end subroutine tracing_surf
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! subroutine tracing_surfpts(pt,pts,b)
-! real(8), intent(in) :: pt(2)
-! real(8), pointer, intent(out) :: pts(:,:)
-! real(8), pointer, intent(out) :: b(:,:)
-! real(8), allocatable :: pttmp(:,:)
-! integer(4) :: ncross
-! real(8) :: yp(2),z
-! !---
-! ALLOCATE(pttmp(4,active_tracer%maxsteps))
-! !---
-! ncross=0
-! call active_tracer%setup(pt)
-! z=pt(2)
-! do while(active_tracer%nsteps<active_tracer%maxsteps)
-!     yp=active_tracer%y
-!     call active_tracer%step
-!     if(active_tracer%cell==0)exit
-!     pttmp(1:2,active_tracer%nsteps)=active_tracer%y
-!     pttmp(3:4,active_tracer%nsteps)=active_tracer%dy
-!     if(active_tracer%nsteps>1.AND.(active_tracer%y(2)-z)*(yp(2)-z)<0.d0)ncross=ncross+1
-!     if(ncross>1)then
-!         active_tracer%status=1
-!         exit
-!     end if
-! end do
-! !---
-! ALLOCATE(pts(2,active_tracer%nsteps),b(2,active_tracer%nsteps))
-! pts=pttmp(1:2,1:active_tracer%nsteps)
-! b=pttmp(3:4,1:active_tracer%nsteps)
-! DEALLOCATE(pttmp)
-! end subroutine tracing_surfpts
-! !------------------------------------------------------------------------------
-! !> Needs docs
-! !------------------------------------------------------------------------------
-! subroutine tracinginv_surf(pt,filename,ntheta)
-! real(8), intent(in) :: pt(2)
-! character(*), intent(in) :: filename
-! integer(4), optional, intent(in) :: ntheta
-! real(8) :: z,theta,yp(2)
-! integer(4) :: io_unit,ncross
-! !---
-! open(NEWUNIT=io_unit,FILE=TRIM(filename)//".surf")
-! !---
-! IF(present(ntheta))THEN
-!   theta=2*pi/ntheta
-! ELSE
-!   theta=0.d0
-! END IF
-! ncross=0
-! call active_tracer%setup(pt)
-! z=pt(2)
-! do while(active_tracer%nsteps<active_tracer%maxsteps)
-!     yp=active_tracer%y
-!     call active_tracer%step
-!     if(active_tracer%cell==0)exit
-!     IF(active_tracer%t>=theta)THEN
-!       write(io_unit,'(3F14.6)')active_tracer%t,active_tracer%y
-!       IF(present(ntheta))THEN
-!         theta=theta+2*pi/ntheta
-!       END IF
-!     END IF
-!     if(active_tracer%t>=2.d0*pi)then
-!         active_tracer%status=1
-!         exit
-!     end if
-! end do
-! !---
-! close(io_unit)
-! end subroutine tracinginv_surf
 !------------------------------------------------------------------------------
 !> Trace field line and save path to file
 !------------------------------------------------------------------------------
@@ -394,7 +280,7 @@ self%v=0.d0
 self%dv=0.d0
 !---
 self%t=0.d0
-self%tout=2.d0*pi
+self%tmax=2.d0*pi
 self%nsteps=0
 !---Find starting point
 self%cell=0
@@ -409,10 +295,11 @@ ELSE
 END IF
 !---
 self%y=y
+self%dy=0.d0
 pttmp=[self%y(1),self%y(2),0.d0]
 call bmesh_findcell(self%mesh,self%cell,pttmp,self%f)
 self%initialized=.TRUE.
-active_tracer%status=0
+self%status=0
 end subroutine trace_setup_lsode
 !------------------------------------------------------------------------------
 !> Advance the tracer one step using LSODE
@@ -420,11 +307,11 @@ end subroutine trace_setup_lsode
 subroutine trace_advance_lsode(self)
 class(tracer_lsode), intent(inout) :: self !< LSODE tracer object
 IF(self%inv)THEN
-  call dlsode(tracing_eval_Binv,self%neq,self%v,self%t,self%tout,1,self%tol, &
+  call dlsode(tracing_eval_Binv,self%neq,self%v,self%t,self%tmax,1,self%tol, &
     self%tol,self%itask,self%istate,0,self%rwork,self%lrw,self%iwork,self%liw, &
     tracing_eval_Binv,10)
 ELSE
-  call dlsode(tracing_eval_B,self%neq,self%v,self%t,self%tout,1,self%tol, &
+  call dlsode(tracing_eval_B,self%neq,self%v,self%t,self%tmax,1,self%tol, &
     self%tol,self%itask,self%istate,0,self%rwork,self%lrw,self%iwork,self%liw, &
     tracing_eval_B,10)
 END IF
@@ -443,4 +330,75 @@ IF(ASSOCIATED(self%iwork))deallocate(self%iwork)
 IF(ASSOCIATED(self%v))deallocate(self%v)
 IF(ASSOCIATED(self%dv))deallocate(self%dv)
 end subroutine trace_delete_lsode
+!------------------------------------------------------------------------------
+!> Initialize simple forward Euler tracer
+!------------------------------------------------------------------------------
+subroutine trace_setup_euler(self,y,cell)
+class(tracer_euler), intent(inout) :: self !< Tracer object
+real(8), intent(in) :: y(2) !< Initial position
+integer(4), optional, intent(in) :: cell !< Guess for starting cell
+real(8) :: pttmp(3)
+if(self%neq<=0)call oft_abort('Invalid number of equations.','trace_setup_euler',__FILE__)
+!---
+IF(.NOT.self%initialized)THEN
+  allocate(self%v(self%neq))
+  allocate(self%dv(self%neq))
+  allocate(self%dv_last(self%neq))
+END IF
+self%v=0.d0
+self%dv=0.d0
+self%dv_last=0.d0
+!---
+self%t=0.d0
+self%tmax=2.d0*pi
+self%dt=self%tmax/1.d4
+self%nsteps=0
+!---Find starting point
+self%cell=0
+if(present(cell))self%cell=cell
+IF(self%inv)THEN
+  self%v(1)=y(1)-self%raxis
+  self%v(2)=0.d0
+ELSE
+  self%v(1:2)=y
+END IF
+!---
+self%y=y
+self%dy=0.d0
+pttmp=[self%y(1),self%y(2),0.d0]
+call bmesh_findcell(self%mesh,self%cell,pttmp,self%f)
+self%initialized=.TRUE.
+self%status=0
+end subroutine trace_setup_euler
+!------------------------------------------------------------------------------
+!> Advance the tracer one step using a forward Euler method with adaptive timestep control
+!------------------------------------------------------------------------------
+subroutine trace_advance_euler(self)
+class(tracer_euler), intent(inout) :: self !< Tracer object
+self%dv_last=self%dv
+IF(self%inv)THEN
+  CALL tracing_eval_Binv(self%neq,self%t,self%v,self%dv)
+ELSE
+  CALL tracing_eval_B(self%neq,self%t,self%v,self%dv)
+END IF
+IF(self%t>0.d0)THEN ! Approximate error over last step and update timestep
+  self%dv_last=self%dt*(self%dv - self%dv_last)/2.d0 ! LTE = h^2 * y'' / 2 = h^2 * (yd_1 - yd_0)/(2*h)
+  self%dt=MIN(self%tol/SQRT(SUM(self%dv_last**2)),2.d0*self%dt)
+  IF(self%t+self%dt>self%tmax)self%dt=self%tmax-self%t ! Don't overshoot target time
+END IF
+self%v=self%v+self%dt*self%dv
+self%t=self%t+self%dt
+self%nsteps=self%nsteps+1
+end subroutine trace_advance_euler
+!------------------------------------------------------------------------------
+!> Destroy Euler tracer and deallocate internal storage
+!------------------------------------------------------------------------------
+subroutine trace_delete_euler(self)
+class(tracer_euler), intent(inout) :: self !< Tracer object
+self%nsteps=0
+self%initialized=.FALSE.
+IF(ASSOCIATED(self%v))deallocate(self%v)
+IF(ASSOCIATED(self%dv))deallocate(self%dv)
+IF(ASSOCIATED(self%dv_last))deallocate(self%dv_last)
+end subroutine trace_delete_euler
 end module tracing_2d
