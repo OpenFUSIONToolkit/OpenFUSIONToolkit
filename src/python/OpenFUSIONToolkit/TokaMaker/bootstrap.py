@@ -911,19 +911,18 @@ def solve_with_bootstrap(mygs,
         # Gradients (using raw psi for derivatives); edge_order=2 is required, the
         # first-order default is badly inaccurate at the axis and separatrix
         psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
+        if psi_range == 0.0:
+            raise ValueError("Degenerate equilibrium: psi_bounds are equal")
 
-        # Avoid division by zero; psi_range itself is reused unclamped below
-        psi_range_safe = psi_range if psi_range != 0 else 1e-9
-
-        pprime_local = numpy.gradient(pressure, psi_N, edge_order=2) / psi_range_safe
+        pprime_local = numpy.gradient(pressure, psi_N, edge_order=2) / psi_range
 
         j_BS_final = numpy.zeros_like(pressure)
 
         if include_jBS:
-            dn_e_dpsi = numpy.gradient(ne, psi_N, edge_order=2) / psi_range_safe
-            dT_e_dpsi = numpy.gradient(Te, psi_N, edge_order=2) / psi_range_safe
-            dn_i_dpsi = numpy.gradient(ni, psi_N, edge_order=2) / psi_range_safe
-            dT_i_dpsi = numpy.gradient(Ti, psi_N, edge_order=2) / psi_range_safe
+            dn_e_dpsi = numpy.gradient(ne, psi_N, edge_order=2) / psi_range
+            dT_e_dpsi = numpy.gradient(Te, psi_N, edge_order=2) / psi_range
+            dn_i_dpsi = numpy.gradient(ni, psi_N, edge_order=2) / psi_range
+            dT_i_dpsi = numpy.gradient(Ti, psi_N, edge_order=2) / psi_range
 
             if use_OMFIT_sauter:
                 j_BS_neo = sauter_bootstrap( # legacy OMFIT implementation

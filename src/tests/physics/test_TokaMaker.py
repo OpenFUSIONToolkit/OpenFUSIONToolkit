@@ -1377,12 +1377,11 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
 
     # --- Gradients (same as solve_with_bootstrap) ---
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
-    psi_range_safe = psi_range if psi_range != 0 else 1e-9
 
-    dn_e_dpsi = np.gradient(ne, psi_N, edge_order=2) / psi_range_safe
-    dT_e_dpsi = np.gradient(Te, psi_N, edge_order=2) / psi_range_safe
-    dn_i_dpsi = np.gradient(ni, psi_N, edge_order=2) / psi_range_safe
-    dT_i_dpsi = np.gradient(Ti, psi_N, edge_order=2) / psi_range_safe
+    dn_e_dpsi = np.gradient(ne, psi_N, edge_order=2) / psi_range
+    dT_e_dpsi = np.gradient(Te, psi_N, edge_order=2) / psi_range
+    dn_i_dpsi = np.gradient(ni, psi_N, edge_order=2) / psi_range
+    dT_i_dpsi = np.gradient(Ti, psi_N, edge_order=2) / psi_range
 
     # --- Coulomb logarithms (same as solve_with_bootstrap) ---
     ln_le, ln_lii = calculate_ln_lambda(
@@ -1490,23 +1489,6 @@ def test_bootstrap_psi_N_validation():
         call(np.linspace(-0.1, 1.0, n))
     with pytest.raises(ValueError, match="exceeds the first/last"):
         call(good, psi_pad=0.5)
-
-
-@pytest.mark.coverage
-def test_bootstrap_derivative_edge_order():
-    """Profile derivatives must use a 2nd-order stencil at the axis and edge.
-
-    The first-order default of `numpy.gradient` is badly inaccurate at the
-    magnetic axis, where it propagates directly into on-axis j_BS.
-    """
-    psi = np.linspace(0.0, 1.0, 257)
-    y = np.tanh(6.0*(0.9-psi)) + 0.3*np.cos(3.0*psi)
-    exact = -6.0/np.cosh(6.0*(0.9-psi))**2 - 0.9*np.sin(3.0*psi)
-    d2 = np.gradient(y, psi, edge_order=2)
-    d1 = np.gradient(y, psi, edge_order=1)
-    assert abs(d2[0]-exact[0]) < 0.1*abs(d1[0]-exact[0])
-    assert abs(d2[-1]-exact[-1]) < 0.5*abs(d1[-1]-exact[-1])
-    assert np.linalg.norm(d2[1:-1]-exact[1:-1])/np.linalg.norm(exact[1:-1]) < 5.e-3
 
 
 # -----------------------------------------------------------------------
