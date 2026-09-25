@@ -918,13 +918,13 @@ class reconstruction():
         @result Error flag
         '''
         # Check for possibly conflicting constraints
-        if self._tMaker_obj._tMaker_equil.Isoflux_constraints is not None:
+        if self._tMaker_obj._tMaker_equil[0].Isoflux_constraints is not None:
             oft_warning('Removing conflicting isoflux constraints from equilibrium object via `.set_isoflux_constraints(None)`')
             self._tMaker_obj.set_isoflux_constraints(None)
-        if self._tMaker_obj._tMaker_equil.Psi_constraints[0] is not None:
+        if self._tMaker_obj._tMaker_equil[0].Psi_constraints[0] is not None:
             oft_warning('Removing conflicting Psi constraints from equilibrium object via `.set_psi_constraints(None,None)`')
             self._tMaker_obj.set_psi_constraints(None,None)
-        if self._tMaker_obj._tMaker_equil.Saddle_constraints is not None:
+        if self._tMaker_obj._tMaker_equil[0].Saddle_constraints is not None:
             oft_warning('Removing conflicting saddle targets from equilibrium object via `.set_saddle_constraints(None)`')
             self._tMaker_obj.set_saddle_constraints(None)
         weight_chk = [self._tMaker_obj.settings.ffp_target_weight > 0.0, self._tMaker_obj.settings.pp_target_weight > 0.0, self._tMaker_obj.settings.opoint_target_weight > 0.0]
