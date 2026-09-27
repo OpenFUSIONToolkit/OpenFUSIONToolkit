@@ -2778,7 +2778,10 @@ DO i=1,self%maxits
   IF(SQRT(nl_res)<self%nl_tol)EXIT
 end do
 IF(oft_env%pm)CALL oft_decrease_indent
-IF(i>self%maxits)error_flag=-1
+IF(i>self%maxits)THEN
+  error_flag=-1
+  IF(map_fails>0)error_flag=-9 ! Ran out of iterations on a stale toroidal flux map
+END IF
 IF(error_flag==0)THEN
   self%nl_its=i
 ELSE
