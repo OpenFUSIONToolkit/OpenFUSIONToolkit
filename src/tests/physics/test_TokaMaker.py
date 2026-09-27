@@ -1227,7 +1227,6 @@ ITER_bootstrap_eq_dict = {
     'bs_fraction': 0.15830066097468243,
 }
 
-@pytest.mark.slow
 @pytest.mark.parametrize("order", (2,))
 def test_ITER_bootstrap(order):
     results = mp_run(run_ITER_bootstrap_case, (1.0, order), timeout=300)
@@ -1450,7 +1449,6 @@ Redl_jBS_eq_dict = {
 }
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("order", (2,))
 def test_Redl_jBS(order):
     results = mp_run(run_Redl_jBS_case, (1.0, order), timeout=300)
@@ -1485,8 +1483,12 @@ def test_bootstrap_psi_N_validation():
         call(unsorted_grid)
     with pytest.raises(ValueError, match="non-finite"):
         call(nan_grid)
-    with pytest.raises(ValueError, match=r"within \[0,1\]"):
+    with pytest.raises(ValueError, match="span"):
         call(np.linspace(-0.1, 1.0, n))
+    with pytest.raises(ValueError, match="span"):
+        call(np.linspace(0.3, 1.0, n))
+    with pytest.raises(ValueError, match="span"):
+        call(np.linspace(0.0, 0.5, n))
     with pytest.raises(ValueError, match="exceeds the first/last"):
         call(good, psi_pad=0.5)
 

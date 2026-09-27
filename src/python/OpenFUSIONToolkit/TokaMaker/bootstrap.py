@@ -875,8 +875,8 @@ def solve_with_bootstrap(mygs,
             raise ValueError("psi_N contains non-finite values")
         if numpy.any(numpy.diff(psi_N) <= 0.0):
             raise ValueError("psi_N must be strictly increasing")
-        if (psi_N[0] < 0.0) or (psi_N[-1] > 1.0):
-            raise ValueError("psi_N must lie within [0,1] ({0}, {1})".format(psi_N[0], psi_N[-1]))
+        if not (numpy.isclose(psi_N[0], 0.0) and numpy.isclose(psi_N[-1], 1.0)):
+            raise ValueError("psi_N must span [0,1] ({0}, {1})".format(psi_N[0], psi_N[-1]))
 
     # Equilibrium quantities are sampled on the profile grid, with endpoints clipped
     # because the flux-surface tracer cannot resolve the axis or separatrix
@@ -890,7 +890,7 @@ def solve_with_bootstrap(mygs,
         ip_computed = mygs.flux_integral(psi_N, j_total)
         return ip_computed - target_ip
 
-    def calculate_profiles_and_bootstrap(psi_N, include_jBS):
+    def calculate_profiles_and_bootstrap(include_jBS):
         '''
         Main physics calculation:
         1. Gets geometry from current equilibrium (self).
@@ -1024,7 +1024,7 @@ def solve_with_bootstrap(mygs,
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-            psi_N, include_jBS=True
+            include_jBS=True
         )
 
         # Enforce P' edge condition
@@ -1040,7 +1040,7 @@ def solve_with_bootstrap(mygs,
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-            psi_N, include_jBS=True
+            include_jBS=True
         )
 
         # Enforce P' edge condition
@@ -1063,7 +1063,7 @@ def solve_with_bootstrap(mygs,
         for n in range(iterations):
             # Calculate new profiles
             pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-                psi_N, include_jBS=True
+                include_jBS=True
             )
 
             # Enforce P' edge condition
