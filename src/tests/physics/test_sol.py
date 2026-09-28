@@ -1,20 +1,23 @@
+import os
+import sys
 import pytest
-
+import numpy as np
+test_dir = os.path.abspath(os.path.dirname(__file__))
+sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from OpenFUSIONToolkit import OFT_env
+from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import load_gs_mesh
-from OpenFUSIONToolkit.TokaMaker.reconstruction import reconstruction
-from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk, read_mhdin, read_kfile
+from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk
+from test_TokaMaker import mp_run
 
-import numpy as np
 
-@pytest.mark.coverage
-def test_current_consistent():
+def run_sol_case(mp_q):
     myOFT = OFT_env(nthreads=2)
     mygs = TokaMaker(myOFT)
 
-    mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('./src/examples/TokaMaker/DIIID/DIIID_mesh.h5')
-    eqdsk = read_eqdsk('./src/examples/TokaMaker/DIIID/g192185.02440')
+    mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('DIIID_mesh.h5')
+    eqdsk = read_eqdsk('g192185.02440')
     mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order = 2, F0 = eqdsk['rcentr']*eqdsk['bcentr'])
@@ -77,7 +80,7 @@ def test_current_consistent():
     x_sol = np.linspace(1.01, 1.3, 25)
     x_ffp = np.append(x, x_sol)
 
-    ffprim = np.append(ffprim, len(x_sol) * [0.0]) 
+    ffprim = np.append(ffprim, len(x_sol) * [0.0])
 
     def supergaussian(psi_n, centr, std=0.05):
         return np.exp(-(psi_n - centr) ** 4 / (2 * std**4))
@@ -93,7 +96,11 @@ def test_current_consistent():
     delta = -0.4
 
     mygs.init_psi(R0, Z0, a, kappa, delta)
-    _ = mygs.solve()
+    try:
+        mygs.solve()
+    except ValueError:
+        mp_q.put(None)
+        return
 
     eq_stats = mygs.get_stats()
     stats_Ip = eq_stats['Ip']
@@ -111,5 +118,14 @@ def test_current_consistent():
         area = 0.5 * np.linalg.norm(np.cross(v2-v1, v3-v1))
         jtot += (j_dens[idx1] + j_dens[idx2] + j_dens[idx3]) * area / 3.0
 
+    mp_q.put([stats_Ip, jtot])
+    oftpy_dump_cov()
+
+
+@pytest.mark.coverage
+def test_current_consistent():
+    results = mp_run(run_sol_case,(),timeout=60)
+    assert results is not None, "FAILED: error in solve!"
+    stats_Ip, jtot = results
     err = np.abs((jtot - stats_Ip) / stats_Ip)
     assert err < 0.001
