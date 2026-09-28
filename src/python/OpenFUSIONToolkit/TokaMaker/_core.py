@@ -14,7 +14,6 @@ import collections
 import ctypes
 from warnings import warn
 import numpy
-from scipy.special import ellipk, ellipe
 from scipy.linalg import lu_factor, lu_solve
 from ._interface import *
 from .util import eval_green
@@ -2246,7 +2245,8 @@ class TokaMaker():
 
                 dist, _ = plasma_tree.query(centroid)
                 n_close = max(1, int(proximity_frac * len(dist)))
-                close = numpy.argsort(dist) < n_close
+                close = numpy.zeros(len(dist), dtype=bool)
+                close[numpy.argsort(dist)[:n_close]] = True
 
                 # Break up passive conductors
                 p0c, p1c, p2c = self._refine_triangles(p0[close], p1[close], p2[close], n_refine_vessel)
@@ -2380,21 +2380,6 @@ class TokaMaker():
         dz = 1.E-4
         return (self._mutual_inductance(R1, Z1 + dz, R2, Z2) - 2 * self._mutual_inductance(R1, Z1, R2, Z2)
                 + self._mutual_inductance(R1, Z1 - dz, R2, Z2)) / dz**2
-
-    def _region_geometry(self, reg_id, r, lc, reg):
-        r'''! Centroid R,Z and area of every mesh triangle belonging to a given region id.
-        
-        @param reg_id Region id to select.
-        @param r Node coordinates [n_nodes,>=2].
-        @param lc Triangle connectivity [n_cells,3], 0-indexed.
-        @param reg Per-cell region id [n_cells].
-        @result R, Z, area arrays, one entry per matching triangle.
-        '''
-        tris = lc[reg == reg_id]
-        p0, p1, p2 = r[tris[:, 0], :2], r[tris[:, 1], :2], r[tris[:, 2], :2]
-        area = 0.5 * numpy.abs((p1[:, 0] - p0[:, 0]) * (p2[:, 1] - p0[:, 1]) - (p2[:, 0] - p0[:, 0]) * (p1[:, 1] - p0[:, 1]))
-        centroid = (p0 + p1 + p2) / 3.0
-        return centroid[:, 0], centroid[:, 1], area
 
 
 class TokaMaker_equilibrium():
