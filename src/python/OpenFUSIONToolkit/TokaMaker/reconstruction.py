@@ -105,7 +105,7 @@ class Ip_con:
         @param val Value of constraint
         @param err Error in constraint
         '''
-        if val <= 0.0:
+        if val is not None and val <= 0.0:
             raise ValueError("Plasma current constraint must be positive")
         self.val = val
         self.err = err
@@ -204,7 +204,7 @@ class Press_con:
         @param val Value of pressure constraint
         @param err Error in constraint
         '''
-        if val <= 0.0:
+        if val is not None and val <= 0.0:
             raise ValueError("Plasma pressure constraints must be positive")
         self.loc = loc
         self.val = val
@@ -582,6 +582,7 @@ class reconstruction():
         self._mirnovs = []
         self._saddles = []
         self._pressure_cons = []
+        self._coil_current_cons = []
 
     def write_fit_in(self):
         '''! Create reconstruction input file for specified constraints'''
