@@ -14,6 +14,7 @@ import numpy
 import h5py
 import scipy
 from ._interface import *
+from ._homology_cli import compute_homology
 from ..io import build_XDMF
 from warnings import warn
 
@@ -32,10 +33,11 @@ class ThinCurr():
         self._oft_env.oft_in_groups['thincurr_hodlr_options'] = {
             'target_size': '1200',
             'aca_min_its': '20',
-            'L_svd_tol': '1.E-8',
+            'aca_sep_thresh': '1.0,1.1',
+            'L_svd_tol': '-1.E-5',
             'L_aca_rel_tol': '0.05',
-            'B_svd_tol': '1.E-3',
-            'B_aca_rel_tol': '0.05',
+            'B_svd_tol': '-1.E-5',
+            'B_aca_rel_tol': '0.05'
         }
         self._oft_env.update_oft_in()
         ## Thin-wall model object
@@ -96,7 +98,7 @@ class ThinCurr():
   |_| |_| |_|_|_| |_|\____\__,_|_|  |_|
 ''')
 
-    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0):
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0,no_verify_holes=False):
         '''! Setup ThinCurr model
 
         @param r Point list `(np,3)`
@@ -106,6 +108,7 @@ class ThinCurr():
         @param pmap Point map for periodic grids
         @param xml_filename Path to XML file for model
         @param jumper_start Index of first jumper nodeset in meshfile (positive values Fortran style, negative values Python style)
+        @param no_verify_holes Skip verification of mesh and model
         '''
         if self.nregs != -1:
             raise ValueError('Mesh already setup, delete or create new instance for new model')
@@ -115,6 +118,12 @@ class ThinCurr():
         if mesh_file is not None:
             if (r is not None) or (lc is not None) or (reg is not None):
                 raise ValueError('Specification of "mesh_file" is incompatible with specification of "r", "lc", and "reg"')
+            if no_verify_holes:
+                print('Skipping mesh hole and closure verification...')
+            else:
+                print('Verifying mesh holes and closures...')
+                compute_homology(mesh_file, verify_only=True)
+                print()
             idummy = c_int(-1)
             rfake = numpy.ones((1,1),dtype=numpy.float64)
             lcfake = numpy.ones((1,1),dtype=numpy.int32)
@@ -164,6 +173,59 @@ class ThinCurr():
         self.n_vcoils = sizes[6]
         self.nelems = sizes[7]
         self.n_icoils = sizes[8]
+        #
+        self.n_coils = self.n_vcoils + self.n_icoils
+        self.coils = {}
+        for i in range(self.n_coils):
+            coil_name = ctypes.create_string_buffer(b"",41)
+            vcoil_flag = c_bool()
+            error_string = self._oft_env.get_c_errorbuff()
+            thincurr_get_coil_name(self.tw_obj,c_int(i+1),coil_name,ctypes.byref(vcoil_flag),error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value.decode())
+            coil_name = coil_name.value.decode()
+            if coil_name in self.coils:
+                raise ValueError('Duplicate coil name "{0}" in model'.format(coil_name))
+            self.coils[coil_name] = {
+                'id': i+1,
+                'type': 'vcoil' if vcoil_flag.value else 'icoil'
+            }
+
+    def update_coil_types(self,vcoils=[],icoils=[]):
+        '''! Update coil types for ThinCurr model
+
+        @note Any coil names not specified in `vcoils` or `icoils` will be left unchanged.
+
+        @note Must be called after `setup_model()` and before `compute_Mcoil()` to be effective.
+
+        @param vcoils List of names of voltage-specified coils
+        @param icoils List of names of current-specified coils
+        '''
+        vcoil_flags = numpy.array([self.coils[coil_name]['type'] == 'vcoil' for coil_name in self.coils], dtype=numpy.int32)
+        for coil_name in vcoils:
+            if coil_name not in self.coils:
+                raise ValueError('Coil name "{0}" not found in model'.format(coil_name))
+            vcoil_flags[self.coils[coil_name]['id']-1] = 1
+        for coil_name in icoils:
+            if coil_name not in self.coils:
+                raise ValueError('Coil name "{0}" not found in model'.format(coil_name))
+            vcoil_flags[self.coils[coil_name]['id']-1] = 0
+        error_string = self._oft_env.get_c_errorbuff()
+        thincurr_set_coil_types(self.tw_obj,vcoil_flags,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value.decode())
+        self.n_vcoils = numpy.sum(vcoil_flags)
+        self.n_icoils = self.n_coils - self.n_vcoils
+        self.nelems = self.np_active + self.nholes + self.n_vcoils
+        # Resync with Fortran model
+        for i in range(self.n_coils):
+            coil_name = ctypes.create_string_buffer(b"",41)
+            vcoil_flag = c_bool()
+            error_string = self._oft_env.get_c_errorbuff()
+            thincurr_get_coil_name(self.tw_obj,i+1,coil_name,ctypes.byref(vcoil_flag),error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value.decode())
+            self.coils[coil_name.value.decode()]['type'] = 'vcoil' if vcoil_flag.value else 'icoil'
 
     def setup_io(self,basepath=None,save_debug=False,legacy_hdf5=False):
         '''! Setup XDMF+HDF5 I/O for 3D visualization
@@ -266,6 +328,36 @@ class ThinCurr():
         thincurr_scale_va(self.tw_obj,data_in,div_flag)
         return data_in
 
+    def set_hodlr_options(self,target_size=None,aca_min_its=None,aca_sep_thresh=None,L_svd_tol=None,
+                          L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None):
+        '''! Set HODLR options for ThinCurr model
+
+        @param target_size Target size for HODLR blocks
+        @param aca_min_its Minimum number of ACA iterations
+        @param aca_sep_thresh Separation threshold for ACA vs SVD (tuple of 2 values: [lowest level, all other levels])
+        @param L_svd_tol Tolerance for SVD compression of L-matrix blocks
+        @param L_aca_rel_tol Relative tolerance for ACA compression of L-matrix blocks
+        @param B_svd_tol Tolerance for SVD compression of B-matrix blocks
+        @param B_aca_rel_tol Relative tolerance for ACA compression of B-matrix blocks
+        '''
+        if target_size is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
+        if aca_min_its is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['aca_min_its'] = '{0:d}'.format(aca_min_its)
+        if aca_sep_thresh is not None:
+            if len(aca_sep_thresh) != 2:
+                raise ValueError('"aca_sep_thresh" must be a tuple of 2 values')
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['aca_sep_thresh'] = '{0:.4E}, {1:.4E}'.format(aca_sep_thresh[0],aca_sep_thresh[1])
+        if L_svd_tol is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['L_svd_tol'] = '{0:.4E}'.format(L_svd_tol)
+        if L_aca_rel_tol is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['L_aca_rel_tol'] = '{0:.4E}'.format(L_aca_rel_tol)
+        if B_svd_tol is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['B_svd_tol'] = '{0:.4E}'.format(B_svd_tol)
+        if B_aca_rel_tol is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['B_aca_rel_tol'] = '{0:.4E}'.format(B_aca_rel_tol)
+        self._oft_env.update_oft_in()
+
     def compute_Lmat(self,cache_file=None,use_hodlr=False):
         '''! Compute the self-inductance matrix for this model
 
@@ -304,10 +396,11 @@ class ThinCurr():
             thincurr_apply_Lmat(self.tw_obj,field_in,c_void_p())
         return field_in
 
-    def compute_Bmat(self,cache_file=None):
+    def compute_Bmat(self,cache_file=None,B_dx=-1.E-2):
         '''! Compute magnetic field reconstruction operators for this model
 
         @param cache_file Path to cache file to store/load matrix
+        @param B_dx Spatial step size for finite difference evaluation of B-field (negative values for relative sizing)
         @result Element B-field reconstruction matrix (`(:,:)` if HODLR is available else `None`)
         @result Icoil B-field reconstruction matrix `(:,:)`
         '''
@@ -319,9 +412,9 @@ class ThinCurr():
         Bdr_ptr = c_void_p()
         error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
-            thincurr_Bmat(self.tw_obj,self.Lmat_hodlr,ctypes.byref(Bmat_loc),ctypes.byref(Bdr_ptr),cache_string,error_string)
+            thincurr_Bmat(self.tw_obj,self.Lmat_hodlr,B_dx,ctypes.byref(Bmat_loc),ctypes.byref(Bdr_ptr),cache_string,error_string)
         else:
-            thincurr_Bmat(self.tw_obj,c_void_p(),ctypes.byref(Bmat_loc),ctypes.byref(Bdr_ptr),cache_string,error_string)
+            thincurr_Bmat(self.tw_obj,c_void_p(),B_dx,ctypes.byref(Bmat_loc),ctypes.byref(Bdr_ptr),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         if self.Lmat_hodlr:
@@ -610,12 +703,13 @@ class ThinCurr():
             raise Exception(error_string.value.decode())
         return result
 
-    def run_td(self,dt,nsteps,coil_currs=None,coil_volts=None,full_volts=None,direct=False,
+    def run_td(self,dt=None,nsteps=None,times=None,coil_currs=None,coil_volts=None,full_volts=None,direct=False,
                status_freq=10,plot_freq=10,sensor_obj=None,sensor_values=None,lin_tol=1.E-6,lin_rtol=1.E-4,timestep_cn=True):
         '''! Perform a time-domain simulation
 
         @param dt Time step for simulation
         @param nsteps Number of steps to take
+        @param times Simulation time array [s]
         @param coil_currs Current vs time array for Icoils `(:,n_icoils+1)` (first column is time)
         @param coil_volts Voltage vs time array for Vcoils `(:,n_vcoils+1)` (first column is time)
         @param full_volts Voltage vs time array for Vcoils `(:,nelems+1)` (first column is time)
@@ -669,13 +763,30 @@ class ThinCurr():
                 raise ValueError("# of voltages in waveform does not match # of vcoils")
             nvolt = c_int(coil_volts.shape[0])
             coil_volts = numpy.ascontiguousarray(coil_volts.transpose(), dtype=numpy.float64)
+        if times is not None:
+            times = numpy.asarray(times, dtype=numpy.float64)
+            if (times.ndim != 1) or (times.size < 2) or not numpy.all(numpy.isfinite(times)) or numpy.any(numpy.diff(times) <= 0.0):
+                raise ValueError('"times" must be a finite, strictly increasing 1D array with at least two entries')
+            times = numpy.ascontiguousarray(times)
+            if nsteps is not None:
+                raise ValueError('"nsteps" should not be specified if "times" is specified')
+            if dt is not None:
+                raise ValueError('"dt" should not be specified if "times" is specified')
+            nsteps = times.shape[0]-1
+        else:
+            if dt is not None:
+                if nsteps is None:
+                    raise ValueError('"nsteps" must be specified if "dt" is specified')
+                times = numpy.arange(0.0,dt*(nsteps+1),dt,dtype=numpy.float64)
+            else:
+                raise ValueError('Either "dt" or "times" must be specified')
         error_string = self._oft_env.get_c_errorbuff()
         if self.Lmat_hodlr:
-            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_double(lin_tol),c_double(lin_rtol),c_bool(timestep_cn),
+            thincurr_time_domain(self.tw_obj,c_bool(direct),times,c_int(nsteps),c_double(lin_tol),c_double(lin_rtol),c_bool(timestep_cn),
                                  c_int(status_freq),c_int(plot_freq),vec_ic,sensor_ptr,ncurr,coil_currs,nvolt,coil_volts,volts_full,
                                  sensor_values_ptr,self.Lmat_hodlr,error_string)
         else:
-            thincurr_time_domain(self.tw_obj,c_bool(direct),c_double(dt),c_int(nsteps),c_double(lin_tol),c_double(lin_rtol),c_bool(timestep_cn),
+            thincurr_time_domain(self.tw_obj,c_bool(direct),times,c_int(nsteps),c_double(lin_tol),c_double(lin_rtol),c_bool(timestep_cn),
                                  c_int(status_freq),c_int(plot_freq),vec_ic,sensor_ptr,ncurr,coil_currs,nvolt,coil_volts,volts_full,
                                  sensor_values_ptr,c_void_p(),error_string)
         if error_string.value != b'':

@@ -4898,6 +4898,9 @@ CALL u%delete
 CALL uc%delete
 CALL up%delete
 DEALLOCATE(u,uc,up)
+CALL lminv%delete(propogate=.TRUE.)
+CALL lmop%delete
+DEALLOCATE(lminv,lmop)
 !--- plotting fields
 CALL x%delete
 CALL ap%delete

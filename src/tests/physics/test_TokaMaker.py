@@ -48,7 +48,11 @@ def validate_dict(results,dict_exp,tol_dict=None):
     default_tol = {
         'delta': 5.E-2,
         'deltaU': 5.E-2,
-        'deltaL': 5.E-2
+        'deltaL': 5.E-2,
+        # R at a Z extremum is taken from the nearest traced point, so it carries
+        # O(dtheta) sampling error and moves with element order and mesh resolution
+        'fsa_R_at_Zmin': 2.E-2,
+        'fsa_R_at_Zmax': 2.E-2
     }
     if tol_dict is None:
         tol_dict = default_tol
@@ -619,6 +623,11 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
         eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
         eq_info['Lplasma'] = Lmat[-1,-1]
         eq_info['nl_its'] = nl_its
+        # Flux surface averages and per-surface shape parameters (see `get_fsa`)
+        fsa = EQ_obj.get_fsa(psi=np.r_[0.25, 0.5, 0.9])
+        for key in ('q', 'F', 'dV/dPsi', '<|grad psi|>', '<|grad psi|^2>', '<Bp^2>',
+                    '<1/B^2>', 'R_min', 'R_max', 'Z_min', 'Z_max', 'R_at_Zmin', 'R_at_Zmax'):
+            eq_info['fsa_' + key] = fsa[key].tolist()
     if test_type.startswith('recon'):
         import random
         from OpenFUSIONToolkit.TokaMaker.reconstruction import reconstruction
@@ -779,7 +788,7 @@ ITER_eq_dict = {
     'q_95': 2.7602989886308738,
     'P_ax': 619225.017325726,
     'W_MHD': 242986393.97329777,
-    'beta_pol': 42.443587820489455,
+    'beta_pol': 42.427927348488936,
     'dflux': 1.540293464599462,
     'tflux': 121.86081608235014,
     'l_i': 0.9054096856166233,
@@ -787,7 +796,21 @@ ITER_eq_dict = {
     'beta_n': 1.1951205307278518,
     'LCS1': 2.4858609418809336e-06,
     'MCS1_plasma': 8.931779419000401e-07,
-    'Lplasma': 1.1900576990802187e-05
+    'Lplasma': 1.1900576990802187e-05,
+    # Flux surface averages and shape at psi_N = [0.25, 0.5, 0.9] (see `get_fsa`)
+    'fsa_q': [0.8957740190095893, 1.0925386896870009, 2.244697561979323],
+    'fsa_F': [33.974461335230956, 33.24150425404669, 32.863767384960504],
+    'fsa_dV/dPsi': [-40.809941802973256, -48.739421299593786, -88.3635676135186],
+    'fsa_<|grad psi|>': [6.631303992418605, 8.12645638205315, 6.722632628048097],
+    'fsa_<|grad psi|^2>': [44.962611735546105, 68.65358375003274, 53.596719328235814],
+    'fsa_<Bp^2>': [1.1232107307935824, 1.7334030132908238, 1.3698497417461675],
+    'fsa_<1/B^2>': [0.03394218780262852, 0.03459374214812227, 0.03358354423001478],
+    'fsa_R_min': [5.462226095551001, 5.036393890349691, 4.409277529477673],
+    'fsa_R_max': [7.220524711028818, 7.593373222623317, 8.085943200676986],
+    'fsa_Z_min': [-0.7383764856169046, -1.3583537534271921, -2.508416991476664],
+    'fsa_Z_max': [1.8005752842848168, 2.414360593511412, 3.5092131308630288],
+    'fsa_R_at_Zmin': [6.304387105351003, 6.204424153705717, 5.796505368206957],
+    'fsa_R_at_Zmax': [6.272540830880864, 6.157453542216596, 5.750257254804224],
 }
 
 @pytest.mark.coverage
@@ -799,6 +822,11 @@ def test_ITER_eq(order,helicity):
     eq_dict['dflux'] *= helicity
     eq_dict['q_0'] *= helicity
     eq_dict['q_95'] *= helicity
+    # `q` and `F` follow the sign of F0; the remaining `fsa_*` entries are invariant.
+    # Rebind rather than scale in place: `ITER_eq_dict.copy()` is shallow, so mutating
+    # these lists would leak into the other parametrized runs.
+    eq_dict['fsa_q'] = [val*helicity for val in eq_dict['fsa_q']]
+    eq_dict['fsa_F'] = [val*helicity for val in eq_dict['fsa_F']]
     results = mp_run(run_ITER_case,(1.0,(order,),'',helicity))
     assert validate_dict(results,eq_dict)
     assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)
@@ -814,6 +842,11 @@ def test_ITER_eq_io(order,helicity):
     eq_dict['dflux'] *= helicity
     eq_dict['q_0'] *= helicity
     eq_dict['q_95'] *= helicity
+    # `q` and `F` follow the sign of F0; the remaining `fsa_*` entries are invariant.
+    # Rebind rather than scale in place: `ITER_eq_dict.copy()` is shallow, so mutating
+    # these lists would leak into the other parametrized runs.
+    eq_dict['fsa_q'] = [val*helicity for val in eq_dict['fsa_q']]
+    eq_dict['fsa_F'] = [val*helicity for val in eq_dict['fsa_F']]
     results = mp_run(run_ITER_case,(1.0,(order,),'io',helicity))
     assert validate_dict(results,eq_dict)
 

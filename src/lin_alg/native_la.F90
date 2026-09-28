@@ -237,6 +237,8 @@ contains
   procedure :: zero => dense_mat_zero
   !> Zero all elements in a given row
   procedure :: zero_rows => dense_mat_zero_rows
+  !> Delete matrix
+  procedure :: delete => dense_mat_delete
 end type oft_native_dense_matrix
 !---------------------------------------------------------------------------------
 !> Native dense complex matrix implementation
@@ -260,6 +262,8 @@ contains
   procedure :: zero => dense_cmat_zero
   !> Zero all elements in a given row
   procedure :: zero_rows => dense_cmat_zero_rows
+  !> Delete matrix
+  procedure :: delete => dense_cmat_delete
 end type oft_native_dense_cmatrix
 INTERFACE
 !------------------------------------------------------------------------------

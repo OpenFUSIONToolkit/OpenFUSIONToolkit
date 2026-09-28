@@ -6,14 +6,14 @@ on:
       - main
   pull_request:
     types: [opened, reopened, synchronize]
-  
+
 jobs:
-  cleanup:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
         uses: actions/checkout@v5
-      
+
       - name: Install prerequisites
         run: |
           python3 -m venv ${{ github.workspace }}/oft_venv

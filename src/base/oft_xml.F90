@@ -561,7 +561,7 @@ REAL(r8) :: val_tmp
 CHARACTER(LEN=8) :: col_char,row_char
 character(len=256) :: msg
 CHARACTER(LEN=:), ALLOCATABLE :: content_tmp
-
+NULLIFY(output)
 CALL normalize_string(content,content_tmp)
 CALL tokenize_string(content_tmp,tokens,ierr)
 IF(ierr/=0)THEN
@@ -608,7 +608,7 @@ INTEGER(i4) :: val_tmp
 CHARACTER(LEN=8) :: col_char,row_char
 character(len=256) :: msg
 CHARACTER(LEN=:), ALLOCATABLE :: content_tmp
-
+NULLIFY(output)
 CALL normalize_string(content,content_tmp)
 CALL tokenize_string(content_tmp,tokens,ierr)
 IF(ierr/=0)THEN
@@ -658,7 +658,7 @@ INTEGER(i4), ALLOCATABLE :: tokens(:,:,:)
 CHARACTER(LEN=8) :: col_char,row_char
 CHARACTER(LEN=:), ALLOCATABLE :: token_strip
 CHARACTER(LEN=:), ALLOCATABLE :: content_tmp
-
+NULLIFY(output)
 CALL normalize_string(content,content_tmp)
 CALL tokenize_string(content_tmp,tokens,ierr)
 IF(ierr/=0)THEN

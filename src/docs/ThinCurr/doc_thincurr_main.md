@@ -13,10 +13,13 @@ flowing in thin conducting structures (2D sheets in 3D geometry)
 ThinCurr should primarily be used through the python interface using the \ref OpenFUSIONToolkit.ThinCurr "OpenFUSIONToolkit.ThinCurr" python module
 and the \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr "OpenFUSIONToolkit.ThinCurr.ThinCurr" class.
 
+\section doc_tw_scripts ThinCurr helper scripts
+ - \subpage thincurr_holes_tool
+ - \subpage thincurr_mesh_tool
+
 \section doc_tw_main_ex ThinCurr Examples
 The following examples illustrate usage of ThinCurr to perform calculations using the thin-wall model.
 
-**Python interface (recommended)**
  - \subpage doc_tCurr_plate_eig
  - \subpage doc_tCurr_cyl_td
  - \subpage doc_tCurr_cyl_td-jumpers
@@ -27,12 +30,6 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_tCurr_regcoil
  - \subpage doc_tCurr_hodlr
  - \subpage doc_tCurr_reduction
-
-**Command line interface (deprecated)**
- - \subpage doc_thincurr_ex1
- - \subpage doc_thincurr_ex2
- - \subpage doc_thincurr_ex3
- - \subpage doc_thincurr_ex4 
 
 \section doc_tw_main_settings ThinCurr settings groups
 
@@ -57,22 +54,6 @@ Settings for ThinCurr runs are contained in the `oft->thincurr` element, with th
   </thincurr>
 </oft>
 ```
-
-\subsection doc_tw_main_settings_fortran Fortran option groups
-Driver-specific settings groups are defined for each of the programs above (eg. `thincurr_td`), follow links for description
-of available settings.
-
-The following driver-wide settings are also available:
-
-**Option group:** `thincurr_hodlr_options` (see \ref doc_tw_main_hodlr "HODLR")
-|  Option                 |  Description  | Type [dim] |
-|-------------------------|---------------|------------|
-|  `target_size=1500`     |  Target size for mesh partitioning | int |
-|  `aca_min_its=20`       |  Minimum nuber of ACA+ iterations to perfom (if used) | int |
-|  `L_svd_tol=-1.0`       |  SVD tolerance for HODLR compression of \f$ \textrm{L} \f$ matrix (negative to disable) | int |
-|  `L_aca_rel_tol=-1.0`   |  ACA tolerance (relative to SVD) for HODLR compression of \f$ \textrm{L} \f$ matrix (negative to disable) | int |
-|  `B_svd_tol=T`          |  SVD tolerance for HODLR compression of B reconstruction operator (negative to disable) | int |
-|  `B_aca_rel_tol=F`      |  ACA tolerance (relative to SVD) for HODLR compression of B reconstruction operator (negative to disable) | int |
 
 
 \section doc_tw_main_num Description of numerics

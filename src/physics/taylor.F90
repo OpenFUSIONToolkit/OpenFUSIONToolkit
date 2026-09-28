@@ -482,11 +482,12 @@ do k=1,self%nm
     ! divout%bc=>lag_zerob
     divout%pm=oft_env%pm
     CALL divout%apply(u)
-    CALL linv%pre%delete
-    DEALLOCATE(linv%pre)
-    CALL linv%delete
+    CALL linv%delete(propogate=.TRUE.)
     DEALLOCATE(linv)
-    IF(nlevels_lop<=0)CALL lop%delete
+    IF(nlevels_lop<=0)THEN
+      CALL lop%delete
+      DEALLOCATE(lop)
+    END IF
 !------------------------------------------------------------------------------
 ! Write restart files
 !------------------------------------------------------------------------------
@@ -651,6 +652,7 @@ CALL b%delete
 NULLIFY(tmp,b)
 !---
 CALL mop%delete
+DEALLOCATE(mop)
 IF(ASSOCIATED(ml_lop))THEN
   DO i=1,SIZE(ml_lop)
     CALL ml_lop(i)%M%delete
@@ -658,9 +660,7 @@ IF(ASSOCIATED(ml_lop))THEN
   END DO
   DEALLOCATE(ml_lop)
 END IF
-CALL linv%pre%delete
-DEALLOCATE(linv%pre)
-CALL linv%delete
+CALL linv%delete(propogate=.TRUE.)
 DEALLOCATE(linv)
 CALL self%ML_lagrange%set_level(self%ML_lagrange%nlevels)
 DEBUG_STACK_POP
@@ -827,6 +827,7 @@ NULLIFY(tmp,b)
 CALL mop%delete
 CALL mop_hcurl%delete
 CALL lop_lag%delete
+DEALLOCATE(mop,mop_hcurl,lop_lag)
 IF(ASSOCIATED(ml_wop))THEN
   DO i=1,SIZE(ml_wop)
     CALL ml_wop(i)%M%delete
@@ -834,13 +835,9 @@ IF(ASSOCIATED(ml_wop))THEN
   END DO
   DEALLOCATE(ml_wop)
 END IF
-CALL winv%pre%delete
-DEALLOCATE(winv%pre)
-CALL winv%delete
+CALL winv%delete(propogate=.TRUE.)
 DEALLOCATE(winv)
-CALL linv_lag%pre%delete
-DEALLOCATE(linv_lag%pre)
-CALL linv_lag%delete
+CALL linv_lag%delete(propogate=.TRUE.)
 DEALLOCATE(linv_lag)
 CALL self%ML_lagrange%set_level(self%ML_lagrange%nlevels)
 DEBUG_STACK_POP
@@ -869,6 +866,7 @@ TYPE(oft_hcurl_divout), TARGET :: hcurl_divout
 !---
 class(oft_vector), pointer :: u,b,tmp
 real(r8) :: venergy,lam_file
+real(r8), parameter :: lam_load_tol=1.d-5, lam_orthog_tol=5.d-2
 integer(i4) :: i,k,ierr
 logical :: do_orthog,have_rst,save_rst
 character(LEN=16) :: field_name
@@ -885,21 +883,27 @@ save_rst=.FALSE.
 IF(PRESENT(rst_filename))save_rst=.TRUE.
 IF(save_rst)THEN
   have_rst=oft_file_exist(rst_filename)
-  DO i=1,self%nh
-    WRITE(field_name,'(A6,A2,A2,I2.2,A2,I2.2)')'gffa_g',self%ML_hcurl%ml_mesh%rlevel,'_p',self%ML_hcurl%current_level%order,'_h',i
-    have_rst=have_rst.AND.hdf5_field_exist(rst_filename,field_name)
-  END DO
+  lam_file=-1.d99
+  IF(hdf5_field_exist(rst_filename,'lambda'))CALL hdf5_read(lam_file,rst_filename,'lambda')
+  IF(ABS(lam_file-lambda)<lam_load_tol)THEN
+    DO i=1,self%nh
+      WRITE(field_name,'(A6,A2,A2,I2.2,A2,I2.2)')'gffa_g',self%ML_hcurl%ml_mesh%rlevel,'_p',self%ML_hcurl%current_level%order,'_h',i
+      have_rst=have_rst.AND.hdf5_field_exist(rst_filename,field_name)
+    END DO
+  ELSE
+    have_rst=.FALSE.
+  END IF
 ELSE
   have_rst=.FALSE.
 END IF
 hcurl_zerob%ML_hcurl_rep=>self%ML_hcurl
 lag_zerob%ML_lag_rep=>self%ML_lagrange
 NULLIFY(mop,kop,wop,jmlb_mat,ml_jmlb)
+do_orthog=.FALSE.
 IF(.NOT.have_rst)THEN
   !---Orthogonalize (if within 5% of Taylor state)
-  do_orthog=.FALSE.
   IF(hmodes%nm>0)THEN
-    IF(ABS((lambda-hmodes%hlam(1,self%ML_hcurl%level))/hmodes%hlam(1,self%ML_hcurl%level))<5.d-2)THEN
+    IF(ABS((lambda-hmodes%hlam(1,self%ML_hcurl%level))/hmodes%hlam(1,self%ML_hcurl%level))<lam_orthog_tol)THEN
       CALL oft_hcurl_getwop(self%ML_hcurl%current_level,wop,'zerob')
       hmodes%orthog%nm=1
       hmodes%orthog%wop=>wop
@@ -961,7 +965,7 @@ do i=1,self%nh
     IF(oft_file_exist(rst_filename))THEN
       lam_file=-1.d99
       IF(hdf5_field_exist(rst_filename,'lambda'))CALL hdf5_read(lam_file,rst_filename,'lambda')
-      IF(ABS(lam_file-lambda)<1.d-5)THEN
+      IF(ABS(lam_file-lambda)<lam_load_tol)THEN
         WRITE(field_name,'(A6,A2,A2,I2.2,A2,I2.2)')'gffa_g',self%ML_hcurl%ml_mesh%rlevel,'_p',self%ML_hcurl%current_level%order,'_h',i
         IF(hdf5_field_exist(rst_filename,field_name))THEN
           CALL self%ML_hcurl%current_level%vec_load(u,rst_filename,field_name)
@@ -1005,6 +1009,7 @@ CALL tmp%delete
 NULLIFY(tmp,b)
 !---
 CALL mop%delete
+DEALLOCATE(mop)
 IF(ASSOCIATED(kop))THEN
   CALL kop%delete
   DEALLOCATE(kop)
@@ -1017,7 +1022,7 @@ IF(ASSOCIATED(ml_jmlb))THEN
   END DO
   DEALLOCATE(ml_jmlb)
 ELSE
-  IF(ASSOCIATED(ml_jmlb))THEN
+  IF(ASSOCIATED(jmlb_mat))THEN
     CALL jmlb_mat%delete
     DEALLOCATE(jmlb_mat)
   END IF
@@ -1027,7 +1032,7 @@ ELSE
   END IF
 END IF
 !---
-IF(.NOT.have_rst)CALL jmlb_inv%pre%delete
+IF(.NOT.have_rst)CALL jmlb_inv%delete(propogate=.TRUE.)
 CALL self%ML_lagrange%set_level(self%ML_lagrange%nlevels)
 DEBUG_STACK_POP
 end subroutine taylor_injectors
@@ -1151,6 +1156,7 @@ CALL tmp%delete
 DEALLOCATE(tmp)
 !---
 CALL lop_lag%delete
+DEALLOCATE(lop_lag)
 IF(ASSOCIATED(ml_jmlb))THEN
   DO i=1,SIZE(ml_jmlb)
     CALL ml_jmlb(i)%M%delete
@@ -1162,7 +1168,7 @@ ELSE
   DEALLOCATE(jmlb_mat)
 END IF
 !---
-CALL jmlb_inv%pre%delete
+CALL jmlb_inv%delete(propogate=.TRUE.)
 CALL self%ML_lagrange%set_level(self%ML_lagrange%nlevels)
 DEBUG_STACK_POP
 end subroutine taylor_injector_single

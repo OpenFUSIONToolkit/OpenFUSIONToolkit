@@ -26,7 +26,7 @@ MODULE oft_tetmesh_type
 USE oft_base
 USE oft_lag_poly
 USE oft_tet_quadrature, ONLY: set_quad_3d, oft_quad_type
-USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
+USE oft_mesh_type, ONLY: oft_mesh, mesh_destroy, cell_is_curved
 USE tetmesh_tessellation, ONLY: tessellate1, tessellate2, tessellate3, tessellate4
 IMPLICIT NONE
 #include "local.h"
@@ -58,6 +58,8 @@ CONTAINS
   PROCEDURE :: quad_rule => tetmesh_quad_rule
   PROCEDURE :: tessellate => tetmesh_tessellate
   PROCEDURE :: tessellated_sizes => tetmesh_tessellated_sizes
+  !> Destroy mesh object
+  PROCEDURE :: delete => tetmesh_destroy
 END TYPE oft_tetmesh
 !---Encapsulation for external function call parameters
 TYPE, PRIVATE :: opt_targets
@@ -98,6 +100,16 @@ ALLOCATE(self%face_ed(2,3))
 self%face_ed=tri_ed
 CALL self%set_order(1)
 END SUBROUTINE tetmesh_setup
+!------------------------------------------------------------------------------
+!> Destroy mesh object
+!------------------------------------------------------------------------------
+SUBROUTINE tetmesh_destroy(self)
+CLASS(oft_tetmesh), INTENT(inout) :: self
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%xnodes))DEALLOCATE(self%xnodes)
+CALL mesh_destroy(self)
+DEBUG_STACK_POP
+END SUBROUTINE tetmesh_destroy
 !------------------------------------------------------------------------------
 !> Set maximum order of spatial mapping
 !------------------------------------------------------------------------------
