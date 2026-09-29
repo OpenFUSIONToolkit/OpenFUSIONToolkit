@@ -299,6 +299,22 @@ def _trapz(y, x):
                            np.asarray(x, dtype=float)))
 
 
+def _clip_psi(psi_n, psi_pad=PSI_PAD):
+    r'''! Clip a normalized flux grid away from the magnetic axis and LCFS
+
+    Flux-surface quantities (`get_q`, `trace_surf`) are unreliable when sampled
+    at exactly \f$\psi_N = 0\f$ or \f$1\f$, so fallback evaluations use this grid.
+
+    @param psi_n Normalized flux grid
+    @param psi_pad Padding applied at both ends
+    @result Contiguous copy of `psi_n` clipped to [`psi_pad`, 1 - `psi_pad`]
+    '''
+    return np.ascontiguousarray(
+        np.clip(np.asarray(psi_n, dtype=float), float(psi_pad), 1.0 - float(psi_pad)),
+        dtype=float,
+    )
+
+
 def fsa_current_geometry(eq, psi_N, psi_pad=PSI_PAD, want_pprime=True):
     r"""Per-surface FSA geometry for :func:`Ip_fsa_integral`, from ``get_q``.
 
@@ -308,8 +324,7 @@ def fsa_current_geometry(eq, psi_N, psi_pad=PSI_PAD, want_pprime=True):
     ``dA_dpsiN = (V'/2pi) <1/R> |dpsi/dpsi_N|``.
     """
     psi_N = np.asarray(psi_N, dtype=float)
-    psi_q = np.ascontiguousarray(
-        np.clip(psi_N, float(psi_pad), 1.0 - float(psi_pad)), dtype=float)
+    psi_q = _clip_psi(psi_N, psi_pad)
 
     ravgs = eq.get_q(psi=psi_q)[2]
     R_avg = q_ravg(ravgs, "<R>")
@@ -624,8 +639,9 @@ def _resampled_jtor(gfile, resampled_profiles, eq_snapshot):
     except FALLBACK_ERRORS as exc:
         if eq_snapshot is None:
             raise RuntimeError("resampled_jtor fallback requires eq_snapshot, but eq_snapshot is None") from exc   
-        _,f,fp,_,pprime = eq_snapshot.get_profiles(psi=resampled_profiles['psi_n'])
-        _, _, ravgs, _, _, _ = eq_snapshot.get_q(psi=resampled_profiles['psi_n']) # get flux averaged R from equilibrium solution
+        psi_q = _clip_psi(resampled_profiles['psi_n'])
+        _,f,fp,_,pprime = eq_snapshot.get_profiles(psi=psi_q.copy())
+        _, _, ravgs, _, _, _ = eq_snapshot.get_q(psi=psi_q) # get flux averaged R from equilibrium solution
         R_avg = q_ravg(ravgs, '<R>')
         one_over_R_avg = q_ravg(ravgs, '<1/R>')
         jtor_tmp = get_jphi_from_GS(
@@ -652,7 +668,7 @@ def _resampled_geom(gfile, resampled_profiles, eq_snapshot):
 
         geom_tmp = _fallback_geom_contour(eq_snapshot)
         if geom_tmp is None:
-            _, _, _, _, rbounds, zbounds = eq_snapshot.get_q(psi=psi_n, compute_geo=True)
+            _, _, _, _, rbounds, zbounds = eq_snapshot.get_q(psi=_clip_psi(psi_n), compute_geo=True)
             geom_tmp = _fallback_geom_bounds(rbounds, zbounds)
 
         geom.update({
@@ -668,11 +684,12 @@ def _resampled_geom(gfile, resampled_profiles, eq_snapshot):
 
 
 def _fallback_R(resampled_profiles, eq_snapshot):
+    psi_q = _clip_psi(resampled_profiles['psi_n'])
     try:
-        _,_,ravgs,_,_,_ = eq_snapshot.get_q(psi=resampled_profiles['psi_n'])
+        _,_,ravgs,_,_,_ = eq_snapshot.get_q(psi=psi_q)
         return q_ravg(ravgs, '<R>')
     except FALLBACK_ERRORS:
-        _,_,_,_,rbounds,_ = eq_snapshot.get_q(psi=resampled_profiles['psi_n'], compute_geo=True)
+        _,_,_,_,rbounds,_ = eq_snapshot.get_q(psi=psi_q, compute_geo=True)
         lcfs_r = 0.5 * (rbounds[0, 0] + rbounds[1, 0])
         return np.linspace(eq_snapshot.o_point[0], lcfs_r, len(resampled_profiles['psi_n']))
     
@@ -681,10 +698,11 @@ def _fallback_Z(resampled_profiles, eq_snapshot):
     if eq_snapshot is None:
         raise ValueError("fallback_Z requires eq_snapshot")
 
-    Z = np.full(len(resampled_profiles['psi_n']), eq_snapshot.o_point[1], dtype=float)
+    psi_q = _clip_psi(resampled_profiles['psi_n'])
+    Z = np.full(len(psi_q), eq_snapshot.o_point[1], dtype=float)
     got_any = False
 
-    for i, psi_val in enumerate(resampled_profiles['psi_n']):
+    for i, psi_val in enumerate(psi_q):
         try:
             contour = eq_snapshot.trace_surf(float(psi_val))
         except FALLBACK_ERRORS:
@@ -694,7 +712,7 @@ def _fallback_Z(resampled_profiles, eq_snapshot):
             got_any = True
 
     if not got_any:
-        _, _, _, _, _, zbounds = eq_snapshot.get_q(psi=resampled_profiles['psi_n'], compute_geo=True)
+        _, _, _, _, _, zbounds = eq_snapshot.get_q(psi=psi_q, compute_geo=True)
         lcfs_z = (zbounds[0, 1] + zbounds[1, 1]) / 2.0
         Z = np.linspace(eq_snapshot.o_point[1], lcfs_z, len(resampled_profiles['psi_n']))
 
@@ -799,7 +817,7 @@ def get_init_geom(gfile, resampled_profiles, eq_snapshot=None):
         if geom_tmp is not None:
             geom_tmp['ginit_flag'] = ginit_flag
             return geom_tmp
-        _, _, _, _, rbounds, zbounds = eq_snapshot.get_q(psi=resampled_profiles['psi_n'],compute_geo=True)
+        _, _, _, _, rbounds, zbounds = eq_snapshot.get_q(psi=_clip_psi(resampled_profiles['psi_n']),compute_geo=True)
         geom_tmp = _fallback_geom_bounds(rbounds, zbounds)
         geom_tmp['ginit_flag'] = ginit_flag
         return geom_tmp
@@ -825,14 +843,15 @@ def _resampled_Bs(gfile, resampled_profiles, eq_snapshot):
     return Bs
 
 def _fallback_B(resampled_profiles, eq_snapshot):
-    profile_size = len(resampled_profiles['psi_n'])
+    psi_q = _clip_psi(resampled_profiles['psi_n'])
+    profile_size = len(psi_q)
     Bt = np.zeros(profile_size, dtype=float)
     Bp = np.zeros(profile_size, dtype=float)
-    contour_ok = np.zeros(len(resampled_profiles['psi_n']), dtype=bool)
+    contour_ok = np.zeros(profile_size, dtype=bool)
 
     try:
-        b_eval = eq_snapshot.get_field_eval("B")  
-        for i, psi_val in enumerate(resampled_profiles['psi_n']):
+        b_eval = eq_snapshot.get_field_eval("B")
+        for i, psi_val in enumerate(psi_q):
             contour = eq_snapshot.trace_surf(psi_val)        
             if contour is None or len(contour) == 0:
                 continue
@@ -851,8 +870,8 @@ def _fallback_B(resampled_profiles, eq_snapshot):
     if np.all(contour_ok):
         return {"Bt": Bt, "Bp": Bp}
     
-    _, qvals, ravgs, _, _, _ = eq_snapshot.get_q(psi=resampled_profiles['psi_n'])
-    _, f, _, _, _ = eq_snapshot.get_profiles(psi=resampled_profiles['psi_n'])
+    _, qvals, ravgs, _, _, _ = eq_snapshot.get_q(psi=psi_q)
+    _, f, _, _, _ = eq_snapshot.get_profiles(psi=psi_q.copy())
 
     Bt_fb = f * q_ravg(ravgs, '<1/R>')
     R = q_ravg(ravgs, '<R>')
