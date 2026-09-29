@@ -92,7 +92,6 @@ real(r8), intent(in) :: a(n) !< Local vector 1 for dot_product
 real(r8), intent(in) :: b(n) !< Local vector 2 for dot_product
 logical, optional, intent(in) :: no_reduce !< Skip global reduction step
 logical :: do_reduce
-LOGICAL, POINTER, CONTIGUOUS :: boundary(:)
 integer(i4) :: i
 real(r8) :: c
 DEBUG_STACK_PUSH
@@ -101,35 +100,16 @@ IF(PRESENT(no_reduce))do_reduce=do_reduce.AND.(.NOT.no_reduce)
 !---Global reduction
 c=0.d0
 IF(.NOT.self%skip)THEN
-  IF(self%nbe==0)THEN
-    !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-    !$omp do simd
-    DO i=1,n
-      c=c+a(i)*b(i)
-    END DO
-    !$omp end parallel
-  ELSE
-    ! Raw seams may provide only boundary indices and ownership flags.
-    IF(ASSOCIATED(self%be))THEN
-      boundary=>self%be
-    ELSE
-      ALLOCATE(boundary(n))
-      boundary=.FALSE.
-      boundary(self%lbe(1:self%nbe))=.TRUE.
-    END IF
-    ! Sum owned entries directly to avoid cancellation from duplicate values.
-    !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-    !$omp do simd
-    DO i=1,n
-      IF(.NOT.boundary(i))c=c+a(i)*b(i)
-    END DO
-    !$omp do simd
-    DO i=1,self%nbe
-      IF(self%leo(i))c=c+a(self%lbe(i))*b(self%lbe(i))
-    END DO
-    !$omp end parallel
-    IF(.NOT.ASSOCIATED(self%be))DEALLOCATE(boundary)
-  END IF
+  !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
+  !$omp do simd
+  do i=1,n
+    c=c+a(i)*b(i)
+  end do
+  !$omp do simd
+  do i=1,self%nbe
+    if(.NOT.self%leo(i))c=c-a(self%lbe(i))*b(self%lbe(i))
+  end do
+  !$omp end parallel
 END IF
 IF(do_reduce)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
@@ -144,7 +124,6 @@ COMPLEX(c8), intent(in) :: a(n) !< Local vector 1 for dot_product
 COMPLEX(c8), intent(in) :: b(n) !< Local vector 2 for dot_product
 logical, optional, intent(in) :: no_reduce !< Skip global reduction step
 logical :: do_reduce
-LOGICAL, POINTER, CONTIGUOUS :: boundary(:)
 integer(i4) :: i
 COMPLEX(c8) :: c
 DEBUG_STACK_PUSH
@@ -153,35 +132,16 @@ IF(PRESENT(no_reduce))do_reduce=do_reduce.AND.(.NOT.no_reduce)
 !---Global reduction
 c=0.d0
 IF(.NOT.self%skip)THEN
-  IF(self%nbe==0)THEN
-    !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-    !$omp do simd
-    DO i=1,n
-      c=c+CONJG(a(i))*b(i)
-    END DO
-    !$omp end parallel
-  ELSE
-    ! Raw seams may provide only boundary indices and ownership flags.
-    IF(ASSOCIATED(self%be))THEN
-      boundary=>self%be
-    ELSE
-      ALLOCATE(boundary(n))
-      boundary=.FALSE.
-      boundary(self%lbe(1:self%nbe))=.TRUE.
-    END IF
-    ! Sum owned entries directly to avoid cancellation from duplicate values.
-    !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
-    !$omp do simd
-    DO i=1,n
-      IF(.NOT.boundary(i))c=c+CONJG(a(i))*b(i)
-    END DO
-    !$omp do simd
-    DO i=1,self%nbe
-      IF(self%leo(i))c=c+CONJG(a(self%lbe(i)))*b(self%lbe(i))
-    END DO
-    !$omp end parallel
-    IF(.NOT.ASSOCIATED(self%be))DEALLOCATE(boundary)
-  END IF
+  !$omp parallel reduction(+:c) if(n>OFT_OMP_VTHRESH)
+  !$omp do simd
+  do i=1,n
+    c=c+CONJG(a(i))*b(i)
+  end do
+  !$omp do simd
+  do i=1,self%nbe
+    if(.NOT.self%leo(i))c=c-CONJG(a(self%lbe(i)))*b(self%lbe(i))
+  end do
+  !$omp end parallel
 END IF
 IF(do_reduce)c=oft_mpi_sum(c)
 DEBUG_STACK_POP
