@@ -41,7 +41,9 @@ KEV_TO_KPA = constants.eV * 1.0e20
 DENOM_TOL = 1.0e-7
 PSI_PAD = 1.0e-3
 LCFS_PAD = 1.0e-2
-FALLBACK_ERRORS = (AttributeError, IndexError, KeyError, TypeError, ValueError, RuntimeError)
+# TokaMaker bindings raise bare Exception for Fortran-side errors, so the
+# fallback and retry paths must catch Exception rather than a subset of it.
+FALLBACK_ERRORS = (Exception,)
 _GET_Q_RAVG_INDEX = {"<R>": 0, "<1/R>": 1, "<1/R^2>": 2, "dV/dPsi": 3}
 
 
@@ -1723,7 +1725,7 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
             except _NonConvergenceError as error:
                 solve_error = error
                 continue
-            except (RuntimeError, ValueError) as error:
+            except FALLBACK_ERRORS as error:
                 solve_error = _NonConvergenceError(
                     str(error),
                     float(getattr(t_object.settings, 'nl_tol', 5.0e-6)),
