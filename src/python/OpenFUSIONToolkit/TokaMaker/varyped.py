@@ -1191,6 +1191,42 @@ def _solve_baseline_with_retries(t_object, seed_eq):
         "Baseline equilibrium solve exhausted retry attempts", last_nl_tol,
     )
 
+
+def _normalize_to_axis(y):
+    y = np.asarray(y, dtype=float)
+    scale = y[0]
+    if abs(scale) < DENOM_TOL:
+        scale = y[np.argmax(np.abs(y))]
+    if abs(scale) < DENOM_TOL:
+        raise ValueError("Cannot normalize an identically zero profile")
+    return y / scale
+
+
+def _bootstrap_jtor(t_object, gfile, resampled_profiles, psi_n):
+    r'''! Derive the scan current profile from an equilibrium solved with the g-file FF' and P'
+
+    Used when the g-file has no direct flux-averaged current, since the
+    fallback would otherwise sample an equilibrium that has not been solved.
+    On return `t_object` holds the solved equilibrium, which seeds the baseline.
+
+    @param t_object TokaMaker object with psi initialized and targets set
+    @param gfile Input g-file object
+    @param resampled_profiles Resampled g-file profiles from @ref resample_gfile
+    @param psi_n Normalized flux grid used by the scan
+    @result Toroidal current profile on `psi_n` [A/m^2]
+    '''
+    psi_gfile = np.asarray(gfile.psi_N, dtype=float)
+    ffp = np.interp(psi_n, psi_gfile, np.asarray(gfile.ffprim, dtype=float))
+    pp = np.interp(psi_n, psi_gfile, np.asarray(gfile.pprime, dtype=float))
+    t_object.set_profiles(
+        ffp_prof={'type': 'linterp', 'x': psi_n, 'y': _normalize_to_axis(ffp)},
+        pp_prof={'type': 'linterp', 'x': psi_n, 'y': _normalize_to_axis(pp)},
+    )
+    print("=============== STARTING G-FILE BOOTSTRAP SOLVE ===============")
+    _solve_baseline_with_retries(t_object, t_object.copy_eq())
+    jtor, _ = _resampled_jtor(gfile, resampled_profiles, t_object.copy_eq())
+    return jtor
+
 def _prepare_solver_profiles(t_object, ptot, jtor, psi_n, target_scales,
                      Ip_target, energy_target=None, pressure_geometry=None,
                      energy_geometry_factor=1.0, pressure_amplitude=1.0):
@@ -1632,6 +1668,13 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
     pax_target = float(ptot[0])
 
     t_object.init_psi(R0, Z0, a, kappa, delta)
+    t_object.set_targets(Ip=Ip_target, pax=pax_target)
+
+    # input_eq has not been solved, so a current profile taken from its
+    # fallback is meaningless; re-derive it from a solved g-file equilibrium.
+    if gfile_profiles['jtor_flag']:
+        refit_jtor = _bootstrap_jtor(t_object, gfile, gfile_profiles, psi_n)
+        gfile_profiles['j_tor_averaged_direct'] = refit_jtor
 
     init_pp_prof = {'type':'linterp',
                     'y': np.gradient(ptot, psi_n),
