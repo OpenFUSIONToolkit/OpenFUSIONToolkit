@@ -1926,13 +1926,6 @@ def summarize_scan(results, n_best=5):
     @param results Result structure returned by :func:`equilibrium_scan`.
     @param n_best Number of best converged points to print.
     '''
-    try:
-        import pandas as pd
-    except ImportError as error:
-        raise ImportError(
-            "summarize_scan requires pandas to build its quality table"
-        ) from error
-
     if not isinstance(results, (list, tuple)) or not results:
         raise ValueError("results must be the non-empty output of equilibrium_scan")
 
@@ -1962,11 +1955,10 @@ def summarize_scan(results, n_best=5):
     )
 
     rows = []
-    for index, point in enumerate(scan_points):
+    for point in scan_points:
         ip_final = float(point.get('Ip_final', np.nan))
         w_final = float(point.get('W_final', np.nan))
         rows.append({
-            'scan_index': index,
             'scale_p': float(point.get('scale_p', np.nan)),
             'scale_j': float(point.get('scale_j', np.nan)),
             'converged': bool(point.get('converged', False)),
@@ -1977,28 +1969,22 @@ def summarize_scan(results, n_best=5):
             'W_rel_err': _relative_error(w_final, w_target),
         })
 
-    columns = [
-        'scan_index', 'scale_p', 'scale_j', 'converged', 'nl_tol',
-        'Ip_final', 'Ip_rel_err', 'W_final', 'W_rel_err',
-    ]
-    quality_table = pd.DataFrame(rows, columns=columns)
-    if quality_table.empty:
-        best_points = quality_table.copy()
-        converged_table = quality_table.copy()
-    else:
-        converged_table = quality_table.loc[
-            quality_table['converged']
-        ].copy()
-        best_points = converged_table.sort_values(
-            ['W_rel_err', 'Ip_rel_err', 'nl_tol'],
-            na_position='last',
-        ).reset_index(drop=True)
+    converged_rows = [row for row in rows if row['converged']]
 
-    ip_mean, ip_median, ip_max = _stats(converged_table['Ip_rel_err'])
-    w_mean, w_median, w_max = _stats(converged_table['W_rel_err'])
-    nl_mean, nl_median, nl_max = _stats(quality_table['nl_tol'])
-    n_points = len(quality_table)
-    n_converged = int(quality_table['converged'].sum())
+    def _sort_key(row):
+        # Rank by energy, then current error, then tolerance; NaN sorts last
+        return tuple(
+            row[key] if np.isfinite(row[key]) else np.inf
+            for key in ('W_rel_err', 'Ip_rel_err', 'nl_tol')
+        )
+
+    best_points = sorted(converged_rows, key=_sort_key)
+
+    ip_mean, ip_median, ip_max = _stats([row['Ip_rel_err'] for row in converged_rows])
+    w_mean, w_median, w_max = _stats([row['W_rel_err'] for row in converged_rows])
+    nl_mean, nl_median, nl_max = _stats([row['nl_tol'] for row in rows])
+    n_points = len(rows)
+    n_converged = len(converged_rows)
 
     def _format(value):
         return 'n/a' if not np.isfinite(value) else f'{value:.3e}'
@@ -2031,10 +2017,17 @@ def summarize_scan(results, n_best=5):
     )
     print()
     print('Best converged scan points by energy, then current error:')
-    print(best_points.head(n_best)[[
-        'scale_p', 'scale_j', 'Ip_rel_err', 'W_rel_err',
-        'nl_tol', 'Ip_final', 'W_final',
-    ]].to_string(index=False))
+    table_columns = (
+        ('scale_p', '{:g}'), ('scale_j', '{:g}'),
+        ('Ip_rel_err', '{:.3e}'), ('W_rel_err', '{:.3e}'), ('nl_tol', '{:.1e}'),
+        ('Ip_final', '{:.6e}'), ('W_final', '{:.6e}'),
+    )
+    table = [[name for name, _ in table_columns]]
+    for row in best_points[:n_best]:
+        table.append([fmt.format(row[name]) for name, fmt in table_columns])
+    widths = [max(len(line[i]) for line in table) for i in range(len(table_columns))]
+    for line in table:
+        print(' '.join(cell.rjust(width) for cell, width in zip(line, widths)))
     print('=' * 90)
 
 
