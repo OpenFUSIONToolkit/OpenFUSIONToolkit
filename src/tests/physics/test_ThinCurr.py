@@ -987,6 +987,48 @@ def test_td_torus_volt(direct_flag,convert_xml):
                            lin_tol=1.E-11)
     assert validate_td(sigs_final,jumpers_final)
 
+def test_torus_fourier_sensor_plot_sensor_output_remove_n0(monkeypatch):
+    from matplotlib.figure import Figure
+    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
+
+    theta = 2*np.pi*np.arange(16)/16
+    phi = 2*np.pi*np.arange(8)/8
+    interface = torus_fourier_sensor(1+np.cos(theta),np.sin(theta),1.0,-1)
+    interface.nphi = len(phi)
+    interface.hist_file = object()
+    mesh = 0.1 + 0.02*np.cos(theta[:,None]) + 0.003*np.cos(phi[None,:])
+    interface.get_B_mesh = lambda t: mesh
+
+    fig = Figure()
+    ax = fig.subplots()
+    plotted = {}
+
+    def capture_contourf(phi_grid,theta_grid,values,**kwargs):
+        plotted['values'] = values
+        plotted['limits'] = (kwargs['vmin'],kwargs['vmax'])
+        return object()
+
+    class Colorbar:
+        def __init__(self):
+            self.ax = self
+
+        def ticklabel_format(self,**kwargs):
+            pass
+
+    monkeypatch.setattr(ax,'contourf',capture_contourf)
+    monkeypatch.setattr(fig,'colorbar',lambda *args,**kwargs: Colorbar())
+
+    interface.plot_sensor_output(0,fig,ax,remove_n0=True)
+    expected = mesh - mesh.mean(axis=1,keepdims=True)
+    np.testing.assert_allclose(plotted['values'],np.flip(expected,axis=1))
+    np.testing.assert_allclose(plotted['values'].mean(axis=1),0,atol=1e-16)
+    assert plotted['limits'][0] == -plotted['limits'][1]
+    np.testing.assert_allclose(mesh,0.1 + 0.02*np.cos(theta[:,None]) + 0.003*np.cos(phi[None,:]))
+
+    interface.plot_sensor_output(0,fig,ax)
+    np.testing.assert_allclose(plotted['values'],np.flip(mesh,axis=1))
+
+
 def test_torus_fourier_sensor_mode_trace_parts():
     from matplotlib.figure import Figure
     from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor

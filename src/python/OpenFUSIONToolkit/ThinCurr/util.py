@@ -496,12 +496,13 @@ class torus_fourier_sensor():
                         count = 0
                 f.write("\n")
 
-    def plot_sensor_output(self,t,fig,ax):
+    def plot_sensor_output(self,t,fig,ax,remove_n0=False):
         '''! Plot the magnetic field contour of the sensors on the surface at time step `t`
 
         @param t The time step during the time evolution
         @param fig Matplotlib figure for plotting
         @param ax Matplotlib axis for plotting
+        @param remove_n0 Whether to subtract the toroidal mean at each poloidal position before plotting
         @result cf The contour plot of the sensor values on the surface at time step `t`
         @result cbar The colorbar of the contour plot
         '''
@@ -511,14 +512,23 @@ class torus_fourier_sensor():
         else:
             phi_grid, theta_grid = np.meshgrid(np.linspace(0,2*np.pi,self.nphi,endpoint=False),self.theta_list)
             B_n = self.get_B_mesh(t)
+            if remove_n0:
+                B_n = B_n - B_n.mean(axis=1,keepdims=True)
 
             if len(np.array(ax).flatten())!=1 or len(np.array(fig).flatten())!=1:
                 raise ValueError('For customized plotting, please provide a single figure and a single axis for plotting the a contour.')
-            ax.set_title(rf"Magnetic Field on surfaces of toroidal planes with $R_0$ = {self.major_radius:.3f} at [t] = {t}")
+            title = "Magnetic Field" if not remove_n0 else r"Magnetic Field ($n=0$ removed)"
+            ax.set_title(rf"{title} on surfaces of toroidal planes with $R_0$ = {self.major_radius:.3f} at [t] = {t}")
             ax.set_xlabel(r"$\phi$ (radians)")
             ax.set_ylabel(r"$\theta$ (radians)")
-            cf = ax.contourf(phi_grid,theta_grid,np.flip(B_n,axis=1),vmax=B_n.max(),vmin=B_n.min(),levels=50,cmap="RdBu_r")
-            cbar = fig.colorbar(cf,label="Outward Normal Magnetic Field (Tesla)")
+            if remove_n0:
+                limit = np.max(np.abs(B_n))
+                vmin, vmax = -limit, limit
+            else:
+                vmin, vmax = B_n.min(), B_n.max()
+            cf = ax.contourf(phi_grid,theta_grid,np.flip(B_n,axis=1),vmax=vmax,vmin=vmin,levels=50,cmap="RdBu_r")
+            label = "Outward Normal Magnetic Field (Tesla)" if not remove_n0 else "Outward Normal Magnetic Field, n=0 removed (Tesla)"
+            cbar = fig.colorbar(cf,label=label)
             cbar.ax.ticklabel_format(style='sci', scilimits=(-3, 3))
             return cf, cbar
 
