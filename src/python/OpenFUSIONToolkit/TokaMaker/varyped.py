@@ -23,6 +23,7 @@ import datetime as dt
 from itertools import product
 import os
 import pprint
+import re
 
 import numpy as np
 
@@ -44,6 +45,9 @@ LCFS_PAD = 1.0e-2
 # TokaMaker bindings raise bare Exception for Fortran-side errors, so the
 # fallback and retry paths must catch Exception rather than a subset of it.
 FALLBACK_ERRORS = (Exception,)
+# Scan output names written by _save_scan_outputs: {g,p}{yyyymm}.{index:05d}
+_GFILE_NAME = re.compile(r'g\d{6}\.\d{5}')
+_PFILE_NAME = re.compile(r'p\d{6}\.\d{5}')
 _GET_Q_RAVG_INDEX = {"<R>": 0, "<1/R>": 1, "<1/R^2>": 2, "dV/dPsi": 3}
 
 
@@ -2040,7 +2044,7 @@ def summarize_scan(results, n_best=5):
 
 def _find_results_file(path):
     for entry in sorted(os.scandir(path), key=lambda item: item.name):
-        if entry.is_file() and entry.name.startswith('r'):
+        if entry.is_file() and entry.name.startswith('results_'):
             return entry.path
     raise FileNotFoundError(f"No VARYPED results file found in '{path}'")
 
@@ -2204,7 +2208,7 @@ def plot_pfiles(dir_name, profiles, scaling_range=None, savefig=False):
     path = os.path.join(cwd, dir_name)
     pfiles = []
     for entry in sorted(os.scandir(path), key=lambda entry: entry.name):
-        if entry.is_file() and entry.name.startswith('p'):
+        if entry.is_file() and _PFILE_NAME.fullmatch(entry.name):
             pfiles.append(eqdsk.read_pfile(entry))
 
     if not pfiles:
@@ -2279,7 +2283,7 @@ def plot_gfiles(
         cocos = 7 if directory_name.startswith('varyped') else 1
     gfiles = []
     for entry in sorted(os.scandir(path), key = lambda e: e.name):
-        if entry.is_file() and entry.name.startswith('g'):
+        if entry.is_file() and _GFILE_NAME.fullmatch(entry.name):
             gfiles.append(eqdsk.read_geqdsk(entry, cocos=cocos))
 
     if not gfiles:
