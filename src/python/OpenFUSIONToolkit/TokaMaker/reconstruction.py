@@ -66,6 +66,8 @@ class Mirnov_con:
         @param val Value of constraint
         @param err Error in constraint
         '''
+        if norm is not None and numpy.shape(norm) != (3,):
+            raise ValueError("Mirnov normal must have three components (R, phi, Z)")
         self.loc = loc
         self.phi = phi
         self.norm = norm
@@ -545,10 +547,10 @@ class reconstruction():
         self._flux_loops.append(fluxLoop_con(loc=loc, val=val, err=err))
 
     def add_Mirnov(self,loc,norm,val,err):
-        '''! Add Mirnov sensor constraint
+        r'''! Add Mirnov sensor constraint
 
         @param loc Location of Mirnov in R-Z plane [2]
-        @param norm Unit normal in R-Z plane [2]
+        @param norm Unit normal \f$ (R,\phi,Z) \f$ [3]; use a zero toroidal component for a poloidal probe
         @param val Value of Mirnov constraint
         @param err Error in constraint
         '''
