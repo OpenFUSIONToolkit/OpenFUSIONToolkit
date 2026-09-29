@@ -713,8 +713,8 @@ class torus_fourier_sensor():
             ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
             return line_list, poloidal_harmonics
 
-    def plot_m_over_n_amplitude(self,m_list,n_list,t_max,dt,ax,t_min=0,hamada_dphi=None):
-        '''! Plot the 2D Fast Fourier Transformed amplitude of the magnetic field for `m/n` (poloidal harmonic / toroidal harmonic) mode with respect to time
+    def plot_m_over_n_amplitude(self,m_list,n_list,t_max,dt,ax,t_min=0,hamada_dphi=None,part='r'):
+        '''! Plot a component of the 2D Fourier coefficient of an `m/n` mode with respect to time
 
         @param m_list The list of m of the m/n modes to be visualized [:]
         @param n_list The (list of) n of the m/n modes to be visualized [:]
@@ -723,10 +723,13 @@ class torus_fourier_sensor():
         @param ax Matplotlib axis for plotting
         @param t_min The starting time step of the plot
         @param hamada_dphi Hamada phase shifts [ntheta]
+        @param part The coefficient component to plot ('r' for real, 'i' for imaginary, 'a' for absolute amplitude, 'p' for phase in radians)
         @result line_list The list of line objects for each m/n mode in `m_list` and `n_list`
         '''
         if hamada_dphi is None:
             hamada_dphi = self.hamada_dphi
+        if part not in ['r','i','a','p']:
+            raise ValueError("Input of 'part' is invalid. Accepts 'r', 'i', 'a', or 'p'.")
 
         n_list = np.array(n_list).flatten()
         if len(n_list)!=1 and (len(m_list)!=len(n_list)):
@@ -735,7 +738,7 @@ class torus_fourier_sensor():
             n_list = np.array([n_list[0]]*len(m_list))
         t_array = np.array(range(t_min,t_max+1))
         mode_amplitudes = np.zeros((len(m_list),len(t_array)))
-        for t in t_array:
+        for time_index,t in enumerate(t_array):
             B = self.get_B_mesh(t)
             if hamada_dphi is None:
                 B_n_fft, n_modes, m_modes = self.fft2(B)
@@ -750,18 +753,30 @@ class torus_fourier_sensor():
             for m,n in zip(m_list,n_list):
                 m_indices = np.where((m_modes_sorted == m))[0]
                 n_indices = np.where((n_modes_sorted == n))[0]
-                mode_amplitudes[i][t] = B_n_sorted[m_indices,n_indices].real[0]
+                coefficient = B_n_sorted[m_indices,n_indices][0]
+                if part == 'r':
+                    mode_amplitudes[i][time_index] = coefficient.real
+                elif part == 'i':
+                    mode_amplitudes[i][time_index] = coefficient.imag
+                elif part == 'a':
+                    mode_amplitudes[i][time_index] = abs(coefficient)
+                else:
+                    mode_amplitudes[i][time_index] = np.angle(coefficient)
                 i+=1
 
         line_list = []
         for j in range(mode_amplitudes.shape[0]):
             line = ax.plot(t_array*dt,mode_amplitudes[j],label=f'{m_list[j]}/{n_list[j]}')
             line_list.append(line)
-        ax.set_ylabel('Mode amplitudes (Tesla)')
+        if part == 'p':
+            ax.set_ylabel('Mode phase (radians)')
+        else:
+            ax.set_ylabel('Mode amplitudes (Tesla)')
         ax.set_xlabel('Time (s)')
-        ax.set_title('Amplitude of m/n modes in time')
+        ax.set_title('Phase of m/n modes in time' if part == 'p' else 'Amplitude of m/n modes in time')
         ax.legend()
-        ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
+        if part != 'p':
+            ax.ticklabel_format(style='sci', scilimits=(-3,3), axis='y')
         return line_list
 
     def field_fourier_amplitude_contour(self,t,m_min,m_max,n_min,n_max,fig,ax,hamada_dphi=None,part='r'):

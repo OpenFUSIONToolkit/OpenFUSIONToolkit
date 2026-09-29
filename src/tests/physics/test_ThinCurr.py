@@ -987,6 +987,38 @@ def test_td_torus_volt(direct_flag,convert_xml):
                            lin_tol=1.E-11)
     assert validate_td(sigs_final,jumpers_final)
 
+def test_torus_fourier_sensor_mode_trace_parts():
+    from matplotlib.figure import Figure
+    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
+
+    theta = 2*np.pi*np.arange(16)/16
+    phi = 2*np.pi*np.arange(8)/8
+    phases = [0.0,-np.pi/2,np.pi/3]
+    interface = torus_fourier_sensor(1+np.cos(theta),np.sin(theta),1.0,-1)
+    interface.nphi = len(phi)
+    interface.get_B_mesh = lambda t: np.cos(2*theta[:,None]+phi[None,:]+phases[t])
+
+    expected = {
+        'r': np.cos(phases[1:]),
+        'i': np.sin(phases[1:]),
+        'a': np.ones(2),
+        'p': np.array(phases[1:]),
+    }
+    for part,values in expected.items():
+        ax = Figure().subplots()
+        line = interface.plot_m_over_n_amplitude([2],1,2,0.1,ax,t_min=1,part=part)[0][0]
+        np.testing.assert_allclose(line.get_xdata(),[0.1,0.2])
+        np.testing.assert_allclose(line.get_ydata(),values,atol=1e-14)
+        if part == 'p':
+            assert ax.get_ylabel() == 'Mode phase (radians)'
+
+    ax = Figure().subplots()
+    default_line = interface.plot_m_over_n_amplitude([2],1,2,0.1,ax,t_min=1)[0][0]
+    np.testing.assert_allclose(default_line.get_ydata(),expected['r'],atol=1e-14)
+    with pytest.raises(ValueError,match="Input of 'part' is invalid"):
+        interface.plot_m_over_n_amplitude([2],1,2,0.1,ax,part='invalid')
+
+
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_torus_fourier_sensor(direct_flag):
