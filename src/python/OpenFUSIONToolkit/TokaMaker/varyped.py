@@ -1628,6 +1628,11 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
    #Extract psi_n from pfile 
     if not profile_exists(pfile, 'ptot'):
         raise ValueError("pfile must contain 'ptot' (total pressure) profile")
+    if file_output:
+        # Needed by make_updated_pfile, which only runs after the first solve
+        missing = [key for key in ('ne', 'ni', 'te', 'ti') if not profile_exists(pfile, key)]
+        if missing:
+            raise ValueError(f"pfile must contain {missing} profile(s) when file_output=True")
     psi_n_pfile = pfile.psinorm_for('ptot')
     if psi_n_pfile is None:
         raise ValueError("Could not extract psinorm for 'ptot' profile")
