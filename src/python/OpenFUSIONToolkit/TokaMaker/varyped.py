@@ -65,12 +65,12 @@ def _get_pedestal_parameters(psi_n, pprime):
     if np.any(np.diff(psi_n) <= 0.0):
         raise ValueError("psi_n must be strictly increasing")
 
+    prof_edge = 0.75
     hr_psi = np.linspace(0.0, 1.0, 1000)
     hr_pprime = np.interp(hr_psi, psi_n, pprime)
 
-
-    hr_psi_slice = hr_psi[np.where(hr_psi >= 0.75)[0]]
-    pprime_slice = hr_pprime[hr_psi >= 0.75]
+    hr_psi_slice = hr_psi[np.where(hr_psi >= prof_edge)[0]]
+    pprime_slice = hr_pprime[hr_psi >= prof_edge]
     pprime_peak = pprime_slice[np.argmax(np.abs(pprime_slice))]
     if np.isclose(pprime_peak, 0.0):
         return None
