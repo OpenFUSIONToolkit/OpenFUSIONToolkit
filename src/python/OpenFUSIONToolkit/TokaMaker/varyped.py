@@ -1309,16 +1309,16 @@ def _solve_with_retries(
         if not is_recovery:
             target_attempt += 1
         if solve_settings is not None:
-            _, initial_nl_tol, _ = solve_settings
+            urf, initial_nl_tol, maxits = solve_settings
             if is_recovery:
-                solve_settings = (0.3, 1.0e-5, 125)
+                solve_settings = (urf, 1.0e-5, maxits)
             elif float(initial_nl_tol) <= 1.0e-6:
                 nl_tol = (1.0e-6, 2.0e-6, 5.0e-6)[
                     min(target_attempt - 1, 2)
                 ]
-                solve_settings = (0.3, nl_tol, 125)
+                solve_settings = (urf, nl_tol, maxits)
             else:
-                solve_settings = (0.3, float(initial_nl_tol), 125)
+                solve_settings = (urf, float(initial_nl_tol), maxits)
         if solve_settings is not None:
             last_nl_tol = float(solve_settings[1])
         try:
