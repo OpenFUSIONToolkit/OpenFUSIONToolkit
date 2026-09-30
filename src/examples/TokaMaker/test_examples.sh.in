@@ -47,6 +47,14 @@ run_test ITER ITER_Hmode_ex.ipynb
 run_test LTX LTX_mesh_ex.ipynb
 run_test LTX LTX_eq_ex.ipynb
 
+# Dipole cases
+run_test Dipole dipole_mesh_ex.ipynb
+run_test Dipole dipole_eq_ex.ipynb
+
+# WHAM cases
+# run_test WHAM WHAM_mesh_ex.ipynb
+run_test WHAM WHAM_eq_ex.ipynb
+
 # Advanced workflow cases
 run_test AdvancedWorkflows/Pulse_Design CUTE_pulse_ex.ipynb 
 # run_test AdvancedWorkflows/IsofluxController NSTXU_shape_control_simulator.ipynb 

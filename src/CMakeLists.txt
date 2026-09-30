@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 ########################
 cmake_minimum_required( VERSION 3.27 )
-project( OpenFUSIONToolkit LANGUAGES NONE VERSION "26.6" )
+project( OpenFUSIONToolkit LANGUAGES NONE VERSION "26.9" )
 set( OFT_VER_SUFFIX "" CACHE INTERNAL "Version suffix" )
 set( OFT_PYPI_VER_SUFFIX "" CACHE INTERNAL "Version suffix for PYPI (needs to be pep440)" )
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake" )
@@ -353,24 +353,6 @@ if ( OFT_ARPACK_FOUND )
   set( EXT_LIBS ${OFT_ARPACK_LIBRARIES} ${EXT_LIBS} )
   add_definitions( -DHAVE_ARPACK )
 endif()
-# NETCDF
-if( OFT_NETCDF_ROOT )
-  find_package( OFT_NETCDF COMPONENTS Fortran )
-endif()
-if ( OFT_NETCDF_FOUND )
-  include_directories( ${OFT_NETCDF_INCLUDE_DIRS} )
-  set( EXT_LIBS ${OFT_NETCDF_LIBRARIES} ${EXT_LIBS} )
-  add_definitions( -DHAVE_NCDF )
-endif()
-# OpenNURBS
-if( OFT_OpenNURBS_ROOT )
-  find_package( OFT_OpenNURBS )
-endif()
-if ( OFT_OpenNURBS_FOUND )
-  include_directories( ${OFT_OpenNURBS_INCLUDE_DIRS} )
-  set( EXT_LIBS ${OFT_OpenNURBS_LIBRARIES} ${EXT_LIBS} )
-  add_definitions( -DHAVE_ONURBS )
-endif()
 # PETSc
 if( OFT_PETSc_FOUND )
   add_definitions( -DHAVE_PETSC )
@@ -552,6 +534,9 @@ endfunction()
 add_subdirectory( examples )
 # Testing
 if( OFT_BUILD_TESTS )
+  if( NOT OFT_BUILD_PYTHON )
+    message( FATAL_ERROR "Python interface must be built to run tests" )
+  endif()
   add_subdirectory( tests )
 endif()
 # Binary directories

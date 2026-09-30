@@ -6,13 +6,7 @@ on:
       - main
       - cov_debug
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
-    paths:
-      - .github/workflows/cov_build.yaml
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: cov-${{ github.ref }}
@@ -46,7 +40,7 @@ jobs:
       uses: actions/cache@v5
       with:
         path: builds
-        key: cov_build-${{ hashFiles('src/utilities/build_libs.py') }}
+        key: cov_build-${{ hashFiles('src/utilities/build_libs.py', '.github/workflows/cov_build.yaml') }}
 
     - name: Create build dir
       if: ${{ steps.cache-ext-libs.outputs.cache-hit != 'true' }}
@@ -64,7 +58,7 @@ jobs:
       timeout-minutes: 60
       working-directory: builds
       run: >
-        python3 ../src/utilities/build_libs.py --no_dl_progress --nthread=4
+        python3 ../src/utilities/build_libs.py --no_dl_progress --nthread=4 --oblas_dynamic_arch
         --build_mpich=1 --build_arpack=1 --build_petsc=1 --petsc_version=3.23 --petsc_openmp=1
         --build_cmake=1 --oft_build_tests=1 --oft_build_coverage
 

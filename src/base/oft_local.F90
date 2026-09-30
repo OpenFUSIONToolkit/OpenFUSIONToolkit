@@ -15,6 +15,7 @@
 !--------------------------------------------------------------------------------
 MODULE oft_local
 USE, INTRINSIC :: iso_c_binding, only: c_int, c_ptr, c_long
+USE, INTRINSIC :: ieee_arithmetic, only: ieee_value, ieee_quiet_nan
 #ifdef __INTEL_COMPILER
 USE ifport ! Intel fortran portability library
 #endif

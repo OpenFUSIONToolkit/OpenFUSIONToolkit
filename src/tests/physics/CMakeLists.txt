@@ -26,6 +26,9 @@ if( OFT_BUILD_TESTS )
   configure_file( test_alfven_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   oft_add_test( test_sound_2d.F90 test_phys_helpers )
   configure_file( test_sound_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  oft_add_test( test_taylor_green_2d.F90 test_phys_helpers )
+  configure_file( test_taylor_green_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( oft_in_taylor_green.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
   # ThinCurr tests
   configure_file( test_ThinCurr.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
@@ -44,6 +47,8 @@ if( OFT_BUILD_TESTS )
 
   # TokaMaker tests
   configure_file( test_TokaMaker.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( test_TokaMaker_reconstruction_io.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( test_TokaMaker_mirnov.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( ITER_geom.json ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( ITER_test.eqdsk ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( ITER_test.ifile ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )

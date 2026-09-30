@@ -188,6 +188,7 @@ TYPE :: gs_factory
   LOGICAL, POINTER, DIMENSION(:) :: saddle_pmask => NULL() !< Point mask for saddle search
   LOGICAL, POINTER, DIMENSION(:) :: saddle_cmask => NULL() !< Cell mask for saddle search
   LOGICAL, POINTER, DIMENSION(:) :: saddle_rmask => NULL() !< Region mask for saddle search
+  LOGICAL, POINTER, DIMENSION(:) :: ignore_rmask => NULL() !< Mask for regions to ignore when populating physics (defaults to false)
   INTEGER(i4), POINTER, DIMENSION(:) :: limiter_nds => NULL() !< List of limiter nodes
   INTEGER(i4), POINTER, DIMENSION(:) :: bc_rhs_list => NULL() !< List of terms interacting with free-boundary BC
   INTEGER(i4), POINTER, DIMENSION(:) :: olbp => NULL() !< Oriented list of boundary points
@@ -236,7 +237,7 @@ TYPE :: gs_factory
   CLASS(oft_matrix), POINTER :: mop => NULL() !< Lagrange FE mass matrix
   CLASS(oft_matrix), POINTER :: mop_axis => NULL() !< Lagrange FE mass matrix with Dirichlet BCs on axis
   CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Mesh
-  CLASS(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< Lagrange FE representation
+  TYPE(oft_scalar_bfem), POINTER :: fe_rep => NULL() !< Lagrange FE representation
   TYPE(oft_ml_fem_type), POINTER :: ML_fe_rep => NULL() !< Multi-level Lagrange FE representation (only top level used)
   TYPE(oft_blag_zerob), POINTER :: zerob_bc => NULL() !< BC object for zeroing boundary nodes
   TYPE(oft_blag_zerogrnd), POINTER :: zerogrnd_bc => NULL() !< BC object for zeroing grounding node(s)
@@ -809,6 +810,10 @@ DO i=1,smesh%nc
   END DO
 END DO
 !---Build operators
+IF(.NOT.ASSOCIATED(self%ignore_rmask))THEN
+  ALLOCATE(self%ignore_rmask(smesh%nreg))
+  self%ignore_rmask=.FALSE.
+END IF
 IF(.NOT.ASSOCIATED(self%dels))THEN
   IF(self%free)THEN
     CALL compute_bcmat(self)
@@ -4715,7 +4720,7 @@ SELECT CASE(self%mode)
     ELSE
       val(1)=self%equil%psiscale*self%equil%I%f_offset
     END IF
-  CASE(3)
+  CASE(3) ! Isotropic pressure or perpendicular component for anisotropic pressure
     CALL self%psi_eval%interp(cell,f,gop,psitmp)
     IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
       ! Handle anisotropic pressure
@@ -4733,6 +4738,19 @@ SELECT CASE(self%mode)
     CALL self%psi_eval%interp(cell,f,gop,psitmp)
     IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
       val(1)=(psitmp(1)-self%equil%plasma_bounds(1))/(self%equil%plasma_bounds(2)-self%equil%plasma_bounds(1))
+    ELSE
+      val(1)=0.d0
+    END IF
+  CASE(5) ! Isotropic pressure or parallel component for anisotropic pressure
+    CALL self%psi_eval%interp(cell,f,gop,psitmp)
+    IF(in_plasma.AND.(psitmp(1)>self%equil%plasma_bounds(1)))THEN
+      ! Handle anisotropic pressure
+      IF(ASSOCIATED(self%equil%P_ani))THEN
+        CALL self%equil%P_ani%interp(cell,f,gop,pani)
+        val(1) = (self%equil%psiscale**2)*self%equil%p_scale*self%equil%P%F(psitmp(1))*pani(1)/mu0
+      ELSE
+        val(1) = (self%equil%psiscale**2)*self%equil%p_scale*self%equil%P%F(psitmp(1))/mu0
+      END IF
     ELSE
       val(1)=0.d0
     END IF
@@ -5462,6 +5480,8 @@ allocate(lop(self%fe_rep%nce,self%fe_rep%nce)) ! Local laplacian matrix
 IF(nnonaxi>0)allocate(nonaxi_tmp(self%fe_rep%nce))
 !$omp do schedule(dynamic,1) ordered
 do i=1,self%fe_rep%mesh%nc
+  !---Skip cell if in 'ignore' region
+  IF(self%ignore_rmask(self%fe_rep%mesh%reg(i))) CYCLE
   !---Get local reconstructed operators
   lop=0.d0
   IF(nnonaxi>0)nonaxi_tmp=0.d0
@@ -5668,6 +5688,8 @@ allocate(rop(self%fe_rep%nce),row_tmp(self%fe_rep%nce,1))
 allocate(j_lag(self%fe_rep%nce),col_tmp(1,self%fe_rep%nce))
 !!$omp do schedule(static)
 DO j=1,smesh%nc
+  !---Skip cell if in 'ignore' region
+  IF(self%ignore_rmask(self%fe_rep%mesh%reg(j))) CYCLE
   nturns=self%coil_nturns(smesh%reg(j),iCoil)
   eta_wt=0.d0
   IF(eta_reg(smesh%reg(j))>0.d0)eta_wt=1.d0/(dt_in*eta_reg(smesh%reg(j)))
