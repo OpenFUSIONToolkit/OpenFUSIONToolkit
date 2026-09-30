@@ -1036,7 +1036,7 @@ def test_torus_fourier_sensor_mode_trace_parts():
     theta = 2*np.pi*np.arange(16)/16
     phi = 2*np.pi*np.arange(8)/8
     phases = [0.0,-np.pi/2,np.pi/3]
-    interface = torus_fourier_sensor(1+np.cos(theta),np.sin(theta),1.0,-1)
+    interface = torus_fourier_sensor(1+np.cos(theta),np.sin(theta),1.0,-1,hamada_dphi=np.zeros(len(theta)))
     interface.nphi = len(phi)
     interface.get_B_mesh = lambda t: np.cos(2*theta[:,None]+phi[None,:]+phases[t])
 
@@ -1150,14 +1150,17 @@ def test_torus_fourier_sensor_from_gpec_control_output():
     assert interface_o.helicity == -1
 
 @pytest.mark.coverage
-def test_torus_fourier_sensor_hamada_alignment():
+def test_torus_fourier_sensor_hamada_alignment(tmp_path):
+    from matplotlib.figure import Figure
     from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
     R_0 = 3.0
-    theta = np.linspace(0.0,2.0*np.pi,65)
+    # Start below the outboard midplane and include the repeated endpoint.
+    theta = np.linspace(-np.pi/64,2.0*np.pi-np.pi/64,65)
     R = R_0+1.0*np.cos(theta)
     Z = 1.0*np.sin(theta)
     dphi = 0.3*np.sin(theta)+0.1*np.cos(2.0*theta)
     base = torus_fourier_sensor(R,Z,R_0,1,hamada_dphi=dphi)
+    assert base.ntheta == 64
     # the same surface supplied in a rotated point order must produce the same
     # object: hamada_dphi is reordered together with the surface points
     roll = 17
@@ -1174,111 +1177,34 @@ def test_torus_fourier_sensor_hamada_alignment():
     B_n_expl, _, _ = base.fft2(B,hamada_dphi=base.hamada_dphi)
     assert np.allclose(B_n_base,B_n_expl)
 
-@pytest.mark.coverage
-@pytest.mark.parametrize('duplicate_endpoint',(False,True))
-def test_torus_fourier_sensor_negative_start(duplicate_endpoint):
-    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
-    theta = 2*np.pi*np.arange(16)/16 - np.pi/16
-    R = 3.0+np.cos(theta)
-    Z = np.sin(theta)
-    dphi = 0.3*np.sin(theta)
-    if duplicate_endpoint:
-        R, Z, dphi = [np.r_[values,values[0]] for values in (R,Z,dphi)]
-    interface = torus_fourier_sensor(R,Z,3.0,-1,hamada_dphi=dphi)
-    order = np.argsort(np.mod(theta,2*np.pi))
-    assert interface.ntheta == 16
-    np.testing.assert_allclose(interface.radial_positions,R[:16][order])
-    np.testing.assert_allclose(interface.axial_positions,Z[:16][order])
-    np.testing.assert_allclose(interface.hamada_dphi,dphi[:16][order])
-    np.testing.assert_allclose(interface.theta_list,np.mod(theta[order],2*np.pi))
-
-
-@pytest.mark.coverage
-@pytest.mark.parametrize('theta',([-np.pi/4,3*np.pi/4,5*np.pi/4,np.pi/4],
-                                 [0.0,np.pi/2,3*np.pi/2,np.pi]))
-def test_torus_fourier_sensor_distinct_endpoints(theta):
-    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
-    theta = np.array(theta)
-    # First and last points share R or Z, but are distinct surface points.
-    R, Z = 3.0+np.cos(theta), np.sin(theta)
-    interface = torus_fourier_sensor(R,Z,3.0,-1,hamada_dphi=np.arange(4))
-    assert interface.ntheta == 4
-    order = np.argsort(np.mod(theta,2*np.pi))
-    np.testing.assert_allclose(interface.radial_positions,R[order])
-    np.testing.assert_allclose(interface.axial_positions,Z[order])
-    np.testing.assert_array_equal(interface.hamada_dphi,np.arange(4)[order])
-
-
-@pytest.mark.coverage
-@pytest.mark.parametrize('correction_source',('stored','explicit','closed'))
-@pytest.mark.parametrize('phase', (0.0,0.2))
-def test_torus_fourier_sensor_constant_hamada(tmp_path,correction_source,phase):
-    from matplotlib.figure import Figure
-    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
-    theta = 2*np.pi*np.arange(16)/16
-    phi = 2*np.pi*np.arange(9)/9
-    dphi = np.full(16,phase)
-    interface = torus_fourier_sensor(3.0+np.cos(theta),np.sin(theta),3.0,-1,
-                                  hamada_dphi=dphi if correction_source == 'stored' else None)
-    interface.nphi = len(phi)
-    mesh = np.cos(2*theta[:,None]+phi[None,:]+phase)
-    interface.get_B_mesh = lambda t: mesh
-    kwargs = {} if correction_source == 'stored' else {
-        'hamada_dphi': np.r_[dphi,phase] if correction_source == 'closed' else dphi}
-
-    # Constant corrections are valid at every point; only an extra endpoint is removed.
-    stem = str(tmp_path / 'spectrum')
-    interface.save_spectrum(0,stem,sensor_mesh=mesh,data_type='vac3d',**kwargs)
-    reference = str(tmp_path / 'reference')
-    interface.save_spectrum(0,reference,sensor_mesh=mesh,data_type='vac3d',hamada_dphi=dphi)
-    assert pathlib.Path(stem+'.dat').read_text() == pathlib.Path(reference+'.dat').read_text()
-    assert interface.ntheta == 16
-    if correction_source == 'stored':
-        np.testing.assert_array_equal(interface.hamada_dphi,dphi)
-
-    ax = Figure().subplots()
-    _, toroidal = interface.plot_1D_fourier_amplitude(0,[1],ax,**kwargs)
-    np.testing.assert_allclose(toroidal[:,1],np.exp(2j*theta),atol=1e-14)
-    ax = Figure().subplots()
-    line = interface.plot_m_over_n_amplitude([2],1,2,0.1,ax,**kwargs)[0][0]
-    np.testing.assert_allclose(line.get_ydata(),np.ones(3),atol=1e-14)
-    ax = Figure().subplots()
-    real_lines, _ = interface.plot_2D_fourier_amplitude(0,[1],axes=ax,
-        x_mode_min=-3,x_mode_max=3,sensor_mesh=mesh,**kwargs)
-    np.testing.assert_allclose(real_lines[0][0].get_ydata(),[0,0,0,0,0,1,0],atol=1e-14)
-    axes = Figure().subplots(2)
-    amplitude_lines, phase_lines = interface.plot_2D_fourier_amplitude(0,[1],axes=axes,
-        part='ap',x_mode_min=-3,x_mode_max=3,sensor_mesh=mesh,**kwargs)
-    np.testing.assert_allclose(amplitude_lines[0][0].get_ydata(),[0,0,0,0,0,1,0],atol=1e-14)
-    np.testing.assert_allclose(phase_lines[0][0].get_ydata()[5],0,atol=1e-14)
-    assert amplitude_lines[0][0].axes is axes[0]
-    assert phase_lines[0][0].axes is axes[1]
-    fig = Figure()
-    interface.field_fourier_amplitude_contour(0,-3,3,0,2,fig,fig.subplots(),**kwargs)
-
-
-@pytest.mark.coverage
-def test_append_coil_currents_custom_matching(tmp_path):
-    from OpenFUSIONToolkit.ThinCurr.util import append_coil_currents_to_drive, drive_to_array
-    drive = tmp_path / 'input.drive'
-    drive.write_text('2 3\n0 10\n1 20\n2 30\n')
-    csv = tmp_path / 'currents.csv'
-    csv.write_text('time,cs1u amperes,divl amperes\n0,4,7\n1,5,8\n2,6,9\n')
-    output = tmp_path / 'output.drive'
-    missing = append_coil_currents_to_drive(str(drive),str(csv),str(output),
-        ['CS1U_lead_2','divl','unknown'],header_template='{name} amperes',
-        ignore_suffixes=('_lead',),verbose=False)
-    assert missing == {'unknown'}
-    np.testing.assert_allclose(drive_to_array(str(output)),
-                               [[0,10,4,7,0],[1,20,5,8,0],[2,30,6,9,0]])
-
+    # Matching only R or only Z must not remove a distinct endpoint.
+    for angles in ([-np.pi/4,3*np.pi/4,5*np.pi/4,np.pi/4], [0,np.pi/2,3*np.pi/2,np.pi]):
+        surface = torus_fourier_sensor(R_0+np.cos(angles),np.sin(angles),R_0,1)
+        assert surface.ntheta == 4
+    # Stored, explicit, and endpoint-inclusive zero corrections must remain aligned.
+    base.hamada_dphi = np.zeros(base.ntheta)
+    base.nphi = B.shape[1]
+    base.get_B_mesh = lambda t: B
+    spectra = []
+    for i,kwargs in enumerate(({}, {'hamada_dphi': base.hamada_dphi},
+                              {'hamada_dphi': np.r_[base.hamada_dphi,0.0]})):
+        stem = str(tmp_path / ('zero_phase_%d' % i))
+        base.save_spectrum(0,stem,sensor_mesh=B,**kwargs)
+        spectra.append(pathlib.Path(stem+'.dat').read_text())
+        base.plot_1D_fourier_amplitude(0,1,Figure().subplots(),**kwargs)
+        base.plot_2D_fourier_amplitude(0,[1],axes=Figure().subplots(2),part='ap',
+                                      x_mode_min=-3,x_mode_max=3,**kwargs)
+        fig = Figure()
+        base.field_fourier_amplitude_contour(0,-3,3,0,2,fig,fig.subplots(),**kwargs)
+    assert spectra[0] == spectra[1] == spectra[2]
 
 @pytest.mark.coverage
 def test_thincurr_model_prep_utils(tmp_path):
     import netCDF4
     from OpenFUSIONToolkit.ThinCurr.util import (drive_to_array, triangular_waveform,
                                                  shift_coils_in_xml, parse_coils_xml,
-                                                 find_coil_current_column, add_gpec_coils_to_xml)
+                                                 find_coil_current_column, add_gpec_coils_to_xml,
+                                                 append_coil_currents_to_drive)
     # triangular_waveform: 3-point ramp holding the requested peak at twidth/2
     curr = np.array([14.0, 0.0, 2.0, -4.0])
     tri = triangular_waveform(1.E-2,0.015,curr)
@@ -1313,6 +1239,15 @@ def test_thincurr_model_prep_utils(tmp_path):
     assert find_coil_current_column('CS1U_feed_2',header_to_idx) == 3
     assert find_coil_current_column('divl_1',header_to_idx) == 7
     assert find_coil_current_column('unknown',header_to_idx) is None
+    # Custom CSV matching options must reach the column lookup helper.
+    csv_file = tmp_path / 'currents.csv'
+    csv_file.write_text('cs1u amperes,divl amperes\n4,7\n5,8\n')
+    appended_file = tmp_path / 'appended.drive'
+    missing = append_coil_currents_to_drive(str(drive_file),str(csv_file),str(appended_file),
+        ['CS1U_lead_2','divl','unknown'],header_template='{name} amperes',
+        ignore_suffixes=('_lead',),verbose=False)
+    assert missing == {'unknown'}
+    assert np.allclose(drive_to_array(str(appended_file)),[[0,1,2,4,7,0],[1,3,4,5,8,0]])
     # add_gpec_coils_to_xml: split coil groups from a GPEC-style netCDF
     nc_file = tmp_path / 'coils.nc'
     with netCDF4.Dataset(str(nc_file),'w',format='NETCDF3_CLASSIC') as ds:
