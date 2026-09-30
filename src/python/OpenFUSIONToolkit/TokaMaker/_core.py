@@ -29,7 +29,7 @@ def create_prof_file(self, filename, profile_dict, name):
     coord = profile_dict.get('coord','psi_n')
     if coord not in ('psi_n','phi_n','phi_n_relabel'):
         raise ValueError('Invalid coord "{0}" for {1} profile, must be "psi_n", "phi_n", or "phi_n_relabel"'.format(coord, name))
-    if coord == 'phi_n' and (profile_dict['type'].startswith('jphi') or name in ('Te','Ti','ne','ni','Zeff','eta')):
+    if coord == 'phi_n' and (profile_dict['type'].startswith('jphi') or name in ('Te','Ti','ne','ni','Zeff','eta','jphi_fixed')):
         raise ValueError('{0} profile ("{1}") on toroidal flux must use coord "phi_n_relabel"'.format(name, profile_dict['type']))
     file_lines = [profile_dict['type'] if coord == 'psi_n' else '{0} {1}'.format(profile_dict['type'], coord)]
     if profile_dict['type'] == 'flat':
@@ -2464,6 +2464,8 @@ class TokaMaker():
                                                   for _prof in (te_prof, ne_prof, ti_prof, ni_prof)]
             if isinstance(Zeff, dict):
                 Zeff = dict(Zeff, coord='phi_n_relabel')
+            if jphi_fixed_prof is not None:
+                jphi_fixed_prof = dict(jphi_fixed_prof, coord='phi_n_relabel')
 
         # Evaluate pressure on axis
         pax = float(pressure[0])

@@ -362,6 +362,7 @@ CALL remap(equil%Ti)
 CALL remap(equil%ne)
 CALL remap(equil%ni)
 CALL remap(equil%Zeff)
+CALL remap(equil%jphi_fixed)
 !---Value-type profiles cannot use derivative (phi_n) semantics
 CALL check_value(equil%eta,'eta')
 CALL check_value(equil%Te,'Te')
@@ -369,6 +370,7 @@ CALL check_value(equil%Ti,'Ti')
 CALL check_value(equil%ne,'ne')
 CALL check_value(equil%ni,'ni')
 CALL check_value(equil%Zeff,'Zeff')
+CALL check_value(equil%jphi_fixed,'jphi_fixed')
 CONTAINS
 !---Abort if a value-type profile uses coord=1
 subroutine check_value(F,name)
@@ -408,6 +410,7 @@ CALL attach(self%Ti)
 CALL attach(self%ne)
 CALL attach(self%ni)
 CALL attach(self%Zeff)
+CALL attach(self%jphi_fixed)
 CONTAINS
 !---Point at copied map and rebuild relabel table
 subroutine attach(F)
@@ -468,6 +471,7 @@ CALL add_func(gseq%Ti)
 CALL add_func(gseq%ne)
 CALL add_func(gseq%ni)
 CALL add_func(gseq%Zeff)
+CALL add_func(gseq%jphi_fixed)
 gseq%tmap%active=active
 IF((.NOT.active).OR.(gseq%plasma_bounds(1)<-1.d98))THEN
   IF(gseq%tmap%ns>0)CALL gseq%tmap%delete()

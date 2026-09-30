@@ -458,6 +458,7 @@ END IF
 IF(ASSOCIATED(self%jphi_fixed))THEN
   CALL hdf5_create_group(filename,'tokamaker/JPHI_FIXED_PROFILE')
   CALL self%jphi_fixed%save(filename,'tokamaker/JPHI_FIXED_PROFILE')
+  CALL gs_profile_save_coord(self%jphi_fixed,filename,'tokamaker/JPHI_FIXED_PROFILE')
 END IF
 ! IF(ASSOCIATED(self%P_ani))THEN
 !   CALL hdf5_create_group(filename,'tokamaker/P_ANI')
@@ -662,6 +663,7 @@ IF(hdf5_field_exist(filename,'tokamaker/JPHI_FIXED_PROFILE'))THEN
   CALL gs_profile_alloc(profType,self%jphi_fixed)
   DEALLOCATE(profType)
   CALL self%jphi_fixed%load(filename,'tokamaker/JPHI_FIXED_PROFILE',success=success)
+  CALL gs_profile_load_coord(self%jphi_fixed,filename,'tokamaker/JPHI_FIXED_PROFILE')
   IF(.NOT.success)THEN
     error_string='Failed to load jphi_fixed profile.'
     RETURN
