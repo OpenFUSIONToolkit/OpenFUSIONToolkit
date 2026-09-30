@@ -73,6 +73,7 @@ Thanks! :sunny: :heart:
 The Open FUSION Toolkit Team
 
 ## Contributors
+Matt Adams (@mattsgit)\
 Anson Braun (@ansonbraun)\
 Daniel Burgess (@d-burg)\
 Samuel Freiberger (@samuel-frei)\
