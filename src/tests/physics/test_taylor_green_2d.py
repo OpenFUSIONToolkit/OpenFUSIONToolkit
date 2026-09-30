@@ -102,12 +102,6 @@ def validate_result(vxerr_exp, vzerr_exp, perr_exp):
 @pytest.mark.parametrize("nonfinite", (float('nan'), float('inf'), float('-inf')),
                          ids=("nan", "positive-inf", "negative-inf"))
 def test_validate_result_rejects_nonfinite(tmp_path, monkeypatch, error_index, nonfinite):
-    """@brief Reject nonfinite values in each reported physics error.
-    @param tmp_path Isolated directory for the results file.
-    @param monkeypatch Fixture that restores the working directory.
-    @param error_index Position of the nonfinite error in the results file.
-    @param nonfinite Nonfinite value to reject.
-    """
     errors = [0.1, 0.2, 0.3]
     errors[error_index] = nonfinite
     (tmp_path / 'taylor_green_2d.results').write_text(
@@ -117,10 +111,6 @@ def test_validate_result_rejects_nonfinite(tmp_path, monkeypatch, error_index, n
 
 @pytest.mark.coverage
 def test_validate_result_accepts_finite(tmp_path, monkeypatch):
-    """@brief Accept finite physics errors within the existing bounds.
-    @param tmp_path Isolated directory for the results file.
-    @param monkeypatch Fixture that restores the working directory.
-    """
     (tmp_path / 'taylor_green_2d.results').write_text('0.1\n0.2\n0.3\n')
     monkeypatch.chdir(tmp_path)
     assert validate_result(0.1, 0.2, 0.3)
