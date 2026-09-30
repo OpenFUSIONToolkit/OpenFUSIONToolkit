@@ -585,6 +585,11 @@ ELSE
   END IF
 END IF
 self%alpha_last = alpha
+IF(ip_result_lo > ip_target)THEN
+  WRITE(char_buf,'(A,ES12.4,A,ES12.4,A)') 'Fixed + bootstrap current (', ip_result_lo/mu0, &
+    ' A) exceeds target plasma current (', ip_target/mu0, ' A); inductive current is reversed'
+  IF(oft_env%pm)CALL oft_warn(TRIM(char_buf))
+END IF
 !--- 6. Assemble jphi_total, save profiles
 jphi_total = alpha * jphi_ind + j_BS + jphi_fixed
 IF(.NOT.ASSOCIATED(self%jphi_total_last)) ALLOCATE(self%jphi_total_last(0:self%npsi))
