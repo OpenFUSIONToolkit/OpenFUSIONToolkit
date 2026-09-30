@@ -41,23 +41,24 @@ TYPE :: boot_ops
   REAL(r8) :: scale_jBS = 1.0_r8 !< Scaling factor applied to the spike profile (default 1)
   REAL(r8) :: djBS_tol = 1.0e-4_r8 !< Threshold on rel. change in bootstrap current to stop recalculation (increasing solve speed)
   LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration
-  LOGICAL :: taper_edge_jBS = .FALSE. !< Smooth taper of toroidal current to zero at plasma edge (guards against numerical issues at the separatrix)
+  LOGICAL :: taper_edge_jBS = .FALSE. !< Smooth taper of toroidal current (inductive, bootstrap and fixed) to zero at plasma edge (guards against numerical issues at the separatrix)
   REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
   INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
 END TYPE boot_ops
 !------------------------------------------------------------------------------
 !> Cached current profiles produced by the last call to @ref jphi_bs_update.
 !!
-!! All four arrays are allocated/overwritten on every call to jphi_bs_update
+!! All arrays are allocated/overwritten on every call to jphi_bs_update
 !! and remain valid until the next call or until the parent @ref gs_equil is
 !! destroyed.  Units are A/m² (before the mu0 normalisation used internally).
 !------------------------------------------------------------------------------
 TYPE :: boot_profs
   REAL(r8), POINTER, DIMENSION(:) :: psi_n => NULL() !< Normalised psi_N values for these current profiles in OFT convention (0=LCFS, 1=axis); index 0 is the LCFS boundary
   REAL(r8), POINTER, DIMENSION(:) :: j_bs_raw => NULL() !< Raw bootstrap current density output directly from Redl PoP 2021 formula [A/m²]
-  REAL(r8), POINTER, DIMENSION(:) :: total_j_phi => NULL() !< Total toroidal current density = j_ind_final + j_bs_final [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: total_j_phi => NULL() !< Total toroidal current density = j_ind_final + j_bs_final + jphi_fixed [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: j_ind_final => NULL() !< Input jphi, re-scaled & optionally tapered [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: j_bs_final => NULL() !< Bootstrap current density, optionally isolated/parametrised/tapered [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: jphi_fixed => NULL() !< Fixed (non-rescaled) toroidal current density, optionally tapered [A/m²]
 END TYPE boot_profs
 !------------------------------------------------------------------------------
 !> Jphi flux function type for bootstrap current calculation
@@ -152,6 +153,8 @@ IF(ASSOCIATED(self%boot_profs%total_j_phi).OR.ASSOCIATED(self%boot_profs%j_bs_ra
     CALL hdf5_write(self%boot_profs%total_j_phi,filename,path//'/BOOT_PROFS/TOTAL_J_PHI')
     CALL hdf5_write(self%boot_profs%j_ind_final,filename,path//'/BOOT_PROFS/J_IND_FINAL')
     CALL hdf5_write(self%boot_profs%j_bs_final,filename,path//'/BOOT_PROFS/J_BS_FINAL')
+    IF(ASSOCIATED(self%boot_profs%jphi_fixed)) &
+      CALL hdf5_write(self%boot_profs%jphi_fixed,filename,path//'/BOOT_PROFS/JPHI_FIXED')
     IF(ASSOCIATED(self%boot_profs%j_bs_raw)) &
       CALL hdf5_write(self%boot_profs%j_bs_raw,filename,path//'/BOOT_PROFS/J_BS_RAW')
   END IF
@@ -226,6 +229,11 @@ IF(hdf5_field_exist(filename,path//'/BOOT_PROFS'))THEN
     CALL hdf5_read(self%boot_profs%total_j_phi,filename,path//'/BOOT_PROFS/TOTAL_J_PHI',success=success)
     CALL hdf5_read(self%boot_profs%j_ind_final,filename,path//'/BOOT_PROFS/J_IND_FINAL',success=success)
     CALL hdf5_read(self%boot_profs%j_bs_final,filename,path//'/BOOT_PROFS/J_BS_FINAL',success=success)
+    IF(ASSOCIATED(self%boot_profs%jphi_fixed))DEALLOCATE(self%boot_profs%jphi_fixed)
+    IF(hdf5_field_exist(filename,path//'/BOOT_PROFS/JPHI_FIXED'))THEN
+      ALLOCATE(self%boot_profs%jphi_fixed(0:SIZE(self%boot_profs%total_j_phi)-1))
+      CALL hdf5_read(self%boot_profs%jphi_fixed,filename,path//'/BOOT_PROFS/JPHI_FIXED',success=success)
+    END IF
     IF(hdf5_field_exist(filename,path//'/BOOT_PROFS/J_BS_RAW'))THEN
       CALL hdf5_field_get_sizes(filename,path//'/BOOT_PROFS/J_BS_RAW',ndims,dim_sizes)
       IF(ASSOCIATED(self%boot_profs%j_bs_raw))DEALLOCATE(self%boot_profs%j_bs_raw)
@@ -316,6 +324,7 @@ SELECT TYPE(new)
     IF(ASSOCIATED(self%boot_profs%total_j_phi))ALLOCATE(new%boot_profs%total_j_phi,SOURCE=self%boot_profs%total_j_phi)
     IF(ASSOCIATED(self%boot_profs%j_bs_final))ALLOCATE(new%boot_profs%j_bs_final,SOURCE=self%boot_profs%j_bs_final)
     IF(ASSOCIATED(self%boot_profs%j_ind_final))ALLOCATE(new%boot_profs%j_ind_final,SOURCE=self%boot_profs%j_ind_final)
+    IF(ASSOCIATED(self%boot_profs%jphi_fixed))ALLOCATE(new%boot_profs%jphi_fixed,SOURCE=self%boot_profs%jphi_fixed)
 END SELECT
 end subroutine jphi_bs_copy
 !------------------------------------------------------------------------------
@@ -335,6 +344,7 @@ IF(ASSOCIATED(self%boot_profs%j_bs_raw))DEALLOCATE(self%boot_profs%j_bs_raw)
 IF(ASSOCIATED(self%boot_profs%total_j_phi))DEALLOCATE(self%boot_profs%total_j_phi)
 IF(ASSOCIATED(self%boot_profs%j_bs_final))DEALLOCATE(self%boot_profs%j_bs_final)
 IF(ASSOCIATED(self%boot_profs%j_ind_final))DEALLOCATE(self%boot_profs%j_ind_final)
+IF(ASSOCIATED(self%boot_profs%jphi_fixed))DEALLOCATE(self%boot_profs%jphi_fixed)
 IF(ASSOCIATED(self%boot_profs%psi_n))DEALLOCATE(self%boot_profs%psi_n)
 end subroutine jphi_bs_delete
 !---------------------------------------------------------------------------------
@@ -342,12 +352,12 @@ end subroutine jphi_bs_delete
 !>
 !> Each call (one NL iteration):
 !>   1. Build <R>/<1/R> spline on self%x; pre-compute qtmp = <R>*<1/R>.
-!>   2. Evaluate bootstrap current j_BS on self%x (or reuse cache if frozen).
-!>   3. Apply edge taper to j_BS and jphi_ind component-wise.
+!>   2. Evaluate fixed current jphi_fixed and bootstrap current j_BS on self%x (or reuse cache if frozen).
+!>   3. Apply edge taper to j_BS, jphi_ind and jphi_fixed component-wise.
 !>   4. Compute jphi_rescale to reconcile gs_itor_nl vs gs_flux_int.
 !>   5. Solve analytically for alpha: gs_flux_int is linear in alpha, so two
 !>      evaluations (alpha=0, alpha=1) give alpha = (Ip_target - Ip_lo)/(Ip_hi - Ip_lo).
-!>   6. Assemble jphi_total = alpha*jphi_ind + j_BS; compute F*F' knots.
+!>   6. Assemble jphi_total = alpha*jphi_ind + j_BS + jphi_fixed; compute F*F' knots.
 !>   7. Diagnostics (if diagnose_bs is set).
 !---------------------------------------------------------------------------------
 SUBROUTINE jphi_bs_update(self, gseq)
@@ -365,6 +375,7 @@ REAL(r8), ALLOCATABLE :: j_spike_mask_tmp(:)  !< Raw masked (pre-fit) spike prof
 ! Working arrays on self%x grid
 REAL(r8), ALLOCATABLE :: jphi_total(:)
 REAL(r8), ALLOCATABLE :: jphi_ind(:)  !< Tapered copy of self%jphi (= self%jphi when taper off)
+REAL(r8), ALLOCATABLE :: jphi_fixed(:)  !< Fixed current from gseq%jphi_fixed (A/m², mu0*A/m² from step 3; 0 if unset)
 ! Alpha-solve scalars
 REAL(r8) :: alpha, ip_target, ip_ind, ip_result_lo, ip_result_hi, dalpha
 ! Relative change in bootstrap current for freeze check
@@ -406,7 +417,15 @@ ALLOCATE(qtmp(0:self%npsi))
 CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
 CALL eval_R_qtmp(R_spline, [0.0_r8, self%x], self%npsi+1, qtmp)
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
-!--- 2. Bootstrap current on self%x grid.
+!--- 2. Fixed current [A/m²] and bootstrap current on self%x grid.
+ALLOCATE(jphi_fixed(0:self%npsi))
+jphi_fixed = 0.0_r8
+IF(ASSOCIATED(gseq%jphi_fixed))THEN
+  jphi_fixed(0) = gseq%jphi_fixed%fp(0.0_r8)
+  DO i = 1, self%npsi
+    jphi_fixed(i) = gseq%jphi_fixed%fp(self%x(i))
+  END DO
+END IF
 ALLOCATE(j_BS(0:self%npsi))
 IF(self%freeze_j_BS .AND. ASSOCIATED(self%j_BS_last)) THEN
   !--- Frozen: reuse cached j_BS.
@@ -423,14 +442,14 @@ ELSE
         j_spike=j_spike_tmp, j_spike_masked=j_spike_mask_tmp)
     IF (self%boot_ops%diagnose_bs) THEN
       IF (self%boot_ops%parameterize_jBS) THEN
-        WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         j_BS(bulk)[A/m2]  j_spike[A/m2]   j_spike_masked[A/m2]  jphi[A/m2]'
+        WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         j_BS(bulk)[A/m2]  j_spike[A/m2]   j_spike_masked[A/m2]  jphi[A/m2]  jphi_fixed[A/m2]'
         DO i = 1, self%npsi
-          WRITE(*,'(A,I4,5ES15.5)') '  ', i, self%x(i), j_BS(i), j_spike_tmp(i), j_spike_mask_tmp(i), self%jphi(i)
+          WRITE(*,'(A,I4,6ES15.5)') '  ', i, self%x(i), j_BS(i), j_spike_tmp(i), j_spike_mask_tmp(i), self%jphi(i), jphi_fixed(i)
         END DO
       ELSE
-        WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         j_BS(bulk)[A/m2]  j_spike[A/m2]   jphi[A/m2]'
+        WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         j_BS(bulk)[A/m2]  j_spike[A/m2]   jphi[A/m2]  jphi_fixed[A/m2]'
         DO i = 1, self%npsi
-          WRITE(*,'(A,I4,4ES15.5)') '  ', i, self%x(i), j_BS(i), j_spike_tmp(i), self%jphi(i)
+          WRITE(*,'(A,I4,5ES15.5)') '  ', i, self%x(i), j_BS(i), j_spike_tmp(i), self%jphi(i), jphi_fixed(i)
         END DO
       END IF
     END IF
@@ -440,9 +459,9 @@ ELSE
     CALL calculate_bootstrap(self, gseq, self%npsi, self%x, j_BS)
     j_BS = j_BS * self%boot_ops%scale_jBS
     IF(self%boot_ops%diagnose_bs)THEN
-      WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         j_BS[A/m2]      jphi[A/m2]'
+      WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         j_BS[A/m2]      jphi[A/m2]  jphi_fixed[A/m2]'
       DO i = 1, self%npsi
-        WRITE(*,'(A,I4,3ES15.5)') '  ', i, self%x(i), j_BS(i), self%jphi(i)
+        WRITE(*,'(A,I4,4ES15.5)') '  ', i, self%x(i), j_BS(i), self%jphi(i), jphi_fixed(i)
       END DO
     END IF
   END IF
@@ -480,18 +499,23 @@ ELSE
   IF(.NOT.ASSOCIATED(self%j_BS_last)) ALLOCATE(self%j_BS_last(0:self%npsi))
   self%j_BS_last = j_BS
 END IF
-!--- 3. Apply edge taper to j_BS and jphi_ind.
+!--- 3. Apply edge taper to j_BS, jphi_ind and jphi_fixed (jphi_fixed first converted to mu0*A/m²).
 !   self%j_BS_last caches the un-tapered j_BS so freeze comparisons track physics.
 !   taper_edge_psi0 is in standard convention (0=axis,1=LCFS);
 !   threshold in OFT convention (0=LCFS,1=axis) is (1 - taper_edge_psi0).
 ALLOCATE(jphi_ind(0:self%npsi))
 jphi_ind = [self%j0, self%jphi]
+jphi_fixed = jphi_fixed * mu0
 IF (self%boot_ops%taper_edge_jBS) THEN
   CALL apply_edge_taper(self%npsi+1, [0.0_r8, self%x], j_BS, &
                         1.0_r8 - self%boot_ops%taper_edge_psi0, &
                         self%boot_ops%taper_edge_shape, &
                         oft_psi_conv=.TRUE.)
   CALL apply_edge_taper(self%npsi+1, [0.0_r8, self%x], jphi_ind, &
+                        1.0_r8 - self%boot_ops%taper_edge_psi0, &
+                        self%boot_ops%taper_edge_shape, &
+                        oft_psi_conv=.TRUE.)
+  CALL apply_edge_taper(self%npsi+1, [0.0_r8, self%x], jphi_fixed, &
                         1.0_r8 - self%boot_ops%taper_edge_psi0, &
                         self%boot_ops%taper_edge_shape, &
                         oft_psi_conv=.TRUE.)
@@ -519,9 +543,9 @@ IF(self%freeze_alpha) THEN
   ip_result_hi = 0.0_r8
 ELSE
   !--- Not yet frozen: exact linear solve for alpha.
-  jphi_total = j_BS
+  jphi_total = j_BS + jphi_fixed
   CALL gs_flux_int(gseq, [0.0_r8, self%x], jphi_total/qtmp, self%npsi+1, ip_result_lo)
-  jphi_total = jphi_ind + j_BS
+  jphi_total = jphi_ind + j_BS + jphi_fixed
   CALL gs_flux_int(gseq, [0.0_r8, self%x], jphi_total/qtmp, self%npsi+1, ip_result_hi)
   ip_ind = ip_result_hi - ip_result_lo
   IF(ABS(ip_ind) > 0.0_r8)THEN
@@ -562,7 +586,7 @@ ELSE
 END IF
 self%alpha_last = alpha
 !--- 6. Assemble jphi_total, save profiles
-jphi_total = alpha * jphi_ind + j_BS
+jphi_total = alpha * jphi_ind + j_BS + jphi_fixed
 IF(.NOT.ASSOCIATED(self%jphi_total_last)) ALLOCATE(self%jphi_total_last(0:self%npsi))
 self%jphi_total_last = jphi_total
 IF(.NOT.ASSOCIATED(self%boot_profs%total_j_phi))THEN
@@ -571,10 +595,12 @@ IF(.NOT.ASSOCIATED(self%boot_profs%total_j_phi))THEN
   ALLOCATE(self%boot_profs%j_bs_final(0:self%npsi))
   ALLOCATE(self%boot_profs%j_ind_final(0:self%npsi))
 END IF
+IF(.NOT.ASSOCIATED(self%boot_profs%jphi_fixed))ALLOCATE(self%boot_profs%jphi_fixed(0:self%npsi))
 self%boot_profs%psi_n       = [0.0_r8, self%x]
 self%boot_profs%total_j_phi = jphi_total/mu0
 self%boot_profs%j_bs_final  = j_BS/mu0
 self%boot_profs%j_ind_final = alpha * jphi_ind/mu0
+self%boot_profs%jphi_fixed  = jphi_fixed/mu0
 !--- Compute updated F*F' profile
 IF(ASSOCIATED(gseq%P_ani)) &
   CALL oft_abort('Jphi profiles do not support anisotropic pressure', &
@@ -607,6 +633,7 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,L1)')     '  [jphi_bs_update] freeze_alpha= ', self%freeze_alpha
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] j_BS max    = ', MAXVAL(ABS(j_BS))
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi max    = ', MAXVAL(ABS(self%jphi))
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi_fixed max = ', MAXVAL(ABS(jphi_fixed))
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi_rescale= ', jphi_rescale
   !--- Side-by-side Ip comparison: FEM nonlinear solve vs profile flux integral
   CALL gs_itor_nl(gseq, itor_nl)
@@ -616,7 +643,7 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] Ip(flux_int/qtmp) = ', itor_flint/mu0
 END IF
 !--- Clean up
-DEALLOCATE(j_BS, jphi_total, jphi_ind, qtmp)
+DEALLOCATE(j_BS, jphi_total, jphi_ind, jphi_fixed, qtmp)
 CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)
 END SUBROUTINE jphi_bs_update

@@ -561,15 +561,17 @@ CASE DEFAULT
 END SELECT
 END SUBROUTINE tokamaker_set_profile_dofs
 !---------------------------------------------------------------------------------
-!> Load kinetic profile specification files (Te, Ti, ne, ni, Zeff)
+!> Load kinetic profile specification files (Te, Ti, ne, ni, Zeff, jphi_fixed)
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_load_kinetic_profiles(tMaker_equil_ptr,te_file,ne_file,ti_file,ni_file,zeff_file,error_str) BIND(C,NAME="tokamaker_load_kinetic_profiles")
+SUBROUTINE tokamaker_load_kinetic_profiles(tMaker_equil_ptr,te_file,ne_file,ti_file,ni_file,zeff_file, &
+    jphi_fixed_file,error_str) BIND(C,NAME="tokamaker_load_kinetic_profiles")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 CHARACTER(KIND=c_char), INTENT(in) :: te_file(OFT_PATH_SLEN) !< Electron temperature [keV] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ne_file(OFT_PATH_SLEN) !< Electron density [m^-3] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ti_file(OFT_PATH_SLEN) !< Ion temperature [keV] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ni_file(OFT_PATH_SLEN) !< Ion density [m^-3] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: zeff_file(OFT_PATH_SLEN) !< Effective charge [-] profile specification file
+CHARACTER(KIND=c_char), INTENT(in) :: jphi_fixed_file(OFT_PATH_SLEN) !< Fixed toroidal current density [A/m^2] profile specification file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
@@ -584,6 +586,8 @@ CALL copy_string_rev(ni_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%ni)
 CALL copy_string_rev(zeff_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%Zeff)
+CALL copy_string_rev(jphi_fixed_file,tmp_str)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%jphi_fixed)
 END SUBROUTINE tokamaker_load_kinetic_profiles
 !---------------------------------------------------------------------------------
 !> Set bootstrap current options on the jphi_bs_flux_func object inside gs_equil.
@@ -647,17 +651,18 @@ END SUBROUTINE tokamaker_get_boot_ops
 !> Get cached bootstrap current profiles from the last jphi_bs_update call.
 !!
 !! Returns C pointers directly into the Fortran-owned arrays.
-!! n is the size of the total_j_phi/psi_n/j_bs_final/j_ind_final group (0 if not allocated).
+!! n is the size of the total_j_phi/psi_n/j_bs_final/j_ind_final/jphi_fixed group (0 if not allocated).
 !! n_raw is the size of j_bs_raw (0 if not allocated).  The two sizes may differ.
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_boot_profs(tMaker_equil_ptr,n,psi_n_ptr,total_j_phi_ptr, &
-    j_bs_final_ptr,j_ind_final_ptr,n_raw,j_bs_raw_ptr,error_str) BIND(C,NAME="tokamaker_get_boot_profs")
+    j_bs_final_ptr,j_ind_final_ptr,jphi_fixed_ptr,n_raw,j_bs_raw_ptr,error_str) BIND(C,NAME="tokamaker_get_boot_profs")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 INTEGER(c_int), INTENT(out) :: n !< Size of total_j_phi, psi_n, j_bs_final, j_ind_final arrays (0 if not allocated)
 TYPE(c_ptr), INTENT(out) :: psi_n_ptr !< Pointer to psi_n array
 TYPE(c_ptr), INTENT(out) :: total_j_phi_ptr !< Pointer to total_j_phi array
 TYPE(c_ptr), INTENT(out) :: j_bs_final_ptr !< Pointer to j_bs_final array
 TYPE(c_ptr), INTENT(out) :: j_ind_final_ptr !< Pointer to j_ind_final array
+TYPE(c_ptr), INTENT(out) :: jphi_fixed_ptr !< Pointer to jphi_fixed array (c_null_ptr if not allocated)
 INTEGER(c_int), INTENT(out) :: n_raw !< Size of j_bs_raw array (0 if not allocated)
 TYPE(c_ptr), INTENT(out) :: j_bs_raw_ptr !< Pointer to j_bs_raw array (c_null_ptr if not allocated)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
@@ -671,6 +676,7 @@ TYPE IS (jphi_bs_flux_func)
   total_j_phi_ptr = c_null_ptr
   j_bs_final_ptr = c_null_ptr
   j_ind_final_ptr = c_null_ptr
+  jphi_fixed_ptr = c_null_ptr
   j_bs_raw_ptr = c_null_ptr
   IF(ASSOCIATED(I%boot_profs%total_j_phi))THEN
     n = SIZE(I%boot_profs%total_j_phi, KIND=c_int)
@@ -678,6 +684,7 @@ TYPE IS (jphi_bs_flux_func)
     total_j_phi_ptr = c_loc(I%boot_profs%total_j_phi)
     j_bs_final_ptr = c_loc(I%boot_profs%j_bs_final)
     j_ind_final_ptr = c_loc(I%boot_profs%j_ind_final)
+    IF(ASSOCIATED(I%boot_profs%jphi_fixed))jphi_fixed_ptr = c_loc(I%boot_profs%jphi_fixed)
   END IF
   IF(ASSOCIATED(I%boot_profs%j_bs_raw))THEN
     n_raw = SIZE(I%boot_profs%j_bs_raw, KIND=c_int)
