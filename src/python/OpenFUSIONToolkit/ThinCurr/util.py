@@ -843,12 +843,12 @@ class torus_fourier_sensor():
         cbar.ax.ticklabel_format(style='sci', scilimits=(-3, 3))
         return cf, cbar
 
-    def plot_2D_fourier_amplitude(self,t,harmonics,ax,toroidal_harmonics=True,hamada_dphi=None,x_type='modes',x_mode_min=None,x_mode_max=None,sensor_mesh=None,part='ri'):
+    def plot_2D_fourier_amplitude(self,t,harmonics,axes,toroidal_harmonics=True,hamada_dphi=None,x_type='modes',x_mode_min=None,x_mode_max=None,sensor_mesh=None,part='ri'):
         '''! Plot the 2D Fast Fourier Transformed amplitude of the mesh of magnetic values against poloidal/toroidal harmonics/angles
 
         @param t The time step during the time evolution
         @param harmonics List of (poloidal/toroidal) modes whose amplitudes are to be visualized in y axis [:]
-        @param ax Matplotlib axis/axes for plotting: a single axis for `part` = 'ri', or exactly two axes for `part` = 'ap' (amplitude on the first, phase on the second)
+        @param axes Matplotlib axis/axes for plotting: a single axis for `part` = 'ri', or exactly two axes for `part` = 'ap' (amplitude on the first, phase on the second)
         @param toroidal_harmonics Whether the input `harmonics` is toroidal or poloidal harmonics
         @param hamada_dphi Hamada phase shifts [ntheta]
         @param x_type The variable on x axis ('modes' or 'angles')
@@ -869,7 +869,6 @@ class torus_fourier_sensor():
             raise ValueError('For x_type == "modes", both mode_min and mode_max should be provided.')
         if part not in ['ri','ap']:
             raise ValueError("Unsupported part is provided. Accepts 'ri' (real/imaginary) and 'ap' (amplitude/phase) only.")
-        axes = ax
         if isinstance(axes,(list,tuple,np.ndarray)):
             axes = list(axes)
         else:

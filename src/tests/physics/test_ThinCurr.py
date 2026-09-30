@@ -1243,9 +1243,16 @@ def test_torus_fourier_sensor_constant_hamada(tmp_path,correction_source,phase):
     line = interface.plot_m_over_n_amplitude([2],1,2,0.1,ax,**kwargs)[0][0]
     np.testing.assert_allclose(line.get_ydata(),np.ones(3),atol=1e-14)
     ax = Figure().subplots()
-    real_lines, _ = interface.plot_2D_fourier_amplitude(0,[1],ax=ax,
+    real_lines, _ = interface.plot_2D_fourier_amplitude(0,[1],axes=ax,
         x_mode_min=-3,x_mode_max=3,sensor_mesh=mesh,**kwargs)
     np.testing.assert_allclose(real_lines[0][0].get_ydata(),[0,0,0,0,0,1,0],atol=1e-14)
+    axes = Figure().subplots(2)
+    amplitude_lines, phase_lines = interface.plot_2D_fourier_amplitude(0,[1],axes=axes,
+        part='ap',x_mode_min=-3,x_mode_max=3,sensor_mesh=mesh,**kwargs)
+    np.testing.assert_allclose(amplitude_lines[0][0].get_ydata(),[0,0,0,0,0,1,0],atol=1e-14)
+    np.testing.assert_allclose(phase_lines[0][0].get_ydata()[5],0,atol=1e-14)
+    assert amplitude_lines[0][0].axes is axes[0]
+    assert phase_lines[0][0].axes is axes[1]
     fig = Figure()
     interface.field_fourier_amplitude_contour(0,-3,3,0,2,fig,fig.subplots(),**kwargs)
 
