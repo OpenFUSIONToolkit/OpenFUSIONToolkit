@@ -1811,6 +1811,31 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         mp_q.put(None)
         return
 
+    # --- verify jphi_fixed_prof is added unscaled to the total and reduces the
+    #     inductive share, and that omitting it afterwards resets it to zero ---
+    try:
+        jfix_y = 2.0e5 * np.exp(-((psi_sample - 0.5) / 0.1)**2)
+        profs_fixed = mygs.solve_bootstrap(
+            Zeff=Zeff_val,
+            jphi_fixed_prof={'type': 'linterp', 'x': psi_sample, 'y': jfix_y},
+            **zeff_common_kwargs,
+        )
+        if not np.allclose(profs_fixed['jphi_fixed'], np.interp(profs_fixed['psi_n'], psi_sample, jfix_y),
+                           rtol=1e-6, atol=1e-6*jfix_y.max()):
+            raise AssertionError("boot_profs['jphi_fixed'] does not match the input jphi_fixed_prof")
+        j_sum = profs_fixed['j_ind_final'] + profs_fixed['j_bs_final'] + profs_fixed['jphi_fixed']
+        if not np.allclose(profs_fixed['total_j_phi'], j_sum, rtol=1e-10, atol=1e-6):
+            raise AssertionError("total_j_phi != j_ind_final + j_bs_final + jphi_fixed")
+        if not np.sum(profs_fixed['j_ind_final']) < np.sum(profs_scalar['j_ind_final']):
+            raise AssertionError("jphi_fixed did not reduce the inductive current share")
+        profs_reset = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
+        if np.any(profs_reset['jphi_fixed'] != 0.0):
+            raise AssertionError("jphi_fixed persisted after solve_bootstrap without jphi_fixed_prof")
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+
     mp_q.put([eq_info])
     oftpy_dump_cov()
 

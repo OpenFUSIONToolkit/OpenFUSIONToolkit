@@ -94,9 +94,9 @@ tokamaker_get_profile_dofs = ctypes_subroutine(oftpy_lib.tokamaker_get_profile_d
 tokamaker_set_profile_dofs = ctypes_subroutine(oftpy_lib.tokamaker_set_profile_dofs,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
-# tokamaker_load_kinetic_profiles(tMaker_equil_ptr,te_file,ne_file,ti_file,ni_file,zeff_file,error_str)
+# tokamaker_load_kinetic_profiles(tMaker_equil_ptr,te_file,ne_file,ti_file,ni_file,zeff_file,jphi_fixed_file,error_str)
 tokamaker_load_kinetic_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_kinetic_profiles,
-    [c_void_p, c_char_p, c_char_p, c_char_p, c_char_p, c_char_p, c_char_p])
+    [c_void_p, c_char_p, c_char_p, c_char_p, c_char_p, c_char_p, c_char_p, c_char_p])
 
 # tokamaker_set_boot_ops(tMaker_equil_ptr,bops,error_str)
 tokamaker_set_boot_ops = ctypes_subroutine(oftpy_lib.tokamaker_set_boot_ops,
@@ -106,10 +106,10 @@ tokamaker_set_boot_ops = ctypes_subroutine(oftpy_lib.tokamaker_set_boot_ops,
 tokamaker_get_boot_ops = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_ops,
     [c_void_p, ctypes.POINTER(tokamaker_boot_ops_struct), ctypes.POINTER(c_bool), c_char_p])
 
-# tokamaker_get_boot_profs(tMaker_equil_ptr,n,psi_n_ptr,total_j_phi_ptr,j_bs_final_ptr,j_ind_final_ptr,n_raw,j_bs_raw_ptr,error_str)
+# tokamaker_get_boot_profs(tMaker_equil_ptr,n,psi_n_ptr,total_j_phi_ptr,j_bs_final_ptr,j_ind_final_ptr,jphi_fixed_ptr,n_raw,j_bs_raw_ptr,error_str)
 tokamaker_get_boot_profs = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_profs,
     [c_void_p, c_int_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr,
-     c_int_ptr, c_double_ptr_ptr, c_char_p])
+     c_double_ptr_ptr, c_int_ptr, c_double_ptr_ptr, c_char_p])
 ## @endcond
 
 # tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str)

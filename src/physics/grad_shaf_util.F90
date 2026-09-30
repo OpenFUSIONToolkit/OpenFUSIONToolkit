@@ -429,7 +429,7 @@ IF(ASSOCIATED(self%eta))THEN
   CALL self%eta%save(filename,'tokamaker/ETA_PROFILE')
   CALL gs_profile_save_coord(self%eta,filename,'tokamaker/ETA_PROFILE')
 END IF
-!---Save kinetic profiles (Te, Ti, ne, ni, Zeff) if set
+!---Save kinetic profiles (Te, Ti, ne, ni, Zeff, jphi_fixed) if set
 IF(ASSOCIATED(self%Te))THEN
   CALL hdf5_create_group(filename,'tokamaker/TE_PROFILE')
   CALL self%Te%save(filename,'tokamaker/TE_PROFILE')
@@ -454,6 +454,10 @@ IF(ASSOCIATED(self%Zeff))THEN
   CALL hdf5_create_group(filename,'tokamaker/ZEFF_PROFILE')
   CALL self%Zeff%save(filename,'tokamaker/ZEFF_PROFILE')
   CALL gs_profile_save_coord(self%Zeff,filename,'tokamaker/ZEFF_PROFILE')
+END IF
+IF(ASSOCIATED(self%jphi_fixed))THEN
+  CALL hdf5_create_group(filename,'tokamaker/JPHI_FIXED_PROFILE')
+  CALL self%jphi_fixed%save(filename,'tokamaker/JPHI_FIXED_PROFILE')
 END IF
 ! IF(ASSOCIATED(self%P_ani))THEN
 !   CALL hdf5_create_group(filename,'tokamaker/P_ANI')
@@ -548,7 +552,7 @@ IF(.NOT.success)THEN
   RETURN
 END IF
 CALL gs_update_bounds(self)
-!---Load kinetic profiles (Te, Ti, ne, ni) before flux functions so they are
+!---Load kinetic profiles (Te, Ti, ne, ni, Zeff, jphi_fixed) before flux functions so they are
 !   available when flux function update() calls (e.g. jphi_bs_update) are made below
 IF(hdf5_field_exist(filename,'tokamaker/TE_PROFILE'))THEN
   CALL hdf5_read(profType,filename,'tokamaker/TE_PROFILE/TYPE',success=success)
@@ -642,6 +646,24 @@ IF(hdf5_field_exist(filename,'tokamaker/ZEFF_PROFILE'))THEN
   CALL gs_profile_load_coord(self%Zeff,filename,'tokamaker/ZEFF_PROFILE')
   IF(.NOT.success)THEN
     error_string='Failed to load Zeff profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/JPHI_FIXED_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/JPHI_FIXED_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read jphi_fixed profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%jphi_fixed))THEN
+    CALL self%jphi_fixed%delete()
+    DEALLOCATE(self%jphi_fixed)
+  END IF
+  CALL gs_profile_alloc(profType,self%jphi_fixed)
+  DEALLOCATE(profType)
+  CALL self%jphi_fixed%load(filename,'tokamaker/JPHI_FIXED_PROFILE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to load jphi_fixed profile.'
     RETURN
   END IF
 END IF
