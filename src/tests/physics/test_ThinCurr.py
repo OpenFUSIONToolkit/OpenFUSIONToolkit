@@ -1049,7 +1049,7 @@ def test_torus_fourier_sensor_mode_trace_parts():
     for part,values in expected.items():
         ax = Figure().subplots()
         line = interface.plot_m_over_n_amplitude([2],1,2,0.1,ax,t_min=1,part=part)[0][0]
-        np.testing.assert_allclose(line.get_xdata(),[0.1,0.2])
+        np.testing.assert_allclose(line.get_xdata(),[100.0,200.0])
         np.testing.assert_allclose(line.get_ydata(),values,atol=1e-14)
         if part == 'p':
             assert ax.get_ylabel() == 'Mode phase (radians)'
@@ -1173,6 +1173,98 @@ def test_torus_fourier_sensor_hamada_alignment():
     assert np.allclose(B_n_base,B_n_rolled)
     B_n_expl, _, _ = base.fft2(B,hamada_dphi=base.hamada_dphi)
     assert np.allclose(B_n_base,B_n_expl)
+
+@pytest.mark.coverage
+@pytest.mark.parametrize('duplicate_endpoint',(False,True))
+def test_torus_fourier_sensor_negative_start(duplicate_endpoint):
+    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
+    theta = 2*np.pi*np.arange(16)/16 - np.pi/16
+    R = 3.0+np.cos(theta)
+    Z = np.sin(theta)
+    dphi = 0.3*np.sin(theta)
+    if duplicate_endpoint:
+        R, Z, dphi = [np.r_[values,values[0]] for values in (R,Z,dphi)]
+    interface = torus_fourier_sensor(R,Z,3.0,-1,hamada_dphi=dphi)
+    order = np.argsort(np.mod(theta,2*np.pi))
+    assert interface.ntheta == 16
+    np.testing.assert_allclose(interface.radial_positions,R[:16][order])
+    np.testing.assert_allclose(interface.axial_positions,Z[:16][order])
+    np.testing.assert_allclose(interface.hamada_dphi,dphi[:16][order])
+    np.testing.assert_allclose(interface.theta_list,np.mod(theta[order],2*np.pi))
+
+
+@pytest.mark.coverage
+@pytest.mark.parametrize('theta',([-np.pi/4,3*np.pi/4,5*np.pi/4,np.pi/4],
+                                 [0.0,np.pi/2,3*np.pi/2,np.pi]))
+def test_torus_fourier_sensor_distinct_endpoints(theta):
+    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
+    theta = np.array(theta)
+    # First and last points share R or Z, but are distinct surface points.
+    R, Z = 3.0+np.cos(theta), np.sin(theta)
+    interface = torus_fourier_sensor(R,Z,3.0,-1,hamada_dphi=np.arange(4))
+    assert interface.ntheta == 4
+    order = np.argsort(np.mod(theta,2*np.pi))
+    np.testing.assert_allclose(interface.radial_positions,R[order])
+    np.testing.assert_allclose(interface.axial_positions,Z[order])
+    np.testing.assert_array_equal(interface.hamada_dphi,np.arange(4)[order])
+
+
+@pytest.mark.coverage
+@pytest.mark.parametrize('correction_source',('stored','explicit','closed'))
+@pytest.mark.parametrize('phase', (0.0,0.2))
+def test_torus_fourier_sensor_constant_hamada(tmp_path,correction_source,phase):
+    from matplotlib.figure import Figure
+    from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
+    theta = 2*np.pi*np.arange(16)/16
+    phi = 2*np.pi*np.arange(9)/9
+    dphi = np.full(16,phase)
+    interface = torus_fourier_sensor(3.0+np.cos(theta),np.sin(theta),3.0,-1,
+                                  hamada_dphi=dphi if correction_source == 'stored' else None)
+    interface.nphi = len(phi)
+    mesh = np.cos(2*theta[:,None]+phi[None,:]+phase)
+    interface.get_B_mesh = lambda t: mesh
+    kwargs = {} if correction_source == 'stored' else {
+        'hamada_dphi': np.r_[dphi,phase] if correction_source == 'closed' else dphi}
+
+    # Constant corrections are valid at every point; only an extra endpoint is removed.
+    stem = str(tmp_path / 'spectrum')
+    interface.save_spectrum(0,stem,sensor_mesh=mesh,data_type='vac3d',**kwargs)
+    reference = str(tmp_path / 'reference')
+    interface.save_spectrum(0,reference,sensor_mesh=mesh,data_type='vac3d',hamada_dphi=dphi)
+    assert pathlib.Path(stem+'.dat').read_text() == pathlib.Path(reference+'.dat').read_text()
+    assert interface.ntheta == 16
+    if correction_source == 'stored':
+        np.testing.assert_array_equal(interface.hamada_dphi,dphi)
+
+    ax = Figure().subplots()
+    _, toroidal = interface.plot_1D_fourier_amplitude(0,[1],ax,**kwargs)
+    np.testing.assert_allclose(toroidal[:,1],np.exp(2j*theta),atol=1e-14)
+    ax = Figure().subplots()
+    line = interface.plot_m_over_n_amplitude([2],1,2,0.1,ax,**kwargs)[0][0]
+    np.testing.assert_allclose(line.get_ydata(),np.ones(3),atol=1e-14)
+    ax = Figure().subplots()
+    real_lines, _ = interface.plot_2D_fourier_amplitude(0,[1],ax=ax,
+        x_mode_min=-3,x_mode_max=3,sensor_mesh=mesh,**kwargs)
+    np.testing.assert_allclose(real_lines[0][0].get_ydata(),[0,0,0,0,0,1,0],atol=1e-14)
+    fig = Figure()
+    interface.field_fourier_amplitude_contour(0,-3,3,0,2,fig,fig.subplots(),**kwargs)
+
+
+@pytest.mark.coverage
+def test_append_coil_currents_custom_matching(tmp_path):
+    from OpenFUSIONToolkit.ThinCurr.util import append_coil_currents_to_drive, drive_to_array
+    drive = tmp_path / 'input.drive'
+    drive.write_text('2 3\n0 10\n1 20\n2 30\n')
+    csv = tmp_path / 'currents.csv'
+    csv.write_text('time,cs1u amperes,divl amperes\n0,4,7\n1,5,8\n2,6,9\n')
+    output = tmp_path / 'output.drive'
+    missing = append_coil_currents_to_drive(str(drive),str(csv),str(output),
+        ['CS1U_lead_2','divl','unknown'],header_template='{name} amperes',
+        ignore_suffixes=('_lead',),verbose=False)
+    assert missing == {'unknown'}
+    np.testing.assert_allclose(drive_to_array(str(output)),
+                               [[0,10,4,7,0],[1,20,5,8,0],[2,30,6,9,0]])
+
 
 @pytest.mark.coverage
 def test_thincurr_model_prep_utils(tmp_path):

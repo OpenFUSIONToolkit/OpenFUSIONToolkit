@@ -32,7 +32,7 @@ class torus_fourier_sensor():
         self.major_radius = major_radius
         self.helicity = helicity
         npts_in = len(radial_positions)
-        if (abs(radial_positions[0] - radial_positions[-1]) < 1e-13) or (abs(axial_positions[0] - axial_positions[-1]) < 1e-13):
+        if (abs(radial_positions[0] - radial_positions[-1]) < 1e-13) and (abs(axial_positions[0] - axial_positions[-1]) < 1e-13):
             self.radial_positions =  radial_positions[0:-1]
             self.axial_positions = axial_positions[0:-1]
         else:
@@ -417,7 +417,7 @@ class torus_fourier_sensor():
         if hamada_dphi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
         else:
-            if abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
+            if len(hamada_dphi) == self.ntheta+1 and abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
                 hamada_dphi = hamada_dphi[0:-1]
             B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
 
@@ -654,7 +654,7 @@ class torus_fourier_sensor():
             toroidal_harmonics=np.fft.fft(B_n,axis=1,norm="forward")
             # Apply phase shift
             if hamada_dphi is not None:
-                if abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
+                if len(hamada_dphi) == self.ntheta+1 and abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
                     hamada_dphi = hamada_dphi[0:-1]
                 if len(hamada_dphi) == len(self.radial_positions):
                     toroidal_harmonics *= np.exp(-1j*np.outer(hamada_dphi,n_modes))
@@ -753,7 +753,7 @@ class torus_fourier_sensor():
             if hamada_dphi is None:
                 B_n_fft, n_modes, m_modes = self.fft2(B)
             else:
-                if abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
+                if len(hamada_dphi) == self.ntheta+1 and abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
                     hamada_dphi = hamada_dphi[0:-1]
                 B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)    
 
@@ -776,13 +776,13 @@ class torus_fourier_sensor():
 
         line_list = []
         for j in range(mode_amplitudes.shape[0]):
-            line = ax.plot(t_array*dt,mode_amplitudes[j],label=f'{m_list[j]}/{n_list[j]}')
+            line = ax.plot(t_array*dt*1e3,mode_amplitudes[j],label=f'{m_list[j]}/{n_list[j]}')
             line_list.append(line)
         if part == 'p':
             ax.set_ylabel('Mode phase (radians)')
         else:
             ax.set_ylabel('Mode amplitudes (Tesla)')
-        ax.set_xlabel('Time (s)')
+        ax.set_xlabel('Time (ms)')
         ax.set_title('Phase of m/n modes in time' if part == 'p' else 'Amplitude of m/n modes in time')
         ax.legend()
         if part != 'p':
@@ -814,7 +814,7 @@ class torus_fourier_sensor():
         if hamada_dphi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
         else:
-            if abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
+            if len(hamada_dphi) == self.ntheta+1 and abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
                 hamada_dphi = hamada_dphi[0:-1]
             B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
 
@@ -843,12 +843,12 @@ class torus_fourier_sensor():
         cbar.ax.ticklabel_format(style='sci', scilimits=(-3, 3))
         return cf, cbar
 
-    def plot_2D_fourier_amplitude(self,t,harmonics,axes,toroidal_harmonics=True,hamada_dphi=None,x_type='modes',x_mode_min=None,x_mode_max=None,sensor_mesh=None,part='ri'):
+    def plot_2D_fourier_amplitude(self,t,harmonics,ax,toroidal_harmonics=True,hamada_dphi=None,x_type='modes',x_mode_min=None,x_mode_max=None,sensor_mesh=None,part='ri'):
         '''! Plot the 2D Fast Fourier Transformed amplitude of the mesh of magnetic values against poloidal/toroidal harmonics/angles
 
         @param t The time step during the time evolution
         @param harmonics List of (poloidal/toroidal) modes whose amplitudes are to be visualized in y axis [:]
-        @param axes Matplotlib axis/axes for plotting: a single axis for `part` = 'ri', or exactly two axes for `part` = 'ap' (amplitude on the first, phase on the second)
+        @param ax Matplotlib axis/axes for plotting: a single axis for `part` = 'ri', or exactly two axes for `part` = 'ap' (amplitude on the first, phase on the second)
         @param toroidal_harmonics Whether the input `harmonics` is toroidal or poloidal harmonics
         @param hamada_dphi Hamada phase shifts [ntheta]
         @param x_type The variable on x axis ('modes' or 'angles')
@@ -869,6 +869,7 @@ class torus_fourier_sensor():
             raise ValueError('For x_type == "modes", both mode_min and mode_max should be provided.')
         if part not in ['ri','ap']:
             raise ValueError("Unsupported part is provided. Accepts 'ri' (real/imaginary) and 'ap' (amplitude/phase) only.")
+        axes = ax
         if isinstance(axes,(list,tuple,np.ndarray)):
             axes = list(axes)
         else:
@@ -894,7 +895,7 @@ class torus_fourier_sensor():
         if hamada_dphi is None:
             B_n_fft, n_modes, m_modes = self.fft2(B)
         else:
-            if abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
+            if len(hamada_dphi) == self.ntheta+1 and abs(hamada_dphi[0] - hamada_dphi[-1]) < 1e-10:
                 hamada_dphi = hamada_dphi[0:-1]
             B_n_fft, n_modes, m_modes = self.fft2(B,hamada_dphi=hamada_dphi)
 
@@ -1651,7 +1652,8 @@ def append_coil_currents_to_drive(drive_filename,csv_filename,output_filename,co
     new_columns_data = [[] for _ in range(num_rows)]
     missing_columns = set()
     for coil_name in coil_names:
-        col_idx = find_coil_current_column(coil_name, header_to_idx)
+        col_idx = find_coil_current_column(coil_name, header_to_idx,
+                                           header_template=header_template,ignore_suffixes=ignore_suffixes)
         if col_idx is None:
             missing_columns.add(coil_name)
         for row_idx in range(num_rows):
