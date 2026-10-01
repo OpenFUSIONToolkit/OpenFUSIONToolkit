@@ -23,6 +23,7 @@ import datetime as dt
 from itertools import product
 import os
 import pprint
+import re
 
 import numpy as np
 
@@ -41,7 +42,12 @@ KEV_TO_KPA = constants.eV * 1.0e20
 DENOM_TOL = 1.0e-7
 PSI_PAD = 1.0e-3
 LCFS_PAD = 1.0e-2
-FALLBACK_ERRORS = (AttributeError, IndexError, KeyError, TypeError, ValueError, RuntimeError)
+# TokaMaker bindings raise bare Exception for Fortran-side errors, so the
+# fallback and retry paths must catch Exception rather than a subset of it.
+FALLBACK_ERRORS = (Exception,)
+# Scan output names written by _save_scan_outputs: {g,p}{yyyymm}.{index:05d}
+_GFILE_NAME = re.compile(r'g\d{6}\.\d{5}')
+_PFILE_NAME = re.compile(r'p\d{6}\.\d{5}')
 _GET_Q_RAVG_INDEX = {"<R>": 0, "<1/R>": 1, "<1/R^2>": 2, "dV/dPsi": 3}
 
 
@@ -65,12 +71,12 @@ def _get_pedestal_parameters(psi_n, pprime):
     if np.any(np.diff(psi_n) <= 0.0):
         raise ValueError("psi_n must be strictly increasing")
 
+    prof_edge = 0.75
     hr_psi = np.linspace(0.0, 1.0, 1000)
     hr_pprime = np.interp(hr_psi, psi_n, pprime)
 
-
-    hr_psi_slice = hr_psi[np.where(hr_psi >= 0.75)[0]]
-    pprime_slice = hr_pprime[hr_psi >= 0.75]
+    hr_psi_slice = hr_psi[np.where(hr_psi >= prof_edge)[0]]
+    pprime_slice = hr_pprime[hr_psi >= prof_edge]
     pprime_peak = pprime_slice[np.argmax(np.abs(pprime_slice))]
     if np.isclose(pprime_peak, 0.0):
         return None
@@ -297,6 +303,22 @@ def _trapz(y, x):
                            np.asarray(x, dtype=float)))
 
 
+def _clip_psi(psi_n, psi_pad=PSI_PAD):
+    r'''! Clip a normalized flux grid away from the magnetic axis and LCFS
+
+    Flux-surface quantities (`get_q`, `trace_surf`) are unreliable when sampled
+    at exactly \f$\psi_N = 0\f$ or \f$1\f$, so fallback evaluations use this grid.
+
+    @param psi_n Normalized flux grid
+    @param psi_pad Padding applied at both ends
+    @result Contiguous copy of `psi_n` clipped to [`psi_pad`, 1 - `psi_pad`]
+    '''
+    return np.ascontiguousarray(
+        np.clip(np.asarray(psi_n, dtype=float), float(psi_pad), 1.0 - float(psi_pad)),
+        dtype=float,
+    )
+
+
 def fsa_current_geometry(eq, psi_N, psi_pad=PSI_PAD, want_pprime=True):
     r"""Per-surface FSA geometry for :func:`Ip_fsa_integral`, from ``get_q``.
 
@@ -306,8 +328,7 @@ def fsa_current_geometry(eq, psi_N, psi_pad=PSI_PAD, want_pprime=True):
     ``dA_dpsiN = (V'/2pi) <1/R> |dpsi/dpsi_N|``.
     """
     psi_N = np.asarray(psi_N, dtype=float)
-    psi_q = np.ascontiguousarray(
-        np.clip(psi_N, float(psi_pad), 1.0 - float(psi_pad)), dtype=float)
+    psi_q = _clip_psi(psi_N, psi_pad)
 
     ravgs = eq.get_q(psi=psi_q)[2]
     R_avg = q_ravg(ravgs, "<R>")
@@ -622,8 +643,9 @@ def _resampled_jtor(gfile, resampled_profiles, eq_snapshot):
     except FALLBACK_ERRORS as exc:
         if eq_snapshot is None:
             raise RuntimeError("resampled_jtor fallback requires eq_snapshot, but eq_snapshot is None") from exc   
-        _,f,fp,_,pprime = eq_snapshot.get_profiles(psi=resampled_profiles['psi_n'])
-        _, _, ravgs, _, _, _ = eq_snapshot.get_q(psi=resampled_profiles['psi_n']) # get flux averaged R from equilibrium solution
+        psi_q = _clip_psi(resampled_profiles['psi_n'])
+        _,f,fp,_,pprime = eq_snapshot.get_profiles(psi=psi_q.copy())
+        _, _, ravgs, _, _, _ = eq_snapshot.get_q(psi=psi_q) # get flux averaged R from equilibrium solution
         R_avg = q_ravg(ravgs, '<R>')
         one_over_R_avg = q_ravg(ravgs, '<1/R>')
         jtor_tmp = get_jphi_from_GS(
@@ -650,7 +672,7 @@ def _resampled_geom(gfile, resampled_profiles, eq_snapshot):
 
         geom_tmp = _fallback_geom_contour(eq_snapshot)
         if geom_tmp is None:
-            _, _, _, _, rbounds, zbounds = eq_snapshot.get_q(psi=psi_n, compute_geo=True)
+            _, _, _, _, rbounds, zbounds = eq_snapshot.get_q(psi=_clip_psi(psi_n), compute_geo=True)
             geom_tmp = _fallback_geom_bounds(rbounds, zbounds)
 
         geom.update({
@@ -666,11 +688,12 @@ def _resampled_geom(gfile, resampled_profiles, eq_snapshot):
 
 
 def _fallback_R(resampled_profiles, eq_snapshot):
+    psi_q = _clip_psi(resampled_profiles['psi_n'])
     try:
-        _,_,ravgs,_,_,_ = eq_snapshot.get_q(psi=resampled_profiles['psi_n'])
+        _,_,ravgs,_,_,_ = eq_snapshot.get_q(psi=psi_q)
         return q_ravg(ravgs, '<R>')
     except FALLBACK_ERRORS:
-        _,_,_,_,rbounds,_ = eq_snapshot.get_q(psi=resampled_profiles['psi_n'], compute_geo=True)
+        _,_,_,_,rbounds,_ = eq_snapshot.get_q(psi=psi_q, compute_geo=True)
         lcfs_r = 0.5 * (rbounds[0, 0] + rbounds[1, 0])
         return np.linspace(eq_snapshot.o_point[0], lcfs_r, len(resampled_profiles['psi_n']))
     
@@ -679,10 +702,11 @@ def _fallback_Z(resampled_profiles, eq_snapshot):
     if eq_snapshot is None:
         raise ValueError("fallback_Z requires eq_snapshot")
 
-    Z = np.full(len(resampled_profiles['psi_n']), eq_snapshot.o_point[1], dtype=float)
+    psi_q = _clip_psi(resampled_profiles['psi_n'])
+    Z = np.full(len(psi_q), eq_snapshot.o_point[1], dtype=float)
     got_any = False
 
-    for i, psi_val in enumerate(resampled_profiles['psi_n']):
+    for i, psi_val in enumerate(psi_q):
         try:
             contour = eq_snapshot.trace_surf(float(psi_val))
         except FALLBACK_ERRORS:
@@ -692,7 +716,7 @@ def _fallback_Z(resampled_profiles, eq_snapshot):
             got_any = True
 
     if not got_any:
-        _, _, _, _, _, zbounds = eq_snapshot.get_q(psi=resampled_profiles['psi_n'], compute_geo=True)
+        _, _, _, _, _, zbounds = eq_snapshot.get_q(psi=psi_q, compute_geo=True)
         lcfs_z = (zbounds[0, 1] + zbounds[1, 1]) / 2.0
         Z = np.linspace(eq_snapshot.o_point[1], lcfs_z, len(resampled_profiles['psi_n']))
 
@@ -797,7 +821,7 @@ def get_init_geom(gfile, resampled_profiles, eq_snapshot=None):
         if geom_tmp is not None:
             geom_tmp['ginit_flag'] = ginit_flag
             return geom_tmp
-        _, _, _, _, rbounds, zbounds = eq_snapshot.get_q(psi=resampled_profiles['psi_n'],compute_geo=True)
+        _, _, _, _, rbounds, zbounds = eq_snapshot.get_q(psi=_clip_psi(resampled_profiles['psi_n']),compute_geo=True)
         geom_tmp = _fallback_geom_bounds(rbounds, zbounds)
         geom_tmp['ginit_flag'] = ginit_flag
         return geom_tmp
@@ -823,14 +847,15 @@ def _resampled_Bs(gfile, resampled_profiles, eq_snapshot):
     return Bs
 
 def _fallback_B(resampled_profiles, eq_snapshot):
-    profile_size = len(resampled_profiles['psi_n'])
+    psi_q = _clip_psi(resampled_profiles['psi_n'])
+    profile_size = len(psi_q)
     Bt = np.zeros(profile_size, dtype=float)
     Bp = np.zeros(profile_size, dtype=float)
-    contour_ok = np.zeros(len(resampled_profiles['psi_n']), dtype=bool)
+    contour_ok = np.zeros(profile_size, dtype=bool)
 
     try:
-        b_eval = eq_snapshot.get_field_eval("B")  
-        for i, psi_val in enumerate(resampled_profiles['psi_n']):
+        b_eval = eq_snapshot.get_field_eval("B")
+        for i, psi_val in enumerate(psi_q):
             contour = eq_snapshot.trace_surf(psi_val)        
             if contour is None or len(contour) == 0:
                 continue
@@ -849,8 +874,8 @@ def _fallback_B(resampled_profiles, eq_snapshot):
     if np.all(contour_ok):
         return {"Bt": Bt, "Bp": Bp}
     
-    _, qvals, ravgs, _, _, _ = eq_snapshot.get_q(psi=resampled_profiles['psi_n'])
-    _, f, _, _, _ = eq_snapshot.get_profiles(psi=resampled_profiles['psi_n'])
+    _, qvals, ravgs, _, _, _ = eq_snapshot.get_q(psi=psi_q)
+    _, f, _, _, _ = eq_snapshot.get_profiles(psi=psi_q.copy())
 
     Bt_fb = f * q_ravg(ravgs, '<1/R>')
     R = q_ravg(ravgs, '<R>')
@@ -1170,6 +1195,42 @@ def _solve_baseline_with_retries(t_object, seed_eq):
         "Baseline equilibrium solve exhausted retry attempts", last_nl_tol,
     )
 
+
+def _normalize_to_axis(y):
+    y = np.asarray(y, dtype=float)
+    scale = y[0]
+    if abs(scale) < DENOM_TOL:
+        scale = y[np.argmax(np.abs(y))]
+    if abs(scale) < DENOM_TOL:
+        raise ValueError("Cannot normalize an identically zero profile")
+    return y / scale
+
+
+def _bootstrap_jtor(t_object, gfile, resampled_profiles, psi_n):
+    r'''! Derive the scan current profile from an equilibrium solved with the g-file FF' and P'
+
+    Used when the g-file has no direct flux-averaged current, since the
+    fallback would otherwise sample an equilibrium that has not been solved.
+    On return `t_object` holds the solved equilibrium, which seeds the baseline.
+
+    @param t_object TokaMaker object with psi initialized and targets set
+    @param gfile Input g-file object
+    @param resampled_profiles Resampled g-file profiles from @ref resample_gfile
+    @param psi_n Normalized flux grid used by the scan
+    @result Toroidal current profile on `psi_n` [A/m^2]
+    '''
+    psi_gfile = np.asarray(gfile.psi_N, dtype=float)
+    ffp = np.interp(psi_n, psi_gfile, np.asarray(gfile.ffprim, dtype=float))
+    pp = np.interp(psi_n, psi_gfile, np.asarray(gfile.pprime, dtype=float))
+    t_object.set_profiles(
+        ffp_prof={'type': 'linterp', 'x': psi_n, 'y': _normalize_to_axis(ffp)},
+        pp_prof={'type': 'linterp', 'x': psi_n, 'y': _normalize_to_axis(pp)},
+    )
+    print("=============== STARTING G-FILE BOOTSTRAP SOLVE ===============")
+    _solve_baseline_with_retries(t_object, t_object.copy_eq())
+    jtor, _ = _resampled_jtor(gfile, resampled_profiles, t_object.copy_eq())
+    return jtor
+
 def _prepare_solver_profiles(t_object, ptot, jtor, psi_n, target_scales,
                      Ip_target, energy_target=None, pressure_geometry=None,
                      energy_geometry_factor=1.0, pressure_amplitude=1.0):
@@ -1252,16 +1313,16 @@ def _solve_with_retries(
         if not is_recovery:
             target_attempt += 1
         if solve_settings is not None:
-            _, initial_nl_tol, _ = solve_settings
+            urf, initial_nl_tol, maxits = solve_settings
             if is_recovery:
-                solve_settings = (0.3, 1.0e-5, 125)
+                solve_settings = (urf, 1.0e-5, maxits)
             elif float(initial_nl_tol) <= 1.0e-6:
                 nl_tol = (1.0e-6, 2.0e-6, 5.0e-6)[
                     min(target_attempt - 1, 2)
                 ]
-                solve_settings = (0.3, nl_tol, 125)
+                solve_settings = (urf, nl_tol, maxits)
             else:
-                solve_settings = (0.3, float(initial_nl_tol), 125)
+                solve_settings = (urf, float(initial_nl_tol), maxits)
         if solve_settings is not None:
             last_nl_tol = float(solve_settings[1])
         try:
@@ -1571,6 +1632,11 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
    #Extract psi_n from pfile 
     if not profile_exists(pfile, 'ptot'):
         raise ValueError("pfile must contain 'ptot' (total pressure) profile")
+    if file_output:
+        # Needed by make_updated_pfile, which only runs after the first solve
+        missing = [key for key in ('ne', 'ni', 'te', 'ti') if not profile_exists(pfile, key)]
+        if missing:
+            raise ValueError(f"pfile must contain {missing} profile(s) when file_output=True")
     psi_n_pfile = pfile.psinorm_for('ptot')
     if psi_n_pfile is None:
         raise ValueError("Could not extract psinorm for 'ptot' profile")
@@ -1611,6 +1677,13 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
     pax_target = float(ptot[0])
 
     t_object.init_psi(R0, Z0, a, kappa, delta)
+    t_object.set_targets(Ip=Ip_target, pax=pax_target)
+
+    # input_eq has not been solved, so a current profile taken from its
+    # fallback is meaningless; re-derive it from a solved g-file equilibrium.
+    if gfile_profiles['jtor_flag']:
+        refit_jtor = _bootstrap_jtor(t_object, gfile, gfile_profiles, psi_n)
+        gfile_profiles['j_tor_averaged_direct'] = refit_jtor
 
     init_pp_prof = {'type':'linterp',
                     'y': np.gradient(ptot, psi_n),
@@ -1723,7 +1796,7 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
             except _NonConvergenceError as error:
                 solve_error = error
                 continue
-            except (RuntimeError, ValueError) as error:
+            except FALLBACK_ERRORS as error:
                 solve_error = _NonConvergenceError(
                     str(error),
                     float(getattr(t_object.settings, 'nl_tol', 5.0e-6)),
@@ -1853,13 +1926,6 @@ def summarize_scan(results, n_best=5):
     @param results Result structure returned by :func:`equilibrium_scan`.
     @param n_best Number of best converged points to print.
     '''
-    try:
-        import pandas as pd
-    except ImportError as error:
-        raise ImportError(
-            "summarize_scan requires pandas to build its quality table"
-        ) from error
-
     if not isinstance(results, (list, tuple)) or not results:
         raise ValueError("results must be the non-empty output of equilibrium_scan")
 
@@ -1889,11 +1955,10 @@ def summarize_scan(results, n_best=5):
     )
 
     rows = []
-    for index, point in enumerate(scan_points):
+    for point in scan_points:
         ip_final = float(point.get('Ip_final', np.nan))
         w_final = float(point.get('W_final', np.nan))
         rows.append({
-            'scan_index': index,
             'scale_p': float(point.get('scale_p', np.nan)),
             'scale_j': float(point.get('scale_j', np.nan)),
             'converged': bool(point.get('converged', False)),
@@ -1904,28 +1969,22 @@ def summarize_scan(results, n_best=5):
             'W_rel_err': _relative_error(w_final, w_target),
         })
 
-    columns = [
-        'scan_index', 'scale_p', 'scale_j', 'converged', 'nl_tol',
-        'Ip_final', 'Ip_rel_err', 'W_final', 'W_rel_err',
-    ]
-    quality_table = pd.DataFrame(rows, columns=columns)
-    if quality_table.empty:
-        best_points = quality_table.copy()
-        converged_table = quality_table.copy()
-    else:
-        converged_table = quality_table.loc[
-            quality_table['converged']
-        ].copy()
-        best_points = converged_table.sort_values(
-            ['W_rel_err', 'Ip_rel_err', 'nl_tol'],
-            na_position='last',
-        ).reset_index(drop=True)
+    converged_rows = [row for row in rows if row['converged']]
 
-    ip_mean, ip_median, ip_max = _stats(converged_table['Ip_rel_err'])
-    w_mean, w_median, w_max = _stats(converged_table['W_rel_err'])
-    nl_mean, nl_median, nl_max = _stats(quality_table['nl_tol'])
-    n_points = len(quality_table)
-    n_converged = int(quality_table['converged'].sum())
+    def _sort_key(row):
+        # Rank by energy, then current error, then tolerance; NaN sorts last
+        return tuple(
+            row[key] if np.isfinite(row[key]) else np.inf
+            for key in ('W_rel_err', 'Ip_rel_err', 'nl_tol')
+        )
+
+    best_points = sorted(converged_rows, key=_sort_key)
+
+    ip_mean, ip_median, ip_max = _stats([row['Ip_rel_err'] for row in converged_rows])
+    w_mean, w_median, w_max = _stats([row['W_rel_err'] for row in converged_rows])
+    nl_mean, nl_median, nl_max = _stats([row['nl_tol'] for row in rows])
+    n_points = len(rows)
+    n_converged = len(converged_rows)
 
     def _format(value):
         return 'n/a' if not np.isfinite(value) else f'{value:.3e}'
@@ -1958,10 +2017,17 @@ def summarize_scan(results, n_best=5):
     )
     print()
     print('Best converged scan points by energy, then current error:')
-    print(best_points.head(n_best)[[
-        'scale_p', 'scale_j', 'Ip_rel_err', 'W_rel_err',
-        'nl_tol', 'Ip_final', 'W_final',
-    ]].to_string(index=False))
+    table_columns = (
+        ('scale_p', '{:g}'), ('scale_j', '{:g}'),
+        ('Ip_rel_err', '{:.3e}'), ('W_rel_err', '{:.3e}'), ('nl_tol', '{:.1e}'),
+        ('Ip_final', '{:.6e}'), ('W_final', '{:.6e}'),
+    )
+    table = [[name for name, _ in table_columns]]
+    for row in best_points[:n_best]:
+        table.append([fmt.format(row[name]) for name, fmt in table_columns])
+    widths = [max(len(line[i]) for line in table) for i in range(len(table_columns))]
+    for line in table:
+        print(' '.join(cell.rjust(width) for cell, width in zip(line, widths)))
     print('=' * 90)
 
 
@@ -1971,7 +2037,7 @@ def summarize_scan(results, n_best=5):
 
 def _find_results_file(path):
     for entry in sorted(os.scandir(path), key=lambda item: item.name):
-        if entry.is_file() and entry.name.startswith('r'):
+        if entry.is_file() and entry.name.startswith('results_'):
             return entry.path
     raise FileNotFoundError(f"No VARYPED results file found in '{path}'")
 
@@ -2135,7 +2201,7 @@ def plot_pfiles(dir_name, profiles, scaling_range=None, savefig=False):
     path = os.path.join(cwd, dir_name)
     pfiles = []
     for entry in sorted(os.scandir(path), key=lambda entry: entry.name):
-        if entry.is_file() and entry.name.startswith('p'):
+        if entry.is_file() and _PFILE_NAME.fullmatch(entry.name):
             pfiles.append(eqdsk.read_pfile(entry))
 
     if not pfiles:
@@ -2210,7 +2276,7 @@ def plot_gfiles(
         cocos = 7 if directory_name.startswith('varyped') else 1
     gfiles = []
     for entry in sorted(os.scandir(path), key = lambda e: e.name):
-        if entry.is_file() and entry.name.startswith('g'):
+        if entry.is_file() and _GFILE_NAME.fullmatch(entry.name):
             gfiles.append(eqdsk.read_geqdsk(entry, cocos=cocos))
 
     if not gfiles:
