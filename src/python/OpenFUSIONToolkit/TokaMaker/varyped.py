@@ -1332,10 +1332,11 @@ def _prepare_solver_profiles(t_object, ptot, jtor, psi_n, target_scales,
             pprime=pprime_scaled, target_current=Ip_target,
         )
 
+    # P' is a shape function, supplied positive by convention
     pp_prof = {
         'type': 'linterp',
         'x': psi_n,
-        'y': pprime_scaled,
+        'y': -pprime_scaled,
     }
     ffp_prof = {
         'type': 'jphi-linterp',
@@ -1777,7 +1778,7 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
         gfile_profiles['j_tor_averaged_direct'] = refit_jtor
 
     init_pp_prof = {'type':'linterp',
-                    'y': _pprime_profile(ptot, psi_n, pin_edge_pprime),
+                    'y': -_pprime_profile(ptot, psi_n, pin_edge_pprime),
                     'x': psi_n}
     
     init_ffp_prof = {'type':'jphi-linterp',
