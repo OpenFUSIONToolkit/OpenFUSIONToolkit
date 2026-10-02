@@ -206,6 +206,9 @@ TYPE :: gs_factory
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_bounds => NULL() !< Coil current bounds
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_nturns => NULL() !< Number of turns for each coil in each region
   REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils => NULL() !< Coil mutual inductance matrix
+  REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils_asym => NULL() !< Lcoils minus the one-directional
+    !< quadrature gs_wall_source actually picks up; added back on the RHS so operator and RHS
+    !< use the SAME (symmetric) mutuals. See gs_wall_source and the assembly loop.
   LOGICAL :: free = .FALSE. !< Computing free-boundary equilibrium?
   LOGICAL :: compute_chi = .FALSE. !< Compute toroidal field potential?
   LOGICAL :: plot_step = .TRUE. !< Save solver steps for plotting
@@ -794,6 +797,7 @@ type(oft_lag_brinterp) :: psi_eval
 integer(4) :: i,j,k,mind,nCon,ierr
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
+real(r8) :: Lraw_ij,Lraw_ji !< one-directional coil mutual integrals, see below
 real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:)
 character(LEN=3) :: coil_tag
 character(LEN=2) :: cond_tag,eig_tag
@@ -904,11 +908,13 @@ ELSE
   END DO
 END IF
 ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils,self%ncoils),self%dist_coil(self%ncoils))
+ALLOCATE(self%Lcoils_asym(self%ncoils,self%ncoils))
 ALLOCATE(self%Rcoils(self%ncoils+1),self%coils_dt(self%ncoils+1),self%coils_volt(self%ncoils+1))
 self%Rcoils=-1.d0
 self%coils_dt=0.d0
 self%coils_volt=0.d0
 self%Lcoils=0.d0
+self%Lcoils_asym=0.d0
 DO i=1,self%ncoils
   NULLIFY(self%dist_coil(i)%v)
   CALL self%fe_rep%vec_create(self%psi_coil(i)%f)
@@ -921,11 +927,24 @@ DO i=1,self%ncoils
 END DO
 DO i=1,self%ncoils
   DO j=i,self%ncoils
-    CALL gs_coil_mutual(self,i,self%psi_coil(j)%f,self%Lcoils(i,j))
+    CALL gs_coil_mutual(self,i,self%psi_coil(j)%f,Lraw_ij)
+    self%Lcoils(i,j)=Lraw_ij
     IF(j>i)THEN ! Integral can be slightly different in each direction so compute both ways and average
-      CALL gs_coil_mutual(self,j,self%psi_coil(i)%f,self%Lcoils(j,i))
-      self%Lcoils(j,i)=(self%Lcoils(j,i)+self%Lcoils(i,j))/2.d0
-      self%Lcoils(i,j)=self%Lcoils(j,i)
+      CALL gs_coil_mutual(self,j,self%psi_coil(i)%f,Lraw_ji)
+      self%Lcoils(i,j)=(Lraw_ij+Lraw_ji)/2.d0
+      self%Lcoils(j,i)=self%Lcoils(i,j)
+      !---The coil rows of the time-dependent operator take Lcoils/dt, while their right-hand
+      !   side gets the same inductance implicitly, as the quadrature of psi over the coil
+      !   region in gs_wall_source.  That quadrature is the ONE-DIRECTIONAL integral: row i
+      !   picks up Lraw(i,j) from coil j, not the average stored above.  Left uncorrected the
+      !   operator and RHS differ by (Lraw(i,j)-Lraw(j,i))/2 -- ~2e-5 relative on the SPARC
+      !   mesh, but committed once per STEP, so the Vcoil error grows with the step count and
+      !   refining dt makes the answer monotonically worse.  Record the difference here and
+      !   add it back on the RHS, which keeps Lcoils symmetric: the symmetric average is also
+      !   the more accurate mutual, being 1.3-4.4x closer to the analytic value than either
+      !   one-directional integral.
+      self%Lcoils_asym(i,j)=self%Lcoils(i,j)-Lraw_ij
+      self%Lcoils_asym(j,i)=self%Lcoils(j,i)-Lraw_ji
     END IF
   END DO
 END DO
@@ -1526,11 +1545,20 @@ IF(self%ncoils>0)THEN
   CALL b%get_local(btmp_coils,2)
   ! CALL dpsi_dt%get_local(coil_vals,2)
 ENDIF
-! DO l=1,self%ncoils
-!   IF(self%Rcoils(l)<=0.d0)CYCLE
-!   btmp_coils(l)=DOT_PRODUCT(coil_vals(1:self%ncoils),self%Lcoils(1:self%ncoils,l))
-! END DO
-! DEALLOCATE(coil_vals)
+!---Make the RHS use the SAME mutuals as the operator.  The quadrature below picks up the
+!   one-directional integral Lraw(l,j) from coil j, while the operator row takes the symmetric
+!   Lcoils(l,j)/dt.  Lcoils_asym holds the difference, so adding it here leaves both sides on
+!   the symmetric (and more accurate) mutuals.  Block 2 carries the previous Vcoil currents
+!   already divided by dt, matching the scaling of the quadrature.
+IF(self%ncoils>0)THEN
+  CALL dpsi_dt%get_local(coil_vals,2)
+  DO l=1,self%ncoils
+    IF(self%Rcoils(l)<=0.d0)CYCLE
+    btmp_coils(l)=btmp_coils(l) &
+      +DOT_PRODUCT(self%Lcoils_asym(l,1:self%ncoils),coil_vals(1:self%ncoils))
+  END DO
+  DEALLOCATE(coil_vals)
+END IF
 !
 ALLOCATE(eta_reg(self%fe_rep%mesh%nreg),reg_source(self%fe_rep%mesh%nreg))
 reg_source=0.d0
