@@ -2255,30 +2255,51 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
-    def get_strike_points(self):
+    def get_strike_points(self, epsilon_psi=1e-4):
+        '''! Return strike points
+
+        @param epsilon_psi Minimum psi difference for locating strike points (for use in limited geometry)
+        @result List of (R,Z) strike point coordinates
+        '''
         lim = self.lim_contours[0] # Assume one limiter
         lim = [numpy.array(pt) for pt in lim]
 
         psi_eval = self.get_field_eval('PSI')
         psi_LCFS = self.psi_bounds[0]
 
-        strike_pts = []
-        prev_pt = lim[-1]
-        prev_psi = psi_eval.eval(prev_pt)
+        if self.diverted:
+            strike_pts = []
+            prev_pt = lim[-1]
+            prev_psi = psi_eval.eval(prev_pt)
 
-        for pt in lim:
-            psi = psi_eval.eval(pt)[0]
-            if prev_psi < psi_LCFS and psi >= psi_LCFS:
-                psi_diff = (psi_LCFS - prev_psi) / (psi - prev_psi)
-                strike_pt = (1.0-psi_diff) * prev_pt + psi_diff * pt
-                strike_pts.append(strike_pt)
-            elif prev_psi > psi_LCFS and psi <= psi_LCFS:
-                psi_diff = (psi_LCFS - psi) / (prev_psi - psi)
-                strike_pt = (1.0-psi_diff) * pt + psi_diff * prev_pt
-                strike_pts.append(strike_pt)
-            prev_pt = pt
-            prev_psi = psi
-        return strike_pts
+            for pt in lim:
+                psi = psi_eval.eval(pt)[0]
+                if prev_psi < psi_LCFS and psi >= psi_LCFS:
+                    psi_diff = (psi_LCFS - prev_psi) / (psi - prev_psi)
+                    strike_pt = (1.0-psi_diff) * prev_pt + psi_diff * pt
+                    strike_pts.append(strike_pt)
+                elif prev_psi > psi_LCFS and psi <= psi_LCFS:
+                    psi_diff = (psi_LCFS - psi) / (prev_psi - psi)
+                    strike_pt = (1.0-psi_diff) * pt + psi_diff * prev_pt
+                    strike_pts.append(strike_pt)
+                prev_pt = pt
+                prev_psi = psi
+            return strike_pts
+        else:
+            diff_psi = numpy.zeros(len(lim))
+            for i, pt in enumerate(lim):
+                diff_psi[i] = psi_eval.eval(pt)[0]
+            diff_psi = numpy.abs(diff_psi - psi_LCFS)
+            min_idx = numpy.array([], dtype=numpy.int32)
+            min_diff = numpy.array([])
+            for i, diff in enumerate(diff_psi):
+                if diff < diff_psi[(i-1) % len(diff_psi)] and diff < diff_psi[(i+1) % len(diff_psi)]:
+                    min_diff = numpy.append(min_diff, diff)
+                    min_idx = numpy.append(min_idx, i)
+
+            min_idx = min_idx[min_diff < epsilon_psi]
+            return numpy.array(lim)[min_idx]
+
 
     def plot_current_density(self, fig, ax, window=None, cmap='viridis'):
         '''! Plot current density
