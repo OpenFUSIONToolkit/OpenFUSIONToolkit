@@ -1672,9 +1672,12 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output=None
     @param path_to_output Directory for the scan output directory (default: cwd)
     @param file_output Write a g-file and p-file for each solved point?
     @param result_output Write the VARYPED results file?
-    @param pin_edge_pprime Set \f$P'\f$ to zero at \f$\hat{\psi}=1\f$? This changes
-    the input gradient over the last grid interval only; keeping it leaves a
-    current jump at the LCFS that can stall the solver.
+    @param pin_edge_pprime Set \f$P'\f$ to zero at \f$\hat{\psi}=1\f$? The shape
+    of \f$P'\f$ changes over the last grid interval only, but as the solver
+    normalizes it to the axis pressure the gradient elsewhere rises uniformly
+    to make up the pressure removed there (0.01-0.14% in the example scan).
+    Keeping the edge gradient leaves a current jump at the LCFS that can stall
+    the solver.
     @result List whose first entry describes the baseline and whose remaining
     entries are one result dictionary per scan point
     '''
