@@ -28,8 +28,6 @@ def create_prof_file(self, filename, profile_dict, name, include_sol=False):
     '''
     if include_sol and (profile_dict['type'] != 'linterp' and profile_dict['type'] != 'mlinterp'):
         raise ValueError('Only "linterp" and "mlinterp" profile types support SOL current flag')
-    if name == "P'" and max(profile_dict['x'] > 1.0):
-        raise ValueError("P' profile does not support SOL currents")
     file_lines = [profile_dict['type']]
     if profile_dict['type'] == 'flat':
         pass
@@ -46,6 +44,8 @@ def create_prof_file(self, filename, profile_dict, name, include_sol=False):
             y = numpy.array(y.copy())
         if numpy.min(numpy.diff(x)) < 0.0:
             raise ValueError("psi values in {0} profile must be monotonically increasing".format(name))
+        if (name == "P'") and (x[-1] > 1.0):
+            raise ValueError("P' profile does not support SOL currents")
         if (x[0] < 0.0) or (x[-1] > 1.0) and not include_sol:
             raise ValueError("Invalid psi values in {0} profile ({1}, {2})".format(name, x[0], x[-1]))
         if self.psi_convention == 0:
@@ -439,7 +439,6 @@ class TokaMaker():
         self.ncoils = ncoils.value
         self.Lcoils = numpy.ctypeslib.as_array(Lmat_loc,shape=(self.ncoils,self.ncoils))
         # Create equilibirum object
-        print('Creating EQ object')
         self._tMaker_equil = TokaMaker_equilibrium(self)
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_equil_set(self._tMaker_ptr,self._tMaker_equil.c_ptr,error_string)
@@ -800,7 +799,7 @@ class TokaMaker():
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.load_profiles(f_file,foffset,f_SOL,p_file,eta_file,f_NI_file)
+        return self._tMaker_equil.load_profiles(f_file=f_file,foffset=foffset,p_file=p_file,eta_file=eta_file,f_NI_file=f_NI_file,f_SOL=f_SOL)
 
     def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False, f_SOL=None):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
