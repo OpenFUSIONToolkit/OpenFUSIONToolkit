@@ -374,7 +374,9 @@ class JAMfit():
         # intializing the Ms and Msc matrices with the appropriate weighting and scaling based off sigma
         Ms_weighted = self.torus_reduced.Ms[:, :num_sensors]/sigma[:]
         Msc_weighted = self.torus_reduced.Msc[:, :num_sensors]/sigma[:]
-        Msc_weighted_fil = Msc_weighted[num_non_fil_coils:, :]
+        Msc_weighted_fil = Msc_weighted[num_non_fil_coils:, :num_sensors]
+        Msc_coils_weighted         = Msc_weighted[:num_non_fil_coils, :num_sensors]                       # (n_shaping_coils, n_sensors)
+
 
         # This section of code scales the total ip constraint row of the matrix to ensure it has a comparable influence on the 
         # least squares solution as the magnetic measurements, based on the provided ip_weight and the magnitude of ip_at_time
@@ -390,7 +392,8 @@ class JAMfit():
         # here we prepare the the B vector by subtacting the non plasma filament contribution from the sensor measurements
         # we also scale by sigma here as well (to ensure magnetic sensor signals are normalized to each other - one sensor doesnt dominate)
         # finally we append the ip cosntraint row as well 
-        B_weighted = (Psi_at_time/ sigma[:]) - coil_curr_at_time @ self.torus_reduced.Msc[:num_non_fil_coils, :num_sensors] 
+        B_weighted = (Psi_at_time)/sigma[:] - coil_curr_at_time @ Msc_coils_weighted
+
         B_weighted = numpy.append(B_weighted, [ip_at_time * ip_weight/ip_row_norm])  # ip_at_time/ip_row_norm reduces to sign(ip_at_time) — magnitude is encoded in A side column
 
         # here we apply tikonov regularization to both the filament and wall component of the lstq 
@@ -597,7 +600,8 @@ class JAMfit():
         if gaussian: 
             lap_mat, N = get_gaussian_lap_mat(rgrid, zgrid, sigma_r, sigma_z)                # (n_fil, n_fil)
         # getting laplacian matrix for smoothing the filament solution in space 
-        lap_mat, N = get_laplace_matrix(rgrid, zgrid, verbose=verbose)                # (n_fil, n_fil)
+        else: 
+            lap_mat, N = get_laplace_matrix(rgrid, zgrid, verbose=verbose)                # (n_fil, n_fil)
 
         # building A matrix's measurements corresponding to sensors: [wall | filament] columns ---
         meas_block = numpy.hstack([Ms_weighted.T, Msc_fil_weighted.T])                # (n_sensors, n_wall + n_fil)
@@ -620,6 +624,7 @@ class JAMfit():
         A = numpy.vstack([meas_block, ip_block, wall_reg, fil_lap])
 
         # building B matrix by stacking the sensor measurements (with coil contributions removed) with the ip constraint and zeros for regularization rows
+
         psi_reg = numpy.concatenate([
             B_weighted,
             numpy.array([lam * ip_at_time / ip_row_norm]),
