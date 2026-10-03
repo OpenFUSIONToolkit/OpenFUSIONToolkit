@@ -1,10 +1,8 @@
-	
- #------------------------------------------------------------------------------
- # Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
- #
- # SPDX-License-Identifier: LGPL-3.0-only
- #------------------------------------------------------------------------------
-
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
 '''! Functions and helpers to run varyped equilibrium scan on TokaMaker instance 
 
 Runs equilibrium scan over range of scaling values using profiles from 
@@ -45,6 +43,12 @@ LCFS_PAD = 1.0e-2
 # TokaMaker bindings raise bare Exception for Fortran-side errors, so the
 # fallback and retry paths must catch Exception rather than a subset of it.
 FALLBACK_ERRORS = (Exception,)
+# Multiples of the caller's nl_tol tried in turn for a scan point; a point
+# accepted above 1.0 is reported as 'partial'.
+NL_TOL_RELAX = (1.0, 2.0, 5.0)
+# Multiple of the caller's nl_tol used for intermediate continuation steps,
+# whose equilibria only seed the next solve.
+CONTINUATION_RELAX = 10.0
 # Scan output names written by _save_scan_outputs: {g,p}{yyyymm}.{index:05d}
 _GFILE_NAME = re.compile(r'g\d{6}\.\d{5}')
 _PFILE_NAME = re.compile(r'p\d{6}\.\d{5}')
@@ -143,7 +147,9 @@ def _pressure_volume_energy(t_object, psi_n, pressure, geometry=None):
         geometry = fsa_current_geometry(
             t_object, psi_n, want_pprime=False,
         )
+    # Measured from the separatrix value, as TokaMaker's W_MHD is
     pressure = np.asarray(pressure, dtype=float)
+    pressure = pressure - pressure[-1]
     volume_weight = (
         geometry['dV_dpsi'] * geometry['dpsi_dpsiN']
     )
@@ -282,7 +288,12 @@ def scale_pressure(t_object, psi_n, pressure, pedestal_factor, energy_target=Non
 #=============================================================================
 
 def q_ravg(ravgs, which):
-    """Extract a flux-surface average from ``get_q`` output."""
+    r'''! Extract a flux-surface average from `get_q` output
+
+    @param ravgs Averages returned by `get_q` (dictionary or legacy array)
+    @param which One of `<R>`, `<1/R>`, `<1/R^2>`, `dV/dPsi`
+    @result Requested average on the `get_q` sampling grid
+    '''
     index = _GET_Q_RAVG_INDEX[which]
     if isinstance(ravgs, dict):
         values = ravgs[which]
@@ -320,13 +331,17 @@ def _clip_psi(psi_n, psi_pad=PSI_PAD):
 
 
 def fsa_current_geometry(eq, psi_N, psi_pad=PSI_PAD, want_pprime=True):
-    r"""Per-surface FSA geometry for :func:`Ip_fsa_integral`, from ``get_q``.
+    r'''! Per-surface flux-surface-averaged geometry for @ref Ip_fsa_integral
 
-    Returns a dict with ``psi_N``, ``psi_q`` (the clipped sampling grid),
-    ``R_avg``, ``inv_R``, ``inv_R2``, ``dV_dpsi`` (magnitude),
-    ``dpsi_dpsiN``, ``pprime`` (``None`` if not requested) and
-    ``dA_dpsiN = (V'/2pi) <1/R> |dpsi/dpsi_N|``.
-    """
+    @param eq TokaMaker object or equilibrium
+    @param psi_N Normalized flux grid
+    @param psi_pad Padding keeping the sampled surfaces off the axis and LCFS
+    @param want_pprime Also sample \f$P'\f$ from `eq`?
+    @result Dictionary with `psi_N`, `psi_q` (the clipped sampling grid),
+    `R_avg`, `inv_R`, `inv_R2`, `dV_dpsi` (magnitude), `dpsi_dpsiN`,
+    `pprime` (`None` if not requested) and
+    `dA_dpsiN` \f$= (V'/2\pi) \left<1/R\right> |d\psi/d\hat{\psi}|\f$
+    '''
     psi_N = np.asarray(psi_N, dtype=float)
     psi_q = _clip_psi(psi_N, psi_pad)
 
@@ -381,7 +396,14 @@ def fsa_current_geometry(eq, psi_N, psi_pad=PSI_PAD, want_pprime=True):
 
 
 def Ip_fsa_weights(geom, convention="jphi-linterp", pprime_sign=1.0):
- 
+    r'''! Quadrature weights turning a current profile into plasma current
+
+    @param geom Geometry from @ref fsa_current_geometry
+    @param convention Current profile convention (`jphi-linterp` or `fsa`)
+    @param pprime_sign Sign applied to \f$P'\f$
+    @result Weights `w` and offset `c` such that
+    \f$I_p = \int w j \, d\hat{\psi} + c\f$
+    '''
     g = geom["dV_dpsi"] / (2.0 * np.pi) * geom["dpsi_dpsiN"]
 
     if convention == "fsa":
@@ -416,7 +438,17 @@ def Ip_fsa_weights(geom, convention="jphi-linterp", pprime_sign=1.0):
 
 def Ip_fsa_integral(eq, psi_N, j_profile, convention="jphi-linterp",
                     psi_pad=PSI_PAD, pprime_sign=1.0, geom=None):
-    r"""Plasma current [A] carried by a toroidal current profile *j_profile*."""
+    r'''! Plasma current carried by a toroidal current profile
+
+    @param eq TokaMaker object or equilibrium (unused if `geom` is given)
+    @param psi_N Normalized flux grid
+    @param j_profile Toroidal current profile on `psi_N` [A/m^2]
+    @param convention Current profile convention (`jphi-linterp` or `fsa`)
+    @param psi_pad Padding keeping the sampled surfaces off the axis and LCFS
+    @param pprime_sign Sign applied to \f$P'\f$
+    @param geom Precomputed geometry from @ref fsa_current_geometry
+    @result Plasma current [A]
+    '''
     if geom is None:
         geom = fsa_current_geometry(
             eq, psi_N, psi_pad=psi_pad,
@@ -429,7 +461,14 @@ def Ip_fsa_integral(eq, psi_N, j_profile, convention="jphi-linterp",
 
 def eq_jphi_profile(geom, convention="jphi-linterp", eq=None,
                     pprime_sign=1.0):
-    r"""Return the equilibrium's own current profile in *convention*."""
+    r'''! Equilibrium's own toroidal current profile
+
+    @param geom Geometry from @ref fsa_current_geometry (with `pprime`)
+    @param convention Current profile convention (`jphi-linterp` or `fsa`)
+    @param eq TokaMaker object or equilibrium, needed if `geom` has no `FFp`
+    @param pprime_sign Sign applied to \f$P'\f$ and \f$FF'\f$
+    @result Toroidal current profile on the `geom` sampling grid [A/m^2]
+    '''
     FFp = geom.get("FFp")
     if FFp is None:
         if eq is None:
@@ -584,7 +623,16 @@ def _scale_current_density(t_object, psi_n, jtor, scale_j,
 
 def scale_current_density(t_object, psi_n, jtor, scale_j,
                           denom_tol=DENOM_TOL, pprime=None):
-    r'''! Scale current using the input profile's own current as target.'''
+    r'''! Scale the edge current profile, holding the profile's own plasma current
+
+    @param t_object TokaMaker equilibrium object
+    @param psi_n Normalized flux coordinate
+    @param jtor Toroidal current profile
+    @param scale_j Requested current scale
+    @param denom_tol Minimum normalization denominator
+    @param pprime Pressure derivative used by the current measure
+    @result Tuple containing scaled current and current integrals
+    '''
     return _scale_current_density(
         t_object, psi_n, jtor, scale_j,
         denom_tol=denom_tol, pprime=pprime,
@@ -602,7 +650,14 @@ def _gfile_profile(gfile, key):
 
 #resample the needed gfile profiles onto the normalized psi coordinate being used in equilbrium scan
 def resample_gfile(gfile, psi_n, eq_snapshot=None):
-    r'''! Resample required g-file profiles onto a common flux coordinate.'''
+    r'''! Resample required g-file profiles onto a common flux coordinate
+
+    @param gfile Input g-file object
+    @param psi_n Normalized flux grid to resample onto
+    @param eq_snapshot Solved equilibrium used when a g-file quantity is unavailable
+    @result Dictionary of resampled profiles, with `jtor_flag`, `geom_flag`
+    and `B_flag` set where `eq_snapshot` was used instead of the g-file
+    '''
 
     resampled_profiles = {'psi_n': np.asarray(psi_n, dtype=float)}
     resampled_profiles['psi_n_gfile'] = np.asarray(gfile.psi_N, dtype=float)
@@ -1124,10 +1179,16 @@ def _update_diamagnetic_and_rotation_decomposition(pfile, resampled_gfile_profil
 
 
 def make_updated_pfile(pfile, resampled_gfile_profiles, psf, psi_n):
-    r'''! Return a deep-copied p-file with all scan profiles updated.
+    r'''! Return a deep-copied p-file with all scan profiles updated
 
     The returned p-file updates kinetic, fast-ion, impurity, rotation, and
     derived force-balance profiles on the supplied normalized-flux grid.
+
+    @param pfile Input p-file object on `psi_n`
+    @param resampled_gfile_profiles Profiles from @ref resample_gfile
+    @param psf Pressure scaling function on `psi_n`
+    @param psi_n Normalized flux grid
+    @result Updated p-file object
     '''
     
     pfile_copy = copy.deepcopy(pfile)
@@ -1157,43 +1218,47 @@ def _scan_output_name(path, timestamp):
     raise FileExistsError("Unable to allocate a unique VARYPED output directory")
 
 @contextmanager
-def _temporary_solver_settings(t_object, urf, nl_tol, maxits):
-    original_settings = (t_object.settings.urf, t_object.settings.nl_tol, t_object.settings.maxits)
+def _temporary_nl_tol(t_object, nl_tol):
+    original_nl_tol = t_object.settings.nl_tol
     try:
-        t_object.settings.urf = urf
         t_object.settings.nl_tol = nl_tol
-        t_object.settings.maxits = maxits
         t_object.update_settings()
         yield
     finally:
-        t_object.settings.urf, t_object.settings.nl_tol, t_object.settings.maxits = original_settings
+        t_object.settings.nl_tol = original_nl_tol
         t_object.update_settings()
 
 
-def _solve_baseline_with_retries(t_object, seed_eq):
-    last_nl_tol = getattr(t_object.settings, 'nl_tol', 1.0e-6)
-    for attempt in range(6):
-        nl_tol = min(5.0e-6, (attempt + 1) * 1.0e-6)
-        try:
-            with _temporary_solver_settings(t_object, 0.3, nl_tol, 125):
-                t_object.solve()
-            if hasattr(t_object, 'get_stats'):
-                stats = t_object.get_stats()
-                for key in ('Ip', 'W_MHD'):
-                    if not np.isfinite(float(stats[key])):
-                        raise RuntimeError(
-                            f"TokaMaker returned a non-finite {key}"
-                        )
-            return
-        except FALLBACK_ERRORS + (FloatingPointError, OverflowError) as error:
-            last_nl_tol = nl_tol
-            t_object.replace_eq(source_eq=seed_eq)
-            if attempt == 5:
-                raise _NonConvergenceError(str(error), last_nl_tol) from error
+def _convergence_status(nl_tol, nl_tol_target):
+    return 'converged' if nl_tol <= nl_tol_target else 'partial'
 
-    raise _NonConvergenceError(
-        "Baseline equilibrium solve exhausted retry attempts", last_nl_tol,
-    )
+
+def _solve_checked(t_object, nl_tol):
+    with _temporary_nl_tol(t_object, nl_tol):
+        t_object.solve()
+    stats = t_object.get_stats()
+    for key in ('Ip', 'W_MHD'):
+        if not np.isfinite(float(stats[key])):
+            raise RuntimeError(f"TokaMaker returned a non-finite {key}")
+
+
+def _solve_baseline_with_retries(t_object, seed_eq):
+    r'''! Solve the baseline equilibrium, relaxing `nl_tol` only if it stalls
+
+    @param t_object TokaMaker object with targets and profiles set
+    @param seed_eq Equilibrium restored before each retry
+    @result Tolerance at which the solve converged
+    '''
+    nl_tol_target = float(t_object.settings.nl_tol)
+    for relax in NL_TOL_RELAX:
+        nl_tol = relax * nl_tol_target
+        try:
+            _solve_checked(t_object, nl_tol)
+            return nl_tol
+        except FALLBACK_ERRORS as error:
+            t_object.replace_eq(source_eq=seed_eq)
+            last_error = error
+    raise _NonConvergenceError(str(last_error), nl_tol) from last_error
 
 
 def _normalize_to_axis(y):
@@ -1231,9 +1296,17 @@ def _bootstrap_jtor(t_object, gfile, resampled_profiles, psi_n):
     jtor, _ = _resampled_jtor(gfile, resampled_profiles, t_object.copy_eq())
     return jtor
 
+def _pprime_profile(ptot, psi_n, pin_edge):
+    pprime = np.gradient(ptot, psi_n)
+    if pin_edge:
+        pprime[-1] = 0.0
+    return pprime
+
+
 def _prepare_solver_profiles(t_object, ptot, jtor, psi_n, target_scales,
                      Ip_target, energy_target=None, pressure_geometry=None,
-                     energy_geometry_factor=1.0, pressure_amplitude=1.0):
+                     energy_geometry_factor=1.0, pressure_amplitude=1.0,
+                     pin_edge_pprime=False):
     if pressure_geometry is None:
         pressure_geometry = fsa_current_geometry(
             t_object, psi_n, want_pprime=False,
@@ -1249,7 +1322,7 @@ def _prepare_solver_profiles(t_object, ptot, jtor, psi_n, target_scales,
     if np.isfinite(pressure_amplitude) and pressure_amplitude > 0.0:
         ptot_scaled = ptot_scaled * float(pressure_amplitude)
         psf = psf * float(pressure_amplitude)
-    pprime_scaled = np.gradient(ptot_scaled, psi_n)
+    pprime_scaled = _pprime_profile(ptot_scaled, psi_n, pin_edge_pprime)
     if (np.isclose(target_scales[0], 1.0)
             and np.isclose(target_scales[1], 1.0)):
         jtor_scaled = np.asarray(jtor, dtype=float).copy()
@@ -1259,10 +1332,11 @@ def _prepare_solver_profiles(t_object, ptot, jtor, psi_n, target_scales,
             pprime=pprime_scaled, target_current=Ip_target,
         )
 
+    # P' is a shape function, supplied positive by convention
     pp_prof = {
         'type': 'linterp',
         'x': psi_n,
-        'y': pprime_scaled,
+        'y': -pprime_scaled,
     }
     ffp_prof = {
         'type': 'jphi-linterp',
@@ -1270,7 +1344,9 @@ def _prepare_solver_profiles(t_object, ptot, jtor, psi_n, target_scales,
         'y': jtor_scaled,
     }
 
-    t_object.set_targets(Ip=Ip_target, pax=ptot_scaled[0])
+    # TokaMaker pressure vanishes at the LCFS; the separatrix value is
+    # restored when the g-file is written.
+    t_object.set_targets(Ip=Ip_target, pax=ptot_scaled[0] - ptot_scaled[-1])
     t_object.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof)
     return psf, target_scales
 
@@ -1292,39 +1368,40 @@ def _solve_with_retries(
     conv_eq,
     Ip_target,
     max_attempts,
-    initial_settings=None,
-    return_settings=False,
+    continuation=False,
     energy_target=None,
     pressure_geometry=None,
     energy_geometry_factor=1.0,
     pressure_amplitude=1.0,
+    pin_edge_pprime=False,
 ):
+    r'''! Solve one scan target, stepping through a midpoint when it stalls
+
+    Solver settings are the caller's; only `nl_tol` is changed, to the next
+    entry of `NL_TOL_RELAX` on each attempt at the target.
+
+    @param continuation Target is an intermediate step, solved at
+    `CONTINUATION_RELAX` times the caller's `nl_tol`
+    @result Scaling function, solved scales, and the tolerance that was met
+    '''
     requested_scales = tuple(target_scales)
     trial_scales = requested_scales
     last_scales = tuple(conv_scales)
     last_eq = conv_eq
     is_recovery = False
     target_attempt = 0
-    last_nl_tol = getattr(t_object.settings, 'nl_tol', 1.0e-6)
+    nl_tol_target = float(t_object.settings.nl_tol)
     last_eq_geometry = None
 
     while target_attempt < max_attempts:
-        solve_settings = initial_settings
         if not is_recovery:
             target_attempt += 1
-        if solve_settings is not None:
-            urf, initial_nl_tol, maxits = solve_settings
-            if is_recovery:
-                solve_settings = (urf, 1.0e-5, maxits)
-            elif float(initial_nl_tol) <= 1.0e-6:
-                nl_tol = (1.0e-6, 2.0e-6, 5.0e-6)[
-                    min(target_attempt - 1, 2)
-                ]
-                solve_settings = (urf, nl_tol, maxits)
-            else:
-                solve_settings = (urf, float(initial_nl_tol), maxits)
-        if solve_settings is not None:
-            last_nl_tol = float(solve_settings[1])
+        if is_recovery or continuation:
+            nl_tol = CONTINUATION_RELAX * nl_tol_target
+        else:
+            nl_tol = nl_tol_target * NL_TOL_RELAX[
+                min(target_attempt, len(NL_TOL_RELAX)) - 1
+            ]
         try:
             use_predicted_geometry = (
                 pressure_geometry is not None
@@ -1345,29 +1422,13 @@ def _solve_with_retries(
                 pressure_geometry=trial_pressure_geometry,
                 energy_geometry_factor=energy_geometry_factor,
                 pressure_amplitude=pressure_amplitude,
+                pin_edge_pprime=pin_edge_pprime,
             )
-            if solve_settings is None:
-                t_object.solve()
-            else:
-                with _temporary_solver_settings(t_object, *solve_settings):
-                    t_object.solve()
-            if hasattr(t_object, 'get_stats'):
-                stats = t_object.get_stats()
-                for key in ('Ip', 'W_MHD'):
-                    if not np.isfinite(float(stats[key])):
-                        raise RuntimeError(
-                            f"TokaMaker returned a non-finite {key}"
-                        )
-        except FALLBACK_ERRORS + (FloatingPointError, OverflowError) as error:
-            failed_nl_tol = (
-                solve_settings[1]
-                if solve_settings is not None
-                else getattr(t_object.settings, 'nl_tol', 1.0e-6)
-            )
-            if not is_recovery and target_attempt >= max_attempts:
-                t_object.replace_eq(source_eq=last_eq)
-                raise _NonConvergenceError(str(error), failed_nl_tol) from error
+            _solve_checked(t_object, nl_tol)
+        except FALLBACK_ERRORS as error:
             t_object.replace_eq(source_eq=last_eq)
+            if not is_recovery and target_attempt >= max_attempts:
+                raise _NonConvergenceError(str(error), nl_tol) from error
             if is_recovery:
                 is_recovery = False
                 trial_scales = requested_scales
@@ -1388,9 +1449,7 @@ def _solve_with_retries(
             continue
 
         if np.allclose(trial_scales, requested_scales):
-            if return_settings:
-                return (*prepared, solve_settings)
-            return prepared
+            return (*prepared, nl_tol)
 
         last_scales = tuple(trial_scales)
         last_eq = t_object.copy_eq()
@@ -1399,7 +1458,7 @@ def _solve_with_retries(
         is_recovery = False
 
     raise _NonConvergenceError(
-        "Scaled equilibrium solve exhausted retry attempts", last_nl_tol,
+        "Scaled equilibrium solve exhausted retry attempts", nl_tol,
     )
 
 
@@ -1449,20 +1508,24 @@ def _predicted_pressure_geometry(anchor_eq, midpoint_eq, psi_n,
     return geometry
 
 
-def _failed_scan_result(scale_p, scale_j, Ip_target, pax_target,
-                         nl_tol=np.nan):
+def _failed_scan_result(scale_p, scale_j, Ip_target, nl_tol_target, error):
     return {
         'scale_p': scale_p,
         'scale_j': scale_j,
+        'scale_p_actual': np.nan,
         'gfile_name': '',
         'pfile_name': '',
         'Ip_target': Ip_target,
         'Ip_final': np.nan,
-        'pax_target': float(pax_target),
+        'pax_target': np.nan,
+        'psep': np.nan,
         'W_target': np.nan,
         'W_final': np.nan,
-        'nl_tol': float(nl_tol),
+        'nl_tol': error.nl_tol,
+        'nl_tol_target': nl_tol_target,
+        'status': 'failed',
         'converged': False,
+        'error': str(error),
         'eq_snapshot': None,
         'flags': {'jtor_flag': False, 'geom_flag': False, 'B_flag': False},
     }
@@ -1472,7 +1535,8 @@ def _solve_point(
     t_object, ptot, jtor, psi_n, scale_p, scale_j,
     anchor_scales, anchor_eq, Ip_target,
     energy_target=None, energy_geometry_factor=1.0,
-    midpoint_scales=None, last_converged_scales=None):
+    midpoint_scales=None, last_converged_scales=None,
+    pin_edge_pprime=False):
 
     target_scales = (scale_p, scale_j)
     continuation_scales = (
@@ -1485,11 +1549,10 @@ def _solve_point(
         solve_result = _solve_with_retries(
             t_object, ptot, jtor, psi_n, target_scales,
             continuation_scales, anchor_eq, Ip_target,
-            return_settings=True,
-            max_attempts=3,
-            initial_settings=(0.3, 1.0e-6, 20),
+            max_attempts=len(NL_TOL_RELAX),
             energy_target=energy_target,
             energy_geometry_factor=energy_geometry_factor,
+            pin_edge_pprime=pin_edge_pprime,
         )
     else:
         print(f"MID-STEP: (SCALE_P = {midpoint_scales[0]}, "
@@ -1499,9 +1562,10 @@ def _solve_point(
             t_object, ptot, jtor, psi_n, midpoint_scales,
             continuation_scales, anchor_eq, Ip_target,
             max_attempts=2,
-            initial_settings=(0.3, 1.0e-5, 20),
+            continuation=True,
             energy_target=energy_target,
             energy_geometry_factor=energy_geometry_factor,
+            pin_edge_pprime=pin_edge_pprime,
         )
 
         midpoint_eq = t_object.copy_eq()
@@ -1512,15 +1576,14 @@ def _solve_point(
         solve_result = _solve_with_retries(
             t_object, ptot, jtor, psi_n, target_scales,
             midpoint_scales, midpoint_eq, Ip_target,
-            return_settings=True,
-            max_attempts=3,
-            initial_settings=(0.3, 1.0e-6, 20),
+            max_attempts=len(NL_TOL_RELAX),
             energy_target=energy_target,
             pressure_geometry=pressure_geometry,
             energy_geometry_factor=energy_geometry_factor,
+            pin_edge_pprime=pin_edge_pprime,
         )
 
-    if energy_target is None or not hasattr(t_object, 'get_stats'):
+    if energy_target is None:
         return solve_result
 
     feedback_amplitude = 1.0
@@ -1546,12 +1609,11 @@ def _solve_point(
             solve_result = _solve_with_retries(
                 t_object, ptot, jtor, psi_n, target_scales,
                 target_scales, feedback_eq, Ip_target,
-                return_settings=True,
-                max_attempts=3,
-                initial_settings=(0.3, 1.0e-6, 100),
+                max_attempts=len(NL_TOL_RELAX),
                 energy_target=energy_target,
                 pressure_geometry=feedback_geometry,
                 energy_geometry_factor=energy_geometry_factor,
+                pin_edge_pprime=pin_edge_pprime,
                 pressure_amplitude=feedback_amplitude,
             )
         except _NonConvergenceError:
@@ -1563,7 +1625,7 @@ def _solve_point(
 
 def _save_scan_outputs(
     t_object, pfile_copy, psi_n, psf, eq_snapshot,
-    scan_index, yyyymm, out_dir, file_output):
+    scan_index, yyyymm, out_dir, file_output, lcfs_pressure):
     if not file_output:
         return {'jtor_flag': False, 'geom_flag': False, 'B_flag': False}
 
@@ -1573,6 +1635,7 @@ def _save_scan_outputs(
                         nz=len(psi_n),
                         truncate_eq=False,
                         lcfs_pad=LCFS_PAD,
+                        lcfs_pressure=lcfs_pressure,
                         cocos=7)
 
     output_gfile = eqdsk.read_geqdsk(output_gfile_path, cocos=7)
@@ -1589,13 +1652,40 @@ def _save_scan_outputs(
 
 
 def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output=None,
-                     file_output=True, result_output=True):
-    r'''! Run a VARYPED scan and restore the caller state on exit.'''
+                     file_output=True, result_output=True, pin_edge_pprime=True):
+    r'''! Run a VARYPED scan and restore the caller state on exit
+
+    Every pair of pressure and current scales in `scaling_values` is solved with
+    the solver settings of `t_object`. A point that stalls is retried at the
+    relaxed tolerances in `NL_TOL_RELAX` and labeled by its `status`:
+    `converged` (caller's `nl_tol` met), `partial` (met only a relaxed `nl_tol`,
+    recorded as `nl_tol`) or `failed`.
+
+    Pressure at the separatrix of the input p-file is kept as an offset: it is
+    scaled with the pedestal and written to the output g-files.
+
+    @param t_object TokaMaker object with mesh, coils and constraints set up
+    @param pfile Input p-file object
+    @param gfile Input g-file object
+    @param scaling_values Non-decreasing positive scale(s), applied to both
+    pedestal pressure and edge current
+    @param path_to_output Directory for the scan output directory (default: cwd)
+    @param file_output Write a g-file and p-file for each solved point?
+    @param result_output Write the VARYPED results file?
+    @param pin_edge_pprime Set \f$P'\f$ to zero at \f$\hat{\psi}=1\f$? The shape
+    of \f$P'\f$ changes over the last grid interval only, but as the solver
+    normalizes it to the axis pressure the gradient elsewhere rises uniformly
+    to make up the pressure removed there (0.01-0.14% in the example scan).
+    Keeping the edge gradient leaves a current jump at the LCFS that can stall
+    the solver.
+    @result List whose first entry describes the baseline and whose remaining
+    entries are one result dictionary per scan point
+    '''
     initial_eq = t_object.copy_eq()
     try:
         return _run_equilibrium_scan(
             t_object, pfile, gfile, scaling_values, path_to_output,
-            file_output, result_output,
+            file_output, result_output, pin_edge_pprime,
         )
     finally:
         t_object.replace_eq(source_eq=initial_eq)
@@ -1603,9 +1693,9 @@ def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output=None
 
 def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
                            path_to_output=None, file_output=True,
-                           result_output=True):
+                           result_output=True, pin_edge_pprime=True):
     results = []
-    result_errors = []
+    nl_tol_target = float(t_object.settings.nl_tol)
 
     #ensure scaling_values is array-like
     if isinstance(scaling_values, (int, float)):
@@ -1635,8 +1725,10 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
     if file_output:
         # Needed by make_updated_pfile, which only runs after the first solve
         missing = [key for key in ('ne', 'ni', 'te', 'ti') if not profile_exists(pfile, key)]
+        if 'N Z A' not in pfile:
+            missing.append('N Z A')
         if missing:
-            raise ValueError(f"pfile must contain {missing} profile(s) when file_output=True")
+            raise ValueError(f"pfile must contain {missing} when file_output=True")
     psi_n_pfile = pfile.psinorm_for('ptot')
     if psi_n_pfile is None:
         raise ValueError("Could not extract psinorm for 'ptot' profile")
@@ -1674,7 +1766,10 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
 
     # Get Ip target
     Ip_target = gfile.Ip
-    pax_target = float(ptot[0])
+    # TokaMaker pressure vanishes at the LCFS, so the solver targets pressure
+    # relative to the separatrix and the offset is restored in the g-files.
+    psep_input = float(ptot[-1])
+    pax_target = float(ptot[0]) - psep_input
 
     t_object.init_psi(R0, Z0, a, kappa, delta)
     t_object.set_targets(Ip=Ip_target, pax=pax_target)
@@ -1686,7 +1781,7 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
         gfile_profiles['j_tor_averaged_direct'] = refit_jtor
 
     init_pp_prof = {'type':'linterp',
-                    'y': np.gradient(ptot, psi_n),
+                    'y': -_pprime_profile(ptot, psi_n, pin_edge_pprime),
                     'x': psi_n}
     
     init_ffp_prof = {'type':'jphi-linterp',
@@ -1699,7 +1794,7 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
     baseline_seed = t_object.copy_eq()
     
     print("=============== STARTING BASELINE SOLVE ===============")
-    _solve_baseline_with_retries(t_object, baseline_seed)
+    baseline_nl_tol = _solve_baseline_with_retries(t_object, baseline_seed)
     baseline_solve = t_object.copy_eq()
     W_target = float(baseline_solve.get_stats()['W_MHD'])
     energy_geometry_factor = 1.0
@@ -1726,7 +1821,14 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
                     'input_pfile': pfile,
                     'baseline_eq': baseline_solve ,
                     'scaling_values': scaling_values,
-                    'g_init_flag': init_geom['ginit_flag']
+                    'psep_input': psep_input,
+                    'pin_edge_pprime': pin_edge_pprime,
+                    'nl_tol': baseline_nl_tol,
+                    'nl_tol_target': nl_tol_target,
+                    'status': _convergence_status(baseline_nl_tol, nl_tol_target),
+                    'g_init_flag': init_geom['ginit_flag'],
+                    'flags': {key: gfile_profiles[key]
+                              for key in ('jtor_flag', 'geom_flag', 'B_flag')},
                     })
     
     teqs = 0
@@ -1792,15 +1894,13 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
                     energy_geometry_factor=energy_geometry_factor,
                     midpoint_scales=pressure_midpoint,
                     last_converged_scales=last_conv,
+                    pin_edge_pprime=pin_edge_pprime,
                 )
             except _NonConvergenceError as error:
                 solve_error = error
                 continue
             except FALLBACK_ERRORS as error:
-                solve_error = _NonConvergenceError(
-                    str(error),
-                    float(getattr(t_object.settings, 'nl_tol', 5.0e-6)),
-                )
+                solve_error = _NonConvergenceError(str(error), nl_tol_target)
                 continue
             else:
                 anchor_scales = candidate_scales
@@ -1808,21 +1908,26 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
                 break
 
         if solved is None:
-            error = solve_error
             t_object.replace_eq(source_eq=last_conv_eq)
             results.append(_failed_scan_result(
-                scale_p, scale_j, Ip_target, pax_target,
-                nl_tol=error.nl_tol,
+                scale_p, scale_j, Ip_target, nl_tol_target, solve_error,
             ))
-            result_errors.append(error.nl_tol)
             print(
-                f"NON-CONVERGED: (SCALE_P = {scale_p}, "
-                f"SCALE_J = {scale_j}); nl_tol = {error.nl_tol}"
+                f"FAILED: (SCALE_P = {scale_p}, SCALE_J = {scale_j}); "
+                f"nl_tol = {solve_error.nl_tol}: {solve_error}"
             )
             teqs += 1
             continue
 
-        psf, solved_scales, solve_settings = solved
+        psf, solved_scales, nl_tol = solved
+        status = _convergence_status(nl_tol, nl_tol_target)
+        if status == 'partial':
+            print(
+                f"PARTIALLY CONVERGED: (SCALE_P = {scale_p}, SCALE_J = {scale_j}); "
+                f"nl_tol = {nl_tol} (requested {nl_tol_target})"
+            )
+        # psf carries the pedestal scale and any energy-feedback rescaling
+        psep = float(psf[-1]) * psep_input
 
         last_conv = solved_scales
         last_conv_eq = t_object.copy_eq()
@@ -1834,27 +1939,25 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
 
         flags = _save_scan_outputs(
             t_object, pfile_copy, psi_n, psf, eq_snapshot,
-            teqs, yyyymm, out_dir, file_output,
+            teqs, yyyymm, out_dir, file_output, psep,
         )
-        nl_tol = (
-            float(solve_settings[1])
-            if solve_settings is not None
-            else float(getattr(t_object.settings, 'nl_tol', 1.0e-6))
-        )
-        result_errors.append(nl_tol)
         eq_stats = eq_snapshot.get_stats()
         results.append({
             'scale_p': scale_p,
             'scale_j': scale_j,
+            'scale_p_actual': float(psf[-1]),
             'gfile_name': f'g{yyyymm}.{teqs:05d}',
             'pfile_name': f'p{yyyymm}.{teqs:05d}',
             'Ip_target': Ip_target,
             'Ip_final': eq_stats['Ip'],
-            'pax_target': float(pax_target),
+            'pax_target': float(psf[0] * ptot[0]),
+            'psep': psep,
             'W_target': W_target,
             'W_final': float(eq_stats['W_MHD']),
             'nl_tol': nl_tol,
-            'converged': True,
+            'nl_tol_target': nl_tol_target,
+            'status': status,
+            'converged': status == 'converged',
             'eq_snapshot': eq_snapshot,
             'flags': flags,
         })
@@ -1872,47 +1975,34 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
         )
         pprint.pprint(results[i])
     if result_output:
-        make_results_file(results, result_errors=result_errors)
+        make_results_file(results)
     
     return results
 
 
-def make_results_file(results, result_errors=None):
+def make_results_file(results):
     r'''! Write the VARYPED text results file.
 
+    The `err` column holds the `nl_tol` of the final solve attempt and `convrg`
+    is 1 only where the caller's `nl_tol` was met; `status` distinguishes
+    `partial` points (solved at a relaxed `nl_tol`) from `failed` ones.
+
     @param results Scan result dictionaries, including the baseline entry.
-    @param result_errors Optional private values for the ``err`` column.
     '''
     time = dt.datetime.now()
     time_run = time.ctime()
 
     file_dir = results[0]['out_dir']
     file_name = 'results_'+results[0]['result_filename']
-    if result_errors is not None and len(result_errors) != len(results) - 1:
-        raise ValueError(
-            "result_errors must contain one value for each scan result"
-        )
 
     lines = [f'OFT TokaMaker VARYPED Results; Run on: {time_run}', 
-             '  i pres w nustar den temp cur ne_shift te_shift pe_shift err convrg']
+             '  i pres w nustar den temp cur ne_shift te_shift pe_shift err convrg status']
 
     for i, res in enumerate(results[1:]):
-        error_value = (
-            result_errors[i]
-            if result_errors is not None
-            else 1.0e-6
-        )
-        try:
-            error_value = float(error_value)
-        except (TypeError, ValueError):
-            error_value = 1.0e-6
-        if not np.isfinite(error_value):
-            error_value = 1.0e-6
-        converged = int(bool(res.get('converged', False)))
         line = (
             f"  {i} {res['scale_p']} 1.0 1.0 1.0 1.0 "
             f"{res['scale_j']} 0.00 0.00 0.00 "
-            f"{error_value:.6g} {converged}"
+            f"{res['nl_tol']:.6g} {int(res['converged'])} {res['status']}"
         )
         lines.append(line)
     
@@ -1961,7 +2051,7 @@ def summarize_scan(results, n_best=5):
         rows.append({
             'scale_p': float(point.get('scale_p', np.nan)),
             'scale_j': float(point.get('scale_j', np.nan)),
-            'converged': bool(point.get('converged', False)),
+            'status': point.get('status', 'failed'),
             'nl_tol': float(point.get('nl_tol', np.nan)),
             'Ip_final': ip_final,
             'Ip_rel_err': _relative_error(ip_final, ip_target),
@@ -1969,7 +2059,7 @@ def summarize_scan(results, n_best=5):
             'W_rel_err': _relative_error(w_final, w_target),
         })
 
-    converged_rows = [row for row in rows if row['converged']]
+    solved_rows = [row for row in rows if row['status'] != 'failed']
 
     def _sort_key(row):
         # Rank by energy, then current error, then tolerance; NaN sorts last
@@ -1978,13 +2068,14 @@ def summarize_scan(results, n_best=5):
             for key in ('W_rel_err', 'Ip_rel_err', 'nl_tol')
         )
 
-    best_points = sorted(converged_rows, key=_sort_key)
+    best_points = sorted(solved_rows, key=_sort_key)
 
-    ip_mean, ip_median, ip_max = _stats([row['Ip_rel_err'] for row in converged_rows])
-    w_mean, w_median, w_max = _stats([row['W_rel_err'] for row in converged_rows])
-    nl_mean, nl_median, nl_max = _stats([row['nl_tol'] for row in rows])
+    ip_mean, ip_median, ip_max = _stats([row['Ip_rel_err'] for row in solved_rows])
+    w_mean, w_median, w_max = _stats([row['W_rel_err'] for row in solved_rows])
+    nl_mean, nl_median, nl_max = _stats([row['nl_tol'] for row in solved_rows])
     n_points = len(rows)
-    n_converged = len(converged_rows)
+    n_converged = sum(row['status'] == 'converged' for row in rows)
+    n_partial = len(solved_rows) - n_converged
 
     def _format(value):
         return 'n/a' if not np.isfinite(value) else f'{value:.3e}'
@@ -1993,8 +2084,12 @@ def summarize_scan(results, n_best=5):
     print('VARYPED RUN QUALITY SUMMARY')
     print('=' * 90)
     print(f"Scan points:                 {n_points}")
+    print(f"Requested nl_tol:            {_format(float(results[0]['nl_tol_target']))}")
+    print(f"Baseline:                    {results[0]['status']}")
+    print(f"Edge P' pinned to zero:      {results[0]['pin_edge_pprime']}")
     print(f"Converged:                   {n_converged}")
-    print(f"Failed:                      {n_points - n_converged}")
+    print(f"Partially converged:         {n_partial}")
+    print(f"Failed:                      {n_points - len(solved_rows)}")
     print(
         f"Convergence fraction:        "
         f"{n_converged / n_points if n_points else np.nan:.3f} "
@@ -2016,9 +2111,9 @@ def summarize_scan(results, n_best=5):
         f"{_format(nl_mean)} / {_format(nl_median)} / {_format(nl_max)}"
     )
     print()
-    print('Best converged scan points by energy, then current error:')
+    print('Best solved scan points by energy, then current error:')
     table_columns = (
-        ('scale_p', '{:g}'), ('scale_j', '{:g}'),
+        ('scale_p', '{:g}'), ('scale_j', '{:g}'), ('status', '{}'),
         ('Ip_rel_err', '{:.3e}'), ('W_rel_err', '{:.3e}'), ('nl_tol', '{:.1e}'),
         ('Ip_final', '{:.6e}'), ('W_final', '{:.6e}'),
     )
@@ -2042,6 +2137,10 @@ def _find_results_file(path):
     raise FileNotFoundError(f"No VARYPED results file found in '{path}'")
 
 
+def _scan_index(file_name):
+    return int(file_name.split('.')[1])
+
+
 def _read_scan_values(path, usecols):
     values = np.asarray(
         np.genfromtxt(path, skip_header=2, usecols=usecols),
@@ -2053,15 +2152,19 @@ def _read_scan_values(path, usecols):
     return tuple(values[:, index] for index in range(values.shape[1]))
 
 
-def _converged_scan_results(results):
+def _solved_scan_results(results):
     return [
         result for result in results[1:]
-        if result.get('converged', result.get('eq_snapshot') is not None)
+        if result['eq_snapshot'] is not None
     ]
 
 
 def plot_pressure_results(results, savefig=False):
-    r'''! Plot pressure and pressure-derivative scan results.'''
+    r'''! Plot pressure and pressure-derivative scan results
+
+    @param results Result structure returned by @ref equilibrium_scan
+    @param savefig Save generated figures in the scan output directory?
+    '''
     scaling_values = np.asarray(results[0]["scaling_values"])
     vmin=(scaling_values.min())
     vmax=(scaling_values.max())
@@ -2069,11 +2172,11 @@ def plot_pressure_results(results, savefig=False):
     cmap = cm.plasma
     fig, ax = plt.subplots()
 
-    for result in _converged_scan_results(results):
+    for result in _solved_scan_results(results):
         color = cmap(norm(float(result['scale_p'])))    
         psi_n, _, _, ptot, _ = result['eq_snapshot'].get_profiles(
             npsi=514, psi_pad=PSI_PAD)
-        ax.plot(psi_n, ptot, color = color)
+        ax.plot(psi_n, ptot + result['psep'], color = color)
 
     sm = cm.ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])
@@ -2085,7 +2188,7 @@ def plot_pressure_results(results, savefig=False):
     psi_b, _, _, ptot_b, pprime_b = baseline.get_profiles(
         npsi=514, psi_pad=PSI_PAD)
 
-    ax.plot(psi_b, ptot_b, color = 'black', label = 'Input Pressure Profile', linestyle = '--', linewidth = 2.5)
+    ax.plot(psi_b, ptot_b + results[0]['psep_input'], color = 'black', label = 'Input Pressure Profile', linestyle = '--', linewidth = 2.5)
 
     plt.grid()
     plt.legend()
@@ -2100,7 +2203,7 @@ def plot_pressure_results(results, savefig=False):
 
     fig, ax = plt.subplots()
 
-    for result in _converged_scan_results(results):
+    for result in _solved_scan_results(results):
         color = cmap(norm(float(result['scale_p'])))    
         psi_n, _, _, _, pprime = result['eq_snapshot'].get_profiles(
             npsi=514, psi_pad=PSI_PAD)
@@ -2126,7 +2229,11 @@ def plot_pressure_results(results, savefig=False):
     plt.close(fig)
     
 def plot_current_results(results, savefig=False):
-    r'''! Plot toroidal current-density scan results.'''
+    r'''! Plot toroidal current-density scan results
+
+    @param results Result structure returned by @ref equilibrium_scan
+    @param savefig Save generated figures in the scan output directory?
+    '''
     scaling_values = np.asarray(results[0]["scaling_values"])
     vmin=(scaling_values.min())
     vmax=(scaling_values.max())
@@ -2135,7 +2242,7 @@ def plot_current_results(results, savefig=False):
     fig, ax = plt.subplots()
 
 
-    for result in _converged_scan_results(results):
+    for result in _solved_scan_results(results):
         color = cmap(norm(float(result['scale_j'])))    
         
         psi_n, jtor = _jtor_from_eq(result['eq_snapshot'])
@@ -2190,7 +2297,13 @@ def _jtor_from_eq(eq, npsi=514, psi_pad=PSI_PAD):
 
 
 def plot_pfiles(dir_name, profiles, scaling_range=None, savefig=False):
-    r'''! Plot selected profiles from p-files in a scan directory.'''
+    r'''! Plot selected profiles from p-files in a scan directory
+
+    @param dir_name Scan output directory, relative to the working directory
+    @param profiles Profile name, list of names, or `'all'`
+    @param scaling_range Optional (min, max) pressure scale to include
+    @param savefig Save generated figures in the scan directory?
+    '''
 
     if profiles == 'all':
         profiles = ['all']
@@ -2200,21 +2313,16 @@ def plot_pfiles(dir_name, profiles, scaling_range=None, savefig=False):
     cwd = os.getcwd()
     path = os.path.join(cwd, dir_name)
     pfiles = []
+    scan_indices = []
     for entry in sorted(os.scandir(path), key=lambda entry: entry.name):
         if entry.is_file() and _PFILE_NAME.fullmatch(entry.name):
             pfiles.append(eqdsk.read_pfile(entry))
+            scan_indices.append(_scan_index(entry.name))
 
     if not pfiles:
         raise ValueError(f"No p-files found in '{path}'")
     results_file = _find_results_file(path)
-    scale_values, convergence = _read_scan_values(results_file, (1, 11))
-    convergence = convergence.astype(bool)
-    scaling_values = scale_values[convergence]
-    if len(pfiles) != len(scaling_values):
-        raise ValueError(
-            f"Found {len(pfiles)} p-files but {len(scaling_values)} "
-            "converged scan results"
-        )
+    scaling_values = _read_scan_values(results_file, 1)[scan_indices]
     
     if scaling_range is not None:
         scale_min, scale_max = sorted(map(float, scaling_range))
@@ -2260,7 +2368,16 @@ def plot_gfiles(
     dir_name, profiles, container=None, scaling_range=None, savefig=False,
     cocos=None,
 ):
-    r'''! Plot selected profiles from g-files in a scan directory.'''
+    r'''! Plot selected profiles from g-files in a scan directory
+
+    @param dir_name Scan output directory, relative to the working directory
+    @param profiles Profile name, list of names, or `'all'`
+    @param container g-file dictionary holding the profiles (`geometry`,
+    `averages` or `midplane`), if not a top-level attribute
+    @param scaling_range Optional (min, max) scale to include
+    @param savefig Save generated figures in the scan directory?
+    @param cocos COCOS of the g-files (default: 7 for a `varyped` directory, else 1)
+    '''
 
     if profiles == 'all':
         profiles = ['all']
@@ -2275,24 +2392,18 @@ def plot_gfiles(
         directory_name = os.path.basename(os.path.normpath(path))
         cocos = 7 if directory_name.startswith('varyped') else 1
     gfiles = []
+    scan_indices = []
     for entry in sorted(os.scandir(path), key = lambda e: e.name):
         if entry.is_file() and _GFILE_NAME.fullmatch(entry.name):
             gfiles.append(eqdsk.read_geqdsk(entry, cocos=cocos))
+            scan_indices.append(_scan_index(entry.name))
 
     if not gfiles:
         raise ValueError(f"No g-files found in '{path}'")
     results_file = _find_results_file(path)
-    scale_p_all, scale_j_all, convergence = _read_scan_values(
-        results_file, (1, 6, 11)
-    )
-    convergence = convergence.astype(bool)
-    scale_p_values = scale_p_all[convergence]
-    scale_j_values = scale_j_all[convergence]
-    if len(gfiles) != len(scale_p_values):
-        raise ValueError(
-            f"Found {len(gfiles)} g-files but {len(scale_p_values)} "
-            "converged scan results"
-        )
+    scale_p_all, scale_j_all = _read_scan_values(results_file, (1, 6))
+    scale_p_values = scale_p_all[scan_indices]
+    scale_j_values = scale_j_all[scan_indices]
 
     if profiles == ['all'] and container is not None:
         c = getattr(gfiles[0], container)
