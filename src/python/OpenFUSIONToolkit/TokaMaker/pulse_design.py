@@ -314,6 +314,12 @@ class TokaMaker_TORAX:
         self._state['f_GW']     = np.zeros(N)
         self._state['f_GW_vol'] = np.zeros(N)
 
+        # ── L-H transition power balance from TORAX [W] ──────────────────────────
+        self._state['P_SOL']        = np.zeros(N)
+        self._state['P_LH']         = np.zeros(N)   # Martin scaling
+        self._state['P_LH_delabie'] = np.zeros(N)   # Delabie scaling (formation-model gate)
+        self._state['n_e_min_P_LH'] = np.zeros(N)   # Ryter density minimum [m^-3]
+
         # H-mode flag at each tm_time (True=H-mode, False=L-mode); filled from the
         # TORAX pedestal confinement_mode when the L/H state machine is active.
         self._state['confinement_mode'] = np.zeros(N, dtype=bool)
@@ -338,6 +344,30 @@ class TokaMaker_TORAX:
         # Per-time coupling-convergence cost (flavor-2 aggregate); overwritten each loop
         # like the err_* arrays. The per-loop history lives in _coupling_cost_history.
         self._state['coupling_cost'] = np.full(N, np.nan)
+
+        # ── Derived scalars, recomputed each loop by _compute_derived_quantities ──
+        # Flux consumption [Wb] relative to the first solved time (consumed flux > 0).
+        self._state['flux_consumed_tm'] = np.full(N, np.nan)
+        self._state['flux_consumed_tx'] = np.full(N, np.nan)
+        # Plasma resistance proxy: on-axis eta times cross-section area pi*a^2*kappa.
+        self._state['area']     = np.full(N, np.nan)   # [m^2]
+        self._state['R_plasma'] = np.full(N, np.nan)   # [Ohm]
+        # Disruptivity proxies (see _compute_disruptivity_limits).
+        self._state['n_e_line_avg']  = np.full(N, np.nan)   # [m^-3]
+        self._state['n_e_vol_avg']   = np.full(N, np.nan)   # [m^-3]
+        self._state['n_GW']          = np.full(N, np.nan)   # Greenwald density [m^-3]
+        self._state['n_e_edge']      = np.full(N, np.nan)   # rho_norm 0.85-0.95 average [m^-3]
+        self._state['T_e_edge']      = np.full(N, np.nan)   # rho_norm 0.85-0.95 average [keV]
+        self._state['LDL25']         = np.full(N, np.nan)   # Maris L-mode density-limit metric
+        self._state['HDL25']         = np.full(N, np.nan)   # Maris H-mode density-limit metric
+        self._state['beta_N_troyon'] = np.full(N, np.nan)   # Troyon no-wall limit 4*l_i [%]
+        self._state['vs_margin']     = np.full(N, np.nan)   # Tobin -F'_z [N/m], < 0 unstable
+
+        # ── Coil currents and rate-limit tunnel {coil: (N,) array, A-turns} ────
+        self._state['coil_currents']      = {}  # solved current, filled by _tm_update
+        self._state['coil_bounds_lo']     = {}  # per-solve rate-limited bounds (NaN if not tightened)
+        self._state['coil_bounds_hi']     = {}
+        self._state['coil_dIdt_realized'] = {}  # |dI/dt| [A-turns/s] over the interval ending at each solve
 
         # ── Safety factor profiles {i: {'x':..., 'y':..., 'type':...}} ─────────
         self._state['q_prof_eqdsk'] = {}
@@ -3124,9 +3154,7 @@ class TokaMaker_TORAX:
             if self._save_outputs:
                 self._res_update(data_tree)
 
-            # Flux consumption: positive Ip drives psi_lcfs down in TM-native.
-            # Convention: consumed_flux > 0 means plasma has consumed flux from CS.
-            consumed_flux = -2.0 * np.pi * (self._state['psi_lcfs_tx'][-1] - self._state['psi_lcfs_tx'][0])
+            consumed_flux = _flux_consumed(self._state['psi_lcfs_tx'])[-1]
             consumed_flux_integral = np.trapezoid(v_loops[0:], self._tm_times[0:])
             self._log(f"Loop {self._current_loop} TORAX: cflux={consumed_flux:.4f} Wb")
             self._print(f'  TORAX: done (cflux={consumed_flux:.4f} Wb)')
@@ -3165,6 +3193,10 @@ class TokaMaker_TORAX:
         self._state['vloop_tx'][i]  = self._extract_tx_scalar(data_tree, 'v_loop_lcfs', t)
         self._state['f_GW'][i]      = self._extract_tx_scalar(data_tree, 'fgw_n_e_line_avg', t)
         self._state['f_GW_vol'][i]  = self._extract_tx_scalar(data_tree, 'fgw_n_e_volume_avg', t)
+        self._state['P_SOL'][i]        = self._extract_tx_scalar(data_tree, 'P_SOL_total', t)
+        self._state['P_LH'][i]         = self._extract_tx_scalar(data_tree, 'P_LH', t)
+        self._state['P_LH_delabie'][i] = self._extract_tx_scalar(data_tree, 'P_LH_delabie', t)
+        self._state['n_e_min_P_LH'][i] = self._extract_tx_scalar(data_tree, 'n_e_min_P_LH', t)
         self._state['q95'][i]       = self._extract_tx_scalar(data_tree, 'q95', t)
         self._state['q0'][i]        = self._extract_tx_scalar_at_rho(data_tree, 'q', t, 0.0, rho_coord='rho_face_norm')
 
@@ -3862,9 +3894,7 @@ class TokaMaker_TORAX:
                     self._apply_tm_coil_reg(targets=prev_coil_targets)
                 _pbar.update(1)
 
-        # Flux consumption: positive Ip drives psi_lcfs down in TM convention
-        # Convention: consumed_flux > 0
-        consumed_flux = -(self._state['psi_lcfs_tm'][-1] - self._state['psi_lcfs_tm'][0]) * 2.0 * np.pi
+        consumed_flux = _flux_consumed(self._state['psi_lcfs_tm'])[-1]
         consumed_flux_integral = np.trapezoid(self._state['vloop_tm'][0:], self._tm_times[0:])
 
         n_ok = sum(1 for e in _loop_level_log if e.get('succeeded'))
@@ -4020,17 +4050,14 @@ class TokaMaker_TORAX:
         self._state['R_avg_tm'][i] =     {'x': self._psi_N.copy(), 'y': np.interp(self._psi_N, psi_geo, np.array(geo['<R>'])), 'type': 'linterp'}
         self._state['R_inv_avg_tm'][i] = {'x': self._psi_N.copy(), 'y': np.interp(self._psi_N, psi_geo, np.array(geo['<1/R>'])), 'type': 'linterp'}
 
-        # Update Results
         # get_coil_currents() returns the per-winding current [A/turn]; store and track
         # everything in total Amp-turns (A-turns), the public TokaMaker_TORAX coil unit.
         coils, _ = self._state['equil'][i].get_coil_currents()
         coils_aturn = {c: cur * self._coil_net_turns(c) for c, cur in coils.items()}
-        if 'COIL' not in self._results:
-            self._results['COIL'] = {coil: {} for coil in coils_aturn}
         for coil, current in coils_aturn.items():
-            if coil not in self._results['COIL']:
-                self._results['COIL'][coil] = {}
-            self._results['COIL'][coil][self._tm_times[i]] = current
+            if coil not in self._state['coil_currents']:
+                self._state['coil_currents'][coil] = np.full(len(self._tm_times), np.nan)
+            self._state['coil_currents'][coil][i] = current
 
         # Coil rate-limit audit: compare the realized change against the budget that was
         # applied for this solve (relative to the last-good currents). A breach here means
@@ -4128,25 +4155,9 @@ class TokaMaker_TORAX:
                 s['err_xpt_secondary_rms'][i] = _xpt_rms(
                     self._secondary_x_point_targets, s['x_pts_tm'].get(i))
 
-        # ── Flux-consumption error [Wb], referenced (like plot_scalars) to each series'
-        #    own first solved time; TM and TX each use their own reference. ──
-        psi_lcfs_tm = np.asarray(s['psi_lcfs_tm'], dtype=float)
-        psi_lcfs_tx = np.asarray(s['psi_lcfs_tx'], dtype=float)
-
-        def _first_valid(a):
-            idx = np.where(np.isfinite(a) & (a != 0.0))[0]
-            return int(idx[0]) if idx.size else None
-
-        ref_tm = _first_valid(psi_lcfs_tm)
-        ref_tx = _first_valid(psi_lcfs_tx)
-        if ref_tm is not None and ref_tx is not None:
-            flux_tm = -(psi_lcfs_tm - psi_lcfs_tm[ref_tm]) * 2.0 * np.pi
-            flux_tx = -(psi_lcfs_tx - psi_lcfs_tx[ref_tx]) * 2.0 * np.pi
-            err_flux = flux_tm - flux_tx
-            bad = ((psi_lcfs_tm == 0.0) | (psi_lcfs_tx == 0.0)
-                   | ~np.isfinite(psi_lcfs_tm) | ~np.isfinite(psi_lcfs_tx))
-            err_flux[bad] = np.nan
-            s['err_flux'] = err_flux
+        # ── Flux-consumption error [Wb]; TM and TX each use their own first solved time
+        #    as reference (see _flux_consumed). Requires _compute_derived_quantities(). ──
+        s['err_flux'] = s['flux_consumed_tm'] - s['flux_consumed_tx']
 
 
     def _compute_coupling_cost(self):
@@ -4177,13 +4188,8 @@ class TokaMaker_TORAX:
 
         # Characteristic per-time TORAX scale for each channel (matches the err_* units).
         psi_scale = np.abs(np.asarray(s['psi_lcfs_tx'], float) - np.asarray(s['psi_axis_tx'], float))
-        flux_tx = np.asarray(s['psi_lcfs_tx'], float)
-        _fin = np.where(np.isfinite(flux_tx) & (flux_tx != 0.0))[0]
-        if _fin.size:
-            flux_swing = np.abs((flux_tx - flux_tx[int(_fin[0])]) * 2.0 * np.pi)
-            flux_ref = np.full(N, np.nanmax(flux_swing) if np.any(np.isfinite(flux_swing)) else np.nan)
-        else:
-            flux_ref = np.full(N, np.nan)
+        flux_swing = np.abs(s['flux_consumed_tx'])
+        flux_ref = np.full(N, np.nanmax(flux_swing) if np.any(np.isfinite(flux_swing)) else np.nan)
 
         scales = {
             'err_psi_lcfs': psi_scale,
@@ -4252,15 +4258,121 @@ class TokaMaker_TORAX:
                   f'mean={cost_mean:.4f} max={cost_max:.4f}')
 
 
+    def _compute_derived_quantities(self):
+        r'''! Fill the derived state arrays from this loop's TM and TX results: flux
+                consumption, plasma resistance, coil bounds and ramp rates, and disruptivity
+                proxies. Called once per loop after all TM solves and before _compute_errors
+                (which uses the flux consumption). Arrays are on tm_times and overwritten each loop.
+        '''
+        s = self._state
+
+        s['flux_consumed_tm'] = _flux_consumed(s['psi_lcfs_tm'])
+        s['flux_consumed_tx'] = _flux_consumed(s['psi_lcfs_tx'])
+
+        # Plasma resistance proxy R = eta(psi_N=0) * pi a^2 kappa: TORAX on-axis resistivity
+        # times the (seed) cross-section area.
+        s['area'] = np.pi * np.asarray(s['a'], float)**2 * np.asarray(s['kappa'], float)
+        eta_axis = np.array([s['eta_prof'][i]['y'][0] for i in range(len(self._tm_times))])
+        s['R_plasma'] = eta_axis * s['area']
+
+        self._compute_coil_quantities()
+        self._compute_disruptivity_limits()
+
+    def _compute_coil_quantities(self):
+        r'''! Per-coil rate-limited bounds [A-turns] and realized |dI/dt| [A-turns/s] on tm_times.'''
+        s = self._state
+        times = np.asarray(self._tm_times, dtype=float)
+        N = len(times)
+        # The rate budget is enforced over dt_eff = max(dt, dt_floor), so the realized rate is
+        # measured over the same floored interval; a raw sub-floor dt shows spurious spikes.
+        dt_floor = float(getattr(self, '_coil_rate_dt_floor', 0.0))
+        for c, I in s['coil_currents'].items():
+            lo = np.full(N, np.nan)
+            hi = np.full(N, np.nan)
+            for i, bounds in self._coil_bounds_history.items():
+                if c in bounds:
+                    lo[i], hi[i] = bounds[c]
+            s['coil_bounds_lo'][c] = lo
+            s['coil_bounds_hi'][c] = hi
+
+            dIdt = np.full(N, np.nan)
+            solved = np.nonzero(np.isfinite(I))[0]
+            if solved.size >= 2:
+                dt_eff = np.maximum(np.diff(times[solved]), dt_floor)
+                dIdt[solved[1:]] = np.abs(np.diff(I[solved])) / np.where(dt_eff == 0, np.nan, dt_eff)
+            s['coil_dIdt_realized'][c] = dIdt
+
+    def _compute_disruptivity_limits(self):
+        r'''! Disruptivity proxies on tm_times: Greenwald density, Maris LDL25/HDL25 edge
+                density-limit metrics, Troyon no-wall beta_N limit, and Tobin vertical-stability
+                margin. TORAX scalars are read at full resolution and interpolated onto tm_times.
+        '''
+        s = self._state
+        tm = np.asarray(self._tm_times, dtype=float)
+        N = len(tm)
+
+        # Greenwald density from TORAX's own line-averaged fraction: n_GW = n_e_line / f_GW.
+        t_line, y_line = _tx_scalar(self, 'n_e_line_avg', required=True)
+        t_vol, y_vol = _tx_scalar(self, 'n_e_volume_avg', required=True)
+        t_fgw, y_fgw = _tx_scalar(self, 'fgw_n_e_line_avg', required=True)
+        s['n_e_line_avg'] = np.interp(tm, t_line, y_line)
+        s['n_e_vol_avg'] = np.interp(tm, t_vol, y_vol)
+        s['n_GW'] = s['n_e_line_avg'] / np.interp(tm, t_fgw, y_fgw)
+
+        # Edge density and temperature averaged over rho_norm in [0.85, 0.95].
+        t_ne, y_ne = _tx_profile_at_rho(self, 'n_e', None, rho_range=(0.85, 0.95))
+        t_te, y_te = _tx_profile_at_rho(self, 'T_e', None, rho_range=(0.85, 0.95))
+        s['n_e_edge'] = np.interp(tm, t_ne, y_ne)
+        s['T_e_edge'] = np.interp(tm, t_te, y_te)
+
+        # Maris LDL25 (L-mode) and HDL25 (H-mode) density-limit metrics, built from edge
+        # collisionality nu*, edge beta and normalized ion gyroradius rho*.
+        EC = 1.60217662e-19
+        EPS0 = 8.8541878128e-12
+        ion_masses = {'H': 1.6726219e-27, 'D': 3.3435837724e-27, 'T': 5.0082670e-27}
+        main_ion = self._main_ion or {'D': 1.0}
+        M_i = sum(frac * ion_masses[species] for species, frac in main_ion.items())  # mean fuel-ion mass [kg]
+
+        n_e = s['n_e_edge']
+        T_e = s['T_e_edge'] * 1e3   # keV -> eV
+        R0 = np.asarray(s['R0_mag'], float)
+        a = np.asarray(s['a'], float)
+        kappa = np.asarray(s['kappa'], float)
+        B0 = np.abs(np.asarray(s['B0'], float))
+        Ip = np.abs(np.asarray(s['Ip'], float))
+        eps = a / R0
+        B_edge = B0 * R0 / (R0 + a)   # vacuum toroidal field at the outboard edge
+        q_star = (2 * np.pi / mu_0) * B0 * R0 * eps**2 * ((1 + kappa**2) / 2) / Ip
+        lambda_D = 7430 * np.sqrt(T_e / n_e)   # Debye length [m], T_e in eV
+        ln_Lambda = np.log(12 * np.pi * n_e * lambda_D**3)
+        nu_star = (EC**4 / (4 * np.pi * EPS0**2)) * ln_Lambda * n_e * q_star * R0 * eps**(-1.5) * (2 * EC * T_e)**(-2)
+        beta_edge = 4 * mu_0 * n_e * T_e * EC / B_edge**2   # 2 mu0 p / B^2 with p = 2 n_e T_e
+        rho_star = np.sqrt(M_i * T_e * EC) / (EC * B_edge) / a
+        s['LDL25'] = nu_star * beta_edge**0.4
+        s['HDL25'] = nu_star * beta_edge**0.8 * rho_star**(-0.6) * np.abs(np.asarray(s['q95_tm'], float))
+
+        # Troyon no-wall limit beta_N,max ~ 4 l_i [%].
+        s['beta_N_troyon'] = 4.0 * np.asarray(s['l_i_tm'], float)
+
+        # Tobin vertical force-gradient margin -F'_z [N/m], negative is vertically unstable.
+        # The passive-conductor geometry it needs is cached on the TokaMaker object.
+        vs_margin = np.full(N, np.nan)
+        with self._quiet_tm():   # its plasma-current projection prints CG solver output
+            for i, equil in s['equil'].items():
+                vs_margin[i] = equil.compute_vertical_stability_margin()
+        s['vs_margin'] = vs_margin
+
+
     # ─── I/O & Logging ──────────────────────────────────────────────────────────
 
     def save_state(self, fname):
-        r'''! Save intermediate simulation state to JSON.
+        r'''! Save intermediate simulation state to JSON. The TokaMaker equilibrium objects
+                in state['equil'] are left out.
                 @param fname Filename to save to.
 
         '''
         with open(fname, 'w') as f:
-            json.dump(self._state, f, cls=MyEncoder)
+            json.dump({k: v for k, v in self._state.items() if k != 'equil'}, f, cls=MyEncoder)
 
     def save_res(self):
         r'''! Save simulation results to JSON.'''
@@ -4709,6 +4821,13 @@ class TokaMaker_TORAX:
                               f'cflux_TX={cflux_tx:.4f} Wb | cflux_TM={cflux_tm:.4f} Wb')
                 self._log(f'TX Convergence error = {err*100.0:.3f} %')
                 self._log(f'Difference Convergence error = {cflux_diff:.4f} %')
+
+                # Derived state arrays (flux consumption, resistance, coil tunnel, disruptivity
+                # proxies). Runs before _compute_errors, which uses the flux consumption.
+                try:
+                    self._compute_derived_quantities()
+                except Exception as _e:
+                    self._log(f'_compute_derived_quantities failed at loop {self._current_loop}: {_e}')
 
                 # Coupling error metrics: compute once per loop (fills the err_* state
                 # arrays) so they are available to plot_errors and to save_state, even
@@ -7261,10 +7380,9 @@ def plot_scalars(tt, save_path=None, display=True):
     ax.set_ylabel(r'$\psi$ [Wb/rad]')
     ax.grid(True, alpha=0.3)
     ax2_psi = ax.twinx()
-    psi_lcfs_tm_arr = np.array(s['psi_lcfs_tm'])
     ax2_psi.plot(
         times,
-        -(psi_lcfs_tm_arr - psi_lcfs_tm_arr[0]) * 2 * np.pi,
+        s['flux_consumed_tm'],
         color='darkorange',
         ls='-.',
         marker='o',
@@ -7273,8 +7391,7 @@ def plot_scalars(tt, save_path=None, display=True):
         label='Flux TM',
     )
     if t_psi_lcfs is not None:
-        flux_tx = -(y_psi_lcfs - y_psi_lcfs[0]) * 2 * np.pi
-        ax2_psi.plot(t_psi_lcfs, flux_tx, color='seagreen', ls='-.', lw=1, label='Flux TX')
+        ax2_psi.plot(t_psi_lcfs, _flux_consumed(y_psi_lcfs), color='seagreen', ls='-.', lw=1, label='Flux TX')
     ax2_psi.set_ylabel('Flux consumption [Wb]')
     ax2_psi.tick_params(axis='y')
     h1, l1 = ax.get_legend_handles_labels()
@@ -7362,21 +7479,7 @@ def plot_scalars(tt, save_path=None, display=True):
     # (2,0): scalar resistance R = eta * plasma cross-sectional area + TORAX v_loop
     ax = axes[2, 0]
     ax.set_title(r'Scalar resistance $R$ & $V_{loop}$ (TX)')
-    area_tm = np.pi * np.asarray(s['a'], dtype=float) ** 2 * np.asarray(s['kappa'], dtype=float)
-    eta_tm_scalar = np.full(len(times), np.nan, dtype=float)
-    for ii in range(len(times)):
-        eta_entry = s.get('eta_prof', {}).get(ii)
-        if eta_entry is None:
-            continue
-        x_eta = np.asarray(eta_entry.get('x', []), dtype=float)
-        y_eta = np.asarray(eta_entry.get('y', []), dtype=float)
-        if y_eta.size == 0:
-            continue
-        if x_eta.size == y_eta.size and x_eta.size > 0:
-            eta_tm_scalar[ii] = y_eta[np.argmin(np.abs(x_eta))]
-        else:
-            eta_tm_scalar[ii] = y_eta[0]
-    r_tm_scalar = eta_tm_scalar * area_tm
+    r_tm_scalar = np.asarray(s['R_plasma'], dtype=float)
     if np.any(np.isfinite(r_tm_scalar)):
         ax.plot(
             times, r_tm_scalar, color=COLOR_TM, ls='-', marker='o', ms=MK_SZ, lw=1,
@@ -7387,7 +7490,7 @@ def plot_scalars(tt, save_path=None, display=True):
         t_eta_tx, y_eta_tx = _tx_scalar(tt, tx_eta_name)
         if t_eta_tx is None:
             continue
-        area_tx = np.interp(t_eta_tx, times, area_tm)
+        area_tx = np.interp(t_eta_tx, times, s['area'])
         r_tx = np.asarray(y_eta_tx, dtype=float) * area_tx
         ax.plot(
             t_eta_tx, r_tx, color=COLOR_TX, ls='-', lw=1.1, label=r'$R$ TX',
@@ -7711,6 +7814,19 @@ _COUPLING_COST_FLOORS = {
 _COUPLING_COST_SPEC = ('coupling_cost',
                        'Coupling convergence cost\n(weighted, normalized)',
                        'cost [-]')
+
+
+def _flux_consumed(psi_lcfs):
+    r'''! Flux consumed [Wb] from a psi_lcfs series in TM Wb/rad, relative to its first solved
+    (finite, nonzero) point. Positive Ip drives psi_lcfs down, so consumed flux > 0; unsolved
+    points are NaN.
+    '''
+    psi = np.asarray(psi_lcfs, dtype=float)
+    solved = np.isfinite(psi) & (psi != 0.0)
+    flux = np.full(psi.shape, np.nan)
+    if np.any(solved):
+        flux[solved] = -(psi[solved] - psi[np.argmax(solved)]) * 2.0 * np.pi
+    return flux
 
 
 def _rms_prof_diff(prof_a, prof_b):
@@ -8121,164 +8237,36 @@ def plot_PLH_components(tt, save_path=None, display=True):
 # ── Disruptivity limits ───────────────────────────────────────────────────────
 
 def compute_disruptivity_limits(tt):
-    r'''! Compute disruptivity-proxy limits for a TokaMaker_TORAX run.
+    r'''! Collect the disruptivity-proxy quantities stored in tt._state (filled each loop by
+    _compute_disruptivity_limits) into entries pairing each plasma quantity with its threshold.
 
     @param tt TokaMaker_TORAX instance.
-    @return dict with keys tm_times, all_limits_units, in_h_mode, and lh_transitions.
+    @return dict with keys tm_times, all_limits_units, and in_h_mode.
     '''
-    state = tt.state
-    tm = np.asarray(tt._tm_times)
-
-    EC = 1.60217662e-19
-    MU0 = 4 * np.pi * 1e-7
-    EPS0 = 8.8541878128e-12
-    ion_masses = {'H': 1.6726219e-27, 'D': 3.3435837724e-27, 'T': 5.0082670e-27}
-    main_ion = tt._main_ion or {'D': 1.0}
-    M_i = sum(frac * ion_masses[species] for species, frac in main_ion.items())  # mean fuel-ion mass
-    WARN = 3.0 # Placeholder for Maris LDL25 threshold, not currently used
+    s = tt._state
+    tm = np.asarray(tt._tm_times, dtype=float)
     all_limits_units = {}
 
     def add_limit_units(name, label, value, limit_curve, units, worst='max'):
-        r'''! Adds a new limit with units, keeps actual plasma quantity 
-        separate from its threshold curve so they can be overplotted.
-
-        @param name Unique identifier for the limit.
-        @param label Human-readable label for the limit.
-        @param value Array of the actual physical quantity over time.
-        @param limit_curve Threshold in the same units, either a curve or a scalar broadcast over time.
-        @param units Units string used for the y axis label.
-        @param worst 'max' if high values are dangerous, 'min' if low values are dangerous.
-        @return dict containing the limit entry with keys label, value, limit_curve, units, peak, and peak_time.
+        r'''! Store one limit: plasma quantity, threshold (curve, or scalar broadcast over time),
+        y-axis units, and the worst value; worst='max' if high values are dangerous, 'min' if low.
         '''
-        value = np.asarray(value)
+        value = np.asarray(value, dtype=float)
         limit_curve = np.broadcast_to(limit_curve, value.shape)
-        i_peak = int(np.argmin(value)) if worst == 'min' else int(np.argmax(value))
-        entry = {'label': label, 'value': value, 'limit_curve': limit_curve, 'units': units, 'worst': worst,
-                  'peak': float(value[i_peak]), 'peak_time': float(tm[i_peak])}
-        all_limits_units[name] = entry
-        return entry
+        i_peak = int(np.nanargmin(value)) if worst == 'min' else int(np.nanargmax(value))
+        all_limits_units[name] = {'label': label, 'value': value, 'limit_curve': limit_curve, 'units': units,
+                                  'worst': worst, 'peak': float(value[i_peak]), 'peak_time': float(tm[i_peak])}
 
-    # Compute Coulomb logarithm at the plasma edge.
-    def coulomb_log_edge(ne, Te):
-        dl = 7430 * np.sqrt(Te / ne)
-        return np.log(12 * np.pi * ne * dl**3)
+    add_limit_units('n_e_line', 'n_e (line avg)', s['n_e_line_avg'] * 1e-20, s['n_GW'] * 1e-20, '1e20 m^-3')
+    add_limit_units('n_e_vol', 'n_e (vol avg)', s['n_e_vol_avg'] * 1e-20, s['n_GW'] * 1e-20, '1e20 m^-3')
+    add_limit_units('LDL25', 'LDL25', s['LDL25'], np.nan, '-')
+    add_limit_units('HDL25', 'HDL25', s['HDL25'], np.nan, '-')
+    add_limit_units('troyon', 'beta_N', s['beta_N_tm'], s['beta_N_troyon'], '%')
+    add_limit_units('q95', 'q95', s['q95_tm'], 2.0, '-', worst='min')
+    add_limit_units('q0', 'q0', s['q0_tm'], 1.0, '-', worst='min')
+    add_limit_units('vde', "-F'_z", s['vs_margin'], 0.0, 'N/m', worst='min')
 
-    # Compute normalized safety factor.
-    def q_star(Bt0, R0, eps, kappa, Ip):
-        return np.abs((2 * np.pi / MU0) * Bt0 * R0 * eps**2 * ((1 + kappa**2) / 2) / Ip)
-
-    # Compute normalized edge collisionality.
-    def collisionality_edge(ne, Te, qs, R0, eps):
-        return (EC**4 / (4 * np.pi * EPS0**2)) * coulomb_log_edge(ne, Te) * ne * qs * R0 * eps**(-1.5) * (2 * EC * Te)**(-2)
-
-    # Compute normalized edge plasma pressure (beta).
-    def beta_edge(ne, Te, Bt0, R0, a0):
-        bt = Bt0 * R0 / (R0 + a0)
-        return 4 * MU0 * ne * Te * EC / bt**2
-
-    # Compute normalized ion gyroradius at the plasma edge.
-    def rho_star_edge(ne, Te, Bt0, R0, a0):
-        bt = Bt0 * R0 / (R0 + a0)
-        rho_i = np.sqrt(M_i * Te * EC) / (EC * bt)
-        return rho_i / a0
-
-    def ldl25_metric(ne, Te, Bt0, R0, a0, kappa, Ip):
-        r'''! Compute the Maris LDL25 L-mode density limit metric.
-
-        @param ne Edge electron density [m^-3].
-        @param Te Edge electron temperature [eV].
-        @param Bt0 Toroidal magnetic field at the plasma center [T].
-        @param R0 Major radius of the plasma [m].
-        @param a0 Minor radius of the plasma [m].
-        @param kappa Plasma elongation.
-        @param Ip Plasma current [A].
-        @return The LDL25 metric value.
-        '''
-        eps = a0 / R0
-        qs = q_star(Bt0, R0, eps, kappa, Ip)
-        nu_star = collisionality_edge(ne, Te, qs, R0, eps)
-        beta_T = beta_edge(ne, Te, Bt0, R0, a0)
-        return nu_star * beta_T**0.40
-
-    def hdl25_metric(ne, Te, Bt0, R0, a0, kappa, Ip, q95):
-        r'''! Compute the Maris HDL25 H-mode density limit metric.
-
-        @param ne Edge electron density [m^-3].
-        @param Te Edge electron temperature [eV].
-        @param Bt0 Toroidal magnetic field at the plasma center [T].
-        @param R0 Major radius of the plasma [m].
-        @param a0 Minor radius of the plasma [m].
-        @param kappa Plasma elongation.
-        @param Ip Plasma current [A].
-        @param q95 Edge safety factor from the equilibrium.
-        @return The HDL25 metric value.
-        '''
-        eps = a0 / R0
-        qs = q_star(Bt0, R0, eps, kappa, Ip)
-        nu_star = collisionality_edge(ne, Te, qs, R0, eps)
-        beta_T = beta_edge(ne, Te, Bt0, R0, a0)
-        rho_star = rho_star_edge(ne, Te, Bt0, R0, a0)
-        return nu_star * beta_T**0.8 * rho_star**(-0.6) * q95**1.0
-
-    # Greenwald density limit: n_e line-avg and vol-avg pulled directly from TORAX.
-    # n_GW derived from TORAX's fgw_n_e_line_avg fraction.
-    # Both quantities in 1e20 m^-3, interpolated onto tm_times. n_GW is
-    # a curve since it scales with Ip/a over the pulse.
-    tt_ne_line, y_ne_line = _tx_scalar(tt, 'n_e_line_avg', scale=1e-20, required=True)
-    tt_ne_vol,  y_ne_vol  = _tx_scalar(tt, 'n_e_volume_avg', scale=1e-20, required=True)
-    n_e_line = np.interp(tm, tt_ne_line, y_ne_line)
-    n_e_vol  = np.interp(tm, tt_ne_vol,  y_ne_vol)
-    tt_fgw, y_fgw = _tx_scalar(tt, 'fgw_n_e_line_avg', required=True)
-    fgw = np.interp(tm, tt_fgw, y_fgw)
-    n_GW = n_e_line / fgw
-
-    # Maris LDL/HDL metrics
-    # Edge density/temperature averaged across rho=[0.85,0.95]
-    tt_ne_edge, ne_edge = _tx_profile_at_rho(tt, 'n_e', None, rho_range=(0.85, 0.95))
-    tt_te_edge, te_edge = _tx_profile_at_rho(tt, 'T_e', None, rho_range=(0.85, 0.95), scale=1e3)
-    ne_e_arr = np.interp(tm, tt_ne_edge, ne_edge)
-    Te_e_arr = np.interp(tm, tt_te_edge, te_edge)
-    q95_arr = np.asarray(state['q95_tm'])
-
-    in_h_mode = np.asarray(state['confinement_mode'])
-    lh_transitions = np.array([t for t in (tt._lh_time, tt._hl_time) if t is not None])
-
-    ldl25_raw = []
-    hdl25_raw = []
-    for i, t in enumerate(tm):
-        ne_e = float(ne_e_arr[i])
-        Te_e = float(Te_e_arr[i])
-        R0_i = float(state['R0_mag'][i]); a0 = float(state['a'][i]); Bt0 = abs(float(state['B0'][i]))
-        kappa_i = float(state['kappa'][i]); Ip_i = abs(float(state['Ip'][i]))
-        q95_i = abs(float(q95_arr[i]))
-        ldl25_raw.append(ldl25_metric(ne_e, Te_e, Bt0, R0_i, a0, kappa_i, Ip_i))
-        hdl25_raw.append(hdl25_metric(ne_e, Te_e, Bt0, R0_i, a0, kappa_i, Ip_i, q95_i))
-    ldl25_raw = np.array(ldl25_raw)
-    hdl25_raw = np.array(hdl25_raw)
-
-    # Beta_N compared against Troyon no-wall beta limit
-    beta_N = np.asarray(state['beta_N_tm'])
-    troyon_limit = 4.0 * np.asarray(state['l_i_tm'])
-
-    # q95 and q0: safety factor values compared against their thresholds.
-    q95_raw = np.asarray(state['q95_tm'])
-    q0_raw = np.asarray(state['q0_tm'])
-
-    # Vertical-stability margin: -F'_z from Tobin's equation, unstable when < 0. One
-    # compute_vertical_stability_margin() call per timestep. The passive-conductor 
-    # geometry it needs is cached on the TokaMaker object itself, not recomputed here.
-    vde_raw = np.array([state['equil'][i].compute_vertical_stability_margin() for i in range(len(tm))])
-
-    add_limit_units('n_e_line', 'n_e (line avg)', n_e_line, n_GW, '1e20 m^-3')
-    add_limit_units('n_e_vol', 'n_e (vol avg)', n_e_vol, n_GW, '1e20 m^-3')
-    add_limit_units('LDL25', 'LDL25', ldl25_raw, np.nan, '-')
-    add_limit_units('HDL25', 'HDL25', hdl25_raw, np.nan, '-')
-    add_limit_units('troyon', 'beta_N', beta_N, troyon_limit, '%')
-    add_limit_units('q95', 'q95', q95_raw, 2.0, '-', worst='min')
-    add_limit_units('q0', 'q0', q0_raw, 1.0, '-', worst='min')
-    add_limit_units('vde', "-F'_z", vde_raw, 0.0, 'N/m', worst='min')
-
-    return {'tm_times': tm, 'all_limits_units': all_limits_units, 'in_h_mode': in_h_mode, 'lh_transitions': lh_transitions}
+    return {'tm_times': tm, 'all_limits_units': all_limits_units, 'in_h_mode': np.asarray(s['confinement_mode'])}
 
 #### Helper functions to allow functions to be called with just the TokaMaker_TORAX instance ####
 def plot_disruptivity_limits(tt, scale='linear', save_path=None, display=True, limits=None):
@@ -8492,9 +8480,10 @@ def _coil_aturn_clim(tt):
 
 def plot_coils(tt, save_path=None, display=True):
     r'''! Plot coil current traces in MA-turns with limit bands (data stored in A-turns).'''
-    coil_data = tt._results.get('COIL', {})
+    coil_data = tt._state['coil_currents']
     if not coil_data:
         return
+    times = np.asarray(tt._tm_times, dtype=float)
     coil_names = sorted(coil_data.keys())
     n_coils = len(coil_names)
     ncols = 3
@@ -8502,9 +8491,8 @@ def plot_coils(tt, save_path=None, display=True):
     fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 3 * nrows), squeeze=False)
     for k, cname in enumerate(coil_names):
         ax = axes[k // ncols, k % ncols]
-        t_vals = sorted(coil_data[cname].keys())
-        i_vals = [coil_data[cname][t_v] * 1e-6 for t_v in t_vals]   # A-turns -> MA-turns
-        ax.plot(t_vals, i_vals, '-o', ms=2, lw=1.2)
+        solved = np.isfinite(coil_data[cname])
+        ax.plot(times[solved], coil_data[cname][solved] * 1e-6, '-o', ms=2, lw=1.2)   # A-turns -> MA-turns
         if hasattr(tt, '_coil_bounds') and cname in tt._coil_bounds:
             lo, hi = tt._coil_bounds[cname]
             lo_ma, hi_ma = lo * 1e-6, hi * 1e-6
@@ -8537,34 +8525,19 @@ def plot_coil_current_tunnel(tt, save_path=None, display=True):
             A final subplot shows every coil's realized |dI/dt| (MA-turns/s) between
             consecutive solves, with each coil's configured rate limit as a dashed reference.
 
-            Requires set_coil_rate_limits() to have populated tt._coil_bounds_history during
-            the solve loop; falls back to a message if no history is present.
+            The bounds and realized rates come from tt._state (filled by
+            _compute_coil_quantities); the tunnel is drawn only where set_coil_rate_limits()
+            tightened the bounds for a solve.
 
             @param tt TokaMaker_TORAX instance.
             @param save_path Output path (or None to display).
             @param display Show interactively instead of saving.
     '''
-    coil_data = tt._results.get('COIL', {})
-    history = getattr(tt, '_coil_bounds_history', {}) or {}
+    s = tt._state
+    coil_data = s['coil_currents']
     if not coil_data:
         return
-
-    # Map timestep index -> time for the stored per-step bounds.
-    tm_times = tt._tm_times
-    # Per-coil bounds tunnel: {cname: (t_arr, lo_arr, hi_arr)} in MA-turns, sorted by time.
-    tunnel = {}
-    for cname in coil_data:
-        pts = []
-        for i, bounds in history.items():
-            if cname in bounds and 0 <= i < len(tm_times):
-                lo, hi = bounds[cname]
-                pts.append((tm_times[i], lo * 1e-6, hi * 1e-6))
-        pts.sort()
-        if pts:
-            t_arr = np.array([p[0] for p in pts])
-            lo_arr = np.array([p[1] for p in pts])
-            hi_arr = np.array([p[2] for p in pts])
-            tunnel[cname] = (t_arr, lo_arr, hi_arr)
+    times = np.asarray(tt._tm_times, dtype=float)
 
     coil_names = sorted(coil_data.keys())
     n_coils = len(coil_names)
@@ -8575,12 +8548,16 @@ def plot_coil_current_tunnel(tt, save_path=None, display=True):
 
     for k, cname in enumerate(coil_names):
         ax = axes[k // ncols, k % ncols]
-        t_vals = np.array(sorted(coil_data[cname].keys()))
-        i_vals = np.array([coil_data[cname][t_v] * 1e-6 for t_v in t_vals])  # MA-turns
+        solved = np.isfinite(coil_data[cname])
+        t_vals = times[solved]
+        i_vals = coil_data[cname][solved] * 1e-6  # MA-turns
 
         # Gray-outside tunnel: shade above hi and below lo, leave the corridor white.
-        if cname in tunnel:
-            t_b, lo_b, hi_b = tunnel[cname]
+        lo = s['coil_bounds_lo'].get(cname, np.full(len(times), np.nan))
+        hi = s['coil_bounds_hi'].get(cname, np.full(len(times), np.nan))
+        bounded = np.isfinite(lo) & np.isfinite(hi)
+        if np.any(bounded):
+            t_b, lo_b, hi_b = times[bounded], lo[bounded] * 1e-6, hi[bounded] * 1e-6
             # y-range for the gray fill: pad around both the trace and the bounds.
             stack = np.concatenate([i_vals, lo_b, hi_b]) if i_vals.size else np.concatenate([lo_b, hi_b])
             ymin = float(np.min(stack))
@@ -8603,24 +8580,19 @@ def plot_coil_current_tunnel(tt, save_path=None, display=True):
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=6, loc='best')
 
-    # Combined dI/dt subplot. The rate budget is enforced over the floored interval
-    # dt_eff = max(dt, dt_floor) — that is what the limit actually constrains — so we
-    # divide by dt_eff, not the raw consecutive dt. Dividing by a sub-floor dt would
-    # show spurious super-limit spikes even when the coil stayed inside its bound box.
+    # Combined dI/dt subplot: realized rate over the floored interval dt_eff = max(dt, dt_floor)
+    # ending at each solve, drawn as a step held over that interval.
     ax = axes[n_coils // ncols, n_coils % ncols]
     dt_floor = float(getattr(tt, '_coil_rate_dt_floor', 0.0))
     colors = plt.cm.tab20(np.linspace(0, 1, max(n_coils, 1)))
     plotted = False
     for ci, cname in enumerate(coil_names):
-        t_vals = np.array(sorted(coil_data[cname].keys()))
-        if t_vals.size < 2:
+        rate = s['coil_dIdt_realized'].get(cname, np.full(len(times), np.nan))
+        ok = np.isfinite(rate)
+        if not np.any(ok):
             continue
-        i_vals = np.array([coil_data[cname][t_v] for t_v in t_vals])  # A-turns
-        dt = np.diff(t_vals)
-        dt_eff = np.maximum(dt, dt_floor)
-        rate = np.abs(np.diff(i_vals)) / np.where(dt_eff == 0, np.nan, dt_eff) * 1e-6  # MA-turns/s
-        t_mid = 0.5 * (t_vals[1:] + t_vals[:-1])
-        ax.plot(t_mid, rate, '-o', ms=2, lw=1.0, color=colors[ci], label=cname)
+        ax.plot(times[ok], rate[ok] * 1e-6, '-o', ms=2, lw=1.0, drawstyle='steps-pre',
+                color=colors[ci], label=cname)   # MA-turns/s
         plotted = True
     # No limit reference here: each coil may carry its own dI/dt budget (always so when it is
     # given in A/turn/s), which would need a separate line per coil. The per-coil bound box
@@ -8800,10 +8772,9 @@ def make_movie(tt, save_path=None, display=True, speed_factor=5.0, loop=None, no
         times = tt._tm_times
         n = len(times)
 
-        psi_lcfs_tm = np.array(tt._state['psi_lcfs_tm'])
-        flux_con_tm = -(psi_lcfs_tm - psi_lcfs_tm[0]) * 2.0 * np.pi
         # Flux consumed TX is derived inside _draw_scalars_movie from the full-resolution
-        # TORAX psi_lcfs, so there is no tm_times-sampled version to precompute here.
+        # TORAX psi_lcfs rather than the tm_times-sampled state['flux_consumed_tx'].
+        flux_con_tm = tt._state['flux_consumed_tm']
 
         equil_dir = os.path.join(tmp_dir, 'equil')
         os.makedirs(equil_dir, exist_ok=True)
@@ -9053,13 +9024,14 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm):
     ax2 = ax.twinx()
     ax2.plot(times, flux_con_tm, color='darkorange', ls='-.', lw=LW, marker=MK_TM, ms=MK_SZ, label='Flux TM')
     if t_psi_lcfs is not None:
-        ax2.plot(t_psi_lcfs, -(y_psi_lcfs - y_psi_lcfs[0]) * 2.0 * np.pi,
+        ax2.plot(t_psi_lcfs, _flux_consumed(y_psi_lcfs),
                  color='seagreen', ls='-.', lw=LW, label='Flux TX')
     ax2.set_ylabel('Flux Consumed [Wb]', fontsize=LABEL_FS)
     ax2.tick_params(labelsize=TICK_FS)
     ax2.legend(fontsize=LEGEND_FS, loc='lower left')
 
-    coil_data = tt._results.get('COIL', {})
+    coil_data = s['coil_currents']
+    times_arr = np.asarray(times, dtype=float)
     cs_coils = []
     other_coils = []
     for cname, cvals in sorted(coil_data.items()):
@@ -9073,9 +9045,9 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm):
     if cs_coils:
         cs_colors = plt.cm.tab10(np.linspace(0, 1, max(len(cs_coils), 1)))
         for ci, (cname, cvals) in enumerate(cs_coils):
-            ct = sorted(cvals.keys())
-            ci_vals = [cvals[t_v] * 1e-6 for t_v in ct]   # A-turns -> MA-turns
-            ax.plot(ct, ci_vals, ls=LS_PRI, lw=LW * 0.8, color=cs_colors[ci], label=cname)
+            solved = np.isfinite(cvals)
+            ax.plot(times_arr[solved], cvals[solved] * 1e-6, ls=LS_PRI, lw=LW * 0.8,
+                    color=cs_colors[ci], label=cname)   # A-turns -> MA-turns
         ax.legend(fontsize=LEGEND_FS - 2, loc='lower left', ncol=2)
     else:
         ax.text(0.5, 0.5, 'No CS coils', transform=ax.transAxes,
@@ -9087,9 +9059,9 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm):
     if other_coils:
         oth_colors = plt.cm.tab20(np.linspace(0, 1, max(len(other_coils), 1)))
         for ci, (cname, cvals) in enumerate(other_coils):
-            ct = sorted(cvals.keys())
-            ci_vals = [cvals[t_v] * 1e-6 for t_v in ct]   # A-turns -> MA-turns
-            ax.plot(ct, ci_vals, ls=LS_PRI, lw=LW * 0.75, color=oth_colors[ci], label=cname)
+            solved = np.isfinite(cvals)
+            ax.plot(times_arr[solved], cvals[solved] * 1e-6, ls=LS_PRI, lw=LW * 0.75,
+                    color=oth_colors[ci], label=cname)   # A-turns -> MA-turns
         ax.legend(fontsize=LEGEND_FS - 3, loc='lower left', ncol=2)
     else:
         ax.text(0.5, 0.5, 'No PF/other coils', transform=ax.transAxes,
@@ -9483,8 +9455,7 @@ def summary(tt):
     out['q95_min'] = float(np.nanmin(s['q95_tm'][s['q95_tm'] > 0])) if np.any(s['q95_tm'] > 0) else None
     out['q0_min'] = float(np.nanmin(s['q0_tm'][s['q0_tm'] > 0])) if np.any(s['q0_tm'] > 0) else None
 
-    psi_lcfs_tm = np.array(s['psi_lcfs_tm'])
-    out['flux_consumed_Wb'] = float(-(psi_lcfs_tm[-1] - psi_lcfs_tm[0]) * 2 * np.pi)
+    out['flux_consumed_Wb'] = float(s['flux_consumed_tm'][-1])
 
     _, y_Pa = _tx_scalar(tt, 'P_alpha_total')
     _, y_Po = _tx_scalar(tt, 'P_ohmic_e')
