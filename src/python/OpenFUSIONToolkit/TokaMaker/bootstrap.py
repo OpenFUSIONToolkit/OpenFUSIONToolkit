@@ -890,6 +890,7 @@ def solve_with_bootstrap(mygs,
                          diagnose_bs = False,
                          use_python_solve = False,
                          jphi_fixed = None,
+                         p_fixed = None,
                          **kwargs):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
@@ -921,6 +922,8 @@ def solve_with_bootstrap(mygs,
       parameterized spike profile table to stdout (mirroring the Fortran --diagnose-bs output).
     @param jphi_fixed Fixed toroidal current density \f$j_{fixed}(\hat{\psi})\f$ [A/m$^2$] (array or profile dict),
       added to the total without rescaling (internal Fortran solver only)
+    @param p_fixed Additional pressure \f$P_{fixed}(\hat{\psi})\f$ [Pa] (array or profile dict, e.g. fast-ion pressure),
+      added to \f$e_C(n_e T_e + n_i T_i)\f$ for the GS pressure but excluded from j_BS (internal Fortran solver only)
     @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
     '''
 
@@ -948,6 +951,7 @@ def solve_with_bootstrap(mygs,
         _Ti   = Ti if isinstance(Ti, dict) else _default_psi_profile(Ti, 'Ti', psi_N=psi_N, scale=1e-3)
         _ffp  = inductive_jphi if isinstance(inductive_jphi, dict) else _default_psi_profile(inductive_jphi, 'inductive_jphi', psi_N=psi_N)
         _jfix = None if jphi_fixed is None else (jphi_fixed if isinstance(jphi_fixed, dict) else _default_psi_profile(jphi_fixed, 'jphi_fixed', psi_N=psi_N))
+        _pfix = None if p_fixed is None else (p_fixed if isinstance(p_fixed, dict) else _default_psi_profile(p_fixed, 'p_fixed', psi_N=psi_N))
         Zeff_arg = Zeff if isinstance(Zeff, dict) else (_default_psi_profile(Zeff, 'Zeff', psi_N=psi_N) if numpy.ndim(Zeff) > 0 and numpy.size(Zeff) > 1 else float(Zeff))
         _results = mygs.solve_bootstrap(
             ffp_prof=_ffp,
@@ -958,6 +962,7 @@ def solve_with_bootstrap(mygs,
             Zeff=Zeff_arg,
             Ip_target=Ip_target,
             jphi_fixed_prof=_jfix,
+            p_fixed_prof=_pfix,
             scale_jBS=scale_jBS,
             isolate_edge_jBS=isolate_edge_jBS,
             parameterize_jBS=parameterize_jBS,
@@ -975,6 +980,8 @@ def solve_with_bootstrap(mygs,
     else:
         if jphi_fixed is not None:
             raise NotImplementedError("jphi_fixed is only supported by the internal Fortran solver (use_python_solve=False)")
+        if p_fixed is not None:
+            raise NotImplementedError("p_fixed is only supported by the internal Fortran solver (use_python_solve=False)")
         F0_local = kwargs.get('F0_local', None)
 
     warn(
