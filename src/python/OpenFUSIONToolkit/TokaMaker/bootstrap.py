@@ -928,7 +928,7 @@ def solve_with_bootstrap(mygs,
       parameterized spike profile table to stdout (mirroring the Fortran --diagnose-bs output).
     @param jphi_fixed Fixed toroidal current density \f$j_{fixed}\f$ [A/m$^2$] on `x` (array or profile dict),
       added to the total without rescaling (internal Fortran solver only)
-    @param p_fixed Additional pressure \f$P_{fixed}(\hat{\psi})\f$ [Pa] (array or profile dict, e.g. fast-ion pressure),
+    @param p_fixed Additional pressure \f$P_{fixed}\f$ [Pa] on `x` (array or profile dict, e.g. fast-ion pressure),
       added to \f$e_C(n_e T_e + n_i T_i)\f$ for the GS pressure but excluded from j_BS (internal Fortran solver only)
     @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
       (internal solver also returns `'psi_n'`, the \f$\hat{\psi}\f$ of each input node)

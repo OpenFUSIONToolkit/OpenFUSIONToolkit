@@ -2054,13 +2054,14 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
             except ValueError:
                 results['phi_n_rejected'] = True
         elif test_type == 'bootstrap':
-            # solve_bootstrap with every profile (jphi, kinetics, pressure, jphi_fixed) on Phi_N
+            # solve_bootstrap with every profile (jphi, kinetics, pressure, jphi_fixed, p_fixed) on Phi_N
             n = 257
             x = np.linspace(0.0,1.0,n)
             ne = Hmode_profiles(edge=0.35,ped=0.6,core=1.1,rgrid=n,expin=1.6,expout=1.6,widthp=0.35,xphalf=0.965)*1.E20
             Te = Hmode_profiles(edge=1500.,ped=5000.,core=21000.,rgrid=n,expin=1.3,expout=1.7,widthp=0.1,xphalf=0.965)
             jind = create_power_flux_fun(n,2.25,2.5)['y']
             jfix = 1.E5*np.exp(-((x-0.5)/0.15)**2)
+            pfix = 0.2*2.0*1.602176634E-19*ne[0]*Te[0]*np.exp(-((x-0.3)/0.15)**2)  # [Pa]
             mygs.set_profiles(ffp_prof=create_power_flux_fun(40,1.5,2.0),pp_prof=pp)
             init()
             mygs.solve()
@@ -2072,6 +2073,7 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
                     ti_prof={'type': 'linterp', 'x': x_in, 'y': Te/1.E3},
                     ni_prof={'type': 'linterp', 'x': x_in, 'y': ne},
                     jphi_fixed_prof={'type': 'linterp', 'x': x_in, 'y': jfix},
+                    p_fixed_prof={'x': x_in, 'y': pfix},
                     Zeff=1.5, Ip_target=13.0E6, coord=coord)
             res_psi = run(x,'psi_n')
             ref = _torflux_ref(mygs)
@@ -2089,7 +2091,7 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
             results['node_err'] = np.max(np.abs(res_phi['psi_n']-psi_nodes))
             # solve_with_bootstrap: 'psi_n' output; Python solver rejects toroidal coordinates
             res_swb = solve_with_bootstrap(mygs,ne,Te,ne,Te,1.5,13.0E6,inductive_jphi=jind,x=x_phi,coord='phi_n',
-                                           jphi_fixed=jfix)
+                                           jphi_fixed=jfix,p_fixed=pfix)
             psi_nodes, _ = mygs.get_torflux_map(x_phi,inverse=True)
             results['swb_node_err'] = np.max(np.abs(res_swb['psi_n']-psi_nodes))
             results['swb_jfix_err'] = np.max(np.abs(res_swb['j_fixed']-jfix))/np.max(jfix)
