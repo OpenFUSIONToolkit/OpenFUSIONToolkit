@@ -11,7 +11,7 @@ test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
-from OpenFUSIONToolkit.util import mu0
+from OpenFUSIONToolkit.util import mu0, eC
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
 from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun, create_isoflux_xpts, xpoints_from_moments
@@ -1831,6 +1831,40 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         profs_reset = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         if np.any(profs_reset['jphi_fixed'] != 0.0):
             raise AssertionError("jphi_fixed persisted after solve_bootstrap without jphi_fixed_prof")
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+
+    # --- verify p_fixed_prof [Pa] is added to the kinetic pressure: same result as
+    #     pres_prof = kinetic + p_fixed, and mutually exclusive with pres_prof ---
+    try:
+        p_kin = eC * (ne * Te + ni * Ti)
+        # Offset keeps pres_prof safely above the kinetic pressure (roundoff) at the edge
+        pf = p_kin[0] * (0.2 * np.exp(-((psi_sample - 0.3) / 0.15)**2) + 1.0e-3)
+        profs_pfix = mygs.solve_bootstrap(Zeff=Zeff_val, p_fixed_prof={'x': psi_sample, 'y': pf}, **zeff_common_kwargs)
+        _, _, _, P_pfix, _ = mygs.get_profiles(npsi=n_sample)
+        P_ax_pfix = np.max(mygs.get_profiles(psi=np.array([0.0, 1.0]))[3])
+        profs_pres = mygs.solve_bootstrap(Zeff=Zeff_val, pres_prof={'x': psi_sample, 'y': p_kin + pf}, **zeff_common_kwargs)
+        _, _, _, P_pres, _ = mygs.get_profiles(npsi=n_sample)
+        for key in profs_pres:
+            if not np.allclose(profs_pfix[key], profs_pres[key], rtol=1e-6, atol=1e-6*np.max(np.abs(profs_pres[key]))):
+                raise AssertionError(f"p_fixed_prof vs pres_prof=kinetic+p_fixed: boot_profs['{key}'] differ")
+        if not np.allclose(P_pfix, P_pres, rtol=1e-6, atol=1e-6*np.max(P_pres)):
+            raise AssertionError("p_fixed_prof vs pres_prof=kinetic+p_fixed: pressure profiles differ")
+        if not np.isclose(P_ax_pfix, p_kin[0] + pf[0], rtol=1e-4):
+            raise AssertionError(f"axis pressure {P_ax_pfix:.6e} != kinetic + p_fixed {p_kin[0] + pf[0]:.6e}")
+        mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
+        if np.isclose(np.max(mygs.get_profiles(psi=np.array([0.0, 1.0]))[3]), P_ax_pfix, rtol=1e-4):
+            raise AssertionError("p_fixed_prof did not change the axis pressure")
+        for bad_kwargs, label in (({'pres_prof': {'x': psi_sample, 'y': p_kin + pf}}, "with pres_prof"),
+                                  ({}, "negative")):
+            try:
+                y_bad = -pf if label == "negative" else pf
+                mygs.solve_bootstrap(Zeff=Zeff_val, p_fixed_prof={'x': psi_sample, 'y': y_bad}, **bad_kwargs, **zeff_common_kwargs)
+            except ValueError:
+                continue
+            raise AssertionError(f"p_fixed_prof {label} did not raise ValueError")
     except Exception as e:
         print(e)
         mp_q.put(None)

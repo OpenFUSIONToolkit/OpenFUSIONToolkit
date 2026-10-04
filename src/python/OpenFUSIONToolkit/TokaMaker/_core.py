@@ -2361,13 +2361,13 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
-    def solve_bootstrap(self, ffp_prof, te_prof, ne_prof, ti_prof, ni_prof, Zeff, Ip_target, F0=None, pres_prof=None, jphi_fixed_prof=None, coord='psi_n', **kwargs):
+    def solve_bootstrap(self, ffp_prof, te_prof, ne_prof, ti_prof, ni_prof, Zeff, Ip_target, F0=None, pres_prof=None, jphi_fixed_prof=None, p_fixed_prof=None, coord='psi_n', **kwargs):
         r'''! Solve G-S equilibrium with self-consistent bootstrap current from kinetic profiles
 
         Derives a pressure-gradient profile \f$P'(\hat{\psi})\f$ from the supplied kinetic
         profiles, then calls the internal Fortran solver to reach a self-consistent equilibrium.
         By default the pressure is computed from the kinetic profiles as
-        \f$P = e_C(n_e T_e + n_i T_i)\f$; if ``pres_prof`` is supplied it overrides this,
+        \f$P = e_C(n_e T_e + n_i T_i) + P_{fixed}\f$; if ``pres_prof`` is supplied it overrides this,
         allowing additional contributions (e.g. fast-ion pressure) to be included provided the
         total pressure is nowhere less than the kinetic pressure.
         Temperature profiles are expected in keV; density profiles in m\f$^{-3}\f$.
@@ -2384,6 +2384,9 @@ class TokaMaker():
           is used in place of the kinetic pressure to form \f$P'\f$ and \f$P_{ax}\f$.
         @param jphi_fixed_prof Optional fixed toroidal current density profile dict (``'x'``: in ``coord``,
           ``'y'``: \f$j_\phi\f$ [A/m\f$^2\f$]), added to the total without rescaling
+        @param p_fixed_prof Optional additional pressure profile dict (``'x'``: in ``coord``, ``'y'``: \f$P_{fixed}\f$ [Pa],
+          e.g. fast-ion pressure), added to the kinetic pressure. Sets \f$P'\f$ and \f$P_{ax}\f$ but is excluded
+          from the bootstrap calculation. Mutually exclusive with ``pres_prof``.
         @param coord Coordinate of all ``'x'`` grids: ``'psi_n'`` (default) or ``'phi_n'`` (normalized toroidal flux).
           For ``'phi_n'``, profiles are passed as ``'phi_n_relabel'`` and \f$P'\f$ as \f$dP/d\hat{\Phi}\f$ (``'phi_n'``).
 
@@ -2440,7 +2443,19 @@ class TokaMaker():
         ne    = Akima1DInterpolator(ne_prof['x'], ne_prof['y'])(psi_sample)
         Ti_eV = Akima1DInterpolator(ti_prof['x'], ti_prof['y'])(psi_sample) * 1e3
         ni    = Akima1DInterpolator(ni_prof['x'], ni_prof['y'])(psi_sample)
-        pressure = eC * ne * Te_eV + eC * ni * Ti_eV
+        p_fixed = 0.0
+        if p_fixed_prof is not None:
+            if pres_prof is not None:
+                raise ValueError("pres_prof and p_fixed_prof are mutually exclusive (pres_prof is already a total pressure)")
+            if not isinstance(p_fixed_prof, dict):
+                raise TypeError(f"p_fixed_prof must be a dict with 'x' and 'y' keys; got {type(p_fixed_prof).__name__}")
+            for _key in ('x', 'y'):
+                if _key not in p_fixed_prof:
+                    raise ValueError(f"p_fixed_prof is missing required key '{_key}'")
+            p_fixed = Akima1DInterpolator(p_fixed_prof['x'], p_fixed_prof['y'])(psi_sample)
+            if numpy.any(p_fixed < 0.0):
+                raise ValueError("p_fixed_prof must be >= 0 at every point on the psi grid")
+        pressure = eC * ne * Te_eV + eC * ni * Ti_eV + p_fixed
         if pres_prof is not None:
             if not isinstance(pres_prof, dict):
                 raise TypeError(f"pres_prof must be a dict with 'x' and 'y' keys; got {type(pres_prof).__name__}")
