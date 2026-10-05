@@ -1683,6 +1683,20 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         print(f"<J.B> balance (A8): rel err {err_par:.3e}")
         if err_par > 2.0e-2:
             raise AssertionError(f"equilibrium <J.B> != sum of components (rel err {err_par:.3e})")
+        # A9d: I_p from TokaMaker's own jphi equals the FEM I_p; the old <R><1/R> measure does not
+        psi_f = np.linspace(1.0e-4, 1.0 - 1.0e-4, 1001)
+        _, F_f, Fp_f, _, Pp_f = mygs.get_profiles(psi=psi_f)
+        _, _, rv_f, _, _, _ = mygs.get_q(psi=psi_f)
+        J_f = F_f * Fp_f * rv_f['<1/R>'] / mu0 + Pp_f * rv_f['<R>']
+        psi_phys = mygs.psi_bounds[0] + psi_f * (mygs.psi_bounds[1] - mygs.psi_bounds[0])
+        w = rv_f['dV/dPsi'] / (2.0 * np.pi)
+        ip_exact = abs(np.trapezoid(w * (J_f * rv_f['<1/R^2>'] / rv_f['<1/R>']
+                   + Pp_f * (1.0 - rv_f['<R>'] * rv_f['<1/R^2>'] / rv_f['<1/R>'])), psi_phys))
+        ip_qtmp = abs(np.trapezoid(w * J_f / rv_f['<R>'], psi_phys))
+        print(f"I_p: FEM {eq_info['Ip']:.6e}, A9d {ip_exact:.6e} ({ip_exact/eq_info['Ip']-1:+.3e}), "
+              f"old <R><1/R> measure {ip_qtmp:.6e} ({ip_qtmp/eq_info['Ip']-1:+.3e})")
+        if abs(ip_exact / eq_info['Ip'] - 1.0) > 2.0e-3:
+            raise AssertionError(f"A9d I_p {ip_exact:.6e} != FEM I_p {eq_info['Ip']:.6e}")
     except Exception:
         import traceback
         traceback.print_exc()
