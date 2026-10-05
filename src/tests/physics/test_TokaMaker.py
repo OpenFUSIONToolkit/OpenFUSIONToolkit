@@ -1224,7 +1224,9 @@ ITER_bootstrap_eq_dict = {
     'j_BS_axis': 4696.213397541225,
     'jphi_axis': 1397130.088093367,
     'jphi_max': 1507460.349786304,
-    'j_ind_axis': 1299739.2064956713,
+    # alpha * seed, now = jphi_axis - j_BS_axis: since 1c6955d the Python alpha closure
+    # integrates the plasma only (was -7 % from the limiter-area over-count)
+    'j_ind_axis': 1.392583E+06,
     'bs_fraction': 0.17910707149956598,
 }
 
