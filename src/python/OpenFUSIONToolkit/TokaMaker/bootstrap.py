@@ -1038,10 +1038,12 @@ def solve_with_bootstrap(mygs,
                          "flux surfaces. Reduce psi_pad or coarsen the profile grid."
                          % (psi_pad, psi_N[1]-psi_N[0], psi_N[-1]-psi_N[-2]))
 
-    def current_scaling_objective(alpha, j_inductive, j_spike, psi_N, target_ip):
-        '''Objective function to match total Ip.'''
+    def current_scaling_objective(alpha, j_inductive, j_spike, psi_N, target_ip, geom):
+        '''Objective function to match total Ip: exact I_p of TokaMaker jphi (eqs. A5, A9c).'''
         j_total = (alpha * j_inductive) + j_spike
-        ip_computed = mygs.flux_integral(psi_N, j_total)
+        R, inv_R, inv_R2, pp = geom
+        j_imas = (pp + inv_R2 * (j_total - R * pp) / inv_R) / inv_R
+        ip_computed = mygs.compute_flux_integral(psi_N, j_imas)
         return ip_computed - target_ip
 
     def calculate_profiles_and_bootstrap(psi_N, include_jBS):
@@ -1179,7 +1181,8 @@ def solve_with_bootstrap(mygs,
         # Solve for alpha: integral(alpha * j_ind + j_spike) = Ip_target
         try:
             sol = root_scalar(current_scaling_objective,
-                                args=(current_jphi_target, spike_prof, psi_N, Ip_target),
+                                args=(current_jphi_target, spike_prof, psi_N, Ip_target,
+                                      (R_avg, ravgs_q['<1/R>'], ravgs_q['<1/R^2>'], pp_eq)),
                                 bracket=[1.0, 10. * Ip_target],
                                 method='brentq', rtol=1e-6)
             alpha_opt = sol.root
