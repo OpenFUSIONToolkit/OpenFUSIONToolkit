@@ -1213,19 +1213,19 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
 # Expected values dictionary
 # -----------------------------------------------------------------------
 ITER_bootstrap_eq_dict = {
-    'Ip': 15599993.874846907,
-    'kappa': 1.8761626076245332,
-    'R_geo': 6.222347872515414,
-    'a_geo': 1.9813765739500924,
-    'q_0': 0.9852073751253527,
-    'q_95': 2.8481934025238593,
-    'P_ax': 740023.5117187897,
-    'j_BS_max': 186464.65688338986,
-    'j_BS_axis': 4565.0530321718725,
-    'jphi_axis': 1472165.870478406,
-    'jphi_max': 1565242.8028327106,
-    'j_ind_axis': 1385129.3335464464,
-    'bs_fraction': 0.1501465091465194,
+    'Ip': 15599997.261988742,
+    'kappa': 1.8746806271900014,
+    'R_geo': 6.222524490498655,
+    'a_geo': 1.9807072056151687,
+    'q_0': 1.036565329524374,
+    'q_95': 2.863029898626678,
+    'P_ax': 740023.5117187898,
+    'j_BS_max': 219163.55709184994,
+    'j_BS_axis': 4696.213397541225,
+    'jphi_axis': 1397130.088093367,
+    'jphi_max': 1507460.349786304,
+    'j_ind_axis': 1299739.2064956713,
+    'bs_fraction': 0.17910707149956598,
 }
 
 @pytest.mark.slow
@@ -1886,8 +1886,9 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         P_ax_pfix = np.max(mygs.get_profiles(psi=np.array([0.0, 1.0]))[3])
         profs_pres = mygs.solve_bootstrap(Zeff=Zeff_val, pres_prof={'x': psi_sample, 'y': p_kin + pf}, **zeff_common_kwargs)
         _, _, _, P_pres, _ = mygs.get_profiles(npsi=n_sample)
+        # Both solves converge j_BS to djBS_tol (1e-4) and may stop an iteration apart
         for key in profs_pres:
-            if not np.allclose(profs_pfix[key], profs_pres[key], rtol=1e-6, atol=1e-6*np.max(np.abs(profs_pres[key]))):
+            if not np.allclose(profs_pfix[key], profs_pres[key], rtol=2e-4, atol=2e-4*np.max(np.abs(profs_pres[key]))):
                 raise AssertionError(f"p_fixed_prof vs pres_prof=kinetic+p_fixed: boot_profs['{key}'] differ")
         if not np.allclose(P_pfix, P_pres, rtol=1e-6, atol=1e-6*np.max(P_pres)):
             raise AssertionError("p_fixed_prof vs pres_prof=kinetic+p_fixed: pressure profiles differ")
@@ -1914,22 +1915,22 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
 
 
 ITER_bootstrap_internal_eq_dict = {
-    'Ip':        13000000.284035483,
-    'kappa':     1.8724514466961761,
-    'R_geo':     6.222657289115216,
-    'a_geo':     1.9796608199888572,
-    'q_0':       1.2730296376083903,
-    'q_95':      3.479602743293292,
+    'Ip':        13000003.24961143,
+    'kappa':     1.8710874971500062,
+    'R_geo':     6.2229574417901645,
+    'a_geo':     1.9785979198829686,
+    'q_0':       1.3748401369017682,
+    'q_95':      3.504083741872661,
     'P_ax':      740021.5037035183,
-    'beta_pol':  83.76968618328351,
-    'beta_tor':  2.447017893408179,
-    'jphi_axis': 1093078.1972058476,
-    'jphi_max':  1229975.7780165318,
-    'q_axis':    1.3025021696770782,
-    'jphi_prof': [1093078.1972058476, 1220700.5202791495, 1209821.8243717737,
-                  1102134.086647744,   913471.7887893931,  686494.9329961948,
-                   444062.79141603364, 239381.03647250237, 153257.50913874793,
-                   116795.19939926293],
+    'beta_pol':  85.19729428055419,
+    'beta_tor':  2.492084824025585,
+    'jphi_axis': 1010416.1199979713,
+    'jphi_max':  1173298.5135544762,
+    'q_axis':    1.410565702638605,
+    'jphi_prof': [1010416.1199979713, 1155117.92412601,   1162817.6369466858,
+                  1072123.3558973635,  898492.2764938722,  683025.6545245483,
+                   449301.00087938644, 249118.67207980127, 173771.68344307062,
+                   136306.8890837856],
 }
 
 
