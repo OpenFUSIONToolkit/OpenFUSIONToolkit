@@ -930,8 +930,10 @@ def solve_with_bootstrap(mygs,
       added to the total without rescaling (internal Fortran solver only)
     @param p_fixed Additional pressure \f$P_{fixed}\f$ [Pa] on `x` (array or profile dict, e.g. fast-ion pressure),
       added to \f$e_C(n_e T_e + n_i T_i)\f$ for the GS pressure but excluded from j_BS (internal Fortran solver only)
-    @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
-      (internal solver also returns `'psi_n'`, the \f$\hat{\psi}\f$ of each input node)
+    @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles, all (like the
+      `inductive_jphi` and `jphi_fixed` inputs) TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$
+      (see doc_tokamaker_current_conventions); the internal solver also returns `'psi_n'`, the
+      \f$\hat{\psi}\f$ of each input node
     '''
 
     if psi_N is not None:
@@ -990,6 +992,7 @@ def solve_with_bootstrap(mygs,
                     'j_inductive' : _results['j_ind_final'],
                     'isolated_j_BS' : _results['j_bs_final'],
                     'j_fixed' : _results.get('jphi_fixed'),
+                    'jdotb_BS' : _results.get('jdotb_bs_raw'),
                     'scale_j0' : 1.0,
                     'scale_Ip' : 1.0}
         return results
@@ -1068,7 +1071,7 @@ def solve_with_bootstrap(mygs,
         4. Scales inductive current to match Ip_target.
         '''
         # Get geometry and flux functions
-        _, f, _, _, _ = mygs.get_profiles(psi=psi_eval)
+        _, f, _, _, pp_eq = mygs.get_profiles(psi=psi_eval)
         if use_sauter_eps:
             _, fc, r_avgs, b_avgs, eps = mygs.sauter_fc(psi=psi_eval, return_eps=True)
         else:
@@ -1155,8 +1158,10 @@ def solve_with_bootstrap(mygs,
                     formula_form='jboot1', # no d(ln ne)=d(ln ni) assumption
                 )
 
-            # Convert to A/m^2
-            j_BS_final = j_BS_neo / b_avgs[0]
+            # <j_BS.B> -> TokaMaker jphi = <j_phi> (doc_tokamaker_current_conventions.md eq. A7):
+            # field-aligned F<1/R>/<B^2> * <j_BS.B> plus the pressure-driven part P'(<R> - F^2<1/R>/<B^2>)
+            inv_R, B2 = ravgs_q['<1/R>'], b_avgs[1]
+            j_BS_final = j_BS_neo * f * inv_R / B2 + pp_eq * (R_avg - f**2 * inv_R / B2)
             j_BS_final = numpy.nan_to_num(j_BS_final, nan=0.0)
 
             # Extrapolate to LCFS/axis to match fortran solve

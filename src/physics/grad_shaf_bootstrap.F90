@@ -19,7 +19,7 @@ use oft_lag_basis, only: oft_blag_geval
 use oft_mesh_type, only: bmesh_findcell
 use oft_blag_operators, only: oft_lag_brinterp
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
-use grad_shaf_prof_phys, only: eval_R_qtmp, build_Ravg_spline, gs_flux_int, &
+use grad_shaf_prof_phys, only: eval_jtor_imas, build_Ravg_spline, gs_flux_int, &
   jphi_update, jphi_copy, jphi_flux_func, jphi_psi_nodes
 use spline_mod
 USE oft_io, ONLY: hdf5_create_group, hdf5_write, hdf5_read, &
@@ -54,7 +54,8 @@ END TYPE boot_ops
 !------------------------------------------------------------------------------
 TYPE :: boot_profs
   REAL(r8), POINTER, DIMENSION(:) :: psi_n => NULL() !< Normalised psi_N values for these current profiles in OFT convention (0=LCFS, 1=axis); index 0 is the LCFS boundary
-  REAL(r8), POINTER, DIMENSION(:) :: j_bs_raw => NULL() !< Raw bootstrap current density output directly from Redl PoP 2021 formula [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: j_bs_raw => NULL() !< Redl PoP 2021 bootstrap as TokaMaker jphi, <j_BS.B> F<1/R>/<B^2> + P'(<R> - F^2<1/R>/<B^2>), before isolation/scaling [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: jdotb_bs_raw => NULL() !< Redl PoP 2021 <j_BS.B> on the j_bs_raw grid [T A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: total_j_phi => NULL() !< Total toroidal current density = j_ind_final + j_bs_final + jphi_fixed [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: j_ind_final => NULL() !< Input jphi, re-scaled & optionally tapered [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: j_bs_final => NULL() !< Bootstrap current density, optionally isolated/parametrised/tapered [A/m²]
@@ -157,6 +158,8 @@ IF(ASSOCIATED(self%boot_profs%total_j_phi).OR.ASSOCIATED(self%boot_profs%j_bs_ra
       CALL hdf5_write(self%boot_profs%jphi_fixed,filename,path//'/BOOT_PROFS/JPHI_FIXED')
     IF(ASSOCIATED(self%boot_profs%j_bs_raw)) &
       CALL hdf5_write(self%boot_profs%j_bs_raw,filename,path//'/BOOT_PROFS/J_BS_RAW')
+    IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw)) &
+      CALL hdf5_write(self%boot_profs%jdotb_bs_raw,filename,path//'/BOOT_PROFS/JDOTB_BS_RAW')
   END IF
 END IF
 end subroutine jphi_bs_save_hdf5
@@ -241,6 +244,13 @@ IF(hdf5_field_exist(filename,path//'/BOOT_PROFS'))THEN
       DEALLOCATE(dim_sizes)
       CALL hdf5_read(self%boot_profs%j_bs_raw,filename,path//'/BOOT_PROFS/J_BS_RAW',success=success)
     END IF
+    IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw))DEALLOCATE(self%boot_profs%jdotb_bs_raw)
+    IF(hdf5_field_exist(filename,path//'/BOOT_PROFS/JDOTB_BS_RAW'))THEN
+      CALL hdf5_field_get_sizes(filename,path//'/BOOT_PROFS/JDOTB_BS_RAW',ndims,dim_sizes)
+      ALLOCATE(self%boot_profs%jdotb_bs_raw(0:dim_sizes(1)-1))
+      DEALLOCATE(dim_sizes)
+      CALL hdf5_read(self%boot_profs%jdotb_bs_raw,filename,path//'/BOOT_PROFS/JDOTB_BS_RAW',success=success)
+    END IF
   END IF
 END IF
 end subroutine jphi_bs_load_hdf5
@@ -321,6 +331,7 @@ SELECT TYPE(new)
     IF(ASSOCIATED(self%j_BS_last)) ALLOCATE(new%j_BS_last, SOURCE=self%j_BS_last)
     IF(ASSOCIATED(self%boot_profs%psi_n))ALLOCATE(new%boot_profs%psi_n,SOURCE=self%boot_profs%psi_n)
     IF(ASSOCIATED(self%boot_profs%j_bs_raw))ALLOCATE(new%boot_profs%j_bs_raw,SOURCE=self%boot_profs%j_bs_raw)
+    IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw))ALLOCATE(new%boot_profs%jdotb_bs_raw,SOURCE=self%boot_profs%jdotb_bs_raw)
     IF(ASSOCIATED(self%boot_profs%total_j_phi))ALLOCATE(new%boot_profs%total_j_phi,SOURCE=self%boot_profs%total_j_phi)
     IF(ASSOCIATED(self%boot_profs%j_bs_final))ALLOCATE(new%boot_profs%j_bs_final,SOURCE=self%boot_profs%j_bs_final)
     IF(ASSOCIATED(self%boot_profs%j_ind_final))ALLOCATE(new%boot_profs%j_ind_final,SOURCE=self%boot_profs%j_ind_final)
@@ -341,6 +352,7 @@ IF(ASSOCIATED(self%jphi_total_last))DEALLOCATE(self%jphi_total_last)
 IF(ASSOCIATED(self%j_BS_last))DEALLOCATE(self%j_BS_last)
 !---Destroy cached bootstrap current profiles
 IF(ASSOCIATED(self%boot_profs%j_bs_raw))DEALLOCATE(self%boot_profs%j_bs_raw)
+IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw))DEALLOCATE(self%boot_profs%jdotb_bs_raw)
 IF(ASSOCIATED(self%boot_profs%total_j_phi))DEALLOCATE(self%boot_profs%total_j_phi)
 IF(ASSOCIATED(self%boot_profs%j_bs_final))DEALLOCATE(self%boot_profs%j_bs_final)
 IF(ASSOCIATED(self%boot_profs%j_ind_final))DEALLOCATE(self%boot_profs%j_ind_final)
@@ -351,12 +363,12 @@ end subroutine jphi_bs_delete
 !> Update F*F' profile from inductive Jphi coupled with bootstrap current.
 !>
 !> Each call (one NL iteration):
-!>   1. Build <R>/<1/R> spline on self%x; pre-compute qtmp = <R>*<1/R>.
+!>   1. Build <R>/<1/R>/<1/R^2> spline on self%x; pressure scale.
 !>   2. Evaluate fixed current jphi_fixed and bootstrap current j_BS on self%x (or reuse cache if frozen).
 !>   3. Apply edge taper to j_BS, jphi_ind and jphi_fixed component-wise.
-!>   4. Compute jphi_rescale to reconcile gs_itor_nl vs gs_flux_int.
-!>   5. Solve analytically for alpha: gs_flux_int is linear in alpha, so two
-!>      evaluations (alpha=0, alpha=1) give alpha = (Ip_target - Ip_lo)/(Ip_hi - Ip_lo).
+!>   4. Compute jphi_rescale to reconcile gs_itor_nl vs gs_flux_int (~1: the measure is exact).
+!>   5. Solve analytically for alpha: the exact I_p (gs_flux_int of eval_jtor_imas) is affine in
+!>      alpha, so two evaluations (alpha=0, alpha=1) give alpha = (Ip_target - Ip_lo)/(Ip_hi - Ip_lo).
 !>   6. Assemble jphi_total = alpha*jphi_ind + j_BS + jphi_fixed; compute F*F' knots.
 !>   7. Diagnostics (if diagnose_bs is set).
 !---------------------------------------------------------------------------------
@@ -365,7 +377,7 @@ CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 INTEGER(i4) :: i
 REAL(r8) :: pscale, pprime
-REAL(r8), ALLOCATABLE :: qtmp(:)
+REAL(r8), ALLOCATABLE :: jtor(:)  !< IMAS-convention current for the exact I_p measure (eval_jtor_imas)
 REAL(r8), ALLOCATABLE :: xpsi(:) !< Node locations in normalized poloidal flux
 TYPE(spline_type) :: R_spline
 ! Bootstrap arrays (on self%x grid)
@@ -413,12 +425,16 @@ IF(.NOT.ASSOCIATED(gseq%ni)) &
 IF(.NOT.ASSOCIATED(gseq%Zeff)) &
   CALL oft_abort("Jphi-BS profile requires Zeff profile", &
                  "jphi_bs_update",__FILE__)
-!--- 1. Build <R>/<1/R> spline; pre-compute qtmp = <R>*<1/R> on self%x.
+!--- 1. Build <R>/<1/R>/<1/R^2> spline (I_p measure, F*F' map); pressure scale.
 !   R_spline stays alive until after the F*F' loop (step 6).
-ALLOCATE(qtmp(0:self%npsi))
+ALLOCATE(jtor(0:self%npsi))
 CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
-CALL eval_R_qtmp(R_spline, [0.0_r8, xpsi], self%npsi+1, qtmp)
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
+IF(ASSOCIATED(gseq%P_ani)) &
+  CALL oft_abort('Jphi profiles do not support anisotropic pressure', &
+                 'jphi_bs_update',__FILE__)
+pscale = gseq%P%f(gseq%plasma_bounds(2))
+pscale = gseq%pax_target / pscale
 !--- 2. Fixed current [A/m²] and bootstrap current on self%x grid.
 ALLOCATE(jphi_fixed(0:self%npsi))
 jphi_fixed = 0.0_r8
@@ -529,7 +545,8 @@ ALLOCATE(jphi_total(0:self%npsi))
 jphi_rescale = self%rescale_last
 IF(ASSOCIATED(self%jphi_total_last) .AND. .NOT. self%freeze_alpha) THEN
   CALL gs_itor_nl(gseq, itor_nl)
-  CALL gs_flux_int(gseq, [0.0_r8, xpsi], self%jphi_total_last/qtmp, self%npsi+1, itor_flint)
+  CALL eval_jtor_imas(gseq, R_spline, [0.0_r8, xpsi], self%npsi+1, self%jphi_total_last, pscale, jtor)
+  CALL gs_flux_int(gseq, [0.0_r8, xpsi], jtor, self%npsi+1, itor_flint)
   jphi_rescale = (itor_nl/itor_flint + self%rescale_last) / 2.0_r8
   self%rescale_last = jphi_rescale
 END IF
@@ -546,9 +563,11 @@ IF(self%freeze_alpha) THEN
 ELSE
   !--- Not yet frozen: exact linear solve for alpha.
   jphi_total = j_BS + jphi_fixed
-  CALL gs_flux_int(gseq, [0.0_r8, xpsi], jphi_total/qtmp, self%npsi+1, ip_result_lo)
+  CALL eval_jtor_imas(gseq, R_spline, [0.0_r8, xpsi], self%npsi+1, jphi_total, pscale, jtor)
+  CALL gs_flux_int(gseq, [0.0_r8, xpsi], jtor, self%npsi+1, ip_result_lo)
   jphi_total = jphi_ind + j_BS + jphi_fixed
-  CALL gs_flux_int(gseq, [0.0_r8, xpsi], jphi_total/qtmp, self%npsi+1, ip_result_hi)
+  CALL eval_jtor_imas(gseq, R_spline, [0.0_r8, xpsi], self%npsi+1, jphi_total, pscale, jtor)
+  CALL gs_flux_int(gseq, [0.0_r8, xpsi], jtor, self%npsi+1, ip_result_hi)
   ip_ind = ip_result_hi - ip_result_lo
   IF(ABS(ip_ind) > 0.0_r8)THEN
     alpha = (ip_target - ip_result_lo) / ip_ind
@@ -609,11 +628,6 @@ self%boot_profs%j_bs_final  = j_BS/mu0
 self%boot_profs%j_ind_final = alpha * jphi_ind/mu0
 self%boot_profs%jphi_fixed  = jphi_fixed/mu0
 !--- Compute updated F*F' profile
-IF(ASSOCIATED(gseq%P_ani)) &
-  CALL oft_abort('Jphi profiles do not support anisotropic pressure', &
-                 'jphi_bs_update',__FILE__)
-pscale = gseq%P%f(gseq%plasma_bounds(2))
-pscale = gseq%pax_target / pscale
 CALL spline_eval(R_spline, 0.d0, 0) ! LCFS point for y0 calculation
 pprime = gseq%P%fp(gseq%plasma_bounds(1))
 self%y0 = 2.d0*(jphi_total(0) - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
@@ -644,13 +658,14 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi_rescale= ', jphi_rescale
   !--- Side-by-side Ip comparison: FEM nonlinear solve vs profile flux integral
   CALL gs_itor_nl(gseq, itor_nl)
-  CALL gs_flux_int(gseq, [0.0_r8, xpsi], jphi_total/qtmp, self%npsi+1, itor_flint)
+  CALL eval_jtor_imas(gseq, R_spline, [0.0_r8, xpsi], self%npsi+1, jphi_total, pscale, jtor)
+  CALL gs_flux_int(gseq, [0.0_r8, xpsi], jtor, self%npsi+1, itor_flint)
   WRITE(*,'(A)') '  [jphi_bs_update] --- Ip comparison (current jphi_total) ---'
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] Ip(gs_itor_nl)    = ', itor_nl/mu0
-  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] Ip(flux_int/qtmp) = ', itor_flint/mu0
+  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] Ip(flux_int)      = ', itor_flint/mu0
 END IF
 !--- Clean up
-DEALLOCATE(j_BS, jphi_total, jphi_ind, jphi_fixed, qtmp)
+DEALLOCATE(j_BS, jphi_total, jphi_ind, jphi_fixed, jtor)
 CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)
 END SUBROUTINE jphi_bs_update
@@ -990,7 +1005,7 @@ END SUBROUTINE gradient_
 !> @param gseq    Equilibrium object (must have Te, Ti, ne, ni, Zeff set)
 !> @param n_psi    Number of flux surface samples
 !> @param psi_N    Normalised psi grid [0,1], arbitrary spacing
-!> @param j_BS Output: average toroidal bootstrap current density [A/m^2] on psi_N grid
+!> @param j_BS Output: bootstrap current density as TokaMaker jphi = <j_phi> [A/m^2] on psi_N grid
 !------------------------------------------------------------------------------
 SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, j_BS, &
                                isolate_edge_jBS, parameterize_jBS, scale_jBS, &
@@ -1025,7 +1040,7 @@ REAL(r8) :: ln_le(n_psi), ln_lii(n_psi), Z_lnLam(n_psi)
 REAL(r8) :: Zavg(n_psi), Zion(n_psi)
 REAL(r8) :: nu_i_star(n_psi), nu_e_star(n_psi)
 REAL(r8) :: B_times_Jbs(n_psi)
-REAL(r8) :: psi_range, Zdom
+REAL(r8) :: psi_range, Zdom, pscale, pprime
 REAL(r8), PARAMETER :: EC = 1.602176634e-19_r8
 ! Locals for optional edge-spike isolation
 LOGICAL  :: do_isolate, do_parametrize
@@ -1098,25 +1113,39 @@ nu_e_star = 6.921e-18_r8 * ABS(qvals) * R_avg * ne &
 CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, qvals, eps, ft, f, &
     dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &
     ln_le, ln_lii, nu_e_star, nu_i_star, B_times_Jbs)
-! Convert parallel bootstrap to phi component: j_phi = B_times_Jbs * <R> / F
+! Convert <j_BS.B> to TokaMaker's jphi = <j_phi> = <R>P' + <1/R>FF'/mu0 (exact, see
+! doc_tokamaker_current_conventions.md eq. A7): the field-aligned part F<1/R>/<B^2> * <j_BS.B>,
+! plus the pressure-driven (diamagnetic + Pfirsch-Schlueter) part P'(<R> - F^2<1/R>/<B^2>),
+! which is assigned to the bootstrap (as IMAS includes_bootstrap=true). P' as in jphi_bs_update.
+pscale = gseq%pax_target/gseq%P%f(gseq%plasma_bounds(2))
 j_BS(0) = 0.0_r8 ! Placeholder until extrap_jBS_boundaries sets the real LCFS value below
-WHERE(ABS(f) > 0.0_r8)
-  j_BS(1:) = B_times_Jbs / B_avg
-ELSEWHERE
-  j_BS(1:) = 0.0_r8
-END WHERE
+DO i = 1, n_psi
+  IF(ABS(f(i)) > 0.0_r8 .AND. modb_avgs_saut(i,2) > 0.0_r8)THEN
+    pprime = gseq%P%fp(psi_abs(i))*pscale/mu0
+    j_BS(i) = B_times_Jbs(i)*f(i)*r_avgs_saut(i,2)/modb_avgs_saut(i,2) &
+      + pprime*(r_avgs_saut(i,1) - f(i)**2*r_avgs_saut(i,2)/modb_avgs_saut(i,2))
+  ELSE
+    j_BS(i) = 0.0_r8
+  END IF
+END DO
 ! Guard NaN (where F -> 0)
 WHERE(.NOT.(ABS(j_BS) < 1.0e99_r8)) j_BS = 0.0_r8
 ! Extrapolate to LCFS/axis where q is undefined. Sets LCFS value j_BS(0).
 CALL extrap_jBS_boundaries(n_psi, psi_N, j_BS)
-! Save raw bootstrap output
+! Save raw bootstrap output, and Redl's <j_BS.B> on the same grid
 IF(.NOT.ASSOCIATED(self%boot_profs%j_bs_raw)) ALLOCATE(self%boot_profs%j_bs_raw(0:n_psi))
 self%boot_profs%j_bs_raw = j_BS
+IF(.NOT.ASSOCIATED(self%boot_profs%jdotb_bs_raw)) ALLOCATE(self%boot_profs%jdotb_bs_raw(0:n_psi))
+self%boot_profs%jdotb_bs_raw(0) = 0.0_r8
+self%boot_profs%jdotb_bs_raw(1:) = B_times_Jbs
+WHERE(.NOT.(ABS(self%boot_profs%jdotb_bs_raw) < 1.0e99_r8)) self%boot_profs%jdotb_bs_raw = 0.0_r8
+CALL extrap_jBS_boundaries(n_psi, psi_N, self%boot_profs%jdotb_bs_raw)
 IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A)') '  [calculate_bootstrap] geometry & collisionality sample (i=1,mid,n):'
   WRITE(*,'(A,3ES12.4)') '    <R>      : ', r_avgs_saut(1,1), r_avgs_saut(n_psi/2,1), r_avgs_saut(n_psi,1)
   WRITE(*,'(A,3ES12.4)') '    <1/R>    : ', r_avgs_saut(1,2), r_avgs_saut(n_psi/2,2), r_avgs_saut(n_psi,2)
   WRITE(*,'(A,3ES12.4)') '    <B>      : ', B_avg(1), B_avg(n_psi/2), B_avg(n_psi)
+  WRITE(*,'(A,3ES12.4)') '    <B^2>    : ', modb_avgs_saut(1,2), modb_avgs_saut(n_psi/2,2), modb_avgs_saut(n_psi,2)
   WRITE(*,'(A,3ES12.4)') '    eps      : ', eps(1), eps(n_psi/2), eps(n_psi)
   WRITE(*,'(A,3ES12.4)') '    q        : ', qvals(1), qvals(n_psi/2), qvals(n_psi)
   WRITE(*,'(A,3ES12.4)') '    nu_e_star: ', nu_e_star(1), nu_e_star(n_psi/2), nu_e_star(n_psi)

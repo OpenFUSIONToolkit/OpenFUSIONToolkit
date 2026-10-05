@@ -1213,19 +1213,19 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
 # Expected values dictionary
 # -----------------------------------------------------------------------
 ITER_bootstrap_eq_dict = {
-    'Ip': 15599993.874846907,
-    'kappa': 1.8761626076245332,
-    'R_geo': 6.222347872515414,
-    'a_geo': 1.9813765739500924,
-    'q_0': 0.9852073751253527,
-    'q_95': 2.8481934025238593,
-    'P_ax': 740023.5117187897,
-    'j_BS_max': 186464.65688338986,
-    'j_BS_axis': 4565.0530321718725,
-    'jphi_axis': 1472165.870478406,
-    'jphi_max': 1565242.8028327106,
-    'j_ind_axis': 1385129.3335464464,
-    'bs_fraction': 0.1501465091465194,
+    'Ip': 15599997.261988742,
+    'kappa': 1.8746806271900014,
+    'R_geo': 6.222524490498655,
+    'a_geo': 1.9807072056151687,
+    'q_0': 1.036565329524374,
+    'q_95': 2.863029898626678,
+    'P_ax': 740023.5117187898,
+    'j_BS_max': 219163.55709184994,
+    'j_BS_axis': 4696.213397541225,
+    'jphi_axis': 1397130.088093367,
+    'jphi_max': 1507460.349786304,
+    'j_ind_axis': 1299739.2064956713,
+    'bs_fraction': 0.17910707149956598,
 }
 
 @pytest.mark.slow
@@ -1664,6 +1664,53 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
     eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
 
+    # --- Verify the <j_BS.B> -> jphi conversion (doc_tokamaker_current_conventions eqs. A7, A8)
+    #     against geometry traced independently from the converged equilibrium ---
+    try:
+        bp = mygs.get_boot_profs()
+        inner = (bp['psi_n'] > 0.05) & (bp['psi_n'] < 0.95)
+        psi_c = bp['psi_n'][inner]
+        _, F_c, Fp_c, _, Pp_c = mygs.get_profiles(psi=psi_c)
+        _, _, ravgs_c, _, _, _ = mygs.get_q(psi=psi_c)
+        _, _, _, modb_c = mygs.sauter_fc(psi=psi_c)
+        R_c, invR_c, B2_c = ravgs_c['<R>'], ravgs_c['<1/R>'], modb_c[1]
+        jdotb = bp['jdotb_bs_raw'][inner]
+        field_aligned = jdotb * F_c * invR_c / B2_c
+        p_term = Pp_c * (R_c - F_c**2 * invR_c / B2_c)
+        scale = np.max(np.abs(bp['j_bs_raw'][inner]))
+        err = np.max(np.abs(bp['j_bs_raw'][inner] - (field_aligned + p_term))) / scale
+        err_flip = np.max(np.abs(bp['j_bs_raw'][inner] - (field_aligned - p_term))) / scale
+        print(f"j_bs_raw vs A7: rel err {err:.3e} (pressure term flipped: {err_flip:.3e}), "
+              f"max|P'G|/max|j_BS| = {np.max(np.abs(p_term))/scale:.3e}")
+        if not (err < 1.0e-2 and err_flip > 5.0 * err):
+            raise AssertionError(f"j_bs_raw does not match eq. A7 (rel err {err:.3e}, flipped {err_flip:.3e})")
+        # A8: the equilibrium's own <J.B> = F P' + F'<B^2>/mu0 equals the sum of its components'
+        jdotb_eq = F_c * Pp_c + Fp_c * B2_c / mu0
+        jdotb_sum = jdotb + (bp['j_ind_final'][inner] + bp['jphi_fixed'][inner]) * B2_c / (F_c * invR_c)
+        err_par = np.max(np.abs(jdotb_eq - jdotb_sum)) / np.max(np.abs(jdotb_eq))
+        print(f"<J.B> balance (A8): rel err {err_par:.3e}")
+        if err_par > 2.0e-2:
+            raise AssertionError(f"equilibrium <J.B> != sum of components (rel err {err_par:.3e})")
+        # A9d: I_p from TokaMaker's own jphi equals the FEM I_p; the old <R><1/R> measure does not
+        psi_f = np.linspace(1.0e-4, 1.0 - 1.0e-4, 1001)
+        _, F_f, Fp_f, _, Pp_f = mygs.get_profiles(psi=psi_f)
+        _, _, rv_f, _, _, _ = mygs.get_q(psi=psi_f)
+        J_f = F_f * Fp_f * rv_f['<1/R>'] / mu0 + Pp_f * rv_f['<R>']
+        psi_phys = mygs.psi_bounds[0] + psi_f * (mygs.psi_bounds[1] - mygs.psi_bounds[0])
+        w = rv_f['dV/dPsi'] / (2.0 * np.pi)
+        ip_exact = abs(np.trapezoid(w * (J_f * rv_f['<1/R^2>'] / rv_f['<1/R>']
+                   + Pp_f * (1.0 - rv_f['<R>'] * rv_f['<1/R^2>'] / rv_f['<1/R>'])), psi_phys))
+        ip_qtmp = abs(np.trapezoid(w * J_f / rv_f['<R>'], psi_phys))
+        print(f"I_p: FEM {eq_info['Ip']:.6e}, A9d {ip_exact:.6e} ({ip_exact/eq_info['Ip']-1:+.3e}), "
+              f"old <R><1/R> measure {ip_qtmp:.6e} ({ip_qtmp/eq_info['Ip']-1:+.3e})")
+        if abs(ip_exact / eq_info['Ip'] - 1.0) > 2.0e-3:
+            raise AssertionError(f"A9d I_p {ip_exact:.6e} != FEM I_p {eq_info['Ip']:.6e}")
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        mp_q.put(None)
+        return
+
     # --- Verify that boot_ops, boot_profs round-trips correctly through save/load, and that
     #     replace_eq(source_file=...) correctly syncs the _boot_ops shadow dict ---
     save_file = 'ITER_boot_ops_test.h5'
@@ -1847,8 +1894,9 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         P_ax_pfix = np.max(mygs.get_profiles(psi=np.array([0.0, 1.0]))[3])
         profs_pres = mygs.solve_bootstrap(Zeff=Zeff_val, pres_prof={'x': psi_sample, 'y': p_kin + pf}, **zeff_common_kwargs)
         _, _, _, P_pres, _ = mygs.get_profiles(npsi=n_sample)
+        # Both solves converge j_BS to djBS_tol (1e-4) and may stop an iteration apart
         for key in profs_pres:
-            if not np.allclose(profs_pfix[key], profs_pres[key], rtol=1e-6, atol=1e-6*np.max(np.abs(profs_pres[key]))):
+            if not np.allclose(profs_pfix[key], profs_pres[key], rtol=2e-4, atol=2e-4*np.max(np.abs(profs_pres[key]))):
                 raise AssertionError(f"p_fixed_prof vs pres_prof=kinetic+p_fixed: boot_profs['{key}'] differ")
         if not np.allclose(P_pfix, P_pres, rtol=1e-6, atol=1e-6*np.max(P_pres)):
             raise AssertionError("p_fixed_prof vs pres_prof=kinetic+p_fixed: pressure profiles differ")
@@ -1875,22 +1923,22 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
 
 
 ITER_bootstrap_internal_eq_dict = {
-    'Ip':        13000000.284035483,
-    'kappa':     1.8724514466961761,
-    'R_geo':     6.222657289115216,
-    'a_geo':     1.9796608199888572,
-    'q_0':       1.2730296376083903,
-    'q_95':      3.479602743293292,
+    'Ip':        13000003.24961143,
+    'kappa':     1.8710874971500062,
+    'R_geo':     6.2229574417901645,
+    'a_geo':     1.9785979198829686,
+    'q_0':       1.3748401369017682,
+    'q_95':      3.504083741872661,
     'P_ax':      740021.5037035183,
-    'beta_pol':  83.76968618328351,
-    'beta_tor':  2.447017893408179,
-    'jphi_axis': 1093078.1972058476,
-    'jphi_max':  1229975.7780165318,
-    'q_axis':    1.3025021696770782,
-    'jphi_prof': [1093078.1972058476, 1220700.5202791495, 1209821.8243717737,
-                  1102134.086647744,   913471.7887893931,  686494.9329961948,
-                   444062.79141603364, 239381.03647250237, 153257.50913874793,
-                   116795.19939926293],
+    'beta_pol':  85.19729428055419,
+    'beta_tor':  2.492084824025585,
+    'jphi_axis': 1010416.1199979713,
+    'jphi_max':  1173298.5135544762,
+    'q_axis':    1.410565702638605,
+    'jphi_prof': [1010416.1199979713, 1155117.92412601,   1162817.6369466858,
+                  1072123.3558973635,  898492.2764938722,  683025.6545245483,
+                   449301.00087938644, 249118.67207980127, 173771.68344307062,
+                   136306.8890837856],
 }
 
 
