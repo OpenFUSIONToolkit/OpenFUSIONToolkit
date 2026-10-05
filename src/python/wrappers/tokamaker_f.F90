@@ -1413,6 +1413,7 @@ do i=1,tMaker_equil_obj%device%mesh%nc
   do m=1,tMaker_equil_obj%device%fe_rep%quad%np
     call tMaker_equil_obj%device%mesh%jacobian(i,tMaker_equil_obj%device%fe_rep%quad%pts(:,m),sgop,area)
     call prof_interp_obj%interp(i,tMaker_equil_obj%device%fe_rep%quad%pts(:,m),sgop,psitmp)
+    IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma (mode 4 returns 0 there)
     psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
     IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*tMaker_equil_obj%device%fe_rep%quad%wts(m)
   end do
