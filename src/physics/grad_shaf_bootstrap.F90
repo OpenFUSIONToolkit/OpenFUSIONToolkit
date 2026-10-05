@@ -69,7 +69,7 @@ type, extends(jphi_flux_func) :: jphi_bs_flux_func
   logical :: freeze_j_BS = .FALSE. !< Set .TRUE. once j_BS stagnates for 2 steps; skips Sauter call (big speedup)
   logical :: freeze_alpha = .FALSE.   !< Set .TRUE. once dalpha stagnates for 2 steps; skips alpha re-solve (speedup)
   real(8) :: djBS_stol = 1.0e-3_r8 !< RMS tolerance stagnation value: reset no-improve counter if above this
-  real(8) :: dalpha_tol(2) = [1.0e-6_r8, 1.0e-3_r8]   !< Hard tolerance; (1) freeze if below this, (2) reset no-improve counter if above this
+  real(8) :: dalpha_tol(2) = [1.0e-6_r8, 1.0e-3_r8]   !< Relative (|dalpha|/|alpha|) tolerance; (1) freeze if below this, (2) reset no-improve counter if above this
   integer(4) :: djBS_no_improve = 0   !< Consecutive steps with non-decreasing djBS
   real(8) :: djBS_min = huge(1.0d0)  !< Running minimum djBS seen so far
   integer(4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
@@ -560,7 +560,8 @@ ELSE
   ELSE
     alpha = self%alpha_last
   END IF
-  dalpha = ABS(alpha - self%alpha_last)
+  !--- Relative change: alpha's scale is set by the units of ffp_prof (e.g. ~1e-6 for a jphi in A/m^2)
+  dalpha = ABS(alpha - self%alpha_last) / MAX(ABS(alpha), TINY(1.0_r8))
   !--- Freeze alpha on hard tol OR 2 consecutive steps above running minimum; also freeze bootstrap.
   IF(dalpha < self%dalpha_tol(1)) THEN
     self%freeze_alpha = .TRUE.
