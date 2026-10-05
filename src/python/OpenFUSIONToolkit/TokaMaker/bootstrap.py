@@ -470,7 +470,7 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         ffp_prof['type'] = 'jphi-linterp'
         ffp_prof['y'] = matched_input_jphi
 
-        pax_target = pressure[0]
+        pax_target = pressure[0] - pressure[-1]  # P = 0 at the LCFS: target the drop
 
         solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target)
 
@@ -1201,7 +1201,7 @@ def solve_with_bootstrap(mygs,
         return pp_dict, ffp_dict, j_BS_final, matched_j_inductive, spike_prof
 
     # --- Main Execution Flow ---
-    mygs.set_targets(Ip=Ip_target, pax=pressure[0])
+    mygs.set_targets(Ip=Ip_target, pax=pressure[0] - pressure[-1])
 
     if inductive_jphi is not None:
 
@@ -1219,7 +1219,7 @@ def solve_with_bootstrap(mygs,
         ffp_prof['type'] = 'jphi-linterp'
         ffp_prof['y'] = matched_j_inductive + spike_prof
 
-        pax_target = pressure[0]
+        pax_target = pressure[0] - pressure[-1]  # P = 0 at the LCFS: target the drop
 
         # Run through once for better profile convergence
         solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target,F0=F0_local)
@@ -1260,7 +1260,7 @@ def solve_with_bootstrap(mygs,
             ffp_prof['y'] = matched_input_jphi
 
             scaled_Ip_target = Ip_target*final_scale_Ip
-            pax_target = pressure[0]
+            pax_target = pressure[0] - pressure[-1]  # P = 0 at the LCFS: target the drop
 
             solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target,F0=F0_local)
 
