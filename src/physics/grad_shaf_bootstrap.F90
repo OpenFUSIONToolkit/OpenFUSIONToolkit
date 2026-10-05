@@ -67,13 +67,13 @@ END TYPE boot_profs
 type, extends(jphi_flux_func) :: jphi_bs_flux_func
   real(8) :: alpha_last = 1.d0 !< Alpha (input Jphi rescaling factor) from previous NL iteration
   logical :: freeze_j_BS = .FALSE. !< Set .TRUE. once j_BS stagnates for 2 steps; skips Sauter call (big speedup)
-  logical :: freeze_alpha = .FALSE.   !< Set .TRUE. once dalpha stagnates for 2 steps; skips alpha re-solve (speedup)
+  logical :: freeze_alpha = .FALSE.   !< Kept for compatibility; alpha is re-solved every update (never frozen)
   real(8) :: djBS_stol = 1.0e-3_r8 !< RMS tolerance stagnation value: reset no-improve counter if above this
-  real(8) :: dalpha_tol(2) = [1.0e-6_r8, 1.0e-3_r8]   !< Relative (|dalpha|/|alpha|) tolerance; (1) freeze if below this, (2) reset no-improve counter if above this
+  real(8) :: dalpha_tol(2) = [1.0e-6_r8, 1.0e-3_r8]   !< Relative (|dalpha|/|alpha|): (1) no stall warning below this; (2) unused
   integer(4) :: djBS_no_improve = 0   !< Consecutive steps with non-decreasing djBS
   real(8) :: djBS_min = huge(1.0d0)  !< Running minimum djBS seen so far
   integer(4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
-  real(8) :: dalpha_min = huge(1.0d0) !< Running minimum dalpha seen so far
+  real(8) :: dalpha_min = huge(1.0d0) !< dalpha of the previous update (stall diagnostic)
   real(8), pointer, dimension(:) :: j_BS_last => NULL() !< j_BS profile from previous NL iteration (for freeze check)
   TYPE(boot_ops) :: boot_ops       !< Python read-in ptions for j_bs_update
   TYPE(boot_profs) :: boot_profs   !< Cached current profiles from the last jphi_bs_update call
@@ -484,7 +484,7 @@ ELSE
   IF(ASSOCIATED(self%j_BS_last)) THEN
     djBS = SQRT(SUM((j_BS - self%j_BS_last)**2) / REAL(self%npsi+1,r8)) / &
            MAX(SQRT(SUM(j_BS**2) / REAL(self%npsi+1,r8)), 1.0e-30_r8)
-    IF(djBS < self%boot_ops%djBS_tol .OR. self%freeze_alpha) THEN
+    IF(djBS < self%boot_ops%djBS_tol) THEN
       self%freeze_j_BS = .TRUE.
       IF(oft_env%pm)WRITE(*,*)' Freezing bootstrap solution.'
     ELSE IF(djBS >= self%djBS_min) THEN
@@ -536,60 +536,43 @@ END IF
 ALLOCATE(jphi_total(0:self%npsi))
 !--- 4. Solve analytically for alpha.
 !   gs_flux_int is linear in alpha; two evaluations (alpha=0 and alpha=1) give
-!   alpha = (Ip_target - Ip_lo) / (Ip_hi - Ip_lo).  Skip once frozen.
+!   alpha = (Ip_target - Ip_lo) / (Ip_hi - Ip_lo).  Re-solved every update (cheap): a
+!   frozen alpha lets I_p drift while the shape is still settling.
 ip_target = ABS(gseq%Ip_target)
-IF(self%freeze_alpha) THEN
-  !--- Frozen: reuse last converged alpha.
-  alpha = self%alpha_last
-  dalpha = 0.0_r8
-  ip_result_lo = 0.0_r8
-  ip_result_hi = 0.0_r8
+self%freeze_alpha = .FALSE.
+jphi_total = j_BS + jphi_fixed
+CALL eval_jtor_imas(gseq, R_spline, [0.0_r8, xpsi], self%npsi+1, jphi_total, pscale, jtor)
+CALL gs_flux_int(gseq, [0.0_r8, xpsi], jtor, self%npsi+1, ip_result_lo)
+jphi_total = jphi_ind + j_BS + jphi_fixed
+CALL eval_jtor_imas(gseq, R_spline, [0.0_r8, xpsi], self%npsi+1, jphi_total, pscale, jtor)
+CALL gs_flux_int(gseq, [0.0_r8, xpsi], jtor, self%npsi+1, ip_result_hi)
+ip_ind = ip_result_hi - ip_result_lo
+IF(ABS(ip_ind) > 0.0_r8)THEN
+  alpha = (ip_target - ip_result_lo) / ip_ind
+  IF(alpha < -1.0_r8 .OR. alpha > 10.0_r8) THEN
+    WRITE(char_buf,'(A,ES12.4)') '[jphi_bs_update] WARNING: alpha out of expected range [-1,10]: alpha=', alpha
+    CALL oft_warn(TRIM(char_buf))
+  END IF
 ELSE
-  !--- Not yet frozen: exact linear solve for alpha.
-  jphi_total = j_BS + jphi_fixed
-  CALL eval_jtor_imas(gseq, R_spline, [0.0_r8, xpsi], self%npsi+1, jphi_total, pscale, jtor)
-  CALL gs_flux_int(gseq, [0.0_r8, xpsi], jtor, self%npsi+1, ip_result_lo)
-  jphi_total = jphi_ind + j_BS + jphi_fixed
-  CALL eval_jtor_imas(gseq, R_spline, [0.0_r8, xpsi], self%npsi+1, jphi_total, pscale, jtor)
-  CALL gs_flux_int(gseq, [0.0_r8, xpsi], jtor, self%npsi+1, ip_result_hi)
-  ip_ind = ip_result_hi - ip_result_lo
-  IF(ABS(ip_ind) > 0.0_r8)THEN
-    alpha = (ip_target - ip_result_lo) / ip_ind
-    IF(alpha < -1.0_r8 .OR. alpha > 10.0_r8) THEN
-      WRITE(char_buf,'(A,ES12.4)') '[jphi_bs_update] WARNING: alpha out of expected range [-1,10]: alpha=', alpha
-      CALL oft_warn(TRIM(char_buf))
-    END IF
-  ELSE
-    alpha = self%alpha_last
-  END IF
-  !--- Relative change: alpha's scale is set by the units of ffp_prof (e.g. ~1e-6 for a jphi in A/m^2)
-  dalpha = ABS(alpha - self%alpha_last) / MAX(ABS(alpha), TINY(1.0_r8))
-  !--- Freeze alpha on hard tol OR 2 consecutive steps above running minimum; also freeze bootstrap.
-  IF(dalpha < self%dalpha_tol(1)) THEN
-    self%freeze_alpha = .TRUE.
-    self%freeze_j_BS = .TRUE.
-    IF(oft_env%pm)WRITE(*,*)' Freezing inductive current scale.'
-  ELSE IF(dalpha >= self%dalpha_min) THEN
-    self%dalpha_no_improve = self%dalpha_no_improve + 1
-    IF(self%dalpha_no_improve >= 2) THEN
-      WRITE(char_buf,'(A,ES12.4,A,ES12.4,A)') &
-        'Alpha convergence stalled,' // &
-        ' relative change per nonlinear step = ', dalpha, &
-        ', above recommended tolerance (dalpha_tol=', self%dalpha_tol(1), ')'
-      IF(dalpha > self%dalpha_tol(2)) THEN
-        self%dalpha_no_improve = 0 ! Reset counter, give more chances to improve
-      ELSE
-        self%freeze_alpha = .TRUE.
-        self%freeze_j_BS = .TRUE.
-        char_buf = TRIM(char_buf) // ' Freezing alpha solution.'
-      END IF
-      IF(oft_env%pm)CALL oft_warn(TRIM(char_buf))
-    END IF
-  ELSE
-    self%dalpha_no_improve = 0
-    self%dalpha_min = dalpha
-  END IF
+  alpha = self%alpha_last
 END IF
+!--- Relative change: alpha's scale is set by the units of ffp_prof (e.g. ~1e-6 for a jphi in A/m^2)
+dalpha = ABS(alpha - self%alpha_last) / MAX(ABS(alpha), TINY(1.0_r8))
+!--- Stall diagnostic only (alpha is never frozen): 2 consecutive non-decreasing steps.
+IF(dalpha >= self%dalpha_tol(1) .AND. dalpha >= self%dalpha_min) THEN
+  self%dalpha_no_improve = self%dalpha_no_improve + 1
+  IF(self%dalpha_no_improve >= 2) THEN
+    WRITE(char_buf,'(A,ES12.4,A,ES12.4,A)') &
+      'Alpha convergence stalled,' // &
+      ' relative change per nonlinear step = ', dalpha, &
+      ', above recommended tolerance (dalpha_tol=', self%dalpha_tol(1), ')'
+    self%dalpha_no_improve = 0
+    IF(oft_env%pm)CALL oft_warn(TRIM(char_buf))
+  END IF
+ELSE
+  self%dalpha_no_improve = 0
+END IF
+self%dalpha_min = dalpha   ! previous step, not a running minimum
 self%alpha_last = alpha
 IF(ip_result_lo > ip_target)THEN
   WRITE(char_buf,'(A,ES12.4,A,ES12.4,A)') 'Fixed + bootstrap current (', ip_result_lo/mu0, &

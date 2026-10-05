@@ -1219,7 +1219,8 @@ ITER_bootstrap_eq_dict = {
     'a_geo': 1.9807072056151687,
     'q_0': 1.036565329524374,
     'q_95': 2.863029898626678,
-    'P_ax': 740023.5117187898,
+    # P_ax = p(axis) - p(LCFS) since pax targets the drop TokaMaker's P' carries (was p(axis): -2.3 %)
+    'P_ax': 7.232048E+05,
     'j_BS_max': 219163.55709184994,
     'j_BS_axis': 4696.213397541225,
     'jphi_axis': 1397130.088093367,
@@ -1902,8 +1903,10 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
                 raise AssertionError(f"p_fixed_prof vs pres_prof=kinetic+p_fixed: boot_profs['{key}'] differ")
         if not np.allclose(P_pfix, P_pres, rtol=1e-6, atol=1e-6*np.max(P_pres)):
             raise AssertionError("p_fixed_prof vs pres_prof=kinetic+p_fixed: pressure profiles differ")
-        if not np.isclose(P_ax_pfix, p_kin[0] + pf[0], rtol=1e-4):
-            raise AssertionError(f"axis pressure {P_ax_pfix:.6e} != kinetic + p_fixed {p_kin[0] + pf[0]:.6e}")
+        # TokaMaker holds P = 0 at the LCFS: the axis value is the kinetic + p_fixed drop
+        p_tot = p_kin + pf
+        if not np.isclose(P_ax_pfix, p_tot[0] - p_tot[-1], rtol=1e-4):
+            raise AssertionError(f"axis pressure {P_ax_pfix:.6e} != kinetic + p_fixed drop {p_tot[0] - p_tot[-1]:.6e}")
         mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         if np.isclose(np.max(mygs.get_profiles(psi=np.array([0.0, 1.0]))[3]), P_ax_pfix, rtol=1e-4):
             raise AssertionError("p_fixed_prof did not change the axis pressure")
@@ -1931,9 +1934,10 @@ ITER_bootstrap_internal_eq_dict = {
     'a_geo':     1.9785979198829686,
     'q_0':       1.3748401369017682,
     'q_95':      3.504083741872661,
-    'P_ax':      740021.5037035183,
-    'beta_pol':  85.19729428055419,
-    'beta_tor':  2.492084824025585,
+    # P_ax = p(axis) - p(LCFS) since pax targets the drop TokaMaker's P' carries (was p(axis): -2.3 %)
+    'P_ax':      7.232028E+05,
+    'beta_pol':  8.320959E+01,
+    'beta_tor':  2.435303E+00,
     'jphi_axis': 1010416.1199979713,
     'jphi_max':  1173298.5135544762,
     'q_axis':    1.410565702638605,

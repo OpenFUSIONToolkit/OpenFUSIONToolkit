@@ -2486,8 +2486,9 @@ class TokaMaker():
             if jphi_fixed_prof is not None:
                 jphi_fixed_prof = dict(jphi_fixed_prof, coord='phi_n_relabel')
 
-        # Evaluate pressure on axis
-        pax = float(pressure[0])
+        # Axis target = the pressure drop the P' profile carries: TokaMaker holds P = 0 at the
+        # LCFS, so targeting pressure[0] would scale P' up by pressure[0]/(pressure[0] - pressure[-1])
+        pax = float(pressure[0] - pressure[-1])
         if ffp_prof['x'][0] > 0:
             warn(f"Bootstrap solver expects profiles defined at psi=0 (axis). Current axis-pressure evaluated at psi_N={ffp_prof['x'][0]:.3f}. Consider extending profile to psi=0 for increased accuracy.", UserWarning, stacklevel=2)
 
