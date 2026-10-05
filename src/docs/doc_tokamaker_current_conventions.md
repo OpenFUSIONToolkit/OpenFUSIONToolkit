@@ -80,17 +80,26 @@ By (A4), ⟨j_φ/R⟩ = ⟨1/R⟩J_IMAS, so comparing with (A9a)
     (A9c) I_p = ∫ J_IMAS dA      (exact; J_IMAS from J_TM by (A5))
     (A9d) I_p = ∫dψ (V′/2π) [J_TM⟨1/R²⟩/⟨1/R⟩ + p′(1 − ⟨R⟩⟨1/R²⟩/⟨1/R⟩)]
 
-`gs_flux_int(J_TM/(⟨R⟩⟨1/R⟩))`, used previously to normalise jphi profiles, evaluates by (A9a)
-∫dψ (V′/2π) J_TM/⟨R⟩, which equals (A9b) only if ⟨j_φ/R⟩ = ⟨j_φ⟩/⟨R⟩. This did not bias the
-converged I_p: `jphi_update` switches to the FEM current (`gs_itor_nl`) after its first iteration,
-and `jphi_bs_update` rescales its I_p target by `gs_itor_nl`/`gs_flux_int` on the total. Integrating
-J_IMAS(J_TM) instead (A9c) makes the measure itself exact, so that correction factor is ≈ 1 (up to
-discretisation) and the first iterate already carries the right current.
+TokaMaker evaluates (A9c) as `gs_flux_int(J_IMAS(J_TM))`, which is (A9a) on the plasma region.
+Two earlier errors in this measure have been removed:
+- the integrand was J_TM/(⟨R⟩⟨1/R⟩), i.e. ∫dψ (V′/2π) J_TM/⟨R⟩, which equals (A9b) only if
+  ⟨j_φ/R⟩ = ⟨j_φ⟩/⟨R⟩;
+- `gs_flux_int` integrated over the whole plasma region of the mesh, crediting every point outside
+  the LCFS with the profile's LCFS value (the profile interpolator returns the LCFS end there). For a
+  profile with a finite edge value this overstated I_p by several percent (ITER bootstrap case:
+  5–7 %); ∫ 1 dA was the region's area, not the plasma's.
+
+`jphi_bs_update` used to absorb both errors by rescaling its I_p target by
+`gs_itor_nl`/`gs_flux_int` on the total. With the exact measure that factor converged to 1.0004
+(1-D quadrature error) and has been removed, so the SWB inductive scale α is set by (A9c) alone;
+converged I_p sits within a few 1e-4 of the target. `jphi_update` normalises its first iterate by
+(A9c) and then follows the FEM current (`gs_itor_nl`).
 
 ## Where these are used
 - TokaMaker `jphi_bs_update` / `calculate_bootstrap` (Fortran) and `solve_with_bootstrap(use_python_solve=True)`:
   the bootstrap enters `jphi_total` by (A7) with p′G; `boot_profs['jdotb_bs_raw']` holds the Redl ⟨J·B⟩.
-- TokaMaker `jphi_update` / `jphi_bs_update` I_p normalisation: (A9c).
+- TokaMaker `jphi_update` / `jphi_bs_update` I_p normalisation, and the α root of
+  `solve_with_bootstrap(use_python_solve=True)` (`compute_flux_integral` of J_IMAS): (A9c).
 - bouquet: currents are stored as J_TM; FUSE/IMAS currents are read and written through (A5)–(A7).
 
 ## References
