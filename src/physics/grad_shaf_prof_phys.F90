@@ -596,7 +596,8 @@ IF(self%coord==2.AND.ASSOCIATED(self%tmap))THEN
 END IF
 end subroutine jphi_psi_nodes
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Area integral over the plasma (inside the LCFS) of a flux function given on
+!! normalized psi nodes (0 at the LCFS, 1 at the axis)
 !---------------------------------------------------------------------------------
 SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result)
 class(gs_equil), INTENT(inout) :: self !< Pointer to TokaMaker object
@@ -619,6 +620,7 @@ do i=1,self%device%mesh%nc
   do m=1,self%device%fe_rep%quad%np
     call self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
     call prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
+    IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma (mode 4 returns 0 there)
     psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
     IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*self%device%fe_rep%quad%wts(m)
   end do

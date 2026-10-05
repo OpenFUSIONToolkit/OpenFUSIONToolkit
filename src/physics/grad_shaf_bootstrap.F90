@@ -66,7 +66,6 @@ END TYPE boot_profs
 !------------------------------------------------------------------------------
 type, extends(jphi_flux_func) :: jphi_bs_flux_func
   real(8) :: alpha_last = 1.d0 !< Alpha (input Jphi rescaling factor) from previous NL iteration
-  real(8) :: rescale_last = 1.d0 !< Damped jphi_rescale from previous NL iteration, to ensure Ip target is met
   logical :: freeze_j_BS = .FALSE. !< Set .TRUE. once j_BS stagnates for 2 steps; skips Sauter call (big speedup)
   logical :: freeze_alpha = .FALSE.   !< Set .TRUE. once dalpha stagnates for 2 steps; skips alpha re-solve (speedup)
   real(8) :: djBS_stol = 1.0e-3_r8 !< RMS tolerance stagnation value: reset no-improve counter if above this
@@ -75,7 +74,6 @@ type, extends(jphi_flux_func) :: jphi_bs_flux_func
   real(8) :: djBS_min = huge(1.0d0)  !< Running minimum djBS seen so far
   integer(4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
   real(8) :: dalpha_min = huge(1.0d0) !< Running minimum dalpha seen so far
-  real(8), pointer, dimension(:) :: jphi_total_last => NULL() !< Assembled jphi_total from previous NL iteration
   real(8), pointer, dimension(:) :: j_BS_last => NULL() !< j_BS profile from previous NL iteration (for freeze check)
   TYPE(boot_ops) :: boot_ops       !< Python read-in ptions for j_bs_update
   TYPE(boot_profs) :: boot_profs   !< Cached current profiles from the last jphi_bs_update call
@@ -317,7 +315,6 @@ CALL jphi_copy(self,new)
 SELECT TYPE(new)
   CLASS IS(jphi_bs_flux_func)
     new%alpha_last = self%alpha_last
-    new%rescale_last = self%rescale_last
     new%freeze_j_BS = self%freeze_j_BS
     new%freeze_alpha = self%freeze_alpha
     new%djBS_stol = self%djBS_stol
@@ -327,7 +324,6 @@ SELECT TYPE(new)
     new%dalpha_no_improve = self%dalpha_no_improve
     new%dalpha_min = self%dalpha_min
     new%boot_ops = self%boot_ops
-    IF(ASSOCIATED(self%jphi_total_last)) ALLOCATE(new%jphi_total_last, SOURCE=self%jphi_total_last)
     IF(ASSOCIATED(self%j_BS_last)) ALLOCATE(new%j_BS_last, SOURCE=self%j_BS_last)
     IF(ASSOCIATED(self%boot_profs%psi_n))ALLOCATE(new%boot_profs%psi_n,SOURCE=self%boot_profs%psi_n)
     IF(ASSOCIATED(self%boot_profs%j_bs_raw))ALLOCATE(new%boot_profs%j_bs_raw,SOURCE=self%boot_profs%j_bs_raw)
@@ -348,7 +344,6 @@ IF(ASSOCIATED(self%jphi))DEALLOCATE(self%jphi)
 IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
 IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
 IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
-IF(ASSOCIATED(self%jphi_total_last))DEALLOCATE(self%jphi_total_last)
 IF(ASSOCIATED(self%j_BS_last))DEALLOCATE(self%j_BS_last)
 !---Destroy cached bootstrap current profiles
 IF(ASSOCIATED(self%boot_profs%j_bs_raw))DEALLOCATE(self%boot_profs%j_bs_raw)
@@ -366,11 +361,11 @@ end subroutine jphi_bs_delete
 !>   1. Build <R>/<1/R>/<1/R^2> spline on self%x; pressure scale.
 !>   2. Evaluate fixed current jphi_fixed and bootstrap current j_BS on self%x (or reuse cache if frozen).
 !>   3. Apply edge taper to j_BS, jphi_ind and jphi_fixed component-wise.
-!>   4. Compute jphi_rescale to reconcile gs_itor_nl vs gs_flux_int (~1: the measure is exact).
-!>   5. Solve analytically for alpha: the exact I_p (gs_flux_int of eval_jtor_imas) is affine in
-!>      alpha, so two evaluations (alpha=0, alpha=1) give alpha = (Ip_target - Ip_lo)/(Ip_hi - Ip_lo).
-!>   6. Assemble jphi_total = alpha*jphi_ind + j_BS + jphi_fixed; compute F*F' knots.
-!>   7. Diagnostics (if diagnose_bs is set).
+!>   4. Solve analytically for alpha: the exact I_p (gs_flux_int of eval_jtor_imas, eq. A9c) is
+!>      affine in alpha, so two evaluations (alpha=0, alpha=1) give
+!>      alpha = (Ip_target - Ip_lo)/(Ip_hi - Ip_lo).
+!>   5. Assemble jphi_total = alpha*jphi_ind + j_BS + jphi_fixed; compute F*F' knots.
+!>   6. Diagnostics (if diagnose_bs is set).
 !---------------------------------------------------------------------------------
 SUBROUTINE jphi_bs_update(self, gseq)
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
@@ -393,8 +388,8 @@ REAL(r8), ALLOCATABLE :: jphi_fixed(:)  !< Fixed current from gseq%jphi_fixed (A
 REAL(r8) :: alpha, ip_target, ip_ind, ip_result_lo, ip_result_hi, dalpha
 ! Relative change in bootstrap current for freeze check
 REAL(r8) :: djBS
-! gs_itor_nl / gs_flux_int reconciliation
-REAL(r8) :: itor_nl = 0.0_r8, itor_flint = 0.0_r8, jphi_rescale
+! Diagnostic I_p comparison
+REAL(r8) :: itor_nl, itor_flint
 CHARACTER(len=256) :: char_buf
 !--- First-iteration runs with no bootstrap current
 IF(.NOT. gseq%skip_targets) THEN
@@ -539,21 +534,10 @@ IF (self%boot_ops%taper_edge_jBS) THEN
                         oft_psi_conv=.TRUE.)
 END IF
 ALLOCATE(jphi_total(0:self%npsi))
-!--- 4. Reconcile gs_itor_nl vs gs_flux_int.
-!   No Ip target: rescale jphi_total so the integrated current matches the
-!   FEM solution (gs_itor_nl) rather than the profile quadrature (gs_flux_int).
-jphi_rescale = self%rescale_last
-IF(ASSOCIATED(self%jphi_total_last) .AND. .NOT. self%freeze_alpha) THEN
-  CALL gs_itor_nl(gseq, itor_nl)
-  CALL eval_jtor_imas(gseq, R_spline, [0.0_r8, xpsi], self%npsi+1, self%jphi_total_last, pscale, jtor)
-  CALL gs_flux_int(gseq, [0.0_r8, xpsi], jtor, self%npsi+1, itor_flint)
-  jphi_rescale = (itor_nl/itor_flint + self%rescale_last) / 2.0_r8
-  self%rescale_last = jphi_rescale
-END IF
-!--- 5. Solve analytically for alpha.
+!--- 4. Solve analytically for alpha.
 !   gs_flux_int is linear in alpha; two evaluations (alpha=0 and alpha=1) give
 !   alpha = (Ip_target - Ip_lo) / (Ip_hi - Ip_lo).  Skip once frozen.
-ip_target = ABS(gseq%Ip_target)/jphi_rescale
+ip_target = ABS(gseq%Ip_target)
 IF(self%freeze_alpha) THEN
   !--- Frozen: reuse last converged alpha.
   alpha = self%alpha_last
@@ -611,10 +595,8 @@ IF(ip_result_lo > ip_target)THEN
     ' A) exceeds target plasma current (', ip_target/mu0, ' A); inductive current is reversed'
   IF(oft_env%pm)CALL oft_warn(TRIM(char_buf))
 END IF
-!--- 6. Assemble jphi_total, save profiles
+!--- 5. Assemble jphi_total, save profiles
 jphi_total = alpha * jphi_ind + j_BS + jphi_fixed
-IF(.NOT.ASSOCIATED(self%jphi_total_last)) ALLOCATE(self%jphi_total_last(0:self%npsi))
-self%jphi_total_last = jphi_total
 IF(.NOT.ASSOCIATED(self%boot_profs%total_j_phi))THEN
   ALLOCATE(self%boot_profs%psi_n(0:self%npsi))
   ALLOCATE(self%boot_profs%total_j_phi(0:self%npsi))
@@ -642,7 +624,7 @@ END DO
 ! gseq%skip_targets is already true when jphi_bs_update called
 gseq%ffp_scale=1.d0
 gseq%p_scale=pscale
-!--- 7. Diagnostics.
+!--- 6. Diagnostics.
 IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] ip_target   = ', ip_target
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] ip_result_lo= ', ip_result_lo
@@ -655,7 +637,6 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] j_BS max    = ', MAXVAL(ABS(j_BS))
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi max    = ', MAXVAL(ABS(self%jphi))
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi_fixed max = ', MAXVAL(ABS(jphi_fixed))
-  WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi_rescale= ', jphi_rescale
   !--- Side-by-side Ip comparison: FEM nonlinear solve vs profile flux integral
   CALL gs_itor_nl(gseq, itor_nl)
   CALL eval_jtor_imas(gseq, R_spline, [0.0_r8, xpsi], self%npsi+1, jphi_total, pscale, jtor)
