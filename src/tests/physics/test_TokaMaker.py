@@ -2160,7 +2160,8 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
 def _torflux_check(res, psi_tol, q_tol, its_ref=None):
     assert res['psi_err'] < psi_tol
     assert res['q_err'] < q_tol
-    assert res['Ip_err'] < 1.E-4
+    # I_p is set by the exact 1-D profile quadrature (no FEM rescale in jphi_bs_update): residual up to ~4e-4
+    assert res['Ip_err'] < 5.E-4
     if its_ref is not None:
         assert res['its'] <= its_ref + 5
 
