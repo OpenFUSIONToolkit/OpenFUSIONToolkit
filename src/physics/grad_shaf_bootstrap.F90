@@ -54,7 +54,8 @@ END TYPE boot_ops
 !------------------------------------------------------------------------------
 TYPE :: boot_profs
   REAL(r8), POINTER, DIMENSION(:) :: psi_n => NULL() !< Normalised psi_N values for these current profiles in OFT convention (0=LCFS, 1=axis); index 0 is the LCFS boundary
-  REAL(r8), POINTER, DIMENSION(:) :: j_bs_raw => NULL() !< Raw bootstrap current density output directly from Redl PoP 2021 formula [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: j_bs_raw => NULL() !< Redl PoP 2021 bootstrap as TokaMaker jphi, <j_BS.B> F<1/R>/<B^2> + P'(<R> - F^2<1/R>/<B^2>), before isolation/scaling [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: jdotb_bs_raw => NULL() !< Redl PoP 2021 <j_BS.B> on the j_bs_raw grid [T A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: total_j_phi => NULL() !< Total toroidal current density = j_ind_final + j_bs_final + jphi_fixed [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: j_ind_final => NULL() !< Input jphi, re-scaled & optionally tapered [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: j_bs_final => NULL() !< Bootstrap current density, optionally isolated/parametrised/tapered [A/m²]
@@ -157,6 +158,8 @@ IF(ASSOCIATED(self%boot_profs%total_j_phi).OR.ASSOCIATED(self%boot_profs%j_bs_ra
       CALL hdf5_write(self%boot_profs%jphi_fixed,filename,path//'/BOOT_PROFS/JPHI_FIXED')
     IF(ASSOCIATED(self%boot_profs%j_bs_raw)) &
       CALL hdf5_write(self%boot_profs%j_bs_raw,filename,path//'/BOOT_PROFS/J_BS_RAW')
+    IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw)) &
+      CALL hdf5_write(self%boot_profs%jdotb_bs_raw,filename,path//'/BOOT_PROFS/JDOTB_BS_RAW')
   END IF
 END IF
 end subroutine jphi_bs_save_hdf5
@@ -241,6 +244,13 @@ IF(hdf5_field_exist(filename,path//'/BOOT_PROFS'))THEN
       DEALLOCATE(dim_sizes)
       CALL hdf5_read(self%boot_profs%j_bs_raw,filename,path//'/BOOT_PROFS/J_BS_RAW',success=success)
     END IF
+    IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw))DEALLOCATE(self%boot_profs%jdotb_bs_raw)
+    IF(hdf5_field_exist(filename,path//'/BOOT_PROFS/JDOTB_BS_RAW'))THEN
+      CALL hdf5_field_get_sizes(filename,path//'/BOOT_PROFS/JDOTB_BS_RAW',ndims,dim_sizes)
+      ALLOCATE(self%boot_profs%jdotb_bs_raw(0:dim_sizes(1)-1))
+      DEALLOCATE(dim_sizes)
+      CALL hdf5_read(self%boot_profs%jdotb_bs_raw,filename,path//'/BOOT_PROFS/JDOTB_BS_RAW',success=success)
+    END IF
   END IF
 END IF
 end subroutine jphi_bs_load_hdf5
@@ -321,6 +331,7 @@ SELECT TYPE(new)
     IF(ASSOCIATED(self%j_BS_last)) ALLOCATE(new%j_BS_last, SOURCE=self%j_BS_last)
     IF(ASSOCIATED(self%boot_profs%psi_n))ALLOCATE(new%boot_profs%psi_n,SOURCE=self%boot_profs%psi_n)
     IF(ASSOCIATED(self%boot_profs%j_bs_raw))ALLOCATE(new%boot_profs%j_bs_raw,SOURCE=self%boot_profs%j_bs_raw)
+    IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw))ALLOCATE(new%boot_profs%jdotb_bs_raw,SOURCE=self%boot_profs%jdotb_bs_raw)
     IF(ASSOCIATED(self%boot_profs%total_j_phi))ALLOCATE(new%boot_profs%total_j_phi,SOURCE=self%boot_profs%total_j_phi)
     IF(ASSOCIATED(self%boot_profs%j_bs_final))ALLOCATE(new%boot_profs%j_bs_final,SOURCE=self%boot_profs%j_bs_final)
     IF(ASSOCIATED(self%boot_profs%j_ind_final))ALLOCATE(new%boot_profs%j_ind_final,SOURCE=self%boot_profs%j_ind_final)
@@ -341,6 +352,7 @@ IF(ASSOCIATED(self%jphi_total_last))DEALLOCATE(self%jphi_total_last)
 IF(ASSOCIATED(self%j_BS_last))DEALLOCATE(self%j_BS_last)
 !---Destroy cached bootstrap current profiles
 IF(ASSOCIATED(self%boot_profs%j_bs_raw))DEALLOCATE(self%boot_profs%j_bs_raw)
+IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw))DEALLOCATE(self%boot_profs%jdotb_bs_raw)
 IF(ASSOCIATED(self%boot_profs%total_j_phi))DEALLOCATE(self%boot_profs%total_j_phi)
 IF(ASSOCIATED(self%boot_profs%j_bs_final))DEALLOCATE(self%boot_profs%j_bs_final)
 IF(ASSOCIATED(self%boot_profs%j_ind_final))DEALLOCATE(self%boot_profs%j_ind_final)
@@ -988,7 +1000,7 @@ END SUBROUTINE gradient_
 !> @param gseq    Equilibrium object (must have Te, Ti, ne, ni, Zeff set)
 !> @param n_psi    Number of flux surface samples
 !> @param psi_N    Normalised psi grid [0,1], arbitrary spacing
-!> @param j_BS Output: average toroidal bootstrap current density [A/m^2] on psi_N grid
+!> @param j_BS Output: bootstrap current density as TokaMaker jphi = <j_phi> [A/m^2] on psi_N grid
 !------------------------------------------------------------------------------
 SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, j_BS, &
                                isolate_edge_jBS, parameterize_jBS, scale_jBS, &
@@ -1023,7 +1035,7 @@ REAL(r8) :: ln_le(n_psi), ln_lii(n_psi), Z_lnLam(n_psi)
 REAL(r8) :: Zavg(n_psi), Zion(n_psi)
 REAL(r8) :: nu_i_star(n_psi), nu_e_star(n_psi)
 REAL(r8) :: B_times_Jbs(n_psi)
-REAL(r8) :: psi_range, Zdom
+REAL(r8) :: psi_range, Zdom, pscale, pprime
 REAL(r8), PARAMETER :: EC = 1.602176634e-19_r8
 ! Locals for optional edge-spike isolation
 LOGICAL  :: do_isolate, do_parametrize
@@ -1096,25 +1108,39 @@ nu_e_star = 6.921e-18_r8 * ABS(qvals) * R_avg * ne &
 CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, qvals, eps, ft, f, &
     dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &
     ln_le, ln_lii, nu_e_star, nu_i_star, B_times_Jbs)
-! Convert parallel bootstrap to phi component: j_phi = B_times_Jbs * <R> / F
+! Convert <j_BS.B> to TokaMaker's jphi = <j_phi> = <R>P' + <1/R>FF'/mu0 (exact, see
+! doc_tokamaker_current_conventions.md eq. A7): the field-aligned part F<1/R>/<B^2> * <j_BS.B>,
+! plus the pressure-driven (diamagnetic + Pfirsch-Schlueter) part P'(<R> - F^2<1/R>/<B^2>),
+! which is assigned to the bootstrap (as IMAS includes_bootstrap=true). P' as in jphi_bs_update.
+pscale = gseq%pax_target/gseq%P%f(gseq%plasma_bounds(2))
 j_BS(0) = 0.0_r8 ! Placeholder until extrap_jBS_boundaries sets the real LCFS value below
-WHERE(ABS(f) > 0.0_r8)
-  j_BS(1:) = B_times_Jbs / B_avg
-ELSEWHERE
-  j_BS(1:) = 0.0_r8
-END WHERE
+DO i = 1, n_psi
+  IF(ABS(f(i)) > 0.0_r8 .AND. modb_avgs_saut(i,2) > 0.0_r8)THEN
+    pprime = gseq%P%fp(psi_abs(i))*pscale/mu0
+    j_BS(i) = B_times_Jbs(i)*f(i)*r_avgs_saut(i,2)/modb_avgs_saut(i,2) &
+      + pprime*(r_avgs_saut(i,1) - f(i)**2*r_avgs_saut(i,2)/modb_avgs_saut(i,2))
+  ELSE
+    j_BS(i) = 0.0_r8
+  END IF
+END DO
 ! Guard NaN (where F -> 0)
 WHERE(.NOT.(ABS(j_BS) < 1.0e99_r8)) j_BS = 0.0_r8
 ! Extrapolate to LCFS/axis where q is undefined. Sets LCFS value j_BS(0).
 CALL extrap_jBS_boundaries(n_psi, psi_N, j_BS)
-! Save raw bootstrap output
+! Save raw bootstrap output, and Redl's <j_BS.B> on the same grid
 IF(.NOT.ASSOCIATED(self%boot_profs%j_bs_raw)) ALLOCATE(self%boot_profs%j_bs_raw(0:n_psi))
 self%boot_profs%j_bs_raw = j_BS
+IF(.NOT.ASSOCIATED(self%boot_profs%jdotb_bs_raw)) ALLOCATE(self%boot_profs%jdotb_bs_raw(0:n_psi))
+self%boot_profs%jdotb_bs_raw(0) = 0.0_r8
+self%boot_profs%jdotb_bs_raw(1:) = B_times_Jbs
+WHERE(.NOT.(ABS(self%boot_profs%jdotb_bs_raw) < 1.0e99_r8)) self%boot_profs%jdotb_bs_raw = 0.0_r8
+CALL extrap_jBS_boundaries(n_psi, psi_N, self%boot_profs%jdotb_bs_raw)
 IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A)') '  [calculate_bootstrap] geometry & collisionality sample (i=1,mid,n):'
   WRITE(*,'(A,3ES12.4)') '    <R>      : ', r_avgs_saut(1,1), r_avgs_saut(n_psi/2,1), r_avgs_saut(n_psi,1)
   WRITE(*,'(A,3ES12.4)') '    <1/R>    : ', r_avgs_saut(1,2), r_avgs_saut(n_psi/2,2), r_avgs_saut(n_psi,2)
   WRITE(*,'(A,3ES12.4)') '    <B>      : ', B_avg(1), B_avg(n_psi/2), B_avg(n_psi)
+  WRITE(*,'(A,3ES12.4)') '    <B^2>    : ', modb_avgs_saut(1,2), modb_avgs_saut(n_psi/2,2), modb_avgs_saut(n_psi,2)
   WRITE(*,'(A,3ES12.4)') '    eps      : ', eps(1), eps(n_psi/2), eps(n_psi)
   WRITE(*,'(A,3ES12.4)') '    q        : ', qvals(1), qvals(n_psi/2), qvals(n_psi)
   WRITE(*,'(A,3ES12.4)') '    nu_e_star: ', nu_e_star(1), nu_e_star(n_psi/2), nu_e_star(n_psi)

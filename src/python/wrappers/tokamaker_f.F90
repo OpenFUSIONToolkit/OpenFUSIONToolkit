@@ -652,10 +652,11 @@ END SUBROUTINE tokamaker_get_boot_ops
 !!
 !! Returns C pointers directly into the Fortran-owned arrays.
 !! n is the size of the total_j_phi/psi_n/j_bs_final/j_ind_final/jphi_fixed group (0 if not allocated).
-!! n_raw is the size of j_bs_raw (0 if not allocated).  The two sizes may differ.
+!! n_raw is the size of j_bs_raw and jdotb_bs_raw (0 if not allocated).  The two sizes may differ.
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_boot_profs(tMaker_equil_ptr,n,psi_n_ptr,total_j_phi_ptr, &
-    j_bs_final_ptr,j_ind_final_ptr,jphi_fixed_ptr,n_raw,j_bs_raw_ptr,error_str) BIND(C,NAME="tokamaker_get_boot_profs")
+    j_bs_final_ptr,j_ind_final_ptr,jphi_fixed_ptr,n_raw,j_bs_raw_ptr,jdotb_bs_raw_ptr,error_str) &
+    BIND(C,NAME="tokamaker_get_boot_profs")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 INTEGER(c_int), INTENT(out) :: n !< Size of total_j_phi, psi_n, j_bs_final, j_ind_final arrays (0 if not allocated)
 TYPE(c_ptr), INTENT(out) :: psi_n_ptr !< Pointer to psi_n array
@@ -665,6 +666,7 @@ TYPE(c_ptr), INTENT(out) :: j_ind_final_ptr !< Pointer to j_ind_final array
 TYPE(c_ptr), INTENT(out) :: jphi_fixed_ptr !< Pointer to jphi_fixed array (c_null_ptr if not allocated)
 INTEGER(c_int), INTENT(out) :: n_raw !< Size of j_bs_raw array (0 if not allocated)
 TYPE(c_ptr), INTENT(out) :: j_bs_raw_ptr !< Pointer to j_bs_raw array (c_null_ptr if not allocated)
+TYPE(c_ptr), INTENT(out) :: jdotb_bs_raw_ptr !< Pointer to jdotb_bs_raw array (c_null_ptr if not allocated)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
@@ -678,6 +680,7 @@ TYPE IS (jphi_bs_flux_func)
   j_ind_final_ptr = c_null_ptr
   jphi_fixed_ptr = c_null_ptr
   j_bs_raw_ptr = c_null_ptr
+  jdotb_bs_raw_ptr = c_null_ptr
   IF(ASSOCIATED(I%boot_profs%total_j_phi))THEN
     n = SIZE(I%boot_profs%total_j_phi, KIND=c_int)
     psi_n_ptr = c_loc(I%boot_profs%psi_n)
@@ -689,6 +692,7 @@ TYPE IS (jphi_bs_flux_func)
   IF(ASSOCIATED(I%boot_profs%j_bs_raw))THEN
     n_raw = SIZE(I%boot_profs%j_bs_raw, KIND=c_int)
     j_bs_raw_ptr = c_loc(I%boot_profs%j_bs_raw)
+    IF(ASSOCIATED(I%boot_profs%jdotb_bs_raw))jdotb_bs_raw_ptr = c_loc(I%boot_profs%jdotb_bs_raw)
   END IF
 CLASS DEFAULT
   CALL oft_warn('tokamaker_get_boot_profs: ffp_prof is not of type jphi-split-bootstrap. ' // &

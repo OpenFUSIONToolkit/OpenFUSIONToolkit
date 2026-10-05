@@ -1656,6 +1656,39 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
     eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
 
+    # --- Verify the <j_BS.B> -> jphi conversion (doc_tokamaker_current_conventions eqs. A7, A8)
+    #     against geometry traced independently from the converged equilibrium ---
+    try:
+        bp = mygs.get_boot_profs()
+        inner = (bp['psi_n'] > 0.05) & (bp['psi_n'] < 0.95)
+        psi_c = bp['psi_n'][inner]
+        _, F_c, Fp_c, _, Pp_c = mygs.get_profiles(psi=psi_c)
+        _, _, ravgs_c, _, _, _ = mygs.get_q(psi=psi_c)
+        _, _, _, modb_c = mygs.sauter_fc(psi=psi_c)
+        R_c, invR_c, B2_c = ravgs_c['<R>'], ravgs_c['<1/R>'], modb_c[1]
+        jdotb = bp['jdotb_bs_raw'][inner]
+        field_aligned = jdotb * F_c * invR_c / B2_c
+        p_term = Pp_c * (R_c - F_c**2 * invR_c / B2_c)
+        scale = np.max(np.abs(bp['j_bs_raw'][inner]))
+        err = np.max(np.abs(bp['j_bs_raw'][inner] - (field_aligned + p_term))) / scale
+        err_flip = np.max(np.abs(bp['j_bs_raw'][inner] - (field_aligned - p_term))) / scale
+        print(f"j_bs_raw vs A7: rel err {err:.3e} (pressure term flipped: {err_flip:.3e}), "
+              f"max|P'G|/max|j_BS| = {np.max(np.abs(p_term))/scale:.3e}")
+        if not (err < 1.0e-2 and err_flip > 5.0 * err):
+            raise AssertionError(f"j_bs_raw does not match eq. A7 (rel err {err:.3e}, flipped {err_flip:.3e})")
+        # A8: the equilibrium's own <J.B> = F P' + F'<B^2>/mu0 equals the sum of its components'
+        jdotb_eq = F_c * Pp_c + Fp_c * B2_c / mu0
+        jdotb_sum = jdotb + (bp['j_ind_final'][inner] + bp['jphi_fixed'][inner]) * B2_c / (F_c * invR_c)
+        err_par = np.max(np.abs(jdotb_eq - jdotb_sum)) / np.max(np.abs(jdotb_eq))
+        print(f"<J.B> balance (A8): rel err {err_par:.3e}")
+        if err_par > 2.0e-2:
+            raise AssertionError(f"equilibrium <J.B> != sum of components (rel err {err_par:.3e})")
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        mp_q.put(None)
+        return
+
     # --- Verify that boot_ops, boot_profs round-trips correctly through save/load, and that
     #     replace_eq(source_file=...) correctly syncs the _boot_ops shadow dict ---
     save_file = 'ITER_boot_ops_test.h5'
