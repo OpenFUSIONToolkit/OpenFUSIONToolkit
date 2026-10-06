@@ -346,7 +346,7 @@ def read_ifile(filename):
     '''! Read i-file inverse equilibrium file
 
     @param filename Path to file
-    @result Dictionary containing i-file information
+    @result Dictionary containing i-file information (`ffp`, `pp`: \f$FF'\f$, \f$P'\f$ when present)
     '''
     def read_array(content,offset,var_type,count):
         if var_type in ("i", "f"):
@@ -392,6 +392,9 @@ def read_ifile(filename):
     Z, offset = read_array(content,offset,var_type,sizes[0]*sizes[1])
     out_dict["R"] = R.reshape(sizes)
     out_dict["Z"] = Z.reshape(sizes)
+    if offset < len(content):
+        out_dict["ffp"], offset = read_array(content,offset,var_type,sizes[0])
+        out_dict["pp"], offset = read_array(content,offset,var_type,sizes[0])
     return out_dict
 
 
