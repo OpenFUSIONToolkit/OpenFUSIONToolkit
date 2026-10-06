@@ -1003,22 +1003,24 @@ real(8), intent(in) :: axis(2) !< Ray origin (magnetic axis)
 real(8), intent(in) :: theta !< Ray angle
 real(8), intent(in) :: psi_target !< Flux of the surface
 integer(4), intent(inout) :: cell !< Cell guess (updated)
-real(8), intent(inout) :: pt(2) !< Guess (input); point on the surface (output)
-real(8) :: e(2),rho,drho,f(3),gop(3,3),v,psi(1),gpsi(3),pt3(3)
+real(8), intent(inout) :: pt(2) !< Traced point (input); point on the surface (output, unchanged if not converged)
+real(8) :: e(2),rho,drho,f(3),gop(3,3),v,psi(1),gpsi(3)
 integer(4) :: i
 e=[COS(theta),SIN(theta)]
 rho=SQRT(SUM((pt-axis)**2))
 DO i=1,20
-  pt3=[axis+rho*e,0.d0]
-  CALL bmesh_findcell(mesh,cell,pt3,f)
+  CALL bmesh_findcell(mesh,cell,axis+rho*e,f)
+  IF(cell==0)RETURN
   CALL mesh%jacobian(cell,f,gop,v)
   CALL psi_int%interp(cell,f,gop,psi)
   CALL psi_gint%interp(cell,f,gop,gpsi)
   drho=(psi(1)-psi_target)/DOT_PRODUCT(gpsi(1:2),e)
   rho=rho-drho
-  IF(ABS(drho)<1.d-13*rho)EXIT
+  IF(ABS(drho)<1.d-13*rho)THEN
+    pt=axis+rho*e
+    RETURN
+  END IF
 END DO
-pt=axis+rho*e
 end subroutine ifile_snap
 !------------------------------------------------------------------------------
 !> F*dF/dpsi and dp/dpsi at `psi` (`fval` is F there)
