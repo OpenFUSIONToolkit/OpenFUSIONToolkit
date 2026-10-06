@@ -67,13 +67,12 @@ END TYPE boot_profs
 type, extends(jphi_flux_func) :: jphi_bs_flux_func
   real(8) :: alpha_last = 1.d0 !< Alpha (input Jphi rescaling factor) from previous NL iteration
   logical :: freeze_j_BS = .FALSE. !< Set .TRUE. once j_BS stagnates for 2 steps; skips Sauter call (big speedup)
-  logical :: freeze_alpha = .FALSE.   !< Kept for compatibility; alpha is re-solved every update (never frozen)
   real(8) :: djBS_stol = 1.0e-3_r8 !< RMS tolerance stagnation value: reset no-improve counter if above this
-  real(8) :: dalpha_tol(2) = [1.0e-6_r8, 1.0e-3_r8]   !< Relative (|dalpha|/|alpha|): (1) no stall warning below this; (2) unused
+  real(8) :: dalpha_warn_tol = 1.0e-6_r8 !< Relative (|dalpha|/|alpha|): no alpha stall warning below this
   integer(4) :: djBS_no_improve = 0   !< Consecutive steps with non-decreasing djBS
   real(8) :: djBS_min = huge(1.0d0)  !< Running minimum djBS seen so far
   integer(4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
-  real(8) :: dalpha_min = huge(1.0d0) !< dalpha of the previous update (stall diagnostic)
+  real(8) :: dalpha_last = huge(1.0d0) !< dalpha of the previous update (stall diagnostic)
   real(8), pointer, dimension(:) :: j_BS_last => NULL() !< j_BS profile from previous NL iteration (for freeze check)
   TYPE(boot_ops) :: boot_ops       !< Python read-in ptions for j_bs_update
   TYPE(boot_profs) :: boot_profs   !< Cached current profiles from the last jphi_bs_update call
@@ -316,13 +315,12 @@ SELECT TYPE(new)
   CLASS IS(jphi_bs_flux_func)
     new%alpha_last = self%alpha_last
     new%freeze_j_BS = self%freeze_j_BS
-    new%freeze_alpha = self%freeze_alpha
     new%djBS_stol = self%djBS_stol
-    new%dalpha_tol = self%dalpha_tol
+    new%dalpha_warn_tol = self%dalpha_warn_tol
     new%djBS_no_improve = self%djBS_no_improve
     new%djBS_min = self%djBS_min
     new%dalpha_no_improve = self%dalpha_no_improve
-    new%dalpha_min = self%dalpha_min
+    new%dalpha_last = self%dalpha_last
     new%boot_ops = self%boot_ops
     IF(ASSOCIATED(self%j_BS_last)) ALLOCATE(new%j_BS_last, SOURCE=self%j_BS_last)
     IF(ASSOCIATED(self%boot_profs%psi_n))ALLOCATE(new%boot_profs%psi_n,SOURCE=self%boot_profs%psi_n)
@@ -539,7 +537,6 @@ ALLOCATE(jphi_total(0:self%npsi))
 !   alpha = (Ip_target - Ip_lo) / (Ip_hi - Ip_lo).  Re-solved every update (cheap): a
 !   frozen alpha lets I_p drift while the shape is still settling.
 ip_target = ABS(gseq%Ip_target)
-self%freeze_alpha = .FALSE.
 jphi_total = j_BS + jphi_fixed
 CALL eval_jtor_imas(gseq, R_spline, [0.0_r8, xpsi], self%npsi+1, jphi_total, pscale, jtor)
 CALL gs_flux_int(gseq, [0.0_r8, xpsi], jtor, self%npsi+1, ip_result_lo)
@@ -559,20 +556,20 @@ END IF
 !--- Relative change: alpha's scale is set by the units of ffp_prof (e.g. ~1e-6 for a jphi in A/m^2)
 dalpha = ABS(alpha - self%alpha_last) / MAX(ABS(alpha), TINY(1.0_r8))
 !--- Stall diagnostic only (alpha is never frozen): 2 consecutive non-decreasing steps.
-IF(dalpha >= self%dalpha_tol(1) .AND. dalpha >= self%dalpha_min) THEN
+IF(dalpha >= self%dalpha_warn_tol .AND. dalpha >= self%dalpha_last) THEN
   self%dalpha_no_improve = self%dalpha_no_improve + 1
   IF(self%dalpha_no_improve >= 2) THEN
     WRITE(char_buf,'(A,ES12.4,A,ES12.4,A)') &
       'Alpha convergence stalled,' // &
       ' relative change per nonlinear step = ', dalpha, &
-      ', above recommended tolerance (dalpha_tol=', self%dalpha_tol(1), ')'
+      ', above recommended tolerance (dalpha_warn_tol=', self%dalpha_warn_tol, ')'
     self%dalpha_no_improve = 0
     IF(oft_env%pm)CALL oft_warn(TRIM(char_buf))
   END IF
 ELSE
   self%dalpha_no_improve = 0
 END IF
-self%dalpha_min = dalpha   ! previous step, not a running minimum
+self%dalpha_last = dalpha
 self%alpha_last = alpha
 IF(ip_result_lo > ip_target)THEN
   WRITE(char_buf,'(A,ES12.4,A,ES12.4,A)') 'Fixed + bootstrap current (', ip_result_lo/mu0, &
@@ -617,7 +614,6 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] dalpha      = ', dalpha
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] djBS        = ', djBS
   WRITE(*,'(A,L1)')     '  [jphi_bs_update] bs_frozen   = ', self%freeze_j_BS
-  WRITE(*,'(A,L1)')     '  [jphi_bs_update] freeze_alpha= ', self%freeze_alpha
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] j_BS max    = ', MAXVAL(ABS(j_BS))
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi max    = ', MAXVAL(ABS(self%jphi))
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi_fixed max = ', MAXVAL(ABS(jphi_fixed))
