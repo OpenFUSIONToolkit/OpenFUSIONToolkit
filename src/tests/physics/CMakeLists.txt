@@ -48,6 +48,9 @@ if( OFT_BUILD_TESTS )
 
   # TokaMaker tests
   configure_file( test_TokaMaker.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( tokamaker_torflux_analysis.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( tokamaker_torflux_motivation.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( D3Dlike_Hmode_baseline.geqdsk ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( test_TokaMaker_reconstruction_io.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( test_TokaMaker_mirnov.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( ITER_geom.json ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )

@@ -22,14 +22,20 @@ def create_prof_file(self, filename, profile_dict, name):
     '''! Create profile input file to be read by load_profiles()
 
     @param filename Name of input file, see options in set_profiles()
-    @param profile_dict Dictionary object containing profile values ['y'] and sampled locations
-    in normalized Psi ['x']
+    @param profile_dict Dictionary object containing profile values ['y'] and sampled locations ['x'],
+    in normalized Psi unless ['coord'] is 'phi_n' or 'phi_n_relabel' (normalized toroidal flux)
     @param filename Name of input quantity, see options in set_profiles()
     '''
-    file_lines = [profile_dict['type']]
+    coord = profile_dict.get('coord','psi_n')
+    if coord not in ('psi_n','phi_n','phi_n_relabel'):
+        raise ValueError('Invalid coord "{0}" for {1} profile, must be "psi_n", "phi_n", or "phi_n_relabel"'.format(coord, name))
+    if coord == 'phi_n' and (profile_dict['type'].startswith('jphi') or name in ('Te','Ti','ne','ni','Zeff','eta','jphi_fixed')):
+        raise ValueError('{0} profile ("{1}") on toroidal flux must use coord "phi_n_relabel"'.format(name, profile_dict['type']))
+    file_lines = [profile_dict['type'] if coord == 'psi_n' else '{0} {1}'.format(profile_dict['type'], coord)]
     if profile_dict['type'] == 'flat':
         pass
-    elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp'):
+    elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp') \
+            or (profile_dict['type'] == 'jphi-split-bootstrap'):
         x = profile_dict.get('x',None)
         if x is None:
             raise KeyError('No array "x" for piecewise linear profile.')
@@ -105,7 +111,7 @@ def create_prof_file(self, filename, profile_dict, name):
         for y in y_basis:
             file_lines += ["{0}".format(" ".join(["{0}".format(val) for val in y]))]
     else:
-        raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp")')
+        raise KeyError('Invalid profile type ("flat", "linterp", "jphi-linterp", "jphi-split-bootstrap", "mlinterp", "jphi-mlinterp")')
     with open(filename, 'w+') as fid:
         fid.write("\n".join(file_lines))
 
@@ -804,6 +810,10 @@ class TokaMaker():
         @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations in normalized Psi ['x']
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
+
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default), 'phi_n' (normalized
+        toroidal flux, ['y'] is the derivative w.r.t. toroidal flux), or 'phi_n_relabel' (normalized toroidal flux,
+        ['y'] is the usual derivative w.r.t. poloidal flux).
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -828,6 +838,69 @@ class TokaMaker():
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_profile_dofs(prof_type, values)
+
+    def load_kinetic_profiles(self, te_file='none', ti_file='none', ne_file='none', ni_file='none', zeff_file='none', jphi_fixed_file='none'):
+        r'''! Load kinetic profiles (electron and ion temperature and density) from files
+
+        @param te_file File containing electron temperature profile in KeV
+        @param ti_file File containing ion temperature profile in KeV
+        @param ne_file File containing electron density profile in m^-3
+        @param ni_file File containing ion density profile in m^-3
+        @param zeff_file File containing effective charge profile
+        @param jphi_fixed_file File containing fixed toroidal current density profile in A/m^2
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.load_kinetic_profiles(te_file,ti_file,ne_file,ni_file,zeff_file,jphi_fixed_file)
+
+    def set_kinetic_profiles(self, te_prof=None, ti_prof=None, ne_prof=None, ni_prof=None, Zeff=None, keep_files=False, jphi_fixed_prof=None):
+        r'''! Set kinetic profiles (electron and ion temperature and density) using a piecewise linear definition
+
+        @param te_prof Dictionary object containing electron temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ti_prof Dictionary object containing ion temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ne_prof Dictionary object containing electron density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param ni_prof Dictionary object containing ion density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param Zeff Scalar effective charge or Dictionary object containing effective charge profile ['y'] and sampled locations in normalized Psi ['x']
+        @param keep_files Retain temporary profile files
+        @param jphi_fixed_prof Dictionary object containing fixed toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.set_kinetic_profiles(te_prof,ti_prof,ne_prof,ni_prof,Zeff,keep_files,jphi_fixed_prof)
+
+    def set_boot_ops(self, isolate_edge_jBS=None, parameterize_jBS=None, scale_jBS=None, djBS_tol=None,
+                     diagnose_bs=None, taper_edge_jBS=None, taper_edge_psi0=None, taper_edge_shape=None):
+        r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
+
+        Call after setting a `jphi-split-bootstrap`-type ffp_prof profile, and before mygs.solve().
+        Any `None` value is left unchanged from its current state (for default values see Tokamaker_equilibrium.set_boot_ops).
+
+        @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
+        @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true. (Internal default: False)
+        @param scale_jBS Scaling factor applied to the spike profile. (Internal default: 1.0)
+        @param djBS_tol Threshold on relative change in j_BS to freeze bootstrap values. (Internal default: 1e-4)
+        @param diagnose_bs Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration. (Internal default: False)
+        @param taper_edge_jBS Smoothly taper toroidal current (inductive, bootstrap and fixed) to zero at the plasma edge. (Internal default: False)
+        @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
+        @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.set_boot_ops(isolate_edge_jBS, parameterize_jBS, scale_jBS, djBS_tol,
+                                               diagnose_bs,
+                                               taper_edge_jBS, taper_edge_psi0, taper_edge_shape)
+
+    def get_boot_profs(self):
+        r'''! Get cached bootstrap current profiles from the last call to the G-S solver with a
+        `jphi-split-bootstrap` current profile.
+
+        @result Dictionary with keys `'psi_n'`, `'total_j_phi'`, `'j_bs_final'`, `'j_ind_final'`
+          and (when available) `'jphi_fixed'`, `'j_bs_raw'`.  Returns `None` if no profiles have been computed.
+          `'psi_n'` is in standard convention (0=axis, 1=LCFS). Current densities are in A/m².
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_boot_profs()
 
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
@@ -1309,6 +1382,26 @@ class TokaMaker():
             tokamaker_load_tokamaker(tmp_eq.c_ptr,cfilename,error_string)
             if error_string.value != b'':
                 raise Exception(error_string.value)
+            # Sync the Python bootstrap options shadow dict from the newly loaded Fortran-side boot_ops.
+            bops = tokamaker_boot_ops_struct()
+            initialized = c_bool(False)
+            error_string = self._oft_env.get_c_errorbuff()
+            tokamaker_get_boot_ops(tmp_eq.c_ptr, ctypes.byref(bops), ctypes.byref(initialized), error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
+            if initialized.value:
+                tmp_eq._boot_ops = {
+                    'isolate_edge_jBS': bool(bops.isolate_edge_jBS),
+                    'parameterize_jBS': bool(bops.parameterize_jBS),
+                    'scale_jBS':        float(bops.scale_jBS),
+                    'djBS_tol':         float(bops.djBS_tol),
+                    'diagnose_bs':      bool(bops.diagnose_bs),
+                    'taper_edge_jBS':   bool(bops.taper_edge_jBS),
+                    'taper_edge_psi0':  float(bops.taper_edge_psi0),
+                    'taper_edge_shape': int(bops.taper_edge_shape),
+                }
+            else:
+                tmp_eq._boot_ops = None
         else:
             raise ValueError("Must specify either `source_eq` or `source_file`")
         error_string = self._oft_env.get_c_errorbuff()
@@ -1433,6 +1526,15 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.get_q(psi,psi_pad,npsi,compute_geo)
 
+    def get_torflux_map(self,x,inverse=False):
+        r'''! Evaluate the solver's poloidal/toroidal flux map
+
+        See @ref TokaMaker.TokaMaker_equilibrium.get_torflux_map "get_torflux_map"
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_torflux_map(x,inverse)
+
     def get_fsa(self,psi=None,psi_pad=0.02,npsi=50):
         r'''! Get flux surface averages and per-surface shape parameters
 
@@ -1447,17 +1549,27 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.get_fsa(psi,psi_pad,npsi)
 
-    def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50):
-        r'''! Evaluate Sauter trapped particle fractions at specified or uniformly spaced points
+    def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50,return_eps=False):
+        r'''! Evaluate Sauter trapped particle fractions and flux-surface geometry at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
-        @result \f$ f_c \f$, \f${<R>,<1/R>,<a>}\f$, \f$[<|B|>,<|B|^2>]\f$
+        @param return_eps If True, append the local inverse aspect ratio array to the return tuple
+        @result Tuple `(psi, fc, r_avgs, modb_avgs)`, or `(psi, fc, r_avgs, modb_avgs, eps)` when `return_eps=True`
+          - `psi` [npsi] — normalised poloidal flux \f$\hat{\psi}\f$ of each sample
+          - `fc` [npsi] — circulating-particle fraction \f$f_c\f$ (Sauter 1999)
+          - `r_avgs` dict — flux-surface averaged values \f${<R>,<1/R>,<a>}\f$ where a is minor radius
+          - `modb_avgs` [2, npsi] — flux-surface-averaged magnetic field values:
+            row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
+          - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
+            \f$\varepsilon = (R_{\max} - R_{\min}) / (2 \langle R \rangle)\f$,
+            where \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius
+            reached by the field-line trace on that surface
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.calc_sauter_fc(psi,psi_pad,npsi)
+        return self._tMaker_equil.calc_sauter_fc(psi,psi_pad,npsi,return_eps)
 
     def get_globals(self):
         r'''! Get global plasma parameters
@@ -2249,6 +2361,162 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
+    def solve_bootstrap(self, ffp_prof, te_prof, ne_prof, ti_prof, ni_prof, Zeff, Ip_target, F0=None, pres_prof=None, jphi_fixed_prof=None, p_fixed_prof=None, coord='psi_n', **kwargs):
+        r'''! Solve G-S equilibrium with self-consistent bootstrap current from kinetic profiles
+
+        Derives a pressure-gradient profile \f$P'(\hat{\psi})\f$ from the supplied kinetic
+        profiles, then calls the internal Fortran solver to reach a self-consistent equilibrium.
+        By default the pressure is computed from the kinetic profiles as
+        \f$P = e_C(n_e T_e + n_i T_i) + P_{fixed}\f$; if ``pres_prof`` is supplied it overrides this,
+        allowing additional contributions (e.g. fast-ion pressure) to be included provided the
+        total pressure is nowhere less than the kinetic pressure.
+        Temperature profiles are expected in keV; density profiles in m\f$^{-3}\f$.
+
+        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'`` \f$\hat{\psi_n}\f$ grid, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``)
+        @param te_prof Electron temperature profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$T_e\f$ [keV])
+        @param ne_prof Electron density profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$n_e\f$ [m\f$^{-3}\f$])
+        @param ti_prof Ion temperature profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$T_i\f$ [keV])
+        @param ni_prof Ion density profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$n_i\f$ [m\f$^{-3}\f$])
+        @param Zeff Effective charge \f$Z_{eff}\f$ (scalar or profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$Z_{eff}\f$))
+        @param Ip_target Target plasma current \f$I_p\f$ [A]
+        @param pres_prof Optional total pressure profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$P\f$ [Pa]).
+          If provided, must be \f$\geq\f$ the kinetic pressure \f$e_C(n_e T_e + n_i T_i)\f$ everywhere and
+          is used in place of the kinetic pressure to form \f$P'\f$ and \f$P_{ax}\f$.
+        @param jphi_fixed_prof Optional fixed toroidal current density profile dict (``'x'``: in ``coord``,
+          ``'y'``: \f$j_\phi\f$ [A/m\f$^2\f$]), added to the total without rescaling
+        @param p_fixed_prof Optional additional pressure profile dict (``'x'``: in ``coord``, ``'y'``: \f$P_{fixed}\f$ [Pa],
+          e.g. fast-ion pressure), added to the kinetic pressure. Sets \f$P'\f$ and \f$P_{ax}\f$ but is excluded
+          from the bootstrap calculation. Mutually exclusive with ``pres_prof``.
+        @param coord Coordinate of all ``'x'`` grids: ``'psi_n'`` (default) or ``'phi_n'`` (normalized toroidal flux).
+          For ``'phi_n'``, profiles are passed as ``'phi_n_relabel'`` and \f$P'\f$ as \f$dP/d\hat{\Phi}\f$ (``'phi_n'``).
+
+        @par Bootstrap solver options (forwarded to ``set_boot_ops()``)
+        @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk (default: False)
+        @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike;
+          overrides ``isolate_edge_jBS`` if True (default: False)
+        @param scale_jBS Scaling factor applied to the bootstrap current profile (default: 1.0)
+        @param djBS_tol Threshold on relative change in j_BS to freeze bootstrap values (influences solve speed) (default: 1e-4)
+        @param diagnose_bs Print detailed output at each NL iteration (default: False)
+        @param taper_edge_jBS Smoothly taper toroidal current (inductive, bootstrap and fixed) to zero at the plasma edge (default: False)
+        @param taper_edge_psi0 \f$\hat{\psi_n}\f$ (0=axis, 1=LCFS) where the taper begins (default: 0.999)
+        @param taper_edge_shape Taper shape: 1=cos\f$^2\f$/Hann, 2=quintic smoothstep, 3=cubic power
+          (default: 2)
+
+        @result Dictionary with 1-D numpy array values (A/m² unless noted). All current densities, inputs
+          included, are TokaMaker \f$j_\phi = \langle j_\phi \rangle = \langle R \rangle P' + \langle 1/R \rangle FF'/\mu_0\f$
+          (see doc_tokamaker_current_conventions):
+          - ``'psi_n'`` Normalised poloidal flux grid (0 = axis, 1 = LCFS) of the ``ffp_prof['x']`` nodes
+            (mapped from toroidal flux if ``coord='phi_n'``)
+          - ``'total_j_phi'`` Total toroidal current density = j_ind_final + j_bs_final + jphi_fixed [A/m²]
+          - ``'j_ind_final'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
+          - ``'j_bs_final'`` Bootstrap current density (optionally isolated / parametrised / tapered) [A/m²]
+          - ``'jphi_fixed'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
+          - ``'j_bs_raw'`` Bootstrap current density from the Redl PoP 2021 formula,
+            \f$\langle j_{BS} \cdot B \rangle F \langle 1/R \rangle/\langle B^2 \rangle + P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
+          - ``'jdotb_bs_raw'`` The Redl \f$\langle j_{BS} \cdot B \rangle\f$ behind ``'j_bs_raw'`` [T A/m²]
+        '''
+        from scipy.interpolate import Akima1DInterpolator
+        if coord not in ('psi_n', 'phi_n'):
+            raise ValueError(f"coord must be 'psi_n' or 'phi_n' (got {coord!r})")
+        # --- Type / shape check on ffp_prof ---
+        if not isinstance(ffp_prof, dict):
+            raise TypeError(f"ffp_prof must be a dict with 'x' and 'y' keys; got {type(ffp_prof).__name__}")
+        for _key in ('x', 'y'):
+            if _key not in ffp_prof:
+                raise ValueError(f"ffp_prof is missing required key '{_key}'")
+        if len(ffp_prof['x']) != len(ffp_prof['y']):
+            raise ValueError(f"ffp_prof: 'x' and 'y' must have the same length "
+                             f"(got {len(ffp_prof['x'])} and {len(ffp_prof['y'])})")
+        if ffp_prof.get('type', 'jphi-split-bootstrap') != 'jphi-split-bootstrap':
+            raise ValueError(f"ffp_prof 'type' must be 'jphi-split-bootstrap' (got {ffp_prof['type']!r})")
+        ffp_prof.setdefault('type', 'jphi-split-bootstrap')
+
+        # Check temperature profiles are KeV
+        for _prof, _name in ((te_prof, 'te_prof'), (ti_prof, 'ti_prof')):
+            if numpy.max(_prof['y']) > 500.0:
+                warn(
+                    f"{_name}: maximum value ({numpy.max(_prof['y']):.1f}) exceeds 500 — "
+                    "assuming input is in eV and converting to keV.",
+                    UserWarning, stacklevel=2,
+                )
+                _prof['y'] = numpy.asarray(_prof['y']) / 1e3
+
+        # Evaluate pprime from kinetic profiles on the same psi 'x' grid as ffp_prof
+        psi_sample = numpy.asarray(ffp_prof['x'])
+        Te_eV = Akima1DInterpolator(te_prof['x'], te_prof['y'])(psi_sample) * 1e3
+        ne    = Akima1DInterpolator(ne_prof['x'], ne_prof['y'])(psi_sample)
+        Ti_eV = Akima1DInterpolator(ti_prof['x'], ti_prof['y'])(psi_sample) * 1e3
+        ni    = Akima1DInterpolator(ni_prof['x'], ni_prof['y'])(psi_sample)
+        p_fixed = 0.0
+        if p_fixed_prof is not None:
+            if pres_prof is not None:
+                raise ValueError("pres_prof and p_fixed_prof are mutually exclusive (pres_prof is already a total pressure)")
+            if not isinstance(p_fixed_prof, dict):
+                raise TypeError(f"p_fixed_prof must be a dict with 'x' and 'y' keys; got {type(p_fixed_prof).__name__}")
+            for _key in ('x', 'y'):
+                if _key not in p_fixed_prof:
+                    raise ValueError(f"p_fixed_prof is missing required key '{_key}'")
+            p_fixed = Akima1DInterpolator(p_fixed_prof['x'], p_fixed_prof['y'])(psi_sample)
+            if numpy.any(p_fixed < 0.0):
+                raise ValueError("p_fixed_prof must be >= 0 at every point on the psi grid")
+        pressure = eC * ne * Te_eV + eC * ni * Ti_eV + p_fixed
+        if pres_prof is not None:
+            if not isinstance(pres_prof, dict):
+                raise TypeError(f"pres_prof must be a dict with 'x' and 'y' keys; got {type(pres_prof).__name__}")
+            for _key in ('x', 'y'):
+                if _key not in pres_prof:
+                    raise ValueError(f"pres_prof is missing required key '{_key}'")
+            pres_vals = Akima1DInterpolator(pres_prof['x'], pres_prof['y'])(psi_sample)
+            if numpy.any(pres_vals < pressure):
+                raise ValueError(
+                    "pres_prof must be >= the kinetic pressure (eC*(ne*Te + ni*Ti)) at every point on the psi grid"
+                )
+            pressure = pres_vals
+        pp_vals = Akima1DInterpolator(psi_sample, pressure).derivative()(psi_sample)
+        pp_vals[-1] = 0.0
+        pp_prof = {'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_vals[0]}
+        if coord == 'phi_n':
+            # Values are relabelled onto toroidal flux; P' above is dP/dPhi_N
+            pp_prof['coord'] = 'phi_n'
+            ffp_prof = dict(ffp_prof, coord='phi_n_relabel')
+            te_prof, ne_prof, ti_prof, ni_prof = [dict(_prof, coord='phi_n_relabel')
+                                                  for _prof in (te_prof, ne_prof, ti_prof, ni_prof)]
+            if isinstance(Zeff, dict):
+                Zeff = dict(Zeff, coord='phi_n_relabel')
+            if jphi_fixed_prof is not None:
+                jphi_fixed_prof = dict(jphi_fixed_prof, coord='phi_n_relabel')
+
+        # Axis target = the pressure drop the P' profile carries: TokaMaker holds P = 0 at the
+        # LCFS, so targeting pressure[0] would scale P' up by pressure[0]/(pressure[0] - pressure[-1])
+        pax = float(pressure[0] - pressure[-1])
+        if ffp_prof['x'][0] > 0:
+            warn(f"Bootstrap solver expects profiles defined at psi=0 (axis). Current axis-pressure evaluated at psi_N={ffp_prof['x'][0]:.3f}. Consider extending profile to psi=0 for increased accuracy.", UserWarning, stacklevel=2)
+
+        # Zero profile when unset, so a previous call's jphi_fixed does not persist
+        if jphi_fixed_prof is None:
+            jphi_fixed_prof = {'type': 'linterp', 'x': numpy.array([0.0, 1.0]), 'y': numpy.zeros(2)}
+
+        # Set profiles and targets
+        self.set_kinetic_profiles(
+            te_prof=te_prof,
+            ne_prof=ne_prof,
+            ti_prof=ti_prof,
+            ni_prof=ni_prof,
+            Zeff=Zeff,
+            jphi_fixed_prof=jphi_fixed_prof,
+        )
+        self.set_targets(Ip=Ip_target, pax=pax)
+        self.update_settings()
+        self.set_profiles(
+            ffp_prof=ffp_prof,
+            pp_prof=pp_prof,
+            foffset=F0,
+        )
+        self.set_boot_ops(**kwargs) # Must come after set_profiles
+        self.solve()
+
+        # Extract bootstrap profiles
+        return self.get_boot_profs()
 
 class TokaMaker_equilibrium():
     '''! TokaMaker G-S equilibrium class'''
@@ -2300,6 +2568,8 @@ class TokaMaker_equilibrium():
             self._saddle_targets = None
             ## Internal value (use @ref TokaMaker.TokaMaker_equilibrium.Mirnov_constraints "Mirnov_constraints" property)
             self._mirnov_constraints = None
+            ## Shadow of `gs_equil%boot_ops`; `None` until first call to `set_boot_ops`
+            self._boot_ops = None
         else:
             self._F0 = copy.copy(source_eq._F0)
             if skip_targets:
@@ -2328,6 +2598,8 @@ class TokaMaker_equilibrium():
                 self._saddle_targets = source_eq._saddle_targets.copy() if source_eq._saddle_targets is not None else None
                 self._psi_constraints = (source_eq._psi_constraints[0].copy(), source_eq._psi_constraints[1].copy()) if source_eq._psi_constraints is not None else None
                 self._mirnov_constraints = (source_eq._mirnov_constraints[0].copy(), source_eq._mirnov_constraints[1].copy(), source_eq._mirnov_constraints[2].copy()) if source_eq._mirnov_constraints is not None else None
+            ## Shadow of `gs_equil%boot_ops`; copied so subsequent set_boot_ops calls update from the source state
+            self._boot_ops = copy.copy(source_eq._boot_ops)
         ## Normalized flux convention (0 -> tokamak, 1 -> spheromak)
         self.psi_convention = self._tMaker.psi_convention
         ## Free or fixed boundary flag
@@ -2566,6 +2838,10 @@ class TokaMaker_equilibrium():
         @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations in normalized Psi ['x']
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
+
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default), 'phi_n' (normalized
+        toroidal flux, ['y'] is the derivative w.r.t. toroidal flux), or 'phi_n_relabel' (normalized toroidal flux,
+        ['y'] is the usual derivative w.r.t. poloidal flux).
         '''
         delete_files = []
         ffp_file = 'none'
@@ -2634,6 +2910,259 @@ class TokaMaker_equilibrium():
         tokamaker_set_profile_dofs(self.c_ptr,c_int({'ffp':1,'pp':2}[prof_type]),dofs,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+    
+    def load_kinetic_profiles(self, te_file='none', ti_file='none', ne_file='none', ni_file='none', zeff_file='none', jphi_fixed_file='none'):
+        r'''! Load kinetic flux function profiles (electron/ion temperature and density) from files
+
+        @param te_file File containing electron temperature profile in KeV
+        @param ti_file File containing ion temperature profile in KeV
+        @param ne_file File containing electron density profile in m^-3
+        @param ni_file File containing ion density profile in m^-3
+        @param zeff_file File containing effective charge profile
+        @param jphi_fixed_file File containing fixed toroidal current density profile in A/m^2
+        '''
+
+        te_file_c = self._oft_env.path2c(te_file)
+        ne_file_c = self._oft_env.path2c(ne_file)
+        ti_file_c = self._oft_env.path2c(ti_file)
+        ni_file_c = self._oft_env.path2c(ni_file)
+        zeff_file_c = self._oft_env.path2c(zeff_file)
+        jphi_fixed_file_c = self._oft_env.path2c(jphi_fixed_file)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_load_kinetic_profiles(self.c_ptr,te_file_c,ne_file_c,ti_file_c,ni_file_c,zeff_file_c,jphi_fixed_file_c,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+
+    def set_kinetic_profiles(self, te_prof=None, ti_prof=None, ne_prof=None, ni_prof=None, Zeff=None, keep_files=False, jphi_fixed_prof=None):
+        r'''! Set kinetic profiles (electron/ion temperature and density) using a piecewise linear definition
+
+        @param te_prof Dictionary object containing electron temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ti_prof Dictionary object containing ion temperature profile in KeV ['y'] and sampled locations in normalized Psi ['x']
+        @param ne_prof Dictionary object containing electron density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param ni_prof Dictionary object containing ion density profile in m^-3 ['y'] and sampled locations in normalized Psi ['x']
+        @param Zeff Effective charge state as a single value or a profile ['y'] with sampled locations in normalized Psi ['x']
+        @param keep_files Retain temporary profile files
+        @param jphi_fixed_prof Dictionary object containing fixed toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
+        '''
+        delete_files = []
+
+        zeff_file = 'none'
+        if Zeff is not None:
+            if numpy.isscalar(Zeff):
+                Zeff = {
+                    'type': 'linterp',
+                    'x': numpy.array([0.0, 1.0]),
+                    'y': numpy.array([float(Zeff), float(Zeff)])
+                }
+            elif isinstance(Zeff, dict):
+                if 'x' not in Zeff or 'y' not in Zeff:
+                    raise ValueError('Zeff profile dictionary must contain "x" and "y" keys')
+                if len(Zeff['x']) != len(Zeff['y']):
+                    raise ValueError(f"Zeff profile dict: 'x' and 'y' must have the same length "
+                                     f"(got {len(Zeff['x'])} and {len(Zeff['y'])})")
+                if Zeff.get('type', 'linterp') != 'linterp':
+                    raise ValueError(f"Zeff profile 'type' must be 'linterp' (got {Zeff['type']!r})")
+                Zeff.setdefault('type', 'linterp')
+            else:
+                raise TypeError(f"Zeff must be a scalar or a profile dict with 'x' and 'y' keys; "
+                                f"got {type(Zeff).__name__}")
+            zeff_file = self._oft_env.unique_tmpfile('tokamaker_zeff.prof')
+            create_prof_file(self, zeff_file, Zeff, "Zeff")
+            delete_files.append(zeff_file)
+        te_file = 'none'
+        if te_prof is not None:
+            if not isinstance(te_prof, dict) or 'x' not in te_prof or 'y' not in te_prof:
+                raise TypeError("te_prof must be a dict with 'x' and 'y' keys")
+            if len(te_prof['x']) != len(te_prof['y']):
+                raise ValueError(f"te_prof: 'x' and 'y' must have the same length "
+                                 f"(got {len(te_prof['x'])} and {len(te_prof['y'])})")
+            if te_prof.get('type', 'linterp') != 'linterp':
+                raise ValueError(f"te_prof 'type' must be 'linterp' (got {te_prof['type']!r})")
+            te_prof.setdefault('type', 'linterp')
+            te_file = self._oft_env.unique_tmpfile('tokamaker_te.prof')
+            create_prof_file(self, te_file, te_prof, "Te")
+            delete_files.append(te_file)
+        ti_file = 'none'
+        if ti_prof is not None:
+            if not isinstance(ti_prof, dict) or 'x' not in ti_prof or 'y' not in ti_prof:
+                raise TypeError("ti_prof must be a dict with 'x' and 'y' keys")
+            if len(ti_prof['x']) != len(ti_prof['y']):
+                raise ValueError(f"ti_prof: 'x' and 'y' must have the same length "
+                                 f"(got {len(ti_prof['x'])} and {len(ti_prof['y'])})")
+            if ti_prof.get('type', 'linterp') != 'linterp':
+                raise ValueError(f"ti_prof 'type' must be 'linterp' (got {ti_prof['type']!r})")
+            ti_prof.setdefault('type', 'linterp')
+            ti_file = self._oft_env.unique_tmpfile('tokamaker_ti.prof')
+            create_prof_file(self, ti_file, ti_prof, "Ti")
+            delete_files.append(ti_file)
+        ne_file = 'none'
+        if ne_prof is not None:
+            if not isinstance(ne_prof, dict) or 'x' not in ne_prof or 'y' not in ne_prof:
+                raise TypeError("ne_prof must be a dict with 'x' and 'y' keys")
+            if len(ne_prof['x']) != len(ne_prof['y']):
+                raise ValueError(f"ne_prof: 'x' and 'y' must have the same length "
+                                 f"(got {len(ne_prof['x'])} and {len(ne_prof['y'])})")
+            if ne_prof.get('type', 'linterp') != 'linterp':
+                raise ValueError(f"ne_prof 'type' must be 'linterp' (got {ne_prof['type']!r})")
+            ne_prof.setdefault('type', 'linterp')
+            ne_file = self._oft_env.unique_tmpfile('tokamaker_ne.prof')
+            create_prof_file(self, ne_file, ne_prof, "ne")
+            delete_files.append(ne_file)
+        ni_file = 'none'
+        if ni_prof is not None:
+            if not isinstance(ni_prof, dict) or 'x' not in ni_prof or 'y' not in ni_prof:
+                raise TypeError("ni_prof must be a dict with 'x' and 'y' keys")
+            if len(ni_prof['x']) != len(ni_prof['y']):
+                raise ValueError(f"ni_prof: 'x' and 'y' must have the same length "
+                                 f"(got {len(ni_prof['x'])} and {len(ni_prof['y'])})")
+            if ni_prof.get('type', 'linterp') != 'linterp':
+                raise ValueError(f"ni_prof 'type' must be 'linterp' (got {ni_prof['type']!r})")
+            ni_prof.setdefault('type', 'linterp')
+            ni_file = self._oft_env.unique_tmpfile('tokamaker_ni.prof')
+            create_prof_file(self, ni_file, ni_prof, "ni")
+            delete_files.append(ni_file)
+        jphi_fixed_file = 'none'
+        if jphi_fixed_prof is not None:
+            if not isinstance(jphi_fixed_prof, dict) or 'x' not in jphi_fixed_prof or 'y' not in jphi_fixed_prof:
+                raise TypeError("jphi_fixed_prof must be a dict with 'x' and 'y' keys")
+            if len(jphi_fixed_prof['x']) != len(jphi_fixed_prof['y']):
+                raise ValueError(f"jphi_fixed_prof: 'x' and 'y' must have the same length "
+                                 f"(got {len(jphi_fixed_prof['x'])} and {len(jphi_fixed_prof['y'])})")
+            if jphi_fixed_prof.get('type', 'linterp') != 'linterp':
+                raise ValueError(f"jphi_fixed_prof 'type' must be 'linterp' (got {jphi_fixed_prof['type']!r})")
+            jphi_fixed_prof.setdefault('type', 'linterp')
+            jphi_fixed_file = self._oft_env.unique_tmpfile('tokamaker_jphi_fixed.prof')
+            create_prof_file(self, jphi_fixed_file, jphi_fixed_prof, "jphi_fixed")
+            delete_files.append(jphi_fixed_file)
+        self.load_kinetic_profiles(te_file=te_file, ti_file=ti_file, ne_file=ne_file, ni_file=ni_file,zeff_file=zeff_file,jphi_fixed_file=jphi_fixed_file)
+        if not keep_files:
+            for file in delete_files:
+                try:
+                    os.remove(file)
+                except:
+                    print('Warning: unable to delete temporary file "{0}"'.format(file))
+
+    def set_boot_ops(self, isolate_edge_jBS=None, parameterize_jBS=None, scale_jBS=None, djBS_tol=None,
+                     diagnose_bs=None, taper_edge_jBS=None, taper_edge_psi0=None, taper_edge_shape=None):
+        r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
+
+        Call after setting a `jphi-split-bootstrap`-type ffp_prof profile, and before mygs.solve().
+        Any `None` value is left unchanged from current state (see initialisations in dict. below).
+
+        @param isolate_edge_jBS Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
+        @param parameterize_jBS Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true. (Internal default: False)
+        @param scale_jBS Scaling factor applied to the spike profile. (Internal default: 1.0)
+        @param djBS_tol Threshold on relative change in j_BS to freeze bootstrap values. Influences bootstrap solve walltime (Internal default: 1e-4)
+        @param diagnose_bs Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration. (Internal default: False)
+        @param taper_edge_jBS Smoothly taper toroidal current (inductive, bootstrap and fixed) to zero at the plasma edge. (Internal default: False)
+        @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
+        @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
+        '''
+        # On first call, seed the shadow dict from the Fortran-type defaults in grad_shaf.F90
+        if self._boot_ops is None:
+            self._boot_ops = {
+                'isolate_edge_jBS': False,
+                'parameterize_jBS': False,
+                'scale_jBS': 1.0,
+                'djBS_tol': 1.0e-4,
+                'diagnose_bs': False,
+                'taper_edge_jBS': False,
+                'taper_edge_psi0': 0.999,
+                'taper_edge_shape': 2,
+            }
+        # Override only the explicitly provided kwargs
+        if isolate_edge_jBS is not None:
+            self._boot_ops['isolate_edge_jBS'] = bool(isolate_edge_jBS)
+        if parameterize_jBS is not None:
+            self._boot_ops['parameterize_jBS'] = bool(parameterize_jBS)
+        if scale_jBS is not None:
+            self._boot_ops['scale_jBS'] = float(scale_jBS)
+        if djBS_tol is not None:
+            self._boot_ops['djBS_tol'] = float(djBS_tol)
+        if diagnose_bs is not None:
+            self._boot_ops['diagnose_bs'] = bool(diagnose_bs)
+        if taper_edge_jBS is not None:
+            self._boot_ops['taper_edge_jBS'] = bool(taper_edge_jBS)
+        if taper_edge_psi0 is not None:
+            self._boot_ops['taper_edge_psi0'] = float(taper_edge_psi0)
+        if taper_edge_shape is not None:
+            self._boot_ops['taper_edge_shape'] = int(taper_edge_shape)
+        # Build the ctypes struct from the merged shadow state and send to Fortran
+        bops = tokamaker_boot_ops_struct()
+        bops.isolate_edge_jBS = self._boot_ops['isolate_edge_jBS']
+        bops.parameterize_jBS = self._boot_ops['parameterize_jBS']
+        bops.scale_jBS = self._boot_ops['scale_jBS']
+        bops.djBS_tol = self._boot_ops['djBS_tol']
+        bops.diagnose_bs = self._boot_ops['diagnose_bs']
+        bops.taper_edge_jBS = self._boot_ops['taper_edge_jBS']
+        bops.taper_edge_psi0 = self._boot_ops['taper_edge_psi0']
+        bops.taper_edge_shape = self._boot_ops['taper_edge_shape']
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_set_boot_ops(self.c_ptr, ctypes.byref(bops), error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+
+    def get_boot_profs(self):
+        r'''! Get cached bootstrap current profiles from the last call to the G-S solver with a
+        `jphi-split-bootstrap` current profile.
+
+        @result Dictionary with keys `'psi_n'`, `'total_j_phi'`, `'j_bs_final'`, `'j_ind_final'`
+          and (when available) `'jphi_fixed'`, `'j_bs_raw'`, `'jdotb_bs_raw'`.  Returns `None` if no
+          profiles have been computed.  All arrays are 1-D numpy arrays of length *npsi*.  `'psi_n'` is
+          in standard convention (0 = axis, 1 = LCFS).  Current densities are TokaMaker
+          \f$j_\phi = \langle j_\phi \rangle\f$ in A/m² (see doc_tokamaker_current_conventions);
+          `'jdotb_bs_raw'` is the Redl \f$\langle j_{BS} \cdot B \rangle\f$ [T A/m²] behind `'j_bs_raw'`.
+        '''
+        n = c_int(0)
+        n_raw = c_int(0)
+        psi_n_ptr = c_double_ptr()
+        total_j_phi_ptr = c_double_ptr()
+        j_bs_final_ptr = c_double_ptr()
+        j_ind_final_ptr = c_double_ptr()
+        jphi_fixed_ptr = c_double_ptr()
+        j_bs_raw_ptr = c_double_ptr()
+        jdotb_bs_raw_ptr = c_double_ptr()
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_get_boot_profs(self.c_ptr,
+            ctypes.byref(n), ctypes.byref(psi_n_ptr),
+            ctypes.byref(total_j_phi_ptr), ctypes.byref(j_bs_final_ptr),
+            ctypes.byref(j_ind_final_ptr), ctypes.byref(jphi_fixed_ptr),
+            ctypes.byref(n_raw), ctypes.byref(j_bs_raw_ptr), ctypes.byref(jdotb_bs_raw_ptr),
+            error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        if n.value != n_raw.value:
+            warn(
+                f"Bootstrap profile size mismatch: total_j_phi group has {n.value} points but "
+                f"j_bs_raw has {n_raw.value} points — jphi_bs_update may not have run correctly.",
+                UserWarning, stacklevel=2)
+        result = {}
+        if n.value > 0:
+            result['psi_n'] = numpy.ctypeslib.as_array(psi_n_ptr, shape=(n.value,)).copy()
+            result['total_j_phi'] = numpy.ctypeslib.as_array(total_j_phi_ptr, shape=(n.value,)).copy()
+            result['j_bs_final'] = numpy.ctypeslib.as_array(j_bs_final_ptr, shape=(n.value,)).copy()
+            result['j_ind_final'] = numpy.ctypeslib.as_array(j_ind_final_ptr, shape=(n.value,)).copy()
+            if jphi_fixed_ptr:
+                result['jphi_fixed'] = numpy.ctypeslib.as_array(jphi_fixed_ptr, shape=(n.value,)).copy()
+        if n_raw.value > 0:
+            result['j_bs_raw'] = numpy.ctypeslib.as_array(j_bs_raw_ptr, shape=(n_raw.value,)).copy()
+            if jdotb_bs_raw_ptr:
+                result['jdotb_bs_raw'] = numpy.ctypeslib.as_array(jdotb_bs_raw_ptr, shape=(n_raw.value,)).copy()
+        if result and (self.psi_convention == 0):
+            # Convert from OFT convention (0=LCFS, ascending toward axis) to
+            # standard convention (0=axis, ascending toward LCFS)
+            if 'psi_n' in result:
+                result['psi_n'] = (1.0 - result['psi_n'])[::-1].copy()
+                result['total_j_phi'] = result['total_j_phi'][::-1].copy()
+                result['j_bs_final'] = result['j_bs_final'][::-1].copy()
+                result['j_ind_final'] = result['j_ind_final'][::-1].copy()
+                if 'jphi_fixed' in result:
+                    result['jphi_fixed'] = result['jphi_fixed'][::-1].copy()
+            if 'j_bs_raw' in result:
+                result['j_bs_raw'] = result['j_bs_raw'][::-1].copy()
+            if 'jdotb_bs_raw' in result:
+                result['jdotb_bs_raw'] = result['jdotb_bs_raw'][::-1].copy()
+        return result if result else None
 
     def set_resistivity(self, eta_prof=None):
         r'''! Set flux function profile $\eta$ using a piecewise linear definition
@@ -2817,6 +3346,28 @@ class TokaMaker_equilibrium():
                 return psi,qvals,ravg_dict,dl.value,rbounds,zbounds
             else:
                 return psi,qvals,ravg_dict,None,None,None
+
+    def get_torflux_map(self,x,inverse=False):
+        r'''! Evaluate the solver's poloidal/toroidal flux map
+
+        Uses the map built during the last solve (or load); requires at least one profile with
+        `coord='phi_n'` or `'phi_n_relabel'`. Stale after `set_psi` until the next solve.
+
+        @param x \f$\hat{\psi}\f$ sampling locations (\f$\hat{\Phi}\f$ if `inverse`)
+        @param inverse Map \f$\hat{\Phi} \rightarrow \hat{\psi}\f$ instead
+        @result \f$\hat{\Phi}(x)\f$ (\f$\hat{\psi}(x)\f$ if `inverse`), \f$d\hat{\Phi}/d\hat{\psi}\f$ at each point
+        '''
+        x = numpy.atleast_1d(numpy.asarray(x, dtype=numpy.float64))
+        xin = numpy.ascontiguousarray(1.0-x if self.psi_convention == 0 else x, dtype=numpy.float64)
+        xout = numpy.zeros_like(xin)
+        jac = numpy.zeros_like(xin)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_torflux_map(self._equil_ptr,xin.shape[0],xin,xout,jac,inverse,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        if self.psi_convention == 0:
+            xout = 1.0 - xout
+        return xout, jac
 
     def get_fsa(self,psi=None,psi_pad=0.02,npsi=50):
         r'''! Get flux surface averages and per-surface shape parameters
@@ -3113,14 +3664,24 @@ class TokaMaker_equilibrium():
             raise ValueError('eta array not specified')
         else:
             return V_loop.value
-
-    def calc_sauter_fc(self,psi=None,psi_pad=0.02,npsi=50):
-        r'''! Evaluate Sauter trapped particle fractions at specified or uniformly spaced points
+    
+    def calc_sauter_fc(self,psi=None,psi_pad=0.02,npsi=50,return_eps=False):
+        r'''! Evaluate Sauter trapped particle fractions and flux-surface geometry at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
-        @result \f$ f_c \f$, \f${<R>,<1/R>,<a>}\f$, \f$[<|B|>,<|B|^2>]\f$
+        @param return_eps If True, append the local inverse aspect ratio array to the return tuple
+        @result Tuple `(psi, fc, r_avgs, modb_avgs)`, or `(psi, fc, r_avgs, modb_avgs, eps)` when `return_eps=True`
+          - `psi` [npsi] — normalised poloidal flux \f$\hat{\psi}\f$ of each sample
+          - `fc` [npsi] — circulating-particle fraction \f$f_c\f$ (Sauter 1999)
+          - `r_avgs` dict — flux-surface averaged values \f${<R>,<1/R>,<a>}\f$ where a is minor radius
+          - `modb_avgs` [2, npsi] — flux-surface-averaged magnetic field values:
+            row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
+          - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
+            \f$\varepsilon = (R_{\max} - R_{\min}) / (2 \langle R \rangle)\f$,
+            where \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius
+            reached by the field-line trace on that surface
         '''
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
@@ -3134,8 +3695,9 @@ class TokaMaker_equilibrium():
         fc = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         r_avgs = numpy.zeros((3,psi.shape[0]), dtype=numpy.float64)
         modb_avgs = numpy.zeros((2,psi.shape[0]), dtype=numpy.float64)
+        eps = numpy.zeros((psi.shape[0],), dtype=numpy.float64)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_sauter_fc(self._equil_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,error_string)
+        tokamaker_sauter_fc(self._equil_ptr,psi.shape[0],psi,fc,r_avgs,modb_avgs,eps,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         ravg_dict = {
@@ -3144,9 +3706,11 @@ class TokaMaker_equilibrium():
             '<a>': r_avgs[2,:]
         }
         if self.psi_convention == 0:
-            return psi_save,fc,ravg_dict,modb_avgs
+            result = (psi_save, fc, ravg_dict, modb_avgs)
         else:
-            return psi,fc,ravg_dict,modb_avgs
+            result = (psi, fc, ravg_dict, modb_avgs)
+        return result + (eps,) if return_eps else result
+    
 
     def calc_delstar_curr(self,psi):
         r'''! Get toroidal current density from \f$ \psi \f$ through \f$ \Delta^{*} \f$ operator

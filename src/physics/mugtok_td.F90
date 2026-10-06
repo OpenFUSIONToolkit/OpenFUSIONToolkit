@@ -837,6 +837,8 @@ dev => self%parent_sim%tkmr%gs_device
 F0 = self%parent_sim%F0_node
 !---LHS (dt>0) uses the current TokaMaker profile (updated in apply_mfop)
 !---RHS (dt=0) uses the previous-step snapshot
+IF(eq%I%coord/=0)CALL oft_abort('Toroidal flux profiles not supported in time-dependent solves', &
+  'mugtok_td',__FILE__)
 IF(dt > 0.d0)THEN
   f_scale_use = self%parent_sim%tkmr%f_scale
   ffp => eq%I

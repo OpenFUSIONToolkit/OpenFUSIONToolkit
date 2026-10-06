@@ -3,6 +3,7 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
+from warnings import warn
 '''! Solvers and helper functions for TokaMaker bootstrap current functionality
 
 @authors Daniel Burgess
@@ -388,7 +389,31 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
 
     return results
 
-def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
+def _extrap_jBS_boundaries(psi_N, j_BS):
+    r'''! Linearly extrapolate j_BS to the axis/LCFS endpoints where q is
+    undefined, using the second-order gradient at the nearest well-defined
+    (interior) point.
+
+    Ensures similarity between fortran and python solves.
+
+    @param psi_N Normalised poloidal flux grid [0, 1], standard convention
+    @param j_BS Bootstrap current profile on psi_N
+    @result j_BS with the axis/LCFS endpoints replaced by extrapolated values
+    '''
+    n_psi = len(psi_N)
+    if n_psi - 2 < 3:
+        raise ValueError(
+            "_extrap_jBS_boundaries: too few points with well-defined q "
+            "(%d) to build a second-order derivative for extrapolating j_BS "
+            "to the axis/LCFS" % max(0, n_psi - 2))
+
+    j_BS = j_BS.copy()
+    djBS_dpsi = numpy.gradient(j_BS[1:-1], psi_N[1:-1], edge_order=2)
+    j_BS[0] = j_BS[1] + djBS_dpsi[0] * (psi_N[0] - psi_N[1])
+    j_BS[-1] = j_BS[-2] + djBS_dpsi[-1] * (psi_N[-1] - psi_N[-2])
+    return j_BS
+
+def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target, F0=None):
     r'''! Solve Grad-Shafranov equilibrium for given profiles
 
     @param mygs Grad-Shafranov solver object
@@ -402,7 +427,7 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
     ffp_prof['type'] = 'jphi-linterp'
 
     mygs.set_targets(Ip=Ip_target, pax=pax_target)
-    mygs.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof)
+    mygs.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof, foffset=F0)
 
     # Solve Grad-Shafranov
     mygs.solve()
@@ -428,7 +453,10 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     '''
     import matplotlib.pyplot as plt
 
-    n_psi = len(psi_N)
+    # Sample equilibrium quantities on the profile grid so they can be combined
+    # element-wise with the profiles; endpoints are clipped because the
+    # flux-surface tracer cannot resolve the magnetic axis or separatrix exactly.
+    psi_eval = numpy.clip(psi_N, psi_pad, 1.0 - psi_pad)
 
     if spike_prof is None:
         spike_prof = numpy.zeros_like(j_inductive)
@@ -442,13 +470,13 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         ffp_prof['type'] = 'jphi-linterp'
         ffp_prof['y'] = matched_input_jphi
 
-        pax_target = pressure[0]
+        pax_target = pressure[0] - pressure[-1]  # P = 0 at the LCFS: target the drop
 
         solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target)
 
         # Check Convergence
-        _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-        _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+        _, f, fp, _, pp = mygs.get_profiles(psi=psi_eval)
+        _, _, ravgs, _, _, _ = mygs.get_q(psi=psi_eval)
 
         tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 
@@ -795,6 +823,52 @@ def redl_bootstrap(
 
     return j_bootstrap, coeffs
 
+def _validate_grid(values, name, x=None):
+    r'''! Validate (or build) the normalized radial grid a profile is sampled on
+
+    @param values Profile values
+    @param name Profile name, used in the raised error message
+    @param x Normalized radial grid (\f$\hat{\psi}\f$ or \f$\hat{\Phi}\f$) `values` is
+      sampled on. If `None`, a uniform grid `numpy.linspace(0,1,len(values))` is used.
+      Otherwise must be finite, strictly increasing, within [0,1], and the same length
+      as `values`.
+    @result Validated grid
+    '''
+    values = numpy.asarray(values)
+    if len(values) < 3:
+        raise ValueError("profiles must contain at least 3 points for second-order "
+                         "derivatives (got %d)" % len(values))
+    if x is None:
+        return numpy.linspace(0., 1., len(values))
+    grid = numpy.asarray(x, dtype=float)
+    if grid.ndim != 1 or grid.size != len(values):
+        raise ValueError("x must be 1D with the same length as the '%s' profile "
+                         "(got %s, expected (%d,))" % (name, grid.shape, len(values)))
+    if not numpy.all(numpy.isfinite(grid)):
+        raise ValueError("x contains non-finite values at indices %s for the '%s' profile"
+                         % (numpy.flatnonzero(~numpy.isfinite(grid))[:5].tolist(), name))
+    if numpy.any(numpy.diff(grid) <= 0.):
+        raise ValueError("x must be strictly increasing; found non-increasing "
+                         "steps at indices %s for the '%s' profile (duplicated or "
+                         "unsorted flux labels give undefined profile derivatives)"
+                         % (numpy.flatnonzero(numpy.diff(grid) <= 0.)[:5].tolist(), name))
+    if (grid[0] < 0.) or (grid[-1] > 1.):
+        raise ValueError("x must lie within [0,1] for the '%s' profile (got [%g, %g])"
+                         % (name, grid[0], grid[-1]))
+    return grid
+
+def _default_profile(values, name, x=None, scale=1.0):
+    r'''! Build a {'x','y'} profile dict on the validated grid `x`
+
+    @param values Profile values
+    @param name Profile name, used in the raised error message
+    @param x Normalized radial grid `values` is sampled on (see `_validate_grid`)
+    @param scale Multiplicative scaling applied to `values` (e.g. eV -> keV)
+    @result Profile dict {'x': x, 'y': values * scale}
+    '''
+    values = numpy.asarray(values)
+    return {'x': _validate_grid(values, name, x=x), 'y': values * scale}
+
 def solve_with_bootstrap(mygs,
                          ne,
                          Te,
@@ -811,17 +885,26 @@ def solve_with_bootstrap(mygs,
                          diagnostic_plots=False,
                          parameterize_jBS = False,
                          use_OMFIT_sauter = False,
-                         verbose = True):
+                         verbose = True,
+                         x = None,
+                         use_sauter_eps = True,
+                         diagnose_bs = False,
+                         use_python_solve = False,
+                         coord = 'psi_n',
+                         psi_N = None,
+                         jphi_fixed = None,
+                         p_fixed = None,
+                         **kwargs):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
     @param mygs Grad-Shafranov solver object
-    @param ne Electron density profile \f$n_e(\hat{\psi})\f$ [m$^{-3}$]
-    @param Te Electron temperature profile \f$T_e(\hat{\psi})\f$ [eV]
-    @param ni Ion density profile \f$n_i(\hat{\psi})\f$ [m$^{-3}$]
-    @param Ti Ion temperature profile \f$T_i(\hat{\psi})\f$ [eV]
-    @param Zeff Effective charge profile \f$Z_{eff}(\hat{\psi})\f$
+    @param ne Electron density profile \f$n_e(x)\f$ [m$^{-3}$]
+    @param Te Electron temperature profile \f$T_e(x)\f$ [eV]
+    @param ni Ion density profile \f$n_i(x)\f$ [m$^{-3}$]
+    @param Ti Ion temperature profile \f$T_i(x)\f$ [eV]
+    @param Zeff Effective charge profile \f$Z_{eff}(x)\f$
     @param Ip_target Target plasma current \f$I_p\f$ [A]
-    @param inductive_jphi Inductive toroidal current profile \f$j_{ind}(\hat{\psi})\f$
+    @param inductive_jphi Inductive toroidal current profile \f$j_{ind}(x)\f$
     @param Zis List of impurity atomic numbers (default: [1.0])
     @param scale_jBS Scaling factor for bootstrap current
     @param isolate_edge_jBS If True, isolate edge spike in bootstrap current
@@ -830,8 +913,106 @@ def solve_with_bootstrap(mygs,
     @param diagnostic_plots If True, plot diagnostic figures
     @param parameterize_jBS If True, use parameterized edge spike
     @param use_OMFIT_sauter If True, use OMFIT Sauter model
-    @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
+    @param x Normalized radial grid the input profiles are sampled on, in `coord`.
+    If `None` (default) the profiles are assumed evenly sampled and a uniform grid
+    `numpy.linspace(0,1,len(ne))` is used. Must be finite, strictly increasing, within
+    [0,1], and the same length as the profiles. The number of traced flux surfaces is
+    `len(x)`, so profile resolution sets equilibrium sampling resolution.
+    @param coord Coordinate of `x`: `'psi_n'` (default, \f$\hat{\psi}\f$) or `'phi_n'`
+    (\f$\hat{\Phi}\f$, internal solver only; see `TokaMaker.solve_bootstrap`)
+    @param psi_N Deprecated alias of `x`
+    @param use_sauter_eps If True (default), use the geometric inverse aspect ratio
+      \f$\varepsilon = (R_{\max}-R_{\min})/(2\langle R\rangle)\f$ from the field-line trace.
+      If False, use the formula \f$\varepsilon = \langle a\rangle / \langle R\rangle\f$.
+    @param diagnose_bs If True, print the 7 edge-spike fit parameters and the
+      parameterized spike profile table to stdout (mirroring the Fortran --diagnose-bs output).
+    @param jphi_fixed Fixed toroidal current density \f$j_{fixed}\f$ [A/m$^2$] on `x` (array or profile dict),
+      added to the total without rescaling (internal Fortran solver only)
+    @param p_fixed Additional pressure \f$P_{fixed}\f$ [Pa] on `x` (array or profile dict, e.g. fast-ion pressure),
+      added to \f$e_C(n_e T_e + n_i T_i)\f$ for the GS pressure but excluded from j_BS (internal Fortran solver only)
+    @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles, all (like the
+      `inductive_jphi` and `jphi_fixed` inputs) TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$
+      (see doc_tokamaker_current_conventions); the internal solver also returns `'psi_n'`, the
+      \f$\hat{\psi}\f$ of each input node
     '''
+
+    if psi_N is not None:
+        if x is not None:
+            raise ValueError("pass the grid as x only (psi_N is its deprecated alias)")
+        warn("solve_with_bootstrap(psi_N=) is deprecated: pass the grid as x= and its "
+             "coordinate as coord= ('psi_n' or 'phi_n')", DeprecationWarning, stacklevel=2)
+        x = psi_N
+
+    if not use_python_solve:
+        _python_only = {
+            'Zis': (Zis, None),
+            'psi_pad': (psi_pad, 1e-3),
+            'iterations': (iterations, 3),
+            'diagnostic_plots': (diagnostic_plots, False),
+            'use_OMFIT_sauter': (use_OMFIT_sauter, False),
+            'use_sauter_eps': (use_sauter_eps, True),
+        }
+        non_default = [k for k, (v, d) in _python_only.items() if v != d]
+        if non_default:
+            warn(
+                "solve_with_bootstrap(use_python_solve=False): the following kwargs have no effect "
+                f"with the internal Fortran solver: {non_default}. ",
+                UserWarning, stacklevel=2,
+            )
+        if inductive_jphi is None:
+            raise ValueError("inductive_jphi must be provided for method='internal'")
+        _ne   = ne if isinstance(ne, dict) else _default_profile(ne, 'ne', x=x)
+        _Te   = Te if isinstance(Te, dict) else _default_profile(Te, 'Te', x=x, scale=1e-3)
+        _ni   = ni if isinstance(ni, dict) else _default_profile(ni, 'ni', x=x)
+        _Ti   = Ti if isinstance(Ti, dict) else _default_profile(Ti, 'Ti', x=x, scale=1e-3)
+        _ffp  = inductive_jphi if isinstance(inductive_jphi, dict) else _default_profile(inductive_jphi, 'inductive_jphi', x=x)
+        _jfix = None if jphi_fixed is None else (jphi_fixed if isinstance(jphi_fixed, dict) else _default_profile(jphi_fixed, 'jphi_fixed', x=x))
+        _pfix = None if p_fixed is None else (p_fixed if isinstance(p_fixed, dict) else _default_profile(p_fixed, 'p_fixed', x=x))
+        Zeff_arg = Zeff if isinstance(Zeff, dict) else (_default_profile(Zeff, 'Zeff', x=x) if numpy.ndim(Zeff) > 0 and numpy.size(Zeff) > 1 else float(Zeff))
+        _results = mygs.solve_bootstrap(
+            ffp_prof=_ffp,
+            te_prof=_Te,
+            ne_prof=_ne,
+            ti_prof=_Ti,
+            ni_prof=_ni,
+            Zeff=Zeff_arg,
+            Ip_target=Ip_target,
+            jphi_fixed_prof=_jfix,
+            p_fixed_prof=_pfix,
+            scale_jBS=scale_jBS,
+            isolate_edge_jBS=isolate_edge_jBS,
+            parameterize_jBS=parameterize_jBS,
+            diagnose_bs=diagnose_bs,
+            coord=coord,
+            **kwargs
+        )
+        results = {'psi_n' : _results['psi_n'],
+                    'total_j_phi' : _results['total_j_phi'],
+                    'j_BS' : _results['j_bs_raw'],
+                    'j_inductive' : _results['j_ind_final'],
+                    'isolated_j_BS' : _results['j_bs_final'],
+                    'j_fixed' : _results.get('jphi_fixed'),
+                    'jdotb_BS' : _results.get('jdotb_bs_raw'),
+                    'scale_j0' : 1.0,
+                    'scale_Ip' : 1.0}
+        return results
+    else:
+        if coord != 'psi_n':
+            raise ValueError("coord='%s' requires the internal solver (use_python_solve=False)" % coord)
+        if jphi_fixed is not None:
+            raise NotImplementedError("jphi_fixed is only supported by the internal Fortran solver (use_python_solve=False)")
+        if p_fixed is not None:
+            raise NotImplementedError("p_fixed is only supported by the internal Fortran solver (use_python_solve=False)")
+        F0_local = kwargs.get('F0_local', None)
+
+    warn(
+        "The python solve_with_bootstrap() is deprecated by mygs.solve_bootstrap() (internal fortran-solve)."
+        "Set use_python_solve = True to retain the original Python-based bootstrap calculation, otherwise "
+        "solve_with_bootstrap passes arguments to solve_bootstrap()",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     from scipy.optimize import root_scalar
     import matplotlib.pyplot as plt
 
@@ -858,17 +1039,29 @@ def solve_with_bootstrap(mygs,
 
     # Calculate Pressure [Pa]
     # p = n * T * k_B. Since T is in eV, k_B is essentially elementary charge e
-    pressure = (EC * ne * Te) + (EC * ni * Ti)
+    pressure = (EC * ne * Te) + (EC * ni * Ti) # Kinetic profiles same length
 
-    # Reconstruct normalized psi grid based on input pressure length
-    # Note: Assumes inputs are evenly sampled in psi_norm 0..1
-    n_psi = len(pressure)
-    psi_N = numpy.linspace(0., 1., n_psi)
+    # Normalized flux grid the input profiles are sampled on (psi_N: coord is
+    # 'psi_n' here); `None` means assume they are evenly sampled in psi_norm 0..1
+    psi_N = _validate_grid(pressure, 'pressure', x=x)
 
-    def current_scaling_objective(alpha, j_inductive, j_spike, psi_N, target_ip):
-        '''Objective function to match total Ip.'''
+    # Equilibrium quantities are sampled on the *same* grid as the profiles so that
+    # they can be combined element-wise below. The endpoints are clipped because the
+    # flux-surface tracer cannot resolve the magnetic axis or the separatrix exactly;
+    # this clip applies to the sampling points only, never to the profile grid itself.
+    psi_eval = numpy.clip(psi_N, psi_pad, 1.0 - psi_pad)
+    if numpy.any(numpy.diff(psi_eval) <= 0.):
+        raise ValueError("psi_pad (%g) is larger than the first/last psi_N interval "
+                         "(%g, %g); clipping the endpoints would collapse distinct "
+                         "flux surfaces. Reduce psi_pad or coarsen the profile grid."
+                         % (psi_pad, psi_N[1]-psi_N[0], psi_N[-1]-psi_N[-2]))
+
+    def current_scaling_objective(alpha, j_inductive, j_spike, psi_N, target_ip, geom):
+        '''Objective function to match total Ip: exact I_p of TokaMaker jphi (eqs. A5, A9c).'''
         j_total = (alpha * j_inductive) + j_spike
-        ip_computed = mygs.flux_integral(psi_N, j_total)
+        R, inv_R, inv_R2, pp = geom
+        j_imas = (pp + inv_R2 * (j_total - R * pp) / inv_R) / inv_R
+        ip_computed = mygs.compute_flux_integral(psi_N, j_imas)
         return ip_computed - target_ip
 
     def calculate_profiles_and_bootstrap(psi_N, include_jBS):
@@ -880,32 +1073,45 @@ def solve_with_bootstrap(mygs,
         4. Scales inductive current to match Ip_target.
         '''
         # Get geometry and flux functions
-        _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-        _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
-
+        _, f, _, _, pp_eq = mygs.get_profiles(psi=psi_eval)
+        if use_sauter_eps:
+            _, fc, r_avgs, b_avgs, eps = mygs.sauter_fc(psi=psi_eval, return_eps=True)
+        else:
+            warn(
+                "Using use_sauter_eps = False introduces error to the bootstrap calculation in highly elongated plasmas, "
+                "use_sauter_eps = True recommended",
+                UserWarning,
+                stacklevel=2,
+            )
+            _, fc, r_avgs, b_avgs = mygs.sauter_fc(psi=psi_eval)
+            eps = r_avgs['<a>'] / r_avgs['<R>']
+        
         # Geometry terms
-        ft = 1 - fc
-        eps = r_avgs['<a>'] / r_avgs['<R>']
-        _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+        ft = 1 - fc 
+        _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
         R_avg = ravgs_q['<R>']
 
         # Gradients (using raw psi for derivatives)
+        # `edge_order=2` gives a second-order accurate one-sided stencil at the
+        # magnetic axis and separatrix; the numpy default (first order) is badly
+        # inaccurate there and propagates straight into on-axis/edge j_BS. Passing
+        # psi_N explicitly also makes this correct for a non-uniform input grid.
         psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
-        d_psi = numpy.gradient(psi_N)
 
-        # Avoid division by zero in gradients
-        d_psi_eff = d_psi * psi_range
-        d_psi_eff[d_psi_eff == 0] = 1e-9
+        # Avoid division by zero in derivative scaling only; psi_range itself
+        # is reused downstream (e.g. building psiraw for the OMFIT Sauter
+        # call) and must not be clamped
+        psi_range_safe = psi_range if psi_range != 0 else 1e-9
 
-        pprime_local = numpy.gradient(pressure) / d_psi_eff
+        pprime_local = numpy.gradient(pressure, psi_N, edge_order=2) / psi_range_safe
 
         j_BS_final = numpy.zeros_like(pressure)
 
         if include_jBS:
-            dn_e_dpsi = numpy.gradient(ne) / d_psi_eff
-            dT_e_dpsi = numpy.gradient(Te) / d_psi_eff
-            dn_i_dpsi = numpy.gradient(ni) / d_psi_eff
-            dT_i_dpsi = numpy.gradient(Ti) / d_psi_eff
+            dn_e_dpsi = numpy.gradient(ne, psi_N, edge_order=2) / psi_range_safe
+            dT_e_dpsi = numpy.gradient(Te, psi_N, edge_order=2) / psi_range_safe
+            dn_i_dpsi = numpy.gradient(ni, psi_N, edge_order=2) / psi_range_safe
+            dT_i_dpsi = numpy.gradient(Ti, psi_N, edge_order=2) / psi_range_safe
 
             if use_OMFIT_sauter:
                 j_BS_neo = sauter_bootstrap( # legacy OMFIT implementation
@@ -954,11 +1160,14 @@ def solve_with_bootstrap(mygs,
                     formula_form='jboot1', # no d(ln ne)=d(ln ni) assumption
                 )
 
-            # Convert to A/m^2
-            j_BS_final = j_BS_neo * (R_avg / f)
+            # <j_BS.B> -> TokaMaker jphi = <j_phi> (doc_tokamaker_current_conventions.md eq. A7):
+            # field-aligned F<1/R>/<B^2> * <j_BS.B> plus the pressure-driven part P'(<R> - F^2<1/R>/<B^2>)
+            inv_R, B2 = ravgs_q['<1/R>'], b_avgs[1]
+            j_BS_final = j_BS_neo * f * inv_R / B2 + pp_eq * (R_avg - f**2 * inv_R / B2)
             j_BS_final = numpy.nan_to_num(j_BS_final, nan=0.0)
 
-            # to-do: project j_BS_parallel to j_phi more accurately?
+            # Extrapolate to LCFS/axis to match fortran solve
+            j_BS_final = _extrap_jBS_boundaries(psi_N, j_BS_final)
 
         # Scale Currents to match Ip
         current_jphi_target = inductive_jphi if inductive_jphi is not None else numpy.zeros_like(pressure)
@@ -970,6 +1179,17 @@ def solve_with_bootstrap(mygs,
                 if parameterize_jBS:
                     res = analyze_bootstrap_edge_spike(psi_N, j_BS_final, diagnostic_plots=diagnostic_plots)
                     spike_prof = res['parameterized_spike'] * scale_jBS
+                    if diagnose_bs:
+                        popt = res['gaussian_params']
+                        amp, center, width, offset, sk, y_sep, bw = popt
+                        print(f'  [edge_spike_fit_ext]'
+                              f' amp={amp:.6E} center={center:.6E} width={width:.6E}'
+                              f' offset={offset:.6E} sk={sk:.6E} y_sep={y_sep:.6E}'
+                              f' bw={bw:.6E}')
+                        print('  [edge_spike_profile_ext] i  psi_N(std)    j_BS_raw[A/m2]    j_spike_masked[A/m2]  parameterized_spike[A/m2]')
+                        for _i, (_p, _r, _m, _v) in enumerate(
+                                zip(psi_N, j_BS_final, res['masked_spike'], res['parameterized_spike']), 1):
+                            print(f'   {_i:4d}   {_p:.5E}   {_r:.5E}   {_m:.5E}   {_v:.5E}')
                 else:
                     res = analyze_bootstrap_edge_spike(psi_N, j_BS_final)
                     spike_prof = res['masked_spike'] * scale_jBS
@@ -979,7 +1199,8 @@ def solve_with_bootstrap(mygs,
         # Solve for alpha: integral(alpha * j_ind + j_spike) = Ip_target
         try:
             sol = root_scalar(current_scaling_objective,
-                                args=(current_jphi_target, spike_prof, psi_N, Ip_target),
+                                args=(current_jphi_target, spike_prof, psi_N, Ip_target,
+                                      (R_avg, ravgs_q['<1/R>'], ravgs_q['<1/R^2>'], pp_eq)),
                                 bracket=[1.0, 10. * Ip_target],
                                 method='brentq', rtol=1e-6)
             alpha_opt = sol.root
@@ -998,7 +1219,7 @@ def solve_with_bootstrap(mygs,
         return pp_dict, ffp_dict, j_BS_final, matched_j_inductive, spike_prof
 
     # --- Main Execution Flow ---
-    mygs.set_targets(Ip=Ip_target, pax=pressure[0])
+    mygs.set_targets(Ip=Ip_target, pax=pressure[0] - pressure[-1])
 
     if inductive_jphi is not None:
 
@@ -1016,10 +1237,10 @@ def solve_with_bootstrap(mygs,
         ffp_prof['type'] = 'jphi-linterp'
         ffp_prof['y'] = matched_j_inductive + spike_prof
 
-        pax_target = pressure[0]
+        pax_target = pressure[0] - pressure[-1]  # P = 0 at the LCFS: target the drop
 
         # Run through once for better profile convergence
-        solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target)
+        solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target,F0=F0_local)
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
@@ -1057,13 +1278,13 @@ def solve_with_bootstrap(mygs,
             ffp_prof['y'] = matched_input_jphi
 
             scaled_Ip_target = Ip_target*final_scale_Ip
-            pax_target = pressure[0]
+            pax_target = pressure[0] - pressure[-1]  # P = 0 at the LCFS: target the drop
 
-            solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target)
+            solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target,F0=F0_local)
 
             # Check Convergence
-            _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-            _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+            _, f, fp, _, pp = mygs.get_profiles(psi=psi_eval)
+            _, _, ravgs, _, _, _ = mygs.get_q(psi=psi_eval)
 
             tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 

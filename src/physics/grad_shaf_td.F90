@@ -614,6 +614,8 @@ self%p_scale=self%gs_equil%p_scale
 !
 self%F=>self%gs_equil%I
 self%P=>self%gs_equil%P
+IF(self%F%coord/=0.OR.self%P%coord/=0)CALL oft_abort('Toroidal flux profiles not supported in time-dependent solves', &
+  'setup_mfop',__FILE__)
 !
 ALLOCATE(self%eta_reg(self%gs_device%mesh%nreg))
 self%eta_reg=-1.d0

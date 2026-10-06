@@ -16,7 +16,7 @@ USE oft_io, ONLY: hdf5_read, hdf5_write, hdf5_field_exist
 USE oft_base
 USE spline_mod
 USE oft_gs, ONLY: flux_func, gs_equil, oft_indent, oft_increase_indent, &
-  oft_decrease_indent
+  oft_decrease_indent, flux_coord_name
 implicit none
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -28,13 +28,13 @@ contains
   !> Needs docs
   procedure :: copy => zero_copy
   !> Needs docs
-  procedure :: f => zero_f
+  procedure :: f_native => zero_f
   !> Needs docs
-  procedure :: fp => zero_fp
+  procedure :: fp_native => zero_fp
   !> Needs docs
   procedure :: update => zero_update
   !> Needs docs
-  procedure :: set_cofs => zero_cofs_update
+  procedure :: set_cofs_native => zero_cofs_update
   !> Needs docs
   procedure :: get_cofs => zero_cofs_get
   !> Needs docs
@@ -54,13 +54,13 @@ contains
   !> Needs docs
   procedure :: copy => flat_copy
   !> Needs docs
-  procedure :: f => flat_f
+  procedure :: f_native => flat_f
   !> Needs docs
-  procedure :: fp => flat_fp
+  procedure :: fp_native => flat_fp
   !> Needs docs
   procedure :: update => flat_update
   !> Needs docs
-  procedure :: set_cofs => flat_cofs_update
+  procedure :: set_cofs_native => flat_cofs_update
   !> Needs docs
   procedure :: get_cofs => flat_cofs_get
   !> Needs docs
@@ -84,13 +84,13 @@ contains
   !> Needs docs
   procedure :: copy => poly_copy
   !> Needs docs
-  procedure :: f => poly_f
+  procedure :: f_native => poly_f
   !> Needs docs
-  procedure :: fp => poly_fp
+  procedure :: fp_native => poly_fp
   !> Needs docs
   procedure :: update => poly_update
   !> Needs docs
-  procedure :: set_cofs => poly_cofs_update
+  procedure :: set_cofs_native => poly_cofs_update
   !> Needs docs
   procedure :: get_cofs => poly_cofs_get
   !> Needs docs
@@ -119,13 +119,13 @@ contains
   !> Needs docs
   procedure :: copy => spline_func_copy
   !> Needs docs
-  procedure :: f => spline_f
+  procedure :: f_native => spline_f
   !> Needs docs
-  procedure :: fp => spline_fp
+  procedure :: fp_native => spline_fp
   !> Needs docs
   procedure :: update => spline_update
   !> Needs docs
-  procedure :: set_cofs => spline_cofs_update
+  procedure :: set_cofs_native => spline_cofs_update
   !> Needs docs
   procedure :: get_cofs => spline_cofs_get
   !> Needs docs
@@ -150,15 +150,17 @@ contains
   !> Needs docs
   procedure :: copy => linterp_copy
   !> Needs docs
-  procedure :: f => linterp_f
+  procedure :: f_native => linterp_f
   !> Needs docs
-  procedure :: fp => linterp_fp
+  procedure :: fp_native => linterp_fp
   !> Needs docs
-  procedure :: fpp => linterp_fpp
+  procedure :: fpp_native => linterp_fpp
+  !> Node locations
+  procedure :: get_nodes => linterp_get_nodes
   !> Needs docs
   procedure :: update => linterp_update
   !> Needs docs
-  procedure :: set_cofs => linterp_cofs_update
+  procedure :: set_cofs_native => linterp_cofs_update
   !> Needs docs
   procedure :: get_cofs => linterp_cofs_get
   !> Needs docs
@@ -183,7 +185,7 @@ contains
   !> Needs docs
   procedure :: update => mlinterp_update
   !> Needs docs
-  procedure :: set_cofs => mlinterp_cofs_update
+  procedure :: set_cofs_native => mlinterp_cofs_update
   !> Needs docs
   procedure :: get_cofs => mlinterp_cofs_get
   !> Needs docs
@@ -201,10 +203,10 @@ type, extends(flux_func) :: wesson_flux_func
 contains
   procedure :: delete => wesson_delete
   procedure :: copy => wesson_copy
-  procedure :: f => wesson_f
-  procedure :: fp => wesson_fp
+  procedure :: f_native => wesson_f
+  procedure :: fp_native => wesson_fp
   procedure :: update => wesson_update
-  procedure :: set_cofs => wesson_cofs_update
+  procedure :: set_cofs_native => wesson_cofs_update
   procedure :: get_cofs => wesson_cofs_get
   procedure :: save_hdf5 => wesson_save_hdf5
   procedure :: save_txt => wesson_save_txt
@@ -227,7 +229,7 @@ end subroutine zero_save_hdf5
 subroutine zero_save_txt(self,io_unit)
 class(zero_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'zero'
+WRITE(io_unit,*)'zero '//TRIM(flux_coord_name(self%coord))
 end subroutine zero_save_txt
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -257,6 +259,7 @@ class(flux_func), pointer, intent(inout) :: new
 ALLOCATE(zero_flux_func::new)
 new%plasma_bounds=self%plasma_bounds
 new%f_offset=self%f_offset
+new%coord=self%coord
 new%ndofs=0
 end subroutine zero_copy
 !------------------------------------------------------------------------------
@@ -322,7 +325,7 @@ end subroutine flat_save_hdf5
 subroutine flat_save_txt(self,io_unit)
 class(flat_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'flat'
+WRITE(io_unit,*)'flat '//TRIM(flux_coord_name(self%coord))
 end subroutine flat_save_txt
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -364,6 +367,7 @@ class(flux_func), pointer, intent(inout) :: new
 ALLOCATE(flat_flux_func::new)
 new%plasma_bounds=self%plasma_bounds
 new%f_offset=self%f_offset
+new%coord=self%coord
 new%ndofs=0
 end subroutine flat_copy
 !------------------------------------------------------------------------------
@@ -453,7 +457,7 @@ end subroutine poly_save_hdf5
 subroutine poly_save_txt(self,io_unit)
 class(poly_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'poly'
+WRITE(io_unit,*)'poly '//TRIM(flux_coord_name(self%coord))
 IF(self%zero_grad)THEN
   WRITE(io_unit,*)self%ndofs+1,self%zero_grad
   WRITE(io_unit,*)0.d0,self%cofs
@@ -544,6 +548,7 @@ SELECT TYPE(new)
   CLASS IS(poly_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
+    new%coord=self%coord
     new%deg=self%deg
     new%ndofs=self%ndofs
     new%zero_grad=self%zero_grad
@@ -692,7 +697,7 @@ end subroutine spline_save_hdf5
 subroutine spline_save_txt(self,io_unit)
 class(spline_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'spline'
+WRITE(io_unit,*)'spline '//TRIM(flux_coord_name(self%coord))
 WRITE(io_unit,*)self%npsi
 WRITE(io_unit,*)self%func%xs(0:self%npsi-1)
 WRITE(io_unit,*)self%func%fs(0:self%npsi-1,1)
@@ -788,6 +793,7 @@ SELECT TYPE(new)
   CLASS IS(spline_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
+    new%coord=self%coord
     new%npsi=self%npsi
     new%ndofs=self%ndofs
     new%xmin=self%xmin
@@ -860,6 +866,7 @@ class(spline_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 REAL(8) :: yp1,f0
 INTEGER(4) :: i
+IF(self%coord/=0)CALL oft_abort('Toroidal flux coordinate not supported for spline profiles','spline_update',__FILE__)
 self%plasma_bounds=gseq%plasma_bounds
 RETURN
 CALL spline_eval(self%func,self%xmin,1)
@@ -945,7 +952,7 @@ end subroutine linterp_save_hdf5
 subroutine linterp_save_txt(self,io_unit)
 class(linterp_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'linterp'
+WRITE(io_unit,*)'linterp '//TRIM(flux_coord_name(self%coord))
 WRITE(io_unit,*)self%npsi,self%y0
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%yp
@@ -1038,6 +1045,7 @@ SELECT TYPE(new)
   CLASS IS(linterp_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
+    new%coord=self%coord
     new%npsi=self%npsi
     new%ndofs=self%ndofs
     new%y0=self%y0
@@ -1083,6 +1091,7 @@ else
     if(psihat>self%x(i-1).AND.psihat<=self%x(i))then
       b = self%y(i-1) + psihat*(.5d0*psihat - self%x(i-1))/(self%x(i) - self%x(i-1))* &
           (self%yp(i) - self%yp(i-1)) + psihat*self%yp(i-1)
+      exit
     end if
   end do
 end if
@@ -1116,6 +1125,7 @@ else
     if(psihat>self%x(i-1).AND.psihat<=self%x(i))then
       x=(psihat-self%x(i-1))/(self%x(i)-self%x(i-1))
       b = self%yp(i-1) + (self%yp(i)-self%yp(i-1))*x
+      exit
     end if
   end do
 end if
@@ -1146,10 +1156,20 @@ else
     if(psihat>self%x(i-1).AND.psihat<=self%x(i))then
       x=1.d0/(self%plasma_bounds(2)-self%plasma_bounds(1))/(self%x(i)-self%x(i-1))
       b = (self%yp(i)-self%yp(i-1))*x
+      exit
     end if
   end do
 end if
 end function linterp_fpp
+!------------------------------------------------------------------------------
+!> Get node locations
+!------------------------------------------------------------------------------
+subroutine linterp_get_nodes(self,nodes)
+class(linterp_flux_func), intent(inout) :: self
+real(8), allocatable, intent(out) :: nodes(:)
+ALLOCATE(nodes(self%npsi))
+nodes=self%x
+end subroutine linterp_get_nodes
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -1233,7 +1253,7 @@ subroutine mlinterp_save_txt(self,io_unit)
 class(mlinterp_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
 integer(4) :: i
-WRITE(io_unit,*)'mlinterp'
+WRITE(io_unit,*)'mlinterp '//TRIM(flux_coord_name(self%coord))
 WRITE(io_unit,*)self%npsi
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%nbasis
@@ -1338,6 +1358,7 @@ SELECT TYPE(new)
   CLASS IS(mlinterp_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
+    new%coord=self%coord
     new%npsi=self%npsi
     new%ndofs=self%ndofs
     new%y0=self%y0
@@ -1441,7 +1462,7 @@ end subroutine wesson_save_hdf5
 subroutine wesson_save_txt(self,io_unit)
 class(wesson_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'wesson'
+WRITE(io_unit,*)'wesson '//TRIM(flux_coord_name(self%coord))
 WRITE(io_unit,*)self%ndofs
 WRITE(io_unit,*)self%gamma
 end subroutine wesson_save_txt
@@ -1495,6 +1516,7 @@ SELECT TYPE(new)
   TYPE IS(wesson_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
+    new%coord=self%coord
     new%ndofs=self%ndofs
     new%gamma=self%gamma
 END SELECT
