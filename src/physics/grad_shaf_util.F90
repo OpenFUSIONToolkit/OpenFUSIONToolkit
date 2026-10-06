@@ -747,12 +747,14 @@ LOGICAL, OPTIONAL, INTENT(in) :: single_prec !< Save file with single precision 
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 type(gsinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
-real(8) :: gop(3,3),psi_surf(1),pt_last(3)
+type(oft_lag_brinterp), pointer :: psi_loc
+type(oft_lag_bginterp), pointer :: psi_gloc
+real(8) :: gop(3,3),psi_surf(1),pt_last(3),pt_rz(2)
 real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr
 real(8), allocatable :: ptout(:,:)
 real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:)
 real(8), parameter :: tol=1.d-10
-integer(4) :: j,k,cell,io_unit
+integer(4) :: j,k,cell,io_unit,cell_snap
 LOGICAL :: do_pack,save_single
 TYPE(spline_type) :: rz
 type(gs_factory), pointer :: device
@@ -810,11 +812,14 @@ IF(oft_debug_print(1))THEN
 END IF
 !---Trace
 call set_tracer(1)
-ALLOCATE(cout(npsi,4))
+ALLOCATE(cout(npsi,6))
 ALLOCATE(rout(ntheta,npsi))
 ALLOCATE(zout(ntheta,npsi))
-!$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
-ALLOCATE(field)
+!$omp parallel private(j,k,psi_surf,pt,pt_rz,ptout,field,rz,gop,psi_loc,psi_gloc,cell_snap) firstprivate(pt_last)
+ALLOCATE(field,psi_loc,psi_gloc)
+psi_loc%u=>gseq%psi
+CALL psi_loc%setup(device%fe_rep)
+CALL psi_gloc%shared_setup(psi_loc)
 field%u=>gseq%psi
 CALL field%setup(device%fe_rep)
 active_tracer%neq=3
@@ -832,7 +837,7 @@ do j=2,npsi
   !---------------------------------------------------------------------------
   ! Trace contour
   !---------------------------------------------------------------------------
-  IF(pack_lcfs)THEN
+  IF(do_pack)THEN
     psi_surf = xr*(1.d0-(j-1)/REAL(npsi-1,8))**2 + x1
   ELSE
     psi_surf = xr*(1.d0-(j-1)/REAL(npsi-1,8)) + x1
@@ -857,7 +862,7 @@ do j=2,npsi
       !$omp end critical
       CYCLE
     ELSE
-      call oft_abort('Trace did not complete.','gs_save_decon',__FILE__)
+      call oft_abort('Trace did not complete.','gs_save_ifile',__FILE__)
     END IF
   END IF
   !---------------------------------------------------------------------------
@@ -870,11 +875,15 @@ do j=2,npsi
   rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
   rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
   CALL spline_fit(rz,"periodic")
-  !---Resample trace
+  !---Resample trace at equal geometric angle, then move each point onto the surface
+  cell_snap=0
   DO k=0,ntheta-1
     CALL spline_eval(rz,k/REAL(ntheta-1,8),0)
-    rout(k+1,j)=rz%f(1)
-    zout(k+1,j)=rz%f(2)
+    pt_rz=[rz%f(1),rz%f(2)]
+    CALL ifile_snap(device%mesh,psi_loc,psi_gloc,[raxis,zaxis],2.d0*pi*k/REAL(ntheta-1,8), &
+      psi_surf(1),cell_snap,pt_rz)
+    rout(k+1,j)=pt_rz(1)
+    zout(k+1,j)=pt_rz(2)
   END DO
   !---Destroy Spline
   CALL spline_dealloc(rz)
@@ -890,10 +899,13 @@ do j=2,npsi
   END IF
   cout(j,3)=gseq%p_scale*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
   cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
+  CALL ifile_derivs(gseq,psi_surf(1),cout(j,2),cout(j,5:6))
 end do
 CALL active_tracer%delete
 CALL field%delete
-DEALLOCATE(ptout,field)
+CALL psi_gloc%delete()
+CALL psi_loc%delete()
+DEALLOCATE(ptout,field,psi_loc,psi_gloc)
 !$omp end parallel
 CALL psi_int%delete()
 IF(PRESENT(error_str))THEN
@@ -912,6 +924,7 @@ ELSE
   cout(1,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(x2) + gseq%I%f_offset**2)
 END IF
 cout(1,3)=gseq%p_scale*gseq%P%f(x2)/mu0
+CALL ifile_derivs(gseq,x2,cout(1,2),cout(1,5:6))
 cout(1,4)=(cout(3,4)-cout(2,4))*(x2-cout(2,1))/(cout(3,1)-cout(2,1)) + cout(2,4)
 !---Add LCFS pressure if specified
 IF(PRESENT(lcfs_press))cout(:,3)=cout(:,3)+lcfs_press
@@ -952,20 +965,76 @@ ELSE
   WRITE(io_unit)zout
 END IF
 !---------------------------------------------------------------------------
+! Write out profile derivatives (after the original records)
+!
+! cout(:,5) -> F*dF/dpsi(0:npsi)
+! cout(:,6) -> dp/dpsi(0:npsi)
+!---------------------------------------------------------------------------
+DO j=5,6
+  IF(save_single)THEN
+    WRITE(io_unit)REAL(cout(:,j),4)
+  ELSE
+    WRITE(io_unit)cout(:,j)
+  END IF
+END DO
+!---------------------------------------------------------------------------
 ! Close output file
 !---------------------------------------------------------------------------
 CLOSE(io_unit)
 !---
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,2ES11.3)')oft_indent,'Psi  = ',x1,x2
-  WRITE(*,'(2A,F7.2)')oft_indent,'Qmin = ',MINVAL(cout(4,:))
-  WRITE(*,'(2A,F7.2)')oft_indent,'Qmax = ',MAXVAL(cout(4,:))
+  WRITE(*,'(2A,F7.2)')oft_indent,'Qmin = ',MINVAL(cout(:,4))
+  WRITE(*,'(2A,F7.2)')oft_indent,'Qmax = ',MAXVAL(cout(:,4))
   ! WRITE(*,'(2A)')oft_indent,'Done'
 END IF
 CALL oft_decrease_indent
 !---
 DEALLOCATE(cout,rout,zout)
 end subroutine gs_save_ifile
+!------------------------------------------------------------------------------
+!> Move a point along the ray from the axis at angle `theta` onto the surface psi = `psi_target`
+!------------------------------------------------------------------------------
+subroutine ifile_snap(mesh,psi_int,psi_gint,axis,theta,psi_target,cell,pt)
+class(oft_bmesh), intent(inout) :: mesh !< Mesh
+type(oft_lag_brinterp), intent(inout) :: psi_int !< Flux interpolator
+type(oft_lag_bginterp), intent(inout) :: psi_gint !< Flux gradient interpolator
+real(8), intent(in) :: axis(2) !< Ray origin (magnetic axis)
+real(8), intent(in) :: theta !< Ray angle
+real(8), intent(in) :: psi_target !< Flux of the surface
+integer(4), intent(inout) :: cell !< Cell guess (updated)
+real(8), intent(inout) :: pt(2) !< Guess (input); point on the surface (output)
+real(8) :: e(2),rho,drho,f(3),gop(3,3),v,psi(1),gpsi(3),pt3(3)
+integer(4) :: i
+e=[COS(theta),SIN(theta)]
+rho=SQRT(SUM((pt-axis)**2))
+DO i=1,20
+  pt3=[axis+rho*e,0.d0]
+  CALL bmesh_findcell(mesh,cell,pt3,f)
+  CALL mesh%jacobian(cell,f,gop,v)
+  CALL psi_int%interp(cell,f,gop,psi)
+  CALL psi_gint%interp(cell,f,gop,gpsi)
+  drho=(psi(1)-psi_target)/DOT_PRODUCT(gpsi(1:2),e)
+  rho=rho-drho
+  IF(ABS(drho)<1.d-13*rho)EXIT
+END DO
+pt=axis+rho*e
+end subroutine ifile_snap
+!------------------------------------------------------------------------------
+!> F*dF/dpsi and dp/dpsi at `psi` (`fval` is F there)
+!------------------------------------------------------------------------------
+subroutine ifile_derivs(gseq,psi,fval,derivs)
+class(gs_equil), intent(inout) :: gseq !< G-S object
+real(8), intent(in) :: psi !< Poloidal flux
+real(8), intent(in) :: fval !< F at psi
+real(8), intent(out) :: derivs(2) !< [F*dF/dpsi, dp/dpsi]
+IF(gseq%mode==0)THEN
+  derivs(1)=fval*gseq%ffp_scale*gseq%I%fp(psi)
+ELSE
+  derivs(1)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi)
+END IF
+derivs(2)=gseq%p_scale*gseq%P%fp(psi)/mu0
+end subroutine ifile_derivs
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
