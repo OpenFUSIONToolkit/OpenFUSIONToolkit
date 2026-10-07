@@ -428,7 +428,8 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     '''
     import matplotlib.pyplot as plt
 
-    n_psi = len(psi_N)
+    # Endpoints clipped: the flux-surface tracer cannot resolve the axis or separatrix
+    psi_eval = numpy.clip(psi_N, psi_pad, 1.0 - psi_pad)
 
     if spike_prof is None:
         spike_prof = numpy.zeros_like(j_inductive)
@@ -447,8 +448,8 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
         solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target)
 
         # Check Convergence
-        _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-        _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+        _, f, fp, _, pp = mygs.get_profiles(psi=psi_eval)
+        _, _, ravgs, _, _, _ = mygs.get_q(psi=psi_eval)
 
         tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 
@@ -811,7 +812,8 @@ def solve_with_bootstrap(mygs,
                          diagnostic_plots=False,
                          parameterize_jBS = False,
                          use_OMFIT_sauter = False,
-                         verbose = True):
+                         verbose = True,
+                         psi_N = None):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
     @param mygs Grad-Shafranov solver object
@@ -830,6 +832,8 @@ def solve_with_bootstrap(mygs,
     @param diagnostic_plots If True, plot diagnostic figures
     @param parameterize_jBS If True, use parameterized edge spike
     @param use_OMFIT_sauter If True, use OMFIT Sauter model
+    @param psi_N \f$\hat{\psi}\f$ grid the profiles are sampled on (strictly increasing, in [0,1]);
+    if `None`, profiles are assumed evenly sampled on [0,1]
     @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
     '''
     from scipy.optimize import root_scalar
@@ -860,10 +864,25 @@ def solve_with_bootstrap(mygs,
     # p = n * T * k_B. Since T is in eV, k_B is essentially elementary charge e
     pressure = (EC * ne * Te) + (EC * ni * Ti)
 
-    # Reconstruct normalized psi grid based on input pressure length
-    # Note: Assumes inputs are evenly sampled in psi_norm 0..1
     n_psi = len(pressure)
-    psi_N = numpy.linspace(0., 1., n_psi)
+    if psi_N is None:
+        psi_N = numpy.linspace(0., 1., n_psi)
+    else:
+        psi_N = numpy.asarray(psi_N, dtype=float)
+        if psi_N.shape != (n_psi,):
+            raise ValueError("psi_N must be 1D and the same length as the profiles")
+        if not numpy.all(numpy.isfinite(psi_N)):
+            raise ValueError("psi_N contains non-finite values")
+        if numpy.any(numpy.diff(psi_N) <= 0.0):
+            raise ValueError("psi_N must be strictly increasing")
+        if not (numpy.isclose(psi_N[0], 0.0) and numpy.isclose(psi_N[-1], 1.0)):
+            raise ValueError("psi_N must span [0,1] ({0}, {1})".format(psi_N[0], psi_N[-1]))
+
+    # Equilibrium quantities are sampled on the profile grid, with endpoints clipped
+    # because the flux-surface tracer cannot resolve the axis or separatrix
+    psi_eval = numpy.clip(psi_N, psi_pad, 1.0 - psi_pad)
+    if numpy.any(numpy.diff(psi_eval) <= 0.0):
+        raise ValueError("psi_pad ({0}) exceeds the first/last psi_N interval".format(psi_pad))
 
     def current_scaling_objective(alpha, j_inductive, j_spike, psi_N, target_ip):
         '''Objective function to match total Ip.'''
@@ -871,7 +890,7 @@ def solve_with_bootstrap(mygs,
         ip_computed = mygs.flux_integral(psi_N, j_total)
         return ip_computed - target_ip
 
-    def calculate_profiles_and_bootstrap(psi_N, include_jBS):
+    def calculate_profiles_and_bootstrap(include_jBS):
         '''
         Main physics calculation:
         1. Gets geometry from current equilibrium (self).
@@ -880,32 +899,30 @@ def solve_with_bootstrap(mygs,
         4. Scales inductive current to match Ip_target.
         '''
         # Get geometry and flux functions
-        _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-        _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
+        _, f, _, _, _ = mygs.get_profiles(psi=psi_eval)
+        _, fc, r_avgs, _ = mygs.sauter_fc(psi=psi_eval)
 
         # Geometry terms
         ft = 1 - fc
         eps = r_avgs['<a>'] / r_avgs['<R>']
-        _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+        _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
         R_avg = ravgs_q['<R>']
 
-        # Gradients (using raw psi for derivatives)
+        # Gradients (using raw psi for derivatives); edge_order=2 is required, the
+        # first-order default is badly inaccurate at the axis and separatrix
         psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
-        d_psi = numpy.gradient(psi_N)
+        if psi_range == 0.0:
+            raise ValueError("Degenerate equilibrium: psi_bounds are equal")
 
-        # Avoid division by zero in gradients
-        d_psi_eff = d_psi * psi_range
-        d_psi_eff[d_psi_eff == 0] = 1e-9
-
-        pprime_local = numpy.gradient(pressure) / d_psi_eff
+        pprime_local = numpy.gradient(pressure, psi_N, edge_order=2) / psi_range
 
         j_BS_final = numpy.zeros_like(pressure)
 
         if include_jBS:
-            dn_e_dpsi = numpy.gradient(ne) / d_psi_eff
-            dT_e_dpsi = numpy.gradient(Te) / d_psi_eff
-            dn_i_dpsi = numpy.gradient(ni) / d_psi_eff
-            dT_i_dpsi = numpy.gradient(Ti) / d_psi_eff
+            dn_e_dpsi = numpy.gradient(ne, psi_N, edge_order=2) / psi_range
+            dT_e_dpsi = numpy.gradient(Te, psi_N, edge_order=2) / psi_range
+            dn_i_dpsi = numpy.gradient(ni, psi_N, edge_order=2) / psi_range
+            dT_i_dpsi = numpy.gradient(Ti, psi_N, edge_order=2) / psi_range
 
             if use_OMFIT_sauter:
                 j_BS_neo = sauter_bootstrap( # legacy OMFIT implementation
@@ -1007,7 +1024,7 @@ def solve_with_bootstrap(mygs,
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-            psi_N, include_jBS=True
+            include_jBS=True
         )
 
         # Enforce P' edge condition
@@ -1023,7 +1040,7 @@ def solve_with_bootstrap(mygs,
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-            psi_N, include_jBS=True
+            include_jBS=True
         )
 
         # Enforce P' edge condition
@@ -1046,7 +1063,7 @@ def solve_with_bootstrap(mygs,
         for n in range(iterations):
             # Calculate new profiles
             pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-                psi_N, include_jBS=True
+                include_jBS=True
             )
 
             # Enforce P' edge condition
@@ -1062,8 +1079,8 @@ def solve_with_bootstrap(mygs,
             solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target)
 
             # Check Convergence
-            _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-            _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+            _, f, fp, _, pp = mygs.get_profiles(psi=psi_eval)
+            _, _, ravgs, _, _, _ = mygs.get_q(psi=psi_eval)
 
             tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 
