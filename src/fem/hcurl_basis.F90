@@ -29,7 +29,8 @@ USE oft_hexmesh_type, ONLY: hex_bary_ecoords, hex_bary_efcoords, hex_bary_fcoord
   hex_get_bary, hex_get_bary_gop, hex_get_bary_cgop
 USE multigrid, ONLY: multigrid_mesh, multigrid_level
 USE oft_la_base, ONLY: oft_matrix, oft_graph
-USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type, oft_afem_type
+USE fem_base, ONLY: oft_fem_type, oft_ml_fem_type, oft_bfem_type, oft_afem_type, &
+  bfem_delete, fem_delete
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_h1_basis, ONLY: oft_h1_fem, oft_h1_setup_vol
 IMPLICIT NONE
@@ -40,12 +41,18 @@ IMPLICIT NONE
 type, extends(oft_fem_type) :: oft_hcurl_fem
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL()
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsc => NULL()
+CONTAINS
+  !> Delete H(Curl) FE object and free memory
+  PROCEDURE :: delete => oft_hcurl_delete
 end type oft_hcurl_fem
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(oft_bfem_type) :: oft_hcurl_bfem
   INTEGER(i4), POINTER, DIMENSION(:,:) :: indsf => NULL()
+CONTAINS
+  !> Delete H(Curl) FE object and free memory
+  PROCEDURE :: delete => oft_bhcurl_delete
 end type oft_hcurl_bfem
 !---Global Variables
 integer(i4), parameter :: cgop_map(4,4) = RESHAPE((/0,-1,-2,-3,1,0,-4,-5,2,4,0,-6,3,5,6,0/),(/4,4/))
@@ -72,6 +79,17 @@ SELECT TYPE(source)
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_3D_hcurl_cast
+!------------------------------------------------------------------------------
+!> Destroy FE object
+!------------------------------------------------------------------------------
+SUBROUTINE oft_hcurl_delete(self)
+CLASS(oft_hcurl_fem), INTENT(inout) :: self
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%indsf))DEALLOCATE(self%indsf)
+IF(ASSOCIATED(self%indsc))DEALLOCATE(self%indsc)
+CALL fem_delete(self)
+DEBUG_STACK_POP
+END SUBROUTINE oft_hcurl_delete
 !---------------------------------------------------------------------------------
 !> Cast abstract FE type to 2D H(Curl) finite element type
 !!
@@ -93,6 +111,16 @@ SELECT TYPE(source)
 END SELECT
 DEBUG_STACK_POP
 END FUNCTION oft_2D_hcurl_cast
+!------------------------------------------------------------------------------
+!> Destroy FE object
+!------------------------------------------------------------------------------
+SUBROUTINE oft_bhcurl_delete(self)
+CLASS(oft_hcurl_bfem), INTENT(inout) :: self
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%indsf))DEALLOCATE(self%indsf)
+CALL bfem_delete(self)
+DEBUG_STACK_POP
+END SUBROUTINE oft_bhcurl_delete
 !------------------------------------------------------------------------------
 !> Construct H(Curl) FE basis on each mesh level
 !!

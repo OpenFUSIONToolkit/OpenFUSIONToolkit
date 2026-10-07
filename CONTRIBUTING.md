@@ -73,6 +73,7 @@ Thanks! :sunny: :heart:
 The Open FUSION Toolkit Team
 
 ## Contributors
+Matt Adams (@mattsgit)\
 Anson Braun (@ansonbraun)\
 Daniel Burgess (@d-burg)\
 Samuel Freiberger (@samuel-frei)\
@@ -83,6 +84,7 @@ Julia Kirby (@juliagoestoikea)\
 John Lhota (@john4255)\
 Francois Logak\
 Oak Nelson (@nelsonand)\
+Matthew Parsons\
 Matthew Pharr (@matt-pharr)\
 Jeremy Salm (@jeremslm)\
 Benjy Smith (@benjysmith)\

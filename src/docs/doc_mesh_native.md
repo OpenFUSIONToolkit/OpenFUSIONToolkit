@@ -12,15 +12,15 @@ scripts \ref doc_mesh_native_conv "described below".
 
 In order to load a native mesh file `cad_type = 0` must be specified in the `mesh_options` group
 (see \ref doc_input_mesh). The mesh filename and some native-specific options are specified at runtime
-in the `cubit_options` group. The options available in this group are listed below.
+in the `native_mesh_options` group. The options available in this group are listed below.
 
 **Option group:** `native_mesh_options`
 |  Option  |  Description  | Type [dim] |
 |----|----|----|
-filename,reflect,ref_periodic
 | `filename=""`  | Name of mesh file | str(OFT_PATH_SLEN) |
 | `reflect=F`    | Reflect mesh about xy-plane? | bool |
 | `ref_periodic=F` | Make mesh periodic in z-direction following reflection? | int |
+| `zstretch=1.`  | Scale for z-direction | float |
 
 \section doc_mesh_native_conv Converting Meshes
 
@@ -28,22 +28,25 @@ As OFT only provides mesh generation capability for selected cases, most files w
 by one of the provided conversion scripts from software-specfic formats (eg. CUBIT, gmsh, etc.).
 
 \subsection doc_mesh_native_conv_cubit Converting CUBIT files
-To convert from CUBIT meshes saved using the Exodus/Gensis file format use the `convert_cubit.py` script
+To convert from CUBIT meshes saved using the Exodus/Gensis file format use the `OFT_convert_cubit.py` script
 (as below). The `--in_file` argument must be specified and by default a new file is created in native
 format with the same name, but `*.h5` extension, in the current working directory. Additional options
 to control inclusion of periodicity information are available (use `--help` for more information).
 
 \verbatim
-~$ python /path/to/oft/bin/convert_cubit.py --in_file=/path/to/cubit_mesh.g
+~$ python /path/to/oft/bin/OFT_convert_cubit.py --in_file=/path/to/cubit_mesh.g
 \endverbatim
 
 \subsection doc_mesh_native_conv_gmsh Converting Gmsh files
 To convert from Gmsh meshes saved using the [MSH file format](https://gmsh.info/doc/texinfo/gmsh.html#MSH-file-format)
-use the `convert_gmsh.py` script (as below). The `--in_file` argument must be specified and by default a new file is created in native
+use the `OFT_convert_gmsh.py` script (as below). The `--in_file` argument must be specified and by default a new file is created in native
 format with the same name, but `*.h5` extension, in the current working directory.
 
 \note Currently only Tet/Tri meshes are supported in both linear and quadratic variants.
 
+\note Both the version 1 (`$NOD`/`$ELM`) and version 2 (`$Nodes`/`$Elements`) MSH formats are supported, as is
+the MEDIT format written by Gmsh's `-format mesh` option.
+
 \verbatim
-~$ python /path/to/oft/bin/convert_gmsh.py --in_file=/path/to/gmsh_mesh.msh
+~$ python /path/to/oft/bin/OFT_convert_gmsh.py --in_file=/path/to/gmsh_mesh.msh
 \endverbatim

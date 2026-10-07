@@ -1,14 +1,10 @@
 name: Container CD Build and Deployment
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - container_release
-  pull_request:
-    paths:
-      - .github/workflows/container_cd.yaml
-      - src/utilities/build_libs.py
-      - docker/Dockerfile.*
 
 concurrency:
   group: cd_container-${{ github.ref }}
@@ -62,7 +58,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
-      
+
       - name: Get build architecture
         run: echo "ARCH_SUFFIX=$(dpkg --print-architecture)" >> "$GITHUB_ENV"
 

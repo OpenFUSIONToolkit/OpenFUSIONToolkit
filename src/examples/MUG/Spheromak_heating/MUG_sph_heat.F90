@@ -335,7 +335,7 @@ END PROGRAM MUG_sph_heat
 !!/
 !!\endverbatim
 !!
-!! Once the post-processing run is complete `bin/build_xdmf.py` can be used to generate `*.xmf` files that can be loaded by
+!! Once the post-processing run is complete `bin/OFT_build_xdmf.py` can be used to generate `*.xmf` files that can be loaded by
 !! [VisIt](https://visit-dav.github.io/visit-website/index.html), [ParaView](https://www.paraview.org/), or other visualization programs.
 !!
 !! \image html MUG_heat_ex-Fields.png "Resulting temperature distribution (shading) and magnetic field (vectors) at the end of the simulation, showing thermal confinement in the core of the torus."
@@ -362,18 +362,18 @@ END PROGRAM MUG_sph_heat
 !!mesh volume 1
 !!
 !!set duplicate block elements off
-!!block 1 add volume 1 
+!!block 1 add volume 1
 !!block 1 element type tetra10
 !!
 !!set large exodus file on
 !!export Genesis  "cyl_heat.g" overwrite block 1
 !!\endverbatim
 !!
-!! Once complete the mesh should be converted into the native mesh format using the `convert_cubit.py` script as
+!! Once complete the mesh should be converted into the native mesh format using the `OFT_convert_cubit.py` script as
 !! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
 !!
 !!\verbatim
-!!~$ python convert_cubit.py --in_file=cyl_heat.g
+!!~$ python OFT_convert_cubit.py --in_file=cyl_heat.g
 !!\endverbatim
 !!
 !!\subsection doc_mug_sph_ex2_gmsh Meshing with Gmsh
@@ -406,9 +406,9 @@ END PROGRAM MUG_sph_heat
 !!~$ gmsh -3 -format mesh -optimize -clscale .2 -order 2 -o cyl_heat.mesh cyl_heat.geo
 !!\endverbatim
 !!
-!! Once complete the mesh should be converted into the native mesh format using the `convert_gmsh.py` script as
+!! Once complete the mesh should be converted into the native mesh format using the `OFT_convert_gmsh.py` script as
 !! below. The script is located in `bin` following installation or `src/utilities` in the base repo.
 !!
 !!\verbatim
-!!~$ python convert_gmsh.py --in_file=cyl_heat.mesh
+!!~$ python OFT_convert_gmsh.py --in_file=cyl_heat.mesh
 !!\endverbatim

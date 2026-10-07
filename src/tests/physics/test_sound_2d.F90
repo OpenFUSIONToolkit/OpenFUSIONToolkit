@@ -1,3 +1,37 @@
+MODULE sound_2d_helpers
+USE oft_local
+IMPLICIT NONE
+REAL(r8) :: k_dir(3) = (/1.d0,0.d0,0.d0/) !< Direction of wave propagation
+REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
+REAL(r8) :: lam = 2.d0 !< Wavelength
+REAL(r8) :: delta = 1.d-4 !< Relative size of perturbation (<<1)
+CONTAINS
+!
+SUBROUTINE dens_sound(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val=(1.d0+delta*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam))**(3.d0/5.d0)
+END SUBROUTINE dens_sound
+!
+SUBROUTINE velx_sound(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = delta*k_dir(1)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+END SUBROUTINE velx_sound
+!
+SUBROUTINE velz_sound(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = delta*k_dir(2)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
+END SUBROUTINE velz_sound
+!
+SUBROUTINE temp_sound(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val=(1.d0+delta*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam))**(2.d0/5.d0)
+END SUBROUTINE temp_sound
+END MODULE sound_2d_helpers 
+
 PROGRAM test_sound_2d
 !---Runtime
 USE oft_base
@@ -15,6 +49,7 @@ USE mhd_utils, ONLY: elec_charge, proton_mass, mu0
 USE diagnostic, ONLY: scal_energy_2d
 USE fem_utils, ONLY: diff_interp_2d
 USE xmhd_2d
+USE sound_2d_helpers
 IMPLICIT NONE
 INTEGER(i4) :: io_unit,ierr
 REAL(r8), POINTER :: vec_vals(:)
@@ -49,11 +84,11 @@ REAL(r8) :: nu=1.E-12 !< Needs docs
 REAL(r8) :: gamma=1.d0
 REAL(r8) :: D_diff=1.E-12
 REAL(r8) :: den_scale=1.d19
-REAL(r8) :: k_dir(3) = (/1.d0,0.d0,0.d0/) !< Direction of wave propagation
-REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
-REAL(r8) :: lam = 2.d0 !< Wavelength
+!REAL(r8) :: k_dir(3) = (/1.d0,0.d0,0.d0/) !< Direction of wave propagation
+!REAL(r8) :: r0(3) = (/0.d0,0.d0,0.d0/)  !< Zero-phase position
+!REAL(r8) :: lam = 2.d0 !< Wavelength
 REAL(r8) :: v_sound = 2.d4
-REAL(r8) :: delta = 1.d-4 !< Relative size of perturbation (<<1)
+!REAL(r8) :: delta = 1.d-4 !< Relative size of perturbation (<<1)
 REAL(r8) :: lin_tol = 1.d-8
 REAL(r8) :: nl_tol = 1.d-5
 LOGICAL :: pm=.FALSE.
@@ -96,7 +131,7 @@ v_delta=2.d0*t0*elec_charge/(proton_mass*v_sound)
 
 
 !---Project n initial condition onto scalar Lagrange basis
-IF (linear)THEN
+IF(linear)THEN
   CALL u%set(n0)
   CALL u%get_local(vec_vals)
   vec_vals = vec_vals / den_scale
@@ -186,11 +221,11 @@ mhd_sim%ittarget=300
 mhd_sim%timestep_cn=.TRUE.
 oft_env%pm=pm
 
-IF (linear) THEN
+IF(linear)THEN
   CALL mhd_sim%u%add(1.d0,-1.d0,mhd_sim%u0)
   CALL mhd_sim%run_lin_simulation()
   CALL mhd_sim%u%add(1.d0,1.d0,mhd_sim%u0)
-ELSE 
+ELSE
   CALL mhd_sim%run_simulation()
 END IF
 
@@ -253,30 +288,4 @@ CLOSE(io_unit)
 
 !---Finalize enviroment
 CALL oft_finalize
-CONTAINS
-    
-SUBROUTINE dens_sound(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val=(1.d0+delta*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam))**(3.d0/5.d0)
-END SUBROUTINE dens_sound
-    
-SUBROUTINE velx_sound(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = delta*k_dir(1)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
-END SUBROUTINE velx_sound
-    
-SUBROUTINE velz_sound(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val = delta*k_dir(2)*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam)
-END SUBROUTINE velz_sound
-    
-SUBROUTINE temp_sound(pt, val)
-REAL(r8), INTENT(in) :: pt(3)
-REAL(r8), INTENT(out) :: val
-val=(1.d0+delta*SIN(DOT_PRODUCT(pt-r0,k_dir)*2.d0*pi/lam))**(2.d0/5.d0)
-END SUBROUTINE temp_sound
-
 END PROGRAM test_sound_2d

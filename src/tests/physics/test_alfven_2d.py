@@ -1,4 +1,3 @@
-from __future__ import print_function
 import os
 import sys
 import pytest
@@ -203,7 +202,7 @@ def test_lin_r1_p3_mpi(petsc_flag):
     verr_exp = 2.5746106154166067E-3
     berr_exp = 5.148998451109316E-4
     assert alfven_2d_setup(1,2,3, petsc=petsc_flag, linear = True)
-    assert validate_result(verr_exp, berr_exp) 
+    assert validate_result(verr_exp, berr_exp)
 
 #============================================================================
 #Linear test runners for NP=4
@@ -220,4 +219,4 @@ def test_lin_r1_p4_mpi(petsc_flag):
     verr_exp = 4.997848969169074E-4
     berr_exp = 4.504851399342237E-4
     assert alfven_2d_setup(1,2,4, petsc=petsc_flag, linear = True)
-    assert validate_result(verr_exp, berr_exp) 
+    assert validate_result(verr_exp, berr_exp)

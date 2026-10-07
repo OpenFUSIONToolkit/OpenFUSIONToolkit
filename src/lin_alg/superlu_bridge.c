@@ -102,7 +102,9 @@ oft_superlu_dgssv_c(int iopt, int n, int nnz, int nrhs,
         } else {
             LUfactors = *f_factors;
             Destroy_SuperNode_Matrix(LUfactors->L);
+            SUPERLU_FREE(LUfactors->L);
             Destroy_CompCol_Matrix(LUfactors->U);
+            SUPERLU_FREE(LUfactors->U);
             L = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
             U = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
             perm_c = LUfactors->perm_c;
@@ -221,7 +223,7 @@ oft_superlu_dgssv_c(int iopt, int n, int nnz, int nrhs,
         SUPERLU_FREE (LUfactors->L);
         SUPERLU_FREE (LUfactors->U);
         SUPERLU_FREE (LUfactors);
-        f_factors = NULL;
+        *f_factors = NULL;
     } else {
         fprintf(stderr,"Invalid iopt=%d passed to oft_superlu_dgssv_c()\n",iopt);
         *info = -1;
@@ -305,7 +307,9 @@ oft_superlu_dgsisx_c(int iopt, int n, int nnz, int nrhs,
         } else {
             LUfactors = *f_factors;
             Destroy_SuperNode_Matrix(LUfactors->L);
+            SUPERLU_FREE(LUfactors->L);
             Destroy_CompCol_Matrix(LUfactors->U);
+            SUPERLU_FREE(LUfactors->U);
             L = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
             U = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
             perm_c = LUfactors->perm_c;
@@ -419,7 +423,7 @@ oft_superlu_dgsisx_c(int iopt, int n, int nnz, int nrhs,
         SUPERLU_FREE (LUfactors->L);
         SUPERLU_FREE (LUfactors->U);
         SUPERLU_FREE (LUfactors);
-        f_factors = NULL;
+        *f_factors = NULL;
     } else {
         fprintf(stderr,"Invalid iopt=%d passed to oft_superlu_dgsisx_c()\n",iopt);
         *info = -1;

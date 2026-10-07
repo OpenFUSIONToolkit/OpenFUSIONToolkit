@@ -270,7 +270,17 @@ def _run_tokamaker_torax(
         tt.set_ne(ne, right_bc=0.25e20)
         tt.set_Te(te, right_bc=0.1)
         tt.set_Ti(te, right_bc=0.1)
-        tt.set_pedestal(set_pedestal=True, T_i_ped=3.0, T_e_ped=3.0, n_e_ped=0.8e20)
+        # H-mode pedestal-top targets; the TORAX L/H formation model owns the transition timing
+        # (pedestal applied once P_SOL > P_LH), ramped over transition_time.
+        tt.set_pedestal(
+            config_mode="ADAPTIVE_SOURCE",
+            ped_height_Te=3.0,
+            ped_height_Ti=3.0,
+            ped_height_ne=0.8e20,
+            ped_top=0.9,
+            transition_time=0.5,
+            formation_model="martin_scaling",
+        )
 
         heat_times = {0.0: 30.0e6}
         tt.set_heating(

@@ -1,7 +1,6 @@
 # Python modules
 set( OFT_PY_HELPER_MODS
   oft_mpl.py
-  tokamaker_fit.py
 )
 foreach( file ${OFT_PY_HELPER_MODS} )
   configure_file( ${file} ${CMAKE_BINARY_DIR}/python/${file} COPYONLY )
@@ -10,14 +9,8 @@ endforeach()
 
 # Python scripts
 set( OFT_PY_BINS
-  build_xdmf.py
-  build_xdmf-legacy.py
-  convert_hist.py
-  convert_cubit.py
-  convert_gmsh.py
   scripts/plot_mug_hist.py
-  scripts/plot_tokamaker_psi.py
-  scripts/ThinCurr_compute_holes.py
+  build_xdmf-legacy.py
 )
 
 foreach( path ${OFT_PY_BINS} )

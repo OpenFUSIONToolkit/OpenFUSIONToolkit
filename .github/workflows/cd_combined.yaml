@@ -1,16 +1,11 @@
 name: CD Build and Deployment
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
       - pypi_release
-  pull_request:
-    paths:
-      - .github/workflows/cd_combined.yaml
-      - src/utilities/build_libs.py
-      - src/python/pyproject.toml.in
-      - src/python/make_package.sh.in
 
 concurrency:
   group: cd_comb-${{ github.ref }}

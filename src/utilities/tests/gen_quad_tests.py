@@ -6,7 +6,6 @@
 # Class definition for manipulating Open FUSION Toolkit (OFT) structured binary files in Python
 #
 #------------------------------------------------------------------------------
-from __future__ import print_function
 try:
     import numpy
 except:

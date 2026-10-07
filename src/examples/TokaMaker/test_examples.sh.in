@@ -5,16 +5,19 @@ ROOT_PATH=$(pwd)
 
 run_test() {
   cd $1
+  start_time=$SECONDS
   jupyter nbconvert --execute --to notebook --inplace --ExecutePreprocessor.kernel_name=@OFT_PY_KERNEL@ $2 > tmp.log 2>&1
   if [ $? -ne 0 ]; then
-    echo "Example TokaMaker/$1/$2 failed."
+    elapsed=$((SECONDS - start_time))
+    echo "Example TokaMaker/$1/$2 failed in $elapsed seconds."
     echo "" >> $log_path
     echo "====== Begin TokaMaker/$1/$2 output ======" >> $log_path
     cat tmp.log >> $log_path
     echo "======  End TokaMaker/$1/$2 output  ======" >> $log_path
     echo "" >> $log_path
   else
-    echo "Example TokaMaker/$1/$2 ran successfully."
+    elapsed=$((SECONDS - start_time))
+    echo "Example TokaMaker/$1/$2 ran successfully in $elapsed seconds."
   fi
   rm tmp.log
   cd $ROOT_PATH
@@ -43,6 +46,14 @@ run_test ITER ITER_Hmode_ex.ipynb
 # LTX cases
 run_test LTX LTX_mesh_ex.ipynb
 run_test LTX LTX_eq_ex.ipynb
+
+# Dipole cases
+run_test Dipole dipole_mesh_ex.ipynb
+run_test Dipole dipole_eq_ex.ipynb
+
+# WHAM cases
+# run_test WHAM WHAM_mesh_ex.ipynb
+run_test WHAM WHAM_eq_ex.ipynb
 
 # Advanced workflow cases
 run_test AdvancedWorkflows/Pulse_Design CUTE_pulse_ex.ipynb 

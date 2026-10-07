@@ -1003,7 +1003,7 @@ ELSE
   self%internal_solver=.TRUE.
 END IF
 !
-SELECT CASE(TRIM(bc)) 
+SELECT CASE(TRIM(bc))
 CASE('grnd')
   ALLOCATE(bc_zerogrnd)
   bc_zerogrnd%ML_lag_rep=>ML_lag_rep
@@ -1048,7 +1048,7 @@ END IF
 uu=a%dot(a)
 self%solver%atol=MAX(self%solver%atol,SQRT(uu*1.d-20))
 call u%set(0.d0)
-call self%bc%apply(g)
+IF(ASSOCIATED(self%bc))call self%bc%apply(g)
 !---
 pm_save=oft_env%pm; oft_env%pm=self%pm
 call self%solver%apply(u,g)
