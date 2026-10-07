@@ -1272,19 +1272,19 @@ END IF
 2022 format(2i5)
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 WRITE (io_unit,2000) eqdsk_case,0,nr,nz
-WRITE (io_unit,2020) REAL([rdim,zdim,rcentr,rleft,zmid],4)
-WRITE (io_unit,2020) REAL([raxis,zaxis,x2,x1,bcentr],4)
-WRITE (io_unit,2020) REAL([itor,x2,xdum,raxis,xdum],4)
-WRITE (io_unit,2020) REAL([zaxis,xdum,x1,xdum,xdum],4)
-WRITE (io_unit,2020) (REAL(fpol(i),4),i=1,nr)
-WRITE (io_unit,2020) (REAL(pres(i),4),i=1,nr)
-WRITE (io_unit,2020) (REAL(ffprim(i),4),i=1,nr)
-WRITE (io_unit,2020) (REAL(pprime(i),4),i=1,nr)
-WRITE (io_unit,2020) ((REAL(psirz(i,j),4),i=1,nr),j=1,nz)
-WRITE (io_unit,2020) (REAL(qpsi(i),4),i=1,nr)
+WRITE (io_unit,2020) eqdsk_val([rdim,zdim,rcentr,rleft,zmid])
+WRITE (io_unit,2020) eqdsk_val([raxis,zaxis,x2,x1,bcentr])
+WRITE (io_unit,2020) eqdsk_val([itor,x2,xdum,raxis,xdum])
+WRITE (io_unit,2020) eqdsk_val([zaxis,xdum,x1,xdum,xdum])
+WRITE (io_unit,2020) (eqdsk_val(fpol(i)),i=1,nr)
+WRITE (io_unit,2020) (eqdsk_val(pres(i)),i=1,nr)
+WRITE (io_unit,2020) (eqdsk_val(ffprim(i)),i=1,nr)
+WRITE (io_unit,2020) (eqdsk_val(pprime(i)),i=1,nr)
+WRITE (io_unit,2020) ((eqdsk_val(psirz(i,j)),i=1,nr),j=1,nz)
+WRITE (io_unit,2020) (eqdsk_val(qpsi(i)),i=1,nr)
 WRITE (io_unit,2022) nr,nlim
-WRITE (io_unit,2020) (REAL([rout(i),zout(i)],4),i=1,nr)
-WRITE (io_unit,2020) (REAL([rlim(i),zlim(i)],4),i=1,nlim)
+WRITE (io_unit,2020) (eqdsk_val([rout(i),zout(i)]),i=1,nr)
+WRITE (io_unit,2020) (eqdsk_val([rlim(i),zlim(i)]),i=1,nlim)
 CLOSE (io_unit)
 !---
 IF(oft_debug_print(1))THEN
@@ -1296,6 +1296,14 @@ CALL oft_decrease_indent
 !---
 DEALLOCATE(rout,zout,rlim,zlim)
 DEALLOCATE(fpol,pres,ffprim,pprime,qpsi,psirz)
+CONTAINS
+!> Flush |x| < 1E-99 to zero so (5e16.9) keeps a 2-digit exponent
+ELEMENTAL FUNCTION eqdsk_val(x) RESULT(y)
+REAL(8), INTENT(in) :: x
+REAL(8) :: y
+y=x
+IF(ABS(y)<1.d-99)y=0.d0
+END FUNCTION eqdsk_val
 end subroutine gs_save_eqdsk
 !------------------------------------------------------------------------------
 !> Evaluate terms in augmented tracing ODE for computing Sauter factors (see @ref sauter_fc)
