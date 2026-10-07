@@ -1,12 +1,11 @@
 name: CD Build and Deployment
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
       - pypi_release
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: cd_comb-${{ github.ref }}
@@ -14,7 +13,7 @@ concurrency:
 
 jobs:
   linux-build:
-    if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: ${{ format('Linux CD ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     container: ${{ matrix.config.image }}
@@ -140,7 +139,7 @@ jobs:
         retention-days: 2
 
   macos-build:
-    if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     name: ${{ format('macOS CD ({0})', matrix.config.name) }}
     runs-on: ${{ matrix.config.os }}
     timeout-minutes: 45
