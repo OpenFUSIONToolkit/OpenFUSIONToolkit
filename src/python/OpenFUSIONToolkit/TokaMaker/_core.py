@@ -1516,7 +1516,7 @@ class TokaMaker():
     def update_settings(self):
         '''! Update settings after changes to values in python'''
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_set_settings(self._tMaker_ptr,self.settings.get_c_struct(self._oft_env),error_string)
+        tokamaker_set_settings(self._tMaker_ptr,ctypes.byref(self.settings.get_c_struct(self._oft_env)),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 

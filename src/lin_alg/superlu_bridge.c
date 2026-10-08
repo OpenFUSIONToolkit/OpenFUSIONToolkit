@@ -52,31 +52,19 @@ oft_superlu_dgssv_c(int iopt, int n, int nnz, int nrhs,
 *
 */
 {
-    SuperMatrix A, AC, B, X;
+    SuperMatrix A, AC, B;
     SuperMatrix *L, *U;
     int *perm_r; /* row permutations from partial pivoting */
     int *perm_c; /* column permutation vector */
     int *etree;  /* column elimination tree */
-    char equed;
-    double *R;
-    double *C;
-    SCformat *Lstore;
-    NCformat *Ustore;
-    int i, panel_size, permc_spec, relax;
+    int panel_size, permc_spec, relax;
     trans_t trans;
-    mem_usage_t mem_usage;
     superlu_options_t options;
     #if SUPERLU_VER_MAJOR >= 5
     GlobalLU_t Glu;
     #endif
     SuperLUStat_t stat;
     factors_t *LUfactors;
-
-    double *recip_pivot_growth;
-    double *rcond;
-    double *ferr;
-    double *berr;
-    double *x;
 
     trans = TRANS; // Row storage format is passed so we solve the transposed system
 
@@ -91,8 +79,20 @@ oft_superlu_dgssv_c(int iopt, int n, int nnz, int nrhs,
             *   permc_spec = 2: minimum degree on structure of A'+A
             *   permc_spec = 3: approximate minimum degree for unsymmetric matrices
             */
-            if ( perm_spec >= 0 ) options.ColPerm = perm_spec;
-            if (!iter_refine) options.IterRefine = NO;
+            if ( perm_spec == 0 ) {
+		            options.ColPerm = NATURAL;
+            } else if (perm_spec == 1) {
+                options.ColPerm = MMD_ATA;
+            } else if (perm_spec == 2) {
+                options.ColPerm = MMD_AT_PLUS_A;
+            } else if (perm_spec == 3) {
+                options.ColPerm = COLAMD;
+            } else if (perm_spec == -1) {
+                // Use default
+            } else {
+                ABORT("Invalid column permutation type.");
+            }
+            if (!iter_refine) options.IterRefine = NOREFINE;
             /* */
             L = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
             U = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
@@ -155,11 +155,12 @@ oft_superlu_dgssv_c(int iopt, int n, int nnz, int nrhs,
         }
         //
 //        if ( *info == 0 ) {
-//            Lstore = (SCformat *) L->Store;
-//            Ustore = (NCformat *) U->Store;
+//            SCformat *Lstore = (SCformat *) L->Store;
+//            NCformat *Ustore = (NCformat *) U->Store;
 //            //printf("No of nonzeros in factor L = %d\n", Lstore->nnz);
 //            //printf("No of nonzeros in factor U = %d\n", Ustore->nnz);
 //            //printf("No of nonzeros in L+U = %d\n", Lstore->nnz + Ustore->nnz);
+//            //mem_usage_t mem_usage;
 //            //dQuerySpace(L, U, &mem_usage);
 //            //printf("L\\U MB %.3f\ttotal MB needed %.3f\n",
 //            //       mem_usage.for_lu/1e6, mem_usage.total_needed/1e6);
@@ -252,31 +253,19 @@ oft_superlu_dgsisx_c(int iopt, int n, int nnz, int nrhs,
 *
 */
 {
-    SuperMatrix A, AC, B, X;
+    SuperMatrix A, AC, B;
     SuperMatrix *L, *U;
     int *perm_r; /* row permutations from partial pivoting */
     int *perm_c; /* column permutation vector */
     int *etree;  /* column elimination tree */
-    char equed;
-    double *R;
-    double *C;
-    SCformat *Lstore;
-    NCformat *Ustore;
-    int i, panel_size, permc_spec, relax;
+    int panel_size, permc_spec, relax;
     trans_t trans;
-    mem_usage_t mem_usage;
     superlu_options_t options;
     #if SUPERLU_VER_MAJOR >= 5
     GlobalLU_t Glu;
     #endif
     SuperLUStat_t stat;
     factors_t *LUfactors;
-
-    double *recip_pivot_growth;
-    double *rcond;
-    double *ferr;
-    double *berr;
-    double *x;
 
     trans = TRANS; // Row storage format is passed so we solve the transposed system
 
@@ -296,7 +285,19 @@ oft_superlu_dgsisx_c(int iopt, int n, int nnz, int nrhs,
             *   permc_spec = 2: minimum degree on structure of A'+A
             *   permc_spec = 3: approximate minimum degree for unsymmetric matrices
             */
-            if ( perm_spec >= 0 ) options.ColPerm = perm_spec;
+            if ( perm_spec == 0 ) {
+                options.ColPerm = NATURAL;
+            } else if (perm_spec == 1) {
+                options.ColPerm = MMD_ATA;
+            } else if (perm_spec == 2) {
+                options.ColPerm = MMD_AT_PLUS_A;
+            } else if (perm_spec == 3) {
+                options.ColPerm = COLAMD;
+            } else if (perm_spec == -1) {
+                // Use default
+            } else {
+                ABORT("Invalid column permutation type.");
+            }
             /* */
             L = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
             U = (SuperMatrix *) SUPERLU_MALLOC( sizeof(SuperMatrix) );
@@ -354,11 +355,12 @@ oft_superlu_dgsisx_c(int iopt, int n, int nnz, int nrhs,
         }
         //
         // if ( *info == 0 ) {
-        //     Lstore = (SCformat *) L->Store;
-        //     Ustore = (NCformat *) U->Store;
+        //     SCformat *Lstore = (SCformat *) L->Store;
+        //     NCformat *Ustore = (NCformat *) U->Store;
         //     printf("No of nonzeros in factor L = %d\n", Lstore->nnz);
         //     printf("No of nonzeros in factor U = %d\n", Ustore->nnz);
         //     printf("No of nonzeros in L+U = %d\n", Lstore->nnz + Ustore->nnz);
+	//     mem_usage_t mem_usage;
         //     dQuerySpace(L, U, &mem_usage);
         //     printf("L\\U MB %.3f\ttotal MB needed %.3f\n",
         //             mem_usage.for_lu/1e6, mem_usage.total_needed/1e6);

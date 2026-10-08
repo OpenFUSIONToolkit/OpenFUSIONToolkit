@@ -620,7 +620,7 @@ do i=1,mesh%ne
   r2=mesh%r(:,mesh%le(2,i))-hcpc(:)
   r1dv=DOT_PRODUCT(r1,hcpv(:))
   r2dv=DOT_PRODUCT(r2,hcpv(:))
-  if (XOR(ABS(r1dv)<tol,ABS(r2dv)<tol)) then
+  if ((ABS(r1dv)<tol).NEQV.(ABS(r2dv)<tol)) then
     if (ABS(r2dv)<tol) r1=r2
     r1cv=SUM(cross_product(r1,hcpv)**2)
     if(r1cv<1.d0)acurl(i)=1.d0*SIGN(.5d0,r2dv-r1dv)*SIGN(INT(1,8),mesh%global%le(i))
@@ -962,7 +962,7 @@ subroutine hcurl_grad_getmop(hcurl_grad_rep,mat,bc)
 class(oft_fem_comp_type), intent(inout) :: hcurl_grad_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_flag
 integer(i4), allocatable :: j_curl(:),j_grad(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
 real(r8), allocatable, dimension(:,:) :: rop_curl,rop_grad
@@ -988,6 +988,14 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero
 END IF
+!---
+bc_flag=0
+SELECT CASE(TRIM(bc))
+  CASE("none")
+    bc_flag=1
+  CASE("zerob")
+    bc_flag=2
+END SELECT
 !------------------------------------------------------------------------------
 ! Operator integration
 !------------------------------------------------------------------------------
@@ -1032,11 +1040,11 @@ do i=1,hgrad_rep%mesh%nc
   call hgrad_rep%ncdofs(i,j_grad)
   mop21=TRANSPOSE(mop12)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("none")
+  SELECT CASE(bc_flag)
+    CASE(1)
       mop21(1:hgrad_rep%mesh%cell_np,:)=0.d0
       mop22(1:hgrad_rep%mesh%cell_np,:)=0.d0
-    CASE("zerob")
+    CASE(2)
       DO jr=1,hcurl_rep%nce
         IF(hcurl_rep%global%gbe(j_curl(jr)))THEN
           mop11(jr,:)=0.d0
@@ -1064,8 +1072,8 @@ deallocate(mop11,mop12,mop21,mop22)
 !$omp end parallel
 ALLOCATE(mop11(1,1),j_curl(1))
 !---Set diagonal entries for dirichlet rows
-SELECT CASE(TRIM(bc))
-  CASE("none")
+SELECT CASE(bc_flag)
+  CASE(1)
     mop11(1,1)=1.d0
     DO i=1,hgrad_rep%mesh%np
       IF(hgrad_rep%mesh%bp(i))CYCLE
@@ -1079,7 +1087,7 @@ SELECT CASE(TRIM(bc))
       j_curl=jr
       call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
     END DO
-  CASE("zerob")
+  CASE(2)
     mop11(1,1)=1.d0
     DO i=1,hcurl_rep%nbe
       jr=hcurl_rep%lbe(i)
@@ -1141,7 +1149,7 @@ call x%set(0.d0)
 call x%get_local(xcurl,1)
 call x%get_local(xgrad,2)
 !---Integerate over the volume
-!$omp parallel default(firstprivate) shared(xcurl,xgrad) private(curved,det)
+!$omp parallel default(firstprivate) shared(xcurl,xgrad,field) private(curved,det)
 allocate(j_hcurl(hcurl_rep%nce),rop_curl(3,hcurl_rep%nce))
 allocate(j_hgrad(hgrad_rep%nce),rop_grad(3,hgrad_rep%nce))
 !$omp do schedule(guided)
@@ -1203,7 +1211,7 @@ call x%set(0.d0)
 call x%get_local(xcurl,1)
 call x%get_local(xgrad,2)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(xcurl,xgrad) private(det)
+!$omp parallel default(firstprivate) shared(xcurl,xgrad,field) private(det)
 allocate(j_hcurl(hcurl_rep%nce),rop_curl(3,hcurl_rep%nce))
 allocate(j_hgrad(hgrad_rep%nce),rop_grad(3,hgrad_rep%nce))
 !$omp do schedule(guided)

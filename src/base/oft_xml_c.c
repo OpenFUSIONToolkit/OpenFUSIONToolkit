@@ -164,7 +164,6 @@ int oft_xml_get_content(const void* node_ptr, char** content, int* content_len) 
  */
 int oft_xml_has_attribute(const void* node_ptr, const char* attr_name) {
     const xmlNode* node = (const xmlNode*)node_ptr;
-    int len;
     if (node == NULL || attr_name == NULL) {
         return 1;
     }
