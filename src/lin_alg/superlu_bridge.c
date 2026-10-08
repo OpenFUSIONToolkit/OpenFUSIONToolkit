@@ -80,17 +80,17 @@ oft_superlu_dgssv_c(int iopt, int n, int nnz, int nrhs,
             *   permc_spec = 3: approximate minimum degree for unsymmetric matrices
             */
             if ( perm_spec == 0 ) {
-		options.ColPerm = NATURAL;
-	    } else if (perm_spec == 1) {
-		options.ColPerm = MMD_ATA;
-	    } else if (perm_spec == 2) {
+		            options.ColPerm = NATURAL;
+            } else if (perm_spec == 1) {
+                options.ColPerm = MMD_ATA;
+            } else if (perm_spec == 2) {
                 options.ColPerm = MMD_AT_PLUS_A;
-	    } else if (perm_spec == 3) {
+            } else if (perm_spec == 3) {
                 options.ColPerm = COLAMD;
-	    } else if (perm_spec == -1) {
-		// Use default
+            } else if (perm_spec == -1) {
+                // Use default
             } else {
-		ABORT("Invalid column permutation type.");
+                ABORT("Invalid column permutation type.");
             }
             if (!iter_refine) options.IterRefine = NOREFINE;
             /* */
@@ -285,7 +285,7 @@ oft_superlu_dgsisx_c(int iopt, int n, int nnz, int nrhs,
             *   permc_spec = 2: minimum degree on structure of A'+A
             *   permc_spec = 3: approximate minimum degree for unsymmetric matrices
             */
-	    if ( perm_spec == 0 ) {
+            if ( perm_spec == 0 ) {
                 options.ColPerm = NATURAL;
             } else if (perm_spec == 1) {
                 options.ColPerm = MMD_ATA;
@@ -293,7 +293,7 @@ oft_superlu_dgsisx_c(int iopt, int n, int nnz, int nrhs,
                 options.ColPerm = MMD_AT_PLUS_A;
             } else if (perm_spec == 3) {
                 options.ColPerm = COLAMD;
-	    } else if (perm_spec == -1) {
+            } else if (perm_spec == -1) {
                 // Use default
             } else {
                 ABORT("Invalid column permutation type.");

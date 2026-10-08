@@ -347,19 +347,12 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     config_dict['CC_VERSION'] = cc_version
     if cc_vendor == 'gnu':
         config_dict['OMP_FLAGS'] = "-fopenmp"
-        config_dict['DEBUG_FLAGS'] = "-g"
-        config_dict['CHK_FLAGS'] = "-O0 -fcheck=all"
-        config_dict['OPT_FLAGS'] = "-O2"
-    elif cc_vendor == 'clang':
-        config_dict['OMP_FLAGS'] = "-mp"
-        config_dict['DEBUG_FLAGS'] = "-g"
-        config_dict['CHK_FLAGS'] = "-O0"
-        config_dict['OPT_FLAGS'] = ""
+    elif cc_vendor == 'llvm':
+        config_dict['OMP_FLAGS'] = "-fopenmp"
     elif cc_vendor == 'intel':
         config_dict['OMP_FLAGS'] = "-qopenmp"
-        config_dict['DEBUG_FLAGS'] = "-g"
-        config_dict['CHK_FLAGS'] = "-O0 -check bounds,pointers,shape,uninit"
-        config_dict['OPT_FLAGS'] = ""
+    elif cc_vendor == 'nvidia':
+        config_dict['OMP_FLAGS'] = "-mp"
     # Determine OS type
     config_dict['OS_TYPE'] = platform.uname().system
     config_dict['HOST_ARCH'] = platform.uname().machine
@@ -1956,7 +1949,6 @@ parser.add_argument("--download_only", action="store_true", default=False, help=
 parser.add_argument("--setup_only", action="store_true", default=False, help="Download and setup build, but do not actually build")
 parser.add_argument("--keep_build_dirs", action="store_true", default=False, help="Keep build directories after successful build (default: False)")
 parser.add_argument("--nthread", "--nthreads", default=1, type=int, help="Number of threads to use for make (default=1)")
-parser.add_argument("--opt_flags", default=None, type=str, help="Compiler optimization flags")
 parser.add_argument("--ld_flags", default=None, type=str, help="Linker flags")
 parser.add_argument("--macos_sdk_path", default=None, type=str, help="Path to macOS SDK to use for building")
 parser.add_argument("--macos_deployment_target", default=None, type=str, help="macOS deployment target version, required for python package builds (e.g. 10.15)")
@@ -2056,8 +2048,6 @@ config_dict['DOWN_ONLY'] = options.download_only
 config_dict['SETUP_ONLY'] = options.setup_only
 if options.nthread > 1:
     config_dict['MAKE_THREADS'] = options.nthread
-if options.opt_flags is not None:
-    config_dict['OPT_FLAGS'] = options.opt_flags
 if options.ld_flags is not None:
     config_dict['LD_FLAGS'] = options.ld_flags
 if config_dict['OS_TYPE'] == 'Darwin':

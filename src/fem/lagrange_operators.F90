@@ -281,7 +281,7 @@ end subroutine lag_rinterp
 !> Reconstruct the gradient of a Lagrange scalar field
 !------------------------------------------------------------------------------
 subroutine lag_ginterp_apply(self,cell,f,gop,val)
-class(oft_lag_ginterp), intent(inout) :: self !< 
+class(oft_lag_ginterp), intent(inout) :: self !<
 integer(i4), intent(in) :: cell !< Cell for interpolation
 real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
 real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
@@ -900,7 +900,6 @@ logical :: curved
 CLASS(oft_vector), POINTER :: oft_lag_vec
 type(oft_timer) :: mytimer
 CLASS(oft_scalar_fem), POINTER :: lag_rep
-class(oft_matrix), pointer :: mat_tmp
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing LAG::LOP'
