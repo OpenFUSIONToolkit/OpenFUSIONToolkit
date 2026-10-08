@@ -9,12 +9,7 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <stdint.h>
-#ifdef __linux__
-#include <unistd.h>
-#include <execinfo.h>
-#endif
 #include "git_info.h"
-#define MAX_FRAMES 64
 
 void oft_stack_print();
 void oft_finalize();
@@ -69,12 +64,6 @@ void oft_signal_handler(int signum)
 		}
 		// Print stacktrace
 		oft_stack_print();
-#ifdef __linux__
-		void *array[MAX_FRAMES];
-		size_t size;
-		size = backtrace(array, MAX_FRAMES);
-		backtrace_symbols_fd(array, size, STDERR_FILENO);
-#endif
 		if (signum != SIGABRT) {
 			// Abort program
 			abort();
