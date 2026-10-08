@@ -251,6 +251,13 @@ elseif("${CMAKE_Fortran_COMPILER_ID}" MATCHES "LLVMFlang")
   set( CMAKE_CXX_FLAGS_RELEASE ${CMAKE_C_FLAGS_RELEASE} )
   set( CMAKE_Fortran_FLAGS_DEBUG ${CMAKE_C_FLAGS_DEBUG} )
   set( CMAKE_Fortran_FLAGS_RELEASE ${CMAKE_C_FLAGS_RELEASE} )
+  if(NOT OFT_PACKAGE_BUILD)
+    if(OFT_DEBUG_CHECK)
+      # set( CMAKE_Fortran_FLAGS_DEBUG "${CMAKE_Fortran_FLAGS_DEBUG}" )
+    elseif(OFT_DEBUG_SANITIZER)
+      message( FATAL_ERROR "Address sanitization not supported with Nvidia compilers" )
+    endif()
+  endif()
   # # Temporary workaround as compiler doesn't inject its search paths
   # get_filename_component(LLVM_DIRECTORY "${CMAKE_C_COMPILER}" DIRECTORY)
   # find_program(LLVM_CONFIG_PATH
