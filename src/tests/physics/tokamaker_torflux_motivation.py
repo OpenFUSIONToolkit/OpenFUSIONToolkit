@@ -52,7 +52,7 @@ EDGE_RAMP = 0.05       # FF' and p' ramped linearly to zero over the outer 5% of
 
 # Normalised j_phi = FF'<1/R>/mu0 + p'<R> on PSI_NODES (psi_N, 0 at the axis)
 PSI_NODES = np.linspace(0.0, 1.0, 51)
-# EFIT02-like: DIII-D 174956 EFIT02 gEQDSK (t = 1.98 s)
+# EFIT02-like: a measured H-mode j_phi profile (normalised)
 JPHI_EFIT = np.array([
     1.0000, 0.9854, 0.9566, 0.9284, 0.9006, 0.8734, 0.8466, 0.8204, 0.7947, 0.7695, 0.7448, 0.7206,
     0.6969, 0.6737, 0.6510, 0.6289, 0.6072, 0.5861, 0.5654, 0.5453, 0.5256, 0.5065, 0.4878, 0.4697,
