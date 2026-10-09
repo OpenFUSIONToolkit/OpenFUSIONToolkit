@@ -57,10 +57,10 @@ TYPE :: boot_profs
   REAL(r8), POINTER, DIMENSION(:) :: jphi_bs_raw => NULL() !< Redl PoP 2021 bootstrap as TokaMaker jphi, <j_BS.B> F<1/R>/<B^2> + P'(<R> - F^2<1/R>/<B^2>), before isolation/scaling [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: jdotb_bs_raw => NULL() !< Redl PoP 2021 <j_BS.B> on the jphi_bs_raw grid [T A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: jphi_pdriven_raw => NULL() !< Pressure-driven (diamagnetic + Pfirsch-Schlueter) part of jphi_bs_raw, P'(<R> - F^2<1/R>/<B^2>) [A/m²]
-  REAL(r8), POINTER, DIMENSION(:) :: jphi_total => NULL() !< Total toroidal current density = jphi_ind_final + jphi_bs_final + jphi_fixed [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: jphi_total => NULL() !< Total toroidal current density = jphi_ind_final + jphi_bs_final + jphi_fixed_final [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: jphi_ind_final => NULL() !< Input jphi, re-scaled & optionally tapered [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: jphi_bs_final => NULL() !< Bootstrap current density, optionally isolated/parametrised/tapered [A/m²]
-  REAL(r8), POINTER, DIMENSION(:) :: jphi_fixed => NULL() !< Fixed (non-rescaled) toroidal current density, optionally tapered [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: jphi_fixed_final => NULL() !< Fixed (non-rescaled) toroidal current density, optionally tapered [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: jphi_pdriven_final => NULL() !< jphi_pdriven_raw times scale_jBS, optionally tapered (not isolated/parametrised) [A/m²]
 END TYPE boot_profs
 !------------------------------------------------------------------------------
@@ -156,8 +156,8 @@ IF(ASSOCIATED(self%boot_profs%jphi_total).OR.ASSOCIATED(self%boot_profs%jphi_bs_
     CALL hdf5_write(self%boot_profs%jphi_total,filename,path//'/BOOT_PROFS/TOTAL_J_PHI')
     CALL hdf5_write(self%boot_profs%jphi_ind_final,filename,path//'/BOOT_PROFS/J_IND_FINAL')
     CALL hdf5_write(self%boot_profs%jphi_bs_final,filename,path//'/BOOT_PROFS/J_BS_FINAL')
-    IF(ASSOCIATED(self%boot_profs%jphi_fixed)) &
-      CALL hdf5_write(self%boot_profs%jphi_fixed,filename,path//'/BOOT_PROFS/JPHI_FIXED')
+    IF(ASSOCIATED(self%boot_profs%jphi_fixed_final)) &
+      CALL hdf5_write(self%boot_profs%jphi_fixed_final,filename,path//'/BOOT_PROFS/JPHI_FIXED')
     IF(ASSOCIATED(self%boot_profs%jphi_pdriven_final)) &
       CALL hdf5_write(self%boot_profs%jphi_pdriven_final,filename,path//'/BOOT_PROFS/JPHI_PDRIVEN_FINAL')
     IF(ASSOCIATED(self%boot_profs%jphi_bs_raw)) &
@@ -248,10 +248,10 @@ IF(hdf5_field_exist(filename,path//'/BOOT_PROFS'))THEN
     CALL hdf5_read(self%boot_profs%jphi_total,filename,path//'/BOOT_PROFS/TOTAL_J_PHI',success=success)
     CALL hdf5_read(self%boot_profs%jphi_ind_final,filename,path//'/BOOT_PROFS/J_IND_FINAL',success=success)
     CALL hdf5_read(self%boot_profs%jphi_bs_final,filename,path//'/BOOT_PROFS/J_BS_FINAL',success=success)
-    IF(ASSOCIATED(self%boot_profs%jphi_fixed))DEALLOCATE(self%boot_profs%jphi_fixed)
+    IF(ASSOCIATED(self%boot_profs%jphi_fixed_final))DEALLOCATE(self%boot_profs%jphi_fixed_final)
     IF(hdf5_field_exist(filename,path//'/BOOT_PROFS/JPHI_FIXED'))THEN
-      ALLOCATE(self%boot_profs%jphi_fixed(0:SIZE(self%boot_profs%jphi_total)-1))
-      CALL hdf5_read(self%boot_profs%jphi_fixed,filename,path//'/BOOT_PROFS/JPHI_FIXED',success=success)
+      ALLOCATE(self%boot_profs%jphi_fixed_final(0:SIZE(self%boot_profs%jphi_total)-1))
+      CALL hdf5_read(self%boot_profs%jphi_fixed_final,filename,path//'/BOOT_PROFS/JPHI_FIXED',success=success)
     END IF
     IF(ASSOCIATED(self%boot_profs%jphi_pdriven_final))DEALLOCATE(self%boot_profs%jphi_pdriven_final)
     IF(hdf5_field_exist(filename,path//'/BOOT_PROFS/JPHI_PDRIVEN_FINAL'))THEN
@@ -361,7 +361,7 @@ SELECT TYPE(new)
     IF(ASSOCIATED(self%boot_profs%jphi_total))ALLOCATE(new%boot_profs%jphi_total,SOURCE=self%boot_profs%jphi_total)
     IF(ASSOCIATED(self%boot_profs%jphi_bs_final))ALLOCATE(new%boot_profs%jphi_bs_final,SOURCE=self%boot_profs%jphi_bs_final)
     IF(ASSOCIATED(self%boot_profs%jphi_ind_final))ALLOCATE(new%boot_profs%jphi_ind_final,SOURCE=self%boot_profs%jphi_ind_final)
-    IF(ASSOCIATED(self%boot_profs%jphi_fixed))ALLOCATE(new%boot_profs%jphi_fixed,SOURCE=self%boot_profs%jphi_fixed)
+    IF(ASSOCIATED(self%boot_profs%jphi_fixed_final))ALLOCATE(new%boot_profs%jphi_fixed_final,SOURCE=self%boot_profs%jphi_fixed_final)
     IF(ASSOCIATED(self%boot_profs%jphi_pdriven_raw))ALLOCATE(new%boot_profs%jphi_pdriven_raw,SOURCE=self%boot_profs%jphi_pdriven_raw)
     IF(ASSOCIATED(self%boot_profs%jphi_pdriven_final))ALLOCATE(new%boot_profs%jphi_pdriven_final,SOURCE=self%boot_profs%jphi_pdriven_final)
 END SELECT
@@ -383,7 +383,7 @@ IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw))DEALLOCATE(self%boot_profs%jdotb_bs_
 IF(ASSOCIATED(self%boot_profs%jphi_total))DEALLOCATE(self%boot_profs%jphi_total)
 IF(ASSOCIATED(self%boot_profs%jphi_bs_final))DEALLOCATE(self%boot_profs%jphi_bs_final)
 IF(ASSOCIATED(self%boot_profs%jphi_ind_final))DEALLOCATE(self%boot_profs%jphi_ind_final)
-IF(ASSOCIATED(self%boot_profs%jphi_fixed))DEALLOCATE(self%boot_profs%jphi_fixed)
+IF(ASSOCIATED(self%boot_profs%jphi_fixed_final))DEALLOCATE(self%boot_profs%jphi_fixed_final)
 IF(ASSOCIATED(self%boot_profs%jphi_pdriven_raw))DEALLOCATE(self%boot_profs%jphi_pdriven_raw)
 IF(ASSOCIATED(self%boot_profs%jphi_pdriven_final))DEALLOCATE(self%boot_profs%jphi_pdriven_final)
 IF(ASSOCIATED(self%boot_profs%psi_n))DEALLOCATE(self%boot_profs%psi_n)
@@ -627,12 +627,12 @@ IF(.NOT.ASSOCIATED(self%boot_profs%jphi_total))THEN
   ALLOCATE(self%boot_profs%jphi_bs_final(0:self%npsi))
   ALLOCATE(self%boot_profs%jphi_ind_final(0:self%npsi))
 END IF
-IF(.NOT.ASSOCIATED(self%boot_profs%jphi_fixed))ALLOCATE(self%boot_profs%jphi_fixed(0:self%npsi))
+IF(.NOT.ASSOCIATED(self%boot_profs%jphi_fixed_final))ALLOCATE(self%boot_profs%jphi_fixed_final(0:self%npsi))
 self%boot_profs%psi_n       = [0.0_r8, xpsi]
 self%boot_profs%jphi_total = jphi_total/mu0
 self%boot_profs%jphi_bs_final  = j_BS/mu0
 self%boot_profs%jphi_ind_final = alpha * jphi_ind/mu0
-self%boot_profs%jphi_fixed  = jphi_fixed/mu0
+self%boot_profs%jphi_fixed_final = jphi_fixed/mu0
 IF(.NOT.ASSOCIATED(self%boot_profs%jphi_pdriven_final))ALLOCATE(self%boot_profs%jphi_pdriven_final(0:self%npsi))
 self%boot_profs%jphi_pdriven_final = 0.0_r8
 IF(ASSOCIATED(self%boot_profs%jphi_pdriven_raw))THEN

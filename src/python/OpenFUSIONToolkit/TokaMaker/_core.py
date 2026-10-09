@@ -895,7 +895,7 @@ class TokaMaker():
         `jphi-split-bootstrap` current profile.
 
         @result Dictionary with keys `'psi_n'`, `'jphi_total'`, `'jphi_bs_final'`, `'jphi_ind_final'`
-          and (when available) `'jphi_fixed'`, `'jphi_pdriven_final'`, `'jphi_bs_raw'`, `'jdotb_bs_raw'`,
+          and (when available) `'jphi_fixed_final'`, `'jphi_pdriven_final'`, `'jphi_bs_raw'`, `'jdotb_bs_raw'`,
           `'jphi_pdriven_raw'`.  Returns `None` if no profiles have been computed.
           `'psi_n'` is in standard convention (0=axis, 1=LCFS). Current densities are in A/m².
         '''
@@ -2408,10 +2408,10 @@ class TokaMaker():
           (see doc_tokamaker_current_conventions):
           - ``'psi_n'`` Normalised poloidal flux grid (0 = axis, 1 = LCFS) of the ``ffp_prof['x']`` nodes
             (mapped from toroidal flux if ``coord='phi_n'``)
-          - ``'jphi_total'`` Total toroidal current density = jphi_ind_final + jphi_bs_final + jphi_fixed [A/m²]
+          - ``'jphi_total'`` Total toroidal current density = jphi_ind_final + jphi_bs_final + jphi_fixed_final [A/m²]
           - ``'jphi_ind_final'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
           - ``'jphi_bs_final'`` Bootstrap current density (optionally isolated / parametrised / tapered) [A/m²]
-          - ``'jphi_fixed'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
+          - ``'jphi_fixed_final'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
           - ``'jphi_bs_raw'`` Bootstrap current density from the Redl PoP 2021 formula,
             \f$\langle j_{BS} \cdot B \rangle F \langle 1/R \rangle/\langle B^2 \rangle + P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
           - ``'jdotb_bs_raw'`` The Redl \f$\langle j_{BS} \cdot B \rangle\f$ behind ``'jphi_bs_raw'`` [T A/m²]
@@ -3120,7 +3120,7 @@ class TokaMaker_equilibrium():
         `jphi-split-bootstrap` current profile.
 
         @result Dictionary with keys `'psi_n'`, `'jphi_total'`, `'jphi_bs_final'`, `'jphi_ind_final'`
-          and (when available) `'jphi_fixed'`, `'jphi_pdriven_final'`, `'jphi_bs_raw'`, `'jdotb_bs_raw'`,
+          and (when available) `'jphi_fixed_final'`, `'jphi_pdriven_final'`, `'jphi_bs_raw'`, `'jdotb_bs_raw'`,
           `'jphi_pdriven_raw'`.  Returns `None` if no
           profiles have been computed.  All arrays are 1-D numpy arrays of length *npsi*.  `'psi_n'` is
           in standard convention (0 = axis, 1 = LCFS).  Current densities are TokaMaker
@@ -3134,7 +3134,7 @@ class TokaMaker_equilibrium():
         jphi_total_ptr = c_double_ptr()
         jphi_bs_final_ptr = c_double_ptr()
         jphi_ind_final_ptr = c_double_ptr()
-        jphi_fixed_ptr = c_double_ptr()
+        jphi_fixed_final_ptr = c_double_ptr()
         jphi_pdriven_final_ptr = c_double_ptr()
         jphi_bs_raw_ptr = c_double_ptr()
         jdotb_bs_raw_ptr = c_double_ptr()
@@ -3143,7 +3143,7 @@ class TokaMaker_equilibrium():
         tokamaker_get_boot_profs(self.c_ptr,
             ctypes.byref(n), ctypes.byref(psi_n_ptr),
             ctypes.byref(jphi_total_ptr), ctypes.byref(jphi_bs_final_ptr),
-            ctypes.byref(jphi_ind_final_ptr), ctypes.byref(jphi_fixed_ptr), ctypes.byref(jphi_pdriven_final_ptr),
+            ctypes.byref(jphi_ind_final_ptr), ctypes.byref(jphi_fixed_final_ptr), ctypes.byref(jphi_pdriven_final_ptr),
             ctypes.byref(n_raw), ctypes.byref(jphi_bs_raw_ptr), ctypes.byref(jdotb_bs_raw_ptr),
             ctypes.byref(jphi_pdriven_raw_ptr), error_string)
         if error_string.value != b'':
@@ -3159,8 +3159,8 @@ class TokaMaker_equilibrium():
             result['jphi_total'] = numpy.ctypeslib.as_array(jphi_total_ptr, shape=(n.value,)).copy()
             result['jphi_bs_final'] = numpy.ctypeslib.as_array(jphi_bs_final_ptr, shape=(n.value,)).copy()
             result['jphi_ind_final'] = numpy.ctypeslib.as_array(jphi_ind_final_ptr, shape=(n.value,)).copy()
-            if jphi_fixed_ptr:
-                result['jphi_fixed'] = numpy.ctypeslib.as_array(jphi_fixed_ptr, shape=(n.value,)).copy()
+            if jphi_fixed_final_ptr:
+                result['jphi_fixed_final'] = numpy.ctypeslib.as_array(jphi_fixed_final_ptr, shape=(n.value,)).copy()
             if jphi_pdriven_final_ptr:
                 result['jphi_pdriven_final'] = numpy.ctypeslib.as_array(jphi_pdriven_final_ptr, shape=(n.value,)).copy()
         if n_raw.value > 0:
