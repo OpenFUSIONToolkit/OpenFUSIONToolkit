@@ -2345,7 +2345,7 @@ integer(i4) :: j
 logical :: fail_test
 logical :: pm_save
 integer(i4) :: ierr_loc, error_flag
-ierr = 0
+IF(PRESENT(ierr))ierr = 0
 ierr_loc = 0
 error_flag = 0
 converged = .FALSE.
@@ -2508,8 +2508,10 @@ IF(ALL(factory%target_weights<=0.d0))THEN
   CALL lapack_matinv(3,self%param_mat,ierr_loc)
   oft_env%pm=self%pm_save
   IF(ierr_loc/=0)THEN
-    IF(PRESENT(ierr))ierr=-6
-    self%ierr = ierr
+    IF(PRESENT(ierr))THEN
+      ierr=-6
+      self%ierr = ierr
+    END IF
     RETURN
   END IF
   self%param_vec=MATMUL(self%param_mat,self%param_rhs)
@@ -2529,8 +2531,10 @@ IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
     self%param_psi(2)%f=>self%psi_press
     CALL equil%fit_isoflux(self%psip,ierr_loc,self%mat_save,self%param_rhs,self%param_psi)
     IF(ierr_loc/=0)THEN
-      IF(PRESENT(ierr))ierr=-7
-      self%ierr = ierr
+      IF(PRESENT(ierr))THEN
+        ierr=-7
+        self%ierr = ierr
+      END IF
       RETURN
     END IF
     equil%ffp_scale=self%param_rhs(1)
@@ -2539,8 +2543,10 @@ IF(equil%isoflux_ntargets+equil%flux_ntargets+equil%saddle_ntargets>0)THEN
   ELSE
     CALL equil%fit_isoflux(self%psip,ierr_loc)
     IF(ierr_loc/=0)THEN
-      IF(PRESENT(ierr))ierr=-7
-      self%ierr = ierr
+      IF(PRESENT(ierr))THEN
+        ierr=-7
+        self%ierr = ierr
+      END IF
       RETURN
     END IF
   END IF
@@ -2722,8 +2728,8 @@ ELSE
 END IF
 IF(PRESENT(ierr))THEN
   ierr=error_flag
+  self%ierr = ierr
 END IF
-self%ierr = ierr
 end subroutine gs_step
 
 subroutine gs_solve(self,equil,ierr)
@@ -2734,7 +2740,7 @@ integer(i4) :: step_err
 logical :: converged = .FALSE.
 integer(i4) :: i
 CHARACTER(LEN=40) :: err_reason
-ierr = 0
+IF(PRESENT(ierr))ierr = 0
 
 IF(oft_env%pm)THEN
   WRITE(*,'(2A)')oft_indent,'Starting non-linear GS solver (update)'
@@ -2773,12 +2779,14 @@ DO i=1,self%maxits
       CALL self%fe_rep%mesh%save_vertex_scalar(self%gs_solvers(1)%vals_tmp,self%xdmf,'Psi_vcont')
     END IF
     self%timing(1)=self%timing(1)+(omp_get_wtime()-self%gs_solvers(1)%t0)
-    CALL oft_decrease_indent
-    WRITE(*,*)'Timing:',self%timing(1)
-    WRITE(*,*)'  Source:  ',self%timing(2)
-    WRITE(*,*)'  Solve:   ',self%timing(3)
-    WRITE(*,*)'  Boundary:',self%timing(4)
-    WRITE(*,*)'  Other:   ',self%timing(1)-SUM(self%timing(2:4))
+    ! CALL oft_decrease_indent
+    IF(oft_env%pm)THEN
+      WRITE(*,*)'Timing:',self%timing(1)
+      WRITE(*,*)'  Source:  ',self%timing(2)
+      WRITE(*,*)'  Solve:   ',self%timing(3)
+      WRITE(*,*)'  Boundary:',self%timing(4)
+      WRITE(*,*)'  Other:   ',self%timing(1)-SUM(self%timing(2:4))
+    END IF
     !---
     EXIT
   END IF
@@ -3080,7 +3088,7 @@ REAL(8) :: psimax
 real(r8), pointer, DIMENSION(:) :: vals_tmp
 logical :: pm_save
 !---
-ierr=0
+IF(PRESENT(ierr))ierr=0
 IF(TRIM(self%lu_solver%package)=='none')THEN
   CALL oft_abort("LU solver required for GS solve","gs_vac_solve",__FILE__)
 ELSE

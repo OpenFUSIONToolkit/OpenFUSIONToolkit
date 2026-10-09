@@ -456,7 +456,6 @@ CALL copy_string_rev(f_file,tmp_str)
 IF(TRIM(tmp_str)/='none')THEN
   CALL gs_profile_load(tmp_str,prof_tmp)
   IF(ASSOCIATED(tMaker_equil_obj%I))THEN
-    print *,tMaker_equil_obj%I%f_offset
     prof_tmp%f_offset=tMaker_equil_obj%I%f_offset ! Persist F0 with profile changes
     CALL prof_tmp%update(tMaker_equil_obj)        ! Initialize new profile with current EQ
   END IF
@@ -593,10 +592,9 @@ END SUBROUTINE tokamaker_init_psi
 !---------------------------------------------------------------------------------
 !> Perform nonlinear solve to find equilibrium solution for given profiles, targets, etc.
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,eq_idx,nl_its,error_str) BIND(C,NAME="tokamaker_solve")
+SUBROUTINE tokamaker_solve(tMaker_ptr,vacuum,nl_its,error_str) BIND(C,NAME="tokamaker_solve")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Perform vacuum solve?
-INTEGER(c_int), vALUE, INTENT(in) :: eq_idx !< Number of nonlinear iterations
 INTEGER(c_int), INTENT(out) :: nl_its !< Number of nonlinear iterations
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ntargets,ierr
@@ -605,34 +603,35 @@ TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
 IF(ANY(tMaker_obj%device%rcoils>0.d0).AND.(tMaker_obj%device%dt>0.d0))THEN
-  ntargets=tMaker_obj%gs_equils(eq_idx)%eq%isoflux_ntargets+tMaker_obj%gs_equils(eq_idx)%eq%flux_ntargets+tMaker_obj%gs_equils(eq_idx)%eq%saddle_ntargets
+  ntargets=tMaker_obj%gs_equils(1)%eq%isoflux_ntargets+tMaker_obj%gs_equils(1)%eq%flux_ntargets+tMaker_obj%gs_equils(1)%eq%saddle_ntargets
   IF(ntargets>0)THEN
     CALL copy_string('Use of shape targets with time-dependence and Vcoils is not supported at this time',error_str)
     RETURN
   END IF
 END IF
 IF(vacuum)THEN
-  vac_save=tMaker_obj%gs_equils(eq_idx)%eq%has_plasma
-  tMaker_obj%gs_equils(eq_idx)%eq%has_plasma=.FALSE.
+  vac_save=tMaker_obj%gs_equils(1)%eq%has_plasma
+  tMaker_obj%gs_equils(1)%eq%has_plasma=.FALSE.
 END IF
 tMaker_obj%device%timing=0.d0
-CALL tMaker_obj%device%solve(tMaker_obj%gs_equils(eq_idx)%eq,ierr)
-IF(vacuum)tMaker_obj%gs_equils(eq_idx)%eq%has_plasma=vac_save
+CALL tMaker_obj%device%solve(tMaker_obj%gs_equils(1)%eq,ierr)
+IF(vacuum)tMaker_obj%gs_equils(1)%eq%has_plasma=vac_save
 IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
-nl_its=tMaker_obj%device%gs_solvers(eq_idx)%nl_its
+nl_its=tMaker_obj%device%gs_solvers(1)%nl_its
 END SUBROUTINE tokamaker_solve
 
 SUBROUTINE tokamaker_multistep(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_multistep")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+INTEGER(i4) :: step_err
 INTEGER(i4) :: i
 TYPE(gs_equil) :: myeq
 INTEGER(i4), SAVE :: j = 1
-INTEGER(i4) :: step_err
 LOGICAL :: converged = .FALSE.
 LOGICAL, SAVE :: did_setup = .FALSE.
-
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
+step_err = 0
+
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 
 IF(.NOT.did_setup)THEN
@@ -644,6 +643,9 @@ END IF
 
 DO i=1, tMaker_obj%n_eq
   CALL tMaker_obj%device%gs_solvers(i)%step(tMaker_obj%device, tMaker_obj%gs_equils(i)%eq, j, converged, step_err)
+  IF(step_err /= 0)THEN
+    CALL copy_string('Error in GS solver step.',error_str)
+  END IF
 END DO
 j = j + 1
 END SUBROUTINE tokamaker_multistep
@@ -1958,10 +1960,10 @@ INTEGER :: i
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
-IF(ASSOCIATED(tMaker_obj%gs_equils(eq_idx)%eq%mirnov_targets))DEALLOCATE(tMaker_obj%gs_equils(1)%eq%mirnov_targets)
+IF(ASSOCIATED(tMaker_obj%gs_equils(eq_idx)%eq%mirnov_targets))DEALLOCATE(tMaker_obj%gs_equils(eq_idx)%eq%mirnov_targets)
 tMaker_obj%gs_equils(eq_idx)%eq%mirnov_ntargets=ntargets
 IF(ntargets>0)THEN
-  ALLOCATE(tMaker_obj%gs_equils(1)%eq%mirnov_targets(6,tMaker_obj%gs_equils(1)%eq%mirnov_ntargets))
+  ALLOCATE(tMaker_obj%gs_equils(eq_idx)%eq%mirnov_targets(6,tMaker_obj%gs_equils(eq_idx)%eq%mirnov_ntargets))
   tMaker_obj%gs_equils(eq_idx)%eq%mirnov_targets(1:2,:)=locations
   tMaker_obj%gs_equils(eq_idx)%eq%mirnov_targets(3:4,:)=norms
   tMaker_obj%gs_equils(eq_idx)%eq%mirnov_targets(5,:)=targets

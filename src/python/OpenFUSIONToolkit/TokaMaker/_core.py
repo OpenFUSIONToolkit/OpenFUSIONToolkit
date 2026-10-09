@@ -876,7 +876,7 @@ class TokaMaker():
             raise ValueError("Equilibrium list is empty")
         return self._tMaker_equil[eq_idx].set_resistivity(eta_prof)
 
-    def solve(self, vacuum=False, return_its=False, eq_idx=0):
+    def solve(self, vacuum=False, return_its=False):
         '''! Solve G-S equation with specified constraints, profiles, etc.
 
         @param vacuum Perform vacuum solve? Plasma-related targets (eg. `Ip`) will be ignored.
@@ -886,13 +886,13 @@ class TokaMaker():
         '''
         nl_its = c_int()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),eq_idx+1,ctypes.byref(nl_its),error_string)
+        tokamaker_solve(self._tMaker_ptr,c_bool(vacuum),ctypes.byref(nl_its),error_string)
         if error_string.value != b'':
             raise ValueError("Error in solve: {0}".format(error_string.value.decode()))
         if return_its:
-            return self.copy_eq(eq_idx=eq_idx), nl_its.value
+            return self.copy_eq(eq_idx=0), nl_its.value
         else:
-            return self.copy_eq(eq_idx=eq_idx)
+            return self.copy_eq(eq_idx=0)
 
     def vac_solve(self,psi=None,rhs_source=None):
         '''! Solve for vacuum solution (no plasma), with present coil currents
