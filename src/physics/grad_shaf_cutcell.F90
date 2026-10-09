@@ -109,9 +109,10 @@ WHERE(ok)
 END WHERE
 end subroutine gs_ravg_cutcell
 !------------------------------------------------------------------------------
-!> \f$ q/F \f$ and the flux-surface averages of @ref oft_gs::gs_get_qprof (`ravgs`) by the same quadrature
+!> \f$ q/F \f$, the flux-surface averages and the surface shape of @ref oft_gs::gs_get_qprof
+!! (`ravgs`, `fsa_avgs`, `shape_geo`) by the same quadrature
 !------------------------------------------------------------------------------
-subroutine gs_fsa_cutcell(gseq,nr,psi_q,qf,ravgs,ok,fpol,fsa)
+subroutine gs_fsa_cutcell(gseq,nr,psi_q,qf,ravgs,ok,fpol,fsa,shp)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(i4), intent(in) :: nr !< Number of surfaces
 real(r8), intent(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
@@ -120,13 +121,14 @@ real(r8), intent(out) :: ravgs(nr,4) !< \f$ \langle R \rangle \f$, \f$ \langle 1
 logical, intent(out) :: ok(nr) !< Surface inside (0,1) and closed about the O-point
 real(r8), optional, intent(in) :: fpol(nr) !< F on each surface (with `fsa`)
 real(r8), optional, intent(out) :: fsa(nr,4) !< \f$ \langle |\nabla\psi| \rangle \f$, \f$ \langle |\nabla\psi|^2 \rangle \f$, \f$ \langle B_p^2 \rangle \f$, \f$ \langle 1/B^2 \rangle \f$
-real(r8) :: wind(nr),racc(3,nr),facc(5,nr),dpsi
+real(r8), optional, intent(out) :: shp(nr,6) !< \f$ R_{min} \f$, \f$ R_{max} \f$, \f$ Z_{min} \f$, \f$ Z_{max} \f$, \f$ R(Z_{min}) \f$, \f$ R(Z_{max}) \f$
+real(r8) :: wind(nr),racc(3,nr),dpsi
+real(r8), allocatable :: facc(:,:),xacc(:,:,:)
 integer(i4) :: k
-IF(PRESENT(fsa))THEN
-  CALL geom_sums(gseq,nr,psi_q,qf,wind,dpsi,racc,fpol,facc)
-ELSE
-  CALL geom_sums(gseq,nr,psi_q,qf,wind,dpsi,racc)
-END IF
+!---Unallocated accumulators are passed as absent (F2008)
+IF(PRESENT(fsa))ALLOCATE(facc(5,nr))
+IF(PRESENT(shp))ALLOCATE(xacc(2,4,nr))
+CALL geom_sums(gseq,nr,psi_q,qf,wind,dpsi,racc,fpol,facc,xacc)
 ok=(dpsi/=0.d0).AND.(psi_q>0.d0).AND.(psi_q<1.d0).AND.(ABS(wind-1.d0)<=wind_tol)
 ravgs=0.d0
 WHERE(ok)
@@ -144,12 +146,23 @@ IF(PRESENT(fsa))THEN
     WHERE(ok)fsa(:,k)=facc(k+1,:)/facc(1,:)
   END DO
 END IF
+IF(PRESENT(shp))THEN
+  shp=0.d0
+  WHERE(ok)
+    shp(:,1)=-xacc(1,1,:); shp(:,2)=xacc(1,2,:)
+    shp(:,3)=-xacc(1,3,:); shp(:,4)=xacc(1,4,:)
+    shp(:,5)=xacc(2,3,:); shp(:,6)=xacc(2,4,:)
+  END WHERE
+END IF
 end subroutine gs_fsa_cutcell
 !------------------------------------------------------------------------------
 !> Fixed-order sums of \f$ \oint w/R \f$, winding and optionally \f$ \oint w\,[R, R^2, 1] \f$,
 !! \f$ w = dl/|\nabla \hat{\psi}| \f$; all zero with `dpsi=0` if there is no plasma
+!!
+!! Surface extrema (`xacc`) are reduced with a total order (@ref ext_merge), which is exact,
+!! so they too do not depend on the thread count or schedule.
 !------------------------------------------------------------------------------
-subroutine geom_sums(gseq,nr,psi_q,g,wind,dpsi,racc,fpol,facc)
+subroutine geom_sums(gseq,nr,psi_q,g,wind,dpsi,racc,fpol,facc,xacc)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(i4), intent(in) :: nr !< Number of surfaces
 real(r8), intent(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
@@ -159,14 +172,16 @@ real(r8), intent(out) :: dpsi !< Axis minus LCFS flux
 real(r8), optional, intent(out) :: racc(3,nr) !< \f$ \oint w\,[R, R^2, 1] \f$
 real(r8), optional, intent(in) :: fpol(nr) !< F on each surface (with `facc`)
 real(r8), optional, intent(out) :: facc(5,nr) !< \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$
+real(r8), optional, intent(out) :: xacc(2,4,nr) !< Extrema of \f$ [-R, R, -Z, Z] \f$ with the other coordinate (see @ref ext_add)
 type(bern_tab) :: bt
 real(r8), pointer :: vals(:)
-real(r8), allocatable :: gblk(:,:),wblk(:,:),rblk(:,:,:),fblk(:,:,:),gloc(:),wloc(:),rloc(:,:),floc(:,:)
+real(r8), allocatable :: gblk(:,:),wblk(:,:),rblk(:,:,:),fblk(:,:,:),gloc(:),wloc(:),rloc(:,:),floc(:,:),xloc(:,:,:)
 real(r8) :: x1
-integer(i4) :: nblk,ib,cell,nc
+integer(i4) :: nblk,ib,cell,nc,i
 g=0.d0; wind=0.d0; dpsi=0.d0
 IF(PRESENT(racc))racc=0.d0
 IF(PRESENT(facc))facc=0.d0
+IF(PRESENT(xacc))xacc=-HUGE(1.d0)
 IF(nr<1)RETURN
 IF(gseq%plasma_bounds(1)<-1.d98)RETURN
 x1=gseq%plasma_bounds(1)
@@ -179,27 +194,40 @@ nc=gseq%device%fe_rep%mesh%nc
 CALL perm_update(gseq%device%fe_rep,bt)
 nblk=(nc+nblk_cells-1)/nblk_cells
 ALLOCATE(gblk(nr,nblk),wblk(nr,nblk),rblk(3,nr,MERGE(nblk,0,PRESENT(racc))),fblk(5,nr,MERGE(nblk,0,PRESENT(facc))))
-!$omp parallel private(ib,cell,gloc,wloc,rloc,floc)
-ALLOCATE(gloc(nr),wloc(nr),rloc(3,nr),floc(5,nr))
+!---Thread-private accumulators; unallocated ones are passed to `cell_contrib` as absent (F2008)
+!$omp parallel private(ib,cell,i,gloc,wloc,rloc,floc,xloc)
+ALLOCATE(gloc(nr),wloc(nr))
+IF(PRESENT(racc))ALLOCATE(rloc(3,nr))
+IF(PRESENT(facc))ALLOCATE(floc(5,nr))
+IF(PRESENT(xacc))THEN
+  ALLOCATE(xloc(2,4,nr))
+  xloc=-HUGE(1.d0)
+END IF
 !$omp do schedule(dynamic,1)
 DO ib=1,nblk
-  gloc=0.d0; wloc=0.d0; rloc=0.d0; floc=0.d0
+  gloc=0.d0; wloc=0.d0
+  IF(PRESENT(racc))rloc=0.d0
+  IF(PRESENT(facc))floc=0.d0
   DO cell=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,nc)
     IF(gseq%device%fe_rep%mesh%reg(cell)/=1)CYCLE
-    IF(PRESENT(facc))THEN
-      CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol=fpol,racc=rloc,facc=floc)
-    ELSE IF(PRESENT(racc))THEN
-      CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,racc=rloc)
-    ELSE
-      CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc)
-    END IF
+    CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol=fpol,racc=rloc,facc=floc,xacc=xloc)
   END DO
   gblk(:,ib)=gloc; wblk(:,ib)=wloc
   IF(PRESENT(racc))rblk(:,:,ib)=rloc
   IF(PRESENT(facc))fblk(:,:,ib)=floc
 END DO
 !$omp end do
-DEALLOCATE(gloc,wloc,rloc,floc)
+IF(PRESENT(xacc))THEN
+!$omp critical
+  DO i=1,nr
+    CALL ext_merge(xacc(:,:,i),xloc(:,:,i))
+  END DO
+!$omp end critical
+END IF
+DEALLOCATE(gloc,wloc)
+IF(ALLOCATED(rloc))DEALLOCATE(rloc)
+IF(ALLOCATED(floc))DEALLOCATE(floc)
+IF(ALLOCATED(xloc))DEALLOCATE(xloc)
 !$omp end parallel
 !---Fixed-order reduction
 DO ib=1,nblk
@@ -277,7 +305,7 @@ end subroutine gs_sauter_cutcell
 !------------------------------------------------------------------------------
 !> Add arc integrals and winding (and optionally geometric or Sauter sums) of all surfaces crossing `cell`
 !------------------------------------------------------------------------------
-subroutine cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc,racc,facc)
+subroutine cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc,racc,facc,xacc)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 type(bern_tab), intent(in) :: bt !< Bernstein tables
 real(r8), intent(in) :: vals(:) !< Local \f$ \psi \f$ values
@@ -294,6 +322,7 @@ real(r8), optional, intent(inout) :: aloc(:,:) !< Accumulated Sauter sums [8,nr]
 real(r8), optional, intent(inout) :: eloc(:,:) !< Accumulated extrema [3,nr]
 real(r8), optional, intent(inout) :: racc(:,:) !< Accumulated \f$ \oint w\,[R, R^2, 1] \f$ [3,nr] (see @ref geom_sums)
 real(r8), optional, intent(inout) :: facc(:,:) !< Accumulated \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$ [5,nr] (needs `fpol`)
+real(r8), optional, intent(inout) :: xacc(:,:,:) !< Accumulated surface extrema [2,4,nr] (see @ref ext_add)
 type(oft_scalar_bfem), pointer :: lag_rep
 integer(i4) :: jdofs(32),jc,k,ns,d0,i
 integer(i4) :: dep(3*max_depth+4)
@@ -397,9 +426,9 @@ real(r8), intent(inout) :: gacc,wacc
 integer(i4), intent(in) :: iq
 integer(i4) :: k0,k1,k2,ig,kk,nab,ng
 logical :: ab(3)
-real(r8) :: p1(2),p2(2),e(2),xi1,xi2,xi,c(2),muc(3),elo,ehi,eta,x(2),val,gr(2)
+real(r8) :: p1(2),p2(2),e(2),xi1,xi2,xi,x(2),val,gr(2)
 real(r8) :: pt(2),detm,sum,q1(2),q2(2),dth,sig,gmid(2),xg(5),wg(5)
-real(r8) :: av(8),rv(3),fv(5),gq,wq,bq,b,rq,sx(0:6),sb(0:6),sr(0:6)
+real(r8) :: av(8),rv(3),fv(5),gq,wq,bq,b,rq,sx(0:6),sb(0:6),sr(0:6),xs(0:6),sp(2,0:6),sg(2,0:6)
 DO kk=1,3
   ab(kk)=(cs(bt%corner(kk))>=s)
 END DO
@@ -430,24 +459,20 @@ IF(PRESENT(aloc))THEN
   CALL sau_point(p1,iq,sb(0),sr(0)); sx(0)=xi1
   CALL sau_point(p2,iq,sb(ng+1),sr(ng+1)); sx(ng+1)=xi2
 END IF
+IF(PRESENT(xacc))THEN
+  CALL poly_eval(bt,cm,p1,val,gr); sg(:,0)=phys_grad(p1,gr)
+  CALL cell_geom(p1,sp(:,0),detm); xs(0)=xi1
+  CALL poly_eval(bt,cm,p2,val,gr); sg(:,ng+1)=phys_grad(p2,gr)
+  CALL cell_geom(p2,sp(:,ng+1),detm); xs(ng+1)=xi2
+END IF
 DO ig=1,ng
   xi=(xi1+xi2)/2.d0+xg(ig)*(xi2-xi1)/2.d0
-  c=p1+((xi-xi1)/(xi2-xi1))*(p2-p1)
-  muc(2:3)=MATMUL(ainv,c-tri(:,1))
-  muc(1)=1.d0-muc(2)-muc(3)
-  elo=-HUGE(1.d0); ehi=HUGE(1.d0)
-  DO kk=1,3
-    IF(dmu(kk)>0.d0)THEN
-      elo=MAX(elo,-muc(kk)/dmu(kk))
-    ELSE IF(dmu(kk)<0.d0)THEN
-      ehi=MIN(ehi,-muc(kk)/dmu(kk))
-    END IF
-  END DO
-  elo=MIN(elo,0.d0); ehi=MAX(ehi,0.d0)
-  eta=line_root(bt,cm,s,c,dvec,elo,ehi,0.d0)
-  x=c+eta*dvec
+  x=arc_point(s,p1,p2,xi1,xi2,xi)
   CALL poly_eval(bt,cm,x,val,gr)
   CALL cell_geom(x,pt,detm)
+  IF(PRESENT(xacc))THEN
+    xs(ig)=xi; sp(:,ig)=pt; sg(:,ig)=phys_grad(x,gr)
+  END IF
   sum=sum+wg(ig)*ABS(detm)/(pt(1)*ABS(DOT_PRODUCT(gr,dvec)))
   IF(ig==(ng+1)/2)gmid=gr
   wq=wg(ig)*ABS(detm)/ABS(DOT_PRODUCT(gr,dvec))
@@ -481,6 +506,7 @@ IF(PRESENT(aloc))THEN
   eloc(2,iq)=MAX(eloc(2,iq),arc_peak(ng,sx,sr))
   eloc(3,iq)=MAX(eloc(3,iq),arc_peak(ng,sx,-sr))
 END IF
+IF(PRESENT(xacc))CALL arc_extrema(s,p1,p2,xi1,xi2,ng,xs,sp,sg,xacc(:,:,iq))
 !---Winding about O-point, oriented with 1-psi-hat increasing to the left
 CALL cell_geom(p1,q1,detm)
 CALL cell_geom(p2,q2,detm)
@@ -489,14 +515,84 @@ dth=ATAN2(q1(1)*q2(2)-q1(2)*q2(1),DOT_PRODUCT(q1,q2))
 sig=SIGN(1.d0,(p2(1)-p1(1))*gmid(2)-(p2(2)-p1(2))*gmid(1))*SIGN(1.d0,detm)
 wacc=wacc+sig*dth/(2.d0*pi)
 end subroutine tri_arc
-!---|grad(psi)| at uv, from the (u,v) gradient of 1-psi-hat
-function grad_mag(uv,grp) result(gq)
+!---Point of surface s on the current arc at xi (projected from the chord p1-p2 along d)
+function arc_point(s,p1,p2,xi1,xi2,xi) result(x)
+real(r8), intent(in) :: s,p1(2),p2(2),xi1,xi2,xi
+real(r8) :: x(2),c(2),muc(3),elo,ehi,eta
+integer(i4) :: kk
+c=p1+((xi-xi1)/(xi2-xi1))*(p2-p1)
+muc(2:3)=MATMUL(ainv,c-tri(:,1))
+muc(1)=1.d0-muc(2)-muc(3)
+elo=-HUGE(1.d0); ehi=HUGE(1.d0)
+DO kk=1,3
+  IF(dmu(kk)>0.d0)THEN
+    elo=MAX(elo,-muc(kk)/dmu(kk))
+  ELSE IF(dmu(kk)<0.d0)THEN
+    ehi=MIN(ehi,-muc(kk)/dmu(kk))
+  END IF
+END DO
+elo=MIN(elo,0.d0); ehi=MAX(ehi,0.d0)
+eta=line_root(bt,cm,s,c,dvec,elo,ehi,0.d0)
+x=c+eta*dvec
+end function arc_point
+!---Extrema of R and Z on the current arc of surface s, added to `xa`
+!!
+!! A smooth arc of a level set has stationary R where \f$ \partial_Z \psi = 0 \f$ and stationary
+!! Z where \f$ \partial_R \psi = 0 \f$; the FE surface is only C0 across cells, so the candidates
+!! are the arc ends (exact edge crossings), the Gauss points, and the roots of these gradient
+!! components bracketed by neighbouring samples (Illinois regula falsi on xi). The gradient
+!! stays within a half-plane on a simple sub-cell, so a convex arc has at most one root of each
+!! and none is missed; on an inflected arc a missed root pair bounds an O(h^2) excursion.
+subroutine arc_extrema(s,p1,p2,xi1,xi2,ng,xs,sp,sg,xa)
+real(r8), intent(in) :: s,p1(2),p2(2),xi1,xi2
+integer(i4), intent(in) :: ng
+real(r8), intent(in) :: xs(0:),sp(:,0:),sg(:,0:) !< Sample xi, (R,Z) and physical gradient
+real(r8), intent(inout) :: xa(2,4)
+real(r8) :: xl,xr,fl,fr,xm,fm,x(2),val,gr(2),gp(2),pt(2),detm
+integer(i4) :: k,jg,it,side
+DO k=0,ng+1
+  CALL ext_add(xa,sp(:,k))
+END DO
+DO jg=1,2
+  DO k=0,ng
+    fl=sg(jg,k); fr=sg(jg,k+1)
+    IF(.NOT.(((fl<0.d0).AND.(fr>0.d0)).OR.((fl>0.d0).AND.(fr<0.d0))))CYCLE
+    xl=xs(k); xr=xs(k+1); side=0
+    DO it=1,60
+      xm=(xl*fr-xr*fl)/(fr-fl)
+      x=arc_point(s,p1,p2,xi1,xi2,xm)
+      CALL poly_eval(bt,cm,x,val,gr)
+      gp=phys_grad(x,gr); fm=gp(jg)
+      IF(fm==0.d0)EXIT
+      IF((fm>0.d0).EQV.(fr>0.d0))THEN
+        xr=xm; fr=fm
+        IF(side==-1)fl=fl/2.d0
+        side=-1
+      ELSE
+        xl=xm; fl=fm
+        IF(side==1)fr=fr/2.d0
+        side=1
+      END IF
+      IF(ABS(xr-xl)<=1.d-13*ABS(xi2-xi1))EXIT
+    END DO
+    CALL cell_geom(x,pt,detm)
+    CALL ext_add(xa,pt)
+  END DO
+END DO
+end subroutine arc_extrema
+!---Physical gradient at uv, from the (u,v) gradient of 1-psi-hat
+function phys_grad(uv,grp) result(gp)
 real(r8), intent(in) :: uv(2),grp(2)
-real(r8) :: gq,lam(3),gop(3,3),dj,gp(2)
+real(r8) :: gp(2),lam(3),gop(3,3),dj
 lam=[1.d0-uv(1)-uv(2),uv(1),uv(2)]
 CALL gseq%device%fe_rep%mesh%jacobian(cell,lam,gop,dj)
 gp=grp(1)*gop(1:2,2)+grp(2)*gop(1:2,3)
-gq=ABS(dpsi)*SQRT(SUM(gp**2))
+end function phys_grad
+!---|grad(psi)| at uv, from the (u,v) gradient of 1-psi-hat
+function grad_mag(uv,grp) result(gq)
+real(r8), intent(in) :: uv(2),grp(2)
+real(r8) :: gq
+gq=ABS(dpsi)*SQRT(SUM(phys_grad(uv,grp)**2))
 end function grad_mag
 !---|B| and R at uv on surface iq
 subroutine sau_point(uv,iq,bq,rq,grin)
@@ -542,6 +638,42 @@ ELSE
 END IF
 end subroutine cell_geom
 end subroutine cell_contrib
+!------------------------------------------------------------------------------
+!> Add point `pt` = (R,Z) to surface extrema `xa`
+!!
+!! Column k holds (key, companion) for keys \f$ [-R, R, -Z, Z] \f$ with companions
+!! \f$ [Z, Z, R, R] \f$. The larger key wins and ties go to the larger companion: a total order
+!! of exact comparisons, so the result does not depend on the order points are added.
+!------------------------------------------------------------------------------
+pure subroutine ext_add(xa,pt)
+real(r8), intent(inout) :: xa(2,4)
+real(r8), intent(in) :: pt(2)
+CALL ext_upd(xa(:,1),-pt(1),pt(2))
+CALL ext_upd(xa(:,2),pt(1),pt(2))
+CALL ext_upd(xa(:,3),-pt(2),pt(1))
+CALL ext_upd(xa(:,4),pt(2),pt(1))
+end subroutine ext_add
+!------------------------------------------------------------------------------
+!> Merge surface extrema `xb` into `xa` (same order as @ref ext_add)
+!------------------------------------------------------------------------------
+pure subroutine ext_merge(xa,xb)
+real(r8), intent(inout) :: xa(2,4)
+real(r8), intent(in) :: xb(2,4)
+integer(i4) :: k
+DO k=1,4
+  CALL ext_upd(xa(:,k),xb(1,k),xb(2,k))
+END DO
+end subroutine ext_merge
+!------------------------------------------------------------------------------
+!> Keep the larger of (`key`,`comp`) and `e` in lexicographic order
+!------------------------------------------------------------------------------
+pure subroutine ext_upd(e,key,comp)
+real(r8), intent(inout) :: e(2)
+real(r8), intent(in) :: key,comp
+IF((key>e(1)).OR.((key==e(1)).AND.(comp>e(2))))THEN
+  e(1)=key; e(2)=comp
+END IF
+end subroutine ext_upd
 !------------------------------------------------------------------------------
 !> Maximum of arc samples y(0:ng+1) at x(0:ng+1), refined by a parabola through the
 !! largest interior sample and its neighbours

@@ -514,14 +514,15 @@ abstract interface
   end subroutine ani_press_update
 end interface
 INTERFACE
-  !> q and `ravgs` of @ref gs_get_qprof from the cut-cell quadrature (see grad_shaf_qprof.F90)
-  MODULE SUBROUTINE gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,ok)
+  !> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the cut-cell quadrature (see grad_shaf_qprof.F90)
+  MODULE SUBROUTINE gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,ok)
     class(gs_equil), intent(inout) :: gseq !< G-S object
     integer(4), intent(in) :: nr !< Number of flux surfaces
     real(8), intent(in) :: psi_q(nr) !< Locations in normalized flux
     real(8), intent(out) :: prof(nr) !< q at each location
     real(8), optional, intent(out) :: ravgs(nr,4) !< <R>, <1/R>, <1/R^2>, dV/dPsi
     real(8), optional, intent(out) :: fsa_avgs(nr,4) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
+    real(8), optional, intent(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
     logical, intent(out) :: ok !< All surfaces evaluated (otherwise use the tracer)
   END SUBROUTINE gs_qprof_cutcell
 END INTERFACE
@@ -4435,9 +4436,9 @@ IF(lcfs_any.AND.(.NOT.lcfs_all))CALL oft_abort('All LCFS arguments must be passe
 IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but "psi_q(1)" far from LCFS, not projecting')
 IF(PRESENT(shape_geo).AND.lcfs_any)CALL oft_abort('"shape_geo" cannot be combined with LCFS arguments', &
   'gs_get_qprof',__FILE__)
-!---Cut-cell quadrature for q and flux-surface averages (the tracer handles LCFS and shape outputs)
-IF((qprof_backend==0).AND.(.NOT.(lcfs_any.OR.geo.OR.PRESENT(shape_geo))))THEN
-  CALL gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,lcfs_all)
+!---Cut-cell quadrature for q, flux-surface averages and shape (the tracer handles the LCFS outputs)
+IF((qprof_backend==0).AND.(.NOT.(lcfs_any.OR.geo)))THEN
+  CALL gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,lcfs_all)
   IF(lcfs_all)RETURN
 END IF
 !---

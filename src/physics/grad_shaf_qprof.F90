@@ -15,10 +15,11 @@ USE oft_gs_cutcell, ONLY: gs_fsa_cutcell
 IMPLICIT NONE
 CONTAINS
 !------------------------------------------------------------------------------
-!> q, `ravgs` and `fsa_avgs` of @ref gs_get_qprof from the cut-cell quadrature
+!> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the cut-cell quadrature
 !------------------------------------------------------------------------------
 MODULE PROCEDURE gs_qprof_cutcell
-real(8) :: qf(nr),avgs(nr,4),fsa(nr,4),fpol(nr),psi_surf
+real(8) :: qf(nr),avgs(nr,4),fpol(nr),psi_surf
+real(8), allocatable :: fsa(:,:),shp(:,:)
 logical :: done(nr)
 integer(4) :: j
 DO j=1,nr
@@ -29,15 +30,15 @@ DO j=1,nr
     fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
   END IF
 END DO
-IF(PRESENT(fsa_avgs))THEN
-  CALL gs_fsa_cutcell(gseq,nr,psi_q,qf,avgs,done,fpol,fsa)
-ELSE
-  CALL gs_fsa_cutcell(gseq,nr,psi_q,qf,avgs,done)
-END IF
+!---Unallocated outputs are passed as absent (F2008)
+IF(PRESENT(fsa_avgs))ALLOCATE(fsa(nr,4))
+IF(PRESENT(shape_geo))ALLOCATE(shp(nr,6))
+CALL gs_fsa_cutcell(gseq,nr,psi_q,qf,avgs,done,fpol,fsa,shp)
 ok=ALL(done)
 IF(.NOT.ok)RETURN
 prof=fpol*qf
 IF(PRESENT(ravgs))ravgs=avgs
 IF(PRESENT(fsa_avgs))fsa_avgs=fsa
+IF(PRESENT(shape_geo))shape_geo=shp
 END PROCEDURE gs_qprof_cutcell
 END SUBMODULE oft_gs_qprof
