@@ -2376,7 +2376,7 @@ CALL self%psi_ffp%restore_local(factory%lu_solver%sec_rhs(:,1))
 IF(ABS(equil%ffp_scale)>TINY(equil%ffp_scale)*1.d2)CALL self%psi_ffp%scale(1.d0/equil%ffp_scale)
 factory%lu_solver%nrhs=1
 factory%timing(3)=factory%timing(3)+(omp_get_wtime()-self%t1)
-oft_env%pm=pm_save
+oft_env%pm=self%pm_save
 
 self%param_mat=0.d0
 self%param_rhs=0.d0
@@ -2654,6 +2654,9 @@ IF(fail_test)THEN
   IF((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)error_flag=-3
   IF((equil%o_point(1) < factory%rmin).AND.equil%has_plasma)error_flag=-4
   ! WRITE(*,*)error_flag
+  self%nl_its=-i
+  self%ierr=error_flag
+  IF(PRESENT(ierr))ierr=error_flag
   RETURN
 END IF
 !---Under-relax solution
@@ -2713,6 +2716,7 @@ IF((equil%R0_target>0.d0).AND.(ABS(self%R0_tmp-equil%R0_target)>1.d-8))RETURN
 IF((equil%Z0_target>-1.d98).AND.(ABS(self%Z0_tmp-equil%Z0_target)>1.d-8))RETURN
 ! IF((equil%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
 IF(SQRT(self%nl_res)<factory%nl_tol)THEN
+  self%nl_its=i
   converged = .TRUE.
   RETURN
 END IF
@@ -2791,6 +2795,13 @@ DO i=1,self%maxits
     EXIT
   END IF
 END DO
+IF(i>self%maxits)THEN
+  IF(PRESENT(ierr))ierr=-1
+  self%gs_solvers(1)%nl_its=-self%maxits
+  self%gs_solvers(1)%ierr=-1
+  err_reason=gs_err_reason(-1)
+  WRITE(*,'(3A)')oft_indent,'Equilibrium solve Failed: ',TRIM(err_reason)
+END IF
 CALL self%gs_solvers(1)%delete(self, equil)
 end subroutine gs_solve
 !------------------------------------------------------------------------------
