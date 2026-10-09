@@ -36,7 +36,7 @@ USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_de
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
   gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
-USE oft_gs, ONLY: qprof_trace_tol
+USE oft_gs, ONLY: qprof_trace_tol, qprof_backend
 USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_map, torflux_setup, torflux_attach, torflux_unwrap
 USE oft_gs_cutcell, ONLY: gs_qgeom_cutcell
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
@@ -1661,6 +1661,7 @@ SUBROUTINE tokamaker_torflux_backend(backend,tol) BIND(C,NAME="tokamaker_torflux
 INTEGER(c_int), VALUE, INTENT(in) :: backend !< 0 cut-cell (default), 1 tracer
 REAL(c_double), VALUE, INTENT(in) :: tol !< Tracer tolerance, <0 for default
 torflux_qgeom_backend=backend
+qprof_backend=backend
 qprof_trace_tol=tol
 END SUBROUTINE tokamaker_torflux_backend
 !---------------------------------------------------------------------------------

@@ -48,6 +48,7 @@ IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
 REAL(8) :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
+INTEGER(4) :: qprof_backend = 0 !< Surface backend of @ref gs_get_qprof: 0 cut-cell where supported, 1 field-line tracer (deprecated)
 !------------------------------------------------------------------------------
 !> Interpolation class for uniform source with simple tokamak representation
 !------------------------------------------------------------------------------
@@ -512,6 +513,17 @@ abstract interface
     class(gs_equil), intent(inout) :: gseq
   end subroutine ani_press_update
 end interface
+INTERFACE
+  !> q and `ravgs` of @ref gs_get_qprof from the cut-cell quadrature (see grad_shaf_qprof.F90)
+  MODULE SUBROUTINE gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,ok)
+    class(gs_equil), intent(inout) :: gseq !< G-S object
+    integer(4), intent(in) :: nr !< Number of flux surfaces
+    real(8), intent(in) :: psi_q(nr) !< Locations in normalized flux
+    real(8), intent(out) :: prof(nr) !< q at each location
+    real(8), optional, intent(out) :: ravgs(nr,4) !< <R>, <1/R>, <1/R^2>, dV/dPsi
+    logical, intent(out) :: ok !< All surfaces evaluated (otherwise use the tracer)
+  END SUBROUTINE gs_qprof_cutcell
+END INTERFACE
 !---Encapsulation for external function call parameters
 TYPE, PRIVATE :: opt_targets
   integer(i4) :: cell = 0
@@ -4422,6 +4434,11 @@ IF(lcfs_any.AND.(.NOT.lcfs_all))CALL oft_abort('All LCFS arguments must be passe
 IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but "psi_q(1)" far from LCFS, not projecting')
 IF(PRESENT(shape_geo).AND.lcfs_any)CALL oft_abort('"shape_geo" cannot be combined with LCFS arguments', &
   'gs_get_qprof',__FILE__)
+!---Cut-cell quadrature for q and <R> averages (the tracer handles the other outputs)
+IF((qprof_backend==0).AND.(.NOT.(lcfs_any.OR.geo.OR.PRESENT(fsa_avgs).OR.PRESENT(shape_geo))))THEN
+  CALL gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,lcfs_all)
+  IF(lcfs_all)RETURN
+END IF
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)

@@ -56,7 +56,7 @@ REAL(r8), PARAMETER :: wg5(5) = [0.236926885056189087514264d0,0.4786286704993664
 TYPE(oft_scalar_bfem), POINTER :: perm_rep => NULL()
 INTEGER(i8) :: perm_sum = -1
 INTEGER(i4), ALLOCATABLE :: perm(:,:)
-PUBLIC gs_qgeom_cutcell, gs_ravg_cutcell, gs_sauter_cutcell
+PUBLIC gs_qgeom_cutcell, gs_ravg_cutcell, gs_sauter_cutcell, gs_fsa_cutcell
 CONTAINS
 !------------------------------------------------------------------------------
 !> Geometric factor \f$ g = q/F = \frac{1}{2\pi} \oint \frac{dl}{R |\nabla \psi|} \f$ on flux surfaces
@@ -108,6 +108,30 @@ WHERE(ok)
   ravgs(:,3)=g/racc(1,:)
 END WHERE
 end subroutine gs_ravg_cutcell
+!------------------------------------------------------------------------------
+!> \f$ q/F \f$ and the flux-surface averages of @ref oft_gs::gs_get_qprof (`ravgs`) by the same quadrature
+!------------------------------------------------------------------------------
+subroutine gs_fsa_cutcell(gseq,nr,psi_q,qf,ravgs,ok)
+class(gs_equil), intent(inout) :: gseq !< G-S object
+integer(i4), intent(in) :: nr !< Number of surfaces
+real(r8), intent(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
+real(r8), intent(out) :: qf(nr) !< \f$ q/F \f$
+real(r8), intent(out) :: ravgs(nr,4) !< \f$ \langle R \rangle \f$, \f$ \langle 1/R \rangle \f$, \f$ \langle 1/R^2 \rangle \f$, \f$ dV/d\psi \f$
+logical, intent(out) :: ok(nr) !< Surface inside (0,1) and closed about the O-point
+real(r8) :: wind(nr),racc(3,nr),dpsi
+CALL geom_sums(gseq,nr,psi_q,qf,wind,dpsi,racc)
+ok=(dpsi/=0.d0).AND.(psi_q>0.d0).AND.(psi_q<1.d0).AND.(ABS(wind-1.d0)<=wind_tol)
+ravgs=0.d0
+WHERE(ok)
+  ravgs(:,1)=racc(2,:)/racc(1,:)
+  ravgs(:,2)=racc(3,:)/racc(1,:)
+  ravgs(:,3)=qf/racc(1,:)
+  ravgs(:,4)=-2.d0*pi*racc(1,:)/dpsi
+  qf=qf/(2.d0*pi*ABS(dpsi))
+ELSEWHERE
+  qf=0.d0
+END WHERE
+end subroutine gs_fsa_cutcell
 !------------------------------------------------------------------------------
 !> Fixed-order sums of \f$ \oint w/R \f$, winding and optionally \f$ \oint w\,[R, R^2, 1] \f$,
 !! \f$ w = dl/|\nabla \hat{\psi}| \f$; all zero with `dpsi=0` if there is no plasma
