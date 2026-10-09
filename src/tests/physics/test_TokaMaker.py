@@ -127,6 +127,22 @@ def validate_eqdsk(file_test,file_ref,helicity=1.0):
     return test_result
 
 
+def ifile_errors(mygs,filename):
+    """Relative errors of an i-file: psi at its R,Z points vs its psi grid, its FF', P' records and its psi bounds."""
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    ifile = read_ifile(filename)
+    psi_range = mygs.psi_bounds[1]-mygs.psi_bounds[0]
+    R, Z = ifile['R'][1:], ifile['Z'][1:]
+    psi_pts = mygs.get_field_eval('psi').eval(np.column_stack([R.ravel(),Z.ravel()]))[:,0].reshape(R.shape)
+    _, F, Fp, _, Pp = mygs.get_profiles(psi=(mygs.psi_bounds[1]-ifile['psi'])/psi_range)
+    return {
+        'ifile_psi_err': np.max(np.abs(psi_pts-ifile['psi'][1:,None]))/abs(psi_range),
+        'ifile_ffp_err': np.max(np.abs(ifile['ffp']-F*Fp))/np.max(np.abs(F*Fp)),
+        'ifile_pp_err': np.max(np.abs(ifile['pp']-Pp))/np.max(np.abs(Pp)),
+        'ifile_bounds_err': np.max(np.abs(ifile['psi_bounds']-mygs.psi_bounds[::-1]))/abs(psi_range)
+    }
+
+
 def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile
     try:
@@ -741,6 +757,8 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
     # Save equilibrium to gEQDSK and i-file format
     mygs.save_eqdsk('tokamaker.eqdsk',nr=64,nz=64,lcfs_pad=0.001)
     mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001)
+    mygs.save_ifile('tokamaker_ext.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,profile_derivs=True,psi_bounds=True)
+    eq_info.update(ifile_errors(mygs,'tokamaker_ext.ifile'))
     # Save final one
     mp_q.put([eq_info])
     oftpy_dump_cov()
@@ -831,6 +849,16 @@ def test_ITER_eq(order,helicity):
     assert validate_dict(results,eq_dict)
     assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)
     assert validate_ifile('tokamaker.ifile','ITER_test.ifile',helicity)
+    # Optional records are written only on request and leave the others unchanged
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    ifile, ifile_ext = read_ifile('tokamaker.ifile'), read_ifile('tokamaker_ext.ifile')
+    assert ('ffp' not in ifile) and ('psi_bounds' not in ifile)
+    assert all(np.array_equal(ifile[key],ifile_ext[key]) for key in ifile)
+    # i-file points lie on their flux surfaces; FF', P' and psi bounds match the equilibrium
+    assert results[0]['ifile_psi_err'] < 1.E-10
+    assert results[0]['ifile_ffp_err'] < 1.E-10
+    assert results[0]['ifile_pp_err'] < 1.E-10
+    assert results[0]['ifile_bounds_err'] < 1.E-12
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))

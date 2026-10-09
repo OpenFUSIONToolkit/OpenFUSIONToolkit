@@ -2332,7 +2332,8 @@ END SUBROUTINE tokamaker_save_eqdsk
 !------------------------------------------------------------------------------
 !> Save current equilibrium to iFile format
 !------------------------------------------------------------------------------
-SUBROUTINE tokamaker_save_ifile(tMaker_equil_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str) BIND(C,NAME="tokamaker_save_ifile")
+SUBROUTINE tokamaker_save_ifile(tMaker_equil_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs, &
+  psi_bounds,error_str) BIND(C,NAME="tokamaker_save_ifile")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< TokaMaker equilibrium instance
 CHARACTER(KIND=c_char), INTENT(in) :: filename(OFT_PATH_SLEN) !< Filename to save equilibrium to
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Number of radial sampling points
@@ -2341,6 +2342,8 @@ REAL(c_double), VALUE, INTENT(in) :: psi_pad !< Padding in normalized flux at LC
 REAL(c_double), VALUE, INTENT(in) :: lcfs_press !< Plasma pressure on the LCFS (zero by default)
 LOGICAL(c_bool), VALUE, INTENT(in) :: pack_lcfs !< Pack toward LCFS with quadraturic sampling?
 LOGICAL(c_bool), VALUE, INTENT(in) :: single_prec !< Save single precision file? (default: double precision)
+LOGICAL(c_bool), VALUE, INTENT(in) :: profile_derivs !< Append F*F' and P' records?
+LOGICAL(c_bool), VALUE, INTENT(in) :: psi_bounds !< Append the unpadded [psi_axis, psi_LCFS] record?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: filename_tmp
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_flag
@@ -2348,7 +2351,8 @@ TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(filename,filename_tmp)
 CALL gs_save_ifile(tMaker_equil_obj,filename_tmp,npsi,ntheta,psi_pad,lcfs_press=lcfs_press, &
-  pack_lcfs=LOGICAL(pack_lcfs),single_prec=LOGICAL(single_prec),error_str=error_flag)
+  pack_lcfs=LOGICAL(pack_lcfs),single_prec=LOGICAL(single_prec),profile_derivs=LOGICAL(profile_derivs), &
+  psi_bounds=LOGICAL(psi_bounds),error_str=error_flag)
 CALL copy_string(TRIM(error_flag),error_str)
 END SUBROUTINE tokamaker_save_ifile
 !------------------------------------------------------------------------------

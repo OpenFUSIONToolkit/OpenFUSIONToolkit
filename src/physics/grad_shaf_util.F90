@@ -938,7 +938,7 @@ end subroutine gs_load_tokamaker
 !---------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------
-subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
+subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs,psi_bounds,error_str)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
 integer(4), intent(in) :: npsi !< Number of points in flux coordinate
@@ -947,16 +947,18 @@ REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
 LOGICAL, OPTIONAL, INTENT(in) :: pack_lcfs !< Use quadratic packing toward LCFS?
 LOGICAL, OPTIONAL, INTENT(in) :: single_prec !< Save file with single precision fields?
+LOGICAL, OPTIONAL, INTENT(in) :: profile_derivs !< Append F*dF/dpsi and dp/dpsi records? (extends the format)
+LOGICAL, OPTIONAL, INTENT(in) :: psi_bounds !< Append the unpadded [psi_axis, psi_LCFS] record? (extends the format)
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
 type(gsinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
-real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr
+real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr,bounds(2)
 real(8), allocatable :: ptout(:,:)
 real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),rzc(:,:,:),qf(:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell,io_unit
-LOGICAL :: do_pack,save_single,cc_done
+LOGICAL :: do_pack,save_single,save_derivs,save_bounds,cc_done
 LOGICAL, allocatable :: ok(:)
 TYPE(spline_type) :: rz
 type(gs_factory), pointer :: device
@@ -967,8 +969,12 @@ WRITE(*,'(3A)')oft_indent,'Saving iFile: ',TRIM(filename)
 CALL oft_increase_indent
 do_pack=.FALSE.
 save_single=.FALSE.
+save_derivs=.FALSE.
+save_bounds=.FALSE.
 IF(PRESENT(pack_lcfs))do_pack=pack_lcfs
 IF(PRESENT(single_prec))save_single=single_prec
+IF(PRESENT(profile_derivs))save_derivs=profile_derivs
+IF(PRESENT(psi_bounds))save_bounds=psi_bounds
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -976,6 +982,7 @@ x1=0.d0; x2=1.d0
 IF(gseq%plasma_bounds(1)>-1.d98)THEN
   x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
 END IF
+bounds=[x2,x1]
 !
 xr = (x2-x1)
 x1 = x1 + xr*psi_pad
@@ -1012,10 +1019,10 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
   CALL oft_decrease_indent
 END IF
-ALLOCATE(cout(npsi,4))
+ALLOCATE(cout(npsi,6))
 ALLOCATE(rout(ntheta,npsi))
 ALLOCATE(zout(ntheta,npsi))
-!---Surface flux, F and pressure
+!---Surface flux, F, pressure and their derivatives
 do j=2,npsi
   IF(do_pack)THEN
     cout(j,1) = xr*(1.d0-(j-1)/REAL(npsi-1,8))**2 + x1
@@ -1028,6 +1035,7 @@ do j=2,npsi
     cout(j,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(cout(j,1)) + gseq%I%f_offset**2)
   END IF
   cout(j,3)=gseq%p_scale*gseq%P%f(cout(j,1))/mu0
+  CALL ifile_derivs(gseq,cout(j,1),cout(j,2),cout(j,5:6))
 end do
 !---Surfaces at uniform polar angle from the cut-cell quadrature (exact on the FE surface);
 !---the field-line tracer below is the deprecated method and the fallback
@@ -1133,6 +1141,7 @@ ELSE
   cout(1,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(x2) + gseq%I%f_offset**2)
 END IF
 cout(1,3)=gseq%p_scale*gseq%P%f(x2)/mu0
+CALL ifile_derivs(gseq,x2,cout(1,2),cout(1,5:6))
 cout(1,4)=(cout(3,4)-cout(2,4))*(x2-cout(2,1))/(cout(3,1)-cout(2,1)) + cout(2,4)
 !---Add LCFS pressure if specified
 IF(PRESENT(lcfs_press))cout(:,3)=cout(:,3)+lcfs_press
@@ -1173,20 +1182,58 @@ ELSE
   WRITE(io_unit)zout
 END IF
 !---------------------------------------------------------------------------
+! Optional records (after the original ones; readers tell them apart by length)
+!
+! cout(:,5) -> F*dF/dpsi(0:npsi)
+! cout(:,6) -> dp/dpsi(0:npsi)
+! bounds -> [psi_axis, psi_LCFS] (unpadded)
+!---------------------------------------------------------------------------
+IF(save_derivs)THEN
+  DO j=5,6
+    IF(save_single)THEN
+      WRITE(io_unit)REAL(cout(:,j),4)
+    ELSE
+      WRITE(io_unit)cout(:,j)
+    END IF
+  END DO
+END IF
+IF(save_bounds)THEN
+  IF(save_single)THEN
+    WRITE(io_unit)REAL(bounds,4)
+  ELSE
+    WRITE(io_unit)bounds
+  END IF
+END IF
+!---------------------------------------------------------------------------
 ! Close output file
 !---------------------------------------------------------------------------
 CLOSE(io_unit)
 !---
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,2ES11.3)')oft_indent,'Psi  = ',x1,x2
-  WRITE(*,'(2A,F7.2)')oft_indent,'Qmin = ',MINVAL(cout(4,:))
-  WRITE(*,'(2A,F7.2)')oft_indent,'Qmax = ',MAXVAL(cout(4,:))
+  WRITE(*,'(2A,F7.2)')oft_indent,'Qmin = ',MINVAL(cout(:,4))
+  WRITE(*,'(2A,F7.2)')oft_indent,'Qmax = ',MAXVAL(cout(:,4))
   ! WRITE(*,'(2A)')oft_indent,'Done'
 END IF
 CALL oft_decrease_indent
 !---
 DEALLOCATE(cout,rout,zout)
 end subroutine gs_save_ifile
+!------------------------------------------------------------------------------
+!> F*dF/dpsi and dp/dpsi at `psi` (`fval` is F there)
+!------------------------------------------------------------------------------
+subroutine ifile_derivs(gseq,psi,fval,derivs)
+class(gs_equil), intent(inout) :: gseq !< G-S object
+real(8), intent(in) :: psi !< Poloidal flux
+real(8), intent(in) :: fval !< F at psi
+real(8), intent(out) :: derivs(2) !< [F*dF/dpsi, dp/dpsi]
+IF(gseq%mode==0)THEN
+  derivs(1)=fval*gseq%ffp_scale*gseq%I%fp(psi)
+ELSE
+  derivs(1)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi)
+END IF
+derivs(2)=gseq%p_scale*gseq%P%fp(psi)/mu0
+end subroutine ifile_derivs
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
