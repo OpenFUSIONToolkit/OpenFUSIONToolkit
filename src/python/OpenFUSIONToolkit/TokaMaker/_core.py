@@ -2453,7 +2453,12 @@ class TokaMaker():
             pressure = pres_vals
         pp_vals = Akima1DInterpolator(psi_sample, pressure).derivative()(psi_sample)
         pp_vals[-1] = 0.0
-        pp_prof = {'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_vals[0]}
+        # Shape only (the pax target sets the scale): normalise by the largest |P'|, which is
+        # nonzero unless the pressure is flat (P'(axis) can be 0 for a flat core)
+        pp_norm = pp_vals[numpy.argmax(numpy.abs(pp_vals))]
+        if pp_norm == 0.0:
+            raise ValueError("The pressure profile is flat (P' = 0 everywhere)")
+        pp_prof = {'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_norm}
 
         # Axis target = the pressure drop the P' profile carries: TokaMaker holds P = 0 at the
         # LCFS, so targeting pressure[0] would scale P' up by pressure[0]/(pressure[0] - pressure[-1])
