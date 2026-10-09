@@ -2323,7 +2323,7 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
                                            jphi_fixed=jfix,p_fixed=pfix)
             psi_nodes, _ = mygs.get_torflux_map(x_phi,inverse=True)
             results['swb_node_err'] = np.max(np.abs(res_swb['psi_n']-psi_nodes))
-            results['swb_jfix_err'] = np.max(np.abs(res_swb['j_fixed']-jfix))/np.max(jfix)
+            results['swb_jfix_err'] = np.max(np.abs(res_swb['jphi_fixed_final']-jfix))/np.max(jfix)
             # jphi_saw (saw off) is relabelled like jphi_fixed: 0.4 of jfix moved to it changes nothing
             res_saw = solve_with_bootstrap(mygs,ne,Te,ne,Te,1.5,13.0E6,inductive_jphi=jind,x=x_phi,coord='phi_n',
                                            jphi_fixed=0.6*jfix,jphi_saw=0.4*jfix,p_fixed=pfix)
