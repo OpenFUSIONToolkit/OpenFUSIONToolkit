@@ -389,8 +389,15 @@ REAL(r8) :: djBS
 ! Diagnostic I_p comparison
 REAL(r8) :: itor_nl, itor_flint
 CHARACTER(len=256) :: char_buf
-!--- First-iteration runs with no bootstrap current
+!--- First-iteration runs with no bootstrap current; it starts a new solve, so the
+!    freeze state of the previous solve is reset
 IF(.NOT. gseq%skip_targets) THEN
+  self%freeze_j_BS = .FALSE.
+  self%djBS_no_improve = 0
+  self%djBS_min = HUGE(1.0d0)
+  self%dalpha_no_improve = 0
+  self%dalpha_last = HUGE(1.0d0)
+  IF(ASSOCIATED(self%j_BS_last))DEALLOCATE(self%j_BS_last)
   CALL jphi_update(self,gseq)
   RETURN
 ENDIF
