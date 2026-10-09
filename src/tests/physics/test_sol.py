@@ -118,7 +118,19 @@ def run_sol_case(mp_q):
         area = 0.5 * np.linalg.norm(np.cross(v2-v1, v3-v1))
         jtot += (j_dens[idx1] + j_dens[idx2] + j_dens[idx3]) * area / 3.0
 
-    mp_q.put([stats_Ip, jtot])
+    # Peak current density inside the SOL portion of the profile and beyond its last point
+    # (the profile's last two points are nonzero, so extrapolation past the end would be detected).
+    # Nodal J is a projection that smears the cutoff over neighbouring cells, so leave a margin.
+    psi_n = mygs.get_psi(normalized=True)
+    plasma_nodes = np.unique(mygs.lc[mygs.reg == 1])
+    psi_n = psi_n[plasma_nodes]
+    j_plasma = j_dens[plasma_nodes]
+    in_sol = (psi_n > 1.0) & (psi_n < x_sol[-1])
+    beyond_sol = psi_n > x_sol[-1] + 0.2
+    jmax_sol = np.max(np.abs(j_plasma[in_sol]))
+    jmax_beyond = np.max(np.abs(j_plasma[beyond_sol])) if beyond_sol.any() else None
+
+    mp_q.put([stats_Ip, jtot, jmax_sol, jmax_beyond])
     oftpy_dump_cov()
 
 
@@ -126,6 +138,15 @@ def run_sol_case(mp_q):
 def test_current_consistent():
     results = mp_run(run_sol_case,(),timeout=60)
     assert results is not None, "FAILED: error in solve!"
-    stats_Ip, jtot = results
+    stats_Ip, jtot, _, _ = results
     err = np.abs((jtot - stats_Ip) / stats_Ip)
     assert err < 0.001
+
+
+def test_no_current_past_sol_profile():
+    results = mp_run(run_sol_case,(),timeout=60)
+    assert results is not None, "FAILED: error in solve!"
+    _, _, jmax_sol, jmax_beyond = results
+    assert jmax_beyond is not None, "Mesh does not extend past the end of the SOL profile"
+    assert jmax_sol > 0.0
+    assert jmax_beyond < 1.E-3*jmax_sol

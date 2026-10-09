@@ -57,11 +57,19 @@ def create_prof_file(self, filename, profile_dict, name, include_sol=False):
             pass
         else:
             raise ValueError('Unknown convention type, must be 0 (tokamak) or 1 (spheromak)')
-        file_lines += [
-            "{0} {1}".format(x.shape[0]-1, y[0]),
-            "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
-            "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
-        ]
+        if x[0] < 0.0:
+            # SOL points present: first value is at the LCFS (interpolated), so all points must be written
+            file_lines += [
+                "{0} {1}".format(x.shape[0], numpy.interp(0.0, x, y)),
+                "{0}".format(" ".join(["{0}".format(val) for val in x])),
+                "{0}".format(" ".join(["{0}".format(val) for val in y]))
+            ]
+        else:
+            file_lines += [
+                "{0} {1}".format(x.shape[0]-1, y[0]),
+                "{0}".format(" ".join(["{0}".format(val) for val in x[1:]])),
+                "{0}".format(" ".join(["{0}".format(val) for val in y[1:]]))
+            ]
     elif (profile_dict['type'] == 'mlinterp') or (profile_dict['type'] == 'jphi-mlinterp'):
         if profile_dict['type'] == 'jphi-mlinterp':
             raise NotImplementedError('jphi-mlinterp profile type not currently implemented')
