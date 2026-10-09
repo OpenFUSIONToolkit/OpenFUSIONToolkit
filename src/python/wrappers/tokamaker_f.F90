@@ -649,11 +649,11 @@ END SUBROUTINE tokamaker_get_boot_ops
 !> Get cached bootstrap current profiles from the last jphi_bs_update call.
 !!
 !! Returns C pointers directly into the Fortran-owned arrays.
-!! n is the size of the jphi_total/psi_n/jphi_bs_final/jphi_ind_final/jphi_fixed/jphi_pdriven_final group (0 if not allocated).
+!! n is the size of the jphi_total/psi_n/jphi_bs_final/jphi_ind_final/jphi_fixed_final/jphi_pdriven_final group (0 if not allocated).
 !! n_raw is the size of jphi_bs_raw, jdotb_bs_raw and jphi_pdriven_raw (0 if not allocated).  The two sizes may differ.
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_boot_profs(tMaker_equil_ptr,n,psi_n_ptr,jphi_total_ptr, &
-    jphi_bs_final_ptr,jphi_ind_final_ptr,jphi_fixed_ptr,jphi_pdriven_final_ptr,n_raw,jphi_bs_raw_ptr, &
+    jphi_bs_final_ptr,jphi_ind_final_ptr,jphi_fixed_final_ptr,jphi_pdriven_final_ptr,n_raw,jphi_bs_raw_ptr, &
     jdotb_bs_raw_ptr,jphi_pdriven_raw_ptr,error_str) &
     BIND(C,NAME="tokamaker_get_boot_profs")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
@@ -662,7 +662,7 @@ TYPE(c_ptr), INTENT(out) :: psi_n_ptr !< Pointer to psi_n array
 TYPE(c_ptr), INTENT(out) :: jphi_total_ptr !< Pointer to jphi_total array
 TYPE(c_ptr), INTENT(out) :: jphi_bs_final_ptr !< Pointer to jphi_bs_final array
 TYPE(c_ptr), INTENT(out) :: jphi_ind_final_ptr !< Pointer to jphi_ind_final array
-TYPE(c_ptr), INTENT(out) :: jphi_fixed_ptr !< Pointer to jphi_fixed array (c_null_ptr if not allocated)
+TYPE(c_ptr), INTENT(out) :: jphi_fixed_final_ptr !< Pointer to jphi_fixed_final array (c_null_ptr if not allocated)
 TYPE(c_ptr), INTENT(out) :: jphi_pdriven_final_ptr !< Pointer to jphi_pdriven_final array (c_null_ptr if not allocated)
 INTEGER(c_int), INTENT(out) :: n_raw !< Size of jphi_bs_raw array (0 if not allocated)
 TYPE(c_ptr), INTENT(out) :: jphi_bs_raw_ptr !< Pointer to jphi_bs_raw array (c_null_ptr if not allocated)
@@ -679,7 +679,7 @@ TYPE IS (jphi_bs_flux_func)
   jphi_total_ptr = c_null_ptr
   jphi_bs_final_ptr = c_null_ptr
   jphi_ind_final_ptr = c_null_ptr
-  jphi_fixed_ptr = c_null_ptr
+  jphi_fixed_final_ptr = c_null_ptr
   jphi_pdriven_final_ptr = c_null_ptr
   jphi_bs_raw_ptr = c_null_ptr
   jdotb_bs_raw_ptr = c_null_ptr
@@ -690,7 +690,7 @@ TYPE IS (jphi_bs_flux_func)
     jphi_total_ptr = c_loc(I%boot_profs%jphi_total)
     jphi_bs_final_ptr = c_loc(I%boot_profs%jphi_bs_final)
     jphi_ind_final_ptr = c_loc(I%boot_profs%jphi_ind_final)
-    IF(ASSOCIATED(I%boot_profs%jphi_fixed))jphi_fixed_ptr = c_loc(I%boot_profs%jphi_fixed)
+    IF(ASSOCIATED(I%boot_profs%jphi_fixed_final))jphi_fixed_final_ptr = c_loc(I%boot_profs%jphi_fixed_final)
     IF(ASSOCIATED(I%boot_profs%jphi_pdriven_final))jphi_pdriven_final_ptr = c_loc(I%boot_profs%jphi_pdriven_final)
   END IF
   IF(ASSOCIATED(I%boot_profs%jphi_bs_raw))THEN

@@ -967,7 +967,7 @@ def solve_with_bootstrap(mygs,
                         'j_BS' : _results['jphi_bs_raw'],
                         'j_inductive' : _results['jphi_ind_final'],
                         'isolated_j_BS' : _results['jphi_bs_final'],
-                        'j_fixed' : _results.get('jphi_fixed'),
+                        'j_fixed' : _results.get('jphi_fixed_final'),
                         'jdotb_BS' : _results.get('jdotb_bs_raw'),
                         'scale_j0' : 1.0,
                         'scale_Ip' : 1.0})
