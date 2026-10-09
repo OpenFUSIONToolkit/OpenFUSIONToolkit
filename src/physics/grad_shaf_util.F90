@@ -27,7 +27,8 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
-  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa
+  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend
+USE oft_gs_cutcell, ONLY: gs_rays_cutcell
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
 USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func
@@ -943,10 +944,11 @@ type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
 real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr
 real(8), allocatable :: ptout(:,:)
-real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:)
+real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),theta(:),rzc(:,:,:),qf(:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell,io_unit
-LOGICAL :: do_pack,save_single
+LOGICAL :: do_pack,save_single,traced
+LOGICAL, allocatable :: ok(:)
 TYPE(spline_type) :: rz
 type(gs_factory), pointer :: device
 device=>gseq%device
@@ -1001,11 +1003,46 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
   CALL oft_decrease_indent
 END IF
-!---Trace
-call set_tracer(1)
 ALLOCATE(cout(npsi,4))
 ALLOCATE(rout(ntheta,npsi))
 ALLOCATE(zout(ntheta,npsi))
+!---Surface flux, F and pressure
+do j=2,npsi
+  IF(do_pack)THEN
+    cout(j,1) = xr*(1.d0-(j-1)/REAL(npsi-1,8))**2 + x1
+  ELSE
+    cout(j,1) = xr*(1.d0-(j-1)/REAL(npsi-1,8)) + x1
+  END IF
+  IF(gseq%mode==0)THEN
+    cout(j,2)=gseq%ffp_scale*gseq%I%f(cout(j,1))+gseq%I%f_offset
+  ELSE
+    cout(j,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(cout(j,1)) + gseq%I%f_offset**2)
+  END IF
+  cout(j,3)=gseq%p_scale*gseq%P%f(cout(j,1))/mu0
+end do
+!---Surfaces at uniform polar angle from the cut-cell quadrature (exact on the FE surface);
+!---the field-line tracer below is the deprecated method and the fallback
+traced=.FALSE.
+IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
+  ALLOCATE(psi_q(npsi-1),theta(ntheta-1),rzc(2,ntheta-1,npsi-1),qf(npsi-1),ok(npsi-1))
+  psi_q=(cout(2:npsi,1)-gseq%plasma_bounds(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
+  DO k=1,ntheta-1
+    theta(k)=2.d0*pi*(k-1)/REAL(ntheta-1,8)
+  END DO
+  CALL gs_rays_cutcell(gseq,npsi-1,psi_q,ntheta-1,theta,rzc,qf,ok)
+  IF(ALL(ok))THEN
+    DO j=2,npsi
+      rout(1:ntheta-1,j)=rzc(1,:,j-1); rout(ntheta,j)=rzc(1,1,j-1)
+      zout(1:ntheta-1,j)=rzc(2,:,j-1); zout(ntheta,j)=rzc(2,1,j-1)
+      cout(j,4)=cout(j,2)*qf(j-1)
+    END DO
+    traced=.TRUE.
+  END IF
+  DEALLOCATE(psi_q,theta,rzc,qf,ok)
+END IF
+!---Trace
+IF(.NOT.traced)THEN
+call set_tracer(1)
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
@@ -1025,12 +1062,7 @@ do j=2,npsi
   !---------------------------------------------------------------------------
   ! Trace contour
   !---------------------------------------------------------------------------
-  IF(pack_lcfs)THEN
-    psi_surf = xr*(1.d0-(j-1)/REAL(npsi-1,8))**2 + x1
-  ELSE
-    psi_surf = xr*(1.d0-(j-1)/REAL(npsi-1,8)) + x1
-  END IF
-  ! psi_surf(1)=x2 - psi_surf(1)
+  psi_surf = cout(j,1)
   IF(gseq%diverted.AND.ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near divertor
     active_tracer%tol=1.d-10
   ELSE
@@ -1071,23 +1103,13 @@ do j=2,npsi
   END DO
   !---Destroy Spline
   CALL spline_dealloc(rz)
-  !---------------------------------------------------------------------------
-  ! Save DCON information
-  !---------------------------------------------------------------------------
-  cout(j,1)=psi_surf(1) ! Poloidal flux
-  !---Toroidal flux function
-  IF(gseq%mode==0)THEN
-    cout(j,2)=gseq%ffp_scale*gseq%I%f(psi_surf(1))+gseq%I%f_offset
-  ELSE
-    cout(j,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2)
-  END IF
-  cout(j,3)=gseq%p_scale*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
   cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
 end do
 CALL active_tracer%delete
 CALL field%delete
 DEALLOCATE(ptout,field)
 !$omp end parallel
+END IF
 CALL psi_int%delete()
 IF(PRESENT(error_str))THEN
   IF(error_str/="")THEN

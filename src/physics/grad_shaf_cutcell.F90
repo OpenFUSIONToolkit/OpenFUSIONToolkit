@@ -44,6 +44,7 @@ INTEGER(i4), PARAMETER :: nblk_cells = 64 !< Cells per deterministic accumulatio
 INTEGER(i4), PARAMETER :: max_depth = 12 !< Maximum subdivision depth
 REAL(r8), PARAMETER :: kappa = 0.25d0 !< Required min/max ratio of \f$ \partial_d \hat{\psi} \f$ per sub-cell
 REAL(r8), PARAMETER :: wind_tol = 1.d-2 !< Tolerance on winding number about O-point
+REAL(r8), PARAMETER :: ray_slack = 1.d-10 !< Angular slack (rad) when assigning a polar angle to an arc
 REAL(r8), PARAMETER :: smooth_ratio = 0.9d0 !< Min/max \f$ \partial_d \hat{\psi} \f$ ratio above which 3 Gauss points are used (else 5)
 REAL(r8), PARAMETER :: xg3(3) = [-0.774596669241483377035853d0,0.d0,0.774596669241483377035853d0]
 REAL(r8), PARAMETER :: wg3(3) = [0.555555555555555555555556d0,0.888888888888888888888889d0, &
@@ -56,7 +57,7 @@ REAL(r8), PARAMETER :: wg5(5) = [0.236926885056189087514264d0,0.4786286704993664
 TYPE(oft_scalar_bfem), POINTER :: perm_rep => NULL()
 INTEGER(i8) :: perm_sum = -1
 INTEGER(i4), ALLOCATABLE :: perm(:,:)
-PUBLIC gs_qgeom_cutcell, gs_sauter_cutcell, gs_fsa_cutcell
+PUBLIC gs_qgeom_cutcell, gs_sauter_cutcell, gs_fsa_cutcell, gs_rays_cutcell
 CONTAINS
 !------------------------------------------------------------------------------
 !> Geometric factor \f$ g = q/F = \frac{1}{2\pi} \oint \frac{dl}{R |\nabla \psi|} \f$ on flux surfaces
@@ -137,13 +138,50 @@ IF(PRESENT(shp))THEN
 END IF
 end subroutine gs_fsa_cutcell
 !------------------------------------------------------------------------------
+!> Points of flux surfaces at polar angles about the O-point, and \f$ q/F \f$ by the same quadrature
+!!
+!! The inverse-coordinate counterpart of @ref tracing_2d::tracinginv_fs: `rz(:,k,i)` is the
+!! intersection of surface `i` with the ray from the O-point at angle `theta(k)`, exact on the FE
+!! surface. Each arc owns the angles inside its angular span and solves for the intersection
+!! on the arc. A surface is `ok` only if it is closed about the O-point, star-shaped about it (the
+!! polar angle never decreases along it), and every angle has an intersection. Results do not
+!! depend on the thread count.
+!------------------------------------------------------------------------------
+subroutine gs_rays_cutcell(gseq,nr,psi_q,nth,theta,rz,qf,ok)
+class(gs_equil), intent(inout) :: gseq !< G-S object
+integer(i4), intent(in) :: nr !< Number of surfaces
+real(r8), intent(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
+integer(i4), intent(in) :: nth !< Number of angles
+real(r8), intent(in) :: theta(nth) !< Polar angles about the O-point (radians, from the +R direction)
+real(r8), intent(out) :: rz(2,nth,nr) !< (R,Z) of each surface at each angle
+real(r8), intent(out) :: qf(nr) !< \f$ q/F \f$
+logical, intent(out) :: ok(nr) !< Surface closed and star-shaped about the O-point, all angles found
+real(r8) :: wind(nr),dpsi
+real(r8), allocatable :: tacc(:,:,:)
+integer(i4) :: i
+ALLOCATE(tacc(3,0:nth,nr))
+CALL geom_sums(gseq,nr,psi_q,qf,wind,dpsi,theta=theta,tacc=tacc)
+ok=(dpsi/=0.d0).AND.(psi_q>0.d0).AND.(psi_q<1.d0).AND.(ABS(wind-1.d0)<=wind_tol)
+DO i=1,nr
+  ok(i)=ok(i).AND.(tacc(1,0,i)<=ray_slack).AND.ALL(tacc(1,1:nth,i)>=-ray_slack)
+  rz(:,:,i)=MERGE(tacc(2:3,1:nth,i),0.d0,ok(i))
+END DO
+WHERE(ok)
+  qf=qf/(2.d0*pi*ABS(dpsi))
+ELSEWHERE
+  qf=0.d0
+END WHERE
+DEALLOCATE(tacc)
+end subroutine gs_rays_cutcell
+!------------------------------------------------------------------------------
 !> Fixed-order sums of \f$ \oint w/R \f$, winding and optionally \f$ \oint w\,[R, R^2, 1] \f$,
 !! \f$ w = dl/|\nabla \hat{\psi}| \f$; all zero with `dpsi=0` if there is no plasma
 !!
-!! Surface extrema (`xacc`) are reduced with a total order (@ref ext_merge), which is exact,
-!! so they too do not depend on the thread count or schedule.
+!! Surface extrema (`xacc`) and ray points (`tacc`) are reduced with a total order
+!! (@ref ext_merge, @ref tri_upd), which is exact, so they too do not depend on the thread count
+!! or schedule.
 !------------------------------------------------------------------------------
-subroutine geom_sums(gseq,nr,psi_q,g,wind,dpsi,racc,fpol,facc,xacc)
+subroutine geom_sums(gseq,nr,psi_q,g,wind,dpsi,racc,fpol,facc,xacc,theta,tacc)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(i4), intent(in) :: nr !< Number of surfaces
 real(r8), intent(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
@@ -154,15 +192,18 @@ real(r8), optional, intent(out) :: racc(3,nr) !< \f$ \oint w\,[R, R^2, 1] \f$
 real(r8), optional, intent(in) :: fpol(nr) !< F on each surface (with `facc`)
 real(r8), optional, intent(out) :: facc(5,nr) !< \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$
 real(r8), optional, intent(out) :: xacc(2,4,nr) !< Extrema of \f$ [-R, R, -Z, Z] \f$ with the other coordinate (see @ref ext_add)
+real(r8), optional, intent(in) :: theta(:) !< Polar angles about the O-point (with `tacc`)
+real(r8), optional, intent(out) :: tacc(:,0:,:) !< Ray points [3,0:nth,nr] (see @ref gs_rays_cutcell)
 type(bern_tab) :: bt
 real(r8), pointer :: vals(:)
-real(r8), allocatable :: gblk(:,:),wblk(:,:),rblk(:,:,:),fblk(:,:,:),gloc(:),wloc(:),rloc(:,:),floc(:,:),xloc(:,:,:)
+real(r8), allocatable :: gblk(:,:),wblk(:,:),rblk(:,:,:),fblk(:,:,:),gloc(:),wloc(:),rloc(:,:),floc(:,:),xloc(:,:,:),tloc(:,:,:)
 real(r8) :: x1
-integer(i4) :: nblk,ib,cell,nc,i
+integer(i4) :: nblk,ib,cell,nc,i,k
 g=0.d0; wind=0.d0; dpsi=0.d0
 IF(PRESENT(racc))racc=0.d0
 IF(PRESENT(facc))facc=0.d0
 IF(PRESENT(xacc))xacc=-HUGE(1.d0)
+IF(PRESENT(tacc))tacc=-HUGE(1.d0)
 IF(nr<1)RETURN
 IF(gseq%plasma_bounds(1)<-1.d98)RETURN
 x1=gseq%plasma_bounds(1)
@@ -176,13 +217,17 @@ CALL perm_update(gseq%device%fe_rep,bt)
 nblk=(nc+nblk_cells-1)/nblk_cells
 ALLOCATE(gblk(nr,nblk),wblk(nr,nblk),rblk(3,nr,MERGE(nblk,0,PRESENT(racc))),fblk(5,nr,MERGE(nblk,0,PRESENT(facc))))
 !---Thread-private accumulators; unallocated ones are passed to `cell_contrib` as absent (F2008)
-!$omp parallel private(ib,cell,i,gloc,wloc,rloc,floc,xloc)
+!$omp parallel private(ib,cell,i,k,gloc,wloc,rloc,floc,xloc,tloc)
 ALLOCATE(gloc(nr),wloc(nr))
 IF(PRESENT(racc))ALLOCATE(rloc(3,nr))
 IF(PRESENT(facc))ALLOCATE(floc(5,nr))
 IF(PRESENT(xacc))THEN
   ALLOCATE(xloc(2,4,nr))
   xloc=-HUGE(1.d0)
+END IF
+IF(PRESENT(tacc))THEN
+  ALLOCATE(tloc(3,0:SIZE(tacc,2)-1,nr))
+  tloc=-HUGE(1.d0)
 END IF
 !$omp do schedule(dynamic,1)
 DO ib=1,nblk
@@ -191,7 +236,8 @@ DO ib=1,nblk
   IF(PRESENT(facc))floc=0.d0
   DO cell=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,nc)
     IF(gseq%device%fe_rep%mesh%reg(cell)/=1)CYCLE
-    CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol=fpol,racc=rloc,facc=floc,xacc=xloc)
+    CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol=fpol,racc=rloc,facc=floc,xacc=xloc, &
+      theta=theta,tacc=tloc)
   END DO
   gblk(:,ib)=gloc; wblk(:,ib)=wloc
   IF(PRESENT(racc))rblk(:,:,ib)=rloc
@@ -205,10 +251,20 @@ IF(PRESENT(xacc))THEN
   END DO
 !$omp end critical
 END IF
+IF(PRESENT(tacc))THEN
+!$omp critical
+  DO i=1,nr
+    DO k=0,SIZE(tacc,2)-1
+      CALL tri_upd(tacc(:,k,i),tloc(:,k,i))
+    END DO
+  END DO
+!$omp end critical
+END IF
 DEALLOCATE(gloc,wloc)
 IF(ALLOCATED(rloc))DEALLOCATE(rloc)
 IF(ALLOCATED(floc))DEALLOCATE(floc)
 IF(ALLOCATED(xloc))DEALLOCATE(xloc)
+IF(ALLOCATED(tloc))DEALLOCATE(tloc)
 !$omp end parallel
 !---Fixed-order reduction
 DO ib=1,nblk
@@ -291,7 +347,7 @@ end subroutine gs_sauter_cutcell
 !------------------------------------------------------------------------------
 !> Add arc integrals and winding (and optionally geometric or Sauter sums) of all surfaces crossing `cell`
 !------------------------------------------------------------------------------
-subroutine cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc,racc,facc,xacc)
+subroutine cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc,racc,facc,xacc,theta,tacc)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 type(bern_tab), intent(in) :: bt !< Bernstein tables
 real(r8), intent(in) :: vals(:) !< Local \f$ \psi \f$ values
@@ -309,6 +365,8 @@ real(r8), optional, intent(inout) :: eloc(:) !< Accumulated \f$ B_{max} \f$ [nr]
 real(r8), optional, intent(inout) :: racc(:,:) !< Accumulated \f$ \oint w\,[R, R^2, 1] \f$ [3,nr] (see @ref geom_sums)
 real(r8), optional, intent(inout) :: facc(:,:) !< Accumulated \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$ [5,nr] (needs `fpol`)
 real(r8), optional, intent(inout) :: xacc(:,:,:) !< Accumulated surface extrema [2,4,nr] (see @ref ext_add)
+real(r8), optional, intent(in) :: theta(:) !< Polar angles about the O-point (with `tacc`)
+real(r8), optional, intent(inout) :: tacc(:,0:,:) !< Accumulated ray points [3,0:nth,nr] (see @ref arc_rays)
 type(oft_scalar_bfem), pointer :: lag_rep
 integer(i4) :: jdofs(32),jc,k,ns,d0,i
 integer(i4) :: dep(3*max_depth+4)
@@ -445,7 +503,7 @@ IF(PRESENT(aloc))THEN
   sb(0)=b_mag(p1,iq); sx(0)=xi1
   sb(ng+1)=b_mag(p2,iq); sx(ng+1)=xi2
 END IF
-IF(PRESENT(xacc))THEN
+IF(PRESENT(xacc).OR.PRESENT(tacc))THEN
   CALL poly_eval(bt,cm,p1,val,gr); sg(:,0)=phys_grad(p1,gr)
   CALL cell_geom(p1,sp(:,0),detm); xs(0)=xi1
   CALL poly_eval(bt,cm,p2,val,gr); sg(:,ng+1)=phys_grad(p2,gr)
@@ -456,7 +514,7 @@ DO ig=1,ng
   x=arc_point(s,p1,p2,xi1,xi2,xi)
   CALL poly_eval(bt,cm,x,val,gr)
   CALL cell_geom(x,pt,detm)
-  IF(PRESENT(xacc))THEN
+  IF(PRESENT(xacc).OR.PRESENT(tacc))THEN
     xs(ig)=xi; sp(:,ig)=pt; sg(:,ig)=phys_grad(x,gr)
   END IF
   sum=sum+wg(ig)*ABS(detm)/(pt(1)*ABS(DOT_PRODUCT(gr,dvec)))
@@ -498,6 +556,7 @@ q1=q1-gseq%o_point; q2=q2-gseq%o_point
 dth=ATAN2(q1(1)*q2(2)-q1(2)*q2(1),DOT_PRODUCT(q1,q2))
 sig=SIGN(1.d0,(p2(1)-p1(1))*gmid(2)-(p2(2)-p1(2))*gmid(1))*SIGN(1.d0,detm)
 wacc=wacc+sig*dth/(2.d0*pi)
+IF(PRESENT(tacc))CALL arc_rays(s,p1,p2,xi1,xi2,ng,sig,xs,sp,tacc(:,:,iq))
 end subroutine tri_arc
 !---Point of surface s on the current arc at xi (projected from the chord p1-p2 along d)
 function arc_point(s,p1,p2,xi1,xi2,xi) result(x)
@@ -532,8 +591,8 @@ real(r8), intent(in) :: s,p1(2),p2(2),xi1,xi2
 integer(i4), intent(in) :: ng
 real(r8), intent(in) :: xs(0:),sp(:,0:),sg(:,0:) !< Sample xi, (R,Z) and physical gradient
 real(r8), intent(inout) :: xa(2,4)
-real(r8) :: xl,xr,fl,fr,xm,fm,x(2),val,gr(2),gp(2),pt(2),detm
-integer(i4) :: k,jg,it,side
+real(r8) :: fl,fr,x(2),pt(2),detm
+integer(i4) :: k,jg
 DO k=0,ng+1
   CALL ext_add(xa,sp(:,k))
 END DO
@@ -541,29 +600,93 @@ DO jg=1,2
   DO k=0,ng
     fl=sg(jg,k); fr=sg(jg,k+1)
     IF(.NOT.(((fl<0.d0).AND.(fr>0.d0)).OR.((fl>0.d0).AND.(fr<0.d0))))CYCLE
-    xl=xs(k); xr=xs(k+1); side=0
-    DO it=1,60
-      xm=(xl*fr-xr*fl)/(fr-fl)
-      x=arc_point(s,p1,p2,xi1,xi2,xm)
-      CALL poly_eval(bt,cm,x,val,gr)
-      gp=phys_grad(x,gr); fm=gp(jg)
-      IF(fm==0.d0)EXIT
-      IF((fm>0.d0).EQV.(fr>0.d0))THEN
-        xr=xm; fr=fm
-        IF(side==-1)fl=fl/2.d0
-        side=-1
-      ELSE
-        xl=xm; fl=fm
-        IF(side==1)fr=fr/2.d0
-        side=1
-      END IF
-      IF(ABS(xr-xl)<=1.d-13*ABS(xi2-xi1))EXIT
-    END DO
+    x=arc_solve(s,p1,p2,xi1,xi2,jg,0.d0,xs(k),xs(k+1),fl,fr)
     CALL cell_geom(x,pt,detm)
     CALL ext_add(xa,pt)
   END DO
 END DO
 end subroutine arc_extrema
+!---Points of the current arc at the polar angles `theta`, added to `ta` [3,0:nth]
+!!
+!! `sig` orients the arc along the surface (anticlockwise about the O-point for a closed
+!! surface). Each angle inside the arc's span (with slack `ray_slack`) is solved for on the arc
+!! and offered as (margin inside the span, R, Z); `ta(1,0)` records the largest backward step in
+!! angle, which is positive only if the surface is not star-shaped about the O-point.
+subroutine arc_rays(s,p1,p2,xi1,xi2,ng,sig,xs,sp,ta)
+real(r8), intent(in) :: s,p1(2),p2(2),xi1,xi2,sig
+integer(i4), intent(in) :: ng
+real(r8), intent(in) :: xs(0:),sp(:,0:) !< Sample xi and (R,Z)
+real(r8), intent(inout) :: ta(:,0:)
+real(r8) :: u(0:6),xo(0:6),po(2,0:6),t,umin,umax,x(2),pt(2),detm
+integer(i4) :: m,mm,k
+!---Samples in surface order, with the angle unwrapped along the arc
+DO m=0,ng+1
+  mm=MERGE(m,ng+1-m,sig>0.d0)
+  po(:,m)=sp(:,mm); xo(m)=xs(mm)
+END DO
+u(0)=ATAN2(po(2,0)-gseq%o_point(2),po(1,0)-gseq%o_point(1))
+DO m=1,ng+1
+  u(m)=u(m-1)+wrap_pi(ATAN2(po(2,m)-gseq%o_point(2),po(1,m)-gseq%o_point(1))-u(m-1))
+  CALL tri_upd(ta(:,0),[u(m-1)-u(m),0.d0,0.d0])
+END DO
+umin=MINVAL(u(0:ng+1)); umax=MAXVAL(u(0:ng+1))
+DO k=1,SIZE(theta)
+  t=u(0)+wrap_pi(theta(k)-u(0))
+  IF((t<umin-ray_slack).OR.(t>umax+ray_slack))CYCLE
+  IF(t<=u(0))THEN
+    pt=po(:,0)
+  ELSE IF(t>=u(ng+1))THEN
+    pt=po(:,ng+1)
+  ELSE
+    DO m=0,ng
+      IF((u(m)<=t).AND.(t<=u(m+1)))EXIT
+    END DO
+    IF(m>ng)CYCLE ! Not monotone here (flagged by the backward step)
+    IF(t==u(m))THEN
+      pt=po(:,m)
+    ELSE IF(t==u(m+1))THEN
+      pt=po(:,m+1)
+    ELSE
+      x=arc_solve(s,p1,p2,xi1,xi2,3,theta(k),xo(m),xo(m+1),u(m)-t,u(m+1)-t)
+      CALL cell_geom(x,pt,detm)
+    END IF
+  END IF
+  CALL tri_upd(ta(:,k),[MIN(t-umin,umax-t),pt(1),pt(2)])
+END DO
+end subroutine arc_rays
+!---Root on the current arc, bracketed by xi in [xl,xr] with values fl, fr of opposite sign
+!!
+!! Illinois regula falsi on xi. `mode` 1 or 2: that component of the physical gradient;
+!! `mode` 3: polar angle about the O-point minus `tgt`.
+function arc_solve(s,p1,p2,xi1,xi2,mode,tgt,xl0,xr0,fl0,fr0) result(x)
+real(r8), intent(in) :: s,p1(2),p2(2),xi1,xi2,tgt,xl0,xr0,fl0,fr0
+integer(i4), intent(in) :: mode
+real(r8) :: x(2),xl,xr,fl,fr,xm,fm,val,gr(2),gp(2),pt(2),detm
+integer(i4) :: it,side
+xl=xl0; xr=xr0; fl=fl0; fr=fr0; side=0
+DO it=1,60
+  xm=(xl*fr-xr*fl)/(fr-fl)
+  x=arc_point(s,p1,p2,xi1,xi2,xm)
+  IF(mode==3)THEN
+    CALL cell_geom(x,pt,detm)
+    fm=wrap_pi(ATAN2(pt(2)-gseq%o_point(2),pt(1)-gseq%o_point(1))-tgt)
+  ELSE
+    CALL poly_eval(bt,cm,x,val,gr)
+    gp=phys_grad(x,gr); fm=gp(mode)
+  END IF
+  IF(fm==0.d0)EXIT
+  IF((fm>0.d0).EQV.(fr>0.d0))THEN
+    xr=xm; fr=fm
+    IF(side==-1)fl=fl/2.d0
+    side=-1
+  ELSE
+    xl=xm; fl=fm
+    IF(side==1)fr=fr/2.d0
+    side=1
+  END IF
+  IF(ABS(xr-xl)<=1.d-13*ABS(xi2-xi1))EXIT
+END DO
+end function arc_solve
 !---Physical gradient at uv, from the (u,v) gradient of 1-psi-hat
 function phys_grad(uv,grp) result(gp)
 real(r8), intent(in) :: uv(2),grp(2)
@@ -644,6 +767,21 @@ DO k=1,4
   CALL ext_upd(xa(:,k),xb(1,k),xb(2,k))
 END DO
 end subroutine ext_merge
+!------------------------------------------------------------------------------
+!> Keep the lexicographically larger of `e` and `v` (exact, so independent of merge order)
+!------------------------------------------------------------------------------
+pure subroutine tri_upd(e,v)
+real(r8), intent(inout) :: e(3)
+real(r8), intent(in) :: v(3)
+IF((v(1)>e(1)).OR.((v(1)==e(1)).AND.((v(2)>e(2)).OR.((v(2)==e(2)).AND.(v(3)>e(3))))))e=v
+end subroutine tri_upd
+!------------------------------------------------------------------------------
+!> Angle `a` wrapped to \f$ [-\pi,\pi] \f$
+!------------------------------------------------------------------------------
+pure real(r8) function wrap_pi(a)
+real(r8), intent(in) :: a
+wrap_pi=a-2.d0*pi*ANINT(a/(2.d0*pi))
+end function wrap_pi
 !------------------------------------------------------------------------------
 !> Keep the larger of (`key`,`comp`) and `e` in lexicographic order
 !------------------------------------------------------------------------------
