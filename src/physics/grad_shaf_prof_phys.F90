@@ -627,6 +627,49 @@ result=oft_mpi_sum(result)
 CALL prof_interp_obj%delete()
 ! DEBUG_STACK_POP
 END SUBROUTINE gs_flux_int
+!---------------------------------------------------------------------------------
+!> Area integrals of several flux functions inside each node's surface, in one quadrature
+!! pass (same quadrature as @ref gs_flux_int). cum(1,:) is the full plasma integral.
+!---------------------------------------------------------------------------------
+SUBROUTINE gs_flux_cumint(self,psi_tmp,fields,nvals,nf,cum)
+class(gs_equil), INTENT(inout) :: self !< TokaMaker object
+INTEGER(i4), INTENT(in) :: nvals !< Number of nodes
+INTEGER(i4), INTENT(in) :: nf !< Number of fields
+REAL(r8), INTENT(in) :: psi_tmp(nvals) !< Nodes in normalized psi (0 at LCFS, 1 at axis), ascending
+REAL(r8), INTENT(in) :: fields(nvals,nf) !< Fields on the nodes
+REAL(r8), INTENT(out) :: cum(nvals,nf) !< Integral over psi >= psi_tmp(k) of each field
+INTEGER(i4) :: i,m,k,inds(2)
+REAL(r8) :: area,psitmp(1),sgop(3,3),facs(2)
+REAL(r8), ALLOCATABLE :: bins(:,:)
+TYPE(gs_prof_interp) :: prof_interp_obj
+ALLOCATE(bins(nvals,nf))
+bins=0.d0
+prof_interp_obj%mode=4
+CALL prof_interp_obj%setup(self)
+!$omp parallel do private(m,psitmp,sgop,area,inds,facs) reduction(+:bins)
+do i=1,self%device%mesh%nc
+  IF(self%device%mesh%reg(i)/=1)CYCLE
+  do m=1,self%device%fe_rep%quad%np
+    call self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
+    call prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
+    IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma
+    CALL linterp_facs(psi_tmp,nvals,psitmp(1),inds,facs,0)
+    IF(inds(1)<=0)CYCLE
+    area=area*self%device%fe_rep%quad%wts(m)
+    ! Lower node inds(2) is the innermost surface enclosing this point
+    bins(inds(2),:)=bins(inds(2),:)+(fields(inds(1),:)*facs(1)+fields(inds(2),:)*facs(2))*area
+  end do
+end do
+DO k=1,nf
+  bins(:,k)=oft_mpi_sum(bins(:,k),nvals)
+END DO
+cum(nvals,:)=bins(nvals,:)
+DO k=nvals-1,1,-1
+  cum(k,:)=cum(k+1,:)+bins(k,:)
+END DO
+CALL prof_interp_obj%delete()
+DEALLOCATE(bins)
+END SUBROUTINE gs_flux_cumint
 !------------------------------------------------------------------------------
 !> Flux surface averages <R>, <1/R>, <1/R^2> on normalized psi nodes (0 at the LCFS, 1 at the axis)
 !!

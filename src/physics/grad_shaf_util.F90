@@ -417,7 +417,7 @@ IF(ASSOCIATED(self%eta))THEN
   CALL hdf5_create_group(filename,'tokamaker/ETA_PROFILE')
   CALL self%eta%save(filename,'tokamaker/ETA_PROFILE')
 END IF
-!---Save kinetic profiles (Te, Ti, ne, ni, Zeff, jphi_fixed) if set
+!---Save kinetic profiles (Te, Ti, ne, ni, Zeff, jphi_fixed, jphi_saw) if set
 IF(ASSOCIATED(self%Te))THEN
   CALL hdf5_create_group(filename,'tokamaker/TE_PROFILE')
   CALL self%Te%save(filename,'tokamaker/TE_PROFILE')
@@ -441,6 +441,10 @@ END IF
 IF(ASSOCIATED(self%jphi_fixed))THEN
   CALL hdf5_create_group(filename,'tokamaker/JPHI_FIXED_PROFILE')
   CALL self%jphi_fixed%save(filename,'tokamaker/JPHI_FIXED_PROFILE')
+END IF
+IF(ASSOCIATED(self%jphi_saw))THEN
+  CALL hdf5_create_group(filename,'tokamaker/JPHI_SAW_PROFILE')
+  CALL self%jphi_saw%save(filename,'tokamaker/JPHI_SAW_PROFILE')
 END IF
 ! IF(ASSOCIATED(self%P_ani))THEN
 !   CALL hdf5_create_group(filename,'tokamaker/P_ANI')
@@ -535,7 +539,7 @@ IF(.NOT.success)THEN
   RETURN
 END IF
 CALL gs_update_bounds(self)
-!---Load kinetic profiles (Te, Ti, ne, ni, Zeff, jphi_fixed) before flux functions so they are
+!---Load kinetic profiles (Te, Ti, ne, ni, Zeff, jphi_fixed, jphi_saw) before flux functions so they are
 !   available when flux function update() calls (e.g. jphi_bs_update) are made below
 IF(hdf5_field_exist(filename,'tokamaker/TE_PROFILE'))THEN
   CALL hdf5_read(profType,filename,'tokamaker/TE_PROFILE/TYPE',success=success)
@@ -648,6 +652,25 @@ IF(hdf5_field_exist(filename,'tokamaker/JPHI_FIXED_PROFILE'))THEN
   CALL gs_profile_load_coord(self%jphi_fixed,filename,'tokamaker/JPHI_FIXED_PROFILE')
   IF(.NOT.success)THEN
     error_string='Failed to load jphi_fixed profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/JPHI_SAW_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/JPHI_SAW_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read jphi_saw profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%jphi_saw))THEN
+    CALL self%jphi_saw%delete()
+    DEALLOCATE(self%jphi_saw)
+  END IF
+  CALL gs_profile_alloc(profType,self%jphi_saw)
+  DEALLOCATE(profType)
+  CALL self%jphi_saw%load(filename,'tokamaker/JPHI_SAW_PROFILE',success=success)
+  CALL gs_profile_load_coord(self%jphi_saw,filename,'tokamaker/JPHI_SAW_PROFILE')
+  IF(.NOT.success)THEN
+    error_string='Failed to load jphi_saw profile.'
     RETURN
   END IF
 END IF

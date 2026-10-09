@@ -1730,6 +1730,7 @@ CALL attach(gseq%ne,'ne',.TRUE.)
 CALL attach(gseq%ni,'ni',.TRUE.)
 CALL attach(gseq%Zeff,'Zeff',.TRUE.)
 CALL attach(gseq%jphi_fixed,'jphi_fixed',.TRUE.)
+CALL attach(gseq%jphi_saw,'jphi_saw',.TRUE.)
 IF(PRESENT(active))active=any_wrapped
 IF(PRESENT(resettle).AND.ASSOCIATED(gseq%torflux))THEN
   SELECT TYPE(map=>gseq%torflux)
@@ -2339,6 +2340,7 @@ CALL add_nodes(gseq%ne)
 CALL add_nodes(gseq%ni)
 CALL add_nodes(gseq%Zeff)
 CALL add_nodes(gseq%jphi_fixed)
+CALL add_nodes(gseq%jphi_saw)
 phinodes=[0.d0,1.d0,MIN(MAX(phinodes,0.d0),1.d0)]
 CALL sort_unique(phinodes)
 ALLOCATE(phitarg(0))
@@ -2471,6 +2473,7 @@ CALL build_fint(gseq%ne)
 CALL build_fint(gseq%ni)
 CALL build_fint(gseq%Zeff)
 CALL build_fint(gseq%jphi_fixed)
+CALL build_fint(gseq%jphi_saw)
 CONTAINS
 !---Rebuild the relabel table of a wrapped profile
 subroutine build_fint(F)

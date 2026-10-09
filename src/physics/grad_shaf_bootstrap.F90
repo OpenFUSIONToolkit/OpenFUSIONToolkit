@@ -16,13 +16,13 @@ use oft_base
 use oft_gs, only: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
  gs_itor_nl, qprof_trace_tol
 use oft_gs_profiles, only: torflux_qgeom_backend
-use oft_gs_cutcell, only: gs_sauter_cutcell
+use oft_gs_cutcell, only: gs_sauter_cutcell, gs_qgeom_cutcell
 use oft_lag_basis, only: oft_blag_geval
 use oft_mesh_type, only: bmesh_findcell
 use oft_blag_operators, only: oft_lag_brinterp
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use grad_shaf_prof_phys, only: eval_jtor_imas, gs_ravgs, gs_flux_int, &
-  jphi_update, jphi_copy, jphi_flux_func, jphi_psi_nodes
+  gs_flux_cumint, jphi_update, jphi_copy, jphi_flux_func, jphi_psi_nodes
 USE oft_io, ONLY: hdf5_create_group, hdf5_write, hdf5_read, &
   hdf5_field_get_sizes, hdf5_field_exist
 use mhd_utils, only: mu0
@@ -45,6 +45,12 @@ TYPE :: boot_ops
   LOGICAL :: taper_edge_jBS = .FALSE. !< Smooth taper of toroidal current (inductive, bootstrap and fixed) to zero at plasma edge (guards against numerical issues at the separatrix)
   REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
   INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
+  REAL(r8) :: saw_q_s = 0.0_r8 !< Sawtooth reset q on axis (q_s); 0 = off (see @ref saw_reset_1d)
+  REAL(r8) :: saw_dq = 0.03_r8 !< Reset regions end where q_base crosses saw_q_s + saw_dq
+  REAL(r8) :: saw_tol = 1.0e-4_r8 !< Rel. change in j_saw (vs RMS total) below which j_saw is frozen
+  REAL(r8) :: saw_relax = 1.0_r8 !< Under-relaxation of the j_saw update (1 = none)
+  REAL(r8) :: saw_ramp = 0.01_r8 !< Reset weight ramps over this q deficit below saw_q_s (0 = hard trigger)
+  INTEGER(i4) :: saw_rule = 2 !< Reset rule: 1 = fuse (axis to rho_m, FUSE saw_crash!), 2 = local (each dip, two-sided)
 END TYPE boot_ops
 !------------------------------------------------------------------------------
 !> Cached current profiles produced by the last call to @ref jphi_bs_update.
@@ -61,6 +67,10 @@ TYPE :: boot_profs
   REAL(r8), POINTER, DIMENSION(:) :: j_ind_final => NULL() !< Input jphi, re-scaled & optionally tapered [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: j_bs_final => NULL() !< Bootstrap current density, optionally isolated/parametrised/tapered [A/m²]
   REAL(r8), POINTER, DIMENSION(:) :: jphi_fixed => NULL() !< Fixed (non-rescaled) toroidal current density, optionally tapered [A/m²]
+  REAL(r8), POINTER, DIMENSION(:) :: j_saw => NULL() !< Sawtooth current = input jphi_saw + q reset redistribution [A/m²]
+  REAL(r8) :: saw_rho_m = 0.0_r8 !< Sawtooth radius (rho_tor_norm): q_s + dq crossing beyond the outermost q_base < q_s (0 = none)
+  REAL(r8) :: saw_rho_out = 0.0_r8 !< Outer end of the last reset (rho_tor_norm; 0 = none)
+  INTEGER(i4) :: saw_n_dips = 0 !< Regions reset at the last reset (rule 1: separate q_base < saw_q_s regions)
 END TYPE boot_profs
 !------------------------------------------------------------------------------
 !> Jphi flux function type for bootstrap current calculation
@@ -75,6 +85,11 @@ type, extends(jphi_flux_func) :: jphi_bs_flux_func
   integer(4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
   real(8) :: dalpha_last = huge(1.0d0) !< dalpha of the previous update (stall diagnostic)
   real(8), pointer, dimension(:) :: j_BS_last => NULL() !< j_BS profile from previous NL iteration (for freeze check)
+  logical :: freeze_saw = .FALSE. !< Set .TRUE. once j_saw converges or stagnates, after j_BS is frozen
+  integer(4) :: djsaw_no_improve = 0 !< Consecutive steps with non-decreasing djsaw
+  real(8) :: djsaw_min = huge(1.0d0) !< Running minimum djsaw
+  real(8), pointer, dimension(:) :: j_saw_last => NULL() !< j_saw from previous NL iteration (mu0*A/m²)
+  real(8), pointer, dimension(:) :: jtot_last => NULL() !< Total jphi from previous NL iteration (mu0*A/m²), the current of the equilibrium being traced
   TYPE(boot_ops) :: boot_ops       !< Python read-in ptions for j_bs_update
   TYPE(boot_profs) :: boot_profs   !< Cached current profiles from the last jphi_bs_update call
 contains
@@ -143,6 +158,12 @@ IF(self%boot_ops%initialized)THEN
   CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%taper_edge_jBS),filename,path//'/BOOT_OPS/TAPER_EDGE_JBS')
   CALL hdf5_write(self%boot_ops%taper_edge_psi0,filename,path//'/BOOT_OPS/TAPER_EDGE_PSI0')
   CALL hdf5_write(self%boot_ops%taper_edge_shape,filename,path//'/BOOT_OPS/TAPER_EDGE_SHAPE')
+  CALL hdf5_write(self%boot_ops%saw_q_s,filename,path//'/BOOT_OPS/SAW_Q_S')
+  CALL hdf5_write(self%boot_ops%saw_dq,filename,path//'/BOOT_OPS/SAW_DQ')
+  CALL hdf5_write(self%boot_ops%saw_tol,filename,path//'/BOOT_OPS/SAW_TOL')
+  CALL hdf5_write(self%boot_ops%saw_relax,filename,path//'/BOOT_OPS/SAW_RELAX')
+  CALL hdf5_write(self%boot_ops%saw_ramp,filename,path//'/BOOT_OPS/SAW_RAMP')
+  CALL hdf5_write(self%boot_ops%saw_rule,filename,path//'/BOOT_OPS/SAW_RULE')
 END IF
 !---Save cached bootstrap current profiles (only when available)
 IF(ASSOCIATED(self%boot_profs%total_j_phi).OR.ASSOCIATED(self%boot_profs%j_bs_raw))THEN
@@ -154,6 +175,8 @@ IF(ASSOCIATED(self%boot_profs%total_j_phi).OR.ASSOCIATED(self%boot_profs%j_bs_ra
     CALL hdf5_write(self%boot_profs%j_bs_final,filename,path//'/BOOT_PROFS/J_BS_FINAL')
     IF(ASSOCIATED(self%boot_profs%jphi_fixed)) &
       CALL hdf5_write(self%boot_profs%jphi_fixed,filename,path//'/BOOT_PROFS/JPHI_FIXED')
+    IF(ASSOCIATED(self%boot_profs%j_saw)) &
+      CALL hdf5_write(self%boot_profs%j_saw,filename,path//'/BOOT_PROFS/J_SAW')
     IF(ASSOCIATED(self%boot_profs%j_bs_raw)) &
       CALL hdf5_write(self%boot_profs%j_bs_raw,filename,path//'/BOOT_PROFS/J_BS_RAW')
     IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw)) &
@@ -211,6 +234,14 @@ IF(hdf5_field_exist(filename,path//'/BOOT_OPS'))THEN
   IF(success) self%boot_ops%taper_edge_jBS = (int_tmp/=0)
   CALL hdf5_read(self%boot_ops%taper_edge_psi0,filename,path//'/BOOT_OPS/TAPER_EDGE_PSI0',success=success)
   CALL hdf5_read(self%boot_ops%taper_edge_shape,filename,path//'/BOOT_OPS/TAPER_EDGE_SHAPE',success=success)
+  IF(hdf5_field_exist(filename,path//'/BOOT_OPS/SAW_Q_S'))THEN
+    CALL hdf5_read(self%boot_ops%saw_q_s,filename,path//'/BOOT_OPS/SAW_Q_S',success=success)
+    CALL hdf5_read(self%boot_ops%saw_dq,filename,path//'/BOOT_OPS/SAW_DQ',success=success)
+    CALL hdf5_read(self%boot_ops%saw_tol,filename,path//'/BOOT_OPS/SAW_TOL',success=success)
+    CALL hdf5_read(self%boot_ops%saw_relax,filename,path//'/BOOT_OPS/SAW_RELAX',success=success)
+    CALL hdf5_read(self%boot_ops%saw_ramp,filename,path//'/BOOT_OPS/SAW_RAMP',success=success)
+    CALL hdf5_read(self%boot_ops%saw_rule,filename,path//'/BOOT_OPS/SAW_RULE',success=success)
+  END IF
   self%boot_ops%initialized = .TRUE.
 END IF
 !---Load cached bootstrap current profiles if available
@@ -234,6 +265,11 @@ IF(hdf5_field_exist(filename,path//'/BOOT_PROFS'))THEN
     IF(hdf5_field_exist(filename,path//'/BOOT_PROFS/JPHI_FIXED'))THEN
       ALLOCATE(self%boot_profs%jphi_fixed(0:SIZE(self%boot_profs%total_j_phi)-1))
       CALL hdf5_read(self%boot_profs%jphi_fixed,filename,path//'/BOOT_PROFS/JPHI_FIXED',success=success)
+    END IF
+    IF(ASSOCIATED(self%boot_profs%j_saw))DEALLOCATE(self%boot_profs%j_saw)
+    IF(hdf5_field_exist(filename,path//'/BOOT_PROFS/J_SAW'))THEN
+      ALLOCATE(self%boot_profs%j_saw(0:SIZE(self%boot_profs%total_j_phi)-1))
+      CALL hdf5_read(self%boot_profs%j_saw,filename,path//'/BOOT_PROFS/J_SAW',success=success)
     END IF
     IF(hdf5_field_exist(filename,path//'/BOOT_PROFS/J_BS_RAW'))THEN
       CALL hdf5_field_get_sizes(filename,path//'/BOOT_PROFS/J_BS_RAW',ndims,dim_sizes)
@@ -324,6 +360,14 @@ SELECT TYPE(new)
     new%dalpha_last = self%dalpha_last
     new%boot_ops = self%boot_ops
     IF(ASSOCIATED(self%j_BS_last)) ALLOCATE(new%j_BS_last, SOURCE=self%j_BS_last)
+    new%freeze_saw = self%freeze_saw
+    new%djsaw_no_improve = self%djsaw_no_improve
+    new%djsaw_min = self%djsaw_min
+    IF(ASSOCIATED(self%j_saw_last)) ALLOCATE(new%j_saw_last, SOURCE=self%j_saw_last)
+    IF(ASSOCIATED(self%jtot_last)) ALLOCATE(new%jtot_last, SOURCE=self%jtot_last)
+    new%boot_profs%saw_rho_m = self%boot_profs%saw_rho_m
+    new%boot_profs%saw_rho_out = self%boot_profs%saw_rho_out
+    new%boot_profs%saw_n_dips = self%boot_profs%saw_n_dips
     IF(ASSOCIATED(self%boot_profs%psi_n))ALLOCATE(new%boot_profs%psi_n,SOURCE=self%boot_profs%psi_n)
     IF(ASSOCIATED(self%boot_profs%j_bs_raw))ALLOCATE(new%boot_profs%j_bs_raw,SOURCE=self%boot_profs%j_bs_raw)
     IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw))ALLOCATE(new%boot_profs%jdotb_bs_raw,SOURCE=self%boot_profs%jdotb_bs_raw)
@@ -331,6 +375,7 @@ SELECT TYPE(new)
     IF(ASSOCIATED(self%boot_profs%j_bs_final))ALLOCATE(new%boot_profs%j_bs_final,SOURCE=self%boot_profs%j_bs_final)
     IF(ASSOCIATED(self%boot_profs%j_ind_final))ALLOCATE(new%boot_profs%j_ind_final,SOURCE=self%boot_profs%j_ind_final)
     IF(ASSOCIATED(self%boot_profs%jphi_fixed))ALLOCATE(new%boot_profs%jphi_fixed,SOURCE=self%boot_profs%jphi_fixed)
+    IF(ASSOCIATED(self%boot_profs%j_saw))ALLOCATE(new%boot_profs%j_saw,SOURCE=self%boot_profs%j_saw)
 END SELECT
 end subroutine jphi_bs_copy
 !------------------------------------------------------------------------------
@@ -344,6 +389,8 @@ IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
 IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
 IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
 IF(ASSOCIATED(self%j_BS_last))DEALLOCATE(self%j_BS_last)
+IF(ASSOCIATED(self%j_saw_last))DEALLOCATE(self%j_saw_last)
+IF(ASSOCIATED(self%jtot_last))DEALLOCATE(self%jtot_last)
 !---Destroy cached bootstrap current profiles
 IF(ASSOCIATED(self%boot_profs%j_bs_raw))DEALLOCATE(self%boot_profs%j_bs_raw)
 IF(ASSOCIATED(self%boot_profs%jdotb_bs_raw))DEALLOCATE(self%boot_profs%jdotb_bs_raw)
@@ -351,6 +398,7 @@ IF(ASSOCIATED(self%boot_profs%total_j_phi))DEALLOCATE(self%boot_profs%total_j_ph
 IF(ASSOCIATED(self%boot_profs%j_bs_final))DEALLOCATE(self%boot_profs%j_bs_final)
 IF(ASSOCIATED(self%boot_profs%j_ind_final))DEALLOCATE(self%boot_profs%j_ind_final)
 IF(ASSOCIATED(self%boot_profs%jphi_fixed))DEALLOCATE(self%boot_profs%jphi_fixed)
+IF(ASSOCIATED(self%boot_profs%j_saw))DEALLOCATE(self%boot_profs%j_saw)
 IF(ASSOCIATED(self%boot_profs%psi_n))DEALLOCATE(self%boot_profs%psi_n)
 end subroutine jphi_bs_delete
 !---------------------------------------------------------------------------------
@@ -360,11 +408,13 @@ end subroutine jphi_bs_delete
 !>   1. Pressure scale.
 !>   2. Evaluate fixed current jphi_fixed and bootstrap current j_BS on self%x (or reuse cache if frozen);
 !>      <R>, <1/R>, <1/R^2> on the nodes from its Sauter pass, else (and on the LCFS) from gs_ravgs.
-!>   3. Apply edge taper to j_BS, jphi_ind and jphi_fixed component-wise.
+!>   3. Apply edge taper to j_BS, jphi_ind, jphi_fixed and the input sawtooth current component-wise.
 !>   4. Solve analytically for alpha: the exact I_p (gs_flux_int of eval_jtor_imas, eq. A9c) is
 !>      affine in alpha, so two evaluations (alpha=0, alpha=1) give
 !>      alpha = (Ip_target - Ip_lo)/(Ip_hi - Ip_lo).
-!>   5. Assemble jphi_total = alpha*jphi_ind + j_BS + jphi_fixed; compute F*F' knots.
+!>   4a. Sawtooth reset (saw_q_s > 0): j_saw = jphi_saw + the Ip-neutral current that resets the q of
+!>      base = alpha*jphi_ind + j_BS + jphi_fixed + jphi_saw above saw_q_s (@ref saw_redistribute).
+!>   5. Assemble jphi_total = alpha*jphi_ind + j_BS + jphi_fixed + j_saw; compute F*F' knots.
 !>   6. Diagnostics (if diagnose_bs is set), including wall times of the steps above.
 !---------------------------------------------------------------------------------
 SUBROUTINE jphi_bs_update(self, gseq)
@@ -385,6 +435,11 @@ REAL(r8), ALLOCATABLE :: j_spike_mask_tmp(:)  !< Raw masked (pre-fit) spike prof
 REAL(r8), ALLOCATABLE :: jphi_total(:)
 REAL(r8), ALLOCATABLE :: jphi_ind(:)  !< Tapered copy of self%jphi (= self%jphi when taper off)
 REAL(r8), ALLOCATABLE :: jphi_fixed(:)  !< Fixed current from gseq%jphi_fixed (A/m², mu0*A/m² from step 3; 0 if unset)
+! Sawtooth current (mu0*A/m² from step 3): input, value entering the alpha solve, final
+REAL(r8), ALLOCATABLE :: j_saw_in(:), j_saw_cur(:), j_saw(:), dj_saw(:)
+REAL(r8), ALLOCATABLE :: cflds(:,:), cum(:,:)
+LOGICAL :: saw_on, do_saw
+REAL(r8) :: djsaw
 ! Alpha-solve scalars
 REAL(r8) :: alpha, ip_target, ip_ind, ip_result_lo, ip_result_hi, dalpha
 ! Relative change in bootstrap current for freeze check
@@ -427,6 +482,9 @@ IF(.NOT.ASSOCIATED(gseq%Zeff)) &
 ALLOCATE(jtor(0:self%npsi), psi_n(0:self%npsi), ravgs(0:self%npsi,3))
 psi_n = [0.0_r8, xpsi]
 wt=0.d0; wt(5)=omp_get_wtime()
+saw_on = self%boot_ops%saw_q_s > 0.0_r8
+do_saw = saw_on .AND. (.NOT.self%freeze_saw) .AND. ASSOCIATED(self%jtot_last)
+djsaw = 0.0_r8
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(ASSOCIATED(gseq%P_ani)) &
   CALL oft_abort('Jphi profiles do not support anisotropic pressure', &
@@ -440,6 +498,14 @@ IF(ASSOCIATED(gseq%jphi_fixed))THEN
   jphi_fixed(0) = gseq%jphi_fixed%fp(0.0_r8)
   DO i = 1, self%npsi
     jphi_fixed(i) = gseq%jphi_fixed%fp(xpsi(i))
+  END DO
+END IF
+ALLOCATE(j_saw_in(0:self%npsi))
+j_saw_in = 0.0_r8
+IF(ASSOCIATED(gseq%jphi_saw))THEN
+  j_saw_in(0) = gseq%jphi_saw%fp(0.0_r8)
+  DO i = 1, self%npsi
+    j_saw_in(i) = gseq%jphi_saw%fp(xpsi(i))
   END DO
 END IF
 ALLOCATE(j_BS(0:self%npsi))
@@ -526,13 +592,14 @@ ELSE
   CALL gs_ravgs(gseq, 1, psi_n(0:0), ravgs(0:0,:))
 END IF
 wt(1)=omp_get_wtime()-wt(1)
-!--- 3. Apply edge taper to j_BS, jphi_ind and jphi_fixed (jphi_fixed first converted to mu0*A/m²).
+!--- 3. Apply edge taper to j_BS, jphi_ind, jphi_fixed and j_saw_in (the last two first converted to mu0*A/m²).
 !   self%j_BS_last caches the un-tapered j_BS so freeze comparisons track physics.
 !   taper_edge_psi0 is in standard convention (0=axis,1=LCFS);
 !   threshold in OFT convention (0=LCFS,1=axis) is (1 - taper_edge_psi0).
 ALLOCATE(jphi_ind(0:self%npsi))
 jphi_ind = [self%j0, self%jphi]
 jphi_fixed = jphi_fixed * mu0
+j_saw_in = j_saw_in * mu0
 IF (self%boot_ops%taper_edge_jBS) THEN
   CALL apply_edge_taper(self%npsi+1, psi_n, j_BS, &
                         1.0_r8 - self%boot_ops%taper_edge_psi0, &
@@ -546,20 +613,49 @@ IF (self%boot_ops%taper_edge_jBS) THEN
                         1.0_r8 - self%boot_ops%taper_edge_psi0, &
                         self%boot_ops%taper_edge_shape, &
                         oft_psi_conv=.TRUE.)
+  CALL apply_edge_taper(self%npsi+1, psi_n, j_saw_in, &
+                        1.0_r8 - self%boot_ops%taper_edge_psi0, &
+                        self%boot_ops%taper_edge_shape, &
+                        oft_psi_conv=.TRUE.)
 END IF
 ALLOCATE(jphi_total(0:self%npsi))
+ALLOCATE(j_saw_cur(0:self%npsi), j_saw(0:self%npsi))
+!   Sawtooth current entering the alpha solve: last iterate (or the input until the first reset)
+j_saw_cur = j_saw_in
+IF(saw_on .AND. ASSOCIATED(self%j_saw_last))j_saw_cur = self%j_saw_last
+!   One quadrature pass for the alpha solve and the reset's enclosed currents: lo (alpha=0 with the
+!   input saw), ind (inductive, linear), dsaw (j_saw_cur - input, linear), eq (last total), area.
+IF(do_saw)THEN
+  ALLOCATE(cflds(self%npsi+1,5), cum(self%npsi+1,5))
+  jphi_total = j_BS + jphi_fixed + j_saw_in
+  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, cflds(:,1))
+  jphi_total = jphi_ind + j_BS + jphi_fixed + j_saw_in
+  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
+  cflds(:,2) = jtor - cflds(:,1)
+  jphi_total = j_BS + jphi_fixed + j_saw_cur
+  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
+  cflds(:,3) = jtor - cflds(:,1)
+  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, self%jtot_last, pscale, cflds(:,4))
+  cflds(:,5) = 1.0_r8
+  CALL gs_flux_cumint(gseq, psi_n, cflds, self%npsi+1, 5, cum)
+END IF
 !--- 4. Solve analytically for alpha.
 !   gs_flux_int is linear in alpha; two evaluations (alpha=0 and alpha=1) give
 !   alpha = (Ip_target - Ip_lo) / (Ip_hi - Ip_lo).  Re-solved every update (cheap): a
 !   frozen alpha lets I_p drift while the shape is still settling.
 ip_target = ABS(gseq%Ip_target)
 wt(3)=omp_get_wtime()
-jphi_total = j_BS + jphi_fixed
-CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
-CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, ip_result_lo)
-jphi_total = jphi_ind + j_BS + jphi_fixed
-CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
-CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, ip_result_hi)
+IF(do_saw)THEN
+  ip_result_lo = cum(1,1) + cum(1,3)
+  ip_result_hi = ip_result_lo + cum(1,2)
+ELSE
+  jphi_total = j_BS + jphi_fixed + j_saw_cur
+  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
+  CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, ip_result_lo)
+  jphi_total = jphi_ind + j_BS + jphi_fixed + j_saw_cur
+  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
+  CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, ip_result_hi)
+END IF
 ip_ind = ip_result_hi - ip_result_lo
 wt(3)=omp_get_wtime()-wt(3)
 IF(ABS(ip_ind) > 0.0_r8)THEN
@@ -594,8 +690,53 @@ IF(ip_result_lo > ip_target)THEN
     ' A) exceeds target plasma current (', ip_target/mu0, ' A); inductive current is reversed'
   IF(oft_env%pm)CALL oft_warn(TRIM(char_buf))
 END IF
+!--- 4a. Sawtooth reset of the base current (alpha now known); j_saw freeze check.
+IF(do_saw)THEN
+  ALLOCATE(dj_saw(0:self%npsi))
+  CALL saw_redistribute(self, gseq, psi_n, ravgs, cum(:,1) + alpha*cum(:,2), &
+                        cum(:,4), cum(:,5), alpha*jphi_ind + j_BS + jphi_fixed + j_saw_in, dj_saw)
+  j_saw = j_saw_in + self%boot_ops%saw_relax*dj_saw + (1.0_r8 - self%boot_ops%saw_relax)*(j_saw_cur - j_saw_in)
+  jphi_total = alpha * jphi_ind + j_BS + jphi_fixed + j_saw
+  djsaw = SQRT(SUM((j_saw - self%j_saw_last)**2)) / MAX(SQRT(SUM(jphi_total**2)), 1.0e-30_r8)
+  ! Freeze only once j_BS has: before that the base current still moves, and an early iterate
+  ! without a dip (djsaw = 0) would freeze the reset off for the whole solve
+  IF(.NOT.self%freeze_j_BS)THEN
+    CONTINUE
+  ELSE IF(djsaw < self%boot_ops%saw_tol)THEN
+    self%freeze_saw = .TRUE.
+    IF(oft_env%pm)WRITE(*,*)' Freezing sawtooth current.'
+  ELSE IF(djsaw >= self%djsaw_min)THEN
+    self%djsaw_no_improve = self%djsaw_no_improve + 1
+    IF(self%djsaw_no_improve >= 2)THEN
+      WRITE(char_buf,'(A,ES12.4,A,ES12.4,A)') &
+        'Sawtooth current convergence stalled, relative change per nonlinear step = ', djsaw, &
+        ', above set tolerance (saw_tol=', self%boot_ops%saw_tol, ')'
+      IF(djsaw > self%djBS_stol)THEN
+        self%djsaw_no_improve = 0
+      ELSE
+        self%freeze_saw = .TRUE.
+        char_buf = TRIM(char_buf) // ' Freezing sawtooth current.'
+      END IF
+      IF(oft_env%pm)CALL oft_warn(TRIM(char_buf))
+    END IF
+  ELSE
+    self%djsaw_no_improve = 0
+    self%djsaw_min = djsaw
+  END IF
+  DEALLOCATE(dj_saw, cflds, cum)
+ELSE
+  j_saw = j_saw_cur
+END IF
+IF(saw_on)THEN
+  IF(.NOT.ASSOCIATED(self%j_saw_last))ALLOCATE(self%j_saw_last(0:self%npsi))
+  self%j_saw_last = j_saw
+END IF
 !--- 5. Assemble jphi_total, save profiles
-jphi_total = alpha * jphi_ind + j_BS + jphi_fixed
+jphi_total = alpha * jphi_ind + j_BS + jphi_fixed + j_saw
+IF(saw_on)THEN
+  IF(.NOT.ASSOCIATED(self%jtot_last))ALLOCATE(self%jtot_last(0:self%npsi))
+  self%jtot_last = jphi_total
+END IF
 IF(.NOT.ASSOCIATED(self%boot_profs%total_j_phi))THEN
   ALLOCATE(self%boot_profs%psi_n(0:self%npsi))
   ALLOCATE(self%boot_profs%total_j_phi(0:self%npsi))
@@ -603,6 +744,8 @@ IF(.NOT.ASSOCIATED(self%boot_profs%total_j_phi))THEN
   ALLOCATE(self%boot_profs%j_ind_final(0:self%npsi))
 END IF
 IF(.NOT.ASSOCIATED(self%boot_profs%jphi_fixed))ALLOCATE(self%boot_profs%jphi_fixed(0:self%npsi))
+IF(.NOT.ASSOCIATED(self%boot_profs%j_saw))ALLOCATE(self%boot_profs%j_saw(0:self%npsi))
+self%boot_profs%j_saw       = j_saw/mu0
 self%boot_profs%psi_n       = psi_n
 self%boot_profs%total_j_phi = jphi_total/mu0
 self%boot_profs%j_bs_final  = j_BS/mu0
@@ -637,6 +780,11 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] j_BS max    = ', MAXVAL(ABS(j_BS))
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi max    = ', MAXVAL(ABS(self%jphi))
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi_fixed max = ', MAXVAL(ABS(jphi_fixed))
+  IF(saw_on)THEN
+    WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] j_saw max   = ', MAXVAL(ABS(j_saw))/mu0
+    WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] djsaw       = ', djsaw
+    WRITE(*,'(A,L1)')     '  [jphi_bs_update] saw_frozen  = ', self%freeze_saw
+  END IF
   !--- Side-by-side Ip comparison: FEM nonlinear solve vs profile flux integral
   CALL gs_itor_nl(gseq, itor_nl)
   CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
@@ -647,8 +795,445 @@ IF(self%boot_ops%diagnose_bs)THEN
 END IF
 !--- Clean up
 DEALLOCATE(j_BS, jphi_total, jphi_ind, jphi_fixed, jtor, psi_n, ravgs)
+DEALLOCATE(j_saw_in, j_saw_cur, j_saw)
 i=self%set_cofs(self%yp)
 END SUBROUTINE jphi_bs_update
+!---------------------------------------------------------------------------------
+!> Sawtooth reset current on the nodes `xn` (OFT convention, mu0*A/m², TokaMaker jphi).
+!!
+!! q_base = q_eq*I_eq/I_base is the q that the base current implies in the equilibrium geometry
+!! (q*I is geometric), with q_eq = |F| q/F on the nodes (q/F by cut-cell, @ref gs_qgeom_cutcell).
+!! rho = sqrt(Phi_N), Phi from int q_eq dpsi. @ref saw_reset_1d gives the
+!! reset on the nodes whose cumulative-area bin holds at least a quarter of the mean bin area (a
+!! node-dense axis, e.g. psi_N ~ rho^2, leaves inner bins without quadrature points), interpolated
+!! in rho; inside the reset the base jphi between kept nodes is replaced by its interpolant too (weighted
+!! by the reset weight wr), so its fine structure is reset with the rest. dI/dA is mapped back to jphi with the linear part of
+!! eval_jtor_imas.
+!---------------------------------------------------------------------------------
+SUBROUTINE saw_redistribute(self, gseq, xn, ravgs, I_base, I_eq, area, j_base, dj)
+CLASS(jphi_bs_flux_func), INTENT(inout) :: self
+CLASS(gs_equil), INTENT(inout) :: gseq
+REAL(r8), INTENT(in) :: xn(:) !< Nodes, 0 at LCFS, 1 at axis [n]
+REAL(r8), INTENT(in) :: ravgs(:,:) !< <R>, <1/R>, <1/R^2> on the nodes [n,3]
+REAL(r8), INTENT(in) :: I_base(:) !< Enclosed base current at each node (gs_flux_cumint) [n]
+REAL(r8), INTENT(in) :: I_eq(:) !< Enclosed current of the equilibrium [n]
+REAL(r8), INTENT(in) :: area(:) !< Enclosed area [n]
+REAL(r8), INTENT(in) :: j_base(:) !< Base jphi on the nodes [n]
+REAL(r8), INTENT(out) :: dj(:) !< Reset current [n]
+INTEGER(i4) :: n, i, k, n_dips, nk
+INTEGER(i4), ALLOCATABLE :: kk(:)
+REAL(r8), PARAMETER :: psi_ax = 1.0e-4_r8
+REAL(r8) :: rho_s, rho_m, rho_out, w, wf, dAmin, alast, psi
+REAL(r8), ALLOCATABLE :: q_eq(:), c1(:), rho(:), qb(:), Ib(:), Ar(:), qn(:), djr(:), wr(:), r(:), phi(:), g(:)
+n = SIZE(xn)
+ALLOCATE(q_eq(n), c1(n), rho(n), qb(n), Ib(n), Ar(n), qn(n), djr(n), wr(n), r(n), phi(n), g(n))
+!---q on the nodes, axis-first (index 1 = innermost node). Nodes without a closed surface (g = 0:
+!   the LCFS, the axis, a failed surface) take the q of the next node inward (the axis: outward).
+CALL gs_qgeom_cutcell(gseq, n, xn, g)
+DO i = 1, n
+  k = n + 1 - i
+  q_eq(i) = 0.0_r8
+  IF(g(k) /= 0.0_r8)THEN
+    psi = gseq%plasma_bounds(1) + xn(k)*(gseq%plasma_bounds(2) - gseq%plasma_bounds(1))
+    q_eq(i) = ABS(g(k))*SQRT(MAX(gseq%ffp_scale*gseq%I%f(psi) + gseq%I%f_offset**2, 0.0_r8))
+  END IF
+  c1(i) = ravgs(k,3)/ravgs(k,2)**2
+  Ib(i) = I_base(k)
+  Ar(i) = area(k)
+END DO
+DO i = 2, n
+  IF(q_eq(i) <= 0.0_r8)q_eq(i) = q_eq(i-1)
+END DO
+DO i = n-1, 1, -1
+  IF(q_eq(i) <= 0.0_r8)q_eq(i) = q_eq(i+1)
+END DO
+!---Nodes within psi_ax of the axis (cut-cell q/F is unreliable on surfaces much smaller than a
+!   cell) take the quadratic extrapolation in psi of the first three nodes outside it
+nk = COUNT(1.0_r8 - xn > psi_ax)
+IF(nk >= 3 .AND. nk < n)THEN
+  g(1:3) = xn(nk:nk-2:-1)
+  phi(1:3) = q_eq(n-nk+1:n-nk+3)
+  DO i = 1, n - nk
+    psi = xn(n+1-i)
+    q_eq(i) = phi(1)*(psi-g(2))*(psi-g(3))/((g(1)-g(2))*(g(1)-g(3))) &
+            + phi(2)*(psi-g(1))*(psi-g(3))/((g(2)-g(1))*(g(2)-g(3))) &
+            + phi(3)*(psi-g(1))*(psi-g(2))/((g(3)-g(1))*(g(3)-g(2)))
+  END DO
+END IF
+!---rho_tor_norm from Phi = int q dpsi_N, from the innermost node (its inner piece as a rectangle)
+phi(1) = q_eq(1)*(1.0_r8 - xn(n))
+DO i = 2, n
+  phi(i) = phi(i-1) + 0.5_r8*(q_eq(i) + q_eq(i-1))*(xn(n+2-i) - xn(n+1-i))
+END DO
+rho = SQRT(phi/phi(n))
+!---Nodes kept for the reset: the axis (if it is a node) and every node whose bin adds >= dAmin
+ALLOCATE(kk(n))
+dAmin = 0.25_r8*Ar(n)/REAL(n-1,r8)
+nk = 0
+alast = 0.0_r8
+IF(1.0_r8 - xn(n) < 1.0e-12_r8)THEN
+  nk = 1; kk(1) = 1
+END IF
+DO i = 2, n
+  IF(Ar(i) - alast >= dAmin .OR. (i == n .AND. nk < 2))THEN
+    nk = nk + 1; kk(nk) = i; alast = Ar(i)
+  ELSE IF(i == n)THEN
+    kk(nk) = n
+  END IF
+END DO
+!---q_base on the kept nodes; the axis takes the ratio of the first node off it
+DO i = 1, nk
+  r(i) = 1.0_r8
+  IF(ABS(Ib(kk(i))) > 0.0_r8 .AND. Ar(kk(i)) > 0.0_r8)r(i) = I_eq(n+1-kk(i))/Ib(kk(i))
+END DO
+IF(Ar(kk(1)) <= 0.0_r8 .AND. nk > 1)r(1) = r(2)
+DO i = 1, nk
+  qb(i) = q_eq(kk(i))*r(i)
+END DO
+CALL saw_reset_1d(nk, rho(kk(1:nk)), qb(1:nk), Ib(kk(1:nk)), Ar(kk(1:nk)), c1(kk(1:nk)), &
+                  self%boot_ops%saw_q_s, self%boot_ops%saw_dq, self%boot_ops%saw_ramp, &
+                  self%boot_ops%saw_rule, qn(1:nk), djr(1:nk), wr(1:nk), rho_s, rho_m, rho_out, n_dips, w)
+!---Reset interpolated in rho; inside the reset the base structure between kept nodes is reset too
+!   (target total = base + reset is interpolated), weighted by the reset weight (rule 1: w inside
+!   rho_m, a sharp cut as in FUSE; rule 2: wr interpolated) so it vanishes with the reset
+DO i = 1, nk
+  phi(i) = j_base(n+1-kk(i))
+END DO
+DO i = 1, n
+  dj(n + 1 - i) = linterp(rho(kk(1:nk)), djr(1:nk), nk, rho(i), 1)
+  IF(self%boot_ops%saw_rule == 1)THEN
+    wf = MERGE(w, 0.0_r8, rho(i) < rho_m)
+  ELSE
+    wf = linterp(rho(kk(1:nk)), wr(1:nk), nk, rho(i), 1)
+  END IF
+  IF(wf > 0.0_r8)dj(n + 1 - i) = dj(n + 1 - i) + wf*(linterp(rho(kk(1:nk)), phi(1:nk), nk, rho(i), 1) - j_base(n+1-i))
+END DO
+IF(.NOT.ALL(ABS(dj) < HUGE(1.0_r8)))THEN
+  CALL oft_warn('saw_redistribute: non-finite reset current, skipping the reset this update')
+  dj = 0.0_r8
+END IF
+self%boot_profs%saw_rho_m = rho_m
+self%boot_profs%saw_rho_out = rho_out
+self%boot_profs%saw_n_dips = n_dips
+IF(self%boot_ops%diagnose_bs)THEN
+  WRITE(*,'(A,3F8.4,I3,F7.3,2F8.4)') '  [saw] rho_s rho_m rho_out n_dips w q_base(0) q_new(0) = ', &
+    rho_s, rho_m, rho_out, n_dips, w, qb(1), qn(1)
+END IF
+DEALLOCATE(q_eq, c1, rho, qb, Ib, Ar, qn, djr, wr, r, phi, g, kk)
+END SUBROUTINE saw_redistribute
+!---------------------------------------------------------------------------------
+!> Sawtooth q reset on a 1-D profile (axis first).
+!!
+!! rule 1 (fuse, after FUSE's saw_crash!): from the axis to rho_m, the first crossing of q = q_s + dq
+!! beyond the outermost q < q_s point (interpolated, so it moves continuously), q_t = q_s +
+!! dq*p(rho/rho_m), p C1 onto q at rho_m (cubic, or x^m for slope m > 3), weighted by
+!! w = clamp((q_s - min q)/ramp, 0, 1) (1 for ramp <= 0).
+!! rule 2 (local): each maximal q < q_s + dq interval [rho_in, rho_out] (interpolated crossings,
+!! rho_in = 0 at the axis) that holds a q < q_s point and has an outer crossing is reset about its
+!! q minimum rho_c (parabola-refined, 0 at the axis node): q_s + dq*p((rho-rho_c)/(rho_out-rho_c))
+!! outside rho_c, mirrored inside as q_s + D*p((rho_c-rho)/(rho_c-rho_in)), D = q(rho_in) - q_s
+!! (max(q(0) - q_s, 0) at the axis; flat if 0), weighted per interval by w_k. Humps inside an interval
+!! (between runs, or a run and an end) blend it toward per-run resets split at the hump tops by the hump
+!! height (local_reset), so an interval splitting in two moves q_new continuously.
+!! q is unchanged elsewhere, so dI vanishes at both ends of every interval.
+!! dI = I*(q/q_new - 1), dj = (d dI/dA)/c1. Both rules: rho_s / rho_m = q_s / q_s + dq crossings
+!! beyond the outermost q < q_s point; rho_out = outer end of the (outermost) reset; wr = per-node
+!! weight (w_k inside interval k, else 0); w = max weight; n_dips = regions reset (rule 1: q < q_s regions).
+!---------------------------------------------------------------------------------
+SUBROUTINE saw_reset_1d(n, rho, q, I, A, c1, q_s, dq, ramp, rule, q_new, dj, wr, rho_s, rho_m, rho_out, n_dips, w)
+INTEGER(i4), INTENT(in) :: n
+REAL(r8), INTENT(in) :: rho(n) !< Radius, ascending from the axis
+REAL(r8), INTENT(in) :: q(n) !< Base q
+REAL(r8), INTENT(in) :: I(n) !< Enclosed current
+REAL(r8), INTENT(in) :: A(n) !< Enclosed area
+REAL(r8), INTENT(in) :: c1(n) !< d(jtor)/d(jphi)
+REAL(r8), INTENT(in) :: q_s, dq, ramp
+INTEGER(i4), INTENT(in) :: rule !< 1 = fuse, 2 = local
+REAL(r8), INTENT(out) :: q_new(n), dj(n), wr(n), rho_s, rho_m, rho_out, w
+INTEGER(i4), INTENT(out) :: n_dips
+INTEGER(i4) :: k, ia, n_low
+INTEGER(i4), ALLOCATABLE :: reg_start(:), reg_end(:)
+REAL(r8) :: qm
+LOGICAL :: ok
+REAL(r8), ALLOCATABLE :: dI(:), gq(:), qt(:)
+q_new = q; dj = 0.0_r8; wr = 0.0_r8; rho_s = 0.0_r8; rho_m = 0.0_r8; rho_out = 0.0_r8; w = 0.0_r8; n_dips = 0
+IF(n < 3)RETURN
+!---Separate q < q_s regions [reg_start(k), reg_end(k)]
+ALLOCATE(reg_start(n), reg_end(n), gq(n), dI(n), qt(n))
+n_low = 0
+DO k = 1, n
+  IF(q(k) >= q_s)CYCLE
+  IF(k == 1)THEN
+    n_low = n_low + 1
+    reg_start(n_low) = k
+  ELSE IF(q(k-1) >= q_s)THEN
+    n_low = n_low + 1
+    reg_start(n_low) = k
+  END IF
+  reg_end(n_low) = k
+END DO
+IF(n_low == 0)RETURN
+CALL grad_nonuniform(n, rho, q, gq)
+qm = q_s + dq
+!---Sawtooth radius (both rules) and rule 1's reset, from the outermost q < q_s region
+CALL full_reset(n_low, qt, rho_s, rho_m, ok)
+IF(.NOT.ok)THEN
+  rho_s = 0.0_r8; rho_m = 0.0_r8
+END IF
+IF(rule == 1)THEN
+  n_dips = n_low
+  IF(ok)THEN
+    !---Trigger weight from the deepest point inside rho_m
+    w = 1.0_r8
+    IF(ramp > 0.0_r8)w = MIN(MAX((q_s - MINVAL(q, MASK=(rho < rho_m)))/ramp, 0.0_r8), 1.0_r8)
+    q_new = q + w*(qt - q)
+    rho_out = rho_m
+    WHERE(rho < rho_m)wr = w
+  END IF
+ELSE
+  !---Maximal q < q_s + dq intervals [ia, k] with an outer crossing and a q < q_s point
+  ia = 0
+  DO k = 1, n
+    IF(q(k) >= qm)CYCLE
+    IF(ia == 0)ia = k
+    IF(k == n)EXIT
+    IF(q(k+1) < qm)CYCLE
+    IF(MINVAL(q(ia:k)) < q_s)CALL local_reset(ia, k)
+    ia = 0
+  END DO
+END IF
+dI = I*(q/q_new - 1.0_r8)
+CALL grad_nonuniform(n, A, dI, dj)
+dj = dj/c1
+DEALLOCATE(reg_start, reg_end, gq, dI, qt)
+CONTAINS
+!---Full (w = 1) reset from the end of dip region kr; ok = .FALSE. if no mixing radius
+SUBROUTINE full_reset(kr, qt_, rs_, rm_, ok_)
+INTEGER(i4), INTENT(in) :: kr
+REAL(r8), INTENT(out) :: qt_(n), rs_, rm_
+LOGICAL, INTENT(out) :: ok_
+INTEGER(i4) :: is, jm, kk
+REAL(r8) :: qm, slope, m, x, p
+qt_ = q; rs_ = 0.0_r8; rm_ = 0.0_r8; ok_ = .FALSE.
+is = reg_end(kr)
+IF(is >= n)RETURN
+rs_ = rho(is) + (q_s - q(is))/(q(is+1) - q(is))*(rho(is+1) - rho(is))
+qm = q_s + dq
+jm = 0
+DO kk = is + 1, n
+  IF(q(kk) >= qm)THEN
+    jm = kk
+    EXIT
+  END IF
+END DO
+IF(jm == 0)RETURN
+rm_ = rho(jm-1) + (qm - q(jm-1))/(q(jm) - q(jm-1))*(rho(jm) - rho(jm-1))
+!---Slope at rho_m from interpolated nodal gradients (continuous in rho_m)
+slope = gq(jm-1) + (rm_ - rho(jm-1))/(rho(jm) - rho(jm-1))*(gq(jm) - gq(jm-1))
+m = MAX(rm_*slope/dq, 0.0_r8)
+DO kk = 1, jm - 1
+  x = rho(kk)/rm_
+  IF(m <= 3.0_r8)THEN
+    p = (3.0_r8 - 2.0_r8*x)*x**2 + m*(x**3 - x**2)
+  ELSE
+    p = x**m
+  END IF
+  qt_(kk) = q_s + dq*p
+END DO
+ok_ = .TRUE.
+END SUBROUTINE full_reset
+!---Local reset of interval [ia_, ib_] (q < q_s + dq, ib_ < n). Humps (q maxima) split it into segments:
+!   between two q < q_s runs the highest point of the gap, between a run and an interval end its highest
+!   interior local maximum. The merged reset (one centre, interval ends) blends into the split one (each
+!   run reset between its bounding hump tops, shoulder height h - q_s, zero slope there; no change in a
+!   run-free segment) by s = clamp((h - b)/(q_s + dq - b), 0, 1), b = max(q_s, the higher neighbouring
+!   minimum), linear in rho between humps: a hump reaching q_s + dq meets the split intervals continuously.
+SUBROUTINE local_reset(ia_, ib_)
+INTEGER(i4), INTENT(in) :: ia_, ib_
+INTEGER(i4) :: kk, j, nr, ih, m, nsg
+INTEGER(i4) :: rs(ib_-ia_+1), re(ib_-ia_+1), srun(ib_-ia_+3)
+REAL(r8) :: r_in, r_out, r_c, d_in, s_in, s_out, wk, qt_k, sk, dl, dr, sl, sr, qsp, wj
+REAL(r8) :: e(0:ib_-ia_+3), hh(ib_-ia_+3), sh(ib_-ia_+3)
+!---Ends: crossings of q_s + dq and the slopes there (interpolated nodal gradients)
+r_out = rho(ib_) + (qm - q(ib_))/(q(ib_+1) - q(ib_))*(rho(ib_+1) - rho(ib_))
+s_out = gq(ib_) + (r_out - rho(ib_))/(rho(ib_+1) - rho(ib_))*(gq(ib_+1) - gq(ib_))
+IF(ia_ == 1)THEN
+  r_in = 0.0_r8; d_in = MAX(q(1) - q_s, 0.0_r8); s_in = 0.0_r8
+ELSE
+  r_in = rho(ia_-1) + (qm - q(ia_-1))/(q(ia_) - q(ia_-1))*(rho(ia_) - rho(ia_-1))
+  s_in = gq(ia_-1) + (r_in - rho(ia_-1))/(rho(ia_) - rho(ia_-1))*(gq(ia_) - gq(ia_-1))
+  d_in = dq
+END IF
+r_c = centre(ia_, ib_, r_in, r_out)
+wk = run_weight(ia_, ib_)
+!---q < q_s runs [rs(j), re(j)]
+nr = 0
+DO kk = ia_, ib_
+  IF(q(kk) >= q_s)CYCLE
+  IF(kk == ia_)THEN
+    nr = nr + 1; rs(nr) = kk
+  ELSE IF(q(kk-1) >= q_s)THEN
+    nr = nr + 1; rs(nr) = kk
+  END IF
+  re(nr) = kk
+END DO
+!---Segments (srun = run, 0 = run-free) and the hump tops e(m) / heights hh(m) / weights sh(m) between them
+nsg = 0
+ih = edge_hump(MAX(ia_, 2), rs(1) - 1)
+IF(ih > 0)THEN
+  nsg = nsg + 1; srun(nsg) = 0
+  CALL vertex_max(ih, e(nsg), hh(nsg))
+  sh(nsg) = hump_weight(hh(nsg), MAX(q_s, MINVAL(q(ia_:ih))))
+END IF
+DO j = 1, nr
+  nsg = nsg + 1; srun(nsg) = j
+  IF(j < nr)THEN
+    ih = re(j) + MAXLOC(q(re(j)+1:rs(j+1)-1), DIM=1)
+    CALL vertex_max(ih, e(nsg), hh(nsg))
+    sh(nsg) = hump_weight(hh(nsg), q_s)
+  END IF
+END DO
+ih = edge_hump(re(nr) + 1, ib_)
+IF(ih > 0)THEN
+  CALL vertex_max(ih, e(nsg), hh(nsg))
+  sh(nsg) = hump_weight(hh(nsg), MAX(q_s, MINVAL(q(ih:ib_))))
+  nsg = nsg + 1; srun(nsg) = 0
+END IF
+e(0) = r_in; e(nsg) = r_out
+IF(nsg == 1)THEN
+  DO kk = ia_, ib_
+    qt_k = two_sided(rho(kk), r_in, d_in, s_in, r_c, r_out, dq, s_out)
+    q_new(kk) = q(kk) + wk*(qt_k - q(kk))
+    wr(kk) = wk
+  END DO
+ELSE
+  DO kk = ia_, ib_
+    m = 1 + COUNT(e(1:nsg-1) <= rho(kk))
+    !---Split weight: linear in rho between hump tops, constant outside them
+    IF(rho(kk) <= e(1))THEN
+      sk = sh(1)
+    ELSE IF(rho(kk) >= e(nsg-1))THEN
+      sk = sh(nsg-1)
+    ELSE
+      sk = sh(m-1) + (rho(kk) - e(m-1))/(e(m) - e(m-1))*(sh(m) - sh(m-1))
+    END IF
+    qt_k = two_sided(rho(kk), r_in, d_in, s_in, r_c, r_out, dq, s_out)
+    qsp = q(kk); wj = 0.0_r8
+    IF(srun(m) > 0)THEN
+      j = srun(m)
+      dl = d_in; sl = s_in; dr = dq; sr = s_out
+      IF(m > 1)THEN
+        dl = MAX(hh(m-1) - q_s, 0.0_r8); sl = 0.0_r8
+      END IF
+      IF(m < nsg)THEN
+        dr = MAX(hh(m) - q_s, 0.0_r8); sr = 0.0_r8
+      END IF
+      qsp = two_sided(rho(kk), e(m-1), dl, sl, centre(rs(j), re(j), e(m-1), e(m)), e(m), dr, sr)
+      wj = run_weight(rs(j), re(j))
+    END IF
+    q_new(kk) = q(kk) + (1.0_r8 - sk)*wk*(qt_k - q(kk)) + sk*wj*(qsp - q(kk))
+    wr(kk) = (1.0_r8 - sk)*wk + sk*wj
+  END DO
+END IF
+n_dips = n_dips + 1
+w = MAX(w, wk)
+rho_out = r_out
+END SUBROUTINE local_reset
+!---Highest interior local maximum of q in [a_, b_] (0 if none)
+INTEGER(i4) FUNCTION edge_hump(a_, b_)
+INTEGER(i4), INTENT(in) :: a_, b_
+INTEGER(i4) :: kk
+edge_hump = 0
+DO kk = a_, b_
+  IF(q(kk) < q(kk-1) .OR. q(kk) < q(kk+1))CYCLE
+  IF(edge_hump == 0)THEN
+    edge_hump = kk
+  ELSE IF(q(kk) > q(edge_hump))THEN
+    edge_hump = kk
+  END IF
+END DO
+END FUNCTION edge_hump
+!---Split weight of a hump of height h over the higher neighbouring minimum b
+REAL(r8) FUNCTION hump_weight(h, b)
+REAL(r8), INTENT(in) :: h, b
+hump_weight = 0.0_r8
+IF(qm > b)hump_weight = MIN(MAX((h - b)/(qm - b), 0.0_r8), 1.0_r8)
+END FUNCTION hump_weight
+!---Reset centre in [a_, b_]: q minimum, refined by the parabola through it and its neighbours
+!   (0 at the axis node), clamped to [lo, hi]
+REAL(r8) FUNCTION centre(a_, b_, lo, hi)
+INTEGER(i4), INTENT(in) :: a_, b_
+REAL(r8), INTENT(in) :: lo, hi
+INTEGER(i4) :: ic
+REAL(r8) :: d0, d2, s0, s2, cc
+ic = a_ - 1 + MINLOC(q(a_:b_), DIM=1)
+centre = 0.0_r8
+IF(ic > 1)THEN
+  d0 = rho(ic-1) - rho(ic); d2 = rho(ic+1) - rho(ic)
+  s0 = (q(ic-1) - q(ic))/d0; s2 = (q(ic+1) - q(ic))/d2
+  cc = (s2 - s0)/(d2 - d0)
+  centre = rho(ic)
+  IF(cc > 0.0_r8)centre = rho(ic) - 0.5_r8*(s0 - cc*d0)/cc
+  centre = MIN(MAX(centre, lo), hi)
+END IF
+END FUNCTION centre
+!---Hump top: maximum of the parabola through node i_ and its neighbours (at least q(i_))
+SUBROUTINE vertex_max(i_, rv, qv)
+INTEGER(i4), INTENT(in) :: i_
+REAL(r8), INTENT(out) :: rv, qv
+REAL(r8) :: d0, d2, s0, s2, cc, bb, t
+rv = rho(i_); qv = q(i_)
+d0 = rho(i_-1) - rho(i_); d2 = rho(i_+1) - rho(i_)
+s0 = (q(i_-1) - q(i_))/d0; s2 = (q(i_+1) - q(i_))/d2
+cc = (s2 - s0)/(d2 - d0)
+IF(cc >= 0.0_r8)RETURN
+bb = s0 - cc*d0
+t = MIN(MAX(-0.5_r8*bb/cc, d0), d2)
+rv = rho(i_) + t
+qv = MAX(q(i_) + bb*t + cc*t**2, q(i_))
+END SUBROUTINE vertex_max
+!---Trigger weight of the q < q_s points in [a_, b_]
+REAL(r8) FUNCTION run_weight(a_, b_)
+INTEGER(i4), INTENT(in) :: a_, b_
+run_weight = 1.0_r8
+IF(ramp > 0.0_r8)run_weight = MIN(MAX((q_s - MINVAL(q(a_:b_)))/ramp, 0.0_r8), 1.0_r8)
+END FUNCTION run_weight
+!---Two-sided target at x: q_s at r_c_, shoulders of height d_in_ / d_out_ C1 onto slopes s_in_ /
+!   s_out_ at r_in_ / r_out_ (flat at q_s where the height is 0)
+REAL(r8) FUNCTION two_sided(x, r_in_, d_in_, s_in_, r_c_, r_out_, d_out_, s_out_)
+REAL(r8), INTENT(in) :: x, r_in_, d_in_, s_in_, r_c_, r_out_, d_out_, s_out_
+two_sided = q_s
+IF(x >= r_c_)THEN
+  IF(d_out_ > 0.0_r8 .AND. r_out_ > r_c_)two_sided = q_s + d_out_*pshape((x - r_c_)/(r_out_ - r_c_), &
+    MAX((r_out_ - r_c_)*s_out_/d_out_, 0.0_r8))
+ELSE IF(d_in_ > 0.0_r8)THEN
+  two_sided = q_s + d_in_*pshape((r_c_ - x)/(r_c_ - r_in_), MAX(-(r_c_ - r_in_)*s_in_/d_in_, 0.0_r8))
+END IF
+END FUNCTION two_sided
+!---FUSE's shoulder: cubic p(0) = 0, p(1) = 1, p'(0) = 0, p'(1) = m (m <= 3), else x^m
+REAL(r8) FUNCTION pshape(x, m)
+REAL(r8), INTENT(in) :: x, m
+IF(m <= 3.0_r8)THEN
+  pshape = (3.0_r8 - 2.0_r8*x)*x**2 + m*(x**3 - x**2)
+ELSE
+  pshape = x**m
+END IF
+END FUNCTION pshape
+!---Derivative dy/dx on a non-uniform grid (2nd-order interior, one-sided ends)
+SUBROUTINE grad_nonuniform(nn, xx, yy, dy)
+INTEGER(i4), INTENT(in) :: nn
+REAL(r8), INTENT(in) :: xx(nn), yy(nn)
+REAL(r8), INTENT(out) :: dy(nn)
+INTEGER(i4) :: kk
+REAL(r8) :: h1, h2
+dy(1) = (yy(2) - yy(1))/(xx(2) - xx(1))
+dy(nn) = (yy(nn) - yy(nn-1))/(xx(nn) - xx(nn-1))
+DO kk = 2, nn - 1
+  h1 = xx(kk) - xx(kk-1); h2 = xx(kk+1) - xx(kk)
+  dy(kk) = (h1**2*yy(kk+1) - h2**2*yy(kk-1) + (h2**2 - h1**2)*yy(kk))/(h1*h2*(h1 + h2))
+END DO
+END SUBROUTINE grad_nonuniform
+END SUBROUTINE saw_reset_1d
 !------------------------------------------------------------------------------
 !> Evaluate terms in augmented tracing ODE for computing Sauter factors
 !! (see @ref sauter_fc)

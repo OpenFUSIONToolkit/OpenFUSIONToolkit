@@ -42,7 +42,7 @@ USE oft_gs_cutcell, ONLY: gs_qgeom_cutcell
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
-USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func, sauter_fc
+USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func, sauter_fc, saw_reset_1d
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -96,6 +96,12 @@ TYPE, BIND(C) :: tokamaker_boot_ops_type
   LOGICAL(c_bool) :: taper_edge_jBS = .FALSE.      !< Taper j_BS at edge (guards against separatrix issues)
   REAL(c_double)  :: taper_edge_psi0 = 0.999d0   !< Taper onset psi_N (default 0.999)
   INTEGER(c_int)  :: taper_edge_shape = 2         !< Taper shape: 2 = quintic smoothstep (default)
+  REAL(c_double)  :: saw_q_s = 0.d0               !< Sawtooth reset q on axis (0 = off)
+  REAL(c_double)  :: saw_dq = 0.03d0              !< Mixing radius at q_s + saw_dq
+  REAL(c_double)  :: saw_tol = 1.d-4              !< Freeze threshold on rel. change in j_saw
+  REAL(c_double)  :: saw_relax = 1.d0             !< Under-relaxation of j_saw
+  REAL(c_double)  :: saw_ramp = 1.d-2             !< Reset weight ramp in q deficit (0 = hard trigger)
+  INTEGER(c_int)  :: saw_rule = 2                 !< Reset rule: 1 fuse (axis to rho_m), 2 local (each dip, two-sided)
 END TYPE tokamaker_boot_ops_type
 !---------------------------------------------------------------------------------
 !> TokaMaker wrapper object for Python API
@@ -567,10 +573,10 @@ CASE DEFAULT
 END SELECT
 END SUBROUTINE tokamaker_set_profile_dofs
 !---------------------------------------------------------------------------------
-!> Load kinetic profile specification files (Te, Ti, ne, ni, Zeff, jphi_fixed)
+!> Load kinetic profile specification files (Te, Ti, ne, ni, Zeff, jphi_fixed, jphi_saw)
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_load_kinetic_profiles(tMaker_equil_ptr,te_file,ne_file,ti_file,ni_file,zeff_file, &
-    jphi_fixed_file,error_str) BIND(C,NAME="tokamaker_load_kinetic_profiles")
+    jphi_fixed_file,jphi_saw_file,error_str) BIND(C,NAME="tokamaker_load_kinetic_profiles")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 CHARACTER(KIND=c_char), INTENT(in) :: te_file(OFT_PATH_SLEN) !< Electron temperature [keV] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ne_file(OFT_PATH_SLEN) !< Electron density [m^-3] profile specification file
@@ -578,6 +584,7 @@ CHARACTER(KIND=c_char), INTENT(in) :: ti_file(OFT_PATH_SLEN) !< Ion temperature 
 CHARACTER(KIND=c_char), INTENT(in) :: ni_file(OFT_PATH_SLEN) !< Ion density [m^-3] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: zeff_file(OFT_PATH_SLEN) !< Effective charge [-] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: jphi_fixed_file(OFT_PATH_SLEN) !< Fixed toroidal current density [A/m^2] profile specification file
+CHARACTER(KIND=c_char), INTENT(in) :: jphi_saw_file(OFT_PATH_SLEN) !< Input sawtooth toroidal current density [A/m^2] profile specification file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
@@ -594,6 +601,8 @@ CALL copy_string_rev(zeff_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%Zeff)
 CALL copy_string_rev(jphi_fixed_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%jphi_fixed)
+CALL copy_string_rev(jphi_saw_file,tmp_str)
+IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%jphi_saw)
 CALL torflux_setup(tMaker_equil_obj,resettle=.TRUE.)
 END SUBROUTINE tokamaker_load_kinetic_profiles
 !---------------------------------------------------------------------------------
@@ -622,6 +631,12 @@ TYPE IS (jphi_bs_flux_func)
   I%boot_ops%taper_edge_jBS = bops%taper_edge_jBS
   I%boot_ops%taper_edge_psi0 = bops%taper_edge_psi0
   I%boot_ops%taper_edge_shape = bops%taper_edge_shape
+  I%boot_ops%saw_q_s = bops%saw_q_s
+  I%boot_ops%saw_dq = bops%saw_dq
+  I%boot_ops%saw_tol = bops%saw_tol
+  I%boot_ops%saw_relax = bops%saw_relax
+  I%boot_ops%saw_ramp = bops%saw_ramp
+  I%boot_ops%saw_rule = bops%saw_rule
 CLASS DEFAULT
   CALL oft_warn('Run set_profiles with a jphi-split-bootstrap profile before calling set_boot_ops.')
 END SELECT
@@ -652,6 +667,12 @@ TYPE IS (jphi_bs_flux_func)
   bops%taper_edge_jBS = I%boot_ops%taper_edge_jBS
   bops%taper_edge_psi0 = I%boot_ops%taper_edge_psi0
   bops%taper_edge_shape = I%boot_ops%taper_edge_shape
+  bops%saw_q_s = I%boot_ops%saw_q_s
+  bops%saw_dq = I%boot_ops%saw_dq
+  bops%saw_tol = I%boot_ops%saw_tol
+  bops%saw_relax = I%boot_ops%saw_relax
+  bops%saw_ramp = I%boot_ops%saw_ramp
+  bops%saw_rule = I%boot_ops%saw_rule
 CLASS DEFAULT
   CALL oft_warn('tokamaker_get_boot_ops: ffp_prof is not of type jphi-split-bootstrap. ' // &
     'Bootstrap options are not available.')
@@ -662,12 +683,12 @@ END SUBROUTINE tokamaker_get_boot_ops
 !> Get cached bootstrap current profiles from the last jphi_bs_update call.
 !!
 !! Returns C pointers directly into the Fortran-owned arrays.
-!! n is the size of the total_j_phi/psi_n/j_bs_final/j_ind_final/jphi_fixed group (0 if not allocated).
+!! n is the size of the total_j_phi/psi_n/j_bs_final/j_ind_final/jphi_fixed/j_saw group (0 if not allocated).
 !! n_raw is the size of j_bs_raw and jdotb_bs_raw (0 if not allocated).  The two sizes may differ.
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_get_boot_profs(tMaker_equil_ptr,n,psi_n_ptr,total_j_phi_ptr, &
-    j_bs_final_ptr,j_ind_final_ptr,jphi_fixed_ptr,n_raw,j_bs_raw_ptr,jdotb_bs_raw_ptr,error_str) &
-    BIND(C,NAME="tokamaker_get_boot_profs")
+    j_bs_final_ptr,j_ind_final_ptr,jphi_fixed_ptr,j_saw_ptr,saw_rho_m,saw_rho_out,saw_n_dips,n_raw, &
+    j_bs_raw_ptr,jdotb_bs_raw_ptr,error_str) BIND(C,NAME="tokamaker_get_boot_profs")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 INTEGER(c_int), INTENT(out) :: n !< Size of total_j_phi, psi_n, j_bs_final, j_ind_final arrays (0 if not allocated)
 TYPE(c_ptr), INTENT(out) :: psi_n_ptr !< Pointer to psi_n array
@@ -675,6 +696,10 @@ TYPE(c_ptr), INTENT(out) :: total_j_phi_ptr !< Pointer to total_j_phi array
 TYPE(c_ptr), INTENT(out) :: j_bs_final_ptr !< Pointer to j_bs_final array
 TYPE(c_ptr), INTENT(out) :: j_ind_final_ptr !< Pointer to j_ind_final array
 TYPE(c_ptr), INTENT(out) :: jphi_fixed_ptr !< Pointer to jphi_fixed array (c_null_ptr if not allocated)
+TYPE(c_ptr), INTENT(out) :: j_saw_ptr !< Pointer to j_saw array (c_null_ptr if not allocated)
+REAL(c_double), INTENT(out) :: saw_rho_m !< Sawtooth radius at the last reset (0 = none)
+REAL(c_double), INTENT(out) :: saw_rho_out !< Outer end of the last reset (0 = none)
+INTEGER(c_int), INTENT(out) :: saw_n_dips !< Regions reset at the last reset
 INTEGER(c_int), INTENT(out) :: n_raw !< Size of j_bs_raw array (0 if not allocated)
 TYPE(c_ptr), INTENT(out) :: j_bs_raw_ptr !< Pointer to j_bs_raw array (c_null_ptr if not allocated)
 TYPE(c_ptr), INTENT(out) :: jdotb_bs_raw_ptr !< Pointer to jdotb_bs_raw array (c_null_ptr if not allocated)
@@ -692,6 +717,10 @@ TYPE IS (jphi_bs_flux_func)
   j_bs_final_ptr = c_null_ptr
   j_ind_final_ptr = c_null_ptr
   jphi_fixed_ptr = c_null_ptr
+  j_saw_ptr = c_null_ptr
+  saw_rho_m = I%boot_profs%saw_rho_m
+  saw_rho_out = I%boot_profs%saw_rho_out
+  saw_n_dips = I%boot_profs%saw_n_dips
   j_bs_raw_ptr = c_null_ptr
   jdotb_bs_raw_ptr = c_null_ptr
   IF(ASSOCIATED(I%boot_profs%total_j_phi))THEN
@@ -701,6 +730,7 @@ TYPE IS (jphi_bs_flux_func)
     j_bs_final_ptr = c_loc(I%boot_profs%j_bs_final)
     j_ind_final_ptr = c_loc(I%boot_profs%j_ind_final)
     IF(ASSOCIATED(I%boot_profs%jphi_fixed))jphi_fixed_ptr = c_loc(I%boot_profs%jphi_fixed)
+    IF(ASSOCIATED(I%boot_profs%j_saw))j_saw_ptr = c_loc(I%boot_profs%j_saw)
   END IF
   IF(ASSOCIATED(I%boot_profs%j_bs_raw))THEN
     n_raw = SIZE(I%boot_profs%j_bs_raw, KIND=c_int)
@@ -712,6 +742,30 @@ CLASS DEFAULT
     'Bootstrap profiles are not available.')
 END SELECT
 END SUBROUTINE tokamaker_get_boot_profs
+!---------------------------------------------------------------------------------
+!> 1-D sawtooth q reset (@ref grad_shaf_bootstrap::saw_reset_1d) on given profiles, axis first.
+!! scal = [rho_s, rho_m, n_dips, w, rho_out]
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_saw_reset_1d(n,rho,q,itor,area,c1,q_s,dq,ramp,rule,q_new,dj,wr,scal) &
+    BIND(C,NAME="tokamaker_saw_reset_1d")
+INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of points
+REAL(c_double), INTENT(in) :: rho(n) !< Radius, ascending from the axis
+REAL(c_double), INTENT(in) :: q(n) !< Base q
+REAL(c_double), INTENT(in) :: itor(n) !< Enclosed current
+REAL(c_double), INTENT(in) :: area(n) !< Enclosed area
+REAL(c_double), INTENT(in) :: c1(n) !< d(jtor)/d(jphi)
+REAL(c_double), VALUE, INTENT(in) :: q_s !< Reset q on axis
+REAL(c_double), VALUE, INTENT(in) :: dq !< Mixing radius offset
+REAL(c_double), VALUE, INTENT(in) :: ramp !< Trigger ramp
+INTEGER(c_int), VALUE, INTENT(in) :: rule !< Reset rule (1 fuse, 2 local)
+REAL(c_double), INTENT(out) :: q_new(n) !< Reset q
+REAL(c_double), INTENT(out) :: dj(n) !< Reset current (jphi units of itor/area)
+REAL(c_double), INTENT(out) :: wr(n) !< Per-node reset weight
+REAL(c_double), INTENT(out) :: scal(5) !< rho_s, rho_m, n_dips, w, rho_out
+INTEGER(i4) :: n_dips
+CALL saw_reset_1d(n,rho,q,itor,area,c1,q_s,dq,ramp,rule,q_new,dj,wr,scal(1),scal(2),scal(5),n_dips,scal(4))
+scal(3) = REAL(n_dips,8)
+END SUBROUTINE tokamaker_saw_reset_1d
 !---------------------------------------------------------------------------------
 !> Initialize \f$ \psi \f$ using a uniform or specified current source
 !---------------------------------------------------------------------------------
