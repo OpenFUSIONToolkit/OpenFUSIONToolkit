@@ -28,7 +28,7 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend
-USE oft_gs_cutcell, ONLY: gs_rays_cutcell
+USE oft_gs_cutcell, ONLY: gs_rays_cutcell, gs_fsa_cutcell
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
 USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func
@@ -1214,10 +1214,12 @@ INTEGER(4) :: nlim
 REAL(8), ALLOCATABLE, DIMENSION(:) :: rlim,zlim
 CHARACTER(LEN=48) :: eqdsk_case
 INTEGER(4) :: idum
-REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS,fptmp
-REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
-LOGICAL :: do_truncate
+REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS
+REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi,ftrace,psi_q,theta,qf
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz,ravgs
+REAL(8), ALLOCATABLE, DIMENSION(:,:,:) :: rzc
+LOGICAL :: do_truncate,traced
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: ok
 !---
 device=>gseq%device
 IF(PRESENT(error_str))error_str=""
@@ -1271,11 +1273,50 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
   CALL oft_decrease_indent
 END IF
-!---Trace
-call set_tracer(1)
 ALLOCATE(rout(nr))
 ALLOCATE(zout(nr))
-!$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field,fptmp) firstprivate(pt_last)
+!---Flux functions on each surface; q is evaluated on the traced surface `psi_trace`
+ALLOCATE(ftrace(nr),psi_q(nr))
+do j=1,nr
+  psi_surf = x2 - xr*((j-1)/REAL(nr-1,8))
+  psi_trace = psi_surf
+  IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
+  psi_q(j)=psi_trace
+  IF(gseq%mode==0)THEN
+    ftrace(j)=gseq%ffp_scale*gseq%I%f(psi_trace)+gseq%I%f_offset
+    fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
+    ffprim(j)=gseq%I%fp(psi_surf)*((gseq%ffp_scale**2)*gseq%I%f(psi_surf)+gseq%ffp_scale*gseq%I%f_offset)
+  ELSE
+    ftrace(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_trace) + gseq%I%f_offset**2)
+    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
+    ffprim(j)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi_surf)
+  END IF
+  pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0
+  pprime(j)=gseq%p_scale*gseq%P%fp(psi_surf)/mu0
+end do
+!---q and the boundary contour (uniform polar angle) from the cut-cell quadrature (exact on the
+!---FE surface); the field-line tracer below is the deprecated method and the fallback
+traced=.FALSE.
+IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
+  ALLOCATE(theta(nr-1),rzc(2,nr-1,1),qf(nr),ravgs(nr,4),ok(nr))
+  psi_q=(psi_q-gseq%plasma_bounds(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
+  CALL gs_fsa_cutcell(gseq,nr-1,psi_q(2:nr),qf(2:nr),ravgs(2:nr,:),ok(2:nr))
+  DO k=1,nr-1
+    theta(k)=2.d0*pi*(k-1)/REAL(nr-1,8)
+  END DO
+  CALL gs_rays_cutcell(gseq,1,psi_q(nr:nr),nr-1,theta,rzc,qf(1:1),ok(1:1))
+  IF(ALL(ok))THEN
+    qpsi(2:nr)=ftrace(2:nr)*qf(2:nr)
+    rout(1:nr-1)=rzc(1,:,1); rout(nr)=rzc(1,1,1)
+    zout(1:nr-1)=rzc(2,:,1); zout(nr)=rzc(2,1,1)
+    traced=.TRUE.
+  END IF
+  DEALLOCATE(theta,rzc,qf,ravgs,ok)
+END IF
+!---Trace
+IF(.NOT.traced)THEN
+call set_tracer(1)
+!$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(device%fe_rep)
@@ -1355,28 +1396,15 @@ do j=1,nr
     CALL spline_dealloc(rz)
     DEALLOCATE(ptout)
   END IF
-  !------------------------------------------------------------------------------
-  ! Compute Mercier Profiles
-  !------------------------------------------------------------------------------
-  !---Get flux variables
-  IF(gseq%mode==0)THEN
-    fptmp=gseq%ffp_scale*gseq%I%f(psi_trace)+gseq%I%f_offset
-    fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
-    ffprim(j)=gseq%I%fp(psi_surf)*((gseq%ffp_scale**2)*gseq%I%f(psi_surf)+gseq%ffp_scale*gseq%I%f_offset)
-  ELSE
-    fptmp=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_trace) + gseq%I%f_offset**2)
-    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
-    ffprim(j)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi_surf)
-  END IF
-  pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0
-  pprime(j)=gseq%p_scale*gseq%P%fp(psi_surf)/mu0
   !---Safety Factor (q)
-  IF(j>1)qpsi(j)=fptmp*active_tracer%v(3)/(2*pi)
+  IF(j>1)qpsi(j)=ftrace(j)*active_tracer%v(3)/(2*pi)
 end do
 CALL active_tracer%delete
 CALL field%delete()
 DEALLOCATE(field)
 !$omp end parallel
+END IF
+DEALLOCATE(ftrace,psi_q)
 IF(PRESENT(error_str))THEN
   IF(error_str/="")THEN
     DEALLOCATE(rout,zout)
