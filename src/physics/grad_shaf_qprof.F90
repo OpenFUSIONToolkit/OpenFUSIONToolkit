@@ -11,7 +11,7 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 SUBMODULE (oft_gs) oft_gs_qprof
-USE oft_gs_cutcell, ONLY: gs_fsa_cutcell, gs_rays_cutcell, gs_extrema_cutcell
+USE oft_gs_cutcell, ONLY: gs_fsa_cutcell, gs_rays_cutcell
 IMPLICIT NONE
 CONTAINS
 !------------------------------------------------------------------------------
@@ -51,16 +51,12 @@ END PROCEDURE gs_qprof_cutcell
 !------------------------------------------------------------------------------
 MODULE PROCEDURE gs_lcfs_cutcell
 integer(4), parameter :: nlcfs=1000
-real(8) :: theta(nlcfs),rz(2,nlcfs,1),qf(1),xa(2,4,1),pt(2),dir(2)
+real(8) :: rz(2,nlcfs,1),qf(1),xa(2,4,1),pt(2),dir(2)
 logical :: okr(1)
 integer(4) :: k
 type(oft_lag_brinterp) :: psi_int
 ok=.FALSE.
-IF(gseq%plasma_bounds(1)<-1.d98)RETURN
-DO k=1,nlcfs
-  theta(k)=2.d0*pi*(k-1)/REAL(nlcfs,8)
-END DO
-CALL gs_rays_cutcell(gseq,1,[psi_q1],nlcfs,theta,rz,qf,okr)
+CALL gs_rays_cutcell(gseq,1,[psi_q1],nlcfs,rz,qf,okr,xa)
 IF(.NOT.okr(1))RETURN
 IF(gseq%diverted.AND.(psi_q1<0.05d0))THEN
   psi_int%u=>gseq%psi
@@ -75,8 +71,6 @@ IF(gseq%diverted.AND.(psi_q1<0.05d0))THEN
   rbounds(:,1)=rz(:,MINLOC(rz(1,:,1),DIM=1),1); rbounds(:,2)=rz(:,MAXLOC(rz(1,:,1),DIM=1),1)
   zbounds(:,1)=rz(:,MINLOC(rz(2,:,1),DIM=1),1); zbounds(:,2)=rz(:,MAXLOC(rz(2,:,1),DIM=1),1)
 ELSE
-  CALL gs_extrema_cutcell(gseq,1,[psi_q1],xa,okr)
-  IF(.NOT.okr(1))RETURN
   rbounds(:,1)=[-xa(1,1,1),xa(2,1,1)]; rbounds(:,2)=[xa(1,2,1),xa(2,2,1)]
   zbounds(:,1)=[xa(2,3,1),-xa(1,3,1)]; zbounds(:,2)=[xa(2,4,1),xa(1,4,1)]
 END IF
@@ -89,16 +83,11 @@ END PROCEDURE gs_lcfs_cutcell
 !------------------------------------------------------------------------------
 MODULE PROCEDURE gs_trace_surf_cutcell
 integer(4), parameter :: nth=1000
-real(8) :: theta(nth),rz(2,nth,1),qf(1)
+real(8) :: rz(2,nth,1),qf(1)
 logical :: ok(1)
-integer(4) :: k
 npoints=-1
 NULLIFY(points)
-IF(gseq%plasma_bounds(1)<-1.d98)RETURN
-DO k=1,nth
-  theta(k)=2.d0*pi*(k-1)/REAL(nth,8)
-END DO
-CALL gs_rays_cutcell(gseq,1,[psi_in],nth,theta,rz,qf,ok)
+CALL gs_rays_cutcell(gseq,1,[psi_in],nth,rz,qf,ok)
 IF(.NOT.ok(1))RETURN
 ALLOCATE(points(2,nth))
 points=rz(:,:,1)

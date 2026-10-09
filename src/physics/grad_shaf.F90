@@ -48,7 +48,7 @@ IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
 REAL(8) :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
-INTEGER(4) :: qprof_backend = 0 !< Surface backend of @ref gs_get_qprof: 0 cut-cell where supported, 1 field-line tracer (deprecated)
+INTEGER(4) :: qprof_backend = 0 !< Surface backend of @ref gs_get_qprof, @ref gs_trace_surf, `gs_save_ifile` and `gs_save_eqdsk`: 0 cut-cell where supported, 1 field-line tracer (deprecated)
 !------------------------------------------------------------------------------
 !> Interpolation class for uniform source with simple tokamak representation
 !------------------------------------------------------------------------------
@@ -4440,7 +4440,7 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
 integer(4), parameter :: nlcfs=1000
-logical :: lcfs_all,lcfs_any,geo,cc_ok
+logical :: lcfs_all,lcfs_any,geo,cc_ok,cc_prof
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
@@ -4453,9 +4453,12 @@ IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but 
 IF(PRESENT(shape_geo).AND.lcfs_any)CALL oft_abort('"shape_geo" cannot be combined with LCFS arguments', &
   'gs_get_qprof',__FILE__)
 !---Cut-cell quadrature (exact on the FE surface); the field-line tracer below is the deprecated
-!---method (`qprof_backend=1`) and the fallback for surfaces the cut-cell path does not accept
+!---method (`qprof_backend=1`) and the fallback for surfaces the cut-cell path does not accept.
+!---If only the LCFS outputs fail, the profiles are kept and only `psi_q(1)` is traced.
+cc_prof=.FALSE.
 IF((qprof_backend==0).AND.(.NOT.geo))THEN
-  CALL gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,cc_ok)
+  CALL gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,cc_prof)
+  cc_ok=cc_prof
   IF(cc_ok.AND.lcfs_all)CALL gs_lcfs_cutcell(gseq,psi_q(1),dl,rbounds,zbounds,cc_ok)
   IF(cc_ok)RETURN
 END IF
@@ -4527,7 +4530,7 @@ active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
 IF(PRESENT(shape_geo))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
-do j=1,nr
+do j=1,MERGE(1,nr,cc_prof)
   !------------------------------------------------------------------------------
   ! Trace contour
   !------------------------------------------------------------------------------
@@ -4568,7 +4571,7 @@ do j=1,nr
   if(active_tracer%status/=1)THEN
     WRITE(error_str,"(A,F10.4)")"gs_get_qprof: Trace did not complete at psi = ",1.d0-psi_q(j)
     CALL oft_warn(error_str)
-    prof(j)=0.d0
+    IF(.NOT.cc_prof)prof(j)=0.d0
     CYCLE
   end if
   !------------------------------------------------------------------------------
@@ -4639,6 +4642,7 @@ do j=1,nr
       IF(.NOT.PRESENT(shape_geo))DEALLOCATE(ptout)
     END IF
   END IF
+  IF(cc_prof)CYCLE ! Profiles kept from the cut-cell path
   !---Safety Factor (q)
   qpsi=fpol*active_tracer%v(3)/(2*pi)
   prof(j)=qpsi

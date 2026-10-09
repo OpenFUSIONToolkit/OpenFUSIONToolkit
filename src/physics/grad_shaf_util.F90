@@ -28,7 +28,7 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend
-USE oft_gs_cutcell, ONLY: gs_rays_cutcell, gs_fsa_cutcell
+USE oft_gs_cutcell, ONLY: gs_rays_cutcell
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
 USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func
@@ -944,10 +944,10 @@ type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
 real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr
 real(8), allocatable :: ptout(:,:)
-real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),theta(:),rzc(:,:,:),qf(:)
+real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),rzc(:,:,:),qf(:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell,io_unit
-LOGICAL :: do_pack,save_single,traced
+LOGICAL :: do_pack,save_single,cc_done
 LOGICAL, allocatable :: ok(:)
 TYPE(spline_type) :: rz
 type(gs_factory), pointer :: device
@@ -1022,26 +1022,23 @@ do j=2,npsi
 end do
 !---Surfaces at uniform polar angle from the cut-cell quadrature (exact on the FE surface);
 !---the field-line tracer below is the deprecated method and the fallback
-traced=.FALSE.
+cc_done=.FALSE.
 IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
-  ALLOCATE(psi_q(npsi-1),theta(ntheta-1),rzc(2,ntheta-1,npsi-1),qf(npsi-1),ok(npsi-1))
+  ALLOCATE(psi_q(npsi-1),rzc(2,ntheta-1,npsi-1),qf(npsi-1),ok(npsi-1))
   psi_q=(cout(2:npsi,1)-gseq%plasma_bounds(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
-  DO k=1,ntheta-1
-    theta(k)=2.d0*pi*(k-1)/REAL(ntheta-1,8)
-  END DO
-  CALL gs_rays_cutcell(gseq,npsi-1,psi_q,ntheta-1,theta,rzc,qf,ok)
+  CALL gs_rays_cutcell(gseq,npsi-1,psi_q,ntheta-1,rzc,qf,ok)
   IF(ALL(ok))THEN
     DO j=2,npsi
       rout(1:ntheta-1,j)=rzc(1,:,j-1); rout(ntheta,j)=rzc(1,1,j-1)
       zout(1:ntheta-1,j)=rzc(2,:,j-1); zout(ntheta,j)=rzc(2,1,j-1)
       cout(j,4)=cout(j,2)*qf(j-1)
     END DO
-    traced=.TRUE.
+    cc_done=.TRUE.
   END IF
-  DEALLOCATE(psi_q,theta,rzc,qf,ok)
+  DEALLOCATE(psi_q,rzc,qf,ok)
 END IF
 !---Trace
-IF(.NOT.traced)THEN
+IF(.NOT.cc_done)THEN
 call set_tracer(1)
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 ALLOCATE(field)
@@ -1215,10 +1212,10 @@ REAL(8), ALLOCATABLE, DIMENSION(:) :: rlim,zlim
 CHARACTER(LEN=48) :: eqdsk_case
 INTEGER(4) :: idum
 REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS
-REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi,ftrace,psi_q,theta,qf
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz,ravgs
+REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi,ftrace,psi_q,qf
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
 REAL(8), ALLOCATABLE, DIMENSION(:,:,:) :: rzc
-LOGICAL :: do_truncate,traced
+LOGICAL :: do_truncate,cc_done
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: ok
 !---
 device=>gseq%device
@@ -1296,25 +1293,21 @@ do j=1,nr
 end do
 !---q and the boundary contour (uniform polar angle) from the cut-cell quadrature (exact on the
 !---FE surface); the field-line tracer below is the deprecated method and the fallback
-traced=.FALSE.
+cc_done=.FALSE.
 IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
-  ALLOCATE(theta(nr-1),rzc(2,nr-1,1),qf(nr),ravgs(nr,4),ok(nr))
+  ALLOCATE(rzc(2,nr-1,nr-1),qf(nr-1),ok(nr-1))
   psi_q=(psi_q-gseq%plasma_bounds(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
-  CALL gs_fsa_cutcell(gseq,nr-1,psi_q(2:nr),qf(2:nr),ravgs(2:nr,:),ok(2:nr))
-  DO k=1,nr-1
-    theta(k)=2.d0*pi*(k-1)/REAL(nr-1,8)
-  END DO
-  CALL gs_rays_cutcell(gseq,1,psi_q(nr:nr),nr-1,theta,rzc,qf(1:1),ok(1:1))
+  CALL gs_rays_cutcell(gseq,nr-1,psi_q(2:nr),nr-1,rzc,qf,ok)
   IF(ALL(ok))THEN
-    qpsi(2:nr)=ftrace(2:nr)*qf(2:nr)
-    rout(1:nr-1)=rzc(1,:,1); rout(nr)=rzc(1,1,1)
-    zout(1:nr-1)=rzc(2,:,1); zout(nr)=rzc(2,1,1)
-    traced=.TRUE.
+    qpsi(2:nr)=ftrace(2:nr)*qf
+    rout(1:nr-1)=rzc(1,:,nr-1); rout(nr)=rzc(1,1,nr-1)
+    zout(1:nr-1)=rzc(2,:,nr-1); zout(nr)=rzc(2,1,nr-1)
+    cc_done=.TRUE.
   END IF
-  DEALLOCATE(theta,rzc,qf,ravgs,ok)
+  DEALLOCATE(rzc,qf,ok)
 END IF
 !---Trace
-IF(.NOT.traced)THEN
+IF(.NOT.cc_done)THEN
 call set_tracer(1)
 !$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field) firstprivate(pt_last)
 ALLOCATE(field)

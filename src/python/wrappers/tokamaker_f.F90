@@ -1655,8 +1655,8 @@ END IF
 CALL copy_string('No toroidal flux map (requires an equilibrium with toroidal-flux profiles)',error_str)
 END SUBROUTINE tokamaker_torflux_map
 !---------------------------------------------------------------------------------
-!> Select the flux-surface backend of the toroidal flux map and of @ref oft_gs::gs_get_qprof,
-!! and the tracer tolerance (testing only)
+!> Select the flux-surface backend of the toroidal flux map, @ref oft_gs::gs_get_qprof,
+!! @ref oft_gs::gs_trace_surf and the ifile/gEQDSK writers, and the tracer tolerance (testing only)
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_torflux_backend(backend,tol) BIND(C,NAME="tokamaker_torflux_backend")
 INTEGER(c_int), VALUE, INTENT(in) :: backend !< 0 cut-cell (default), 1 field-line tracer (deprecated)
