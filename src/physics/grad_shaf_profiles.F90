@@ -1072,10 +1072,12 @@ ELSE
   psihat=(psi-self%plasma_bounds(1))/(self%plasma_bounds(2)-self%plasma_bounds(1))
 END IF
 b=0.d0
-IF(psihat<0.d0)RETURN
+! Zero outside profile (x(1) < 0 when SOL points are included)
+IF(psihat<MIN(0.d0,self%x(1)))RETURN
 !
 if(psihat<=self%x(1))then
-  b = psihat*(.5d0*psihat)/self%x(1)*(self%yp(1)-self%y0) + psihat*self%y0
+  ! With SOL points (x(1) <= 0) F is zero at the outer edge of the profile
+  IF(self%x(1)>0.d0)b = psihat*(.5d0*psihat)/self%x(1)*(self%yp(1)-self%y0) + psihat*self%y0
 else if(psihat>=self%x(self%npsi))then
   b=self%y(self%npsi)+self%yp(self%npsi)*(psihat-self%x(self%npsi))
 else
@@ -1104,11 +1106,16 @@ ELSE
   psihat=(psi-self%plasma_bounds(1))/(self%plasma_bounds(2)-self%plasma_bounds(1))
 END IF
 b=0.d0
-IF(psihat<0.d0)RETURN
+! Zero outside profile (x(1) < 0 when SOL points are included)
+IF(psihat<MIN(0.d0,self%x(1)))RETURN
 !
 if(psihat<=self%x(1))then
-  x = psihat/self%x(1)
-  b = self%y0 + (self%yp(1)-self%y0)*x
+  IF(self%x(1)>0.d0)THEN
+    x = psihat/self%x(1)
+    b = self%y0 + (self%yp(1)-self%y0)*x
+  ELSE
+    b = self%yp(1)
+  END IF
 else if(psihat>=self%x(self%npsi))then
   b=self%yp(self%npsi)
 else
@@ -1134,11 +1141,17 @@ ELSE
   psihat=(psi-self%plasma_bounds(1))/(self%plasma_bounds(2)-self%plasma_bounds(1))
 END IF
 b=0.d0
-IF(psihat<0.d0)RETURN
+! Zero outside profile (x(1) < 0 when SOL points are included)
+IF(psihat<MIN(0.d0,self%x(1)))RETURN
 !
 if(psihat<=self%x(1))then
-  x = 1.d0/(self%plasma_bounds(2)-self%plasma_bounds(1))/self%x(1)
-  b = (self%yp(1)-self%y0)*x
+  IF(self%x(1)>0.d0)THEN
+    x = 1.d0/(self%plasma_bounds(2)-self%plasma_bounds(1))/self%x(1)
+    b = (self%yp(1)-self%y0)*x
+  ELSE IF(self%npsi>1)THEN
+    x = 1.d0/(self%plasma_bounds(2)-self%plasma_bounds(1))/(self%x(2)-self%x(1))
+    b = (self%yp(2)-self%yp(1))*x
+  END IF
 else if(psihat>=self%x(self%npsi))then
   b  = 0.d0
 else
@@ -1178,7 +1191,11 @@ DO i=1,self%npsi
   x=self%x(i)
   !---
   IF(i==1)THEN
-    self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
+    IF(self%x(1)<=0.d0)THEN ! SOL points present: F starts from zero (vacuum) at the outer edge of the profile
+      self%y(i)=0.d0
+    ELSE
+      self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
+    END IF
   ELSE
     xp=self%x(i-1)
     self%y(i-1)=self%y(i-1) - (xp*(.5d0*xp-xp)/(x-xp)*(self%yp(i)-self%yp(i-1)) &
@@ -1396,7 +1413,11 @@ END DO
 DO i=1,self%npsi
   x=self%x(i)
   IF(i==1)THEN
-    self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
+    IF(self%x(1)<=0.d0)THEN ! SOL points present: F starts from zero (vacuum) at the outer edge of the profile
+      self%y(i)=0.d0
+    ELSE
+      self%y(i)=x*(.5d0*x)/self%x(1)*(self%yp(1)-self%y0) + x*self%y0
+    END IF
   ELSE
     xp=self%x(i-1)
     self%y(i-1)=self%y(i-1) - (xp*(.5d0*xp-xp)/(x-xp)*(self%yp(i)-self%yp(i-1)) &
