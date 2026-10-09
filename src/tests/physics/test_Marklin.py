@@ -44,8 +44,7 @@ def run_marklin(meshfile,nmodes,order,grid_order,meshfile2,mp_q):
         from OpenFUSIONToolkit.Marklin import Marklin
         myOFT = OFT_env(nthreads=-1)
         taylor_solver = Marklin(myOFT)
-        taylor_solver.setup_mesh(mesh_file=meshfile,grid_order=grid_order)
-        taylor_solver.setup(order,minlev=1)
+        taylor_solver.setup_model(mesh_file=meshfile, grid_order=grid_order, order=order, minlev=1)
         taylor_solver.compute_eig(nmodes,cache_file='Marklin_{0}.rst'.format(meshfile.split(".")[0]))
         result = True
     except BaseException as e:
@@ -55,8 +54,7 @@ def run_marklin(meshfile,nmodes,order,grid_order,meshfile2,mp_q):
         try:
             taylor_solver_old = taylor_solver
             taylor_solver = Marklin(myOFT)
-            taylor_solver.setup_mesh(mesh_file=meshfile2,grid_order=grid_order)
-            taylor_solver.setup(order,minlev=1)
+            taylor_solver.setup_model(mesh_file=meshfile2, grid_order=grid_order, order=order, minlev=1)
             taylor_solver.compute_eig(nmodes,cache_file='Marklin_{0}.rst'.format(meshfile2.split(".")[0]))
             result = True
         except BaseException as e:
@@ -88,8 +86,7 @@ def run_marklin_vac(meshfile,order,grid_order,mp_q):
         from OpenFUSIONToolkit.Marklin import Marklin
         myOFT = OFT_env(nthreads=-1)
         taylor_solver = Marklin(myOFT)
-        taylor_solver.setup_mesh(mesh_file=meshfile,grid_order=grid_order)
-        taylor_solver.setup(order,minlev=1)
+        taylor_solver.setup_model(mesh_file=meshfile, grid_order=grid_order, order=order, minlev=1)
         nh = 1
         hcpc = np.array([[1.0,0.0,0.0],])
         hcpv = np.array([[0.0,1.5,0.0],])

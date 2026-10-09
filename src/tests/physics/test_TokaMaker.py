@@ -185,9 +185,8 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
     # Run EQ
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
-    mygs.setup(order=fe_order,F0=1.0,full_domain=True)
+    mygs.setup_model(mesh_pts, mesh_lc, order=fe_order, F0=1.0, full_domain=True)
     mygs.p_scale=a
     mygs.ffp_scale=b*R*R*2.0
     mygs.set_profiles(ffp_prof={'type': 'flat'},pp_prof={'type': 'flat'})
@@ -280,9 +279,8 @@ def run_sph_case(mesh_resolution,fe_order,mp_q):
     # Run EQ
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
-    mygs.setup(order=fe_order)
+    mygs.setup_model(mesh_pts, mesh_lc, order=fe_order)
     mygs.p_scale=0.0
     ffp_prof={
         'type': 'linterp',
@@ -383,9 +381,7 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     # Run EQ
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-    mygs.setup(order=fe_order)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order)
     mygs.set_coil_currents({'COIL1': cdx*cdy})
     if dist is not None:
         mygs.set_coil_current_dist('COIL1',dist(mygs.r[:,0],mygs.r[:,1]))
@@ -521,9 +517,7 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
         mygs_last = mygs
         mygs = TokaMaker(myOFT)
         mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
-        mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-        mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-        mygs.setup(order=fe_order,F0=helicity*5.3*6.2)
+        mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=helicity*5.3*6.2)
         #
         if test_type.startswith('eig'):
             if test_type == 'eig_dep':
@@ -931,9 +925,7 @@ def run_LTX_case(fe_order,test_type,mp_q):
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('LTX_mesh.h5')
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-    mygs.setup(order=fe_order,F0=0.10752)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=0.10752)
     #
     if test_type == 'eig':
         eig_vals, _ = mygs.compute_wall_modes(10)
@@ -1088,9 +1080,7 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('ITER_mesh.h5')
-    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
-    mygs.setup(order=fe_order, F0=5.3*6.2)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=5.3*6.2)
 
     mygs.set_coil_vsc({'VS': 1.0})
     coil_bounds = {key: [-50.E6, 50.E6] for key in mygs.coil_sets}
@@ -1286,9 +1276,7 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('ITER_mesh.h5')
-    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
-    mygs.setup(order=fe_order, F0=5.3*6.2)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=5.3*6.2)
 
     mygs.set_coil_vsc({'VS': 1.0})
     coil_bounds = {key: [-50.E6, 50.E6] for key in mygs.coil_sets}

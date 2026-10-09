@@ -48,8 +48,7 @@ def run_all(dummy,mp_q):
     # Run Marklin
     try:
         taylor_solver = Marklin(myOFT)
-        taylor_solver.setup_mesh(mesh_file='cyl_Marklin.h5',grid_order=1)
-        taylor_solver.setup(2,minlev=1)
+        taylor_solver.setup_model(mesh_file='cyl_Marklin.h5', grid_order=1, order=2, minlev=1)
         taylor_solver.compute_eig(1)
         mp_q.put(taylor_solver.eig_vals)
     except:
@@ -78,9 +77,8 @@ def run_all(dummy,mp_q):
         gs_mesh.add_rectangle(0.5,0.5,1.0,1.0,'plasma')
         mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
         mygs = TokaMaker(myOFT)
-        mygs.setup_mesh(mesh_pts,mesh_lc)
         mygs.settings.free_boundary = False
-        mygs.setup(order=2)
+        mygs.setup_model(mesh_pts, mesh_lc, order=2)
         mygs.p_scale=0.0
         ffp_prof={
             'type': 'linterp',

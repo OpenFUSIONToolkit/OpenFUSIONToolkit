@@ -30,6 +30,8 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_tCurr_regcoil
  - \subpage doc_tCurr_hodlr
  - \subpage doc_tCurr_reduction
+ - \subpage doc_tCurr_fourier
+ - \subpage doc_tCurr_xml
 
 \section doc_tw_main_settings ThinCurr settings groups
 
