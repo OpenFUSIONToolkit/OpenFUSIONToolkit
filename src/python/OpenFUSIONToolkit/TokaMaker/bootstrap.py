@@ -830,6 +830,8 @@ def _validate_grid(values, name, x=None):
     @result Validated grid
     '''
     n_x = len(values)
+    if n_x < 5:
+        raise ValueError("The '{0}' profile needs at least 5 points".format(name))
     if x is None:
         return numpy.linspace(0., 1., n_x)
     x = numpy.asarray(x, dtype=float)
@@ -880,6 +882,7 @@ def solve_with_bootstrap(mygs,
                          psi_N = None,
                          jphi_fixed = None,
                          p_fixed = None,
+                         F0 = None,
                          **kwargs):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
@@ -911,12 +914,14 @@ def solve_with_bootstrap(mygs,
       parameterized spike profile table to stdout (mirroring the Fortran --diagnose-bs output).
     @param jphi_fixed Fixed toroidal current density \f$j_{fixed}\f$ [A/m$^2$] on `x` (array or profile dict),
       added to the total without rescaling (internal Fortran solver only)
+    @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0), passed to the solver (default: keep the current value)
     @param p_fixed Additional pressure \f$P_{fixed}\f$ [Pa] on `x` (array or profile dict, e.g. fast-ion pressure),
       added to \f$e_C(n_e T_e + n_i T_i)\f$ for the GS pressure but excluded from j_BS (internal Fortran solver only)
     @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles, all (like the
       `inductive_jphi` and `jphi_fixed` inputs) TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$
-      (see doc_tokamaker_current_conventions); the internal solver also returns `'psi_n'`, the
-      \f$\hat{\psi}\f$ of each input node
+      (see doc_tokamaker_current_conventions); with the internal solver it also holds every profile
+      returned by TokaMaker.solve_bootstrap (`'psi_n'`, the \f$\hat{\psi}\f$ of each input node,
+      `'jphi_*'`, `'jdotb_bs_raw'`)
     '''
 
     if psi_N is not None:
@@ -967,17 +972,19 @@ def solve_with_bootstrap(mygs,
             parameterize_jBS=parameterize_jBS,
             diagnose_bs=diagnose_bs,
             coord=coord,
+            F0=F0,
             **kwargs
         )
-        results = {'psi_n' : _results['psi_n'],
-                    'total_j_phi' : _results['total_j_phi'],
-                    'j_BS' : _results['j_bs_raw'],
-                    'j_inductive' : _results['j_ind_final'],
-                    'isolated_j_BS' : _results['j_bs_final'],
-                    'j_fixed' : _results.get('jphi_fixed'),
-                    'jdotb_BS' : _results.get('jdotb_bs_raw'),
-                    'scale_j0' : 1.0,
-                    'scale_Ip' : 1.0}
+        # Every profile of solve_bootstrap, plus the Python-path keys
+        results = dict(_results)
+        results.update({'total_j_phi' : _results['jphi_total'],
+                        'j_BS' : _results['jphi_bs_raw'],
+                        'j_inductive' : _results['jphi_ind_final'],
+                        'isolated_j_BS' : _results['jphi_bs_final'],
+                        'j_fixed' : _results.get('jphi_fixed'),
+                        'jdotb_BS' : _results.get('jdotb_bs_raw'),
+                        'scale_j0' : 1.0,
+                        'scale_Ip' : 1.0})
         return results
     else:
         if coord != 'psi_n':
@@ -986,7 +993,6 @@ def solve_with_bootstrap(mygs,
             raise NotImplementedError("jphi_fixed is only supported by the internal Fortran solver (use_python_solve=False)")
         if p_fixed is not None:
             raise NotImplementedError("p_fixed is only supported by the internal Fortran solver (use_python_solve=False)")
-        F0_local = kwargs.get('F0_local', None)
 
     warn(
         "The python solve_with_bootstrap() is deprecated by mygs.solve_bootstrap() (internal fortran-solve)."
@@ -1210,7 +1216,7 @@ def solve_with_bootstrap(mygs,
         pax_target = pressure[0] - pressure[-1]  # P = 0 at the LCFS: target the drop
 
         # Run through once for better profile convergence
-        solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target,F0=F0_local)
+        solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target,F0=F0)
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
@@ -1250,7 +1256,7 @@ def solve_with_bootstrap(mygs,
             scaled_Ip_target = Ip_target*final_scale_Ip
             pax_target = pressure[0] - pressure[-1]  # P = 0 at the LCFS: target the drop
 
-            solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target,F0=F0_local)
+            solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target,F0=F0)
 
             # Check Convergence
             _, f, fp, _, pp = mygs.get_profiles(psi=psi_eval)

@@ -1607,16 +1607,21 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         jdotb = bp['jdotb_bs_raw'][inner]
         field_aligned = jdotb * F_c * invR_c / B2_c
         p_term = Pp_c * (R_c - F_c**2 * invR_c / B2_c)
-        scale = np.max(np.abs(bp['j_bs_raw'][inner]))
-        err = np.max(np.abs(bp['j_bs_raw'][inner] - (field_aligned + p_term))) / scale
-        err_flip = np.max(np.abs(bp['j_bs_raw'][inner] - (field_aligned - p_term))) / scale
-        print(f"j_bs_raw vs A7: rel err {err:.3e} (pressure term flipped: {err_flip:.3e}), "
+        scale = np.max(np.abs(bp['jphi_bs_raw'][inner]))
+        err = np.max(np.abs(bp['jphi_bs_raw'][inner] - (field_aligned + p_term))) / scale
+        err_flip = np.max(np.abs(bp['jphi_bs_raw'][inner] - (field_aligned - p_term))) / scale
+        print(f"jphi_bs_raw vs A7: rel err {err:.3e} (pressure term flipped: {err_flip:.3e}), "
               f"max|P'G|/max|j_BS| = {np.max(np.abs(p_term))/scale:.3e}")
         if not (err < 1.0e-2 and err_flip > 5.0 * err):
-            raise AssertionError(f"j_bs_raw does not match eq. A7 (rel err {err:.3e}, flipped {err_flip:.3e})")
+            raise AssertionError(f"jphi_bs_raw does not match eq. A7 (rel err {err:.3e}, flipped {err_flip:.3e})")
+        # The stored pressure-driven part is the A7 P'G term
+        err_pd = np.max(np.abs(bp['jphi_pdriven_raw'][inner] - p_term)) / scale
+        print(f"jphi_pdriven_raw vs P'G: rel err {err_pd:.3e}")
+        if err_pd > 1.0e-2:
+            raise AssertionError(f"jphi_pdriven_raw does not match P'(<R> - F^2<1/R>/<B^2>) (rel err {err_pd:.3e})")
         # A8: the equilibrium's own <J.B> = F P' + F'<B^2>/mu0 equals the sum of its components'
         jdotb_eq = F_c * Pp_c + Fp_c * B2_c / mu0
-        jdotb_sum = jdotb + (bp['j_ind_final'][inner] + bp['jphi_fixed'][inner]) * B2_c / (F_c * invR_c)
+        jdotb_sum = jdotb + (bp['jphi_ind_final'][inner] + bp['jphi_fixed'][inner]) * B2_c / (F_c * invR_c)
         err_par = np.max(np.abs(jdotb_eq - jdotb_sum)) / np.max(np.abs(jdotb_eq))
         print(f"<J.B> balance (A8): rel err {err_par:.3e}")
         if err_par > 2.0e-2:
@@ -1648,6 +1653,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         # Capture expected state before save so we can check all fields
         expected_boot_ops = dict(mygs._tMaker_equil._boot_ops)
         expected_boot_profs = mygs.get_boot_profs()
+        _, F_s, Fp_s, _, _ = mygs.get_profiles(npsi=50)
         mygs._tMaker_equil.save_TokaMaker(save_file)
         # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
         mygs._tMaker_equil._boot_ops['scale_jBS'] = -999.0
@@ -1673,6 +1679,11 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
                     raise AssertionError(
                         f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
                     )
+        # Verify F*F' round-trips exactly (the saved knots are restored, not recomputed)
+        _, F_l, Fp_l, _, _ = mygs.get_profiles(npsi=50)
+        ffp_err = np.max(np.abs(F_l*Fp_l - F_s*Fp_s)) / np.max(np.abs(F_s*Fp_s))
+        if ffp_err > 1e-10:
+            raise AssertionError(f"F*F' changed through save/load (max rel diff {ffp_err:.3e})")
         # Verify BOOT_PROFS arrays round-trip correctly through save/load
         if expected_boot_profs is None:
             raise AssertionError("get_boot_profs() returned None before save")
@@ -1772,11 +1783,11 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             Zeff={'x': psi_sample, 'y': np.linspace(1.0, 2.5, n_sample)},
             **zeff_common_kwargs,
         )
-        j_scalar = profs_scalar['j_bs_raw']
-        j_linear = profs_linear['j_bs_raw']
+        j_scalar = profs_scalar['jphi_bs_raw']
+        j_linear = profs_linear['jphi_bs_raw']
         magnitude = 0.5 * (np.abs(j_scalar) + np.abs(j_linear))
         rel_diff = np.where(magnitude > 0, (j_linear - j_scalar) / magnitude, 0.0)
-        print("\nZeff scalar vs linear j_bs_raw relative difference (j_linear-j_scalar)/|mean|:")
+        print("\nZeff scalar vs linear jphi_bs_raw relative difference (j_linear-j_scalar)/|mean|:")
         print(rel_diff)
         if np.allclose(j_scalar, j_linear):
             raise AssertionError(
@@ -1800,10 +1811,10 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         if not np.allclose(profs_fixed['jphi_fixed'], np.interp(profs_fixed['psi_n'], psi_sample, jfix_y),
                            rtol=1e-6, atol=1e-6*jfix_y.max()):
             raise AssertionError("boot_profs['jphi_fixed'] does not match the input jphi_fixed_prof")
-        j_sum = profs_fixed['j_ind_final'] + profs_fixed['j_bs_final'] + profs_fixed['jphi_fixed']
-        if not np.allclose(profs_fixed['total_j_phi'], j_sum, rtol=1e-10, atol=1e-6):
-            raise AssertionError("total_j_phi != j_ind_final + j_bs_final + jphi_fixed")
-        if not np.sum(profs_fixed['j_ind_final']) < np.sum(profs_scalar['j_ind_final']):
+        j_sum = profs_fixed['jphi_ind_final'] + profs_fixed['jphi_bs_final'] + profs_fixed['jphi_fixed']
+        if not np.allclose(profs_fixed['jphi_total'], j_sum, rtol=1e-10, atol=1e-6):
+            raise AssertionError("jphi_total != jphi_ind_final + jphi_bs_final + jphi_fixed")
+        if not np.sum(profs_fixed['jphi_ind_final']) < np.sum(profs_scalar['jphi_ind_final']):
             raise AssertionError("jphi_fixed did not reduce the inductive current share")
         profs_reset = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         if np.any(profs_reset['jphi_fixed'] != 0.0):
@@ -2062,9 +2073,9 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
             res_phi = run(x_phi,'phi_n')
             results['phi_n'] = _torflux_compare(mygs,ref)
             # Bootstrap current at matching surfaces (interior, away from edge spike)
-            j_ref = np.interp(res_phi['psi_n'],res_psi['psi_n'],res_psi['j_bs_final'])
+            j_ref = np.interp(res_phi['psi_n'],res_psi['psi_n'],res_psi['jphi_bs_final'])
             mask = (res_phi['psi_n'] > 0.05) & (res_phi['psi_n'] < 0.9)
-            results['jbs_err'] = np.max(np.abs(res_phi['j_bs_final'][mask]-j_ref[mask]))/np.max(np.abs(j_ref))
+            results['jbs_err'] = np.max(np.abs(res_phi['jphi_bs_final'][mask]-j_ref[mask]))/np.max(np.abs(j_ref))
             # jphi_fixed relabelled onto Phi_N nodes returns the input values
             results['jfix_err'] = np.max(np.abs(res_phi['jphi_fixed']-jfix))/np.max(jfix)
             # Node psi_N positions agree with the solver map
@@ -2138,15 +2149,17 @@ def test_ITER_torflux_bootstrap(order):
 # Test: solve_with_bootstrap() x validation (fails before the solver is used)
 # -----------------------------------------------------------------------
 @pytest.mark.coverage
-def test_bootstrap_x_validation():
+@pytest.mark.parametrize("use_python_solve", (True, False))
+def test_bootstrap_x_validation(use_python_solve):
     from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap
     n = 65
     ne = np.full(n, 1.0e20)
     Te = np.full(n, 2.0e3)
     Zeff = np.full(n, 1.7)
-    def call(x=None, psi_pad=1.E-3, psi_N=None):
-        return solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), Zeff,
-                                    1.0e6, psi_pad=psi_pad, x=x, psi_N=psi_N, use_python_solve=True)
+    def call(x=None, psi_pad=1.E-3, psi_N=None, m=n):
+        return solve_with_bootstrap(None, ne[:m], Te[:m], ne[:m].copy(), Te[:m].copy(), Zeff[:m],
+                                    1.0e6, inductive_jphi=np.ones(m), psi_pad=psi_pad, x=x, psi_N=psi_N,
+                                    use_python_solve=use_python_solve)
     good = np.linspace(0.0, 1.0, n)
     dup = good.copy()
     dup[32] = dup[31]
@@ -2168,8 +2181,11 @@ def test_bootstrap_x_validation():
         call(np.linspace(0.3, 1.0, n))
     with pytest.raises(ValueError, match="span"):
         call(np.linspace(0.0, 0.5, n))
-    with pytest.raises(ValueError, match="exceeds the first/last"):
-        call(good, psi_pad=0.5)
+    with pytest.raises(ValueError, match="at least 5 points"):
+        call(None, m=4)
+    if use_python_solve:  # psi_pad is used by the Python solver only
+        with pytest.raises(ValueError, match="exceeds the first/last"):
+            call(good, psi_pad=0.5)
     # deprecated alias psi_N: warns, then validated as x
     with pytest.warns(DeprecationWarning, match="psi_N"):
         with pytest.raises(ValueError, match="same length"):
