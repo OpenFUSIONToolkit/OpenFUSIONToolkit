@@ -111,15 +111,22 @@ end subroutine gs_ravg_cutcell
 !------------------------------------------------------------------------------
 !> \f$ q/F \f$ and the flux-surface averages of @ref oft_gs::gs_get_qprof (`ravgs`) by the same quadrature
 !------------------------------------------------------------------------------
-subroutine gs_fsa_cutcell(gseq,nr,psi_q,qf,ravgs,ok)
+subroutine gs_fsa_cutcell(gseq,nr,psi_q,qf,ravgs,ok,fpol,fsa)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(i4), intent(in) :: nr !< Number of surfaces
 real(r8), intent(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
 real(r8), intent(out) :: qf(nr) !< \f$ q/F \f$
 real(r8), intent(out) :: ravgs(nr,4) !< \f$ \langle R \rangle \f$, \f$ \langle 1/R \rangle \f$, \f$ \langle 1/R^2 \rangle \f$, \f$ dV/d\psi \f$
 logical, intent(out) :: ok(nr) !< Surface inside (0,1) and closed about the O-point
-real(r8) :: wind(nr),racc(3,nr),dpsi
-CALL geom_sums(gseq,nr,psi_q,qf,wind,dpsi,racc)
+real(r8), optional, intent(in) :: fpol(nr) !< F on each surface (with `fsa`)
+real(r8), optional, intent(out) :: fsa(nr,4) !< \f$ \langle |\nabla\psi| \rangle \f$, \f$ \langle |\nabla\psi|^2 \rangle \f$, \f$ \langle B_p^2 \rangle \f$, \f$ \langle 1/B^2 \rangle \f$
+real(r8) :: wind(nr),racc(3,nr),facc(5,nr),dpsi
+integer(i4) :: k
+IF(PRESENT(fsa))THEN
+  CALL geom_sums(gseq,nr,psi_q,qf,wind,dpsi,racc,fpol,facc)
+ELSE
+  CALL geom_sums(gseq,nr,psi_q,qf,wind,dpsi,racc)
+END IF
 ok=(dpsi/=0.d0).AND.(psi_q>0.d0).AND.(psi_q<1.d0).AND.(ABS(wind-1.d0)<=wind_tol)
 ravgs=0.d0
 WHERE(ok)
@@ -131,12 +138,18 @@ WHERE(ok)
 ELSEWHERE
   qf=0.d0
 END WHERE
+IF(PRESENT(fsa))THEN
+  fsa=0.d0
+  DO k=1,4
+    WHERE(ok)fsa(:,k)=facc(k+1,:)/facc(1,:)
+  END DO
+END IF
 end subroutine gs_fsa_cutcell
 !------------------------------------------------------------------------------
 !> Fixed-order sums of \f$ \oint w/R \f$, winding and optionally \f$ \oint w\,[R, R^2, 1] \f$,
 !! \f$ w = dl/|\nabla \hat{\psi}| \f$; all zero with `dpsi=0` if there is no plasma
 !------------------------------------------------------------------------------
-subroutine geom_sums(gseq,nr,psi_q,g,wind,dpsi,racc)
+subroutine geom_sums(gseq,nr,psi_q,g,wind,dpsi,racc,fpol,facc)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(i4), intent(in) :: nr !< Number of surfaces
 real(r8), intent(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
@@ -144,13 +157,16 @@ real(r8), intent(out) :: g(nr) !< \f$ \oint w/R \f$
 real(r8), intent(out) :: wind(nr) !< Winding number about the O-point
 real(r8), intent(out) :: dpsi !< Axis minus LCFS flux
 real(r8), optional, intent(out) :: racc(3,nr) !< \f$ \oint w\,[R, R^2, 1] \f$
+real(r8), optional, intent(in) :: fpol(nr) !< F on each surface (with `facc`)
+real(r8), optional, intent(out) :: facc(5,nr) !< \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$
 type(bern_tab) :: bt
 real(r8), pointer :: vals(:)
-real(r8), allocatable :: gblk(:,:),wblk(:,:),rblk(:,:,:),gloc(:),wloc(:),rloc(:,:)
+real(r8), allocatable :: gblk(:,:),wblk(:,:),rblk(:,:,:),fblk(:,:,:),gloc(:),wloc(:),rloc(:,:),floc(:,:)
 real(r8) :: x1
 integer(i4) :: nblk,ib,cell,nc
 g=0.d0; wind=0.d0; dpsi=0.d0
 IF(PRESENT(racc))racc=0.d0
+IF(PRESENT(facc))facc=0.d0
 IF(nr<1)RETURN
 IF(gseq%plasma_bounds(1)<-1.d98)RETURN
 x1=gseq%plasma_bounds(1)
@@ -162,15 +178,17 @@ CALL gseq%psi%get_local(vals)
 nc=gseq%device%fe_rep%mesh%nc
 CALL perm_update(gseq%device%fe_rep,bt)
 nblk=(nc+nblk_cells-1)/nblk_cells
-ALLOCATE(gblk(nr,nblk),wblk(nr,nblk),rblk(3,nr,MERGE(nblk,0,PRESENT(racc))))
-!$omp parallel private(ib,cell,gloc,wloc,rloc)
-ALLOCATE(gloc(nr),wloc(nr),rloc(3,nr))
+ALLOCATE(gblk(nr,nblk),wblk(nr,nblk),rblk(3,nr,MERGE(nblk,0,PRESENT(racc))),fblk(5,nr,MERGE(nblk,0,PRESENT(facc))))
+!$omp parallel private(ib,cell,gloc,wloc,rloc,floc)
+ALLOCATE(gloc(nr),wloc(nr),rloc(3,nr),floc(5,nr))
 !$omp do schedule(dynamic,1)
 DO ib=1,nblk
-  gloc=0.d0; wloc=0.d0; rloc=0.d0
+  gloc=0.d0; wloc=0.d0; rloc=0.d0; floc=0.d0
   DO cell=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,nc)
     IF(gseq%device%fe_rep%mesh%reg(cell)/=1)CYCLE
-    IF(PRESENT(racc))THEN
+    IF(PRESENT(facc))THEN
+      CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol=fpol,racc=rloc,facc=floc)
+    ELSE IF(PRESENT(racc))THEN
       CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,racc=rloc)
     ELSE
       CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc)
@@ -178,17 +196,19 @@ DO ib=1,nblk
   END DO
   gblk(:,ib)=gloc; wblk(:,ib)=wloc
   IF(PRESENT(racc))rblk(:,:,ib)=rloc
+  IF(PRESENT(facc))fblk(:,:,ib)=floc
 END DO
 !$omp end do
-DEALLOCATE(gloc,wloc,rloc)
+DEALLOCATE(gloc,wloc,rloc,floc)
 !$omp end parallel
 !---Fixed-order reduction
 DO ib=1,nblk
   g=g+gblk(:,ib)
   wind=wind+wblk(:,ib)
   IF(PRESENT(racc))racc=racc+rblk(:,:,ib)
+  IF(PRESENT(facc))facc=facc+fblk(:,:,ib)
 END DO
-DEALLOCATE(vals,gblk,wblk,rblk)
+DEALLOCATE(vals,gblk,wblk,rblk,fblk)
 end subroutine geom_sums
 !------------------------------------------------------------------------------
 !> Flux-surface sums for @ref grad_shaf_bootstrap::sauter_fc by the same quadrature
@@ -257,7 +277,7 @@ end subroutine gs_sauter_cutcell
 !------------------------------------------------------------------------------
 !> Add arc integrals and winding (and optionally geometric or Sauter sums) of all surfaces crossing `cell`
 !------------------------------------------------------------------------------
-subroutine cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc,racc)
+subroutine cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc,racc,facc)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 type(bern_tab), intent(in) :: bt !< Bernstein tables
 real(r8), intent(in) :: vals(:) !< Local \f$ \psi \f$ values
@@ -273,6 +293,7 @@ real(r8), optional, intent(in) :: bref(nr) !< \f$ B_{ref} \f$ on each surface (S
 real(r8), optional, intent(inout) :: aloc(:,:) !< Accumulated Sauter sums [8,nr] (see @ref gs_sauter_cutcell)
 real(r8), optional, intent(inout) :: eloc(:,:) !< Accumulated extrema [3,nr]
 real(r8), optional, intent(inout) :: racc(:,:) !< Accumulated \f$ \oint w\,[R, R^2, 1] \f$ [3,nr] (see @ref geom_sums)
+real(r8), optional, intent(inout) :: facc(:,:) !< Accumulated \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$ [5,nr] (needs `fpol`)
 type(oft_scalar_bfem), pointer :: lag_rep
 integer(i4) :: jdofs(32),jc,k,ns,d0,i
 integer(i4) :: dep(3*max_depth+4)
@@ -378,7 +399,7 @@ integer(i4) :: k0,k1,k2,ig,kk,nab,ng
 logical :: ab(3)
 real(r8) :: p1(2),p2(2),e(2),xi1,xi2,xi,c(2),muc(3),elo,ehi,eta,x(2),val,gr(2)
 real(r8) :: pt(2),detm,sum,q1(2),q2(2),dth,sig,gmid(2),xg(5),wg(5)
-real(r8) :: av(8),rv(3),wq,bq,b,rq,sx(0:6),sb(0:6),sr(0:6)
+real(r8) :: av(8),rv(3),fv(5),gq,wq,bq,b,rq,sx(0:6),sb(0:6),sr(0:6)
 DO kk=1,3
   ab(kk)=(cs(bt%corner(kk))>=s)
 END DO
@@ -399,7 +420,7 @@ xi1=DOT_PRODUCT(e,p1); xi2=DOT_PRODUCT(e,p2)
 IF(xi1==xi2)RETURN
 !---Gauss quadrature over xi, projecting onto the level set along d
 sum=0.d0
-av=0.d0; rv=0.d0
+av=0.d0; rv=0.d0; fv=0.d0
 IF(dratio>=smooth_ratio)THEN
   ng=3; xg(1:3)=xg3; wg(1:3)=wg3
 ELSE
@@ -431,6 +452,10 @@ DO ig=1,ng
   IF(ig==(ng+1)/2)gmid=gr
   wq=wg(ig)*ABS(detm)/ABS(DOT_PRODUCT(gr,dvec))
   IF(PRESENT(racc))rv=rv+wq*[pt(1),pt(1)**2,1.d0]
+  IF(PRESENT(facc))THEN
+    gq=grad_mag(x,gr)
+    fv=fv+wq*pt(1)*[1.d0,gq,gq**2,(gq/pt(1))**2,pt(1)**2/(gq**2+fpol(iq)**2)]
+  END IF
   IF(PRESENT(aloc))THEN
     CALL sau_point(x,iq,bq,rq,gr)
     sx(ig)=xi; sb(ig)=bq; sr(ig)=rq
@@ -449,6 +474,7 @@ DO ig=1,ng
 END DO
 gacc=gacc+sum*ABS(xi2-xi1)/2.d0
 IF(PRESENT(racc))racc(:,iq)=racc(:,iq)+rv*ABS(xi2-xi1)/2.d0
+IF(PRESENT(facc))facc(:,iq)=facc(:,iq)+fv*ABS(xi2-xi1)/2.d0
 IF(PRESENT(aloc))THEN
   aloc(:,iq)=aloc(:,iq)+av*ABS(xi2-xi1)/2.d0
   eloc(1,iq)=MAX(eloc(1,iq),arc_peak(ng,sx,sb))
@@ -463,6 +489,15 @@ dth=ATAN2(q1(1)*q2(2)-q1(2)*q2(1),DOT_PRODUCT(q1,q2))
 sig=SIGN(1.d0,(p2(1)-p1(1))*gmid(2)-(p2(2)-p1(2))*gmid(1))*SIGN(1.d0,detm)
 wacc=wacc+sig*dth/(2.d0*pi)
 end subroutine tri_arc
+!---|grad(psi)| at uv, from the (u,v) gradient of 1-psi-hat
+function grad_mag(uv,grp) result(gq)
+real(r8), intent(in) :: uv(2),grp(2)
+real(r8) :: gq,lam(3),gop(3,3),dj,gp(2)
+lam=[1.d0-uv(1)-uv(2),uv(1),uv(2)]
+CALL gseq%device%fe_rep%mesh%jacobian(cell,lam,gop,dj)
+gp=grp(1)*gop(1:2,2)+grp(2)*gop(1:2,3)
+gq=ABS(dpsi)*SQRT(SUM(gp**2))
+end function grad_mag
 !---|B| and R at uv on surface iq
 subroutine sau_point(uv,iq,bq,rq,grin)
 real(r8), intent(in) :: uv(2)

@@ -15,24 +15,29 @@ USE oft_gs_cutcell, ONLY: gs_fsa_cutcell
 IMPLICIT NONE
 CONTAINS
 !------------------------------------------------------------------------------
-!> q and `ravgs` of @ref gs_get_qprof from the cut-cell quadrature
+!> q, `ravgs` and `fsa_avgs` of @ref gs_get_qprof from the cut-cell quadrature
 !------------------------------------------------------------------------------
 MODULE PROCEDURE gs_qprof_cutcell
-real(8) :: qf(nr),avgs(nr,4),psi_surf,fpol
+real(8) :: qf(nr),avgs(nr,4),fsa(nr,4),fpol(nr),psi_surf
 logical :: done(nr)
 integer(4) :: j
-CALL gs_fsa_cutcell(gseq,nr,psi_q,qf,avgs,done)
-ok=ALL(done)
-IF(.NOT.ok)RETURN
 DO j=1,nr
   psi_surf=psi_q(j)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1)
   IF(gseq%mode==0)THEN
-    fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
+    fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
   ELSE
-    fpol=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
+    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
   END IF
-  prof(j)=fpol*qf(j)
 END DO
+IF(PRESENT(fsa_avgs))THEN
+  CALL gs_fsa_cutcell(gseq,nr,psi_q,qf,avgs,done,fpol,fsa)
+ELSE
+  CALL gs_fsa_cutcell(gseq,nr,psi_q,qf,avgs,done)
+END IF
+ok=ALL(done)
+IF(.NOT.ok)RETURN
+prof=fpol*qf
 IF(PRESENT(ravgs))ravgs=avgs
+IF(PRESENT(fsa_avgs))fsa_avgs=fsa
 END PROCEDURE gs_qprof_cutcell
 END SUBMODULE oft_gs_qprof
