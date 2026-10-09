@@ -32,21 +32,21 @@ class tokamaker_settings_cstruct(c_struct):
 class tokamaker_boot_ops_struct(c_struct):
     r'''! Bootstrap current options for the jphi-split-bootstrap current profile update.
 
-     - `isolate_edge_jBS` Isolate the edge bootstrap spike from the bulk bootstrap current?
-     - `parameterize_jBS` Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jBS` if true.
-     - `scale_jBS` Scaling factor applied to the spike profile (default 1.0)
-     - `djBS_tol` Threshold on relative change in j_BS to freeze bootstrap values (default 1e-4)
+     - `isolate_edge_jbs` Isolate the edge bootstrap spike from the bulk bootstrap current?
+     - `parameterize_jbs` Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jbs` if true.
+     - `scale_jbs` Scaling factor applied to the spike profile (default 1.0)
+     - `djbs_tol` Threshold on relative change in the bootstrap current to freeze it (default 1e-4)
      - `diagnose_bs` Print alpha/Ip scalars, j_BS stats, and full profile tables each NL iteration?
-     - `taper_edge_jBS` Smooth taper of toroidal current to zero at the plasma edge (guards against numerical issues at the separatrix; default False)
+     - `taper_edge_jbs` Smooth taper of toroidal current to zero at the plasma edge (guards against numerical issues at the separatrix; default False)
      - `taper_edge_psi0` psi_N where the taper begins (standard: 0=axis, 1=LCFS; default 0.999)
      - `taper_edge_shape` Taper shape: 1=cos²/Hann, 2=quintic smoothstep (default), 3=cubic power
     '''
-    _fields_ = [('isolate_edge_jBS', c_bool),
-                ('parameterize_jBS', c_bool),
-                ('scale_jBS', c_double),
-                ('djBS_tol', c_double),
+    _fields_ = [('isolate_edge_jbs', c_bool),
+                ('parameterize_jbs', c_bool),
+                ('scale_jbs', c_double),
+                ('djbs_tol', c_double),
                 ('diagnose_bs', c_bool),
-                ('taper_edge_jBS', c_bool),
+                ('taper_edge_jbs', c_bool),
                 ('taper_edge_psi0', c_double),
                 ('taper_edge_shape', c_int)]
 
@@ -106,11 +106,9 @@ tokamaker_set_boot_ops = ctypes_subroutine(oftpy_lib.tokamaker_set_boot_ops,
 tokamaker_get_boot_ops = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_ops,
     [c_void_p, ctypes.POINTER(tokamaker_boot_ops_struct), ctypes.POINTER(c_bool), c_char_p])
 
-# tokamaker_get_boot_profs(tMaker_equil_ptr,n,psi_n_ptr,jphi_total_ptr,jphi_bs_final_ptr,jphi_ind_final_ptr,jphi_fixed_final_ptr,
-#                          jphi_pdriven_final_ptr,n_raw,jphi_bs_raw_ptr,jdotb_bs_raw_ptr,jphi_pdriven_raw_ptr,error_str)
-tokamaker_get_boot_profs = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_profs,
-    [c_void_p, c_int_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr,
-     c_double_ptr_ptr, c_double_ptr_ptr, c_int_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_char_p])
+# tokamaker_get_boot_prof(tMaker_equil_ptr,name,n,prof_ptr,error_str)
+tokamaker_get_boot_prof = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_prof,
+    [c_void_p, c_char_p, c_int_ptr, c_double_ptr_ptr, c_char_p])
 
 # tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
