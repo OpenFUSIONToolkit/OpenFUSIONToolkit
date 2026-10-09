@@ -2406,6 +2406,8 @@ class TokaMaker():
                              f"(got {len(ffp_prof['x'])} and {len(ffp_prof['y'])})")
         if ffp_prof.get('type', 'jphi-split-bootstrap') != 'jphi-split-bootstrap':
             raise ValueError(f"ffp_prof 'type' must be 'jphi-split-bootstrap' (got {ffp_prof['type']!r})")
+        # Work on copies so the caller's profile dicts are not modified
+        ffp_prof, te_prof, ti_prof = dict(ffp_prof), dict(te_prof), dict(ti_prof)
         ffp_prof.setdefault('type', 'jphi-split-bootstrap')
 
         # Check temperature profiles are KeV
