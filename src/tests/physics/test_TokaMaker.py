@@ -1231,7 +1231,6 @@ ITER_bootstrap_eq_dict = {
     'bs_fraction': 0.17910707149956598,
 }
 
-@pytest.mark.slow
 @pytest.mark.parametrize("order", (2,))
 def test_ITER_bootstrap(order):
     results = mp_run(run_ITER_bootstrap_case, (1.0, order), timeout=300)
@@ -1379,15 +1378,12 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     R_avg = ravgs_q['<R>']
 
     # --- Gradients (same as solve_with_bootstrap) ---
-    # Second-order one-sided stencils at the axis/edge, matching the derivative
-    # path used by solve_with_bootstrap
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
-    psi_range_safe = psi_range if psi_range != 0 else 1e-9
 
-    dn_e_dpsi = np.gradient(ne, psi_N, edge_order=2) / psi_range_safe
-    dT_e_dpsi = np.gradient(Te, psi_N, edge_order=2) / psi_range_safe
-    dn_i_dpsi = np.gradient(ni, psi_N, edge_order=2) / psi_range_safe
-    dT_i_dpsi = np.gradient(Ti, psi_N, edge_order=2) / psi_range_safe
+    dn_e_dpsi = np.gradient(ne, psi_N, edge_order=2) / psi_range
+    dT_e_dpsi = np.gradient(Te, psi_N, edge_order=2) / psi_range
+    dn_i_dpsi = np.gradient(ni, psi_N, edge_order=2) / psi_range
+    dT_i_dpsi = np.gradient(Ti, psi_N, edge_order=2) / psi_range
 
     # --- Coulomb logarithms (same as solve_with_bootstrap) ---
     ln_le, ln_lii = calculate_ln_lambda(
@@ -1444,66 +1440,6 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     oftpy_dump_cov()
 
 
-#============================================================================
-# Validation of the optional `psi_N` grid argument to `solve_with_bootstrap`.
-# These pin the Python solve path (`use_python_solve=True`); they exercise input
-# checking only, which happens before the solver object is touched, so they are
-# fast and run in the default CI selection.
-@pytest.mark.coverage
-def test_bootstrap_psi_N_validation():
-    from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap
-    n = 65
-    ne = np.full(n, 1.0e20)
-    Te = np.full(n, 2.0e3)
-    Zeff = np.full(n, 1.7)
-    def call(psi_N):
-        return solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), Zeff,
-                                    1.0e6, psi_N=psi_N, use_python_solve=True)
-    good = np.linspace(0.0, 1.0, n)
-    # wrong length
-    with pytest.raises(ValueError, match="same length"):
-        call(np.linspace(0.0, 1.0, n-1))
-    # duplicated flux label -> undefined derivative
-    dup = good.copy(); dup[32] = dup[31]
-    with pytest.raises(ValueError, match="strictly increasing"):
-        call(dup)
-    # unsorted
-    unsorted_grid = good.copy(); unsorted_grid[10], unsorted_grid[11] = good[11], good[10]
-    with pytest.raises(ValueError, match="strictly increasing"):
-        call(unsorted_grid)
-    # non-finite
-    nan_grid = good.copy(); nan_grid[5] = np.nan
-    with pytest.raises(ValueError, match="non-finite"):
-        call(nan_grid)
-    # out of range
-    with pytest.raises(ValueError, match=r"within \[0,1\]"):
-        call(np.linspace(-0.1, 1.0, n))
-    # psi_pad coarser than the grid would collapse distinct flux surfaces
-    with pytest.raises(ValueError, match="larger than the first/last"):
-        solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), Zeff, 1.0e6,
-                             psi_N=good, psi_pad=0.5, use_python_solve=True)
-
-
-@pytest.mark.coverage
-def test_bootstrap_derivative_edge_order():
-    """Profile derivatives must use a 2nd-order stencil at the axis and edge.
-
-    The first-order default of `numpy.gradient` is badly inaccurate at the
-    magnetic axis, where it propagates directly into on-axis j_BS.
-    """
-    psi = np.linspace(0.0, 1.0, 257)
-    # analytic profile with a known slope
-    y = np.tanh(6.0*(0.9-psi)) + 0.3*np.cos(3.0*psi)
-    exact = -6.0/np.cosh(6.0*(0.9-psi))**2 - 0.9*np.sin(3.0*psi)
-    d2 = np.gradient(y, psi, edge_order=2)
-    d1 = np.gradient(y, psi, edge_order=1)
-    # 2nd-order endpoint is dramatically better at the axis
-    assert abs(d2[0]-exact[0]) < 0.1*abs(d1[0]-exact[0])
-    assert abs(d2[-1]-exact[-1]) < 0.5*abs(d1[-1]-exact[-1])
-    # and matches the analytic slope closely in the interior
-    assert np.linalg.norm(d2[1:-1]-exact[1:-1])/np.linalg.norm(exact[1:-1]) < 5.e-3
-
-
 Redl_jBS_eq_dict = {
     'j_BS_max': 190036.48438360557,
     'j_BS_axis': 5101.043999559047,
@@ -1516,7 +1452,6 @@ Redl_jBS_eq_dict = {
 }
 
 
-@pytest.mark.slow
 @pytest.mark.parametrize("order", (2,))
 def test_Redl_jBS(order):
     results = mp_run(run_Redl_jBS_case, (1.0, order), timeout=300)
@@ -1945,6 +1880,44 @@ ITER_bootstrap_internal_eq_dict = {
 def test_ITER_bootstrap_internal(order):
     results = mp_run(run_ITER_bootstrap_case_internal, (1.0, order), timeout=300)
     assert validate_dict(results, ITER_bootstrap_internal_eq_dict)
+
+# -----------------------------------------------------------------------
+# Test: solve_with_bootstrap() psi_N validation (fails before the solver is used)
+# -----------------------------------------------------------------------
+@pytest.mark.coverage
+def test_bootstrap_psi_N_validation():
+    from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap
+    n = 65
+    ne = np.full(n, 1.0e20)
+    Te = np.full(n, 2.0e3)
+    Zeff = np.full(n, 1.7)
+    def call(psi_N, psi_pad=1.E-3):
+        return solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), Zeff,
+                                    1.0e6, psi_pad=psi_pad, psi_N=psi_N, use_python_solve=True)
+    good = np.linspace(0.0, 1.0, n)
+    dup = good.copy()
+    dup[32] = dup[31]
+    unsorted_grid = good.copy()
+    unsorted_grid[[10, 11]] = good[[11, 10]]
+    nan_grid = good.copy()
+    nan_grid[5] = np.nan
+    with pytest.raises(ValueError, match="same length"):
+        call(np.linspace(0.0, 1.0, n-1))
+    with pytest.raises(ValueError, match="strictly increasing"):
+        call(dup)
+    with pytest.raises(ValueError, match="strictly increasing"):
+        call(unsorted_grid)
+    with pytest.raises(ValueError, match="non-finite"):
+        call(nan_grid)
+    with pytest.raises(ValueError, match="span"):
+        call(np.linspace(-0.1, 1.0, n))
+    with pytest.raises(ValueError, match="span"):
+        call(np.linspace(0.3, 1.0, n))
+    with pytest.raises(ValueError, match="span"):
+        call(np.linspace(0.0, 0.5, n))
+    with pytest.raises(ValueError, match="exceeds the first/last"):
+        call(good, psi_pad=0.5)
+
 
 # -----------------------------------------------------------------------
 # Test: GEQDSK (g-file) reader in TokaMaker.eqdsk
