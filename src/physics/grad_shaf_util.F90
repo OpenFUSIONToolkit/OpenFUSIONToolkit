@@ -449,7 +449,7 @@ integer(4) :: hash_tmp,hash_in,io_unit,int_tmp,ndims
 integer(i4), allocatable :: dim_sizes(:)
 REAL(r8) :: pt_tmp(2),scale_tmp,diff_val
 real(r8), pointer :: vals_tmp(:)
-logical :: success,pm_save,logical_tmp
+logical :: success,pm_save,logical_tmp,restored
 CHARACTER(LEN=:), ALLOCATABLE :: profType
 error_string=''
 ! CALL hdf5_write(self%device%fe_rep%mesh%r,filename,'mesh/R')
@@ -854,8 +854,18 @@ IF(hdf5_field_exist(filename,'tokamaker/MIRNOV_TARGETS'))THEN
     RETURN
   END IF
 END IF
-!---Update all flux functions now that all fields (F0, targets, kinetics) are loaded
-CALL self%I%update(self)
+!---Update all flux functions now that all fields (F0, targets, kinetics) are loaded; a bootstrap
+!   F*F' restored from the file is kept as saved (an update would recompute it)
+restored=.FALSE.
+SELECT TYPE(I=>self%I)
+  TYPE IS(jphi_bs_flux_func)
+    restored=I%ffp_restored
+END SELECT
+IF(restored)THEN
+  self%I%plasma_bounds=self%plasma_bounds
+ELSE
+  CALL self%I%update(self)
+END IF
 CALL self%P%update(self)
 IF(ASSOCIATED(self%I_NI))CALL self%I_NI%update(self)
 IF(ASSOCIATED(self%eta))CALL self%eta%update(self)

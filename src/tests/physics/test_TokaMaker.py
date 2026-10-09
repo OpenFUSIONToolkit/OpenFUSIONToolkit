@@ -1648,6 +1648,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         # Capture expected state before save so we can check all fields
         expected_boot_ops = dict(mygs._tMaker_equil._boot_ops)
         expected_boot_profs = mygs.get_boot_profs()
+        _, F_s, Fp_s, _, _ = mygs.get_profiles(npsi=50)
         mygs._tMaker_equil.save_TokaMaker(save_file)
         # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
         mygs._tMaker_equil._boot_ops['scale_jBS'] = -999.0
@@ -1673,6 +1674,11 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
                     raise AssertionError(
                         f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
                     )
+        # Verify F*F' round-trips exactly (the saved knots are restored, not recomputed)
+        _, F_l, Fp_l, _, _ = mygs.get_profiles(npsi=50)
+        ffp_err = np.max(np.abs(F_l*Fp_l - F_s*Fp_s)) / np.max(np.abs(F_s*Fp_s))
+        if ffp_err > 1e-10:
+            raise AssertionError(f"F*F' changed through save/load (max rel diff {ffp_err:.3e})")
         # Verify BOOT_PROFS arrays round-trip correctly through save/load
         if expected_boot_profs is None:
             raise AssertionError("get_boot_profs() returned None before save")

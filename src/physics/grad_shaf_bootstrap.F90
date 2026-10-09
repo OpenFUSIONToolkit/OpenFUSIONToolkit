@@ -74,6 +74,7 @@ type, extends(jphi_flux_func) :: jphi_bs_flux_func
   integer(4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
   real(8) :: dalpha_last = huge(1.0d0) !< dalpha of the previous update (stall diagnostic)
   real(8), pointer, dimension(:) :: j_BS_last => NULL() !< j_BS profile from previous NL iteration (for freeze check)
+  logical :: ffp_restored = .FALSE. !< F*F' knots were read from a file, so loading keeps them instead of updating
   TYPE(boot_ops) :: boot_ops       !< Python read-in ptions for j_bs_update
   TYPE(boot_profs) :: boot_profs   !< Cached current profiles from the last jphi_bs_update call
 contains
@@ -131,6 +132,8 @@ CALL hdf5_write(self%npsi,filename,path//'/NPSI')
 CALL hdf5_write(self%x,filename,path//'/XVALS')
 CALL hdf5_write(self%jphi,filename,path//'/YVALS')
 CALL hdf5_write(self%j0,filename,path//'/J0')
+CALL hdf5_write(self%yp,filename,path//'/YPVALS') ! F*F' knots and LCFS value, so a load restores the profile exactly
+CALL hdf5_write(self%y0,filename,path//'/Y0')
 !---Save boot_ops (only when initialized)
 IF(self%boot_ops%initialized)THEN
   CALL hdf5_create_group(filename,path//'/BOOT_OPS')
@@ -181,7 +184,7 @@ character(LEN=*), intent(in) :: path
 logical, intent(out) :: success
 integer(i4), allocatable :: dim_sizes(:)
 integer(i4) :: npsi
-integer(4) :: int_tmp, ndims
+integer(4) :: int_tmp, ndims, ierr
 real(r8) :: J0
 real(r8), allocatable :: xvals(:),yvals(:)
 CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
@@ -195,6 +198,16 @@ CALL hdf5_read(J0,filename,path//'/J0',success=success)
 IF(.NOT.success)RETURN
 CALL create_jphi_bs_ff(self,npsi,xvals,yvals,J0) ! Load npsi,xvals,yvals,J0
 DEALLOCATE(xvals,yvals)
+!---F*F' knots (files written before they were saved get the update on load instead)
+self%ffp_restored=.FALSE.
+IF(hdf5_field_exist(filename,path//'/YPVALS').AND.hdf5_field_exist(filename,path//'/Y0'))THEN
+  CALL hdf5_read(self%y0,filename,path//'/Y0',success=success)
+  IF(success)CALL hdf5_read(self%yp,filename,path//'/YPVALS',success=success)
+  IF(success)THEN
+    ierr=self%set_cofs(self%yp)
+    self%ffp_restored=.TRUE.
+  END IF
+END IF
 !---Load boot_ops
 self%boot_ops%initialized = .FALSE.
 IF(hdf5_field_exist(filename,path//'/BOOT_OPS'))THEN
