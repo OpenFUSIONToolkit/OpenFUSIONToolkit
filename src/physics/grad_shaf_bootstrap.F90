@@ -737,7 +737,7 @@ real(8), intent(out) :: fc(nr) !< Circulating particle fraction \f$ f_c \f$
 real(8), intent(out) :: r_avgs(nr,3) !< Flux surface averaged radial coords \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
 real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field \f$<|B|>\f$, \f$<|B|^2>\f$
 real(8), optional, intent(out) :: qprof(nr) !< Safety factor q on each surface (avoids a separate gs_get_qprof call)
-real(8), optional, intent(out) :: eps(nr) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(2\langle R \rangle) \f$ on each surface
+real(8), optional, intent(out) :: eps(nr) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min}) \f$ on each surface
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi,h,h2,hf,ftu,ftl
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp) :: psi_int
@@ -846,7 +846,7 @@ do j=1,nr
   fc(j) = 1.d0 - (0.75d0 * ftu + 0.25d0 * ftl)
   qpsi = fpol * active_tracer%v(9) / (2*pi)
   IF(PRESENT(qprof)) qprof(j) = qpsi
-  IF(PRESENT(eps))   eps(j)   = (field%rmax_surf - field%rmin_surf) / (2.d0 * r_avgs(j,1))
+  IF(PRESENT(eps))   eps(j)   = (field%rmax_surf - field%rmin_surf) / (field%rmax_surf + field%rmin_surf)
 end do
 CALL field%delete
 CALL active_tracer%delete
