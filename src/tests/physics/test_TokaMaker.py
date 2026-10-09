@@ -2090,11 +2090,11 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
     oftpy_dump_cov()
 
 
-def _torflux_check(res, psi_tol, q_tol, its_ref=None):
+def _torflux_check(res, psi_tol, q_tol, its_ref=None, ip_tol=1.E-4):
     assert res['psi_err'] < psi_tol
     assert res['q_err'] < q_tol
-    # I_p is set by the exact 1-D profile quadrature (no FEM rescale in jphi_bs_update): residual up to ~4e-4
-    assert res['Ip_err'] < 5.E-4
+    # Bootstrap I_p comes from the 1-D profile quadrature (no FEM rescale)
+    assert res['Ip_err'] < ip_tol
     if its_ref is not None:
         assert res['its'] <= its_ref + 5
 
@@ -2127,7 +2127,7 @@ def test_ITER_torflux_jphi(order):
 def test_ITER_torflux_bootstrap(order):
     results = mp_run(run_ITER_torflux_case,(order,'bootstrap'),timeout=600)
     assert results is not None
-    _torflux_check(results['phi_n'],3.E-3,3.E-3)
+    _torflux_check(results['phi_n'],3.E-3,3.E-3,ip_tol=2.E-4)
     assert results['jbs_err'] < 1.E-2
     assert results['node_err'] < 1.E-12
     assert results['swb_node_err'] < 1.E-12

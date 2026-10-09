@@ -131,10 +131,11 @@ end subroutine set_tracer
 !------------------------------------------------------------------------------
 !> Trace field line for one flux surface transit in inverse coordinates
 !------------------------------------------------------------------------------
-subroutine tracinginv_fs(mesh,pt,ptout)
+subroutine tracinginv_fs(mesh,pt,ptout,vout)
 class(oft_bmesh), target, intent(in) :: mesh !< Mesh for tracing
 real(8), intent(in) :: pt(2) !< Starting point [2]
 real(8), optional, intent(inout) :: ptout(:,:) !< Points on surface [3,:]
+real(8), optional, intent(inout) :: vout(:,:) !< Leading ODE RHS components at the last evaluation of each step [:,maxsteps]
 real(8) :: z,tp,yp(2)
 integer(4) :: ncross
 !---
@@ -161,6 +162,7 @@ do while(active_tracer%nsteps<active_tracer%maxsteps)
       ptout(2:3,active_tracer%nsteps+1)=active_tracer%y
       ptout(1,active_tracer%nsteps+1)=active_tracer%t
     END IF
+    IF(present(vout))vout(:,active_tracer%nsteps)=active_tracer%dv(1:SIZE(vout,1))
     if(active_tracer%t>=2.d0*pi)then
         active_tracer%status=1
         exit

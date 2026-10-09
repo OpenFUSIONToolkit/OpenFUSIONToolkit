@@ -22,9 +22,10 @@ USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
   gs_get_qprof, gs_ani_press, gs_epsilon
+use oft_gs_cutcell, only: gs_ravg_cutcell
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
-  spline_func_copy, spline_func_delete, phi_flux_wrapper
+  spline_func_copy, spline_func_delete, phi_flux_wrapper, torflux_qgeom_backend
 use spline_mod
 USE mhd_utils, ONLY: mu0
 implicit none
@@ -56,7 +57,6 @@ end type mercier_flux_func
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(linterp_flux_func) :: jphi_flux_func
-  integer(4) :: ngeom = 50 !< Number of points in psi for <R>, <1/R> evaluation
   real(8) :: j0 = 0.d0 !< LCFS Jphi value
   real(8) :: norm_last = 1.d0 !< Last Jphi normalization factor (for Ip target)
   real(8), pointer, dimension(:) :: jphi => NULL() !< Jphi(psi) profile values
@@ -501,7 +501,6 @@ SELECT TYPE(new)
   CLASS IS(jphi_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
-    new%ngeom = self%ngeom
     new%j0 = self%j0
     new%norm_last = self%norm_last
     ALLOCATE(new%jphi, SOURCE=self%jphi)
@@ -526,15 +525,15 @@ class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
 REAL(r8) :: jphi_norm,pscale,pprime,dnorm,ip0,ip1
-REAL(r8), ALLOCATABLE :: jtor(:),xpsi(:)
-type(spline_type) :: R_spline
+REAL(r8), ALLOCATABLE :: jtor(:),xpsi(:),ravgs(:,:)
 self%plasma_bounds=gseq%plasma_bounds
 CALL jphi_psi_nodes(self,xpsi)
 IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
 IF(gseq%Ip_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
-!---Get updated flux surface geometry for Jphi -> F*F' mapping
-CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
+!---Flux surface geometry for Jphi -> F*F' mapping at the LCFS (row 0) and nodes
+ALLOCATE(ravgs(0:self%npsi,3))
+CALL gs_ravgs(gseq, self%npsi+1, [0.d0, xpsi], ravgs)
 !---Get pressure profile
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__) !CALL gseq%P_ani%update(gseq)
@@ -549,22 +548,20 @@ IF(gseq%skip_targets)THEN
 ELSE
   ! Exact I_p (A9c) is affine in the jphi scale: I_p(norm) = ip0 + norm*(ip1 - ip0)
   ALLOCATE(jtor(self%npsi))
-  CALL eval_jtor_imas(gseq, R_spline, xpsi, self%npsi, self%jphi, pscale, jtor)
+  CALL eval_jtor_imas(gseq, xpsi, self%npsi, ravgs(1:,:), self%jphi, pscale, jtor)
   CALL gs_flux_int(gseq,xpsi,jtor,self%npsi,ip1)
-  CALL eval_jtor_imas(gseq, R_spline, xpsi, self%npsi, 0.d0*self%jphi, pscale, jtor)
+  CALL eval_jtor_imas(gseq, xpsi, self%npsi, ravgs(1:,:), 0.d0*self%jphi, pscale, jtor)
   CALL gs_flux_int(gseq,xpsi,jtor,self%npsi,ip0)
   DEALLOCATE(jtor)
   jphi_norm=(ABS(gseq%Ip_target)-ip0)/(ip1-ip0)
   self%norm_last=jphi_norm
 END IF
 !---Compute updated F*F' profile ! 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
-CALL spline_eval(R_spline,0.d0,0)
 pprime=gseq%P%fp(gseq%plasma_bounds(1))
-self%y0 = 2.d0*(self%j0*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
+self%y0 = 2.d0*(self%j0*jphi_norm - ravgs(0,1)*pprime*pscale)/ravgs(0,2)
 DO i=1,self%npsi
-  CALL spline_eval(R_spline,xpsi(i),0)
   pprime=gseq%P%fp(xpsi(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
-  self%yp(i) = 2.d0*(self%jphi(i)*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
+  self%yp(i) = 2.d0*(self%jphi(i)*jphi_norm - ravgs(i,1)*pprime*pscale)/ravgs(i,2)
 END DO
 ! Disable Ip matching and fix F*F' scale (matching is done here instead)
 gseq%skip_targets=.TRUE.
@@ -572,7 +569,7 @@ gseq%skip_targets=.TRUE.
 gseq%ffp_scale=1.d0
 gseq%p_scale=pscale
 !---Clean up
-CALL spline_dealloc(R_spline)
+DEALLOCATE(ravgs)
 i=self%set_cofs(self%yp)
 end subroutine jphi_update
 !------------------------------------------------------------------------------
@@ -631,59 +628,60 @@ CALL prof_interp_obj%delete()
 ! DEBUG_STACK_POP
 END SUBROUTINE gs_flux_int
 !------------------------------------------------------------------------------
-!> Build the <R> / <1/R> / <1/R^2> spline needed for jphi -> F*F' mapping and the I_p measure.
-!> Allocates and fits R_spline on ngeom points from the current equilibrium.
-!> Caller is responsible for calling spline_dealloc(R_spline) when done.
+!> Flux surface averages <R>, <1/R>, <1/R^2> on normalized psi nodes (0 at the LCFS, 1 at the axis)
+!!
+!! Cut-cell quadrature (@ref oft_gs_cutcell::gs_ravg_cutcell), tracing only surfaces it cannot
+!! close, or all when `torflux_qgeom_backend=1` (testing). The axis takes its exact limit; nodes
+!! at or outside the LCFS are traced on it if limited, or `psi_pad` inside it if diverted.
 !------------------------------------------------------------------------------
-SUBROUTINE build_Ravg_spline(gseq, ngeom, R_spline)
-CLASS(gs_equil), INTENT(inout) :: gseq
-INTEGER(i4), INTENT(in) :: ngeom
-TYPE(spline_type), INTENT(out) :: R_spline
-INTEGER(i4) :: i
-REAL(r8), ALLOCATABLE :: ravgs(:,:), psi_q(:), qprof(:)
+SUBROUTINE gs_ravgs(gseq, n, psi_vals, ravgs)
+CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+INTEGER(i4), INTENT(in) :: n !< Number of nodes
+REAL(r8), INTENT(in) :: psi_vals(n) !< Node locations
+REAL(r8), INTENT(out) :: ravgs(n,3) !< <R>, <1/R>, <1/R^2> at each node
 REAL(r8), PARAMETER :: psi_pad = 1.d-3
-ALLOCATE(ravgs(ngeom,4), psi_q(ngeom), qprof(ngeom))
-psi_q = [(REAL(i-1,r8)/REAL(ngeom,r8), i=1,ngeom)]
-IF(gseq%diverted)THEN
-  psi_q(1) = MIN(psi_q(2), psi_pad)
-  CALL gs_get_qprof(gseq, ngeom, psi_q, qprof, ravgs=ravgs)
-  psi_q(1) = 0.d0
-  ravgs(1,1) = gseq%lim_point(1)
-  ravgs(1,2) = 1.d0/gseq%lim_point(1)
-  ravgs(1,3) = 1.d0/gseq%lim_point(1)**2
-ELSE
-  CALL gs_get_qprof(gseq, ngeom, psi_q, qprof, ravgs=ravgs)
-END IF
-CALL spline_alloc(R_spline, ngeom-1, 3)
-R_spline%xs(0:ngeom-2) = psi_q(1:ngeom-1); R_spline%xs(ngeom-1) = 1.d0
-R_spline%fs(0:ngeom-2,1) = ravgs(1:ngeom-1,1)
-R_spline%fs(ngeom-1,1) = gseq%o_point(1)
-R_spline%fs(0:ngeom-2,2) = ravgs(1:ngeom-1,2)
-R_spline%fs(ngeom-1,2) = 1.d0/gseq%o_point(1)
-R_spline%fs(0:ngeom-2,3) = ravgs(1:ngeom-1,3)
-R_spline%fs(ngeom-1,3) = 1.d0/gseq%o_point(1)**2
-CALL spline_fit(R_spline, "extrap")
-DEALLOCATE(ravgs, psi_q, qprof)
-END SUBROUTINE build_Ravg_spline
+REAL(r8) :: psi_q(n)
+REAL(r8), ALLOCATABLE :: rtr(:,:), qtr(:)
+LOGICAL :: ok(n)
+INTEGER(i4) :: k, m
+psi_q = MERGE(psi_vals, MERGE(psi_pad, 0.d0, gseq%diverted), psi_vals>0.d0)
+ravgs = 0.d0
+ok = .FALSE.
+IF(torflux_qgeom_backend/=1)CALL gs_ravg_cutcell(gseq, n, psi_q, ravgs, ok)
+WHERE(psi_q>=1.d0)
+  ravgs(:,1) = gseq%o_point(1)
+  ravgs(:,2) = 1.d0/gseq%o_point(1)
+  ravgs(:,3) = 1.d0/gseq%o_point(1)**2
+  ok = .TRUE.
+END WHERE
+m = COUNT(.NOT.ok)
+IF(m==0)RETURN
+ALLOCATE(rtr(m,4), qtr(m))
+rtr = 0.d0
+CALL gs_get_qprof(gseq, m, PACK(psi_q, .NOT.ok), qtr, ravgs=rtr)
+DO k=1,3
+  ravgs(:,k) = UNPACK(rtr(:,k), .NOT.ok, ravgs(:,k))
+END DO
+DEALLOCATE(rtr, qtr)
+END SUBROUTINE gs_ravgs
 !------------------------------------------------------------------------------
 !> IMAS-convention <j_phi/R>/<1/R> from TokaMaker jphi = <j_phi> on the psi_N grid psi_vals
 !> (OFT convention), eq. A5 of doc_tokamaker_current_conventions; gs_flux_int of the result is
 !> exactly I_p (eq. A9c). jphi and P'*pscale must share units.
 !------------------------------------------------------------------------------
-SUBROUTINE eval_jtor_imas(gseq, R_spline, psi_vals, n, jphi, pscale, jtor)
+SUBROUTINE eval_jtor_imas(gseq, psi_vals, n, ravgs, jphi, pscale, jtor)
 CLASS(gs_equil), INTENT(inout) :: gseq
-TYPE(spline_type), INTENT(inout) :: R_spline
 INTEGER(i4), INTENT(in) :: n
 REAL(r8), INTENT(in) :: psi_vals(n)
+REAL(r8), INTENT(in) :: ravgs(n,3) !< <R>, <1/R>, <1/R^2> at psi_vals (@ref gs_ravgs)
 REAL(r8), INTENT(in) :: jphi(n)
 REAL(r8), INTENT(in) :: pscale
 REAL(r8), INTENT(out) :: jtor(n)
 INTEGER(i4) :: i
 REAL(r8) :: pprime
 DO i = 1, n
-  CALL spline_eval(R_spline, psi_vals(i), 0)
   pprime = pscale*gseq%P%fp(psi_vals(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
-  jtor(i) = (pprime + R_spline%f(3)*(jphi(i) - R_spline%f(1)*pprime)/R_spline%f(2))/R_spline%f(2)
+  jtor(i) = (pprime + ravgs(i,3)*(jphi(i) - ravgs(i,1)*pprime)/ravgs(i,2))/ravgs(i,2)
 END DO
 END SUBROUTINE eval_jtor_imas
 !---------------------------------------------------------------------------------
