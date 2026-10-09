@@ -1885,15 +1885,17 @@ def test_ITER_bootstrap_internal(order):
 # Test: solve_with_bootstrap() psi_N validation (fails before the solver is used)
 # -----------------------------------------------------------------------
 @pytest.mark.coverage
-def test_bootstrap_psi_N_validation():
+@pytest.mark.parametrize("use_python_solve", (True, False))
+def test_bootstrap_psi_N_validation(use_python_solve):
     from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap
     n = 65
     ne = np.full(n, 1.0e20)
     Te = np.full(n, 2.0e3)
     Zeff = np.full(n, 1.7)
-    def call(psi_N, psi_pad=1.E-3):
-        return solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), Zeff,
-                                    1.0e6, psi_pad=psi_pad, psi_N=psi_N, use_python_solve=True)
+    def call(psi_N, psi_pad=1.E-3, m=n):
+        return solve_with_bootstrap(None, ne[:m], Te[:m], ne[:m].copy(), Te[:m].copy(), Zeff[:m],
+                                    1.0e6, inductive_jphi=np.ones(m), psi_pad=psi_pad, psi_N=psi_N,
+                                    use_python_solve=use_python_solve)
     good = np.linspace(0.0, 1.0, n)
     dup = good.copy()
     dup[32] = dup[31]
@@ -1915,8 +1917,11 @@ def test_bootstrap_psi_N_validation():
         call(np.linspace(0.3, 1.0, n))
     with pytest.raises(ValueError, match="span"):
         call(np.linspace(0.0, 0.5, n))
-    with pytest.raises(ValueError, match="exceeds the first/last"):
-        call(good, psi_pad=0.5)
+    with pytest.raises(ValueError, match="at least 5 points"):
+        call(None, m=4)
+    if use_python_solve:  # psi_pad is used by the Python solver only
+        with pytest.raises(ValueError, match="exceeds the first/last"):
+            call(good, psi_pad=0.5)
 
 
 # -----------------------------------------------------------------------
