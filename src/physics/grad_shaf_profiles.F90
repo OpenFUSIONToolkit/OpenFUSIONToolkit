@@ -280,6 +280,10 @@ contains
   procedure :: load_hdf5 => phi_wrap_load_hdf5
   procedure :: load_txt => phi_wrap_load_txt
 end type phi_flux_wrapper
+!---Toroidal flux map internals
+PRIVATE :: sort_unique, quad_interp, fd_deriv, tmap_find, tmap_index, tmap_lookup, torflux_qgeom, &
+  phi_wrap_map, phi_wrap_norm, phi_wrap_relabel_int, phi_wrap_relabel_cof, phi_wrap_relabel_f, &
+  phi_wrap_build_fint, torflux_set_bounds
 contains
 !------------------------------------------------------------------------------
 !> Needs Docs
