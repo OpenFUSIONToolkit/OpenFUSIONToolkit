@@ -39,7 +39,7 @@ type, abstract :: tracer
   real(r8) :: raxis = 0.d0 !< Radial location of axis for inverse coordinates
   real(r8) :: zaxis = 0.d0 !< Vertical location of axis for inverse coordinates
   real(r8), pointer :: v(:) => NULL() !< Current ODE solution vector
-  real(r8), pointer :: dv(:) => NULL() !< Change in ODE solution over last step
+  real(r8), pointer :: dv(:) => NULL() !< ODE right-hand side at the last evaluation
   class(bfem_interp), pointer :: B => NULL() !< Interpolation object for field evaluation
   class(oft_bmesh), pointer :: mesh => NULL()
 contains

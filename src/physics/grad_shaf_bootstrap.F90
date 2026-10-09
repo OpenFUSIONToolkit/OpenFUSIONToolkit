@@ -414,7 +414,7 @@ end subroutine jphi_bs_delete
 !>   4a. Sawtooth reset (saw_q_s > 0): j_saw = jphi_saw + the Ip-neutral current that resets the q of
 !>      base = alpha*jphi_ind + j_BS + jphi_fixed + jphi_saw above saw_q_s (@ref saw_redistribute).
 !>   5. Assemble jphi_total = alpha*jphi_ind + j_BS + jphi_fixed + j_saw; compute F*F' knots.
-!>   6. Diagnostics (if diagnose_bs is set), including wall times of the steps above.
+!>   6. Diagnostics (if diagnose_bs is set).
 !---------------------------------------------------------------------------------
 SUBROUTINE jphi_bs_update(self, gseq)
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
@@ -852,6 +852,11 @@ phi(1) = q_eq(1)*(1.0_r8 - xn(n))
 DO i = 2, n
   phi(i) = phi(i-1) + 0.5_r8*(q_eq(i) + q_eq(i-1))*(xn(n+2-i) - xn(n+1-i))
 END DO
+IF(.NOT.(phi(n) > 0.0_r8))THEN
+  CALL oft_warn('saw_redistribute: no closed surfaces for the q profile, skipping the reset this update')
+  dj = 0.0_r8
+  RETURN
+END IF
 rho = SQRT(phi/phi(n))
 !---Nodes kept for the reset: the axis (if it is a node) and every node whose bin adds >= dAmin
 ALLOCATE(kk(n))
@@ -1331,6 +1336,8 @@ IF(oft_debug_print(1))THEN
   CALL oft_decrease_indent
 END IF
 ALLOCATE(pts(2,nr),fpol(nr),qtmp(nr),epstmp(nr),i2tmp(nr),done(nr))
+!---Surfaces that fail below keep zeros
+r_avgs=0.d0; modb_avgs=0.d0; fc=0.d0; qtmp=0.d0; epstmp=0.d0; i2tmp=0.d0
 DO j=1,nr
   psi_surf=psi_q(j)*(x2-x1) + x1
   IF(gseq%mode==0)THEN

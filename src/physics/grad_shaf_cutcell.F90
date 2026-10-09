@@ -56,7 +56,7 @@ REAL(r8), PARAMETER :: wg5(5) = [0.236926885056189087514264d0,0.4786286704993664
 TYPE(oft_scalar_bfem), POINTER :: perm_rep => NULL()
 INTEGER(i8) :: perm_sum = -1
 INTEGER(i4), ALLOCATABLE :: perm(:,:)
-PUBLIC gs_qgeom_cutcell, gs_ravg_cutcell, gs_sauter_cutcell, gs_fsa_cutcell
+PUBLIC gs_qgeom_cutcell, gs_sauter_cutcell, gs_fsa_cutcell
 CONTAINS
 !------------------------------------------------------------------------------
 !> Geometric factor \f$ g = q/F = \frac{1}{2\pi} \oint \frac{dl}{R |\nabla \psi|} \f$ on flux surfaces
@@ -89,26 +89,6 @@ DO i=1,nr
 END DO
 end subroutine gs_qgeom_cutcell
 !------------------------------------------------------------------------------
-!> Flux-surface averages \f$ \langle R \rangle \f$, \f$ \langle 1/R \rangle \f$ and
-!! \f$ \langle 1/R^2 \rangle \f$ by the same quadrature (independent of the thread count)
-!------------------------------------------------------------------------------
-subroutine gs_ravg_cutcell(gseq,nr,psi_q,ravgs,ok)
-class(gs_equil), intent(inout) :: gseq !< G-S object
-integer(i4), intent(in) :: nr !< Number of surfaces
-real(r8), intent(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
-real(r8), intent(out) :: ravgs(nr,3) !< \f$ \langle R \rangle \f$, \f$ \langle 1/R \rangle \f$, \f$ \langle 1/R^2 \rangle \f$
-logical, intent(out) :: ok(nr) !< Surface inside (0,1) and closed about the O-point
-real(r8) :: g(nr),wind(nr),racc(3,nr),dpsi
-CALL geom_sums(gseq,nr,psi_q,g,wind,dpsi,racc)
-ok=(dpsi/=0.d0).AND.(psi_q>0.d0).AND.(psi_q<1.d0).AND.(ABS(wind-1.d0)<=wind_tol)
-ravgs=0.d0
-WHERE(ok)
-  ravgs(:,1)=racc(2,:)/racc(1,:)
-  ravgs(:,2)=racc(3,:)/racc(1,:)
-  ravgs(:,3)=g/racc(1,:)
-END WHERE
-end subroutine gs_ravg_cutcell
-!------------------------------------------------------------------------------
 !> \f$ q/F \f$, the flux-surface averages and the surface shape of @ref oft_gs::gs_get_qprof
 !! (`ravgs`, `fsa_avgs`, `shape_geo`) by the same quadrature
 !------------------------------------------------------------------------------
@@ -125,6 +105,7 @@ real(r8), optional, intent(out) :: shp(nr,6) !< \f$ R_{min} \f$, \f$ R_{max} \f$
 real(r8) :: wind(nr),racc(3,nr),dpsi
 real(r8), allocatable :: facc(:,:),xacc(:,:,:)
 integer(i4) :: k
+IF(PRESENT(fsa).AND.(.NOT.PRESENT(fpol)))CALL oft_abort('"fsa" requires "fpol"','gs_fsa_cutcell',__FILE__)
 !---Unallocated accumulators are passed as absent (F2008)
 IF(PRESENT(fsa))ALLOCATE(facc(5,nr))
 IF(PRESENT(shp))ALLOCATE(xacc(2,4,nr))
@@ -135,7 +116,7 @@ WHERE(ok)
   ravgs(:,1)=racc(2,:)/racc(1,:)
   ravgs(:,2)=racc(3,:)/racc(1,:)
   ravgs(:,3)=qf/racc(1,:)
-  ravgs(:,4)=-2.d0*pi*racc(1,:)/dpsi
+  ravgs(:,4)=-2.d0*pi*racc(1,:)/ABS(dpsi)
   qf=qf/(2.d0*pi*ABS(dpsi))
 ELSEWHERE
   qf=0.d0
@@ -258,7 +239,7 @@ real(r8), intent(out) :: ext(3,nr) !< \f$ B_{max} \f$, \f$ R_{max} \f$, \f$ -R_{
 logical, intent(out) :: ok(nr) !< Surface inside (0,1) and closed about the O-point
 type(bern_tab) :: bt
 real(r8), pointer :: vals(:)
-real(r8), allocatable :: ablk(:,:,:),wblk(:,:),gloc(:),wloc(:),aloc(:,:),eloc(:,:),xloc(:,:,:),wind(:)
+real(r8), allocatable :: ablk(:,:,:),wblk(:,:),gloc(:),wloc(:),aloc(:,:),eloc(:),xloc(:,:,:),wind(:)
 real(r8) :: x1,dpsi,xacc(2,4,nr)
 integer(i4) :: nblk,ib,cell,i,nc
 acc=0.d0; ext=-HUGE(1.d0); ok=.FALSE.; xacc=-HUGE(1.d0)
@@ -275,7 +256,7 @@ CALL perm_update(gseq%device%fe_rep,bt)
 nblk=(nc+nblk_cells-1)/nblk_cells
 ALLOCATE(ablk(8,nr,nblk),wblk(nr,nblk))
 !$omp parallel private(ib,cell,i,gloc,wloc,aloc,eloc,xloc)
-ALLOCATE(gloc(nr),wloc(nr),aloc(8,nr),eloc(1,nr),xloc(2,4,nr))
+ALLOCATE(gloc(nr),wloc(nr),aloc(8,nr),eloc(nr),xloc(2,4,nr))
 eloc=-HUGE(1.d0); xloc=-HUGE(1.d0)
 !$omp do schedule(dynamic,1)
 DO ib=1,nblk
@@ -288,7 +269,7 @@ DO ib=1,nblk
 END DO
 !$omp end do
 !$omp critical
-ext(1:1,:)=MAX(ext(1:1,:),eloc)
+ext(1,:)=MAX(ext(1,:),eloc)
 DO i=1,nr
   CALL ext_merge(xacc(:,:,i),xloc(:,:,i))
 END DO
@@ -324,7 +305,7 @@ real(r8), intent(inout) :: wloc(nr) !< Accumulated winding number
 real(r8), optional, intent(in) :: fpol(nr) !< F on each surface (Sauter sums only)
 real(r8), optional, intent(in) :: bref(nr) !< \f$ B_{ref} \f$ on each surface (Sauter sums only)
 real(r8), optional, intent(inout) :: aloc(:,:) !< Accumulated Sauter sums [8,nr] (see @ref gs_sauter_cutcell)
-real(r8), optional, intent(inout) :: eloc(:,:) !< Accumulated \f$ B_{max} \f$ [1,nr]
+real(r8), optional, intent(inout) :: eloc(:) !< Accumulated \f$ B_{max} \f$ [nr]
 real(r8), optional, intent(inout) :: racc(:,:) !< Accumulated \f$ \oint w\,[R, R^2, 1] \f$ [3,nr] (see @ref geom_sums)
 real(r8), optional, intent(inout) :: facc(:,:) !< Accumulated \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$ [5,nr] (needs `fpol`)
 real(r8), optional, intent(inout) :: xacc(:,:,:) !< Accumulated surface extrema [2,4,nr] (see @ref ext_add)
@@ -507,7 +488,7 @@ IF(PRESENT(racc))racc(:,iq)=racc(:,iq)+rv*ABS(xi2-xi1)/2.d0
 IF(PRESENT(facc))facc(:,iq)=facc(:,iq)+fv*ABS(xi2-xi1)/2.d0
 IF(PRESENT(aloc))THEN
   aloc(:,iq)=aloc(:,iq)+av*ABS(xi2-xi1)/2.d0
-  eloc(1,iq)=MAX(eloc(1,iq),arc_peak(ng,sx,sb))
+  eloc(iq)=MAX(eloc(iq),arc_peak(ng,sx,sb))
 END IF
 IF(PRESENT(xacc))CALL arc_extrema(s,p1,p2,xi1,xi2,ng,xs,sp,sg,xacc(:,:,iq))
 !---Winding about O-point, oriented with 1-psi-hat increasing to the left
