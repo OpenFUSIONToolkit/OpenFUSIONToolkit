@@ -915,7 +915,8 @@ class reconstruction():
         @param ftol Stopping condition: termination occurs when both the actual and predicted relative reductions in the sum of squares are at most `ftol`
         @param xtol Stopping condition: termination occurs when the relative error between two consecutive iterates is at most `xtol`
         @param gtol Stopping condition: termination occurs when the cosine of the angle between fvec and any column of the jacobian is at most `gtol` in absolute value
-        @result Error flag
+        @result Error flag (0: success; -1: `fitR0` and `fit_Pscale` requested together; -2: initial equilibrium solve failed;
+        -3: no free parameters, or fewer constraints than free parameters; -4: invalid inputs to fitting routine)
         '''
         # Check for possibly conflicting constraints
         if self._tMaker_obj._tMaker_equil.Isoflux_constraints is not None:

@@ -12,7 +12,8 @@ from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk
 from test_TokaMaker import mp_run
 
 
-def run_sol_case(mp_q):
+def setup_sol_case():
+    '''Build and solve the SOL test equilibrium (raises ValueError if the solve fails)'''
     myOFT = OFT_env(nthreads=2)
     mygs = TokaMaker(myOFT)
 
@@ -96,8 +97,13 @@ def run_sol_case(mp_q):
     delta = -0.4
 
     mygs.init_psi(R0, Z0, a, kappa, delta)
+    mygs.solve()
+    return mygs, eqdsk, x_sol
+
+
+def run_sol_case(mp_q):
     try:
-        mygs.solve()
+        mygs, _, x_sol = setup_sol_case()
     except ValueError:
         mp_q.put(None)
         return
@@ -150,3 +156,51 @@ def test_no_current_past_sol_profile():
     assert jmax_beyond is not None, "Mesh does not extend past the end of the SOL profile"
     assert jmax_sol > 0.0
     assert jmax_beyond < 1.E-3*jmax_sol
+
+
+def run_sol_recon_errors_case(mp_q):
+    from OpenFUSIONToolkit.TokaMaker.reconstruction import reconstruction
+    try:
+        mygs, eqdsk, _ = setup_sol_case()
+    except ValueError:
+        mp_q.put(None)
+        return
+    # Synthetic flux loops sampled from the solved equilibrium
+    myrecon = reconstruction(mygs)
+    myrecon.set_Ip(abs(eqdsk['ip']), err=0.01*abs(eqdsk['ip']))
+    psi_eval = mygs.get_field_eval('PSI')
+    for pt in eqdsk['rzout'][::10,:]:
+        psi_val = 2.0*np.pi*psi_eval.eval(pt)[0]
+        myrecon.add_flux_loop(pt, psi_val, err=0.01*abs(psi_val)+1.E-3)
+    # Hold the plasma position, since reconstruct() removes the isoflux constraints
+    mygs.set_targets(R0=mygs.o_point[0], Z0=mygs.o_point[1])
+    mygs.settings.maxits = 100
+    mygs.update_settings()
+    flags = []
+    # No free parameters (Ip target was replaced by the position targets above)
+    flags.append(myrecon.reconstruct(maxits=5))
+    # Fitting every point of the FF' profile: more free parameters than constraints
+    myrecon.settings.fitF = True
+    flags.append(myrecon.reconstruct(maxits=5))
+    myrecon.settings.fitF = False
+    myrecon.settings.fitR0 = True
+    # Initial equilibrium solve fails (rough initial guess and a single iteration)
+    psi_eq = mygs.get_psi(normalized=False)
+    mygs.init_psi(1.7, 0.0, 0.5, 1.3, -0.4)
+    mygs.settings.maxits = 1
+    mygs.update_settings()
+    flags.append(myrecon.reconstruct(maxits=5))
+    # Valid fit after the failures above (previously crashed on reallocation of module data)
+    mygs.set_psi(psi_eq)
+    mygs.settings.maxits = 100
+    mygs.update_settings()
+    flags.append(myrecon.reconstruct(maxits=5))
+    mp_q.put(flags)
+    oftpy_dump_cov()
+
+
+@pytest.mark.coverage
+def test_recon_error_flags():
+    results = mp_run(run_sol_recon_errors_case,(),timeout=120)
+    assert results is not None, "FAILED: error in solve!"
+    assert results == [-3, -3, -2, 0]
