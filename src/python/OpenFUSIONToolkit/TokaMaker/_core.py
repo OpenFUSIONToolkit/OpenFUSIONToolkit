@@ -885,8 +885,9 @@ class TokaMaker():
         r'''! Get cached bootstrap current profiles from the last call to the G-S solver with a
         `jphi-split-bootstrap` current profile.
 
-        @result Dictionary with keys `'psi_n'`, `'total_j_phi'`, `'j_bs_final'`, `'j_ind_final'`
-          and (when available) `'jphi_fixed'`, `'j_bs_raw'`.  Returns `None` if no profiles have been computed.
+        @result Dictionary with keys `'psi_n'`, `'jphi_total'`, `'jphi_bs_final'`, `'jphi_ind_final'`
+          and (when available) `'jphi_fixed'`, `'jphi_pdriven_final'`, `'jphi_bs_raw'`, `'jdotb_bs_raw'`,
+          `'jphi_pdriven_raw'`.  Returns `None` if no profiles have been computed.
           `'psi_n'` is in standard convention (0=axis, 1=LCFS). Current densities are in A/m².
         '''
         if self._tMaker_equil is None:
@@ -2386,13 +2387,18 @@ class TokaMaker():
           included, are TokaMaker \f$j_\phi = \langle j_\phi \rangle = \langle R \rangle P' + \langle 1/R \rangle FF'/\mu_0\f$
           (see doc_tokamaker_current_conventions):
           - ``'psi_n'`` Normalised flux grid (0 = axis, 1 = LCFS), taken from ``ffp_prof['x']``
-          - ``'total_j_phi'`` Total toroidal current density = j_ind_final + j_bs_final + jphi_fixed [A/m²]
-          - ``'j_ind_final'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
-          - ``'j_bs_final'`` Bootstrap current density (optionally isolated / parametrised / tapered) [A/m²]
+          - ``'jphi_total'`` Total toroidal current density = jphi_ind_final + jphi_bs_final + jphi_fixed [A/m²]
+          - ``'jphi_ind_final'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
+          - ``'jphi_bs_final'`` Bootstrap current density (optionally isolated / parametrised / tapered) [A/m²]
           - ``'jphi_fixed'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
-          - ``'j_bs_raw'`` Bootstrap current density from the Redl PoP 2021 formula,
+          - ``'jphi_bs_raw'`` Bootstrap current density from the Redl PoP 2021 formula,
             \f$\langle j_{BS} \cdot B \rangle F \langle 1/R \rangle/\langle B^2 \rangle + P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
-          - ``'jdotb_bs_raw'`` The Redl \f$\langle j_{BS} \cdot B \rangle\f$ behind ``'j_bs_raw'`` [T A/m²]
+          - ``'jdotb_bs_raw'`` The Redl \f$\langle j_{BS} \cdot B \rangle\f$ behind ``'jphi_bs_raw'`` [T A/m²]
+          - ``'jphi_pdriven_raw'`` Pressure-driven (diamagnetic + Pfirsch-Schlueter) part of ``'jphi_bs_raw'``,
+            \f$P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
+          - ``'jphi_pdriven_final'`` ``'jphi_pdriven_raw'`` times ``scale_jBS``, (optionally) tapered; not
+            isolated / parametrised, so it is the pressure-driven part of ``'jphi_bs_final'`` only when
+            ``isolate_edge_jBS`` (and ``parameterize_jBS``) are off [A/m²]
         '''
         from scipy.interpolate import Akima1DInterpolator
         # --- Type / shape check on ffp_prof ---
@@ -3076,62 +3082,63 @@ class TokaMaker_equilibrium():
         r'''! Get cached bootstrap current profiles from the last call to the G-S solver with a
         `jphi-split-bootstrap` current profile.
 
-        @result Dictionary with keys `'psi_n'`, `'total_j_phi'`, `'j_bs_final'`, `'j_ind_final'`
-          and (when available) `'jphi_fixed'`, `'j_bs_raw'`, `'jdotb_bs_raw'`.  Returns `None` if no
+        @result Dictionary with keys `'psi_n'`, `'jphi_total'`, `'jphi_bs_final'`, `'jphi_ind_final'`
+          and (when available) `'jphi_fixed'`, `'jphi_pdriven_final'`, `'jphi_bs_raw'`, `'jdotb_bs_raw'`,
+          `'jphi_pdriven_raw'`.  Returns `None` if no
           profiles have been computed.  All arrays are 1-D numpy arrays of length *npsi*.  `'psi_n'` is
           in standard convention (0 = axis, 1 = LCFS).  Current densities are TokaMaker
           \f$j_\phi = \langle j_\phi \rangle\f$ in A/m² (see doc_tokamaker_current_conventions);
-          `'jdotb_bs_raw'` is the Redl \f$\langle j_{BS} \cdot B \rangle\f$ [T A/m²] behind `'j_bs_raw'`.
+          `'jdotb_bs_raw'` is the Redl \f$\langle j_{BS} \cdot B \rangle\f$ [T A/m²] behind `'jphi_bs_raw'`;
+          `'jphi_pdriven_raw'`/`'jphi_pdriven_final'` are the pressure-driven parts of `'jphi_bs_raw'`/`'jphi_bs_final'`.
         '''
         n = c_int(0)
         n_raw = c_int(0)
         psi_n_ptr = c_double_ptr()
-        total_j_phi_ptr = c_double_ptr()
-        j_bs_final_ptr = c_double_ptr()
-        j_ind_final_ptr = c_double_ptr()
+        jphi_total_ptr = c_double_ptr()
+        jphi_bs_final_ptr = c_double_ptr()
+        jphi_ind_final_ptr = c_double_ptr()
         jphi_fixed_ptr = c_double_ptr()
-        j_bs_raw_ptr = c_double_ptr()
+        jphi_pdriven_final_ptr = c_double_ptr()
+        jphi_bs_raw_ptr = c_double_ptr()
         jdotb_bs_raw_ptr = c_double_ptr()
+        jphi_pdriven_raw_ptr = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_get_boot_profs(self.c_ptr,
             ctypes.byref(n), ctypes.byref(psi_n_ptr),
-            ctypes.byref(total_j_phi_ptr), ctypes.byref(j_bs_final_ptr),
-            ctypes.byref(j_ind_final_ptr), ctypes.byref(jphi_fixed_ptr),
-            ctypes.byref(n_raw), ctypes.byref(j_bs_raw_ptr), ctypes.byref(jdotb_bs_raw_ptr),
-            error_string)
+            ctypes.byref(jphi_total_ptr), ctypes.byref(jphi_bs_final_ptr),
+            ctypes.byref(jphi_ind_final_ptr), ctypes.byref(jphi_fixed_ptr), ctypes.byref(jphi_pdriven_final_ptr),
+            ctypes.byref(n_raw), ctypes.byref(jphi_bs_raw_ptr), ctypes.byref(jdotb_bs_raw_ptr),
+            ctypes.byref(jphi_pdriven_raw_ptr), error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         if n.value != n_raw.value:
             warn(
-                f"Bootstrap profile size mismatch: total_j_phi group has {n.value} points but "
-                f"j_bs_raw has {n_raw.value} points — jphi_bs_update may not have run correctly.",
+                f"Bootstrap profile size mismatch: jphi_total group has {n.value} points but "
+                f"jphi_bs_raw has {n_raw.value} points — jphi_bs_update may not have run correctly.",
                 UserWarning, stacklevel=2)
         result = {}
         if n.value > 0:
             result['psi_n'] = numpy.ctypeslib.as_array(psi_n_ptr, shape=(n.value,)).copy()
-            result['total_j_phi'] = numpy.ctypeslib.as_array(total_j_phi_ptr, shape=(n.value,)).copy()
-            result['j_bs_final'] = numpy.ctypeslib.as_array(j_bs_final_ptr, shape=(n.value,)).copy()
-            result['j_ind_final'] = numpy.ctypeslib.as_array(j_ind_final_ptr, shape=(n.value,)).copy()
+            result['jphi_total'] = numpy.ctypeslib.as_array(jphi_total_ptr, shape=(n.value,)).copy()
+            result['jphi_bs_final'] = numpy.ctypeslib.as_array(jphi_bs_final_ptr, shape=(n.value,)).copy()
+            result['jphi_ind_final'] = numpy.ctypeslib.as_array(jphi_ind_final_ptr, shape=(n.value,)).copy()
             if jphi_fixed_ptr:
                 result['jphi_fixed'] = numpy.ctypeslib.as_array(jphi_fixed_ptr, shape=(n.value,)).copy()
+            if jphi_pdriven_final_ptr:
+                result['jphi_pdriven_final'] = numpy.ctypeslib.as_array(jphi_pdriven_final_ptr, shape=(n.value,)).copy()
         if n_raw.value > 0:
-            result['j_bs_raw'] = numpy.ctypeslib.as_array(j_bs_raw_ptr, shape=(n_raw.value,)).copy()
+            result['jphi_bs_raw'] = numpy.ctypeslib.as_array(jphi_bs_raw_ptr, shape=(n_raw.value,)).copy()
             if jdotb_bs_raw_ptr:
                 result['jdotb_bs_raw'] = numpy.ctypeslib.as_array(jdotb_bs_raw_ptr, shape=(n_raw.value,)).copy()
+            if jphi_pdriven_raw_ptr:
+                result['jphi_pdriven_raw'] = numpy.ctypeslib.as_array(jphi_pdriven_raw_ptr, shape=(n_raw.value,)).copy()
         if result and (self.psi_convention == 0):
             # Convert from OFT convention (0=LCFS, ascending toward axis) to
             # standard convention (0=axis, ascending toward LCFS)
             if 'psi_n' in result:
-                result['psi_n'] = (1.0 - result['psi_n'])[::-1].copy()
-                result['total_j_phi'] = result['total_j_phi'][::-1].copy()
-                result['j_bs_final'] = result['j_bs_final'][::-1].copy()
-                result['j_ind_final'] = result['j_ind_final'][::-1].copy()
-                if 'jphi_fixed' in result:
-                    result['jphi_fixed'] = result['jphi_fixed'][::-1].copy()
-            if 'j_bs_raw' in result:
-                result['j_bs_raw'] = result['j_bs_raw'][::-1].copy()
-            if 'jdotb_bs_raw' in result:
-                result['jdotb_bs_raw'] = result['jdotb_bs_raw'][::-1].copy()
+                result['psi_n'] = 1.0 - result['psi_n']
+            for key in result:
+                result[key] = result[key][::-1].copy()
         return result if result else None
 
     def set_resistivity(self, eta_prof=None):

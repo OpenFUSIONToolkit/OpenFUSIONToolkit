@@ -1607,16 +1607,21 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         jdotb = bp['jdotb_bs_raw'][inner]
         field_aligned = jdotb * F_c * invR_c / B2_c
         p_term = Pp_c * (R_c - F_c**2 * invR_c / B2_c)
-        scale = np.max(np.abs(bp['j_bs_raw'][inner]))
-        err = np.max(np.abs(bp['j_bs_raw'][inner] - (field_aligned + p_term))) / scale
-        err_flip = np.max(np.abs(bp['j_bs_raw'][inner] - (field_aligned - p_term))) / scale
-        print(f"j_bs_raw vs A7: rel err {err:.3e} (pressure term flipped: {err_flip:.3e}), "
+        scale = np.max(np.abs(bp['jphi_bs_raw'][inner]))
+        err = np.max(np.abs(bp['jphi_bs_raw'][inner] - (field_aligned + p_term))) / scale
+        err_flip = np.max(np.abs(bp['jphi_bs_raw'][inner] - (field_aligned - p_term))) / scale
+        print(f"jphi_bs_raw vs A7: rel err {err:.3e} (pressure term flipped: {err_flip:.3e}), "
               f"max|P'G|/max|j_BS| = {np.max(np.abs(p_term))/scale:.3e}")
         if not (err < 1.0e-2 and err_flip > 5.0 * err):
-            raise AssertionError(f"j_bs_raw does not match eq. A7 (rel err {err:.3e}, flipped {err_flip:.3e})")
+            raise AssertionError(f"jphi_bs_raw does not match eq. A7 (rel err {err:.3e}, flipped {err_flip:.3e})")
+        # The stored pressure-driven part is the A7 P'G term
+        err_pd = np.max(np.abs(bp['jphi_pdriven_raw'][inner] - p_term)) / scale
+        print(f"jphi_pdriven_raw vs P'G: rel err {err_pd:.3e}")
+        if err_pd > 1.0e-2:
+            raise AssertionError(f"jphi_pdriven_raw does not match P'(<R> - F^2<1/R>/<B^2>) (rel err {err_pd:.3e})")
         # A8: the equilibrium's own <J.B> = F P' + F'<B^2>/mu0 equals the sum of its components'
         jdotb_eq = F_c * Pp_c + Fp_c * B2_c / mu0
-        jdotb_sum = jdotb + (bp['j_ind_final'][inner] + bp['jphi_fixed'][inner]) * B2_c / (F_c * invR_c)
+        jdotb_sum = jdotb + (bp['jphi_ind_final'][inner] + bp['jphi_fixed'][inner]) * B2_c / (F_c * invR_c)
         err_par = np.max(np.abs(jdotb_eq - jdotb_sum)) / np.max(np.abs(jdotb_eq))
         print(f"<J.B> balance (A8): rel err {err_par:.3e}")
         if err_par > 2.0e-2:
@@ -1778,11 +1783,11 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             Zeff={'x': psi_sample, 'y': np.linspace(1.0, 2.5, n_sample)},
             **zeff_common_kwargs,
         )
-        j_scalar = profs_scalar['j_bs_raw']
-        j_linear = profs_linear['j_bs_raw']
+        j_scalar = profs_scalar['jphi_bs_raw']
+        j_linear = profs_linear['jphi_bs_raw']
         magnitude = 0.5 * (np.abs(j_scalar) + np.abs(j_linear))
         rel_diff = np.where(magnitude > 0, (j_linear - j_scalar) / magnitude, 0.0)
-        print("\nZeff scalar vs linear j_bs_raw relative difference (j_linear-j_scalar)/|mean|:")
+        print("\nZeff scalar vs linear jphi_bs_raw relative difference (j_linear-j_scalar)/|mean|:")
         print(rel_diff)
         if np.allclose(j_scalar, j_linear):
             raise AssertionError(
@@ -1806,10 +1811,10 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         if not np.allclose(profs_fixed['jphi_fixed'], np.interp(profs_fixed['psi_n'], psi_sample, jfix_y),
                            rtol=1e-6, atol=1e-6*jfix_y.max()):
             raise AssertionError("boot_profs['jphi_fixed'] does not match the input jphi_fixed_prof")
-        j_sum = profs_fixed['j_ind_final'] + profs_fixed['j_bs_final'] + profs_fixed['jphi_fixed']
-        if not np.allclose(profs_fixed['total_j_phi'], j_sum, rtol=1e-10, atol=1e-6):
-            raise AssertionError("total_j_phi != j_ind_final + j_bs_final + jphi_fixed")
-        if not np.sum(profs_fixed['j_ind_final']) < np.sum(profs_scalar['j_ind_final']):
+        j_sum = profs_fixed['jphi_ind_final'] + profs_fixed['jphi_bs_final'] + profs_fixed['jphi_fixed']
+        if not np.allclose(profs_fixed['jphi_total'], j_sum, rtol=1e-10, atol=1e-6):
+            raise AssertionError("jphi_total != jphi_ind_final + jphi_bs_final + jphi_fixed")
+        if not np.sum(profs_fixed['jphi_ind_final']) < np.sum(profs_scalar['jphi_ind_final']):
             raise AssertionError("jphi_fixed did not reduce the inductive current share")
         profs_reset = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         if np.any(profs_reset['jphi_fixed'] != 0.0):

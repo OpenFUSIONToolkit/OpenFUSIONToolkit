@@ -914,7 +914,8 @@ def solve_with_bootstrap(mygs,
       added to \f$e_C(n_e T_e + n_i T_i)\f$ for the GS pressure but excluded from j_BS (internal Fortran solver only)
     @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles, all (like the
       `inductive_jphi` and `jphi_fixed` inputs) TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$
-      (see doc_tokamaker_current_conventions)
+      (see doc_tokamaker_current_conventions); with the internal solver it also holds every profile
+      returned by TokaMaker.solve_bootstrap (`'jphi_*'`, `'jdotb_bs_raw'`)
     '''
 
     if not use_python_solve:
@@ -960,14 +961,16 @@ def solve_with_bootstrap(mygs,
             F0=F0,
             **kwargs
         )
-        results = {'total_j_phi' : _results['total_j_phi'],
-                    'j_BS' : _results['j_bs_raw'],
-                    'j_inductive' : _results['j_ind_final'],
-                    'isolated_j_BS' : _results['j_bs_final'],
-                    'j_fixed' : _results.get('jphi_fixed'),
-                    'jdotb_BS' : _results.get('jdotb_bs_raw'),
-                    'scale_j0' : 1.0,
-                    'scale_Ip' : 1.0}
+        # Every profile of solve_bootstrap, plus the Python-path keys
+        results = dict(_results)
+        results.update({'total_j_phi' : _results['jphi_total'],
+                        'j_BS' : _results['jphi_bs_raw'],
+                        'j_inductive' : _results['jphi_ind_final'],
+                        'isolated_j_BS' : _results['jphi_bs_final'],
+                        'j_fixed' : _results.get('jphi_fixed'),
+                        'jdotb_BS' : _results.get('jdotb_bs_raw'),
+                        'scale_j0' : 1.0,
+                        'scale_Ip' : 1.0})
         return results
     else:
         if jphi_fixed is not None:
