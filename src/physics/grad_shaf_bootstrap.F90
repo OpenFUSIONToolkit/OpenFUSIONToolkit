@@ -1288,7 +1288,7 @@ real(8), intent(out) :: fc(nr) !< Circulating particle fraction \f$ f_c \f$
 real(8), intent(out) :: r_avgs(nr,3) !< Flux surface averaged radial coords \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
 real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field \f$<|B|>\f$, \f$<|B|^2>\f$
 real(8), optional, intent(out) :: qprof(nr) !< Safety factor q on each surface (avoids a separate gs_get_qprof call)
-real(8), optional, intent(out) :: eps(nr) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(2\langle R \rangle) \f$ on each surface
+real(8), optional, intent(out) :: eps(nr) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min}) \f$ on each surface
 real(8), optional, intent(out) :: invr2(nr) !< \f$<1/R^2>\f$ on each surface
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,h,h2,hf,ftu,ftl
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
@@ -1377,7 +1377,7 @@ IF(torflux_qgeom_backend/=1)THEN
     ftl = 1.d0 - h2 * hf
     fc(j) = 1.d0 - (0.75d0 * ftu + 0.25d0 * ftl)
     qtmp(j) = fpol(j) * acc(7,j) / (2.d0*pi*ABS(x2-x1))
-    epstmp(j) = (ext(2,j) + ext(3,j)) / (2.d0 * r_avgs(j,1))
+    epstmp(j) = (ext(2,j) + ext(3,j)) / (ext(2,j) - ext(3,j)) ! (R_max - R_min)/(R_max + R_min)
     i2tmp(j) = acc(7,j)/acc(1,j)
   END DO
   done=done.OR.(psi_q == 1.d0)
@@ -1441,7 +1441,7 @@ do j=1,nr
   ftl = 1.d0 - h2 * hf
   fc(j) = 1.d0 - (0.75d0 * ftu + 0.25d0 * ftl)
   qtmp(j) = fpol(j) * active_tracer%v(8) / (2*pi)
-  epstmp(j) = (field%rmax_surf - field%rmin_surf) / (2.d0 * r_avgs(j,1))
+  epstmp(j) = (field%rmax_surf - field%rmin_surf) / (field%rmax_surf + field%rmin_surf)
   i2tmp(j) = active_tracer%v(8)/active_tracer%v(2)
 end do
 DEALLOCATE(ptout,vout)

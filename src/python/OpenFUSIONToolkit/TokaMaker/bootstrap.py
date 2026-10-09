@@ -960,7 +960,7 @@ def solve_with_bootstrap(mygs,
     (\f$\hat{\Phi}\f$, internal solver only; see `TokaMaker.solve_bootstrap`)
     @param psi_N Deprecated alias of `x`
     @param use_sauter_eps If True (default), use the geometric inverse aspect ratio
-      \f$\varepsilon = (R_{\max}-R_{\min})/(2\langle R\rangle)\f$ from the field-line trace.
+      \f$\varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min})\f$ of each surface (`TokaMaker.sauter_fc`).
       If False, use the formula \f$\varepsilon = \langle a\rangle / \langle R\rangle\f$.
     @param diagnose_bs If True, print the 7 edge-spike fit parameters and the
       parameterized spike profile table to stdout (mirroring the Fortran --diagnose-bs output).

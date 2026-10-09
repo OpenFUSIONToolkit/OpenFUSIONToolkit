@@ -1698,7 +1698,7 @@ REAL(c_double), INTENT(in) :: psi_saut(npsi) !< \f$ \psi \f$ values to compute t
 REAL(c_double), INTENT(out) :: fc(npsi) !< Trapped particle fraction
 REAL(c_double), INTENT(out) :: r_avgs(npsi,3) !< Flux surface averaged radial coordinates \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
 REAL(c_double), INTENT(out) :: modb_avgs(npsi,2) !< Flux surface averaged field strength \f$<|B|>\f$, \f$<|B|^2>\f$
-REAL(c_double), INTENT(out) :: eps(npsi) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(2\langle R \rangle) \f$
+REAL(c_double), INTENT(out) :: eps(npsi) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min}) \f$
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
