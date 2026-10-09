@@ -23,6 +23,7 @@ USE oft_base
 USE oft_mesh_type, ONLY: oft_bmesh, cell_is_curved
 USE oft_lag_basis, ONLY: oft_blag_npos, oft_scalar_bfem
 USE oft_gs, ONLY: gs_equil, gs_test_bounds
+USE oft_lu, ONLY: lapack_matinv
 IMPLICIT NONE
 #include "local.h"
 PRIVATE
@@ -35,7 +36,6 @@ TYPE :: bern_tab
   INTEGER(i4), ALLOCATABLE :: mi1(:,:) !< Degree-(p-1) multi-indices [3,nb1]
   INTEGER(i4), ALLOCATABLE :: lk(:,:) !< Index of (p-a2-a3,a2,a3) [0:p,0:p]
   INTEGER(i4) :: corner(3) = 0 !< Index of vertex coefficients
-  REAL(r8), ALLOCATABLE :: mult(:) !< Multinomial factors [nb]
   REAL(r8), ALLOCATABLE :: vinv(:,:) !< Uniform-lattice values to coefficients [nb,nb]
   REAL(r8), ALLOCATABLE :: mvinv(:,:) !< Uniform-lattice values to monomial coefficients [nb,nb]
   REAL(r8) :: cbound = 0.d0 !< Coefficients lie within nodal range extended by `cbound` times its width
@@ -106,7 +106,7 @@ DEALLOCATE(gloc,wloc)
 !$omp end parallel
 !---Fixed-order reduction
 ALLOCATE(wind(nr))
-g=0.d0; wind=0.d0
+wind=0.d0
 DO ib=1,nblk
   g=g+gblk(:,ib)
   wind=wind+wblk(:,ib)
@@ -141,19 +141,17 @@ real(r8), intent(inout) :: wloc(nr) !< Accumulated winding number
 type(oft_scalar_bfem), pointer :: lag_rep
 integer(i4) :: jdofs(32),jc,k,ns,d0,i
 integer(i4) :: dep(3*max_depth+4)
-real(r8) :: f(3),lat(32),cc(32),cm(32),cs(32),tri(2,3),stk(2,3,3*max_depth+4),xv(2,3),detm0
-real(r8) :: lo,hi,dvec(2),dmu(3),ainv(2,2),m(2,3),dratio
+real(r8) :: lat(32),cc(32),cm(32),cs(32),tri(2,3),stk(2,3,3*max_depth+4),xv(2,3),detm0
+real(r8) :: lo,hi,pad,dvec(2),dmu(3),ainv(2,2),m(2,3),dratio
 logical :: curved,act(nr),sact(nr,3*max_depth+4)
 lag_rep=>gseq%device%fe_rep
 !---Bernstein coefficients of 1-psi-hat in this cell
 CALL lag_rep%ncdofs(cell,jdofs)
 lo=(MINVAL(vals(jdofs(1:lag_rep%nce)))-x1)/dpsi
 hi=(MAXVAL(vals(jdofs(1:lag_rep%nce)))-x1)/dpsi
-IF(lo>hi)THEN
-  f(1)=lo; lo=hi; hi=f(1)
-END IF
-f(1)=bt%cbound*(hi-lo)
-IF(.NOT.any_hit(lo-f(1),hi+f(1)))RETURN
+IF(lo>hi)CALL swap(lo,hi)
+pad=bt%cbound*(hi-lo)
+IF(.NOT.any_hit(lo-pad,hi+pad))RETURN
 DO jc=1,lag_rep%nce
   lat(perm(jc,cell))=(vals(jdofs(jc))-x1)/dpsi
 END DO
@@ -206,6 +204,12 @@ DO WHILE(ns>0)
   END IF
 END DO
 CONTAINS
+!---Exchange two values
+subroutine swap(a,b)
+real(r8), intent(inout) :: a,b
+real(r8) :: t
+t=a; a=b; b=t
+end subroutine swap
 !---Does any surface lie in [a,b]?
 logical function any_hit(a,b)
 real(r8), intent(in) :: a,b
@@ -483,13 +487,13 @@ end subroutine perm_update
 subroutine bern_setup(bt,p)
 type(bern_tab), intent(inout) :: bt
 integer(i4), intent(in) :: p
-real(r8) :: v(15,15),fact(0:4),x
-integer(i4) :: n,m,a2,a3,k
+real(r8) :: v(15,15),fact(0:4),mult(15),x
+integer(i4) :: n,m,a2,a3,k,ierr
 IF((p<1).OR.(p>4))CALL oft_abort('Unsupported FE order','bern_setup',__FILE__)
 bt%p=p
 bt%nb=(p+1)*(p+2)/2
 bt%nb1=p*(p+1)/2
-ALLOCATE(bt%mi(3,bt%nb),bt%mi1(3,bt%nb1),bt%lk(0:p,0:p),bt%mult(bt%nb),bt%vinv(bt%nb,bt%nb))
+ALLOCATE(bt%mi(3,bt%nb),bt%mi1(3,bt%nb1),bt%lk(0:p,0:p))
 fact(0)=1.d0
 DO k=1,4
   fact(k)=fact(k-1)*k
@@ -501,7 +505,7 @@ DO a3=0,p
     n=n+1
     bt%mi(:,n)=[p-a2-a3,a2,a3]
     bt%lk(a2,a3)=n
-    bt%mult(n)=fact(p)/(fact(p-a2-a3)*fact(a2)*fact(a3))
+    mult(n)=fact(p)/(fact(p-a2-a3)*fact(a2)*fact(a3))
   END DO
 END DO
 n=0
@@ -515,48 +519,23 @@ bt%corner=[bt%lk(0,0),bt%lk(p,0),bt%lk(0,p)]
 !---Values of each basis function on the uniform lattice
 DO m=1,bt%nb
   DO n=1,bt%nb
-    x=bt%mult(n)
+    x=mult(n)
     DO k=1,3
       IF(bt%mi(k,n)>0)x=x*(REAL(bt%mi(k,m),r8)/REAL(p,r8))**bt%mi(k,n)
     END DO
     v(m,n)=x
   END DO
 END DO
-CALL mat_inv(bt%nb,v(1:bt%nb,1:bt%nb),bt%vinv)
+ALLOCATE(bt%vinv,SOURCE=v(1:bt%nb,1:bt%nb))
+CALL lapack_matinv(bt%nb,bt%vinv,ierr)
 !---Monomials u^a2 v^a3 on the uniform lattice
-ALLOCATE(bt%mvinv(bt%nb,bt%nb))
 DO m=1,bt%nb
   DO n=1,bt%nb
     v(m,n)=(REAL(bt%mi(2,m),r8)/REAL(p,r8))**bt%mi(2,n)*(REAL(bt%mi(3,m),r8)/REAL(p,r8))**bt%mi(3,n)
   END DO
 END DO
-CALL mat_inv(bt%nb,v(1:bt%nb,1:bt%nb),bt%mvinv)
+ALLOCATE(bt%mvinv,SOURCE=v(1:bt%nb,1:bt%nb))
+CALL lapack_matinv(bt%nb,bt%mvinv,ierr)
 bt%cbound=(MAXVAL(SUM(ABS(bt%vinv),DIM=2))-1.d0)/2.d0+1.d-12
 end subroutine bern_setup
-!------------------------------------------------------------------------------
-!> Invert small dense matrix (Gauss-Jordan with partial pivoting)
-!------------------------------------------------------------------------------
-subroutine mat_inv(n,a,ainv)
-integer(i4), intent(in) :: n
-real(r8), intent(in) :: a(n,n)
-real(r8), intent(out) :: ainv(n,n)
-real(r8) :: w(n,2*n),tmp(2*n)
-integer(i4) :: i,k,piv
-w=0.d0
-w(:,1:n)=a
-DO i=1,n
-  w(i,n+i)=1.d0
-END DO
-DO k=1,n
-  piv=k-1+MAXLOC(ABS(w(k:n,k)),DIM=1)
-  IF(piv/=k)THEN
-    tmp=w(k,:); w(k,:)=w(piv,:); w(piv,:)=tmp
-  END IF
-  w(k,:)=w(k,:)/w(k,k)
-  DO i=1,n
-    IF(i/=k)w(i,:)=w(i,:)-w(i,k)*w(k,:)
-  END DO
-END DO
-ainv=w(:,n+1:2*n)
-end subroutine mat_inv
 END MODULE oft_gs_cutcell
