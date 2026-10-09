@@ -525,6 +525,13 @@ INTERFACE
     real(8), optional, intent(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
     logical, intent(out) :: ok !< All surfaces evaluated (otherwise use the tracer)
   END SUBROUTINE gs_qprof_cutcell
+  !> @ref gs_trace_surf from the cut-cell quadrature (see grad_shaf_qprof.F90); `npoints=-1` if not available
+  MODULE SUBROUTINE gs_trace_surf_cutcell(gseq,psi_in,points,npoints)
+    class(gs_equil), intent(inout) :: gseq !< G-S object
+    real(8), intent(in) :: psi_in !< Surface location in normalized flux
+    real(8), pointer, dimension(:,:), intent(out) :: points !< Surface points [2,npoints]
+    integer(4), intent(out) :: npoints !< Number of points
+  END SUBROUTINE gs_trace_surf_cutcell
 END INTERFACE
 !---Encapsulation for external function call parameters
 TYPE, PRIVATE :: opt_targets
@@ -4659,6 +4666,12 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
 type(gsinv_interp), target :: field
+!---Points at uniform polar angle from the cut-cell quadrature (exact on the FE surface);
+!---the field-line tracer below is the deprecated method and the fallback
+IF(qprof_backend==0)THEN
+  CALL gs_trace_surf_cutcell(gseq,psi_in,points,npoints)
+  IF(npoints>0)RETURN
+END IF
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
