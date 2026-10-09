@@ -243,8 +243,9 @@ end subroutine geom_sums
 !!
 !! `acc(:,i)` holds \f$ \oint w\,[R, R^2, 1, R a, R|B|, R B^2, 1/R, R f(|B|/B_{ref})] \f$ with
 !! \f$ w = dl/|\nabla \hat{\psi}| \f$, \f$ a \f$ the distance to the O-point and
-!! \f$ f(b)=(1-\sqrt{1-b}(1+b/2))/b^2 \f$. Extrema are sampled at arc ends and Gauss points
-!! and refined by a parabola on each arc. Results do not depend on the thread count.
+!! \f$ f(b)=(1-\sqrt{1-b}(1+b/2))/b^2 \f$. \f$ B_{max} \f$ is sampled at arc ends and Gauss
+!! points and refined by a parabola on each arc; \f$ R_{max} \f$ and \f$ R_{min} \f$ are exact on the
+!! FE surface (@ref ext_add). Results do not depend on the thread count.
 !------------------------------------------------------------------------------
 subroutine gs_sauter_cutcell(gseq,nr,psi_q,fpol,bref,acc,ext,ok)
 class(gs_equil), intent(inout) :: gseq !< G-S object
@@ -257,10 +258,10 @@ real(r8), intent(out) :: ext(3,nr) !< \f$ B_{max} \f$, \f$ R_{max} \f$, \f$ -R_{
 logical, intent(out) :: ok(nr) !< Surface inside (0,1) and closed about the O-point
 type(bern_tab) :: bt
 real(r8), pointer :: vals(:)
-real(r8), allocatable :: ablk(:,:,:),wblk(:,:),gloc(:),wloc(:),aloc(:,:),eloc(:,:),wind(:)
-real(r8) :: x1,dpsi
+real(r8), allocatable :: ablk(:,:,:),wblk(:,:),gloc(:),wloc(:),aloc(:,:),eloc(:,:),xloc(:,:,:),wind(:)
+real(r8) :: x1,dpsi,xacc(2,4,nr)
 integer(i4) :: nblk,ib,cell,i,nc
-acc=0.d0; ext=-HUGE(1.d0); ok=.FALSE.
+acc=0.d0; ext=-HUGE(1.d0); ok=.FALSE.; xacc=-HUGE(1.d0)
 IF(nr<1)RETURN
 IF(gseq%plasma_bounds(1)<-1.d98)RETURN
 x1=gseq%plasma_bounds(1)
@@ -273,24 +274,28 @@ nc=gseq%device%fe_rep%mesh%nc
 CALL perm_update(gseq%device%fe_rep,bt)
 nblk=(nc+nblk_cells-1)/nblk_cells
 ALLOCATE(ablk(8,nr,nblk),wblk(nr,nblk))
-!$omp parallel private(ib,cell,gloc,wloc,aloc,eloc)
-ALLOCATE(gloc(nr),wloc(nr),aloc(8,nr),eloc(3,nr))
-eloc=-HUGE(1.d0)
+!$omp parallel private(ib,cell,i,gloc,wloc,aloc,eloc,xloc)
+ALLOCATE(gloc(nr),wloc(nr),aloc(8,nr),eloc(1,nr),xloc(2,4,nr))
+eloc=-HUGE(1.d0); xloc=-HUGE(1.d0)
 !$omp do schedule(dynamic,1)
 DO ib=1,nblk
   gloc=0.d0; wloc=0.d0; aloc=0.d0
   DO cell=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,nc)
     IF(gseq%device%fe_rep%mesh%reg(cell)/=1)CYCLE
-    CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc)
+    CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc,xacc=xloc)
   END DO
   ablk(:,:,ib)=aloc; wblk(:,ib)=wloc
 END DO
 !$omp end do
 !$omp critical
-ext=MAX(ext,eloc)
+ext(1:1,:)=MAX(ext(1:1,:),eloc)
+DO i=1,nr
+  CALL ext_merge(xacc(:,:,i),xloc(:,:,i))
+END DO
 !$omp end critical
-DEALLOCATE(gloc,wloc,aloc,eloc)
+DEALLOCATE(gloc,wloc,aloc,eloc,xloc)
 !$omp end parallel
+ext(2,:)=xacc(1,2,:); ext(3,:)=xacc(1,1,:)
 ALLOCATE(wind(nr))
 wind=0.d0
 DO ib=1,nblk
@@ -319,7 +324,7 @@ real(r8), intent(inout) :: wloc(nr) !< Accumulated winding number
 real(r8), optional, intent(in) :: fpol(nr) !< F on each surface (Sauter sums only)
 real(r8), optional, intent(in) :: bref(nr) !< \f$ B_{ref} \f$ on each surface (Sauter sums only)
 real(r8), optional, intent(inout) :: aloc(:,:) !< Accumulated Sauter sums [8,nr] (see @ref gs_sauter_cutcell)
-real(r8), optional, intent(inout) :: eloc(:,:) !< Accumulated extrema [3,nr]
+real(r8), optional, intent(inout) :: eloc(:,:) !< Accumulated \f$ B_{max} \f$ [1,nr]
 real(r8), optional, intent(inout) :: racc(:,:) !< Accumulated \f$ \oint w\,[R, R^2, 1] \f$ [3,nr] (see @ref geom_sums)
 real(r8), optional, intent(inout) :: facc(:,:) !< Accumulated \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$ [5,nr] (needs `fpol`)
 real(r8), optional, intent(inout) :: xacc(:,:,:) !< Accumulated surface extrema [2,4,nr] (see @ref ext_add)
@@ -428,7 +433,7 @@ integer(i4) :: k0,k1,k2,ig,kk,nab,ng
 logical :: ab(3)
 real(r8) :: p1(2),p2(2),e(2),xi1,xi2,xi,x(2),val,gr(2)
 real(r8) :: pt(2),detm,sum,q1(2),q2(2),dth,sig,gmid(2),xg(5),wg(5)
-real(r8) :: av(8),rv(3),fv(5),gq,wq,bq,b,rq,sx(0:6),sb(0:6),sr(0:6),xs(0:6),sp(2,0:6),sg(2,0:6)
+real(r8) :: av(8),rv(3),fv(5),gq,wq,bq,b,sx(0:6),sb(0:6),xs(0:6),sp(2,0:6),sg(2,0:6)
 DO kk=1,3
   ab(kk)=(cs(bt%corner(kk))>=s)
 END DO
@@ -456,8 +461,8 @@ ELSE
   ng=5; xg=xg5; wg=wg5
 END IF
 IF(PRESENT(aloc))THEN
-  CALL sau_point(p1,iq,sb(0),sr(0)); sx(0)=xi1
-  CALL sau_point(p2,iq,sb(ng+1),sr(ng+1)); sx(ng+1)=xi2
+  sb(0)=b_mag(p1,iq); sx(0)=xi1
+  sb(ng+1)=b_mag(p2,iq); sx(ng+1)=xi2
 END IF
 IF(PRESENT(xacc))THEN
   CALL poly_eval(bt,cm,p1,val,gr); sg(:,0)=phys_grad(p1,gr)
@@ -482,8 +487,8 @@ DO ig=1,ng
     fv=fv+wq*pt(1)*[1.d0,gq,gq**2,(gq/pt(1))**2,pt(1)**2/(gq**2+fpol(iq)**2)]
   END IF
   IF(PRESENT(aloc))THEN
-    CALL sau_point(x,iq,bq,rq,gr)
-    sx(ig)=xi; sb(ig)=bq; sr(ig)=rq
+    bq=b_mag(x,iq,gr)
+    sx(ig)=xi; sb(ig)=bq
     av(1)=av(1)+wq*pt(1)
     av(2)=av(2)+wq*pt(1)**2
     av(3)=av(3)+wq
@@ -503,8 +508,6 @@ IF(PRESENT(facc))facc(:,iq)=facc(:,iq)+fv*ABS(xi2-xi1)/2.d0
 IF(PRESENT(aloc))THEN
   aloc(:,iq)=aloc(:,iq)+av*ABS(xi2-xi1)/2.d0
   eloc(1,iq)=MAX(eloc(1,iq),arc_peak(ng,sx,sb))
-  eloc(2,iq)=MAX(eloc(2,iq),arc_peak(ng,sx,sr))
-  eloc(3,iq)=MAX(eloc(3,iq),arc_peak(ng,sx,-sr))
 END IF
 IF(PRESENT(xacc))CALL arc_extrema(s,p1,p2,xi1,xi2,ng,xs,sp,sg,xacc(:,:,iq))
 !---Winding about O-point, oriented with 1-psi-hat increasing to the left
@@ -594,25 +597,21 @@ real(r8), intent(in) :: uv(2),grp(2)
 real(r8) :: gq
 gq=ABS(dpsi)*SQRT(SUM(phys_grad(uv,grp)**2))
 end function grad_mag
-!---|B| and R at uv on surface iq
-subroutine sau_point(uv,iq,bq,rq,grin)
+!---|B| at uv on surface iq
+function b_mag(uv,iq,grin) result(bq)
 real(r8), intent(in) :: uv(2)
 integer(i4), intent(in) :: iq
-real(r8), intent(out) :: bq,rq
 real(r8), optional, intent(in) :: grin(2)
-real(r8) :: lam(3),gop(3,3),dj,p3(3),grp(2),vv,gp(2)
+real(r8) :: bq,lam(3),p3(3),grp(2),vv
 IF(PRESENT(grin))THEN
   grp=grin
 ELSE
   CALL poly_eval(bt,cm,uv,vv,grp)
 END IF
 lam=[1.d0-uv(1)-uv(2),uv(1),uv(2)]
-CALL gseq%device%fe_rep%mesh%jacobian(cell,lam,gop,dj)
 p3=gseq%device%fe_rep%mesh%log2phys(cell,lam)
-gp=grp(1)*gop(1:2,2)+grp(2)*gop(1:2,3)
-bq=SQRT(dpsi**2*SUM(gp**2)+fpol(iq)**2)/p3(1)
-rq=p3(1)
-end subroutine sau_point
+bq=SQRT(dpsi**2*SUM(phys_grad(uv,grp)**2)+fpol(iq)**2)/p3(1)
+end function b_mag
 !---Crossing of surface s on sub-cell edge ka->kb (regula falsi start)
 function edge_cross(s,ka,kb) result(pc)
 real(r8), intent(in) :: s
