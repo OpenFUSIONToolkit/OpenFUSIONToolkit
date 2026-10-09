@@ -830,6 +830,8 @@ def _validate_psi_grid(values, name, psi_N=None):
     @result Validated \f$\hat{\psi}\f$ grid
     '''
     n_psi = len(values)
+    if n_psi < 5:
+        raise ValueError("The '{0}' profile needs at least 5 points".format(name))
     if psi_N is None:
         return numpy.linspace(0., 1., n_psi)
     psi_N = numpy.asarray(psi_N, dtype=float)
@@ -930,7 +932,7 @@ def solve_with_bootstrap(mygs,
                 UserWarning, stacklevel=2,
             )
         if inductive_jphi is None:
-            raise ValueError("inductive_jphi must be provided for method='internal'")
+            raise ValueError("inductive_jphi must be provided with use_python_solve=False")
         _ne   = ne if isinstance(ne, dict) else _default_psi_profile(ne, 'ne', psi_N=psi_N)
         _Te   = Te if isinstance(Te, dict) else _default_psi_profile(Te, 'Te', psi_N=psi_N, scale=1e-3)
         _ni   = ni if isinstance(ni, dict) else _default_psi_profile(ni, 'ni', psi_N=psi_N)

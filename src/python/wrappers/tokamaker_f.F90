@@ -614,7 +614,7 @@ TYPE IS (jphi_bs_flux_func)
   I%boot_ops%taper_edge_psi0 = bops%taper_edge_psi0
   I%boot_ops%taper_edge_shape = bops%taper_edge_shape
 CLASS DEFAULT
-  CALL oft_warn('Run set_profiles with a jphi-split-bootstrap profile before calling set_boot_ops.')
+  CALL copy_string('Run set_profiles with a jphi-split-bootstrap profile before calling set_boot_ops.',error_str)
 END SELECT
 END SUBROUTINE tokamaker_set_boot_ops
 !---------------------------------------------------------------------------------
@@ -642,9 +642,7 @@ TYPE IS (jphi_bs_flux_func)
   bops%taper_edge_psi0 = I%boot_ops%taper_edge_psi0
   bops%taper_edge_shape = I%boot_ops%taper_edge_shape
 CLASS DEFAULT
-  CALL oft_warn('tokamaker_get_boot_ops: ffp_prof is not of type jphi-split-bootstrap. ' // &
-    'Bootstrap options are not available.')
-  initialized = .FALSE.
+  initialized = .FALSE. ! Not a bootstrap profile: no options
 END SELECT
 END SUBROUTINE tokamaker_get_boot_ops
 !---------------------------------------------------------------------------------

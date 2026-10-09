@@ -110,7 +110,6 @@ tokamaker_get_boot_ops = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_ops,
 tokamaker_get_boot_profs = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_profs,
     [c_void_p, c_int_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_double_ptr_ptr,
      c_double_ptr_ptr, c_int_ptr, c_double_ptr_ptr, c_double_ptr_ptr, c_char_p])
-## @endcond
 
 # tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
@@ -318,6 +317,8 @@ tokamaker_load_tokamaker = ctypes_subroutine(oftpy_lib.tokamaker_load_tokamaker,
 # tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,dist_pointer,normalize,error_str)
 tokamaker_set_coil_current_dist = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_current_dist,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_double_ptr_ptr, c_bool, c_char_p])
+
+## @endcond
 
 class TokaMaker_field_interpolator():
     '''! Interpolation class for Grad-Shafranov fields'''

@@ -250,6 +250,7 @@ IF(hdf5_field_exist(filename,path//'/BOOT_PROFS'))THEN
     END IF
   END IF
 END IF
+success=.TRUE. ! BOOT_OPS and BOOT_PROFS are optional
 end subroutine jphi_bs_load_hdf5
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -696,9 +697,8 @@ real(8), optional, intent(out) :: eps(nr) !< Local inverse aspect ratio \f$ \var
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi,h,h2,hf,ftu,ftl
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp) :: psi_int
-real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
-integer(4) :: i,j,cell
+integer(4) :: j,cell
 type(sauter_interp), target :: field
 type(gs_factory), pointer :: device
 device=>gseq%device
@@ -708,6 +708,10 @@ x1=0.d0; x2=1.d0
 IF(gseq%plasma_bounds(1)>-1.d98)THEN
   x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
 END IF
+!---Surfaces that fail below keep zeros
+fc=0.d0; r_avgs=0.d0; modb_avgs=0.d0
+IF(PRESENT(qprof))qprof=0.d0
+IF(PRESENT(eps))eps=0.d0
 psi_int%u=>gseq%psi
 CALL psi_int%setup(device%fe_rep)
 !---Find Rmax along Z=zaxis
@@ -755,7 +759,7 @@ do j=1,nr
     modb_avgs(j,1) = ABS(fpol) / raxis
     modb_avgs(j,2) = (fpol / raxis)**2
     fc(j)          = 1.d0
-    IF(PRESENT(qprof))   qprof(j)   = MERGE(qprof(j-1), 0.d0, j > 1)
+    IF(PRESENT(qprof).AND.(j>1))qprof(j) = qprof(j-1)
     IF(PRESENT(eps))     eps(j)     = 0.d0
     CYCLE
   END IF
