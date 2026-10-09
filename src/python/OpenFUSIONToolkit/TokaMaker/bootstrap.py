@@ -3,7 +3,6 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-from warnings import warn
 '''! Solvers and helper functions for TokaMaker bootstrap current functionality
 
 @authors Daniel Burgess
@@ -11,7 +10,7 @@ from warnings import warn
 @ingroup doxy_oft_python
 '''
 import numpy
-import warnings
+from warnings import warn
 from ._interface import *
 from OpenFUSIONToolkit.TokaMaker.util import get_jphi_from_GS
 
@@ -214,8 +213,8 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
         # bootstrap profile (identical to the isolate_edge_jBS=False path)
         # rather than returning None, which would break the documented dict
         # contract and crash subscripting callers (res['masked_spike']).
-        warnings.warn(reason + "; using bootstrap profile without edge isolation",
-                      RuntimeWarning, stacklevel=2)
+        warn(reason + "; using bootstrap profile without edge isolation",
+             RuntimeWarning, stacklevel=2)
         j_full = numpy.array(j_bootstrap, dtype=float)
         return {
             'sigma': 0.0,
@@ -361,9 +360,9 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
         amp, center, width, offset, sk, y_sep, blend_width = popt
         spike_only = parameterize_edge_jBS(psi_N, amp, center, width, offset, sk, y_sep, blend_width)
     except Exception as _edge_fit_exc:
-        warnings.warn("parameterize_edge_jBS fit failed (%s); falling back to "
-                      "masked_spike (unused unless parameterize_jBS=True)" % _edge_fit_exc,
-                      RuntimeWarning, stacklevel=2)
+        warn("parameterize_edge_jBS fit failed (%s); falling back to "
+             "masked_spike (unused unless parameterize_jBS=True)" % _edge_fit_exc,
+             RuntimeWarning, stacklevel=2)
         popt = numpy.asarray(p0, dtype=float)
         amp, center, width, offset, sk, y_sep, blend_width = popt
         spike_only = masked_spike.copy()
