@@ -20,6 +20,7 @@ USE fem_utils, ONLY: fem_dirichlet_diag, fem_dirichlet_vec
 USE oft_lag_basis, ONLY: oft_scalar_bfem, oft_blag_eval, oft_blag_geval
 USE oft_blag_operators, ONLY: oft_blag_vproject, oft_blag_getmop, oft_lag_bginterp
 USE mhd_utils, ONLY: mu0
+USE oft_gs_profiles, ONLY: torflux_coord
 USE oft_gs, ONLY: gs_epsilon, gs_equil, gs_factory, gs_update_bounds, gs_test_bounds, flux_func, build_dels
 USE oft_gs_td, ONLY: oft_tmaker_td_mfop, build_vac_op, apply_rhs
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
@@ -837,7 +838,7 @@ dev => self%parent_sim%tkmr%gs_device
 F0 = self%parent_sim%F0_node
 !---LHS (dt>0) uses the current TokaMaker profile (updated in apply_mfop)
 !---RHS (dt=0) uses the previous-step snapshot
-IF(eq%I%coord/=0)CALL oft_abort('Toroidal flux profiles not supported in time-dependent solves', &
+IF(torflux_coord(eq%I)/=0)CALL oft_abort('Toroidal flux profiles not supported in time-dependent solves', &
   'mugtok_td',__FILE__)
 IF(dt > 0.d0)THEN
   f_scale_use = self%parent_sim%tkmr%f_scale

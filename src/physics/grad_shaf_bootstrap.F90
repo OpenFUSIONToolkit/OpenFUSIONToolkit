@@ -14,7 +14,7 @@
 module grad_shaf_bootstrap
 use oft_base
 use oft_gs, only: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
- gs_itor_nl, flux_coord_name
+ gs_itor_nl
 use oft_lag_basis, only: oft_blag_geval
 use oft_mesh_type, only: bmesh_findcell
 use oft_blag_operators, only: oft_lag_brinterp
@@ -166,7 +166,7 @@ end subroutine jphi_bs_save_hdf5
 subroutine jphi_bs_save_txt(self,io_unit)
 class(jphi_bs_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'jphi-split-bootstrap '//TRIM(flux_coord_name(self%coord))
+WRITE(io_unit,*)'jphi-split-bootstrap'
 WRITE(io_unit,*)self%npsi,self%j0
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%jphi

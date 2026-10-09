@@ -21,10 +21,10 @@ use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
-  gs_get_qprof, gs_ani_press, gs_epsilon, flux_coord_name
+  gs_get_qprof, gs_ani_press, gs_epsilon
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
-  spline_func_copy, spline_func_delete
+  spline_func_copy, spline_func_delete, phi_flux_wrapper
 use spline_mod
 USE mhd_utils, ONLY: mu0
 implicit none
@@ -197,7 +197,6 @@ SELECT TYPE(new)
   CLASS IS(mercier_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
-    new%coord=self%coord
     new%rs = self%rs
     new%ntheta = self%ntheta
     CALL spline_alloc(new%funcp,new%npsi,1)
@@ -225,7 +224,6 @@ real(8) :: raxis,zaxis,f(3),pt(3),x1,x2
 real(8), pointer, dimension(:) :: v
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell
-IF(self%coord/=0)CALL oft_abort('Toroidal flux coordinate not supported for this profile','mercier_update',__FILE__)
 !
 IF(oft_debug_print(2))THEN
   WRITE(*,'(2A)')oft_indent,'Updating Mercier Pressure:'
@@ -411,7 +409,7 @@ end subroutine jphi_save_hdf5
 subroutine jphi_save_txt(self,io_unit)
 class(jphi_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'jphi-linterp '//TRIM(flux_coord_name(self%coord))
+WRITE(io_unit,*)'jphi-linterp'
 WRITE(io_unit,*)self%npsi,self%j0
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%jphi
@@ -503,7 +501,6 @@ SELECT TYPE(new)
   CLASS IS(jphi_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
-    new%coord=self%coord
     new%ngeom = self%ngeom
     new%j0 = self%j0
     new%norm_last = self%norm_last
@@ -579,21 +576,24 @@ CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)
 end subroutine jphi_update
 !------------------------------------------------------------------------------
-!> Node locations in normalized poloidal flux (maps `x` from toroidal flux if `coord=2`)
+!> Node locations in normalized poloidal flux (`x` mapped from toroidal flux if wrapped)
 !------------------------------------------------------------------------------
 subroutine jphi_psi_nodes(self,xpsi)
 class(jphi_flux_func), intent(inout) :: self
 REAL(r8), ALLOCATABLE, INTENT(out) :: xpsi(:) !< Node locations in \f$ 1-\hat{\psi} \f$
 INTEGER(i4) :: i
-IF(self%coord==1)CALL oft_abort('Jphi profiles on toroidal flux must use "phi_n_relabel"', &
-  'jphi_psi_nodes',__FILE__)
 ALLOCATE(xpsi(self%npsi))
 xpsi=self%x
-IF(self%coord==2.AND.ASSOCIATED(self%tmap))THEN
-  DO i=1,self%npsi
-    xpsi(i)=self%tmap%inv(self%x(i))
-  END DO
-END IF
+IF(.NOT.ASSOCIATED(self%phi_wrapper))RETURN
+SELECT TYPE(wrap=>self%phi_wrapper)
+  TYPE IS(phi_flux_wrapper)
+    IF(.NOT.wrap%relabel)CALL oft_abort('Jphi profiles on toroidal flux must use "phi_n_relabel"', &
+      'jphi_psi_nodes',__FILE__)
+    IF(.NOT.ASSOCIATED(wrap%map))RETURN
+    DO i=1,self%npsi
+      xpsi(i)=wrap%map%inv(self%x(i))
+    END DO
+END SELECT
 end subroutine jphi_psi_nodes
 !---------------------------------------------------------------------------------
 !> Area integral over the plasma (inside the LCFS) of a flux function given on
@@ -723,7 +723,7 @@ end subroutine dipole_b0_save_hdf5
 subroutine dipole_b0_save_txt(self,io_unit)
 class(dipole_b0_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'dipole_b0 '//TRIM(flux_coord_name(self%coord))
+WRITE(io_unit,*)'dipole_b0'
 WRITE(io_unit,*)self%npsi,self%psi_pad
 end subroutine dipole_b0_save_txt
 !------------------------------------------------------------------------------
@@ -763,7 +763,6 @@ SELECT TYPE(new)
   TYPE IS(dipole_b0_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
-    new%coord=self%coord
     new%psi_pad=self%psi_pad
 END SELECT
 end subroutine dipole_b0_copy
@@ -788,7 +787,6 @@ real(8) :: raxis,zaxis,f(3),pt(3),x1,x2,xr
 real(8), pointer, dimension(:) :: v
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell
-IF(self%coord/=0)CALL oft_abort('Toroidal flux coordinate not supported for this profile','dipole_b0_update',__FILE__)
 !
 IF(oft_debug_print(2))THEN
   WRITE(*,'(2A)')oft_indent,'Updating Dipole B0 profile:'
@@ -1027,7 +1025,7 @@ end subroutine mirror_b0_save_hdf5
 subroutine mirror_b0_save_txt(self,io_unit)
 class(mirror_b0_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'mirror_b0 '//TRIM(flux_coord_name(self%coord))
+WRITE(io_unit,*)'mirror_b0'
 WRITE(io_unit,*)self%npsi
 WRITE(io_unit,*)self%z_midplane
 end subroutine mirror_b0_save_txt
@@ -1069,7 +1067,6 @@ SELECT TYPE(new)
   TYPE IS(mirror_b0_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
-    new%coord=self%coord
     new%z_midplane = self%z_midplane
 END SELECT
 end subroutine mirror_b0_copy
@@ -1095,7 +1092,6 @@ real(8) :: raxis,zaxis,f(3),pt(3),x1,x2,xr
 real(8), pointer, dimension(:) :: v
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell
-IF(self%coord/=0)CALL oft_abort('Toroidal flux coordinate not supported for this profile','mirror_b0_update',__FILE__)
 !
 IF(oft_debug_print(2))THEN
   WRITE(*,'(2A)')oft_indent,'Updating Mirror B0 profile:'

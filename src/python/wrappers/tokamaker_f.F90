@@ -36,7 +36,8 @@ USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_de
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
   gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
-USE oft_gs, ONLY: torflux_qgeom_backend, qprof_trace_tol
+USE oft_gs, ONLY: qprof_trace_tol
+USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_map, torflux_setup, torflux_attach, torflux_unwrap
 USE oft_gs_cutcell, ONLY: gs_qgeom_cutcell
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
@@ -151,6 +152,7 @@ ELSE
     RETURN
   END IF
   CALL new_equil%copy(old_equil)
+  CALL torflux_setup(new_equil)
 END IF
 new_equil_ptr=C_LOC(new_equil)
 END SUBROUTINE tokamaker_equil_copy
@@ -456,7 +458,7 @@ IF(TRIM(tmp_str)/='none')THEN
   CALL gs_profile_load(tmp_str,prof_tmp)
   IF(ASSOCIATED(tMaker_equil_obj%I))THEN
     prof_tmp%f_offset=tMaker_equil_obj%I%f_offset ! Persist F0 with profile changes
-    prof_tmp%tmap=>tMaker_equil_obj%tmap ! Current toroidal flux map (if coord/=0)
+    CALL torflux_attach(prof_tmp,tMaker_equil_obj) ! Current toroidal flux map (if on toroidal flux)
     IF(prof_tmp%update_on_load)CALL prof_tmp%update(tMaker_equil_obj) ! Initialize new profile with current EQ
   END IF
   tMaker_equil_obj%I=>prof_tmp
@@ -468,6 +470,7 @@ CALL copy_string_rev(eta_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%eta)
 CALL copy_string_rev(f_NI_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%I_NI)
+CALL torflux_setup(tMaker_equil_obj,resettle=.TRUE.)
 END SUBROUTINE tokamaker_load_profiles
 !---------------------------------------------------------------------------------
 !> Retrieve degrees of freedom for desired flux profile
@@ -591,6 +594,7 @@ CALL copy_string_rev(zeff_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%Zeff)
 CALL copy_string_rev(jphi_fixed_file,tmp_str)
 IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%jphi_fixed)
+CALL torflux_setup(tMaker_equil_obj,resettle=.TRUE.)
 END SUBROUTINE tokamaker_load_kinetic_profiles
 !---------------------------------------------------------------------------------
 !> Set bootstrap current options on the jphi_bs_flux_func object inside gs_equil.
@@ -603,9 +607,11 @@ SUBROUTINE tokamaker_set_boot_ops(tMaker_equil_ptr,bops,error_str) BIND(C,NAME="
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 TYPE(tokamaker_boot_ops_type), INTENT(in) :: bops !< Bootstrap options to apply
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+CLASS(flux_func), POINTER :: I_base
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-SELECT TYPE(I => tMaker_equil_obj%I)
+I_base=>torflux_unwrap(tMaker_equil_obj%I)
+SELECT TYPE(I => I_base)
 TYPE IS (jphi_bs_flux_func)
   I%boot_ops%initialized = .TRUE.
   I%boot_ops%isolate_edge_jBS = bops%isolate_edge_jBS
@@ -631,9 +637,11 @@ TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equil
 TYPE(tokamaker_boot_ops_type), INTENT(out) :: bops !< Bootstrap options read from object
 LOGICAL(c_bool), INTENT(out) :: initialized !< .TRUE. if boot_ops have been initialized
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+CLASS(flux_func), POINTER :: I_base
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-SELECT TYPE(I => tMaker_equil_obj%I)
+I_base=>torflux_unwrap(tMaker_equil_obj%I)
+SELECT TYPE(I => I_base)
 TYPE IS (jphi_bs_flux_func)
   initialized = I%boot_ops%initialized
   bops%isolate_edge_jBS = I%boot_ops%isolate_edge_jBS
@@ -671,9 +679,11 @@ INTEGER(c_int), INTENT(out) :: n_raw !< Size of j_bs_raw array (0 if not allocat
 TYPE(c_ptr), INTENT(out) :: j_bs_raw_ptr !< Pointer to j_bs_raw array (c_null_ptr if not allocated)
 TYPE(c_ptr), INTENT(out) :: jdotb_bs_raw_ptr !< Pointer to jdotb_bs_raw array (c_null_ptr if not allocated)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+CLASS(flux_func), POINTER :: I_base
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-SELECT TYPE(I => tMaker_equil_obj%I)
+I_base=>torflux_unwrap(tMaker_equil_obj%I)
+SELECT TYPE(I => I_base)
 TYPE IS (jphi_bs_flux_func)
   n = 0
   n_raw = 0
@@ -1570,20 +1580,25 @@ INTEGER(i4) :: i
 REAL(r8) :: psihat,phihat
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-IF((.NOT.tMaker_equil_obj%tmap%active).OR.(tMaker_equil_obj%tmap%ns<2))THEN
-  CALL copy_string('No toroidal flux map (requires an equilibrium with toroidal-flux profiles)',error_str)
-  RETURN
+IF(ASSOCIATED(tMaker_equil_obj%torflux))THEN
+  SELECT TYPE(map=>tMaker_equil_obj%torflux)
+    CLASS IS(torflux_map)
+      IF(map%active.AND.(map%ns>=2))THEN
+        DO i=1,npts
+          IF(inverse)THEN
+            psihat=map%inv(xin(i))
+            CALL map%eval(psihat,phihat,jac(i))
+            xout(i)=psihat
+          ELSE
+            CALL map%eval(xin(i),phihat,jac(i))
+            xout(i)=phihat
+          END IF
+        END DO
+        RETURN
+      END IF
+  END SELECT
 END IF
-DO i=1,npts
-  IF(inverse)THEN
-    psihat=tMaker_equil_obj%tmap%inv(xin(i))
-    CALL tMaker_equil_obj%tmap%eval(psihat,phihat,jac(i))
-    xout(i)=psihat
-  ELSE
-    CALL tMaker_equil_obj%tmap%eval(xin(i),phihat,jac(i))
-    xout(i)=phihat
-  END IF
-END DO
+CALL copy_string('No toroidal flux map (requires an equilibrium with toroidal-flux profiles)',error_str)
 END SUBROUTINE tokamaker_torflux_map
 !---------------------------------------------------------------------------------
 !> Select toroidal flux map q/F backend and tracer tolerance (testing only)

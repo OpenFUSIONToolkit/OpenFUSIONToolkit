@@ -12,7 +12,6 @@ set( OBJS
   tracing_2d.F90
   axi_green.F90
   grad_shaf.F90
-  grad_shaf_torflux.F90
   grad_shaf_cutcell.F90
   grad_shaf_profiles.F90
   grad_shaf_bootstrap.F90

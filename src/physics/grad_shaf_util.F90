@@ -27,7 +27,7 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
-  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, gs_update_flux_funcs
+  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
 USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func
@@ -67,23 +67,16 @@ SELECT CASE(TRIM(profType))
 END SELECT
 END SUBROUTINE gs_profile_alloc
 !---------------------------------------------------------------------------------
-!> Save flux function storage coordinate to HDF5 (only if non-default)
-!---------------------------------------------------------------------------------
-SUBROUTINE gs_profile_save_coord(F,filename,path)
-CLASS(flux_func), INTENT(in) :: F !< Flux function object
-CHARACTER(LEN=*), INTENT(in) :: filename !< HDF5 file
-CHARACTER(LEN=*), INTENT(in) :: path !< Profile group path
-IF(F%coord/=0)CALL hdf5_write(F%coord,filename,path//'/COORD')
-END SUBROUTINE gs_profile_save_coord
-!---------------------------------------------------------------------------------
-!> Load flux function storage coordinate from HDF5 (default: psi_n)
+!> Wrap a loaded flux function if it was saved on toroidal flux (HDF5 `COORD`, default psi_n)
 !---------------------------------------------------------------------------------
 SUBROUTINE gs_profile_load_coord(F,filename,path)
-CLASS(flux_func), INTENT(inout) :: F !< Flux function object
+CLASS(flux_func), POINTER, INTENT(inout) :: F !< Flux function object
 CHARACTER(LEN=*), INTENT(in) :: filename !< HDF5 file
 CHARACTER(LEN=*), INTENT(in) :: path !< Profile group path
-F%coord=0
-IF(hdf5_field_exist(filename,path//'/COORD'))CALL hdf5_read(F%coord,filename,path//'/COORD')
+INTEGER(4) :: coord
+coord=0
+IF(hdf5_field_exist(filename,path//'/COORD'))CALL hdf5_read(coord,filename,path//'/COORD')
+CALL torflux_wrap(F,coord)
 END SUBROUTINE gs_profile_load_coord
 !---------------------------------------------------------------------------------
 !> Create flux function object from definition file
@@ -111,11 +104,10 @@ CALL F%load(io_unit)
 CLOSE(io_unit)
 SELECT CASE(TRIM(coordType))
   CASE("psi_n")
-    F%coord=0
   CASE("phi_n")
-    F%coord=1
+    CALL torflux_wrap(F,1)
   CASE("phi_n_relabel")
-    F%coord=2
+    CALL torflux_wrap(F,2)
   CASE DEFAULT
     CALL oft_abort('Invalid profile coordinate "'//TRIM(coordType)//'"','gs_profile_load',__FILE__)
 END SELECT
@@ -414,51 +406,41 @@ CALL hdf5_write(self%ffp_scale,filename,'tokamaker/FFP_SCALE')
 CALL hdf5_write(self%I%f_offset,filename,'tokamaker/F0')
 CALL hdf5_create_group(filename,'tokamaker/FFP_PROFILE')
 CALL self%I%save(filename,'tokamaker/FFP_PROFILE')
-CALL gs_profile_save_coord(self%I,filename,'tokamaker/FFP_PROFILE')
 CALL hdf5_write(self%p_scale,filename,'tokamaker/P_SCALE')
 CALL hdf5_create_group(filename,'tokamaker/PP_PROFILE')
 CALL self%P%save(filename,'tokamaker/PP_PROFILE')
-CALL gs_profile_save_coord(self%P,filename,'tokamaker/PP_PROFILE')
 IF(ASSOCIATED(self%I_NI))THEN
   CALL hdf5_create_group(filename,'tokamaker/NI_PROFILE')
   CALL self%I_NI%save(filename,'tokamaker/NI_PROFILE')
-  CALL gs_profile_save_coord(self%I_NI,filename,'tokamaker/NI_PROFILE')
 END IF
 IF(ASSOCIATED(self%eta))THEN
   CALL hdf5_create_group(filename,'tokamaker/ETA_PROFILE')
   CALL self%eta%save(filename,'tokamaker/ETA_PROFILE')
-  CALL gs_profile_save_coord(self%eta,filename,'tokamaker/ETA_PROFILE')
 END IF
 !---Save kinetic profiles (Te, Ti, ne, ni, Zeff, jphi_fixed) if set
 IF(ASSOCIATED(self%Te))THEN
   CALL hdf5_create_group(filename,'tokamaker/TE_PROFILE')
   CALL self%Te%save(filename,'tokamaker/TE_PROFILE')
-  CALL gs_profile_save_coord(self%Te,filename,'tokamaker/TE_PROFILE')
 END IF
 IF(ASSOCIATED(self%Ti))THEN
   CALL hdf5_create_group(filename,'tokamaker/TI_PROFILE')
   CALL self%Ti%save(filename,'tokamaker/TI_PROFILE')
-  CALL gs_profile_save_coord(self%Ti,filename,'tokamaker/TI_PROFILE')
 END IF
 IF(ASSOCIATED(self%ne))THEN
   CALL hdf5_create_group(filename,'tokamaker/NE_PROFILE')
   CALL self%ne%save(filename,'tokamaker/NE_PROFILE')
-  CALL gs_profile_save_coord(self%ne,filename,'tokamaker/NE_PROFILE')
 END IF
 IF(ASSOCIATED(self%ni))THEN
   CALL hdf5_create_group(filename,'tokamaker/NI_DENS_PROFILE')
   CALL self%ni%save(filename,'tokamaker/NI_DENS_PROFILE')
-  CALL gs_profile_save_coord(self%ni,filename,'tokamaker/NI_DENS_PROFILE')
 END IF
 IF(ASSOCIATED(self%Zeff))THEN
   CALL hdf5_create_group(filename,'tokamaker/ZEFF_PROFILE')
   CALL self%Zeff%save(filename,'tokamaker/ZEFF_PROFILE')
-  CALL gs_profile_save_coord(self%Zeff,filename,'tokamaker/ZEFF_PROFILE')
 END IF
 IF(ASSOCIATED(self%jphi_fixed))THEN
   CALL hdf5_create_group(filename,'tokamaker/JPHI_FIXED_PROFILE')
   CALL self%jphi_fixed%save(filename,'tokamaker/JPHI_FIXED_PROFILE')
-  CALL gs_profile_save_coord(self%jphi_fixed,filename,'tokamaker/JPHI_FIXED_PROFILE')
 END IF
 ! IF(ASSOCIATED(self%P_ani))THEN
 !   CALL hdf5_create_group(filename,'tokamaker/P_ANI')
@@ -910,7 +892,12 @@ IF(hdf5_field_exist(filename,'tokamaker/MIRNOV_TARGETS'))THEN
   END IF
 END IF
 !---Update all flux functions now that all fields (F0, targets, kinetics) are loaded
-CALL gs_update_flux_funcs(self)
+CALL torflux_setup(self,resettle=.TRUE.)
+CALL gs_update_bounds(self)
+IF(ASSOCIATED(self%torflux))CALL self%torflux%update(self)
+CALL self%I%update(self)
+CALL self%P%update(self)
+IF(ASSOCIATED(self%P_ani))CALL self%P_ani%update(self)
 IF(ASSOCIATED(self%I_NI))CALL self%I_NI%update(self)
 IF(ASSOCIATED(self%eta))CALL self%eta%update(self)
 end subroutine gs_load_tokamaker
