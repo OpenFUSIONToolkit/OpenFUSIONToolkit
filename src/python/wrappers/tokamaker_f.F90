@@ -33,10 +33,9 @@ USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_dels, flux_func, &
   gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source, gs_coil_source_distributed, gs_vacuum_solve, &
-  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
+  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds, qprof_trace_tol
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
   gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
-USE oft_gs, ONLY: qprof_trace_tol
 USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_map, torflux_setup, torflux_attach, torflux_unwrap
 USE oft_gs_cutcell, ONLY: gs_qgeom_cutcell
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm

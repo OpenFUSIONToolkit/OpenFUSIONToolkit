@@ -6016,6 +6016,10 @@ IF(ASSOCIATED(self%P_ani))THEN
   CALL self%P_ani%delete()
   DEALLOCATE(self%P_ani)
 END IF
+IF(ASSOCIATED(self%torflux))THEN
+  CALL self%torflux%delete()
+  DEALLOCATE(self%torflux)
+END IF
 end subroutine equil_destroy
 !------------------------------------------------------------------------------
 !> Compute boundary condition matrix for free-boundary case

@@ -98,7 +98,10 @@ OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,'(A)')line
 coordType='psi_n'
 READ(line,*,IOSTAT=ios)profType,coordType
-IF(ios/=0)READ(line,*)profType
+IF(ios/=0)THEN
+  READ(line,*)profType
+  coordType='psi_n'
+END IF
 CALL gs_profile_alloc(profType,F)
 CALL F%load(io_unit)
 CLOSE(io_unit)
@@ -893,11 +896,9 @@ IF(hdf5_field_exist(filename,'tokamaker/MIRNOV_TARGETS'))THEN
 END IF
 !---Update all flux functions now that all fields (F0, targets, kinetics) are loaded
 CALL torflux_setup(self,resettle=.TRUE.)
-CALL gs_update_bounds(self)
 IF(ASSOCIATED(self%torflux))CALL self%torflux%update(self)
 CALL self%I%update(self)
 CALL self%P%update(self)
-IF(ASSOCIATED(self%P_ani))CALL self%P_ani%update(self)
 IF(ASSOCIATED(self%I_NI))CALL self%I_NI%update(self)
 IF(ASSOCIATED(self%eta))CALL self%eta%update(self)
 end subroutine gs_load_tokamaker

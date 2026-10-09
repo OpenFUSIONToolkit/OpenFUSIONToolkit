@@ -20,7 +20,7 @@
 !------------------------------------------------------------------------------
 MODULE oft_gs_cutcell
 USE oft_base
-USE oft_mesh_type, ONLY: oft_bmesh, cell_is_curved
+USE oft_mesh_type, ONLY: cell_is_curved
 USE oft_lag_basis, ONLY: oft_blag_npos, oft_scalar_bfem
 USE oft_gs, ONLY: gs_equil, gs_test_bounds
 USE oft_lu, ONLY: lapack_matinv
@@ -528,6 +528,7 @@ DO m=1,bt%nb
 END DO
 ALLOCATE(bt%vinv,SOURCE=v(1:bt%nb,1:bt%nb))
 CALL lapack_matinv(bt%nb,bt%vinv,ierr)
+IF(ierr/=0)CALL oft_abort('Bernstein table inversion failed','bern_setup',__FILE__)
 !---Monomials u^a2 v^a3 on the uniform lattice
 DO m=1,bt%nb
   DO n=1,bt%nb
@@ -536,6 +537,7 @@ DO m=1,bt%nb
 END DO
 ALLOCATE(bt%mvinv,SOURCE=v(1:bt%nb,1:bt%nb))
 CALL lapack_matinv(bt%nb,bt%mvinv,ierr)
+IF(ierr/=0)CALL oft_abort('Monomial table inversion failed','bern_setup',__FILE__)
 bt%cbound=(MAXVAL(SUM(ABS(bt%vinv),DIM=2))-1.d0)/2.d0+1.d-12
 end subroutine bern_setup
 END MODULE oft_gs_cutcell
