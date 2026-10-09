@@ -133,7 +133,6 @@ TYPE :: edge_jbs_fit_ctx
   REAL(r8) :: ub(7) = 1.0_r8        !< Upper bounds for the 7 parameters
 END TYPE edge_jbs_fit_ctx
 TYPE(edge_jbs_fit_ctx) :: active_edge_jbs !< Module-level context for lmdif callback
-REAL(r8) :: sauter_wtime = 0.d0 !< Time of the last @ref sauter_fc call [s] (cut-cell wall time plus tracing time summed over threads)
 contains
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -447,7 +446,6 @@ REAL(r8) :: djBS
 LOGICAL :: bs_frozen !< j_BS reused from the last update (no Sauter pass)
 ! Diagnostic I_p comparison
 REAL(r8) :: itor_nl, itor_flint
-REAL(r8) :: wt(5) !< Wall times [s]: <R> averages, bootstrap, alpha solve, update total, start
 CHARACTER(len=256) :: char_buf
 !--- First-iteration runs with no bootstrap current
 IF(.NOT. gseq%skip_targets) THEN
@@ -481,7 +479,6 @@ IF(.NOT.ASSOCIATED(gseq%Zeff)) &
 !--- 1. Pressure scale.
 ALLOCATE(jtor(0:self%npsi), psi_n(0:self%npsi), ravgs(0:self%npsi,3))
 psi_n = [0.0_r8, xpsi]
-wt=0.d0; wt(5)=omp_get_wtime()
 saw_on = self%boot_ops%saw_q_s > 0.0_r8
 do_saw = saw_on .AND. (.NOT.self%freeze_saw) .AND. ASSOCIATED(self%jtot_last)
 djsaw = 0.0_r8
@@ -516,7 +513,6 @@ IF(bs_frozen) THEN
   djBS = 0.0_r8
 ELSE
   !--- Not frozen: run full bootstrap calculation (Sauter).
-  wt(2)=omp_get_wtime()
   IF (self%boot_ops%isolate_edge_jBS .OR. self%boot_ops%parameterize_jBS) THEN
     ALLOCATE(j_spike_tmp(0:self%npsi), j_spike_mask_tmp(0:self%npsi))
     CALL calculate_bootstrap(self, gseq, self%npsi, xpsi, j_BS, &
@@ -582,16 +578,13 @@ ELSE
   END IF
   IF(.NOT.ASSOCIATED(self%j_BS_last)) ALLOCATE(self%j_BS_last(0:self%npsi))
   self%j_BS_last = j_BS
-  wt(2)=omp_get_wtime()-wt(2)
 END IF
 !--- 2b. <R>, <1/R>, <1/R^2> (I_p measure, F*F' map) not set by the Sauter pass
-wt(1)=omp_get_wtime()
 IF(bs_frozen)THEN
   CALL gs_ravgs(gseq, self%npsi+1, psi_n, ravgs)
 ELSE
   CALL gs_ravgs(gseq, 1, psi_n(0:0), ravgs(0:0,:))
 END IF
-wt(1)=omp_get_wtime()-wt(1)
 !--- 3. Apply edge taper to j_BS, jphi_ind, jphi_fixed and j_saw_in (the last two first converted to mu0*A/m²).
 !   self%j_BS_last caches the un-tapered j_BS so freeze comparisons track physics.
 !   taper_edge_psi0 is in standard convention (0=axis,1=LCFS);
@@ -644,7 +637,6 @@ END IF
 !   alpha = (Ip_target - Ip_lo) / (Ip_hi - Ip_lo).  Re-solved every update (cheap): a
 !   frozen alpha lets I_p drift while the shape is still settling.
 ip_target = ABS(gseq%Ip_target)
-wt(3)=omp_get_wtime()
 IF(do_saw)THEN
   ip_result_lo = cum(1,1) + cum(1,3)
   ip_result_hi = ip_result_lo + cum(1,2)
@@ -657,7 +649,6 @@ ELSE
   CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, ip_result_hi)
 END IF
 ip_ind = ip_result_hi - ip_result_lo
-wt(3)=omp_get_wtime()-wt(3)
 IF(ABS(ip_ind) > 0.0_r8)THEN
   alpha = (ip_target - ip_result_lo) / ip_ind
   IF(alpha < -1.0_r8 .OR. alpha > 10.0_r8) THEN
@@ -764,12 +755,8 @@ END DO
 ! gseq%skip_targets is already true when jphi_bs_update called
 gseq%ffp_scale=1.d0
 gseq%p_scale=pscale
-wt(4)=omp_get_wtime()-wt(5)
 !--- 6. Diagnostics.
 IF(self%boot_ops%diagnose_bs)THEN
-  WRITE(*,'(A,L1,4(A,F9.4))') '  [bs_timing] bs_frozen=', bs_frozen, ' ravg=', wt(1), &
-    ' bootstrap=', wt(2), ' alpha=', wt(3), ' update=', wt(4)
-  IF(.NOT.bs_frozen)WRITE(*,'(A,F9.4)') '  [bs_timing] sauter_fc time=', sauter_wtime
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] ip_target   = ', ip_target
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] ip_result_lo= ', ip_result_lo
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] ip_result_hi= ', ip_result_hi
@@ -1303,7 +1290,7 @@ real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field \f$<|B|>\
 real(8), optional, intent(out) :: qprof(nr) !< Safety factor q on each surface (avoids a separate gs_get_qprof call)
 real(8), optional, intent(out) :: eps(nr) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(2\langle R \rangle) \f$ on each surface
 real(8), optional, intent(out) :: invr2(nr) !< \f$<1/R^2>\f$ on each surface
-real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,h,h2,hf,ftu,ftl,t0
+real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,h,h2,hf,ftu,ftl
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
 real(8), allocatable :: pts(:,:),fpol(:),qtmp(:),epstmp(:),i2tmp(:)
 real(8), pointer :: ptout(:,:),vout(:,:)
@@ -1364,9 +1351,7 @@ DO j=1,nr
   i2tmp(j)       = 1.d0/raxis**2
 END DO
 !---Cut-cell averages and extrema
-sauter_wtime=0.d0
 IF(torflux_qgeom_backend/=1)THEN
-  t0=omp_get_wtime()
   ALLOCATE(acc(8,nr),ext(3,nr),bref(nr))
   bref=-1.d0
   CALL gs_sauter_cutcell(gseq,nr,psi_q,fpol,bref,acc,ext,ok=done)
@@ -1391,7 +1376,6 @@ IF(torflux_qgeom_backend/=1)THEN
   END DO
   done=done.OR.(psi_q == 1.d0)
   DEALLOCATE(acc,ext,bref)
-  sauter_wtime=omp_get_wtime()-t0
   IF(oft_debug_print(1).AND.(.NOT.ALL(done)))WRITE(*,'(2A,I0,A)')oft_indent, &
     'sauter_fc: tracing ',COUNT(.NOT.done),' surfaces not closed by the cut-cell pass'
 END IF
@@ -1407,7 +1391,7 @@ CALL psi_int%delete()
 !---Trace the remaining surfaces
 IF(.NOT.ALL(done))THEN
 call set_tracer(1)
-!$omp parallel private(j,field,ptout,vout,h,h2,hf,ftu,ftl,t0) reduction(+:sauter_wtime)
+!$omp parallel private(j,field,ptout,vout,h,h2,hf,ftu,ftl)
 ALLOCATE(field)
 field%u=>gseq%psi
 field%mag_axis=gseq%o_point
@@ -1433,9 +1417,7 @@ do j=1,nr
   field%bmax=0.d0
   field%rmax_surf = -1.d30
   field%rmin_surf =  1.d30
-  t0=omp_get_wtime()
   CALL tracinginv_fs(device%mesh,pts(:,j),ptout,vout)
-  sauter_wtime=sauter_wtime+omp_get_wtime()-t0
   if(active_tracer%status/=1)THEN
     WRITE(*,*)j,pts(:,j)
     CALL oft_warn("sauter_fc: Trace did not complete")
