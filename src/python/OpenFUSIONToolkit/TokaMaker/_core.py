@@ -906,7 +906,7 @@ class TokaMaker():
         `jphi-split-bootstrap` current profile.
 
         @result Dictionary with keys `'psi_n'`, `'jphi_total'`, `'jphi_bs_final'`, `'jphi_ind_final'`
-          and (when available) `'jphi_fixed'`, `'jphi_saw_final'`, `'saw_rho_m'`, `'saw_rho_out'`, `'saw_n_dips'`,
+          and (when available) `'jphi_fixed_final'`, `'jphi_saw_final'`, `'saw_rho_m'`, `'saw_rho_out'`, `'saw_n_dips'`,
           `'jphi_pdriven_final'`, `'jphi_bs_raw'`, `'jdotb_bs_raw'`, `'jphi_pdriven_raw'`.  Returns `None` if no profiles have been computed.
           `'psi_n'` is in standard convention (0=axis, 1=LCFS). Current densities are in A/m².
         '''
@@ -2432,10 +2432,10 @@ class TokaMaker():
           (see doc_tokamaker_current_conventions):
           - ``'psi_n'`` Normalised poloidal flux grid (0 = axis, 1 = LCFS) of the ``ffp_prof['x']`` nodes
             (mapped from toroidal flux if ``coord='phi_n'``)
-          - ``'jphi_total'`` Total toroidal current density = jphi_ind_final + jphi_bs_final + jphi_fixed + jphi_saw_final [A/m²]
+          - ``'jphi_total'`` Total toroidal current density = jphi_ind_final + jphi_bs_final + jphi_fixed_final + jphi_saw_final [A/m²]
           - ``'jphi_ind_final'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
           - ``'jphi_bs_final'`` Bootstrap current density (optionally isolated / parametrised / tapered) [A/m²]
-          - ``'jphi_fixed'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
+          - ``'jphi_fixed_final'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
           - ``'jphi_saw_final'`` Sawtooth current: ``jphi_saw_prof`` (optionally tapered) plus the reset current [A/m²]
           - ``'saw_rho_m'``, ``'saw_rho_out'``, ``'saw_n_dips'`` Sawtooth radius (q_s + dq crossing beyond the outermost
             q < q_s, \f$\rho_{tor,N}\f$), outer end of the reset and number of regions reset, at the last reset
@@ -3195,7 +3195,7 @@ class TokaMaker_equilibrium():
         `jphi-split-bootstrap` current profile.
 
         @result Dictionary with keys `'psi_n'`, `'jphi_total'`, `'jphi_bs_final'`, `'jphi_ind_final'`
-          and (when available) `'jphi_fixed'`, `'jphi_saw_final'`, `'saw_rho_m'`, `'saw_rho_out'`, `'saw_n_dips'`,
+          and (when available) `'jphi_fixed_final'`, `'jphi_saw_final'`, `'saw_rho_m'`, `'saw_rho_out'`, `'saw_n_dips'`,
           `'jphi_pdriven_final'`, `'jphi_bs_raw'`, `'jdotb_bs_raw'`, `'jphi_pdriven_raw'`.  Returns `None` if no
           profiles have been computed.  All arrays are 1-D numpy arrays of length *npsi*.  `'psi_n'` is
           in standard convention (0 = axis, 1 = LCFS).  Current densities are TokaMaker
@@ -3209,7 +3209,7 @@ class TokaMaker_equilibrium():
         jphi_total_ptr = c_double_ptr()
         jphi_bs_final_ptr = c_double_ptr()
         jphi_ind_final_ptr = c_double_ptr()
-        jphi_fixed_ptr = c_double_ptr()
+        jphi_fixed_final_ptr = c_double_ptr()
         jphi_saw_final_ptr = c_double_ptr()
         saw_rho_m = c_double(0.0)
         saw_rho_out = c_double(0.0)
@@ -3222,7 +3222,7 @@ class TokaMaker_equilibrium():
         tokamaker_get_boot_profs(self.c_ptr,
             ctypes.byref(n), ctypes.byref(psi_n_ptr),
             ctypes.byref(jphi_total_ptr), ctypes.byref(jphi_bs_final_ptr),
-            ctypes.byref(jphi_ind_final_ptr), ctypes.byref(jphi_fixed_ptr),
+            ctypes.byref(jphi_ind_final_ptr), ctypes.byref(jphi_fixed_final_ptr),
             ctypes.byref(jphi_saw_final_ptr), ctypes.byref(saw_rho_m), ctypes.byref(saw_rho_out), ctypes.byref(saw_n_dips),
             ctypes.byref(jphi_pdriven_final_ptr),
             ctypes.byref(n_raw), ctypes.byref(jphi_bs_raw_ptr), ctypes.byref(jdotb_bs_raw_ptr),
@@ -3240,8 +3240,8 @@ class TokaMaker_equilibrium():
             result['jphi_total'] = numpy.ctypeslib.as_array(jphi_total_ptr, shape=(n.value,)).copy()
             result['jphi_bs_final'] = numpy.ctypeslib.as_array(jphi_bs_final_ptr, shape=(n.value,)).copy()
             result['jphi_ind_final'] = numpy.ctypeslib.as_array(jphi_ind_final_ptr, shape=(n.value,)).copy()
-            if jphi_fixed_ptr:
-                result['jphi_fixed'] = numpy.ctypeslib.as_array(jphi_fixed_ptr, shape=(n.value,)).copy()
+            if jphi_fixed_final_ptr:
+                result['jphi_fixed_final'] = numpy.ctypeslib.as_array(jphi_fixed_final_ptr, shape=(n.value,)).copy()
             if jphi_saw_final_ptr:
                 result['jphi_saw_final'] = numpy.ctypeslib.as_array(jphi_saw_final_ptr, shape=(n.value,)).copy()
             result['saw_rho_m'] = float(saw_rho_m.value)

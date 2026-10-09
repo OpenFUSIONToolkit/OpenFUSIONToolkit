@@ -1633,7 +1633,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             raise AssertionError(f"jphi_pdriven_raw does not match P'(<R> - F^2<1/R>/<B^2>) (rel err {err_pd:.3e})")
         # A8: the equilibrium's own <J.B> = F P' + F'<B^2>/mu0 equals the sum of its components'
         jdotb_eq = F_c * Pp_c + Fp_c * B2_c / mu0
-        jdotb_sum = jdotb + (bp['jphi_ind_final'][inner] + bp['jphi_fixed'][inner]) * B2_c / (F_c * invR_c)
+        jdotb_sum = jdotb + (bp['jphi_ind_final'][inner] + bp['jphi_fixed_final'][inner]) * B2_c / (F_c * invR_c)
         err_par = np.max(np.abs(jdotb_eq - jdotb_sum)) / np.max(np.abs(jdotb_eq))
         print(f"<J.B> balance (A8): rel err {err_par:.3e}")
         if err_par > 2.0e-2:
@@ -1820,16 +1820,16 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             jphi_fixed_prof={'type': 'linterp', 'x': psi_sample, 'y': jfix_y},
             **zeff_common_kwargs,
         )
-        if not np.allclose(profs_fixed['jphi_fixed'], np.interp(profs_fixed['psi_n'], psi_sample, jfix_y),
+        if not np.allclose(profs_fixed['jphi_fixed_final'], np.interp(profs_fixed['psi_n'], psi_sample, jfix_y),
                            rtol=1e-6, atol=1e-6*jfix_y.max()):
-            raise AssertionError("boot_profs['jphi_fixed'] does not match the input jphi_fixed_prof")
-        j_sum = profs_fixed['jphi_ind_final'] + profs_fixed['jphi_bs_final'] + profs_fixed['jphi_fixed']
+            raise AssertionError("boot_profs['jphi_fixed_final'] does not match the input jphi_fixed_prof")
+        j_sum = profs_fixed['jphi_ind_final'] + profs_fixed['jphi_bs_final'] + profs_fixed['jphi_fixed_final']
         if not np.allclose(profs_fixed['jphi_total'], j_sum, rtol=1e-10, atol=1e-6):
-            raise AssertionError("jphi_total != jphi_ind_final + jphi_bs_final + jphi_fixed")
+            raise AssertionError("jphi_total != jphi_ind_final + jphi_bs_final + jphi_fixed_final")
         if not np.sum(profs_fixed['jphi_ind_final']) < np.sum(profs_scalar['jphi_ind_final']):
             raise AssertionError("jphi_fixed did not reduce the inductive current share")
         profs_reset = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
-        if np.any(profs_reset['jphi_fixed'] != 0.0):
+        if np.any(profs_reset['jphi_fixed_final'] != 0.0):
             raise AssertionError("jphi_fixed persisted after solve_bootstrap without jphi_fixed_prof")
     except Exception as e:
         print(e)
@@ -1925,7 +1925,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         return np.allclose(a, b, rtol=rtol, atol=rtol*np.max(np.abs(b)))
 
     def sum_ok(p):
-        return close(p['jphi_total'], p['jphi_ind_final'] + p['jphi_bs_final'] + p['jphi_fixed'] + p['jphi_saw_final'], 1e-10)
+        return close(p['jphi_total'], p['jphi_ind_final'] + p['jphi_bs_final'] + p['jphi_fixed_final'] + p['jphi_saw_final'], 1e-10)
 
     try:
         base = mygs.solve_bootstrap(**common)
@@ -1937,10 +1937,10 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         # Both converge j_BS to djBS_tol (1e-4) and may stop an iteration apart
         if not close(p_saw['jphi_total'], p_fix['jphi_total'], 2e-4):
             raise AssertionError("jphi_saw_prof (saw off) total differs from the same jphi_fixed_prof")
-        if not close(p_saw['jphi_saw_final'], np.interp(p_saw['psi_n'], psi_sample, bump), 1e-6) or np.any(p_saw['jphi_fixed'] != 0.0):
+        if not close(p_saw['jphi_saw_final'], np.interp(p_saw['psi_n'], psi_sample, bump), 1e-6) or np.any(p_saw['jphi_fixed_final'] != 0.0):
             raise AssertionError("j_saw / jphi_fixed with jphi_saw_prof (saw off) wrong")
         if not (sum_ok(p_fix) and sum_ok(p_saw)):
-            raise AssertionError("jphi_total != j_ind + j_bs + jphi_fixed + j_saw")
+            raise AssertionError("jphi_total != j_ind + j_bs + jphi_fixed_final + jphi_saw_final")
         # jphi_saw survives an equilibrium save/load: re-solving the reloaded state keeps j_saw
         # (zeroed before the reload, since replace_eq loads into a copy of the live equilibrium)
         mygs._tMaker_equil.save_TokaMaker('ITER_saw_roundtrip.h5')
@@ -2314,7 +2314,7 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
             mask = (res_phi['psi_n'] > 0.05) & (res_phi['psi_n'] < 0.9)
             results['jbs_err'] = np.max(np.abs(res_phi['jphi_bs_final'][mask]-j_ref[mask]))/np.max(np.abs(j_ref))
             # jphi_fixed relabelled onto Phi_N nodes returns the input values
-            results['jfix_err'] = np.max(np.abs(res_phi['jphi_fixed']-jfix))/np.max(jfix)
+            results['jfix_err'] = np.max(np.abs(res_phi['jphi_fixed_final']-jfix))/np.max(jfix)
             # Node psi_N positions agree with the solver map
             psi_nodes, _ = mygs.get_torflux_map(x_phi,inverse=True)
             results['node_err'] = np.max(np.abs(res_phi['psi_n']-psi_nodes))
