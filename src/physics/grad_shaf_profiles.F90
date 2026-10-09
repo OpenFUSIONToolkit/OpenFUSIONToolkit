@@ -1765,11 +1765,11 @@ real(8), intent(out) :: jac !< \f$ d\hat{\Phi}/d\hat{\psi} \f$
 real(8), optional, intent(out) :: djac !< \f$ d^2\hat{\Phi}/d\hat{\psi}^2 \f$
 logical :: mapped
 real(8) :: x1,dpsi,psihat,phihat
-self%phi_rep%plasma_bounds=self%plasma_bounds
 mapped=.FALSE.
 psim=psi; jac=1.d0
 IF(PRESENT(djac))djac=0.d0
 IF(.NOT.ASSOCIATED(self%map))RETURN
+IF(self%map%ns<2)RETURN
 CALL phi_wrap_norm(self,x1,dpsi)
 psihat=(psi-x1)/dpsi
 IF(psihat<0.d0)RETURN
@@ -1777,6 +1777,18 @@ CALL self%map%eval(psihat,phihat,jac,djac)
 psim=x1+phihat*dpsi
 mapped=.TRUE.
 end function phi_wrap_map
+!------------------------------------------------------------------------------
+!> Set the plasma bounds of `F`, and of the profile it wraps if it is on toroidal flux
+!------------------------------------------------------------------------------
+subroutine torflux_set_bounds(F,bounds)
+class(flux_func), intent(inout) :: F !< Profile
+real(8), intent(in) :: bounds(2) !< Plasma bounds
+F%plasma_bounds=bounds
+SELECT TYPE(F)
+  TYPE IS(phi_flux_wrapper)
+    F%phi_rep%plasma_bounds=bounds
+END SELECT
+end subroutine torflux_set_bounds
 !------------------------------------------------------------------------------
 !> Normalization offset and width (unset bounds: argument is already \f$ 1-\hat{\psi} \f$)
 !------------------------------------------------------------------------------
@@ -1922,9 +1934,7 @@ real(8) :: b,x1,dpsi,psihat,u
 integer(4) :: lo
 CALL phi_wrap_norm(self,x1,dpsi)
 psihat=(psi-x1)/dpsi
-IF(self%map%ns<2)THEN
-  b=phi_wrap_relabel_int(self,0.d0,psihat)
-ELSE IF(self%fint_stamp/=self%map%stamp)THEN
+IF(self%fint_stamp/=self%map%stamp)THEN
   !---Table unavailable, integrate over all map intervals (slow)
   b=phi_wrap_relabel_int(self,0.d0,MIN(psihat,self%map%psis(1)))
   DO lo=2,self%map%ns
@@ -1947,8 +1957,10 @@ end function phi_wrap_relabel_f
 subroutine phi_wrap_update(self,gseq)
 class(phi_flux_wrapper), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
-self%plasma_bounds=gseq%plasma_bounds
-IF(gseq%torflux_ierr==2)RETURN ! No closed surfaces to map
+real(8) :: dpsi
+CALL torflux_set_bounds(self,gseq%plasma_bounds)
+dpsi=ABS(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
+IF(.NOT.((dpsi>0.d0).AND.(dpsi<HUGE(dpsi))))RETURN ! No closed surfaces to map
 IF(.NOT.ASSOCIATED(self%map))THEN
   IF(.NOT.ASSOCIATED(gseq%torflux))ALLOCATE(torflux_map::gseq%torflux)
   SELECT TYPE(map=>gseq%torflux)
@@ -2006,6 +2018,11 @@ SELECT TYPE(rep)
     rep%plasma_bounds=self%plasma_bounds
     rep%f_offset=self%f_offset
     rep%map=>self%map
+    IF(ASSOCIATED(self%fint))THEN
+      ALLOCATE(rep%fint,SOURCE=self%fint)
+      ALLOCATE(rep%fcof,SOURCE=self%fcof)
+      rep%fint_stamp=self%fint_stamp
+    END IF
 END SELECT
 new=>rep
 end subroutine phi_wrap_copy
@@ -2163,6 +2180,7 @@ SELECT TYPE(new)
     new%active=self%active
     new%Q=self%Q
     new%ns=self%ns
+    new%stamp=self%stamp
     IF(self%ns>0)THEN
       ALLOCATE(new%psis,SOURCE=self%psis)
       ALLOCATE(new%phihat,SOURCE=self%phihat)
@@ -2360,9 +2378,6 @@ ELSE IF(SIZE(self%nodes)/=SIZE(phinodes))THEN
 ELSE IF(ANY(self%nodes/=phinodes))THEN
   npass=place_maxits
 END IF
-self%settle=.FALSE.
-IF(ASSOCIATED(self%nodes))DEALLOCATE(self%nodes)
-ALLOCATE(self%nodes,SOURCE=phinodes)
 !---Place surfaces at node locations of the current map and re-trace until they settle
 shift=-1.d0
 DO ip=1,npass
@@ -2396,7 +2411,7 @@ DO ip=1,npass
     RETURN
   END IF
   !---Fixed-point iteration for F/map consistency
-  IF(ASSOCIATED(gseq%I))gseq%I%plasma_bounds=gseq%plasma_bounds
+  IF(ASSOCIATED(gseq%I))CALL torflux_set_bounds(gseq%I,gseq%plasma_bounds)
   dpsi=gseq%plasma_bounds(2)-gseq%plasma_bounds(1)
   DO it=1,fp_maxits
     DO i=2,n-1
@@ -2441,7 +2456,6 @@ DO ip=1,npass
     IF(self%ns==n)err=MAXVAL(ABS(cum/cum(n)-self%phihat))
     IF(self%ns/=n)THEN
       CALL self%delete()
-      ALLOCATE(self%nodes,SOURCE=phinodes)
       self%ns=n
       ALLOCATE(self%psis(n),self%phihat(n),self%jac(n))
     END IF
@@ -2460,9 +2474,16 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,I4,A,I3,A,I3,A,ES11.3,A,ES11.3)')oft_indent,'Toroidal flux map: ',n,' surfaces, ', &
     MIN(ip,npass),' passes, ',it,' its, shift = ',shift,', Q = ',self%Q
 END IF
+!---Placement settled for these nodes
+self%settle=.FALSE.
+IF(ASSOCIATED(self%nodes))DEALLOCATE(self%nodes)
+ALLOCATE(self%nodes,SOURCE=phinodes)
 IF(ALLOCATED(pnew))DEALLOCATE(pnew)
 DEALLOCATE(phinodes,phitarg,psis,g,q,r,dq,cum)
-!---Rebuild the relabel tables of all profiles against the new map
+CALL build_all_fint
+CONTAINS
+!---Rebuild the relabel tables of all profiles against the current map
+subroutine build_all_fint
 CALL build_fint(gseq%I)
 CALL build_fint(gseq%P)
 CALL build_fint(gseq%eta)
@@ -2474,7 +2495,7 @@ CALL build_fint(gseq%ni)
 CALL build_fint(gseq%Zeff)
 CALL build_fint(gseq%jphi_fixed)
 CALL build_fint(gseq%jphi_saw)
-CONTAINS
+end subroutine build_all_fint
 !---Rebuild the relabel table of a wrapped profile
 subroutine build_fint(F)
 CLASS(flux_func), POINTER, INTENT(in) :: F
@@ -2489,6 +2510,7 @@ subroutine map_failed(reason)
 CHARACTER(LEN=*), INTENT(in) :: reason
 CALL oft_warn('Toroidal flux map update failed ('//reason//'), keeping previous map')
 gseq%torflux_ierr=1
+CALL build_all_fint
 end subroutine map_failed
 !---Collect the nodes of a wrapped profile (piecewise-linear profiles only)
 subroutine add_nodes(F)
