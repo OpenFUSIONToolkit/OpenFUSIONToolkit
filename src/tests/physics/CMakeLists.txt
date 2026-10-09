@@ -29,6 +29,7 @@ if( OFT_BUILD_TESTS )
   oft_add_test( test_taylor_green_2d.F90 test_phys_helpers )
   configure_file( test_taylor_green_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( oft_in_taylor_green.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( oft_in_taylor_green_p2_mf.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
   # ThinCurr tests
   configure_file( test_ThinCurr.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )

@@ -1,0 +1,13 @@
+<oft>
+  <xmhd2d>
+    <pre type="gmres">
+      <its>1</its>
+      <nrits>1</nrits>
+      <pre type="block_jacobi">
+        <!-- Two LU blocks avoid near-exact serial P2 matrix-free preconditioning. -->
+        <nlocal>2</nlocal>
+        <solver type="lu"></solver>
+      </pre>
+    </pre>
+  </xmhd2d>
+</oft>

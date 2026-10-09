@@ -1,11 +1,10 @@
 name: Container CD Build and Deployment
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - container_release
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: cd_container-${{ github.ref }}
@@ -16,7 +15,7 @@ env:
 
 jobs:
   prepare-version:
-    if: (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
+    if: github.repository == 'OpenFUSIONToolkit/OpenFUSIONToolkit'
     runs-on: ubuntu-latest
     outputs:
       version_tag: ${{ steps.version.outputs.version_tag }}

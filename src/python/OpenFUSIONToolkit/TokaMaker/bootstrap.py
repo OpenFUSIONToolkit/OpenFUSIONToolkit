@@ -3,7 +3,6 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-from warnings import warn
 '''! Solvers and helper functions for TokaMaker bootstrap current functionality
 
 @authors Daniel Burgess
@@ -11,7 +10,7 @@ from warnings import warn
 @ingroup doxy_oft_python
 '''
 import numpy
-import warnings
+from warnings import warn
 from ._interface import *
 from OpenFUSIONToolkit.TokaMaker.util import get_jphi_from_GS
 
@@ -214,8 +213,8 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
         # bootstrap profile (identical to the isolate_edge_jBS=False path)
         # rather than returning None, which would break the documented dict
         # contract and crash subscripting callers (res['masked_spike']).
-        warnings.warn(reason + "; using bootstrap profile without edge isolation",
-                      RuntimeWarning, stacklevel=2)
+        warn(reason + "; using bootstrap profile without edge isolation",
+             RuntimeWarning, stacklevel=2)
         j_full = numpy.array(j_bootstrap, dtype=float)
         return {
             'sigma': 0.0,
@@ -361,9 +360,9 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
         amp, center, width, offset, sk, y_sep, blend_width = popt
         spike_only = parameterize_edge_jBS(psi_N, amp, center, width, offset, sk, y_sep, blend_width)
     except Exception as _edge_fit_exc:
-        warnings.warn("parameterize_edge_jBS fit failed (%s); falling back to "
-                      "masked_spike (unused unless parameterize_jBS=True)" % _edge_fit_exc,
-                      RuntimeWarning, stacklevel=2)
+        warn("parameterize_edge_jBS fit failed (%s); falling back to "
+             "masked_spike (unused unless parameterize_jBS=True)" % _edge_fit_exc,
+             RuntimeWarning, stacklevel=2)
         popt = numpy.asarray(p0, dtype=float)
         amp, center, width, offset, sk, y_sep, blend_width = popt
         spike_only = masked_spike.copy()
@@ -453,9 +452,7 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     '''
     import matplotlib.pyplot as plt
 
-    # Sample equilibrium quantities on the profile grid so they can be combined
-    # element-wise with the profiles; endpoints are clipped because the
-    # flux-surface tracer cannot resolve the magnetic axis or separatrix exactly.
+    # Endpoints clipped: the flux-surface tracer cannot resolve the axis or separatrix
     psi_eval = numpy.clip(psi_N, psi_pad, 1.0 - psi_pad)
 
     if spike_prof is None:
@@ -828,34 +825,23 @@ def _validate_grid(values, name, x=None):
 
     @param values Profile values
     @param name Profile name, used in the raised error message
-    @param x Normalized radial grid (\f$\hat{\psi}\f$ or \f$\hat{\Phi}\f$) `values` is
-      sampled on. If `None`, a uniform grid `numpy.linspace(0,1,len(values))` is used.
-      Otherwise must be finite, strictly increasing, within [0,1], and the same length
-      as `values`.
+    @param x Normalized radial grid (\f$\hat{\psi}\f$ or \f$\hat{\Phi}\f$) `values` is sampled on
+    (strictly increasing, in [0,1]); if `None`, `values` is assumed evenly sampled on [0,1]
     @result Validated grid
     '''
-    values = numpy.asarray(values)
-    if len(values) < 3:
-        raise ValueError("profiles must contain at least 3 points for second-order "
-                         "derivatives (got %d)" % len(values))
+    n_x = len(values)
     if x is None:
-        return numpy.linspace(0., 1., len(values))
-    grid = numpy.asarray(x, dtype=float)
-    if grid.ndim != 1 or grid.size != len(values):
-        raise ValueError("x must be 1D with the same length as the '%s' profile "
-                         "(got %s, expected (%d,))" % (name, grid.shape, len(values)))
-    if not numpy.all(numpy.isfinite(grid)):
-        raise ValueError("x contains non-finite values at indices %s for the '%s' profile"
-                         % (numpy.flatnonzero(~numpy.isfinite(grid))[:5].tolist(), name))
-    if numpy.any(numpy.diff(grid) <= 0.):
-        raise ValueError("x must be strictly increasing; found non-increasing "
-                         "steps at indices %s for the '%s' profile (duplicated or "
-                         "unsorted flux labels give undefined profile derivatives)"
-                         % (numpy.flatnonzero(numpy.diff(grid) <= 0.)[:5].tolist(), name))
-    if (grid[0] < 0.) or (grid[-1] > 1.):
-        raise ValueError("x must lie within [0,1] for the '%s' profile (got [%g, %g])"
-                         % (name, grid[0], grid[-1]))
-    return grid
+        return numpy.linspace(0., 1., n_x)
+    x = numpy.asarray(x, dtype=float)
+    if x.shape != (n_x,):
+        raise ValueError("x must be 1D and the same length as the '{0}' profile".format(name))
+    if not numpy.all(numpy.isfinite(x)):
+        raise ValueError("x contains non-finite values")
+    if numpy.any(numpy.diff(x) <= 0.0):
+        raise ValueError("x must be strictly increasing")
+    if not (numpy.isclose(x[0], 0.0) and numpy.isclose(x[-1], 1.0)):
+        raise ValueError("x must span [0,1] ({0}, {1})".format(x[0], x[-1]))
+    return x
 
 def _default_profile(values, name, x=None, scale=1.0):
     r'''! Build a {'x','y'} profile dict on the validated grid `x`
@@ -913,11 +899,8 @@ def solve_with_bootstrap(mygs,
     @param diagnostic_plots If True, plot diagnostic figures
     @param parameterize_jBS If True, use parameterized edge spike
     @param use_OMFIT_sauter If True, use OMFIT Sauter model
-    @param x Normalized radial grid the input profiles are sampled on, in `coord`.
-    If `None` (default) the profiles are assumed evenly sampled and a uniform grid
-    `numpy.linspace(0,1,len(ne))` is used. Must be finite, strictly increasing, within
-    [0,1], and the same length as the profiles. The number of traced flux surfaces is
-    `len(x)`, so profile resolution sets equilibrium sampling resolution.
+    @param x Normalized radial grid the profiles are sampled on, in `coord` (strictly increasing,
+    in [0,1]); if `None`, profiles are assumed evenly sampled on [0,1]
     @param coord Coordinate of `x`: `'psi_n'` (default, \f$\hat{\psi}\f$) or `'phi_n'`
     (\f$\hat{\Phi}\f$, internal solver only; see `TokaMaker.solve_bootstrap`)
     @param psi_N Deprecated alias of `x`
@@ -1041,20 +1024,13 @@ def solve_with_bootstrap(mygs,
     # p = n * T * k_B. Since T is in eV, k_B is essentially elementary charge e
     pressure = (EC * ne * Te) + (EC * ni * Ti) # Kinetic profiles same length
 
-    # Normalized flux grid the input profiles are sampled on (psi_N: coord is
-    # 'psi_n' here); `None` means assume they are evenly sampled in psi_norm 0..1
-    psi_N = _validate_grid(pressure, 'pressure', x=x)
+    psi_N = _validate_grid(pressure, 'pressure', x=x) # coord is 'psi_n' here
 
-    # Equilibrium quantities are sampled on the *same* grid as the profiles so that
-    # they can be combined element-wise below. The endpoints are clipped because the
-    # flux-surface tracer cannot resolve the magnetic axis or the separatrix exactly;
-    # this clip applies to the sampling points only, never to the profile grid itself.
+    # Equilibrium quantities are sampled on the profile grid, with endpoints clipped
+    # because the flux-surface tracer cannot resolve the axis or separatrix
     psi_eval = numpy.clip(psi_N, psi_pad, 1.0 - psi_pad)
-    if numpy.any(numpy.diff(psi_eval) <= 0.):
-        raise ValueError("psi_pad (%g) is larger than the first/last psi_N interval "
-                         "(%g, %g); clipping the endpoints would collapse distinct "
-                         "flux surfaces. Reduce psi_pad or coarsen the profile grid."
-                         % (psi_pad, psi_N[1]-psi_N[0], psi_N[-1]-psi_N[-2]))
+    if numpy.any(numpy.diff(psi_eval) <= 0.0):
+        raise ValueError("psi_pad ({0}) exceeds the first/last psi_N interval".format(psi_pad))
 
     def current_scaling_objective(alpha, j_inductive, j_spike, psi_N, target_ip, geom):
         '''Objective function to match total Ip: exact I_p of TokaMaker jphi (eqs. A5, A9c).'''
@@ -1064,7 +1040,7 @@ def solve_with_bootstrap(mygs,
         ip_computed = mygs.compute_flux_integral(psi_N, j_imas)
         return ip_computed - target_ip
 
-    def calculate_profiles_and_bootstrap(psi_N, include_jBS):
+    def calculate_profiles_and_bootstrap(include_jBS):
         '''
         Main physics calculation:
         1. Gets geometry from current equilibrium (self).
@@ -1091,27 +1067,21 @@ def solve_with_bootstrap(mygs,
         _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
         R_avg = ravgs_q['<R>']
 
-        # Gradients (using raw psi for derivatives)
-        # `edge_order=2` gives a second-order accurate one-sided stencil at the
-        # magnetic axis and separatrix; the numpy default (first order) is badly
-        # inaccurate there and propagates straight into on-axis/edge j_BS. Passing
-        # psi_N explicitly also makes this correct for a non-uniform input grid.
+        # Gradients (using raw psi for derivatives); edge_order=2 is required, the
+        # first-order default is badly inaccurate at the axis and separatrix
         psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
+        if psi_range == 0.0:
+            raise ValueError("Degenerate equilibrium: psi_bounds are equal")
 
-        # Avoid division by zero in derivative scaling only; psi_range itself
-        # is reused downstream (e.g. building psiraw for the OMFIT Sauter
-        # call) and must not be clamped
-        psi_range_safe = psi_range if psi_range != 0 else 1e-9
-
-        pprime_local = numpy.gradient(pressure, psi_N, edge_order=2) / psi_range_safe
+        pprime_local = numpy.gradient(pressure, psi_N, edge_order=2) / psi_range
 
         j_BS_final = numpy.zeros_like(pressure)
 
         if include_jBS:
-            dn_e_dpsi = numpy.gradient(ne, psi_N, edge_order=2) / psi_range_safe
-            dT_e_dpsi = numpy.gradient(Te, psi_N, edge_order=2) / psi_range_safe
-            dn_i_dpsi = numpy.gradient(ni, psi_N, edge_order=2) / psi_range_safe
-            dT_i_dpsi = numpy.gradient(Ti, psi_N, edge_order=2) / psi_range_safe
+            dn_e_dpsi = numpy.gradient(ne, psi_N, edge_order=2) / psi_range
+            dT_e_dpsi = numpy.gradient(Te, psi_N, edge_order=2) / psi_range
+            dn_i_dpsi = numpy.gradient(ni, psi_N, edge_order=2) / psi_range
+            dT_i_dpsi = numpy.gradient(Ti, psi_N, edge_order=2) / psi_range
 
             if use_OMFIT_sauter:
                 j_BS_neo = sauter_bootstrap( # legacy OMFIT implementation
@@ -1228,7 +1198,7 @@ def solve_with_bootstrap(mygs,
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-            psi_N, include_jBS=True
+            include_jBS=True
         )
 
         # Enforce P' edge condition
@@ -1244,7 +1214,7 @@ def solve_with_bootstrap(mygs,
 
         # Calculate new profiles
         pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-            psi_N, include_jBS=True
+            include_jBS=True
         )
 
         # Enforce P' edge condition
@@ -1267,7 +1237,7 @@ def solve_with_bootstrap(mygs,
         for n in range(iterations):
             # Calculate new profiles
             pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-                psi_N, include_jBS=True
+                include_jBS=True
             )
 
             # Enforce P' edge condition
