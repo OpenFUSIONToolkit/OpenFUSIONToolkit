@@ -532,6 +532,15 @@ INTERFACE
     real(8), pointer, dimension(:,:), intent(out) :: points !< Surface points [2,npoints]
     integer(4), intent(out) :: npoints !< Number of points
   END SUBROUTINE gs_trace_surf_cutcell
+  !> LCFS outputs of @ref gs_get_qprof from the cut-cell quadrature (see grad_shaf_qprof.F90)
+  MODULE SUBROUTINE gs_lcfs_cutcell(gseq,psi_q1,dl,rbounds,zbounds,ok)
+    class(gs_equil), intent(inout) :: gseq !< G-S object
+    real(8), intent(in) :: psi_q1 !< Surface location in normalized flux
+    real(8), intent(out) :: dl !< Surface length
+    real(8), intent(out) :: rbounds(2,2) !< (R,Z) at minimum and maximum R
+    real(8), intent(out) :: zbounds(2,2) !< (R,Z) at minimum and maximum Z
+    logical, intent(out) :: ok !< Surface evaluated (otherwise use the tracer)
+  END SUBROUTINE gs_lcfs_cutcell
 END INTERFACE
 !---Encapsulation for external function call parameters
 TYPE, PRIVATE :: opt_targets
@@ -4431,7 +4440,7 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
 integer(4), parameter :: nlcfs=1000
-logical :: lcfs_all,lcfs_any,geo
+logical :: lcfs_all,lcfs_any,geo,cc_ok
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
@@ -4443,10 +4452,12 @@ IF(lcfs_any.AND.(.NOT.lcfs_all))CALL oft_abort('All LCFS arguments must be passe
 IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but "psi_q(1)" far from LCFS, not projecting')
 IF(PRESENT(shape_geo).AND.lcfs_any)CALL oft_abort('"shape_geo" cannot be combined with LCFS arguments', &
   'gs_get_qprof',__FILE__)
-!---Cut-cell quadrature for q, flux-surface averages and shape (the tracer handles the LCFS outputs)
-IF((qprof_backend==0).AND.(.NOT.(lcfs_any.OR.geo)))THEN
-  CALL gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,lcfs_all)
-  IF(lcfs_all)RETURN
+!---Cut-cell quadrature (exact on the FE surface); the field-line tracer below is the deprecated
+!---method (`qprof_backend=1`) and the fallback for surfaces the cut-cell path does not accept
+IF((qprof_backend==0).AND.(.NOT.geo))THEN
+  CALL gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,cc_ok)
+  IF(cc_ok.AND.lcfs_all)CALL gs_lcfs_cutcell(gseq,psi_q(1),dl,rbounds,zbounds,cc_ok)
+  IF(cc_ok)RETURN
 END IF
 !---
 raxis=gseq%o_point(1)

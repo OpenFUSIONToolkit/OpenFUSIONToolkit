@@ -11,7 +11,7 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 SUBMODULE (oft_gs) oft_gs_qprof
-USE oft_gs_cutcell, ONLY: gs_fsa_cutcell, gs_rays_cutcell
+USE oft_gs_cutcell, ONLY: gs_fsa_cutcell, gs_rays_cutcell, gs_extrema_cutcell
 IMPLICIT NONE
 CONTAINS
 !------------------------------------------------------------------------------
@@ -41,6 +41,48 @@ IF(PRESENT(ravgs))ravgs=avgs
 IF(PRESENT(fsa_avgs))fsa_avgs=fsa
 IF(PRESENT(shape_geo))shape_geo=shp
 END PROCEDURE gs_qprof_cutcell
+!------------------------------------------------------------------------------
+!> LCFS outputs of @ref gs_get_qprof (`dl`, `rbounds`, `zbounds`) for surface `psi_q1`
+!!
+!! The surface is sampled at `nlcfs` uniform polar angles. If the plasma is diverted and `psi_q1`
+!! is near the LCFS, the points are projected onto the LCFS along rays from the O-point (as the
+!! tracer path does), and the bounds are the extreme projected points. Otherwise the bounds are the
+!! exact extrema of the FE surface. `dl` is the length of the closed polygon through the points.
+!------------------------------------------------------------------------------
+MODULE PROCEDURE gs_lcfs_cutcell
+integer(4), parameter :: nlcfs=1000
+real(8) :: theta(nlcfs),rz(2,nlcfs,1),qf(1),xa(2,4,1),pt(2),dir(2)
+logical :: okr(1)
+integer(4) :: k
+type(oft_lag_brinterp) :: psi_int
+ok=.FALSE.
+IF(gseq%plasma_bounds(1)<-1.d98)RETURN
+DO k=1,nlcfs
+  theta(k)=2.d0*pi*(k-1)/REAL(nlcfs,8)
+END DO
+CALL gs_rays_cutcell(gseq,1,[psi_q1],nlcfs,theta,rz,qf,okr)
+IF(.NOT.okr(1))RETURN
+IF(gseq%diverted.AND.(psi_q1<0.05d0))THEN
+  psi_int%u=>gseq%psi
+  CALL psi_int%setup(gseq%device%fe_rep)
+  DO k=1,nlcfs
+    pt=rz(:,k,1)
+    dir=(pt-gseq%o_point)/SQRT(SUM((pt-gseq%o_point)**2))
+    CALL gs_psi2pt(gseq,gseq%plasma_bounds(1),pt,gseq%o_point,dir,psi_int)
+    rz(:,k,1)=pt
+  END DO
+  CALL psi_int%delete
+  rbounds(:,1)=rz(:,MINLOC(rz(1,:,1),DIM=1),1); rbounds(:,2)=rz(:,MAXLOC(rz(1,:,1),DIM=1),1)
+  zbounds(:,1)=rz(:,MINLOC(rz(2,:,1),DIM=1),1); zbounds(:,2)=rz(:,MAXLOC(rz(2,:,1),DIM=1),1)
+ELSE
+  CALL gs_extrema_cutcell(gseq,1,[psi_q1],xa,okr)
+  IF(.NOT.okr(1))RETURN
+  rbounds(:,1)=[-xa(1,1,1),xa(2,1,1)]; rbounds(:,2)=[xa(1,2,1),xa(2,2,1)]
+  zbounds(:,1)=[xa(2,3,1),-xa(1,3,1)]; zbounds(:,2)=[xa(2,4,1),xa(1,4,1)]
+END IF
+dl=SUM(SQRT(SUM((rz(:,:,1)-CSHIFT(rz(:,:,1),1,DIM=2))**2,DIM=1)))
+ok=.TRUE.
+END PROCEDURE gs_lcfs_cutcell
 !------------------------------------------------------------------------------
 !> Points of one surface at uniform polar angle about the O-point, starting on the outboard
 !! side and running anticlockwise (as the tracer), from the cut-cell quadrature

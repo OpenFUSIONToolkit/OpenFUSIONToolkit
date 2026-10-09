@@ -57,7 +57,7 @@ REAL(r8), PARAMETER :: wg5(5) = [0.236926885056189087514264d0,0.4786286704993664
 TYPE(oft_scalar_bfem), POINTER :: perm_rep => NULL()
 INTEGER(i8) :: perm_sum = -1
 INTEGER(i4), ALLOCATABLE :: perm(:,:)
-PUBLIC gs_qgeom_cutcell, gs_sauter_cutcell, gs_fsa_cutcell, gs_rays_cutcell
+PUBLIC gs_qgeom_cutcell, gs_sauter_cutcell, gs_fsa_cutcell, gs_rays_cutcell, gs_extrema_cutcell
 CONTAINS
 !------------------------------------------------------------------------------
 !> Geometric factor \f$ g = q/F = \frac{1}{2\pi} \oint \frac{dl}{R |\nabla \psi|} \f$ on flux surfaces
@@ -137,6 +137,20 @@ IF(PRESENT(shp))THEN
   END WHERE
 END IF
 end subroutine gs_fsa_cutcell
+!------------------------------------------------------------------------------
+!> Extrema of R and Z on flux surfaces, each with the other coordinate (see @ref ext_add),
+!! exact on the FE surface
+!------------------------------------------------------------------------------
+subroutine gs_extrema_cutcell(gseq,nr,psi_q,xa,ok)
+class(gs_equil), intent(inout) :: gseq !< G-S object
+integer(i4), intent(in) :: nr !< Number of surfaces
+real(r8), intent(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
+real(r8), intent(out) :: xa(2,4,nr) !< (key, companion) for keys \f$ [-R, R, -Z, Z] \f$, companions \f$ [Z, Z, R, R] \f$
+logical, intent(out) :: ok(nr) !< Surface inside (0,1) and closed about the O-point
+real(r8) :: g(nr),wind(nr),dpsi
+CALL geom_sums(gseq,nr,psi_q,g,wind,dpsi,xacc=xa)
+ok=(dpsi/=0.d0).AND.(psi_q>0.d0).AND.(psi_q<1.d0).AND.(ABS(wind-1.d0)<=wind_tol)
+end subroutine gs_extrema_cutcell
 !------------------------------------------------------------------------------
 !> Points of flux surfaces at polar angles about the O-point, and \f$ q/F \f$ by the same quadrature
 !!
