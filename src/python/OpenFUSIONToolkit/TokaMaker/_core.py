@@ -1545,9 +1545,9 @@ class TokaMaker():
           - `modb_avgs` [2, npsi] — flux-surface-averaged magnetic field values:
             row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
           - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
-            \f$\varepsilon = (R_{\max} - R_{\min}) / (2 \langle R \rangle)\f$,
-            where \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius
-            reached by the field-line trace on that surface
+            \f$\varepsilon = (R_{\max} - R_{\min}) / (R_{\max} + R_{\min})\f$ (Redl 2021 \f$r/R_0\f$, with the
+            surface's major radius \f$R_0 = (R_{\max} + R_{\min})/2\f$, as OMFIT and FUSE), where
+            \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius of the surface
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -3598,9 +3598,9 @@ class TokaMaker_equilibrium():
           - `modb_avgs` [2, npsi] — flux-surface-averaged magnetic field values:
             row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
           - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
-            \f$\varepsilon = (R_{\max} - R_{\min}) / (2 \langle R \rangle)\f$,
-            where \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius
-            reached by the field-line trace on that surface
+            \f$\varepsilon = (R_{\max} - R_{\min}) / (R_{\max} + R_{\min})\f$ (Redl 2021 \f$r/R_0\f$, with the
+            surface's major radius \f$R_0 = (R_{\max} + R_{\min})/2\f$, as OMFIT and FUSE), where
+            \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius of the surface
         '''
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
