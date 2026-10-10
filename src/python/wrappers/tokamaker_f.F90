@@ -97,8 +97,8 @@ TYPE, BIND(C) :: tokamaker_boot_ops_type
   INTEGER(c_int)  :: taper_edge_shape = 2         !< Taper shape: 2 = quintic smoothstep (default)
   REAL(c_double)  :: saw_q_s = 0.d0               !< Sawtooth reset q on axis (0 = off)
   REAL(c_double)  :: saw_dq = 0.03d0              !< Mixing radius at q_s + saw_dq
-  REAL(c_double)  :: saw_tol = 1.d-4              !< Freeze threshold on rel. change in j_saw
-  REAL(c_double)  :: saw_relax = 1.d0             !< Under-relaxation of j_saw
+  REAL(c_double)  :: saw_tol = 1.d-4              !< Freeze threshold on rel. change in jphi_saw
+  REAL(c_double)  :: saw_relax = 1.d0             !< Under-relaxation of jphi_saw
   REAL(c_double)  :: saw_ramp = 1.d-2             !< Reset weight ramp in q deficit (0 = hard trigger)
   INTEGER(c_int)  :: saw_rule = 2                 !< Reset rule: 1 fuse (axis to rho_m), 2 local (each dip, two-sided)
 END TYPE tokamaker_boot_ops_type
