@@ -449,7 +449,7 @@ CHARACTER(KIND=c_char), INTENT(in) :: eta_file(OFT_PATH_SLEN) !< Resistivity (et
 CHARACTER(KIND=c_char), INTENT(in) :: f_NI_file(OFT_PATH_SLEN) !< Non-inductive F*F' profile specification file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
-CLASS(flux_func), POINTER :: prof_tmp
+CLASS(flux_func), POINTER :: prof_tmp,I_new,I_old
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(f_file,tmp_str)
@@ -458,6 +458,15 @@ IF(TRIM(tmp_str)/='none')THEN
   IF(ASSOCIATED(tMaker_equil_obj%I))THEN
     prof_tmp%f_offset=tMaker_equil_obj%I%f_offset ! Persist F0 with profile changes
     CALL torflux_attach(prof_tmp,tMaker_equil_obj) ! Current toroidal flux map (if on toroidal flux)
+    I_new=>torflux_unwrap(prof_tmp)
+    I_old=>torflux_unwrap(tMaker_equil_obj%I)
+    SELECT TYPE(new_I => I_new) ! Bootstrap options persist when a bootstrap profile replaces another
+    TYPE IS (jphi_bs_flux_func)
+      SELECT TYPE(old_I => I_old)
+      TYPE IS (jphi_bs_flux_func)
+        new_I%boot_ops=old_I%boot_ops
+      END SELECT
+    END SELECT
     IF(prof_tmp%update_on_load)CALL prof_tmp%update(tMaker_equil_obj) ! Initialize new profile with current EQ
   END IF
   tMaker_equil_obj%I=>prof_tmp

@@ -1007,7 +1007,7 @@ END SUBROUTINE gradient_
 !> (up to and including the redl_bootstrap call).
 !>
 !> Fixed conventions: NRL Coulomb logs, Koh ion collisionality model,
-!> Redl 2021 jboot1 form with use_sign_q=.TRUE., L34=L31.
+!> Redl 2021 jboot1 form, L34=L31.
 !>
 !> @param gseq    Equilibrium object (must have Te, Ti, ne, ni, Zeff set)
 !> @param n_psi    Number of flux surface samples
@@ -1120,7 +1120,7 @@ nu_i_star = 4.90e-18_r8 * ABS(qvals) * R_avg * ni &
 nu_e_star = 6.921e-18_r8 * ABS(qvals) * R_avg * ne &
           * Zeff * ln_le / (Te**2 * eps**1.5_r8)
 ! Compute bootstrap current via Redl 2021
-CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, qvals, eps, ft, f, &
+CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, eps, ft, f, &
     dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &
     ln_le, ln_lii, nu_e_star, nu_i_star, jdotb_bs)
 ! Convert <j_BS.B> to TokaMaker's jphi = <j_phi> = <R>P' + <1/R>FF'/mu0 (exact, see
@@ -1785,7 +1785,7 @@ peak_height = jphi_bs(peak_idx)
 !    Mirrors: lmin_jbs = min(j_bootstrap[(psi_N > 0.5) & (psi_N < peak_psi)])
 ! =====================================================================
 lmin_jbs = 1.0e30_r8
-lmin_idx  = peak_idx      ! fallback: use peak location if no point found
+lmin_idx  = peak_idx
 DO i = 1, n
   IF (psi_N(i) > 0.5_r8 .AND. psi_N(i) < peak_psi) THEN
     IF (jphi_bs(i) < lmin_jbs) THEN
@@ -1794,6 +1794,13 @@ DO i = 1, n
     END IF
   END IF
 END DO
+IF (lmin_idx == peak_idx) THEN
+  CALL oft_warn('[analyze_bootstrap_edge_spike] no node between psi_N = 0.5 and the '// &
+    'edge peak; using bootstrap profile without edge isolation')
+  masked_spike = jphi_bs
+  IF (PRESENT(parameterized_spike)) parameterized_spike = jphi_bs
+  RETURN
+END IF
 ! =====================================================================
 ! 3. Build masked_spike:
 !    - Flat at lmin_jbs for psi_N < psi_N(lmin_idx)
@@ -1968,7 +1975,7 @@ END SUBROUTINE analyze_bootstrap_edge_spike
 !>
 !> Translates Python bootstrap.py:redl_bootstrap with fixed settings:
 !>   - use_legacy_L34 = .FALSE.  (L34 = L31)
-!>   - use_sign_q     = .TRUE.
+!>   - no sign(q) factor (<j.B> is odd in F through I_psi)
 !>   - formula_form   = 'jboot1'
 !>   - nu_e_star and nu_i_star are passed in pre-computed (no internal fallback)
 !>
@@ -1982,7 +1989,6 @@ END SUBROUTINE analyze_bootstrap_edge_spike
 !> @param pe          Electron pressure [Pa]
 !> @param pi          Ion pressure [Pa]
 !> @param Zeff        Effective charge
-!> @param q           Safety factor
 !> @param eps         Inverse aspect ratio
 !> @param fT          Trapped particle fraction
 !> @param I_psi       Toroidal current function F = R*Bt [T*m]
@@ -1996,13 +2002,13 @@ END SUBROUTINE analyze_bootstrap_edge_spike
 !> @param nu_i_star   Ion collisionality (pre-computed)
 !> @param avg_j_bootstrap_times_B Output: <j_{bs,parallel}*B> [same units as -I_psi * pe * d/dpsi]
 !------------------------------------------------------------------------------
-SUBROUTINE redl_bootstrap(n, Te, Ti, ne, ni, pe, pi, Zeff, q, eps, fT, I_psi, &
+SUBROUTINE redl_bootstrap(n, Te, Ti, ne, ni, pe, pi, Zeff, eps, fT, I_psi, &
     dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &
     ln_lambda_e, ln_lambda_ii, nu_e_star, nu_i_star, avg_j_bootstrap_times_B)
 INTEGER(i4), INTENT(in) :: n
 REAL(r8), INTENT(in) :: Te(n), Ti(n), ne(n), ni(n)
 REAL(r8), INTENT(in) :: pe(n), pi(n), Zeff(n)
-REAL(r8), INTENT(in) :: q(n), eps(n), fT(n), I_psi(n)
+REAL(r8), INTENT(in) :: eps(n), fT(n), I_psi(n)
 REAL(r8), INTENT(in) :: dT_e_dpsi(n), dT_i_dpsi(n)
 REAL(r8), INTENT(in) :: dn_e_dpsi(n), dn_i_dpsi(n)
 REAL(r8), INTENT(in) :: ln_lambda_e(n), ln_lambda_ii(n)
@@ -2044,7 +2050,7 @@ dee_3 = (0.13_r8 * (1.0_r8 - 0.38_r8*fT) * nu_e_star / (Zeff**2)) &
        + fT**2 * SQRT((0.075_r8 + 0.25_r8*(Zeff - 1.0_r8)**2) * nu_e_star))
 X32_ee = fT / (1.0_r8 + dee_2 + dee_3)
 F32_ee = ( (0.1_r8 + 0.6_r8*Zeff) &
-         / (Zeff*(0.77_r8 + 0.63_r8*(1.0_r8 + (Zeff - 1.0_r8)**1.1_r8))) &
+         / (Zeff*(0.77_r8 + 0.63_r8*(1.0_r8 + MAX(Zeff - 1.0_r8, 0.0_r8)**1.1_r8))) &
          * (X32_ee - X32_ee**4) &
          + 0.7_r8/(1.0_r8 + 0.2_r8*Zeff) &
          * (X32_ee**2 - X32_ee**4 - 1.2_r8*(X32_ee**3 - X32_ee**4)) &
@@ -2072,7 +2078,7 @@ alpha = ((alpha0 + 0.7_r8*Zeff*SQRT(fT)*SQRT(nu_i_star)) &
        - 0.002_r8*nu_i_star**2*fT**6) &
       / (1.0_r8 + 0.004_r8*nu_i_star**2*fT**6)
 ! =====================================================================
-! Assemble: jboot1 form with use_sign_q = .TRUE.
+! Assemble: jboot1 form
 ! =====================================================================
 dp_dpsi = (ne*dT_e_dpsi + Te*dn_e_dpsi &
          + ni*dT_i_dpsi + Ti*dn_i_dpsi) * EC
@@ -2080,7 +2086,5 @@ bra1 = L31 * dp_dpsi / pe
 bra2 = L32 * dT_e_dpsi / Te
 bra3 = L34 * alpha * (1.0_r8 - R_pe) / R_pe * dT_i_dpsi / Ti
 avg_j_bootstrap_times_B = -I_psi * pe * (bra1 + bra2 + bra3)
-! Apply sign(q)
-avg_j_bootstrap_times_B = avg_j_bootstrap_times_B * SIGN(1.0_r8, q)
 END SUBROUTINE redl_bootstrap
 end module grad_shaf_bootstrap
