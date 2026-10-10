@@ -1981,7 +1981,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         p_kin = eC*(setup['ne']*setup['Te'] + setup['ni']*setup['Ti'])
         kw = dict(jphi_fixed_prof={'x': psi_sample, 'y': 0.5*bump}, jphi_saw_prof={'x': psi_sample, 'y': 0.5*bump},
                   p_fixed_prof={'x': psi_sample, 'y': p_kin[0]*(0.1*np.exp(-((psi_sample - 0.3)/0.15)**2) + 1.0e-3)},
-                  saw_q_s=q_s, saw_dq=dq, saw_rule=2, taper_edge_jbs=True)
+                  saw_q_s=q_s, saw_dq=dq, saw_rule=2, taper_edge_jphi=True)
         mygs.solve_bootstrap(**kw, **common)
         mygs._tMaker_equil.save_TokaMaker('ITER_boot_state.h5')
         mygs.boot_reset()
@@ -1995,7 +1995,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
                 raise AssertionError(f"loaded state: '{key}' differs from the explicit call")
         mygs.boot_reset()
         if mygs._tMaker_equil._boot_inputs is not None or mygs._tMaker_equil._boot_ops['saw_q_s'] != 0.0 \
-                or mygs._tMaker_equil._boot_ops['taper_edge_jbs']:
+                or mygs._tMaker_equil._boot_ops['taper_edge_jphi']:
             raise AssertionError("boot_reset() did not restore the defaults")
         p_def = mygs.solve_bootstrap(**common)
         if np.any(p_def['jphi_fixed'] != 0.0) or np.any(p_def['jphi_saw'] != 0.0):

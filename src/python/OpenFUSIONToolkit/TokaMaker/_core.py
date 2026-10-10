@@ -126,7 +126,7 @@ _BOOT_OPS_DEFAULTS = {
     'scale_jbs': 1.0,
     'djbs_tol': 1.0e-4,
     'diagnose_bs': False,
-    'taper_edge_jbs': False,
+    'taper_edge_jphi': False,
     'taper_edge_psi0': 0.999,
     'taper_edge_shape': 2,
     'saw_q_s': 0.0,
@@ -966,7 +966,7 @@ class TokaMaker():
             self._tMaker_equil.set_boot_ops()
 
     def set_boot_ops(self, isolate_edge_jbs=None, scale_jbs=None, djbs_tol=None,
-                     diagnose_bs=None, taper_edge_jbs=None, taper_edge_psi0=None, taper_edge_shape=None,
+                     diagnose_bs=None, taper_edge_jphi=None, taper_edge_psi0=None, taper_edge_shape=None,
                      saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update
 
@@ -976,7 +976,7 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_boot_ops(isolate_edge_jbs, scale_jbs, djbs_tol,
                                                diagnose_bs,
-                                               taper_edge_jbs, taper_edge_psi0, taper_edge_shape,
+                                               taper_edge_jphi, taper_edge_psi0, taper_edge_shape,
                                                saw_q_s, saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule)
 
     def get_boot_profs(self):
@@ -2472,7 +2472,7 @@ class TokaMaker():
         @param scale_jbs Scaling factor applied to the bootstrap current profile (default: 1.0)
         @param djbs_tol Threshold on relative change in the bootstrap current to freeze it (default: 1e-4)
         @param diagnose_bs Print detailed output at each NL iteration (default: False)
-        @param taper_edge_jbs Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS (default: False)
+        @param taper_edge_jphi Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS (default: False)
         @param taper_edge_psi0 \f$\hat{\psi_n}\f$ (0=axis, 1=LCFS) where the taper begins (default: 0.999)
         @param taper_edge_shape Taper shape: 1=cos\f$^2\f$/Hann, 2=quintic smoothstep, 3=cubic power
           (default: 2)
@@ -3108,7 +3108,7 @@ class TokaMaker_equilibrium():
                     print('Warning: unable to delete temporary file "{0}"'.format(file))
 
     def set_boot_ops(self, isolate_edge_jbs=None, scale_jbs=None, djbs_tol=None,
-                     diagnose_bs=None, taper_edge_jbs=None, taper_edge_psi0=None, taper_edge_shape=None,
+                     diagnose_bs=None, taper_edge_jphi=None, taper_edge_psi0=None, taper_edge_shape=None,
                      saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
 
@@ -3119,7 +3119,7 @@ class TokaMaker_equilibrium():
         @param scale_jbs Scaling factor applied to the bootstrap current (the isolated spike if `isolate_edge_jbs`). (Internal default: 1.0)
         @param djbs_tol Threshold on relative change in the bootstrap current to freeze it. (Internal default: 1e-4)
         @param diagnose_bs Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration. (Internal default: False)
-        @param taper_edge_jbs Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS. (Internal default: False)
+        @param taper_edge_jphi Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS. (Internal default: False)
         @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
         @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
         @param saw_q_s Sawtooth reset q floor; 0 = off. (Internal default: 0)
@@ -3133,7 +3133,7 @@ class TokaMaker_equilibrium():
         if self._boot_ops is None:
             self._boot_ops = dict(_BOOT_OPS_DEFAULTS)
         for key, val in (('isolate_edge_jbs', isolate_edge_jbs), ('scale_jbs', scale_jbs), ('djbs_tol', djbs_tol),
-                         ('diagnose_bs', diagnose_bs), ('taper_edge_jbs', taper_edge_jbs),
+                         ('diagnose_bs', diagnose_bs), ('taper_edge_jphi', taper_edge_jphi),
                          ('taper_edge_psi0', taper_edge_psi0), ('taper_edge_shape', taper_edge_shape),
                          ('saw_q_s', saw_q_s), ('saw_dq', saw_dq), ('saw_tol', saw_tol), ('saw_relax', saw_relax),
                          ('saw_ramp', saw_ramp), ('saw_rule', saw_rule)):

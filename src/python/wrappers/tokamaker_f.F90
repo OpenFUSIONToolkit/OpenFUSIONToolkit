@@ -92,7 +92,7 @@ TYPE, BIND(C) :: tokamaker_boot_ops_type
   REAL(c_double)  :: scale_jbs = 1.0d0           !< Scaling factor for the bootstrap current
   REAL(c_double)  :: djbs_tol = 1.0d-4            !< Threshold on rel. change in the bootstrap current to freeze it
   LOGICAL(c_bool) :: diagnose_bs = .FALSE.        !< Print diagnostic output
-  LOGICAL(c_bool) :: taper_edge_jbs = .FALSE.      !< Taper the current at the edge (guards against separatrix issues)
+  LOGICAL(c_bool) :: taper_edge_jphi = .FALSE.     !< Taper the current at the edge (guards against separatrix issues)
   REAL(c_double)  :: taper_edge_psi0 = 0.999d0   !< Taper onset psi_N (default 0.999)
   INTEGER(c_int)  :: taper_edge_shape = 2         !< Taper shape: 2 = quintic smoothstep (default)
   REAL(c_double)  :: saw_q_s = 0.d0               !< Sawtooth reset q on axis (0 = off)
@@ -633,7 +633,7 @@ TYPE IS (jphi_bs_flux_func)
   I%boot_ops%scale_jbs = bops%scale_jbs
   I%boot_ops%djbs_tol = bops%djbs_tol
   I%boot_ops%diagnose_bs = bops%diagnose_bs
-  I%boot_ops%taper_edge_jbs = bops%taper_edge_jbs
+  I%boot_ops%taper_edge_jphi = bops%taper_edge_jphi
   I%boot_ops%taper_edge_psi0 = bops%taper_edge_psi0
   I%boot_ops%taper_edge_shape = bops%taper_edge_shape
   I%boot_ops%saw_q_s = bops%saw_q_s
@@ -668,7 +668,7 @@ TYPE IS (jphi_bs_flux_func)
   bops%scale_jbs = I%boot_ops%scale_jbs
   bops%djbs_tol = I%boot_ops%djbs_tol
   bops%diagnose_bs = I%boot_ops%diagnose_bs
-  bops%taper_edge_jbs = I%boot_ops%taper_edge_jbs
+  bops%taper_edge_jphi = I%boot_ops%taper_edge_jphi
   bops%taper_edge_psi0 = I%boot_ops%taper_edge_psi0
   bops%taper_edge_shape = I%boot_ops%taper_edge_shape
   bops%saw_q_s = I%boot_ops%saw_q_s
