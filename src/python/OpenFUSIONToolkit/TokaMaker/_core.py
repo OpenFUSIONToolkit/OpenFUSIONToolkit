@@ -2472,7 +2472,7 @@ class TokaMaker():
           (default: 2)
         @param saw_q_s Sawtooth reset q floor; 0 = off (default: 0). The q of
           \f$\alpha j_{ind} + j_{BS} + j_{fixed} + j_{saw,in}\f$ in the traced geometry is reset where it dips
-          below q_s (``saw_rule``); the Ip-neutral current that does this is added to ``j_saw``
+          below q_s (``saw_rule``); the Ip-neutral current that does this is added to ``jphi_saw``
         @param saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule See ``set_boot_ops()``
 
         @result Dictionary with 1-D numpy array values (A/m² unless noted). All current densities, inputs
@@ -3195,8 +3195,8 @@ class TokaMaker_equilibrium():
         @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
         @param saw_q_s Sawtooth reset q floor; 0 = off. (Internal default: 0)
         @param saw_dq Reset regions end where the base q crosses saw_q_s + saw_dq. (Internal default: 0.03)
-        @param saw_tol Threshold on relative change in j_saw to freeze it. (Internal default: 1e-4)
-        @param saw_relax Under-relaxation of the j_saw update. (Internal default: 1)
+        @param saw_tol Threshold on relative change in jphi_saw to freeze it. (Internal default: 1e-4)
+        @param saw_relax Under-relaxation of the jphi_saw update. (Internal default: 1)
         @param saw_ramp Reset weight ramps over this q deficit below saw_q_s; 0 = hard trigger. (Internal default: 0.01)
         @param saw_rule Reset rule: 1 = fuse (FUSE's saw_crash!: q reset from the axis out to the sawtooth radius);
           2 = local (each dip below saw_q_s raised about its q minimum, current moved only inside it). (Internal default: 2)

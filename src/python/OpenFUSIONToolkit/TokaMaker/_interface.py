@@ -41,8 +41,8 @@ class tokamaker_boot_ops_struct(c_struct):
      - `taper_edge_shape` Taper shape: 1=cos²/Hann, 2=quintic smoothstep (default), 3=cubic power
      - `saw_q_s` Sawtooth reset q on axis; 0 = off (default 0)
      - `saw_dq` Reset regions end where the base q crosses saw_q_s + saw_dq (default 0.03)
-     - `saw_tol` Threshold on relative change in j_saw to freeze it (default 1e-4)
-     - `saw_relax` Under-relaxation of the j_saw update (default 1)
+     - `saw_tol` Threshold on relative change in jphi_saw to freeze it (default 1e-4)
+     - `saw_relax` Under-relaxation of the jphi_saw update (default 1)
      - `saw_ramp` Reset weight ramps over this q deficit below saw_q_s; 0 = hard trigger (default 0.01)
      - `saw_rule` Reset rule: 1 fuse (axis to the sawtooth radius, FUSE's saw_crash!), 2 local (each dip, two-sided; default)
     '''
