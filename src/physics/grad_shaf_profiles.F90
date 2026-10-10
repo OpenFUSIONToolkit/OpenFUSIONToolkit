@@ -283,7 +283,7 @@ end type phi_flux_wrapper
 !---Toroidal flux map internals
 PRIVATE :: sort_unique, quad_interp, fd_deriv, tmap_find, tmap_index, tmap_lookup, torflux_qgeom, &
   phi_wrap_map, phi_wrap_norm, phi_wrap_relabel_int, phi_wrap_relabel_cof, phi_wrap_relabel_f, &
-  phi_wrap_build_fint, torflux_set_bounds
+  phi_wrap_build_fint
 contains
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -1657,6 +1657,7 @@ class(flux_func), pointer, intent(inout) :: F !< Profile on \f$ \hat{\Phi} \f$, 
 integer(4), intent(in) :: coord !< Coordinate of `F`
 class(phi_flux_wrapper), pointer :: wrap
 IF(coord==0)RETURN
+IF((coord<0).OR.(coord>2))CALL oft_abort('Unknown profile coordinate','torflux_wrap',__FILE__)
 SELECT TYPE(F)
   CLASS IS(spline_flux_func)
     CALL oft_abort('Toroidal flux coordinate not supported for this profile','torflux_wrap',__FILE__)
