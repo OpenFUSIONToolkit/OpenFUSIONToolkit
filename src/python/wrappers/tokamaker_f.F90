@@ -454,6 +454,13 @@ IF(TRIM(tmp_str)/='none')THEN
   CALL gs_profile_load(tmp_str,prof_tmp)
   IF(ASSOCIATED(tMaker_equil_obj%I))THEN
     prof_tmp%f_offset=tMaker_equil_obj%I%f_offset ! Persist F0 with profile changes
+    SELECT TYPE(new_I => prof_tmp) ! Bootstrap options persist when a bootstrap profile replaces another
+    TYPE IS (jphi_bs_flux_func)
+      SELECT TYPE(old_I => tMaker_equil_obj%I)
+      TYPE IS (jphi_bs_flux_func)
+        new_I%boot_ops=old_I%boot_ops
+      END SELECT
+    END SELECT
     IF(prof_tmp%update_on_load)CALL prof_tmp%update(tMaker_equil_obj) ! Initialize new profile with current EQ
   END IF
   tMaker_equil_obj%I=>prof_tmp
