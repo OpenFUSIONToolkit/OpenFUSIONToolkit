@@ -479,6 +479,7 @@ integer(i4), allocatable :: dim_sizes(:)
 REAL(r8) :: pt_tmp(2),scale_tmp,diff_val
 real(r8), pointer :: vals_tmp(:)
 logical :: success,pm_save,logical_tmp,restored
+CLASS(flux_func), POINTER :: I_base
 CHARACTER(LEN=:), ALLOCATABLE :: profType
 error_string=''
 ! CALL hdf5_write(self%device%fe_rep%mesh%r,filename,'mesh/R')
@@ -898,12 +899,13 @@ END IF
 CALL torflux_setup(self,resettle=.TRUE.)
 IF(ASSOCIATED(self%torflux))CALL self%torflux%update(self)
 restored=.FALSE.
-SELECT TYPE(I=>self%I)
+I_base=>torflux_unwrap(self%I)
+SELECT TYPE(I=>I_base)
   TYPE IS(jphi_bs_flux_func)
     restored=I%ffp_restored
 END SELECT
 IF(restored)THEN
-  self%I%plasma_bounds=self%plasma_bounds
+  CALL torflux_set_bounds(self%I,self%plasma_bounds)
 ELSE
   CALL self%I%update(self)
 END IF
