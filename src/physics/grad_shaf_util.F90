@@ -938,11 +938,19 @@ IF(ASSOCIATED(self%I_NI))CALL self%I_NI%update(self)
 IF(ASSOCIATED(self%eta))CALL self%eta%update(self)
 end subroutine gs_load_tokamaker
 !---------------------------------------------------------------------------
-!> Needs docs
+!> Save an inverse-equilibrium (flux-coordinate) file, Fortran unformatted
+!!
+!! Surfaces at uniform polar angle about the O-point from the cut-cell quadrature (tracer as fallback).
+!! Records (r8, or r4 if @p single_prec):
+!! 1. npsi, ntheta (i4)
+!! 2-5. psi, F, p, q on the npsi flux points
+!! 6-7. R(ntheta,npsi), Z(ntheta,npsi)
+!! 8-9. F*dF/dpsi, dp/dpsi (only if @p profile_derivs)
+!! 10. [psi_axis, psi_LCFS], unpadded (only if @p psi_bounds)
 !---------------------------------------------------------------------------
 subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs,psi_bounds,error_str)
 class(gs_equil), intent(inout) :: gseq !< G-S object
-CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
+CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Output filename
 integer(4), intent(in) :: npsi !< Number of points in flux coordinate
 integer(4), intent(in) :: ntheta !< Number of points in poloidal coordinate
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
@@ -951,7 +959,7 @@ LOGICAL, OPTIONAL, INTENT(in) :: pack_lcfs !< Use quadratic packing toward LCFS?
 LOGICAL, OPTIONAL, INTENT(in) :: single_prec !< Save file with single precision fields?
 LOGICAL, OPTIONAL, INTENT(in) :: profile_derivs !< Append F*dF/dpsi and dp/dpsi records? (extends the format)
 LOGICAL, OPTIONAL, INTENT(in) :: psi_bounds !< Append the unpadded [psi_axis, psi_LCFS] record? (extends the format)
-CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
+CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str !< Error message (empty on success)
 type(gsinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)

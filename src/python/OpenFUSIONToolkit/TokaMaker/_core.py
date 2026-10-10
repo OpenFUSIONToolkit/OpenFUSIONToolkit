@@ -1577,10 +1577,10 @@ class TokaMaker():
         return Lmat
 
     def trace_surf(self,psi,nresample=None):
-        r'''! Trace surface for a given poloidal flux
+        r'''! Points on the surface of a given poloidal flux (cut-cell, uniform polar angle about the O-point; tracer as fallback)
 
         @param psi Flux surface to trace \f$\hat{\psi}\f$
-        @param nresample Number of points to resample along the traced surface (default: None, return all points)
+        @param nresample Number of points to resample uniformly in arc length (default: None, return all points)
         @result \f$r(\hat{\psi})\f$
         '''
         if self._tMaker_equil is None:
@@ -3505,8 +3505,8 @@ class TokaMaker_equilibrium():
     def get_fsa(self,psi=None,psi_pad=0.02,npsi=50):
         r'''! Get flux surface averages and per-surface shape parameters
 
-        Traces each requested surface once and accumulates all quantities in the
-        tracing ODE, so every returned profile shares the same quadrature. This
+        Evaluates all quantities on each surface with one cut-cell quadrature (field-line
+        tracer as fallback), so every returned profile shares the same quadrature. This
         extends @ref TokaMaker.TokaMaker_equilibrium.get_q "get_q" with the
         averages needed to close a 1D transport formulation.
 
@@ -3576,10 +3576,10 @@ class TokaMaker_equilibrium():
         }
 
     def trace_surf(self,psi,nresample=None):
-        r'''! Trace surface for a given poloidal flux
+        r'''! Points on the surface of a given poloidal flux (cut-cell, uniform polar angle about the O-point; tracer as fallback)
 
         @param psi Flux surface to trace \f$\hat{\psi}\f$
-        @param nresample Number of points to resample along the traced surface (default: None, return all points)
+        @param nresample Number of points to resample uniformly in arc length (default: None, return all points)
         @result \f$r(\hat{\psi})\f$
         '''
         if self.psi_convention == 0:

@@ -137,12 +137,8 @@ end subroutine gs_fsa_cutcell
 !> Points of flux surfaces at uniform polar angle about the O-point, and \f$ q/F \f$ (and optionally
 !! the surface extrema) by the same quadrature
 !!
-!! The inverse-coordinate counterpart of @ref tracing_2d::tracinginv_fs: `rz(:,k,i)` is the
-!! intersection of surface `i` with the ray from the O-point at angle \f$ 2\pi(k-1)/n_\theta \f$
-!! (from the +R direction, anticlockwise), exact on the FE surface. Each arc owns the angles inside
-!! its angular span and solves for the intersection on the arc. A surface is `ok` only if it is
-!! closed about the O-point, star-shaped about it (the polar angle never decreases along it), and
-!! every angle has an intersection. Results do not depend on the thread count.
+!! Cut-cell counterpart of @ref tracing_2d::tracinginv_fs: `rz(:,k,i)` is surface `i` on the ray at angle
+!! \f$ 2\pi(k-1)/n_\theta \f$ from +R; `ok(i)` false unless the surface is closed and star-shaped about the O-point.
 !------------------------------------------------------------------------------
 subroutine gs_rays_cutcell(gseq,nr,psi_q,nth,rz,qf,ok,xa)
 class(gs_equil), intent(inout) :: gseq !< G-S object

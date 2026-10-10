@@ -48,7 +48,9 @@ IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
 REAL(8) :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
-INTEGER(4) :: qprof_backend = 0 !< Surface backend of @ref gs_get_qprof, @ref gs_trace_surf, `gs_save_ifile` and `gs_save_eqdsk`: 0 cut-cell where supported, 1 field-line tracer (deprecated)
+!> Surface backend of @ref gs_get_qprof, @ref gs_trace_surf, `gs_save_ifile`, `gs_save_eqdsk`:
+!! 0 cut-cell where supported, 1 field-line tracer (deprecated)
+INTEGER(4) :: qprof_backend = 0
 !------------------------------------------------------------------------------
 !> Interpolation class for uniform source with simple tokamak representation
 !------------------------------------------------------------------------------
@@ -4678,7 +4680,8 @@ DEALLOCATE(field)
 CALL psi_int%delete()
 end subroutine gs_get_qprof
 !------------------------------------------------------------------------------
-!> Trace a single specified flux surface
+!> Points on one flux surface: 1000 cut-cell points at uniform polar angle about the O-point
+!! (field-line tracer if the cut-cell backend is off or fails)
 !------------------------------------------------------------------------------
 subroutine gs_trace_surf(gseq,psi_in,points,npoints)
 class(gs_equil), intent(inout) :: gseq !< G-S object
