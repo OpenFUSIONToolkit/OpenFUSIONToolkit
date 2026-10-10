@@ -11,7 +11,7 @@ Pass --mode to restrict to a single method.
 
 Usage
 -----
-  python ITER_Hmode_bootstrap_ex.py [--mode both|external|internal]
+  python bootstrap_python_vs_fortran_solve.py [--mode both|external|internal]
                                       [--isolate-edge]
                                       [--parameterize-edge]
                                       [--scale-jbs 1.0]

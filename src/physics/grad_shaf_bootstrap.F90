@@ -5,7 +5,7 @@
 !---------------------------------------------------------------------------------
 !> @file grad_shaf_bootstrap.F90
 !
-!> Physics-scripts used in the bootstrap calculation inside the Grad-Sharfranov solve
+!> Bootstrap current and sawtooth reset for the jphi-split-bootstrap Grad-Shafranov profile
 !!
 !! @authors Stuart Benjamin, fortranisation of Daniel Burgess' bootstrap.py
 !! @date June 2026
@@ -38,7 +38,7 @@ TYPE :: boot_ops
   LOGICAL :: isolate_edge_jbs = .FALSE. !< Isolate edge bootstrap spike from bulk?
   LOGICAL :: parameterize_jbs = .FALSE. !< Use parametrised skew-normal fit for spike? Overrides `isolate_edge_jbs` if true.
   REAL(r8) :: scale_jbs = 1.0_r8 !< Scaling factor applied to the bootstrap current (default 1)
-  REAL(r8) :: djbs_tol = 1.0e-4_r8 !< Threshold on rel. change in bootstrap current to stop recalculation (increasing solve speed)
+  REAL(r8) :: djbs_tol = 1.0e-4_r8 !< Rel. change in jphi_bs below which it is frozen (not recomputed)
   LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, bootstrap stats, and full profile tables each NL iteration
   LOGICAL :: taper_edge_jbs = .FALSE. !< Smooth taper of toroidal current (inductive, bootstrap and fixed) to zero at plasma edge (guards against numerical issues at the separatrix)
   REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
@@ -72,7 +72,7 @@ REAL(r8), PARAMETER :: dalpha_warn_tol = 1.0e-6_r8 !< Relative (|dalpha|/|alpha|
 !------------------------------------------------------------------------------
 type, extends(jphi_flux_func) :: jphi_bs_flux_func
   real(8) :: alpha_last = 1.d0 !< Alpha (input Jphi rescaling factor) from previous NL iteration
-  logical :: freeze_jbs = .FALSE. !< Set .TRUE. once jphi_bs converges or stagnates; skips the Sauter pass (big speedup)
+  logical :: freeze_jbs = .FALSE. !< jphi_bs converged or stagnated: skip the Sauter pass
   integer(4) :: djbs_no_improve = 0   !< Consecutive steps with non-decreasing djbs
   real(8) :: djbs_min = huge(1.0d0)  !< Running minimum djbs seen so far
   integer(4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
@@ -400,7 +400,7 @@ end function h5_name
 !---------------------------------------------------------------------------------
 !> Update F*F' profile from the inductive jphi coupled with the bootstrap current.
 !!
-!! Each call (one NL iteration; the first iteration of a solve runs @ref jphi_update and resets the
+!! Called once per NL iteration (the first iteration of a solve runs @ref jphi_update and resets the
 !! convergence state). Current densities are TokaMaker jphi in mu0*A/m² on the nodes `psi_n`
 !! (LCFS and self%x):
 !!   1. <R>/<1/R>/<1/R^2> spline on self%x; pressure scale.

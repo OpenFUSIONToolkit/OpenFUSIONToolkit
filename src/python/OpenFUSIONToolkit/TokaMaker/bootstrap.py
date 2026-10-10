@@ -1028,9 +1028,8 @@ def solve_with_bootstrap(mygs,
             raise NotImplementedError("p_fixed is only supported by the internal Fortran solver (use_python_solve=False)")
 
     warn(
-        "The python solve_with_bootstrap() is deprecated by mygs.solve_bootstrap() (internal fortran-solve)."
-        "Set use_python_solve = True to retain the original Python-based bootstrap calculation, otherwise "
-        "solve_with_bootstrap passes arguments to solve_bootstrap()",
+        "The Python bootstrap solve (use_python_solve=True) is deprecated; use mygs.solve_bootstrap() "
+        "(internal solver), which solve_with_bootstrap() calls by default.",
         DeprecationWarning,
         stacklevel=2,
     )
