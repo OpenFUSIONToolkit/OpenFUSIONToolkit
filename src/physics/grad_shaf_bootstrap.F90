@@ -965,7 +965,7 @@ DO k = 1, n
   reg_end(n_low) = k
 END DO
 IF(n_low == 0)RETURN
-CALL grad_nonuniform(n, rho, q, gq)
+CALL gradient_(n, rho, q, gq, edge_order=1)
 qm = q_s + dq
 !---Sawtooth radius (both rules) and rule 1's reset, from the outermost q < q_s region
 CALL full_reset(n_low, qt, rho_s, rho_m, ok)
@@ -995,7 +995,7 @@ ELSE
   END DO
 END IF
 dI = I*(q/q_new - 1.0_r8)
-CALL grad_nonuniform(n, A, dI, dj)
+CALL gradient_(n, A, dI, dj, edge_order=1)
 dj = dj/c1
 DEALLOCATE(reg_start, reg_end, gq, dI, qt)
 CONTAINS
@@ -1005,12 +1005,11 @@ INTEGER(i4), INTENT(in) :: kr
 REAL(r8), INTENT(out) :: qt_(n), rs_, rm_
 LOGICAL, INTENT(out) :: ok_
 INTEGER(i4) :: is, jm, kk
-REAL(r8) :: qm, slope, m, x, p
+REAL(r8) :: slope, m
 qt_ = q; rs_ = 0.0_r8; rm_ = 0.0_r8; ok_ = .FALSE.
 is = reg_end(kr)
 IF(is >= n)RETURN
 rs_ = rho(is) + (q_s - q(is))/(q(is+1) - q(is))*(rho(is+1) - rho(is))
-qm = q_s + dq
 jm = 0
 DO kk = is + 1, n
   IF(q(kk) >= qm)THEN
@@ -1024,13 +1023,7 @@ rm_ = rho(jm-1) + (qm - q(jm-1))/(q(jm) - q(jm-1))*(rho(jm) - rho(jm-1))
 slope = gq(jm-1) + (rm_ - rho(jm-1))/(rho(jm) - rho(jm-1))*(gq(jm) - gq(jm-1))
 m = MAX(rm_*slope/dq, 0.0_r8)
 DO kk = 1, jm - 1
-  x = rho(kk)/rm_
-  IF(m <= 3.0_r8)THEN
-    p = (3.0_r8 - 2.0_r8*x)*x**2 + m*(x**3 - x**2)
-  ELSE
-    p = x**m
-  END IF
-  qt_(kk) = q_s + dq*p
+  qt_(kk) = q_s + dq*pshape(rho(kk)/rm_, m)
 END DO
 ok_ = .TRUE.
 END SUBROUTINE full_reset
@@ -1211,20 +1204,6 @@ ELSE
   pshape = x**m
 END IF
 END FUNCTION pshape
-!---Derivative dy/dx on a non-uniform grid (2nd-order interior, one-sided ends)
-SUBROUTINE grad_nonuniform(nn, xx, yy, dy)
-INTEGER(i4), INTENT(in) :: nn
-REAL(r8), INTENT(in) :: xx(nn), yy(nn)
-REAL(r8), INTENT(out) :: dy(nn)
-INTEGER(i4) :: kk
-REAL(r8) :: h1, h2
-dy(1) = (yy(2) - yy(1))/(xx(2) - xx(1))
-dy(nn) = (yy(nn) - yy(nn-1))/(xx(nn) - xx(nn-1))
-DO kk = 2, nn - 1
-  h1 = xx(kk) - xx(kk-1); h2 = xx(kk+1) - xx(kk)
-  dy(kk) = (h1**2*yy(kk+1) - h2**2*yy(kk-1) + (h2**2 - h1**2)*yy(kk))/(h1*h2*(h1 + h2))
-END DO
-END SUBROUTINE grad_nonuniform
 END SUBROUTINE saw_reset_1d
 !------------------------------------------------------------------------------
 !> Evaluate terms in augmented tracing ODE for computing Sauter factors
@@ -1552,43 +1531,25 @@ DO i = 1, n
 END DO
 END SUBROUTINE apply_edge_taper
 !------------------------------------------------------------------------------
-!> Compute dy/dx with second-order-accurate finite differences on the native grid.
-!>
-!> Port of `numpy.gradient(y, x, edge_order=2)`: the interior uses the
-!> three-point central stencil for the local (possibly non-uniform) spacing,
-!> and both endpoints use the second-order one-sided stencil.  The first-order
-!> endpoint difference numpy uses by default is badly inaccurate at the
-!> magnetic axis and separatrix, where the error propagates straight into
-!> on-axis/edge jphi_bs.
-!>
-!> This replaces an earlier shape-preserving PCHIP derivative.  On the uniform
-!> grids this code uses, the PCHIP endpoint formula reduces algebraically to
-!> the second-order one-sided difference, while its monotonicity clipping
-!> flattens the pedestal and makes the interior measurably less accurate.
-!>
-!> The grid is validated rather than repaired: unlike the PCHIP routine it
-!> replaces, this does not sort x or average over duplicated abscissae.
-!> Duplicated or unsorted flux labels give an undefined derivative, so they
-!> abort here instead of being silently smoothed.
-!>
-!> @param n     Number of input points (>= 3)
-!> @param x     Independent variable (e.g. psi); strictly monotonic, either direction
-!> @param y     Dependent variable sampled on x
-!> @param dydx  Output: dy/dx at each point in x
+!> dy/dx on a strictly monotonic, possibly non-uniform grid, as `numpy.gradient(y, x, edge_order=...)`:
+!! three-point central interior, one-sided ends of order `edge_order` (1 or 2, default 2). Aborts on
+!! a non-finite input or result, or on a repeated or unsorted abscissa.
 !------------------------------------------------------------------------------
-SUBROUTINE gradient_(n, x, y, dydx)
+SUBROUTINE gradient_(n, x, y, dydx, edge_order)
 USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
-INTEGER(i4), INTENT(in) :: n
-REAL(r8), INTENT(in) :: x(n)
-REAL(r8), INTENT(in) :: y(n)
-REAL(r8), INTENT(out) :: dydx(n)
+INTEGER(i4), INTENT(in) :: n !< Number of points
+REAL(r8), INTENT(in) :: x(n) !< Abscissae
+REAL(r8), INTENT(in) :: y(n) !< Values on x
+REAL(r8), INTENT(out) :: dydx(n) !< dy/dx on x
+INTEGER(i4), OPTIONAL, INTENT(in) :: edge_order !< Order of the end stencils (1 or 2, default 2)
 !---
-INTEGER(i4) :: i
+INTEGER(i4) :: i, eo
 REAL(r8) :: hs, hd !< Backward and forward interval widths about the stencil centre
 CHARACTER(len=512) :: char_buf
-IF(n < 3) &
-  CALL oft_abort('fewer than 3 input points; a second-order stencil is undefined', &
-    'gradient_', __FILE__)
+eo = 2
+IF(PRESENT(edge_order))eo = edge_order
+IF(n < eo+1) &
+  CALL oft_abort('too few input points for the end stencils', 'gradient_', __FILE__)
 DO i = 1, n
   IF(.NOT.IEEE_IS_FINITE(x(i)) .OR. .NOT.IEEE_IS_FINITE(y(i)))THEN
     WRITE(char_buf,'(A,I0,A,ES12.5,A,ES12.5)') 'non-finite input at i=', i, &
@@ -1614,17 +1575,22 @@ DO i = 2, n-1
             + ((hd - hs)/(hs*hd))*y(i) &
             + (hs/(hd*(hs + hd)))*y(i+1)
 END DO
-!--- Endpoints: second-order one-sided stencils (numpy's edge_order=2)
-hs = x(2) - x(1)
-hd = x(3) - x(2)
-dydx(1) = -((2.0_r8*hs + hd)/(hs*(hs + hd)))*y(1) &
-          + ((hs + hd)/(hs*hd))*y(2) &
-          - (hs/(hd*(hs + hd)))*y(3)
-hs = x(n-1) - x(n-2)
-hd = x(n) - x(n-1)
-dydx(n) = (hd/(hs*(hs + hd)))*y(n-2) &
-          - ((hd + hs)/(hs*hd))*y(n-1) &
-          + ((2.0_r8*hd + hs)/(hd*(hs + hd)))*y(n)
+!--- Endpoints: one-sided stencils of order eo
+IF(eo == 1)THEN
+  dydx(1) = (y(2) - y(1))/(x(2) - x(1))
+  dydx(n) = (y(n) - y(n-1))/(x(n) - x(n-1))
+ELSE
+  hs = x(2) - x(1)
+  hd = x(3) - x(2)
+  dydx(1) = -((2.0_r8*hs + hd)/(hs*(hs + hd)))*y(1) &
+            + ((hs + hd)/(hs*hd))*y(2) &
+            - (hs/(hd*(hs + hd)))*y(3)
+  hs = x(n-1) - x(n-2)
+  hd = x(n) - x(n-1)
+  dydx(n) = (hd/(hs*(hs + hd)))*y(n-2) &
+            - ((hd + hs)/(hs*hd))*y(n-1) &
+            + ((2.0_r8*hd + hs)/(hd*(hs + hd)))*y(n)
+END IF
 !--- Finite input does not guarantee a finite result: the stencil weights
 !   overflow for large y on a very fine grid.
 DO i = 1, n

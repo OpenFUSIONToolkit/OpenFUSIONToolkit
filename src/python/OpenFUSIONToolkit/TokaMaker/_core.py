@@ -3252,8 +3252,6 @@ class TokaMaker_equilibrium():
             self._boot_ops['taper_edge_psi0'] = float(taper_edge_psi0)
         if taper_edge_shape is not None:
             self._boot_ops['taper_edge_shape'] = int(taper_edge_shape)
-        for _k, _d in (('saw_q_s', 0.0), ('saw_dq', 0.03), ('saw_tol', 1.0e-4), ('saw_relax', 1.0), ('saw_ramp', 0.01), ('saw_rule', 2)):
-            self._boot_ops.setdefault(_k, _d)
         for _k, _v, _t in (('saw_q_s', saw_q_s, float), ('saw_dq', saw_dq, float), ('saw_tol', saw_tol, float),
                            ('saw_relax', saw_relax, float), ('saw_ramp', saw_ramp, float), ('saw_rule', saw_rule, int)):
             if _v is not None:
