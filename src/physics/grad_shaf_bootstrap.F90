@@ -1915,7 +1915,6 @@ IF (lmin_idx == peak_idx) THEN
   CALL oft_warn('[analyze_bootstrap_edge_spike] no node between psi_N = 0.5 and the '// &
     'edge peak; using bootstrap profile without edge isolation')
   masked_spike = jphi_bs
-  IF (PRESENT(parameterized_spike)) parameterized_spike = jphi_bs
   RETURN
 END IF
 ! =====================================================================
