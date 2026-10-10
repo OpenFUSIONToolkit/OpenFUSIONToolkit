@@ -781,14 +781,8 @@ END SUBROUTINE stall_check
 !---------------------------------------------------------------------------------
 !> Sawtooth reset current on the nodes `xn` (OFT convention, mu0*A/m², TokaMaker jphi).
 !!
-!! q_base = q_eq*I_eq/I_base is the q that the base current implies in the equilibrium geometry
-!! (q*I is geometric), with q_eq = |F| q/F on the nodes (q/F by cut-cell, @ref gs_qgeom_cutcell).
-!! rho = sqrt(Phi_N), Phi from int q_eq dpsi. @ref saw_reset_1d gives the
-!! reset on the nodes whose cumulative-area bin holds at least a quarter of the mean bin area (a
-!! node-dense axis, e.g. psi_N ~ rho^2, leaves inner bins without quadrature points), interpolated
-!! in rho; inside the reset the base jphi between kept nodes is replaced by its interpolant too (weighted
-!! by the reset weight wr), so its fine structure is reset with the rest. dI/dA is mapped back to jphi with the linear part of
-!! eval_jtor_imas.
+!! q_base = q_eq*I_eq/I_base (q*I is geometric) on rho = sqrt(Phi_N); @ref saw_reset_1d resets it on
+!! nodes with enough enclosed area, interpolated in rho; dI/dA maps back to jphi via eval_jtor_imas.
 !---------------------------------------------------------------------------------
 SUBROUTINE saw_redistribute(self, gseq, xn, ravgs, I_base, I_eq, area, j_base, dj)
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
@@ -910,21 +904,11 @@ END SUBROUTINE saw_redistribute
 !---------------------------------------------------------------------------------
 !> Sawtooth q reset on a 1-D profile (axis first).
 !!
-!! rule 1 (fuse, after FUSE's saw_crash!): from the axis to rho_m, the first crossing of q = q_s + dq
-!! beyond the outermost q < q_s point (interpolated, so it moves continuously), q_t = q_s +
-!! dq*p(rho/rho_m), p C1 onto q at rho_m (cubic, or x^m for slope m > 3), weighted by
-!! w = clamp((q_s - min q)/ramp, 0, 1) (1 for ramp <= 0).
-!! rule 2 (local): each maximal q < q_s + dq interval [rho_in, rho_out] (interpolated crossings,
-!! rho_in = 0 at the axis) that holds a q < q_s point and has an outer crossing is reset about its
-!! q minimum rho_c (parabola-refined, 0 at the axis node): q_s + dq*p((rho-rho_c)/(rho_out-rho_c))
-!! outside rho_c, mirrored inside as q_s + D*p((rho_c-rho)/(rho_c-rho_in)), D = q(rho_in) - q_s
-!! (max(q(0) - q_s, 0) at the axis; flat if 0), weighted per interval by w_k. Humps inside an interval
-!! (between runs, or a run and an end) blend it toward per-run resets split at the hump tops by the hump
-!! height (local_reset), so an interval splitting in two moves q_new continuously.
-!! q is unchanged elsewhere, so dI vanishes at both ends of every interval.
-!! dI = I*(q/q_new - 1), dj = (d dI/dA)/c1. Both rules: rho_s / rho_m = q_s / q_s + dq crossings
-!! beyond the outermost q < q_s point; rho_out = outer end of the (outermost) reset; wr = per-node
-!! weight (w_k inside interval k, else 0); w = max weight; n_dips = regions reset (rule 1: q < q_s regions).
+!! rule 1 (FUSE saw_crash!): q -> q_s + dq*p(rho/rho_m) from the axis to rho_m (the q = q_s + dq crossing
+!! beyond the outermost q < q_s point), p C1 onto q at rho_m, weighted by w = clamp((q_s - min q)/ramp, 0, 1).
+!! rule 2 (local): each q < q_s + dq interval holding a q < q_s point is reset about its q minimum,
+!! weighted per interval (@ref local_reset); q is unchanged elsewhere, so dI = 0 at interval ends.
+!! dI = I*(q/q_new - 1), dj = (d dI/dA)/c1.
 !---------------------------------------------------------------------------------
 SUBROUTINE saw_reset_1d(n, rho, q, I, A, c1, q_s, dq, ramp, rule, q_new, dj, wr, rho_s, rho_m, rho_out, n_dips, w)
 INTEGER(i4), INTENT(in) :: n
