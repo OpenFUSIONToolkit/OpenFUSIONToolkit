@@ -774,11 +774,7 @@ do j=1,nr
   psi_surf=psi_q(j)*(x2-x1) + x1
   !--- Axis guard: flux surface degenerates at psi_N=1; prescribe analytically.
   IF(psi_q(j) == 1.d0)THEN
-    IF(gseq%mode==0)THEN
-      fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
-    ELSE
-      fpol=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
-    END IF
+    fpol=gs_fpol(gseq,psi_surf)
     r_avgs(j,1)    = raxis
     r_avgs(j,2)    = 1.d0 / raxis
     r_avgs(j,3)    = 0.d0
@@ -796,11 +792,7 @@ do j=1,nr
   END IF
   pt=pt_last
   CALL gs_psi2r(gseq,psi_surf,pt,psi_int=psi_int)
-  IF(gseq%mode==0)THEN
-    fpol=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
-  ELSE
-    fpol=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
-  END IF
+  fpol=gs_fpol(gseq,psi_surf)
   field%f_surf=fpol
   field%bmax=0.d0
   field%rmax_surf = -1.d30
