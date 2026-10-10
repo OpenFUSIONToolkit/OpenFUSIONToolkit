@@ -2483,7 +2483,7 @@ class TokaMaker():
         @param p_fixed_prof Optional additional pressure profile dict (``'x'``: in ``coord``, ``'y'``: \f$P_{fixed}\f$ [Pa],
           e.g. fast-ion pressure), added to the kinetic pressure. Sets \f$P'\f$ and \f$P_{ax}\f$ but is excluded
           from the bootstrap calculation. Mutually exclusive with ``pres_prof``.
-        @param jphi_saw_prof Optional input sawtooth toroidal current density profile dict (``'x'``: \f$\hat{\psi_n}\f$,
+        @param jphi_saw_prof Optional input sawtooth toroidal current density profile dict (``'x'``: in ``coord``,
           ``'y'``: \f$j_\phi\f$ [A/m\f$^2\f$], e.g. a source's sawtooth current), added without rescaling. With
           ``saw_q_s`` > 0 the reset current is added to it (returned as ``'jphi_saw'``)
         @param coord Coordinate of all ``'x'`` grids: ``'psi_n'`` (default) or ``'phi_n'`` (normalized toroidal flux).

@@ -93,7 +93,7 @@ type, extends(jphi_flux_func) :: jphi_bs_flux_func
   integer(4) :: djsaw_no_improve = 0 !< Consecutive steps with non-decreasing djsaw
   real(8) :: djsaw_min = huge(1.0d0) !< Running minimum djsaw
   real(8), allocatable :: jphi_saw_last(:) !< jphi_saw of the last update (mu0*A/m²)
-  real(8), allocatable :: jphi_total_last(:) !< jphi_total of the last update (mu0*A/m²), the current of the equilibrium being traced
+  real(8), allocatable :: jphi_total_last(:) !< jphi_total of the last update (mu0*A/m²)
   logical :: ffp_restored = .FALSE. !< F*F' knots were read from a file, so loading keeps them instead of updating
   TYPE(boot_ops) :: boot_ops       !< Options set from Python (@ref tokamaker_set_boot_ops)
   TYPE(boot_profs) :: boot_profs   !< Current profiles of the last update

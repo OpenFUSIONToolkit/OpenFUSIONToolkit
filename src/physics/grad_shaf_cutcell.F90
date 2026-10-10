@@ -97,11 +97,11 @@ class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(i4), intent(in) :: nr !< Number of surfaces
 real(r8), intent(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
 real(r8), intent(out) :: qf(nr) !< \f$ q/F \f$
-real(r8), intent(out) :: ravgs(nr,4) !< \f$ \langle R \rangle \f$, \f$ \langle 1/R \rangle \f$, \f$ \langle 1/R^2 \rangle \f$, \f$ dV/d\psi \f$
+real(r8), intent(out) :: ravgs(nr,4) !< <R>, <1/R>, <1/R^2>, dV/dpsi
 logical, intent(out) :: ok(nr) !< Surface inside (0,1) and closed about the O-point
 real(r8), optional, intent(in) :: fpol(nr) !< F on each surface (with `fsa`)
-real(r8), optional, intent(out) :: fsa(nr,4) !< \f$ \langle |\nabla\psi| \rangle \f$, \f$ \langle |\nabla\psi|^2 \rangle \f$, \f$ \langle B_p^2 \rangle \f$, \f$ \langle 1/B^2 \rangle \f$
-real(r8), optional, intent(out) :: shp(nr,6) !< \f$ R_{min} \f$, \f$ R_{max} \f$, \f$ Z_{min} \f$, \f$ Z_{max} \f$, \f$ R(Z_{min}) \f$, \f$ R(Z_{max}) \f$
+real(r8), optional, intent(out) :: fsa(nr,4) !< <|grad psi|>, <|grad psi|^2>, <B_p^2>, <1/B^2>
+real(r8), optional, intent(out) :: shp(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
 real(r8) :: wind(nr),racc(3,nr),dpsi
 real(r8), allocatable :: facc(:,:),xacc(:,:,:)
 integer(i4) :: k
@@ -307,7 +307,7 @@ real(r8), optional, intent(in) :: bref(nr) !< \f$ B_{ref} \f$ on each surface (S
 real(r8), optional, intent(inout) :: aloc(:,:) !< Accumulated Sauter sums [8,nr] (see @ref gs_sauter_cutcell)
 real(r8), optional, intent(inout) :: eloc(:) !< Accumulated \f$ B_{max} \f$ [nr]
 real(r8), optional, intent(inout) :: racc(:,:) !< Accumulated \f$ \oint w\,[R, R^2, 1] \f$ [3,nr] (see @ref geom_sums)
-real(r8), optional, intent(inout) :: facc(:,:) !< Accumulated \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$ [5,nr] (needs `fpol`)
+real(r8), optional, intent(inout) :: facc(:,:) !< Accumulated oint w R [1, |grad psi|, |grad psi|^2, B_p^2, 1/B^2] [5,nr] (needs `fpol`)
 real(r8), optional, intent(inout) :: xacc(:,:,:) !< Accumulated surface extrema [2,4,nr] (see @ref ext_add)
 type(oft_scalar_bfem), pointer :: lag_rep
 integer(i4) :: jdofs(32),jc,k,ns,d0,i
@@ -521,12 +521,7 @@ x=c+eta*dvec
 end function arc_point
 !---Extrema of R and Z on the current arc of surface s, added to `xa`
 !!
-!! A smooth arc of a level set has stationary R where \f$ \partial_Z \psi = 0 \f$ and stationary
-!! Z where \f$ \partial_R \psi = 0 \f$; the FE surface is only C0 across cells, so the candidates
-!! are the arc ends (exact edge crossings), the Gauss points, and the roots of these gradient
-!! components bracketed by neighbouring samples (Illinois regula falsi on xi). The gradient
-!! stays within a half-plane on a simple sub-cell, so a convex arc has at most one root of each
-!! and none is missed; on an inflected arc a missed root pair bounds an O(h^2) excursion.
+!! Candidates: arc ends, Gauss points, and bracketed roots of \f$ \partial_Z \psi \f$ / \f$ \partial_R \psi \f$.
 subroutine arc_extrema(s,p1,p2,xi1,xi2,ng,xs,sp,sg,xa)
 real(r8), intent(in) :: s,p1(2),p2(2),xi1,xi2
 integer(i4), intent(in) :: ng

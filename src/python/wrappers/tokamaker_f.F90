@@ -592,7 +592,7 @@ CHARACTER(KIND=c_char), INTENT(in) :: ti_file(OFT_PATH_SLEN) !< Ion temperature 
 CHARACTER(KIND=c_char), INTENT(in) :: ni_file(OFT_PATH_SLEN) !< Ion density [m^-3] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: zeff_file(OFT_PATH_SLEN) !< Effective charge [-] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: jphi_fixed_file(OFT_PATH_SLEN) !< Fixed toroidal current density [A/m^2] profile specification file
-CHARACTER(KIND=c_char), INTENT(in) :: jphi_saw_file(OFT_PATH_SLEN) !< Input sawtooth toroidal current density [A/m^2] profile specification file
+CHARACTER(KIND=c_char), INTENT(in) :: jphi_saw_file(OFT_PATH_SLEN) !< Input sawtooth jphi [A/m^2] profile specification file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
@@ -716,7 +716,8 @@ END SUBROUTINE tokamaker_get_boot_prof
 !---------------------------------------------------------------------------------
 !> Get the sawtooth scalars of the last jphi_bs_update (zero if none or not a bootstrap profile)
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_boot_saw(tMaker_equil_ptr,saw_rho_m,saw_rho_out,saw_n_dips,error_str) BIND(C,NAME="tokamaker_get_boot_saw")
+SUBROUTINE tokamaker_get_boot_saw(tMaker_equil_ptr,saw_rho_m,saw_rho_out,saw_n_dips,error_str) &
+  BIND(C,NAME="tokamaker_get_boot_saw")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 REAL(c_double), INTENT(out) :: saw_rho_m !< Sawtooth radius at the last reset (0 = none)
 REAL(c_double), INTENT(out) :: saw_rho_out !< Outer end of the last reset (0 = none)
