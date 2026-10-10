@@ -33,7 +33,6 @@ class tokamaker_boot_ops_struct(c_struct):
     r'''! Bootstrap current options for the jphi-split-bootstrap current profile update.
 
      - `isolate_edge_jbs` Isolate the edge bootstrap spike from the bulk bootstrap current?
-     - `parameterize_jbs` Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jbs` if true.
      - `scale_jbs` Scaling factor applied to the spike profile (default 1.0)
      - `djbs_tol` Threshold on relative change in the bootstrap current to freeze it (default 1e-4)
      - `diagnose_bs` Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration?
@@ -48,7 +47,6 @@ class tokamaker_boot_ops_struct(c_struct):
      - `saw_rule` Reset rule: 1 fuse (axis to the sawtooth radius, FUSE's saw_crash!), 2 local (each dip, two-sided; default)
     '''
     _fields_ = [('isolate_edge_jbs', c_bool),
-                ('parameterize_jbs', c_bool),
                 ('scale_jbs', c_double),
                 ('djbs_tol', c_double),
                 ('diagnose_bs', c_bool),

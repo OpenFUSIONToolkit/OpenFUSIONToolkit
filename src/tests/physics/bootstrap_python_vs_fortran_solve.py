@@ -13,7 +13,6 @@ Usage
 -----
   python ITER_Hmode_bootstrap_ex.py [--mode both|external|internal]
                                       [--isolate-edge]
-                                      [--parameterize-edge]
                                       [--scale-jbs 1.0]
                                       [--taper-edge]
                                       [--nthreads 2]
@@ -45,8 +44,6 @@ parser.add_argument('--mode', choices=['both', 'external', 'internal'],
                     help='Which bootstrap method(s) to run (default: both)')
 parser.add_argument('--isolate-edge', action='store_true',
                     help='Isolate the edge bootstrap spike from the bulk')
-parser.add_argument('--parameterize-edge', action='store_true',
-                    help='Fit edge spike with parametrised skew-normal (implies --isolate-edge)')
 parser.add_argument('--scale-jbs', type=float, default=1.0,
                     help='Scale factor applied to the bootstrap current (default 1.0)')
 parser.add_argument('--djbs-tol', type=float, default=1.0e-4,
@@ -202,11 +199,6 @@ if run_external:
     print("="*60)
     build_gs(mygs)
 
-    # --parameterize-edge requires --isolate-edge for the external solver.
-    ext_isolate_edge = args.isolate_edge or args.parameterize_edge
-    if args.parameterize_edge and not args.isolate_edge:
-        print('Note: --parameterize-edge implies --isolate-edge for the external solver.')
-
     t0 = time.perf_counter()
     results_ext = solve_with_bootstrap(
         mygs,
@@ -215,8 +207,7 @@ if run_external:
         Ip_target,
         inductive_jphi,
         scale_jbs=args.scale_jbs,
-        isolate_edge_jbs=ext_isolate_edge,
-        parameterize_jbs=args.parameterize_edge,
+        isolate_edge_jbs=args.isolate_edge,
         diagnostic_plots=False,
         verbose=True,
         diagnose_bs=args.diagnose_bs,
@@ -269,7 +260,6 @@ if run_internal:
         Zeff=Zeff_val,
         Ip_target=Ip_target,
         isolate_edge_jbs=args.isolate_edge,
-        parameterize_jbs=args.parameterize_edge,
         scale_jbs=args.scale_jbs,
         diagnose_bs=args.diagnose_bs,
         taper_edge_jbs=args.taper_edge,
@@ -316,7 +306,6 @@ if run_external and run_internal:
 
     option_parts = []
     if args.isolate_edge:     option_parts.append('isolate-edge')
-    if args.parameterize_edge: option_parts.append('parameterize-edge')
     if args.taper_edge:       option_parts.append(f'taper(psi0={args.taper_edge_psi0},sh={args.taper_edge_shape})')
     if args.scale_jbs != 1.0: option_parts.append(f'scale={args.scale_jbs}')
     option_tag   = ('_' + '_'.join(option_parts)) if option_parts else '_plain'
@@ -394,7 +383,6 @@ if run_external != run_internal:
 
     option_parts = []
     if args.isolate_edge:      option_parts.append('isolate-edge')
-    if args.parameterize_edge: option_parts.append('parameterize-edge')
     if args.taper_edge:        option_parts.append(f'taper(psi0={args.taper_edge_psi0},sh={args.taper_edge_shape})')
     if args.scale_jbs != 1.0:  option_parts.append(f'scale={args.scale_jbs}')
     option_tag   = ('_' + '_'.join(option_parts)) if option_parts else '_plain'

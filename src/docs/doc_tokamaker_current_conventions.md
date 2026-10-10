@@ -101,7 +101,7 @@ converged I_p sits within a few 1e-4 of the target. `jphi_update` normalises its
 scaling and taper). Parts: `bs` (bootstrap, (A7)), `pd` (its pressure-driven p′G term), `ind` (inductive),
 `fixed`, `saw`: `jphi_total` = `jphi_ind` + `jphi_bs` + `jphi_fixed` + `jphi_saw` (the Python solve returns
 the GS output as `jphi_total`). `jdotB_bs_raw` is the Redl ⟨J·B⟩ behind `jphi_bs_raw`. Options use `jbs`
-(`scale_jbs`, `isolate_edge_jbs`, `parameterize_jbs`, `taper_edge_jbs`, `djbs_tol`).
+(`scale_jbs`, `isolate_edge_jbs`, `taper_edge_jbs`, `djbs_tol`).
 
 ## Where these are used
 - TokaMaker `jphi_bs_update` / `calculate_bootstrap` (Fortran) and `solve_with_bootstrap(use_python_solve=True)`:

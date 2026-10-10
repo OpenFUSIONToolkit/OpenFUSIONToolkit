@@ -874,7 +874,7 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_kinetic_profiles(te_prof,ti_prof,ne_prof,ni_prof,Zeff,keep_files,jphi_fixed_prof,jphi_saw_prof)
 
-    def set_boot_ops(self, isolate_edge_jbs=None, parameterize_jbs=None, scale_jbs=None, djbs_tol=None,
+    def set_boot_ops(self, isolate_edge_jbs=None, scale_jbs=None, djbs_tol=None,
                      diagnose_bs=None, taper_edge_jbs=None, taper_edge_psi0=None, taper_edge_shape=None,
                      saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
@@ -883,7 +883,6 @@ class TokaMaker():
         Any `None` value is left unchanged from its current state (for default values see Tokamaker_equilibrium.set_boot_ops).
 
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
-        @param parameterize_jbs Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jbs` if true. (Internal default: False)
         @param scale_jbs Scaling factor applied to the spike profile. (Internal default: 1.0)
         @param djbs_tol Threshold on relative change in the bootstrap current to freeze it. (Internal default: 1e-4)
         @param diagnose_bs Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration. (Internal default: False)
@@ -900,7 +899,7 @@ class TokaMaker():
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.set_boot_ops(isolate_edge_jbs, parameterize_jbs, scale_jbs, djbs_tol,
+        return self._tMaker_equil.set_boot_ops(isolate_edge_jbs, scale_jbs, djbs_tol,
                                                diagnose_bs,
                                                taper_edge_jbs, taper_edge_psi0, taper_edge_shape,
                                                saw_q_s, saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule)
@@ -1403,7 +1402,6 @@ class TokaMaker():
             if initialized.value:
                 tmp_eq._boot_ops = {
                     'isolate_edge_jbs': bool(bops.isolate_edge_jbs),
-                    'parameterize_jbs': bool(bops.parameterize_jbs),
                     'scale_jbs':        float(bops.scale_jbs),
                     'djbs_tol':         float(bops.djbs_tol),
                     'diagnose_bs':      bool(bops.diagnose_bs),
@@ -2412,8 +2410,6 @@ class TokaMaker():
 
         @par Bootstrap solver options (forwarded to ``set_boot_ops()``)
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk (default: False)
-        @param parameterize_jbs Use a parametrised skew-normal fit for the edge spike;
-          overrides ``isolate_edge_jbs`` if True (default: False)
         @param scale_jbs Scaling factor applied to the bootstrap current profile (default: 1.0)
         @param djbs_tol Threshold on relative change in the bootstrap current to freeze it (influences solve speed) (default: 1e-4)
         @param diagnose_bs Print detailed output at each NL iteration (default: False)
@@ -2437,10 +2433,10 @@ class TokaMaker():
           - ``'jphi_pd_raw'`` Pressure-driven (diamagnetic + Pfirsch-Schlueter) part of ``'jphi_bs_raw'``,
             \f$P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
           - ``'jphi_total'`` Total toroidal current density = jphi_ind + jphi_bs + jphi_saw + jphi_fixed [A/m²]
-          - ``'jphi_bs'`` Bootstrap current density (optionally isolated / parametrised / tapered) [A/m²]
+          - ``'jphi_bs'`` Bootstrap current density (optionally isolated / tapered) [A/m²]
           - ``'jphi_pd'`` ``'jphi_pd_raw'`` times ``scale_jbs``, (optionally) tapered; not
-            isolated / parametrised, so it is the pressure-driven part of ``'jphi_bs'`` only when
-            ``isolate_edge_jbs`` (and ``parameterize_jbs``) are off [A/m²]
+            isolated, so it is the pressure-driven part of ``'jphi_bs'`` only when
+            ``isolate_edge_jbs`` is off [A/m²]
           - ``'jphi_ind'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
           - ``'jphi_saw'`` Sawtooth current: ``jphi_saw_prof`` (optionally tapered) plus the reset current [A/m²]
           - ``'jphi_fixed'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
@@ -3104,7 +3100,7 @@ class TokaMaker_equilibrium():
                 except:
                     print('Warning: unable to delete temporary file "{0}"'.format(file))
 
-    def set_boot_ops(self, isolate_edge_jbs=None, parameterize_jbs=None, scale_jbs=None, djbs_tol=None,
+    def set_boot_ops(self, isolate_edge_jbs=None, scale_jbs=None, djbs_tol=None,
                      diagnose_bs=None, taper_edge_jbs=None, taper_edge_psi0=None, taper_edge_shape=None,
                      saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
@@ -3113,7 +3109,6 @@ class TokaMaker_equilibrium():
         Any `None` value is left unchanged from current state (see initialisations in dict. below).
 
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
-        @param parameterize_jbs Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jbs` if true. (Internal default: False)
         @param scale_jbs Scaling factor applied to the spike profile. (Internal default: 1.0)
         @param djbs_tol Threshold on relative change in the bootstrap current to freeze it. Influences bootstrap solve walltime (Internal default: 1e-4)
         @param diagnose_bs Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration. (Internal default: False)
@@ -3132,7 +3127,6 @@ class TokaMaker_equilibrium():
         if self._boot_ops is None:
             self._boot_ops = {
                 'isolate_edge_jbs': False,
-                'parameterize_jbs': False,
                 'scale_jbs': 1.0,
                 'djbs_tol': 1.0e-4,
                 'diagnose_bs': False,
@@ -3149,8 +3143,6 @@ class TokaMaker_equilibrium():
         # Override only the explicitly provided kwargs
         if isolate_edge_jbs is not None:
             self._boot_ops['isolate_edge_jbs'] = bool(isolate_edge_jbs)
-        if parameterize_jbs is not None:
-            self._boot_ops['parameterize_jbs'] = bool(parameterize_jbs)
         if scale_jbs is not None:
             self._boot_ops['scale_jbs'] = float(scale_jbs)
         if djbs_tol is not None:
@@ -3175,7 +3167,6 @@ class TokaMaker_equilibrium():
         # Build the ctypes struct from the merged shadow state and send to Fortran
         bops = tokamaker_boot_ops_struct()
         bops.isolate_edge_jbs = self._boot_ops['isolate_edge_jbs']
-        bops.parameterize_jbs = self._boot_ops['parameterize_jbs']
         bops.scale_jbs = self._boot_ops['scale_jbs']
         bops.djbs_tol = self._boot_ops['djbs_tol']
         bops.diagnose_bs = self._boot_ops['diagnose_bs']
