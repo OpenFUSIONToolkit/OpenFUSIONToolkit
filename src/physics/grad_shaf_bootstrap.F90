@@ -54,28 +54,28 @@ END TYPE boot_ops
 !------------------------------------------------------------------------------
 !> Current profiles of the last @ref jphi_bs_update (diagnostics; the update itself uses its own
 !! `jphi_*` arrays). `_raw`: from the last bootstrap evaluation, before scaling, isolation and taper;
-!! `_final`: as added into `jphi_total`. TokaMaker jphi [A/m²] on `psi_n` (OFT convention, 0=LCFS,
-!! 1=axis; LCFS first); `jdotb_bs_raw` in [T A/m²].
+!! no suffix: as added into `jphi_total`. TokaMaker jphi [A/m²] on `psi_n` (OFT convention, 0=LCFS,
+!! 1=axis; LCFS first); `jdotB_bs_raw` in [T A/m²].
 !------------------------------------------------------------------------------
 TYPE :: boot_profs
   REAL(r8), ALLOCATABLE :: psi_n(:) !< Normalised psi of the profile nodes, LCFS first
-  REAL(r8), ALLOCATABLE :: jdotb_bs_raw(:) !< Redl PoP 2021 <j_BS.B>
+  REAL(r8), ALLOCATABLE :: jdotB_bs_raw(:) !< Redl PoP 2021 <j_BS.B>
   REAL(r8), ALLOCATABLE :: jphi_bs_raw(:) !< Bootstrap jphi, <j_BS.B> F<1/R>/<B^2> + jphi_pd_raw
   REAL(r8), ALLOCATABLE :: jphi_pd_raw(:) !< Pressure-driven (diamagnetic + Pfirsch-Schlueter) part of jphi_bs_raw, P'(<R> - F^2<1/R>/<B^2>)
-  REAL(r8), ALLOCATABLE :: jphi_total(:) !< Total = jphi_ind_final + jphi_bs_final + jphi_saw_final + jphi_fixed_final
-  REAL(r8), ALLOCATABLE :: jphi_bs_final(:) !< Bootstrap jphi, scaled, optionally isolated/parametrised and tapered
-  REAL(r8), ALLOCATABLE :: jphi_pd_final(:) !< jphi_pd_raw scaled and optionally tapered (not isolated/parametrised)
-  REAL(r8), ALLOCATABLE :: jphi_ind_final(:) !< Inductive jphi: input jphi times alpha, optionally tapered
-  REAL(r8), ALLOCATABLE :: jphi_saw_final(:) !< Sawtooth jphi: input jphi_saw (optionally tapered) plus the q reset current
-  REAL(r8), ALLOCATABLE :: jphi_fixed_final(:) !< Fixed (non-rescaled) jphi, optionally tapered
+  REAL(r8), ALLOCATABLE :: jphi_total(:) !< Total = jphi_ind + jphi_bs + jphi_saw + jphi_fixed
+  REAL(r8), ALLOCATABLE :: jphi_bs(:) !< Bootstrap jphi, scaled, optionally isolated/parametrised and tapered
+  REAL(r8), ALLOCATABLE :: jphi_pd(:) !< jphi_pd_raw scaled and optionally tapered (not isolated/parametrised)
+  REAL(r8), ALLOCATABLE :: jphi_ind(:) !< Inductive jphi: input jphi times alpha, optionally tapered
+  REAL(r8), ALLOCATABLE :: jphi_saw(:) !< Sawtooth jphi: input jphi_saw (optionally tapered) plus the q reset current
+  REAL(r8), ALLOCATABLE :: jphi_fixed(:) !< Fixed (non-rescaled) jphi, optionally tapered
   REAL(r8) :: saw_rho_m = 0.0_r8 !< Sawtooth radius (rho_tor_norm): q_s + dq crossing beyond the outermost q_base < q_s (0 = none)
   REAL(r8) :: saw_rho_out = 0.0_r8 !< Outer end of the last reset (rho_tor_norm; 0 = none)
   INTEGER(i4) :: saw_n_dips = 0 !< Regions reset at the last reset (rule 1: separate q_base < saw_q_s regions)
 END TYPE boot_profs
 !> Names of the @ref boot_profs arrays, in declaration order (HDF5 datasets are these in upper case)
-CHARACTER(LEN=16), PARAMETER :: boot_prof_names(10) = [CHARACTER(LEN=16) :: 'psi_n', 'jdotb_bs_raw', &
-  'jphi_bs_raw', 'jphi_pd_raw', 'jphi_total', 'jphi_bs_final', 'jphi_pd_final', 'jphi_ind_final', &
-  'jphi_saw_final', 'jphi_fixed_final']
+CHARACTER(LEN=16), PARAMETER :: boot_prof_names(10) = [CHARACTER(LEN=16) :: 'psi_n', 'jdotB_bs_raw', &
+  'jphi_bs_raw', 'jphi_pd_raw', 'jphi_total', 'jphi_bs', 'jphi_pd', 'jphi_ind', &
+  'jphi_saw', 'jphi_fixed']
 !------------------------------------------------------------------------------
 !> Jphi flux function type for bootstrap current calculation
 !------------------------------------------------------------------------------
@@ -372,15 +372,15 @@ REAL(r8), OPTIONAL, INTENT(in) :: set(:)
 IF(PRESENT(get))get=>NULL()
 SELECT CASE(TRIM(name))
   CASE('psi_n'); CALL access(bp%psi_n)
-  CASE('jdotb_bs_raw'); CALL access(bp%jdotb_bs_raw)
+  CASE('jdotB_bs_raw'); CALL access(bp%jdotB_bs_raw)
   CASE('jphi_bs_raw'); CALL access(bp%jphi_bs_raw)
   CASE('jphi_pd_raw'); CALL access(bp%jphi_pd_raw)
   CASE('jphi_total'); CALL access(bp%jphi_total)
-  CASE('jphi_bs_final'); CALL access(bp%jphi_bs_final)
-  CASE('jphi_pd_final'); CALL access(bp%jphi_pd_final)
-  CASE('jphi_ind_final'); CALL access(bp%jphi_ind_final)
-  CASE('jphi_saw_final'); CALL access(bp%jphi_saw_final)
-  CASE('jphi_fixed_final'); CALL access(bp%jphi_fixed_final)
+  CASE('jphi_bs'); CALL access(bp%jphi_bs)
+  CASE('jphi_pd'); CALL access(bp%jphi_pd)
+  CASE('jphi_ind'); CALL access(bp%jphi_ind)
+  CASE('jphi_saw'); CALL access(bp%jphi_saw)
+  CASE('jphi_fixed'); CALL access(bp%jphi_fixed)
 END SELECT
 CONTAINS
 SUBROUTINE access(a)
@@ -682,11 +682,11 @@ jphi_total = alpha * jphi_ind + jphi_bs + jphi_fixed + jphi_saw
 IF(saw_on)self%jphi_total_last = jphi_total
 self%boot_profs%psi_n = psi_n
 self%boot_profs%jphi_total = jphi_total/mu0
-self%boot_profs%jphi_bs_final = jphi_bs/mu0
-self%boot_profs%jphi_pd_final = jphi_pd/mu0
-self%boot_profs%jphi_ind_final = alpha * jphi_ind/mu0
-self%boot_profs%jphi_saw_final = jphi_saw/mu0
-self%boot_profs%jphi_fixed_final = jphi_fixed/mu0
+self%boot_profs%jphi_bs = jphi_bs/mu0
+self%boot_profs%jphi_pd = jphi_pd/mu0
+self%boot_profs%jphi_ind = alpha * jphi_ind/mu0
+self%boot_profs%jphi_saw = jphi_saw/mu0
+self%boot_profs%jphi_fixed = jphi_fixed/mu0
 pprime = gseq%P%fp(gseq%plasma_bounds(1))
 self%y0 = 2.d0*(jphi_total(0) - ravgs(0,1)*pprime*pscale)/ravgs(0,2)
 DO i = 1, self%npsi
@@ -1680,8 +1680,8 @@ REAL(r8) :: dn_i_dpsi(n_psi), dT_i_dpsi(n_psi)
 REAL(r8) :: ln_le(n_psi), ln_lii(n_psi), Z_lnLam(n_psi)
 REAL(r8) :: Zavg(n_psi), Zion(n_psi)
 REAL(r8) :: nu_i_star(n_psi), nu_e_star(n_psi)
-REAL(r8) :: jdotb_bs(n_psi)
-REAL(r8) :: jdotb(0:n_psi) !< <j_BS.B> with its LCFS/axis values
+REAL(r8) :: jdotB_bs(n_psi)
+REAL(r8) :: jdotB(0:n_psi) !< <j_BS.B> with its LCFS/axis values
 REAL(r8) :: psi_range, Zdom, pscale, pprime
 REAL(r8), PARAMETER :: EC = 1.602176634e-19_r8
 ! Locals for optional edge-spike isolation
@@ -1755,7 +1755,7 @@ nu_e_star = 6.921e-18_r8 * ABS(qvals) * R_avg * ne &
 ! Compute bootstrap current via Redl 2021
 CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, qvals, eps, ft, f, &
     dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &
-    ln_le, ln_lii, nu_e_star, nu_i_star, jdotb_bs)
+    ln_le, ln_lii, nu_e_star, nu_i_star, jdotB_bs)
 ! Convert <j_BS.B> to TokaMaker's jphi = <j_phi> = <R>P' + <1/R>FF'/mu0 (exact, see
 ! doc_tokamaker_current_conventions.md eq. A7): the field-aligned part F<1/R>/<B^2> * <j_BS.B>,
 ! plus the pressure-driven (diamagnetic + Pfirsch-Schlueter) part P'(<R> - F^2<1/R>/<B^2>),
@@ -1767,17 +1767,17 @@ DO i = 1, n_psi
   IF(ABS(f(i)) > 0.0_r8 .AND. modb_avgs_saut(i,2) > 0.0_r8)THEN
     pprime = gseq%P%fp(psi_abs(i))*pscale/mu0
     jphi_pd(i) = pprime*(r_avgs_saut(i,1) - f(i)**2*r_avgs_saut(i,2)/modb_avgs_saut(i,2))
-    jphi_bs(i) = jdotb_bs(i)*f(i)*r_avgs_saut(i,2)/modb_avgs_saut(i,2) + jphi_pd(i)
+    jphi_bs(i) = jdotB_bs(i)*f(i)*r_avgs_saut(i,2)/modb_avgs_saut(i,2) + jphi_pd(i)
   ELSE
     jphi_pd(i) = 0.0_r8
     jphi_bs(i) = 0.0_r8
   END IF
 END DO
-jdotb = [0.0_r8, jdotb_bs]
+jdotB = [0.0_r8, jdotB_bs]
 CALL finish(jphi_bs)
 CALL finish(jphi_pd)
-CALL finish(jdotb)
-self%boot_profs%jdotb_bs_raw = jdotb
+CALL finish(jdotB)
+self%boot_profs%jdotB_bs_raw = jdotB
 self%boot_profs%jphi_bs_raw = jphi_bs
 self%boot_profs%jphi_pd_raw = jphi_pd
 IF(self%boot_ops%diagnose_bs)THEN

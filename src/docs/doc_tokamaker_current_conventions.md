@@ -97,15 +97,15 @@ converged I_p sits within a few 1e-4 of the target. `jphi_update` normalises its
 
 ## Bootstrap profile names
 `solve_bootstrap`, `get_boot_profs` and `solve_with_bootstrap` return J_TM profiles on `psi_n` (0 = axis,
-1 = LCFS) named `jphi_<part>_<stage>`. Parts: `bs` (bootstrap, (A7)), `pd` (its pressure-driven p′G term),
-`ind` (inductive), `fixed`, `total`. `_raw` is before edge isolation, scaling and taper; `_final` is what
-enters `jphi_total` = `jphi_ind_final` + `jphi_bs_final` + `jphi_fixed_final` (the Python solve returns the
-GS output as `jphi_total`). `jdotb_bs_raw` is the Redl ⟨J·B⟩ behind `jphi_bs_raw`. Options use `jbs`
+1 = LCFS) named `jphi_<part>` (as it enters `jphi_total`) or `jphi_<part>_raw` (before edge isolation,
+scaling and taper). Parts: `bs` (bootstrap, (A7)), `pd` (its pressure-driven p′G term), `ind` (inductive),
+`fixed`, `saw`: `jphi_total` = `jphi_ind` + `jphi_bs` + `jphi_fixed` + `jphi_saw` (the Python solve returns
+the GS output as `jphi_total`). `jdotB_bs_raw` is the Redl ⟨J·B⟩ behind `jphi_bs_raw`. Options use `jbs`
 (`scale_jbs`, `isolate_edge_jbs`, `parameterize_jbs`, `taper_edge_jbs`, `djbs_tol`).
 
 ## Where these are used
 - TokaMaker `jphi_bs_update` / `calculate_bootstrap` (Fortran) and `solve_with_bootstrap(use_python_solve=True)`:
-  the bootstrap enters `jphi_total` by (A7) with p′G (`boot_profs['jphi_pd_raw']`); `boot_profs['jdotb_bs_raw']` holds the Redl ⟨J·B⟩.
+  the bootstrap enters `jphi_total` by (A7) with p′G (`boot_profs['jphi_pd_raw']`); `boot_profs['jdotB_bs_raw']` holds the Redl ⟨J·B⟩.
 - TokaMaker `jphi_update` / `jphi_bs_update` I_p normalisation, and the α root of
   `solve_with_bootstrap(use_python_solve=True)` (`compute_flux_integral` of J_IMAS): (A9c).
 - bouquet: currents are stored as J_TM; FUSE/IMAS currents are read and written through (A5)–(A7).

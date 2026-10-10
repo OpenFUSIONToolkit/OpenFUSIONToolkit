@@ -19,8 +19,8 @@ from ..fe import Lagrange_2D_field_interpolator
 
 
 ## Bootstrap current profiles of get_boot_profs, in the Fortran `boot_prof_names` order
-_BOOT_PROF_NAMES = ('psi_n', 'jdotb_bs_raw', 'jphi_bs_raw', 'jphi_pd_raw', 'jphi_total', 'jphi_bs_final',
-                    'jphi_pd_final', 'jphi_ind_final', 'jphi_saw_final', 'jphi_fixed_final')
+_BOOT_PROF_NAMES = ('psi_n', 'jdotB_bs_raw', 'jphi_bs_raw', 'jphi_pd_raw', 'jphi_total', 'jphi_bs',
+                    'jphi_pd', 'jphi_ind', 'jphi_saw', 'jphi_fixed')
 
 def create_prof_file(self, filename, profile_dict, name):
     '''! Create profile input file to be read by load_profiles()
@@ -2406,7 +2406,7 @@ class TokaMaker():
           from the bootstrap calculation. Mutually exclusive with ``pres_prof``.
         @param jphi_saw_prof Optional input sawtooth toroidal current density profile dict (``'x'``: \f$\hat{\psi_n}\f$,
           ``'y'``: \f$j_\phi\f$ [A/m\f$^2\f$], e.g. a source's sawtooth current), added without rescaling. With
-          ``saw_q_s`` > 0 the reset current is added to it (returned as ``'jphi_saw_final'``)
+          ``saw_q_s`` > 0 the reset current is added to it (returned as ``'jphi_saw'``)
         @param coord Coordinate of all ``'x'`` grids: ``'psi_n'`` (default) or ``'phi_n'`` (normalized toroidal flux).
           For ``'phi_n'``, profiles are passed as ``'phi_n_relabel'`` and \f$P'\f$ as \f$dP/d\hat{\Phi}\f$ (``'phi_n'``).
 
@@ -2431,19 +2431,19 @@ class TokaMaker():
           (see doc_tokamaker_current_conventions):
           - ``'psi_n'`` Normalised poloidal flux grid (0 = axis, 1 = LCFS) of the ``ffp_prof['x']`` nodes
             (mapped from toroidal flux if ``coord='phi_n'``)
-          - ``'jdotb_bs_raw'`` The Redl \f$\langle j_{BS} \cdot B \rangle\f$ behind ``'jphi_bs_raw'`` [T A/m²]
+          - ``'jdotB_bs_raw'`` The Redl \f$\langle j_{BS} \cdot B \rangle\f$ behind ``'jphi_bs_raw'`` [T A/m²]
           - ``'jphi_bs_raw'`` Bootstrap current density from the Redl PoP 2021 formula,
             \f$\langle j_{BS} \cdot B \rangle F \langle 1/R \rangle/\langle B^2 \rangle + P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
           - ``'jphi_pd_raw'`` Pressure-driven (diamagnetic + Pfirsch-Schlueter) part of ``'jphi_bs_raw'``,
             \f$P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
-          - ``'jphi_total'`` Total toroidal current density = jphi_ind_final + jphi_bs_final + jphi_saw_final + jphi_fixed_final [A/m²]
-          - ``'jphi_bs_final'`` Bootstrap current density (optionally isolated / parametrised / tapered) [A/m²]
-          - ``'jphi_pd_final'`` ``'jphi_pd_raw'`` times ``scale_jbs``, (optionally) tapered; not
-            isolated / parametrised, so it is the pressure-driven part of ``'jphi_bs_final'`` only when
+          - ``'jphi_total'`` Total toroidal current density = jphi_ind + jphi_bs + jphi_saw + jphi_fixed [A/m²]
+          - ``'jphi_bs'`` Bootstrap current density (optionally isolated / parametrised / tapered) [A/m²]
+          - ``'jphi_pd'`` ``'jphi_pd_raw'`` times ``scale_jbs``, (optionally) tapered; not
+            isolated / parametrised, so it is the pressure-driven part of ``'jphi_bs'`` only when
             ``isolate_edge_jbs`` (and ``parameterize_jbs``) are off [A/m²]
-          - ``'jphi_ind_final'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
-          - ``'jphi_saw_final'`` Sawtooth current: ``jphi_saw_prof`` (optionally tapered) plus the reset current [A/m²]
-          - ``'jphi_fixed_final'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
+          - ``'jphi_ind'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
+          - ``'jphi_saw'`` Sawtooth current: ``jphi_saw_prof`` (optionally tapered) plus the reset current [A/m²]
+          - ``'jphi_fixed'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
           - ``'saw_rho_m'``, ``'saw_rho_out'``, ``'saw_n_dips'`` Sawtooth radius (q_s + dq crossing beyond the outermost
             q < q_s, \f$\rho_{tor,N}\f$), outer end of the reset and number of regions reset, at the last reset
         '''
@@ -3195,9 +3195,9 @@ class TokaMaker_equilibrium():
         @result Dictionary of 1-D numpy arrays, keys `_BOOT_PROF_NAMES` (those available), or `None`
           if no profiles have been computed. `'psi_n'` is in standard convention (0 = axis, 1 = LCFS).
           Current densities are TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$ in A/m² (see
-          doc_tokamaker_current_conventions); `'jdotb_bs_raw'` is the Redl
+          doc_tokamaker_current_conventions); `'jdotB_bs_raw'` is the Redl
           \f$\langle j_{BS} \cdot B \rangle\f$ [T A/m²] behind `'jphi_bs_raw'`. `_raw`: from the last
-          bootstrap evaluation, before scaling, isolation and taper; `_final`: as added into `'jphi_total'`.
+          bootstrap evaluation, before scaling, isolation and taper; no suffix: as added into `'jphi_total'`.
           It also holds the sawtooth scalars `'saw_rho_m'`, `'saw_rho_out'`, `'saw_n_dips'` (zero without a reset).
         '''
         result = {}

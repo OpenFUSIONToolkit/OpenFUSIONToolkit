@@ -385,7 +385,7 @@ def case_boot(out_dir):
             te_prof={'type': 'linterp', 'x': x_in, 'y': Te/1.E3}, ne_prof={'type': 'linterp', 'x': x_in, 'y': ne},
             ti_prof={'type': 'linterp', 'x': x_in, 'y': Te/1.E3}, ni_prof={'type': 'linterp', 'x': x_in, 'y': ne},
             Zeff=1.5, Ip_target=13.0E6, coord=coord)
-        r = {k: r[k] for k in ('psi_n', 'jphi_bs_final', 'jphi_total')}
+        r = {k: r[k] for k in ('psi_n', 'jphi_bs', 'jphi_total')}
         r['t'] = time.perf_counter()-t0
         return r
     out = {'x': x, 'Te': Te}
@@ -548,7 +548,7 @@ def make_plots(out_dir, orders, threads):
         a = ax[1]
         for k, c, ls in (('psi', 'k', '-'), ('phi', 'C0', '--')):
             r = d[k]
-            a.plot(A(r['psi_n']), A(r['jphi_bs_final'])/1.E6, color=c, ls=ls, label=r"$j_{BS}$, coord='%s_n'" % k)
+            a.plot(A(r['psi_n']), A(r['jphi_bs'])/1.E6, color=c, ls=ls, label=r"$j_{BS}$, coord='%s_n'" % k)
             a.plot(A(r['psi_n']), A(r['jphi_total'])/1.E6, color=c, ls=ls, alpha=0.5, lw=0.8)
         a.set_xlabel(r'$\hat\psi$ (from each run)'); a.set_ylabel(r'MA/m$^2$'); a.legend(fontsize=8)
         a.set_title(r'Bootstrap (bold) and total $j_\phi$ (thin)')
