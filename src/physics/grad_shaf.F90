@@ -4318,6 +4318,19 @@ end do
 dflux=dflux*self%psiscale
 end function gs_dflux
 !------------------------------------------------------------------------------
+!> Poloidal current function \f$ F = R B_\phi \f$ at (unnormalized) \f$ \psi \f$
+!------------------------------------------------------------------------------
+function gs_fpol(self,psi) result(F)
+class(gs_equil), intent(inout) :: self !< G-S object
+real(8), intent(in) :: psi !< Poloidal flux
+real(8) :: F
+IF(self%mode==0)THEN
+  F=self%ffp_scale*self%I%f(psi)+self%I%f_offset
+ELSE
+  F=SIGN(1.d0,self%I%f_offset)*SQRT(MAX(self%ffp_scale*self%I%f(psi)+self%I%f_offset**2,0.d0))
+END IF
+end function gs_fpol
+!------------------------------------------------------------------------------
 !> Compute the magnetic energy and helicity of a fixed boundary equilibrium
 !!
 !! @note Helicity computed by this subroutine is only valid for equilibria

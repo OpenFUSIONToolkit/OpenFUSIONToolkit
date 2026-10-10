@@ -120,6 +120,24 @@ def create_prof_file(self, filename, profile_dict, name):
         fid.write("\n".join(file_lines))
 
 
+## Bootstrap options and their defaults (as in the Fortran `boot_ops` type); value types set the conversions
+_BOOT_OPS_DEFAULTS = {
+    'isolate_edge_jbs': False,
+    'scale_jbs': 1.0,
+    'djbs_tol': 1.0e-4,
+    'diagnose_bs': False,
+    'taper_edge_jbs': False,
+    'taper_edge_psi0': 0.999,
+    'taper_edge_shape': 2,
+    'saw_q_s': 0.0,
+    'saw_dq': 0.03,
+    'saw_tol': 1.0e-4,
+    'saw_relax': 1.0,
+    'saw_ramp': 0.01,
+    'saw_rule': 2,
+}
+
+
 ## Keyword inputs of @ref TokaMaker.TokaMaker.solve_bootstrap "solve_bootstrap" kept between calls and in saved files
 _BOOT_INPUT_KEYS = ('F0', 'pres_prof', 'p_fixed_prof', 'jphi_fixed_prof', 'jphi_saw_prof', 'coord')
 
@@ -1457,21 +1475,7 @@ class TokaMaker():
             if error_string.value != b'':
                 raise Exception(error_string.value)
             if initialized.value:
-                tmp_eq._boot_ops = {
-                    'isolate_edge_jbs': bool(bops.isolate_edge_jbs),
-                    'scale_jbs':        float(bops.scale_jbs),
-                    'djbs_tol':         float(bops.djbs_tol),
-                    'diagnose_bs':      bool(bops.diagnose_bs),
-                    'taper_edge_jbs':   bool(bops.taper_edge_jbs),
-                    'taper_edge_psi0':  float(bops.taper_edge_psi0),
-                    'taper_edge_shape': int(bops.taper_edge_shape),
-                    'saw_q_s':          float(bops.saw_q_s),
-                    'saw_dq':           float(bops.saw_dq),
-                    'saw_tol':          float(bops.saw_tol),
-                    'saw_relax':        float(bops.saw_relax),
-                    'saw_ramp':         float(bops.saw_ramp),
-                    'saw_rule':         int(bops.saw_rule),
-                }
+                tmp_eq._boot_ops = {k: type(v)(getattr(bops, k)) for k, v in _BOOT_OPS_DEFAULTS.items()}
             else:
                 tmp_eq._boot_ops = None
             tmp_eq._boot_inputs = _load_boot_inputs(source_file)
@@ -3068,108 +3072,31 @@ class TokaMaker_equilibrium():
         @param jphi_saw_prof Dictionary object containing the input sawtooth toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
         '''
         delete_files = []
+        def prof_file(name, prof, label):
+            '''! Validate a linterp profile dict and write it to a temporary file ('none' if `prof` is None)'''
+            if prof is None:
+                return 'none'
+            if not isinstance(prof, dict) or 'x' not in prof or 'y' not in prof:
+                raise TypeError(f"{name} must be a dict with 'x' and 'y' keys")
+            if len(prof['x']) != len(prof['y']):
+                raise ValueError(f"{name}: 'x' and 'y' must have the same length "
+                                 f"(got {len(prof['x'])} and {len(prof['y'])})")
+            if prof.get('type', 'linterp') != 'linterp':
+                raise ValueError(f"{name} 'type' must be 'linterp' (got {prof['type']!r})")
+            filename = self._oft_env.unique_tmpfile(f'tokamaker_{label.lower()}.prof')
+            create_prof_file(self, filename, dict(prof, type='linterp'), label)
+            delete_files.append(filename)
+            return filename
 
-        zeff_file = 'none'
-        if Zeff is not None:
-            if numpy.isscalar(Zeff):
-                Zeff = {
-                    'type': 'linterp',
-                    'x': numpy.array([0.0, 1.0]),
-                    'y': numpy.array([float(Zeff), float(Zeff)])
-                }
-            elif isinstance(Zeff, dict):
-                if 'x' not in Zeff or 'y' not in Zeff:
-                    raise ValueError('Zeff profile dictionary must contain "x" and "y" keys')
-                if len(Zeff['x']) != len(Zeff['y']):
-                    raise ValueError(f"Zeff profile dict: 'x' and 'y' must have the same length "
-                                     f"(got {len(Zeff['x'])} and {len(Zeff['y'])})")
-                if Zeff.get('type', 'linterp') != 'linterp':
-                    raise ValueError(f"Zeff profile 'type' must be 'linterp' (got {Zeff['type']!r})")
-                Zeff = dict(Zeff, type='linterp')
-            else:
-                raise TypeError(f"Zeff must be a scalar or a profile dict with 'x' and 'y' keys; "
-                                f"got {type(Zeff).__name__}")
-            zeff_file = self._oft_env.unique_tmpfile('tokamaker_zeff.prof')
-            create_prof_file(self, zeff_file, Zeff, "Zeff")
-            delete_files.append(zeff_file)
-        te_file = 'none'
-        if te_prof is not None:
-            if not isinstance(te_prof, dict) or 'x' not in te_prof or 'y' not in te_prof:
-                raise TypeError("te_prof must be a dict with 'x' and 'y' keys")
-            if len(te_prof['x']) != len(te_prof['y']):
-                raise ValueError(f"te_prof: 'x' and 'y' must have the same length "
-                                 f"(got {len(te_prof['x'])} and {len(te_prof['y'])})")
-            if te_prof.get('type', 'linterp') != 'linterp':
-                raise ValueError(f"te_prof 'type' must be 'linterp' (got {te_prof['type']!r})")
-            te_prof = dict(te_prof, type='linterp')
-            te_file = self._oft_env.unique_tmpfile('tokamaker_te.prof')
-            create_prof_file(self, te_file, te_prof, "Te")
-            delete_files.append(te_file)
-        ti_file = 'none'
-        if ti_prof is not None:
-            if not isinstance(ti_prof, dict) or 'x' not in ti_prof or 'y' not in ti_prof:
-                raise TypeError("ti_prof must be a dict with 'x' and 'y' keys")
-            if len(ti_prof['x']) != len(ti_prof['y']):
-                raise ValueError(f"ti_prof: 'x' and 'y' must have the same length "
-                                 f"(got {len(ti_prof['x'])} and {len(ti_prof['y'])})")
-            if ti_prof.get('type', 'linterp') != 'linterp':
-                raise ValueError(f"ti_prof 'type' must be 'linterp' (got {ti_prof['type']!r})")
-            ti_prof = dict(ti_prof, type='linterp')
-            ti_file = self._oft_env.unique_tmpfile('tokamaker_ti.prof')
-            create_prof_file(self, ti_file, ti_prof, "Ti")
-            delete_files.append(ti_file)
-        ne_file = 'none'
-        if ne_prof is not None:
-            if not isinstance(ne_prof, dict) or 'x' not in ne_prof or 'y' not in ne_prof:
-                raise TypeError("ne_prof must be a dict with 'x' and 'y' keys")
-            if len(ne_prof['x']) != len(ne_prof['y']):
-                raise ValueError(f"ne_prof: 'x' and 'y' must have the same length "
-                                 f"(got {len(ne_prof['x'])} and {len(ne_prof['y'])})")
-            if ne_prof.get('type', 'linterp') != 'linterp':
-                raise ValueError(f"ne_prof 'type' must be 'linterp' (got {ne_prof['type']!r})")
-            ne_prof = dict(ne_prof, type='linterp')
-            ne_file = self._oft_env.unique_tmpfile('tokamaker_ne.prof')
-            create_prof_file(self, ne_file, ne_prof, "ne")
-            delete_files.append(ne_file)
-        ni_file = 'none'
-        if ni_prof is not None:
-            if not isinstance(ni_prof, dict) or 'x' not in ni_prof or 'y' not in ni_prof:
-                raise TypeError("ni_prof must be a dict with 'x' and 'y' keys")
-            if len(ni_prof['x']) != len(ni_prof['y']):
-                raise ValueError(f"ni_prof: 'x' and 'y' must have the same length "
-                                 f"(got {len(ni_prof['x'])} and {len(ni_prof['y'])})")
-            if ni_prof.get('type', 'linterp') != 'linterp':
-                raise ValueError(f"ni_prof 'type' must be 'linterp' (got {ni_prof['type']!r})")
-            ni_prof = dict(ni_prof, type='linterp')
-            ni_file = self._oft_env.unique_tmpfile('tokamaker_ni.prof')
-            create_prof_file(self, ni_file, ni_prof, "ni")
-            delete_files.append(ni_file)
-        jphi_fixed_file = 'none'
-        if jphi_fixed_prof is not None:
-            if not isinstance(jphi_fixed_prof, dict) or 'x' not in jphi_fixed_prof or 'y' not in jphi_fixed_prof:
-                raise TypeError("jphi_fixed_prof must be a dict with 'x' and 'y' keys")
-            if len(jphi_fixed_prof['x']) != len(jphi_fixed_prof['y']):
-                raise ValueError(f"jphi_fixed_prof: 'x' and 'y' must have the same length "
-                                 f"(got {len(jphi_fixed_prof['x'])} and {len(jphi_fixed_prof['y'])})")
-            if jphi_fixed_prof.get('type', 'linterp') != 'linterp':
-                raise ValueError(f"jphi_fixed_prof 'type' must be 'linterp' (got {jphi_fixed_prof['type']!r})")
-            jphi_fixed_prof = dict(jphi_fixed_prof, type='linterp')
-            jphi_fixed_file = self._oft_env.unique_tmpfile('tokamaker_jphi_fixed.prof')
-            create_prof_file(self, jphi_fixed_file, jphi_fixed_prof, "jphi_fixed")
-            delete_files.append(jphi_fixed_file)
-        jphi_saw_file = 'none'
-        if jphi_saw_prof is not None:
-            if not isinstance(jphi_saw_prof, dict) or 'x' not in jphi_saw_prof or 'y' not in jphi_saw_prof:
-                raise TypeError("jphi_saw_prof must be a dict with 'x' and 'y' keys")
-            if len(jphi_saw_prof['x']) != len(jphi_saw_prof['y']):
-                raise ValueError(f"jphi_saw_prof: 'x' and 'y' must have the same length "
-                                 f"(got {len(jphi_saw_prof['x'])} and {len(jphi_saw_prof['y'])})")
-            if jphi_saw_prof.get('type', 'linterp') != 'linterp':
-                raise ValueError(f"jphi_saw_prof 'type' must be 'linterp' (got {jphi_saw_prof['type']!r})")
-            jphi_saw_prof = dict(jphi_saw_prof, type='linterp')
-            jphi_saw_file = self._oft_env.unique_tmpfile('tokamaker_jphi_saw.prof')
-            create_prof_file(self, jphi_saw_file, jphi_saw_prof, "jphi_saw")
-            delete_files.append(jphi_saw_file)
+        if Zeff is not None and numpy.isscalar(Zeff):
+            Zeff = {'x': numpy.array([0.0, 1.0]), 'y': numpy.array([float(Zeff), float(Zeff)])}
+        zeff_file = prof_file('Zeff', Zeff, 'Zeff')
+        te_file = prof_file('te_prof', te_prof, 'Te')
+        ti_file = prof_file('ti_prof', ti_prof, 'Ti')
+        ne_file = prof_file('ne_prof', ne_prof, 'ne')
+        ni_file = prof_file('ni_prof', ni_prof, 'ni')
+        jphi_fixed_file = prof_file('jphi_fixed_prof', jphi_fixed_prof, 'jphi_fixed')
+        jphi_saw_file = prof_file('jphi_saw_prof', jphi_saw_prof, 'jphi_saw')
         self.load_kinetic_profiles(te_file=te_file, ti_file=ti_file, ne_file=ne_file, ni_file=ni_file,zeff_file=zeff_file,jphi_fixed_file=jphi_fixed_file,jphi_saw_file=jphi_saw_file)
         if not keep_files:
             for file in delete_files:
@@ -3184,7 +3111,7 @@ class TokaMaker_equilibrium():
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
 
         Call after setting a `jphi-split-bootstrap`-type ffp_prof profile, and before mygs.solve().
-        Any `None` value is left unchanged from current state (see initialisations in dict. below).
+        Any `None` value is left unchanged from the current state (defaults: `_BOOT_OPS_DEFAULTS`).
 
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
         @param scale_jbs Scaling factor applied to the bootstrap current (the isolated spike if `isolate_edge_jbs`). (Internal default: 1.0)
@@ -3201,58 +3128,23 @@ class TokaMaker_equilibrium():
         @param saw_rule Reset rule: 1 = fuse (FUSE's saw_crash!: q reset from the axis out to the sawtooth radius);
           2 = local (each dip below saw_q_s raised about its q minimum, current moved only inside it). (Internal default: 2)
         '''
-        # On first call, seed the shadow dict from the Fortran-type defaults in grad_shaf.F90
         if self._boot_ops is None:
-            self._boot_ops = {
-                'isolate_edge_jbs': False,
-                'scale_jbs': 1.0,
-                'djbs_tol': 1.0e-4,
-                'diagnose_bs': False,
-                'taper_edge_jbs': False,
-                'taper_edge_psi0': 0.999,
-                'taper_edge_shape': 2,
-                'saw_q_s': 0.0,
-                'saw_dq': 0.03,
-                'saw_tol': 1.0e-4,
-                'saw_relax': 1.0,
-                'saw_ramp': 0.01,
-                'saw_rule': 2,
-            }
-        # Override only the explicitly provided kwargs
-        if isolate_edge_jbs is not None:
-            self._boot_ops['isolate_edge_jbs'] = bool(isolate_edge_jbs)
-        if scale_jbs is not None:
-            self._boot_ops['scale_jbs'] = float(scale_jbs)
-        if djbs_tol is not None:
-            self._boot_ops['djbs_tol'] = float(djbs_tol)
-        if diagnose_bs is not None:
-            self._boot_ops['diagnose_bs'] = bool(diagnose_bs)
-        if taper_edge_jbs is not None:
-            self._boot_ops['taper_edge_jbs'] = bool(taper_edge_jbs)
-        if taper_edge_psi0 is not None:
-            self._boot_ops['taper_edge_psi0'] = float(taper_edge_psi0)
-        if taper_edge_shape is not None:
-            self._boot_ops['taper_edge_shape'] = int(taper_edge_shape)
-        for _k, _v, _t in (('saw_q_s', saw_q_s, float), ('saw_dq', saw_dq, float), ('saw_tol', saw_tol, float),
-                           ('saw_relax', saw_relax, float), ('saw_ramp', saw_ramp, float), ('saw_rule', saw_rule, int)):
-            if _v is not None:
-                self._boot_ops[_k] = _t(_v)
+            self._boot_ops = dict(_BOOT_OPS_DEFAULTS)
+        for key, val in (('isolate_edge_jbs', isolate_edge_jbs), ('scale_jbs', scale_jbs), ('djbs_tol', djbs_tol),
+                         ('diagnose_bs', diagnose_bs), ('taper_edge_jbs', taper_edge_jbs),
+                         ('taper_edge_psi0', taper_edge_psi0), ('taper_edge_shape', taper_edge_shape),
+                         ('saw_q_s', saw_q_s), ('saw_dq', saw_dq), ('saw_tol', saw_tol), ('saw_relax', saw_relax),
+                         ('saw_ramp', saw_ramp), ('saw_rule', saw_rule)):
+            if val is not None:
+                self._boot_ops[key] = type(_BOOT_OPS_DEFAULTS[key])(val)
         if self._boot_ops['saw_q_s'] < 0.0 or self._boot_ops['saw_dq'] <= 0.0 or not (0.0 < self._boot_ops['saw_relax'] <= 1.0) \
                 or self._boot_ops['saw_ramp'] < 0.0 or self._boot_ops['saw_rule'] not in (1, 2):
             raise ValueError("saw options: need saw_q_s >= 0, saw_dq > 0, 0 < saw_relax <= 1, saw_ramp >= 0, saw_rule in (1, 2)")
         if self._boot_ops['taper_edge_shape'] not in (1, 2, 3) or not (0.0 < self._boot_ops['taper_edge_psi0'] < 1.0):
             raise ValueError("taper options: need taper_edge_shape in (1, 2, 3) and 0 < taper_edge_psi0 < 1")
-        # Build the ctypes struct from the merged shadow state and send to Fortran
         bops = tokamaker_boot_ops_struct()
-        bops.isolate_edge_jbs = self._boot_ops['isolate_edge_jbs']
-        bops.scale_jbs = self._boot_ops['scale_jbs']
-        bops.djbs_tol = self._boot_ops['djbs_tol']
-        bops.diagnose_bs = self._boot_ops['diagnose_bs']
-        bops.taper_edge_jbs = self._boot_ops['taper_edge_jbs']
-        bops.taper_edge_psi0 = self._boot_ops['taper_edge_psi0']
-        bops.taper_edge_shape = self._boot_ops['taper_edge_shape']
-        for _k in ('saw_q_s', 'saw_dq', 'saw_tol', 'saw_relax', 'saw_ramp', 'saw_rule'):
-            setattr(bops, _k, self._boot_ops[_k])
+        for key in _BOOT_OPS_DEFAULTS:
+            setattr(bops, key, self._boot_ops[key])
         error_string = self._oft_env.get_c_errorbuff()
         tokamaker_set_boot_ops(self.c_ptr, ctypes.byref(bops), error_string)
         if error_string.value != b'':
