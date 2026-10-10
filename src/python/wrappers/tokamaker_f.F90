@@ -42,7 +42,7 @@ USE oft_gs_cutcell, ONLY: gs_qgeom_cutcell
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
-USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func, sauter_fc, saw_reset_1d
+USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func, sauter_fc, saw_reset_1d, boot_prof_access
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -88,12 +88,11 @@ END TYPE tokamaker_recon_settings_type
 !> BIND(C) mirror of the `boot_ops` type for passing bootstrap options from Python
 !---------------------------------------------------------------------------------
 TYPE, BIND(C) :: tokamaker_boot_ops_type
-  LOGICAL(c_bool) :: isolate_edge_jBS = .FALSE.  !< Isolate edge j_BS spike
-  LOGICAL(c_bool) :: parameterize_jBS = .FALSE.  !< Overrides `isolate_edge_jBS` if true
-  REAL(c_double)  :: scale_jBS = 1.0d0           !< Scaling factor for j_BS
-  REAL(c_double)  :: djBS_tol = 1.0d-4            !< Threshold on rel. change in j_BS to freeze values
+  LOGICAL(c_bool) :: isolate_edge_jbs = .FALSE.  !< Isolate the edge bootstrap spike
+  REAL(c_double)  :: scale_jbs = 1.0d0           !< Scaling factor for the bootstrap current
+  REAL(c_double)  :: djbs_tol = 1.0d-4            !< Threshold on rel. change in the bootstrap current to freeze it
   LOGICAL(c_bool) :: diagnose_bs = .FALSE.        !< Print diagnostic output
-  LOGICAL(c_bool) :: taper_edge_jBS = .FALSE.      !< Taper j_BS at edge (guards against separatrix issues)
+  LOGICAL(c_bool) :: taper_edge_jbs = .FALSE.      !< Taper the current at the edge (guards against separatrix issues)
   REAL(c_double)  :: taper_edge_psi0 = 0.999d0   !< Taper onset psi_N (default 0.999)
   INTEGER(c_int)  :: taper_edge_shape = 2         !< Taper shape: 2 = quintic smoothstep (default)
   REAL(c_double)  :: saw_q_s = 0.d0               !< Sawtooth reset q on axis (0 = off)
@@ -623,12 +622,11 @@ I_base=>torflux_unwrap(tMaker_equil_obj%I)
 SELECT TYPE(I => I_base)
 TYPE IS (jphi_bs_flux_func)
   I%boot_ops%initialized = .TRUE.
-  I%boot_ops%isolate_edge_jBS = bops%isolate_edge_jBS
-  I%boot_ops%parameterize_jBS = bops%parameterize_jBS
-  I%boot_ops%scale_jBS = bops%scale_jBS
-  I%boot_ops%djBS_tol = bops%djBS_tol
+  I%boot_ops%isolate_edge_jbs = bops%isolate_edge_jbs
+  I%boot_ops%scale_jbs = bops%scale_jbs
+  I%boot_ops%djbs_tol = bops%djbs_tol
   I%boot_ops%diagnose_bs = bops%diagnose_bs
-  I%boot_ops%taper_edge_jBS = bops%taper_edge_jBS
+  I%boot_ops%taper_edge_jbs = bops%taper_edge_jbs
   I%boot_ops%taper_edge_psi0 = bops%taper_edge_psi0
   I%boot_ops%taper_edge_shape = bops%taper_edge_shape
   I%boot_ops%saw_q_s = bops%saw_q_s
@@ -659,12 +657,11 @@ I_base=>torflux_unwrap(tMaker_equil_obj%I)
 SELECT TYPE(I => I_base)
 TYPE IS (jphi_bs_flux_func)
   initialized = I%boot_ops%initialized
-  bops%isolate_edge_jBS = I%boot_ops%isolate_edge_jBS
-  bops%parameterize_jBS = I%boot_ops%parameterize_jBS
-  bops%scale_jBS = I%boot_ops%scale_jBS
-  bops%djBS_tol = I%boot_ops%djBS_tol
+  bops%isolate_edge_jbs = I%boot_ops%isolate_edge_jbs
+  bops%scale_jbs = I%boot_ops%scale_jbs
+  bops%djbs_tol = I%boot_ops%djbs_tol
   bops%diagnose_bs = I%boot_ops%diagnose_bs
-  bops%taper_edge_jBS = I%boot_ops%taper_edge_jBS
+  bops%taper_edge_jbs = I%boot_ops%taper_edge_jbs
   bops%taper_edge_psi0 = I%boot_ops%taper_edge_psi0
   bops%taper_edge_shape = I%boot_ops%taper_edge_shape
   bops%saw_q_s = I%boot_ops%saw_q_s
@@ -678,75 +675,58 @@ CLASS DEFAULT
 END SELECT
 END SUBROUTINE tokamaker_get_boot_ops
 !---------------------------------------------------------------------------------
-!> Get cached bootstrap current profiles from the last jphi_bs_update call.
+!> Get one current profile of the last jphi_bs_update (`boot_profs`, see `boot_prof_names`) by name.
 !!
-!! Returns C pointers directly into the Fortran-owned arrays.
-!! n is the size of the jphi_total/psi_n/jphi_bs_final/jphi_ind_final/jphi_fixed_final/jphi_saw_final/jphi_pdriven_final group (0 if not allocated).
-!! n_raw is the size of jphi_bs_raw, jdotb_bs_raw and jphi_pdriven_raw (0 if not allocated).  The two sizes may differ.
+!! Returns a C pointer into the Fortran-owned array, or n = 0 if it is not available (also when
+!! ffp_prof is not of type jphi-split-bootstrap).
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_boot_profs(tMaker_equil_ptr,n,psi_n_ptr,jphi_total_ptr, &
-    jphi_bs_final_ptr,jphi_ind_final_ptr,jphi_fixed_final_ptr,jphi_saw_final_ptr,saw_rho_m,saw_rho_out,saw_n_dips, &
-    jphi_pdriven_final_ptr,n_raw,jphi_bs_raw_ptr,jdotb_bs_raw_ptr,jphi_pdriven_raw_ptr,error_str) &
-    BIND(C,NAME="tokamaker_get_boot_profs")
+SUBROUTINE tokamaker_get_boot_prof(tMaker_equil_ptr,name,n,prof_ptr,error_str) BIND(C,NAME="tokamaker_get_boot_prof")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
-INTEGER(c_int), INTENT(out) :: n !< Size of jphi_total, psi_n, jphi_bs_final, jphi_ind_final arrays (0 if not allocated)
-TYPE(c_ptr), INTENT(out) :: psi_n_ptr !< Pointer to psi_n array
-TYPE(c_ptr), INTENT(out) :: jphi_total_ptr !< Pointer to jphi_total array
-TYPE(c_ptr), INTENT(out) :: jphi_bs_final_ptr !< Pointer to jphi_bs_final array
-TYPE(c_ptr), INTENT(out) :: jphi_ind_final_ptr !< Pointer to jphi_ind_final array
-TYPE(c_ptr), INTENT(out) :: jphi_fixed_final_ptr !< Pointer to jphi_fixed_final array (c_null_ptr if not allocated)
-TYPE(c_ptr), INTENT(out) :: jphi_saw_final_ptr !< Pointer to jphi_saw_final array (c_null_ptr if not allocated)
+CHARACTER(KIND=c_char), INTENT(in) :: name(*) !< Profile name (null-terminated)
+INTEGER(c_int), INTENT(out) :: n !< Size of the profile (0 if not available)
+TYPE(c_ptr), INTENT(out) :: prof_ptr !< Pointer to the profile (c_null_ptr if not available)
+CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+CHARACTER(LEN=32) :: name_f
+REAL(r8), POINTER :: vals(:)
+CLASS(flux_func), POINTER :: I_base
+TYPE(gs_equil), POINTER :: tMaker_equil_obj
+IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+n = 0
+prof_ptr = c_null_ptr
+CALL copy_string_rev(name,name_f)
+I_base=>torflux_unwrap(tMaker_equil_obj%I)
+SELECT TYPE(I => I_base)
+TYPE IS (jphi_bs_flux_func)
+  CALL boot_prof_access(I%boot_profs,name_f,get=vals)
+  IF(ASSOCIATED(vals))THEN
+    n = SIZE(vals, KIND=c_int)
+    prof_ptr = c_loc(vals)
+  END IF
+END SELECT
+END SUBROUTINE tokamaker_get_boot_prof
+!---------------------------------------------------------------------------------
+!> Get the sawtooth scalars of the last jphi_bs_update (zero if none or not a bootstrap profile)
+!---------------------------------------------------------------------------------
+SUBROUTINE tokamaker_get_boot_saw(tMaker_equil_ptr,saw_rho_m,saw_rho_out,saw_n_dips,error_str) BIND(C,NAME="tokamaker_get_boot_saw")
+TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 REAL(c_double), INTENT(out) :: saw_rho_m !< Sawtooth radius at the last reset (0 = none)
 REAL(c_double), INTENT(out) :: saw_rho_out !< Outer end of the last reset (0 = none)
 INTEGER(c_int), INTENT(out) :: saw_n_dips !< Regions reset at the last reset
-TYPE(c_ptr), INTENT(out) :: jphi_pdriven_final_ptr !< Pointer to jphi_pdriven_final array (c_null_ptr if not allocated)
-INTEGER(c_int), INTENT(out) :: n_raw !< Size of jphi_bs_raw array (0 if not allocated)
-TYPE(c_ptr), INTENT(out) :: jphi_bs_raw_ptr !< Pointer to jphi_bs_raw array (c_null_ptr if not allocated)
-TYPE(c_ptr), INTENT(out) :: jdotb_bs_raw_ptr !< Pointer to jdotb_bs_raw array (c_null_ptr if not allocated)
-TYPE(c_ptr), INTENT(out) :: jphi_pdriven_raw_ptr !< Pointer to jphi_pdriven_raw array (c_null_ptr if not allocated)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CLASS(flux_func), POINTER :: I_base
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
+saw_rho_m = 0.d0
+saw_rho_out = 0.d0
+saw_n_dips = 0
 I_base=>torflux_unwrap(tMaker_equil_obj%I)
 SELECT TYPE(I => I_base)
 TYPE IS (jphi_bs_flux_func)
-  n = 0
-  n_raw = 0
-  psi_n_ptr = c_null_ptr
-  jphi_total_ptr = c_null_ptr
-  jphi_bs_final_ptr = c_null_ptr
-  jphi_ind_final_ptr = c_null_ptr
-  jphi_fixed_final_ptr = c_null_ptr
-  jphi_saw_final_ptr = c_null_ptr
   saw_rho_m = I%boot_profs%saw_rho_m
   saw_rho_out = I%boot_profs%saw_rho_out
   saw_n_dips = I%boot_profs%saw_n_dips
-  jphi_pdriven_final_ptr = c_null_ptr
-  jphi_bs_raw_ptr = c_null_ptr
-  jdotb_bs_raw_ptr = c_null_ptr
-  jphi_pdriven_raw_ptr = c_null_ptr
-  IF(ASSOCIATED(I%boot_profs%jphi_total))THEN
-    n = SIZE(I%boot_profs%jphi_total, KIND=c_int)
-    psi_n_ptr = c_loc(I%boot_profs%psi_n)
-    jphi_total_ptr = c_loc(I%boot_profs%jphi_total)
-    jphi_bs_final_ptr = c_loc(I%boot_profs%jphi_bs_final)
-    jphi_ind_final_ptr = c_loc(I%boot_profs%jphi_ind_final)
-    IF(ASSOCIATED(I%boot_profs%jphi_fixed_final))jphi_fixed_final_ptr = c_loc(I%boot_profs%jphi_fixed_final)
-    IF(ASSOCIATED(I%boot_profs%jphi_saw_final))jphi_saw_final_ptr = c_loc(I%boot_profs%jphi_saw_final)
-    IF(ASSOCIATED(I%boot_profs%jphi_pdriven_final))jphi_pdriven_final_ptr = c_loc(I%boot_profs%jphi_pdriven_final)
-  END IF
-  IF(ASSOCIATED(I%boot_profs%jphi_bs_raw))THEN
-    n_raw = SIZE(I%boot_profs%jphi_bs_raw, KIND=c_int)
-    jphi_bs_raw_ptr = c_loc(I%boot_profs%jphi_bs_raw)
-    IF(ASSOCIATED(I%boot_profs%jdotb_bs_raw))jdotb_bs_raw_ptr = c_loc(I%boot_profs%jdotb_bs_raw)
-    IF(ASSOCIATED(I%boot_profs%jphi_pdriven_raw))jphi_pdriven_raw_ptr = c_loc(I%boot_profs%jphi_pdriven_raw)
-  END IF
-CLASS DEFAULT
-  CALL oft_warn('tokamaker_get_boot_profs: ffp_prof is not of type jphi-split-bootstrap. ' // &
-    'Bootstrap profiles are not available.')
 END SELECT
-END SUBROUTINE tokamaker_get_boot_profs
+END SUBROUTINE tokamaker_get_boot_saw
 !---------------------------------------------------------------------------------
 !> 1-D sawtooth q reset (@ref grad_shaf_bootstrap::saw_reset_1d) on given profiles, axis first.
 !! scal = [rho_s, rho_m, n_dips, w, rho_out]
@@ -1715,7 +1695,7 @@ REAL(c_double), INTENT(in) :: psi_saut(npsi) !< \f$ \psi \f$ values to compute t
 REAL(c_double), INTENT(out) :: fc(npsi) !< Trapped particle fraction
 REAL(c_double), INTENT(out) :: r_avgs(npsi,3) !< Flux surface averaged radial coordinates \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
 REAL(c_double), INTENT(out) :: modb_avgs(npsi,2) !< Flux surface averaged field strength \f$<|B|>\f$, \f$<|B|^2>\f$
-REAL(c_double), INTENT(out) :: eps(npsi) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(2\langle R \rangle) \f$
+REAL(c_double), INTENT(out) :: eps(npsi) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min}) \f$
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN

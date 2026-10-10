@@ -1175,8 +1175,8 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
             ne, Te, ni, Ti, Zeff,
             Ip_target,
             inductive_jphi,
-            scale_jBS=1.0,
-            isolate_edge_jBS=False,
+            scale_jbs=1.0,
+            isolate_edge_jbs=False,
             psi_pad=psi_pad,
             iterations=2,
             diagnostic_plots=False,
@@ -1191,19 +1191,19 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
     eq_info = mygs.get_stats(li_normalization='ITER')
 
     # Bootstrap-specific diagnostics
-    j_BS = bs_results['j_BS']
-    j_total = bs_results['total_j_phi']
-    j_ind = bs_results['j_inductive']
+    jphi_bs_raw = bs_results['jphi_bs_raw']
+    jphi_total = bs_results['jphi_total']
+    jphi_ind = bs_results['jphi_ind']
 
-    eq_info['j_BS_max'] = float(np.max(np.abs(j_BS)))
-    eq_info['j_BS_axis'] = float(j_BS[0])
-    eq_info['jphi_axis'] = float(j_total[0])
-    eq_info['jphi_max'] = float(np.max(np.abs(j_total)))
-    eq_info['j_ind_axis'] = float(j_ind[0])
+    eq_info['jphi_bs_max'] = float(np.max(np.abs(jphi_bs_raw)))
+    eq_info['jphi_bs_axis'] = float(jphi_bs_raw[0])
+    eq_info['jphi_axis'] = float(jphi_total[0])
+    eq_info['jphi_max'] = float(np.max(np.abs(jphi_total)))
+    eq_info['jphi_ind_axis'] = float(jphi_ind[0])
 
     # Bootstrap fraction (psi-space trapezoid estimate)
-    bs_frac = np.trapezoid(j_BS, psi_sample) / np.trapezoid(j_total, psi_sample) \
-              if np.trapezoid(j_total, psi_sample) != 0 else 0.0
+    bs_frac = np.trapezoid(jphi_bs_raw, psi_sample) / np.trapezoid(jphi_total, psi_sample) \
+              if np.trapezoid(jphi_total, psi_sample) != 0 else 0.0
     eq_info['bs_fraction'] = float(bs_frac)
 
     mp_q.put([eq_info])
@@ -1221,13 +1221,13 @@ ITER_bootstrap_eq_dict = {
     'q_95': 2.863029898626678,
     # P_ax = p(axis) - p(LCFS) since pax targets the drop TokaMaker's P' carries (was p(axis): -2.3 %)
     'P_ax': 7.232048E+05,
-    'j_BS_max': 219163.55709184994,
-    'j_BS_axis': 4696.213397541225,
+    'jphi_bs_max': 219163.55709184994,
+    'jphi_bs_axis': 4696.213397541225,
     'jphi_axis': 1397130.088093367,
     'jphi_max': 1507460.349786304,
-    # alpha * seed, now = jphi_axis - j_BS_axis: since 1c6955d the Python alpha closure
+    # scale_j0 * alpha * seed, now = jphi_axis - jphi_bs_axis: since 1c6955d the Python alpha closure
     # integrates the plasma only (was -7 % from the limiter-area over-count)
-    'j_ind_axis': 1.392583E+06,
+    'jphi_ind_axis': 1.392583E+06,
     'bs_fraction': 0.17910707149956598,
 }
 
@@ -1585,7 +1585,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
             Zeff=Zeff_val,
             Ip_target=Ip_target,
-            scale_jBS=1.0,
+            scale_jbs=1.0,
             diagnose_bs=True,
         )
     except Exception:
@@ -1606,7 +1606,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
     eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
 
-    # --- Verify the <j_BS.B> -> jphi conversion (doc_tokamaker_current_conventions eqs. A7, A8)
+    # --- Verify the jdotB_bs -> jphi conversion (doc_tokamaker_current_conventions eqs. A7, A8)
     #     against geometry traced independently from the converged equilibrium ---
     try:
         bp = mygs.get_boot_profs()
@@ -1616,25 +1616,25 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         _, _, ravgs_c, _, _, _ = mygs.get_q(psi=psi_c)
         _, _, _, modb_c = mygs.sauter_fc(psi=psi_c)
         R_c, invR_c, B2_c = ravgs_c['<R>'], ravgs_c['<1/R>'], modb_c[1]
-        jdotb = bp['jdotb_bs_raw'][inner]
-        field_aligned = jdotb * F_c * invR_c / B2_c
+        jdotB = bp['jdotB_bs_raw'][inner]
+        field_aligned = jdotB * F_c * invR_c / B2_c
         p_term = Pp_c * (R_c - F_c**2 * invR_c / B2_c)
         scale = np.max(np.abs(bp['jphi_bs_raw'][inner]))
         err = np.max(np.abs(bp['jphi_bs_raw'][inner] - (field_aligned + p_term))) / scale
         err_flip = np.max(np.abs(bp['jphi_bs_raw'][inner] - (field_aligned - p_term))) / scale
         print(f"jphi_bs_raw vs A7: rel err {err:.3e} (pressure term flipped: {err_flip:.3e}), "
-              f"max|P'G|/max|j_BS| = {np.max(np.abs(p_term))/scale:.3e}")
+              f"max|P'G|/max|jphi_bs_raw| = {np.max(np.abs(p_term))/scale:.3e}")
         if not (err < 1.0e-2 and err_flip > 5.0 * err):
             raise AssertionError(f"jphi_bs_raw does not match eq. A7 (rel err {err:.3e}, flipped {err_flip:.3e})")
         # The stored pressure-driven part is the A7 P'G term
-        err_pd = np.max(np.abs(bp['jphi_pdriven_raw'][inner] - p_term)) / scale
-        print(f"jphi_pdriven_raw vs P'G: rel err {err_pd:.3e}")
+        err_pd = np.max(np.abs(bp['jphi_pd_raw'][inner] - p_term)) / scale
+        print(f"jphi_pd_raw vs P'G: rel err {err_pd:.3e}")
         if err_pd > 1.0e-2:
-            raise AssertionError(f"jphi_pdriven_raw does not match P'(<R> - F^2<1/R>/<B^2>) (rel err {err_pd:.3e})")
+            raise AssertionError(f"jphi_pd_raw does not match P'(<R> - F^2<1/R>/<B^2>) (rel err {err_pd:.3e})")
         # A8: the equilibrium's own <J.B> = F P' + F'<B^2>/mu0 equals the sum of its components'
-        jdotb_eq = F_c * Pp_c + Fp_c * B2_c / mu0
-        jdotb_sum = jdotb + (bp['jphi_ind_final'][inner] + bp['jphi_fixed_final'][inner]) * B2_c / (F_c * invR_c)
-        err_par = np.max(np.abs(jdotb_eq - jdotb_sum)) / np.max(np.abs(jdotb_eq))
+        jdotB_eq = F_c * Pp_c + Fp_c * B2_c / mu0
+        jdotB_sum = jdotB + (bp['jphi_ind'][inner] + bp['jphi_fixed'][inner]) * B2_c / (F_c * invR_c)
+        err_par = np.max(np.abs(jdotB_eq - jdotB_sum)) / np.max(np.abs(jdotB_eq))
         print(f"<J.B> balance (A8): rel err {err_par:.3e}")
         if err_par > 2.0e-2:
             raise AssertionError(f"equilibrium <J.B> != sum of components (rel err {err_par:.3e})")
@@ -1668,7 +1668,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         _, F_s, Fp_s, _, _ = mygs.get_profiles(npsi=50)
         mygs._tMaker_equil.save_TokaMaker(save_file)
         # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
-        mygs._tMaker_equil._boot_ops['scale_jBS'] = -999.0
+        mygs._tMaker_equil._boot_ops['scale_jbs'] = -999.0
         mygs.replace_eq(source_file=save_file)
         boot_ops = mygs._tMaker_equil._boot_ops
         if boot_ops is None:
@@ -1729,7 +1729,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         expected_boot_profs = mygs.get_boot_profs()
         mygs_copied = mygs.copy_eq()
         # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
-        mygs._tMaker_equil._boot_ops['scale_jBS'] = -999.0
+        mygs._tMaker_equil._boot_ops['scale_jbs'] = -999.0
         mygs.replace_eq(source_eq=mygs_copied)
         boot_ops = mygs._tMaker_equil._boot_ops
         if boot_ops is None:
@@ -1788,7 +1788,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
             ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
             Ip_target=Ip_target,
-            scale_jBS=1.0,
+            scale_jbs=1.0,
         )
         profs_scalar = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         profs_linear = mygs.solve_bootstrap(
@@ -1812,7 +1812,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         return
 
     # --- verify jphi_fixed_prof is added unscaled to the total and reduces the
-    #     inductive share, and that omitting it afterwards resets it to zero ---
+    #     inductive share; omitting it afterwards keeps it, until boot_reset() ---
     try:
         jfix_y = 2.0e5 * np.exp(-((psi_sample - 0.5) / 0.1)**2)
         profs_fixed = mygs.solve_bootstrap(
@@ -1820,17 +1820,21 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             jphi_fixed_prof={'type': 'linterp', 'x': psi_sample, 'y': jfix_y},
             **zeff_common_kwargs,
         )
-        if not np.allclose(profs_fixed['jphi_fixed_final'], np.interp(profs_fixed['psi_n'], psi_sample, jfix_y),
+        if not np.allclose(profs_fixed['jphi_fixed'], np.interp(profs_fixed['psi_n'], psi_sample, jfix_y),
                            rtol=1e-6, atol=1e-6*jfix_y.max()):
-            raise AssertionError("boot_profs['jphi_fixed_final'] does not match the input jphi_fixed_prof")
-        j_sum = profs_fixed['jphi_ind_final'] + profs_fixed['jphi_bs_final'] + profs_fixed['jphi_fixed_final']
+            raise AssertionError("boot_profs['jphi_fixed'] does not match the input jphi_fixed_prof")
+        j_sum = profs_fixed['jphi_ind'] + profs_fixed['jphi_bs'] + profs_fixed['jphi_fixed']
         if not np.allclose(profs_fixed['jphi_total'], j_sum, rtol=1e-10, atol=1e-6):
-            raise AssertionError("jphi_total != jphi_ind_final + jphi_bs_final + jphi_fixed_final")
-        if not np.sum(profs_fixed['jphi_ind_final']) < np.sum(profs_scalar['jphi_ind_final']):
+            raise AssertionError("jphi_total != jphi_ind + jphi_bs + jphi_fixed")
+        if not np.sum(profs_fixed['jphi_ind']) < np.sum(profs_scalar['jphi_ind']):
             raise AssertionError("jphi_fixed did not reduce the inductive current share")
+        profs_kept = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
+        if not np.array_equal(profs_kept['jphi_fixed'], profs_fixed['jphi_fixed']):
+            raise AssertionError("jphi_fixed not kept by solve_bootstrap without jphi_fixed_prof")
+        mygs.boot_reset()
         profs_reset = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
-        if np.any(profs_reset['jphi_fixed_final'] != 0.0):
-            raise AssertionError("jphi_fixed persisted after solve_bootstrap without jphi_fixed_prof")
+        if np.any(profs_reset['jphi_fixed'] != 0.0):
+            raise AssertionError("jphi_fixed persisted after boot_reset()")
     except Exception as e:
         print(e)
         mp_q.put(None)
@@ -1847,7 +1851,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         P_ax_pfix = np.max(mygs.get_profiles(psi=np.array([0.0, 1.0]))[3])
         profs_pres = mygs.solve_bootstrap(Zeff=Zeff_val, pres_prof={'x': psi_sample, 'y': p_kin + pf}, **zeff_common_kwargs)
         _, _, _, P_pres, _ = mygs.get_profiles(npsi=n_sample)
-        # Both solves converge j_BS to djBS_tol (1e-4) and may stop an iteration apart
+        # Both solves converge jphi_bs to djbs_tol (1e-4) and may stop an iteration apart
         for key in profs_pres:
             if not np.allclose(profs_pfix[key], profs_pres[key], rtol=2e-4, atol=2e-4*np.max(np.abs(profs_pres[key]))):
                 raise AssertionError(f"p_fixed_prof vs pres_prof=kinetic+p_fixed: boot_profs['{key}'] differ")
@@ -1857,6 +1861,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         p_tot = p_kin + pf
         if not np.isclose(P_ax_pfix, p_tot[0] - p_tot[-1], rtol=1e-4):
             raise AssertionError(f"axis pressure {P_ax_pfix:.6e} != kinetic + p_fixed drop {p_tot[0] - p_tot[-1]:.6e}")
+        mygs.boot_reset()
         mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         if np.isclose(np.max(mygs.get_profiles(psi=np.array([0.0, 1.0]))[3]), P_ax_pfix, rtol=1e-4):
             raise AssertionError("p_fixed_prof did not change the axis pressure")
@@ -1918,14 +1923,14 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         ne_prof={'type': 'linterp', 'x': psi_sample, 'y': setup['ne']},
         ti_prof={'type': 'linterp', 'x': psi_sample, 'y': setup['Ti'] / 1e3},
         ni_prof={'type': 'linterp', 'x': psi_sample, 'y': setup['ni']},
-        Zeff=setup['Zeff_val'], Ip_target=Ip_target, scale_jBS=1.0,
+        Zeff=setup['Zeff_val'], Ip_target=Ip_target, scale_jbs=1.0,
     )
 
     def close(a, b, rtol):
         return np.allclose(a, b, rtol=rtol, atol=rtol*np.max(np.abs(b)))
 
     def sum_ok(p):
-        return close(p['jphi_total'], p['jphi_ind_final'] + p['jphi_bs_final'] + p['jphi_fixed_final'] + p['jphi_saw_final'], 1e-10)
+        return close(p['jphi_total'], p['jphi_ind'] + p['jphi_bs'] + p['jphi_fixed'] + p['jphi_saw'], 1e-10)
 
     try:
         base = mygs.solve_bootstrap(**common)
@@ -1933,14 +1938,15 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         # (a) an input jphi_saw_prof with the reset off acts as a fixed current
         bump = 1.0e5 * np.exp(-((psi_sample - 0.2) / 0.1)**2)
         p_fix = mygs.solve_bootstrap(jphi_fixed_prof={'x': psi_sample, 'y': bump}, **common)
+        mygs.boot_reset()  # jphi_fixed_prof would otherwise be kept
         p_saw = mygs.solve_bootstrap(jphi_saw_prof={'x': psi_sample, 'y': bump}, **common)
-        # Both converge j_BS to djBS_tol (1e-4) and may stop an iteration apart
+        # Both converge j_BS to djbs_tol (1e-4) and may stop an iteration apart
         if not close(p_saw['jphi_total'], p_fix['jphi_total'], 2e-4):
             raise AssertionError("jphi_saw_prof (saw off) total differs from the same jphi_fixed_prof")
-        if not close(p_saw['jphi_saw_final'], np.interp(p_saw['psi_n'], psi_sample, bump), 1e-6) or np.any(p_saw['jphi_fixed_final'] != 0.0):
+        if not close(p_saw['jphi_saw'], np.interp(p_saw['psi_n'], psi_sample, bump), 1e-6) or np.any(p_saw['jphi_fixed'] != 0.0):
             raise AssertionError("j_saw / jphi_fixed with jphi_saw_prof (saw off) wrong")
         if not (sum_ok(p_fix) and sum_ok(p_saw)):
-            raise AssertionError("jphi_total != j_ind + j_bs + jphi_fixed_final + jphi_saw_final")
+            raise AssertionError("jphi_total != j_ind + j_bs + jphi_fixed + jphi_saw")
         # jphi_saw survives an equilibrium save/load: re-solving the reloaded state keeps j_saw
         # (zeroed before the reload, since replace_eq loads into a copy of the live equilibrium)
         mygs._tMaker_equil.save_TokaMaker('ITER_saw_roundtrip.h5')
@@ -1948,13 +1954,14 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         mygs.replace_eq(source_file='ITER_saw_roundtrip.h5')
         mygs.solve()
         p_rel = mygs.get_boot_profs()
-        if not (close(p_rel['jphi_saw_final'], p_saw['jphi_saw_final'], 1e-6) and close(p_rel['jphi_total'], p_saw['jphi_total'], 1e-3)):
+        if not (close(p_rel['jphi_saw'], p_saw['jphi_saw'], 1e-6) and close(p_rel['jphi_total'], p_saw['jphi_total'], 1e-3)):
             raise AssertionError("jphi_saw lost in the equilibrium save/load")
         # (c, d) q_s below min q: no reset, same result as saw off (alpha through the cumulative integral)
+        mygs.boot_reset()  # jphi_saw_prof would otherwise be kept
         p_low = mygs.solve_bootstrap(saw_q_s=0.5*np.min(q_base), **common)
-        if np.any(p_low['jphi_saw_final'] != 0.0) or p_low['saw_n_dips'] != 0:
+        if np.any(p_low['jphi_saw'] != 0.0) or p_low['saw_n_dips'] != 0:
             raise AssertionError("saw_q_s below min q changed j_saw")
-        for key in ('jphi_total', 'jphi_ind_final', 'jphi_bs_final'):
+        for key in ('jphi_total', 'jphi_ind', 'jphi_bs'):
             if not close(p_low[key], base[key], 2e-4):
                 raise AssertionError(f"saw_q_s below min q: '{key}' differs from saw off")
         # (b) q_s above the unconstrained q0 (default rule 2, local; the base has reversed shear, so the
@@ -1964,7 +1971,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         p_on = mygs.solve_bootstrap(saw_q_s=q_s, saw_dq=dq, diagnose_bs=False, **common)
         psi_q, q_on, _, _, _, _ = mygs.get_q(npsi=40)
         print(f"saw: q0 base {q_base[0]:.4f} -> {q_on[0]:.4f} (q_s {q_s:.4f}), rho_m {p_on['saw_rho_m']:.3f}, "
-              f"rho_out {p_on['saw_rho_out']:.3f}, n_dips {p_on['saw_n_dips']}, max|j_saw| {np.max(np.abs(p_on['jphi_saw_final'])):.3e}")
+              f"rho_out {p_on['saw_rho_out']:.3f}, n_dips {p_on['saw_n_dips']}, max|j_saw| {np.max(np.abs(p_on['jphi_saw'])):.3e}")
         if abs(q_on[0] - q_s) > 0.03:
             raise AssertionError(f"saw: q0 {q_on[0]:.4f} not at q_s {q_s:.4f}")
         inner = q_on < q_s + dq
@@ -1983,7 +1990,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
             return np.sqrt(np.interp(psi, psi_q, phi/phi[-1]))
         rho_of_psi = rho_tor(psi_q, q_on, p_on['psi_n'])
         outside = rho_of_psi > p_on['saw_rho_out'] + 0.05
-        if np.max(np.abs(p_on['jphi_saw_final'][outside])) > 1e-3*np.max(np.abs(p_on['jphi_saw_final'])):
+        if np.max(np.abs(p_on['jphi_saw'][outside])) > 1e-3*np.max(np.abs(p_on['jphi_saw'])):
             raise AssertionError("saw: j_saw nonzero outside rho_out")
         # (b2) a second solve from the converged reset state must reset again (an early iterate with
         #      no dip must not freeze the reset off)
@@ -1999,7 +2006,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         p_d = mygs.solve_bootstrap(saw_q_s=q_s, saw_dq=dq, **dense)
         _, q_d, _, _, _, _ = mygs.get_q(npsi=40)
         print(f"saw dense axis: q0 {q_d[0]:.4f} (q_s {q_s:.4f}), rho_m {p_d['saw_rho_m']:.3f}")
-        if not np.all(np.isfinite(p_d['jphi_saw_final'])) or abs(q_d[0] - q_s) > 0.03:
+        if not np.all(np.isfinite(p_d['jphi_saw'])) or abs(q_d[0] - q_s) > 0.03:
             raise AssertionError("saw: dense-axis grid reset not finite or q0 not at q_s")
         # (f) reversed shear, q_s between the off-axis min q and q0 (> q_s + dq): local raises only the dip
         #     (q0 kept, j_saw zero inside the region's inner end); fuse resets from the axis (q0 -> q_s)
@@ -2021,8 +2028,33 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         rho_l = rho_tor(psi_l, q_l, p_l['psi_n'])
         rho_in = rho_tor(psi_l, q_l, psi_l[np.argmax(q_l < q_s + dq)])
         away = (rho_l < rho_in - 0.05) | (rho_l > p_l['saw_rho_out'] + 0.05)
-        if not (0.1 < rho_in < p_l['saw_rho_out']) or np.max(np.abs(p_l['jphi_saw_final'][away])) > 1e-3*np.max(np.abs(p_l['jphi_saw_final'])):
+        if not (0.1 < rho_in < p_l['saw_rho_out']) or np.max(np.abs(p_l['jphi_saw'][away])) > 1e-3*np.max(np.abs(p_l['jphi_saw'])):
             raise AssertionError("saw reversed shear: local j_saw not confined to [rho_in, rho_out]")
+        # (g) a loaded bootstrap state is re-solvable as saved: the same positional call after loading
+        #     reproduces the call with every keyword input and option passed explicitly
+        eC = 1.602176634e-19
+        p_kin = eC*(setup['ne']*setup['Te'] + setup['ni']*setup['Ti'])
+        kw = dict(jphi_fixed_prof={'x': psi_sample, 'y': 0.5*bump}, jphi_saw_prof={'x': psi_sample, 'y': 0.5*bump},
+                  p_fixed_prof={'x': psi_sample, 'y': p_kin[0]*(0.1*np.exp(-((psi_sample - 0.3)/0.15)**2) + 1.0e-3)},
+                  saw_q_s=q_s, saw_dq=dq, saw_rule=2, taper_edge_jbs=True)
+        mygs.solve_bootstrap(**kw, **common)
+        mygs._tMaker_equil.save_TokaMaker('ITER_boot_state.h5')
+        mygs.boot_reset()
+        mygs.replace_eq(source_file='ITER_boot_state.h5')
+        p_kept = mygs.solve_bootstrap(**common)
+        mygs.boot_reset()
+        mygs.replace_eq(source_file='ITER_boot_state.h5')
+        p_expl = mygs.solve_bootstrap(**kw, **common)
+        for key in ('jphi_total', 'jphi_ind', 'jphi_bs', 'jphi_fixed', 'jphi_saw', 'jphi_pd'):
+            if not close(p_kept[key], p_expl[key], 1e-10):
+                raise AssertionError(f"loaded state: '{key}' differs from the explicit call")
+        mygs.boot_reset()
+        if mygs._tMaker_equil._boot_inputs is not None or mygs._tMaker_equil._boot_ops['saw_q_s'] != 0.0 \
+                or mygs._tMaker_equil._boot_ops['taper_edge_jbs']:
+            raise AssertionError("boot_reset() did not restore the defaults")
+        p_def = mygs.solve_bootstrap(**common)
+        if np.any(p_def['jphi_fixed'] != 0.0) or np.any(p_def['jphi_saw'] != 0.0):
+            raise AssertionError("boot_reset(): jphi_fixed / j_saw not back to zero")
     except Exception as e:
         print(e)
         mp_q.put(None)
@@ -2310,11 +2342,11 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
             res_phi = run(x_phi,'phi_n')
             results['phi_n'] = _torflux_compare(mygs,ref)
             # Bootstrap current at matching surfaces (interior, away from edge spike)
-            j_ref = np.interp(res_phi['psi_n'],res_psi['psi_n'],res_psi['jphi_bs_final'])
+            j_ref = np.interp(res_phi['psi_n'],res_psi['psi_n'],res_psi['jphi_bs'])
             mask = (res_phi['psi_n'] > 0.05) & (res_phi['psi_n'] < 0.9)
-            results['jbs_err'] = np.max(np.abs(res_phi['jphi_bs_final'][mask]-j_ref[mask]))/np.max(np.abs(j_ref))
+            results['jbs_err'] = np.max(np.abs(res_phi['jphi_bs'][mask]-j_ref[mask]))/np.max(np.abs(j_ref))
             # jphi_fixed relabelled onto Phi_N nodes returns the input values
-            results['jfix_err'] = np.max(np.abs(res_phi['jphi_fixed_final']-jfix))/np.max(jfix)
+            results['jfix_err'] = np.max(np.abs(res_phi['jphi_fixed']-jfix))/np.max(jfix)
             # Node psi_N positions agree with the solver map
             psi_nodes, _ = mygs.get_torflux_map(x_phi,inverse=True)
             results['node_err'] = np.max(np.abs(res_phi['psi_n']-psi_nodes))
@@ -2323,11 +2355,11 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
                                            jphi_fixed=jfix,p_fixed=pfix)
             psi_nodes, _ = mygs.get_torflux_map(x_phi,inverse=True)
             results['swb_node_err'] = np.max(np.abs(res_swb['psi_n']-psi_nodes))
-            results['swb_jfix_err'] = np.max(np.abs(res_swb['j_fixed']-jfix))/np.max(jfix)
+            results['swb_jfix_err'] = np.max(np.abs(res_swb['jphi_fixed']-jfix))/np.max(jfix)
             # jphi_saw (saw off) is relabelled like jphi_fixed: 0.4 of jfix moved to it changes nothing
             res_saw = solve_with_bootstrap(mygs,ne,Te,ne,Te,1.5,13.0E6,inductive_jphi=jind,x=x_phi,coord='phi_n',
                                            jphi_fixed=0.6*jfix,jphi_saw=0.4*jfix,p_fixed=pfix)
-            results['swb_jsaw_err'] = np.max(np.abs(res_saw['j_saw']-0.4*jfix))/np.max(jfix)
+            results['swb_jsaw_err'] = np.max(np.abs(res_saw["jphi_saw"]-0.4*jfix))/np.max(jfix)
             results['swb_jsaw_total_err'] = (np.max(np.abs(res_saw['jphi_total']-res_swb['jphi_total']))
                                              /np.max(np.abs(res_swb['jphi_total'])))
             try:
@@ -2437,6 +2469,32 @@ def test_bootstrap_x_validation(use_python_solve):
             call(psi_N=good[:-1])
     with pytest.raises(ValueError, match="x only"):
         call(good, psi_N=good)
+
+
+# -----------------------------------------------------------------------
+# Test: deprecated solve_with_bootstrap kwarg and result names (no solver needed)
+# -----------------------------------------------------------------------
+@pytest.mark.coverage
+@pytest.mark.parametrize("use_python_solve", (True, False))
+def test_bootstrap_deprecated_names(use_python_solve):
+    from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap, _BootstrapResults
+    n = 65
+    ne = np.full(n, 1.0e20)
+    Te = np.full(n, 2.0e3)
+    bad_grid = np.linspace(0.0, 1.0, n)
+    bad_grid[[10, 11]] = bad_grid[[11, 10]]
+    with pytest.warns(DeprecationWarning, match="scale_jBS"):
+        with pytest.raises(ValueError, match="strictly increasing"):
+            solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), 1.7, 1.0e6, inductive_jphi=np.ones(n),
+                                 scale_jBS=1.0, psi_N=bad_grid, use_python_solve=use_python_solve)
+    with pytest.raises(TypeError, match="scale_jBS"):
+        solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), 1.7, 1.0e6, inductive_jphi=np.ones(n),
+                             scale_jbs=2.0, scale_jBS=2.0, use_python_solve=use_python_solve)
+    results = _BootstrapResults({'jphi_total': 1})
+    with pytest.warns(DeprecationWarning, match="total_j_phi"):
+        assert results['total_j_phi'] == 1
+    with pytest.warns(DeprecationWarning, match="total_j_phi"):
+        assert 'total_j_phi' in results
 
 
 # -----------------------------------------------------------------------
