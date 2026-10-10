@@ -35,6 +35,7 @@ TYPE :: bern_tab
   REAL(r8), ALLOCATABLE :: mvinv(:,:) !< Uniform-lattice values to monomial coefficients [nb,nb]
   REAL(r8) :: cbound = 0.d0 !< Coefficients lie within nodal range extended by `cbound` times its width
 END TYPE bern_tab
+TYPE(bern_tab), SAVE :: bt_cache !< Tables of the last degree used (built once per degree)
 INTEGER(i4), PARAMETER :: nblk_cells = 64 !< Cells per deterministic accumulation block
 INTEGER(i4), PARAMETER :: max_depth = 12 !< Maximum subdivision depth
 REAL(r8), PARAMETER :: kappa = 0.25d0 !< Required min/max ratio of \f$ \partial_d \hat{\psi} \f$ per sub-cell
@@ -822,14 +823,26 @@ perm_rep=>lag_rep
 perm_sum=chk
 end subroutine perm_update
 !------------------------------------------------------------------------------
-!> Build Bernstein tables for degree `p` (1-4)
+!> Bernstein tables for degree `p` (1-4), built on first use of each degree
 !------------------------------------------------------------------------------
 subroutine bern_setup(bt,p)
 type(bern_tab), intent(inout) :: bt
 integer(i4), intent(in) :: p
+IF(bt_cache%p/=p)THEN
+  IF(ALLOCATED(bt_cache%mi))DEALLOCATE(bt_cache%mi,bt_cache%mi1,bt_cache%lk,bt_cache%vinv,bt_cache%mvinv)
+  CALL bern_build(bt_cache,p)
+END IF
+bt=bt_cache
+end subroutine bern_setup
+!------------------------------------------------------------------------------
+!> Build Bernstein tables for degree `p` (1-4)
+!------------------------------------------------------------------------------
+subroutine bern_build(bt,p)
+type(bern_tab), intent(inout) :: bt
+integer(i4), intent(in) :: p
 real(r8) :: v(15,15),fact(0:4),mult(15),x
 integer(i4) :: n,m,a2,a3,k,ierr
-IF((p<1).OR.(p>4))CALL oft_abort('Unsupported FE order','bern_setup',__FILE__)
+IF((p<1).OR.(p>4))CALL oft_abort('Unsupported FE order','bern_build',__FILE__)
 bt%p=p
 bt%nb=(p+1)*(p+2)/2
 bt%nb1=p*(p+1)/2
@@ -868,7 +881,7 @@ DO m=1,bt%nb
 END DO
 ALLOCATE(bt%vinv,SOURCE=v(1:bt%nb,1:bt%nb))
 CALL lapack_matinv(bt%nb,bt%vinv,ierr)
-IF(ierr/=0)CALL oft_abort('Bernstein table inversion failed','bern_setup',__FILE__)
+IF(ierr/=0)CALL oft_abort('Bernstein table inversion failed','bern_build',__FILE__)
 !---Monomials u^a2 v^a3 on the uniform lattice
 DO m=1,bt%nb
   DO n=1,bt%nb
@@ -877,7 +890,7 @@ DO m=1,bt%nb
 END DO
 ALLOCATE(bt%mvinv,SOURCE=v(1:bt%nb,1:bt%nb))
 CALL lapack_matinv(bt%nb,bt%mvinv,ierr)
-IF(ierr/=0)CALL oft_abort('Monomial table inversion failed','bern_setup',__FILE__)
+IF(ierr/=0)CALL oft_abort('Monomial table inversion failed','bern_build',__FILE__)
 bt%cbound=(MAXVAL(SUM(ABS(bt%vinv),DIM=2))-1.d0)/2.d0+1.d-12
-end subroutine bern_setup
+end subroutine bern_build
 END MODULE oft_gs_cutcell
