@@ -3302,6 +3302,8 @@ class TokaMaker_equilibrium():
             saw_rho_m, saw_rho_out, saw_n_dips = c_double(0.0), c_double(0.0), c_int(0)
             tokamaker_get_boot_saw(self.c_ptr, ctypes.byref(saw_rho_m), ctypes.byref(saw_rho_out),
                                    ctypes.byref(saw_n_dips), error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
             result.update(saw_rho_m=saw_rho_m.value, saw_rho_out=saw_rho_out.value, saw_n_dips=saw_n_dips.value)
         if result and (self.psi_convention == 0):
             # OFT convention (0 = LCFS, LCFS first) to standard convention (0 = axis, axis first)

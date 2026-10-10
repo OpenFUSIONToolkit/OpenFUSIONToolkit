@@ -345,7 +345,17 @@ self%djsaw_no_improve = 0
 self%djsaw_min = HUGE(1.0d0)
 IF(ALLOCATED(self%jphi_saw_last))DEALLOCATE(self%jphi_saw_last)
 IF(ALLOCATED(self%jphi_total_last))DEALLOCATE(self%jphi_total_last)
+CALL saw_scalars_reset(self%boot_profs)
 end subroutine reset_solve_state
+!------------------------------------------------------------------------------
+!> Zero the sawtooth scalars of @ref boot_profs (no reset)
+!------------------------------------------------------------------------------
+subroutine saw_scalars_reset(bp)
+TYPE(boot_profs), INTENT(inout) :: bp
+bp%saw_rho_m = 0.0_r8
+bp%saw_rho_out = 0.0_r8
+bp%saw_n_dips = 0
+end subroutine saw_scalars_reset
 !------------------------------------------------------------------------------
 !> Set (`set`) or point at (`get`) the @ref boot_profs array called `name` (see @ref boot_prof_names);
 !! `get` is NULL if that array is unallocated or the name is unknown
@@ -393,6 +403,11 @@ DO k=1,SIZE(boot_prof_names)
   group_made = .TRUE.
   CALL hdf5_write(vals,filename,path//'/'//h5_name(boot_prof_names(k)))
 END DO
+IF(group_made)THEN
+  CALL hdf5_write(bp%saw_rho_m,filename,path//'/SAW_RHO_M')
+  CALL hdf5_write(bp%saw_rho_out,filename,path//'/SAW_RHO_OUT')
+  CALL hdf5_write(bp%saw_n_dips,filename,path//'/SAW_N_DIPS')
+END IF
 end subroutine boot_profs_save
 !------------------------------------------------------------------------------
 !> Read the @ref boot_profs arrays present in group `path`; the others are left unallocated
@@ -415,6 +430,11 @@ DO k=1,SIZE(boot_prof_names)
   IF(success)CALL boot_prof_access(bp,boot_prof_names(k),set=vals)
   DEALLOCATE(vals,dim_sizes)
 END DO
+IF(hdf5_field_exist(filename,path//'/SAW_N_DIPS'))THEN
+  CALL hdf5_read(bp%saw_rho_m,filename,path//'/SAW_RHO_M',success=success)
+  CALL hdf5_read(bp%saw_rho_out,filename,path//'/SAW_RHO_OUT',success=success)
+  CALL hdf5_read(bp%saw_n_dips,filename,path//'/SAW_N_DIPS',success=success)
+END IF
 end subroutine boot_profs_load
 !------------------------------------------------------------------------------
 !> HDF5 dataset name of a @ref boot_profs array (its name in upper case)
@@ -541,6 +561,12 @@ ELSE
         WRITE(*,'(A,I4,4ES15.5)') '  ', i, xpsi(i), jphi_bs(i), self%jphi(i), jphi_fixed(i)/mu0
       END DO
     END IF
+  END IF
+  !--- A surface that failed both the cut-cell and the tracer evaluation ends the solve (gs_solve error -10)
+  IF(.NOT.ALL(ravgs(1:,2)>0.0_r8))THEN
+    CALL oft_warn('jphi_bs_update: flux-surface evaluation failed on a bootstrap node')
+    gseq%prof_failed=.TRUE.
+    RETURN
   END IF
   jphi_pd = jphi_pd * self%boot_ops%scale_jbs
   jphi_bs = jphi_bs * mu0
@@ -828,6 +854,7 @@ END DO
 IF(.NOT.(phi(n) > 0.0_r8))THEN
   CALL oft_warn('saw_redistribute: no closed surfaces for the q profile, skipping the reset this update')
   dj = 0.0_r8
+  CALL saw_scalars_reset(self%boot_profs)
   RETURN
 END IF
 rho = SQRT(phi/phi(n))
@@ -946,8 +973,8 @@ IF(.NOT.ok)THEN
   rho_s = 0.0_r8; rho_m = 0.0_r8
 END IF
 IF(rule == 1)THEN
-  n_dips = n_low
   IF(ok)THEN
+    n_dips = n_low
     !---Trigger weight from the deepest point inside rho_m
     w = 1.0_r8
     IF(ramp > 0.0_r8)w = MIN(MAX((q_s - MINVAL(q, MASK=(rho < rho_m)))/ramp, 0.0_r8), 1.0_r8)
