@@ -585,7 +585,7 @@ CHARACTER(KIND=c_char), INTENT(in) :: ne_file(OFT_PATH_SLEN) !< Electron density
 CHARACTER(KIND=c_char), INTENT(in) :: ti_file(OFT_PATH_SLEN) !< Ion temperature [keV] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ni_file(OFT_PATH_SLEN) !< Ion density [m^-3] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: zeff_file(OFT_PATH_SLEN) !< Effective charge [-] profile specification file
-CHARACTER(KIND=c_char), INTENT(in) :: jphi_fixed_file(OFT_PATH_SLEN) !< Fixed toroidal current density [A/m^2] profile specification file
+CHARACTER(KIND=c_char), INTENT(in) :: jphi_fixed_file(OFT_PATH_SLEN) !< Fixed jphi [A/m^2] profile specification file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
@@ -607,9 +607,7 @@ END SUBROUTINE tokamaker_load_kinetic_profiles
 !---------------------------------------------------------------------------------
 !> Set bootstrap current options on the jphi_bs_flux_func object inside gs_equil.
 !!
-!! Must be called before solving with a `jphi-split-bootstrap` current profile.
-!! Fields in @p bops correspond to the optional arguments of
-!! @ref jphi_bs_update in grad_shaf_bootstrap.F90.
+!! Fields of @p bops are those of @ref grad_shaf_bootstrap::boot_ops "boot_ops".
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_boot_ops(tMaker_equil_ptr,bops,error_str) BIND(C,NAME="tokamaker_set_boot_ops")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
@@ -1627,16 +1625,16 @@ CALL gs_get_qprof(tMaker_equil_obj,npsi,psi_q,qvals,ravgs=ravgs,fsa_avgs=fsa_avg
                   shape_geo=shape_geo)
 END SUBROUTINE tokamaker_get_fsa
 !---------------------------------------------------------------------------------
-!> Evaluate Sauter trapped particle fraction and related quantities
+!> Evaluate the Sauter circulating fraction f_c and flux-surface geometry
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_sauter_fc(tMaker_equil_ptr,npsi,psi_saut,fc,r_avgs,modb_avgs,eps,error_str) BIND(C,NAME="tokamaker_sauter_fc")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Number of evaluation points
-REAL(c_double), INTENT(in) :: psi_saut(npsi) !< \f$ \psi \f$ values to compute trapped particle fraction and other fields
-REAL(c_double), INTENT(out) :: fc(npsi) !< Trapped particle fraction
+REAL(c_double), INTENT(in) :: psi_saut(npsi) !< Normalised \f$ \psi \f$ sample points
+REAL(c_double), INTENT(out) :: fc(npsi) !< Circulating particle fraction \f$ f_c \f$
 REAL(c_double), INTENT(out) :: r_avgs(npsi,3) !< Flux surface averaged radial coordinates \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
 REAL(c_double), INTENT(out) :: modb_avgs(npsi,2) !< Flux surface averaged field strength \f$<|B|>\f$, \f$<|B|^2>\f$
-REAL(c_double), INTENT(out) :: eps(npsi) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min}) \f$
+REAL(c_double), INTENT(out) :: eps(npsi) !< Inverse aspect ratio (R_max-R_min)/(R_max+R_min)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN

@@ -5,7 +5,7 @@
 !---------------------------------------------------------------------------------
 !> @file grad_shaf_bootstrap.F90
 !
-!> Physics-scripts used in the bootstrap calculation inside the Grad-Sharfranov solve
+!> Bootstrap current and sawtooth reset for the jphi-split-bootstrap Grad-Shafranov profile
 !!
 !! @authors Stuart Benjamin, fortranisation of Daniel Burgess' bootstrap.py
 !! @date June 2026
@@ -27,20 +27,16 @@ USE oft_io, ONLY: hdf5_create_group, hdf5_write, hdf5_read, &
 use mhd_utils, only: mu0
 implicit none
 !------------------------------------------------------------------------------
-!> Read-in options for the jphi-split-bootstrap current profile update.
-!!
-!! Must be initialised (via @ref tokamaker_set_boot_ops) before
-!! running TokaMaker with a `jphi-split-bootstrap` current profile.  Fields
-!! correspond to the optional arguments of @ref calculate_bootstrap.
+!> Options of @ref jphi_bs_update (defaults apply unless set via @ref tokamaker_set_boot_ops)
 !------------------------------------------------------------------------------
 TYPE :: boot_ops
   LOGICAL :: initialized = .FALSE. !< Options have been explicitly set?
   LOGICAL :: isolate_edge_jbs = .FALSE. !< Isolate edge bootstrap spike from bulk?
   LOGICAL :: parameterize_jbs = .FALSE. !< Use parametrised skew-normal fit for spike? Overrides `isolate_edge_jbs` if true.
   REAL(r8) :: scale_jbs = 1.0_r8 !< Scaling factor applied to the bootstrap current (default 1)
-  REAL(r8) :: djbs_tol = 1.0e-4_r8 !< Threshold on rel. change in bootstrap current to stop recalculation (increasing solve speed)
+  REAL(r8) :: djbs_tol = 1.0e-4_r8 !< Rel. change in jphi_bs below which it is frozen (not recomputed)
   LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, bootstrap stats, and full profile tables each NL iteration
-  LOGICAL :: taper_edge_jbs = .FALSE. !< Smooth taper of toroidal current (inductive, bootstrap and fixed) to zero at plasma edge (guards against numerical issues at the separatrix)
+  LOGICAL :: taper_edge_jbs = .FALSE. !< Taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS
   REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
   INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
 END TYPE boot_ops
@@ -54,7 +50,7 @@ TYPE :: boot_profs
   REAL(r8), ALLOCATABLE :: psi_n(:) !< Normalised psi of the profile nodes, LCFS first
   REAL(r8), ALLOCATABLE :: jdotb_bs_raw(:) !< Redl PoP 2021 <j_BS.B>
   REAL(r8), ALLOCATABLE :: jphi_bs_raw(:) !< Bootstrap jphi, <j_BS.B> F<1/R>/<B^2> + jphi_pd_raw
-  REAL(r8), ALLOCATABLE :: jphi_pd_raw(:) !< Pressure-driven (diamagnetic + Pfirsch-Schlueter) part of jphi_bs_raw, P'(<R> - F^2<1/R>/<B^2>)
+  REAL(r8), ALLOCATABLE :: jphi_pd_raw(:) !< Pressure-driven (diamagnetic + Pfirsch-Schlueter) part, P'(<R> - F^2<1/R>/<B^2>)
   REAL(r8), ALLOCATABLE :: jphi_total(:) !< Total = jphi_ind_final + jphi_bs_final + jphi_fixed_final
   REAL(r8), ALLOCATABLE :: jphi_bs_final(:) !< Bootstrap jphi, scaled, optionally isolated/parametrised and tapered
   REAL(r8), ALLOCATABLE :: jphi_pd_final(:) !< jphi_pd_raw scaled and optionally tapered (not isolated/parametrised)
@@ -72,12 +68,12 @@ REAL(r8), PARAMETER :: dalpha_warn_tol = 1.0e-6_r8 !< Relative (|dalpha|/|alpha|
 !------------------------------------------------------------------------------
 type, extends(jphi_flux_func) :: jphi_bs_flux_func
   real(8) :: alpha_last = 1.d0 !< Alpha (input Jphi rescaling factor) from previous NL iteration
-  logical :: freeze_jbs = .FALSE. !< Set .TRUE. once jphi_bs converges or stagnates; skips the Sauter pass (big speedup)
+  logical :: freeze_jbs = .FALSE. !< jphi_bs converged or stagnated: skip the Sauter pass
   integer(4) :: djbs_no_improve = 0   !< Consecutive steps with non-decreasing djbs
   real(8) :: djbs_min = huge(1.0d0)  !< Running minimum djbs seen so far
   integer(4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
   real(8) :: dalpha_last = huge(1.0d0) !< dalpha of the previous update (stall diagnostic)
-  real(8), allocatable :: jphi_bs_last(:) !< Scaled, untapered jphi_bs of the last bootstrap evaluation (mu0*A/m²; freeze check and cache)
+  real(8), allocatable :: jphi_bs_last(:) !< Scaled, untapered jphi_bs of the last evaluation (mu0*A/m²)
   real(8), allocatable :: jphi_pd_last(:) !< Its pressure-driven part (mu0*A/m²)
   logical :: ffp_restored = .FALSE. !< F*F' knots were read from a file, so loading keeps them instead of updating
   TYPE(boot_ops) :: boot_ops       !< Options set from Python (@ref tokamaker_set_boot_ops)
@@ -114,8 +110,8 @@ contains
 end type sauter_interp
 !------------------------------------------------------------------------------
 !> Context type for MINPACK-based fitting of the edge bootstrap profile.
-!> Module-level variable `active_edge_jbs` is populated by curve_fit_edge_jbs
-!> before invoking lmdif so that edge_jbs_residual can access the target data.
+!! Module-level variable `active_edge_jbs` is populated by curve_fit_edge_jbs
+!! before invoking lmdif so that edge_jbs_residual can access the target data.
 !------------------------------------------------------------------------------
 TYPE :: edge_jbs_fit_ctx
   INTEGER(i4) :: n_fit = 0           !< Number of data points in the fit
@@ -400,7 +396,7 @@ end function h5_name
 !---------------------------------------------------------------------------------
 !> Update F*F' profile from the inductive jphi coupled with the bootstrap current.
 !!
-!! Each call (one NL iteration; the first iteration of a solve runs @ref jphi_update and resets the
+!! Called once per NL iteration (the first iteration of a solve runs @ref jphi_update and resets the
 !! convergence state). Current densities are TokaMaker jphi in mu0*A/m² on the nodes `psi_n`
 !! (LCFS and the profile nodes xpsi):
 !!   1. <R>/<1/R>/<1/R^2> spline; pressure scale.
@@ -731,7 +727,7 @@ real(8), intent(out) :: fc(nr) !< Circulating particle fraction \f$ f_c \f$
 real(8), intent(out) :: r_avgs(nr,3) !< Flux surface averaged radial coords \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
 real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field \f$<|B|>\f$, \f$<|B|^2>\f$
 real(8), optional, intent(out) :: qprof(nr) !< Safety factor q on each surface (avoids a separate gs_get_qprof call)
-real(8), optional, intent(out) :: eps(nr) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min}) \f$ on each surface
+real(8), optional, intent(out) :: eps(nr) !< Inverse aspect ratio (R_max-R_min)/(R_max+R_min) on each surface
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi,h,h2,hf,ftu,ftl
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp) :: psi_int
@@ -848,12 +844,12 @@ CALL psi_int%delete()
 end subroutine sauter_fc
 !------------------------------------------------------------------------------
 !> Apply a smooth edge taper to an array, zeroing it at the plasma edge.
-!>
-!> @param n          Number of grid points
-!> @param psi        Normalised psi grid, OFT convention (0=LCFS, 1=axis)
-!> @param arr        Array to taper (modified in-place)
-!> @param psi0       psi (OFT convention) where the taper begins; it acts on psi <= psi0
-!> @param shape      Taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
+!!
+!! @param n          Number of grid points
+!! @param psi        Normalised psi grid, OFT convention (0=LCFS, 1=axis)
+!! @param arr        Array to taper (modified in-place)
+!! @param psi0       psi (OFT convention) where the taper begins; it acts on psi <= psi0
+!! @param shape      Taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
 !------------------------------------------------------------------------------
 SUBROUTINE apply_edge_taper(n, psi, arr, psi0, shape)
 INTEGER(i4), INTENT(in)    :: n
@@ -889,28 +885,28 @@ END DO
 END SUBROUTINE apply_edge_taper
 !------------------------------------------------------------------------------
 !> Compute dy/dx with second-order-accurate finite differences on the native grid.
-!>
-!> Port of `numpy.gradient(y, x, edge_order=2)`: the interior uses the
-!> three-point central stencil for the local (possibly non-uniform) spacing,
-!> and both endpoints use the second-order one-sided stencil.  The first-order
-!> endpoint difference numpy uses by default is badly inaccurate at the
-!> magnetic axis and separatrix, where the error propagates straight into
-!> on-axis/edge jphi_bs.
-!>
-!> This replaces an earlier shape-preserving PCHIP derivative.  On the uniform
-!> grids this code uses, the PCHIP endpoint formula reduces algebraically to
-!> the second-order one-sided difference, while its monotonicity clipping
-!> flattens the pedestal and makes the interior measurably less accurate.
-!>
-!> The grid is validated rather than repaired: unlike the PCHIP routine it
-!> replaces, this does not sort x or average over duplicated abscissae.
-!> Duplicated or unsorted flux labels give an undefined derivative, so they
-!> abort here instead of being silently smoothed.
-!>
-!> @param n     Number of input points (>= 3)
-!> @param x     Independent variable (e.g. psi); strictly monotonic, either direction
-!> @param y     Dependent variable sampled on x
-!> @param dydx  Output: dy/dx at each point in x
+!!
+!! Port of `numpy.gradient(y, x, edge_order=2)`: the interior uses the
+!! three-point central stencil for the local (possibly non-uniform) spacing,
+!! and both endpoints use the second-order one-sided stencil.  The first-order
+!! endpoint difference numpy uses by default is badly inaccurate at the
+!! magnetic axis and separatrix, where the error propagates straight into
+!! on-axis/edge jphi_bs.
+!!
+!! This replaces an earlier shape-preserving PCHIP derivative.  On the uniform
+!! grids this code uses, the PCHIP endpoint formula reduces algebraically to
+!! the second-order one-sided difference, while its monotonicity clipping
+!! flattens the pedestal and makes the interior measurably less accurate.
+!!
+!! The grid is validated rather than repaired: unlike the PCHIP routine it
+!! replaces, this does not sort x or average over duplicated abscissae.
+!! Duplicated or unsorted flux labels give an undefined derivative, so they
+!! abort here instead of being silently smoothed.
+!!
+!! @param n     Number of input points (>= 3)
+!! @param x     Independent variable (e.g. psi); strictly monotonic, either direction
+!! @param y     Dependent variable sampled on x
+!! @param dydx  Output: dy/dx at each point in x
 !------------------------------------------------------------------------------
 SUBROUTINE gradient_(n, x, y, dydx)
 USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
@@ -972,19 +968,15 @@ DO i = 1, n
 END DO
 END SUBROUTINE gradient_
 !------------------------------------------------------------------------------
-!> Computes the bootstrap current on a uniform psi_N grid.
-!>
-!> Translated from Python bootstrap.py: calculate_profiles_and_bootstrap
-!> (up to and including the redl_bootstrap call).
-!>
-!> Fixed conventions: NRL Coulomb logs, Koh ion collisionality model,
-!> Redl 2021 jboot1 form, L34=L31.
-!>
-!> @param gseq    Equilibrium object (must have Te, Ti, ne, ni, Zeff set)
-!> @param n_psi    Number of flux surface samples
-!> @param psi_N    Normalised psi grid [0,1], arbitrary spacing
-!> @param jphi_bs Output: bootstrap current density as TokaMaker jphi = <j_phi> [A/m^2] on psi_N grid
-!> @param jphi_pd Output: its pressure-driven part [A/m^2]
+!> Bootstrap current (Redl 2021) on the nodes psi_N (bootstrap.py calculate_profiles_and_bootstrap)
+!!
+!! NRL Coulomb logs, Koh ion collisionality, Redl jboot1 (no sign(q) factor: <j.B> is odd in F), L34=L31.
+!!
+!! @param gseq    Equilibrium object (must have Te, Ti, ne, ni, Zeff set)
+!! @param n_psi   Number of flux surface samples
+!! @param psi_N   Normalised psi, OFT convention (0=LCFS, 1=axis), any spacing, psi_N(1)>0
+!! @param jphi_bs Output: bootstrap current density as TokaMaker jphi = <j_phi> [A/m^2] on psi_N grid
+!! @param jphi_pd Output: its pressure-driven part [A/m^2]
 !------------------------------------------------------------------------------
 SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, jphi_bs, jphi_pd, &
                                isolate_edge_jbs, parameterize_jbs, scale_jbs, &
@@ -992,7 +984,7 @@ SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, jphi_bs, jphi_pd, &
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 INTEGER(i4), INTENT(in) :: n_psi
-REAL(r8), INTENT(in) :: psi_N(1:n_psi)  !< Normalised psi grid (0,1], arbitrary spacing. psi_N(1)>0.0
+REAL(r8), INTENT(in) :: psi_N(1:n_psi)  !< Normalised psi (OFT convention, 0=LCFS), psi_N(1)>0
 REAL(r8), INTENT(out) :: jphi_bs(0:n_psi) !< jphi_bs(0) the LCFS value (extrapolated)
 REAL(r8), INTENT(out) :: jphi_pd(0:n_psi) !< Pressure-driven part of jphi_bs
 LOGICAL,  OPTIONAL, INTENT(in)  :: isolate_edge_jbs  !< If .TRUE., isolate edge spike from core
@@ -1172,7 +1164,7 @@ END SUBROUTINE finish
 END SUBROUTINE calculate_bootstrap
 !------------------------------------------------------------------------------
 !> Linearly extrapolate a bootstrap profile to the LCFS (and the axis, if a node) where q is
-!> undefined, using the second-order gradient at the nearest well-defined point.
+!! undefined, using the second-order gradient at the nearest well-defined point.
 !------------------------------------------------------------------------------
 SUBROUTINE extrap_jbs_boundaries(n_psi, psi_N, prof)
 INTEGER(i4), INTENT(in) :: n_psi
@@ -1202,16 +1194,16 @@ ENDIF
 END SUBROUTINE extrap_jbs_boundaries
 !------------------------------------------------------------------------------
 !> Evaluate the skew-normal PDF at a single point.
-!>
-!> Equivalent to scipy.stats.skewnorm.pdf(x, sk, loc=ctr, scale=scl):
-!>   f = (2/scl) * phi((x-ctr)/scl) * Phi(sk*(x-ctr)/scl)
-!> where phi and Phi are the standard normal PDF and CDF.
-!>
-!> @param x   Evaluation point
-!> @param sk  Skewness parameter
-!> @param ctr Location (mean shift)
-!> @param scl Scale (width)
-!> @result    PDF value at x
+!!
+!! Equivalent to scipy.stats.skewnorm.pdf(x, sk, loc=ctr, scale=scl):
+!!   f = (2/scl) * phi((x-ctr)/scl) * Phi(sk*(x-ctr)/scl)
+!! where phi and Phi are the standard normal PDF and CDF.
+!!
+!! @param x   Evaluation point
+!! @param sk  Skewness parameter
+!! @param ctr Location (mean shift)
+!! @param scl Scale (width)
+!! @result    PDF value at x
 !------------------------------------------------------------------------------
 PURE FUNCTION skewnorm_pdf_pt(x, sk, ctr, scl) RESULT(y)
 REAL(r8), INTENT(in) :: x, sk, ctr, scl
@@ -1226,7 +1218,7 @@ y       =  (2.0_r8 / scl) * phi_val * cdf_val
 END FUNCTION skewnorm_pdf_pt
 !------------------------------------------------------------------------------
 !> Compute log(exp(a) + exp(b)) stably (avoids overflow).
-!> Mirrors numpy.logaddexp(a, b).
+!! Mirrors numpy.logaddexp(a, b).
 !------------------------------------------------------------------------------
 PURE FUNCTION safe_logaddexp(a, b) RESULT(y)
 REAL(r8), INTENT(in) :: a, b
@@ -1236,21 +1228,21 @@ y = c + LOG(EXP(a - c) + EXP(b - c))
 END FUNCTION safe_logaddexp
 !------------------------------------------------------------------------------
 !> Locate the peak of the skew-normal shape used in parametrise_edge_jbs
-!> using ternary search on the interval
-!>   [max(0, center - 3*width), min(1, center + 3*width)]
-!>
-!> The skew-normal PDF is strictly unimodal for all skewness values (Azzalini
-!> 1985), so ternary search is guaranteed to converge.  Each iteration cuts
-!> the search interval by a factor of 2/3; 100 iterations reduce an initial
-!> width of ~6*width to < 10^{-17} * initial_width (essentially machine
-!> precision), while requiring only 200 PDF evaluations — 50x fewer than the
-!> previous 10 000-point linear scan.
-!>
-!> @param center       Gaussian centre (loc)
-!> @param width        Gaussian width (scale)
-!> @param sk           Skewness parameter
-!> @param x_peak       Output: psi_N at the raw-shape peak
-!> @param val_peak_raw Output: raw-shape value at the peak
+!! using ternary search on the interval
+!!   [max(0, center - 3*width), min(1, center + 3*width)]
+!!
+!! The skew-normal PDF is strictly unimodal for all skewness values (Azzalini
+!! 1985), so ternary search is guaranteed to converge.  Each iteration cuts
+!! the search interval by a factor of 2/3; 100 iterations reduce an initial
+!! width of ~6*width to < 10^{-17} * initial_width (essentially machine
+!! precision), while requiring only 200 PDF evaluations — 50x fewer than the
+!! previous 10 000-point linear scan.
+!!
+!! @param center       Gaussian centre (loc)
+!! @param width        Gaussian width (scale)
+!! @param sk           Skewness parameter
+!! @param x_peak       Output: psi_N at the raw-shape peak
+!! @param val_peak_raw Output: raw-shape value at the peak
 !------------------------------------------------------------------------------
 SUBROUTINE find_skewnorm_peak(center, width, sk, x_peak, val_peak_raw)
 REAL(r8), INTENT(in)  :: center, width, sk
@@ -1283,31 +1275,31 @@ IF (val_peak_raw < 1.0e-30_r8) val_peak_raw = 1.0e-30_r8
 END SUBROUTINE find_skewnorm_peak
 !------------------------------------------------------------------------------
 !> Evaluate the parametrised skewnorm profile on an arbitrary psi grid.
-!>
-!> Direct translation of the inner function generate_baseline_prof from
-!> Python bootstrap.py:parameterize_edge_jbs.  Constructs the profile by
-!> stitching a left-side SoftMax-blended skew-normal spike with a right-side
-!> cosine (or cosh) decay at x_peak:
-!>
-!>   left  (psi <= x_peak):  SoftMax(offset_in, amp*skewnorm/val_peak_raw)
-!>   right (psi >  x_peak):  stitch_height * cos(omega*(psi-x_peak))^tail_alpha
-!>
-!> x_peak and val_peak_raw must be pre-computed via find_skewnorm_peak so
-!> the golden-section scan is not repeated for every function evaluation.
-!>
-!> @param n            Number of psi points
-!> @param psi          psi_N grid [0, 1]
-!> @param amp          Amplitude of the skew-normal spike
-!> @param center       Spike centre in psi_N
-!> @param width        Spike width (sigma = FWHM/2.355)
-!> @param offset_in    Flat baseline J_BS level left of the spike
-!> @param sk           Skewness parameter (a in skewnorm.pdf)
-!> @param y_sep        Profile value prescribed at the separatrix (psi_N = 1)
-!> @param blend_width  SoftMax blend width (sharpness of left-side stitch)
-!> @param tail_alpha   Right-side decay exponent (>= 1)
-!> @param x_peak       Peak location of the raw skew-normal (from find_skewnorm_peak)
-!> @param val_peak_raw Peak value   of the raw skew-normal (from find_skewnorm_peak)
-!> @param profile      Output: profile values on the psi grid
+!!
+!! Direct translation of the inner function generate_baseline_prof from
+!! Python bootstrap.py:parameterize_edge_jbs.  Constructs the profile by
+!! stitching a left-side SoftMax-blended skew-normal spike with a right-side
+!! cosine (or cosh) decay at x_peak:
+!!
+!!   left  (psi <= x_peak):  SoftMax(offset_in, amp*skewnorm/val_peak_raw)
+!!   right (psi >  x_peak):  stitch_height * cos(omega*(psi-x_peak))^tail_alpha
+!!
+!! x_peak and val_peak_raw must be pre-computed via find_skewnorm_peak so
+!! the golden-section scan is not repeated for every function evaluation.
+!!
+!! @param n            Number of psi points
+!! @param psi          psi_N grid [0, 1]
+!! @param amp          Amplitude of the skew-normal spike
+!! @param center       Spike centre in psi_N
+!! @param width        Spike width (sigma = FWHM/2.355)
+!! @param offset_in    Flat baseline J_BS level left of the spike
+!! @param sk           Skewness parameter (a in skewnorm.pdf)
+!! @param y_sep        Profile value prescribed at the separatrix (psi_N = 1)
+!! @param blend_width  SoftMax blend width (sharpness of left-side stitch)
+!! @param tail_alpha   Right-side decay exponent (>= 1)
+!! @param x_peak       Peak location of the raw skew-normal (from find_skewnorm_peak)
+!! @param val_peak_raw Peak value   of the raw skew-normal (from find_skewnorm_peak)
+!! @param profile      Output: profile values on the psi grid
 !------------------------------------------------------------------------------
 SUBROUTINE eval_baseline_profile(n, psi, amp, center, width, offset_in, sk, &
     y_sep, blend_width, tail_alpha, x_peak, val_peak_raw, profile)
@@ -1395,27 +1387,27 @@ END DO
 END SUBROUTINE eval_baseline_profile
 !------------------------------------------------------------------------------
 !> Fortran equivalent of Python bootstrap.py:parameterize_edge_jbs.
-!>
-!> Generates the parameterised edge-bootstrap profile on an n-point psi_N
-!> grid.  When offset /= 0 an internal 1-D root find (bisection on alpha)
-!> ensures that profile(psi(1)) matches the requested offset level, mirroring
-!> the root_scalar(brentq) call in the Python.  When offset == 0 the function
-!> falls through directly to eval_baseline_profile with a very negative
-!> effective offset (reproducing the Python `-1e10` shortcut).
-!>
-!> Fixed parameter: tail_alpha = 1.5 (Python default, not a fit variable).
-!>
-!> @param n           Number of psi_N points
-!> @param psi         Normalised poloidal flux grid [0, 1]
-!> @param amp         Spike amplitude
-!> @param center      Spike centre in psi_N
-!> @param width       Spike width (sigma of skew-normal)
-!> @param offset      Requested flat-core level
-!> @param sk          Skewness parameter
-!> @param y_sep       Value at the separatrix (psi_N = 1)
-!> @param blend_width SoftMax blending width
-!> @param tail_alpha  Right-side fall-off exponent
-!> @param profile     Output: profile values on the psi grid
+!!
+!! Generates the parameterised edge-bootstrap profile on an n-point psi_N
+!! grid.  When offset /= 0 an internal 1-D root find (bisection on alpha)
+!! ensures that profile(psi(1)) matches the requested offset level, mirroring
+!! the root_scalar(brentq) call in the Python.  When offset == 0 the function
+!! falls through directly to eval_baseline_profile with a very negative
+!! effective offset (reproducing the Python `-1e10` shortcut).
+!!
+!! Fixed parameter: tail_alpha = 1.5 (Python default, not a fit variable).
+!!
+!! @param n           Number of psi_N points
+!! @param psi         Normalised poloidal flux grid [0, 1]
+!! @param amp         Spike amplitude
+!! @param center      Spike centre in psi_N
+!! @param width       Spike width (sigma of skew-normal)
+!! @param offset      Requested flat-core level
+!! @param sk          Skewness parameter
+!! @param y_sep       Value at the separatrix (psi_N = 1)
+!! @param blend_width SoftMax blending width
+!! @param tail_alpha  Right-side fall-off exponent
+!! @param profile     Output: profile values on the psi grid
 !------------------------------------------------------------------------------
 SUBROUTINE parametrise_edge_jbs(n, psi, amp, center, width, offset, sk, &
     y_sep, blend_width, tail_alpha, profile)
@@ -1491,12 +1483,12 @@ CALL eval_baseline_profile(n, psi, amp, center, width, a_optimal*offset, sk, &
 END SUBROUTINE parametrise_edge_jbs
 !------------------------------------------------------------------------------
 !> MINPACK lmdif residual subroutine for curve_fit_edge_jbs.
-!>
-!> Computes fvec(i) = parametrise_edge_jbs(psi_fit(i); cofs) - j_fit(i)
-!> where cofs(7) = (amp, center, width, offset, sk, y_sep, blend_width) and
-!> the fitting data are taken from the module-level active_edge_jbs context.
-!>
-!> Signature required by lmdif:  SUBROUTINE fcn(m, n, x, fvec, iflag)
+!!
+!! Computes fvec(i) = parametrise_edge_jbs(psi_fit(i); cofs) - j_fit(i)
+!! where cofs(7) = (amp, center, width, offset, sk, y_sep, blend_width) and
+!! the fitting data are taken from the module-level active_edge_jbs context.
+!!
+!! Signature required by lmdif:  SUBROUTINE fcn(m, n, x, fvec, iflag)
 !------------------------------------------------------------------------------
 SUBROUTINE edge_jbs_residual(m, n, cofs, err, iflag)
 INTEGER(4),  INTENT(in)    :: m, n
@@ -1528,26 +1520,26 @@ err = profile - active_edge_jbs%j_fit
 END SUBROUTINE edge_jbs_residual
 !------------------------------------------------------------------------------
 !> Levenberg-Marquardt least-squares fit of parametrise_edge_jbs to a set
-!> of (psi_fit, jphi_bs_fit) data points using MINPACK lmdif.
-!>
-!> Equivalent to the scipy.optimize.curve_fit call in Python's
-!> analyze_bootstrap_edge_spike (using the same 7-parameter model but without
-!> parameter bounds, which lmdif does not support natively).
-!>
-!> The 7 parameters and their Python / curve_fit correspondences are:
-!>   p(1)  amp         -- spike amplitude
-!>   p(2)  center      -- spike centre in psi_N
-!>   p(3)  width       -- spike sigma
-!>   p(4)  offset      -- flat-core level
-!>   p(5)  sk          -- skewness
-!>   p(6)  y_sep       -- value at psi_N = 1
-!>   p(7)  blend_width -- SoftMax blending width
-!>
-!> @param n_fit    Number of data points (m == n_fit for lmdif)
-!> @param psi_fit  psi_N values of the fitting points
-!> @param jphi_bs_fit Target jphi_bs values [A/m^2] at psi_fit
-!> @param p0       Initial parameter guess (7 elements)
-!> @param popt     Output: optimised parameters (7 elements)
+!! of (psi_fit, jphi_bs_fit) data points using MINPACK lmdif.
+!!
+!! Equivalent to the scipy.optimize.curve_fit call in Python's
+!! analyze_bootstrap_edge_spike (using the same 7-parameter model but without
+!! parameter bounds, which lmdif does not support natively).
+!!
+!! The 7 parameters and their Python / curve_fit correspondences are:
+!!   p(1)  amp         -- spike amplitude
+!!   p(2)  center      -- spike centre in psi_N
+!!   p(3)  width       -- spike sigma
+!!   p(4)  offset      -- flat-core level
+!!   p(5)  sk          -- skewness
+!!   p(6)  y_sep       -- value at psi_N = 1
+!!   p(7)  blend_width -- SoftMax blending width
+!!
+!! @param n_fit    Number of data points (m == n_fit for lmdif)
+!! @param psi_fit  psi_N values of the fitting points
+!! @param jphi_bs_fit Target jphi_bs values [A/m^2] at psi_fit
+!! @param p0       Initial parameter guess (7 elements)
+!! @param popt     Output: optimised parameters (7 elements)
 !------------------------------------------------------------------------------
 SUBROUTINE curve_fit_edge_jbs(n_fit, psi_fit, jphi_bs_fit, p0, popt, &
     lb_in, ub_in, success)
@@ -1626,33 +1618,33 @@ END DO
 END SUBROUTINE curve_fit_edge_jbs
 !------------------------------------------------------------------------------
 !> Analyse and isolate the edge bootstrap-current spike from a toroidal
-!> bootstrap current density profile.
-!>
-!> Translated from Python bootstrap.py: analyze_bootstrap_edge_spike
-!>
-!> The routine performs the following steps:
-!>   1. Locates the highest local peak (whose prominence exceeds 5%)
-!>      in psi_N in [0.85,1.0], else the rightmost peak for psi_N > 0.7.  
-!>      With no edge region or no qualifying peak the un-isolated profile 
-!>      is returned (with a warning) rather than zeros.
-!>   2. Finds the minimum of jphi_bs between psi_N = 0.5 and the peak (the
-!>      flat-core stitching level, lmin_jbs).
-!>   3. Builds masked_spike: flat at lmin_jbs for psi_N below the minimum
-!>      index, actual jphi_bs from that index to the separatrix.
-!>   4. Smooths the flat/spike junction with a cubic Hermite spline over a
-!>      window of width min(0.5 * dist_to_peak, 0.2) centred on the minimum.
-!>   5. (Optional) Fits parametrise_edge_jbs to jphi_bs over the spike region
-!>      (psi_N >= psi_N(lmin_idx)) via curve_fit_edge_jbs (MINPACK lmdif).
-!>      Only performed when parameterized_spike is present.  An approximate
-!>      FWHM is computed first as the initial sigma guess.  The 7 fitted
-!>      parameters are used to evaluate parameterized_spike on the full
-!>      n-point psi_N grid.
-!>
-!> @param n                  Number of flux surface samples
-!> @param psi_N              Normalised poloidal flux grid [0, 1]
-!> @param jphi_bs           Bootstrap current density j_phi profile [A/m^2]
-!> @param masked_spike       Output: isolated edge spike spliced onto flat core [A/m^2]
-!> @param parameterized_spike Output: parametrise_edge_jbs fit evaluated on full psi_N grid [A/m^2]
+!! bootstrap current density profile.
+!!
+!! Translated from Python bootstrap.py: analyze_bootstrap_edge_spike
+!!
+!! The routine performs the following steps:
+!!   1. Locates the highest local peak (whose prominence exceeds 5%)
+!!      in psi_N in [0.85,1.0], else the rightmost peak for psi_N > 0.7.
+!!      With no edge region or no qualifying peak the un-isolated profile
+!!      is returned (with a warning) rather than zeros.
+!!   2. Finds the minimum of jphi_bs between psi_N = 0.5 and the peak (the
+!!      flat-core stitching level, lmin_jbs).
+!!   3. Builds masked_spike: flat at lmin_jbs for psi_N below the minimum
+!!      index, actual jphi_bs from that index to the separatrix.
+!!   4. Smooths the flat/spike junction with a cubic Hermite spline over a
+!!      window of width min(0.5 * dist_to_peak, 0.2) centred on the minimum.
+!!   5. (Optional) Fits parametrise_edge_jbs to jphi_bs over the spike region
+!!      (psi_N >= psi_N(lmin_idx)) via curve_fit_edge_jbs (MINPACK lmdif).
+!!      Only performed when parameterized_spike is present.  An approximate
+!!      FWHM is computed first as the initial sigma guess.  The 7 fitted
+!!      parameters are used to evaluate parameterized_spike on the full
+!!      n-point psi_N grid.
+!!
+!! @param n                  Number of flux surface samples
+!! @param psi_N              Normalised poloidal flux grid [0, 1]
+!! @param jphi_bs           Bootstrap current density j_phi profile [A/m^2]
+!! @param masked_spike       Output: isolated edge spike spliced onto flat core [A/m^2]
+!! @param parameterized_spike Output: parametrise_edge_jbs fit evaluated on full psi_N grid [A/m^2]
 !------------------------------------------------------------------------------
 SUBROUTINE analyze_bootstrap_edge_spike(n, psi_N, jphi_bs, masked_spike, &
                                       parameterized_spike, diagnose)
@@ -1681,7 +1673,7 @@ REAL(r8)    :: amp_fit, center_fit, width_fit, offset_fit, sk_fit, y_sep_fit, bw
 REAL(r8), ALLOCATABLE :: psi_fit(:), j_fit(:)
 ! =====================================================================
 ! 1. Find the highest local peak (whose prominence exceeds 5%)
-!    in psi_N in [0.85,1.0], else the rightmost peak for psi_N > 0.7.  
+!    in psi_N in [0.85,1.0], else the rightmost peak for psi_N > 0.7.
 !    Fall back to the input jphi_bs if no edge region or no qualifying peak.
 ! =====================================================================
 has_edge   = .FALSE.
@@ -1943,33 +1935,33 @@ END IF
 END SUBROUTINE analyze_bootstrap_edge_spike
 !------------------------------------------------------------------------------
 !> Redl 2021 bootstrap current formula.
-!>
-!> Translates Python bootstrap.py:redl_bootstrap with fixed settings:
-!>   - use_legacy_L34 = .FALSE.  (L34 = L31)
-!>   - no sign(q) factor (<j.B> is odd in F through I_psi)
-!>   - formula_form   = 'jboot1'
-!>   - nu_e_star and nu_i_star are passed in pre-computed (no internal fallback)
-!>
-!> Reference: Redl et al., Phys. Plasmas 28, 022502 (2021)
-!>
-!> @param n           Number of flux surfaces
-!> @param Te          Electron temperature [eV]
-!> @param Ti          Ion temperature [eV]
-!> @param ne          Electron density [m^-3]
-!> @param ni          Ion density [m^-3]
-!> @param pe          Electron pressure [Pa]
-!> @param pi          Ion pressure [Pa]
-!> @param Zeff        Effective charge
-!> @param eps         Inverse aspect ratio
-!> @param fT          Trapped particle fraction
-!> @param I_psi       Toroidal current function F = R*Bt [T*m]
-!> @param dT_e_dpsi   d(Te)/d(psi) [eV/Wb]
-!> @param dT_i_dpsi   d(Ti)/d(psi) [eV/Wb]
-!> @param dn_e_dpsi   d(ne)/d(psi) [m^-3/Wb]
-!> @param dn_i_dpsi   d(ni)/d(psi) [m^-3/Wb]
-!> @param nu_e_star   Electron collisionality (pre-computed)
-!> @param nu_i_star   Ion collisionality (pre-computed)
-!> @param avg_j_bootstrap_times_B Output: <j_{bs,parallel}*B> [same units as -I_psi * pe * d/dpsi]
+!!
+!! Translates Python bootstrap.py:redl_bootstrap with fixed settings:
+!!   - use_legacy_L34 = .FALSE.  (L34 = L31)
+!!   - no sign(q) factor (<j.B> is odd in F through I_psi)
+!!   - formula_form   = 'jboot1'
+!!   - nu_e_star and nu_i_star are passed in pre-computed (no internal fallback)
+!!
+!! Reference: Redl et al., Phys. Plasmas 28, 022502 (2021)
+!!
+!! @param n           Number of flux surfaces
+!! @param Te          Electron temperature [eV]
+!! @param Ti          Ion temperature [eV]
+!! @param ne          Electron density [m^-3]
+!! @param ni          Ion density [m^-3]
+!! @param pe          Electron pressure [Pa]
+!! @param pi          Ion pressure [Pa]
+!! @param Zeff        Effective charge
+!! @param eps         Inverse aspect ratio
+!! @param fT          Trapped particle fraction
+!! @param I_psi       Toroidal current function F = R*Bt [T*m]
+!! @param dT_e_dpsi   d(Te)/d(psi) [eV/Wb]
+!! @param dT_i_dpsi   d(Ti)/d(psi) [eV/Wb]
+!! @param dn_e_dpsi   d(ne)/d(psi) [m^-3/Wb]
+!! @param dn_i_dpsi   d(ni)/d(psi) [m^-3/Wb]
+!! @param nu_e_star   Electron collisionality (pre-computed)
+!! @param nu_i_star   Ion collisionality (pre-computed)
+!! @param avg_j_bootstrap_times_B Output: <j_{bs,parallel}*B> [same units as -I_psi * pe * d/dpsi]
 !------------------------------------------------------------------------------
 SUBROUTINE redl_bootstrap(n, Te, Ti, ne, ni, pe, pi, Zeff, eps, fT, I_psi, &
     dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &

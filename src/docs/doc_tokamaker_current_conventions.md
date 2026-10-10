@@ -81,19 +81,9 @@ By (A4), ⟨j_φ/R⟩ = ⟨1/R⟩J_IMAS, so comparing with (A9a)
     (A9d) I_p = ∫dψ (V′/2π) [J_TM⟨1/R²⟩/⟨1/R⟩ + p′(1 − ⟨R⟩⟨1/R²⟩/⟨1/R⟩)]
 
 TokaMaker evaluates (A9c) as `gs_flux_int(J_IMAS(J_TM))`, which is (A9a) on the plasma region.
-Two earlier errors in this measure have been removed:
-- the integrand was J_TM/(⟨R⟩⟨1/R⟩), i.e. ∫dψ (V′/2π) J_TM/⟨R⟩, which equals (A9b) only if
-  ⟨j_φ/R⟩ = ⟨j_φ⟩/⟨R⟩;
-- `gs_flux_int` integrated over the whole plasma region of the mesh, crediting every point outside
-  the LCFS with the profile's LCFS value (the profile interpolator returns the LCFS end there). For a
-  profile with a finite edge value this overstated I_p by several percent (ITER bootstrap case:
-  5–7 %); ∫ 1 dA was the region's area, not the plasma's.
-
-`jphi_bs_update` used to absorb both errors by rescaling its I_p target by
-`gs_itor_nl`/`gs_flux_int` on the total. With the exact measure that factor converged to 1.0004
-(1-D quadrature error) and has been removed, so the SWB inductive scale α is set by (A9c) alone;
-converged I_p sits within a few 1e-4 of the target. `jphi_update` normalises its first iterate by
-(A9c) and then follows the FEM current (`gs_itor_nl`).
+The integral covers only the region inside the LCFS. The inductive scale α of `jphi_bs_update` is set
+by (A9c) alone (converged I_p within a few 1e-4 of the target); `jphi_update` normalises its first
+iterate by (A9c) and then follows the FEM current (`gs_itor_nl`).
 
 ## Bootstrap profile names
 `solve_bootstrap`, `get_boot_profs` and `solve_with_bootstrap` return J_TM profiles on `psi_n` (0 = axis,
@@ -108,7 +98,6 @@ GS output as `jphi_total`). `jdotb_bs_raw` is the Redl ⟨J·B⟩ behind `jphi_b
   the bootstrap enters `jphi_total` by (A7) with p′G (`boot_profs['jphi_pd_raw']`); `boot_profs['jdotb_bs_raw']` holds the Redl ⟨J·B⟩.
 - TokaMaker `jphi_update` / `jphi_bs_update` I_p normalisation, and the α root of
   `solve_with_bootstrap(use_python_solve=True)` (`compute_flux_integral` of J_IMAS): (A9c).
-- bouquet: currents are stored as J_TM; FUSE/IMAS currents are read and written through (A5)–(A7).
 
 ## References
 - J. P. Freidberg, *Ideal MHD* (Cambridge University Press, 2014): Grad–Shafranov equilibrium; (A1), (A2).
