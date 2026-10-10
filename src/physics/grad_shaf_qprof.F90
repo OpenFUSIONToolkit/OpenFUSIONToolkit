@@ -20,7 +20,6 @@ CONTAINS
 MODULE PROCEDURE gs_qprof_cutcell
 real(8) :: qf(nr),avgs(nr,4),fpol(nr),psi_surf
 real(8), allocatable :: fsa(:,:),shp(:,:)
-logical :: done(nr)
 integer(4) :: j
 DO j=1,nr
   psi_surf=psi_q(j)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1)
@@ -34,12 +33,13 @@ END DO
 IF(PRESENT(fsa_avgs))ALLOCATE(fsa(nr,4))
 IF(PRESENT(shape_geo))ALLOCATE(shp(nr,6))
 CALL gs_fsa_cutcell(gseq,nr,psi_q,qf,avgs,done,fpol,fsa,shp)
-ok=ALL(done)
-IF(.NOT.ok)RETURN
-prof=fpol*qf
-IF(PRESENT(ravgs))ravgs=avgs
-IF(PRESENT(fsa_avgs))fsa_avgs=fsa
-IF(PRESENT(shape_geo))shape_geo=shp
+DO j=1,nr
+  IF(.NOT.done(j))CYCLE
+  prof(j)=fpol(j)*qf(j)
+  IF(PRESENT(ravgs))ravgs(j,:)=avgs(j,:)
+  IF(PRESENT(fsa_avgs))fsa_avgs(j,:)=fsa(j,:)
+  IF(PRESENT(shape_geo))shape_geo(j,:)=shp(j,:)
+END DO
 END PROCEDURE gs_qprof_cutcell
 !------------------------------------------------------------------------------
 !> LCFS outputs of @ref gs_get_qprof (`dl`, `rbounds`, `zbounds`) for surface `psi_q1`

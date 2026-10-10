@@ -270,6 +270,7 @@ TYPE :: gs_equil
   LOGICAL :: diverted = .FALSE. !< Equilibrium is diverted?
   LOGICAL :: has_plasma = .TRUE. !< Solve with plasma? (otherwise vacuum)
   LOGICAL :: skip_targets = .FALSE. !< Skip toroidal current target in non-linear solve?
+  LOGICAL :: prof_failed = .FALSE. !< A flux function update failed (set by the profile, ends @ref gs_solve)
   INTEGER(i4) :: mode = 0 !< RHS source mode (0 -> F*F', 1 -> F')
   INTEGER(i4) :: nx_points = 0 !< Number of X-points in current solution
   INTEGER(i4) :: nregularize = 0 !< Number of regularization terms
@@ -515,7 +516,7 @@ abstract interface
 end interface
 INTERFACE
   !> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the cut-cell quadrature (see grad_shaf_qprof.F90)
-  MODULE SUBROUTINE gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,ok)
+  MODULE SUBROUTINE gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,done)
     class(gs_equil), intent(inout) :: gseq !< G-S object
     integer(4), intent(in) :: nr !< Number of flux surfaces
     real(8), intent(in) :: psi_q(nr) !< Locations in normalized flux
@@ -523,7 +524,7 @@ INTERFACE
     real(8), optional, intent(out) :: ravgs(nr,4) !< <R>, <1/R>, <1/R^2>, dV/dPsi
     real(8), optional, intent(out) :: fsa_avgs(nr,4) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
     real(8), optional, intent(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
-    logical, intent(out) :: ok !< All surfaces evaluated (otherwise use the tracer)
+    logical, intent(out) :: done(nr) !< Surfaces evaluated (the others are left for the tracer)
   END SUBROUTINE gs_qprof_cutcell
   !> @ref gs_trace_surf from the cut-cell quadrature (see grad_shaf_qprof.F90); `npoints=-1` if not available
   MODULE SUBROUTINE gs_trace_surf_cutcell(gseq,psi_in,points,npoints)
@@ -2191,6 +2192,7 @@ error_flag=0
 map_fails=0
 self%nl_its=0
 equil%skip_targets=.FALSE.
+equil%prof_failed=.FALSE.
 IF(TRIM(self%lu_solver%package)=='none')THEN
   CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 ELSE
@@ -2337,6 +2339,10 @@ END IF
 DO i=1,self%maxits
   IF(map_fails>=map_fail_max)THEN
     error_flag=-9
+    EXIT
+  END IF
+  IF(equil%prof_failed)THEN
+    error_flag=-10
     EXIT
   END IF
   !---Ramp R0 target
@@ -2706,12 +2712,14 @@ DO i=1,self%maxits
   IF((equil%Z0_target>-1.d98).AND.(ABS(Z0_tmp-equil%Z0_target)>1.d-8))CYCLE
   ! IF((equil%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
   IF(map_fails>0)CYCLE ! Do not converge on a stale toroidal flux map
+  IF(equil%prof_failed)CYCLE ! Nor on a failed flux function update (ends the solve above)
   IF(SQRT(nl_res)<self%nl_tol)EXIT
 end do
 IF(oft_env%pm)CALL oft_decrease_indent
 IF(i>self%maxits)THEN
   error_flag=-1
   IF(map_fails>0)error_flag=-9 ! Ran out of iterations on a stale toroidal flux map
+  IF(equil%prof_failed)error_flag=-10
 END IF
 IF(error_flag==0)THEN
   self%nl_its=i
@@ -3299,6 +3307,8 @@ SELECT CASE(ierr)
     err_reason='Wall eigenmode flux loop fitting failed'
   CASE(-9)
     err_reason='Toroidal flux map update failed'
+  CASE(-10)
+    err_reason='Flux function update failed'
   CASE DEFAULT
     err_reason='Unknown reason'
 END SELECT
@@ -4440,7 +4450,7 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
 integer(4), parameter :: nlcfs=1000
-logical :: lcfs_all,lcfs_any,geo,cc_ok,cc_prof
+logical :: lcfs_all,lcfs_any,geo,lcfs_ok,cc_done(nr)
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
@@ -4453,14 +4463,14 @@ IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but 
 IF(PRESENT(shape_geo).AND.lcfs_any)CALL oft_abort('"shape_geo" cannot be combined with LCFS arguments', &
   'gs_get_qprof',__FILE__)
 !---Cut-cell quadrature (exact on the FE surface); the field-line tracer below is the deprecated
-!---method (`qprof_backend=1`) and the fallback for surfaces the cut-cell path does not accept.
-!---If only the LCFS outputs fail, the profiles are kept and only `psi_q(1)` is traced.
-cc_prof=.FALSE.
+!---method (`qprof_backend=1`) and the fallback for the surfaces, and the LCFS outputs, the cut-cell
+!---path does not accept.
+cc_done=.FALSE.
+lcfs_ok=.NOT.lcfs_all
 IF((qprof_backend==0).AND.(.NOT.geo))THEN
-  CALL gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,cc_prof)
-  cc_ok=cc_prof
-  IF(cc_ok.AND.lcfs_all)CALL gs_lcfs_cutcell(gseq,psi_q(1),dl,rbounds,zbounds,cc_ok)
-  IF(cc_ok)RETURN
+  CALL gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,cc_done)
+  IF(lcfs_all.AND.cc_done(1))CALL gs_lcfs_cutcell(gseq,psi_q(1),dl,rbounds,zbounds,lcfs_ok)
+  IF(ALL(cc_done).AND.lcfs_ok)RETURN
 END IF
 !---
 raxis=gseq%o_point(1)
@@ -4530,7 +4540,8 @@ active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
 IF(PRESENT(shape_geo))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
-do j=1,MERGE(1,nr,cc_prof)
+do j=1,nr
+  IF(cc_done(j).AND.((j>1).OR.lcfs_ok))CYCLE
   !------------------------------------------------------------------------------
   ! Trace contour
   !------------------------------------------------------------------------------
@@ -4571,7 +4582,7 @@ do j=1,MERGE(1,nr,cc_prof)
   if(active_tracer%status/=1)THEN
     WRITE(error_str,"(A,F10.4)")"gs_get_qprof: Trace did not complete at psi = ",1.d0-psi_q(j)
     CALL oft_warn(error_str)
-    IF(.NOT.cc_prof)prof(j)=0.d0
+    IF(.NOT.cc_done(j))prof(j)=0.d0
     CYCLE
   end if
   !------------------------------------------------------------------------------
@@ -4642,7 +4653,7 @@ do j=1,MERGE(1,nr,cc_prof)
       IF(.NOT.PRESENT(shape_geo))DEALLOCATE(ptout)
     END IF
   END IF
-  IF(cc_prof)CYCLE ! Profiles kept from the cut-cell path
+  IF(cc_done(j))CYCLE ! Profiles kept from the cut-cell path
   !---Safety Factor (q)
   qpsi=fpol*active_tracer%v(3)/(2*pi)
   prof(j)=qpsi

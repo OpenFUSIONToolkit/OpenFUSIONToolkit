@@ -1253,8 +1253,7 @@ ITER_bootstrap_eq_dict = {
     'jphi_bs_axis': 4696.213397541225,
     'jphi_axis': 1397130.088093367,
     'jphi_max': 1507460.349786304,
-    # scale_j0 * alpha * seed, now = jphi_axis - jphi_bs_axis: since 1c6955d the Python alpha closure
-    # integrates the plasma only (was -7 % from the limiter-area over-count)
+    # returned jphi_ind at the axis: alpha * seed (the Python path's jphi_ind excludes scale_j0)
     'jphi_ind_axis': 1.392583E+06,
     'bs_fraction': 0.17910707149956598,
 }
@@ -1398,8 +1397,8 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
 
     # --- Extract geometry from equilibrium (same as solve_with_bootstrap) ---
     psi_eval = np.clip(psi_N, psi_pad, 1.0 - psi_pad)
-    _, f, _, _, _ = mygs.get_profiles(psi=psi_eval)
-    _, fc, r_avgs, _, eps = mygs.sauter_fc(psi=psi_eval, return_eps=True)
+    _, f, _, _, pp_eq = mygs.get_profiles(psi=psi_eval)
+    _, fc, r_avgs, b_avgs, eps = mygs.sauter_fc(psi=psi_eval, return_eps=True)
 
     ft = 1 - fc
     _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
@@ -1441,7 +1440,7 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
             nu_e_star_override=nu_e_star,
             nu_i_star_override=nu_i_star,
             use_legacy_L34=False,
-            use_sign_q=True,
+            use_sign_q=False,
             formula_form='jboot1',
         )
     except Exception as e:
@@ -1449,15 +1448,16 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
         mp_q.put(None)
         return
 
-    # Convert to j_phi (A/m^2) same as solve_with_bootstrap
-    j_BS = j_BS_neo * (R_avg / f)
-    j_BS = np.nan_to_num(j_BS, nan=0.0)
+    # Convert to j_phi (A/m^2) same as solve_with_bootstrap (doc_tokamaker_current_conventions eq. A7)
+    inv_R, B2 = ravgs_q['<1/R>'], b_avgs[1]
+    jphi_bs = j_BS_neo * f * inv_R / B2 + pp_eq * (R_avg - f**2 * inv_R / B2)
+    jphi_bs = np.nan_to_num(jphi_bs, nan=0.0)
 
     # --- Collect results ---
     results = {}
-    results['j_BS_max'] = float(np.max(np.abs(j_BS)))
-    results['j_BS_axis'] = float(j_BS[0])
-    results['j_BS_edge'] = float(j_BS[-1])
+    results['jphi_bs_max'] = float(np.max(np.abs(jphi_bs)))
+    results['jphi_bs_axis'] = float(jphi_bs[0])
+    results['jphi_bs_edge'] = float(jphi_bs[-1])
     results['L31_axis'] = float(coeffs['L31'][0])
     results['L32_axis'] = float(coeffs['L32'][0])
     results['alpha_axis'] = float(coeffs['alpha'][0])
@@ -1469,9 +1469,9 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
 
 
 Redl_jBS_eq_dict = {
-    'j_BS_max': 190036.48438360557,
-    'j_BS_axis': 5101.043999559047,
-    'j_BS_edge': 96587.97236259702,
+    'jphi_bs_max': 195234.5633663803,
+    'jphi_bs_axis': 5182.40772662609,
+    'jphi_bs_edge': 88568.31833389413,
     'L31_axis': 0.10849481301194958,
     'L32_axis': -0.014581267675566556,
     'alpha_axis': -0.6150406171285213,
@@ -1780,7 +1780,6 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
                     raise AssertionError(
                         f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_eq=...)"
                     )
-            print(key,val,expected)
         # Verify BOOT_PROFS arrays round-trip correctly through save/load
         if expected_boot_profs is None:
             raise AssertionError("get_boot_profs() returned None before save")

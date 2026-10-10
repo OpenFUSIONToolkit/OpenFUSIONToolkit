@@ -2599,6 +2599,8 @@ class TokaMaker():
                     "pres_prof must be >= the kinetic pressure (eC*(ne*Te + ni*Ti)) at every point on the psi grid"
                 )
             pressure = pres_vals
+        if not numpy.all(numpy.isfinite(pressure)):  # Akima gives NaN outside its data
+            raise ValueError("The kinetic, pres_prof and p_fixed_prof profiles must cover ffp_prof['x']")
         pp_vals = Akima1DInterpolator(psi_sample, pressure).derivative()(psi_sample)
         pp_vals[-1] = 0.0
         # Shape only (the pax target sets the scale): normalise by the largest |P'|, which is
@@ -2642,7 +2644,8 @@ class TokaMaker():
             jphi_fixed_prof=jphi_fixed_prof,
             jphi_saw_prof=jphi_saw_prof,
         )
-        self.set_targets(Ip=Ip_target, pax=pax)
+        # Keep the user's other targets; the jphi profile sets the FF'/P' split, so no Ip_ratio
+        self.set_targets(Ip=Ip_target, pax=pax, Ip_ratio=self._oft_env.float_disable_flag, retain_previous=True)
         self.update_settings()
         self.set_profiles(
             ffp_prof=ffp_prof,
@@ -2970,6 +2973,12 @@ class TokaMaker_equilibrium():
         tokamaker_load_profiles(self.c_ptr,f_file_c,c_double(self._F0),p_file_c,eta_file_c,f_NI_file_c,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        if (f_file != 'none') and (self._boot_ops is not None):
+            # The Fortran options persist only if a bootstrap profile replaced a bootstrap profile
+            bops, initialized = tokamaker_boot_ops_struct(), c_bool(False)
+            tokamaker_get_boot_ops(self.c_ptr, ctypes.byref(bops), ctypes.byref(initialized), error_string)
+            if not initialized.value:
+                self._boot_ops = None
 
     def set_profiles(self, ffp_prof=None, foffset=None, pp_prof=None, ffp_NI_prof=None, keep_files=False):
         r'''! Set flux function profiles (\f$F*F'\f$ and \f$P'\f$) using a piecewise linear definition
@@ -3106,7 +3115,7 @@ class TokaMaker_equilibrium():
                                      f"(got {len(Zeff['x'])} and {len(Zeff['y'])})")
                 if Zeff.get('type', 'linterp') != 'linterp':
                     raise ValueError(f"Zeff profile 'type' must be 'linterp' (got {Zeff['type']!r})")
-                Zeff.setdefault('type', 'linterp')
+                Zeff = dict(Zeff, type='linterp')
             else:
                 raise TypeError(f"Zeff must be a scalar or a profile dict with 'x' and 'y' keys; "
                                 f"got {type(Zeff).__name__}")
@@ -3122,7 +3131,7 @@ class TokaMaker_equilibrium():
                                  f"(got {len(te_prof['x'])} and {len(te_prof['y'])})")
             if te_prof.get('type', 'linterp') != 'linterp':
                 raise ValueError(f"te_prof 'type' must be 'linterp' (got {te_prof['type']!r})")
-            te_prof.setdefault('type', 'linterp')
+            te_prof = dict(te_prof, type='linterp')
             te_file = self._oft_env.unique_tmpfile('tokamaker_te.prof')
             create_prof_file(self, te_file, te_prof, "Te")
             delete_files.append(te_file)
@@ -3135,7 +3144,7 @@ class TokaMaker_equilibrium():
                                  f"(got {len(ti_prof['x'])} and {len(ti_prof['y'])})")
             if ti_prof.get('type', 'linterp') != 'linterp':
                 raise ValueError(f"ti_prof 'type' must be 'linterp' (got {ti_prof['type']!r})")
-            ti_prof.setdefault('type', 'linterp')
+            ti_prof = dict(ti_prof, type='linterp')
             ti_file = self._oft_env.unique_tmpfile('tokamaker_ti.prof')
             create_prof_file(self, ti_file, ti_prof, "Ti")
             delete_files.append(ti_file)
@@ -3148,7 +3157,7 @@ class TokaMaker_equilibrium():
                                  f"(got {len(ne_prof['x'])} and {len(ne_prof['y'])})")
             if ne_prof.get('type', 'linterp') != 'linterp':
                 raise ValueError(f"ne_prof 'type' must be 'linterp' (got {ne_prof['type']!r})")
-            ne_prof.setdefault('type', 'linterp')
+            ne_prof = dict(ne_prof, type='linterp')
             ne_file = self._oft_env.unique_tmpfile('tokamaker_ne.prof')
             create_prof_file(self, ne_file, ne_prof, "ne")
             delete_files.append(ne_file)
@@ -3161,7 +3170,7 @@ class TokaMaker_equilibrium():
                                  f"(got {len(ni_prof['x'])} and {len(ni_prof['y'])})")
             if ni_prof.get('type', 'linterp') != 'linterp':
                 raise ValueError(f"ni_prof 'type' must be 'linterp' (got {ni_prof['type']!r})")
-            ni_prof.setdefault('type', 'linterp')
+            ni_prof = dict(ni_prof, type='linterp')
             ni_file = self._oft_env.unique_tmpfile('tokamaker_ni.prof')
             create_prof_file(self, ni_file, ni_prof, "ni")
             delete_files.append(ni_file)
@@ -3174,7 +3183,7 @@ class TokaMaker_equilibrium():
                                  f"(got {len(jphi_fixed_prof['x'])} and {len(jphi_fixed_prof['y'])})")
             if jphi_fixed_prof.get('type', 'linterp') != 'linterp':
                 raise ValueError(f"jphi_fixed_prof 'type' must be 'linterp' (got {jphi_fixed_prof['type']!r})")
-            jphi_fixed_prof.setdefault('type', 'linterp')
+            jphi_fixed_prof = dict(jphi_fixed_prof, type='linterp')
             jphi_fixed_file = self._oft_env.unique_tmpfile('tokamaker_jphi_fixed.prof')
             create_prof_file(self, jphi_fixed_file, jphi_fixed_prof, "jphi_fixed")
             delete_files.append(jphi_fixed_file)
@@ -3187,7 +3196,7 @@ class TokaMaker_equilibrium():
                                  f"(got {len(jphi_saw_prof['x'])} and {len(jphi_saw_prof['y'])})")
             if jphi_saw_prof.get('type', 'linterp') != 'linterp':
                 raise ValueError(f"jphi_saw_prof 'type' must be 'linterp' (got {jphi_saw_prof['type']!r})")
-            jphi_saw_prof.setdefault('type', 'linterp')
+            jphi_saw_prof = dict(jphi_saw_prof, type='linterp')
             jphi_saw_file = self._oft_env.unique_tmpfile('tokamaker_jphi_saw.prof')
             create_prof_file(self, jphi_saw_file, jphi_saw_prof, "jphi_saw")
             delete_files.append(jphi_saw_file)
@@ -3254,8 +3263,6 @@ class TokaMaker_equilibrium():
             self._boot_ops['taper_edge_psi0'] = float(taper_edge_psi0)
         if taper_edge_shape is not None:
             self._boot_ops['taper_edge_shape'] = int(taper_edge_shape)
-        for _k, _d in (('saw_q_s', 0.0), ('saw_dq', 0.03), ('saw_tol', 1.0e-4), ('saw_relax', 1.0), ('saw_ramp', 0.01), ('saw_rule', 2)):
-            self._boot_ops.setdefault(_k, _d)
         for _k, _v, _t in (('saw_q_s', saw_q_s, float), ('saw_dq', saw_dq, float), ('saw_tol', saw_tol, float),
                            ('saw_relax', saw_relax, float), ('saw_ramp', saw_ramp, float), ('saw_rule', saw_rule, int)):
             if _v is not None:
@@ -3263,6 +3270,8 @@ class TokaMaker_equilibrium():
         if self._boot_ops['saw_q_s'] < 0.0 or self._boot_ops['saw_dq'] <= 0.0 or not (0.0 < self._boot_ops['saw_relax'] <= 1.0) \
                 or self._boot_ops['saw_ramp'] < 0.0 or self._boot_ops['saw_rule'] not in (1, 2):
             raise ValueError("saw options: need saw_q_s >= 0, saw_dq > 0, 0 < saw_relax <= 1, saw_ramp >= 0, saw_rule in (1, 2)")
+        if self._boot_ops['taper_edge_shape'] not in (1, 2, 3) or not (0.0 < self._boot_ops['taper_edge_psi0'] < 1.0):
+            raise ValueError("taper options: need taper_edge_shape in (1, 2, 3) and 0 < taper_edge_psi0 < 1")
         # Build the ctypes struct from the merged shadow state and send to Fortran
         bops = tokamaker_boot_ops_struct()
         bops.isolate_edge_jbs = self._boot_ops['isolate_edge_jbs']
@@ -3304,6 +3313,8 @@ class TokaMaker_equilibrium():
             saw_rho_m, saw_rho_out, saw_n_dips = c_double(0.0), c_double(0.0), c_int(0)
             tokamaker_get_boot_saw(self.c_ptr, ctypes.byref(saw_rho_m), ctypes.byref(saw_rho_out),
                                    ctypes.byref(saw_n_dips), error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
             result.update(saw_rho_m=saw_rho_m.value, saw_rho_out=saw_rho_out.value, saw_n_dips=saw_n_dips.value)
         if result and (self.psi_convention == 0):
             # OFT convention (0 = LCFS, LCFS first) to standard convention (0 = axis, axis first)

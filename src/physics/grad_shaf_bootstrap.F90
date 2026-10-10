@@ -75,14 +75,14 @@ END TYPE boot_profs
 CHARACTER(LEN=16), PARAMETER :: boot_prof_names(10) = [CHARACTER(LEN=16) :: 'psi_n', 'jdotB_bs_raw', &
   'jphi_bs_raw', 'jphi_pd_raw', 'jphi_total', 'jphi_bs', 'jphi_pd', 'jphi_ind', &
   'jphi_saw', 'jphi_fixed']
+REAL(r8), PARAMETER :: djbs_stol = 1.0e-3_r8 !< Stagnation tolerance: a stalled change above this resets the no-improve counter
+REAL(r8), PARAMETER :: dalpha_warn_tol = 1.0e-6_r8 !< Relative (|dalpha|/|alpha|): no alpha stall warning below this
 !------------------------------------------------------------------------------
 !> Jphi flux function type for bootstrap current calculation
 !------------------------------------------------------------------------------
 type, extends(jphi_flux_func) :: jphi_bs_flux_func
   real(8) :: alpha_last = 1.d0 !< Alpha (input Jphi rescaling factor) from previous NL iteration
   logical :: freeze_jbs = .FALSE. !< Set .TRUE. once jphi_bs converges or stagnates; skips the Sauter pass (big speedup)
-  real(8) :: djbs_stol = 1.0e-3_r8 !< Stagnation tolerance: a stalled change above this resets the no-improve counter
-  real(8) :: dalpha_warn_tol = 1.0e-6_r8 !< Relative (|dalpha|/|alpha|): no alpha stall warning below this
   integer(4) :: djbs_no_improve = 0   !< Consecutive steps with non-decreasing djbs
   real(8) :: djbs_min = huge(1.0d0)  !< Running minimum djbs seen so far
   integer(4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
@@ -298,8 +298,6 @@ SELECT TYPE(new)
   CLASS IS(jphi_bs_flux_func)
     new%alpha_last = self%alpha_last
     new%freeze_jbs = self%freeze_jbs
-    new%djbs_stol = self%djbs_stol
-    new%dalpha_warn_tol = self%dalpha_warn_tol
     new%djbs_no_improve = self%djbs_no_improve
     new%djbs_min = self%djbs_min
     new%dalpha_no_improve = self%dalpha_no_improve
@@ -345,7 +343,17 @@ self%djsaw_no_improve = 0
 self%djsaw_min = HUGE(1.0d0)
 IF(ALLOCATED(self%jphi_saw_last))DEALLOCATE(self%jphi_saw_last)
 IF(ALLOCATED(self%jphi_total_last))DEALLOCATE(self%jphi_total_last)
+CALL saw_scalars_reset(self%boot_profs)
 end subroutine reset_solve_state
+!------------------------------------------------------------------------------
+!> Zero the sawtooth scalars of @ref boot_profs (no reset)
+!------------------------------------------------------------------------------
+subroutine saw_scalars_reset(bp)
+TYPE(boot_profs), INTENT(inout) :: bp
+bp%saw_rho_m = 0.0_r8
+bp%saw_rho_out = 0.0_r8
+bp%saw_n_dips = 0
+end subroutine saw_scalars_reset
 !------------------------------------------------------------------------------
 !> Set (`set`) or point at (`get`) the @ref boot_profs array called `name` (see @ref boot_prof_names);
 !! `get` is NULL if that array is unallocated or the name is unknown
@@ -393,6 +401,11 @@ DO k=1,SIZE(boot_prof_names)
   group_made = .TRUE.
   CALL hdf5_write(vals,filename,path//'/'//h5_name(boot_prof_names(k)))
 END DO
+IF(group_made)THEN
+  CALL hdf5_write(bp%saw_rho_m,filename,path//'/SAW_RHO_M')
+  CALL hdf5_write(bp%saw_rho_out,filename,path//'/SAW_RHO_OUT')
+  CALL hdf5_write(bp%saw_n_dips,filename,path//'/SAW_N_DIPS')
+END IF
 end subroutine boot_profs_save
 !------------------------------------------------------------------------------
 !> Read the @ref boot_profs arrays present in group `path`; the others are left unallocated
@@ -415,6 +428,11 @@ DO k=1,SIZE(boot_prof_names)
   IF(success)CALL boot_prof_access(bp,boot_prof_names(k),set=vals)
   DEALLOCATE(vals,dim_sizes)
 END DO
+IF(hdf5_field_exist(filename,path//'/SAW_N_DIPS'))THEN
+  CALL hdf5_read(bp%saw_rho_m,filename,path//'/SAW_RHO_M',success=success)
+  CALL hdf5_read(bp%saw_rho_out,filename,path//'/SAW_RHO_OUT',success=success)
+  CALL hdf5_read(bp%saw_n_dips,filename,path//'/SAW_N_DIPS',success=success)
+END IF
 end subroutine boot_profs_load
 !------------------------------------------------------------------------------
 !> HDF5 dataset name of a @ref boot_profs array (its name in upper case)
@@ -542,6 +560,12 @@ ELSE
       END DO
     END IF
   END IF
+  !--- A surface that failed both the cut-cell and the tracer evaluation ends the solve (gs_solve error -10)
+  IF(.NOT.ALL(ravgs(1:,2)>0.0_r8))THEN
+    CALL oft_warn('jphi_bs_update: flux-surface evaluation failed on a bootstrap node')
+    gseq%prof_failed=.TRUE.
+    RETURN
+  END IF
   jphi_pd = jphi_pd * self%boot_ops%scale_jbs
   jphi_bs = jphi_bs * mu0
   jphi_pd = jphi_pd * mu0
@@ -549,7 +573,7 @@ ELSE
   IF(ALLOCATED(self%jphi_bs_last)) THEN
     djbs = SQRT(SUM((jphi_bs - self%jphi_bs_last)**2) / REAL(self%npsi+1,r8)) / &
            MAX(SQRT(SUM(jphi_bs**2) / REAL(self%npsi+1,r8)), 1.0e-30_r8)
-    CALL stall_check(djbs, self%boot_ops%djbs_tol, self%djbs_stol, self%djbs_min, self%djbs_no_improve, &
+    CALL stall_check(djbs, self%boot_ops%djbs_tol, djbs_stol, self%djbs_min, self%djbs_no_improve, &
                      self%freeze_jbs, 'Bootstrap solution', 'djbs_tol', 'bootstrap solution')
   ELSE
     djbs = HUGE(1.0_r8)
@@ -608,23 +632,19 @@ END IF
 ip_ind = ip_result_hi - ip_result_lo
 IF(ABS(ip_ind) > 0.0_r8)THEN
   alpha = (ip_target - ip_result_lo) / ip_ind
-  IF(alpha < -1.0_r8 .OR. alpha > 10.0_r8) THEN
-    WRITE(char_buf,'(A,ES12.4)') '[jphi_bs_update] WARNING: alpha out of expected range [-1,10]: alpha=', alpha
-    CALL oft_warn(TRIM(char_buf))
-  END IF
 ELSE
   alpha = self%alpha_last
 END IF
 !--- Relative change: alpha's scale is set by the units of ffp_prof (e.g. ~1e-6 for a jphi in A/m^2)
 dalpha = ABS(alpha - self%alpha_last) / MAX(ABS(alpha), TINY(1.0_r8))
 !--- Stall diagnostic only (alpha is never frozen): 2 consecutive non-decreasing steps.
-IF(dalpha >= self%dalpha_warn_tol .AND. dalpha >= self%dalpha_last) THEN
+IF(dalpha >= dalpha_warn_tol .AND. dalpha >= self%dalpha_last) THEN
   self%dalpha_no_improve = self%dalpha_no_improve + 1
   IF(self%dalpha_no_improve >= 2) THEN
     WRITE(char_buf,'(A,ES12.4,A,ES12.4,A)') &
       'Alpha convergence stalled,' // &
       ' relative change per nonlinear step = ', dalpha, &
-      ', above recommended tolerance (dalpha_warn_tol=', self%dalpha_warn_tol, ')'
+      ', above recommended tolerance (dalpha_warn_tol=', dalpha_warn_tol, ')'
     self%dalpha_no_improve = 0
     IF(oft_env%pm)CALL oft_warn(TRIM(char_buf))
   END IF
@@ -648,7 +668,7 @@ IF(do_saw)THEN
   djsaw = SQRT(SUM((jphi_saw - self%jphi_saw_last)**2)) / MAX(SQRT(SUM(jphi_total**2)), 1.0e-30_r8)
   ! Freeze only once jphi_bs has: before that the base current still moves, and an early iterate
   ! without a dip (djsaw = 0) would freeze the reset off for the whole solve
-  IF(self%freeze_jbs)CALL stall_check(djsaw, self%boot_ops%saw_tol, self%djbs_stol, self%djsaw_min, &
+  IF(self%freeze_jbs)CALL stall_check(djsaw, self%boot_ops%saw_tol, djbs_stol, self%djsaw_min, &
     self%djsaw_no_improve, self%freeze_saw, 'Sawtooth current', 'saw_tol', 'sawtooth current')
   DEALLOCATE(djphi_saw, cflds, cum)
 ELSE
@@ -719,7 +739,7 @@ END SUBROUTINE node_vals
 SUBROUTINE taper(a)
 REAL(r8), INTENT(inout) :: a(0:)
 IF(self%boot_ops%taper_edge_jbs)CALL apply_edge_taper(self%npsi+1, psi_n, a, &
-  1.0_r8 - self%boot_ops%taper_edge_psi0, self%boot_ops%taper_edge_shape, oft_psi_conv=.TRUE.)
+  1.0_r8 - self%boot_ops%taper_edge_psi0, self%boot_ops%taper_edge_shape)
 END SUBROUTINE taper
 END SUBROUTINE jphi_bs_update
 !---------------------------------------------------------------------------------
@@ -828,6 +848,7 @@ END DO
 IF(.NOT.(phi(n) > 0.0_r8))THEN
   CALL oft_warn('saw_redistribute: no closed surfaces for the q profile, skipping the reset this update')
   dj = 0.0_r8
+  CALL saw_scalars_reset(self%boot_profs)
   RETURN
 END IF
 rho = SQRT(phi/phi(n))
@@ -938,7 +959,7 @@ DO k = 1, n
   reg_end(n_low) = k
 END DO
 IF(n_low == 0)RETURN
-CALL grad_nonuniform(n, rho, q, gq)
+CALL gradient_(n, rho, q, gq, edge_order=1)
 qm = q_s + dq
 !---Sawtooth radius (both rules) and rule 1's reset, from the outermost q < q_s region
 CALL full_reset(n_low, qt, rho_s, rho_m, ok)
@@ -946,8 +967,8 @@ IF(.NOT.ok)THEN
   rho_s = 0.0_r8; rho_m = 0.0_r8
 END IF
 IF(rule == 1)THEN
-  n_dips = n_low
   IF(ok)THEN
+    n_dips = n_low
     !---Trigger weight from the deepest point inside rho_m
     w = 1.0_r8
     IF(ramp > 0.0_r8)w = MIN(MAX((q_s - MINVAL(q, MASK=(rho < rho_m)))/ramp, 0.0_r8), 1.0_r8)
@@ -968,7 +989,7 @@ ELSE
   END DO
 END IF
 dI = I*(q/q_new - 1.0_r8)
-CALL grad_nonuniform(n, A, dI, dj)
+CALL gradient_(n, A, dI, dj, edge_order=1)
 dj = dj/c1
 DEALLOCATE(reg_start, reg_end, gq, dI, qt)
 CONTAINS
@@ -978,12 +999,11 @@ INTEGER(i4), INTENT(in) :: kr
 REAL(r8), INTENT(out) :: qt_(n), rs_, rm_
 LOGICAL, INTENT(out) :: ok_
 INTEGER(i4) :: is, jm, kk
-REAL(r8) :: qm, slope, m, x, p
+REAL(r8) :: slope, m
 qt_ = q; rs_ = 0.0_r8; rm_ = 0.0_r8; ok_ = .FALSE.
 is = reg_end(kr)
 IF(is >= n)RETURN
 rs_ = rho(is) + (q_s - q(is))/(q(is+1) - q(is))*(rho(is+1) - rho(is))
-qm = q_s + dq
 jm = 0
 DO kk = is + 1, n
   IF(q(kk) >= qm)THEN
@@ -997,13 +1017,7 @@ rm_ = rho(jm-1) + (qm - q(jm-1))/(q(jm) - q(jm-1))*(rho(jm) - rho(jm-1))
 slope = gq(jm-1) + (rm_ - rho(jm-1))/(rho(jm) - rho(jm-1))*(gq(jm) - gq(jm-1))
 m = MAX(rm_*slope/dq, 0.0_r8)
 DO kk = 1, jm - 1
-  x = rho(kk)/rm_
-  IF(m <= 3.0_r8)THEN
-    p = (3.0_r8 - 2.0_r8*x)*x**2 + m*(x**3 - x**2)
-  ELSE
-    p = x**m
-  END IF
-  qt_(kk) = q_s + dq*p
+  qt_(kk) = q_s + dq*pshape(rho(kk)/rm_, m)
 END DO
 ok_ = .TRUE.
 END SUBROUTINE full_reset
@@ -1184,20 +1198,6 @@ ELSE
   pshape = x**m
 END IF
 END FUNCTION pshape
-!---Derivative dy/dx on a non-uniform grid (2nd-order interior, one-sided ends)
-SUBROUTINE grad_nonuniform(nn, xx, yy, dy)
-INTEGER(i4), INTENT(in) :: nn
-REAL(r8), INTENT(in) :: xx(nn), yy(nn)
-REAL(r8), INTENT(out) :: dy(nn)
-INTEGER(i4) :: kk
-REAL(r8) :: h1, h2
-dy(1) = (yy(2) - yy(1))/(xx(2) - xx(1))
-dy(nn) = (yy(nn) - yy(nn-1))/(xx(nn) - xx(nn-1))
-DO kk = 2, nn - 1
-  h1 = xx(kk) - xx(kk-1); h2 = xx(kk+1) - xx(kk)
-  dy(kk) = (h1**2*yy(kk+1) - h2**2*yy(kk-1) + (h2**2 - h1**2)*yy(kk))/(h1*h2*(h1 + h2))
-END DO
-END SUBROUTINE grad_nonuniform
 END SUBROUTINE saw_reset_1d
 !------------------------------------------------------------------------------
 !> Evaluate terms in augmented tracing ODE for computing Sauter factors
@@ -1464,50 +1464,27 @@ end function sauter_hf
 !> Apply a smooth edge taper to an array, zeroing it at the plasma edge.
 !>
 !> @param n          Number of grid points
-!> @param psi        Normalised psi grid
+!> @param psi        Normalised psi grid, OFT convention (0=LCFS, 1=axis)
 !> @param arr        Array to taper (modified in-place)
-!> @param psi0       psi value (in the grid's own convention) where taper begins
+!> @param psi0       psi (OFT convention) where the taper begins; it acts on psi <= psi0
 !> @param shape      Taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
-!> @param oft_psi_conv  If .TRUE., psi uses OFT internal convention (0=LCFS, 1=axis)
-!>                      and psi0 should be the OFT threshold (= 1 - standard psi0).
-!>                      Taper then acts on points where psi <= psi0.
-!>                      If .FALSE. (default), standard convention (0=axis, 1=LCFS),
-!>                      taper acts on points where psi >= psi0.
 !------------------------------------------------------------------------------
-SUBROUTINE apply_edge_taper(n, psi, arr, psi0, shape, oft_psi_conv)
+SUBROUTINE apply_edge_taper(n, psi, arr, psi0, shape)
 INTEGER(i4), INTENT(in)    :: n
 REAL(r8),    INTENT(in)    :: psi(n)
 REAL(r8),    INTENT(inout) :: arr(n)
 REAL(r8),    INTENT(in)    :: psi0
 INTEGER(i4), INTENT(in)    :: shape
-LOGICAL,     OPTIONAL, INTENT(in) :: oft_psi_conv
 !---
 INTEGER(i4) :: i
-LOGICAL     :: do_oft
 REAL(r8)    :: t_taper, w_taper, span
 CHARACTER(len=80) :: char_buf
 REAL(r8), PARAMETER :: HALF_PI = 1.5707963267948966_r8
-do_oft = .FALSE.
-IF (PRESENT(oft_psi_conv)) do_oft = oft_psi_conv
-! Taper width: distance from threshold to the plasma edge.
-! OFT convention: edge at psi=0, so width = psi0.
-! Standard convention: edge at psi=1, so width = 1 - psi0.
-IF (do_oft) THEN
-  span = psi0
-ELSE
-  span = 1.0_r8 - psi0
-END IF
+span = psi0 ! Taper width: the edge is at psi=0
 IF (span < 1.0e-6_r8) RETURN
 DO i = 1, n
-  IF (do_oft) THEN
-    ! OFT convention: edge at psi=0, taper region is psi in [0, psi0]
-    IF (psi(i) > psi0) CYCLE
-    t_taper = (psi0 - psi(i)) / span
-  ELSE
-    ! Standard convention: edge at psi=1, taper region is psi in [psi0, 1]
-    IF (psi(i) < psi0) CYCLE
-    t_taper = (psi(i) - psi0) / span
-  END IF
+  IF (psi(i) > psi0) CYCLE
+  t_taper = (psi0 - psi(i)) / span
   t_taper = MIN(MAX(t_taper, 0.0_r8), 1.0_r8)
   SELECT CASE (shape)
     CASE (1)  ! cos² / Hann
@@ -1525,43 +1502,25 @@ DO i = 1, n
 END DO
 END SUBROUTINE apply_edge_taper
 !------------------------------------------------------------------------------
-!> Compute dy/dx with second-order-accurate finite differences on the native grid.
-!>
-!> Port of `numpy.gradient(y, x, edge_order=2)`: the interior uses the
-!> three-point central stencil for the local (possibly non-uniform) spacing,
-!> and both endpoints use the second-order one-sided stencil.  The first-order
-!> endpoint difference numpy uses by default is badly inaccurate at the
-!> magnetic axis and separatrix, where the error propagates straight into
-!> on-axis/edge jphi_bs.
-!>
-!> This replaces an earlier shape-preserving PCHIP derivative.  On the uniform
-!> grids this code uses, the PCHIP endpoint formula reduces algebraically to
-!> the second-order one-sided difference, while its monotonicity clipping
-!> flattens the pedestal and makes the interior measurably less accurate.
-!>
-!> The grid is validated rather than repaired: unlike the PCHIP routine it
-!> replaces, this does not sort x or average over duplicated abscissae.
-!> Duplicated or unsorted flux labels give an undefined derivative, so they
-!> abort here instead of being silently smoothed.
-!>
-!> @param n     Number of input points (>= 3)
-!> @param x     Independent variable (e.g. psi); strictly monotonic, either direction
-!> @param y     Dependent variable sampled on x
-!> @param dydx  Output: dy/dx at each point in x
+!> dy/dx on a strictly monotonic, possibly non-uniform grid, as `numpy.gradient(y, x, edge_order=...)`:
+!! three-point central interior, one-sided ends of order `edge_order` (1 or 2, default 2). Aborts on
+!! a non-finite input or result, or on a repeated or unsorted abscissa.
 !------------------------------------------------------------------------------
-SUBROUTINE gradient_(n, x, y, dydx)
+SUBROUTINE gradient_(n, x, y, dydx, edge_order)
 USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
-INTEGER(i4), INTENT(in) :: n
-REAL(r8), INTENT(in) :: x(n)
-REAL(r8), INTENT(in) :: y(n)
-REAL(r8), INTENT(out) :: dydx(n)
+INTEGER(i4), INTENT(in) :: n !< Number of points
+REAL(r8), INTENT(in) :: x(n) !< Abscissae
+REAL(r8), INTENT(in) :: y(n) !< Values on x
+REAL(r8), INTENT(out) :: dydx(n) !< dy/dx on x
+INTEGER(i4), OPTIONAL, INTENT(in) :: edge_order !< Order of the end stencils (1 or 2, default 2)
 !---
-INTEGER(i4) :: i
+INTEGER(i4) :: i, eo
 REAL(r8) :: hs, hd !< Backward and forward interval widths about the stencil centre
 CHARACTER(len=512) :: char_buf
-IF(n < 3) &
-  CALL oft_abort('fewer than 3 input points; a second-order stencil is undefined', &
-    'gradient_', __FILE__)
+eo = 2
+IF(PRESENT(edge_order))eo = edge_order
+IF(n < eo+1) &
+  CALL oft_abort('too few input points for the end stencils', 'gradient_', __FILE__)
 DO i = 1, n
   IF(.NOT.IEEE_IS_FINITE(x(i)) .OR. .NOT.IEEE_IS_FINITE(y(i)))THEN
     WRITE(char_buf,'(A,I0,A,ES12.5,A,ES12.5)') 'non-finite input at i=', i, &
@@ -1587,17 +1546,22 @@ DO i = 2, n-1
             + ((hd - hs)/(hs*hd))*y(i) &
             + (hs/(hd*(hs + hd)))*y(i+1)
 END DO
-!--- Endpoints: second-order one-sided stencils (numpy's edge_order=2)
-hs = x(2) - x(1)
-hd = x(3) - x(2)
-dydx(1) = -((2.0_r8*hs + hd)/(hs*(hs + hd)))*y(1) &
-          + ((hs + hd)/(hs*hd))*y(2) &
-          - (hs/(hd*(hs + hd)))*y(3)
-hs = x(n-1) - x(n-2)
-hd = x(n) - x(n-1)
-dydx(n) = (hd/(hs*(hs + hd)))*y(n-2) &
-          - ((hd + hs)/(hs*hd))*y(n-1) &
-          + ((2.0_r8*hd + hs)/(hd*(hs + hd)))*y(n)
+!--- Endpoints: one-sided stencils of order eo
+IF(eo == 1)THEN
+  dydx(1) = (y(2) - y(1))/(x(2) - x(1))
+  dydx(n) = (y(n) - y(n-1))/(x(n) - x(n-1))
+ELSE
+  hs = x(2) - x(1)
+  hd = x(3) - x(2)
+  dydx(1) = -((2.0_r8*hs + hd)/(hs*(hs + hd)))*y(1) &
+            + ((hs + hd)/(hs*hd))*y(2) &
+            - (hs/(hd*(hs + hd)))*y(3)
+  hs = x(n-1) - x(n-2)
+  hd = x(n) - x(n-1)
+  dydx(n) = (hd/(hs*(hs + hd)))*y(n-2) &
+            - ((hd + hs)/(hs*hd))*y(n-1) &
+            + ((2.0_r8*hd + hs)/(hd*(hs + hd)))*y(n)
+END IF
 !--- Finite input does not guarantee a finite result: the stencil weights
 !   overflow for large y on a very fine grid.
 DO i = 1, n
@@ -1615,7 +1579,7 @@ END SUBROUTINE gradient_
 !> (up to and including the redl_bootstrap call).
 !>
 !> Fixed conventions: NRL Coulomb logs, Koh ion collisionality model,
-!> Redl 2021 jboot1 form with use_sign_q=.TRUE., L34=L31.
+!> Redl 2021 jboot1 form, L34=L31.
 !>
 !> @param gseq    Equilibrium object (must have Te, Ti, ne, ni, Zeff set)
 !> @param n_psi    Number of flux surface samples
@@ -1728,9 +1692,9 @@ nu_i_star = 4.90e-18_r8 * ABS(qvals) * R_avg * ni &
 nu_e_star = 6.921e-18_r8 * ABS(qvals) * R_avg * ne &
           * Zeff * ln_le / (Te**2 * eps**1.5_r8)
 ! Compute bootstrap current via Redl 2021
-CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, qvals, eps, ft, f, &
+CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, eps, ft, f, &
     dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &
-    ln_le, ln_lii, nu_e_star, nu_i_star, jdotB_bs)
+    nu_e_star, nu_i_star, jdotB_bs)
 ! Convert <j_BS.B> to TokaMaker's jphi = <j_phi> = <R>P' + <1/R>FF'/mu0 (exact, see
 ! doc_tokamaker_current_conventions.md eq. A7): the field-aligned part F<1/R>/<B^2> * <j_BS.B>,
 ! plus the pressure-driven (diamagnetic + Pfirsch-Schlueter) part P'(<R> - F^2<1/R>/<B^2>),
@@ -1938,7 +1902,7 @@ peak_psi    = psi_N(peak_idx)
 !    Mirrors: lmin_jbs = min(j_bootstrap[(psi_N > 0.5) & (psi_N < peak_psi)])
 ! =====================================================================
 lmin_jbs = 1.0e30_r8
-lmin_idx  = peak_idx      ! fallback: use peak location if no point found
+lmin_idx  = peak_idx
 DO i = 1, n
   IF (psi_N(i) > 0.5_r8 .AND. psi_N(i) < peak_psi) THEN
     IF (jphi_bs(i) < lmin_jbs) THEN
@@ -1947,6 +1911,13 @@ DO i = 1, n
     END IF
   END IF
 END DO
+IF (lmin_idx == peak_idx) THEN
+  CALL oft_warn('[analyze_bootstrap_edge_spike] no node between psi_N = 0.5 and the '// &
+    'edge peak; using bootstrap profile without edge isolation')
+  masked_spike = jphi_bs
+  IF (PRESENT(parameterized_spike)) parameterized_spike = jphi_bs
+  RETURN
+END IF
 ! =====================================================================
 ! 3. Build masked_spike:
 !    - Flat at lmin_jbs for psi_N < psi_N(lmin_idx)
@@ -2024,7 +1995,7 @@ END SUBROUTINE analyze_bootstrap_edge_spike
 !>
 !> Translates Python bootstrap.py:redl_bootstrap with fixed settings:
 !>   - use_legacy_L34 = .FALSE.  (L34 = L31)
-!>   - use_sign_q     = .TRUE.
+!>   - no sign(q) factor (<j.B> is odd in F through I_psi)
 !>   - formula_form   = 'jboot1'
 !>   - nu_e_star and nu_i_star are passed in pre-computed (no internal fallback)
 !>
@@ -2038,7 +2009,6 @@ END SUBROUTINE analyze_bootstrap_edge_spike
 !> @param pe          Electron pressure [Pa]
 !> @param pi          Ion pressure [Pa]
 !> @param Zeff        Effective charge
-!> @param q           Safety factor
 !> @param eps         Inverse aspect ratio
 !> @param fT          Trapped particle fraction
 !> @param I_psi       Toroidal current function F = R*Bt [T*m]
@@ -2046,22 +2016,19 @@ END SUBROUTINE analyze_bootstrap_edge_spike
 !> @param dT_i_dpsi   d(Ti)/d(psi) [eV/Wb]
 !> @param dn_e_dpsi   d(ne)/d(psi) [m^-3/Wb]
 !> @param dn_i_dpsi   d(ni)/d(psi) [m^-3/Wb]
-!> @param ln_lambda_e Electron Coulomb logarithm
-!> @param ln_lambda_ii Ion Coulomb logarithm
 !> @param nu_e_star   Electron collisionality (pre-computed)
 !> @param nu_i_star   Ion collisionality (pre-computed)
 !> @param avg_j_bootstrap_times_B Output: <j_{bs,parallel}*B> [same units as -I_psi * pe * d/dpsi]
 !------------------------------------------------------------------------------
-SUBROUTINE redl_bootstrap(n, Te, Ti, ne, ni, pe, pi, Zeff, q, eps, fT, I_psi, &
+SUBROUTINE redl_bootstrap(n, Te, Ti, ne, ni, pe, pi, Zeff, eps, fT, I_psi, &
     dT_e_dpsi, dT_i_dpsi, dn_e_dpsi, dn_i_dpsi, &
-    ln_lambda_e, ln_lambda_ii, nu_e_star, nu_i_star, avg_j_bootstrap_times_B)
+    nu_e_star, nu_i_star, avg_j_bootstrap_times_B)
 INTEGER(i4), INTENT(in) :: n
 REAL(r8), INTENT(in) :: Te(n), Ti(n), ne(n), ni(n)
 REAL(r8), INTENT(in) :: pe(n), pi(n), Zeff(n)
-REAL(r8), INTENT(in) :: q(n), eps(n), fT(n), I_psi(n)
+REAL(r8), INTENT(in) :: eps(n), fT(n), I_psi(n)
 REAL(r8), INTENT(in) :: dT_e_dpsi(n), dT_i_dpsi(n)
 REAL(r8), INTENT(in) :: dn_e_dpsi(n), dn_i_dpsi(n)
-REAL(r8), INTENT(in) :: ln_lambda_e(n), ln_lambda_ii(n)
 REAL(r8), INTENT(in) :: nu_e_star(n), nu_i_star(n)
 REAL(r8), INTENT(out) :: avg_j_bootstrap_times_B(n)
 !---
@@ -2100,7 +2067,7 @@ dee_3 = (0.13_r8 * (1.0_r8 - 0.38_r8*fT) * nu_e_star / (Zeff**2)) &
        + fT**2 * SQRT((0.075_r8 + 0.25_r8*(Zeff - 1.0_r8)**2) * nu_e_star))
 X32_ee = fT / (1.0_r8 + dee_2 + dee_3)
 F32_ee = ( (0.1_r8 + 0.6_r8*Zeff) &
-         / (Zeff*(0.77_r8 + 0.63_r8*(1.0_r8 + (Zeff - 1.0_r8)**1.1_r8))) &
+         / (Zeff*(0.77_r8 + 0.63_r8*(1.0_r8 + MAX(Zeff - 1.0_r8, 0.0_r8)**1.1_r8))) &
          * (X32_ee - X32_ee**4) &
          + 0.7_r8/(1.0_r8 + 0.2_r8*Zeff) &
          * (X32_ee**2 - X32_ee**4 - 1.2_r8*(X32_ee**3 - X32_ee**4)) &
@@ -2128,7 +2095,7 @@ alpha = ((alpha0 + 0.7_r8*Zeff*SQRT(fT)*SQRT(nu_i_star)) &
        - 0.002_r8*nu_i_star**2*fT**6) &
       / (1.0_r8 + 0.004_r8*nu_i_star**2*fT**6)
 ! =====================================================================
-! Assemble: jboot1 form with use_sign_q = .TRUE.
+! Assemble: jboot1 form
 ! =====================================================================
 dp_dpsi = (ne*dT_e_dpsi + Te*dn_e_dpsi &
          + ni*dT_i_dpsi + Ti*dn_i_dpsi) * EC
@@ -2136,7 +2103,5 @@ bra1 = L31 * dp_dpsi / pe
 bra2 = L32 * dT_e_dpsi / Te
 bra3 = L34 * alpha * (1.0_r8 - R_pe) / R_pe * dT_i_dpsi / Ti
 avg_j_bootstrap_times_B = -I_psi * pe * (bra1 + bra2 + bra3)
-! Apply sign(q)
-avg_j_bootstrap_times_B = avg_j_bootstrap_times_B * SIGN(1.0_r8, q)
 END SUBROUTINE redl_bootstrap
 end module grad_shaf_bootstrap

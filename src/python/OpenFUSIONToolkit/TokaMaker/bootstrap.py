@@ -741,7 +741,7 @@ def redl_bootstrap(
     X32_ee = fT / (1 + dee_2 + dee_3)
     F32_ee = (
         (0.1 + 0.6 * Zeff)
-        / (Zeff * (0.77 + 0.63 * (1 + (Zeff - 1)**1.1)))
+        / (Zeff * (0.77 + 0.63 * (1 + numpy.maximum(Zeff - 1, 0)**1.1)))
         * (X32_ee - X32_ee**4)
         + 0.7 / (1 + 0.2 * Zeff)
         * (X32_ee**2 - X32_ee**4 - 1.2 * (X32_ee**3 - X32_ee**4))
@@ -1189,7 +1189,7 @@ def solve_with_bootstrap(mygs,
                     nu_e_star_override=nu_e_star,
                     nu_i_star_override=nu_i_star,
                     use_legacy_L34=False, # L34 = L31 (correct Redl 2021)
-                    use_sign_q=True, # convention-dependent
+                    use_sign_q=False, # <j.B> is odd in F through I_psi
                     formula_form='jboot1', # no d(ln ne)=d(ln ni) assumption
                 )
 

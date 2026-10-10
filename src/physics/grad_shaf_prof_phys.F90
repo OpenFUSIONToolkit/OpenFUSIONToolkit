@@ -525,7 +525,7 @@ class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
 REAL(r8) :: jphi_norm,pscale,pprime,dnorm,ip0,ip1
-REAL(r8), ALLOCATABLE :: jtor(:),xpsi(:),ravgs(:,:)
+REAL(r8), ALLOCATABLE :: jtor(:),xpsi(:),ravgs(:,:),xn(:),jn(:)
 self%plasma_bounds=gseq%plasma_bounds
 CALL jphi_psi_nodes(self,xpsi)
 IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
@@ -546,13 +546,15 @@ IF(gseq%skip_targets)THEN
   jphi_norm=(1.d0+dnorm)*self%norm_last/2.d0
   self%norm_last=jphi_norm
 ELSE
-  ! Exact I_p (A9c) is affine in the jphi scale: I_p(norm) = ip0 + norm*(ip1 - ip0)
-  ALLOCATE(jtor(self%npsi))
-  CALL eval_jtor_imas(gseq, xpsi, self%npsi, ravgs(1:,:), self%jphi, pscale, jtor)
-  CALL gs_flux_int(gseq,xpsi,jtor,self%npsi,ip1)
-  CALL eval_jtor_imas(gseq, xpsi, self%npsi, ravgs(1:,:), 0.d0*self%jphi, pscale, jtor)
-  CALL gs_flux_int(gseq,xpsi,jtor,self%npsi,ip0)
-  DEALLOCATE(jtor)
+  ! Exact I_p (A9c) is affine in the jphi scale: I_p(norm) = ip0 + norm*(ip1 - ip0), over [LCFS, x]
+  ALLOCATE(xn(0:self%npsi),jn(0:self%npsi),jtor(0:self%npsi))
+  xn=[0.d0,xpsi]; jn=[self%j0,self%jphi]
+  CALL eval_jtor_imas(gseq, xn, self%npsi+1, ravgs, jn, pscale, jtor)
+  CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip1)
+  jn=0.d0
+  CALL eval_jtor_imas(gseq, xn, self%npsi+1, ravgs, jn, pscale, jtor)
+  CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip0)
+  DEALLOCATE(xn,jn,jtor)
   jphi_norm=(ABS(gseq%Ip_target)-ip0)/(ip1-ip0)
   self%norm_last=jphi_norm
 END IF
