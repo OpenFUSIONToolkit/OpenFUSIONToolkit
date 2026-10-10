@@ -16,7 +16,7 @@ use oft_base
 use oft_gs, only: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
  gs_itor_nl, qprof_trace_tol, gs_fpol
 use oft_gs_profiles, only: torflux_qgeom_backend
-use oft_gs_cutcell, only: gs_sauter_cutcell, gs_qgeom_cutcell
+use oft_gs_cutcell, only: gs_sauter_cutcell, gs_fsa_cutcell
 use oft_lag_basis, only: oft_blag_geval
 use oft_mesh_type, only: bmesh_findcell
 use oft_blag_operators, only: oft_lag_brinterp
@@ -73,6 +73,7 @@ CHARACTER(LEN=16), PARAMETER :: boot_prof_names(10) = [CHARACTER(LEN=16) :: 'psi
   'jphi_saw', 'jphi_fixed']
 REAL(r8), PARAMETER :: djbs_stol = 1.0e-3_r8 !< Stagnation tolerance: a stalled change above this resets the no-improve counter
 REAL(r8), PARAMETER :: dalpha_warn_tol = 1.0e-6_r8 !< Relative (|dalpha|/|alpha|): no alpha stall warning below this
+INTEGER(i4), PARAMETER :: saw_nsmooth = 8 !< Half-width (kept nodes) of the quadratic fit smoothing q_base in @ref saw_redistribute
 !------------------------------------------------------------------------------
 !> Jphi flux function type for bootstrap current calculation
 !------------------------------------------------------------------------------
@@ -594,10 +595,10 @@ ALLOCATE(jphi_total(0:self%npsi), jphi_saw_cur(0:self%npsi), jphi_saw(0:self%nps
 !   Sawtooth current entering the alpha solve: last iterate (or the input until the first reset)
 jphi_saw_cur = jphi_saw_in
 IF(saw_on .AND. ALLOCATED(self%jphi_saw_last))jphi_saw_cur = self%jphi_saw_last
-!   One quadrature pass for the alpha solve and the reset's enclosed currents: lo (alpha=0 with the
-!   input saw), ind (inductive, linear), dsaw (jphi_saw_cur - input, linear), eq (last total), area.
+!   One quadrature pass for the alpha solve: lo (alpha=0 with the input saw), ind (inductive, linear),
+!   dsaw (jphi_saw_cur - input, linear); eq (last total) is for the reset.
 IF(do_saw)THEN
-  ALLOCATE(cflds(self%npsi+1,5), cum(self%npsi+1,5))
+  ALLOCATE(cflds(self%npsi+1,4), cum(self%npsi+1,3))
   jphi_total = jphi_bs + jphi_fixed + jphi_saw_in
   CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, cflds(:,1))
   jphi_total = jphi_ind + jphi_bs + jphi_fixed + jphi_saw_in
@@ -607,8 +608,7 @@ IF(do_saw)THEN
   CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
   cflds(:,3) = jtor - cflds(:,1)
   CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, self%jphi_total_last, pscale, cflds(:,4))
-  cflds(:,5) = 1.0_r8
-  CALL gs_flux_cumint(gseq, psi_n, cflds, self%npsi+1, 5, cum)
+  CALL gs_flux_cumint(gseq, psi_n, cflds(:,1:3), self%npsi+1, 3, cum)
 END IF
 !--- 4. alpha: I_p is affine in alpha, so alpha = (Ip_target - Ip_lo) / (Ip_hi - Ip_lo). Re-solved
 !   every update (cheap): a frozen alpha lets I_p drift while the shape is still settling.
@@ -656,8 +656,8 @@ END IF
 !--- 4a. Sawtooth reset of the base current (alpha now known); jphi_saw freeze check.
 IF(do_saw)THEN
   ALLOCATE(djphi_saw(0:self%npsi))
-  CALL saw_redistribute(self, gseq, psi_n, ravgs, cum(:,1) + alpha*cum(:,2), &
-                        cum(:,4), cum(:,5), alpha*jphi_ind + jphi_bs + jphi_fixed + jphi_saw_in, djphi_saw)
+  CALL saw_redistribute(self, gseq, psi_n, ravgs, cflds(:,1) + alpha*cflds(:,2), &
+                        cflds(:,4), alpha*jphi_ind + jphi_bs + jphi_fixed + jphi_saw_in, djphi_saw)
   jphi_saw = jphi_saw_in + self%boot_ops%saw_relax*djphi_saw + (1.0_r8 - self%boot_ops%saw_relax)*(jphi_saw_cur - jphi_saw_in)
   jphi_total = alpha * jphi_ind + jphi_bs + jphi_fixed + jphi_saw
   djsaw = SQRT(SUM((jphi_saw - self%jphi_saw_last)**2)) / MAX(SQRT(SUM(jphi_total**2)), 1.0e-30_r8)
@@ -778,43 +778,60 @@ END SUBROUTINE stall_check
 !!
 !! q_base = q_eq*I_eq/I_base (q*I is geometric) on rho = sqrt(Phi_N); @ref saw_reset_1d resets it on
 !! nodes with enough enclosed area, interpolated in rho; dI/dA maps back to jphi via eval_jtor_imas.
+!! Enclosed area and currents are 1-D integrals over the cut-cell \f$ dA/d\hat{\psi} \f$: the reset
+!! differentiates them, and binning mesh quadrature points by psi (@ref gs_flux_cumint) leaves
+!! percent-level noise in each node interval.
 !---------------------------------------------------------------------------------
-SUBROUTINE saw_redistribute(self, gseq, xn, ravgs, I_base, I_eq, area, j_base, dj)
+SUBROUTINE saw_redistribute(self, gseq, xn, ravgs, jt_base, jt_eq, j_base, dj)
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 REAL(r8), INTENT(in) :: xn(:) !< Nodes, 0 at LCFS, 1 at axis [n]
 REAL(r8), INTENT(in) :: ravgs(:,:) !< <R>, <1/R>, <1/R^2> on the nodes [n,3]
-REAL(r8), INTENT(in) :: I_base(:) !< Enclosed base current at each node (gs_flux_cumint) [n]
-REAL(r8), INTENT(in) :: I_eq(:) !< Enclosed current of the equilibrium [n]
-REAL(r8), INTENT(in) :: area(:) !< Enclosed area [n]
+REAL(r8), INTENT(in) :: jt_base(:) !< Base jtor (@ref eval_jtor_imas) on the nodes [n]
+REAL(r8), INTENT(in) :: jt_eq(:) !< jtor of the equilibrium's current on the nodes [n]
 REAL(r8), INTENT(in) :: j_base(:) !< Base jphi on the nodes [n]
 REAL(r8), INTENT(out) :: dj(:) !< Reset current [n]
 INTEGER(i4) :: n, i, k, n_dips, nk
 INTEGER(i4), ALLOCATABLE :: kk(:)
 REAL(r8), PARAMETER :: psi_ax = 1.0e-4_r8
-REAL(r8) :: rho_s, rho_m, rho_out, w, wf, dAmin, alast, psi
-REAL(r8), ALLOCATABLE :: q_eq(:), c1(:), rho(:), qb(:), Ib(:), Ar(:), qn(:), djr(:), wr(:), r(:), phi(:), g(:)
+REAL(r8) :: rho_s, rho_m, rho_out, w, wf, dAmin, alast, psi, h
+REAL(r8), ALLOCATABLE :: q_eq(:), c1(:), rho(:), qb(:), Ib(:), Ie(:), Ar(:), ap(:), qn(:), djr(:), wr(:), r(:), &
+  phi(:), g(:), fs(:,:)
+LOGICAL, ALLOCATABLE :: ok(:)
 n = SIZE(xn)
-ALLOCATE(q_eq(n), c1(n), rho(n), qb(n), Ib(n), Ar(n), qn(n), djr(n), wr(n), r(n), phi(n), g(n))
-!---q on the nodes, axis-first (index 1 = innermost node). Nodes without a closed surface (g = 0:
-!   the LCFS, the axis, a failed surface) take the q of the next node inward (the axis: outward).
-CALL gs_qgeom_cutcell(gseq, n, xn, g)
+ALLOCATE(q_eq(n), c1(n), rho(n), qb(n), Ib(n), Ie(n), Ar(n), ap(n), qn(n), djr(n), wr(n), r(n), phi(n), g(n), &
+  fs(n,4), ok(n))
+!---q and dA/dpsi_N = oint dl/|grad psi_N| = <1/R> dV/dpsi_N / 2pi on the nodes, axis-first (index 1 =
+!   innermost node). Nodes without a closed surface (the LCFS, the axis, a failed surface) take the
+!   values of the next node inward (the axis: outward).
+CALL gs_fsa_cutcell(gseq, n, xn, g, fs, ok)
 DO i = 1, n
   k = n + 1 - i
-  q_eq(i) = 0.0_r8
-  IF(g(k) /= 0.0_r8)THEN
+  q_eq(i) = 0.0_r8; ap(i) = 0.0_r8
+  IF(ok(k))THEN
     psi = gseq%plasma_bounds(1) + xn(k)*(gseq%plasma_bounds(2) - gseq%plasma_bounds(1))
     q_eq(i) = ABS(g(k)*gs_fpol(gseq, psi))
+    ap(i) = ABS(fs(k,2)*fs(k,4)*(gseq%plasma_bounds(2) - gseq%plasma_bounds(1)))/(2.0_r8*pi)
   END IF
   c1(i) = ravgs(k,3)/ravgs(k,2)**2
-  Ib(i) = I_base(k)
-  Ar(i) = area(k)
 END DO
 DO i = 2, n
   IF(q_eq(i) <= 0.0_r8)q_eq(i) = q_eq(i-1)
+  IF(ap(i) <= 0.0_r8)ap(i) = ap(i-1)
 END DO
 DO i = n-1, 1, -1
   IF(q_eq(i) <= 0.0_r8)q_eq(i) = q_eq(i+1)
+  IF(ap(i) <= 0.0_r8)ap(i) = ap(i+1)
+END DO
+!---Enclosed area and currents (trapezoid in psi_N; the piece inside the innermost node as a rectangle)
+h = 1.0_r8 - xn(n)
+Ar(1) = h*ap(1); Ib(1) = h*ap(1)*jt_base(n); Ie(1) = h*ap(1)*jt_eq(n)
+DO i = 2, n
+  k = n + 1 - i
+  h = 0.5_r8*(xn(k+1) - xn(k))
+  Ar(i) = Ar(i-1) + h*(ap(i) + ap(i-1))
+  Ib(i) = Ib(i-1) + h*(ap(i)*jt_base(k) + ap(i-1)*jt_base(k+1))
+  Ie(i) = Ie(i-1) + h*(ap(i)*jt_eq(k) + ap(i-1)*jt_eq(k+1))
 END DO
 !---Nodes within psi_ax of the axis (cut-cell q/F is unreliable on surfaces much smaller than a
 !   cell) take the quadratic extrapolation in psi of the first three nodes outside it
@@ -859,12 +876,14 @@ END DO
 !---q_base on the kept nodes; the axis takes the ratio of the first node off it
 DO i = 1, nk
   r(i) = 1.0_r8
-  IF(ABS(Ib(kk(i))) > 0.0_r8 .AND. Ar(kk(i)) > 0.0_r8)r(i) = I_eq(n+1-kk(i))/Ib(kk(i))
+  IF(ABS(Ib(kk(i))) > 0.0_r8 .AND. Ar(kk(i)) > 0.0_r8)r(i) = Ie(kk(i))/Ib(kk(i))
 END DO
 IF(Ar(kk(1)) <= 0.0_r8 .AND. nk > 1)r(1) = r(2)
 DO i = 1, nk
   qb(i) = q_eq(kk(i))*r(i)
 END DO
+!---The reset differentiates q_base, so smooth its grid-scale roughness first (the shoulder itself is analytic)
+CALL quad_smooth(nk, rho(kk(1:nk)), qb(1:nk), saw_nsmooth)
 CALL saw_reset_1d(nk, rho(kk(1:nk)), qb(1:nk), Ib(kk(1:nk)), Ar(kk(1:nk)), c1(kk(1:nk)), &
                   self%boot_ops%saw_q_s, self%boot_ops%saw_dq, self%boot_ops%saw_ramp, &
                   self%boot_ops%saw_rule, qn(1:nk), djr(1:nk), wr(1:nk), rho_s, rho_m, rho_out, n_dips, w)
@@ -894,8 +913,44 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,3F8.4,I3,F7.3,2F8.4)') '  [saw] rho_s rho_m rho_out n_dips w q_base(0) q_new(0) = ', &
     rho_s, rho_m, rho_out, n_dips, w, qb(1), qn(1)
 END IF
-DEALLOCATE(q_eq, c1, rho, qb, Ib, Ar, qn, djr, wr, r, phi, g, kk)
+DEALLOCATE(q_eq, c1, rho, qb, Ib, Ie, Ar, ap, qn, djr, wr, r, phi, g, fs, ok, kk)
 END SUBROUTINE saw_redistribute
+!---------------------------------------------------------------------------------
+!> Smooth y(x) in place by a least-squares quadratic over +-hw points about each point (Savitzky-Golay
+!! on a non-uniform grid; exact for quadratics). If x(1) = 0 the points are mirrored about it (y even in x).
+!---------------------------------------------------------------------------------
+SUBROUTINE quad_smooth(n, x, y, hw)
+INTEGER(i4), INTENT(in) :: n, hw
+REAL(r8), INTENT(in) :: x(n)
+REAL(r8), INTENT(inout) :: y(n)
+INTEGER(i4) :: i, j, k, nm
+REAL(r8) :: xe(1-n:n), ye(1-n:n), ys(n), s(0:4), t(0:2), d, det
+IF(hw < 1 .OR. n < 3)RETURN
+xe(1:n) = x; ye(1:n) = y
+nm = 0
+IF(x(1) == 0.0_r8)nm = MIN(hw, n-1)
+DO j = 1, nm
+  xe(1-j) = -x(1+j); ye(1-j) = y(1+j)
+END DO
+DO i = 1, n
+  s = 0.0_r8; t = 0.0_r8
+  DO j = MAX(i-hw, 1-nm), MIN(i+hw, n)
+    d = xe(j) - x(i)
+    DO k = 0, 4
+      s(k) = s(k) + d**k
+    END DO
+    DO k = 0, 2
+      t(k) = t(k) + ye(j)*d**k
+    END DO
+  END DO
+  !---Constant term of the normal equations (Cramer)
+  det = s(0)*(s(2)*s(4) - s(3)**2) - s(1)*(s(1)*s(4) - s(2)*s(3)) + s(2)*(s(1)*s(3) - s(2)**2)
+  ys(i) = y(i)
+  IF(ABS(det) > 0.0_r8)ys(i) = (t(0)*(s(2)*s(4) - s(3)**2) - s(1)*(t(1)*s(4) - s(3)*t(2)) &
+    + s(2)*(t(1)*s(3) - s(2)*t(2)))/det
+END DO
+y = ys
+END SUBROUTINE quad_smooth
 !---------------------------------------------------------------------------------
 !> Sawtooth q reset on a 1-D profile (axis first).
 !!
