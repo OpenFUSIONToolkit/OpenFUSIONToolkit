@@ -318,7 +318,7 @@ TYPE :: gs_equil
   CLASS(flux_func), POINTER :: Zeff => NULL() !< Effective charge flux function (dimensionless)
   CLASS(flux_func), POINTER :: jphi_fixed => NULL() !< Fixed (non-rescaled) toroidal current density flux function [A/m^2]
   CLASS(flux_func), POINTER :: torflux => NULL() !< Normalized toroidal flux map (if any profile is on \f$ \hat{\Phi} \f$)
-  INTEGER(i4) :: torflux_ierr = 0 !< Status of the last `torflux` update (0 ok, 1 failed and previous map kept, 2 no closed surfaces)
+  INTEGER(i4) :: torflux_ierr = 0 !< Last `torflux` update: 0 ok, 1 failed (previous map kept), 2 no closed surfaces
   TYPE(gs_factory), POINTER :: device => NULL() !< Device/factory object for equilibrium
 CONTAINS
   !>

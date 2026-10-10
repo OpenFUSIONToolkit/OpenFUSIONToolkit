@@ -2372,14 +2372,14 @@ class TokaMaker():
         total pressure is nowhere less than the kinetic pressure.
         Temperature profiles are expected in keV; density profiles in m\f$^{-3}\f$.
 
-        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'`` \f$\hat{\psi_n}\f$ grid, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``)
-        @param te_prof Electron temperature profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$T_e\f$ [keV])
-        @param ne_prof Electron density profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$n_e\f$ [m\f$^{-3}\f$])
-        @param ti_prof Ion temperature profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$T_i\f$ [keV])
-        @param ni_prof Ion density profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$n_i\f$ [m\f$^{-3}\f$])
-        @param Zeff Effective charge \f$Z_{eff}\f$ (scalar or profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$Z_{eff}\f$))
+        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'``: in ``coord``, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``)
+        @param te_prof Electron temperature profile dict (``'x'``: in ``coord``, ``'y'``: \f$T_e\f$ [keV])
+        @param ne_prof Electron density profile dict (``'x'``: in ``coord``, ``'y'``: \f$n_e\f$ [m\f$^{-3}\f$])
+        @param ti_prof Ion temperature profile dict (``'x'``: in ``coord``, ``'y'``: \f$T_i\f$ [keV])
+        @param ni_prof Ion density profile dict (``'x'``: in ``coord``, ``'y'``: \f$n_i\f$ [m\f$^{-3}\f$])
+        @param Zeff Effective charge \f$Z_{eff}\f$ (scalar or profile dict (``'x'``: in ``coord``, ``'y'``: \f$Z_{eff}\f$))
         @param Ip_target Target plasma current \f$I_p\f$ [A]
-        @param pres_prof Optional total pressure profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$P\f$ [Pa]).
+        @param pres_prof Optional total pressure profile dict (``'x'``: in ``coord``, ``'y'``: \f$P\f$ [Pa]).
           If provided, must be \f$\geq\f$ the kinetic pressure \f$e_C(n_e T_e + n_i T_i)\f$ everywhere and
           is used in place of the kinetic pressure to form \f$P'\f$ and \f$P_{ax}\f$.
         @param jphi_fixed_prof Optional fixed toroidal current density profile dict (``'x'``: in ``coord``,
