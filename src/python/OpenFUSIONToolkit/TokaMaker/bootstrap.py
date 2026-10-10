@@ -425,6 +425,7 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target, F0=None):
     @param pp_prof Pressure gradient profile (\f$P'\f$)
     @param Ip_target Target plasma current \f$I_p\f$ [A]
     @param pax_target Target on-axis pressure \f$p_{axis}\f$ [Pa]
+    @param F0 Vacuum \f$F = R_0 B_0\f$ passed to `set_profiles` as `foffset` (default: keep the current value)
     @result None (updates equilibrium in-place)
     '''
 
@@ -951,6 +952,7 @@ def solve_with_bootstrap(mygs,
     @param diagnostic_plots If True, plot diagnostic figures
     @param parameterize_jbs If True, use parameterized edge spike (was `parameterize_jBS`, deprecated)
     @param use_OMFIT_sauter If True, use OMFIT Sauter model
+    @param verbose Print iteration progress (Python solver only)
     @param psi_N \f$\hat{\psi}\f$ grid the profiles are sampled on (strictly increasing, in [0,1]);
     if `None`, profiles are assumed evenly sampled on [0,1]
     @param use_sauter_eps If True (default), use the geometric inverse aspect ratio
@@ -958,6 +960,8 @@ def solve_with_bootstrap(mygs,
       If False, use the formula \f$\varepsilon = \langle a\rangle / \langle R\rangle\f$.
     @param diagnose_bs If True, print per-iteration diagnostics (internal solver: see `TokaMaker.solve_bootstrap`;
       Python solver with `parameterize_jbs`: the 7 edge-spike fit parameters and spike table)
+    @param use_python_solve If True, run the deprecated Python iteration; else (default) forward to
+      `TokaMaker.solve_bootstrap` (internal Fortran solver)
     @param jphi_fixed Fixed toroidal current density \f$j_{fixed}(\hat{\psi})\f$ [A/m$^2$] (array or profile dict),
       added to the total without rescaling (internal Fortran solver only)
     @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0), passed to the solver (default: keep the current value)

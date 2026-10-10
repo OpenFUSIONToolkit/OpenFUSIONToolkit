@@ -578,7 +578,7 @@ CHARACTER(KIND=c_char), INTENT(in) :: ne_file(OFT_PATH_SLEN) !< Electron density
 CHARACTER(KIND=c_char), INTENT(in) :: ti_file(OFT_PATH_SLEN) !< Ion temperature [keV] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ni_file(OFT_PATH_SLEN) !< Ion density [m^-3] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: zeff_file(OFT_PATH_SLEN) !< Effective charge [-] profile specification file
-CHARACTER(KIND=c_char), INTENT(in) :: jphi_fixed_file(OFT_PATH_SLEN) !< Fixed toroidal current density [A/m^2] profile specification file
+CHARACTER(KIND=c_char), INTENT(in) :: jphi_fixed_file(OFT_PATH_SLEN) !< Fixed jphi [A/m^2] profile specification file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
@@ -1558,7 +1558,7 @@ REAL(c_double), INTENT(in) :: psi_saut(npsi) !< Normalised \f$ \psi \f$ sample p
 REAL(c_double), INTENT(out) :: fc(npsi) !< Circulating particle fraction \f$ f_c \f$
 REAL(c_double), INTENT(out) :: r_avgs(npsi,3) !< Flux surface averaged radial coordinates \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
 REAL(c_double), INTENT(out) :: modb_avgs(npsi,2) !< Flux surface averaged field strength \f$<|B|>\f$, \f$<|B|^2>\f$
-REAL(c_double), INTENT(out) :: eps(npsi) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min}) \f$
+REAL(c_double), INTENT(out) :: eps(npsi) !< Inverse aspect ratio (R_max-R_min)/(R_max+R_min)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
