@@ -36,7 +36,7 @@ TYPE :: boot_ops
   REAL(r8) :: scale_jbs = 1.0_r8 !< Scaling factor applied to the bootstrap current (default 1)
   REAL(r8) :: djbs_tol = 1.0e-4_r8 !< Rel. change in jphi_bs below which it is frozen (not recomputed)
   LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, bootstrap stats, and full profile tables each NL iteration
-  LOGICAL :: taper_edge_jbs = .FALSE. !< Taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS
+  LOGICAL :: taper_edge_jphi = .FALSE. !< Taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS
   REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
   INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
   REAL(r8) :: saw_q_s = 0.0_r8 !< Sawtooth reset q on axis (q_s); 0 = off (see @ref saw_reset_1d)
@@ -145,7 +145,7 @@ IF(self%boot_ops%initialized)THEN
   CALL hdf5_write(self%boot_ops%scale_jbs,filename,path//'/BOOT_OPS/SCALE_JBS')
   CALL hdf5_write(self%boot_ops%djbs_tol,filename,path//'/BOOT_OPS/DJBS_TOL')
   CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%diagnose_bs),filename,path//'/BOOT_OPS/DIAGNOSE_BS')
-  CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%taper_edge_jbs),filename,path//'/BOOT_OPS/TAPER_EDGE_JBS')
+  CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%taper_edge_jphi),filename,path//'/BOOT_OPS/TAPER_EDGE_JPHI')
   CALL hdf5_write(self%boot_ops%taper_edge_psi0,filename,path//'/BOOT_OPS/TAPER_EDGE_PSI0')
   CALL hdf5_write(self%boot_ops%taper_edge_shape,filename,path//'/BOOT_OPS/TAPER_EDGE_SHAPE')
   CALL hdf5_write(self%boot_ops%saw_q_s,filename,path//'/BOOT_OPS/SAW_Q_S')
@@ -214,8 +214,8 @@ IF(hdf5_field_exist(filename,path//'/BOOT_OPS'))THEN
   CALL hdf5_read(self%boot_ops%djbs_tol,filename,path//'/BOOT_OPS/DJBS_TOL',success=success)
   CALL hdf5_read(int_tmp,filename,path//'/BOOT_OPS/DIAGNOSE_BS',success=success)
   IF(success) self%boot_ops%diagnose_bs = (int_tmp/=0)
-  CALL hdf5_read(int_tmp,filename,path//'/BOOT_OPS/TAPER_EDGE_JBS',success=success)
-  IF(success) self%boot_ops%taper_edge_jbs = (int_tmp/=0)
+  CALL hdf5_read(int_tmp,filename,path//'/BOOT_OPS/TAPER_EDGE_JPHI',success=success)
+  IF(success) self%boot_ops%taper_edge_jphi = (int_tmp/=0)
   CALL hdf5_read(self%boot_ops%taper_edge_psi0,filename,path//'/BOOT_OPS/TAPER_EDGE_PSI0',success=success)
   CALL hdf5_read(self%boot_ops%taper_edge_shape,filename,path//'/BOOT_OPS/TAPER_EDGE_SHAPE',success=success)
   IF(hdf5_field_exist(filename,path//'/BOOT_OPS/SAW_Q_S'))THEN
@@ -733,7 +733,7 @@ END SUBROUTINE node_vals
 !> Edge taper (taper_edge_psi0 is in standard convention, psi_n in OFT convention)
 SUBROUTINE taper(a)
 REAL(r8), INTENT(inout) :: a(0:)
-IF(self%boot_ops%taper_edge_jbs)CALL apply_edge_taper(self%npsi+1, psi_n, a, &
+IF(self%boot_ops%taper_edge_jphi)CALL apply_edge_taper(self%npsi+1, psi_n, a, &
   1.0_r8 - self%boot_ops%taper_edge_psi0, self%boot_ops%taper_edge_shape)
 END SUBROUTINE taper
 END SUBROUTINE jphi_bs_update
