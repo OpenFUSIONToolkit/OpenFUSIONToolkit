@@ -36,8 +36,8 @@ USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_de
   gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds, qprof_trace_tol
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
   gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
-USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_map, torflux_setup, torflux_attach, torflux_unwrap
-USE oft_gs_cutcell, ONLY: gs_qgeom_cutcell
+USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_map, torflux_setup, torflux_attach, torflux_unwrap, &
+  torflux_qgeom
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
@@ -1601,11 +1601,7 @@ INTEGER(c_int), VALUE, INTENT(in) :: backend !< 0 cut-cell, 1 tracer
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-IF(backend==1)THEN
-  CALL gs_get_qprof(tMaker_equil_obj,nr,psi_q,g,geom_only=.TRUE.)
-ELSE
-  CALL gs_qgeom_cutcell(tMaker_equil_obj,nr,psi_q,g)
-END IF
+CALL torflux_qgeom(tMaker_equil_obj,nr,psi_q,g,backend)
 END SUBROUTINE tokamaker_torflux_qgeom
 !---------------------------------------------------------------------------------
 !> Evaluate flux surface averages, per-surface shape parameters, and q
