@@ -1376,7 +1376,6 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
         return
 
     # --- Define kinetic profiles (same as run_ITER_bootstrap_case) ---
-    EC = 1.602176634e-19
     n_psi = 257
     psi_N = np.linspace(0.0, 1.0, n_psi)
     psi_pad = 1.E-3
@@ -1393,7 +1392,7 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     Ti = Te.copy()
     Zeff = np.full(n_psi, 1.7)
 
-    pressure = (EC * ne * Te) + (EC * ni * Ti)
+    pressure = (eC * ne * Te) + (eC * ni * Ti)
 
     # --- Extract geometry from equilibrium (same as solve_with_bootstrap) ---
     psi_eval = np.clip(psi_N, psi_pad, 1.0 - psi_pad)
@@ -1432,7 +1431,7 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     try:
         j_BS_neo, coeffs = redl_bootstrap(
             psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
-            pe=EC*(ne*Te), pi=EC*(ni*Ti),
+            pe=eC*(ne*Te), pi=eC*(ni*Ti),
             Zeff=Zeff, R=R_avg, q=qvals, eps=eps, fT=ft, I_psi=f,
             dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
             dn_e_dpsi=dn_e_dpsi, dn_i_dpsi=dn_i_dpsi,
@@ -1488,6 +1487,25 @@ def test_Redl_jBS(order):
 #============================================================================
 # Internal bootstrap test (ITER-based)
 #============================================================================
+def _check_boot_state_restored(mygs, restore, label):
+    '''Check that restore() (a replace_eq call) restores the bootstrap options shadow and profiles'''
+    ops_ref, profs_ref = dict(mygs._tMaker_equil._boot_ops), mygs.get_boot_profs()
+    mygs._tMaker_equil._boot_ops['scale_jbs'] = -999.0  # the restore must overwrite the shadow
+    restore()
+    ops, profs = mygs._tMaker_equil._boot_ops, mygs.get_boot_profs()
+    if ops is None or profs is None or profs_ref is None:
+        raise AssertionError(f"_boot_ops or boot_profs missing around replace_eq({label}=...)")
+    for key, ref in ops_ref.items():
+        if not np.isclose(ops[key], ref, rtol=0.0, atol=1e-10):
+            raise AssertionError(f"_boot_ops['{key}'] = {ops[key]} != {ref} after replace_eq({label}=...)")
+    for key, ref in profs_ref.items():
+        if key not in profs:
+            raise AssertionError(f"boot_profs['{key}'] missing after replace_eq({label}=...)")
+        if not np.allclose(profs[key], ref, rtol=1e-3):
+            rel = np.max(np.abs(profs[key] - ref) / (np.abs(ref) + 1e-30))
+            raise AssertionError(f"boot_profs['{key}'] differs after replace_eq({label}=...) (max rel diff {rel:.3e})")
+
+
 def _ITER_bootstrap_internal_setup(mesh_resolution, fe_order):
     '''ITER mesh, H-mode profiles and an initial no-bootstrap solve; None on failure'''
     from OpenFUSIONToolkit.TokaMaker.bootstrap import Hmode_profiles
@@ -1593,7 +1611,6 @@ def _ITER_bootstrap_internal_setup(mesh_resolution, fe_order):
                 Zeff_val=Zeff_val, ne=ne, Te=Te, ni=ni, Ti=Ti, inductive_jphi=inductive_jphi)
 
 
-
 def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     setup = _ITER_bootstrap_internal_setup(mesh_resolution, fe_order)
     if setup is None:
@@ -1620,7 +1637,6 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         mp_q.put(None)
         return
 
-    mu0 = 4.0 * np.pi * 1e-7
     eq_info = mygs.get_stats(li_normalization='ITER')
 
     # --- Extract 1D profiles ---
@@ -1686,120 +1702,21 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         mp_q.put(None)
         return
 
-    # --- Verify that boot_ops, boot_profs round-trips correctly through save/load, and that
-    #     replace_eq(source_file=...) correctly syncs the _boot_ops shadow dict ---
+    # --- Verify that boot_ops and boot_profs survive save/load and copy_eq, and that
+    #     replace_eq(source_file=/source_eq=) syncs the _boot_ops shadow dict ---
     save_file = 'ITER_boot_ops_test.h5'
     try:
-        # Capture expected state before save so we can check all fields
-        expected_boot_ops = dict(mygs._tMaker_equil._boot_ops)
-        expected_boot_profs = mygs.get_boot_profs()
         _, F_s, Fp_s, _, _ = mygs.get_profiles(npsi=50)
         mygs._tMaker_equil.save_TokaMaker(save_file)
-        # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
-        mygs._tMaker_equil._boot_ops['scale_jbs'] = -999.0
-        mygs.replace_eq(source_file=save_file)
-        boot_ops = mygs._tMaker_equil._boot_ops
-        if boot_ops is None:
-            raise AssertionError("_boot_ops is None after replace_eq(source_file=...)")
-        # Verify all fields round-trip correctly through save/load
-        for key, expected in expected_boot_ops.items():
-            val = boot_ops[key]
-            if isinstance(expected, bool):
-                if val != expected:
-                    raise AssertionError(
-                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
-                    )
-            elif isinstance(expected, float):
-                if abs(val - expected) > 1e-10:
-                    raise AssertionError(
-                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
-                    )
-            elif isinstance(expected, int):
-                if val != expected:
-                    raise AssertionError(
-                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_file=...)"
-                    )
-        # Verify F*F' round-trips exactly (the saved knots are restored, not recomputed)
+        _check_boot_state_restored(mygs, lambda: mygs.replace_eq(source_file=save_file), 'source_file')
+        # F*F' round-trips exactly (the saved knots are restored, not recomputed)
         _, F_l, Fp_l, _, _ = mygs.get_profiles(npsi=50)
         ffp_err = np.max(np.abs(F_l*Fp_l - F_s*Fp_s)) / np.max(np.abs(F_s*Fp_s))
         if ffp_err > 1e-10:
             raise AssertionError(f"F*F' changed through save/load (max rel diff {ffp_err:.3e})")
-        # Verify BOOT_PROFS arrays round-trip correctly through save/load
-        if expected_boot_profs is None:
-            raise AssertionError("get_boot_profs() returned None before save")
-        boot_profs = mygs.get_boot_profs()
-        if boot_profs is None:
-            raise AssertionError("get_boot_profs() returned None after replace_eq(source_file=...)")
-        for key, expected_arr in expected_boot_profs.items():
-            if key not in boot_profs:
-                raise AssertionError(
-                    f"boot_profs key '{key}' missing after replace_eq(source_file=...)"
-                )
-            if not np.allclose(boot_profs[key], expected_arr, rtol=1e-3):
-                reldiff = np.abs(boot_profs[key] - expected_arr) / (np.abs(expected_arr) + 1e-30)
-                idx = int(np.argmax(reldiff))
-                raise AssertionError(
-                    f"boot_profs['{key}'] does not match after replace_eq(source_file=...) "
-                    f"max_reldiff={reldiff.max():.3e} at idx={idx} "
-                    f"(expected={expected_arr[idx]:.6e}, got={boot_profs[key][idx]:.6e})"
-                )
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        mp_q.put(None)
-        return
-
-    # --- Verify that boot_ops, boot_profs round-trips correctly through copy, and that
-    #     replace_eq(source_eq=...) correctly syncs the _boot_ops shadow dict ---
-    try:
-        # Capture expected state before copy so we can check all fields
-        expected_boot_ops = dict(mygs._tMaker_equil._boot_ops)
-        expected_boot_profs = mygs.get_boot_profs()
         mygs_copied = mygs.copy_eq()
-        # Corrupt the shadow dict so we can confirm replace_eq overwrites it from the file
-        mygs._tMaker_equil._boot_ops['scale_jbs'] = -999.0
-        mygs.replace_eq(source_eq=mygs_copied)
-        boot_ops = mygs._tMaker_equil._boot_ops
-        if boot_ops is None:
-            raise AssertionError("_boot_ops is None after replace_eq(source_eq=...)")
-        # Verify all fields round-trip correctly through save/load
-        for key, expected in expected_boot_ops.items():
-            val = boot_ops[key]
-            if isinstance(expected, bool):
-                if val != expected:
-                    raise AssertionError(
-                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_eq=...)"
-                    )
-            elif isinstance(expected, float):
-                if abs(val - expected) > 1e-10:
-                    raise AssertionError(
-                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_eq=...)"
-                    )
-            elif isinstance(expected, int):
-                if val != expected:
-                    raise AssertionError(
-                        f"_boot_ops['{key}'] = {val} != {expected} after replace_eq(source_eq=...)"
-                    )
-        # Verify BOOT_PROFS arrays round-trip correctly through save/load
-        if expected_boot_profs is None:
-            raise AssertionError("get_boot_profs() returned None before save")
-        boot_profs = mygs.get_boot_profs()
-        if boot_profs is None:
-            raise AssertionError("get_boot_profs() returned None after replace_eq(source_eq=...)")
-        for key, expected_arr in expected_boot_profs.items():
-            if key not in boot_profs:
-                raise AssertionError(
-                    f"boot_profs key '{key}' missing after replace_eq(source_eq=...)"
-                )
-            if not np.allclose(boot_profs[key], expected_arr, rtol=1e-3):
-                reldiff = np.abs(boot_profs[key] - expected_arr) / (np.abs(expected_arr) + 1e-30)
-                idx = int(np.argmax(reldiff))
-                raise AssertionError(
-                    f"boot_profs['{key}'] does not match after replace_eq(source_eq=...) "
-                    f"max_reldiff={reldiff.max():.3e} at idx={idx} "
-                    f"(expected={expected_arr[idx]:.6e}, got={boot_profs[key][idx]:.6e})"
-                )
-    except Exception as e:
+        _check_boot_state_restored(mygs, lambda: mygs.replace_eq(source_eq=mygs_copied), 'source_eq')
+    except Exception:
         import traceback
         traceback.print_exc()
         mp_q.put(None)
@@ -1816,6 +1733,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
             Ip_target=Ip_target,
             scale_jbs=1.0,
+            diagnose_bs=False,
         )
         profs_scalar = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         profs_linear = mygs.solve_bootstrap(
@@ -2097,8 +2015,22 @@ def test_ITER_bootstrap_saw_internal(order):
     assert validate_dict(results, {'saw_checks': 1.0})
 
 
+def run_saw_reset_1d(mp_q):
+    import traceback
+    try:
+        _check_saw_reset_1d()
+        mp_q.put('ok')
+    except Exception:
+        mp_q.put(traceback.format_exc())
+
+
 def test_saw_reset_1d():
     '''1-D sawtooth reset on a cylinder (I = rho^2/q, A = rho^2): rule 1 (fuse) and rule 2 (local)'''
+    result = mp_run(run_saw_reset_1d, (), timeout=60)
+    assert result == 'ok', result
+
+
+def _check_saw_reset_1d():
     from OpenFUSIONToolkit.TokaMaker.bootstrap import _saw_reset_1d
     rho = np.linspace(0.0, 1.0, 201)
     A, c1 = rho**2, np.ones_like(rho)

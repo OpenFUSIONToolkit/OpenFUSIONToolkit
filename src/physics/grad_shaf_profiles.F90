@@ -16,7 +16,7 @@ USE oft_io, ONLY: hdf5_read, hdf5_write, hdf5_field_exist
 USE oft_base
 USE spline_mod
 USE oft_gs, ONLY: flux_func, gs_equil, oft_indent, oft_increase_indent, &
-  oft_decrease_indent, gs_get_qprof
+  oft_decrease_indent, gs_get_qprof, gs_fpol
 USE oft_gs_cutcell, ONLY: gs_qgeom_cutcell
 implicit none
 INTEGER(4) :: torflux_qgeom_backend = 0 !< Toroidal flux map q/F backend: 0 cut-cell, 1 tracer (testing only)
@@ -281,7 +281,7 @@ contains
   procedure :: load_txt => phi_wrap_load_txt
 end type phi_flux_wrapper
 !---Toroidal flux map internals
-PRIVATE :: sort_unique, quad_interp, fd_deriv, tmap_find, tmap_index, tmap_lookup, torflux_qgeom, &
+PRIVATE :: sort_unique, quad_interp, fd_deriv, tmap_find, tmap_index, tmap_lookup, &
   phi_wrap_map, phi_wrap_norm, phi_wrap_relabel_int, phi_wrap_relabel_cof, phi_wrap_relabel_f, &
   phi_wrap_build_fint
 contains
@@ -2416,7 +2416,7 @@ DO ip=1,npass
   dpsi=gseq%plasma_bounds(2)-gseq%plasma_bounds(1)
   DO it=1,fp_maxits
     DO i=2,n-1
-      q(i)=ABS(fpol(gseq%plasma_bounds(1)+psis(i)*dpsi))*g(i)
+      q(i)=ABS(gs_fpol(gseq,gseq%plasma_bounds(1)+psis(i)*dpsi))*g(i)
     END DO
     !---Axis: quadratic extrapolation
     q(n)=quad_interp(psis(n-3:n-1),q(n-3:n-1),1.d0)
@@ -2525,16 +2525,6 @@ SELECT TYPE(F)
     END SELECT
 END SELECT
 end subroutine add_nodes
-!---Poloidal current function F(psi)
-function fpol(psi) result(F)
-real(8), intent(in) :: psi
-real(8) :: F
-IF(gseq%mode==0)THEN
-  F=gseq%ffp_scale*gseq%I%f(psi)+gseq%I%f_offset
-ELSE
-  F=SIGN(1.d0,gseq%I%f_offset)*SQRT(MAX(gseq%ffp_scale*gseq%I%f(psi)+gseq%I%f_offset**2,0.d0))
-END IF
-end function fpol
 !---Antiderivative of ln(s)
 pure function xlogx(s) result(v)
 real(8), intent(in) :: s
@@ -2576,12 +2566,16 @@ end subroutine tmap_update
 !! `g` in the units of @ref oft_gs::gs_get_qprof with F=1 (sign ignored by caller); `g(i)=0`
 !! flags a failed surface (caller interpolates).
 !------------------------------------------------------------------------------
-subroutine torflux_qgeom(gseq,nr,psi_q,g)
+subroutine torflux_qgeom(gseq,nr,psi_q,g,backend)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of surfaces
 real(8), intent(in) :: psi_q(nr) !< Surface locations
 real(8), intent(out) :: g(nr) !< Geometric factor at each surface
-IF(torflux_qgeom_backend==1)THEN
+integer(4), optional, intent(in) :: backend !< 0 cut-cell, 1 tracer (default: `torflux_qgeom_backend`)
+integer(4) :: bk
+bk=torflux_qgeom_backend
+IF(PRESENT(backend))bk=backend
+IF(bk==1)THEN
   CALL gs_get_qprof(gseq,nr,psi_q,g,geom_only=.TRUE.)
 ELSE
   CALL gs_qgeom_cutcell(gseq,nr,psi_q,g)
