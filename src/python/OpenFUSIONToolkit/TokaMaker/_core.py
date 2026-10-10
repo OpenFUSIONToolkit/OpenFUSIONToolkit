@@ -1532,7 +1532,7 @@ class TokaMaker():
         return self._tMaker_equil.get_fsa(psi,psi_pad,npsi)
 
     def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50,return_eps=False):
-        r'''! Evaluate Sauter trapped particle fractions and flux-surface geometry at specified or uniformly spaced points
+        r'''! Evaluate the Sauter circulating fraction and flux-surface geometry at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
@@ -3596,7 +3596,7 @@ class TokaMaker_equilibrium():
             return V_loop.value
     
     def calc_sauter_fc(self,psi=None,psi_pad=0.02,npsi=50,return_eps=False):
-        r'''! Evaluate Sauter trapped particle fractions and flux-surface geometry at specified or uniformly spaced points
+        r'''! Evaluate the Sauter circulating fraction and flux-surface geometry at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)

@@ -1549,13 +1549,13 @@ CALL gs_get_qprof(tMaker_equil_obj,npsi,psi_q,qvals,ravgs=ravgs,fsa_avgs=fsa_avg
                   shape_geo=shape_geo)
 END SUBROUTINE tokamaker_get_fsa
 !---------------------------------------------------------------------------------
-!> Evaluate Sauter trapped particle fraction and related quantities
+!> Evaluate the Sauter circulating fraction f_c and flux-surface geometry
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_sauter_fc(tMaker_equil_ptr,npsi,psi_saut,fc,r_avgs,modb_avgs,eps,error_str) BIND(C,NAME="tokamaker_sauter_fc")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Number of evaluation points
-REAL(c_double), INTENT(in) :: psi_saut(npsi) !< \f$ \psi \f$ values to compute trapped particle fraction and other fields
-REAL(c_double), INTENT(out) :: fc(npsi) !< Trapped particle fraction
+REAL(c_double), INTENT(in) :: psi_saut(npsi) !< Normalised \f$ \psi \f$ sample points
+REAL(c_double), INTENT(out) :: fc(npsi) !< Circulating particle fraction \f$ f_c \f$
 REAL(c_double), INTENT(out) :: r_avgs(npsi,3) !< Flux surface averaged radial coordinates \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
 REAL(c_double), INTENT(out) :: modb_avgs(npsi,2) !< Flux surface averaged field strength \f$<|B|>\f$, \f$<|B|^2>\f$
 REAL(c_double), INTENT(out) :: eps(npsi) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min}) \f$

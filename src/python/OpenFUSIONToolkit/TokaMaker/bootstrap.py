@@ -956,8 +956,8 @@ def solve_with_bootstrap(mygs,
     @param use_sauter_eps If True (default), use the geometric inverse aspect ratio
       \f$\varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min})\f$ of each surface (`TokaMaker.sauter_fc`).
       If False, use the formula \f$\varepsilon = \langle a\rangle / \langle R\rangle\f$.
-    @param diagnose_bs If True, print the 7 edge-spike fit parameters and the
-      parameterized spike profile table to stdout (mirroring the Fortran --diagnose-bs output).
+    @param diagnose_bs If True, print per-iteration diagnostics (internal solver: see `TokaMaker.solve_bootstrap`;
+      Python solver with `parameterize_jbs`: the 7 edge-spike fit parameters and spike table)
     @param jphi_fixed Fixed toroidal current density \f$j_{fixed}(\hat{\psi})\f$ [A/m$^2$] (array or profile dict),
       added to the total without rescaling (internal Fortran solver only)
     @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0), passed to the solver (default: keep the current value)
