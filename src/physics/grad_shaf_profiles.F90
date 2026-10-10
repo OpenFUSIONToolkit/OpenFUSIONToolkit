@@ -16,7 +16,7 @@ USE oft_io, ONLY: hdf5_read, hdf5_write, hdf5_field_exist
 USE oft_base
 USE spline_mod
 USE oft_gs, ONLY: flux_func, gs_equil, oft_indent, oft_increase_indent, &
-  oft_decrease_indent, gs_get_qprof
+  oft_decrease_indent, gs_get_qprof, gs_fpol
 USE oft_gs_cutcell, ONLY: gs_qgeom_cutcell
 implicit none
 INTEGER(4) :: torflux_qgeom_backend = 0 !< Toroidal flux map q/F backend: 0 cut-cell, 1 tracer (testing only)
@@ -2414,7 +2414,7 @@ DO ip=1,npass
   dpsi=gseq%plasma_bounds(2)-gseq%plasma_bounds(1)
   DO it=1,fp_maxits
     DO i=2,n-1
-      q(i)=ABS(fpol(gseq%plasma_bounds(1)+psis(i)*dpsi))*g(i)
+      q(i)=ABS(gs_fpol(gseq,gseq%plasma_bounds(1)+psis(i)*dpsi))*g(i)
     END DO
     !---Axis: quadratic extrapolation
     q(n)=quad_interp(psis(n-3:n-1),q(n-3:n-1),1.d0)
@@ -2522,16 +2522,6 @@ SELECT TYPE(F)
     END SELECT
 END SELECT
 end subroutine add_nodes
-!---Poloidal current function F(psi)
-function fpol(psi) result(F)
-real(8), intent(in) :: psi
-real(8) :: F
-IF(gseq%mode==0)THEN
-  F=gseq%ffp_scale*gseq%I%f(psi)+gseq%I%f_offset
-ELSE
-  F=SIGN(1.d0,gseq%I%f_offset)*SQRT(MAX(gseq%ffp_scale*gseq%I%f(psi)+gseq%I%f_offset**2,0.d0))
-END IF
-end function fpol
 !---Antiderivative of ln(s)
 pure function xlogx(s) result(v)
 real(8), intent(in) :: s
