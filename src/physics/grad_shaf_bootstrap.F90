@@ -804,7 +804,7 @@ DO i = 1, n
   q_eq(i) = 0.0_r8
   IF(g(k) /= 0.0_r8)THEN
     psi = gseq%plasma_bounds(1) + xn(k)*(gseq%plasma_bounds(2) - gseq%plasma_bounds(1))
-    q_eq(i) = ABS(g(k))*SQRT(MAX(gseq%ffp_scale*gseq%I%f(psi) + gseq%I%f_offset**2, 0.0_r8))
+    q_eq(i) = ABS(g(k)*gs_fpol(gseq, psi))
   END IF
   c1(i) = ravgs(k,3)/ravgs(k,2)**2
   Ib(i) = I_base(k)
@@ -1296,11 +1296,7 @@ ALLOCATE(pts(2,nr),fpol(nr),qtmp(nr),epstmp(nr),i2tmp(nr),done(nr))
 r_avgs=0.d0; modb_avgs=0.d0; fc=0.d0; qtmp=0.d0; epstmp=0.d0; i2tmp=0.d0
 DO j=1,nr
   psi_surf=psi_q(j)*(x2-x1) + x1
-  IF(gseq%mode==0)THEN
-    fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
-  ELSE
-    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
-  END IF
+  fpol(j)=gs_fpol(gseq,psi_surf)
 END DO
 !--- Axis guard: flux surface degenerates at psi_N=1; prescribe analytically.
 done=(psi_q == 1.d0)
