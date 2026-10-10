@@ -97,8 +97,8 @@ TYPE, BIND(C) :: tokamaker_boot_ops_type
   INTEGER(c_int)  :: taper_edge_shape = 2         !< Taper shape: 2 = quintic smoothstep (default)
   REAL(c_double)  :: saw_q_s = 0.d0               !< Sawtooth reset q on axis (0 = off)
   REAL(c_double)  :: saw_dq = 0.03d0              !< Mixing radius at q_s + saw_dq
-  REAL(c_double)  :: saw_tol = 1.d-4              !< Freeze threshold on rel. change in j_saw
-  REAL(c_double)  :: saw_relax = 1.d0             !< Under-relaxation of j_saw
+  REAL(c_double)  :: saw_tol = 1.d-4              !< Freeze threshold on rel. change in jphi_saw
+  REAL(c_double)  :: saw_relax = 1.d0             !< Under-relaxation of jphi_saw
   REAL(c_double)  :: saw_ramp = 1.d-2             !< Reset weight ramp in q deficit (0 = hard trigger)
   INTEGER(c_int)  :: saw_rule = 2                 !< Reset rule: 1 fuse (axis to rho_m), 2 local (each dip, two-sided)
 END TYPE tokamaker_boot_ops_type
@@ -591,8 +591,8 @@ CHARACTER(KIND=c_char), INTENT(in) :: ne_file(OFT_PATH_SLEN) !< Electron density
 CHARACTER(KIND=c_char), INTENT(in) :: ti_file(OFT_PATH_SLEN) !< Ion temperature [keV] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: ni_file(OFT_PATH_SLEN) !< Ion density [m^-3] profile specification file
 CHARACTER(KIND=c_char), INTENT(in) :: zeff_file(OFT_PATH_SLEN) !< Effective charge [-] profile specification file
-CHARACTER(KIND=c_char), INTENT(in) :: jphi_fixed_file(OFT_PATH_SLEN) !< Fixed toroidal current density [A/m^2] profile specification file
-CHARACTER(KIND=c_char), INTENT(in) :: jphi_saw_file(OFT_PATH_SLEN) !< Input sawtooth toroidal current density [A/m^2] profile specification file
+CHARACTER(KIND=c_char), INTENT(in) :: jphi_fixed_file(OFT_PATH_SLEN) !< Fixed jphi [A/m^2] profile specification file
+CHARACTER(KIND=c_char), INTENT(in) :: jphi_saw_file(OFT_PATH_SLEN) !< Input sawtooth jphi [A/m^2] profile specification file
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
@@ -616,9 +616,7 @@ END SUBROUTINE tokamaker_load_kinetic_profiles
 !---------------------------------------------------------------------------------
 !> Set bootstrap current options on the jphi_bs_flux_func object inside gs_equil.
 !!
-!! Must be called before solving with a `jphi-split-bootstrap` current profile.
-!! Fields in @p bops correspond to the optional arguments of
-!! @ref jphi_bs_update in grad_shaf_bootstrap.F90.
+!! Fields of @p bops are those of @ref grad_shaf_bootstrap::boot_ops "boot_ops".
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_boot_ops(tMaker_equil_ptr,bops,error_str) BIND(C,NAME="tokamaker_set_boot_ops")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
@@ -716,7 +714,8 @@ END SUBROUTINE tokamaker_get_boot_prof
 !---------------------------------------------------------------------------------
 !> Get the sawtooth scalars of the last jphi_bs_update (zero if none or not a bootstrap profile)
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_get_boot_saw(tMaker_equil_ptr,saw_rho_m,saw_rho_out,saw_n_dips,error_str) BIND(C,NAME="tokamaker_get_boot_saw")
+SUBROUTINE tokamaker_get_boot_saw(tMaker_equil_ptr,saw_rho_m,saw_rho_out,saw_n_dips,error_str) &
+  BIND(C,NAME="tokamaker_get_boot_saw")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 REAL(c_double), INTENT(out) :: saw_rho_m !< Sawtooth radius at the last reset (0 = none)
 REAL(c_double), INTENT(out) :: saw_rho_out !< Outer end of the last reset (0 = none)
@@ -1695,16 +1694,16 @@ CALL gs_get_qprof(tMaker_equil_obj,npsi,psi_q,qvals,ravgs=ravgs,fsa_avgs=fsa_avg
                   shape_geo=shape_geo)
 END SUBROUTINE tokamaker_get_fsa
 !---------------------------------------------------------------------------------
-!> Evaluate Sauter trapped particle fraction and related quantities
+!> Evaluate the Sauter circulating fraction f_c and flux-surface geometry
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_sauter_fc(tMaker_equil_ptr,npsi,psi_saut,fc,r_avgs,modb_avgs,eps,error_str) BIND(C,NAME="tokamaker_sauter_fc")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
 INTEGER(c_int), VALUE, INTENT(in) :: npsi !< Number of evaluation points
-REAL(c_double), INTENT(in) :: psi_saut(npsi) !< \f$ \psi \f$ values to compute trapped particle fraction and other fields
-REAL(c_double), INTENT(out) :: fc(npsi) !< Trapped particle fraction
+REAL(c_double), INTENT(in) :: psi_saut(npsi) !< Normalised \f$ \psi \f$ sample points
+REAL(c_double), INTENT(out) :: fc(npsi) !< Circulating particle fraction \f$ f_c \f$
 REAL(c_double), INTENT(out) :: r_avgs(npsi,3) !< Flux surface averaged radial coordinates \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
 REAL(c_double), INTENT(out) :: modb_avgs(npsi,2) !< Flux surface averaged field strength \f$<|B|>\f$, \f$<|B|^2>\f$
-REAL(c_double), INTENT(out) :: eps(npsi) !< Local inverse aspect ratio \f$ \varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min}) \f$
+REAL(c_double), INTENT(out) :: eps(npsi) !< Inverse aspect ratio (R_max-R_min)/(R_max+R_min)
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN

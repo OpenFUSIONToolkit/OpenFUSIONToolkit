@@ -68,7 +68,7 @@ TYPE, ABSTRACT :: flux_func
   INTEGER(i4) :: ndofs = 0 !< Number of free coefficients
   REAL(r8) :: f_offset = 0.d0 !< Offset value
   REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Current plasma bounds (for normalization)
-  LOGICAL :: update_on_load = .TRUE. 
+  LOGICAL :: update_on_load = .TRUE.
 CONTAINS
   !> Delete profile
   PROCEDURE(flux_func_delete), DEFERRED :: delete
@@ -320,8 +320,8 @@ TYPE :: gs_equil
   CLASS(flux_func), POINTER :: Zeff => NULL() !< Effective charge flux function (dimensionless)
   CLASS(flux_func), POINTER :: jphi_fixed => NULL() !< Fixed (non-rescaled) toroidal current density flux function [A/m^2]
   CLASS(flux_func), POINTER :: torflux => NULL() !< Normalized toroidal flux map (if any profile is on \f$ \hat{\Phi} \f$)
-  INTEGER(i4) :: torflux_ierr = 0 !< Status of the last `torflux` update (0 ok, 1 failed and previous map kept, 2 no closed surfaces)
-  CLASS(flux_func), POINTER :: jphi_saw => NULL() !< Input sawtooth toroidal current density flux function [A/m^2] (bootstrap profile only)
+  INTEGER(i4) :: torflux_ierr = 0 !< Last `torflux` update: 0 ok, 1 failed (previous map kept), 2 no closed surfaces
+  CLASS(flux_func), POINTER :: jphi_saw => NULL() !< Input sawtooth jphi flux function [A/m^2] (bootstrap profile only)
   TYPE(gs_factory), POINTER :: device => NULL() !< Device/factory object for equilibrium
 CONTAINS
   !>

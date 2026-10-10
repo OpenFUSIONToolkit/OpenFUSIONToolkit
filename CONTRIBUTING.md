@@ -74,6 +74,7 @@ The Open FUSION Toolkit Team
 
 ## Contributors
 Matt Adams (@mattsgit)\
+Stuart Benjamin (@StuartBenjamin)\
 Anson Braun (@ansonbraun)\
 Daniel Burgess (@d-burg)\
 Samuel Freiberger (@samuel-frei)\
@@ -89,7 +90,6 @@ Matthew Pharr (@matt-pharr)\
 Jeremy Salm (@jeremslm)\
 Benjy Smith (@benjysmith)\
 Thomas Wang (@ThomasWangAPAM)\
-Stuart Benjamin (@StuartBenjamin)
 Yunfei Zhao (@SeaWolfYFZ)
 
 ### Contributors to predecessor codes

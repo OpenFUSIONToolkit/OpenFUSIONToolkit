@@ -536,7 +536,7 @@ ALLOCATE(ravgs(0:self%npsi,3))
 CALL gs_ravgs(gseq, self%npsi+1, [0.d0, xpsi], ravgs)
 !---Get pressure profile
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
-IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__) !CALL gseq%P_ani%update(gseq)
+IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__)
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
 !---Update jphi normalization to match Ip target
@@ -600,10 +600,10 @@ end subroutine jphi_psi_nodes
 !---------------------------------------------------------------------------------
 SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result)
 class(gs_equil), INTENT(inout) :: self !< Pointer to TokaMaker object
-REAL(r8), INTENT(in) :: psi_tmp(:) !< Needs docs
-REAL(r8), INTENT(in) :: field_tmp(:) !< Needs docs
-INTEGER(i4), INTENT(in) :: nvals
-REAL(r8), INTENT(out) :: result !< Needs docs
+REAL(r8), INTENT(in) :: psi_tmp(:) !< Normalised psi nodes (OFT convention)
+REAL(r8), INTENT(in) :: field_tmp(:) !< Flux function on @p psi_tmp
+INTEGER(i4), INTENT(in) :: nvals !< Number of nodes
+REAL(r8), INTENT(out) :: result !< Integral over the plasma cross-section
 INTEGER(i4) :: i,m
 REAL(r8) :: area,psitmp(1),sgop(3,3)
 TYPE(gs_prof_interp) :: prof_interp_obj
@@ -742,17 +742,17 @@ END DO
 END SUBROUTINE gs_ravgs
 !------------------------------------------------------------------------------
 !> IMAS-convention <j_phi/R>/<1/R> from TokaMaker jphi = <j_phi> on the psi_N grid psi_vals
-!> (OFT convention), eq. A5 of doc_tokamaker_current_conventions; gs_flux_int of the result is
-!> exactly I_p (eq. A9c). jphi and P'*pscale must share units.
+!! (OFT convention), eq. A5 of doc_tokamaker_current_conventions; gs_flux_int of the result is
+!! exactly I_p (eq. A9c). jphi and P'*pscale must share units.
 !------------------------------------------------------------------------------
 SUBROUTINE eval_jtor_imas(gseq, psi_vals, n, ravgs, jphi, pscale, jtor)
-CLASS(gs_equil), INTENT(inout) :: gseq
-INTEGER(i4), INTENT(in) :: n
-REAL(r8), INTENT(in) :: psi_vals(n)
+CLASS(gs_equil), INTENT(inout) :: gseq !< Equilibrium
+INTEGER(i4), INTENT(in) :: n !< Number of nodes
+REAL(r8), INTENT(in) :: psi_vals(n) !< Normalised psi nodes (OFT convention)
 REAL(r8), INTENT(in) :: ravgs(n,3) !< <R>, <1/R>, <1/R^2> at psi_vals (@ref gs_ravgs)
-REAL(r8), INTENT(in) :: jphi(n)
-REAL(r8), INTENT(in) :: pscale
-REAL(r8), INTENT(out) :: jtor(n)
+REAL(r8), INTENT(in) :: jphi(n) !< TokaMaker jphi = <j_phi> at psi_vals
+REAL(r8), INTENT(in) :: pscale !< Pressure scale applied to P'
+REAL(r8), INTENT(out) :: jtor(n) !< <j_phi/R>/<1/R>
 INTEGER(i4) :: i
 REAL(r8) :: pprime
 DO i = 1, n

@@ -950,25 +950,9 @@ class TokaMaker():
     def set_boot_ops(self, isolate_edge_jbs=None, scale_jbs=None, djbs_tol=None,
                      diagnose_bs=None, taper_edge_jbs=None, taper_edge_psi0=None, taper_edge_shape=None,
                      saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None):
-        r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
+        r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update
 
-        Call after setting a `jphi-split-bootstrap`-type ffp_prof profile, and before mygs.solve().
-        Any `None` value is left unchanged from its current state (for default values see Tokamaker_equilibrium.set_boot_ops).
-
-        @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
-        @param scale_jbs Scaling factor applied to the spike profile. (Internal default: 1.0)
-        @param djbs_tol Threshold on relative change in the bootstrap current to freeze it. (Internal default: 1e-4)
-        @param diagnose_bs Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration. (Internal default: False)
-        @param taper_edge_jbs Smoothly taper toroidal current (inductive, bootstrap and fixed) to zero at the plasma edge. (Internal default: False)
-        @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
-        @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
-        @param saw_q_s Sawtooth reset: q floor of the reset of the base current's q; 0 = off. (Internal default: 0)
-        @param saw_dq Reset regions end where the base q crosses saw_q_s + saw_dq. (Internal default: 0.03)
-        @param saw_tol Threshold on relative change in j_saw to freeze it. (Internal default: 1e-4)
-        @param saw_relax Under-relaxation of the j_saw update. (Internal default: 1)
-        @param saw_ramp Reset weight ramps over this q deficit below saw_q_s; 0 = hard trigger. (Internal default: 0.01)
-        @param saw_rule Reset rule: 1 = fuse (FUSE's saw_crash!: q reset from the axis out to the sawtooth radius);
-          2 = local (each dip below saw_q_s raised about its q minimum, current moved only inside it). (Internal default: 2)
+        See @ref TokaMaker.TokaMaker_equilibrium.set_boot_ops "set_boot_ops"
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -1641,22 +1625,9 @@ class TokaMaker():
         return self._tMaker_equil.get_fsa(psi,psi_pad,npsi)
 
     def sauter_fc(self,psi=None,psi_pad=0.02,npsi=50,return_eps=False):
-        r'''! Evaluate Sauter trapped particle fractions and flux-surface geometry at specified or uniformly spaced points
+        r'''! Evaluate the Sauter circulating fraction and flux-surface geometry
 
-        @param psi Explicit sampling locations in \f$\hat{\psi}\f$
-        @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
-        @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
-        @param return_eps If True, append the local inverse aspect ratio array to the return tuple
-        @result Tuple `(psi, fc, r_avgs, modb_avgs)`, or `(psi, fc, r_avgs, modb_avgs, eps)` when `return_eps=True`
-          - `psi` [npsi] — normalised poloidal flux \f$\hat{\psi}\f$ of each sample
-          - `fc` [npsi] — circulating-particle fraction \f$f_c\f$ (Sauter 1999)
-          - `r_avgs` dict — flux-surface averaged values \f${<R>,<1/R>,<a>}\f$ where a is minor radius
-          - `modb_avgs` [2, npsi] — flux-surface-averaged magnetic field values:
-            row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
-          - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
-            \f$\varepsilon = (R_{\max} - R_{\min}) / (R_{\max} + R_{\min})\f$ (Redl 2021 \f$r/R_0\f$, with the
-            surface's major radius \f$R_0 = (R_{\max} + R_{\min})/2\f$, as OMFIT and FUSE), where
-            \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius of the surface
+        See @ref TokaMaker.TokaMaker_equilibrium.calc_sauter_fc "calc_sauter_fc"
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -2470,14 +2441,15 @@ class TokaMaker():
         take the value of the previous call (or of the loaded equilibrium), so repeating a call with the
         same positional arguments reproduces it. @ref boot_reset returns them to their defaults (shown below).
 
-        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'`` \f$\hat{\psi_n}\f$ grid, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``)
-        @param te_prof Electron temperature profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$T_e\f$ [keV])
-        @param ne_prof Electron density profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$n_e\f$ [m\f$^{-3}\f$])
-        @param ti_prof Ion temperature profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$T_i\f$ [keV])
-        @param ni_prof Ion density profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$n_i\f$ [m\f$^{-3}\f$])
-        @param Zeff Effective charge \f$Z_{eff}\f$ (scalar or profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$Z_{eff}\f$))
+        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'``: in ``coord``, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``)
+        @param te_prof Electron temperature profile dict (``'x'``: in ``coord``, ``'y'``: \f$T_e\f$ [keV])
+        @param ne_prof Electron density profile dict (``'x'``: in ``coord``, ``'y'``: \f$n_e\f$ [m\f$^{-3}\f$])
+        @param ti_prof Ion temperature profile dict (``'x'``: in ``coord``, ``'y'``: \f$T_i\f$ [keV])
+        @param ni_prof Ion density profile dict (``'x'``: in ``coord``, ``'y'``: \f$n_i\f$ [m\f$^{-3}\f$])
+        @param Zeff Effective charge \f$Z_{eff}\f$ (scalar or profile dict (``'x'``: in ``coord``, ``'y'``: \f$Z_{eff}\f$))
         @param Ip_target Target plasma current \f$I_p\f$ [A]
-        @param pres_prof Optional total pressure profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$P\f$ [Pa]).
+        @param F0 Vacuum \f$F = R_0 B_0\f$ (default: previous call / loaded equilibrium)
+        @param pres_prof Optional total pressure profile dict (``'x'``: in ``coord``, ``'y'``: \f$P\f$ [Pa]).
           If provided, must be \f$\geq\f$ the kinetic pressure \f$e_C(n_e T_e + n_i T_i)\f$ everywhere and
           is used in place of the kinetic pressure to form \f$P'\f$ and \f$P_{ax}\f$.
         @param jphi_fixed_prof Optional fixed toroidal current density profile dict (``'x'``: in ``coord``,
@@ -2485,7 +2457,7 @@ class TokaMaker():
         @param p_fixed_prof Optional additional pressure profile dict (``'x'``: in ``coord``, ``'y'``: \f$P_{fixed}\f$ [Pa],
           e.g. fast-ion pressure), added to the kinetic pressure. Sets \f$P'\f$ and \f$P_{ax}\f$ but is excluded
           from the bootstrap calculation. Mutually exclusive with ``pres_prof``.
-        @param jphi_saw_prof Optional input sawtooth toroidal current density profile dict (``'x'``: \f$\hat{\psi_n}\f$,
+        @param jphi_saw_prof Optional input sawtooth toroidal current density profile dict (``'x'``: in ``coord``,
           ``'y'``: \f$j_\phi\f$ [A/m\f$^2\f$], e.g. a source's sawtooth current), added without rescaling. With
           ``saw_q_s`` > 0 the reset current is added to it (returned as ``'jphi_saw'``)
         @param coord Coordinate of all ``'x'`` grids: ``'psi_n'`` (default) or ``'phi_n'`` (normalized toroidal flux).
@@ -2494,15 +2466,15 @@ class TokaMaker():
         @par Bootstrap solver options (forwarded to ``set_boot_ops()``)
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk (default: False)
         @param scale_jbs Scaling factor applied to the bootstrap current profile (default: 1.0)
-        @param djbs_tol Threshold on relative change in the bootstrap current to freeze it (influences solve speed) (default: 1e-4)
+        @param djbs_tol Threshold on relative change in the bootstrap current to freeze it (default: 1e-4)
         @param diagnose_bs Print detailed output at each NL iteration (default: False)
-        @param taper_edge_jbs Smoothly taper toroidal current (inductive, bootstrap and fixed) to zero at the plasma edge (default: False)
+        @param taper_edge_jbs Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS (default: False)
         @param taper_edge_psi0 \f$\hat{\psi_n}\f$ (0=axis, 1=LCFS) where the taper begins (default: 0.999)
         @param taper_edge_shape Taper shape: 1=cos\f$^2\f$/Hann, 2=quintic smoothstep, 3=cubic power
           (default: 2)
         @param saw_q_s Sawtooth reset q floor; 0 = off (default: 0). The q of
           \f$\alpha j_{ind} + j_{BS} + j_{fixed} + j_{saw,in}\f$ in the traced geometry is reset where it dips
-          below q_s (``saw_rule``); the Ip-neutral current that does this is added to ``j_saw``
+          below q_s (``saw_rule``); the Ip-neutral current that does this is added to ``jphi_saw``
         @param saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule See ``set_boot_ops()``
 
         @result Dictionary with 1-D numpy array values (A/m² unless noted). All current densities, inputs
@@ -3217,16 +3189,16 @@ class TokaMaker_equilibrium():
         Any `None` value is left unchanged from current state (see initialisations in dict. below).
 
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
-        @param scale_jbs Scaling factor applied to the spike profile. (Internal default: 1.0)
-        @param djbs_tol Threshold on relative change in the bootstrap current to freeze it. Influences bootstrap solve walltime (Internal default: 1e-4)
+        @param scale_jbs Scaling factor applied to the bootstrap current (the isolated spike if `isolate_edge_jbs`). (Internal default: 1.0)
+        @param djbs_tol Threshold on relative change in the bootstrap current to freeze it. (Internal default: 1e-4)
         @param diagnose_bs Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration. (Internal default: False)
-        @param taper_edge_jbs Smoothly taper toroidal current (inductive, bootstrap and fixed) to zero at the plasma edge. (Internal default: False)
+        @param taper_edge_jbs Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS. (Internal default: False)
         @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
         @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
         @param saw_q_s Sawtooth reset q floor; 0 = off. (Internal default: 0)
         @param saw_dq Reset regions end where the base q crosses saw_q_s + saw_dq. (Internal default: 0.03)
-        @param saw_tol Threshold on relative change in j_saw to freeze it. (Internal default: 1e-4)
-        @param saw_relax Under-relaxation of the j_saw update. (Internal default: 1)
+        @param saw_tol Threshold on relative change in jphi_saw to freeze it. (Internal default: 1e-4)
+        @param saw_relax Under-relaxation of the jphi_saw update. (Internal default: 1)
         @param saw_ramp Reset weight ramps over this q deficit below saw_q_s; 0 = hard trigger. (Internal default: 0.01)
         @param saw_rule Reset rule: 1 = fuse (FUSE's saw_crash!: q reset from the axis out to the sawtooth radius);
           2 = local (each dip below saw_q_s raised about its q minimum, current moved only inside it). (Internal default: 2)
@@ -3827,7 +3799,7 @@ class TokaMaker_equilibrium():
             return V_loop.value
     
     def calc_sauter_fc(self,psi=None,psi_pad=0.02,npsi=50,return_eps=False):
-        r'''! Evaluate Sauter trapped particle fractions and flux-surface geometry at specified or uniformly spaced points
+        r'''! Evaluate the Sauter circulating fraction and flux-surface geometry at specified or uniformly spaced points
 
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
