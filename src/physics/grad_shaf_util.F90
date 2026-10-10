@@ -27,7 +27,7 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
-  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend
+  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend, gs_fpol
 USE oft_gs_cutcell, ONLY: gs_rays_cutcell
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
@@ -1039,11 +1039,7 @@ do j=2,npsi
   ELSE
     cout(j,1) = xr*(1.d0-(j-1)/REAL(npsi-1,8)) + x1
   END IF
-  IF(gseq%mode==0)THEN
-    cout(j,2)=gseq%ffp_scale*gseq%I%f(cout(j,1))+gseq%I%f_offset
-  ELSE
-    cout(j,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(cout(j,1)) + gseq%I%f_offset**2)
-  END IF
+  cout(j,2)=gs_fpol(gseq,cout(j,1))
   cout(j,3)=gseq%p_scale*gseq%P%f(cout(j,1))/mu0
   CALL ifile_derivs(gseq,cout(j,1),cout(j,2),cout(j,5:6))
 end do
@@ -1345,13 +1341,11 @@ do j=1,nr
   psi_trace = psi_surf
   IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
   psi_q(j)=psi_trace
+  ftrace(j)=gs_fpol(gseq,psi_trace)
+  fpol(j)=gs_fpol(gseq,psi_surf)
   IF(gseq%mode==0)THEN
-    ftrace(j)=gseq%ffp_scale*gseq%I%f(psi_trace)+gseq%I%f_offset
-    fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
     ffprim(j)=gseq%I%fp(psi_surf)*((gseq%ffp_scale**2)*gseq%I%f(psi_surf)+gseq%ffp_scale*gseq%I%f_offset)
   ELSE
-    ftrace(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_trace) + gseq%I%f_offset**2)
-    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
     ffprim(j)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi_surf)
   END IF
   pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0

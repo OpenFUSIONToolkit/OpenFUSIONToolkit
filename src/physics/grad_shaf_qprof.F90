@@ -23,11 +23,7 @@ real(8), allocatable :: fsa(:,:),shp(:,:)
 integer(4) :: j
 DO j=1,nr
   psi_surf=psi_q(j)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1)
-  IF(gseq%mode==0)THEN
-    fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
-  ELSE
-    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
-  END IF
+  fpol(j)=gs_fpol(gseq,psi_surf)
 END DO
 !---Unallocated outputs are passed as absent (F2008)
 IF(PRESENT(fsa_avgs))ALLOCATE(fsa(nr,4))
