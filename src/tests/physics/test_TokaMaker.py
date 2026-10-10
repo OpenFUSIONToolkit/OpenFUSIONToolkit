@@ -2069,8 +2069,22 @@ def test_ITER_bootstrap_saw_internal(order):
     assert validate_dict(results, {'saw_checks': 1.0})
 
 
+def run_saw_reset_1d(mp_q):
+    import traceback
+    try:
+        _check_saw_reset_1d()
+        mp_q.put('ok')
+    except Exception:
+        mp_q.put(traceback.format_exc())
+
+
 def test_saw_reset_1d():
     '''1-D sawtooth reset on a cylinder (I = rho^2/q, A = rho^2): rule 1 (fuse) and rule 2 (local)'''
+    result = mp_run(run_saw_reset_1d, (), timeout=60)
+    assert result == 'ok', result
+
+
+def _check_saw_reset_1d():
     from OpenFUSIONToolkit.TokaMaker.bootstrap import _saw_reset_1d
     rho = np.linspace(0.0, 1.0, 201)
     A, c1 = rho**2, np.ones_like(rho)
