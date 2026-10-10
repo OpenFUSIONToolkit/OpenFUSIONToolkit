@@ -872,10 +872,10 @@ class TokaMaker():
 
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
         @param parameterize_jbs Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jbs` if true. (Internal default: False)
-        @param scale_jbs Scaling factor applied to the spike profile. (Internal default: 1.0)
+        @param scale_jbs Scaling factor applied to the bootstrap current (the isolated spike if `isolate_edge_jbs`). (Internal default: 1.0)
         @param djbs_tol Threshold on relative change in the bootstrap current to freeze it. (Internal default: 1e-4)
         @param diagnose_bs Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration. (Internal default: False)
-        @param taper_edge_jbs Smoothly taper toroidal current (inductive, bootstrap and fixed) to zero at the plasma edge. (Internal default: False)
+        @param taper_edge_jbs Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS. (Internal default: False)
         @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
         @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
         '''
@@ -2377,7 +2377,7 @@ class TokaMaker():
         @param scale_jbs Scaling factor applied to the bootstrap current profile (default: 1.0)
         @param djbs_tol Threshold on relative change in the bootstrap current to freeze it (default: 1e-4)
         @param diagnose_bs Print detailed output at each NL iteration (default: False)
-        @param taper_edge_jbs Smoothly taper toroidal current (inductive, bootstrap and fixed) to zero at the plasma edge (default: False)
+        @param taper_edge_jbs Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS (default: False)
         @param taper_edge_psi0 \f$\hat{\psi_n}\f$ (0=axis, 1=LCFS) where the taper begins (default: 0.999)
         @param taper_edge_shape Taper shape: 1=cos\f$^2\f$/Hann, 2=quintic smoothstep, 3=cubic power
           (default: 2)
@@ -3035,10 +3035,10 @@ class TokaMaker_equilibrium():
 
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
         @param parameterize_jbs Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jbs` if true. (Internal default: False)
-        @param scale_jbs Scaling factor applied to the spike profile. (Internal default: 1.0)
+        @param scale_jbs Scaling factor applied to the bootstrap current (the isolated spike if `isolate_edge_jbs`). (Internal default: 1.0)
         @param djbs_tol Threshold on relative change in the bootstrap current to freeze it. (Internal default: 1e-4)
         @param diagnose_bs Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration. (Internal default: False)
-        @param taper_edge_jbs Smoothly taper toroidal current (inductive, bootstrap and fixed) to zero at the plasma edge. (Internal default: False)
+        @param taper_edge_jbs Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS. (Internal default: False)
         @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
         @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
         '''

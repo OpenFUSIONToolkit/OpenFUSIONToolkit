@@ -599,9 +599,7 @@ END SUBROUTINE tokamaker_load_kinetic_profiles
 !---------------------------------------------------------------------------------
 !> Set bootstrap current options on the jphi_bs_flux_func object inside gs_equil.
 !!
-!! Must be called before solving with a `jphi-split-bootstrap` current profile.
-!! Fields in @p bops correspond to the optional arguments of
-!! @ref jphi_bs_update in grad_shaf_bootstrap.F90.
+!! Fields of @p bops are those of @ref grad_shaf_bootstrap::boot_ops "boot_ops".
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_boot_ops(tMaker_equil_ptr,bops,error_str) BIND(C,NAME="tokamaker_set_boot_ops")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object

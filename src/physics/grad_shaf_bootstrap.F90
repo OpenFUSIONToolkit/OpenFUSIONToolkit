@@ -27,11 +27,7 @@ USE oft_io, ONLY: hdf5_create_group, hdf5_write, hdf5_read, &
 use mhd_utils, only: mu0
 implicit none
 !------------------------------------------------------------------------------
-!> Read-in options for the jphi-split-bootstrap current profile update.
-!!
-!! Must be initialised (via @ref tokamaker_set_boot_ops) before
-!! running TokaMaker with a `jphi-split-bootstrap` current profile.  Fields
-!! correspond to the optional arguments of @ref calculate_bootstrap.
+!> Options of @ref jphi_bs_update (defaults apply unless set via @ref tokamaker_set_boot_ops)
 !------------------------------------------------------------------------------
 TYPE :: boot_ops
   LOGICAL :: initialized = .FALSE. !< Options have been explicitly set?
@@ -40,7 +36,7 @@ TYPE :: boot_ops
   REAL(r8) :: scale_jbs = 1.0_r8 !< Scaling factor applied to the bootstrap current (default 1)
   REAL(r8) :: djbs_tol = 1.0e-4_r8 !< Rel. change in jphi_bs below which it is frozen (not recomputed)
   LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, bootstrap stats, and full profile tables each NL iteration
-  LOGICAL :: taper_edge_jbs = .FALSE. !< Smooth taper of toroidal current (inductive, bootstrap and fixed) to zero at plasma edge (guards against numerical issues at the separatrix)
+  LOGICAL :: taper_edge_jbs = .FALSE. !< Taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS
   REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
   INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
 END TYPE boot_ops
