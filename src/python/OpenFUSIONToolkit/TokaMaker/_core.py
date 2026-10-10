@@ -120,6 +120,65 @@ def create_prof_file(self, filename, profile_dict, name):
         fid.write("\n".join(file_lines))
 
 
+## Keyword inputs of @ref TokaMaker.TokaMaker.solve_bootstrap "solve_bootstrap" kept between calls and in saved files
+_BOOT_INPUT_KEYS = ('F0', 'pres_prof', 'p_fixed_prof', 'jphi_fixed_prof', 'jphi_saw_prof', 'coord')
+
+
+def _save_boot_inputs(filename, inputs):
+    '''! Write the kept `solve_bootstrap` keyword inputs to group `tokamaker/BOOT_INPUTS` of a saved equilibrium'''
+    import h5py
+    with h5py.File(filename, 'a') as fid:
+        tok = fid.require_group('tokamaker')
+        if 'BOOT_INPUTS' in tok:
+            del tok['BOOT_INPUTS']
+        grp = tok.create_group('BOOT_INPUTS')
+        for key, val in inputs.items():
+            if val is None:
+                continue
+            if isinstance(val, dict):
+                sub = grp.create_group(key)
+                for k, v in val.items():
+                    if isinstance(v, str):
+                        sub.attrs[k] = v
+                    else:
+                        sub.create_dataset(k, data=numpy.asarray(v, dtype=numpy.float64))
+            else:
+                grp.attrs[key] = val if isinstance(val, str) else float(val)
+
+
+def _load_boot_inputs(filename):
+    '''! Read the kept `solve_bootstrap` keyword inputs from a saved equilibrium (`None` if the file has none)'''
+    import h5py
+    def _str(v):
+        return v.decode() if isinstance(v, bytes) else v
+    with h5py.File(filename, 'r') as fid:
+        if 'tokamaker/BOOT_INPUTS' not in fid:
+            return None
+        grp = fid['tokamaker/BOOT_INPUTS']
+        inputs = dict.fromkeys(_BOOT_INPUT_KEYS)
+        for key, val in grp.attrs.items():
+            val = _str(val)
+            inputs[key] = val if isinstance(val, str) else float(val)
+        for key, sub in grp.items():
+            prof = {k: numpy.array(sub[k]) for k in sub}
+            prof.update({k: _str(v) for k, v in sub.attrs.items()})
+            inputs[key] = prof
+    return inputs
+
+
+def _boot_state_message(boot_ops, inputs):
+    '''! One-line summary of a loaded bootstrap state (options and kept keyword inputs)'''
+    opts = ', '.join(f'{k}={v!r}' for k, v in boot_ops.items())
+    kept = []
+    for key, val in (inputs or {}).items():
+        if val is None:
+            continue
+        kept.append(key if isinstance(val, dict) else f'{key}={val!r}')
+    return ('Bootstrap state loaded with its solve_bootstrap options and keyword inputs retained. '
+            'Options: ' + opts + '. Keyword inputs: '
+            + (', '.join(kept) if kept else 'none') + '. Run boot_reset() to return them to their defaults.')
+
+
 class tokamaker_settings:
     r'''! TokaMaker settings class'''
     def __init__(self):
@@ -874,6 +933,20 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.set_kinetic_profiles(te_prof,ti_prof,ne_prof,ni_prof,Zeff,keep_files,jphi_fixed_prof,jphi_saw_prof)
 
+    def boot_reset(self):
+        r'''! Return the bootstrap options and the keyword inputs that @ref solve_bootstrap keeps between calls
+        (`F0`, `pres_prof`, `p_fixed_prof`, `jphi_fixed_prof`, `jphi_saw_prof`, `coord`) to their defaults
+
+        Loaded equilibria keep the state they were solved with; call this to start the next
+        @ref solve_bootstrap from the defaults instead.
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        self._tMaker_equil._boot_inputs = None
+        if self._tMaker_equil._boot_ops is not None:
+            self._tMaker_equil._boot_ops = None
+            self._tMaker_equil.set_boot_ops()
+
     def set_boot_ops(self, isolate_edge_jbs=None, scale_jbs=None, djbs_tol=None,
                      diagnose_bs=None, taper_edge_jbs=None, taper_edge_psi0=None, taper_edge_shape=None,
                      saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None):
@@ -1417,6 +1490,9 @@ class TokaMaker():
                 }
             else:
                 tmp_eq._boot_ops = None
+            tmp_eq._boot_inputs = _load_boot_inputs(source_file)
+            if tmp_eq._boot_ops is not None:
+                print(_boot_state_message(tmp_eq._boot_ops, tmp_eq._boot_inputs))
         else:
             raise ValueError("Must specify either `source_eq` or `source_file`")
         error_string = self._oft_env.get_c_errorbuff()
@@ -2376,7 +2452,7 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
-    def solve_bootstrap(self, ffp_prof, te_prof, ne_prof, ti_prof, ni_prof, Zeff, Ip_target, F0=None, pres_prof=None, jphi_fixed_prof=None, p_fixed_prof=None, coord='psi_n', jphi_saw_prof=None, **kwargs):
+    def solve_bootstrap(self, ffp_prof, te_prof, ne_prof, ti_prof, ni_prof, Zeff, Ip_target, F0=None, pres_prof=None, jphi_fixed_prof=None, p_fixed_prof=None, coord=None, jphi_saw_prof=None, **kwargs):
         r'''! Solve G-S equilibrium with self-consistent bootstrap current from kinetic profiles
 
         Derives a pressure-gradient profile \f$P'(\hat{\psi})\f$ from the supplied kinetic
@@ -2386,6 +2462,11 @@ class TokaMaker():
         allowing additional contributions (e.g. fast-ion pressure) to be included provided the
         total pressure is nowhere less than the kinetic pressure.
         Temperature profiles are expected in keV; density profiles in m\f$^{-3}\f$.
+
+        The keyword inputs (`F0`, `pres_prof`, `p_fixed_prof`, `jphi_fixed_prof`, `jphi_saw_prof`, `coord`)
+        and the bootstrap options are kept between calls and in saved equilibria: any left as `None`
+        take the value of the previous call (or of the loaded equilibrium), so repeating a call with the
+        same positional arguments reproduces it. @ref boot_reset returns them to their defaults (shown below).
 
         @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'`` \f$\hat{\psi_n}\f$ grid, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``)
         @param te_prof Electron temperature profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$T_e\f$ [keV])
@@ -2417,7 +2498,7 @@ class TokaMaker():
         @param taper_edge_psi0 \f$\hat{\psi_n}\f$ (0=axis, 1=LCFS) where the taper begins (default: 0.999)
         @param taper_edge_shape Taper shape: 1=cos\f$^2\f$/Hann, 2=quintic smoothstep, 3=cubic power
           (default: 2)
-        @param saw_q_s Sawtooth reset q floor; 0 = off (default: 0, also when omitted after a call that set it). The q of
+        @param saw_q_s Sawtooth reset q floor; 0 = off (default: 0). The q of
           \f$\alpha j_{ind} + j_{BS} + j_{fixed} + j_{saw,in}\f$ in the traced geometry is reset where it dips
           below q_s (``saw_rule``); the Ip-neutral current that does this is added to ``j_saw``
         @param saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule See ``set_boot_ops()``
@@ -2444,6 +2525,20 @@ class TokaMaker():
             q < q_s, \f$\rho_{tor,N}\f$), outer end of the reset and number of regions reset, at the last reset
         '''
         from scipy.interpolate import Akima1DInterpolator
+        # Keyword inputs left as None keep their values from the previous call or the loaded state
+        kept = self._tMaker_equil._boot_inputs or {}
+        if F0 is None:
+            F0 = kept.get('F0')
+        if coord is None:
+            coord = kept.get('coord') or 'psi_n'
+        if (pres_prof is None) and (p_fixed_prof is None):
+            pres_prof, p_fixed_prof = kept.get('pres_prof'), kept.get('p_fixed_prof')
+        if jphi_fixed_prof is None:
+            jphi_fixed_prof = kept.get('jphi_fixed_prof')
+        if jphi_saw_prof is None:
+            jphi_saw_prof = kept.get('jphi_saw_prof')
+        boot_inputs = copy.deepcopy({'F0': F0, 'pres_prof': pres_prof, 'p_fixed_prof': p_fixed_prof,
+                                     'jphi_fixed_prof': jphi_fixed_prof, 'jphi_saw_prof': jphi_saw_prof, 'coord': coord})
         if coord not in ('psi_n', 'phi_n'):
             raise ValueError(f"coord must be 'psi_n' or 'phi_n' (got {coord!r})")
         # --- Type / shape check on ffp_prof ---
@@ -2529,7 +2624,7 @@ class TokaMaker():
         if ffp_prof['x'][0] > 0:
             warn(f"Bootstrap solver expects profiles defined at psi=0 (axis). Current axis-pressure evaluated at psi_N={ffp_prof['x'][0]:.3f}. Consider extending profile to psi=0 for increased accuracy.", UserWarning, stacklevel=2)
 
-        # Zero profile when unset, so a previous call's jphi_fixed does not persist
+        # Zero profile when unset (no kept value either)
         if jphi_fixed_prof is None:
             jphi_fixed_prof = {'type': 'linterp', 'x': numpy.array([0.0, 1.0]), 'y': numpy.zeros(2)}
         if jphi_saw_prof is None:
@@ -2552,9 +2647,8 @@ class TokaMaker():
             pp_prof=pp_prof,
             foffset=F0,
         )
-        # The sawtooth reset is per solve, like jphi_fixed: off unless saw_q_s is passed
-        kwargs.setdefault('saw_q_s', 0.0)
-        self.set_boot_ops(**kwargs) # Must come after set_profiles
+        self.set_boot_ops(**kwargs) # Must come after set_profiles (options not passed keep their current values)
+        self._tMaker_equil._boot_inputs = boot_inputs
         self.solve()
 
         # Extract bootstrap profiles
@@ -2612,6 +2706,8 @@ class TokaMaker_equilibrium():
             self._mirnov_constraints = None
             ## Shadow of `gs_equil%boot_ops`; `None` until first call to `set_boot_ops`
             self._boot_ops = None
+            ## Keyword inputs of the last `solve_bootstrap` call (kept between calls and in saved files)
+            self._boot_inputs = None
         else:
             self._F0 = copy.copy(source_eq._F0)
             if skip_targets:
@@ -2642,6 +2738,7 @@ class TokaMaker_equilibrium():
                 self._mirnov_constraints = (source_eq._mirnov_constraints[0].copy(), source_eq._mirnov_constraints[1].copy(), source_eq._mirnov_constraints[2].copy()) if source_eq._mirnov_constraints is not None else None
             ## Shadow of `gs_equil%boot_ops`; copied so subsequent set_boot_ops calls update from the source state
             self._boot_ops = copy.copy(source_eq._boot_ops)
+            self._boot_inputs = copy.deepcopy(source_eq._boot_inputs)
         ## Normalized flux convention (0 -> tokamak, 1 -> spheromak)
         self.psi_convention = self._tMaker.psi_convention
         ## Free or fixed boundary flag
@@ -4030,3 +4127,5 @@ class TokaMaker_equilibrium():
         tokamaker_save_tokamaker(self._equil_ptr,cfilename,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        if self._boot_inputs is not None:
+            _save_boot_inputs(filename, self._boot_inputs)

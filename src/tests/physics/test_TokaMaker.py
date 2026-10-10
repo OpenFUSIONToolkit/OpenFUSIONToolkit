@@ -1812,7 +1812,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         return
 
     # --- verify jphi_fixed_prof is added unscaled to the total and reduces the
-    #     inductive share, and that omitting it afterwards resets it to zero ---
+    #     inductive share; omitting it afterwards keeps it, until boot_reset() ---
     try:
         jfix_y = 2.0e5 * np.exp(-((psi_sample - 0.5) / 0.1)**2)
         profs_fixed = mygs.solve_bootstrap(
@@ -1828,9 +1828,13 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             raise AssertionError("jphi_total != jphi_ind + jphi_bs + jphi_fixed")
         if not np.sum(profs_fixed['jphi_ind']) < np.sum(profs_scalar['jphi_ind']):
             raise AssertionError("jphi_fixed did not reduce the inductive current share")
+        profs_kept = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
+        if not np.array_equal(profs_kept['jphi_fixed'], profs_fixed['jphi_fixed']):
+            raise AssertionError("jphi_fixed not kept by solve_bootstrap without jphi_fixed_prof")
+        mygs.boot_reset()
         profs_reset = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         if np.any(profs_reset['jphi_fixed'] != 0.0):
-            raise AssertionError("jphi_fixed persisted after solve_bootstrap without jphi_fixed_prof")
+            raise AssertionError("jphi_fixed persisted after boot_reset()")
     except Exception as e:
         print(e)
         mp_q.put(None)
@@ -1857,6 +1861,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         p_tot = p_kin + pf
         if not np.isclose(P_ax_pfix, p_tot[0] - p_tot[-1], rtol=1e-4):
             raise AssertionError(f"axis pressure {P_ax_pfix:.6e} != kinetic + p_fixed drop {p_tot[0] - p_tot[-1]:.6e}")
+        mygs.boot_reset()
         mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         if np.isclose(np.max(mygs.get_profiles(psi=np.array([0.0, 1.0]))[3]), P_ax_pfix, rtol=1e-4):
             raise AssertionError("p_fixed_prof did not change the axis pressure")
@@ -1933,6 +1938,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         # (a) an input jphi_saw_prof with the reset off acts as a fixed current
         bump = 1.0e5 * np.exp(-((psi_sample - 0.2) / 0.1)**2)
         p_fix = mygs.solve_bootstrap(jphi_fixed_prof={'x': psi_sample, 'y': bump}, **common)
+        mygs.boot_reset()  # jphi_fixed_prof would otherwise be kept
         p_saw = mygs.solve_bootstrap(jphi_saw_prof={'x': psi_sample, 'y': bump}, **common)
         # Both converge j_BS to djbs_tol (1e-4) and may stop an iteration apart
         if not close(p_saw['jphi_total'], p_fix['jphi_total'], 2e-4):
@@ -1951,6 +1957,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         if not (close(p_rel['jphi_saw'], p_saw['jphi_saw'], 1e-6) and close(p_rel['jphi_total'], p_saw['jphi_total'], 1e-3)):
             raise AssertionError("jphi_saw lost in the equilibrium save/load")
         # (c, d) q_s below min q: no reset, same result as saw off (alpha through the cumulative integral)
+        mygs.boot_reset()  # jphi_saw_prof would otherwise be kept
         p_low = mygs.solve_bootstrap(saw_q_s=0.5*np.min(q_base), **common)
         if np.any(p_low['jphi_saw'] != 0.0) or p_low['saw_n_dips'] != 0:
             raise AssertionError("saw_q_s below min q changed j_saw")
@@ -2023,6 +2030,31 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         away = (rho_l < rho_in - 0.05) | (rho_l > p_l['saw_rho_out'] + 0.05)
         if not (0.1 < rho_in < p_l['saw_rho_out']) or np.max(np.abs(p_l['jphi_saw'][away])) > 1e-3*np.max(np.abs(p_l['jphi_saw'])):
             raise AssertionError("saw reversed shear: local j_saw not confined to [rho_in, rho_out]")
+        # (g) a loaded bootstrap state is re-solvable as saved: the same positional call after loading
+        #     reproduces the call with every keyword input and option passed explicitly
+        eC = 1.602176634e-19
+        p_kin = eC*(setup['ne']*setup['Te'] + setup['ni']*setup['Ti'])
+        kw = dict(jphi_fixed_prof={'x': psi_sample, 'y': 0.5*bump}, jphi_saw_prof={'x': psi_sample, 'y': 0.5*bump},
+                  p_fixed_prof={'x': psi_sample, 'y': p_kin[0]*(0.1*np.exp(-((psi_sample - 0.3)/0.15)**2) + 1.0e-3)},
+                  saw_q_s=q_s, saw_dq=dq, saw_rule=2, taper_edge_jbs=True)
+        mygs.solve_bootstrap(**kw, **common)
+        mygs._tMaker_equil.save_TokaMaker('ITER_boot_state.h5')
+        mygs.boot_reset()
+        mygs.replace_eq(source_file='ITER_boot_state.h5')
+        p_kept = mygs.solve_bootstrap(**common)
+        mygs.boot_reset()
+        mygs.replace_eq(source_file='ITER_boot_state.h5')
+        p_expl = mygs.solve_bootstrap(**kw, **common)
+        for key in ('jphi_total', 'jphi_ind', 'jphi_bs', 'jphi_fixed', 'jphi_saw', 'jphi_pd'):
+            if not close(p_kept[key], p_expl[key], 1e-10):
+                raise AssertionError(f"loaded state: '{key}' differs from the explicit call")
+        mygs.boot_reset()
+        if mygs._tMaker_equil._boot_inputs is not None or mygs._tMaker_equil._boot_ops['saw_q_s'] != 0.0 \
+                or mygs._tMaker_equil._boot_ops['taper_edge_jbs']:
+            raise AssertionError("boot_reset() did not restore the defaults")
+        p_def = mygs.solve_bootstrap(**common)
+        if np.any(p_def['jphi_fixed'] != 0.0) or np.any(p_def['jphi_saw'] != 0.0):
+            raise AssertionError("boot_reset(): jphi_fixed / j_saw not back to zero")
     except Exception as e:
         print(e)
         mp_q.put(None)
