@@ -966,19 +966,15 @@ DO i = 1, n
 END DO
 END SUBROUTINE gradient_
 !------------------------------------------------------------------------------
-!> Computes the bootstrap current on a uniform psi_N grid.
-!>
-!> Translated from Python bootstrap.py: calculate_profiles_and_bootstrap
-!> (up to and including the redl_bootstrap call).
-!>
-!> Fixed conventions: NRL Coulomb logs, Koh ion collisionality model,
-!> Redl 2021 jboot1 form, L34=L31.
-!>
-!> @param gseq    Equilibrium object (must have Te, Ti, ne, ni, Zeff set)
-!> @param n_psi    Number of flux surface samples
-!> @param psi_N    Normalised psi grid [0,1], arbitrary spacing
-!> @param jphi_bs Output: bootstrap current density as TokaMaker jphi = <j_phi> [A/m^2] on psi_N grid
-!> @param jphi_pd Output: its pressure-driven part [A/m^2]
+!> Bootstrap current (Redl 2021) on the nodes psi_N (bootstrap.py calculate_profiles_and_bootstrap)
+!!
+!! NRL Coulomb logs, Koh ion collisionality, Redl jboot1 (no sign(q) factor: <j.B> is odd in F), L34=L31.
+!!
+!! @param gseq    Equilibrium object (must have Te, Ti, ne, ni, Zeff set)
+!! @param n_psi   Number of flux surface samples
+!! @param psi_N   Normalised psi, OFT convention (0=LCFS, 1=axis), any spacing, psi_N(1)>0
+!! @param jphi_bs Output: bootstrap current density as TokaMaker jphi = <j_phi> [A/m^2] on psi_N grid
+!! @param jphi_pd Output: its pressure-driven part [A/m^2]
 !------------------------------------------------------------------------------
 SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, jphi_bs, jphi_pd, &
                                isolate_edge_jbs, parameterize_jbs, scale_jbs, &
@@ -986,7 +982,7 @@ SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, jphi_bs, jphi_pd, &
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 INTEGER(i4), INTENT(in) :: n_psi
-REAL(r8), INTENT(in) :: psi_N(1:n_psi)  !< Normalised psi grid (0,1], arbitrary spacing. psi_N(1)>0.0
+REAL(r8), INTENT(in) :: psi_N(1:n_psi)  !< Normalised psi (OFT convention, 0=LCFS), psi_N(1)>0
 REAL(r8), INTENT(out) :: jphi_bs(0:n_psi) !< jphi_bs(0) the LCFS value (extrapolated)
 REAL(r8), INTENT(out) :: jphi_pd(0:n_psi) !< Pressure-driven part of jphi_bs
 LOGICAL,  OPTIONAL, INTENT(in)  :: isolate_edge_jbs  !< If .TRUE., isolate edge spike from core
