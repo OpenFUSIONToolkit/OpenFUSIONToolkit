@@ -2985,7 +2985,7 @@ class TokaMaker_equilibrium():
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
 
         Call after setting a `jphi-split-bootstrap`-type ffp_prof profile, and before mygs.solve().
-        Any `None` value is left unchanged from current state (see initialisations in dict. below).
+        Any `None` value is left unchanged from the current state (defaults: `_BOOT_OPS_DEFAULTS`).
 
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
         @param parameterize_jbs Use a parametrised skew-normal fit for the edge spike? Overrides `isolate_edge_jbs` if true. (Internal default: False)
