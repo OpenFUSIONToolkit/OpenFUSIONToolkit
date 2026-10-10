@@ -40,7 +40,7 @@ USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_map, torflux_setup, to
   torflux_qgeom
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
-USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh
+USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh, gs_flux_int
 USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func, sauter_fc, boot_prof_access
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
@@ -1386,34 +1386,13 @@ TYPE(c_ptr), VALUE, INTENT(in) :: field_vals !< Value of the flux function at ma
 INTEGER(c_int), VALUE, INTENT(in) :: nvals !< Number of values in `psi_vals` and `field_vals`
 REAL(c_double), INTENT(out) :: result !< Integral result
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-INTEGER(i4) :: i,m
-REAL(r8) :: area,psitmp(1),sgop(3,3)
 REAL(8), POINTER, DIMENSION(:) :: psi_tmp,field_tmp
-TYPE(gs_prof_interp) :: prof_interp_obj
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 DEBUG_STACK_PUSH
-!---Setup
 CALL c_f_pointer(psi_vals, psi_tmp, [nvals])
 CALL c_f_pointer(field_vals, field_tmp, [nvals])
-result=0.d0
-prof_interp_obj%mode=4
-CALL prof_interp_obj%setup(tMaker_equil_obj)
-!$omp parallel do private(m,psitmp,sgop,area) reduction(+:result)
-do i=1,tMaker_equil_obj%device%mesh%nc
-  IF(tMaker_equil_obj%device%mesh%reg(i)/=1)CYCLE
-  !---Loop over quadrature points
-  do m=1,tMaker_equil_obj%device%fe_rep%quad%np
-    call tMaker_equil_obj%device%mesh%jacobian(i,tMaker_equil_obj%device%fe_rep%quad%pts(:,m),sgop,area)
-    call prof_interp_obj%interp(i,tMaker_equil_obj%device%fe_rep%quad%pts(:,m),sgop,psitmp)
-    IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma (mode 4 returns 0 there)
-    psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
-    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*tMaker_equil_obj%device%fe_rep%quad%wts(m)
-  end do
-end do
-!---Global reduction and cleanup
-result=oft_mpi_sum(result)
-CALL prof_interp_obj%delete()
+CALL gs_flux_int(tMaker_equil_obj,psi_tmp,field_tmp,nvals,result)
 DEBUG_STACK_POP
 END SUBROUTINE tokamaker_flux_int
 !---------------------------------------------------------------------------------

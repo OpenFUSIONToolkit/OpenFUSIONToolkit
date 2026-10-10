@@ -14,7 +14,7 @@
 module grad_shaf_bootstrap
 use oft_base
 use oft_gs, only: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
- gs_itor_nl
+ gs_itor_nl, gs_fpol
 use oft_lag_basis, only: oft_blag_geval
 use oft_mesh_type, only: bmesh_findcell
 use oft_blag_operators, only: oft_lag_brinterp
@@ -131,7 +131,7 @@ subroutine jphi_bs_save_hdf5(self,filename,path)
 class(jphi_bs_flux_func), intent(inout) :: self
 character(LEN=*), intent(in) :: filename
 character(LEN=*), intent(in) :: path
-CALL hdf5_write('jphi-split-bootstrap',filename,path//'/TYPE')
+IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('jphi-split-bootstrap',filename,path//'/TYPE')
 CALL hdf5_write(self%npsi,filename,path//'/NPSI')
 CALL hdf5_write(self%x,filename,path//'/XVALS')
 CALL hdf5_write(self%jphi,filename,path//'/YVALS')
@@ -419,6 +419,7 @@ REAL(r8), ALLOCATABLE :: psi_n(:) !< Nodes: LCFS (0) and xpsi
 REAL(r8), ALLOCATABLE :: jtor(:)  !< IMAS-convention current for the exact I_p measure (eval_jtor_imas)
 REAL(r8), ALLOCATABLE :: jphi_bs(:), jphi_pd(:), jphi_ind(:), jphi_fixed(:), jphi_total(:)
 REAL(r8), ALLOCATABLE :: jphi_bs_spike(:), jphi_bs_spike_masked(:) !< Isolated / masked edge spike [A/m²]
+LOGICAL :: isolate
 REAL(r8) :: alpha, ip_target, ip_ind, ip_result_lo, ip_result_hi, dalpha
 REAL(r8) :: djbs !< Relative RMS change of jphi_bs since the last evaluation
 REAL(r8) :: itor_nl, itor_flint
@@ -471,38 +472,31 @@ IF(self%freeze_jbs .AND. ALLOCATED(self%jphi_bs_last)) THEN
   jphi_pd = self%jphi_pd_last
   djbs = 0.0_r8
 ELSE
-  IF (self%boot_ops%isolate_edge_jbs .OR. self%boot_ops%parameterize_jbs) THEN
+  CALL calculate_bootstrap(self, gseq, self%npsi, xpsi, jphi_bs, jphi_pd)
+  isolate = self%boot_ops%isolate_edge_jbs .OR. self%boot_ops%parameterize_jbs
+  IF(isolate)THEN
     ALLOCATE(jphi_bs_spike(0:self%npsi), jphi_bs_spike_masked(0:self%npsi))
-    CALL calculate_bootstrap(self, gseq, self%npsi, xpsi, jphi_bs, jphi_pd, &
-        isolate_edge_jbs=self%boot_ops%isolate_edge_jbs, &
-        parameterize_jbs=self%boot_ops%parameterize_jbs, &
-        scale_jbs=self%boot_ops%scale_jbs, &
-        jphi_bs_spike=jphi_bs_spike, jphi_bs_spike_masked=jphi_bs_spike_masked)
-    IF (self%boot_ops%diagnose_bs) THEN
-      IF (self%boot_ops%parameterize_jbs) THEN
-        WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         jphi_bs(bulk)[A/m2]  spike[A/m2]   spike_masked[A/m2]  jphi[A/m2]  jphi_fixed[A/m2]'
-        DO i = 1, self%npsi
-          WRITE(*,'(A,I4,6ES15.5)') '  ', i, xpsi(i), jphi_bs(i), jphi_bs_spike(i), jphi_bs_spike_masked(i), self%jphi(i), jphi_fixed(i)/mu0
-        END DO
-      ELSE
-        WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         jphi_bs(bulk)[A/m2]  spike[A/m2]   jphi[A/m2]  jphi_fixed[A/m2]'
-        DO i = 1, self%npsi
-          WRITE(*,'(A,I4,5ES15.5)') '  ', i, xpsi(i), jphi_bs(i), jphi_bs_spike(i), self%jphi(i), jphi_fixed(i)/mu0
-        END DO
-      END IF
-    END IF
-    jphi_bs = jphi_bs_spike
-    DEALLOCATE(jphi_bs_spike, jphi_bs_spike_masked)
-  ELSE
-    CALL calculate_bootstrap(self, gseq, self%npsi, xpsi, jphi_bs, jphi_pd)
-    jphi_bs = jphi_bs * self%boot_ops%scale_jbs
-    IF(self%boot_ops%diagnose_bs)THEN
+    CALL edge_spike(self%npsi, xpsi, jphi_bs, self%boot_ops%parameterize_jbs, self%boot_ops%diagnose_bs, &
+                    jphi_bs_spike, jphi_bs_spike_masked)
+  END IF
+  IF(self%boot_ops%diagnose_bs)THEN
+    IF(isolate)THEN
+      WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         jphi_bs(bulk)[A/m2]  spike[A/m2]   spike_masked[A/m2]  jphi[A/m2]  jphi_fixed[A/m2]'
+      DO i = 1, self%npsi
+        WRITE(*,'(A,I4,6ES15.5)') '  ', i, xpsi(i), jphi_bs(i), jphi_bs_spike(i), jphi_bs_spike_masked(i), self%jphi(i), jphi_fixed(i)/mu0
+      END DO
+    ELSE
       WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         jphi_bs[A/m2]      jphi[A/m2]  jphi_fixed[A/m2]'
       DO i = 1, self%npsi
         WRITE(*,'(A,I4,4ES15.5)') '  ', i, xpsi(i), jphi_bs(i), self%jphi(i), jphi_fixed(i)/mu0
       END DO
     END IF
   END IF
+  IF(isolate)THEN
+    jphi_bs = jphi_bs_spike
+    DEALLOCATE(jphi_bs_spike, jphi_bs_spike_masked)
+  END IF
+  jphi_bs = jphi_bs * self%boot_ops%scale_jbs
   jphi_pd = jphi_pd * self%boot_ops%scale_jbs
   jphi_bs = jphi_bs * mu0
   jphi_pd = jphi_pd * mu0
@@ -978,20 +972,13 @@ END SUBROUTINE gradient_
 !! @param jphi_bs Output: bootstrap current density as TokaMaker jphi = <j_phi> [A/m^2] on psi_N grid
 !! @param jphi_pd Output: its pressure-driven part [A/m^2]
 !------------------------------------------------------------------------------
-SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, jphi_bs, jphi_pd, &
-                               isolate_edge_jbs, parameterize_jbs, scale_jbs, &
-                               jphi_bs_spike, jphi_bs_spike_masked)
+SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, jphi_bs, jphi_pd)
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 INTEGER(i4), INTENT(in) :: n_psi
 REAL(r8), INTENT(in) :: psi_N(1:n_psi)  !< Normalised psi (OFT convention, 0=LCFS), psi_N(1)>0
 REAL(r8), INTENT(out) :: jphi_bs(0:n_psi) !< jphi_bs(0) the LCFS value (extrapolated)
 REAL(r8), INTENT(out) :: jphi_pd(0:n_psi) !< Pressure-driven part of jphi_bs
-LOGICAL,  OPTIONAL, INTENT(in)  :: isolate_edge_jbs  !< If .TRUE., isolate edge spike from core
-LOGICAL,  OPTIONAL, INTENT(in)  :: parameterize_jbs  !< If .TRUE., use parametrised skew-normal fit
-REAL(r8), OPTIONAL, INTENT(in)  :: scale_jbs         !< Scaling factor applied to spike profile (default 1)
-REAL(r8), OPTIONAL, INTENT(out) :: jphi_bs_spike(0:n_psi)        !< Processed spike profile [A/m^2]
-REAL(r8), OPTIONAL, INTENT(out) :: jphi_bs_spike_masked(0:n_psi) !< Raw masked (pre-fit) spike profile [A/m^2]
 !---
 INTEGER(i4) :: i
 REAL(r8) :: psi_abs(n_psi)
@@ -1015,11 +1002,6 @@ REAL(r8) :: jdotb_bs(n_psi)
 REAL(r8) :: jdotb(0:n_psi) !< <j_BS.B> with its LCFS/axis values
 REAL(r8) :: psi_range, Zdom, pscale, pprime
 REAL(r8), PARAMETER :: EC = 1.602176634e-19_r8
-! Locals for optional edge-spike isolation
-LOGICAL  :: do_isolate, do_parametrize
-REAL(r8) :: scl_jbs
-! Workspace for psi_N convention flip (OFT: 0=LCFS,1=axis → standard: 0=axis,1=LCFS)
-REAL(r8), ALLOCATABLE :: psi_N_std(:), jphi_bs_std(:), mask_std(:), param_std(:)
 !---
 ! Compute raw psi values from the caller-supplied psi_N grid
 psi_range = gseq%plasma_bounds(2) - gseq%plasma_bounds(1)
@@ -1036,11 +1018,7 @@ IF(MAXVAL(Te) > 5.0e5_r8)CALL oft_warn('calculate_bootstrap: max(Te) > 500 keV �
 IF(MAXVAL(Ti) > 5.0e5_r8)CALL oft_warn('calculate_bootstrap: max(Ti) > 500 keV — profiles should be in keV, not eV')
 ! Get I(psi) = R*Bt = F(psi) profile on the psi_N grid
 DO i = 1, n_psi
-  IF(gseq%mode==0)THEN
-    f(i) = gseq%ffp_scale * gseq%I%f(psi_abs(i)) + gseq%I%f_offset
-  ELSE
-    f(i) = SIGN(1.0_r8, gseq%I%f_offset) * SQRT(gseq%ffp_scale * gseq%I%f(psi_abs(i)) + gseq%I%f_offset**2)
-  END IF
+  f(i) = gs_fpol(gseq, psi_abs(i))
 END DO
 ! Get flux-surface geometry: fc, eps, q, and <R> in one tracing pass
 CALL sauter_fc(gseq, n_psi, psi_N, fc, r_avgs_saut, modb_avgs_saut, qprof=qvals, eps=eps)
@@ -1121,39 +1099,6 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,3ES12.4)') '    nu_e_star: ', nu_e_star(1), nu_e_star(n_psi/2), nu_e_star(n_psi)
   WRITE(*,'(A,3ES12.4)') '    jphi_bs  : ', jphi_bs(1), jphi_bs(n_psi/2), jphi_bs(n_psi)
 END IF
-!---
-! Optionally isolate the edge bootstrap spike and return it as jphi_bs_spike, mirroring the
-! isolate_edge_jbs, parameterize_jbs logic in bootstrap.py:calculate_profiles_and_bootstrap.
-IF (PRESENT(jphi_bs_spike)) THEN
-  do_isolate    = .FALSE.
-  do_parametrize = .FALSE.
-  scl_jbs       = 1.0_r8
-  IF (PRESENT(isolate_edge_jbs)) do_isolate    = isolate_edge_jbs
-  IF (PRESENT(parameterize_jbs)) do_parametrize = parameterize_jbs
-  IF (PRESENT(scale_jbs))        scl_jbs        = scale_jbs
-  IF (do_isolate .OR. do_parametrize) THEN
-    ! analyze_bootstrap_edge_spike uses standard psi_N convention (0=axis, 1=LCFS).
-    ! OFT internal convention is reversed (0=LCFS, 1=axis).
-    ! Flip arrays before calling, then flip outputs back.
-    ALLOCATE(psi_N_std(0:n_psi), jphi_bs_std(0:n_psi), mask_std(0:n_psi))
-    IF (do_parametrize) ALLOCATE(param_std(0:n_psi))
-    psi_N_std(0:n_psi-1) = 1.0_r8 - psi_N(n_psi:1:-1)
-    psi_N_std(n_psi) = 1.0_r8
-    jphi_bs_std  = jphi_bs(n_psi:0:-1)
-    IF (do_parametrize) THEN
-      CALL analyze_bootstrap_edge_spike((n_psi+1), psi_N_std, jphi_bs_std, mask_std, &
-                                      param_std, diagnose=self%boot_ops%diagnose_bs)
-      jphi_bs_spike = scl_jbs * param_std(n_psi:0:-1)
-      IF (PRESENT(jphi_bs_spike_masked)) jphi_bs_spike_masked = scl_jbs * mask_std(n_psi:0:-1)
-      DEALLOCATE(param_std)
-    ELSE
-      CALL analyze_bootstrap_edge_spike((n_psi+1), psi_N_std, jphi_bs_std, mask_std)
-      jphi_bs_spike = scl_jbs * mask_std(n_psi:0:-1)
-      IF (PRESENT(jphi_bs_spike_masked)) jphi_bs_spike_masked = scl_jbs * mask_std(n_psi:0:-1)
-    END IF
-    DEALLOCATE(psi_N_std, jphi_bs_std, mask_std)
-  END IF
-END IF
 CONTAINS
 !> Zero non-finite values (where F -> 0) and extrapolate to the LCFS/axis, where q is undefined
 SUBROUTINE finish(a)
@@ -1162,6 +1107,32 @@ WHERE(.NOT.(ABS(a) < 1.0e99_r8)) a = 0.0_r8
 CALL extrap_jbs_boundaries(n_psi, psi_N, a)
 END SUBROUTINE finish
 END SUBROUTINE calculate_bootstrap
+!------------------------------------------------------------------------------
+!> Edge spike of a bootstrap profile (OFT convention), as isolate_edge_jbs / parameterize_jbs in
+!! bootstrap.py calculate_profiles_and_bootstrap: the masked spike and, if @p parameterize, its fit
+!------------------------------------------------------------------------------
+SUBROUTINE edge_spike(n_psi, psi_N, jphi_bs, parameterize, diagnose, spike, spike_masked)
+INTEGER(i4), INTENT(in) :: n_psi !< Number of nodes (without the LCFS)
+REAL(r8), INTENT(in) :: psi_N(1:n_psi) !< Normalised psi (OFT convention, 0=LCFS)
+REAL(r8), INTENT(in) :: jphi_bs(0:n_psi) !< Bootstrap profile, jphi_bs(0) at the LCFS
+LOGICAL, INTENT(in) :: parameterize !< Fit the spike (skew-normal)?
+LOGICAL, INTENT(in) :: diagnose !< Print the fit parameters?
+REAL(r8), INTENT(out) :: spike(0:n_psi) !< Edge spike (the fit if @p parameterize)
+REAL(r8), INTENT(out) :: spike_masked(0:n_psi) !< Masked spike, before any fit
+REAL(r8) :: psi_N_std(0:n_psi), jphi_bs_std(0:n_psi), mask_std(0:n_psi), param_std(0:n_psi)
+! analyze_bootstrap_edge_spike uses the standard convention (0=axis, 1=LCFS): flip in and out
+psi_N_std(0:n_psi-1) = 1.0_r8 - psi_N(n_psi:1:-1)
+psi_N_std(n_psi) = 1.0_r8
+jphi_bs_std = jphi_bs(n_psi:0:-1)
+IF(parameterize)THEN
+  CALL analyze_bootstrap_edge_spike(n_psi+1, psi_N_std, jphi_bs_std, mask_std, param_std, diagnose=diagnose)
+  spike = param_std(n_psi:0:-1)
+ELSE
+  CALL analyze_bootstrap_edge_spike(n_psi+1, psi_N_std, jphi_bs_std, mask_std)
+  spike = mask_std(n_psi:0:-1)
+END IF
+spike_masked = mask_std(n_psi:0:-1)
+END SUBROUTINE edge_spike
 !------------------------------------------------------------------------------
 !> Linearly extrapolate a bootstrap profile to the LCFS (and the axis, if a node) where q is
 !! undefined, using the second-order gradient at the nearest well-defined point.
