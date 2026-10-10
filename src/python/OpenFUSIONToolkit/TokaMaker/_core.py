@@ -3194,7 +3194,7 @@ class TokaMaker_equilibrium():
                                  f"(got {len(jphi_saw_prof['x'])} and {len(jphi_saw_prof['y'])})")
             if jphi_saw_prof.get('type', 'linterp') != 'linterp':
                 raise ValueError(f"jphi_saw_prof 'type' must be 'linterp' (got {jphi_saw_prof['type']!r})")
-            jphi_saw_prof.setdefault('type', 'linterp')
+            jphi_saw_prof = dict(jphi_saw_prof, type='linterp')
             jphi_saw_file = self._oft_env.unique_tmpfile('tokamaker_jphi_saw.prof')
             create_prof_file(self, jphi_saw_file, jphi_saw_prof, "jphi_saw")
             delete_files.append(jphi_saw_file)
