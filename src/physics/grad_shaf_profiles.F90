@@ -2316,12 +2316,8 @@ end function tmap_lookup
 !------------------------------------------------------------------------------
 !> Update the \f$ \hat{\psi} \rightarrow \hat{\Phi} \f$ map from the equilibrium q profile
 !!
-!! Surfaces are placed at the \f$ \hat{\psi} \f$ of each profile node, with gaps filled to
-!! `dphi_max`, plus fixed surfaces near the LCFS and axis. After new profiles or a new state
-!! (`settle`, set by @ref torflux_setup) surfaces are re-placed on the updated map until they move
-!! less than `place_tol`; otherwise a single pass is made and they settle over the nonlinear iterations. The geometric factor
-!! \f$ q/F \f$ is traced once per pass; consistency between F and the map (when F*F' is itself on
-!! \f$ \hat{\Phi} \f$) is then obtained by fixed-point iteration without further tracing.
+!! Surfaces sit at the profile nodes (gaps filled to `dphi_max`); \f$ q/F \f$ is computed once per pass.
+!! With `settle` (@ref torflux_setup) passes repeat until surfaces move less than `place_tol`, else one pass.
 !! Sets `gseq%torflux_ierr`: 0 ok, 1 update failed (previous map kept), 2 no closed surfaces.
 !------------------------------------------------------------------------------
 subroutine tmap_update(self,gseq)

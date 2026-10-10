@@ -33,10 +33,10 @@ class tokamaker_boot_ops_struct(c_struct):
     r'''! Bootstrap current options for the jphi-split-bootstrap current profile update.
 
      - `isolate_edge_jbs` Isolate the edge bootstrap spike from the bulk bootstrap current?
-     - `scale_jbs` Scaling factor applied to the spike profile (default 1.0)
+     - `scale_jbs` Scaling factor applied to the bootstrap current (the isolated spike if `isolate_edge_jbs`; default 1.0)
      - `djbs_tol` Threshold on relative change in the bootstrap current to freeze it (default 1e-4)
      - `diagnose_bs` Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration?
-     - `taper_edge_jbs` Smooth taper of toroidal current to zero at the plasma edge (guards against numerical issues at the separatrix; default False)
+     - `taper_edge_jbs` Taper all current components to zero at the LCFS (default False)
      - `taper_edge_psi0` psi_N where the taper begins (standard: 0=axis, 1=LCFS; default 0.999)
      - `taper_edge_shape` Taper shape: 1=cos²/Hann, 2=quintic smoothstep (default), 3=cubic power
      - `saw_q_s` Sawtooth reset q on axis; 0 = off (default 0)

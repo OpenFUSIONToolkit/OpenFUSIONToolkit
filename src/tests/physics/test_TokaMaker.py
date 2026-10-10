@@ -1219,7 +1219,7 @@ ITER_bootstrap_eq_dict = {
     'a_geo': 1.9807072056151687,
     'q_0': 1.036565329524374,
     'q_95': 2.863029898626678,
-    # P_ax = p(axis) - p(LCFS) since pax targets the drop TokaMaker's P' carries (was p(axis): -2.3 %)
+    # P_ax = p(axis) - p(LCFS): pax targets the pressure drop carried by TokaMaker's P'
     'P_ax': 7.232048E+05,
     'jphi_bs_max': 219163.55709184994,
     'jphi_bs_axis': 4696.213397541225,
@@ -1504,7 +1504,7 @@ def _ITER_bootstrap_internal_setup(mesh_resolution, fe_order):
             print(e)
             return None
 
-    # --- Kinetic and current profiles (match ITER_Hmode_bootstrap_ex.py) ---
+    # --- Kinetic and current profiles (ITER H-mode) ---
     n_sample = 257
     psi_sample = np.linspace(0.0, 1.0, n_sample)
     Ip_target = 13.0e6
@@ -1888,7 +1888,7 @@ ITER_bootstrap_internal_eq_dict = {
     'a_geo':     1.9785979198829686,
     'q_0':       1.3748401369017682,
     'q_95':      3.504083741872661,
-    # P_ax = p(axis) - p(LCFS) since pax targets the drop TokaMaker's P' carries (was p(axis): -2.3 %)
+    # P_ax = p(axis) - p(LCFS): pax targets the pressure drop carried by TokaMaker's P'
     'P_ax':      7.232028E+05,
     'beta_pol':  8.320959E+01,
     'beta_tor':  2.435303E+00,

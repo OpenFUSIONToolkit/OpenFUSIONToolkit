@@ -7,14 +7,9 @@
 !
 !> Mesh-based (cut-cell) evaluation of the flux-surface geometric factor \f$ q/F \f$
 !!
-!! In each plasma cell \f$ \hat{\psi} \f$ is a degree-p polynomial in the logical
-!! coordinates \f$ (u,v) = (\lambda_2,\lambda_3) \f$, held in Bernstein form. Cells are
-!! split recursively until \f$ \hat{\psi} \f$ is strictly monotone along a fixed direction
-!! \f$ d \f$ with monotone edge restrictions. Each level-set arc is then a graph over
-!! \f$ \xi = e \cdot x \f$ (\f$ e \perp d \f$) between exact edge crossings, and
-!! \f$ dl/|\nabla \psi| = |J| d\xi / |\partial_d \psi| \f$ (coarea formula in logical space).
-!! Arc points are exact roots of the FE \f$ \hat{\psi} \f$ along \f$ d \f$, so the result is
-!! smooth in \f$ \psi \f$ up to Gauss quadrature error.
+!! Cells are split (Bernstein form) until \f$ \hat{\psi} \f$ is monotone along a direction \f$ d \f$;
+!! each level-set arc is then a graph between exact edge crossings, integrated by Gauss quadrature
+!! with \f$ dl/|\nabla \psi| = |J| d\xi / |\partial_d \psi| \f$.
 !!
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
@@ -44,7 +39,7 @@ INTEGER(i4), PARAMETER :: nblk_cells = 64 !< Cells per deterministic accumulatio
 INTEGER(i4), PARAMETER :: max_depth = 12 !< Maximum subdivision depth
 REAL(r8), PARAMETER :: kappa = 0.25d0 !< Required min/max ratio of \f$ \partial_d \hat{\psi} \f$ per sub-cell
 REAL(r8), PARAMETER :: wind_tol = 1.d-2 !< Tolerance on winding number about O-point
-REAL(r8), PARAMETER :: smooth_ratio = 0.9d0 !< Min/max \f$ \partial_d \hat{\psi} \f$ ratio above which 3 Gauss points are used (else 5)
+REAL(r8), PARAMETER :: smooth_ratio = 0.9d0 !< Min/max d psi/d d ratio above which 3 Gauss points are used (else 5)
 REAL(r8), PARAMETER :: xg3(3) = [-0.774596669241483377035853d0,0.d0,0.774596669241483377035853d0]
 REAL(r8), PARAMETER :: wg3(3) = [0.555555555555555555555556d0,0.888888888888888888888889d0, &
   0.555555555555555555555556d0]
