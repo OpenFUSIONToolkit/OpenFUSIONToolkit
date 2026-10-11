@@ -58,8 +58,8 @@ TYPE :: boot_profs
   REAL(r8), ALLOCATABLE :: jphi_bs_raw(:) !< Field-aligned bootstrap jphi, <j_BS.B> F<1/R>/<B^2> (with jphi_pd_raw, eq. A7)
   REAL(r8), ALLOCATABLE :: jphi_pd_raw(:) !< Pressure-driven (diamagnetic + Pfirsch-Schlueter) part, P'(<R> - F^2<1/R>/<B^2>)
   REAL(r8), ALLOCATABLE :: jphi_total(:) !< Total = jphi_ind + jphi_bs + jphi_pd + jphi_saw + jphi_fixed
-  REAL(r8), ALLOCATABLE :: jphi_bs(:) !< Field-aligned bootstrap jphi, scaled, optionally isolated (with jphi_pd) and tapered
-  REAL(r8), ALLOCATABLE :: jphi_pd(:) !< jphi_pd_raw, optionally tapered (not scaled)
+  REAL(r8), ALLOCATABLE :: jphi_bs(:) !< Field-aligned bootstrap jphi, scaled, optionally isolated and tapered
+  REAL(r8), ALLOCATABLE :: jphi_pd(:) !< jphi_pd_raw, optionally tapered (not scaled or isolated)
   REAL(r8), ALLOCATABLE :: jphi_ind(:) !< Inductive jphi: input jphi times alpha, optionally tapered
   REAL(r8), ALLOCATABLE :: jphi_saw(:) !< Sawtooth jphi: input jphi_saw (optionally tapered) plus the q reset current
   REAL(r8), ALLOCATABLE :: jphi_fixed(:) !< Fixed (non-rescaled) jphi, optionally tapered
@@ -448,8 +448,8 @@ end function h5_name
 !! (LCFS and the profile nodes `xpsi`):
 !!   1. Pressure scale.
 !!   2. jphi_fixed, the input sawtooth current jphi_saw_in and the bootstrap current jphi_bs (here
-!!      with its pressure-driven part jphi_pd, which scale_jbs leaves out), optionally isolated and
-!!      scaled, or reused from the last evaluation when frozen; <R>, <1/R>, <1/R^2> on the nodes
+!!      with its pressure-driven part jphi_pd, which isolation and scale_jbs leave out), optionally
+!!      isolated and scaled, or reused from the last evaluation when frozen; <R>, <1/R>, <1/R^2> on the nodes
 !!      from its Sauter pass, else (and on the LCFS) from gs_ravgs.
 !!   3. Edge taper of jphi_bs, jphi_pd, jphi_ind, jphi_fixed and jphi_saw_in.
 !!   4. alpha from the exact I_p (gs_flux_int of eval_jtor_imas, eq. A9c), which is affine in
@@ -543,13 +543,13 @@ ELSE
   END IF
   IF(self%boot_ops%isolate_edge_jbs)THEN
     ALLOCATE(jphi_bs_spike(0:self%npsi))
-    CALL edge_spike(self%npsi, xpsi, jphi_bs, jphi_bs_spike)
+    CALL edge_spike(self%npsi, xpsi, jphi_bs - jphi_pd, jphi_bs_spike) ! field-aligned part only
   END IF
   IF(self%boot_ops%diagnose_bs)THEN
     IF(self%boot_ops%isolate_edge_jbs)THEN
       WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         jphi_bs(bulk)[A/m2]  spike[A/m2]   jphi[A/m2]  jphi_fixed[A/m2]'
       DO i = 1, self%npsi
-        WRITE(*,'(A,I4,5ES15.5)') '  ', i, xpsi(i), jphi_bs(i), jphi_bs_spike(i), self%jphi(i), jphi_fixed(i)/mu0
+        WRITE(*,'(A,I4,5ES15.5)') '  ', i, xpsi(i), jphi_bs(i) - jphi_pd(i), jphi_bs_spike(i), self%jphi(i), jphi_fixed(i)/mu0
       END DO
     ELSE
       WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         jphi_bs[A/m2]      jphi[A/m2]  jphi_fixed[A/m2]'
@@ -559,7 +559,7 @@ ELSE
     END IF
   END IF
   IF(self%boot_ops%isolate_edge_jbs)THEN
-    jphi_bs = jphi_bs_spike
+    jphi_bs = jphi_bs_spike + jphi_pd
     DEALLOCATE(jphi_bs_spike)
   END IF
   !--- scale_jbs scales the field-aligned part only, not p'G
