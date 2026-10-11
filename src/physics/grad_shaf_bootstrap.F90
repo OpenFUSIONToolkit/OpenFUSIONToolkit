@@ -33,7 +33,7 @@ implicit none
 TYPE :: boot_ops
   LOGICAL :: initialized = .FALSE. !< Options have been explicitly set?
   LOGICAL :: isolate_edge_jbs = .FALSE. !< Isolate edge bootstrap spike from bulk?
-  REAL(r8) :: scale_jbs = 1.0_r8 !< Scaling factor applied to the bootstrap current (default 1)
+  REAL(r8) :: scale_jbs = 1.0_r8 !< Scaling factor applied to the field-aligned bootstrap current, not to its p'G part (default 1)
   REAL(r8) :: djbs_tol = 1.0e-4_r8 !< Rel. change in jphi_bs below which it is frozen (not recomputed)
   LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, bootstrap stats, and full profile tables each NL iteration
   LOGICAL :: taper_edge_jphi = .FALSE. !< Taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS
@@ -55,11 +55,11 @@ END TYPE boot_ops
 TYPE :: boot_profs
   REAL(r8), ALLOCATABLE :: psi_n(:) !< Normalised psi of the profile nodes, LCFS first
   REAL(r8), ALLOCATABLE :: jdotB_bs_raw(:) !< Redl PoP 2021 <j_BS.B>
-  REAL(r8), ALLOCATABLE :: jphi_bs_raw(:) !< Bootstrap jphi, <j_BS.B> F<1/R>/<B^2> + jphi_pd_raw
+  REAL(r8), ALLOCATABLE :: jphi_bs_raw(:) !< Field-aligned bootstrap jphi, <j_BS.B> F<1/R>/<B^2> (with jphi_pd_raw, eq. A7)
   REAL(r8), ALLOCATABLE :: jphi_pd_raw(:) !< Pressure-driven (diamagnetic + Pfirsch-Schlueter) part, P'(<R> - F^2<1/R>/<B^2>)
-  REAL(r8), ALLOCATABLE :: jphi_total(:) !< Total = jphi_ind + jphi_bs + jphi_saw + jphi_fixed
-  REAL(r8), ALLOCATABLE :: jphi_bs(:) !< Bootstrap jphi, scaled, optionally isolated and tapered
-  REAL(r8), ALLOCATABLE :: jphi_pd(:) !< jphi_pd_raw scaled and optionally tapered (not isolated)
+  REAL(r8), ALLOCATABLE :: jphi_total(:) !< Total = jphi_ind + jphi_bs + jphi_pd + jphi_saw + jphi_fixed
+  REAL(r8), ALLOCATABLE :: jphi_bs(:) !< Field-aligned bootstrap jphi, scaled, optionally isolated (with jphi_pd) and tapered
+  REAL(r8), ALLOCATABLE :: jphi_pd(:) !< jphi_pd_raw, optionally tapered (not scaled)
   REAL(r8), ALLOCATABLE :: jphi_ind(:) !< Inductive jphi: input jphi times alpha, optionally tapered
   REAL(r8), ALLOCATABLE :: jphi_saw(:) !< Sawtooth jphi: input jphi_saw (optionally tapered) plus the q reset current
   REAL(r8), ALLOCATABLE :: jphi_fixed(:) !< Fixed (non-rescaled) jphi, optionally tapered
@@ -447,17 +447,18 @@ end function h5_name
 !! convergence state). Current densities are TokaMaker jphi in mu0*A/m² on the nodes `psi_n`
 !! (LCFS and the profile nodes `xpsi`):
 !!   1. Pressure scale.
-!!   2. jphi_fixed, the input sawtooth current jphi_saw_in and the bootstrap current jphi_bs (with
-!!      its pressure-driven part jphi_pd), scaled and optionally isolated, or reused from the last
-!!      evaluation when frozen; <R>, <1/R>, <1/R^2> on the nodes from its Sauter pass, else (and on
-!!      the LCFS) from gs_ravgs.
+!!   2. jphi_fixed, the input sawtooth current jphi_saw_in and the bootstrap current jphi_bs (here
+!!      with its pressure-driven part jphi_pd, which scale_jbs leaves out), optionally isolated and
+!!      scaled, or reused from the last evaluation when frozen; <R>, <1/R>, <1/R^2> on the nodes
+!!      from its Sauter pass, else (and on the LCFS) from gs_ravgs.
 !!   3. Edge taper of jphi_bs, jphi_pd, jphi_ind, jphi_fixed and jphi_saw_in.
 !!   4. alpha from the exact I_p (gs_flux_int of eval_jtor_imas, eq. A9c), which is affine in
 !!      alpha: alpha = (Ip_target - Ip_lo)/(Ip_hi - Ip_lo).
 !!   4a. Sawtooth reset (saw_q_s > 0): jphi_saw = jphi_saw_in + the Ip-neutral current that resets the
 !!      q of the base current alpha*jphi_ind + jphi_bs + jphi_fixed + jphi_saw_in above saw_q_s
 !!      (@ref saw_redistribute).
-!!   5. jphi_total = alpha*jphi_ind + jphi_bs + jphi_fixed + jphi_saw; boot_profs; F*F' knots.
+!!   5. jphi_total = alpha*jphi_ind + jphi_bs + jphi_fixed + jphi_saw; boot_profs (jphi_bs without
+!!      jphi_pd); F*F' knots.
 !!   6. Diagnostics (if diagnose_bs is set).
 !---------------------------------------------------------------------------------
 SUBROUTINE jphi_bs_update(self, gseq)
@@ -561,8 +562,8 @@ ELSE
     jphi_bs = jphi_bs_spike
     DEALLOCATE(jphi_bs_spike)
   END IF
-  jphi_bs = jphi_bs * self%boot_ops%scale_jbs
-  jphi_pd = jphi_pd * self%boot_ops%scale_jbs
+  !--- scale_jbs scales the field-aligned part only, not p'G
+  jphi_bs = jphi_pd + self%boot_ops%scale_jbs*(jphi_bs - jphi_pd)
   jphi_bs = jphi_bs * mu0
   jphi_pd = jphi_pd * mu0
   !--- Freeze when the change drops below djbs_tol or stalls
@@ -675,7 +676,7 @@ jphi_total = alpha * jphi_ind + jphi_bs + jphi_fixed + jphi_saw
 IF(saw_on)self%jphi_total_last = jphi_total
 self%boot_profs%psi_n = psi_n
 self%boot_profs%jphi_total = jphi_total/mu0
-self%boot_profs%jphi_bs = jphi_bs/mu0
+self%boot_profs%jphi_bs = (jphi_bs - jphi_pd)/mu0
 self%boot_profs%jphi_pd = jphi_pd/mu0
 self%boot_profs%jphi_ind = alpha * jphi_ind/mu0
 self%boot_profs%jphi_saw = jphi_saw/mu0
@@ -1715,7 +1716,8 @@ CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, eps, ft, f, &
 ! Convert <j_BS.B> to TokaMaker's jphi = <j_phi> = <R>P' + <1/R>FF'/mu0 (exact, see
 ! doc_tokamaker_current_conventions.md eq. A7): the field-aligned part F<1/R>/<B^2> * <j_BS.B>,
 ! plus the pressure-driven (diamagnetic + Pfirsch-Schlueter) part P'(<R> - F^2<1/R>/<B^2>),
-! which is assigned to the bootstrap (as IMAS includes_bootstrap=true). P' as in jphi_bs_update.
+! which is assigned to the bootstrap (as IMAS includes_bootstrap=true); boot_profs report it apart.
+! P' as in jphi_bs_update.
 pscale = gseq%pax_target/gseq%P%f(gseq%plasma_bounds(2))
 jphi_bs(0) = 0.0_r8 ! LCFS value set by the extrapolation below
 jphi_pd(0) = 0.0_r8
@@ -1734,7 +1736,7 @@ CALL finish(jphi_bs)
 CALL finish(jphi_pd)
 CALL finish(jdotB)
 self%boot_profs%jdotB_bs_raw = jdotB
-self%boot_profs%jphi_bs_raw = jphi_bs
+self%boot_profs%jphi_bs_raw = jphi_bs - jphi_pd
 self%boot_profs%jphi_pd_raw = jphi_pd
 IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A)') '  [calculate_bootstrap] geometry & collisionality sample (i=1,mid,n):'

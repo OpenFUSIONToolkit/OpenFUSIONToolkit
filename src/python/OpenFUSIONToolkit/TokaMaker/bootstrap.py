@@ -948,7 +948,7 @@ def solve_with_bootstrap(mygs,
     @param Ip_target Target plasma current \f$I_p\f$ [A]
     @param inductive_jphi Inductive toroidal current profile \f$j_{ind}(x)\f$
     @param Zis List of impurity atomic numbers (default: [1.0])
-    @param scale_jbs Scaling factor for bootstrap current (was `scale_jBS`, deprecated)
+    @param scale_jbs Scaling factor for the field-aligned bootstrap current, not its pressure-driven p'G part (was `scale_jBS`, deprecated)
     @param isolate_edge_jbs If True, isolate edge spike in bootstrap current (was `isolate_edge_jBS`, deprecated)
     @param psi_pad Padding for flux surface calculations
     @param iterations Number of solver iterations
@@ -1144,6 +1144,7 @@ def solve_with_bootstrap(mygs,
         pprime_local = numpy.gradient(pressure, psi_N, edge_order=2) / psi_range
 
         jphi_bs_raw = numpy.zeros_like(pressure)
+        jphi_pd_raw = numpy.zeros_like(pressure)
 
         if include_jbs:
             dn_e_dpsi = numpy.gradient(ne, psi_N, edge_order=2) / psi_range
@@ -1201,11 +1202,16 @@ def solve_with_bootstrap(mygs,
             # Redl jdotB_bs -> TokaMaker jphi = <j_phi> (doc_tokamaker_current_conventions.md eq. A7):
             # field-aligned F<1/R>/<B^2> * jdotB_bs plus the pressure-driven part P'(<R> - F^2<1/R>/<B^2>)
             inv_R, B2 = ravgs_q['<1/R>'], b_avgs[1]
-            jphi_bs_raw = jdotB_bs * f * inv_R / B2 + pp_eq * (R_avg - f**2 * inv_R / B2)
-            jphi_bs_raw = numpy.nan_to_num(jphi_bs_raw, nan=0.0)
+            jphi_pd_raw = numpy.nan_to_num(pp_eq * (R_avg - f**2 * inv_R / B2), nan=0.0)
+            jphi_bs_raw = numpy.nan_to_num(jdotB_bs * f * inv_R / B2, nan=0.0) + jphi_pd_raw
 
             # Extrapolate to LCFS/axis to match fortran solve
             jphi_bs_raw = _extrap_jbs_boundaries(psi_N, jphi_bs_raw)
+            jphi_pd_raw = _extrap_jbs_boundaries(psi_N, jphi_pd_raw)
+
+        def scaled(j):
+            # scale_jbs scales the field-aligned part only, not the pressure-driven p'G (as the Fortran solve)
+            return scale_jbs * j + (1.0 - scale_jbs) * jphi_pd_raw
 
         # Scale Currents to match Ip
         current_jphi_target = inductive_jphi if inductive_jphi is not None else numpy.zeros_like(pressure)
@@ -1216,7 +1222,7 @@ def solve_with_bootstrap(mygs,
             if isolate_edge_jbs:
                 if parameterize_jbs:
                     res = analyze_bootstrap_edge_spike(psi_N, jphi_bs_raw, diagnostic_plots=diagnostic_plots)
-                    jphi_bs = res['parameterized_spike'] * scale_jbs
+                    jphi_bs = scaled(res['parameterized_spike'])
                     if diagnose_bs:
                         popt = res['gaussian_params']
                         amp, center, width, offset, sk, y_sep, bw = popt
@@ -1230,9 +1236,9 @@ def solve_with_bootstrap(mygs,
                             print(f'   {_i:4d}   {_p:.5E}   {_r:.5E}   {_m:.5E}   {_v:.5E}')
                 else:
                     res = analyze_bootstrap_edge_spike(psi_N, jphi_bs_raw)
-                    jphi_bs = res['masked_spike'] * scale_jbs
+                    jphi_bs = scaled(res['masked_spike'])
             else:
-                jphi_bs = jphi_bs_raw * scale_jbs
+                jphi_bs = scaled(jphi_bs_raw)
 
         # Solve for alpha: Ip(alpha * jphi_ind + jphi_bs) = Ip_target
         try:

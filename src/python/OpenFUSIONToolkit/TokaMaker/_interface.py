@@ -33,7 +33,7 @@ class tokamaker_boot_ops_struct(c_struct):
     r'''! Bootstrap current options for the jphi-split-bootstrap current profile update.
 
      - `isolate_edge_jbs` Isolate the edge bootstrap spike from the bulk bootstrap current?
-     - `scale_jbs` Scaling factor applied to the bootstrap current (the isolated spike if `isolate_edge_jbs`; default 1.0)
+     - `scale_jbs` Scaling factor applied to the field-aligned bootstrap current (the isolated spike if `isolate_edge_jbs`), not to jphi_pd; default 1.0
      - `djbs_tol` Threshold on relative change in the bootstrap current to freeze it (default 1e-4)
      - `diagnose_bs` Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration?
      - `taper_edge_jphi` Taper all current components to zero at the LCFS (default False)

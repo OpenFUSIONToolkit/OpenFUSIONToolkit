@@ -89,7 +89,7 @@ END TYPE tokamaker_recon_settings_type
 !---------------------------------------------------------------------------------
 TYPE, BIND(C) :: tokamaker_boot_ops_type
   LOGICAL(c_bool) :: isolate_edge_jbs = .FALSE.  !< Isolate the edge bootstrap spike
-  REAL(c_double)  :: scale_jbs = 1.0d0           !< Scaling factor for the bootstrap current
+  REAL(c_double)  :: scale_jbs = 1.0d0           !< Scaling factor for the field-aligned bootstrap current (not jphi_pd)
   REAL(c_double)  :: djbs_tol = 1.0d-4            !< Threshold on rel. change in the bootstrap current to freeze it
   LOGICAL(c_bool) :: diagnose_bs = .FALSE.        !< Print diagnostic output
   LOGICAL(c_bool) :: taper_edge_jphi = .FALSE.     !< Taper the current at the edge (guards against separatrix issues)

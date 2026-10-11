@@ -1666,8 +1666,9 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         field_aligned = jdotB * F_c * invR_c / B2_c
         p_term = Pp_c * (R_c - F_c**2 * invR_c / B2_c)
         scale = np.max(np.abs(bp['jphi_bs_raw'][inner]))
-        err = np.max(np.abs(bp['jphi_bs_raw'][inner] - (field_aligned + p_term))) / scale
-        err_flip = np.max(np.abs(bp['jphi_bs_raw'][inner] - (field_aligned - p_term))) / scale
+        j_bs_raw = bp['jphi_bs_raw'][inner] + bp['jphi_pd_raw'][inner]
+        err = np.max(np.abs(j_bs_raw - (field_aligned + p_term))) / scale
+        err_flip = np.max(np.abs(j_bs_raw - (field_aligned - p_term))) / scale
         print(f"jphi_bs_raw vs A7: rel err {err:.3e} (pressure term flipped: {err_flip:.3e}), "
               f"max|P'G|/max|jphi_bs_raw| = {np.max(np.abs(p_term))/scale:.3e}")
         if not (err < 1.0e-2 and err_flip > 5.0 * err):
@@ -1770,9 +1771,9 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         if not np.allclose(profs_fixed['jphi_fixed'], np.interp(profs_fixed['psi_n'], psi_sample, jfix_y),
                            rtol=1e-6, atol=1e-6*jfix_y.max()):
             raise AssertionError("boot_profs['jphi_fixed'] does not match the input jphi_fixed_prof")
-        j_sum = profs_fixed['jphi_ind'] + profs_fixed['jphi_bs'] + profs_fixed['jphi_fixed']
+        j_sum = profs_fixed['jphi_ind'] + profs_fixed['jphi_bs'] + profs_fixed['jphi_pd'] + profs_fixed['jphi_fixed']
         if not np.allclose(profs_fixed['jphi_total'], j_sum, rtol=1e-10, atol=1e-6):
-            raise AssertionError("jphi_total != jphi_ind + jphi_bs + jphi_fixed")
+            raise AssertionError("jphi_total != jphi_ind + jphi_bs + jphi_pd + jphi_fixed")
         if not np.sum(profs_fixed['jphi_ind']) < np.sum(profs_scalar['jphi_ind']):
             raise AssertionError("jphi_fixed did not reduce the inductive current share")
         profs_kept = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
@@ -1877,7 +1878,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         return np.allclose(a, b, rtol=rtol, atol=rtol*np.max(np.abs(b)))
 
     def sum_ok(p):
-        return close(p['jphi_total'], p['jphi_ind'] + p['jphi_bs'] + p['jphi_fixed'] + p['jphi_saw'], 1e-10)
+        return close(p['jphi_total'], p['jphi_ind'] + p['jphi_bs'] + p['jphi_pd'] + p['jphi_fixed'] + p['jphi_saw'], 1e-10)
 
     try:
         base = mygs.solve_bootstrap(**common)
