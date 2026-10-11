@@ -1132,6 +1132,8 @@ def solve_with_bootstrap(mygs,
         ft = 1 - fc 
         _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
         R_avg = ravgs_q['<R>']
+        fsa = mygs.get_fsa(psi=psi_eval)
+        R_geo = 0.5*(fsa['R_min'] + fsa['R_max'])  # major radius in nu*, as eps = r/R_geo
 
         # Gradients (using raw psi for derivatives); edge_order=2 is required, the
         # first-order default is badly inaccurate at the axis and separatrix
@@ -1154,7 +1156,7 @@ def solve_with_bootstrap(mygs,
                     psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, p=pressure,
                     nis=[ni], Zis=Zis, Zeff=Zeff, gEQDSKs=[None],
                     psiraw=psi_N * psi_range + mygs.psi_bounds[0],
-                    R=R_avg, eps=eps, q=qvals, fT=ft, I_psi=f,
+                    R=R_geo, eps=eps, q=qvals, fT=ft, I_psi=f,
                     nt=1, version='neo_2021', debug_plots=False,
                     return_units=True, return_package=False,
                     charge_number_to_use_in_ion_collisionality='Koh',
@@ -1174,17 +1176,17 @@ def solve_with_bootstrap(mygs,
                 Zdom = 1.0  # deuterium
                 Zavg = ne / ni
                 Zion = (Zdom**2 * Zavg * Zeff)**0.25
-                nu_i_star = (4.90e-18 * numpy.abs(qvals) * R_avg * ni
+                nu_i_star = (4.90e-18 * numpy.abs(qvals) * R_geo * ni
                             * Zion**4 * ln_lii / (Ti**2 * eps**1.5))
 
                 # Electron collisionality
-                nu_e_star = (6.921e-18 * numpy.abs(qvals) * R_avg * ne
+                nu_e_star = (6.921e-18 * numpy.abs(qvals) * R_geo * ne
                             * Zeff * ln_le / (Te**2 * eps**1.5))
 
                 jdotB_bs, _ = redl_bootstrap( # native re-implementation of Redl 2021
                     psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
                     pe=EC*(ne*Te), pi=EC*(ni*Ti),
-                    Zeff=Zeff, R=R_avg, q=qvals, eps=eps, fT=ft, I_psi=f,
+                    Zeff=Zeff, R=R_geo, q=qvals, eps=eps, fT=ft, I_psi=f,
                     dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
                     dn_e_dpsi=dn_e_dpsi, dn_i_dpsi=dn_i_dpsi,
                     ln_lambda_e=ln_le, ln_lambda_ii=ln_lii,
