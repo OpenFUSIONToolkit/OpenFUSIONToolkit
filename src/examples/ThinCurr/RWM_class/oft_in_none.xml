@@ -1,0 +1,14 @@
+<oft>
+  <thincurr>
+    <eta>1.257E-5, 1.257E-5</eta>
+    <icoils>
+    </icoils>
+    <vcoils>
+    <coil_set name="0"><coil scale="1.0" res_per_len="1.256637E-5" npts="4" radius="5.E-3">
+-10000, -10001, -10000
+-10000, -10001, -10001
+-10000, -10000, -10001
+-10000, -10000, -10000
+</coil></coil_set></vcoils>
+  </thincurr>
+</oft>
