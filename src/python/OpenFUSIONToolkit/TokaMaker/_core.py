@@ -2467,7 +2467,7 @@ class TokaMaker():
 
         @par Bootstrap solver options (forwarded to ``set_boot_ops()``)
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk (default: False)
-        @param scale_jbs Scaling factor applied to the bootstrap current profile (default: 1.0)
+        @param scale_jbs Scaling factor applied to the field-aligned bootstrap current, not to its pressure-driven part ``'jphi_pd'`` (default: 1.0)
         @param djbs_tol Threshold on relative change in the bootstrap current to freeze it (default: 1e-4)
         @param diagnose_bs Print detailed output at each NL iteration (default: False)
         @param taper_edge_jphi Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS (default: False)
@@ -2485,15 +2485,15 @@ class TokaMaker():
           - ``'psi_n'`` Normalised poloidal flux grid (0 = axis, 1 = LCFS) of the ``ffp_prof['x']`` nodes
             (mapped from toroidal flux if ``coord='phi_n'``)
           - ``'jdotB_bs_raw'`` The Redl \f$\langle j_{BS} \cdot B \rangle\f$ behind ``'jphi_bs_raw'`` [T A/m²]
-          - ``'jphi_bs_raw'`` Bootstrap current density from the Redl PoP 2021 formula,
-            \f$\langle j_{BS} \cdot B \rangle F \langle 1/R \rangle/\langle B^2 \rangle + P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
-          - ``'jphi_pd_raw'`` Pressure-driven (diamagnetic + Pfirsch-Schlueter) part of ``'jphi_bs_raw'``,
+          - ``'jphi_bs_raw'`` Field-aligned bootstrap current density from the Redl PoP 2021 formula,
+            \f$\langle j_{BS} \cdot B \rangle F \langle 1/R \rangle/\langle B^2 \rangle\f$ [A/m²]
+          - ``'jphi_pd_raw'`` Pressure-driven (diamagnetic + Pfirsch-Schlueter) current density,
             \f$P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
-          - ``'jphi_total'`` Total toroidal current density = jphi_ind + jphi_bs + jphi_saw + jphi_fixed [A/m²]
-          - ``'jphi_bs'`` Bootstrap current density (optionally isolated / tapered) [A/m²]
-          - ``'jphi_pd'`` ``'jphi_pd_raw'`` times ``scale_jbs``, (optionally) tapered; not
-            isolated, so it is the pressure-driven part of ``'jphi_bs'`` only when
-            ``isolate_edge_jbs`` is off [A/m²]
+          - ``'jphi_total'`` Total toroidal current density = jphi_ind + jphi_bs + jphi_pd + jphi_saw + jphi_fixed [A/m²]
+          - ``'jphi_bs'`` Field-aligned bootstrap current density, scaled by ``scale_jbs`` and (optionally)
+            tapered; with ``isolate_edge_jbs`` it is the isolated ``'jphi_bs_raw'`` + ``'jphi_pd_raw'``
+            minus ``'jphi_pd_raw'`` [A/m²]
+          - ``'jphi_pd'`` ``'jphi_pd_raw'``, (optionally) tapered; not scaled by ``scale_jbs`` [A/m²]
           - ``'jphi_ind'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
           - ``'jphi_saw'`` Sawtooth current: ``jphi_saw_prof`` (optionally tapered) plus the reset current [A/m²]
           - ``'jphi_fixed'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
@@ -3114,7 +3114,7 @@ class TokaMaker_equilibrium():
         Any `None` value is left unchanged from the current state (defaults: `_BOOT_OPS_DEFAULTS`).
 
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk bootstrap current? (Internal default: False)
-        @param scale_jbs Scaling factor applied to the bootstrap current (the isolated spike if `isolate_edge_jbs`). (Internal default: 1.0)
+        @param scale_jbs Scaling factor applied to the field-aligned bootstrap current (the isolated spike if `isolate_edge_jbs`), not to its pressure-driven part jphi_pd. (Internal default: 1.0)
         @param djbs_tol Threshold on relative change in the bootstrap current to freeze it. (Internal default: 1e-4)
         @param diagnose_bs Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration. (Internal default: False)
         @param taper_edge_jphi Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS. (Internal default: False)
