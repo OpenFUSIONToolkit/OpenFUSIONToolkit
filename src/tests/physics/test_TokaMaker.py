@@ -1218,8 +1218,8 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
     # --- Collect results ---
     eq_info = mygs.get_stats(li_normalization='ITER')
 
-    # Bootstrap-specific diagnostics
-    jphi_bs_raw = bs_results['jphi_bs_raw']
+    # Bootstrap-specific diagnostics (bootstrap with its p'G part, eq. A7)
+    jphi_bs_raw = bs_results['jphi_bs_raw'] + bs_results['jphi_pd_raw']
     jphi_total = bs_results['jphi_total']
     jphi_ind = bs_results['jphi_ind']
 
@@ -1821,6 +1821,23 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
             except ValueError:
                 continue
             raise AssertionError(f"p_fixed_prof {label} did not raise ValueError")
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+
+    # --- verify isolate_edge_jbs isolates the field-aligned jphi_bs only: jphi_pd stays jphi_pd_raw and
+    #     jphi_bs is flat in the core (isolating it with p'G would leave the floor minus p'G there) ---
+    try:
+        profs_iso = mygs.solve_bootstrap(Zeff=Zeff_val, isolate_edge_jbs=True, **zeff_common_kwargs)
+        if not np.allclose(profs_iso['jphi_pd'], profs_iso['jphi_pd_raw'], rtol=1e-12, atol=1e-6):
+            raise AssertionError("isolate_edge_jbs changed jphi_pd")
+        core = profs_iso['jphi_bs'][profs_iso['psi_n'] < 0.3]
+        if np.ptp(core) > 1e-10 * np.max(np.abs(profs_iso['jphi_bs'])):
+            raise AssertionError(f"isolated jphi_bs not flat in the core (spread {np.ptp(core):.3e} A/m^2)")
+        j_sum = profs_iso['jphi_ind'] + profs_iso['jphi_bs'] + profs_iso['jphi_pd'] + profs_iso['jphi_fixed']
+        if not np.allclose(profs_iso['jphi_total'], j_sum, rtol=1e-10, atol=1e-6):
+            raise AssertionError("isolated: jphi_total != jphi_ind + jphi_bs + jphi_pd + jphi_fixed")
     except Exception as e:
         print(e)
         mp_q.put(None)

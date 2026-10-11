@@ -2492,10 +2492,8 @@ class TokaMaker():
           - ``'jphi_pd_raw'`` Pressure-driven (diamagnetic + Pfirsch-Schlueter) current density,
             \f$P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
           - ``'jphi_total'`` Total toroidal current density = jphi_ind + jphi_bs + jphi_pd + jphi_saw + jphi_fixed [A/m²]
-          - ``'jphi_bs'`` Field-aligned bootstrap current density, scaled by ``scale_jbs`` and (optionally)
-            tapered; with ``isolate_edge_jbs`` it is the isolated ``'jphi_bs_raw'`` + ``'jphi_pd_raw'``
-            minus ``'jphi_pd_raw'`` [A/m²]
-          - ``'jphi_pd'`` ``'jphi_pd_raw'``, (optionally) tapered; not scaled by ``scale_jbs`` [A/m²]
+          - ``'jphi_bs'`` ``'jphi_bs_raw'``, (optionally) edge-isolated, scaled by ``scale_jbs`` and (optionally) tapered [A/m²]
+          - ``'jphi_pd'`` ``'jphi_pd_raw'``, (optionally) tapered; not isolated or scaled by ``scale_jbs`` [A/m²]
           - ``'jphi_ind'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
           - ``'jphi_saw'`` Sawtooth current: ``jphi_saw_prof`` (optionally tapered) plus the reset current [A/m²]
           - ``'jphi_fixed'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]

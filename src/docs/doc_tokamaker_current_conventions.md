@@ -90,9 +90,8 @@ iterate by (A9c) and then follows the FEM current (`gs_itor_nl`).
 1 = LCFS) named `jphi_<part>` (as it enters `jphi_total`) or `jphi_<part>_raw` (before edge isolation,
 scaling and taper). Parts: `bs` (bootstrap, the field-aligned term of (A7)), `pd` (its pressure-driven p′G
 term), `ind` (inductive), `fixed`, `saw`: `jphi_total` = `jphi_ind` + `jphi_bs` + `jphi_pd` + `jphi_fixed` +
-`jphi_saw`. The edge isolation acts on `bs` + `pd` and `scale_jbs` on `bs` only. The Python solve
-(`use_python_solve=True`) has no `pd` part: its `jphi_bs` carries p′G, and it returns the GS output as
-`jphi_total`. `jdotB_bs_raw` is the Redl ⟨J·B⟩ behind `jphi_bs_raw`. Options use `jbs`
+`jphi_saw`. The edge isolation and `scale_jbs` act on `bs` only. The Python solve (`use_python_solve=True`)
+returns the GS output as `jphi_total`. `jdotB_bs_raw` is the Redl ⟨J·B⟩ behind `jphi_bs_raw`. Options use `jbs`
 (`scale_jbs`, `isolate_edge_jbs`, `taper_edge_jphi`, `djbs_tol`).
 
 ## Where these are used

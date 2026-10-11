@@ -978,8 +978,9 @@ def solve_with_bootstrap(mygs,
       with `saw_q_s` > 0 the sawtooth reset current is added to it (internal Fortran solver only)
     @param kwargs Further TokaMaker.solve_bootstrap options (internal Fortran solver only)
     @result Dictionary of TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$ profiles [A/m$^2$] (see
-      doc_tokamaker_current_conventions) on `'psi_n'`: `'jphi_total'`, `'jphi_bs_raw'` (before isolation/scaling),
-      `'jphi_bs'` and `'jphi_ind'` (the last solve's input is `scale_j0` times `'jphi_ind'` plus `'jphi_bs'`), plus `'scale_j0'`, `'scale_Ip'`;
+      doc_tokamaker_current_conventions) on `'psi_n'`: `'jphi_total'`, `'jphi_bs_raw'` (field-aligned, before
+      isolation/scaling), `'jphi_pd_raw'` (p'G), `'jphi_bs'`, `'jphi_pd'` (= `'jphi_pd_raw'`) and `'jphi_ind'` (the last
+      solve's input is `scale_j0` times `'jphi_ind'` plus `'jphi_bs'` plus `'jphi_pd'`), plus `'scale_j0'`, `'scale_Ip'`;
       the internal solver returns every TokaMaker.solve_bootstrap key. The pre-rename keys `'total_j_phi'`, `'j_BS'`,
       `'j_inductive'`, `'isolated_j_BS'` are deprecated aliases.
     '''
@@ -1203,15 +1204,15 @@ def solve_with_bootstrap(mygs,
             # field-aligned F<1/R>/<B^2> * jdotB_bs plus the pressure-driven part P'(<R> - F^2<1/R>/<B^2>)
             inv_R, B2 = ravgs_q['<1/R>'], b_avgs[1]
             jphi_pd_raw = numpy.nan_to_num(pp_eq * (R_avg - f**2 * inv_R / B2), nan=0.0)
-            jphi_bs_raw = numpy.nan_to_num(jdotB_bs * f * inv_R / B2, nan=0.0) + jphi_pd_raw
+            jphi_bs_raw = numpy.nan_to_num(jdotB_bs * f * inv_R / B2, nan=0.0)
 
             # Extrapolate to LCFS/axis to match fortran solve
             jphi_bs_raw = _extrap_jbs_boundaries(psi_N, jphi_bs_raw)
             jphi_pd_raw = _extrap_jbs_boundaries(psi_N, jphi_pd_raw)
 
         def scaled(j):
-            # scale_jbs scales the field-aligned part only, not the pressure-driven p'G (as the Fortran solve)
-            return scale_jbs * j + (1.0 - scale_jbs) * jphi_pd_raw
+            # As the Fortran solve: scaling (and isolation) act on the field-aligned part; p'G is added whole
+            return scale_jbs * j + jphi_pd_raw
 
         # Scale Currents to match Ip
         current_jphi_target = inductive_jphi if inductive_jphi is not None else numpy.zeros_like(pressure)
@@ -1260,7 +1261,7 @@ def solve_with_bootstrap(mygs,
         pp_dict = {'type': 'linterp', 'x': psi_N, 'y': pprime_local / pprime_local[0]}
         ffp_dict = {'type': 'jphi-linterp', 'x': psi_N, 'y': numpy.nan_to_num(matched_jphi)}
 
-        return pp_dict, ffp_dict, jphi_bs_raw, jphi_ind, jphi_bs
+        return pp_dict, ffp_dict, jphi_bs_raw, jphi_pd_raw, jphi_ind, jphi_bs
 
     # --- Main Execution Flow ---
     mygs.set_targets(Ip=Ip_target, pax=pressure[0] - pressure[-1])
@@ -1271,7 +1272,7 @@ def solve_with_bootstrap(mygs,
             print('\n >>> Matching input core j_phi with G-S solution')
 
         # Calculate new profiles
-        pp_prof, ffp_prof, jphi_bs_raw, jphi_ind, jphi_bs = calculate_profiles_and_bootstrap(
+        pp_prof, ffp_prof, jphi_bs_raw, jphi_pd_raw, jphi_ind, jphi_bs = calculate_profiles_and_bootstrap(
             include_jbs=True
         )
 
@@ -1287,7 +1288,7 @@ def solve_with_bootstrap(mygs,
         solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target,F0=F0)
 
         # Calculate new profiles
-        pp_prof, ffp_prof, jphi_bs_raw, jphi_ind, jphi_bs = calculate_profiles_and_bootstrap(
+        pp_prof, ffp_prof, jphi_bs_raw, jphi_pd_raw, jphi_ind, jphi_bs = calculate_profiles_and_bootstrap(
             include_jbs=True
         )
 
@@ -1310,7 +1311,7 @@ def solve_with_bootstrap(mygs,
 
         for n in range(iterations):
             # Calculate new profiles
-            pp_prof, ffp_prof, jphi_bs_raw, jphi_ind, jphi_bs = calculate_profiles_and_bootstrap(
+            pp_prof, ffp_prof, jphi_bs_raw, jphi_pd_raw, jphi_ind, jphi_bs = calculate_profiles_and_bootstrap(
                 include_jbs=True
             )
 
@@ -1345,11 +1346,13 @@ def solve_with_bootstrap(mygs,
     else:
         raise ValueError("inductive_jphi must be specified.")
 
-    # jphi_total is the GS output; the last solve's input is scale_j0*jphi_ind + jphi_bs
+    # jphi_total is the GS output; the last solve's input is scale_j0*jphi_ind + jphi_bs (with p'G here)
     return _BootstrapResults(psi_n=psi_N,
                              jphi_total=jphi_total,
                              jphi_bs_raw=jphi_bs_raw,
-                             jphi_bs=jphi_bs,
+                             jphi_pd_raw=jphi_pd_raw,
+                             jphi_bs=jphi_bs - jphi_pd_raw,
+                             jphi_pd=jphi_pd_raw,
                              jphi_ind=jphi_ind,
                              scale_j0=final_scale_j0,
                              scale_Ip=final_scale_Ip)
