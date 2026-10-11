@@ -1292,7 +1292,7 @@ end subroutine sauter_apply
 !! trapezoidal quadrature over the tracer steps. Surfaces are traced in parallel
 !! from start points found serially, so results do not depend on the thread count.
 !------------------------------------------------------------------------------
-subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs,qprof,eps,invr2)
+subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs,qprof,eps,invr2,rgeo)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux sample points
 real(8), intent(in) :: psi_q(nr) !< Location of flux sample points in normalised psi
@@ -1302,9 +1302,10 @@ real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field \f$<|B|>\
 real(8), optional, intent(out) :: qprof(nr) !< Safety factor q on each surface (avoids a separate gs_get_qprof call)
 real(8), optional, intent(out) :: eps(nr) !< Inverse aspect ratio (R_max-R_min)/(R_max+R_min) on each surface
 real(8), optional, intent(out) :: invr2(nr) !< \f$<1/R^2>\f$ on each surface
+real(8), optional, intent(out) :: rgeo(nr) !< Geometric major radius (R_max+R_min)/2 on each surface
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,h,h2,hf,ftu,ftl
 real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
-real(8), allocatable :: pts(:,:),fpol(:),qtmp(:),epstmp(:),i2tmp(:)
+real(8), allocatable :: pts(:,:),fpol(:),qtmp(:),epstmp(:),i2tmp(:),rgtmp(:)
 real(8), pointer :: ptout(:,:),vout(:,:)
 real(8), allocatable :: acc(:,:),ext(:,:),bref(:)
 logical, allocatable :: done(:)
@@ -1346,9 +1347,9 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
   CALL oft_decrease_indent
 END IF
-ALLOCATE(pts(2,nr),fpol(nr),qtmp(nr),epstmp(nr),i2tmp(nr),done(nr))
+ALLOCATE(pts(2,nr),fpol(nr),qtmp(nr),epstmp(nr),i2tmp(nr),rgtmp(nr),done(nr))
 !---Surfaces that fail below keep zeros
-r_avgs=0.d0; modb_avgs=0.d0; fc=0.d0; qtmp=0.d0; epstmp=0.d0; i2tmp=0.d0
+r_avgs=0.d0; modb_avgs=0.d0; fc=0.d0; qtmp=0.d0; epstmp=0.d0; i2tmp=0.d0; rgtmp=0.d0
 DO j=1,nr
   psi_surf=psi_q(j)*(x2-x1) + x1
   fpol(j)=gs_fpol(gseq,psi_surf)
@@ -1363,6 +1364,7 @@ DO j=1,nr
   qtmp(j)        = 0.d0 ! Taken from the previous surface below
   epstmp(j)      = 0.d0
   i2tmp(j)       = 1.d0/raxis**2
+  rgtmp(j)       = raxis
 END DO
 !---Cut-cell averages and extrema
 IF(torflux_qgeom_backend/=1)THEN
@@ -1386,6 +1388,7 @@ IF(torflux_qgeom_backend/=1)THEN
     fc(j) = 1.d0 - (0.75d0 * ftu + 0.25d0 * ftl)
     qtmp(j) = fpol(j) * acc(7,j) / (2.d0*pi*ABS(x2-x1))
     epstmp(j) = (ext(2,j) + ext(3,j)) / (ext(2,j) - ext(3,j)) ! (R_max - R_min)/(R_max + R_min)
+    rgtmp(j) = 0.5d0*(ext(2,j) - ext(3,j))
     i2tmp(j) = acc(7,j)/acc(1,j)
   END DO
   done=done.OR.(psi_q == 1.d0)
@@ -1450,6 +1453,7 @@ do j=1,nr
   fc(j) = 1.d0 - (0.75d0 * ftu + 0.25d0 * ftl)
   qtmp(j) = fpol(j) * active_tracer%v(8) / (2*pi)
   epstmp(j) = (field%rmax_surf - field%rmin_surf) / (field%rmax_surf + field%rmin_surf)
+  rgtmp(j) = 0.5d0*(field%rmax_surf + field%rmin_surf)
   i2tmp(j) = active_tracer%v(8)/active_tracer%v(2)
 end do
 DEALLOCATE(ptout,vout)
@@ -1464,7 +1468,8 @@ END DO
 IF(PRESENT(qprof))qprof=qtmp
 IF(PRESENT(eps))eps=epstmp
 IF(PRESENT(invr2))invr2=i2tmp
-DEALLOCATE(pts,fpol,qtmp,epstmp,i2tmp,done)
+IF(PRESENT(rgeo))rgeo=rgtmp
+DEALLOCATE(pts,fpol,qtmp,epstmp,i2tmp,rgtmp,done)
 end subroutine sauter_fc
 !------------------------------------------------------------------------------
 !> Trapped-particle integral \f$ \langle (1-\sqrt{1-b}(1+b/2))/b^2 \rangle \f$ by
@@ -1631,7 +1636,7 @@ REAL(r8) :: fc(n_psi)       !< Circulating fraction
 REAL(r8) :: ft(n_psi)       !< Trapped particle fraction
 REAL(r8) :: eps(n_psi)      !< Inverse aspect ratio
 REAL(r8) :: qvals(n_psi)    !< Safety factor
-REAL(r8) :: R_avg(n_psi)    !< <R> [m] per flux surface
+REAL(r8) :: R_geo(n_psi)    !< (R_max+R_min)/2 [m] per flux surface
 REAL(r8) :: B_avg(n_psi)    !< <B> [T] per flux surface
 REAL(r8) :: r_avgs_saut(n_psi,3)    !< Sauter FSA: <R>, <1/R>, <a>
 REAL(r8) :: invr2(n_psi)            !< Sauter FSA: <1/R^2>
@@ -1663,10 +1668,9 @@ IF(MAXVAL(Ti) > 5.0e5_r8)CALL oft_warn('calculate_bootstrap: max(Ti) > 500 keV â
 DO i = 1, n_psi
   f(i) = gs_fpol(gseq, psi_abs(i))
 END DO
-! Get flux-surface geometry: fc, eps, q, and <R> in one tracing pass
-CALL sauter_fc(gseq, n_psi, psi_N, fc, r_avgs_saut, modb_avgs_saut, qprof=qvals, eps=eps, invr2=invr2)
+! Get flux-surface geometry in one pass: fc, eps, q and R_geo (the major radius in nu*, as eps = r/R_geo)
+CALL sauter_fc(gseq, n_psi, psi_N, fc, r_avgs_saut, modb_avgs_saut, qprof=qvals, eps=eps, invr2=invr2, rgeo=R_geo)
 IF(PRESENT(ravgs))ravgs = RESHAPE([r_avgs_saut(:,1:2), invr2], [n_psi,3])
-R_avg = r_avgs_saut(:,1)
 B_avg = modb_avgs_saut(:,1)
 ! ===================================================================
 ft = 1.0_r8 - fc
@@ -1699,10 +1703,10 @@ ln_lii = MAX(ln_lii, 10.0_r8)
 Zdom = 1.0_r8    ! dominant ion charge (deuterium)
 Zavg = ne / ni
 Zion = (Zdom**2 * Zavg * Zeff)**0.25_r8
-nu_i_star = 4.90e-18_r8 * ABS(qvals) * R_avg * ni &
+nu_i_star = 4.90e-18_r8 * ABS(qvals) * R_geo * ni &
           * Zion**4 * ln_lii / (Ti**2 * eps**1.5_r8)
 ! Electron collisionality
-nu_e_star = 6.921e-18_r8 * ABS(qvals) * R_avg * ne &
+nu_e_star = 6.921e-18_r8 * ABS(qvals) * R_geo * ne &
           * Zeff * ln_le / (Te**2 * eps**1.5_r8)
 ! Compute bootstrap current via Redl 2021
 CALL redl_bootstrap(n_psi, Te, Ti, ne, ni, pe, pi_arr, Zeff, eps, ft, f, &

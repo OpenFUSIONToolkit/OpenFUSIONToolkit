@@ -1402,6 +1402,8 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     ft = 1 - fc
     _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
     R_avg = ravgs_q['<R>']
+    fsa = mygs.get_fsa(psi=psi_eval)
+    R_geo = 0.5*(fsa['R_min'] + fsa['R_max'])
 
     # --- Gradients (same as solve_with_bootstrap) ---
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
@@ -1422,9 +1424,9 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     Zdom = 1.0
     Zavg = ne / ni
     Zion = (Zdom**2 * Zavg * Zeff)**0.25
-    nu_i_star = (4.90e-18 * np.abs(qvals) * R_avg * ni
+    nu_i_star = (4.90e-18 * np.abs(qvals) * R_geo * ni
                  * Zion**4 * ln_lii / (Ti**2 * eps**1.5))
-    nu_e_star = (6.921e-18 * np.abs(qvals) * R_avg * ne
+    nu_e_star = (6.921e-18 * np.abs(qvals) * R_geo * ne
                  * Zeff * ln_le / (Te**2 * eps**1.5))
 
     # --- Call redl_bootstrap (same as solve_with_bootstrap) ---
@@ -1432,7 +1434,7 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
         j_BS_neo, coeffs = redl_bootstrap(
             psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
             pe=eC*(ne*Te), pi=eC*(ni*Ti),
-            Zeff=Zeff, R=R_avg, q=qvals, eps=eps, fT=ft, I_psi=f,
+            Zeff=Zeff, R=R_geo, q=qvals, eps=eps, fT=ft, I_psi=f,
             dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
             dn_e_dpsi=dn_e_dpsi, dn_i_dpsi=dn_i_dpsi,
             ln_lambda_e=ln_le, ln_lambda_ii=ln_lii,
