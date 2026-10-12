@@ -5,9 +5,11 @@
 !---------------------------------------------------------------------------------
 !> @file grad_shaf_bootstrap.F90
 !
-!> Bootstrap current and sawtooth reset for the jphi-split-bootstrap Grad-Shafranov profile
+!> Bootstrap current for the jphi-split-bootstrap Grad-Shafranov profile
 !!
-!! @authors Stuart Benjamin, fortranisation of Daniel Burgess' bootstrap.py
+!! Fortran port of Daniel Burgess' Python bootstrap solve (TokaMaker/bootstrap.py).
+!!
+!! @authors Stuart Benjamin, Daniel Burgess
 !! @date June 2026
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
@@ -36,7 +38,7 @@ TYPE :: boot_ops
   REAL(r8) :: scale_jbs = 1.0_r8 !< Scaling factor applied to the bootstrap current (default 1)
   REAL(r8) :: djbs_tol = 1.0e-4_r8 !< Rel. change in jphi_bs below which it is frozen (not recomputed)
   LOGICAL :: diagnose_bs = .FALSE. !< Print alpha/Ip scalars, bootstrap stats, and full profile tables each NL iteration
-  LOGICAL :: taper_edge_jbs = .FALSE. !< Taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS
+  LOGICAL :: taper_edge_jbs = .FALSE. !< Taper all current components (jphi_ind, _bs, _pd, _fixed) to zero at the LCFS
   REAL(r8) :: taper_edge_psi0 = 0.999_r8 !< psi_N (standard: 0=axis, 1=LCFS) where edge taper begins
   INTEGER(i4) :: taper_edge_shape = 2 !< Edge taper shape: 1=cos² (Hann), 2=quintic smoothstep, 3=cubic power
 END TYPE boot_ops
@@ -303,6 +305,26 @@ CALL reset_solve_state(self)
 self%boot_profs = boot_profs()
 end subroutine jphi_bs_delete
 !------------------------------------------------------------------------------
+!> Set the F*F' knots from the equilibrium's current F*F' (`gseq%I` times `ffp_scale`), so a bootstrap
+!! profile that replaces it keeps the current state until the next solve. No-op before an equilibrium exists.
+!------------------------------------------------------------------------------
+SUBROUTINE jphi_bs_carry_ffp(self,gseq)
+CLASS(jphi_bs_flux_func), INTENT(inout) :: self !< New bootstrap profile
+CLASS(gs_equil), INTENT(inout) :: gseq !< Equilibrium, still holding the profile being replaced
+INTEGER(i4) :: i,ierr
+REAL(r8) :: b1,b2
+IF(.NOT.ASSOCIATED(gseq%I))RETURN
+IF(gseq%plasma_bounds(1)<-1.d98)RETURN
+b1=gseq%plasma_bounds(1); b2=gseq%plasma_bounds(2)
+self%plasma_bounds=gseq%plasma_bounds
+self%y0=gseq%ffp_scale*gseq%I%fp(b1)
+DO i=1,self%npsi
+  self%yp(i)=gseq%ffp_scale*gseq%I%fp(self%x(i)*(b2-b1)+b1)
+END DO
+ierr=self%set_cofs(self%yp)
+gseq%ffp_scale=1.d0
+END SUBROUTINE jphi_bs_carry_ffp
+!------------------------------------------------------------------------------
 !> Forget the convergence state of the last solve (freeze flags, counters, cached currents)
 !------------------------------------------------------------------------------
 subroutine reset_solve_state(self)
@@ -528,9 +550,10 @@ jphi_total = jphi_ind + jphi_bs + jphi_fixed
 CALL eval_dIdA(gseq, R_spline, psi_n, self%npsi+1, jphi_total, pscale, jtor)
 CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, ip_result_hi)
 ip_ind = ip_result_hi - ip_result_lo
-IF(ABS(ip_ind) > 0.0_r8)THEN
+IF(ABS(ip_ind) > 1.0e-10_r8*ip_target)THEN
   alpha = (ip_target - ip_result_lo) / ip_ind
 ELSE
+  CALL oft_warn("jphi_bs_update: inductive jphi carries no net current, keeping the last alpha")
   alpha = self%alpha_last
 END IF
 !--- Relative change: alpha's scale is set by the units of ffp_prof (e.g. ~1e-6 for a jphi in A/m^2)
@@ -1834,8 +1857,8 @@ IF (PRESENT(parameterized_spike)) THEN
   ! amp bounds
   eps_tmp = MAX(1.0e-6_r8, 1.0e-3_r8 * ABS(peak_height))
   IF (peak_height == 0.0_r8) eps_tmp = 1.0e-6_r8
-  amp_lo  = MIN(0.9995_r8 * peak_height, peak_height - eps_tmp)
-  amp_hi  = MAX(1.0005_r8 * peak_height, peak_height + eps_tmp)
+  amp_lo  = MIN(0.99_r8 * peak_height, peak_height - eps_tmp)
+  amp_hi  = MAX(1.01_r8 * peak_height, peak_height + eps_tmp)
   ! offset bounds
   eps_tmp = MAX(1.0e-6_r8, 1.0e-3_r8 * ABS(lmin_jbs))
   IF (lmin_jbs == 0.0_r8) eps_tmp = 1.0e-6_r8

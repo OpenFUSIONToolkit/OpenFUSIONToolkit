@@ -599,7 +599,7 @@ do i=1,self%device%mesh%nc
   do m=1,self%device%fe_rep%quad%np
     call self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
     call prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
-    IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma (mode 4 returns 0 there)
+    IF(psitmp(1)<=0.d0)CYCLE ! Outside the plasma: mode 4 returns 0 outside the LCFS and where gs_test_bounds fails (private flux)
     psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
     IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*self%device%fe_rep%quad%wts(m)
   end do
@@ -620,13 +620,11 @@ INTEGER(i4), INTENT(in) :: ngeom
 TYPE(spline_type), INTENT(out) :: R_spline
 INTEGER(i4) :: i
 REAL(r8), ALLOCATABLE :: ravgs(:,:), psi_q(:), qprof(:)
-REAL(r8), PARAMETER :: psi_pad = 1.d-3
 ALLOCATE(ravgs(ngeom,4), psi_q(ngeom), qprof(ngeom))
 psi_q = [(REAL(i-1,r8)/REAL(ngeom,r8), i=1,ngeom)]
 IF(gseq%diverted)THEN
-  psi_q(1) = MIN(psi_q(2), psi_pad)
-  CALL gs_get_qprof(gseq, ngeom, psi_q, qprof, ravgs=ravgs)
-  psi_q(1) = 0.d0
+  ! LCFS row from the X-point below: its trace (next to the X-point) is not needed
+  CALL gs_get_qprof(gseq, ngeom-1, psi_q(2:ngeom), qprof(2:ngeom), ravgs=ravgs(2:ngeom,:))
   ravgs(1,1) = gseq%lim_point(1)
   ravgs(1,2) = 1.d0/gseq%lim_point(1)
   ravgs(1,3) = 1.d0/gseq%lim_point(1)**2
