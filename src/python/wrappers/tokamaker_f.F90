@@ -42,7 +42,7 @@ USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_map, torflux_setup, to
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh, gs_flux_int
-USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func, sauter_fc, saw_reset_1d, boot_prof_access
+USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func, sauter_fc, saw_reset_1d, boot_prof_access, jphi_bs_carry_ffp
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -472,6 +472,7 @@ IF(TRIM(tmp_str)/='none')THEN
       TYPE IS (jphi_bs_flux_func)
         new_I%boot_ops=old_I%boot_ops
       END SELECT
+      IF(.NOT.new_I%ffp_restored)CALL jphi_bs_carry_ffp(new_I,tMaker_equil_obj) ! Keep the current F*F' until the next solve
     END SELECT
     IF(prof_tmp%update_on_load)CALL prof_tmp%update(tMaker_equil_obj) ! Initialize new profile with current EQ
   END IF
@@ -598,21 +599,33 @@ CHARACTER(LEN=OFT_PATH_SLEN) :: tmp_str
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
 IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
 CALL copy_string_rev(te_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%Te)
+IF(TRIM(tmp_str)/='none')CALL reload_profile(tmp_str,tMaker_equil_obj%Te)
 CALL copy_string_rev(ne_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%ne)
+IF(TRIM(tmp_str)/='none')CALL reload_profile(tmp_str,tMaker_equil_obj%ne)
 CALL copy_string_rev(ti_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%Ti)
+IF(TRIM(tmp_str)/='none')CALL reload_profile(tmp_str,tMaker_equil_obj%Ti)
 CALL copy_string_rev(ni_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%ni)
+IF(TRIM(tmp_str)/='none')CALL reload_profile(tmp_str,tMaker_equil_obj%ni)
 CALL copy_string_rev(zeff_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%Zeff)
+IF(TRIM(tmp_str)/='none')CALL reload_profile(tmp_str,tMaker_equil_obj%Zeff)
 CALL copy_string_rev(jphi_fixed_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%jphi_fixed)
+IF(TRIM(tmp_str)/='none')CALL reload_profile(tmp_str,tMaker_equil_obj%jphi_fixed)
 CALL copy_string_rev(jphi_saw_file,tmp_str)
-IF(TRIM(tmp_str)/='none')CALL gs_profile_load(tmp_str,tMaker_equil_obj%jphi_saw)
+IF(TRIM(tmp_str)/='none')CALL reload_profile(tmp_str,tMaker_equil_obj%jphi_saw)
 CALL torflux_setup(tMaker_equil_obj,resettle=.TRUE.)
 END SUBROUTINE tokamaker_load_kinetic_profiles
+!---------------------------------------------------------------------------------
+!> Load a profile specification file into `prof`, deleting the profile it replaces
+!---------------------------------------------------------------------------------
+SUBROUTINE reload_profile(filename,prof)
+CHARACTER(LEN=*), INTENT(in) :: filename !< Profile specification file
+CLASS(flux_func), POINTER, INTENT(inout) :: prof !< Profile to replace
+IF(ASSOCIATED(prof))THEN
+  CALL prof%delete()
+  DEALLOCATE(prof)
+END IF
+CALL gs_profile_load(filename,prof)
+END SUBROUTINE reload_profile
 !---------------------------------------------------------------------------------
 !> Set bootstrap current options on the jphi_bs_flux_func object inside gs_equil.
 !!
@@ -794,9 +807,31 @@ INTEGER(c_int), INTENT(out) :: nl_its !< Number of nonlinear iterations
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ntargets,ierr
 LOGICAL :: vac_save
+CHARACTER(LEN=OFT_ERROR_SLEN) :: missing
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+!---Inputs the bootstrap profile needs (missing ones would abort inside the solve)
+IF((.NOT.vacuum).AND.ASSOCIATED(tMaker_obj%gs_equil%I))THEN
+  SELECT TYPE(I=>torflux_unwrap(tMaker_obj%gs_equil%I))
+  TYPE IS(jphi_bs_flux_func)
+    missing=''
+    IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%Te))missing=TRIM(missing)//' Te'
+    IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%Ti))missing=TRIM(missing)//' Ti'
+    IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%ne))missing=TRIM(missing)//' ne'
+    IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%ni))missing=TRIM(missing)//' ni'
+    IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%Zeff))missing=TRIM(missing)//' Zeff'
+    IF(LEN_TRIM(missing)>0)THEN
+      CALL copy_string('jphi-split-bootstrap profile requires kinetic profiles (set_kinetic_profiles), missing:' &
+        //TRIM(missing),error_str)
+      RETURN
+    END IF
+    IF((tMaker_obj%gs_equil%Ip_target<0.d0).OR.(tMaker_obj%gs_equil%pax_target<0.d0))THEN
+      CALL copy_string('jphi-split-bootstrap profile requires Ip and pax targets (set_targets)',error_str)
+      RETURN
+    END IF
+  END SELECT
+END IF
 IF(ANY(tMaker_obj%device%rcoils>0.d0).AND.(tMaker_obj%device%dt>0.d0))THEN
   ntargets=tMaker_obj%gs_equil%isoflux_ntargets+tMaker_obj%gs_equil%flux_ntargets+tMaker_obj%gs_equil%saddle_ntargets
   IF(ntargets>0)THEN

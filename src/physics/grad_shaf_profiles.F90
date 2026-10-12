@@ -19,7 +19,7 @@ USE oft_gs, ONLY: flux_func, gs_equil, oft_indent, oft_increase_indent, &
   oft_decrease_indent, gs_get_qprof, gs_fpol
 USE oft_gs_cutcell, ONLY: gs_qgeom_cutcell
 implicit none
-INTEGER(4) :: torflux_qgeom_backend = 0 !< Toroidal flux map q/F backend: 0 cut-cell, 1 tracer (testing only)
+INTEGER(i4) :: torflux_qgeom_backend = 0 !< Toroidal flux map q/F backend: 0 cut-cell, 1 tracer (testing only)
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -146,7 +146,7 @@ type, extends(flux_func) :: linterp_flux_func
   real(8), pointer, dimension(:) :: x => NULL() !< Needs docs
   real(8), pointer, dimension(:) :: yp => NULL() !< Needs docs
   real(8), pointer, dimension(:) :: y => NULL() !< Needs docs
-  class(flux_func), pointer :: phi_wrapper => NULL() !< Enclosing @ref phi_flux_wrapper if `x` is on \f$ \hat{\Phi} \f$
+  CLASS(flux_func), POINTER :: phi_wrapper => NULL() !< Enclosing @ref phi_flux_wrapper if `x` is on \f$ \hat{\Phi} \f$
 contains
   !> Delete profile
   procedure :: delete => linterp_delete
@@ -223,34 +223,34 @@ end type wesson_flux_func
 !! @ref phi_flux_wrapper profiles of an equilibrium and rebuilt from q by `update`.
 !! As a flux function, `f` is \f$ 1-\hat{\Phi} \f$ and `fp` its derivative.
 !------------------------------------------------------------------------------
-type, extends(flux_func) :: torflux_map
-  logical :: active = .FALSE. !< Any profile of the equilibrium on toroidal flux?
-  logical :: settle = .TRUE. !< Settle surface placement fully on the next update
-  integer(4) :: ns = 0 !< Number of surfaces (identity map if < 2)
-  integer(4) :: stamp = 0 !< Incremented on each map update
-  real(8) :: Q = 1.d0 !< \f$ \int_0^1 q d\hat{\psi} \f$
-  real(8), pointer, dimension(:) :: psis => NULL() !< \f$ 1-\hat{\psi} \f$ of each surface (ascending)
-  real(8), pointer, dimension(:) :: phihat => NULL() !< \f$ 1-\hat{\Phi} \f$ of each surface
-  real(8), pointer, dimension(:) :: jac => NULL() !< \f$ d\hat{\Phi}/d\hat{\psi} = q/Q \f$ of each surface
-  real(8), pointer, dimension(:) :: nodes => NULL() !< Profile nodes the surfaces were placed for
-  integer(4), pointer, dimension(:) :: bin => NULL() !< First interval of each uniform \f$ 1-\hat{\psi} \f$ bin
-contains
+TYPE, EXTENDS(flux_func) :: torflux_map
+  LOGICAL :: active = .FALSE. !< Any profile of the equilibrium on toroidal flux?
+  LOGICAL :: settle = .TRUE. !< Settle surface placement fully on the next update
+  INTEGER(i4) :: ns = 0 !< Number of surfaces (identity map if < 2)
+  INTEGER(i4) :: stamp = 0 !< Incremented on each map update
+  REAL(r8) :: Q = 1.d0 !< \f$ \int_0^1 q d\hat{\psi} \f$
+  REAL(r8), POINTER, DIMENSION(:) :: psis => NULL() !< \f$ 1-\hat{\psi} \f$ of each surface (ascending)
+  REAL(r8), POINTER, DIMENSION(:) :: phihat => NULL() !< \f$ 1-\hat{\Phi} \f$ of each surface
+  REAL(r8), POINTER, DIMENSION(:) :: jac => NULL() !< \f$ d\hat{\Phi}/d\hat{\psi} = q/Q \f$ of each surface
+  REAL(r8), POINTER, DIMENSION(:) :: nodes => NULL() !< Profile nodes the surfaces were placed for
+  INTEGER(i4), POINTER, DIMENSION(:) :: bin => NULL() !< First interval of each uniform \f$ 1-\hat{\psi} \f$ bin
+CONTAINS
   !> Evaluate \f$ 1-\hat{\Phi} \f$ and derivatives at \f$ 1-\hat{\psi} \f$
-  procedure :: eval => tmap_eval
+  PROCEDURE :: eval => tmap_eval
   !> Evaluate \f$ 1-\hat{\psi} \f$ at \f$ 1-\hat{\Phi} \f$
-  procedure :: inv => tmap_inv
-  procedure :: delete => tmap_delete
-  procedure :: copy => tmap_copy
-  procedure :: f => tmap_f
-  procedure :: fp => tmap_fp
-  procedure :: update => tmap_update
-  procedure :: set_cofs => tmap_cofs_update
-  procedure :: get_cofs => tmap_cofs_get
-  procedure :: save_hdf5 => tmap_save_hdf5
-  procedure :: save_txt => tmap_save_txt
-  procedure :: load_hdf5 => tmap_load_hdf5
-  procedure :: load_txt => tmap_load_txt
-end type torflux_map
+  PROCEDURE :: inv => tmap_inv
+  PROCEDURE :: delete => tmap_delete
+  PROCEDURE :: copy => tmap_copy
+  PROCEDURE :: f => tmap_f
+  PROCEDURE :: fp => tmap_fp
+  PROCEDURE :: update => tmap_update
+  PROCEDURE :: set_cofs => tmap_cofs_update
+  PROCEDURE :: get_cofs => tmap_cofs_get
+  PROCEDURE :: save_hdf5 => tmap_save_hdf5
+  PROCEDURE :: save_txt => tmap_save_txt
+  PROCEDURE :: load_hdf5 => tmap_load_hdf5
+  PROCEDURE :: load_txt => tmap_load_txt
+END TYPE torflux_map
 !------------------------------------------------------------------------------
 !> Flux function on normalized toroidal flux, evaluated through @ref torflux_map
 !!
@@ -259,27 +259,27 @@ end type torflux_map
 !! - "phi_n_relabel" (`relabel=.TRUE.`): `phi_rep` holds \f$ dY/d\hat{\psi} \f$ on a \f$ \hat{\Phi} \f$
 !!   grid, so \f$ f' = Y'(\hat{\Phi}) \f$ and `f` integrates it over \f$ \hat{\psi} \f$
 !------------------------------------------------------------------------------
-type, extends(flux_func) :: phi_flux_wrapper
-  logical :: relabel = .FALSE. !< "phi_n_relabel" (otherwise "phi_n")
-  class(flux_func), pointer :: phi_rep => NULL() !< Profile on \f$ \hat{\Phi} \f$
-  class(torflux_map), pointer :: map => NULL() !< Equilibrium map (`gs_equil%torflux`)
-  integer(4) :: fint_stamp = -1 !< Map stamp `fint` was built for
-  real(8), pointer, dimension(:) :: fint => NULL() !< Cumulative \f$ \int f' d\hat{\psi} \f$ on map surfaces (relabel)
-  real(8), pointer, dimension(:,:) :: fcof => NULL() !< Per-interval quartic for partial integrals of `fint` [4,ns-1]
-contains
-  procedure :: delete => phi_wrap_delete
-  procedure :: copy => phi_wrap_copy
-  procedure :: f => phi_wrap_f
-  procedure :: fp => phi_wrap_fp
-  procedure :: fpp => phi_wrap_fpp
-  procedure :: update => phi_wrap_update
-  procedure :: set_cofs => phi_wrap_cofs_update
-  procedure :: get_cofs => phi_wrap_cofs_get
-  procedure :: save_hdf5 => phi_wrap_save_hdf5
-  procedure :: save_txt => phi_wrap_save_txt
-  procedure :: load_hdf5 => phi_wrap_load_hdf5
-  procedure :: load_txt => phi_wrap_load_txt
-end type phi_flux_wrapper
+TYPE, EXTENDS(flux_func) :: phi_flux_wrapper
+  LOGICAL :: relabel = .FALSE. !< "phi_n_relabel" (otherwise "phi_n")
+  CLASS(flux_func), POINTER :: phi_rep => NULL() !< Profile on \f$ \hat{\Phi} \f$
+  CLASS(torflux_map), POINTER :: map => NULL() !< Equilibrium map (`gs_equil%torflux`)
+  INTEGER(i4) :: fint_stamp = -1 !< Map stamp `fint` was built for
+  REAL(r8), POINTER, DIMENSION(:) :: fint => NULL() !< Cumulative \f$ \int f' d\hat{\psi} \f$ on map surfaces (relabel)
+  REAL(r8), POINTER, DIMENSION(:,:) :: fcof => NULL() !< Per-interval quartic for partial integrals of `fint` [4,ns-1]
+CONTAINS
+  PROCEDURE :: delete => phi_wrap_delete
+  PROCEDURE :: copy => phi_wrap_copy
+  PROCEDURE :: f => phi_wrap_f
+  PROCEDURE :: fp => phi_wrap_fp
+  PROCEDURE :: fpp => phi_wrap_fpp
+  PROCEDURE :: update => phi_wrap_update
+  PROCEDURE :: set_cofs => phi_wrap_cofs_update
+  PROCEDURE :: get_cofs => phi_wrap_cofs_get
+  PROCEDURE :: save_hdf5 => phi_wrap_save_hdf5
+  PROCEDURE :: save_txt => phi_wrap_save_txt
+  PROCEDURE :: load_hdf5 => phi_wrap_load_hdf5
+  PROCEDURE :: load_txt => phi_wrap_load_txt
+END TYPE phi_flux_wrapper
 !---Toroidal flux map internals
 PRIVATE :: sort_unique, quad_interp, fd_deriv, tmap_find, tmap_index, tmap_lookup, &
   phi_wrap_map, phi_wrap_norm, phi_wrap_relabel_int, phi_wrap_relabel_cof, phi_wrap_relabel_f, &
@@ -1156,7 +1156,7 @@ else
     if(psihat>self%x(i-1).AND.psihat<=self%x(i))then
       b = self%y(i-1) + psihat*(.5d0*psihat - self%x(i-1))/(self%x(i) - self%x(i-1))* &
           (self%yp(i) - self%yp(i-1)) + psihat*self%yp(i-1)
-      exit
+      EXIT
     end if
   end do
 end if
@@ -1190,7 +1190,7 @@ else
     if(psihat>self%x(i-1).AND.psihat<=self%x(i))then
       x=(psihat-self%x(i-1))/(self%x(i)-self%x(i-1))
       b = self%yp(i-1) + (self%yp(i)-self%yp(i-1))*x
-      exit
+      EXIT
     end if
   end do
 end if
@@ -1221,7 +1221,7 @@ else
     if(psihat>self%x(i-1).AND.psihat<=self%x(i))then
       x=1.d0/(self%plasma_bounds(2)-self%plasma_bounds(1))/(self%x(i)-self%x(i-1))
       b = (self%yp(i)-self%yp(i-1))*x
-      exit
+      EXIT
     end if
   end do
 end if
@@ -1652,10 +1652,10 @@ end subroutine wesson_cofs_get
 !------------------------------------------------------------------------------
 !> Wrap `F` as a profile on normalized toroidal flux (`coord`: 1 "phi_n", 2 "phi_n_relabel")
 !------------------------------------------------------------------------------
-subroutine torflux_wrap(F,coord)
-class(flux_func), pointer, intent(inout) :: F !< Profile on \f$ \hat{\Phi} \f$, replaced by its wrapper
-integer(4), intent(in) :: coord !< Coordinate of `F`
-class(phi_flux_wrapper), pointer :: wrap
+SUBROUTINE torflux_wrap(F,coord)
+CLASS(flux_func), POINTER, INTENT(inout) :: F !< Profile on \f$ \hat{\Phi} \f$, replaced by its wrapper
+INTEGER(i4), INTENT(in) :: coord !< Coordinate of `F`
+CLASS(phi_flux_wrapper), POINTER :: wrap
 IF(coord==0)RETURN
 IF((coord<0).OR.(coord>2))CALL oft_abort('Unknown profile coordinate','torflux_wrap',__FILE__)
 SELECT TYPE(F)
@@ -1670,38 +1670,38 @@ wrap%f_offset=F%f_offset
 wrap%plasma_bounds=F%plasma_bounds
 wrap%update_on_load=F%update_on_load
 F=>wrap
-end subroutine torflux_wrap
+END SUBROUTINE torflux_wrap
 !------------------------------------------------------------------------------
 !> Coordinate of `F` (0 "psi_n", 1 "phi_n", 2 "phi_n_relabel")
 !------------------------------------------------------------------------------
-function torflux_coord(F) result(coord)
-class(flux_func), intent(in) :: F
-integer(4) :: coord
+FUNCTION torflux_coord(F) RESULT(coord)
+CLASS(flux_func), INTENT(in) :: F
+INTEGER(i4) :: coord
 coord=0
 SELECT TYPE(F)
   TYPE IS(phi_flux_wrapper)
     coord=MERGE(2,1,F%relabel)
 END SELECT
-end function torflux_coord
+END FUNCTION torflux_coord
 !------------------------------------------------------------------------------
 !> Profile `F` itself, or the profile it wraps if it is on toroidal flux
 !------------------------------------------------------------------------------
-function torflux_unwrap(F) result(base)
-class(flux_func), pointer, intent(in) :: F
-class(flux_func), pointer :: base
+FUNCTION torflux_unwrap(F) RESULT(base)
+CLASS(flux_func), POINTER, INTENT(in) :: F
+CLASS(flux_func), POINTER :: base
 base=>F
 IF(.NOT.ASSOCIATED(F))RETURN
 SELECT TYPE(F)
   TYPE IS(phi_flux_wrapper)
     base=>F%phi_rep
 END SELECT
-end function torflux_unwrap
+END FUNCTION torflux_unwrap
 !------------------------------------------------------------------------------
 !> Point a profile on toroidal flux at the equilibrium's map, creating the map if needed
 !------------------------------------------------------------------------------
-subroutine torflux_attach(F,gseq)
-class(flux_func), pointer, intent(in) :: F !< Profile (no-op unless it is a @ref phi_flux_wrapper)
-class(gs_equil), intent(inout) :: gseq !< G-S object
+SUBROUTINE torflux_attach(F,gseq)
+CLASS(flux_func), POINTER, INTENT(in) :: F !< Profile (no-op unless it is a @ref phi_flux_wrapper)
+CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 IF(.NOT.ASSOCIATED(F))RETURN
 SELECT TYPE(F)
   TYPE IS(phi_flux_wrapper)
@@ -1715,15 +1715,15 @@ SELECT TYPE(F)
         rep%phi_wrapper=>F
     END SELECT
 END SELECT
-end subroutine torflux_attach
+END SUBROUTINE torflux_attach
 !------------------------------------------------------------------------------
 !> Attach all profiles of an equilibrium to its toroidal flux map (created if needed)
 !------------------------------------------------------------------------------
-subroutine torflux_setup(gseq,active,resettle)
-class(gs_equil), intent(inout) :: gseq !< G-S object
-logical, optional, intent(out) :: active !< Any profile on toroidal flux?
-logical, optional, intent(in) :: resettle !< Settle surface placement fully on the next map update (new profiles or state)
-logical :: any_wrapped
+SUBROUTINE torflux_setup(gseq,active,resettle)
+CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+LOGICAL, OPTIONAL, INTENT(out) :: active !< Any profile on toroidal flux?
+LOGICAL, OPTIONAL, INTENT(in) :: resettle !< Settle surface placement fully on the next map update (new profiles or state)
+LOGICAL :: any_wrapped
 any_wrapped=.FALSE.
 CALL attach(gseq%I,'',.FALSE.)
 CALL attach(gseq%P,'',.FALSE.)
@@ -1745,7 +1745,7 @@ IF(PRESENT(resettle).AND.ASSOCIATED(gseq%torflux))THEN
 END IF
 CONTAINS
 !---Attach a wrapped profile (value-type profiles must be relabelled)
-subroutine attach(F,name,value_type)
+SUBROUTINE attach(F,name,value_type)
 CLASS(flux_func), POINTER, INTENT(in) :: F
 CHARACTER(LEN=*), INTENT(in) :: name
 LOGICAL, INTENT(in) :: value_type
@@ -1757,19 +1757,19 @@ SELECT TYPE(F)
     any_wrapped=.TRUE.
 END SELECT
 CALL torflux_attach(F,gseq)
-end subroutine attach
-end subroutine torflux_setup
+END SUBROUTINE attach
+END SUBROUTINE torflux_setup
 !------------------------------------------------------------------------------
 !> Map \f$ \psi \f$ to the coordinate of `phi_rep`, returns `.FALSE.` if no map applies
 !------------------------------------------------------------------------------
-function phi_wrap_map(self,psi,psim,jac,djac) result(mapped)
-class(phi_flux_wrapper), intent(inout) :: self
-real(8), intent(in) :: psi !< Poloidal flux
-real(8), intent(out) :: psim !< Mapped flux \f$ \psi_a + (1-\hat{\Phi})(\psi_0-\psi_a) \f$
-real(8), intent(out) :: jac !< \f$ d\hat{\Phi}/d\hat{\psi} \f$
-real(8), optional, intent(out) :: djac !< \f$ d^2\hat{\Phi}/d\hat{\psi}^2 \f$
-logical :: mapped
-real(8) :: x1,dpsi,psihat,phihat
+FUNCTION phi_wrap_map(self,psi,psim,jac,djac) RESULT(mapped)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: psi !< Poloidal flux
+REAL(r8), INTENT(out) :: psim !< Mapped flux \f$ \psi_a + (1-\hat{\Phi})(\psi_0-\psi_a) \f$
+REAL(r8), INTENT(out) :: jac !< \f$ d\hat{\Phi}/d\hat{\psi} \f$
+REAL(r8), OPTIONAL, INTENT(out) :: djac !< \f$ d^2\hat{\Phi}/d\hat{\psi}^2 \f$
+LOGICAL :: mapped
+REAL(r8) :: x1,dpsi,psihat,phihat
 mapped=.FALSE.
 psim=psi; jac=1.d0
 IF(PRESENT(djac))djac=0.d0
@@ -1781,39 +1781,39 @@ IF(psihat<0.d0)RETURN
 CALL self%map%eval(psihat,phihat,jac,djac)
 psim=x1+phihat*dpsi
 mapped=.TRUE.
-end function phi_wrap_map
+END FUNCTION phi_wrap_map
 !------------------------------------------------------------------------------
 !> Set the plasma bounds of `F`, and of the profile it wraps if it is on toroidal flux
 !------------------------------------------------------------------------------
-subroutine torflux_set_bounds(F,bounds)
-class(flux_func), intent(inout) :: F !< Profile
-real(8), intent(in) :: bounds(2) !< Plasma bounds
+SUBROUTINE torflux_set_bounds(F,bounds)
+CLASS(flux_func), INTENT(inout) :: F !< Profile
+REAL(r8), INTENT(in) :: bounds(2) !< Plasma bounds
 F%plasma_bounds=bounds
 SELECT TYPE(F)
   TYPE IS(phi_flux_wrapper)
     F%phi_rep%plasma_bounds=bounds
 END SELECT
-end subroutine torflux_set_bounds
+END SUBROUTINE torflux_set_bounds
 !------------------------------------------------------------------------------
 !> Normalization offset and width (unset bounds: argument is already \f$ 1-\hat{\psi} \f$)
 !------------------------------------------------------------------------------
-pure subroutine phi_wrap_norm(self,x1,dpsi)
-class(flux_func), intent(in) :: self
-real(8), intent(out) :: x1 !< Flux at LCFS
-real(8), intent(out) :: dpsi !< Axis minus LCFS flux
+PURE SUBROUTINE phi_wrap_norm(self,x1,dpsi)
+CLASS(flux_func), INTENT(in) :: self
+REAL(r8), INTENT(out) :: x1 !< Flux at LCFS
+REAL(r8), INTENT(out) :: dpsi !< Axis minus LCFS flux
 IF(self%plasma_bounds(1)<-1.d98)THEN
   x1=0.d0; dpsi=1.d0
 ELSE
   x1=self%plasma_bounds(1); dpsi=self%plasma_bounds(2)-self%plasma_bounds(1)
 END IF
-end subroutine phi_wrap_norm
+END SUBROUTINE phi_wrap_norm
 !------------------------------------------------------------------------------
 !> Evaluate the profile at \f$ \psi \f$
 !------------------------------------------------------------------------------
-function phi_wrap_f(self,psi) result(b)
-class(phi_flux_wrapper), intent(inout) :: self
-real(8), intent(in) :: psi
-real(8) :: b,psim,jac
+FUNCTION phi_wrap_f(self,psi) RESULT(b)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: psi
+REAL(r8) :: b,psim,jac
 IF(.NOT.phi_wrap_map(self,psi,psim,jac))THEN
   b=self%phi_rep%f(psi)
 ELSE IF(.NOT.self%relabel)THEN
@@ -1821,14 +1821,14 @@ ELSE IF(.NOT.self%relabel)THEN
 ELSE
   b=phi_wrap_relabel_f(self,psi)
 END IF
-end function phi_wrap_f
+END FUNCTION phi_wrap_f
 !------------------------------------------------------------------------------
 !> Evaluate the first derivative of the profile at \f$ \psi \f$
 !------------------------------------------------------------------------------
-function phi_wrap_fp(self,psi) result(b)
-class(phi_flux_wrapper), intent(inout) :: self
-real(8), intent(in) :: psi
-real(8) :: b,psim,jac
+FUNCTION phi_wrap_fp(self,psi) RESULT(b)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: psi
+REAL(r8) :: b,psim,jac
 IF(.NOT.phi_wrap_map(self,psi,psim,jac))THEN
   b=self%phi_rep%fp(psi)
 ELSE IF(.NOT.self%relabel)THEN
@@ -1836,14 +1836,14 @@ ELSE IF(.NOT.self%relabel)THEN
 ELSE
   b=self%phi_rep%fp(psim)
 END IF
-end function phi_wrap_fp
+END FUNCTION phi_wrap_fp
 !------------------------------------------------------------------------------
 !> Evaluate the second derivative of the profile at \f$ \psi \f$
 !------------------------------------------------------------------------------
-function phi_wrap_fpp(self,psi) result(b)
-class(phi_flux_wrapper), intent(inout) :: self
-real(8), intent(in) :: psi
-real(8) :: b,psim,jac,djac,x1,dpsi
+FUNCTION phi_wrap_fpp(self,psi) RESULT(b)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: psi
+REAL(r8) :: b,psim,jac,djac,x1,dpsi
 IF(.NOT.phi_wrap_map(self,psi,psim,jac,djac))THEN
   b=self%phi_rep%fpp(psi)
 ELSE IF(.NOT.self%relabel)THEN
@@ -1852,19 +1852,19 @@ ELSE IF(.NOT.self%relabel)THEN
 ELSE
   b=self%phi_rep%fpp(psim)*jac
 END IF
-end function phi_wrap_fpp
+END FUNCTION phi_wrap_fpp
 !------------------------------------------------------------------------------
 !> Integral of `phi_rep%fp` over \f$ 1-\hat{\psi} \in [a,b] \f$ (4-point Gauss)
 !------------------------------------------------------------------------------
-function phi_wrap_relabel_int(self,a,b) result(val)
-class(phi_flux_wrapper), intent(inout) :: self
-real(8), intent(in) :: a,b
-real(8) :: val,s,phihat,jac,x1,dpsi
-real(8), parameter :: xg(4)=[-0.861136311594053d0,-0.339981043584856d0, &
+FUNCTION phi_wrap_relabel_int(self,a,b) RESULT(val)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: a,b
+REAL(r8) :: val,s,phihat,jac,x1,dpsi
+REAL(r8), PARAMETER :: xg(4)=[-0.861136311594053d0,-0.339981043584856d0, &
   0.339981043584856d0,0.861136311594053d0]
-real(8), parameter :: wg(4)=[0.347854845137454d0,0.652145154862546d0, &
+REAL(r8), PARAMETER :: wg(4)=[0.347854845137454d0,0.652145154862546d0, &
   0.652145154862546d0,0.347854845137454d0]
-integer(4) :: i
+INTEGER(i4) :: i
 CALL phi_wrap_norm(self,x1,dpsi)
 val=0.d0
 DO i=1,4
@@ -1873,13 +1873,13 @@ DO i=1,4
   val=val+wg(i)*self%phi_rep%fp(x1+phihat*dpsi)
 END DO
 val=val*(b-a)/2.d0
-end function phi_wrap_relabel_int
+END FUNCTION phi_wrap_relabel_int
 !------------------------------------------------------------------------------
 !> Rebuild the cumulative integral table on the map surfaces (relabel only)
 !------------------------------------------------------------------------------
-subroutine phi_wrap_build_fint(self)
-class(phi_flux_wrapper), intent(inout) :: self
-integer(4) :: k
+SUBROUTINE phi_wrap_build_fint(self)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+INTEGER(i4) :: k
 IF(ASSOCIATED(self%fint))DEALLOCATE(self%fint)
 IF(ASSOCIATED(self%fcof))DEALLOCATE(self%fcof)
 self%fint_stamp=-1
@@ -1891,21 +1891,21 @@ DO k=2,self%map%ns
   self%fint(k)=self%fint(k-1)+SUM(self%fcof(:,k-1))
 END DO
 self%fint_stamp=self%map%stamp
-end subroutine phi_wrap_build_fint
+END SUBROUTINE phi_wrap_build_fint
 !------------------------------------------------------------------------------
 !> Quartic \f$ \sum_j c_j u^j \f$ (u in [0,1]) for \f$ \int_a^{a+u(b-a)} f'\,d(1-\hat{\psi}) \f$
 !!
 !! Exact integral of the cubic interpolating `phi_rep%fp` at the 4 Gauss points of [a,b],
 !! so the full-interval value equals @ref phi_wrap_relabel_int.
 !------------------------------------------------------------------------------
-subroutine phi_wrap_relabel_cof(self,a,b,cof)
-class(phi_flux_wrapper), intent(inout) :: self
-real(8), intent(in) :: a,b
-real(8), intent(out) :: cof(4)
-real(8), parameter :: xg(4)=[-0.861136311594053d0,-0.339981043584856d0, &
+SUBROUTINE phi_wrap_relabel_cof(self,a,b,cof)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: a,b
+REAL(r8), INTENT(out) :: cof(4)
+REAL(r8), PARAMETER :: xg(4)=[-0.861136311594053d0,-0.339981043584856d0, &
   0.339981043584856d0,0.861136311594053d0]
-real(8) :: u(4),fv(4),m(4),phihat,jac,x1,dpsi,s
-integer(4) :: i,j,k
+REAL(r8) :: u(4),fv(4),m(4),phihat,jac,x1,dpsi,s
+INTEGER(i4) :: i,j,k
 CALL phi_wrap_norm(self,x1,dpsi)
 u=(1.d0+xg)/2.d0
 DO i=1,4
@@ -1928,15 +1928,15 @@ DO i=1,4
 END DO
 !---Integrate: c_j u^j -> c_j u^(j+1)/(j+1), scaled by interval width
 cof=cof*(b-a)/[1.d0,2.d0,3.d0,4.d0]
-end subroutine phi_wrap_relabel_cof
+END SUBROUTINE phi_wrap_relabel_cof
 !------------------------------------------------------------------------------
 !> Evaluate \f$ (\psi_0-\psi_a) \int f'\,d(1-\hat{\psi}) \f$ from the LCFS to \f$ 1-\hat{\psi} \f$ (relabel)
 !------------------------------------------------------------------------------
-function phi_wrap_relabel_f(self,psi) result(b)
-class(phi_flux_wrapper), intent(inout) :: self
-real(8), intent(in) :: psi
-real(8) :: b,x1,dpsi,psihat,u
-integer(4) :: lo
+FUNCTION phi_wrap_relabel_f(self,psi) RESULT(b)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: psi
+REAL(r8) :: b,x1,dpsi,psihat,u
+INTEGER(i4) :: lo
 CALL phi_wrap_norm(self,x1,dpsi)
 psihat=(psi-x1)/dpsi
 IF(self%fint_stamp/=self%map%stamp)THEN
@@ -1955,14 +1955,14 @@ ELSE
   b=self%fint(lo)+u*(self%fcof(1,lo)+u*(self%fcof(2,lo)+u*(self%fcof(3,lo)+u*self%fcof(4,lo))))
 END IF
 b=b*dpsi
-end function phi_wrap_relabel_f
+END FUNCTION phi_wrap_relabel_f
 !------------------------------------------------------------------------------
 !> Update the profile on \f$ \hat{\Phi} \f$ for the new equilibrium
 !------------------------------------------------------------------------------
-subroutine phi_wrap_update(self,gseq)
-class(phi_flux_wrapper), intent(inout) :: self
-class(gs_equil), intent(inout) :: gseq
-real(8) :: dpsi
+SUBROUTINE phi_wrap_update(self,gseq)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+CLASS(gs_equil), INTENT(inout) :: gseq
+REAL(r8) :: dpsi
 CALL torflux_set_bounds(self,gseq%plasma_bounds)
 dpsi=ABS(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
 IF(.NOT.((dpsi>0.d0).AND.(dpsi<HUGE(dpsi))))RETURN ! No closed surfaces to map
@@ -1976,30 +1976,30 @@ END IF
 CALL self%phi_rep%update(gseq)
 self%ndofs=self%phi_rep%ndofs
 IF(self%relabel)CALL phi_wrap_build_fint(self)
-end subroutine phi_wrap_update
+END SUBROUTINE phi_wrap_update
 !------------------------------------------------------------------------------
 !> Set the coefficients of `phi_rep`
 !------------------------------------------------------------------------------
-function phi_wrap_cofs_update(self,c) result(ierr)
-class(phi_flux_wrapper), intent(inout) :: self
-real(8), intent(in) :: c(:)
-integer(4) :: ierr
+FUNCTION phi_wrap_cofs_update(self,c) RESULT(ierr)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: c(:)
+INTEGER(i4) :: ierr
 ierr=self%phi_rep%set_cofs(c)
 IF(self%relabel.AND.ASSOCIATED(self%map))CALL phi_wrap_build_fint(self)
-end function phi_wrap_cofs_update
+END FUNCTION phi_wrap_cofs_update
 !------------------------------------------------------------------------------
 !> Get the coefficients of `phi_rep`
 !------------------------------------------------------------------------------
-subroutine phi_wrap_cofs_get(self,c)
-class(phi_flux_wrapper), intent(inout) :: self
-real(8), intent(out) :: c(:)
+SUBROUTINE phi_wrap_cofs_get(self,c)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+REAL(r8), INTENT(out) :: c(:)
 CALL self%phi_rep%get_cofs(c)
-end subroutine phi_wrap_cofs_get
+END SUBROUTINE phi_wrap_cofs_get
 !------------------------------------------------------------------------------
 !> Destroy the wrapper and `phi_rep`
 !------------------------------------------------------------------------------
-subroutine phi_wrap_delete(self)
-class(phi_flux_wrapper), intent(inout) :: self
+SUBROUTINE phi_wrap_delete(self)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
 IF(ASSOCIATED(self%phi_rep))THEN
   CALL self%phi_rep%delete()
   DEALLOCATE(self%phi_rep)
@@ -2008,14 +2008,14 @@ IF(ASSOCIATED(self%fint))DEALLOCATE(self%fint)
 IF(ASSOCIATED(self%fcof))DEALLOCATE(self%fcof)
 NULLIFY(self%map)
 self%fint_stamp=-1
-end subroutine phi_wrap_delete
+END SUBROUTINE phi_wrap_delete
 !------------------------------------------------------------------------------
 !> Copy the wrapper and `phi_rep` (the copy shares the map until @ref torflux_setup)
 !------------------------------------------------------------------------------
-subroutine phi_wrap_copy(self,new)
-class(phi_flux_wrapper), intent(inout) :: self
-class(flux_func), pointer, intent(inout) :: new
-class(flux_func), pointer :: rep
+SUBROUTINE phi_wrap_copy(self,new)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+CLASS(flux_func), POINTER, INTENT(inout) :: new
+CLASS(flux_func), POINTER :: rep
 CALL self%phi_rep%copy(rep)
 CALL torflux_wrap(rep,MERGE(2,1,self%relabel))
 SELECT TYPE(rep)
@@ -2030,26 +2030,26 @@ SELECT TYPE(rep)
     END IF
 END SELECT
 new=>rep
-end subroutine phi_wrap_copy
+END SUBROUTINE phi_wrap_copy
 !------------------------------------------------------------------------------
 !> Save `phi_rep` and its coordinate to HDF5
 !------------------------------------------------------------------------------
-subroutine phi_wrap_save_hdf5(self,filename,path)
-class(phi_flux_wrapper), intent(inout) :: self
-character(LEN=*), intent(in) :: filename
-character(LEN=*), intent(in) :: path
+SUBROUTINE phi_wrap_save_hdf5(self,filename,path)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+CHARACTER(LEN=*), INTENT(in) :: filename
+CHARACTER(LEN=*), INTENT(in) :: path
 CALL self%phi_rep%save(filename,path)
 CALL hdf5_write(torflux_coord(self),filename,path//'/COORD')
-end subroutine phi_wrap_save_hdf5
+END SUBROUTINE phi_wrap_save_hdf5
 !------------------------------------------------------------------------------
 !> Save `phi_rep` to a text file, with its coordinate after the type on the first line
 !------------------------------------------------------------------------------
-subroutine phi_wrap_save_txt(self,io_unit)
-class(phi_flux_wrapper), intent(inout) :: self
-integer, intent(in) :: io_unit
-character(LEN=2**17) :: line
-integer(4) :: tmp_unit,ios
-logical :: first
+SUBROUTINE phi_wrap_save_txt(self,io_unit)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+INTEGER, INTENT(in) :: io_unit
+CHARACTER(LEN=2**17) :: line
+INTEGER(i4) :: tmp_unit,ios
+LOGICAL :: first
 OPEN(NEWUNIT=tmp_unit,STATUS='SCRATCH')
 CALL self%phi_rep%save(tmp_unit)
 REWIND(tmp_unit)
@@ -2063,38 +2063,38 @@ DO
   first=.FALSE.
 END DO
 CLOSE(tmp_unit)
-end subroutine phi_wrap_save_txt
+END SUBROUTINE phi_wrap_save_txt
 !------------------------------------------------------------------------------
 !> Load `phi_rep` from HDF5 (allocate it first; normally loaded unwrapped, see @ref torflux_wrap)
 !------------------------------------------------------------------------------
-subroutine phi_wrap_load_hdf5(self,filename,path,success)
-class(phi_flux_wrapper), intent(inout) :: self
-character(LEN=*), intent(in) :: filename
-character(LEN=*), intent(in) :: path
-logical, intent(out) :: success
+SUBROUTINE phi_wrap_load_hdf5(self,filename,path,success)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+CHARACTER(LEN=*), INTENT(in) :: filename
+CHARACTER(LEN=*), INTENT(in) :: path
+LOGICAL, INTENT(out) :: success
 CALL self%phi_rep%load(filename,path,success)
 self%ndofs=self%phi_rep%ndofs
-end subroutine phi_wrap_load_hdf5
+END SUBROUTINE phi_wrap_load_hdf5
 !------------------------------------------------------------------------------
 !> Load `phi_rep` from a text file (allocate it first; normally loaded unwrapped, see @ref torflux_wrap)
 !------------------------------------------------------------------------------
-subroutine phi_wrap_load_txt(self,io_unit)
-class(phi_flux_wrapper), intent(inout) :: self
-integer, intent(in) :: io_unit
+SUBROUTINE phi_wrap_load_txt(self,io_unit)
+CLASS(phi_flux_wrapper), INTENT(inout) :: self
+INTEGER, INTENT(in) :: io_unit
 CALL self%phi_rep%load(io_unit)
 self%ndofs=self%phi_rep%ndofs
-end subroutine phi_wrap_load_txt
+END SUBROUTINE phi_wrap_load_txt
 !------------------------------------------------------------------------------
 !> Evaluate \f$ 1-\hat{\Phi} \f$, \f$ J = d\hat{\Phi}/d\hat{\psi} \f$ and \f$ dJ/d\hat{\psi} \f$ at \f$ 1-\hat{\psi} \f$
 !------------------------------------------------------------------------------
-subroutine tmap_eval(self,psihat,phihat,jac,djac)
-class(torflux_map), intent(in) :: self
-real(8), intent(in) :: psihat !< Normalized poloidal flux
-real(8), intent(out) :: phihat !< Normalized toroidal flux
-real(8), intent(out) :: jac !< \f$ d\hat{\Phi}/d\hat{\psi} \f$
-real(8), optional, intent(out) :: djac !< \f$ d^2\hat{\Phi}/d\hat{\psi}^2 \f$
-integer(4) :: lo,hi
-real(8) :: h,u,pa,pb,ma,mb
+SUBROUTINE tmap_eval(self,psihat,phihat,jac,djac)
+CLASS(torflux_map), INTENT(in) :: self
+REAL(r8), INTENT(in) :: psihat !< Normalized poloidal flux
+REAL(r8), INTENT(out) :: phihat !< Normalized toroidal flux
+REAL(r8), INTENT(out) :: jac !< \f$ d\hat{\Phi}/d\hat{\psi} \f$
+REAL(r8), OPTIONAL, INTENT(out) :: djac !< \f$ d^2\hat{\Phi}/d\hat{\psi}^2 \f$
+INTEGER(i4) :: lo,hi
+REAL(r8) :: h,u,pa,pb,ma,mb
 IF(self%ns<2)THEN
   phihat=psihat; jac=1.d0
   IF(PRESENT(djac))djac=0.d0
@@ -2121,16 +2121,16 @@ phihat=(2.d0*u**3-3.d0*u**2+1.d0)*pa + (u**3-2.d0*u**2+u)*ma &
   + (3.d0*u**2-2.d0*u**3)*pb + (u**3-u**2)*mb
 jac=((6.d0*u**2-6.d0*u)*(pa-pb) + (3.d0*u**2-4.d0*u+1.d0)*ma + (3.d0*u**2-2.d0*u)*mb)/h
 IF(PRESENT(djac))djac=((12.d0*u-6.d0)*(pa-pb) + (6.d0*u-4.d0)*ma + (6.d0*u-2.d0)*mb)/h**2
-end subroutine tmap_eval
+END SUBROUTINE tmap_eval
 !------------------------------------------------------------------------------
 !> Evaluate \f$ 1-\hat{\psi} \f$ at \f$ 1-\hat{\Phi} \f$ (inverse of @ref tmap_eval)
 !------------------------------------------------------------------------------
-function tmap_inv(self,phihat) result(psihat)
-class(torflux_map), intent(in) :: self
-real(8), intent(in) :: phihat !< Normalized toroidal flux
-real(8) :: psihat
-real(8) :: a,b,phi,jac
-integer(4) :: lo,i
+FUNCTION tmap_inv(self,phihat) RESULT(psihat)
+CLASS(torflux_map), INTENT(in) :: self
+REAL(r8), INTENT(in) :: phihat !< Normalized toroidal flux
+REAL(r8) :: psihat
+REAL(r8) :: a,b,phi,jac
+INTEGER(i4) :: lo,i
 IF(self%ns<2)THEN
   psihat=phihat
   RETURN
@@ -2157,12 +2157,12 @@ DO i=1,30
   psihat=psihat-(phi-phihat)/jac
   IF((psihat<=a).OR.(psihat>=b))psihat=(a+b)/2.d0
 END DO
-end function tmap_inv
+END FUNCTION tmap_inv
 !------------------------------------------------------------------------------
 !> Reset map to identity
 !------------------------------------------------------------------------------
-subroutine tmap_delete(self)
-class(torflux_map), intent(inout) :: self
+SUBROUTINE tmap_delete(self)
+CLASS(torflux_map), INTENT(inout) :: self
 IF(ASSOCIATED(self%psis))DEALLOCATE(self%psis)
 IF(ASSOCIATED(self%phihat))DEALLOCATE(self%phihat)
 IF(ASSOCIATED(self%jac))DEALLOCATE(self%jac)
@@ -2171,13 +2171,13 @@ IF(ASSOCIATED(self%bin))DEALLOCATE(self%bin)
 self%ns=0
 self%Q=1.d0
 self%stamp=self%stamp+1
-end subroutine tmap_delete
+END SUBROUTINE tmap_delete
 !------------------------------------------------------------------------------
 !> Copy map (profiles of the new equilibrium attach to it in @ref torflux_setup)
 !------------------------------------------------------------------------------
-subroutine tmap_copy(self,new)
-class(torflux_map), intent(inout) :: self
-class(flux_func), pointer, intent(inout) :: new
+SUBROUTINE tmap_copy(self,new)
+CLASS(torflux_map), INTENT(inout) :: self
+CLASS(flux_func), POINTER, INTENT(inout) :: new
 ALLOCATE(torflux_map::new)
 SELECT TYPE(new)
   TYPE IS(torflux_map)
@@ -2194,83 +2194,83 @@ SELECT TYPE(new)
     END IF
     IF(ASSOCIATED(self%nodes))ALLOCATE(new%nodes,SOURCE=self%nodes)
 END SELECT
-end subroutine tmap_copy
+END SUBROUTINE tmap_copy
 !------------------------------------------------------------------------------
 !> Evaluate \f$ 1-\hat{\Phi} \f$ at \f$ \psi \f$
 !------------------------------------------------------------------------------
-function tmap_f(self,psi) result(b)
-class(torflux_map), intent(inout) :: self
-real(8), intent(in) :: psi
-real(8) :: b,x1,dpsi,jac
+FUNCTION tmap_f(self,psi) RESULT(b)
+CLASS(torflux_map), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: psi
+REAL(r8) :: b,x1,dpsi,jac
 CALL phi_wrap_norm(self,x1,dpsi)
 CALL self%eval((psi-x1)/dpsi,b,jac)
-end function tmap_f
+END FUNCTION tmap_f
 !------------------------------------------------------------------------------
 !> Evaluate \f$ d(1-\hat{\Phi})/d\psi \f$ at \f$ \psi \f$
 !------------------------------------------------------------------------------
-function tmap_fp(self,psi) result(b)
-class(torflux_map), intent(inout) :: self
-real(8), intent(in) :: psi
-real(8) :: b,x1,dpsi,phihat
+FUNCTION tmap_fp(self,psi) RESULT(b)
+CLASS(torflux_map), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: psi
+REAL(r8) :: b,x1,dpsi,phihat
 CALL phi_wrap_norm(self,x1,dpsi)
 CALL self%eval((psi-x1)/dpsi,phihat,b)
 b=b/dpsi
-end function tmap_fp
+END FUNCTION tmap_fp
 !------------------------------------------------------------------------------
 !> The map has no free coefficients
 !------------------------------------------------------------------------------
-function tmap_cofs_update(self,c) result(ierr)
-class(torflux_map), intent(inout) :: self
-real(8), intent(in) :: c(:)
-integer(4) :: ierr
+FUNCTION tmap_cofs_update(self,c) RESULT(ierr)
+CLASS(torflux_map), INTENT(inout) :: self
+REAL(r8), INTENT(in) :: c(:)
+INTEGER(i4) :: ierr
 ierr=0
-end function tmap_cofs_update
+END FUNCTION tmap_cofs_update
 !------------------------------------------------------------------------------
 !> The map has no free coefficients
 !------------------------------------------------------------------------------
-subroutine tmap_cofs_get(self,c)
-class(torflux_map), intent(inout) :: self
-real(8), intent(out) :: c(:)
-end subroutine tmap_cofs_get
+SUBROUTINE tmap_cofs_get(self,c)
+CLASS(torflux_map), INTENT(inout) :: self
+REAL(r8), INTENT(out) :: c(:)
+END SUBROUTINE tmap_cofs_get
 !------------------------------------------------------------------------------
 !> The map is rebuilt from the equilibrium, not saved
 !------------------------------------------------------------------------------
-subroutine tmap_save_hdf5(self,filename,path)
-class(torflux_map), intent(inout) :: self
-character(LEN=*), intent(in) :: filename
-character(LEN=*), intent(in) :: path
-end subroutine tmap_save_hdf5
+SUBROUTINE tmap_save_hdf5(self,filename,path)
+CLASS(torflux_map), INTENT(inout) :: self
+CHARACTER(LEN=*), INTENT(in) :: filename
+CHARACTER(LEN=*), INTENT(in) :: path
+END SUBROUTINE tmap_save_hdf5
 !------------------------------------------------------------------------------
 !> The map is rebuilt from the equilibrium, not saved
 !------------------------------------------------------------------------------
-subroutine tmap_save_txt(self,io_unit)
-class(torflux_map), intent(inout) :: self
-integer, intent(in) :: io_unit
-end subroutine tmap_save_txt
+SUBROUTINE tmap_save_txt(self,io_unit)
+CLASS(torflux_map), INTENT(inout) :: self
+INTEGER, INTENT(in) :: io_unit
+END SUBROUTINE tmap_save_txt
 !------------------------------------------------------------------------------
 !> The map is rebuilt from the equilibrium, not loaded
 !------------------------------------------------------------------------------
-subroutine tmap_load_hdf5(self,filename,path,success)
-class(torflux_map), intent(inout) :: self
-character(LEN=*), intent(in) :: filename
-character(LEN=*), intent(in) :: path
-logical, intent(out) :: success
+SUBROUTINE tmap_load_hdf5(self,filename,path,success)
+CLASS(torflux_map), INTENT(inout) :: self
+CHARACTER(LEN=*), INTENT(in) :: filename
+CHARACTER(LEN=*), INTENT(in) :: path
+LOGICAL, INTENT(out) :: success
 success=.FALSE.
-end subroutine tmap_load_hdf5
+END SUBROUTINE tmap_load_hdf5
 !------------------------------------------------------------------------------
 !> The map is rebuilt from the equilibrium, not loaded
 !------------------------------------------------------------------------------
-subroutine tmap_load_txt(self,io_unit)
-class(torflux_map), intent(inout) :: self
-integer, intent(in) :: io_unit
-end subroutine tmap_load_txt
+SUBROUTINE tmap_load_txt(self,io_unit)
+CLASS(torflux_map), INTENT(inout) :: self
+INTEGER, INTENT(in) :: io_unit
+END SUBROUTINE tmap_load_txt
 !------------------------------------------------------------------------------
 !> Find interval `lo` such that `x(lo) <= val < x(lo+1)` (bisection, `x` ascending)
 !------------------------------------------------------------------------------
-pure function tmap_find(x,n,val) result(lo)
-integer(4), intent(in) :: n
-real(8), intent(in) :: x(n),val
-integer(4) :: lo,hi,k
+PURE FUNCTION tmap_find(x,n,val) RESULT(lo)
+INTEGER(i4), INTENT(in) :: n
+REAL(r8), INTENT(in) :: x(n),val
+INTEGER(i4) :: lo,hi,k
 lo=1; hi=n
 DO WHILE(hi-lo>1)
   k=(lo+hi)/2
@@ -2280,13 +2280,13 @@ DO WHILE(hi-lo>1)
     lo=k
   END IF
 END DO
-end function tmap_find
+END FUNCTION tmap_find
 !------------------------------------------------------------------------------
 !> Rebuild uniform-bin lookup index for `map%psis` (call after changing surfaces)
 !------------------------------------------------------------------------------
-subroutine tmap_index(map)
-class(torflux_map), intent(inout) :: map
-integer(4) :: j,nbin
+SUBROUTINE tmap_index(map)
+CLASS(torflux_map), INTENT(inout) :: map
+INTEGER(i4) :: j,nbin
 IF(ASSOCIATED(map%bin))DEALLOCATE(map%bin)
 IF(map%ns<2)RETURN
 nbin=4*map%ns
@@ -2294,14 +2294,14 @@ ALLOCATE(map%bin(nbin))
 DO j=1,nbin
   map%bin(j)=tmap_find(map%psis,map%ns,REAL(j-1,8)/REAL(nbin,8))
 END DO
-end subroutine tmap_index
+END SUBROUTINE tmap_index
 !------------------------------------------------------------------------------
 !> Same result as `tmap_find` on `map%psis`, starting from the bin index
 !------------------------------------------------------------------------------
-function tmap_lookup(map,psihat) result(lo)
-class(torflux_map), intent(in) :: map
-real(8), intent(in) :: psihat
-integer(4) :: lo,nbin
+FUNCTION tmap_lookup(map,psihat) RESULT(lo)
+CLASS(torflux_map), INTENT(in) :: map
+REAL(r8), INTENT(in) :: psihat
+INTEGER(i4) :: lo,nbin
 IF(.NOT.ASSOCIATED(map%bin))THEN
   lo=tmap_find(map%psis,map%ns,psihat)
   RETURN
@@ -2312,7 +2312,7 @@ DO WHILE(lo<map%ns-1)
   IF(psihat<map%psis(lo+1))EXIT
   lo=lo+1
 END DO
-end function tmap_lookup
+END FUNCTION tmap_lookup
 !------------------------------------------------------------------------------
 !> Update the \f$ \hat{\psi} \rightarrow \hat{\Phi} \f$ map from the equilibrium q profile
 !!
@@ -2320,20 +2320,20 @@ end function tmap_lookup
 !! With `settle` (@ref torflux_setup) passes repeat until surfaces move less than `place_tol`, else one pass.
 !! Sets `gseq%torflux_ierr`: 0 ok, 1 update failed (previous map kept), 2 no closed surfaces.
 !------------------------------------------------------------------------------
-subroutine tmap_update(self,gseq)
-class(torflux_map), intent(inout) :: self
-class(gs_equil), intent(inout) :: gseq
-real(8), parameter :: pad = 1.d-3 !< Minimum offset of node surfaces from LCFS and axis
-real(8), parameter :: edge_s(2) = [1.d-4,1.d-3] !< Fixed surfaces near the LCFS (edge singularity fit)
-real(8), parameter :: axis_s(2) = [1.d-3,3.d-3] !< Fixed surfaces near the axis (axis extrapolation)
-real(8), parameter :: dphi_max = 1.d-2 !< Maximum spacing between surfaces in \f$ \hat{\Phi} \f$
-real(8), parameter :: fp_tol = 1.d-10 !< Fixed-point tolerance on \f$ \hat{\Phi} \f$
-integer(4), parameter :: fp_maxits = 20
-real(8), parameter :: place_tol = 1.d-8 !< Surface placement tolerance in \f$ \hat{\psi} \f$
-integer(4), parameter :: place_maxits = 5
-integer(4) :: i,k,n,nfill,it,ip,npass
-real(8) :: dpsi,b,h,err,shift
-real(8), allocatable :: phinodes(:),phitarg(:),psis(:),pnew(:),g(:),q(:),r(:),dq(:),cum(:)
+SUBROUTINE tmap_update(self,gseq)
+CLASS(torflux_map), INTENT(inout) :: self
+CLASS(gs_equil), INTENT(inout) :: gseq
+REAL(r8), PARAMETER :: pad = 1.d-3 !< Minimum offset of node surfaces from LCFS and axis
+REAL(r8), PARAMETER :: edge_s(2) = [1.d-4,1.d-3] !< Fixed surfaces near the LCFS (edge singularity fit)
+REAL(r8), PARAMETER :: axis_s(2) = [1.d-3,3.d-3] !< Fixed surfaces near the axis (axis extrapolation)
+REAL(r8), PARAMETER :: dphi_max = 1.d-2 !< Maximum spacing between surfaces in \f$ \hat{\Phi} \f$
+REAL(r8), PARAMETER :: fp_tol = 1.d-10 !< Fixed-point tolerance on \f$ \hat{\Phi} \f$
+INTEGER(i4), PARAMETER :: fp_maxits = 20
+REAL(r8), PARAMETER :: place_tol = 1.d-8 !< Surface placement tolerance in \f$ \hat{\psi} \f$
+INTEGER(i4), PARAMETER :: place_maxits = 5
+INTEGER(i4) :: i,k,n,nfill,it,ip,npass
+REAL(r8) :: dpsi,b,h,err,shift
+REAL(r8), ALLOCATABLE :: phinodes(:),phitarg(:),psis(:),pnew(:),g(:),q(:),r(:),dq(:),cum(:)
 gseq%torflux_ierr=0
 self%plasma_bounds=gseq%plasma_bounds
 CALL torflux_setup(gseq,self%active)
@@ -2484,7 +2484,7 @@ DEALLOCATE(phinodes,phitarg,psis,g,q,r,dq,cum)
 CALL build_all_fint
 CONTAINS
 !---Rebuild the relabel tables of all profiles against the current map
-subroutine build_all_fint
+SUBROUTINE build_all_fint
 CALL build_fint(gseq%I)
 CALL build_fint(gseq%P)
 CALL build_fint(gseq%eta)
@@ -2496,25 +2496,25 @@ CALL build_fint(gseq%ni)
 CALL build_fint(gseq%Zeff)
 CALL build_fint(gseq%jphi_fixed)
 CALL build_fint(gseq%jphi_saw)
-end subroutine build_all_fint
+END SUBROUTINE build_all_fint
 !---Rebuild the relabel table of a wrapped profile
-subroutine build_fint(F)
+SUBROUTINE build_fint(F)
 CLASS(flux_func), POINTER, INTENT(in) :: F
 IF(.NOT.ASSOCIATED(F))RETURN
 SELECT TYPE(F)
   TYPE IS(phi_flux_wrapper)
     IF(F%relabel.AND.ASSOCIATED(F%map))CALL phi_wrap_build_fint(F)
 END SELECT
-end subroutine build_fint
+END SUBROUTINE build_fint
 !---Warn and flag a failed update (previous map is kept)
-subroutine map_failed(reason)
+SUBROUTINE map_failed(reason)
 CHARACTER(LEN=*), INTENT(in) :: reason
 CALL oft_warn('Toroidal flux map update failed ('//reason//'), keeping previous map')
 gseq%torflux_ierr=1
 CALL build_all_fint
-end subroutine map_failed
+END SUBROUTINE map_failed
 !---Collect the nodes of a wrapped profile (piecewise-linear profiles only)
-subroutine add_nodes(F)
+SUBROUTINE add_nodes(F)
 CLASS(flux_func), POINTER, INTENT(in) :: F
 IF(.NOT.ASSOCIATED(F))RETURN
 SELECT TYPE(F)
@@ -2524,17 +2524,17 @@ SELECT TYPE(F)
         phinodes=[phinodes,rep%x]
     END SELECT
 END SELECT
-end subroutine add_nodes
+END SUBROUTINE add_nodes
 !---Antiderivative of ln(s)
-pure function xlogx(s) result(v)
-real(8), intent(in) :: s
-real(8) :: v
+PURE FUNCTION xlogx(s) RESULT(v)
+REAL(r8), INTENT(in) :: s
+REAL(r8) :: v
 v=s*LOG(s)-s
-end function xlogx
+END FUNCTION xlogx
 !---Replace failed traces (g=0) by linear interpolation, .FALSE. if too few remain
-function fill_failed() result(ok)
-logical :: ok
-integer(4) :: j,jl,jr
+FUNCTION fill_failed() RESULT(ok)
+LOGICAL :: ok
+INTEGER(i4) :: j,jl,jr
 ok=(COUNT(g(2:n-1)>0.d0)>=3)
 IF(.NOT.ok)RETURN
 DO j=2,n-1
@@ -2557,8 +2557,8 @@ DO j=2,n-1
     g(j)=g(jl)+(g(jr)-g(jl))*(psis(j)-psis(jl))/(psis(jr)-psis(jl))
   END IF
 END DO
-end function fill_failed
-end subroutine tmap_update
+END FUNCTION fill_failed
+END SUBROUTINE tmap_update
 !------------------------------------------------------------------------------
 !> Geometric factor \f$ g = q/F = \frac{1}{2\pi} \oint \frac{dl}{R |\nabla \psi|} \f$ on flux surfaces
 !!
@@ -2566,13 +2566,13 @@ end subroutine tmap_update
 !! `g` in the units of @ref oft_gs::gs_get_qprof with F=1 (sign ignored by caller); `g(i)=0`
 !! flags a failed surface (caller interpolates).
 !------------------------------------------------------------------------------
-subroutine torflux_qgeom(gseq,nr,psi_q,g,backend)
-class(gs_equil), intent(inout) :: gseq !< G-S object
-integer(4), intent(in) :: nr !< Number of surfaces
-real(8), intent(in) :: psi_q(nr) !< Surface locations
-real(8), intent(out) :: g(nr) !< Geometric factor at each surface
-integer(4), optional, intent(in) :: backend !< 0 cut-cell, 1 tracer (default: `torflux_qgeom_backend`)
-integer(4) :: bk
+SUBROUTINE torflux_qgeom(gseq,nr,psi_q,g,backend)
+CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+INTEGER(i4), INTENT(in) :: nr !< Number of surfaces
+REAL(r8), INTENT(in) :: psi_q(nr) !< Surface locations
+REAL(r8), INTENT(out) :: g(nr) !< Geometric factor at each surface
+INTEGER(i4), OPTIONAL, INTENT(in) :: backend !< 0 cut-cell, 1 tracer (default: `torflux_qgeom_backend`)
+INTEGER(i4) :: bk
 bk=torflux_qgeom_backend
 IF(PRESENT(backend))bk=backend
 IF(bk==1)THEN
@@ -2580,15 +2580,15 @@ IF(bk==1)THEN
 ELSE
   CALL gs_qgeom_cutcell(gseq,nr,psi_q,g)
 END IF
-end subroutine torflux_qgeom
+END SUBROUTINE torflux_qgeom
 !------------------------------------------------------------------------------
 !> Sort array ascending and remove near-duplicates
 !------------------------------------------------------------------------------
-subroutine sort_unique(x)
-real(8), allocatable, intent(inout) :: x(:)
-real(8), parameter :: tol=1.d-8
-integer(4) :: i,j,m
-real(8) :: tmp
+SUBROUTINE sort_unique(x)
+REAL(r8), ALLOCATABLE, INTENT(inout) :: x(:)
+REAL(r8), PARAMETER :: tol=1.d-8
+INTEGER(i4) :: i,j,m
+REAL(r8) :: tmp
 DO i=2,SIZE(x)
   tmp=x(i)
   j=i-1
@@ -2607,27 +2607,27 @@ DO i=2,SIZE(x)
   END IF
 END DO
 x=x(1:m)
-end subroutine sort_unique
+END SUBROUTINE sort_unique
 !------------------------------------------------------------------------------
 !> Quadratic (3-point Lagrange) interpolation/extrapolation
 !------------------------------------------------------------------------------
-pure function quad_interp(x,y,xi) result(yi)
-real(8), intent(in) :: x(3),y(3),xi
-real(8) :: yi
+PURE FUNCTION quad_interp(x,y,xi) RESULT(yi)
+REAL(r8), INTENT(in) :: x(3),y(3),xi
+REAL(r8) :: yi
 yi=y(1)*(xi-x(2))*(xi-x(3))/((x(1)-x(2))*(x(1)-x(3))) &
   + y(2)*(xi-x(1))*(xi-x(3))/((x(2)-x(1))*(x(2)-x(3))) &
   + y(3)*(xi-x(1))*(xi-x(2))/((x(3)-x(1))*(x(3)-x(2)))
-end function quad_interp
+END FUNCTION quad_interp
 !------------------------------------------------------------------------------
 !> Derivative of 3-point Lagrange interpolant at point `k` of `x`
 !------------------------------------------------------------------------------
-pure function fd_deriv(x,y,k) result(dy)
-real(8), intent(in) :: x(3),y(3)
-integer(4), intent(in) :: k
-real(8) :: dy,xi
+PURE FUNCTION fd_deriv(x,y,k) RESULT(dy)
+REAL(r8), INTENT(in) :: x(3),y(3)
+INTEGER(i4), INTENT(in) :: k
+REAL(r8) :: dy,xi
 xi=x(k)
 dy=y(1)*(2.d0*xi-x(2)-x(3))/((x(1)-x(2))*(x(1)-x(3))) &
   + y(2)*(2.d0*xi-x(1)-x(3))/((x(2)-x(1))*(x(2)-x(3))) &
   + y(3)*(2.d0*xi-x(1)-x(2))/((x(3)-x(1))*(x(3)-x(2)))
-end function fd_deriv
+END FUNCTION fd_deriv
 end module oft_gs_profiles
