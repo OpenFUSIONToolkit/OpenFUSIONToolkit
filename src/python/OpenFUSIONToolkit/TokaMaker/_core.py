@@ -500,7 +500,7 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def setup(self,order=2,F0=0.0,full_domain=False,split_nlev=3):
+    def setup(self,order=2,F0=0.0,full_domain=False,split_nlev=2):
         r'''! Setup G-S solver
 
         @param order Order of FE representation to use

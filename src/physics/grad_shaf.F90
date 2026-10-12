@@ -177,7 +177,7 @@ TYPE :: gs_factory
   INTEGER(i4) :: bc_nrhs = 0 !< Number of terms in free-boundary BC
   INTEGER(i4) :: nlim_con = 0 !< Number of node points in limiter contour list
   INTEGER(i4) :: lim_nloops = 0 !< Number of limiter loops
-  INTEGER(i4) :: split_nlev = 3 !< Plasma integrals split cells the plasma boundary may cross into 4**split_nlev sub-cells (0: whole cells)
+  INTEGER(i4) :: split_nlev = 2 !< Plasma integrals split cells the plasma boundary may cross into 4**split_nlev sub-cells (0: whole cells)
   REAL(r8) :: split_pad = 0.d0 !< Bound on the FE interpolant beyond its nodal range, per unit range (@ref gs_split_setup)
   REAL(r8) :: rmin = 0.d0 !< Minimum radial coordinate in model
   REAL(r8) :: rmax = 0.d0 !< Maximum radial coordinate in model
