@@ -73,7 +73,7 @@ SUBROUTINE gs_profile_load_coord(F,filename,path)
 CLASS(flux_func), POINTER, INTENT(inout) :: F !< Flux function object
 CHARACTER(LEN=*), INTENT(in) :: filename !< HDF5 file
 CHARACTER(LEN=*), INTENT(in) :: path !< Profile group path
-INTEGER(4) :: coord
+INTEGER(i4) :: coord
 coord=0
 IF(hdf5_field_exist(filename,path//'/COORD'))CALL hdf5_read(coord,filename,path//'/COORD')
 CALL torflux_wrap(F,coord)
@@ -92,7 +92,7 @@ INTEGER(4) :: io_unit
 ! LOGICAL :: zero_grad
 CHARACTER(LEN=32) :: profType,coordType
 CHARACTER(LEN=128) :: line
-INTEGER(4) :: ios
+INTEGER(i4) :: ios
 !---First line: "<type> [coord]"
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,'(A)')line
