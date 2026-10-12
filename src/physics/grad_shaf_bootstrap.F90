@@ -13,17 +13,17 @@
 !! @date June 2026
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
-module grad_shaf_bootstrap
-use oft_base
-use oft_gs, only: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
+MODULE grad_shaf_bootstrap
+USE oft_base
+USE oft_gs, ONLY: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
  gs_itor_nl, qprof_trace_tol, gs_fpol
-use oft_gs_profiles, only: torflux_qgeom_backend, torflux_set_bounds
-use oft_gs_cutcell, only: gs_sauter_cutcell, gs_fsa_cutcell
-use oft_lag_basis, only: oft_blag_geval
-use oft_mesh_type, only: bmesh_findcell
-use oft_blag_operators, only: oft_lag_brinterp
-use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
-use grad_shaf_prof_phys, only: eval_dIdA, gs_ravgs, gs_flux_int, &
+USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_set_bounds
+USE oft_gs_cutcell, ONLY: gs_sauter_cutcell, gs_fsa_cutcell
+USE oft_lag_basis, ONLY: oft_blag_geval
+USE oft_mesh_type, ONLY: bmesh_findcell
+USE oft_blag_operators, ONLY: oft_lag_brinterp
+USE tracing_2d, ONLY: set_tracer, active_tracer, tracinginv_fs
+USE grad_shaf_prof_phys, ONLY: eval_dIdA, gs_ravgs, gs_flux_int, &
   gs_flux_cumint, jphi_update, jphi_copy, jphi_flux_func, jphi_psi_nodes
 USE oft_io, ONLY: hdf5_create_group, hdf5_write, hdf5_read, &
   hdf5_field_get_sizes, hdf5_field_exist
@@ -79,21 +79,21 @@ INTEGER(i4), PARAMETER :: saw_nsmooth = 8 !< Half-width (kept nodes) of the quad
 !------------------------------------------------------------------------------
 !> Jphi flux function type for bootstrap current calculation
 !------------------------------------------------------------------------------
-type, extends(jphi_flux_func) :: jphi_bs_flux_func
-  real(8) :: alpha_last = 1.d0 !< Alpha (input Jphi rescaling factor) from previous NL iteration
-  logical :: freeze_jbs = .FALSE. !< jphi_bs converged or stagnated: skip the Sauter pass
-  integer(4) :: djbs_no_improve = 0   !< Consecutive steps with non-decreasing djbs
-  real(8) :: djbs_min = huge(1.0d0)  !< Running minimum djbs seen so far
-  integer(4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
-  real(8) :: dalpha_last = huge(1.0d0) !< dalpha of the previous update (stall diagnostic)
-  real(8), allocatable :: jphi_bs_last(:) !< Scaled, untapered jphi_bs of the last evaluation (mu0*A/m²)
-  real(8), allocatable :: jphi_pd_last(:) !< Its pressure-driven part (mu0*A/m²)
-  logical :: freeze_saw = .FALSE. !< Set .TRUE. once jphi_saw converges or stagnates, after jphi_bs is frozen
-  integer(4) :: djsaw_no_improve = 0 !< Consecutive steps with non-decreasing djsaw
-  real(8) :: djsaw_min = huge(1.0d0) !< Running minimum djsaw
-  real(8), allocatable :: jphi_saw_last(:) !< jphi_saw of the last update (mu0*A/m²)
-  real(8), allocatable :: jphi_total_last(:) !< jphi_total of the last update (mu0*A/m²)
-  logical :: ffp_restored = .FALSE. !< F*F' knots were read from a file, so loading keeps them instead of updating
+TYPE, EXTENDS(jphi_flux_func) :: jphi_bs_flux_func
+  REAL(r8) :: alpha_last = 1.d0 !< Alpha (input Jphi rescaling factor) from previous NL iteration
+  LOGICAL :: freeze_jbs = .FALSE. !< jphi_bs converged or stagnated: skip the Sauter pass
+  INTEGER(i4) :: djbs_no_improve = 0   !< Consecutive steps with non-decreasing djbs
+  REAL(r8) :: djbs_min = HUGE(1.0d0)  !< Running minimum djbs seen so far
+  INTEGER(i4) :: dalpha_no_improve = 0 !< Consecutive steps with non-decreasing dalpha
+  REAL(r8) :: dalpha_last = HUGE(1.0d0) !< dalpha of the previous update (stall diagnostic)
+  REAL(r8), ALLOCATABLE :: jphi_bs_last(:) !< Scaled, untapered jphi_bs of the last evaluation (mu0*A/m²)
+  REAL(r8), ALLOCATABLE :: jphi_pd_last(:) !< Its pressure-driven part (mu0*A/m²)
+  LOGICAL :: freeze_saw = .FALSE. !< Set .TRUE. once jphi_saw converges or stagnates, after jphi_bs is frozen
+  INTEGER(i4) :: djsaw_no_improve = 0 !< Consecutive steps with non-decreasing djsaw
+  REAL(r8) :: djsaw_min = HUGE(1.0d0) !< Running minimum djsaw
+  REAL(r8), ALLOCATABLE :: jphi_saw_last(:) !< jphi_saw of the last update (mu0*A/m²)
+  REAL(r8), ALLOCATABLE :: jphi_total_last(:) !< jphi_total of the last update (mu0*A/m²)
+  LOGICAL :: ffp_restored = .FALSE. !< F*F' knots were read from a file, so loading keeps them instead of updating
   TYPE(boot_ops) :: boot_ops       !< Options set from Python (@ref tokamaker_set_boot_ops)
   TYPE(boot_profs) :: boot_profs   !< Current profiles of the last update
 CONTAINS
@@ -116,16 +116,16 @@ END TYPE jphi_bs_flux_func
 !> Interpolation object for computing Sauter trapped-particle factors
 !! (accumulates flux-surface averages of B, R, and bounce integrals)
 !------------------------------------------------------------------------------
-type, extends(gsinv_interp) :: sauter_interp
-  real(8) :: bmax = 0.d0        !< Maximum |B| on surface (sampled during the trace)
-  real(8) :: rmax_surf = -1.d30 !< Maximum R on surface (sampled during the trace)
-  real(8) :: rmin_surf =  1.d30 !< Minimum R on surface (sampled during the trace)
-  real(8) :: mag_axis(2) = 0.d0 !< Magnetic axis (R, Z)
-contains
+TYPE, EXTENDS(gsinv_interp) :: sauter_interp
+  REAL(r8) :: bmax = 0.d0        !< Maximum |B| on surface (sampled during the trace)
+  REAL(r8) :: rmax_surf = -1.d30 !< Maximum R on surface (sampled during the trace)
+  REAL(r8) :: rmin_surf =  1.d30 !< Minimum R on surface (sampled during the trace)
+  REAL(r8) :: mag_axis(2) = 0.d0 !< Magnetic axis (R, Z)
+CONTAINS
   !> Evaluate ODE RHS for Sauter integration
-  procedure :: interp => sauter_apply
-end type sauter_interp
-contains
+  PROCEDURE :: interp => sauter_apply
+END TYPE sauter_interp
+CONTAINS
 !------------------------------------------------------------------------------
 !> Save to HDF5: the profile definition, the F*F' knots (so a load restores the profile exactly),
 !! the options and the last profiles
@@ -370,16 +370,16 @@ self%djsaw_min = HUGE(1.0d0)
 IF(ALLOCATED(self%jphi_saw_last))DEALLOCATE(self%jphi_saw_last)
 IF(ALLOCATED(self%jphi_total_last))DEALLOCATE(self%jphi_total_last)
 CALL saw_scalars_reset(self%boot_profs)
-end subroutine reset_solve_state
+END SUBROUTINE reset_solve_state
 !------------------------------------------------------------------------------
 !> Zero the sawtooth scalars of @ref boot_profs (no reset)
 !------------------------------------------------------------------------------
-subroutine saw_scalars_reset(bp)
+SUBROUTINE saw_scalars_reset(bp)
 TYPE(boot_profs), INTENT(inout) :: bp
 bp%saw_rho_m = 0.0_r8
 bp%saw_rho_out = 0.0_r8
 bp%saw_n_dips = 0
-end subroutine saw_scalars_reset
+END SUBROUTINE saw_scalars_reset
 !------------------------------------------------------------------------------
 !> Set (`set`) or point at (`get`) the @ref boot_profs array called `name` (see @ref boot_prof_names);
 !! `get` is NULL if that array is unallocated or the name is unknown
@@ -432,7 +432,7 @@ IF(group_made)THEN
   CALL hdf5_write(bp%saw_rho_out,filename,path//'/SAW_RHO_OUT')
   CALL hdf5_write(bp%saw_n_dips,filename,path//'/SAW_N_DIPS')
 END IF
-end subroutine boot_profs_save
+END SUBROUTINE boot_profs_save
 !------------------------------------------------------------------------------
 !> Read the @ref boot_profs arrays present in group `path`; the others are left unallocated
 !------------------------------------------------------------------------------
@@ -459,7 +459,7 @@ IF(hdf5_field_exist(filename,path//'/SAW_N_DIPS'))THEN
   CALL hdf5_read(bp%saw_rho_out,filename,path//'/SAW_RHO_OUT',success=success)
   CALL hdf5_read(bp%saw_n_dips,filename,path//'/SAW_N_DIPS',success=success)
 END IF
-end subroutine boot_profs_load
+END SUBROUTINE boot_profs_load
 !------------------------------------------------------------------------------
 !> HDF5 dataset name of a @ref boot_profs array (its name in upper case)
 !------------------------------------------------------------------------------
@@ -1268,18 +1268,18 @@ END SUBROUTINE saw_reset_1d
 !> Evaluate terms in augmented tracing ODE for computing Sauter factors
 !! (see @ref sauter_fc)
 !------------------------------------------------------------------------------
-subroutine sauter_apply(self,cell,f,gop,val)
-class(sauter_interp), intent(inout) :: self !< Interpolation object
-integer(4), intent(in) :: cell !< Cell for interpolation
-real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
-real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
-real(8), intent(out) :: val(:) !< Reconstructed field at f [8]
-integer(4) :: j(self%lag_rep%nce)
-integer(4) :: jc
-real(8) :: rop(3),pt(3),grad(3)
-real(8) :: s,c,Bp2,Bt2,mod_B
+SUBROUTINE sauter_apply(self,cell,f,gop,val)
+CLASS(sauter_interp), INTENT(inout) :: self !< Interpolation object
+INTEGER(i4), INTENT(in) :: cell !< Cell for interpolation
+REAL(r8), INTENT(in) :: f(:) !< Position in cell in logical coord [3]
+REAL(r8), INTENT(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
+REAL(r8), INTENT(out) :: val(:) !< Reconstructed field at f [8]
+INTEGER(i4) :: j(self%lag_rep%nce)
+INTEGER(i4) :: jc
+REAL(r8) :: rop(3),pt(3),grad(3)
+REAL(r8) :: s,c,Bp2,Bt2,mod_B
 !---Get dofs
-call self%lag_rep%ncdofs(cell,j)
+CALL self%lag_rep%ncdofs(cell,j)
 !---Reconstruct gradient
 grad=0.d0
 DO jc=1,self%lag_rep%nce
@@ -1308,7 +1308,7 @@ val(8)=val(2)/pt(1)**2      ! q integrand: q = F_surf/(2π) * ∮ val(8)
 self%bmax = MAX(self%bmax,mod_B)
 self%rmax_surf = MAX(self%rmax_surf, pt(1))
 self%rmin_surf = MIN(self%rmin_surf, pt(1))
-end subroutine sauter_apply
+END SUBROUTINE sauter_apply
 !------------------------------------------------------------------------------
 !> Compute factors required for Sauter bootstrap formula
 !!
@@ -1323,28 +1323,28 @@ end subroutine sauter_apply
 !! trapezoidal quadrature over the tracer steps. Surfaces are traced in parallel
 !! from start points found serially, so results do not depend on the thread count.
 !------------------------------------------------------------------------------
-subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs,qprof,eps,invr2,rgeo)
-class(gs_equil), intent(inout) :: gseq !< G-S object
-integer(4), intent(in) :: nr !< Number of flux sample points
-real(8), intent(in) :: psi_q(nr) !< Location of flux sample points in normalised psi
-real(8), intent(out) :: fc(nr) !< Circulating particle fraction \f$ f_c \f$
-real(8), intent(out) :: r_avgs(nr,3) !< Flux surface averaged radial coords \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
-real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field \f$<|B|>\f$, \f$<|B|^2>\f$
-real(8), optional, intent(out) :: qprof(nr) !< Safety factor q on each surface (avoids a separate gs_get_qprof call)
-real(8), optional, intent(out) :: eps(nr) !< Inverse aspect ratio (R_max-R_min)/(R_max+R_min) on each surface
-real(8), optional, intent(out) :: invr2(nr) !< \f$<1/R^2>\f$ on each surface
-real(8), optional, intent(out) :: rgeo(nr) !< Geometric major radius (R_max+R_min)/2 on each surface
-real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,h,h2,hf,ftu,ftl
-real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
-real(8), allocatable :: pts(:,:),fpol(:),qtmp(:),epstmp(:),i2tmp(:),rgtmp(:)
-real(8), pointer :: ptout(:,:),vout(:,:)
-real(8), allocatable :: acc(:,:),ext(:,:),bref(:)
-logical, allocatable :: done(:)
-type(oft_lag_brinterp) :: psi_int
-real(8), parameter :: tol=1.d-10
-integer(4) :: j,cell
-type(sauter_interp), pointer :: field
-type(gs_factory), pointer :: device
+SUBROUTINE sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs,qprof,eps,invr2,rgeo)
+CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+INTEGER(i4), INTENT(in) :: nr !< Number of flux sample points
+REAL(r8), INTENT(in) :: psi_q(nr) !< Location of flux sample points in normalised psi
+REAL(r8), INTENT(out) :: fc(nr) !< Circulating particle fraction \f$ f_c \f$
+REAL(r8), INTENT(out) :: r_avgs(nr,3) !< Flux surface averaged radial coords \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
+REAL(r8), INTENT(out) :: modb_avgs(nr,2) !< Flux surface averaged field \f$<|B|>\f$, \f$<|B|^2>\f$
+REAL(r8), OPTIONAL, INTENT(out) :: qprof(nr) !< Safety factor q on each surface (avoids a separate gs_get_qprof call)
+REAL(r8), OPTIONAL, INTENT(out) :: eps(nr) !< Inverse aspect ratio (R_max-R_min)/(R_max+R_min) on each surface
+REAL(r8), OPTIONAL, INTENT(out) :: invr2(nr) !< \f$<1/R^2>\f$ on each surface
+REAL(r8), OPTIONAL, INTENT(out) :: rgeo(nr) !< Geometric major radius (R_max+R_min)/2 on each surface
+REAL(r8) :: psi_surf,rmax,x1,x2,raxis,zaxis,h,h2,hf,ftu,ftl
+REAL(r8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
+REAL(r8), ALLOCATABLE :: pts(:,:),fpol(:),qtmp(:),epstmp(:),i2tmp(:),rgtmp(:)
+REAL(r8), POINTER :: ptout(:,:),vout(:,:)
+REAL(r8), ALLOCATABLE :: acc(:,:),ext(:,:),bref(:)
+LOGICAL, ALLOCATABLE :: done(:)
+TYPE(oft_lag_brinterp) :: psi_int
+REAL(r8), PARAMETER :: tol=1.d-10
+INTEGER(i4) :: j,cell
+TYPE(sauter_interp), POINTER :: field
+TYPE(gs_factory), POINTER :: device
 device=>gseq%device
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -1438,7 +1438,7 @@ END DO
 CALL psi_int%delete()
 !---Trace the remaining surfaces
 IF(.NOT.ALL(done))THEN
-call set_tracer(1)
+CALL set_tracer(1)
 !$omp parallel private(j,field,ptout,vout,h,h2,hf,ftu,ftl)
 ALLOCATE(field)
 field%u=>gseq%psi
@@ -1453,7 +1453,7 @@ active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
 ALLOCATE(ptout(3,active_tracer%maxsteps+1),vout(3,active_tracer%maxsteps))
 !$omp do schedule(dynamic,1)
-do j=1,nr
+DO j=1,nr
   IF(done(j))CYCLE
   IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN
     active_tracer%tol=1.d-10
@@ -1466,11 +1466,11 @@ do j=1,nr
   field%rmax_surf = -1.d30
   field%rmin_surf =  1.d30
   CALL tracinginv_fs(device%mesh,pts(:,j),ptout,vout)
-  if(active_tracer%status/=1)THEN
+  IF(active_tracer%status/=1)THEN
     WRITE(*,*)j,pts(:,j)
     CALL oft_warn("sauter_fc: Trace did not complete")
     CYCLE
-  end if
+  END IF
   r_avgs(j,1)=active_tracer%v(5)/active_tracer%v(2)
   r_avgs(j,2)=active_tracer%v(6)/active_tracer%v(2)
   r_avgs(j,3)=active_tracer%v(7)/active_tracer%v(2)
@@ -1486,7 +1486,7 @@ do j=1,nr
   epstmp(j) = (field%rmax_surf - field%rmin_surf) / (field%rmax_surf + field%rmin_surf)
   rgtmp(j) = 0.5d0*(field%rmax_surf + field%rmin_surf)
   i2tmp(j) = active_tracer%v(8)/active_tracer%v(2)
-end do
+END DO
 DEALLOCATE(ptout,vout)
 CALL active_tracer%delete
 CALL field%delete
@@ -1501,18 +1501,18 @@ IF(PRESENT(eps))eps=epstmp
 IF(PRESENT(invr2))invr2=i2tmp
 IF(PRESENT(rgeo))rgeo=rgtmp
 DEALLOCATE(pts,fpol,qtmp,epstmp,i2tmp,rgtmp,done)
-end subroutine sauter_fc
+END SUBROUTINE sauter_fc
 !------------------------------------------------------------------------------
 !> Trapped-particle integral \f$ \langle (1-\sqrt{1-b}(1+b/2))/b^2 \rangle \f$ by
 !! periodic trapezoidal quadrature over the steps of one surface trace
 !------------------------------------------------------------------------------
-function sauter_hf(ns,t,vout,bmax) result(hf)
-integer(4), intent(in) :: ns !< Number of steps (the last ends at \f$ 2\pi \f$)
-real(8), intent(in) :: t(:) !< Angle before each step and at its end [ns+1]
-real(8), intent(in) :: vout(:,:) !< ODE RHS at each step; (2) FSA weight, (3) weight times \f$ B^2 \f$ [3,ns]
-real(8), intent(in) :: bmax !< Maximum \f$ |B| \f$ on the surface
-real(8) :: hf,g(2),w(2),b,wsum
-integer(4) :: k,i,kk(2)
+FUNCTION sauter_hf(ns,t,vout,bmax) RESULT(hf)
+INTEGER(i4), INTENT(in) :: ns !< Number of steps (the last ends at \f$ 2\pi \f$)
+REAL(r8), INTENT(in) :: t(:) !< Angle before each step and at its end [ns+1]
+REAL(r8), INTENT(in) :: vout(:,:) !< ODE RHS at each step; (2) FSA weight, (3) weight times \f$ B^2 \f$ [3,ns]
+REAL(r8), INTENT(in) :: bmax !< Maximum \f$ |B| \f$ on the surface
+REAL(r8) :: hf,g(2),w(2),b,wsum
+INTEGER(i4) :: k,i,kk(2)
 hf=0.d0; wsum=0.d0
 DO k=1,ns
   kk=[MERGE(k-1,ns,k>1),k]
@@ -1525,7 +1525,7 @@ DO k=1,ns
   wsum=wsum+(t(k+1)-t(k))*SUM(w)
 END DO
 hf=hf/wsum
-end function sauter_hf
+END FUNCTION sauter_hf
 !------------------------------------------------------------------------------
 !> Apply a smooth edge taper to an array, zeroing it at the plasma edge.
 !!

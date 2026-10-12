@@ -22,7 +22,7 @@ USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
   gs_get_qprof, gs_ani_press, gs_epsilon
-use oft_gs_cutcell, only: gs_fsa_cutcell
+USE oft_gs_cutcell, ONLY: gs_fsa_cutcell
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
   spline_func_copy, spline_func_delete, phi_flux_wrapper, torflux_qgeom_backend
@@ -632,7 +632,7 @@ END SUBROUTINE gs_flux_int
 !! pass (same quadrature as @ref gs_flux_int). cum(1,:) is the full plasma integral.
 !---------------------------------------------------------------------------------
 SUBROUTINE gs_flux_cumint(self,psi_tmp,fields,nvals,nf,cum)
-class(gs_equil), INTENT(inout) :: self !< TokaMaker object
+CLASS(gs_equil), INTENT(inout) :: self !< TokaMaker object
 INTEGER(i4), INTENT(in) :: nvals !< Number of nodes
 INTEGER(i4), INTENT(in) :: nf !< Number of fields
 REAL(r8), INTENT(in) :: psi_tmp(nvals) !< Nodes in normalized psi (0 at LCFS, 1 at axis), ascending
@@ -649,21 +649,21 @@ bblk=0.d0
 prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
 !$omp parallel do private(i,m,psitmp,sgop,area,inds,facs) schedule(dynamic,1)
-do ib=1,nblk
-  do i=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,self%device%mesh%nc)
+DO ib=1,nblk
+  DO i=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,self%device%mesh%nc)
     IF(self%device%mesh%reg(i)/=1)CYCLE
-    do m=1,self%device%fe_rep%quad%np
-      call self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
-      call prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
+    DO m=1,self%device%fe_rep%quad%np
+      CALL self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
+      CALL prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
       IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma
       CALL linterp_facs(psi_tmp,nvals,psitmp(1),inds,facs,0)
       IF(inds(1)<=0)CYCLE
       area=area*self%device%fe_rep%quad%wts(m)
       ! Lower node inds(2) is the innermost surface enclosing this point
       bblk(inds(2),:,ib)=bblk(inds(2),:,ib)+(fields(inds(1),:)*facs(1)+fields(inds(2),:)*facs(2))*area
-    end do
-  end do
-end do
+    END DO
+  END DO
+END DO
 bins=0.d0
 DO ib=1,nblk
   bins=bins+bblk(:,:,ib)

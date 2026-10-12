@@ -2496,7 +2496,7 @@ CALL build_fint(gseq%ni)
 CALL build_fint(gseq%Zeff)
 CALL build_fint(gseq%jphi_fixed)
 CALL build_fint(gseq%jphi_saw)
-end subroutine build_all_fint
+END SUBROUTINE build_all_fint
 !---Rebuild the relabel table of a wrapped profile
 SUBROUTINE build_fint(F)
 CLASS(flux_func), POINTER, INTENT(in) :: F

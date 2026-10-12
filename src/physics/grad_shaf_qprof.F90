@@ -18,9 +18,9 @@ CONTAINS
 !> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the cut-cell quadrature
 !------------------------------------------------------------------------------
 MODULE PROCEDURE gs_qprof_cutcell
-real(8) :: qf(nr),avgs(nr,4),fpol(nr),psi_surf
-real(8), allocatable :: fsa(:,:),shp(:,:)
-integer(4) :: j
+REAL(r8) :: qf(nr),avgs(nr,4),fpol(nr),psi_surf
+REAL(r8), ALLOCATABLE :: fsa(:,:),shp(:,:)
+INTEGER(i4) :: j
 DO j=1,nr
   psi_surf=psi_q(j)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1)
   IF(gseq%mode==0)THEN

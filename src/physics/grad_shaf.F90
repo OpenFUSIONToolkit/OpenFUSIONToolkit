@@ -47,8 +47,8 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer, cylinv_interp
 IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
-REAL(8) :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
-INTEGER(4) :: qprof_backend = 0 !< Surface backend of @ref gs_get_qprof: 0 cut-cell where supported, 1 field-line tracer (deprecated)
+REAL(r8) :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
+INTEGER(i4) :: qprof_backend = 0 !< Surface backend of @ref gs_get_qprof: 0 cut-cell where supported, 1 field-line tracer (deprecated)
 !------------------------------------------------------------------------------
 !> Interpolation class for uniform source with simple tokamak representation
 !------------------------------------------------------------------------------
@@ -517,14 +517,14 @@ end interface
 INTERFACE
   !> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the cut-cell quadrature (see grad_shaf_qprof.F90)
   MODULE SUBROUTINE gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,done)
-    class(gs_equil), intent(inout) :: gseq !< G-S object
-    integer(4), intent(in) :: nr !< Number of flux surfaces
-    real(8), intent(in) :: psi_q(nr) !< Locations in normalized flux
-    real(8), intent(out) :: prof(nr) !< q at each location
-    real(8), optional, intent(out) :: ravgs(nr,4) !< <R>, <1/R>, <1/R^2>, dV/dPsi
-    real(8), optional, intent(out) :: fsa_avgs(nr,4) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
-    real(8), optional, intent(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
-    logical, intent(out) :: done(nr) !< Surfaces evaluated (the others are left for the tracer)
+    CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+    INTEGER(i4), INTENT(in) :: nr !< Number of flux surfaces
+    REAL(r8), INTENT(in) :: psi_q(nr) !< Locations in normalized flux
+    REAL(r8), INTENT(out) :: prof(nr) !< q at each location
+    REAL(r8), OPTIONAL, INTENT(out) :: ravgs(nr,4) !< <R>, <1/R>, <1/R^2>, dV/dPsi
+    REAL(r8), OPTIONAL, INTENT(out) :: fsa_avgs(nr,4) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
+    REAL(r8), OPTIONAL, INTENT(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
+    LOGICAL, INTENT(out) :: done(nr) !< Surfaces evaluated (the others are left for the tracer)
   END SUBROUTINE gs_qprof_cutcell
 END INTERFACE
 !---Encapsulation for external function call parameters
@@ -4488,7 +4488,7 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
 integer(4), parameter :: nlcfs=1000
-logical :: lcfs_all,lcfs_any,geo,cc_done(nr)
+LOGICAL :: lcfs_all,lcfs_any,geo,cc_done(nr)
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
