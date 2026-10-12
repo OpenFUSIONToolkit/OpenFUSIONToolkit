@@ -2176,6 +2176,7 @@ end subroutine gs_fit_isoflux
 !> Compute Grad-Shafranov solution for current flux function definitions and targets
 !------------------------------------------------------------------------------
 subroutine gs_solve(self,equil,ierr)
+USE, INTRINSIC :: ieee_arithmetic, ONLY: ieee_is_finite
 class(gs_factory), intent(inout) :: self !< G-S factory/device object
 class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
 integer(4), optional, intent(out) :: ierr !< Error flag
@@ -2213,6 +2214,22 @@ END IF
 IF(equil%dflux_target>-1.d98.AND.ABS(equil%ffp_scale)<1.d-8)equil%ffp_scale=1.d0
 !---
 ALLOCATE(vals_tmp(equil%psi%n))
+!---Refuse to start from a non-finite flux state (every flux-surface trace would fail, every
+!---iteration, until "maxits"); nothing has been modified yet, so return directly
+CALL equil%psi%get_local(vals_tmp)
+IF(.NOT.ALL(ieee_is_finite(vals_tmp)))THEN
+  DEALLOCATE(vals_tmp)
+  error_flag=-10
+  CALL oft_warn('gs_solve: initial flux is non-finite (NaN/Inf), solve not started')
+  self%ierr=error_flag
+  IF(PRESENT(ierr))THEN
+    ierr=error_flag
+  ELSE
+    err_reason=gs_err_reason(error_flag)
+    WRITE(*,'(3A)')oft_indent,'Equilibrium solve Failed: ',TRIM(err_reason)
+  END IF
+  RETURN
+END IF
 CALL equil%psi%new(tmp_vec)
 CALL equil%psi%new(psip)
 CALL equil%psi%new(psiin)
@@ -2636,8 +2653,16 @@ DO i=1,self%maxits
     CALL equil%psi%add(1.d0,1.d0,psi_dt)
   END IF
 
-  !---Check for scale issues
+  !---Abort on a non-finite iterate before it reaches the flux-function update (surface tracing)
   CALL equil%psi%get_local(vals_tmp)
+  IF(.NOT.(ALL(ieee_is_finite(vals_tmp)).AND.ieee_is_finite(equil%ffp_scale) &
+    .AND.ieee_is_finite(equil%p_scale).AND.ieee_is_finite(equil%vcontrol_val)))THEN
+    WRITE(err_reason,'(I6)')i
+    CALL oft_warn('gs_solve: non-finite flux or scale factor at iteration '//TRIM(ADJUSTL(err_reason)))
+    error_flag=-10
+    EXIT
+  END IF
+  !---Check for scale issues
   psimax=maxval(ABS(vals_tmp))
   fail_test=psimax<gs_epsilon
   fail_test=fail_test.OR.((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)
@@ -2679,6 +2704,12 @@ DO i=1,self%maxits
   END IF
   !---Update flux functions
   CALL gs_update_bounds(equil)
+  IF(.NOT.(ALL(ieee_is_finite(equil%plasma_bounds)).AND.ALL(ieee_is_finite(equil%o_point))))THEN
+    WRITE(err_reason,'(I6)')i
+    CALL oft_warn('gs_solve: non-finite plasma bounds or O-point at iteration '//TRIM(ADJUSTL(err_reason)))
+    error_flag=-10
+    EXIT
+  END IF
   IF(ASSOCIATED(equil%torflux))CALL equil%torflux%update(equil)
   CALL equil%I%update(equil)
   CALL equil%p%update(equil)
@@ -2715,6 +2746,13 @@ DO i=1,self%maxits
   !---Output progress
   IF(oft_env%pm)WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,equil%ffp_scale,equil%p_scale, &
     SQRT(nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
+  !---Abort on a non-finite source/residual (e.g. NaN in the updated flux functions)
+  IF(.NOT.ieee_is_finite(nl_res))THEN
+    WRITE(err_reason,'(I6)')i
+    CALL oft_warn('gs_solve: non-finite source or residual at iteration '//TRIM(ADJUSTL(err_reason)))
+    error_flag=-10
+    EXIT
+  END IF
   !---Check if converged
   IF((equil%R0_target>0.d0).AND.(ABS(R0_tmp-equil%R0_target)>1.d-8))CYCLE
   IF((equil%Z0_target>-1.d98).AND.(ABS(Z0_tmp-equil%Z0_target)>1.d-8))CYCLE
@@ -3316,7 +3354,7 @@ SELECT CASE(ierr)
   CASE(-9)
     err_reason='Toroidal flux map update failed'
   CASE(-10)
-    err_reason='Flux function update failed'
+    err_reason='Non-finite state or failed flux function update'
   CASE DEFAULT
     err_reason='Unknown reason'
 END SELECT
