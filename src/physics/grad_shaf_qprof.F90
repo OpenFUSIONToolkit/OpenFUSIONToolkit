@@ -18,9 +18,9 @@ CONTAINS
 !> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the cut-cell quadrature
 !------------------------------------------------------------------------------
 MODULE PROCEDURE gs_qprof_cutcell
-real(8) :: qf(nr),avgs(nr,4),fpol(nr),psi_surf
-real(8), allocatable :: fsa(:,:),shp(:,:)
-integer(4) :: j
+REAL(r8) :: qf(nr),avgs(nr,4),fpol(nr),psi_surf
+REAL(r8), ALLOCATABLE :: fsa(:,:),shp(:,:)
+INTEGER(i4) :: j
 DO j=1,nr
   psi_surf=psi_q(j)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1)
   fpol(j)=gs_fpol(gseq,psi_surf)
@@ -46,11 +46,11 @@ END PROCEDURE gs_qprof_cutcell
 !! exact extrema of the FE surface. `dl` is the length of the closed polygon through the points.
 !------------------------------------------------------------------------------
 MODULE PROCEDURE gs_lcfs_cutcell
-integer(4), parameter :: nlcfs=1000
-real(8) :: rz(2,nlcfs,1),qf(1),xa(2,4,1),pt(2),dir(2)
-logical :: okr(1)
-integer(4) :: k
-type(oft_lag_brinterp) :: psi_int
+INTEGER(i4), PARAMETER :: nlcfs=1000
+REAL(r8) :: rz(2,nlcfs,1),qf(1),xa(2,4,1),pt(2),dir(2)
+LOGICAL :: okr(1)
+INTEGER(i4) :: k
+TYPE(oft_lag_brinterp) :: psi_int
 ok=.FALSE.
 CALL gs_rays_cutcell(gseq,1,[psi_q1],nlcfs,rz,qf,okr,xa)
 IF(.NOT.okr(1))RETURN
@@ -78,9 +78,9 @@ END PROCEDURE gs_lcfs_cutcell
 !! side and running anticlockwise (as the tracer), from the cut-cell quadrature
 !------------------------------------------------------------------------------
 MODULE PROCEDURE gs_trace_surf_cutcell
-integer(4), parameter :: nth=1000
-real(8) :: rz(2,nth,1),qf(1)
-logical :: ok(1)
+INTEGER(i4), PARAMETER :: nth=1000
+REAL(r8) :: rz(2,nth,1),qf(1)
+LOGICAL :: ok(1)
 npoints=-1
 NULLIFY(points)
 CALL gs_rays_cutcell(gseq,1,[psi_in],nth,rz,qf,ok)

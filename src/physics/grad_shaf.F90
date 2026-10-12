@@ -47,10 +47,10 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer, cylinv_interp
 IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
-REAL(8) :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
+REAL(r8) :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
 !> Surface backend of @ref gs_get_qprof, @ref gs_trace_surf, `gs_save_ifile`, `gs_save_eqdsk`:
 !! 0 cut-cell where supported, 1 field-line tracer (deprecated)
-INTEGER(4) :: qprof_backend = 0
+INTEGER(i4) :: qprof_backend = 0
 !------------------------------------------------------------------------------
 !> Interpolation class for uniform source with simple tokamak representation
 !------------------------------------------------------------------------------
@@ -522,30 +522,30 @@ end interface
 INTERFACE
   !> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the cut-cell quadrature (see grad_shaf_qprof.F90)
   MODULE SUBROUTINE gs_qprof_cutcell(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,done)
-    class(gs_equil), intent(inout) :: gseq !< G-S object
-    integer(4), intent(in) :: nr !< Number of flux surfaces
-    real(8), intent(in) :: psi_q(nr) !< Locations in normalized flux
-    real(8), intent(out) :: prof(nr) !< q at each location
-    real(8), optional, intent(out) :: ravgs(nr,4) !< <R>, <1/R>, <1/R^2>, dV/dPsi
-    real(8), optional, intent(out) :: fsa_avgs(nr,4) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
-    real(8), optional, intent(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
-    logical, intent(out) :: done(nr) !< Surfaces evaluated (the others are left for the tracer)
+    CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+    INTEGER(i4), INTENT(in) :: nr !< Number of flux surfaces
+    REAL(r8), INTENT(in) :: psi_q(nr) !< Locations in normalized flux
+    REAL(r8), INTENT(out) :: prof(nr) !< q at each location
+    REAL(r8), OPTIONAL, INTENT(out) :: ravgs(nr,4) !< <R>, <1/R>, <1/R^2>, dV/dPsi
+    REAL(r8), OPTIONAL, INTENT(out) :: fsa_avgs(nr,4) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
+    REAL(r8), OPTIONAL, INTENT(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
+    LOGICAL, INTENT(out) :: done(nr) !< Surfaces evaluated (the others are left for the tracer)
   END SUBROUTINE gs_qprof_cutcell
   !> @ref gs_trace_surf from the cut-cell quadrature (see grad_shaf_qprof.F90); `npoints=-1` if not available
   MODULE SUBROUTINE gs_trace_surf_cutcell(gseq,psi_in,points,npoints)
-    class(gs_equil), intent(inout) :: gseq !< G-S object
-    real(8), intent(in) :: psi_in !< Surface location in normalized flux
-    real(8), pointer, dimension(:,:), intent(out) :: points !< Surface points [2,npoints]
-    integer(4), intent(out) :: npoints !< Number of points
+    CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+    REAL(r8), INTENT(in) :: psi_in !< Surface location in normalized flux
+    REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: points !< Surface points [2,npoints]
+    INTEGER(i4), INTENT(out) :: npoints !< Number of points
   END SUBROUTINE gs_trace_surf_cutcell
   !> LCFS outputs of @ref gs_get_qprof from the cut-cell quadrature (see grad_shaf_qprof.F90)
   MODULE SUBROUTINE gs_lcfs_cutcell(gseq,psi_q1,dl,rbounds,zbounds,ok)
-    class(gs_equil), intent(inout) :: gseq !< G-S object
-    real(8), intent(in) :: psi_q1 !< Surface location in normalized flux
-    real(8), intent(out) :: dl !< Surface length
-    real(8), intent(out) :: rbounds(2,2) !< (R,Z) at minimum and maximum R
-    real(8), intent(out) :: zbounds(2,2) !< (R,Z) at minimum and maximum Z
-    logical, intent(out) :: ok !< Surface evaluated (otherwise use the tracer)
+    CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+    REAL(r8), INTENT(in) :: psi_q1 !< Surface location in normalized flux
+    REAL(r8), INTENT(out) :: dl !< Surface length
+    REAL(r8), INTENT(out) :: rbounds(2,2) !< (R,Z) at minimum and maximum R
+    REAL(r8), INTENT(out) :: zbounds(2,2) !< (R,Z) at minimum and maximum Z
+    LOGICAL, INTENT(out) :: ok !< Surface evaluated (otherwise use the tracer)
   END SUBROUTINE gs_lcfs_cutcell
 END INTERFACE
 !---Encapsulation for external function call parameters
@@ -1254,6 +1254,7 @@ END DO
 equil%plasma_bounds=[-1.d99,1.d99]
 CALL gs_update_bounds(equil)
 IF(ASSOCIATED(equil%torflux))CALL equil%torflux%update(equil)
+equil%skip_targets=.FALSE. ! Flux functions set up as on the first iteration of a solve
 CALL equil%I%update(equil)
 CALL equil%p%update(equil)
 IF(ASSOCIATED(equil%P_ani))CALL equil%P_ani%update(equil)
@@ -2191,8 +2192,8 @@ REAL(8) :: nl_res,psimax,ffp_scale_in,ffp_scale_prev,itor,pnorm0,pnormp,itor_ffp
 REAL(8) :: R0_tmp,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3),t0,t1
 REAL(8) :: param_mat(3,3),mat_save(2,2),param_vec(3),param_rhs(3)
 REAL(r8), POINTER :: saddle_save(:,:)
-integer(4) :: i,ii,j,k,error_flag,cell,ierr_loc,map_fails
-integer(4), parameter :: map_fail_max = 3 !< Consecutive toroidal flux map failures before the solve fails
+INTEGER(i4) :: i,ii,j,k,error_flag,cell,ierr_loc,map_fails
+INTEGER(i4), PARAMETER :: map_fail_max = 3 !< Consecutive toroidal flux map failures before the solve fails
 integer(4), save :: eq_count = 0
 CHARACTER(LEN=40) :: err_reason
 logical :: pm_save,fail_test
@@ -2844,13 +2845,13 @@ ELSE
 END IF
 CONTAINS
 !---Track consecutive toroidal flux map failures
-subroutine count_map_fails
+SUBROUTINE count_map_fails
 IF(equil%torflux_ierr==0)THEN
   map_fails=0
 ELSE
   map_fails=map_fails+1
 END IF
-end subroutine count_map_fails
+END SUBROUTINE count_map_fails
 end subroutine gs_solve
 !------------------------------------------------------------------------------
 !> Compute solution to linearized Grad-Shafranov without updating \f$ \psi \f$ for RHS
@@ -4470,17 +4471,19 @@ dflux=dflux*self%psiscale
 end function gs_dflux
 !------------------------------------------------------------------------------
 !> Poloidal current function \f$ F = R B_\phi \f$ at (unnormalized) \f$ \psi \f$
+!!
+!! @warning Only valid inside the plasma; \f$ \psi \f$ is not checked against the plasma bounds
 !------------------------------------------------------------------------------
-function gs_fpol(self,psi) result(F)
-class(gs_equil), intent(inout) :: self !< G-S object
-real(8), intent(in) :: psi !< Poloidal flux
-real(8) :: F
+FUNCTION gs_fpol(self,psi) RESULT(F)
+CLASS(gs_equil), INTENT(inout) :: self !< G-S object
+REAL(r8), INTENT(in) :: psi !< Poloidal flux
+REAL(r8) :: F
 IF(self%mode==0)THEN
   F=self%ffp_scale*self%I%f(psi)+self%I%f_offset
 ELSE
   F=SIGN(1.d0,self%I%f_offset)*SQRT(MAX(self%ffp_scale*self%I%f(psi)+self%I%f_offset**2,0.d0))
 END IF
-end function gs_fpol
+END FUNCTION gs_fpol
 !------------------------------------------------------------------------------
 !> Compute the magnetic energy and helicity of a fixed boundary equilibrium
 !!
@@ -4579,7 +4582,7 @@ end subroutine psimax_error_grad
 !------------------------------------------------------------------------------
 !> Get q profile for equilibrium
 !------------------------------------------------------------------------------
-subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs,fsa_avgs,shape_geo,geom_only)
+SUBROUTINE gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs,fsa_avgs,shape_geo,geom_only)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux surfaces to sample
 real(8), intent(in) :: psi_q(nr) !< Locations to sample in normalized flux
@@ -4590,7 +4593,7 @@ real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `ps
 real(8), optional, intent(out) :: ravgs(nr,4) !< Flux surface averages <R>, <1/R>, <1/R^2>, and dV/dPsi
 real(8), optional, intent(out) :: fsa_avgs(nr,4) !< Flux surface averages <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
 real(8), optional, intent(out) :: shape_geo(nr,6) !< Per-surface R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
-logical, optional, intent(in) :: geom_only !< Return \f$ q/F \f$ (independent of F profile)
+LOGICAL, OPTIONAL, INTENT(in) :: geom_only !< Return \f$ q/F \f$ (independent of F profile)
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
@@ -4598,7 +4601,7 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
 integer(4), parameter :: nlcfs=1000
-logical :: lcfs_all,lcfs_any,geo,lcfs_ok,cc_done(nr)
+LOGICAL :: lcfs_all,lcfs_any,geo,lcfs_ok,cc_done(nr)
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str

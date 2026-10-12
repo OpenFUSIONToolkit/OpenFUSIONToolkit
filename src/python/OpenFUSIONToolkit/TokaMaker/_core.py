@@ -1783,6 +1783,9 @@ class TokaMaker():
     def compute_flux_integral(self,psi_vals,field_vals):
         r'''! Compute area integral of flux function over the plasma
 
+        For a current, integrate `util.get_dIdA_from_jphi` of the \f$ j_\phi \f$ profile: the integral of
+        \f$ j_\phi \f$ itself is not the current.
+
         @param psi_vals \f$ \hat{\psi} \f$ values defining flux function [:]
         @param field_vals Flux function values at each \f$ \hat{\psi} \f$ value [:]
         @result \f$ \int f dA \f$
@@ -3887,6 +3890,9 @@ class TokaMaker_equilibrium():
 
     def compute_flux_integral(self,psi_vals,field_vals):
         r'''! Compute area integral of field over a specified region
+
+        For a current, integrate `util.get_dIdA_from_jphi` of the \f$ j_\phi \f$ profile: the integral of
+        \f$ j_\phi \f$ itself is not the current.
 
         @param field Field to integrate [np,]
         @param reg_mask ID of region for integration (negative for whole mesh)
