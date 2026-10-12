@@ -260,6 +260,7 @@ CALL field%setup(gseq%device%fe_rep)
 active_tracer%neq=8
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
+active_tracer%rtol=-1.d2 ! Avoid relative tolerance from controling step size at start of tracing
 active_tracer%tol=1.d-9
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
@@ -769,6 +770,7 @@ CALL field%setup(gseq%device%fe_rep)
 active_tracer%neq=2
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
+active_tracer%rtol=-1.d2 ! Avoid relative tolerance from controling step size at start of tracing
 active_tracer%tol=1.d-9
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis

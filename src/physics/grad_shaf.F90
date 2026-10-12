@@ -4438,6 +4438,7 @@ active_tracer%maxsteps=8e4
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
+active_tracer%rtol=-1.d2 ! Avoid relative tolerance from controling step size at start of tracing
 IF(PRESENT(shape_geo))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,nr
@@ -4484,24 +4485,22 @@ do j=1,nr
   ! If shape information is requested, reinterpolate LCFS to get uniform spacing for geometric parameters
   !------------------------------------------------------------------------------
   IF(PRESENT(shape_geo).OR.(PRESENT(dl).AND.(j==1)))THEN
-    IF(active_tracer%nsteps>nlcfs)THEN
-      !---Allocate and fit spline
-      CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
-      lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
-      lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
-      lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
-      CALL spline_fit(lcfs_rz,"periodic")
-      !---Resample trace
-      DO i=0,nlcfs-1
-        CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
-        ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
-        ptout(2,i+1)=lcfs_rz%f(1)
-        ptout(3,i+1)=lcfs_rz%f(2)
-      END DO
-      !---Destroy Spline
-      CALL spline_dealloc(lcfs_rz)
-      active_tracer%nsteps=nlcfs
-    END IF
+    !---Reinterpolate onto fixed spacing
+    CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
+    lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
+    lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
+    lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
+    CALL spline_fit(lcfs_rz,"periodic")
+    !---Resample trace
+    DO i=0,nlcfs-1
+      CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
+      ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
+      ptout(2,i+1)=lcfs_rz%f(1)
+      ptout(3,i+1)=lcfs_rz%f(2)
+    END DO
+    !---Destroy Spline
+    CALL spline_dealloc(lcfs_rz)
+    active_tracer%nsteps=nlcfs
     !---Per-surface extrema, used for elongation and triangularity
     IF(PRESENT(shape_geo))THEN
       imin_r=1; imax_r=1; imin_z=1; imax_z=1
@@ -4632,6 +4631,7 @@ CALL field%setup(gseq%device%fe_rep)
 active_tracer%neq=3
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
+active_tracer%rtol=-1.d2 ! Avoid relative tolerance from controling step size at start of tracing
 IF(gseq%diverted.AND.psi_in<0.02d0)THEN ! Use higher tracing tolerance near divertor
   active_tracer%tol=1.d-10
 ELSE

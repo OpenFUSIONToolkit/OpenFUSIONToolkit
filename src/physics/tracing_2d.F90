@@ -29,7 +29,8 @@ type, abstract :: tracer
   integer(i4) :: nsteps = 0 !< Number of timesteps taken
   integer(i4) :: cell = 0 !< Current cell containing tracer
   integer(i4) :: status = 0 !< Status of tracer
-  real(r8) :: tol = 1.d-4 !< Tolerance for ODE solver
+  real(r8) :: rtol = -1.d0 !< Relative tolerance for ODE solver
+  real(r8) :: tol = 1.d-4 !< Absolute tolerance for ODE solver
   real(r8) :: t = 0.d0 !< Current time
   real(r8) :: dt = 0.d0 !< Timestep (for fixed step methods)
   real(r8) :: tmax = 0.d0 !< Maximum time for integration
@@ -278,6 +279,7 @@ self%rwork=0.d0
 self%iwork=0
 self%v=0.d0
 self%dv=0.d0
+IF(self%rtol<0.d0)self%rtol=ABS(self%rtol)*self%tol
 !---
 self%t=0.d0
 self%tmax=2.d0*pi
@@ -307,11 +309,11 @@ end subroutine trace_setup_lsode
 subroutine trace_advance_lsode(self)
 class(tracer_lsode), intent(inout) :: self !< LSODE tracer object
 IF(self%inv)THEN
-  call dlsode(tracing_eval_Binv,self%neq,self%v,self%t,self%tmax,1,self%tol, &
+  call dlsode(tracing_eval_Binv,self%neq,self%v,self%t,self%tmax,1,self%rtol, &
     self%tol,self%itask,self%istate,0,self%rwork,self%lrw,self%iwork,self%liw, &
     tracing_eval_Binv,10)
 ELSE
-  call dlsode(tracing_eval_B,self%neq,self%v,self%t,self%tmax,1,self%tol, &
+  call dlsode(tracing_eval_B,self%neq,self%v,self%t,self%tmax,1,self%rtol, &
     self%tol,self%itask,self%istate,0,self%rwork,self%lrw,self%iwork,self%liw, &
     tracing_eval_B,10)
 END IF
