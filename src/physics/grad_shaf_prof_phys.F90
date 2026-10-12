@@ -21,13 +21,14 @@ use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
-  gs_get_qprof, gs_ani_press, gs_epsilon
+  gs_get_qprof, gs_ani_press, gs_epsilon, gs_cell_quad
 use oft_gs_cutcell, only: gs_fsa_cutcell
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
   spline_func_copy, spline_func_delete, phi_flux_wrapper, torflux_qgeom_backend
 use spline_mod
 USE mhd_utils, ONLY: mu0
+USE oft_quadrature, ONLY: oft_quad_type
 implicit none
 !------------------------------------------------------------------------------
 !> Needs docs
@@ -607,21 +608,23 @@ REAL(r8), INTENT(out) :: result !< Integral over the plasma cross-section
 INTEGER(i4) :: i,m
 REAL(r8) :: area,psitmp(1),sgop(3,3)
 TYPE(gs_prof_interp) :: prof_interp_obj
+TYPE(oft_quad_type), POINTER :: quad
 ! DEBUG_STACK_PUSH
 !---Setup
 result=0.d0
 prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
-!$omp parallel do private(m,psitmp,sgop,area) reduction(+:result)
+!$omp parallel do private(m,psitmp,sgop,area,quad) reduction(+:result) schedule(dynamic,16)
 do i=1,self%device%mesh%nc
   IF(self%device%mesh%reg(i)/=1)CYCLE
+  CALL gs_cell_quad(self,i,prof_interp_obj%psi_eval%vals,quad)
   !---Loop over quadrature points
-  do m=1,self%device%fe_rep%quad%np
-    call self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
-    call prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
+  do m=1,quad%np
+    call self%device%mesh%jacobian(i,quad%pts(:,m),sgop,area)
+    call prof_interp_obj%interp(i,quad%pts(:,m),sgop,psitmp)
     IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma (mode 4 returns 0 there)
     psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
-    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*self%device%fe_rep%quad%wts(m)
+    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*quad%wts(m)
   end do
 end do
 !---Global reduction and cleanup
@@ -645,22 +648,24 @@ INTEGER(i4) :: i,m,k,ib,nblk,inds(2)
 REAL(r8) :: area,psitmp(1),sgop(3,3),facs(2)
 REAL(r8), ALLOCATABLE :: bins(:,:),bblk(:,:,:)
 TYPE(gs_prof_interp) :: prof_interp_obj
+TYPE(oft_quad_type), POINTER :: quad
 nblk=(self%device%mesh%nc+nblk_cells-1)/nblk_cells
 ALLOCATE(bins(nvals,nf),bblk(nvals,nf,nblk))
 bblk=0.d0
 prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
-!$omp parallel do private(i,m,psitmp,sgop,area,inds,facs) schedule(dynamic,1)
+!$omp parallel do private(i,m,psitmp,sgop,area,inds,facs,quad) schedule(dynamic,1)
 do ib=1,nblk
   do i=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,self%device%mesh%nc)
     IF(self%device%mesh%reg(i)/=1)CYCLE
-    do m=1,self%device%fe_rep%quad%np
-      call self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
-      call prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
+    CALL gs_cell_quad(self,i,prof_interp_obj%psi_eval%vals,quad)
+    do m=1,quad%np
+      call self%device%mesh%jacobian(i,quad%pts(:,m),sgop,area)
+      call prof_interp_obj%interp(i,quad%pts(:,m),sgop,psitmp)
       IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma
       CALL linterp_facs(psi_tmp,nvals,psitmp(1),inds,facs,0)
       IF(inds(1)<=0)CYCLE
-      area=area*self%device%fe_rep%quad%wts(m)
+      area=area*quad%wts(m)
       ! Lower node inds(2) is the innermost surface enclosing this point
       bblk(inds(2),:,ib)=bblk(inds(2),:,ib)+(fields(inds(1),:)*facs(1)+fields(inds(2),:)*facs(2))*area
     end do

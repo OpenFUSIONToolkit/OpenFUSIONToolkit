@@ -177,6 +177,8 @@ TYPE :: gs_factory
   INTEGER(i4) :: bc_nrhs = 0 !< Number of terms in free-boundary BC
   INTEGER(i4) :: nlim_con = 0 !< Number of node points in limiter contour list
   INTEGER(i4) :: lim_nloops = 0 !< Number of limiter loops
+  INTEGER(i4) :: split_nlev = 3 !< Plasma integrals split cells the plasma boundary may cross into 4**split_nlev sub-cells (0: whole cells)
+  REAL(r8) :: split_pad = 0.d0 !< Bound on the FE interpolant beyond its nodal range, per unit range (@ref gs_split_setup)
   REAL(r8) :: rmin = 0.d0 !< Minimum radial coordinate in model
   REAL(r8) :: rmax = 0.d0 !< Maximum radial coordinate in model
   REAL(r8) :: urf = .2d0 !< Under-relaxation factor for Picard iteration
@@ -222,6 +224,7 @@ TYPE :: gs_factory
   CHARACTER(LEN=OFT_PATH_SLEN) :: coil_file = 'none' !< File containing coil definitions
   CHARACTER(LEN=OFT_PATH_SLEN) :: limiter_file = 'none' !< File non-node limiter points
   TYPE(xdmf_plot_file) :: xdmf !< XDMF plotting object
+  TYPE(oft_quad_type) :: split_quad !< FE rule on the sub-cells of split cells (@ref gs_split_setup)
   TYPE(oft_lusolver) :: lu_solver !< \f$ \frac{1}{R} \Delta^* \f$ inverse solver
   TYPE(oft_lusolver) :: lu_solver_dt !< LHS inverse solver with time dependence
   TYPE(axi_coil_set), POINTER, DIMENSION(:) :: coils_ext => NULL() !< External coil definitions
@@ -993,6 +996,7 @@ IF(self%ncoils>0)THEN
   CALL create_vector(self%aug_vec,stitch_tmp,map_tmp)
   DEALLOCATE(stitch_tmp,map_tmp)
 END IF
+CALL gs_split_setup(self)
 contains
 !
 subroutine get_limiter()
@@ -1773,6 +1777,7 @@ logical :: curved
 type(oft_lag_brinterp), target :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp), target :: psi_geval
 type(gs_factory), pointer :: device
+type(oft_quad_type), pointer :: quad
 ! t1=omp_get_wtime()
 !---
 device=>self%device
@@ -1791,7 +1796,7 @@ END IF
 !---
 mutual=0.d0
 itor=0.d0
-!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,pt,psitmp,b_tmp,l,rop,itor_loc,pani,bcross_kappa,gpsitmp) reduction(+:mutual) &
+!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,pt,psitmp,b_tmp,l,rop,itor_loc,pani,bcross_kappa,gpsitmp,quad) reduction(+:mutual) &
 !$omp reduction(+:itor)
 allocate(rop(device%fe_rep%nce))
 allocate(j_lag(device%fe_rep%nce))
@@ -1800,10 +1805,11 @@ DO j=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(j)/=1)CYCLE
   call device%fe_rep%ncdofs(j,j_lag)
   curved=cell_is_curved(device%fe_rep%mesh,j)
-  do m=1,device%fe_rep%quad%np
-    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,device%fe_rep%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(j,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
-    pt=device%fe_rep%mesh%log2phys(j,device%fe_rep%quad%pts(:,m))
+  CALL gs_cell_quad(self,j,psi_eval%vals,quad)
+  do m=1,quad%np
+    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(j,quad%pts(:,m),goptmp,psitmp)
+    pt=device%fe_rep%mesh%log2phys(j,quad%pts(:,m))
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
       IF(self%mode==0)THEN
@@ -1813,18 +1819,18 @@ DO j=1,device%fe_rep%mesh%nc
       END IF
       ! Handle anisotropic pressure
       IF(ASSOCIATED(self%P_ani))THEN
-        CALL self%P_ani%interp(j,device%fe_rep%quad%pts(:,m),goptmp,pani)
-        CALL bcross_kappa_fun%interp(j,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
+        CALL self%P_ani%interp(j,quad%pts(:,m),goptmp,pani)
+        CALL bcross_kappa_fun%interp(j,quad%pts(:,m),goptmp,bcross_kappa)
         itor_loc = itor_loc + self%p_scale*pt(1)*(self%P%fp(psitmp(1))*pani(2)+self%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
       ELSE
         itor_loc = itor_loc + self%p_scale*pt(1)*self%P%Fp(psitmp(1))
       END IF
       b_tmp=0.d0
       DO l=1,device%fe_rep%nce
-        CALL oft_blag_eval(device%fe_rep,j,l,device%fe_rep%quad%pts(:,m),rop(l))
+        CALL oft_blag_eval(device%fe_rep,j,l,quad%pts(:,m),rop(l))
         b_tmp=b_tmp+btmp(j_lag(l))*rop(l)
       END DO
-      det = v*device%fe_rep%quad%wts(m)
+      det = v*quad%wts(m)
       itor = itor + itor_loc*det
       mutual = mutual + b_tmp*itor_loc*det
     END IF
@@ -3388,6 +3394,7 @@ integer(4), allocatable :: j_lag(:)
 logical :: curved
 type(oft_lag_brinterp) :: bcross_kappa_fun
 type(gs_factory), pointer :: device
+type(oft_quad_type), pointer :: quad
 t1=omp_get_wtime()
 !---
 NULLIFY(atmp,btmp,b2tmp,b3tmp)
@@ -3412,12 +3419,12 @@ itor_ffp=0.d0
 itor_press=0.d0
 estore=0.d0
 dflux_ffp=0.d0
-!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp) &
+!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp,quad) &
 !$omp reduction(+:itor_ffp) reduction(+:itor_press) reduction(+:estore) reduction(+:dflux_ffp)
 allocate(rhs_loc(device%fe_rep%nce,3))
 allocate(rop(device%fe_rep%nce),vcache(device%fe_rep%nce))
 allocate(j_lag(device%fe_rep%nce))
-!$omp do schedule(static)
+!$omp do schedule(dynamic,16)
 do j=1,device%fe_rep%mesh%nc
   ! IF(self%cflag(j)==3)CYCLE ! Vacuum region (no source)
   IF(device%fe_rep%mesh%reg(j)/=1)CYCLE ! Only compute in plasma region
@@ -3427,14 +3434,15 @@ do j=1,device%fe_rep%mesh%nc
     vcache(l) = atmp(j_lag(l))
   END DO
   curved=cell_is_curved(device%fe_rep%mesh,j)
-  do m=1,device%fe_rep%quad%np
-    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,device%fe_rep%quad%pts(:,m),goptmp,v)
-    det=v*device%fe_rep%quad%wts(m)
+  CALL gs_cell_quad(self,j,atmp,quad)
+  do m=1,quad%np
+    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,quad%pts(:,m),goptmp,v)
+    det=v*quad%wts(m)
     DO l=1,device%fe_rep%nce
-      CALL oft_blag_eval(device%fe_rep,j,l,device%fe_rep%quad%pts(:,m),rop(l))
+      CALL oft_blag_eval(device%fe_rep,j,l,quad%pts(:,m),rop(l))
     END DO
     ffp=0.d0
-    pt=device%fe_rep%mesh%log2phys(j,device%fe_rep%quad%pts(:,m))
+    pt=device%fe_rep%mesh%log2phys(j,quad%pts(:,m))
     IF(gs_test_bounds(self,pt))THEN
       psitmp=0.d0
       !$omp simd reduction(+:psitmp)
@@ -3444,25 +3452,25 @@ do j=1,device%fe_rep%mesh%nc
       IF(psitmp>self%plasma_bounds(1))THEN
         IF(self%mode==0)THEN
           ffp(1:2)=((self%ffp_scale**2)*self%I%f(psitmp)+self%ffp_scale*self%I%f_offset)*self%I%fp(psitmp)
-          itor_ffp = itor_ffp + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
-          dflux_ffp = dflux_ffp + (self%ffp_scale*self%I%F(psitmp))/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+          itor_ffp = itor_ffp + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)*v*quad%wts(m)
+          dflux_ffp = dflux_ffp + (self%ffp_scale*self%I%F(psitmp))/(pt(1)+gs_epsilon)*v*quad%wts(m)
         ELSE
           ffp(1:2)=0.5d0*self%ffp_scale*self%I%fp(psitmp)
-          itor_ffp = itor_ffp + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+          itor_ffp = itor_ffp + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*quad%wts(m)
           dflux_ffp = dflux_ffp + (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp) + self%I%f_offset**2) &
-            - self%I%f_offset)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+            - self%I%f_offset)/(pt(1)+gs_epsilon)*v*quad%wts(m)
         END IF
         ! Handle anisotropic pressure
         IF(ASSOCIATED(self%P_ani))THEN
-          CALL self%P_ani%interp(j,device%fe_rep%quad%pts(:,m),goptmp,pani)
-          CALL bcross_kappa_fun%interp(j,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
+          CALL self%P_ani%interp(j,quad%pts(:,m),goptmp,pani)
+          CALL bcross_kappa_fun%interp(j,quad%pts(:,m),goptmp,bcross_kappa)
           ffp([1,3]) = ffp([1,3]) + [self%p_scale,1.d0]*(self%P%fp(psitmp)*pani(2)+self%P%f(psitmp)*(pani(1)-pani(2))*bcross_kappa(1))*(pt(1)**2)
         ELSE
           ffp([1,3]) = ffp([1,3]) + [self%p_scale,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
         END IF
         !
-        estore = estore + (self%P%F(psitmp))*v*device%fe_rep%quad%wts(m)*pt(1)
-        itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*device%fe_rep%quad%wts(m)
+        estore = estore + (self%P%F(psitmp))*v*quad%wts(m)*pt(1)
+        itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*quad%wts(m)
       END IF
     END IF
     pt(1) = MAX(pt(1),gs_epsilon)
@@ -3618,6 +3626,7 @@ real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),bcross_kappa(1),H,ani_fac,pani(2)
 real(8) :: pt(3),curr_cent(2)
 integer(4) :: i,m
 type(gs_factory), pointer :: device
+type(oft_quad_type), pointer :: quad
 IF(.NOT.self%has_plasma)THEN
   IF(PRESENT(centroid))centroid = 0.d0
   itor=0.d0
@@ -3640,11 +3649,12 @@ itor=0.d0
 curr_cent=0.d0
 do i=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(i)/=1)CYCLE
-  do m=1,device%fe_rep%quad%np
-    call device%fe_rep%mesh%jacobian(i,device%fe_rep%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
+  CALL gs_cell_quad(self,i,psi_eval%vals,quad)
+  do m=1,quad%np
+    call device%fe_rep%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
     ! IF(psitmp(1)<self%plasma_bounds(1).OR.psitmp(1)>self%plasma_bounds(2))CYCLE
-    pt=device%fe_rep%mesh%log2phys(i,device%fe_rep%quad%pts(:,m))
+    pt=device%fe_rep%mesh%log2phys(i,quad%pts(:,m))
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
       IF(self%mode==0)THEN
@@ -3654,14 +3664,14 @@ do i=1,device%fe_rep%mesh%nc
       END IF
       ! Handle anisotropic pressure
       IF(ASSOCIATED(self%P_ani))THEN
-        CALL self%P_ani%interp(i,device%fe_rep%quad%pts(:,m),goptmp,pani)
-        CALL bcross_kappa_fun%interp(i,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
+        CALL self%P_ani%interp(i,quad%pts(:,m),goptmp,pani)
+        CALL bcross_kappa_fun%interp(i,quad%pts(:,m),goptmp,bcross_kappa)
         itor_loc = itor_loc + self%p_scale*pt(1)*(self%P%fp(psitmp(1))*pani(2)+self%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
       ELSE
         itor_loc = itor_loc + self%p_scale*pt(1)*self%P%Fp(psitmp(1))
       END IF
-      itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
-      curr_cent = curr_cent + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
+      itor = itor + itor_loc*v*quad%wts(m)
+      curr_cent = curr_cent + itor_loc*pt(1:2)*v*quad%wts(m)
     END IF
   end do
 end do
@@ -4153,6 +4163,89 @@ DO i=1,self%nx_points
 END DO
 end function gs_test_bounds
 !------------------------------------------------------------------------------
+!> Build the split rule for plasma integrals (the FE rule on each of the 4**split_nlev
+!! sub-triangles of the reference cell) and `split_pad`
+!!
+!! The interpolant deviates from the mid-range of its nodal values by at most \f$ \Lambda/2 \f$ times
+!! that range, with \f$ \Lambda \f$ the Lebesgue constant of the element (sampled, 10% margin).
+!------------------------------------------------------------------------------
+subroutine gs_split_setup(self)
+class(gs_factory), intent(inout) :: self !< G-S object
+integer(i4), parameter :: nsamp = 60 !< Lattice divisions for sampling the Lebesgue function
+integer(i4) :: ns,ia,ib,k,j
+real(r8) :: f(3),val,lsum,lam
+CALL self%split_quad%delete()
+IF(self%split_nlev<1)RETURN
+!---Lebesgue constant
+lam=1.d0
+DO ia=0,nsamp
+  DO ib=0,nsamp-ia
+    f=REAL([ia,ib,nsamp-ia-ib],r8)/nsamp
+    lsum=0.d0
+    DO j=1,self%fe_rep%nce
+      CALL oft_blag_eval(self%fe_rep,1,j,f,val)
+      lsum=lsum+ABS(val)
+    END DO
+    lam=MAX(lam,lsum)
+  END DO
+END DO
+self%split_pad=0.5d0*(1.1d0*lam-1.d0)
+!---Split rule
+ns=2**self%split_nlev
+self%split_quad%dim=self%fe_rep%quad%dim
+self%split_quad%order=self%fe_rep%quad%order
+self%split_quad%np=self%fe_rep%quad%np*ns**2
+ALLOCATE(self%split_quad%pts(SIZE(self%fe_rep%quad%pts,1),self%split_quad%np))
+ALLOCATE(self%split_quad%wts(self%split_quad%np))
+k=0
+DO ia=0,ns-1
+  DO ib=0,ns-1-ia
+    CALL add_tri([ia,ib],[ia+1,ib],[ia,ib+1])
+    IF(ia+ib<=ns-2)CALL add_tri([ia+1,ib],[ia+1,ib+1],[ia,ib+1])
+  END DO
+END DO
+CONTAINS
+!> Add the FE rule on the sub-triangle with lattice vertices v1, v2, v3
+subroutine add_tri(v1,v2,v3)
+integer(i4), intent(in) :: v1(2),v2(2),v3(2)
+real(r8) :: fv(3,3)
+integer(i4) :: m
+fv(:,1)=REAL([v1(1),v1(2),ns-v1(1)-v1(2)],r8)/ns
+fv(:,2)=REAL([v2(1),v2(2),ns-v2(1)-v2(2)],r8)/ns
+fv(:,3)=REAL([v3(1),v3(2),ns-v3(1)-v3(2)],r8)/ns
+DO m=1,self%fe_rep%quad%np
+  k=k+1
+  self%split_quad%pts(:,k)=MATMUL(fv,self%fe_rep%quad%pts(1:3,m))
+  self%split_quad%wts(k)=self%fe_rep%quad%wts(m)/REAL(ns**2,r8)
+END DO
+end subroutine add_tri
+end subroutine gs_split_setup
+!------------------------------------------------------------------------------
+!> Quadrature rule for plasma integrals on `cell`: the split rule (@ref gs_split_setup) if the
+!! plasma boundary (LCFS or X-point cut) may cross the cell, else the FE rule
+!------------------------------------------------------------------------------
+subroutine gs_cell_quad(self,cell,vals,quad)
+class(gs_equil), intent(inout) :: self !< G-S object
+integer(i4), intent(in) :: cell !< Cell index
+real(r8), intent(in) :: vals(:) !< Local \f$ \psi \f$ values
+type(oft_quad_type), pointer, intent(out) :: quad !< Rule for this cell
+integer(i4) :: k,jd(self%device%fe_rep%nce)
+real(r8) :: lo,hi,pad
+logical :: msk(3)
+quad=>self%device%fe_rep%quad
+IF((self%device%split_quad%np==0).OR.(self%plasma_bounds(1)<-1.d98))RETURN
+CALL self%device%fe_rep%ncdofs(cell,jd)
+lo=MINVAL(vals(jd)); hi=MAXVAL(vals(jd))
+pad=self%device%split_pad*(hi-lo)
+IF(hi+pad<=self%plasma_bounds(1))RETURN
+DO k=1,3
+  msk(k)=gs_test_bounds(self,self%device%fe_rep%mesh%r(1:2,self%device%fe_rep%mesh%lc(k,cell)))
+END DO
+IF(.NOT.ANY(msk))RETURN ! The mask is convex: no plasma in the cell
+IF(ALL(msk).AND.(lo-pad>self%plasma_bounds(1)))RETURN
+quad=>self%device%split_quad
+end subroutine gs_cell_quad
+!------------------------------------------------------------------------------
 !> Compute magnetic fields from Grad-Shafranov equilibrium
 !------------------------------------------------------------------------------
 subroutine gs_save_fields(self,pts,npts,filename)
@@ -4306,19 +4399,21 @@ real(8) :: goptmp(3,3),v,psitmp(1),pt(3)
 real(8) :: Btor
 integer(4) :: i,m
 type(gs_factory), pointer :: device
+type(oft_quad_type), pointer :: quad
 device=>self%device
 !---
 psi_eval%u=>self%psi
 CALL psi_eval%setup(device%fe_rep)
 dflux=0.d0
-!$omp parallel do private(m,pt,goptmp,v,psitmp,Btor) reduction(+:dflux)
+!$omp parallel do private(m,pt,goptmp,v,psitmp,Btor,quad) reduction(+:dflux)
 do i=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(i)/=1)CYCLE
-  do m=1,device%fe_rep%quad%np
-    call device%fe_rep%mesh%jacobian(i,device%fe_rep%quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,device%fe_rep%quad%pts(:,m),goptmp,psitmp)
+  CALL gs_cell_quad(self,i,psi_eval%vals,quad)
+  do m=1,quad%np
+    call device%fe_rep%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
     ! IF(psitmp(1)<self%plasma_bounds(1).OR.psitmp(1)>self%plasma_bounds(2))CYCLE
-    pt=device%fe_rep%mesh%log2phys(i,device%fe_rep%quad%pts(:,m))
+    pt=device%fe_rep%mesh%log2phys(i,quad%pts(:,m))
     IF(gs_test_bounds(self,pt).AND.(psitmp(1)>self%plasma_bounds(1)))THEN
       pt(1)=MAX(pt(1),gs_epsilon)
       !---Compute differential toroidal Field
@@ -4329,7 +4424,7 @@ do i=1,device%fe_rep%mesh%nc
         - self%I%f_offset)/pt(1)
       END IF
       !---Update integrand
-      dflux = dflux + Btor*v*device%fe_rep%quad%wts(m)
+      dflux = dflux + Btor*v*quad%wts(m)
     END IF
   end do
 end do
@@ -5910,6 +6005,7 @@ subroutine factory_destroy(self)
 class(gs_factory), intent(inout) :: self !< G-S object
 integer(i4) :: i,j
 IF(oft_debug_print(2))WRITE(*,*)"Destroying Grad-Shafranov factory object"
+CALL self%split_quad%delete()
 IF(ASSOCIATED(self%gs_zerob_bc))THEN
   CALL self%gs_zerob_bc%delete()
   DEALLOCATE(self%gs_zerob_bc)

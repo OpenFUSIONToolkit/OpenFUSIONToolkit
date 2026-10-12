@@ -76,9 +76,9 @@ tokamaker_equil_set = ctypes_subroutine(oftpy_lib.tokamaker_equil_set,
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
     [c_void_p, c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int, c_char_p])
 
-# tokamaker_setup(tMaker_ptr,fe_ptr,order,full_domain,ncoils,coil_Lmat,error_str)
+# tokamaker_setup(tMaker_ptr,fe_ptr,order,full_domain,split_nlev,ncoils,coil_Lmat,error_str)
 tokamaker_setup = ctypes_subroutine(oftpy_lib.tokamaker_setup,
-    [c_void_p, c_void_ptr_ptr, c_int, c_bool, c_int_ptr, c_double_ptr_ptr, c_char_p])
+    [c_void_p, c_void_ptr_ptr, c_int, c_bool, c_int, c_int_ptr, c_double_ptr_ptr, c_char_p])
 
 # tokamaker_destroy(tMaker_ptr,error_str)
 tokamaker_destroy = ctypes_subroutine(oftpy_lib.tokamaker_destroy,

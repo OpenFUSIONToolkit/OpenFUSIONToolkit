@@ -378,11 +378,12 @@ END SUBROUTINE tokamaker_equil_destroy
 !---------------------------------------------------------------------------------
 !> Complete setup of TokaMaker device/wrapper object and build FE representation
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_setup(tMaker_ptr,fe_ptr,order,full_domain,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
+SUBROUTINE tokamaker_setup(tMaker_ptr,fe_ptr,order,full_domain,split_nlev,ncoils,coil_Lmat,error_str) BIND(C,NAME="tokamaker_setup")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 TYPE(c_ptr), INTENT(out) :: fe_ptr !< Pointer to FE representation object
 INTEGER(KIND=c_int), VALUE, INTENT(in) :: order !< FE order for Lagrange elements
 LOGICAL(KIND=c_bool), VALUE, INTENT(in) :: full_domain !< Plasma covers full domain (eg. fixed-boundary solves)?
+INTEGER(KIND=c_int), VALUE, INTENT(in) :: split_nlev !< Plasma-boundary cells split into 4**split_nlev sub-cells in plasma integrals
 INTEGER(KIND=c_int), INTENT(out) :: ncoils !< Number of coils in model
 TYPE(c_ptr), INTENT(out) :: coil_Lmat !< Pointer to coil inductance matrix
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
@@ -429,6 +430,7 @@ CALL tMaker_obj%device%setup(tMaker_obj%ML_oft_blagrange)
 !------------------------------------------------------------------------------
 tMaker_obj%device%save_visit=.FALSE.
 tMaker_obj%device%full_domain=full_domain
+tMaker_obj%device%split_nlev=split_nlev
 CALL gs_setup_walls(tMaker_obj%device)
 CALL tMaker_obj%device%load_limiters
 CALL tMaker_obj%device%init()

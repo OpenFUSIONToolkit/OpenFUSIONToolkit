@@ -500,11 +500,13 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def setup(self,order=2,F0=0.0,full_domain=False):
+    def setup(self,order=2,F0=0.0,full_domain=False,split_nlev=3):
         r'''! Setup G-S solver
 
         @param order Order of FE representation to use
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
+        @param split_nlev Plasma integrals split cells crossed by the plasma boundary into
+        \f$ 4^{split\_nlev} \f$ sub-cells (0: whole cells)
         '''
         if self.np != -1:
             raise ValueError('G-S instance already setup')
@@ -513,7 +515,7 @@ class TokaMaker():
         ncoils = c_int()
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup(self._tMaker_ptr,ctypes.byref(self._fe_ptr),order,full_domain,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
+        tokamaker_setup(self._tMaker_ptr,ctypes.byref(self._fe_ptr),order,full_domain,split_nlev,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         # Update vacuum flux
