@@ -3330,7 +3330,7 @@ SELECT CASE(ierr)
   CASE(-9)
     err_reason='Toroidal flux map update failed'
   CASE(-10)
-    err_reason='Flux function update failed'
+    err_reason='Non-finite state or failed flux function update'
   CASE DEFAULT
     err_reason='Unknown reason'
 END SELECT

@@ -254,6 +254,42 @@ def test_solo_h2(order):
     ]
     results = mp_run(run_solo_case,(0.015/2.0,order))
     assert validate_solo(results,errs[order-2][0],errs[order-2][1])
+
+
+#============================================================================
+def run_nonfinite_case(mode,mp_q):
+    gs_mesh = gs_Domain()
+    gs_mesh.define_region('plasma',0.015,'plasma')
+    gs_mesh.add_rectangle(1.0,0.0,0.12,0.15,'plasma')
+    mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
+    mygs.setup_mesh(mesh_pts,mesh_lc)
+    mygs.settings.free_boundary = False
+    mygs.settings.maxits = 200
+    mygs.setup(order=2,F0=1.0,full_domain=True)
+    mygs.p_scale=np.nan if mode == 'source' else 1.2
+    mygs.ffp_scale=-2.0
+    mygs.set_profiles(ffp_prof={'type': 'flat'},pp_prof={'type': 'flat'})
+    mygs.init_psi()
+    if mode == 'psi':
+        psi = mygs.get_psi(False)
+        psi[0] = np.nan
+        mygs.set_psi(psi)
+    try:
+        mygs.solve()
+    except ValueError as err:
+        mp_q.put(str(err))
+        return
+    mp_q.put('converged')
+
+
+# A non-finite initial flux or source must fail at once (error -10), not run to "maxits"
+@pytest.mark.parametrize("mode", ('psi','source'))
+def test_nonfinite_abort(mode):
+    result = mp_run(run_nonfinite_case,(mode,))
+    assert result is not None
+    assert 'Non-finite state' in result
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,3,4))
 def test_solo_h3(order):
