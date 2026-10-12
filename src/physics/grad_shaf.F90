@@ -47,10 +47,10 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer, cylinv_interp
 IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
-REAL(8) :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
+REAL(r8) :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
 !> Surface backend of @ref gs_get_qprof, @ref gs_trace_surf, `gs_save_ifile`, `gs_save_eqdsk`:
 !! 0 cut-cell where supported, 1 field-line tracer (deprecated)
-INTEGER(4) :: qprof_backend = 0
+INTEGER(i4) :: qprof_backend = 0
 !------------------------------------------------------------------------------
 !> Interpolation class for uniform source with simple tokamak representation
 !------------------------------------------------------------------------------
@@ -530,19 +530,19 @@ INTERFACE
   END SUBROUTINE gs_qprof_cutcell
   !> @ref gs_trace_surf from the cut-cell quadrature (see grad_shaf_qprof.F90); `npoints=-1` if not available
   MODULE SUBROUTINE gs_trace_surf_cutcell(gseq,psi_in,points,npoints)
-    class(gs_equil), intent(inout) :: gseq !< G-S object
-    real(8), intent(in) :: psi_in !< Surface location in normalized flux
-    real(8), pointer, dimension(:,:), intent(out) :: points !< Surface points [2,npoints]
-    integer(4), intent(out) :: npoints !< Number of points
+    CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+    REAL(r8), INTENT(in) :: psi_in !< Surface location in normalized flux
+    REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: points !< Surface points [2,npoints]
+    INTEGER(i4), INTENT(out) :: npoints !< Number of points
   END SUBROUTINE gs_trace_surf_cutcell
   !> LCFS outputs of @ref gs_get_qprof from the cut-cell quadrature (see grad_shaf_qprof.F90)
   MODULE SUBROUTINE gs_lcfs_cutcell(gseq,psi_q1,dl,rbounds,zbounds,ok)
-    class(gs_equil), intent(inout) :: gseq !< G-S object
-    real(8), intent(in) :: psi_q1 !< Surface location in normalized flux
-    real(8), intent(out) :: dl !< Surface length
-    real(8), intent(out) :: rbounds(2,2) !< (R,Z) at minimum and maximum R
-    real(8), intent(out) :: zbounds(2,2) !< (R,Z) at minimum and maximum Z
-    logical, intent(out) :: ok !< Surface evaluated (otherwise use the tracer)
+    CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+    REAL(r8), INTENT(in) :: psi_q1 !< Surface location in normalized flux
+    REAL(r8), INTENT(out) :: dl !< Surface length
+    REAL(r8), INTENT(out) :: rbounds(2,2) !< (R,Z) at minimum and maximum R
+    REAL(r8), INTENT(out) :: zbounds(2,2) !< (R,Z) at minimum and maximum Z
+    LOGICAL, INTENT(out) :: ok !< Surface evaluated (otherwise use the tracer)
   END SUBROUTINE gs_lcfs_cutcell
 END INTERFACE
 !---Encapsulation for external function call parameters
@@ -4506,7 +4506,7 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
 integer(4), parameter :: nlcfs=1000
-logical :: lcfs_all,lcfs_any,geo,lcfs_ok,cc_done(nr)
+LOGICAL :: lcfs_all,lcfs_any,geo,lcfs_ok,cc_done(nr)
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
