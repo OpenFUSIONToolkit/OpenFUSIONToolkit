@@ -1215,6 +1215,7 @@ END DO
 equil%plasma_bounds=[-1.d99,1.d99]
 CALL gs_update_bounds(equil)
 IF(ASSOCIATED(equil%torflux))CALL equil%torflux%update(equil)
+equil%skip_targets=.FALSE. ! Flux functions set up as on the first iteration of a solve
 CALL equil%I%update(equil)
 CALL equil%p%update(equil)
 IF(ASSOCIATED(equil%P_ani))CALL equil%P_ani%update(equil)
@@ -4293,17 +4294,19 @@ dflux=dflux*self%psiscale
 end function gs_dflux
 !------------------------------------------------------------------------------
 !> Poloidal current function \f$ F = R B_\phi \f$ at (unnormalized) \f$ \psi \f$
+!!
+!! @warning Only valid inside the plasma; \f$ \psi \f$ is not checked against the plasma bounds
 !------------------------------------------------------------------------------
-function gs_fpol(self,psi) result(F)
-class(gs_equil), intent(inout) :: self !< G-S object
-real(8), intent(in) :: psi !< Poloidal flux
-real(8) :: F
+FUNCTION gs_fpol(self,psi) RESULT(F)
+CLASS(gs_equil), INTENT(inout) :: self !< G-S object
+REAL(r8), INTENT(in) :: psi !< Poloidal flux
+REAL(r8) :: F
 IF(self%mode==0)THEN
   F=self%ffp_scale*self%I%f(psi)+self%I%f_offset
 ELSE
   F=SIGN(1.d0,self%I%f_offset)*SQRT(MAX(self%ffp_scale*self%I%f(psi)+self%I%f_offset**2,0.d0))
 END IF
-end function gs_fpol
+END FUNCTION gs_fpol
 !------------------------------------------------------------------------------
 !> Compute the magnetic energy and helicity of a fixed boundary equilibrium
 !!

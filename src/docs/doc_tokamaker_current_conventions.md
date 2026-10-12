@@ -3,109 +3,127 @@ Toroidal and parallel current densities in TokaMaker and IMAS     {#doc_tokamake
 
 TokaMaker's `jphi-*` profiles and IMAS (FUSE, IMAS.jl, FRESCO) use different, equally valid
 definitions of "toroidal current density". This note derives the exact conversions between them
-and from the flux-surface-averaged parallel current ⟨J·B⟩, as used by the bootstrap solver
-(`solve_bootstrap` / `solve_with_bootstrap`).
+and from the flux-surface-averaged parallel current \f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle \f$, as used by the
+bootstrap solver (`solve_bootstrap` / `solve_with_bootstrap`), and the exact plasma current of a profile.
 
 ## Setting
-Axisymmetric equilibrium, **B** = F(ψ)∇φ + ∇ψ×∇φ, with ψ the poloidal flux per radian. The sign of
-ψ is chosen so that the Grad–Shafranov equation reads Δ*ψ = −μ0R²p′ − FF′ (′ = d/dψ), so that
+Axisymmetric equilibrium, \f$ \mathbf{B} = F(\psi)\nabla\phi + \nabla\psi\times\nabla\phi \f$, with \f$ \psi \f$ the poloidal
+flux per radian. The sign of \f$ \psi \f$ is chosen so that the Grad–Shafranov equation reads
+\f$ \Delta^*\psi = -\mu_0 R^2 p' - FF' \f$ (\f$ ' = d/d\psi \f$), so that
 
-    (A1)  j_φ = R p′ + FF′/(μ0 R)
+\f[ j_\phi = R p' + \frac{FF'}{\mu_0 R} \qquad \text{(A1)} \f]
 
-which is TokaMaker's convention (`util.get_jphi_from_GS`). COCOS 11 (IMAS) uses ψ per full turn
-and a different sign: that changes only the factors 2π and ±1 in what follows, never the geometry.
-Flux-surface average: ⟨A⟩ = ∮A dl/B_p ⁄ ∮dl/B_p, so V′ = dV/dψ = 2π∮dl/B_p. F, F′ and p′ are
-flux functions.
+which is TokaMaker's convention (`util.get_jphi_from_GS`). COCOS 11 (IMAS) uses \f$ \psi \f$ per full turn
+and a different sign: that changes only the factors \f$ 2\pi \f$ and \f$ \pm 1 \f$ in what follows, never the geometry.
+Flux-surface average: \f$ \langle A \rangle = \oint A\, dl/B_p \big/ \oint dl/B_p \f$, so
+\f$ V' = dV/d\psi = 2\pi \oint dl/B_p \f$. \f$ F \f$, \f$ F' \f$ and \f$ p' \f$ are flux functions.
 
 ## Parallel current
-Ampère's law gives **J** = (F′/μ0)∇ψ×∇φ + j_φ R∇φ, so J·B = (F/R) j_φ + (F′/μ0) B_p². With (A1):
+Ampère's law gives \f$ \mathbf{J} = (F'/\mu_0)\nabla\psi\times\nabla\phi + j_\phi R\nabla\phi \f$, so
+\f$ \mathbf{J}\cdot\mathbf{B} = (F/R)\, j_\phi + (F'/\mu_0) B_p^2 \f$. With (A1):
 
-    (A2)  J·B = F p′ + F′B²/μ0,   hence   ⟨J·B⟩ = F p′ + F′⟨B²⟩/μ0
+\f[ \mathbf{J}\cdot\mathbf{B} = F p' + \frac{F' B^2}{\mu_0}, \quad \text{hence} \quad
+    \langle \mathbf{J}\cdot\mathbf{B} \rangle = F p' + \frac{F' \langle B^2 \rangle}{\mu_0} \qquad \text{(A2)} \f]
 
 ## The two toroidal conventions
 Averaging (A1):
 
-    (A3)  TokaMaker:  J_TM   ≡ ⟨j_φ⟩           = ⟨R⟩p′ + ⟨1/R⟩FF′/μ0
-    (A4)  IMAS:       J_IMAS ≡ ⟨j_φ/R⟩/⟨1/R⟩  = (p′ + ⟨1/R²⟩FF′/μ0)/⟨1/R⟩
+\f[ \text{TokaMaker:} \quad J_{TM} \equiv \langle j_\phi \rangle = \langle R \rangle p' + \langle 1/R \rangle \frac{FF'}{\mu_0} \qquad \text{(A3)} \f]
+\f[ \text{IMAS:} \quad J_{IMAS} \equiv \frac{\langle j_\phi/R \rangle}{\langle 1/R \rangle}
+    = \frac{p' + \langle 1/R^2 \rangle FF'/\mu_0}{\langle 1/R \rangle} \qquad \text{(A4)} \f]
 
-TokaMaker's jphi → FF′ map (`jphi_update`, `jphi_bs_update`) inverts (A3) exactly. IMAS.jl
-`J_tor` and FRESCO `PressureJt` use (A4). On the FF′ part the two differ by ⟨1/R²⟩/⟨1/R⟩² = 1 + O(ε²),
-largest at the edge.
+TokaMaker's jphi → \f$ FF' \f$ map (`jphi_update`, `jphi_bs_update`) inverts (A3) exactly. IMAS.jl
+`J_tor` and FRESCO `PressureJt` use (A4). On the \f$ FF' \f$ part the two differ by
+\f$ \langle 1/R^2 \rangle / \langle 1/R \rangle^2 = 1 + O(\epsilon^2) \f$, largest at the edge.
+\f$ J_{IMAS} \f$ is also the current per unit cross-section area, \f$ dI/dA \f$ (A9c).
 
 ## IMAS ↔ TokaMaker
-Eliminating FF′/μ0 between (A3) and (A4):
+Eliminating \f$ FF'/\mu_0 \f$ between (A3) and (A4):
 
-    (A5)  J_TM   = ⟨R⟩p′ + ⟨1/R⟩ (J_IMAS⟨1/R⟩ − p′)/⟨1/R²⟩
-          J_IMAS = [p′ + ⟨1/R²⟩ (J_TM − ⟨R⟩p′)/⟨1/R⟩] / ⟨1/R⟩
+\f[ J_{TM} = \langle R \rangle p' + \langle 1/R \rangle \frac{J_{IMAS}\langle 1/R \rangle - p'}{\langle 1/R^2 \rangle},
+    \qquad
+    J_{IMAS} = \frac{1}{\langle 1/R \rangle}\left[ p' + \langle 1/R^2 \rangle \frac{J_{TM} - \langle R \rangle p'}{\langle 1/R \rangle} \right]
+    \qquad \text{(A5)} \f]
 
 ## Parallel → toroidal
-From (A2), FF′/μ0 = F(⟨J·B⟩ − Fp′)/⟨B²⟩. Substituting into (A4):
+From (A2), \f$ FF'/\mu_0 = F(\langle \mathbf{J}\cdot\mathbf{B} \rangle - F p')/\langle B^2 \rangle \f$. Substituting into (A4):
 
-    (A6)  J_IMAS = F⟨1/R²⟩⟨J·B⟩/(⟨B²⟩⟨1/R⟩) + p′ (1 − F²⟨1/R²⟩/⟨B²⟩)/⟨1/R⟩
+\f[ J_{IMAS} = \frac{F \langle 1/R^2 \rangle \langle \mathbf{J}\cdot\mathbf{B} \rangle}{\langle B^2 \rangle \langle 1/R \rangle}
+    + \frac{p'}{\langle 1/R \rangle}\left(1 - \frac{F^2 \langle 1/R^2 \rangle}{\langle B^2 \rangle}\right) \qquad \text{(A6)} \f]
 
-which is IMAS.jl `JparB_2_JtoR` (with `includes_bootstrap=true`; COCOS 11 adds −2π to p′), a check on
+which is IMAS.jl `JparB_2_JtoR` (with `includes_bootstrap=true`; COCOS 11 adds \f$ -2\pi \f$ to \f$ p' \f$), a check on
 the derivation. Substituting into (A3) instead:
 
-    (A7)  J_TM = F⟨1/R⟩⟨J·B⟩/⟨B²⟩ + p′G,     G = ⟨R⟩ − F²⟨1/R⟩/⟨B²⟩
+\f[ J_{TM} = \frac{F \langle 1/R \rangle \langle \mathbf{J}\cdot\mathbf{B} \rangle}{\langle B^2 \rangle} + p' G, \qquad
+    G = \langle R \rangle - \frac{F^2 \langle 1/R \rangle}{\langle B^2 \rangle} \qquad \text{(A7)} \f]
 
 ## Components
-(A6) and (A7) are exact for the total current with the equilibrium's own F and averages, and at
-fixed geometry they are linear in ⟨J·B⟩. So for a split ⟨J·B⟩ = Σ_k⟨J·B⟩_k (ohmic, bootstrap,
+(A6) and (A7) are exact for the total current with the equilibrium's own \f$ F \f$ and averages, and at
+fixed geometry they are linear in \f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle \f$. So for a split
+\f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle = \sum_k \langle \mathbf{J}\cdot\mathbf{B} \rangle_k \f$ (ohmic, bootstrap,
 current drive, …) each component converts with the first term alone, and the single pressure term
 is assigned to one component; following IMAS.jl (`includes_bootstrap=true`), to the bootstrap.
-Building J_TM this way guarantees
+Building \f$ J_{TM} \f$ this way guarantees
 
-    (A8)  the equilibrium's own ⟨J·B⟩ (= F p′ + F′⟨B²⟩/μ0) = Σ_k ⟨J·B⟩_k
+\f[ \langle \mathbf{J}\cdot\mathbf{B} \rangle_{\text{equilibrium}} = F p' + \frac{F' \langle B^2 \rangle}{\mu_0}
+    = \sum_k \langle \mathbf{J}\cdot\mathbf{B} \rangle_k \qquad \text{(A8)} \f]
 
 The pressure term is the pressure-driven, non-field-aligned current (diamagnetic plus
-Pfirsch–Schlüter, the latter with ⟨j_PS·B⟩ = 0). Neoclassical bootstrap and current-drive models
-give the field-aligned part as ⟨J·B⟩ (Hirshman & Sigmar 1981; Sauter et al. 1999; Redl et al. 2021),
-which is why it converts with the first term only. For B_p → 0, G → ⟨R⟩ − ⟨1/R⟩/⟨1/R²⟩ ≥ 0.
+Pfirsch–Schlüter, the latter with \f$ \langle \mathbf{j}_{PS}\cdot\mathbf{B} \rangle = 0 \f$). Neoclassical bootstrap
+and current-drive models give the field-aligned part as \f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle \f$ (Hirshman & Sigmar 1981;
+Sauter et al. 1999; Redl et al. 2021), which is why it converts with the first term only. For
+\f$ B_p \to 0 \f$, \f$ G \to \langle R \rangle - \langle 1/R \rangle / \langle 1/R^2 \rangle \ge 0 \f$.
 
-Earlier bootstrap conversions used ⟨J·B⟩⟨R⟩/F, then ⟨J·B⟩/⟨|B|⟩. For B_p → 0 these exceed the
-first term of (A7) by ⟨R⟩⟨1/R²⟩/⟨1/R⟩ and ⟨1/R²⟩/⟨1/R⟩² respectively, and both omit p′G.
+Earlier bootstrap conversions used \f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle \langle R \rangle / F \f$, then
+\f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle / \langle |B| \rangle \f$. For \f$ B_p \to 0 \f$ these exceed the first term of (A7) by
+\f$ \langle R \rangle \langle 1/R^2 \rangle / \langle 1/R \rangle \f$ and \f$ \langle 1/R^2 \rangle / \langle 1/R \rangle^2 \f$
+respectively, and both omit \f$ p'G \f$.
 
 ## Plasma current
-The cross-section element between neighbouring surfaces is dA = dl dψ/|∇ψ| = dl dψ/(R B_p), so for
-any flux function f
+The cross-section element between neighbouring surfaces is \f$ dA = dl\, d\psi/|\nabla\psi| = dl\, d\psi/(R B_p) \f$,
+so for any flux function \f$ f \f$
 
-    (A9a) ∫ f dA = ∫dψ f ∮dl/(R B_p) = ∫dψ (V′/2π) f ⟨1/R⟩
+\f[ \int f\, dA = \int d\psi\, f \oint \frac{dl}{R B_p} = \int d\psi\, \frac{V'}{2\pi} f \langle 1/R \rangle \qquad \text{(A9a)} \f]
 
 and for the toroidal current
 
-    (A9b) I_p = ∫ j_φ dA = ∫dψ ∮(j_φ/R) dl/B_p = ∫dψ (V′/2π) ⟨j_φ/R⟩
+\f[ I_p = \int j_\phi\, dA = \int d\psi \oint \frac{j_\phi}{R} \frac{dl}{B_p} = \int d\psi\, \frac{V'}{2\pi} \langle j_\phi/R \rangle \qquad \text{(A9b)} \f]
 
-By (A4), ⟨j_φ/R⟩ = ⟨1/R⟩J_IMAS, so comparing with (A9a)
+By (A4), \f$ \langle j_\phi/R \rangle = \langle 1/R \rangle J_{IMAS} \f$, so comparing with (A9a)
 
-    (A9c) I_p = ∫ J_IMAS dA      (exact; J_IMAS from J_TM by (A5))
-    (A9d) I_p = ∫dψ (V′/2π) [J_TM⟨1/R²⟩/⟨1/R⟩ + p′(1 − ⟨R⟩⟨1/R²⟩/⟨1/R⟩)]
+\f[ I_p = \int J_{IMAS}\, dA \quad \text{(exact; } J_{IMAS} \text{ from } J_{TM} \text{ by (A5))} \qquad \text{(A9c)} \f]
+\f[ I_p = \int d\psi\, \frac{V'}{2\pi} \left[ J_{TM} \frac{\langle 1/R^2 \rangle}{\langle 1/R \rangle}
+    + p'\left(1 - \frac{\langle R \rangle \langle 1/R^2 \rangle}{\langle 1/R \rangle}\right) \right] \qquad \text{(A9d)} \f]
 
-TokaMaker evaluates (A9c) as `gs_flux_int(J_IMAS(J_TM))`, which is (A9a) on the plasma region.
-The integral covers only the region inside the LCFS. The inductive scale α of `jphi_bs_update` is set
-by (A9c) alone (converged I_p within a few 1e-4 of the target); `jphi_update` normalises its first
-iterate by (A9c) and then follows the FEM current (`gs_itor_nl`).
+TokaMaker evaluates (A9c) as `gs_flux_int` of `eval_dIdA`, which is (A9a) on the plasma region.
+The integral covers only the region inside the LCFS. The inductive scale \f$ \alpha \f$ of `jphi_bs_update` is set
+by (A9c) alone (converged \f$ I_p \f$ within a few \f$ 10^{-4} \f$ of the target), and so is the jphi scale of
+`jphi_update` (`jphi-linterp`) at every iteration (converged \f$ I_p \f$ within a few \f$ 10^{-6} \f$ of the target on the
+ITER example). To get a current from a jphi profile, integrate \f$ dI/dA = J_{IMAS} \f$ (`util.get_dIdA_from_jphi`),
+not \f$ J_{TM} \f$.
 
 ## Bootstrap profile names
-`solve_bootstrap`, `get_boot_profs` and `solve_with_bootstrap` return J_TM profiles on `psi_n` (0 = axis,
-1 = LCFS) named `jphi_<part>_<stage>`. Parts: `bs` (bootstrap, (A7)), `pd` (its pressure-driven p′G term),
+`solve_bootstrap`, `get_boot_profs` and `solve_with_bootstrap` return \f$ J_{TM} \f$ profiles on `psi_n` (0 = axis,
+1 = LCFS) named `jphi_<part>_<stage>`. Parts: `bs` (bootstrap, (A7)), `pd` (its pressure-driven \f$ p'G \f$ term),
 `ind` (inductive), `fixed`, `total`. `_raw` is before edge isolation, scaling and taper; `_final` is what
 enters `jphi_total` = `jphi_ind_final` + `jphi_bs_final` + `jphi_fixed_final` (the Python solve returns the
-GS output as `jphi_total`). `jdotb_bs_raw` is the Redl ⟨J·B⟩ behind `jphi_bs_raw`. Options use `jbs`
-(`scale_jbs`, `isolate_edge_jbs`, `parameterize_jbs`, `taper_edge_jbs`, `djbs_tol`).
+GS output as `jphi_total`). `jdotb_bs_raw` is the Redl \f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle \f$ behind `jphi_bs_raw`.
+Options use `jbs` (`scale_jbs`, `isolate_edge_jbs`, `parameterize_jbs`, `taper_edge_jbs`, `djbs_tol`).
 
 ## Where these are used
 - TokaMaker `jphi_bs_update` / `calculate_bootstrap` (Fortran) and `solve_with_bootstrap(use_python_solve=True)`:
-  the bootstrap enters `jphi_total` by (A7) with p′G (`boot_profs['jphi_pd_raw']`); `boot_profs['jdotb_bs_raw']` holds the Redl ⟨J·B⟩.
-- TokaMaker `jphi_update` / `jphi_bs_update` I_p normalisation, and the α root of
-  `solve_with_bootstrap(use_python_solve=True)` (`compute_flux_integral` of J_IMAS): (A9c).
+  the bootstrap enters `jphi_total` by (A7) with \f$ p'G \f$ (`boot_profs['jphi_pd_raw']`); `boot_profs['jdotb_bs_raw']`
+  holds the Redl \f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle \f$.
+- TokaMaker `jphi_update` / `jphi_bs_update` \f$ I_p \f$ normalisation, the \f$ \alpha \f$ root of
+  `solve_with_bootstrap(use_python_solve=True)`, and `util.get_dIdA_from_jphi`: (A9c).
 
 ## References
 - J. P. Freidberg, *Ideal MHD* (Cambridge University Press, 2014): Grad–Shafranov equilibrium; (A1), (A2).
 - J. Wesson, *Tokamaks*, 4th ed. (Oxford University Press, 2011): equilibrium and flux-surface averages.
-- S. P. Hirshman and D. J. Sigmar, Nucl. Fusion **21**, 1079 (1981): neoclassical currents as ⟨J·B⟩;
-  Pfirsch–Schlüter current with zero ⟨J·B⟩.
+- S. P. Hirshman and D. J. Sigmar, Nucl. Fusion **21**, 1079 (1981): neoclassical currents as
+  \f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle \f$; Pfirsch–Schlüter current with zero \f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle \f$.
 - O. Sauter, C. Angioni and Y. R. Lin-Liu, Phys. Plasmas **6**, 2834 (1999); A. Redl et al.,
-  Phys. Plasmas **28**, 022502 (2021): bootstrap current as ⟨j_∥B⟩.
-- O. Sauter and S. Yu. Medvedev, Comput. Phys. Commun. **184**, 293 (2013): COCOS (IMAS signs and 2π).
+  Phys. Plasmas **28**, 022502 (2021): bootstrap current as \f$ \langle j_\parallel B \rangle \f$.
+- O. Sauter and S. Yu. Medvedev, Comput. Phys. Commun. **184**, 293 (2013): COCOS (IMAS signs and \f$ 2\pi \f$).
 - IMAS.jl `src/physics/currents.jl`, `JparB_2_JtoR`:
   `<J⋅B> = (1/f)(<B²>/<1/R²>)(<Jt/R> + dp/dψ(1 − f²<1/R²>/<B²>))`, i.e. (A6).
