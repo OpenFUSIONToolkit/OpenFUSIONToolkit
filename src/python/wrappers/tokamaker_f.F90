@@ -646,7 +646,7 @@ END SUBROUTINE tokamaker_vac_solve
 SUBROUTINE tokamaker_recon_run(tMaker_ptr,vacuum,settings,error_flag) BIND(C,NAME="tokamaker_recon_run")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Reconstruct vacuum equilibrium (no plasma)?
-TYPE(tokamaker_recon_settings_type), VALUE, INTENT(in) :: settings !< Reconstruction settings struct
+TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Reconstruction settings struct
 INTEGER(c_int), INTENT(out) :: error_flag !< Error flag (0 if no error)
 LOGICAL :: fitI,fitP,fit_Pscale,fit_FFPscale,fitR0,fitZ0,fitCoils,fitF0,fixedCentering,vac_save
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c,outfile_c
@@ -690,7 +690,7 @@ END SUBROUTINE tokamaker_recon_run
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_recon_setup(tMaker_ptr,settings,ncons,error_flag) BIND(C,NAME="tokamaker_recon_setup")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
-TYPE(tokamaker_recon_settings_type), VALUE, INTENT(in) :: settings !< Reconstruction settings struct
+TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Reconstruction settings struct
 INTEGER(c_int), INTENT(out) :: ncons !< Number of constraints
 INTEGER(c_int), INTENT(out) :: error_flag !< Error flag (0 if no error)
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: infile_c
@@ -736,7 +736,7 @@ END SUBROUTINE tokamaker_recon_destroy
 SUBROUTINE tokamaker_recon_err(tMaker_ptr,vacuum,settings,error_mat,error_flag) BIND(C,NAME="tokamaker_recon_err")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
 LOGICAL(c_bool), VALUE, INTENT(in) :: vacuum !< Reconstruct vacuum equilibrium (no plasma)?
-TYPE(tokamaker_recon_settings_type), VALUE, INTENT(in) :: settings !< Reconstruction settings struct
+TYPE(tokamaker_recon_settings_type), INTENT(in) :: settings !< Reconstruction settings struct
 TYPE(c_ptr), VALUE, INTENT(in) :: error_mat !< Pointer to error matrix or void to write to file
 INTEGER(c_int), INTENT(out) :: error_flag !< Error flag (0 if no error)
 REAL(r8), POINTER :: error_mat_tmp(:,:)
@@ -1709,7 +1709,7 @@ END SUBROUTINE tokamaker_set_psi_dt
 !---------------------------------------------------------------------------------
 SUBROUTINE tokamaker_set_settings(tMaker_ptr,settings,error_str) BIND(C,NAME="tokamaker_set_settings")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< TokaMaker instance
-TYPE(tokamaker_settings_type), VALUE, INTENT(in) :: settings !< Settings object
+TYPE(tokamaker_settings_type), INTENT(in) :: settings !< Settings object
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 CHARACTER(KIND=c_char), POINTER, DIMENSION(:) :: limfile_c
 TYPE(tokamaker_instance), POINTER :: tMaker_obj

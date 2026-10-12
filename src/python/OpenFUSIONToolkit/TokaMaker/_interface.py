@@ -205,7 +205,7 @@ tokamaker_set_psi_dt = ctypes_subroutine(oftpy_lib.tokamaker_set_psi_dt,
 
 # tokamaker_set_settings(tMaker_ptr,settings,error_str)
 tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,
-    [c_void_p, tokamaker_settings_cstruct, c_char_p])
+    [c_void_p, ctypes.POINTER(tokamaker_settings_cstruct), c_char_p])
 
 # tokamaker_set_dipole_a(tMaker_ptr,dipole_a,error_str)
 tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,

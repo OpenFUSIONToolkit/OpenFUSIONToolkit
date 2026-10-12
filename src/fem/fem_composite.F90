@@ -100,9 +100,9 @@ END TYPE oft_ml_fem_comp_type
 type, PUBLIC, extends(oft_ml_vecspace) :: oft_ml_fe_comp_vecspace
   class(oft_ml_fem_comp_type), pointer :: ML_FE_rep => NULL() !< ML FE representation
   !> Needs docs
-  PROCEDURE(ml_fe_base_pop), POINTER :: base_pop => NULL()
+  PROCEDURE(ml_fe_base_pop2), POINTER :: base_pop => NULL()
   !> Needs docs
-  PROCEDURE(ml_fe_base_push), POINTER :: base_push => NULL()
+  PROCEDURE(ml_fe_base_push2), POINTER :: base_push => NULL()
 contains
   !> Needs docs
   PROCEDURE :: vec_create => ml_fe_vecspace_create
@@ -115,21 +115,21 @@ ABSTRACT INTERFACE
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-  SUBROUTINE ml_fe_base_push(self,afine,acors)
+  SUBROUTINE ml_fe_base_push2(self,afine,acors)
     IMPORT oft_ml_fe_comp_vecspace, oft_vector
     CLASS(oft_ml_fe_comp_vecspace), INTENT(inout) :: self
     CLASS(oft_vector), INTENT(inout) :: afine
     CLASS(oft_vector), INTENT(inout) :: acors
-  END SUBROUTINE ml_fe_base_push
+  END SUBROUTINE ml_fe_base_push2
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
-  SUBROUTINE ml_fe_base_pop(self,acors,afine)
+  SUBROUTINE ml_fe_base_pop2(self,acors,afine)
     IMPORT oft_ml_fe_comp_vecspace, oft_vector
     CLASS(oft_ml_fe_comp_vecspace), INTENT(inout) :: self
     CLASS(oft_vector), INTENT(inout) :: acors
     CLASS(oft_vector), INTENT(inout) :: afine
-  END SUBROUTINE ml_fe_base_pop
+  END SUBROUTINE ml_fe_base_pop2
 END INTERFACE
 CONTAINS
 !------------------------------------------------------------------------------

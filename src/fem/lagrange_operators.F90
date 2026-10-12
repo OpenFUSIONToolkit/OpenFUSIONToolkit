@@ -281,7 +281,7 @@ end subroutine lag_rinterp
 !> Reconstruct the gradient of a Lagrange scalar field
 !------------------------------------------------------------------------------
 subroutine lag_ginterp_apply(self,cell,f,gop,val)
-class(oft_lag_ginterp), intent(inout) :: self !< 
+class(oft_lag_ginterp), intent(inout) :: self !<
 integer(i4), intent(in) :: cell !< Cell for interpolation
 real(r8), intent(in) :: f(:) !< Position in cell in logical coord [4]
 real(r8), intent(in) :: gop(3,4) !< Logical gradient vectors at f [3,4]
@@ -770,7 +770,7 @@ subroutine oft_lag_getmop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_flag
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
 real(r8), allocatable :: rop(:),mop(:,:)
@@ -792,6 +792,14 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero
 END IF
+!---
+bc_flag=0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_flag=1
+  CASE("grnd")
+    bc_flag=2
+END SELECT
 !------------------------------------------------------------------------------
 !
 !------------------------------------------------------------------------------
@@ -819,12 +827,12 @@ do i=1,lag_rep%mesh%nc
   !---Get local to global DOF mapping
   call lag_rep%ncdofs(i,j)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("zerob")
+  SELECT CASE(bc_flag)
+    CASE(1)
       DO jr=1,lag_rep%nce
         IF(lag_rep%global%gbe(j(jr)))mop(jr,:)=0.d0
       END DO
-    CASE("grnd")
+    CASE(2)
       IF(ANY(lag_rep%mesh%igrnd>0))THEN
         DO jr=1,lag_rep%nce
           IF(ANY(j(jr)==lag_rep%mesh%igrnd))mop(jr,:)=0.d0
@@ -841,8 +849,8 @@ deallocate(j,rop,mop)
 ALLOCATE(mop(1,1),j(1))
 !---Set diagonal entries for dirichlet rows
 mop(1,1)=1.d0
-SELECT CASE(TRIM(bc))
-  CASE("zerob")
+SELECT CASE(bc_flag)
+  CASE(1)
     DO i=1,lag_rep%nbe
       jr=lag_rep%lbe(i)
       IF(lag_rep%global%gbe(jr).AND.lag_rep%linkage%leo(i))THEN
@@ -850,7 +858,7 @@ SELECT CASE(TRIM(bc))
         call mat%add_values(j,j,mop,1,1)
       END IF
     END DO
-  CASE("grnd")
+  CASE(2)
     IF(ANY(lag_rep%mesh%igrnd>0))THEN
       DO i=1,lag_rep%nbe
         jr=lag_rep%lbe(i)
@@ -884,7 +892,7 @@ subroutine oft_lag_getlop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_flag
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
 real(r8), allocatable :: gop(:,:),lop(:,:)
@@ -906,6 +914,14 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero
 END IF
+!---Set BC flag
+bc_flag = 0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_flag = 1
+  CASE("grnd")
+    bc_flag = 2
+END SELECT
 !------------------------------------------------------------------------------
 ! Operator integration
 !------------------------------------------------------------------------------
@@ -932,12 +948,12 @@ do i=1,lag_rep%mesh%nc
   !---Get local to global DOF mapping
   call lag_rep%ncdofs(i,j)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("zerob")
+  SELECT CASE(bc_flag)
+    CASE(1)
       DO jr=1,lag_rep%nce
         IF(lag_rep%global%gbe(j(jr)))lop(jr,:)=0.d0
       END DO
-    CASE("grnd")
+    CASE(2)
       IF(ANY(lag_rep%mesh%igrnd>0))THEN
         DO jr=1,lag_rep%nce
           IF(ANY(j(jr)==lag_rep%mesh%igrnd))lop(jr,:)=0.d0
@@ -954,8 +970,8 @@ deallocate(j,gop,lop)
 ALLOCATE(lop(1,1),j(1))
 !---Set diagonal entries for dirichlet rows
 lop(1,1)=1.d0
-SELECT CASE(TRIM(bc))
-  CASE("zerob")
+SELECT CASE(bc_flag)
+  CASE(1)
     DO i=1,lag_rep%nbe
       jr=lag_rep%lbe(i)
       IF(lag_rep%global%gbe(jr).AND.lag_rep%linkage%leo(i))THEN
@@ -963,7 +979,7 @@ SELECT CASE(TRIM(bc))
         call mat%add_values(j,j,lop,1,1)
       END IF
     END DO
-  CASE("grnd")
+  CASE(2)
     IF(ANY(lag_rep%mesh%igrnd>0))THEN
       DO i=1,lag_rep%nbe
         jr=lag_rep%lbe(i)
@@ -1000,7 +1016,7 @@ class(fem_interp), intent(inout) :: field !< Vector field defining \f$ \hat{b} \
 character(LEN=*), intent(in) :: bc !< Boundary condition
 real(r8), optional, intent(in) :: perp !< Value of perpendicular conductivity (optional)
 logical, optional, intent(in) :: be_flag(:) !< Flag for dirichlet nodes if different from boundary [ne] (optional)
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_flag
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),B_nodal(3),par_diff,perp_diff,elapsed_time
 real(r8), allocatable :: gop(:,:),pdop(:,:)
@@ -1029,6 +1045,14 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero
 END IF
+!---
+bc_flag=0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_flag=1
+  CASE("list")
+    bc_flag=2
+END SELECT
 !------------------------------------------------------------------------------
 !
 !------------------------------------------------------------------------------
@@ -1061,12 +1085,12 @@ do i=1,lag_rep%mesh%nc
     end do
   end do
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("zerob")
+  SELECT CASE(bc_flag)
+    CASE(1)
       DO jr=1,lag_rep%nce
         IF(lag_rep%global%gbe(j(jr)))pdop(jr,:)=0.d0
       END DO
-    CASE("list")
+    CASE(2)
       DO jr=1,lag_rep%nce
         IF(be_flag(j(jr)))pdop(jr,:)=0.d0
       END DO
@@ -1080,8 +1104,8 @@ deallocate(j,gop,pdop)
 !$omp end parallel
 ALLOCATE(pdop(1,1),j(1))
 !---Set diagonal entries for dirichlet rows
-SELECT CASE(TRIM(bc))
-  CASE("zerob")
+SELECT CASE(bc_flag)
+  CASE(1)
     pdop(1,1)=1.d0
     DO i=1,lag_rep%nbe
       jr=lag_rep%lbe(i)
@@ -1090,7 +1114,7 @@ SELECT CASE(TRIM(bc))
       j=jr
       call mat%add_values(j,j,pdop,1,1)
     END DO
-  CASE("list")
+  CASE(2)
     pdop(1,1)=1.d0
     DO i=1,lag_rep%ne
       IF(lag_rep%be(i))CYCLE

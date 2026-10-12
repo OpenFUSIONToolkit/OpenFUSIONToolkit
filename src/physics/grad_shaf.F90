@@ -5355,7 +5355,7 @@ class(gs_factory), intent(inout) :: self !< G-S object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 real(8), optional, intent(in) :: dt !< Timestep size for time-dependent version
 real(8), optional, intent(in) :: scale !< Global scale factor
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_flag
 integer(i4), allocatable :: j(:),j2(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time,pt(3),dt_in,main_scale
 real(r8), allocatable :: rop(:),gop(:,:),lop(:,:),eta_reg(:)
@@ -5386,6 +5386,13 @@ IF(dt_in>0.d0)nnonaxi=self%region_info%nnonaxi
 !------------------------------------------------------------------------------
 ! Allocate matrix
 !------------------------------------------------------------------------------
+bc_flag=0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_flag=1
+  CASE("free")
+    bc_flag=2
+END SELECT
 IF(.NOT.ASSOCIATED(mat))THEN
   !---
   CALL self%fe_rep%vec_create(oft_lag_vec)
@@ -5412,7 +5419,7 @@ IF(.NOT.ASSOCIATED(mat))THEN
     DEALLOCATE(dense_flag)
   END IF
   !---Add dense block for boundary
-  IF(TRIM(bc)=="free")THEN
+  IF(bc_flag==2)THEN
     ! CALL gs_mat_create(mat)
     ALLOCATE(bc_nodes(1))
     bc_nodes(1)%n=self%fe_rep%nbe
@@ -5518,12 +5525,12 @@ do i=1,self%fe_rep%mesh%nc
   !---Get local to global DOF mapping
   call self%fe_rep%ncdofs(i,j)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("zerob")
+  SELECT CASE(bc_flag)
+    CASE(1)
       DO jr=1,self%fe_rep%nce
         IF(self%fe_rep%be(j(jr)))lop(jr,:)=0.d0
       END DO
-    CASE("free")
+    CASE(2)
       DO jr=1,self%fe_rep%nce
         IF(self%fe_rep%be(j(jr)))lop(jr,:)=0.d0
       END DO
@@ -5620,15 +5627,15 @@ IF((dt_in>0.d0).AND.(self%ncoils>0))THEN
 END IF
 IF(nnonaxi>0)DEALLOCATE(nonaxi_vals)
 !---Set diagonal entries for dirichlet rows
-SELECT CASE(TRIM(bc))
-CASE("zerob")
+SELECT CASE(bc_flag)
+CASE(1)
   lop(1,1)=1.d0
   DO i=1,self%fe_rep%nbe
     IF(.NOT.self%fe_rep%linkage%leo(i))CYCLE
     j=self%fe_rep%lbe(i)
     call mat%add_values(j,j,lop,1,1)
   END DO
-CASE("free")
+CASE(2)
   CALL set_bcmat(self,mat)
 END SELECT
 DEALLOCATE(j,lop)
@@ -5661,7 +5668,7 @@ real(r8), optional, intent(in) :: nonaxi_vals(:,:)
 real(r8), pointer, dimension(:) :: btmp
 real(8) :: psitmp,goptmp(3,3),det,v,t1,psi_tmp,nturns,eta_wt,pt(3),coil_dist,vcont_val
 real(8), allocatable :: rhs_loc(:),cond_fac(:),rop(:),row_tmp(:,:),col_tmp(:,:),eta_reg(:)
-integer(4) :: i,j,m,l,k,j2(1),jvsc(1)
+integer(4) :: i,j,m,l,k,j2(1),jvsc(1),bc_flag
 integer(4), allocatable :: j_lag(:)
 logical :: curved
 CLASS(oft_bmesh), POINTER :: smesh
@@ -5682,6 +5689,14 @@ IF(dt_in>0.d0)THEN
     eta_reg(j)=self%cond_regions(l)%eta
   END DO
 END IF
+!---
+bc_flag=0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_flag=1
+  CASE("free")
+    bc_flag=2
+END SELECT
 !---
 !!$omp parallel private(j,j_lag,curved,goptmp,v,m,det,psitmp,l,rop,nturns) reduction(+:mutual)
 allocate(rop(self%fe_rep%nce),row_tmp(self%fe_rep%nce,1))
@@ -5722,12 +5737,12 @@ DO j=1,smesh%nc
     END DO
   end do
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-  CASE("zerob")
+  SELECT CASE(bc_flag)
+  CASE(1)
     DO l=1,self%fe_rep%nce
       IF(self%fe_rep%be(j_lag(l)))row_tmp(l,1)=0.d0
     END DO
-  CASE("free")
+  CASE(2)
     DO l=1,self%fe_rep%nce
       IF(self%fe_rep%be(j_lag(l)))row_tmp(l,1)=0.d0
     END DO
