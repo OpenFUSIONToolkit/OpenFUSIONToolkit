@@ -525,7 +525,7 @@ subroutine jphi_update(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
-REAL(r8) :: jphi_norm,pscale,pprime,dnorm,ip0,ip1
+REAL(r8) :: jphi_norm,pscale,pprime,ip0,ip1
 REAL(r8), ALLOCATABLE :: jtor(:),xn(:),jn(:)
 type(spline_type) :: R_spline
 self%plasma_bounds=gseq%plasma_bounds
@@ -539,25 +539,23 @@ CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__)
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
-!---Update jphi normalization to match Ip target
-IF(gseq%skip_targets)THEN
-  CALL gs_itor_nl(gseq,jphi_norm)
-  dnorm=gseq%Ip_target/jphi_norm
-  jphi_norm=(1.d0+dnorm)*self%norm_last/2.d0
-  self%norm_last=jphi_norm
-ELSE
-  ! Exact I_p (A9c) is affine in the jphi scale: I_p(norm) = ip0 + norm*(ip1 - ip0), over [LCFS, x]
-  ALLOCATE(xn(0:self%npsi),jn(0:self%npsi),jtor(0:self%npsi))
-  xn=[0.d0,self%x]; jn=[self%j0,self%jphi]
-  CALL eval_jtor_imas(gseq, R_spline, xn, self%npsi+1, jn, pscale, jtor)
-  CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip1)
-  jn=0.d0
-  CALL eval_jtor_imas(gseq, R_spline, xn, self%npsi+1, jn, pscale, jtor)
-  CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip0)
-  DEALLOCATE(xn,jn,jtor)
+!---Update jphi normalization to match Ip target: the exact I_p (A9c) is affine in the jphi scale,
+!   I_p(norm) = ip0 + norm*(ip1 - ip0), over [LCFS, x]
+ALLOCATE(xn(0:self%npsi),jn(0:self%npsi),jtor(0:self%npsi))
+xn=[0.d0,self%x]; jn=[self%j0,self%jphi]
+CALL eval_dIdA(gseq, R_spline, xn, self%npsi+1, jn, pscale, jtor)
+CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip1)
+jn=0.d0
+CALL eval_dIdA(gseq, R_spline, xn, self%npsi+1, jn, pscale, jtor)
+CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip0)
+DEALLOCATE(xn,jn,jtor)
+IF(ABS(ip1-ip0)>1.d-10*ABS(gseq%Ip_target))THEN
   jphi_norm=(ABS(gseq%Ip_target)-ip0)/(ip1-ip0)
-  self%norm_last=jphi_norm
+ELSE
+  CALL oft_warn("jphi_update: jphi profile carries no net current, keeping the last normalization")
+  jphi_norm=self%norm_last
 END IF
+self%norm_last=jphi_norm
 !---Compute updated F*F' profile ! 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
 CALL spline_eval(R_spline,0.d0,0)
 pprime=gseq%P%fp(gseq%plasma_bounds(1))
@@ -647,11 +645,11 @@ CALL spline_fit(R_spline, "extrap")
 DEALLOCATE(ravgs, psi_q, qprof)
 END SUBROUTINE build_Ravg_spline
 !------------------------------------------------------------------------------
-!> IMAS-convention <j_phi/R>/<1/R> from TokaMaker jphi = <j_phi> on the psi_N grid psi_vals
+!> Current per unit cross-section area, dI/dA = <j_phi/R>/<1/R>, from TokaMaker jphi = <j_phi> on the psi_N grid psi_vals
 !! (OFT convention), eq. A5 of doc_tokamaker_current_conventions; gs_flux_int of the result is
 !! exactly I_p (eq. A9c). jphi and P'*pscale must share units.
 !------------------------------------------------------------------------------
-SUBROUTINE eval_jtor_imas(gseq, R_spline, psi_vals, n, jphi, pscale, jtor)
+SUBROUTINE eval_dIdA(gseq, R_spline, psi_vals, n, jphi, pscale, jtor)
 CLASS(gs_equil), INTENT(inout) :: gseq !< Equilibrium
 TYPE(spline_type), INTENT(inout) :: R_spline !< <R>, <1/R>, <1/R^2> spline (@ref build_ravg_spline)
 INTEGER(i4), INTENT(in) :: n !< Number of nodes
@@ -666,7 +664,7 @@ DO i = 1, n
   pprime = pscale*gseq%P%fp(psi_vals(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
   jtor(i) = (pprime + R_spline%f(3)*(jphi(i) - R_spline%f(1)*pprime)/R_spline%f(2))/R_spline%f(2)
 END DO
-END SUBROUTINE eval_jtor_imas
+END SUBROUTINE eval_dIdA
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

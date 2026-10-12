@@ -82,8 +82,9 @@ By (A4), ⟨j_φ/R⟩ = ⟨1/R⟩J_IMAS, so comparing with (A9a)
 
 TokaMaker evaluates (A9c) as `gs_flux_int(J_IMAS(J_TM))`, which is (A9a) on the plasma region.
 The integral covers only the region inside the LCFS. The inductive scale α of `jphi_bs_update` is set
-by (A9c) alone (converged I_p within a few 1e-4 of the target); `jphi_update` normalises its first
-iterate by (A9c) and then follows the FEM current (`gs_itor_nl`).
+by (A9c) alone (converged I_p within a few 1e-4 of the target), and so is the jphi scale of
+`jphi_update` (`jphi-linterp`) at every iteration (converged I_p within a few 1e-6 of the target on the
+ITER example). To get a current from a jphi profile, integrate dI/dA = J_IMAS (`util.get_dIdA_from_jphi`), not J_TM.
 
 ## Bootstrap profile names
 `solve_bootstrap`, `get_boot_profs` and `solve_with_bootstrap` return J_TM profiles on `psi_n` (0 = axis,

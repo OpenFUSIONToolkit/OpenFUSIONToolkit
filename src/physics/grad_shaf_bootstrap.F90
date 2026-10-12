@@ -19,7 +19,7 @@ use oft_lag_basis, only: oft_blag_geval
 use oft_mesh_type, only: bmesh_findcell
 use oft_blag_operators, only: oft_lag_brinterp
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
-use grad_shaf_prof_phys, only: eval_jtor_imas, build_Ravg_spline, gs_flux_int, &
+use grad_shaf_prof_phys, only: eval_dIdA, build_Ravg_spline, gs_flux_int, &
   jphi_update, jphi_copy, jphi_flux_func
 use spline_mod
 USE oft_io, ONLY: hdf5_create_group, hdf5_write, hdf5_read, &
@@ -403,7 +403,7 @@ end function h5_name
 !!   2. jphi_fixed and the bootstrap current jphi_bs (with its pressure-driven part jphi_pd), scaled
 !!      and optionally isolated, or reused from the last evaluation when frozen.
 !!   3. Edge taper of jphi_bs, jphi_pd, jphi_ind and jphi_fixed.
-!!   4. alpha from the exact I_p (gs_flux_int of eval_jtor_imas, eq. A9c), which is affine in
+!!   4. alpha from the exact I_p (gs_flux_int of eval_dIdA, eq. A9c), which is affine in
 !!      alpha: alpha = (Ip_target - Ip_lo)/(Ip_hi - Ip_lo).
 !!   5. jphi_total = alpha*jphi_ind + jphi_bs + jphi_fixed; boot_profs; F*F' knots.
 !!   6. Diagnostics (if diagnose_bs is set).
@@ -415,7 +415,7 @@ INTEGER(i4) :: i
 REAL(r8) :: pscale, pprime
 TYPE(spline_type) :: R_spline
 REAL(r8), ALLOCATABLE :: psi_n(:) !< Nodes: LCFS (0) and self%x
-REAL(r8), ALLOCATABLE :: jtor(:)  !< IMAS-convention current for the exact I_p measure (eval_jtor_imas)
+REAL(r8), ALLOCATABLE :: jtor(:)  !< dI/dA for the exact I_p measure (eval_dIdA)
 REAL(r8), ALLOCATABLE :: jphi_bs(:), jphi_pd(:), jphi_ind(:), jphi_fixed(:), jphi_total(:)
 REAL(r8), ALLOCATABLE :: jphi_bs_spike(:), jphi_bs_spike_masked(:) !< Isolated / masked edge spike [A/m²]
 LOGICAL :: isolate
@@ -522,10 +522,10 @@ ALLOCATE(jphi_total(0:self%npsi))
 !   every update (cheap): a frozen alpha lets I_p drift while the shape is still settling.
 ip_target = ABS(gseq%Ip_target)
 jphi_total = jphi_bs + jphi_fixed
-CALL eval_jtor_imas(gseq, R_spline, psi_n, self%npsi+1, jphi_total, pscale, jtor)
+CALL eval_dIdA(gseq, R_spline, psi_n, self%npsi+1, jphi_total, pscale, jtor)
 CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, ip_result_lo)
 jphi_total = jphi_ind + jphi_bs + jphi_fixed
-CALL eval_jtor_imas(gseq, R_spline, psi_n, self%npsi+1, jphi_total, pscale, jtor)
+CALL eval_dIdA(gseq, R_spline, psi_n, self%npsi+1, jphi_total, pscale, jtor)
 CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, ip_result_hi)
 ip_ind = ip_result_hi - ip_result_lo
 IF(ABS(ip_ind) > 0.0_r8)THEN
@@ -592,7 +592,7 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] jphi_fixed max = ', MAXVAL(ABS(jphi_fixed))
   !--- Side-by-side Ip comparison: FEM nonlinear solve vs profile flux integral
   CALL gs_itor_nl(gseq, itor_nl)
-  CALL eval_jtor_imas(gseq, R_spline, psi_n, self%npsi+1, jphi_total, pscale, jtor)
+  CALL eval_dIdA(gseq, R_spline, psi_n, self%npsi+1, jphi_total, pscale, jtor)
   CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, itor_flint)
   WRITE(*,'(A)') '  [jphi_bs_update] --- Ip comparison (current jphi_total) ---'
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] Ip(gs_itor_nl)    = ', itor_nl/mu0
