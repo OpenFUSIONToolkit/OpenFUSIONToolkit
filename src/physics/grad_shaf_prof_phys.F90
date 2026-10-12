@@ -524,7 +524,7 @@ subroutine jphi_update(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
-REAL(r8) :: jphi_norm,pscale,pprime,dnorm,ip0,ip1
+REAL(r8) :: jphi_norm,pscale,pprime,ip0,ip1
 REAL(r8), ALLOCATABLE :: jtor(:),xpsi(:),ravgs(:,:),xn(:),jn(:)
 self%plasma_bounds=gseq%plasma_bounds
 CALL jphi_psi_nodes(self,xpsi)
@@ -539,25 +539,23 @@ CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__)
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
-!---Update jphi normalization to match Ip target
-IF(gseq%skip_targets)THEN
-  CALL gs_itor_nl(gseq,jphi_norm)
-  dnorm=gseq%Ip_target/jphi_norm
-  jphi_norm=(1.d0+dnorm)*self%norm_last/2.d0
-  self%norm_last=jphi_norm
-ELSE
-  ! Exact I_p (A9c) is affine in the jphi scale: I_p(norm) = ip0 + norm*(ip1 - ip0), over [LCFS, x]
-  ALLOCATE(xn(0:self%npsi),jn(0:self%npsi),jtor(0:self%npsi))
-  xn=[0.d0,xpsi]; jn=[self%j0,self%jphi]
-  CALL eval_jtor_imas(gseq, xn, self%npsi+1, ravgs, jn, pscale, jtor)
-  CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip1)
-  jn=0.d0
-  CALL eval_jtor_imas(gseq, xn, self%npsi+1, ravgs, jn, pscale, jtor)
-  CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip0)
-  DEALLOCATE(xn,jn,jtor)
+!---Update jphi normalization to match Ip target: the exact I_p (A9c) is affine in the jphi scale,
+!   I_p(norm) = ip0 + norm*(ip1 - ip0), over [LCFS, x]
+ALLOCATE(xn(0:self%npsi),jn(0:self%npsi),jtor(0:self%npsi))
+xn=[0.d0,xpsi]; jn=[self%j0,self%jphi]
+CALL eval_dIdA(gseq, xn, self%npsi+1, ravgs, jn, pscale, jtor)
+CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip1)
+jn=0.d0
+CALL eval_dIdA(gseq, xn, self%npsi+1, ravgs, jn, pscale, jtor)
+CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip0)
+DEALLOCATE(xn,jn,jtor)
+IF(ABS(ip1-ip0)>1.d-10*ABS(gseq%Ip_target))THEN
   jphi_norm=(ABS(gseq%Ip_target)-ip0)/(ip1-ip0)
-  self%norm_last=jphi_norm
+ELSE
+  CALL oft_warn("jphi_update: jphi profile carries no net current, keeping the last normalization")
+  jphi_norm=self%norm_last
 END IF
+self%norm_last=jphi_norm
 !---Compute updated F*F' profile ! 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
 pprime=gseq%P%fp(gseq%plasma_bounds(1))
 self%y0 = 2.d0*(self%j0*jphi_norm - ravgs(0,1)*pprime*pscale)/ravgs(0,2)
@@ -619,7 +617,7 @@ do i=1,self%device%mesh%nc
   do m=1,self%device%fe_rep%quad%np
     call self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
     call prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
-    IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma (mode 4 returns 0 there)
+    IF(psitmp(1)<=0.d0)CYCLE ! Outside the plasma: mode 4 returns 0 outside the LCFS and where gs_test_bounds fails (private flux)
     psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
     IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*self%device%fe_rep%quad%wts(m)
   end do
@@ -741,11 +739,11 @@ DO k=1,n
 END DO
 END SUBROUTINE gs_ravgs
 !------------------------------------------------------------------------------
-!> IMAS-convention <j_phi/R>/<1/R> from TokaMaker jphi = <j_phi> on the psi_N grid psi_vals
+!> Current per unit cross-section area, dI/dA = <j_phi/R>/<1/R>, from TokaMaker jphi = <j_phi> on the psi_N grid psi_vals
 !! (OFT convention), eq. A5 of doc_tokamaker_current_conventions; gs_flux_int of the result is
 !! exactly I_p (eq. A9c). jphi and P'*pscale must share units.
 !------------------------------------------------------------------------------
-SUBROUTINE eval_jtor_imas(gseq, psi_vals, n, ravgs, jphi, pscale, jtor)
+SUBROUTINE eval_dIdA(gseq, psi_vals, n, ravgs, jphi, pscale, jtor)
 CLASS(gs_equil), INTENT(inout) :: gseq !< Equilibrium
 INTEGER(i4), INTENT(in) :: n !< Number of nodes
 REAL(r8), INTENT(in) :: psi_vals(n) !< Normalised psi nodes (OFT convention)
@@ -759,7 +757,7 @@ DO i = 1, n
   pprime = pscale*gseq%P%fp(psi_vals(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
   jtor(i) = (pprime + ravgs(i,3)*(jphi(i) - ravgs(i,1)*pprime)/ravgs(i,2))/ravgs(i,2)
 END DO
-END SUBROUTINE eval_jtor_imas
+END SUBROUTINE eval_dIdA
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

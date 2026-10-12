@@ -5,9 +5,11 @@
 !---------------------------------------------------------------------------------
 !> @file grad_shaf_bootstrap.F90
 !
-!> Bootstrap current and sawtooth reset for the jphi-split-bootstrap Grad-Shafranov profile
+!> Bootstrap current for the jphi-split-bootstrap Grad-Shafranov profile
 !!
-!! @authors Stuart Benjamin, fortranisation of Daniel Burgess' bootstrap.py
+!! Fortran port of Daniel Burgess' Python bootstrap solve (TokaMaker/bootstrap.py).
+!!
+!! @authors Stuart Benjamin, Daniel Burgess
 !! @date June 2026
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
@@ -21,7 +23,7 @@ use oft_lag_basis, only: oft_blag_geval
 use oft_mesh_type, only: bmesh_findcell
 use oft_blag_operators, only: oft_lag_brinterp
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
-use grad_shaf_prof_phys, only: eval_jtor_imas, gs_ravgs, gs_flux_int, &
+use grad_shaf_prof_phys, only: eval_dIdA, gs_ravgs, gs_flux_int, &
   gs_flux_cumint, jphi_update, jphi_copy, jphi_flux_func, jphi_psi_nodes
 USE oft_io, ONLY: hdf5_create_group, hdf5_write, hdf5_read, &
   hdf5_field_get_sizes, hdf5_field_exist
@@ -324,6 +326,26 @@ CALL reset_solve_state(self)
 self%boot_profs = boot_profs()
 end subroutine jphi_bs_delete
 !------------------------------------------------------------------------------
+!> Set the F*F' knots from the equilibrium's current F*F' (`gseq%I` times `ffp_scale`), so a bootstrap
+!! profile that replaces it keeps the current state until the next solve. No-op before an equilibrium exists.
+!------------------------------------------------------------------------------
+SUBROUTINE jphi_bs_carry_ffp(self,gseq)
+CLASS(jphi_bs_flux_func), INTENT(inout) :: self !< New bootstrap profile
+CLASS(gs_equil), INTENT(inout) :: gseq !< Equilibrium, still holding the profile being replaced
+INTEGER(i4) :: i,ierr
+REAL(r8) :: b1,b2
+IF(.NOT.ASSOCIATED(gseq%I))RETURN
+IF(gseq%plasma_bounds(1)<-1.d98)RETURN
+b1=gseq%plasma_bounds(1); b2=gseq%plasma_bounds(2)
+self%plasma_bounds=gseq%plasma_bounds
+self%y0=gseq%ffp_scale*gseq%I%fp(b1)
+DO i=1,self%npsi
+  self%yp(i)=gseq%ffp_scale*gseq%I%fp(self%x(i)*(b2-b1)+b1)
+END DO
+ierr=self%set_cofs(self%yp)
+gseq%ffp_scale=1.d0
+END SUBROUTINE jphi_bs_carry_ffp
+!------------------------------------------------------------------------------
 !> Forget the convergence state of the last solve (freeze flags, counters, cached currents)
 !------------------------------------------------------------------------------
 subroutine reset_solve_state(self)
@@ -452,7 +474,7 @@ end function h5_name
 !!      isolated and scaled, or reused from the last evaluation when frozen; <R>, <1/R>, <1/R^2> on the nodes
 !!      from its Sauter pass, else (and on the LCFS) from gs_ravgs.
 !!   3. Edge taper of jphi_bs, jphi_pd, jphi_ind, jphi_fixed and jphi_saw_in.
-!!   4. alpha from the exact I_p (gs_flux_int of eval_jtor_imas, eq. A9c), which is affine in
+!!   4. alpha from the exact I_p (gs_flux_int of eval_dIdA, eq. A9c), which is affine in
 !!      alpha: alpha = (Ip_target - Ip_lo)/(Ip_hi - Ip_lo).
 !!   4a. Sawtooth reset (saw_q_s > 0): jphi_saw = jphi_saw_in + the Ip-neutral current that resets the
 !!      q of the base current alpha*jphi_ind + jphi_bs + jphi_fixed + jphi_saw_in above saw_q_s
@@ -469,7 +491,7 @@ REAL(r8) :: pscale, pprime
 REAL(r8), ALLOCATABLE :: xpsi(:) !< Node locations in normalized poloidal flux
 REAL(r8), ALLOCATABLE :: psi_n(:) !< Nodes: LCFS (0) and xpsi
 REAL(r8), ALLOCATABLE :: ravgs(:,:) !< <R>, <1/R>, <1/R^2> at psi_n
-REAL(r8), ALLOCATABLE :: jtor(:)  !< IMAS-convention current for the exact I_p measure (eval_jtor_imas)
+REAL(r8), ALLOCATABLE :: jtor(:)  !< dI/dA for the exact I_p measure (eval_dIdA)
 REAL(r8), ALLOCATABLE :: jphi_bs(:), jphi_pd(:), jphi_ind(:), jphi_fixed(:), jphi_total(:)
 REAL(r8), ALLOCATABLE :: jphi_bs_spike(:) !< Isolated edge spike [A/m²]
 !> Sawtooth current: input, value entering the alpha solve, result, reset increment
@@ -601,14 +623,14 @@ IF(saw_on .AND. ALLOCATED(self%jphi_saw_last))jphi_saw_cur = self%jphi_saw_last
 IF(do_saw)THEN
   ALLOCATE(cflds(self%npsi+1,4), cum(self%npsi+1,3))
   jphi_total = jphi_bs + jphi_fixed + jphi_saw_in
-  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, cflds(:,1))
+  CALL eval_dIdA(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, cflds(:,1))
   jphi_total = jphi_ind + jphi_bs + jphi_fixed + jphi_saw_in
-  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
+  CALL eval_dIdA(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
   cflds(:,2) = jtor - cflds(:,1)
   jphi_total = jphi_bs + jphi_fixed + jphi_saw_cur
-  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
+  CALL eval_dIdA(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
   cflds(:,3) = jtor - cflds(:,1)
-  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, self%jphi_total_last, pscale, cflds(:,4))
+  CALL eval_dIdA(gseq, psi_n, self%npsi+1, ravgs, self%jphi_total_last, pscale, cflds(:,4))
   CALL gs_flux_cumint(gseq, psi_n, cflds(:,1:3), self%npsi+1, 3, cum)
 END IF
 !--- 4. alpha: I_p is affine in alpha, so alpha = (Ip_target - Ip_lo) / (Ip_hi - Ip_lo). Re-solved
@@ -619,16 +641,17 @@ IF(do_saw)THEN
   ip_result_hi = ip_result_lo + cum(1,2)
 ELSE
   jphi_total = jphi_bs + jphi_fixed + jphi_saw_cur
-  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
+  CALL eval_dIdA(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
   CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, ip_result_lo)
   jphi_total = jphi_ind + jphi_bs + jphi_fixed + jphi_saw_cur
-  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
+  CALL eval_dIdA(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
   CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, ip_result_hi)
 END IF
 ip_ind = ip_result_hi - ip_result_lo
-IF(ABS(ip_ind) > 0.0_r8)THEN
+IF(ABS(ip_ind) > 1.0e-10_r8*ip_target)THEN
   alpha = (ip_target - ip_result_lo) / ip_ind
 ELSE
+  CALL oft_warn("jphi_bs_update: inductive jphi carries no net current, keeping the last alpha")
   alpha = self%alpha_last
 END IF
 !--- Relative change: alpha's scale is set by the units of ffp_prof (e.g. ~1e-6 for a jphi in A/m^2)
@@ -712,7 +735,7 @@ IF(self%boot_ops%diagnose_bs)THEN
   END IF
   !--- Side-by-side Ip comparison: FEM nonlinear solve vs profile flux integral
   CALL gs_itor_nl(gseq, itor_nl)
-  CALL eval_jtor_imas(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
+  CALL eval_dIdA(gseq, psi_n, self%npsi+1, ravgs, jphi_total, pscale, jtor)
   CALL gs_flux_int(gseq, psi_n, jtor, self%npsi+1, itor_flint)
   WRITE(*,'(A)') '  [jphi_bs_update] --- Ip comparison (current jphi_total) ---'
   WRITE(*,'(A,ES12.4)') '  [jphi_bs_update] Ip(gs_itor_nl)    = ', itor_nl/mu0
@@ -778,7 +801,7 @@ END SUBROUTINE stall_check
 !> Sawtooth reset current on the nodes `xn` (OFT convention, mu0*A/m², TokaMaker jphi).
 !!
 !! q_base = q_eq*I_eq/I_base (q*I is geometric) on rho = sqrt(Phi_N); @ref saw_reset_1d resets it on
-!! nodes with enough enclosed area, interpolated in rho; dI/dA maps back to jphi via eval_jtor_imas.
+!! nodes with enough enclosed area, interpolated in rho; dI/dA maps back to jphi via eval_dIdA.
 !! Enclosed area and currents are 1-D integrals over the cut-cell \f$ dA/d\hat{\psi} \f$: the reset
 !! differentiates them, and binning mesh quadrature points by psi (@ref gs_flux_cumint) leaves
 !! percent-level noise in each node interval.
@@ -788,7 +811,7 @@ CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 REAL(r8), INTENT(in) :: xn(:) !< Nodes, 0 at LCFS, 1 at axis [n]
 REAL(r8), INTENT(in) :: ravgs(:,:) !< <R>, <1/R>, <1/R^2> on the nodes [n,3]
-REAL(r8), INTENT(in) :: jt_base(:) !< Base jtor (@ref eval_jtor_imas) on the nodes [n]
+REAL(r8), INTENT(in) :: jt_base(:) !< Base jtor (@ref eval_dIdA) on the nodes [n]
 REAL(r8), INTENT(in) :: jt_eq(:) !< jtor of the equilibrium's current on the nodes [n]
 REAL(r8), INTENT(in) :: j_base(:) !< Base jphi on the nodes [n]
 REAL(r8), INTENT(out) :: dj(:) !< Reset current [n]

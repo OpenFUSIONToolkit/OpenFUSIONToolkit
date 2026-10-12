@@ -1232,6 +1232,7 @@ END DO
 equil%plasma_bounds=[-1.d99,1.d99]
 CALL gs_update_bounds(equil)
 IF(ASSOCIATED(equil%torflux))CALL equil%torflux%update(equil)
+equil%skip_targets=.FALSE. ! Flux functions set up as on the first iteration of a solve
 CALL equil%I%update(equil)
 CALL equil%p%update(equil)
 IF(ASSOCIATED(equil%P_ani))CALL equil%P_ani%update(equil)
@@ -4357,6 +4358,8 @@ dflux=dflux*self%psiscale
 end function gs_dflux
 !------------------------------------------------------------------------------
 !> Poloidal current function \f$ F = R B_\phi \f$ at (unnormalized) \f$ \psi \f$
+!!
+!! @warning Only valid inside the plasma; \f$ \psi \f$ is not checked against the plasma bounds
 !------------------------------------------------------------------------------
 function gs_fpol(self,psi) result(F)
 class(gs_equil), intent(inout) :: self !< G-S object
