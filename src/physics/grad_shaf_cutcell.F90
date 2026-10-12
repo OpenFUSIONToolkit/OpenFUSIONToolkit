@@ -372,21 +372,21 @@ DO WHILE(ns>0)
 END DO
 CONTAINS
 !---Exchange two values
-subroutine swap(a,b)
-real(r8), intent(inout) :: a,b
-real(r8) :: t
+SUBROUTINE swap(a,b)
+REAL(r8), INTENT(inout) :: a,b
+REAL(r8) :: t
 t=a; a=b; b=t
-end subroutine swap
+END SUBROUTINE swap
 !---Does any surface lie in [a,b]?
-logical function any_hit(a,b)
-real(r8), intent(in) :: a,b
+LOGICAL FUNCTION any_hit(a,b)
+REAL(r8), INTENT(in) :: a,b
 any_hit=ANY((psi_q>=a).AND.(psi_q<=b))
-end function any_hit
+END FUNCTION any_hit
 !---At most one crossing of s per sub-cell edge (Bernstein sign changes)
-logical function edges_ok(s)
-real(r8), intent(in) :: s
-integer(i4) :: kk,ka,kb,q,nch,al(3)
-logical :: up,upl
+LOGICAL FUNCTION edges_ok(s)
+REAL(r8), INTENT(in) :: s
+INTEGER(i4) :: kk,ka,kb,q,nch,al(3)
+LOGICAL :: up,upl
 edges_ok=.FALSE.
 DO kk=1,3
   ka=MOD(kk,3)+1; kb=MOD(kk+1,3)+1
@@ -400,7 +400,7 @@ DO kk=1,3
   IF(nch>1)RETURN
 END DO
 edges_ok=.TRUE.
-end function edges_ok
+END FUNCTION edges_ok
 !---Integrate the arc of surface s in the current (simple) sub-cell
 subroutine tri_arc(s,gacc,wacc,iq)
 real(r8), intent(in) :: s
@@ -585,19 +585,19 @@ p3=gseq%device%fe_rep%mesh%log2phys(cell,lam)
 bq=SQRT(dpsi**2*SUM(phys_grad(uv,grp)**2)+fpol(iq)**2)/p3(1)
 end function b_mag
 !---Crossing of surface s on sub-cell edge ka->kb (regula falsi start)
-function edge_cross(s,ka,kb) result(pc)
-real(r8), intent(in) :: s
-integer(i4), intent(in) :: ka,kb
-real(r8) :: pc(2),fa,fb,t
+FUNCTION edge_cross(s,ka,kb) RESULT(pc)
+REAL(r8), INTENT(in) :: s
+INTEGER(i4), INTENT(in) :: ka,kb
+REAL(r8) :: pc(2),fa,fb,t
 fa=cs(bt%corner(ka))-s; fb=cs(bt%corner(kb))-s
 t=line_root(bt,cm,s,tri(:,ka),tri(:,kb)-tri(:,ka),0.d0,1.d0,fa/(fa-fb))
 pc=tri(:,ka)+t*(tri(:,kb)-tri(:,ka))
-end function edge_cross
+END FUNCTION edge_cross
 !---Physical position and logical Jacobian determinant at uv
-subroutine cell_geom(uv,pt,detm)
-real(r8), intent(in) :: uv(2)
-real(r8), intent(out) :: pt(2),detm
-real(r8) :: lam(3),gop(3,3),p3(3)
+SUBROUTINE cell_geom(uv,pt,detm)
+REAL(r8), INTENT(in) :: uv(2)
+REAL(r8), INTENT(out) :: pt(2),detm
+REAL(r8) :: lam(3),gop(3,3),p3(3)
 IF(curved)THEN
   lam=[1.d0-uv(1)-uv(2),uv(1),uv(2)]
   CALL gseq%device%fe_rep%mesh%jacobian(cell,lam,gop,detm)
@@ -607,8 +607,8 @@ ELSE
   pt=xv(:,1)+uv(1)*(xv(:,2)-xv(:,1))+uv(2)*(xv(:,3)-xv(:,1))
   detm=detm0
 END IF
-end subroutine cell_geom
-end subroutine cell_contrib
+END SUBROUTINE cell_geom
+END SUBROUTINE cell_contrib
 !------------------------------------------------------------------------------
 !> Add point `pt` = (R,Z) to surface extrema `xa`
 !!
@@ -669,12 +669,12 @@ end function arc_peak
 !! Newton from `t0`, falling back to safeguarded Newton-bisection on [a,b]. Returns the
 !! nearer end if the bracket does not straddle the root. `cc` holds monomial coefficients.
 !------------------------------------------------------------------------------
-function line_root(bt,cc,s,x0,dir,a,b,t0) result(t)
-type(bern_tab), intent(in) :: bt
-real(r8), intent(in) :: cc(:),s,x0(2),dir(2),a,b,t0
-real(r8) :: t
-real(r8) :: ta,tb,fa,fb,f,fp,gr(2),tn
-integer(i4) :: it
+FUNCTION line_root(bt,cc,s,x0,dir,a,b,t0) RESULT(t)
+TYPE(bern_tab), INTENT(in) :: bt
+REAL(r8), INTENT(in) :: cc(:),s,x0(2),dir(2),a,b,t0
+REAL(r8) :: t
+REAL(r8) :: ta,tb,fa,fb,f,fp,gr(2),tn
+INTEGER(i4) :: it
 !---Newton
 t=t0
 DO it=1,8
@@ -717,23 +717,23 @@ DO it=1,100
   END IF
   t=tn
 END DO
-end function line_root
+END FUNCTION line_root
 !------------------------------------------------------------------------------
 !> Test if \f$ \hat{\psi} \f$ is strictly monotone (with bounded variation) along the
 !! centroid gradient direction over sub-cell `tri`
 !------------------------------------------------------------------------------
-function tri_simple(bt,cc,cs,tri,dvec,dmu,ainv,dratio) result(simple)
-type(bern_tab), intent(in) :: bt
-real(r8), intent(in) :: cc(:) !< Cell monomial coefficients
-real(r8), intent(in) :: cs(:) !< Sub-cell Bernstein coefficients
-real(r8), intent(in) :: tri(2,3) !< Sub-cell vertices (uv)
-real(r8), intent(out) :: dvec(2) !< Monotone direction (uv, unit)
-real(r8), intent(out) :: dmu(3) !< `dvec` in sub-cell barycentric increments
-real(r8), intent(out) :: ainv(2,2) !< Map from uv offset to sub-cell (mu2,mu3)
-real(r8), intent(out) :: dratio !< Lower bound of min/max \f$ \partial_d \hat{\psi} \f$ over the sub-cell
-logical :: simple
-real(r8) :: val,gr(2),gn,a(2,2),det,dc,dcmin,dcmax
-integer(i4) :: n,k,al(3)
+FUNCTION tri_simple(bt,cc,cs,tri,dvec,dmu,ainv,dratio) RESULT(simple)
+TYPE(bern_tab), INTENT(in) :: bt
+REAL(r8), INTENT(in) :: cc(:) !< Cell monomial coefficients
+REAL(r8), INTENT(in) :: cs(:) !< Sub-cell Bernstein coefficients
+REAL(r8), INTENT(in) :: tri(2,3) !< Sub-cell vertices (uv)
+REAL(r8), INTENT(out) :: dvec(2) !< Monotone direction (uv, unit)
+REAL(r8), INTENT(out) :: dmu(3) !< `dvec` in sub-cell barycentric increments
+REAL(r8), INTENT(out) :: ainv(2,2) !< Map from uv offset to sub-cell (mu2,mu3)
+REAL(r8), INTENT(out) :: dratio !< Lower bound of min/max \f$ \partial_d \hat{\psi} \f$ over the sub-cell
+LOGICAL :: simple
+REAL(r8) :: val,gr(2),gn,a(2,2),det,dc,dcmin,dcmax
+INTEGER(i4) :: n,k,al(3)
 simple=.FALSE.
 dratio=0.d0
 CALL poly_eval(bt,cc,SUM(tri,DIM=2)/3.d0,val,gr)
@@ -759,32 +759,32 @@ END DO
 IF((dcmax<=0.d0).OR.(dcmin<=kappa*dcmax))RETURN
 dratio=dcmin/dcmax
 simple=.TRUE.
-end function tri_simple
+END FUNCTION tri_simple
 !------------------------------------------------------------------------------
 !> Bernstein coefficients on sub-cell `tri` of the cell polynomial (monomial coefficients `cc`)
 !------------------------------------------------------------------------------
-subroutine sub_coefs(bt,cc,tri,cs)
-type(bern_tab), intent(in) :: bt
-real(r8), intent(in) :: cc(:),tri(2,3)
-real(r8), intent(out) :: cs(:)
-real(r8) :: lat(32),gr(2),uv(2)
-integer(i4) :: n
+SUBROUTINE sub_coefs(bt,cc,tri,cs)
+TYPE(bern_tab), INTENT(in) :: bt
+REAL(r8), INTENT(in) :: cc(:),tri(2,3)
+REAL(r8), INTENT(out) :: cs(:)
+REAL(r8) :: lat(32),gr(2),uv(2)
+INTEGER(i4) :: n
 DO n=1,bt%nb
   uv=MATMUL(tri,REAL(bt%mi(:,n),r8))/REAL(bt%p,r8)
   CALL poly_eval(bt,cc,uv,lat(n),gr)
 END DO
 cs(1:bt%nb)=MATMUL(bt%vinv,lat(1:bt%nb))
 cs(bt%corner)=lat(bt%corner)
-end subroutine sub_coefs
+END SUBROUTINE sub_coefs
 !------------------------------------------------------------------------------
 !> Evaluate cell polynomial (monomial coefficients) and its (u,v) gradient
 !------------------------------------------------------------------------------
-subroutine poly_eval(bt,c,uv,val,gr)
-type(bern_tab), intent(in) :: bt
-real(r8), intent(in) :: c(:),uv(2)
-real(r8), intent(out) :: val,gr(2)
-real(r8) :: up(-1:4),vp(-1:4)
-integer(i4) :: n,i,j
+SUBROUTINE poly_eval(bt,c,uv,val,gr)
+TYPE(bern_tab), INTENT(in) :: bt
+REAL(r8), INTENT(in) :: c(:),uv(2)
+REAL(r8), INTENT(out) :: val,gr(2)
+REAL(r8) :: up(-1:4),vp(-1:4)
+INTEGER(i4) :: n,i,j
 up(-1)=0.d0; vp(-1)=0.d0; up(0)=1.d0; vp(0)=1.d0
 DO i=1,bt%p
   up(i)=up(i-1)*uv(1); vp(i)=vp(i-1)*uv(2)
@@ -796,16 +796,16 @@ DO n=1,bt%nb
   gr(1)=gr(1)+c(n)*i*up(i-1)*vp(j)
   gr(2)=gr(2)+c(n)*j*up(i)*vp(j-1)
 END DO
-end subroutine poly_eval
+END SUBROUTINE poly_eval
 !------------------------------------------------------------------------------
 !> Refresh cached lattice index of each cell DOF when mesh or FE space changes
 !------------------------------------------------------------------------------
-subroutine perm_update(lag_rep,bt)
-type(oft_scalar_bfem), pointer, intent(in) :: lag_rep
-type(bern_tab), intent(in) :: bt
-integer(i8) :: chk
-integer(i4) :: cell,jc
-real(r8) :: f(3)
+SUBROUTINE perm_update(lag_rep,bt)
+TYPE(oft_scalar_bfem), POINTER, INTENT(in) :: lag_rep
+TYPE(bern_tab), INTENT(in) :: bt
+INTEGER(i8) :: chk
+INTEGER(i4) :: cell,jc
+REAL(r8) :: f(3)
 chk=SUM(INT(lag_rep%mesh%lc,i8))+SUM(INT(ABS(lag_rep%mesh%lce),i8)*INT(SIGN(2,lag_rep%mesh%lce)+1,i8)) &
   +INT(lag_rep%order,i8)
 IF(ASSOCIATED(perm_rep,lag_rep).AND.ALLOCATED(perm).AND.(perm_sum==chk))THEN
@@ -821,27 +821,27 @@ DO cell=1,lag_rep%mesh%nc
 END DO
 perm_rep=>lag_rep
 perm_sum=chk
-end subroutine perm_update
+END SUBROUTINE perm_update
 !------------------------------------------------------------------------------
 !> Bernstein tables for degree `p` (1-4), built on first use of each degree
 !------------------------------------------------------------------------------
-subroutine bern_setup(bt,p)
-type(bern_tab), intent(inout) :: bt
-integer(i4), intent(in) :: p
+SUBROUTINE bern_setup(bt,p)
+TYPE(bern_tab), INTENT(inout) :: bt
+INTEGER(i4), INTENT(in) :: p
 IF(bt_cache%p/=p)THEN
   IF(ALLOCATED(bt_cache%mi))DEALLOCATE(bt_cache%mi,bt_cache%mi1,bt_cache%lk,bt_cache%vinv,bt_cache%mvinv)
   CALL bern_build(bt_cache,p)
 END IF
 bt=bt_cache
-end subroutine bern_setup
+END SUBROUTINE bern_setup
 !------------------------------------------------------------------------------
 !> Build Bernstein tables for degree `p` (1-4)
 !------------------------------------------------------------------------------
-subroutine bern_build(bt,p)
-type(bern_tab), intent(inout) :: bt
-integer(i4), intent(in) :: p
-real(r8) :: v(15,15),fact(0:4),mult(15),x
-integer(i4) :: n,m,a2,a3,k,ierr
+SUBROUTINE bern_build(bt,p)
+TYPE(bern_tab), INTENT(inout) :: bt
+INTEGER(i4), INTENT(in) :: p
+REAL(r8) :: v(15,15),fact(0:4),mult(15),x
+INTEGER(i4) :: n,m,a2,a3,k,ierr
 IF((p<1).OR.(p>4))CALL oft_abort('Unsupported FE order','bern_build',__FILE__)
 bt%p=p
 bt%nb=(p+1)*(p+2)/2
@@ -892,5 +892,5 @@ ALLOCATE(bt%mvinv,SOURCE=v(1:bt%nb,1:bt%nb))
 CALL lapack_matinv(bt%nb,bt%mvinv,ierr)
 IF(ierr/=0)CALL oft_abort('Monomial table inversion failed','bern_build',__FILE__)
 bt%cbound=(MAXVAL(SUM(ABS(bt%vinv),DIM=2))-1.d0)/2.d0+1.d-12
-end subroutine bern_build
+END SUBROUTINE bern_build
 END MODULE oft_gs_cutcell

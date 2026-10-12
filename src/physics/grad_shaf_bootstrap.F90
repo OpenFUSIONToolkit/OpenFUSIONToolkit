@@ -17,7 +17,7 @@ module grad_shaf_bootstrap
 use oft_base
 use oft_gs, only: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
  gs_itor_nl, qprof_trace_tol, gs_fpol
-use oft_gs_profiles, only: torflux_qgeom_backend
+use oft_gs_profiles, only: torflux_qgeom_backend, torflux_set_bounds
 use oft_gs_cutcell, only: gs_sauter_cutcell, gs_fsa_cutcell
 use oft_lag_basis, only: oft_blag_geval
 use oft_mesh_type, only: bmesh_findcell
@@ -27,8 +27,8 @@ use grad_shaf_prof_phys, only: eval_dIdA, gs_ravgs, gs_flux_int, &
   gs_flux_cumint, jphi_update, jphi_copy, jphi_flux_func, jphi_psi_nodes
 USE oft_io, ONLY: hdf5_create_group, hdf5_write, hdf5_read, &
   hdf5_field_get_sizes, hdf5_field_exist
-use mhd_utils, only: mu0
-implicit none
+USE mhd_utils, ONLY: mu0
+IMPLICIT NONE
 !------------------------------------------------------------------------------
 !> Options of @ref jphi_bs_update (defaults apply unless set via @ref tokamaker_set_boot_ops)
 !------------------------------------------------------------------------------
@@ -96,22 +96,22 @@ type, extends(jphi_flux_func) :: jphi_bs_flux_func
   logical :: ffp_restored = .FALSE. !< F*F' knots were read from a file, so loading keeps them instead of updating
   TYPE(boot_ops) :: boot_ops       !< Options set from Python (@ref tokamaker_set_boot_ops)
   TYPE(boot_profs) :: boot_profs   !< Current profiles of the last update
-contains
+CONTAINS
   !> Save to HDF5 (profile definition, options and the last profiles)
-  procedure :: save_hdf5 => jphi_bs_save_hdf5
+  PROCEDURE :: save_hdf5 => jphi_bs_save_hdf5
   !> Save the profile definition to a text file
-  procedure :: save_txt => jphi_bs_save_txt
+  PROCEDURE :: save_txt => jphi_bs_save_txt
   !> Load from HDF5
-  procedure :: load_hdf5 => jphi_bs_load_hdf5
+  PROCEDURE :: load_hdf5 => jphi_bs_load_hdf5
   !> Load the profile definition from a text file
-  procedure :: load_txt => jphi_bs_load_txt
+  PROCEDURE :: load_txt => jphi_bs_load_txt
   !> Copy into a new profile
-  procedure :: copy => jphi_bs_copy
+  PROCEDURE :: copy => jphi_bs_copy
   !> Free the profile's storage
-  procedure :: delete => jphi_bs_delete
+  PROCEDURE :: delete => jphi_bs_delete
   !> Update F*F' profile from Jphi and current equilibrium state
-  procedure :: update => jphi_bs_update
-end type jphi_bs_flux_func
+  PROCEDURE :: update => jphi_bs_update
+END TYPE jphi_bs_flux_func
 !------------------------------------------------------------------------------
 !> Interpolation object for computing Sauter trapped-particle factors
 !! (accumulates flux-surface averages of B, R, and bounce integrals)
@@ -130,10 +130,10 @@ contains
 !> Save to HDF5: the profile definition, the F*F' knots (so a load restores the profile exactly),
 !! the options and the last profiles
 !------------------------------------------------------------------------------
-subroutine jphi_bs_save_hdf5(self,filename,path)
-class(jphi_bs_flux_func), intent(inout) :: self
-character(LEN=*), intent(in) :: filename
-character(LEN=*), intent(in) :: path
+SUBROUTINE jphi_bs_save_hdf5(self,filename,path)
+CLASS(jphi_bs_flux_func), INTENT(inout) :: self
+CHARACTER(LEN=*), INTENT(in) :: filename
+CHARACTER(LEN=*), INTENT(in) :: path
 IF(.NOT.hdf5_field_exist(filename,path//'/TYPE'))CALL hdf5_write('jphi-split-bootstrap',filename,path//'/TYPE')
 CALL hdf5_write(self%npsi,filename,path//'/NPSI')
 CALL hdf5_write(self%x,filename,path//'/XVALS')
@@ -158,30 +158,30 @@ IF(self%boot_ops%initialized)THEN
   CALL hdf5_write(self%boot_ops%saw_rule,filename,path//'/BOOT_OPS/SAW_RULE')
 END IF
 CALL boot_profs_save(self%boot_profs,filename,path//'/BOOT_PROFS')
-end subroutine jphi_bs_save_hdf5
+END SUBROUTINE jphi_bs_save_hdf5
 !------------------------------------------------------------------------------
 !> Save the profile definition to a text file
 !------------------------------------------------------------------------------
-subroutine jphi_bs_save_txt(self,io_unit)
-class(jphi_bs_flux_func), intent(inout) :: self
-integer, intent(in) :: io_unit
+SUBROUTINE jphi_bs_save_txt(self,io_unit)
+CLASS(jphi_bs_flux_func), INTENT(inout) :: self
+INTEGER, INTENT(in) :: io_unit
 WRITE(io_unit,*)'jphi-split-bootstrap'
 WRITE(io_unit,*)self%npsi,self%j0
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%jphi
-end subroutine jphi_bs_save_txt
+END SUBROUTINE jphi_bs_save_txt
 !------------------------------------------------------------------------------
 !> Load from HDF5 (see @ref jphi_bs_save_hdf5); options and profiles are optional
 !------------------------------------------------------------------------------
-subroutine jphi_bs_load_hdf5(self,filename,path,success)
-class(jphi_bs_flux_func), intent(inout) :: self
-character(LEN=*), intent(in) :: filename
-character(LEN=*), intent(in) :: path
-logical, intent(out) :: success
-integer(i4) :: npsi
-integer(4) :: int_tmp, ierr
-real(r8) :: J0
-real(r8), allocatable :: xvals(:),yvals(:)
+SUBROUTINE jphi_bs_load_hdf5(self,filename,path,success)
+CLASS(jphi_bs_flux_func), INTENT(inout) :: self
+CHARACTER(LEN=*), INTENT(in) :: filename
+CHARACTER(LEN=*), INTENT(in) :: path
+LOGICAL, INTENT(out) :: success
+INTEGER(i4) :: npsi
+INTEGER(i4) :: int_tmp, ierr
+REAL(r8) :: J0
+REAL(r8), ALLOCATABLE :: xvals(:),yvals(:)
 CALL hdf5_read(npsi,filename,path//'/NPSI',success=success)
 IF(.NOT.success)RETURN
 ALLOCATE(xvals(npsi),yvals(npsi))
@@ -232,33 +232,33 @@ IF(hdf5_field_exist(filename,path//'/BOOT_OPS'))THEN
 END IF
 CALL boot_profs_load(self%boot_profs,filename,path//'/BOOT_PROFS')
 success=.TRUE. ! BOOT_OPS and BOOT_PROFS are optional
-end subroutine jphi_bs_load_hdf5
+END SUBROUTINE jphi_bs_load_hdf5
 !------------------------------------------------------------------------------
 !> Load the profile definition from a text file
 !------------------------------------------------------------------------------
-subroutine jphi_bs_load_txt(self,io_unit)
-class(jphi_bs_flux_func), intent(inout) :: self
-integer, intent(in) :: io_unit
-integer(i4) :: npsi
-real(r8) :: J0
-real(r8), allocatable :: xvals(:),yvals(:)
+SUBROUTINE jphi_bs_load_txt(self,io_unit)
+CLASS(jphi_bs_flux_func), INTENT(inout) :: self
+INTEGER, INTENT(in) :: io_unit
+INTEGER(i4) :: npsi
+REAL(r8) :: J0
+REAL(r8), ALLOCATABLE :: xvals(:),yvals(:)
 READ(io_unit,*)npsi,J0
 ALLOCATE(xvals(npsi),yvals(npsi))
 READ(io_unit,*)xvals
 READ(io_unit,*)yvals
 CALL create_jphi_bs_ff(self,npsi,xvals,yvals,J0)
 DEALLOCATE(xvals,yvals)
-end subroutine jphi_bs_load_txt
+END SUBROUTINE jphi_bs_load_txt
 !------------------------------------------------------------------------------
 !> Sets values inside jphi_bs_flux_func. Called only after a fresh allocation.
 !------------------------------------------------------------------------------
 SUBROUTINE create_jphi_bs_ff(func,npsi,psivals,yvals,y0)
 CLASS(flux_func), INTENT(inout) :: func
-INTEGER(4), INTENT(in) :: npsi
-REAL(8), INTENT(in) :: psivals(npsi)
-REAL(8), INTENT(in) :: yvals(npsi)
-REAL(8), INTENT(in) :: y0
-INTEGER(4) :: i,ierr
+INTEGER(i4), INTENT(in) :: npsi
+REAL(r8), INTENT(in) :: psivals(npsi)
+REAL(r8), INTENT(in) :: yvals(npsi)
+REAL(r8), INTENT(in) :: y0
+INTEGER(i4) :: i,ierr
 SELECT TYPE(self=>func)
   TYPE IS(jphi_bs_flux_func)
   !---
@@ -281,7 +281,7 @@ SELECT TYPE(self=>func)
   self%yp = self%yp/(SUM(ABS(self%yp))/REAL(self%npsi,8)) ! Consistent (hopefully) normalization
   ierr=self%set_cofs(self%yp)
   IF(oft_debug_print(1))WRITE(*,*)'Jphi bs flux func Created',self%ndofs,self%x,self%j0
-class default
+CLASS DEFAULT
   CALL oft_abort('Invalid flux function type in create_jphi_bs_ff','create_jphi_bs_ff',__FILE__)
 END SELECT
 
@@ -289,9 +289,9 @@ END SUBROUTINE create_jphi_bs_ff
 !------------------------------------------------------------------------------
 !> Copy into a new profile (definition, options, solve state and last profiles)
 !------------------------------------------------------------------------------
-subroutine jphi_bs_copy(self,new)
-class(jphi_bs_flux_func), intent(inout) :: self
-class(flux_func), pointer, intent(inout) :: new
+SUBROUTINE jphi_bs_copy(self,new)
+CLASS(jphi_bs_flux_func), INTENT(inout) :: self
+CLASS(flux_func), POINTER, INTENT(inout) :: new
 CALL jphi_copy(self,new)
 SELECT TYPE(new)
   CLASS IS(jphi_bs_flux_func)
@@ -311,12 +311,12 @@ SELECT TYPE(new)
     new%boot_ops = self%boot_ops
     new%boot_profs = self%boot_profs
 END SELECT
-end subroutine jphi_bs_copy
+END SUBROUTINE jphi_bs_copy
 !------------------------------------------------------------------------------
 !> Free the profile's storage
 !------------------------------------------------------------------------------
-subroutine jphi_bs_delete(self)
-class(jphi_bs_flux_func), intent(inout) :: self
+SUBROUTINE jphi_bs_delete(self)
+CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 self%j0=0.d0
 IF(ASSOCIATED(self%jphi))DEALLOCATE(self%jphi)
 IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
@@ -324,7 +324,7 @@ IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
 IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
 CALL reset_solve_state(self)
 self%boot_profs = boot_profs()
-end subroutine jphi_bs_delete
+END SUBROUTINE jphi_bs_delete
 !------------------------------------------------------------------------------
 !> Set the F*F' knots from the equilibrium's current F*F' (`gseq%I` times `ffp_scale`), so a bootstrap
 !! profile that replaces it keeps the current state until the next solve. No-op before an equilibrium exists.
@@ -334,22 +334,29 @@ CLASS(jphi_bs_flux_func), INTENT(inout) :: self !< New bootstrap profile
 CLASS(gs_equil), INTENT(inout) :: gseq !< Equilibrium, still holding the profile being replaced
 INTEGER(i4) :: i,ierr
 REAL(r8) :: b1,b2
+REAL(r8), ALLOCATABLE :: xpsi(:)
 IF(.NOT.ASSOCIATED(gseq%I))RETURN
 IF(gseq%plasma_bounds(1)<-1.d98)RETURN
 b1=gseq%plasma_bounds(1); b2=gseq%plasma_bounds(2)
-self%plasma_bounds=gseq%plasma_bounds
+CALL jphi_psi_nodes(self,xpsi) ! Knots in psi (mapped from toroidal flux if on it)
 self%y0=gseq%ffp_scale*gseq%I%fp(b1)
 DO i=1,self%npsi
-  self%yp(i)=gseq%ffp_scale*gseq%I%fp(self%x(i)*(b2-b1)+b1)
+  self%yp(i)=gseq%ffp_scale*gseq%I%fp(xpsi(i)*(b2-b1)+b1)
 END DO
-ierr=self%set_cofs(self%yp)
+IF(ASSOCIATED(self%phi_wrapper))THEN
+  CALL torflux_set_bounds(self%phi_wrapper,gseq%plasma_bounds)
+  ierr=self%phi_wrapper%set_cofs(self%yp)
+ELSE
+  self%plasma_bounds=gseq%plasma_bounds
+  ierr=self%set_cofs(self%yp)
+END IF
 gseq%ffp_scale=1.d0
 END SUBROUTINE jphi_bs_carry_ffp
 !------------------------------------------------------------------------------
 !> Forget the convergence state of the last solve (freeze flags, counters, cached currents)
 !------------------------------------------------------------------------------
-subroutine reset_solve_state(self)
-class(jphi_bs_flux_func), intent(inout) :: self
+SUBROUTINE reset_solve_state(self)
+CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 self%freeze_jbs = .FALSE.
 self%djbs_no_improve = 0
 self%djbs_min = HUGE(1.0d0)
@@ -377,7 +384,7 @@ end subroutine saw_scalars_reset
 !> Set (`set`) or point at (`get`) the @ref boot_profs array called `name` (see @ref boot_prof_names);
 !! `get` is NULL if that array is unallocated or the name is unknown
 !------------------------------------------------------------------------------
-subroutine boot_prof_access(bp,name,get,set)
+SUBROUTINE boot_prof_access(bp,name,get,set)
 TYPE(boot_profs), TARGET, INTENT(inout) :: bp
 CHARACTER(LEN=*), INTENT(in) :: name
 REAL(r8), POINTER, OPTIONAL, INTENT(out) :: get(:)
@@ -401,11 +408,11 @@ REAL(r8), ALLOCATABLE, TARGET, INTENT(inout) :: a(:)
 IF(PRESENT(set))a = set
 IF(PRESENT(get).AND.ALLOCATED(a))get => a
 END SUBROUTINE access
-end subroutine boot_prof_access
+END SUBROUTINE boot_prof_access
 !------------------------------------------------------------------------------
 !> Write the allocated @ref boot_profs arrays to group `path` (dataset names: upper-case array names)
 !------------------------------------------------------------------------------
-subroutine boot_profs_save(bp,filename,path)
+SUBROUTINE boot_profs_save(bp,filename,path)
 TYPE(boot_profs), TARGET, INTENT(inout) :: bp
 CHARACTER(LEN=*), INTENT(in) :: filename
 CHARACTER(LEN=*), INTENT(in) :: path
@@ -429,7 +436,7 @@ end subroutine boot_profs_save
 !------------------------------------------------------------------------------
 !> Read the @ref boot_profs arrays present in group `path`; the others are left unallocated
 !------------------------------------------------------------------------------
-subroutine boot_profs_load(bp,filename,path)
+SUBROUTINE boot_profs_load(bp,filename,path)
 TYPE(boot_profs), TARGET, INTENT(inout) :: bp
 CHARACTER(LEN=*), INTENT(in) :: filename
 CHARACTER(LEN=*), INTENT(in) :: path
@@ -456,12 +463,12 @@ end subroutine boot_profs_load
 !------------------------------------------------------------------------------
 !> HDF5 dataset name of a @ref boot_profs array (its name in upper case)
 !------------------------------------------------------------------------------
-function h5_name(name) result(h5)
+FUNCTION h5_name(name) RESULT(h5)
 CHARACTER(LEN=*), INTENT(in) :: name
 CHARACTER(LEN=LEN_TRIM(name)) :: h5
 h5 = TRIM(name)
 CALL string_to_upper(h5)
-end function h5_name
+END FUNCTION h5_name
 !---------------------------------------------------------------------------------
 !> Update F*F' profile from the inductive jphi coupled with the bootstrap current.
 !!
@@ -770,7 +777,7 @@ REAL(r8), INTENT(in) :: d !< Relative change this update
 REAL(r8), INTENT(in) :: tol !< Convergence tolerance
 REAL(r8), INTENT(in) :: stol !< Stagnation tolerance
 REAL(r8), INTENT(inout) :: dmin !< Smallest change so far
-INTEGER(4), INTENT(inout) :: n_no_improve !< Updates since the last new minimum
+INTEGER(i4), INTENT(inout) :: n_no_improve !< Updates since the last new minimum
 LOGICAL, INTENT(inout) :: frozen !< Set when frozen
 CHARACTER(LEN=*), INTENT(in) :: what !< Name in the warning ("Bootstrap solution")
 CHARACTER(LEN=*), INTENT(in) :: tol_name !< Name of `tol` in the warning
@@ -1275,10 +1282,10 @@ real(8) :: s,c,Bp2,Bt2,mod_B
 call self%lag_rep%ncdofs(cell,j)
 !---Reconstruct gradient
 grad=0.d0
-do jc=1,self%lag_rep%nce
-  call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
+DO jc=1,self%lag_rep%nce
+  CALL oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
   grad=grad+self%uvals(j(jc))*rop
-end do
+END DO
 !---Get radial position
 pt=self%mesh%log2phys(cell,f)
 s=SIN(self%t)
@@ -2141,4 +2148,4 @@ bra2 = L32 * dT_e_dpsi / Te
 bra3 = L34 * alpha * (1.0_r8 - R_pe) / R_pe * dT_i_dpsi / Ti
 avg_j_bootstrap_times_B = -I_psi * pe * (bra1 + bra2 + bra3)
 END SUBROUTINE redl_bootstrap
-end module grad_shaf_bootstrap
+END MODULE grad_shaf_bootstrap

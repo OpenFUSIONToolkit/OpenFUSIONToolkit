@@ -813,7 +813,7 @@ IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
 !---Inputs the bootstrap profile needs (missing ones would abort inside the solve)
 IF((.NOT.vacuum).AND.ASSOCIATED(tMaker_obj%gs_equil%I))THEN
-  SELECT TYPE(I=>tMaker_obj%gs_equil%I)
+  SELECT TYPE(I=>torflux_unwrap(tMaker_obj%gs_equil%I))
   TYPE IS(jphi_bs_flux_func)
     missing=''
     IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%Te))missing=TRIM(missing)//' Te'

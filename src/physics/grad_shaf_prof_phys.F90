@@ -575,8 +575,8 @@ end subroutine jphi_update
 !------------------------------------------------------------------------------
 !> Node locations in normalized poloidal flux (`x` mapped from toroidal flux if wrapped)
 !------------------------------------------------------------------------------
-subroutine jphi_psi_nodes(self,xpsi)
-class(jphi_flux_func), intent(inout) :: self
+SUBROUTINE jphi_psi_nodes(self,xpsi)
+CLASS(jphi_flux_func), INTENT(inout) :: self
 REAL(r8), ALLOCATABLE, INTENT(out) :: xpsi(:) !< Node locations in \f$ 1-\hat{\psi} \f$
 INTEGER(i4) :: i
 ALLOCATE(xpsi(self%npsi))
@@ -591,7 +591,7 @@ SELECT TYPE(wrap=>self%phi_wrapper)
       xpsi(i)=wrap%map%inv(self%x(i))
     END DO
 END SELECT
-end subroutine jphi_psi_nodes
+END SUBROUTINE jphi_psi_nodes
 !---------------------------------------------------------------------------------
 !> Area integral over the plasma (inside the LCFS) of a flux function given on
 !! normalized psi nodes (0 at the LCFS, 1 at the axis)
