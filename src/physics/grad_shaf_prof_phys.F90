@@ -22,7 +22,7 @@ USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
   gs_get_qprof, gs_ani_press, gs_epsilon, gs_cell_quad
-use oft_gs_cutcell, only: gs_fsa_cutcell
+USE oft_gs_cutcell, ONLY: gs_fsa_cutcell
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
   spline_func_copy, spline_func_delete, phi_flux_wrapper, torflux_qgeom_backend
@@ -617,9 +617,9 @@ do i=1,self%device%mesh%nc
   IF(self%device%mesh%reg(i)/=1)CYCLE
   CALL gs_cell_quad(self,i,prof_interp_obj%psi_eval%vals,quad)
   !---Loop over quadrature points
-  do m=1,quad%np
-    call self%device%mesh%jacobian(i,quad%pts(:,m),sgop,area)
-    call prof_interp_obj%interp(i,quad%pts(:,m),sgop,psitmp)
+  DO m=1,quad%np
+    CALL self%device%mesh%jacobian(i,quad%pts(:,m),sgop,area)
+    CALL prof_interp_obj%interp(i,quad%pts(:,m),sgop,psitmp)
     IF(psitmp(1)<=0.d0)CYCLE ! Outside the plasma: mode 4 returns 0 outside the LCFS and where gs_test_bounds fails (private flux)
     psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
     IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*quad%wts(m)
@@ -653,13 +653,13 @@ bblk=0.d0
 prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
 !$omp parallel do private(i,m,psitmp,sgop,area,inds,facs,quad) schedule(dynamic,1)
-do ib=1,nblk
-  do i=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,self%device%mesh%nc)
+DO ib=1,nblk
+  DO i=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,self%device%mesh%nc)
     IF(self%device%mesh%reg(i)/=1)CYCLE
     CALL gs_cell_quad(self,i,prof_interp_obj%psi_eval%vals,quad)
-    do m=1,quad%np
-      call self%device%mesh%jacobian(i,quad%pts(:,m),sgop,area)
-      call prof_interp_obj%interp(i,quad%pts(:,m),sgop,psitmp)
+    DO m=1,quad%np
+      CALL self%device%mesh%jacobian(i,quad%pts(:,m),sgop,area)
+      CALL prof_interp_obj%interp(i,quad%pts(:,m),sgop,psitmp)
       IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma
       CALL linterp_facs(psi_tmp,nvals,psitmp(1),inds,facs,0)
       IF(inds(1)<=0)CYCLE

@@ -1778,7 +1778,7 @@ logical :: curved
 type(oft_lag_brinterp), target :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp), target :: psi_geval
 type(gs_factory), pointer :: device
-type(oft_quad_type), pointer :: quad
+TYPE(oft_quad_type), POINTER :: quad
 ! t1=omp_get_wtime()
 !---
 device=>self%device
@@ -1807,9 +1807,9 @@ DO j=1,device%fe_rep%mesh%nc
   call device%fe_rep%ncdofs(j,j_lag)
   curved=cell_is_curved(device%fe_rep%mesh,j)
   CALL gs_cell_quad(self,j,psi_eval%vals,quad)
-  do m=1,quad%np
-    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(j,quad%pts(:,m),goptmp,psitmp)
+  DO m=1,quad%np
+    IF(curved.OR.(m==1))CALL device%fe_rep%mesh%jacobian(j,quad%pts(:,m),goptmp,v)
+    CALL psi_eval%interp(j,quad%pts(:,m),goptmp,psitmp)
     pt=device%fe_rep%mesh%log2phys(j,quad%pts(:,m))
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
@@ -3433,7 +3433,7 @@ integer(4), allocatable :: j_lag(:)
 logical :: curved
 type(oft_lag_brinterp) :: bcross_kappa_fun
 type(gs_factory), pointer :: device
-type(oft_quad_type), pointer :: quad
+TYPE(oft_quad_type), POINTER :: quad
 t1=omp_get_wtime()
 !---
 NULLIFY(atmp,btmp,b2tmp,b3tmp)
@@ -3474,8 +3474,8 @@ do j=1,device%fe_rep%mesh%nc
   END DO
   curved=cell_is_curved(device%fe_rep%mesh,j)
   CALL gs_cell_quad(self,j,atmp,quad)
-  do m=1,quad%np
-    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,quad%pts(:,m),goptmp,v)
+  DO m=1,quad%np
+    IF(curved.OR.(m==1))CALL device%fe_rep%mesh%jacobian(j,quad%pts(:,m),goptmp,v)
     det=v*quad%wts(m)
     DO l=1,device%fe_rep%nce
       CALL oft_blag_eval(device%fe_rep,j,l,quad%pts(:,m),rop(l))
@@ -3665,7 +3665,7 @@ real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),bcross_kappa(1),H,ani_fac,pani(2)
 real(8) :: pt(3),curr_cent(2)
 integer(4) :: i,m
 type(gs_factory), pointer :: device
-type(oft_quad_type), pointer :: quad
+TYPE(oft_quad_type), POINTER :: quad
 IF(.NOT.self%has_plasma)THEN
   IF(PRESENT(centroid))centroid = 0.d0
   itor=0.d0
@@ -3689,9 +3689,9 @@ curr_cent=0.d0
 do i=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(i)/=1)CYCLE
   CALL gs_cell_quad(self,i,psi_eval%vals,quad)
-  do m=1,quad%np
-    call device%fe_rep%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
+  DO m=1,quad%np
+    CALL device%fe_rep%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
+    CALL psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
     ! IF(psitmp(1)<self%plasma_bounds(1).OR.psitmp(1)>self%plasma_bounds(2))CYCLE
     pt=device%fe_rep%mesh%log2phys(i,quad%pts(:,m))
     !---Compute Magnetic Field
@@ -4208,11 +4208,11 @@ end function gs_test_bounds
 !! The interpolant deviates from the mid-range of its nodal values by at most \f$ \Lambda/2 \f$ times
 !! that range, with \f$ \Lambda \f$ the Lebesgue constant of the element (sampled, 10% margin).
 !------------------------------------------------------------------------------
-subroutine gs_split_setup(self)
-class(gs_factory), intent(inout) :: self !< G-S object
-integer(i4), parameter :: nsamp = 60 !< Lattice divisions for sampling the Lebesgue function
-integer(i4) :: ns,ia,ib,k,j
-real(r8) :: f(3),val,lsum,lam
+SUBROUTINE gs_split_setup(self)
+CLASS(gs_factory), INTENT(inout) :: self !< G-S object
+INTEGER(i4), PARAMETER :: nsamp = 60 !< Lattice divisions for sampling the Lebesgue function
+INTEGER(i4) :: ns,ia,ib,k,j
+REAL(r8) :: f(3),val,lsum,lam
 CALL self%split_quad%delete()
 IF(self%split_nlev<1)RETURN
 !---Lebesgue constant
@@ -4245,10 +4245,10 @@ DO ia=0,ns-1
 END DO
 CONTAINS
 !> Add the FE rule on the sub-triangle with lattice vertices v1, v2, v3
-subroutine add_tri(v1,v2,v3)
-integer(i4), intent(in) :: v1(2),v2(2),v3(2)
-real(r8) :: fv(3,3)
-integer(i4) :: m
+SUBROUTINE add_tri(v1,v2,v3)
+INTEGER(i4), INTENT(in) :: v1(2),v2(2),v3(2)
+REAL(r8) :: fv(3,3)
+INTEGER(i4) :: m
 fv(:,1)=REAL([v1(1),v1(2),ns-v1(1)-v1(2)],r8)/ns
 fv(:,2)=REAL([v2(1),v2(2),ns-v2(1)-v2(2)],r8)/ns
 fv(:,3)=REAL([v3(1),v3(2),ns-v3(1)-v3(2)],r8)/ns
@@ -4257,20 +4257,20 @@ DO m=1,self%fe_rep%quad%np
   self%split_quad%pts(:,k)=MATMUL(fv,self%fe_rep%quad%pts(1:3,m))
   self%split_quad%wts(k)=self%fe_rep%quad%wts(m)/REAL(ns**2,r8)
 END DO
-end subroutine add_tri
-end subroutine gs_split_setup
+END SUBROUTINE add_tri
+END SUBROUTINE gs_split_setup
 !------------------------------------------------------------------------------
 !> Quadrature rule for plasma integrals on `cell`: the split rule (@ref gs_split_setup) if the
 !! plasma boundary (LCFS or X-point cut) may cross the cell, else the FE rule
 !------------------------------------------------------------------------------
-subroutine gs_cell_quad(self,cell,vals,quad)
-class(gs_equil), intent(inout) :: self !< G-S object
-integer(i4), intent(in) :: cell !< Cell index
-real(r8), intent(in) :: vals(:) !< Local \f$ \psi \f$ values
-type(oft_quad_type), pointer, intent(out) :: quad !< Rule for this cell
-integer(i4) :: k,jd(self%device%fe_rep%nce)
-real(r8) :: lo,hi,pad
-logical :: msk(3)
+SUBROUTINE gs_cell_quad(self,cell,vals,quad)
+CLASS(gs_equil), INTENT(inout) :: self !< G-S object
+INTEGER(i4), INTENT(in) :: cell !< Cell index
+REAL(r8), INTENT(in) :: vals(:) !< Local \f$ \psi \f$ values
+TYPE(oft_quad_type), POINTER, INTENT(out) :: quad !< Rule for this cell
+INTEGER(i4) :: k,jd(self%device%fe_rep%nce)
+REAL(r8) :: lo,hi,pad
+LOGICAL :: msk(3)
 quad=>self%device%fe_rep%quad
 IF((self%device%split_quad%np==0).OR.(self%plasma_bounds(1)<-1.d98))RETURN
 CALL self%device%fe_rep%ncdofs(cell,jd)
@@ -4283,7 +4283,7 @@ END DO
 IF(.NOT.ANY(msk))RETURN ! The mask is convex: no plasma in the cell
 IF(ALL(msk).AND.(lo-pad>self%plasma_bounds(1)))RETURN
 quad=>self%device%split_quad
-end subroutine gs_cell_quad
+END SUBROUTINE gs_cell_quad
 !------------------------------------------------------------------------------
 !> Compute magnetic fields from Grad-Shafranov equilibrium
 !------------------------------------------------------------------------------
@@ -4438,7 +4438,7 @@ real(8) :: goptmp(3,3),v,psitmp(1),pt(3)
 real(8) :: Btor
 integer(4) :: i,m
 type(gs_factory), pointer :: device
-type(oft_quad_type), pointer :: quad
+TYPE(oft_quad_type), POINTER :: quad
 device=>self%device
 !---
 psi_eval%u=>self%psi
@@ -4448,9 +4448,9 @@ dflux=0.d0
 do i=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(i)/=1)CYCLE
   CALL gs_cell_quad(self,i,psi_eval%vals,quad)
-  do m=1,quad%np
-    call device%fe_rep%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
+  DO m=1,quad%np
+    CALL device%fe_rep%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
+    CALL psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
     ! IF(psitmp(1)<self%plasma_bounds(1).OR.psitmp(1)>self%plasma_bounds(2))CYCLE
     pt=device%fe_rep%mesh%log2phys(i,quad%pts(:,m))
     IF(gs_test_bounds(self,pt).AND.(psitmp(1)>self%plasma_bounds(1)))THEN

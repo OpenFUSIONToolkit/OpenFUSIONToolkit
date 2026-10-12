@@ -228,7 +228,7 @@ real(8) :: pt(3),curr_cent(2),Btor,Bpol(2),pani(2),bcross_kappa(1)
 integer(4) :: i,m
 class(oft_bmesh), pointer :: smesh
 type(gs_factory), pointer :: device
-type(oft_quad_type), pointer :: quad
+TYPE(oft_quad_type), POINTER :: quad
 !---
 device=>self%device
 smesh=>device%mesh
@@ -256,9 +256,9 @@ bp_vol = 0.d0
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
   CALL gs_cell_quad(self,i,psi_eval%vals,quad)
-  do m=1,quad%np
-    call smesh%jacobian(i,quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
+  DO m=1,quad%np
+    CALL smesh%jacobian(i,quad%pts(:,m),goptmp,v)
+    CALL psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
     IF(psitmp(1)<self%plasma_bounds(1))CYCLE
     pt=smesh%log2phys(i,quad%pts(:,m))
     !---Compute Magnetic Field
@@ -288,7 +288,7 @@ do i=1,smesh%nc
       END IF
       tflux = tflux + Btor*v*quad%wts(m)
       !---Compute internal inductance
-      call psi_geval%interp(i,quad%pts(:,m),goptmp,gpsitmp)
+      CALL psi_geval%interp(i,quad%pts(:,m),goptmp,gpsitmp)
       Bpol = [gpsitmp(1),gpsitmp(2)]/(pt(1)+gs_epsilon)
       bp_vol = bp_vol + SUM(Bpol**2)*v*quad%wts(m)*pt(1)
       !---Compute differential toroidal Field
@@ -337,7 +337,7 @@ real(8) :: psitmp(1) ! magnetic flux coordinate
 integer(4) :: i,m
 class(oft_bmesh), pointer :: smesh
 type(gs_factory), pointer :: device
-type(oft_quad_type), pointer :: quad
+TYPE(oft_quad_type), POINTER :: quad
 !---
 device=>self%device
 smesh=>device%mesh
@@ -356,9 +356,9 @@ vloop = 0.d0
 do i=1,smesh%nc
   IF(smesh%reg(i)/=1)CYCLE
   CALL gs_cell_quad(self,i,psi_eval%vals,quad)
-  do m=1,quad%np
-    call smesh%jacobian(i,quad%pts(:,m),goptmp,v)
-    call psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
+  DO m=1,quad%np
+    CALL smesh%jacobian(i,quad%pts(:,m),goptmp,v)
+    CALL psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
     IF(psitmp(1)<self%plasma_bounds(1))CYCLE
     pt=smesh%log2phys(i,quad%pts(:,m))
     !---Compute toroidal current itor, and eta*j^2 eta_jsq (numerator of Vloop integral)
