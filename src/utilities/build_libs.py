@@ -301,6 +301,10 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     if line.find('GNU') >= 0:
         fc_vendor = 'gnu'
     elif line.find('flang') >= 0:
+        ver_string = line.split("version")[1]
+        ver_string = ver_string.split("-")[0]  # Needed if patch release
+        if ver_lt(ver_string,"23.0"):
+            error_exit('LLVM Flang version must be >= 23.0')
         fc_vendor = 'llvm'
     elif (line.find('ifort') >= 0) or (line.find('ifx') >= 0):
         fc_vendor = 'intel'
@@ -308,6 +312,10 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
             if ver_lt(config_dict.get('CMAKE_VERSION','0.0'),"3.20"):
                 error_exit('CMAKE >= 3.20 required for Intel "ifx" Fortran compiler', ('Update or retry with "--build_cmake=1" to build a compatible version',))
     elif line.find('nvfortran') >= 0:
+        ver_string = line.split(" ")[1]
+        ver_string = ver_string.split("-")[0]  # Needed if patch release
+        if ver_lt(ver_string,"26.0"):
+            error_exit('Nvidia Fortran compiler version must be >= 26.0')
         fc_vendor = 'nvidia'
     # Check C++ compiler
     result, errcode = run_command("{CXX} --version".format(**config_dict))

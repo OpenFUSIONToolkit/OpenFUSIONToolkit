@@ -258,31 +258,6 @@ elseif("${CMAKE_Fortran_COMPILER_ID}" MATCHES "LLVMFlang")
       message( FATAL_ERROR "Address sanitization not supported with Nvidia compilers" )
     endif()
   endif()
-  # # Temporary workaround as compiler doesn't inject its search paths
-  # get_filename_component(LLVM_DIRECTORY "${CMAKE_C_COMPILER}" DIRECTORY)
-  # find_program(LLVM_CONFIG_PATH
-  #     NAMES llvm-config
-  #     HINTS "${LLVM_DIRECTORY}"
-  #     NO_DEFAULT_PATH
-  # )
-  # if(LLVM_CONFIG_PATH)
-  #   message(STATUS "Found llvm-config at: ${LLVM_CONFIG_PATH}")
-  # else()
-  #   message(FATAL_ERROR "Could not find llvm-config in ${LLVM_DIRECTORY}")
-  # endif()
-  # execute_process(
-  #   COMMAND "${LLVM_CONFIG_PATH} --libdir"
-  #   OUTPUT_VARIABLE FLANG_LIB_DIR
-  #   OUTPUT_STRIP_TRAILING_WHITESPACE)
-  # if( APPLE )
-  #   list(APPEND CMAKE_BUILD_RPATH "${FLANG_LIB_DIR}" "/usr/lib")
-  # else()
-  #   execute_process(
-  #     COMMAND "${CMAKE_Fortran_COMPILER} -print-target-triple"
-  #     OUTPUT_VARIABLE FLANG_TARGET_TRIPLE
-  #     OUTPUT_STRIP_TRAILING_WHITESPACE)
-  #   list(APPEND CMAKE_BUILD_RPATH "${FLANG_LIB_DIR}/${FLANG_TARGET_TRIPLE}")
-  # endif()
 endif()
 # Enable IPO for release builds (not including coverage)
 if(OFT_USE_LTO)
