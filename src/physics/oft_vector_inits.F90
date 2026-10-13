@@ -188,13 +188,13 @@ az=self%akz*(pt(self%zaxis)-self%zmin)
 if(ar==0)then
   i=.5d0
 else
-  i=dbesj1(ar)/ar
+  i=BESSEL_J1(ar)/ar
 end if
 s=SIN(az); c=COS(az)
 !---
 val(self%rplane(2))=(self%alm*pt(self%rplane(1))*s-self%akz*pt(self%rplane(2))*c)*i
 val(self%rplane(1))=-(self%alm*pt(self%rplane(2))*s+self%akz*pt(self%rplane(1))*c)*i
-val(self%zaxis)=dbesj0(ar)*s
+val(self%zaxis)=BESSEL_J0(ar)*s
 end subroutine cyl_taylor_eval
 !------------------------------------------------------------------------------
 !> Setup infinite coil interpolation class
