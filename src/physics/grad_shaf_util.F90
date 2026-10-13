@@ -95,7 +95,7 @@ INTEGER(4) :: io_unit
 ! LOGICAL :: zero_grad
 CHARACTER(LEN=32) :: profType,coordType
 CHARACTER(LEN=128) :: line
-INTEGER(i4) :: ios
+INTEGER(4) :: ios
 !---First line: "<type> [coord]"
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,'(A)')line
@@ -489,7 +489,7 @@ integer(4) :: hash_tmp,hash_in,io_unit,int_tmp,ndims
 integer(i4), allocatable :: dim_sizes(:)
 REAL(r8) :: pt_tmp(2),scale_tmp,diff_val
 real(r8), pointer :: vals_tmp(:)
-LOGICAL :: success,pm_save,logical_tmp,restored
+logical :: success,pm_save,logical_tmp,restored
 CLASS(flux_func), POINTER :: I_base
 CHARACTER(LEN=:), ALLOCATABLE :: profType
 error_string=''
@@ -954,9 +954,9 @@ end subroutine gs_load_tokamaker
 !! 8-9. F*dF/dpsi, dp/dpsi (only if @p profile_derivs)
 !! 10. [psi_axis, psi_LCFS], unpadded (only if @p psi_bounds)
 !---------------------------------------------------------------------------
-SUBROUTINE gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs,psi_bounds,error_str)
+subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs,psi_bounds,error_str)
 class(gs_equil), intent(inout) :: gseq !< G-S object
-CHARACTER(LEN=OFT_PATH_SLEN), INTENT(in) :: filename !< Output filename
+CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Output filename
 integer(4), intent(in) :: npsi !< Number of points in flux coordinate
 integer(4), intent(in) :: ntheta !< Number of points in poloidal coordinate
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
@@ -969,13 +969,13 @@ CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str !< Error messa
 type(gsinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
-REAL(r8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr,bounds(2)
+real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr,bounds(2)
 real(8), allocatable :: ptout(:,:)
-REAL(r8), ALLOCATABLE :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),rzc(:,:,:),qf(:)
+real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),rzc(:,:,:),qf(:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell,io_unit
 LOGICAL :: do_pack,save_single,save_derivs,save_bounds,cc_done
-LOGICAL, ALLOCATABLE :: ok(:)
+LOGICAL, allocatable :: ok(:)
 TYPE(spline_type) :: rz
 type(gs_factory), pointer :: device
 device=>gseq%device
@@ -1039,7 +1039,7 @@ ALLOCATE(cout(npsi,6))
 ALLOCATE(rout(ntheta,npsi))
 ALLOCATE(zout(ntheta,npsi))
 !---Surface flux, F, pressure and their derivatives
-DO j=2,npsi
+do j=2,npsi
   IF(do_pack)THEN
     cout(j,1) = xr*(1.d0-(j-1)/REAL(npsi-1,8))**2 + x1
   ELSE
@@ -1048,7 +1048,7 @@ DO j=2,npsi
   cout(j,2)=gs_fpol(gseq,cout(j,1))
   cout(j,3)=gseq%p_scale*gseq%P%f(cout(j,1))/mu0
   CALL ifile_derivs(gseq,cout(j,1),cout(j,2),cout(j,5:6))
-END DO
+end do
 !---Surfaces at uniform polar angle from the cut-cell quadrature (exact on the FE surface);
 !---the field-line tracer below is the deprecated method and the fallback
 cc_done=.FALSE.
@@ -1068,7 +1068,7 @@ IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
 END IF
 !---Trace
 IF(.NOT.cc_done)THEN
-CALL set_tracer(1)
+call set_tracer(1)
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
@@ -1279,10 +1279,10 @@ INTEGER(4) :: nlim
 REAL(8), ALLOCATABLE, DIMENSION(:) :: rlim,zlim
 CHARACTER(LEN=48) :: eqdsk_case
 INTEGER(4) :: idum
-REAL(r8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi,ftrace,psi_q,qf
+REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS
+REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi,ftrace,psi_q,qf
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
-REAL(r8), ALLOCATABLE, DIMENSION(:,:,:) :: rzc
+REAL(8), ALLOCATABLE, DIMENSION(:,:,:) :: rzc
 LOGICAL :: do_truncate,cc_done
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: ok
 !---
@@ -1342,7 +1342,7 @@ ALLOCATE(rout(nr))
 ALLOCATE(zout(nr))
 !---Flux functions on each surface; q is evaluated on the traced surface `psi_trace`
 ALLOCATE(ftrace(nr),psi_q(nr))
-DO j=1,nr
+do j=1,nr
   psi_surf = x2 - xr*((j-1)/REAL(nr-1,8))
   psi_trace = psi_surf
   IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
@@ -1356,7 +1356,7 @@ DO j=1,nr
   END IF
   pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0
   pprime(j)=gseq%p_scale*gseq%P%fp(psi_surf)/mu0
-END DO
+end do
 !---q and the boundary contour (uniform polar angle) from the cut-cell quadrature (exact on the
 !---FE surface); the field-line tracer below is the deprecated method and the fallback
 cc_done=.FALSE.
@@ -1374,7 +1374,7 @@ IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
 END IF
 !---Trace
 IF(.NOT.cc_done)THEN
-CALL set_tracer(1)
+call set_tracer(1)
 !$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi

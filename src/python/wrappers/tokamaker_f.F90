@@ -42,7 +42,8 @@ USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_map, torflux_setup, to
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh, gs_flux_int
-USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func, sauter_fc, saw_reset_1d, boot_prof_access, jphi_bs_carry_ffp
+USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func, sauter_fc, saw_reset_1d, boot_prof_access, jphi_bs_carry_ffp, &
+  jphi_bs_missing_inputs
 USE diagnostic, ONLY: bscal_surf_int
 USE oft_base_f, ONLY: copy_string, copy_string_rev, oftpy_init
 IMPLICIT NONE
@@ -809,27 +810,17 @@ INTEGER(c_int), INTENT(out) :: nl_its !< Number of nonlinear iterations
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: ntargets,ierr
 LOGICAL :: vac_save
-CHARACTER(LEN=OFT_ERROR_SLEN) :: missing
+CHARACTER(LEN=256) :: missing
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
-!---Inputs the bootstrap profile needs (missing ones would abort inside the solve)
-IF((.NOT.vacuum).AND.ASSOCIATED(tMaker_obj%gs_equil%I))THEN
+!---Inputs the bootstrap profile needs (missing ones would abort inside the solve; a vacuum solve updates it too)
+IF(ASSOCIATED(tMaker_obj%gs_equil%I))THEN
   SELECT TYPE(I=>torflux_unwrap(tMaker_obj%gs_equil%I))
   TYPE IS(jphi_bs_flux_func)
-    missing=''
-    IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%Te))missing=TRIM(missing)//' Te'
-    IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%Ti))missing=TRIM(missing)//' Ti'
-    IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%ne))missing=TRIM(missing)//' ne'
-    IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%ni))missing=TRIM(missing)//' ni'
-    IF(.NOT.ASSOCIATED(tMaker_obj%gs_equil%Zeff))missing=TRIM(missing)//' Zeff'
+    missing=jphi_bs_missing_inputs(tMaker_obj%gs_equil)
     IF(LEN_TRIM(missing)>0)THEN
-      CALL copy_string('jphi-split-bootstrap profile requires kinetic profiles (set_kinetic_profiles), missing:' &
-        //TRIM(missing),error_str)
-      RETURN
-    END IF
-    IF((tMaker_obj%gs_equil%Ip_target<0.d0).OR.(tMaker_obj%gs_equil%pax_target<0.d0))THEN
-      CALL copy_string('jphi-split-bootstrap profile requires Ip and pax targets (set_targets)',error_str)
+      CALL copy_string('jphi-split-bootstrap profile requires '//TRIM(missing),error_str)
       RETURN
     END IF
   END SELECT

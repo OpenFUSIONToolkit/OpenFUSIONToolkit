@@ -19,10 +19,10 @@ USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
 use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
-use oft_gs, only: gs_equil, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
+use oft_gs, only: gs_equil, flux_func, gs_psi2r, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
   gs_get_qprof, gs_ani_press, gs_epsilon, gs_cell_quad
-USE oft_gs_cutcell, ONLY: gs_fsa_cutcell
+use oft_gs_cutcell, only: gs_fsa_cutcell
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
   spline_func_copy, spline_func_delete, phi_flux_wrapper, torflux_qgeom_backend
@@ -541,19 +541,19 @@ IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
 !---Update jphi normalization to match Ip target: the exact I_p (A9c) is affine in the jphi scale,
-!   I_p(norm) = ip0 + norm*(ip1 - ip0), over [LCFS, x]
+!   I_p(norm) = ip0 + norm*(ip1 - ip0); past the last node jphi is held, as F*F' is
 ALLOCATE(xn(0:self%npsi),jn(0:self%npsi),jtor(0:self%npsi))
 xn=[0.d0,xpsi]; jn=[self%j0,self%jphi]
 CALL eval_dIdA(gseq, xn, self%npsi+1, ravgs, jn, pscale, jtor)
-CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip1)
+CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip1,extrap=1)
 jn=0.d0
 CALL eval_dIdA(gseq, xn, self%npsi+1, ravgs, jn, pscale, jtor)
-CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip0)
+CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip0,extrap=1)
 DEALLOCATE(xn,jn,jtor)
-IF(ABS(ip1-ip0)>1.d-10*ABS(gseq%Ip_target))THEN
+IF(ABS(ip1-ip0)>0.d0)THEN
   jphi_norm=(ABS(gseq%Ip_target)-ip0)/(ip1-ip0)
 ELSE
-  CALL oft_warn("jphi_update: jphi profile carries no net current, keeping the last normalization")
+  CALL oft_warn("jphi_update: jphi profile carries no (finite) net current, keeping the last normalization")
   jphi_norm=self%norm_last
 END IF
 self%norm_last=jphi_norm
@@ -597,18 +597,21 @@ END SUBROUTINE jphi_psi_nodes
 !> Area integral over the plasma (inside the LCFS) of a flux function given on
 !! normalized psi nodes (0 at the LCFS, 1 at the axis)
 !---------------------------------------------------------------------------------
-SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result)
+SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result,extrap)
 class(gs_equil), INTENT(inout) :: self !< Pointer to TokaMaker object
 REAL(r8), INTENT(in) :: psi_tmp(:) !< Normalised psi nodes (OFT convention)
 REAL(r8), INTENT(in) :: field_tmp(:) !< Flux function on @p psi_tmp
 INTEGER(i4), INTENT(in) :: nvals !< Number of nodes
 REAL(r8), INTENT(out) :: result !< Integral over the plasma cross-section
-INTEGER(i4) :: i,m
+INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Beyond the last node: 0 skip (default), 1 hold its value (see linterp)
+INTEGER(i4) :: i,m,extrap_loc
 REAL(r8) :: area,psitmp(1),sgop(3,3)
 TYPE(gs_prof_interp) :: prof_interp_obj
 TYPE(oft_quad_type), POINTER :: quad
 ! DEBUG_STACK_PUSH
 !---Setup
+extrap_loc=0
+IF(PRESENT(extrap))extrap_loc=extrap
 result=0.d0
 prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
@@ -617,11 +620,11 @@ do i=1,self%device%mesh%nc
   IF(self%device%mesh%reg(i)/=1)CYCLE
   CALL gs_cell_quad(self,i,prof_interp_obj%psi_eval%vals,quad)
   !---Loop over quadrature points
-  DO m=1,quad%np
-    CALL self%device%mesh%jacobian(i,quad%pts(:,m),sgop,area)
-    CALL prof_interp_obj%interp(i,quad%pts(:,m),sgop,psitmp)
-    IF(psitmp(1)<=0.d0)CYCLE ! Outside the plasma: mode 4 returns 0 outside the LCFS and where gs_test_bounds fails (private flux)
-    psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
+  do m=1,quad%np
+    call self%device%mesh%jacobian(i,quad%pts(:,m),sgop,area)
+    call prof_interp_obj%interp(i,quad%pts(:,m),sgop,psitmp)
+    IF(psitmp(1)<=0.d0)CYCLE ! Outside the plasma (mode 4 gives 0 outside the LCFS or gs_test_bounds)
+    psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),extrap_loc)
     IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*quad%wts(m)
   end do
 end do
@@ -634,19 +637,22 @@ END SUBROUTINE gs_flux_int
 !> Area integrals of several flux functions inside each node's surface, in one quadrature
 !! pass (same quadrature as @ref gs_flux_int). cum(1,:) is the full plasma integral.
 !---------------------------------------------------------------------------------
-SUBROUTINE gs_flux_cumint(self,psi_tmp,fields,nvals,nf,cum)
+SUBROUTINE gs_flux_cumint(self,psi_tmp,fields,nvals,nf,cum,extrap)
 CLASS(gs_equil), INTENT(inout) :: self !< TokaMaker object
 INTEGER(i4), INTENT(in) :: nvals !< Number of nodes
 INTEGER(i4), INTENT(in) :: nf !< Number of fields
 REAL(r8), INTENT(in) :: psi_tmp(nvals) !< Nodes in normalized psi (0 at LCFS, 1 at axis), ascending
 REAL(r8), INTENT(in) :: fields(nvals,nf) !< Fields on the nodes
 REAL(r8), INTENT(out) :: cum(nvals,nf) !< Integral over psi >= psi_tmp(k) of each field
+INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Beyond the last node: 0 skip (default), 1 hold its value (see linterp)
 INTEGER(i4), PARAMETER :: nblk_cells=64 !< Cells per block (fixed-order sums, independent of the thread count)
-INTEGER(i4) :: i,m,k,ib,nblk,inds(2)
+INTEGER(i4) :: i,m,k,ib,nblk,inds(2),extrap_loc
 REAL(r8) :: area,psitmp(1),sgop(3,3),facs(2)
 REAL(r8), ALLOCATABLE :: bins(:,:),bblk(:,:,:)
 TYPE(gs_prof_interp) :: prof_interp_obj
 TYPE(oft_quad_type), POINTER :: quad
+extrap_loc=0
+IF(PRESENT(extrap))extrap_loc=extrap
 nblk=(self%device%mesh%nc+nblk_cells-1)/nblk_cells
 ALLOCATE(bins(nvals,nf),bblk(nvals,nf,nblk))
 bblk=0.d0
@@ -661,7 +667,7 @@ DO ib=1,nblk
       CALL self%device%mesh%jacobian(i,quad%pts(:,m),sgop,area)
       CALL prof_interp_obj%interp(i,quad%pts(:,m),sgop,psitmp)
       IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma
-      CALL linterp_facs(psi_tmp,nvals,psitmp(1),inds,facs,0)
+      CALL linterp_facs(psi_tmp,nvals,psitmp(1),inds,facs,extrap_loc)
       IF(inds(1)<=0)CYCLE
       area=area*quad%wts(m)
       ! Lower node inds(2) is the innermost surface enclosing this point
