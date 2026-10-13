@@ -140,10 +140,12 @@ INTEGER(i4) :: oft_tid = 0 !< ID of current thread
 REAL(r8), PRIVATE :: start_time !< Time that run began
 INTEGER(i8) :: comm_times(4) = 0 !< Times for blocking communications
 LOGICAL :: use_petsc = .FALSE. !< Use PETSc as linear algebra backend
-INTEGER(i4), PARAMETER :: oft_test_seed(24) = [430470439, -303393496, -476850581, &
+INTEGER(i4), PARAMETER :: oft_test_seed(34) = [430470439, -303393496, -476850581, &
   -964913795, 995391627, 84909391, -586395292, -2070086573, -1010035798, 1012650827, &
   325297911, 701378007, 392909068, 379156631, 484729024, -292308758, -1669043581, &
-  142231192, 708877466, -1255634259, 593274827, -561530186, -934579426, 900810854]
+  142231192, 708877466, -1255634259, 593274827, -561530186, -934579426, 900810854, &
+  325397911, 701379007, 392919068, 379166631, 484739024, -292318758, -1669143581, &
+  430570439, 430420439, -303093496]
 !$omp threadprivate(oft_tid)
 !---Debugging stack information
 LOGICAL :: oft_stack_disabled = .FALSE. !< Disable debug/profiling stack
