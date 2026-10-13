@@ -2168,8 +2168,8 @@ REAL(8) :: nl_res,psimax,ffp_scale_in,ffp_scale_prev,itor,pnorm0,pnormp,itor_ffp
 REAL(8) :: R0_tmp,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3),t0,t1
 REAL(8) :: param_mat(3,3),mat_save(2,2),param_vec(3),param_rhs(3)
 REAL(r8), POINTER :: saddle_save(:,:)
-INTEGER(i4) :: i,ii,j,k,error_flag,cell,ierr_loc,map_fails
-INTEGER(i4), PARAMETER :: map_fail_max = 3 !< Consecutive toroidal flux map failures before the solve fails
+integer(4) :: i,ii,j,k,error_flag,cell,ierr_loc,map_fails
+integer(4), parameter :: map_fail_max = 3 !< Consecutive toroidal flux map failures before the solve fails
 integer(4), save :: eq_count = 0
 CHARACTER(LEN=40) :: err_reason
 logical :: pm_save,fail_test
@@ -4469,7 +4469,7 @@ end subroutine psimax_error_grad
 !------------------------------------------------------------------------------
 !> Get q profile for equilibrium
 !------------------------------------------------------------------------------
-SUBROUTINE gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs,fsa_avgs,shape_geo,geom_only)
+subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs,fsa_avgs,shape_geo,geom_only)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux surfaces to sample
 real(8), intent(in) :: psi_q(nr) !< Locations to sample in normalized flux
@@ -4480,7 +4480,7 @@ real(8), optional, intent(out) :: zbounds(2,2) !< Vertical bounds of surface `ps
 real(8), optional, intent(out) :: ravgs(nr,4) !< Flux surface averages <R>, <1/R>, <1/R^2>, and dV/dPsi
 real(8), optional, intent(out) :: fsa_avgs(nr,4) !< Flux surface averages <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
 real(8), optional, intent(out) :: shape_geo(nr,6) !< Per-surface R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
-LOGICAL, OPTIONAL, INTENT(in) :: geom_only !< Return \f$ q/F \f$ (independent of F profile)
+logical, optional, intent(in) :: geom_only !< Return \f$ q/F \f$ (independent of F profile)
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int

@@ -19,7 +19,7 @@ USE oft_gs, ONLY: flux_func, gs_equil, oft_indent, oft_increase_indent, &
   oft_decrease_indent, gs_get_qprof, gs_fpol
 USE oft_gs_cutcell, ONLY: gs_qgeom_cutcell
 implicit none
-INTEGER(i4) :: torflux_qgeom_backend = 0 !< Toroidal flux map q/F backend: 0 cut-cell, 1 tracer (testing only)
+INTEGER(4) :: torflux_qgeom_backend = 0 !< Toroidal flux map q/F backend: 0 cut-cell, 1 tracer (testing only)
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -146,7 +146,7 @@ type, extends(flux_func) :: linterp_flux_func
   real(8), pointer, dimension(:) :: x => NULL() !< Needs docs
   real(8), pointer, dimension(:) :: yp => NULL() !< Needs docs
   real(8), pointer, dimension(:) :: y => NULL() !< Needs docs
-  CLASS(flux_func), POINTER :: phi_wrapper => NULL() !< Enclosing @ref phi_flux_wrapper if `x` is on \f$ \hat{\Phi} \f$
+  class(flux_func), pointer :: phi_wrapper => NULL() !< Enclosing @ref phi_flux_wrapper if `x` is on \f$ \hat{\Phi} \f$
 contains
   !> Delete profile
   procedure :: delete => linterp_delete
@@ -1156,7 +1156,7 @@ else
     if(psihat>self%x(i-1).AND.psihat<=self%x(i))then
       b = self%y(i-1) + psihat*(.5d0*psihat - self%x(i-1))/(self%x(i) - self%x(i-1))* &
           (self%yp(i) - self%yp(i-1)) + psihat*self%yp(i-1)
-      EXIT
+      exit
     end if
   end do
 end if
@@ -1190,7 +1190,7 @@ else
     if(psihat>self%x(i-1).AND.psihat<=self%x(i))then
       x=(psihat-self%x(i-1))/(self%x(i)-self%x(i-1))
       b = self%yp(i-1) + (self%yp(i)-self%yp(i-1))*x
-      EXIT
+      exit
     end if
   end do
 end if
@@ -1221,7 +1221,7 @@ else
     if(psihat>self%x(i-1).AND.psihat<=self%x(i))then
       x=1.d0/(self%plasma_bounds(2)-self%plasma_bounds(1))/(self%x(i)-self%x(i-1))
       b = (self%yp(i)-self%yp(i-1))*x
-      EXIT
+      exit
     end if
   end do
 end if
