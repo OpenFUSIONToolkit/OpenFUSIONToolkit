@@ -22,7 +22,7 @@ USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, flux_func, gs_psi2r, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
   gs_get_qprof, gs_ani_press, gs_epsilon
-USE oft_gs_cutcell, ONLY: gs_fsa_cutcell
+use oft_gs_cutcell, only: gs_fsa_cutcell
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
   spline_func_copy, spline_func_delete, phi_flux_wrapper, torflux_qgeom_backend
