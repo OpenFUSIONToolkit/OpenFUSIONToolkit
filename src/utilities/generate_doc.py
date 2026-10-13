@@ -164,6 +164,11 @@ if __name__ == '__main__':
     print("Converting Jupyter notebooks")
     eq_reg = re.compile(r'\$(.*?)\$')
     files = glob.glob("examples/*/*/*.ipynb")
+    # Advanced workflow notebooks are one level deeper; include those that define a documentation page
+    for filename in glob.glob("examples/*/AdvancedWorkflows/*/*.ipynb"):
+        with open(filename, 'r') as fid:
+            if '{#doc_' in fid.read():
+                files.append(filename)
     for filename in files:
         print(filename)
         base_path = filename.split('.')[0]

@@ -43,6 +43,7 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 
 ### Equilibrium Reconstruction
  - \subpage doc_tMaker_ITER_ex4
+ - \subpage doc_tMaker_DIIID_ex4
 
 ### Dipole Equilibria
  - \subpage doc_tMaker_dipole_ex2

@@ -267,7 +267,7 @@ END SUBROUTINE fit_gs_error
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
-SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fit_p_scale,fit_ffp_scale,fitR0,fitZ0,fitCoils,fitF0,fixedCentering)
+SUBROUTINE fit_gs(gs,inpath,outpath,fitI,fitP,fit_p_scale,fit_ffp_scale,fitR0,fitZ0,fitCoils,fitF0,fixedCentering,ierr)
 TYPE(gs_equil), TARGET, INTENT(inout) :: gs !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: inpath !< Needs docs
 CHARACTER(LEN=*), INTENT(in) :: outpath !< Needs docs
@@ -280,15 +280,20 @@ LOGICAL, OPTIONAL, INTENT(in) :: fitZ0 !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitCoils !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fitF0 !< Needs docs
 LOGICAL, OPTIONAL, INTENT(in) :: fixedCentering !< Needs docs
+INTEGER(i4), INTENT(out) :: ierr !< Error flag (0: success; -1: R0 and p_scale fitting requested together;
+!! -2: initial equilibrium solve failed; -3: no free parameters, or fewer constraints than free parameters;
+!! -4: MINPACK rejected inputs)
 !---
 real(8), allocatable :: fjac(:,:),qtf(:),error(:),cofs(:)
 real(8), allocatable :: wa1(:),wa2(:),wa3(:),wa4(:)
 real(8) :: ftol,xtol,gtol,epsfcn,factor
-integer(4) :: maxfev,mode,nprint,info,nfev,njev,ldfjac,i,j,js,je,offset,ierr,io_unit
+integer(4) :: maxfev,mode,nprint,info,nfev,njev,ldfjac,i,j,js,je,offset,io_unit,io_err
+CHARACTER(LEN=OFT_ERROR_SLEN) :: warn_msg
 integer(4), allocatable :: ipvt(:)
 logical :: file_exists,comp_var
 NAMELIST/gs_fit_options/ftol,xtol,gtol,maxfev,epsfcn,factor,comp_var,linearized_fit
 !---
+ierr = 0
 fit_I = .TRUE.
 IF(PRESENT(fitI))fit_I=fitI
 fit_P = .TRUE.
@@ -307,8 +312,10 @@ fit_F0 = .FALSE.
 IF(PRESENT(fitF0))fit_F0=fitF0
 fixed_centering = .FALSE.
 IF(PRESENT(fixedCentering))fixed_centering=fixedCentering
-IF(fit_Pscale.AND.fit_R0)CALL oft_abort('R0 or p_scale fitting cannot be used together', &
-'fit_gs',__FILE__)
+IF(fit_Pscale.AND.fit_R0)THEN
+  ierr = -1
+  RETURN
+END IF
 IF(fit_Pscale.AND.gs%R0_target>0.d0)THEN
   gs%R0_target=-1.d0
   CALL oft_warn('P_norm adjustment requested, disabling R0 target')
@@ -440,9 +447,9 @@ linearized_fit = .FALSE.
 ! Load settings
 !------------------------------------------------------------------------------
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
-READ(io_unit,gs_fit_options,IOSTAT=ierr)
+READ(io_unit,gs_fit_options,IOSTAT=io_err)
 CLOSE(io_unit)
-IF(ierr>0)CALL oft_abort('Error parsing "gs_fit_options" in input file.','fit_gs',__FILE__)
+IF(io_err>0)CALL oft_abort('Error parsing "gs_fit_options" in input file.','fit_gs',__FILE__)
 !---
 chi_best=1.d99
 ffp_scale_best = 1.d99
@@ -469,23 +476,35 @@ IF(maxfev>0)THEN
   CALL fit_error(ncons,ncofs,cofs,error,info)
   ! gs_active%Ip_target=-1.d0
   ! IF(fit_FFPscale)cofs(1)=gs_active%ffp_scale
-  IF(gs_active%device%ierr<0)CALL oft_abort('Initial equilibrium solve failed to converge','fit_gs',__FILE__)
-  !---
-  call lmder(fit_error_grad,ncons,ncofs,cofs,error,fjac,ldfjac, &
-             ftol,xtol,gtol,maxfev,cofs_scale,mode,factor,nprint,info,nfev,njev, &
-             ipvt,qtf,wa1,wa2,wa3,wa4)
-  WRITE(*,'(A)')'========================================'
-  WRITE(*,'(2A)')oft_indent,'Fit Complete '
-  CALL oft_increase_indent
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Final error          =',SQRT(SUM(error**2))
-  WRITE(*,'(3A)')oft_indent,'Termination reason:  ',minpack_exit_reason(info)
-  CALL oft_decrease_indent
-  WRITE(*,*)
-  IF(SQRT(SUM(error**2))>chi_best)THEN
-    cofs=cofs_best
-    gs_active%p_scale=p_scale_best
-    gs_active%vcontrol_val=vcont_best
-    CALL gs_active%psi%add(0.d0,1.d0,psi_best)
+  ! Skip (rather than return) on failure so that module data is cleaned up below
+  IF(gs_active%device%ierr<0)THEN
+    CALL oft_warn('Initial equilibrium solve failed to converge, skipping fit')
+    ierr = -2
+  ELSE IF(ncofs<1)THEN
+    CALL oft_warn('No free parameters selected for fit, skipping fit')
+    ierr = -3
+  ELSE IF(ncons<ncofs)THEN
+    WRITE(warn_msg,'(A,I6,A,I6,A)')'Fewer constraints (',ncons,') than free parameters (',ncofs,'), skipping fit'
+    CALL oft_warn(TRIM(warn_msg))
+    ierr = -3
+  ELSE
+    call lmder(fit_error_grad,ncons,ncofs,cofs,error,fjac,ldfjac, &
+               ftol,xtol,gtol,maxfev,cofs_scale,mode,factor,nprint,info,nfev,njev, &
+               ipvt,qtf,wa1,wa2,wa3,wa4)
+    WRITE(*,'(A)')'========================================'
+    WRITE(*,'(2A)')oft_indent,'Fit Complete '
+    CALL oft_increase_indent
+    WRITE(*,'(2A,ES11.3)')oft_indent,'Final error          =',SQRT(SUM(error**2))
+    WRITE(*,'(3A)')oft_indent,'Termination reason:  ',minpack_exit_reason(info)
+    CALL oft_decrease_indent
+    WRITE(*,*)
+    IF(info==0)ierr = -4
+    IF(SQRT(SUM(error**2))>chi_best)THEN
+      cofs=cofs_best
+      gs_active%p_scale=p_scale_best
+      gs_active%vcontrol_val=vcont_best
+      CALL gs_active%psi%add(0.d0,1.d0,psi_best)
+    END IF
   END IF
 END IF
 !---
