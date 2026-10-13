@@ -12,7 +12,8 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 MODULE oft_gs_fit
-use oft_base
+USE, INTRINSIC :: ieee_arithmetic, ONLY: ieee_is_nan
+USE oft_base
 USE oft_io, ONLY: hdf5_read, oft_file_exist
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 !---
@@ -656,7 +657,7 @@ IF(iflag==1)THEN
     END IF
   END IF
   CALL oft_increase_indent
-  IF(ANY(isnan(cofs)))THEN
+  IF(ANY(ieee_is_nan(cofs)))THEN
     WRITE(*,'(2A)')oft_indent,'Step failed: Bad parameters!'
     WRITE(*,*)
     CALL oft_decrease_indent
@@ -865,7 +866,7 @@ IF(iflag==1)THEN
     WRITE(*,*)
   END IF
   CALL oft_decrease_indent
-  IF(ANY(isnan(err)))THEN
+  IF(ANY(ieee_is_nan(err)))THEN
     WRITE(*,'(2A)')oft_indent,'Evaluation failed: NaN detected'
     err=1.d99
   END IF
@@ -1027,7 +1028,7 @@ ELSE
   END IF
   gs_active%device%plot_final=plot_save
   CALL oft_decrease_indent
-  IF(ANY(isnan(jac_mat)))THEN
+  IF(ANY(ieee_is_nan(jac_mat)))THEN
     CALL oft_abort("Gradient failed: NaN detected", "fit_error_grad", __FILE__)
   END IF
   WRITE(*,*)
