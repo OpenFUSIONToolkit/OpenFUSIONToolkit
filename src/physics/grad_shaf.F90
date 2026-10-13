@@ -1778,7 +1778,7 @@ logical :: curved
 type(oft_lag_brinterp), target :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp), target :: psi_geval
 type(gs_factory), pointer :: device
-TYPE(oft_quad_type), POINTER :: quad
+type(oft_quad_type), pointer :: quad
 ! t1=omp_get_wtime()
 !---
 device=>self%device
@@ -1807,9 +1807,9 @@ DO j=1,device%fe_rep%mesh%nc
   call device%fe_rep%ncdofs(j,j_lag)
   curved=cell_is_curved(device%fe_rep%mesh,j)
   CALL gs_cell_quad(self,j,psi_eval%vals,quad)
-  DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL device%fe_rep%mesh%jacobian(j,quad%pts(:,m),goptmp,v)
-    CALL psi_eval%interp(j,quad%pts(:,m),goptmp,psitmp)
+  do m=1,quad%np
+    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(j,quad%pts(:,m),goptmp,psitmp)
     pt=device%fe_rep%mesh%log2phys(j,quad%pts(:,m))
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt).AND.psitmp(1)>self%plasma_bounds(1))THEN
@@ -3433,7 +3433,7 @@ integer(4), allocatable :: j_lag(:)
 logical :: curved
 type(oft_lag_brinterp) :: bcross_kappa_fun
 type(gs_factory), pointer :: device
-TYPE(oft_quad_type), POINTER :: quad
+type(oft_quad_type), pointer :: quad
 t1=omp_get_wtime()
 !---
 NULLIFY(atmp,btmp,b2tmp,b3tmp)
@@ -3474,8 +3474,8 @@ do j=1,device%fe_rep%mesh%nc
   END DO
   curved=cell_is_curved(device%fe_rep%mesh,j)
   CALL gs_cell_quad(self,j,atmp,quad)
-  DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL device%fe_rep%mesh%jacobian(j,quad%pts(:,m),goptmp,v)
+  do m=1,quad%np
+    if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,quad%pts(:,m),goptmp,v)
     det=v*quad%wts(m)
     DO l=1,device%fe_rep%nce
       CALL oft_blag_eval(device%fe_rep,j,l,quad%pts(:,m),rop(l))
@@ -3665,7 +3665,7 @@ real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),bcross_kappa(1),H,ani_fac,pani(2)
 real(8) :: pt(3),curr_cent(2)
 integer(4) :: i,m
 type(gs_factory), pointer :: device
-TYPE(oft_quad_type), POINTER :: quad
+type(oft_quad_type), pointer :: quad
 IF(.NOT.self%has_plasma)THEN
   IF(PRESENT(centroid))centroid = 0.d0
   itor=0.d0
@@ -3689,9 +3689,9 @@ curr_cent=0.d0
 do i=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(i)/=1)CYCLE
   CALL gs_cell_quad(self,i,psi_eval%vals,quad)
-  DO m=1,quad%np
-    CALL device%fe_rep%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
-    CALL psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
+  do m=1,quad%np
+    call device%fe_rep%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
     ! IF(psitmp(1)<self%plasma_bounds(1).OR.psitmp(1)>self%plasma_bounds(2))CYCLE
     pt=device%fe_rep%mesh%log2phys(i,quad%pts(:,m))
     !---Compute Magnetic Field
@@ -4438,7 +4438,7 @@ real(8) :: goptmp(3,3),v,psitmp(1),pt(3)
 real(8) :: Btor
 integer(4) :: i,m
 type(gs_factory), pointer :: device
-TYPE(oft_quad_type), POINTER :: quad
+type(oft_quad_type), pointer :: quad
 device=>self%device
 !---
 psi_eval%u=>self%psi
@@ -4448,9 +4448,9 @@ dflux=0.d0
 do i=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(i)/=1)CYCLE
   CALL gs_cell_quad(self,i,psi_eval%vals,quad)
-  DO m=1,quad%np
-    CALL device%fe_rep%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
-    CALL psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
+  do m=1,quad%np
+    call device%fe_rep%mesh%jacobian(i,quad%pts(:,m),goptmp,v)
+    call psi_eval%interp(i,quad%pts(:,m),goptmp,psitmp)
     ! IF(psitmp(1)<self%plasma_bounds(1).OR.psitmp(1)>self%plasma_bounds(2))CYCLE
     pt=device%fe_rep%mesh%log2phys(i,quad%pts(:,m))
     IF(gs_test_bounds(self,pt).AND.(psitmp(1)>self%plasma_bounds(1)))THEN
