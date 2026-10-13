@@ -1102,8 +1102,8 @@ def solve_with_bootstrap(mygs,
     def current_scaling_objective(alpha, jphi_ind, jphi_bs, psi_N, target_ip, geom):
         '''Objective function to match total Ip: exact I_p of TokaMaker jphi (eqs. A5, A9c).'''
         jphi_total = (alpha * jphi_ind) + jphi_bs
-        didA = get_dIdA_from_jphi(jphi_total, *geom)
-        ip_computed = mygs.compute_flux_integral(psi_N, didA)
+        dIdA = get_dIdA_from_jphi(jphi_total, *geom)
+        ip_computed = mygs.compute_flux_integral(psi_N, dIdA)
         return ip_computed - target_ip
 
     def calculate_profiles_and_bootstrap(include_jbs):
