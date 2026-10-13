@@ -79,7 +79,7 @@ jobs:
     - name: Build OFT
       shell: bash
       working-directory: builds/build_release
-      run: make
+      run: make -j2
 
     - name: Test OFT
       shell: bash

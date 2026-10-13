@@ -95,19 +95,12 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         bash config_cmake.sh
 
-    - name: Build OFT
+    - name: Build+Install OFT
       shell: bash
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        make
-
-    - name: Install OFT
-      shell: bash
-      working-directory: builds/build_release
-      run: |
-        source ${{ github.workspace }}/setup_env.sh
-        make install
+        make -j2 install
 
     - name: Package OFT
       shell: bash
@@ -239,19 +232,12 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         bash config_cmake.sh
 
-    - name: Build OFT
+    - name: Build+Install OFT
       shell: bash
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        make
-
-    - name: Install OFT
-      shell: bash
-      working-directory: builds/build_release
-      run: |
-        source ${{ github.workspace }}/setup_env.sh
-        make install
+        make -j2 install
 
     - name: Package OFT
       shell: bash
