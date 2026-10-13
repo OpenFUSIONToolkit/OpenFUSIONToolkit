@@ -19,7 +19,7 @@ USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
 use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
-use oft_gs, only: gs_equil, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
+use oft_gs, only: gs_equil, flux_func, gs_psi2r, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
   gs_get_qprof, gs_ani_press, gs_epsilon
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
@@ -71,7 +71,7 @@ contains
   procedure :: copy => jphi_copy
   !> Needs docs
   procedure :: delete => jphi_delete
-  !> Update F*F' profile from Jphi, P', and current equilibrium
+  !> Update F*F' profile from Jphi and current equilibrium state
   procedure :: update => jphi_update
 end type jphi_flux_func
 !------------------------------------------------------------------------------
@@ -525,56 +525,37 @@ subroutine jphi_update(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
-REAL(r8) :: jphi_norm,pscale,pprime,dnorm
-REAL(r8), ALLOCATABLE :: ravgs(:,:),qtmp(:),psi_q(:)
+REAL(r8) :: jphi_norm,pscale,pprime,ip0,ip1
+REAL(r8), ALLOCATABLE :: jtor(:),xn(:),jn(:)
 type(spline_type) :: R_spline
 self%plasma_bounds=gseq%plasma_bounds
 IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
 IF(gseq%Ip_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
 !---Get updated flux surface geometry for Jphi -> F*F' mapping
-ALLOCATE(ravgs(self%ngeom+1,4),psi_q(self%ngeom+1),qtmp(self%ngeom+1))
-IF(gseq%diverted)THEN
-  psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
-  psi_q(1)=psi_q(2)
-  CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
-  psi_q(1)=0.d0
-  ravgs(1,1)=gseq%lim_point(1)
-  ravgs(1,2)=1.d0/gseq%lim_point(1)
-ELSE
-  psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
-  CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
-END IF
-! WRITE(*,*)'  <R>     = ',ravgs(2,1),ravgs(self%ngeom-2,1)
-! WRITE(*,*)'  <1/R>   = ',ravgs(2,2),ravgs(self%ngeom-2,2)
-CALL spline_alloc(R_spline,self%ngeom-1,2)
-R_spline%xs(0:self%ngeom-2)=psi_q; R_spline%xs(self%ngeom-1)=1.d0
-R_spline%fs(0:self%ngeom-2,1)=ravgs(1:self%ngeom-1,1); R_spline%fs(self%ngeom-1,1)=gseq%o_point(1)
-R_spline%fs(0:self%ngeom-2,2)=ravgs(1:self%ngeom-1,2); R_spline%fs(self%ngeom-1,2)=1.d0/gseq%o_point(1)
-CALL spline_fit(R_spline,"extrap")
-DEALLOCATE(ravgs,psi_q,qtmp)
-!---Update jphi normalization to match Ip target
-CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
-IF(gseq%skip_targets)THEN
-  CALL gs_itor_nl(gseq,jphi_norm)
-  dnorm=gseq%Ip_target/jphi_norm
-  jphi_norm=(1.d0+dnorm)*self%norm_last/2.d0
-  self%norm_last=jphi_norm
-ELSE
-  ALLOCATE(qtmp(self%npsi))
-  DO i=1,self%npsi
-    CALL spline_eval(R_spline,self%x(i),0)
-    qtmp(i) = R_spline%f(1)*R_spline%f(2)
-  END DO
-  CALL gs_flux_int(gseq,self%x,self%jphi/qtmp,self%npsi,jphi_norm)
-  DEALLOCATE(qtmp)
-  jphi_norm=ABS(gseq%Ip_target)/jphi_norm
-  self%norm_last=jphi_norm
-END IF
+CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
 !---Get pressure profile
-IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__) !CALL gseq%P_ani%update(gseq)
+CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
+IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__)
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
+!---Update jphi normalization to match Ip target: the exact I_p (A9c) is affine in the jphi scale,
+!   I_p(norm) = ip0 + norm*(ip1 - ip0); past the last node jphi is held, as F*F' is
+ALLOCATE(xn(0:self%npsi),jn(0:self%npsi),jtor(0:self%npsi))
+xn=[0.d0,self%x]; jn=[self%j0,self%jphi]
+CALL eval_dIdA(gseq, R_spline, xn, self%npsi+1, jn, pscale, jtor)
+CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip1,extrap=1)
+jn=0.d0
+CALL eval_dIdA(gseq, R_spline, xn, self%npsi+1, jn, pscale, jtor)
+CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip0,extrap=1)
+DEALLOCATE(xn,jn,jtor)
+IF(ABS(ip1-ip0)>0.d0)THEN
+  jphi_norm=(ABS(gseq%Ip_target)-ip0)/(ip1-ip0)
+ELSE
+  CALL oft_warn("jphi_update: jphi profile carries no (finite) net current, keeping the last normalization")
+  jphi_norm=self%norm_last
+END IF
+self%norm_last=jphi_norm
 !---Compute updated F*F' profile ! 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
 CALL spline_eval(R_spline,0.d0,0)
 pprime=gseq%P%fp(gseq%plasma_bounds(1))
@@ -594,19 +575,23 @@ CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)
 end subroutine jphi_update
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Area integral over the plasma (inside the LCFS) of a flux function given on
+!! normalized psi nodes (0 at the LCFS, 1 at the axis)
 !---------------------------------------------------------------------------------
-SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result)
+SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result,extrap)
 class(gs_equil), INTENT(inout) :: self !< Pointer to TokaMaker object
-REAL(r8), INTENT(in) :: psi_tmp(:) !< Needs docs
-REAL(r8), INTENT(in) :: field_tmp(:) !< Needs docs
-INTEGER(i4), INTENT(in) :: nvals
-REAL(r8), INTENT(out) :: result !< Needs docs
-INTEGER(i4) :: i,m
+REAL(r8), INTENT(in) :: psi_tmp(:) !< Normalised psi nodes (OFT convention)
+REAL(r8), INTENT(in) :: field_tmp(:) !< Flux function on @p psi_tmp
+INTEGER(i4), INTENT(in) :: nvals !< Number of nodes
+REAL(r8), INTENT(out) :: result !< Integral over the plasma cross-section
+INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Beyond the last node: 0 skip (default), 1 hold its value (see linterp)
+INTEGER(i4) :: i,m,extrap_loc
 REAL(r8) :: area,psitmp(1),sgop(3,3)
 TYPE(gs_prof_interp) :: prof_interp_obj
 ! DEBUG_STACK_PUSH
 !---Setup
+extrap_loc=0
+IF(PRESENT(extrap))extrap_loc=extrap
 result=0.d0
 prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
@@ -617,7 +602,8 @@ do i=1,self%device%mesh%nc
   do m=1,self%device%fe_rep%quad%np
     call self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
     call prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
-    psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
+    IF(psitmp(1)<=0.d0)CYCLE ! Outside the plasma (mode 4 gives 0 outside the LCFS or gs_test_bounds)
+    psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),extrap_loc)
     IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*self%device%fe_rep%quad%wts(m)
   end do
 end do
@@ -626,6 +612,60 @@ result=oft_mpi_sum(result)
 CALL prof_interp_obj%delete()
 ! DEBUG_STACK_POP
 END SUBROUTINE gs_flux_int
+!------------------------------------------------------------------------------
+!> Build the <R> / <1/R> / <1/R^2> spline needed for jphi -> F*F' mapping and the I_p measure.
+!> Allocates and fits R_spline on ngeom points from the current equilibrium.
+!> Caller is responsible for calling spline_dealloc(R_spline) when done.
+!------------------------------------------------------------------------------
+SUBROUTINE build_Ravg_spline(gseq, ngeom, R_spline)
+CLASS(gs_equil), INTENT(inout) :: gseq
+INTEGER(i4), INTENT(in) :: ngeom
+TYPE(spline_type), INTENT(out) :: R_spline
+INTEGER(i4) :: i
+REAL(r8), ALLOCATABLE :: ravgs(:,:), psi_q(:), qprof(:)
+ALLOCATE(ravgs(ngeom,4), psi_q(ngeom), qprof(ngeom))
+psi_q = [(REAL(i-1,r8)/REAL(ngeom,r8), i=1,ngeom)]
+IF(gseq%diverted)THEN
+  ! LCFS row from the X-point below: its trace (next to the X-point) is not needed
+  CALL gs_get_qprof(gseq, ngeom-1, psi_q(2:ngeom), qprof(2:ngeom), ravgs=ravgs(2:ngeom,:))
+  ravgs(1,1) = gseq%lim_point(1)
+  ravgs(1,2) = 1.d0/gseq%lim_point(1)
+  ravgs(1,3) = 1.d0/gseq%lim_point(1)**2
+ELSE
+  CALL gs_get_qprof(gseq, ngeom, psi_q, qprof, ravgs=ravgs)
+END IF
+CALL spline_alloc(R_spline, ngeom-1, 3)
+R_spline%xs(0:ngeom-2) = psi_q(1:ngeom-1); R_spline%xs(ngeom-1) = 1.d0
+R_spline%fs(0:ngeom-2,1) = ravgs(1:ngeom-1,1)
+R_spline%fs(ngeom-1,1) = gseq%o_point(1)
+R_spline%fs(0:ngeom-2,2) = ravgs(1:ngeom-1,2)
+R_spline%fs(ngeom-1,2) = 1.d0/gseq%o_point(1)
+R_spline%fs(0:ngeom-2,3) = ravgs(1:ngeom-1,3)
+R_spline%fs(ngeom-1,3) = 1.d0/gseq%o_point(1)**2
+CALL spline_fit(R_spline, "extrap")
+DEALLOCATE(ravgs, psi_q, qprof)
+END SUBROUTINE build_Ravg_spline
+!------------------------------------------------------------------------------
+!> Current per unit cross-section area, dI/dA = <j_phi/R>/<1/R>, from TokaMaker jphi = <j_phi> on the psi_N grid psi_vals
+!! (OFT convention), eq. A5 of doc_tokamaker_current_conventions; gs_flux_int of the result is
+!! exactly I_p (eq. A9c). jphi and P'*pscale must share units.
+!------------------------------------------------------------------------------
+SUBROUTINE eval_dIdA(gseq, R_spline, psi_vals, n, jphi, pscale, jtor)
+CLASS(gs_equil), INTENT(inout) :: gseq !< Equilibrium
+TYPE(spline_type), INTENT(inout) :: R_spline !< <R>, <1/R>, <1/R^2> spline (@ref build_ravg_spline)
+INTEGER(i4), INTENT(in) :: n !< Number of nodes
+REAL(r8), INTENT(in) :: psi_vals(n) !< Normalised psi nodes (OFT convention)
+REAL(r8), INTENT(in) :: jphi(n) !< TokaMaker jphi = <j_phi> at psi_vals
+REAL(r8), INTENT(in) :: pscale !< Pressure scale applied to P'
+REAL(r8), INTENT(out) :: jtor(n) !< <j_phi/R>/<1/R>
+INTEGER(i4) :: i
+REAL(r8) :: pprime
+DO i = 1, n
+  CALL spline_eval(R_spline, psi_vals(i), 0)
+  pprime = pscale*gseq%P%fp(psi_vals(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
+  jtor(i) = (pprime + R_spline%f(3)*(jphi(i) - R_spline%f(1)*pprime)/R_spline%f(2))/R_spline%f(2)
+END DO
+END SUBROUTINE eval_dIdA
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

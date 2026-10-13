@@ -66,6 +66,7 @@ TYPE, ABSTRACT :: flux_func
   INTEGER(i4) :: ndofs = 0 !< Number of free coefficients
   REAL(r8) :: f_offset = 0.d0 !< Offset value
   REAL(r8) :: plasma_bounds(2) = [-1.d99,1.d99] !< Current plasma bounds (for normalization)
+  LOGICAL :: update_on_load = .TRUE.
 CONTAINS
   !> Delete profile
   PROCEDURE(flux_func_delete), DEFERRED :: delete
@@ -309,6 +310,12 @@ TYPE :: gs_equil
   CLASS(gs_ani_press), POINTER :: P_ani => NULL() !< Anisotropic flux interpolator
   CLASS(flux_func), POINTER :: eta => NULL() !< Resistivity flux function
   CLASS(flux_func), POINTER :: I_NI => NULL() !< Non-inductive F*F' flux function
+  CLASS(flux_func), POINTER :: Te => NULL() !< Electron temperature flux function [keV]
+  CLASS(flux_func), POINTER :: Ti => NULL() !< Ion temperature flux function [keV]
+  CLASS(flux_func), POINTER :: ne => NULL() !< Electron density flux function [m^-3]
+  CLASS(flux_func), POINTER :: ni => NULL() !< Ion density flux function [m^-3]
+  CLASS(flux_func), POINTER :: Zeff => NULL() !< Effective charge flux function (dimensionless)
+  CLASS(flux_func), POINTER :: jphi_fixed => NULL() !< Fixed (non-rescaled) toroidal current density flux function [A/m^2]
   TYPE(gs_factory), POINTER :: device => NULL() !< Device/factory object for equilibrium
 CONTAINS
   !>
@@ -1054,6 +1061,12 @@ CALL source%I%copy(self%I)
 CALL source%P%copy(self%P)
 IF(ASSOCIATED(source%I_NI))CALL source%I_NI%copy(self%I_NI)
 IF(ASSOCIATED(source%eta))CALL source%eta%copy(self%eta)
+IF(ASSOCIATED(source%Te))CALL source%Te%copy(self%Te)
+IF(ASSOCIATED(source%Ti))CALL source%Ti%copy(self%Ti)
+IF(ASSOCIATED(source%ne))CALL source%ne%copy(self%ne)
+IF(ASSOCIATED(source%ni))CALL source%ni%copy(self%ni)
+IF(ASSOCIATED(source%Zeff))CALL source%Zeff%copy(self%Zeff)
+IF(ASSOCIATED(source%jphi_fixed))CALL source%jphi_fixed%copy(self%jphi_fixed)
 self%diverted=source%diverted
 self%has_plasma=source%has_plasma
 self%mode=source%mode
@@ -1197,6 +1210,7 @@ END DO
 !
 equil%plasma_bounds=[-1.d99,1.d99]
 CALL gs_update_bounds(equil)
+equil%skip_targets=.FALSE. ! Flux functions set up as on the first iteration of a solve
 CALL equil%I%update(equil)
 CALL equil%p%update(equil)
 IF(ASSOCIATED(equil%P_ani))CALL equil%P_ani%update(equil)
@@ -4248,6 +4262,21 @@ end do
 dflux=dflux*self%psiscale
 end function gs_dflux
 !------------------------------------------------------------------------------
+!> Poloidal current function \f$ F = R B_\phi \f$ at (unnormalized) \f$ \psi \f$
+!!
+!! @warning Only valid inside the plasma; \f$ \psi \f$ is not checked against the plasma bounds
+!------------------------------------------------------------------------------
+FUNCTION gs_fpol(self,psi) RESULT(F)
+CLASS(gs_equil), INTENT(inout) :: self !< G-S object
+REAL(r8), INTENT(in) :: psi !< Poloidal flux
+REAL(r8) :: F
+IF(self%mode==0)THEN
+  F=self%ffp_scale*self%I%f(psi)+self%I%f_offset
+ELSE
+  F=SIGN(1.d0,self%I%f_offset)*SQRT(MAX(self%ffp_scale*self%I%f(psi)+self%I%f_offset**2,0.d0))
+END IF
+END FUNCTION gs_fpol
+!------------------------------------------------------------------------------
 !> Compute the magnetic energy and helicity of a fixed boundary equilibrium
 !!
 !! @note Helicity computed by this subroutine is only valid for equilibria
@@ -5950,6 +5979,30 @@ END IF
 IF(ASSOCIATED(self%eta))THEN
   CALL self%eta%delete()
   DEALLOCATE(self%eta)
+END IF
+IF(ASSOCIATED(self%Te))THEN
+  CALL self%Te%delete()
+  DEALLOCATE(self%Te)
+END IF
+IF(ASSOCIATED(self%Ti))THEN
+  CALL self%Ti%delete()
+  DEALLOCATE(self%Ti)
+END IF
+IF(ASSOCIATED(self%ne))THEN
+  CALL self%ne%delete()
+  DEALLOCATE(self%ne)
+END IF
+IF(ASSOCIATED(self%ni))THEN
+  CALL self%ni%delete()
+  DEALLOCATE(self%ni)
+END IF
+IF(ASSOCIATED(self%Zeff))THEN
+  CALL self%Zeff%delete()
+  DEALLOCATE(self%Zeff)
+END IF
+IF(ASSOCIATED(self%jphi_fixed))THEN
+  CALL self%jphi_fixed%delete()
+  DEALLOCATE(self%jphi_fixed)
 END IF
 IF(ASSOCIATED(self%P_ani))THEN
   CALL self%P_ani%delete()

@@ -11,7 +11,7 @@ test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..','..','python')))
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
-from OpenFUSIONToolkit.util import mu0
+from OpenFUSIONToolkit.util import mu0, eC
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh, load_gs_mesh
 from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, eval_green, create_power_flux_fun, create_isoflux_xpts, xpoints_from_moments
@@ -1175,11 +1175,12 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
             ne, Te, ni, Ti, Zeff,
             Ip_target,
             inductive_jphi,
-            scale_jBS=1.0,
-            isolate_edge_jBS=False,
+            scale_jbs=1.0,
+            isolate_edge_jbs=False,
             psi_pad=psi_pad,
             iterations=2,
-            diagnostic_plots=False
+            diagnostic_plots=False,
+            use_python_solve=True,
         )
     except Exception as e:
         print("Bootstrap solve failed: {0}".format(e))
@@ -1190,19 +1191,19 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
     eq_info = mygs.get_stats(li_normalization='ITER')
 
     # Bootstrap-specific diagnostics
-    j_BS = bs_results['j_BS']
-    j_total = bs_results['total_j_phi']
-    j_ind = bs_results['j_inductive']
+    jphi_bs_raw = bs_results['jphi_bs_raw']
+    jphi_total = bs_results['jphi_total']
+    jphi_ind = bs_results['jphi_ind_final']
 
-    eq_info['j_BS_max'] = float(np.max(np.abs(j_BS)))
-    eq_info['j_BS_axis'] = float(j_BS[0])
-    eq_info['jphi_axis'] = float(j_total[0])
-    eq_info['jphi_max'] = float(np.max(np.abs(j_total)))
-    eq_info['j_ind_axis'] = float(j_ind[0])
+    eq_info['jphi_bs_max'] = float(np.max(np.abs(jphi_bs_raw)))
+    eq_info['jphi_bs_axis'] = float(jphi_bs_raw[0])
+    eq_info['jphi_axis'] = float(jphi_total[0])
+    eq_info['jphi_max'] = float(np.max(np.abs(jphi_total)))
+    eq_info['jphi_ind_axis'] = float(jphi_ind[0])
 
     # Bootstrap fraction (psi-space trapezoid estimate)
-    bs_frac = np.trapezoid(j_BS, psi_sample) / np.trapezoid(j_total, psi_sample) \
-              if np.trapezoid(j_total, psi_sample) != 0 else 0.0
+    bs_frac = np.trapezoid(jphi_bs_raw, psi_sample) / np.trapezoid(jphi_total, psi_sample) \
+              if np.trapezoid(jphi_total, psi_sample) != 0 else 0.0
     eq_info['bs_fraction'] = float(bs_frac)
 
     mp_q.put([eq_info])
@@ -1212,19 +1213,21 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
 # Expected values dictionary
 # -----------------------------------------------------------------------
 ITER_bootstrap_eq_dict = {
-    'Ip': 15599995.005297558,
-    'kappa': 1.8756201041390395,
-    'R_geo': 6.222398878914673,
-    'a_geo': 1.9812095318679077,
-    'q_0': 1.0003453863455334,
-    'q_95': 2.850975301589531,
-    'P_ax': 740025.054814244,
-    'j_BS_max': 194617.71663981146,
-    'j_BS_axis': 5463.030180037696,
-    'jphi_axis': 1449201.5709280553,
-    'jphi_max': 1546301.0419844517,
-    'j_ind_axis': 1359327.795694679,
-    'bs_fraction': 0.15830066097468243,
+    'Ip': 15599997.261988742,
+    'kappa': 1.8746806271900014,
+    'R_geo': 6.222524490498655,
+    'a_geo': 1.9807072056151687,
+    'q_0': 1.036565329524374,
+    'q_95': 2.863029898626678,
+    # P_ax = p(axis) - p(LCFS): pax targets the pressure drop carried by TokaMaker's P'
+    'P_ax': 7.232048E+05,
+    'jphi_bs_max': 219163.55709184994,
+    'jphi_bs_axis': 4696.213397541225,
+    'jphi_axis': 1397130.088093367,
+    'jphi_max': 1507460.349786304,
+    # returned jphi_ind at the axis: alpha * seed (the Python path's jphi_ind excludes scale_j0)
+    'jphi_ind_axis': 1.392583E+06,
+    'bs_fraction': 0.17910707149956598,
 }
 
 @pytest.mark.parametrize("order", (2,))
@@ -1345,7 +1348,6 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
         return
 
     # --- Define kinetic profiles (same as run_ITER_bootstrap_case) ---
-    EC = 1.602176634e-19
     n_psi = 257
     psi_N = np.linspace(0.0, 1.0, n_psi)
     psi_pad = 1.E-3
@@ -1362,15 +1364,14 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     Ti = Te.copy()
     Zeff = np.full(n_psi, 1.7)
 
-    pressure = (EC * ne * Te) + (EC * ni * Ti)
+    pressure = (eC * ne * Te) + (eC * ni * Ti)
 
     # --- Extract geometry from equilibrium (same as solve_with_bootstrap) ---
     psi_eval = np.clip(psi_N, psi_pad, 1.0 - psi_pad)
-    _, f, _, _, _ = mygs.get_profiles(psi=psi_eval)
-    _, fc, r_avgs, _ = mygs.sauter_fc(psi=psi_eval)
+    _, f, _, _, pp_eq = mygs.get_profiles(psi=psi_eval)
+    _, fc, r_avgs, b_avgs, eps = mygs.sauter_fc(psi=psi_eval, return_eps=True)
 
     ft = 1 - fc
-    eps = r_avgs['<a>'] / r_avgs['<R>']
     _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
     R_avg = ravgs_q['<R>']
 
@@ -1402,7 +1403,7 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     try:
         j_BS_neo, coeffs = redl_bootstrap(
             psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
-            pe=EC*(ne*Te), pi=EC*(ni*Ti),
+            pe=eC*(ne*Te), pi=eC*(ni*Ti),
             Zeff=Zeff, R=R_avg, q=qvals, eps=eps, fT=ft, I_psi=f,
             dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
             dn_e_dpsi=dn_e_dpsi, dn_i_dpsi=dn_i_dpsi,
@@ -1410,7 +1411,7 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
             nu_e_star_override=nu_e_star,
             nu_i_star_override=nu_i_star,
             use_legacy_L34=False,
-            use_sign_q=True,
+            use_sign_q=False,
             formula_form='jboot1',
         )
     except Exception as e:
@@ -1418,15 +1419,16 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
         mp_q.put(None)
         return
 
-    # Convert to j_phi (A/m^2) same as solve_with_bootstrap
-    j_BS = j_BS_neo * (R_avg / f)
-    j_BS = np.nan_to_num(j_BS, nan=0.0)
+    # Convert to j_phi (A/m^2) same as solve_with_bootstrap (doc_tokamaker_current_conventions eq. A7)
+    inv_R, B2 = ravgs_q['<1/R>'], b_avgs[1]
+    jphi_bs = j_BS_neo * f * inv_R / B2 + pp_eq * (R_avg - f**2 * inv_R / B2)
+    jphi_bs = np.nan_to_num(jphi_bs, nan=0.0)
 
     # --- Collect results ---
     results = {}
-    results['j_BS_max'] = float(np.max(np.abs(j_BS)))
-    results['j_BS_axis'] = float(j_BS[0])
-    results['j_BS_edge'] = float(j_BS[-1])
+    results['jphi_bs_max'] = float(np.max(np.abs(jphi_bs)))
+    results['jphi_bs_axis'] = float(jphi_bs[0])
+    results['jphi_bs_edge'] = float(jphi_bs[-1])
     results['L31_axis'] = float(coeffs['L31'][0])
     results['L32_axis'] = float(coeffs['L32'][0])
     results['alpha_axis'] = float(coeffs['alpha'][0])
@@ -1438,14 +1440,14 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
 
 
 Redl_jBS_eq_dict = {
-    'j_BS_max': 186852.37639066574,
-    'j_BS_axis': 4947.428045838814,
-    'j_BS_edge': 95960.3268758662,
-    'L31_axis': 0.11422862302537663,
-    'L32_axis': -0.02358142633558105,
-    'alpha_axis': -0.6541022585240726,
-    'nu_e_star_axis': 0.25167544799360553,
-    'nu_i_star_axis': 0.2189404571637855,
+    'jphi_bs_max': 195234.5633663803,
+    'jphi_bs_axis': 5182.40772662609,
+    'jphi_bs_edge': 88568.31833389413,
+    'L31_axis': 0.10849481301194958,
+    'L32_axis': -0.014581267675566556,
+    'alpha_axis': -0.6150406171285213,
+    'nu_e_star_axis': 0.3420647094964808,
+    'nu_i_star_axis': 0.2975729435421919,
 }
 
 
@@ -1454,20 +1456,375 @@ def test_Redl_jBS(order):
     results = mp_run(run_Redl_jBS_case, (1.0, order), timeout=300)
     assert validate_dict(results, Redl_jBS_eq_dict)
 
+#============================================================================
+# Internal bootstrap test (ITER-based)
+#============================================================================
+def _check_boot_state_restored(mygs, restore, label):
+    '''Check that restore() (a replace_eq call) restores the bootstrap options shadow and profiles'''
+    ops_ref, profs_ref = dict(mygs._tMaker_equil._boot_ops), mygs.get_boot_profs()
+    mygs._tMaker_equil._boot_ops['scale_jbs'] = -999.0  # the restore must overwrite the shadow
+    restore()
+    ops, profs = mygs._tMaker_equil._boot_ops, mygs.get_boot_profs()
+    if ops is None or profs is None or profs_ref is None:
+        raise AssertionError(f"_boot_ops or boot_profs missing around replace_eq({label}=...)")
+    for key, ref in ops_ref.items():
+        if not np.isclose(ops[key], ref, rtol=0.0, atol=1e-10):
+            raise AssertionError(f"_boot_ops['{key}'] = {ops[key]} != {ref} after replace_eq({label}=...)")
+    for key, ref in profs_ref.items():
+        if key not in profs:
+            raise AssertionError(f"boot_profs['{key}'] missing after replace_eq({label}=...)")
+        if not np.allclose(profs[key], ref, rtol=1e-3):
+            rel = np.max(np.abs(profs[key] - ref) / (np.abs(ref) + 1e-30))
+            raise AssertionError(f"boot_profs['{key}'] differs after replace_eq({label}=...) (max rel diff {rel:.3e})")
+
+
+def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
+    from OpenFUSIONToolkit.TokaMaker.bootstrap import Hmode_profiles
+
+    # --- Mesh creation (same as run_ITER_case) ---
+    def create_mesh():
+        with open('ITER_geom.json','r') as fid:
+            ITER_geom = json.load(fid)
+        plasma_dx = 0.15/mesh_resolution
+        coil_dx = 0.2/mesh_resolution
+        vv_dx = 0.3/mesh_resolution
+        vac_dx = 0.6/mesh_resolution
+        gs_mesh = gs_Domain()
+        gs_mesh.define_region('air',vac_dx,'boundary')
+        gs_mesh.define_region('plasma',plasma_dx,'plasma')
+        gs_mesh.define_region('vacuum1',vv_dx,'vacuum')
+        gs_mesh.define_region('vacuum2',vv_dx,'vacuum')
+        gs_mesh.define_region('vv1',vv_dx,'conductor',eta=6.9E-7)
+        gs_mesh.define_region('vv2',vv_dx,'conductor',eta=6.9E-7)
+        for key, coil in ITER_geom['coils'].items():
+            if not key.startswith('VS'):
+                gs_mesh.define_region(key,coil_dx,'coil')
+        gs_mesh.define_region('VSU',coil_dx,'coil',coil_set='VS',nTurns=1.0)
+        gs_mesh.define_region('VSL',coil_dx,'coil',coil_set='VS',nTurns=-1.0)
+        gs_mesh.add_polygon(ITER_geom['limiter'],'plasma',parent_name='vacuum1')
+        gs_mesh.add_annulus(ITER_geom['inner_vv'][0],'vacuum1',ITER_geom['inner_vv'][1],'vv1',parent_name='vacuum2')
+        gs_mesh.add_annulus(ITER_geom['outer_vv'][0],'vacuum2',ITER_geom['outer_vv'][1],'vv2',parent_name='air')
+        for key, coil in ITER_geom['coils'].items():
+            if key.startswith('VS'):
+                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='vacuum1')
+            else:
+                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='air')
+        mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
+        coil_dict = gs_mesh.get_coils()
+        cond_dict = gs_mesh.get_conductors()
+        save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,'ITER_mesh.h5')
+
+    if not os.path.exists('ITER_mesh.h5'):
+        try:
+            create_mesh()
+        except Exception as e:
+            print(e)
+            mp_q.put(None)
+            return
+
+    # --- Kinetic and current profiles (ITER H-mode) ---
+    n_sample = 257
+    psi_sample = np.linspace(0.0, 1.0, n_sample)
+    Ip_target = 13.0e6
+    Zeff_val = 1.5
+
+    xphalf = 0.965
+    ne = Hmode_profiles(edge=0.35, ped=0.6, core=1.1, rgrid=n_sample,
+                        expin=1.6, expout=1.6, widthp=0.35, xphalf=xphalf) * 1e20
+    Te = Hmode_profiles(edge=1500., ped=5000., core=21000., rgrid=n_sample,
+                        expin=1.3, expout=1.7, widthp=0.1, xphalf=xphalf)
+    ni = ne.copy()
+    Ti = Te.copy()
+
+    inductive_jphi = create_power_flux_fun(n_sample, 2.25, 2.5)['y']
+
+    # --- Set up GS solver ---
+    myOFT = OFT_env(nthreads=-1)
+    mygs = TokaMaker(myOFT)
+    mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('ITER_mesh.h5')
+    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
+    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
+    mygs.settings.maxits = 100
+    mygs.setup(order=fe_order, F0=5.3*6.2)
+
+    mygs.set_coil_vsc({'VS': 1.0})
+    mygs.set_coil_bounds({key: [-50.E6, 50.E6] for key in mygs.coil_sets})
+
+    isoflux_pts = np.array([
+        [ 8.20,  0.41], [ 8.06,  1.46], [ 7.51,  2.62],
+        [ 6.14,  3.78], [ 4.51,  3.02], [ 4.26,  1.33],
+        [ 4.28,  0.08], [ 4.49, -1.34], [ 7.28, -1.89],
+        [ 8.00, -0.68],
+    ])
+    x_point = np.array([[5.125, -3.4]])
+    mygs.set_isoflux(np.vstack((isoflux_pts, x_point)))
+    mygs.set_saddles(x_point)
+
+    regularization_terms = []
+    for name in mygs.coil_sets:
+        if name.startswith('CS'):
+            w = 2.E-2 if name.startswith('CS1') else 1.E-2
+        else:
+            w = 1.E-2
+        regularization_terms.append(mygs.coil_reg_term({name: 1.0}, target=0.0, weight=w))
+    regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0}, target=0.0, weight=1.E2))
+    mygs.set_coil_reg(reg_terms=regularization_terms)
+
+    # Initial no-bootstrap solve
+    mygs.set_targets(Ip=Ip_target, pax=6.2E5)
+    mygs.settings.pm = False
+    mygs.update_settings()
+    try:
+        mygs.init_psi(6.3, 0.5, 2.0, 1.4, 0.0)
+        mygs.solve()
+    except ValueError:
+        mp_q.put(None)
+        return
+
+    # --- Bootstrap solve ---
+    try:
+        mygs.solve_bootstrap(
+            ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
+            te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
+            ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
+            ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
+            ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
+            Zeff=Zeff_val,
+            Ip_target=Ip_target,
+            scale_jbs=1.0,
+            diagnose_bs=True,
+        )
+    except Exception:
+        mp_q.put(None)
+        return
+
+    eq_info = mygs.get_stats(li_normalization='ITER')
+
+    # --- Extract 1D profiles ---
+    psi_i, F_i, Fp_i, P_i, Pp_i = mygs.get_profiles(npsi=n_sample, psi_pad=1e-3)
+    _, q_i, ravgs_i, _, _, _     = mygs.get_q(npsi=n_sample, psi_pad=1e-3)
+    jtor_i = F_i * Fp_i * ravgs_i['<1/R>'] / mu0 + Pp_i * ravgs_i['<R>']
+
+    eq_info['jphi_axis'] = float(jtor_i[0])
+    eq_info['jphi_max']  = float(np.max(np.abs(jtor_i)))
+    eq_info['q_axis']    = float(q_i[0])
+    sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
+    eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
+
+    # --- Verify the jdotb_bs -> jphi conversion (doc_tokamaker_current_conventions eqs. A7, A8)
+    #     against geometry traced independently from the converged equilibrium ---
+    try:
+        bp = mygs.get_boot_profs()
+        inner = (bp['psi_n'] > 0.05) & (bp['psi_n'] < 0.95)
+        psi_c = bp['psi_n'][inner]
+        _, F_c, Fp_c, _, Pp_c = mygs.get_profiles(psi=psi_c)
+        _, _, ravgs_c, _, _, _ = mygs.get_q(psi=psi_c)
+        _, _, _, modb_c = mygs.sauter_fc(psi=psi_c)
+        R_c, invR_c, B2_c = ravgs_c['<R>'], ravgs_c['<1/R>'], modb_c[1]
+        jdotb = bp['jdotb_bs_raw'][inner]
+        field_aligned = jdotb * F_c * invR_c / B2_c
+        p_term = Pp_c * (R_c - F_c**2 * invR_c / B2_c)
+        scale = np.max(np.abs(bp['jphi_bs_raw'][inner]))
+        err = np.max(np.abs(bp['jphi_bs_raw'][inner] - (field_aligned + p_term))) / scale
+        err_flip = np.max(np.abs(bp['jphi_bs_raw'][inner] - (field_aligned - p_term))) / scale
+        print(f"jphi_bs_raw vs A7: rel err {err:.3e} (pressure term flipped: {err_flip:.3e}), "
+              f"max|P'G|/max|jphi_bs_raw| = {np.max(np.abs(p_term))/scale:.3e}")
+        if not (err < 1.0e-2 and err_flip > 5.0 * err):
+            raise AssertionError(f"jphi_bs_raw does not match eq. A7 (rel err {err:.3e}, flipped {err_flip:.3e})")
+        # The stored pressure-driven part is the A7 P'G term
+        err_pd = np.max(np.abs(bp['jphi_pd_raw'][inner] - p_term)) / scale
+        print(f"jphi_pd_raw vs P'G: rel err {err_pd:.3e}")
+        if err_pd > 1.0e-2:
+            raise AssertionError(f"jphi_pd_raw does not match P'(<R> - F^2<1/R>/<B^2>) (rel err {err_pd:.3e})")
+        # A8: the equilibrium's own <J.B> = F P' + F'<B^2>/mu0 equals the sum of its components'
+        jdotb_eq = F_c * Pp_c + Fp_c * B2_c / mu0
+        jdotb_sum = jdotb + (bp['jphi_ind_final'][inner] + bp['jphi_fixed_final'][inner]) * B2_c / (F_c * invR_c)
+        err_par = np.max(np.abs(jdotb_eq - jdotb_sum)) / np.max(np.abs(jdotb_eq))
+        print(f"<J.B> balance (A8): rel err {err_par:.3e}")
+        if err_par > 2.0e-2:
+            raise AssertionError(f"equilibrium <J.B> != sum of components (rel err {err_par:.3e})")
+        # A9d: I_p from TokaMaker's own jphi equals the FEM I_p; the old <R><1/R> measure does not
+        psi_f = np.linspace(1.0e-4, 1.0 - 1.0e-4, 1001)
+        _, F_f, Fp_f, _, Pp_f = mygs.get_profiles(psi=psi_f)
+        _, _, rv_f, _, _, _ = mygs.get_q(psi=psi_f)
+        J_f = F_f * Fp_f * rv_f['<1/R>'] / mu0 + Pp_f * rv_f['<R>']
+        psi_phys = mygs.psi_bounds[0] + psi_f * (mygs.psi_bounds[1] - mygs.psi_bounds[0])
+        w = rv_f['dV/dPsi'] / (2.0 * np.pi)
+        ip_exact = abs(np.trapezoid(w * (J_f * rv_f['<1/R^2>'] / rv_f['<1/R>']
+                   + Pp_f * (1.0 - rv_f['<R>'] * rv_f['<1/R^2>'] / rv_f['<1/R>'])), psi_phys))
+        ip_qtmp = abs(np.trapezoid(w * J_f / rv_f['<R>'], psi_phys))
+        print(f"I_p: FEM {eq_info['Ip']:.6e}, A9d {ip_exact:.6e} ({ip_exact/eq_info['Ip']-1:+.3e}), "
+              f"old <R><1/R> measure {ip_qtmp:.6e} ({ip_qtmp/eq_info['Ip']-1:+.3e})")
+        if abs(ip_exact / eq_info['Ip'] - 1.0) > 2.0e-3:
+            raise AssertionError(f"A9d I_p {ip_exact:.6e} != FEM I_p {eq_info['Ip']:.6e}")
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        mp_q.put(None)
+        return
+
+    # --- Verify that boot_ops and boot_profs survive save/load and copy_eq, and that
+    #     replace_eq(source_file=/source_eq=) syncs the _boot_ops shadow dict ---
+    save_file = 'ITER_boot_ops_test.h5'
+    try:
+        _, F_s, Fp_s, _, _ = mygs.get_profiles(npsi=50)
+        mygs._tMaker_equil.save_TokaMaker(save_file)
+        _check_boot_state_restored(mygs, lambda: mygs.replace_eq(source_file=save_file), 'source_file')
+        # F*F' round-trips exactly (the saved knots are restored, not recomputed)
+        _, F_l, Fp_l, _, _ = mygs.get_profiles(npsi=50)
+        ffp_err = np.max(np.abs(F_l*Fp_l - F_s*Fp_s)) / np.max(np.abs(F_s*Fp_s))
+        if ffp_err > 1e-10:
+            raise AssertionError(f"F*F' changed through save/load (max rel diff {ffp_err:.3e})")
+        mygs_copied = mygs.copy_eq()
+        _check_boot_state_restored(mygs, lambda: mygs.replace_eq(source_eq=mygs_copied), 'source_eq')
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        mp_q.put(None)
+        return
+
+    # --- verify that scalar Zeff and a linearly-increasing Zeff profile
+    #     produce different bootstrap current profiles ---
+    try:
+        zeff_common_kwargs = dict(
+            ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
+            te_prof={'type': 'linterp', 'x': psi_sample, 'y': Te / 1e3},
+            ne_prof={'type': 'linterp', 'x': psi_sample, 'y': ne},
+            ti_prof={'type': 'linterp', 'x': psi_sample, 'y': Ti / 1e3},
+            ni_prof={'type': 'linterp', 'x': psi_sample, 'y': ni},
+            Ip_target=Ip_target,
+            scale_jbs=1.0,
+            diagnose_bs=False,
+        )
+        profs_scalar = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
+        profs_linear = mygs.solve_bootstrap(
+            Zeff={'x': psi_sample, 'y': np.linspace(1.0, 2.5, n_sample)},
+            **zeff_common_kwargs,
+        )
+        j_scalar = profs_scalar['jphi_bs_raw']
+        j_linear = profs_linear['jphi_bs_raw']
+        magnitude = 0.5 * (np.abs(j_scalar) + np.abs(j_linear))
+        rel_diff = np.where(magnitude > 0, (j_linear - j_scalar) / magnitude, 0.0)
+        print("\nZeff scalar vs linear jphi_bs_raw relative difference (j_linear-j_scalar)/|mean|:")
+        print(rel_diff)
+        if np.allclose(j_scalar, j_linear):
+            raise AssertionError(
+                "Bootstrap profiles with scalar Zeff and linearly-increasing Zeff profile "
+                "are identical; expected them to differ."
+            )
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+
+    # --- verify jphi_fixed_prof is added unscaled to the total and reduces the
+    #     inductive share, and that omitting it afterwards resets it to zero ---
+    try:
+        jfix_y = 2.0e5 * np.exp(-((psi_sample - 0.5) / 0.1)**2)
+        profs_fixed = mygs.solve_bootstrap(
+            Zeff=Zeff_val,
+            jphi_fixed_prof={'type': 'linterp', 'x': psi_sample, 'y': jfix_y},
+            **zeff_common_kwargs,
+        )
+        if not np.allclose(profs_fixed['jphi_fixed_final'], np.interp(profs_fixed['psi_n'], psi_sample, jfix_y),
+                           rtol=1e-6, atol=1e-6*jfix_y.max()):
+            raise AssertionError("boot_profs['jphi_fixed_final'] does not match the input jphi_fixed_prof")
+        j_sum = profs_fixed['jphi_ind_final'] + profs_fixed['jphi_bs_final'] + profs_fixed['jphi_fixed_final']
+        if not np.allclose(profs_fixed['jphi_total'], j_sum, rtol=1e-10, atol=1e-6):
+            raise AssertionError("jphi_total != jphi_ind_final + jphi_bs_final + jphi_fixed_final")
+        if not np.sum(profs_fixed['jphi_ind_final']) < np.sum(profs_scalar['jphi_ind_final']):
+            raise AssertionError("jphi_fixed did not reduce the inductive current share")
+        profs_reset = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
+        if np.any(profs_reset['jphi_fixed_final'] != 0.0):
+            raise AssertionError("jphi_fixed persisted after solve_bootstrap without jphi_fixed_prof")
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+
+    # --- verify p_fixed_prof [Pa] is added to the kinetic pressure: same result as
+    #     pres_prof = kinetic + p_fixed, and mutually exclusive with pres_prof ---
+    try:
+        p_kin = eC * (ne * Te + ni * Ti)
+        # Offset keeps pres_prof safely above the kinetic pressure (roundoff) at the edge
+        pf = p_kin[0] * (0.2 * np.exp(-((psi_sample - 0.3) / 0.15)**2) + 1.0e-3)
+        profs_pfix = mygs.solve_bootstrap(Zeff=Zeff_val, p_fixed_prof={'x': psi_sample, 'y': pf}, **zeff_common_kwargs)
+        _, _, _, P_pfix, _ = mygs.get_profiles(npsi=n_sample)
+        P_ax_pfix = np.max(mygs.get_profiles(psi=np.array([0.0, 1.0]))[3])
+        profs_pres = mygs.solve_bootstrap(Zeff=Zeff_val, pres_prof={'x': psi_sample, 'y': p_kin + pf}, **zeff_common_kwargs)
+        _, _, _, P_pres, _ = mygs.get_profiles(npsi=n_sample)
+        # Both solves converge jphi_bs to djbs_tol (1e-4) and may stop an iteration apart
+        for key in profs_pres:
+            if not np.allclose(profs_pfix[key], profs_pres[key], rtol=2e-4, atol=2e-4*np.max(np.abs(profs_pres[key]))):
+                raise AssertionError(f"p_fixed_prof vs pres_prof=kinetic+p_fixed: boot_profs['{key}'] differ")
+        if not np.allclose(P_pfix, P_pres, rtol=1e-6, atol=1e-6*np.max(P_pres)):
+            raise AssertionError("p_fixed_prof vs pres_prof=kinetic+p_fixed: pressure profiles differ")
+        # TokaMaker holds P = 0 at the LCFS: the axis value is the kinetic + p_fixed drop
+        p_tot = p_kin + pf
+        if not np.isclose(P_ax_pfix, p_tot[0] - p_tot[-1], rtol=1e-4):
+            raise AssertionError(f"axis pressure {P_ax_pfix:.6e} != kinetic + p_fixed drop {p_tot[0] - p_tot[-1]:.6e}")
+        mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
+        if np.isclose(np.max(mygs.get_profiles(psi=np.array([0.0, 1.0]))[3]), P_ax_pfix, rtol=1e-4):
+            raise AssertionError("p_fixed_prof did not change the axis pressure")
+        for bad_kwargs, label in (({'pres_prof': {'x': psi_sample, 'y': p_kin + pf}}, "with pres_prof"),
+                                  ({}, "negative")):
+            try:
+                y_bad = -pf if label == "negative" else pf
+                mygs.solve_bootstrap(Zeff=Zeff_val, p_fixed_prof={'x': psi_sample, 'y': y_bad}, **bad_kwargs, **zeff_common_kwargs)
+            except ValueError:
+                continue
+            raise AssertionError(f"p_fixed_prof {label} did not raise ValueError")
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+
+    mp_q.put([eq_info])
+    oftpy_dump_cov()
+
+
+ITER_bootstrap_internal_eq_dict = {
+    'Ip':        13000003.24961143,
+    'kappa':     1.8710874971500062,
+    'R_geo':     6.2229574417901645,
+    'a_geo':     1.9785979198829686,
+    'q_0':       1.3748401369017682,
+    'q_95':      3.504083741872661,
+    # P_ax = p(axis) - p(LCFS): pax targets the pressure drop carried by TokaMaker's P'
+    'P_ax':      7.232028E+05,
+    'beta_pol':  8.320959E+01,
+    'beta_tor':  2.435303E+00,
+    'jphi_axis': 1010416.1199979713,
+    'jphi_max':  1173298.5135544762,
+    'q_axis':    1.410565702638605,
+    'jphi_prof': [1010416.1199979713, 1155117.92412601,   1162817.6369466858,
+                  1072123.3558973635,  898492.2764938722,  683025.6545245483,
+                   449301.00087938644, 249118.67207980127, 173771.68344307062,
+                   136306.8890837856],
+}
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("order", (2,))
+def test_ITER_bootstrap_internal(order):
+    results = mp_run(run_ITER_bootstrap_case_internal, (1.0, order), timeout=300)
+    assert validate_dict(results, ITER_bootstrap_internal_eq_dict)
 
 # -----------------------------------------------------------------------
 # Test: solve_with_bootstrap() psi_N validation (fails before the solver is used)
 # -----------------------------------------------------------------------
 @pytest.mark.coverage
-def test_bootstrap_psi_N_validation():
+@pytest.mark.parametrize("use_python_solve", (True, False))
+def test_bootstrap_psi_N_validation(use_python_solve):
     from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap
     n = 65
     ne = np.full(n, 1.0e20)
     Te = np.full(n, 2.0e3)
     Zeff = np.full(n, 1.7)
-    def call(psi_N, psi_pad=1.E-3):
-        return solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), Zeff,
-                                    1.0e6, psi_pad=psi_pad, psi_N=psi_N)
+    def call(psi_N, psi_pad=1.E-3, m=n):
+        return solve_with_bootstrap(None, ne[:m], Te[:m], ne[:m].copy(), Te[:m].copy(), Zeff[:m],
+                                    1.0e6, inductive_jphi=np.ones(m), psi_pad=psi_pad, psi_N=psi_N,
+                                    use_python_solve=use_python_solve)
     good = np.linspace(0.0, 1.0, n)
     dup = good.copy()
     dup[32] = dup[31]
@@ -1489,8 +1846,37 @@ def test_bootstrap_psi_N_validation():
         call(np.linspace(0.3, 1.0, n))
     with pytest.raises(ValueError, match="span"):
         call(np.linspace(0.0, 0.5, n))
-    with pytest.raises(ValueError, match="exceeds the first/last"):
-        call(good, psi_pad=0.5)
+    with pytest.raises(ValueError, match="at least 5 points"):
+        call(None, m=4)
+    if use_python_solve:  # psi_pad is used by the Python solver only
+        with pytest.raises(ValueError, match="exceeds the first/last"):
+            call(good, psi_pad=0.5)
+
+
+# -----------------------------------------------------------------------
+# Test: deprecated solve_with_bootstrap kwarg and result names (no solver needed)
+# -----------------------------------------------------------------------
+@pytest.mark.coverage
+@pytest.mark.parametrize("use_python_solve", (True, False))
+def test_bootstrap_deprecated_names(use_python_solve):
+    from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap, _BootstrapResults
+    n = 65
+    ne = np.full(n, 1.0e20)
+    Te = np.full(n, 2.0e3)
+    bad_grid = np.linspace(0.0, 1.0, n)
+    bad_grid[[10, 11]] = bad_grid[[11, 10]]
+    with pytest.warns(DeprecationWarning, match="scale_jBS"):
+        with pytest.raises(ValueError, match="strictly increasing"):
+            solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), 1.7, 1.0e6, inductive_jphi=np.ones(n),
+                                 scale_jBS=1.0, psi_N=bad_grid, use_python_solve=use_python_solve)
+    with pytest.raises(TypeError, match="scale_jBS"):
+        solve_with_bootstrap(None, ne, Te, ne.copy(), Te.copy(), 1.7, 1.0e6, inductive_jphi=np.ones(n),
+                             scale_jbs=2.0, scale_jBS=2.0, use_python_solve=use_python_solve)
+    results = _BootstrapResults({'jphi_total': 1})
+    with pytest.warns(DeprecationWarning, match="total_j_phi"):
+        assert results['total_j_phi'] == 1
+    with pytest.warns(DeprecationWarning, match="total_j_phi"):
+        assert 'total_j_phi' in results
 
 
 # -----------------------------------------------------------------------
