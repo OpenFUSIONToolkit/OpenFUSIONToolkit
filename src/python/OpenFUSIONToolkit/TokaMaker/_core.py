@@ -27,14 +27,15 @@ def create_prof_file(self, filename, profile_dict, name):
 
     @param filename Name of input file, see options in set_profiles()
     @param profile_dict Dictionary object containing profile values ['y'] and sampled locations ['x'],
-    in normalized Psi unless ['coord'] is 'phi_n' or 'phi_n_relabel' (normalized toroidal flux)
+    in normalized Psi unless ['coord'] is 'phi_n' (normalized toroidal flux)
     @param filename Name of input quantity, see options in set_profiles()
     '''
     coord = profile_dict.get('coord','psi_n')
-    if coord not in ('psi_n','phi_n','phi_n_relabel'):
-        raise ValueError('Invalid coord "{0}" for {1} profile, must be "psi_n", "phi_n", or "phi_n_relabel"'.format(coord, name))
-    if coord == 'phi_n' and (profile_dict['type'].startswith('jphi') or name in ('Te','Ti','ne','ni','Zeff','eta','jphi_fixed')):
-        raise ValueError('{0} profile ("{1}") on toroidal flux must use coord "phi_n_relabel"'.format(name, profile_dict['type']))
+    if coord not in ('psi_n','phi_n'):
+        raise ValueError('Invalid coord "{0}" for {1} profile, must be "psi_n" or "phi_n"'.format(coord, name))
+    if coord == 'phi_n':  # Value profiles keep their values, derivative profiles are derivatives w.r.t. toroidal flux
+        value = profile_dict['type'].startswith('jphi') or name in ('Te','Ti','ne','ni','Zeff','eta','jphi_fixed')
+        coord = 'phi_n_val' if value else 'phi_n_deriv'
     file_lines = [profile_dict['type'] if coord == 'psi_n' else '{0} {1}'.format(profile_dict['type'], coord)]
     if profile_dict['type'] == 'flat':
         pass
@@ -828,9 +829,9 @@ class TokaMaker():
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
 
-        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default), 'phi_n' (normalized
-        toroidal flux, ['y'] is the derivative w.r.t. toroidal flux), or 'phi_n_relabel' (normalized toroidal flux,
-        ['y'] is the usual derivative w.r.t. poloidal flux).
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized
+        toroidal flux, ['y'] is then the derivative w.r.t. toroidal flux, eg. \f$dP/d\hat{\Phi}\f$, except for
+        jphi profiles, whose ['y'] is \f$j_\phi\f$ as usual).
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -880,6 +881,8 @@ class TokaMaker():
         @param Zeff Scalar effective charge or Dictionary object containing effective charge profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
         @param jphi_fixed_prof Dictionary object containing fixed toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
+
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux).
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -2373,7 +2376,6 @@ class TokaMaker():
           e.g. fast-ion pressure), added to the kinetic pressure. Sets \f$P'\f$ and \f$P_{ax}\f$ but is excluded
           from the bootstrap calculation. Mutually exclusive with ``pres_prof``.
         @param coord Coordinate of all ``'x'`` grids: ``'psi_n'`` (default) or ``'phi_n'`` (normalized toroidal flux).
-          For ``'phi_n'``, profiles are passed as ``'phi_n_relabel'`` and \f$P'\f$ as \f$dP/d\hat{\Phi}\f$ (``'phi_n'``).
 
         @par Bootstrap solver options (forwarded to ``set_boot_ops()``)
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk (default: False)
@@ -2475,15 +2477,15 @@ class TokaMaker():
             raise ValueError("The pressure profile is flat (P' = 0 everywhere)")
         pp_prof = {'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_norm}
         if coord == 'phi_n':
-            # Values are relabelled onto toroidal flux; P' above is dP/dPhi_N
+            # P' above is dP/dPhi_N
             pp_prof['coord'] = 'phi_n'
-            ffp_prof = dict(ffp_prof, coord='phi_n_relabel')
-            te_prof, ne_prof, ti_prof, ni_prof = [dict(_prof, coord='phi_n_relabel')
+            ffp_prof = dict(ffp_prof, coord='phi_n')
+            te_prof, ne_prof, ti_prof, ni_prof = [dict(_prof, coord='phi_n')
                                                   for _prof in (te_prof, ne_prof, ti_prof, ni_prof)]
             if isinstance(Zeff, dict):
-                Zeff = dict(Zeff, coord='phi_n_relabel')
+                Zeff = dict(Zeff, coord='phi_n')
             if jphi_fixed_prof is not None:
-                jphi_fixed_prof = dict(jphi_fixed_prof, coord='phi_n_relabel')
+                jphi_fixed_prof = dict(jphi_fixed_prof, coord='phi_n')
 
         # Axis target = the pressure drop the P' profile carries: TokaMaker holds P = 0 at the
         # LCFS, so targeting pressure[0] would scale P' up by pressure[0]/(pressure[0] - pressure[-1])
@@ -2845,9 +2847,9 @@ class TokaMaker_equilibrium():
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
 
-        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default), 'phi_n' (normalized
-        toroidal flux, ['y'] is the derivative w.r.t. toroidal flux), or 'phi_n_relabel' (normalized toroidal flux,
-        ['y'] is the usual derivative w.r.t. poloidal flux).
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized
+        toroidal flux, ['y'] is then the derivative w.r.t. toroidal flux, eg. \f$dP/d\hat{\Phi}\f$, except for
+        jphi profiles, whose ['y'] is \f$j_\phi\f$ as usual).
         '''
         delete_files = []
         ffp_file = 'none'
@@ -2949,6 +2951,8 @@ class TokaMaker_equilibrium():
         @param Zeff Effective charge state as a single value or a profile ['y'] with sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
         @param jphi_fixed_prof Dictionary object containing fixed toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
+
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux).
         '''
         delete_files = []
         def prof_file(name, prof, label):
@@ -3232,7 +3236,7 @@ class TokaMaker_equilibrium():
         r'''! Evaluate the solver's poloidal/toroidal flux map
 
         Uses the map built during the last solve (or load); requires at least one profile with
-        `coord='phi_n'` or `'phi_n_relabel'`. Stale after `set_psi` until the next solve.
+        `coord='phi_n'`. Stale after `set_psi` until the next solve.
 
         @param x \f$\hat{\psi}\f$ sampling locations (\f$\hat{\Phi}\f$ if `inverse`)
         @param inverse Map \f$\hat{\Phi} \rightarrow \hat{\psi}\f$ instead

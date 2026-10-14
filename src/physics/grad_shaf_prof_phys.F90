@@ -578,18 +578,22 @@ end subroutine jphi_update
 !------------------------------------------------------------------------------
 !> Node locations in normalized poloidal flux (`x` mapped from toroidal flux if wrapped)
 !------------------------------------------------------------------------------
-SUBROUTINE jphi_psi_nodes(self,xpsi)
+SUBROUTINE jphi_psi_nodes(self,xpsi,mapped)
 CLASS(jphi_flux_func), INTENT(inout) :: self
 REAL(r8), ALLOCATABLE, INTENT(out) :: xpsi(:) !< Node locations in \f$ 1-\hat{\psi} \f$
+LOGICAL, OPTIONAL, INTENT(out) :: mapped !< `.FALSE.` if on toroidal flux and the map is not built
 INTEGER(i4) :: i
 ALLOCATE(xpsi(self%npsi))
 xpsi=self%x
+IF(PRESENT(mapped))mapped=.TRUE.
 IF(.NOT.ASSOCIATED(self%phi_wrapper))RETURN
 SELECT TYPE(wrap=>self%phi_wrapper)
   TYPE IS(phi_flux_wrapper)
-    IF(.NOT.wrap%relabel)CALL oft_abort('Jphi profiles on toroidal flux must use "phi_n_relabel"', &
+    IF(.NOT.wrap%val)CALL oft_abort('Jphi profiles on toroidal flux must use "phi_n_val"', &
       'jphi_psi_nodes',__FILE__)
-    IF(.NOT.ASSOCIATED(wrap%map))RETURN
+    IF(.NOT.ASSOCIATED(wrap%map))CALL oft_abort('Profile on toroidal flux not attached, call torflux_setup', &
+      'jphi_psi_nodes',__FILE__)
+    IF(PRESENT(mapped))mapped=(wrap%map%ns>=2)
     DO i=1,self%npsi
       xpsi(i)=wrap%map%inv(self%x(i))
     END DO

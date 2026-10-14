@@ -315,10 +315,19 @@ CLASS(gs_equil), INTENT(inout) :: gseq !< Equilibrium, still holding the profile
 INTEGER(i4) :: i,ierr
 REAL(r8) :: b1,b2
 REAL(r8), ALLOCATABLE :: xpsi(:)
+LOGICAL :: mapped
 IF(.NOT.ASSOCIATED(gseq%I))RETURN
 b1=gseq%plasma_bounds(1); b2=gseq%plasma_bounds(2)
 IF((b1<-1.d98).OR.(b2==b1))RETURN ! No plasma yet
-CALL jphi_psi_nodes(self,xpsi) ! Knots in psi (mapped from toroidal flux if on it)
+CALL jphi_psi_nodes(self,xpsi,mapped) ! Knots in psi (mapped from toroidal flux if on it)
+IF(.NOT.mapped)THEN ! No map yet (eg. replacing a profile on psi_N): build it for the current equilibrium
+  CALL gseq%torflux%update(gseq)
+  CALL jphi_psi_nodes(self,xpsi,mapped)
+END IF
+IF(.NOT.mapped)THEN
+  CALL oft_warn("No toroidal flux map, F*F' not carried to the new profile")
+  RETURN
+END IF
 self%y0=gseq%ffp_scale*gseq%I%fp(b1)
 DO i=1,self%npsi
   self%yp(i)=gseq%ffp_scale*gseq%I%fp(xpsi(i)*(b2-b1)+b1)

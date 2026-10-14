@@ -3,9 +3,9 @@
 !
 ! SPDX-License-Identifier: LGPL-3.0-only
 !---------------------------------------------------------------------------------
-!> @file grad_shaf_cutcell.F90
+!> @file grad_shaf_contour.F90
 !
-!> Mesh-based (cut-cell) evaluation of the flux-surface geometric factor \f$ q/F \f$
+!> Mesh-based contour evaluation of the flux-surface geometric factor \f$ q/F \f$
 !!
 !! Cells are split (Bernstein form) until \f$ \hat{\psi} \f$ is monotone along a direction \f$ d \f$;
 !! each level-set arc is then a graph between exact edge crossings, integrated by Gauss quadrature
@@ -13,7 +13,7 @@
 !!
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
-MODULE oft_gs_cutcell
+MODULE oft_gs_contour
 USE oft_base
 USE oft_mesh_type, ONLY: cell_is_curved
 USE oft_lag_basis, ONLY: oft_blag_npos, oft_scalar_bfem
@@ -52,17 +52,17 @@ REAL(r8), PARAMETER :: wg5(5) = [0.236926885056189087514264d0,0.4786286704993664
 TYPE(oft_scalar_bfem), POINTER :: perm_rep => NULL()
 INTEGER(i8) :: perm_sum = -1
 INTEGER(i4), ALLOCATABLE :: perm(:,:)
-PUBLIC gs_qgeom_cutcell
+PUBLIC gs_qgeom_contour
 CONTAINS
 !------------------------------------------------------------------------------
 !> Geometric factor \f$ g = q/F = \frac{1}{2\pi} \oint \frac{dl}{R |\nabla \psi|} \f$ on flux surfaces
 !!
 !! Same contract and units as @ref oft_gs::gs_get_qprof with `geom_only`. Only arcs inside
-!! the plasma mask (@ref oft_gs::gs_test_bounds) contribute; surfaces whose winding about the
-!! O-point is not one return `g=0`. Summation order is fixed, so results do not depend on
+!! the plasma mask (@ref oft_gs::gs_test_bounds) contribute; surfaces outside (0,1) or whose winding
+!! about the O-point is not one return `g=-1.d99`. Summation order is fixed, so results do not depend on
 !! the thread count.
 !------------------------------------------------------------------------------
-SUBROUTINE gs_qgeom_cutcell(gseq,nr,psi_q,g)
+SUBROUTINE gs_qgeom_contour(gseq,nr,psi_q,g)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: nr !< Number of surfaces
 REAL(r8), INTENT(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
@@ -73,7 +73,7 @@ REAL(r8), ALLOCATABLE :: gblk(:,:),wblk(:,:),gloc(:),wloc(:),wind(:)
 REAL(r8) :: x1,dpsi
 INTEGER(i4) :: nblk,ib,cell,i,nc
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
-g=0.d0
+g=-1.d99
 IF(nr<1)RETURN
 IF(gseq%plasma_bounds(1)<-1.d98)RETURN
 x1=gseq%plasma_bounds(1)
@@ -84,6 +84,7 @@ NULLIFY(vals)
 CALL gseq%psi%get_local(vals)
 nc=gseq%device%fe_rep%mesh%nc
 CALL perm_update(gseq%device%fe_rep,bt)
+g=0.d0
 nblk=(nc+nblk_cells-1)/nblk_cells
 ALLOCATE(gblk(nr,nblk),wblk(nr,nblk))
 !$omp parallel private(ib,cell,gloc,wloc)
@@ -110,16 +111,16 @@ END DO
 g=g/(2.d0*pi*ABS(dpsi))
 DO i=1,nr
   IF((psi_q(i)<=0.d0).OR.(psi_q(i)>=1.d0))THEN
-    g(i)=0.d0
+    g(i)=-1.d99
   ELSE IF(ABS(wind(i)-1.d0)>wind_tol)THEN
-    WRITE(error_str,'(A,F10.6,A,ES11.3)')'gs_qgeom_cutcell: open or missing surface at psi = ', &
+    WRITE(error_str,'(A,F10.6,A,ES11.3)')'gs_qgeom_contour: open or missing surface at psi = ', &
       1.d0-psi_q(i),', winding = ',wind(i)
     CALL oft_warn(error_str)
-    g(i)=0.d0
+    g(i)=-1.d99
   END IF
 END DO
 DEALLOCATE(vals,gblk,wblk,wind)
-END SUBROUTINE gs_qgeom_cutcell
+END SUBROUTINE gs_qgeom_contour
 !------------------------------------------------------------------------------
 !> Add arc integrals and winding of all surfaces crossing `cell`
 !------------------------------------------------------------------------------
@@ -207,16 +208,18 @@ REAL(r8) :: t
 t=a; a=b; b=t
 END SUBROUTINE swap
 !---Does any surface lie in [a,b]?
-LOGICAL FUNCTION any_hit(a,b)
+FUNCTION any_hit(a,b) RESULT(hit)
 REAL(r8), INTENT(in) :: a,b
-any_hit=ANY((psi_q>=a).AND.(psi_q<=b))
+LOGICAL :: hit
+hit=ANY((psi_q>=a).AND.(psi_q<=b))
 END FUNCTION any_hit
 !---At most one crossing of s per sub-cell edge (Bernstein sign changes)
-LOGICAL FUNCTION edges_ok(s)
+FUNCTION edges_ok(s) RESULT(ok)
 REAL(r8), INTENT(in) :: s
+LOGICAL :: ok
 INTEGER(i4) :: kk,ka,kb,q,nch,al(3)
 LOGICAL :: up,upl
-edges_ok=.FALSE.
+ok=.FALSE.
 DO kk=1,3
   ka=MOD(kk,3)+1; kb=MOD(kk+1,3)+1
   nch=0
@@ -228,7 +231,7 @@ DO kk=1,3
   END DO
   IF(nch>1)RETURN
 END DO
-edges_ok=.TRUE.
+ok=.TRUE.
 END FUNCTION edges_ok
 !---Integrate the arc of surface s in the current (simple) sub-cell
 SUBROUTINE tri_arc(s,gacc,wacc)
@@ -548,4 +551,4 @@ CALL lapack_matinv(bt%nb,bt%mvinv,ierr)
 IF(ierr/=0)CALL oft_abort('Monomial table inversion failed','bern_build',__FILE__)
 bt%cbound=(MAXVAL(SUM(ABS(bt%vinv),DIM=2))-1.d0)/2.d0+1.d-12
 END SUBROUTINE bern_build
-END MODULE oft_gs_cutcell
+END MODULE oft_gs_contour

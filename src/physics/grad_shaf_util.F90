@@ -92,7 +92,7 @@ INTEGER(4) :: io_unit
 ! LOGICAL :: zero_grad
 CHARACTER(LEN=32) :: profType,coordType
 CHARACTER(LEN=128) :: line
-INTEGER(4) :: ios
+INTEGER(i4) :: ios
 !---First line: "<type> [coord]"
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,'(A)')line
@@ -107,9 +107,9 @@ CALL F%load(io_unit)
 CLOSE(io_unit)
 SELECT CASE(TRIM(coordType))
   CASE("psi_n")
-  CASE("phi_n")
+  CASE("phi_n_deriv")
     CALL torflux_wrap(F,1)
-  CASE("phi_n_relabel")
+  CASE("phi_n_val")
     CALL torflux_wrap(F,2)
   CASE DEFAULT
     CALL oft_abort('Invalid profile coordinate "'//TRIM(coordType)//'"','gs_profile_load',__FILE__)

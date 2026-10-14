@@ -33,11 +33,10 @@ USE axi_green, ONLY: green
 USE oft_gs, ONLY: gs_factory, gs_equil, gs_save_fields, gs_setup_walls, build_dels, flux_func, &
   gs_fixed_vflux, gs_get_qprof, gs_trace_surf, gs_b_interp, gs_j_interp, gs_prof_interp, &
   gs_plasma_mutual, gs_source, gs_err_reason, gs_coil_source, gs_coil_source_distributed, gs_vacuum_solve, &
-  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds, qprof_trace_tol
+  gs_coil_mutual, gs_coil_mutual_distributed, gs_project_b, gs_save_mug, gs_update_bounds
 USE oft_gs_util, ONLY: gs_comp_globals, gs_save_eqdsk, gs_save_ifile, gs_profile_load, gs_profile_save, &
   gs_calc_vloop, gs_save_tokamaker, gs_load_tokamaker
-USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_map, torflux_setup, torflux_attach, torflux_unwrap, &
-  torflux_qgeom
+USE oft_gs_profiles, ONLY: torflux_map, torflux_setup, torflux_attach, torflux_unwrap
 USE oft_gs_fit, ONLY: fit_gs, fit_gs_error, fit_gs_setup, fit_gs_destroy, fit_constraint_ptr, fit_pm
 USE oft_gs_td, ONLY: oft_tmaker_td, eig_gs_td
 USE grad_shaf_prof_phys, ONLY: create_dipole_b0_prof, dipole_ani_press, mirror_ani_slosh, gs_flux_int
@@ -152,7 +151,6 @@ ELSE
     RETURN
   END IF
   CALL new_equil%copy(old_equil)
-  CALL torflux_setup(new_equil)
 END IF
 new_equil_ptr=C_LOC(new_equil)
 END SUBROUTINE tokamaker_equil_copy
@@ -1587,29 +1585,6 @@ IF(ASSOCIATED(tMaker_equil_obj%torflux))THEN
 END IF
 CALL copy_string('No toroidal flux map (requires an equilibrium with toroidal-flux profiles)',error_str)
 END SUBROUTINE tokamaker_torflux_map
-!---------------------------------------------------------------------------------
-!> Select toroidal flux map q/F backend and tracer tolerance (testing only)
-!---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_torflux_backend(backend,tol) BIND(C,NAME="tokamaker_torflux_backend")
-INTEGER(c_int), VALUE, INTENT(in) :: backend !< 0 cut-cell (default), 1 tracer
-REAL(c_double), VALUE, INTENT(in) :: tol !< Tracer tolerance, <0 for default
-torflux_qgeom_backend=backend
-qprof_trace_tol=tol
-END SUBROUTINE tokamaker_torflux_backend
-!---------------------------------------------------------------------------------
-!> Evaluate q/F on flux surfaces with the cut-cell or tracer backend (testing only)
-!---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_torflux_qgeom(tMaker_equil_ptr,nr,psi_q,g,backend,error_str) BIND(C,NAME="tokamaker_torflux_qgeom")
-TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_equil_ptr !< Pointer to TokaMaker equilibrium object
-INTEGER(c_int), VALUE, INTENT(in) :: nr !< Number of surfaces
-REAL(c_double), INTENT(in) :: psi_q(nr) !< \f$ 1-\hat{\psi} \f$ of each surface
-REAL(c_double), INTENT(out) :: g(nr) !< q/F on each surface (0 if failed)
-INTEGER(c_int), VALUE, INTENT(in) :: backend !< 0 cut-cell, 1 tracer
-CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
-TYPE(gs_equil), POINTER :: tMaker_equil_obj
-IF(.NOT.tokamaker_equil_ccast(tMaker_equil_ptr,tMaker_equil_obj,error_str))RETURN
-CALL torflux_qgeom(tMaker_equil_obj,nr,psi_q,g,backend)
-END SUBROUTINE tokamaker_torflux_qgeom
 !---------------------------------------------------------------------------------
 !> Evaluate flux surface averages, per-surface shape parameters, and q
 !---------------------------------------------------------------------------------
