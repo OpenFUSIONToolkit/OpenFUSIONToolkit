@@ -23,7 +23,7 @@ USE oft_lag_basis, ONLY: oft_blag_geval
 USE oft_mesh_type, ONLY: bmesh_findcell
 USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE tracing_2d, ONLY: set_tracer, active_tracer, tracinginv_fs
-USE grad_shaf_prof_phys, ONLY: eval_dIdA, gs_ravgs, gs_flux_int, &
+USE grad_shaf_prof_phys, ONLY: eval_dIdA, gs_ravgs, gs_ravgs_failed, gs_flux_int, &
   gs_flux_cumint, jphi_update, jphi_copy, jphi_flux_func, jphi_psi_nodes
 USE oft_io, ONLY: hdf5_create_group, hdf5_write, hdf5_read, &
   hdf5_field_get_sizes, hdf5_field_exist
@@ -511,7 +511,7 @@ END FUNCTION h5_name
 SUBROUTINE jphi_bs_update(self, gseq)
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
-INTEGER(i4) :: i
+INTEGER(i4) :: i, ierr
 REAL(r8) :: pscale, pprime
 REAL(r8), ALLOCATABLE :: xpsi(:) !< Node locations in normalized poloidal flux
 REAL(r8), ALLOCATABLE :: psi_n(:) !< Nodes: LCFS (0) and xpsi
@@ -567,11 +567,9 @@ IF(bs_frozen) THEN
   jphi_pd = self%jphi_pd_last
   djbs = 0.0_r8
 ELSE
-  CALL calculate_bootstrap(self, gseq, self%npsi, xpsi, jphi_bs, jphi_pd, ravgs=ravgs(1:,:))
-  !--- A surface that failed both the cut-cell and the tracer evaluation ends the solve (gs_solve error -10)
-  IF(.NOT.ALL(ravgs(1:,2)>0.0_r8))THEN
-    CALL oft_warn('jphi_bs_update: flux-surface evaluation failed on a bootstrap node')
-    gseq%prof_failed=.TRUE.
+  CALL calculate_bootstrap(self, gseq, self%npsi, xpsi, jphi_bs, jphi_pd, ierr, ravgs=ravgs(1:,:))
+  IF(ierr /= 0)THEN
+    gseq%prof_failed=.TRUE. ! The solve ends with error -10
     RETURN
   END IF
   IF(self%boot_ops%isolate_edge_jbs)THEN
@@ -617,6 +615,7 @@ IF(bs_frozen)THEN
 ELSE
   CALL gs_ravgs(gseq, 1, psi_n(0:0), ravgs(0:0,:))
 END IF
+IF(gs_ravgs_failed(gseq, psi_n, ravgs, 'jphi_bs_update'))RETURN
 !--- 3. Edge taper (the cache above keeps the untapered jphi_bs, so freeze checks track physics)
 ALLOCATE(jphi_ind(0:self%npsi))
 jphi_ind = [self%j0, self%jphi]
@@ -826,7 +825,7 @@ REAL(r8), INTENT(in) :: jt_base(:) !< Base jtor (@ref eval_dIdA) on the nodes [n
 REAL(r8), INTENT(in) :: jt_eq(:) !< jtor of the equilibrium's current on the nodes [n]
 REAL(r8), INTENT(in) :: j_base(:) !< Base jphi on the nodes [n]
 REAL(r8), INTENT(out) :: dj(:) !< Reset current [n]
-INTEGER(i4) :: n, i, k, n_dips, nk
+INTEGER(i4) :: n, i, k, n_dips, nk, ierr
 INTEGER(i4), ALLOCATABLE :: kk(:)
 REAL(r8), PARAMETER :: psi_ax = 1.0e-4_r8
 REAL(r8) :: rho_s, rho_m, rho_out, w, wf, dAmin, alast, psi, h
@@ -851,12 +850,12 @@ DO i = 1, n
   c1(i) = ravgs(k,3)/ravgs(k,2)**2
 END DO
 DO i = 2, n
-  IF(q_eq(i) <= 0.0_r8)q_eq(i) = q_eq(i-1)
-  IF(ap(i) <= 0.0_r8)ap(i) = ap(i-1)
+  IF(.NOT.(q_eq(i) > 0.0_r8))q_eq(i) = q_eq(i-1) ! Also catches NaN
+  IF(.NOT.(ap(i) > 0.0_r8))ap(i) = ap(i-1)
 END DO
 DO i = n-1, 1, -1
-  IF(q_eq(i) <= 0.0_r8)q_eq(i) = q_eq(i+1)
-  IF(ap(i) <= 0.0_r8)ap(i) = ap(i+1)
+  IF(.NOT.(q_eq(i) > 0.0_r8))q_eq(i) = q_eq(i+1)
+  IF(.NOT.(ap(i) > 0.0_r8))ap(i) = ap(i+1)
 END DO
 !---Enclosed area and currents (trapezoid in psi_N; the piece inside the innermost node as a rectangle)
 h = 1.0_r8 - xn(n)
@@ -921,7 +920,13 @@ END DO
 CALL quad_smooth(nk, rho(kk(1:nk)), qb(1:nk), saw_nsmooth)
 CALL saw_reset_1d(nk, rho(kk(1:nk)), qb(1:nk), Ib(kk(1:nk)), Ar(kk(1:nk)), c1(kk(1:nk)), &
                   self%boot_ops%saw_q_s, self%boot_ops%saw_dq, self%boot_ops%saw_ramp, &
-                  self%boot_ops%saw_rule, qn(1:nk), djr(1:nk), wr(1:nk), rho_s, rho_m, rho_out, n_dips, w)
+                  self%boot_ops%saw_rule, qn(1:nk), djr(1:nk), wr(1:nk), rho_s, rho_m, rho_out, n_dips, w, ierr)
+IF(ierr /= 0)THEN
+  CALL oft_warn('saw_redistribute: sawtooth reset failed, skipping the reset this update')
+  dj = 0.0_r8
+  CALL saw_scalars_reset(self%boot_profs)
+  RETURN
+END IF
 !---Reset interpolated in rho; inside the reset the base structure between kept nodes is reset too
 !   (target total = base + reset is interpolated), weighted by the reset weight (rule 1: w inside
 !   rho_m, a sharp cut as in FUSE; rule 2: wr interpolated) so it vanishes with the reset
@@ -995,7 +1000,7 @@ END SUBROUTINE quad_smooth
 !! weighted per interval (@ref local_reset); q is unchanged elsewhere, so dI = 0 at interval ends.
 !! dI = I*(q/q_new - 1), dj = (d dI/dA)/c1.
 !---------------------------------------------------------------------------------
-SUBROUTINE saw_reset_1d(n, rho, q, I, A, c1, q_s, dq, ramp, rule, q_new, dj, wr, rho_s, rho_m, rho_out, n_dips, w)
+SUBROUTINE saw_reset_1d(n, rho, q, I, A, c1, q_s, dq, ramp, rule, q_new, dj, wr, rho_s, rho_m, rho_out, n_dips, w, ierr)
 INTEGER(i4), INTENT(in) :: n
 REAL(r8), INTENT(in) :: rho(n) !< Radius, ascending from the axis
 REAL(r8), INTENT(in) :: q(n) !< Base q
@@ -1006,12 +1011,14 @@ REAL(r8), INTENT(in) :: q_s, dq, ramp
 INTEGER(i4), INTENT(in) :: rule !< 1 = fuse, 2 = local
 REAL(r8), INTENT(out) :: q_new(n), dj(n), wr(n), rho_s, rho_m, rho_out, w
 INTEGER(i4), INTENT(out) :: n_dips
+INTEGER(i4), INTENT(out) :: ierr !< 0 on success, -1 if a gradient failed (no reset: q_new = q, dj = 0)
 INTEGER(i4) :: k, ia, n_low
 INTEGER(i4), ALLOCATABLE :: reg_start(:), reg_end(:)
 REAL(r8) :: qm
 LOGICAL :: ok
 REAL(r8), ALLOCATABLE :: dI(:), gq(:), qt(:)
 q_new = q; dj = 0.0_r8; wr = 0.0_r8; rho_s = 0.0_r8; rho_m = 0.0_r8; rho_out = 0.0_r8; w = 0.0_r8; n_dips = 0
+ierr = 0
 IF(n < 3)RETURN
 !---Separate q < q_s regions [reg_start(k), reg_end(k)]
 ALLOCATE(reg_start(n), reg_end(n), gq(n), dI(n), qt(n))
@@ -1028,7 +1035,8 @@ DO k = 1, n
   reg_end(n_low) = k
 END DO
 IF(n_low == 0)RETURN
-CALL gradient_(n, rho, q, gq, edge_order=1)
+CALL gradient_(n, rho, q, gq, ierr, edge_order=1)
+IF(ierr /= 0)RETURN
 qm = q_s + dq
 !---Sawtooth radius (both rules) and rule 1's reset, from the outermost q < q_s region
 CALL full_reset(n_low, qt, rho_s, rho_m, ok)
@@ -1058,7 +1066,11 @@ ELSE
   END DO
 END IF
 dI = I*(q/q_new - 1.0_r8)
-CALL gradient_(n, A, dI, dj, edge_order=1)
+CALL gradient_(n, A, dI, dj, ierr, edge_order=1)
+IF(ierr /= 0)THEN
+  q_new = q; wr = 0.0_r8
+  RETURN
+END IF
 dj = dj/c1
 DEALLOCATE(reg_start, reg_end, gq, dI, qt)
 CONTAINS
@@ -1573,15 +1585,16 @@ END DO
 END SUBROUTINE apply_edge_taper
 !------------------------------------------------------------------------------
 !> dy/dx on a strictly monotonic, possibly non-uniform grid, as `numpy.gradient(y, x, edge_order=...)`:
-!! three-point central interior, one-sided ends of order `edge_order` (1 or 2, default 2). Aborts on
-!! a non-finite input or result, or on a repeated or unsorted abscissa.
+!! three-point central interior, one-sided ends of order `edge_order` (1 or 2, default 2). On a
+!! non-finite input or result, a repeated or unsorted abscissa, or too few points: warns, ierr = -1.
 !------------------------------------------------------------------------------
-SUBROUTINE gradient_(n, x, y, dydx, edge_order)
+SUBROUTINE gradient_(n, x, y, dydx, ierr, edge_order)
 USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
 INTEGER(i4), INTENT(in) :: n !< Number of points
 REAL(r8), INTENT(in) :: x(n) !< Abscissae
 REAL(r8), INTENT(in) :: y(n) !< Values on x
 REAL(r8), INTENT(out) :: dydx(n) !< dy/dx on x
+INTEGER(i4), INTENT(out) :: ierr !< 0 on success, -1 on failure (dydx = 0)
 INTEGER(i4), OPTIONAL, INTENT(in) :: edge_order !< Order of the end stencils (1 or 2, default 2)
 !---
 INTEGER(i4) :: i, eo
@@ -1589,13 +1602,16 @@ REAL(r8) :: hs, hd !< Backward and forward interval widths about the stencil cen
 CHARACTER(len=512) :: char_buf
 eo = 2
 IF(PRESENT(edge_order))eo = edge_order
-IF(n < eo+1) &
-  CALL oft_abort('too few input points for the end stencils', 'gradient_', __FILE__)
+IF(n < eo+1)THEN
+  CALL fail('too few input points for the end stencils')
+  RETURN
+END IF
 DO i = 1, n
   IF(.NOT.IEEE_IS_FINITE(x(i)) .OR. .NOT.IEEE_IS_FINITE(y(i)))THEN
     WRITE(char_buf,'(A,I0,A,ES12.5,A,ES12.5)') 'non-finite input at i=', i, &
       ': x=', x(i), ', y=', y(i)
-    CALL oft_abort(TRIM(char_buf), 'gradient_', __FILE__)
+    CALL fail(char_buf)
+    RETURN
   END IF
 END DO
 !--- Strict monotonicity in either direction.  The stencils below are signed,
@@ -1606,7 +1622,8 @@ DO i = 2, n
   WRITE(char_buf,'(A,I0,A,ES12.5,A,ES12.5,A)') 'x not strictly monotonic at '// &
     'i=', i, ' (x=', x(i-1), ' then ', x(i), '); duplicated or unsorted '// &
     'abscissae give an undefined derivative'
-  CALL oft_abort(TRIM(char_buf), 'gradient_', __FILE__)
+  CALL fail(char_buf)
+  RETURN
 END DO
 !--- Interior: three-point central stencil for the local spacing
 DO i = 2, n-1
@@ -1638,9 +1655,18 @@ DO i = 1, n
   IF(.NOT.IEEE_IS_FINITE(dydx(i)))THEN
     WRITE(char_buf,'(A,I0,A,ES12.5)') 'non-finite derivative at i=', i, &
       ', x=', x(i)
-    CALL oft_abort(TRIM(char_buf), 'gradient_', __FILE__)
+    CALL fail(char_buf)
+    RETURN
   END IF
 END DO
+ierr = 0
+CONTAINS
+SUBROUTINE fail(msg)
+CHARACTER(LEN=*), INTENT(in) :: msg
+CALL oft_warn('gradient_: '//TRIM(msg))
+dydx = 0.0_r8
+ierr = -1
+END SUBROUTINE fail
 END SUBROUTINE gradient_
 !------------------------------------------------------------------------------
 !> Bootstrap current (Redl 2021) on the nodes psi_N (bootstrap.py calculate_profiles_and_bootstrap)
@@ -1652,14 +1678,16 @@ END SUBROUTINE gradient_
 !! @param psi_N   Normalised psi, OFT convention (0=LCFS, 1=axis), any spacing, psi_N(1)>0
 !! @param jphi_bs Output: bootstrap current density as TokaMaker jphi = <j_phi> [A/m^2] on psi_N grid
 !! @param jphi_pd Output: its pressure-driven part [A/m^2]
+!! @param ierr    Output: 0 on success, -1 if a gradient or the boundary extrapolation failed
 !------------------------------------------------------------------------------
-SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, jphi_bs, jphi_pd, ravgs)
+SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, jphi_bs, jphi_pd, ierr, ravgs)
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 INTEGER(i4), INTENT(in) :: n_psi
 REAL(r8), INTENT(in) :: psi_N(1:n_psi)  !< Normalised psi (OFT convention, 0=LCFS), psi_N(1)>0
 REAL(r8), INTENT(out) :: jphi_bs(0:n_psi) !< jphi_bs(0) the LCFS value (extrapolated)
 REAL(r8), INTENT(out) :: jphi_pd(0:n_psi) !< Pressure-driven part of jphi_bs
+INTEGER(i4), INTENT(out) :: ierr !< 0 on success, -1 on failure (warned)
 REAL(r8), OPTIONAL, INTENT(out) :: ravgs(n_psi,3) !< <R>, <1/R>, <1/R^2> on psi_N from the Sauter pass
 !---
 INTEGER(i4) :: i
@@ -1713,10 +1741,11 @@ ft = 1.0_r8 - fc
 pe = EC * ne * Te
 pi_arr = EC * ni * Ti
 ! Gradients d/dpsi [Wb^-1]
-CALL gradient_(n_psi, psi_abs, Te, dT_e_dpsi)
-CALL gradient_(n_psi, psi_abs, Ti, dT_i_dpsi)
-CALL gradient_(n_psi, psi_abs, ne, dn_e_dpsi)
-CALL gradient_(n_psi, psi_abs, ni, dn_i_dpsi)
+CALL gradient_(n_psi, psi_abs, Te, dT_e_dpsi, ierr)
+IF(ierr == 0)CALL gradient_(n_psi, psi_abs, Ti, dT_i_dpsi, ierr)
+IF(ierr == 0)CALL gradient_(n_psi, psi_abs, ne, dn_e_dpsi, ierr)
+IF(ierr == 0)CALL gradient_(n_psi, psi_abs, ni, dn_i_dpsi, ierr)
+IF(ierr /= 0)RETURN
 ! In the Fortran internal convention psi increases LCFS→axis (opposite to the
 ! standard Sauter/Redl derivation where psi increases axis→LCFS).  Negate
 ! all gradients so the bootstrap formula sees the conventional sign.
@@ -1767,8 +1796,9 @@ DO i = 1, n_psi
 END DO
 jdotB = [0.0_r8, jdotB_bs]
 CALL finish(jphi_bs)
-CALL finish(jphi_pd)
-CALL finish(jdotB)
+IF(ierr == 0)CALL finish(jphi_pd)
+IF(ierr == 0)CALL finish(jdotB)
+IF(ierr /= 0)RETURN
 self%boot_profs%jdotB_bs_raw = jdotB
 self%boot_profs%jphi_bs_raw = jphi_bs - jphi_pd
 self%boot_profs%jphi_pd_raw = jphi_pd
@@ -1788,7 +1818,7 @@ CONTAINS
 SUBROUTINE finish(a)
 REAL(r8), INTENT(inout) :: a(0:n_psi)
 WHERE(.NOT.(ABS(a) < 1.0e99_r8)) a = 0.0_r8
-CALL extrap_jbs_boundaries(n_psi, psi_N, a)
+CALL extrap_jbs_boundaries(n_psi, psi_N, a, ierr)
 END SUBROUTINE finish
 END SUBROUTINE calculate_bootstrap
 !------------------------------------------------------------------------------
@@ -1812,31 +1842,28 @@ END SUBROUTINE edge_spike
 !> Linearly extrapolate a bootstrap profile to the LCFS (and the axis, if a node) where q is
 !! undefined, using the second-order gradient at the nearest well-defined point.
 !------------------------------------------------------------------------------
-SUBROUTINE extrap_jbs_boundaries(n_psi, psi_N, prof)
+SUBROUTINE extrap_jbs_boundaries(n_psi, psi_N, prof, ierr)
 INTEGER(i4), INTENT(in) :: n_psi
 REAL(r8), INTENT(in) :: psi_N(1:n_psi)
 REAL(r8), INTENT(inout) :: prof(0:n_psi)
+INTEGER(i4), INTENT(out) :: ierr !< 0 on success, -1 if too few points or the gradient failed
 INTEGER(i4) :: n_lo, n_hi
 REAL(r8) :: dprof_dpsi(n_psi)
-! psi_N(0) = 0.0 at the LCFS is implicit.
+! psi_N(0) = 0.0 at the LCFS is implicit; an axis node is excluded from both stencils.
 n_lo = 1
 n_hi = MERGE(n_psi-1, n_psi, psi_N(n_psi) == 1.0_r8)
-IF(n_hi-n_lo+1 < 3) CALL oft_abort('extrap_jbs_boundaries: too few '// &
-  'points with well-defined q to extrapolate the bootstrap current to the LCFS', &
-  'extrap_jbs_boundaries', __FILE__)
+ierr = -1
+IF(n_hi-n_lo+1 < 3)THEN
+  CALL oft_warn('extrap_jbs_boundaries: too few points with well-defined q to extrapolate the '// &
+    'bootstrap current to the LCFS and axis')
+  RETURN
+END IF
 CALL gradient_(n_hi-n_lo+1, psi_N(n_lo:n_hi), prof(n_lo:n_hi), &
-  dprof_dpsi(n_lo:n_hi))
+  dprof_dpsi(n_lo:n_hi), ierr)
+IF(ierr /= 0)RETURN
 prof(0) = prof(n_lo) + dprof_dpsi(n_lo) * (0.0_r8 - psi_N(n_lo))
-IF(psi_N(n_psi) == 1.0_r8)THEN
-  n_lo = 1
-  n_hi = n_psi-1
-  IF(n_hi-n_lo+1 < 3) CALL oft_abort('extrap_jbs_boundaries: too few '// &
-    'points with well-defined q to extrapolate the bootstrap current to the axis', &
-    'extrap_jbs_boundaries', __FILE__)
-  CALL gradient_(n_hi-n_lo+1, psi_N(n_lo:n_hi), prof(n_lo:n_hi), &
-    dprof_dpsi(n_lo:n_hi))
+IF(psi_N(n_psi) == 1.0_r8) &
   prof(n_psi) = prof(n_hi) + dprof_dpsi(n_hi) * (psi_N(n_psi) - psi_N(n_hi))
-ENDIF
 END SUBROUTINE extrap_jbs_boundaries
 !------------------------------------------------------------------------------
 !> Analyse and isolate the edge bootstrap-current spike from a toroidal

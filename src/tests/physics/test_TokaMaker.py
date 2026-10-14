@@ -2085,6 +2085,11 @@ def _check_saw_reset_1d():
     for rule in (1, 2):
         q_new2, dj2, sc2 = reset(q + 0.2, rule)
         assert sc2['n_dips'] == 0 and np.all(dj2 == 0.0) and np.all(q_new2 == q + 0.2) and sc2['rho_out'] == 0.0
+    # Non-finite q (a failed surface): no reset, and no abort
+    q_nan = q.copy()
+    q_nan[100] = np.nan
+    q_new2, dj2, _ = reset(q_nan, 2)
+    assert np.all(dj2 == 0.0) and np.array_equal(q_new2, q_nan, equal_nan=True)
     # Off-axis dip only (q0 > q_s + dq): local leaves q0 and everything outside [rho_in, rho_out] alone,
     # dI = 0 at both ends (Ip-neutral); fuse lowers q0 to q_s. rho_m is the same axis-anchored radius.
     q4 = 1.10 + 0.6*rho**2 - 0.17*g(0.35, 0.08)
