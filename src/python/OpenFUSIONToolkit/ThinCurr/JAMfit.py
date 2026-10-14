@@ -681,15 +681,23 @@ class JAMfit():
         wall_psi_at_time = solution_wall_at_time @ wall_psi_probes
         return wall_psi_at_time 
     
-    def post_process_tidx(self, filaments_at_time, wall_psi, coil_curr_dict, rgrid, zgrid, verbose = False):
+    def post_process_tidx(self, filaments_at_time, wall_psi, coil_curr_dict, rgrid, zgrid, verbose = False, include_negative_encl = True):
         '''! Post-process the results at a given time index to compute plasma parameters and visualize.
-        
+
+        The internal inductance uses the 'std' normalisation of TokaMaker get_stats,
+        li = (int B_p^2 dV / V) / (mu0 Ip / L_LCFS)^2, where the B_p^2 integral and V only cover the region inside
+        the LCFS. Ip is therefore the current enclosed by the traced LCFS: the sum of the filaments whose centre
+        (rgrid, zgrid) lies inside lcfs_points, not the sum of all filaments.
+
         @param filaments_at_time numpy.ndarray, filament currents at the given time index
         @param coil_curr_dict dict, dictionary of coil currents at the given time index
         @param rgrid numpy.ndarray, R coordinates of the filament mesh
         @param zgrid numpy.ndarray, Z coordinates of the filament mesh
         @param wall_psi numpy.ndarray, precomputed wall contribution to the flux
         @param verbose bool, if True, plots the equilibrium and LCFS (default: False)
+        @param include_negative_encl bool, if True, negative filaments inside the LCFS count towards the enclosed Ip
+            used for li; if False only positive filaments are summed, consistent with the psi used here (negative
+            filaments are left out of psi) (default: True)
         @result tuple, containing LCFS points, limiting points, psi at LCFS, total psi, q values, q95, internal inductance, current centroid, area centroid, and area'''
         # reset mygs in case there are left over coil currents from previous runs
         self.mygs.set_coil_currents()
@@ -739,10 +747,23 @@ class JAMfit():
             limiting_pts.append([lim_R, lim_Z])
             _, q_vals, _, _, _, _= self.mygs.get_q() 
 
-            try:
-                internal_inductance = self.mygs.get_stats(beta_Ip = ip)['l_i']
-            except ZeroDivisionError:
-                print(f"Couldn't compute li, Ip was {ip}, skipping this one")
+            # --- Ip enclosed by the traced LCFS, for li ---
+            # get_stats integrates B_p^2 only inside the LCFS, so li must be normalised by the current inside it.
+            # Late in a VDE much of the filament current sits outside the LCFS, and using the total (ip) makes li
+            # too small by (Ip_encl/Ip_total)^2.
+            fil_inside = Path(lcfs_points[:, :2]).contains_points(numpy.column_stack((rgrid, zgrid)))
+            if include_negative_encl:
+                # Negative filaments are unphysical for this plasma and should vanish for a good enough fit, but
+                # they are part of the fitted solution, so they are counted for now (they are still left out of psi).
+                ip_encl = numpy.sum(filaments_at_time[fil_inside])
+            else:
+                ip_encl = numpy.sum(filaments_at_time[fil_inside & (filaments_at_time > 0)])
+
+            if ip_encl > 0:
+                internal_inductance = self.mygs.get_stats(beta_Ip = ip_encl)['l_i']
+            else:
+                # get_stats divides by Ip^2 with numpy (inf, no exception), so catch it here
+                print(f"Couldn't compute li, Ip enclosed by the LCFS was {ip_encl}, skipping this one")
                 internal_inductance = numpy.nan
 
             _, q95, _ , _, _, _ = self.mygs.get_q(psi=0.95)
@@ -879,9 +900,10 @@ def get_laplace_matrix(rgrid, zgrid, verbose=False):
             if neighbor in valid_set:
                 # Interior neighbor — standard FD
                 lap_mat[k, valid_set[neighbor]] = weight
-                lap_mat[k, k] -= weight
-            # else: boundary point, Neumann BC, skip
 
+        lap_mat[k, k] = -2.0*(1.0/(dr**2) + 1.0/(dz**2)) # TODO read this mksure this is correct then restest
+        # possibly doing something weird with boundary but fixed now.  
+            
     return lap_mat, N
 
 
@@ -1014,7 +1036,7 @@ def get_bbox_grid_pts(meshfile_tokamaker, myOFT, n_r=10, n_z=10, verbose=False):
         plt.gca().set_aspect('equal', adjustable='box')
         plt.show()
 
-    return bbox_pts, R, Z, mygs.r
+    return bbox_pts, R, Z, mygs.r.copy()
 
 
 def get_inside_limiter_pts(meshfile_tokamaker, myOFT, stride=1, verbose=False):
