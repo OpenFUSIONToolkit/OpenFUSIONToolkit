@@ -100,7 +100,7 @@ jobs:
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        make -j2 install
+        make install
 
     - name: Package OFT
       shell: bash
@@ -237,7 +237,7 @@ jobs:
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        make -j2 install
+        make install
 
     - name: Package OFT
       shell: bash

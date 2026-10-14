@@ -225,7 +225,7 @@ jobs:
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/setup_env.sh
-        make -j2 install
+        make install
 
     - name: Test OFT
       shell: bash
