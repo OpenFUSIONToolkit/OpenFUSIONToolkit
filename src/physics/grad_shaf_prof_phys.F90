@@ -535,6 +535,7 @@ IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_
 !---Flux surface geometry for Jphi -> F*F' mapping at the LCFS (row 0) and nodes
 ALLOCATE(ravgs(0:self%npsi,3))
 CALL gs_ravgs(gseq, self%npsi+1, [0.d0, xpsi], ravgs)
+IF(gs_ravgs_failed(gseq, xpsi, ravgs, 'jphi_update'))RETURN
 !---Get pressure profile
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__)
@@ -693,43 +694,38 @@ END SUBROUTINE gs_flux_cumint
 !------------------------------------------------------------------------------
 !> Flux surface averages <R>, <1/R>, <1/R^2> on normalized psi nodes (0 at the LCFS, 1 at the axis)
 !!
-!! Cut-cell quadrature (@ref oft_gs_cutcell::gs_fsa_cutcell), tracing only surfaces it cannot
-!! close, or all when `torflux_qgeom_backend=1` (testing). The axis takes its exact limit; nodes
-!! at or outside the LCFS are traced on it if limited, or `psi_pad` inside it if diverted. Nodes
-!! that fail both methods take the averages of the nearest node that did not.
+!! The axis takes its exact limit (the O-point values). Other nodes use cut-cell quadrature
+!! (@ref oft_gs_cutcell::gs_fsa_cutcell), tracing only surfaces it cannot close (all when
+!! `torflux_qgeom_backend=1`, testing). The LCFS of a diverted plasma is evaluated `psi_pad` inside it
+!! (q is singular on it, and the averages approach their X-point limits only logarithmically); a limited
+!! LCFS is traced on it, and retried `psi_pad` inside if that fails. Nodes that fail both methods take
+!! the averages of the nearest node that did not; non-finite nodes are skipped (see @ref gs_ravgs_failed).
 !------------------------------------------------------------------------------
 SUBROUTINE gs_ravgs(gseq, n, psi_vals, ravgs)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: n !< Number of nodes
 REAL(r8), INTENT(in) :: psi_vals(n) !< Node locations
 REAL(r8), INTENT(out) :: ravgs(n,3) !< <R>, <1/R>, <1/R^2> at each node
-REAL(r8), PARAMETER :: psi_pad = 1.d-3
-REAL(r8) :: psi_q(n), qf(n), avgs(n,4)
-REAL(r8), ALLOCATABLE :: rtr(:,:), qtr(:)
-LOGICAL :: ok(n)
+REAL(r8), PARAMETER :: psi_pad = 1.d-3 !< Offset inside a diverted LCFS, or a limited one whose trace failed
+REAL(r8) :: psi_q(n)
+LOGICAL :: ok(n), retry(n)
 INTEGER(i4) :: k, m
-psi_q = MERGE(psi_vals, MERGE(psi_pad, 0.d0, gseq%diverted), psi_vals>0.d0)
+psi_q = psi_vals
+IF(gseq%diverted)WHERE(psi_q <= 0.d0)psi_q = psi_pad
 ravgs = 0.d0
-ok = .FALSE.
-IF(torflux_qgeom_backend/=1)THEN
-  CALL gs_fsa_cutcell(gseq, n, psi_q, qf, avgs, ok)
-  ravgs = avgs(:,1:3)
-END IF
-WHERE(psi_q>=1.d0)
+!---Axis: exact limit
+WHERE(psi_q >= 1.d0)
   ravgs(:,1) = gseq%o_point(1)
   ravgs(:,2) = 1.d0/gseq%o_point(1)
   ravgs(:,3) = 1.d0/gseq%o_point(1)**2
-  ok = .TRUE.
 END WHERE
-m = COUNT(.NOT.ok)
-IF(m==0)RETURN
-ALLOCATE(rtr(m,4), qtr(m))
-rtr = 0.d0
-CALL gs_get_qprof(gseq, m, PACK(psi_q, .NOT.ok), qtr, ravgs=rtr)
-DO k=1,3
-  ravgs(:,k) = UNPACK(rtr(:,k), .NOT.ok, ravgs(:,k))
-END DO
-DEALLOCATE(rtr, qtr)
+!---Other finite nodes; a limited LCFS whose trace failed is retried psi_pad inside
+CALL eval_surfs((psi_q < 1.d0).AND.(ABS(psi_q) < HUGE(1.d0)))
+retry = (psi_q <= 0.d0).AND.(.NOT.(ravgs(:,2) > 0.d0))
+IF(ANY(retry))THEN
+  WHERE(retry)psi_q = psi_pad
+  CALL eval_surfs(retry)
+END IF
 !---Nodes that failed both methods (zero averages) take the averages of the nearest node that did not
 ok = (ravgs(:,2) > 0.d0)
 IF(ALL(ok).OR.(.NOT.ANY(ok)))RETURN ! None: no equilibrium yet, the caller sees zeros
@@ -748,7 +744,50 @@ DO k=1,n
     END IF
   END DO
 END DO
+CONTAINS
+!---Cut-cell averages on the nodes in todo, then the tracer for those it cannot close
+SUBROUTINE eval_surfs(todo)
+LOGICAL, INTENT(in) :: todo(n)
+INTEGER(i4) :: nt, nf, j
+REAL(r8), ALLOCATABLE :: pq(:), qf(:), avgs(:,:), rtr(:,:), qtr(:)
+LOGICAL, ALLOCATABLE :: done(:)
+nt = COUNT(todo)
+IF(nt==0)RETURN
+ALLOCATE(pq(nt), qf(nt), avgs(nt,4), done(nt))
+pq = PACK(psi_q, todo)
+avgs = 0.d0
+done = .FALSE.
+IF(torflux_qgeom_backend/=1)CALL gs_fsa_cutcell(gseq, nt, pq, qf, avgs, done)
+nf = COUNT(.NOT.done)
+IF(nf>0)THEN
+  ALLOCATE(rtr(nf,4), qtr(nf))
+  rtr = 0.d0
+  CALL gs_get_qprof(gseq, nf, PACK(pq, .NOT.done), qtr, ravgs=rtr)
+  DO j=1,3
+    avgs(:,j) = UNPACK(rtr(:,j), .NOT.done, avgs(:,j))
+  END DO
+END IF
+DO j=1,3
+  ravgs(:,j) = UNPACK(avgs(:,j), todo, ravgs(:,j))
+END DO
+END SUBROUTINE eval_surfs
 END SUBROUTINE gs_ravgs
+!------------------------------------------------------------------------------
+!> True, with a warning and `gseq%prof_failed` set (the solve ends with error -10), if a node is
+!! non-finite or its flux-surface averages from @ref gs_ravgs are not positive and finite
+!------------------------------------------------------------------------------
+FUNCTION gs_ravgs_failed(gseq, psi_vals, ravgs, caller) RESULT(failed)
+CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+REAL(r8), INTENT(in) :: psi_vals(:) !< Node locations
+REAL(r8), INTENT(in) :: ravgs(:,:) !< <R>, <1/R>, <1/R^2> at each node
+CHARACTER(LEN=*), INTENT(in) :: caller !< Calling routine, for the warning
+LOGICAL :: failed
+failed = .NOT.(ALL(ABS(psi_vals) < HUGE(1.d0)).AND.ALL((ravgs(:,2) > 0.d0).AND.(ravgs(:,2) < HUGE(1.d0))))
+IF(failed)THEN
+  CALL oft_warn(caller//': flux-surface evaluation failed on a profile node')
+  gseq%prof_failed = .TRUE.
+END IF
+END FUNCTION gs_ravgs_failed
 !------------------------------------------------------------------------------
 !> Current per unit cross-section area, dI/dA = <j_phi/R>/<1/R>, from TokaMaker jphi = <j_phi> on the psi_N grid psi_vals
 !! (OFT convention), eq. A5 of doc_tokamaker_current_conventions; gs_flux_int of the result is
