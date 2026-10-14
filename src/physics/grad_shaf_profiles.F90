@@ -2130,16 +2130,18 @@ CLASS(torflux_map), INTENT(in) :: self
 REAL(r8), INTENT(in) :: phihat !< Normalized toroidal flux
 REAL(r8) :: psihat
 REAL(r8) :: a,b,phi,jac
-INTEGER(i4) :: lo,i
+INTEGER(i4) :: lo,i,k
 IF(self%ns<2)THEN
   psihat=phihat
   RETURN
 END IF
-IF(phihat<=self%phihat(1))THEN
-  psihat=self%psis(1)+(phihat-self%phihat(1))/self%jac(1)
-  RETURN
-ELSE IF(phihat>=self%phihat(self%ns))THEN
-  psihat=self%psis(self%ns)+(phihat-self%phihat(self%ns))/self%jac(self%ns)
+!---At or beyond an end: that end, extrapolated linearly only with a usable end slope
+k=0
+IF(phihat<=self%phihat(1))k=1
+IF(phihat>=self%phihat(self%ns))k=self%ns
+IF(k>0)THEN
+  psihat=self%psis(k)
+  IF((self%jac(k)>0.d0).AND.(self%jac(k)<HUGE(1.d0)))psihat=psihat+(phihat-self%phihat(k))/self%jac(k)
   RETURN
 END IF
 lo=tmap_find(self%phihat,self%ns,phihat)
@@ -2448,8 +2450,8 @@ DO ip=1,npass
       cum(i+1)=cum(i)+h*(r(i)+r(i+1))/2.d0+h**2*(dq(i)-dq(i+1))/12.d0 &
         +b*(xlogx(psis(i+1))-xlogx(psis(i)))
     END DO
-    IF(.NOT.((cum(n)>0.d0).AND.(cum(n)<HUGE(cum(n))).AND.ALL(q(2:n)>=0.d0)))THEN
-      CALL map_failed('non-finite q')
+    IF(.NOT.((cum(n)>0.d0).AND.(cum(n)<HUGE(cum(n))).AND.ALL(q(2:n)>0.d0)))THEN
+      CALL map_failed('non-finite or non-positive q')
       RETURN
     END IF
     !---Store map
