@@ -18,7 +18,7 @@ USE oft_base
 USE oft_gs, ONLY: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
  gs_itor_nl, qprof_trace_tol, gs_fpol
 USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_set_bounds
-USE oft_gs_cutcell, ONLY: gs_sauter_cutcell, gs_fsa_cutcell
+USE oft_gs_contour, ONLY: gs_sauter_contour, gs_fsa_contour
 USE oft_lag_basis, ONLY: oft_blag_geval
 USE oft_mesh_type, ONLY: bmesh_findcell
 USE oft_blag_operators, ONLY: oft_lag_brinterp
@@ -335,10 +335,19 @@ CLASS(gs_equil), INTENT(inout) :: gseq !< Equilibrium, still holding the profile
 INTEGER(i4) :: i,ierr
 REAL(r8) :: b1,b2
 REAL(r8), ALLOCATABLE :: xpsi(:)
+LOGICAL :: mapped
 IF(.NOT.ASSOCIATED(gseq%I))RETURN
 b1=gseq%plasma_bounds(1); b2=gseq%plasma_bounds(2)
 IF((b1<-1.d98).OR.(b2==b1))RETURN ! No plasma yet
-CALL jphi_psi_nodes(self,xpsi) ! Knots in psi (mapped from toroidal flux if on it)
+CALL jphi_psi_nodes(self,xpsi,mapped) ! Knots in psi (mapped from toroidal flux if on it)
+IF(.NOT.mapped)THEN ! No map yet (eg. replacing a profile on psi_N): build it for the current equilibrium
+  CALL gseq%torflux%update(gseq)
+  CALL jphi_psi_nodes(self,xpsi,mapped)
+END IF
+IF(.NOT.mapped)THEN
+  CALL oft_warn("No toroidal flux map, F*F' not carried to the new profile")
+  RETURN
+END IF
 self%y0=gseq%ffp_scale*gseq%I%fp(b1)
 DO i=1,self%npsi
   self%yp(i)=gseq%ffp_scale*gseq%I%fp(xpsi(i)*(b2-b1)+b1)
@@ -812,7 +821,7 @@ END SUBROUTINE stall_check
 !!
 !! q_base = q_eq*I_eq/I_base (q*I is geometric) on rho = sqrt(Phi_N); @ref saw_reset_1d resets it on
 !! nodes with enough enclosed area, interpolated in rho; dI/dA maps back to jphi via eval_dIdA.
-!! Enclosed area and currents are 1-D integrals over the cut-cell \f$ dA/d\hat{\psi} \f$: the reset
+!! Enclosed area and currents are 1-D integrals over the contour \f$ dA/d\hat{\psi} \f$: the reset
 !! differentiates them, and binning mesh quadrature points by psi (@ref gs_flux_cumint) leaves
 !! percent-level noise in each node interval.
 !---------------------------------------------------------------------------------
@@ -838,7 +847,7 @@ ALLOCATE(q_eq(n), c1(n), rho(n), qb(n), Ib(n), Ie(n), Ar(n), ap(n), qn(n), djr(n
 !---q and dA/dpsi_N = oint dl/|grad psi_N| = <1/R> dV/dpsi_N / 2pi on the nodes, axis-first (index 1 =
 !   innermost node). Nodes without a closed surface (the LCFS, the axis, a failed surface) take the
 !   values of the next node inward (the axis: outward).
-CALL gs_fsa_cutcell(gseq, n, xn, g, fs, ok)
+CALL gs_fsa_contour(gseq, n, xn, g, fs, ok)
 DO i = 1, n
   k = n + 1 - i
   q_eq(i) = 0.0_r8; ap(i) = 0.0_r8
@@ -867,7 +876,7 @@ DO i = 2, n
   Ib(i) = Ib(i-1) + h*(ap(i)*jt_base(k) + ap(i-1)*jt_base(k+1))
   Ie(i) = Ie(i-1) + h*(ap(i)*jt_eq(k) + ap(i-1)*jt_eq(k+1))
 END DO
-!---Nodes within psi_ax of the axis (cut-cell q/F is unreliable on surfaces much smaller than a
+!---Nodes within psi_ax of the axis (contour q/F is unreliable on surfaces much smaller than a
 !   cell) take the quadratic extrapolation in psi of the first three nodes outside it
 nk = COUNT(1.0_r8 - xn > psi_ax)
 IF(nk >= 3 .AND. nk < n)THEN
@@ -1328,8 +1337,8 @@ END SUBROUTINE sauter_apply
 !------------------------------------------------------------------------------
 !> Compute factors required for Sauter bootstrap formula
 !!
-!! Surface averages and extrema come from the cut-cell quadrature
-!! (@ref oft_gs_cutcell::gs_sauter_cutcell, two passes as the trapped-particle sum
+!! Surface averages and extrema come from the contour quadrature
+!! (@ref oft_gs_contour::gs_sauter_contour, two passes as the trapped-particle sum
 !! needs Bmax). Surfaces it cannot close, or all surfaces when
 !! `torflux_qgeom_backend=1` (testing), are traced instead.
 !!
@@ -1413,13 +1422,13 @@ DO j=1,nr
   i2tmp(j)       = 1.d0/raxis**2
   rgtmp(j)       = raxis
 END DO
-!---Cut-cell averages and extrema
+!---Contour averages and extrema
 IF(torflux_qgeom_backend/=1)THEN
   ALLOCATE(acc(8,nr),ext(3,nr),bref(nr))
   bref=-1.d0
-  CALL gs_sauter_cutcell(gseq,nr,psi_q,fpol,bref,acc,ext,ok=done)
+  CALL gs_sauter_contour(gseq,nr,psi_q,fpol,bref,acc,ext,ok=done)
   bref=ext(1,:)
-  CALL gs_sauter_cutcell(gseq,nr,psi_q,fpol,bref,acc,ext,ok=done)
+  CALL gs_sauter_contour(gseq,nr,psi_q,fpol,bref,acc,ext,ok=done)
   DO j=1,nr
     IF((.NOT.done(j)).OR.(psi_q(j)==1.d0))CYCLE
     r_avgs(j,1)=acc(2,j)/acc(1,j)
@@ -1441,7 +1450,7 @@ IF(torflux_qgeom_backend/=1)THEN
   done=done.OR.(psi_q == 1.d0)
   DEALLOCATE(acc,ext,bref)
   IF(oft_debug_print(1).AND.(.NOT.ALL(done)))WRITE(*,'(2A,I0,A)')oft_indent, &
-    'sauter_fc: tracing ',COUNT(.NOT.done),' surfaces not closed by the cut-cell pass'
+    'sauter_fc: tracing ',COUNT(.NOT.done),' surfaces not closed by the contour pass'
 END IF
 !---Start points of the remaining surfaces (each from the previous one)
 DO j=1,nr

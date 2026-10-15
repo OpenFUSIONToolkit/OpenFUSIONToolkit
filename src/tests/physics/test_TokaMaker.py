@@ -2154,7 +2154,7 @@ def _check_saw_reset_1d():
     assert norms[1] > 0.5 and norms[2] < 0.05
 
 # -----------------------------------------------------------------------
-# Test: profiles on normalized toroidal flux (coord='phi_n'/'phi_n_relabel')
+# Test: profiles on normalized toroidal flux (coord='phi_n')
 #
 # Each case solves ITER with psi_N profiles, maps them onto Phi_N with the
 # converged q, re-solves with the toroidal-flux profiles and compares.
@@ -2249,22 +2249,21 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
         init = lambda: mygs.init_psi(6.3, 0.5, 2.0, 1.4, 0.0)
         pp = create_power_flux_fun(40,4.0,1.0)
         if test_type == 'ffp':
-            # FF' and p' as linterp, both toroidal modes, then copy and save/load
+            # FF' and p' as linterp (derivatives w.r.t. Phi_N), then copy and save/load
             ffp = create_power_flux_fun(40,1.5,2.0)
             mygs.set_profiles(ffp_prof=ffp,pp_prof=pp)
             init()
             _, its = mygs.solve(return_its=True)
             ref = _torflux_ref(mygs,its)
             pmap = _torflux_phi_map(mygs)
-            for coord in ('phi_n', 'phi_n_relabel'):
-                profs = {}
-                for key, prof in (('ffp', ffp), ('pp', pp)):
-                    y = prof['y']/np.interp(prof['x'],pmap[0],pmap[2]) if coord == 'phi_n' else prof['y']
-                    profs[key] = {'type': 'linterp', 'x': _torflux_to_phi(prof['x'],pmap), 'y': y, 'coord': coord}
-                mygs.set_profiles(ffp_prof=profs['ffp'],pp_prof=profs['pp'])
-                init()
-                _, its = mygs.solve(return_its=True)
-                results[coord] = _torflux_compare(mygs,ref,its)
+            profs = {}
+            for key, prof in (('ffp', ffp), ('pp', pp)):
+                y = prof['y']/np.interp(prof['x'],pmap[0],pmap[2])
+                profs[key] = {'type': 'linterp', 'x': _torflux_to_phi(prof['x'],pmap), 'y': y, 'coord': 'phi_n'}
+            mygs.set_profiles(ffp_prof=profs['ffp'],pp_prof=profs['pp'])
+            init()
+            _, its = mygs.solve(return_its=True)
+            results['phi_n'] = _torflux_compare(mygs,ref,its)
             results['psi_its'] = ref['its']
             # Solver map against q: dPhi_N/dpsi_N = q/Q and Phi_N increments = int q dpsi_N/Q
             from scipy.integrate import cumulative_trapezoid
@@ -2288,7 +2287,7 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
             prof_l = np.array(mygs.get_profiles(npsi=60)[1:])
             results['load_err'] = np.max(np.abs(prof_l-prof0))/np.max(np.abs(prof0))
         elif test_type == 'jphi':
-            # jphi-linterp current profile (relabel only)
+            # jphi-linterp current profile (values on Phi_N)
             x = np.linspace(0.0,1.0,65)
             jphi = {'type': 'jphi-linterp', 'x': x, 'y': create_power_flux_fun(65,2.25,2.5)['y']}
             mygs.set_profiles(ffp_prof=jphi,pp_prof=pp)
@@ -2296,16 +2295,18 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
             _, its = mygs.solve(return_its=True)
             ref = _torflux_ref(mygs,its)
             pmap = _torflux_phi_map(mygs)
-            mygs.set_profiles(ffp_prof=dict(jphi,x=_torflux_to_phi(x,pmap),coord='phi_n_relabel'),pp_prof=pp)
+            # A bootstrap profile on Phi_N replacing one on psi_N keeps F*F', also across save/load
+            _, f, fp, _, _ = mygs.get_profiles(npsi=60)
+            mygs.set_profiles(ffp_prof=dict(jphi,type='jphi-split-bootstrap',coord='phi_n'))
+            mygs.copy_eq().save_TokaMaker('torflux_carry.h5')
+            mygs.replace_eq(source_file='torflux_carry.h5')
+            _, f1, fp1, _, _ = mygs.get_profiles(npsi=60)
+            results['carry_err'] = np.max(np.abs(f1*fp1-f*fp))/np.max(np.abs(f*fp))
+            mygs.set_profiles(ffp_prof=dict(jphi,x=_torflux_to_phi(x,pmap),coord='phi_n'),pp_prof=pp)
             init()
             _, its = mygs.solve(return_its=True)
-            results['phi_n_relabel'] = _torflux_compare(mygs,ref,its)
+            results['phi_n'] = _torflux_compare(mygs,ref,its)
             results['psi_its'] = ref['its']
-            try:
-                mygs.set_profiles(ffp_prof=dict(jphi,x=_torflux_to_phi(x,pmap),coord='phi_n'),pp_prof=pp)
-                results['phi_n_rejected'] = False
-            except ValueError:
-                results['phi_n_rejected'] = True
         elif test_type == 'bootstrap':
             # solve_bootstrap with every profile (jphi, kinetics, pressure, jphi_fixed, p_fixed) on Phi_N
             n = 257
@@ -2337,7 +2338,7 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
             j_ref = np.interp(res_phi['psi_n'],res_psi['psi_n'],res_psi['jphi_bs'])
             mask = (res_phi['psi_n'] > 0.05) & (res_phi['psi_n'] < 0.9)
             results['jbs_err'] = np.max(np.abs(res_phi['jphi_bs'][mask]-j_ref[mask]))/np.max(np.abs(j_ref))
-            # jphi_fixed relabelled onto Phi_N nodes returns the input values
+            # jphi_fixed on Phi_N nodes returns the input values
             results['jfix_err'] = np.max(np.abs(res_phi['jphi_fixed']-jfix))/np.max(jfix)
             # Node psi_N positions agree with the solver map
             psi_nodes, _ = mygs.get_torflux_map(x_phi,inverse=True)
@@ -2348,7 +2349,7 @@ def run_ITER_torflux_case(fe_order, test_type, mp_q):
             psi_nodes, _ = mygs.get_torflux_map(x_phi,inverse=True)
             results['swb_node_err'] = np.max(np.abs(res_swb['psi_n']-psi_nodes))
             results['swb_jfix_err'] = np.max(np.abs(res_swb['jphi_fixed']-jfix))/np.max(jfix)
-            # jphi_saw (saw off) is relabelled like jphi_fixed: 0.4 of jfix moved to it changes nothing
+            # jphi_saw (saw off) on Phi_N, like jphi_fixed: 0.4 of jfix moved to it changes nothing
             res_saw = solve_with_bootstrap(mygs,ne,Te,ne,Te,1.5,13.0E6,inductive_jphi=jind,x=x_phi,coord='phi_n',
                                            jphi_fixed=0.6*jfix,jphi_saw=0.4*jfix,p_fixed=pfix)
             results['swb_jsaw_err'] = np.max(np.abs(res_saw["jphi_saw"]-0.4*jfix))/np.max(jfix)
@@ -2383,7 +2384,6 @@ def test_ITER_torflux_ffp(order):
     results = mp_run(run_ITER_torflux_case,(order,'ffp'),timeout=120)
     assert results is not None
     _torflux_check(results['phi_n'],4.E-3,4.E-3,results['psi_its'])
-    _torflux_check(results['phi_n_relabel'],2.E-3,3.E-3,results['psi_its'])
     assert results['map_err'] < 1.E-4
     assert results['jac_err'] < 1.E-3
     assert results['inv_err'] < 1.E-10
@@ -2396,8 +2396,8 @@ def test_ITER_torflux_ffp(order):
 def test_ITER_torflux_jphi(order):
     results = mp_run(run_ITER_torflux_case,(order,'jphi'),timeout=120)
     assert results is not None
-    _torflux_check(results['phi_n_relabel'],1.E-3,2.E-3,results['psi_its'])
-    assert results['phi_n_rejected']
+    _torflux_check(results['phi_n'],1.E-3,2.E-3,results['psi_its'])
+    assert results['carry_err'] < 1.E-3
 
 
 @pytest.mark.slow

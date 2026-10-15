@@ -926,16 +926,16 @@ def solve_with_bootstrap(mygs,
                          parameterize_jbs = False,
                          use_OMFIT_sauter = False,
                          verbose = True,
-                         x = None,
+                         psi_N = None,
                          use_sauter_eps = True,
                          diagnose_bs = False,
                          use_python_solve = False,
-                         coord = None,
-                         psi_N = None,
                          jphi_fixed = None,
                          p_fixed = None,
-                         jphi_saw = None,
                          F0 = None,
+                         x = None,
+                         coord = None,
+                         jphi_saw = None,
                          **kwargs):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
@@ -956,11 +956,6 @@ def solve_with_bootstrap(mygs,
     @param parameterize_jbs If True, use parameterized edge spike; Python solver only (was `parameterize_jBS`, deprecated)
     @param use_OMFIT_sauter If True, use OMFIT Sauter model
     @param verbose Print iteration progress (Python solver only)
-    @param x Normalized radial grid the profiles are sampled on, in `coord` (strictly increasing,
-    in [0,1]); if `None`, profiles are assumed evenly sampled on [0,1]
-    @param coord Coordinate of `x`: `'psi_n'` (default, \f$\hat{\psi}\f$) or `'phi_n'`
-    (\f$\hat{\Phi}\f$, internal solver only; see `TokaMaker.solve_bootstrap`). `None` keeps the
-    internal solver's previous/loaded value (`'psi_n'` if none)
     @param psi_N Deprecated alias of `x`
     @param use_sauter_eps If True (default), use the geometric inverse aspect ratio
       \f$\varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min})\f$ of each surface (`TokaMaker.sauter_fc`).
@@ -974,6 +969,11 @@ def solve_with_bootstrap(mygs,
     @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0), passed to the solver (default: keep the current value)
     @param p_fixed Additional pressure \f$P_{fixed}\f$ [Pa] on `x` (array or profile dict, e.g. fast-ion pressure),
       added to \f$e_C(n_e T_e + n_i T_i)\f$ for the GS pressure but excluded from the bootstrap current (internal Fortran solver only)
+    @param x Normalized radial grid the profiles are sampled on, in `coord` (strictly increasing,
+    in [0,1]); if `None`, profiles are assumed evenly sampled on [0,1]
+    @param coord Coordinate of `x`: `'psi_n'` (default, \f$\hat{\psi}\f$) or `'phi_n'`
+    (\f$\hat{\Phi}\f$, internal solver only; see `TokaMaker.solve_bootstrap`). `None` keeps the
+    internal solver's previous/loaded value (`'psi_n'` if none)
     @param jphi_saw Input sawtooth toroidal current density [A/m$^2$] (array or profile dict), added without rescaling;
       with `saw_q_s` > 0 the sawtooth reset current is added to it (internal Fortran solver only)
     @param kwargs Further TokaMaker.solve_bootstrap options (internal Fortran solver only)
@@ -1013,7 +1013,7 @@ def solve_with_bootstrap(mygs,
                 UserWarning, stacklevel=2,
             )
         if inductive_jphi is None:
-            raise ValueError("inductive_jphi must be provided for method='internal'")
+            raise ValueError("inductive_jphi must be provided with use_python_solve=False")
         if parameterize_jbs:
             raise ValueError("parameterize_jbs is not supported by the internal solver (use_python_solve=True)")
         _ne   = ne if isinstance(ne, dict) else _default_profile(ne, 'ne', x=x)

@@ -5,19 +5,19 @@
 !---------------------------------------------------------------------------------
 !> @file grad_shaf_qprof.F90
 !
-!> Cut-cell evaluation of @ref oft_gs::gs_get_qprof outputs (submodule, so that
-!! @ref oft_gs can use @ref oft_gs_cutcell, which itself uses @ref oft_gs)
+!> Contour evaluation of @ref oft_gs::gs_get_qprof outputs (submodule, so that
+!! @ref oft_gs can use @ref oft_gs_contour, which itself uses @ref oft_gs)
 !!
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 SUBMODULE (oft_gs) oft_gs_qprof
-USE oft_gs_cutcell, ONLY: gs_fsa_cutcell
+USE oft_gs_contour, ONLY: gs_fsa_contour
 IMPLICIT NONE
 CONTAINS
 !------------------------------------------------------------------------------
-!> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the cut-cell quadrature
+!> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the contour quadrature
 !------------------------------------------------------------------------------
-MODULE PROCEDURE gs_qprof_cutcell
+MODULE PROCEDURE gs_qprof_contour
 REAL(r8) :: qf(nr),avgs(nr,4),fpol(nr),psi_surf
 REAL(r8), ALLOCATABLE :: fsa(:,:),shp(:,:)
 INTEGER(i4) :: j
@@ -32,7 +32,7 @@ END DO
 !---Unallocated outputs are passed as absent (F2008)
 IF(PRESENT(fsa_avgs))ALLOCATE(fsa(nr,4))
 IF(PRESENT(shape_geo))ALLOCATE(shp(nr,6))
-CALL gs_fsa_cutcell(gseq,nr,psi_q,qf,avgs,done,fpol,fsa,shp)
+CALL gs_fsa_contour(gseq,nr,psi_q,qf,avgs,done,fpol,fsa,shp)
 DO j=1,nr
   IF(.NOT.done(j))CYCLE
   prof(j)=fpol(j)*qf(j)
@@ -40,5 +40,5 @@ DO j=1,nr
   IF(PRESENT(fsa_avgs))fsa_avgs(j,:)=fsa(j,:)
   IF(PRESENT(shape_geo))shape_geo(j,:)=shp(j,:)
 END DO
-END PROCEDURE gs_qprof_cutcell
+END PROCEDURE gs_qprof_contour
 END SUBMODULE oft_gs_qprof
