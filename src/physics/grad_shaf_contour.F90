@@ -3,9 +3,9 @@
 !
 ! SPDX-License-Identifier: LGPL-3.0-only
 !---------------------------------------------------------------------------------
-!> @file grad_shaf_cutcell.F90
+!> @file grad_shaf_contour.F90
 !
-!> Mesh-based (cut-cell) flux-surface quadrature: \f$ q/F \f$, flux-surface averages, surface
+!> Mesh-based contour flux-surface quadrature: \f$ q/F \f$, flux-surface averages, surface
 !! extrema and surface points at given polar angles, exact on the FE level sets
 !!
 !! Cells are split (Bernstein form) until \f$ \hat{\psi} \f$ is monotone along a direction \f$ d \f$;
@@ -14,7 +14,7 @@
 !!
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
-MODULE oft_gs_cutcell
+MODULE oft_gs_contour
 USE oft_base
 USE oft_mesh_type, ONLY: cell_is_curved
 USE oft_lag_basis, ONLY: oft_blag_npos, oft_scalar_bfem
@@ -54,17 +54,17 @@ REAL(r8), PARAMETER :: wg5(5) = [0.236926885056189087514264d0,0.4786286704993664
 TYPE(oft_scalar_bfem), POINTER :: perm_rep => NULL()
 INTEGER(i8) :: perm_sum = -1
 INTEGER(i4), ALLOCATABLE :: perm(:,:)
-PUBLIC gs_qgeom_cutcell, gs_sauter_cutcell, gs_fsa_cutcell, gs_rays_cutcell
+PUBLIC gs_qgeom_contour, gs_sauter_contour, gs_fsa_contour, gs_rays_contour
 CONTAINS
 !------------------------------------------------------------------------------
 !> Geometric factor \f$ g = q/F = \frac{1}{2\pi} \oint \frac{dl}{R |\nabla \psi|} \f$ on flux surfaces
 !!
 !! Same contract and units as @ref oft_gs::gs_get_qprof with `geom_only`. Only arcs inside
-!! the plasma mask (@ref oft_gs::gs_test_bounds) contribute; surfaces whose winding about the
-!! O-point is not one return `g=0`. Summation order is fixed, so results do not depend on
+!! the plasma mask (@ref oft_gs::gs_test_bounds) contribute; surfaces outside (0,1) or whose winding
+!! about the O-point is not one return `g=-1.d99`. Summation order is fixed, so results do not depend on
 !! the thread count.
 !------------------------------------------------------------------------------
-SUBROUTINE gs_qgeom_cutcell(gseq,nr,psi_q,g)
+SUBROUTINE gs_qgeom_contour(gseq,nr,psi_q,g)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: nr !< Number of surfaces
 REAL(r8), INTENT(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
@@ -73,24 +73,27 @@ REAL(r8) :: wind(nr),dpsi
 INTEGER(i4) :: i
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
 CALL geom_sums(gseq,nr,psi_q,g,wind,dpsi)
-IF(dpsi==0.d0)RETURN
+IF(dpsi==0.d0)THEN
+  g=-1.d99
+  RETURN
+END IF
 g=g/(2.d0*pi*ABS(dpsi))
 DO i=1,nr
   IF((psi_q(i)<=0.d0).OR.(psi_q(i)>=1.d0))THEN
-    g(i)=0.d0
+    g(i)=-1.d99
   ELSE IF(ABS(wind(i)-1.d0)>wind_tol)THEN
-    WRITE(error_str,'(A,F10.6,A,ES11.3)')'gs_qgeom_cutcell: open or missing surface at psi = ', &
+    WRITE(error_str,'(A,F10.6,A,ES11.3)')'gs_qgeom_contour: open or missing surface at psi = ', &
       1.d0-psi_q(i),', winding = ',wind(i)
     CALL oft_warn(error_str)
-    g(i)=0.d0
+    g(i)=-1.d99
   END IF
 END DO
-END SUBROUTINE gs_qgeom_cutcell
+END SUBROUTINE gs_qgeom_contour
 !------------------------------------------------------------------------------
 !> \f$ q/F \f$, the flux-surface averages and the surface shape of @ref oft_gs::gs_get_qprof
 !! (`ravgs`, `fsa_avgs`, `shape_geo`) by the same quadrature
 !------------------------------------------------------------------------------
-SUBROUTINE gs_fsa_cutcell(gseq,nr,psi_q,qf,ravgs,ok,fpol,fsa,shp)
+SUBROUTINE gs_fsa_contour(gseq,nr,psi_q,qf,ravgs,ok,fpol,fsa,shp)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: nr !< Number of surfaces
 REAL(r8), INTENT(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
@@ -103,7 +106,7 @@ REAL(r8), OPTIONAL, INTENT(out) :: shp(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_
 REAL(r8) :: wind(nr),racc(3,nr),dpsi
 REAL(r8), ALLOCATABLE :: facc(:,:),xacc(:,:,:)
 INTEGER(i4) :: k
-IF(PRESENT(fsa).AND.(.NOT.PRESENT(fpol)))CALL oft_abort('"fsa" requires "fpol"','gs_fsa_cutcell',__FILE__)
+IF(PRESENT(fsa).AND.(.NOT.PRESENT(fpol)))CALL oft_abort('"fsa" requires "fpol"','gs_fsa_contour',__FILE__)
 !---Unallocated accumulators are passed as absent (F2008)
 IF(PRESENT(fsa))ALLOCATE(facc(5,nr))
 IF(PRESENT(shp))ALLOCATE(xacc(2,4,nr))
@@ -133,15 +136,15 @@ IF(PRESENT(shp))THEN
     shp(:,5)=xacc(2,3,:); shp(:,6)=xacc(2,4,:)
   END WHERE
 END IF
-END SUBROUTINE gs_fsa_cutcell
+END SUBROUTINE gs_fsa_contour
 !------------------------------------------------------------------------------
 !> Points of flux surfaces at uniform polar angle about the O-point, and \f$ q/F \f$ (and optionally
 !! the surface extrema) by the same quadrature
 !!
-!! Cut-cell counterpart of @ref tracing_2d::tracinginv_fs: `rz(:,k,i)` is surface `i` on the ray at angle
+!! Contour counterpart of @ref tracing_2d::tracinginv_fs: `rz(:,k,i)` is surface `i` on the ray at angle
 !! \f$ 2\pi(k-1)/n_\theta \f$ from +R; `ok(i)` false unless the surface is closed and star-shaped about the O-point.
 !------------------------------------------------------------------------------
-SUBROUTINE gs_rays_cutcell(gseq,nr,psi_q,nth,rz,qf,ok,xa)
+SUBROUTINE gs_rays_contour(gseq,nr,psi_q,nth,rz,qf,ok,xa)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: nr !< Number of surfaces
 REAL(r8), INTENT(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
@@ -166,7 +169,7 @@ ELSEWHERE
   qf=0.d0
 END WHERE
 DEALLOCATE(tacc)
-END SUBROUTINE gs_rays_cutcell
+END SUBROUTINE gs_rays_contour
 !------------------------------------------------------------------------------
 !> Fixed-order sums of \f$ \oint w/R \f$, winding and optionally \f$ \oint w\,[R, R^2, 1] \f$,
 !! \f$ w = dl/|\nabla \hat{\psi}| \f$; all zero with `dpsi=0` if there is no plasma
@@ -186,7 +189,7 @@ REAL(r8), OPTIONAL, INTENT(out) :: racc(3,nr) !< \f$ \oint w\,[R, R^2, 1] \f$
 REAL(r8), OPTIONAL, INTENT(in) :: fpol(nr) !< F on each surface (with `facc`)
 REAL(r8), OPTIONAL, INTENT(out) :: facc(5,nr) !< \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$
 REAL(r8), OPTIONAL, INTENT(out) :: xacc(2,4,nr) !< Extrema of \f$ [-R, R, -Z, Z] \f$ with the other coordinate (see @ref ext_add)
-REAL(r8), OPTIONAL, INTENT(out) :: tacc(:,0:,:) !< Ray points [3,0:nth,nr] at uniform polar angle (see @ref gs_rays_cutcell)
+REAL(r8), OPTIONAL, INTENT(out) :: tacc(:,0:,:) !< Ray points [3,0:nth,nr] at uniform polar angle (see @ref gs_rays_contour)
 TYPE(bern_tab) :: bt
 REAL(r8), POINTER :: vals(:)
 REAL(r8), ALLOCATABLE :: gblk(:,:),wblk(:,:),rblk(:,:,:),fblk(:,:,:),gloc(:),wloc(:),rloc(:,:),floc(:,:),xloc(:,:,:),tloc(:,:,:)
@@ -277,7 +280,7 @@ END SUBROUTINE geom_sums
 !! points and refined by a parabola on each arc; \f$ R_{max} \f$ and \f$ R_{min} \f$ are exact on the
 !! FE surface (@ref ext_add). Results do not depend on the thread count.
 !------------------------------------------------------------------------------
-SUBROUTINE gs_sauter_cutcell(gseq,nr,psi_q,fpol,bref,acc,ext,ok)
+SUBROUTINE gs_sauter_contour(gseq,nr,psi_q,fpol,bref,acc,ext,ok)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: nr !< Number of surfaces
 REAL(r8), INTENT(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
@@ -336,7 +339,7 @@ DO i=1,nr
   ok(i)=(psi_q(i)>0.d0).AND.(psi_q(i)<1.d0).AND.(ABS(wind(i)-1.d0)<=wind_tol)
 END DO
 DEALLOCATE(vals,ablk,wblk,wind)
-END SUBROUTINE gs_sauter_cutcell
+END SUBROUTINE gs_sauter_contour
 !------------------------------------------------------------------------------
 !> Add arc integrals and winding (and optionally geometric or Sauter sums) of all surfaces crossing `cell`
 !------------------------------------------------------------------------------
@@ -353,7 +356,7 @@ REAL(r8), INTENT(inout) :: gloc(nr) !< Accumulated \f$ \oint dl/(R|\nabla\hat{\p
 REAL(r8), INTENT(inout) :: wloc(nr) !< Accumulated winding number
 REAL(r8), OPTIONAL, INTENT(in) :: fpol(nr) !< F on each surface (Sauter sums only)
 REAL(r8), OPTIONAL, INTENT(in) :: bref(nr) !< \f$ B_{ref} \f$ on each surface (Sauter sums only)
-REAL(r8), OPTIONAL, INTENT(inout) :: aloc(:,:) !< Accumulated Sauter sums [8,nr] (see @ref gs_sauter_cutcell)
+REAL(r8), OPTIONAL, INTENT(inout) :: aloc(:,:) !< Accumulated Sauter sums [8,nr] (see @ref gs_sauter_contour)
 REAL(r8), OPTIONAL, INTENT(inout) :: eloc(:) !< Accumulated \f$ B_{max} \f$ [nr]
 REAL(r8), OPTIONAL, INTENT(inout) :: racc(:,:) !< Accumulated \f$ \oint w\,[R, R^2, 1] \f$ [3,nr] (see @ref geom_sums)
 REAL(r8), OPTIONAL, INTENT(inout) :: facc(:,:) !< Accumulated oint w R [1, |grad psi|, |grad psi|^2, B_p^2, 1/B^2] [5,nr] (needs `fpol`)
@@ -432,16 +435,17 @@ REAL(r8) :: t
 t=a; a=b; b=t
 END SUBROUTINE swap
 !---Does any surface lie in [a,b]?
-LOGICAL FUNCTION any_hit(a,b)
+FUNCTION any_hit(a,b) RESULT(hit)
 REAL(r8), INTENT(in) :: a,b
-any_hit=ANY((psi_q>=a).AND.(psi_q<=b))
+LOGICAL :: hit
+hit=ANY((psi_q>=a).AND.(psi_q<=b))
 END FUNCTION any_hit
 !---At most one crossing of s per sub-cell edge (Bernstein sign changes)
-LOGICAL FUNCTION edges_ok(s)
+FUNCTION edges_ok(s) RESULT(ok)
 REAL(r8), INTENT(in) :: s
 INTEGER(i4) :: kk,ka,kb,q,nch,al(3)
-LOGICAL :: up,upl
-edges_ok=.FALSE.
+LOGICAL :: up,upl,ok
+ok=.FALSE.
 DO kk=1,3
   ka=MOD(kk,3)+1; kb=MOD(kk+1,3)+1
   nch=0
@@ -453,7 +457,7 @@ DO kk=1,3
   END DO
   IF(nch>1)RETURN
 END DO
-edges_ok=.TRUE.
+ok=.TRUE.
 END FUNCTION edges_ok
 !---Integrate the arc of surface s in the current (simple) sub-cell
 SUBROUTINE tri_arc(s,gacc,wacc,iq)
@@ -1032,4 +1036,4 @@ CALL lapack_matinv(bt%nb,bt%mvinv,ierr)
 IF(ierr/=0)CALL oft_abort('Monomial table inversion failed','bern_build',__FILE__)
 bt%cbound=(MAXVAL(SUM(ABS(bt%vinv),DIM=2))-1.d0)/2.d0+1.d-12
 END SUBROUTINE bern_build
-END MODULE oft_gs_cutcell
+END MODULE oft_gs_contour

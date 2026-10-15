@@ -5,19 +5,19 @@
 !---------------------------------------------------------------------------------
 !> @file grad_shaf_qprof.F90
 !
-!> Cut-cell evaluation of @ref oft_gs::gs_get_qprof and @ref oft_gs::gs_trace_surf outputs (submodule, so that
-!! @ref oft_gs can use @ref oft_gs_cutcell, which itself uses @ref oft_gs)
+!> Contour evaluation of @ref oft_gs::gs_get_qprof and @ref oft_gs::gs_trace_surf outputs (submodule, so that
+!! @ref oft_gs can use @ref oft_gs_contour, which itself uses @ref oft_gs)
 !!
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 SUBMODULE (oft_gs) oft_gs_qprof
-USE oft_gs_cutcell, ONLY: gs_fsa_cutcell, gs_rays_cutcell
+USE oft_gs_contour, ONLY: gs_fsa_contour, gs_rays_contour
 IMPLICIT NONE
 CONTAINS
 !------------------------------------------------------------------------------
-!> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the cut-cell quadrature
+!> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the contour quadrature
 !------------------------------------------------------------------------------
-MODULE PROCEDURE gs_qprof_cutcell
+MODULE PROCEDURE gs_qprof_contour
 REAL(r8) :: qf(nr),avgs(nr,4),fpol(nr),psi_surf
 REAL(r8), ALLOCATABLE :: fsa(:,:),shp(:,:)
 INTEGER(i4) :: j
@@ -28,7 +28,7 @@ END DO
 !---Unallocated outputs are passed as absent (F2008)
 IF(PRESENT(fsa_avgs))ALLOCATE(fsa(nr,4))
 IF(PRESENT(shape_geo))ALLOCATE(shp(nr,6))
-CALL gs_fsa_cutcell(gseq,nr,psi_q,qf,avgs,done,fpol,fsa,shp)
+CALL gs_fsa_contour(gseq,nr,psi_q,qf,avgs,done,fpol,fsa,shp)
 DO j=1,nr
   IF(.NOT.done(j))CYCLE
   prof(j)=fpol(j)*qf(j)
@@ -36,7 +36,7 @@ DO j=1,nr
   IF(PRESENT(fsa_avgs))fsa_avgs(j,:)=fsa(j,:)
   IF(PRESENT(shape_geo))shape_geo(j,:)=shp(j,:)
 END DO
-END PROCEDURE gs_qprof_cutcell
+END PROCEDURE gs_qprof_contour
 !------------------------------------------------------------------------------
 !> LCFS outputs of @ref gs_get_qprof (`dl`, `rbounds`, `zbounds`) for surface `psi_q1`
 !!
@@ -45,14 +45,14 @@ END PROCEDURE gs_qprof_cutcell
 !! tracer path does), and the bounds are the extreme projected points. Otherwise the bounds are the
 !! exact extrema of the FE surface. `dl` is the length of the closed polygon through the points.
 !------------------------------------------------------------------------------
-MODULE PROCEDURE gs_lcfs_cutcell
+MODULE PROCEDURE gs_lcfs_contour
 INTEGER(i4), PARAMETER :: nlcfs=1000
 REAL(r8) :: rz(2,nlcfs,1),qf(1),xa(2,4,1),pt(2),dir(2)
 LOGICAL :: okr(1)
 INTEGER(i4) :: k
 TYPE(oft_lag_brinterp) :: psi_int
 ok=.FALSE.
-CALL gs_rays_cutcell(gseq,1,[psi_q1],nlcfs,rz,qf,okr,xa)
+CALL gs_rays_contour(gseq,1,[psi_q1],nlcfs,rz,qf,okr,xa)
 IF(.NOT.okr(1))RETURN
 IF(gseq%diverted.AND.(psi_q1<0.05d0))THEN
   psi_int%u=>gseq%psi
@@ -72,21 +72,21 @@ ELSE
 END IF
 dl=SUM(SQRT(SUM((rz(:,:,1)-CSHIFT(rz(:,:,1),1,DIM=2))**2,DIM=1)))
 ok=.TRUE.
-END PROCEDURE gs_lcfs_cutcell
+END PROCEDURE gs_lcfs_contour
 !------------------------------------------------------------------------------
 !> Points of one surface at uniform polar angle about the O-point, starting on the outboard
-!! side and running anticlockwise (as the tracer), from the cut-cell quadrature
+!! side and running anticlockwise (as the tracer), from the contour quadrature
 !------------------------------------------------------------------------------
-MODULE PROCEDURE gs_trace_surf_cutcell
+MODULE PROCEDURE gs_trace_surf_contour
 INTEGER(i4), PARAMETER :: nth=1000
 REAL(r8) :: rz(2,nth,1),qf(1)
 LOGICAL :: ok(1)
 npoints=-1
 NULLIFY(points)
-CALL gs_rays_cutcell(gseq,1,[psi_in],nth,rz,qf,ok)
+CALL gs_rays_contour(gseq,1,[psi_in],nth,rz,qf,ok)
 IF(.NOT.ok(1))RETURN
 ALLOCATE(points(2,nth))
 points=rz(:,:,1)
 npoints=nth
-END PROCEDURE gs_trace_surf_cutcell
+END PROCEDURE gs_trace_surf_contour
 END SUBMODULE oft_gs_qprof
