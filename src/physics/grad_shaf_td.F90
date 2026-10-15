@@ -34,7 +34,6 @@ USE oft_lag_basis, ONLY: oft_blag_geval, oft_blag_eval, oft_blag_npos, &
   oft_scalar_bfem
 USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE axi_green, ONLY: green
-USE oft_gs_profiles, ONLY: torflux_coord
 USE oft_gs, ONLY: gs_epsilon, flux_func, gs_factory, gs_equil, gs_update_bounds, &
     gs_test_bounds, gs_mat_create, compute_bcmat, set_bcmat, build_dels
 USE mhd_utils, ONLY: mu0
@@ -615,7 +614,7 @@ self%p_scale=self%gs_equil%p_scale
 !
 self%F=>self%gs_equil%I
 self%P=>self%gs_equil%P
-IF(torflux_coord(self%F)/=0.OR.torflux_coord(self%P)/=0)CALL oft_abort( &
+IF(self%F%coord()/=0.OR.self%P%coord()/=0)CALL oft_abort( &
   'Toroidal flux profiles not supported in time-dependent solves','setup_mfop',__FILE__)
 !
 ALLOCATE(self%eta_reg(self%gs_device%mesh%nreg))

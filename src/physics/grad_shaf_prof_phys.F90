@@ -22,7 +22,7 @@ USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, flux_func, gs_psi2r, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
   gs_get_qprof, gs_ani_press, gs_epsilon
-use oft_gs_cutcell, only: gs_fsa_cutcell
+use oft_gs_contour, only: gs_fsa_contour
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
   spline_func_copy, spline_func_delete, phi_flux_wrapper, torflux_qgeom_backend
@@ -576,18 +576,22 @@ end subroutine jphi_update
 !------------------------------------------------------------------------------
 !> Node locations in normalized poloidal flux (`x` mapped from toroidal flux if wrapped)
 !------------------------------------------------------------------------------
-SUBROUTINE jphi_psi_nodes(self,xpsi)
+SUBROUTINE jphi_psi_nodes(self,xpsi,mapped)
 CLASS(jphi_flux_func), INTENT(inout) :: self
 REAL(r8), ALLOCATABLE, INTENT(out) :: xpsi(:) !< Node locations in \f$ 1-\hat{\psi} \f$
+LOGICAL, OPTIONAL, INTENT(out) :: mapped !< `.FALSE.` if on toroidal flux and the map is not built
 INTEGER(i4) :: i
 ALLOCATE(xpsi(self%npsi))
 xpsi=self%x
+IF(PRESENT(mapped))mapped=.TRUE.
 IF(.NOT.ASSOCIATED(self%phi_wrapper))RETURN
 SELECT TYPE(wrap=>self%phi_wrapper)
   TYPE IS(phi_flux_wrapper)
-    IF(.NOT.wrap%relabel)CALL oft_abort('Jphi profiles on toroidal flux must use "phi_n_relabel"', &
+    IF(.NOT.wrap%val)CALL oft_abort('Jphi profiles on toroidal flux must use "phi_n_val"', &
       'jphi_psi_nodes',__FILE__)
-    IF(.NOT.ASSOCIATED(wrap%map))RETURN
+    IF(.NOT.ASSOCIATED(wrap%map))CALL oft_abort('Profile on toroidal flux not attached, call torflux_setup', &
+      'jphi_psi_nodes',__FILE__)
+    IF(PRESENT(mapped))mapped=(wrap%map%ns>=2)
     DO i=1,self%npsi
       xpsi(i)=wrap%map%inv(self%x(i))
     END DO
@@ -689,8 +693,8 @@ END SUBROUTINE gs_flux_cumint
 !------------------------------------------------------------------------------
 !> Flux surface averages <R>, <1/R>, <1/R^2> on normalized psi nodes (0 at the LCFS, 1 at the axis)
 !!
-!! The axis takes its exact limit (the O-point values). Other nodes use cut-cell quadrature
-!! (@ref oft_gs_cutcell::gs_fsa_cutcell), tracing only surfaces it cannot close (all when
+!! The axis takes its exact limit (the O-point values). Other nodes use contour quadrature
+!! (@ref oft_gs_contour::gs_fsa_contour), tracing only surfaces it cannot close (all when
 !! `torflux_qgeom_backend=1`, testing). The LCFS of a diverted plasma is evaluated `psi_pad` inside it
 !! (q is singular on it, and the averages approach their X-point limits only logarithmically); a limited
 !! LCFS is traced on it, and retried `psi_pad` inside if that fails. Nodes that fail both methods take
@@ -740,7 +744,7 @@ DO k=1,n
   END DO
 END DO
 CONTAINS
-!---Cut-cell averages on the nodes in todo, then the tracer for those it cannot close
+!---Contour averages on the nodes in todo, then the tracer for those it cannot close
 SUBROUTINE eval_surfs(todo)
 LOGICAL, INTENT(in) :: todo(n)
 INTEGER(i4) :: nt, nf, j
@@ -752,7 +756,7 @@ ALLOCATE(pq(nt), qf(nt), avgs(nt,4), done(nt))
 pq = PACK(psi_q, todo)
 avgs = 0.d0
 done = .FALSE.
-IF(torflux_qgeom_backend/=1)CALL gs_fsa_cutcell(gseq, nt, pq, qf, avgs, done)
+IF(torflux_qgeom_backend/=1)CALL gs_fsa_contour(gseq, nt, pq, qf, avgs, done)
 nf = COUNT(.NOT.done)
 IF(nf>0)THEN
   ALLOCATE(rtr(nf,4), qtr(nf))

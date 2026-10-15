@@ -28,7 +28,7 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend, gs_fpol
-USE oft_gs_cutcell, ONLY: gs_rays_cutcell
+USE oft_gs_contour, ONLY: gs_rays_contour
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
 USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func
@@ -93,7 +93,7 @@ INTEGER(4) :: io_unit
 ! LOGICAL :: zero_grad
 CHARACTER(LEN=32) :: profType,coordType
 CHARACTER(LEN=128) :: line
-INTEGER(4) :: ios
+INTEGER(i4) :: ios
 !---First line: "<type> [coord]"
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,'(A)')line
@@ -108,9 +108,9 @@ CALL F%load(io_unit)
 CLOSE(io_unit)
 SELECT CASE(TRIM(coordType))
   CASE("psi_n")
-  CASE("phi_n")
+  CASE("phi_n_deriv")
     CALL torflux_wrap(F,1)
-  CASE("phi_n_relabel")
+  CASE("phi_n_val")
     CALL torflux_wrap(F,2)
   CASE DEFAULT
     CALL oft_abort('Invalid profile coordinate "'//TRIM(coordType)//'"','gs_profile_load',__FILE__)
@@ -940,7 +940,7 @@ end subroutine gs_load_tokamaker
 !---------------------------------------------------------------------------
 !> Save an inverse-equilibrium (flux-coordinate) file, Fortran unformatted
 !!
-!! Surfaces at uniform polar angle about the O-point from the cut-cell quadrature (tracer as fallback).
+!! Surfaces at uniform polar angle about the O-point from the contour quadrature (tracer as fallback).
 !! Records (r8, or r4 if @p single_prec):
 !! 1. npsi, ntheta (i4)
 !! 2-5. psi, F, p, q on the npsi flux points
@@ -1043,13 +1043,13 @@ do j=2,npsi
   cout(j,3)=gseq%p_scale*gseq%P%f(cout(j,1))/mu0
   CALL ifile_derivs(gseq,cout(j,1),cout(j,2),cout(j,5:6))
 end do
-!---Surfaces at uniform polar angle from the cut-cell quadrature (exact on the FE surface);
+!---Surfaces at uniform polar angle from the contour quadrature (exact on the FE surface);
 !---the field-line tracer below is the deprecated method and the fallback
 cc_done=.FALSE.
 IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
   ALLOCATE(psi_q(npsi-1),rzc(2,ntheta-1,npsi-1),qf(npsi-1),ok(npsi-1))
   psi_q=(cout(2:npsi,1)-gseq%plasma_bounds(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
-  CALL gs_rays_cutcell(gseq,npsi-1,psi_q,ntheta-1,rzc,qf,ok)
+  CALL gs_rays_contour(gseq,npsi-1,psi_q,ntheta-1,rzc,qf,ok)
   IF(ALL(ok))THEN
     DO j=2,npsi
       rout(1:ntheta-1,j)=rzc(1,:,j-1); rout(ntheta,j)=rzc(1,1,j-1)
@@ -1351,13 +1351,13 @@ do j=1,nr
   pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0
   pprime(j)=gseq%p_scale*gseq%P%fp(psi_surf)/mu0
 end do
-!---q and the boundary contour (uniform polar angle) from the cut-cell quadrature (exact on the
+!---q and the boundary contour (uniform polar angle) from the contour quadrature (exact on the
 !---FE surface); the field-line tracer below is the deprecated method and the fallback
 cc_done=.FALSE.
 IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
   ALLOCATE(rzc(2,nr-1,nr-1),qf(nr-1),ok(nr-1))
   psi_q=(psi_q-gseq%plasma_bounds(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
-  CALL gs_rays_cutcell(gseq,nr-1,psi_q(2:nr),nr-1,rzc,qf,ok)
+  CALL gs_rays_contour(gseq,nr-1,psi_q(2:nr),nr-1,rzc,qf,ok)
   IF(ALL(ok))THEN
     qpsi(2:nr)=ftrace(2:nr)*qf
     rout(1:nr-1)=rzc(1,:,nr-1); rout(nr)=rzc(1,1,nr-1)
