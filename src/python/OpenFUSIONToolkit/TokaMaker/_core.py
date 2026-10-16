@@ -2340,6 +2340,9 @@ class TokaMaker():
             facecolors=jphi_plot[mask],
             cmap=cmap
         )
+        if window:
+            ax.set_xlim(window[0], window[1])
+            ax.set_ylim(window[2], window[3])
         fig.colorbar(heatmap, ax=ax)
         
 class TokaMaker_equilibrium():
