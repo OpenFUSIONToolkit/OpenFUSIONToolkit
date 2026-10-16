@@ -46,14 +46,37 @@ src/
 
 ## Build System
 
-OFT uses a two-stage build process:
+OFT uses a two-stage build process. The build tree is created by the user and its
+location is **not** fixed by the project — read "Locating the build tree" before
+running any build or test command.
+
+### Locating the build tree
+
+These instructions use `<build_dir>` for the configured build directory and
+`<config_dir>` for its parent (where `build_libs.py` was run, holding
+`config_cmake.sh`, the compiled external libraries, and `install_release/`).
+**Do not assume `builds/build_release`.**
+
+- **User environments** (the normal case): users commonly keep several build trees side by side, one per toolchain/parallelism combination, nested under `builds/`. For example `builds/GCC/MPI/build_release` and `builds/LLVM/build_release`, with external libraries and `config_cmake.sh` in `builds/GCC/MPI/` and `builds/LLVM/` respectively.
+- **CI/ephemeral environments**: a single flat tree — `<config_dir>` is `builds/` and `<build_dir>` is `builds/build_release`, installing to `builds/install_release`.
+
+To find candidate build trees, look for `config_cmake.sh`:
+
+```bash
+find builds -maxdepth 4 -name config_cmake.sh
+```
+
+If more than one is found, **ask the user which to use** rather than guessing — they
+may differ in compiler, MPI configuration, or build type, and some may be stale.
 
 ### Stage 1: Build external libraries
 
+Run from the directory that will become `<config_dir>`, with the user's Python
+environment active (see "Python environment"):
+
 ```bash
-mkdir builds && cd builds
-source ../setup_env.sh  # activates Python venv
-python ../src/utilities/build_libs.py \
+mkdir -p builds/GCC/MPI && cd builds/GCC/MPI   # one directory per configuration
+python <repo_root>/src/utilities/build_libs.py \
   --nthread=4 --build_umfpack=1 --build_superlu=1 \
   --build_arpack=1 --oft_build_tests=1 --build_mpich=1
 ```
@@ -63,11 +86,11 @@ This downloads and compiles dependencies (OpenBLAS, HDF5, METIS, etc.) and gener
 ### Stage 2: Configure, build, and install OFT
 
 ```bash
-# Still in builds/
-bash config_cmake.sh        # runs cmake, creates builds/build_release/
+# Still in <config_dir>, beside config_cmake.sh
+bash config_cmake.sh        # runs cmake, creates <config_dir>/build_release/
 cd build_release
 make                         # compile
-make install                 # install to builds/install_release/
+make install                 # install to <config_dir>/install_release/
 ```
 
 ### Key CMake options (set via build_libs.py flags)
@@ -78,14 +101,28 @@ make install                 # install to builds/install_release/
 - `OFT_BUILD_DOCS` — build Doxygen documentation
 - `OFT_BUILD_EXAMPLES` — build example programs
 
-### Important Environment Notes
+### Python environment
 
-- The project uses a Python virtual environment at `oft_venv/`. **Always** `source setup_env.sh` before running builds or tests.
-- The `copilot-setup-steps.yml` workflow mirrors the Ubuntu 24.04 GCC 14 + OpenMP CI configuration and pre-builds external libraries in a cached `builds/` directory. After this workflow runs, the agent environment has:
+Building and testing OFT needs a Python environment providing `pytest`, `numpy`,
+`scipy`, `h5py`, `netcdf4`, and `matplotlib`.
+
+- **User environments** (the normal case): there is no project-managed virtual environment. `oft_venv/` and `setup_env.sh` are **not** created by `build_libs.py`, are gitignored, and will not exist in a normal checkout. If the user has not already specified which interpreter or environment to use, **ask them** — do not guess, and do not fall back to the system `python3`, which frequently lacks `numpy`/`h5py`. Carry the answer forward for the rest of the session.
+- **CI/ephemeral environments only**: the workflows create a venv at `oft_venv/` and write `source oft_venv/bin/activate` into `setup_env.sh` at the workspace root. `source setup_env.sh` is valid there, and only there.
+
+To use an OFT install from an arbitrary Python environment, either set
+`OFT_ROOTPATH=<config_dir>/install_release` (the Python examples append
+`$OFT_ROOTPATH/python` to `sys.path`) or put `<config_dir>/install_release/python`
+on `PYTHONPATH`.
+
+### Ephemeral agent environments
+
+The `copilot-setup-steps.yml` workflow mirrors the Ubuntu 24.04 GCC 14 + OpenMP CI configuration and pre-builds external libraries in a cached `builds/` directory. After this workflow runs, the agent environment has:
   - Compilers: `gcc-14`, `g++-14`, `gfortran-14`
-  - Python venv with: `pytest`, `numpy`, `scipy`, `h5py`, `netcdf4`, `matplotlib`
+  - Python venv at `oft_venv/` with: `pytest`, `numpy`, `scipy`, `h5py`, `netcdf4`, `matplotlib`
   - Pre-built external libraries in `builds/`
   - OFT compiled and installed in `builds/install_release/`
+
+This is the flat-layout case: `<config_dir>` is `builds/` and `<build_dir>` is `builds/build_release`.
 
 ### Python packaging information
 
@@ -104,27 +141,27 @@ Each test subdirectory has:
 
 ### Running tests
 
-From `builds/build_release/`:
+With the user's Python environment active (see "Python environment"), from `<build_dir>`:
 
 ```bash
-source ../../setup_env.sh
 make test                    # runs: pytest -m "not slow" base grid lin_alg fem physics
 make test_full               # runs all tests including slow ones
 make test_examples           # runs example notebook tests
 ```
 
-Or run individual test files:
+Or run individual test files. `run_test.sh` is generated into `<build_dir>/tests/`,
+so invoke it from there:
 
 ```bash
-cd builds/build_release/tests
-../../run_test.sh physics/test_TokaMaker.py -k "test_name"
+cd <build_dir>/tests
+./run_test.sh physics/test_TokaMaker.py -k "test_name"
 ```
 
 To list tests for a specific file or folder:
 
 ```bash
-cd builds/build_release/tests
-../../run_test.sh physics/test_TokaMaker.py --collect-only
+cd <build_dir>/tests
+./run_test.sh physics/test_TokaMaker.py --collect-only
 ```
 
 To run a specific test `test_name`, optionally with arguments (`test_args`), within a specific file `test_file.py` (current working director must contain `test_file.py`):
@@ -221,7 +258,7 @@ A representative build environment that can be used for creating a testing sandb
 
 1. **Single OFT_env instance**: The Python `OFT_env` class enforces a singleton. Tests use `multiprocessing.Process` to work around this. Never create two `OFT_env` instances in the same process.
 
-2. **Tests run from build tree**: Tests must be run from `builds/build_release/tests/` (or via `make test` from `builds/build_release/`), not from the source tree, because compiled Fortran test executables are in the build tree.
+2. **Tests run from build tree**: Tests must be run from `<build_dir>/tests/` (or via `make test` from `<build_dir>`), not from the source tree, because compiled Fortran test executables are in the build tree. See "Locating the build tree" — `<build_dir>` is only `builds/build_release` in CI/ephemeral environments.
 
 3. **ext_libs/ is bundled third-party code**: Do not modify files in `src/ext_libs/`. These are upstream sources (triangle, minpack, bvls, dlsode).
 

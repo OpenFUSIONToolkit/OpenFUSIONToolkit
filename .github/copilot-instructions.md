@@ -13,6 +13,6 @@ When reviewing code, please consider and explicitly highlight any issues in the 
 
 ## Common Pitfalls
 
-1. **Source setup_env.sh**: Always source this before any build/test commands. It activates the Python venv. In CI, this file is generated during prerequisites setup.
+1. **Source setup_env.sh (ephemeral environments only)**: In the Copilot agent environment, which is provisioned by `copilot-setup-steps.yml`, `setup_env.sh` is generated during prerequisites setup and activates the Python venv at `oft_venv/` — always source it before any build/test command. Neither file is created by `build_libs.py`, and neither exists in a user's local checkout; see "Python environment" in `AGENTS.md` for that case.
 
-2. **Build from `builds/` directory**: The `build_libs.py` script must run from the `builds/` directory. It creates `config_cmake.sh` there. CMake then creates `build_release/` and `install_release/` inside `builds/`.
+2. **Build from `builds/` directory (ephemeral environments only)**: In the Copilot agent environment, `build_libs.py` runs from `builds/`, creating `config_cmake.sh` there, and CMake then creates `build_release/` and `install_release/` inside `builds/`. User checkouts commonly nest one build tree per configuration (eg. `builds/GCC/MPI/`); see "Locating the build tree" in `AGENTS.md` before assuming these paths.
