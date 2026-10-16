@@ -34,6 +34,7 @@ new meshes, see \ref doc_gs_main_mesh_ex.
  - \subpage doc_tMaker_ITER_ex2
  - \subpage doc_tMaker_HBT_ex2
  - \subpage doc_tMaker_DIIID_ex2
+ - \subpage doc_tMaker_DIIID_ex3
  - \subpage doc_tMaker_CUTE_ex2
  - \subpage doc_tMaker_LTX_ex2
  - \subpage doc_tMaker_ITER_ex3
@@ -54,7 +55,10 @@ new meshes, see \ref doc_gs_main_mesh_ex.
  - \subpage doc_tMaker_ITER_ex5
  - \subpage doc_tMaker_HBT_ex3
  - \subpage doc_tMaker_CUTE_ex3
+ - \subpage doc_tMaker_CUTE_ex4
  - \subpage doc_tMaker_ARC_ex3
+ - \subpage doc_tMaker_GPEC_ex1
+ - \subpage doc_tMaker_blanket_vde_ex
 
 ### Deprecated workflows
  - \subpage doc_tMaker_ITER_ex4-legacy
