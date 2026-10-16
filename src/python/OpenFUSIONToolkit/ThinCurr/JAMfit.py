@@ -99,7 +99,7 @@ class JAMfit():
         else:
             self.torus.setup_io() 
         self.Msensor, self.Msc, self.sensor_obj = self.torus.compute_Msensor(floops_path)
-        self.torus.compute_Mcoil(cache_file=hodlr_path)
+        self.Mcoil = self.torus.compute_Mcoil(cache_file=hodlr_path)  # (n_icoils, nelems) `[Wb/A]`, used by compute_freq_response_basis
         self.torus.compute_Lmat(use_hodlr=True, cache_file=hodlr_path)
         self.torus.compute_Rmat(copy_out=True)
         print('JAMfit setup complete.')
@@ -149,7 +149,7 @@ class JAMfit():
             return hist_file, plot_data
         else: 
             return "done" 
-    def create_from_runTD_top_modes(self,num_modes,reduced_filename,coil_currs,dt,nsteps,initial_num_eigs=50, verbose=False,s_freq=10,p_freq=10,axisymmetric_modes=None):
+    def create_from_runTD_top_modes(self,num_modes,reduced_filename,coil_currs,dt,nsteps,initial_num_eigs=50, verbose=False,s_freq=10,p_freq=10,axisymmetric_modes=None,freq_response=None):
         '''! Build a reduced model using the dominant eigenmodes from a full run.
         Computes eigenvalues, runs a preliminary reduced model to identify the
         most active modes by current amplitude, then builds a final reduced model
@@ -171,11 +171,15 @@ class JAMfit():
         @param p_freq int, frequency of plotting during the run for plot_data (build_XDMF) (default: 10)
         @param axisymmetric_modes list or array-like, indices of the axisymmetric modes to allow
                                 (default: None -> allow all computed modes)
+        @param freq_response dict, keyword arguments for @ref compute_freq_response_basis (at least
+               `fil_indices` and `num_non_fil_coils`). If given, the frequency-response vectors are
+               appended after the selected eigenmodes and always kept. The vectors and their labels
+               are stored in `self.freq_vecs` and `self.freq_labels` (default: None -> eigenmodes only)
 
         @result ThinCurr_reduced, the constructed reduced model object
         @result numpy.ndarray, sensor measurements from the time-dependent run
         @result dict, currents from the time-dependent run
-        @result numpy.ndarray, eigenvectors corresponding to the selected dominant modes (if verbose is True)
+        @result numpy.ndarray, basis of the reduced model: the selected eigenmodes, followed by any frequency-response vectors (if verbose is True)
         @result list, indices of the selected dominant modes (if verbose is True)
         @result list, maximum weight amplitudes of the selected dominant modes (if verbose is True)
         '''
@@ -230,11 +234,21 @@ class JAMfit():
                 if verbose:
                     ax.semilogy(currents['time'], abs(currents['curr'][:, i]), color='gray', alpha=0.3)
 
-        self.torus_reduced = self.create_reduced_model(self.eig_vecs[eig_inds, :], reduced_filename, compute_B=False)
+        # --- Optionally append frequency-response vectors (always kept, not ranked) ---
+        basis = self.eig_vecs[eig_inds, :]
+        self.freq_vecs = None
+        self.freq_labels = None
+        if freq_response is not None:
+            self.freq_vecs, self.freq_labels = self.compute_freq_response_basis(
+                existing_basis=basis, verbose=verbose, **freq_response
+            )
+            basis = numpy.vstack([basis, self.freq_vecs])
+
+        self.torus_reduced = self.create_reduced_model(basis, reduced_filename, compute_B=False)
         self.reduced_created_flag = True
 
         if verbose:
-            return self.torus_reduced, sensors_measurement, currents, self.eig_vecs[eig_inds, :], eig_inds, weight_amplitude
+            return self.torus_reduced, sensors_measurement, currents, basis, eig_inds, weight_amplitude
         else:
             return self.torus_reduced, sensors_measurement, currents
 
@@ -316,30 +330,109 @@ class JAMfit():
         self.reduced_created_flag = True
         return self.torus_reduced
     
-    def add_freq_eigenvalues(self, specific_fil_array): 
-        '''! Augment the eigenvector basis with frequency-response vectors for specific filaments.
-        For each filament index provided, computes the steady-state frequency
-        response driven by that filament's mutual inductance and appends the
-        result to the stored eigenvector matrix.
+    def compute_freq_response_basis(self, fil_indices, num_non_fil_coils, freqs=None, existing_basis=None, dup_tol=1.E-3, verbose=False):
+        '''! Compute wall-current basis vectors from the frequency response to chosen plasma filaments.
+        Fast events (e.g. a current quench) drive a flux-conserving wall response that can be spread
+        over many short-time-constant eigenmodes, so a truncated eigenbasis may miss it. This method
+        computes that response directly and returns it as extra basis vectors for the reduced model.
 
-        @param specific_fil_array list, indices of filaments to compute frequency responses for
-        @result numpy.ndarray, updated eigenvector matrix including frequency-response vectors, appended to the end of the existing eigenvectors
+        For a filament carrying 1 A at angular frequency w, the wall currents solve
+        `(R + i w L) I = -i w M_fil`, i.e. `I = -i w (R + i w L)^-1 M_fil`, where `M_fil` is the
+        filament row of `Mcoil` (flux on each wall element per amp, `[Wb/A]`). Limits:
+          - freq = inf (inductive limit, `fr_limit=1`): `I = -L^-1 M_fil`, purely real. This is the
+            wall current immediately after an instantaneous change of the filament current.
+          - freq = 0 (resistive limit, `fr_limit=2`): `I = -i R^-1 M_fil` (per unit w), purely imaginary.
+          - finite freq: both the in-phase (real) and quadrature (imaginary) parts are used.
+
+        Each candidate vector is Gram-Schmidt orthogonalized, in the R inner product `<a,b> = a^T R b`,
+        against `existing_basis` and the vectors kept before it, then normalized so `v^T R v = 1`. This
+        matches ThinCurr eigenvectors, which are R-orthonormal. A candidate is skipped (with a warning)
+        when the fraction of it that is new, `||r||_R / ||v||_R`, is below `dup_tol`, so near-duplicate
+        filaments cannot make the reduced inductance matrix singular.
+
+        Requires @ref setup_JAMfit (needs `self.torus` with L, R and Mcoil).
+
+        @param fil_indices list of int, filaments to drive, counted from the first filament (0 = first filament Icoil)
+        @param num_non_fil_coils int, number of non-filament Icoils listed before the filaments in the XML
+        @param freqs float or list of float, drive frequencies `[Hz]`; `numpy.inf` = inductive limit,
+               `0` = resistive limit (default: None -> `[numpy.inf]`)
+        @param existing_basis numpy.ndarray, `(nbasis, nelems)` vectors already in the basis, e.g. the selected
+               eigenmodes (default: None)
+        @param dup_tol float, skip a candidate when less than this fraction of it is new (default: 1.E-3)
+        @param verbose bool, if True, prints the new fraction for each candidate (default: False)
+        @result numpy.ndarray, kept basis vectors `(nkept, nelems)`, R-orthonormal and R-orthogonal to `existing_basis`
+        @result list of tuple, `(filament index, freq [Hz], 'real' or 'imag')` source of each kept vector
+
+        Example
+        -------
+        >>> # Disruption with the plasma staying near the centre: one filament, inductive limit
+        >>> vecs, labels = jam.compute_freq_response_basis([center_fil], num_non_fil_coils=n_coils)
+        >>> # VDE then quench: centre and end-position filaments, inductive limit and 500 Hz
+        >>> vecs, labels = jam.compute_freq_response_basis([center_fil, vde_end_fil], n_coils,
+        ...                                                freqs=[numpy.inf, 500.0], existing_basis=eig_basis)
         '''
-        from IPython.display import clear_output
-        if self.eig_vecs is None:
-            raise ValueError("Eigenvalues and eigenvectors have not been computed yet.")
+        if freqs is None:
+            freqs = [numpy.inf]
+        freqs = numpy.atleast_1d(numpy.asarray(freqs, dtype=numpy.float64))
+        if not hasattr(self, 'Mcoil'):
+            self.Mcoil = self.torus.compute_Mcoil()
+        Rmat = self.torus.Rmat  # scipy sparse (nelems, nelems)
 
-        eig_vecs_wfreq = numpy.copy(self.eig_vecs)
-        for target_fil in specific_fil_array:
-            Mcoil = self.torus.compute_Mcoil()
-            driver = numpy.zeros((2, self.torus.nelems))
-            driver[0, :] = Mcoil[target_fil, :]
-            result = self.torus.compute_freq_response(driver, freq=1.E3)
-            eig_vecs_wfreq = numpy.concatenate((eig_vecs_wfreq, result[:1, :]), axis=0)
-            clear_output(wait=True)
+        # --- Orthonormal (in R) basis so far, stored with R*e to avoid repeated sparse products ---
+        ortho_vecs = []
+        ortho_Rvecs = []
+        if existing_basis is not None:
+            for v in numpy.atleast_2d(existing_basis):
+                r = numpy.array(v, dtype=numpy.float64)
+                for e, Re in zip(ortho_vecs, ortho_Rvecs):
+                    r -= numpy.dot(Re, r)*e
+                Rr = Rmat @ r
+                r_norm = numpy.sqrt(numpy.dot(r, Rr))
+                if r_norm > 0.0:
+                    ortho_vecs.append(r/r_norm)
+                    ortho_Rvecs.append(Rr/r_norm)
+        n_existing = len(ortho_vecs)
 
-        self.eig_vecs = eig_vecs_wfreq
-        return eig_vecs_wfreq
+        # --- Frequency response for each filament and frequency ---
+        labels = []
+        for fil in fil_indices:
+            fdriver = numpy.zeros((2, self.torus.nelems))
+            fdriver[0, :] = self.Mcoil[num_non_fil_coils + fil, :]  # real flux driver for 1 A in the filament
+            for freq in freqs:
+                if numpy.isinf(freq):
+                    result = self.torus.compute_freq_response(fdriver=fdriver, fr_limit=1)
+                    candidates = [(result[0, :], 'real')]
+                elif freq == 0.0:
+                    result = self.torus.compute_freq_response(fdriver=fdriver, fr_limit=2)
+                    candidates = [(result[1, :], 'imag')]
+                else:
+                    result = self.torus.compute_freq_response(fdriver=fdriver, freq=freq)
+                    candidates = [(result[0, :], 'real'), (result[1, :], 'imag')]
+
+                # --- Modified Gram-Schmidt in the R inner product, with duplicate guard ---
+                for v, part in candidates:
+                    v_norm = numpy.sqrt(numpy.dot(v, Rmat @ v))
+                    if v_norm == 0.0:
+                        print(f"Skipping filament {fil} at {freq} Hz ({part}): zero response")
+                        continue
+                    r = v.copy()
+                    for e, Re in zip(ortho_vecs, ortho_Rvecs):
+                        r -= numpy.dot(Re, r)*e
+                    Rr = Rmat @ r
+                    r_norm = numpy.sqrt(max(numpy.dot(r, Rr), 0.0))
+                    frac_new = r_norm/v_norm
+                    if frac_new < dup_tol:
+                        print(f"Skipping filament {fil} at {freq} Hz ({part}): only {frac_new:.2e} of it is new")
+                        continue
+                    if verbose:
+                        print(f"Keeping filament {fil} at {freq} Hz ({part}): {frac_new:.2e} of it is new")
+                    ortho_vecs.append(r/r_norm)
+                    ortho_Rvecs.append(Rr/r_norm)
+                    labels.append((fil, float(freq), part))
+
+        new_vecs = numpy.array(ortho_vecs[n_existing:]).reshape((-1, self.torus.nelems))
+        print(f"Frequency response: kept {new_vecs.shape[0]} vectors from {len(fil_indices)*len(freqs)} filament/frequency drives")
+        return new_vecs, labels
 
     # ============================================
     # JAMfit Reconstruction Relevant Classes
