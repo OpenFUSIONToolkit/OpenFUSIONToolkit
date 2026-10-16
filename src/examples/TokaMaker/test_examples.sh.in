@@ -56,5 +56,6 @@ run_test Dipole dipole_eq_ex.ipynb
 run_test WHAM WHAM_eq_ex.ipynb
 
 # Advanced workflow cases
-run_test AdvancedWorkflows/Pulse_Design CUTE_pulse_ex.ipynb 
+run_test AdvancedWorkflows/Pulse_Design CUTE_pulse_ex.ipynb
+run_test AdvancedWorkflows/SOLReconstruction DIIID_reconstruction_SOL_strikept.ipynb
 # run_test AdvancedWorkflows/IsofluxController NSTXU_shape_control_simulator.ipynb 
