@@ -104,15 +104,16 @@ not \f$ J_{TM} \f$.
 
 ## Bootstrap profile names
 `solve_bootstrap`, `get_boot_profs` and `solve_with_bootstrap` return \f$ J_{TM} \f$ profiles on `psi_n` (0 = axis,
-1 = LCFS) named `jphi_<part>_<stage>`. Parts: `bs` (bootstrap, (A7)), `pd` (its pressure-driven \f$ p'G \f$ term),
-`ind` (inductive), `fixed`, `total`. `_raw` is before edge isolation, scaling and taper; `_final` is what
-enters `jphi_total` = `jphi_ind_final` + `jphi_bs_final` + `jphi_fixed_final` (the Python solve returns the
-GS output as `jphi_total`). `jdotb_bs_raw` is the Redl \f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle \f$ behind `jphi_bs_raw`.
-Options use `jbs` (`scale_jbs`, `isolate_edge_jbs`, `parameterize_jbs`, `taper_edge_jbs`, `djbs_tol`).
+1 = LCFS) named `jphi_<part>` (as it enters `jphi_total`) or `jphi_<part>_raw` (before edge isolation,
+scaling and taper). Parts: `bs` (bootstrap, the field-aligned term of (A7)), `pd` (its pressure-driven \f$ p'G \f$
+term), `ind` (inductive), `fixed`, `saw`: `jphi_total` = `jphi_ind` + `jphi_bs` + `jphi_pd` + `jphi_fixed` +
+`jphi_saw`. The edge isolation and `scale_jbs` act on `bs` only. The Python solve (`use_python_solve=True`)
+returns the GS output as `jphi_total`. `jdotB_bs_raw` is the Redl \f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle \f$
+behind `jphi_bs_raw`. Options use `jbs` (`scale_jbs`, `isolate_edge_jbs`, `taper_edge_jphi`, `djbs_tol`).
 
 ## Where these are used
 - TokaMaker `jphi_bs_update` / `calculate_bootstrap` (Fortran) and `solve_with_bootstrap(use_python_solve=True)`:
-  the bootstrap enters `jphi_total` by (A7) with \f$ p'G \f$ (`boot_profs['jphi_pd_raw']`); `boot_profs['jdotb_bs_raw']`
+  the bootstrap enters `jphi_total` by (A7) with \f$ p'G \f$ (`boot_profs['jphi_pd_raw']`); `boot_profs['jdotB_bs_raw']`
   holds the Redl \f$ \langle \mathbf{J}\cdot\mathbf{B} \rangle \f$.
 - TokaMaker `jphi_update` / `jphi_bs_update` \f$ I_p \f$ normalisation, the \f$ \alpha \f$ root of
   `solve_with_bootstrap(use_python_solve=True)`, and `util.get_dIdA_from_jphi`: (A9c).
