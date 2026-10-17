@@ -693,6 +693,8 @@ class reconstruction():
             ax[2].errorbar(j,error_mat[i,2], yerr=saddle.err, color='r', capsize=2)
             ax[2].plot(j,error_mat[i,1], 'bx')
             i += 1
+        if len(self._saddles) == 0:
+                    ax[2].remove()
         ax[3].set_title('Pressure Constraints')
         ax[3].set_xlabel('Constraint Index')
         ax[3].set_ylabel('Signal [Pa]')
@@ -700,6 +702,8 @@ class reconstruction():
             ax[3].errorbar(j,error_mat[i,2], yerr=press_con.err, color='r', capsize=2)
             ax[3].plot(j,error_mat[i,1], 'bx')
             i += 1
+        if len(self._pressure_cons) == 0:
+            ax[3].remove()
         # Plot coil signals
         if (coil_ax is not None) and (len(self._coil_current_cons) > 0):
             ind_to_name = {self._tMaker_obj.coil_sets[coil_set]['id']: coil_set for coil_set in self._tMaker_obj.coil_sets}
