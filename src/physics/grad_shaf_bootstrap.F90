@@ -22,8 +22,9 @@ USE oft_mesh_type, ONLY: bmesh_findcell
 USE oft_blag_operators, ONLY: oft_lag_brinterp
 USE tracing_2d, ONLY: set_tracer, active_tracer, tracinginv_fs
 USE grad_shaf_prof_phys, ONLY: eval_dIdA, build_Ravg_spline, gs_flux_int, &
-  jphi_update, jphi_copy, jphi_flux_func
+  jphi_update, jphi_copy, jphi_flux_func, jphi_psi_nodes
 USE spline_mod
+USE oft_gs_profiles, ONLY: torflux_set_bounds
 USE oft_io, ONLY: hdf5_create_group, hdf5_write, hdf5_read, &
   hdf5_field_get_sizes, hdf5_field_exist
 USE mhd_utils, ONLY: mu0
@@ -313,15 +314,31 @@ CLASS(jphi_bs_flux_func), INTENT(inout) :: self !< New bootstrap profile
 CLASS(gs_equil), INTENT(inout) :: gseq !< Equilibrium, still holding the profile being replaced
 INTEGER(i4) :: i,ierr
 REAL(r8) :: b1,b2
+REAL(r8), ALLOCATABLE :: xpsi(:)
+LOGICAL :: mapped
 IF(.NOT.ASSOCIATED(gseq%I))RETURN
 b1=gseq%plasma_bounds(1); b2=gseq%plasma_bounds(2)
 IF((b1<-1.d98).OR.(b2==b1))RETURN ! No plasma yet
-self%plasma_bounds=gseq%plasma_bounds
+CALL jphi_psi_nodes(self,xpsi,mapped) ! Knots in psi (mapped from toroidal flux if on it)
+IF(.NOT.mapped)THEN ! No map yet (eg. replacing a profile on psi_N): build it for the current equilibrium
+  CALL gseq%torflux%update(gseq)
+  CALL jphi_psi_nodes(self,xpsi,mapped)
+END IF
+IF(.NOT.mapped)THEN
+  CALL oft_warn("No toroidal flux map, F*F' not carried to the new profile")
+  RETURN
+END IF
 self%y0=gseq%ffp_scale*gseq%I%fp(b1)
 DO i=1,self%npsi
-  self%yp(i)=gseq%ffp_scale*gseq%I%fp(self%x(i)*(b2-b1)+b1)
+  self%yp(i)=gseq%ffp_scale*gseq%I%fp(xpsi(i)*(b2-b1)+b1)
 END DO
-ierr=self%set_cofs(self%yp)
+IF(ASSOCIATED(self%phi_wrapper))THEN
+  CALL torflux_set_bounds(self%phi_wrapper,gseq%plasma_bounds)
+  ierr=self%phi_wrapper%set_cofs(self%yp)
+ELSE
+  self%plasma_bounds=gseq%plasma_bounds
+  ierr=self%set_cofs(self%yp)
+END IF
 gseq%ffp_scale=1.d0
 END SUBROUTINE jphi_bs_carry_ffp
 !------------------------------------------------------------------------------
@@ -438,8 +455,8 @@ END FUNCTION h5_name
 !!
 !! Called once per NL iteration (the first iteration of a solve runs @ref jphi_update and resets the
 !! convergence state). Current densities are TokaMaker jphi in mu0*A/m² on the nodes `psi_n`
-!! (LCFS and self%x):
-!!   1. <R>/<1/R>/<1/R^2> spline on self%x; pressure scale.
+!! (LCFS and the profile nodes xpsi):
+!!   1. <R>/<1/R>/<1/R^2> spline; pressure scale.
 !!   2. jphi_fixed and the bootstrap current jphi_bs (with its pressure-driven part jphi_pd), scaled
 !!      and optionally isolated, or reused from the last evaluation when frozen.
 !!   3. Edge taper of jphi_bs, jphi_pd, jphi_ind and jphi_fixed.
@@ -453,8 +470,9 @@ CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 INTEGER(i4) :: i
 REAL(r8) :: pscale, pprime
+REAL(r8), ALLOCATABLE :: xpsi(:) !< Node locations in normalized poloidal flux
 TYPE(spline_type) :: R_spline
-REAL(r8), ALLOCATABLE :: psi_n(:) !< Nodes: LCFS (0) and self%x
+REAL(r8), ALLOCATABLE :: psi_n(:) !< Nodes: LCFS (0) and xpsi
 REAL(r8), ALLOCATABLE :: jtor(:)  !< dI/dA for the exact I_p measure (eval_dIdA)
 REAL(r8), ALLOCATABLE :: jphi_bs(:), jphi_pd(:), jphi_ind(:), jphi_fixed(:), jphi_total(:)
 REAL(r8), ALLOCATABLE :: jphi_bs_spike(:), jphi_bs_spike_masked(:) !< Isolated / masked edge spike [A/m²]
@@ -472,6 +490,7 @@ IF(.NOT. gseq%skip_targets) THEN
 ENDIF
 !---
 self%plasma_bounds = gseq%plasma_bounds
+CALL jphi_psi_nodes(self,xpsi)
 IF(gseq%mode/=1) &
   CALL oft_abort("Jphi-BS profile requires (F^2)' formulation", &
                  "jphi_bs_update",__FILE__)
@@ -480,7 +499,7 @@ IF(LEN_TRIM(char_buf) > 0) &
   CALL oft_abort("Jphi-BS profile requires "//TRIM(char_buf), "jphi_bs_update",__FILE__)
 !--- 1. <R>/<1/R>/<1/R^2> spline (I_p measure, F*F' map), kept until the F*F' loop; pressure scale.
 ALLOCATE(psi_n(0:self%npsi), jtor(0:self%npsi))
-psi_n = [0.0_r8, self%x]
+psi_n = [0.0_r8, xpsi]
 CALL build_Ravg_spline(gseq, self%ngeom, R_spline)
 CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
 IF(ASSOCIATED(gseq%P_ani)) &
@@ -496,23 +515,23 @@ IF(self%freeze_jbs .AND. ALLOCATED(self%jphi_bs_last)) THEN
   jphi_pd = self%jphi_pd_last
   djbs = 0.0_r8
 ELSE
-  CALL calculate_bootstrap(self, gseq, self%npsi, self%x, jphi_bs, jphi_pd)
+  CALL calculate_bootstrap(self, gseq, self%npsi, xpsi, jphi_bs, jphi_pd)
   isolate = self%boot_ops%isolate_edge_jbs .OR. self%boot_ops%parameterize_jbs
   IF(isolate)THEN
     ALLOCATE(jphi_bs_spike(0:self%npsi), jphi_bs_spike_masked(0:self%npsi))
-    CALL edge_spike(self%npsi, self%x, jphi_bs, self%boot_ops%parameterize_jbs, self%boot_ops%diagnose_bs, &
+    CALL edge_spike(self%npsi, xpsi, jphi_bs, self%boot_ops%parameterize_jbs, self%boot_ops%diagnose_bs, &
                     jphi_bs_spike, jphi_bs_spike_masked)
   END IF
   IF(self%boot_ops%diagnose_bs)THEN
     IF(isolate)THEN
       WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         jphi_bs(bulk)[A/m2]  spike[A/m2]   spike_masked[A/m2]  jphi[A/m2]  jphi_fixed[A/m2]'
       DO i = 1, self%npsi
-        WRITE(*,'(A,I4,6ES15.5)') '  ', i, self%x(i), jphi_bs(i), jphi_bs_spike(i), jphi_bs_spike_masked(i), self%jphi(i), jphi_fixed(i)/mu0
+        WRITE(*,'(A,I4,6ES15.5)') '  ', i, xpsi(i), jphi_bs(i), jphi_bs_spike(i), jphi_bs_spike_masked(i), self%jphi(i), jphi_fixed(i)/mu0
       END DO
     ELSE
       WRITE(*,'(A)') '  [diagnose_bs] i  psi_N         jphi_bs[A/m2]      jphi[A/m2]  jphi_fixed[A/m2]'
       DO i = 1, self%npsi
-        WRITE(*,'(A,I4,4ES15.5)') '  ', i, self%x(i), jphi_bs(i), self%jphi(i), jphi_fixed(i)/mu0
+        WRITE(*,'(A,I4,4ES15.5)') '  ', i, xpsi(i), jphi_bs(i), self%jphi(i), jphi_fixed(i)/mu0
       END DO
     END IF
   END IF
@@ -595,8 +614,8 @@ CALL spline_eval(R_spline, 0.d0, 0) ! LCFS point for y0 calculation
 pprime = gseq%P%fp(gseq%plasma_bounds(1))
 self%y0 = 2.d0*(jphi_total(0) - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 DO i = 1, self%npsi
-  CALL spline_eval(R_spline, self%x(i), 0)
-  pprime = gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2) - &
+  CALL spline_eval(R_spline, xpsi(i), 0)
+  pprime = gseq%P%fp(xpsi(i)*(gseq%plasma_bounds(2) - &
                                   gseq%plasma_bounds(1)) + &
                                   gseq%plasma_bounds(1))
   self%yp(i) = 2.d0*(jphi_total(i) - R_spline%f(1)*pprime*pscale)/R_spline%f(2)

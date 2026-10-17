@@ -26,11 +26,17 @@ def create_prof_file(self, filename, profile_dict, name):
     '''! Create profile input file to be read by load_profiles()
 
     @param filename Name of input file, see options in set_profiles()
-    @param profile_dict Dictionary object containing profile values ['y'] and sampled locations
-    in normalized Psi ['x']
+    @param profile_dict Dictionary object containing profile values ['y'] and sampled locations ['x'],
+    in normalized Psi unless ['coord'] is 'phi_n' (normalized toroidal flux)
     @param filename Name of input quantity, see options in set_profiles()
     '''
-    file_lines = [profile_dict['type']]
+    coord = profile_dict.get('coord','psi_n')
+    if coord not in ('psi_n','phi_n'):
+        raise ValueError('Invalid coord "{0}" for {1} profile, must be "psi_n" or "phi_n"'.format(coord, name))
+    if coord == 'phi_n':  # Value profiles keep their values, derivative profiles are derivatives w.r.t. toroidal flux
+        value = profile_dict['type'].startswith('jphi') or name in ('Te','Ti','ne','ni','Zeff','eta','jphi_fixed')
+        coord = 'phi_n_val' if value else 'phi_n_deriv'
+    file_lines = [profile_dict['type'] if coord == 'psi_n' else '{0} {1}'.format(profile_dict['type'], coord)]
     if profile_dict['type'] == 'flat':
         pass
     elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp') \
@@ -822,6 +828,10 @@ class TokaMaker():
         @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations in normalized Psi ['x']
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
+
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized
+        toroidal flux, ['y'] is then the derivative w.r.t. toroidal flux, eg. \f$dP/d\hat{\Phi}\f$, except for
+        jphi profiles, whose ['y'] is \f$j_\phi\f$ as usual).
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -871,6 +881,8 @@ class TokaMaker():
         @param Zeff Scalar effective charge or Dictionary object containing effective charge profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
         @param jphi_fixed_prof Dictionary object containing fixed toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
+
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux).
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -1510,6 +1522,15 @@ class TokaMaker():
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.get_q(psi,psi_pad,npsi,compute_geo)
+
+    def get_torflux_map(self,x,inverse=False):
+        r'''! Evaluate the solver's poloidal/toroidal flux map
+
+        See @ref TokaMaker.TokaMaker_equilibrium.get_torflux_map "get_torflux_map"
+        '''
+        if self._tMaker_equil is None:
+            raise ValueError("Equilibrium object is `None`")
+        return self._tMaker_equil.get_torflux_map(x,inverse)
 
     def get_fsa(self,psi=None,psi_pad=0.02,npsi=50):
         r'''! Get flux surface averages and per-surface shape parameters
@@ -2327,7 +2348,7 @@ class TokaMaker():
             raise Exception(error_string.value)
         return time.value, dt.value, nl_its.value, lin_its.value, nretry.value
 
-    def solve_bootstrap(self, ffp_prof, te_prof, ne_prof, ti_prof, ni_prof, Zeff, Ip_target, F0=None, pres_prof=None, jphi_fixed_prof=None, p_fixed_prof=None, **kwargs):
+    def solve_bootstrap(self, ffp_prof, te_prof, ne_prof, ti_prof, ni_prof, Zeff, Ip_target, F0=None, pres_prof=None, jphi_fixed_prof=None, p_fixed_prof=None, coord='psi_n', **kwargs):
         r'''! Solve G-S equilibrium with self-consistent bootstrap current from kinetic profiles
 
         Derives a pressure-gradient profile \f$P'(\hat{\psi})\f$ from the supplied kinetic
@@ -2338,22 +2359,23 @@ class TokaMaker():
         total pressure is nowhere less than the kinetic pressure.
         Temperature profiles are expected in keV; density profiles in m\f$^{-3}\f$.
 
-        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'`` \f$\hat{\psi_n}\f$ grid, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``)
-        @param te_prof Electron temperature profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$T_e\f$ [keV])
-        @param ne_prof Electron density profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$n_e\f$ [m\f$^{-3}\f$])
-        @param ti_prof Ion temperature profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$T_i\f$ [keV])
-        @param ni_prof Ion density profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$n_i\f$ [m\f$^{-3}\f$])
-        @param Zeff Effective charge \f$Z_{eff}\f$ (scalar or profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$Z_{eff}\f$))
+        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'``: in ``coord``, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``)
+        @param te_prof Electron temperature profile dict (``'x'``: in ``coord``, ``'y'``: \f$T_e\f$ [keV])
+        @param ne_prof Electron density profile dict (``'x'``: in ``coord``, ``'y'``: \f$n_e\f$ [m\f$^{-3}\f$])
+        @param ti_prof Ion temperature profile dict (``'x'``: in ``coord``, ``'y'``: \f$T_i\f$ [keV])
+        @param ni_prof Ion density profile dict (``'x'``: in ``coord``, ``'y'``: \f$n_i\f$ [m\f$^{-3}\f$])
+        @param Zeff Effective charge \f$Z_{eff}\f$ (scalar or profile dict (``'x'``: in ``coord``, ``'y'``: \f$Z_{eff}\f$))
         @param Ip_target Target plasma current \f$I_p\f$ [A]
         @param F0 Vacuum \f$F = R_0 B_0\f$ (default: previous call / loaded equilibrium)
-        @param pres_prof Optional total pressure profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$P\f$ [Pa]).
+        @param pres_prof Optional total pressure profile dict (``'x'``: in ``coord``, ``'y'``: \f$P\f$ [Pa]).
           If provided, must be \f$\geq\f$ the kinetic pressure \f$e_C(n_e T_e + n_i T_i)\f$ everywhere and
           is used in place of the kinetic pressure to form \f$P'\f$ and \f$P_{ax}\f$.
-        @param jphi_fixed_prof Optional fixed toroidal current density profile dict (``'x'``: \f$\hat{\psi_n}\f$,
+        @param jphi_fixed_prof Optional fixed toroidal current density profile dict (``'x'``: in ``coord``,
           ``'y'``: \f$j_\phi\f$ [A/m\f$^2\f$]), added to the total without rescaling
-        @param p_fixed_prof Optional additional pressure profile dict (``'x'``: \f$\hat{\psi_n}\f$, ``'y'``: \f$P_{fixed}\f$ [Pa],
+        @param p_fixed_prof Optional additional pressure profile dict (``'x'``: in ``coord``, ``'y'``: \f$P_{fixed}\f$ [Pa],
           e.g. fast-ion pressure), added to the kinetic pressure. Sets \f$P'\f$ and \f$P_{ax}\f$ but is excluded
           from the bootstrap calculation. Mutually exclusive with ``pres_prof``.
+        @param coord Coordinate of all ``'x'`` grids: ``'psi_n'`` (default) or ``'phi_n'`` (normalized toroidal flux).
 
         @par Bootstrap solver options (forwarded to ``set_boot_ops()``)
         @param isolate_edge_jbs Isolate the edge bootstrap spike from the bulk (default: False)
@@ -2370,7 +2392,8 @@ class TokaMaker():
         @result Dictionary with 1-D numpy array values (A/m² unless noted). All current densities, inputs
           included, are TokaMaker \f$j_\phi = \langle j_\phi \rangle = \langle R \rangle P' + \langle 1/R \rangle FF'/\mu_0\f$
           (see doc_tokamaker_current_conventions):
-          - ``'psi_n'`` Normalised flux grid (0 = axis, 1 = LCFS), taken from ``ffp_prof['x']``
+          - ``'psi_n'`` Normalised poloidal flux grid (0 = axis, 1 = LCFS) of the ``ffp_prof['x']`` nodes
+            (mapped from toroidal flux if ``coord='phi_n'``)
           - ``'jdotb_bs_raw'`` The Redl \f$\langle j_{BS} \cdot B \rangle\f$ behind ``'jphi_bs_raw'`` [T A/m²]
           - ``'jphi_bs_raw'`` Bootstrap current density from the Redl PoP 2021 formula,
             \f$\langle j_{BS} \cdot B \rangle F \langle 1/R \rangle/\langle B^2 \rangle + P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
@@ -2385,6 +2408,8 @@ class TokaMaker():
           - ``'jphi_fixed_final'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
         '''
         from scipy.interpolate import Akima1DInterpolator
+        if coord not in ('psi_n', 'phi_n'):
+            raise ValueError(f"coord must be 'psi_n' or 'phi_n' (got {coord!r})")
         # --- Type / shape check on ffp_prof ---
         if not isinstance(ffp_prof, dict):
             raise TypeError(f"ffp_prof must be a dict with 'x' and 'y' keys; got {type(ffp_prof).__name__}")
@@ -2451,6 +2476,16 @@ class TokaMaker():
         if pp_norm == 0.0:
             raise ValueError("The pressure profile is flat (P' = 0 everywhere)")
         pp_prof = {'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_norm}
+        if coord == 'phi_n':
+            # P' above is dP/dPhi_N
+            pp_prof['coord'] = 'phi_n'
+            ffp_prof = dict(ffp_prof, coord='phi_n')
+            te_prof, ne_prof, ti_prof, ni_prof = [dict(_prof, coord='phi_n')
+                                                  for _prof in (te_prof, ne_prof, ti_prof, ni_prof)]
+            if isinstance(Zeff, dict):
+                Zeff = dict(Zeff, coord='phi_n')
+            if jphi_fixed_prof is not None:
+                jphi_fixed_prof = dict(jphi_fixed_prof, coord='phi_n')
 
         # Axis target = the pressure drop the P' profile carries: TokaMaker holds P = 0 at the
         # LCFS, so targeting pressure[0] would scale P' up by pressure[0]/(pressure[0] - pressure[-1])
@@ -2811,6 +2846,10 @@ class TokaMaker_equilibrium():
         @param pp_prof Dictionary object containing P' profile ['y'] and sampled locations in normalized Psi ['x']
         @param ffp_NI_prof Dictionary object containing non-inductive FF' profile ['y'] and sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
+
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized
+        toroidal flux, ['y'] is then the derivative w.r.t. toroidal flux, eg. \f$dP/d\hat{\Phi}\f$, except for
+        jphi profiles, whose ['y'] is \f$j_\phi\f$ as usual).
         '''
         delete_files = []
         ffp_file = 'none'
@@ -2912,6 +2951,8 @@ class TokaMaker_equilibrium():
         @param Zeff Effective charge state as a single value or a profile ['y'] with sampled locations in normalized Psi ['x']
         @param keep_files Retain temporary profile files
         @param jphi_fixed_prof Dictionary object containing fixed toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
+
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux).
         '''
         delete_files = []
         def prof_file(name, prof, label):
@@ -3151,7 +3192,7 @@ class TokaMaker_equilibrium():
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param compute_geo Compute geometric values for LCFS
         @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f${<R>,<1/R>,<1/R^2>,dV/dPsi}\f$, length of last surface,
-        [r(R_min),r(R_max)], [r(z_min),r(z_max)]
+        [r(R_min),r(R_max)], [r(z_min),r(z_max)] (profiles are NaN on surfaces where the trace failed)
         '''
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
@@ -3174,6 +3215,9 @@ class TokaMaker_equilibrium():
         tokamaker_get_q(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,ctypes.byref(dl),rbounds,zbounds,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        failed = qvals < -1.E98 # Trace failed
+        for vals in (qvals, ravgs):
+            vals[...,failed] = numpy.nan
         ravg_dict = {
             '<R>': ravgs[0,:],
             '<1/R>': ravgs[1,:],
@@ -3190,6 +3234,28 @@ class TokaMaker_equilibrium():
                 return psi,qvals,ravg_dict,dl.value,rbounds,zbounds
             else:
                 return psi,qvals,ravg_dict,None,None,None
+
+    def get_torflux_map(self,x,inverse=False):
+        r'''! Evaluate the solver's poloidal/toroidal flux map
+
+        Uses the map built during the last solve (or load); requires at least one profile with
+        `coord='phi_n'`. Stale after `set_psi` until the next solve.
+
+        @param x \f$\hat{\psi}\f$ sampling locations (\f$\hat{\Phi}\f$ if `inverse`)
+        @param inverse Map \f$\hat{\Phi} \rightarrow \hat{\psi}\f$ instead
+        @result \f$\hat{\Phi}(x)\f$ (\f$\hat{\psi}(x)\f$ if `inverse`), \f$d\hat{\Phi}/d\hat{\psi}\f$ at each point
+        '''
+        x = numpy.atleast_1d(numpy.asarray(x, dtype=numpy.float64))
+        xin = numpy.ascontiguousarray(1.0-x if self.psi_convention == 0 else x, dtype=numpy.float64)
+        xout = numpy.zeros_like(xin)
+        jac = numpy.zeros_like(xin)
+        error_string = self._oft_env.get_c_errorbuff()
+        tokamaker_torflux_map(self._equil_ptr,xin.shape[0],xin,xout,jac,inverse,error_string)
+        if error_string.value != b'':
+            raise Exception(error_string.value)
+        if self.psi_convention == 0:
+            xout = 1.0 - xout
+        return xout, jac
 
     def get_fsa(self,psi=None,psi_pad=0.02,npsi=50):
         r'''! Get flux surface averages and per-surface shape parameters
@@ -3209,7 +3275,7 @@ class TokaMaker_equilibrium():
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
-        @result Dictionary of flux surface profiles and scalars
+        @result Dictionary of flux surface profiles (NaN on surfaces where the trace failed) and scalars
         '''
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
@@ -3231,6 +3297,9 @@ class TokaMaker_equilibrium():
         tokamaker_get_fsa(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,fsa_avgs,shape_geo,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        failed = qvals < -1.E98 # Trace failed
+        for vals in (qvals, ravgs, fsa_avgs, shape_geo):
+            vals[...,failed] = numpy.nan
         # F is a flux function, so it comes straight from the source profile rather
         # than the trace. The leading zero picks up the axis value, which cannot be traced.
         fpol = self.get_profiles(psi=numpy.concatenate(([0.0], psi_save)))[1]

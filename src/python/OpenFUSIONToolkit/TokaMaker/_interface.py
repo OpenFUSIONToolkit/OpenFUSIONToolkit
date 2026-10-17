@@ -196,6 +196,11 @@ tokamaker_get_q = ctypes_subroutine(oftpy_lib.tokamaker_get_q,
     [c_void_p, c_int,ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,2),
      c_double_ptr, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_char_p])
 
+# tokamaker_torflux_map(tMaker_equil_ptr,npts,xin,xout,jac,inverse,error_str)
+tokamaker_torflux_map = ctypes_subroutine(oftpy_lib.tokamaker_torflux_map,
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1),
+     ctypes_numpy_array(numpy.float64,1), c_bool, c_char_p])
+
 # tokamaker_get_fsa(tMaker_equil_ptr,npsi,psi_q,qvals,ravgs,fsa_avgs,shape_geo,error_str)
 tokamaker_get_fsa = ctypes_subroutine(oftpy_lib.tokamaker_get_fsa,
     [c_void_p, c_int,ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,2),

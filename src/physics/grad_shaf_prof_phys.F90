@@ -24,7 +24,7 @@ use oft_gs, only: gs_equil, flux_func, gs_psi2r, oft_indent, &
   gs_get_qprof, gs_ani_press, gs_epsilon
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
-  spline_func_copy, spline_func_delete
+  spline_func_copy, spline_func_delete, phi_flux_wrapper
 use spline_mod
 USE mhd_utils, ONLY: mu0
 implicit none
@@ -526,9 +526,10 @@ class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
 REAL(r8) :: jphi_norm,pscale,pprime,ip0,ip1
-REAL(r8), ALLOCATABLE :: jtor(:),xn(:),jn(:)
+REAL(r8), ALLOCATABLE :: jtor(:),xpsi(:),xn(:),jn(:)
 type(spline_type) :: R_spline
 self%plasma_bounds=gseq%plasma_bounds
+CALL jphi_psi_nodes(self,xpsi)
 IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
 IF(gseq%Ip_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
@@ -542,7 +543,7 @@ pscale=gseq%pax_target/pscale
 !---Update jphi normalization to match Ip target: the exact I_p (A9c) is affine in the jphi scale,
 !   I_p(norm) = ip0 + norm*(ip1 - ip0); past the last node jphi is held, as F*F' is
 ALLOCATE(xn(0:self%npsi),jn(0:self%npsi),jtor(0:self%npsi))
-xn=[0.d0,self%x]; jn=[self%j0,self%jphi]
+xn=[0.d0,xpsi]; jn=[self%j0,self%jphi]
 CALL eval_dIdA(gseq, R_spline, xn, self%npsi+1, jn, pscale, jtor)
 CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip1,extrap=1)
 jn=0.d0
@@ -561,8 +562,8 @@ CALL spline_eval(R_spline,0.d0,0)
 pprime=gseq%P%fp(gseq%plasma_bounds(1))
 self%y0 = 2.d0*(self%j0*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 DO i=1,self%npsi
-  CALL spline_eval(R_spline,self%x(i),0)
-  pprime=gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
+  CALL spline_eval(R_spline,xpsi(i),0)
+  pprime=gseq%P%fp(xpsi(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
   self%yp(i) = 2.d0*(self%jphi(i)*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
 END DO
 ! Disable Ip matching and fix F*F' scale (matching is done here instead)
@@ -574,6 +575,30 @@ gseq%p_scale=pscale
 CALL spline_dealloc(R_spline)
 i=self%set_cofs(self%yp)
 end subroutine jphi_update
+!------------------------------------------------------------------------------
+!> Node locations in normalized poloidal flux (`x` mapped from toroidal flux if wrapped)
+!------------------------------------------------------------------------------
+SUBROUTINE jphi_psi_nodes(self,xpsi,mapped)
+CLASS(jphi_flux_func), INTENT(inout) :: self
+REAL(r8), ALLOCATABLE, INTENT(out) :: xpsi(:) !< Node locations in \f$ 1-\hat{\psi} \f$
+LOGICAL, OPTIONAL, INTENT(out) :: mapped !< `.FALSE.` if on toroidal flux and the map is not built
+INTEGER(i4) :: i
+ALLOCATE(xpsi(self%npsi))
+xpsi=self%x
+IF(PRESENT(mapped))mapped=.TRUE.
+IF(.NOT.ASSOCIATED(self%phi_wrapper))RETURN
+SELECT TYPE(wrap=>self%phi_wrapper)
+  TYPE IS(phi_flux_wrapper)
+    IF(.NOT.wrap%val)CALL oft_abort('Jphi profiles on toroidal flux must use "phi_n_val"', &
+      'jphi_psi_nodes',__FILE__)
+    IF(.NOT.ASSOCIATED(wrap%map))CALL oft_abort('Profile on toroidal flux not attached, call torflux_setup', &
+      'jphi_psi_nodes',__FILE__)
+    IF(PRESENT(mapped))mapped=(wrap%map%ns>=2)
+    DO i=1,self%npsi
+      xpsi(i)=wrap%map%inv(self%x(i))
+    END DO
+END SELECT
+END SUBROUTINE jphi_psi_nodes
 !---------------------------------------------------------------------------------
 !> Area integral over the plasma (inside the LCFS) of a flux function given on
 !! normalized psi nodes (0 at the LCFS, 1 at the axis)
