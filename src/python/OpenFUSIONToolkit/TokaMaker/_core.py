@@ -3335,7 +3335,7 @@ class TokaMaker_equilibrium():
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param compute_geo Compute geometric values for LCFS
         @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f${<R>,<1/R>,<1/R^2>,dV/dPsi}\f$, length of last surface,
-        [r(R_min),r(R_max)], [r(z_min),r(z_max)]
+        [r(R_min),r(R_max)], [r(z_min),r(z_max)] (profiles are NaN on surfaces where the trace failed)
         '''
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
@@ -3358,6 +3358,9 @@ class TokaMaker_equilibrium():
         tokamaker_get_q(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,ctypes.byref(dl),rbounds,zbounds,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        failed = qvals < -1.E98 # Trace failed
+        for vals in (qvals, ravgs):
+            vals[...,failed] = numpy.nan
         ravg_dict = {
             '<R>': ravgs[0,:],
             '<1/R>': ravgs[1,:],
@@ -3415,7 +3418,7 @@ class TokaMaker_equilibrium():
         @param psi Explicit sampling locations in \f$\hat{\psi}\f$
         @param psi_pad End padding (axis and edge) for uniform sampling (ignored if `psi` is not None)
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
-        @result Dictionary of flux surface profiles and scalars
+        @result Dictionary of flux surface profiles (NaN on surfaces where the trace failed) and scalars
         '''
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
@@ -3437,6 +3440,9 @@ class TokaMaker_equilibrium():
         tokamaker_get_fsa(self._equil_ptr,psi.shape[0],psi,qvals,ravgs,fsa_avgs,shape_geo,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
+        failed = qvals < -1.E98 # Trace failed
+        for vals in (qvals, ravgs, fsa_avgs, shape_geo):
+            vals[...,failed] = numpy.nan
         # F is a flux function, so it comes straight from the source profile rather
         # than the trace. The leading zero picks up the axis value, which cannot be traced.
         fpol = self.get_profiles(psi=numpy.concatenate(([0.0], psi_save)))[1]
