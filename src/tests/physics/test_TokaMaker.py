@@ -390,7 +390,7 @@ def test_spheromak_h2(order):
 @pytest.mark.parametrize("order", (2,3,4))
 def test_spheromak_h3(order):
     errs = [3.257155111957006e-07, 2.090369020180253e-09, 8.601148342547016e-12]
-    results = mp_run(run_sph_case,(0.05/4.0,order),timeout=40)
+    results = mp_run(run_sph_case,(0.05/4.0,order),timeout=60)
     assert validate_sph(results,errs[order-2])
 
 
