@@ -220,14 +220,7 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         bash config_cmake.sh
 
-    - name: Build OFT
-      shell: bash
-      working-directory: builds/build_release
-      run: |
-        source ${{ github.workspace }}/setup_env.sh
-        make
-
-    - name: Install OFT
+    - name: Build+Install OFT
       shell: bash
       working-directory: builds/build_release
       run: |
