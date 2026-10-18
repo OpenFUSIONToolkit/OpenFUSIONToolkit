@@ -5,7 +5,9 @@ This file contains Copilot-tailored instructions for the OpenFUSIONToolkit proje
 ## Code review
 
 When reviewing code, please consider and explicitly highlight any issues in the following:
- - **Documentation**: All new or modified functions, classes, and modules should be well-documented using Doxygen-compatible comments. Check for missing or outdated documentation in the codebase and associated documentation files within `src/docs`. Ensure that the code is well-documented and easy to understand. Significant new functionality should be accompanied by an example.
+ - **Documentation**: New or modified functions, classes, and modules in code that Doxygen processes should be well-documented using Doxygen-compatible comments. Check for missing or outdated documentation in the codebase and associated documentation files within `src/docs`. Ensure that the code is well-documented and easy to understand. Significant new functionality should be accompanied by an example.
+
+   **Exception — test and example code:** Doxygen's `INPUT` list in `src/docs/Doxyfile.in` does not include `src/tests/` or `src/examples/`, so Doxygen markup there is never processed. Do **not** request Doxygen-style documentation (`!>`/`!!` markers, or `@param`/`@result` docstring commands) for anything in those directories — adding it would be incorrect, not merely unnecessary. Function-level documentation blocks in test code are optional; do not flag their absence. Brief plain comments or docstrings are welcome there. See "Test and example code" in `AGENTS.md`.
 
  - **Code Style:** Ensure that the code adheres to the project's coding standards and style guidelines. This includes consistent naming conventions, indentation, and formatting. Check for any deviations from the established code style and provide suggestions for improvement.
 
