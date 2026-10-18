@@ -231,7 +231,7 @@ A representative build environment that can be used for creating a testing sandb
 - Doxygen-style comments with `!>` and `!!` markers
 - Module names typically prefixed with `oft_` (e.g., `oft_gs`, `oft_la_base`)
 - Line length: unlimited (`-ffree-line-length-none`), but keep reasonable
-- New functions/subroutines must have Doxygen documentation
+- New functions/subroutines must have Doxygen documentation — this applies to code Doxygen actually processes; see "Test and example code" below
 - All fortran keywords, statements, and built-in functions should be in UPPERCASE 
 - New functions should use `RESULT` style definition instead of leading variable style
 - `INTEGER` and `REAL` definitions should explicitly provide the `KIND`/precision using one of `i4`/`i8` or `r4`/`r8` (defined in `src/base/local.F90`) respectively
@@ -240,12 +240,27 @@ A representative build environment that can be used for creating a testing sandb
 ### Python
 
 - SPDX license header comment block at top of each file
-- New functions/subroutines must have Doxygen documentation using docstrings with `@`-style commands (eg. `@param`, `@result`)
+- New functions/subroutines must have Doxygen documentation using docstrings with `@`-style commands (eg. `@param`, `@result`) — this applies to code Doxygen actually processes; see "Test and example code" below
 - Target Python 3.7+ (for OMFIT compatibility)
 - Use `ctypes` for Fortran interop; wrapper patterns in `_interface.py` files
 - All Python wrappers live under `src/python/OpenFUSIONToolkit/`
 - Balance readability and efficiency; For example, avoid overly long or nested list comprehensions and inline if statements
 - Four space indentation should be used
+
+### Test and example code
+
+Doxygen's `INPUT` list in `src/docs/Doxyfile.in` covers `src/docs`, `base`, `grid`,
+`lin_alg`, `fem`, `physics`, `bin`, and `python` only. Code under `src/tests/` and
+`src/examples/` is **not** scanned, so Doxygen markup there is never processed into
+the documentation.
+
+- **Do not use Doxygen notation in test or example code** — no `!>`/`!!` markers in Fortran, no `@`-style commands (`@param`, `@result`, `@brief`) in Python docstrings. Use plain comments and plain docstrings instead.
+- Brief documentation in these areas is still helpful and welcome: a short line saying what a test covers or what an example demonstrates aids the next reader.
+- Function-level documentation blocks in test code are **optional**.
+
+When reviewing changes, do not flag missing documentation on test functions, and do
+not request Doxygen-style documentation for anything under `src/tests/` or
+`src/examples/` — adding it there would be incorrect, not merely unnecessary.
 
 ### Pull Requests
 
