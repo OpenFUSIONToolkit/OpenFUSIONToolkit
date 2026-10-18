@@ -25,7 +25,7 @@ RUN $CC --version
 RUN $FC --version
 RUN bash config_cmake.sh
 WORKDIR /usr/local/OFT/build_release
-RUN make -j3
+RUN make -j3 oftpy
 RUN make install
 
 ## Stage II
