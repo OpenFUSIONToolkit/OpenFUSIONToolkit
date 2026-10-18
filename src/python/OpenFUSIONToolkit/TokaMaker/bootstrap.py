@@ -826,42 +826,42 @@ def redl_bootstrap(
 
     return jdotb_bs, coeffs
 
-def _validate_psi_grid(values, name, psi_N=None):
-    r'''! Validate (or build) the \f$\hat{\psi}\f$ grid a profile is sampled on
+def _validate_grid(values, name, x=None):
+    r'''! Validate (or build) the normalized radial grid a profile is sampled on
 
     @param values Profile values
     @param name Profile name, used in the raised error message
-    @param psi_N \f$\hat{\psi}\f$ grid `values` is sampled on (strictly increasing, in [0,1]);
-    if `None`, `values` is assumed evenly sampled on [0,1]
-    @result Validated \f$\hat{\psi}\f$ grid
+    @param x Normalized radial grid (\f$\hat{\psi}\f$ or \f$\hat{\Phi}\f$) `values` is sampled on
+    (strictly increasing, in [0,1]); if `None`, `values` is assumed evenly sampled on [0,1]
+    @result Validated grid
     '''
-    n_psi = len(values)
-    if n_psi < 5:
+    n_x = len(values)
+    if n_x < 5:
         raise ValueError("The '{0}' profile needs at least 5 points".format(name))
-    if psi_N is None:
-        return numpy.linspace(0., 1., n_psi)
-    psi_N = numpy.asarray(psi_N, dtype=float)
-    if psi_N.shape != (n_psi,):
-        raise ValueError("psi_N must be 1D and the same length as the '{0}' profile".format(name))
-    if not numpy.all(numpy.isfinite(psi_N)):
-        raise ValueError("psi_N contains non-finite values")
-    if numpy.any(numpy.diff(psi_N) <= 0.0):
-        raise ValueError("psi_N must be strictly increasing")
-    if not (numpy.isclose(psi_N[0], 0.0) and numpy.isclose(psi_N[-1], 1.0)):
-        raise ValueError("psi_N must span [0,1] ({0}, {1})".format(psi_N[0], psi_N[-1]))
-    return psi_N
+    if x is None:
+        return numpy.linspace(0., 1., n_x)
+    x = numpy.asarray(x, dtype=float)
+    if x.shape != (n_x,):
+        raise ValueError("x must be 1D and the same length as the '{0}' profile".format(name))
+    if not numpy.all(numpy.isfinite(x)):
+        raise ValueError("x contains non-finite values")
+    if numpy.any(numpy.diff(x) <= 0.0):
+        raise ValueError("x must be strictly increasing")
+    if not (numpy.isclose(x[0], 0.0) and numpy.isclose(x[-1], 1.0)):
+        raise ValueError("x must span [0,1] ({0}, {1})".format(x[0], x[-1]))
+    return x
 
-def _default_psi_profile(values, name, psi_N=None, scale=1.0):
-    r'''! Build a {'x','y'} profile dict on the validated `psi_N` grid
+def _default_profile(values, name, x=None, scale=1.0):
+    r'''! Build a {'x','y'} profile dict on the validated grid `x`
 
     @param values Profile values
     @param name Profile name, used in the raised error message
-    @param psi_N Normalized flux grid `values` is sampled on (see `_validate_psi_grid`)
+    @param x Normalized radial grid `values` is sampled on (see `_validate_grid`)
     @param scale Multiplicative scaling applied to `values` (e.g. eV -> keV)
-    @result Profile dict {'x': psi_N, 'y': values * scale}
+    @result Profile dict {'x': x, 'y': values * scale}
     '''
     values = numpy.asarray(values)
-    return {'x': _validate_psi_grid(values, name, psi_N=psi_N), 'y': values * scale}
+    return {'x': _validate_grid(values, name, x=x), 'y': values * scale}
 
 ## Deprecated solve_with_bootstrap kwargs (old name -> (new name, default))
 _RENAMED_KWARGS = {'scale_jBS': ('scale_jbs', 1.0),
@@ -933,17 +933,19 @@ def solve_with_bootstrap(mygs,
                          jphi_fixed = None,
                          p_fixed = None,
                          F0 = None,
+                         x = None,
+                         coord = 'psi_n',
                          **kwargs):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
     @param mygs Grad-Shafranov solver object
-    @param ne Electron density profile \f$n_e(\hat{\psi})\f$ [m$^{-3}$]
-    @param Te Electron temperature profile \f$T_e(\hat{\psi})\f$ [eV]
-    @param ni Ion density profile \f$n_i(\hat{\psi})\f$ [m$^{-3}$]
-    @param Ti Ion temperature profile \f$T_i(\hat{\psi})\f$ [eV]
-    @param Zeff Effective charge profile \f$Z_{eff}(\hat{\psi})\f$
+    @param ne Electron density profile \f$n_e(x)\f$ [m$^{-3}$]
+    @param Te Electron temperature profile \f$T_e(x)\f$ [eV]
+    @param ni Ion density profile \f$n_i(x)\f$ [m$^{-3}$]
+    @param Ti Ion temperature profile \f$T_i(x)\f$ [eV]
+    @param Zeff Effective charge profile \f$Z_{eff}(x)\f$
     @param Ip_target Target plasma current \f$I_p\f$ [A]
-    @param inductive_jphi Inductive toroidal current profile \f$j_{ind}(\hat{\psi})\f$
+    @param inductive_jphi Inductive toroidal current profile \f$j_{ind}(x)\f$
     @param Zis List of impurity atomic numbers (default: [1.0])
     @param scale_jbs Scaling factor for bootstrap current (was `scale_jBS`, deprecated)
     @param isolate_edge_jbs If True, isolate edge spike in bootstrap current (was `isolate_edge_jBS`, deprecated)
@@ -953,8 +955,7 @@ def solve_with_bootstrap(mygs,
     @param parameterize_jbs If True, use parameterized edge spike (was `parameterize_jBS`, deprecated)
     @param use_OMFIT_sauter If True, use OMFIT Sauter model
     @param verbose Print iteration progress (Python solver only)
-    @param psi_N \f$\hat{\psi}\f$ grid the profiles are sampled on (strictly increasing, in [0,1]);
-    if `None`, profiles are assumed evenly sampled on [0,1]
+    @param psi_N Deprecated alias of `x`
     @param use_sauter_eps If True (default), use the geometric inverse aspect ratio
       \f$\varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min})\f$ of each surface (`TokaMaker.sauter_fc`).
       If False, use the formula \f$\varepsilon = \langle a\rangle / \langle R\rangle\f$.
@@ -962,11 +963,15 @@ def solve_with_bootstrap(mygs,
       Python solver with `parameterize_jbs`: the 7 edge-spike fit parameters and spike table)
     @param use_python_solve If True, run the deprecated Python iteration; else (default) forward to
       `TokaMaker.solve_bootstrap` (internal Fortran solver)
-    @param jphi_fixed Fixed toroidal current density \f$j_{fixed}(\hat{\psi})\f$ [A/m$^2$] (array or profile dict),
+    @param jphi_fixed Fixed toroidal current density \f$j_{fixed}\f$ [A/m$^2$] on `x` (array or profile dict),
       added to the total without rescaling (internal Fortran solver only)
     @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0), passed to the solver (default: keep the current value)
-    @param p_fixed Additional pressure \f$P_{fixed}(\hat{\psi})\f$ [Pa] (array or profile dict, e.g. fast-ion pressure),
+    @param p_fixed Additional pressure \f$P_{fixed}\f$ [Pa] on `x` (array or profile dict, e.g. fast-ion pressure),
       added to \f$e_C(n_e T_e + n_i T_i)\f$ for the GS pressure but excluded from the bootstrap current (internal Fortran solver only)
+    @param x Normalized radial grid the profiles are sampled on, in `coord` (strictly increasing,
+    in [0,1]); if `None`, profiles are assumed evenly sampled on [0,1]
+    @param coord Coordinate of `x`: `'psi_n'` (default, \f$\hat{\psi}\f$) or `'phi_n'`
+    (\f$\hat{\Phi}\f$, internal solver only; see `TokaMaker.solve_bootstrap`)
     @param kwargs Further TokaMaker.solve_bootstrap options (internal Fortran solver only)
     @result Dictionary of TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$ profiles [A/m$^2$] (see
       doc_tokamaker_current_conventions) on `'psi_n'`: `'jphi_total'`, `'jphi_bs_raw'` (before isolation/scaling),
@@ -974,6 +979,13 @@ def solve_with_bootstrap(mygs,
       the internal solver returns every TokaMaker.solve_bootstrap key. The pre-rename keys `'total_j_phi'`, `'j_BS'`,
       `'j_inductive'`, `'isolated_j_BS'` are deprecated aliases.
     '''
+
+    if psi_N is not None:
+        if x is not None:
+            raise ValueError("pass the grid as x only (psi_N is its deprecated alias)")
+        warn("solve_with_bootstrap(psi_N=) is deprecated: pass the grid as x= and its "
+             "coordinate as coord= ('psi_n' or 'phi_n')", DeprecationWarning, stacklevel=2)
+        x = psi_N
 
     _opts = _pop_renamed_kwargs(kwargs, {'scale_jbs': scale_jbs, 'isolate_edge_jbs': isolate_edge_jbs,
                                          'parameterize_jbs': parameterize_jbs})
@@ -997,14 +1009,14 @@ def solve_with_bootstrap(mygs,
             )
         if inductive_jphi is None:
             raise ValueError("inductive_jphi must be provided with use_python_solve=False")
-        _ne   = ne if isinstance(ne, dict) else _default_psi_profile(ne, 'ne', psi_N=psi_N)
-        _Te   = Te if isinstance(Te, dict) else _default_psi_profile(Te, 'Te', psi_N=psi_N, scale=1e-3)
-        _ni   = ni if isinstance(ni, dict) else _default_psi_profile(ni, 'ni', psi_N=psi_N)
-        _Ti   = Ti if isinstance(Ti, dict) else _default_psi_profile(Ti, 'Ti', psi_N=psi_N, scale=1e-3)
-        _ffp  = inductive_jphi if isinstance(inductive_jphi, dict) else _default_psi_profile(inductive_jphi, 'inductive_jphi', psi_N=psi_N)
-        _jfix = None if jphi_fixed is None else (jphi_fixed if isinstance(jphi_fixed, dict) else _default_psi_profile(jphi_fixed, 'jphi_fixed', psi_N=psi_N))
-        _pfix = None if p_fixed is None else (p_fixed if isinstance(p_fixed, dict) else _default_psi_profile(p_fixed, 'p_fixed', psi_N=psi_N))
-        Zeff_arg = Zeff if isinstance(Zeff, dict) else (_default_psi_profile(Zeff, 'Zeff', psi_N=psi_N) if numpy.ndim(Zeff) > 0 and numpy.size(Zeff) > 1 else float(Zeff))
+        _ne   = ne if isinstance(ne, dict) else _default_profile(ne, 'ne', x=x)
+        _Te   = Te if isinstance(Te, dict) else _default_profile(Te, 'Te', x=x, scale=1e-3)
+        _ni   = ni if isinstance(ni, dict) else _default_profile(ni, 'ni', x=x)
+        _Ti   = Ti if isinstance(Ti, dict) else _default_profile(Ti, 'Ti', x=x, scale=1e-3)
+        _ffp  = inductive_jphi if isinstance(inductive_jphi, dict) else _default_profile(inductive_jphi, 'inductive_jphi', x=x)
+        _jfix = None if jphi_fixed is None else (jphi_fixed if isinstance(jphi_fixed, dict) else _default_profile(jphi_fixed, 'jphi_fixed', x=x))
+        _pfix = None if p_fixed is None else (p_fixed if isinstance(p_fixed, dict) else _default_profile(p_fixed, 'p_fixed', x=x))
+        Zeff_arg = Zeff if isinstance(Zeff, dict) else (_default_profile(Zeff, 'Zeff', x=x) if numpy.ndim(Zeff) > 0 and numpy.size(Zeff) > 1 else float(Zeff))
         _results = mygs.solve_bootstrap(
             ffp_prof=_ffp,
             te_prof=_Te,
@@ -1019,6 +1031,7 @@ def solve_with_bootstrap(mygs,
             isolate_edge_jbs=isolate_edge_jbs,
             parameterize_jbs=parameterize_jbs,
             diagnose_bs=diagnose_bs,
+            coord=coord,
             F0=F0,
             **kwargs
         )
@@ -1026,6 +1039,8 @@ def solve_with_bootstrap(mygs,
         results.update({'scale_j0': 1.0, 'scale_Ip': 1.0})
         return results
     else:
+        if coord != 'psi_n':
+            raise ValueError("coord='%s' requires the internal solver (use_python_solve=False)" % coord)
         if jphi_fixed is not None:
             raise NotImplementedError("jphi_fixed is only supported by the internal Fortran solver (use_python_solve=False)")
         if p_fixed is not None:
@@ -1066,7 +1081,7 @@ def solve_with_bootstrap(mygs,
     # p = n * T * k_B. Since T is in eV, k_B is essentially elementary charge e
     pressure = (EC * ne * Te) + (EC * ni * Ti) # Kinetic profiles same length
 
-    psi_N = _validate_psi_grid(pressure, 'pressure', psi_N=psi_N)
+    psi_N = _validate_grid(pressure, 'pressure', x=x) # coord is 'psi_n' here
 
     # Equilibrium quantities are sampled on the profile grid, with endpoints clipped
     # because the flux-surface tracer cannot resolve the axis or separatrix

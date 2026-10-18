@@ -1811,19 +1811,272 @@ def test_ITER_bootstrap_internal(order):
     assert validate_dict(results, ITER_bootstrap_internal_eq_dict)
 
 # -----------------------------------------------------------------------
-# Test: solve_with_bootstrap() psi_N validation (fails before the solver is used)
+# Test: profiles on normalized toroidal flux (coord='phi_n')
+#
+# Each case solves ITER with psi_N profiles, maps them onto Phi_N with the
+# converged q, re-solves with the toroidal-flux profiles and compares.
+# Differences are set by profile interpolation in the two coordinates.
+# -----------------------------------------------------------------------
+def _torflux_ITER_gs(fe_order, Ip_target=15.6E6):
+    if not os.path.exists('ITER_mesh.h5'):
+        with open('ITER_geom.json','r') as fid:
+            ITER_geom = json.load(fid)
+        gs_mesh = gs_Domain()
+        gs_mesh.define_region('air',0.6,'boundary')
+        gs_mesh.define_region('plasma',0.15,'plasma')
+        gs_mesh.define_region('vacuum1',0.3,'vacuum')
+        gs_mesh.define_region('vacuum2',0.3,'vacuum')
+        gs_mesh.define_region('vv1',0.3,'conductor',eta=6.9E-7)
+        gs_mesh.define_region('vv2',0.3,'conductor',eta=6.9E-7)
+        for key, coil in ITER_geom['coils'].items():
+            if not key.startswith('VS'):
+                gs_mesh.define_region(key,0.2,'coil')
+        gs_mesh.define_region('VSU',0.2,'coil',coil_set='VS',nTurns=1.0)
+        gs_mesh.define_region('VSL',0.2,'coil',coil_set='VS',nTurns=-1.0)
+        gs_mesh.add_polygon(ITER_geom['limiter'],'plasma',parent_name='vacuum1')
+        gs_mesh.add_annulus(ITER_geom['inner_vv'][0],'vacuum1',ITER_geom['inner_vv'][1],'vv1',parent_name='vacuum2')
+        gs_mesh.add_annulus(ITER_geom['outer_vv'][0],'vacuum2',ITER_geom['outer_vv'][1],'vv2',parent_name='air')
+        for key, coil in ITER_geom['coils'].items():
+            parent = 'vacuum1' if key.startswith('VS') else 'air'
+            gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name=parent)
+        mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
+        save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,gs_mesh.get_coils(),gs_mesh.get_conductors(),'ITER_mesh.h5')
+    mygs = TokaMaker(OFT_env(nthreads=-1))
+    mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
+    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
+    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
+    mygs.settings.maxits = 100
+    mygs.setup(order=fe_order,F0=5.3*6.2)
+    mygs.set_coil_vsc({'VS': 1.0})
+    mygs.set_coil_bounds({key: [-50.E6, 50.E6] for key in mygs.coil_sets})
+    mygs.set_targets(Ip=Ip_target, pax=6.2E5)
+    isoflux_pts = np.array([
+        [ 8.20,  0.41], [ 8.06,  1.46], [ 7.51,  2.62], [ 6.14,  3.78], [ 4.51,  3.02],
+        [ 4.26,  1.33], [ 4.28,  0.08], [ 4.49, -1.34], [ 7.28, -1.89], [ 8.00, -0.68]
+    ])
+    x_point = np.array([[5.125, -3.4],])
+    mygs.set_isoflux(np.vstack((isoflux_pts,x_point)))
+    mygs.set_saddles(x_point)
+    reg_terms = [mygs.coil_reg_term({name: 1.0},target=0.0,weight=(2.E-2 if name.startswith('CS1') else 1.E-2))
+                 for name in mygs.coil_sets]
+    reg_terms.append(mygs.coil_reg_term({'#VSC': 1.0},target=0.0,weight=1.E2))
+    mygs.set_coil_reg(reg_terms=reg_terms)
+    return mygs
+
+
+def _torflux_phi_map(mygs):
+    '''Phi_N(psi_N) and dPhi_N/dpsi_N from the converged q profile'''
+    from scipy.integrate import cumulative_trapezoid
+    psi_n, q, _, _, _, _ = mygs.get_q(npsi=400,psi_pad=1.E-4)
+    phi = cumulative_trapezoid(q,psi_n,initial=0.0)
+    return psi_n, phi/phi[-1], q/phi[-1]
+
+
+def _torflux_to_phi(x, pmap):
+    x_phi = np.interp(x,pmap[0],pmap[1])
+    x_phi[0] = 0.0; x_phi[-1] = 1.0
+    return x_phi
+
+
+def _torflux_compare(mygs, ref, its=None):
+    psi = mygs.get_psi(False)
+    _, q, _, _, _, _ = mygs.get_q(npsi=100,psi_pad=1.E-3)
+    stats = mygs.get_stats()
+    return {
+        'psi_err': np.linalg.norm(psi-ref['psi'])/np.linalg.norm(ref['psi']),
+        'q_err': np.max(np.abs(q-ref['q'])/np.abs(ref['q'])),
+        'Ip_err': abs(stats['Ip']-ref['Ip'])/ref['Ip'],
+        'its': its
+    }
+
+
+def _torflux_ref(mygs, its=None):
+    _, q, _, _, _, _ = mygs.get_q(npsi=100,psi_pad=1.E-3)
+    return {'psi': mygs.get_psi(False), 'q': q, 'Ip': mygs.get_stats()['Ip'], 'its': its}
+
+
+def run_ITER_torflux_case(fe_order, test_type, mp_q):
+    try:
+        results = {}
+        if test_type == 'bootstrap':
+            from OpenFUSIONToolkit.TokaMaker.bootstrap import Hmode_profiles, solve_with_bootstrap
+            mygs = _torflux_ITER_gs(fe_order,Ip_target=13.0E6)
+        else:
+            mygs = _torflux_ITER_gs(fe_order)
+        init = lambda: mygs.init_psi(6.3, 0.5, 2.0, 1.4, 0.0)
+        pp = create_power_flux_fun(40,4.0,1.0)
+        if test_type == 'ffp':
+            # FF' and p' as linterp (derivatives w.r.t. Phi_N), then copy and save/load
+            ffp = create_power_flux_fun(40,1.5,2.0)
+            mygs.set_profiles(ffp_prof=ffp,pp_prof=pp)
+            init()
+            _, its = mygs.solve(return_its=True)
+            ref = _torflux_ref(mygs,its)
+            pmap = _torflux_phi_map(mygs)
+            profs = {}
+            for key, prof in (('ffp', ffp), ('pp', pp)):
+                y = prof['y']/np.interp(prof['x'],pmap[0],pmap[2])
+                profs[key] = {'type': 'linterp', 'x': _torflux_to_phi(prof['x'],pmap), 'y': y, 'coord': 'phi_n'}
+            mygs.set_profiles(ffp_prof=profs['ffp'],pp_prof=profs['pp'])
+            init()
+            _, its = mygs.solve(return_its=True)
+            results['phi_n'] = _torflux_compare(mygs,ref,its)
+            results['psi_its'] = ref['its']
+            # Solver map against q: dPhi_N/dpsi_N = q/Q and Phi_N increments = int q dpsi_N/Q
+            from scipy.integrate import cumulative_trapezoid
+            x = np.linspace(0.05,0.95,19)
+            phi_x, jac_x = mygs.get_torflux_map(x)
+            psi_x, _ = mygs.get_torflux_map(phi_x,inverse=True)
+            psi_q, q, _, _, _, _ = mygs.get_q(psi=np.linspace(0.05,0.95,400))
+            Qinv = jac_x/np.interp(x,psi_q,q)
+            dphi = cumulative_trapezoid(q,psi_q,initial=0.0)*np.mean(Qinv)
+            results['jac_err'] = np.max(np.abs(Qinv/np.mean(Qinv)-1.0))
+            results['map_err'] = np.max(np.abs(phi_x-phi_x[0]-np.interp(x,psi_q,dphi)))
+            results['inv_err'] = np.max(np.abs(psi_x-x))
+            # Copy and save/load keep (or rebuild) the map
+            prof0 = np.array(mygs.get_profiles(npsi=60)[1:])
+            eq_copy = mygs.copy_eq()
+            prof_c = np.array(eq_copy.get_profiles(npsi=60)[1:])
+            results['copy_err'] = np.max(np.abs(prof_c-prof0))/np.max(np.abs(prof0))
+            eq_copy.save_TokaMaker('torflux_eq.h5')
+            init()
+            mygs.replace_eq(source_file='torflux_eq.h5')
+            prof_l = np.array(mygs.get_profiles(npsi=60)[1:])
+            results['load_err'] = np.max(np.abs(prof_l-prof0))/np.max(np.abs(prof0))
+        elif test_type == 'jphi':
+            # jphi-linterp current profile (values on Phi_N)
+            x = np.linspace(0.0,1.0,65)
+            jphi = {'type': 'jphi-linterp', 'x': x, 'y': create_power_flux_fun(65,2.25,2.5)['y']}
+            mygs.set_profiles(ffp_prof=jphi,pp_prof=pp)
+            init()
+            _, its = mygs.solve(return_its=True)
+            ref = _torflux_ref(mygs,its)
+            pmap = _torflux_phi_map(mygs)
+            # A bootstrap profile on Phi_N replacing one on psi_N keeps F*F', also across save/load
+            _, f, fp, _, _ = mygs.get_profiles(npsi=60)
+            mygs.set_profiles(ffp_prof=dict(jphi,type='jphi-split-bootstrap',coord='phi_n'))
+            mygs.copy_eq().save_TokaMaker('torflux_carry.h5')
+            mygs.replace_eq(source_file='torflux_carry.h5')
+            _, f1, fp1, _, _ = mygs.get_profiles(npsi=60)
+            results['carry_err'] = np.max(np.abs(f1*fp1-f*fp))/np.max(np.abs(f*fp))
+            mygs.set_profiles(ffp_prof=dict(jphi,x=_torflux_to_phi(x,pmap),coord='phi_n'),pp_prof=pp)
+            init()
+            _, its = mygs.solve(return_its=True)
+            results['phi_n'] = _torflux_compare(mygs,ref,its)
+            results['psi_its'] = ref['its']
+        elif test_type == 'bootstrap':
+            # solve_bootstrap with every profile (jphi, kinetics, pressure, jphi_fixed, p_fixed) on Phi_N
+            n = 257
+            x = np.linspace(0.0,1.0,n)
+            ne = Hmode_profiles(edge=0.35,ped=0.6,core=1.1,rgrid=n,expin=1.6,expout=1.6,widthp=0.35,xphalf=0.965)*1.E20
+            Te = Hmode_profiles(edge=1500.,ped=5000.,core=21000.,rgrid=n,expin=1.3,expout=1.7,widthp=0.1,xphalf=0.965)
+            jind = create_power_flux_fun(n,2.25,2.5)['y']
+            jfix = 1.E5*np.exp(-((x-0.5)/0.15)**2)
+            pfix = 0.2*2.0*1.602176634E-19*ne[0]*Te[0]*np.exp(-((x-0.3)/0.15)**2)  # [Pa]
+            mygs.set_profiles(ffp_prof=create_power_flux_fun(40,1.5,2.0),pp_prof=pp)
+            init()
+            mygs.solve()
+            def run(x_in, coord):
+                return mygs.solve_bootstrap(
+                    ffp_prof={'type': 'jphi-split-bootstrap', 'x': x_in, 'y': jind},
+                    te_prof={'type': 'linterp', 'x': x_in, 'y': Te/1.E3},
+                    ne_prof={'type': 'linterp', 'x': x_in, 'y': ne},
+                    ti_prof={'type': 'linterp', 'x': x_in, 'y': Te/1.E3},
+                    ni_prof={'type': 'linterp', 'x': x_in, 'y': ne},
+                    jphi_fixed_prof={'type': 'linterp', 'x': x_in, 'y': jfix},
+                    p_fixed_prof={'x': x_in, 'y': pfix},
+                    Zeff=1.5, Ip_target=13.0E6, coord=coord)
+            res_psi = run(x,'psi_n')
+            ref = _torflux_ref(mygs)
+            x_phi = _torflux_to_phi(x,_torflux_phi_map(mygs))
+            res_phi = run(x_phi,'phi_n')
+            results['phi_n'] = _torflux_compare(mygs,ref)
+            # Bootstrap current at matching surfaces (interior, away from edge spike)
+            j_ref = np.interp(res_phi['psi_n'],res_psi['psi_n'],res_psi['jphi_bs_final'])
+            mask = (res_phi['psi_n'] > 0.05) & (res_phi['psi_n'] < 0.9)
+            results['jbs_err'] = np.max(np.abs(res_phi['jphi_bs_final'][mask]-j_ref[mask]))/np.max(np.abs(j_ref))
+            # jphi_fixed on Phi_N nodes returns the input values
+            results['jfix_err'] = np.max(np.abs(res_phi['jphi_fixed_final']-jfix))/np.max(jfix)
+            # Node psi_N positions agree with the solver map
+            psi_nodes, _ = mygs.get_torflux_map(x_phi,inverse=True)
+            results['node_err'] = np.max(np.abs(res_phi['psi_n']-psi_nodes))
+            # solve_with_bootstrap: 'psi_n' output; Python solver rejects toroidal coordinates
+            res_swb = solve_with_bootstrap(mygs,ne,Te,ne,Te,1.5,13.0E6,inductive_jphi=jind,x=x_phi,coord='phi_n',
+                                           jphi_fixed=jfix,p_fixed=pfix)
+            psi_nodes, _ = mygs.get_torflux_map(x_phi,inverse=True)
+            results['swb_node_err'] = np.max(np.abs(res_swb['psi_n']-psi_nodes))
+            results['swb_jfix_err'] = np.max(np.abs(res_swb['jphi_fixed_final']-jfix))/np.max(jfix)
+            try:
+                solve_with_bootstrap(mygs,ne,Te,ne,Te,1.5,13.0E6,inductive_jphi=jind,x=x_phi,
+                                     use_python_solve=True,coord='phi_n')
+                results['python_rejected'] = False
+            except ValueError:
+                results['python_rejected'] = True
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+    mp_q.put(results)
+    oftpy_dump_cov()
+
+
+def _torflux_check(res, psi_tol, q_tol, its_ref=None):
+    assert res['psi_err'] < psi_tol
+    assert res['q_err'] < q_tol
+    # I_p is set by the exact 1-D profile quadrature (no FEM rescale in jphi_bs_update): residual up to ~4e-4
+    assert res['Ip_err'] < 5.E-4
+    if its_ref is not None:
+        assert res['its'] <= its_ref + 5
+
+
+@pytest.mark.coverage
+@pytest.mark.parametrize("order", (2,))
+def test_ITER_torflux_ffp(order):
+    results = mp_run(run_ITER_torflux_case,(order,'ffp'),timeout=120)
+    assert results is not None
+    _torflux_check(results['phi_n'],4.E-3,4.E-3,results['psi_its'])
+    assert results['map_err'] < 1.E-4
+    assert results['jac_err'] < 1.E-3
+    assert results['inv_err'] < 1.E-10
+    assert results['copy_err'] < 1.E-12
+    assert results['load_err'] < 5.E-5
+
+
+@pytest.mark.coverage
+@pytest.mark.parametrize("order", (2,))
+def test_ITER_torflux_jphi(order):
+    results = mp_run(run_ITER_torflux_case,(order,'jphi'),timeout=120)
+    assert results is not None
+    _torflux_check(results['phi_n'],1.E-3,2.E-3,results['psi_its'])
+    assert results['carry_err'] < 1.E-3
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("order", (2,))
+def test_ITER_torflux_bootstrap(order):
+    results = mp_run(run_ITER_torflux_case,(order,'bootstrap'),timeout=600)
+    assert results is not None
+    _torflux_check(results['phi_n'],3.E-3,3.E-3)
+    assert results['jbs_err'] < 1.E-2
+    assert results['node_err'] < 1.E-12
+    assert results['swb_node_err'] < 1.E-12
+    assert results['jfix_err'] < 1.E-6
+    assert results['swb_jfix_err'] < 1.E-6
+    assert results['python_rejected']
+
+# Test: solve_with_bootstrap() x validation (fails before the solver is used)
 # -----------------------------------------------------------------------
 @pytest.mark.coverage
 @pytest.mark.parametrize("use_python_solve", (True, False))
-def test_bootstrap_psi_N_validation(use_python_solve):
+def test_bootstrap_x_validation(use_python_solve):
     from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap
     n = 65
     ne = np.full(n, 1.0e20)
     Te = np.full(n, 2.0e3)
     Zeff = np.full(n, 1.7)
-    def call(psi_N, psi_pad=1.E-3, m=n):
+    def call(x=None, psi_pad=1.E-3, psi_N=None, m=n):
         return solve_with_bootstrap(None, ne[:m], Te[:m], ne[:m].copy(), Te[:m].copy(), Zeff[:m],
-                                    1.0e6, inductive_jphi=np.ones(m), psi_pad=psi_pad, psi_N=psi_N,
+                                    1.0e6, inductive_jphi=np.ones(m), psi_pad=psi_pad, x=x, psi_N=psi_N,
                                     use_python_solve=use_python_solve)
     good = np.linspace(0.0, 1.0, n)
     dup = good.copy()
@@ -1851,6 +2104,12 @@ def test_bootstrap_psi_N_validation(use_python_solve):
     if use_python_solve:  # psi_pad is used by the Python solver only
         with pytest.raises(ValueError, match="exceeds the first/last"):
             call(good, psi_pad=0.5)
+    # deprecated alias psi_N: warns, then validated as x
+    with pytest.warns(DeprecationWarning, match="psi_N"):
+        with pytest.raises(ValueError, match="same length"):
+            call(psi_N=good[:-1])
+    with pytest.raises(ValueError, match="x only"):
+        call(good, psi_N=good)
 
 
 # -----------------------------------------------------------------------
