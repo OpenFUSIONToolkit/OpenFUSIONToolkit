@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # SPDX-License-Identifier: LGPL-3.0-only
-'''! Compute a fixed- or free-boundary Grad-Shafranov equilibrium with TokaMaker
+"""Compute a fixed- or free-boundary Grad-Shafranov equilibrium with TokaMaker
 from a JSON case definition.
 
 Usage:
@@ -8,9 +8,7 @@ Usage:
 
 See `../reference.md` for the full case-file schema and `../examples/` for
 complete examples.
-
-@authors TokaMaker agent skill
-'''
+"""
 import argparse
 import json
 import os
@@ -20,10 +18,11 @@ import numpy
 
 
 def _load_tokamaker():
-    '''! Import the OpenFUSIONToolkit python package, honoring `OFT_ROOTPATH`
+    """Import the OpenFUSIONToolkit python package, honoring OFT_ROOTPATH.
 
-    @result Dictionary of the TokaMaker symbols used by this script
-    '''
+    Returns:
+        Dictionary of the TokaMaker symbols used by this script.
+    """
     root_path = os.getenv('OFT_ROOTPATH')
     if root_path is not None:
         sys.path.append(os.path.join(root_path, 'python'))
@@ -51,25 +50,31 @@ def _load_tokamaker():
 
 
 def resolve_path(path, base_dir):
-    '''! Resolve a path from the case file relative to the case file's directory
+    """Resolve a path from the case file relative to the case file's directory.
 
-    @param path Path as given in the case file
-    @param base_dir Directory containing the case file
-    @result Absolute path
-    '''
+    Args:
+        path: Path as given in the case file.
+        base_dir: Directory containing the case file.
+
+    Returns:
+        Absolute path.
+    """
     if os.path.isabs(path):
         return path
     return os.path.normpath(os.path.join(base_dir, path))
 
 
 def build_lcfs(lcfs_spec, base_dir, api):
-    '''! Build the LCFS contour and X-point list from the case `lcfs` block
+    """Build the LCFS contour and X-point list from the case "lcfs" block.
 
-    @param lcfs_spec `lcfs` block of the case file
-    @param base_dir Directory containing the case file
-    @param api Dictionary of TokaMaker symbols from @ref _load_tokamaker
-    @result (contour [npts,2], xpoints [nx,2] or `None`, moments dictionary)
-    '''
+    Args:
+        lcfs_spec: "lcfs" block of the case file.
+        base_dir: Directory containing the case file.
+        api: Dictionary of TokaMaker symbols from _load_tokamaker().
+
+    Returns:
+        Tuple of (contour [npts,2], xpoints [nx,2] or None, moments dictionary).
+    """
     lcfs_type = lcfs_spec.get('type', 'shape')
     if lcfs_type == 'points':
         contour = numpy.asarray(lcfs_spec['points'], dtype=numpy.float64)
@@ -128,13 +133,16 @@ def build_lcfs(lcfs_spec, base_dir, api):
 
 
 def moments_from_contour(contour):
-    '''! Estimate Miller-like shaping moments from an explicit LCFS contour
+    """Estimate Miller-like shaping moments from an explicit LCFS contour.
 
-    Used only to provide sensible defaults for `init_psi()`.
+    Used only to provide sensible defaults for init_psi().
 
-    @param contour LCFS point list [npts,2]
-    @result Dictionary of approximate shaping moments
-    '''
+    Args:
+        contour: LCFS point list [npts,2].
+
+    Returns:
+        Dictionary of approximate shaping moments.
+    """
     r_min, r_max = contour[:, 0].min(), contour[:, 0].max()
     z_min, z_max = contour[:, 1].min(), contour[:, 1].max()
     r0 = 0.5*(r_max + r_min)
@@ -150,12 +158,15 @@ def moments_from_contour(contour):
 
 
 def build_profile(prof_spec, api):
-    '''! Build a flux-function profile dictionary from a case-file profile block
+    """Build a flux-function profile dictionary from a case-file profile block.
 
-    @param prof_spec Profile block (`None` or `{'type': 'default'}` to leave unset)
-    @param api Dictionary of TokaMaker symbols from @ref _load_tokamaker
-    @result Profile dictionary for `set_profiles()`, or `None`
-    '''
+    Args:
+        prof_spec: Profile block (None or {'type': 'default'} to leave unset).
+        api: Dictionary of TokaMaker symbols from _load_tokamaker().
+
+    Returns:
+        Profile dictionary for set_profiles(), or None.
+    """
     if prof_spec is None:
         return None
     prof_type = prof_spec.get('type', 'power')
@@ -177,15 +188,18 @@ def build_profile(prof_spec, api):
 
 
 def setup_mesh(mygs, case, base_dir, lcfs_contour, api):
-    '''! Load an existing mesh or generate a fixed-boundary mesh from the LCFS
+    """Load an existing mesh or generate a fixed-boundary mesh from the LCFS.
 
-    @param mygs TokaMaker instance
-    @param case Full case dictionary
-    @param base_dir Directory containing the case file
-    @param lcfs_contour LCFS point list [npts,2]
-    @param api Dictionary of TokaMaker symbols from @ref _load_tokamaker
-    @result True if the mesh defines coils/conductors (free-boundary capable)
-    '''
+    Args:
+        mygs: TokaMaker instance.
+        case: Full case dictionary.
+        base_dir: Directory containing the case file.
+        lcfs_contour: LCFS point list [npts,2].
+        api: Dictionary of TokaMaker symbols from _load_tokamaker().
+
+    Returns:
+        True if the mesh defines coils/conductors (free-boundary capable).
+    """
     mesh_file = case.get('mesh_file')
     if mesh_file is not None:
         mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = \
@@ -210,11 +224,12 @@ def setup_mesh(mygs, case, base_dir, lcfs_contour, api):
 
 
 def apply_coil_settings(mygs, coil_spec):
-    '''! Apply VSC definition, current bounds, and current regularization
+    """Apply VSC definition, current bounds, and current regularization.
 
-    @param mygs TokaMaker instance
-    @param coil_spec `coils` block of the case file
-    '''
+    Args:
+        mygs: TokaMaker instance.
+        coil_spec: "coils" block of the case file.
+    """
     vsc = coil_spec.get('vsc')
     if vsc:
         mygs.set_coil_vsc(vsc)
@@ -255,12 +270,15 @@ def apply_coil_settings(mygs, coil_spec):
 
 
 def init_psi_args(case, moments):
-    '''! Determine `init_psi()` arguments from the case file and LCFS moments
+    """Determine init_psi() arguments from the case file and LCFS moments.
 
-    @param case Full case dictionary
-    @param moments Shaping moments of the LCFS
-    @result Argument dictionary for `init_psi()` (empty for a uniform-current start)
-    '''
+    Args:
+        case: Full case dictionary.
+        moments: Shaping moments of the LCFS.
+
+    Returns:
+        Argument dictionary for init_psi() (empty for a uniform-current start).
+    """
     init_spec = case.get('init', {})
     if init_spec.get('uniform', False):
         return {}
@@ -276,14 +294,15 @@ def init_psi_args(case, moments):
 
 
 def write_plot(mygs, filename, has_regions, isoflux_pts, lcfs_contour):
-    '''! Write a flux-surface plot of the converged equilibrium
+    """Write a flux-surface plot of the converged equilibrium.
 
-    @param mygs TokaMaker instance
-    @param filename Output image path
-    @param has_regions Does the mesh define coils/conductors?
-    @param isoflux_pts Isoflux constraint points to overlay (or `None`)
-    @param lcfs_contour Target LCFS contour to overlay when no constraints were used
-    '''
+    Args:
+        mygs: TokaMaker instance.
+        filename: Output image path.
+        has_regions: Does the mesh define coils/conductors?
+        isoflux_pts: Isoflux constraint points to overlay (or None).
+        lcfs_contour: Target LCFS contour to overlay when no constraints were used.
+    """
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
