@@ -92,5 +92,6 @@ The following examples illustrate usage of \ref OpenFUSIONToolkit.TokaMaker.mesh
  - \subpage doc_tMaker_LTX_ex1
  - \subpage doc_tMaker_dipole_ex1
  - \subpage doc_tMaker_wham_ex1
+ - \subpage doc_tMaker_TCS_ex1
  - \subpage doc_tMaker_ARC_ex1
  - \subpage doc_tMaker_SPARC_ex1
