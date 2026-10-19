@@ -57,6 +57,7 @@ run_test WHAM WHAM_eq_ex.ipynb
 
 # TCS cases
 run_test TCS TCS_mesh_ex.ipynb
+run_test TCS TCS_eq_ex.ipynb
 
 # Advanced workflow cases
 run_test AdvancedWorkflows/Pulse_Design CUTE_pulse_ex.ipynb 
