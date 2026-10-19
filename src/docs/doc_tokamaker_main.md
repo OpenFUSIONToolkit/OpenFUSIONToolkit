@@ -49,6 +49,8 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 
 ### Mirror Equilibria
  - \subpage doc_tMaker_wham_ex2
+
+### FRC Equilibria
  - \subpage doc_tMaker_TCS_ex2
 
 ### Other workflows/examples
