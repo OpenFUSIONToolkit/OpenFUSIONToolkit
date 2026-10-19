@@ -795,6 +795,8 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
     mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001)
     mygs.save_ifile('tokamaker_ext.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,profile_derivs=True,psi_bounds=True)
     eq_info.update(ifile_errors(mygs,'tokamaker_ext.ifile'))
+    mygs.save_ifile('tokamaker_axis.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,axis_pack=1.E-4)
+    eq_info['ifile_psi_err_axis'] = ifile_errors(mygs,'tokamaker_axis.ifile')['ifile_psi_err']
     # Save final one
     mp_q.put([eq_info])
     oftpy_dump_cov()
@@ -895,6 +897,13 @@ def test_ITER_eq(order,helicity):
     assert results[0]['ifile_ffp_err'] < 1.E-10
     assert results[0]['ifile_pp_err'] < 1.E-10
     assert results[0]['ifile_bounds_err'] < 1.E-12
+    # Axis zone: first surface at axis_pack, spacing growing smoothly into the LCFS-packed points
+    ifile_axis = read_ifile('tokamaker_axis.ifile')
+    x = (ifile_axis['psi']-ifile_axis['psi_bounds'][0])/(ifile_axis['psi_bounds'][1]-ifile_axis['psi_bounds'][0])
+    dx = np.diff(x)
+    assert abs(x[1]-1.E-4) < 1.E-10
+    assert np.all(dx > 0) and np.max(dx[1:]/dx[:-1]) < 1.7
+    assert results[0]['ifile_psi_err_axis'] < 1.E-10
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
