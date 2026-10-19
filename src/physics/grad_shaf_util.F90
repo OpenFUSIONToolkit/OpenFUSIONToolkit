@@ -953,8 +953,10 @@ end subroutine gs_load_tokamaker
 !! 6-7. R(ntheta,npsi), Z(ntheta,npsi)
 !! 8-9. F*dF/dpsi, dp/dpsi (only if @p profile_derivs)
 !! 10. [psi_axis, psi_LCFS], unpadded (only if @p psi_bounds)
+!! Flux points: see @ref ifile_psi_nodes.
 !---------------------------------------------------------------------------
-subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs,psi_bounds,error_str)
+subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs,psi_bounds,error_str, &
+  axis_pack)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Output filename
 integer(4), intent(in) :: npsi !< Number of points in flux coordinate
@@ -966,14 +968,15 @@ LOGICAL, OPTIONAL, INTENT(in) :: single_prec !< Save file with single precision 
 LOGICAL, OPTIONAL, INTENT(in) :: profile_derivs !< Append F*dF/dpsi and dp/dpsi records? (extends the format)
 LOGICAL, OPTIONAL, INTENT(in) :: psi_bounds !< Append the unpadded [psi_axis, psi_LCFS] record? (extends the format)
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str !< Error message (empty on success)
+REAL(8), OPTIONAL, INTENT(in) :: axis_pack !< Normalized flux of the innermost surface of a geometric axis zone (0: none)
 type(gsinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
-real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr,bounds(2)
+real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr,xa,bounds(2)
 real(8), allocatable :: ptout(:,:)
-real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),rzc(:,:,:),qf(:)
+real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),rzc(:,:,:),qf(:),un(:)
 real(8), parameter :: tol=1.d-10
-integer(4) :: j,k,cell,io_unit
+integer(4) :: j,k,cell,io_unit,ierr
 LOGICAL :: do_pack,save_single,save_derivs,save_bounds,cc_done
 LOGICAL, allocatable :: ok(:)
 TYPE(spline_type) :: rz
@@ -991,6 +994,20 @@ IF(PRESENT(pack_lcfs))do_pack=pack_lcfs
 IF(PRESENT(single_prec))save_single=single_prec
 IF(PRESENT(profile_derivs))save_derivs=profile_derivs
 IF(PRESENT(psi_bounds))save_bounds=psi_bounds
+!---Flux points
+xa=0.d0
+IF(PRESENT(axis_pack))xa=axis_pack/(1.d0-psi_pad)
+ALLOCATE(un(npsi))
+CALL ifile_psi_nodes(npsi,do_pack,xa,un,ierr)
+IF(ierr/=0)THEN
+  DEALLOCATE(un)
+  IF(PRESENT(error_str))THEN
+    error_str="axis_pack must be below the LCFS and leave npsi room for the axis zone"
+    CALL oft_decrease_indent
+    RETURN
+  END IF
+  CALL oft_abort('Invalid axis_pack','gs_save_ifile',__FILE__)
+END IF
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -1040,15 +1057,12 @@ ALLOCATE(rout(ntheta,npsi))
 ALLOCATE(zout(ntheta,npsi))
 !---Surface flux, F, pressure and their derivatives
 do j=2,npsi
-  IF(do_pack)THEN
-    cout(j,1) = xr*(1.d0-(j-1)/REAL(npsi-1,8))**2 + x1
-  ELSE
-    cout(j,1) = xr*(1.d0-(j-1)/REAL(npsi-1,8)) + x1
-  END IF
+  cout(j,1) = xr*un(j) + x1
   cout(j,2)=gs_fpol(gseq,cout(j,1))
   cout(j,3)=gseq%p_scale*gseq%P%f(cout(j,1))/mu0
   CALL ifile_derivs(gseq,cout(j,1),cout(j,2),cout(j,5:6))
 end do
+DEALLOCATE(un)
 !---Surfaces at uniform polar angle from the contour quadrature (exact on the FE surface);
 !---the field-line tracer below is the deprecated method and the fallback
 cc_done=.FALSE.
@@ -1231,6 +1245,71 @@ CALL oft_decrease_indent
 !---
 DEALLOCATE(cout,rout,zout)
 end subroutine gs_save_ifile
+!------------------------------------------------------------------------------
+!> i-file flux points, as the fraction of the padded axis-to-LCFS flux left to the LCFS (`u(1)=1` is the axis)
+!!
+!! A surface at fraction \f$ x \f$ from the axis has \f$ u=1-x \f$. Without an axis zone (`xa=0`)
+!! \f$ x_j=f(s_j) \f$, \f$ s_j=(j-1)/(n_\psi-1) \f$, with \f$ f(s)=1-(1-s)^2 \f$ if `pack`, else \f$ f(s)=s \f$.
+!! With one, surfaces sit at unit steps of \f$ C(s)=m s+\ln[f\,(x_a+f_1)/(x_a(f+f_1))]/\ln 1.5 \f$ from
+!! \f$ f=x_a \f$ to \f$ f=1 \f$ (\f$ f_1=f(s_2) \f$): the spacing grows by about 1.5 per surface while \f$ f \ll f_1 \f$
+!! and follows \f$ f \f$ beyond. The zone takes \f$ \ln[(x_a+f_1)/(x_a(1+f_1))]/\ln 1.5 \f$ of the surfaces.
+!------------------------------------------------------------------------------
+SUBROUTINE ifile_psi_nodes(npsi,pack,xa,u,ierr)
+INTEGER(i4), INTENT(in) :: npsi !< Number of flux points
+LOGICAL, INTENT(in) :: pack !< Quadratic packing toward the LCFS?
+REAL(r8), INTENT(in) :: xa !< Innermost surface of the axis zone, as a fraction from the axis (0: no zone)
+REAL(r8), INTENT(out) :: u(npsi) !< Flux points (1 at the axis, 0 at the padded LCFS)
+INTEGER(i4), INTENT(out) :: ierr !< 1 if the axis zone does not fit
+REAL(r8), PARAMETER :: lr=LOG(1.5d0)
+REAL(r8) :: s,f1,sa,m,lo,hi
+INTEGER(i4) :: j,k
+ierr=0
+u(1)=1.d0
+IF(xa<=0.d0)THEN
+  DO j=2,npsi
+    s=(j-1)/REAL(npsi-1,r8)
+    IF(pack)THEN
+      u(j)=(1.d0-s)**2
+    ELSE
+      u(j)=1.d0-s
+    END IF
+  END DO
+  RETURN
+END IF
+IF(xa>=1.d0)THEN
+  ierr=1
+  RETURN
+END IF
+f1=pfun(1.d0/REAL(npsi-1,r8))
+sa=xa
+IF(pack)sa=1.d0-SQRT(1.d0-xa)
+m=(npsi-2-LOG((xa+f1)/(xa*(1.d0+f1)))/lr)/(1.d0-sa)
+IF(m<=0.d0)THEN
+  ierr=1
+  RETURN
+END IF
+!---Bisection for C(s)=C(sa)+j-2
+DO j=2,npsi-1
+  lo=sa; hi=1.d0
+  DO k=1,100
+    s=0.5d0*(lo+hi)
+    IF(m*s+LOG(pfun(s)*(xa+f1)/(xa*(pfun(s)+f1)))/lr<m*sa+(j-2))THEN
+      lo=s
+    ELSE
+      hi=s
+    END IF
+  END DO
+  u(j)=1.d0-pfun(s)
+END DO
+u(npsi)=0.d0
+CONTAINS
+!> Packing \f$ f(s) \f$
+PURE REAL(r8) FUNCTION pfun(s)
+REAL(r8), INTENT(in) :: s
+pfun=s
+IF(pack)pfun=1.d0-(1.d0-s)**2
+END FUNCTION pfun
+END SUBROUTINE ifile_psi_nodes
 !------------------------------------------------------------------------------
 !> F*dF/dpsi and dp/dpsi at `psi` (`fval` is F there)
 !------------------------------------------------------------------------------
