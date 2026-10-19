@@ -240,7 +240,7 @@ class JAMfit():
         self.freq_labels = None
         if freq_response is not None:
             self.freq_vecs, self.freq_labels = self.compute_freq_response_basis(
-                existing_basis=basis, verbose=verbose, **freq_response
+                verbose=verbose, **freq_response
             )
             basis = numpy.vstack([basis, self.freq_vecs])
 
@@ -330,11 +330,12 @@ class JAMfit():
         self.reduced_created_flag = True
         return self.torus_reduced
     
-    def compute_freq_response_basis(self, fil_indices, num_non_fil_coils, freqs=None, existing_basis=None, dup_tol=1.E-3, verbose=False):
+    def compute_freq_response_basis(self, fil_indices, num_non_fil_coils, freqs=None, verbose=False):
         '''! Compute wall-current basis vectors from the frequency response to chosen plasma filaments.
         Fast events (e.g. a current quench) drive a flux-conserving wall response that can be spread
         over many short-time-constant eigenmodes, so a truncated eigenbasis may miss it. This method
         computes that response directly and returns it as extra basis vectors for the reduced model.
+        The vectors are forced-response patterns, not eigenmodes (they have no L/R time of their own).
 
         For a filament carrying 1 A at angular frequency w, the wall currents solve
         `(R + i w L) I = -i w M_fil`, i.e. `I = -i w (R + i w L)^-1 M_fil`, where `M_fil` is the
@@ -344,11 +345,17 @@ class JAMfit():
           - freq = 0 (resistive limit, `fr_limit=2`): `I = -i R^-1 M_fil` (per unit w), purely imaginary.
           - finite freq: both the in-phase (real) and quadrature (imaginary) parts are used.
 
-        Each candidate vector is Gram-Schmidt orthogonalized, in the R inner product `<a,b> = a^T R b`,
-        against `existing_basis` and the vectors kept before it, then normalized so `v^T R v = 1`. This
-        matches ThinCurr eigenvectors, which are R-orthonormal. A candidate is skipped (with a warning)
-        when the fraction of it that is new, `||r||_R / ||v||_R`, is below `dup_tol`, so near-duplicate
-        filaments cannot make the reduced inductance matrix singular.
+        Each response is kept as computed (it is not orthogonalized against the eigenmodes), only scaled so
+        `v^T R v = 1`, the same normalization as ThinCurr eigenvectors. The overlap with the eigenmodes is
+        part of the physical response and is kept: removing it would change the current pattern the vector
+        carries. The combined basis is therefore not R-orthonormal and the reduced `R` is not the identity;
+        `ThinCurr_reduced` uses the full reduced `L` and `R`, so this is fine for time-dependent runs.
+
+        Suggested use: one or two filaments (e.g. plasma centre and the end position of a VDE) at a single
+        frequency on the disruption time scale, `f ~ 1/(2 pi tau_CQ)`. The inductive limit alone tends to put too
+        much current on the wall surface closest to the plasma. Avoid pairs of drives with nearly identical
+        responses (e.g. `numpy.inf` together with a frequency far above the wall rates, where `w tau >> 1`): they
+        make the reduced inductance matrix nearly singular.
 
         Requires @ref setup_JAMfit (needs `self.torus` with L, R and Mcoil).
 
@@ -356,20 +363,16 @@ class JAMfit():
         @param num_non_fil_coils int, number of non-filament Icoils listed before the filaments in the XML
         @param freqs float or list of float, drive frequencies `[Hz]`; `numpy.inf` = inductive limit,
                `0` = resistive limit (default: None -> `[numpy.inf]`)
-        @param existing_basis numpy.ndarray, `(nbasis, nelems)` vectors already in the basis, e.g. the selected
-               eigenmodes (default: None)
-        @param dup_tol float, skip a candidate when less than this fraction of it is new (default: 1.E-3)
-        @param verbose bool, if True, prints the new fraction for each candidate (default: False)
-        @result numpy.ndarray, kept basis vectors `(nkept, nelems)`, R-orthonormal and R-orthogonal to `existing_basis`
-        @result list of tuple, `(filament index, freq [Hz], 'real' or 'imag')` source of each kept vector
+        @param verbose bool, if True, prints each kept vector and its R-norm before scaling (default: False)
+        @result numpy.ndarray, basis vectors `(nvecs, nelems)`, each scaled to `v^T R v = 1`
+        @result list of tuple, `(filament index, freq [Hz], 'real' or 'imag')` source of each vector
 
         Example
         -------
         >>> # Disruption with the plasma staying near the centre: one filament, inductive limit
         >>> vecs, labels = jam.compute_freq_response_basis([center_fil], num_non_fil_coils=n_coils)
-        >>> # VDE then quench: centre and end-position filaments, inductive limit and 500 Hz
-        >>> vecs, labels = jam.compute_freq_response_basis([center_fil, vde_end_fil], n_coils,
-        ...                                                freqs=[numpy.inf, 500.0], existing_basis=eig_basis)
+        >>> # VDE then quench with tau_CQ ~ 19 ms: centre and end-position filaments at f_CQ = 1/(2 pi tau_CQ) ~ 8.3 Hz
+        >>> vecs, labels = jam.compute_freq_response_basis([center_fil, vde_end_fil], n_coils, freqs=[8.3])
         '''
         if freqs is None:
             freqs = [numpy.inf]
@@ -378,22 +381,8 @@ class JAMfit():
             self.Mcoil = self.torus.compute_Mcoil()
         Rmat = self.torus.Rmat  # scipy sparse (nelems, nelems)
 
-        # --- Orthonormal (in R) basis so far, stored with R*e to avoid repeated sparse products ---
-        ortho_vecs = []
-        ortho_Rvecs = []
-        if existing_basis is not None:
-            for v in numpy.atleast_2d(existing_basis):
-                r = numpy.array(v, dtype=numpy.float64)
-                for e, Re in zip(ortho_vecs, ortho_Rvecs):
-                    r -= numpy.dot(Re, r)*e
-                Rr = Rmat @ r
-                r_norm = numpy.sqrt(numpy.dot(r, Rr))
-                if r_norm > 0.0:
-                    ortho_vecs.append(r/r_norm)
-                    ortho_Rvecs.append(Rr/r_norm)
-        n_existing = len(ortho_vecs)
-
         # --- Frequency response for each filament and frequency ---
+        vecs = []
         labels = []
         for fil in fil_indices:
             fdriver = numpy.zeros((2, self.torus.nelems))
@@ -409,29 +398,19 @@ class JAMfit():
                     result = self.torus.compute_freq_response(fdriver=fdriver, freq=freq)
                     candidates = [(result[0, :], 'real'), (result[1, :], 'imag')]
 
-                # --- Modified Gram-Schmidt in the R inner product, with duplicate guard ---
+                # --- scale each response to v^T R v = 1 (shape unchanged) ---
                 for v, part in candidates:
                     v_norm = numpy.sqrt(numpy.dot(v, Rmat @ v))
                     if v_norm == 0.0:
                         print(f"Skipping filament {fil} at {freq} Hz ({part}): zero response")
                         continue
-                    r = v.copy()
-                    for e, Re in zip(ortho_vecs, ortho_Rvecs):
-                        r -= numpy.dot(Re, r)*e
-                    Rr = Rmat @ r
-                    r_norm = numpy.sqrt(max(numpy.dot(r, Rr), 0.0))
-                    frac_new = r_norm/v_norm
-                    if frac_new < dup_tol:
-                        print(f"Skipping filament {fil} at {freq} Hz ({part}): only {frac_new:.2e} of it is new")
-                        continue
                     if verbose:
-                        print(f"Keeping filament {fil} at {freq} Hz ({part}): {frac_new:.2e} of it is new")
-                    ortho_vecs.append(r/r_norm)
-                    ortho_Rvecs.append(Rr/r_norm)
+                        print(f"Keeping filament {fil} at {freq} Hz ({part}): ||v||_R = {v_norm:.3e} before scaling")
+                    vecs.append(v/v_norm)
                     labels.append((fil, float(freq), part))
 
-        new_vecs = numpy.array(ortho_vecs[n_existing:]).reshape((-1, self.torus.nelems))
-        print(f"Frequency response: kept {new_vecs.shape[0]} vectors from {len(fil_indices)*len(freqs)} filament/frequency drives")
+        new_vecs = numpy.array(vecs).reshape((-1, self.torus.nelems))
+        print(f"Frequency response: {new_vecs.shape[0]} vectors from {len(fil_indices)} filament(s) x {len(freqs)} frequency(ies)")
         return new_vecs, labels
 
     # ============================================
