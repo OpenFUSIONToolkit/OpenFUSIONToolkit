@@ -29,7 +29,7 @@ new meshes, see \ref doc_gs_main_mesh_ex.
 ### Fixed Boundary Equilibria
  - \subpage doc_tMaker_fixed_ex1
  - \subpage doc_tMaker_fixed_ex2
- - \subpage doc_tMaker_fixed_ex3
+ - \subpage doc_tMaker_fixed_ex4
 
 ### Free Boundary Equilibria
  - \subpage doc_tMaker_ITER_ex2
