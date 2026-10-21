@@ -206,9 +206,7 @@ TYPE :: gs_factory
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_bounds => NULL() !< Coil current bounds
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_nturns => NULL() !< Number of turns for each coil in each region
   REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils => NULL() !< Coil mutual inductance matrix
-  REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils_asym => NULL() !< Lcoils minus the one-directional
-    !< quadrature gs_wall_source actually picks up; added back on the RHS so operator and RHS
-    !< use the SAME (symmetric) mutuals. See gs_wall_source and the assembly loop.
+  REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils_asym => NULL() !< Lcoils minus the one-directional coil mutuals
   LOGICAL :: free = .FALSE. !< Computing free-boundary equilibrium?
   LOGICAL :: compute_chi = .FALSE. !< Compute toroidal field potential?
   LOGICAL :: plot_step = .TRUE. !< Save solver steps for plotting
@@ -797,7 +795,7 @@ type(oft_lag_brinterp) :: psi_eval
 integer(4) :: i,j,k,mind,nCon,ierr
 integer(4), allocatable :: cells(:)
 real(r8) :: itor,curr,f(3),goptmp(3,4),pol_val(1),v,pt(2),theta
-real(r8) :: Lraw_ij,Lraw_ji !< one-directional coil mutual integrals, see below
+real(r8) :: Lraw_ij,Lraw_ji
 real(r8), allocatable :: err_mat(:,:),rhs(:),err_inv(:,:),currs(:)
 character(LEN=3) :: coil_tag
 character(LEN=2) :: cond_tag,eig_tag
@@ -933,16 +931,7 @@ DO i=1,self%ncoils
       CALL gs_coil_mutual(self,j,self%psi_coil(i)%f,Lraw_ji)
       self%Lcoils(i,j)=(Lraw_ij+Lraw_ji)/2.d0
       self%Lcoils(j,i)=self%Lcoils(i,j)
-      !---The coil rows of the time-dependent operator take Lcoils/dt, while their right-hand
-      !   side gets the same inductance implicitly, as the quadrature of psi over the coil
-      !   region in gs_wall_source.  That quadrature is the ONE-DIRECTIONAL integral: row i
-      !   picks up Lraw(i,j) from coil j, not the average stored above.  Left uncorrected the
-      !   operator and RHS differ by (Lraw(i,j)-Lraw(j,i))/2 -- ~2e-5 relative on the SPARC
-      !   mesh, but committed once per STEP, so the Vcoil error grows with the step count and
-      !   refining dt makes the answer monotonically worse.  Record the difference here and
-      !   add it back on the RHS, which keeps Lcoils symmetric: the symmetric average is also
-      !   the more accurate mutual, being 1.3-4.4x closer to the analytic value than either
-      !   one-directional integral.
+      ! Difference from the one-directional integral, used to correct the RHS in gs_wall_source
       self%Lcoils_asym(i,j)=self%Lcoils(i,j)-Lraw_ij
       self%Lcoils_asym(j,i)=self%Lcoils(j,i)-Lraw_ji
     END IF
@@ -1545,17 +1534,15 @@ IF(self%ncoils>0)THEN
   CALL b%get_local(btmp_coils,2)
   ! CALL dpsi_dt%get_local(coil_vals,2)
 ENDIF
-!---Make the RHS use the SAME mutuals as the operator.  The quadrature below picks up the
-!   one-directional integral Lraw(l,j) from coil j, while the operator row takes the symmetric
-!   Lcoils(l,j)/dt.  Lcoils_asym holds the difference, so adding it here leaves both sides on
-!   the symmetric (and more accurate) mutuals.  Block 2 carries the previous Vcoil currents
-!   already divided by dt, matching the scaling of the quadrature.
+!---Correct coil rows to the symmetric mutuals used in the operator (block 2 holds coil currents/dt,
+!   entry ncoils+1 the virtual VSC, which acts through the coils weighted by coil_vcont)
 IF(self%ncoils>0)THEN
   CALL dpsi_dt%get_local(coil_vals,2)
   DO l=1,self%ncoils
     IF(self%Rcoils(l)<=0.d0)CYCLE
     btmp_coils(l)=btmp_coils(l) &
-      +DOT_PRODUCT(self%Lcoils_asym(l,1:self%ncoils),coil_vals(1:self%ncoils))
+      +DOT_PRODUCT(self%Lcoils_asym(l,1:self%ncoils),coil_vals(1:self%ncoils)) &
+      +DOT_PRODUCT(self%Lcoils_asym(l,1:self%ncoils),self%coil_vcont)*coil_vals(self%ncoils+1)
   END DO
   DEALLOCATE(coil_vals)
 END IF
@@ -5829,6 +5816,7 @@ IF(ASSOCIATED(self%coil_bounds))DEALLOCATE(self%coil_bounds)
 IF(ASSOCIATED(self%saddle_cmask))DEALLOCATE(self%saddle_cmask)
 IF(ASSOCIATED(self%saddle_pmask))DEALLOCATE(self%saddle_pmask)
 IF(ASSOCIATED(self%Lcoils))DEALLOCATE(self%Lcoils)
+IF(ASSOCIATED(self%Lcoils_asym))DEALLOCATE(self%Lcoils_asym)
 !
 IF(ASSOCIATED(self%Rcoils))DEALLOCATE(self%Rcoils)
 IF(ASSOCIATED(self%coils_dt))DEALLOCATE(self%coils_dt)
