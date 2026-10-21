@@ -663,10 +663,6 @@ IF(PRESENT(save_file))THEN
         END IF
       END IF
       !---Coil<->coil mutuals.  Without these the cache is unusable for a model with Vcoils:
-      !---tw_compute_Lmat_coils, the only place Acoil2coil is built, is called AFTER the early
-      !---return below, so a cache hit left it unassociated and thincurr_Lmat rejected the model
-      !---with "Coil mutuals required if, # of Vcoils > 0".  A cache written before this record
-      !---existed hits EOF here, falls back to a full rebuild, and is rewritten with it.
       IF(exists.AND.(tw_obj%n_vcoils>0))THEN
         IF(ASSOCIATED(tw_obj%Acoil2coil))DEALLOCATE(tw_obj%Acoil2coil)
         ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
@@ -832,8 +828,6 @@ IF(PRESENT(save_file))THEN
     WRITE(io_unit)tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils
     WRITE(io_unit)tw_obj%Ael2coil
     WRITE(io_unit)tw_obj%Ael2dr
-    !---Ael2dr above is already complete: tw_compute_Lmat_coils has filled its Vcoil rows and
-    !---applied the mu0/4pi scaling before this point, so only Acoil2coil is still missing.
     IF(tw_obj%n_vcoils>0)WRITE(io_unit)tw_obj%Acoil2coil
     CLOSE(io_unit)
   END IF
