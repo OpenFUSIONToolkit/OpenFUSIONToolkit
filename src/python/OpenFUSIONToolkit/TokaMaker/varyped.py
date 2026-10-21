@@ -48,7 +48,7 @@ TRUNCATE_EQ = True
 # Defaults of the OMFIT VARYPED module:
 # scale_pres = scale_cur = [0.5, 0.1, 11]; error = 1e-8 (set as the TokaMaker
 # nl_tol by the caller); the boundary is the input separatrix resampled to 110
-# points with bdry_weight = 10 (see @ref gfile_boundary_constraints); 
+# points with bdry_weight = 10 (see @ref gfile_boundary_constraints)
 VARYPED_SCALE_DEFAULT = (0.5, 0.1, 11)
 VARYPED_NL_TOL = 1.0e-8
 VARYPED_NBDRY = 110
@@ -1278,7 +1278,7 @@ def _bdry_xpoint_candidates(gfile):
 
 def gfile_separatrix(gfile):
     r'''! Separatrix of a g-file traced from its flux map
-    
+
     This method bisects for the largest closed flux contour around the magnetic
     axis, rather than reading the g-file `RBBBS`. This matters for g-files
     written slightly inside the separatrix (e.g. TokaMaker `lcfs_pad`), whose
@@ -1853,6 +1853,7 @@ def _save_scan_outputs(
                        truncate_eq=TRUNCATE_EQ, lcfs_pad=LCFS_PAD,
                        lcfs_pressure=lcfs_pressure)
 
+    # p-file rotation terms use the COCOS 7 B_p sign (E_r matches the input)
     t_object.save_eqdsk(output_gfile_path, cocos=7, **save_kwargs)
     output_gfile = eqdsk.read_geqdsk(output_gfile_path, cocos=7)
     output_profiles = resample_gfile(output_gfile, psi_n, eq_snapshot=eq_snapshot)
