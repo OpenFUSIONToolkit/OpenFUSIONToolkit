@@ -1686,13 +1686,15 @@ END FUNCTION torflux_unwrap
 SUBROUTINE torflux_attach(F,gseq)
 CLASS(flux_func), POINTER, INTENT(in) :: F !< Profile (no-op unless it is a @ref phi_flux_wrapper)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+CLASS(flux_func), POINTER :: F_loc
 IF(.NOT.ASSOCIATED(F))RETURN
-SELECT TYPE(F)
+F_loc=>F
+SELECT TYPE(F_loc)
   TYPE IS(phi_flux_wrapper)
     IF(.NOT.ASSOCIATED(gseq%torflux))ALLOCATE(torflux_map::gseq%torflux)
     SELECT TYPE(map=>gseq%torflux)
       TYPE IS(torflux_map)
-        F%map=>map
+        F_loc%map=>map
         map%active=.TRUE.
     END SELECT
 END SELECT
