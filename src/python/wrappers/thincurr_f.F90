@@ -223,6 +223,12 @@ IF(c_associated(xml_ptr))THEN
     RETURN
   END IF
 END IF
+CALL c_f_pointer(pmap_loc, pmap_tmp, [1])
+IF(pmap_tmp(1)>=0)THEN
+  CALL c_f_pointer(pmap_loc, pmap_tmp, [tw_obj%mesh%np])
+  ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
+  tw_obj%pmap=pmap_tmp
+END IF
 IF(np>0)THEN
    CALL tw_obj%setup(hole_nsets, error_string)
 ELSE

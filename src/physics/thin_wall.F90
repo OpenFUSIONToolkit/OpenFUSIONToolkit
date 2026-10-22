@@ -2567,11 +2567,15 @@ ALLOCATE(self%sens_mask(self%mesh%nreg))
 self%sens_mask=.FALSE.
 !---Read periodicity information
 IF(hdf5_field_exist(TRIM(filepath),'thincurr/periodicity/PMAP'))THEN
-  ALLOCATE(self%pmap(self%mesh%np))
-  CALL hdf5_read(self%pmap,TRIM(filepath),'thincurr/periodicity/PMAP',success)
-  IF(.NOT.success)THEN
-    error_string='Error reading periodicity information from mesh file'
-    RETURN
+  IF(ASSOCIATED(self%pmap))THEN
+    CALL oft_warn("Point map specified directly and in mesh file, ignoring mesh file definition")
+  ELSE
+    ALLOCATE(self%pmap(self%mesh%np))
+    CALL hdf5_read(self%pmap,TRIM(filepath),'thincurr/periodicity/PMAP',success)
+    IF(.NOT.success)THEN
+      error_string='Error reading periodicity information from mesh file'
+      RETURN
+    END IF
   END IF
 END IF
 !---Read surface resistivity

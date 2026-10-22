@@ -105,7 +105,7 @@ class ThinCurr():
         @param lc Cell list `(nc,3)`
         @param reg Region tag `(nc,)`
         @param mesh_file File containing model in native mesh format
-        @param pmap Point map for periodic grids
+        @param pmap Vertex to unknown map `(np,)`: 0 for inactive vertices, otherwise the 1-based unknown index
         @param xml_filename Path to XML file for model
         @param jumper_start Index of first jumper nodeset in meshfile (positive values Fortran style, negative values Python style)
         @param no_verify_holes Skip verification of mesh and model
@@ -131,7 +131,8 @@ class ThinCurr():
             if pmap is None:
                 pmap = -numpy.ones((1,),dtype=numpy.int32)
             else:
-                pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
+                with h5py.File(mesh_file,'r') as fid:
+                    pmap = self._check_pmap(pmap,fid['mesh/R'].shape[0])
             sizes = numpy.zeros((9,),dtype=numpy.int32)
             cfilename = self._oft_env.path2c(mesh_file)
             error_string = self._oft_env.get_c_errorbuff()
@@ -154,8 +155,7 @@ class ThinCurr():
             if pmap is None:
                 pmap = -numpy.ones((1,),dtype=numpy.int32)
             else:
-                # pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
-                raise ValueError('"pmap" not supported with manual mesh specification')
+                pmap = self._check_pmap(pmap,np.value)
             sizes = numpy.zeros((9,),dtype=numpy.int32)
             cfilename = self._oft_env.path2c('')
             error_string = self._oft_env.get_c_errorbuff()
@@ -190,6 +190,15 @@ class ThinCurr():
                 'id': i+1,
                 'type': 'vcoil' if vcoil_flag.value else 'icoil'
             }
+
+    @staticmethod
+    def _check_pmap(pmap,npts):
+        pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
+        if pmap.shape != (npts,):
+            raise ValueError('"pmap" must have shape ({0},), got {1}'.format(npts,pmap.shape))
+        if pmap.min() < 0:
+            raise ValueError('"pmap" entries must be non-negative')
+        return pmap
 
     def update_coil_types(self,vcoils=[],icoils=[]):
         '''! Update coil types for ThinCurr model
