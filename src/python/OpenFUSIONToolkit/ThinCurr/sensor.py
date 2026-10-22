@@ -69,11 +69,14 @@ class Mirnov(flux_loop):
         '''
         center = numpy.asarray(pt)
         if center.shape[0] != 3:
-            raise ValueError('"center" must be a 3-dimensional vector')
+            raise ValueError('"pt" must be a 3-dimensional vector')
         norm = numpy.asarray(norm)
         if norm.shape[0] != 3:
             raise ValueError('"norm" must be a 3-dimensional vector')
-        norm = norm/numpy.linalg.norm(norm)
+        norm_mag = numpy.linalg.norm(norm)
+        if (not numpy.isfinite(norm_mag)) or (norm_mag < 1.E-12):
+            raise ValueError('"norm" must be a non-zero vector')
+        norm = norm/norm_mag
         v1 = numpy.cross([1.0, 0.0, 0.0], norm)
         if numpy.linalg.norm(v1) < 1.E-8:
             v1 = numpy.cross([0.0, 1.0, 0.0], norm)
