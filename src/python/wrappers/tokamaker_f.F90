@@ -1851,7 +1851,7 @@ TYPE(oft_lag_bginterp), POINTER :: psi_grad_obj
 TYPE(gs_prof_interp), POINTER :: prof_interp_obj
 TYPE(gs_b_interp), POINTER :: b_interp_obj
 INTEGER(i4) :: i,cell
-REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
+REAL(8) :: f(3),goptmp(3,4),vol,fmin,fmax
 REAL(r8), POINTER, DIMENSION(:,:) :: pts,field
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 TYPE(gs_equil), POINTER :: tMaker_equil_obj
