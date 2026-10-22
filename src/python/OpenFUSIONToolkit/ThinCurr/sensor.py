@@ -60,10 +60,10 @@ class circular_flux_loop(flux_loop):
 class Mirnov(flux_loop):
     '''! ThinCurr Mirnov sensor class'''
     def __init__(self, pt, norm, name, dx=1.E-3):
-        '''! Initialize Mirnov sensor object
+        r'''! Initialize Mirnov sensor object
 
         @param pt Location of Mirnov sensor [3]
-        @param norm Normal direction of Mirnov sensor [3]
+        @param norm Normal direction of Mirnov sensor [3]; the loop is wound right-handed about `norm`, so the signal is \f$ +\mathbf{B} \cdot \hat{n} \f$
         @param name Name of Mirnov sensor
         @param dx Scale of Mirnov flux loop
         '''
