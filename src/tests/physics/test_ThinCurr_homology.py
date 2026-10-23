@@ -5,7 +5,7 @@
 #------------------------------------------------------------------------------
 # Tests for ThinCurr hole and closure selection (OFT_ThinCurr_holes)
 #
-# Meshes are built with GMSH by "create_homology_meshes.py".
+# Meshes are built with GMSH by "create_ThinCurr_meshes.py".
 import os
 import sys
 import time

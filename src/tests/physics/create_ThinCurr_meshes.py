@@ -34,8 +34,9 @@ def surface_mesh(name, size, build):
     finish(name + '.msh')
 
 
-def discrete_mesh(name, r, lc):
-    '''Write a mesh given explicitly as vertices and triangles (for surfaces that cannot be built from CAD)'''
+def discrete_mesh(name, build):
+    '''Write a mesh given explicitly as vertices and triangles by `build` (for surfaces that cannot be built from CAD)'''
+    r, lc = build()
     start(name, 1.0)
     tag = gmsh.model.addDiscreteEntity(2)
     gmsh.model.mesh.addNodes(2, tag, list(range(1, r.shape[0]+1)), r.flatten().tolist())
@@ -110,11 +111,12 @@ surface_mesh('homology_touching', 0.25, touching)
 
 
 # Mobius strip (non-orientable)
-n = 24
-u, v = np.meshgrid(np.linspace(0.0, 2.0*np.pi, n, endpoint=False), np.r_[-0.2, 0.2], indexing='ij')
-r = np.c_[((1.0+v*np.cos(u/2))*np.cos(u)).ravel(), ((1.0+v*np.cos(u/2))*np.sin(u)).ravel(), (v*np.sin(u/2)).ravel()]
-def idx(i, j):
-    return (i % n)*2 + j
-lc = [[idx(i,0), idx(i+1,0), idx(i+1,1)] for i in range(n-1)] + [[idx(i,0), idx(i+1,1), idx(i,1)] for i in range(n-1)]
-lc += [[idx(n-1,0), idx(0,1), idx(0,0)], [idx(n-1,0), idx(0,0), idx(n-1,1)]] # Joined with a half twist
-discrete_mesh('homology_mobius', r, lc)
+def mobius(n=24):
+    u, v = np.meshgrid(np.linspace(0.0, 2.0*np.pi, n, endpoint=False), np.r_[-0.2, 0.2], indexing='ij')
+    r = np.c_[((1.0+v*np.cos(u/2))*np.cos(u)).ravel(), ((1.0+v*np.cos(u/2))*np.sin(u)).ravel(), (v*np.sin(u/2)).ravel()]
+    def idx(i, j):
+        return (i % n)*2 + j
+    lc = [[idx(i,0), idx(i+1,0), idx(i+1,1)] for i in range(n-1)] + [[idx(i,0), idx(i+1,1), idx(i,1)] for i in range(n-1)]
+    lc += [[idx(n-1,0), idx(0,1), idx(0,0)], [idx(n-1,0), idx(0,0), idx(n-1,1)]] # Joined with a half twist
+    return r, lc
+discrete_mesh('homology_mobius', mobius)
