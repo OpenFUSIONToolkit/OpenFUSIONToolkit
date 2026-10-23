@@ -16,9 +16,9 @@
 MODULE grad_shaf_bootstrap
 USE oft_base
 USE oft_gs, ONLY: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
- gs_itor_nl, qprof_trace_tol, gs_fpol
-USE oft_gs_profiles, ONLY: torflux_qgeom_backend, torflux_set_bounds
-USE oft_gs_contour, ONLY: gs_sauter_contour, gs_fsa_contour
+ gs_itor_nl, qprof_trace_tol, gs_fpol, qprof_backend
+USE oft_gs_profiles, ONLY: torflux_set_bounds
+USE oft_gs_contour, ONLY: gs_sauter_contour
 USE oft_lag_basis, ONLY: oft_blag_geval
 USE oft_mesh_type, ONLY: bmesh_findcell
 USE oft_blag_operators, ONLY: oft_lag_brinterp
@@ -51,8 +51,8 @@ END TYPE boot_ops
 !------------------------------------------------------------------------------
 !> Current profiles of the last @ref jphi_bs_update (diagnostics; the update itself uses its own
 !! `jphi_*` arrays). `_raw`: from the last bootstrap evaluation, before scaling, isolation and taper;
-!! no suffix: as added into `jphi_total`. TokaMaker jphi [A/m²] on `psi_n` (OFT convention, 0=LCFS,
-!! 1=axis; LCFS first); `jdotB_bs_raw` in [T A/m²].
+!! no suffix: as added into `jphi_total`. TokaMaker jphi [A/m^2] on `psi_n` (OFT convention, 0=LCFS,
+!! 1=axis; LCFS first); `jdotB_bs_raw` in [T A/m^2].
 !------------------------------------------------------------------------------
 TYPE :: boot_profs
   REAL(r8), ALLOCATABLE :: psi_n(:) !< Normalised psi of the profile nodes, LCFS first
@@ -91,8 +91,8 @@ TYPE, EXTENDS(jphi_flux_func) :: jphi_bs_flux_func
   LOGICAL :: freeze_saw = .FALSE. !< Set .TRUE. once jphi_saw converges or stagnates, after jphi_bs is frozen
   INTEGER(i4) :: djsaw_no_improve = 0 !< Consecutive steps with non-decreasing djsaw
   REAL(r8) :: djsaw_min = HUGE(1.0d0) !< Running minimum djsaw
-  REAL(r8), ALLOCATABLE :: jphi_saw_last(:) !< jphi_saw of the last update (mu0*A/m²)
-  REAL(r8), ALLOCATABLE :: jphi_total_last(:) !< jphi_total of the last update (mu0*A/m²)
+  REAL(r8), ALLOCATABLE :: jphi_saw_last(:) !< jphi_saw of the last update (mu0*A/m^2)
+  REAL(r8), ALLOCATABLE :: jphi_total_last(:) !< jphi_total of the last update (mu0*A/m^2)
   LOGICAL :: ffp_restored = .FALSE. !< F*F' knots were read from a file, so loading keeps them instead of updating
   TYPE(boot_ops) :: boot_ops       !< Options set from Python (@ref tokamaker_set_boot_ops)
   TYPE(boot_profs) :: boot_profs   !< Current profiles of the last update
@@ -525,9 +525,10 @@ REAL(r8) :: pscale, pprime
 REAL(r8), ALLOCATABLE :: xpsi(:) !< Node locations in normalized poloidal flux
 REAL(r8), ALLOCATABLE :: psi_n(:) !< Nodes: LCFS (0) and xpsi
 REAL(r8), ALLOCATABLE :: ravgs(:,:) !< <R>, <1/R>, <1/R^2> at psi_n
+REAL(r8), ALLOCATABLE :: qa(:,:) !< q and dA/dpsi_N at psi_n from the contour passes (sawtooth reset)
 REAL(r8), ALLOCATABLE :: jtor(:)  !< dI/dA for the exact I_p measure (eval_dIdA)
 REAL(r8), ALLOCATABLE :: jphi_bs(:), jphi_pd(:), jphi_ind(:), jphi_fixed(:), jphi_total(:)
-REAL(r8), ALLOCATABLE :: jphi_bs_spike(:) !< Isolated edge spike [A/m²]
+REAL(r8), ALLOCATABLE :: jphi_bs_spike(:) !< Isolated edge spike [A/m^2]
 !> Sawtooth current: input, value entering the alpha solve, result, reset increment
 REAL(r8), ALLOCATABLE :: jphi_saw_in(:), jphi_saw_cur(:), jphi_saw(:), djphi_saw(:)
 REAL(r8), ALLOCATABLE :: cflds(:,:), cum(:,:)
@@ -555,7 +556,8 @@ char_buf = jphi_bs_missing_inputs(gseq) ! Normally caught before the solve (toka
 IF(LEN_TRIM(char_buf) > 0) &
   CALL oft_abort("Jphi-BS profile requires "//TRIM(char_buf), "jphi_bs_update",__FILE__)
 !--- 1. Pressure scale.
-ALLOCATE(jtor(0:self%npsi), psi_n(0:self%npsi), ravgs(0:self%npsi,3))
+ALLOCATE(jtor(0:self%npsi), psi_n(0:self%npsi), ravgs(0:self%npsi,3), qa(0:self%npsi,2))
+qa = 0.0_r8
 psi_n = [0.0_r8, xpsi]
 saw_on = self%boot_ops%saw_q_s > 0.0_r8
 do_saw = saw_on .AND. (.NOT.self%freeze_saw) .AND. ALLOCATED(self%jphi_total_last)
@@ -576,7 +578,7 @@ IF(bs_frozen) THEN
   jphi_pd = self%jphi_pd_last
   djbs = 0.0_r8
 ELSE
-  CALL calculate_bootstrap(self, gseq, self%npsi, xpsi, jphi_bs, jphi_pd, ierr, ravgs=ravgs(1:,:))
+  CALL calculate_bootstrap(self, gseq, self%npsi, xpsi, jphi_bs, jphi_pd, ierr, ravgs=ravgs(1:,:), qa=qa(1:,:))
   IF(ierr /= 0)THEN
     gseq%prof_failed=.TRUE. ! The solve ends with error -10
     RETURN
@@ -620,7 +622,7 @@ ELSE
 END IF
 !--- <R>, <1/R>, <1/R^2> (I_p measure, F*F' map) not set by the Sauter pass
 IF(bs_frozen)THEN
-  CALL gs_ravgs(gseq, self%npsi+1, psi_n, ravgs)
+  CALL gs_ravgs(gseq, self%npsi+1, psi_n, ravgs, qa=qa)
 ELSE
   CALL gs_ravgs(gseq, 1, psi_n(0:0), ravgs(0:0,:))
 END IF
@@ -699,15 +701,19 @@ END IF
 !--- 4a. Sawtooth reset of the base current (alpha now known); jphi_saw freeze check.
 IF(do_saw)THEN
   ALLOCATE(djphi_saw(0:self%npsi))
-  CALL saw_redistribute(self, gseq, psi_n, ravgs, cflds(:,1) + alpha*cflds(:,2), &
-                        cflds(:,4), alpha*jphi_ind + jphi_bs + jphi_fixed + jphi_saw_in, djphi_saw)
-  jphi_saw = jphi_saw_in + self%boot_ops%saw_relax*djphi_saw + (1.0_r8 - self%boot_ops%saw_relax)*(jphi_saw_cur - jphi_saw_in)
-  jphi_total = alpha * jphi_ind + jphi_bs + jphi_fixed + jphi_saw
-  djsaw = SQRT(SUM((jphi_saw - self%jphi_saw_last)**2)) / MAX(SQRT(SUM(jphi_total**2)), 1.0e-30_r8)
-  ! Freeze only once jphi_bs has: before that the base current still moves, and an early iterate
-  ! without a dip (djsaw = 0) would freeze the reset off for the whole solve
-  IF(self%freeze_jbs)CALL stall_check(djsaw, self%boot_ops%saw_tol, djbs_stol, self%djsaw_min, &
-    self%djsaw_no_improve, self%freeze_saw, 'Sawtooth current', 'saw_tol', 'sawtooth current')
+  CALL saw_redistribute(self, gseq, psi_n, ravgs, qa, cflds(:,1) + alpha*cflds(:,2), &
+                        cflds(:,4), alpha*jphi_ind + jphi_bs + jphi_fixed + jphi_saw_in, djphi_saw, ierr)
+  IF(ierr == 0)THEN
+    jphi_saw = jphi_saw_in + self%boot_ops%saw_relax*djphi_saw + (1.0_r8 - self%boot_ops%saw_relax)*(jphi_saw_cur - jphi_saw_in)
+    jphi_total = alpha * jphi_ind + jphi_bs + jphi_fixed + jphi_saw
+    djsaw = SQRT(SUM((jphi_saw - self%jphi_saw_last)**2)) / MAX(SQRT(SUM(jphi_total**2)), 1.0e-30_r8)
+    ! Freeze only once jphi_bs has: before that the base current still moves, and an early iterate
+    ! without a dip (djsaw = 0) would freeze the reset off for the whole solve
+    IF(self%freeze_jbs)CALL stall_check(djsaw, self%boot_ops%saw_tol, djbs_stol, self%djsaw_min, &
+      self%djsaw_no_improve, self%freeze_saw, 'Sawtooth current', 'saw_tol', 'sawtooth current')
+  ELSE
+    jphi_saw = jphi_saw_cur ! Failed reset: keep the last one; this update does not count towards the freeze
+  END IF
   DEALLOCATE(djphi_saw, cflds, cum)
 ELSE
   jphi_saw = jphi_saw_cur
@@ -817,45 +823,40 @@ ELSE
 END IF
 END SUBROUTINE stall_check
 !---------------------------------------------------------------------------------
-!> Sawtooth reset current on the nodes `xn` (OFT convention, mu0*A/m², TokaMaker jphi).
+!> Sawtooth reset current on the nodes `xn` (OFT convention, mu0*A/m^2, TokaMaker jphi).
 !!
 !! q_base = q_eq*I_eq/I_base (q*I is geometric) on rho = sqrt(Phi_N); @ref saw_reset_1d resets it on
 !! nodes with enough enclosed area, interpolated in rho; dI/dA maps back to jphi via eval_dIdA.
 !! Enclosed area and currents are 1-D integrals over the contour \f$ dA/d\hat{\psi} \f$: the reset
 !! differentiates them, and binning mesh quadrature points by psi (@ref gs_flux_cumint) leaves
-!! percent-level noise in each node interval.
+!! percent-level noise in each node interval. q and \f$ dA/d\hat{\psi} \f$ come from the contour pass
+!! the caller has just made (@ref sauter_fc or @ref gs_ravgs). On failure (`ierr` /= 0) `dj` is not set.
 !---------------------------------------------------------------------------------
-SUBROUTINE saw_redistribute(self, gseq, xn, ravgs, jt_base, jt_eq, j_base, dj)
+SUBROUTINE saw_redistribute(self, gseq, xn, ravgs, qa, jt_base, jt_eq, j_base, dj, ierr)
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 REAL(r8), INTENT(in) :: xn(:) !< Nodes, 0 at LCFS, 1 at axis [n]
 REAL(r8), INTENT(in) :: ravgs(:,:) !< <R>, <1/R>, <1/R^2> on the nodes [n,3]
+REAL(r8), INTENT(in) :: qa(:,:) !< q and \f$ dA/d\hat{\psi} \f$ on the nodes, 0 without a closed contour surface [n,2]
 REAL(r8), INTENT(in) :: jt_base(:) !< Base jtor (@ref eval_dIdA) on the nodes [n]
 REAL(r8), INTENT(in) :: jt_eq(:) !< jtor of the equilibrium's current on the nodes [n]
 REAL(r8), INTENT(in) :: j_base(:) !< Base jphi on the nodes [n]
 REAL(r8), INTENT(out) :: dj(:) !< Reset current [n]
-INTEGER(i4) :: n, i, k, n_dips, nk, ierr
+INTEGER(i4), INTENT(out) :: ierr !< 0 on success, nonzero if the reset failed (warned)
+INTEGER(i4) :: n, i, k, n_dips, nk
 INTEGER(i4), ALLOCATABLE :: kk(:)
 REAL(r8), PARAMETER :: psi_ax = 1.0e-4_r8
 REAL(r8) :: rho_s, rho_m, rho_out, w, wf, dAmin, alast, psi, h
 REAL(r8), ALLOCATABLE :: q_eq(:), c1(:), rho(:), qb(:), Ib(:), Ie(:), Ar(:), ap(:), qn(:), djr(:), wr(:), r(:), &
-  phi(:), g(:), fs(:,:)
-LOGICAL, ALLOCATABLE :: ok(:)
+  phi(:), g(:)
 n = SIZE(xn)
-ALLOCATE(q_eq(n), c1(n), rho(n), qb(n), Ib(n), Ie(n), Ar(n), ap(n), qn(n), djr(n), wr(n), r(n), phi(n), g(n), &
-  fs(n,4), ok(n))
-!---q and dA/dpsi_N = oint dl/|grad psi_N| = <1/R> dV/dpsi_N / 2pi on the nodes, axis-first (index 1 =
-!   innermost node). Nodes without a closed surface (the LCFS, the axis, a failed surface) take the
-!   values of the next node inward (the axis: outward).
-CALL gs_fsa_contour(gseq, n, xn, g, fs, ok)
+ALLOCATE(q_eq(n), c1(n), rho(n), qb(n), Ib(n), Ie(n), Ar(n), ap(n), qn(n), djr(n), wr(n), r(n), phi(n), g(n))
+!---q and dA/dpsi_N = oint dl/|grad psi_N| on the nodes, axis-first (index 1 = innermost node). Nodes
+!   without a closed surface (the LCFS, the axis, a failed surface) take the values of the next node
+!   inward (the axis: outward).
 DO i = 1, n
   k = n + 1 - i
-  q_eq(i) = 0.0_r8; ap(i) = 0.0_r8
-  IF(ok(k))THEN
-    psi = gseq%plasma_bounds(1) + xn(k)*(gseq%plasma_bounds(2) - gseq%plasma_bounds(1))
-    q_eq(i) = ABS(g(k)*gs_fpol(gseq, psi))
-    ap(i) = ABS(fs(k,2)*fs(k,4)*(gseq%plasma_bounds(2) - gseq%plasma_bounds(1)))/(2.0_r8*pi)
-  END IF
+  q_eq(i) = qa(k,1); ap(i) = qa(k,2)
   c1(i) = ravgs(k,3)/ravgs(k,2)**2
 END DO
 DO i = 2, n
@@ -895,9 +896,8 @@ DO i = 2, n
   phi(i) = phi(i-1) + 0.5_r8*(q_eq(i) + q_eq(i-1))*(xn(n+2-i) - xn(n+1-i))
 END DO
 IF(.NOT.(phi(n) > 0.0_r8))THEN
-  CALL oft_warn('saw_redistribute: no closed surfaces for the q profile, skipping the reset this update')
-  dj = 0.0_r8
-  CALL saw_scalars_reset(self%boot_profs)
+  CALL oft_warn('saw_redistribute: no closed surfaces for the q profile, keeping the last reset this update')
+  ierr = -1
   RETURN
 END IF
 rho = SQRT(phi/phi(n))
@@ -931,9 +931,7 @@ CALL saw_reset_1d(nk, rho(kk(1:nk)), qb(1:nk), Ib(kk(1:nk)), Ar(kk(1:nk)), c1(kk
                   self%boot_ops%saw_q_s, self%boot_ops%saw_dq, self%boot_ops%saw_ramp, &
                   self%boot_ops%saw_rule, qn(1:nk), djr(1:nk), wr(1:nk), rho_s, rho_m, rho_out, n_dips, w, ierr)
 IF(ierr /= 0)THEN
-  CALL oft_warn('saw_redistribute: sawtooth reset failed, skipping the reset this update')
-  dj = 0.0_r8
-  CALL saw_scalars_reset(self%boot_profs)
+  CALL oft_warn('saw_redistribute: sawtooth reset failed, keeping the last reset this update')
   RETURN
 END IF
 !---Reset interpolated in rho; inside the reset the base structure between kept nodes is reset too
@@ -952,8 +950,9 @@ DO i = 1, n
   IF(wf > 0.0_r8)dj(n + 1 - i) = dj(n + 1 - i) + wf*(linterp(rho(kk(1:nk)), phi(1:nk), nk, rho(i), 1) - j_base(n+1-i))
 END DO
 IF(.NOT.ALL(ABS(dj) < HUGE(1.0_r8)))THEN
-  CALL oft_warn('saw_redistribute: non-finite reset current, skipping the reset this update')
-  dj = 0.0_r8
+  CALL oft_warn('saw_redistribute: non-finite reset current, keeping the last reset this update')
+  ierr = -1
+  RETURN
 END IF
 self%boot_profs%saw_rho_m = rho_m
 self%boot_profs%saw_rho_out = rho_out
@@ -962,7 +961,7 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,3F8.4,I3,F7.3,2F8.4)') '  [saw] rho_s rho_m rho_out n_dips w q_base(0) q_new(0) = ', &
     rho_s, rho_m, rho_out, n_dips, w, qb(1), qn(1)
 END IF
-DEALLOCATE(q_eq, c1, rho, qb, Ib, Ie, Ar, ap, qn, djr, wr, r, phi, g, fs, ok, kk)
+DEALLOCATE(q_eq, c1, rho, qb, Ib, Ie, Ar, ap, qn, djr, wr, r, phi, g, kk)
 END SUBROUTINE saw_redistribute
 !---------------------------------------------------------------------------------
 !> Smooth y(x) in place by a least-squares quadratic over +-hw points about each point (Savitzky-Golay
@@ -1209,41 +1208,44 @@ w = MAX(w, wk)
 rho_out = r_out
 END SUBROUTINE local_reset
 !---Highest interior local maximum of q in [a_, b_] (0 if none)
-INTEGER(i4) FUNCTION edge_hump(a_, b_)
+FUNCTION edge_hump(a_, b_) RESULT(kh)
 INTEGER(i4), INTENT(in) :: a_, b_
+INTEGER(i4) :: kh
 INTEGER(i4) :: kk
-edge_hump = 0
+kh = 0
 DO kk = a_, b_
   IF(q(kk) < q(kk-1) .OR. q(kk) < q(kk+1))CYCLE
-  IF(edge_hump == 0)THEN
-    edge_hump = kk
-  ELSE IF(q(kk) > q(edge_hump))THEN
-    edge_hump = kk
+  IF(kh == 0)THEN
+    kh = kk
+  ELSE IF(q(kk) > q(kh))THEN
+    kh = kk
   END IF
 END DO
 END FUNCTION edge_hump
 !---Split weight of a hump of height h over the higher neighbouring minimum b
-REAL(r8) FUNCTION hump_weight(h, b)
+FUNCTION hump_weight(h, b) RESULT(wh)
 REAL(r8), INTENT(in) :: h, b
-hump_weight = 0.0_r8
-IF(qm > b)hump_weight = MIN(MAX((h - b)/(qm - b), 0.0_r8), 1.0_r8)
+REAL(r8) :: wh
+wh = 0.0_r8
+IF(qm > b)wh = MIN(MAX((h - b)/(qm - b), 0.0_r8), 1.0_r8)
 END FUNCTION hump_weight
 !---Reset centre in [a_, b_]: q minimum, refined by the parabola through it and its neighbours
 !   (0 at the axis node), clamped to [lo, hi]
-REAL(r8) FUNCTION centre(a_, b_, lo, hi)
+FUNCTION centre(a_, b_, lo, hi) RESULT(rc)
 INTEGER(i4), INTENT(in) :: a_, b_
 REAL(r8), INTENT(in) :: lo, hi
+REAL(r8) :: rc
 INTEGER(i4) :: ic
 REAL(r8) :: d0, d2, s0, s2, cc
 ic = a_ - 1 + MINLOC(q(a_:b_), DIM=1)
-centre = 0.0_r8
+rc = 0.0_r8
 IF(ic > 1)THEN
   d0 = rho(ic-1) - rho(ic); d2 = rho(ic+1) - rho(ic)
   s0 = (q(ic-1) - q(ic))/d0; s2 = (q(ic+1) - q(ic))/d2
   cc = (s2 - s0)/(d2 - d0)
-  centre = rho(ic)
-  IF(cc > 0.0_r8)centre = rho(ic) - 0.5_r8*(s0 - cc*d0)/cc
-  centre = MIN(MAX(centre, lo), hi)
+  rc = rho(ic)
+  IF(cc > 0.0_r8)rc = rho(ic) - 0.5_r8*(s0 - cc*d0)/cc
+  rc = MIN(MAX(rc, lo), hi)
 END IF
 END FUNCTION centre
 !---Hump top: maximum of the parabola through node i_ and its neighbours (at least q(i_))
@@ -1262,30 +1264,33 @@ rv = rho(i_) + t
 qv = MAX(q(i_) + bb*t + cc*t**2, q(i_))
 END SUBROUTINE vertex_max
 !---Trigger weight of the q < q_s points in [a_, b_]
-REAL(r8) FUNCTION run_weight(a_, b_)
+FUNCTION run_weight(a_, b_) RESULT(wt)
 INTEGER(i4), INTENT(in) :: a_, b_
-run_weight = 1.0_r8
-IF(ramp > 0.0_r8)run_weight = MIN(MAX((q_s - MINVAL(q(a_:b_)))/ramp, 0.0_r8), 1.0_r8)
+REAL(r8) :: wt
+wt = 1.0_r8
+IF(ramp > 0.0_r8)wt = MIN(MAX((q_s - MINVAL(q(a_:b_)))/ramp, 0.0_r8), 1.0_r8)
 END FUNCTION run_weight
 !---Two-sided target at x: q_s at r_c_, shoulders of height d_in_ / d_out_ C1 onto slopes s_in_ /
 !   s_out_ at r_in_ / r_out_ (flat at q_s where the height is 0)
-REAL(r8) FUNCTION two_sided(x, r_in_, d_in_, s_in_, r_c_, r_out_, d_out_, s_out_)
+FUNCTION two_sided(x, r_in_, d_in_, s_in_, r_c_, r_out_, d_out_, s_out_) RESULT(qtg)
 REAL(r8), INTENT(in) :: x, r_in_, d_in_, s_in_, r_c_, r_out_, d_out_, s_out_
-two_sided = q_s
+REAL(r8) :: qtg
+qtg = q_s
 IF(x >= r_c_)THEN
-  IF(d_out_ > 0.0_r8 .AND. r_out_ > r_c_)two_sided = q_s + d_out_*pshape((x - r_c_)/(r_out_ - r_c_), &
+  IF(d_out_ > 0.0_r8 .AND. r_out_ > r_c_)qtg = q_s + d_out_*pshape((x - r_c_)/(r_out_ - r_c_), &
     MAX((r_out_ - r_c_)*s_out_/d_out_, 0.0_r8))
 ELSE IF(d_in_ > 0.0_r8)THEN
-  two_sided = q_s + d_in_*pshape((r_c_ - x)/(r_c_ - r_in_), MAX(-(r_c_ - r_in_)*s_in_/d_in_, 0.0_r8))
+  qtg = q_s + d_in_*pshape((r_c_ - x)/(r_c_ - r_in_), MAX(-(r_c_ - r_in_)*s_in_/d_in_, 0.0_r8))
 END IF
 END FUNCTION two_sided
 !---FUSE's shoulder: cubic p(0) = 0, p(1) = 1, p'(0) = 0, p'(1) = m (m <= 3), else x^m
-REAL(r8) FUNCTION pshape(x, m)
+FUNCTION pshape(x, m) RESULT(ps)
 REAL(r8), INTENT(in) :: x, m
+REAL(r8) :: ps
 IF(m <= 3.0_r8)THEN
-  pshape = (3.0_r8 - 2.0_r8*x)*x**2 + m*(x**3 - x**2)
+  ps = (3.0_r8 - 2.0_r8*x)*x**2 + m*(x**3 - x**2)
 ELSE
-  pshape = x**m
+  ps = x**m
 END IF
 END FUNCTION pshape
 END SUBROUTINE saw_reset_1d
@@ -1328,7 +1333,7 @@ val(4)=val(2)*mod_B         ! <|B|>
 val(5)=val(2)*pt(1)         ! <R>
 val(6)=val(2)/pt(1)         ! <1/R>
 val(7)=val(2)*SQRT((pt(1)-self%mag_axis(1))**2+(pt(2)-self%mag_axis(2))**2)  ! <a>
-val(8)=val(2)/pt(1)**2      ! q integrand: q = F_surf/(2π) * ∮ val(8)
+val(8)=val(2)/pt(1)**2      ! q integrand: q = F_surf/(2pi) * oint val(8)
 !---Surface extrema, sampled at ODE evaluations
 self%bmax = MAX(self%bmax,mod_B)
 self%rmax_surf = MAX(self%rmax_surf, pt(1))
@@ -1340,7 +1345,7 @@ END SUBROUTINE sauter_apply
 !! Surface averages and extrema come from the contour quadrature
 !! (@ref oft_gs_contour::gs_sauter_contour, two passes as the trapped-particle sum
 !! needs Bmax). Surfaces it cannot close, or all surfaces when
-!! `torflux_qgeom_backend=1` (testing), are traced instead.
+!! `qprof_backend=1` (testing), are traced instead.
 !!
 !! Each traced surface is traced once. The trapped-particle integral
 !! \f$ \langle (1-\sqrt{1-b}(1+b/2))/b^2 \rangle \f$, \f$ b=|B|/B_{max} \f$, needs
@@ -1348,7 +1353,7 @@ END SUBROUTINE sauter_apply
 !! trapezoidal quadrature over the tracer steps. Surfaces are traced in parallel
 !! from start points found serially, so results do not depend on the thread count.
 !------------------------------------------------------------------------------
-SUBROUTINE sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs,qprof,eps,invr2,rgeo)
+SUBROUTINE sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs,qprof,eps,invr2,rgeo,qa)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: nr !< Number of flux sample points
 REAL(r8), INTENT(in) :: psi_q(nr) !< Location of flux sample points in normalised psi
@@ -1359,6 +1364,7 @@ REAL(r8), OPTIONAL, INTENT(out) :: qprof(nr) !< Safety factor q on each surface 
 REAL(r8), OPTIONAL, INTENT(out) :: eps(nr) !< Inverse aspect ratio (R_max-R_min)/(R_max+R_min) on each surface
 REAL(r8), OPTIONAL, INTENT(out) :: invr2(nr) !< \f$<1/R^2>\f$ on each surface
 REAL(r8), OPTIONAL, INTENT(out) :: rgeo(nr) !< Geometric major radius (R_max+R_min)/2 on each surface
+REAL(r8), OPTIONAL, INTENT(out) :: qa(nr,2) !< q and \f$ dA/d\hat{\psi} = \oint dl/|\nabla\hat{\psi}| \f$ on surfaces closed by the contour pass, else 0
 REAL(r8) :: psi_surf,rmax,x1,x2,raxis,zaxis,h,h2,hf,ftu,ftl
 REAL(r8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
 REAL(r8), ALLOCATABLE :: pts(:,:),fpol(:),qtmp(:),epstmp(:),i2tmp(:),rgtmp(:)
@@ -1381,6 +1387,7 @@ END IF
 fc=0.d0; r_avgs=0.d0; modb_avgs=0.d0
 IF(PRESENT(qprof))qprof=0.d0
 IF(PRESENT(eps))eps=0.d0
+IF(PRESENT(qa))qa=0.d0
 psi_int%u=>gseq%psi
 CALL psi_int%setup(device%fe_rep)
 !---Find Rmax along Z=zaxis
@@ -1423,7 +1430,7 @@ DO j=1,nr
   rgtmp(j)       = raxis
 END DO
 !---Contour averages and extrema
-IF(torflux_qgeom_backend/=1)THEN
+IF(qprof_backend/=1)THEN
   ALLOCATE(acc(8,nr),ext(3,nr),bref(nr))
   bref=-1.d0
   CALL gs_sauter_contour(gseq,nr,psi_q,fpol,bref,acc,ext,ok=done)
@@ -1443,6 +1450,7 @@ IF(torflux_qgeom_backend/=1)THEN
     ftl = 1.d0 - h2 * hf
     fc(j) = 1.d0 - (0.75d0 * ftu + 0.25d0 * ftl)
     qtmp(j) = fpol(j) * acc(7,j) / (2.d0*pi*ABS(x2-x1))
+    IF(PRESENT(qa))qa(j,:)=[ABS(qtmp(j)), ABS(acc(3,j))]
     epstmp(j) = (ext(2,j) + ext(3,j)) / (ext(2,j) - ext(3,j)) ! (R_max - R_min)/(R_max + R_min)
     rgtmp(j) = 0.5d0*(ext(2,j) - ext(3,j))
     i2tmp(j) = acc(7,j)/acc(1,j)
@@ -1689,7 +1697,7 @@ END SUBROUTINE gradient_
 !! @param jphi_pd Output: its pressure-driven part [A/m^2]
 !! @param ierr    Output: 0 on success, -1 if a gradient or the boundary extrapolation failed
 !------------------------------------------------------------------------------
-SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, jphi_bs, jphi_pd, ierr, ravgs)
+SUBROUTINE calculate_bootstrap(self, gseq, n_psi, psi_N, jphi_bs, jphi_pd, ierr, ravgs, qa)
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 CLASS(gs_equil), INTENT(inout) :: gseq
 INTEGER(i4), INTENT(in) :: n_psi
@@ -1698,6 +1706,7 @@ REAL(r8), INTENT(out) :: jphi_bs(0:n_psi) !< jphi_bs(0) the LCFS value (extrapol
 REAL(r8), INTENT(out) :: jphi_pd(0:n_psi) !< Pressure-driven part of jphi_bs
 INTEGER(i4), INTENT(out) :: ierr !< 0 on success, -1 on failure (warned)
 REAL(r8), OPTIONAL, INTENT(out) :: ravgs(n_psi,3) !< <R>, <1/R>, <1/R^2> on psi_N from the Sauter pass
+REAL(r8), OPTIONAL, INTENT(out) :: qa(n_psi,2) !< q and dA/dpsi_N on psi_N from the Sauter contour pass (see @ref sauter_fc)
 !---
 INTEGER(i4) :: i
 REAL(r8) :: psi_abs(n_psi)
@@ -1741,7 +1750,7 @@ DO i = 1, n_psi
   f(i) = gs_fpol(gseq, psi_abs(i))
 END DO
 ! Get flux-surface geometry in one pass: fc, eps, q and R_geo (the major radius in nu*, as eps = r/R_geo)
-CALL sauter_fc(gseq, n_psi, psi_N, fc, r_avgs_saut, modb_avgs_saut, qprof=qvals, eps=eps, invr2=invr2, rgeo=R_geo)
+CALL sauter_fc(gseq, n_psi, psi_N, fc, r_avgs_saut, modb_avgs_saut, qprof=qvals, eps=eps, invr2=invr2, rgeo=R_geo, qa=qa)
 IF(PRESENT(ravgs))ravgs = RESHAPE([r_avgs_saut(:,1:2), invr2], [n_psi,3])
 B_avg = modb_avgs_saut(:,1)
 ! ===================================================================

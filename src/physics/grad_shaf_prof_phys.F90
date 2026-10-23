@@ -21,11 +21,11 @@ use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
 use oft_gs, only: gs_equil, flux_func, gs_psi2r, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
-  gs_get_qprof, gs_ani_press, gs_epsilon
+  gs_get_qprof, gs_ani_press, gs_epsilon, qprof_backend, gs_fpol
 use oft_gs_contour, only: gs_fsa_contour
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
-  spline_func_copy, spline_func_delete, phi_flux_wrapper, torflux_qgeom_backend
+  spline_func_copy, spline_func_delete, phi_flux_wrapper
 use spline_mod
 USE mhd_utils, ONLY: mu0
 implicit none
@@ -695,16 +695,17 @@ END SUBROUTINE gs_flux_cumint
 !!
 !! The axis takes its exact limit (the O-point values). Other nodes use contour quadrature
 !! (@ref oft_gs_contour::gs_fsa_contour), tracing only surfaces it cannot close (all when
-!! `torflux_qgeom_backend=1`, testing). The LCFS of a diverted plasma is evaluated `psi_pad` inside it
+!! `qprof_backend=1`, testing). The LCFS of a diverted plasma is evaluated `psi_pad` inside it
 !! (q is singular on it, and the averages approach their X-point limits only logarithmically); a limited
 !! LCFS is traced on it, and retried `psi_pad` inside if that fails. Nodes that fail both methods take
 !! the averages of the nearest node that did not; non-finite nodes are skipped (see @ref gs_ravgs_failed).
 !------------------------------------------------------------------------------
-SUBROUTINE gs_ravgs(gseq, n, psi_vals, ravgs)
+SUBROUTINE gs_ravgs(gseq, n, psi_vals, ravgs, qa)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: n !< Number of nodes
 REAL(r8), INTENT(in) :: psi_vals(n) !< Node locations
 REAL(r8), INTENT(out) :: ravgs(n,3) !< <R>, <1/R>, <1/R^2> at each node
+REAL(r8), OPTIONAL, INTENT(out) :: qa(n,2) !< q and dA/dpsi_N at the nodes inside the LCFS closed by the contour pass, else 0
 REAL(r8), PARAMETER :: psi_pad = 1.d-3 !< Offset inside a diverted LCFS, or a limited one whose trace failed
 REAL(r8) :: psi_q(n)
 LOGICAL :: ok(n), retry(n)
@@ -712,6 +713,7 @@ INTEGER(i4) :: k, m
 psi_q = psi_vals
 IF(gseq%diverted)WHERE(psi_q <= 0.d0)psi_q = psi_pad
 ravgs = 0.d0
+IF(PRESENT(qa))qa = 0.d0
 !---Axis: exact limit
 WHERE(psi_q >= 1.d0)
   ravgs(:,1) = gseq%o_point(1)
@@ -724,6 +726,11 @@ retry = (psi_q <= 0.d0).AND.(.NOT.(ravgs(:,2) > 0.d0))
 IF(ANY(retry))THEN
   WHERE(retry)psi_q = psi_pad
   CALL eval_surfs(retry)
+END IF
+IF(PRESENT(qa))THEN ! Only on the nodes themselves (not at the LCFS offset)
+  WHERE(psi_vals <= 0.d0)
+    qa(:,1) = 0.d0; qa(:,2) = 0.d0
+  END WHERE
 END IF
 !---Nodes that failed both methods (zero averages) take the averages of the nearest node that did not
 ok = (ravgs(:,2) > 0.d0)
@@ -748,7 +755,8 @@ CONTAINS
 SUBROUTINE eval_surfs(todo)
 LOGICAL, INTENT(in) :: todo(n)
 INTEGER(i4) :: nt, nf, j
-REAL(r8), ALLOCATABLE :: pq(:), qf(:), avgs(:,:), rtr(:,:), qtr(:)
+REAL(r8) :: dpsi
+REAL(r8), ALLOCATABLE :: pq(:), qf(:), avgs(:,:), rtr(:,:), qtr(:), qc(:,:)
 LOGICAL, ALLOCATABLE :: done(:)
 nt = COUNT(todo)
 IF(nt==0)RETURN
@@ -756,12 +764,25 @@ ALLOCATE(pq(nt), qf(nt), avgs(nt,4), done(nt))
 pq = PACK(psi_q, todo)
 avgs = 0.d0
 done = .FALSE.
-IF(torflux_qgeom_backend/=1)CALL gs_fsa_contour(gseq, nt, pq, qf, avgs, done)
+IF(qprof_backend/=1)CALL gs_fsa_contour(gseq, nt, pq, qf, avgs, done)
+IF(PRESENT(qa))THEN
+  ALLOCATE(qc(nt,2))
+  qc = 0.d0
+  dpsi = gseq%plasma_bounds(2) - gseq%plasma_bounds(1)
+  DO j=1,nt
+    IF(.NOT.done(j))CYCLE
+    qc(j,1) = ABS(qf(j)*gs_fpol(gseq, gseq%plasma_bounds(1) + pq(j)*dpsi))
+    qc(j,2) = ABS(avgs(j,2)*avgs(j,4)*dpsi)/(2.d0*pi)
+  END DO
+  DO j=1,2
+    qa(:,j) = UNPACK(qc(:,j), todo, qa(:,j))
+  END DO
+END IF
 nf = COUNT(.NOT.done)
 IF(nf>0)THEN
   ALLOCATE(rtr(nf,4), qtr(nf))
   rtr = 0.d0
-  CALL gs_get_qprof(gseq, nf, PACK(pq, .NOT.done), qtr, ravgs=rtr)
+  CALL gs_get_qprof(gseq, nf, PACK(pq, .NOT.done), qtr, ravgs=rtr, trace_only=.TRUE.)
   DO j=1,3
     avgs(:,j) = UNPACK(rtr(:,j), .NOT.done, avgs(:,j))
   END DO

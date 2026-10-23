@@ -48,8 +48,9 @@ IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
 REAL(r8), PARAMETER :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
-!> Surface backend of @ref gs_get_qprof, @ref gs_trace_surf, `gs_save_ifile`, `gs_save_eqdsk`:
-!! 0 contour where supported, 1 field-line tracer (testing only)
+!> Flux-surface backend of @ref gs_get_qprof, @ref gs_trace_surf, `gs_save_ifile`, `gs_save_eqdsk`, the averages,
+!! the toroidal flux map and the Sauter factors: 0 contour where supported, 1 field-line tracer (testing only;
+!! the sawtooth reset needs the contour and is skipped)
 INTEGER(i4), PARAMETER :: qprof_backend = 0
 !------------------------------------------------------------------------------
 !> Interpolation class for uniform source with simple tokamak representation
@@ -554,7 +555,7 @@ abstract interface
   END SUBROUTINE torflux_map_delete
 end interface
 INTERFACE
-  !> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the contour quadrature (see grad_shaf_qprof.F90)
+  !> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the contour quadrature (see grad_shaf_contour.F90)
   MODULE SUBROUTINE gs_qprof_contour(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,done)
     CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
     INTEGER(i4), INTENT(in) :: nr !< Number of flux surfaces
@@ -565,14 +566,14 @@ INTERFACE
     REAL(r8), OPTIONAL, INTENT(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
     LOGICAL, INTENT(out) :: done(nr) !< Surfaces evaluated (the others are left for the tracer)
   END SUBROUTINE gs_qprof_contour
-  !> @ref gs_trace_surf from the contour quadrature (see grad_shaf_qprof.F90); `npoints=-1` if not available
+  !> @ref gs_trace_surf from the contour quadrature (see grad_shaf_contour.F90); `npoints=-1` if not available
   MODULE SUBROUTINE gs_trace_surf_contour(gseq,psi_in,points,npoints)
     CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
     REAL(r8), INTENT(in) :: psi_in !< Surface location in normalized flux
     REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: points !< Surface points [2,npoints]
     INTEGER(i4), INTENT(out) :: npoints !< Number of points
   END SUBROUTINE gs_trace_surf_contour
-  !> LCFS outputs of @ref gs_get_qprof from the contour quadrature (see grad_shaf_qprof.F90)
+  !> LCFS outputs of @ref gs_get_qprof from the contour quadrature (see grad_shaf_contour.F90)
   MODULE SUBROUTINE gs_lcfs_contour(gseq,psi_q1,dl,rbounds,zbounds,ok)
     CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
     REAL(r8), INTENT(in) :: psi_q1 !< Surface location in normalized flux
@@ -2235,7 +2236,7 @@ integer(4) :: i,ii,j,k,error_flag,cell,ierr_loc
 INTEGER(i4) :: tmap_fails
 INTEGER(i4), PARAMETER :: tmap_fail_max = 3 !< Consecutive toroidal flux map failures before the solve fails
 integer(4), save :: eq_count = 0
-CHARACTER(LEN=40) :: err_reason
+CHARACTER(LEN=80) :: err_reason
 logical :: pm_save,fail_test
 !---
 error_flag=0
@@ -2910,7 +2911,7 @@ real(8) :: opoint(2),f(3),t0,t1,curr,itor_ffp,itor_press,estored,dflux_ffp
 REAL(8) :: psimax,ffp_scale_in,ffp_scale_prev,pnorm0,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3)
 REAL(8) :: param_mat(3,3),param_vec(3),param_rhs(3)
 integer(4) :: ii,j,k,error_flag,cell,ierr_loc
-CHARACTER(LEN=40) :: err_reason
+CHARACTER(LEN=80) :: err_reason
 logical :: pm_save
 t0=omp_get_wtime()
 !---
@@ -3374,7 +3375,7 @@ end subroutine gs_vac_solve
 !------------------------------------------------------------------------------
 function gs_err_reason(ierr) result(err_reason)
 integer(4), intent(in) :: ierr !< Error flag
-CHARACTER(LEN=40) :: err_reason !< String representation of error
+CHARACTER(LEN=80) :: err_reason !< String representation of error
 SELECT CASE(ierr)
   CASE(-1)
     err_reason='Exceeded "maxits"'
@@ -4533,7 +4534,7 @@ end subroutine psimax_error_grad
 !------------------------------------------------------------------------------
 !> Get q profile for equilibrium
 !------------------------------------------------------------------------------
-subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs,fsa_avgs,shape_geo,geom_only)
+subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs,fsa_avgs,shape_geo,geom_only,trace_only)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux surfaces to sample
 real(8), intent(in) :: psi_q(nr) !< Locations to sample in normalized flux
@@ -4545,6 +4546,7 @@ real(8), optional, intent(out) :: ravgs(nr,4) !< Flux surface averages <R>, <1/R
 real(8), optional, intent(out) :: fsa_avgs(nr,4) !< Flux surface averages <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
 real(8), optional, intent(out) :: shape_geo(nr,6) !< Per-surface R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
 logical, optional, intent(in) :: geom_only !< Return \f$ q/F \f$ (independent of F profile)
+logical, optional, intent(in) :: trace_only !< Trace every surface (skip the contour pass, e.g. for surfaces it rejected)
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
@@ -4552,12 +4554,14 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
 integer(4), parameter :: nlcfs=1000
-logical :: lcfs_all,lcfs_any,geo,lcfs_ok,cc_done(nr)
+logical :: lcfs_all,lcfs_any,geo,trace,lcfs_ok,cc_done(nr)
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
 geo=.FALSE.
 IF(PRESENT(geom_only))geo=geom_only
+trace=.FALSE.
+IF(PRESENT(trace_only))trace=trace_only
 lcfs_any = PRESENT(dl).OR.PRESENT(rbounds).OR.PRESENT(zbounds)
 lcfs_all = PRESENT(dl).AND.PRESENT(rbounds).AND.PRESENT(zbounds)
 IF(lcfs_any.AND.(.NOT.lcfs_all))CALL oft_abort('All LCFS arguments must be passed if any are','gs_get_qprof',__FILE__)
@@ -4569,7 +4573,7 @@ IF(PRESENT(shape_geo).AND.lcfs_any)CALL oft_abort('"shape_geo" cannot be combine
 !---path does not accept.
 cc_done=.FALSE.
 lcfs_ok=.NOT.lcfs_all
-IF((qprof_backend==0).AND.(.NOT.geo))THEN
+IF((qprof_backend==0).AND.(.NOT.(geo.OR.trace)))THEN
   CALL gs_qprof_contour(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,cc_done)
   IF(lcfs_all.AND.cc_done(1))CALL gs_lcfs_contour(gseq,psi_q(1),dl,rbounds,zbounds,lcfs_ok)
   IF(ALL(cc_done).AND.lcfs_ok)RETURN
