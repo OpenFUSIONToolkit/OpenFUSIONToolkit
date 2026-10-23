@@ -201,9 +201,8 @@ The script should be available in one of two ways depending on the installation/
 
 For each connected surface, all boundary loops except the longest are used as holes and the remaining holes are selected using a
 tree-cotree approach (see \ref OpenFUSIONToolkit.ThinCurr._tree_homology "_tree_homology"). Candidate loops are taken from shortest-path trees and
-kept, shortest first, when they are independent of the loops already selected. Each selected loop is simple and has no chords, so that
-it can be used directly as a hole element. The `--optimize_holes` option repeats the search from additional base points to find shorter
-loops. The previous Greedy Homotopy method is still available using the `--use_legacy` option.
+kept, shortest first, when they are independent of the loops already selected. The `--optimize_holes` option repeats the search from
+additional base points to find shorter loops. The previous Greedy Homotopy method is still available using the `--use_legacy` option.
 
 
 \subsection doc_tw_main_close "Closure" elements

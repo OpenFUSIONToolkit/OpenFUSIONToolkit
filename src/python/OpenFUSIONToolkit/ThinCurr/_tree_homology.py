@@ -20,11 +20,10 @@ Holes are chosen for each connected surface as follows:
     a set of loops is a valid set of holes exactly when its signatures are linearly independent.
  3. Candidate loops are the fundamental cycles of a shortest-path tree from a base vertex. The candidates are
     taken shortest first and kept when their signature is independent of the loops already kept.
- 4. Optionally, the shortest-path search is repeated from the middle of each selected loop and the selection
-    is repeated over all candidates found ("optimization").
- 5. Chords (mesh edges joining two non-consecutive vertices of a loop) are removed by splitting the loop at
-    the chord and keeping the part that leaves the set of holes independent, so each hole is a simple,
-    chord-free loop.
+ 4. The shortest-path search is repeated from the middle of each selected loop and the selection is repeated
+    over all candidates found. With optimization this is repeated until the selection does not change.
+ 5. Each selected loop is shortened by cutting corners: where three consecutive vertices form a cell, the
+    middle vertex is removed, which does not change the loop's signature.
 
 The cost is linear in the number of cells for fixed topology, plus a term proportional to the number of
 holes times the number of cells crossed by the cuts.
@@ -37,7 +36,6 @@ from fractions import Fraction
 import numpy as np
 import scipy.sparse
 import scipy.sparse.csgraph
-import scipy.sparse.linalg
 
 _block_size = 32 # Number of hole functionals processed together when computing loop signatures
 _max_passes = 10 # Maximum number of search passes when optimizing
@@ -400,18 +398,6 @@ class _surface:
                 i += 1
         return loop
 
-    def find_chord(self, loop):
-        '''! Positions (i,j), i < j, of two non-consecutive loop vertices joined by a mesh edge, or None'''
-        pos = {v: i for i, v in enumerate(loop)}
-        n = len(loop)
-        indptr, indices = self.graph.indptr, self.graph.indices
-        for i, v in enumerate(loop):
-            for u in indices[indptr[v]:indptr[v+1]]:
-                j = pos.get(int(u))
-                if (j is not None) and (j > i+1) and not ((i == 0) and (j == n-1)):
-                    return i, j
-        return None
-
 
 class _independent_set:
     '''! Incremental test for linear independence of sparse integer vectors (exact arithmetic)'''
@@ -481,38 +467,6 @@ def _select(seeds, pools, nholes):
     return selected
 
 
-def _clean_loops(surf, loops, sigs, first):
-    '''! Tighten loops and remove chords while keeping the set of loops independent
-
-    @param surf Surface
-    @param loops Loops to process (modified in place)
-    @param sigs Signatures of all holes on the surface (dense [nholes,nholes], modified in place)
-    @param first Row of `sigs` for the first loop in `loops`
-    '''
-    lu = None
-    for j in range(len(loops)):
-        while True:
-            loops[j] = surf.tighten(loops[j])
-            chord = surf.find_chord(loops[j])
-            if chord is None:
-                break
-            i, k = chord
-            loop = loops[j]
-            parts = sorted((loop[i:k+1], loop[k:] + loop[:i+1]), key=len)
-            if lu is None:
-                lu = scipy.sparse.linalg.splu(scipy.sparse.csc_matrix(sigs.T.astype(np.float64)))
-            for part in parts:
-                sig = surf.loop_signature(part)
-                coeff = lu.solve(sig.astype(np.float64))
-                if abs(coeff[first+j]) > 1.E-8:
-                    loops[j] = part
-                    sigs[first+j,:] = sig
-                    lu = None
-                    break
-            else:
-                raise RuntimeError("Could not remove chord from hole loop")
-
-
 def _surface_holes(r, lc, ref_point, optimize, info, indent):
     '''! Select holes for one connected surface
 
@@ -558,9 +512,7 @@ def _surface_holes(r, lc, ref_point, optimize, info, indent):
         selected = _select(seeds, pools, nholes)
         if set((s[1], s[3]) for s in selected) == previous:
             break
-    loops = [surf.tree_cycle(sroot, slimit, edge) for _, sroot, slimit, edge in selected]
-    sigs = np.array(seeds + [surf.loop_signature(loop) for loop in loops], dtype=np.int64).reshape(nholes, nholes)
-    _clean_loops(surf, loops, sigs, len(seeds))
+    loops = [surf.tighten(surf.tree_cycle(sroot, slimit, edge)) for _, sroot, slimit, edge in selected]
     return bloops, omitted, loops
 
 

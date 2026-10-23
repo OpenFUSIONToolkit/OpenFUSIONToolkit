@@ -142,11 +142,6 @@ def test_holes(mesh_name, method):
     edges = edge_set(mesh['lc'])
     for loop in holes:
         assert is_simple_loop(loop, edges)
-    if method.startswith('tree'):
-        bedges = set(e for e, count in edge_counts(mesh['lc']).items() if count == 1)
-        for loop in holes:
-            on_boundary = all(tuple(sorted((int(loop[k]), int(loop[(k+1) % len(loop)])))) in bedges for k in range(len(loop)))
-            assert on_boundary or (not has_chord(loop, edges))
     assert homology_rank(mesh['lc'], holes) == nholes
 
 
