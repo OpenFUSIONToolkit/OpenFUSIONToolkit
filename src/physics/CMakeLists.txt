@@ -13,7 +13,6 @@ set( OBJS
   axi_green.F90
   grad_shaf.F90
   grad_shaf_contour.F90
-  grad_shaf_qprof.F90
   grad_shaf_profiles.F90
   grad_shaf_bootstrap.F90
   grad_shaf_prof_phys.F90

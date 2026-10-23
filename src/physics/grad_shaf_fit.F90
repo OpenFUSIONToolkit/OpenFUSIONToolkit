@@ -631,7 +631,7 @@ real(8), allocatable :: cof_tmp(:),err_tmp(:)
 real(8), save :: ffp_scale_in,p_scale_in,bounds_in(2,2),vcont_in,ip_target_in,estore_target_in
 real(8), allocatable, save :: cofs_in(:)
 class(oft_vector), pointer, save :: psi_center => NULL()
-CHARACTER(LEN=40) :: err_reason
+CHARACTER(LEN=80) :: err_reason
 IF(.NOT.ASSOCIATED(psi_center))THEN
   ALLOCATE(cofs_in(n))
   cofs_in=cofs

@@ -124,12 +124,12 @@ tokamaker_get_boot_prof = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_prof,
 tokamaker_get_boot_saw = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_saw,
     [c_void_p, c_double_ptr, c_double_ptr, c_int_ptr, c_char_p])
 
-# tokamaker_saw_reset_1d(n,rho,q,itor,area,c1,q_s,dq,ramp,rule,q_new,dj,wr,scal)
+# tokamaker_saw_reset_1d(n,rho,q,itor,area,c1,q_s,dq,ramp,rule,q_new,dj,wr,scal,ierr)
 tokamaker_saw_reset_1d = ctypes_subroutine(oftpy_lib.tokamaker_saw_reset_1d,
     [c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1),
      ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_double, c_double, c_double, c_int,
      ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1),
-     ctypes_numpy_array(numpy.float64,1)])
+     ctypes_numpy_array(numpy.float64,1), c_int_ptr])
 
 # tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,

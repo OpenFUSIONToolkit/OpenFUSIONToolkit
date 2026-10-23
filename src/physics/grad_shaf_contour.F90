@@ -653,19 +653,20 @@ END SUBROUTINE ext_upd
 !> Maximum of arc samples y(0:ng+1) at x(0:ng+1), refined by a parabola through the
 !! largest interior sample and its neighbours
 !------------------------------------------------------------------------------
-PURE REAL(r8) FUNCTION arc_peak(ng,x,y)
+PURE FUNCTION arc_peak(ng,x,y) RESULT(ymax)
 INTEGER(i4), INTENT(in) :: ng
 REAL(r8), INTENT(in) :: x(0:),y(0:)
+REAL(r8) :: ymax
 REAL(r8) :: d1,d2,a,b
 INTEGER(i4) :: k
 k=MAXLOC(y(0:ng+1),DIM=1)-1
-arc_peak=y(k)
+ymax=y(k)
 IF((k<1).OR.(k>ng))RETURN
 d1=(y(k)-y(k-1))/(x(k)-x(k-1)); d2=(y(k+1)-y(k))/(x(k+1)-x(k))
 a=(d2-d1)/(x(k+1)-x(k-1))
 IF(a>=0.d0)RETURN
 b=d1+a*(x(k)-x(k-1)) ! slope at x(k)
-arc_peak=MAX(y(k),y(k)-b**2/(4.d0*a))
+ymax=MAX(y(k),y(k)-b**2/(4.d0*a))
 END FUNCTION arc_peak
 !------------------------------------------------------------------------------
 !> Root of \f$ (1-\hat{\psi})(x_0+t\,d)=s \f$ for \f$ t \in [a,b] \f$
@@ -898,3 +899,39 @@ IF(ierr/=0)CALL oft_abort('Monomial table inversion failed','bern_build',__FILE_
 bt%cbound=(MAXVAL(SUM(ABS(bt%vinv),DIM=2))-1.d0)/2.d0+1.d-12
 END SUBROUTINE bern_build
 END MODULE oft_gs_contour
+!------------------------------------------------------------------------------
+!> Contour evaluation of @ref oft_gs::gs_get_qprof outputs (a submodule of @ref oft_gs, so that
+!! @ref oft_gs can use @ref oft_gs_contour, which itself uses @ref oft_gs)
+!------------------------------------------------------------------------------
+SUBMODULE (oft_gs) oft_gs_qprof
+USE oft_gs_contour, ONLY: gs_fsa_contour
+IMPLICIT NONE
+CONTAINS
+!------------------------------------------------------------------------------
+!> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the contour quadrature
+!------------------------------------------------------------------------------
+MODULE PROCEDURE gs_qprof_contour
+REAL(r8) :: qf(nr),avgs(nr,4),fpol(nr),psi_surf
+REAL(r8), ALLOCATABLE :: fsa(:,:),shp(:,:)
+INTEGER(i4) :: j
+DO j=1,nr
+  psi_surf=psi_q(j)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1)
+  IF(gseq%mode==0)THEN
+    fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
+  ELSE
+    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
+  END IF
+END DO
+!---Unallocated outputs are passed as absent (F2008)
+IF(PRESENT(fsa_avgs))ALLOCATE(fsa(nr,4))
+IF(PRESENT(shape_geo))ALLOCATE(shp(nr,6))
+CALL gs_fsa_contour(gseq,nr,psi_q,qf,avgs,done,fpol,fsa,shp)
+DO j=1,nr
+  IF(.NOT.done(j))CYCLE
+  prof(j)=fpol(j)*qf(j)
+  IF(PRESENT(ravgs))ravgs(j,:)=avgs(j,:)
+  IF(PRESENT(fsa_avgs))fsa_avgs(j,:)=fsa(j,:)
+  IF(PRESENT(shape_geo))shape_geo(j,:)=shp(j,:)
+END DO
+END PROCEDURE gs_qprof_contour
+END SUBMODULE oft_gs_qprof

@@ -1787,6 +1787,13 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         profs_kept = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         if not np.array_equal(profs_kept['jphi_fixed'], profs_fixed['jphi_fixed']):
             raise AssertionError("jphi_fixed not kept by solve_bootstrap without jphi_fixed_prof")
+        try:  # the kept profiles are on psi_n, so they cannot be reused on another coordinate
+            mygs.solve_bootstrap(Zeff=Zeff_val, coord='phi_n', **zeff_common_kwargs)
+        except ValueError as err:
+            if 'kept coord' not in str(err):
+                raise
+        else:
+            raise AssertionError("kept jphi_fixed_prof reused on a different coord")
         mygs.boot_reset()
         profs_reset = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         if np.any(profs_reset['jphi_fixed'] != 0.0):
@@ -2085,11 +2092,19 @@ def _check_saw_reset_1d():
     for rule in (1, 2):
         q_new2, dj2, sc2 = reset(q + 0.2, rule)
         assert sc2['n_dips'] == 0 and np.all(dj2 == 0.0) and np.all(q_new2 == q + 0.2) and sc2['rho_out'] == 0.0
-    # Non-finite q (a failed surface): no reset, and no abort
+    # Non-finite q (a failed surface): no reset, no abort, and the failure is returned
     q_nan = q.copy()
     q_nan[100] = np.nan
-    q_new2, dj2, _ = reset(q_nan, 2)
-    assert np.all(dj2 == 0.0) and np.array_equal(q_new2, q_nan, equal_nan=True)
+    q_new2, dj2, sc2 = reset(q_nan, 2)
+    assert np.all(dj2 == 0.0) and np.array_equal(q_new2, q_nan, equal_nan=True) and sc2['ierr'] != 0
+    assert sc['ierr'] == 0
+    # Inputs of different lengths are rejected
+    try:
+        _saw_reset_1d(rho[:-1], q, A/q, A, c1, q_s, dq)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError('_saw_reset_1d accepted inputs of different lengths')
     # Off-axis dip only (q0 > q_s + dq): local leaves q0 and everything outside [rho_in, rho_out] alone,
     # dI = 0 at both ends (Ip-neutral); fuse lowers q0 to q_s. rho_m is the same axis-anchored radius.
     q4 = 1.10 + 0.6*rho**2 - 0.17*g(0.35, 0.08)

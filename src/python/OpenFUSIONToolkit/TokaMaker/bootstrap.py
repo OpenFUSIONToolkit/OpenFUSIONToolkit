@@ -1361,12 +1361,16 @@ def _saw_reset_1d(rho, q, itor, area, c1, q_s, dq=0.03, ramp=0.01, rule=2):
     r'''! Fortran 1-D sawtooth q reset (grad_shaf_bootstrap::saw_reset_1d) on given profiles, axis first
 
     @param rule 1 = fuse (axis to rho_m), 2 = local (each dip, two-sided)
-    @result (q_new, dj, dict(rho_s, rho_m, rho_out, n_dips, w, wr)); dj in the units of itor/area divided by c1,
-      wr the per-node reset weight
+    @result (q_new, dj, dict(rho_s, rho_m, rho_out, n_dips, w, wr, ierr)); dj in the units of itor/area divided by c1,
+      wr the per-node reset weight, ierr nonzero if the reset failed (then q_new = q and dj = 0)
     '''
     from ._interface import tokamaker_saw_reset_1d
     arrs = [numpy.ascontiguousarray(a, dtype=numpy.float64) for a in (rho, q, itor, area, c1)]
     n = arrs[0].size
+    if any(a.size != n for a in arrs):
+        raise ValueError('rho, q, itor, area and c1 must have the same length')
     q_new, dj, wr, scal = numpy.zeros(n), numpy.zeros(n), numpy.zeros(n), numpy.zeros(5)
-    tokamaker_saw_reset_1d(n, *arrs, float(q_s), float(dq), float(ramp), int(rule), q_new, dj, wr, scal)
-    return q_new, dj, {'rho_s': scal[0], 'rho_m': scal[1], 'rho_out': scal[4], 'n_dips': int(scal[2]), 'w': scal[3], 'wr': wr}
+    ierr = c_int()
+    tokamaker_saw_reset_1d(n, *arrs, float(q_s), float(dq), float(ramp), int(rule), q_new, dj, wr, scal, ctypes.byref(ierr))
+    return q_new, dj, {'rho_s': scal[0], 'rho_m': scal[1], 'rho_out': scal[4], 'n_dips': int(scal[2]), 'w': scal[3], 'wr': wr,
+                       'ierr': ierr.value}

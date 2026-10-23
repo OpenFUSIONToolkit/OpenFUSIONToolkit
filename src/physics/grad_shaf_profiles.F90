@@ -16,12 +16,11 @@ USE oft_io, ONLY: hdf5_read, hdf5_write, hdf5_field_exist
 USE oft_base
 USE spline_mod
 USE oft_gs, ONLY: flux_func, gs_equil, gs_torflux_map, oft_indent, oft_increase_indent, &
-  oft_decrease_indent, gs_get_qprof, gs_fpol
+  oft_decrease_indent, gs_get_qprof, gs_fpol, qprof_backend
 USE oft_gs_contour, ONLY: gs_qgeom_contour
 USE oft_gauss_quadrature, ONLY: oft_quad_type, set_quad_1d
 USE oft_sort, ONLY: sort_array
 implicit none
-INTEGER(i4), PARAMETER :: torflux_qgeom_backend = 0 !< Toroidal flux map q/F backend: 0 contour, 1 tracer (testing only)
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -2469,7 +2468,7 @@ CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: nr !< Number of surfaces
 REAL(r8), INTENT(in) :: psi_q(nr) !< Surface locations
 REAL(r8), INTENT(out) :: g(nr) !< Geometric factor at each surface
-IF(torflux_qgeom_backend==1)THEN
+IF(qprof_backend==1)THEN
   CALL gs_get_qprof(gseq,nr,psi_q,g,geom_only=.TRUE.)
 ELSE
   CALL gs_qgeom_contour(gseq,nr,psi_q,g)
