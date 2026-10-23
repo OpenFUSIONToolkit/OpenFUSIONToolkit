@@ -239,10 +239,14 @@ independent current patterns on the original mesh.
 \subsubsection doc_tw_main_junctions_def Defining junction meshes
  - Give each sheet its own region, e.g. a gmsh physical surface converted with `OFT_convert_gmsh --physical_regions`.
  - Run `OFT_ThinCurr_holes` (\ref thincurr_holes_tool) on the mesh. If it finds junctions it writes the split mesh
-   with a `thincurr/junctions` group (junction table, hole elements, vertex map and \f$ \textbf{P} \f$).
- - Use the resulting file as any other ThinCurr mesh. Sheets can be insulated from each other at the junctions when
-   the model is set up, without a new mesh file, with
-   \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.setup_model "setup_model(junction_insulated=[...])".
+   with a `thincurr/junctions` group (junction table, hole elements, vertex map and \f$ \textbf{P} \f$). Where
+   sheets only meet two at a time (for example a torus divided into sectors), add `--split_regions` to split at
+   the region interfaces anyway, so that the sheets can be insulated from each other.
+ - Use the resulting file as any other ThinCurr mesh. Sheets can be insulated at the junctions when the model is set
+   up, without a new mesh file, with \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.setup_model "setup_model(junction_insulated=[...])".
+   A region in the list is insulated at every junction it touches; a pair of regions, e.g. `(1,2)`, is insulated
+   only from each other (for example a single insulating break in a sectored torus), which is allowed where they
+   are the only two sheets on the junction edge.
 
 See \ref doc_tCurr_junctions for an example.
 

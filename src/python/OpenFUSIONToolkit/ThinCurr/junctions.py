@@ -200,13 +200,40 @@ def junction_table(lines):
     return numpy.array(kje, dtype=numpy.int32), numpy.array(lje, dtype=numpy.int32).reshape(-1, 3)
 
 
+def _insulation(insulated):
+    '''! Split an insulation list into insulated regions and insulated pairs of regions'''
+    regions, pairs = set(), set()
+    for item in insulated:
+        if isinstance(item, (tuple, list, set, frozenset, numpy.ndarray)):
+            pair = frozenset(int(k) for k in item)
+            if len(pair) != 2:
+                raise ValueError('Insulated pairs must name two different regions, got {0}'.format(item))
+            pairs.add(pair)
+        else:
+            regions.add(int(item))
+    return regions, pairs
+
+
+def _joined(regions, insulated):
+    '''! Regions joined across a junction edge with the given regions, after insulation'''
+    ins_regions, ins_pairs = insulated
+    if frozenset(regions) in ins_pairs:
+        return []
+    for pair in ins_pairs:
+        if pair < frozenset(regions):
+            raise ValueError('Regions {0} can only be insulated from each other where they are the only sheets on a junction '
+                             'edge (found an edge with regions {1})'.format(sorted(pair), sorted(regions)))
+    return [k for k in regions if k not in ins_regions]
+
+
 def current_loop_count(lc, reg, insulated=()):
     '''! Number of independent divergence-free current patterns on the original mesh
 
     Cycles of the dual graph whose nodes are the cells and the junction edges (Kirchhoff), with no flow
-    across outer edges or into insulated sheets.
+    across outer edges or into insulated sheets (see @ref find_junction_holes for `insulated`).
     '''
     reg = numpy.asarray(reg)
+    insulated = _insulation(insulated)
     nf = len(lc)
     I, J, nj = [], [], 0
     for e, cells in _edge_cells(lc).items():
@@ -216,7 +243,8 @@ def current_loop_count(lc, reg, insulated=()):
                 I.append(cells[0])
                 J.append(cells[1])
             continue
-        joined = [c for c in cells if int(reg[c]) not in insulated]
+        keep = _joined(regs, insulated)
+        joined = [c for c in cells if int(reg[c]) in keep]
         if len(joined) >= 2:
             for c in joined:
                 I.append(c)
@@ -324,13 +352,14 @@ def junction_basis(r_split, lc_split, lines, insulated=(), cuts=()):
     '''! Reduced unknowns of a split mesh: map from unknowns to the stream function at each cell corner
 
     @param r_split, lc_split, lines From @ref split_junctions
-    @param insulated Regions with chi = 0 at every junction (left out of Kirchhoff)
+    @param insulated Insulation, see @ref find_junction_holes
     @param cuts List of [n,2] (cell, corner) arrays, each a jump of chi with its own unknown
     @result M (sparse [3 nc, n_reduced], corner (c, i) is row 3c+i), info dict with
             'arcs' [(points, closed)], 'references' (arc indices fixed at zero), 'holes' (free arc indices),
             'cuts' (indices of independent cuts), 'closures' (cells), 'shifts' (zero-current shifts removed)
     '''
     nv, nc = len(r_split), len(lc_split)
+    insulated = _insulation(insulated)
     lco = orient_cells(lc_split)
     corner_cut = {}
     for j, cut in enumerate(cuts):
@@ -347,7 +376,7 @@ def junction_basis(r_split, lc_split, lines, insulated=(), cuts=()):
                     raise ValueError('Sheet {0} changes orientation along a junction line'.format(k))
                 jverts |= {a, b}
         for (i, j), regions, cells in zip(_pairs(line), line['segments'], line['cells']):
-            joined = [k for k in regions if k not in insulated]
+            joined = _joined(regions, insulated)
             if len(joined) < 2:
                 continue
             for k in joined:
@@ -462,8 +491,8 @@ def homology_loops(r, lc):
     from ._homology_cli import compute_homology
     with tempfile.TemporaryDirectory() as tmp:
         in_file = os.path.join(tmp, 'mesh.h5')
-        write_ThinCurr_mesh(in_file, r, lc, numpy.ones(len(lc), dtype=numpy.int32))
         with contextlib.redirect_stdout(io.StringIO()):
+            write_ThinCurr_mesh(in_file, r, lc, numpy.ones(len(lc), dtype=numpy.int32))
             compute_homology(in_file)
         holes = read_ThinCurr_mesh(os.path.join(tmp, 'mesh-homology.h5'))['thincurr'].get('holes', [])
     ec = _edge_cells(lc)
@@ -481,7 +510,8 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10):
     @param r Point list [np,3]
     @param lc Cell list [nc,3] (0-based)
     @param reg Region list [nc]
-    @param insulated Regions with chi = 0 at every junction
+    @param insulated Insulation: regions (insulated at every junction they touch) and/or pairs of regions
+    (insulated from each other only, allowed where they are the only two sheets on a junction edge)
     @param tol Relative eigenvalue below which a candidate cut is taken to add a zero-energy mode
     @result Dictionary: 'r', 'lc' (split mesh), 'reg', 'lines', 'kje', 'lje' (junction table with
             the sign of each entry in ThinCurr's orientation), 'holes' (explicit holes: [n,2] (cell,

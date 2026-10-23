@@ -235,3 +235,38 @@ def test_runtime_insulation():
     eig_ins = mp_run(run_reduction, (files_ins, None, None))
     assert eig_rt is not False and eig_ins is not False
     assert np.allclose(eig_rt, eig_ins, rtol=1.0E-10, atol=0.0)
+
+
+@pytest.mark.parametrize("insulated,nholes", (([1], 2), ([(1, 2)], 1), ([(1, 2), (2, 3)], 2), ([1, 2, 3], 3)))
+def test_torus_insulation(insulated, nholes):
+    r, lc, reg = torus()
+    out = find_junction_holes(r, lc, reg, insulated=insulated)
+    assert out['n_unknowns'] == out['n_loops'] == current_loop_count(lc, reg, insulated=insulated)
+    assert len(out['cuts']) == 0 and len(out['info']['closures']) == 0
+    assert len(out['info']['holes']) == nholes
+
+
+def test_pair_insulation_needs_two_sheets():
+    r, lc, reg = tplate()
+    with pytest.raises(ValueError):
+        find_junction_holes(r, lc, reg, insulated=[(1, 2)])
+
+
+def test_split_regions_file(tmp_path):
+    r, lc, reg = torus()
+    in_file = str(tmp_path / 'torus.h5')
+    write_ThinCurr_mesh(in_file, r, lc, reg)
+    compute_homology(in_file, split_regions=True)
+    junc = read_ThinCurr_mesh(str(tmp_path / 'torus-homology.h5'))['thincurr']['junctions']
+    assert junc['P'].shape[1] == current_loop_count(lc, reg)
+    assert len(junc['kje']) - 1 == 3*8
+
+
+def test_runtime_pair_insulation():
+    r, lc, reg = torus()
+    files_rt, _ = write_pair(r, lc, reg, 'junction_torus_rt')
+    files_ins, _ = write_pair(r, lc, reg, 'junction_torus_ins', insulated=[(1, 2)])
+    eig_rt = mp_run(run_reduction, (files_rt, None, [(1, 2)]))
+    eig_ins = mp_run(run_reduction, (files_ins, None, None))
+    assert eig_rt is not False and eig_ins is not False
+    assert np.allclose(eig_rt, eig_ins, rtol=1.0E-10, atol=0.0)

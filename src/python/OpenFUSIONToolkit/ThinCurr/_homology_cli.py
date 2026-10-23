@@ -642,7 +642,8 @@ def _compute_junction_holes(input_model, out_file, verify_only, print_info):
 
 
 def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False, show_omitted=False,
-                     show_covering=False, debug=False, ref_point=None, optimize_holes=False, verify_only=False):
+                     show_covering=False, debug=False, ref_point=None, optimize_holes=False, verify_only=False,
+                     split_regions=False):
     '''! Compute holes and closures for ThinCurr meshes using a Greedy Homotopy approach
 
     @param in_file Input mesh file
@@ -655,6 +656,7 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     @param ref_point Reference location for base point [x,y,z] (default: [0,0,0])
     @param optimize_holes Sample additional points to attempt to optimize holes?
     @param verify_only Verify the correct number of holes and closures are found, but do not write output file?
+    @param split_regions Split the mesh at all region interfaces (junction mesh) even if every edge has at most two cells?
     '''
     global indent_level
 
@@ -693,7 +695,7 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
 
 
     # Setup full mesh
-    if has_junctions(face_full):
+    if has_junctions(face_full) or split_regions:
         return _compute_junction_holes(input_model, out_file, verify_only, print_info)
     full_mesh = trimesh(vertex_full,face_full,info=print_info)
     boundary_cycles = full_mesh.boundary_cycles(info=print_info)
@@ -971,6 +973,7 @@ def script_entry():
     parser.add_argument("--debug", action="store_true", default=False, help="Print additional debug information?")
     parser.add_argument("--ref_point", default=None, type=float, nargs='+', help='Reference location for base point [x,y,z] (default: [0,0,0])')
     parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes?")
+    parser.add_argument("--split_regions", action="store_true", default=False, help="Split the mesh at all region interfaces (junction mesh)?")
     options = parser.parse_args()
 
     if options.keep_nodeset_start is not None:
@@ -985,7 +988,8 @@ def script_entry():
         show_covering=options.show_covering,
         debug=options.debug,
         ref_point=options.ref_point,
-        optimize_holes=options.optimize_holes
+        optimize_holes=options.optimize_holes,
+        split_regions=options.split_regions
     )
 
 
@@ -995,13 +999,15 @@ def script_entry():
 # This script identifies holes and closures in a ThinCurr surface mesh using
 # homology computations.
 #
-# If the mesh has junctions (edges shared by more than two cells) it is split at the junctions instead and
-# the output file holds the split mesh with the junction data (`thincurr/junctions`): see
-# \ref doc_tw_main_junctions. Each region must be a separate sheet.
+# If the mesh has junctions (edges shared by more than two cells), or `--split_regions` is given, it is split
+# at the region interfaces instead and the output file holds the split mesh with the junction data
+# (`thincurr/junctions`): see \ref doc_tw_main_junctions. Each region must be a separate sheet.
+# `--split_regions` is needed when sheets meet two at a time (e.g. a torus in sectors) but should be
+# insulatable from each other with `setup_model(junction_insulated=...)`.
 #
 #```shell
 # usage: OFT_ThinCurr_holes [-h] --in_file IN_FILE [--out_file OUT_FILE] [--keep_nodeset_start KEEP_NODESET_START] [--plot_final] [--plot_steps] [--show_omitted]
-#                                 [--show_covering] [--debug] [--ref_point REF_POINT [REF_POINT ...]] [--optimize_holes]
+#                                 [--show_covering] [--debug] [--ref_point REF_POINT [REF_POINT ...]] [--optimize_holes] [--split_regions]
 #
 # options:
 #     -h, --help            show this help message and exit
@@ -1017,4 +1023,5 @@ def script_entry():
 #     --ref_point REF_POINT [REF_POINT ...]
 #                           Reference location for base point [x,y,z] (default: [0,0,0])
 #     --optimize_holes      Sample additional points to attempt to optimize holes?
+#     --split_regions       Split the mesh at all region interfaces (junction mesh)?
 #```

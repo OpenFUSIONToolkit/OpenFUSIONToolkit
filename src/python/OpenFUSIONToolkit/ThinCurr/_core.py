@@ -113,7 +113,8 @@ class ThinCurr():
         @param xml_filename Path to XML file for model
         @param jumper_start Index of first jumper nodeset in meshfile (positive values Fortran style, negative values Python style)
         @param no_verify_holes Skip verification of mesh and model
-        @param junction_insulated Regions to insulate at every junction (mesh files split at junctions only)
+        @param junction_insulated Junction insulation (mesh files split at junctions only): regions, insulated at every
+        junction they touch, and/or pairs of regions, insulated from each other only (e.g. `[3, (1,2)]`)
         '''
         if self.nregs != -1:
             raise ValueError('Mesh already setup, delete or create new instance for new model')
