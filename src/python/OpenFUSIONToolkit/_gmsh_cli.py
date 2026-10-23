@@ -312,7 +312,7 @@ def script_entry():
 # This script converts a GMSH mesh file to native Open FUSION Toolkit mesh format.
 #
 #```shell
-# usage: OFT_convert_gmsh [-h] --in_file IN_FILE [--out_file OUT_FILE]
+# usage: OFT_convert_gmsh [-h] --in_file IN_FILE [--out_file OUT_FILE] [--physical_regions]
 #
 # Convert a GMSH mesh file to native Open FUSION Toolkit mesh format
 #
@@ -320,4 +320,8 @@ def script_entry():
 #   -h, --help           show this help message and exit
 #   --in_file IN_FILE    Input mesh file
 #   --out_file OUT_FILE  Ouput mesh file
+#   --physical_regions   Use physical tags as regions
 #```
+#
+# By default every cell is assigned to region 1. With `--physical_regions` the physical tag of each element is
+# used as its region, which is needed for example to define the sheets of a ThinCurr mesh with junctions.

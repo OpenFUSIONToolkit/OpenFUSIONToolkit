@@ -30,6 +30,7 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_tCurr_regcoil
  - \subpage doc_tCurr_hodlr
  - \subpage doc_tCurr_reduction
+ - \subpage doc_tCurr_junctions
 
 \section doc_tw_main_settings ThinCurr settings groups
 
@@ -211,6 +212,44 @@ solveable.
 \subsubsection doc_tw_main_close_def Defining closures
 As with holes, closures can also be defined using the `OFT_ThinCurr_holes.py` script. This is now the recommended way of defining
 closures in ThinCurr models, although \ref doc_tw_dep_leg_holes "manual definition" is also still supported.
+
+\subsection doc_tw_main_junctions Junctions between sheets
+ThinCurr's stream-function formulation requires each edge of the mesh to be shared by at most two cells. Structures
+where three or more conducting sheets meet along an edge, a *junction* (for example a plate with a stiffening rib,
+a flange welded around a tube, or ribs that cross each other), are supported by splitting the mesh at the junctions:
+
+ - Each region is a sheet. Along every junction edge each sheet gets its own copy of the junction vertices, so the
+   split mesh is an ordinary (manifold) ThinCurr mesh.
+ - Current conservation (Kirchhoff's law) across each junction edge joins the sheets again: at each end of a junction
+   edge, \f$ \sum_k s_k \phi_k = 0 \f$ over the sheets on that edge, where \f$ s_k = \pm 1 \f$ follows each sheet's
+   orientation. This leaves no current flowing along the junction line itself.
+ - The resulting constraints define a map \f$ \textbf{P} \f$ from the reduced (joined) unknowns to the unknowns of
+   the split mesh, \f$ \phi_{split} = \textbf{P} x \f$. ThinCurr assembles all operators on the split mesh as usual
+   and reduces them, e.g. \f$ \textbf{L} \rightarrow \textbf{P}^T \textbf{L} \textbf{P} \f$, so that all solvers,
+   coils, sensors, HODLR compression and plotting work on the joined model.
+
+Holes are chosen automatically for junction meshes. On each sheet the stream function is uniform along every chain of
+outer edges (an "outer arc"), and Kirchhoff's law links the arcs of different sheets where a junction line meets an
+outer edge. Constant shifts of the stream function that carry no current are removed by fixing some arcs at zero
+(or one vertex, a closure, on a closed surface); the remaining free arcs are the holes. Loops that cross junction lines
+(for example a torus cut into sectors) are represented by cuts, a jump in the stream function across a closed
+junction line or across a loop of the homology basis. The number of unknowns is checked against the number of
+independent current patterns on the original mesh.
+
+\subsubsection doc_tw_main_junctions_def Defining junction meshes
+ - Give each sheet its own region, e.g. a gmsh physical surface converted with `OFT_convert_gmsh --physical_regions`.
+ - Run `OFT_ThinCurr_holes` (\ref thincurr_holes_tool) on the mesh. If it finds junctions it writes the split mesh
+   with a `thincurr/junctions` group (junction table, hole elements, vertex map and \f$ \textbf{P} \f$).
+ - Use the resulting file as any other ThinCurr mesh. Sheets can be insulated from each other at the junctions when
+   the model is set up, without a new mesh file, with
+   \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.setup_model "setup_model(junction_insulated=[...])".
+
+See \ref doc_tCurr_junctions for an example.
+
+**Limitation:** cut candidates are the closed junction lines and, when every edge of the original mesh is shared by at
+most two cells (regions meeting two at a time), the loops of the homology basis. On a mesh with junctions of three or
+more sheets, loops that cross junction lines without being closed junction lines (for example the long way around a
+torus that also carries a rib) are not searched for. Such meshes are reported by the unknown count check.
 
 \subsection doc_tw_main_hodlr Hierarchical Off-Diagonal Low-Rank (HODLR) approximation
 In the standard BFEM approach described above every element interacts with every other element, leading to a dense \f$ \textrm{L} \f$ and

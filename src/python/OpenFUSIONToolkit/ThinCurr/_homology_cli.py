@@ -995,6 +995,10 @@ def script_entry():
 # This script identifies holes and closures in a ThinCurr surface mesh using
 # homology computations.
 #
+# If the mesh has junctions (edges shared by more than two cells) it is split at the junctions instead and
+# the output file holds the split mesh with the junction data (`thincurr/junctions`): see
+# \ref doc_tw_main_junctions. Each region must be a separate sheet.
+#
 #```shell
 # usage: OFT_ThinCurr_holes [-h] --in_file IN_FILE [--out_file OUT_FILE] [--keep_nodeset_start KEEP_NODESET_START] [--plot_final] [--plot_steps] [--show_omitted]
 #                                 [--show_covering] [--debug] [--ref_point REF_POINT [REF_POINT ...]] [--optimize_holes]

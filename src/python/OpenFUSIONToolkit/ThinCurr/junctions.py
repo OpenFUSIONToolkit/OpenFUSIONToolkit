@@ -475,8 +475,8 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10):
     '''! Split a junction mesh and choose its holes, cuts and references
 
     Cut candidates are the closed junction lines and, if the original mesh is manifold, the internal
-    loops of ThinCurr's homology basis. Loops that exist only through a non-manifold junction are not
-    searched for; the final count check reports them.
+    loops of ThinCurr's homology basis. On a non-manifold mesh, loops that cross junction lines without
+    being closed junction lines are not searched for; the final count check reports them.
 
     @param r Point list [np,3]
     @param lc Cell list [nc,3] (0-based)

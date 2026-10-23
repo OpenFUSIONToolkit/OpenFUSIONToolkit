@@ -1,6 +1,10 @@
 import os
 import sys
+import copy
+import time
+import multiprocessing
 import numpy as np
+import scipy.sparse
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
 python_dir = os.path.abspath(os.path.join(test_dir, '..', '..', 'python'))
@@ -142,3 +146,92 @@ def test_insulate_file(tmp_path):
     assert junc['P'].shape[1] == current_loop_count(lc, reg, insulated=(3,)) == out['n_unknowns']
     assert len(junc['holes']) == len(out['holes'])
     assert np.all(junc['vmap'] == out['vmap'])
+
+
+def mp_run(target, args, timeout=180):
+    if os.environ.get('OFT_DEBUG_TEST', 0):
+        timeout *= 4
+    os.chdir(test_dir)
+    mp_q = multiprocessing.Queue()
+    p = multiprocessing.Process(target=target, args=args + (mp_q,))
+    p.start()
+    start = time.time()
+    while time.time() - start <= timeout:
+        if not p.is_alive():
+            break
+        time.sleep(.5)
+    else:
+        print("Timeout reached")
+        p.terminate()
+        p.join()
+        return False
+    try:
+        test_result = mp_q.get(timeout=5)
+    except:
+        print("Failed to get output")
+        return False
+    p.join()
+    return test_result
+
+
+def write_pair(r, lc, reg, prefix, insulated=()):
+    """Junction mesh file with its map P and the same mesh with P = identity (expanded reference), with an I-coil."""
+    from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil
+    out = find_junction_holes(r, lc, reg, insulated=insulated)
+    ident = copy.copy(out)
+    ident['P'] = scipy.sparse.identity(out['P'].shape[0], format='csr')
+    coil = ThinCurr_Icoil('IC')
+    coil.add_circular_subcoil([0.7, 0.3])
+    files = []
+    for tag, junc in (('junction', out), ('expanded', ident)):
+        path = os.path.join(test_dir, '{0}_{1}.h5'.format(prefix, tag))
+        write_ThinCurr_mesh(path, out['r'], out['lc'], reg, junctions=junc, eta_surf=1.0E-4*np.ones(reg.max()),
+                            coil_sets=[coil])
+        files.append(path)
+    return files, out['P'].toarray()
+
+
+def run_reduction(files, P, insulated_runtime, mp_q):
+    """Junction model matrices must equal P applied to the expanded model's."""
+    result = True
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        mats = []
+        for path, ins in ((files[0], insulated_runtime), (files[1], None)):
+            tw = ThinCurr(myOFT)
+            tw.setup_model(mesh_file=path, junction_insulated=ins)
+            Mc = np.array(tw.compute_Mcoil())
+            tw.compute_Lmat()
+            tw.compute_Rmat()
+            mats.append((np.array(tw.Lmat), tw.Rmat.toarray(), Mc, np.sort(tw.get_eigs(4, direct=True)[0])))
+        (L, R, Mc, eig), (Lx, Rx, Mcx, _) = mats
+        if P is not None:
+            rel = lambda a, b: np.abs(a - b).max()/np.abs(b).max()
+            errs = [rel(L, P.T @ Lx @ P), rel(R, P.T @ Rx @ P), rel(Mc, Mcx @ P)]
+            print('L, R, Mcoil errors', errs)
+            result = max(errs) < 1.0E-12
+        else:
+            result = eig
+    except BaseException as e:
+        print(e)
+        result = False
+    mp_q.put(result)
+
+
+@pytest.mark.parametrize("mesh", ('tplate', 'ring', 'torus'))
+def test_reduction(mesh):
+    r, lc, reg = {'tplate': tplate, 'ring': ring, 'torus': torus}[mesh]()
+    files, P = write_pair(r, lc, reg, 'junction_' + mesh)
+    assert mp_run(run_reduction, (files, P, None))
+
+
+def test_runtime_insulation():
+    r, lc, reg = ring()
+    files_rt, _ = write_pair(r, lc, reg, 'junction_ring_rt')
+    files_ins, _ = write_pair(r, lc, reg, 'junction_ring_ins', insulated=(3,))
+    eig_rt = mp_run(run_reduction, (files_rt, None, [3]))
+    eig_ins = mp_run(run_reduction, (files_ins, None, None))
+    assert eig_rt is not False and eig_ins is not False
+    assert np.allclose(eig_rt, eig_ins, rtol=1.0E-10, atol=0.0)
