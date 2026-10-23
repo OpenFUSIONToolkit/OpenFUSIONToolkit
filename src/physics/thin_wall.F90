@@ -1274,7 +1274,7 @@ END SUBROUTINE tw_compute_LmatDirect_exp
 !---------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Lmat_MF(row_obj,col_obj,nrhs,a,b)
+SUBROUTINE tw_compute_Lmat_MF_exp(row_obj,col_obj,nrhs,a,b)
 TYPE(tw_type), INTENT(in) :: row_obj !< Thin-wall model object for rows
 TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
 INTEGER(4), INTENT(in) :: nrhs
@@ -1290,7 +1290,6 @@ CLASS(oft_bmesh), POINTER :: rmesh,cmesh
 TYPE(oft_quad_type) :: quad,quad2
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
-IF(row_obj%junctions)CALL oft_abort("Not yet supported for models with junctions","tw_compute_Lmat_MF",__FILE__)
 CALL mytimer%tick
 !---Setup quadrature
 CALL set_quad_2d(quad,quad_orders(2))
@@ -1499,7 +1498,7 @@ elapsed_time=mytimer%tock()
 WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
-END SUBROUTINE tw_compute_Lmat_MF
+END SUBROUTINE tw_compute_Lmat_MF_exp
 !---------------------------------------------------------------------------------
 !> Compute coupling from thin-wall model elements to flux loop sensors
 !---------------------------------------------------------------------------------
@@ -3804,9 +3803,20 @@ TYPE(tw_type), TARGET, OPTIONAL, INTENT(in) :: col_model !< Thin-wall model obje
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
 REAL(8), CONTIGUOUS, POINTER :: Lexp(:,:)
 IF(PRESENT(col_model))THEN
-  IF(row_model%junctions.OR.col_model%junctions)CALL oft_abort("Coupling between models is not yet supported with junctions", &
-    "tw_compute_LmatDirect",__FILE__)
-  CALL tw_compute_LmatDirect_exp(row_model,Lmat,col_model,save_file)
+  IF(.NOT.(row_model%junctions.OR.col_model%junctions))THEN
+    CALL tw_compute_LmatDirect_exp(row_model,Lmat,col_model,save_file)
+    RETURN
+  END IF
+  Lexp=>NULL()
+  CALL tw_compute_LmatDirect_exp(row_model,Lexp,col_model,save_file)
+  IF(col_model%junctions)CALL tw_junction_reduce_rows(col_model,Lexp)
+  IF(row_model%junctions)CALL tw_junction_reduce_cols(row_model,Lexp)
+  IF(ASSOCIATED(Lmat))THEN
+    Lmat=Lexp
+    DEALLOCATE(Lexp)
+  ELSE
+    Lmat=>Lexp
+  END IF
   RETURN
 END IF
 IF(.NOT.row_model%junctions)THEN
@@ -4059,4 +4069,38 @@ DO e=1,self%nelems_exp
   END DO
 END DO
 END SUBROUTINE tw_junction_reduce_diag
+!---------------------------------------------------------------------------------
+!> Apply the mutual inductance between two models, b = M a (reduced to the junction unknowns if present)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_compute_Lmat_MF(row_obj,col_obj,nrhs,a,b)
+TYPE(tw_type), INTENT(in) :: row_obj !< Thin-wall model object for rows
+TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
+INTEGER(4), INTENT(in) :: nrhs !< Number of vectors
+REAL(8), CONTIGUOUS, POINTER, INTENT(in) :: a(:,:) !< Currents on row_obj [nelems,nrhs]
+REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: b(:,:) !< Fluxes on col_obj [nelems,nrhs]
+INTEGER(4) :: i
+REAL(8), CONTIGUOUS, POINTER :: aexp(:,:),bexp(:,:)
+IF(.NOT.(row_obj%junctions.OR.col_obj%junctions))THEN
+  CALL tw_compute_Lmat_MF_exp(row_obj,col_obj,nrhs,a,b)
+  RETURN
+END IF
+ALLOCATE(aexp(row_obj%nelems_exp,nrhs),bexp(col_obj%nelems_exp,nrhs))
+DO i=1,nrhs
+  IF(row_obj%junctions)THEN
+    CALL tw_junction_expand(row_obj,a(:,i),aexp(:,i))
+  ELSE
+    aexp(:,i)=a(:,i)
+  END IF
+END DO
+bexp=0.d0
+CALL tw_compute_Lmat_MF_exp(row_obj,col_obj,nrhs,aexp,bexp)
+DO i=1,nrhs
+  IF(col_obj%junctions)THEN
+    CALL tw_junction_reduce_vec(col_obj,bexp(:,i),b(:,i))
+  ELSE
+    b(:,i)=bexp(:,i)
+  END IF
+END DO
+DEALLOCATE(aexp,bexp)
+END SUBROUTINE tw_compute_Lmat_MF
 END MODULE thin_wall
