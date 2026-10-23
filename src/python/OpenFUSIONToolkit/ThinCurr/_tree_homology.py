@@ -13,7 +13,7 @@ at zero) is added for each closed surface. For a connected surface with Euler ch
 \f$ 2 - \chi \f$ if it is closed.
 
 Holes are chosen for each connected surface as follows:
- 1. All boundary loops except the longest are taken as holes (as in the legacy method).
+ 1. All boundary loops except the longest are taken as holes.
  2. A tree-cotree decomposition (a spanning tree of the vertices and a spanning tree of the cells over the
     remaining edges) gives one integer functional per hole on closed edge chains. A loop's values under
     these functionals (its signature) are zero exactly when the loop is the boundary of a set of cells, so
@@ -164,7 +164,7 @@ def _check_mesh(r, lc):
         scipy.sparse.coo_matrix((np.ones(inner.shape[0]), (f1, f2)), shape=(nf,nf)), directed=False)
     _, first = np.unique(fgroup, return_index=True)
     if np.unique(vsurf[lc[first,0]]).shape[0] != first.shape[0]:
-        raise ValueError("Surfaces that touch only at a vertex are not supported; try `use_legacy`")
+        raise ValueError("Surfaces that touch only at a vertex are not supported")
     rows = np.concatenate((f1, np.full(first.shape[0], nf)))
     cols = np.concatenate((f2, first))
     Gf = scipy.sparse.coo_matrix((np.ones(rows.shape[0]), (rows, cols)), shape=(nf+1,nf+1)).tocsr()
@@ -218,7 +218,7 @@ class _surface:
         src = self.lc.reshape(-1)[hb]
         dst = self.lc[:,[1,2,0]].reshape(-1)[hb]
         if np.any(np.bincount(src, minlength=self.nv) > 1):
-            raise ValueError("Boundary touches itself at a vertex (pinched boundary), which is not supported; try `use_legacy`")
+            raise ValueError("Boundary touches itself at a vertex (pinched boundary), which is not supported")
         nxt = -np.ones(self.nv, dtype=np.int64)
         nxt[src] = dst
         seen = np.zeros(self.nv, dtype=bool)
