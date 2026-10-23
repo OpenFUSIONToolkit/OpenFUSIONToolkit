@@ -390,12 +390,13 @@ class trimesh:
         sys.setrecursionlimit(recur_lim)
         cell_group = np.array(cell_group)
         # return cell_group, np.where(cell_group[self.lef[:,0]]!=cell_group[self.lef[:,1]])[0]
-        keep_edges = np.where(cell_group[self.lef[:,0]]!=cell_group[self.lef[:,1]])[0]
+        # Marked edges must be kept even when the same group lies on both sides (non-separating cycles)
+        cut_edge = np.logical_or(eflag > 0, cell_group[self.lef[:,0]]!=cell_group[self.lef[:,1]])
         pt_flag = np.zeros((self.np,), dtype=np.int32) + pflag
-        for i in keep_edges:
+        for i in np.where(cut_edge)[0]:
             pt_flag[self.le[i,0]] += 1
             pt_flag[self.le[i,1]] += 1
-        keep_edges = np.where(np.logical_and(cell_group[self.lef[:,0]]!=cell_group[self.lef[:,1]], np.logical_or(pt_flag[self.le[:,0]]>2, pt_flag[self.le[:,1]]>2)))[0]
+        keep_edges = np.where(np.logical_and(cut_edge, np.logical_or(pt_flag[self.le[:,0]]>2, pt_flag[self.le[:,1]]>2)))[0]
         return cell_group, keep_edges
 
 

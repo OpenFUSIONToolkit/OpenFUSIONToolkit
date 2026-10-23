@@ -205,6 +205,22 @@ def test_invalid_meshes():
         find_holes(r, np.array(lc))
 
 
+@pytest.mark.parametrize("name", ('torus', 'torus_with_port', 'two_tori'))
+def test_legacy_optimize(tmp_path, name):
+    '''Legacy optimization must keep non-separating cycles (eg. poloidal loop on a torus)'''
+    builder, nholes, nclosures = meshes[name]
+    r, lc = builder()
+    in_file = str(tmp_path / 'mesh.h5')
+    out_file = str(tmp_path / 'mesh-homology.h5')
+    write_ThinCurr_mesh(in_file, r, lc, np.ones(lc.shape[0], dtype=np.int32))
+    compute_homology(in_file, out_file=out_file, use_legacy=True, optimize_holes=True)
+    mesh = read_ThinCurr_mesh(out_file)
+    holes = mesh['thincurr']['holes']
+    assert len(holes) == nholes
+    assert len(mesh['thincurr'].get('closures', [])) == nclosures
+    assert homology_rank(r, lc, holes) == nholes
+
+
 @pytest.mark.parametrize("use_legacy", (False, True))
 def test_cli(tmp_path, use_legacy):
     r, lc = torus_with_port()
