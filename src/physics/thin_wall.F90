@@ -500,6 +500,14 @@ INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
 INTEGER(4), INTENT(out) :: list_out(n) !< Reordered list
 INTEGER(4) :: ii,jj,k,l,nlinks,ipt,eprev,ed,ed2,ptp2,ptp,candidate,candidate2,last_item(3),i0
 INTEGER(4), ALLOCATABLE :: lloop_tmp(:),flag_list(:)
+!---Use the given order if consecutive points (including last -> first) are all joined by mesh edges
+DO jj=1,n
+  IF(mesh_local_findedge(self%mesh,[list_in(jj),list_in(MOD(jj,n)+1)])==0)EXIT
+END DO
+IF(jj>n)THEN
+  list_out=list_in
+  RETURN
+END IF
 !---Find loop points and edges
 ALLOCATE(lloop_tmp(n),flag_list(n))
 flag_list=0

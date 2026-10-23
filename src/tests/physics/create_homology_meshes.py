@@ -66,6 +66,18 @@ def plate():
 surface_mesh('homology_plate', 0.05, plate)
 
 
+# Plate with an opening wrapped around a narrow tongue of material: 1 hole (boundary), no closures.
+# The tongue is narrower than the cell size, so the opening's boundary loop has chords (mesh edges across the
+# tongue) and cannot be rebuilt from its sorted vertices by walking mesh edges.
+def tongue():
+    plate = gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 1.0, 1.0)
+    opening = gmsh.model.occ.addRectangle(0.3, 0.3, 0.0, 0.4, 0.4)
+    tongue = gmsh.model.occ.addRectangle(0.49, 0.3, 0.0, 0.02, 0.3)
+    gmsh.model.occ.cut([(2, opening)], [(2, tongue)])
+    gmsh.model.occ.cut([(2, plate)], [(2, opening)])
+surface_mesh('homology_tongue', 0.04, tongue)
+
+
 # Surface of a slab with 4 through holes (closed surface of genus 4): 8 holes, 1 closure
 def genus4():
     box = gmsh.model.occ.addBox(0.0, 0.0, 0.0, 1.0, 1.0, 0.2)

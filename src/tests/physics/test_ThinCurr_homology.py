@@ -27,7 +27,11 @@ meshes = {
     'homology_plate': (4, 0),
     'homology_genus4': (8, 1),
     'homology_two_tori': (4, 2),
+    'homology_tongue': (1, 0),
 }
+# The legacy method caps each opening with a fan of cells from one boundary vertex, which fails when that vertex
+# is joined to another vertex of the same boundary by a mesh edge (narrow tongue of material)
+legacy_unsupported = ('homology_tongue',)
 
 # Options for each method
 methods = {
@@ -126,8 +130,8 @@ def loop_length(r, loops):
     return total
 
 
-@pytest.mark.parametrize("mesh_name", meshes.keys())
-@pytest.mark.parametrize("method", methods.keys())
+@pytest.mark.parametrize("mesh_name,method", [(mesh_name, method) for mesh_name in meshes for method in methods
+                                               if not (method.startswith('legacy') and mesh_name in legacy_unsupported)])
 def test_holes(mesh_name, method):
     '''Hole and closure counts, loop validity and independence for each method'''
     nholes, nclosures = meshes[mesh_name]
@@ -225,3 +229,12 @@ def test_eigs_match():
         eigs[method] = mp_run(run_eigs, (find_holes('homology_torus_port', method),))
         assert eigs[method] is not None
     assert np.allclose(eigs['tree'], eigs['legacy'], rtol=1.E-5, atol=0.0)
+
+
+def test_ordered_hole():
+    '''A hole loop with chords is used in its given order (it cannot be rebuilt from its sorted vertices)'''
+    out_file = find_holes('homology_tongue', 'tree')
+    mesh = read_ThinCurr_mesh(out_file)
+    loop = mesh['thincurr']['holes'][0]
+    assert has_chord(loop, edge_set(mesh['lc']))
+    assert mp_run(run_eigs, (out_file,)) is not None
