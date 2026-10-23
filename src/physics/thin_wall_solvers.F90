@@ -1389,12 +1389,12 @@ IF(compute_B)THEN
     DEALLOCATE(pvals)
   ELSE
     IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self,self%B_dx)
-    CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &
-      self%Bel(:,:,1),self%mesh%np,eig_vec,self%nelems,0.d0,Bxtmp,self%mesh%np)
-    CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &
-      self%Bel(:,:,2),self%mesh%np,eig_vec,self%nelems,0.d0,Bytmp,self%mesh%np)
-    CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &
-      self%Bel(:,:,3),self%mesh%np,eig_vec,self%nelems,0.d0,Bztmp,self%mesh%np)
+    CALL dgemm('T','N',self%mesh%np,neigs,self%nelems,1.d0, &
+      self%Bel(:,:,1),self%nelems,eig_vec,self%nelems,0.d0,Bxtmp,self%mesh%np)
+    CALL dgemm('T','N',self%mesh%np,neigs,self%nelems,1.d0, &
+      self%Bel(:,:,2),self%nelems,eig_vec,self%nelems,0.d0,Bytmp,self%mesh%np)
+    CALL dgemm('T','N',self%mesh%np,neigs,self%nelems,1.d0, &
+      self%Bel(:,:,3),self%nelems,eig_vec,self%nelems,0.d0,Bztmp,self%mesh%np)
   END IF
   CALL hdf5_write(Bxtmp,TRIM(filename),'Bx')
   description=["X-component of B reconstruction matrix for model"]
