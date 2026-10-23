@@ -30,6 +30,7 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_tCurr_regcoil
  - \subpage doc_tCurr_hodlr
  - \subpage doc_tCurr_reduction
+ - \subpage doc_tCurr_junctions
 
 \section doc_tw_main_settings ThinCurr settings groups
 
@@ -199,6 +200,12 @@ The script should be available in one of two ways depending on the installation/
  - If OFT is installed via `pip` or similar, then it should be available via command line as `OFT_ThinCurr_holes` in any environment where OFT is also available (eg. virtual environment)
  - If OFT is installed any other way, including installation from source, the `OFT_ThinCurr_holes.py` script will be located in the `python` directory of the install or build folder
 
+For each connected surface, all boundary loops except the longest are used as holes and the remaining holes are selected using a
+tree-cotree approach (see \ref OpenFUSIONToolkit.ThinCurr._tree_homology "_tree_homology"). Candidate loops are taken from shortest-path trees and
+kept, shortest first, when they are independent of the loops already selected. Each selected loop is simple and has no chords, so that
+it can be used directly as a hole element. The `--optimize_holes` option repeats the search from additional base points to find shorter
+loops. The previous Greedy Homotopy method is still available using the `--use_legacy` option.
+
 
 \subsection doc_tw_main_close "Closure" elements
 As stated above the fact that the solution depends only on the gradient and not on the absolute value of \f$ \phi \f$ itself can
@@ -211,6 +218,55 @@ solveable.
 \subsubsection doc_tw_main_close_def Defining closures
 As with holes, closures can also be defined using the `OFT_ThinCurr_holes.py` script. This is now the recommended way of defining
 closures in ThinCurr models, although \ref doc_tw_dep_leg_holes "manual definition" is also still supported.
+
+\subsection doc_tw_main_junctions Junctions between sheets
+ThinCurr's stream-function formulation requires each edge of the mesh to be shared by at most two cells. Structures
+where three or more conducting sheets meet along an edge, a *junction* (for example a plate with a stiffening rib,
+a flange welded around a tube, or ribs that cross each other), are supported by splitting the mesh at the junctions:
+
+ - Each region is a sheet, and a junction edge is an edge shared by more than two cells or by cells of different
+   regions. At each vertex, every group of cells connected through ordinary edges gets its own copy of the vertex,
+   so the split mesh is an ordinary (manifold) ThinCurr mesh. Cells keep their index and region. Sheets that touch
+   only at a point are therefore not connected (no current passes through a point), and a region may lie on both
+   sides of a junction (for example a plate under a stiffening rib).
+ - Current conservation (Kirchhoff's law) across each junction edge joins the cells again:
+   \f$ \sum_c s_c (\phi_c(b) - \phi_c(a)) = 0 \f$ over the cells on the edge \f$ a \rightarrow b \f$, where
+   \f$ s_c = \pm 1 \f$ follows each cell's orientation, so that each term is the current leaving that cell.
+ - The resulting constraints define a map \f$ \textbf{P} \f$ from the reduced (joined) unknowns to the unknowns of
+   the split mesh, \f$ \phi_{split} = \textbf{P} x \f$. ThinCurr assembles all operators on the split mesh as usual
+   and reduces them, e.g. \f$ \textbf{L} \rightarrow \textbf{P}^T \textbf{L} \textbf{P} \f$, so that all solvers,
+   coils, sensors, HODLR compression and plotting work on the joined model.
+
+Holes are chosen automatically for junction meshes. The currents the model can carry are the cycles of a graph
+whose nodes are the cells and the junction edges, linked wherever current can cross an edge. The stream function is
+uniform along each chain of outer edges (an "outer arc"); constant shifts that carry no current are removed by fixing
+one arc (or one vertex, a closure, on a closed surface) per connected piece; and the currents these unknowns do not
+represent are added as hole elements built from cycles of the graph (a jump of the stream function at the vertex where
+each cell on the cycle is entered and left). This covers holes of any kind, including loops that cross junctions
+(for example the long way around a torus divided into sectors, with or without ribs). The number of unknowns is
+checked against the number of cycles of the graph.
+
+\subsubsection doc_tw_main_junctions_def Defining junction meshes
+ - Give each sheet its own region, e.g. a gmsh physical surface converted with `OFT_convert_gmsh --physical_regions`.
+ - Run `OFT_ThinCurr_holes` (\ref thincurr_holes_tool) on the mesh. If it finds junctions (or sheets of different
+   regions touching at a point) it writes the split mesh with a `thincurr/junctions` group (junction table, hole
+   elements, vertex map and \f$ \textbf{P} \f$). Where sheets only meet two at a time (for example a torus divided
+   into sectors), add `--split_regions` to split at the region interfaces anyway, so that the sheets can be
+   insulated from each other.
+ - Use the resulting file as any other ThinCurr mesh. Sheets can be insulated at the junctions when the model is set
+   up, without a new mesh file, with \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.setup_model "setup_model(junction_insulated=[...])".
+   A region in the list is insulated at every junction it touches; a pair of regions, e.g. `(1,2)`, is insulated
+   only from each other (for example a single insulating break in a sectored torus). Where a third sheet meets both
+   on the same junction edge, current can pass between the pair through it, so the pair has no effect there (a
+   warning is given).
+
+**Periodic models:** a periodic mesh (`nfp`, with the periodic point map and hole loops of e.g.
+\ref OpenFUSIONToolkit.ThinCurr.meshing.ThinCurr_periodic_toroid "ThinCurr_periodic_toroid") with junctions, or with
+`--split_regions`, is split in the same way. As for other periodic models, the stream function is the same in every
+period and the file's hole loops (one toroidal loop and a poloidal loop at each period seam) are kept as independent
+holes; the periods are tied through \f$ \textbf{P} \f$, so the junction file does not use the periodic point map.
+
+See \ref doc_tCurr_junctions for an example.
 
 \subsection doc_tw_main_hodlr Hierarchical Off-Diagonal Low-Rank (HODLR) approximation
 In the standard BFEM approach described above every element interacts with every other element, leading to a dense \f$ \textrm{L} \f$ and

@@ -27,7 +27,7 @@ USE oft_la_base, ONLY: oft_vector
 USE oft_native_la, ONLY: oft_native_vector, oft_native_dense_matrix
 !---
 USE fem_utils, ONLY: fem_interp
-USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, &
+USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, tw_junction_reduce_cols, &
   tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF, &
   tw_recon_curr, tw_compute_Bops, tw_copy_coil
 USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op
@@ -222,6 +222,12 @@ IF(c_associated(xml_ptr))THEN
     CALL copy_string('Error getting ThinCurr XML node',error_str)
     RETURN
   END IF
+END IF
+CALL c_f_pointer(pmap_loc, pmap_tmp, [1])
+IF(pmap_tmp(1)>=0)THEN
+  CALL c_f_pointer(pmap_loc, pmap_tmp, [tw_obj%mesh%np])
+  ALLOCATE(tw_obj%pmap(tw_obj%mesh%np))
+  tw_obj%pmap=pmap_tmp
 END IF
 IF(np>0)THEN
    CALL tw_obj%setup(hole_nsets, error_string)
@@ -719,7 +725,9 @@ IF(ASSOCIATED(tw_obj%vcoils))DEALLOCATE(tw_obj%vcoils)
 IF(ASSOCIATED(tw_obj%icoils))DEALLOCATE(tw_obj%icoils)
 tw_obj%n_vcoils=COUNT(flag_tmp==1)
 tw_obj%n_icoils=tw_obj%n_coils-tw_obj%n_vcoils
-tw_obj%nelems=tw_obj%np_active+tw_obj%nholes+tw_obj%n_vcoils
+tw_obj%nelems_exp=tw_obj%np_active+tw_obj%nholes+tw_obj%n_vcoils
+tw_obj%nelems=tw_obj%nelems_exp
+IF(tw_obj%junctions)tw_obj%nelems=tw_obj%jp_nred+tw_obj%n_vcoils
 IF(tw_obj%n_vcoils>0)ALLOCATE(tw_obj%vcoils(tw_obj%n_vcoils))
 IF(tw_obj%n_icoils>0)ALLOCATE(tw_obj%icoils(tw_obj%n_icoils))
 tw_obj%n_icoils=0
@@ -1056,11 +1064,13 @@ TYPE(c_ptr), VALUE, INTENT(in) :: Rmat !< Pointer to regularization matrix
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error message
 INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
 REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
-REAL(8), POINTER, DIMENSION(:,:) :: Rmat_tmp
+REAL(8), POINTER, DIMENSION(:,:) :: Rmat_out
+REAL(8), CONTIGUOUS, POINTER, DIMENSION(:,:) :: Rmat_tmp
 TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
-CALL c_f_pointer(Rmat, Rmat_tmp, [3*tw_obj%mesh%nc,tw_obj%nelems])
+CALL c_f_pointer(Rmat, Rmat_out, [3*tw_obj%mesh%nc,tw_obj%nelems])
+ALLOCATE(Rmat_tmp(3*tw_obj%mesh%nc,tw_obj%nelems_exp))
 !
 Rmat_tmp=0.d0
 !---Avg to cells
@@ -1096,6 +1106,9 @@ DO ihc=tw_obj%hmesh(ih)%kpc(ihp),tw_obj%hmesh(ih)%kpc(ihp+1)-1
 END DO
 END DO
 END DO
+IF(tw_obj%junctions)CALL tw_junction_reduce_cols(tw_obj,Rmat_tmp)
+Rmat_out=Rmat_tmp
+DEALLOCATE(Rmat_tmp)
 END SUBROUTINE thincurr_curr_regmat
 !---------------------------------------------------------------------------------
 !> Compute eigenmodes (L/R times and current structures) of a ThinCurr model
