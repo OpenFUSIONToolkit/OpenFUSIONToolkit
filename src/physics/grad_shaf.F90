@@ -48,6 +48,7 @@ IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
 REAL(r8), PARAMETER :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
+INTEGER(i4), PARAMETER :: qprof_backend = 0 !< Flux-surface backend (q profile, averages, toroidal flux map, Sauter factors): 0 contour where supported, 1 field-line tracer (testing only; the sawtooth reset needs the contour and is skipped)
 !------------------------------------------------------------------------------
 !> Interpolation class for uniform source with simple tokamak representation
 !------------------------------------------------------------------------------
@@ -284,6 +285,7 @@ TYPE :: gs_equil
   LOGICAL :: diverted = .FALSE. !< Equilibrium is diverted?
   LOGICAL :: has_plasma = .TRUE. !< Solve with plasma? (otherwise vacuum)
   LOGICAL :: skip_targets = .FALSE. !< Skip toroidal current target in non-linear solve?
+  LOGICAL :: prof_failed = .FALSE. !< A flux function update failed (set by the profile, ends @ref gs_solve)
   INTEGER(i4) :: mode = 0 !< RHS source mode (0 -> F*F', 1 -> F')
   INTEGER(i4) :: nx_points = 0 !< Number of X-points in current solution
   INTEGER(i4) :: nregularize = 0 !< Number of regularization terms
@@ -334,6 +336,7 @@ TYPE :: gs_equil
   CLASS(flux_func), POINTER :: jphi_fixed => NULL() !< Fixed (non-rescaled) toroidal current density flux function [A/m^2]
   CLASS(gs_torflux_map), POINTER :: torflux => NULL() !< Normalized toroidal flux map (if any profile is on \f$ \hat{\Phi} \f$)
   INTEGER(i4) :: torflux_ierr = 0 !< Last `torflux` update: 0 ok, 1 failed (previous map kept), 2 no closed surfaces
+  CLASS(flux_func), POINTER :: jphi_saw => NULL() !< Input sawtooth jphi flux function [A/m^2] (bootstrap profile only)
   TYPE(gs_factory), POINTER :: device => NULL() !< Device/factory object for equilibrium
 CONTAINS
   !>
@@ -549,6 +552,19 @@ abstract interface
     CLASS(gs_torflux_map), INTENT(inout) :: self
   END SUBROUTINE torflux_map_delete
 end interface
+INTERFACE
+  !> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the contour quadrature (see grad_shaf_contour.F90)
+  MODULE SUBROUTINE gs_qprof_contour(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,done)
+    CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+    INTEGER(i4), INTENT(in) :: nr !< Number of flux surfaces
+    REAL(r8), INTENT(in) :: psi_q(nr) !< Locations in normalized flux
+    REAL(r8), INTENT(out) :: prof(nr) !< q at each location
+    REAL(r8), OPTIONAL, INTENT(out) :: ravgs(nr,4) !< <R>, <1/R>, <1/R^2>, dV/dPsi
+    REAL(r8), OPTIONAL, INTENT(out) :: fsa_avgs(nr,4) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
+    REAL(r8), OPTIONAL, INTENT(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
+    LOGICAL, INTENT(out) :: done(nr) !< Surfaces evaluated (the others are left for the tracer)
+  END SUBROUTINE gs_qprof_contour
+END INTERFACE
 !---Encapsulation for external function call parameters
 TYPE, PRIVATE :: opt_targets
   integer(i4) :: cell = 0
@@ -1113,6 +1129,7 @@ IF(ASSOCIATED(source%ne))CALL source%ne%copy(self%ne)
 IF(ASSOCIATED(source%ni))CALL source%ni%copy(self%ni)
 IF(ASSOCIATED(source%Zeff))CALL source%Zeff%copy(self%Zeff)
 IF(ASSOCIATED(source%jphi_fixed))CALL source%jphi_fixed%copy(self%jphi_fixed)
+IF(ASSOCIATED(source%jphi_saw))CALL source%jphi_saw%copy(self%jphi_saw)
 IF(ASSOCIATED(source%torflux))CALL source%torflux%copy(self)
 self%diverted=source%diverted
 self%has_plasma=source%has_plasma
@@ -2217,6 +2234,7 @@ end subroutine gs_fit_isoflux
 !> Compute Grad-Shafranov solution for current flux function definitions and targets
 !------------------------------------------------------------------------------
 subroutine gs_solve(self,equil,ierr)
+USE, INTRINSIC :: ieee_arithmetic, ONLY: ieee_is_finite
 class(gs_factory), intent(inout) :: self !< G-S factory/device object
 class(gs_equil), intent(inout) :: equil !< G-S equilibrium object
 integer(4), optional, intent(out) :: ierr !< Error flag
@@ -2235,13 +2253,14 @@ integer(4) :: i,ii,j,k,error_flag,cell,ierr_loc
 INTEGER(i4) :: tmap_fails
 INTEGER(i4), PARAMETER :: tmap_fail_max = 3 !< Consecutive toroidal flux map failures before the solve fails
 integer(4), save :: eq_count = 0
-CHARACTER(LEN=40) :: err_reason
+CHARACTER(LEN=80) :: err_reason
 logical :: pm_save,fail_test
 !---
 error_flag=0
 tmap_fails=0
 self%nl_its=0
 equil%skip_targets=.FALSE.
+equil%prof_failed=.FALSE.
 IF(TRIM(self%lu_solver%package)=='none')THEN
   CALL oft_abort("LU solver required for GS solve","gs_solve",__FILE__)
 ELSE
@@ -2254,6 +2273,22 @@ END IF
 IF(equil%dflux_target>-1.d98.AND.ABS(equil%ffp_scale)<1.d-8)equil%ffp_scale=1.d0
 !---
 ALLOCATE(vals_tmp(equil%psi%n))
+!---Refuse to start from a non-finite flux state (every flux-surface trace would fail, every
+!---iteration, until "maxits"); nothing has been modified yet, so return directly
+CALL equil%psi%get_local(vals_tmp)
+IF(.NOT.ALL(ieee_is_finite(vals_tmp)))THEN
+  DEALLOCATE(vals_tmp)
+  error_flag=-10
+  CALL oft_warn('gs_solve: initial flux is non-finite (NaN/Inf), solve not started')
+  self%ierr=error_flag
+  IF(PRESENT(ierr))THEN
+    ierr=error_flag
+  ELSE
+    err_reason=gs_err_reason(error_flag)
+    WRITE(*,'(3A)')oft_indent,'Equilibrium solve Failed: ',TRIM(err_reason)
+  END IF
+  RETURN
+END IF
 CALL equil%psi%new(tmp_vec)
 CALL equil%psi%new(psip)
 CALL equil%psi%new(psiin)
@@ -2388,6 +2423,10 @@ END IF
 DO i=1,self%maxits
   IF(tmap_fails>=tmap_fail_max)THEN
     error_flag=-9
+    EXIT
+  END IF
+  IF(equil%prof_failed)THEN
+    error_flag=-10
     EXIT
   END IF
   !---Ramp R0 target
@@ -2673,8 +2712,16 @@ DO i=1,self%maxits
     CALL equil%psi%add(1.d0,1.d0,psi_dt)
   END IF
 
-  !---Check for scale issues
+  !---Abort on a non-finite iterate before it reaches the flux-function update (surface tracing)
   CALL equil%psi%get_local(vals_tmp)
+  IF(.NOT.(ALL(ieee_is_finite(vals_tmp)).AND.ieee_is_finite(equil%ffp_scale) &
+    .AND.ieee_is_finite(equil%p_scale).AND.ieee_is_finite(equil%vcontrol_val)))THEN
+    WRITE(err_reason,'(I6)')i
+    CALL oft_warn('gs_solve: non-finite flux or scale factor at iteration '//TRIM(ADJUSTL(err_reason)))
+    error_flag=-10
+    EXIT
+  END IF
+  !---Check for scale issues
   psimax=maxval(ABS(vals_tmp))
   fail_test=psimax<gs_epsilon
   fail_test=fail_test.OR.((equil%plasma_bounds(2) < equil%plasma_bounds(1)).AND.equil%has_plasma)
@@ -2716,6 +2763,12 @@ DO i=1,self%maxits
   END IF
   !---Update flux functions
   CALL gs_update_bounds(equil)
+  IF(.NOT.(ALL(ieee_is_finite(equil%plasma_bounds)).AND.ALL(ieee_is_finite(equil%o_point))))THEN
+    WRITE(err_reason,'(I6)')i
+    CALL oft_warn('gs_solve: non-finite plasma bounds or O-point at iteration '//TRIM(ADJUSTL(err_reason)))
+    error_flag=-10
+    EXIT
+  END IF
   IF(ASSOCIATED(equil%torflux))CALL equil%torflux%update(equil)
   CALL equil%I%update(equil)
   CALL equil%p%update(equil)
@@ -2752,17 +2805,26 @@ DO i=1,self%maxits
   !---Output progress
   IF(oft_env%pm)WRITE(*,'(A,I4,6ES12.4)')oft_indent,i,equil%ffp_scale,equil%p_scale, &
     SQRT(nl_res),equil%o_point(1),equil%o_point(2),equil%vcontrol_val/mu0
+  !---Abort on a non-finite source/residual (e.g. NaN in the updated flux functions)
+  IF(.NOT.ieee_is_finite(nl_res))THEN
+    WRITE(err_reason,'(I6)')i
+    CALL oft_warn('gs_solve: non-finite source or residual at iteration '//TRIM(ADJUSTL(err_reason)))
+    error_flag=-10
+    EXIT
+  END IF
   !---Check if converged
   IF((equil%R0_target>0.d0).AND.(ABS(R0_tmp-equil%R0_target)>1.d-8))CYCLE
   IF((equil%Z0_target>-1.d98).AND.(ABS(Z0_tmp-equil%Z0_target)>1.d-8))CYCLE
   ! IF((equil%R0_target>0.d0).AND.(i<self%nR0_ramp))CYCLE
   IF(tmap_fails>0)CYCLE ! Do not converge on a stale toroidal flux map
+  IF(equil%prof_failed)CYCLE ! Nor on a failed flux function update (ends the solve above)
   IF(SQRT(nl_res)<self%nl_tol)EXIT
 end do
 IF(oft_env%pm)CALL oft_decrease_indent
 IF(i>self%maxits)THEN
   error_flag=-1
   IF(tmap_fails>0)error_flag=-9 ! Ran out of iterations on a stale toroidal flux map
+  IF(equil%prof_failed)error_flag=-10
 END IF
 IF(error_flag==0)THEN
   self%nl_its=i
@@ -2866,7 +2928,7 @@ real(8) :: opoint(2),f(3),t0,t1,curr,itor_ffp,itor_press,estored,dflux_ffp
 REAL(8) :: psimax,ffp_scale_in,ffp_scale_prev,pnorm0,R0_hist(2),gpsi0(3),gpsi1(3),gpsi2(3)
 REAL(8) :: param_mat(3,3),param_vec(3),param_rhs(3)
 integer(4) :: ii,j,k,error_flag,cell,ierr_loc
-CHARACTER(LEN=40) :: err_reason
+CHARACTER(LEN=80) :: err_reason
 logical :: pm_save
 t0=omp_get_wtime()
 !---
@@ -3330,7 +3392,7 @@ end subroutine gs_vac_solve
 !------------------------------------------------------------------------------
 function gs_err_reason(ierr) result(err_reason)
 integer(4), intent(in) :: ierr !< Error flag
-CHARACTER(LEN=40) :: err_reason !< String representation of error
+CHARACTER(LEN=80) :: err_reason !< String representation of error
 SELECT CASE(ierr)
   CASE(-1)
     err_reason='Exceeded "maxits"'
@@ -3350,6 +3412,8 @@ SELECT CASE(ierr)
     err_reason='Wall eigenmode flux loop fitting failed'
   CASE(-9)
     err_reason='Toroidal flux map update failed'
+  CASE(-10)
+    err_reason='Non-finite state or failed flux function update'
   CASE DEFAULT
     err_reason='Unknown reason'
 END SELECT
@@ -4487,7 +4551,7 @@ end subroutine psimax_error_grad
 !------------------------------------------------------------------------------
 !> Get q profile for equilibrium
 !------------------------------------------------------------------------------
-subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs,fsa_avgs,shape_geo,geom_only)
+subroutine gs_get_qprof(gseq,nr,psi_q,prof,dl,rbounds,zbounds,ravgs,fsa_avgs,shape_geo,geom_only,trace_only)
 class(gs_equil), intent(inout) :: gseq !< G-S object
 integer(4), intent(in) :: nr !< Number of flux surfaces to sample
 real(8), intent(in) :: psi_q(nr) !< Locations to sample in normalized flux
@@ -4499,6 +4563,7 @@ real(8), optional, intent(out) :: ravgs(nr,4) !< Flux surface averages <R>, <1/R
 real(8), optional, intent(out) :: fsa_avgs(nr,4) !< Flux surface averages <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
 real(8), optional, intent(out) :: shape_geo(nr,6) !< Per-surface R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
 logical, optional, intent(in) :: geom_only !< Return \f$ q/F \f$ (independent of F profile)
+logical, optional, intent(in) :: trace_only !< Trace every surface (skip the contour pass, e.g. for surfaces it rejected)
 real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi
 real(8) :: pt(3),pt_last(3),pt_proj(3),f(3),psi_tmp(1),gop(3,3)
 type(oft_lag_brinterp), target :: psi_int
@@ -4506,18 +4571,27 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
 integer(4), parameter :: nlcfs=1000
-logical :: lcfs_all,lcfs_any,geo
+logical :: lcfs_all,lcfs_any,geo,trace,cc_done(nr)
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
 geo=.FALSE.
 IF(PRESENT(geom_only))geo=geom_only
+trace=.FALSE.
+IF(PRESENT(trace_only))trace=trace_only
 lcfs_any = PRESENT(dl).OR.PRESENT(rbounds).OR.PRESENT(zbounds)
 lcfs_all = PRESENT(dl).AND.PRESENT(rbounds).AND.PRESENT(zbounds)
 IF(lcfs_any.AND.(.NOT.lcfs_all))CALL oft_abort('All LCFS arguments must be passed if any are','gs_get_qprof',__FILE__)
 IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but "psi_q(1)" far from LCFS, not projecting')
 IF(PRESENT(shape_geo).AND.lcfs_any)CALL oft_abort('"shape_geo" cannot be combined with LCFS arguments', &
   'gs_get_qprof',__FILE__)
+!---Contour quadrature for q, flux-surface averages and shape; the tracer handles the LCFS outputs
+!---and the surfaces the contour pass does not accept
+cc_done=.FALSE.
+IF((qprof_backend==0).AND.(.NOT.(lcfs_any.OR.geo.OR.trace)))THEN
+  CALL gs_qprof_contour(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,cc_done)
+  IF(ALL(cc_done))RETURN
+END IF
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -4587,6 +4661,7 @@ active_tracer%inv=.TRUE.
 IF(PRESENT(shape_geo))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,nr
+  IF(cc_done(j))CYCLE
   !------------------------------------------------------------------------------
   ! Trace contour
   !------------------------------------------------------------------------------
@@ -6125,6 +6200,10 @@ END IF
 IF(ASSOCIATED(self%jphi_fixed))THEN
   CALL self%jphi_fixed%delete()
   DEALLOCATE(self%jphi_fixed)
+END IF
+IF(ASSOCIATED(self%jphi_saw))THEN
+  CALL self%jphi_saw%delete()
+  DEALLOCATE(self%jphi_saw)
 END IF
 IF(ASSOCIATED(self%P_ani))THEN
   CALL self%P_ani%delete()

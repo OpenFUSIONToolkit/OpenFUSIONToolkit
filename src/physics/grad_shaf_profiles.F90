@@ -16,12 +16,11 @@ USE oft_io, ONLY: hdf5_read, hdf5_write, hdf5_field_exist
 USE oft_base
 USE spline_mod
 USE oft_gs, ONLY: flux_func, gs_equil, gs_torflux_map, oft_indent, oft_increase_indent, &
-  oft_decrease_indent, gs_get_qprof, gs_fpol
+  oft_decrease_indent, gs_get_qprof, gs_fpol, qprof_backend
 USE oft_gs_contour, ONLY: gs_qgeom_contour
 USE oft_gauss_quadrature, ONLY: oft_quad_type, set_quad_1d
 USE oft_sort, ONLY: sort_array
 implicit none
-INTEGER(i4), PARAMETER :: torflux_qgeom_backend = 0 !< Toroidal flux map q/F backend: 0 contour, 1 tracer (testing only)
 !------------------------------------------------------------------------------
 !> Needs docs
 !------------------------------------------------------------------------------
@@ -1720,6 +1719,7 @@ CALL attach(gseq%ne,'ne',.TRUE.)
 CALL attach(gseq%ni,'ni',.TRUE.)
 CALL attach(gseq%Zeff,'Zeff',.TRUE.)
 CALL attach(gseq%jphi_fixed,'jphi_fixed',.TRUE.)
+CALL attach(gseq%jphi_saw,'jphi_saw',.TRUE.)
 CONTAINS
 !---Attach a profile (value-type profiles on toroidal flux must be "phi_n_val")
 SUBROUTINE attach(F,name,value_type)
@@ -2254,6 +2254,7 @@ CALL add_nodes(gseq%ne)
 CALL add_nodes(gseq%ni)
 CALL add_nodes(gseq%Zeff)
 CALL add_nodes(gseq%jphi_fixed)
+CALL add_nodes(gseq%jphi_saw)
 phinodes=[0.d0,1.d0,MIN(MAX(phinodes,0.d0),1.d0)]
 CALL sort_unique(phinodes)
 ALLOCATE(phitarg(0))
@@ -2391,6 +2392,7 @@ CALL build_fint(gseq%ne)
 CALL build_fint(gseq%ni)
 CALL build_fint(gseq%Zeff)
 CALL build_fint(gseq%jphi_fixed)
+CALL build_fint(gseq%jphi_saw)
 END SUBROUTINE build_all_fint
 !---Rebuild the integral table of a wrapped profile
 SUBROUTINE build_fint(F)
@@ -2466,7 +2468,7 @@ CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: nr !< Number of surfaces
 REAL(r8), INTENT(in) :: psi_q(nr) !< Surface locations
 REAL(r8), INTENT(out) :: g(nr) !< Geometric factor at each surface
-IF(torflux_qgeom_backend==1)THEN
+IF(qprof_backend==1)THEN
   CALL gs_get_qprof(gseq,nr,psi_q,g,geom_only=.TRUE.)
 ELSE
   CALL gs_qgeom_contour(gseq,nr,psi_q,g)

@@ -200,6 +200,12 @@ The script should be available in one of two ways depending on the installation/
  - If OFT is installed via `pip` or similar, then it should be available via command line as `OFT_ThinCurr_holes` in any environment where OFT is also available (eg. virtual environment)
  - If OFT is installed any other way, including installation from source, the `OFT_ThinCurr_holes.py` script will be located in the `python` directory of the install or build folder
 
+For each connected surface, all boundary loops except the longest are used as holes and the remaining holes are selected using a
+tree-cotree approach (see \ref OpenFUSIONToolkit.ThinCurr._tree_homology "_tree_homology"). Candidate loops are taken from shortest-path trees and
+kept, shortest first, when they are independent of the loops already selected. Each selected loop is simple and has no chords, so that
+it can be used directly as a hole element. The `--optimize_holes` option repeats the search from additional base points to find shorter
+loops. The previous Greedy Homotopy method is still available using the `--use_legacy` option.
+
 
 \subsection doc_tw_main_close "Closure" elements
 As stated above the fact that the solution depends only on the gradient and not on the absolute value of \f$ \phi \f$ itself can
