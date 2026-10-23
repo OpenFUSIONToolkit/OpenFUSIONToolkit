@@ -235,9 +235,9 @@ class ThinCurr():
         thincurr_set_coil_types(self.tw_obj,vcoil_flags,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
+        self.nelems += numpy.sum(vcoil_flags) - self.n_vcoils
         self.n_vcoils = numpy.sum(vcoil_flags)
         self.n_icoils = self.n_coils - self.n_vcoils
-        self.nelems = self.np_active + self.nholes + self.n_vcoils
         # Resync with Fortran model
         for i in range(self.n_coils):
             coil_name = ctypes.create_string_buffer(b"",41)

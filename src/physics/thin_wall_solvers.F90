@@ -833,7 +833,7 @@ IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
     jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
   END DO
   DO j=1,self%nholes+self%n_vcoils
-    jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
+    jumpout(sensors%njumpers+j+1)=tw_hole_value(self,vals,j)/mu0
   END DO
   !---Setup history file
   IF(oft_env%head_proc)THEN
@@ -955,7 +955,7 @@ DO i=1,nsteps
     vals=vals+pcoil_volt
   ELSE
     DO j=1,self%n_vcoils
-      vals(self%np_active+self%nholes+j)=vals(self%np_active+self%nholes+j)+pcoil_volt(j)
+      vals(self%nelems-self%n_vcoils+j)=vals(self%nelems-self%n_vcoils+j)+pcoil_volt(j)
     END DO
   END IF
   CALL g%restore_local(vals)
@@ -1017,7 +1017,7 @@ DO i=1,nsteps
       jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
     END DO
     DO j=1,self%nholes+self%n_vcoils
-      jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
+      jumpout(sensors%njumpers+j+1)=tw_hole_value(self,vals,j)/mu0
     END DO
     jumpout(1)=t
     CALL jumper_hist%write(data_r8=jumpout)
@@ -1212,7 +1212,7 @@ DO i=0,nsteps
         jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
       END DO
       DO j=1,self%nholes+self%n_vcoils
-        jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
+        jumpout(sensors%njumpers+j+1)=tw_hole_value(self,vals,j)/mu0
       END DO
       jumpout(1)=t
       CALL jumper_hist%write(data_r8=jumpout)
