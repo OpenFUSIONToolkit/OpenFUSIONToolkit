@@ -2066,7 +2066,7 @@ REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),po
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
 INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
 LOGICAL :: is_neighbor,load_success
-CHARACTER(LEN=1), PARAMETER :: dir_names(3) = ['X','Y','Z']
+INTEGER(c_int), PARAMETER :: Bops_cache_ver = 1 !< Cache file version (used as hash starting value)
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 IF(PRESENT(save_file))THEN
@@ -2245,28 +2245,23 @@ IF(PRESENT(save_file))CALL save_to_file()
 CALL oft_decrease_indent
 CONTAINS
 FUNCTION load_from_file() RESULT(exists)
-INTEGER(4) :: i,hash_tmp(4),file_counts(4)
-REAL(r8), ALLOCATABLE :: Btmp(:,:)
+INTEGER(4) :: hash_tmp(4),file_counts(4)
 LOGICAL :: exists
 IF(TRIM(save_file)/='none')THEN
   INQUIRE(FILE=TRIM(save_file),EXIST=exists)
   IF(exists)THEN
     hash_tmp(1) = self%nelems
     hash_tmp(2) = self%mesh%nc
-    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=Bops_cache_ver)
     hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
     WRITE(*,'(3A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
-    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
-    IF(exists.AND.ALL(file_counts==hash_tmp))THEN
-      ! Element operator components are stored as [nelems,np] in file
+    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
+    IF(exists)exists=ALL(file_counts==hash_tmp)
+    IF(exists)THEN
       ALLOCATE(self%Bel(self%mesh%np,self%nelems,3))
-      ALLOCATE(Btmp(self%nelems,self%mesh%np))
-      DO i=1,3
-        CALL hdf5_read(Btmp,TRIM(save_file),'Bel_'//dir_names(i),success=exists)
-        IF(.NOT.exists)EXIT
-        self%Bel(:,:,i)=TRANSPOSE(Btmp)
-      END DO
-      DEALLOCATE(Btmp)
+      CALL hdf5_read(self%Bel(:,:,1),TRIM(save_file),'Bel_X',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,2),TRIM(save_file),'Bel_Y',success=exists)
+      IF(exists)CALL hdf5_read(self%Bel(:,:,3),TRIM(save_file),'Bel_Z',success=exists)
       IF(exists)THEN
         ALLOCATE(self%Bdr(self%mesh%np,self%n_icoils,3))
         CALL hdf5_read(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X',success=exists)
@@ -2284,19 +2279,18 @@ END IF
 END FUNCTION load_from_file
 !
 SUBROUTINE save_to_file()
-INTEGER(4) :: i,hash_tmp(4)
+INTEGER(4) :: hash_tmp(4)
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%nelems
   hash_tmp(2) = self%mesh%nc
-  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=Bops_cache_ver)
   hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
   WRITE(*,'(2A)')oft_indent,'Saving B-field operator to file: ',TRIM(save_file)
   CALL hdf5_create_file(TRIM(save_file))
   CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
-  ! Element operator components are stored as [nelems,np] in file
-  DO i=1,3
-    CALL hdf5_write(TRANSPOSE(self%Bel(:,:,i)),TRIM(save_file),'Bel_'//dir_names(i))
-  END DO
+  CALL hdf5_write(self%Bel(:,:,1),TRIM(save_file),'Bel_X')
+  CALL hdf5_write(self%Bel(:,:,2),TRIM(save_file),'Bel_Y')
+  CALL hdf5_write(self%Bel(:,:,3),TRIM(save_file),'Bel_Z')
   CALL hdf5_write(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X')
   CALL hdf5_write(self%Bdr(:,:,2),TRIM(save_file),'Bdr_Y')
   CALL hdf5_write(self%Bdr(:,:,3),TRIM(save_file),'Bdr_Z')
