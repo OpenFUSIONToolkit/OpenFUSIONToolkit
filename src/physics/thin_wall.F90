@@ -117,6 +117,15 @@ TYPE :: tw_type
   INTEGER(i4) :: n_vcoils = 0 !< Number of voltage-specified coils in model
   INTEGER(i4) :: n_icoils = 0 !< Number of current-specified coils in model
   INTEGER(i4) :: nholes = 0 !< Number of "holes" in model
+  INTEGER(i4) :: nelems_exp = 0 !< Number of elements before the junction reduction (nelems without junctions)
+  LOGICAL :: junctions = .FALSE. !< Model has junctions: unknowns are reduced by the map P (jp_*)
+  INTEGER(i4) :: n_jholes = 0 !< Number of explicit holes (junction meshes), after the mesh file holes
+  INTEGER(i4) :: jp_nred = 0 !< Number of reduced surface unknowns
+  INTEGER(i4), POINTER, DIMENSION(:) :: jp_kr => NULL() !< Junction map P, row pointer [np_active+nholes+1]
+  INTEGER(i4), POINTER, DIMENSION(:) :: jp_lc => NULL() !< Junction map P, column indices
+  REAL(r8), POINTER, DIMENSION(:) :: jp_val => NULL() !< Junction map P, values
+  INTEGER(i4), POINTER, DIMENSION(:,:) :: jtable => NULL() !< Junction table (vertex, vertex, cell, sign) [4,n]
+  TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jholes => NULL() !< Explicit holes, (cell, corner) pairs
   INTEGER(i4) :: nclosures = 0 !< Number of "closures" in model
   INTEGER(i4) :: nfh = 0 !< Number of face-hole interactions
   REAL(r8) :: B_dx = 1.d-3 !< Spatial step size for finite difference evaluation of B-field
@@ -252,13 +261,14 @@ ELSE
   END IF
 END IF
 !---Analyze mesh to construct holes
-IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)
+self%nholes=self%n_jholes
+IF(ASSOCIATED(hole_ns))self%nholes=SIZE(hole_ns)+self%n_jholes
 WRITE(*,'(2A)')oft_indent,'Creating hole elements'
 ALLOCATE(self%hmesh(self%nholes))
 ALLOCATE(self%kfh(self%mesh%nc+1))
 self%kfh=0
 IF(self%nholes>0)THEN
-  DO i=1,self%nholes
+  DO i=1,self%nholes-self%n_jholes
     IF(oft_debug_print(1))THEN
       WRITE(*,'(2A,I12)')oft_indent,'  Hole: ',i
       WRITE(*,'(2A,I12)')oft_indent,'    Nset size = ',hole_ns(i)%n
@@ -284,6 +294,9 @@ IF(self%nholes>0)THEN
       END DO
       CALL oft_decrease_indent
     END IF
+  END DO
+  DO i=1,self%n_jholes
+    CALL tw_setup_jhole(self%mesh,self%jholes(i),self%hmesh(self%nholes-self%n_jholes+i))
   END DO
   !---Build cell list
   DO i=1,self%nholes
@@ -389,6 +402,8 @@ DO i=1,self%mesh%np
 END DO
 DEALLOCATE(np_inverse)
 self%nelems = self%np_active + self%nholes + self%n_vcoils
+self%nelems_exp = self%nelems
+IF(self%junctions)CALL tw_setup_junctions(self)
 !---Build basis array
 ALLOCATE(self%qbasis(3,3,self%mesh%nc))
 f=1.d0/3.d0
@@ -631,6 +646,7 @@ TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
+IF(tw_obj%junctions)CALL oft_abort("Not yet supported for models with junctions","tw_compute_Ael2dr",__FILE__)
 !
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
@@ -856,6 +872,7 @@ TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
+IF(tw_obj%junctions)CALL oft_abort("Not yet supported for models with junctions","tw_compute_Lmat_coils",__FILE__)
 !
 ALLOCATE(quads(18))
 DO i=1,18
@@ -955,7 +972,7 @@ END SUBROUTINE tw_compute_Lmat_coils
 !---------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_LmatDirect(row_model,Lmat,col_model,save_file)
+SUBROUTINE tw_compute_LmatDirect_exp(row_model,Lmat,col_model,save_file)
 TYPE(tw_type), TARGET, INTENT(in) :: row_model !< Thin-wall model object for rows
 REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix
 TYPE(tw_type), TARGET, OPTIONAL, INTENT(in) :: col_model !< Thin-wall model object for columns
@@ -980,11 +997,11 @@ ELSE
   col_obj=>row_obj
 END IF
 IF(ASSOCIATED(Lmat))THEN
-  IF(SIZE(Lmat,DIM=1)/=col_obj%nelems.OR.SIZE(Lmat,DIM=2)/=row_obj%nelems)THEN
+  IF(SIZE(Lmat,DIM=1)/=col_obj%nelems_exp.OR.SIZE(Lmat,DIM=2)/=row_obj%nelems_exp)THEN
     CALL oft_abort("Input size incorrect","tw_compute_LmatDirect",__FILE__)
   END IF
 ELSE
-  ALLOCATE(Lmat(col_obj%nelems,row_obj%nelems))
+  ALLOCATE(Lmat(col_obj%nelems_exp,row_obj%nelems_exp))
 END IF
 !
 IF(PRESENT(save_file))THEN
@@ -1000,11 +1017,11 @@ IF(PRESENT(save_file))THEN
         CALL oft_increase_indent
         OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
         READ(io_unit, IOSTAT=ierr)file_counts
-        hash_tmp(1) = row_obj%nelems
+        hash_tmp(1) = row_obj%nelems_exp
         hash_tmp(2) = row_obj%mesh%nc
         IF((ierr==0).AND.ALL(file_counts==hash_tmp))THEN
-          DO i=1,row_obj%nelems
-            READ(io_unit, IOSTAT=ierr)Lmat(i,i:row_obj%nelems)
+          DO i=1,row_obj%nelems_exp
+            READ(io_unit, IOSTAT=ierr)Lmat(i,i:row_obj%nelems_exp)
             IF(ierr/=0)THEN
               WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
               exists=.FALSE.
@@ -1013,8 +1030,8 @@ IF(PRESENT(save_file))THEN
           END DO
           CLOSE(io_unit)
           IF(exists)THEN
-            DO i=1,row_obj%nelems
-              DO j=i+1,row_obj%nelems
+            DO i=1,row_obj%nelems_exp
+              DO j=i+1,row_obj%nelems_exp
                 Lmat(j,i)=Lmat(i,j)
               END DO
             END DO
@@ -1030,10 +1047,10 @@ IF(PRESENT(save_file))THEN
         CALL oft_increase_indent
         OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
         READ(io_unit, IOSTAT=ierr)file_counts
-        hash_tmp(1) = col_obj%nelems
-        hash_tmp(2) = row_obj%nelems
+        hash_tmp(1) = col_obj%nelems_exp
+        hash_tmp(2) = row_obj%nelems_exp
         IF((ierr==0).AND.ALL(file_counts==hash_tmp))THEN
-          DO i=1,row_obj%nelems
+          DO i=1,row_obj%nelems_exp
             READ(io_unit, IOSTAT=ierr)Lmat(:,i)
             IF(ierr/=0)THEN
               WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
@@ -1215,7 +1232,7 @@ IF(Lself)THEN
     END DO
   END DO
   !$omp do private(j)
-  DO i=1,row_obj%nelems
+  DO i=1,row_obj%nelems_exp
     DO j=1,i-1
       Lmat(j,i)=Lmat(i,j)
     END DO
@@ -1233,19 +1250,19 @@ IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     IF(Lself)THEN
       OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-      hash_tmp(1) = row_obj%nelems
+      hash_tmp(1) = row_obj%nelems_exp
       hash_tmp(2) = row_obj%mesh%nc
       WRITE(io_unit)hash_tmp
-      DO i=1,row_obj%nelems
-        WRITE(io_unit)row_obj%Lmat(i,i:row_obj%nelems)
+      DO i=1,row_obj%nelems_exp
+        WRITE(io_unit)row_obj%Lmat(i,i:row_obj%nelems_exp)
       END DO
       CLOSE(io_unit)
     ELSE
       OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-      hash_tmp(1) = col_obj%nelems
-      hash_tmp(2) = row_obj%nelems
+      hash_tmp(1) = col_obj%nelems_exp
+      hash_tmp(2) = row_obj%nelems_exp
       WRITE(io_unit)hash_tmp
-      DO i=1,row_obj%nelems
+      DO i=1,row_obj%nelems_exp
         WRITE(io_unit)Lmat(:,i)
       END DO
       CLOSE(io_unit)
@@ -1254,7 +1271,7 @@ IF(PRESENT(save_file))THEN
 END IF
 CALL oft_decrease_indent
 DEBUG_STACK_POP
-END SUBROUTINE tw_compute_LmatDirect
+END SUBROUTINE tw_compute_LmatDirect_exp
 !---------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
 !---------------------------------------------------------------------------------
@@ -1274,6 +1291,7 @@ CLASS(oft_bmesh), POINTER :: rmesh,cmesh
 TYPE(oft_quad_type) :: quad,quad2
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
+IF(row_obj%junctions)CALL oft_abort("Not yet supported for models with junctions","tw_compute_Lmat_MF",__FILE__)
 CALL mytimer%tick
 !---Setup quadrature
 CALL set_quad_2d(quad,quad_orders(2))
@@ -1503,6 +1521,7 @@ TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
+IF(tw_obj%junctions)CALL oft_abort("Not yet supported for models with junctions","tw_compute_mutuals",__FILE__)
 !
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
@@ -1758,7 +1777,7 @@ END SUBROUTINE tw_compute_mutuals
 !---------------------------------------------------------------------------------
 !> Compute resistivity matrix for thin-wall model
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Rmat(tw_obj,keep_closures)
+SUBROUTINE tw_compute_Rmat_exp(tw_obj,keep_closures)
 TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 LOGICAL, INTENT(in) :: keep_closures !< Keep diagonal entries (1) for closure elements
 INTEGER(4) :: i,ii,j,jj,jj2,k,kk,kr,ed,ninteract,pt,ih,ihp,ihc,max_felems
@@ -1778,8 +1797,8 @@ IF(ALL(tw_obj%Eta_surf<0.d0))THEN
 END IF
 ALLOCATE(tw_obj%Rmat)
 Rmat=>tw_obj%Rmat
-Rmat%nr=tw_obj%nelems; Rmat%nrg=tw_obj%nelems
-Rmat%nc=tw_obj%nelems; Rmat%ncg=tw_obj%nelems
+Rmat%nr=tw_obj%nelems_exp; Rmat%nrg=tw_obj%nelems_exp
+Rmat%nc=tw_obj%nelems_exp; Rmat%ncg=tw_obj%nelems_exp
 !---Build face element lists
 max_felems=bmesh%cell_np+2*tw_obj%nholes
 ALLOCATE(face_interact(2,max_felems,bmesh%nc))
@@ -1998,7 +2017,7 @@ DEALLOCATE(j_add,eta_add)
 ! END IF
 CALL oft_decrease_indent
 DEBUG_STACK_POP
-END SUBROUTINE tw_compute_Rmat
+END SUBROUTINE tw_compute_Rmat_exp
 !---------------------------------------------------------------------------------
 !> Compute \f$ \int 1/(r-r') dA' \f$ for a triangle
 !---------------------------------------------------------------------------------
@@ -2068,6 +2087,7 @@ INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
 LOGICAL :: is_neighbor,load_success
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+IF(self%junctions)CALL oft_abort("Not yet supported for models with junctions","tw_compute_Bops",__FILE__)
 IF(PRESENT(save_file))THEN
   load_success=load_from_file()
   IF(load_success)RETURN
@@ -2429,7 +2449,8 @@ CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: error_string
 integer(4) :: ncoils,ncoil_sets,nread,coil_type,nmasked
 LOGICAL :: success
 INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims,n_jumpers
-INTEGER(4), ALLOCATABLE :: dim_sizes(:)
+INTEGER(4), ALLOCATABLE :: dim_sizes(:),itmp2(:,:)
+INTEGER(4) :: psize(2)
 REAL(8) :: res_per_len,radius,dl,theta
 REAL(8), POINTER :: pts_tmp(:)
 CHARACTER(LEN=4) :: blknum,blknum2
@@ -2651,6 +2672,48 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/holes'))THEN
       RETURN
     END IF
   END DO
+END IF
+!---Junctions
+IF(hdf5_field_exist(TRIM(filepath),'thincurr/junctions'))THEN
+  self%junctions=.TRUE.
+  IF(.NOT.ASSOCIATED(self%pmap))THEN
+    ALLOCATE(self%pmap(self%mesh%np))
+    CALL hdf5_read(self%pmap,TRIM(filepath),'thincurr/junctions/PMAP',success)
+    IF(.NOT.success)THEN
+      error_string='Error reading junction point map from mesh file'
+      RETURN
+    END IF
+  END IF
+  CALL hdf5_read(self%n_jholes,TRIM(filepath),'thincurr/junctions/NHOLES',success)
+  ALLOCATE(self%jholes(self%n_jholes))
+  DO i=1,self%n_jholes
+    WRITE(blknum,'(I4.4)')i
+    CALL hdf5_field_get_sizes(TRIM(filepath),'thincurr/junctions/HOLE'//blknum,ndims,dim_sizes)
+    ALLOCATE(itmp2(dim_sizes(1),dim_sizes(2)))
+    CALL hdf5_read(itmp2,TRIM(filepath),'thincurr/junctions/HOLE'//blknum,success)
+    IF(.NOT.success)THEN
+      error_string='Error reading junction hole from mesh file'
+      RETURN
+    END IF
+    self%jholes(i)%n=SIZE(itmp2,DIM=2)
+    ALLOCATE(self%jholes(i)%v(2*self%jholes(i)%n))
+    self%jholes(i)%v=RESHAPE(itmp2,[2*self%jholes(i)%n])
+    DEALLOCATE(itmp2)
+  END DO
+  CALL hdf5_read(psize,TRIM(filepath),'thincurr/junctions/P_SIZE',success)
+  self%jp_nred=psize(2)
+  ALLOCATE(self%jp_kr(psize(1)+1))
+  CALL hdf5_read(self%jp_kr,TRIM(filepath),'thincurr/junctions/P_KR',success)
+  ALLOCATE(self%jp_lc(self%jp_kr(psize(1)+1)-1),self%jp_val(self%jp_kr(psize(1)+1)-1))
+  CALL hdf5_read(self%jp_lc,TRIM(filepath),'thincurr/junctions/P_LC',success)
+  CALL hdf5_read(self%jp_val,TRIM(filepath),'thincurr/junctions/P_VAL',success)
+  CALL hdf5_field_get_sizes(TRIM(filepath),'thincurr/junctions/LJE',ndims,dim_sizes)
+  ALLOCATE(self%jtable(dim_sizes(1),dim_sizes(2)))
+  CALL hdf5_read(self%jtable,TRIM(filepath),'thincurr/junctions/LJE',success)
+  IF(.NOT.success)THEN
+    error_string='Error reading junction map from mesh file'
+    RETURN
+  END IF
 END IF
 !---
 IF(hdf5_field_exist(TRIM(filepath),'thincurr/jumpers'))THEN
@@ -3153,6 +3216,7 @@ REAL(r8) :: jumper_current !< Computed current through jumper  [A]
 INTEGER(i4) :: k,ind1
 REAL(r8) :: val_prev
 !---
+IF(tw_obj%junctions)CALL oft_abort("Not yet supported for models with junctions","jumper_compute_current",__FILE__)
 jumper_current=0.d0
 IF(self%np>0)THEN
   val_prev=0.d0
@@ -3304,7 +3368,7 @@ end subroutine tw_load_eta
 !---------------------------------------------------------------------------------
 !> Save solution vector for thin-wall model for plotting in VisIt
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_recon_curr(self,pot,curr)
+SUBROUTINE tw_recon_curr_exp(self,pot,curr)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 real(8), intent(in) :: pot(:) !< Solution values [self%nelems]
 real(8), intent(out) :: curr(:,:) !< Solution values [3,self%mesh%nelems]
@@ -3338,7 +3402,7 @@ END DO
 END DO
 END DO
 DEBUG_STACK_POP
-END SUBROUTINE tw_recon_curr
+END SUBROUTINE tw_recon_curr_exp
 !---------------------------------------------------------------------------------
 !> Save solution vector for thin-wall model for plotting in VisIt
 !---------------------------------------------------------------------------------
@@ -3351,6 +3415,7 @@ REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
 REAL(8), ALLOCATABLE, DIMENSION(:) :: thickness_cell
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: ptvec,cellvec,jvol_cellvec
 DEBUG_STACK_PUSH
+IF(self%junctions)CALL oft_abort("Not yet supported for models with junctions","tw_save_pfield",__FILE__)
 !---Avg to cells
 ALLOCATE(cellvec(3,self%mesh%nc))
 CALL tw_recon_curr(self,a,cellvec)
@@ -3498,4 +3563,292 @@ CALL hdf5_rst_destroy(rst_info)
 DEALLOCATE(global_le)
 DEBUG_STACK_POP
 end subroutine tw_rst_load
+!---------------------------------------------------------------------------------
+!> Set up an explicit hole from its (cell, corner) pairs (value +1 at each)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_setup_jhole(bmesh,pairs,hmesh)
+CLASS(oft_bmesh), INTENT(in) :: bmesh !< Surface mesh
+TYPE(oft_1d_int), INTENT(in) :: pairs !< (cell, corner) pairs [2*n]
+TYPE(hole_mesh), INTENT(inout) :: hmesh !< Hole definition
+INTEGER(4) :: i,j,n
+INTEGER(4), ALLOCATABLE :: pts(:),cnt(:)
+n=pairs%n
+ALLOCATE(pts(n))
+DO i=1,n
+  pts(i)=bmesh%lc(pairs%v(2*i),pairs%v(2*i-1))
+END DO
+CALL sort_array(pts,n)
+hmesh%n=1
+DO i=2,n
+  IF(pts(i)/=pts(hmesh%n))THEN
+    hmesh%n=hmesh%n+1
+    pts(hmesh%n)=pts(i)
+  END IF
+END DO
+ALLOCATE(hmesh%lp(hmesh%n),hmesh%lp_sorted(hmesh%n),hmesh%sort_ind(hmesh%n))
+hmesh%lp=pts(1:hmesh%n)
+hmesh%lp_sorted=hmesh%lp
+hmesh%sort_ind=[(i,i=1,hmesh%n)]
+ALLOCATE(cnt(hmesh%n+1),hmesh%kpc(hmesh%n+1),hmesh%lpc(n))
+cnt=0
+DO i=1,n
+  j=search_array(bmesh%lc(pairs%v(2*i),pairs%v(2*i-1)),hmesh%lp,hmesh%n)
+  cnt(j)=cnt(j)+1
+END DO
+hmesh%kpc(1)=1
+DO i=1,hmesh%n
+  hmesh%kpc(i+1)=hmesh%kpc(i)+cnt(i)
+END DO
+cnt=0
+DO i=1,n
+  j=search_array(bmesh%lc(pairs%v(2*i),pairs%v(2*i-1)),hmesh%lp,hmesh%n)
+  hmesh%lpc(hmesh%kpc(j)+cnt(j))=pairs%v(2*i-1)
+  cnt(j)=cnt(j)+1
+END DO
+hmesh%ptcc=0.d0
+DO i=1,hmesh%n
+  hmesh%ptcc=hmesh%ptcc+bmesh%r(:,hmesh%lp(i))
+END DO
+hmesh%ptcc=hmesh%ptcc/REAL(hmesh%n,8)
+DEALLOCATE(pts,cnt)
+END SUBROUTINE tw_setup_jhole
+!---------------------------------------------------------------------------------
+!> Check the junction map against the model and set the reduced element count
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_setup_junctions(self)
+TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
+INTEGER(4) :: i,j,s
+IF(SIZE(self%jp_kr)-1/=self%np_active+self%nholes)THEN
+  WRITE(*,*)SIZE(self%jp_kr)-1,self%np_active,self%nholes
+  CALL oft_abort("Junction map does not match the active vertices and holes","tw_setup_junctions",__FILE__)
+END IF
+DO i=1,SIZE(self%jtable,DIM=2)
+  DO j=1,3
+    IF(self%mesh%lc(j,self%jtable(3,i))==self%jtable(1,i))EXIT
+  END DO
+  s=-1
+  IF(self%mesh%lc(MOD(j,3)+1,self%jtable(3,i))==self%jtable(2,i))s=1
+  IF(s/=self%jtable(4,i))CALL oft_abort("Junction signs do not match the mesh orientation", &
+    "tw_setup_junctions",__FILE__)
+END DO
+self%nelems=self%jp_nred+self%n_vcoils
+WRITE(*,'(2A,I8,A,I8)')oft_indent,'Junctions: unknowns reduced from ',self%nelems_exp,' to ',self%nelems
+END SUBROUTINE tw_setup_junctions
+!---------------------------------------------------------------------------------
+!> Entries of row e of the junction map P (V-coil rows map to themselves)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_junction_row(self,e,n,cols,vals)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+INTEGER(4), INTENT(in) :: e !< Expanded element
+INTEGER(4), INTENT(out) :: n !< Number of entries
+INTEGER(4), INTENT(out) :: cols(:) !< Reduced elements
+REAL(8), INTENT(out) :: vals(:) !< Coefficients
+INTEGER(4) :: k,ns
+ns=self%np_active+self%nholes
+IF(e<=ns)THEN
+  n=self%jp_kr(e+1)-self%jp_kr(e)
+  DO k=1,n
+    cols(k)=self%jp_lc(self%jp_kr(e)+k-1)
+    vals(k)=self%jp_val(self%jp_kr(e)+k-1)
+  END DO
+ELSE
+  n=1
+  cols(1)=self%jp_nred+e-ns
+  vals(1)=1.d0
+END IF
+END SUBROUTINE tw_junction_row
+!---------------------------------------------------------------------------------
+!> Expand a reduced vector, x_exp = P x
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_junction_expand(self,x,x_exp)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+REAL(8), INTENT(in) :: x(:) !< Reduced vector [nelems]
+REAL(8), INTENT(out) :: x_exp(:) !< Expanded vector [nelems_exp]
+INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
+REAL(8) :: vals(self%jp_nred+1)
+DO e=1,self%nelems_exp
+  CALL tw_junction_row(self,e,n,cols,vals)
+  x_exp(e)=0.d0
+  DO k=1,n
+    x_exp(e)=x_exp(e)+vals(k)*x(cols(k))
+  END DO
+END DO
+END SUBROUTINE tw_junction_expand
+!---------------------------------------------------------------------------------
+!> Reduce a dense matrix, A = P^T A_exp P
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_junction_reduce_dense(self,Aexp,A)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+REAL(8), INTENT(in) :: Aexp(:,:) !< Expanded matrix [nelems_exp,nelems_exp]
+REAL(8), INTENT(out) :: A(:,:) !< Reduced matrix [nelems,nelems]
+INTEGER(4) :: e,k,c,n,cols(self%jp_nred+1)
+REAL(8) :: vals(self%jp_nred+1)
+REAL(8), ALLOCATABLE :: T(:,:)
+ALLOCATE(T(self%nelems_exp,self%nelems))
+T=0.d0
+DO e=1,self%nelems_exp
+  CALL tw_junction_row(self,e,n,cols,vals)
+  DO k=1,n
+    T(:,cols(k))=T(:,cols(k))+vals(k)*Aexp(:,e)
+  END DO
+END DO
+A=0.d0
+DO c=1,self%nelems
+  DO e=1,self%nelems_exp
+    IF(T(e,c)==0.d0)CYCLE
+    CALL tw_junction_row(self,e,n,cols,vals)
+    DO k=1,n
+      A(cols(k),c)=A(cols(k),c)+vals(k)*T(e,c)
+    END DO
+  END DO
+END DO
+DEALLOCATE(T)
+END SUBROUTINE tw_junction_reduce_dense
+!---------------------------------------------------------------------------------
+!> Reduce the resistance matrix in place, R = P^T R_exp P
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_junction_reduce_sparse(self)
+TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
+INTEGER(4) :: a,e,i,j,k,l,n,m,nr,nnz
+INTEGER(4) :: cols(self%jp_nred+1)
+INTEGER(4), ALLOCATABLE :: pt_kr(:),pt_lc(:),kr(:),lc(:),mark(:),ind(:),tmp(:)
+REAL(8) :: vals(self%jp_nred+1)
+REAL(8), ALLOCATABLE :: pt_val(:),mvals(:),acc(:)
+TYPE(oft_native_matrix), POINTER :: Rexp,Rred
+Rexp=>self%Rmat
+nr=self%nelems
+!---Transpose of P
+ALLOCATE(pt_kr(nr+1),tmp(nr))
+tmp=0
+DO e=1,self%nelems_exp
+  CALL tw_junction_row(self,e,n,cols,vals)
+  DO k=1,n
+    tmp(cols(k))=tmp(cols(k))+1
+  END DO
+END DO
+pt_kr(1)=1
+DO a=1,nr
+  pt_kr(a+1)=pt_kr(a)+tmp(a)
+END DO
+ALLOCATE(pt_lc(pt_kr(nr+1)-1),pt_val(pt_kr(nr+1)-1))
+tmp=0
+DO e=1,self%nelems_exp
+  CALL tw_junction_row(self,e,n,cols,vals)
+  DO k=1,n
+    pt_lc(pt_kr(cols(k))+tmp(cols(k)))=e
+    pt_val(pt_kr(cols(k))+tmp(cols(k)))=vals(k)
+    tmp(cols(k))=tmp(cols(k))+1
+  END DO
+END DO
+!---Sparsity of P^T R P
+ALLOCATE(mark(nr),kr(nr+1))
+mark=0
+kr(1)=1
+DO a=1,nr
+  m=0
+  DO i=pt_kr(a),pt_kr(a+1)-1
+    e=pt_lc(i)
+    DO j=Rexp%kr(e),Rexp%kr(e+1)-1
+      CALL tw_junction_row(self,Rexp%lc(j),n,cols,vals)
+      DO k=1,n
+        IF(mark(cols(k))/=a)THEN
+          mark(cols(k))=a
+          m=m+1
+        END IF
+      END DO
+    END DO
+  END DO
+  kr(a+1)=kr(a)+m
+END DO
+nnz=kr(nr+1)-1
+ALLOCATE(lc(nnz),mvals(nnz),acc(nr),ind(nr))
+mark=0
+acc=0.d0
+DO a=1,nr
+  m=0
+  DO i=pt_kr(a),pt_kr(a+1)-1
+    e=pt_lc(i)
+    DO j=Rexp%kr(e),Rexp%kr(e+1)-1
+      CALL tw_junction_row(self,Rexp%lc(j),n,cols,vals)
+      DO k=1,n
+        IF(mark(cols(k))/=a)THEN
+          mark(cols(k))=a
+          m=m+1
+          tmp(m)=cols(k)
+        END IF
+        acc(cols(k))=acc(cols(k))+pt_val(i)*Rexp%M(j)*vals(k)
+      END DO
+    END DO
+  END DO
+  ind(1:m)=[(l,l=1,m)]
+  CALL sort_array(tmp(1:m),ind(1:m),m)
+  DO l=1,m
+    lc(kr(a)+l-1)=tmp(l)
+    mvals(kr(a)+l-1)=acc(tmp(l))
+    acc(tmp(l))=0.d0
+  END DO
+END DO
+ALLOCATE(Rred)
+Rred%nr=nr; Rred%nrg=nr
+Rred%nc=nr; Rred%ncg=nr
+Rred%nnz=nnz
+Rred%kr=>NULL(); Rred%lc=>NULL(); Rred%M=>NULL()
+ALLOCATE(Rred%kr(nr+1),Rred%lc(nnz),Rred%M(nnz))
+Rred%kr=kr; Rred%lc=lc; Rred%M=mvals
+CALL Rexp%delete()
+DEALLOCATE(Rexp)
+self%Rmat=>Rred
+DEALLOCATE(pt_kr,pt_lc,pt_val,tmp,mark,kr,lc,mvals,acc,ind)
+END SUBROUTINE tw_junction_reduce_sparse
+!---------------------------------------------------------------------------------
+!> Compute the inductance matrix (reduced to the junction unknowns if present)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_compute_LmatDirect(row_model,Lmat,col_model,save_file)
+TYPE(tw_type), TARGET, INTENT(in) :: row_model !< Thin-wall model object for rows
+REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix
+TYPE(tw_type), TARGET, OPTIONAL, INTENT(in) :: col_model !< Thin-wall model object for columns
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
+REAL(8), CONTIGUOUS, POINTER :: Lexp(:,:)
+IF(PRESENT(col_model))THEN
+  IF(row_model%junctions.OR.col_model%junctions)CALL oft_abort("Coupling between models is not yet supported with junctions", &
+    "tw_compute_LmatDirect",__FILE__)
+  CALL tw_compute_LmatDirect_exp(row_model,Lmat,col_model,save_file)
+  RETURN
+END IF
+IF(.NOT.row_model%junctions)THEN
+  CALL tw_compute_LmatDirect_exp(row_model,Lmat,save_file=save_file)
+  RETURN
+END IF
+Lexp=>NULL()
+CALL tw_compute_LmatDirect_exp(row_model,Lexp,save_file=save_file)
+IF(.NOT.ASSOCIATED(Lmat))ALLOCATE(Lmat(row_model%nelems,row_model%nelems))
+CALL tw_junction_reduce_dense(row_model,Lexp,Lmat)
+DEALLOCATE(Lexp)
+END SUBROUTINE tw_compute_LmatDirect
+!---------------------------------------------------------------------------------
+!> Compute the resistance matrix (reduced to the junction unknowns if present)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_compute_Rmat(tw_obj,keep_closures)
+TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
+LOGICAL, INTENT(in) :: keep_closures !< Keep diagonal entries (1) for closure elements
+CALL tw_compute_Rmat_exp(tw_obj,keep_closures)
+IF(tw_obj%junctions)CALL tw_junction_reduce_sparse(tw_obj)
+END SUBROUTINE tw_compute_Rmat
+!---------------------------------------------------------------------------------
+!> Reconstruct the surface current on each cell (expanding junction unknowns if present)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_recon_curr(self,pot,curr)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+real(8), intent(in) :: pot(:) !< Solution values [self%nelems]
+real(8), intent(out) :: curr(:,:) !< Solution values [3,self%mesh%nelems]
+REAL(8), ALLOCATABLE :: pot_exp(:)
+IF(.NOT.self%junctions)THEN
+  CALL tw_recon_curr_exp(self,pot,curr)
+  RETURN
+END IF
+ALLOCATE(pot_exp(self%nelems_exp))
+CALL tw_junction_expand(self,pot,pot_exp)
+CALL tw_recon_curr_exp(self,pot_exp,curr)
+DEALLOCATE(pot_exp)
+END SUBROUTINE tw_recon_curr
 END MODULE thin_wall

@@ -81,7 +81,7 @@ def test_torus_sectors():
     assert not has_junctions(lc)
     out = find_junction_holes(r, lc, reg)
     assert out['n_unknowns'] == out['n_loops']
-    assert len(out['cuts']) == 2 and len(out['closures']) == 1 and len(out['holes']) == 0
+    assert len(out['cuts']) == 2 and len(out['info']['closures']) == 1 and len(out['holes']) == 2
 
 
 def test_homology_file(tmp_path):
@@ -90,11 +90,36 @@ def test_homology_file(tmp_path):
     write_ThinCurr_mesh(in_file, r, lc, reg)
     compute_homology(in_file)
     mesh = read_ThinCurr_mesh(str(tmp_path / 'ring-homology.h5'))
-    info = mesh['thincurr']
+    junc = mesh['thincurr']['junctions']
     assert mesh['r'].shape[0] == r.shape[0] + 2*24
-    assert len(info['holes']) == 1 and np.sum(info['open_holes']) == 0
-    assert len(info['junctions']['kje']) == 25 and len(info['junctions']['cuts']) == 0
-    assert info['junctions']['lje'].min() >= 0
+    assert len(junc['holes']) == 1 and len(junc['kje']) == 25
+    assert junc['P'].shape[1] == current_loop_count(lc, reg)
+    assert junc['P'].shape[0] == np.count_nonzero(junc['pmap']) + len(junc['holes'])
+
+
+def corner_map(lc, pmap, holes, nexp):
+    nc = len(lc)
+    I, J = [], []
+    for c in range(nc):
+        for i in range(3):
+            if pmap[lc[c, i]] > 0:
+                I.append(3*c + i)
+                J.append(pmap[lc[c, i]] - 1)
+    nact = np.count_nonzero(pmap)
+    for h, hole in enumerate(holes):
+        for c, i in hole:
+            I.append(3*c + i)
+            J.append(nact + h)
+    import scipy.sparse
+    return scipy.sparse.csr_matrix((np.ones(len(I)), (I, J)), shape=(3*nc, nexp))
+
+
+@pytest.mark.parametrize("mesh", ('tplate', 'ring', 'torus'))
+def test_expanded_map(mesh):
+    r, lc, reg = {'tplate': tplate, 'ring': ring, 'torus': torus}[mesh]()
+    out = find_junction_holes(r, lc, reg)
+    B = corner_map(out['lc'], out['pmap'], out['holes'], out['P'].shape[0])
+    assert abs(B @ out['P'] - out['M']).max() < 1.0E-12
 
 
 def test_gmsh_physical_regions(tmp_path):

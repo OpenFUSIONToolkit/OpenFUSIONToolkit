@@ -421,9 +421,28 @@ def junction_basis(r_split, lc_split, lines, insulated=(), cuts=()):
     for x in fixed:
         if x < nv:
             closures.append(int(next(c for c in range(nc) if x in lc_split[c] and all(v in plain for v in lc_split[c]))))
+    pmap = numpy.zeros(nv, dtype=numpy.int32)
+    active = [v for v in range(nv) if var_of[v] < nv and v not in fixed]
+    pmap[active] = numpy.arange(1, len(active) + 1)
+    hole_arcs = [a for a in range(len(arcs)) if nv + a not in fixed]
+    elements = [int(var_of[v]) for v in active] + [nv + a for a in hole_arcs] + [-1 - j for j in range(len(cuts))]
+    I, J, V = [], [], []
+    for e, x in enumerate(elements):
+        for f, cf in terms_of(x).items():
+            if f in col and cf != 0:
+                I.append(e)
+                J.append(col[f])
+                V.append(float(cf))
+    P = scipy.sparse.csr_matrix((V, (I, J)), shape=(len(elements), len(cols)))
+    cell_of = {}
+    for c in range(nc):
+        for i in range(3):
+            cell_of.setdefault(int(lc_split[c, i]), []).append((c, i))
+    explicit = [numpy.array([ci for v in arcs[a][0] for ci in cell_of[int(v)]], dtype=numpy.int32) for a in hole_arcs]
+    explicit += [numpy.asarray(cut, dtype=numpy.int32) for cut in cuts]
     info = {'arcs': arcs, 'references': [x - nv for x in fixed if x >= nv],
             'holes': [x - nv for x in cols if x >= nv], 'cuts': [-1 - h for h in hfree],
-            'closures': closures, 'shifts': len(gfree)}
+            'closures': closures, 'shifts': len(gfree), 'pmap': pmap, 'P': P, 'explicit_holes': explicit}
     return M, info
 
 
@@ -464,9 +483,12 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10):
     @param reg Region list [nc]
     @param insulated Regions with chi = 0 at every junction
     @param tol Relative eigenvalue below which a candidate cut is taken to add a zero-energy mode
-    @result Dictionary: 'r', 'lc' (split mesh), 'reg', 'lines', 'kje', 'lje' (junction table),
-            'holes' [(points, closed)] (free and Kirchhoff-set arcs; references left out), 'cuts'
-            [(cell, corner) arrays], 'closures', 'n_unknowns', 'n_loops', 'M', 'info'
+    @result Dictionary: 'r', 'lc' (split mesh), 'reg', 'lines', 'kje', 'lje' (junction table with
+            the sign of each entry in ThinCurr's orientation), 'holes' (explicit holes: [n,2] (cell,
+            corner) arrays, value +1 at each, for the non-reference arcs then the cuts), 'cuts', 'pmap'
+            (vertex to expanded unknown, 0 inactive), 'P' (sparse [n_expanded, n_reduced]; expanded
+            unknowns are the active vertices then the explicit holes), 'n_unknowns', 'n_loops', 'M',
+            'info'
     '''
     lc = numpy.asarray(lc, dtype=numpy.int32)
     reg = numpy.asarray(reg, dtype=numpy.int32)
@@ -501,7 +523,8 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10):
     if _min_energy(M, K) <= tol:
         raise ValueError('Junction model has a zero-energy mode')
     kje, lje = junction_table(lines)
-    holes = [arc for a, arc in enumerate(info['arcs']) if a not in info['references']]
-    return {'r': rs, 'lc': lcs, 'reg': reg, 'lines': lines, 'kje': kje, 'lje': lje, 'holes': holes,
-            'cuts': chosen, 'closures': info['closures'], 'n_unknowns': M.shape[1], 'n_loops': target,
-            'M': M, 'info': info}
+    lco = orient_cells(lcs)
+    sign = numpy.array([_edge_sign(lco[c], a, b) for a, b, c in lje], dtype=numpy.int32)
+    return {'r': rs, 'lc': lcs, 'reg': reg, 'lines': lines, 'kje': kje, 'lje': numpy.c_[lje, sign],
+            'holes': info['explicit_holes'], 'cuts': chosen, 'pmap': info['pmap'], 'P': info['P'],
+            'n_unknowns': M.shape[1], 'n_loops': target, 'M': M, 'info': info}

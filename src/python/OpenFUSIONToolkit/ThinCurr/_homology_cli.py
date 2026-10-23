@@ -618,8 +618,8 @@ def fixup_loop(cycle,mesh,boundary_cycles,debug):
 def _compute_junction_holes(input_model, out_file, verify_only, print_info):
     '''! Split a mesh with junctions (edges shared by more than two cells) and choose its holes
 
-    See @ref junctions.find_junction_holes. The output file holds the split mesh, the junction table,
-    open and closed holes, cuts and closures.
+    See @ref junctions.find_junction_holes. The output file holds the split mesh and, in the
+    `thincurr/junctions` group, the junction table, explicit holes, vertex map and P.
     '''
     out = find_junction_holes(input_model['r'], input_model['lc'], input_model['reg'])
     if print_info:
@@ -627,17 +627,15 @@ def _compute_junction_holes(input_model, out_file, verify_only, print_info):
         print("  # of junction lines = {0}".format(len(out['lines'])))
         print("  # of junction edges = {0}".format(len(out['kje'])-1))
         print("  # of vertices after split = {0}".format(out['r'].shape[0]))
-        print("  # of holes = {0} ({1} open)".format(len(out['holes']), sum(not closed for _, closed in out['holes'])))
+        print("  # of holes = {0} (outer arcs and cuts)".format(len(out['holes'])))
         print("  # of cuts = {0}".format(len(out['cuts'])))
-        print("  # of closures = {0}".format(len(out['closures'])))
+        print("  # of closures = {0}".format(len(out['info']['closures'])))
         print("  # of unknowns = {0} (independent currents {1})".format(out['n_unknowns'], out['n_loops']))
     if verify_only:
         return
     thincurr = input_model['thincurr']
     write_ThinCurr_mesh(out_file, out['r'], out['lc'], input_model['reg'],
-                        holes=[points for points, _ in out['holes']],
-                        open_holes=[not closed for _, closed in out['holes']],
-                        closures=out['closures'], junctions=out,
+                        junctions=out,
                         eta_surf=thincurr.get('eta_surf'), eta_vol=thincurr.get('eta_vol'),
                         thickness=thincurr.get('thickness'), coil_sets=thincurr.get('coil_sets'),
                         reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'))
@@ -687,6 +685,11 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
                 raise ValueError('Homology calculation does not support periodic ThinCurr meshes (nfp > 0) at this time')
     else:
         input_model['thincurr'] = {}
+    if 'junctions' in input_model['thincurr']:
+        if verify_only:
+            print("Junction mesh detected, holes were chosen and checked when the junctions were split")
+            return
+        raise ValueError('Mesh has already been split at junctions')
 
 
     # Setup full mesh
