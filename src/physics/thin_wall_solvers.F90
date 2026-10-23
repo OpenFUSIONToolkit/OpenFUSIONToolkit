@@ -1163,31 +1163,11 @@ DO i=0,nsteps
       cc_vals(3,:)=vtmp
       DEALLOCATE(vtmp)
     ELSE
-      !$omp parallel do private(j,jj,tmp)
-      DO k=1,self%mesh%np
-        DO jj=1,3
-          tmp=0.d0
-          !$omp simd reduction(+:tmp)
-          DO j=1,self%nelems
-            tmp=tmp+vals(j)*self%Bel(j,k,jj)
-          END DO
-          cc_vals(jj,k)=tmp
-        END DO
-      END DO
+      CALL dgemv('N',3*self%mesh%np,self%nelems,1.d0,self%Bel,3*self%mesh%np, &
+        vals,1,0.d0,cc_vals,1)
     END IF
-    IF(self%n_icoils>0)THEN
-      !$omp parallel do private(j,tmp) collapse(2)
-      DO k=1,self%mesh%np
-        DO jj=1,3
-          tmp = 0.d0
-          !$omp simd reduction(+:tmp)
-          DO j=1,self%n_icoils
-            tmp=tmp+coil_vec(j)*self%Bdr(k,j,jj)
-          END DO
-          cc_vals(jj,k)=cc_vals(jj,k)+tmp
-        END DO
-      END DO
-    END IF
+    IF(self%n_icoils>0)CALL dgemv('N',3*self%mesh%np,self%n_icoils,1.d0,self%Bdr, &
+      3*self%mesh%np,coil_vec,1,1.d0,cc_vals,1)
     CALL self%mesh%save_vertex_vector(cc_vals,self%xdmf,'B_v')
   END IF
   IF(rebuild_sensors)THEN
@@ -1256,7 +1236,9 @@ TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L ma
 !---
 INTEGER(4) :: i,j
 REAL(8), POINTER :: vals(:),pvals(:)
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: Mattmp,Mat_red,Bxtmp,Bytmp,Bztmp
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: Mattmp,Mat_red,Bcomp
+REAL(8), ALLOCATABLE, DIMENSION(:,:,:) :: Bred
+CHARACTER(LEN=1), PARAMETER :: dir_names(3) = ['x','y','z'],dir_desc(3) = ['X','Y','Z']
 CHARACTER(LEN=4) :: sub_coil_id
 CLASS(oft_vector), POINTER :: atmp,btmp,Bx,By,Bz
 character(LEN=80), dimension(1) :: description
@@ -1370,7 +1352,7 @@ IF(compute_B)THEN
   CALL self%Uloc_pts%new(Bx)
   CALL self%Uloc_pts%new(By)
   CALL self%Uloc_pts%new(Bz)
-  ALLOCATE(Bxtmp(self%mesh%np,neigs),Bytmp(self%mesh%np,neigs),Bztmp(self%mesh%np,neigs))
+  ALLOCATE(Bred(3,self%mesh%np,neigs))
   IF(PRESENT(hodlr_op))THEN
     IF(.NOT.ASSOCIATED(hodlr_op%aca_B_dense))CALL hodlr_op%compute_B()
     NULLIFY(pvals)
@@ -1380,46 +1362,41 @@ IF(compute_B)THEN
       CALL Bx%set(0.d0)
       CALL hodlr_op%apply_bop(atmp,Bx,By,Bz)
       CALL Bx%get_local(pvals)
-      Bxtmp(:,i) = pvals
+      Bred(1,:,i) = pvals
       CALL By%get_local(pvals)
-      Bytmp(:,i) = pvals
+      Bred(2,:,i) = pvals
       CALL Bz%get_local(pvals)
-      Bztmp(:,i) = pvals
+      Bred(3,:,i) = pvals
     END DO
     DEALLOCATE(pvals)
   ELSE
     IF(.NOT.ASSOCIATED(self%Bel))CALL tw_compute_Bops(self,self%B_dx)
-    CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &
-      self%Bel(:,:,1),self%mesh%np,eig_vec,self%nelems,0.d0,Bxtmp,self%mesh%np)
-    CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &
-      self%Bel(:,:,2),self%mesh%np,eig_vec,self%nelems,0.d0,Bytmp,self%mesh%np)
-    CALL dgemm('N','N',self%mesh%np,neigs,self%nelems,1.d0, &
-      self%Bel(:,:,3),self%mesh%np,eig_vec,self%nelems,0.d0,Bztmp,self%mesh%np)
+    CALL dgemm('N','N',3*self%mesh%np,neigs,self%nelems,1.d0, &
+      self%Bel,3*self%mesh%np,eig_vec,self%nelems,0.d0,Bred,3*self%mesh%np)
   END IF
-  CALL hdf5_write(Bxtmp,TRIM(filename),'Bx')
-  description=["X-component of B reconstruction matrix for model"]
-  CALL hdf5_add_string_attribute(TRIM(filename),'Bx','description',description)
-  CALL hdf5_write(Bytmp,TRIM(filename),'By')
-  description=["Y-component of B reconstruction matrix for model"]
-  CALL hdf5_add_string_attribute(TRIM(filename),'By','description',description)
-  CALL hdf5_write(Bztmp,TRIM(filename),'Bz')
-  description=["Z-component of B reconstruction matrix for model"]
-  CALL hdf5_add_string_attribute(TRIM(filename),'Bz','description',description)
-  DEALLOCATE(Bxtmp,Bytmp,Bztmp)
+  ! Each component is saved as [np,neigs]
+  ALLOCATE(Bcomp(self%mesh%np,neigs))
+  DO i=1,3
+    Bcomp=Bred(i,:,:)
+    CALL hdf5_write(Bcomp,TRIM(filename),'B'//dir_names(i))
+    description=[dir_desc(i)//"-component of B reconstruction matrix for model"]
+    CALL hdf5_add_string_attribute(TRIM(filename),'B'//dir_names(i),'description',description)
+  END DO
+  DEALLOCATE(Bred,Bcomp)
   CALL Bx%delete()
   CALL By%delete()
   CALL Bz%delete()
   DEALLOCATE(Bx,By,Bz)
   IF(self%n_icoils>0)THEN
-    CALL hdf5_write(self%Bdr(:,:,1),TRIM(filename),'Bx_c')
-    description=["X-component of B reconstruction matrix for coils"]
-    CALL hdf5_add_string_attribute(TRIM(filename),'Bx_c','description',description)
-    CALL hdf5_write(self%Bdr(:,:,2),TRIM(filename),'By_c')
-    description=["Y-component of B reconstruction matrix for coils"]
-    CALL hdf5_add_string_attribute(TRIM(filename),'By_c','description',description)
-    CALL hdf5_write(self%Bdr(:,:,3),TRIM(filename),'Bz_c')
-    description=["Z-component of B reconstruction matrix for coils"]
-    CALL hdf5_add_string_attribute(TRIM(filename),'Bz_c','description',description)
+    ! Each component is saved as [np,n_icoils]
+    ALLOCATE(Bcomp(self%mesh%np,self%n_icoils))
+    DO i=1,3
+      Bcomp=self%Bdr(i,:,1:self%n_icoils)
+      CALL hdf5_write(Bcomp,TRIM(filename),'B'//dir_names(i)//'_c')
+      description=[dir_desc(i)//"-component of B reconstruction matrix for coils"]
+      CALL hdf5_add_string_attribute(TRIM(filename),'B'//dir_names(i)//'_c','description',description)
+    END DO
+    DEALLOCATE(Bcomp)
   END IF
 END IF
 CALL atmp%delete()

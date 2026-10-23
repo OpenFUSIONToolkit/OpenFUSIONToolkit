@@ -399,10 +399,16 @@ class ThinCurr():
     def compute_Bmat(self,cache_file=None,B_dx=-1.E-2):
         '''! Compute magnetic field reconstruction operators for this model
 
+        The operators are returned as views of the underlying Fortran arrays, which are stored as
+        `[3,np,nelems]` and `[3,np,n_icoils]` (Fortran ordering). In Python (C ordering) the corresponding
+        shapes are `(nelems,np,3)` and `(n_icoils,np,3)`, so contributions to the vertex field can be evaluated
+        as `numpy.tensordot(potential,Bel,axes=1) + numpy.tensordot(coil_currs,Bdr,axes=1)`, giving an array
+        of shape `(np,3)` (same layout as \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.reconstruct_Bfield "reconstruct_Bfield()").
+
         @param cache_file Path to cache file to store/load matrix
         @param B_dx Spatial step size for finite difference evaluation of B-field (negative values for relative sizing)
-        @result Element B-field reconstruction matrix (`(:,:)` if HODLR is available else `None`)
-        @result Icoil B-field reconstruction matrix `(:,:)`
+        @result Element B-field reconstruction matrix `(nelems,np,3)` (`None` if HODLR is used)
+        @result Icoil B-field reconstruction matrix `(n_icoils,np,3)`
         '''
         if cache_file is None:
             cache_string = self._oft_env.path2c("")
@@ -418,10 +424,10 @@ class ThinCurr():
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
         if self.Lmat_hodlr:
-            return None, numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
+            return None, numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(self.n_icoils,self.np,3))
         else:
-            return numpy.ctypeslib.as_array(ctypes.cast(Bmat_loc, c_double_ptr),shape=(3,self.nelems,self.np)), \
-                numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
+            return numpy.ctypeslib.as_array(ctypes.cast(Bmat_loc, c_double_ptr),shape=(self.nelems,self.np,3)), \
+                numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(self.n_icoils,self.np,3))
 
     def compute_Mcoil(self,cache_file=None):
         '''! Compute the mutual inductance between passive (mesh+Vcoils) and active elements (Icoils)

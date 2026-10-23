@@ -390,8 +390,6 @@ TYPE(c_ptr), VALUE, INTENT(in) :: pot !< Pointer to current potential values
 TYPE(c_ptr), VALUE, INTENT(in) :: coils !< Pointer to Icoil values
 TYPE(c_ptr), VALUE, INTENT(in) :: field !< Pointer to output magnetic field values
 TYPE(c_ptr), VALUE, INTENT(in) :: hodlr_ptr !< Pointer to HODLR operator or null
-INTEGER(4) :: k,j,jj
-REAL(8) :: tmp
 REAL(8), POINTER, DIMENSION(:) :: pot_tmp,coils_tmp,vtmp
 REAL(8), POINTER, DIMENSION(:,:) :: field_tmp
 TYPE(tw_type), POINTER :: tw_obj
@@ -426,29 +424,11 @@ IF(c_associated(hodlr_ptr))THEN
   CALL Bz%delete()
   DEALLOCATE(u,Bx,By,Bz)
 ELSE
-  !$omp parallel do private(j,jj,tmp)
-  DO k=1,tw_obj%mesh%np
-    DO jj=1,3
-      tmp=0.d0
-      !$omp simd reduction(+:tmp)
-      DO j=1,tw_obj%nelems
-        tmp=tmp+pot_tmp(j)*tw_obj%Bel(j,k,jj)
-      END DO
-      field_tmp(jj,k)=tmp
-    END DO
-  END DO
+  CALL dgemv('N',3*tw_obj%mesh%np,tw_obj%nelems,1.d0,tw_obj%Bel,3*tw_obj%mesh%np, &
+    pot_tmp,1,0.d0,field_tmp,1)
 END IF
-IF(tw_obj%n_icoils>0)THEN
-  !$omp parallel do private(k,tmp) collapse(2)
-  DO j=1,tw_obj%n_icoils
-    DO jj=1,3
-      !$omp simd
-      DO k=1,tw_obj%mesh%np
-        field_tmp(jj,k)=field_tmp(jj,k)+coils_tmp(j)*tw_obj%Bdr(k,j,jj)
-      END DO
-    END DO
-  END DO
-END IF
+IF(tw_obj%n_icoils>0)CALL dgemv('N',3*tw_obj%mesh%np,tw_obj%n_icoils,1.d0,tw_obj%Bdr, &
+  3*tw_obj%mesh%np,coils_tmp,1,1.d0,field_tmp,1)
 DEBUG_STACK_POP
 END SUBROUTINE thincurr_recon_field
 !---------------------------------------------------------------------------------
