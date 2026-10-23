@@ -129,3 +129,16 @@ def test_gmsh_physical_regions(tmp_path):
                               '2 2 3 9 2 0 1 3 4', '$EndElements', '']))
     assert list(read_mesh(str(msh))[3]) == [1, 1]
     assert list(read_mesh(str(msh), physical_regions=True)[3]) == [7, 9]
+
+
+def test_insulate_file(tmp_path):
+    from OpenFUSIONToolkit.ThinCurr.junctions import insulate_junction_file
+    r, lc, reg = ring()
+    in_file = str(tmp_path / 'ring.h5')
+    write_ThinCurr_mesh(in_file, r, lc, reg)
+    compute_homology(in_file)
+    out = insulate_junction_file(str(tmp_path / 'ring-homology.h5'), (3,), str(tmp_path / 'ring-gap.h5'))
+    junc = read_ThinCurr_mesh(str(tmp_path / 'ring-gap.h5'))['thincurr']['junctions']
+    assert junc['P'].shape[1] == current_loop_count(lc, reg, insulated=(3,)) == out['n_unknowns']
+    assert len(junc['holes']) == len(out['holes'])
+    assert np.all(junc['vmap'] == out['vmap'])

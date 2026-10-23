@@ -17,6 +17,28 @@ from ..meshing import write_native_mesh, read_native_mesh
 from .coils import coil_from_hdf5
 
 
+def write_junction_group(h5_file, junctions):
+    r'''! Write the `thincurr/junctions` group of a mesh file
+
+    @param h5_file Open HDF5 file
+    @param junctions Junction data from @ref junctions.find_junction_holes (0-based)
+    '''
+    lje = numpy.asarray(junctions['lje'], dtype=numpy.int32).copy()
+    lje[:,:3] += 1
+    h5_file.create_dataset('thincurr/junctions/KJE', data=numpy.asarray(junctions['kje'])+1, dtype='i4')
+    h5_file.create_dataset('thincurr/junctions/LJE', data=lje, dtype='i4')
+    h5_file.create_dataset('thincurr/junctions/VMAP', data=numpy.asarray(junctions['vmap'])+1, dtype='i4')
+    h5_file.create_dataset('thincurr/junctions/PMAP', data=junctions['pmap'], dtype='i4')
+    h5_file.create_dataset('thincurr/junctions/NHOLES', data=[len(junctions['holes']),], dtype='i4')
+    for i, hole in enumerate(junctions['holes']):
+        h5_file.create_dataset('thincurr/junctions/HOLE{0:04d}'.format(i+1), data=numpy.asarray(hole)+1, dtype='i4')
+    P = junctions['P'].tocsr()
+    h5_file.create_dataset('thincurr/junctions/P_SIZE', data=list(P.shape), dtype='i4')
+    h5_file.create_dataset('thincurr/junctions/P_KR', data=P.indptr+1, dtype='i4')
+    h5_file.create_dataset('thincurr/junctions/P_LC', data=P.indices+1, dtype='i4')
+    h5_file.create_dataset('thincurr/junctions/P_VAL', data=P.data, dtype='f8')
+
+
 def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures=None, eta_surf=None, eta_vol=None,
                         thickness=None, coil_sets=None, pmap=None, nfp=None, reg_attrs=None, reg_names=None,
                         junctions=None):
@@ -78,19 +100,7 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures
                 coil_group = h5_file.create_group('thincurr/coils/coilset{0:04d}'.format(i+1))
                 coil_set.save_hdf5(coil_group,fallback_name="coilset{0:04d}".format(i+1))
         if junctions is not None:
-            lje = numpy.asarray(junctions['lje'], dtype=numpy.int32).copy()
-            lje[:,:3] += 1
-            h5_file.create_dataset('thincurr/junctions/KJE', data=numpy.asarray(junctions['kje'])+1, dtype='i4')
-            h5_file.create_dataset('thincurr/junctions/LJE', data=lje, dtype='i4')
-            h5_file.create_dataset('thincurr/junctions/PMAP', data=junctions['pmap'], dtype='i4')
-            h5_file.create_dataset('thincurr/junctions/NHOLES', data=[len(junctions['holes']),], dtype='i4')
-            for i, hole in enumerate(junctions['holes']):
-                h5_file.create_dataset('thincurr/junctions/HOLE{0:04d}'.format(i+1), data=numpy.asarray(hole)+1, dtype='i4')
-            P = junctions['P'].tocsr()
-            h5_file.create_dataset('thincurr/junctions/P_SIZE', data=list(P.shape), dtype='i4')
-            h5_file.create_dataset('thincurr/junctions/P_KR', data=P.indptr+1, dtype='i4')
-            h5_file.create_dataset('thincurr/junctions/P_LC', data=P.indices+1, dtype='i4')
-            h5_file.create_dataset('thincurr/junctions/P_VAL', data=P.data, dtype='f8')
+            write_junction_group(h5_file, junctions)
         # Write mesh periodicity information
         if nfp is not None:
             h5_file.create_dataset('thincurr/periodicity/NFP', data=[nfp,], dtype='i4')
@@ -134,7 +144,7 @@ def read_ThinCurr_mesh(filename):
                 nh = jgroup['NHOLES'][0]
                 psize = jgroup['P_SIZE'][()]
                 thincurr_info['junctions'] = {
-                    'kje': jgroup['KJE'][()] - 1, 'lje': lje, 'pmap': jgroup['PMAP'][()],
+                    'kje': jgroup['KJE'][()] - 1, 'lje': lje, 'pmap': jgroup['PMAP'][()], 'vmap': jgroup['VMAP'][()] - 1,
                     'holes': [jgroup['HOLE{0:04d}'.format(i+1)][()] - 1 for i in range(nh)],
                     'P': scipy.sparse.csr_matrix((jgroup['P_VAL'][()], jgroup['P_LC'][()] - 1, jgroup['P_KR'][()] - 1),
                                                  shape=tuple(psize))}

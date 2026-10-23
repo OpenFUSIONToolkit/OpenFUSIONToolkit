@@ -486,7 +486,8 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10):
     @result Dictionary: 'r', 'lc' (split mesh), 'reg', 'lines', 'kje', 'lje' (junction table with
             the sign of each entry in ThinCurr's orientation), 'holes' (explicit holes: [n,2] (cell,
             corner) arrays, value +1 at each, for the non-reference arcs then the cuts), 'cuts', 'pmap'
-            (vertex to expanded unknown, 0 inactive), 'P' (sparse [n_expanded, n_reduced]; expanded
+            (vertex to expanded unknown, 0 inactive), 'vmap' (original vertex of each split vertex), 'P'
+            (sparse [n_expanded, n_reduced]; expanded
             unknowns are the active vertices then the explicit holes), 'n_unknowns', 'n_loops', 'M',
             'info'
     '''
@@ -525,6 +526,37 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10):
     kje, lje = junction_table(lines)
     lco = orient_cells(lcs)
     sign = numpy.array([_edge_sign(lco[c], a, b) for a, b, c in lje], dtype=numpy.int32)
-    return {'r': rs, 'lc': lcs, 'reg': reg, 'lines': lines, 'kje': kje, 'lje': numpy.c_[lje, sign],
+    vmap = numpy.arange(len(rs), dtype=numpy.int32)
+    for line in lines:
+        for v, copies in zip(line['vertices'], line['copies']):
+            vmap[list(copies.values())] = v
+    return {'r': rs, 'lc': lcs, 'reg': reg, 'lines': lines, 'kje': kje, 'lje': numpy.c_[lje, sign], 'vmap': vmap,
             'holes': info['explicit_holes'], 'cuts': chosen, 'pmap': info['pmap'], 'P': info['P'],
             'n_unknowns': M.shape[1], 'n_loops': target, 'M': M, 'info': info}
+
+
+def insulate_junction_file(mesh_file, insulated, out_file):
+    '''! Copy a junction mesh file with the junction data for some sheets insulated
+
+    The unsplit mesh is rebuilt from the split one (`vmap`), holes and P are recomputed with the given
+    regions insulated (chi = 0 at every junction), and the copy's `thincurr/junctions` group is replaced.
+
+    @param mesh_file Junction mesh file (from the homology tool or @ref find_junction_holes)
+    @param insulated Regions to insulate
+    @param out_file Output file
+    '''
+    import shutil
+    import h5py
+    from .meshing import read_ThinCurr_mesh, write_junction_group
+    mesh = read_ThinCurr_mesh(mesh_file)
+    vmap = mesh['thincurr']['junctions']['vmap']
+    r = numpy.zeros((vmap.max() + 1, 3))
+    r[vmap] = mesh['r']
+    out = find_junction_holes(r, vmap[mesh['lc']], mesh['reg'], insulated=insulated)
+    if (out['lc'].shape != mesh['lc'].shape) or numpy.any(out['lc'] != mesh['lc']):
+        raise ValueError('Split mesh in "{0}" does not match the junction split of its unsplit mesh'.format(mesh_file))
+    shutil.copyfile(mesh_file, out_file)
+    with h5py.File(out_file, 'r+') as h5_file:
+        del h5_file['thincurr/junctions']
+        write_junction_group(h5_file, out)
+    return out

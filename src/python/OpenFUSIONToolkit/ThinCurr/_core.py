@@ -9,12 +9,15 @@
 @date March 2024
 @ingroup doxy_oft_python
 '''
+import os
 import ctypes
+import tempfile
 import numpy
 import h5py
 import scipy
 from ._interface import *
 from ._homology_cli import compute_homology
+from .junctions import insulate_junction_file
 from ..io import build_XDMF
 from warnings import warn
 
@@ -98,7 +101,8 @@ class ThinCurr():
   |_| |_| |_|_|_| |_|\____\__,_|_|  |_|
 ''')
 
-    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0,no_verify_holes=False):
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0,no_verify_holes=False,
+                    junction_insulated=None):
         '''! Setup ThinCurr model
 
         @param r Point list `(np,3)`
@@ -109,6 +113,7 @@ class ThinCurr():
         @param xml_filename Path to XML file for model
         @param jumper_start Index of first jumper nodeset in meshfile (positive values Fortran style, negative values Python style)
         @param no_verify_holes Skip verification of mesh and model
+        @param junction_insulated Regions to insulate at every junction (mesh files split at junctions only)
         '''
         if self.nregs != -1:
             raise ValueError('Mesh already setup, delete or create new instance for new model')
@@ -118,6 +123,13 @@ class ThinCurr():
         if mesh_file is not None:
             if (r is not None) or (lc is not None) or (reg is not None):
                 raise ValueError('Specification of "mesh_file" is incompatible with specification of "r", "lc", and "reg"')
+            if junction_insulated is not None:
+                if pmap is not None:
+                    raise ValueError('"junction_insulated" is incompatible with "pmap"')
+                self._junction_tmp = tempfile.TemporaryDirectory()
+                insulated_file = os.path.join(self._junction_tmp.name, os.path.basename(mesh_file))
+                insulate_junction_file(mesh_file, tuple(junction_insulated), insulated_file)
+                mesh_file = insulated_file
             if no_verify_holes:
                 print('Skipping mesh hole and closure verification...')
             else:
