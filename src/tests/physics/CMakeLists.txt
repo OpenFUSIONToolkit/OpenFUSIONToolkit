@@ -33,6 +33,7 @@ if( OFT_BUILD_TESTS )
 
   # ThinCurr tests
   configure_file( test_ThinCurr.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( test_ThinCurr_homology.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( tw_test-cyl.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( tw_test-cyl_hr.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( tw_test-passive.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
