@@ -169,8 +169,7 @@ def test_optimize():
     assert loop_length(opt['r'], opt['thincurr']['holes']) <= loop_length(base['r'], base['thincurr']['holes']) + 1.E-12
 
 
-@pytest.mark.parametrize("mesh_name,message", (('homology_tee', 'manifold'),
-                                               ('homology_touching', 'touch only at a vertex'),
+@pytest.mark.parametrize("mesh_name,message", (('homology_touching', 'touch only at a vertex'),
                                                ('homology_mobius', 'orientable')))
 def test_invalid(mesh_name, message):
     in_file = convert_mesh(mesh_name)
@@ -238,3 +237,17 @@ def test_ordered_hole():
     loop = mesh['thincurr']['holes'][0]
     assert has_chord(loop, edge_set(mesh['lc']))
     assert mp_run(run_eigs, (out_file,)) is not None
+
+
+def test_tee_junction():
+    '''Three sheets on one edge are a junction: the mesh is split and written with junction data'''
+    import h5py
+    in_file = convert_mesh('homology_tee')
+    out_file = 'homology_tee-junction.h5'
+    _, _, errcode = run_script(["OFT_ThinCurr_holes.py", "--in_file={0}".format(in_file), "--out_file={0}".format(out_file)])
+    assert errcode == 0
+    from OpenFUSIONToolkit.ThinCurr.meshing import read_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr.junctions import current_loop_count
+    mesh_in = read_ThinCurr_mesh(in_file)
+    junc = read_ThinCurr_mesh(out_file)['thincurr']['junctions']
+    assert junc['P'].shape[1] == current_loop_count(mesh_in['lc'], mesh_in['reg'])
