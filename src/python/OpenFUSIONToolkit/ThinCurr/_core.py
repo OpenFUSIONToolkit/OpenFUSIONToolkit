@@ -401,8 +401,8 @@ class ThinCurr():
 
         @param cache_file Path to cache file to store/load matrix
         @param B_dx Spatial step size for finite difference evaluation of B-field (negative values for relative sizing)
-        @result Element B-field reconstruction matrix (`(:,:)` if HODLR is available else `None`)
-        @result Icoil B-field reconstruction matrix `(:,:)`
+        @result Element B-field reconstruction matrix `(3,nelems,np)` (`None` if HODLR is used)
+        @result Icoil B-field reconstruction matrix `(3,n_icoils,np)`
         '''
         if cache_file is None:
             cache_string = self._oft_env.path2c("")
@@ -420,7 +420,7 @@ class ThinCurr():
         if self.Lmat_hodlr:
             return None, numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
         else:
-            return numpy.ctypeslib.as_array(ctypes.cast(Bmat_loc, c_double_ptr),shape=(3,self.nelems,self.np)), \
+            return numpy.ctypeslib.as_array(ctypes.cast(Bmat_loc, c_double_ptr),shape=(3,self.np,self.nelems)).transpose(0,2,1), \
                 numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
 
     def compute_Mcoil(self,cache_file=None):
