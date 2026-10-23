@@ -2691,9 +2691,13 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/junctions'))THEN
       error_string='Error reading junction hole from mesh file'
       RETURN
     END IF
+    IF(SIZE(itmp2,DIM=1)/=3)THEN
+      error_string='Junction holes must list (cell, vertex, sign) triples'
+      RETURN
+    END IF
     self%jholes(i)%n=SIZE(itmp2,DIM=2)
-    ALLOCATE(self%jholes(i)%v(2*self%jholes(i)%n))
-    self%jholes(i)%v=RESHAPE(itmp2,[2*self%jholes(i)%n])
+    ALLOCATE(self%jholes(i)%v(3*self%jholes(i)%n))
+    self%jholes(i)%v=RESHAPE(itmp2,[3*self%jholes(i)%n])
     DEALLOCATE(itmp2)
   END DO
   CALL hdf5_read(psize,TRIM(filepath),'thincurr/junctions/P_SIZE',success)
@@ -3558,18 +3562,18 @@ DEALLOCATE(global_le)
 DEBUG_STACK_POP
 end subroutine tw_rst_load
 !---------------------------------------------------------------------------------
-!> Set up an explicit hole from its (cell, corner) pairs (value +1 at each)
+!> Set up an explicit hole from its (cell, vertex, sign) triples (value sign at that corner of the cell)
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_setup_jhole(bmesh,pairs,hmesh)
 CLASS(oft_bmesh), INTENT(in) :: bmesh !< Surface mesh
-TYPE(oft_1d_int), INTENT(in) :: pairs !< (cell, corner) pairs [2*n]
+TYPE(oft_1d_int), INTENT(in) :: pairs !< (cell, vertex, sign) triples [3*n]
 TYPE(hole_mesh), INTENT(inout) :: hmesh !< Hole definition
 INTEGER(4) :: i,j,n
 INTEGER(4), ALLOCATABLE :: pts(:),cnt(:)
 n=pairs%n
 ALLOCATE(pts(n))
 DO i=1,n
-  pts(i)=bmesh%lc(pairs%v(2*i),pairs%v(2*i-1))
+  pts(i)=pairs%v(3*i-1)
 END DO
 CALL sort_array(pts,n)
 hmesh%n=1
@@ -3586,7 +3590,7 @@ hmesh%sort_ind=[(i,i=1,hmesh%n)]
 ALLOCATE(cnt(hmesh%n+1),hmesh%kpc(hmesh%n+1),hmesh%lpc(n))
 cnt=0
 DO i=1,n
-  j=search_array(bmesh%lc(pairs%v(2*i),pairs%v(2*i-1)),hmesh%lp,hmesh%n)
+  j=search_array(pairs%v(3*i-1),hmesh%lp,hmesh%n)
   cnt(j)=cnt(j)+1
 END DO
 hmesh%kpc(1)=1
@@ -3595,8 +3599,8 @@ DO i=1,hmesh%n
 END DO
 cnt=0
 DO i=1,n
-  j=search_array(bmesh%lc(pairs%v(2*i),pairs%v(2*i-1)),hmesh%lp,hmesh%n)
-  hmesh%lpc(hmesh%kpc(j)+cnt(j))=pairs%v(2*i-1)
+  j=search_array(pairs%v(3*i-1),hmesh%lp,hmesh%n)
+  hmesh%lpc(hmesh%kpc(j)+cnt(j))=SIGN(pairs%v(3*i-2),pairs%v(3*i))
   cnt(j)=cnt(j)+1
 END DO
 hmesh%ptcc=0.d0

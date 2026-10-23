@@ -31,7 +31,15 @@ def write_junction_group(h5_file, junctions):
     h5_file.create_dataset('thincurr/junctions/PMAP', data=junctions['pmap'], dtype='i4')
     h5_file.create_dataset('thincurr/junctions/NHOLES', data=[len(junctions['holes']),], dtype='i4')
     for i, hole in enumerate(junctions['holes']):
-        h5_file.create_dataset('thincurr/junctions/HOLE{0:04d}'.format(i+1), data=numpy.asarray(hole)+1, dtype='i4')
+        hole = numpy.asarray(hole, dtype=numpy.int32).reshape(-1, 3).copy()
+        hole[:,:2] += 1
+        h5_file.create_dataset('thincurr/junctions/HOLE{0:04d}'.format(i+1), data=hole, dtype='i4')
+    periodic = junctions.get('periodic')
+    if periodic is not None:
+        h5_file.create_dataset('thincurr/junctions/PERIODIC_PMAP', data=numpy.asarray(periodic['pmap'])+1, dtype='i4')
+        h5_file.create_dataset('thincurr/junctions/NPHOLES', data=[len(periodic['holes']),], dtype='i4')
+        for i, hole in enumerate(periodic['holes']):
+            h5_file.create_dataset('thincurr/junctions/PHOLE{0:04d}'.format(i+1), data=numpy.asarray(hole)+1, dtype='i4')
     P = junctions['P'].tocsr()
     h5_file.create_dataset('thincurr/junctions/P_SIZE', data=list(P.shape), dtype='i4')
     h5_file.create_dataset('thincurr/junctions/P_KR', data=P.indptr+1, dtype='i4')
@@ -60,8 +68,8 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures
     @param reg_attrs List of region attributes
     @param reg_names List of region names
     @param junctions Junction data from @ref junctions.find_junction_holes (0-based): `kje` [n+1] and `lje`
-    [m,4] (vertex, vertex, cell, sign) junction table, `holes` (explicit holes, [n,2] (cell, corner)
-    arrays), `pmap` [np] (0 inactive) and `P` (sparse [n_expanded, n_reduced])
+    [m,4] (vertex, vertex, cell, sign) junction table, `holes` (explicit holes, [n,3] (cell, vertex, sign)
+    arrays), `vmap`, `pmap` [np] (0 inactive) and `P` (sparse [n_expanded, n_reduced])
     '''
     if (eta_vol is not None) and (thickness is None):
         raise ValueError("Must specify `thickness` if `eta_vol` is specified")
@@ -145,9 +153,14 @@ def read_ThinCurr_mesh(filename):
                 psize = jgroup['P_SIZE'][()]
                 thincurr_info['junctions'] = {
                     'kje': jgroup['KJE'][()] - 1, 'lje': lje, 'pmap': jgroup['PMAP'][()], 'vmap': jgroup['VMAP'][()] - 1,
-                    'holes': [jgroup['HOLE{0:04d}'.format(i+1)][()] - 1 for i in range(nh)],
+                    'holes': [jgroup['HOLE{0:04d}'.format(i+1)][()] - numpy.array([1, 1, 0]) for i in range(nh)],
                     'P': scipy.sparse.csr_matrix((jgroup['P_VAL'][()], jgroup['P_LC'][()] - 1, jgroup['P_KR'][()] - 1),
                                                  shape=tuple(psize))}
+                if 'PERIODIC_PMAP' in jgroup:
+                    nph = jgroup['NPHOLES'][0]
+                    thincurr_info['junctions']['periodic'] = {
+                        'pmap': jgroup['PERIODIC_PMAP'][()] - 1,
+                        'holes': [jgroup['PHOLE{0:04d}'.format(i+1)][()] - 1 for i in range(nph)]}
             # Read jumpers
             if 'jumpers' in thincurr:
                 njumpers = thincurr['jumpers/NJUMPERS'][0]

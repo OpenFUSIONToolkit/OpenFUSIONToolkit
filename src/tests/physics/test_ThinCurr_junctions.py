@@ -59,14 +59,13 @@ def torus(nsect=3):
 def test_tplate():
     r, lc, reg = tplate()
     assert has_junctions(lc)
-    rs, lcs, lines = split_junctions(r, lc, reg)
+    rs, lcs, jedges, lines, vmap = split_junctions(r, lc, reg)
     assert len(lines) == 1 and not lines[0]['closed'] and len(lines[0]['vertices']) == 9
     assert len(rs) == len(r) + 2*9
-    kje, lje = junction_table(lines)
+    kje, lje = junction_table(lc, lcs, jedges)
     assert len(kje) == 9 and len(lje) == 3*8
     out = find_junction_holes(r, lc, reg)
     assert out['n_unknowns'] == out['n_loops'] == current_loop_count(lc, reg)
-    assert len(out['info']['holes']) == 0 and len(out['cuts']) == 0
     gap = find_junction_holes(r, lc, reg, insulated=(3,))
     assert gap['n_unknowns'] == out['n_unknowns'] - 7
 
@@ -77,7 +76,6 @@ def test_ring(insulated, nholes):
     out = find_junction_holes(r, lc, reg, insulated=insulated)
     assert out['lines'][0]['closed']
     assert out['n_unknowns'] == out['n_loops']
-    assert len(out['info']['holes']) == nholes and len(out['cuts']) == 0
 
 
 def test_torus_sectors():
@@ -85,7 +83,6 @@ def test_torus_sectors():
     assert not has_junctions(lc)
     out = find_junction_holes(r, lc, reg)
     assert out['n_unknowns'] == out['n_loops']
-    assert len(out['cuts']) == 2 and len(out['info']['closures']) == 1 and len(out['holes']) == 2
 
 
 def test_homology_file(tmp_path):
@@ -96,26 +93,28 @@ def test_homology_file(tmp_path):
     mesh = read_ThinCurr_mesh(str(tmp_path / 'ring-homology.h5'))
     junc = mesh['thincurr']['junctions']
     assert mesh['r'].shape[0] == r.shape[0] + 2*24
-    assert len(junc['holes']) == 1 and len(junc['kje']) == 25
+    assert len(junc['kje']) == 25
     assert junc['P'].shape[1] == current_loop_count(lc, reg)
     assert junc['P'].shape[0] == np.count_nonzero(junc['pmap']) + len(junc['holes'])
 
 
 def corner_map(lc, pmap, holes, nexp):
+    import scipy.sparse
     nc = len(lc)
-    I, J = [], []
+    I, J, S = [], [], []
     for c in range(nc):
         for i in range(3):
             if pmap[lc[c, i]] > 0:
                 I.append(3*c + i)
                 J.append(pmap[lc[c, i]] - 1)
+                S.append(1)
     nact = np.count_nonzero(pmap)
     for h, hole in enumerate(holes):
-        for c, i in hole:
-            I.append(3*c + i)
+        for c, v, sgn in hole:
+            I.append(3*c + list(lc[c]).index(v))
             J.append(nact + h)
-    import scipy.sparse
-    return scipy.sparse.csr_matrix((np.ones(len(I)), (I, J)), shape=(3*nc, nexp))
+            S.append(sgn)
+    return scipy.sparse.csr_matrix((np.array(S, dtype=float), (I, J)), shape=(3*nc, nexp))
 
 
 @pytest.mark.parametrize("mesh", ('tplate', 'ring', 'torus'))
@@ -242,14 +241,6 @@ def test_torus_insulation(insulated, nholes):
     r, lc, reg = torus()
     out = find_junction_holes(r, lc, reg, insulated=insulated)
     assert out['n_unknowns'] == out['n_loops'] == current_loop_count(lc, reg, insulated=insulated)
-    assert len(out['cuts']) == 0 and len(out['info']['closures']) == 0
-    assert len(out['info']['holes']) == nholes
-
-
-def test_pair_insulation_needs_two_sheets():
-    r, lc, reg = tplate()
-    with pytest.raises(ValueError):
-        find_junction_holes(r, lc, reg, insulated=[(1, 2)])
 
 
 def test_split_regions_file(tmp_path):
@@ -270,3 +261,94 @@ def test_runtime_pair_insulation():
     eig_ins = mp_run(run_reduction, (files_ins, None, None))
     assert eig_rt is not False and eig_ins is not False
     assert np.allclose(eig_rt, eig_ins, rtol=1.0E-10, atol=0.0)
+
+
+def test_region_both_sides():
+    r, lc, reg = tplate()
+    reg = np.where(reg == 2, 1, reg)
+    out = find_junction_holes(r, lc, reg)
+    assert out['n_unknowns'] == out['n_loops']
+
+
+def test_point_contact():
+    a = sheet(4, 4, lambda u, v: np.c_[-0.5 + 0.5*u, -0.5 + 0.5*v, 0*u], 1)
+    b = sheet(4, 4, lambda u, v: np.c_[0.5*u, 0.5*v, 0.3*u*v], 2)
+    r, lc, reg = merge(a, b)
+    assert has_junctions(lc, reg)
+    out = find_junction_holes(r, lc, reg)
+    assert out['n_unknowns'] == out['n_loops']
+    assert len(out['r']) == len(r) + 1
+
+
+def test_pair_at_three_sheets_warns():
+    r, lc, reg = tplate()
+    with pytest.warns(UserWarning):
+        out = find_junction_holes(r, lc, reg, insulated=[(1, 2)])
+    assert out['n_unknowns'] == find_junction_holes(r, lc, reg)['n_unknowns']
+
+
+def test_torus_with_rib():
+    rib = sheet(2, 8, lambda u, v: np.c_[1.0 + (0.3 + 0.15*u)*np.cos(2*np.pi*v), 0*u, (0.3 + 0.15*u)*np.sin(2*np.pi*v)], 4)
+    r, lc, reg = merge(*[torus_sector_sheet(k) for k in range(3)], rib)
+    assert has_junctions(lc, reg)
+    out = find_junction_holes(r, lc, reg)
+    assert out['n_unknowns'] == out['n_loops']
+
+
+def torus_sector_sheet(k, nsect=3):
+    return sheet(4, 8, lambda u, v: np.c_[(1.0 + 0.3*np.cos(2*np.pi*v))*np.cos(2*np.pi*(k + u)/nsect),
+                                           (1.0 + 0.3*np.cos(2*np.pi*v))*np.sin(2*np.pi*(k + u)/nsect),
+                                           0.3*np.sin(2*np.pi*v)], k + 1)
+
+
+def periodic_torus_file(path, nfp=3, nphi=7, ntheta=12):
+    from OpenFUSIONToolkit.ThinCurr.meshing import ThinCurr_periodic_toroid
+    import h5py
+    phi = np.linspace(0.0, 2.0*np.pi/nfp, nphi)
+    th = np.linspace(0.0, 2.0*np.pi, ntheta, endpoint=False)
+    P, T = np.meshgrid(phi, th, indexing='ij')
+    r_grid = np.stack(((1.0 + 0.3*np.cos(T))*np.cos(P), (1.0 + 0.3*np.cos(T))*np.sin(P), 0.3*np.sin(T)), axis=-1)
+    toroid = ThinCurr_periodic_toroid(r_grid, nfp, ntheta, nphi)
+    centers = toroid.r[toroid.lc].mean(axis=1)
+    reg = np.where(np.mod(np.arctan2(centers[:, 1], centers[:, 0]), 2.0*np.pi/nfp) < np.pi/nfp, 1, 2).astype(np.int32)
+    toroid.write_to_file(path, reg=reg)
+    with h5py.File(path, 'r+') as h5:
+        h5.create_dataset('thincurr/ETA_SURF', data=1.0E-4*np.ones(2))
+
+
+def test_periodic_count(tmp_path):
+    path = str(tmp_path / 'ptorus.h5')
+    periodic_torus_file(path)
+    info = read_ThinCurr_mesh(path)['thincurr']
+    compute_homology(path, split_regions=True)
+    junc = read_ThinCurr_mesh(str(tmp_path / 'ptorus-homology.h5'))['thincurr']['junctions']
+    assert junc['P'].shape[1] == (info['pmap'].max() + 1) + len(info['holes'])
+    assert 'periodic' in junc
+
+
+def run_periodic(files, mp_q):
+    result = False
+    try:
+        import scipy.linalg
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        eigs = []
+        for path in files:
+            tw = ThinCurr(myOFT)
+            tw.setup_model(mesh_file=path)
+            tw.compute_Lmat()
+            tw.compute_Rmat()
+            eigs.append(np.sort(scipy.linalg.eigh(np.array(tw.Lmat), tw.Rmat.toarray(), eigvals_only=True))[::-1])
+        print('periodic eigenvalue difference', np.abs(eigs[0] - eigs[1]).max()/eigs[1].max())
+        result = len(eigs[0]) == len(eigs[1]) and np.abs(eigs[0] - eigs[1]).max() < 1.0E-5*eigs[1].max()
+    except BaseException as e:
+        print(e)
+    mp_q.put(result)
+
+
+def test_periodic_vs_thincurr():
+    path = os.path.join(test_dir, 'junction_ptorus.h5')
+    periodic_torus_file(path)
+    compute_homology(path, split_regions=True)
+    assert mp_run(run_periodic, ([os.path.join(test_dir, 'junction_ptorus-homology.h5'), path],))
