@@ -72,7 +72,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:,:) :: aca_B_dense => NULL() !< Fallback dense matrices for compressed off-diagonal interactions (B-field)
   TYPE(oft_native_dense_matrix), POINTER, DIMENSION(:,:) :: dense_B_mats => NULL() !< Dense matrices for diagonal interactions (B-field)
   REAL(8), POINTER, DIMENSION(:,:,:) :: hole_Vcoil_Bmat => NULL() !< Dense coupling matrix to holes and Vcoils (B-field)
-  REAL(8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Icoil_Bmat => NULL() !< Dense coupling matrix to Icoils (B-field) [3,np,n_icoils]
+  REAL(8), POINTER, DIMENSION(:,:,:) :: Icoil_Bmat => NULL() !< Dense coupling matrix to Icoils (B-field) [np,n_icoils,3]
   TYPE(oft_tw_block), POINTER, DIMENSION(:) :: blocks => NULL() !< REMOVE
   TYPE(oft_tw_level), POINTER, DIMENSION(:) :: levels => NULL() !< Block heirarchy
   type(tw_type), pointer :: tw_obj => NULL()
@@ -422,7 +422,7 @@ END SUBROUTINE tw_compute_Lmatblock
 SUBROUTINE tw_compute_Bops_hole(self,Bop,Bop_dr,B_dx)
 TYPE(tw_type), INTENT(inout) :: self
 REAL(8), INTENT(out) :: Bop(:,:,:) !< Magnetic field evaluation matrix
-REAL(8), INTENT(out) :: Bop_dr(:,:,:) !< Magnetic field evaluation matrix for Icoils [3,np,n_icoils]
+REAL(8), INTENT(out) :: Bop_dr(:,:,:) !< Magnetic field evaluation matrix
 REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
 REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
@@ -581,7 +581,7 @@ IF(self%n_icoils>0)THEN
         ecc=ecc+self%icoils(j)%scales(k)*diffvec
       END DO
       DO jj=1,3
-        Bop_dr(jj,i,j) = Bop_dr(jj,i,j) + ecc(jj)
+        Bop_dr(i,j,jj) = Bop_dr(i,j,jj) + ecc(jj)
       END DO
     END DO
   END DO
@@ -1673,7 +1673,7 @@ ALLOCATE(self%aca_B_dense(2*self%nsparse,3))
 WRITE(*,'(2A)')oft_indent,'Building hole, Vcoil and Icoil columns'
 IF(MAX(self%tw_obj%n_icoils,self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
   ALLOCATE(self%hole_Vcoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%nholes+self%tw_obj%n_vcoils),3))
-  ALLOCATE(self%Icoil_Bmat(3,self%tw_obj%mesh%np,MAX(1,self%tw_obj%n_icoils)))
+  ALLOCATE(self%Icoil_Bmat(self%tw_obj%mesh%np,MAX(1,self%tw_obj%n_icoils),3))
   CALL tw_compute_Bops_hole(self%tw_obj,self%hole_Vcoil_Bmat,self%Icoil_Bmat,self%tw_obj%B_dx)
   self%tw_obj%Bdr=>self%Icoil_Bmat
 END IF

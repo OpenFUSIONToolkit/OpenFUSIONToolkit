@@ -136,8 +136,8 @@ TYPE :: tw_type
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2coil => NULL() !< Coil to coil coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Lmat => NULL() !< Full inductance matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2sen => NULL() !< Driver (icoils) to sensor coupling matrix
-  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bel => NULL() !< Element to vertex B-field reconstruction operator [3,np,nelems]
-  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL() !< Driver (icoils) to vertex B-field reconstruction operator [3,np,n_icoils]
+  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bel => NULL() !< Element to vertex B-field reconstruction operator [np,nelems,3]
+  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL() !< Driver (icoils) to vertex B-field reconstruction operator [np,n_icoils,3]
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: qbasis => NULL() !< Basis function pre-evaluated at cell centers
   CHARACTER(LEN=OFT_PATH_SLEN) :: rst_prefix = '' !< Path prefix for .rst and .hist output files
   TYPE(xdmf_plot_file) :: xdmf
@@ -2079,7 +2079,7 @@ ALLOCATE(quads(18))
 DO i=1,18
   CALL set_quad_2d(quads(i),i)
 END DO
-ALLOCATE(self%Bel(3,bmesh%np,self%nelems))
+ALLOCATE(self%Bel(bmesh%np,self%nelems,3))
 self%Bel=0.d0
 f=1.d0/3.d0
 WRITE(*,'(2A)')oft_indent,'Building element->element magnetic reconstruction operator'
@@ -2162,20 +2162,20 @@ DO i=1,bmesh%nc
   DO ii=1,3
     ik=self%pmap(bmesh%lc(ii,i))
     IF(ik==0)CYCLE
-    DO j=1,bmesh%np
-      DO jj=1,3
+    DO jj=1,3
+      DO j=1,bmesh%np
         !$omp atomic
-        self%Bel(jj,j,ik) = self%Bel(jj,j,ik) + atmp(jj,ii,j)
+        self%Bel(j,ik,jj) = self%Bel(j,ik,jj) + atmp(jj,ii,j)
       END DO
     END DO
   END DO
   DO ii=self%kfh(i),self%kfh(i+1)-1
     ik=ABS(self%lfh(1,ii))+self%np_active
-    DO j=1,bmesh%np
-      DO jj=1,3
+    DO jj=1,3
+      DO j=1,bmesh%np
         tmp=SIGN(1,self%lfh(1,ii))*atmp(jj,self%lfh(2,ii),j)
         !$omp atomic
-        self%Bel(jj,j,ik) = self%Bel(jj,j,ik) + tmp
+        self%Bel(j,ik,jj) = self%Bel(j,ik,jj) + tmp
       END DO
     END DO
   END DO
@@ -2206,15 +2206,15 @@ DO i=1,bmesh%np
     END DO
     DO jj=1,3
       !$omp atomic
-      self%Bel(jj,i,self%np_active+self%nholes+j) = &
-        self%Bel(jj,i,self%np_active+self%nholes+j) + ecc(jj)
+      self%Bel(i,self%np_active+self%nholes+j,jj) = &
+        self%Bel(i,self%np_active+self%nholes+j,jj) + ecc(jj)
     END DO
   END DO
 END DO
 self%Bel=self%Bel/(4.d0*pi)
 !
 WRITE(*,'(2A)')oft_indent,'Building icoil->element magnetic reconstruction operator'
-ALLOCATE(self%Bdr(3,bmesh%np,self%n_icoils))
+ALLOCATE(self%Bdr(bmesh%np,self%n_icoils,3))
 self%Bdr=0.d0
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
 DO i=1,bmesh%np
@@ -2234,7 +2234,7 @@ DO i=1,bmesh%np
     END DO
     DO jj=1,3
       !$omp atomic
-      self%Bdr(jj,i,j) = self%Bdr(jj,i,j) + ecc(jj)
+      self%Bdr(i,j,jj) = self%Bdr(i,j,jj) + ecc(jj)
     END DO
   END DO
 END DO
@@ -2258,24 +2258,20 @@ IF(TRIM(save_file)/='none')THEN
     WRITE(*,'(3A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
     CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
     IF(exists.AND.ALL(file_counts==hash_tmp))THEN
-      ! Each component is stored in file as [nelems,np] (Bel) and [np,n_icoils] (Bdr)
-      ALLOCATE(self%Bel(3,self%mesh%np,self%nelems))
+      ! Element operator components are stored as [nelems,np] in file
+      ALLOCATE(self%Bel(self%mesh%np,self%nelems,3))
       ALLOCATE(Btmp(self%nelems,self%mesh%np))
       DO i=1,3
         CALL hdf5_read(Btmp,TRIM(save_file),'Bel_'//dir_names(i),success=exists)
         IF(.NOT.exists)EXIT
-        self%Bel(i,:,:)=TRANSPOSE(Btmp)
+        self%Bel(:,:,i)=TRANSPOSE(Btmp)
       END DO
       DEALLOCATE(Btmp)
       IF(exists)THEN
-        ALLOCATE(self%Bdr(3,self%mesh%np,self%n_icoils))
-        ALLOCATE(Btmp(self%mesh%np,self%n_icoils))
-        DO i=1,3
-          CALL hdf5_read(Btmp,TRIM(save_file),'Bdr_'//dir_names(i),success=exists)
-          IF(.NOT.exists)EXIT
-          self%Bdr(i,:,:)=Btmp
-        END DO
-        DEALLOCATE(Btmp)
+        ALLOCATE(self%Bdr(self%mesh%np,self%n_icoils,3))
+        CALL hdf5_read(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,2),TRIM(save_file),'Bdr_Y',success=exists)
+        IF(exists)CALL hdf5_read(self%Bdr(:,:,3),TRIM(save_file),'Bdr_Z',success=exists)
       END IF
     END IF
     IF(exists)RETURN
@@ -2289,7 +2285,6 @@ END FUNCTION load_from_file
 !
 SUBROUTINE save_to_file()
 INTEGER(4) :: i,hash_tmp(4)
-REAL(r8), ALLOCATABLE :: Btmp(:,:)
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%nelems
   hash_tmp(2) = self%mesh%nc
@@ -2298,19 +2293,13 @@ IF(TRIM(save_file)/='none')THEN
   WRITE(*,'(2A)')oft_indent,'Saving B-field operator to file: ',TRIM(save_file)
   CALL hdf5_create_file(TRIM(save_file))
   CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
-  ! Each component is stored in file as [nelems,np] (Bel) and [np,n_icoils] (Bdr)
-  ALLOCATE(Btmp(self%nelems,self%mesh%np))
+  ! Element operator components are stored as [nelems,np] in file
   DO i=1,3
-    Btmp=TRANSPOSE(self%Bel(i,:,:))
-    CALL hdf5_write(Btmp,TRIM(save_file),'Bel_'//dir_names(i))
+    CALL hdf5_write(TRANSPOSE(self%Bel(:,:,i)),TRIM(save_file),'Bel_'//dir_names(i))
   END DO
-  DEALLOCATE(Btmp)
-  ALLOCATE(Btmp(self%mesh%np,self%n_icoils))
-  DO i=1,3
-    Btmp=self%Bdr(i,:,:)
-    CALL hdf5_write(Btmp,TRIM(save_file),'Bdr_'//dir_names(i))
-  END DO
-  DEALLOCATE(Btmp)
+  CALL hdf5_write(self%Bdr(:,:,1),TRIM(save_file),'Bdr_X')
+  CALL hdf5_write(self%Bdr(:,:,2),TRIM(save_file),'Bdr_Y')
+  CALL hdf5_write(self%Bdr(:,:,3),TRIM(save_file),'Bdr_Z')
 END IF
 END SUBROUTINE save_to_file
 END SUBROUTINE tw_compute_Bops
