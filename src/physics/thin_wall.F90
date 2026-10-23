@@ -126,6 +126,7 @@ TYPE :: tw_type
   REAL(r8), POINTER, DIMENSION(:) :: jp_val => NULL() !< Junction map P, values
   INTEGER(i4), POINTER, DIMENSION(:,:) :: jtable => NULL() !< Junction table (vertex, vertex, cell, sign) [4,n]
   TYPE(oft_1d_int), POINTER, DIMENSION(:) :: jholes => NULL() !< Explicit holes, (cell, corner) pairs
+  TYPE(oft_native_matrix), POINTER :: Rmat_exp => NULL() !< Resistance matrix before the junction reduction
   INTEGER(i4) :: nclosures = 0 !< Number of "closures" in model
   INTEGER(i4) :: nfh = 0 !< Number of face-hole interactions
   REAL(r8) :: B_dx = 1.d-3 !< Spatial step size for finite difference evaluation of B-field
@@ -3789,8 +3790,7 @@ Rred%nnz=nnz
 Rred%kr=>NULL(); Rred%lc=>NULL(); Rred%M=>NULL()
 ALLOCATE(Rred%kr(nr+1),Rred%lc(nnz),Rred%M(nnz))
 Rred%kr=kr; Rred%lc=lc; Rred%M=mvals
-CALL Rexp%delete()
-DEALLOCATE(Rexp)
+self%Rmat_exp=>Rexp
 self%Rmat=>Rred
 DEALLOCATE(pt_kr,pt_lc,pt_val,tmp,mark,kr,lc,mvals,acc,ind)
 END SUBROUTINE tw_junction_reduce_sparse
@@ -3991,4 +3991,72 @@ CALL tw_junction_expand(self,a,a_exp)
 CALL tw_save_pfield_exp(self,a_exp,tag)
 DEALLOCATE(a_exp)
 END SUBROUTINE tw_save_pfield
+!---------------------------------------------------------------------------------
+!> Reduce an expanded vector, x = P^T x_exp
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_junction_reduce_vec(self,x_exp,x)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+REAL(8), INTENT(in) :: x_exp(:) !< Expanded vector [nelems_exp]
+REAL(8), INTENT(out) :: x(:) !< Reduced vector [nelems]
+INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
+REAL(8) :: vals(self%jp_nred+1)
+x=0.d0
+DO e=1,self%nelems_exp
+  CALL tw_junction_row(self,e,n,cols,vals)
+  DO k=1,n
+    x(cols(k))=x(cols(k))+vals(k)*x_exp(e)
+  END DO
+END DO
+END SUBROUTINE tw_junction_reduce_vec
+!---------------------------------------------------------------------------------
+!> Expand a reduced complex vector, x_exp = P x
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_junction_expand_c(self,x,x_exp)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+COMPLEX(8), INTENT(in) :: x(:) !< Reduced vector [nelems]
+COMPLEX(8), INTENT(out) :: x_exp(:) !< Expanded vector [nelems_exp]
+INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
+REAL(8) :: vals(self%jp_nred+1)
+DO e=1,self%nelems_exp
+  CALL tw_junction_row(self,e,n,cols,vals)
+  x_exp(e)=(0.d0,0.d0)
+  DO k=1,n
+    x_exp(e)=x_exp(e)+vals(k)*x(cols(k))
+  END DO
+END DO
+END SUBROUTINE tw_junction_expand_c
+!---------------------------------------------------------------------------------
+!> Reduce an expanded complex vector, x = P^T x_exp
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_junction_reduce_vec_c(self,x_exp,x)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+COMPLEX(8), INTENT(in) :: x_exp(:) !< Expanded vector [nelems_exp]
+COMPLEX(8), INTENT(out) :: x(:) !< Reduced vector [nelems]
+INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
+REAL(8) :: vals(self%jp_nred+1)
+x=(0.d0,0.d0)
+DO e=1,self%nelems_exp
+  CALL tw_junction_row(self,e,n,cols,vals)
+  DO k=1,n
+    x(cols(k))=x(cols(k))+vals(k)*x_exp(e)
+  END DO
+END DO
+END SUBROUTINE tw_junction_reduce_vec_c
+!---------------------------------------------------------------------------------
+!> Diagonal of P^T D P for a diagonal D over expanded elements (cross terms dropped)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_junction_reduce_diag(self,d_exp,d)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+REAL(8), INTENT(in) :: d_exp(:) !< Expanded diagonal [nelems_exp]
+REAL(8), INTENT(out) :: d(:) !< Reduced diagonal [nelems]
+INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
+REAL(8) :: vals(self%jp_nred+1)
+d=0.d0
+DO e=1,self%nelems_exp
+  CALL tw_junction_row(self,e,n,cols,vals)
+  DO k=1,n
+    d(cols(k))=d(cols(k))+vals(k)**2*d_exp(e)
+  END DO
+END DO
+END SUBROUTINE tw_junction_reduce_diag
 END MODULE thin_wall
