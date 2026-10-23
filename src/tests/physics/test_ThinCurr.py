@@ -507,6 +507,19 @@ def _build_dummy_model(xml_filename):
     return model
 
 
+def test_mirnov_orientation_and_validation():
+    from OpenFUSIONToolkit.ThinCurr.sensor import Mirnov
+    for norm in ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.3, -0.5, 0.8]):
+        pts = Mirnov([1.0, 0.5, -0.2], norm, 'test')._pts
+        area = 0.5*sum(np.cross(pts[i], pts[i+1]) for i in range(len(pts)-1))
+        n_hat = np.asarray(norm)/np.linalg.norm(norm)
+        assert np.allclose(area/np.linalg.norm(area), n_hat)
+    with pytest.raises(ValueError):
+        Mirnov([1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 'test')
+    with pytest.raises(ValueError):
+        Mirnov([1.0, 0.0], [0.0, 0.0, 1.0], 'test')
+
+
 def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_Hamada,sigs_mnmodes_2D_PEST,sigs_mnmodes_2D_Hamada,t,delta_phi,tol=1.E-6):
     try:
         interface.load_histfile()

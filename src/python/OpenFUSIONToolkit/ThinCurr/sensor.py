@@ -60,25 +60,28 @@ class circular_flux_loop(flux_loop):
 class Mirnov(flux_loop):
     '''! ThinCurr Mirnov sensor class'''
     def __init__(self, pt, norm, name, dx=1.E-3):
-        '''! Initialize Mirnov sensor object
+        r'''! Initialize Mirnov sensor object
 
         @param pt Location of Mirnov sensor [3]
-        @param norm Normal direction of Mirnov sensor [3]
+        @param norm Normal direction of Mirnov sensor [3]; the loop is wound right-handed about `norm`, so the signal is \f$ +\mathbf{B} \cdot \hat{n} \f$
         @param name Name of Mirnov sensor
         @param dx Scale of Mirnov flux loop
         '''
         center = numpy.asarray(pt)
         if center.shape[0] != 3:
-            raise ValueError('"center" must be a 3-dimensional vector')
+            raise ValueError('"pt" must be a 3-dimensional vector')
         norm = numpy.asarray(norm)
         if norm.shape[0] != 3:
             raise ValueError('"norm" must be a 3-dimensional vector')
-        norm = norm/numpy.linalg.norm(norm)
+        norm_mag = numpy.linalg.norm(norm)
+        if (not numpy.isfinite(norm_mag)) or (norm_mag < 1.E-12):
+            raise ValueError('"norm" must be a non-zero vector')
+        norm = norm/norm_mag
         v1 = numpy.cross([1.0, 0.0, 0.0], norm)
         if numpy.linalg.norm(v1) < 1.E-8:
             v1 = numpy.cross([0.0, 1.0, 0.0], norm)
         v1 = v1/numpy.linalg.norm(v1)
-        v2 = numpy.cross(v1, norm)
+        v2 = numpy.cross(norm, v1)
         v2 /= numpy.linalg.norm(v2)
         #
         self._pts = numpy.array([
