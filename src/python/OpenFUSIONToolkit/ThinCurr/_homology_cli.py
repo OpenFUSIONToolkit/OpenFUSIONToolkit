@@ -18,6 +18,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import scipy
 from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
+from .junctions import has_junctions, find_junction_holes
 
 tri_ed = np.asarray([[2,1], [0,2], [1,0]]) # Triangle edge list
 indent_level = ''
@@ -614,6 +615,34 @@ def fixup_loop(cycle,mesh,boundary_cycles,debug):
     return cycle
 
 
+def _compute_junction_holes(input_model, out_file, verify_only, print_info):
+    '''! Split a mesh with junctions (edges shared by more than two cells) and choose its holes
+
+    See @ref junctions.find_junction_holes. The output file holds the split mesh, the junction table,
+    open and closed holes, cuts and closures.
+    '''
+    out = find_junction_holes(input_model['r'], input_model['lc'], input_model['reg'])
+    if print_info:
+        print("Junction mesh:")
+        print("  # of junction lines = {0}".format(len(out['lines'])))
+        print("  # of junction edges = {0}".format(len(out['kje'])-1))
+        print("  # of vertices after split = {0}".format(out['r'].shape[0]))
+        print("  # of holes = {0} ({1} open)".format(len(out['holes']), sum(not closed for _, closed in out['holes'])))
+        print("  # of cuts = {0}".format(len(out['cuts'])))
+        print("  # of closures = {0}".format(len(out['closures'])))
+        print("  # of unknowns = {0} (independent currents {1})".format(out['n_unknowns'], out['n_loops']))
+    if verify_only:
+        return
+    thincurr = input_model['thincurr']
+    write_ThinCurr_mesh(out_file, out['r'], out['lc'], input_model['reg'],
+                        holes=[points for points, _ in out['holes']],
+                        open_holes=[not closed for _, closed in out['holes']],
+                        closures=out['closures'], junctions=out,
+                        eta_surf=thincurr.get('eta_surf'), eta_vol=thincurr.get('eta_vol'),
+                        thickness=thincurr.get('thickness'), coil_sets=thincurr.get('coil_sets'),
+                        reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'))
+
+
 def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False, show_omitted=False,
                      show_covering=False, debug=False, ref_point=None, optimize_holes=False, verify_only=False):
     '''! Compute holes and closures for ThinCurr meshes using a Greedy Homotopy approach
@@ -661,6 +690,8 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
 
 
     # Setup full mesh
+    if has_junctions(face_full):
+        return _compute_junction_holes(input_model, out_file, verify_only, print_info)
     full_mesh = trimesh(vertex_full,face_full,info=print_info)
     boundary_cycles = full_mesh.boundary_cycles(info=print_info)
     indent_level = '  '

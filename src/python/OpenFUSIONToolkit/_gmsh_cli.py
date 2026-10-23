@@ -74,32 +74,46 @@ def read_node_block(fid, end_tag):
     return r
 
 
-def read_element_block(fid, end_tag):
+def read_element_block(fid, end_tag, version=1, physical_regions=False):
     '''! Read a GMSH element block, whose section tag has already been consumed
 
     Triangles are only used as cells if no tetrahedra are present (surface mesh).
 
     @param fid Open file handle
     @param end_tag Section tag terminating the element block (without the leading "$")
+    @param version Format version (1 or 2)
+    @param physical_regions Use the physical tag of each element as its region (otherwise all 1)
     @result Cell list, region list, and number of linear points per cell
     '''
     mesh_nelems = int(fid.readline())
     lf = []
     lc = []
+    lf_reg = []
+    lc_reg = []
     for i in range(mesh_nelems):
         line_vals = [int(val) for val in fid.readline().split()]
+        if version == 1:
+            phys, nodes = line_vals[2], line_vals[5:]
+        else:
+            ntags = line_vals[2]
+            phys, nodes = (line_vals[3] if ntags > 0 else 1), line_vals[3+ntags:]
         if line_vals[1] in (2,9):
-            lf.append(line_vals[5:])
+            lf.append(nodes)
+            lf_reg.append(phys)
         elif line_vals[1] in (4,11):
-            lc.append(line_vals[5:])
+            lc.append(nodes)
+            lc_reg.append(phys)
     check_tag_line(fid, end_tag)
     if len(lc) == 0:
         lc = np.array(lf, dtype=np.int32)
+        reg = np.array(lf_reg, dtype=np.int32)
         ncp_lin = 3
     else:
         lc = np.array(lc, dtype=np.int32)
+        reg = np.array(lc_reg, dtype=np.int32)
         ncp_lin = 4
-    reg = np.ones((lc.shape[0],), dtype=np.int32)
+    if (not physical_regions) or np.any(reg <= 0):
+        reg = np.ones((lc.shape[0],), dtype=np.int32)
     return lc, reg, ncp_lin
 
 
@@ -159,27 +173,29 @@ def read_medit(fid):
     return r, lc, reg, ncp_lin
 
 
-def read_msh1(fid):
+def read_msh1(fid, physical_regions=False):
     '''! Read a GMSH mesh in the version 1 (`$NOD`/`$ELM`) format
 
     The leading "$NOD" tag is consumed by @ref read_mesh before this is called.
 
     @param fid Open file handle
+    @param physical_regions Use physical tags as regions
     '''
     # Read in vertices
     r = read_node_block(fid, "ENDNOD")
     # Read in cells
     check_tag_line(fid, "ELM")
-    lc, reg, ncp_lin = read_element_block(fid, "ENDELM")
+    lc, reg, ncp_lin = read_element_block(fid, "ENDELM", 1, physical_regions)
     return r, lc, reg, ncp_lin
 
 
-def read_msh2(fid):
+def read_msh2(fid, physical_regions=False):
     '''! Read a GMSH mesh in the version 2 (`$Nodes`/`$Elements`) format
 
     The leading "$MeshFormat" tag is consumed by @ref read_mesh before this is called.
 
     @param fid Open file handle
+    @param physical_regions Use physical tags as regions
     '''
     fid.readline() # Mesh format numbers
     check_tag_line(fid, "EndMeshFormat")
@@ -188,20 +204,20 @@ def read_msh2(fid):
     r = read_node_block(fid, "EndNodes")
     # Read in cells
     check_tag_line(fid, "Elements")
-    lc, reg, ncp_lin = read_element_block(fid, "EndElements")
+    lc, reg, ncp_lin = read_element_block(fid, "EndElements", 2, physical_regions)
     return r, lc, reg, ncp_lin
 
 
-def read_mesh(filename):
+def read_mesh(filename, physical_regions=False):
     print()
     print("Reading mesh: {0}".format(filename))
     with open(filename,'r') as fid:
         mesh_format_line = fid.readline().strip()
         if mesh_format_line == '$MeshFormat': # GMSH version 2 format
-            r, lc, reg, ncp_lin = read_msh2(fid)
+            r, lc, reg, ncp_lin = read_msh2(fid, physical_regions)
             ed_map_tet = ed_map_tet_msh
         elif mesh_format_line == '$NOD': # GMSH version 1 format
-            r, lc, reg, ncp_lin = read_msh1(fid)
+            r, lc, reg, ncp_lin = read_msh1(fid, physical_regions)
             ed_map_tet = ed_map_tet_msh
         else: # MEDIT format
             r, lc, reg, ncp_lin = read_medit(fid)
@@ -257,17 +273,18 @@ def read_mesh(filename):
     return mesh_type, r_new, lc_new, reg, ho_info
 
 
-def convert_gmsh_to_native(in_file, out_file=None):
+def convert_gmsh_to_native(in_file, out_file=None, physical_regions=False):
     '''! Convert GMSH mesh to native Open FUSION Toolkit mesh
 
     @param in_file Input mesh file
     @param out_file Output mesh file (optional, default is `in_file` with `.h5` extension)
+    @param physical_regions Use physical tags as regions (otherwise all cells are region 1)
     '''
     if out_file is None:
         out_file = os.path.splitext(in_file)[0] + ".h5"
 
     # Read input GMSH file
-    mesh_type, r, lc, reg, ho_info = read_mesh(in_file)
+    mesh_type, r, lc, reg, ho_info = read_mesh(in_file, physical_regions)
 
     # Write output file
     write_native_mesh(out_file, mesh_type.split('_')[0], r, lc, reg, ho_info=ho_info)
@@ -283,9 +300,10 @@ def script_entry():
     parser.description = "Convert a GMSH mesh file to native Open FUSION Toolkit mesh format"
     parser.add_argument("--in_file", type=str, required=True, help="Input mesh file")
     parser.add_argument("--out_file", type=str, default=None, help="Ouput mesh file")
+    parser.add_argument("--physical_regions", action="store_true", default=False, help="Use physical tags as regions")
     options = parser.parse_args()
 
-    convert_gmsh_to_native(options.in_file, options.out_file)
+    convert_gmsh_to_native(options.in_file, options.out_file, options.physical_regions)
 
 
 ## @page convert_gmsh `OFT_convert_gmsh`: GMSH to native Open FUSION Toolkit mesh conversion

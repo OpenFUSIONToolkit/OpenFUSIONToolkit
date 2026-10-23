@@ -17,7 +17,8 @@ from .coils import coil_from_hdf5
 
 
 def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures=None, eta_surf=None, eta_vol=None,
-                        thickness=None, coil_sets=None, pmap=None, nfp=None, reg_attrs=None, reg_names=None):
+                        thickness=None, coil_sets=None, pmap=None, nfp=None, reg_attrs=None, reg_names=None,
+                        open_holes=None, junctions=None):
     r'''! Create a native HDF5 mesh file for ThinCurr from the given mesh information
 
     @param filename Filename for mesh file
@@ -35,6 +36,9 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures
     @param nfp Number of field periods for periodic meshes (single surface only)
     @param reg_attrs List of region attributes
     @param reg_names List of region names
+    @param open_holes Flag for each hole, True if it is an open boundary arc rather than a closed loop
+    @param junctions Junction data from @ref junctions.find_junction_holes, dictionary with `kje` [n+1],
+    `lje` [m,3] (vertex, vertex, cell; 0-based) and `cuts` (list of [n,2] (cell, corner) arrays, 0-based)
     '''
     if (eta_vol is not None) and (thickness is None):
         raise ValueError("Must specify `thickness` if `eta_vol` is specified")
@@ -72,6 +76,14 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures
             for i, coil_set in enumerate(coil_sets):
                 coil_group = h5_file.create_group('thincurr/coils/coilset{0:04d}'.format(i+1))
                 coil_set.save_hdf5(coil_group,fallback_name="coilset{0:04d}".format(i+1))
+        if open_holes is not None:
+            h5_file.create_dataset('thincurr/holes/OPEN', data=numpy.asarray(open_holes, dtype=numpy.int32), dtype='i4')
+        if junctions is not None:
+            h5_file.create_dataset('thincurr/junctions/KJE', data=numpy.asarray(junctions['kje'])+1, dtype='i4')
+            h5_file.create_dataset('thincurr/junctions/LJE', data=numpy.asarray(junctions['lje'])+1, dtype='i4')
+            h5_file.create_dataset('thincurr/junctions/NCUTS', data=[len(junctions['cuts']),], dtype='i4')
+            for i, cut in enumerate(junctions['cuts']):
+                h5_file.create_dataset('thincurr/junctions/CUT{0:04d}'.format(i+1), data=numpy.asarray(cut)+1, dtype='i4')
         # Write mesh periodicity information
         if nfp is not None:
             h5_file.create_dataset('thincurr/periodicity/NFP', data=[nfp,], dtype='i4')
@@ -107,6 +119,13 @@ def read_ThinCurr_mesh(filename):
             if 'holes' in thincurr:
                 nholes = thincurr['holes/NHOLES'][0]
                 thincurr_info['holes'] = [thincurr['holes/HOLE{0:04d}'.format(i+1)][()] - 1 for i in range(nholes)] # Convert to 0-based indexing
+            if 'holes/OPEN' in thincurr:
+                thincurr_info['open_holes'] = thincurr['holes/OPEN'][()].astype(bool)
+            # Read junctions
+            if 'junctions' in thincurr:
+                ncuts = thincurr['junctions/NCUTS'][0]
+                thincurr_info['junctions'] = {'kje': thincurr['junctions/KJE'][()] - 1, 'lje': thincurr['junctions/LJE'][()] - 1,
+                                              'cuts': [thincurr['junctions/CUT{0:04d}'.format(i+1)][()] - 1 for i in range(ncuts)]}
             # Read jumpers
             if 'jumpers' in thincurr:
                 njumpers = thincurr['jumpers/NJUMPERS'][0]
