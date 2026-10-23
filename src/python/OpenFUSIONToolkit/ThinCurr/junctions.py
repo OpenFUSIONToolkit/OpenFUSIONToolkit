@@ -720,13 +720,15 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10, periodic=None):
 
 
 def _min_energy(M, K):
-    '''! Smallest eigenvalue of M^T K M relative to its largest entry'''
+    '''! Smallest pivot of a sparse LU factorization of M^T K M relative to the largest (zero for a zero-energy mode)'''
     A = (M.T @ K @ M).tocsc()
-    scale = abs(A).max()
-    if A.shape[0] <= 4000:
-        return numpy.linalg.eigvalsh(A.toarray()).min()/scale
-    val = scipy.sparse.linalg.eigsh(A, k=1, sigma=-1.0E-6*scale, which='LM', return_eigenvectors=False)
-    return val.min()/scale
+    try:
+        lu = scipy.sparse.linalg.splu(A, permc_spec='MMD_AT_PLUS_A', diag_pivot_thresh=0.0,
+                                      options={'SymmetricMode': True})
+    except RuntimeError:
+        return 0.0
+    d = numpy.abs(lu.U.diagonal())
+    return d.min()/d.max()
 
 
 def insulate_junction_file(mesh_file, insulated, out_file):
