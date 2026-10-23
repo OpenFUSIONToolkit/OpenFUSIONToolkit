@@ -754,7 +754,7 @@ END SUBROUTINE tokamaker_get_boot_saw
 !> 1-D sawtooth q reset (@ref grad_shaf_bootstrap::saw_reset_1d) on given profiles, axis first.
 !! scal = [rho_s, rho_m, n_dips, w, rho_out]
 !---------------------------------------------------------------------------------
-SUBROUTINE tokamaker_saw_reset_1d(n,rho,q,itor,area,c1,q_s,dq,ramp,rule,q_new,dj,wr,scal) &
+SUBROUTINE tokamaker_saw_reset_1d(n,rho,q,itor,area,c1,q_s,dq,ramp,rule,q_new,dj,wr,scal,ierr) &
     BIND(C,NAME="tokamaker_saw_reset_1d")
 INTEGER(c_int), VALUE, INTENT(in) :: n !< Number of points
 REAL(c_double), INTENT(in) :: rho(n) !< Radius, ascending from the axis
@@ -770,8 +770,9 @@ REAL(c_double), INTENT(out) :: q_new(n) !< Reset q
 REAL(c_double), INTENT(out) :: dj(n) !< Reset current (jphi units of itor/area)
 REAL(c_double), INTENT(out) :: wr(n) !< Per-node reset weight
 REAL(c_double), INTENT(out) :: scal(5) !< rho_s, rho_m, n_dips, w, rho_out
-INTEGER(i4) :: n_dips,ierr
-CALL saw_reset_1d(n,rho,q,itor,area,c1,q_s,dq,ramp,rule,q_new,dj,wr,scal(1),scal(2),scal(5),n_dips,scal(4),ierr) ! ierr/=0: no reset
+INTEGER(c_int), INTENT(out) :: ierr !< 0 on success, nonzero if the reset failed (no reset)
+INTEGER(i4) :: n_dips
+CALL saw_reset_1d(n,rho,q,itor,area,c1,q_s,dq,ramp,rule,q_new,dj,wr,scal(1),scal(2),scal(5),n_dips,scal(4),ierr)
 scal(3) = REAL(n_dips,8)
 END SUBROUTINE tokamaker_saw_reset_1d
 !---------------------------------------------------------------------------------

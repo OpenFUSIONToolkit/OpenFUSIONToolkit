@@ -792,19 +792,20 @@ END SUBROUTINE ext_upd
 !> Maximum of arc samples y(0:ng+1) at x(0:ng+1), refined by a parabola through the
 !! largest interior sample and its neighbours
 !------------------------------------------------------------------------------
-PURE REAL(r8) FUNCTION arc_peak(ng,x,y)
+PURE FUNCTION arc_peak(ng,x,y) RESULT(ymax)
 INTEGER(i4), INTENT(in) :: ng
 REAL(r8), INTENT(in) :: x(0:),y(0:)
+REAL(r8) :: ymax
 REAL(r8) :: d1,d2,a,b
 INTEGER(i4) :: k
 k=MAXLOC(y(0:ng+1),DIM=1)-1
-arc_peak=y(k)
+ymax=y(k)
 IF((k<1).OR.(k>ng))RETURN
 d1=(y(k)-y(k-1))/(x(k)-x(k-1)); d2=(y(k+1)-y(k))/(x(k+1)-x(k))
 a=(d2-d1)/(x(k+1)-x(k-1))
 IF(a>=0.d0)RETURN
 b=d1+a*(x(k)-x(k-1)) ! slope at x(k)
-arc_peak=MAX(y(k),y(k)-b**2/(4.d0*a))
+ymax=MAX(y(k),y(k)-b**2/(4.d0*a))
 END FUNCTION arc_peak
 !------------------------------------------------------------------------------
 !> Root of \f$ (1-\hat{\psi})(x_0+t\,d)=s \f$ for \f$ t \in [a,b] \f$
@@ -1037,3 +1038,87 @@ IF(ierr/=0)CALL oft_abort('Monomial table inversion failed','bern_build',__FILE_
 bt%cbound=(MAXVAL(SUM(ABS(bt%vinv),DIM=2))-1.d0)/2.d0+1.d-12
 END SUBROUTINE bern_build
 END MODULE oft_gs_contour
+!------------------------------------------------------------------------------
+!> Contour evaluation of @ref oft_gs::gs_get_qprof and @ref oft_gs::gs_trace_surf outputs (a submodule of
+!! @ref oft_gs, so that @ref oft_gs can use @ref oft_gs_contour, which itself uses @ref oft_gs)
+!------------------------------------------------------------------------------
+SUBMODULE (oft_gs) oft_gs_qprof
+USE oft_gs_contour, ONLY: gs_fsa_contour, gs_rays_contour
+IMPLICIT NONE
+CONTAINS
+!------------------------------------------------------------------------------
+!> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the contour quadrature
+!------------------------------------------------------------------------------
+MODULE PROCEDURE gs_qprof_contour
+REAL(r8) :: qf(nr),avgs(nr,4),fpol(nr),psi_surf
+REAL(r8), ALLOCATABLE :: fsa(:,:),shp(:,:)
+INTEGER(i4) :: j
+DO j=1,nr
+  psi_surf=psi_q(j)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1)
+  fpol(j)=gs_fpol(gseq,psi_surf)
+END DO
+!---Unallocated outputs are passed as absent (F2008)
+IF(PRESENT(fsa_avgs))ALLOCATE(fsa(nr,4))
+IF(PRESENT(shape_geo))ALLOCATE(shp(nr,6))
+CALL gs_fsa_contour(gseq,nr,psi_q,qf,avgs,done,fpol,fsa,shp)
+DO j=1,nr
+  IF(.NOT.done(j))CYCLE
+  prof(j)=fpol(j)*qf(j)
+  IF(PRESENT(ravgs))ravgs(j,:)=avgs(j,:)
+  IF(PRESENT(fsa_avgs))fsa_avgs(j,:)=fsa(j,:)
+  IF(PRESENT(shape_geo))shape_geo(j,:)=shp(j,:)
+END DO
+END PROCEDURE gs_qprof_contour
+!------------------------------------------------------------------------------
+!> LCFS outputs of @ref gs_get_qprof (`dl`, `rbounds`, `zbounds`) for surface `psi_q1`
+!!
+!! The surface is sampled at `nlcfs` uniform polar angles. If the plasma is diverted and `psi_q1`
+!! is near the LCFS, the points are projected onto the LCFS along rays from the O-point (as the
+!! tracer path does), and the bounds are the extreme projected points. Otherwise the bounds are the
+!! exact extrema of the FE surface. `dl` is the length of the closed polygon through the points.
+!------------------------------------------------------------------------------
+MODULE PROCEDURE gs_lcfs_contour
+INTEGER(i4), PARAMETER :: nlcfs=1000
+REAL(r8) :: rz(2,nlcfs,1),qf(1),xa(2,4,1),pt(2),dir(2)
+LOGICAL :: okr(1)
+INTEGER(i4) :: k
+TYPE(oft_lag_brinterp) :: psi_int
+ok=.FALSE.
+CALL gs_rays_contour(gseq,1,[psi_q1],nlcfs,rz,qf,okr,xa)
+IF(.NOT.okr(1))RETURN
+IF(gseq%diverted.AND.(psi_q1<0.05d0))THEN
+  psi_int%u=>gseq%psi
+  CALL psi_int%setup(gseq%device%fe_rep)
+  DO k=1,nlcfs
+    pt=rz(:,k,1)
+    dir=(pt-gseq%o_point)/SQRT(SUM((pt-gseq%o_point)**2))
+    CALL gs_psi2pt(gseq,gseq%plasma_bounds(1),pt,gseq%o_point,dir,psi_int)
+    rz(:,k,1)=pt
+  END DO
+  CALL psi_int%delete
+  rbounds(:,1)=rz(:,MINLOC(rz(1,:,1),DIM=1),1); rbounds(:,2)=rz(:,MAXLOC(rz(1,:,1),DIM=1),1)
+  zbounds(:,1)=rz(:,MINLOC(rz(2,:,1),DIM=1),1); zbounds(:,2)=rz(:,MAXLOC(rz(2,:,1),DIM=1),1)
+ELSE
+  rbounds(:,1)=[-xa(1,1,1),xa(2,1,1)]; rbounds(:,2)=[xa(1,2,1),xa(2,2,1)]
+  zbounds(:,1)=[xa(2,3,1),-xa(1,3,1)]; zbounds(:,2)=[xa(2,4,1),xa(1,4,1)]
+END IF
+dl=SUM(SQRT(SUM((rz(:,:,1)-CSHIFT(rz(:,:,1),1,DIM=2))**2,DIM=1)))
+ok=.TRUE.
+END PROCEDURE gs_lcfs_contour
+!------------------------------------------------------------------------------
+!> Points of one surface at uniform polar angle about the O-point, starting on the outboard
+!! side and running anticlockwise (as the tracer), from the contour quadrature
+!------------------------------------------------------------------------------
+MODULE PROCEDURE gs_trace_surf_contour
+INTEGER(i4), PARAMETER :: nth=1000
+REAL(r8) :: rz(2,nth,1),qf(1)
+LOGICAL :: ok(1)
+npoints=-1
+NULLIFY(points)
+CALL gs_rays_contour(gseq,1,[psi_in],nth,rz,qf,ok)
+IF(.NOT.ok(1))RETURN
+ALLOCATE(points(2,nth))
+points=rz(:,:,1)
+npoints=nth
+END PROCEDURE gs_trace_surf_contour
+END SUBMODULE oft_gs_qprof

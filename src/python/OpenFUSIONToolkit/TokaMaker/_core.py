@@ -144,7 +144,11 @@ _BOOT_INPUT_KEYS = ('F0', 'pres_prof', 'p_fixed_prof', 'jphi_fixed_prof', 'jphi_
 
 
 def _save_boot_inputs(filename, inputs):
-    '''! Write the kept `solve_bootstrap` keyword inputs to group `tokamaker/BOOT_INPUTS` of a saved equilibrium'''
+    '''! Write the kept `solve_bootstrap` keyword inputs to group `tokamaker/BOOT_INPUTS` of a saved equilibrium
+
+    @param filename Saved equilibrium file (HDF5, opened for appending)
+    @param inputs Dictionary of kept keyword inputs (keys `_BOOT_INPUT_KEYS`; `None` values are skipped)
+    '''
     import h5py
     with h5py.File(filename, 'a') as fid:
         tok = fid.require_group('tokamaker')
@@ -166,7 +170,11 @@ def _save_boot_inputs(filename, inputs):
 
 
 def _load_boot_inputs(filename):
-    '''! Read the kept `solve_bootstrap` keyword inputs from a saved equilibrium (`None` if the file has none)'''
+    '''! Read the kept `solve_bootstrap` keyword inputs from a saved equilibrium
+
+    @param filename Saved equilibrium file (HDF5)
+    @result Dictionary of kept keyword inputs (keys `_BOOT_INPUT_KEYS`), or `None` if the file has none
+    '''
     import h5py
     def _str(v):
         return v.decode() if isinstance(v, bytes) else v
@@ -186,7 +194,12 @@ def _load_boot_inputs(filename):
 
 
 def _boot_state_message(boot_ops, inputs):
-    '''! One-line summary of a loaded bootstrap state (options and kept keyword inputs)'''
+    '''! One-line summary of a loaded bootstrap state (options and kept keyword inputs)
+
+    @param boot_ops Dictionary of `solve_bootstrap` options
+    @param inputs Dictionary of kept keyword inputs, or `None`
+    @result Summary string
+    '''
     opts = ', '.join(f'{k}={v!r}' for k, v in boot_ops.items())
     kept = []
     for key, val in (inputs or {}).items():
@@ -2495,23 +2508,33 @@ class TokaMaker():
           (see doc_tokamaker_current_conventions):
           - ``'psi_n'`` Normalised poloidal flux grid (0 = axis, 1 = LCFS) of the ``ffp_prof['x']`` nodes
             (mapped from toroidal flux if ``coord='phi_n'``)
-          - ``'jdotB_bs_raw'`` The Redl \f$\langle j_{BS} \cdot B \rangle\f$ behind ``'jphi_bs_raw'`` [T A/m²]
+          - ``'jdotB_bs_raw'`` The Redl \f$\langle j_{BS} \cdot B \rangle\f$ behind ``'jphi_bs_raw'`` [T A/m^2]
           - ``'jphi_bs_raw'`` Field-aligned bootstrap current density from the Redl PoP 2021 formula,
-            \f$\langle j_{BS} \cdot B \rangle F \langle 1/R \rangle/\langle B^2 \rangle\f$ [A/m²]
+            \f$\langle j_{BS} \cdot B \rangle F \langle 1/R \rangle/\langle B^2 \rangle\f$ [A/m^2]
           - ``'jphi_pd_raw'`` Pressure-driven (diamagnetic + Pfirsch-Schlueter) current density,
             \f$P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
-          - ``'jphi_total'`` Total toroidal current density = jphi_ind + jphi_bs + jphi_pd + jphi_saw + jphi_fixed [A/m²]
-          - ``'jphi_bs'`` ``'jphi_bs_raw'``, (optionally) edge-isolated, scaled by ``scale_jbs`` and (optionally) tapered [A/m²]
-          - ``'jphi_pd'`` ``'jphi_pd_raw'``, (optionally) tapered; not isolated or scaled by ``scale_jbs`` [A/m²]
-          - ``'jphi_ind'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m²]
-          - ``'jphi_saw'`` Sawtooth current: ``jphi_saw_prof`` (optionally tapered) plus the reset current [A/m²]
-          - ``'jphi_fixed'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m²]
+          - ``'jphi_total'`` Total toroidal current density = jphi_ind + jphi_bs + jphi_pd + jphi_saw + jphi_fixed [A/m^2]
+          - ``'jphi_bs'`` ``'jphi_bs_raw'``, (optionally) edge-isolated, scaled by ``scale_jbs`` and (optionally) tapered [A/m^2]
+          - ``'jphi_pd'`` ``'jphi_pd_raw'``, (optionally) tapered; not isolated or scaled by ``scale_jbs`` [A/m^2]
+          - ``'jphi_ind'`` Input ``ffp_prof['y']`` re-scaled and (optionally) tapered [A/m^2]
+          - ``'jphi_saw'`` Sawtooth current: ``jphi_saw_prof`` (optionally tapered) plus the reset current [A/m^2]
+          - ``'jphi_fixed'`` Fixed current density ``jphi_fixed_prof`` (optionally tapered, zero if not set) [A/m^2]
           - ``'saw_rho_m'``, ``'saw_rho_out'``, ``'saw_n_dips'`` Sawtooth radius (q_s + dq crossing beyond the outermost
             q < q_s, \f$\rho_{tor,N}\f$), outer end of the reset and number of regions reset, at the last reset
         '''
         from scipy.interpolate import Akima1DInterpolator
         # Keyword inputs left as None keep their values from the previous call or the loaded state
         kept = self._tMaker_equil._boot_inputs or {}
+        if (coord is not None) and (coord != (kept.get('coord') or 'psi_n')):
+            # Kept profiles are on the kept coordinate, so they cannot be reused on another one
+            p_passed = (pres_prof is not None) or (p_fixed_prof is not None)
+            stale = [key for key, passed in (('pres_prof', p_passed), ('p_fixed_prof', p_passed),
+                                             ('jphi_fixed_prof', jphi_fixed_prof is not None),
+                                             ('jphi_saw_prof', jphi_saw_prof is not None))
+                     if (not passed) and (kept.get(key) is not None)]
+            if stale:
+                raise ValueError(f"coord={coord!r} differs from the kept coord={kept.get('coord') or 'psi_n'!r}: "
+                                 f"pass {', '.join(stale)} on the new coordinate (or call boot_reset())")
         if F0 is None:
             F0 = kept.get('F0')
         if coord is None:
