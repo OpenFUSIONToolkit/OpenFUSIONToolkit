@@ -20,7 +20,8 @@ Holes are chosen for each connected surface as follows:
     a set of loops is a valid set of holes exactly when its signatures are linearly independent.
  3. Candidate loops are the fundamental cycles of a shortest-path tree from a base vertex. The candidates are
     taken shortest first and kept when their signature is independent of the loops already kept.
- 4. The shortest-path search is repeated from the middle of each selected loop and the selection is repeated
+ 4. The shortest-path search is repeated from the far side of each selected loop (the end of the tree edge that
+    closes it, opposite the point where its two tree paths meet) and the selection is repeated
     over all candidates found. With optimization this is repeated until the selection does not change.
  5. Each selected loop is shortened by cutting corners: where three consecutive vertices form a cell, the
     middle vertex is removed, which does not change the loop's signature.
@@ -498,7 +499,7 @@ def _surface_holes(r, lc, ref_point, optimize, info, verbose, indent):
             print(indent+'  Base point ({0:.3E}, {1:.3E}, {2:.3E})'.format(*r[root]))
         print(indent+'  Initial search: {0} candidate loops, total length = {1:.4E} ({2:.2f} s)'.format(
             pools[0][2].shape[0], sum(sel[0] for sel in selected), time.perf_counter()-t0), flush=True)
-    # Search again from the middle of each selected loop, until the selection does not change. Loops longer than
+    # Search again from the far side of each selected loop, until the selection does not change. Loops longer than
     # those already selected are never needed, so each search is limited to that length.
     searched = {root}
     npasses = _max_passes if optimize else 1
@@ -507,8 +508,8 @@ def _surface_holes(r, lc, ref_point, optimize, info, verbose, indent):
         limit = max(s[0] for s in selected)
         roots = set()
         for _, sroot, slimit, edge in selected:
-            loop = surf.tighten(surf.tree_cycle(sroot, slimit, edge))
-            roots.add(loop[len(loop)//2])
+            # Point on the loop farthest along the tree from where it was found (one end of the closing edge)
+            roots.add(surf.tree_cycle(sroot, slimit, edge)[0])
         roots = sorted(roots - searched)
         if len(roots) == 0:
             if info:
@@ -563,7 +564,7 @@ def find_holes(r, lc, ref_point=None, optimize=False, info=False, verbose=False,
     @param r Vertex list [nv,3]
     @param lc Cell list [nf,3] (0-based)
     @param ref_point Reference location for the base point of each surface [x,y,z] (default: [0,0,0])
-    @param optimize Search again from the middle of each selected loop to shorten the internal holes?
+    @param optimize Repeat the search from the far side of the selected loops until the selection does not change?
     @param info Print information on each surface?
     @param verbose Print the location and search time of each base point (requires `info`)?
     @param indent Indentation for printed information
