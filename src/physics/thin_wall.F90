@@ -662,6 +662,23 @@ IF(PRESENT(save_file))THEN
           exists=.FALSE.
         END IF
       END IF
+      !---Coil<->coil mutuals.  Without these the cache is unusable for a model with Vcoils:
+      IF(exists.AND.(tw_obj%n_vcoils>0))THEN
+        IF(ASSOCIATED(tw_obj%Acoil2coil))DEALLOCATE(tw_obj%Acoil2coil)
+        ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
+        READ(io_unit, IOSTAT=ierr)tw_obj%Acoil2coil
+        IF(ierr/=0)THEN
+          WRITE(*,'(2A)')oft_indent,'Stored matrix predates coil<->coil caching, rebuilding'
+          DEALLOCATE(tw_obj%Ael2coil,tw_obj%Ael2dr,tw_obj%Acoil2coil)
+          exists=.FALSE.
+        ELSE
+          DO i=1,tw_obj%n_vcoils
+            tw_obj%vcoils(i)%Lself=tw_obj%Acoil2coil(i,i)
+            WRITE(*,"(2A,1X,I4,A,ES12.4)")oft_indent,"Vcoil",i,": L [H] = ", &
+              tw_obj%vcoils(i)%Lself*1.d-7
+          END DO
+        END IF
+      END IF
       CLOSE(io_unit)
       CALL oft_decrease_indent
     END IF
@@ -811,6 +828,7 @@ IF(PRESENT(save_file))THEN
     WRITE(io_unit)tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils
     WRITE(io_unit)tw_obj%Ael2coil
     WRITE(io_unit)tw_obj%Ael2dr
+    IF(tw_obj%n_vcoils>0)WRITE(io_unit)tw_obj%Acoil2coil
     CLOSE(io_unit)
   END IF
 END IF

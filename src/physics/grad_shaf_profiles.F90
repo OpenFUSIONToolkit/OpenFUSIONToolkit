@@ -1683,7 +1683,7 @@ END FUNCTION torflux_unwrap
 !> Point a profile on toroidal flux at the equilibrium's map, creating the map if needed
 !------------------------------------------------------------------------------
 SUBROUTINE torflux_attach(F,gseq)
-CLASS(flux_func), POINTER, INTENT(in) :: F !< Profile (no-op unless it is a @ref phi_flux_wrapper)
+CLASS(flux_func), POINTER, INTENT(inout) :: F !< Profile (no-op unless it is a @ref phi_flux_wrapper)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 IF(.NOT.ASSOCIATED(F))RETURN
 SELECT TYPE(F)
@@ -1723,7 +1723,7 @@ CALL attach(gseq%jphi_saw,'jphi_saw',.TRUE.)
 CONTAINS
 !---Attach a profile (value-type profiles on toroidal flux must be "phi_n_val")
 SUBROUTINE attach(F,name,value_type)
-CLASS(flux_func), POINTER, INTENT(in) :: F
+CLASS(flux_func), POINTER, INTENT(inout) :: F
 CHARACTER(LEN=*), INTENT(in) :: name
 LOGICAL, INTENT(in) :: value_type
 IF(.NOT.ASSOCIATED(F))RETURN
