@@ -399,10 +399,13 @@ class ThinCurr():
     def compute_Bmat(self,cache_file=None,B_dx=-1.E-2):
         '''! Compute magnetic field reconstruction operators for this model
 
+        @note To reconstruct the magnetic field from a current potential and coil currents use
+        \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.reconstruct_Bfield "reconstruct_Bfield()".
+
         @param cache_file Path to cache file to store/load matrix
         @param B_dx Spatial step size for finite difference evaluation of B-field (negative values for relative sizing)
-        @result Element B-field reconstruction matrix (`(:,:)` if HODLR is available else `None`)
-        @result Icoil B-field reconstruction matrix `(:,:)`
+        @result Element B-field reconstruction matrix `(3,nelems,np)` (`None` if HODLR is used)
+        @result Icoil B-field reconstruction matrix `(3,n_icoils,np)`
         '''
         if cache_file is None:
             cache_string = self._oft_env.path2c("")
