@@ -500,11 +500,37 @@ INTEGER(4), INTENT(in) :: list_in(n) !< Input vertex list
 INTEGER(4), INTENT(out) :: list_out(n) !< Reordered list
 INTEGER(4) :: ii,jj,k,l,nlinks,ipt,eprev,ed,ed2,ptp2,ptp,candidate,candidate2,last_item(3),i0
 INTEGER(4), ALLOCATABLE :: lloop_tmp(:),flag_list(:)
-!---Find loop points and edges
+!---Check for a valid point list
+IF(n<3)CALL oft_abort('Error building hole mesh, hole has fewer than 3 points', &
+  'tw_setup::order_hole_list', __FILE__)
 ALLOCATE(lloop_tmp(n),flag_list(n))
 flag_list=0
 lloop_tmp=list_in
 CALL sort_array(lloop_tmp, n)
+IF(ANY(lloop_tmp(2:n)==lloop_tmp(1:n-1)))CALL oft_abort('Error building hole mesh, hole has repeated points', &
+  'tw_setup::order_hole_list', __FILE__)
+!---Use the given order if consecutive points (including last -> first) are all joined by mesh edges,
+!---starting at the lowest point and going towards its lower neighbor (same as the walk below)
+DO jj=1,n
+  IF(mesh_local_findedge(self%mesh,[list_in(jj),list_in(MOD(jj,n)+1)])==0)EXIT
+END DO
+IF(jj>n)THEN
+  i0=MINLOC(list_in,DIM=1)
+  IF(list_in(MOD(i0,n)+1)<list_in(MOD(i0+n-2,n)+1))THEN
+    DO k=1,n
+      list_out(k)=list_in(MOD(i0+k-2,n)+1)
+    END DO
+  ELSE
+    DO k=1,n
+      list_out(k)=list_in(MOD(i0-k+n,n)+1)
+    END DO
+  END IF
+  DEALLOCATE(lloop_tmp,flag_list)
+  RETURN
+END IF
+CALL oft_warn('Hole points are not stored as an ordered loop, using legacy ordering (may fail or flip the hole ' &
+  //'direction for loops with chords); recreate holes with "OFT_ThinCurr_holes"')
+!---Find loop points and edges
 !
 ! DO i0=1,n
 !   nlinks=0
