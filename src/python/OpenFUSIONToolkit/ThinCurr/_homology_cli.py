@@ -79,7 +79,7 @@ def _write_holes(out_file, input_model, holes, closures):
 
 def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False, show_omitted=False,
                      show_covering=False, debug=False, ref_point=None, optimize_holes=False, verify_only=False,
-                     use_legacy=False):
+                     use_legacy=False, verbose=False):
     '''! Compute holes and closures for ThinCurr meshes
 
     By default holes are selected using a tree-cotree approach (see @ref _tree_homology). The previous Greedy
@@ -96,6 +96,7 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     @param optimize_holes Sample additional points to attempt to optimize holes?
     @param verify_only Verify the correct number of holes and closures are found, but do not write output file?
     @param use_legacy Use the legacy Greedy Homotopy method?
+    @param verbose Print progress for each search base point (tree-cotree method only)?
     '''
     if out_file is None:
         out_file = os.path.splitext(in_file)[0] + "-homology.h5"
@@ -135,7 +136,8 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     elif verify_only:
         nholes, nclosures = _tree_homology.count_holes(input_model['r'], input_model['lc'])
     else:
-        out = _tree_homology.find_holes(input_model['r'], input_model['lc'], ref_point=ref_point, optimize=optimize_holes, info=print_info)
+        out = _tree_homology.find_holes(input_model['r'], input_model['lc'], ref_point=ref_point, optimize=optimize_holes, info=print_info,
+                                        verbose=verbose)
         nholes = len(out['boundary_holes']) + len(out['internal_holes'])
         nclosures = len(out['closures'])
     if print_info:
@@ -193,6 +195,7 @@ def script_entry():
     parser.add_argument("--ref_point", default=None, type=float, nargs='+', help='Reference location for base point [x,y,z] (default: [0,0,0])')
     parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes?")
     parser.add_argument("--use_legacy", action="store_true", default=False, help="Use the legacy Greedy Homotopy method?")
+    parser.add_argument("--verbose", action="store_true", default=False, help="Print progress for each search base point (tree-cotree method only)?")
     options = parser.parse_args()
 
     if options.keep_nodeset_start is not None:
@@ -208,7 +211,8 @@ def script_entry():
         debug=options.debug,
         ref_point=options.ref_point,
         optimize_holes=options.optimize_holes,
-        use_legacy=options.use_legacy
+        use_legacy=options.use_legacy,
+        verbose=options.verbose
     )
 
 
@@ -222,7 +226,7 @@ def script_entry():
 #
 #```shell
 # usage: OFT_ThinCurr_holes [-h] --in_file IN_FILE [--out_file OUT_FILE] [--keep_nodeset_start KEEP_NODESET_START] [--plot_final] [--plot_steps] [--show_omitted]
-#                                 [--show_covering] [--debug] [--ref_point REF_POINT [REF_POINT ...]] [--optimize_holes] [--use_legacy]
+#                                 [--show_covering] [--debug] [--ref_point REF_POINT [REF_POINT ...]] [--optimize_holes] [--use_legacy] [--verbose]
 #
 # options:
 #     -h, --help            show this help message and exit
@@ -239,4 +243,5 @@ def script_entry():
 #                           Reference location for base point [x,y,z] (default: [0,0,0])
 #     --optimize_holes      Sample additional points to attempt to optimize holes?
 #     --use_legacy          Use the legacy Greedy Homotopy method?
+#     --verbose             Print progress for each search base point (tree-cotree method only)?
 #```

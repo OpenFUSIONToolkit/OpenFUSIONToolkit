@@ -468,7 +468,7 @@ def _select(seeds, pools, nholes):
     return selected
 
 
-def _surface_holes(r, lc, ref_point, optimize, info, indent):
+def _surface_holes(r, lc, ref_point, optimize, info, verbose, indent):
     '''! Select holes for one connected surface
 
     @result boundary holes, omitted boundary loop (or None), internal holes (local vertex indices)
@@ -494,12 +494,16 @@ def _surface_holes(r, lc, ref_point, optimize, info, indent):
     pools = [(root, np.inf) + surf.candidates(root)]
     selected = _select(seeds, pools, nholes)
     if info:
-        print(indent+'  Initial search from base point ({0:.3E}, {1:.3E}, {2:.3E}): {3} candidate loops, total length = {4:.4E} ({5:.2f} s)'.format(
-            *r[root], pools[0][2].shape[0], sum(sel[0] for sel in selected), time.perf_counter()-t0), flush=True)
+        if verbose:
+            print(indent+'  Base point ({0:.3E}, {1:.3E}, {2:.3E})'.format(*r[root]))
+        print(indent+'  Initial search: {0} candidate loops, total length = {1:.4E} ({2:.2f} s)'.format(
+            pools[0][2].shape[0], sum(sel[0] for sel in selected), time.perf_counter()-t0), flush=True)
     # Search again from the middle of each selected loop, until the selection does not change. Loops longer than
     # those already selected are never needed, so each search is limited to that length.
     searched = {root}
-    for ipass in range(_max_passes if optimize else 1):
+    npasses = _max_passes if optimize else 1
+    for ipass in range(npasses):
+        t0 = time.perf_counter()
         limit = max(s[0] for s in selected)
         roots = set()
         for _, sroot, slimit, edge in selected:
@@ -507,23 +511,24 @@ def _surface_holes(r, lc, ref_point, optimize, info, indent):
             roots.add(loop[len(loop)//2])
         roots = sorted(roots - searched)
         if len(roots) == 0:
+            if info:
+                print(indent+'  [{0}/{1}] Search pass: no new base points, search converged'.format(ipass+1, npasses), flush=True)
             break
         searched.update(roots)
         if info:
-            print(indent+'  Search pass {0}: {1} additional base point(s)'.format(ipass+1, len(roots)), flush=True)
+            print(indent+'  [{0}/{1}] Search pass: {2} base point(s)'.format(ipass+1, npasses, len(roots)), flush=True)
         for k, new_root in enumerate(roots):
-            t0 = time.perf_counter()
+            t1 = time.perf_counter()
             pools.append((new_root, limit) + surf.candidates(new_root, limit))
-            if info:
+            if verbose:
                 print(indent+'    [{0}/{1}] Base point ({2:.3E}, {3:.3E}, {4:.3E}): {5} candidate loops ({6:.2f} s)'.format(
-                    k+1, len(roots), *r[new_root], pools[-1][2].shape[0], time.perf_counter()-t0), flush=True)
+                    k+1, len(roots), *r[new_root], pools[-1][2].shape[0], time.perf_counter()-t1), flush=True)
         previous = set((s[1], s[3]) for s in selected)
-        t0 = time.perf_counter()
         selected = _select(seeds, pools, nholes)
         changed = set((s[1], s[3]) for s in selected) != previous
         if info:
-            print(indent+'    Selection {0}: total length = {1:.4E} ({2:.2f} s)'.format(
-                'updated' if changed else 'unchanged', sum(sel[0] for sel in selected), time.perf_counter()-t0), flush=True)
+            print(indent+'    total length = {0:.4E} ({1:.2f} s){2}'.format(sum(sel[0] for sel in selected), time.perf_counter()-t0,
+                                                                         '' if changed else ', selection unchanged, search converged'), flush=True)
         if not changed:
             break
     loops = [surf.tighten(surf.tree_cycle(sroot, slimit, edge)) for _, sroot, slimit, edge in selected]
@@ -552,7 +557,7 @@ def count_holes(r, lc):
     return nholes, int(np.count_nonzero(closed))
 
 
-def find_holes(r, lc, ref_point=None, optimize=False, info=False, indent=''):
+def find_holes(r, lc, ref_point=None, optimize=False, info=False, verbose=False, indent=''):
     '''! Select holes and closures for a ThinCurr surface mesh
 
     @param r Vertex list [nv,3]
@@ -560,6 +565,7 @@ def find_holes(r, lc, ref_point=None, optimize=False, info=False, indent=''):
     @param ref_point Reference location for the base point of each surface [x,y,z] (default: [0,0,0])
     @param optimize Search again from the middle of each selected loop to shorten the internal holes?
     @param info Print information on each surface?
+    @param verbose Print the location and search time of each base point (requires `info`)?
     @param indent Indentation for printed information
     @result Dictionary with 'boundary_holes' (boundary loops used as holes), 'omitted' (one boundary loop per
     surface with a boundary, not used), 'internal_holes' (other loops) and 'closures' (cell indices, one per
@@ -580,7 +586,7 @@ def find_holes(r, lc, ref_point=None, optimize=False, info=False, indent=''):
         if info:
             print()
             print(indent+'Analyzing surface {0} of {1}'.format(i+1, surfs.shape[0]))
-        bloops, omitted, loops = _surface_holes(r[verts,:], lc_local, ref_point, optimize, info, indent)
+        bloops, omitted, loops = _surface_holes(r[verts,:], lc_local, ref_point, optimize, info, verbose, indent)
         out['boundary_holes'] += [verts[loop] for loop in bloops]
         out['internal_holes'] += [verts[loop] for loop in loops]
         if omitted is None:
