@@ -108,7 +108,7 @@ def _compute_junction_holes(input_model, out_file, verify_only, print_info, peri
 
 def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False, show_omitted=False,
                      show_covering=False, debug=False, ref_point=None, optimize_holes=False, verify_only=False,
-                     use_legacy=False, split_regions=False):
+                     use_legacy=False, verbose=False, split_regions=False):
     '''! Compute holes and closures for ThinCurr meshes
 
     By default holes are selected using a tree-cotree approach (see @ref _tree_homology). The previous Greedy
@@ -122,9 +122,10 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     @param show_covering Show covering triangles for boundary cycles (legacy method only, only used if `plot_steps`)?
     @param debug Print additional debug information?
     @param ref_point Reference location for base point [x,y,z] (default: [0,0,0])
-    @param optimize_holes Sample additional points to attempt to optimize holes?
+    @param optimize_holes Sample additional points to attempt to optimize holes (little effect with the default method)?
     @param verify_only Verify the correct number of holes and closures are found, but do not write output file?
     @param use_legacy Use the legacy Greedy Homotopy method?
+    @param verbose Print progress for each search base point (tree-cotree method only)?
     @param split_regions Split the mesh at all region interfaces (junction mesh) even if every edge has at most two cells?
     '''
     if out_file is None:
@@ -176,7 +177,8 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     elif verify_only:
         nholes, nclosures = _tree_homology.count_holes(input_model['r'], input_model['lc'])
     else:
-        out = _tree_homology.find_holes(input_model['r'], input_model['lc'], ref_point=ref_point, optimize=optimize_holes, info=print_info)
+        out = _tree_homology.find_holes(input_model['r'], input_model['lc'], ref_point=ref_point, optimize=optimize_holes, info=print_info,
+                                        verbose=verbose)
         nholes = len(out['boundary_holes']) + len(out['internal_holes'])
         nclosures = len(out['closures'])
     if print_info:
@@ -232,8 +234,9 @@ def script_entry():
     parser.add_argument("--show_covering", action="store_true", default=False, help="Show covering triangles for boundary cycles (legacy method only, only used if `--plot_steps`)?")
     parser.add_argument("--debug", action="store_true", default=False, help="Print additional debug information?")
     parser.add_argument("--ref_point", default=None, type=float, nargs='+', help='Reference location for base point [x,y,z] (default: [0,0,0])')
-    parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes?")
+    parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes (little effect with the default method)?")
     parser.add_argument("--use_legacy", action="store_true", default=False, help="Use the legacy Greedy Homotopy method?")
+    parser.add_argument("--verbose", action="store_true", default=False, help="Print progress for each search base point (tree-cotree method only)?")
     parser.add_argument("--split_regions", action="store_true", default=False, help="Split the mesh at all region interfaces (junction mesh)?")
     options = parser.parse_args()
 
@@ -251,6 +254,7 @@ def script_entry():
         ref_point=options.ref_point,
         optimize_holes=options.optimize_holes,
         use_legacy=options.use_legacy,
+        verbose=options.verbose,
         split_regions=options.split_regions
     )
 
@@ -272,7 +276,7 @@ def script_entry():
 #
 #```shell
 # usage: OFT_ThinCurr_holes [-h] --in_file IN_FILE [--out_file OUT_FILE] [--keep_nodeset_start KEEP_NODESET_START] [--plot_final] [--plot_steps] [--show_omitted]
-#                                 [--show_covering] [--debug] [--ref_point REF_POINT [REF_POINT ...]] [--optimize_holes] [--use_legacy] [--split_regions]
+#                                 [--show_covering] [--debug] [--ref_point REF_POINT [REF_POINT ...]] [--optimize_holes] [--use_legacy] [--verbose] [--split_regions]
 #
 # options:
 #     -h, --help            show this help message and exit
@@ -287,7 +291,8 @@ def script_entry():
 #     --debug               Print additional debug information?
 #     --ref_point REF_POINT [REF_POINT ...]
 #                           Reference location for base point [x,y,z] (default: [0,0,0])
-#     --optimize_holes      Sample additional points to attempt to optimize holes?
+#     --optimize_holes      Sample additional points to attempt to optimize holes (little effect with the default method)?
 #     --use_legacy          Use the legacy Greedy Homotopy method?
+#     --verbose             Print progress for each search base point (tree-cotree method only)?
 #     --split_regions       Split the mesh at all region interfaces (junction mesh)?
 #```

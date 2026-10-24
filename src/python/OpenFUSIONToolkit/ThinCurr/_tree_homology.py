@@ -20,24 +20,25 @@ Holes are chosen for each connected surface as follows:
     a set of loops is a valid set of holes exactly when its signatures are linearly independent.
  3. Candidate loops are the fundamental cycles of a shortest-path tree from a base vertex. The candidates are
     taken shortest first and kept when their signature is independent of the loops already kept.
- 4. Optionally, the shortest-path search is repeated from the middle of each selected loop and the selection
-    is repeated over all candidates found ("optimization").
- 5. Chords (mesh edges joining two non-consecutive vertices of a loop) are removed by splitting the loop at
-    the chord and keeping the part that leaves the set of holes independent, so each hole is a simple,
-    chord-free loop.
+ 4. The shortest-path search is repeated from the far side of each selected loop (the end of the tree edge that
+    closes it, opposite the point where its two tree paths meet) and the selection is repeated over all
+    candidates found. Optionally (`optimize`), this is repeated until the selection does not change, which
+    rarely shortens the loops further.
+ 5. Each selected loop is shortened by cutting corners: where three consecutive vertices form a cell, the
+    middle vertex is removed, which does not change the loop's signature.
 
 The cost is linear in the number of cells for fixed topology, plus a term proportional to the number of
 holes times the number of cells crossed by the cuts.
 
-@authors Chris Hansen
+@authors Ian Stewart and Chris Hansen
 @date October 2026
 @ingroup doxy_oft_python
 '''
+import time
 from fractions import Fraction
 import numpy as np
 import scipy.sparse
 import scipy.sparse.csgraph
-import scipy.sparse.linalg
 
 _block_size = 32 # Number of hole functionals processed together when computing loop signatures
 _max_passes = 10 # Maximum number of search passes when optimizing
@@ -80,7 +81,14 @@ def _edge_cells(he_edge, counts):
 
 
 def _edge_index(keys, nv, u, v):
-    '''! Index of the edges joining vertices `u` and `v` (arrays)'''
+    '''! Index of the edges joining pairs of vertices
+
+    @param keys Sorted edge keys (low vertex * `nv` + high vertex)
+    @param nv Number of vertices
+    @param u First vertex of each pair
+    @param v Second vertex of each pair
+    @result Edge index of each pair
+    '''
     return np.searchsorted(keys, np.minimum(u,v).astype(np.int64)*nv + np.maximum(u,v))
 
 
@@ -133,7 +141,7 @@ def _check_mesh(r, lc):
 
     @param r Vertex list [nv,3]
     @param lc Cell list [nf,3] (0-based)
-    @result Oriented cell list [nf,3], surface index of each cell [nf]
+    @result Oriented cell list [nf,3], surface index of each cell [nf], edge list [ne,2], number of cells on each edge [ne]
     '''
     nv = r.shape[0]
     nf = lc.shape[0]
@@ -185,7 +193,7 @@ def _check_mesh(r, lc):
     lco = lc.copy()
     lco[flip == 1,1] = lc[flip == 1,2]
     lco[flip == 1,2] = lc[flip == 1,1]
-    return lco, fsurf
+    return lco, fsurf, le, counts
 
 
 class _surface:
@@ -312,7 +320,9 @@ class _surface:
     def tree(self, root, limit=np.inf):
         '''! Shortest-path tree from a root vertex
 
-        @result distance and parent of each vertex (-9999 if not reached or root)
+        @param root Root vertex
+        @param limit Only search vertices closer than this to the root
+        @result Distance and parent of each vertex (parent is -9999 if not reached or root)
         '''
         return scipy.sparse.csgraph.dijkstra(self.graph, indices=root, return_predecessors=True, limit=limit)
 
@@ -324,7 +334,7 @@ class _surface:
 
         @param root Root vertex
         @param limit Only search vertices closer than this to the root and keep loops shorter than this
-        @result Loop lengths [n], edges [n], signatures (sparse [n,nholes])
+        @result Loop lengths [n], edges [n], signatures (sparse [n,nholes]), parent of each vertex in the tree
         '''
         nv, le = self.nv, self.le
         dist, pred = self.tree(root, limit)
@@ -368,11 +378,15 @@ class _surface:
         lca = _tree_lca(tpred, la[nonzero], lb[nonzero])
         clen = dist[le[ce,0]] + dist[le[ce,1]] + self.elen[ce] - 2.0*dist[nodes[lca]]
         keep = np.nonzero(clen <= limit)[0]
-        return clen[keep], ce[keep], sigs[nonzero[keep]]
+        return clen[keep], ce[keep], sigs[nonzero[keep]], pred
 
-    def tree_cycle(self, root, limit, edge):
-        '''! Simple vertex loop closed by `edge` in the shortest-path tree from `root` (without the stem to the root)'''
-        _, pred = self.tree(root, limit)
+    def tree_cycle(self, pred, edge):
+        '''! Simple vertex loop closed by an edge in a shortest-path tree (without the stem to the root)
+
+        @param pred Parent of each vertex in the tree (from @ref candidates)
+        @param edge Edge outside the tree
+        @result Loop vertices, starting at the low vertex of `edge` and ending at its high vertex
+        '''
         a, b = int(self.le[edge,0]), int(self.le[edge,1])
         pa = [a]
         while pred[pa[-1]] >= 0:
@@ -382,6 +396,15 @@ class _surface:
         while pb[-1] not in pos:
             pb.append(int(pred[pb[-1]]))
         return pa[:pos[pb[-1]]+1] + pb[:-1][::-1]
+
+    def loop_key(self, loop):
+        '''! Set of edges in a loop, used to compare loops
+
+        @param loop Loop vertices
+        @result Frozen set of edge indices
+        '''
+        loop = np.asarray(loop, dtype=np.int64)
+        return frozenset(_edge_index(self.keys, self.nv, loop, np.roll(loop, -1)).tolist())
 
     def tighten(self, loop):
         '''! Shorten a loop by cutting corners: where three consecutive vertices form a cell, the middle
@@ -399,18 +422,6 @@ class _surface:
             else:
                 i += 1
         return loop
-
-    def find_chord(self, loop):
-        '''! Positions (i,j), i < j, of two non-consecutive loop vertices joined by a mesh edge, or None'''
-        pos = {v: i for i, v in enumerate(loop)}
-        n = len(loop)
-        indptr, indices = self.graph.indptr, self.graph.indices
-        for i, v in enumerate(loop):
-            for u in indices[indptr[v]:indptr[v+1]]:
-                j = pos.get(int(u))
-                if (j is not None) and (j > i+1) and not ((i == 0) and (j == n-1)):
-                    return i, j
-        return None
 
 
 class _independent_set:
@@ -444,10 +455,21 @@ class _independent_set:
 
 
 def _dense_to_dict(vec):
+    '''! Convert a dense integer vector to a sparse {index: value} dictionary
+
+    @param vec Dense vector
+    @result Dictionary of nonzero entries
+    '''
     return {int(k): int(vec[k]) for k in np.nonzero(vec)[0]}
 
 
 def _sparse_row(mat, i):
+    '''! Row of a CSR matrix as a sparse {index: value} dictionary
+
+    @param mat CSR matrix
+    @param i Row index
+    @result Dictionary of nonzero entries in row `i`
+    '''
     r0, r1 = mat.indptr[i], mat.indptr[i+1]
     return dict(zip(mat.indices[r0:r1].tolist(), mat.data[r0:r1].tolist()))
 
@@ -456,9 +478,9 @@ def _select(seeds, pools, nholes):
     '''! Greedily select loops shortest first
 
     @param seeds Signatures of loops that must be kept (dense)
-    @param pools List of (root, limit, lengths, edges, signatures) candidate sets
+    @param pools List of (root, limit, lengths, edges, signatures, parents) candidate sets
     @param nholes Required number of independent loops
-    @result List of (length, root, limit, edge) for the selected candidates
+    @result List of (length, pool index, edge) for the selected candidates
     '''
     indep = _independent_set()
     for sig in seeds:
@@ -472,48 +494,16 @@ def _select(seeds, pools, nholes):
     for k in np.lexsort((row_ind, pool_ind, lengths)):
         if nsel == nholes:
             break
-        root, limit, _, edges, sigs = pools[pool_ind[k]]
+        edges, sigs = pools[pool_ind[k]][3:5]
         if indep.add(_sparse_row(sigs, row_ind[k])):
-            selected.append((lengths[k], root, limit, edges[row_ind[k]]))
+            selected.append((lengths[k], pool_ind[k], edges[row_ind[k]]))
             nsel += 1
     if nsel != nholes:
         raise RuntimeError("Only found {0} of {1} independent loops".format(nsel, nholes))
     return selected
 
 
-def _clean_loops(surf, loops, sigs, first):
-    '''! Tighten loops and remove chords while keeping the set of loops independent
-
-    @param surf Surface
-    @param loops Loops to process (modified in place)
-    @param sigs Signatures of all holes on the surface (dense [nholes,nholes], modified in place)
-    @param first Row of `sigs` for the first loop in `loops`
-    '''
-    lu = None
-    for j in range(len(loops)):
-        while True:
-            loops[j] = surf.tighten(loops[j])
-            chord = surf.find_chord(loops[j])
-            if chord is None:
-                break
-            i, k = chord
-            loop = loops[j]
-            parts = sorted((loop[i:k+1], loop[k:] + loop[:i+1]), key=len)
-            if lu is None:
-                lu = scipy.sparse.linalg.splu(scipy.sparse.csc_matrix(sigs.T.astype(np.float64)))
-            for part in parts:
-                sig = surf.loop_signature(part)
-                coeff = lu.solve(sig.astype(np.float64))
-                if abs(coeff[first+j]) > 1.E-8:
-                    loops[j] = part
-                    sigs[first+j,:] = sig
-                    lu = None
-                    break
-            else:
-                raise RuntimeError("Could not remove chord from hole loop")
-
-
-def _surface_holes(r, lc, ref_point, optimize, info, indent):
+def _surface_holes(r, lc, ref_point, optimize, info, verbose, indent):
     '''! Select holes for one connected surface
 
     @result boundary holes, omitted boundary loop (or None), internal holes (local vertex indices)
@@ -533,34 +523,47 @@ def _surface_holes(r, lc, ref_point, optimize, info, indent):
     if nholes == len(bloops):
         return bloops, omitted, []
     root = int(np.argmin(np.linalg.norm(r-ref_point[np.newaxis,:], axis=1)))
+    t0 = time.perf_counter()
     surf.setup_functionals(root)
     seeds = [surf.loop_signature(loop) for loop in bloops]
     pools = [(root, np.inf) + surf.candidates(root)]
     selected = _select(seeds, pools, nholes)
-    # Search again from the middle of each selected loop, until the selection does not change. Loops longer than
+    if info:
+        if verbose:
+            print(indent+'  Base point ({0:.3E}, {1:.3E}, {2:.3E})'.format(*r[root]))
+        print(indent+'  Initial search: {0} candidate loops, total length = {1:.4E} ({2:.2f} s)'.format(
+            pools[0][2].shape[0], sum(sel[0] for sel in selected), time.perf_counter()-t0), flush=True)
+    # Search again from the far side of each selected loop, until the selection does not change. Loops longer than
     # those already selected are never needed, so each search is limited to that length.
     searched = {root}
-    for _ in range(_max_passes if optimize else 1):
+    npasses = _max_passes if optimize else 1
+    for ipass in range(npasses):
+        t0 = time.perf_counter()
         limit = max(s[0] for s in selected)
-        roots = set()
-        for _, sroot, slimit, edge in selected:
-            loop = surf.tighten(surf.tree_cycle(sroot, slimit, edge))
-            roots.add(loop[len(loop)//2])
-        roots = sorted(roots - searched)
+        # Point on each loop farthest along the tree from where it was found (one end of the closing edge)
+        roots = sorted(set(int(surf.le[edge,0]) for _, _, edge in selected) - searched)
         if len(roots) == 0:
+            if info:
+                print(indent+'  [{0}/{1}] Search pass: no new base points, search converged'.format(ipass+1, npasses), flush=True)
             break
         searched.update(roots)
         if info:
-            print(indent+'  Searching from {0} additional base point(s)'.format(len(roots)))
-        for new_root in roots:
+            print(indent+'  [{0}/{1}] Search pass: {2} base point(s)'.format(ipass+1, npasses, len(roots)), flush=True)
+        for k, new_root in enumerate(roots):
+            t1 = time.perf_counter()
             pools.append((new_root, limit) + surf.candidates(new_root, limit))
-        previous = set((s[1], s[3]) for s in selected)
+            if verbose:
+                print(indent+'    [{0}/{1}] Base point ({2:.3E}, {3:.3E}, {4:.3E}): {5} candidate loops ({6:.2f} s)'.format(
+                    k+1, len(roots), *r[new_root], pools[-1][2].shape[0], time.perf_counter()-t1), flush=True)
+        previous = set(surf.loop_key(surf.tree_cycle(pools[ip][5], edge)) for _, ip, edge in selected)
         selected = _select(seeds, pools, nholes)
-        if set((s[1], s[3]) for s in selected) == previous:
+        changed = set(surf.loop_key(surf.tree_cycle(pools[ip][5], edge)) for _, ip, edge in selected) != previous
+        if info:
+            print(indent+'    total length = {0:.4E} ({1:.2f} s){2}'.format(sum(sel[0] for sel in selected), time.perf_counter()-t0,
+                                                                         '' if changed else ', selection unchanged, search converged'), flush=True)
+        if not changed:
             break
-    loops = [surf.tree_cycle(sroot, slimit, edge) for _, sroot, slimit, edge in selected]
-    sigs = np.array(seeds + [surf.loop_signature(loop) for loop in loops], dtype=np.int64).reshape(nholes, nholes)
-    _clean_loops(surf, loops, sigs, len(seeds))
+    loops = [surf.tighten(surf.tree_cycle(pools[ip][5], edge)) for _, ip, edge in selected]
     return bloops, omitted, loops
 
 
@@ -573,8 +576,10 @@ def count_holes(r, lc):
     '''
     r = np.asarray(r)
     lc = np.asarray(lc, dtype=np.int64)
-    _, fsurf = _check_mesh(r, lc)
-    le, _, _, counts = _edge_table(lc, r.shape[0])
+    _, fsurf, le, counts = _check_mesh(r, lc)
+    bedges = le[counts == 1,:].reshape(-1)
+    if np.any(np.bincount(bedges, minlength=r.shape[0]) > 2):
+        raise ValueError("Boundary touches itself at a vertex (pinched boundary), which is not supported")
     surfs, fsurf = np.unique(fsurf, return_inverse=True)
     vsurf = -np.ones(r.shape[0], dtype=np.int64)
     vsurf[lc.reshape(-1)] = np.repeat(fsurf, 3)
@@ -586,14 +591,15 @@ def count_holes(r, lc):
     return nholes, int(np.count_nonzero(closed))
 
 
-def find_holes(r, lc, ref_point=None, optimize=False, info=False, indent=''):
+def find_holes(r, lc, ref_point=None, optimize=False, info=False, verbose=False, indent=''):
     '''! Select holes and closures for a ThinCurr surface mesh
 
     @param r Vertex list [nv,3]
     @param lc Cell list [nf,3] (0-based)
     @param ref_point Reference location for the base point of each surface [x,y,z] (default: [0,0,0])
-    @param optimize Search again from the middle of each selected loop to shorten the internal holes?
+    @param optimize Repeat the search from the far side of the selected loops until the selection does not change (rarely shortens the loops further)?
     @param info Print information on each surface?
+    @param verbose Print the location and search time of each base point (requires `info`)?
     @param indent Indentation for printed information
     @result Dictionary with 'boundary_holes' (boundary loops used as holes), 'omitted' (one boundary loop per
     surface with a boundary, not used), 'internal_holes' (other loops) and 'closures' (cell indices, one per
@@ -602,7 +608,7 @@ def find_holes(r, lc, ref_point=None, optimize=False, info=False, indent=''):
     r = np.asarray(r, dtype=np.float64)
     lc = np.asarray(lc, dtype=np.int64)
     ref_point = np.zeros(3) if ref_point is None else np.asarray(ref_point, dtype=np.float64)
-    lco, fsurf = _check_mesh(r, lc)
+    lco, fsurf, _, _ = _check_mesh(r, lc)
     order = np.argsort(fsurf, kind='stable')
     surfs, starts = np.unique(fsurf[order], return_index=True)
     starts = np.append(starts, order.shape[0])
@@ -614,7 +620,7 @@ def find_holes(r, lc, ref_point=None, optimize=False, info=False, indent=''):
         if info:
             print()
             print(indent+'Analyzing surface {0} of {1}'.format(i+1, surfs.shape[0]))
-        bloops, omitted, loops = _surface_holes(r[verts,:], lc_local, ref_point, optimize, info, indent)
+        bloops, omitted, loops = _surface_holes(r[verts,:], lc_local, ref_point, optimize, info, verbose, indent)
         out['boundary_holes'] += [verts[loop] for loop in bloops]
         out['internal_holes'] += [verts[loop] for loop in loops]
         if omitted is None:

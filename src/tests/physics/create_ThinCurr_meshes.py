@@ -110,6 +110,16 @@ def touching():
 surface_mesh('homology_touching', 0.25, touching)
 
 
+# Plate with an opening that touches the outer edge at one point (boundary touches itself)
+def pinched():
+    plate = gmsh.model.occ.addRectangle(0.0, 0.0, 0.0, 1.0, 1.0)
+    pts = [gmsh.model.occ.addPoint(x, y, 0.0) for x, y in ((0.6, 0.5), (0.8, 0.3), (1.0, 0.5), (0.8, 0.7))]
+    lines = [gmsh.model.occ.addLine(pts[i], pts[(i+1) % 4]) for i in range(4)]
+    opening = gmsh.model.occ.addPlaneSurface([gmsh.model.occ.addCurveLoop(lines)])
+    gmsh.model.occ.cut([(2, plate)], [(2, opening)])
+surface_mesh('homology_pinched', 0.08, pinched)
+
+
 # Mobius strip (non-orientable)
 def mobius(n=24):
     u, v = np.meshgrid(np.linspace(0.0, 2.0*np.pi, n, endpoint=False), np.r_[-0.2, 0.2], indexing='ij')
