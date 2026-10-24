@@ -39,7 +39,23 @@ MU0 = 4.0e-7 * np.pi
 KEV_TO_KPA = constants.eV * 1.0e20
 DENOM_TOL = 1.0e-7
 PSI_PAD = 1.0e-3
-LCFS_PAD = 1.0e-2
+# Output g-files are written at psi_N = 1 - LCFS_PAD of the solve. A pad of
+# 1e-2 cuts off the outer 1% of the pedestal, which edge stability codes
+# (ELITE) need, so the boundary is written close to the separatrix.
+LCFS_PAD = 1.0e-3
+# Truncate the written equilibrium at LCFS_PAD (TokaMaker's default)
+TRUNCATE_EQ = True
+# Defaults of the OMFIT VARYPED module:
+# scale_pres = scale_cur = [0.5, 0.1, 11]; error = 1e-8 (set as the TokaMaker
+# nl_tol by the caller); the boundary is the input separatrix resampled to 110
+# points with bdry_weight = 10 (see @ref gfile_boundary_constraints)
+VARYPED_SCALE_DEFAULT = (0.5, 0.1, 11)
+VARYPED_NL_TOL = 1.0e-8
+VARYPED_NBDRY = 110
+VARYPED_BDRY_WEIGHT = 10.0
+VARYPED_RUNID = 'TokaMaker_varyped'
+VARYPED_RESULT_COLUMNS = ('i', 'pres', 'w', 'nustar', 'den', 'temp', 'cur',
+                          'ne_shift', 'te_shift', 'pe_shift', 'err', 'convrg')
 # TokaMaker bindings raise bare Exception for Fortran-side errors, so the
 # fallback and retry paths must catch Exception rather than a subset of it.
 FALLBACK_ERRORS = (Exception,)
@@ -49,9 +65,10 @@ NL_TOL_RELAX = (1.0, 2.0, 5.0)
 # Multiple of the caller's nl_tol used for intermediate continuation steps,
 # whose equilibria only seed the next solve.
 CONTINUATION_RELAX = 10.0
-# Scan output names written by _save_scan_outputs: {g,p}{yyyymm}.{index:05d}
-_GFILE_NAME = re.compile(r'g\d{6}\.\d{5}')
-_PFILE_NAME = re.compile(r'p\d{6}\.\d{5}')
+# Scan output names written by _save_scan_outputs: {g,p}{shot:06d}.{index:05d}
+# (output_format='omfit') or {g,p}{yyyymm}.{index:05d} (output_format='legacy')
+_GFILE_NAME = re.compile(r'g\d{6,}\.\d{5}')
+_PFILE_NAME = re.compile(r'p\d{6,}\.\d{5}')
 _GET_Q_RAVG_INDEX = {"<R>": 0, "<1/R>": 1, "<1/R^2>": 2, "dV/dPsi": 3}
 
 
@@ -1203,10 +1220,173 @@ def make_updated_pfile(pfile, resampled_gfile_profiles, psf, psi_n):
     return pfile_copy
 
 #=============================================================================
+#                       VARYPED DEFAULTS
+#=============================================================================
+
+def varyped_scaling_values(start=VARYPED_SCALE_DEFAULT[0],
+                           step=VARYPED_SCALE_DEFAULT[1],
+                           npts=VARYPED_SCALE_DEFAULT[2]):
+    r'''! Scaling values in the OMFIT VARYPED convention `start + arange(npts)*step`
+
+    The defaults are the VARYPED module's `scaleP`/`scaleJ` = [0.5, 0.1, 11].
+
+    @param start First scaling value
+    @param step Increment between scaling values
+    @param npts Number of scaling values
+    @result Array of scaling values
+    '''
+    return np.round(float(start) + float(step) * np.arange(int(npts)), 10)
+
+
+def _bdry_xpoint_candidates(gfile):
+    # Lowest and highest points of the written boundary, polished to the
+    # nearest field null; the boundary-defining null has psi_N closest to 1.
+    from scipy.interpolate import RectBivariateSpline
+    from scipy.optimize import minimize
+
+    R_grid = np.asarray(gfile.R_grid, dtype=float)
+    Z_grid = np.asarray(gfile.Z_grid, dtype=float)
+    psi_N = np.asarray(gfile.psi_N_RZ, dtype=float)
+    spline = RectBivariateSpline(Z_grid, R_grid, psi_N)
+
+    def grad2(x):
+        return (spline.ev(x[1], x[0], dy=1)**2
+                + spline.ev(x[1], x[0], dx=1)**2)
+
+    R_b = np.asarray(gfile.boundary_R, dtype=float)
+    Z_b = np.asarray(gfile.boundary_Z, dtype=float)
+    # A boundary written inside the separatrix can sit several cm from the
+    # null (46 mm at psi_N = 0.999 in a DIII-D case), so the search radius
+    # scales with the plasma size; a saddle near psi_N = 1 is required.
+    max_move = 0.25 * 0.5 * float(np.ptp(R_b))
+    candidates = []
+    for k in (int(np.argmin(Z_b)), int(np.argmax(Z_b))):
+        fit = minimize(grad2, [R_b[k], Z_b[k]], method='Nelder-Mead',
+                       options={'xatol': 1.0e-8, 'fatol': 1.0e-24})
+        x = np.asarray(fit.x, dtype=float)
+        psi_N_x = float(spline.ev(x[1], x[0]))
+        if (np.hypot(x[0] - R_b[k], x[1] - Z_b[k]) < max_move
+                and abs(psi_N_x - 1.0) < 0.05):
+            hessian = np.array([
+                [spline.ev(x[1], x[0], dy=2), spline.ev(x[1], x[0], dx=1, dy=1)],
+                [spline.ev(x[1], x[0], dx=1, dy=1), spline.ev(x[1], x[0], dx=2)],
+            ])
+            if np.linalg.det(hessian) < 0.0:
+                candidates.append((abs(psi_N_x - 1.0), x, psi_N_x))
+    return spline, sorted(candidates, key=lambda item: item[0])
+
+
+def gfile_separatrix(gfile):
+    r'''! Separatrix of a g-file traced from its flux map
+
+    This method bisects for the largest closed flux contour around the magnetic
+    axis, rather than reading the g-file `RBBBS`. This matters for g-files
+    written slightly inside the separatrix (e.g. TokaMaker `lcfs_pad`), whose
+    `RBBBS` has the X-point corner rounded off. The level is bisected down to
+    the innermost contour that still closes on the g-file grid, and the
+    contour vertex nearest the X-point is moved onto the field null so the
+    traced separatrix passes through it.
+
+    @param gfile Input g-file object
+    @result Tuple of separatrix `R`, `Z` (open contour) and X-point `(R, Z)`,
+    or `None` if no X-point is found (limited plasma)
+    '''
+    import contourpy
+    from matplotlib.path import Path
+
+    _, candidates = _bdry_xpoint_candidates(gfile)
+    if not candidates:
+        return None
+    _, xpoint, psi_N_x = candidates[0]
+    R_grid = np.asarray(gfile.R_grid, dtype=float)
+    Z_grid = np.asarray(gfile.Z_grid, dtype=float)
+    generator = contourpy.contour_generator(
+        R_grid, Z_grid, np.asarray(gfile.psi_N_RZ, dtype=float),
+    )
+    axis = (float(gfile.R_mag), float(gfile.Z_mag))
+
+    def closed_contour(log_frac):
+        level = psi_N_x * (1.0 - 10.0**log_frac)
+        contours = [
+            line for line in generator.lines(level)
+            if len(line) > 10 and np.hypot(*(line[0] - line[-1])) < 1.0e-6
+            and Path(line).contains_point(axis)
+        ]
+        return max(contours, key=len) if contours else None
+
+    log_lo, log_hi = -9.0, -2.0
+    if closed_contour(log_hi) is None:
+        return None
+    for _ in range(30):
+        log_mid = 0.5 * (log_lo + log_hi)
+        if closed_contour(log_mid) is None:
+            log_lo = log_mid
+        else:
+            log_hi = log_mid
+    contour = np.asarray(closed_contour(log_hi)[:-1], dtype=float).copy()
+    nearest = int(np.argmin(np.hypot(contour[:, 0] - xpoint[0],
+                                     contour[:, 1] - xpoint[1])))
+    contour[nearest] = xpoint
+    return contour[:, 0], contour[:, 1], xpoint
+
+
+def gfile_boundary_constraints(gfile, npts=VARYPED_NBDRY,
+                               weight=VARYPED_BDRY_WEIGHT):
+    r'''! Isoflux boundary constraints as the OMFIT VARYPED module sets them
+
+    The VARYPED module (runVARYPED) resamples the input separatrix to 110
+    points, uniform in poloidal angle about the magnetic axis and starting at
+    the X-point, and gives every point the boundary weight `bdry_weight` = 10;
+    the X-point is not constrained separately. The separatrix is traced from
+    the flux map by @ref gfile_separatrix; if no X-point is found the g-file
+    boundary is used instead.
+
+    @param gfile Input g-file object
+    @param npts Number of boundary points
+    @param weight Weight of each point
+    @result Tuple of points (`npts` x 2) and weights, for
+    `TokaMaker.set_isoflux_constraints`
+    '''
+    traced = gfile_separatrix(gfile)
+    if traced is None:
+        R = np.asarray(gfile.boundary_R, dtype=float)
+        Z = np.asarray(gfile.boundary_Z, dtype=float)
+        if np.hypot(R[0] - R[-1], Z[0] - Z[-1]) < 1.0e-9:
+            R, Z = R[:-1], Z[:-1]
+        start = None
+    else:
+        R, Z, start = traced
+    theta = np.unwrap(np.arctan2(Z - float(gfile.Z_mag), R - float(gfile.R_mag)))
+    if theta[-1] < theta[0]:
+        R, Z, theta = R[::-1], Z[::-1], theta[::-1]
+    if not np.all(np.diff(theta) > 0.0):
+        raise ValueError("Boundary is not single-valued in poloidal angle about the axis")
+    k = 0 if start is None else int(np.argmin(np.hypot(R - start[0], Z - start[1])))
+    theta_all = np.concatenate([theta - 2.0 * np.pi, theta, theta + 2.0 * np.pi])
+    theta_out = theta[k] + 2.0 * np.pi * np.arange(int(npts)) / int(npts)
+    points = np.column_stack([
+        np.interp(theta_out, theta_all, np.tile(R, 3)),
+        np.interp(theta_out, theta_all, np.tile(Z, 3)),
+    ])
+    return points, np.full(int(npts), float(weight))
+
+#=============================================================================
 #                       EQUILIBRIUM SCAN
 #=============================================================================
 
-def _scan_output_name(path, timestamp):
+def _scan_output_name(path, timestamp, output_format='omfit', shot=0,
+                      time_id=0, runid=VARYPED_RUNID):
+    if output_format == 'omfit':
+        # As efit.py -V: varyped<shot>_<timeid>_<runid>/results_<shot>_<timeid>_<runid>
+        result_name = f'{int(shot)}_{int(time_id)}_{runid}'
+        out_dir = os.path.join(path, f'varyped{result_name}')
+        candidate, suffix = out_dir, 1
+        while os.path.exists(candidate):
+            suffix += 1
+            candidate = f'{out_dir}_{suffix}'
+        return result_name, candidate
+    if output_format != 'legacy':
+        raise ValueError("output_format must be 'omfit' or 'legacy'")
     date_part = timestamp.strftime('%y%m%d')
     time_part = timestamp.second * 100 + timestamp.microsecond // 10000
     for offset in range(10000):
@@ -1623,26 +1803,69 @@ def _solve_point(
     return solve_result
 
 
+def _flip_eqdsk_field(field):
+    # Negate one 16-character fixed-width E-format field via its sign character
+    if len(field) != 16:
+        raise ValueError(f"Unexpected gEQDSK field width: {field!r}")
+    if field[0] == '-':
+        return ' ' + field[1:]
+    if field[0] != ' ':
+        raise ValueError(f"Unexpected gEQDSK field: {field!r}")
+    return '-' + field[1:]
+
+
+def _flip_toroidal_field(path):
+    r'''! Negate BCENTR and FPOL of a gEQDSK file in place
+
+    TokaMaker solves with \f$F_0 > 0\f$; this restores \f$B_T < 0\f$ for an
+    input equilibrium with reversed toroidal field (e.g. standard DIII-D).
+    \f$FF'\f$ is even in \f$F\f$ and q is written positive, so every other
+    field is left as written.
+
+    @param path gEQDSK file written by TokaMaker
+    '''
+    with open(path, 'r') as file:
+        lines = file.read().split('\n')
+    nw = int(lines[0][52:56])
+    line = lines[2]
+    lines[2] = line[:64] + _flip_eqdsk_field(line[64:80]) + line[80:]
+    for n in range(nw):
+        index, field = 5 + n // 5, n % 5
+        line = lines[index]
+        lines[index] = (line[:16 * field]
+                        + _flip_eqdsk_field(line[16 * field:16 * field + 16])
+                        + line[16 * field + 16:])
+    with open(path, 'w') as file:
+        file.write('\n'.join(lines))
+
+
 def _save_scan_outputs(
     t_object, pfile_copy, psi_n, psf, eq_snapshot,
-    scan_index, yyyymm, out_dir, file_output, lcfs_pressure):
+    scan_index, file_tag, out_dir, file_output, lcfs_pressure,
+    output_format='omfit', grid_shape=None, flip_bt=False):
     if not file_output:
         return {'jtor_flag': False, 'geom_flag': False, 'B_flag': False}
 
-    output_gfile_path = os.path.join(out_dir, f'g{yyyymm}.{scan_index:05d}')
-    t_object.save_eqdsk(output_gfile_path,
-                        nr=len(psi_n),
-                        nz=len(psi_n),
-                        truncate_eq=False,
-                        lcfs_pad=LCFS_PAD,
-                        lcfs_pressure=lcfs_pressure,
-                        cocos=7)
+    if grid_shape is None:
+        grid_shape = (len(psi_n), len(psi_n))
+    output_gfile_path = os.path.join(out_dir, f'g{file_tag}.{scan_index:05d}')
+    save_kwargs = dict(nr=int(grid_shape[0]), nz=int(grid_shape[1]),
+                       truncate_eq=TRUNCATE_EQ, lcfs_pad=LCFS_PAD,
+                       lcfs_pressure=lcfs_pressure)
 
+    # p-file rotation terms use the COCOS 7 B_p sign (E_r matches the input)
+    t_object.save_eqdsk(output_gfile_path, cocos=7, **save_kwargs)
     output_gfile = eqdsk.read_geqdsk(output_gfile_path, cocos=7)
     output_profiles = resample_gfile(output_gfile, psi_n, eq_snapshot=eq_snapshot)
-    
+    if output_format == 'omfit':
+        # Delivered g-file: COCOS 2 at the input g-file resolution (EFIT
+        # VARYPED keeps the input NW), with the input's B_T direction
+        t_object.save_eqdsk(output_gfile_path, cocos=2, **save_kwargs)
+        if flip_bt:
+            _flip_toroidal_field(output_gfile_path)
+
     output_pfile = make_updated_pfile(pfile_copy, output_profiles, psf, psi_n)
-    output_pfile_path = os.path.join(out_dir, f'p{yyyymm}.{scan_index:05d}')
+    output_pfile_path = os.path.join(out_dir, f'p{file_tag}.{scan_index:05d}')
     print(f'Saving pFile: {output_pfile_path}\n')
     output_pfile.save(output_pfile_path)
 
@@ -1651,51 +1874,85 @@ def _save_scan_outputs(
             'B_flag': output_profiles['B_flag']}
 
 
-def equilibrium_scan(t_object, pfile, gfile, scaling_values, path_to_output=None,
-                     file_output=True, result_output=True, pin_edge_pprime=True):
+def equilibrium_scan(t_object, pfile, gfile, scaling_values=None, path_to_output=None,
+                     file_output=True, result_output=True, pin_edge_pprime=False,
+                     nl_tol=VARYPED_NL_TOL, shot=None, time_id=None,
+                     runid=VARYPED_RUNID, output_format='omfit'):
     r'''! Run a VARYPED scan and restore the caller state on exit
 
     Every pair of pressure and current scales in `scaling_values` is solved with
-    the solver settings of `t_object`. A point that stalls is retried at the
-    relaxed tolerances in `NL_TOL_RELAX` and labeled by its `status`:
-    `converged` (caller's `nl_tol` met), `partial` (met only a relaxed `nl_tol`,
-    recorded as `nl_tol`) or `failed`.
+    the solver settings of `t_object`, at the tolerance `nl_tol`. A point that
+    stalls is retried at the relaxed tolerances in `NL_TOL_RELAX` and labeled by
+    its `status`: `converged` (`nl_tol` met), `partial` (met only a relaxed
+    `nl_tol`, recorded as `nl_tol`) or `failed`.
 
     Pressure at the separatrix of the input p-file is kept as an offset: it is
     scaled with the pedestal and written to the output g-files.
+
 
     @param t_object TokaMaker object with mesh, coils and constraints set up
     @param pfile Input p-file object
     @param gfile Input g-file object
     @param scaling_values Non-decreasing positive scale(s), applied to both
-    pedestal pressure and edge current
+    pedestal pressure and edge current (default: @ref varyped_scaling_values,
+    the VARYPED module's [0.5, 0.1, 11])
     @param path_to_output Directory for the scan output directory (default: cwd)
     @param file_output Write a g-file and p-file for each solved point?
     @param result_output Write the VARYPED results file?
-    @param pin_edge_pprime Set \f$P'\f$ to zero at \f$\hat{\psi}=1\f$? The shape
-    of \f$P'\f$ changes over the last grid interval only, but as the solver
+    @param pin_edge_pprime Set \f$P'\f$ to zero at \f$\hat{\psi}=1\f$? The default
+    (`False`) keeps the input gradient there, as VARYPED does. Pinning changes the
+    shape of \f$P'\f$ over the last grid interval only, but as the solver
     normalizes it to the axis pressure the gradient elsewhere rises uniformly
     to make up the pressure removed there (0.01-0.14% in the example scan).
     Keeping the edge gradient leaves a current jump at the LCFS that can stall
-    the solver.
+    the solver; pin it if points fail to converge.
+    @param nl_tol Nonlinear tolerance of the scan solves, applied for the
+    duration of the scan (default: VARYPED's EFIT `error` = 1e-8; `None` uses
+    the setting of `t_object`)
+    @param shot Shot number used in the output names (`output_format='omfit'`;
+    default 0, as VARYPED when it cannot determine one)
+    @param time_id Time [ms] used in the output names (`output_format='omfit'`;
+    default 0)
+    @param runid Run tag of the output directory and results file
+    @param output_format `'omfit'`: as efit.py -V, i.e. directory
+    `varyped<shot>_<time>_<runid>` holding `g<shot:06d>.<index:05d>`,
+    `p<shot:06d>.<index:05d>` and `results_<shot>_<time>_<runid>` in the
+    VARYPED format (loadable by the OMFIT VARYPED module); g-files in COCOS 2 at
+    the input g-file resolution, with the input's toroidal-field direction.
+    `'legacy'`: the original layout (`varyped<date>_<time>_OFT_tokamaker`,
+    `g<yyyymm>.<index>`, COCOS 7, \f$B_T > 0\f$, `status` column in the
+    results file)
     @result List whose first entry describes the baseline and whose remaining
     entries are one result dictionary per scan point
     '''
+    if scaling_values is None:
+        scaling_values = varyped_scaling_values()
     initial_eq = t_object.copy_eq()
+    if nl_tol is None:
+        nl_tol = float(t_object.settings.nl_tol)
     try:
-        return _run_equilibrium_scan(
-            t_object, pfile, gfile, scaling_values, path_to_output,
-            file_output, result_output, pin_edge_pprime,
-        )
+        with _temporary_nl_tol(t_object, float(nl_tol)):
+            return _run_equilibrium_scan(
+                t_object, pfile, gfile, scaling_values, path_to_output,
+                file_output, result_output, pin_edge_pprime,
+                shot=shot, time_id=time_id, runid=runid,
+                output_format=output_format,
+            )
     finally:
         t_object.replace_eq(source_eq=initial_eq)
 
 
 def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
                            path_to_output=None, file_output=True,
-                           result_output=True, pin_edge_pprime=True):
+                           result_output=True, pin_edge_pprime=False,
+                           shot=None, time_id=None, runid=VARYPED_RUNID,
+                           output_format='omfit'):
     results = []
     nl_tol_target = float(t_object.settings.nl_tol)
+    if output_format not in ('omfit', 'legacy'):
+        raise ValueError("output_format must be 'omfit' or 'legacy'")
+    shot = 0 if shot is None else int(shot)
+    time_id = 0 if time_id is None else int(time_id)
 
     #ensure scaling_values is array-like
     if isinstance(scaling_values, (int, float)):
@@ -1709,13 +1966,23 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
         raise ValueError("scaling_values must be non-decreasing")
 
     time = dt.datetime.now()
-    yyyymm = time.strftime('%Y%m')
+    if output_format == 'omfit':
+        file_tag = f'{shot:06d}'
+        grid_shape = (int(gfile._raw['NW']), int(gfile._raw['NH']))
+        flip_bt = float(gfile.B_center) < 0.0
+    else:
+        file_tag = time.strftime('%Y%m')
+        grid_shape = None
+        flip_bt = False
 
     if path_to_output is None:
         path_to_output = os.getcwd()
     else:
         path_to_output = os.path.abspath(path_to_output)
-    result_name, out_dir = _scan_output_name(path_to_output, time)
+    result_name, out_dir = _scan_output_name(
+        path_to_output, time, output_format=output_format, shot=shot,
+        time_id=time_id, runid=runid,
+    )
     if file_output or result_output:
         os.makedirs(out_dir, exist_ok=True)
 
@@ -1939,15 +2206,16 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
 
         flags = _save_scan_outputs(
             t_object, pfile_copy, psi_n, psf, eq_snapshot,
-            teqs, yyyymm, out_dir, file_output, psep,
+            teqs, file_tag, out_dir, file_output, psep,
+            output_format=output_format, grid_shape=grid_shape, flip_bt=flip_bt,
         )
         eq_stats = eq_snapshot.get_stats()
         results.append({
             'scale_p': scale_p,
             'scale_j': scale_j,
             'scale_p_actual': float(psf[-1]),
-            'gfile_name': f'g{yyyymm}.{teqs:05d}',
-            'pfile_name': f'p{yyyymm}.{teqs:05d}',
+            'gfile_name': f'g{file_tag}.{teqs:05d}',
+            'pfile_name': f'p{file_tag}.{teqs:05d}',
             'Ip_target': Ip_target,
             'Ip_final': eq_stats['Ip'],
             'pax_target': float(psf[0] * ptot[0]),
@@ -1966,6 +2234,10 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
 
     results[0]['out_dir'] = out_dir
     results[0]['result_filename'] = result_name
+    results[0]['output_format'] = output_format
+    results[0]['shot'] = shot
+    results[0]['time_id'] = time_id
+    results[0]['runid'] = runid
     print("\nPre-run Info:")
     pprint.pprint(results[0])
     for i in range(1, len(results)):
@@ -1984,8 +2256,16 @@ def make_results_file(results):
     r'''! Write the VARYPED text results file.
 
     The `err` column holds the `nl_tol` of the final solve attempt and `convrg`
-    is 1 only where the caller's `nl_tol` was met; `status` distinguishes
-    `partial` points (solved at a relaxed `nl_tol`) from `failed` ones.
+    is 1 only where the requested `nl_tol` was met. Row `i` is scan index `i`,
+    pressure scale outer and current scale inner, as efit.py -V writes it.
+
+    For `output_format='omfit'` the file is in the VARYPED format read by the
+    OMFIT VARYPED and ELITE modules: one header line holding a single `:`
+    followed by `shot=... timeid=... runid=...`, the column names, then the
+    twelve numeric columns. The `status` of each point (which separates
+    `partial` points, solved at a relaxed `nl_tol`, from `failed` ones) goes to
+    a separate `scan_status_<name>` file. For `output_format='legacy'` it is a
+    thirteenth column of the results file.
 
     @param results Scan result dictionaries, including the baseline entry.
     '''
@@ -1994,6 +2274,32 @@ def make_results_file(results):
 
     file_dir = results[0]['out_dir']
     file_name = 'results_'+results[0]['result_filename']
+
+    if results[0].get('output_format', 'legacy') == 'omfit':
+        # No ':' other than the separator: OMFIT parses header.split(':')[1]
+        lines = [
+            f"OFT_TokaMaker_VARYPED results: shot={results[0]['shot']} "
+            f"timeid={results[0]['time_id']} runid='{results[0]['runid']}' "
+            f"date='{time.strftime('%Y-%m-%d')}'",
+            ' '.join(VARYPED_RESULT_COLUMNS),
+        ]
+        status_lines = ['i pres cur status nl_tol nl_tol_target']
+        for i, res in enumerate(results[1:]):
+            lines.append(
+                f"{i:4d} {res['scale_p']:.4f} 1.0 1.0 1.0 1.0 "
+                f"{res['scale_j']:.4f} 0.00 0.00 0.00 "
+                f"{res['nl_tol']:.4e} {int(res['converged'])}"
+            )
+            status_lines.append(
+                f"{i:4d} {res['scale_p']:.4f} {res['scale_j']:.4f} "
+                f"{res['status']} {res['nl_tol']:.4e} {res['nl_tol_target']:.4e}"
+            )
+        with open(os.path.join(file_dir, file_name), 'w') as file:
+            file.write("\n".join(lines) + "\n")
+        status_name = 'scan_status_' + results[0]['result_filename']
+        with open(os.path.join(file_dir, status_name), 'w') as file:
+            file.write("\n".join(status_lines) + "\n")
+        return
 
     lines = [f'OFT TokaMaker VARYPED Results; Run on: {time_run}', 
              '  i pres w nustar den temp cur ne_shift te_shift pe_shift err convrg status']
@@ -2376,7 +2682,9 @@ def plot_gfiles(
     `averages` or `midplane`), if not a top-level attribute
     @param scaling_range Optional (min, max) scale to include
     @param savefig Save generated figures in the scan directory?
-    @param cocos COCOS of the g-files (default: 7 for a `varyped` directory, else 1)
+    @param cocos COCOS of the g-files (default: 2 for an `output_format='omfit'`
+    scan directory, `varyped<shot>_<time>_<runid>`; 7 for a legacy
+    `varyped<date>_<time>_OFT_tokamaker` directory; else 1)
     '''
 
     if profiles == 'all':
@@ -2390,7 +2698,12 @@ def plot_gfiles(
     path = os.path.join(cwd, dir_name)
     if cocos is None:
         directory_name = os.path.basename(os.path.normpath(path))
-        cocos = 7 if directory_name.startswith('varyped') else 1
+        if directory_name.startswith('varyped') and '_OFT_tokamaker' in directory_name:
+            cocos = 7
+        elif directory_name.startswith('varyped'):
+            cocos = 2
+        else:
+            cocos = 1
     gfiles = []
     scan_indices = []
     for entry in sorted(os.scandir(path), key = lambda e: e.name):
