@@ -17,7 +17,7 @@ MODULE grad_shaf_bootstrap
 USE oft_base
 USE oft_gs, ONLY: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
  gs_itor_nl, qprof_trace_tol, gs_fpol, qprof_backend
-USE oft_gs_profiles, ONLY: torflux_set_bounds
+USE oft_gs_profiles, ONLY: torflux_set_bounds, linterp_save_interp, linterp_interp_token
 USE oft_gs_contour, ONLY: gs_sauter_contour
 USE oft_lag_basis, ONLY: oft_blag_geval
 USE oft_mesh_type, ONLY: bmesh_findcell
@@ -141,6 +141,7 @@ CALL hdf5_write(self%jphi,filename,path//'/YVALS')
 CALL hdf5_write(self%j0,filename,path//'/J0')
 CALL hdf5_write(self%yp,filename,path//'/YPVALS')
 CALL hdf5_write(self%y0,filename,path//'/Y0')
+CALL linterp_save_interp(self,filename,path)
 IF(self%boot_ops%initialized)THEN
   CALL hdf5_create_group(filename,path//'/BOOT_OPS')
   CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%isolate_edge_jbs),filename,path//'/BOOT_OPS/ISOLATE_EDGE_JBS')
@@ -165,7 +166,7 @@ END SUBROUTINE jphi_bs_save_hdf5
 SUBROUTINE jphi_bs_save_txt(self,io_unit)
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 INTEGER, INTENT(in) :: io_unit
-WRITE(io_unit,*)'jphi-split-bootstrap'
+WRITE(io_unit,*)'jphi-split-bootstrap'//linterp_interp_token(self)
 WRITE(io_unit,*)self%npsi,self%j0
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%jphi
@@ -322,6 +323,7 @@ IF(ASSOCIATED(self%jphi))DEALLOCATE(self%jphi)
 IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
 IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
 IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
+IF(ALLOCATED(self%m))DEALLOCATE(self%m)
 CALL reset_solve_state(self)
 self%boot_profs = boot_profs()
 END SUBROUTINE jphi_bs_delete

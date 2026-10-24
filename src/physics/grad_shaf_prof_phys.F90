@@ -25,7 +25,7 @@ use oft_gs, only: gs_equil, flux_func, gs_psi2r, oft_indent, &
 use oft_gs_contour, only: gs_fsa_contour
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
-  spline_func_copy, spline_func_delete, phi_flux_wrapper
+  spline_func_copy, spline_func_delete, phi_flux_wrapper, linterp_save_interp, linterp_interp_token
 use spline_mod
 USE mhd_utils, ONLY: mu0
 USE oft_quadrature, ONLY: oft_quad_type
@@ -403,6 +403,7 @@ CALL hdf5_write(self%npsi,filename,path//'/NPSI')
 CALL hdf5_write(self%x,filename,path//'/XVALS')
 CALL hdf5_write(self%jphi,filename,path//'/YVALS')
 CALL hdf5_write(self%j0,filename,path//'/J0')
+CALL linterp_save_interp(self,filename,path)
 end subroutine jphi_save_hdf5
 !------------------------------------------------------------------------------
 !> Needs Docs
@@ -410,7 +411,7 @@ end subroutine jphi_save_hdf5
 subroutine jphi_save_txt(self,io_unit)
 class(jphi_flux_func), intent(inout) :: self
 integer, intent(in) :: io_unit
-WRITE(io_unit,*)'jphi-linterp'
+WRITE(io_unit,*)'jphi-linterp'//linterp_interp_token(self)
 WRITE(io_unit,*)self%npsi,self%j0
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%jphi
@@ -517,6 +518,7 @@ IF(ASSOCIATED(self%jphi))DEALLOCATE(self%jphi)
 IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
 IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
 IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
+IF(ALLOCATED(self%m))DEALLOCATE(self%m)
 end subroutine jphi_delete
 !------------------------------------------------------------------------------
 !> Update F*F' profile from Jphi, P', and current equilibrium

@@ -2467,6 +2467,137 @@ def test_ITER_torflux_bootstrap(order):
     assert results['swb_jsaw_total_err'] < 1.E-3
     assert results['python_rejected']
 
+
+# -----------------------------------------------------------------------
+# Test: cubic (C2 spline) profile interpolation, interp='cubic'
+#
+# The same FF' and P' nodes as linear and cubic profiles: the cubic solve
+# stays close to the linear one, but its slopes (and on 'phi_n' the slope of
+# the toroidal flux map) no longer jump at the nodes.
+# -----------------------------------------------------------------------
+def _slope_jump(fun, xs, d=1.E-5):
+    '''Largest jump of the slope of each output of `fun` across the points xs (relative to its largest slope),
+    from second-order one-sided differences'''
+    ys = fun(np.concatenate([xs+k*d for k in (-2,-1,0,1,2)]))
+    jumps = []
+    for y in ys:
+        y = y.reshape(5,-1)
+        left, right = (3.0*y[2]-4.0*y[1]+y[0])/(2.0*d), (-3.0*y[2]+4.0*y[3]-y[4])/(2.0*d)
+        jumps.append(np.max(np.abs(right-left))/np.max(np.abs(np.r_[left,right])))
+    return jumps
+
+
+def _profile_slope_jumps(mygs, xs):
+    '''Slope jumps of F*F' and P' across xs'''
+    def fun(x):
+        _, f, fp, _, pp = mygs.get_profiles(psi=x)
+        return f*fp, pp
+    return _slope_jump(fun, xs)
+
+
+def run_ITER_cubic_case(fe_order, coord, mp_q):
+    try:
+        results = {}
+        mygs = _torflux_ITER_gs(fe_order)
+        init = lambda: mygs.init_psi(6.3, 0.5, 2.0, 1.4, 0.0)
+        ffp = create_power_flux_fun(40,1.5,2.0)
+        pp = create_power_flux_fun(40,4.0,1.0)
+        mygs.set_profiles(ffp_prof=ffp,pp_prof=pp)
+        init()
+        mygs.solve()
+        ref = _torflux_ref(mygs)
+        x = ffp['x'][1:-1]
+        results['jumps_linear'] = _profile_slope_jumps(mygs,x)
+        if coord == 'phi_n':
+            # Nodes on Phi_N; the same profiles as linear first (C1 Hermite map), then cubic (C2 spline map)
+            pmap = _torflux_phi_map(mygs)
+            for prof in (ffp, pp):
+                y = prof['y']/np.interp(prof['x'],pmap[0],pmap[2])
+                prof.update(x=_torflux_to_phi(prof['x'],pmap), y=y, coord='phi_n')
+            mygs.set_profiles(ffp_prof=ffp,pp_prof=pp)
+            init()
+            mygs.solve()
+            x, _ = mygs.get_torflux_map(ffp['x'][1:-1],inverse=True)
+            jac_fun = lambda xx: (mygs.get_torflux_map(xx)[1],)
+            results['map_jump_linear'] = _slope_jump(jac_fun,x)[0]
+        mygs.set_profiles(ffp_prof=dict(ffp,interp='cubic'),pp_prof=dict(pp,interp='cubic'))
+        init()
+        mygs.solve()
+        results['eq'] = _torflux_compare(mygs,ref)
+        results['jumps'] = _profile_slope_jumps(mygs,x)
+        if coord == 'phi_n':
+            results['map_jump'] = _slope_jump(jac_fun,x)[0]
+        # F^2/2 and P are the integrals of F*F' and P': their ratio to the integrand is the constant dpsi/dpsi_N
+        xs = np.linspace(0.05,0.95,37)
+        _, f, fp, p, pp_s = mygs.get_profiles(psi=np.concatenate([xs-1.E-5, xs+1.E-5]))
+        ratios = [((g[37:]-g[:37])/2.E-5)/((h[37:]+h[:37])/2.0) for g, h in ((f**2/2.0, f*fp), (p, pp_s))]
+        results['int_err'] = max(np.max(np.abs(r/np.mean(r)-1.0)) for r in ratios)
+        # Copy and save/load keep the cubic profiles
+        prof0 = np.array(mygs.get_profiles(npsi=60)[1:])
+        eq_copy = mygs.copy_eq()
+        results['copy_err'] = np.max(np.abs(np.array(eq_copy.get_profiles(npsi=60)[1:])-prof0))/np.max(np.abs(prof0))
+        eq_copy.save_TokaMaker('cubic_eq.h5')
+        init()
+        mygs.replace_eq(source_file='cubic_eq.h5')
+        results['load_err'] = np.max(np.abs(np.array(mygs.get_profiles(npsi=60)[1:])-prof0))/np.max(np.abs(prof0))
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+    mp_q.put(results)
+    oftpy_dump_cov()
+
+
+@pytest.mark.coverage
+@pytest.mark.parametrize("coord", ('psi_n', 'phi_n'))
+def test_ITER_cubic(coord):
+    results = mp_run(run_ITER_cubic_case,(2,coord),timeout=180)
+    assert results is not None
+    _torflux_check(results['eq'],1.E-3,5.E-3)
+    assert all(j < 1.E-3*j_lin for j, j_lin in zip(results['jumps'],results['jumps_linear']))
+    assert results['int_err'] < 1.E-6
+    assert results['copy_err'] < 1.E-12
+    assert results['load_err'] < 1.E-9
+    if coord == 'phi_n':
+        assert results['map_jump'] < 1.E-3*results['map_jump_linear']
+
+
+def run_ITER_bootstrap_cubic(mp_q):
+    try:
+        results = {}
+        setup = _ITER_bootstrap_internal_setup(1.0, 2)
+        mygs, x = setup['mygs'], setup['psi_sample']
+        def solve(interp):
+            mygs.solve_bootstrap(
+                ffp_prof={'type': 'jphi-split-bootstrap', 'x': x, 'y': setup['inductive_jphi'], 'interp': interp},
+                te_prof={'type': 'linterp', 'x': x, 'y': setup['Te']/1.E3},
+                ne_prof={'type': 'linterp', 'x': x, 'y': setup['ne']},
+                ti_prof={'type': 'linterp', 'x': x, 'y': setup['Ti']/1.E3},
+                ni_prof={'type': 'linterp', 'x': x, 'y': setup['ni']},
+                Zeff=setup['Zeff_val'], Ip_target=setup['Ip_target'])
+            return _profile_slope_jumps(mygs,x[1:-1])
+        results['jumps_linear'] = solve('linterp')
+        results['jumps'] = solve('cubic')
+        # Save/load keeps the cubic bootstrap profile and its F*F' knots
+        prof0 = np.array(mygs.get_profiles(npsi=60)[1:])
+        mygs.copy_eq().save_TokaMaker('boot_cubic.h5')
+        mygs.replace_eq(source_file='boot_cubic.h5')
+        results['load_err'] = np.max(np.abs(np.array(mygs.get_profiles(npsi=60)[1:])-prof0))/np.max(np.abs(prof0))
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+    mp_q.put(results)
+    oftpy_dump_cov()
+
+
+@pytest.mark.slow
+def test_ITER_bootstrap_cubic():
+    results = mp_run(run_ITER_bootstrap_cubic,(),timeout=600)
+    assert results is not None
+    assert all(j < 1.E-3*j_lin for j, j_lin in zip(results['jumps'],results['jumps_linear']))
+    assert results['load_err'] < 1.E-9
+
 # Test: solve_with_bootstrap() x validation (fails before the solver is used)
 # -----------------------------------------------------------------------
 @pytest.mark.coverage

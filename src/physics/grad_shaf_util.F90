@@ -70,13 +70,17 @@ SELECT CASE(TRIM(profType))
 END SELECT
 END SUBROUTINE gs_profile_alloc
 !---------------------------------------------------------------------------------
-!> Wrap a loaded flux function if it was saved on toroidal flux (HDF5 `COORD`, default psi_n)
+!> Apply the interpolation (HDF5 `INTERP`, default linear) and coordinate (`COORD`, default psi_n)
+!! a loaded flux function was saved with
 !---------------------------------------------------------------------------------
 SUBROUTINE gs_profile_load_coord(F,filename,path)
 CLASS(flux_func), POINTER, INTENT(inout) :: F !< Flux function object
 CHARACTER(LEN=*), INTENT(in) :: filename !< HDF5 file
 CHARACTER(LEN=*), INTENT(in) :: path !< Profile group path
-INTEGER(i4) :: coord
+INTEGER(i4) :: coord,interp
+interp=0
+IF(hdf5_field_exist(filename,path//'/INTERP'))CALL hdf5_read(interp,filename,path//'/INTERP')
+IF(interp==1)CALL linterp_set_cubic(F)
 coord=0
 IF(hdf5_field_exist(filename,path//'/COORD'))CALL hdf5_read(coord,filename,path//'/COORD')
 CALL torflux_wrap(F,coord)
@@ -93,21 +97,29 @@ INTEGER(4) :: io_unit
 ! REAL(8), ALLOCATABLE, DIMENSION(:) :: cofs,yvals
 ! INTEGER(4) :: ncofs,npsi,io_unit
 ! LOGICAL :: zero_grad
-CHARACTER(LEN=32) :: profType,coordType
+CHARACTER(LEN=32) :: profType,coordType,opts(2)
 CHARACTER(LEN=128) :: line
-INTEGER(i4) :: ios
-!---First line: "<type> [coord]"
+INTEGER(i4) :: i
+LOGICAL :: cubic
+!---First line: "<type> [coord] [cubic]" (options in any order)
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 READ(io_unit,'(A)')line
+line=TRIM(line)//' /' ! The slash ends the list, so absent options stay blank
+opts=''
+READ(line,*)profType,opts
 coordType='psi_n'
-READ(line,*,IOSTAT=ios)profType,coordType
-IF(ios/=0)THEN
-  READ(line,*)profType
-  coordType='psi_n'
-END IF
+cubic=.FALSE.
+DO i=1,2
+  IF(TRIM(opts(i))=='cubic')THEN
+    cubic=.TRUE.
+  ELSE IF(LEN_TRIM(opts(i))>0)THEN
+    coordType=opts(i)
+  END IF
+END DO
 CALL gs_profile_alloc(profType,F)
 CALL F%load(io_unit)
 CLOSE(io_unit)
+IF(cubic)CALL linterp_set_cubic(F)
 SELECT CASE(TRIM(coordType))
   CASE("psi_n")
   CASE("phi_n_deriv")

@@ -27,7 +27,8 @@ def create_prof_file(self, filename, profile_dict, name):
 
     @param filename Name of input file, see options in set_profiles()
     @param profile_dict Dictionary object containing profile values ['y'] and sampled locations ['x'],
-    in normalized Psi unless ['coord'] is 'phi_n' (normalized toroidal flux)
+    in normalized Psi unless ['coord'] is 'phi_n' (normalized toroidal flux), interpolated as ['interp']
+    ('linterp' or 'cubic')
     @param filename Name of input quantity, see options in set_profiles()
     '''
     coord = profile_dict.get('coord','psi_n')
@@ -36,7 +37,12 @@ def create_prof_file(self, filename, profile_dict, name):
     if coord == 'phi_n':  # Value profiles keep their values, derivative profiles are derivatives w.r.t. toroidal flux
         value = profile_dict['type'].startswith('jphi') or name in ('Te','Ti','ne','ni','Zeff','eta','jphi_fixed','jphi_saw')
         coord = 'phi_n_val' if value else 'phi_n_deriv'
-    file_lines = [profile_dict['type'] if coord == 'psi_n' else '{0} {1}'.format(profile_dict['type'], coord)]
+    interp = profile_dict.get('interp','linterp')
+    if (interp not in ('linterp','cubic')) or ((interp == 'cubic') and (profile_dict['type'] == 'flat')):
+        raise ValueError('Invalid interp "{0}" for {1} profile, must be "linterp" or (piecewise profiles) "cubic"'.format(interp, name))
+    if (interp == 'cubic') and ((len(profile_dict['x']) < 4) or (numpy.min(numpy.diff(profile_dict['x'])) <= 0.0)):
+        raise ValueError('A cubic {0} profile needs at least 4 strictly increasing psi values'.format(name))
+    file_lines = [' '.join([profile_dict['type']] + ([coord] if coord != 'psi_n' else []) + (['cubic'] if interp == 'cubic' else []))]
     if profile_dict['type'] == 'flat':
         pass
     elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp') \
@@ -911,6 +917,10 @@ class TokaMaker():
         Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized
         toroidal flux, ['y'] is then the derivative w.r.t. toroidal flux, eg. \f$dP/d\hat{\Phi}\f$, except for
         jphi profiles, whose ['y'] is \f$j_\phi\f$ as usual).
+
+        Optional profile key ['interp']: 'linterp' (default) or 'cubic', a not-a-knot cubic spline through the
+        nodes (C2; at least 4 strictly increasing ['x']). Use 'cubic' only for smooth node values on a fine enough
+        grid. A cubic profile on 'phi_n' also makes the toroidal flux map C2.
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -963,7 +973,8 @@ class TokaMaker():
         @param jphi_fixed_prof Dictionary object containing fixed toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
         @param jphi_saw_prof Dictionary object containing the input sawtooth toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
 
-        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux).
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux),
+        and ['interp'] the interpolation: 'linterp' (default) or 'cubic' (see set_profiles()).
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -2468,7 +2479,8 @@ class TokaMaker():
         take the value of the previous call (or of the loaded equilibrium), so repeating a call with the
         same positional arguments reproduces it. @ref boot_reset returns them to their defaults (shown below).
 
-        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'``: in ``coord``, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``)
+        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'``: in ``coord``, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``;
+          optional ``'interp'``: ``'cubic'`` for the C2 spline, see set_profiles(), also used for the P' profile built here)
         @param te_prof Electron temperature profile dict (``'x'``: in ``coord``, ``'y'``: \f$T_e\f$ [keV])
         @param ne_prof Electron density profile dict (``'x'``: in ``coord``, ``'y'``: \f$n_e\f$ [m\f$^{-3}\f$])
         @param ti_prof Ion temperature profile dict (``'x'``: in ``coord``, ``'y'``: \f$T_i\f$ [keV])
@@ -2615,6 +2627,7 @@ class TokaMaker():
         if pp_norm == 0.0:
             raise ValueError("The pressure profile is flat (P' = 0 everywhere)")
         pp_prof = {'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_norm}
+        pp_prof['interp'] = ffp_prof.get('interp', 'linterp')
         if coord == 'phi_n':
             # P' above is dP/dPhi_N
             pp_prof['coord'] = 'phi_n'
@@ -2998,6 +3011,10 @@ class TokaMaker_equilibrium():
         Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized
         toroidal flux, ['y'] is then the derivative w.r.t. toroidal flux, eg. \f$dP/d\hat{\Phi}\f$, except for
         jphi profiles, whose ['y'] is \f$j_\phi\f$ as usual).
+
+        Optional profile key ['interp']: 'linterp' (default) or 'cubic', a not-a-knot cubic spline through the
+        nodes (C2; at least 4 strictly increasing ['x']). Use 'cubic' only for smooth node values on a fine enough
+        grid. A cubic profile on 'phi_n' also makes the toroidal flux map C2.
         '''
         delete_files = []
         ffp_file = 'none'
@@ -3103,7 +3120,8 @@ class TokaMaker_equilibrium():
         @param jphi_fixed_prof Dictionary object containing fixed toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
         @param jphi_saw_prof Dictionary object containing the input sawtooth toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
 
-        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux).
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux),
+        and ['interp'] the interpolation: 'linterp' (default) or 'cubic' (see set_profiles()).
         '''
         delete_files = []
         def prof_file(name, prof, label):
