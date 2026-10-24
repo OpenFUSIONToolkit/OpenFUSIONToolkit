@@ -528,6 +528,8 @@ IF(jj>n)THEN
   DEALLOCATE(lloop_tmp,flag_list)
   RETURN
 END IF
+CALL oft_warn('Hole points are not stored as an ordered loop, using legacy ordering (may fail or flip the hole ' &
+  //'direction for loops with chords); recreate holes with "OFT_ThinCurr_holes"')
 !---Find loop points and edges
 !
 ! DO i0=1,n
