@@ -228,6 +228,7 @@ TYPE :: gs_factory
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_bounds => NULL() !< Coil current bounds
   REAL(r8), POINTER, DIMENSION(:,:) :: coil_nturns => NULL() !< Number of turns for each coil in each region
   REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils => NULL() !< Coil mutual inductance matrix
+  REAL(r8), POINTER, DIMENSION(:,:) :: Lcoils_asym => NULL() !< Lcoils minus the one-directional coil mutuals
   LOGICAL :: free = .FALSE. !< Computing free-boundary equilibrium?
   LOGICAL :: compute_chi = .FALSE. !< Compute toroidal field potential?
   LOGICAL :: plot_step = .TRUE. !< Save solver steps for plotting
@@ -997,11 +998,13 @@ ELSE
   END DO
 END IF
 ALLOCATE(self%psi_coil(self%ncoils),self%Lcoils(self%ncoils,self%ncoils),self%dist_coil(self%ncoils))
+ALLOCATE(self%Lcoils_asym(self%ncoils,self%ncoils))
 ALLOCATE(self%Rcoils(self%ncoils+1),self%coils_dt(self%ncoils+1),self%coils_volt(self%ncoils+1))
 self%Rcoils=-1.d0
 self%coils_dt=0.d0
 self%coils_volt=0.d0
 self%Lcoils=0.d0
+self%Lcoils_asym=0.d0
 DO i=1,self%ncoils
   NULLIFY(self%dist_coil(i)%v)
   CALL self%fe_rep%vec_create(self%psi_coil(i)%f)
@@ -1014,12 +1017,7 @@ DO i=1,self%ncoils
 END DO
 DO i=1,self%ncoils
   DO j=i,self%ncoils
-    CALL gs_coil_mutual(self,i,self%psi_coil(j)%f,self%Lcoils(i,j))
-    IF(j>i)THEN ! Integral can be slightly different in each direction so compute both ways and average
-      CALL gs_coil_mutual(self,j,self%psi_coil(i)%f,self%Lcoils(j,i))
-      self%Lcoils(j,i)=(self%Lcoils(j,i)+self%Lcoils(i,j))/2.d0
-      self%Lcoils(i,j)=self%Lcoils(j,i)
-    END IF
+    CALL gs_coil_mutual_pair(self,i,j)
   END DO
 END DO
 CALL tmp_vec%delete()
@@ -1630,11 +1628,18 @@ IF(self%ncoils>0)THEN
   CALL b%get_local(btmp_coils,2)
   ! CALL dpsi_dt%get_local(coil_vals,2)
 ENDIF
-! DO l=1,self%ncoils
-!   IF(self%Rcoils(l)<=0.d0)CYCLE
-!   btmp_coils(l)=DOT_PRODUCT(coil_vals(1:self%ncoils),self%Lcoils(1:self%ncoils,l))
-! END DO
-! DEALLOCATE(coil_vals)
+!---Correct coil rows to the symmetric mutuals used in the operator (block 2 holds coil currents/dt,
+!   entry ncoils+1 the virtual VSC, which acts through the coils weighted by coil_vcont)
+IF(self%ncoils>0)THEN
+  CALL dpsi_dt%get_local(coil_vals,2)
+  DO l=1,self%ncoils
+    IF(self%Rcoils(l)<=0.d0)CYCLE
+    btmp_coils(l)=btmp_coils(l) &
+      +DOT_PRODUCT(self%Lcoils_asym(l,1:self%ncoils),coil_vals(1:self%ncoils)) &
+      +DOT_PRODUCT(self%Lcoils_asym(l,1:self%ncoils),self%coil_vcont)*coil_vals(self%ncoils+1)
+  END DO
+  DEALLOCATE(coil_vals)
+END IF
 !
 ALLOCATE(eta_reg(self%fe_rep%mesh%nreg),reg_source(self%fe_rep%mesh%nreg))
 reg_source=0.d0
@@ -1759,6 +1764,37 @@ deallocate(j_lag,rop)
 mutual=mu0*2.d0*pi*mutual
 DEALLOCATE(btmp)
 end subroutine gs_coil_mutual
+!------------------------------------------------------------------------------
+!> Compute the mutual inductance between two coils, averaged over both directions, and the
+!! difference from each one-directional integral (`Lcoils_asym`)
+!------------------------------------------------------------------------------
+subroutine gs_coil_mutual_pair(self,iCoil,jCoil)
+class(gs_factory), intent(inout) :: self !< G-S object
+integer(4), intent(in) :: iCoil !< First coil index
+integer(4), intent(in) :: jCoil !< Second coil index
+real(8) :: Lraw_ij,Lraw_ji
+IF(ASSOCIATED(self%dist_coil(iCoil)%v))THEN
+  CALL gs_coil_mutual_distributed(self,iCoil,self%psi_coil(jCoil)%f,self%dist_coil(iCoil)%v,Lraw_ij)
+ELSE
+  CALL gs_coil_mutual(self,iCoil,self%psi_coil(jCoil)%f,Lraw_ij)
+END IF
+IF(iCoil==jCoil)THEN
+  self%Lcoils(iCoil,iCoil)=Lraw_ij
+  self%Lcoils_asym(iCoil,iCoil)=0.d0
+  RETURN
+END IF
+! Integral can be slightly different in each direction so compute both ways and average
+IF(ASSOCIATED(self%dist_coil(jCoil)%v))THEN
+  CALL gs_coil_mutual_distributed(self,jCoil,self%psi_coil(iCoil)%f,self%dist_coil(jCoil)%v,Lraw_ji)
+ELSE
+  CALL gs_coil_mutual(self,jCoil,self%psi_coil(iCoil)%f,Lraw_ji)
+END IF
+self%Lcoils(iCoil,jCoil)=(Lraw_ij+Lraw_ji)/2.d0
+self%Lcoils(jCoil,iCoil)=self%Lcoils(iCoil,jCoil)
+! Difference from the one-directional integral, used to correct the RHS in gs_wall_source
+self%Lcoils_asym(iCoil,jCoil)=self%Lcoils(iCoil,jCoil)-Lraw_ij
+self%Lcoils_asym(jCoil,iCoil)=self%Lcoils(jCoil,iCoil)-Lraw_ji
+end subroutine gs_coil_mutual_pair
 !------------------------------------------------------------------------------
 !> Compute inductance between a coil with non-uniform current distribution and given poloidal flux
 !------------------------------------------------------------------------------
@@ -6131,6 +6167,7 @@ IF(ASSOCIATED(self%coil_bounds))DEALLOCATE(self%coil_bounds)
 IF(ASSOCIATED(self%saddle_cmask))DEALLOCATE(self%saddle_cmask)
 IF(ASSOCIATED(self%saddle_pmask))DEALLOCATE(self%saddle_pmask)
 IF(ASSOCIATED(self%Lcoils))DEALLOCATE(self%Lcoils)
+IF(ASSOCIATED(self%Lcoils_asym))DEALLOCATE(self%Lcoils_asym)
 !
 IF(ASSOCIATED(self%Rcoils))DEALLOCATE(self%Rcoils)
 IF(ASSOCIATED(self%coils_dt))DEALLOCATE(self%coils_dt)
