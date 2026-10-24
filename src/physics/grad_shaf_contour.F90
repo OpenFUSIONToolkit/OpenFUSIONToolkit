@@ -5,7 +5,8 @@
 !---------------------------------------------------------------------------------
 !> @file grad_shaf_contour.F90
 !
-!> Mesh-based contour evaluation of the flux-surface geometric factor \f$ q/F \f$
+!> Mesh-based contour flux-surface quadrature: \f$ q/F \f$, flux-surface averages, surface
+!! extrema and surface points at given polar angles, exact on the FE level sets
 !!
 !! Cells are split (Bernstein form) until \f$ \hat{\psi} \f$ is monotone along a direction \f$ d \f$;
 !! each level-set arc is then a graph between exact edge crossings, integrated by Gauss quadrature
@@ -40,6 +41,7 @@ INTEGER(i4), PARAMETER :: nblk_cells = 64 !< Cells per deterministic accumulatio
 INTEGER(i4), PARAMETER :: max_depth = 12 !< Maximum subdivision depth
 REAL(r8), PARAMETER :: kappa = 0.25d0 !< Required min/max ratio of \f$ \partial_d \hat{\psi} \f$ per sub-cell
 REAL(r8), PARAMETER :: wind_tol = 1.d-2 !< Tolerance on winding number about O-point
+REAL(r8), PARAMETER :: ray_slack = 1.d-10 !< Angular slack (rad) when assigning a polar angle to an arc
 REAL(r8), PARAMETER :: smooth_ratio = 0.9d0 !< Min/max d psi/d d ratio above which 3 Gauss points are used (else 5)
 REAL(r8), PARAMETER :: xg3(3) = [-0.774596669241483377035853d0,0.d0,0.774596669241483377035853d0]
 REAL(r8), PARAMETER :: wg3(3) = [0.555555555555555555555556d0,0.888888888888888888888889d0, &
@@ -52,7 +54,7 @@ REAL(r8), PARAMETER :: wg5(5) = [0.236926885056189087514264d0,0.4786286704993664
 TYPE(oft_scalar_bfem), POINTER :: perm_rep => NULL()
 INTEGER(i8) :: perm_sum = -1
 INTEGER(i4), ALLOCATABLE :: perm(:,:)
-PUBLIC gs_qgeom_contour, gs_sauter_contour, gs_fsa_contour
+PUBLIC gs_qgeom_contour, gs_sauter_contour, gs_fsa_contour, gs_rays_contour
 CONTAINS
 !------------------------------------------------------------------------------
 !> Geometric factor \f$ g = q/F = \frac{1}{2\pi} \oint \frac{dl}{R |\nabla \psi|} \f$ on flux surfaces
@@ -136,13 +138,47 @@ IF(PRESENT(shp))THEN
 END IF
 END SUBROUTINE gs_fsa_contour
 !------------------------------------------------------------------------------
+!> Points of flux surfaces at uniform polar angle about the O-point, and \f$ q/F \f$ (and optionally
+!! the surface extrema) by the same quadrature
+!!
+!! Contour counterpart of @ref tracing_2d::tracinginv_fs: `rz(:,k,i)` is surface `i` on the ray at angle
+!! \f$ 2\pi(k-1)/n_\theta \f$ from +R; `ok(i)` false unless the surface is closed and star-shaped about the O-point.
+!------------------------------------------------------------------------------
+SUBROUTINE gs_rays_contour(gseq,nr,psi_q,nth,rz,qf,ok,xa)
+CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+INTEGER(i4), INTENT(in) :: nr !< Number of surfaces
+REAL(r8), INTENT(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
+INTEGER(i4), INTENT(in) :: nth !< Number of angles
+REAL(r8), INTENT(out) :: rz(2,nth,nr) !< (R,Z) of each surface at each angle
+REAL(r8), INTENT(out) :: qf(nr) !< \f$ q/F \f$
+LOGICAL, INTENT(out) :: ok(nr) !< Surface closed and star-shaped about the O-point, all angles found
+REAL(r8), OPTIONAL, INTENT(out) :: xa(2,4,nr) !< Surface extrema (see @ref ext_add)
+REAL(r8) :: wind(nr),dpsi
+REAL(r8), ALLOCATABLE :: tacc(:,:,:)
+INTEGER(i4) :: i
+ALLOCATE(tacc(3,0:nth,nr))
+CALL geom_sums(gseq,nr,psi_q,qf,wind,dpsi,xacc=xa,tacc=tacc)
+ok=(dpsi/=0.d0).AND.(psi_q>0.d0).AND.(psi_q<1.d0).AND.(ABS(wind-1.d0)<=wind_tol)
+DO i=1,nr
+  ok(i)=ok(i).AND.(tacc(1,0,i)<=ray_slack).AND.ALL(tacc(1,1:nth,i)>=-ray_slack)
+  rz(:,:,i)=MERGE(tacc(2:3,1:nth,i),0.d0,ok(i))
+END DO
+WHERE(ok)
+  qf=qf/(2.d0*pi*ABS(dpsi))
+ELSEWHERE
+  qf=0.d0
+END WHERE
+DEALLOCATE(tacc)
+END SUBROUTINE gs_rays_contour
+!------------------------------------------------------------------------------
 !> Fixed-order sums of \f$ \oint w/R \f$, winding and optionally \f$ \oint w\,[R, R^2, 1] \f$,
 !! \f$ w = dl/|\nabla \hat{\psi}| \f$; all zero with `dpsi=0` if there is no plasma
 !!
-!! Surface extrema (`xacc`) are reduced with a total order (@ref ext_merge), which is exact,
-!! so they too do not depend on the thread count or schedule.
+!! Surface extrema (`xacc`) and ray points (`tacc`) are reduced with a total order
+!! (@ref ext_merge, @ref tri_upd), which is exact, so they too do not depend on the thread count
+!! or schedule.
 !------------------------------------------------------------------------------
-SUBROUTINE geom_sums(gseq,nr,psi_q,g,wind,dpsi,racc,fpol,facc,xacc)
+SUBROUTINE geom_sums(gseq,nr,psi_q,g,wind,dpsi,racc,fpol,facc,xacc,tacc)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 INTEGER(i4), INTENT(in) :: nr !< Number of surfaces
 REAL(r8), INTENT(in) :: psi_q(nr) !< Surface locations (0 at LCFS, 1 at axis)
@@ -153,15 +189,17 @@ REAL(r8), OPTIONAL, INTENT(out) :: racc(3,nr) !< \f$ \oint w\,[R, R^2, 1] \f$
 REAL(r8), OPTIONAL, INTENT(in) :: fpol(nr) !< F on each surface (with `facc`)
 REAL(r8), OPTIONAL, INTENT(out) :: facc(5,nr) !< \f$ \oint w R\,[1, |\nabla\psi|, |\nabla\psi|^2, B_p^2, 1/B^2] \f$
 REAL(r8), OPTIONAL, INTENT(out) :: xacc(2,4,nr) !< Extrema of \f$ [-R, R, -Z, Z] \f$ with the other coordinate (see @ref ext_add)
+REAL(r8), OPTIONAL, INTENT(out) :: tacc(:,0:,:) !< Ray points [3,0:nth,nr] at uniform polar angle (see @ref gs_rays_contour)
 TYPE(bern_tab) :: bt
 REAL(r8), POINTER :: vals(:)
-REAL(r8), ALLOCATABLE :: gblk(:,:),wblk(:,:),rblk(:,:,:),fblk(:,:,:),gloc(:),wloc(:),rloc(:,:),floc(:,:),xloc(:,:,:)
+REAL(r8), ALLOCATABLE :: gblk(:,:),wblk(:,:),rblk(:,:,:),fblk(:,:,:),gloc(:),wloc(:),rloc(:,:),floc(:,:),xloc(:,:,:),tloc(:,:,:)
 REAL(r8) :: x1
-INTEGER(i4) :: nblk,ib,cell,nc,i
+INTEGER(i4) :: nblk,ib,cell,nc,i,k
 g=0.d0; wind=0.d0; dpsi=0.d0
 IF(PRESENT(racc))racc=0.d0
 IF(PRESENT(facc))facc=0.d0
 IF(PRESENT(xacc))xacc=-HUGE(1.d0)
+IF(PRESENT(tacc))tacc=-HUGE(1.d0)
 IF(nr<1)RETURN
 IF(gseq%plasma_bounds(1)<-1.d98)RETURN
 x1=gseq%plasma_bounds(1)
@@ -175,13 +213,17 @@ CALL perm_update(gseq%device%fe_rep,bt)
 nblk=(nc+nblk_cells-1)/nblk_cells
 ALLOCATE(gblk(nr,nblk),wblk(nr,nblk),rblk(3,nr,MERGE(nblk,0,PRESENT(racc))),fblk(5,nr,MERGE(nblk,0,PRESENT(facc))))
 !---Thread-private accumulators; unallocated ones are passed to `cell_contrib` as absent (F2008)
-!$omp parallel private(ib,cell,i,gloc,wloc,rloc,floc,xloc)
+!$omp parallel private(ib,cell,i,k,gloc,wloc,rloc,floc,xloc,tloc)
 ALLOCATE(gloc(nr),wloc(nr))
 IF(PRESENT(racc))ALLOCATE(rloc(3,nr))
 IF(PRESENT(facc))ALLOCATE(floc(5,nr))
 IF(PRESENT(xacc))THEN
   ALLOCATE(xloc(2,4,nr))
   xloc=-HUGE(1.d0)
+END IF
+IF(PRESENT(tacc))THEN
+  ALLOCATE(tloc(3,0:SIZE(tacc,2)-1,nr))
+  tloc=-HUGE(1.d0)
 END IF
 !$omp do schedule(dynamic,1)
 DO ib=1,nblk
@@ -190,7 +232,8 @@ DO ib=1,nblk
   IF(PRESENT(facc))floc=0.d0
   DO cell=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,nc)
     IF(gseq%device%fe_rep%mesh%reg(cell)/=1)CYCLE
-    CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol=fpol,racc=rloc,facc=floc,xacc=xloc)
+    CALL cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol=fpol,racc=rloc,facc=floc,xacc=xloc, &
+      tacc=tloc)
   END DO
   gblk(:,ib)=gloc; wblk(:,ib)=wloc
   IF(PRESENT(racc))rblk(:,:,ib)=rloc
@@ -204,10 +247,20 @@ IF(PRESENT(xacc))THEN
   END DO
 !$omp end critical
 END IF
+IF(PRESENT(tacc))THEN
+!$omp critical
+  DO i=1,nr
+    DO k=0,SIZE(tacc,2)-1
+      CALL tri_upd(tacc(:,k,i),tloc(:,k,i))
+    END DO
+  END DO
+!$omp end critical
+END IF
 DEALLOCATE(gloc,wloc)
 IF(ALLOCATED(rloc))DEALLOCATE(rloc)
 IF(ALLOCATED(floc))DEALLOCATE(floc)
 IF(ALLOCATED(xloc))DEALLOCATE(xloc)
+IF(ALLOCATED(tloc))DEALLOCATE(tloc)
 !$omp end parallel
 !---Fixed-order reduction
 DO ib=1,nblk
@@ -290,7 +343,7 @@ END SUBROUTINE gs_sauter_contour
 !------------------------------------------------------------------------------
 !> Add arc integrals and winding (and optionally geometric or Sauter sums) of all surfaces crossing `cell`
 !------------------------------------------------------------------------------
-SUBROUTINE cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc,racc,facc,xacc)
+SUBROUTINE cell_contrib(gseq,bt,vals,x1,dpsi,nr,psi_q,cell,gloc,wloc,fpol,bref,aloc,eloc,racc,facc,xacc,tacc)
 CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
 TYPE(bern_tab), INTENT(in) :: bt !< Bernstein tables
 REAL(r8), INTENT(in) :: vals(:) !< Local \f$ \psi \f$ values
@@ -308,6 +361,7 @@ REAL(r8), OPTIONAL, INTENT(inout) :: eloc(:) !< Accumulated \f$ B_{max} \f$ [nr]
 REAL(r8), OPTIONAL, INTENT(inout) :: racc(:,:) !< Accumulated \f$ \oint w\,[R, R^2, 1] \f$ [3,nr] (see @ref geom_sums)
 REAL(r8), OPTIONAL, INTENT(inout) :: facc(:,:) !< Accumulated oint w R [1, |grad psi|, |grad psi|^2, B_p^2, 1/B^2] [5,nr] (needs `fpol`)
 REAL(r8), OPTIONAL, INTENT(inout) :: xacc(:,:,:) !< Accumulated surface extrema [2,4,nr] (see @ref ext_add)
+REAL(r8), OPTIONAL, INTENT(inout) :: tacc(:,0:,:) !< Accumulated ray points [3,0:nth,nr] (see @ref arc_rays)
 TYPE(oft_scalar_bfem), POINTER :: lag_rep
 INTEGER(i4) :: jdofs(32),jc,k,ns,d0,i
 INTEGER(i4) :: dep(3*max_depth+4)
@@ -445,20 +499,23 @@ IF(PRESENT(aloc))THEN
   sb(0)=b_mag(p1,iq); sx(0)=xi1
   sb(ng+1)=b_mag(p2,iq); sx(ng+1)=xi2
 END IF
+IF(PRESENT(xacc).OR.PRESENT(tacc))THEN
+  CALL cell_geom(p1,sp(:,0),detm); xs(0)=xi1
+  CALL cell_geom(p2,sp(:,ng+1),detm); xs(ng+1)=xi2
+END IF
 IF(PRESENT(xacc))THEN
   CALL poly_eval(bt,cm,p1,val,gr); sg(:,0)=phys_grad(p1,gr)
-  CALL cell_geom(p1,sp(:,0),detm); xs(0)=xi1
   CALL poly_eval(bt,cm,p2,val,gr); sg(:,ng+1)=phys_grad(p2,gr)
-  CALL cell_geom(p2,sp(:,ng+1),detm); xs(ng+1)=xi2
 END IF
 DO ig=1,ng
   xi=(xi1+xi2)/2.d0+xg(ig)*(xi2-xi1)/2.d0
   x=arc_point(s,p1,p2,xi1,xi2,xi)
   CALL poly_eval(bt,cm,x,val,gr)
   CALL cell_geom(x,pt,detm)
-  IF(PRESENT(xacc))THEN
-    xs(ig)=xi; sp(:,ig)=pt; sg(:,ig)=phys_grad(x,gr)
+  IF(PRESENT(xacc).OR.PRESENT(tacc))THEN
+    xs(ig)=xi; sp(:,ig)=pt
   END IF
+  IF(PRESENT(xacc))sg(:,ig)=phys_grad(x,gr)
   sum=sum+wg(ig)*ABS(detm)/(pt(1)*ABS(DOT_PRODUCT(gr,dvec)))
   IF(ig==(ng+1)/2)gmid=gr
   wq=wg(ig)*ABS(detm)/ABS(DOT_PRODUCT(gr,dvec))
@@ -498,6 +555,7 @@ q1=q1-gseq%o_point; q2=q2-gseq%o_point
 dth=ATAN2(q1(1)*q2(2)-q1(2)*q2(1),DOT_PRODUCT(q1,q2))
 sig=SIGN(1.d0,(p2(1)-p1(1))*gmid(2)-(p2(2)-p1(2))*gmid(1))*SIGN(1.d0,detm)
 wacc=wacc+sig*dth/(2.d0*pi)
+IF(PRESENT(tacc))CALL arc_rays(s,p1,p2,xi1,xi2,ng,sig,xs,sp,tacc(:,:,iq))
 END SUBROUTINE tri_arc
 !---Point of surface s on the current arc at xi (projected from the chord p1-p2 along d)
 FUNCTION arc_point(s,p1,p2,xi1,xi2,xi) RESULT(x)
@@ -527,8 +585,8 @@ REAL(r8), INTENT(in) :: s,p1(2),p2(2),xi1,xi2
 INTEGER(i4), INTENT(in) :: ng
 REAL(r8), INTENT(in) :: xs(0:),sp(:,0:),sg(:,0:) !< Sample xi, (R,Z) and physical gradient
 REAL(r8), INTENT(inout) :: xa(2,4)
-REAL(r8) :: xl,xr,fl,fr,xm,fm,x(2),val,gr(2),gp(2),pt(2),detm
-INTEGER(i4) :: k,jg,it,side
+REAL(r8) :: fl,fr,x(2),pt(2),detm
+INTEGER(i4) :: k,jg
 DO k=0,ng+1
   CALL ext_add(xa,sp(:,k))
 END DO
@@ -536,29 +594,95 @@ DO jg=1,2
   DO k=0,ng
     fl=sg(jg,k); fr=sg(jg,k+1)
     IF(.NOT.(((fl<0.d0).AND.(fr>0.d0)).OR.((fl>0.d0).AND.(fr<0.d0))))CYCLE
-    xl=xs(k); xr=xs(k+1); side=0
-    DO it=1,60
-      xm=(xl*fr-xr*fl)/(fr-fl)
-      x=arc_point(s,p1,p2,xi1,xi2,xm)
-      CALL poly_eval(bt,cm,x,val,gr)
-      gp=phys_grad(x,gr); fm=gp(jg)
-      IF(fm==0.d0)EXIT
-      IF((fm>0.d0).EQV.(fr>0.d0))THEN
-        xr=xm; fr=fm
-        IF(side==-1)fl=fl/2.d0
-        side=-1
-      ELSE
-        xl=xm; fl=fm
-        IF(side==1)fr=fr/2.d0
-        side=1
-      END IF
-      IF(ABS(xr-xl)<=1.d-13*ABS(xi2-xi1))EXIT
-    END DO
+    x=arc_solve(s,p1,p2,xi1,xi2,jg,0.d0,xs(k),xs(k+1),fl,fr)
     CALL cell_geom(x,pt,detm)
     CALL ext_add(xa,pt)
   END DO
 END DO
 END SUBROUTINE arc_extrema
+!---Points of the current arc at the polar angles \f$ 2\pi(k-1)/n_\theta \f$, added to `ta` [3,0:nth]
+!!
+!! `sig` orients the arc along the surface (anticlockwise about the O-point for a closed
+!! surface). Each angle inside the arc's span (with slack `ray_slack`) is solved for on the arc
+!! and offered as (margin inside the span, R, Z); `ta(1,0)` records the largest backward step in
+!! angle, which is positive only if the surface is not star-shaped about the O-point.
+SUBROUTINE arc_rays(s,p1,p2,xi1,xi2,ng,sig,xs,sp,ta)
+REAL(r8), INTENT(in) :: s,p1(2),p2(2),xi1,xi2,sig
+INTEGER(i4), INTENT(in) :: ng
+REAL(r8), INTENT(in) :: xs(0:),sp(:,0:) !< Sample xi and (R,Z)
+REAL(r8), INTENT(inout) :: ta(:,0:)
+REAL(r8) :: u(0:6),xo(0:6),po(2,0:6),t,umin,umax,x(2),pt(2),detm,dth
+INTEGER(i4) :: m,mm,k,kk
+!---Samples in surface order, with the angle unwrapped along the arc
+DO m=0,ng+1
+  mm=MERGE(m,ng+1-m,sig>0.d0)
+  po(:,m)=sp(:,mm); xo(m)=xs(mm)
+END DO
+u(0)=ATAN2(po(2,0)-gseq%o_point(2),po(1,0)-gseq%o_point(1))
+DO m=1,ng+1
+  u(m)=u(m-1)+wrap_pi(ATAN2(po(2,m)-gseq%o_point(2),po(1,m)-gseq%o_point(1))-u(m-1))
+  CALL tri_upd(ta(:,0),[u(m-1)-u(m),0.d0,0.d0])
+END DO
+umin=MINVAL(u(0:ng+1)); umax=MAXVAL(u(0:ng+1))
+!---Target angles in the span, unwrapped like u; k is their index in [1,nth]
+dth=2.d0*pi/REAL(SIZE(ta,2)-1,r8)
+DO kk=CEILING((umin-ray_slack)/dth),FLOOR((umax+ray_slack)/dth)
+  t=kk*dth
+  k=MODULO(kk,SIZE(ta,2)-1)+1
+  IF(t<=u(0))THEN
+    pt=po(:,0)
+  ELSE IF(t>=u(ng+1))THEN
+    pt=po(:,ng+1)
+  ELSE
+    DO m=0,ng
+      IF((u(m)<=t).AND.(t<=u(m+1)))EXIT
+    END DO
+    IF(m>ng)CYCLE ! Not monotone here (flagged by the backward step)
+    IF(t==u(m))THEN
+      pt=po(:,m)
+    ELSE IF(t==u(m+1))THEN
+      pt=po(:,m+1)
+    ELSE
+      x=arc_solve(s,p1,p2,xi1,xi2,3,t,xo(m),xo(m+1),u(m)-t,u(m+1)-t)
+      CALL cell_geom(x,pt,detm)
+    END IF
+  END IF
+  CALL tri_upd(ta(:,k),[MIN(t-umin,umax-t),pt(1),pt(2)])
+END DO
+END SUBROUTINE arc_rays
+!---Root on the current arc, bracketed by xi in [xl,xr] with values fl, fr of opposite sign
+!!
+!! Illinois regula falsi on xi. `mode` 1 or 2: that component of the physical gradient;
+!! `mode` 3: polar angle about the O-point minus `tgt`.
+FUNCTION arc_solve(s,p1,p2,xi1,xi2,mode,tgt,xl0,xr0,fl0,fr0) RESULT(x)
+REAL(r8), INTENT(in) :: s,p1(2),p2(2),xi1,xi2,tgt,xl0,xr0,fl0,fr0
+INTEGER(i4), INTENT(in) :: mode
+REAL(r8) :: x(2),xl,xr,fl,fr,xm,fm,val,gr(2),gp(2),pt(2),detm
+INTEGER(i4) :: it,side
+xl=xl0; xr=xr0; fl=fl0; fr=fr0; side=0
+DO it=1,60
+  xm=(xl*fr-xr*fl)/(fr-fl)
+  x=arc_point(s,p1,p2,xi1,xi2,xm)
+  IF(mode==3)THEN
+    CALL cell_geom(x,pt,detm)
+    fm=wrap_pi(ATAN2(pt(2)-gseq%o_point(2),pt(1)-gseq%o_point(1))-tgt)
+  ELSE
+    CALL poly_eval(bt,cm,x,val,gr)
+    gp=phys_grad(x,gr); fm=gp(mode)
+  END IF
+  IF(fm==0.d0)EXIT
+  IF((fm>0.d0).EQV.(fr>0.d0))THEN
+    xr=xm; fr=fm
+    IF(side==-1)fl=fl/2.d0
+    side=-1
+  ELSE
+    xl=xm; fl=fm
+    IF(side==1)fr=fr/2.d0
+    side=1
+  END IF
+  IF(ABS(xr-xl)<=1.d-13*ABS(xi2-xi1))EXIT
+END DO
+END FUNCTION arc_solve
 !---Physical gradient at uv, from the (u,v) gradient of 1-psi-hat
 FUNCTION phys_grad(uv,grp) RESULT(gp)
 REAL(r8), INTENT(in) :: uv(2),grp(2)
@@ -639,6 +763,21 @@ DO k=1,4
   CALL ext_upd(xa(:,k),xb(1,k),xb(2,k))
 END DO
 END SUBROUTINE ext_merge
+!------------------------------------------------------------------------------
+!> Keep the lexicographically larger of `e` and `v` (exact, so independent of merge order)
+!------------------------------------------------------------------------------
+PURE SUBROUTINE tri_upd(e,v)
+REAL(r8), INTENT(inout) :: e(3)
+REAL(r8), INTENT(in) :: v(3)
+IF((v(1)>e(1)).OR.((v(1)==e(1)).AND.((v(2)>e(2)).OR.((v(2)==e(2)).AND.(v(3)>e(3))))))e=v
+END SUBROUTINE tri_upd
+!------------------------------------------------------------------------------
+!> Angle `a` wrapped to \f$ [-\pi,\pi] \f$
+!------------------------------------------------------------------------------
+PURE REAL(r8) FUNCTION wrap_pi(a)
+REAL(r8), INTENT(in) :: a
+wrap_pi=a-2.d0*pi*ANINT(a/(2.d0*pi))
+END FUNCTION wrap_pi
 !------------------------------------------------------------------------------
 !> Keep the larger of (`key`,`comp`) and `e` in lexicographic order
 !------------------------------------------------------------------------------
@@ -900,11 +1039,11 @@ bt%cbound=(MAXVAL(SUM(ABS(bt%vinv),DIM=2))-1.d0)/2.d0+1.d-12
 END SUBROUTINE bern_build
 END MODULE oft_gs_contour
 !------------------------------------------------------------------------------
-!> Contour evaluation of @ref oft_gs::gs_get_qprof outputs (a submodule of @ref oft_gs, so that
-!! @ref oft_gs can use @ref oft_gs_contour, which itself uses @ref oft_gs)
+!> Contour evaluation of @ref oft_gs::gs_get_qprof and @ref oft_gs::gs_trace_surf outputs (a submodule of
+!! @ref oft_gs, so that @ref oft_gs can use @ref oft_gs_contour, which itself uses @ref oft_gs)
 !------------------------------------------------------------------------------
 SUBMODULE (oft_gs) oft_gs_qprof
-USE oft_gs_contour, ONLY: gs_fsa_contour
+USE oft_gs_contour, ONLY: gs_fsa_contour, gs_rays_contour
 IMPLICIT NONE
 CONTAINS
 !------------------------------------------------------------------------------
@@ -916,11 +1055,7 @@ REAL(r8), ALLOCATABLE :: fsa(:,:),shp(:,:)
 INTEGER(i4) :: j
 DO j=1,nr
   psi_surf=psi_q(j)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1)
-  IF(gseq%mode==0)THEN
-    fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
-  ELSE
-    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
-  END IF
+  fpol(j)=gs_fpol(gseq,psi_surf)
 END DO
 !---Unallocated outputs are passed as absent (F2008)
 IF(PRESENT(fsa_avgs))ALLOCATE(fsa(nr,4))
@@ -934,4 +1069,56 @@ DO j=1,nr
   IF(PRESENT(shape_geo))shape_geo(j,:)=shp(j,:)
 END DO
 END PROCEDURE gs_qprof_contour
+!------------------------------------------------------------------------------
+!> LCFS outputs of @ref gs_get_qprof (`dl`, `rbounds`, `zbounds`) for surface `psi_q1`
+!!
+!! The surface is sampled at `nlcfs` uniform polar angles. If the plasma is diverted and `psi_q1`
+!! is near the LCFS, the points are projected onto the LCFS along rays from the O-point (as the
+!! tracer path does), and the bounds are the extreme projected points. Otherwise the bounds are the
+!! exact extrema of the FE surface. `dl` is the length of the closed polygon through the points.
+!------------------------------------------------------------------------------
+MODULE PROCEDURE gs_lcfs_contour
+INTEGER(i4), PARAMETER :: nlcfs=1000
+REAL(r8) :: rz(2,nlcfs,1),qf(1),xa(2,4,1),pt(2),dir(2)
+LOGICAL :: okr(1)
+INTEGER(i4) :: k
+TYPE(oft_lag_brinterp) :: psi_int
+ok=.FALSE.
+CALL gs_rays_contour(gseq,1,[psi_q1],nlcfs,rz,qf,okr,xa)
+IF(.NOT.okr(1))RETURN
+IF(gseq%diverted.AND.(psi_q1<0.05d0))THEN
+  psi_int%u=>gseq%psi
+  CALL psi_int%setup(gseq%device%fe_rep)
+  DO k=1,nlcfs
+    pt=rz(:,k,1)
+    dir=(pt-gseq%o_point)/SQRT(SUM((pt-gseq%o_point)**2))
+    CALL gs_psi2pt(gseq,gseq%plasma_bounds(1),pt,gseq%o_point,dir,psi_int)
+    rz(:,k,1)=pt
+  END DO
+  CALL psi_int%delete
+  rbounds(:,1)=rz(:,MINLOC(rz(1,:,1),DIM=1),1); rbounds(:,2)=rz(:,MAXLOC(rz(1,:,1),DIM=1),1)
+  zbounds(:,1)=rz(:,MINLOC(rz(2,:,1),DIM=1),1); zbounds(:,2)=rz(:,MAXLOC(rz(2,:,1),DIM=1),1)
+ELSE
+  rbounds(:,1)=[-xa(1,1,1),xa(2,1,1)]; rbounds(:,2)=[xa(1,2,1),xa(2,2,1)]
+  zbounds(:,1)=[xa(2,3,1),-xa(1,3,1)]; zbounds(:,2)=[xa(2,4,1),xa(1,4,1)]
+END IF
+dl=SUM(SQRT(SUM((rz(:,:,1)-CSHIFT(rz(:,:,1),1,DIM=2))**2,DIM=1)))
+ok=.TRUE.
+END PROCEDURE gs_lcfs_contour
+!------------------------------------------------------------------------------
+!> Points of one surface at uniform polar angle about the O-point, starting on the outboard
+!! side and running anticlockwise (as the tracer), from the contour quadrature
+!------------------------------------------------------------------------------
+MODULE PROCEDURE gs_trace_surf_contour
+INTEGER(i4), PARAMETER :: nth=1000
+REAL(r8) :: rz(2,nth,1),qf(1)
+LOGICAL :: ok(1)
+npoints=-1
+NULLIFY(points)
+CALL gs_rays_contour(gseq,1,[psi_in],nth,rz,qf,ok)
+IF(.NOT.ok(1))RETURN
+ALLOCATE(points(2,nth))
+points=rz(:,:,1)
+npoints=nth
+END PROCEDURE gs_trace_surf_contour
 END SUBMODULE oft_gs_qprof
