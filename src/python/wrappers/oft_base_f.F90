@@ -338,6 +338,7 @@ CALL c_f_pointer(field_ptr, field, [dim,npts])
 !$omp parallel do private(cell,f,goptmp,vol,fmin,fmax) if(npts>1000)
 DO i=1,npts
   cell=0
+  f=0.d0 ! bmesh_findcell sets only f(1:3)
   IF((int_type>200).AND.(int_type<300))THEN
     call bmesh_findcell(smesh,cell,pts(:,i),f)
   ELSE IF((int_type>300).AND.(int_type<400))THEN

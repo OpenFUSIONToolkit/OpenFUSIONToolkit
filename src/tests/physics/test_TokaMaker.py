@@ -127,6 +127,22 @@ def validate_eqdsk(file_test,file_ref,helicity=1.0):
     return test_result
 
 
+def ifile_errors(mygs,filename):
+    """Relative errors of an i-file: psi at its R,Z points vs its psi grid, its FF', P' records and its psi bounds."""
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    ifile = read_ifile(filename)
+    psi_range = mygs.psi_bounds[1]-mygs.psi_bounds[0]
+    R, Z = ifile['R'][1:], ifile['Z'][1:]
+    psi_pts = mygs.get_field_eval('psi').eval(np.column_stack([R.ravel(),Z.ravel()]))[:,0].reshape(R.shape)
+    _, F, Fp, _, Pp = mygs.get_profiles(psi=(mygs.psi_bounds[1]-ifile['psi'])/psi_range)
+    return {
+        'ifile_psi_err': np.max(np.abs(psi_pts-ifile['psi'][1:,None]))/abs(psi_range),
+        'ifile_ffp_err': np.max(np.abs(ifile['ffp']-F*Fp))/np.max(np.abs(F*Fp)),
+        'ifile_pp_err': np.max(np.abs(ifile['pp']-Pp))/np.max(np.abs(Pp)),
+        'ifile_bounds_err': np.max(np.abs(ifile['psi_bounds']-mygs.psi_bounds[::-1]))/abs(psi_range)
+    }
+
+
 def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile
     try:
@@ -374,7 +390,7 @@ def test_spheromak_h2(order):
 @pytest.mark.parametrize("order", (2,3,4))
 def test_spheromak_h3(order):
     errs = [3.257155111957006e-07, 2.090369020180253e-09, 8.601148342547016e-12]
-    results = mp_run(run_sph_case,(0.05/4.0,order))
+    results = mp_run(run_sph_case,(0.05/4.0,order),timeout=60)
     assert validate_sph(results,errs[order-2])
 
 
@@ -777,6 +793,10 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
     # Save equilibrium to gEQDSK and i-file format
     mygs.save_eqdsk('tokamaker.eqdsk',nr=64,nz=64,lcfs_pad=0.001)
     mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001)
+    mygs.save_ifile('tokamaker_ext.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,profile_derivs=True,psi_bounds=True)
+    eq_info.update(ifile_errors(mygs,'tokamaker_ext.ifile'))
+    mygs.save_ifile('tokamaker_axis.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,axis_pack=1.E-4)
+    eq_info['ifile_psi_err_axis'] = ifile_errors(mygs,'tokamaker_axis.ifile')['ifile_psi_err']
     # Save final one
     mp_q.put([eq_info])
     oftpy_dump_cov()
@@ -867,6 +887,23 @@ def test_ITER_eq(order,helicity):
     assert validate_dict(results,eq_dict)
     assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)
     assert validate_ifile('tokamaker.ifile','ITER_test.ifile',helicity)
+    # Optional records are written only on request and leave the others unchanged
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    ifile, ifile_ext = read_ifile('tokamaker.ifile'), read_ifile('tokamaker_ext.ifile')
+    assert ('ffp' not in ifile) and ('psi_bounds' not in ifile)
+    assert all(np.array_equal(ifile[key],ifile_ext[key]) for key in ifile)
+    # i-file points lie on their flux surfaces; FF', P' and psi bounds match the equilibrium
+    assert results[0]['ifile_psi_err'] < 1.E-10
+    assert results[0]['ifile_ffp_err'] < 1.E-10
+    assert results[0]['ifile_pp_err'] < 1.E-10
+    assert results[0]['ifile_bounds_err'] < 1.E-12
+    # Axis zone: first surface at axis_pack, spacing growing smoothly into the LCFS-packed points
+    ifile_axis = read_ifile('tokamaker_axis.ifile')
+    x = (ifile_axis['psi']-ifile_axis['psi_bounds'][0])/(ifile_axis['psi_bounds'][1]-ifile_axis['psi_bounds'][0])
+    dx = np.diff(x)
+    assert abs(x[1]-1.E-4) < 1.E-10
+    assert np.all(dx > 0) and np.max(dx[1:]/dx[:-1]) < 1.7
+    assert results[0]['ifile_psi_err_axis'] < 1.E-10
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
@@ -2035,6 +2072,21 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         p_def = mygs.solve_bootstrap(**common)
         if np.any(p_def['jphi_fixed'] != 0.0) or np.any(p_def['jphi_saw'] != 0.0):
             raise AssertionError("boot_reset(): jphi_fixed / j_saw not back to zero")
+        # (h) bs_interp: 'linterp' and 'cubic' close to the default 'hermite' with the reset on; the option is kept
+        p_h = mygs.solve_bootstrap(saw_q_s=q_s, saw_dq=dq, **common)
+        for interp in ('linterp', 'cubic'):
+            p_i = mygs.solve_bootstrap(bs_interp=interp, **common)
+            for key in ('jphi_total', 'jphi_bs', 'jphi_saw'):
+                if not close(p_i[key], p_h[key], 2e-2):
+                    raise AssertionError(f"bs_interp={interp!r}: '{key}' far from 'hermite'")
+        if mygs._tMaker_equil._boot_ops['bs_interp'] != 3:
+            raise AssertionError("bs_interp not kept")
+        try:
+            mygs.solve_bootstrap(bs_interp='akima', **common)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("bs_interp='akima' accepted")
     except Exception as e:
         print(e)
         mp_q.put(None)
@@ -2429,6 +2481,137 @@ def test_ITER_torflux_bootstrap(order):
     assert results['swb_jsaw_err'] < 1.E-6
     assert results['swb_jsaw_total_err'] < 1.E-3
     assert results['python_rejected']
+
+
+# -----------------------------------------------------------------------
+# Test: cubic (C2 spline) profile interpolation, interp='cubic'
+#
+# The same FF' and P' nodes as linear and cubic profiles: the cubic solve
+# stays close to the linear one, but its slopes (and on 'phi_n' the slope of
+# the toroidal flux map) no longer jump at the nodes.
+# -----------------------------------------------------------------------
+def _slope_jump(fun, xs, d=1.E-5):
+    '''Largest jump of the slope of each output of `fun` across the points xs (relative to its largest slope),
+    from second-order one-sided differences'''
+    ys = fun(np.concatenate([xs+k*d for k in (-2,-1,0,1,2)]))
+    jumps = []
+    for y in ys:
+        y = y.reshape(5,-1)
+        left, right = (3.0*y[2]-4.0*y[1]+y[0])/(2.0*d), (-3.0*y[2]+4.0*y[3]-y[4])/(2.0*d)
+        jumps.append(np.max(np.abs(right-left))/np.max(np.abs(np.r_[left,right])))
+    return jumps
+
+
+def _profile_slope_jumps(mygs, xs):
+    '''Slope jumps of F*F' and P' across xs'''
+    def fun(x):
+        _, f, fp, _, pp = mygs.get_profiles(psi=x)
+        return f*fp, pp
+    return _slope_jump(fun, xs)
+
+
+def run_ITER_cubic_case(fe_order, coord, mp_q):
+    try:
+        results = {}
+        mygs = _torflux_ITER_gs(fe_order)
+        init = lambda: mygs.init_psi(6.3, 0.5, 2.0, 1.4, 0.0)
+        ffp = create_power_flux_fun(40,1.5,2.0)
+        pp = create_power_flux_fun(40,4.0,1.0)
+        mygs.set_profiles(ffp_prof=ffp,pp_prof=pp)
+        init()
+        mygs.solve()
+        ref = _torflux_ref(mygs)
+        x = ffp['x'][1:-1]
+        results['jumps_linear'] = _profile_slope_jumps(mygs,x)
+        if coord == 'phi_n':
+            # Nodes on Phi_N; the same profiles as linear first (C1 Hermite map), then cubic (C2 spline map)
+            pmap = _torflux_phi_map(mygs)
+            for prof in (ffp, pp):
+                y = prof['y']/np.interp(prof['x'],pmap[0],pmap[2])
+                prof.update(x=_torflux_to_phi(prof['x'],pmap), y=y, coord='phi_n')
+            mygs.set_profiles(ffp_prof=ffp,pp_prof=pp)
+            init()
+            mygs.solve()
+            x, _ = mygs.get_torflux_map(ffp['x'][1:-1],inverse=True)
+            jac_fun = lambda xx: (mygs.get_torflux_map(xx)[1],)
+            results['map_jump_linear'] = _slope_jump(jac_fun,x)[0]
+        mygs.set_profiles(ffp_prof=dict(ffp,interp='cubic'),pp_prof=dict(pp,interp='cubic'))
+        init()
+        mygs.solve()
+        results['eq'] = _torflux_compare(mygs,ref)
+        results['jumps'] = _profile_slope_jumps(mygs,x)
+        if coord == 'phi_n':
+            results['map_jump'] = _slope_jump(jac_fun,x)[0]
+        # F^2/2 and P are the integrals of F*F' and P': their ratio to the integrand is the constant dpsi/dpsi_N
+        xs = np.linspace(0.05,0.95,37)
+        _, f, fp, p, pp_s = mygs.get_profiles(psi=np.concatenate([xs-1.E-5, xs+1.E-5]))
+        ratios = [((g[37:]-g[:37])/2.E-5)/((h[37:]+h[:37])/2.0) for g, h in ((f**2/2.0, f*fp), (p, pp_s))]
+        results['int_err'] = max(np.max(np.abs(r/np.mean(r)-1.0)) for r in ratios)
+        # Copy and save/load keep the cubic profiles
+        prof0 = np.array(mygs.get_profiles(npsi=60)[1:])
+        eq_copy = mygs.copy_eq()
+        results['copy_err'] = np.max(np.abs(np.array(eq_copy.get_profiles(npsi=60)[1:])-prof0))/np.max(np.abs(prof0))
+        eq_copy.save_TokaMaker('cubic_eq.h5')
+        init()
+        mygs.replace_eq(source_file='cubic_eq.h5')
+        results['load_err'] = np.max(np.abs(np.array(mygs.get_profiles(npsi=60)[1:])-prof0))/np.max(np.abs(prof0))
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+    mp_q.put(results)
+    oftpy_dump_cov()
+
+
+@pytest.mark.coverage
+@pytest.mark.parametrize("coord", ('psi_n', 'phi_n'))
+def test_ITER_cubic(coord):
+    results = mp_run(run_ITER_cubic_case,(2,coord),timeout=180)
+    assert results is not None
+    _torflux_check(results['eq'],1.E-3,5.E-3)
+    assert all(j < 1.E-3*j_lin for j, j_lin in zip(results['jumps'],results['jumps_linear']))
+    assert results['int_err'] < 1.E-6
+    assert results['copy_err'] < 1.E-12
+    assert results['load_err'] < 1.E-9
+    if coord == 'phi_n':
+        assert results['map_jump'] < 1.E-3*results['map_jump_linear']
+
+
+def run_ITER_bootstrap_cubic(mp_q):
+    try:
+        results = {}
+        setup = _ITER_bootstrap_internal_setup(1.0, 2)
+        mygs, x = setup['mygs'], setup['psi_sample']
+        def solve(interp):
+            mygs.solve_bootstrap(
+                ffp_prof={'type': 'jphi-split-bootstrap', 'x': x, 'y': setup['inductive_jphi'], 'interp': interp},
+                te_prof={'type': 'linterp', 'x': x, 'y': setup['Te']/1.E3},
+                ne_prof={'type': 'linterp', 'x': x, 'y': setup['ne']},
+                ti_prof={'type': 'linterp', 'x': x, 'y': setup['Ti']/1.E3},
+                ni_prof={'type': 'linterp', 'x': x, 'y': setup['ni']},
+                Zeff=setup['Zeff_val'], Ip_target=setup['Ip_target'])
+            return _profile_slope_jumps(mygs,x[1:-1])
+        results['jumps_linear'] = solve('linterp')
+        results['jumps'] = solve('cubic')
+        # Save/load keeps the cubic bootstrap profile and its F*F' knots
+        prof0 = np.array(mygs.get_profiles(npsi=60)[1:])
+        mygs.copy_eq().save_TokaMaker('boot_cubic.h5')
+        mygs.replace_eq(source_file='boot_cubic.h5')
+        results['load_err'] = np.max(np.abs(np.array(mygs.get_profiles(npsi=60)[1:])-prof0))/np.max(np.abs(prof0))
+    except Exception as e:
+        print(e)
+        mp_q.put(None)
+        return
+    mp_q.put(results)
+    oftpy_dump_cov()
+
+
+@pytest.mark.slow
+def test_ITER_bootstrap_cubic():
+    results = mp_run(run_ITER_bootstrap_cubic,(),timeout=600)
+    assert results is not None
+    assert all(j < 1.E-3*j_lin for j, j_lin in zip(results['jumps'],results['jumps_linear']))
+    assert results['load_err'] < 1.E-9
 
 # Test: solve_with_bootstrap() x validation (fails before the solver is used)
 # -----------------------------------------------------------------------
