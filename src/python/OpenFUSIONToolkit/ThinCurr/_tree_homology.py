@@ -30,7 +30,7 @@ Holes are chosen for each connected surface as follows:
 The cost is linear in the number of cells for fixed topology, plus a term proportional to the number of
 holes times the number of cells crossed by the cuts.
 
-@authors Chris Hansen
+@authors Ian Stewart and Chris Hansen
 @date October 2026
 @ingroup doxy_oft_python
 '''
