@@ -399,12 +399,8 @@ class ThinCurr():
     def compute_Bmat(self,cache_file=None,B_dx=-1.E-2):
         '''! Compute magnetic field reconstruction operators for this model
 
-        The operators are returned as views of the underlying Fortran arrays, which are stored as
-        `[np,nelems,3]` and `[np,n_icoils,3]` (Fortran ordering), corresponding to shapes `(3,nelems,np)`
-        and `(3,n_icoils,np)` in Python (C ordering). For example, the `i`-th component of the field
-        at each vertex is given by `numpy.dot(potential,Bel[i,:,:]) + numpy.dot(coil_currs,Bdr[i,:,:])`.
-        This is the same sum computed by \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.reconstruct_Bfield "reconstruct_Bfield()",
-        which additionally divides the result by `mu0`.
+        @note To reconstruct the magnetic field from a current potential and coil currents use
+        \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.reconstruct_Bfield "reconstruct_Bfield()".
 
         @param cache_file Path to cache file to store/load matrix
         @param B_dx Spatial step size for finite difference evaluation of B-field (negative values for relative sizing)
