@@ -100,6 +100,7 @@ TYPE, BIND(C) :: tokamaker_boot_ops_type
   REAL(c_double)  :: saw_relax = 1.d0             !< Under-relaxation of jphi_saw
   REAL(c_double)  :: saw_ramp = 1.d-2             !< Reset weight ramp in q deficit (0 = hard trigger)
   INTEGER(c_int)  :: saw_rule = 2                 !< Reset rule: 1 fuse (axis to rho_m), 2 local (each dip, two-sided)
+  INTEGER(c_int)  :: bs_interp = 2                !< Kinetic gradients and sawtooth reset: 1 linterp, 2 hermite, 3 cubic
 END TYPE tokamaker_boot_ops_type
 !---------------------------------------------------------------------------------
 !> TokaMaker wrapper object for Python API
@@ -657,6 +658,7 @@ TYPE IS (jphi_bs_flux_func)
   I%boot_ops%saw_relax = bops%saw_relax
   I%boot_ops%saw_ramp = bops%saw_ramp
   I%boot_ops%saw_rule = bops%saw_rule
+  I%boot_ops%bs_interp = bops%bs_interp
 CLASS DEFAULT
   CALL copy_string('Run set_profiles with a jphi-split-bootstrap profile before calling set_boot_ops.',error_str)
 END SELECT
@@ -692,6 +694,7 @@ TYPE IS (jphi_bs_flux_func)
   bops%saw_relax = I%boot_ops%saw_relax
   bops%saw_ramp = I%boot_ops%saw_ramp
   bops%saw_rule = I%boot_ops%saw_rule
+  bops%bs_interp = I%boot_ops%bs_interp
 CLASS DEFAULT
   initialized = .FALSE. ! Not a bootstrap profile: no options
 END SELECT

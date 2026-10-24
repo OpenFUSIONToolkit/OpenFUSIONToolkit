@@ -2072,6 +2072,21 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         p_def = mygs.solve_bootstrap(**common)
         if np.any(p_def['jphi_fixed'] != 0.0) or np.any(p_def['jphi_saw'] != 0.0):
             raise AssertionError("boot_reset(): jphi_fixed / j_saw not back to zero")
+        # (h) bs_interp: 'linterp' and 'cubic' close to the default 'hermite' with the reset on; the option is kept
+        p_h = mygs.solve_bootstrap(saw_q_s=q_s, saw_dq=dq, **common)
+        for interp in ('linterp', 'cubic'):
+            p_i = mygs.solve_bootstrap(bs_interp=interp, **common)
+            for key in ('jphi_total', 'jphi_bs', 'jphi_saw'):
+                if not close(p_i[key], p_h[key], 2e-2):
+                    raise AssertionError(f"bs_interp={interp!r}: '{key}' far from 'hermite'")
+        if mygs._tMaker_equil._boot_ops['bs_interp'] != 3:
+            raise AssertionError("bs_interp not kept")
+        try:
+            mygs.solve_bootstrap(bs_interp='akima', **common)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("bs_interp='akima' accepted")
     except Exception as e:
         print(e)
         mp_q.put(None)

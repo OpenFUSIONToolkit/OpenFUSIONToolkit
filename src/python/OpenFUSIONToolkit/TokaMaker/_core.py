@@ -142,7 +142,10 @@ _BOOT_OPS_DEFAULTS = {
     'saw_relax': 1.0,
     'saw_ramp': 0.01,
     'saw_rule': 2,
+    'bs_interp': 2,
 }
+## Names of the `bs_interp` codes 1, 2, 3 (see @ref TokaMaker.TokaMaker_equilibrium.set_boot_ops "set_boot_ops")
+_BS_INTERP_NAMES = ('linterp', 'hermite', 'cubic')
 
 
 ## Keyword inputs of @ref TokaMaker.TokaMaker.solve_bootstrap "solve_bootstrap" kept between calls and in saved files
@@ -173,6 +176,31 @@ def _save_boot_inputs(filename, inputs):
                         sub.create_dataset(k, data=numpy.asarray(v, dtype=numpy.float64))
             else:
                 grp.attrs[key] = val if isinstance(val, str) else float(val)
+
+
+def _bs_interpolant(method, x, y):
+    '''! Interpolant of y(x) (x increasing) for a `bs_interp` method, NaN outside [x[0], x[-1]]
+
+    @param method 'linterp' (piecewise linear), 'hermite' (cubic Hermite with pchip slopes) or 'cubic'
+      (not-a-knot C2 spline)
+    @param x Nodes
+    @param y Values at x
+    @result Callable f(xs, nu=0): values (nu=0) or first derivatives (nu=1) at xs; for 'linterp' the derivative
+      is the finite-difference one at the nodes (xs must be x)
+    '''
+    from scipy.interpolate import CubicSpline, PchipInterpolator
+    x, y = numpy.asarray(x, dtype=numpy.float64), numpy.asarray(y, dtype=numpy.float64)
+    if method == 'hermite':
+        return PchipInterpolator(x, y, extrapolate=False)
+    if method == 'cubic':
+        return CubicSpline(x, y, bc_type='not-a-knot', extrapolate=False)
+    if method != 'linterp':
+        raise ValueError(f"bs_interp must be one of {_BS_INTERP_NAMES} (got {method!r})")
+    def linear(xs, nu=0):
+        if nu == 0:
+            return numpy.interp(xs, x, y, left=numpy.nan, right=numpy.nan)
+        return numpy.gradient(y, x, edge_order=2)
+    return linear
 
 
 def _load_boot_inputs(filename):
@@ -996,7 +1024,8 @@ class TokaMaker():
 
     def set_boot_ops(self, isolate_edge_jbs=None, scale_jbs=None, djbs_tol=None,
                      diagnose_bs=None, taper_edge_jphi=None, taper_edge_psi0=None, taper_edge_shape=None,
-                     saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None):
+                     saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None,
+                     bs_interp=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update
 
         See @ref TokaMaker.TokaMaker_equilibrium.set_boot_ops "set_boot_ops"
@@ -1006,7 +1035,8 @@ class TokaMaker():
         return self._tMaker_equil.set_boot_ops(isolate_edge_jbs, scale_jbs, djbs_tol,
                                                diagnose_bs,
                                                taper_edge_jphi, taper_edge_psi0, taper_edge_shape,
-                                               saw_q_s, saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule)
+                                               saw_q_s, saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule,
+                                               bs_interp)
 
     def get_boot_profs(self):
         r'''! Get the current profiles of the last G-S solve with a `jphi-split-bootstrap` current profile
@@ -2513,7 +2543,7 @@ class TokaMaker():
         @param saw_q_s Sawtooth reset q floor; 0 = off (default: 0). The q of
           \f$\alpha j_{ind} + j_{BS} + j_{fixed} + j_{saw,in}\f$ in the traced geometry is reset where it dips
           below q_s (``saw_rule``); the Ip-neutral current that does this is added to ``jphi_saw``
-        @param saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule See ``set_boot_ops()``
+        @param saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule, bs_interp See ``set_boot_ops()``
 
         @result Dictionary with 1-D numpy array values (A/m² unless noted). All current densities, inputs
           included, are TokaMaker \f$j_\phi = \langle j_\phi \rangle = \langle R \rangle P' + \langle 1/R \rangle FF'/\mu_0\f$
@@ -2534,9 +2564,11 @@ class TokaMaker():
           - ``'saw_rho_m'``, ``'saw_rho_out'``, ``'saw_n_dips'`` Sawtooth radius (q_s + dq crossing beyond the outermost
             q < q_s, \f$\rho_{tor,N}\f$), outer end of the reset and number of regions reset, at the last reset
         '''
-        from scipy.interpolate import Akima1DInterpolator
         # Keyword inputs left as None keep their values from the previous call or the loaded state
         kept = self._tMaker_equil._boot_inputs or {}
+        # Profile interpolation: this call's bs_interp, else the kept one
+        bs_interp = kwargs.get('bs_interp') or \
+            _BS_INTERP_NAMES[(self._tMaker_equil._boot_ops or _BOOT_OPS_DEFAULTS)['bs_interp'] - 1]
         if (coord is not None) and (coord != (kept.get('coord') or 'psi_n')):
             # Kept profiles are on the kept coordinate, so they cannot be reused on another one
             p_passed = (pres_prof is not None) or (p_fixed_prof is not None)
@@ -2588,10 +2620,10 @@ class TokaMaker():
 
         # Evaluate pprime from kinetic profiles on the same psi 'x' grid as ffp_prof
         psi_sample = numpy.asarray(ffp_prof['x'])
-        Te_eV = Akima1DInterpolator(te_prof['x'], te_prof['y'])(psi_sample) * 1e3
-        ne    = Akima1DInterpolator(ne_prof['x'], ne_prof['y'])(psi_sample)
-        Ti_eV = Akima1DInterpolator(ti_prof['x'], ti_prof['y'])(psi_sample) * 1e3
-        ni    = Akima1DInterpolator(ni_prof['x'], ni_prof['y'])(psi_sample)
+        Te_eV = _bs_interpolant(bs_interp, te_prof['x'], te_prof['y'])(psi_sample) * 1e3
+        ne    = _bs_interpolant(bs_interp, ne_prof['x'], ne_prof['y'])(psi_sample)
+        Ti_eV = _bs_interpolant(bs_interp, ti_prof['x'], ti_prof['y'])(psi_sample) * 1e3
+        ni    = _bs_interpolant(bs_interp, ni_prof['x'], ni_prof['y'])(psi_sample)
         p_fixed = 0.0
         if p_fixed_prof is not None:
             if pres_prof is not None:
@@ -2601,7 +2633,7 @@ class TokaMaker():
             for _key in ('x', 'y'):
                 if _key not in p_fixed_prof:
                     raise ValueError(f"p_fixed_prof is missing required key '{_key}'")
-            p_fixed = Akima1DInterpolator(p_fixed_prof['x'], p_fixed_prof['y'])(psi_sample)
+            p_fixed = _bs_interpolant(bs_interp, p_fixed_prof['x'], p_fixed_prof['y'])(psi_sample)
             if numpy.any(p_fixed < 0.0):
                 raise ValueError("p_fixed_prof must be >= 0 at every point on the psi grid")
         pressure = eC * ne * Te_eV + eC * ni * Ti_eV + p_fixed
@@ -2611,15 +2643,15 @@ class TokaMaker():
             for _key in ('x', 'y'):
                 if _key not in pres_prof:
                     raise ValueError(f"pres_prof is missing required key '{_key}'")
-            pres_vals = Akima1DInterpolator(pres_prof['x'], pres_prof['y'])(psi_sample)
+            pres_vals = _bs_interpolant(bs_interp, pres_prof['x'], pres_prof['y'])(psi_sample)
             if numpy.any(pres_vals < pressure):
                 raise ValueError(
                     "pres_prof must be >= the kinetic pressure (eC*(ne*Te + ni*Ti)) at every point on the psi grid"
                 )
             pressure = pres_vals
-        if not numpy.all(numpy.isfinite(pressure)):  # Akima gives NaN outside its data
+        if not numpy.all(numpy.isfinite(pressure)):  # NaN outside the profiles' data
             raise ValueError("The kinetic, pres_prof and p_fixed_prof profiles must cover ffp_prof['x']")
-        pp_vals = Akima1DInterpolator(psi_sample, pressure).derivative()(psi_sample)
+        pp_vals = _bs_interpolant(bs_interp, psi_sample, pressure)(psi_sample, 1)
         pp_vals[-1] = 0.0
         # Shape only (the pax target sets the scale): normalise by the largest |P'|, which is
         # nonzero unless the pressure is flat (P'(axis) can be 0 for a flat core)
@@ -3159,7 +3191,8 @@ class TokaMaker_equilibrium():
 
     def set_boot_ops(self, isolate_edge_jbs=None, scale_jbs=None, djbs_tol=None,
                      diagnose_bs=None, taper_edge_jphi=None, taper_edge_psi0=None, taper_edge_shape=None,
-                     saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None):
+                     saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None,
+                     bs_interp=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
 
         Call after setting a `jphi-split-bootstrap`-type ffp_prof profile, and before mygs.solve().
@@ -3179,14 +3212,22 @@ class TokaMaker_equilibrium():
         @param saw_ramp Reset weight ramps over this q deficit below saw_q_s; 0 = hard trigger. (Internal default: 0.01)
         @param saw_rule Reset rule: 1 = fuse (FUSE's saw_crash!: q reset from the axis out to the sawtooth radius);
           2 = local (each dip below saw_q_s raised about its q minimum, current moved only inside it). (Internal default: 2)
+        @param bs_interp Interpolation of the profiles in the bootstrap update: the kinetic profiles and P onto the
+          ffp_prof nodes and P' there (solve_bootstrap), the kinetic gradients of the bootstrap current and the
+          sawtooth reset between its nodes. 'linterp': piecewise linear, finite-difference derivatives; 'hermite':
+          cubic Hermite with pchip slopes (C1, no overshoot); 'cubic': not-a-knot cubic spline (C2). (Internal default: 'hermite')
         '''
+        if bs_interp is not None:
+            if bs_interp not in _BS_INTERP_NAMES:
+                raise ValueError(f"bs_interp must be one of {_BS_INTERP_NAMES} (got {bs_interp!r})")
+            bs_interp = _BS_INTERP_NAMES.index(bs_interp) + 1
         if self._boot_ops is None:
             self._boot_ops = dict(_BOOT_OPS_DEFAULTS)
         for key, val in (('isolate_edge_jbs', isolate_edge_jbs), ('scale_jbs', scale_jbs), ('djbs_tol', djbs_tol),
                          ('diagnose_bs', diagnose_bs), ('taper_edge_jphi', taper_edge_jphi),
                          ('taper_edge_psi0', taper_edge_psi0), ('taper_edge_shape', taper_edge_shape),
                          ('saw_q_s', saw_q_s), ('saw_dq', saw_dq), ('saw_tol', saw_tol), ('saw_relax', saw_relax),
-                         ('saw_ramp', saw_ramp), ('saw_rule', saw_rule)):
+                         ('saw_ramp', saw_ramp), ('saw_rule', saw_rule), ('bs_interp', bs_interp)):
             if val is not None:
                 self._boot_ops[key] = type(_BOOT_OPS_DEFAULTS[key])(val)
         if self._boot_ops['saw_q_s'] < 0.0 or self._boot_ops['saw_dq'] <= 0.0 or not (0.0 < self._boot_ops['saw_relax'] <= 1.0) \
