@@ -32,6 +32,7 @@ holes times the number of cells crossed by the cuts.
 @date October 2026
 @ingroup doxy_oft_python
 '''
+import time
 from fractions import Fraction
 import numpy as np
 import scipy.sparse
@@ -487,14 +488,18 @@ def _surface_holes(r, lc, ref_point, optimize, info, indent):
     if nholes == len(bloops):
         return bloops, omitted, []
     root = int(np.argmin(np.linalg.norm(r-ref_point[np.newaxis,:], axis=1)))
+    t0 = time.perf_counter()
     surf.setup_functionals(root)
     seeds = [surf.loop_signature(loop) for loop in bloops]
     pools = [(root, np.inf) + surf.candidates(root)]
     selected = _select(seeds, pools, nholes)
+    if info:
+        print(indent+'  Initial search from base point ({0:.3E}, {1:.3E}, {2:.3E}): {3} candidate loops, total length = {4:.4E} ({5:.2f} s)'.format(
+            *r[root], pools[0][2].shape[0], sum(sel[0] for sel in selected), time.perf_counter()-t0), flush=True)
     # Search again from the middle of each selected loop, until the selection does not change. Loops longer than
     # those already selected are never needed, so each search is limited to that length.
     searched = {root}
-    for _ in range(_max_passes if optimize else 1):
+    for ipass in range(_max_passes if optimize else 1):
         limit = max(s[0] for s in selected)
         roots = set()
         for _, sroot, slimit, edge in selected:
@@ -505,12 +510,21 @@ def _surface_holes(r, lc, ref_point, optimize, info, indent):
             break
         searched.update(roots)
         if info:
-            print(indent+'  Searching from {0} additional base point(s)'.format(len(roots)))
-        for new_root in roots:
+            print(indent+'  Search pass {0}: {1} additional base point(s)'.format(ipass+1, len(roots)), flush=True)
+        for k, new_root in enumerate(roots):
+            t0 = time.perf_counter()
             pools.append((new_root, limit) + surf.candidates(new_root, limit))
+            if info:
+                print(indent+'    [{0}/{1}] Base point ({2:.3E}, {3:.3E}, {4:.3E}): {5} candidate loops ({6:.2f} s)'.format(
+                    k+1, len(roots), *r[new_root], pools[-1][2].shape[0], time.perf_counter()-t0), flush=True)
         previous = set((s[1], s[3]) for s in selected)
+        t0 = time.perf_counter()
         selected = _select(seeds, pools, nholes)
-        if set((s[1], s[3]) for s in selected) == previous:
+        changed = set((s[1], s[3]) for s in selected) != previous
+        if info:
+            print(indent+'    Selection {0}: total length = {1:.4E} ({2:.2f} s)'.format(
+                'updated' if changed else 'unchanged', sum(sel[0] for sel in selected), time.perf_counter()-t0), flush=True)
+        if not changed:
             break
     loops = [surf.tighten(surf.tree_cycle(sroot, slimit, edge)) for _, sroot, slimit, edge in selected]
     return bloops, omitted, loops
