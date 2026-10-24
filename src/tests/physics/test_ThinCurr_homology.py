@@ -17,7 +17,7 @@ python_dir = os.path.abspath(os.path.join(test_dir, '..','..','python'))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 sys.path.append(python_dir)
 from oft_testing import run_command
-from OpenFUSIONToolkit.ThinCurr.meshing import read_ThinCurr_mesh
+from OpenFUSIONToolkit.ThinCurr.meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
 from OpenFUSIONToolkit.ThinCurr._homology_cli import compute_homology
 
 # Expected number of holes and closures for each mesh
@@ -166,12 +166,16 @@ def test_optimize():
 
 @pytest.mark.parametrize("mesh_name,message", (('homology_tee', 'manifold'),
                                                ('homology_touching', 'touch only at a vertex'),
+                                               ('homology_pinched', 'pinched boundary'),
                                                ('homology_mobius', 'orientable')))
 def test_invalid(mesh_name, message):
+    '''Unsupported meshes are rejected, both when selecting holes and when verifying a mesh'''
     in_file = convert_mesh(mesh_name)
     outs, errs, errcode = run_command("OFT_ThinCurr_holes.py --in_file={0}".format(in_file))
     assert errcode != 0
     assert message in (outs + errs).decode()
+    with pytest.raises(ValueError, match=message):
+        compute_homology(in_file, verify_only=True)
 
 
 def mp_run(target, args, timeout=180):
@@ -233,3 +237,33 @@ def test_ordered_hole():
     loop = mesh['thincurr']['holes'][0]
     assert has_chord(loop, edge_set(mesh['lc']))
     assert mp_run(run_eigs, (out_file,)) is not None
+
+
+def run_Lmat(mesh_file, mp_q):
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        tw_model = ThinCurr(myOFT)
+        tw_model.setup_model(mesh_file=mesh_file)
+        tw_model.compute_Lmat()
+        # Large arrays can block the queue, so pass the matrix through a file
+        np.save(mesh_file + '.Lmat.npy', tw_model.Lmat)
+        mp_q.put(mesh_file + '.Lmat.npy')
+    except BaseException as e:
+        print(e)
+        mp_q.put(None)
+
+
+def test_hole_direction():
+    '''The direction of a hole does not depend on the order and starting point of its stored loop'''
+    out_file = find_holes('homology_torus_port', 'tree')
+    mesh = read_ThinCurr_mesh(out_file)
+    holes = [np.roll(hole, len(hole)//3)[::-1] for hole in mesh['thincurr']['holes']]
+    write_ThinCurr_mesh('homology_torus_port-reversed.h5', mesh['r'], mesh['lc'], mesh['reg'], holes=holes,
+                        closures=mesh['thincurr'].get('closures'))
+    Lmat_file = mp_run(run_Lmat, (out_file,))
+    Lmat_reversed_file = mp_run(run_Lmat, ('homology_torus_port-reversed.h5',))
+    assert (Lmat_file is not None) and (Lmat_reversed_file is not None)
+    Lmat, Lmat_reversed = np.load(Lmat_file), np.load(Lmat_reversed_file)
+    assert np.allclose(Lmat, Lmat_reversed, rtol=0.0, atol=1.E-12*np.abs(Lmat).max())
