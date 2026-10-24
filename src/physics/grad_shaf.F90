@@ -3510,7 +3510,7 @@ CLASS(oft_vector), intent(inout) :: b3 !< P' component of source (without `p_sca
 REAL(8), INTENT(out) :: itor_ffp,itor_press,estore,dflux_ffp
 real(r8), pointer, dimension(:) :: atmp,btmp,b2tmp,b3tmp
 real(8) :: psitmp,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),pani(2)
-real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:)
+real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:),rhs_cell(:,:,:),sum_cell(:,:)
 integer(4) :: j,m,l
 integer(4), allocatable :: j_lag(:)
 logical :: curved
@@ -3536,13 +3536,11 @@ IF(ASSOCIATED(self%P_ani))THEN
 ELSE
   NULLIFY(bcross_kappa_fun%u)
 END IF
-!---
-itor_ffp=0.d0
-itor_press=0.d0
-estore=0.d0
-dflux_ffp=0.d0
+!---Per-cell RHS and sums, added up in cell order below (reproducible with the dynamic schedule)
+allocate(rhs_cell(device%fe_rep%nce,3,device%fe_rep%mesh%nc),sum_cell(4,device%fe_rep%mesh%nc))
+sum_cell=0.d0
 !$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp,quad) &
-!$omp reduction(+:itor_ffp) reduction(+:itor_press) reduction(+:estore) reduction(+:dflux_ffp)
+!$omp private(itor_ffp,itor_press,estore,dflux_ffp)
 allocate(rhs_loc(device%fe_rep%nce,3))
 allocate(rop(device%fe_rep%nce),vcache(device%fe_rep%nce))
 allocate(j_lag(device%fe_rep%nce))
@@ -3552,6 +3550,7 @@ do j=1,device%fe_rep%mesh%nc
   IF(device%fe_rep%mesh%reg(j)/=1)CYCLE ! Only compute in plasma region
   call device%fe_rep%ncdofs(j,j_lag)
   rhs_loc=0.d0
+  itor_ffp=0.d0; itor_press=0.d0; estore=0.d0; dflux_ffp=0.d0
   DO l=1,device%fe_rep%nce
     vcache(l) = atmp(j_lag(l))
   END DO
@@ -3602,19 +3601,25 @@ do j=1,device%fe_rep%mesh%nc
       rhs_loc(l,:)=rhs_loc(l,:)+rop(l)*ffp
     end do
   end do
-  !---Get local to global DOF mapping
-  do l=1,device%fe_rep%nce
-    m = j_lag(l)
-    !$omp atomic
-    btmp(m)=btmp(m)+rhs_loc(l,1)
-    !$omp atomic
-    b2tmp(m)=b2tmp(m)+rhs_loc(l,2)
-    !$omp atomic
-    b3tmp(m)=b3tmp(m)+rhs_loc(l,3)
-  end do
+  rhs_cell(:,:,j)=rhs_loc
+  sum_cell(:,j)=[itor_ffp,itor_press,estore,dflux_ffp]
 end do
 deallocate(rhs_loc,j_lag,rop,vcache)
 !$omp end parallel
+!---Get local to global DOF mapping
+allocate(j_lag(device%fe_rep%nce))
+do j=1,device%fe_rep%mesh%nc
+  IF(device%fe_rep%mesh%reg(j)/=1)CYCLE
+  call device%fe_rep%ncdofs(j,j_lag)
+  btmp(j_lag)=btmp(j_lag)+rhs_cell(:,1,j)
+  b2tmp(j_lag)=b2tmp(j_lag)+rhs_cell(:,2,j)
+  b3tmp(j_lag)=b3tmp(j_lag)+rhs_cell(:,3,j)
+end do
+itor_ffp=SUM(sum_cell(1,:))
+itor_press=SUM(sum_cell(2,:))
+estore=SUM(sum_cell(3,:))
+dflux_ffp=SUM(sum_cell(4,:))
+deallocate(j_lag,rhs_cell,sum_cell)
 CALL b%restore_local(btmp,add=.TRUE.)
 CALL b2%restore_local(b2tmp,add=.TRUE.)
 CALL b3%restore_local(b3tmp,add=.TRUE.)
