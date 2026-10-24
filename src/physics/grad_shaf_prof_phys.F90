@@ -613,16 +613,18 @@ REAL(r8), INTENT(out) :: result !< Integral over the plasma cross-section
 INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Beyond the last node: 0 skip (default), 1 hold its value (see linterp)
 INTEGER(i4) :: i,m,extrap_loc
 REAL(r8) :: area,psitmp(1),sgop(3,3)
+REAL(r8), ALLOCATABLE :: cell_int(:)
 TYPE(gs_prof_interp) :: prof_interp_obj
 TYPE(oft_quad_type), POINTER :: quad
 ! DEBUG_STACK_PUSH
 !---Setup
 extrap_loc=0
 IF(PRESENT(extrap))extrap_loc=extrap
-result=0.d0
+ALLOCATE(cell_int(self%device%mesh%nc))
+cell_int=0.d0
 prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
-!$omp parallel do private(m,psitmp,sgop,area,quad) reduction(+:result) schedule(dynamic,16)
+!$omp parallel do private(m,psitmp,sgop,area,quad) schedule(dynamic,16)
 do i=1,self%device%mesh%nc
   IF(self%device%mesh%reg(i)/=1)CYCLE
   CALL gs_cell_quad(self,i,prof_interp_obj%psi_eval%vals,quad)
@@ -632,11 +634,12 @@ do i=1,self%device%mesh%nc
     call prof_interp_obj%interp(i,quad%pts(:,m),sgop,psitmp)
     IF(psitmp(1)<=0.d0)CYCLE ! Outside the plasma (mode 4 gives 0 outside the LCFS or gs_test_bounds)
     psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),extrap_loc)
-    IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*quad%wts(m)
+    IF(psitmp(1)>-1.d98)cell_int(i) = cell_int(i) + psitmp(1)*area*quad%wts(m)
   end do
 end do
-!---Global reduction and cleanup
-result=oft_mpi_sum(result)
+!---Global reduction in cell order (reproducible with the dynamic schedule) and cleanup
+result=oft_mpi_sum(SUM(cell_int))
+DEALLOCATE(cell_int)
 CALL prof_interp_obj%delete()
 ! DEBUG_STACK_POP
 END SUBROUTINE gs_flux_int
