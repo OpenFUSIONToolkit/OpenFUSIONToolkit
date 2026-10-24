@@ -93,7 +93,7 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     @param show_covering Show covering triangles for boundary cycles (legacy method only, only used if `plot_steps`)?
     @param debug Print additional debug information?
     @param ref_point Reference location for base point [x,y,z] (default: [0,0,0])
-    @param optimize_holes Sample additional points to attempt to optimize holes?
+    @param optimize_holes Sample additional points to attempt to optimize holes (little effect with the default method)?
     @param verify_only Verify the correct number of holes and closures are found, but do not write output file?
     @param use_legacy Use the legacy Greedy Homotopy method?
     @param verbose Print progress for each search base point (tree-cotree method only)?
@@ -193,7 +193,7 @@ def script_entry():
     parser.add_argument("--show_covering", action="store_true", default=False, help="Show covering triangles for boundary cycles (legacy method only, only used if `--plot_steps`)?")
     parser.add_argument("--debug", action="store_true", default=False, help="Print additional debug information?")
     parser.add_argument("--ref_point", default=None, type=float, nargs='+', help='Reference location for base point [x,y,z] (default: [0,0,0])')
-    parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes?")
+    parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes (little effect with the default method)?")
     parser.add_argument("--use_legacy", action="store_true", default=False, help="Use the legacy Greedy Homotopy method?")
     parser.add_argument("--verbose", action="store_true", default=False, help="Print progress for each search base point (tree-cotree method only)?")
     options = parser.parse_args()
@@ -241,7 +241,7 @@ def script_entry():
 #     --debug               Print additional debug information?
 #     --ref_point REF_POINT [REF_POINT ...]
 #                           Reference location for base point [x,y,z] (default: [0,0,0])
-#     --optimize_holes      Sample additional points to attempt to optimize holes?
+#     --optimize_holes      Sample additional points to attempt to optimize holes (little effect with the default method)?
 #     --use_legacy          Use the legacy Greedy Homotopy method?
 #     --verbose             Print progress for each search base point (tree-cotree method only)?
 #```

@@ -21,8 +21,9 @@ Holes are chosen for each connected surface as follows:
  3. Candidate loops are the fundamental cycles of a shortest-path tree from a base vertex. The candidates are
     taken shortest first and kept when their signature is independent of the loops already kept.
  4. The shortest-path search is repeated from the far side of each selected loop (the end of the tree edge that
-    closes it, opposite the point where its two tree paths meet) and the selection is repeated
-    over all candidates found. With optimization this is repeated until the selection does not change.
+    closes it, opposite the point where its two tree paths meet) and the selection is repeated over all
+    candidates found. Optionally (`optimize`), this is repeated until the selection does not change, which
+    rarely shortens the loops further.
  5. Each selected loop is shortened by cutting corners: where three consecutive vertices form a cell, the
     middle vertex is removed, which does not change the loop's signature.
 
@@ -564,7 +565,7 @@ def find_holes(r, lc, ref_point=None, optimize=False, info=False, verbose=False,
     @param r Vertex list [nv,3]
     @param lc Cell list [nf,3] (0-based)
     @param ref_point Reference location for the base point of each surface [x,y,z] (default: [0,0,0])
-    @param optimize Repeat the search from the far side of the selected loops until the selection does not change?
+    @param optimize Repeat the search from the far side of the selected loops until the selection does not change (rarely shortens the loops further)?
     @param info Print information on each surface?
     @param verbose Print the location and search time of each base point (requires `info`)?
     @param indent Indentation for printed information
