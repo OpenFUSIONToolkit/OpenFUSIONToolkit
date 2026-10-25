@@ -926,9 +926,12 @@ class TokaMaker():
 
     def multistep(self):
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_multistep(self._tMaker_ptr,error_string)
+        converged = c_bool()
+        tokamaker_multistep(self._tMaker_ptr, ctypes.byref(converged), error_string)
         if error_string.value != b'':
             raise ValueError("Error in multistep: {0}".format(error_string.value.decode()))
+        if converged.value:
+            return True
 
     def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None,eq_idx=0):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium

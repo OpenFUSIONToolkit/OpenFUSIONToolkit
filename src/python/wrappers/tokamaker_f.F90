@@ -620,19 +620,21 @@ IF(ierr/=0)CALL copy_string(gs_err_reason(ierr),error_str)
 nl_its=tMaker_obj%device%gs_solvers(1)%nl_its
 END SUBROUTINE tokamaker_solve
 
-SUBROUTINE tokamaker_multistep(tMaker_ptr,error_str) BIND(C,NAME="tokamaker_multistep")
+SUBROUTINE tokamaker_multistep(tMaker_ptr, sim_converged, error_str) BIND(C,NAME="tokamaker_multistep")
 TYPE(c_ptr), VALUE, INTENT(in) :: tMaker_ptr !< Pointer to TokaMaker object
+LOGICAL, INTENT(out) :: sim_converged
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
 INTEGER(i4) :: step_err
 INTEGER(i4) :: i
 TYPE(gs_equil) :: myeq
 INTEGER(i4), SAVE :: j = 1
-LOGICAL :: converged = .FALSE.
+LOGICAL :: step_converged = .FALSE.
 LOGICAL, SAVE :: did_setup = .FALSE.
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 step_err = 0
 
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
+sim_converged = .TRUE.
 
 IF(.NOT.did_setup)THEN
   DO i=1, tMaker_obj%n_eq
@@ -642,8 +644,10 @@ IF(.NOT.did_setup)THEN
 END IF
 
 DO i=1, tMaker_obj%n_eq
-  CALL tMaker_obj%device%gs_solvers(i)%step(tMaker_obj%device, tMaker_obj%gs_equils(i)%eq, j, converged, step_err)
+  CALL tMaker_obj%device%gs_solvers(i)%step(tMaker_obj%device, tMaker_obj%gs_equils(i)%eq, j, step_converged, step_err)
+  sim_converged = sim_converged.AND.step_converged
   IF(step_err /= 0)THEN
+    print *, 'Error=', step_err
     CALL copy_string('Error in GS solver step.',error_str)
   END IF
 END DO
