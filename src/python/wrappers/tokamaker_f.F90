@@ -86,6 +86,7 @@ END TYPE tokamaker_recon_settings_type
 TYPE :: tokamaker_instance
   INTEGER(i4) :: mode = 1 !< Parallel current source formulation used (0 -> define \f$F'\f$, 1 -> define \f$F*F'\f$)
   INTEGER(i4) :: n_eq = 1 !< Number of GS equilibrium objects (size of gs_equils)
+  INTEGER(i4) :: step = 1 !< Step index for multistep
   INTEGER(i4), POINTER, DIMENSION(:) :: reg_plot => NULL() !< Region index on tesselated plotting mesh
   INTEGER(i4), POINTER, DIMENSION(:,:) :: lc_plot => NULL() !< Cell list for tesselated plotting mesh
   REAL(r8), POINTER, DIMENSION(:,:) :: r_plot => NULL() !< Point list for tesselated plotting mesh
@@ -114,6 +115,7 @@ ALLOCATE(tMaker_obj)
 ALLOCATE(tMaker_obj%device)
 tMaker_ptr=C_LOC(tMaker_obj)
 CALL c_f_pointer(mesh_ptr,tMaker_obj%ml_mesh)
+tMaker_obj%step = 1
 END SUBROUTINE tokamaker_alloc
 !---------------------------------------------------------------------------------
 !> Copy TokaMaker equilibrium object
@@ -627,7 +629,6 @@ CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string
 INTEGER(i4) :: step_err
 INTEGER(i4) :: i
 TYPE(gs_equil) :: myeq
-INTEGER(i4), SAVE :: j = 1
 LOGICAL :: step_converged = .FALSE.
 LOGICAL, SAVE :: did_setup = .FALSE.
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
@@ -644,14 +645,14 @@ IF(.NOT.did_setup)THEN
 END IF
 
 DO i=1, tMaker_obj%n_eq
-  CALL tMaker_obj%device%gs_solvers(i)%step(tMaker_obj%device, tMaker_obj%gs_equils(i)%eq, j, step_converged, step_err)
+  CALL tMaker_obj%device%gs_solvers(i)%step(tMaker_obj%device, tMaker_obj%gs_equils(i)%eq, tMaker_obj%step, step_converged, step_err)
   sim_converged = sim_converged.AND.step_converged
   IF(step_err /= 0)THEN
     print *, 'Error=', step_err
     CALL copy_string('Error in GS solver step.',error_str)
   END IF
 END DO
-j = j + 1
+tMaker_obj%step = tMaker_obj%step + 1
 END SUBROUTINE tokamaker_multistep
 !---------------------------------------------------------------------------------
 !> Perform linear solve to find vacuum solution for given BCs and current sources
