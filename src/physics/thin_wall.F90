@@ -146,8 +146,8 @@ TYPE :: tw_type
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Acoil2coil => NULL() !< Coil to coil coupling matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Lmat => NULL() !< Full inductance matrix
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Adr2sen => NULL() !< Driver (icoils) to sensor coupling matrix
-  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bel => NULL()
-  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL()
+  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bel => NULL() !< Element to vertex B-field reconstruction operator [np,nelems,3]
+  REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bdr => NULL() !< Driver (icoils) to vertex B-field reconstruction operator [np,n_icoils,3]
   REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: qbasis => NULL() !< Basis function pre-evaluated at cell centers
   CHARACTER(LEN=OFT_PATH_SLEN) :: rst_prefix = '' !< Path prefix for .rst and .hist output files
   TYPE(xdmf_plot_file) :: xdmf
@@ -544,6 +544,8 @@ IF(jj>n)THEN
   DEALLOCATE(lloop_tmp,flag_list)
   RETURN
 END IF
+CALL oft_warn('Hole points are not stored as an ordered loop, using legacy ordering (may fail or flip the hole ' &
+  //'direction for loops with chords); recreate holes with "OFT_ThinCurr_holes"')
 !---Find loop points and edges
 !
 ! DO i0=1,n
@@ -2106,6 +2108,7 @@ REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),po
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
 INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
 LOGICAL :: is_neighbor,load_success
+INTEGER(c_int), PARAMETER :: Bops_cache_ver = 1 !< Cache file version (used as hash starting value)
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 IF(PRESENT(save_file))THEN
@@ -2118,7 +2121,7 @@ ALLOCATE(quads(18))
 DO i=1,18
   CALL set_quad_2d(quads(i),i)
 END DO
-ALLOCATE(self%Bel(self%nelems_exp,bmesh%np,3))
+ALLOCATE(self%Bel(bmesh%np,self%nelems_exp,3))
 self%Bel=0.d0
 f=1.d0/3.d0
 WRITE(*,'(2A)')oft_indent,'Building element->element magnetic reconstruction operator'
@@ -2201,20 +2204,20 @@ DO i=1,bmesh%nc
   DO ii=1,3
     ik=self%pmap(bmesh%lc(ii,i))
     IF(ik==0)CYCLE
-    DO j=1,bmesh%np
-      DO jj=1,3
+    DO jj=1,3
+      DO j=1,bmesh%np
         !$omp atomic
-        self%Bel(ik,j,jj) = self%Bel(ik,j,jj) + atmp(jj,ii,j)
+        self%Bel(j,ik,jj) = self%Bel(j,ik,jj) + atmp(jj,ii,j)
       END DO
     END DO
   END DO
   DO ii=self%kfh(i),self%kfh(i+1)-1
     ik=ABS(self%lfh(1,ii))+self%np_active
-    DO j=1,bmesh%np
-      DO jj=1,3
+    DO jj=1,3
+      DO j=1,bmesh%np
         tmp=SIGN(1,self%lfh(1,ii))*atmp(jj,self%lfh(2,ii),j)
         !$omp atomic
-        self%Bel(ik,j,jj) = self%Bel(ik,j,jj) + tmp
+        self%Bel(j,ik,jj) = self%Bel(j,ik,jj) + tmp
       END DO
     END DO
   END DO
@@ -2245,8 +2248,8 @@ DO i=1,bmesh%np
     END DO
     DO jj=1,3
       !$omp atomic
-      self%Bel(self%np_active+self%nholes+j,i,jj) = &
-        self%Bel(self%np_active+self%nholes+j,i,jj) + ecc(jj)
+      self%Bel(i,self%np_active+self%nholes+j,jj) = &
+        self%Bel(i,self%np_active+self%nholes+j,jj) + ecc(jj)
     END DO
   END DO
 END DO
@@ -2291,12 +2294,13 @@ IF(TRIM(save_file)/='none')THEN
   IF(exists)THEN
     hash_tmp(1) = self%nelems_exp
     hash_tmp(2) = self%mesh%nc
-    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=Bops_cache_ver)
     hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
     WRITE(*,'(3A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
-    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash')
-    IF(exists.AND.ALL(file_counts==hash_tmp))THEN
-      ALLOCATE(self%Bel(self%nelems_exp,self%mesh%np,3))
+    CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
+    IF(exists)exists=ALL(file_counts==hash_tmp)
+    IF(exists)THEN
+      ALLOCATE(self%Bel(self%mesh%np,self%nelems_exp,3))
       CALL hdf5_read(self%Bel(:,:,1),TRIM(save_file),'Bel_X',success=exists)
       IF(exists)CALL hdf5_read(self%Bel(:,:,2),TRIM(save_file),'Bel_Y',success=exists)
       IF(exists)CALL hdf5_read(self%Bel(:,:,3),TRIM(save_file),'Bel_Z',success=exists)
@@ -2321,7 +2325,7 @@ INTEGER(4) :: hash_tmp(4)
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%nelems_exp
   hash_tmp(2) = self%mesh%nc
-  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8))
+  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=Bops_cache_ver)
   hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
   WRITE(*,'(2A)')oft_indent,'Saving B-field operator to file: ',TRIM(save_file)
   CALL hdf5_create_file(TRIM(save_file))
@@ -3960,12 +3964,12 @@ REAL(8) :: vals(self%jp_nred+1)
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bred
 CALL tw_compute_Bops_exp(self,B_dx,save_file)
 IF(.NOT.self%junctions)RETURN
-ALLOCATE(Bred(self%nelems,SIZE(self%Bel,DIM=2),3))
+ALLOCATE(Bred(SIZE(self%Bel,DIM=1),self%nelems,3))
 Bred=0.d0
 DO e=1,self%nelems_exp
   CALL tw_junction_row(self,e,n,cols,vals)
   DO k=1,n
-    Bred(cols(k),:,:)=Bred(cols(k),:,:)+vals(k)*self%Bel(e,:,:)
+    Bred(:,cols(k),:)=Bred(:,cols(k),:)+vals(k)*self%Bel(:,e,:)
   END DO
 END DO
 DEALLOCATE(self%Bel)

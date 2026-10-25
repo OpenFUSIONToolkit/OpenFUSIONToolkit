@@ -1165,16 +1165,9 @@ DO i=0,nsteps
       cc_vals(3,:)=vtmp
       DEALLOCATE(vtmp)
     ELSE
-      !$omp parallel do private(j,jj,tmp)
-      DO k=1,self%mesh%np
-        DO jj=1,3
-          tmp=0.d0
-          !$omp simd reduction(+:tmp)
-          DO j=1,self%nelems
-            tmp=tmp+vals(j)*self%Bel(j,k,jj)
-          END DO
-          cc_vals(jj,k)=tmp
-        END DO
+      DO jj=1,3
+        CALL dgemv('N',self%mesh%np,self%nelems,1.d0,self%Bel(:,:,jj),self%mesh%np, &
+          vals,1,0.d0,cc_vals(jj,1),3)
       END DO
     END IF
     IF(self%n_icoils>0)THEN
