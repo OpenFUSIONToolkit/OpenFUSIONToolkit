@@ -1272,3 +1272,36 @@ def test_combine_stitch_aligned_graded(tmp_path):
     ys = np.sort([p[1] for p in stitched.r if abs(p[0]) < 1.E-12 and abs(p[2]) < 1.E-12])
     assert ys.size == 8
     assert np.allclose(np.diff(ys), np.diff(np.linspace(0.0, 1.0, 8)**1.8), atol=0.01)
+
+
+def test_combine_close_gaps(tmp_path):
+    '''Sheets stopping short of a shared edge are extended to where their surfaces meet, then stitched'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    g, th = 0.02, np.radians(25.0)
+    sheets = ((3, 6, lambda u, v: np.c_[-(g + 0.48*u)*np.cos(th), v, -(g + 0.48*u)*np.sin(th)]),
+              (5, 9, lambda u, v: np.c_[(g + 0.48*u)*np.cos(th), v, -(g + 0.48*u)*np.sin(th)]),
+              (4, 7, lambda u, v: np.c_[0*u, v, g + 0.48*u]))
+    files = []
+    for k, (n1, n2, mapping) in enumerate(sheets):
+        r, lc = _sheet(n1, n2, mapping)
+        files.append(str(tmp_path / 'sheet{0}.h5'.format(k)))
+        write_ThinCurr_mesh(files[-1], r, lc, np.ones(lc.shape[0], dtype=np.int32))
+    joined = combine_meshes(files, close_gaps_tol=0.05)
+    edges = {}
+    for cell in joined.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            edges[e] = edges.get(e, 0) + 1
+    # The roof planes and the stem meet on the line x = z = 0
+    junction = [e for e, n in edges.items() if n == 3]
+    assert len(junction) == 7
+    assert np.allclose(joined.r[np.unique(junction)][:, [0, 2]], 0.0, atol=1.E-12)
+    # Gaps larger than the tolerance are left open
+    still_open = combine_meshes(files, close_gaps_tol=0.01)
+    counts = {}
+    for cell in still_open.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            counts[e] = counts.get(e, 0) + 1
+    assert max(counts.values()) == 2

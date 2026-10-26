@@ -905,8 +905,89 @@ def _restitch(mesh, seam, closed, new_pts, rel_tol, end_tol=0.0):
         mesh.closures = None
 
 
+def close_gaps(meshes, gap_tol):
+    """! Close small gaps between the edges of separate meshes, in place, by extending each edge to where the
+    surfaces meet
+
+    Boundary vertices of a mesh within `gap_tol` of another mesh's boundary are moved within their own surface,
+    perpendicular to their edge and away from the mesh, onto the other mesh's surface extended (the plane of its
+    nearest cell). Meshes at an angle then meet on the line where their surfaces intersect; nearly coplanar meshes
+    meet half way. Only vertices whose extension points towards the other mesh are moved, and only the boundary
+    row of each mesh changes, so gaps should be smaller than the cells. Run @ref stitch_meshes afterwards.
+
+    @param meshes List of @ref ThinCurrMesh (modified in place)
+    @param gap_tol Largest gap to close (distance)
+    @result Number of vertices moved
+    """
+    info = []
+    for mesh in meshes:
+        p = mesh.r[mesh.lc]
+        normals = np.cross(p[:, 1] - p[:, 0], p[:, 2] - p[:, 0])
+        normals /= np.linalg.norm(normals, axis=1)[:, None]
+        vcells, ecell = {}, {}
+        for c, cell in enumerate(mesh.lc):
+            for k in range(3):
+                vcells.setdefault(int(cell[k]), []).append(c)
+                ecell[(min(int(cell[k]), int(cell[(k + 1) % 3])), max(int(cell[k]), int(cell[(k + 1) % 3])))] = c
+        info.append({'normals': normals, 'vcells': vcells, 'ecell': ecell, 'chains': _boundary_chains(mesh.lc)})
+    moves = []
+    for im, mesh in enumerate(meshes):
+        for chain in info[im]['chains']:
+            pts = mesh.r[chain]
+            best = np.full(len(chain), np.inf)
+            target = [None]*len(chain)
+            for jm, other in enumerate(meshes):
+                if jm == im:
+                    continue
+                for ochain in info[jm]['chains']:
+                    a = other.r[ochain]
+                    b = np.roll(a, -1, axis=0)
+                    ab = b - a
+                    for iv, pv in enumerate(pts):
+                        t = np.clip(np.einsum('sk,sk->s', pv - a, ab)/np.maximum(np.einsum('sk,sk->s', ab, ab), 1.E-300), 0.0, 1.0)
+                        q = a + t[:, None]*ab
+                        d = np.linalg.norm(q - pv, axis=1)
+                        k = int(np.argmin(d))
+                        if d[k] < best[iv]:
+                            best[iv] = d[k]
+                            e = (min(ochain[k], ochain[(k + 1) % len(ochain)]), max(ochain[k], ochain[(k + 1) % len(ochain)]))
+                            target[iv] = (q[k], info[jm]['normals'][info[jm]['ecell'][e]])
+            near = best < gap_tol
+            n = len(chain)
+            for iv in range(n):
+                if not near[iv] or best[iv] < 1.E-12*gap_tol:
+                    continue
+                if not (near[(iv - 1) % n] or near[(iv + 1) % n]):
+                    continue
+                v = chain[iv]
+                # Edge tangent along the gap and outward direction within the surface
+                nbr = [chain[(iv + s) % n] for s in (-1, 1) if near[(iv + s) % n]]
+                tan = mesh.r[nbr[-1]] - mesh.r[nbr[0]] if len(nbr) == 2 else mesh.r[nbr[0]] - mesh.r[v]
+                cells = info[im]['vcells'][v]
+                nrm = info[im]['normals'][cells].mean(axis=0)
+                out = np.cross(tan, nrm)
+                out /= np.linalg.norm(out)
+                if np.dot(out, mesh.r[v] - mesh.r[mesh.lc[cells]].reshape(-1, 3).mean(axis=0)) < 0.0:
+                    out = -out
+                q, nq = target[iv]
+                gap = q - mesh.r[v]
+                if np.dot(out, gap) < 0.5*np.linalg.norm(gap):
+                    continue
+                denom = np.dot(out, nq)
+                if abs(denom) < 0.2:
+                    step = 0.5*np.dot(gap, out)
+                else:
+                    step = np.dot(gap, nq)/denom
+                if 0.0 < step < 2.0*gap_tol:
+                    moves.append((im, v, mesh.r[v] + step*out))
+    for im, v, pos in moves:
+        meshes[im].r[v] = pos
+    print("  Closed gaps: moved {0} boundary vertices".format(len(moves)))
+    return len(moves)
+
+
 def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_tol=None, stitch=False, stitch_tol=0.1,
-                   stitch_keep=None):
+                   stitch_keep=None, close_gaps_tol=None):
     '''! Combine multiple mesh files into a single mesh
 
     Aborts if any input file contains native `NODESET` entries, since such
@@ -921,6 +1002,8 @@ def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_t
     them (see @ref stitch_meshes; implies `merge_points`)
     @param stitch_tol Seam matching tolerance relative to the local edge length (see @ref stitch_meshes)
     @param stitch_keep Index of the input whose seam vertices are kept unchanged when stitching (see @ref stitch_meshes)
+    @param close_gaps_tol Close gaps up to this distance between the inputs' edges before stitching (see
+    @ref close_gaps; implies `stitch`)
     @result Combined @ref ThinCurrMesh
     '''
     meshes = []
@@ -932,6 +1015,9 @@ def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_t
                 "uncategorized nodesets. Run 'modify' on it first to convert them "
                 "into ThinCurr holes/jumpers.".format(fn))
         meshes.append(mesh)
+    if close_gaps_tol is not None:
+        close_gaps(meshes, close_gaps_tol)
+        stitch = True
     if stitch:
         stitch_meshes(meshes, stitch_tol, keep=stitch_keep)
         merge_points = True
@@ -1009,6 +1095,9 @@ def build_parser():
                              "line up along them (implies --merge_points)")
     p_comb.add_argument("--stitch_tol", type=float, default=0.1,
                         help="Seam matching tolerance for --stitch, relative to the local edge length (default: 0.1)")
+    p_comb.add_argument("--close_gaps", type=float, default=None, metavar='TOL',
+                        help="Close gaps up to TOL between the inputs' edges by extending them to where the surfaces "
+                             "meet, then stitch (implies --stitch)")
     p_comb.add_argument("--stitch_keep", type=int, default=None, metavar='IDX',
                         help="Index (0-based) of the input file whose seam vertices are kept unchanged by --stitch "
                              "(default: new seam vertices with a resolution between the inputs')")
@@ -1101,7 +1190,7 @@ def script_entry(argv=None):
                                     distinct_regions=not options.merge_regions,
                                     merge_points=options.merge_points, merge_tol=options.merge_tol,
                                     stitch=options.stitch, stitch_tol=options.stitch_tol,
-                                    stitch_keep=options.stitch_keep)
+                                    stitch_keep=options.stitch_keep, close_gaps_tol=options.close_gaps)
         except ValueError as err:
             parser.error(str(err))
         result.save(out_file)
@@ -1251,6 +1340,9 @@ def script_entry(argv=None):
 # With `--stitch_keep IDX`, input IDX is left unchanged and the other inputs are reconnected to its vertices along
 # the shared edges; this keeps a reference mesh as made, but puts the whole resolution change into the other
 # meshes' cells along the seam.
+# With `--close_gaps TOL`, inputs whose edges stop up to TOL short of each other are first extended, within their own
+# surface, to where the surfaces meet (the intersection line for sheets at an angle, half way for coplanar sheets),
+# and then stitched. Only the boundary row of each input moves, so TOL should be smaller than the cells.
 #
 # In general, the \ref thincurr_compute_holes "OFT_thincurr_holes" utility should be used on the final
 # model to compute holes and colusures from the combined geometry. For compatibility with older models,
@@ -1307,7 +1399,7 @@ def script_entry(argv=None):
 #
 #```shell
 #usage: OFT_ThinCurr_mesh_tool combine [-h] --in_files IN_FILES [IN_FILES ...] [--out_file OUT_FILE] [--merge_regions] [--merge_points]
-#                                       [--stitch] [--stitch_tol STITCH_TOL] [--stitch_keep IDX] [--merge_tol MERGE_TOL]
+#                                       [--stitch] [--stitch_tol STITCH_TOL] [--close_gaps TOL] [--stitch_keep IDX] [--merge_tol MERGE_TOL]
 #
 #options:
 #  -h, --help            show this help message and exit
@@ -1321,6 +1413,8 @@ def script_entry(argv=None):
 #                        (implies --merge_points)
 #  --stitch_tol STITCH_TOL
 #                        Seam matching tolerance for --stitch, relative to the local edge length (default: 0.1)
+#  --close_gaps TOL      Close gaps up to TOL between the inputs' edges by extending them to where the surfaces meet, then stitch
+#                        (implies --stitch)
 #  --stitch_keep IDX     Index (0-based) of the input file whose seam vertices are kept unchanged by --stitch (default: new seam
 #                        vertices with a resolution between the inputs')
 #  --merge_tol MERGE_TOL
