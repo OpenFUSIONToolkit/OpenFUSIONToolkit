@@ -44,6 +44,9 @@ USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, oft_solver_ptr, &
 IMPLICIT NONE
 #include "local.h"
 private
+!> Re-orthogonalize GMRES Arnoldi vectors when orthogonalization reduces the norm
+!! by more than this factor ("twice is enough" criterion)
+REAL(r8), PARAMETER :: gmres_reorth_tol = 1.d0/SQRT(2.d0)
 !------------------------------------------------------------------------------
 !> CG solver class
 !!
@@ -527,10 +530,11 @@ class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_matrix), pointer :: A
 logical :: pm_save,pre_full_res
 integer(i4) :: i,j,k,nits,its,nrits
-real(r8) :: uu,uuold,gg,ggold,delta,hkmi,ggin
-real(r8), allocatable :: h(:,:),c(:),s(:),res(:)
+real(r8) :: uu,uuold,gg,ggold,delta,hkmi,ggin,wnorm0
+real(r8), allocatable :: h(:,:),c(:),s(:),res(:),hdots(:)
 class(oft_vector), pointer :: r,w
 type(oft_vector_ptr), pointer, dimension(:) :: v,z
+type(oft_vector_ptr), allocatable, dimension(:) :: vw
 DEBUG_STACK_PUSH
 !---
 A=>self%A
@@ -559,6 +563,7 @@ r=>self%r
 w=>self%w
 CALL w%set(0.d0)
 allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
+allocate(hdots(nrits+1),vw(nrits+1))
 c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
 uu = u%dot(u)
@@ -597,13 +602,27 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
     call A%apply(z(i)%f,w)
     if(associated(self%bc))call self%bc%apply(w)
-    !---Arnoldi iteration
-    h(1:i,i)=w%mdot(v(1:i),i)
+    !---Arnoldi iteration (CGS with selective re-orthogonalization)
+    do k=1,i
+      vw(k)%f=>v(k)%f
+    end do
+    vw(i+1)%f=>w
+    hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
+    h(1:i,i)=hdots(1:i)
+    wnorm0=SQRT(hdots(i+1))
     do k=1,i
       call w%add(1.d0,-h(k,i),v(k)%f)
     end do
     !if(associated(self%cleaner))call self%cleaner%apply(w)
     h(i+1,i)=SQRT(w%dot(w))
+    IF(h(i+1,i)<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
+      hdots(1:i)=w%mdot(v(1:i),i)
+      do k=1,i
+        call w%add(1.d0,-hdots(k),v(k)%f)
+      end do
+      h(1:i,i)=h(1:i,i)+hdots(1:i)
+      h(i+1,i)=SQRT(w%dot(w))
+    END IF
     IF(h(i+1,i)>0.d0)call v(i+1)%f%add(0.d0,1.d0/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
     !---Apply Givens rotation
@@ -661,7 +680,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
 end do
 END IF
 call g%add(0.d0,1.d0,r)
-deallocate(c,s,h,res)
+deallocate(c,s,h,res,hdots,vw)
 self%cits=nits
 IF(nits==its)self%cits=-1
 DEBUG_STACK_POP
@@ -786,10 +805,12 @@ class(oft_cmatrix), pointer :: A
 logical :: pm_save,pre_full_res
 integer(i4) :: i,j,k,nits,its,nrits
 real(r8) :: uu,uuold,gg,ggold,ggin
+real(r8) :: wnorm0
 complex(c8) :: delta,hkmi
-complex(c8), allocatable :: h(:,:),c(:),s(:),res(:)
+complex(c8), allocatable :: h(:,:),c(:),s(:),res(:),hdots(:)
 class(oft_cvector), pointer :: r,w
 type(oft_cvector_ptr), pointer, dimension(:) :: v,z
+type(oft_cvector_ptr), allocatable, dimension(:) :: vw
 DEBUG_STACK_PUSH
 !---
 A=>self%A
@@ -818,6 +839,7 @@ r=>self%r
 w=>self%w
 CALL w%set((0.d0,0.d0))
 allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
+allocate(hdots(nrits+1),vw(nrits+1))
 c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
 uu = REAL(u%dot(u))
@@ -856,14 +878,27 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
     call A%apply(z(i)%f,w)
     if(associated(self%bc))call self%bc%apply(w)
-    !---Arnoldi iteration
-    ! h(1:i,i)=w%mdot(v,i)
+    !---Arnoldi iteration (CGS with selective re-orthogonalization)
     do k=1,i
-      h(k,i)=v(k)%f%dot(w)
+      vw(k)%f=>v(k)%f
+    end do
+    vw(i+1)%f=>w
+    hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
+    h(1:i,i)=CONJG(hdots(1:i)) ! mdot gives w^H v_k
+    wnorm0=SQRT(REAL(hdots(i+1),r8))
+    do k=1,i
       call w%add((1.d0,0.d0),-h(k,i),v(k)%f)
     end do
     !if(associated(self%cleaner))call self%cleaner%apply(w)
     h(i+1,i)=SQRT(REAL(w%dot(w),r8))
+    IF(ABS(h(i+1,i))<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
+      hdots(1:i)=CONJG(w%mdot(v(1:i),i))
+      do k=1,i
+        call w%add((1.d0,0.d0),-hdots(k),v(k)%f)
+      end do
+      h(1:i,i)=h(1:i,i)+hdots(1:i)
+      h(i+1,i)=SQRT(REAL(w%dot(w),r8))
+    END IF
     IF(ABS(h(i+1,i))>0.d0)call v(i+1)%f%add((0.d0,0.d0),(1.d0,0.d0)/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
     !---Apply Givens rotation
@@ -920,7 +955,7 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
 end do
 END IF
 call g%add((0.d0,0.d0),(1.d0,0.d0),r)
-deallocate(c,s,h,res)
+deallocate(c,s,h,res,hdots,vw)
 self%cits=nits
 IF(nits==its)self%cits=-1
 DEBUG_STACK_POP
