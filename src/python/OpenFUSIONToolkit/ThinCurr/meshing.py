@@ -40,6 +40,10 @@ def write_junction_group(h5_file, junctions):
         h5_file.create_dataset('thincurr/junctions/NPHOLES', data=[len(periodic['holes']),], dtype='i4')
         for i, hole in enumerate(periodic['holes']):
             h5_file.create_dataset('thincurr/junctions/PHOLE{0:04d}'.format(i+1), data=numpy.asarray(hole)+1, dtype='i4')
+    insulated = junctions.get('insulated', [])
+    if len(insulated) > 0:
+        ins = [list(i) if numpy.ndim(i) > 0 else [i, 0] for i in insulated]
+        h5_file.create_dataset('thincurr/junctions/INSULATED', data=ins, dtype='i4')
     P = junctions['P'].tocsr()
     h5_file.create_dataset('thincurr/junctions/P_SIZE', data=list(P.shape), dtype='i4')
     h5_file.create_dataset('thincurr/junctions/P_KR', data=P.indptr+1, dtype='i4')
@@ -155,7 +159,9 @@ def read_ThinCurr_mesh(filename):
                     'kje': jgroup['KJE'][()] - 1, 'lje': lje, 'pmap': jgroup['PMAP'][()], 'vmap': jgroup['VMAP'][()] - 1,
                     'holes': [jgroup['HOLE{0:04d}'.format(i+1)][()] - numpy.array([1, 1, 0]) for i in range(nh)],
                     'P': scipy.sparse.csr_matrix((jgroup['P_VAL'][()], jgroup['P_LC'][()] - 1, jgroup['P_KR'][()] - 1),
-                                                 shape=tuple(psize))}
+                                                 shape=tuple(psize)),
+                    'insulated': [int(i[0]) if i[1] == 0 else (int(i[0]), int(i[1]))
+                                  for i in jgroup['INSULATED'][()]] if 'INSULATED' in jgroup else []}
                 if 'PERIODIC_PMAP' in jgroup:
                     nph = jgroup['NPHOLES'][0]
                     thincurr_info['junctions']['periodic'] = {

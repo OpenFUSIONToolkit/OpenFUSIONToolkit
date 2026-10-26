@@ -239,9 +239,11 @@ def test_ordered_hole():
 
 
 def test_tee_junction():
-    '''Three sheets on one edge are a junction: the mesh is split and written with junction data'''
-    import h5py
+    '''Three sheets on one edge are a junction: an unsplit mesh fails verification, and the mesh is split and
+    written with junction data that passes it'''
     in_file = convert_mesh('homology_tee')
+    with pytest.raises(ValueError, match='no junction data'):
+        compute_homology(in_file, verify_only=True)
     out_file = 'homology_tee-junction.h5'
     _, _, errcode = run_script(["OFT_ThinCurr_holes.py", "--in_file={0}".format(in_file), "--out_file={0}".format(out_file)])
     assert errcode == 0
@@ -250,6 +252,7 @@ def test_tee_junction():
     mesh_in = read_ThinCurr_mesh(in_file)
     junc = read_ThinCurr_mesh(out_file)['thincurr']['junctions']
     assert junc['P'].shape[1] == current_loop_count(mesh_in['lc'], mesh_in['reg'])
+    compute_homology(out_file, verify_only=True)
 
 
 def run_Lmat(mesh_file, mp_q):

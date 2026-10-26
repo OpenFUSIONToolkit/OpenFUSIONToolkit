@@ -145,6 +145,13 @@ def test_insulate_file(tmp_path):
     assert junc['P'].shape[1] == current_loop_count(lc, reg, insulated=(3,)) == out['n_unknowns']
     assert len(junc['holes']) == len(out['holes'])
     assert np.all(junc['vmap'] == out['vmap'])
+    assert junc['insulated'] == [3]
+    compute_homology(str(tmp_path / 'ring-gap.h5'), verify_only=True)
+    import h5py
+    with h5py.File(str(tmp_path / 'ring-gap.h5'), 'r+') as h5_file:
+        del h5_file['thincurr/junctions/INSULATED']
+    with pytest.raises(ValueError, match='unknowns'):
+        compute_homology(str(tmp_path / 'ring-gap.h5'), verify_only=True)
 
 
 def mp_run(target, args, timeout=180):
@@ -200,7 +207,8 @@ def run_reduction(files, P, insulated_runtime, mp_q):
         mats = []
         for path, ins in ((files[0], insulated_runtime), (files[1], None)):
             tw = ThinCurr(myOFT)
-            tw.setup_model(mesh_file=path, junction_insulated=ins)
+            # The expanded reference (P = identity) is not a valid reduced model, so it is not verified
+            tw.setup_model(mesh_file=path, junction_insulated=ins, no_verify_holes=(path == files[1]))
             Mc = np.array(tw.compute_Mcoil())
             tw.compute_Lmat()
             tw.compute_Rmat()

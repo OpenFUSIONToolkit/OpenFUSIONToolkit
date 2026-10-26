@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
 from . import _tree_homology
 from . import _manifold_homology
-from .junctions import has_junctions, find_junction_holes
+from .junctions import has_junctions, find_junction_holes, verify_junction_mesh
 
 
 def _verify_counts(input_model, nholes, nclosures):
@@ -161,10 +161,18 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
         input_model['thincurr'] = {}
     if 'junctions' in input_model['thincurr']:
         if verify_only:
-            print("Junction mesh detected, holes were chosen and checked when the junctions were split")
+            njedges, nunknowns = verify_junction_mesh(input_model['r'], input_model['lc'], input_model['reg'],
+                                                      input_model['thincurr']['junctions'])
+            if print_info:
+                print("Junction mesh: {0} junction edges, {1} unknowns".format(njedges, nunknowns))
             return
         raise ValueError('Mesh has already been split at junctions')
-    if has_junctions(input_model['lc'], input_model['reg']) or split_regions:
+    if has_junctions(input_model['lc'], input_model['reg']):
+        if verify_only:
+            raise ValueError('Mesh has junctions (edges shared by more than two cells, or sheets touching at a vertex) '
+                             'but no junction data, run "OFT_ThinCurr_holes" to split it')
+        return _compute_junction_holes(input_model, out_file, verify_only, print_info, periodic)
+    if split_regions:
         return _compute_junction_holes(input_model, out_file, verify_only, print_info, periodic)
 
     # Select (or count) holes and closures

@@ -684,7 +684,8 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10, periodic=None):
     @result Dictionary: 'r', 'lc' (split mesh), 'reg', 'lines', 'jedges', 'kje', 'lje' (junction table),
             'vmap', 'holes' (explicit holes, [n,3] (cell, split vertex, sign) arrays: non-reference arcs, then
             cycle holes), 'cuts' (the cycle holes), 'pmap', 'P' (sparse [n_expanded, n_reduced]; expanded
-            unknowns are the active vertices then the explicit holes), 'n_unknowns', 'n_loops', 'M', 'info'
+            unknowns are the active vertices then the explicit holes), 'n_unknowns', 'n_loops', 'M', 'info',
+            'insulated'
     '''
     lc = numpy.asarray(lc, dtype=numpy.int32)
     reg = numpy.asarray(reg, dtype=numpy.int32)
@@ -716,7 +717,7 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10, periodic=None):
     return {'r': rs, 'lc': lcs, 'reg': reg, 'lines': lines, 'jedges': jedges, 'kje': kje, 'lje': lje, 'vmap': vmap,
             'periodic': periodic,
             'holes': info['explicit_holes'], 'cuts': cuts, 'pmap': info['pmap'], 'P': info['P'],
-            'n_unknowns': M.shape[1], 'n_loops': target, 'M': M, 'info': info}
+            'n_unknowns': M.shape[1], 'n_loops': target, 'M': M, 'info': info, 'insulated': list(insulated)}
 
 
 def _min_energy(M, K):
@@ -729,6 +730,36 @@ def _min_energy(M, K):
         return 0.0
     d = numpy.abs(lu.U.diagonal())
     return d.min()/d.max()
+
+
+def verify_junction_mesh(r, lc, reg, junctions):
+    '''! Check a split mesh and its junction data against the unsplit mesh rebuilt from `vmap`
+
+    The split and the number of junction edges must match, and (except for periodic models) the number of
+    reduced unknowns must equal the number of independent currents, with the insulation stored in the file.
+
+    @param r Split point list [np,3]
+    @param lc Split cell list [nc,3] (0-based)
+    @param reg Region list [nc]
+    @param junctions Junction data from @ref meshing.read_ThinCurr_mesh
+    @result Number of junction edges, number of reduced unknowns
+    '''
+    vmap = junctions['vmap']
+    r0 = numpy.zeros((vmap.max() + 1, 3))
+    r0[vmap] = r
+    lc0 = vmap[lc]
+    _, lcs, jedges, _, _ = split_junctions(r0, lc0, reg)
+    if (lcs.shape != lc.shape) or numpy.any(lcs != lc):
+        raise ValueError('Split mesh does not match the junction split of its unsplit mesh, rerun "OFT_ThinCurr_holes"')
+    njedges = len(junctions['kje']) - 1
+    if njedges != len(jedges):
+        raise ValueError('Incorrect number of junction edges found {0} in file (expected {1})'.format(njedges, len(jedges)))
+    nunknowns = junctions['P'].shape[1]
+    if junctions.get('periodic') is None:
+        nloops = current_loop_count(lc0, reg, junctions.get('insulated', []))
+        if nunknowns != nloops:
+            raise ValueError('Incorrect number of junction model unknowns found {0} in file (expected {1})'.format(nunknowns, nloops))
+    return njedges, nunknowns
 
 
 def insulate_junction_file(mesh_file, insulated, out_file):

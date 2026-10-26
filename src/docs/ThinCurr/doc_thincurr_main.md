@@ -253,6 +253,8 @@ checked against the number of cycles of the graph.
    elements, vertex map and \f$ \textbf{P} \f$). Where sheets only meet two at a time (for example a torus divided
    into sectors), add `--split_regions` to split at the region interfaces anyway, so that the sheets can be
    insulated from each other.
+ - When a model is set up, an unsplit mesh with junctions is rejected, and a split mesh is checked against its unsplit
+   mesh (split, number of junction edges, and number of unknowns for the stored insulation).
  - Use the resulting file as any other ThinCurr mesh. Sheets can be insulated at the junctions when the model is set
    up, without a new mesh file, with \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.setup_model "setup_model(junction_insulated=[...])".
    A region in the list is insulated at every junction it touches; a pair of regions, e.g. `(1,2)`, is insulated
