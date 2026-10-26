@@ -3001,7 +3001,7 @@ CLASS(oft_tw_hodlr_bjpre), INTENT(inout) :: self !< Solver object
 CLASS(oft_cvector), INTENT(inout) :: u !< Guess/Solution field
 CLASS(oft_cvector), INTENT(inout) :: g !< RHS/Residual field
 !---
-INTEGER(4) :: i,j,k,l,n,level,iblock
+INTEGER(4) :: i,j,k,l,n,level,iblock,max_size
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,hole_inds
 COMPLEX(8), POINTER, DIMENSION(:) :: utmp,gtmp
 COMPLEX(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
@@ -3009,13 +3009,15 @@ COMPLEX(4), ALLOCATABLE, DIMENSION(:,:) :: vloc4
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
 IF(self%refactor)THEN
+  max_size = 0
+  !$omp parallel private(imap,i,j,k,l,n,level,iblock) reduction(MAX:max_size)
   ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
-  self%max_block_size = 0
+  !$omp do schedule(static)
   DO i=1,self%mf_obj%ndense
     level=self%mf_obj%dense_blocks(1,i)
     iblock=self%mf_obj%dense_blocks(2,i)
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
-    self%max_block_size = MAX(self%max_block_size,n)
+    max_size = MAX(max_size,n)
     IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
     self%inverse_mats(i)%M=self%alpha*self%mf_obj%dense_mats(i)%M
     imap=0
@@ -3033,7 +3035,12 @@ IF(self%refactor)THEN
     END DO
     CALL invert_block(self%inverse_mats(i),n)
   END DO
+  !$omp end do
+  DEALLOCATE(imap)
+  !$omp end parallel
+  self%max_block_size = max_size
   !---Get holes
+  ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
   IF(n>0)THEN
     i = self%mf_obj%ndense+1
@@ -3104,26 +3111,17 @@ CONTAINS
 SUBROUTINE invert_block(mat,nrows)
 TYPE(cmat_container), INTENT(inout) :: mat !< Block to invert (`M` must be populated)
 INTEGER(4), INTENT(in) :: nrows !< Size of block
-INTEGER(4) :: error,lwork
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: ipiv
-COMPLEX(4), ALLOCATABLE, DIMENSION(:) :: work4
+INTEGER(4) :: error
 IF(self%mf_obj%pre_single)THEN
   IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
   mat%M4=CMPLX(mat%M,KIND=c4)
   DEALLOCATE(mat%M)
-  ALLOCATE(ipiv(nrows),work4(1))
-  CALL cgetrf(nrows,nrows,mat%M4,nrows,ipiv,error)
-  IF(error/=0)CALL oft_abort("factorization failed","bjprecond_apply",__FILE__)
-  CALL cgetri(nrows,mat%M4,nrows,ipiv,work4,-1,error)
-  lwork=INT(work4(1),4)
-  DEALLOCATE(work4)
-  ALLOCATE(work4(lwork))
-  CALL cgetri(nrows,mat%M4,nrows,ipiv,work4,lwork,error)
-  IF(error/=0)CALL oft_abort("inversion failed","bjprecond_apply",__FILE__)
-  DEALLOCATE(ipiv,work4)
+  CALL lapack_matinv(nrows,mat%M4,error)
+  IF(error/=0)CALL oft_abort("Single precision block inversion failed, block may be ill-conditioned (try pre_single=F)", &
+    "bjprecond_apply",__FILE__)
 ELSE
   CALL lapack_matinv(nrows,mat%M,error)
-  IF(error/=0)CALL oft_abort("factorization failed","bjprecond_apply",__FILE__)
+  IF(error/=0)CALL oft_abort("Block inversion failed","bjprecond_apply",__FILE__)
 END IF
 END SUBROUTINE invert_block
 !------------------------------------------------------------------------------
@@ -3136,13 +3134,20 @@ INTEGER(4), INTENT(in) :: inds(nrows) !< Global indices of block rows
 COMPLEX(8), ALLOCATABLE, INTENT(inout) :: vloc(:,:) !< Double precision work array [max_block_size,2]
 COMPLEX(4), ALLOCATABLE, INTENT(inout) :: vloc4(:,:) !< Single precision work array [max_block_size,2]
 INTEGER(4) :: j
+REAL(8) :: scale
 IF(self%mf_obj%pre_single)THEN
+  !---Scale RHS to avoid underflow/overflow in single precision
+  scale=0.d0
   DO j=1,nrows
-    vloc4(j,1) = CMPLX(gtmp(inds(j)),KIND=c4)
+    scale=MAX(scale,ABS(REAL(gtmp(inds(j)),8)),ABS(AIMAG(gtmp(inds(j)))))
+  END DO
+  IF(scale<=0.d0)RETURN ! Zero RHS for this block (corresponding entries of utmp are already zero)
+  DO j=1,nrows
+    vloc4(j,1) = CMPLX(gtmp(inds(j))/scale,KIND=c4)
   END DO
   CALL cgemv('N',nrows,nrows,(1.0_r4,0.0_r4),mat%M4,nrows,vloc4(:,1),1,(0.0_r4,0.0_r4),vloc4(:,2),1)
   DO j=1,nrows
-    utmp(inds(j)) = CMPLX(vloc4(j,2),KIND=c8)
+    utmp(inds(j)) = CMPLX(vloc4(j,2),KIND=c8)*scale
   END DO
 ELSE
   DO j=1,nrows
@@ -3189,7 +3194,7 @@ CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
 CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
 CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
-INTEGER(4) :: i,j,k,l,n,level,iblock
+INTEGER(4) :: i,j,k,l,n,level,iblock,max_size
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,hole_inds
 REAL(8), POINTER, DIMENSION(:) :: utmp,gtmp
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
@@ -3197,13 +3202,15 @@ REAL(4), ALLOCATABLE, DIMENSION(:,:) :: vloc4
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
 IF(self%refactor)THEN
+  max_size = 0
+  !$omp parallel private(imap,i,j,k,l,n,level,iblock) reduction(MAX:max_size)
   ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
-  self%max_block_size = 0
+  !$omp do schedule(static)
   DO i=1,self%mf_obj%ndense
     level=self%mf_obj%dense_blocks(1,i)
     iblock=self%mf_obj%dense_blocks(2,i)
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
-    self%max_block_size = MAX(self%max_block_size,n)
+    max_size = MAX(max_size,n)
     IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
     self%inverse_mats(i)%M=self%alpha*self%mf_obj%dense_mats(i)%M
     imap=0
@@ -3221,7 +3228,12 @@ IF(self%refactor)THEN
     END DO
     CALL invert_block(self%inverse_mats(i),n)
   END DO
+  !$omp end do
+  DEALLOCATE(imap)
+  !$omp end parallel
+  self%max_block_size = max_size
   !---Get holes
+  ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
   IF(n>0)THEN
     i = self%mf_obj%ndense+1
@@ -3292,23 +3304,17 @@ CONTAINS
 SUBROUTINE invert_block(mat,nrows)
 TYPE(rmat_container), INTENT(inout) :: mat !< Block to invert (`M` must be populated)
 INTEGER(4), INTENT(in) :: nrows !< Size of block
-INTEGER(4) :: error,j,k
+INTEGER(4) :: error
 IF(self%mf_obj%pre_single)THEN
   IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
   mat%M4=REAL(mat%M,r4)
   DEALLOCATE(mat%M)
-  CALL spotrf('U',nrows,mat%M4,nrows,error)
-  IF(error/=0)CALL oft_abort("factorization failed","rbjprecond_apply",__FILE__)
-  CALL spotri('U',nrows,mat%M4,nrows,error)
-  IF(error/=0)CALL oft_abort("inversion failed","rbjprecond_apply",__FILE__)
-  DO j=1,nrows
-    DO k=1,j-1
-      mat%M4(j,k)=mat%M4(k,j)
-    END DO
-  END DO
+  CALL lapack_cholesky(nrows,mat%M4,error)
+  IF(error/=0)CALL oft_abort("Single precision block factorization failed, block may be ill-conditioned (try pre_single=F)", &
+    "rbjprecond_apply",__FILE__)
 ELSE
   CALL lapack_cholesky(nrows,mat%M,error)
-  IF(error/=0)CALL oft_abort("factorization failed","rbjprecond_apply",__FILE__)
+  IF(error/=0)CALL oft_abort("Block factorization failed","rbjprecond_apply",__FILE__)
 END IF
 END SUBROUTINE invert_block
 !------------------------------------------------------------------------------
@@ -3321,13 +3327,20 @@ INTEGER(4), INTENT(in) :: inds(nrows) !< Global indices of block rows
 REAL(8), ALLOCATABLE, INTENT(inout) :: vloc(:,:) !< Double precision work array [max_block_size,2]
 REAL(4), ALLOCATABLE, INTENT(inout) :: vloc4(:,:) !< Single precision work array [max_block_size,2]
 INTEGER(4) :: j
+REAL(8) :: scale
 IF(self%mf_obj%pre_single)THEN
+  !---Scale RHS to avoid underflow/overflow in single precision
+  scale=0.d0
   DO j=1,nrows
-    vloc4(j,1) = REAL(gtmp(inds(j)),r4)
+    scale=MAX(scale,ABS(gtmp(inds(j))))
+  END DO
+  IF(scale<=0.d0)RETURN ! Zero RHS for this block (corresponding entries of utmp are already zero)
+  DO j=1,nrows
+    vloc4(j,1) = REAL(gtmp(inds(j))/scale,r4)
   END DO
   CALL sgemv('N',nrows,nrows,1.0_r4,mat%M4,nrows,vloc4(:,1),1,0.0_r4,vloc4(:,2),1)
   DO j=1,nrows
-    utmp(inds(j)) = REAL(vloc4(j,2),r8)
+    utmp(inds(j)) = REAL(vloc4(j,2),r8)*scale
   END DO
 ELSE
   DO j=1,nrows

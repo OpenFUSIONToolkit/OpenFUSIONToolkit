@@ -299,9 +299,11 @@ END INTERFACE
 INTERFACE lapack_matinv
   MODULE PROCEDURE lapack_matinv_real
   MODULE PROCEDURE lapack_matinv_complex
+  MODULE PROCEDURE lapack_matinv_complex4
 END INTERFACE lapack_matinv
 INTERFACE lapack_cholesky
   MODULE PROCEDURE lapack_cholesky_real
+  MODULE PROCEDURE lapack_cholesky_real4
   ! MODULE PROCEDURE lapack_cholesky_complex
 END INTERFACE lapack_cholesky
 CONTAINS
@@ -1007,7 +1009,7 @@ NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine ilusolver_delete
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Invert a general real matrix in place using LAPACK (double precision)
 !---------------------------------------------------------------------------------
 SUBROUTINE lapack_matinv_real(nrows,Amat,error)
 INTEGER(4), INTENT(in) :: nrows !< Number of rows/columns
@@ -1035,7 +1037,13 @@ IF(info/=0)THEN
 END IF
 lwork=-1
 CALL dgetri(N,Amat,N,ipiv,rwork,lwork,info)
-lwork=INT(rwork(1),4)
+IF(info/=0)THEN
+  WRITE(*,*)'DGETRI workspace query',info
+  error=info
+  DEALLOCATE(ipiv,rwork)
+  RETURN
+END IF
+lwork=MAX(INT(rwork(1),4),N)
 IF(oft_debug_print(1).AND.oft_env%pm)WRITE(*,*)'  Block size = ',lwork/N
 DEALLOCATE(rwork)
 ALLOCATE(rwork(lwork))
@@ -1049,7 +1057,7 @@ IF(oft_env%pm)THEN
 END IF
 END SUBROUTINE lapack_matinv_real
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Invert a general complex matrix in place using LAPACK (double precision)
 !---------------------------------------------------------------------------------
 SUBROUTINE lapack_matinv_complex(nrows,Amat,error)
 INTEGER(i4), INTENT(in) :: nrows !< Number of rows/columns
@@ -1070,18 +1078,26 @@ N = nrows
 ALLOCATE(ipiv(N),rwork(1))
 CALL zgetrf(N,N,Amat,N,ipiv,info)
 IF(info/=0)THEN
+  WRITE(*,*)'ZGETRF',info
   error=info
   DEALLOCATE(ipiv,rwork)
   RETURN
 END IF
 lwork=-1
 CALL zgetri(N,Amat,N,ipiv,rwork,lwork,info)
-lwork=INT(rwork(1),4)
+IF(info/=0)THEN
+  WRITE(*,*)'ZGETRI workspace query',info
+  error=info
+  DEALLOCATE(ipiv,rwork)
+  RETURN
+END IF
+lwork=MAX(INT(REAL(rwork(1),r8),4),N)
 IF(oft_debug_print(1).AND.oft_env%pm)WRITE(*,*)'  Block size = ',lwork/N
 DEALLOCATE(rwork)
 ALLOCATE(rwork(lwork))
 CALL zgetri(N,Amat,N,ipiv,rwork,lwork,info)
 error=info
+IF(info/=0)WRITE(*,*)'ZGETRI',info
 DEALLOCATE(ipiv,rwork)
 IF(oft_env%pm)THEN
   elapsed_timer=stimer%tock()
@@ -1089,14 +1105,63 @@ IF(oft_env%pm)THEN
 END IF
 END SUBROUTINE lapack_matinv_complex
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Invert a general complex matrix in place using LAPACK (single precision)
+!---------------------------------------------------------------------------------
+SUBROUTINE lapack_matinv_complex4(nrows,Amat,error)
+INTEGER(i4), INTENT(in) :: nrows !< Number of rows/columns
+COMPLEX(c4), INTENT(inout) :: Amat(nrows,nrows) !< Matrix to invert
+INTEGER(4), INTENT(out) :: error !< Error flag
+!---
+INTEGER(i4) :: N,LWORK,info
+REAL(r8) :: elapsed_timer
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ipiv
+COMPLEX(c4), ALLOCATABLE, DIMENSION(:) :: rwork
+TYPE(oft_timer) :: stimer
+!---Invert Mmat
+IF(oft_env%pm)THEN
+  WRITE(*,*)'Inverting complex matrix (single precision)'
+  CALL stimer%tick
+END IF
+N = nrows
+ALLOCATE(ipiv(N),rwork(1))
+CALL cgetrf(N,N,Amat,N,ipiv,info)
+IF(info/=0)THEN
+  WRITE(*,*)'CGETRF',info
+  error=info
+  DEALLOCATE(ipiv,rwork)
+  RETURN
+END IF
+lwork=-1
+CALL cgetri(N,Amat,N,ipiv,rwork,lwork,info)
+IF(info/=0)THEN
+  WRITE(*,*)'CGETRI workspace query',info
+  error=info
+  DEALLOCATE(ipiv,rwork)
+  RETURN
+END IF
+lwork=MAX(INT(REAL(rwork(1),r4),4),N)
+IF(oft_debug_print(1).AND.oft_env%pm)WRITE(*,*)'  Block size = ',lwork/N
+DEALLOCATE(rwork)
+ALLOCATE(rwork(lwork))
+CALL cgetri(N,Amat,N,ipiv,rwork,lwork,info)
+error=info
+IF(info/=0)WRITE(*,*)'CGETRI',info
+DEALLOCATE(ipiv,rwork)
+IF(oft_env%pm)THEN
+  elapsed_timer=stimer%tock()
+  WRITE(*,*)'  Time = ',elapsed_timer
+END IF
+END SUBROUTINE lapack_matinv_complex4
+!---------------------------------------------------------------------------------
+!> Invert a symmetric positive-definite real matrix in place using a Cholesky
+!! factorization (double precision)
 !---------------------------------------------------------------------------------
 SUBROUTINE lapack_cholesky_real(nrows,Amat,error)
 INTEGER(4), INTENT(in) :: nrows !< Number of rows/columns
 REAL(8), INTENT(inout) :: Amat(nrows,nrows) !< Matrix to invert
 INTEGER(4), INTENT(out) :: error !< Error flag
 !---
-INTEGER(4) :: N,LWORK,info,i,j
+INTEGER(4) :: N,info,i,j
 REAL(8) :: elapsed_time
 TYPE(oft_timer) :: stimer
 !---Invert Mmat
@@ -1122,6 +1187,41 @@ IF(oft_env%pm)THEN
   WRITE(*,*)'  Time = ',elapsed_time
 END IF
 END SUBROUTINE lapack_cholesky_real
+!---------------------------------------------------------------------------------
+!> Invert a symmetric positive-definite real matrix in place using a Cholesky
+!! factorization (single precision)
+!---------------------------------------------------------------------------------
+SUBROUTINE lapack_cholesky_real4(nrows,Amat,error)
+INTEGER(4), INTENT(in) :: nrows !< Number of rows/columns
+REAL(r4), INTENT(inout) :: Amat(nrows,nrows) !< Matrix to invert
+INTEGER(4), INTENT(out) :: error !< Error flag
+!---
+INTEGER(4) :: N,info,i,j
+REAL(8) :: elapsed_time
+TYPE(oft_timer) :: stimer
+!---Invert Mmat
+IF(oft_env%pm)THEN
+  WRITE(*,*)'Inverting real matrix (single precision)'
+  CALL stimer%tick
+END IF
+N = nrows
+CALL spotrf('U',N,Amat,N,info)
+IF(info/=0)THEN
+  error=info
+  RETURN
+END IF
+CALL spotri('U',N,Amat,N,info)
+DO i=1,N
+  DO j=1,i-1
+    Amat(i,j)=Amat(j,i)
+  END DO
+END DO
+error=info
+IF(oft_env%pm)THEN
+  elapsed_time=stimer%tock()
+  WRITE(*,*)'  Time = ',elapsed_time
+END IF
+END SUBROUTINE lapack_cholesky_real4
 !---------------------------------------------------------------------------------
 !> Native Incomplete LU factorization with no fill
 !!
