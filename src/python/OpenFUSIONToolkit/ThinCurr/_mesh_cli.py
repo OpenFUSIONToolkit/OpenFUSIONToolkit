@@ -586,12 +586,13 @@ def stitch_meshes(meshes, rel_tol=0.1):
     """! Make the shared edges (seams) of separate meshes conforming, in place
 
     A seam is a boundary run of one mesh that lies on the boundary of other meshes (within `rel_tol` times the
-    local edge length, so that curved seams approximated by different chords are matched). Each seam gets a new
-    set of vertices, as many segments as the average of the meshes along it, evenly spaced along the finest
-    mesh's seam; each mesh is reconnected to them by re-triangulating its row of cells along the seam. The seam
-    vertices are then identical in every mesh and are joined by @ref ThinCurrMesh.merge_points. Open seams
-    must share their end points. Holes and closures of stitched meshes are dropped, as are jumpers on removed
-    seam vertices.
+    local edge length, so that curved seams approximated by different chords are matched). A seam may cover only
+    part of another (e.g. a stem along part of a plate edge, or an arc of a circle); the ends of the shorter seams
+    are kept as vertices of the longer one. Each stretch between those ends gets new vertices with the average
+    point density of the meshes along it, placed on the finest of them; each mesh is reconnected to the new
+    vertices by re-triangulating its row of cells along the seam. The seam vertices are then identical in every
+    mesh and are joined by @ref ThinCurrMesh.merge_points. Holes and closures of stitched meshes are dropped, as
+    are jumpers on removed seam vertices.
 
     @param meshes List of @ref ThinCurrMesh (modified in place)
     @param rel_tol Seam matching tolerance relative to the local boundary edge length
@@ -627,23 +628,29 @@ def stitch_meshes(meshes, rel_tol=0.1):
                 if len(cur) >= 2:
                     runs.append({'mesh': c['mesh'], 'v': cur, 'closed': False})
                 cur = []
-    # Group runs of different meshes that lie on each other
+    # Group runs of different meshes that lie on each other (a run may cover only part of another)
     parent = list(range(len(runs)))
     def find(x):
         while parent[x] != x:
             parent[x] = parent[parent[x]]
             x = parent[x]
         return x
+    for run in runs:
+        run['pts'] = meshes[run['mesh']].r[run['v']]
+        loop = np.vstack((run['pts'], run['pts'][:1])) if run['closed'] else run['pts']
+        run['len'] = np.linalg.norm(np.diff(loop, axis=0), axis=1).sum()
+        run['nseg'] = len(run['v']) if run['closed'] else len(run['v']) - 1
+        run['h'] = run['len']/run['nseg']
     for a in range(len(runs)):
         for b in range(a + 1, len(runs)):
             ra, rb = runs[a], runs[b]
-            if ra['mesh'] == rb['mesh'] or ra['closed'] != rb['closed']:
+            if ra['mesh'] == rb['mesh']:
                 continue
-            pa, pb = meshes[ra['mesh']].r[ra['v']], meshes[rb['mesh']].r[rb['v']]
-            ha = np.linalg.norm(np.diff(pa, axis=0), axis=1).mean()
-            mid = 0.5*(pa[:-1] + pa[1:])
-            if np.median(_polyline_distance(mid, pb, rb['closed'])) < rel_tol*ha:
-                parent[find(a)] = find(b)
+            for r1, r2 in ((ra, rb), (rb, ra)):
+                p1 = np.vstack((r1['pts'], r1['pts'][:1])) if r1['closed'] else r1['pts']
+                mid = 0.5*(p1[:-1] + p1[1:])
+                if np.median(_polyline_distance(mid, r2['pts'], r2['closed'])) < rel_tol*r1['h']:
+                    parent[find(a)] = find(b)
     groups = {}
     for a in range(len(runs)):
         groups.setdefault(find(a), []).append(runs[a])
@@ -651,17 +658,94 @@ def stitch_meshes(meshes, rel_tol=0.1):
     for group in groups.values():
         if len(group) < 2:
             continue
-        closed = group[0]['closed']
-        nseg = [len(g['v']) if closed else len(g['v']) - 1 for g in group]
-        ref = group[int(np.argmax(nseg))]
-        ref_pts = meshes[ref['mesh']].r[ref['v']]
-        n_new = int(round(np.mean(nseg)))
-        new_pts = _arc_points(ref_pts, closed, n_new)
+        # Reference: the longest run (closed if any), parametrized by arc length s
+        base = max(group, key=lambda g: (g['closed'], g['len'], g['nseg']))
+        closed = base['closed']
+        bpts = np.vstack((base['pts'], base['pts'][:1])) if closed else base['pts']
+        bs = np.concatenate(([0.0], np.cumsum(np.linalg.norm(np.diff(bpts, axis=0), axis=1))))
+        length = bs[-1]
         for g in group:
-            _restitch(meshes[g['mesh']], g['v'], closed, new_pts, rel_tol)
+            if g['closed']:
+                g['span'] = None
+            else:
+                sa, sb = _project_s(g['pts'][[0, -1]], bpts, bs)
+                if closed and (sb - sa) % length > (sa - sb) % length:
+                    sa, sb = sb, sa
+                elif (not closed) and sb < sa:
+                    sa, sb = sb, sa
+                g['span'] = (sa, sb)
+        # Breakpoints: the ends of the base (if open) and of every open run
+        brk = [0.0, length] if not closed else []
+        brk += [s for g in group if g['span'] is not None for s in g['span']]
+        brk = np.unique(np.round(np.array(brk) % length if closed else np.array(brk), 12))
+        if closed and brk.size == 0:
+            brk = np.array([0.0])
+        ends = np.append(brk[1:], brk[0] + length) if closed else brk[1:]
+        starts = brk if closed else brk[:-1]
+        s_new = []
+        for s0, s1 in zip(starts, ends):
+            sm = 0.5*(s0 + s1) % length if closed else 0.5*(s0 + s1)
+            cover = [g for g in group if _covers(g['span'], sm, length, closed)]
+            n = max(1, int(round((s1 - s0)*np.mean([g['nseg']/g['len'] for g in cover]))))
+            s_new += list(np.linspace(s0, s1, n + 1)[:-1])
+        if not closed:
+            s_new.append(length)
+        s_new = np.array(s_new)
+        pts = np.array([np.interp(s_new % length if closed else s_new, bs, bpts[:, k]) for k in range(3)]).T
+        # Project onto the finest run covering each point (closest to a curved seam)
+        for ip, sp in enumerate(s_new):
+            cover = [g for g in group if _covers(g['span'], sp % length if closed else sp, length, closed)]
+            fine = max(cover, key=lambda g: g['nseg']/g['len'])
+            pts[ip] = _project_point(pts[ip], fine['pts'], fine['closed'])
+        for g in group:
+            if g['span'] is None:
+                sel = np.arange(len(s_new))
+            else:
+                sa, sb = g['span']
+                sv = s_new % length if closed else s_new
+                if closed and sb < sa:
+                    sel = np.concatenate((np.where(sv >= sa - 1.E-12*length)[0], np.where(sv <= sb + 1.E-12*length)[0]))
+                else:
+                    sel = np.where((sv >= sa - 1.E-12*length) & (sv <= sb + 1.E-12*length))[0]
+            _restitch(meshes[g['mesh']], g['v'], g['closed'], pts[sel], rel_tol)
         nstitched += 1
-        print("  Stitched seam shared by {0} meshes: {1} -> {2} segments".format(len(group), nseg, n_new))
+        print("  Stitched seam shared by {0} meshes: {1} -> {2} segments".format(
+            len(group), [g['nseg'] for g in group], len(s_new) if closed else len(s_new) - 1))
     return nstitched
+
+
+def _project_s(pts, poly, s):
+    """! Arc-length position of the closest point on a polyline (given with its cumulative lengths s)"""
+    a, b = poly[:-1], poly[1:]
+    ab = b - a
+    out = []
+    for p in pts:
+        t = np.clip(np.einsum('sk,sk->s', p - a, ab)/np.maximum(np.einsum('sk,sk->s', ab, ab), 1.E-300), 0.0, 1.0)
+        d = np.linalg.norm(a + t[:, None]*ab - p, axis=1)
+        k = int(np.argmin(d))
+        out.append(s[k] + t[k]*(s[k + 1] - s[k]))
+    return out
+
+
+def _project_point(p, poly, closed):
+    """! Closest point on a polyline"""
+    a = poly
+    b = np.roll(poly, -1, axis=0) if closed else poly[1:]
+    a = a if closed else poly[:-1]
+    ab = b - a
+    t = np.clip(np.einsum('sk,sk->s', p - a, ab)/np.maximum(np.einsum('sk,sk->s', ab, ab), 1.E-300), 0.0, 1.0)
+    q = a + t[:, None]*ab
+    return q[int(np.argmin(np.linalg.norm(q - p, axis=1)))]
+
+
+def _covers(span, sm, length, closed):
+    """! True if an arc-length span (None: the whole seam) contains position sm"""
+    if span is None:
+        return True
+    sa, sb = span
+    if closed and sb < sa:
+        return (sm >= sa) or (sm <= sb)
+    return sa <= sm <= sb
 
 
 def _restitch(mesh, seam, closed, new_pts, rel_tol):
@@ -1087,8 +1171,8 @@ def script_entry(argv=None):
 # that meshes sharing edges are joined (e.g. a rib meeting a plate). Holes and closures are then dropped and
 # should be recomputed with `OFT_ThinCurr_holes`. If the meshes' vertices do not line up along a shared edge, use
 # `--stitch`: each shared edge gets a new set of vertices, with a resolution between those of the meshes, and each
-# mesh is re-triangulated along it before the points are merged. Shared edges must be boundaries of each mesh and
-# (if open) share their end points.
+# mesh is re-triangulated along it before the points are merged. Shared edges must be boundaries of each mesh; one
+# mesh's edge may cover only part of another's (e.g. a stem along part of a plate edge).
 #
 # In general, the \ref thincurr_compute_holes "OFT_thincurr_holes" utility should be used on the final
 # model to compute holes and colusures from the combined geometry. For compatibility with older models,

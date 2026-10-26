@@ -1205,3 +1205,28 @@ def test_combine_stitch(tmp_path):
     for reg in np.unique(joined.reg):
         nr = n[joined.reg == reg]
         assert np.all(nr @ nr[0] > 0.0)
+
+
+def test_combine_stitch_partial(tmp_path):
+    '''A sheet along part of a shared edge (a stem on half of a plate seam) is stitched into it'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    sheets = ((3, 6, lambda u, v: np.c_[-0.5*u, v, 0*u]), (4, 9, lambda u, v: np.c_[0.5*u, v, 0*u]),
+              (4, 7, lambda u, v: np.c_[0*u, 0.5*v, 0.5*u]))
+    files = []
+    for k, (n1, n2, mapping) in enumerate(sheets):
+        r, lc = _sheet(n1, n2, mapping)
+        files.append(str(tmp_path / 'sheet{0}.h5'.format(k)))
+        write_ThinCurr_mesh(files[-1], r, lc, np.ones(lc.shape[0], dtype=np.int32))
+    joined = combine_meshes(files, stitch=True)
+    edges = {}
+    for cell in joined.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            edges[e] = edges.get(e, 0) + 1
+    on_seam = [e for e in edges if np.allclose(joined.r[list(e)][:, [0, 2]], 0.0)]
+    under_stem = [e for e in on_seam if joined.r[list(e), 1].max() <= 0.5 + 1.E-12]
+    # The whole seam is joined, with three sheets on the stem's half and two on the other half
+    assert all(edges[e] == 3 for e in under_stem) and all(edges[e] == 2 for e in on_seam if e not in under_stem)
+    assert len(under_stem) > 0 and len(under_stem) < len(on_seam)
+    assert max(edges.values()) == 3
