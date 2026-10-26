@@ -1238,3 +1238,37 @@ def test_combine_stitch_partial(tmp_path):
     assert all(edges[e] == 3 for e in under_stem) and all(edges[e] == 2 for e in on_seam if e not in under_stem)
     assert len(under_stem) > 0 and len(under_stem) < len(on_seam)
     assert max(edges.values()) == 3
+
+
+def test_combine_stitch_aligned_graded(tmp_path):
+    '''Stitching leaves seams whose vertices already coincide unchanged, and keeps a grading common to the inputs'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    def graded_sheet(n1, vs, mapping):
+        u, v = np.meshgrid(np.linspace(0.0, 1.0, n1 + 1), vs, indexing='ij')
+        n2 = len(vs) - 1
+        idx = lambda i, j: i*(n2 + 1) + j
+        lc = [[idx(i, j), idx(i + 1, j), idx(i + 1, j + 1)] for i in range(n1) for j in range(n2)]
+        lc += [[idx(i, j), idx(i + 1, j + 1), idx(i, j + 1)] for i in range(n1) for j in range(n2)]
+        return mapping(u.ravel(), v.ravel()), np.array(lc, dtype=np.int32)
+    maps = ((3, lambda u, v: np.c_[-0.5*u, v, 0*u]), (5, lambda u, v: np.c_[0.5*u, v, 0*u]), (4, lambda u, v: np.c_[0*u, v, 0.5*u]))
+    keys = lambda m: set(tuple(sorted(map(tuple, np.round(m.r[c], 9) + 0.0))) for c in m.lc)
+    def write(tag, vlist):
+        files = []
+        for k, ((n1, mapping), vs) in enumerate(zip(maps, vlist)):
+            r, lc = graded_sheet(n1, vs, mapping)
+            files.append(str(tmp_path / '{0}{1}.h5'.format(tag, k)))
+            write_ThinCurr_mesh(files[-1], r, lc, np.ones(lc.shape[0], dtype=np.int32))
+        return files
+    # Aligned (graded) seam: same result as merging points only
+    files = write('aligned', [np.linspace(0.0, 1.0, 9)**1.8]*3)
+    merged = combine_meshes(files, merge_points=True)
+    for keep in (None, 0):
+        stitched = combine_meshes(files, stitch=True, stitch_keep=keep)
+        assert stitched.np == merged.np and keys(stitched) == keys(merged)
+    # Same grading, different counts (6, 9, 7): the 7-segment seam keeps the grading
+    files = write('graded', [np.linspace(0.0, 1.0, n + 1)**1.8 for n in (6, 9, 7)])
+    stitched = combine_meshes(files, stitch=True)
+    ys = np.sort([p[1] for p in stitched.r if abs(p[0]) < 1.E-12 and abs(p[2]) < 1.E-12])
+    assert ys.size == 8
+    assert np.allclose(np.diff(ys), np.diff(np.linspace(0.0, 1.0, 8)**1.8), atol=0.01)

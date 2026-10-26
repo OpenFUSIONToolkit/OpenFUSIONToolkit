@@ -589,10 +589,11 @@ def stitch_meshes(meshes, rel_tol=0.1, keep=None):
     local edge length, so that curved seams approximated by different chords are matched). A seam may cover only
     part of another (e.g. a stem along part of a plate edge, or an arc of a circle); the ends of the shorter seams
     are kept as vertices of the longer one. Each stretch between those ends gets new vertices with the average
-    point density of the meshes along it, placed on the finest of them; each mesh is reconnected to the new
+    point density of the meshes along it, distributed as the average of their vertex distributions (so that a
+    common grading is kept) and placed on the finest of them; each mesh is reconnected to the new
     vertices by re-triangulating its row of cells along the seam. The seam vertices are then identical in every
     mesh and are joined by @ref ThinCurrMesh.merge_points. Holes and closures of stitched meshes are dropped, as
-    are jumpers on removed seam vertices.
+    are jumpers on removed seam vertices. Seams whose vertices already coincide in every mesh are left unchanged.
 
     With `keep`, that mesh is left unchanged: along its seams the new vertices are its own seam vertices (ends
     of shorter seams are moved to the nearest of them), and only the other meshes are reconnected.
@@ -678,6 +679,23 @@ def stitch_meshes(meshes, rel_tol=0.1, keep=None):
                 elif (not closed) and sb < sa:
                     sa, sb = sb, sa
                 g['span'] = (sa, sb)
+        for g in group:
+            g['s'] = np.array(_project_s(g['pts'], bpts, bs))
+            if closed:
+                g['s'] = g['s'] % length
+        # Seams whose vertices already coincide are left for the point merge
+        aligned = True
+        for g in group:
+            for o in group:
+                if o is g:
+                    continue
+                inside = [p for p, so in zip(o['pts'], o['s']) if _covers(g['span'], so, length, closed)]
+                if inside:
+                    d = np.linalg.norm(np.array(inside)[:, None, :] - g['pts'][None, :, :], axis=2).min(axis=1)
+                    aligned &= bool(np.all(d < rel_tol*min(g['h'], o['h'])))
+        if aligned:
+            print("  Seam shared by {0} meshes already conforming, left unchanged".format(len(group)))
+            continue
         # Seam vertices of the kept mesh (if any), as arc-length positions
         kept = [g for g in group if g['mesh'] == keep]
         sk, pk = [], []
@@ -712,7 +730,21 @@ def stitch_meshes(meshes, rel_tol=0.1, keep=None):
                 continue
             cover = [g for g in group if _covers(g['span'], sm, length, closed)]
             n = max(1, int(round((s1 - s0)*np.mean([g['nseg']/g['len'] for g in cover]))))
-            s_new += list(np.linspace(s0, s1, n + 1)[:-1])
+            # Average of the meshes' vertex distributions along the stretch (keeps a common grading)
+            tg = np.linspace(0.0, 1.0, 401)
+            dist = []
+            for g in cover:
+                # Continuous vertex index along the mesh's seam (counts partial cells at the stretch ends)
+                if closed:
+                    rel = np.sort((g['s'] - s0) % length)
+                    if g['closed']:
+                        rel = np.concatenate(([rel[-1] - length], rel, [rel[0] + length]))
+                else:
+                    rel = np.sort(g['s'] - s0)
+                idx = np.interp(tg*(s1 - s0), rel, np.arange(rel.size, dtype=np.float64))
+                dist.append((idx - idx[0])/(idx[-1] - idx[0]))
+            t_new = np.interp(np.arange(n)/n, np.mean(dist, axis=0), tg)
+            s_new += list(s0 + t_new*(s1 - s0))
             p_new += [None]*n
         if not closed:
             s_new.append(length)
@@ -1214,7 +1246,8 @@ def script_entry(argv=None):
 # should be recomputed with `OFT_ThinCurr_holes`. If the meshes' vertices do not line up along a shared edge, use
 # `--stitch`: each shared edge gets a new set of vertices, with a resolution between those of the meshes, and each
 # mesh is re-triangulated along it before the points are merged. Shared edges must be boundaries of each mesh; one
-# mesh's edge may cover only part of another's (e.g. a stem along part of a plate edge).
+# mesh's edge may cover only part of another's (e.g. a stem along part of a plate edge). Shared edges whose vertices
+# already coincide are left unchanged, and the new vertices follow the average grading of the inputs along each edge.
 # With `--stitch_keep IDX`, input IDX is left unchanged and the other inputs are reconnected to its vertices along
 # the shared edges; this keeps a reference mesh as made, but puts the whole resolution change into the other
 # meshes' cells along the seam.
