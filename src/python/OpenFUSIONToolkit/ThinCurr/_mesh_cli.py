@@ -502,7 +502,258 @@ def resolve_jumper_indices(nnodesets, explicit=None, index_range=None):
     return []
 
 
-def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_tol=None):
+def _boundary_chains(lc):
+    """! Ordered boundary chains of a triangle mesh
+
+    @param lc Cell list [nc,3]
+    @result List of (vertex list, closed) for each boundary chain
+    """
+    count = {}
+    for cell in lc:
+        for k in range(3):
+            e = (min(int(cell[k]), int(cell[(k + 1) % 3])), max(int(cell[k]), int(cell[(k + 1) % 3])))
+            count[e] = count.get(e, 0) + 1
+    adj = {}
+    for (a, b), n in count.items():
+        if n == 1:
+            adj.setdefault(a, []).append(b)
+            adj.setdefault(b, []).append(a)
+    if any(len(n) != 2 for n in adj.values()):
+        raise ValueError("stitching requires boundaries that are simple loops")
+    chains, seen = [], set()
+    for start in sorted(adj):
+        if start in seen:
+            continue
+        chain = [start]
+        seen.add(start)
+        prev, cur = None, start
+        while True:
+            nxt = [w for w in adj[cur] if w != prev][0]
+            if nxt == start:
+                break
+            chain.append(nxt)
+            seen.add(nxt)
+            prev, cur = cur, nxt
+        chains.append(chain)
+    return chains
+
+
+def _polyline_distance(pts, poly, closed):
+    """! Distance from each point to a polyline"""
+    a = poly
+    b = np.roll(poly, -1, axis=0) if closed else poly[1:]
+    a = a if closed else poly[:-1]
+    ab = b - a
+    t = np.einsum('psk,sk->ps', pts[:, None, :] - a[None, :, :], ab)/np.maximum(np.einsum('sk,sk->s', ab, ab), 1.E-300)
+    t = np.clip(t, 0.0, 1.0)
+    d = pts[:, None, :] - (a[None, :, :] + t[:, :, None]*ab[None, :, :])
+    return np.sqrt(np.einsum('psk,psk->ps', d, d)).min(axis=1)
+
+
+def _arc_points(poly, closed, n):
+    """! n segments evenly spaced in arc length along a polyline (n+1 points if open, n if closed)"""
+    pts = np.vstack((poly, poly[:1])) if closed else poly
+    seg = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+    s = np.concatenate(([0.0], np.cumsum(seg)))
+    targets = np.linspace(0.0, s[-1], n + 1)
+    out = np.array([np.interp(targets, s, pts[:, k]) for k in range(3)]).T
+    return out[:-1] if closed else out
+
+
+def _zip_strip(P, Q, r):
+    """! Triangulate the strip between two vertex chains joined at both ends (advancing on the shorter diagonal)
+
+    @param P First chain (vertex indices)
+    @param Q Second chain, with Q[0] joined to P[0] and Q[-1] joined to P[-1]
+    @param r Vertex positions
+    @result Triangles [n,3] (degenerate triangles at shared end vertices are skipped)
+    """
+    tris = []
+    i, j, m, n = 0, 0, len(P) - 1, len(Q) - 1
+    while (i < m) or (j < n):
+        if (i < m) and ((j == n) or (np.linalg.norm(r[P[i + 1]] - r[Q[j]]) <= np.linalg.norm(r[P[i]] - r[Q[j + 1]]))):
+            tri = (P[i], P[i + 1], Q[j])
+            i += 1
+        else:
+            tri = (P[i], Q[j + 1], Q[j])
+            j += 1
+        if len(set(tri)) == 3:
+            tris.append(tri)
+    return np.array(tris, dtype=np.int64).reshape(-1, 3)
+
+
+def stitch_meshes(meshes, rel_tol=0.1):
+    """! Make the shared edges (seams) of separate meshes conforming, in place
+
+    A seam is a boundary run of one mesh that lies on the boundary of other meshes (within `rel_tol` times the
+    local edge length, so that curved seams approximated by different chords are matched). Each seam gets a new
+    set of vertices, as many segments as the average of the meshes along it, evenly spaced along the finest
+    mesh's seam; each mesh is reconnected to them by re-triangulating its row of cells along the seam. The seam
+    vertices are then identical in every mesh and are joined by @ref ThinCurrMesh.merge_points. Open seams
+    must share their end points. Holes and closures of stitched meshes are dropped, as are jumpers on removed
+    seam vertices.
+
+    @param meshes List of @ref ThinCurrMesh (modified in place)
+    @param rel_tol Seam matching tolerance relative to the local boundary edge length
+    @result Number of seams stitched
+    """
+    # Boundary chains and their local edge lengths
+    chains = []
+    for im, mesh in enumerate(meshes):
+        for chain in _boundary_chains(mesh.lc):
+            pts = mesh.r[chain]
+            seg = np.linalg.norm(pts - np.roll(pts, -1, axis=0), axis=1)
+            h = 0.5*(seg + np.roll(seg, 1))
+            chains.append({'mesh': im, 'v': chain, 'pts': pts, 'h': h})
+    # Seam runs: consecutive chain vertices on another mesh's boundary
+    runs = []
+    for c in chains:
+        on = np.zeros(len(c['v']), dtype=bool)
+        for d in chains:
+            if d['mesh'] != c['mesh']:
+                on |= _polyline_distance(c['pts'], d['pts'], True) < rel_tol*c['h']
+        if on.all():
+            runs.append({'mesh': c['mesh'], 'v': list(c['v']), 'closed': True})
+            continue
+        if not on.any():
+            continue
+        k0 = int(np.argmin(on))  # start scanning just after an off-seam vertex
+        order = [(k0 + k) % len(on) for k in range(len(on))]
+        cur = []
+        for k in order + [k0]:
+            if on[k]:
+                cur.append(c['v'][k])
+            else:
+                if len(cur) >= 2:
+                    runs.append({'mesh': c['mesh'], 'v': cur, 'closed': False})
+                cur = []
+    # Group runs of different meshes that lie on each other
+    parent = list(range(len(runs)))
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for a in range(len(runs)):
+        for b in range(a + 1, len(runs)):
+            ra, rb = runs[a], runs[b]
+            if ra['mesh'] == rb['mesh'] or ra['closed'] != rb['closed']:
+                continue
+            pa, pb = meshes[ra['mesh']].r[ra['v']], meshes[rb['mesh']].r[rb['v']]
+            ha = np.linalg.norm(np.diff(pa, axis=0), axis=1).mean()
+            mid = 0.5*(pa[:-1] + pa[1:])
+            if np.median(_polyline_distance(mid, pb, rb['closed'])) < rel_tol*ha:
+                parent[find(a)] = find(b)
+    groups = {}
+    for a in range(len(runs)):
+        groups.setdefault(find(a), []).append(runs[a])
+    nstitched = 0
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        closed = group[0]['closed']
+        nseg = [len(g['v']) if closed else len(g['v']) - 1 for g in group]
+        ref = group[int(np.argmax(nseg))]
+        ref_pts = meshes[ref['mesh']].r[ref['v']]
+        n_new = int(round(np.mean(nseg)))
+        new_pts = _arc_points(ref_pts, closed, n_new)
+        for g in group:
+            _restitch(meshes[g['mesh']], g['v'], closed, new_pts, rel_tol)
+        nstitched += 1
+        print("  Stitched seam shared by {0} meshes: {1} -> {2} segments".format(len(group), nseg, n_new))
+    return nstitched
+
+
+def _restitch(mesh, seam, closed, new_pts, rel_tol):
+    """! Replace the seam of one mesh by new seam points, re-triangulating its row of cells along the seam"""
+    r = mesh.r
+    seam = list(seam)
+    if not closed:
+        # Orient the new points along the seam and snap the shared end points
+        if np.linalg.norm(r[seam[0]] - new_pts[0]) > np.linalg.norm(r[seam[0]] - new_pts[-1]):
+            new_pts = new_pts[::-1]
+        h = np.linalg.norm(np.diff(r[seam], axis=0), axis=1).mean()
+        for v, p in ((seam[0], new_pts[0]), (seam[-1], new_pts[-1])):
+            if np.linalg.norm(r[v] - p) > rel_tol*h:
+                raise ValueError("seams must share their end points to be stitched")
+            r[v] = p
+        interior = seam[1:-1]
+    else:
+        interior = seam
+    interior_set = set(interior)
+    remove = np.array([bool(interior_set & set(int(v) for v in cell)) for cell in mesh.lc])
+    # Boundary of the removed cells, without the seam edges: the inner chain
+    seam_edges = set()
+    pairs = zip(seam, seam[1:] + seam[:1]) if closed else zip(seam[:-1], seam[1:])
+    for a, b in pairs:
+        seam_edges.add((min(a, b), max(a, b)))
+    count = {}
+    for cell in mesh.lc[remove]:
+        for k in range(3):
+            e = (min(int(cell[k]), int(cell[(k + 1) % 3])), max(int(cell[k]), int(cell[(k + 1) % 3])))
+            count[e] = count.get(e, 0) + 1
+    adj = {}
+    for e, n in count.items():
+        if n == 1 and e not in seam_edges:
+            adj.setdefault(e[0], []).append(e[1])
+            adj.setdefault(e[1], []).append(e[0])
+    if any(len(n) != 2 for v, n in adj.items() if closed or v not in (seam[0], seam[-1])):
+        raise ValueError("cells along the seam do not form a simple strip; refine the mesh near the seam")
+    start = seam[0] if not closed else min(adj, key=lambda v: np.linalg.norm(r[v] - new_pts[0]))
+    inner, prev = [start], None
+    while True:
+        nxt = [w for w in adj[inner[-1]] if w != prev]
+        if not nxt or (closed and nxt[0] == start):
+            break
+        prev = inner[-1]
+        inner.append(nxt[0])
+        if (not closed) and (inner[-1] == seam[-1]):
+            break
+    # New seam vertices
+    if closed:
+        new_ids = list(range(mesh.np, mesh.np + len(new_pts)))
+        mesh.r = np.vstack((r, new_pts))
+        if np.linalg.norm(mesh.r[inner[1]] - mesh.r[new_ids[1]]) > np.linalg.norm(mesh.r[inner[-1]] - mesh.r[new_ids[1]]):
+            inner = [inner[0]] + inner[1:][::-1]
+        P, Q = inner + [inner[0]], new_ids + [new_ids[0]]
+    else:
+        new_ids = list(range(mesh.np, mesh.np + len(new_pts) - 2))
+        mesh.r = np.vstack((r, new_pts[1:-1]))
+        P, Q = inner, [seam[0]] + new_ids + [seam[-1]]
+    tris = _zip_strip(P, Q, mesh.r)
+    # Orientation and region from the nearest removed cell
+    old = mesh.lc[remove]
+    old_c = mesh.r[old].mean(axis=1)
+    old_n = np.cross(mesh.r[old[:, 1]] - mesh.r[old[:, 0]], mesh.r[old[:, 2]] - mesh.r[old[:, 0]])
+    near = np.argmin(np.linalg.norm(mesh.r[tris].mean(axis=1)[:, None, :] - old_c[None, :, :], axis=2), axis=1)
+    new_n = np.cross(mesh.r[tris[:, 1]] - mesh.r[tris[:, 0]], mesh.r[tris[:, 2]] - mesh.r[tris[:, 0]])
+    flip = np.einsum('ik,ik->i', new_n, old_n[near]) < 0.0
+    tris[flip] = tris[flip][:, ::-1]
+    mesh.lc = np.vstack((mesh.lc[~remove], tris)).astype(np.int32)
+    mesh.reg = np.concatenate((mesh.reg[~remove], mesh.reg[remove][near])).astype(np.int32)
+    # Drop the old seam vertices
+    used = np.zeros((mesh.np,), dtype=bool)
+    used[mesh.lc.reshape(-1)] = True
+    new_of_old = -np.ones((mesh.np,), dtype=np.int64)
+    new_of_old[used] = np.arange(int(used.sum()))
+    mesh.r = mesh.r[used]
+    mesh.lc = new_of_old[mesh.lc].astype(np.int32)
+    if mesh.jumpers is not None:
+        jumpers = []
+        for i, ns in enumerate(mesh.jumpers):
+            mapped = new_of_old[ns]
+            if np.any(mapped < 0):
+                print("  Warning: dropping jumper {0}, which uses seam vertices replaced by stitching".format(i + 1))
+                continue
+            jumpers.append(mapped.astype(np.int32))
+        mesh.jumpers = jumpers if jumpers else None
+    if (mesh.holes is not None) or (mesh.closures is not None):
+        print("  Note: dropping holes and closures of a stitched mesh; run OFT_ThinCurr_holes on the result")
+        mesh.holes = None
+        mesh.closures = None
+
+
+def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_tol=None, stitch=False, stitch_tol=0.1):
     '''! Combine multiple mesh files into a single mesh
 
     Aborts if any input file contains native `NODESET` entries, since such
@@ -513,6 +764,9 @@ def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_t
     @param distinct_regions Keep each input's regions distinct by offsetting IDs
     @param merge_points Merge coincident points, joining meshes that share edges (see @ref ThinCurrMesh.merge_points)
     @param merge_tol Distance below which points are merged (default: see @ref ThinCurrMesh.merge_points)
+    @param stitch Make shared edges conforming before merging, for meshes whose vertices do not line up along
+    them (see @ref stitch_meshes; implies `merge_points`)
+    @param stitch_tol Seam matching tolerance relative to the local edge length (see @ref stitch_meshes)
     @result Combined @ref ThinCurrMesh
     '''
     meshes = []
@@ -524,6 +778,9 @@ def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_t
                 "uncategorized nodesets. Run 'modify' on it first to convert them "
                 "into ThinCurr holes/jumpers.".format(fn))
         meshes.append(mesh)
+    if stitch:
+        stitch_meshes(meshes, stitch_tol)
+        merge_points = True
     combined = meshes[0].copy()
     for mesh in meshes[1:]:
         combined.append(mesh, distinct_regions=distinct_regions)
@@ -593,6 +850,11 @@ def build_parser():
     p_comb.add_argument("--merge_points", action="store_true", default=False,
                         help="Merge coincident points, joining meshes that share edges (holes and closures "
                              "are dropped; run OFT_ThinCurr_holes on the result)")
+    p_comb.add_argument("--stitch", action="store_true", default=False,
+                        help="Make shared edges conforming before merging points, for meshes whose vertices do not "
+                             "line up along them (implies --merge_points)")
+    p_comb.add_argument("--stitch_tol", type=float, default=0.1,
+                        help="Seam matching tolerance for --stitch, relative to the local edge length (default: 0.1)")
     p_comb.add_argument("--merge_tol", type=float, default=None,
                         help="Distance below which points are merged with --merge_points "
                              "(default: 1E-8 times the bounding-box diagonal)")
@@ -680,7 +942,8 @@ def script_entry(argv=None):
         try:
             result = combine_meshes(options.in_files,
                                     distinct_regions=not options.merge_regions,
-                                    merge_points=options.merge_points, merge_tol=options.merge_tol)
+                                    merge_points=options.merge_points, merge_tol=options.merge_tol,
+                                    stitch=options.stitch, stitch_tol=options.stitch_tol)
         except ValueError as err:
             parser.error(str(err))
         result.save(out_file)
@@ -822,7 +1085,10 @@ def script_entry(argv=None):
 #
 # The inputs are kept as separate sheets unless `--merge_points` is given, which merges coincident points so
 # that meshes sharing edges are joined (e.g. a rib meeting a plate). Holes and closures are then dropped and
-# should be recomputed with `OFT_ThinCurr_holes`.
+# should be recomputed with `OFT_ThinCurr_holes`. If the meshes' vertices do not line up along a shared edge, use
+# `--stitch`: each shared edge gets a new set of vertices, with a resolution between those of the meshes, and each
+# mesh is re-triangulated along it before the points are merged. Shared edges must be boundaries of each mesh and
+# (if open) share their end points.
 #
 # In general, the \ref thincurr_compute_holes "OFT_thincurr_holes" utility should be used on the final
 # model to compute holes and colusures from the combined geometry. For compatibility with older models,
@@ -879,7 +1145,7 @@ def script_entry(argv=None):
 #
 #```shell
 #usage: OFT_ThinCurr_mesh_tool combine [-h] --in_files IN_FILES [IN_FILES ...] [--out_file OUT_FILE] [--merge_regions] [--merge_points]
-#                                       [--merge_tol MERGE_TOL]
+#                                       [--stitch] [--stitch_tol STITCH_TOL] [--merge_tol MERGE_TOL]
 #
 #options:
 #  -h, --help            show this help message and exit
@@ -889,6 +1155,10 @@ def script_entry(argv=None):
 #  --merge_regions       Merge identical region IDs across inputs instead of keeping them distinct (default: keep distinct)
 #  --merge_points        Merge coincident points, joining meshes that share edges (holes and closures are dropped; run OFT_ThinCurr_holes on
 #                        the result)
+#  --stitch              Make shared edges conforming before merging points, for meshes whose vertices do not line up along them
+#                        (implies --merge_points)
+#  --stitch_tol STITCH_TOL
+#                        Seam matching tolerance for --stitch, relative to the local edge length (default: 0.1)
 #  --merge_tol MERGE_TOL
 #                        Distance below which points are merged with --merge_points (default: 1E-8 times the bounding-box diagonal)
 #```

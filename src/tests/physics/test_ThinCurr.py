@@ -1172,3 +1172,36 @@ def test_combine_merge_points(tmp_path):
     # A tolerance large enough to collapse cells is rejected
     with pytest.raises(ValueError, match='collapses cells'):
         combine_meshes(files, merge_points=True, merge_tol=0.2)
+
+
+def test_combine_stitch(tmp_path):
+    '''Sheets whose vertices do not line up along a shared edge are stitched to a common set of seam vertices'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    sheets = ((3, 6, lambda u, v: np.c_[-0.5*u, v, 0*u]), (5, 9, lambda u, v: np.c_[0.5*u, v, 0*u]),
+              (4, 7, lambda u, v: np.c_[0*u, v, 0.5*u]))
+    files = []
+    for k, (n1, n2, mapping) in enumerate(sheets):
+        r, lc = _sheet(n1, n2, mapping)
+        files.append(str(tmp_path / 'sheet{0}.h5'.format(k)))
+        write_ThinCurr_mesh(files[-1], r, lc, np.ones(lc.shape[0], dtype=np.int32))
+    def edge_counts(mesh):
+        edges = {}
+        for cell in mesh.lc:
+            for k in range(3):
+                e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+                edges[e] = edges.get(e, 0) + 1
+        return edges
+    # Without stitching the seam is not joined (no edge is shared by the three sheets)
+    assert max(edge_counts(combine_meshes(files, merge_points=True)).values()) == 2
+    joined = combine_meshes(files, stitch=True)
+    edges = edge_counts(joined)
+    on_seam = [e for e in edges if np.allclose(joined.r[list(e)][:, [0, 2]], 0.0)]
+    # 7 seam segments (the average of 6, 9 and 7), each shared by the three sheets
+    assert len(on_seam) == 7 and all(edges[e] == 3 for e in on_seam)
+    assert max(edges.values()) == 3
+    # Consistent orientation: each sheet's normals keep one direction
+    n = np.cross(joined.r[joined.lc[:, 1]] - joined.r[joined.lc[:, 0]], joined.r[joined.lc[:, 2]] - joined.r[joined.lc[:, 0]])
+    for reg in np.unique(joined.reg):
+        nr = n[joined.reg == reg]
+        assert np.all(nr @ nr[0] > 0.0)
