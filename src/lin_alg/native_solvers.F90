@@ -530,7 +530,7 @@ class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_matrix), pointer :: A
 logical :: pm_save,pre_full_res
 integer(i4) :: i,j,k,nits,its,nrits
-real(r8) :: uu,uuold,gg,ggold,delta,hkmi,ggin,wnorm0
+real(r8) :: uu,uuold,gg,ggold,delta,hkmi,ggin,wnorm0,rel_tol
 real(r8), allocatable :: h(:,:),c(:),s(:),res(:),hdots(:)
 class(oft_vector), pointer :: r,w
 type(oft_vector_ptr), pointer, dimension(:) :: v,z
@@ -577,6 +577,9 @@ ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,SQRT(uu),SQRT(gg)
+rel_tol=-1.d0
+IF(its==-1)rel_tol=1.d-7
+IF(its==-2)rel_tol=1.d-14
 nits=0
 if(self%its/=0.AND.self%nrits/=0)THEN
 do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
@@ -644,6 +647,19 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     IF(nits==its)EXIT
     IF(ABS(res(i+1))<self%atol)EXIT
     IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
+    !---Check |r|/|u| criterion for current iterate (w used as scratch)
+    IF(rel_tol>0.d0)THEN
+      hdots(1:i)=res(1:i)
+      do k=i,1,-1
+        hdots(k)=hdots(k)/h(k,k)
+        hdots(1:k-1)=hdots(1:k-1)-hdots(k)*h(1:k-1,k)
+      end do
+      call w%add(0.d0,1.d0,u)
+      do k=1,i
+        call w%add(1.d0,hdots(k),z(k)%f)
+      end do
+      IF(ABS(res(i+1))<rel_tol*SQRT(w%dot(w)))EXIT
+    END IF
     IF(oft_env%head_proc.AND.oft_env%pm.AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
       WRITE(*,'(I6,14X,ES14.6)')nits,ABS(res(i+1))
     END IF
@@ -805,7 +821,7 @@ class(oft_cmatrix), pointer :: A
 logical :: pm_save,pre_full_res
 integer(i4) :: i,j,k,nits,its,nrits
 real(r8) :: uu,uuold,gg,ggold,ggin
-real(r8) :: wnorm0
+real(r8) :: wnorm0,rel_tol
 complex(c8) :: delta,hkmi
 complex(c8), allocatable :: h(:,:),c(:),s(:),res(:),hdots(:)
 class(oft_cvector), pointer :: r,w
@@ -853,6 +869,9 @@ ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,SQRT(uu),SQRT(gg)
+rel_tol=-1.d0
+IF(its==-1)rel_tol=1.d-7
+IF(its==-2)rel_tol=1.d-14
 nits=0
 if(self%its/=0.AND.self%nrits/=0)THEN
 do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
@@ -920,6 +939,19 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     IF(nits==its)EXIT
     IF(ABS(res(i+1))<self%atol)EXIT
     IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
+    !---Check |r|/|u| criterion for current iterate (w used as scratch)
+    IF(rel_tol>0.d0)THEN
+      hdots(1:i)=res(1:i)
+      do k=i,1,-1
+        hdots(k)=hdots(k)/h(k,k)
+        hdots(1:k-1)=hdots(1:k-1)-hdots(k)*h(1:k-1,k)
+      end do
+      call w%add((0.d0,0.d0),(1.d0,0.d0),u)
+      do k=1,i
+        call w%add((1.d0,0.d0),hdots(k),z(k)%f)
+      end do
+      IF(ABS(res(i+1))<rel_tol*SQRT(REAL(w%dot(w),r8)))EXIT
+    END IF
     IF(oft_env%head_proc.AND.oft_env%pm.AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
       WRITE(*,'(I6,14X,ES14.6)')nits,ABS(res(i+1))
     END IF
