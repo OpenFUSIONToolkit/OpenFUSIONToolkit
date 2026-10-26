@@ -262,9 +262,7 @@ magnitude larger than those for the \f$ \textrm{L} \f$ matrix.
 \subsection doc_tw_main_hodlr_pre Block-Jacobi preconditioning
 When iterative solvers are used with a HODLR \f$ \textrm{L} \f$ matrix (time-dependent and frequency-response runs), a block-Jacobi
 preconditioner is constructed from the dense diagonal blocks of the HODLR operator. By default the inverse of each block is computed and
-stored in double precision, but can optionally be stored and applied in single precision by setting `pre_single=T` (`pre_single=True` in
-\ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options"). This halves the memory required for the
-preconditioner and the memory traffic during each application, at the cost of a small perturbation to the preconditioner itself.
-By default the block factorization is still performed in double precision and the result rounded to single precision;
-setting `pre_single_factor=T` instead rounds each block before factoring and inverting it, which reduces the setup cost
-with a slight increase in the error of the resulting preconditioner.
+stored in double precision. Alternatively, by setting `pre_single=T` (`pre_single=True` in
+\ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options"), each block is rounded to single precision and
+the inverse is computed, stored, and applied in single precision. This halves the memory required for the preconditioner and reduces
+the cost of both constructing and applying it, at the cost of a small perturbation to the preconditioner itself.

@@ -38,8 +38,7 @@ class ThinCurr():
             'L_aca_rel_tol': '0.05',
             'B_svd_tol': '-1.E-5',
             'B_aca_rel_tol': '0.05',
-            'pre_single': 'F',
-            'pre_single_factor': 'F'
+            'pre_single': 'F'
         }
         self._oft_env.update_oft_in()
         ## Thin-wall model object
@@ -331,8 +330,7 @@ class ThinCurr():
         return data_in
 
     def set_hodlr_options(self,target_size=None,aca_min_its=None,aca_sep_thresh=None,L_svd_tol=None,
-                          L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None,
-                          pre_single_factor=None):
+                          L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None):
         '''! Set HODLR options for ThinCurr model
 
         @param target_size Target size for HODLR blocks
@@ -342,8 +340,7 @@ class ThinCurr():
         @param L_aca_rel_tol Relative tolerance for ACA compression of L-matrix blocks
         @param B_svd_tol Tolerance for SVD compression of B-matrix blocks
         @param B_aca_rel_tol Relative tolerance for ACA compression of B-matrix blocks
-        @param pre_single Store and apply HODLR block-Jacobi preconditioners in single precision?
-        @param pre_single_factor Factor/invert preconditioner blocks in single precision (requires `pre_single=True`)?
+        @param pre_single Compute, store, and apply HODLR block-Jacobi preconditioners in single precision?
         '''
         if target_size is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
@@ -363,8 +360,6 @@ class ThinCurr():
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['B_aca_rel_tol'] = '{0:.4E}'.format(B_aca_rel_tol)
         if pre_single is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_single'] = 'T' if pre_single else 'F'
-        if pre_single_factor is not None:
-            self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_single_factor'] = 'T' if pre_single_factor else 'F'
         self._oft_env.update_oft_in()
 
     def compute_Lmat(self,cache_file=None,use_hodlr=False):

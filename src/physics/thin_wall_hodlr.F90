@@ -58,8 +58,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: L_aca_tol = -1.d0 !< ACA+ tolerance for inductance matrix
   REAL(8) :: B_svd_tol = -1.d0 !< SVD tolerance for B-field operators
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
-  LOGICAL :: pre_single = .FALSE. !< Store and apply block-Jacobi preconditioners in single precision?
-  LOGICAL :: pre_single_factor = .FALSE. !< Factor/invert blocks in single precision (requires `pre_single`)?
+  LOGICAL :: pre_single = .FALSE. !< Compute, store, and apply block-Jacobi preconditioners in single precision?
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_blocks => NULL() !< Indices of compressed off-diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: L_thread_ptr => NULL()
@@ -735,9 +734,8 @@ REAL(8) :: L_aca_rel_tol = -1.d0
 REAL(8) :: B_svd_tol = -1.d99
 REAL(8) :: B_aca_rel_tol = -1.d0
 LOGICAL :: pre_single = .FALSE.
-LOGICAL :: pre_single_factor = .FALSE.
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
-  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_single_factor
+  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -767,7 +765,6 @@ self%min_rank=min_rank
 self%aca_min_its=aca_min_its
 self%aca_sep_thresh=aca_sep_thresh
 self%pre_single=pre_single
-self%pre_single_factor=pre_single.AND.pre_single_factor
 !
 L_approx_scale = 0.5d0*self%tw_obj%mesh%hrms
 IF(L_svd_tol<0.d0)THEN
@@ -878,13 +875,7 @@ IF(self%L_aca_tol<=0.d0)THEN
 END IF
 WRITE(*,'(2A,I6)')oft_indent,'# of SVD  =      ',sparse_count(2)
 WRITE(*,'(2A,I6)')oft_indent,'# of ACA+ =      ',sparse_count(1)
-IF(self%pre_single)THEN
-  IF(self%pre_single_factor)THEN
-    WRITE(*,'(2A)')oft_indent,'Using single precision block preconditioners (single precision factorization)'
-  ELSE
-    WRITE(*,'(2A)')oft_indent,'Using single precision block preconditioners'
-  END IF
-END IF
+IF(self%pre_single)WRITE(*,'(2A)')oft_indent,'Using single precision block preconditioners'
 CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')
 ALLOCATE(cell_mark(self%tw_obj%mesh%nc))
 DO j=1,self%nlevels
@@ -3002,9 +2993,8 @@ END SUBROUTINE get_qr
 !> Precondition a linear system using a Block-Jacobi method (complex)
 !!
 !! Each diagonal block is inverted explicitly using its LU factorization. If `pre_single`
-!! is set on the HODLR operator the inverse is stored and applied in single precision,
-!! with the factorization/inversion performed in double (default) or single precision
-!! (`pre_single_factor`).
+!! is set on the HODLR operator each block is rounded to single precision before
+!! factorization, and the inverse is computed, stored, and applied in single precision.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE bjprecond_apply(self,u,g)
 CLASS(oft_tw_hodlr_bjpre), INTENT(inout) :: self !< Solver object
@@ -3041,7 +3031,7 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
-    CALL factor_block(self%inverse_mats(i),n)
+    CALL invert_block(self%inverse_mats(i),n)
   END DO
   !---Get holes
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
@@ -3066,7 +3056,7 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
-    CALL factor_block(self%inverse_mats(i),n)
+    CALL invert_block(self%inverse_mats(i),n)
   END IF
   DEALLOCATE(imap)
   self%refactor=.FALSE.
@@ -3111,13 +3101,13 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Invert assembled block, converting to single precision if requested
 !------------------------------------------------------------------------------
-SUBROUTINE factor_block(mat,nrows)
+SUBROUTINE invert_block(mat,nrows)
 TYPE(cmat_container), INTENT(inout) :: mat !< Block to invert (`M` must be populated)
 INTEGER(4), INTENT(in) :: nrows !< Size of block
 INTEGER(4) :: error,lwork
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: ipiv
 COMPLEX(4), ALLOCATABLE, DIMENSION(:) :: work4
-IF(self%mf_obj%pre_single_factor)THEN
+IF(self%mf_obj%pre_single)THEN
   IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
   mat%M4=CMPLX(mat%M,KIND=c4)
   DEALLOCATE(mat%M)
@@ -3134,15 +3124,8 @@ IF(self%mf_obj%pre_single_factor)THEN
 ELSE
   CALL lapack_matinv(nrows,mat%M,error)
   IF(error/=0)CALL oft_abort("factorization failed","bjprecond_apply",__FILE__)
-  IF(self%mf_obj%pre_single)THEN
-    IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
-    mat%M4=CMPLX(mat%M,KIND=c4)
-    DEALLOCATE(mat%M)
-  ELSE
-    IF(ASSOCIATED(mat%M4))DEALLOCATE(mat%M4)
-  END IF
 END IF
-END SUBROUTINE factor_block
+END SUBROUTINE invert_block
 !------------------------------------------------------------------------------
 !> Apply preconditioner for a single block
 !------------------------------------------------------------------------------
@@ -3198,9 +3181,8 @@ end subroutine bjprecond_delete
 !> Precondition a linear system using a Block-Jacobi method (real)
 !!
 !! Each diagonal block is inverted explicitly using its Cholesky factorization. If `pre_single`
-!! is set on the HODLR operator the inverse is stored and applied in single precision,
-!! with the factorization/inversion performed in double (default) or single precision
-!! (`pre_single_factor`).
+!! is set on the HODLR operator each block is rounded to single precision before
+!! factorization, and the inverse is computed, stored, and applied in single precision.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE rbjprecond_apply(self,u,g)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
@@ -3237,7 +3219,7 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
-    CALL factor_block(self%inverse_mats(i),n)
+    CALL invert_block(self%inverse_mats(i),n)
   END DO
   !---Get holes
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
@@ -3262,7 +3244,7 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
-    CALL factor_block(self%inverse_mats(i),n)
+    CALL invert_block(self%inverse_mats(i),n)
   END IF
   DEALLOCATE(imap)
   self%refactor=.FALSE.
@@ -3307,11 +3289,11 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Invert assembled block, converting to single precision if requested
 !------------------------------------------------------------------------------
-SUBROUTINE factor_block(mat,nrows)
-TYPE(rmat_container), INTENT(inout) :: mat !< Block to factor (`M` must be populated)
+SUBROUTINE invert_block(mat,nrows)
+TYPE(rmat_container), INTENT(inout) :: mat !< Block to invert (`M` must be populated)
 INTEGER(4), INTENT(in) :: nrows !< Size of block
 INTEGER(4) :: error,j,k
-IF(self%mf_obj%pre_single_factor)THEN
+IF(self%mf_obj%pre_single)THEN
   IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
   mat%M4=REAL(mat%M,r4)
   DEALLOCATE(mat%M)
@@ -3327,15 +3309,8 @@ IF(self%mf_obj%pre_single_factor)THEN
 ELSE
   CALL lapack_cholesky(nrows,mat%M,error)
   IF(error/=0)CALL oft_abort("factorization failed","rbjprecond_apply",__FILE__)
-  IF(self%mf_obj%pre_single)THEN
-    IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
-    mat%M4=REAL(mat%M,r4)
-    DEALLOCATE(mat%M)
-  ELSE
-    IF(ASSOCIATED(mat%M4))DEALLOCATE(mat%M4)
-  END IF
 END IF
-END SUBROUTINE factor_block
+END SUBROUTINE invert_block
 !------------------------------------------------------------------------------
 !> Apply preconditioner for a single block
 !------------------------------------------------------------------------------

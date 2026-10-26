@@ -1121,17 +1121,11 @@ def test_fr_aca(convert_xml):
                            jumper_start=2)
     assert validate_fr(fr_real, fr_imag)
 
-hodlr_pre_opts = (
-    {'pre_single': True},
-    {'pre_single': True, 'pre_single_factor': True}
-)
-
 @pytest.mark.coverage
-@pytest.mark.parametrize("hodlr_opts", hodlr_pre_opts)
-def test_td_aca_pre(hodlr_opts):
+def test_td_aca_single():
     sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((7.205529E-4, 6.100309E-4), rel=1.E-3)
     jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([5.453372E3, 5.453372E3], rel=1.E-3)
-    assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,hodlr_opts=hodlr_opts,
+    assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,hodlr_opts={'pre_single': True},
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
                            curr_waveform=((0.0, 0.0), (1.0, 1.0)),
@@ -1139,11 +1133,10 @@ def test_td_aca_pre(hodlr_opts):
     assert validate_td(sigs_final,jumpers_final)
 
 @pytest.mark.coverage
-@pytest.mark.parametrize("hodlr_opts", hodlr_pre_opts)
-def test_fr_aca_pre(hodlr_opts):
+def test_fr_aca_single():
     fr_real = approx_list((5.888736E-2, 4.881440E-3), rel=1.E-3)
     fr_imag = approx_list((-2.017045E-3, -2.313881E-3), rel=1.E-3)
-    assert ThinCurr_setup("tw_test-cyl_hr.h5",3,'F',use_aca=True,hodlr_opts=hodlr_opts,freq=5.E3,fr_limit=0,
+    assert ThinCurr_setup("tw_test-cyl_hr.h5",3,'F',use_aca=True,hodlr_opts={'pre_single': True},freq=5.E3,fr_limit=0,
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
                            jumper_start=2)
