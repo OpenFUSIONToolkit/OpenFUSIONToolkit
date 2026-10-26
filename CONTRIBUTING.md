@@ -74,6 +74,7 @@ The Open FUSION Toolkit Team
 
 ## Contributors
 Matt Adams (@mattsgit)\
+Stuart Benjamin (@StuartBenjamin)\
 Anson Braun (@ansonbraun)\
 Daniel Burgess (@d-burg)\
 Samuel Freiberger (@samuel-frei)\

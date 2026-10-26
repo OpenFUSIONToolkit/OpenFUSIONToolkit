@@ -10,11 +10,11 @@
 @ingroup doxy_oft_python
 '''
 import numpy
-import warnings
+from warnings import warn
 from ._interface import *
-from OpenFUSIONToolkit.TokaMaker.util import get_jphi_from_GS
+from OpenFUSIONToolkit.TokaMaker.util import get_jphi_from_GS, get_dIdA_from_jphi
 
-def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_width=0.03, tail_alpha=1.5):
+def parameterize_edge_jbs(psi, amp, center, width, offset, sk, y_sep=0.0, blend_width=0.03, tail_alpha=1.5):
     r'''! Generate parameterized edge bootstrap current profile with tunable concave fall-off
 
     @param psi Normalized poloidal flux profile \f$\hat{\psi}\f$
@@ -152,6 +152,11 @@ def parameterize_edge_jBS(psi, amp, center, width, offset, sk, y_sep=0.0, blend_
     # find correct offset to match user input value
     return final_profile
 
+def parameterize_edge_jBS(*args, **kwargs):
+    r'''! Deprecated alias of @ref parameterize_edge_jbs'''
+    warn("parameterize_edge_jBS is deprecated, use parameterize_edge_jbs", DeprecationWarning, stacklevel=2)
+    return parameterize_edge_jbs(*args, **kwargs)
+
 def Hmode_profiles(edge=0.08, ped=0.4, core=2.5, rgrid=201, expin=1.5, expout=1.5, widthp=0.04, xphalf=None):
     r'''! This function generates H-mode density and temperature profiles evenly
     spaced in your favorite radial coordinate. Copied from https://omfit.io/_modules/omfit_classes/utils_fusion.html
@@ -190,11 +195,11 @@ def Hmode_profiles(edge=0.08, ped=0.4, core=2.5, rgrid=201, expin=1.5, expout=1.
 
     return val
 
-def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
+def analyze_bootstrap_edge_spike(psi_N, jphi_bs, diagnostic_plots=False):
     r'''! Analyze bootstrap edge spike location, width, and height
 
     @param psi_N Normalized poloidal flux profile \f$\hat{\psi}\f$
-    @param j_bootstrap Bootstrap current profile \f$j_{BS}(\hat{\psi})\f$
+    @param jphi_bs Bootstrap current profile \f$j_{\phi,BS}(\hat{\psi})\f$ [A/m^2]
     @param diagnostic_plots If True, plot diagnostic figures
     @result Dictionary with spike properties and parameterized spike model
     '''
@@ -206,16 +211,16 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     # Focus on the edge region (psi_N > 0.7)
     edge_mask = psi_N >= 0.7
     psi_edge = psi_N[edge_mask]
-    j_edge = j_bootstrap[edge_mask]
+    j_edge = jphi_bs[edge_mask]
 
     def _no_edge_spike_result(reason):
         # No isolable edge spike was found. Fall back to the un-isolated
-        # bootstrap profile (identical to the isolate_edge_jBS=False path)
+        # bootstrap profile (identical to the isolate_edge_jbs=False path)
         # rather than returning None, which would break the documented dict
         # contract and crash subscripting callers (res['masked_spike']).
-        warnings.warn(reason + "; using bootstrap profile without edge isolation",
-                      RuntimeWarning, stacklevel=2)
-        j_full = numpy.array(j_bootstrap, dtype=float)
+        warn(reason + "; using bootstrap profile without edge isolation",
+             RuntimeWarning, stacklevel=2)
+        j_full = numpy.array(jphi_bs, dtype=float)
         return {
             'sigma': 0.0,
             'background': 0.0,
@@ -253,25 +258,25 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
     # Convert to psi_N coordinates
     fwhm = psi_edge[right_idx] - psi_edge[left_idx]
 
-    # Find minimum of j_BS current in core/mantle region and use as values for flat core profile
-    masked_j_BS = j_bootstrap[(psi_N > 0.5) & (psi_N < peak_psi)] # minimum between psi_N = 0.5 and peak of j_BS
+    # Find minimum of jphi_bs in core/mantle region and use as values for flat core profile
+    masked_jbs = jphi_bs[(psi_N > 0.5) & (psi_N < peak_psi)] # minimum between psi_N = 0.5 and peak of jphi_bs
     masked_psi_N = psi_N[(psi_N > 0.5) & (psi_N < peak_psi)]
-    lmin_j_BS = min(masked_j_BS)
-    lmin_arg = numpy.argmin(masked_j_BS)
+    lmin_jbs = min(masked_jbs)
+    lmin_arg = numpy.argmin(masked_jbs)
     fit_mask = (psi_N >= masked_psi_N[lmin_arg])
 
-    # Splice j_BS profile edge spike onto flat profile with value set to min(j_BS)
-    masked_spike = numpy.ones_like(psi_N)*lmin_j_BS
-    masked_spike[fit_mask] = j_bootstrap[fit_mask]
+    # Splice jphi_bs edge spike onto flat profile with value set to min(jphi_bs)
+    masked_spike = numpy.ones_like(psi_N)*lmin_jbs
+    masked_spike[fit_mask] = jphi_bs[fit_mask]
 
-    # Define the blend window to smooth out junction of flat core profile and edge j_BS spike
+    # Define the blend window to smooth out junction of flat core profile and edge jphi_bs spike
     # Set the total width to be half the distance between splice location and peak
-    jBS_min_loc = masked_psi_N[lmin_arg]
-    dist_to_peak = peak_psi - jBS_min_loc
+    jbs_min_loc = masked_psi_N[lmin_arg]
+    dist_to_peak = peak_psi - jbs_min_loc
     blend_width = min(0.5 * dist_to_peak, 0.2)
 
-    x_start = jBS_min_loc - (blend_width / 2.0)
-    x_end   = jBS_min_loc + (blend_width / 2.0)
+    x_start = jbs_min_loc - (blend_width / 2.0)
+    x_end   = jbs_min_loc + (blend_width / 2.0)
 
     # Find indices for the start and end of the window
     idx_start = (numpy.abs(psi_N - x_start)).argmin()
@@ -314,27 +319,27 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
                 (h01 * y_end) + \
                 (h11 * dx_window * dy_end)
 
-    # Apply the patch to the main masked j_BS profile
+    # Apply the patch to the main masked jphi_bs profile
     masked_spike[idx_start : idx_end + 1] = y_patch
 
     # Attempt to fit bootstrap parameterization to calculated profile (deprecated)
     # Initial parameter guess
     sigma_init = fwhm/2.355  # Convert FWHM to sigma
-    p0 = [peak_height, peak_psi, sigma_init, lmin_j_BS, 1.0,
-          max(0.0, j_bootstrap[-1]), 0.05]
+    p0 = [peak_height, peak_psi, sigma_init, lmin_jbs, 1.0,
+          max(0.0, jphi_bs[-1]), 0.05]
 
-    # Guard against degenerate bounds when peak_height, lmin_j_BS,
-    # or j_bootstrap[-1] are near zero or negative (common for low-
+    # Guard against degenerate bounds when peak_height, lmin_jbs,
+    # or jphi_bs[-1] are near zero or negative (common for low-
     # pedestal L-mode-like profiles in an LH transition scan).
     _eps = max(1e-6, 1e-3 * abs(peak_height)) if peak_height != 0 else 1e-6
     amp_lo = min(0.99 * peak_height, peak_height - _eps)
     amp_hi = max(1.01 * peak_height, peak_height + _eps)
 
-    _eps_off = max(1e-6, 1e-3 * abs(lmin_j_BS)) if lmin_j_BS != 0 else 1e-6
-    off_lo = min(0.99 * lmin_j_BS, lmin_j_BS - _eps_off)
-    off_hi = max(1.01 * lmin_j_BS, lmin_j_BS + _eps_off)
+    _eps_off = max(1e-6, 1e-3 * abs(lmin_jbs)) if lmin_jbs != 0 else 1e-6
+    off_lo = min(0.99 * lmin_jbs, lmin_jbs - _eps_off)
+    off_hi = max(1.01 * lmin_jbs, lmin_jbs + _eps_off)
 
-    ysep_hi = max(2 * abs(j_bootstrap[-1]), abs(j_bootstrap[-1]) + 1e-6, 1e-6)
+    ysep_hi = max(2 * abs(jphi_bs[-1]), abs(jphi_bs[-1]) + 1e-6, 1e-6)
 
     lower_bounds = [amp_lo,
                     0.8*peak_psi,
@@ -351,25 +356,25 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
                     ysep_hi,
                     0.2]
 
-    # The parameterized fit is only used when parameterize_jBS=True; its internal
+    # The parameterized fit is only used when parameterize_jbs=True; its internal
     # root_scalar can fail to bracket on some equilibria, so keep it non-fatal.
     try:
-        popt, pcov = curve_fit(parameterize_edge_jBS, psi_N[fit_mask], j_bootstrap[fit_mask], p0=p0,
+        popt, pcov = curve_fit(parameterize_edge_jbs, psi_N[fit_mask], jphi_bs[fit_mask], p0=p0,
                                 bounds=(lower_bounds, upper_bounds),
                                 maxfev=10000)
         amp, center, width, offset, sk, y_sep, blend_width = popt
-        spike_only = parameterize_edge_jBS(psi_N, amp, center, width, offset, sk, y_sep, blend_width)
+        spike_only = parameterize_edge_jbs(psi_N, amp, center, width, offset, sk, y_sep, blend_width)
     except Exception as _edge_fit_exc:
-        warnings.warn("parameterize_edge_jBS fit failed (%s); falling back to "
-                      "masked_spike (unused unless parameterize_jBS=True)" % _edge_fit_exc,
-                      RuntimeWarning, stacklevel=2)
+        warn("parameterize_edge_jbs fit failed (%s); falling back to "
+             "masked_spike (unused unless parameterize_jbs=True)" % _edge_fit_exc,
+             RuntimeWarning, stacklevel=2)
         popt = numpy.asarray(p0, dtype=float)
         amp, center, width, offset, sk, y_sep, blend_width = popt
         spike_only = masked_spike.copy()
 
     if diagnostic_plots:
         plt.figure()
-        plt.plot(psi_N[fit_mask],j_bootstrap[fit_mask]/1e6,label='Input j_BS')
+        plt.plot(psi_N[fit_mask],jphi_bs[fit_mask]/1e6,label='Input jphi_bs')
         plt.plot(psi_N,spike_only/1e6,label='Fitted parameterization')
         plt.plot(psi_N,masked_spike/1e6,label='Isolated')
         plt.xlabel(r'$\hat \psi$')
@@ -388,7 +393,31 @@ def analyze_bootstrap_edge_spike(psi_N, j_bootstrap, diagnostic_plots=False):
 
     return results
 
-def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
+def _extrap_jbs_boundaries(psi_N, jphi_bs):
+    r'''! Linearly extrapolate jphi_bs to the axis/LCFS endpoints where q is
+    undefined, using the second-order gradient at the nearest well-defined
+    (interior) point.
+
+    Ensures similarity between fortran and python solves.
+
+    @param psi_N Normalised poloidal flux grid [0, 1], standard convention
+    @param jphi_bs Bootstrap current profile on psi_N
+    @result jphi_bs with the axis/LCFS endpoints replaced by extrapolated values
+    '''
+    n_psi = len(psi_N)
+    if n_psi - 2 < 3:
+        raise ValueError(
+            "_extrap_jbs_boundaries: too few points with well-defined q "
+            "(%d) to build a second-order derivative for extrapolating jphi_bs "
+            "to the axis/LCFS" % max(0, n_psi - 2))
+
+    jphi_bs = jphi_bs.copy()
+    djbs_dpsi = numpy.gradient(jphi_bs[1:-1], psi_N[1:-1], edge_order=2)
+    jphi_bs[0] = jphi_bs[1] + djbs_dpsi[0] * (psi_N[0] - psi_N[1])
+    jphi_bs[-1] = jphi_bs[-2] + djbs_dpsi[-1] * (psi_N[-1] - psi_N[-2])
+    return jphi_bs
+
+def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target, F0=None):
     r'''! Solve Grad-Shafranov equilibrium for given profiles
 
     @param mygs Grad-Shafranov solver object
@@ -396,19 +425,20 @@ def solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target):
     @param pp_prof Pressure gradient profile (\f$P'\f$)
     @param Ip_target Target plasma current \f$I_p\f$ [A]
     @param pax_target Target on-axis pressure \f$p_{axis}\f$ [Pa]
+    @param F0 Vacuum \f$F = R_0 B_0\f$ passed to `set_profiles` as `foffset` (default: keep the current value)
     @result None (updates equilibrium in-place)
     '''
 
     ffp_prof['type'] = 'jphi-linterp'
 
     mygs.set_targets(Ip=Ip_target, pax=pax_target)
-    mygs.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof)
+    mygs.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof, foffset=F0)
 
     # Solve Grad-Shafranov
     mygs.solve()
 
-def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
-                            Ip_target, psi_pad, spike_prof=None,
+def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, jphi_ind,
+                            Ip_target, psi_pad, jphi_bs=None,
                             tolerance=0.01, max_iter=5, diagnostic_plots=False, verbose=True):
     r'''! Optimize core-\f$j_0\f$ scaling so input/output \f$j_0\f$ match
 
@@ -417,10 +447,10 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     @param pressure Plasma pressure profile \f$p(\hat{\psi})\f$ [Pa]
     @param ffp_prof Toroidal current profile (\f$j_\phi(\hat{\psi})\f$)
     @param pp_prof Pressure gradient profile (\f$P'\f$)
-    @param j_inductive Inductive/total toroidal current profile \f$j_{ind}(\hat{\psi})\f$ [A/m^2]
+    @param jphi_ind Inductive toroidal current profile \f$j_{\phi,ind}(\hat{\psi})\f$ [A/m^2]
     @param Ip_target Target plasma current \f$I_p\f$ [A]
     @param psi_pad Padding for flux surface calculations
-    @param spike_prof Optional bootstrap current profile \f$j_{BS}(\hat{\psi})\f$ [A/m^2]
+    @param jphi_bs Optional bootstrap current profile added unscaled to the total \f$j_{\phi,BS}(\hat{\psi})\f$ [A/m^2]
     @param tolerance Relative error tolerance for secant method
     @param max_iter Maximum number of secant iterations
     @param diagnostic_plots If True, plot input/output \f$j_\phi\f$
@@ -428,34 +458,35 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
     '''
     import matplotlib.pyplot as plt
 
-    n_psi = len(psi_N)
+    # Endpoints clipped: the flux-surface tracer cannot resolve the axis or separatrix
+    psi_eval = numpy.clip(psi_N, psi_pad, 1.0 - psi_pad)
 
-    if spike_prof is None:
-        spike_prof = numpy.zeros_like(j_inductive)
+    if jphi_bs is None:
+        jphi_bs = numpy.zeros_like(jphi_ind)
 
     # We want: Input_J0 - Output_J0 ~ 0
     def get_j0_error(scale_val, n):
         if verbose:
             print(f"\n--- Checking scale_j0 = {scale_val:.4f} ---")
 
-        matched_input_jphi = scale_val*j_inductive + spike_prof
+        matched_input_jphi = scale_val*jphi_ind + jphi_bs
         ffp_prof['type'] = 'jphi-linterp'
         ffp_prof['y'] = matched_input_jphi
 
-        pax_target = pressure[0]
+        pax_target = pressure[0] - pressure[-1]  # P = 0 at the LCFS: target the drop
 
         solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target)
 
         # Check Convergence
-        _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-        _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+        _, f, fp, _, pp = mygs.get_profiles(psi=psi_eval)
+        _, _, ravgs, _, _, _ = mygs.get_q(psi=psi_eval)
 
-        tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
+        jphi_total = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 
         if diagnostic_plots:
             plt.figure()
             plt.plot(psi_N, matched_input_jphi/1e6, linestyle='--', label=r'Input $j_\phi$')
-            plt.plot(psi_N, tmp_jphi/1e6, label=r'Output $j_\phi$')
+            plt.plot(psi_N, jphi_total/1e6, label=r'Output $j_\phi$')
             plt.title(f'Iteration {n}')#', Ip error: {Ip_err:.3f} %')
             plt.legend()
             plt.xlabel(r'$\hat \psi$')
@@ -464,10 +495,10 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
             plt.show()
 
         # Input j_0 at this scale
-        input_j0 = scale_val * j_inductive[0] + spike_prof[0]
+        input_j0 = scale_val * jphi_ind[0] + jphi_bs[0]
 
         # Output j_0 from solver
-        output_j0 = tmp_jphi[0]
+        output_j0 = jphi_total[0]
 
         # Calculate residual (difference) and relative error
         diff = input_j0 - output_j0
@@ -478,7 +509,7 @@ def find_optimal_scale(mygs, psi_N, pressure, ffp_prof, pp_prof, j_inductive,
             print(f"   Output j_0: {output_j0:.4e}")
             print(f"   Mismatch:  {rel_err*100:.3f}%")
 
-        return diff, rel_err, tmp_jphi
+        return diff, rel_err, jphi_total
 
     # --- Step 1: Initial Guess (1.0) ---
     p0 = 1.0
@@ -622,7 +653,7 @@ def redl_bootstrap(
     @param Zeff_override Override \f$Z_{eff}\f$ if set
     @param nu_e_star_override Override electron collisionality if set
     @param nu_i_star_override Override ion collisionality if set
-    @result Tuple (bootstrap current profile \f$j_{BS}(\hat{\psi})\f$, coefficient dictionary)
+    @result Tuple (Redl \f$\langle j_{BS} \cdot B \rangle(\hat{\psi})\f$ [T A/m^2], coefficient dictionary)
     '''
 
     # Apply Zeff override if requested
@@ -711,7 +742,7 @@ def redl_bootstrap(
     X32_ee = fT / (1 + dee_2 + dee_3)
     F32_ee = (
         (0.1 + 0.6 * Zeff)
-        / (Zeff * (0.77 + 0.63 * (1 + (Zeff - 1)**1.1)))
+        / (Zeff * (0.77 + 0.63 * (1 + numpy.maximum(Zeff - 1, 0)**1.1)))
         * (X32_ee - X32_ee**4)
         + 0.7 / (1 + 0.2 * Zeff)
         * (X32_ee**2 - X32_ee**4 - 1.2 * (X32_ee**3 - X32_ee**4))
@@ -759,7 +790,7 @@ def redl_bootstrap(
         bra1 = L31 * dp_dpsi / pe
         bra2 = L32 * dT_e_dpsi / Te
         bra3 = L34 * alpha * (1 - R_pe) / R_pe * dT_i_dpsi / Ti
-        j_bootstrap = -I_psi * pe * (bra1 + bra2 + bra3)
+        jdotB_bs = -I_psi * pe * (bra1 + bra2 + bra3)
         term_decomp = {
             'bra1': -I_psi * pe * bra1,
             'bra2': -I_psi * pe * bra2,
@@ -769,7 +800,7 @@ def redl_bootstrap(
         term_n = p_total * L31 * (1.0 / ne) * dn_e_dpsi
         term_Te = pe * (L31 + L32) * (1.0 / Te) * dT_e_dpsi
         term_Ti = pi * (L31 + L34 * alpha) * (1.0 / Ti) * dT_i_dpsi
-        j_bootstrap = -I_psi * (term_n + term_Te + term_Ti)
+        jdotB_bs = -I_psi * (term_n + term_Te + term_Ti)
         term_decomp = {
             'term_n': -I_psi * term_n,
             'term_Te': -I_psi * term_Te,
@@ -777,7 +808,7 @@ def redl_bootstrap(
         }
 
     if use_sign_q:
-        j_bootstrap *= numpy.sign(q)
+        jdotB_bs *= numpy.sign(q)
         for k in term_decomp:
             term_decomp[k] *= numpy.sign(q)
 
@@ -793,7 +824,90 @@ def redl_bootstrap(
     }
     coeffs.update(term_decomp)
 
-    return j_bootstrap, coeffs
+    return jdotB_bs, coeffs
+
+def _validate_grid(values, name, x=None):
+    r'''! Validate (or build) the normalized radial grid a profile is sampled on
+
+    @param values Profile values
+    @param name Profile name, used in the raised error message
+    @param x Normalized radial grid (\f$\hat{\psi}\f$ or \f$\hat{\Phi}\f$) `values` is sampled on
+    (strictly increasing, in [0,1]); if `None`, `values` is assumed evenly sampled on [0,1]
+    @result Validated grid
+    '''
+    n_x = len(values)
+    if n_x < 5:
+        raise ValueError("The '{0}' profile needs at least 5 points".format(name))
+    if x is None:
+        return numpy.linspace(0., 1., n_x)
+    x = numpy.asarray(x, dtype=float)
+    if x.shape != (n_x,):
+        raise ValueError("x must be 1D and the same length as the '{0}' profile".format(name))
+    if not numpy.all(numpy.isfinite(x)):
+        raise ValueError("x contains non-finite values")
+    if numpy.any(numpy.diff(x) <= 0.0):
+        raise ValueError("x must be strictly increasing")
+    if not (numpy.isclose(x[0], 0.0) and numpy.isclose(x[-1], 1.0)):
+        raise ValueError("x must span [0,1] ({0}, {1})".format(x[0], x[-1]))
+    return x
+
+def _default_profile(values, name, x=None, scale=1.0):
+    r'''! Build a {'x','y'} profile dict on the validated grid `x`
+
+    @param values Profile values
+    @param name Profile name, used in the raised error message
+    @param x Normalized radial grid `values` is sampled on (see `_validate_grid`)
+    @param scale Multiplicative scaling applied to `values` (e.g. eV -> keV)
+    @result Profile dict {'x': x, 'y': values * scale}
+    '''
+    values = numpy.asarray(values)
+    return {'x': _validate_grid(values, name, x=x), 'y': values * scale}
+
+## Deprecated solve_with_bootstrap kwargs (old name -> (new name, default))
+_RENAMED_KWARGS = {'scale_jBS': ('scale_jbs', 1.0),
+                   'isolate_edge_jBS': ('isolate_edge_jbs', False),
+                   'parameterize_jBS': ('parameterize_jbs', False)}
+
+def _pop_renamed_kwargs(kwargs, values):
+    r'''! Move deprecated names in `kwargs` to `values` (new name -> value), with a DeprecationWarning
+
+    @param kwargs Keyword arguments (deprecated names are removed)
+    @param values Values of the new names
+    @result Updated `values`
+    '''
+    for old, (new, default) in _RENAMED_KWARGS.items():
+        if old not in kwargs:
+            continue
+        if values[new] != default:
+            raise TypeError("solve_with_bootstrap: got both '{0}' and its deprecated name '{1}'".format(new, old))
+        warn("solve_with_bootstrap: '{0}' is deprecated, use '{1}'".format(old, new), DeprecationWarning, stacklevel=3)
+        values[new] = kwargs.pop(old)
+    return values
+
+class _BootstrapResults(dict):
+    r'''! solve_with_bootstrap results; deprecated keys are still readable, with a DeprecationWarning'''
+    ## Deprecated result keys (old name -> new name)
+    _RENAMED = {'total_j_phi': 'jphi_total',
+                'j_BS': 'jphi_bs_raw',
+                'j_inductive': 'jphi_ind',
+                'isolated_j_BS': 'jphi_bs'}
+
+    def _key(self, key):
+        new = self._RENAMED.get(key)
+        if new is None or dict.__contains__(self, key):
+            return key
+        warn("solve_with_bootstrap result '{0}' is deprecated, use '{1}'".format(key, new),
+             DeprecationWarning, stacklevel=3)
+        return new
+
+    def __getitem__(self, key):
+        return dict.__getitem__(self, self._key(key))
+
+    def get(self, key, default=None):
+        return dict.get(self, self._key(key), default)
+
+    def __contains__(self, key):
+        return dict.__contains__(self, self._key(key))
 
 def solve_with_bootstrap(mygs,
                          ne,
@@ -804,34 +918,151 @@ def solve_with_bootstrap(mygs,
                          Ip_target,
                          inductive_jphi=None,
                          Zis=None,
-                         scale_jBS=1.0,
-                         isolate_edge_jBS=False,
+                         scale_jbs=1.0,
+                         isolate_edge_jbs=False,
                          psi_pad=1e-3,
                          iterations=3,
                          diagnostic_plots=False,
-                         parameterize_jBS = False,
+                         parameterize_jbs = False,
                          use_OMFIT_sauter = False,
-                         verbose = True):
+                         verbose = True,
+                         psi_N = None,
+                         use_sauter_eps = True,
+                         diagnose_bs = False,
+                         use_python_solve = False,
+                         jphi_fixed = None,
+                         p_fixed = None,
+                         F0 = None,
+                         x = None,
+                         coord = None,
+                         jphi_saw = None,
+                         **kwargs):
     r'''! Self-consistently compute bootstrap current from H-mode profiles
 
     @param mygs Grad-Shafranov solver object
-    @param ne Electron density profile \f$n_e(\hat{\psi})\f$ [m$^{-3}$]
-    @param Te Electron temperature profile \f$T_e(\hat{\psi})\f$ [eV]
-    @param ni Ion density profile \f$n_i(\hat{\psi})\f$ [m$^{-3}$]
-    @param Ti Ion temperature profile \f$T_i(\hat{\psi})\f$ [eV]
-    @param Zeff Effective charge profile \f$Z_{eff}(\hat{\psi})\f$
+    @param ne Electron density profile \f$n_e(x)\f$ [m$^{-3}$]
+    @param Te Electron temperature profile \f$T_e(x)\f$ [eV]
+    @param ni Ion density profile \f$n_i(x)\f$ [m$^{-3}$]
+    @param Ti Ion temperature profile \f$T_i(x)\f$ [eV]
+    @param Zeff Effective charge profile \f$Z_{eff}(x)\f$
     @param Ip_target Target plasma current \f$I_p\f$ [A]
-    @param inductive_jphi Inductive toroidal current profile \f$j_{ind}(\hat{\psi})\f$
+    @param inductive_jphi Inductive toroidal current profile \f$j_{ind}(x)\f$
     @param Zis List of impurity atomic numbers (default: [1.0])
-    @param scale_jBS Scaling factor for bootstrap current
-    @param isolate_edge_jBS If True, isolate edge spike in bootstrap current
+    @param scale_jbs Scaling factor for the field-aligned bootstrap current, not its pressure-driven p'G part (was `scale_jBS`, deprecated)
+    @param isolate_edge_jbs If True, isolate edge spike in bootstrap current (was `isolate_edge_jBS`, deprecated)
     @param psi_pad Padding for flux surface calculations
     @param iterations Number of solver iterations
     @param diagnostic_plots If True, plot diagnostic figures
-    @param parameterize_jBS If True, use parameterized edge spike
+    @param parameterize_jbs If True, use parameterized edge spike; Python solver only (was `parameterize_jBS`, deprecated)
     @param use_OMFIT_sauter If True, use OMFIT Sauter model
-    @result Dictionary with total, bootstrap, inductive, and isolated edge current profiles
+    @param verbose Print iteration progress (Python solver only)
+    @param psi_N Deprecated alias of `x`
+    @param use_sauter_eps If True (default), use the geometric inverse aspect ratio
+      \f$\varepsilon = (R_{\max}-R_{\min})/(R_{\max}+R_{\min})\f$ of each surface (`TokaMaker.sauter_fc`).
+      If False, use the formula \f$\varepsilon = \langle a\rangle / \langle R\rangle\f$.
+    @param diagnose_bs If True, print per-iteration diagnostics (internal solver: see `TokaMaker.solve_bootstrap`;
+      Python solver with `parameterize_jbs`: the 7 edge-spike fit parameters and spike table)
+    @param use_python_solve If True, run the deprecated Python iteration; else (default) forward to
+      `TokaMaker.solve_bootstrap` (internal Fortran solver)
+    @param jphi_fixed Fixed toroidal current density \f$j_{fixed}\f$ [A/m$^2$] on `x` (array or profile dict),
+      added to the total without rescaling (internal Fortran solver only)
+    @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0), passed to the solver (default: keep the current value)
+    @param p_fixed Additional pressure \f$P_{fixed}\f$ [Pa] on `x` (array or profile dict, e.g. fast-ion pressure),
+      added to \f$e_C(n_e T_e + n_i T_i)\f$ for the GS pressure but excluded from the bootstrap current (internal Fortran solver only)
+    @param x Normalized radial grid the profiles are sampled on, in `coord` (strictly increasing,
+    in [0,1]); if `None`, profiles are assumed evenly sampled on [0,1]
+    @param coord Coordinate of `x`: `'psi_n'` (default, \f$\hat{\psi}\f$) or `'phi_n'`
+    (\f$\hat{\Phi}\f$, internal solver only; see `TokaMaker.solve_bootstrap`). `None` keeps the
+    internal solver's previous/loaded value (`'psi_n'` if none)
+    @param jphi_saw Input sawtooth toroidal current density [A/m$^2$] (array or profile dict), added without rescaling;
+      with `saw_q_s` > 0 the sawtooth reset current is added to it (internal Fortran solver only)
+    @param kwargs Further TokaMaker.solve_bootstrap options (internal Fortran solver only)
+    @result Dictionary of TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$ profiles [A/m$^2$] (see
+      doc_tokamaker_current_conventions) on `'psi_n'`: `'jphi_total'`, `'jphi_bs_raw'` (field-aligned, before
+      isolation/scaling), `'jphi_pd_raw'` (p'G), `'jphi_bs'`, `'jphi_pd'` (= `'jphi_pd_raw'`) and `'jphi_ind'` (the last
+      solve's input is `scale_j0` times `'jphi_ind'` plus `'jphi_bs'` plus `'jphi_pd'`), plus `'scale_j0'`, `'scale_Ip'`;
+      the internal solver returns every TokaMaker.solve_bootstrap key. The pre-rename keys `'total_j_phi'`, `'j_BS'`,
+      `'j_inductive'`, `'isolated_j_BS'` are deprecated aliases.
     '''
+
+    if psi_N is not None:
+        if x is not None:
+            raise ValueError("pass the grid as x only (psi_N is its deprecated alias)")
+        warn("solve_with_bootstrap(psi_N=) is deprecated: pass the grid as x= and its "
+             "coordinate as coord= ('psi_n' or 'phi_n')", DeprecationWarning, stacklevel=2)
+        x = psi_N
+
+    _opts = _pop_renamed_kwargs(kwargs, {'scale_jbs': scale_jbs, 'isolate_edge_jbs': isolate_edge_jbs,
+                                         'parameterize_jbs': parameterize_jbs})
+    scale_jbs, isolate_edge_jbs, parameterize_jbs = _opts['scale_jbs'], _opts['isolate_edge_jbs'], _opts['parameterize_jbs']
+
+    if not use_python_solve:
+        _python_only = {
+            'Zis': (Zis, None),
+            'psi_pad': (psi_pad, 1e-3),
+            'iterations': (iterations, 3),
+            'diagnostic_plots': (diagnostic_plots, False),
+            'use_OMFIT_sauter': (use_OMFIT_sauter, False),
+            'use_sauter_eps': (use_sauter_eps, True),
+        }
+        non_default = [k for k, (v, d) in _python_only.items() if v != d]
+        if non_default:
+            warn(
+                "solve_with_bootstrap(use_python_solve=False): the following kwargs have no effect "
+                f"with the internal Fortran solver: {non_default}. ",
+                UserWarning, stacklevel=2,
+            )
+        if inductive_jphi is None:
+            raise ValueError("inductive_jphi must be provided with use_python_solve=False")
+        if parameterize_jbs:
+            raise ValueError("parameterize_jbs is not supported by the internal solver (use_python_solve=True)")
+        _ne   = ne if isinstance(ne, dict) else _default_profile(ne, 'ne', x=x)
+        _Te   = Te if isinstance(Te, dict) else _default_profile(Te, 'Te', x=x, scale=1e-3)
+        _ni   = ni if isinstance(ni, dict) else _default_profile(ni, 'ni', x=x)
+        _Ti   = Ti if isinstance(Ti, dict) else _default_profile(Ti, 'Ti', x=x, scale=1e-3)
+        _ffp  = inductive_jphi if isinstance(inductive_jphi, dict) else _default_profile(inductive_jphi, 'inductive_jphi', x=x)
+        _jfix = None if jphi_fixed is None else (jphi_fixed if isinstance(jphi_fixed, dict) else _default_profile(jphi_fixed, 'jphi_fixed', x=x))
+        _pfix = None if p_fixed is None else (p_fixed if isinstance(p_fixed, dict) else _default_profile(p_fixed, 'p_fixed', x=x))
+        _jsaw = None if jphi_saw is None else (jphi_saw if isinstance(jphi_saw, dict) else _default_profile(jphi_saw, 'jphi_saw', x=x))
+        Zeff_arg = Zeff if isinstance(Zeff, dict) else (_default_profile(Zeff, 'Zeff', x=x) if numpy.ndim(Zeff) > 0 and numpy.size(Zeff) > 1 else float(Zeff))
+        _results = mygs.solve_bootstrap(
+            ffp_prof=_ffp,
+            te_prof=_Te,
+            ne_prof=_ne,
+            ti_prof=_Ti,
+            ni_prof=_ni,
+            Zeff=Zeff_arg,
+            Ip_target=Ip_target,
+            jphi_fixed_prof=_jfix,
+            p_fixed_prof=_pfix,
+            jphi_saw_prof=_jsaw,
+            scale_jbs=scale_jbs,
+            isolate_edge_jbs=isolate_edge_jbs,
+            diagnose_bs=diagnose_bs,
+            coord=coord,
+            F0=F0,
+            **kwargs
+        )
+        results = _BootstrapResults(_results)
+        results.update({'scale_j0': 1.0, 'scale_Ip': 1.0})
+        return results
+    else:
+        if coord not in (None, 'psi_n'):
+            raise ValueError("coord='%s' requires the internal solver (use_python_solve=False)" % coord)
+        if jphi_fixed is not None:
+            raise NotImplementedError("jphi_fixed is only supported by the internal Fortran solver (use_python_solve=False)")
+        if p_fixed is not None:
+            raise NotImplementedError("p_fixed is only supported by the internal Fortran solver (use_python_solve=False)")
+        if jphi_saw is not None or kwargs.get('saw_q_s'):
+            raise NotImplementedError("jphi_saw / saw_q_s are only supported by the internal Fortran solver (use_python_solve=False)")
+
+    warn(
+        "The Python bootstrap solve (use_python_solve=True) is deprecated; use mygs.solve_bootstrap() "
+        "(internal solver), which solve_with_bootstrap() calls by default.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     from scipy.optimize import root_scalar
     import matplotlib.pyplot as plt
 
@@ -858,20 +1089,24 @@ def solve_with_bootstrap(mygs,
 
     # Calculate Pressure [Pa]
     # p = n * T * k_B. Since T is in eV, k_B is essentially elementary charge e
-    pressure = (EC * ne * Te) + (EC * ni * Ti)
+    pressure = (EC * ne * Te) + (EC * ni * Ti) # Kinetic profiles same length
 
-    # Reconstruct normalized psi grid based on input pressure length
-    # Note: Assumes inputs are evenly sampled in psi_norm 0..1
-    n_psi = len(pressure)
-    psi_N = numpy.linspace(0., 1., n_psi)
+    psi_N = _validate_grid(pressure, 'pressure', x=x) # coord is 'psi_n' here
 
-    def current_scaling_objective(alpha, j_inductive, j_spike, psi_N, target_ip):
-        '''Objective function to match total Ip.'''
-        j_total = (alpha * j_inductive) + j_spike
-        ip_computed = mygs.flux_integral(psi_N, j_total)
+    # Equilibrium quantities are sampled on the profile grid, with endpoints clipped
+    # because the flux-surface tracer cannot resolve the axis or separatrix
+    psi_eval = numpy.clip(psi_N, psi_pad, 1.0 - psi_pad)
+    if numpy.any(numpy.diff(psi_eval) <= 0.0):
+        raise ValueError("psi_pad ({0}) exceeds the first/last psi_N interval".format(psi_pad))
+
+    def current_scaling_objective(alpha, jphi_ind, jphi_bs, psi_N, target_ip, geom):
+        '''Objective function to match total Ip: exact I_p of TokaMaker jphi (eqs. A5, A9c).'''
+        jphi_total = (alpha * jphi_ind) + jphi_bs
+        dIdA = get_dIdA_from_jphi(jphi_total, *geom)
+        ip_computed = mygs.compute_flux_integral(psi_N, dIdA)
         return ip_computed - target_ip
 
-    def calculate_profiles_and_bootstrap(psi_N, include_jBS):
+    def calculate_profiles_and_bootstrap(include_jbs):
         '''
         Main physics calculation:
         1. Gets geometry from current equilibrium (self).
@@ -880,39 +1115,49 @@ def solve_with_bootstrap(mygs,
         4. Scales inductive current to match Ip_target.
         '''
         # Get geometry and flux functions
-        _, f, _, _, _ = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-        _, fc, r_avgs, _ = mygs.sauter_fc(npsi=n_psi, psi_pad=psi_pad)
-
+        _, f, _, _, pp_eq = mygs.get_profiles(psi=psi_eval)
+        if use_sauter_eps:
+            _, fc, r_avgs, b_avgs, eps = mygs.sauter_fc(psi=psi_eval, return_eps=True)
+        else:
+            warn(
+                "Using use_sauter_eps = False introduces error to the bootstrap calculation in highly elongated plasmas, "
+                "use_sauter_eps = True recommended",
+                UserWarning,
+                stacklevel=2,
+            )
+            _, fc, r_avgs, b_avgs = mygs.sauter_fc(psi=psi_eval)
+            eps = r_avgs['<a>'] / r_avgs['<R>']
+        
         # Geometry terms
-        ft = 1 - fc
-        eps = r_avgs['<a>'] / r_avgs['<R>']
-        _, qvals, ravgs_q, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+        ft = 1 - fc 
+        _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
         R_avg = ravgs_q['<R>']
+        fsa = mygs.get_fsa(psi=psi_eval)
+        R_geo = 0.5*(fsa['R_min'] + fsa['R_max'])  # major radius in nu*, as eps = r/R_geo
 
-        # Gradients (using raw psi for derivatives)
+        # Gradients (using raw psi for derivatives); edge_order=2 is required, the
+        # first-order default is badly inaccurate at the axis and separatrix
         psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
-        d_psi = numpy.gradient(psi_N)
+        if psi_range == 0.0:
+            raise ValueError("Degenerate equilibrium: psi_bounds are equal")
 
-        # Avoid division by zero in gradients
-        d_psi_eff = d_psi * psi_range
-        d_psi_eff[d_psi_eff == 0] = 1e-9
+        pprime_local = numpy.gradient(pressure, psi_N, edge_order=2) / psi_range
 
-        pprime_local = numpy.gradient(pressure) / d_psi_eff
+        jphi_bs_raw = numpy.zeros_like(pressure)
+        jphi_pd_raw = numpy.zeros_like(pressure)
 
-        j_BS_final = numpy.zeros_like(pressure)
-
-        if include_jBS:
-            dn_e_dpsi = numpy.gradient(ne) / d_psi_eff
-            dT_e_dpsi = numpy.gradient(Te) / d_psi_eff
-            dn_i_dpsi = numpy.gradient(ni) / d_psi_eff
-            dT_i_dpsi = numpy.gradient(Ti) / d_psi_eff
+        if include_jbs:
+            dn_e_dpsi = numpy.gradient(ne, psi_N, edge_order=2) / psi_range
+            dT_e_dpsi = numpy.gradient(Te, psi_N, edge_order=2) / psi_range
+            dn_i_dpsi = numpy.gradient(ni, psi_N, edge_order=2) / psi_range
+            dT_i_dpsi = numpy.gradient(Ti, psi_N, edge_order=2) / psi_range
 
             if use_OMFIT_sauter:
-                j_BS_neo = sauter_bootstrap( # legacy OMFIT implementation
+                jdotB_bs = sauter_bootstrap( # legacy OMFIT implementation
                     psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, p=pressure,
                     nis=[ni], Zis=Zis, Zeff=Zeff, gEQDSKs=[None],
                     psiraw=psi_N * psi_range + mygs.psi_bounds[0],
-                    R=R_avg, eps=eps, q=qvals, fT=ft, I_psi=f,
+                    R=R_geo, eps=eps, q=qvals, fT=ft, I_psi=f,
                     nt=1, version='neo_2021', debug_plots=False,
                     return_units=True, return_package=False,
                     charge_number_to_use_in_ion_collisionality='Koh',
@@ -932,17 +1177,17 @@ def solve_with_bootstrap(mygs,
                 Zdom = 1.0  # deuterium
                 Zavg = ne / ni
                 Zion = (Zdom**2 * Zavg * Zeff)**0.25
-                nu_i_star = (4.90e-18 * numpy.abs(qvals) * R_avg * ni
+                nu_i_star = (4.90e-18 * numpy.abs(qvals) * R_geo * ni
                             * Zion**4 * ln_lii / (Ti**2 * eps**1.5))
 
                 # Electron collisionality
-                nu_e_star = (6.921e-18 * numpy.abs(qvals) * R_avg * ne
+                nu_e_star = (6.921e-18 * numpy.abs(qvals) * R_geo * ne
                             * Zeff * ln_le / (Te**2 * eps**1.5))
 
-                j_BS_neo, _ = redl_bootstrap( # native re-implementation of Redl 2021
+                jdotB_bs, _ = redl_bootstrap( # native re-implementation of Redl 2021
                     psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
                     pe=EC*(ne*Te), pi=EC*(ni*Ti),
-                    Zeff=Zeff, R=R_avg, q=qvals, eps=eps, fT=ft, I_psi=f,
+                    Zeff=Zeff, R=R_geo, q=qvals, eps=eps, fT=ft, I_psi=f,
                     dT_e_dpsi=dT_e_dpsi, dT_i_dpsi=dT_i_dpsi,
                     dn_e_dpsi=dn_e_dpsi, dn_i_dpsi=dn_i_dpsi,
                     ln_lambda_e=ln_le, ln_lambda_ii=ln_lii,
@@ -950,36 +1195,56 @@ def solve_with_bootstrap(mygs,
                     nu_e_star_override=nu_e_star,
                     nu_i_star_override=nu_i_star,
                     use_legacy_L34=False, # L34 = L31 (correct Redl 2021)
-                    use_sign_q=True, # convention-dependent
+                    use_sign_q=False, # <j.B> is odd in F through I_psi
                     formula_form='jboot1', # no d(ln ne)=d(ln ni) assumption
                 )
 
-            # Convert to A/m^2
-            j_BS_final = j_BS_neo * (R_avg / f)
-            j_BS_final = numpy.nan_to_num(j_BS_final, nan=0.0)
+            # Redl jdotB_bs -> TokaMaker jphi = <j_phi> (doc_tokamaker_current_conventions.md eq. A7):
+            # field-aligned F<1/R>/<B^2> * jdotB_bs plus the pressure-driven part P'(<R> - F^2<1/R>/<B^2>)
+            inv_R, B2 = ravgs_q['<1/R>'], b_avgs[1]
+            jphi_pd_raw = numpy.nan_to_num(pp_eq * (R_avg - f**2 * inv_R / B2), nan=0.0)
+            jphi_bs_raw = numpy.nan_to_num(jdotB_bs * f * inv_R / B2, nan=0.0)
 
-            # to-do: project j_BS_parallel to j_phi more accurately?
+            # Extrapolate to LCFS/axis to match fortran solve
+            jphi_bs_raw = _extrap_jbs_boundaries(psi_N, jphi_bs_raw)
+            jphi_pd_raw = _extrap_jbs_boundaries(psi_N, jphi_pd_raw)
+
+        def scaled(j):
+            # As the Fortran solve: scaling (and isolation) act on the field-aligned part; p'G is added whole
+            return scale_jbs * j + jphi_pd_raw
 
         # Scale Currents to match Ip
         current_jphi_target = inductive_jphi if inductive_jphi is not None else numpy.zeros_like(pressure)
 
-        spike_prof = numpy.zeros_like(j_BS_final)
+        jphi_bs = numpy.zeros_like(jphi_bs_raw)
 
-        if include_jBS:
-            if isolate_edge_jBS:
-                if parameterize_jBS:
-                    res = analyze_bootstrap_edge_spike(psi_N, j_BS_final, diagnostic_plots=diagnostic_plots)
-                    spike_prof = res['parameterized_spike'] * scale_jBS
+        if include_jbs:
+            if isolate_edge_jbs:
+                if parameterize_jbs:
+                    res = analyze_bootstrap_edge_spike(psi_N, jphi_bs_raw, diagnostic_plots=diagnostic_plots)
+                    jphi_bs = scaled(res['parameterized_spike'])
+                    if diagnose_bs:
+                        popt = res['gaussian_params']
+                        amp, center, width, offset, sk, y_sep, bw = popt
+                        print(f'  [edge_spike_fit_ext]'
+                              f' amp={amp:.6E} center={center:.6E} width={width:.6E}'
+                              f' offset={offset:.6E} sk={sk:.6E} y_sep={y_sep:.6E}'
+                              f' bw={bw:.6E}')
+                        print('  [edge_spike_profile_ext] i  psi_N(std)    jphi_bs_raw[A/m2]  j_spike_masked[A/m2]  parameterized_spike[A/m2]')
+                        for _i, (_p, _r, _m, _v) in enumerate(
+                                zip(psi_N, jphi_bs_raw, res['masked_spike'], res['parameterized_spike']), 1):
+                            print(f'   {_i:4d}   {_p:.5E}   {_r:.5E}   {_m:.5E}   {_v:.5E}')
                 else:
-                    res = analyze_bootstrap_edge_spike(psi_N, j_BS_final)
-                    spike_prof = res['masked_spike'] * scale_jBS
+                    res = analyze_bootstrap_edge_spike(psi_N, jphi_bs_raw)
+                    jphi_bs = scaled(res['masked_spike'])
             else:
-                spike_prof = j_BS_final * scale_jBS
+                jphi_bs = scaled(jphi_bs_raw)
 
-        # Solve for alpha: integral(alpha * j_ind + j_spike) = Ip_target
+        # Solve for alpha: Ip(alpha * jphi_ind + jphi_bs) = Ip_target
         try:
             sol = root_scalar(current_scaling_objective,
-                                args=(current_jphi_target, spike_prof, psi_N, Ip_target),
+                                args=(current_jphi_target, jphi_bs, psi_N, Ip_target,
+                                      (pp_eq, R_avg, ravgs_q['<1/R>'], ravgs_q['<1/R^2>'])),
                                 bracket=[1.0, 10. * Ip_target],
                                 method='brentq', rtol=1e-6)
             alpha_opt = sol.root
@@ -988,17 +1253,17 @@ def solve_with_bootstrap(mygs,
                 print("WARNING: Root scalar failed to bracket. Defaulting to alpha=1.0")
             alpha_opt = 1.0
 
-        matched_j_inductive = alpha_opt * current_jphi_target
-        matched_jphi = matched_j_inductive + spike_prof
+        jphi_ind = alpha_opt * current_jphi_target
+        matched_jphi = jphi_ind + jphi_bs
 
         # Package results
         pp_dict = {'type': 'linterp', 'x': psi_N, 'y': pprime_local / pprime_local[0]}
         ffp_dict = {'type': 'jphi-linterp', 'x': psi_N, 'y': numpy.nan_to_num(matched_jphi)}
 
-        return pp_dict, ffp_dict, j_BS_final, matched_j_inductive, spike_prof
+        return pp_dict, ffp_dict, jphi_bs_raw, jphi_pd_raw, jphi_ind, jphi_bs
 
     # --- Main Execution Flow ---
-    mygs.set_targets(Ip=Ip_target, pax=pressure[0])
+    mygs.set_targets(Ip=Ip_target, pax=pressure[0] - pressure[-1])
 
     if inductive_jphi is not None:
 
@@ -1006,24 +1271,24 @@ def solve_with_bootstrap(mygs,
             print('\n >>> Matching input core j_phi with G-S solution')
 
         # Calculate new profiles
-        pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-            psi_N, include_jBS=True
+        pp_prof, ffp_prof, jphi_bs_raw, jphi_pd_raw, jphi_ind, jphi_bs = calculate_profiles_and_bootstrap(
+            include_jbs=True
         )
 
         # Enforce P' edge condition
         pp_prof['y'][-1] = 0.
 
         ffp_prof['type'] = 'jphi-linterp'
-        ffp_prof['y'] = matched_j_inductive + spike_prof
+        ffp_prof['y'] = jphi_ind + jphi_bs
 
-        pax_target = pressure[0]
+        pax_target = pressure[0] - pressure[-1]  # P = 0 at the LCFS: target the drop
 
         # Run through once for better profile convergence
-        solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target)
+        solve_jphi(mygs,ffp_prof,pp_prof,Ip_target,pax_target,F0=F0)
 
         # Calculate new profiles
-        pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-            psi_N, include_jBS=True
+        pp_prof, ffp_prof, jphi_bs_raw, jphi_pd_raw, jphi_ind, jphi_bs = calculate_profiles_and_bootstrap(
+            include_jbs=True
         )
 
         # Enforce P' edge condition
@@ -1033,8 +1298,8 @@ def solve_with_bootstrap(mygs,
             print('\n >>> Finding optimal j_phi scale factor')
         # Find optimal jphi scale
         final_scale_j0, final_jphi = find_optimal_scale(mygs,
-            psi_N, pressure, ffp_prof, pp_prof, matched_j_inductive,
-            Ip_target, psi_pad, spike_prof=spike_prof,
+            psi_N, pressure, ffp_prof, pp_prof, jphi_ind,
+            Ip_target, psi_pad, jphi_bs=jphi_bs,
             diagnostic_plots=diagnostic_plots, verbose=verbose
         )
         # Ip-scale secant removed as redundant; core-j0 scaling retained.
@@ -1045,32 +1310,32 @@ def solve_with_bootstrap(mygs,
 
         for n in range(iterations):
             # Calculate new profiles
-            pp_prof, ffp_prof, j_bs_curr, matched_j_inductive, spike_prof = calculate_profiles_and_bootstrap(
-                psi_N, include_jBS=True
+            pp_prof, ffp_prof, jphi_bs_raw, jphi_pd_raw, jphi_ind, jphi_bs = calculate_profiles_and_bootstrap(
+                include_jbs=True
             )
 
             # Enforce P' edge condition
             pp_prof['y'][-1] = 0.
 
-            matched_input_jphi = final_scale_j0*matched_j_inductive + spike_prof
+            matched_input_jphi = final_scale_j0*jphi_ind + jphi_bs
             ffp_prof['type'] = 'jphi-linterp'
             ffp_prof['y'] = matched_input_jphi
 
             scaled_Ip_target = Ip_target*final_scale_Ip
-            pax_target = pressure[0]
+            pax_target = pressure[0] - pressure[-1]  # P = 0 at the LCFS: target the drop
 
-            solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target)
+            solve_jphi(mygs,ffp_prof,pp_prof,scaled_Ip_target,pax_target,F0=F0)
 
             # Check Convergence
-            _, f, fp, _, pp = mygs.get_profiles(npsi=n_psi, psi_pad=psi_pad)
-            _, _, ravgs, _, _, _ = mygs.get_q(npsi=n_psi, psi_pad=psi_pad)
+            _, f, fp, _, pp = mygs.get_profiles(psi=psi_eval)
+            _, _, ravgs, _, _, _ = mygs.get_q(psi=psi_eval)
 
-            tmp_jphi = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
+            jphi_total = get_jphi_from_GS(f*fp, pp, ravgs['<R>'], ravgs['<1/R>'])
 
             if diagnostic_plots:
                 plt.figure()
                 plt.plot(psi_N, matched_input_jphi/1e6, linestyle='--', label=r'Input $j_\phi$')
-                plt.plot(psi_N, tmp_jphi/1e6, label=r'Output $j_\phi$')
+                plt.plot(psi_N, jphi_total/1e6, label=r'Output $j_\phi$')
                 plt.title(f'Iteration {n}')#', Ip error: {Ip_err:.3f} %')
                 plt.legend()
                 plt.xlabel(r'$\hat \psi$')
@@ -1080,11 +1345,32 @@ def solve_with_bootstrap(mygs,
     else:
         raise ValueError("inductive_jphi must be specified.")
 
-    results = {'total_j_phi' : tmp_jphi,
-                'j_BS' : j_bs_curr,
-                'j_inductive' : matched_j_inductive,
-                'isolated_j_BS' : spike_prof,
-                'scale_j0' : final_scale_j0,
-                'scale_Ip' : final_scale_Ip}
+    # jphi_total is the GS output; the last solve's input is scale_j0*jphi_ind + jphi_bs (with p'G here)
+    return _BootstrapResults(psi_n=psi_N,
+                             jphi_total=jphi_total,
+                             jphi_bs_raw=jphi_bs_raw,
+                             jphi_pd_raw=jphi_pd_raw,
+                             jphi_bs=jphi_bs - jphi_pd_raw,
+                             jphi_pd=jphi_pd_raw,
+                             jphi_ind=jphi_ind,
+                             scale_j0=final_scale_j0,
+                             scale_Ip=final_scale_Ip)
 
-    return results
+
+def _saw_reset_1d(rho, q, itor, area, c1, q_s, dq=0.03, ramp=0.01, rule=2):
+    r'''! Fortran 1-D sawtooth q reset (grad_shaf_bootstrap::saw_reset_1d) on given profiles, axis first
+
+    @param rule 1 = fuse (axis to rho_m), 2 = local (each dip, two-sided)
+    @result (q_new, dj, dict(rho_s, rho_m, rho_out, n_dips, w, wr, ierr)); dj in the units of itor/area divided by c1,
+      wr the per-node reset weight, ierr nonzero if the reset failed (then q_new = q and dj = 0)
+    '''
+    from ._interface import tokamaker_saw_reset_1d
+    arrs = [numpy.ascontiguousarray(a, dtype=numpy.float64) for a in (rho, q, itor, area, c1)]
+    n = arrs[0].size
+    if any(a.size != n for a in arrs):
+        raise ValueError('rho, q, itor, area and c1 must have the same length')
+    q_new, dj, wr, scal = numpy.zeros(n), numpy.zeros(n), numpy.zeros(n), numpy.zeros(5)
+    ierr = c_int()
+    tokamaker_saw_reset_1d(n, *arrs, float(q_s), float(dq), float(ramp), int(rule), q_new, dj, wr, scal, ctypes.byref(ierr))
+    return q_new, dj, {'rho_s': scal[0], 'rho_m': scal[1], 'rho_out': scal[4], 'n_dips': int(scal[2]), 'w': scal[3], 'wr': wr,
+                       'ierr': ierr.value}

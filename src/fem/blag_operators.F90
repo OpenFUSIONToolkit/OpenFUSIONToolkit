@@ -558,7 +558,7 @@ class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
 INTEGER(i4), optional, intent(in) :: parent_geom_flag(:) !< Parent FE geometry type flag
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_flag
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
 real(r8), allocatable :: gop(:,:),lop(:,:)
@@ -580,6 +580,16 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero
 END IF
+!---
+bc_flag=0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_flag=1
+  CASE("grnd")
+    bc_flag=2
+  CASE("edges")
+    bc_flag=3
+END SELECT
 !------------------------------------------------------------------------------
 ! Operator integration
 !------------------------------------------------------------------------------
@@ -607,18 +617,18 @@ do i=1,lag_rep%mesh%nc
   !---Get local to global DOF mapping
   call lag_rep%ncdofs(i,j)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("zerob")
+  SELECT CASE(bc_flag)
+    CASE(1)
       DO jr=1,lag_rep%nce
         IF(lag_rep%global%gbe(j(jr)))lop(jr,:)=0.d0
       END DO
-    CASE("grnd")
+    CASE(2)
       IF(ANY(lag_rep%mesh%igrnd>0))THEN
         DO jr=1,lag_rep%nce
           IF(ANY(j(jr)==lag_rep%mesh%igrnd))lop(jr,:)=0.d0
         END DO
       END IF
-    CASE("edges")
+    CASE(3)
       DO jr=1,lag_rep%nce
         jc=lag_rep%parent%le(j(jr))
         IF(parent_geom_flag(jc)/=3)lop(jr,:)=0.d0
@@ -634,8 +644,8 @@ deallocate(j,gop,lop)
 ALLOCATE(lop(1,1),j(1))
 !---Set diagonal entries for dirichlet rows
 lop(1,1)=1.d0
-SELECT CASE(TRIM(bc))
-  CASE("zerob")
+SELECT CASE(bc_flag)
+  CASE(1)
     DO i=1,lag_rep%nbe
       IF(.NOT.lag_rep%linkage%leo(i))CYCLE
       jr=lag_rep%lbe(i)
@@ -644,7 +654,7 @@ SELECT CASE(TRIM(bc))
         call mat%add_values(j,j,lop,1,1)
       END IF
     END DO
-  CASE("grnd")
+  CASE(2)
     IF(ANY(lag_rep%mesh%igrnd>0))THEN
       DO i=1,lag_rep%nbe
         IF(.NOT.lag_rep%linkage%leo(i))CYCLE
@@ -655,7 +665,7 @@ SELECT CASE(TRIM(bc))
         END IF
       END DO
     END IF
-  CASE("edges")
+  CASE(3)
     DO i=1,lag_rep%ne
       IF(lag_rep%be(i))CYCLE
       jr=lag_rep%parent%le(i)
@@ -828,7 +838,7 @@ NULLIFY(xloc)
 call x%set(0.d0)
 call x%get_local(xloc)
 !---Operator integration loop
-!$omp parallel default(firstprivate) shared(field,xloc) private(det)
+!$omp parallel default(firstprivate) shared(field,xloc,vmesh) private(det)
 allocate(j(lag_rep%nce))
 !$omp do schedule(guided)
 do i=1,lag_rep%mesh%nc

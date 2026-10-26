@@ -452,7 +452,7 @@ IF(raxis==2)ptind(2)=3
 !---Set quadrature order
 CALL mesh%quad_rule(quad_order,quad)
 tflux=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad,raxis,ptind) private(curved) reduction(+:tflux)
+!$omp parallel do default(firstprivate) shared(mesh,field,quad,raxis,ptind) private(curved) reduction(+:tflux)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -484,7 +484,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
+!$omp parallel do default(firstprivate) shared(mesh,field,quad) private(curved) reduction(+:energy)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -514,7 +514,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
+!$omp parallel do default(firstprivate) shared(mesh,field,quad) private(curved) reduction(+:energy)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -543,7 +543,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
+!$omp parallel do default(firstprivate) shared(mesh,field,quad) reduction(+:energy)
 do i=1,mesh%nc
   !---Loop over quadrature points
   do m=1,quad%np
@@ -573,7 +573,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) private(curved) reduction(+:energy)
+!$omp parallel do default(firstprivate) shared(mesh,field,quad) private(curved) reduction(+:energy)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -604,7 +604,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do  default(firstprivate) shared(field,weight,quad) private(curved) reduction(+:energy)
+!$omp parallel do  default(firstprivate) shared(mesh,field,weight,quad) private(curved) reduction(+:energy)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   DO m=1,quad%np
@@ -634,7 +634,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%bmesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
+!$omp parallel do default(firstprivate) shared(mesh,field,quad) reduction(+:energy)
 do i=1,mesh%bmesh%nc
   CALL mesh%get_surf_map(i,cell,ptmap) ! Find parent cell and logical coordinate mapping
   !---Loop over quadrature points
@@ -668,7 +668,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad,reg_mask) reduction(+:energy)
+!$omp parallel do default(firstprivate) shared(mesh,field,quad,reg_mask) reduction(+:energy)
 do i=1,mesh%nc
   IF(PRESENT(reg_mask))THEN
     IF(mesh%reg(i)/=reg_mask)CYCLE
@@ -700,7 +700,7 @@ DEBUG_STACK_PUSH
 !---Setup
 CALL mesh%bmesh%quad_rule(quad_order,quad)
 energy=0.d0
-!$omp parallel do default(firstprivate) shared(field,quad) reduction(+:energy)
+!$omp parallel do default(firstprivate) shared(mesh,field,quad) reduction(+:energy)
 do i=1,mesh%bmesh%nc
   CALL mesh%get_surf_map(i,cell,ptmap) ! Find parent cell and logical coordinate mapping
   !---Loop over quadrature points
