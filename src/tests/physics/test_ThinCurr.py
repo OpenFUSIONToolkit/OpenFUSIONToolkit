@@ -52,7 +52,7 @@ def mp_run(target,args,timeout=180):
     return test_result
 
 
-def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,basepath,pre_single,mp_q):
+def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,basepath,hodlr_opts,mp_q):
     result = True
     try:
         from OpenFUSIONToolkit import OFT_env
@@ -85,8 +85,8 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
         if volt_waveform is not None:
             volt_waveform = np.array(volt_waveform)
         tw_model.compute_Mcoil()
-        if pre_single:
-            tw_model.set_hodlr_options(pre_single=True)
+        if hodlr_opts is not None:
+            tw_model.set_hodlr_options(**hodlr_opts)
         tw_model.compute_Lmat(use_hodlr=use_aca,cache_file='Lmat.save')
         tw_model.compute_Rmat()
         rst_before = set(glob.glob('pThinCurr_*.rst'))
@@ -161,7 +161,7 @@ def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
     mp_q.put(result)
 
 
-def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,pre_single,mp_q):
+def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,hodlr_opts,mp_q):
     try:
         from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
@@ -186,8 +186,8 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,pre_si
             save_sensors(sensors)
             Msensor, Msc, _ = tw_model.compute_Msensor('floops.loc')
         Mcoil = tw_model.compute_Mcoil()
-        if pre_single:
-            tw_model.set_hodlr_options(pre_single=True)
+        if hodlr_opts is not None:
+            tw_model.set_hodlr_options(**hodlr_opts)
         tw_model.compute_Lmat(use_hodlr=use_aca,cache_file='Lmat.save')
         tw_model.compute_Rmat()
         driver_current = 1.0/mu0 # Current is 1.0/mu0 [A]
@@ -285,7 +285,7 @@ def run_td_for_Mirnov(meshfile,direct_flag,curr_waveform,lin_tol,mp_q):
 def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,use_aca=False,
                     icoils=None,vcoils=None,floops=None,curr_waveform=None,volt_waveform=None,
                     lin_tol=1.E-9,jumper_start=0,run_reduced=False,basepath=None,convert_xml=False,
-                    pre_single=False):
+                    hodlr_opts=None):
     """
     Common setup and run operations for thin-wall physics module test cases
     """
@@ -358,11 +358,11 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
                 fid.write(' '.join(['{0}'.format(val) for val in volt_waveform[i]])+'\n')
     # Run thin-wall model
     if run_type == 1:
-       return mp_run(run_td,(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,basepath,pre_single))
+       return mp_run(run_td,(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,basepath,hodlr_opts))
     elif run_type == 2:
         return mp_run(run_eig,(meshfile,direct_flag,use_aca,jumper_start))
     elif run_type == 3:
-        return mp_run(run_fr,(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,pre_single))
+        return mp_run(run_fr,(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,hodlr_opts))
     elif run_type == 5:
         return mp_run(run_mode,(meshfile,freq))
     elif run_type == 6:
@@ -1121,11 +1121,19 @@ def test_fr_aca(convert_xml):
                            jumper_start=2)
     assert validate_fr(fr_real, fr_imag)
 
+hodlr_pre_opts = (
+    {'pre_factor': True},
+    {'pre_single': True},
+    {'pre_single': True, 'pre_factor': True},
+    {'pre_single': True, 'pre_single_factor': True, 'pre_factor': True}
+)
+
 @pytest.mark.coverage
-def test_td_aca_single():
+@pytest.mark.parametrize("hodlr_opts", hodlr_pre_opts)
+def test_td_aca_pre(hodlr_opts):
     sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((7.205529E-4, 6.100309E-4), rel=1.E-3)
     jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([5.453372E3, 5.453372E3], rel=1.E-3)
-    assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,pre_single=True,
+    assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,hodlr_opts=hodlr_opts,
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
                            curr_waveform=((0.0, 0.0), (1.0, 1.0)),
@@ -1133,10 +1141,11 @@ def test_td_aca_single():
     assert validate_td(sigs_final,jumpers_final)
 
 @pytest.mark.coverage
-def test_fr_aca_single():
+@pytest.mark.parametrize("hodlr_opts", hodlr_pre_opts)
+def test_fr_aca_pre(hodlr_opts):
     fr_real = approx_list((5.888736E-2, 4.881440E-3), rel=1.E-3)
     fr_imag = approx_list((-2.017045E-3, -2.313881E-3), rel=1.E-3)
-    assert ThinCurr_setup("tw_test-cyl_hr.h5",3,'F',use_aca=True,pre_single=True,freq=5.E3,fr_limit=0,
+    assert ThinCurr_setup("tw_test-cyl_hr.h5",3,'F',use_aca=True,hodlr_opts=hodlr_opts,freq=5.E3,fr_limit=0,
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
                            jumper_start=2)

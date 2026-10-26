@@ -265,3 +265,6 @@ preconditioner is constructed from the dense diagonal blocks of the HODLR operat
 double precision, but can optionally be stored and applied in single precision by setting `pre_single=T` (`pre_single=True` in
 \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options"). This halves the memory required for the
 preconditioner and the memory traffic during each application, at the cost of a small perturbation to the preconditioner itself.
+By default the block factorization is still performed in double precision and the result rounded to single precision;
+setting `pre_single_factor=T` instead rounds each block before factoring it. Finally, `pre_factor=T` applies each block
+using its Cholesky (real) or LU (complex) factors with triangular solves instead of forming an explicit inverse.
