@@ -60,7 +60,6 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
   LOGICAL :: pre_single = .FALSE. !< Store and apply block-Jacobi preconditioners in single precision?
   LOGICAL :: pre_single_factor = .FALSE. !< Factor/invert blocks in single precision (requires `pre_single`)?
-  LOGICAL :: pre_factor = .FALSE. !< Apply block-Jacobi preconditioners using factors instead of explicit inverses?
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_blocks => NULL() !< Indices of compressed off-diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: L_thread_ptr => NULL()
@@ -99,7 +98,6 @@ end type oft_tw_hodlr_op
 TYPE :: cmat_container
   COMPLEX(c8), POINTER, DIMENSION(:,:) :: M => NULL() !< Double precision matrix
   COMPLEX(c4), POINTER, DIMENSION(:,:) :: M4 => NULL() !< Single precision matrix
-  INTEGER(4), POINTER, DIMENSION(:) :: ipiv => NULL() !< Pivot indices for LU factorization
 END TYPE
 !------------------------------------------------------------------------------
 !> Complex block-Jacobi preconditioner for ThinCurr HODLR matrices
@@ -738,9 +736,8 @@ REAL(8) :: B_svd_tol = -1.d99
 REAL(8) :: B_aca_rel_tol = -1.d0
 LOGICAL :: pre_single = .FALSE.
 LOGICAL :: pre_single_factor = .FALSE.
-LOGICAL :: pre_factor = .FALSE.
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
-  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_single_factor,pre_factor
+  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_single_factor
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -771,7 +768,6 @@ self%aca_min_its=aca_min_its
 self%aca_sep_thresh=aca_sep_thresh
 self%pre_single=pre_single
 self%pre_single_factor=pre_single.AND.pre_single_factor
-self%pre_factor=pre_factor
 !
 L_approx_scale = 0.5d0*self%tw_obj%mesh%hrms
 IF(L_svd_tol<0.d0)THEN
@@ -889,7 +885,6 @@ IF(self%pre_single)THEN
     WRITE(*,'(2A)')oft_indent,'Using single precision block preconditioners'
   END IF
 END IF
-IF(self%pre_factor)WRITE(*,'(2A)')oft_indent,'Using factored form for block preconditioners'
 CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')
 ALLOCATE(cell_mark(self%tw_obj%mesh%nc))
 DO j=1,self%nlevels
@@ -3006,10 +3001,9 @@ END SUBROUTINE get_qr
 !------------------------------------------------------------------------------
 !> Precondition a linear system using a Block-Jacobi method (complex)
 !!
-!! Each diagonal block is LU factored and either inverted explicitly (default) or,
-!! if `pre_factor` is set on the HODLR operator, applied using the LU factors.
-!! If `pre_single` is set the result is stored and applied in single precision,
-!! with the factorization performed in double (default) or single precision
+!! Each diagonal block is inverted explicitly using its LU factorization. If `pre_single`
+!! is set on the HODLR operator the inverse is stored and applied in single precision,
+!! with the factorization/inversion performed in double (default) or single precision
 !! (`pre_single_factor`).
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE bjprecond_apply(self,u,g)
@@ -3115,45 +3109,31 @@ DEALLOCATE(utmp,gtmp,hole_inds)
 DEBUG_STACK_POP
 CONTAINS
 !------------------------------------------------------------------------------
-!> Factor (and invert) assembled block, converting to single precision if requested
+!> Invert assembled block, converting to single precision if requested
 !------------------------------------------------------------------------------
 SUBROUTINE factor_block(mat,nrows)
-TYPE(cmat_container), INTENT(inout) :: mat !< Block to factor (`M` must be populated)
+TYPE(cmat_container), INTENT(inout) :: mat !< Block to invert (`M` must be populated)
 INTEGER(4), INTENT(in) :: nrows !< Size of block
 INTEGER(4) :: error,lwork
-COMPLEX(8), ALLOCATABLE, DIMENSION(:) :: work
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: ipiv
 COMPLEX(4), ALLOCATABLE, DIMENSION(:) :: work4
-IF(ASSOCIATED(mat%ipiv))DEALLOCATE(mat%ipiv)
-ALLOCATE(mat%ipiv(nrows))
 IF(self%mf_obj%pre_single_factor)THEN
   IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
   mat%M4=CMPLX(mat%M,KIND=c4)
   DEALLOCATE(mat%M)
-  CALL cgetrf(nrows,nrows,mat%M4,nrows,mat%ipiv,error)
+  ALLOCATE(ipiv(nrows),work4(1))
+  CALL cgetrf(nrows,nrows,mat%M4,nrows,ipiv,error)
   IF(error/=0)CALL oft_abort("factorization failed","bjprecond_apply",__FILE__)
-  IF(.NOT.self%mf_obj%pre_factor)THEN
-    ALLOCATE(work4(1))
-    CALL cgetri(nrows,mat%M4,nrows,mat%ipiv,work4,-1,error)
-    lwork=INT(work4(1),4)
-    DEALLOCATE(work4)
-    ALLOCATE(work4(lwork))
-    CALL cgetri(nrows,mat%M4,nrows,mat%ipiv,work4,lwork,error)
-    DEALLOCATE(work4)
-    IF(error/=0)CALL oft_abort("inversion failed","bjprecond_apply",__FILE__)
-  END IF
+  CALL cgetri(nrows,mat%M4,nrows,ipiv,work4,-1,error)
+  lwork=INT(work4(1),4)
+  DEALLOCATE(work4)
+  ALLOCATE(work4(lwork))
+  CALL cgetri(nrows,mat%M4,nrows,ipiv,work4,lwork,error)
+  IF(error/=0)CALL oft_abort("inversion failed","bjprecond_apply",__FILE__)
+  DEALLOCATE(ipiv,work4)
 ELSE
-  CALL zgetrf(nrows,nrows,mat%M,nrows,mat%ipiv,error)
+  CALL lapack_matinv(nrows,mat%M,error)
   IF(error/=0)CALL oft_abort("factorization failed","bjprecond_apply",__FILE__)
-  IF(.NOT.self%mf_obj%pre_factor)THEN
-    ALLOCATE(work(1))
-    CALL zgetri(nrows,mat%M,nrows,mat%ipiv,work,-1,error)
-    lwork=INT(work(1),4)
-    DEALLOCATE(work)
-    ALLOCATE(work(lwork))
-    CALL zgetri(nrows,mat%M,nrows,mat%ipiv,work,lwork,error)
-    DEALLOCATE(work)
-    IF(error/=0)CALL oft_abort("inversion failed","bjprecond_apply",__FILE__)
-  END IF
   IF(self%mf_obj%pre_single)THEN
     IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
     mat%M4=CMPLX(mat%M,KIND=c4)
@@ -3162,43 +3142,32 @@ ELSE
     IF(ASSOCIATED(mat%M4))DEALLOCATE(mat%M4)
   END IF
 END IF
-IF(.NOT.self%mf_obj%pre_factor)DEALLOCATE(mat%ipiv)
 END SUBROUTINE factor_block
 !------------------------------------------------------------------------------
 !> Apply preconditioner for a single block
 !------------------------------------------------------------------------------
 SUBROUTINE apply_block(mat,nrows,inds,vloc,vloc4)
-TYPE(cmat_container), INTENT(in) :: mat !< Factored block
+TYPE(cmat_container), INTENT(in) :: mat !< Inverted block
 INTEGER(4), INTENT(in) :: nrows !< Size of block
 INTEGER(4), INTENT(in) :: inds(nrows) !< Global indices of block rows
 COMPLEX(8), ALLOCATABLE, INTENT(inout) :: vloc(:,:) !< Double precision work array [max_block_size,2]
 COMPLEX(4), ALLOCATABLE, INTENT(inout) :: vloc4(:,:) !< Single precision work array [max_block_size,2]
-INTEGER(4) :: j,error
+INTEGER(4) :: j
 IF(self%mf_obj%pre_single)THEN
   DO j=1,nrows
     vloc4(j,1) = CMPLX(gtmp(inds(j)),KIND=c4)
   END DO
-  IF(self%mf_obj%pre_factor)THEN
-    CALL cgetrs('N',nrows,1,mat%M4,nrows,mat%ipiv,vloc4(:,1),nrows,error)
-  ELSE
-    CALL cgemv('N',nrows,nrows,(1.0_r4,0.0_r4),mat%M4,nrows,vloc4(:,1),1,(0.0_r4,0.0_r4),vloc4(:,2),1)
-    vloc4(1:nrows,1)=vloc4(1:nrows,2)
-  END IF
+  CALL cgemv('N',nrows,nrows,(1.0_r4,0.0_r4),mat%M4,nrows,vloc4(:,1),1,(0.0_r4,0.0_r4),vloc4(:,2),1)
   DO j=1,nrows
-    utmp(inds(j)) = CMPLX(vloc4(j,1),KIND=c8)
+    utmp(inds(j)) = CMPLX(vloc4(j,2),KIND=c8)
   END DO
 ELSE
   DO j=1,nrows
     vloc(j,1) = gtmp(inds(j))
   END DO
-  IF(self%mf_obj%pre_factor)THEN
-    CALL zgetrs('N',nrows,1,mat%M,nrows,mat%ipiv,vloc(:,1),nrows,error)
-  ELSE
-    CALL zgemv('N',nrows,nrows,(1.d0,0.d0),mat%M,nrows,vloc(:,1),1,(0.d0,0.d0),vloc(:,2),1)
-    vloc(1:nrows,1)=vloc(1:nrows,2)
-  END IF
+  CALL zgemv('N',nrows,nrows,(1.d0,0.d0),mat%M,nrows,vloc(:,1),1,(0.d0,0.d0),vloc(:,2),1)
   DO j=1,nrows
-    utmp(inds(j)) = vloc(j,1)
+    utmp(inds(j)) = vloc(j,2)
   END DO
 END IF
 END SUBROUTINE apply_block
@@ -3216,7 +3185,6 @@ IF(ASSOCIATED(self%inverse_mats))THEN
   DO i=1,SIZE(self%inverse_mats)
     IF(ASSOCIATED(self%inverse_mats(i)%M))DEALLOCATE(self%inverse_mats(i)%M)
     IF(ASSOCIATED(self%inverse_mats(i)%M4))DEALLOCATE(self%inverse_mats(i)%M4)
-    IF(ASSOCIATED(self%inverse_mats(i)%ipiv))DEALLOCATE(self%inverse_mats(i)%ipiv)
   END DO
   DEALLOCATE(self%inverse_mats)
 END IF
@@ -3229,10 +3197,9 @@ end subroutine bjprecond_delete
 !------------------------------------------------------------------------------
 !> Precondition a linear system using a Block-Jacobi method (real)
 !!
-!! Each diagonal block is Cholesky factored and either inverted explicitly (default) or,
-!! if `pre_factor` is set on the HODLR operator, applied using the Cholesky factor.
-!! If `pre_single` is set the result is stored and applied in single precision,
-!! with the factorization performed in double (default) or single precision
+!! Each diagonal block is inverted explicitly using its Cholesky factorization. If `pre_single`
+!! is set on the HODLR operator the inverse is stored and applied in single precision,
+!! with the factorization/inversion performed in double (default) or single precision
 !! (`pre_single_factor`).
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE rbjprecond_apply(self,u,g)
@@ -3338,7 +3305,7 @@ DEALLOCATE(utmp,gtmp,hole_inds)
 DEBUG_STACK_POP
 CONTAINS
 !------------------------------------------------------------------------------
-!> Factor (and invert) assembled block, converting to single precision if requested
+!> Invert assembled block, converting to single precision if requested
 !------------------------------------------------------------------------------
 SUBROUTINE factor_block(mat,nrows)
 TYPE(rmat_container), INTENT(inout) :: mat !< Block to factor (`M` must be populated)
@@ -3350,21 +3317,15 @@ IF(self%mf_obj%pre_single_factor)THEN
   DEALLOCATE(mat%M)
   CALL spotrf('U',nrows,mat%M4,nrows,error)
   IF(error/=0)CALL oft_abort("factorization failed","rbjprecond_apply",__FILE__)
-  IF(.NOT.self%mf_obj%pre_factor)THEN
-    CALL spotri('U',nrows,mat%M4,nrows,error)
-    IF(error/=0)CALL oft_abort("inversion failed","rbjprecond_apply",__FILE__)
-    DO j=1,nrows
-      DO k=1,j-1
-        mat%M4(j,k)=mat%M4(k,j)
-      END DO
+  CALL spotri('U',nrows,mat%M4,nrows,error)
+  IF(error/=0)CALL oft_abort("inversion failed","rbjprecond_apply",__FILE__)
+  DO j=1,nrows
+    DO k=1,j-1
+      mat%M4(j,k)=mat%M4(k,j)
     END DO
-  END IF
+  END DO
 ELSE
-  IF(self%mf_obj%pre_factor)THEN
-    CALL dpotrf('U',nrows,mat%M,nrows,error)
-  ELSE
-    CALL lapack_cholesky(nrows,mat%M,error)
-  END IF
+  CALL lapack_cholesky(nrows,mat%M,error)
   IF(error/=0)CALL oft_abort("factorization failed","rbjprecond_apply",__FILE__)
   IF(self%mf_obj%pre_single)THEN
     IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
@@ -3379,37 +3340,27 @@ END SUBROUTINE factor_block
 !> Apply preconditioner for a single block
 !------------------------------------------------------------------------------
 SUBROUTINE apply_block(mat,nrows,inds,vloc,vloc4)
-TYPE(rmat_container), INTENT(in) :: mat !< Factored block
+TYPE(rmat_container), INTENT(in) :: mat !< Inverted block
 INTEGER(4), INTENT(in) :: nrows !< Size of block
 INTEGER(4), INTENT(in) :: inds(nrows) !< Global indices of block rows
 REAL(8), ALLOCATABLE, INTENT(inout) :: vloc(:,:) !< Double precision work array [max_block_size,2]
 REAL(4), ALLOCATABLE, INTENT(inout) :: vloc4(:,:) !< Single precision work array [max_block_size,2]
-INTEGER(4) :: j,error
+INTEGER(4) :: j
 IF(self%mf_obj%pre_single)THEN
   DO j=1,nrows
     vloc4(j,1) = REAL(gtmp(inds(j)),r4)
   END DO
-  IF(self%mf_obj%pre_factor)THEN
-    CALL spotrs('U',nrows,1,mat%M4,nrows,vloc4(:,1),nrows,error)
-  ELSE
-    CALL sgemv('N',nrows,nrows,1.0_r4,mat%M4,nrows,vloc4(:,1),1,0.0_r4,vloc4(:,2),1)
-    vloc4(1:nrows,1)=vloc4(1:nrows,2)
-  END IF
+  CALL sgemv('N',nrows,nrows,1.0_r4,mat%M4,nrows,vloc4(:,1),1,0.0_r4,vloc4(:,2),1)
   DO j=1,nrows
-    utmp(inds(j)) = REAL(vloc4(j,1),r8)
+    utmp(inds(j)) = REAL(vloc4(j,2),r8)
   END DO
 ELSE
   DO j=1,nrows
     vloc(j,1) = gtmp(inds(j))
   END DO
-  IF(self%mf_obj%pre_factor)THEN
-    CALL dpotrs('U',nrows,1,mat%M,nrows,vloc(:,1),nrows,error)
-  ELSE
-    CALL dgemv('N',nrows,nrows,1.d0,mat%M,nrows,vloc(:,1),1,0.d0,vloc(:,2),1)
-    vloc(1:nrows,1)=vloc(1:nrows,2)
-  END IF
+  CALL dgemv('N',nrows,nrows,1.d0,mat%M,nrows,vloc(:,1),1,0.d0,vloc(:,2),1)
   DO j=1,nrows
-    utmp(inds(j)) = vloc(j,1)
+    utmp(inds(j)) = vloc(j,2)
   END DO
 END IF
 END SUBROUTINE apply_block

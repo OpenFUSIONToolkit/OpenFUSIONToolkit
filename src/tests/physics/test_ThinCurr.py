@@ -1122,10 +1122,8 @@ def test_fr_aca(convert_xml):
     assert validate_fr(fr_real, fr_imag)
 
 hodlr_pre_opts = (
-    {'pre_factor': True},
     {'pre_single': True},
-    {'pre_single': True, 'pre_factor': True},
-    {'pre_single': True, 'pre_single_factor': True, 'pre_factor': True}
+    {'pre_single': True, 'pre_single_factor': True}
 )
 
 @pytest.mark.coverage

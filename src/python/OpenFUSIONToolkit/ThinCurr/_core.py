@@ -39,8 +39,7 @@ class ThinCurr():
             'B_svd_tol': '-1.E-5',
             'B_aca_rel_tol': '0.05',
             'pre_single': 'F',
-            'pre_single_factor': 'F',
-            'pre_factor': 'F'
+            'pre_single_factor': 'F'
         }
         self._oft_env.update_oft_in()
         ## Thin-wall model object
@@ -333,7 +332,7 @@ class ThinCurr():
 
     def set_hodlr_options(self,target_size=None,aca_min_its=None,aca_sep_thresh=None,L_svd_tol=None,
                           L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None,
-                          pre_single_factor=None,pre_factor=None):
+                          pre_single_factor=None):
         '''! Set HODLR options for ThinCurr model
 
         @param target_size Target size for HODLR blocks
@@ -345,7 +344,6 @@ class ThinCurr():
         @param B_aca_rel_tol Relative tolerance for ACA compression of B-matrix blocks
         @param pre_single Store and apply HODLR block-Jacobi preconditioners in single precision?
         @param pre_single_factor Factor/invert preconditioner blocks in single precision (requires `pre_single=True`)?
-        @param pre_factor Apply preconditioner blocks using factors instead of explicit inverses?
         '''
         if target_size is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
@@ -367,8 +365,6 @@ class ThinCurr():
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_single'] = 'T' if pre_single else 'F'
         if pre_single_factor is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_single_factor'] = 'T' if pre_single_factor else 'F'
-        if pre_factor is not None:
-            self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_factor'] = 'T' if pre_factor else 'F'
         self._oft_env.update_oft_in()
 
     def compute_Lmat(self,cache_file=None,use_hodlr=False):
