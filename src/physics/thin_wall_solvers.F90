@@ -23,7 +23,7 @@ USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
 USE oft_native_la, ONLY: oft_native_dense_matrix, partition_graph
 USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
 USE oft_solver_base, ONLY: oft_solver
-USE oft_native_solvers, ONLY: oft_native_gmres_csolver
+USE oft_native_solvers, ONLY: oft_native_gmres_csolver, gmres_backsolve
 USE oft_solver_utils, ONLY: create_diag_pre, create_native_solver, create_cg_solver
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
@@ -419,8 +419,11 @@ DOUBLE COMPLEX, allocatable, dimension(:) :: r,w
 DOUBLE COMPLEX, allocatable, dimension(:,:) :: v,z
 DOUBLE COMPLEX, allocatable :: h(:,:),c(:),s(:),res(:),y(:)
 DOUBLE COMPLEX :: delta,hkmi
-REAL(r8) :: uu,uuold,gg,ggold,ggin,elapsed_time,rel_tol
+REAL(r8) :: uu,uuold,gg,ggold,ggin,elapsed_time,res_u_tol
+REAL(r8), allocatable :: znorm(:)
 integer(i4) :: i,j,jr,k,kk,nits,info,nfail
+INTEGER(i4), PARAMETER :: min_inner_its = 10 !< Minimum inner iterations before |r|/|u| check
+LOGICAL :: inner_conv
 integer(i4), allocatable, dimension(:) :: part
 LOGICAL, allocatable, dimension(:) :: eflag
 TYPE(mat_parts), pointer, dimension(:) :: parts,parts_tmp
@@ -522,7 +525,7 @@ END IF
 ALLOCATE(v(ncoils,nrits+1),z(ncoils,nrits+1))
 ALLOCATE(r(ncoils),w(ncoils))
 w=(0.d0,0.d0); z=(0.d0,0.d0)
-allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits),y(nrits))
+allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits),y(nrits),znorm(nrits))
 c=(0.d0,0.d0); s=(0.d0,0.d0); res=(0.d0,0.d0); h=(0.d0,0.d0)
 !
 uu = REAL(vec_comp_dot(ncoils,u,u),8)
@@ -531,15 +534,17 @@ r=g-w
 gg = REAL(vec_comp_dot(ncoils,r,r),8)
 ggin=gg
 IF(pm)WRITE(*,'(A,I6,2ES14.6)')oft_indent,0,SQRT(uu),SQRT(gg)
-rel_tol=-1.d0
-IF(its==-1)rel_tol=1.d-7
-IF(its==-2)rel_tol=1.d-14
+! Tolerance on |r|/|u| for its=-1/-2
+res_u_tol=-1.d0
+IF(its==-1)res_u_tol=1.d-7
+IF(its==-2)res_u_tol=1.d-14
 nits=0
 DO j=1,ncoils
   IF(gg==0.d0)EXIT
   res=(0.d0,0.d0)
   res(1)=SQRT(gg)
   v(:,1)=r/res(1)
+  inner_conv=.FALSE.
   DO i=1,nrits
   !---Precondition search direction
   IF(nlocal>1)THEN
@@ -560,6 +565,7 @@ DO j=1,ncoils
         z(k,i)=v(k,i)/A(k,k)
       END DO
     END IF
+    IF(res_u_tol>0.d0)znorm(i)=SQRT(REAL(vec_comp_dot(ncoils,z(:,i),z(:,i)),8))
     CALL mat_comp(ncoils,A,z(:,i),w)
     !---Arnoldi iteration
     DO k=1,i
@@ -585,31 +591,32 @@ DO j=1,ncoils
     IF(i==nrits)EXIT
     IF(ABS(res(i+1))==0.d0)EXIT ! Lucky breakdown
     IF(nits==its)EXIT
-    !---Check convergence of current iterate (|r|/|u| < rel_tol) using estimated residual
-    IF(rel_tol>0.d0)THEN
-      y(1:i)=res(1:i)
-      DO kk=i,1,-1
-        y(kk)=y(kk)/h(kk,kk)
-        y(1:kk-1)=y(1:kk-1)-y(kk)*h(1:kk-1,kk)
-      END DO
-      w=u ! Use w as scratch, it is overwritten before next use
-      DO kk=1,i
-        w=w+y(kk)*z(:,kk)
-      END DO
-      IF(ABS(res(i+1))<rel_tol*SQRT(REAL(vec_comp_dot(ncoils,w,w),8)))EXIT
+    !---Check |r|/|u| criterion for current iterate (after a minimum number of
+    !   inner iterations to avoid stalling through many short restart cycles)
+    IF(res_u_tol>0.d0.AND.i>=MIN(min_inner_its,ncoils))THEN
+      CALL gmres_backsolve(i,h,res,y)
+      ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
+      IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(y(1:i))*znorm(1:i))))THEN
+        w=u ! Form iterate in w (used as scratch)
+        DO kk=1,i
+          w=w+y(kk)*z(:,kk)
+        END DO
+        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(REAL(vec_comp_dot(ncoils,w,w),8)))
+        IF(inner_conv)EXIT
+      END IF
     END IF
     IF(pm)WRITE(*,'(A,I6,14X,ES14.6)')oft_indent,nits,ABS(res(i+1))
   END DO
   k=i
-  DO i=k,2,-1
-    res(i) = res(i) / h(i,i)
-    res(1:i-1) = res(1:i-1) - res(i)*h(1:i-1,i)
-  END DO
-  res(1) = res(1) / h(1,1)
   ! Update iterate
-  DO i=1,k
-    u=u+res(i)*z(:,i)
-  END DO
+  IF(inner_conv)THEN
+    u=w ! Already formed by inner convergence check
+  ELSE
+    CALL gmres_backsolve(k,h,res,y)
+    DO i=1,k
+      u=u+y(i)*z(:,i)
+    END DO
+  END IF
   CALL mat_comp(ncoils,A,u,w)
   r=g-w
   IF(nits==its)EXIT
@@ -617,13 +624,12 @@ DO j=1,ncoils
   gg = REAL(vec_comp_dot(ncoils,r,r),8)
   uu = REAL(vec_comp_dot(ncoils,u,u),8)
   IF(pm)WRITE(*,'(A,I6,3ES14.6)')oft_indent,nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
-  IF(its==-1.AND.sqrt(gg/uu)<1.d-7)EXIT
-  IF(its==-2.AND.sqrt(gg/uu)<1.d-14)EXIT
+  IF(res_u_tol>0.d0.AND.SQRT(gg/uu)<res_u_tol)EXIT
   IF(nits==its)EXIT
   IF(uu==uuold)EXIT
 END DO
 g=r
-DEALLOCATE(c,s,h,res,y)
+DEALLOCATE(c,s,h,res,y,znorm)
 DEALLOCATE(v,z,r,w)
 !
 IF(pm)THEN
