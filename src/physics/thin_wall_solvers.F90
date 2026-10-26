@@ -417,9 +417,9 @@ END TYPE mat_parts
 !
 DOUBLE COMPLEX, allocatable, dimension(:) :: r,w
 DOUBLE COMPLEX, allocatable, dimension(:,:) :: v,z
-DOUBLE COMPLEX, allocatable :: h(:,:),c(:),s(:),res(:)
+DOUBLE COMPLEX, allocatable :: h(:,:),c(:),s(:),res(:),y(:)
 DOUBLE COMPLEX :: delta,hkmi
-REAL(r8) :: uu,uuold,gg,ggold,ggin,elapsed_time
+REAL(r8) :: uu,uuold,gg,ggold,ggin,elapsed_time,rel_tol
 integer(i4) :: i,j,jr,k,kk,nits,info,nfail
 integer(i4), allocatable, dimension(:) :: part
 LOGICAL, allocatable, dimension(:) :: eflag
@@ -522,7 +522,7 @@ END IF
 ALLOCATE(v(ncoils,nrits+1),z(ncoils,nrits+1))
 ALLOCATE(r(ncoils),w(ncoils))
 w=(0.d0,0.d0); z=(0.d0,0.d0)
-allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
+allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits),y(nrits))
 c=(0.d0,0.d0); s=(0.d0,0.d0); res=(0.d0,0.d0); h=(0.d0,0.d0)
 !
 uu = REAL(vec_comp_dot(ncoils,u,u),8)
@@ -531,6 +531,9 @@ r=g-w
 gg = REAL(vec_comp_dot(ncoils,r,r),8)
 ggin=gg
 IF(pm)WRITE(*,'(A,I6,2ES14.6)')oft_indent,0,SQRT(uu),SQRT(gg)
+rel_tol=-1.d0
+IF(its==-1)rel_tol=1.d-7
+IF(its==-2)rel_tol=1.d-14
 nits=0
 DO j=1,ncoils
   IF(gg==0.d0)EXIT
@@ -582,6 +585,19 @@ DO j=1,ncoils
     IF(i==nrits)EXIT
     IF(ABS(res(i+1))==0.d0)EXIT ! Lucky breakdown
     IF(nits==its)EXIT
+    !---Check convergence of current iterate (|r|/|u| < rel_tol) using estimated residual
+    IF(rel_tol>0.d0)THEN
+      y(1:i)=res(1:i)
+      DO kk=i,1,-1
+        y(kk)=y(kk)/h(kk,kk)
+        y(1:kk-1)=y(1:kk-1)-y(kk)*h(1:kk-1,kk)
+      END DO
+      w=u ! Use w as scratch, it is overwritten before next use
+      DO kk=1,i
+        w=w+y(kk)*z(:,kk)
+      END DO
+      IF(ABS(res(i+1))<rel_tol*SQRT(REAL(vec_comp_dot(ncoils,w,w),8)))EXIT
+    END IF
     IF(pm)WRITE(*,'(A,I6,14X,ES14.6)')oft_indent,nits,ABS(res(i+1))
   END DO
   k=i
@@ -607,7 +623,7 @@ DO j=1,ncoils
   IF(uu==uuold)EXIT
 END DO
 g=r
-DEALLOCATE(c,s,h,res)
+DEALLOCATE(c,s,h,res,y)
 DEALLOCATE(v,z,r,w)
 !
 IF(pm)THEN
