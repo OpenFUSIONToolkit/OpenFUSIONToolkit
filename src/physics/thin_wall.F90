@@ -3722,26 +3722,67 @@ SUBROUTINE tw_junction_reduce_dense(self,Aexp,A)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 REAL(8), INTENT(in) :: Aexp(:,:) !< Expanded matrix [nelems_exp,nelems_exp]
 REAL(8), INTENT(out) :: A(:,:) !< Reduced matrix [nelems,nelems]
-INTEGER(4) :: e,k,c
-REAL(8), ALLOCATABLE :: T(:,:)
-ALLOCATE(T(self%nelems_exp,self%nelems))
-T=0.d0
-DO e=1,self%nelems_exp
-  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
-    T(:,self%jp_lc(k))=T(:,self%jp_lc(k))+self%jp_val(k)*Aexp(:,e)
+INTEGER(4), PARAMETER :: nblock = 64
+INTEGER(4) :: c,c0,k,nb,ir
+INTEGER(4), ALLOCATABLE :: pt_kr(:),pt_lc(:)
+REAL(8) :: tmp
+REAL(8), ALLOCATABLE :: pt_val(:),T(:,:)
+CALL tw_junction_transpose(self,pt_kr,pt_lc,pt_val)
+!---Blocks of reduced columns: T = A_exp P(:,block), then A(:,block) = P^T T
+ALLOCATE(T(self%nelems_exp,nblock))
+DO c0=1,self%nelems,nblock
+  nb=MIN(nblock,self%nelems-c0+1)
+  !$omp parallel do private(k)
+  DO c=1,nb
+    T(:,c)=0.d0
+    DO k=pt_kr(c0+c-1),pt_kr(c0+c)-1
+      T(:,c)=T(:,c)+pt_val(k)*Aexp(:,pt_lc(k))
+    END DO
   END DO
-END DO
-A=0.d0
-DO c=1,self%nelems
-  DO e=1,self%nelems_exp
-    IF(T(e,c)==0.d0)CYCLE
-    DO k=self%jp_kr(e),self%jp_kr(e+1)-1
-      A(self%jp_lc(k),c)=A(self%jp_lc(k),c)+self%jp_val(k)*T(e,c)
+  !$omp parallel do private(c,k,tmp)
+  DO ir=1,self%nelems
+    DO c=1,nb
+      tmp=0.d0
+      DO k=pt_kr(ir),pt_kr(ir+1)-1
+        tmp=tmp+pt_val(k)*T(pt_lc(k),c)
+      END DO
+      A(ir,c0+c-1)=tmp
     END DO
   END DO
 END DO
-DEALLOCATE(T)
+DEALLOCATE(T,pt_kr,pt_lc,pt_val)
 END SUBROUTINE tw_junction_reduce_dense
+!---------------------------------------------------------------------------------
+!> Transpose of the junction map, P^T in CSR form
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_junction_transpose(self,pt_kr,pt_lc,pt_val)
+TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
+INTEGER(4), ALLOCATABLE, INTENT(out) :: pt_kr(:) !< Row pointer [nelems+1]
+INTEGER(4), ALLOCATABLE, INTENT(out) :: pt_lc(:) !< Expanded element of each entry
+REAL(8), ALLOCATABLE, INTENT(out) :: pt_val(:) !< Coefficients
+INTEGER(4) :: a,e,k
+INTEGER(4), ALLOCATABLE :: cnt(:)
+ALLOCATE(pt_kr(self%nelems+1),cnt(self%nelems))
+cnt=0
+DO k=1,self%jp_kr(self%nelems_exp+1)-1
+  cnt(self%jp_lc(k))=cnt(self%jp_lc(k))+1
+END DO
+pt_kr(1)=1
+DO a=1,self%nelems
+  pt_kr(a+1)=pt_kr(a)+cnt(a)
+END DO
+ALLOCATE(pt_lc(pt_kr(self%nelems+1)-1),pt_val(pt_kr(self%nelems+1)-1))
+cnt=0
+DO e=1,self%nelems_exp
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    a=self%jp_lc(k)
+    pt_lc(pt_kr(a)+cnt(a))=e
+    pt_val(pt_kr(a)+cnt(a))=self%jp_val(k)
+    cnt(a)=cnt(a)+1
+  END DO
+END DO
+DEALLOCATE(cnt)
+END SUBROUTINE tw_junction_transpose
 !---------------------------------------------------------------------------------
 !> Reduce the resistance matrix in place, R = P^T R_exp P
 !---------------------------------------------------------------------------------
@@ -3753,27 +3794,8 @@ REAL(8), ALLOCATABLE :: pt_val(:),mvals(:),acc(:)
 TYPE(oft_native_matrix), POINTER :: Rexp,Rred
 Rexp=>self%Rmat
 nr=self%nelems
-!---Transpose of P
-ALLOCATE(pt_kr(nr+1),tmp(nr))
-tmp=0
-DO e=1,self%nelems_exp
-  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
-    tmp(self%jp_lc(k))=tmp(self%jp_lc(k))+1
-  END DO
-END DO
-pt_kr(1)=1
-DO a=1,nr
-  pt_kr(a+1)=pt_kr(a)+tmp(a)
-END DO
-ALLOCATE(pt_lc(pt_kr(nr+1)-1),pt_val(pt_kr(nr+1)-1))
-tmp=0
-DO e=1,self%nelems_exp
-  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
-    pt_lc(pt_kr(self%jp_lc(k))+tmp(self%jp_lc(k)))=e
-    pt_val(pt_kr(self%jp_lc(k))+tmp(self%jp_lc(k)))=self%jp_val(k)
-    tmp(self%jp_lc(k))=tmp(self%jp_lc(k))+1
-  END DO
-END DO
+CALL tw_junction_transpose(self,pt_kr,pt_lc,pt_val)
+ALLOCATE(tmp(nr))
 !---Sparsity of P^T R P
 ALLOCATE(mark(nr),kr(nr+1))
 mark=0
