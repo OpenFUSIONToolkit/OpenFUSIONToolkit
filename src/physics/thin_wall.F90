@@ -1559,7 +1559,7 @@ IF(PRESENT(save_file))THEN
         WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Sizes do not match'
       END IF
       IF(exists)THEN
-        ALLOCATE(tw_obj%Ael2sen(tw_obj%nelems_exp,nsensors))
+        ALLOCATE(tw_obj%Ael2sen(nsensors,tw_obj%nelems_exp))
         READ(io_unit, IOSTAT=ierr)tw_obj%Ael2sen
         IF(ierr/=0)THEN
           WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
@@ -1577,7 +1577,7 @@ IF(PRESENT(save_file))THEN
       !   END IF
       ! END IF
       IF(exists)THEN
-        ALLOCATE(tw_obj%Adr2sen(tw_obj%n_icoils,nsensors))
+        ALLOCATE(tw_obj%Adr2sen(nsensors,tw_obj%n_icoils))
         READ(io_unit, IOSTAT=ierr)tw_obj%Adr2sen
         IF(ierr/=0)THEN
           WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
@@ -3946,11 +3946,7 @@ TYPE(floop_sensor), POINTER, INTENT(in) :: sensors(:) !< Sensors
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
 CALL tw_compute_mutuals_exp(tw_obj,nsensors,sensors,save_file)
 IF(.NOT.tw_obj%junctions)RETURN
-IF(SIZE(tw_obj%Ael2sen,DIM=1)==tw_obj%nelems_exp)THEN
-  CALL tw_junction_reduce_rows(tw_obj,tw_obj%Ael2sen)
-ELSE
-  CALL tw_junction_reduce_cols(tw_obj,tw_obj%Ael2sen)
-END IF
+CALL tw_junction_reduce_cols(tw_obj,tw_obj%Ael2sen)
 END SUBROUTINE tw_compute_mutuals
 !---------------------------------------------------------------------------------
 !> Compute the magnetic field operators (reduced to the junction unknowns if present)

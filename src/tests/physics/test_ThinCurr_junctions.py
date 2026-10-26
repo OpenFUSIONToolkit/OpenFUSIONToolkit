@@ -232,21 +232,26 @@ def run_cache(path, mp_q):
     try:
         from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        from OpenFUSIONToolkit.ThinCurr.sensor import Mirnov, save_sensors
+        save_sensors([Mirnov([0.2, 0.5, 0.1], [0.0, 0.0, 1.0], 'B1'), Mirnov([0.1, 0.3, 0.2], [1.0, 0.0, 0.0], 'B2')],
+                     'junction_cache.loc')
         myOFT = OFT_env(nthreads=-1)
         mats = []
-        for cache in (None, 'junction_cache_L.save', 'junction_cache_L.save'):
+        for suffix in (None, '.save', '.save'):
             tw = ThinCurr(myOFT)
             tw.setup_model(mesh_file=path)
-            tw.compute_Lmat(cache_file=cache)
-            mats.append(np.array(tw.Lmat))
-        result = all(np.array_equal(mats[0], m) for m in mats[1:])
+            tw.compute_Lmat(cache_file=suffix and 'junction_cache_L' + suffix)
+            Ms, Msc, _ = tw.compute_Msensor('junction_cache.loc', cache_file=suffix and 'junction_cache_Ms' + suffix)
+            mats.append((np.array(tw.Lmat), np.array(Ms), np.array(Msc)))
+        result = all(a.shape == b.shape and np.allclose(a, b, rtol=0.0, atol=1.E-12*np.abs(a).max())
+                     for m in mats[1:] for a, b in zip(mats[0], m))
     except BaseException as e:
         print(e)
     mp_q.put(result)
 
 
 def test_cache():
-    for f in ('junction_cache_L.save',):
+    for f in ('junction_cache_L.save', 'junction_cache_Ms.save'):
         if os.path.exists(os.path.join(test_dir, f)):
             os.remove(os.path.join(test_dir, f))
     files, _ = write_pair(*tplate(), 'junction_cache')
