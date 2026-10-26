@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
 from . import _tree_homology
 from . import _manifold_homology
-from .junctions import has_junctions, find_junction_holes, verify_junction_mesh
+from .junctions import has_junctions, find_junction_holes, verify_junction_mesh, split_jumper
 
 
 def _verify_counts(input_model, nholes, nclosures):
@@ -99,8 +99,10 @@ def _compute_junction_holes(input_model, out_file, verify_only, print_info, peri
     if verify_only:
         return
     thincurr = input_model['thincurr']
+    jumpers = [split_jumper(input_model['lc'], out['lc'], out['vmap'], out['jedges'], jumper)
+               for jumper in thincurr.get('jumpers', [])]
     write_ThinCurr_mesh(out_file, out['r'], out['lc'], input_model['reg'],
-                        junctions=out,
+                        junctions=out, jumpers=jumpers,
                         eta_surf=thincurr.get('eta_surf'), eta_vol=thincurr.get('eta_vol'),
                         thickness=thincurr.get('thickness'), coil_sets=thincurr.get('coil_sets'),
                         reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'))

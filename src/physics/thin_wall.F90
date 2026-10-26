@@ -650,7 +650,7 @@ ALLOCATE(normals(self%mesh%np,1))
 DO i=1,SIZE(self%jumper_nsets)
   normals=0.d0
   DO j=1,self%jumper_nsets(i)%n
-    normals(self%jumper_nsets(i)%v(j),1)=1.d0
+    IF(self%jumper_nsets(i)%v(j)>0)normals(self%jumper_nsets(i)%v(j),1)=1.d0
   END DO
   WRITE(plt_tag,'(I4.4)')i
   CALL self%mesh%save_vertex_scalar(normals(:,1),self%xdmf,'Jumper_'//plt_tag)
@@ -3078,12 +3078,19 @@ IF(ASSOCIATED(self%jumper_nsets))THEN
   DO i=1,sensors%njumpers
     WRITE(sensors%jumpers(i)%name,'(A,I4.4)')'JUMPER_',i
     sensors%jumpers(i)%np=self%jumper_nsets(i)%n
-    ALLOCATE(sensors%jumpers(i)%points(sensors%jumpers(i)%np+1))
-    CALL order_jumper_list(self%jumper_nsets(i)%v,sensors%jumpers(i)%points,self%jumper_nsets(i)%n)
-    IF(sensors%jumpers(i)%points(sensors%jumpers(i)%np+1)>0)sensors%jumpers(i)%np=sensors%jumpers(i)%np+1
+    IF(self%junctions)THEN
+      ! Already ordered on the split mesh, with segments separated by 0 where the jumper crosses a junction
+      ALLOCATE(sensors%jumpers(i)%points(sensors%jumpers(i)%np))
+      sensors%jumpers(i)%points=self%jumper_nsets(i)%v
+    ELSE
+      ALLOCATE(sensors%jumpers(i)%points(sensors%jumpers(i)%np+1))
+      CALL order_jumper_list(self%jumper_nsets(i)%v,sensors%jumpers(i)%points,self%jumper_nsets(i)%n)
+      IF(sensors%jumpers(i)%points(sensors%jumpers(i)%np+1)>0)sensors%jumpers(i)%np=sensors%jumpers(i)%np+1
+    END IF
     ! Setup hole couplings
     hole_facs=0.d0
     DO j=1,sensors%jumpers(i)%np-1
+      IF(sensors%jumpers(i)%points(j)==0.OR.sensors%jumpers(i)%points(j+1)==0)CYCLE
       id=mesh_local_findedge(self%mesh,[sensors%jumpers(i)%points(j),sensors%jumpers(i)%points(j+1)])
       IF(id==0)THEN
         WRITE(*,*)"No Edge matching points: ",sensors%jumpers(i)%points(j),sensors%jumpers(i)%points(j+1),' on jumper ',i
@@ -3124,7 +3131,8 @@ IF(ASSOCIATED(self%jumper_nsets))THEN
     WRITE(io_unit,'(3ES24.15)')norm
     IF(oft_debug_print(1))WRITE(*,'(A,I8,3ES24.15)')oft_indent,i,norm
     ! Close loop, remove points and only use holes
-    IF(sensors%jumpers(i)%points(1)==sensors%jumpers(i)%points(sensors%jumpers(i)%np))THEN
+    IF((sensors%jumpers(i)%points(1)==sensors%jumpers(i)%points(sensors%jumpers(i)%np)) &
+      .AND.ALL(sensors%jumpers(i)%points(1:sensors%jumpers(i)%np)>0))THEN
       DEALLOCATE(sensors%jumpers(i)%points)
       sensors%jumpers(i)%np=0
     END IF
@@ -3241,29 +3249,29 @@ CLASS(jumper_sensor), INTENT(IN) :: self !< Jumper sensor object
 CLASS(tw_type), INTENT(IN) :: tw_obj !< Thin-wall model object
 REAL(r8), INTENT(IN) :: vals(:) !< Solution vector
 REAL(r8) :: jumper_current !< Computed current through jumper  [A]
-INTEGER(i4) :: k,ind1
-REAL(r8) :: val_prev
-!---
+INTEGER(i4) :: k,k0
+!---Change along each segment (segments are separated by 0 where a jumper crosses a junction)
 jumper_current=0.d0
-IF(self%np>0)THEN
-  val_prev=0.d0
-  ind1=tw_obj%pmap(self%points(1))
-  IF(ind1>0)val_prev=vals(ind1)
-  DO k=1,self%np-1
-    ind1=tw_obj%pmap(self%points(k+1))
-    IF(ind1>0)THEN
-      jumper_current=jumper_current+vals(ind1)-val_prev
-      val_prev=vals(ind1)
-    ELSE
-      jumper_current=jumper_current-val_prev
-      val_prev=0.d0
-    END IF
-  END DO
-END IF
+k0=1
+DO k=1,self%np
+  IF(self%points(k)==0)THEN
+    k0=k+1
+  ELSE IF(k==self%np.OR.self%points(MIN(k+1,self%np))==0)THEN
+    jumper_current=jumper_current+point_value(self%points(k))-point_value(self%points(k0))
+  END IF
+END DO
 DO k=1,tw_obj%nholes
   jumper_current=jumper_current+vals(tw_obj%np_active+k)*self%hole_facs(k)
 END DO
 jumper_current=jumper_current/mu0
+CONTAINS
+!> Solution value at a vertex (zero if inactive)
+FUNCTION point_value(ipt) RESULT(val)
+INTEGER(i4), INTENT(in) :: ipt !< Vertex index
+REAL(r8) :: val
+val=0.d0
+IF(tw_obj%pmap(ipt)>0)val=vals(tw_obj%pmap(ipt))
+END FUNCTION point_value
 END FUNCTION jumper_compute_current_exp
 !------------------------------------------------------------------------------
 !> Load resistivity and sensor mask from "oft_in.xml" file

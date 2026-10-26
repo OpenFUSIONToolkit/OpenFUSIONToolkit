@@ -732,6 +732,84 @@ def _min_energy(M, K):
     return d.min()/d.max()
 
 
+def split_jumper(lc, lc_split, vmap, jedges, jumper):
+    '''! Map a jumper (vertex set of the unsplit mesh) onto the split mesh
+
+    The vertices are ordered into a path along mesh edges and each path edge takes the vertex copies of its
+    cells. Where the path crosses a junction line, consecutive edges use different copies of the crossing
+    vertex and a new segment starts; the jumper current is the sum over the segments. A segment on a sheet
+    oriented opposite to the previous one (both traverse a shared junction edge the same way) is reversed, so
+    that every segment measures current crossing the path in the same direction.
+
+    @param lc Unsplit cell list [nc,3] (0-based)
+    @param lc_split Split cell list [nc,3]
+    @param vmap Unsplit vertex of each split vertex
+    @param jedges Junction edges {(a, b): [cells]} of the unsplit mesh
+    @param jumper Jumper vertices (unsplit, 0-based)
+    @result Ordered split vertices, segments separated by -1 (a closed single segment repeats its first vertex)
+    '''
+    verts = set(int(v) for v in jumper)
+    ec = _edge_cells(lc)
+    adj = {v: [] for v in verts}
+    for a, b in ec:
+        if a in verts and b in verts:
+            adj[a].append(b)
+            adj[b].append(a)
+    ends = sorted(v for v in verts if len(adj[v]) == 1)
+    if any(len(n) > 2 for n in adj.values()) or len(ends) not in (0, 2):
+        raise ValueError('Jumper is not a simple path or loop of mesh edges')
+    path = [ends[0] if ends else min(verts)]
+    while True:
+        nxt = [w for w in sorted(adj[path[-1]]) if w not in path[-2:-1] and (w not in path or (not ends and w == path[0]))]
+        if not nxt or (len(path) > 1 and path[-1] == path[0]):
+            break
+        path.append(nxt[0])
+    if len(set(path)) != len(verts):
+        raise ValueError('Jumper is not a single connected path or loop of mesh edges')
+    edges = []
+    for a, b in zip(path[:-1], path[1:]):
+        if (min(a, b), max(a, b)) in jedges:
+            raise ValueError('Jumper runs along a junction edge ({0}, {1}), where the sheet it measures is ambiguous'.format(a, b))
+        c = ec[(min(a, b), max(a, b))][0]
+        copy = {int(vmap[v]): int(v) for v in lc_split[c]}
+        edges.append((copy[a], copy[b]))
+    breaks = [k for k in range(1, len(edges)) if edges[k][0] != edges[k-1][1]]
+    if not ends and breaks and edges[-1][1] == edges[0][0]:
+        edges = edges[breaks[0]:] + edges[:breaks[0]]
+        breaks = [k for k in range(1, len(edges)) if edges[k][0] != edges[k-1][1]]
+    segments = [edges[i:j] for i, j in zip([0] + breaks, breaks + [len(edges)])]
+    chains = [[seg[0][0]] + [b for _, b in seg] for seg in segments]
+    flip = False
+    for k in range(1, len(segments)):
+        if _copies_opposed(lc_split, vmap, jedges, segments[k-1][-1][1], segments[k][0][0]):
+            flip = not flip
+        if flip:
+            chains[k] = chains[k][::-1]
+    out = chains[0]
+    for chain in chains[1:]:
+        out = out + [-1] + chain
+    return numpy.array(out, dtype=numpy.int32)
+
+
+def _copies_opposed(lc_split, vmap, jedges, va, vb):
+    '''! True if the sheets of two copies of a vertex are oppositely oriented (both traverse a junction edge they
+    share in the same direction)'''
+    v = int(vmap[va])
+    for (a, b), cells in jedges.items():
+        if v not in (a, b):
+            continue
+        w = b if a == v else a
+        signs = {}
+        for c in cells:
+            tri = [int(x) for x in lc_split[c]]
+            for copy in (va, vb):
+                if copy in tri:
+                    signs[copy] = 1 if int(vmap[tri[(tri.index(copy) + 1) % 3]]) == w else -1
+        if len(signs) == 2:
+            return signs[va] == signs[vb]
+    raise ValueError('Jumper crosses between sheets that share no junction edge at vertex {0}'.format(v))
+
+
 def verify_junction_mesh(r, lc, reg, junctions):
     '''! Check a split mesh and its junction data against the unsplit mesh rebuilt from `vmap`
 

@@ -266,6 +266,67 @@ def test_cache():
     assert mp_run(run_cache, (files[0],))
 
 
+def tplate_jumpers():
+    """T-plate jumpers at y = 0.5: across the plate (crossing the junction) and up the stem."""
+    r, lc, reg = tplate()
+    on_line = np.isclose(r[:, 1], 0.5)
+    plate = np.where(on_line & np.isclose(r[:, 2], 0.0))[0]
+    stem = np.where(on_line & np.isclose(r[:, 0], 0.0))[0]
+    return r, lc, reg, [plate, stem]
+
+
+def test_split_jumper():
+    from OpenFUSIONToolkit.ThinCurr.junctions import split_jumper
+    r, lc, reg, jumpers = tplate_jumpers()
+    out = find_junction_holes(r, lc, reg)
+    plate, stem = [split_jumper(lc, out['lc'], out['vmap'], out['jedges'], j) for j in jumpers]
+    assert np.count_nonzero(plate == -1) == 1 and len(plate) == len(jumpers[0]) + 2
+    assert np.count_nonzero(stem == -1) == 0 and len(stem) == len(jumpers[1])
+    along = np.where(np.isclose(r[:, 0], 0.0) & np.isclose(r[:, 2], 0.0))[0]
+    with pytest.raises(ValueError, match='along a junction edge'):
+        split_jumper(lc, out['lc'], out['vmap'], out['jedges'], along)
+
+
+def run_jumpers(path, mp_q):
+    """Currents through the two jumpers must cancel (together they cut the T-plate in two)."""
+    result = False
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        from OpenFUSIONToolkit.io import histfile
+        myOFT = OFT_env(nthreads=-1)
+        tw = ThinCurr(myOFT)
+        tw.setup_model(mesh_file=path)
+        tw.setup_io()
+        tw.compute_Lmat()
+        tw.compute_Rmat()
+        _, _, sensor_obj = tw.compute_Msensor('none')
+        tw.compute_Mcoil()
+        tw.run_td(1.E-4, 10, direct=True, coil_currs=np.array([[0.0, 0.0], [1.E-4, 1.E3], [1.0, 1.E3]]), sensor_obj=sensor_obj)
+        hist = histfile('jumpers.hist')
+        plate, stem = [hist[field][-1] for field in list(hist)[1:3]]
+        print('Jumper currents', plate, stem)
+        result = (abs(plate) > 1.E-3) and (abs(plate + stem) < 1.E-8*abs(plate) or abs(plate - stem) < 1.E-8*abs(plate))
+    except BaseException as e:
+        print(e)
+    mp_q.put(result)
+
+
+def test_jumpers(tmp_path):
+    from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil
+    r, lc, reg, jumpers = tplate_jumpers()
+    # Ring in the corner between the plate (x > 0) and the stem, so current loops through the junction
+    t = np.linspace(0.0, 2.0*np.pi, 61)
+    ring_pts = np.c_[0.15 + 0.07*np.cos(t), 0.5 + 0.1*np.sin(t), 0.15 + 0.07*np.cos(t)]
+    coil = ThinCurr_Icoil('IC')
+    coil.add_subcoil(pts=ring_pts)
+    in_file = os.path.join(test_dir, 'junction_jumpers.h5')
+    write_ThinCurr_mesh(in_file, r, lc, reg, jumpers=jumpers, eta_surf=1.0E-4*np.ones(reg.max()), coil_sets=[coil])
+    compute_homology(in_file)
+    assert len(read_ThinCurr_mesh(os.path.join(test_dir, 'junction_jumpers-homology.h5'))['thincurr']['jumpers']) == 2
+    assert mp_run(run_jumpers, (os.path.join(test_dir, 'junction_jumpers-homology.h5'),))
+
+
 def test_runtime_insulation():
     r, lc, reg = ring()
     files_rt, _ = write_pair(r, lc, reg, 'junction_ring_rt')

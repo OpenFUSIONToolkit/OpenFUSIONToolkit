@@ -61,7 +61,7 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures
     @param lc Cell list [nc,3] (0-based)
     @param reg Region list [nc]
     @param holes List of node sets for hole definitions (0-based)
-    @param jumpers List of jumper sets (0-based)
+    @param jumpers List of jumper sets (0-based; for a mesh split at junctions, ordered split vertices with segments separated by -1, see @ref junctions.split_jumper)
     @param closures List of closures (0-based)
     @param eta_surf Surface electrical resistivity [Ohm]
     @param eta_vol Volumetric electrical resistivity [Ohm-m]
