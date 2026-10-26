@@ -3419,8 +3419,8 @@ end subroutine tw_load_eta
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_recon_curr_exp(self,pot,curr)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
-real(8), intent(in) :: pot(:) !< Solution values [self%nelems]
-real(8), intent(out) :: curr(:,:) !< Solution values [3,self%mesh%nelems]
+REAL(8), INTENT(in) :: pot(:) !< Solution values [self%nelems]
+REAL(8), INTENT(out) :: curr(:,:) !< Solution values [3,self%mesh%nelems]
 INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc
 REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
 DEBUG_STACK_PUSH
@@ -3457,8 +3457,8 @@ END SUBROUTINE tw_recon_curr_exp
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_save_pfield_exp(self,a,tag)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
-real(8), intent(in) :: a(:) !< Solution values [self%nelems]
-character(LEN=*), intent(in) :: tag !< Path to save vector in HDF5 plot files
+REAL(8), INTENT(in) :: a(:) !< Solution values [self%nelems]
+CHARACTER(LEN=*), INTENT(in) :: tag !< Path to save vector in HDF5 plot files
 INTEGER(4) :: i,j,k,jj,pt,ih,ihp,ihc,ic
 REAL(8) :: rcurr(3),ftmp(3),gop(3,3),area,norm(3)
 REAL(8), ALLOCATABLE, DIMENSION(:) :: thickness_cell
@@ -3903,8 +3903,8 @@ END SUBROUTINE tw_compute_Rmat
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_recon_curr(self,pot,curr)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
-real(8), intent(in) :: pot(:) !< Solution values [self%nelems]
-real(8), intent(out) :: curr(:,:) !< Solution values [3,self%mesh%nelems]
+REAL(8), INTENT(in) :: pot(:) !< Solution values [self%nelems]
+REAL(8), INTENT(out) :: curr(:,:) !< Solution values [3,self%mesh%nelems]
 REAL(8), ALLOCATABLE :: pot_exp(:)
 IF(.NOT.self%junctions)THEN
   CALL tw_recon_curr_exp(self,pot,curr)
@@ -4037,8 +4037,8 @@ END FUNCTION tw_hole_value
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_save_pfield(self,a,tag)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
-real(8), intent(in) :: a(:) !< Solution values [self%nelems]
-character(LEN=*), intent(in) :: tag !< Path to save vector in HDF5 plot files
+REAL(8), INTENT(in) :: a(:) !< Solution values [self%nelems]
+CHARACTER(LEN=*), INTENT(in) :: tag !< Path to save vector in HDF5 plot files
 REAL(8), ALLOCATABLE :: a_exp(:)
 IF(.NOT.self%junctions)THEN
   CALL tw_save_pfield_exp(self,a,tag)

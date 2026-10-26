@@ -47,6 +47,12 @@ def _edge_cells(lc):
 
 
 def _edge_sign(tri, a, b):
+    '''! Direction in which a cell traverses one of its edges
+
+    @param tri Cell vertices
+    @param a, b Edge vertices
+    @result +1 if the cell lists the edge as a -> b, -1 if as b -> a
+    '''
     t = list(tri)
     return 1 if t[(t.index(a) + 1) % 3] == b else -1
 
@@ -106,6 +112,7 @@ def _fans(lc, ec, jedges):
         parent = {c: c for c in cells}
 
         def find(c):
+            '''! Root of the group of cell c (union-find, with path halving)'''
             while parent[c] != c:
                 parent[c] = parent[parent[c]]
                 c = parent[c]
@@ -517,6 +524,7 @@ def _cycle_holes(lc, lc_split, reg, jedges, insulated, M):
             tree.add(int(A[v, pred[v]]) - 1)
 
     def path_up(v):
+        '''! Path from node v up to the root of its spanning tree'''
         out = [v]
         while pred[out[-1]] >= 0:
             out.append(int(pred[out[-1]]))

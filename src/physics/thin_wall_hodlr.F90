@@ -2389,7 +2389,7 @@ class(oft_vector), target, intent(inout) :: a
 class(oft_vector), intent(inout) :: b
 integer(4) :: i,j,k,iblock,jblock,level
 real(8), allocatable :: row_tmp(:),col_tmp(:),int_tmp1(:),int_tmp2(:)
-REAL(8), pointer :: avals(:),bvals(:),ared(:),bred(:)
+REAL(8), POINTER :: avals(:),bvals(:),ared(:),bred(:)
 NULLIFY(avals,bvals,ared,bred)
 CALL a%get_local(ared)
 CALL b%set(0.d0)
@@ -2512,7 +2512,7 @@ class(oft_vector), target, intent(inout) :: a
 class(oft_vector), intent(inout) :: bx,by,bz
 integer(4) :: i,j,jj,k,dim,iblock,jblock,level,flip
 real(8), allocatable :: row_tmp(:),col_tmp(:),int_tmp1(:),int_tmp2(:,:)
-REAL(8), pointer :: avals(:),bvals(:,:),btmp(:),ared(:)
+REAL(8), POINTER :: avals(:),bvals(:,:),btmp(:),ared(:)
 NULLIFY(avals,bvals,ared)
 CALL a%get_local(ared)
 IF(self%tw_obj%junctions)THEN
@@ -2621,7 +2621,7 @@ subroutine tw_hodlr_Lassemble(self,diag)
 class(oft_tw_hodlr_op), intent(inout) :: self
 class(oft_vector), optional, target, intent(inout) :: diag
 integer(4) :: i,j,level,iblock
-real(8), POINTER, DIMENSION(:) :: vals,vred
+REAL(8), POINTER, DIMENSION(:) :: vals,vred
 IF(present(diag))THEN
   IF(associated(self%D))CALL self%D%delete
   CALL diag%new(self%D)

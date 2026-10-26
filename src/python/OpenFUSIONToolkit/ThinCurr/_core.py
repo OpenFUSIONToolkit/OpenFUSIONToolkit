@@ -213,6 +213,12 @@ class ThinCurr():
 
     @staticmethod
     def _check_pmap(pmap,npts):
+        '''! Check a periodic point map (shape and non-negative entries) and convert it for the Fortran interface
+
+        @param pmap Point map `(npts,)`
+        @param npts Number of mesh points
+        @result Contiguous `int32` copy of `pmap`
+        '''
         pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
         if pmap.shape != (npts,):
             raise ValueError('"pmap" must have shape ({0},), got {1}'.format(npts,pmap.shape))
