@@ -320,14 +320,15 @@ end if
 if(associated(self%pre))call u%new(s)
 if(associated(self%bc))call self%bc%apply(g)
 if(associated(self%orthog))call self%orthog%apply(u)
-gg = g%dot(u)
-if(gg==0.d0)then
+uu = u%dot(u)
+if(uu==0.d0)then
   alfa=1.d0; f=0.d0
   call q%set(0.d0)
 else
   call A%apply(u,q)
   if(associated(self%bc))call self%bc%apply(q)
   pdq = u%dot(q)
+  gg = g%dot(u)
   alfa=1.d0; f=pdq/2.d0-gg
 endif
 call g%add(1.d0,-1.d0,q)
@@ -341,7 +342,6 @@ if(associated(self%pre))then
 end if
 gg = g%dot(p)
 ggin = g%dot(g)
-uu=u%dot(u)
 100 FORMAT (I6,3ES14.6)
 110 FORMAT (I6,4ES14.6)
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,f,SQRT(uu),SQRT(ggin)
@@ -350,6 +350,7 @@ if(its==0.or.gg==0.d0)then
   call q%delete
   deallocate(p,q)
   if(self%precond)then
+    call g%add(0.d0,1.d0,r)
     CALL r%delete
     DEALLOCATE(r)
   end if
@@ -366,6 +367,7 @@ do k=1,max_its
   if(associated(self%orthog))call self%orthog%apply(p)
   call A%apply(p,q)
   pdq = p%dot(q)
+  if(pdq==0.d0)exit ! Breakdown (zero search direction)
   if(associated(self%bc))call self%bc%apply(q)
   alfa=gg/pdq
   fold=f; f=f-alfa*gg/2
@@ -408,7 +410,7 @@ if(associated(self%pre))then
   call s%delete
   DEALLOCATE(s)
 end if
-if(k>=max_its)write(*,*)'Full Its: cgsolver_apply'
+if(k>=max_its.AND.oft_env%head_proc)write(*,*)'Full Its: cgsolver_apply'
 self%cits=k
 DEBUG_STACK_POP
 end subroutine cg_solver_apply
@@ -518,7 +520,7 @@ class(oft_native_gmres_solver), intent(inout) :: self !< Solver object
 class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
 class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_matrix), pointer :: A
-logical :: pm_save
+logical :: pm_save,pre_full_res
 integer(i4) :: i,j,k,nits,its,nrits
 real(r8) :: uu,uuold,gg,ggold,delta,hkmi,ggin
 real(r8), allocatable :: h(:,:),c(:),s(:),res(:)
@@ -565,9 +567,9 @@ ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,SQRT(uu),SQRT(gg)
-if(self%its/=0.AND.self%nrits/=0)THEN
 nits=0
-do j=1,INT(u%ng,4)
+if(self%its/=0.AND.self%nrits/=0)THEN
+do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   IF(gg==0.d0)EXIT
   res=0.d0
   res(1)=sqrt(gg)
@@ -578,9 +580,10 @@ do j=1,INT(u%ng,4)
       call w%add(0.d0,1.d0,v(i)%f)
       CALL z(i)%f%set(0.d0)
       pm_save=oft_env%pm; oft_env%pm=self%pre%pm
+      pre_full_res=self%pre%full_residual
       self%pre%full_residual=.FALSE.
       call self%pre%apply(z(i)%f,w)
-      self%pre%full_residual=.TRUE.
+      self%pre%full_residual=pre_full_res
       oft_env%pm=pm_save
     else
       call z(i)%f%add(0.d0,1.d0,v(i)%f)
@@ -596,7 +599,7 @@ do j=1,INT(u%ng,4)
     end do
     !if(associated(self%cleaner))call self%cleaner%apply(w)
     h(i+1,i)=SQRT(w%dot(w))
-    call v(i+1)%f%add(0.d0,1.d0/h(i+1,i),w)
+    IF(h(i+1,i)>0.d0)call v(i+1)%f%add(0.d0,1.d0/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
     !---Apply Givens rotation
     do k=2,i
@@ -613,6 +616,7 @@ do j=1,INT(u%ng,4)
     res(i) = c(i)*res(i)
     nits=nits+1
     IF(i==nrits)EXIT
+    IF(ABS(res(i+1))==0.d0)EXIT ! Lucky breakdown
     IF(nits==its)EXIT
     IF(ABS(res(i+1))<self%atol)EXIT
     IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
@@ -774,7 +778,7 @@ class(oft_native_gmres_csolver), intent(inout) :: self !< Solver object
 class(oft_cvector), intent(inout) :: u !< Guess (input), Solution (output)
 class(oft_cvector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_cmatrix), pointer :: A
-logical :: pm_save
+logical :: pm_save,pre_full_res
 integer(i4) :: i,j,k,nits,its,nrits
 real(r8) :: uu,uuold,gg,ggold,ggin
 complex(c8) :: delta,hkmi
@@ -822,9 +826,9 @@ ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,SQRT(uu),SQRT(gg)
-if(self%its/=0.AND.self%nrits/=0)THEN
 nits=0
-do j=1,INT(u%ng,4)
+if(self%its/=0.AND.self%nrits/=0)THEN
+do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   IF(gg==0.d0)EXIT
   res=0.d0
   res(1)=sqrt(gg)
@@ -835,9 +839,10 @@ do j=1,INT(u%ng,4)
       call w%add((0.d0,0.d0),(1.d0,0.d0),v(i)%f)
       CALL z(i)%f%set((0.d0,0.d0))
       pm_save=oft_env%pm; oft_env%pm=self%pre%pm
+      pre_full_res=self%pre%full_residual
       self%pre%full_residual=.FALSE.
       call self%pre%apply(z(i)%f,w)
-      self%pre%full_residual=.TRUE.
+      self%pre%full_residual=pre_full_res
       oft_env%pm=pm_save
     else
       call z(i)%f%add((0.d0,0.d0),(1.d0,0.d0),v(i)%f)
@@ -849,28 +854,29 @@ do j=1,INT(u%ng,4)
     !---Arnoldi iteration
     ! h(1:i,i)=w%mdot(v,i)
     do k=1,i
-      h(k,i)=w%dot(v(k)%f)
+      h(k,i)=v(k)%f%dot(w)
       call w%add((1.d0,0.d0),-h(k,i),v(k)%f)
     end do
     !if(associated(self%cleaner))call self%cleaner%apply(w)
-    h(i+1,i)=SQRT(w%dot(w))
-    call v(i+1)%f%add((0.d0,0.d0),(1.d0,0.d0)/h(i+1,i),w)
+    h(i+1,i)=SQRT(REAL(w%dot(w),r8))
+    IF(ABS(h(i+1,i))>0.d0)call v(i+1)%f%add((0.d0,0.d0),(1.d0,0.d0)/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
     !---Apply Givens rotation
     do k=2,i
       hkmi = h(k-1,i)
-      h(k-1,i) = c(k-1)*hkmi + s(k-1)*h(k,i)
+      h(k-1,i) = CONJG(c(k-1))*hkmi + CONJG(s(k-1))*h(k,i)
       h(k,i) = -s(k-1)*hkmi + c(k-1)*h(k,i)
     enddo
     delta = SQRT( ABS(h(i,i))**2 + ABS(h(i+1,i))**2 )
     c(i) = h(i,i) / delta
     s(i) = h(i+1,i) / delta
-    h(i,i) = c(i)*h(i,i) + s(i)*h(i+1,i)
+    h(i,i) = CONJG(c(i))*h(i,i) + CONJG(s(i))*h(i+1,i)
     !---Update residual
     res(i+1) = -s(i)*res(i)
-    res(i) = c(i)*res(i)
+    res(i) = CONJG(c(i))*res(i)
     nits=nits+1
     IF(i==nrits)EXIT
+    IF(ABS(res(i+1))==0.d0)EXIT ! Lucky breakdown
     IF(nits==its)EXIT
     IF(ABS(res(i+1))<self%atol)EXIT
     IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
