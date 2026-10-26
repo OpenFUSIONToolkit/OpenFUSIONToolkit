@@ -124,6 +124,37 @@ The `copilot-setup-steps.yml` workflow mirrors the Ubuntu 24.04 GCC 14 + OpenMP 
 
 This is the flat-layout case: `<config_dir>` is `builds/` and `<build_dir>` is `builds/build_release`.
 
+### Building against system libraries (ephemeral environments, Ubuntu 24.04)
+
+When no pre-built `builds/` directory is available (eg. a fresh cloud sandbox), building against distribution packages is much faster than running `build_libs.py`. This skips Stage 1 and calls CMake directly, so the resulting tree has no `config_cmake.sh`. On Ubuntu 24.04 the following provides MPI (OpenMPI), ARPACK, and SuperLU in addition to the required LibXML2, HDF5, BLAS/LAPACK, and METIS. It uses the flat layout and creates the `oft_venv/`/`setup_env.sh` pair described in "Python environment", so it should not be used in a user checkout without asking.
+
+```bash
+apt-get install -y --no-install-recommends gfortran libopenmpi-dev openmpi-bin \
+  libarpack2-dev libparpack2-dev libsuperlu-dev libhdf5-dev libxml2-dev \
+  libopenblas-dev liblapack-dev libmetis-dev
+
+# From the repository root: Python venv for tests
+python3 -m venv oft_venv
+echo "source $PWD/oft_venv/bin/activate" > setup_env.sh
+source setup_env.sh
+python -m pip install pytest numpy scipy h5py netcdf4 matplotlib
+
+mkdir -p builds/build_release && cd builds/build_release
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../install_release \
+  -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_Fortran_COMPILER=gfortran \
+  -DOFT_USE_MPI=ON -DOFT_USE_OpenMP=ON -DOFT_BUILD_TESTS=ON -DBLA_VENDOR=OpenBLAS \
+  -DOFT_ARPACK_ROOT=/usr -DOFT_SUPERLU_ROOT=/usr \
+  -DOFT_PYTEST_EXE=$(which pytest) ../../src
+make -j$(nproc)
+```
+
+Notes for this configuration:
+- Optional libraries (ARPACK, SuperLU, SuperLU-DIST, UMFPACK) are only searched for when the corresponding `OFT_<LIB>_ROOT` is set, so set them to `/usr` for system packages.
+- Use the default `gcc`/`g++`/`gfortran` (GCC 13) so the compilers match the ones Ubuntu used to build the OpenMPI Fortran modules.
+- Ubuntu ships HDF5 1.10, which lacks the Fortran file-space-strategy API (added in 1.14.3). OFT builds fine but persistent free-space tracking in HDF5 output files is disabled, and a warning is printed when it is requested.
+- OpenMPI refuses to run as root by default. In a root sandbox, `export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1` before running tests.
+- Pass `OFT_PYTEST_EXE` explicitly if another `pytest` (eg. a user-level install) appears on `PATH` ahead of the venv.
+
 ### Python packaging information
 
 Python packaging is handled by a dedicated script template at `src/python/make_package.sh.in` and associated `src/python/pyproject.toml.in`, which are configured/installed during the CMAKE build process if the `OFT_PACKAGE_PYTHON` option is set. Dependencies, scripts, and other information are available in this file a supersede the lint-only file `src/python/pyproject.toml`. 

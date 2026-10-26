@@ -32,7 +32,7 @@ add_subdirectory( fem )
 add_subdirectory( physics )
 
 # Get MPI path and prepend if necessary
-set( OFT_TEST_PATH "${CMAKE_BINARY_DIR}/python:$ENV{PATH}" ) # Add python directory to path for scripts
+set( OFT_TEST_PATH "$ENV{PATH}" )
 set( OFT_MPI_TEST "0" )
 set( OFT_DEBUG_TEST "0" )
 if( OFT_USE_MPI )
@@ -40,6 +40,10 @@ if( OFT_USE_MPI )
     set( OFT_TEST_PATH "${MPI_BIN_PATH}:${OFT_TEST_PATH}" )
     set( OFT_MPI_TEST "1" )
 endif()
+# Add python directory to path for scripts and ensure they use the configured interpreter,
+# even if MPI_BIN_PATH is a system directory (eg. /usr/bin) that contains another python
+get_filename_component(PYTHON_BIN_PATH ${Python3_EXECUTABLE} DIRECTORY)
+set( OFT_TEST_PATH "${CMAKE_BINARY_DIR}/python:${PYTHON_BIN_PATH}:${OFT_TEST_PATH}" )
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   set( OFT_DEBUG_TEST "1" )
     # set( OFT_TEST_ENV "${OFT_TEST_ENV};OFT_DEBUG_TEST=1")
