@@ -327,6 +327,24 @@ def test_jumpers(tmp_path):
     assert mp_run(run_jumpers, (os.path.join(test_dir, 'junction_jumpers-homology.h5'),))
 
 
+def run_jumper_start(path, mp_q):
+    result = False
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        ThinCurr(OFT_env(nthreads=1)).setup_model(mesh_file=path, jumper_start=1)
+    except ValueError as e:
+        result = 'jumper_start' in str(e)
+    except BaseException as e:
+        print(e)
+    mp_q.put(result)
+
+
+def test_jumper_start_rejected():
+    files, _ = write_pair(*tplate(), 'junction_jumper_start')
+    assert mp_run(run_jumper_start, (files[0],))
+
+
 def test_runtime_insulation():
     r, lc, reg = ring()
     files_rt, _ = write_pair(r, lc, reg, 'junction_ring_rt')

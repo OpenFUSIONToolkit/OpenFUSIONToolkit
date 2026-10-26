@@ -124,6 +124,11 @@ class ThinCurr():
         if mesh_file is not None:
             if (r is not None) or (lc is not None) or (reg is not None):
                 raise ValueError('Specification of "mesh_file" is incompatible with specification of "r", "lc", and "reg"')
+            if jumper_start != 0:
+                with h5py.File(mesh_file, 'r') as h5_file:
+                    if 'thincurr/junctions' in h5_file:
+                        raise ValueError('"jumper_start" is not supported for meshes split at junctions, define jumpers '
+                                         'in the unsplit mesh before running "OFT_ThinCurr_holes"')
             if junction_insulated is not None:
                 if pmap is not None:
                     raise ValueError('"junction_insulated" is incompatible with "pmap"')
