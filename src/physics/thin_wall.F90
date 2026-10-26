@@ -641,7 +641,41 @@ DO i=1,SIZE(self%jumper_nsets)
 END DO
 END SUBROUTINE tw_save_debug
 !---------------------------------------------------------------------------------
+!> Check whether a coil is a circle about the Z axis (closed, constant R and Z, one turn) and return its
+!! radius, height and orientation
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_coil_ring(coil,rc,zc,orient,is_ring)
+TYPE(tw_gen_coil), INTENT(in) :: coil !< Coil
+REAL(r8), INTENT(out) :: rc !< Ring radius
+REAL(r8), INTENT(out) :: zc !< Ring height
+REAL(r8), INTENT(out) :: orient !< +1 if traversed counter-clockwise about +Z, -1 otherwise
+LOGICAL, INTENT(out) :: is_ring !< Is the coil a closed circle about the Z axis?
+INTEGER(4) :: k
+REAL(r8) :: turn,rk
+is_ring=.FALSE.; rc=0.d0; zc=0.d0; orient=0.d0
+IF(coil%npts<16)RETURN
+DO k=1,coil%npts
+  rc=rc+SQRT(coil%pts(1,k)**2+coil%pts(2,k)**2); zc=zc+coil%pts(3,k)
+END DO
+rc=rc/REAL(coil%npts,8); zc=zc/REAL(coil%npts,8)
+IF(rc<=0.d0)RETURN
+IF(SUM(ABS(coil%pts(:,1)-coil%pts(:,coil%npts)))>1.d-9*rc)RETURN
+turn=0.d0
+DO k=1,coil%npts
+  rk=SQRT(coil%pts(1,k)**2+coil%pts(2,k)**2)
+  IF(ABS(rk-rc)>1.d-9*rc.OR.ABS(coil%pts(3,k)-zc)>1.d-9*rc)RETURN
+  IF(k>1)turn=turn+ATAN2(coil%pts(1,k-1)*coil%pts(2,k)-coil%pts(2,k-1)*coil%pts(1,k), &
+    coil%pts(1,k-1)*coil%pts(1,k)+coil%pts(2,k-1)*coil%pts(2,k))
+END DO
+IF(ABS(ABS(turn)-2.d0*pi)>1.d-6)RETURN
+orient=SIGN(1.d0,turn)
+is_ring=.TRUE.
+END SUBROUTINE tw_coil_ring
+!---------------------------------------------------------------------------------
 !> Compute element to driver (Icoils) coupling matrix
+!!
+!! Circular coils about the Z axis are integrated with the exact vector potential of a ring (elliptic integrals)
+!! where they are well separated from an element; otherwise the coil polygon is integrated point by point.
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Ael2dr(tw_obj,save_file)
 TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
@@ -651,7 +685,9 @@ INTEGER(4) :: i,ii,j,jj,k,kk,ik,ncoils_tot,ih,ihp,ihc,file_counts(3),ierr,io_uni
 INTEGER(i4), ALLOCATABLE :: nrad_cross(:)
 REAL(8) :: tmp(3),cvec(3),cpt(3),pt_i(3),evec_i(3,3),pts_i(3,3),elapsed_time
 REAL(8) :: pot_tmp,rgop(3,3),area_i,norm_i(3),f(3),dl_min,dl_max,pot_last
-REAL(8), allocatable :: atmp(:,:),Ael2coil_tmp(:,:)
+REAL(8) :: avec(3),rp,aphi,dring
+REAL(8), allocatable :: atmp(:,:),Ael2coil_tmp(:,:),ring_rz(:,:,:)
+LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
@@ -735,11 +771,23 @@ CALL oft_increase_indent
 CALL mytimer%tick
 ALLOCATE(Ael2coil_tmp(tw_obj%nelems,ncoils_tot),nrad_cross(ncoils_tot))
 nrad_cross=0
+!---Circular coils (rings about the Z axis): radius, height and orientation
+k=0
+DO j=1,ncoils_tot
+  k=MAX(k,coils_tot(j)%ncoils)
+END DO
+ALLOCATE(ring_ok(k,ncoils_tot),ring_rz(3,k,ncoils_tot))
+ring_ok=.FALSE.
+DO j=1,ncoils_tot
+  DO k=1,coils_tot(j)%ncoils
+    CALL tw_coil_ring(coils_tot(j)%coils(k),ring_rz(1,k,j),ring_rz(2,k,j),ring_rz(3,k,j),ring_ok(k,j))
+  END DO
+END DO
 Ael2coil_tmp=0.d0
 f=1.d0/3.d0
 !$omp parallel private(ii,ik,j,jj,k,kk,pts_i,pt_i,cvec, &
 !$omp cpt,tmp,atmp,evec_i,pot_tmp,pot_last,i,ih,ihp, &
-!$omp ihc,rgop,area_i,norm_i,dl_min,dl_max,iquad)
+!$omp ihc,rgop,area_i,norm_i,dl_min,dl_max,iquad,avec,rp,aphi,dring)
 ALLOCATE(atmp(ncoils_tot,3))
 !$omp do
 DO i=1,bmesh%nc
@@ -755,6 +803,41 @@ DO i=1,bmesh%nc
   atmp=0.d0
   DO j=1,ncoils_tot
     DO k=1,coils_tot(j)%ncoils
+      !---Ring well separated from the element: integrate its exact vector potential over the element
+      IF(ring_ok(k,j))THEN
+        dl_min=1.d99
+        dl_max=SQRT(area_i*2.d0)
+        DO ii=1,3
+          dring=SQRT((SQRT(pts_i(1,ii)**2+pts_i(2,ii)**2)-ring_rz(1,k,j))**2+(pts_i(3,ii)-ring_rz(2,k,j))**2)
+          dl_min=MIN(dl_min,dring)
+          dl_max=MAX(dl_max,dring)
+        END DO
+        IF(dl_min<coils_tot(j)%radius(k))THEN
+          !$omp atomic
+          nrad_cross(j)=nrad_cross(j)+1
+        END IF
+        iquad=18
+        IF(dl_min>1.d-8)iquad=MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
+        IF(iquad<=10)THEN
+          avec=0.d0
+          DO ii=1,quads(iquad)%np
+            pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
+              + quads(iquad)%pts(2,ii)*pts_i(:,2) &
+              + quads(iquad)%pts(3,ii)*pts_i(:,3)
+            rp=SQRT(pt_i(1)**2+pt_i(2)**2)
+            IF(rp<1.d-12)CYCLE
+            !---Ring potential sum of dl/|r-r'| = A_phi*phi_hat, A_phi = -4*pi*green/R
+            aphi=-4.d0*pi*green(rp,pt_i(3),ring_rz(1,k,j),ring_rz(2,k,j))/rp
+            avec(1)=avec(1)-quads(iquad)%wts(ii)*aphi*pt_i(2)/rp
+            avec(2)=avec(2)+quads(iquad)%wts(ii)*aphi*pt_i(1)/rp
+          END DO
+          avec=avec*area_i*ring_rz(3,k,j)
+          DO jj=1,3
+            atmp(j,jj)=atmp(j,jj)+coils_tot(j)%scales(k)*DOT_PRODUCT(evec_i(:,jj),avec)
+          END DO
+          CYCLE
+        END IF
+      END IF
       tmp=0.d0
       pot_last=0.d0
       DO kk=1,coils_tot(j)%coils(k)%npts
@@ -837,7 +920,7 @@ DO i=1,tw_obj%n_icoils
   tw_obj%Ael2dr(:,i)=Ael2coil_tmp(:,i+tw_obj%n_vcoils)
 END DO
 !---Cleanup temporaries
-DEALLOCATE(Ael2coil_tmp,coils_tot)
+DEALLOCATE(Ael2coil_tmp,coils_tot,ring_ok,ring_rz)
 DO i=1,18
   CALL quads(i)%delete()
 END DO
@@ -874,8 +957,9 @@ LOGICAL :: exists
 INTEGER(4) :: i,ii,j,jj,k,kk,l,ik,jk,ih,ihp,ihc,file_counts(4),ierr,io_unit,iquad
 REAL(8) :: tmp,dl,pt_i(3),pt_j(3),evec_i(3,3),evec_j(3,3),pts_i(3,3),pt_i_last(3)
 REAL(8) :: rvec_i(3),r1,rmag,rvec_j(3),z1,cvec(3),cpt(3),coil_thickness,sqrt_e
-REAL(8) :: rgop(3,3),norm_i(3),area_i,dl_min,dl_max,pot_last,pot_tmp,elapsed_time
-REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:)
+REAL(8) :: rgop(3,3),norm_i(3),area_i,dl_min,dl_max,pot_last,pot_tmp,elapsed_time,tmp_seg
+REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:),ring_rz(:,:,:)
+LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 INTEGER(4) :: ncoils_tot
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
@@ -900,6 +984,18 @@ IF(ASSOCIATED(tw_obj%Ael2dr))THEN
   END DO
 END IF
 bmesh=>tw_obj%mesh
+!---Circular coils (rings about the Z axis): radius, height and orientation
+k=0
+DO j=1,ncoils_tot
+  k=MAX(k,coils_tot(j)%ncoils)
+END DO
+ALLOCATE(ring_ok(k,ncoils_tot),ring_rz(3,k,ncoils_tot))
+ring_ok=.FALSE.
+DO j=1,ncoils_tot
+  DO k=1,coils_tot(j)%ncoils
+    CALL tw_coil_ring(coils_tot(j)%coils(k),ring_rz(1,k,j),ring_rz(2,k,j),ring_rz(3,k,j),ring_ok(k,j))
+  END DO
+END DO
 !---Compute coupling between coils
 ALLOCATE(Acoil2coil_tmp(tw_obj%n_vcoils,ncoils_tot))
 Acoil2coil_tmp=0.d0
@@ -908,34 +1004,43 @@ IF((tw_obj%n_vcoils>0).AND.(ncoils_tot>0))THEN
   CALL oft_increase_indent
   CALL mytimer%tick()
   sqrt_e=SQRT(EXP(1.d0))
-  !$omp parallel private(i,ii,j,k,kk,tmp,pt_i,rvec_i,atmp,cvec,cpt,coil_thickness,pot_tmp,pot_last,pt_i_last)
+  !$omp parallel private(i,ii,j,k,kk,tmp,tmp_seg,pt_i,rvec_i,atmp,cvec,cpt,coil_thickness,pot_tmp,pot_last,pt_i_last)
   ALLOCATE(atmp(ncoils_tot,1))
   !$omp do
   DO l=1,tw_obj%n_vcoils
     atmp=0.d0
     DO i=1,coils_tot(l)%ncoils
       coil_thickness=(coils_tot(l)%radius(i)**2)/sqrt_e
-      pt_i_last = coils_tot(l)%coils(i)%pts(:,1)
-      DO ii=2,coils_tot(l)%coils(i)%npts
-        rvec_i = coils_tot(l)%coils(i)%pts(:,ii)-coils_tot(l)%coils(i)%pts(:,ii-1)
-        pt_i = coils_tot(l)%coils(i)%pts(:,ii)
-        DO j=1,ncoils_tot
-          DO k=1,coils_tot(j)%ncoils
-            pot_last=0.d0
+      DO j=1,ncoils_tot
+        DO k=1,coils_tot(j)%ncoils
+          IF(ring_ok(i,l).AND.ring_ok(k,j))THEN
+            !---Two coaxial rings: the softened kernel 1/sqrt(|r-r'|^2+t) is the exact ring-ring mutual with the
+            !---height difference dz replaced by sqrt(dz^2+t), so sum dl.dl'/... = -8*pi^2*green
+            tmp=-8.d0*pi*pi*green(ring_rz(1,i,l),SQRT((ring_rz(2,i,l)-ring_rz(2,k,j))**2+coil_thickness), &
+              ring_rz(1,k,j),0.d0)*ring_rz(3,i,l)*ring_rz(3,k,j)
+          ELSE
             tmp=0.d0
-            DO kk=1,coils_tot(j)%coils(k)%npts
-              cpt = coils_tot(j)%coils(k)%pts(:,kk)
-              pot_tmp = (1.d0/SQRT(SUM((pt_i-cpt)**2) + coil_thickness) + 1.d0/SQRT(SUM((pt_i_last-cpt)**2) + coil_thickness))/2.d0
-              IF(kk>1)THEN
-                cvec = coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
-                tmp = tmp + DOT_PRODUCT(rvec_i,cvec)*(pot_tmp+pot_last)/2.d0
-              END IF
-              pot_last = pot_tmp
+            pt_i_last = coils_tot(l)%coils(i)%pts(:,1)
+            DO ii=2,coils_tot(l)%coils(i)%npts
+              rvec_i = coils_tot(l)%coils(i)%pts(:,ii)-coils_tot(l)%coils(i)%pts(:,ii-1)
+              pt_i = coils_tot(l)%coils(i)%pts(:,ii)
+              pot_last=0.d0
+              tmp_seg=0.d0
+              DO kk=1,coils_tot(j)%coils(k)%npts
+                cpt = coils_tot(j)%coils(k)%pts(:,kk)
+                pot_tmp = (1.d0/SQRT(SUM((pt_i-cpt)**2) + coil_thickness) + 1.d0/SQRT(SUM((pt_i_last-cpt)**2) + coil_thickness))/2.d0
+                IF(kk>1)THEN
+                  cvec = coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
+                  tmp_seg = tmp_seg + DOT_PRODUCT(rvec_i,cvec)*(pot_tmp+pot_last)/2.d0
+                END IF
+                pot_last = pot_tmp
+              END DO
+              tmp = tmp + tmp_seg
+              pt_i_last = pt_i
             END DO
-            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*coils_tot(l)%scales(i)*tmp
-          END DO
+          END IF
+          atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*coils_tot(l)%scales(i)*tmp
         END DO
-        pt_i_last = pt_i
       END DO
     END DO
     DO j=1,ncoils_tot
@@ -947,7 +1052,7 @@ IF((tw_obj%n_vcoils>0).AND.(ncoils_tot>0))THEN
   elapsed_time=mytimer%tock()
   WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 END IF
-DEALLOCATE(coils_tot)
+DEALLOCATE(coils_tot,ring_ok,ring_rz)
 !---Unpack passive and driver coils
 IF(ASSOCIATED(tw_obj%Acoil2coil))DEALLOCATE(tw_obj%Acoil2coil)
 ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
