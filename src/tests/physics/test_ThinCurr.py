@@ -467,9 +467,8 @@ def validate_td(sigs_final, jumpers_final=None):
         if len(td_sigs_final) != len(jumpers_final):
             print("FAILED: Number of jumpers does not match {0} != {1}".format(len(td_sigs_final), len(jumpers_final)))
             return False
-        retval = True
         if jumpers_final[0] != td_sigs_final[0]:
-            print("FAILED: Final time incorrect!")
+            print("FAILED: Jumper final time incorrect!")
             print("  Expected = {0}".format(jumpers_final[0]))
             print("  Actual =   {0}".format(td_sigs_final[0]))
             retval = False
@@ -477,7 +476,7 @@ def validate_td(sigs_final, jumpers_final=None):
             if val is None:
                 continue
             if val != td_sigs_final[i+1]:
-                print("FAILED: Signal {0} incorrect!".format(i+1))
+                print("FAILED: Jumper {0} incorrect!".format(i+1))
                 print("  Expected = {0}".format(val))
                 print("  Actual =   {0}".format(td_sigs_final[i+1]))
                 retval = False
