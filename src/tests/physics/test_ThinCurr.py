@@ -1205,6 +1205,14 @@ def test_combine_stitch(tmp_path):
     for reg in np.unique(joined.reg):
         nr = n[joined.reg == reg]
         assert np.all(nr @ nr[0] > 0.0)
+    # Keeping the finest input: its cells are unchanged and the seam has its 9 segments
+    kept = combine_meshes(files, stitch=True, stitch_keep=1)
+    r1, lc1 = _sheet(*sheets[1][:2], sheets[1][2])
+    keys = lambda r, lc: set(tuple(sorted(map(tuple, np.round(r[c], 9) + 0.0))) for c in lc)
+    assert keys(r1, lc1) <= keys(kept.r, kept.lc)
+    edges = edge_counts(kept)
+    on_seam = [e for e in edges if np.allclose(kept.r[list(e)][:, [0, 2]], 0.0)]
+    assert len(on_seam) == 9 and all(edges[e] == 3 for e in on_seam)
 
 
 def test_combine_stitch_partial(tmp_path):
