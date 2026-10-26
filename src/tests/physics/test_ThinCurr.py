@@ -1127,3 +1127,48 @@ def test_td_volt_aca(convert_xml):
                            volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)),
                            jumper_start=2)
     assert validate_td(sigs_final,jumpers_final)
+
+def _sheet(n1, n2, mapping):
+    u, v = np.meshgrid(np.linspace(0.0, 1.0, n1 + 1), np.linspace(0.0, 1.0, n2 + 1), indexing='ij')
+    r = mapping(u.ravel(), v.ravel())
+    idx = lambda i, j: i*(n2 + 1) + j
+    lc = [[idx(i, j), idx(i + 1, j), idx(i + 1, j + 1)] for i in range(n1) for j in range(n2)]
+    lc += [[idx(i, j), idx(i + 1, j + 1), idx(i, j + 1)] for i in range(n1) for j in range(n2)]
+    return r, np.array(lc, dtype=np.int32)
+
+
+def test_combine_merge_points(tmp_path):
+    '''Combining sheets that share an edge joins them only with --merge_points'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh, read_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    sheets = (lambda u, v: np.c_[-0.5*u, v, 0*u], lambda u, v: np.c_[0.5*u, v, 0*u], lambda u, v: np.c_[0*u, v, 0.5*u])
+    files = []
+    for k, mapping in enumerate(sheets):
+        r, lc = _sheet(4, 8, mapping)
+        files.append(str(tmp_path / 'sheet{0}.h5'.format(k)))
+        write_ThinCurr_mesh(files[-1], r, lc, np.ones(lc.shape[0], dtype=np.int32), holes=[np.arange(3)],
+                            jumpers=[np.arange(0, 45, 9)], eta_surf=np.array([1.E-4]))
+    separate = combine_meshes(files)
+    assert separate.np == 3*45 and separate.nholes == 3
+    joined = combine_meshes(files, merge_points=True)
+    # The three sheets share the 9 points of the line x = z = 0
+    assert joined.np == 3*45 - 2*9 and joined.nc == separate.nc
+    assert np.all(joined.reg == separate.reg)
+    assert joined.holes is None and joined.closures is None
+    assert [len(j) for j in joined.jumpers] == [len(j) for j in separate.jumpers]
+    edges = {}
+    for cell in joined.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            edges[e] = edges.get(e, 0) + 1
+    assert max(edges.values()) == 3
+    # Command line
+    out_file = str(tmp_path / 'joined.h5')
+    result = subprocess.run([sys.executable, os.path.join(python_dir, "OFT_ThinCurr_mesh_tool.py"), "combine",
+                             "--in_files"] + files + ["--out_file", out_file, "--merge_points"])
+    assert result.returncode == 0
+    mesh = read_ThinCurr_mesh(out_file)
+    assert mesh['r'].shape[0] == joined.np and np.all(mesh['thincurr']['eta_surf'] == 1.E-4)
+    # A tolerance large enough to collapse cells is rejected
+    with pytest.raises(ValueError, match='collapses cells'):
+        combine_meshes(files, merge_points=True, merge_tol=0.2)

@@ -13,6 +13,9 @@ See @ref thincurr_mesh_tool
 import os
 import xml.etree.ElementTree as ET
 import numpy as np
+import scipy.sparse
+import scipy.sparse.csgraph
+import scipy.spatial
 from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
 from .coils import ThinCurr_XML
 
@@ -411,6 +414,48 @@ class ThinCurrMesh:
             self._drop_props("append with non-distinct regions")
 
 
+    def merge_points(self, tol=None):
+        '''! Merge coincident points (in place), e.g. where combined meshes share an edge
+
+        Points closer than `tol` are replaced by a single point, which joins sheets that meet along shared
+        edges. Holes and closures are dropped if any points are merged, since joining sheets changes the
+        mesh topology; run `OFT_ThinCurr_holes` on the result. Jumpers are remapped.
+
+        @param tol Distance below which points are merged (default: 1E-8 times the bounding-box diagonal)
+        @result Number of points removed
+        '''
+        if tol is None:
+            tol = 1.E-8*np.linalg.norm(self.r.max(axis=0) - self.r.min(axis=0))
+        pairs = scipy.spatial.cKDTree(self.r).query_pairs(tol, output_type='ndarray')
+        if pairs.shape[0] == 0:
+            print("  No coincident points found (tolerance {0:.3E})".format(tol))
+            return 0
+        graph = scipy.sparse.coo_matrix((np.ones(pairs.shape[0]), (pairs[:, 0], pairs[:, 1])),
+                                        shape=(self.np, self.np))
+        ncomp, label = scipy.sparse.csgraph.connected_components(graph, directed=False)
+        first = np.full((ncomp,), self.np, dtype=np.int64)
+        np.minimum.at(first, label, np.arange(self.np))
+        order = np.argsort(first)
+        new_of_comp = np.empty((ncomp,), dtype=np.int64)
+        new_of_comp[order] = np.arange(ncomp)
+        new_of_old = new_of_comp[label]
+        lc = new_of_old[self.lc]
+        if np.any((lc[:, 0] == lc[:, 1]) | (lc[:, 1] == lc[:, 2]) | (lc[:, 0] == lc[:, 2])):
+            raise ValueError("merging points within {0:.3E} collapses cells; use a smaller tolerance".format(tol))
+        nremoved = self.np - ncomp
+        self.r = self.r[first[order], :]
+        self.lc = lc.astype(np.int32)
+        if self.jumpers is not None:
+            self.jumpers = [np.array(list(dict.fromkeys(new_of_old[ns].tolist())), dtype=np.int32)
+                            for ns in self.jumpers]
+        if (self.holes is not None) or (self.closures is not None):
+            print("  Note: dropping holes and closures after merging points; run OFT_ThinCurr_holes on the result")
+            self.holes = None
+            self.closures = None
+        print("  Merged {0} coincident point(s) (tolerance {1:.3E})".format(nremoved, tol))
+        return nremoved
+
+
 def rotation_matrix(axis, angle_deg):
     '''! Build a rotation matrix about a principal Cartesian axis
 
@@ -457,7 +502,7 @@ def resolve_jumper_indices(nnodesets, explicit=None, index_range=None):
     return []
 
 
-def combine_meshes(filenames, distinct_regions=True):
+def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_tol=None):
     '''! Combine multiple mesh files into a single mesh
 
     Aborts if any input file contains native `NODESET` entries, since such
@@ -466,6 +511,8 @@ def combine_meshes(filenames, distinct_regions=True):
 
     @param filenames List of input file paths
     @param distinct_regions Keep each input's regions distinct by offsetting IDs
+    @param merge_points Merge coincident points, joining meshes that share edges (see @ref ThinCurrMesh.merge_points)
+    @param merge_tol Distance below which points are merged (default: see @ref ThinCurrMesh.merge_points)
     @result Combined @ref ThinCurrMesh
     '''
     meshes = []
@@ -484,6 +531,8 @@ def combine_meshes(filenames, distinct_regions=True):
         if mesh.coil_sets is not None:
             print("  Warning: Multiple input meshes contain ThinCurr coil sets; "
                   "these are not combined and only the first mesh's coil sets are preserved.")
+    if merge_points:
+        combined.merge_points(merge_tol)
     return combined
 
 
@@ -541,6 +590,12 @@ def build_parser():
     p_comb.add_argument("--merge_regions", action="store_true", default=False,
                         help="Merge identical region IDs across inputs instead of "
                              "keeping them distinct (default: keep distinct)")
+    p_comb.add_argument("--merge_points", action="store_true", default=False,
+                        help="Merge coincident points, joining meshes that share edges (holes and closures "
+                             "are dropped; run OFT_ThinCurr_holes on the result)")
+    p_comb.add_argument("--merge_tol", type=float, default=None,
+                        help="Distance below which points are merged with --merge_points "
+                             "(default: 1E-8 times the bounding-box diagonal)")
 
     # --- modify ---
     p_mod = sub.add_parser("modify", help="Remove regions, transform, and/or replicate a mesh")
@@ -624,7 +679,8 @@ def script_entry(argv=None):
             out_file = os.path.splitext(options.in_files[0])[0] + "-combined.h5"
         try:
             result = combine_meshes(options.in_files,
-                                    distinct_regions=not options.merge_regions)
+                                    distinct_regions=not options.merge_regions,
+                                    merge_points=options.merge_points, merge_tol=options.merge_tol)
         except ValueError as err:
             parser.error(str(err))
         result.save(out_file)
@@ -764,6 +820,10 @@ def script_entry(argv=None):
 #OFT_ThinCurr_mesh_tool combine --in_files model1.h5 model2.h5 --out_file combined_model.h5
 #```
 #
+# The inputs are kept as separate sheets unless `--merge_points` is given, which merges coincident points so
+# that meshes sharing edges are joined (e.g. a rib meeting a plate). Holes and closures are then dropped and
+# should be recomputed with `OFT_ThinCurr_holes`.
+#
 # In general, the \ref thincurr_compute_holes "OFT_thincurr_holes" utility should be used on the final
 # model to compute holes and colusures from the combined geometry. For compatibility with older models,
 # this script treats all NODESETs as holes by default, which will be overriden by the `OFT_thincurr_holes`
@@ -818,7 +878,8 @@ def script_entry(argv=None):
 # Script options for `combine` workflow:
 #
 #```shell
-#usage: OFT_ThinCurr_mesh_tool combine [-h] --in_files IN_FILES [IN_FILES ...] [--out_file OUT_FILE] [--merge_regions]
+#usage: OFT_ThinCurr_mesh_tool combine [-h] --in_files IN_FILES [IN_FILES ...] [--out_file OUT_FILE] [--merge_regions] [--merge_points]
+#                                       [--merge_tol MERGE_TOL]
 #
 #options:
 #  -h, --help            show this help message and exit
@@ -826,4 +887,8 @@ def script_entry(argv=None):
 #                        Input mesh files (two or more)
 #  --out_file OUT_FILE   Output mesh file
 #  --merge_regions       Merge identical region IDs across inputs instead of keeping them distinct (default: keep distinct)
+#  --merge_points        Merge coincident points, joining meshes that share edges (holes and closures are dropped; run OFT_ThinCurr_holes on
+#                        the result)
+#  --merge_tol MERGE_TOL
+#                        Distance below which points are merged with --merge_points (default: 1E-8 times the bounding-box diagonal)
 #```
