@@ -120,6 +120,7 @@ TYPE :: tw_type
   INTEGER(i4) :: nelems_exp = 0 !< Number of elements before the junction reduction (nelems without junctions)
   LOGICAL :: junctions = .FALSE. !< Model has junctions: unknowns are reduced by the map P (jp_*)
   INTEGER(i4) :: n_jholes = 0 !< Number of explicit holes (junction meshes), after the mesh file holes
+  INTEGER(i4) :: holes_version = 0 !< Version of the hole construction (0: unknown, >0: from "OFT_ThinCurr_holes")
   INTEGER(i4) :: jp_nred = 0 !< Number of reduced surface unknowns
   INTEGER(i4), POINTER, DIMENSION(:) :: jp_kr => NULL() !< Junction map P, row pointer [np_active+nholes+1]
   INTEGER(i4), POINTER, DIMENSION(:) :: jp_lc => NULL() !< Junction map P, column indices
@@ -330,8 +331,9 @@ IF(self%nholes>0)THEN
     END DO
   END DO
   DEALLOCATE(kfh_tmp)
-  !---Check for duplicates (junction holes differ by cell and sign, and are checked when they are built)
-  DO i=1,self%nholes-self%n_jholes
+  !---Check for duplicates (holes from "OFT_ThinCurr_holes" are independent by construction; junction holes differ
+  !---by cell and sign)
+  DO i=1,MERGE(0,self%nholes-self%n_jholes,self%holes_version>0)
     DO j=1,self%nholes-self%n_jholes
       IF(i==j.OR.self%hmesh(i)%n/=self%hmesh(j)%n)CYCLE
       IF(ALL(self%hmesh(i)%lp_sorted==self%hmesh(j)%lp_sorted))THEN
@@ -544,6 +546,8 @@ IF(jj>n)THEN
   DEALLOCATE(lloop_tmp,flag_list)
   RETURN
 END IF
+IF(self%holes_version>0)CALL oft_abort('Hole points from "OFT_ThinCurr_holes" are not an ordered loop', &
+  'tw_setup::order_hole_list', __FILE__)
 CALL oft_warn('Hole points are not stored as an ordered loop, using legacy ordering (may fail or flip the hole ' &
   //'direction for loops with chords); recreate holes with "OFT_ThinCurr_holes"')
 !---Find loop points and edges
@@ -2776,6 +2780,14 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/jumpers'))THEN
       RETURN
     END IF
   END DO
+END IF
+!---Read hole construction version
+IF(hdf5_field_exist(TRIM(filepath),'thincurr/HOLES_VERSION'))THEN
+  CALL hdf5_read(self%holes_version,TRIM(filepath),'thincurr/HOLES_VERSION',success)
+  IF(.NOT.success)THEN
+    error_string='Error reading hole version from mesh file'
+    RETURN
+  END IF
 END IF
 !---Read closures
 IF(hdf5_field_exist(TRIM(filepath),'thincurr/CLOSURES'))THEN

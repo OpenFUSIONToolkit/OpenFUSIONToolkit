@@ -96,6 +96,7 @@ def test_homology_file(tmp_path):
     assert len(junc['kje']) == 25
     assert junc['P'].shape[1] == current_loop_count(lc, reg)
     assert junc['P'].shape[0] == np.count_nonzero(junc['pmap']) + len(junc['holes'])
+    assert mesh['thincurr']['holes_version'] == 1
 
 
 def corner_map(lc, pmap, holes, nexp):

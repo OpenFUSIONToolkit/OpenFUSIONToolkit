@@ -15,7 +15,7 @@ import os
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
-from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
+from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh, HOLES_VERSION
 from . import _tree_homology
 from . import _manifold_homology
 from .junctions import has_junctions, find_junction_holes, verify_junction_mesh, split_jumper
@@ -75,7 +75,8 @@ def _write_holes(out_file, input_model, holes, closures):
                         eta_vol=input_model['thincurr'].get('eta_vol'),
                         thickness=input_model['thincurr'].get('thickness'),
                         coil_sets=input_model['thincurr'].get('coil_sets'),
-                        reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'))
+                        reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'),
+                        holes_version=HOLES_VERSION)
 
 
 def _compute_junction_holes(input_model, out_file, verify_only, print_info):
@@ -103,7 +104,8 @@ def _compute_junction_holes(input_model, out_file, verify_only, print_info):
                         junctions=out, jumpers=jumpers,
                         eta_surf=thincurr.get('eta_surf'), eta_vol=thincurr.get('eta_vol'),
                         thickness=thincurr.get('thickness'), coil_sets=thincurr.get('coil_sets'),
-                        reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'))
+                        reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'),
+                        holes_version=HOLES_VERSION)
 
 
 def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False, show_omitted=False,

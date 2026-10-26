@@ -143,6 +143,7 @@ def test_holes(mesh_name, method):
     for loop in holes:
         assert is_simple_loop(loop, edges)
     assert homology_rank(mesh['lc'], holes) == nholes
+    assert mesh['thincurr']['holes_version'] == 1
 
 
 @pytest.mark.parametrize("mesh_name", ('homology_torus_port', 'homology_genus4'))

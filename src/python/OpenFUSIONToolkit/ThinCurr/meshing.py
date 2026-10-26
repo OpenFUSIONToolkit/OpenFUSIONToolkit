@@ -14,6 +14,9 @@ import h5py
 import scipy.sparse
 from ..util import oft_warning
 from ..meshing import write_native_mesh, read_native_mesh
+
+## Version of holes written by `OFT_ThinCurr_holes` (ordered, independent loops); 0 or absent for other holes
+HOLES_VERSION = 1
 from .coils import coil_from_hdf5
 
 
@@ -47,7 +50,7 @@ def write_junction_group(h5_file, junctions):
 
 def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures=None, eta_surf=None, eta_vol=None,
                         thickness=None, coil_sets=None, pmap=None, nfp=None, reg_attrs=None, reg_names=None,
-                        junctions=None):
+                        junctions=None, holes_version=None):
     r'''! Create a native HDF5 mesh file for ThinCurr from the given mesh information
 
     @param filename Filename for mesh file
@@ -68,6 +71,7 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures
     @param junctions Junction data from @ref junctions.find_junction_holes (0-based): `kje` [n+1] and `lje`
     [m,4] (vertex, vertex, cell, sign) junction table, `holes` (explicit holes, [n,3] (cell, vertex, sign)
     arrays), `vmap`, `pmap` [np] (0 inactive) and `P` (sparse [n_expanded, n_reduced])
+    @param holes_version Version of the hole construction (see @ref HOLES_VERSION), set by `OFT_ThinCurr_holes` only
     '''
     if (eta_vol is not None) and (thickness is None):
         raise ValueError("Must specify `thickness` if `eta_vol` is specified")
@@ -84,6 +88,8 @@ def write_ThinCurr_mesh(filename, r, lc, reg, holes=None, jumpers=None, closures
         if thickness is not None:
             h5_file.create_dataset('thincurr/THICKNESS', data=thickness, dtype='f8')
         # Write holes
+        if holes_version is not None:
+            h5_file.create_dataset('thincurr/HOLES_VERSION', data=[holes_version,], dtype='i4')
         if (holes is not None) and (len(holes) > 0):
             h5_file.create_dataset('thincurr/holes/NHOLES', data=[len(holes),], dtype='i4')
             for i, hole in enumerate(holes):
@@ -160,6 +166,8 @@ def read_ThinCurr_mesh(filename):
             if 'jumpers' in thincurr:
                 njumpers = thincurr['jumpers/NJUMPERS'][0]
                 thincurr_info['jumpers'] = [thincurr['jumpers/JUMPER{0:04d}'.format(i+1)][()] - 1 for i in range(njumpers)] # Convert to 0-based indexing
+            if 'HOLES_VERSION' in thincurr:
+                thincurr_info['holes_version'] = int(thincurr['HOLES_VERSION'][0])
             # Read closures
             if 'CLOSURES' in thincurr:
                 thincurr_info['closures'] = thincurr['CLOSURES'][()] - 1 # Convert to 0-based indexing

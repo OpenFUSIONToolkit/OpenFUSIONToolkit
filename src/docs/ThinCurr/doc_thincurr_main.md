@@ -195,6 +195,8 @@ This use of jumps and a single-valued potential to represent a multivalued poten
 Holes can be defined using the `OFT_ThinCurr_holes.py` script. This script analyzes the toplogy of a given
 mesh and automatically locates and defines needed hole elements. This is now the recommended way of defining holes in
 ThinCurr models, although \ref doc_tw_dep_leg_holes "manual definition" is also still supported.
+The script also records the version of its hole construction in the mesh file (`thincurr/HOLES_VERSION`), so that
+ThinCurr can skip checks that only apply to holes defined in other ways (duplicate holes and unordered loops).
 
 The script should be available in one of two ways depending on the installation/build setup:
  - If OFT is installed via `pip` or similar, then it should be available via command line as `OFT_ThinCurr_holes` in any environment where OFT is also available (eg. virtual environment)
