@@ -14,10 +14,10 @@ import h5py
 import scipy.sparse
 from ..util import oft_warning
 from ..meshing import write_native_mesh, read_native_mesh
+from .coils import coil_from_hdf5
 
 ## Version of holes written by `OFT_ThinCurr_holes` (ordered, independent loops); 0 or absent for other holes
 HOLES_VERSION = 1
-from .coils import coil_from_hdf5
 
 
 def write_junction_group(h5_file, junctions):

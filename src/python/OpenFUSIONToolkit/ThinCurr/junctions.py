@@ -178,7 +178,8 @@ def split_junctions(r, lc, reg):
         adj.setdefault(a, []).append(b)
         adj.setdefault(b, []).append(a)
     ends = sorted(v for v, n in adj.items() if len(n) != 2)
-    key = lambda a, b: (min(a, b), max(a, b))
+    def key(a, b):
+        return (min(a, b), max(a, b))
     lines, used = [], set()
     for start in ends + sorted(adj):
         for w in sorted(adj[start]):
@@ -402,7 +403,8 @@ def junction_basis(lc, lc_split, reg, jedges, insulated=(), holes=()):
     G = scipy.sparse.coo_matrix((numpy.ones(3*nc), (lc_split.ravel(), numpy.repeat(lc_split[:, 0], 3))),
                                 shape=(nv, nv))
     comp = scipy.sparse.csgraph.connected_components(G, directed=False)[1]
-    comp_of = lambda x: comp[x] if x < nv else comp[arcs[x - nv][0][0]]
+    def comp_of(x):
+        return comp[x] if x < nv else comp[arcs[x - nv][0][0]]
     ncomp = comp.max() + 1
     grows = []
     for row in rows:
@@ -429,7 +431,8 @@ def junction_basis(lc, lc_split, reg, jedges, insulated=(), holes=()):
     hfree = [-1 - j for j in range(len(holes)) if -1 - j not in expr]
     cols = [x for x in free if x not in fixed] + hfree
     col = {x: j for j, x in enumerate(cols)}
-    terms_of = lambda x: expr.get(x, {x: 1})
+    def terms_of(x):
+        return expr.get(x, {x: 1})
     I, J, V = [], [], []
     for c in range(nc):
         for i in range(3):

@@ -29,7 +29,7 @@ USE oft_native_la, ONLY: oft_native_vector, oft_native_dense_matrix
 USE fem_utils, ONLY: fem_interp
 USE thin_wall, ONLY: tw_type, tw_save_pfield, tw_compute_LmatDirect, tw_compute_Rmat, tw_junction_reduce_cols, &
   tw_compute_Ael2dr, tw_sensors, tw_compute_mutuals, tw_load_sensors, tw_compute_Lmat_MF, &
-  tw_recon_curr, tw_compute_Bops, tw_copy_coil
+  tw_recon_curr, tw_compute_Bops, tw_copy_coil, tw_junction_vcoil_rows
 USE thin_wall_hodlr, ONLY: oft_tw_hodlr_op
 USE thin_wall_solvers, ONLY: lr_eigenmodes_arpack, lr_eigenmodes_direct, frequency_response, &
   tw_reduce_model, run_td_sim, plot_td_sim
@@ -714,7 +714,7 @@ tw_obj%n_vcoils=COUNT(flag_tmp==1)
 tw_obj%n_icoils=tw_obj%n_coils-tw_obj%n_vcoils
 tw_obj%nelems_exp=tw_obj%np_active+tw_obj%nholes+tw_obj%n_vcoils
 tw_obj%nelems=tw_obj%nelems_exp
-IF(tw_obj%junctions)tw_obj%nelems=tw_obj%jp_nred+tw_obj%n_vcoils
+IF(tw_obj%junctions)CALL tw_junction_vcoil_rows(tw_obj)
 IF(tw_obj%n_vcoils>0)ALLOCATE(tw_obj%vcoils(tw_obj%n_vcoils))
 IF(tw_obj%n_icoils>0)ALLOCATE(tw_obj%icoils(tw_obj%n_icoils))
 tw_obj%n_icoils=0

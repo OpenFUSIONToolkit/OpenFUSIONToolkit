@@ -3665,9 +3665,7 @@ END SUBROUTINE tw_setup_jhole
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_setup_junctions(self)
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
-INTEGER(4) :: i,j,s,ns,nnz
-INTEGER(i4), POINTER, DIMENSION(:) :: kr_tmp,lc_tmp
-REAL(r8), POINTER, DIMENSION(:) :: val_tmp
+INTEGER(4) :: i,j,s
 IF(SIZE(self%jp_kr)-1/=self%np_active+self%nholes)THEN
   WRITE(*,*)SIZE(self%jp_kr)-1,self%np_active,self%nholes
   CALL oft_abort("Junction map does not match the active vertices and holes","tw_setup_junctions",__FILE__)
@@ -3681,13 +3679,25 @@ DO i=1,SIZE(self%jtable,DIM=2)
   IF(s/=self%jtable(4,i))CALL oft_abort("Junction signs do not match the mesh orientation", &
     "tw_setup_junctions",__FILE__)
 END DO
-!---Append the V-coil rows (identity) so that P covers all expanded elements
+CALL tw_junction_vcoil_rows(self)
+WRITE(*,'(2A,I8,A,I8)')oft_indent,'Junctions: unknowns reduced from ',self%nelems_exp,' to ',self%nelems
+END SUBROUTINE tw_setup_junctions
+!---------------------------------------------------------------------------------
+!> Set the V-coil rows of the junction map (identity) for the current V-coils, so that P covers all expanded
+!! elements, and the reduced element count. Called at setup and whenever the coil types change.
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_junction_vcoil_rows(self)
+TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
+INTEGER(4) :: i,ns,nnz
+INTEGER(i4), POINTER, DIMENSION(:) :: kr_tmp,lc_tmp
+REAL(r8), POINTER, DIMENSION(:) :: val_tmp
+!---Keep the vertex and hole rows, drop any previous V-coil rows
 ns=self%np_active+self%nholes
 nnz=self%jp_kr(ns+1)-1
-ALLOCATE(kr_tmp(self%nelems_exp+1),lc_tmp(nnz+self%n_vcoils),val_tmp(nnz+self%n_vcoils))
-kr_tmp(1:ns+1)=self%jp_kr
-lc_tmp(1:nnz)=self%jp_lc
-val_tmp(1:nnz)=self%jp_val
+ALLOCATE(kr_tmp(ns+self%n_vcoils+1),lc_tmp(nnz+self%n_vcoils),val_tmp(nnz+self%n_vcoils))
+kr_tmp(1:ns+1)=self%jp_kr(1:ns+1)
+lc_tmp(1:nnz)=self%jp_lc(1:nnz)
+val_tmp(1:nnz)=self%jp_val(1:nnz)
 DO i=1,self%n_vcoils
   kr_tmp(ns+i+1)=nnz+i+1
   lc_tmp(nnz+i)=self%jp_nred+i
@@ -3698,8 +3708,7 @@ self%jp_kr=>kr_tmp
 self%jp_lc=>lc_tmp
 self%jp_val=>val_tmp
 self%nelems=self%jp_nred+self%n_vcoils
-WRITE(*,'(2A,I8,A,I8)')oft_indent,'Junctions: unknowns reduced from ',self%nelems_exp,' to ',self%nelems
-END SUBROUTINE tw_setup_junctions
+END SUBROUTINE tw_junction_vcoil_rows
 !---------------------------------------------------------------------------------
 !> Expand a reduced vector, x_exp = P x
 !---------------------------------------------------------------------------------

@@ -498,3 +498,40 @@ def test_pmap_rejected(user_pmap):
         with h5py.File(files[0], 'r+') as h5_file:
             h5_file.create_dataset('thincurr/periodicity/PMAP', data=np.arange(h5_file['mesh/R'].shape[0]) + 1, dtype='i4')
     assert mp_run(run_pmap, (files[0], user_pmap))
+
+
+def run_vcoil_switch(path, mp_q):
+    """A coil switched to a V-coil after setup gives the same model as one defined as a V-coil."""
+    result = False
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        mats = []
+        for group in ('icoils', 'vcoils'):
+            xml_file = 'junction_vcoil_{0}.xml'.format(group)
+            with open(xml_file, 'w') as fid:
+                fid.write('<oft><thincurr><{0}><coil_set name="C" res_per_len="1.0E-4" radius="0.01">'
+                          '<coil>0.7, 0.3</coil></coil_set></{0}></thincurr></oft>\n'.format(group))
+            tw = ThinCurr(myOFT)
+            tw.setup_model(mesh_file=path, xml_filename=xml_file)
+            if group == 'icoils':
+                # Names of coils read from XML keep their trailing blanks
+                tw.update_coil_types(vcoils=[name for name in tw.coils if name.strip() == 'C'])
+            tw.compute_Mcoil()
+            tw.compute_Lmat()
+            tw.compute_Rmat()
+            mats.append((np.array(tw.Lmat), tw.Rmat.toarray()))
+        (L1, R1), (L2, R2) = mats
+        result = (L1.shape == L2.shape) and np.allclose(L1, L2, rtol=0.0, atol=1.E-12*np.abs(L2).max()) and \
+            np.allclose(R1, R2, rtol=0.0, atol=1.E-12*np.abs(R2).max())
+    except BaseException as e:
+        print(e)
+    mp_q.put(result)
+
+
+def test_vcoil_after_setup():
+    out = find_junction_holes(*tplate())
+    path = os.path.join(test_dir, 'junction_vcoil_switch.h5')
+    write_ThinCurr_mesh(path, out['r'], out['lc'], out['reg'], junctions=out, eta_surf=1.0E-4*np.ones(out['reg'].max()))
+    assert mp_run(run_vcoil_switch, (path,))
