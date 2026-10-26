@@ -10,10 +10,12 @@
 @ingroup doxy_oft_python
 '''
 import os
+import atexit
 import platform
 import shutil
 import tempfile
 import ctypes
+import multiprocessing.util
 from warnings import warn
 import numpy
 from ._interface import *
@@ -83,25 +85,23 @@ class OFT_env():
                             details=["If correct, this may significantly degrade performance due to oversubcription"])
         ## ID of Python interpreter process
         self.pid = os.getpid()
-        if unique_tempfiles == 'global':
-            ## Directory for temporary files
-            self.tempdir = os.path.join(tempfile.gettempdir(),'oft_{0}'.format(self.pid))
+        ## Directory for temporary files
+        self.tempdir = None
+        if unique_tempfiles in ('global', 'local_dir'):
+            # Use a random suffix so stale directories left by earlier processes with the same PID can not collide
+            if unique_tempfiles == 'global':
+                tempdir_prefix = 'oft_{0}_'.format(self.pid)
+                tempdir_parent = None
+            else:
+                tempdir_prefix = 'oft_tmp-{0}-'.format(self.pid)
+                tempdir_parent = os.getcwd()
             try:
-                os.mkdir(self.tempdir)
-            except:
-                raise IOError("Could not create temporary directory."
-                              "This usually means you have tried to instantiate more than one instance of `OFT_env` within a single python kernel.")
-        elif unique_tempfiles == 'local_dir':
-            self.tempdir = os.path.join(os.getcwd(),'oft_tmp-{0}'.format(self.pid))
-            try:
-                os.mkdir(self.tempdir)
-            except:
-                raise IOError("Could not create temporary directory."
-                              "This usually means you have tried to instantiate more than one instance of `OFT_env` within a single python kernel.")
+                self.tempdir = tempfile.mkdtemp(prefix=tempdir_prefix, dir=tempdir_parent)
+            except OSError as e:
+                raise IOError('Could not create temporary directory: {0}'.format(e))
         elif unique_tempfiles == 'local_file':
-            self.tempdir = None
+            pass
         elif unique_tempfiles == 'none':
-            self.tempdir = None
             self.pid = None
             oft_warning("Using non-unique names/locations for temporary files can lead to conflicts if multiple python instances are used in the same directory")
         else:
@@ -121,6 +121,12 @@ class OFT_env():
         }
         ## Input filename for execution environment
         self.oft_ifile = self.unique_tmpfile('oftpyin')
+        # Remove temporary files on interpreter exit (`atexit`) and on exit of `multiprocessing`
+        # child processes, which terminate via `os._exit()` and skip `atexit` handlers
+        self._tempfiles_removed = False
+        self._tempfiles_owner = os.getpid()
+        atexit.register(self._remove_tempfiles)
+        multiprocessing.util.Finalize(None, self._remove_tempfiles, exitpriority=0)
         self.update_oft_in()
         # Initialize OFT
         slens = numpy.zeros((4,), dtype=numpy.int32)
@@ -266,8 +272,13 @@ class OFT_env():
         )
         write_oft_xml(xml_blocks,path)
 
-    def __del__(self):
-        '''! Destroy environment and cleanup known temporary files'''
+    def _remove_tempfiles(self):
+        '''! Remove known temporary files (safe to call multiple times)'''
+        if getattr(self, '_tempfiles_removed', True):
+            return
+        if os.getpid() != self._tempfiles_owner:
+            return  # Forked child process, leave cleanup to the parent
+        self._tempfiles_removed = True
         if self.tempdir is not None:
             try:
                 shutil.rmtree(self.tempdir)
@@ -278,3 +289,7 @@ class OFT_env():
                 os.remove(self.oft_ifile)
             except:
                 oft_warning('Unable to delete temporary file "{0}"'.format(self.oft_ifile))
+
+    def __del__(self):
+        '''! Destroy environment and cleanup known temporary files'''
+        self._remove_tempfiles()
