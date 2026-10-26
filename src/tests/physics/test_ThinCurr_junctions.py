@@ -266,6 +266,38 @@ def test_cache():
     assert mp_run(run_cache, (files[0],))
 
 
+def run_lmat_pair(files, mp_q):
+    result = False
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        mats = []
+        for path in files:
+            tw = ThinCurr(myOFT)
+            tw.setup_model(mesh_file=path)
+            tw.compute_Lmat()
+            mats.append(np.array(tw.Lmat))
+        result = np.allclose(mats[0], mats[1], rtol=0.0, atol=1.E-12*np.abs(mats[0]).max())
+    except BaseException as e:
+        print(e)
+    mp_q.put(result)
+
+
+def test_holes_share_vertices():
+    """Junction holes on the same vertices but with different signs are not duplicates."""
+    out = find_junction_holes(*tplate())
+    extra = copy.copy(out)
+    extra['holes'] = out['holes'] + [out['holes'][0]*np.array([1, 1, -1])]
+    extra['P'] = scipy.sparse.vstack([out['P'], scipy.sparse.csr_matrix((1, out['P'].shape[1]))]).tocsr()
+    files = []
+    for tag, junc in (('base', out), ('extra', extra)):
+        files.append(os.path.join(test_dir, 'junction_shared_{0}.h5'.format(tag)))
+        write_ThinCurr_mesh(files[-1], out['r'], out['lc'], out['reg'], junctions=junc,
+                            eta_surf=1.0E-4*np.ones(out['reg'].max()))
+    assert mp_run(run_lmat_pair, (files,))
+
+
 def tplate_jumpers():
     """T-plate jumpers at y = 0.5: across the plate (crossing the junction) and up the stem."""
     r, lc, reg = tplate()

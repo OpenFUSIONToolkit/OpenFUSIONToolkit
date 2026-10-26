@@ -330,9 +330,9 @@ IF(self%nholes>0)THEN
     END DO
   END DO
   DEALLOCATE(kfh_tmp)
-  !---Check for duplicates
-  DO i=1,self%nholes
-    DO j=1,self%nholes
+  !---Check for duplicates (junction holes differ by cell and sign, and are checked when they are built)
+  DO i=1,self%nholes-self%n_jholes
+    DO j=1,self%nholes-self%n_jholes
       IF(i==j.OR.self%hmesh(i)%n/=self%hmesh(j)%n)CYCLE
       IF(ALL(self%hmesh(i)%lp_sorted==self%hmesh(j)%lp_sorted))THEN
         WRITE(*,*)"Duplicate hole detected: ",i,j
