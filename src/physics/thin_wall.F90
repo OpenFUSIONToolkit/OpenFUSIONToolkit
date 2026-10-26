@@ -122,7 +122,7 @@ TYPE :: tw_type
   INTEGER(i4) :: n_jholes = 0 !< Number of explicit holes (junction meshes), after the mesh file holes
   INTEGER(i4) :: holes_version = 0 !< Version of the hole construction (0: unknown, >0: from "OFT_ThinCurr_holes")
   INTEGER(i4) :: jp_nred = 0 !< Number of reduced surface unknowns
-  INTEGER(i4), POINTER, DIMENSION(:) :: jp_kr => NULL() !< Junction map P, row pointer [np_active+nholes+1]
+  INTEGER(i4), POINTER, DIMENSION(:) :: jp_kr => NULL() !< Junction map P, row pointer [nelems_exp+1] (V-coil rows appended at setup)
   INTEGER(i4), POINTER, DIMENSION(:) :: jp_lc => NULL() !< Junction map P, column indices
   REAL(r8), POINTER, DIMENSION(:) :: jp_val => NULL() !< Junction map P, values
   INTEGER(i4), POINTER, DIMENSION(:,:) :: jtable => NULL() !< Junction table (vertex, vertex, cell, sign) [4,n]
@@ -3665,7 +3665,9 @@ END SUBROUTINE tw_setup_jhole
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_setup_junctions(self)
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
-INTEGER(4) :: i,j,s
+INTEGER(4) :: i,j,s,ns,nnz
+INTEGER(i4), POINTER, DIMENSION(:) :: kr_tmp,lc_tmp
+REAL(r8), POINTER, DIMENSION(:) :: val_tmp
 IF(SIZE(self%jp_kr)-1/=self%np_active+self%nholes)THEN
   WRITE(*,*)SIZE(self%jp_kr)-1,self%np_active,self%nholes
   CALL oft_abort("Junction map does not match the active vertices and holes","tw_setup_junctions",__FILE__)
@@ -3679,32 +3681,25 @@ DO i=1,SIZE(self%jtable,DIM=2)
   IF(s/=self%jtable(4,i))CALL oft_abort("Junction signs do not match the mesh orientation", &
     "tw_setup_junctions",__FILE__)
 END DO
+!---Append the V-coil rows (identity) so that P covers all expanded elements
+ns=self%np_active+self%nholes
+nnz=self%jp_kr(ns+1)-1
+ALLOCATE(kr_tmp(self%nelems_exp+1),lc_tmp(nnz+self%n_vcoils),val_tmp(nnz+self%n_vcoils))
+kr_tmp(1:ns+1)=self%jp_kr
+lc_tmp(1:nnz)=self%jp_lc
+val_tmp(1:nnz)=self%jp_val
+DO i=1,self%n_vcoils
+  kr_tmp(ns+i+1)=nnz+i+1
+  lc_tmp(nnz+i)=self%jp_nred+i
+  val_tmp(nnz+i)=1.d0
+END DO
+DEALLOCATE(self%jp_kr,self%jp_lc,self%jp_val)
+self%jp_kr=>kr_tmp
+self%jp_lc=>lc_tmp
+self%jp_val=>val_tmp
 self%nelems=self%jp_nred+self%n_vcoils
 WRITE(*,'(2A,I8,A,I8)')oft_indent,'Junctions: unknowns reduced from ',self%nelems_exp,' to ',self%nelems
 END SUBROUTINE tw_setup_junctions
-!---------------------------------------------------------------------------------
-!> Entries of row e of the junction map P (V-coil rows map to themselves)
-!---------------------------------------------------------------------------------
-SUBROUTINE tw_junction_row(self,e,n,cols,vals)
-TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
-INTEGER(4), INTENT(in) :: e !< Expanded element
-INTEGER(4), INTENT(out) :: n !< Number of entries
-INTEGER(4), INTENT(out) :: cols(:) !< Reduced elements
-REAL(8), INTENT(out) :: vals(:) !< Coefficients
-INTEGER(4) :: k,ns
-ns=self%np_active+self%nholes
-IF(e<=ns)THEN
-  n=self%jp_kr(e+1)-self%jp_kr(e)
-  DO k=1,n
-    cols(k)=self%jp_lc(self%jp_kr(e)+k-1)
-    vals(k)=self%jp_val(self%jp_kr(e)+k-1)
-  END DO
-ELSE
-  n=1
-  cols(1)=self%jp_nred+e-ns
-  vals(1)=1.d0
-END IF
-END SUBROUTINE tw_junction_row
 !---------------------------------------------------------------------------------
 !> Expand a reduced vector, x_exp = P x
 !---------------------------------------------------------------------------------
@@ -3712,13 +3707,11 @@ SUBROUTINE tw_junction_expand(self,x,x_exp)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 REAL(8), INTENT(in) :: x(:) !< Reduced vector [nelems]
 REAL(8), INTENT(out) :: x_exp(:) !< Expanded vector [nelems_exp]
-INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
-REAL(8) :: vals(self%jp_nred+1)
+INTEGER(4) :: e,k
 DO e=1,self%nelems_exp
-  CALL tw_junction_row(self,e,n,cols,vals)
   x_exp(e)=0.d0
-  DO k=1,n
-    x_exp(e)=x_exp(e)+vals(k)*x(cols(k))
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    x_exp(e)=x_exp(e)+self%jp_val(k)*x(self%jp_lc(k))
   END DO
 END DO
 END SUBROUTINE tw_junction_expand
@@ -3729,24 +3722,21 @@ SUBROUTINE tw_junction_reduce_dense(self,Aexp,A)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 REAL(8), INTENT(in) :: Aexp(:,:) !< Expanded matrix [nelems_exp,nelems_exp]
 REAL(8), INTENT(out) :: A(:,:) !< Reduced matrix [nelems,nelems]
-INTEGER(4) :: e,k,c,n,cols(self%jp_nred+1)
-REAL(8) :: vals(self%jp_nred+1)
+INTEGER(4) :: e,k,c
 REAL(8), ALLOCATABLE :: T(:,:)
 ALLOCATE(T(self%nelems_exp,self%nelems))
 T=0.d0
 DO e=1,self%nelems_exp
-  CALL tw_junction_row(self,e,n,cols,vals)
-  DO k=1,n
-    T(:,cols(k))=T(:,cols(k))+vals(k)*Aexp(:,e)
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    T(:,self%jp_lc(k))=T(:,self%jp_lc(k))+self%jp_val(k)*Aexp(:,e)
   END DO
 END DO
 A=0.d0
 DO c=1,self%nelems
   DO e=1,self%nelems_exp
     IF(T(e,c)==0.d0)CYCLE
-    CALL tw_junction_row(self,e,n,cols,vals)
-    DO k=1,n
-      A(cols(k),c)=A(cols(k),c)+vals(k)*T(e,c)
+    DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+      A(self%jp_lc(k),c)=A(self%jp_lc(k),c)+self%jp_val(k)*T(e,c)
     END DO
   END DO
 END DO
@@ -3757,10 +3747,8 @@ END SUBROUTINE tw_junction_reduce_dense
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_junction_reduce_sparse(self)
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
-INTEGER(4) :: a,e,i,j,k,l,n,m,nr,nnz
-INTEGER(4) :: cols(self%jp_nred+1)
+INTEGER(4) :: a,e,i,j,k,l,m,nr,nnz
 INTEGER(4), ALLOCATABLE :: pt_kr(:),pt_lc(:),kr(:),lc(:),mark(:),ind(:),tmp(:)
-REAL(8) :: vals(self%jp_nred+1)
 REAL(8), ALLOCATABLE :: pt_val(:),mvals(:),acc(:)
 TYPE(oft_native_matrix), POINTER :: Rexp,Rred
 Rexp=>self%Rmat
@@ -3769,9 +3757,8 @@ nr=self%nelems
 ALLOCATE(pt_kr(nr+1),tmp(nr))
 tmp=0
 DO e=1,self%nelems_exp
-  CALL tw_junction_row(self,e,n,cols,vals)
-  DO k=1,n
-    tmp(cols(k))=tmp(cols(k))+1
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    tmp(self%jp_lc(k))=tmp(self%jp_lc(k))+1
   END DO
 END DO
 pt_kr(1)=1
@@ -3781,11 +3768,10 @@ END DO
 ALLOCATE(pt_lc(pt_kr(nr+1)-1),pt_val(pt_kr(nr+1)-1))
 tmp=0
 DO e=1,self%nelems_exp
-  CALL tw_junction_row(self,e,n,cols,vals)
-  DO k=1,n
-    pt_lc(pt_kr(cols(k))+tmp(cols(k)))=e
-    pt_val(pt_kr(cols(k))+tmp(cols(k)))=vals(k)
-    tmp(cols(k))=tmp(cols(k))+1
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    pt_lc(pt_kr(self%jp_lc(k))+tmp(self%jp_lc(k)))=e
+    pt_val(pt_kr(self%jp_lc(k))+tmp(self%jp_lc(k)))=self%jp_val(k)
+    tmp(self%jp_lc(k))=tmp(self%jp_lc(k))+1
   END DO
 END DO
 !---Sparsity of P^T R P
@@ -3797,10 +3783,9 @@ DO a=1,nr
   DO i=pt_kr(a),pt_kr(a+1)-1
     e=pt_lc(i)
     DO j=Rexp%kr(e),Rexp%kr(e+1)-1
-      CALL tw_junction_row(self,Rexp%lc(j),n,cols,vals)
-      DO k=1,n
-        IF(mark(cols(k))/=a)THEN
-          mark(cols(k))=a
+      DO k=self%jp_kr(Rexp%lc(j)),self%jp_kr(Rexp%lc(j)+1)-1
+        IF(mark(self%jp_lc(k))/=a)THEN
+          mark(self%jp_lc(k))=a
           m=m+1
         END IF
       END DO
@@ -3817,14 +3802,13 @@ DO a=1,nr
   DO i=pt_kr(a),pt_kr(a+1)-1
     e=pt_lc(i)
     DO j=Rexp%kr(e),Rexp%kr(e+1)-1
-      CALL tw_junction_row(self,Rexp%lc(j),n,cols,vals)
-      DO k=1,n
-        IF(mark(cols(k))/=a)THEN
-          mark(cols(k))=a
+      DO k=self%jp_kr(Rexp%lc(j)),self%jp_kr(Rexp%lc(j)+1)-1
+        IF(mark(self%jp_lc(k))/=a)THEN
+          mark(self%jp_lc(k))=a
           m=m+1
-          tmp(m)=cols(k)
+          tmp(m)=self%jp_lc(k)
         END IF
-        acc(cols(k))=acc(cols(k))+pt_val(i)*Rexp%M(j)*vals(k)
+        acc(self%jp_lc(k))=acc(self%jp_lc(k))+pt_val(i)*Rexp%M(j)*self%jp_val(k)
       END DO
     END DO
   END DO
@@ -3915,15 +3899,13 @@ END SUBROUTINE tw_recon_curr
 SUBROUTINE tw_junction_reduce_rows(self,A)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: A(:,:) !< Matrix [nelems_exp,m] -> [nelems,m]
-INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
-REAL(8) :: vals(self%jp_nred+1)
+INTEGER(4) :: e,k
 REAL(8), CONTIGUOUS, POINTER :: Ared(:,:)
 ALLOCATE(Ared(self%nelems,SIZE(A,DIM=2)))
 Ared=0.d0
 DO e=1,self%nelems_exp
-  CALL tw_junction_row(self,e,n,cols,vals)
-  DO k=1,n
-    Ared(cols(k),:)=Ared(cols(k),:)+vals(k)*A(e,:)
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    Ared(self%jp_lc(k),:)=Ared(self%jp_lc(k),:)+self%jp_val(k)*A(e,:)
   END DO
 END DO
 DEALLOCATE(A)
@@ -3935,15 +3917,13 @@ END SUBROUTINE tw_junction_reduce_rows
 SUBROUTINE tw_junction_reduce_cols(self,A)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: A(:,:) !< Matrix [m,nelems_exp] -> [m,nelems]
-INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
-REAL(8) :: vals(self%jp_nred+1)
+INTEGER(4) :: e,k
 REAL(8), CONTIGUOUS, POINTER :: Ared(:,:)
 ALLOCATE(Ared(SIZE(A,DIM=1),self%nelems))
 Ared=0.d0
 DO e=1,self%nelems_exp
-  CALL tw_junction_row(self,e,n,cols,vals)
-  DO k=1,n
-    Ared(:,cols(k))=Ared(:,cols(k))+vals(k)*A(:,e)
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    Ared(:,self%jp_lc(k))=Ared(:,self%jp_lc(k))+self%jp_val(k)*A(:,e)
   END DO
 END DO
 DEALLOCATE(A)
@@ -3977,17 +3957,15 @@ SUBROUTINE tw_compute_Bops(self,B_dx,save_file)
 TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
 REAL(r8), INTENT(in) :: B_dx !< Distance for finite-difference field evaluation
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
-INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
-REAL(8) :: vals(self%jp_nred+1)
+INTEGER(4) :: e,k
 REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bred
 CALL tw_compute_Bops_exp(self,B_dx,save_file)
 IF(.NOT.self%junctions)RETURN
 ALLOCATE(Bred(SIZE(self%Bel,DIM=1),self%nelems,3))
 Bred=0.d0
 DO e=1,self%nelems_exp
-  CALL tw_junction_row(self,e,n,cols,vals)
-  DO k=1,n
-    Bred(:,cols(k),:)=Bred(:,cols(k),:)+vals(k)*self%Bel(:,e,:)
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    Bred(:,self%jp_lc(k),:)=Bred(:,self%jp_lc(k),:)+self%jp_val(k)*self%Bel(:,e,:)
   END DO
 END DO
 DEALLOCATE(self%Bel)
@@ -4022,16 +4000,14 @@ TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 REAL(r8), INTENT(in) :: vals(:) !< Solution vector [nelems]
 INTEGER(4), INTENT(in) :: i !< Hole index
 REAL(r8) :: val
-INTEGER(4) :: k,n,cols(self%jp_nred+1)
-REAL(8) :: coefs(self%jp_nred+1)
+INTEGER(4) :: k
 IF(.NOT.self%junctions)THEN
   val=vals(self%np_active+i)
   RETURN
 END IF
-CALL tw_junction_row(self,self%np_active+i,n,cols,coefs)
 val=0.d0
-DO k=1,n
-  val=val+coefs(k)*vals(cols(k))
+DO k=self%jp_kr(self%np_active+i),self%jp_kr(self%np_active+i+1)-1
+  val=val+self%jp_val(k)*vals(self%jp_lc(k))
 END DO
 END FUNCTION tw_hole_value
 !---------------------------------------------------------------------------------
@@ -4058,13 +4034,11 @@ SUBROUTINE tw_junction_reduce_vec(self,x_exp,x)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 REAL(8), INTENT(in) :: x_exp(:) !< Expanded vector [nelems_exp]
 REAL(8), INTENT(out) :: x(:) !< Reduced vector [nelems]
-INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
-REAL(8) :: vals(self%jp_nred+1)
+INTEGER(4) :: e,k
 x=0.d0
 DO e=1,self%nelems_exp
-  CALL tw_junction_row(self,e,n,cols,vals)
-  DO k=1,n
-    x(cols(k))=x(cols(k))+vals(k)*x_exp(e)
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    x(self%jp_lc(k))=x(self%jp_lc(k))+self%jp_val(k)*x_exp(e)
   END DO
 END DO
 END SUBROUTINE tw_junction_reduce_vec
@@ -4075,13 +4049,11 @@ SUBROUTINE tw_junction_expand_c(self,x,x_exp)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 COMPLEX(8), INTENT(in) :: x(:) !< Reduced vector [nelems]
 COMPLEX(8), INTENT(out) :: x_exp(:) !< Expanded vector [nelems_exp]
-INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
-REAL(8) :: vals(self%jp_nred+1)
+INTEGER(4) :: e,k
 DO e=1,self%nelems_exp
-  CALL tw_junction_row(self,e,n,cols,vals)
   x_exp(e)=(0.d0,0.d0)
-  DO k=1,n
-    x_exp(e)=x_exp(e)+vals(k)*x(cols(k))
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    x_exp(e)=x_exp(e)+self%jp_val(k)*x(self%jp_lc(k))
   END DO
 END DO
 END SUBROUTINE tw_junction_expand_c
@@ -4092,13 +4064,11 @@ SUBROUTINE tw_junction_reduce_vec_c(self,x_exp,x)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 COMPLEX(8), INTENT(in) :: x_exp(:) !< Expanded vector [nelems_exp]
 COMPLEX(8), INTENT(out) :: x(:) !< Reduced vector [nelems]
-INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
-REAL(8) :: vals(self%jp_nred+1)
+INTEGER(4) :: e,k
 x=(0.d0,0.d0)
 DO e=1,self%nelems_exp
-  CALL tw_junction_row(self,e,n,cols,vals)
-  DO k=1,n
-    x(cols(k))=x(cols(k))+vals(k)*x_exp(e)
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    x(self%jp_lc(k))=x(self%jp_lc(k))+self%jp_val(k)*x_exp(e)
   END DO
 END DO
 END SUBROUTINE tw_junction_reduce_vec_c
@@ -4109,13 +4079,11 @@ SUBROUTINE tw_junction_reduce_diag(self,d_exp,d)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
 REAL(8), INTENT(in) :: d_exp(:) !< Expanded diagonal [nelems_exp]
 REAL(8), INTENT(out) :: d(:) !< Reduced diagonal [nelems]
-INTEGER(4) :: e,k,n,cols(self%jp_nred+1)
-REAL(8) :: vals(self%jp_nred+1)
+INTEGER(4) :: e,k
 d=0.d0
 DO e=1,self%nelems_exp
-  CALL tw_junction_row(self,e,n,cols,vals)
-  DO k=1,n
-    d(cols(k))=d(cols(k))+vals(k)**2*d_exp(e)
+  DO k=self%jp_kr(e),self%jp_kr(e+1)-1
+    d(self%jp_lc(k))=d(self%jp_lc(k))+self%jp_val(k)**2*d_exp(e)
   END DO
 END DO
 END SUBROUTINE tw_junction_reduce_diag
