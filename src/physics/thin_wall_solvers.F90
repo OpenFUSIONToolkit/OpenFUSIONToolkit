@@ -307,6 +307,7 @@ ALLOCATE(x(self%nelems))
 x=(0.d0,0.d0)
 IF(direct)THEN
   CALL lapack_matinv(self%nelems,Mmat,info)
+  IF(info/=0)CALL oft_abort('Matrix inversion failed','frequency_response',__FILE__)
   CALL zgemv('N',self%nelems,self%nelems,(1.d0,0.d0),Mmat,self%nelems,b,1,(0.d0,0.d0),x,1)
   DEALLOCATE(Mmat)
 ELSE
@@ -348,16 +349,14 @@ DEALLOCATE(b,x)
 CALL oft_decrease_indent
 CONTAINS
 !---------------------------------------------------------------------------------
-!> Dot product with a second vector
-!!
-!! @param[in] a Second vector for dot product
-!! @result \f$ \sum_i self_i a_i \f$
+!> Conjugated dot product of two complex vectors \f$ a^H b \f$
 !---------------------------------------------------------------------------------
 function vec_comp_dot(n,a,b) result(dot)
-integer(i4), intent(in) :: n
-DOUBLE COMPLEX, intent(in) :: a(n),b(n)
+integer(i4), intent(in) :: n !< Length of vectors
+DOUBLE COMPLEX, intent(in) :: a(n) !< First vector (conjugated)
+DOUBLE COMPLEX, intent(in) :: b(n) !< Second vector
 INTEGER(i4) :: i
-DOUBLE COMPLEX :: dot
+DOUBLE COMPLEX :: dot !< \f$ \sum_i \overline{a_i} b_i \f$
 dot=(0.d0,0.d0)
 !$omp parallel do reduction(+:dot)
 DO i=1,n
@@ -365,15 +364,13 @@ DO i=1,n
 END DO
 end function vec_comp_dot
 !---------------------------------------------------------------------------------
-!> Dot product with a second vector
-!!
-!! @param[in] a Second vector for dot product
-!! @result \f$ \sum_i self_i a_i \f$
+!> Dense complex matrix-vector product \f$ b = A x \f$
 !---------------------------------------------------------------------------------
 subroutine mat_comp(n,A,x,b)
-integer(i4), intent(in) :: n
-DOUBLE COMPLEX, intent(in) :: A(n,n),x(n)
-DOUBLE COMPLEX, intent(out) :: b(n)
+integer(i4), intent(in) :: n !< Size of system
+DOUBLE COMPLEX, intent(in) :: A(n,n) !< Matrix
+DOUBLE COMPLEX, intent(in) :: x(n) !< Input vector
+DOUBLE COMPLEX, intent(out) :: b(n) !< Result
 integer(i4) :: i,j,i1,i2
 b=(0.d0,0.d0)
 IF(omp_in_parallel())THEN
@@ -396,14 +393,19 @@ ELSE
 END IF
 end subroutine mat_comp
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Solve a dense complex linear system using restarted GMRES with a
+!! (optionally overlapping) block-Jacobi preconditioner
 !---------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE gmres_comp(nrits,its,ncoils,A,u,g,graph,nlocal,loverlap)
-INTEGER(i4), INTENT(in) :: nrits,its,ncoils,nlocal
-DOUBLE COMPLEX, INTENT(inout) :: A(ncoils,ncoils)
-DOUBLE COMPLEX, CONTIGUOUS, intent(inout) :: u(:),g(:)
-TYPE(oft_graph), INTENT(inout) :: graph
-LOGICAL, INTENT(in) :: loverlap
+INTEGER(i4), INTENT(in) :: nrits !< Restart length
+INTEGER(i4), INTENT(in) :: its !< Maximum iterations (-1/-2 for relative tolerance of 1E-7/1E-14)
+INTEGER(i4), INTENT(in) :: ncoils !< Size of system
+INTEGER(i4), INTENT(in) :: nlocal !< Number of preconditioner blocks (diagonal scaling if <=1)
+DOUBLE COMPLEX, INTENT(inout) :: A(ncoils,ncoils) !< Matrix
+DOUBLE COMPLEX, CONTIGUOUS, intent(inout) :: u(:) !< Guess (input), Solution (output)
+DOUBLE COMPLEX, CONTIGUOUS, intent(inout) :: g(:) !< RHS (input), Residual (output)
+TYPE(oft_graph), INTENT(inout) :: graph !< Matrix graph used for block partitioning
+LOGICAL, INTENT(in) :: loverlap !< Overlap preconditioner blocks by one level?
 !
 TYPE :: mat_parts
   INTEGER(i4) :: n = 0 !< Number of values in set
@@ -418,7 +420,7 @@ DOUBLE COMPLEX, allocatable, dimension(:,:) :: v,z
 DOUBLE COMPLEX, allocatable :: h(:,:),c(:),s(:),res(:)
 DOUBLE COMPLEX :: delta,hkmi
 REAL(r8) :: uu,uuold,gg,ggold,ggin,elapsed_time
-integer(i4) :: i,j,jr,k,kk,nits,info
+integer(i4) :: i,j,jr,k,kk,nits,info,nfail
 integer(i4), allocatable, dimension(:) :: part
 LOGICAL, allocatable, dimension(:) :: eflag
 TYPE(mat_parts), pointer, dimension(:) :: parts,parts_tmp
@@ -428,7 +430,7 @@ pm=oft_env%pm
 oft_env%pm=.FALSE.
 !---Preconditioner setup
 IF(nlocal>1)THEN
-  WRITE(*,"(A,I6)")" nLocal = ",nlocal
+  IF(pm)WRITE(*,'(2A,I6)')oft_indent,'nLocal = ',nlocal
   ALLOCATE(part(ncoils))
   CALL partition_graph(graph,nlocal,part)
   !---Create partition mappings
@@ -488,7 +490,8 @@ IF(nlocal>1)THEN
     ! parts(i)%n=0
   END DO
   !---Get matrix slice
-  !$omp parallel do private(j,k) schedule(static)
+  nfail=0
+  !$omp parallel do private(j,k,info) schedule(static) reduction(+:nfail)
   DO i=1,nlocal
     DO j=1,parts(i)%n
       DO k=1,parts(i)%n
@@ -496,7 +499,9 @@ IF(nlocal>1)THEN
       END DO
     END DO
     CALL lapack_matinv(parts(i)%n,parts(i)%mat,info)
+    IF(info/=0)nfail=nfail+1
   END DO
+  IF(nfail>0)CALL oft_abort('Preconditioner block inversion failed','gmres_comp',__FILE__)
   IF(loverlap)THEN
     !$omp parallel do private(j)
     DO i=1,nlocal
@@ -516,7 +521,7 @@ END IF
 !---
 ALLOCATE(v(ncoils,nrits+1),z(ncoils,nrits+1))
 ALLOCATE(r(ncoils),w(ncoils))
-w=(0.d0,0.d0)
+w=(0.d0,0.d0); z=(0.d0,0.d0)
 allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
 c=(0.d0,0.d0); s=(0.d0,0.d0); res=(0.d0,0.d0); h=(0.d0,0.d0)
 !
@@ -555,26 +560,27 @@ DO j=1,ncoils
     CALL mat_comp(ncoils,A,z(:,i),w)
     !---Arnoldi iteration
     DO k=1,i
-      h(k,i)=vec_comp_dot(ncoils,w,v(:,k))
+      h(k,i)=vec_comp_dot(ncoils,v(:,k),w)
       w=w-h(k,i)*v(:,k)
     END DO
-    h(i+1,i)=SQRT(vec_comp_dot(ncoils,w,w))
-    v(:,i+1)=w/h(i+1,i)
+    h(i+1,i)=SQRT(REAL(vec_comp_dot(ncoils,w,w),8))
+    IF(ABS(h(i+1,i))>0.d0)v(:,i+1)=w/h(i+1,i)
     !---Apply Givens rotation
     DO k=2,i
       hkmi = h(k-1,i)
-      h(k-1,i) = c(k-1)*hkmi + s(k-1)*h(k,i)
+      h(k-1,i) = CONJG(c(k-1))*hkmi + CONJG(s(k-1))*h(k,i)
       h(k,i) = -s(k-1)*hkmi + c(k-1)*h(k,i)
     END DO
     delta = SQRT( ABS(h(i,i))**2 + ABS(h(i+1,i))**2 )
     c(i) = h(i,i) / delta
     s(i) = h(i+1,i) / delta
-    h(i,i) = c(i)*h(i,i) + s(i)*h(i+1,i)
+    h(i,i) = CONJG(c(i))*h(i,i) + CONJG(s(i))*h(i+1,i)
     !---Update residual
     res(i+1) = -s(i)*res(i)
-    res(i) = c(i)*res(i)
+    res(i) = CONJG(c(i))*res(i)
     nits=nits+1
     IF(i==nrits)EXIT
+    IF(ABS(res(i+1))==0.d0)EXIT ! Lucky breakdown
     IF(nits==its)EXIT
     IF(pm)WRITE(*,'(A,I6,14X,ES14.6)')oft_indent,nits,ABS(res(i+1))
   END DO
