@@ -385,11 +385,16 @@ do k=1,max_its
   if(associated(self%orthog))call self%orthog%apply(q)
   ggold=gg
   gg=g%dot(q)
-  ggnew = g%dot(g)
-  uu=u%dot(u)
+  ! Without preconditioning or orthogonalization q==g, so skip the redundant reduction
+  if(associated(self%pre).OR.associated(self%orthog))then
+    ggnew = g%dot(g)
+  else
+    ggnew = gg
+  end if
   beta=gg/ggold
-  if((k<=self%itplot.OR.MOD(k,self%itplot)==0).AND.(oft_env%pm.AND.oft_env%head_proc))THEN
-    write(*,110)k,f,SQRT(uu),SQRT(ggnew),SQRT(ggnew/uu)
+  if((k<=self%itplot.OR.MOD(k,self%itplot)==0).AND.oft_env%pm)THEN
+    uu=u%dot(u) ! Only needed for output
+    if(oft_env%head_proc)write(*,110)k,f,SQRT(uu),SQRT(ggnew),SQRT(ggnew/uu)
   END IF
   if(k==its)exit
   if(its==-1.and.REAL(f,4)>=REAL(fold,4))exit
