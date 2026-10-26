@@ -58,6 +58,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: L_aca_tol = -1.d0 !< ACA+ tolerance for inductance matrix
   REAL(8) :: B_svd_tol = -1.d0 !< SVD tolerance for B-field operators
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
+  LOGICAL :: pre_single = .FALSE. !< Store block-Jacobi preconditioner inverses in single precision?
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_blocks => NULL() !< Indices of compressed off-diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: L_thread_ptr => NULL()
@@ -94,7 +95,8 @@ end type oft_tw_hodlr_op
 !> Needs docs
 !------------------------------------------------------------------------------
 TYPE :: cmat_container
-  COMPLEX(c8), POINTER, DIMENSION(:,:) :: M => NULL()
+  COMPLEX(c8), POINTER, DIMENSION(:,:) :: M => NULL() !< Double precision matrix
+  COMPLEX(c4), POINTER, DIMENSION(:,:) :: M4 => NULL() !< Single precision matrix
 END TYPE
 !------------------------------------------------------------------------------
 !> Complex block-Jacobi preconditioner for ThinCurr HODLR matrices
@@ -117,7 +119,8 @@ END TYPE oft_tw_hodlr_bjpre
 !> Needs docs
 !------------------------------------------------------------------------------
 TYPE :: rmat_container
-  REAL(r8), POINTER, DIMENSION(:,:) :: M => NULL()
+  REAL(r8), POINTER, DIMENSION(:,:) :: M => NULL() !< Double precision matrix
+  REAL(r4), POINTER, DIMENSION(:,:) :: M4 => NULL() !< Single precision matrix
 END TYPE
 !------------------------------------------------------------------------------
 !> Real block-Jacobi preconditioner for ThinCurr HODLR matrices
@@ -730,8 +733,9 @@ REAL(8) :: L_svd_tol = -1.d99
 REAL(8) :: L_aca_rel_tol = -1.d0
 REAL(8) :: B_svd_tol = -1.d99
 REAL(8) :: B_aca_rel_tol = -1.d0
+LOGICAL :: pre_single = .FALSE.
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
-  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol
+  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -760,6 +764,7 @@ self%leaf_target=target_size
 self%min_rank=min_rank
 self%aca_min_its=aca_min_its
 self%aca_sep_thresh=aca_sep_thresh
+self%pre_single=pre_single
 !
 L_approx_scale = 0.5d0*self%tw_obj%mesh%hrms
 IF(L_svd_tol<0.d0)THEN
@@ -870,6 +875,7 @@ IF(self%L_aca_tol<=0.d0)THEN
 END IF
 WRITE(*,'(2A,I6)')oft_indent,'# of SVD  =      ',sparse_count(2)
 WRITE(*,'(2A,I6)')oft_indent,'# of ACA+ =      ',sparse_count(1)
+IF(self%pre_single)WRITE(*,'(2A)')oft_indent,'Using single precision block preconditioners'
 CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')
 ALLOCATE(cell_mark(self%tw_obj%mesh%nc))
 DO j=1,self%nlevels
@@ -2985,15 +2991,19 @@ DEALLOCATE(WORK,TAU)
 END SUBROUTINE get_qr
 !------------------------------------------------------------------------------
 !> Precondition a linear system using a Block-Jacobi method (complex)
+!!
+!! Block inverses are always computed in double precision. If `pre_single` is set
+!! on the HODLR operator the inverses are then stored and applied in single precision.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE bjprecond_apply(self,u,g)
 CLASS(oft_tw_hodlr_bjpre), INTENT(inout) :: self !< Solver object
 CLASS(oft_cvector), INTENT(inout) :: u !< Guess/Solution field
 CLASS(oft_cvector), INTENT(inout) :: g !< RHS/Residual field
 !---
-INTEGER(4) :: i,j,k,l,n,info,level,iblock
+INTEGER(4) :: i,j,k,l,n,level,iblock
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap
 COMPLEX(8), POINTER, DIMENSION(:) :: utmp,gtmp,uloc,gloc
+COMPLEX(4), POINTER, DIMENSION(:) :: uloc4,gloc4
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
 IF(self%refactor)THEN
@@ -3019,6 +3029,7 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
+    CALL invert_block(self%inverse_mats(i),n)
   END DO
   !---Get holes
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
@@ -3043,68 +3054,95 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
+    CALL invert_block(self%inverse_mats(i),n)
   END IF
   DEALLOCATE(imap)
-  DO i=1,self%mf_obj%ndense+1
-    IF(i==self%mf_obj%ndense+1)THEN
-      IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))EXIT
-      n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
-    ELSE
-      level=self%mf_obj%dense_blocks(1,i)
-      iblock=self%mf_obj%dense_blocks(2,i)
-      n = self%mf_obj%levels(level)%blocks(iblock)%nelems
-    END IF
-    ! oft_env%pm=.TRUE.
-    CALL lapack_matinv(n,self%inverse_mats(i)%M,info)
-    ! CALL lapack_cholesky(n,self%inverse_mats(i)%M,info)
-    IF(info/=0)CALL oft_abort("factorization failed","",__FILE__)
-    ! oft_env%pm=.FALSE.
-  END DO
   self%refactor=.FALSE.
 END IF
 !
-NULLIFY(utmp,gtmp)
+NULLIFY(utmp,gtmp,uloc,gloc,uloc4,gloc4)
 CALL u%get_local(utmp)
 CALL g%get_local(gtmp)
 utmp=(0.d0,0.d0)
-!$omp parallel private(uloc,gloc,i,level,iblock,n,j)
-ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
-!!$omp do schedule(static)
+!$omp parallel private(uloc,gloc,uloc4,gloc4,i,level,iblock,n,j)
+IF(self%mf_obj%pre_single)THEN
+  ALLOCATE(uloc4(self%max_block_size),gloc4(self%max_block_size))
+ELSE
+  ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
+END IF
 DO i=self%mf_obj%L_thread_ptr(2,oft_tid+1),self%mf_obj%L_thread_ptr(2,oft_tid+2)-1
   level=self%mf_obj%dense_blocks(1,i)
   iblock=self%mf_obj%dense_blocks(2,i)
   n = self%mf_obj%levels(level)%blocks(iblock)%nelems
-  DO j=1,n
-    gloc(j) = gtmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))
-  END DO
-  uloc=0.d0
-  CALL zgemv('N',n,n,(1.d0,0.d0),self%inverse_mats(i)%M,n,gloc,1,(0.d0,0.d0),uloc,1)
-  DO j=1,n
-    utmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) = uloc(j)
-  END DO
-  ! WRITE(*,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
+  IF(self%mf_obj%pre_single)THEN
+    DO j=1,n
+      gloc4(j) = CMPLX(gtmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)),KIND=c4)
+    END DO
+    CALL cgemv('N',n,n,(1.0_r4,0.0_r4),self%inverse_mats(i)%M4,n,gloc4,1,(0.0_r4,0.0_r4),uloc4,1)
+    DO j=1,n
+      utmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) = CMPLX(uloc4(j),KIND=c8)
+    END DO
+  ELSE
+    DO j=1,n
+      gloc(j) = gtmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))
+    END DO
+    CALL zgemv('N',n,n,(1.d0,0.d0),self%inverse_mats(i)%M,n,gloc,1,(0.d0,0.d0),uloc,1)
+    DO j=1,n
+      utmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) = uloc(j)
+    END DO
+  END IF
 END DO
-!!$omp end do nowait
 !$omp single
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
 IF(n > 0)THEN
-  DO j=1,n
-    gloc(j) = gtmp(self%mf_obj%tw_obj%np_active+j)
-  END DO
-  uloc=0.d0
   i = self%mf_obj%ndense+1
-  CALL zgemv('N',n,n,(1.d0,0.d0),self%inverse_mats(i)%M,n,gloc,1,(0.d0,0.d0),uloc,1)
-  DO j=1,n
-    utmp(self%mf_obj%tw_obj%np_active+j) = uloc(j)
-  END DO
+  IF(self%mf_obj%pre_single)THEN
+    DO j=1,n
+      gloc4(j) = CMPLX(gtmp(self%mf_obj%tw_obj%np_active+j),KIND=c4)
+    END DO
+    CALL cgemv('N',n,n,(1.0_r4,0.0_r4),self%inverse_mats(i)%M4,n,gloc4,1,(0.0_r4,0.0_r4),uloc4,1)
+    DO j=1,n
+      utmp(self%mf_obj%tw_obj%np_active+j) = CMPLX(uloc4(j),KIND=c8)
+    END DO
+  ELSE
+    DO j=1,n
+      gloc(j) = gtmp(self%mf_obj%tw_obj%np_active+j)
+    END DO
+    CALL zgemv('N',n,n,(1.d0,0.d0),self%inverse_mats(i)%M,n,gloc,1,(0.d0,0.d0),uloc,1)
+    DO j=1,n
+      utmp(self%mf_obj%tw_obj%np_active+j) = uloc(j)
+    END DO
+  END IF
 END IF
 !$omp end single
-DEALLOCATE(uloc,gloc)
+IF(self%mf_obj%pre_single)THEN
+  DEALLOCATE(uloc4,gloc4)
+ELSE
+  DEALLOCATE(uloc,gloc)
+END IF
 !$omp end parallel
 CALL u%restore_local(utmp)
 CALL g%set((0.d0,0.d0))
 DEALLOCATE(utmp,gtmp)
 DEBUG_STACK_POP
+CONTAINS
+!------------------------------------------------------------------------------
+!> Invert assembled block and convert to single precision if requested
+!------------------------------------------------------------------------------
+SUBROUTINE invert_block(mat,nrows)
+TYPE(cmat_container), INTENT(inout) :: mat !< Block to invert (`M` must be populated)
+INTEGER(4), INTENT(in) :: nrows !< Size of block
+INTEGER(4) :: error
+CALL lapack_matinv(nrows,mat%M,error)
+IF(error/=0)CALL oft_abort("factorization failed","bjprecond_apply",__FILE__)
+IF(self%mf_obj%pre_single)THEN
+  IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
+  mat%M4=CMPLX(mat%M,KIND=c4)
+  DEALLOCATE(mat%M)
+ELSE
+  IF(ASSOCIATED(mat%M4))DEALLOCATE(mat%M4)
+END IF
+END SUBROUTINE invert_block
 END SUBROUTINE bjprecond_apply
 !------------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
@@ -3116,33 +3154,38 @@ INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Destroy local solvers
 IF(ASSOCIATED(self%inverse_mats))THEN
-  DO i=1,self%mf_obj%nblocks+1
+  DO i=1,SIZE(self%inverse_mats)
     IF(ASSOCIATED(self%inverse_mats(i)%M))DEALLOCATE(self%inverse_mats(i)%M)
+    IF(ASSOCIATED(self%inverse_mats(i)%M4))DEALLOCATE(self%inverse_mats(i)%M4)
   END DO
   DEALLOCATE(self%inverse_mats)
 END IF
 !---Reset
 self%max_block_size=0
+self%refactor=.TRUE.
 NULLIFY(self%mf_obj)
 DEBUG_STACK_POP
 end subroutine bjprecond_delete
 !------------------------------------------------------------------------------
 !> Precondition a linear system using a Block-Jacobi method (real)
+!!
+!! Block inverses are always computed in double precision. If `pre_single` is set
+!! on the HODLR operator the inverses are then stored and applied in single precision.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE rbjprecond_apply(self,u,g)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
 CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
 CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
-INTEGER(4) :: i,j,k,l,n,info,level,iblock,jblock
+INTEGER(4) :: i,j,k,l,n,level,iblock
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap
 REAL(8), POINTER, DIMENSION(:) :: utmp,gtmp,uloc,gloc
+REAL(4), POINTER, DIMENSION(:) :: uloc4,gloc4
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
 IF(self%refactor)THEN
   ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
   self%max_block_size = 0
-  ALLOCATE(self%inverse_mats(self%mf_obj%ndense+1))
   DO i=1,self%mf_obj%ndense
     level=self%mf_obj%dense_blocks(1,i)
     iblock=self%mf_obj%dense_blocks(2,i)
@@ -3163,6 +3206,7 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
+    CALL invert_block(self%inverse_mats(i),n)
   END DO
   !---Get holes
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
@@ -3187,68 +3231,95 @@ IF(self%refactor)THEN
         END IF
       END DO
     END DO
+    CALL invert_block(self%inverse_mats(i),n)
   END IF
   DEALLOCATE(imap)
-  DO i=1,self%mf_obj%ndense+1
-    IF(i==self%mf_obj%ndense+1)THEN
-      IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))EXIT
-      n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
-    ELSE
-      level=self%mf_obj%dense_blocks(1,i)
-      iblock=self%mf_obj%dense_blocks(2,i)
-      n = self%mf_obj%levels(level)%blocks(iblock)%nelems
-    END IF
-    ! oft_env%pm=.TRUE.
-    ! CALL lapack_matinv(n,self%inverse_mats(i)%M,info)
-    CALL lapack_cholesky(n,self%inverse_mats(i)%M,info)
-    IF(info/=0)CALL oft_abort("factorization failed","",__FILE__)
-    ! oft_env%pm=.FALSE.
-  END DO
   self%refactor=.FALSE.
 END IF
 !
-NULLIFY(utmp,gtmp)
+NULLIFY(utmp,gtmp,uloc,gloc,uloc4,gloc4)
 CALL u%get_local(utmp)
 CALL g%get_local(gtmp)
 utmp=0.d0
-!$omp parallel private(uloc,gloc,i,level,iblock,n,j)
-ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
-!!$omp do schedule(static)
+!$omp parallel private(uloc,gloc,uloc4,gloc4,i,level,iblock,n,j)
+IF(self%mf_obj%pre_single)THEN
+  ALLOCATE(uloc4(self%max_block_size),gloc4(self%max_block_size))
+ELSE
+  ALLOCATE(uloc(self%max_block_size),gloc(self%max_block_size))
+END IF
 DO i=self%mf_obj%L_thread_ptr(2,oft_tid+1),self%mf_obj%L_thread_ptr(2,oft_tid+2)-1
   level=self%mf_obj%dense_blocks(1,i)
   iblock=self%mf_obj%dense_blocks(2,i)
   n = self%mf_obj%levels(level)%blocks(iblock)%nelems
-  DO j=1,n
-    gloc(j) = gtmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))
-  END DO
-  uloc=0.d0
-  CALL dgemv('N',n,n,1.d0,self%inverse_mats(i)%M,n,gloc,1,0.d0,uloc,1)
-  DO j=1,n
-    utmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) = uloc(j)
-  END DO
-  ! WRITE(*,*)i,MINVAL(uloc(1:n)),MAXVAL(uloc(1:n))
+  IF(self%mf_obj%pre_single)THEN
+    DO j=1,n
+      gloc4(j) = REAL(gtmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)),r4)
+    END DO
+    CALL sgemv('N',n,n,1.0_r4,self%inverse_mats(i)%M4,n,gloc4,1,0.0_r4,uloc4,1)
+    DO j=1,n
+      utmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) = REAL(uloc4(j),r8)
+    END DO
+  ELSE
+    DO j=1,n
+      gloc(j) = gtmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))
+    END DO
+    CALL dgemv('N',n,n,1.d0,self%inverse_mats(i)%M,n,gloc,1,0.d0,uloc,1)
+    DO j=1,n
+      utmp(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) = uloc(j)
+    END DO
+  END IF
 END DO
-!!$omp end do nowait
 !$omp single
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
 IF(n > 0)THEN
-  DO j=1,n
-    gloc(j) = gtmp(self%mf_obj%tw_obj%np_active+j)
-  END DO
-  uloc=0.d0
   i = self%mf_obj%ndense+1
-  CALL dgemv('N',n,n,1.d0,self%inverse_mats(i)%M,n,gloc,1,0.d0,uloc,1)
-  DO j=1,n
-    utmp(self%mf_obj%tw_obj%np_active+j) = uloc(j)
-  END DO
+  IF(self%mf_obj%pre_single)THEN
+    DO j=1,n
+      gloc4(j) = REAL(gtmp(self%mf_obj%tw_obj%np_active+j),r4)
+    END DO
+    CALL sgemv('N',n,n,1.0_r4,self%inverse_mats(i)%M4,n,gloc4,1,0.0_r4,uloc4,1)
+    DO j=1,n
+      utmp(self%mf_obj%tw_obj%np_active+j) = REAL(uloc4(j),r8)
+    END DO
+  ELSE
+    DO j=1,n
+      gloc(j) = gtmp(self%mf_obj%tw_obj%np_active+j)
+    END DO
+    CALL dgemv('N',n,n,1.d0,self%inverse_mats(i)%M,n,gloc,1,0.d0,uloc,1)
+    DO j=1,n
+      utmp(self%mf_obj%tw_obj%np_active+j) = uloc(j)
+    END DO
+  END IF
 END IF
 !$omp end single
-DEALLOCATE(uloc,gloc)
+IF(self%mf_obj%pre_single)THEN
+  DEALLOCATE(uloc4,gloc4)
+ELSE
+  DEALLOCATE(uloc,gloc)
+END IF
 !$omp end parallel
 CALL u%restore_local(utmp)
 CALL g%set(0.d0)
 DEALLOCATE(utmp,gtmp)
 DEBUG_STACK_POP
+CONTAINS
+!------------------------------------------------------------------------------
+!> Invert assembled block and convert to single precision if requested
+!------------------------------------------------------------------------------
+SUBROUTINE invert_block(mat,nrows)
+TYPE(rmat_container), INTENT(inout) :: mat !< Block to invert (`M` must be populated)
+INTEGER(4), INTENT(in) :: nrows !< Size of block
+INTEGER(4) :: error
+CALL lapack_cholesky(nrows,mat%M,error)
+IF(error/=0)CALL oft_abort("factorization failed","rbjprecond_apply",__FILE__)
+IF(self%mf_obj%pre_single)THEN
+  IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
+  mat%M4=REAL(mat%M,r4)
+  DEALLOCATE(mat%M)
+ELSE
+  IF(ASSOCIATED(mat%M4))DEALLOCATE(mat%M4)
+END IF
+END SUBROUTINE invert_block
 END SUBROUTINE rbjprecond_apply
 !------------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
@@ -3260,13 +3331,15 @@ INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Destroy local solvers
 IF(ASSOCIATED(self%inverse_mats))THEN
-  DO i=1,self%mf_obj%nblocks+1
+  DO i=1,SIZE(self%inverse_mats)
     IF(ASSOCIATED(self%inverse_mats(i)%M))DEALLOCATE(self%inverse_mats(i)%M)
+    IF(ASSOCIATED(self%inverse_mats(i)%M4))DEALLOCATE(self%inverse_mats(i)%M4)
   END DO
   DEALLOCATE(self%inverse_mats)
 END IF
 !---Reset
 self%max_block_size=0
+self%refactor=.TRUE.
 NULLIFY(self%mf_obj)
 DEBUG_STACK_POP
 end subroutine rbjprecond_delete
