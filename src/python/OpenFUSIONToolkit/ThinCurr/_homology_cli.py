@@ -78,15 +78,13 @@ def _write_holes(out_file, input_model, holes, closures):
                         reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'))
 
 
-def _compute_junction_holes(input_model, out_file, verify_only, print_info, periodic=None):
+def _compute_junction_holes(input_model, out_file, verify_only, print_info):
     '''! Split a mesh with junctions (edges shared by more than two cells) and choose its holes
 
     See @ref junctions.find_junction_holes. The output file holds the split mesh and, in the
-    `thincurr/junctions` group, the junction table, explicit holes, vertex map and P. For a periodic mesh
-    the periods are tied through P, so the periodic point map is not written; it is kept with the file's
-    hole loops in the junction group for run-time insulation.
+    `thincurr/junctions` group, the junction table, explicit holes, vertex map and P.
     '''
-    out = find_junction_holes(input_model['r'], input_model['lc'], input_model['reg'], periodic=periodic)
+    out = find_junction_holes(input_model['r'], input_model['lc'], input_model['reg'])
     if print_info:
         print("Junction mesh:")
         print("  # of junction lines = {0}".format(len(out['lines'])))
@@ -148,12 +146,10 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
 
     # Load mesh
     input_model = read_ThinCurr_mesh(in_file)
-    periodic = None
     if 'thincurr' in input_model:
-        if 'nfp' in input_model['thincurr'] and 'junctions' not in input_model['thincurr'] \
-                and (split_regions or has_junctions(input_model['lc'], input_model['reg'])):
-            periodic = {'pmap': input_model['thincurr']['pmap'], 'holes': input_model['thincurr'].get('holes', [])}
-        elif 'nfp' in input_model['thincurr']:
+        if 'nfp' in input_model['thincurr']:
+            if split_regions or has_junctions(input_model['lc'], input_model['reg']):
+                raise ValueError('Junctions are not supported for periodic ThinCurr meshes (nfp > 0) at this time')
             if verify_only:
                 print("Periodic ThinCurr model detected (nfp > 0), skipping homology calculation")
                 return
@@ -173,9 +169,9 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
         if verify_only:
             raise ValueError('Mesh has junctions (edges shared by more than two cells, or sheets touching at a vertex) '
                              'but no junction data, run "OFT_ThinCurr_holes" to split it')
-        return _compute_junction_holes(input_model, out_file, verify_only, print_info, periodic)
+        return _compute_junction_holes(input_model, out_file, verify_only, print_info)
     if split_regions:
-        return _compute_junction_holes(input_model, out_file, verify_only, print_info, periodic)
+        return _compute_junction_holes(input_model, out_file, verify_only, print_info)
 
     # Select (or count) holes and closures
     if use_legacy:
@@ -278,8 +274,8 @@ def script_entry():
 # is available using `--use_legacy`.
 #
 # If the mesh has junctions (edges shared by more than two cells, or sheets of different regions touching at a
-# point), or `--split_regions` is given, it is split at the region interfaces instead (periodic meshes included)
-# and the output file holds the split mesh with the junction data (`thincurr/junctions`): see
+# point), or `--split_regions` is given, it is split at the region interfaces instead (not supported for periodic
+# meshes) and the output file holds the split mesh with the junction data (`thincurr/junctions`): see
 # \ref doc_tw_main_junctions. Each region must be a separate sheet. `--split_regions` is needed when sheets
 # meet two at a time (e.g. a torus in sectors) but should be insulatable from each other with
 # `setup_model(junction_insulated=...)`.

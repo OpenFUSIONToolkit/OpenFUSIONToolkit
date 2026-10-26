@@ -2700,13 +2700,15 @@ END IF
 !---Junctions
 IF(hdf5_field_exist(TRIM(filepath),'thincurr/junctions'))THEN
   self%junctions=.TRUE.
-  IF(.NOT.ASSOCIATED(self%pmap))THEN
-    ALLOCATE(self%pmap(self%mesh%np))
-    CALL hdf5_read(self%pmap,TRIM(filepath),'thincurr/junctions/PMAP',success)
-    IF(.NOT.success)THEN
-      error_string='Error reading junction point map from mesh file'
-      RETURN
-    END IF
+  IF(ASSOCIATED(self%pmap))THEN
+    error_string='Periodic point maps ("pmap") are not supported for meshes split at junctions'
+    RETURN
+  END IF
+  ALLOCATE(self%pmap(self%mesh%np))
+  CALL hdf5_read(self%pmap,TRIM(filepath),'thincurr/junctions/PMAP',success)
+  IF(.NOT.success)THEN
+    error_string='Error reading junction point map from mesh file'
+    RETURN
   END IF
   CALL hdf5_read(self%n_jholes,TRIM(filepath),'thincurr/junctions/NHOLES',success)
   ALLOCATE(self%jholes(self%n_jholes))

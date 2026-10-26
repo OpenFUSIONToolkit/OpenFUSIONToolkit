@@ -34,12 +34,6 @@ def write_junction_group(h5_file, junctions):
         hole = numpy.asarray(hole, dtype=numpy.int32).reshape(-1, 3).copy()
         hole[:,:2] += 1
         h5_file.create_dataset('thincurr/junctions/HOLE{0:04d}'.format(i+1), data=hole, dtype='i4')
-    periodic = junctions.get('periodic')
-    if periodic is not None:
-        h5_file.create_dataset('thincurr/junctions/PERIODIC_PMAP', data=numpy.asarray(periodic['pmap'])+1, dtype='i4')
-        h5_file.create_dataset('thincurr/junctions/NPHOLES', data=[len(periodic['holes']),], dtype='i4')
-        for i, hole in enumerate(periodic['holes']):
-            h5_file.create_dataset('thincurr/junctions/PHOLE{0:04d}'.format(i+1), data=numpy.asarray(hole)+1, dtype='i4')
     insulated = junctions.get('insulated', [])
     if len(insulated) > 0:
         ins = [list(i) if numpy.ndim(i) > 0 else [i, 0] for i in insulated]
@@ -162,11 +156,6 @@ def read_ThinCurr_mesh(filename):
                                                  shape=tuple(psize)),
                     'insulated': [int(i[0]) if i[1] == 0 else (int(i[0]), int(i[1]))
                                   for i in jgroup['INSULATED'][()]] if 'INSULATED' in jgroup else []}
-                if 'PERIODIC_PMAP' in jgroup:
-                    nph = jgroup['NPHOLES'][0]
-                    thincurr_info['junctions']['periodic'] = {
-                        'pmap': jgroup['PERIODIC_PMAP'][()] - 1,
-                        'holes': [jgroup['PHOLE{0:04d}'.format(i+1)][()] - 1 for i in range(nph)]}
             # Read jumpers
             if 'jumpers' in thincurr:
                 njumpers = thincurr['jumpers/NJUMPERS'][0]

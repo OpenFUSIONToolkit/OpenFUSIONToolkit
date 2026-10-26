@@ -262,11 +262,7 @@ checked against the number of cycles of the graph.
    on the same junction edge, current can pass between the pair through it, so the pair has no effect there (a
    warning is given).
 
-**Periodic models:** a periodic mesh (`nfp`, with the periodic point map and hole loops of e.g.
-\ref OpenFUSIONToolkit.ThinCurr.meshing.ThinCurr_periodic_toroid "ThinCurr_periodic_toroid") with junctions, or with
-`--split_regions`, is split in the same way. As for other periodic models, the stream function is the same in every
-period and the file's hole loops (one toroidal loop and a poloidal loop at each period seam) are kept as independent
-holes; the periods are tied through \f$ \textbf{P} \f$, so the junction file does not use the periodic point map.
+Junctions are not yet supported for periodic models (`nfp`, or a periodic point map `pmap`).
 
 See \ref doc_tCurr_junctions for an example.
 

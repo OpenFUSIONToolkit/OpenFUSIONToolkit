@@ -435,39 +435,33 @@ def periodic_torus_file(path, nfp=3, nphi=7, ntheta=12):
         h5.create_dataset('thincurr/ETA_SURF', data=1.0E-4*np.ones(2))
 
 
-def test_periodic_count(tmp_path):
+def test_periodic_rejected(tmp_path):
     path = str(tmp_path / 'ptorus.h5')
     periodic_torus_file(path)
-    info = read_ThinCurr_mesh(path)['thincurr']
-    compute_homology(path, split_regions=True)
-    junc = read_ThinCurr_mesh(str(tmp_path / 'ptorus-homology.h5'))['thincurr']['junctions']
-    assert junc['P'].shape[1] == (info['pmap'].max() + 1) + len(info['holes'])
-    assert 'periodic' in junc
+    with pytest.raises(ValueError, match='periodic'):
+        compute_homology(path, split_regions=True)
 
 
-def run_periodic(files, mp_q):
+def run_pmap(path, user_pmap, mp_q):
     result = False
     try:
-        import scipy.linalg
         from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        myOFT = OFT_env(nthreads=-1)
-        eigs = []
-        for path in files:
-            tw = ThinCurr(myOFT)
-            tw.setup_model(mesh_file=path)
-            tw.compute_Lmat()
-            tw.compute_Rmat()
-            eigs.append(np.sort(scipy.linalg.eigh(np.array(tw.Lmat), tw.Rmat.toarray(), eigvals_only=True))[::-1])
-        print('periodic eigenvalue difference', np.abs(eigs[0] - eigs[1]).max()/eigs[1].max())
-        result = len(eigs[0]) == len(eigs[1]) and np.abs(eigs[0] - eigs[1]).max() < 1.0E-5*eigs[1].max()
+        np_mesh = read_ThinCurr_mesh(path)['r'].shape[0]
+        ThinCurr(OFT_env(nthreads=1)).setup_model(mesh_file=path, no_verify_holes=True,
+                                                  pmap=np.arange(np_mesh, dtype=np.int32) if user_pmap else None)
     except BaseException as e:
+        result = 'pmap' in str(e)
         print(e)
     mp_q.put(result)
 
 
-def test_periodic_vs_thincurr():
-    path = os.path.join(test_dir, 'junction_ptorus.h5')
-    periodic_torus_file(path)
-    compute_homology(path, split_regions=True)
-    assert mp_run(run_periodic, ([os.path.join(test_dir, 'junction_ptorus-homology.h5'), path],))
+@pytest.mark.parametrize("user_pmap", (True, False))
+def test_pmap_rejected(user_pmap):
+    """A point map from setup_model or from the mesh file is rejected for junction meshes, without aborting."""
+    import h5py
+    files, _ = write_pair(*tplate(), 'junction_pmap')
+    if not user_pmap:
+        with h5py.File(files[0], 'r+') as h5_file:
+            h5_file.create_dataset('thincurr/periodicity/PMAP', data=np.arange(h5_file['mesh/R'].shape[0]) + 1, dtype='i4')
+    assert mp_run(run_pmap, (files[0], user_pmap))
