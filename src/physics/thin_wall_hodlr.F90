@@ -2647,6 +2647,7 @@ IF(present(diag))THEN
   END DO
   IF(self%tw_obj%junctions)THEN
     CALL tw_junction_reduce_diag(self%tw_obj,vals,vred)
+    CALL tw_hodlr_junction_cross_diag(self,vred)
     DEALLOCATE(vals)
     vals=>vred
   END IF
@@ -2657,6 +2658,94 @@ END IF
 self%nr=self%tw_obj%nelems; self%nrg=self%tw_obj%nelems
 self%nc=self%tw_obj%nelems; self%ncg=self%tw_obj%nelems
 end subroutine tw_hodlr_Lassemble
+!---------------------------------------------------------------------------------
+!> Add the cross terms of the reduced diagonal of a junction model, sum over e/=f of P(e,a) L(e,f) P(f,a),
+!! for the columns of P with more than one entry (entries of L are taken from the HODLR blocks)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_junction_cross_diag(self,d)
+CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator
+REAL(8), INTENT(inout) :: d(:) !< Reduced diagonal [nelems]
+TYPE :: level_index
+  INTEGER(4), ALLOCATABLE :: ind(:,:)
+END TYPE level_index
+INTEGER(4) :: a,i,j,k,l,np
+INTEGER(4), ALLOCATABLE :: pt_kr(:),pt_lc(:),blk(:,:),pos(:,:),dense_ind(:)
+REAL(8), ALLOCATABLE :: pt_val(:)
+TYPE(level_index), ALLOCATABLE :: sparse_ind(:)
+CALL tw_junction_transpose(self%tw_obj,pt_kr,pt_lc,pt_val)
+IF(ALL(pt_kr(2:)-pt_kr(:SIZE(pt_kr)-1)<2))THEN
+  DEALLOCATE(pt_kr,pt_lc,pt_val)
+  RETURN
+END IF
+np=self%tw_obj%np_active
+!---Block and position of each vertex on each level, and stored interaction of each block pair
+ALLOCATE(blk(self%nlevels,np),pos(self%nlevels,np),sparse_ind(self%nlevels))
+DO l=1,self%nlevels
+  DO i=1,self%levels(l)%nblocks
+    DO j=1,self%levels(l)%blocks(i)%nelems
+      blk(l,self%levels(l)%blocks(i)%ielem(j))=i
+      pos(l,self%levels(l)%blocks(i)%ielem(j))=j
+    END DO
+  END DO
+  ALLOCATE(sparse_ind(l)%ind(self%levels(l)%nblocks,self%levels(l)%nblocks))
+  sparse_ind(l)%ind=0
+END DO
+DO i=1,self%nsparse
+  sparse_ind(self%sparse_blocks(1,i))%ind(self%sparse_blocks(2,i),self%sparse_blocks(3,i))=i
+END DO
+ALLOCATE(dense_ind(self%levels(self%nlevels)%nblocks))
+DO i=1,self%ndense
+  dense_ind(self%dense_blocks(2,i))=i
+END DO
+!---Cross terms
+DO a=1,SIZE(d)
+  DO k=pt_kr(a),pt_kr(a+1)-1
+    DO j=pt_kr(a),pt_kr(a+1)-1
+      IF(j==k)CYCLE
+      d(a)=d(a)+pt_val(k)*pt_val(j)*entry(pt_lc(k),pt_lc(j))
+    END DO
+  END DO
+END DO
+DO l=1,self%nlevels
+  DEALLOCATE(sparse_ind(l)%ind)
+END DO
+DEALLOCATE(pt_kr,pt_lc,pt_val,blk,pos,dense_ind,sparse_ind)
+CONTAINS
+!> Entry (e,f) of the expanded inductance matrix
+FUNCTION entry(e,f) RESULT(val)
+INTEGER(4), INTENT(in) :: e !< Row
+INTEGER(4), INTENT(in) :: f !< Column
+REAL(8) :: val
+INTEGER(4) :: lev,ib,jb,isp,r,c
+IF(f>np)THEN
+  val=self%hole_Vcoil_mat%M(e,f-np)
+  RETURN
+ELSE IF(e>np)THEN
+  val=self%hole_Vcoil_mat%M(f,e-np)
+  RETURN
+END IF
+DO lev=1,self%nlevels
+  ib=blk(lev,e)
+  jb=blk(lev,f)
+  IF(ib==jb)CYCLE
+  isp=MAX(sparse_ind(lev)%ind(ib,jb),sparse_ind(lev)%ind(jb,ib))
+  IF(isp==0)CYCLE
+  !---Stored as rows of the second block, columns of the first
+  IF(blk(lev,e)==self%sparse_blocks(3,isp))THEN
+    r=pos(lev,e); c=pos(lev,f)
+  ELSE
+    r=pos(lev,f); c=pos(lev,e)
+  END IF
+  IF(ASSOCIATED(self%aca_dense(isp)%M))THEN
+    val=self%aca_dense(isp)%M(r,c)
+  ELSE
+    val=DOT_PRODUCT(self%aca_U_mats(isp)%M(r,:),self%aca_V_mats(isp)%M(:,c))
+  END IF
+  RETURN
+END DO
+val=self%dense_mats(dense_ind(blk(self%nlevels,e)))%M(pos(self%nlevels,e),pos(self%nlevels,f))
+END FUNCTION entry
+END SUBROUTINE tw_hodlr_junction_cross_diag
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
