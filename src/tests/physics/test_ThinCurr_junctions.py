@@ -226,6 +226,33 @@ def test_reduction(mesh):
     assert mp_run(run_reduction, (files, P, None))
 
 
+def run_cache(path, mp_q):
+    """Matrices saved to and loaded from cache files must equal those computed directly."""
+    result = False
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        mats = []
+        for cache in (None, 'junction_cache_L.save', 'junction_cache_L.save'):
+            tw = ThinCurr(myOFT)
+            tw.setup_model(mesh_file=path)
+            tw.compute_Lmat(cache_file=cache)
+            mats.append(np.array(tw.Lmat))
+        result = all(np.array_equal(mats[0], m) for m in mats[1:])
+    except BaseException as e:
+        print(e)
+    mp_q.put(result)
+
+
+def test_cache():
+    for f in ('junction_cache_L.save',):
+        if os.path.exists(os.path.join(test_dir, f)):
+            os.remove(os.path.join(test_dir, f))
+    files, _ = write_pair(*tplate(), 'junction_cache')
+    assert mp_run(run_cache, (files[0],))
+
+
 def test_runtime_insulation():
     r, lc, reg = ring()
     files_rt, _ = write_pair(r, lc, reg, 'junction_ring_rt')

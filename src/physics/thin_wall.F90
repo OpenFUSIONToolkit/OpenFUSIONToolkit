@@ -1279,7 +1279,7 @@ IF(PRESENT(save_file))THEN
       hash_tmp(2) = row_obj%mesh%nc
       WRITE(io_unit)hash_tmp
       DO i=1,row_obj%nelems_exp
-        WRITE(io_unit)row_obj%Lmat(i,i:row_obj%nelems_exp)
+        WRITE(io_unit)Lmat(i,i:row_obj%nelems_exp)
       END DO
       CLOSE(io_unit)
     ELSE
