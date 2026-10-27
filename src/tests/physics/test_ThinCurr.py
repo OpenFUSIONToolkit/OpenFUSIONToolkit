@@ -977,7 +977,7 @@ def test_td_torus(direct_flag,convert_xml):
                            icoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
                            curr_waveform=((-1.0, 0.0), (0.0, 0.0), (1.0, 1.0)),
-                           lin_tol=1.E-10)
+                           lin_tol=1.E-11)
     assert validate_td(sigs_final)
 
 @pytest.mark.coverage
