@@ -167,7 +167,7 @@ REAL(8) :: pt_i(3),rgop(3,3),area_i,norm_i(3),evec_i(3,3),pts_i(3,3)
 REAL(8) :: pt_j(3),cgop(3,3),area_j,norm_j(3),evec_j(3,3),pts_j(3,3)
 LOGICAL :: vvclose_flag, close_flag,exists
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+TYPE(oft_quad_type), POINTER :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 ! ALLOCATE(Lmat(col_obj%nelems,row_obj%nelems))
@@ -176,10 +176,8 @@ DEBUG_STACK_PUSH
 Lmat=0.d0
 ! CALL mytimer%tick
 !---Setup quadrature
-ALLOCATE(quads(18))
-DO i=1,18
-    CALL set_quad_2d(quads(i),i)
-END DO
+CALL tw_quads_setup
+quads=>tw_quads
 !
 rmesh=>row_obj%mesh
 cmesh=>col_obj%mesh
@@ -210,46 +208,8 @@ DO i=1,rmesh%nc
         ! evec_j(:,jj)=cross_product(cgop(:,jj),norm_j)
         evec_j(:,jj)=col_obj%qbasis(:,jj,j)
     END DO
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,area_j)*2.d0) !-1.d99
-    !$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
-    DO ii=1,3
-        DO jj=1,3
-        dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-        dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-        END DO
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-        iquad = 18
-    ELSE
-        iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-    END IF
-    tmp=0.d0
-    IF(iquad>10)THEN
-        DO jj=1,quads(iquad)%np
-        pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-            + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-            + quads(iquad)%pts(3,jj)*pts_j(:,3)
-        tmp = tmp + quads(iquad)%wts(jj)*tw_compute_phipot(pts_i,pt_j)
-        END DO
-        tmp=tmp*area_j
-    ELSE
-        !$omp simd collapse(1) private(pt_i,pt_j) reduction(+:tmp)
-        DO ii=1,quads(iquad)%np
-        pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
-            + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-            + quads(iquad)%pts(3,ii)*pts_i(:,3)
-        DO jj=1,quads(iquad)%np
-            pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-            + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-            + quads(iquad)%pts(3,jj)*pts_j(:,3)
-            tmp = tmp + quads(iquad)%wts(jj)*quads(iquad)%wts(ii)/SQRT(SUM((pt_i-pt_j)**2))
-        END DO
-        END DO
-        tmp=tmp*area_i*area_j
-    END IF
+    !---Cell-pair integral of 1/|r-r'|
+    tmp=tw_cell_pair_kernel(pts_i,area_i,pts_j,area_j)
     !
     DO ii=row_obj%kfh(i),row_obj%kfh(i+1)-1
         ik=ABS(row_obj%lfh(1,ii))
@@ -298,10 +258,6 @@ DO i=1,row_obj%n_vcoils
 END DO
 !$omp end parallel
 Lmat = Lmat/(4.d0*pi)
-DO i=1,18
-    CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 ! elapsed_time=mytimer%tock()
 ! WRITE(*,*)'  Time = ',elapsed_time
 DEBUG_STACK_POP
@@ -324,7 +280,7 @@ REAL(8) :: pt_i(3),rgop(3,3),area_i,norm_i(3),evec_i(3,3),pts_i(3,3)
 REAL(8) :: pt_j(3),cgop(3,3),area_j,norm_j(3),evec_j(3,3),pts_j(3,3)
 LOGICAL :: vvclose_flag, close_flag,exists
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+TYPE(oft_quad_type), POINTER :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
@@ -332,10 +288,8 @@ DEBUG_STACK_PUSH
 Lmat=0.d0
 ! CALL mytimer%tick
 !---Setup quadrature
-ALLOCATE(quads(18))
-DO i=1,18
-    CALL set_quad_2d(quads(i),i)
-END DO
+CALL tw_quads_setup
+quads=>tw_quads
 !
 rmesh=>row_obj%mesh
 cmesh=>col_obj%mesh
@@ -363,45 +317,8 @@ DO irow=1,row_block%ncells
         ! evec_j(:,jj)=cross_product(cgop(:,jj),norm_j)
         evec_j(:,jj)=col_obj%qbasis(:,jj,j)
     END DO
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,area_j)*2.d0) !-1.d99
-    DO ii=1,3
-        DO jj=1,3
-        dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-        dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-        END DO
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-        iquad = 18
-    ELSE
-        iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-    END IF
-    tmp=0.d0
-    IF(iquad>10)THEN
-        DO jj=1,quads(iquad)%np
-        pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-            + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-            + quads(iquad)%pts(3,jj)*pts_j(:,3)
-        tmp = tmp + quads(iquad)%wts(jj)*tw_compute_phipot(pts_i,pt_j)
-        END DO
-        tmp=tmp*area_j
-    ELSE
-        ! !$omp simd collapse(1) private(pt_i,pt_j) reduction(+:tmp)
-        DO ii=1,quads(iquad)%np
-        pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
-            + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-            + quads(iquad)%pts(3,ii)*pts_i(:,3)
-        DO jj=1,quads(iquad)%np
-            pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-            + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-            + quads(iquad)%pts(3,jj)*pts_j(:,3)
-            tmp = tmp + quads(iquad)%wts(jj)*quads(iquad)%wts(ii)/SQRT(SUM((pt_i-pt_j)**2))
-        END DO
-        END DO
-        tmp=tmp*area_i*area_j
-    END IF
+    !---Cell-pair integral of 1/|r-r'|
+    tmp=tw_cell_pair_kernel(pts_i,area_i,pts_j,area_j)
     !
     DO ii=1,3
         ik=row_block%inv_map(rmesh%lc(ii,i))
@@ -417,10 +334,6 @@ DO irow=1,row_block%ncells
     END DO
 END DO
 Lmat = Lmat/(4.d0*pi)
-DO i=1,18
-    CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads) !,rpmap,cpmap)
 ! elapsed_time=mytimer%tock()
 ! WRITE(*,*)'  Time = ',elapsed_time
 DEBUG_STACK_POP
@@ -439,12 +352,10 @@ REAL(r8), ALLOCATABLE :: atmp(:,:,:)
 INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
 LOGICAL :: is_neighbor
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+TYPE(oft_quad_type), POINTER :: quads(:)
 bmesh=>self%mesh
-ALLOCATE(quads(18))
-DO i=1,18
-    CALL set_quad_2d(quads(i),i)
-END DO
+CALL tw_quads_setup
+quads=>tw_quads
 Bop=0.d0
 f=1.d0/3.d0
 ! WRITE(*,*)'Building element->element magnetic reconstruction operator'
@@ -538,10 +449,6 @@ DO i=1,bmesh%nc
 END DO
 DEALLOCATE(atmp)
 !$omp end parallel
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 !
 ! WRITE(*,*)'Building vcoil->element magnetic reconstruction operator'
 IF(self%n_vcoils>0)THEN
@@ -613,12 +520,10 @@ REAL(r8), ALLOCATABLE :: atmp(:,:,:)
 INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad,irow,jcol
 LOGICAL :: is_neighbor
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+TYPE(oft_quad_type), POINTER :: quads(:)
 bmesh=>self%mesh
-ALLOCATE(quads(18))
-DO i=1,18
-    CALL set_quad_2d(quads(i),i)
-END DO
+CALL tw_quads_setup
+quads=>tw_quads
 Bop=0.d0
 f=1.d0/3.d0
 !WRITE(*,*)'Building element->element magnetic reconstruction operator'
@@ -707,10 +612,6 @@ DO irow=1,row_block%ncells
 END DO
 Bop=Bop/(4.d0*pi)
 DEALLOCATE(atmp)
-DO i=1,18
-    CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 END SUBROUTINE tw_compute_Bops_block
 !---------------------------------------------------------------------------------
 !> Needs Docs

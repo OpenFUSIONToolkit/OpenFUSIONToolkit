@@ -163,9 +163,25 @@ REAL(r8) :: quad_tols(3) = [0.75d0, 0.95d0, 0.995d0] !< Distance tolerances for 
 INTEGER(i4) :: quad_orders(3) = [18, 10, 6] !< Quadrature order for each tolerance
 REAL(r8), PARAMETER :: target_err = 1.d-8
 REAL(r8), PARAMETER :: coil_min_rad = 1.d-6
+TYPE(oft_quad_type), TARGET, SAVE :: tw_quads(18) !< Triangle quadrature rules of orders 1-18 (shared)
+LOGICAL, SAVE :: tw_quads_ready = .FALSE. !< Have tw_quads been set up?
 integer(i4), public, parameter :: tw_idx_ver=1 !< File version for array indexing
 character(LEN=16), public, parameter :: tw_idx_path="ThinCurr_Version" !< HDF5 field name
 CONTAINS
+!---------------------------------------------------------------------------------
+!> Set up the shared triangle quadrature rules (once; safe to call from threads)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_quads_setup()
+INTEGER(i4) :: i
+!$omp critical (tw_quads_init)
+IF(.NOT.tw_quads_ready)THEN
+  DO i=1,18
+    CALL set_quad_2d(tw_quads(i),i)
+  END DO
+  tw_quads_ready=.TRUE.
+END IF
+!$omp end critical (tw_quads_init)
+END SUBROUTINE tw_quads_setup
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -689,7 +705,7 @@ REAL(8) :: avec(3),rp,aphi,dring
 REAL(8), allocatable :: atmp(:,:),Ael2coil_tmp(:,:),ring_rz(:,:,:)
 LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+TYPE(oft_quad_type), POINTER :: quads(:)
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
@@ -751,10 +767,8 @@ IF(PRESENT(save_file))THEN
   END IF
 END IF
 !---Setup quadrature
-ALLOCATE(quads(18))
-DO i=1,18
-  CALL set_quad_2d(quads(i),i)
-END DO
+CALL tw_quads_setup
+quads=>tw_quads
 !---Build temporary coil set from all filaments in model
 ncoils_tot=tw_obj%n_vcoils+tw_obj%n_icoils
 ALLOCATE(coils_tot(ncoils_tot))
@@ -921,10 +935,6 @@ DO i=1,tw_obj%n_icoils
 END DO
 !---Cleanup temporaries
 DEALLOCATE(Ael2coil_tmp,coils_tot,ring_ok,ring_rz)
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 elapsed_time=mytimer%tock()
 WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 CALL oft_decrease_indent
@@ -963,14 +973,12 @@ LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 INTEGER(4) :: ncoils_tot
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+TYPE(oft_quad_type), POINTER :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
-ALLOCATE(quads(18))
-DO i=1,18
-  CALL set_quad_2d(quads(i),i)
-END DO
+CALL tw_quads_setup
+quads=>tw_quads
 !---Build temporary coil set from all filaments in model
 ncoils_tot=tw_obj%n_vcoils
 IF(ASSOCIATED(tw_obj%Ael2dr))ncoils_tot=ncoils_tot+tw_obj%n_icoils
@@ -1076,10 +1084,6 @@ IF(ASSOCIATED(tw_obj%Ael2dr))THEN
 END IF
 DEALLOCATE(Acoil2coil_tmp)
 !
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Lmat_coils
@@ -1099,7 +1103,7 @@ REAL(8) :: pt_j(3),cgop(3,3),area_j,norm_j(3),evec_j(3,3),pts_j(3,3)
 LOGICAL :: vvclose_flag,close_flag,exists,Lself
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
 TYPE(tw_type), POINTER :: row_obj,col_obj
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+TYPE(oft_quad_type), POINTER :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 row_obj=>row_model
@@ -1197,10 +1201,8 @@ CALL oft_increase_indent
 Lmat=0.d0
 CALL mytimer%tick
 !---Setup quadrature
-ALLOCATE(quads(18))
-DO i=1,18
-  CALL set_quad_2d(quads(i),i)
-END DO
+CALL tw_quads_setup
+quads=>tw_quads
 !
 rmesh=>row_obj%mesh
 cmesh=>col_obj%mesh
@@ -1243,46 +1245,8 @@ DO i=1,rmesh%nc
       ! evec_j(:,jj)=cross_product(cgop(:,jj),norm_j)
       evec_j(:,jj)=col_obj%qbasis(:,jj,j)
     END DO
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,area_j)*2.d0) !-1.d99
-    !$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
-    DO ii=1,3
-      DO jj=1,3
-        dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-        dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-      END DO
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-      iquad = 18
-    ELSE
-      iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-    END IF
-    tmp=0.d0
-    IF(iquad>10)THEN
-      DO jj=1,quads(iquad)%np
-        pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-          + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-          + quads(iquad)%pts(3,jj)*pts_j(:,3)
-        tmp = tmp + quads(iquad)%wts(jj)*tw_compute_phipot(pts_i,pt_j)
-      END DO
-      tmp=tmp*area_j
-    ELSE
-      !$omp simd collapse(1) private(pt_i,pt_j) reduction(+:tmp)
-      DO ii=1,quads(iquad)%np
-        pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
-          + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-          + quads(iquad)%pts(3,ii)*pts_i(:,3)
-        DO jj=1,quads(iquad)%np
-          pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-            + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-            + quads(iquad)%pts(3,jj)*pts_j(:,3)
-          tmp = tmp + quads(iquad)%wts(jj)*quads(iquad)%wts(ii)/SQRT(SUM((pt_i-pt_j)**2))
-        END DO
-      END DO
-      tmp=tmp*area_i*area_j
-    END IF
+    !---Cell-pair integral of 1/|r-r'|
+    tmp=tw_cell_pair_kernel(pts_i,area_i,pts_j,area_j)
     !
     DO ii=1,3
       ik=row_obj%pmap(rmesh%lc(ii,i))
@@ -1354,10 +1318,6 @@ IF(Lself)THEN
 END IF
 !$omp end parallel
 Lmat = Lmat/(4.d0*pi)
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 elapsed_time=mytimer%tock()
 WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 IF(PRESENT(save_file))THEN
@@ -1631,7 +1591,7 @@ REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 INTEGER(4) :: ncoils_tot
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+TYPE(oft_quad_type), POINTER :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
@@ -1684,10 +1644,8 @@ IF(PRESENT(save_file))THEN
   END IF
 END IF
 !
-ALLOCATE(quads(18))
-DO i=1,18
-  CALL set_quad_2d(quads(i),i)
-END DO
+CALL tw_quads_setup
+quads=>tw_quads
 bmesh=>tw_obj%mesh
 !---Compute coupling between vertices and sensors
 f=1.d0/3.d0
@@ -1869,10 +1827,6 @@ IF(nsensors>0)THEN
 END IF
 DEALLOCATE(Acoil2sen_tmp)
 !
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 !---
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
@@ -2131,58 +2085,107 @@ CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Rmat
 !---------------------------------------------------------------------------------
+!> Compute \f$ \int \int 1/|r-r'| dA dA' \f$ for a pair of triangles
+!!
+!! The quadrature order is chosen from the pair's separation; close pairs integrate the inner triangle analytically
+!! (@ref tw_compute_phipot). Requires @ref tw_quads_setup.
+!---------------------------------------------------------------------------------
+FUNCTION tw_cell_pair_kernel(pts_i,area_i,pts_j,area_j) RESULT(tmp)
+REAL(8), INTENT(in) :: pts_i(3,3) !< Vertices of first triangle
+REAL(8), INTENT(in) :: area_i !< Area of first triangle
+REAL(8), INTENT(in) :: pts_j(3,3) !< Vertices of second triangle
+REAL(8), INTENT(in) :: area_j !< Area of second triangle
+REAL(8) :: tmp
+INTEGER(4) :: ii,jj,iquad,np
+REAL(8) :: dl_min,dl_max,d2,s,pt_i(3),pt_j(3),xj(25),yj(25),zj(25)
+!---Compute minimum separation (squared distances)
+dl_min=1.d99
+dl_max=MAX(area_i,area_j)*2.d0
+DO ii=1,3
+  DO jj=1,3
+    d2=SUM((pts_i(:,ii)-pts_j(:,jj))**2)
+    dl_min=MIN(dl_min,d2)
+    dl_max=MAX(dl_max,d2)
+  END DO
+END DO
+dl_min=SQRT(dl_min)
+dl_max=SQRT(dl_max)
+!---Chose quadrature order based on distance
+IF(dl_min<1.d-8)THEN
+  iquad = 18
+ELSE
+  iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
+END IF
+tmp=0.d0
+np=tw_quads(iquad)%np
+IF(iquad>10)THEN
+  DO jj=1,np
+    pt_j = tw_quads(iquad)%pts(1,jj)*pts_j(:,1) &
+      + tw_quads(iquad)%pts(2,jj)*pts_j(:,2) &
+      + tw_quads(iquad)%pts(3,jj)*pts_j(:,3)
+    tmp = tmp + tw_quads(iquad)%wts(jj)*tw_compute_phipot(pts_i,pt_j)
+  END DO
+  tmp=tmp*area_j
+ELSE
+  !---Map the second triangle's points once, then a vectorizable 1/r loop
+  DO jj=1,np
+    pt_j = tw_quads(iquad)%pts(1,jj)*pts_j(:,1) &
+      + tw_quads(iquad)%pts(2,jj)*pts_j(:,2) &
+      + tw_quads(iquad)%pts(3,jj)*pts_j(:,3)
+    xj(jj)=pt_j(1); yj(jj)=pt_j(2); zj(jj)=pt_j(3)
+  END DO
+  DO ii=1,np
+    pt_i = tw_quads(iquad)%pts(1,ii)*pts_i(:,1) &
+      + tw_quads(iquad)%pts(2,ii)*pts_i(:,2) &
+      + tw_quads(iquad)%pts(3,ii)*pts_i(:,3)
+    s=0.d0
+    !$omp simd reduction(+:s)
+    DO jj=1,np
+      s = s + tw_quads(iquad)%wts(jj)/SQRT((pt_i(1)-xj(jj))**2+(pt_i(2)-yj(jj))**2+(pt_i(3)-zj(jj))**2)
+    END DO
+    tmp = tmp + tw_quads(iquad)%wts(ii)*s
+  END DO
+  tmp=tmp*area_i*area_j
+END IF
+END FUNCTION tw_cell_pair_kernel
+!---------------------------------------------------------------------------------
 !> Compute \f$ \int 1/(r-r') dA' \f$ for a triangle
 !---------------------------------------------------------------------------------
 FUNCTION tw_compute_phipot(pt_cell,pt) RESULT(phi)
 REAL(8), INTENT(in) :: pt_cell(3,3) !< Vertices defining triangle
 REAL(8), INTENT(in) :: pt(3) !< Observation point (r)
 REAL(8) :: phi
-REAL(8) :: gam(3),num,den,omega,nhat(3),c(3,3),r(3,3),rmag(3),tmp,yp(3),yp1(3)
-INTEGER(4) :: i
+REAL(8) :: nhat(3),a(3),b(3),r(3,3),rmag(3),e(3),elen,num,den,omega
+INTEGER(4) :: i,ip
 DEBUG_STACK_PUSH
 !---Get unit normal
-nhat = cross_product(pt_cell(:,2)-pt_cell(:,1),pt_cell(:,3)-pt_cell(:,2))
-nhat = nhat/SQRT(DOT_PRODUCT(nhat,nhat))
+a=pt_cell(:,2)-pt_cell(:,1)
+b=pt_cell(:,3)-pt_cell(:,2)
+nhat=[a(2)*b(3)-a(3)*b(2), a(3)*b(1)-a(1)*b(3), a(1)*b(2)-a(2)*b(1)]
+nhat=nhat/SQRT(SUM(nhat**2))
 !---Compute local vectors
 DO i=1,3
   r(:,i)=pt_cell(:,i)-pt
-  rmag(i)=SQRT(DOT_PRODUCT(r(:,i),r(:,i)))
-  c(:,i)=r(:,i)-DOT_PRODUCT(nhat,r(:,i))*nhat
+  rmag(i)=SQRT(SUM(r(:,i)**2))
 END DO
 !---Compute solid angle
-num=DOT_PRODUCT(r(:,1),cross_product(r(:,2),r(:,3)))
-den=PRODUCT(rmag) + DOT_PRODUCT(r(:,1),r(:,2))*rmag(3) &
-  + DOT_PRODUCT(r(:,1),r(:,3))*rmag(2) + DOT_PRODUCT(r(:,2),r(:,3))*rmag(1)
+num=r(1,1)*(r(2,2)*r(3,3)-r(3,2)*r(2,3)) + r(2,1)*(r(3,2)*r(1,3)-r(1,2)*r(3,3)) &
+  + r(3,1)*(r(1,2)*r(2,3)-r(2,2)*r(1,3))
+den=rmag(1)*rmag(2)*rmag(3) + SUM(r(:,1)*r(:,2))*rmag(3) &
+  + SUM(r(:,1)*r(:,3))*rmag(2) + SUM(r(:,2)*r(:,3))*rmag(1)
 omega=2.d0*ATAN2(num,den)
-!---Compute gammas
+!---Edge terms; nhat.(c_i x c_i+1) = nhat.(r_i x r_i+1) since the in-plane parts c differ from r by the same normal offset
+phi=-DOT_PRODUCT(nhat,r(:,1))*omega
 DO i=1,3
-  yp=r(:,i)
-  IF(i==3)THEN
-    yp1=r(:,1)
-  ELSE
-    yp1=r(:,i+1)
-  END IF
-  tmp=magnitude(yp1-yp)
-  num=magnitude(yp1)*tmp + DOT_PRODUCT(yp1,yp1-yp)
-  den=magnitude(yp)*tmp + DOT_PRODUCT(yp,yp1-yp)
-  IF(ABS(den)<1.d-14.OR.tmp<1.d-14)THEN
-    gam(i)=0.d0
-  ELSE
-    gam(i)=LOG(num/den)/tmp
-  END IF
+  ip=MOD(i,3)+1
+  e=r(:,ip)-r(:,i)
+  elen=SQRT(SUM(e**2))
+  num=rmag(ip)*elen + SUM(r(:,ip)*e)
+  den=rmag(i)*elen + SUM(r(:,i)*e)
+  IF(ABS(den)<1.d-14.OR.elen<1.d-14)CYCLE
+  phi=phi+(nhat(1)*(r(2,i)*r(3,ip)-r(3,i)*r(2,ip)) + nhat(2)*(r(3,i)*r(1,ip)-r(1,i)*r(3,ip)) &
+    + nhat(3)*(r(1,i)*r(2,ip)-r(2,i)*r(1,ip)))*LOG(num/den)/elen
 END DO
-!---Evalute final function
-phi=0.d0
-DO i=1,3
-  yp=c(:,i)
-  IF(i==3)THEN
-    yp1=c(:,1)
-  ELSE
-    yp1=c(:,i+1)
-  END IF
-  phi=phi+DOT_PRODUCT(nhat,cross_product(yp,yp1))*gam(i)
-END DO
-phi=phi-DOT_PRODUCT(nhat,r(:,1))*omega
 DEBUG_STACK_POP
 END FUNCTION tw_compute_phipot
 !---------------------------------------------------------------------------------
@@ -2199,17 +2202,15 @@ INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
 LOGICAL :: is_neighbor,load_success
 INTEGER(c_int), PARAMETER :: Bops_cache_ver = 1 !< Cache file version (used as hash starting value)
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
+TYPE(oft_quad_type), POINTER :: quads(:)
 IF(PRESENT(save_file))THEN
   load_success=load_from_file()
   IF(load_success)RETURN
 END IF
 !
 bmesh=>self%mesh
-ALLOCATE(quads(18))
-DO i=1,18
-  CALL set_quad_2d(quads(i),i)
-END DO
+CALL tw_quads_setup
+quads=>tw_quads
 ALLOCATE(self%Bel(bmesh%np,self%nelems,3))
 self%Bel=0.d0
 f=1.d0/3.d0
@@ -2313,10 +2314,6 @@ DO i=1,bmesh%nc
 END DO
 DEALLOCATE(atmp)
 !$omp end parallel
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 !
 WRITE(*,'(2A)')oft_indent,'Building vcoil->element magnetic reconstruction operator'
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
