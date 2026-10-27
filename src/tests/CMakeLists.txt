@@ -31,19 +31,23 @@ add_subdirectory( lin_alg )
 add_subdirectory( fem )
 add_subdirectory( physics )
 
-# Get MPI path and prepend if necessary
 set( OFT_TEST_PATH "$ENV{PATH}" )
 set( OFT_MPI_TEST "0" )
 set( OFT_DEBUG_TEST "0" )
+# Add the configured interpreter's directory so helper tools from the same environment
+# (eg. pytest, coverage, jupyter) are preferred over any ambient install
+get_filename_component(PYTHON_BIN_PATH "${Python3_EXECUTABLE}" DIRECTORY)
+set( OFT_TEST_PATH "${PYTHON_BIN_PATH}:${OFT_TEST_PATH}" )
+# Get MPI path and prepend if necessary. This must stay ahead of PYTHON_BIN_PATH:
+# `oft_testing.py` launches a bare `mpirun`, which must resolve to the MPI that OFT was
+# built against and not one bundled in a Python environment (eg. conda with mpi4py)
 if( OFT_USE_MPI )
     get_filename_component(MPI_BIN_PATH ${MPIEXEC_EXECUTABLE} DIRECTORY)
     set( OFT_TEST_PATH "${MPI_BIN_PATH}:${OFT_TEST_PATH}" )
     set( OFT_MPI_TEST "1" )
 endif()
-# Add python directory to path for scripts and ensure they use the configured interpreter,
-# even if MPI_BIN_PATH is a system directory (eg. /usr/bin) that contains another python
-get_filename_component(PYTHON_BIN_PATH ${Python3_EXECUTABLE} DIRECTORY)
-set( OFT_TEST_PATH "${CMAKE_BINARY_DIR}/python:${PYTHON_BIN_PATH}:${OFT_TEST_PATH}" )
+# Add python directory to path for scripts
+set( OFT_TEST_PATH "${CMAKE_BINARY_DIR}/python:${OFT_TEST_PATH}" )
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   set( OFT_DEBUG_TEST "1" )
     # set( OFT_TEST_ENV "${OFT_TEST_ENV};OFT_DEBUG_TEST=1")

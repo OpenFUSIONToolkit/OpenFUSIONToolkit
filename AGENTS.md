@@ -126,7 +126,7 @@ This is the flat-layout case: `<config_dir>` is `builds/` and `<build_dir>` is `
 
 ### Building against system libraries (ephemeral environments, Ubuntu 24.04)
 
-When no pre-built `builds/` directory is available (eg. a fresh cloud sandbox), building against distribution packages is much faster than running `build_libs.py`. This skips Stage 1 and calls CMake directly, so the resulting tree has no `config_cmake.sh`. On Ubuntu 24.04 the following provides MPI (OpenMPI), ARPACK, and SuperLU in addition to the required LibXML2, HDF5, BLAS/LAPACK, and METIS. It uses the flat layout and creates the `oft_venv/`/`setup_env.sh` pair described in "Python environment", so it should not be used in a user checkout without asking.
+When no pre-built `builds/` directory is available (eg. a fresh cloud sandbox, or any environment where `build_libs.py` cannot reach the network to download dependencies), building against distribution packages is much faster than running `build_libs.py`. This skips Stage 1, writing the CMake invocation into `config_cmake.sh` directly so the tree still matches "Locating the build tree". On Ubuntu 24.04 the following provides MPI (OpenMPI), ARPACK, and SuperLU in addition to the required LibXML2, HDF5, BLAS/LAPACK, and METIS. It uses the flat layout and creates the `oft_venv/`/`setup_env.sh` pair described in "Python environment", so it should not be used in a user checkout without asking.
 
 ```bash
 apt-get install -y --no-install-recommends gfortran libopenmpi-dev openmpi-bin \
@@ -139,17 +139,33 @@ echo "source $PWD/oft_venv/bin/activate" > setup_env.sh
 source setup_env.sh
 python -m pip install pytest numpy scipy h5py netcdf4 matplotlib
 
-mkdir -p builds/build_release && cd builds/build_release
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=../install_release \
+# Write config_cmake.sh into <config_dir>, mirroring what build_libs.py generates
+mkdir -p builds && cd builds
+cat > config_cmake.sh <<'EOF'
+ROOT_PATH=$(pwd)
+BUILD_DIR=$ROOT_PATH/build_release
+INSTALL_DIR=$ROOT_PATH/install_release
+
+rm -rf $BUILD_DIR
+mkdir $BUILD_DIR && cd $BUILD_DIR
+
+cmake \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX:PATH=$INSTALL_DIR \
   -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_Fortran_COMPILER=gfortran \
-  -DOFT_USE_MPI=ON -DOFT_USE_OpenMP=ON -DOFT_BUILD_TESTS=ON -DBLA_VENDOR=OpenBLAS \
+  -DOFT_USE_MPI:BOOL=TRUE -DOFT_USE_OpenMP:BOOL=TRUE -DOFT_BUILD_TESTS:BOOL=TRUE \
+  -DBLA_VENDOR=OpenBLAS \
   -DOFT_ARPACK_ROOT=/usr -DOFT_SUPERLU_ROOT=/usr \
-  -DOFT_PYTEST_EXE=$(which pytest) ../../src
-make -j$(nproc)
+  -DOFT_PYTEST_EXE=$(which pytest) \
+  $ROOT_PATH/../src
+EOF
+
+bash config_cmake.sh
+cd build_release && make -j$(nproc)
 ```
 
 Notes for this configuration:
-- Optional libraries (ARPACK, SuperLU, SuperLU-DIST, UMFPACK) are only searched for when the corresponding `OFT_<LIB>_ROOT` is set, so set them to `/usr` for system packages.
+- Optional libraries are only searched for when the corresponding `OFT_<LIB>_ROOT` is set, so set it to `/usr` for system packages. SuperLU (`libsuperlu-dev`) is the baseline and is included above; SuperLU-DIST and UMFPACK are not. Install `libsuperlu-dist-dev` or `libsuitesparse-dev` and add `-DOFT_SUPERLU_DIST_ROOT=/usr` or `-DOFT_UMFPACK_ROOT=/usr` only if a specific test requires them.
 - Use the default `gcc`/`g++`/`gfortran` (GCC 13) so the compilers match the ones Ubuntu used to build the OpenMPI Fortran modules.
 - Ubuntu ships HDF5 1.10, which lacks the Fortran file-space-strategy API (added in 1.14.3). OFT builds fine but persistent free-space tracking in HDF5 output files is disabled, and a warning is printed when it is requested.
 - OpenMPI refuses to run as root by default. In a root sandbox, `export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1` before running tests.
@@ -281,17 +297,21 @@ A representative build environment that can be used for creating a testing sandb
 ### Test and example code
 
 Doxygen's `INPUT` list in `src/docs/Doxyfile.in` covers `src/docs`, `base`, `grid`,
-`lin_alg`, `fem`, `physics`, `bin`, and `python` only. Code under `src/tests/` and
-`src/examples/` is **not** scanned, so Doxygen markup there is never processed into
-the documentation.
+`lin_alg`, `fem`, `physics`, `bin`, and `python`. Neither `src/tests/` nor
+`src/examples/` is scanned directly, but examples still reach the documentation
+indirectly: the `build_ex_docs` target runs `src/utilities/generate_doc.py`, which
+reads `examples/*.F90`, `examples/*/*/*.F90`, and `examples/*/*/*.ipynb` and writes
+`docs/generated/doc_*.md`, which Doxygen then picks up through its `docs` entry.
 
-- **Do not use Doxygen notation in test or example code** — no `!>`/`!!` markers in Fortran, no `@`-style commands (`@param`, `@result`, `@brief`) in Python docstrings. Use plain comments and plain docstrings instead.
-- Brief documentation in these areas is still helpful and welcome: a short line saying what a test covers or what an example demonstrates aids the next reader.
+- **Example sources are documentation.** Fortran examples under `src/examples/` carry their own `!!` comment format, including Doxygen page anchors and linking commands (eg. `!!API Example 1 ... {#doc_api_ex1}`, `\section`, `\ref`), which `generate_doc.py` parses into published pages. The same applies to the example notebooks. Do not strip or "correct" this markup, and follow the surrounding file when extending it.
+- **Everything else under `src/tests/` and `src/examples/`** is not parsed into the API documentation, so its functions do not need Doxygen-style documentation — no `!>`/`!!` function blocks in Fortran, no `@`-style commands (`@param`, `@result`, `@brief`) in Python docstrings. Plain comments and plain docstrings are fine.
+- Doxygen **linking** commands (`\section`, `\ref`, …) remain valid anywhere and may be used where they help, even in files whose functions need no documentation blocks.
 - Function-level documentation blocks in test code are **optional**.
+- Brief documentation is still helpful and welcome: a short line saying what a test covers or what an example demonstrates aids the next reader.
 
 When reviewing changes, do not flag missing documentation on test functions, and do
-not request Doxygen-style documentation for anything under `src/tests/` or
-`src/examples/` — adding it there would be incorrect, not merely unnecessary.
+not request Doxygen-style function documentation for files outside the paths
+Doxygen processes.
 
 ### Pull Requests
 
