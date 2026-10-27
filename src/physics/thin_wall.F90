@@ -1221,18 +1221,24 @@ DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Lmat_coils
 !---------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
+!!
+!! For models with junctions each element pair contribution is scattered through the junction maps as it is
+!! computed, giving the reduced matrix \f$ P_c^T L P_r \f$ without storing the matrix over expanded elements.
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_LmatDirect_exp(row_model,Lmat,col_model,save_file)
+SUBROUTINE tw_compute_LmatDirect(row_model,Lmat,col_model,save_file)
 TYPE(tw_type), TARGET, INTENT(in) :: row_model !< Thin-wall model object for rows
-REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix
+REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix [col%nelems,row%nelems]
 TYPE(tw_type), TARGET, OPTIONAL, INTENT(in) :: col_model !< Thin-wall model object for columns
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
-INTEGER(4) :: i,ii,j,jj,ik,jk,imin,jmax,io_unit,ierr,file_counts(6),hash_tmp(6)
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
+INTEGER(4) :: i,ii,j,jj,k,ik,jk,imin,jmax,io_unit,ierr,nsurf,nhash,nbuf,nbuf_max
+INTEGER(4) :: file_counts(8),hash_tmp(8)
+INTEGER(4), ALLOCATABLE :: rkr(:),rlc(:),ckr(:),clc(:),ebuf(:,:)
 INTEGER(8) :: counts(4)
 REAL(8) :: tmp,dl_min,f(3),elapsed_time
 REAL(8) :: area_i,evec_i(3,3),pts_i(3,3)
 REAL(8) :: area_j,evec_j(3,3),pts_j(3,3)
-LOGICAL :: exists,Lself
+REAL(8), ALLOCATABLE :: rval(:),cval(:),vbuf(:)
+LOGICAL :: exists,Lself,jscatter
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
 TYPE(tw_type), POINTER :: row_obj,col_obj
 type(oft_timer) :: mytimer
@@ -1245,21 +1251,42 @@ ELSE
   Lself=.TRUE.
   col_obj=>row_obj
 END IF
+jscatter=ASSOCIATED(row_obj%junc).OR.ASSOCIATED(col_obj%junc)
 IF(ASSOCIATED(Lmat))THEN
-  IF(SIZE(Lmat,DIM=1)/=tw_nelems_exp(col_obj).OR.SIZE(Lmat,DIM=2)/=tw_nelems_exp(row_obj))THEN
+  IF(SIZE(Lmat,DIM=1)/=col_obj%nelems.OR.SIZE(Lmat,DIM=2)/=row_obj%nelems)THEN
     CALL oft_abort("Input size incorrect","tw_compute_LmatDirect",__FILE__)
   END IF
 ELSE
-  ALLOCATE(Lmat(tw_nelems_exp(col_obj),tw_nelems_exp(row_obj)))
+  ALLOCATE(Lmat(col_obj%nelems,row_obj%nelems))
 END IF
 !
 IF(PRESENT(save_file))THEN
+  !---Cache key: element counts and mesh hashes, plus the junction maps (marked by a negative count) if present
   !---Self inductance depends on the V-coils only (no I-coils or resistances); mutual inductance on no coils
+  nhash=6
   hash_tmp(3) = oft_simple_hash(C_LOC(row_obj%mesh%lc),INT(4*3*row_obj%mesh%nc,8), &
     starting_value=MERGE(tw_coil_hash(row_obj,vcoils_only=.TRUE.),tw_cache_ver,Lself))
   hash_tmp(4) = oft_simple_hash(C_LOC(col_obj%mesh%lc),INT(4*3*col_obj%mesh%nc,8))
   hash_tmp(5) = oft_simple_hash(C_LOC(row_obj%mesh%r),INT(8*3*row_obj%mesh%np,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(col_obj%mesh%r),INT(8*3*col_obj%mesh%np,8))
+  IF(Lself)THEN
+    hash_tmp(1) = row_obj%nelems
+    hash_tmp(2) = row_obj%mesh%nc
+    IF(jscatter)THEN
+      nhash=7
+      hash_tmp(1) = -hash_tmp(1)
+      hash_tmp(7) = tw_junction_hash(row_obj)
+    END IF
+  ELSE
+    hash_tmp(1) = col_obj%nelems
+    hash_tmp(2) = row_obj%nelems
+    IF(jscatter)THEN
+      nhash=8
+      hash_tmp(1) = -hash_tmp(1)
+      hash_tmp(7) = tw_junction_hash(row_obj)
+      hash_tmp(8) = tw_junction_hash(col_obj)
+    END IF
+  END IF
   IF(TRIM(save_file)/='none')THEN
     INQUIRE(FILE=TRIM(save_file),EXIST=exists)
     IF(exists)THEN
@@ -1267,12 +1294,10 @@ IF(PRESENT(save_file))THEN
         WRITE(*,'(2A)')oft_indent,'Reading element<->element self inductance matrix'
         CALL oft_increase_indent
         OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-        READ(io_unit, IOSTAT=ierr)file_counts
-        hash_tmp(1) = tw_nelems_exp(row_obj)
-        hash_tmp(2) = row_obj%mesh%nc
-        IF((ierr==0).AND.ALL(file_counts==hash_tmp))THEN
-          DO i=1,tw_nelems_exp(row_obj)
-            READ(io_unit, IOSTAT=ierr)Lmat(i,i:tw_nelems_exp(row_obj))
+        READ(io_unit, IOSTAT=ierr)file_counts(1:nhash)
+        IF((ierr==0).AND.ALL(file_counts(1:nhash)==hash_tmp(1:nhash)))THEN
+          DO i=1,row_obj%nelems
+            READ(io_unit, IOSTAT=ierr)Lmat(i,i:row_obj%nelems)
             IF(ierr/=0)THEN
               WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
               exists=.FALSE.
@@ -1281,8 +1306,8 @@ IF(PRESENT(save_file))THEN
           END DO
           CLOSE(io_unit)
           IF(exists)THEN
-            DO i=1,tw_nelems_exp(row_obj)
-              DO j=i+1,tw_nelems_exp(row_obj)
+            DO i=1,row_obj%nelems
+              DO j=i+1,row_obj%nelems
                 Lmat(j,i)=Lmat(i,j)
               END DO
             END DO
@@ -1297,11 +1322,9 @@ IF(PRESENT(save_file))THEN
         WRITE(*,'(2A)')oft_indent,'Reading element<->element mutual inductance matrix'
         CALL oft_increase_indent
         OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-        READ(io_unit, IOSTAT=ierr)file_counts
-        hash_tmp(1) = tw_nelems_exp(col_obj)
-        hash_tmp(2) = tw_nelems_exp(row_obj)
-        IF((ierr==0).AND.ALL(file_counts==hash_tmp))THEN
-          DO i=1,tw_nelems_exp(row_obj)
+        READ(io_unit, IOSTAT=ierr)file_counts(1:nhash)
+        IF((ierr==0).AND.ALL(file_counts(1:nhash)==hash_tmp(1:nhash)))THEN
+          DO i=1,row_obj%nelems
             READ(io_unit, IOSTAT=ierr)Lmat(:,i)
             IF(ierr/=0)THEN
               WRITE(*,'(2A)')oft_indent,'Error reading matrix from file'
@@ -1324,6 +1347,16 @@ IF(PRESENT(save_file))THEN
     END IF
   END IF
 END IF
+!---Junction maps (identity for a model without junctions)
+!---Contributions of each cell pair are buffered, then scattered together (size of buffer bounded by the vertex
+!---and hole counts of the two cells)
+nbuf_max=0
+IF(jscatter)THEN
+  CALL tw_junction_map(row_obj,rkr,rlc,rval)
+  CALL tw_junction_map(col_obj,ckr,clc,cval)
+  nbuf_max=(3+MAXVAL(row_obj%kfh(2:)-row_obj%kfh(1:row_obj%mesh%nc)))* &
+    (3+MAXVAL(col_obj%kfh(2:)-col_obj%kfh(1:col_obj%mesh%nc)))
+END IF
 !
 IF(Lself)THEN
   WRITE(*,'(2A)')oft_indent,'Building element<->element self inductance matrix'
@@ -1342,7 +1375,8 @@ counts=0
 f=1.d0/3.d0
 !$omp parallel private(ii,j,jj,ik,jk,pts_i,pts_j,tmp, &
 !$omp evec_i,evec_j,dl_min,i,jmax,imin, &
-!$omp area_i,area_j) reduction(+:counts)
+!$omp area_i,area_j,nbuf,ebuf,vbuf) reduction(+:counts)
+IF(jscatter)ALLOCATE(ebuf(2,nbuf_max),vbuf(nbuf_max))
 !$omp do schedule(dynamic,100)
 DO i=1,rmesh%nc
   ! CALL rmesh%jacobian(i,f,rgop,area_i)
@@ -1379,6 +1413,7 @@ DO i=1,rmesh%nc
     !---Cell-pair integral of 1/|r-r'|
     tmp=tw_cell_pair_kernel(pts_i,area_i,pts_j,area_j)
     !
+    nbuf=0
     DO ii=1,3
       ik=row_obj%pmap(rmesh%lc(ii,i))
       IF(ik==0)CYCLE
@@ -1386,15 +1421,27 @@ DO i=1,rmesh%nc
         jk=col_obj%pmap(cmesh%lc(jj,j))
         IF((Lself.AND.jk<ik).OR.jk<=0)CYCLE
         dl_min = DOT_PRODUCT(evec_i(:,ii),evec_j(:,jj))*tmp
-        !$omp atomic
-        Lmat(jk,ik) = Lmat(jk,ik) + dl_min
+        IF(jscatter)THEN
+          nbuf=nbuf+1
+          ebuf(:,nbuf)=[jk,ik]
+          vbuf(nbuf)=dl_min
+        ELSE
+          !$omp atomic
+          Lmat(jk,ik) = Lmat(jk,ik) + dl_min
+        END IF
       END DO
       DO jj=col_obj%kfh(j),col_obj%kfh(j+1)-1
         jk=ABS(col_obj%lfh(1,jj))+col_obj%np_active
         dl_min = SIGN(1,col_obj%lfh(1,jj))* &
           DOT_PRODUCT(evec_i(:,ii),evec_j(:,col_obj%lfh(2,jj)))*tmp
-        !$omp atomic
-        Lmat(jk,ik) = Lmat(jk,ik) + dl_min
+        IF(jscatter)THEN
+          nbuf=nbuf+1
+          ebuf(:,nbuf)=[jk,ik]
+          vbuf(nbuf)=dl_min
+        ELSE
+          !$omp atomic
+          Lmat(jk,ik) = Lmat(jk,ik) + dl_min
+        END IF
       END DO
     END DO
     DO ii=row_obj%kfh(i),row_obj%kfh(i+1)-1
@@ -1404,8 +1451,14 @@ DO i=1,rmesh%nc
         IF(Lself.AND.jk<ik)CYCLE
         dl_min = SIGN(1,row_obj%lfh(1,ii))*SIGN(1,col_obj%lfh(1,jj))* &
           DOT_PRODUCT(evec_i(:,row_obj%lfh(2,ii)),evec_j(:,col_obj%lfh(2,jj)))*tmp
-        !$omp atomic
-        Lmat(jk,ik) = Lmat(jk,ik) + dl_min
+        IF(jscatter)THEN
+          nbuf=nbuf+1
+          ebuf(:,nbuf)=[jk,ik]
+          vbuf(nbuf)=dl_min
+        ELSE
+          !$omp atomic
+          Lmat(jk,ik) = Lmat(jk,ik) + dl_min
+        END IF
       END DO
       !
       IF(.NOT.Lself)THEN
@@ -1414,34 +1467,56 @@ DO i=1,rmesh%nc
           IF(jk<=0)CYCLE
           dl_min = SIGN(1,row_obj%lfh(1,ii))* &
             DOT_PRODUCT(evec_i(:,row_obj%lfh(2,ii)),evec_j(:,jj))*tmp
-          !$omp atomic
-          Lmat(jk,ik) = Lmat(jk,ik) + dl_min
+          IF(jscatter)THEN
+            nbuf=nbuf+1
+            ebuf(:,nbuf)=[jk,ik]
+            vbuf(nbuf)=dl_min
+          ELSE
+            !$omp atomic
+            Lmat(jk,ik) = Lmat(jk,ik) + dl_min
+          END IF
         END DO
       END IF
     END DO
+    IF(jscatter)CALL tw_junction_scatter_add(Lmat,ckr,clc,cval,rkr,rlc,rval,nbuf,ebuf,vbuf,Lself)
   END DO
 END DO
 !$omp end do nowait
+IF(jscatter)DEALLOCATE(ebuf,vbuf)
 IF(Lself)THEN
-  !---Add passive coils to model
-  !$omp do
-  DO i=1,row_obj%np_active+row_obj%nholes
+  !---Add passive coils to model (V-coil rows of P are the identity, so only the element side is mapped)
+  nsurf=row_obj%nelems-row_obj%n_vcoils
+  IF(jscatter)THEN
+    !$omp do private(i,k)
     DO j=1,row_obj%n_vcoils
-      jj=row_obj%np_active+row_obj%nholes+j
-      Lmat(jj,i) = row_obj%Ael2coil(i,j)
+      jj=nsurf+j
+      DO i=1,row_obj%np_active+row_obj%nholes
+        DO k=rkr(i),rkr(i+1)-1
+          Lmat(jj,rlc(k)) = Lmat(jj,rlc(k)) + rval(k)*row_obj%Ael2coil(i,j)
+        END DO
+      END DO
     END DO
-  END DO
-  !$omp end do nowait
+    !$omp end do nowait
+  ELSE
+    !$omp do
+    DO i=1,row_obj%np_active+row_obj%nholes
+      DO j=1,row_obj%n_vcoils
+        jj=nsurf+j
+        Lmat(jj,i) = row_obj%Ael2coil(i,j)
+      END DO
+    END DO
+    !$omp end do nowait
+  END IF
   !$omp do
   DO i=1,row_obj%n_vcoils
-    ii=row_obj%np_active+row_obj%nholes+i
+    ii=nsurf+i
     DO j=i,row_obj%n_vcoils
-      jj=row_obj%np_active+row_obj%nholes+j
+      jj=nsurf+j
       Lmat(jj,ii) = row_obj%Acoil2coil(i,j)
     END DO
   END DO
   !$omp do private(j)
-  DO i=1,tw_nelems_exp(row_obj)
+  DO i=1,row_obj%nelems
     DO j=1,i-1
       Lmat(j,i)=Lmat(i,j)
     END DO
@@ -1451,32 +1526,26 @@ END IF
 Lmat = Lmat/(4.d0*pi)
 elapsed_time=mytimer%tock()
 WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
+IF(jscatter)DEALLOCATE(rkr,rlc,rval,ckr,clc,cval)
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
+    OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
+    WRITE(io_unit)hash_tmp(1:nhash)
     IF(Lself)THEN
-      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-      hash_tmp(1) = tw_nelems_exp(row_obj)
-      hash_tmp(2) = row_obj%mesh%nc
-      WRITE(io_unit)hash_tmp
-      DO i=1,tw_nelems_exp(row_obj)
-        WRITE(io_unit)Lmat(i,i:tw_nelems_exp(row_obj))
+      DO i=1,row_obj%nelems
+        WRITE(io_unit)Lmat(i,i:row_obj%nelems)
       END DO
-      CLOSE(io_unit)
     ELSE
-      OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-      hash_tmp(1) = tw_nelems_exp(col_obj)
-      hash_tmp(2) = tw_nelems_exp(row_obj)
-      WRITE(io_unit)hash_tmp
-      DO i=1,tw_nelems_exp(row_obj)
+      DO i=1,row_obj%nelems
         WRITE(io_unit)Lmat(:,i)
       END DO
-      CLOSE(io_unit)
     END IF
+    CLOSE(io_unit)
   END IF
 END IF
 CALL oft_decrease_indent
 DEBUG_STACK_POP
-END SUBROUTINE tw_compute_LmatDirect_exp
+END SUBROUTINE tw_compute_LmatDirect
 !---------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
 !---------------------------------------------------------------------------------
@@ -2414,16 +2483,21 @@ END DO
 DEBUG_STACK_POP
 END FUNCTION tw_compute_phipot
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Compute the magnetic field reconstruction operators at the mesh vertices
+!!
+!! For models with junctions the element operators are scattered through the junction map as they are
+!! computed, giving the reduced operator (`Bel(:,e,:)` P) without storing the operator over expanded elements.
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Bops_exp(self,B_dx,save_file)
-TYPE(tw_type), INTENT(inout) :: self
-REAL(r8), INTENT(in) :: B_dx
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
+SUBROUTINE tw_compute_Bops(self,B_dx,save_file)
+TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
+REAL(r8), INTENT(in) :: B_dx !< Distance for finite-difference field evaluation
+CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
 REAL(r8) :: evec_i(3,3),pts_i(3,3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: cvec(3),cpt(3),tmp,area_i,norm_j(3),f(3)
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-INTEGER(4) :: i,ii,j,jj,ik,k,kk
+INTEGER(4) :: i,ii,j,jj,ik,k,kk,l,nsurf
+INTEGER(4), ALLOCATABLE :: pkr(:),plc(:)
+REAL(r8), ALLOCATABLE :: pval(:)
 LOGICAL :: load_success
 CLASS(oft_bmesh), POINTER :: bmesh
 IF(PRESENT(save_file))THEN
@@ -2432,12 +2506,14 @@ IF(PRESENT(save_file))THEN
 END IF
 !
 bmesh=>self%mesh
-ALLOCATE(self%Bel(bmesh%np,tw_nelems_exp(self),3))
+ALLOCATE(self%Bel(bmesh%np,self%nelems,3))
 self%Bel=0.d0
+!---Junction map (identity for a model without junctions)
+CALL tw_junction_map(self,pkr,plc,pval)
 f=1.d0/3.d0
 WRITE(*,'(2A)')oft_indent,'Building element->element magnetic reconstruction operator'
 !$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_j,evec_i, &
-!$omp atmp,i,area_i,norm_j,diffvec)
+!$omp atmp,i,area_i,norm_j,diffvec,k,l)
 ALLOCATE(atmp(3,3,bmesh%np))
 !$omp do schedule(dynamic,100)
 DO i=1,bmesh%nc
@@ -2459,28 +2535,37 @@ DO i=1,bmesh%nc
   DO ii=1,3
     ik=self%pmap(bmesh%lc(ii,i))
     IF(ik==0)CYCLE
-    DO jj=1,3
-      DO j=1,bmesh%np
-        !$omp atomic
-        self%Bel(j,ik,jj) = self%Bel(j,ik,jj) + atmp(jj,ii,j)
+    DO k=pkr(ik),pkr(ik+1)-1
+      l=plc(k)
+      DO jj=1,3
+        DO j=1,bmesh%np
+          tmp=pval(k)*atmp(jj,ii,j)
+          !$omp atomic
+          self%Bel(j,l,jj) = self%Bel(j,l,jj) + tmp
+        END DO
       END DO
     END DO
   END DO
   DO ii=self%kfh(i),self%kfh(i+1)-1
     ik=ABS(self%lfh(1,ii))+self%np_active
-    DO jj=1,3
-      DO j=1,bmesh%np
-        tmp=SIGN(1,self%lfh(1,ii))*atmp(jj,self%lfh(2,ii),j)
-        !$omp atomic
-        self%Bel(j,ik,jj) = self%Bel(j,ik,jj) + tmp
+    DO k=pkr(ik),pkr(ik+1)-1
+      l=plc(k)
+      DO jj=1,3
+        DO j=1,bmesh%np
+          tmp=pval(k)*SIGN(1,self%lfh(1,ii))*atmp(jj,self%lfh(2,ii),j)
+          !$omp atomic
+          self%Bel(j,l,jj) = self%Bel(j,l,jj) + tmp
+        END DO
       END DO
     END DO
   END DO
 END DO
 DEALLOCATE(atmp)
 !$omp end parallel
+DEALLOCATE(pkr,plc,pval)
 !
 WRITE(*,'(2A)')oft_indent,'Building vcoil->element magnetic reconstruction operator'
+nsurf=self%nelems-self%n_vcoils ! V-coil rows of the junction map are the identity
 !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt)
 DO i=1,bmesh%np
   pt_j=bmesh%r(:,i)
@@ -2503,8 +2588,7 @@ DO i=1,bmesh%np
     END DO
     DO jj=1,3
       !$omp atomic
-      self%Bel(i,self%np_active+self%nholes+j,jj) = &
-        self%Bel(i,self%np_active+self%nholes+j,jj) + ecc(jj)
+      self%Bel(i,nsurf+j,jj) = self%Bel(i,nsurf+j,jj) + ecc(jj)
     END DO
   END DO
 END DO
@@ -2545,21 +2629,23 @@ CALL oft_increase_indent
 IF(PRESENT(save_file))CALL save_to_file()
 CALL oft_decrease_indent
 CONTAINS
+!> Load the operators from the cache file if its key matches the model
 FUNCTION load_from_file() RESULT(exists)
-INTEGER(4) :: hash_tmp(4),file_counts(4)
+INTEGER(4) :: hash_tmp(4),file_counts(4),jhash(1)
 LOGICAL :: exists
 IF(TRIM(save_file)/='none')THEN
   INQUIRE(FILE=TRIM(save_file),EXIST=exists)
   IF(exists)THEN
-    hash_tmp(1) = tw_nelems_exp(self)
-    hash_tmp(2) = self%mesh%nc
-    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=tw_coil_hash(self))
-    hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
+    CALL cache_key(hash_tmp)
     WRITE(*,'(3A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
     CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
     IF(exists)exists=ALL(file_counts==hash_tmp)
+    IF(exists.AND.ASSOCIATED(self%junc))THEN
+      CALL hdf5_read(jhash,TRIM(save_file),'JUNCTION_hash',success=exists)
+      IF(exists)exists=(jhash(1)==tw_junction_hash(self))
+    END IF
     IF(exists)THEN
-      ALLOCATE(self%Bel(self%mesh%np,tw_nelems_exp(self),3))
+      ALLOCATE(self%Bel(self%mesh%np,self%nelems,3))
       CALL hdf5_read(self%Bel(:,:,1),TRIM(save_file),'Bel_X',success=exists)
       IF(exists)CALL hdf5_read(self%Bel(:,:,2),TRIM(save_file),'Bel_Y',success=exists)
       IF(exists)CALL hdf5_read(self%Bel(:,:,3),TRIM(save_file),'Bel_Z',success=exists)
@@ -2579,16 +2665,15 @@ ELSE
 END IF
 END FUNCTION load_from_file
 !
+!> Save the operators to the cache file
 SUBROUTINE save_to_file()
 INTEGER(4) :: hash_tmp(4)
 IF(TRIM(save_file)/='none')THEN
-  hash_tmp(1) = tw_nelems_exp(self)
-  hash_tmp(2) = self%mesh%nc
-  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=tw_coil_hash(self))
-  hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
+  CALL cache_key(hash_tmp)
   WRITE(*,'(2A)')oft_indent,'Saving B-field operator to file: ',TRIM(save_file)
   CALL hdf5_create_file(TRIM(save_file))
   CALL hdf5_write(hash_tmp,TRIM(save_file),'MODEL_hash')
+  IF(ASSOCIATED(self%junc))CALL hdf5_write([tw_junction_hash(self)],TRIM(save_file),'JUNCTION_hash')
   CALL hdf5_write(self%Bel(:,:,1),TRIM(save_file),'Bel_X')
   CALL hdf5_write(self%Bel(:,:,2),TRIM(save_file),'Bel_Y')
   CALL hdf5_write(self%Bel(:,:,3),TRIM(save_file),'Bel_Z')
@@ -2597,7 +2682,17 @@ IF(TRIM(save_file)/='none')THEN
   CALL hdf5_write(self%Bdr(:,:,3),TRIM(save_file),'Bdr_Z')
 END IF
 END SUBROUTINE save_to_file
-END SUBROUTINE tw_compute_Bops_exp
+!> Cache key: element count and mesh hashes, with the count negated for a model with junctions (whose
+!! map is keyed separately by the `JUNCTION_hash` dataset)
+SUBROUTINE cache_key(hash_tmp)
+INTEGER(4), INTENT(out) :: hash_tmp(4) !< Cache key
+hash_tmp(1) = self%nelems
+IF(ASSOCIATED(self%junc))hash_tmp(1) = -self%nelems
+hash_tmp(2) = self%mesh%nc
+hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=tw_coil_hash(self))
+hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
+END SUBROUTINE cache_key
+END SUBROUTINE tw_compute_Bops
 !---------------------------------------------------------------------------------
 !> Setup hole definition for ordered chain of vertices
 !---------------------------------------------------------------------------------
@@ -3980,42 +4075,91 @@ DO e=1,self%junc%nelems_exp
 END DO
 END SUBROUTINE tw_junction_expand
 !---------------------------------------------------------------------------------
-!> Reduce a dense matrix, A = P^T A_exp P
+!> Junction map P in CSR form, or the identity for a model without junctions
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_junction_reduce_dense(self,Aexp,A)
+SUBROUTINE tw_junction_map(self,kr,lc,val)
 TYPE(tw_type), INTENT(in) :: self !< Thin-wall model object
-REAL(8), INTENT(in) :: Aexp(:,:) !< Expanded matrix [nelems_exp,nelems_exp]
-REAL(8), INTENT(out) :: A(:,:) !< Reduced matrix [nelems,nelems]
-INTEGER(4), PARAMETER :: nblock = 64
-INTEGER(4) :: c,c0,k,nb,ir
-INTEGER(4), ALLOCATABLE :: pt_kr(:),pt_lc(:)
-REAL(8) :: tmp
-REAL(8), ALLOCATABLE :: pt_val(:),T(:,:)
-CALL tw_junction_transpose(self,pt_kr,pt_lc,pt_val)
-!---Blocks of reduced columns: T = A_exp P(:,block), then A(:,block) = P^T T
-ALLOCATE(T(self%junc%nelems_exp,nblock))
-DO c0=1,self%nelems,nblock
-  nb=MIN(nblock,self%nelems-c0+1)
-  !$omp parallel do private(k)
-  DO c=1,nb
-    T(:,c)=0.d0
-    DO k=pt_kr(c0+c-1),pt_kr(c0+c)-1
-      T(:,c)=T(:,c)+pt_val(k)*Aexp(:,pt_lc(k))
-    END DO
-  END DO
-  !$omp parallel do private(c,k,tmp)
-  DO ir=1,self%nelems
-    DO c=1,nb
-      tmp=0.d0
-      DO k=pt_kr(ir),pt_kr(ir+1)-1
-        tmp=tmp+pt_val(k)*T(pt_lc(k),c)
-      END DO
-      A(ir,c0+c-1)=tmp
+INTEGER(4), ALLOCATABLE, INTENT(out) :: kr(:) !< Row pointer [nelems_exp+1]
+INTEGER(4), ALLOCATABLE, INTENT(out) :: lc(:) !< Reduced element of each entry
+REAL(8), ALLOCATABLE, INTENT(out) :: val(:) !< Coefficients
+INTEGER(4) :: e,n
+n=tw_nelems_exp(self)
+IF(ASSOCIATED(self%junc))THEN
+  ALLOCATE(kr(n+1),lc(self%junc%p_kr(n+1)-1),val(self%junc%p_kr(n+1)-1))
+  kr=self%junc%p_kr(1:n+1)
+  lc=self%junc%p_lc(1:SIZE(lc))
+  val=self%junc%p_val(1:SIZE(val))
+ELSE
+  ALLOCATE(kr(n+1),lc(n),val(n))
+  kr=[(e,e=1,n+1)]
+  lc=[(e,e=1,n)]
+  val=1.d0
+END IF
+END SUBROUTINE tw_junction_map
+!---------------------------------------------------------------------------------
+!> Add the contributions of a list of expanded element pairs to a reduced inductance matrix
+!!
+!! For each pair (`e_c`,`e_r`) with value `v`, adds \f$ P_c(e_c,a) P_r(e_r,b) v \f$ to `A(a,b)` for each entry
+!! of row `e_c` of the column model map \f$ P_c \f$ and row `e_r` of the row model map \f$ P_r \f$. If `lsym`
+!! is set the maps are the same, only expanded pairs with `e_c >= e_r` are given (the mirror pair is implied)
+!! and the lower triangle of `A` is accumulated. The diagonal of `A` then receives the mirror pair's
+!! contribution too, while reduced pairs from a diagonal expanded entry are only added once.
+!!
+!! @note Updates are atomic, so this may be called from within an OpenMP parallel region
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_junction_scatter_add(A,ckr,clc,cval,rkr,rlc,rval,n,epairs,v,lsym)
+REAL(8), INTENT(inout) :: A(:,:) !< Reduced matrix [nelems_c,nelems_r]
+INTEGER(4), INTENT(in) :: ckr(:) !< Column model map row pointer
+INTEGER(4), INTENT(in) :: clc(:) !< Column model map column indices
+REAL(8), INTENT(in) :: cval(:) !< Column model map values
+INTEGER(4), INTENT(in) :: rkr(:) !< Row model map row pointer
+INTEGER(4), INTENT(in) :: rlc(:) !< Row model map column indices
+REAL(8), INTENT(in) :: rval(:) !< Row model map values
+INTEGER(4), INTENT(in) :: n !< Number of expanded element pairs
+INTEGER(4), INTENT(in) :: epairs(:,:) !< Expanded elements (`e_c`,`e_r`) of each pair [2,n]
+REAL(8), INTENT(in) :: v(:) !< Contribution of each pair over expanded elements [n]
+LOGICAL, INTENT(in) :: lsym !< Accumulate the lower triangle of a symmetric matrix?
+INTEGER(4) :: i,k,l,ec,er,ia,ib
+REAL(8) :: w
+DO i=1,n
+  ec=epairs(1,i)
+  er=epairs(2,i)
+  DO k=ckr(ec),ckr(ec+1)-1
+    DO l=rkr(er),rkr(er+1)-1
+      w=cval(k)*rval(l)*v(i)
+      ia=clc(k)
+      ib=rlc(l)
+      IF(lsym)THEN
+        IF(ec==er)THEN
+          IF(ia<ib)CYCLE
+        ELSE IF(ia==ib)THEN
+          w=2.d0*w
+        END IF
+        IF(ia<ib)THEN
+          ia=rlc(l)
+          ib=clc(k)
+        END IF
+      END IF
+      !$omp atomic
+      A(ia,ib) = A(ia,ib) + w
     END DO
   END DO
 END DO
-DEALLOCATE(T,pt_kr,pt_lc,pt_val)
-END SUBROUTINE tw_junction_reduce_dense
+END SUBROUTINE tw_junction_scatter_add
+!---------------------------------------------------------------------------------
+!> Hash of the junction map P, used to key cache files (0 for a model without junctions)
+!---------------------------------------------------------------------------------
+FUNCTION tw_junction_hash(self) RESULT(hash)
+TYPE(tw_type), TARGET, INTENT(in) :: self !< Thin-wall model object
+INTEGER(4) :: hash !< Hash of the map
+IF(.NOT.ASSOCIATED(self%junc))THEN
+  hash=0
+  RETURN
+END IF
+hash=oft_simple_hash(C_LOC(self%junc%p_kr),INT(4*SIZE(self%junc%p_kr),8))
+hash=oft_simple_hash(C_LOC(self%junc%p_lc),INT(4*SIZE(self%junc%p_lc),8),starting_value=hash)
+hash=oft_simple_hash(C_LOC(self%junc%p_val),INT(8*SIZE(self%junc%p_val),8),starting_value=hash)
+END FUNCTION tw_junction_hash
 !---------------------------------------------------------------------------------
 !> Transpose of the junction map, P^T in CSR form
 !---------------------------------------------------------------------------------
@@ -4118,42 +4262,6 @@ self%Rmat=>Rred
 DEALLOCATE(pt_kr,pt_lc,pt_val,tmp,mark,kr,lc,mvals,acc,ind)
 END SUBROUTINE tw_junction_reduce_sparse
 !---------------------------------------------------------------------------------
-!> Compute the inductance matrix (reduced to the junction unknowns if present)
-!---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_LmatDirect(row_model,Lmat,col_model,save_file)
-TYPE(tw_type), TARGET, INTENT(in) :: row_model !< Thin-wall model object for rows
-REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix
-TYPE(tw_type), TARGET, OPTIONAL, INTENT(in) :: col_model !< Thin-wall model object for columns
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
-REAL(8), CONTIGUOUS, POINTER :: Lexp(:,:)
-IF(PRESENT(col_model))THEN
-  IF(.NOT.(ASSOCIATED(row_model%junc).OR.ASSOCIATED(col_model%junc)))THEN
-    CALL tw_compute_LmatDirect_exp(row_model,Lmat,col_model,save_file)
-    RETURN
-  END IF
-  Lexp=>NULL()
-  CALL tw_compute_LmatDirect_exp(row_model,Lexp,col_model,save_file)
-  IF(ASSOCIATED(col_model%junc))CALL tw_junction_reduce_rows(col_model,Lexp)
-  IF(ASSOCIATED(row_model%junc))CALL tw_junction_reduce_cols(row_model,Lexp)
-  IF(ASSOCIATED(Lmat))THEN
-    Lmat=Lexp
-    DEALLOCATE(Lexp)
-  ELSE
-    Lmat=>Lexp
-  END IF
-  RETURN
-END IF
-IF(.NOT.ASSOCIATED(row_model%junc))THEN
-  CALL tw_compute_LmatDirect_exp(row_model,Lmat,save_file=save_file)
-  RETURN
-END IF
-Lexp=>NULL()
-CALL tw_compute_LmatDirect_exp(row_model,Lexp,save_file=save_file)
-IF(.NOT.ASSOCIATED(Lmat))ALLOCATE(Lmat(row_model%nelems,row_model%nelems))
-CALL tw_junction_reduce_dense(row_model,Lexp,Lmat)
-DEALLOCATE(Lexp)
-END SUBROUTINE tw_compute_LmatDirect
-!---------------------------------------------------------------------------------
 !> Compute the resistance matrix (reduced to the junction unknowns if present)
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Rmat(tw_obj,keep_closures)
@@ -4236,27 +4344,6 @@ CALL tw_compute_mutuals_exp(tw_obj,nsensors,sensors,save_file)
 IF(.NOT.ASSOCIATED(tw_obj%junc))RETURN
 CALL tw_junction_reduce_cols(tw_obj,tw_obj%Ael2sen)
 END SUBROUTINE tw_compute_mutuals
-!---------------------------------------------------------------------------------
-!> Compute the magnetic field operators (reduced to the junction unknowns if present)
-!---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Bops(self,B_dx,save_file)
-TYPE(tw_type), INTENT(inout) :: self !< Thin-wall model object
-REAL(r8), INTENT(in) :: B_dx !< Distance for finite-difference field evaluation
-CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
-INTEGER(4) :: e,k
-REAL(r8), POINTER, CONTIGUOUS, DIMENSION(:,:,:) :: Bred
-CALL tw_compute_Bops_exp(self,B_dx,save_file)
-IF(.NOT.ASSOCIATED(self%junc))RETURN
-ALLOCATE(Bred(SIZE(self%Bel,DIM=1),self%nelems,3))
-Bred=0.d0
-DO e=1,tw_nelems_exp(self)
-  DO k=self%junc%p_kr(e),self%junc%p_kr(e+1)-1
-    Bred(:,self%junc%p_lc(k),:)=Bred(:,self%junc%p_lc(k),:)+self%junc%p_val(k)*self%Bel(:,e,:)
-  END DO
-END DO
-DEALLOCATE(self%Bel)
-self%Bel=>Bred
-END SUBROUTINE tw_compute_Bops
 !---------------------------------------------------------------------------------
 !> Current through a jumper (expanding junction unknowns if present)
 !---------------------------------------------------------------------------------
