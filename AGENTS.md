@@ -146,6 +146,9 @@ ROOT_PATH=$(pwd)
 BUILD_DIR=$ROOT_PATH/build_release
 INSTALL_DIR=$ROOT_PATH/install_release
 
+# Activate the venv so the configured pytest is the one in it, however the script is run
+source $ROOT_PATH/../setup_env.sh
+
 rm -rf $BUILD_DIR
 mkdir $BUILD_DIR && cd $BUILD_DIR
 
@@ -169,7 +172,7 @@ Notes for this configuration:
 - Use the default `gcc`/`g++`/`gfortran` (GCC 13) so the compilers match the ones Ubuntu used to build the OpenMPI Fortran modules.
 - Ubuntu ships HDF5 1.10, which lacks the Fortran file-space-strategy API (added in 1.14.3). OFT builds fine but persistent free-space tracking in HDF5 output files is disabled, and a warning is printed when it is requested.
 - OpenMPI refuses to run as root by default. In a root sandbox, `export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1` before running tests.
-- Pass `OFT_PYTEST_EXE` explicitly if another `pytest` (eg. a user-level install) appears on `PATH` ahead of the venv.
+- `config_cmake.sh` sources `setup_env.sh` itself, so re-running it later resolves `pytest` from the venv rather than whatever happens to be on `PATH`.
 
 ### Python packaging information
 
