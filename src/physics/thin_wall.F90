@@ -87,7 +87,9 @@ END TYPE tw_sensors
 !> Structure containing filament coil definition
 !---------------------------------------------------------------------------------
 TYPE :: tw_gen_coil
+  LOGICAL :: is_ring = .FALSE. !< Circular coil about the Z axis, defined by its radius and height?
   INTEGER(i4) :: npts = 0 !< Number of points in coil
+  REAL(r8) :: ring_rz(2) = 0.d0 !< Radius and height of a circular coil
   REAL(r8), POINTER, DIMENSION(:,:) :: pts => NULL() !< Points [3,npts]
 END TYPE tw_gen_coil
 !---------------------------------------------------------------------------------
@@ -166,6 +168,7 @@ REAL(r8), PARAMETER :: coil_min_rad = 1.d-6
 TYPE(oft_quad_type), TARGET, SAVE :: tw_quads(18) !< Triangle quadrature rules of orders 1-18 (shared)
 LOGICAL, SAVE :: tw_quads_ready = .FALSE. !< Have tw_quads been set up?
 integer(i4), public, parameter :: tw_idx_ver=1 !< File version for array indexing
+integer(i4), public, parameter :: tw_cache_ver=2 !< Version of cached matrix files (increment when a change invalidates existing caches)
 character(LEN=16), public, parameter :: tw_idx_path="ThinCurr_Version" !< HDF5 field name
 CONTAINS
 !---------------------------------------------------------------------------------
@@ -182,6 +185,55 @@ IF(.NOT.tw_quads_ready)THEN
 END IF
 !$omp end critical (tw_quads_init)
 END SUBROUTINE tw_quads_setup
+!---------------------------------------------------------------------------------
+!> Hash of the coil definitions of a model, seeded with the cache file version, for keys of cached matrices
+!---------------------------------------------------------------------------------
+FUNCTION tw_coil_hash(self) RESULT(hash)
+TYPE(tw_type), INTENT(in) :: self !< ThinCurr object
+INTEGER(4) :: hash
+INTEGER(4) :: i
+hash=tw_cache_ver
+DO i=1,self%n_icoils
+  hash=coil_set_hash(self%icoils(i),hash)
+END DO
+DO i=1,self%n_vcoils
+  hash=coil_set_hash(self%vcoils(i),hash)
+END DO
+CONTAINS
+FUNCTION coil_set_hash(coil_set,hash_in) RESULT(hash_out)
+TYPE(tw_coil_set), INTENT(in) :: coil_set
+INTEGER(4), INTENT(in) :: hash_in
+INTEGER(4) :: hash_out,j
+INTEGER(4), TARGET :: itmp(2)
+REAL(8), TARGET :: rtmp(2)
+itmp=[coil_set%ncoils,0]
+hash_out=oft_simple_hash(C_LOC(itmp),INT(4*2,8),starting_value=hash_in)
+IF(ASSOCIATED(coil_set%scales))hash_out=oft_simple_hash(C_LOC(coil_set%scales),INT(8*coil_set%ncoils,8),starting_value=hash_out)
+IF(ASSOCIATED(coil_set%radius))hash_out=oft_simple_hash(C_LOC(coil_set%radius),INT(8*coil_set%ncoils,8),starting_value=hash_out)
+IF(ASSOCIATED(coil_set%res_per_len))hash_out=oft_simple_hash(C_LOC(coil_set%res_per_len),INT(8*coil_set%ncoils,8),starting_value=hash_out)
+DO j=1,coil_set%ncoils
+  itmp=[coil_set%coils(j)%npts,0]
+  IF(coil_set%coils(j)%is_ring)itmp(2)=1
+  hash_out=oft_simple_hash(C_LOC(itmp),INT(4*2,8),starting_value=hash_out)
+  IF(coil_set%coils(j)%is_ring)THEN
+    rtmp=coil_set%coils(j)%ring_rz
+    hash_out=oft_simple_hash(C_LOC(rtmp),INT(8*2,8),starting_value=hash_out)
+  ELSE
+    hash_out=oft_simple_hash(C_LOC(coil_set%coils(j)%pts),INT(8*3*coil_set%coils(j)%npts,8),starting_value=hash_out)
+  END IF
+END DO
+END FUNCTION coil_set_hash
+END FUNCTION tw_coil_hash
+!---------------------------------------------------------------------------------
+!> Hash of the mesh and coil definitions of a model, for keys of cached coil and sensor matrices
+!---------------------------------------------------------------------------------
+FUNCTION tw_model_hash(self) RESULT(hash)
+TYPE(tw_type), INTENT(in) :: self !< ThinCurr object
+INTEGER(4) :: hash
+hash=tw_coil_hash(self)
+hash=oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=hash)
+hash=oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8),starting_value=hash)
+END FUNCTION tw_model_hash
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -657,36 +709,27 @@ DO i=1,SIZE(self%jumper_nsets)
 END DO
 END SUBROUTINE tw_save_debug
 !---------------------------------------------------------------------------------
-!> Check whether a coil is a circle about the Z axis (closed, constant R and Z, one turn) and return its
-!! radius, height and orientation
+!> Define a circular coil about the Z axis from its radius and height
+!!
+!! The coil is flagged as circular, so couplings use the exact ring formulas, and its points (traversed
+!! counter-clockwise about +Z) are generated for the paths that integrate the coil polygon.
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_coil_ring(coil,rc,zc,orient,is_ring)
-TYPE(tw_gen_coil), INTENT(in) :: coil !< Coil
-REAL(r8), INTENT(out) :: rc !< Ring radius
-REAL(r8), INTENT(out) :: zc !< Ring height
-REAL(r8), INTENT(out) :: orient !< +1 if traversed counter-clockwise about +Z, -1 otherwise
-LOGICAL, INTENT(out) :: is_ring !< Is the coil a closed circle about the Z axis?
-INTEGER(4) :: k
-REAL(r8) :: turn,rk
-is_ring=.FALSE.; rc=0.d0; zc=0.d0; orient=0.d0
-IF(coil%npts<16)RETURN
+SUBROUTINE tw_coil_set_ring(coil,rz,npts)
+TYPE(tw_gen_coil), INTENT(inout) :: coil !< Coil
+REAL(r8), INTENT(in) :: rz(2) !< Radius and height
+INTEGER(i4), INTENT(in) :: npts !< Number of points for the coil polygon (181 if <= 0)
+INTEGER(i4) :: k
+REAL(r8) :: theta
+coil%is_ring=.TRUE.
+coil%ring_rz=rz
+coil%npts=npts
+IF(coil%npts<=0)coil%npts=181
+ALLOCATE(coil%pts(3,coil%npts))
 DO k=1,coil%npts
-  rc=rc+SQRT(coil%pts(1,k)**2+coil%pts(2,k)**2); zc=zc+coil%pts(3,k)
+  theta=(k-1)*2.d0*pi/REAL(coil%npts-1,8)
+  coil%pts(:,k)=[rz(1)*COS(theta),rz(1)*SIN(theta),rz(2)]
 END DO
-rc=rc/REAL(coil%npts,8); zc=zc/REAL(coil%npts,8)
-IF(rc<=0.d0)RETURN
-IF(SUM(ABS(coil%pts(:,1)-coil%pts(:,coil%npts)))>1.d-9*rc)RETURN
-turn=0.d0
-DO k=1,coil%npts
-  rk=SQRT(coil%pts(1,k)**2+coil%pts(2,k)**2)
-  IF(ABS(rk-rc)>1.d-9*rc.OR.ABS(coil%pts(3,k)-zc)>1.d-9*rc)RETURN
-  IF(k>1)turn=turn+ATAN2(coil%pts(1,k-1)*coil%pts(2,k)-coil%pts(2,k-1)*coil%pts(1,k), &
-    coil%pts(1,k-1)*coil%pts(1,k)+coil%pts(2,k-1)*coil%pts(2,k))
-END DO
-IF(ABS(ABS(turn)-2.d0*pi)>1.d-6)RETURN
-orient=SIGN(1.d0,turn)
-is_ring=.TRUE.
-END SUBROUTINE tw_coil_ring
+END SUBROUTINE tw_coil_set_ring
 !---------------------------------------------------------------------------------
 !> Compute element to driver (Icoils) coupling matrix
 !!
@@ -697,7 +740,7 @@ SUBROUTINE tw_compute_Ael2dr(tw_obj,save_file)
 TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 LOGICAL :: exists
-INTEGER(4) :: i,ii,j,jj,k,kk,ik,ncoils_tot,ih,ihp,ihc,file_counts(3),ierr,io_unit,iquad
+INTEGER(4) :: i,ii,j,jj,k,kk,ik,ncoils_tot,ih,ihp,ihc,file_counts(4),ierr,io_unit,iquad
 INTEGER(i4), ALLOCATABLE :: nrad_cross(:)
 REAL(8) :: tmp(3),cvec(3),cpt(3),pt_i(3),evec_i(3,3),pts_i(3,3),elapsed_time
 REAL(8) :: pot_tmp,rgop(3,3),area_i,norm_i(3),f(3),dl_min,dl_max,pot_last
@@ -718,9 +761,9 @@ IF(PRESENT(save_file))THEN
       CALL oft_increase_indent
       OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
       READ(io_unit, IOSTAT=ierr)file_counts
-      IF((ierr/=0).OR.ANY(file_counts/=[tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils]))THEN
+      IF((ierr/=0).OR.ANY(file_counts/=[tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils,tw_model_hash(tw_obj)]))THEN
         exists=.FALSE.
-        WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Sizes do not match'
+        WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Model, coils or cache version do not match'
       END IF
       IF(exists)THEN
         ALLOCATE(tw_obj%Ael2coil(tw_obj%nelems,tw_obj%n_vcoils))
@@ -794,7 +837,8 @@ ALLOCATE(ring_ok(k,ncoils_tot),ring_rz(3,k,ncoils_tot))
 ring_ok=.FALSE.
 DO j=1,ncoils_tot
   DO k=1,coils_tot(j)%ncoils
-    CALL tw_coil_ring(coils_tot(j)%coils(k),ring_rz(1,k,j),ring_rz(2,k,j),ring_rz(3,k,j),ring_ok(k,j))
+    ring_ok(k,j)=coils_tot(j)%coils(k)%is_ring
+    ring_rz(:,k,j)=[coils_tot(j)%coils(k)%ring_rz(1),coils_tot(j)%coils(k)%ring_rz(2),1.d0]
   END DO
 END DO
 Ael2coil_tmp=0.d0
@@ -826,13 +870,14 @@ DO i=1,bmesh%nc
           dl_min=MIN(dl_min,dring)
           dl_max=MAX(dl_max,dring)
         END DO
-        IF(dl_min<coils_tot(j)%radius(k))THEN
-          !$omp atomic
-          nrad_cross(j)=nrad_cross(j)+1
-        END IF
         iquad=18
         IF(dl_min>1.d-8)iquad=MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
         IF(iquad<=10)THEN
+          !---Elements close to the ring use the polygon path below, which counts intersections itself
+          IF(dl_min<coils_tot(j)%radius(k))THEN
+            !$omp atomic
+            nrad_cross(j)=nrad_cross(j)+1
+          END IF
           avec=0.d0
           DO ii=1,quads(iquad)%np
             pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
@@ -944,7 +989,7 @@ CALL tw_compute_Lmat_coils(tw_obj)
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-    WRITE(io_unit)tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils
+    WRITE(io_unit)tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils,tw_model_hash(tw_obj)
     WRITE(io_unit)tw_obj%Ael2coil
     WRITE(io_unit)tw_obj%Ael2dr
     IF(tw_obj%n_vcoils>0)WRITE(io_unit)tw_obj%Acoil2coil
@@ -1001,7 +1046,8 @@ ALLOCATE(ring_ok(k,ncoils_tot),ring_rz(3,k,ncoils_tot))
 ring_ok=.FALSE.
 DO j=1,ncoils_tot
   DO k=1,coils_tot(j)%ncoils
-    CALL tw_coil_ring(coils_tot(j)%coils(k),ring_rz(1,k,j),ring_rz(2,k,j),ring_rz(3,k,j),ring_ok(k,j))
+    ring_ok(k,j)=coils_tot(j)%coils(k)%is_ring
+    ring_rz(:,k,j)=[coils_tot(j)%coils(k)%ring_rz(1),coils_tot(j)%coils(k)%ring_rz(2),1.d0]
   END DO
 END DO
 !---Compute coupling between coils
@@ -1123,7 +1169,7 @@ ELSE
 END IF
 !
 IF(PRESENT(save_file))THEN
-  hash_tmp(3) = oft_simple_hash(C_LOC(row_obj%mesh%lc),INT(4*3*row_obj%mesh%nc,8))
+  hash_tmp(3) = oft_simple_hash(C_LOC(row_obj%mesh%lc),INT(4*3*row_obj%mesh%nc,8),starting_value=tw_coil_hash(row_obj))
   hash_tmp(4) = oft_simple_hash(C_LOC(col_obj%mesh%lc),INT(4*3*col_obj%mesh%nc,8))
   hash_tmp(5) = oft_simple_hash(C_LOC(row_obj%mesh%r),INT(8*3*row_obj%mesh%np,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(col_obj%mesh%r),INT(8*3*col_obj%mesh%np,8))
@@ -1583,7 +1629,7 @@ INTEGER(4), INTENT(in) :: nsensors !< Number of flux loops
 TYPE(floop_sensor), POINTER, INTENT(in) :: sensors(:) !< List of flux loops
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 LOGICAL :: exists
-INTEGER(4) :: i,ii,j,jj,k,kk,l,ik,jk,ih,ihp,ihc,file_counts(4),ierr,io_unit,iquad
+INTEGER(4) :: i,ii,j,jj,k,kk,l,ik,jk,ih,ihp,ihc,file_counts(5),ierr,io_unit,iquad,sens_hash
 REAL(8) :: tmp,dl,pt_i(3),pt_j(3),evec_i(3,3),evec_j(3,3),pts_i(3,3),pt_i_last(3)
 REAL(8) :: rvec_i(3),r1,rmag,rvec_j(3),z1,cvec(3),cpt(3),coil_thickness,elapsed_time
 REAL(8) :: rgop(3,3),norm_i(3),area_i,f(3),dl_min,dl_max,pot_last,pot_tmp
@@ -1595,6 +1641,11 @@ TYPE(oft_quad_type), POINTER :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
+!---Key for cached matrices: mesh, coils, sensors and cache version
+sens_hash=tw_model_hash(tw_obj)
+DO i=1,nsensors
+  sens_hash=oft_simple_hash(C_LOC(sensors(i)%r),INT(8*3*sensors(i)%np,8),starting_value=sens_hash)
+END DO
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     INQUIRE(FILE=TRIM(save_file),EXIST=exists)
@@ -1603,7 +1654,7 @@ IF(PRESENT(save_file))THEN
       CALL oft_increase_indent
       OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
       READ(io_unit, IOSTAT=ierr)file_counts
-      IF((ierr/=0).OR.ANY(file_counts/=[tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils,nsensors]))THEN
+      IF((ierr/=0).OR.ANY(file_counts/=[tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils,nsensors,sens_hash]))THEN
         exists=.FALSE.
         WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Sizes do not match'
       END IF
@@ -1831,7 +1882,7 @@ DEALLOCATE(Acoil2sen_tmp)
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-    WRITE(io_unit)tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils,nsensors
+    WRITE(io_unit)tw_obj%nelems,tw_obj%n_vcoils,tw_obj%n_icoils,nsensors,sens_hash
     WRITE(io_unit)tw_obj%Ael2sen
     ! WRITE(io_unit)tw_obj%Acoil2sen
     WRITE(io_unit)tw_obj%Adr2sen
@@ -2282,7 +2333,6 @@ REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),po
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
 INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
 LOGICAL :: is_neighbor,load_success
-INTEGER(c_int), PARAMETER :: Bops_cache_ver = 1 !< Cache file version (used as hash starting value)
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), POINTER :: quads(:)
 IF(PRESENT(save_file))THEN
@@ -2406,7 +2456,7 @@ IF(TRIM(save_file)/='none')THEN
   IF(exists)THEN
     hash_tmp(1) = self%nelems
     hash_tmp(2) = self%mesh%nc
-    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=Bops_cache_ver)
+    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=tw_coil_hash(self))
     hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
     WRITE(*,'(3A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
     CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
@@ -2437,7 +2487,7 @@ INTEGER(4) :: hash_tmp(4)
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = self%nelems
   hash_tmp(2) = self%mesh%nc
-  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=Bops_cache_ver)
+  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=tw_coil_hash(self))
   hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
   WRITE(*,'(2A)')oft_indent,'Saving B-field operator to file: ',TRIM(save_file)
   CALL hdf5_create_file(TRIM(save_file))
@@ -2584,9 +2634,9 @@ TYPE(oft_1d_int), POINTER, INTENT(inout) :: hole_ns(:)
 CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: error_string
 integer(4) :: ncoils,ncoil_sets,nread,coil_type,nmasked
 LOGICAL :: success
-INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims,n_jumpers
+INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims,n_jumpers,npts_tmp
 INTEGER(4), ALLOCATABLE :: dim_sizes(:)
-REAL(8) :: res_per_len,radius,dl,theta
+REAL(8) :: res_per_len,radius,dl,theta,rz_tmp(2)
 REAL(8), POINTER :: pts_tmp(:)
 CHARACTER(LEN=4) :: blknum,blknum2
 CHARACTER(LEN=16) :: coil_ind
@@ -2654,6 +2704,21 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
     !
     DO j=1,ncoils
       WRITE(blknum2,'(I4.4)')j
+      coil_path='thincurr/coils/coilset'//blknum//'/coil'//blknum2
+      !---Circular coil: radius and height (and optionally the number of polygon points)
+      IF(hdf5_field_exist(TRIM(filepath),TRIM(coil_path)//'/RZ'))THEN
+        CALL hdf5_read(rz_tmp,TRIM(filepath),TRIM(coil_path)//'/RZ',success=success)
+        npts_tmp=0
+        IF(success.AND.hdf5_field_exist(TRIM(filepath),TRIM(coil_path)//'/NPTS'))THEN
+          CALL hdf5_read(npts_tmp,TRIM(filepath),TRIM(coil_path)//'/NPTS',success=success)
+        END IF
+        IF(.NOT.success)THEN
+          WRITE(coil_ind,'(I6,2X,I6)')i,j
+          CALL oft_abort('Failed to read circular coil for coilset/coil '//coil_ind,'tw_load_coils_hdf5',__FILE__)
+        END IF
+        CALL tw_coil_set_ring(coil_tmp%coils(j),rz_tmp,npts_tmp)
+        CYCLE
+      END IF
       CALL hdf5_field_get_sizes(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/coil'//blknum2//'/PTS',ndims,dim_sizes)
       IF(ndims==2)THEN
         coil_tmp%coils(j)%npts=dim_sizes(2)
@@ -2866,7 +2931,7 @@ INTEGER(i4), INTENT(IN) :: name_offset !< Offset for coil set names
 INTEGER(4), INTENT(out) :: ncoils !< Number of coil sets found
 TYPE(tw_coil_set), POINTER, INTENT(out) :: coils(:) !< List of coil sets
 !---XML solver fields
-integer(4) :: ncoil_sets,nread,coil_type,nmasked
+integer(4) :: ncoil_sets,nread,nmasked,npts_tmp
 TYPE(xml_node) :: doc,thincurr_group
 TYPE(xml_node), POINTER :: coil_set,coil
 TYPE(xml_nodelist) :: coil_sets,coil_list
@@ -2874,8 +2939,8 @@ TYPE(xml_nodelist) :: coil_sets,coil_list
 LOGICAL :: success
 INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims
 INTEGER(4), ALLOCATABLE :: dim_sizes(:)
-REAL(8) :: res_per_len,radius,dl,theta
-REAL(8), POINTER :: pts_tmp(:)
+REAL(8) :: res_per_len,radius,dl
+REAL(8), POINTER :: pts2_tmp(:,:)
 CHARACTER(LEN=16) :: coil_ind
 CHARACTER(LEN=OFT_PATH_SLEN) :: coil_path
 CHARACTER(LEN=:), ALLOCATABLE :: str_tmp
@@ -2984,51 +3049,36 @@ DO i=1,ncoils
       END IF
       DEALLOCATE(str_tmp)
     ELSE
-      !---Read number of points
+      !---Read number of points (optional; polygon resolution for a circular coil)
+      npts_tmp=0
       IF(xml_hasAttribute(coil,"npts"))THEN
-        CALL xml_read_attribute(coil,"npts",coil_tmp%coils(j)%npts,iostat=ierr)
+        CALL xml_read_attribute(coil,"npts",npts_tmp,iostat=ierr)
         IF(ierr/=0)THEN
           WRITE(coil_ind,'(I6,2X,I6)')i,j
           CALL oft_xml_abort('Error reading "npts" for coil '//coil_ind,'tw_load_coils_xml',__FILE__)
         END IF
-        coil_type=2
-      ELSE
-        coil_type=1
       END IF
-      SELECT CASE(coil_type)
-        CASE(1)
-          CALL xml_read_content(coil,pts_tmp,iostat=ierr)
-          IF(ierr/=0)THEN
-            WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_xml_abort('Error reading circular coil '//coil_ind,'tw_load_coils_xml',__FILE__)
-          END IF
-          IF(SIZE(pts_tmp,1)/=2)THEN
-            WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_abort('Incorrect size of pts in RZ coil '//coil_ind,'tw_load_coils_xml',__FILE__)
-          END IF
-          IF(coil_tmp%coils(j)%npts==0)coil_tmp%coils(j)%npts=181
-          ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
-          DO k=1,coil_tmp%coils(j)%npts
-            theta=(k-1)*2.d0*pi/REAL(coil_tmp%coils(j)%npts-1,8)
-            coil_tmp%coils(j)%pts(:,k)=[pts_tmp(1)*COS(theta),pts_tmp(1)*SIN(theta),pts_tmp(2)]
-          END DO
-          DEALLOCATE(pts_tmp)
-        CASE(2)
-          ! ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
-          CALL xml_read_content(coil,coil_tmp%coils(j)%pts,iostat=ierr)
-          IF(ierr/=0)THEN
-            WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_xml_abort('Error reading coil '//coil_ind,'tw_load_coils_xml',__FILE__)
-          END IF
-          IF(SIZE(coil_tmp%coils(j)%pts,1)/=3)THEN
-            WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_abort('Incorrect first dimension of coil points in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
-          END IF
-          IF(SIZE(coil_tmp%coils(j)%pts,2)/=coil_tmp%coils(j)%npts)THEN
-            WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_abort('Incorrect second dimension of coil points in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
-          END IF
-      END SELECT
+      !---Points: a single (R, Z) pair for a circular coil, otherwise rows of (x, y, z)
+      CALL xml_read_content(coil,pts2_tmp,iostat=ierr)
+      IF(ierr/=0)THEN
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
+        CALL oft_xml_abort('Error reading coil '//coil_ind,'tw_load_coils_xml',__FILE__)
+      END IF
+      IF(SIZE(pts2_tmp)==2)THEN
+        CALL tw_coil_set_ring(coil_tmp%coils(j),RESHAPE(pts2_tmp,[2]),npts_tmp)
+        DEALLOCATE(pts2_tmp)
+      ELSE
+        IF(SIZE(pts2_tmp,1)/=3)THEN
+          WRITE(coil_ind,'(I6,2X,I6)')i,j
+          CALL oft_abort('Incorrect first dimension of coil points in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
+        END IF
+        IF((npts_tmp>0).AND.(SIZE(pts2_tmp,2)/=npts_tmp))THEN
+          WRITE(coil_ind,'(I6,2X,I6)')i,j
+          CALL oft_abort('Incorrect second dimension of coil points in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
+        END IF
+        coil_tmp%coils(j)%npts=SIZE(pts2_tmp,2)
+        coil_tmp%coils(j)%pts=>pts2_tmp
+      END IF
     END IF
     !---Get scale factor
     IF(xml_hasAttribute(coil,"scale"))THEN

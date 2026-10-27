@@ -285,7 +285,7 @@ def run_td_for_Mirnov(meshfile,direct_flag,curr_waveform,lin_tol,mp_q):
 def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,use_aca=False,
                     icoils=None,vcoils=None,floops=None,curr_waveform=None,volt_waveform=None,
                     lin_tol=1.E-9,jumper_start=0,run_reduced=False,basepath=None,convert_xml=False,
-                    hodlr_opts=None):
+                    hodlr_opts=None,circular=False,convert_circular=False):
     """
     Common setup and run operations for thin-wall physics module test cases
     """
@@ -300,6 +300,9 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
         test_Icoil = ThinCurr_Icoil(name="Test")
         for icoil in icoils:
             R = icoil[0]; Z = icoil[1]
+            if circular:
+                test_Icoil.add_circular_subcoil([R, Z], npoints=nPhi)
+                continue
             coil_pts = []
             for i in range(nPhi):
                 phi = i*phi_fac
@@ -311,6 +314,10 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
             for j, vcoil in enumerate(vcoils):
                 test_Vcoil = ThinCurr_Vcoil(name="Test_{0:d}".format(j+1), resistivity_per_length=1.256637E-5, radius=1.E-2)
                 R = vcoil[0]; Z = vcoil[1]
+                if circular:
+                    test_Vcoil.add_circular_subcoil([R, Z], npoints=nPhi)
+                    xml.add_Vcoil(test_Vcoil)
+                    continue
                 vcoil_pts = []
                 for i in range(nPhi):
                     phi = i*phi_fac
@@ -323,6 +330,8 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
         mesh_tool_args = ["--in_file={0}".format(meshfile), "--out_file=test.h5", "--eta_from_xml=oft_in.xml"]
         if (icoils is not None) or (vcoils is not None):
             mesh_tool_args += ["--coils_from_xml=oft_in.xml"]
+            if convert_circular:
+                mesh_tool_args += ["--circular_coils"]
         if jumper_start > 0:
             mesh_tool_args += ["--jumper_range", "{0}".format(jumper_start-1)]
         result = subprocess.run([sys.executable, os.path.join(python_dir, "OFT_ThinCurr_mesh_tool.py"), "modify"] + mesh_tool_args,
@@ -906,8 +915,8 @@ def test_fr_plate(direct_flag,convert_xml):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_td_plate_volt(direct_flag,convert_xml):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.697889E-4, 3.952895E-4), rel=1.E-3)
-    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1740.218], rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.580643E-4, 3.854292E-4), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1697.895], rel=1.E-3)
     assert ThinCurr_setup("tw_test-plate.h5",1,direct_flag,convert_xml=convert_xml,
                            vcoils=((0.5, 0.1),),
                            floops=((0.5, -0.05), (0.5, -0.1)),
@@ -949,13 +958,33 @@ def test_fr_cyl(direct_flag,convert_xml):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_td_cyl_volt(direct_flag,convert_xml):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.811460E-4, 1.540271E-4), rel=1.E-3)
-    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.344134E3, 1344.134, 786.6749, 786.6708], rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.504279E-4, 1.276624E-4), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.1203960E3, 1120.396, 655.853, 655.850], rel=1.E-3)
     assert ThinCurr_setup("tw_test-cyl.h5",1,direct_flag,convert_xml=convert_xml,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
                            volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)),
                            jumper_start=2)
+    assert validate_td(sigs_final,jumpers_final)
+
+# Circular coils, defined by radius and height in the XML file ('xml') or the mesh file ('mesh'), or converted from
+# point lists by OFT_ThinCurr_mesh_tool ('converted')
+circular_coil_defs = {
+    'xml': {'circular': True},
+    'mesh': {'circular': True, 'convert_xml': True},
+    'converted': {'convert_xml': True, 'convert_circular': True}
+}
+
+@pytest.mark.parametrize("direct_flag", ('F', 'T'))
+@pytest.mark.parametrize("coil_def", ('xml', 'mesh', 'converted'))
+def test_td_cyl_volt_circular(direct_flag,coil_def):
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.811460E-4, 1.540271E-4), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.344134E3, 1344.134, 786.6749, 786.6708], rel=1.E-3)
+    assert ThinCurr_setup("tw_test-cyl.h5",1,direct_flag,
+                           vcoils=((1.1, 0.25), (1.1, -0.25)),
+                           floops=((0.9, 0.5), (0.9, 0.0)),
+                           volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)),
+                           jumper_start=2,**circular_coil_defs[coil_def])
     assert validate_td(sigs_final,jumpers_final)
 
 #============================================================================
@@ -980,6 +1009,17 @@ def test_td_torus(direct_flag,convert_xml):
                            lin_tol=1.E-11)
     assert validate_td(sigs_final)
 
+@pytest.mark.parametrize("direct_flag", ('F', 'T'))
+@pytest.mark.parametrize("coil_def", ('xml', 'mesh', 'converted'))
+def test_td_torus_circular(direct_flag,coil_def):
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.774091E-4, 3.369676E-5), rel=1.E-3)
+    assert ThinCurr_setup("tw_test-torus.h5",1,direct_flag,
+                           icoils=((1.5, 0.5), (1.5, -0.5)),
+                           floops=((1.4, 0.0), (0.6, 0.0)),
+                           curr_waveform=((-1.0, 0.0), (0.0, 0.0), (1.0, 1.0)),
+                           lin_tol=1.E-11,**circular_coil_defs[coil_def])
+    assert validate_td(sigs_final)
+
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("convert_xml", (False, True))
@@ -995,8 +1035,8 @@ def test_fr_torus(direct_flag,convert_xml):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_td_torus_volt(direct_flag,convert_xml):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((7.415830E-5, 5.237280E-6), rel=1.E-3)
-    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([None, -780.3012, 485.3943, 485.3945], rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((5.653338E-5, 4.035387E-6), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([None, -597.6068, 371.74769, 371.74780], rel=1.E-3)
     assert ThinCurr_setup("tw_test-torus.h5",1,direct_flag,convert_xml=convert_xml,
                            vcoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
@@ -1038,16 +1078,24 @@ def test_torus_fourier_sensor(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_eig_passive(direct_flag):
-    eigs = approx_list((1.489372E-1, 6.275102E-2, 3.042023E-2, 2.794258E-2), rel=1.E-5)
+    eigs = approx_list((1.503561E-1, 6.420533E-2, 3.188782E-2, 2.941118E-2), rel=1.E-5)
     assert ThinCurr_setup(None,2,direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)))
     assert validate_eigs(eigs)
 
+@pytest.mark.parametrize("direct_flag", ('F', 'T'))
+def test_eig_passive_circular(direct_flag):
+    eigs = approx_list((1.489372E-1, 6.275102E-2, 3.042023E-2, 2.794258E-2), rel=1.E-5)
+    assert ThinCurr_setup(None,2,direct_flag,eta=1.E4,
+                           vcoils=((0.5, 0.1), (0.5, 0.05),
+                                   (0.5, -0.05), (0.5, -0.1)),circular=True)
+    assert validate_eigs(eigs)
+
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_passive(direct_flag):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((7.943987E-4, 8.073331E-4), rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((8.326557E-4, 8.347735E-4), rel=1.E-3)
     assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
                           icoils=((0.5, 0.1),),
                           vcoils=((0.5, 0.0),),
@@ -1058,8 +1106,8 @@ def test_td_passive(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_fr_passive(direct_flag):
-    fr_real = approx_list((1.846110E-1, 1.917997E-1), rel=1.E-4)
-    fr_imag = approx_list((-2.270568E-4, -1.628597E-4), rel=1.E-4)
+    fr_real = approx_list((1.947713E-1, 1.990873E-1), rel=1.E-4)
+    fr_imag = approx_list((-2.175942E-4, -1.560726E-4), rel=1.E-4)
     assert ThinCurr_setup(None,3,direct_flag,eta=1.E4,freq=5.E3,fr_limit=0,
                            icoils=((0.5, 0.1),),
                            vcoils=((0.5, 0.0),),
@@ -1069,8 +1117,8 @@ def test_fr_passive(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_passive_volt(direct_flag):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.294931E-4, 4.364880E-4), rel=1.E-3)
-    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([-673.7921, 1720.974], rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.379235E-4, 4.389248E-4), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([-641.4736, 1673.2893], rel=1.E-3)
     assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
                           vcoils=((0.5, 0.0), (0.5, 0.1)),
                           floops=((0.5, -0.05), (0.5, -0.1)),
@@ -1144,8 +1192,8 @@ def test_fr_aca_single():
 @pytest.mark.coverage
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_td_volt_aca(convert_xml):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.820654E-4, 1.555350E-4), rel=1.E-3)
-    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.347541E3, 1347.541, 788.3597, 788.3588], rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.513623E-4, 1.292107E-4), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.122550E3, 1122.550, 656.9544, 656.9797], rel=1.E-3)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,convert_xml=convert_xml,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),

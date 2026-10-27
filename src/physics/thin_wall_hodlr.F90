@@ -926,7 +926,7 @@ IF(TRIM(save_file)/='none')THEN
   sparse_hash%nsparse = self%nsparse
   sparse_hash%aca_tol = REAL(self%L_aca_tol,c_float)
   sparse_hash%svd_tol = REAL(self%L_svd_tol,c_float)
-  hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+  hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8),starting_value=tw_cache_ver)
   DO i=1,self%nlevels
     hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
   END DO
@@ -990,7 +990,7 @@ IF(TRIM(save_file)/='none')THEN
     sparse_hash%nsparse = self%nsparse
     sparse_hash%aca_tol = REAL(self%L_aca_tol,c_float)
     sparse_hash%svd_tol = REAL(self%L_svd_tol,c_float)
-    hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+    hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8),starting_value=tw_cache_ver)
     DO i=1,self%nlevels
       hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
     END DO
@@ -1690,7 +1690,7 @@ IF(TRIM(save_file)/='none')THEN
   sparse_hash%nsparse = self%nsparse
   sparse_hash%aca_tol = REAL(self%B_aca_tol,c_float)
   sparse_hash%svd_tol = REAL(self%B_svd_tol,c_float)
-  hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+  hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8),starting_value=tw_cache_ver)
   DO i=1,self%nlevels
     hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
   END DO
@@ -1767,7 +1767,7 @@ IF(TRIM(save_file)/='none')THEN
     sparse_hash%nsparse = self%nsparse
     sparse_hash%aca_tol = REAL(self%B_aca_tol,c_float)
     sparse_hash%svd_tol = REAL(self%B_svd_tol,c_float)
-    hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+    hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8),starting_value=tw_cache_ver)
     DO i=1,self%nlevels
       hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
     END DO
