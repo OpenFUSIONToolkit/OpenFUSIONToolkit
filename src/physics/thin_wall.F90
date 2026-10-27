@@ -2149,6 +2149,88 @@ ELSE
 END IF
 END FUNCTION tw_cell_pair_kernel
 !---------------------------------------------------------------------------------
+!> Compute the B-field at a point from the three basis functions of a triangle (without the 1/(4 pi) factor)
+!!
+!! Far points use quadrature of the Biot-Savart kernel; near points (and points on the cell) use centered finite
+!! differences of the analytic potential (@ref tw_compute_phipot). Requires @ref tw_quads_setup.
+!---------------------------------------------------------------------------------
+FUNCTION tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_i,pt,va,B_dx) RESULT(atmp)
+REAL(8), INTENT(in) :: pts_i(3,3) !< Vertices of triangle
+REAL(8), INTENT(in) :: evec_i(3,3) !< Basis function current directions
+REAL(8), INTENT(in) :: area_i !< Area of triangle
+REAL(8), INTENT(in) :: norm_i(3) !< Unit normal of triangle
+REAL(8), INTENT(in) :: pt(3) !< Evaluation point
+REAL(8), INTENT(in) :: va !< Vertex area of evaluation point
+REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation
+REAL(8) :: atmp(3,3) !< B-field from each basis function [3,3]
+INTEGER(4) :: ii,jj,ik,iquad
+REAL(8) :: dl_min,dl_max,d2,tmp,pt_j(3),pt_i(3),diffvec(3),gvec(3)
+LOGICAL :: is_neighbor
+!---Compute minimum separation (squared distances)
+dl_min=1.d99
+dl_max=MAX(area_i,va/(pi**2))
+DO ii=1,3
+  d2=SUM((pts_i(:,ii)-pt)**2)
+  dl_min=MIN(dl_min,d2)
+  dl_max=MAX(dl_max,d2)
+END DO
+dl_min=SQRT(dl_min)
+dl_max=SQRT(dl_max)
+!---Chose quadrature order based on distance
+IF(dl_min<1.d-8)THEN
+  iquad = 18
+  is_neighbor=.TRUE.
+ELSE
+  iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
+  is_neighbor=.FALSE.
+END IF
+!
+pt_j=pt
+IF(iquad>10)THEN
+  IF(is_neighbor)THEN
+    pt_j = pt_j - norm_i*10.d0*B_dx ! Sample just inside face
+  END IF
+  diffvec=0.d0
+  DO ik=1,2
+    IF(ik==2)pt_j=pt_j+norm_i*20.d0*B_dx ! Sample just outside face
+    DO jj=1,3
+      ! Forward step
+      pt_j(jj)=pt_j(jj)+B_dx
+      tmp=tw_compute_phipot(pts_i,pt_j)
+      diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
+      ! Backward step
+      pt_j(jj)=pt_j(jj)-2.d0*B_dx
+      tmp=tw_compute_phipot(pts_i,pt_j)
+      diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
+      pt_j(jj)=pt_j(jj)+B_dx ! Reset point
+    END DO
+    IF(.NOT.is_neighbor)EXIT
+  END DO
+  IF(is_neighbor)diffvec=diffvec/2.d0
+  DO ik=1,3
+    atmp(1,ik) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
+    atmp(2,ik) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
+    atmp(3,ik) = diffvec(1)*evec_i(2,ik) - diffvec(2)*evec_i(1,ik)
+  END DO
+ELSE
+  !---sum_q w (e x d)/|d|^3 = e x sum_q w d/|d|^3: one pass over the points for all three basis functions
+  gvec=0.d0
+  DO ii=1,tw_quads(iquad)%np
+    pt_i = pt_j - (tw_quads(iquad)%pts(1,ii)*pts_i(:,1) &
+      + tw_quads(iquad)%pts(2,ii)*pts_i(:,2) &
+      + tw_quads(iquad)%pts(3,ii)*pts_i(:,3))
+    d2=SUM(pt_i**2)
+    gvec = gvec + pt_i*(tw_quads(iquad)%wts(ii)/(d2*SQRT(d2)))
+  END DO
+  gvec=gvec*area_i
+  DO ik=1,3
+    atmp(1,ik) = evec_i(2,ik)*gvec(3) - evec_i(3,ik)*gvec(2)
+    atmp(2,ik) = evec_i(3,ik)*gvec(1) - evec_i(1,ik)*gvec(3)
+    atmp(3,ik) = evec_i(1,ik)*gvec(2) - evec_i(2,ik)*gvec(1)
+  END DO
+END IF
+END FUNCTION tw_cell_point_Bkernel
+!---------------------------------------------------------------------------------
 !> Compute \f$ \int 1/(r-r') dA' \f$ for a triangle
 !---------------------------------------------------------------------------------
 FUNCTION tw_compute_phipot(pt_cell,pt) RESULT(phi)
@@ -2232,64 +2314,8 @@ DO i=1,bmesh%nc
   !---Compute sensor couplings
   atmp=0.d0
   DO j=1,bmesh%np
-    pt_j=bmesh%r(:,j)
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,bmesh%va(j)/(pi**2))) !-1.d99
-    !!$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
-    DO ii=1,3
-      dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-      dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-      iquad = 18
-      is_neighbor=.TRUE.
-    ELSE
-      iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-      is_neighbor=.FALSE.
-    END IF
-    !
-    IF(iquad>10)THEN
-      IF(is_neighbor)THEN
-        ! pt_j = (SUM(pts_i,DIM=2)/3.d0 + 19.d0*pt_j)/20.d0 ! Move incrementally toward cell center
-        pt_j = pt_j - norm_j*10.d0*B_dx ! Sample just inside face
-      END IF
-      diffvec=0.d0
-      DO ik=1,2
-        IF(ik==2)pt_j=pt_j+norm_j*20.d0*B_dx ! Sample just outside face
-        DO jj=1,3
-          ! Forward step
-          pt_j(jj)=pt_j(jj)+B_dx
-          tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
-          ! Backward step
-          pt_j(jj)=pt_j(jj)-2.d0*B_dx
-          tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
-          pt_j(jj)=pt_j(jj)+B_dx ! Reset point
-        END DO
-        IF(.NOT.is_neighbor)EXIT
-      END DO
-      IF(is_neighbor)diffvec=diffvec/2.d0
-      DO ik=1,3
-        atmp(1,ik,j) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
-        atmp(2,ik,j) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
-        atmp(3,ik,j) = diffvec(1)*evec_i(2,ik) - diffvec(2)*evec_i(1,ik)
-      END DO
-    ELSE
-      DO ik=1,3
-        diffvec=0.d0
-        ! !$omp simd private(pt_i) reduction(+:diffvec)
-        DO ii=1,quads(iquad)%np
-          pt_i = pt_j - (quads(iquad)%pts(1,ii)*pts_i(:,1) &
-            + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-            + quads(iquad)%pts(3,ii)*pts_i(:,3))
-          diffvec = diffvec + cross_product(evec_i(:,ik),pt_i)*quads(iquad)%wts(ii)/(SUM(pt_i**2))**1.5d0
-        END DO
-        atmp(:,ik,j) = diffvec*area_i
-      END DO
-    END IF
+    !---Field from the cell's three basis functions
+    atmp(:,:,j)=tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_j,bmesh%r(:,j),bmesh%va(j),B_dx)
   END DO
   DO ii=1,3
     ik=self%pmap(bmesh%lc(ii,i))

@@ -377,64 +377,8 @@ DO i=1,bmesh%nc
   !---Compute sensor couplings
   atmp=0.d0
   DO j=1,bmesh%np
-    pt_j=bmesh%r(:,j)
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,bmesh%va(j)/(pi**2))) !-1.d99
-    !!$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
-    DO ii=1,3
-      dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-      dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-      iquad = 18
-      is_neighbor=.TRUE.
-    ELSE
-      iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-      is_neighbor=.FALSE.
-    END IF
-    !
-    IF(iquad>10)THEN
-      IF(is_neighbor)THEN
-        ! pt_j = (SUM(pts_i,DIM=2)/3.d0 + 19.d0*pt_j)/20.d0 ! Move incrementally toward cell center
-        pt_j = pt_j - norm_j*10.d0*B_dx ! Sample just inside face
-      END IF
-      diffvec=0.d0
-      DO ik=1,2
-        IF(ik==2)pt_j=pt_j+norm_j*20.d0*B_dx ! Sample just outside face
-        DO jj=1,3
-          ! Forward step
-          pt_j(jj)=pt_j(jj)+B_dx
-          tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
-          ! Backward step
-          pt_j(jj)=pt_j(jj)-2.d0*B_dx
-          tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
-          pt_j(jj)=pt_j(jj)+B_dx ! Reset point
-        END DO
-        IF(.NOT.is_neighbor)EXIT
-      END DO
-      IF(is_neighbor)diffvec=diffvec/2.d0
-      DO ik=1,3
-        atmp(1,ik,j) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
-        atmp(2,ik,j) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
-        atmp(3,ik,j) = diffvec(1)*evec_i(2,ik) - diffvec(2)*evec_i(1,ik)
-      END DO
-    ELSE
-      DO ik=1,3
-        diffvec=0.d0
-        ! !$omp simd private(pt_i) reduction(+:diffvec)
-        DO ii=1,quads(iquad)%np
-          pt_i = pt_j - (quads(iquad)%pts(1,ii)*pts_i(:,1) &
-            + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-            + quads(iquad)%pts(3,ii)*pts_i(:,3))
-          diffvec = diffvec + cross_product(evec_i(:,ik),pt_i)*quads(iquad)%wts(ii)/(SUM(pt_i**2))**1.5d0
-        END DO
-        atmp(:,ik,j) = diffvec*area_i
-      END DO
-    END IF
+    !---Field from the cell's three basis functions
+    atmp(:,:,j)=tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_j,bmesh%r(:,j),bmesh%va(j),B_dx)
   END DO
   DO ii=self%kfh(i),self%kfh(i+1)-1
     ik=ABS(self%lfh(1,ii))!+self%np_active
@@ -543,64 +487,8 @@ DO irow=1,row_block%ncells
     atmp=0.d0
     DO jcol=1,col_block%np
     j=col_block%ipts(jcol)
-    pt_j=bmesh%r(:,j)
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,bmesh%va(j)/(pi**2))) !-1.d99
-    !!$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
-    DO ii=1,3
-        dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-        dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-        iquad = 18
-        is_neighbor=.TRUE.
-    ELSE
-        iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-        is_neighbor=.FALSE.
-    END IF
-    !
-    IF(iquad>10)THEN
-        IF(is_neighbor)THEN
-            ! pt_j = (SUM(pts_i,DIM=2)/3.d0 + 19.d0*pt_j)/20.d0 ! Move incrementally toward cell center
-            pt_j = pt_j - norm_j*10.d0*B_dx ! Sample just inside face
-        END IF
-        diffvec=0.d0
-        DO ik=1,2
-            IF(ik==2)pt_j=pt_j+norm_j*20.d0*B_dx ! Sample just outside face
-            DO jj=1,3
-                ! Forward step
-                pt_j(jj)=pt_j(jj)+B_dx
-                tmp=tw_compute_phipot(pts_i,pt_j)
-                diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
-                ! Backward step
-                pt_j(jj)=pt_j(jj)-2.d0*B_dx
-                tmp=tw_compute_phipot(pts_i,pt_j)
-                diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
-                pt_j(jj)=pt_j(jj)+B_dx ! Reset point
-            END DO
-            IF(.NOT.is_neighbor)EXIT
-        END DO
-        IF(is_neighbor)diffvec=diffvec/2.d0
-        DO ik=1,3
-            atmp(1,ik,jcol) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
-            atmp(2,ik,jcol) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
-            atmp(3,ik,jcol) = diffvec(1)*evec_i(2,ik) - diffvec(2)*evec_i(1,ik)
-        END DO
-    ELSE
-        DO ik=1,3
-            diffvec=0.d0
-            ! !$omp simd private(pt_i) reduction(+:diffvec)
-            DO ii=1,quads(iquad)%np
-                pt_i = pt_j - (quads(iquad)%pts(1,ii)*pts_i(:,1) &
-                + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-                + quads(iquad)%pts(3,ii)*pts_i(:,3))
-                diffvec = diffvec + cross_product(evec_i(:,ik),pt_i)*quads(iquad)%wts(ii)/(SUM(pt_i**2))**1.5d0
-            END DO
-            atmp(:,ik,jcol) = diffvec*area_i
-        END DO
-    END IF
+    !---Field from the cell's three basis functions
+    atmp(:,:,jcol)=tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_j,bmesh%r(:,j),bmesh%va(j),B_dx)
     END DO
     DO ii=1,3
         ik=row_block%inv_map(bmesh%lc(ii,i)) !self%pmap(bmesh%lc(ii,i))
@@ -613,6 +501,60 @@ END DO
 Bop=Bop/(4.d0*pi)
 DEALLOCATE(atmp)
 END SUBROUTINE tw_compute_Bops_block
+!---------------------------------------------------------------------------------
+!> Compute all three directions of a block of the B-field operator in one pass (see @ref tw_compute_Bops_block)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_compute_Bops_block3(self,Bop,row_block,col_block,B_dx)
+TYPE(tw_type), INTENT(inout) :: self
+REAL(8), INTENT(out) :: Bop(:,:,:) !< Magnetic field evaluation matrix [col_block%np,row_block%nelems,3]
+TYPE(oft_tw_block), INTENT(in) :: row_block !< Block of rows to compute
+TYPE(oft_tw_block), INTENT(in) :: col_block !< Block of columns to compute
+REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
+REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
+REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
+REAL(r8), ALLOCATABLE :: atmp(:,:,:)
+INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad,irow,jcol
+LOGICAL :: is_neighbor
+CLASS(oft_bmesh), POINTER :: bmesh
+TYPE(oft_quad_type), POINTER :: quads(:)
+bmesh=>self%mesh
+CALL tw_quads_setup
+quads=>tw_quads
+Bop=0.d0
+f=1.d0/3.d0
+!WRITE(*,*)'Building element->element magnetic reconstruction operator'
+ALLOCATE(atmp(3,3,col_block%np))
+DO irow=1,row_block%ncells
+    i = row_block%icell(irow)
+    ! CALL bmesh%jacobian(i,f,rgop,area_i)
+    ! CALL bmesh%norm(i,f,norm_i)
+    area_i=bmesh%ca(i)
+    DO ii=1,3
+    pts_i(:,ii)=bmesh%r(:,bmesh%lc(ii,i))
+    ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
+    evec_i(:,ii)=self%qbasis(:,ii,i)
+    END DO
+    CALL bmesh%norm(i,f,norm_j)
+    !---Compute sensor couplings
+    atmp=0.d0
+    DO jcol=1,col_block%np
+    j=col_block%ipts(jcol)
+    !---Field from the cell's three basis functions
+    atmp(:,:,jcol)=tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_j,bmesh%r(:,j),bmesh%va(j),B_dx)
+    END DO
+    DO ii=1,3
+        ik=row_block%inv_map(bmesh%lc(ii,i)) !self%pmap(bmesh%lc(ii,i))
+        IF(ik==0)CYCLE
+        DO jj=1,3
+            DO j=1,col_block%np
+                Bop(j,ik,jj) = Bop(j,ik,jj) + atmp(jj,ii,j)
+            END DO
+        END DO
+    END DO
+END DO
+Bop=Bop/(4.d0*pi)
+DEALLOCATE(atmp)
+END SUBROUTINE tw_compute_Bops_block3
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -1564,6 +1506,7 @@ LOGICAL, ALLOCATABLE, DIMENSION(:) :: near_closure,cell_mark
 LOGICAL, ALLOCATABLE, DIMENSION(:,:) :: dense_blocks
 REAL(8) :: corners_i(3,8),corners_j(3,8),rmin(3),elapsed_time,avg_size,curr_size,target_size
 REAL(8), ALLOCATABLE, DIMENSION(:) :: point_block
+REAL(8), ALLOCATABLE, DIMENSION(:,:,:) :: Btmp
 TYPE(oft_native_dense_matrix), POINTER :: mat_tmp => NULL()
 type(oft_timer) :: mytimer
 WRITE(*,*)
@@ -1595,7 +1538,7 @@ mat_updated=.FALSE.
 ALLOCATE(dense_sizes(self%ndense),sparse_sizes(self%nsparse))
 dense_sizes=0
 sparse_sizes=0
-!$omp parallel private(i,ii,level,j,k,size_out,avg_size,dim,flip) reduction(+:compressed_size) &
+!$omp parallel private(i,ii,level,j,k,size_out,avg_size,dim,flip,Btmp) reduction(+:compressed_size) &
 !$omp reduction(.OR.:mat_updated)
 !$omp single
 nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
@@ -1607,14 +1550,20 @@ DO i=1,self%ndense
   j = self%dense_blocks(2,i)
   k = self%dense_blocks(3,i)
   !---Build full representation
-  DO dim=1,3
-    IF(.NOT.ASSOCIATED(self%dense_B_mats(i,dim)%M))THEN
-      mat_updated=.TRUE.
-      ALLOCATE(self%dense_B_mats(i,dim)%M(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems))
-      CALL tw_compute_Bops_block(self%tw_obj,self%dense_B_mats(i,dim)%M, &
-        self%levels(level)%blocks(k),self%levels(level)%blocks(j),dim,self%tw_obj%B_dx)
-    END IF
-  END DO
+  IF(.NOT.(ASSOCIATED(self%dense_B_mats(i,1)%M).AND.ASSOCIATED(self%dense_B_mats(i,2)%M) &
+    .AND.ASSOCIATED(self%dense_B_mats(i,3)%M)))THEN
+    mat_updated=.TRUE.
+    ALLOCATE(Btmp(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems,3))
+    CALL tw_compute_Bops_block3(self%tw_obj,Btmp, &
+      self%levels(level)%blocks(k),self%levels(level)%blocks(j),self%tw_obj%B_dx)
+    DO dim=1,3
+      IF(.NOT.ASSOCIATED(self%dense_B_mats(i,dim)%M))THEN
+        ALLOCATE(self%dense_B_mats(i,dim)%M(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems))
+        self%dense_B_mats(i,dim)%M=Btmp(:,:,dim)
+      END IF
+    END DO
+    DEALLOCATE(Btmp)
+  END IF
   dense_sizes(i) = 3*self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
   compressed_size = compressed_size + dense_sizes(i)
   !$omp critical
@@ -1663,14 +1612,19 @@ DO i=1,self%nsparse
         !---IF ACA+ failed or diagonal compute dense matrix
         IF(size_out<0)THEN
           ALLOCATE(self%aca_B_dense(ii,dim)%M(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems))
-          CALL tw_compute_Bops_block(self%tw_obj,self%aca_B_dense(ii,dim)%M, &
-            self%levels(level)%blocks(j),self%levels(level)%blocks(k),dim,self%tw_obj%B_dx)
+          IF(.NOT.ALLOCATED(Btmp))THEN ! all three directions in one pass, reused by the other directions
+            ALLOCATE(Btmp(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems,3))
+            CALL tw_compute_Bops_block3(self%tw_obj,Btmp, &
+              self%levels(level)%blocks(j),self%levels(level)%blocks(k),self%tw_obj%B_dx)
+          END IF
+          self%aca_B_dense(ii,dim)%M=Btmp(:,:,dim)
           CALL compress_block(ii,j,k,dim,self%B_svd_tol,size_out)
           ! size_out = self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
         END IF
       END IF
       sparse_sizes(i) = sparse_sizes(i) + size_out
     END DO
+    IF(ALLOCATED(Btmp))DEALLOCATE(Btmp)
   END DO
   compressed_size = compressed_size + sparse_sizes(i)
   !$omp critical
