@@ -1,0 +1,75 @@
+---
+name: oft-test
+description: Run, select, and write Open FUSION Toolkit (OFT) regression tests (pytest driving Fortran test programs and the TokaMaker/ThinCurr/Marklin Python APIs). Use when verifying a change, running the test suite or a single test, listing tests, debugging a failing or timing-out test, or adding a new test under src/tests.
+---
+
+# Testing OFT
+
+Tests use **pytest** and live in `src/tests/`, in subdirectories mirroring the source
+layout: `base/`, `grid/`, `lin_alg/`, `fem/`, `physics/`. Each holds `test_*.py` pytest
+files, the `test_*.F90` Fortran programs they drive, and data files (`.h5`, `.g`,
+`.inp`, …).
+
+## Before running anything
+
+1. **Tests run from the build tree, never the source tree.** The compiled Fortran test executables, copies of the test scripts and data, and the Python package all live under `<build_dir>`. Find `<build_dir>` with the `oft-build` skill ("Locate the build tree") — do not assume `builds/build_release`, which is only the CI/ephemeral layout. Also check that the build tree compiles *this* checkout (see "Check which source tree it builds" in `oft-build`), or you will be testing different code.
+2. **Rebuild first.** Run `make -j<N>` in `<build_dir>` after any source change, including edits to test `.py` files or data: they are copied into the build tree by `configure_file`, so the build-tree copy is stale until `make` runs. `make install` is not needed for tests.
+3. **Python environment.** `make test` and `run_test.sh` use the `pytest` recorded at configure time (`OFT_PYTEST_EXE`) and put that interpreter's directory first on `PATH`, so they work without activating anything as long as that environment still exists. If it is gone or broken, or you run `python`/`pytest` directly, you need the user's environment — ask which to use if not already known; in CI/ephemeral environments only, `source setup_env.sh`.
+
+## Running tests
+
+From `<build_dir>`:
+
+```bash
+make test            # pytest -m "not slow" base grid lin_alg fem physics
+make test_full       # all tests, including slow ones
+make test_examples   # example notebooks/programs (needs OFT_BUILD_EXAMPLES or OFT_BUILD_PYTHON)
+```
+
+`make test`/`test_full` write `<build_dir>/tests/OFT.junit.xml`. The full suite takes a
+long time — run it in the background, and prefer targeted runs while iterating.
+
+Targeted runs use `run_test.sh`, generated into `<build_dir>/tests/`. It sets `PATH`
+(build-tree `python/`, the configured interpreter, and the MPI that OFT was built
+against), `OFT_HAVE_MPI`, and `OFT_DEBUG_TEST`, then passes all arguments to pytest:
+
+```bash
+cd <build_dir>/tests
+./run_test.sh physics/test_TokaMaker.py                       # one file
+./run_test.sh physics/test_TokaMaker.py -k "test_name"        # matching tests
+./run_test.sh physics/test_TokaMaker.py --collect-only        # list tests
+./run_test.sh grid -m "not slow"                              # a folder, skipping slow tests
+```
+
+To call one test function directly, optionally with arguments `test_args`, from the
+build-tree directory containing `test_file.py`:
+
+```bash
+python -c "from test_file import test_name; test_name(*test_args)"
+```
+
+This bypasses `run_test.sh`, so use the user's Python environment and make sure the
+`PATH`/`OFT_HAVE_MPI` that `run_test.sh` would set are not needed (Fortran-driven and
+MPI tests need them).
+
+## Markers and environment
+
+- `@pytest.mark.slow` — excluded from `make test` and default CI runs; included by `make test_full`.
+- `@pytest.mark.mpi` — parallel tests needing MPI (`OFT_HAVE_MPI=1`, set by `run_test.sh` for MPI builds). The skip itself happens in `run_OFT()`, which calls `pytest.skip` when `nproc > 1` and `OFT_HAVE_MPI` is not `1`, so non-MPI builds report these as skipped rather than failed.
+- `@pytest.mark.coverage` — selected by coverage builds (`OFT_COVERAGE`).
+- `@pytest.mark.linear` — linear MHD tests.
+- Test timeouts are multiplied by 4× when `OFT_DEBUG_TEST=1` (Debug builds).
+
+## Debugging failures
+
+- Fortran-driven tests use `run_OFT()` from `oft_testing.py`, which launches the executable (under `mpirun` when `nproc > 1`) and kills it on timeout. Re-run the failing test alone with `-x -s` to see its output, or run the Fortran executable by hand in the test's build-tree directory.
+- A test that only fails under MPI is often picking up the wrong `mpirun`; run it through `run_test.sh`, which puts the MPI OFT was built against first on `PATH`.
+- If results look unaffected by your change, confirm `make` was run and the build tree points at this checkout.
+
+## Writing tests
+
+- Add the test file **and** every data file it reads to the subdirectory's `CMakeLists.txt` (`configure_file(<file> ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)`), and new Fortran programs with `oft_add_test(test_foo.F90)`; otherwise they never reach the build tree.
+- Use `run_OFT(command, nproc, timeout)` from `oft_testing.py` to run Fortran executables.
+- Only one `OFT_env` may exist per process. Physics Python tests (TokaMaker, ThinCurr, Marklin) run each case through an `mp_run()` helper that starts a `multiprocessing.Process` and returns results through a `multiprocessing.Queue` — follow the pattern in the existing test file rather than creating `OFT_env` at module level or twice in one process.
+- Mark cases too slow for routine CI as `@pytest.mark.slow`, and parallel cases as `@pytest.mark.mpi`.
+- Test functions do not need Doxygen-style documentation (see "Test and example code" in `AGENTS.md`); a short comment saying what is covered is welcome.
