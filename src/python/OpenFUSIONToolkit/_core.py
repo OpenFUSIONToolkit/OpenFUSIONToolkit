@@ -124,19 +124,21 @@ class OFT_env():
         # skip `atexit` handlers (finalizer runs at most once and only in the creating process)
         self._tempfiles_finalizer = multiprocessing.util.Finalize(None, self._remove_tempfiles, exitpriority=0)
         self.update_oft_in()
-        # Initialize OFT
+        # Get string sizes before initialization so paths passed to OFT can be checked
         slens = numpy.zeros((4,), dtype=numpy.int32)
-        ifile_c = c_char_p(self.oft_ifile.encode())
-        if abort_callback:
-            oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,oft_python_abort)
-        else:
-            oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,c_void_p())
+        oftpy_get_slens(slens)
         ## General string size
         self.oft_slen = slens[1]
         ## Path string size
         self.oft_path_slen = slens[2]
         ## Error string size
         self.oft_error_slen = slens[3]
+        # Initialize OFT
+        ifile_c = self.path2c(self.oft_ifile)
+        if abort_callback:
+            oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,oft_python_abort)
+        else:
+            oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,c_void_p())
         ## Value for marking a float quantity as disabled
         self.float_disable_flag = -1.E99
 

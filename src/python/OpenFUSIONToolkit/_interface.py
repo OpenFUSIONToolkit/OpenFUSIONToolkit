@@ -109,6 +109,10 @@ def oft_python_abort():
 oft_init = ctypes_subroutine(oftpy_lib.oftpy_init,
     [c_int, c_bool, c_char_p, ctypes_numpy_array(int32,1), c_void_p])
 
+# oftpy_get_slens(slens)
+oftpy_get_slens = ctypes_subroutine(oftpy_lib.oftpy_get_slens,
+    [ctypes_numpy_array(int32,1)])
+
 # oftpy_set_debug(debug_level)
 oftpy_set_debug = ctypes_subroutine(oftpy_lib.oftpy_set_debug,
     [c_int])
