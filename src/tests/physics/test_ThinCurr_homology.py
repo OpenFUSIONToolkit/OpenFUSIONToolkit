@@ -8,6 +8,7 @@
 # Meshes are built with GMSH by "create_ThinCurr_meshes.py".
 import os
 import sys
+import shlex
 import time
 import multiprocessing
 import pytest
@@ -42,9 +43,19 @@ methods = {
 }
 
 
+def script_cmd(script, *args):
+    '''Build a command string that runs a build-tree script under the interpreter running the tests
+
+    The generated stubs start with "#!/usr/bin/env python", so invoking them by name would pick up
+    whichever interpreter comes first on PATH instead of the one the tests are using.
+    '''
+    parts = [shlex.quote(sys.executable), shlex.quote(os.path.join(python_dir, script))]
+    return " ".join(parts + [shlex.quote(arg) for arg in args])
+
+
 def run_script(command):
-    '''Run a script, printing its output on failure'''
-    outs, errs, errcode = run_command(" ".join(command))
+    '''Run a build-tree script, printing its output on failure'''
+    outs, errs, errcode = run_command(script_cmd(command[0], *command[1:]))
     if errcode != 0:
         print("FAILED: {0} exited with non-zero error code!".format(command[0]))
         print("========== STD OUTPUT ==========")
@@ -171,7 +182,7 @@ def test_optimize():
 def test_invalid(mesh_name, message):
     '''Unsupported meshes are rejected, both when selecting holes and when verifying a mesh'''
     in_file = convert_mesh(mesh_name)
-    outs, errs, errcode = run_command("OFT_ThinCurr_holes.py --in_file={0}".format(in_file))
+    outs, errs, errcode = run_command(script_cmd("OFT_ThinCurr_holes.py", "--in_file={0}".format(in_file)))
     assert errcode != 0
     assert message in (outs + errs).decode()
     with pytest.raises(ValueError, match=message):

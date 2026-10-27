@@ -17,6 +17,7 @@ find_library(SUPERLU_DIST_LIBRARY
 
 find_path(SUPERLU_DIST_INCLUDE_DIR
   NAMES superlu_ddefs.h
+  PATH_SUFFIXES superlu-dist
 )
 
 include(FindPackageHandleStandardArgs)
