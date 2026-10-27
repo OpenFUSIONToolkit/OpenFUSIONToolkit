@@ -525,16 +525,12 @@ CALL tw_quads_setup
 quads=>tw_quads
 Bop=0.d0
 f=1.d0/3.d0
-!WRITE(*,*)'Building element->element magnetic reconstruction operator'
 ALLOCATE(atmp(3,3,col_block%np))
 DO irow=1,row_block%ncells
     i = row_block%icell(irow)
-    ! CALL bmesh%jacobian(i,f,rgop,area_i)
-    ! CALL bmesh%norm(i,f,norm_i)
     area_i=bmesh%ca(i)
     DO ii=1,3
     pts_i(:,ii)=bmesh%r(:,bmesh%lc(ii,i))
-    ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
     evec_i(:,ii)=self%qbasis(:,ii,i)
     END DO
     CALL bmesh%norm(i,f,norm_j)
@@ -546,7 +542,7 @@ DO irow=1,row_block%ncells
     atmp(:,:,jcol)=tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_j,bmesh%r(:,j),bmesh%va(j),B_dx)
     END DO
     DO ii=1,3
-        ik=row_block%inv_map(bmesh%lc(ii,i)) !self%pmap(bmesh%lc(ii,i))
+        ik=row_block%inv_map(bmesh%lc(ii,i))
         IF(ik==0)CYCLE
         DO jj=1,3
             DO j=1,col_block%np
