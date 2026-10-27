@@ -48,7 +48,10 @@ IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
 REAL(r8), PARAMETER :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
-INTEGER(i4), PARAMETER :: qprof_backend = 0 !< Flux-surface backend (q profile, averages, toroidal flux map, Sauter factors): 0 contour where supported, 1 field-line tracer (testing only; the sawtooth reset needs the contour and is skipped)
+!> Flux-surface backend of @ref gs_get_qprof, @ref gs_trace_surf, `gs_save_ifile`, `gs_save_eqdsk`, the averages,
+!! the toroidal flux map and the Sauter factors: 0 contour where supported, 1 field-line tracer (testing only;
+!! the sawtooth reset needs the contour and is skipped)
+INTEGER(i4), PARAMETER :: qprof_backend = 0
 !------------------------------------------------------------------------------
 !> Interpolation class for uniform source with simple tokamak representation
 !------------------------------------------------------------------------------
@@ -564,6 +567,22 @@ INTERFACE
     REAL(r8), OPTIONAL, INTENT(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
     LOGICAL, INTENT(out) :: done(nr) !< Surfaces evaluated (the others are left for the tracer)
   END SUBROUTINE gs_qprof_contour
+  !> @ref gs_trace_surf from the contour quadrature (see grad_shaf_contour.F90); `npoints=-1` if not available
+  MODULE SUBROUTINE gs_trace_surf_contour(gseq,psi_in,points,npoints)
+    CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+    REAL(r8), INTENT(in) :: psi_in !< Surface location in normalized flux
+    REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: points !< Surface points [2,npoints]
+    INTEGER(i4), INTENT(out) :: npoints !< Number of points
+  END SUBROUTINE gs_trace_surf_contour
+  !> LCFS outputs of @ref gs_get_qprof from the contour quadrature (see grad_shaf_contour.F90)
+  MODULE SUBROUTINE gs_lcfs_contour(gseq,psi_q1,dl,rbounds,zbounds,ok)
+    CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+    REAL(r8), INTENT(in) :: psi_q1 !< Surface location in normalized flux
+    REAL(r8), INTENT(out) :: dl !< Surface length
+    REAL(r8), INTENT(out) :: rbounds(2,2) !< (R,Z) at minimum and maximum R
+    REAL(r8), INTENT(out) :: zbounds(2,2) !< (R,Z) at minimum and maximum Z
+    LOGICAL, INTENT(out) :: ok !< Surface evaluated (otherwise use the tracer)
+  END SUBROUTINE gs_lcfs_contour
 END INTERFACE
 !---Encapsulation for external function call parameters
 TYPE, PRIVATE :: opt_targets
@@ -4571,7 +4590,7 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
 integer(4), parameter :: nlcfs=1000
-logical :: lcfs_all,lcfs_any,geo,trace,cc_done(nr)
+logical :: lcfs_all,lcfs_any,geo,trace,lcfs_ok,cc_done(nr)
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
@@ -4585,12 +4604,15 @@ IF(lcfs_any.AND.(.NOT.lcfs_all))CALL oft_abort('All LCFS arguments must be passe
 IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but "psi_q(1)" far from LCFS, not projecting')
 IF(PRESENT(shape_geo).AND.lcfs_any)CALL oft_abort('"shape_geo" cannot be combined with LCFS arguments', &
   'gs_get_qprof',__FILE__)
-!---Contour quadrature for q, flux-surface averages and shape; the tracer handles the LCFS outputs
-!---and the surfaces the contour pass does not accept
+!---Contour quadrature (exact on the FE surface); the field-line tracer below is the deprecated
+!---method (`qprof_backend=1`) and the fallback for the surfaces, and the LCFS outputs, the contour
+!---path does not accept.
 cc_done=.FALSE.
-IF((qprof_backend==0).AND.(.NOT.(lcfs_any.OR.geo.OR.trace)))THEN
+lcfs_ok=.NOT.lcfs_all
+IF((qprof_backend==0).AND.(.NOT.(geo.OR.trace)))THEN
   CALL gs_qprof_contour(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,cc_done)
-  IF(ALL(cc_done))RETURN
+  IF(lcfs_all.AND.cc_done(1))CALL gs_lcfs_contour(gseq,psi_q(1),dl,rbounds,zbounds,lcfs_ok)
+  IF(ALL(cc_done).AND.lcfs_ok)RETURN
 END IF
 !---
 raxis=gseq%o_point(1)
@@ -4661,7 +4683,7 @@ active_tracer%inv=.TRUE.
 IF(PRESENT(shape_geo))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,nr
-  IF(cc_done(j))CYCLE
+  IF(cc_done(j).AND.((j>1).OR.lcfs_ok))CYCLE
   !------------------------------------------------------------------------------
   ! Trace contour
   !------------------------------------------------------------------------------
@@ -4702,7 +4724,7 @@ do j=1,nr
   if(active_tracer%status/=1)THEN
     WRITE(error_str,"(A,F10.4)")"gs_get_qprof: Trace did not complete at psi = ",1.d0-psi_q(j)
     CALL oft_warn(error_str)
-    prof(j)=-1.d99
+    IF(.NOT.cc_done(j))prof(j)=-1.d99
     CYCLE
   end if
   !------------------------------------------------------------------------------
@@ -4773,6 +4795,7 @@ do j=1,nr
       IF(.NOT.PRESENT(shape_geo))DEALLOCATE(ptout)
     END IF
   END IF
+  IF(cc_done(j))CYCLE ! Profiles kept from the contour path
   !---Safety Factor (q)
   qpsi=fpol*active_tracer%v(3)/(2*pi)
   prof(j)=qpsi
@@ -4797,7 +4820,8 @@ DEALLOCATE(field)
 CALL psi_int%delete()
 end subroutine gs_get_qprof
 !------------------------------------------------------------------------------
-!> Trace a single specified flux surface
+!> Points on one flux surface: 1000 contour points at uniform polar angle about the O-point
+!! (field-line tracer if the contour backend is off or fails)
 !------------------------------------------------------------------------------
 subroutine gs_trace_surf(gseq,psi_in,points,npoints)
 class(gs_equil), intent(inout) :: gseq !< G-S object
@@ -4811,6 +4835,12 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell
 type(gsinv_interp), target :: field
+!---Points at uniform polar angle from the contour quadrature (exact on the FE surface);
+!---the field-line tracer below is the deprecated method and the fallback
+IF(qprof_backend==0)THEN
+  CALL gs_trace_surf_contour(gseq,psi_in,points,npoints)
+  IF(npoints>0)RETURN
+END IF
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
