@@ -15,15 +15,22 @@ files, the `test_*.F90` Fortran programs they drive, and data files (`.h5`, `.g`
 1. **Tests run from the build tree, never the source tree.** The compiled Fortran test executables, copies of the test scripts and data, and the Python package all live under `<build_dir>`. Find `<build_dir>` with the `oft-build` skill ("Locate the build tree") — do not assume `builds/build_release`, which is only the CI/ephemeral layout. Also check that the build tree compiles *this* checkout (see "Check which source tree it builds" in `oft-build`), or you will be testing different code.
 2. **Rebuild first.** Run `make -j<N>` in `<build_dir>` after any source change, including edits to test `.py` files or data: they are copied into the build tree by `configure_file`, so the build-tree copy is stale until `make` runs. `make install` is not needed for tests.
 3. **Python environment.** `make test` and `run_test.sh` call the `pytest` recorded at configure time (`OFT_PYTEST_EXE`) by absolute path, so they work without activating anything as long as that environment still exists. They also add that interpreter's directory to `PATH`, but after the build-tree `python/` and the MPI `bin/` directory: with a system MPI in `/usr/bin`, a bare `python` inside a test is the system interpreter, so tests must launch Python with `sys.executable`. If it is gone or broken, or you run `python`/`pytest` directly, you need the user's environment — ask which to use if not already known; in CI/ephemeral environments only, `source setup_env.sh`.
+4. **Always set `OMP_NUM_THREADS`.** Use `1` if only one or two cores are available, otherwise `2`, however many cores there are. Leaving it unset lets OpenMP use every core in every test process, which oversubscribes the machine (especially with MPI tests) and makes timings and timeouts unreliable. Set it in the same command that runs the tests, since agent shells may not keep exported variables between calls:
+
+   ```bash
+   OMP_NUM_THREADS=$( [ "$(getconf _NPROCESSORS_ONLN)" -le 2 ] && echo 1 || echo 2 ) make test
+   ```
+
+   In a container, `getconf` may report the host's cores rather than the container's CPU limit; if the limit is one or two cores, use `1`. The only exception is running individual tests specifically to study OpenMP thread scaling or performance, where you set the thread count deliberately.
 
 ## Running tests
 
-From `<build_dir>`:
+From `<build_dir>`, with `OMP_NUM_THREADS` set as above (shown as `2` in the examples):
 
 ```bash
-make test            # pytest -m "not slow" base grid lin_alg fem physics
-make test_full       # all tests, including slow ones
-make test_examples   # example notebooks/programs (needs OFT_BUILD_EXAMPLES or OFT_BUILD_PYTHON)
+OMP_NUM_THREADS=2 make test            # pytest -m "not slow" base grid lin_alg fem physics
+OMP_NUM_THREADS=2 make test_full       # all tests, including slow ones
+OMP_NUM_THREADS=2 make test_examples   # example notebooks/programs (needs OFT_BUILD_EXAMPLES or OFT_BUILD_PYTHON)
 ```
 
 `make test`/`test_full` write `<build_dir>/tests/OFT.junit.xml`. `make test` alone takes
@@ -36,17 +43,17 @@ against), `OFT_HAVE_MPI`, and `OFT_DEBUG_TEST`, then passes all arguments to pyt
 
 ```bash
 cd <build_dir>/tests
-./run_test.sh physics/test_TokaMaker.py                       # one file
-./run_test.sh physics/test_TokaMaker.py -k "test_name"        # matching tests
-./run_test.sh physics/test_TokaMaker.py --collect-only        # list tests
-./run_test.sh grid -m "not slow"                              # a folder, skipping slow tests
+OMP_NUM_THREADS=2 ./run_test.sh physics/test_TokaMaker.py                 # one file
+OMP_NUM_THREADS=2 ./run_test.sh physics/test_TokaMaker.py -k "test_name"  # matching tests
+./run_test.sh physics/test_TokaMaker.py --collect-only                   # list tests (runs nothing)
+OMP_NUM_THREADS=2 ./run_test.sh grid -m "not slow"                        # a folder, skipping slow tests
 ```
 
 To call one test function directly, optionally with arguments `test_args`, from the
 build-tree directory containing `test_file.py`:
 
 ```bash
-python -c "from test_file import test_name; test_name(*test_args)"
+OMP_NUM_THREADS=2 python -c "from test_file import test_name; test_name(*test_args)"
 ```
 
 This bypasses `run_test.sh`, so use the user's Python environment and make sure the

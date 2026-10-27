@@ -175,6 +175,7 @@ Notes for this configuration:
 - Use the default `gcc`/`g++`/`gfortran` (GCC 13) so the compilers match the ones Ubuntu used to build the OpenMPI Fortran modules.
 - Ubuntu ships HDF5 1.10, which lacks the Fortran file-space-strategy API (added in 1.14.3). OFT builds fine but persistent free-space tracking in HDF5 output files is disabled, and a warning is printed when it is requested.
 - OpenMPI refuses to run as root by default. In a root sandbox, `export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1` before running tests.
+- When running tests, always set `OMP_NUM_THREADS` (`1` on one or two cores, otherwise `2`), as described in the `oft-test` skill.
 - `config_cmake.sh` sources `setup_env.sh` itself, so re-running it later resolves `pytest` from the venv rather than whatever happens to be on `PATH`.
 - PETSc is not included, so several hundred `make test` cases skip with `Not compiled with PETSc`; this is expected (see "Skips" in the `oft-test` skill).
 - Exact solver iteration counts can differ from CI's bundled MPICH/METIS. On Ubuntu OpenMPI 4.1.6 with distro METIS, `lin_alg/test_native_bjacobi.py::test_ILU_mpi4_nlocal2[0]` and `test_ILU_mpi4_nlocal2_part[0]` have been seen to fail with 76–77 iterations against 73/70 expected. Treat these as environment differences unless your change touches `lin_alg`.

@@ -89,6 +89,10 @@ the `test_*.F90` programs they drive. They run from `<build_dir>` (`make test`, 
 `<build_dir>/tests/run_test.sh <file> -k <name>` for targeted runs), never from the source
 tree. See the `oft-test` skill for running, markers, debugging, and writing tests.
 
+Always set `OMP_NUM_THREADS` when running tests: `1` if only one or two cores are
+available, otherwise `2`, regardless of core count. The only exception is running
+individual tests specifically to study OpenMP thread scaling or performance.
+
 ## Linting
 
 ### Python linting
