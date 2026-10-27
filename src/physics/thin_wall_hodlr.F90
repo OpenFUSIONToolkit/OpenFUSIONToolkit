@@ -124,7 +124,16 @@ END TYPE
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
+  LOGICAL :: coarse = .TRUE. !< Add a global coarse correction (two-level preconditioner)?
+  INTEGER(4) :: coarse_order = 1 !< Polynomial order of the coarse space on each block (1 or 2)
   INTEGER(4) :: max_block_size = 0
+  INTEGER(4) :: nz = 0 !< Number of coarse vectors
+  INTEGER(4), POINTER, DIMENSION(:) :: z_block => NULL() !< Dense block of each coarse vector (0: unit vector)
+  INTEGER(4), POINTER, DIMENSION(:) :: z_unit => NULL() !< Element of each unit coarse vector
+  REAL(r8), POINTER, DIMENSION(:,:) :: z_vals => NULL() !< Values of each block coarse vector on its block
+  REAL(r8), POINTER, DIMENSION(:,:) :: zlz => NULL() !< Z^T L Z
+  REAL(r8), POINTER, DIMENSION(:,:) :: zrz => NULL() !< Z^T R Z
+  REAL(r8), POINTER, DIMENSION(:,:) :: einv => NULL() !< (Z^T (alpha*L + beta*R) Z)^-1
   REAL(r8) :: alpha = 1.d0
   REAL(r8) :: beta = 1.d0
   REAL(r8) :: times = 0.d0
@@ -3204,6 +3213,16 @@ IF(self%refactor)THEN
     IF(info/=0)CALL oft_abort("factorization failed","",__FILE__)
     ! oft_env%pm=.FALSE.
   END DO
+  !---Coarse correction: Z^T (alpha*L + beta*R) Z, from the stored Z^T L Z and Z^T R Z
+  IF(self%coarse)THEN
+    IF(.NOT.ASSOCIATED(self%zlz))CALL rbjprecond_coarse_setup(self)
+    IF(self%nz>0)THEN
+      IF(.NOT.ASSOCIATED(self%einv))ALLOCATE(self%einv(self%nz,self%nz))
+      self%einv=self%alpha*self%zlz+self%beta*self%zrz
+      CALL lapack_cholesky(self%nz,self%einv,info)
+      IF(info/=0)CALL oft_abort("coarse factorization failed","rbjprecond_apply",__FILE__)
+    END IF
+  END IF
   self%refactor=.FALSE.
 END IF
 !
@@ -3245,11 +3264,164 @@ END IF
 !$omp end single
 DEALLOCATE(uloc,gloc)
 !$omp end parallel
+IF(self%coarse.AND.(self%nz>0))CALL rbjprecond_coarse_apply(self,gtmp,utmp)
 CALL u%restore_local(utmp)
 CALL g%set(0.d0)
 DEALLOCATE(utmp,gtmp)
 DEBUG_STACK_POP
 END SUBROUTINE rbjprecond_apply
+!------------------------------------------------------------------------------
+!> Build the coarse space of the two-level preconditioner and its projections of L and R
+!!
+!! On each diagonal (leaf) block: a constant and the three coordinates of the element positions, orthonormalised
+!! on the block (directions the block does not span are dropped); and a unit vector for each hole and V-coil.
+!! These are the smooth, long-range current patterns block-Jacobi cannot represent.
+!------------------------------------------------------------------------------
+SUBROUTINE rbjprecond_coarse_setup(self)
+CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
+INTEGER(4) :: i,j,k,m,c,n,level,iblock,nmax,nunit,nfun
+REAL(r8) :: nrm,nrm0,cen(3),ext
+REAL(r8), ALLOCATABLE :: zb(:,:)
+REAL(8), POINTER, DIMENSION(:) :: vals,wvals
+CLASS(oft_vector), POINTER :: zvec,azvec
+TYPE(tw_type), POINTER :: tw
+tw=>self%mf_obj%tw_obj
+nunit=tw%nholes+tw%n_vcoils
+nmax=0
+DO i=1,self%mf_obj%ndense
+  nmax=MAX(nmax,self%mf_obj%levels(self%mf_obj%dense_blocks(1,i))%blocks(self%mf_obj%dense_blocks(2,i))%nelems)
+END DO
+nfun=4
+IF(self%coarse_order>1)nfun=10
+ALLOCATE(self%z_block(nfun*self%mf_obj%ndense+nunit),self%z_unit(nfun*self%mf_obj%ndense+nunit))
+ALLOCATE(self%z_vals(nmax,nfun*self%mf_obj%ndense+nunit),zb(nmax,nfun))
+self%z_vals=0.d0
+c=0
+DO i=1,self%mf_obj%ndense
+  level=self%mf_obj%dense_blocks(1,i)
+  iblock=self%mf_obj%dense_blocks(2,i)
+  n=self%mf_obj%levels(level)%blocks(iblock)%nelems
+  cen=0.d0
+  DO j=1,n
+    cen=cen+tw%mesh%r(:,tw%lpmap_inv(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)))
+  END DO
+  cen=cen/REAL(n,8)
+  ext=1.d-30
+  DO j=1,n
+    zb(j,1)=1.d0
+    zb(j,2:4)=tw%mesh%r(:,tw%lpmap_inv(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)))-cen
+    ext=MAX(ext,MAXVAL(ABS(zb(j,2:4))))
+  END DO
+  zb(1:n,2:4)=zb(1:n,2:4)/ext
+  IF(nfun==10)THEN
+    zb(1:n,5)=zb(1:n,2)**2; zb(1:n,6)=zb(1:n,3)**2; zb(1:n,7)=zb(1:n,4)**2
+    zb(1:n,8)=zb(1:n,2)*zb(1:n,3); zb(1:n,9)=zb(1:n,2)*zb(1:n,4); zb(1:n,10)=zb(1:n,3)*zb(1:n,4)
+  END IF
+  !---Modified Gram-Schmidt on the block, dropping directions the block does not span
+  nrm0=SQRT(REAL(n,8))
+  DO m=1,nfun
+    DO k=1,m-1
+      IF(SUM(zb(1:n,k)**2)>0.d0)zb(1:n,m)=zb(1:n,m)-DOT_PRODUCT(zb(1:n,k),zb(1:n,m))*zb(1:n,k)
+    END DO
+    nrm=SQRT(SUM(zb(1:n,m)**2))
+    IF(nrm>1.d-6*nrm0)THEN
+      zb(1:n,m)=zb(1:n,m)/nrm
+      c=c+1
+      self%z_block(c)=i
+      self%z_unit(c)=0
+      self%z_vals(1:n,c)=zb(1:n,m)
+    ELSE
+      zb(1:n,m)=0.d0
+    END IF
+  END DO
+END DO
+DO j=1,nunit
+  c=c+1
+  self%z_block(c)=0
+  self%z_unit(c)=tw%np_active+j
+END DO
+self%nz=c
+DEALLOCATE(zb)
+!---Z^T L Z and Z^T R Z, one L and R product per coarse vector
+ALLOCATE(self%zlz(self%nz,self%nz),self%zrz(self%nz,self%nz))
+CALL tw%Uloc%new(zvec)
+CALL tw%Uloc%new(azvec)
+NULLIFY(vals,wvals)
+ALLOCATE(vals(tw%nelems))
+DO c=1,self%nz
+  vals=0.d0
+  CALL rbjprecond_coarse_expand(self,c,1.d0,vals)
+  CALL zvec%restore_local(vals)
+  CALL self%mf_obj%apply(zvec,azvec)
+  CALL azvec%get_local(wvals)
+  CALL rbjprecond_coarse_restrict(self,wvals,self%zlz(:,c))
+  CALL self%Rmat%apply(zvec,azvec)
+  CALL azvec%get_local(wvals)
+  CALL rbjprecond_coarse_restrict(self,wvals,self%zrz(:,c))
+END DO
+DEALLOCATE(vals,wvals)
+CALL zvec%delete(); CALL azvec%delete()
+DEALLOCATE(zvec,azvec)
+WRITE(*,'(2A,I6,A)')oft_indent,'Two-level preconditioner: ',self%nz,' coarse vectors'
+END SUBROUTINE rbjprecond_coarse_setup
+!------------------------------------------------------------------------------
+!> Add a*z_c to an element vector
+!------------------------------------------------------------------------------
+SUBROUTINE rbjprecond_coarse_expand(self,c,a,vals)
+CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
+INTEGER(4), INTENT(in) :: c !< Coarse vector
+REAL(r8), INTENT(in) :: a !< Coefficient
+REAL(r8), INTENT(inout) :: vals(:) !< Element vector
+INTEGER(4) :: j,level,iblock
+IF(self%z_block(c)==0)THEN
+  vals(self%z_unit(c))=vals(self%z_unit(c))+a
+ELSE
+  level=self%mf_obj%dense_blocks(1,self%z_block(c))
+  iblock=self%mf_obj%dense_blocks(2,self%z_block(c))
+  DO j=1,self%mf_obj%levels(level)%blocks(iblock)%nelems
+    vals(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))=vals(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) &
+      + a*self%z_vals(j,c)
+  END DO
+END IF
+END SUBROUTINE rbjprecond_coarse_expand
+!------------------------------------------------------------------------------
+!> Coarse projection w = Z^T v of an element vector
+!------------------------------------------------------------------------------
+SUBROUTINE rbjprecond_coarse_restrict(self,v,w)
+CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
+REAL(r8), INTENT(in) :: v(:) !< Element vector
+REAL(r8), INTENT(out) :: w(:) !< Coarse vector [nz]
+INTEGER(4) :: c,j,level,iblock
+DO c=1,self%nz
+  IF(self%z_block(c)==0)THEN
+    w(c)=v(self%z_unit(c))
+  ELSE
+    level=self%mf_obj%dense_blocks(1,self%z_block(c))
+    iblock=self%mf_obj%dense_blocks(2,self%z_block(c))
+    w(c)=0.d0
+    DO j=1,self%mf_obj%levels(level)%blocks(iblock)%nelems
+      w(c)=w(c)+self%z_vals(j,c)*v(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))
+    END DO
+  END IF
+END DO
+END SUBROUTINE rbjprecond_coarse_restrict
+!------------------------------------------------------------------------------
+!> Add the coarse correction u += Z (Z^T A Z)^-1 Z^T g
+!------------------------------------------------------------------------------
+SUBROUTINE rbjprecond_coarse_apply(self,g,u)
+CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
+REAL(r8), INTENT(in) :: g(:) !< Residual
+REAL(r8), INTENT(inout) :: u(:) !< Preconditioned residual
+INTEGER(4) :: c
+REAL(r8), ALLOCATABLE :: w(:),y(:)
+ALLOCATE(w(self%nz),y(self%nz))
+CALL rbjprecond_coarse_restrict(self,g,w)
+CALL dgemv('N',self%nz,self%nz,1.d0,self%einv,self%nz,w,1,0.d0,y,1)
+DO c=1,self%nz
+  CALL rbjprecond_coarse_expand(self,c,y(c),u)
+END DO
+DEALLOCATE(w,y)
+END SUBROUTINE rbjprecond_coarse_apply
 !------------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
@@ -3265,6 +3437,10 @@ IF(ASSOCIATED(self%inverse_mats))THEN
   END DO
   DEALLOCATE(self%inverse_mats)
 END IF
+IF(ASSOCIATED(self%z_block))DEALLOCATE(self%z_block,self%z_unit,self%z_vals)
+IF(ASSOCIATED(self%zlz))DEALLOCATE(self%zlz,self%zrz)
+IF(ASSOCIATED(self%einv))DEALLOCATE(self%einv)
+self%nz=0
 !---Reset
 self%max_block_size=0
 NULLIFY(self%mf_obj)
