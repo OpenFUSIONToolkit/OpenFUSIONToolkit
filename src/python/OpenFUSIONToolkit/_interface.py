@@ -93,6 +93,12 @@ except OSError:
 # Abort callback
 @ctypes.CFUNCTYPE(None)
 def oft_python_abort():
+    # Remove temporary files, as `os._exit()` skips normal exit cleanup
+    try:
+        from ._core import OFT_env
+        OFT_env.instance._tempfiles_finalizer()
+    except:
+        pass
     sys.stdout.flush()
     time.sleep(0.1)
     sys.stderr.flush()

@@ -10,7 +10,6 @@
 @ingroup doxy_oft_python
 '''
 import os
-import atexit
 import platform
 import shutil
 import tempfile
@@ -119,14 +118,11 @@ class OFT_env():
                 "meshname": "'none'"
             }
         }
-        ## Input filename for execution environment
-        self.oft_ifile = self.unique_tmpfile('oftpyin')
-        # Remove temporary files on interpreter exit (`atexit`) and on exit of `multiprocessing`
-        # child processes, which terminate via `os._exit()` and skip `atexit` handlers
-        self._tempfiles_removed = False
-        self._tempfiles_owner = os.getpid()
-        atexit.register(self._remove_tempfiles)
-        multiprocessing.util.Finalize(None, self._remove_tempfiles, exitpriority=0)
+        ## Input filename for execution environment (absolute, so cleanup is unaffected by later changes of directory)
+        self.oft_ifile = os.path.abspath(self.unique_tmpfile('oftpyin'))
+        # Remove temporary files at exit, including for `multiprocessing` child processes, which
+        # skip `atexit` handlers (finalizer runs at most once and only in the creating process)
+        self._tempfiles_finalizer = multiprocessing.util.Finalize(None, self._remove_tempfiles, exitpriority=0)
         self.update_oft_in()
         # Initialize OFT
         slens = numpy.zeros((4,), dtype=numpy.int32)
@@ -273,12 +269,7 @@ class OFT_env():
         write_oft_xml(xml_blocks,path)
 
     def _remove_tempfiles(self):
-        '''! Remove known temporary files (safe to call multiple times)'''
-        if getattr(self, '_tempfiles_removed', True):
-            return
-        if os.getpid() != self._tempfiles_owner:
-            return  # Forked child process, leave cleanup to the parent
-        self._tempfiles_removed = True
+        '''! Remove known temporary files'''
         if self.tempdir is not None:
             try:
                 shutil.rmtree(self.tempdir)
@@ -289,7 +280,3 @@ class OFT_env():
                 os.remove(self.oft_ifile)
             except:
                 oft_warning('Unable to delete temporary file "{0}"'.format(self.oft_ifile))
-
-    def __del__(self):
-        '''! Destroy environment and cleanup known temporary files'''
-        self._remove_tempfiles()
