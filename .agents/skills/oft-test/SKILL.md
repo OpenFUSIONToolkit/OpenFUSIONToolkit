@@ -14,7 +14,7 @@ files, the `test_*.F90` Fortran programs they drive, and data files (`.h5`, `.g`
 
 1. **Tests run from the build tree, never the source tree.** The compiled Fortran test executables, copies of the test scripts and data, and the Python package all live under `<build_dir>`. Find `<build_dir>` with the `oft-build` skill ("Locate the build tree") — do not assume `builds/build_release`, which is only the CI/ephemeral layout. Also check that the build tree compiles *this* checkout (see "Check which source tree it builds" in `oft-build`), or you will be testing different code.
 2. **Rebuild first.** Run `make -j<N>` in `<build_dir>` after any source change, including edits to test `.py` files or data: they are copied into the build tree by `configure_file`, so the build-tree copy is stale until `make` runs. `make install` is not needed for tests.
-3. **Python environment.** `make test` and `run_test.sh` use the `pytest` recorded at configure time (`OFT_PYTEST_EXE`) and put that interpreter's directory first on `PATH`, so they work without activating anything as long as that environment still exists. If it is gone or broken, or you run `python`/`pytest` directly, you need the user's environment — ask which to use if not already known; in CI/ephemeral environments only, `source setup_env.sh`.
+3. **Python environment.** `make test` and `run_test.sh` call the `pytest` recorded at configure time (`OFT_PYTEST_EXE`) by absolute path, so they work without activating anything as long as that environment still exists. They also add that interpreter's directory to `PATH`, but after the build-tree `python/` and the MPI `bin/` directory: with a system MPI in `/usr/bin`, a bare `python` inside a test is the system interpreter, so tests must launch Python with `sys.executable`. If it is gone or broken, or you run `python`/`pytest` directly, you need the user's environment — ask which to use if not already known; in CI/ephemeral environments only, `source setup_env.sh`.
 
 ## Running tests
 
@@ -26,8 +26,9 @@ make test_full       # all tests, including slow ones
 make test_examples   # example notebooks/programs (needs OFT_BUILD_EXAMPLES or OFT_BUILD_PYTHON)
 ```
 
-`make test`/`test_full` write `<build_dir>/tests/OFT.junit.xml`. The full suite takes a
-long time — run it in the background, and prefer targeted runs while iterating.
+`make test`/`test_full` write `<build_dir>/tests/OFT.junit.xml`. `make test` alone takes
+roughly 50 minutes on a 4-core sandbox, and `test_full` longer — run them in the
+background, and prefer targeted runs while iterating.
 
 Targeted runs use `run_test.sh`, generated into `<build_dir>/tests/`. It sets `PATH`
 (build-tree `python/`, the configured interpreter, and the MPI that OFT was built
@@ -59,6 +60,17 @@ MPI tests need them).
 - `@pytest.mark.coverage` — selected by coverage builds (`OFT_COVERAGE`).
 - `@pytest.mark.linear` — linear MHD tests.
 - Test timeouts are multiplied by 4× when `OFT_DEBUG_TEST=1` (Debug builds).
+
+### Skips
+
+Large skip counts are normal when optional libraries are missing. Before reading skips
+as a broken build, check the reason (`-rs` prints a summary). The common ones come from
+`run_OFT()` in `oft_testing.py`:
+
+- `Not compiled with PETSc` — the Fortran program reported that PETSc is unavailable. Without PETSc this covers several hundred cases across `fem/`, `lin_alg/test_solver_xml.py`, and the MUG/Marklin physics tests.
+- `Configuration not supported` — the program printed `SKIP TEST`, eg. `lin_alg/test_native_bjacobi.py` cases whose direct solver (SuperLU, SuperLU-DIST, MUMPS, UMFPACK) this build lacks, and `lin_alg/test_arpack.py` without ARPACK.
+- `Not compiled with MPI` — a `nproc > 1` case in a non-MPI build.
+- A bare `Skipped` — a parameter combination the test itself excludes (eg. matrix-free together with PETSc in the MUG tests).
 
 ## Debugging failures
 

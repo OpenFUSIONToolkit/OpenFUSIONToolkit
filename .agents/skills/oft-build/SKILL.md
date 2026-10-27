@@ -8,7 +8,8 @@ description: Configure, compile, rebuild, and install the Open FUSION Toolkit (O
 OFT uses a two-stage build: `src/utilities/build_libs.py` compiles third-party
 dependencies and writes `config_cmake.sh`, which runs CMake to create the OFT build
 tree. Throughout, `<config_dir>` is the directory holding `config_cmake.sh` (and the
-compiled external libraries), and `<build_dir>` is `<config_dir>/build_release`.
+compiled external libraries), and `<build_dir>` is `<config_dir>/build_release`
+(`build_debug`, installing to `install_debug`, for `--oft_build_debug=1` configurations).
 
 ## 1. Locate the build tree
 
@@ -27,10 +28,12 @@ MPI configuration, or build type, and some may be stale.
 
 ### Check which source tree it builds
 
-The last line of `config_cmake.sh` is the **absolute** path of the `src/` directory it
-compiles (also `CMAKE_HOME_DIRECTORY` in `<build_dir>/CMakeCache.txt`). In a git
-worktree, or any second checkout, an existing build tree usually points at the *main*
-checkout, so building it will not compile your changes. To build the current checkout
+`CMAKE_HOME_DIRECTORY` in `<build_dir>/CMakeCache.txt` is the absolute path of the
+`src/` directory the tree compiles. In a `build_libs.py`-generated `config_cmake.sh` the
+same absolute path is also the script's last line (the hand-written system-library
+script in section 5 uses `$ROOT_PATH/../src` instead). In a git worktree, or any second
+checkout, an existing build tree usually points at the *main* checkout, so building it
+will not compile your changes. To build the current checkout
 without disturbing the user's tree, make a sibling configuration that reuses the same
 external libraries:
 
@@ -42,7 +45,10 @@ cd <new_config_dir> && bash config_cmake.sh
 
 `config_cmake.sh` uses `$(pwd)` for the build and install paths, and absolute paths for
 the external libraries, so the copy is self-contained. Put `<new_config_dir>` somewhere
-gitignored (eg. under `builds/`) and tell the user where it is.
+gitignored (eg. under `builds/`) and tell the user where it is. If the copied script
+sources `$ROOT_PATH/../setup_env.sh` (the system-library recipe), replace that with an
+absolute path too, unless `<new_config_dir>` is also exactly one level below the
+repository root.
 
 ## 2. Python environment
 
@@ -118,9 +124,14 @@ When no pre-built `builds/` directory exists (eg. a fresh cloud sandbox, or one 
 `build_libs.py` cannot download dependencies), building against distribution packages is
 much faster. This skips Stage 1 and writes `config_cmake.sh` by hand so the tree still
 matches the layout above. It uses the flat layout and creates the `oft_venv/` +
-`setup_env.sh` pair, so **do not use it in a user checkout without asking**.
+`setup_env.sh` pair, so **do not use it in a user checkout without asking**. Treat the
+environment as ephemeral only if there is no `builds/` directory, you are in a
+disposable container (eg. a cloud agent sandbox or CI runner), and the task did not name
+an existing environment; otherwise ask before installing system packages or creating
+`oft_venv/`.
 
 ```bash
+apt-get update
 apt-get install -y --no-install-recommends gfortran libopenmpi-dev openmpi-bin \
   libarpack2-dev libparpack2-dev libsuperlu-dev libhdf5-dev libxml2-dev \
   libopenblas-dev liblapack-dev libmetis-dev
@@ -165,6 +176,8 @@ Notes for this configuration:
 - Ubuntu ships HDF5 1.10, which lacks the Fortran file-space-strategy API (added in 1.14.3). OFT builds fine but persistent free-space tracking in HDF5 output files is disabled, and a warning is printed when it is requested.
 - OpenMPI refuses to run as root by default. In a root sandbox, `export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1` before running tests.
 - `config_cmake.sh` sources `setup_env.sh` itself, so re-running it later resolves `pytest` from the venv rather than whatever happens to be on `PATH`.
+- PETSc is not included, so several hundred `make test` cases skip with `Not compiled with PETSc`; this is expected (see "Skips" in the `oft-test` skill).
+- Exact solver iteration counts can differ from CI's bundled MPICH/METIS. On Ubuntu OpenMPI 4.1.6 with distro METIS, `lin_alg/test_native_bjacobi.py::test_ILU_mpi4_nlocal2[0]` and `test_ILU_mpi4_nlocal2_part[0]` have been seen to fail with 76–77 iterations against 73/70 expected. Treat these as environment differences unless your change touches `lin_alg`.
 
 ## 6. Python packaging
 

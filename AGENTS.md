@@ -65,7 +65,7 @@ generates `config_cmake.sh`, which runs CMake (≥ 3.27) to create the build tre
 The build tree is created by the user and its location is **not** fixed by the
 project. These instructions use `<build_dir>` for the configured build directory and
 `<config_dir>` for its parent (holding `config_cmake.sh`, the compiled external
-libraries, and `install_release/`). **Do not assume `builds/build_release`.**
+libraries, and `install_release/`; `build_debug`/`install_debug` for Debug configurations). **Do not assume `builds/build_release`.**
 
 - **User environments** (the normal case): several build trees side by side, one per toolchain/parallelism combination, eg. `builds/GCC/MPI/build_release` and `builds/LLVM/build_release`.
 - **CI/ephemeral environments**: a single flat tree — `<config_dir>` is `builds/`, `<build_dir>` is `builds/build_release`.
