@@ -3019,7 +3019,13 @@ IF(self%refactor)THEN
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
     max_size = MAX(max_size,n)
     IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
-    self%inverse_mats(i)%M=self%alpha*self%mf_obj%dense_mats(i)%M
+    ! Explicit loop avoids array temporaries on (small) OpenMP thread stacks
+    !$omp simd collapse(2)
+    DO k=1,n
+      DO j=1,n
+        self%inverse_mats(i)%M(j,k)=self%alpha*self%mf_obj%dense_mats(i)%M(j,k)
+      END DO
+    END DO
     imap=0
     DO j=1,n
       imap(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))=j
@@ -3111,10 +3117,16 @@ CONTAINS
 SUBROUTINE invert_block(mat,nrows)
 TYPE(cmat_container), INTENT(inout) :: mat !< Block to invert (`M` must be populated)
 INTEGER(4), INTENT(in) :: nrows !< Size of block
-INTEGER(4) :: error
+INTEGER(4) :: error,j,k
 IF(self%mf_obj%pre_single)THEN
   IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
-  mat%M4=CMPLX(mat%M,KIND=c4)
+  ! Explicit loop avoids array temporaries on (small) OpenMP thread stacks
+  !$omp simd collapse(2)
+  DO k=1,nrows
+    DO j=1,nrows
+      mat%M4(j,k)=CMPLX(mat%M(j,k),KIND=c4)
+    END DO
+  END DO
   DEALLOCATE(mat%M)
   CALL lapack_matinv(nrows,mat%M4,error)
   IF(error/=0)CALL oft_abort("Single precision block inversion failed, block may be ill-conditioned (try pre_single=F)", &
@@ -3212,7 +3224,13 @@ IF(self%refactor)THEN
     n=self%mf_obj%levels(level)%blocks(iblock)%nelems
     max_size = MAX(max_size,n)
     IF(.NOT.ASSOCIATED(self%inverse_mats(i)%M))ALLOCATE(self%inverse_mats(i)%M(n,n))
-    self%inverse_mats(i)%M=self%alpha*self%mf_obj%dense_mats(i)%M
+    ! Explicit loop avoids array temporaries on (small) OpenMP thread stacks
+    !$omp simd collapse(2)
+    DO k=1,n
+      DO j=1,n
+        self%inverse_mats(i)%M(j,k)=self%alpha*self%mf_obj%dense_mats(i)%M(j,k)
+      END DO
+    END DO
     imap=0
     DO j=1,n
       imap(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))=j
@@ -3304,10 +3322,16 @@ CONTAINS
 SUBROUTINE invert_block(mat,nrows)
 TYPE(rmat_container), INTENT(inout) :: mat !< Block to invert (`M` must be populated)
 INTEGER(4), INTENT(in) :: nrows !< Size of block
-INTEGER(4) :: error
+INTEGER(4) :: error,j,k
 IF(self%mf_obj%pre_single)THEN
   IF(.NOT.ASSOCIATED(mat%M4))ALLOCATE(mat%M4(nrows,nrows))
-  mat%M4=REAL(mat%M,r4)
+  ! Explicit loop avoids array temporaries on (small) OpenMP thread stacks
+  !$omp simd collapse(2)
+  DO k=1,nrows
+    DO j=1,nrows
+      mat%M4(j,k)=REAL(mat%M(j,k),r4)
+    END DO
+  END DO
   DEALLOCATE(mat%M)
   CALL lapack_cholesky(nrows,mat%M4,error)
   IF(error/=0)CALL oft_abort("Single precision block factorization failed, block may be ill-conditioned (try pre_single=F)", &
