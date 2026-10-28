@@ -20,7 +20,7 @@ The build tree's location is chosen by the user and is **not** fixed by the proj
 - **CI/ephemeral environments**: a single flat tree — `<config_dir>` is `builds/`, `<build_dir>` is `builds/build_release`, installing to `builds/install_release`.
 
 ```bash
-find builds -maxdepth 4 -name config_cmake.sh
+find builds -maxdepth 4 -name config_cmake.sh 2>/dev/null
 ```
 
 If more than one is found, **ask the user which to use** — they may differ in compiler,
@@ -39,7 +39,9 @@ grep -E 'OFT_PYTEST_EXE|CMAKE_HOME_DIRECTORY' <build_dir>/CMakeCache.txt
 
 Then offer to reuse one through a sibling configuration (next section, which rebuilds
 OFT but not the external libraries) or to set up a new configuration from scratch
-(section 4).
+(section 4). If no build tree exists anywhere, say so, ask which directory and options
+to use, and follow section 4; its Stage 1 takes 20–30 minutes, so confirm before
+starting. Use section 5 only if the environment qualifies as ephemeral as defined there.
 
 ### Check which source tree it builds
 
@@ -74,7 +76,7 @@ Building (and testing) needs a Python environment with `pytest`, `numpy`, `scipy
 `h5py`, `netcdf4`, and `matplotlib`. CMake records the interpreter and `pytest` it finds
 at configure time, so the right environment must be active when `config_cmake.sh` runs.
 
-- **User environments**: there is no project-managed virtual environment. `oft_venv/` and `setup_env.sh` are **not** created by `build_libs.py`, are gitignored, and will not exist in a normal checkout. If the user has not already said which interpreter or environment to use, **ask them** — do not guess, and do not fall back to the system `python3`, which frequently lacks `numpy`/`h5py`. Carry the answer forward for the rest of the session.
+- **User environments**: there is no project-managed virtual environment. `oft_venv/` and `setup_env.sh` are **not** created by `build_libs.py`, are gitignored, and will not exist in a normal checkout. If either is present anyway, it was made by hand: do not source it without asking, and check that the venv it activates still exists. If the user has not already said which interpreter or environment to use, **ask them** — do not guess, and do not fall back to the system `python3`, which frequently lacks `numpy`/`h5py`. Carry the answer forward for the rest of the session.
 - **CI/ephemeral environments only**: the workflows create a venv at `oft_venv/` and write `source oft_venv/bin/activate` into `setup_env.sh` at the workspace root. `source setup_env.sh` is valid there, and only there.
 
 ## 3. Rebuild after source changes (the common case)
@@ -85,6 +87,7 @@ make -j<N>          # compile; re-runs CMake automatically if CMake inputs chang
 make install        # only if something uses <config_dir>/install_release (see below)
 ```
 
+- **Choosing `<N>`:** take the CPU count from `getconf _NPROCESSORS_ONLN`, not `nproc`, which returns `OMP_NUM_THREADS` when that is set (as it should be when running tests). On a shared machine, ask the user for a limit if you don't know one.
 - **Do not re-run `config_cmake.sh` just to rebuild.** It starts with `rm -rf build_release`, discarding the whole build tree and forcing a full recompile. Only re-run it to change CMake options or after the source path or external libraries change.
 - Regression tests run from the build tree (`<build_dir>/tests`, with `<build_dir>/python` for the Python package), so `make` alone is enough before running tests — see the `oft-test` skill.
 - `make install` is needed when using OFT from an arbitrary Python environment, via `OFT_ROOTPATH=<config_dir>/install_release` (the Python examples append `$OFT_ROOTPATH/python` to `sys.path`) or `PYTHONPATH=<config_dir>/install_release/python`.
@@ -96,8 +99,10 @@ make install        # only if something uses <config_dir>/install_release (see b
 ### Stage 1: external libraries
 
 Run from the directory that will become `<config_dir>`, with the Python environment
-active. This downloads and compiles OpenBLAS, HDF5, METIS, etc., which takes a while —
-run it in the background.
+active. This downloads and compiles OpenBLAS, HDF5, METIS, etc., which takes 20–30
+minutes. Run it in the background with its output sent to a log, since its download
+progress bars produce a very large amount of output; check the exit code and
+`tail build_libs.log` when it finishes.
 
 `build_libs.py` takes its compilers from the `CC`, `CXX`, and `FC` environment
 variables (default `gcc`/`g++`/`gfortran`; `LD` and `CMAKE` are also honored). On macOS
@@ -111,7 +116,7 @@ mkdir -p builds/GCC/MPI && cd builds/GCC/MPI   # one directory per configuration
 CC=gcc-16 CXX=g++-16 FC=gfortran-16 \
 python <repo_root>/src/utilities/build_libs.py \
   --nthread=4 --build_umfpack=1 --build_superlu=1 \
-  --build_arpack=1 --oft_build_tests=1 --build_mpich=1
+  --build_arpack=1 --oft_build_tests=1 --build_mpich=1 > build_libs.log 2>&1
 ```
 
 On macOS, `build_libs.py` finds hwloc (for MPICH/OpenMPI) through `brew --prefix`, and
@@ -198,7 +203,7 @@ cmake \
 EOF
 
 bash config_cmake.sh
-cd build_release && make -j$(nproc)
+cd build_release && make -j$(getconf _NPROCESSORS_ONLN)
 ```
 
 On a 4-core sandbox, configuring takes about 15 s and compiling about 4 minutes.

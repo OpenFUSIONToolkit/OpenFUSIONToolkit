@@ -21,7 +21,7 @@ files, the `test_*.F90` Fortran programs they drive, and data files (`.h5`, `.g`
    OMP_NUM_THREADS=$( [ "$(getconf _NPROCESSORS_ONLN)" -le 2 ] && echo 1 || echo 2 ) make test
    ```
 
-   In a Linux container, `getconf` and `nproc` report the CPUs the process may run on, not a CPU quota. Check the quota with `cat /sys/fs/cgroup/cpu.max` (cgroup v2: `max` means no limit, otherwise `<quota> <period>`) or `cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu/cpu.cfs_period_us` (cgroup v1: a quota of `-1` means no limit). If quota ÷ period is 2 or less, use `1`.
+   Use `getconf _NPROCESSORS_ONLN` for the CPU count, not `nproc`: GNU `nproc` returns `OMP_NUM_THREADS` when that is set (and macOS may not have `nproc` at all). In a Linux container, neither reflects a CPU quota. Check the quota with `cat /sys/fs/cgroup/cpu.max` (cgroup v2: `max` means no limit, otherwise `<quota> <period>`) or `cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu/cpu.cfs_period_us` (cgroup v1: a quota of `-1` means no limit). If quota ÷ period is 2 or less, use `1`.
 
    The only exception is running individual tests specifically to study OpenMP thread scaling or performance, where you set the thread count deliberately.
 
@@ -36,16 +36,17 @@ OMP_NUM_THREADS=2 make test_examples   # example notebooks/programs (needs OFT_B
 ```
 
 `make test`/`test_full` write `<build_dir>/tests/OFT.junit.xml`. With `OMP_NUM_THREADS=2`,
-`make test` alone took about 50 minutes on a 4-core Linux sandbox and about 18 minutes on
-an 18-core Apple Silicon Mac, and `test_full` takes longer — run them in the background,
+`make test` alone took about 50 minutes on a 4-core Linux sandbox, about 28 minutes on a
+40-core Linux server, and about 18 minutes on an 18-core Apple Silicon Mac, and
+`test_full` takes longer — run them in the background,
 and prefer targeted runs while iterating.
 
 Typical `make test` outcomes (October 2026; counts drift as tests are added):
 
-| Configuration | Passed | Skipped | Failed |
+| Configuration | Passed | Skipped (PETSc / configuration / bare) | Failed |
 |---|---|---|---|
-| `build_libs.py` GCC + MPICH, with SuperLU, UMFPACK, ARPACK (macOS) | ~917 | ~328 | 0 |
-| Ubuntu system libraries from `oft-build` section 5 | ~906 | ~337 | 2 (known, see `oft-build`) |
+| `oft-build` section 4 example flags: `build_libs.py` MPICH, SuperLU, UMFPACK, ARPACK (macOS and Linux) | ~917 | ~328 (266 / 36 / 26) | 0 |
+| Ubuntu system libraries from `oft-build` section 5 | ~906 | ~337 (266 / 45 / 26) | 2 (known, see `oft-build`) |
 
 Targeted runs use `run_test.sh`, generated into `<build_dir>/tests/`. It sets `PATH`
 (build-tree `python/`, the configured interpreter, and the MPI that OFT was built
