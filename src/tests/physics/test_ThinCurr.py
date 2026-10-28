@@ -17,7 +17,7 @@ from oft_testing import approx_list
 from OpenFUSIONToolkit.io import histfile, write_oft_xml
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil, ThinCurr_Vcoil, ThinCurr_XML
-from OpenFUSIONToolkit.ThinCurr.sensor import save_sensors, circular_flux_loop
+from OpenFUSIONToolkit.ThinCurr.sensor import save_sensors, circular_flux_loop, Mirnov
 
 
 
@@ -1269,3 +1269,48 @@ def test_td_volt_aca_coarse(pre_single):
                            volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)),
                            jumper_start=2)
     assert validate_td(sigs_final,jumpers_final)
+
+
+#============================================================================
+# Point Mirnov sensors
+def run_mirnov_point(meshfile,mp_q):
+    """Couplings of point Mirnov sensors and of small loop Mirnov sensors at the same locations"""
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        probes = (([1.38, 0.0, 0.0], [1.0, 0.0, 0.0]), ([1.36, 0.05, 0.1], [0.3, 0.2, 0.9]),
+                  ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]))
+        result = []
+        for dx in (None, 1.E-4):
+            save_sensors([Mirnov(p, n, 'B{0}'.format(k), dx=dx) for k, (p, n) in enumerate(probes)],
+                         'mirnov_point.loc')
+            tw_model = ThinCurr(myOFT)
+            tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml')
+            Ms, Msc, _ = tw_model.compute_Msensor('mirnov_point.loc')
+            result.append((np.array(Ms), np.array(Msc)))
+        mp_q.put(result)
+    except BaseException as e:
+        print(e)
+        mp_q.put(None)
+
+
+def test_mirnov_point():
+    os.chdir(test_dir)
+    xml = ThinCurr_XML()
+    xml.set_eta([10.0*mu0])
+    coil = ThinCurr_Icoil(name="Test")
+    coil.add_circular_subcoil([1.6, 0.6])
+    xml.add_Icoil(coil)
+    write_oft_xml([xml], "oft_in.xml")
+    mp_q = multiprocessing.Queue()
+    p = multiprocessing.Process(target=run_mirnov_point, args=("tw_test-torus.h5", mp_q))
+    p.start()
+    result = mp_q.get(timeout=180)
+    p.join()
+    assert result is not None
+    (Ms_point, Msc_point), (Ms_loop, Msc_loop) = result
+    # A loop of side dx approaches the point value as dx^2
+    assert np.abs(Ms_loop - Ms_point).max() < 1.E-5*np.abs(Ms_point).max()
+    assert np.allclose(Msc_loop, Msc_point, rtol=1.E-6, atol=0.0)
+
