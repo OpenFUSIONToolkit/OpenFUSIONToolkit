@@ -23,7 +23,7 @@ USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
 USE oft_native_la, ONLY: oft_native_dense_matrix, partition_graph
 USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
 USE oft_solver_base, ONLY: oft_solver
-USE oft_native_solvers, ONLY: oft_native_gmres_csolver
+USE oft_native_solvers, ONLY: oft_native_gmres_csolver, gmres_backsolve
 USE oft_solver_utils, ONLY: create_diag_pre, create_native_solver, create_cg_solver
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
@@ -307,6 +307,7 @@ ALLOCATE(x(self%nelems))
 x=(0.d0,0.d0)
 IF(direct)THEN
   CALL lapack_matinv(self%nelems,Mmat,info)
+  IF(info/=0)CALL oft_abort('Matrix inversion failed','frequency_response',__FILE__)
   CALL zgemv('N',self%nelems,self%nelems,(1.d0,0.d0),Mmat,self%nelems,b,1,(0.d0,0.d0),x,1)
   DEALLOCATE(Mmat)
 ELSE
@@ -314,6 +315,7 @@ ELSE
     frinv%pre=>frinv_pre
     frinv_pre%mf_obj=>hodlr_op
     frinv_pre%Rmat=>self%Rmat
+    IF(ASSOCIATED(self%junc))frinv_pre%Rmat=>self%junc%Rmat_exp
     frinv_pre%alpha=aca_Fmat%beta
     frinv_pre%beta=aca_Fmat%alam
     ! ALLOCATE(oft_diag_cscale::frinv%pre)
@@ -348,16 +350,14 @@ DEALLOCATE(b,x)
 CALL oft_decrease_indent
 CONTAINS
 !---------------------------------------------------------------------------------
-!> Dot product with a second vector
-!!
-!! @param[in] a Second vector for dot product
-!! @result \f$ \sum_i self_i a_i \f$
+!> Conjugated dot product of two complex vectors \f$ a^H b \f$
 !---------------------------------------------------------------------------------
 function vec_comp_dot(n,a,b) result(dot)
-integer(i4), intent(in) :: n
-DOUBLE COMPLEX, intent(in) :: a(n),b(n)
+integer(i4), intent(in) :: n !< Length of vectors
+DOUBLE COMPLEX, intent(in) :: a(n) !< First vector (conjugated)
+DOUBLE COMPLEX, intent(in) :: b(n) !< Second vector
 INTEGER(i4) :: i
-DOUBLE COMPLEX :: dot
+DOUBLE COMPLEX :: dot !< \f$ \sum_i \overline{a_i} b_i \f$
 dot=(0.d0,0.d0)
 !$omp parallel do reduction(+:dot)
 DO i=1,n
@@ -365,15 +365,13 @@ DO i=1,n
 END DO
 end function vec_comp_dot
 !---------------------------------------------------------------------------------
-!> Dot product with a second vector
-!!
-!! @param[in] a Second vector for dot product
-!! @result \f$ \sum_i self_i a_i \f$
+!> Dense complex matrix-vector product \f$ b = A x \f$
 !---------------------------------------------------------------------------------
 subroutine mat_comp(n,A,x,b)
-integer(i4), intent(in) :: n
-DOUBLE COMPLEX, intent(in) :: A(n,n),x(n)
-DOUBLE COMPLEX, intent(out) :: b(n)
+integer(i4), intent(in) :: n !< Size of system
+DOUBLE COMPLEX, intent(in) :: A(n,n) !< Matrix
+DOUBLE COMPLEX, intent(in) :: x(n) !< Input vector
+DOUBLE COMPLEX, intent(out) :: b(n) !< Result
 integer(i4) :: i,j,i1,i2
 b=(0.d0,0.d0)
 IF(omp_in_parallel())THEN
@@ -396,14 +394,19 @@ ELSE
 END IF
 end subroutine mat_comp
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Solve a dense complex linear system using restarted GMRES with a
+!! (optionally overlapping) block-Jacobi preconditioner
 !---------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE gmres_comp(nrits,its,ncoils,A,u,g,graph,nlocal,loverlap)
-INTEGER(i4), INTENT(in) :: nrits,its,ncoils,nlocal
-DOUBLE COMPLEX, INTENT(inout) :: A(ncoils,ncoils)
-DOUBLE COMPLEX, CONTIGUOUS, intent(inout) :: u(:),g(:)
-TYPE(oft_graph), INTENT(inout) :: graph
-LOGICAL, INTENT(in) :: loverlap
+INTEGER(i4), INTENT(in) :: nrits !< Restart length
+INTEGER(i4), INTENT(in) :: its !< Maximum iterations (-1/-2 for relative tolerance of 1E-7/1E-14)
+INTEGER(i4), INTENT(in) :: ncoils !< Size of system
+INTEGER(i4), INTENT(in) :: nlocal !< Number of preconditioner blocks (diagonal scaling if <=1)
+DOUBLE COMPLEX, INTENT(inout) :: A(ncoils,ncoils) !< Matrix
+DOUBLE COMPLEX, CONTIGUOUS, intent(inout) :: u(:) !< Guess (input), Solution (output)
+DOUBLE COMPLEX, CONTIGUOUS, intent(inout) :: g(:) !< RHS (input), Residual (output)
+TYPE(oft_graph), INTENT(inout) :: graph !< Matrix graph used for block partitioning
+LOGICAL, INTENT(in) :: loverlap !< Overlap preconditioner blocks by one level?
 !
 TYPE :: mat_parts
   INTEGER(i4) :: n = 0 !< Number of values in set
@@ -415,10 +418,13 @@ END TYPE mat_parts
 !
 DOUBLE COMPLEX, allocatable, dimension(:) :: r,w
 DOUBLE COMPLEX, allocatable, dimension(:,:) :: v,z
-DOUBLE COMPLEX, allocatable :: h(:,:),c(:),s(:),res(:)
+DOUBLE COMPLEX, allocatable :: h(:,:),c(:),s(:),res(:),y(:)
 DOUBLE COMPLEX :: delta,hkmi
-REAL(r8) :: uu,uuold,gg,ggold,ggin,elapsed_time
-integer(i4) :: i,j,jr,k,kk,nits,info
+REAL(r8) :: uu,uuold,gg,ggold,ggin,elapsed_time,res_u_tol
+REAL(r8), allocatable :: znorm(:)
+integer(i4) :: i,j,jr,k,kk,nits,info,nfail
+INTEGER(i4), PARAMETER :: min_inner_its = 10 !< Minimum inner iterations before |r|/|u| check
+LOGICAL :: inner_conv
 integer(i4), allocatable, dimension(:) :: part
 LOGICAL, allocatable, dimension(:) :: eflag
 TYPE(mat_parts), pointer, dimension(:) :: parts,parts_tmp
@@ -428,7 +434,7 @@ pm=oft_env%pm
 oft_env%pm=.FALSE.
 !---Preconditioner setup
 IF(nlocal>1)THEN
-  WRITE(*,"(A,I6)")" nLocal = ",nlocal
+  IF(pm)WRITE(*,'(2A,I6)')oft_indent,'nLocal = ',nlocal
   ALLOCATE(part(ncoils))
   CALL partition_graph(graph,nlocal,part)
   !---Create partition mappings
@@ -488,7 +494,8 @@ IF(nlocal>1)THEN
     ! parts(i)%n=0
   END DO
   !---Get matrix slice
-  !$omp parallel do private(j,k) schedule(static)
+  nfail=0
+  !$omp parallel do private(j,k,info) schedule(static) reduction(+:nfail)
   DO i=1,nlocal
     DO j=1,parts(i)%n
       DO k=1,parts(i)%n
@@ -496,7 +503,9 @@ IF(nlocal>1)THEN
       END DO
     END DO
     CALL lapack_matinv(parts(i)%n,parts(i)%mat,info)
+    IF(info/=0)nfail=nfail+1
   END DO
+  IF(nfail>0)CALL oft_abort('Preconditioner block inversion failed','gmres_comp',__FILE__)
   IF(loverlap)THEN
     !$omp parallel do private(j)
     DO i=1,nlocal
@@ -516,8 +525,8 @@ END IF
 !---
 ALLOCATE(v(ncoils,nrits+1),z(ncoils,nrits+1))
 ALLOCATE(r(ncoils),w(ncoils))
-w=(0.d0,0.d0)
-allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
+w=(0.d0,0.d0); z=(0.d0,0.d0)
+allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits),y(nrits),znorm(nrits))
 c=(0.d0,0.d0); s=(0.d0,0.d0); res=(0.d0,0.d0); h=(0.d0,0.d0)
 !
 uu = REAL(vec_comp_dot(ncoils,u,u),8)
@@ -526,12 +535,17 @@ r=g-w
 gg = REAL(vec_comp_dot(ncoils,r,r),8)
 ggin=gg
 IF(pm)WRITE(*,'(A,I6,2ES14.6)')oft_indent,0,SQRT(uu),SQRT(gg)
+! Tolerance on |r|/|u| for its=-1/-2
+res_u_tol=-1.d0
+IF(its==-1)res_u_tol=1.d-7
+IF(its==-2)res_u_tol=1.d-14
 nits=0
 DO j=1,ncoils
   IF(gg==0.d0)EXIT
   res=(0.d0,0.d0)
   res(1)=SQRT(gg)
   v(:,1)=r/res(1)
+  inner_conv=.FALSE.
   DO i=1,nrits
   !---Precondition search direction
   IF(nlocal>1)THEN
@@ -552,42 +566,58 @@ DO j=1,ncoils
         z(k,i)=v(k,i)/A(k,k)
       END DO
     END IF
+    IF(res_u_tol>0.d0)znorm(i)=SQRT(REAL(vec_comp_dot(ncoils,z(:,i),z(:,i)),8))
     CALL mat_comp(ncoils,A,z(:,i),w)
     !---Arnoldi iteration
     DO k=1,i
-      h(k,i)=vec_comp_dot(ncoils,w,v(:,k))
+      h(k,i)=vec_comp_dot(ncoils,v(:,k),w)
       w=w-h(k,i)*v(:,k)
     END DO
-    h(i+1,i)=SQRT(vec_comp_dot(ncoils,w,w))
-    v(:,i+1)=w/h(i+1,i)
+    h(i+1,i)=SQRT(REAL(vec_comp_dot(ncoils,w,w),8))
+    IF(ABS(h(i+1,i))>0.d0)v(:,i+1)=w/h(i+1,i)
     !---Apply Givens rotation
     DO k=2,i
       hkmi = h(k-1,i)
-      h(k-1,i) = c(k-1)*hkmi + s(k-1)*h(k,i)
+      h(k-1,i) = CONJG(c(k-1))*hkmi + CONJG(s(k-1))*h(k,i)
       h(k,i) = -s(k-1)*hkmi + c(k-1)*h(k,i)
     END DO
     delta = SQRT( ABS(h(i,i))**2 + ABS(h(i+1,i))**2 )
     c(i) = h(i,i) / delta
     s(i) = h(i+1,i) / delta
-    h(i,i) = c(i)*h(i,i) + s(i)*h(i+1,i)
+    h(i,i) = CONJG(c(i))*h(i,i) + CONJG(s(i))*h(i+1,i)
     !---Update residual
     res(i+1) = -s(i)*res(i)
-    res(i) = c(i)*res(i)
+    res(i) = CONJG(c(i))*res(i)
     nits=nits+1
     IF(i==nrits)EXIT
+    IF(ABS(res(i+1))==0.d0)EXIT ! Lucky breakdown
     IF(nits==its)EXIT
+    !---Check |r|/|u| criterion for current iterate (after a minimum number of
+    !   inner iterations to avoid stalling through many short restart cycles)
+    IF(res_u_tol>0.d0.AND.i>=MIN(min_inner_its,ncoils))THEN
+      CALL gmres_backsolve(i,h,res,y)
+      ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
+      IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(y(1:i))*znorm(1:i))))THEN
+        w=u ! Form iterate in w (used as scratch)
+        DO kk=1,i
+          w=w+y(kk)*z(:,kk)
+        END DO
+        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(REAL(vec_comp_dot(ncoils,w,w),8)))
+        IF(inner_conv)EXIT
+      END IF
+    END IF
     IF(pm)WRITE(*,'(A,I6,14X,ES14.6)')oft_indent,nits,ABS(res(i+1))
   END DO
   k=i
-  DO i=k,2,-1
-    res(i) = res(i) / h(i,i)
-    res(1:i-1) = res(1:i-1) - res(i)*h(1:i-1,i)
-  END DO
-  res(1) = res(1) / h(1,1)
   ! Update iterate
-  DO i=1,k
-    u=u+res(i)*z(:,i)
-  END DO
+  IF(inner_conv)THEN
+    u=w ! Already formed by inner convergence check
+  ELSE
+    CALL gmres_backsolve(k,h,res,y)
+    DO i=1,k
+      u=u+y(i)*z(:,i)
+    END DO
+  END IF
   CALL mat_comp(ncoils,A,u,w)
   r=g-w
   IF(nits==its)EXIT
@@ -595,13 +625,12 @@ DO j=1,ncoils
   gg = REAL(vec_comp_dot(ncoils,r,r),8)
   uu = REAL(vec_comp_dot(ncoils,u,u),8)
   IF(pm)WRITE(*,'(A,I6,3ES14.6)')oft_indent,nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
-  IF(its==-1.AND.sqrt(gg/uu)<1.d-7)EXIT
-  IF(its==-2.AND.sqrt(gg/uu)<1.d-14)EXIT
+  IF(res_u_tol>0.d0.AND.SQRT(gg/uu)<res_u_tol)EXIT
   IF(nits==its)EXIT
   IF(uu==uuold)EXIT
 END DO
 g=r
-DEALLOCATE(c,s,h,res)
+DEALLOCATE(c,s,h,res,y,znorm)
 DEALLOCATE(v,z,r,w)
 !
 IF(pm)THEN
@@ -746,6 +775,7 @@ IF(.NOT.direct)THEN
   IF(PRESENT(hodlr_op))THEN
     linv_pre%mf_obj=>hodlr_op
     linv_pre%Rmat=>self%Rmat
+    IF(ASSOCIATED(self%junc))linv_pre%Rmat=>self%junc%Rmat_exp
     linv_pre%alpha=1.d0
     linv_pre%beta=fmat%alam
     linv%pre=>linv_pre
@@ -833,7 +863,7 @@ IF(sensors%njumpers+self%nholes+self%n_vcoils>0)THEN
     jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
   END DO
   DO j=1,self%nholes+self%n_vcoils
-    jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
+    jumpout(sensors%njumpers+j+1)=tw_hole_value(self,vals,j)/mu0
   END DO
   !---Setup history file
   IF(oft_env%head_proc)THEN
@@ -955,7 +985,7 @@ DO i=1,nsteps
     vals=vals+pcoil_volt
   ELSE
     DO j=1,self%n_vcoils
-      vals(self%np_active+self%nholes+j)=vals(self%np_active+self%nholes+j)+pcoil_volt(j)
+      vals(self%nelems-self%n_vcoils+j)=vals(self%nelems-self%n_vcoils+j)+pcoil_volt(j)
     END DO
   END IF
   CALL g%restore_local(vals)
@@ -1017,7 +1047,7 @@ DO i=1,nsteps
       jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
     END DO
     DO j=1,self%nholes+self%n_vcoils
-      jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
+      jumpout(sensors%njumpers+j+1)=tw_hole_value(self,vals,j)/mu0
     END DO
     jumpout(1)=t
     CALL jumper_hist%write(data_r8=jumpout)
@@ -1205,7 +1235,7 @@ DO i=0,nsteps
         jumpout(j+1)=sensors%jumpers(j)%compute_current(self,vals)
       END DO
       DO j=1,self%nholes+self%n_vcoils
-        jumpout(sensors%njumpers+j+1)=vals(self%np_active+j)/mu0
+        jumpout(sensors%njumpers+j+1)=tw_hole_value(self,vals,j)/mu0
       END DO
       jumpout(1)=t
       CALL jumper_hist%write(data_r8=jumpout)

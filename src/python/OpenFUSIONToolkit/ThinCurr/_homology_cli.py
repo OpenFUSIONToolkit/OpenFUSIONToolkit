@@ -15,9 +15,10 @@ import os
 import argparse
 import numpy as np
 import matplotlib.pyplot as plt
-from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
+from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh, HOLES_VERSION
 from . import _tree_homology
 from . import _manifold_homology
+from .junctions import has_junctions, find_junction_holes, verify_junction_mesh, split_jumper
 
 
 def _verify_counts(input_model, nholes, nclosures):
@@ -74,12 +75,42 @@ def _write_holes(out_file, input_model, holes, closures):
                         eta_vol=input_model['thincurr'].get('eta_vol'),
                         thickness=input_model['thincurr'].get('thickness'),
                         coil_sets=input_model['thincurr'].get('coil_sets'),
-                        reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'))
+                        reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'),
+                        holes_version=HOLES_VERSION)
+
+
+def _compute_junction_holes(input_model, out_file, verify_only, print_info):
+    '''! Split a mesh with junctions (edges shared by more than two cells) and choose its holes
+
+    See @ref junctions.find_junction_holes. The output file holds the split mesh and, in the
+    `thincurr/junctions` group, the junction table, explicit holes, vertex map and P.
+    '''
+    out = find_junction_holes(input_model['r'], input_model['lc'], input_model['reg'])
+    if print_info:
+        print("Junction mesh:")
+        print("  # of junction lines = {0}".format(len(out['lines'])))
+        print("  # of junction edges = {0}".format(len(out['kje'])-1))
+        print("  # of vertices after split = {0}".format(out['r'].shape[0]))
+        print("  # of holes = {0} (sheet boundaries and cuts)".format(len(out['holes'])))
+        print("  # of cuts = {0}".format(len(out['cuts'])))
+        print("  # of closures = {0}".format(len(out['info']['closures'])))
+        print("  # of unknowns = {0} (independent currents {1})".format(out['n_unknowns'], out['n_loops']))
+    if verify_only:
+        return
+    thincurr = input_model['thincurr']
+    jumpers = [split_jumper(input_model['lc'], out['lc'], out['vmap'], out['jedges'], jumper)
+               for jumper in thincurr.get('jumpers', [])]
+    write_ThinCurr_mesh(out_file, out['r'], out['lc'], input_model['reg'],
+                        junctions=out, jumpers=jumpers,
+                        eta_surf=thincurr.get('eta_surf'), eta_vol=thincurr.get('eta_vol'),
+                        thickness=thincurr.get('thickness'), coil_sets=thincurr.get('coil_sets'),
+                        reg_names=input_model.get('reg_names'), reg_attrs=input_model.get('reg_attrs'),
+                        holes_version=HOLES_VERSION)
 
 
 def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False, show_omitted=False,
                      show_covering=False, debug=False, ref_point=None, optimize_holes=False, verify_only=False,
-                     use_legacy=False, verbose=False):
+                     use_legacy=False, verbose=False, split_regions=False):
     '''! Compute holes and closures for ThinCurr meshes
 
     By default holes are selected using a tree-cotree approach (see @ref _tree_homology). The previous Greedy
@@ -97,6 +128,7 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     @param verify_only Verify the correct number of holes and closures are found, but do not write output file?
     @param use_legacy Use the legacy Greedy Homotopy method?
     @param verbose Print progress for each search base point (tree-cotree method only)?
+    @param split_regions Split the mesh at all region interfaces (junction mesh) even if every edge has at most two cells?
     '''
     if out_file is None:
         out_file = os.path.splitext(in_file)[0] + "-homology.h5"
@@ -118,6 +150,8 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     input_model = read_ThinCurr_mesh(in_file)
     if 'thincurr' in input_model:
         if 'nfp' in input_model['thincurr']:
+            if split_regions or has_junctions(input_model['lc'], input_model['reg']):
+                raise ValueError('Junctions are not supported for periodic ThinCurr meshes (nfp > 0) at this time')
             if verify_only:
                 print("Periodic ThinCurr model detected (nfp > 0), skipping homology calculation")
                 return
@@ -125,6 +159,21 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
                 raise ValueError('Homology calculation does not support periodic ThinCurr meshes (nfp > 0) at this time')
     else:
         input_model['thincurr'] = {}
+    if 'junctions' in input_model['thincurr']:
+        if verify_only:
+            njedges, nunknowns = verify_junction_mesh(input_model['r'], input_model['lc'], input_model['reg'],
+                                                      input_model['thincurr']['junctions'])
+            if print_info:
+                print("Junction mesh: {0} junction edges, {1} unknowns".format(njedges, nunknowns))
+            return
+        raise ValueError('Mesh has already been split at junctions')
+    if has_junctions(input_model['lc'], input_model['reg']):
+        if verify_only:
+            raise ValueError('Mesh has junctions (edges shared by more than two cells, or sheets touching at a vertex) '
+                             'but no junction data, run "OFT_ThinCurr_holes" to split it')
+        return _compute_junction_holes(input_model, out_file, verify_only, print_info)
+    if split_regions:
+        return _compute_junction_holes(input_model, out_file, verify_only, print_info)
 
     # Select (or count) holes and closures
     if use_legacy:
@@ -196,6 +245,7 @@ def script_entry():
     parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes (little effect with the default method)?")
     parser.add_argument("--use_legacy", action="store_true", default=False, help="Use the legacy Greedy Homotopy method?")
     parser.add_argument("--verbose", action="store_true", default=False, help="Print progress for each search base point (tree-cotree method only)?")
+    parser.add_argument("--split_regions", action="store_true", default=False, help="Split the mesh at all region interfaces (junction mesh)?")
     options = parser.parse_args()
 
     if options.keep_nodeset_start is not None:
@@ -212,7 +262,8 @@ def script_entry():
         ref_point=options.ref_point,
         optimize_holes=options.optimize_holes,
         use_legacy=options.use_legacy,
-        verbose=options.verbose
+        verbose=options.verbose,
+        split_regions=options.split_regions
     )
 
 
@@ -224,9 +275,17 @@ def script_entry():
 # (see \ref OpenFUSIONToolkit.ThinCurr._tree_homology); the previous Greedy Homotopy approach
 # is available using `--use_legacy`.
 #
+# If the mesh has junctions (edges shared by more than two cells, or sheets of different regions touching only at a
+# point), or `--split_regions` is given, it is split at the junctions and the region interfaces instead (not
+# supported for periodic meshes) and the output file holds the split mesh with the junction data
+# (`thincurr/junctions`): see
+# \ref doc_tw_main_junctions. Each region must be a separate sheet. `--split_regions` is needed when sheets
+# meet two at a time (e.g. a torus in sectors) but should be insulatable from each other with
+# `setup_model(insulated_junctions=...)`.
+#
 #```shell
 # usage: OFT_ThinCurr_holes [-h] --in_file IN_FILE [--out_file OUT_FILE] [--keep_nodeset_start KEEP_NODESET_START] [--plot_final] [--plot_steps] [--show_omitted]
-#                                 [--show_covering] [--debug] [--ref_point REF_POINT [REF_POINT ...]] [--optimize_holes] [--use_legacy] [--verbose]
+#                                 [--show_covering] [--debug] [--ref_point REF_POINT [REF_POINT ...]] [--optimize_holes] [--use_legacy] [--verbose] [--split_regions]
 #
 # options:
 #     -h, --help            show this help message and exit
@@ -244,4 +303,5 @@ def script_entry():
 #     --optimize_holes      Sample additional points to attempt to optimize holes (little effect with the default method)?
 #     --use_legacy          Use the legacy Greedy Homotopy method?
 #     --verbose             Print progress for each search base point (tree-cotree method only)?
+#     --split_regions       Split the mesh at all region interfaces (junction mesh)?
 #```
