@@ -783,7 +783,7 @@ INTEGER(4) :: i,ii,j,jj,k,kk,ik,ncoils_tot,ih,ihp,ihc,file_counts(4),ierr,io_uni
 INTEGER(i4), ALLOCATABLE :: nrad_cross(:)
 REAL(8) :: tmp(3),cvec(3),cpt(3),pt_i(3),evec_i(3,3),pts_i(3,3),elapsed_time
 REAL(8) :: pot_tmp,rgop(3,3),area_i,norm_i(3),f(3),dl_min,dl_max,pot_last
-REAL(8) :: avec(3),rp,aphi,dring
+REAL(8) :: avec(3),dring
 REAL(8), allocatable :: atmp(:,:),Ael2coil_tmp(:,:),ring_rz(:,:,:)
 LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
@@ -883,7 +883,7 @@ Ael2coil_tmp=0.d0
 f=1.d0/3.d0
 !$omp parallel private(ii,ik,j,jj,k,kk,pts_i,pt_i,cvec, &
 !$omp cpt,tmp,atmp,evec_i,pot_tmp,pot_last,i,ih,ihp, &
-!$omp ihc,rgop,area_i,norm_i,dl_min,dl_max,iquad,avec,rp,aphi,dring)
+!$omp ihc,rgop,area_i,norm_i,dl_min,dl_max,iquad,avec,dring)
 ALLOCATE(atmp(ncoils_tot,3))
 !$omp do
 DO i=1,bmesh%nc
@@ -1051,11 +1051,9 @@ LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 INTEGER(4) :: ncoils_tot
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
-TYPE(oft_quad_type), POINTER :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
-quads=>tw_quads
 !---Build temporary coil set from all filaments in model
 ncoils_tot=tw_obj%n_vcoils
 IF(ASSOCIATED(tw_obj%Ael2dr))ncoils_tot=ncoils_tot+tw_obj%n_icoils
@@ -1173,15 +1171,14 @@ TYPE(tw_type), TARGET, INTENT(in) :: row_model !< Thin-wall model object for row
 REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix
 TYPE(tw_type), TARGET, OPTIONAL, INTENT(in) :: col_model !< Thin-wall model object for columns
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
-INTEGER(4) :: i,ii,j,jj,ik,jk,imin,jmax,io_unit,ierr,file_counts(6),hash_tmp(6),iquad
+INTEGER(4) :: i,ii,j,jj,ik,jk,imin,jmax,io_unit,ierr,file_counts(6),hash_tmp(6)
 INTEGER(8) :: counts(4)
-REAL(8) :: tmp,dl_min,dl_max,f(3),elapsed_time
-REAL(8) :: pt_i(3),rgop(3,3),area_i,norm_i(3),evec_i(3,3),pts_i(3,3)
-REAL(8) :: pt_j(3),cgop(3,3),area_j,norm_j(3),evec_j(3,3),pts_j(3,3)
-LOGICAL :: vvclose_flag,close_flag,exists,Lself
+REAL(8) :: tmp,dl_min,f(3),elapsed_time
+REAL(8) :: area_i,evec_i(3,3),pts_i(3,3)
+REAL(8) :: area_j,evec_j(3,3),pts_j(3,3)
+LOGICAL :: exists,Lself
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
 TYPE(tw_type), POINTER :: row_obj,col_obj
-TYPE(oft_quad_type), POINTER :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 row_obj=>row_model
@@ -1279,16 +1276,15 @@ CALL oft_increase_indent
 Lmat=0.d0
 CALL mytimer%tick
 !---Setup quadrature
-quads=>tw_quads
 !
 rmesh=>row_obj%mesh
 cmesh=>col_obj%mesh
 !---
 counts=0
 f=1.d0/3.d0
-!$omp parallel private(ii,j,jj,ik,jk,pts_i,pts_j,tmp,iquad, &
-!$omp pt_i,pt_j,evec_i,evec_j,dl_min,dl_max,i,jmax,imin, &
-!$omp rgop,area_i,norm_i,cgop,area_j,norm_j,close_flag,vvclose_flag) reduction(+:counts)
+!$omp parallel private(ii,j,jj,ik,jk,pts_i,pts_j,tmp, &
+!$omp evec_i,evec_j,dl_min,i,jmax,imin, &
+!$omp area_i,area_j) reduction(+:counts)
 !$omp do schedule(dynamic,100)
 DO i=1,rmesh%nc
   ! CALL rmesh%jacobian(i,f,rgop,area_i)
@@ -2364,26 +2360,24 @@ SUBROUTINE tw_compute_Bops(self,B_dx,save_file)
 TYPE(tw_type), INTENT(inout) :: self
 REAL(r8), INTENT(in) :: B_dx
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
-REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
-REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
+REAL(r8) :: evec_i(3,3),pts_i(3,3),pt_j(3),diffvec(3),ecc(3)
+REAL(r8) :: cvec(3),cpt(3),tmp,area_i,norm_j(3),f(3)
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
-LOGICAL :: is_neighbor,load_success
+INTEGER(4) :: i,ii,j,jj,ik,k,kk
+LOGICAL :: load_success
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), POINTER :: quads(:)
 IF(PRESENT(save_file))THEN
   load_success=load_from_file()
   IF(load_success)RETURN
 END IF
 !
 bmesh=>self%mesh
-quads=>tw_quads
 ALLOCATE(self%Bel(bmesh%np,self%nelems,3))
 self%Bel=0.d0
 f=1.d0/3.d0
 WRITE(*,'(2A)')oft_indent,'Building element->element magnetic reconstruction operator'
-!$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_i,pt_j,evec_i, &
-!$omp atmp,i,area_i,dl_min,dl_max,norm_j,diffvec,is_neighbor,iquad)
+!$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_j,evec_i, &
+!$omp atmp,i,area_i,norm_j,diffvec)
 ALLOCATE(atmp(3,3,bmesh%np))
 !$omp do schedule(dynamic,100)
 DO i=1,bmesh%nc
@@ -2427,7 +2421,7 @@ DEALLOCATE(atmp)
 !$omp end parallel
 !
 WRITE(*,'(2A)')oft_indent,'Building vcoil->element magnetic reconstruction operator'
-!$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
+!$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt)
 DO i=1,bmesh%np
   pt_j=bmesh%r(:,i)
   !---Compute driver contributions
@@ -2459,7 +2453,7 @@ self%Bel=self%Bel/(4.d0*pi)
 WRITE(*,'(2A)')oft_indent,'Building icoil->element magnetic reconstruction operator'
 ALLOCATE(self%Bdr(bmesh%np,self%n_icoils,3))
 self%Bdr=0.d0
-!$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
+!$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt)
 DO i=1,bmesh%np
   pt_j=bmesh%r(:,i)
   !---Compute driver contributions
@@ -2980,7 +2974,7 @@ TYPE(xml_node), POINTER :: coil_set,coil
 TYPE(xml_nodelist) :: coil_sets,coil_list
 !---
 LOGICAL :: success
-INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims
+INTEGER(4) :: i,j,io_unit,ierr,id,cell,ipath,ndims
 INTEGER(4), ALLOCATABLE :: dim_sizes(:)
 REAL(8) :: res_per_len,radius,dl
 REAL(8), POINTER :: pts2_tmp(:,:)

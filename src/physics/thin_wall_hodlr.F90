@@ -163,15 +163,12 @@ SUBROUTINE tw_compute_LmatHole(row_obj,col_obj,Lmat)
 TYPE(tw_type), INTENT(in) :: row_obj !< Thin-wall model object for rows
 TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
 REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix
-INTEGER(4) :: i,ii,j,jj,ik,jk,imin,jmax,io_unit,ierr,file_counts(2),iquad
+INTEGER(4) :: i,ii,j,jj,ik,jk
 INTEGER(8) :: counts(4)
-REAL(8) :: tmp,dl_min,dl_max,f(3),elapsed_time
-REAL(8) :: pt_i(3),rgop(3,3),area_i,norm_i(3),evec_i(3,3),pts_i(3,3)
-REAL(8) :: pt_j(3),cgop(3,3),area_j,norm_j(3),evec_j(3,3),pts_j(3,3)
-LOGICAL :: vvclose_flag, close_flag,exists
+REAL(8) :: tmp,dl_min,f(3)
+REAL(8) :: area_i,evec_i(3,3),pts_i(3,3)
+REAL(8) :: area_j,evec_j(3,3),pts_j(3,3)
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
-TYPE(oft_quad_type), POINTER :: quads(:)
-type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 ! ALLOCATE(Lmat(col_obj%nelems,row_obj%nelems))
 !
@@ -179,16 +176,15 @@ DEBUG_STACK_PUSH
 Lmat=0.d0
 ! CALL mytimer%tick
 !---Setup quadrature
-quads=>tw_quads
 !
 rmesh=>row_obj%mesh
 cmesh=>col_obj%mesh
 !---
 counts=0
 f=1.d0/3.d0
-!$omp parallel private(ii,j,jj,ik,jk,pts_i,pts_j,tmp,iquad, &
-!$omp pt_i,pt_j,evec_i,evec_j,dl_min,dl_max,i,jmax,imin, &
-!$omp rgop,area_i,norm_i,cgop,area_j,norm_j,close_flag,vvclose_flag) reduction(+:counts)
+!$omp parallel private(ii,j,jj,ik,jk,pts_i,pts_j,tmp, &
+!$omp evec_i,evec_j,dl_min,i, &
+!$omp area_i,area_j) reduction(+:counts)
 !$omp do schedule(dynamic,100)
 DO i=1,rmesh%nc
     IF(row_obj%kfh(i+1)-row_obj%kfh(i)==0)CYCLE
@@ -273,24 +269,18 @@ TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
 TYPE(oft_tw_block), INTENT(in) :: row_block !< Block of rows to compute
 TYPE(oft_tw_block), INTENT(in) :: col_block !< Block of columns to compute
 REAL(8), INTENT(out) :: Lmat(:,:) !< Mutual inductance matrix
-INTEGER(4) :: i,ii,j,jj,ik,jk,imin,jmax,io_unit,ierr,file_counts(2),iquad,irow,jcol
-INTEGER(4) :: rowi,coli
+INTEGER(4) :: i,ii,j,jj,ik,jk,irow,jcol
 INTEGER(8) :: counts(4)
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: rpmap,cpmap
-REAL(8) :: tmp,dl_min,dl_max,f(3),elapsed_time
-REAL(8) :: pt_i(3),rgop(3,3),area_i,norm_i(3),evec_i(3,3),pts_i(3,3)
-REAL(8) :: pt_j(3),cgop(3,3),area_j,norm_j(3),evec_j(3,3),pts_j(3,3)
-LOGICAL :: vvclose_flag, close_flag,exists
+REAL(8) :: tmp,dl_min,f(3)
+REAL(8) :: area_i,evec_i(3,3),pts_i(3,3)
+REAL(8) :: area_j,evec_j(3,3),pts_j(3,3)
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
-TYPE(oft_quad_type), POINTER :: quads(:)
-type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
 ! WRITE(*,*)'Building element<->element inductance matrix block'
 Lmat=0.d0
 ! CALL mytimer%tick
 !---Setup quadrature
-quads=>tw_quads
 !
 rmesh=>row_obj%mesh
 cmesh=>col_obj%mesh
@@ -347,20 +337,17 @@ TYPE(tw_type), INTENT(inout) :: self
 REAL(8), INTENT(out) :: Bop(:,:,:) !< Magnetic field evaluation matrix
 REAL(8), INTENT(out) :: Bop_dr(:,:,:) !< Magnetic field evaluation matrix
 REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
-REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
-REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
+REAL(r8) :: evec_i(3,3),pts_i(3,3),pt_j(3),diffvec(3),ecc(3)
+REAL(r8) :: cvec(3),cpt(3),tmp,area_i,norm_j(3),f(3)
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
-LOGICAL :: is_neighbor
+INTEGER(4) :: i,ii,j,jj,ik,k,kk
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), POINTER :: quads(:)
 bmesh=>self%mesh
-quads=>tw_quads
 Bop=0.d0
 f=1.d0/3.d0
 ! WRITE(*,*)'Building element->element magnetic reconstruction operator'
-!$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_i,pt_j,evec_i, &
-!$omp atmp,i,area_i,dl_min,dl_max,norm_j,diffvec,is_neighbor,iquad)
+!$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_j,evec_i, &
+!$omp atmp,i,area_i,norm_j,diffvec)
 ALLOCATE(atmp(3,3,bmesh%np))
 !$omp do schedule(dynamic,100)
 DO i=1,bmesh%nc
@@ -396,7 +383,7 @@ DEALLOCATE(atmp)
 !
 ! WRITE(*,*)'Building vcoil->element magnetic reconstruction operator'
 IF(self%n_vcoils>0)THEN
-  !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
+  !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt)
   DO i=1,bmesh%np
     pt_j=bmesh%r(:,i)
     !---Compute driver contributions
@@ -428,7 +415,7 @@ Bop=Bop/(4.d0*pi)
 Bop_dr=0.d0
 ! WRITE(*,*)'Building icoil->element magnetic reconstruction operator'
 IF(self%n_icoils>0)THEN
-  !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
+  !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt)
   DO i=1,bmesh%np
     pt_j=bmesh%r(:,i)
     !---Compute driver contributions
@@ -457,7 +444,7 @@ END IF
 Bop_dr=Bop_dr*mu0/(4.d0*pi)
 END SUBROUTINE tw_compute_Bops_hole
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Compute one direction of a block of the B-field operator (see @ref tw_compute_Bops_block3)
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Bops_block(self,Bop,row_block,col_block,dir,B_dx)
 TYPE(tw_type), INTENT(inout) :: self
@@ -466,50 +453,14 @@ TYPE(oft_tw_block), INTENT(in) :: row_block !< Block of rows to compute
 TYPE(oft_tw_block), INTENT(in) :: col_block !< Block of columns to compute
 INTEGER(4), INTENT(in) :: dir !< Direction of B-field to compute (1=x,2=y,3=z)
 REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
-REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
-REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
-REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad,irow,jcol
-LOGICAL :: is_neighbor
-CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), POINTER :: quads(:)
-bmesh=>self%mesh
-quads=>tw_quads
-Bop=0.d0
-f=1.d0/3.d0
-!WRITE(*,*)'Building element->element magnetic reconstruction operator'
-ALLOCATE(atmp(3,3,col_block%np))
-DO irow=1,row_block%ncells
-    i = row_block%icell(irow)
-    ! CALL bmesh%jacobian(i,f,rgop,area_i)
-    ! CALL bmesh%norm(i,f,norm_i)
-    area_i=bmesh%ca(i)
-    DO ii=1,3
-    pts_i(:,ii)=bmesh%r(:,bmesh%lc(ii,i))
-    ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
-    evec_i(:,ii)=self%qbasis(:,ii,i)
-    END DO
-    CALL bmesh%norm(i,f,norm_j)
-    !---Compute sensor couplings
-    atmp=0.d0
-    DO jcol=1,col_block%np
-    j=col_block%ipts(jcol)
-    !---Field from the cell's three basis functions
-    atmp(:,:,jcol)=tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_j,bmesh%r(:,j),bmesh%va(j),B_dx)
-    END DO
-    DO ii=1,3
-        ik=row_block%inv_map(bmesh%lc(ii,i)) !self%pmap(bmesh%lc(ii,i))
-        IF(ik==0)CYCLE
-        DO j=1,col_block%np
-            Bop(j,ik) = Bop(j,ik) + atmp(dir,ii,j)
-        END DO
-    END DO
-END DO
-Bop=Bop/(4.d0*pi)
-DEALLOCATE(atmp)
+REAL(8), ALLOCATABLE :: Bop3(:,:,:)
+ALLOCATE(Bop3(SIZE(Bop,1),SIZE(Bop,2),3))
+CALL tw_compute_Bops_block3(self,Bop3,row_block,col_block,B_dx)
+Bop=Bop3(:,:,dir)
+DEALLOCATE(Bop3)
 END SUBROUTINE tw_compute_Bops_block
 !---------------------------------------------------------------------------------
-!> Compute all three directions of a block of the B-field operator in one pass (see @ref tw_compute_Bops_block)
+!> Compute all three directions of a block of the B-field operator in one pass
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Bops_block3(self,Bop,row_block,col_block,B_dx)
 TYPE(tw_type), INTENT(inout) :: self
@@ -517,15 +468,12 @@ REAL(8), INTENT(out) :: Bop(:,:,:) !< Magnetic field evaluation matrix [col_bloc
 TYPE(oft_tw_block), INTENT(in) :: row_block !< Block of rows to compute
 TYPE(oft_tw_block), INTENT(in) :: col_block !< Block of columns to compute
 REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
-REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
-REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
+REAL(r8) :: evec_i(3,3),pts_i(3,3)
+REAL(r8) :: area_i,norm_j(3),f(3)
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad,irow,jcol
-LOGICAL :: is_neighbor
+INTEGER(4) :: i,ii,j,jj,ik,irow,jcol
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), POINTER :: quads(:)
 bmesh=>self%mesh
-quads=>tw_quads
 Bop=0.d0
 f=1.d0/3.d0
 ALLOCATE(atmp(3,3,col_block%np))
