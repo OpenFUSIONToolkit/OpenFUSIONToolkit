@@ -35,9 +35,17 @@ OMP_NUM_THREADS=2 make test_full       # all tests, including slow ones
 OMP_NUM_THREADS=2 make test_examples   # example notebooks/programs (needs OFT_BUILD_EXAMPLES or OFT_BUILD_PYTHON)
 ```
 
-`make test`/`test_full` write `<build_dir>/tests/OFT.junit.xml`. `make test` alone takes
-roughly 50 minutes on a 4-core sandbox, and `test_full` longer — run them in the
-background, and prefer targeted runs while iterating.
+`make test`/`test_full` write `<build_dir>/tests/OFT.junit.xml`. With `OMP_NUM_THREADS=2`,
+`make test` alone took about 50 minutes on a 4-core Linux sandbox and about 18 minutes on
+an 18-core Apple Silicon Mac, and `test_full` takes longer — run them in the background,
+and prefer targeted runs while iterating.
+
+Typical `make test` outcomes (October 2026; counts drift as tests are added):
+
+| Configuration | Passed | Skipped | Failed |
+|---|---|---|---|
+| `build_libs.py` GCC + MPICH, with SuperLU, UMFPACK, ARPACK (macOS) | ~917 | ~328 | 0 |
+| Ubuntu system libraries from `oft-build` section 5 | ~906 | ~337 | 2 (known, see `oft-build`) |
 
 Targeted runs use `run_test.sh`, generated into `<build_dir>/tests/`. It sets `PATH`
 (build-tree `python/`, the configured interpreter, and the MPI that OFT was built

@@ -71,7 +71,9 @@ libraries, and `install_release/`; `build_debug`/`install_debug` for Debug confi
 - **CI/ephemeral environments**: a single flat tree — `<config_dir>` is `builds/`, `<build_dir>` is `builds/build_release`.
 
 Find candidates with `find builds -maxdepth 4 -name config_cmake.sh`. If more than one
-is found, **ask the user which to use** rather than guessing.
+is found, **ask the user which to use** rather than guessing. If none is found (eg. in a git
+worktree, which never has `builds/`), follow the `oft-build` skill rather than starting a
+new build unasked.
 
 ### Python environment
 

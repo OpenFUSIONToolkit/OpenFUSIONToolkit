@@ -26,6 +26,21 @@ find builds -maxdepth 4 -name config_cmake.sh
 If more than one is found, **ask the user which to use** — they may differ in compiler,
 MPI configuration, or build type, and some may be stale.
 
+If nothing is found, you are probably in a git worktree or second checkout: `builds/` is
+gitignored, so it is never copied into a new worktree. Look in the other checkouts of
+the repository (`git worktree list`; the first entry is the main checkout), and if that
+finds nothing, ask the user where their build trees are. Summarize each candidate so the
+user can choose:
+
+```bash
+grep -E 'COMPILER|OFT_USE_MPI|CMAKE_BUILD_TYPE' <config_dir>/config_cmake.sh
+grep -E 'OFT_PYTEST_EXE|CMAKE_HOME_DIRECTORY' <build_dir>/CMakeCache.txt
+```
+
+Then offer to reuse one through a sibling configuration (next section, which rebuilds
+OFT but not the external libraries) or to set up a new configuration from scratch
+(section 4).
+
 ### Check which source tree it builds
 
 `CMAKE_HOME_DIRECTORY` in `<build_dir>/CMakeCache.txt` is the absolute path of the
@@ -84,12 +99,25 @@ Run from the directory that will become `<config_dir>`, with the Python environm
 active. This downloads and compiles OpenBLAS, HDF5, METIS, etc., which takes a while —
 run it in the background.
 
+`build_libs.py` takes its compilers from the `CC`, `CXX`, and `FC` environment
+variables (default `gcc`/`g++`/`gfortran`; `LD` and `CMAKE` are also honored). On macOS
+`gcc` is Apple clang, so pass Homebrew GCC explicitly. If the user already has a
+configuration, match its compilers and MPI choice (the `*_COMPILER` lines of its
+`config_cmake.sh`); otherwise ask which toolchain and MPI to use.
+
 ```bash
 mkdir -p builds/GCC/MPI && cd builds/GCC/MPI   # one directory per configuration
+# Compilers shown are Homebrew GCC 16 on macOS; omit or adjust to the chosen toolchain
+CC=gcc-16 CXX=g++-16 FC=gfortran-16 \
 python <repo_root>/src/utilities/build_libs.py \
   --nthread=4 --build_umfpack=1 --build_superlu=1 \
   --build_arpack=1 --oft_build_tests=1 --build_mpich=1
 ```
+
+On macOS, `build_libs.py` finds hwloc (for MPICH/OpenMPI) through `brew --prefix`, and
+captures Homebrew's status messages along with the path. If MPI's configure fails with
+``Invalid configuration `Homebrew'``, run any `brew` command first so Homebrew finishes
+refreshing its package data, then rerun with `HOMEBREW_NO_AUTO_UPDATE=1`.
 
 `python src/utilities/build_libs.py --help` lists every option. Commonly used ones:
 
