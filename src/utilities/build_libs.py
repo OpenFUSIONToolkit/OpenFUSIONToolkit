@@ -126,6 +126,22 @@ def run_command(command, timeout=10, env_vars={}):
     return result, errcode
 
 
+# Suppress Homebrew auto-update and hint messages during package lookups
+brew_env = {"HOMEBREW_NO_AUTO_UPDATE": "1", "HOMEBREW_NO_ENV_HINTS": "1"}
+
+
+def brew_prefix(package):
+    # Get install prefix for a Homebrew package (None if not installed)
+    result, errcode = run_command("brew --prefix --installed {0}".format(package), timeout=60, env_vars=brew_env)
+    if errcode != 0:
+        return None
+    # Status output (eg. API data downloads) may precede the path, so use the last non-empty line
+    lines = [line.strip() for line in result.splitlines() if line.strip() != ""]
+    if (len(lines) == 0) or (not os.path.isdir(lines[-1])):
+        return None
+    return lines[-1]
+
+
 def ver_lt(ver_string, ver_test):
     ver_string = ver_string.split("-")[0].split("_")[0]  # Needed if patch release
     ver_test = ver_test.split("-")[0].split("_")[0]  # Needed if patch release
@@ -946,17 +962,15 @@ class MPICH(package):
         if self.config_dict['OS_TYPE'] == 'Darwin':
             print("  macOS detected: Looking for required packages with homebrew")
             # Search for HWLOC
-            result, errcode = run_command("brew --prefix --installed hwloc")
-            if errcode == 0:
-                hwloc_path = result.strip()
+            hwloc_path = brew_prefix("hwloc")
+            if hwloc_path is not None:
                 print("    Using hwloc from homebrew: {0}".format(hwloc_path))
                 config_options.append('--with-hwloc={0}'.format(hwloc_path))
             else:
                 print("    Could not find hwloc, using MPICH-bundled version")
             # # Search for PMIx (If external PMIx is used mpiexec is not built)
-            # result, errcode = run_command("brew --prefix --installed pmix")
-            # if errcode == 0:
-            #     pmix_path = result.strip()
+            # pmix_path = brew_prefix("pmix")
+            # if pmix_path is not None:
             #     print("    Using pmix from homebrew: {0}".format(pmix_path))
             #     config_options.append('--with-pmix={0}'.format(pmix_path))
             # else:
@@ -1038,32 +1052,29 @@ class OpenMPI(package):
         if self.config_dict['OS_TYPE'] == 'Darwin':
             print("  macOS detected: Looking for required packages with homebrew")
             # Search for HWLOC
-            result, errcode = run_command("brew --prefix --installed hwloc")
-            if errcode == 0:
-                hwloc_path = result.strip()
+            hwloc_path = brew_prefix("hwloc")
+            if hwloc_path is not None:
                 print("    Using hwloc from homebrew: {0}".format(hwloc_path))
                 config_options.append('--with-hwloc={0}'.format(hwloc_path))
             else:
                 print("    Could not find hwloc, build may fail")
             # Search for PMIx
-            result, errcode = run_command("brew --prefix --installed pmix")
-            if errcode == 0:
-                ver_result, errcode = run_command("brew list --versions pmix")
+            pmix_path = brew_prefix("pmix")
+            if pmix_path is not None:
+                ver_result, errcode = run_command("brew list --versions pmix", timeout=60, env_vars=brew_env)
                 if errcode == 0:
                     pmix_ver = ver_result.split()[-1].strip()
                     if not ver_lt(pmix_ver, "6.0"):
                         print("  Found pmix version {0}, which is not compatible with OpenMPI 5.x".format(pmix_ver))
                         config_options.append('--with-pmix=internal')
                     else:
-                        pmix_path = result.strip()
                         print("    Using pmix from homebrew: {0}".format(pmix_path))
                         config_options.append('--with-pmix={0}'.format(pmix_path))
             else:
                 print("    Could not find pmix, build may fail")
             # Search for libevent
-            result, errcode = run_command("brew --prefix --installed libevent")
-            if errcode == 0:
-                libevent_path = result.strip()
+            libevent_path = brew_prefix("libevent")
+            if libevent_path is not None:
                 print("    Using libevent from homebrew: {0}".format(libevent_path))
                 config_options.append('--with-libevent={0}'.format(libevent_path))
             else:
