@@ -339,6 +339,12 @@ else
   pdq = u%dot(q)
   gg = g%dot(u)
   alfa=1.d0; f=pdq/2.d0-gg
+  !---Guess worse than zero in the A-norm (f > 0, zero guess has f = 0): start from zero instead
+  if(f>0.d0)then
+    call u%set(0.d0)
+    call q%set(0.d0)
+    f=0.d0
+  end if
 endif
 call g%add(1.d0,-1.d0,q)
 call p%add(0.d0,1.d0,g)
