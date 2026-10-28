@@ -21,7 +21,9 @@ files, the `test_*.F90` Fortran programs they drive, and data files (`.h5`, `.g`
    OMP_NUM_THREADS=$( [ "$(getconf _NPROCESSORS_ONLN)" -le 2 ] && echo 1 || echo 2 ) make test
    ```
 
-   In a container, `getconf` may report the host's cores rather than the container's CPU limit; if the limit is one or two cores, use `1`. The only exception is running individual tests specifically to study OpenMP thread scaling or performance, where you set the thread count deliberately.
+   In a Linux container, `getconf` and `nproc` report the CPUs the process may run on, not a CPU quota. Check the quota with `cat /sys/fs/cgroup/cpu.max` (cgroup v2: `max` means no limit, otherwise `<quota> <period>`) or `cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu/cpu.cfs_period_us` (cgroup v1: a quota of `-1` means no limit). If quota ÷ period is 2 or less, use `1`.
+
+   The only exception is running individual tests specifically to study OpenMP thread scaling or performance, where you set the thread count deliberately.
 
 ## Running tests
 
@@ -74,7 +76,7 @@ Large skip counts are normal when optional libraries are missing. Before reading
 as a broken build, check the reason (`-rs` prints a summary). The common ones come from
 `run_OFT()` in `oft_testing.py`:
 
-- `Not compiled with PETSc` — the Fortran program reported that PETSc is unavailable. Without PETSc this covers several hundred cases across `fem/`, `lin_alg/test_solver_xml.py`, and the MUG/Marklin physics tests.
+- `Not compiled with PETSc` — the Fortran program reported that PETSc is unavailable. Without PETSc this covers a few hundred cases across `fem/`, `lin_alg/test_solver_xml.py`, and the MUG/Marklin physics tests.
 - `Configuration not supported` — the program printed `SKIP TEST`, eg. `lin_alg/test_native_bjacobi.py` cases whose direct solver (SuperLU, SuperLU-DIST, MUMPS, UMFPACK) this build lacks, and `lin_alg/test_arpack.py` without ARPACK.
 - `Not compiled with MPI` — a `nproc > 1` case in a non-MPI build.
 - A bare `Skipped` — a parameter combination the test itself excludes (eg. matrix-free together with PETSc in the MUG tests).

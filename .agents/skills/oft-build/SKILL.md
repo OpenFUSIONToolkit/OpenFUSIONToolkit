@@ -39,16 +39,19 @@ external libraries:
 
 ```bash
 mkdir -p <new_config_dir>
-sed '$ s|[^ ].*|<this_checkout>/src|' <config_dir>/config_cmake.sh > <new_config_dir>/config_cmake.sh
+sed -e '$ s|[^ ].*|<this_checkout>/src|' \
+    -e 's|\$ROOT_PATH/\.\./setup_env\.sh|<config_dir>/../setup_env.sh|' \
+    <config_dir>/config_cmake.sh > <new_config_dir>/config_cmake.sh
 cd <new_config_dir> && bash config_cmake.sh
 ```
 
-`config_cmake.sh` uses `$(pwd)` for the build and install paths, and absolute paths for
-the external libraries, so the copy is self-contained. Put `<new_config_dir>` somewhere
-gitignored (eg. under `builds/`) and tell the user where it is. If the copied script
-sources `$ROOT_PATH/../setup_env.sh` (the system-library recipe), replace that with an
-absolute path too, unless `<new_config_dir>` is also exactly one level below the
-repository root.
+Use an absolute `<config_dir>`. `config_cmake.sh` uses `$(pwd)` for the build and install
+paths, and absolute paths for the external libraries, so the copy is self-contained. The
+second `sed` expression only matters for the system-library script in section 5, which
+sources `setup_env.sh` relative to its own directory; it changes nothing in scripts from
+`build_libs.py`. Afterwards, check that the `Found pytest:` line in the CMake output names
+the intended environment. Put `<new_config_dir>` somewhere gitignored (eg. under
+`builds/`) and tell the user where it is.
 
 ## 2. Python environment
 
@@ -150,7 +153,7 @@ BUILD_DIR=$ROOT_PATH/build_release
 INSTALL_DIR=$ROOT_PATH/install_release
 
 # Activate the venv so the configured pytest is the one in it, however the script is run
-source $ROOT_PATH/../setup_env.sh
+source $ROOT_PATH/../setup_env.sh || { echo "config_cmake.sh: setup_env.sh not found" >&2; exit 1; }
 
 rm -rf $BUILD_DIR
 mkdir $BUILD_DIR && cd $BUILD_DIR
@@ -170,14 +173,16 @@ bash config_cmake.sh
 cd build_release && make -j$(nproc)
 ```
 
+On a 4-core sandbox, configuring takes about 15 s and compiling about 4 minutes.
+
 Notes for this configuration:
 - Optional libraries are only searched for when the corresponding `OFT_<LIB>_ROOT` is set, so set it to `/usr` for system packages. SuperLU (`libsuperlu-dev`) is the baseline and is included above; SuperLU-DIST and UMFPACK are not. Install `libsuperlu-dist-dev` or `libsuitesparse-dev` and add `-DOFT_SUPERLU_DIST_ROOT=/usr` or `-DOFT_UMFPACK_ROOT=/usr` only if a specific test requires them.
 - Use the default `gcc`/`g++`/`gfortran` (GCC 13) so the compilers match the ones Ubuntu used to build the OpenMPI Fortran modules.
 - Ubuntu ships HDF5 1.10, which lacks the Fortran file-space-strategy API (added in 1.14.3). OFT builds fine but persistent free-space tracking in HDF5 output files is disabled, and a warning is printed when it is requested.
-- OpenMPI refuses to run as root by default. In a root sandbox, `export OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1` before running tests.
+- OpenMPI refuses to run as root by default. In a root sandbox, prefix each test command with `OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1`, in the same command like `OMP_NUM_THREADS` (agent shells may not keep exported variables between calls), eg. `OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 OMP_NUM_THREADS=2 make test`.
 - When running tests, always set `OMP_NUM_THREADS` (`1` on one or two cores, otherwise `2`), as described in the `oft-test` skill.
-- `config_cmake.sh` sources `setup_env.sh` itself, so re-running it later resolves `pytest` from the venv rather than whatever happens to be on `PATH`.
-- PETSc is not included, so several hundred `make test` cases skip with `Not compiled with PETSc`; this is expected (see "Skips" in the `oft-test` skill).
+- `config_cmake.sh` sources `setup_env.sh` itself, so re-running it later resolves `pytest` from the venv rather than whatever happens to be on `PATH`. It stops with an error if `setup_env.sh` is missing, instead of configuring against the wrong `pytest`.
+- Expected `make test` results for this configuration (October 2026; counts drift as tests are added): about 906 passed, 337 skipped, 2 failed, in roughly 50 minutes on 4 cores. The skips are about 266 `Not compiled with PETSc` (PETSc is not included), 45 `Configuration not supported` (all `lin_alg/test_native_bjacobi.py`, for the missing SuperLU-DIST/MUMPS/UMFPACK), and 26 bare `Skipped` (MUG physics tests); see "Skips" in the `oft-test` skill. The failures are the two below.
 - Exact solver iteration counts can differ from CI's bundled MPICH/METIS. On Ubuntu OpenMPI 4.1.6 with distro METIS, `lin_alg/test_native_bjacobi.py::test_ILU_mpi4_nlocal2[0]` and `test_ILU_mpi4_nlocal2_part[0]` have been seen to fail with 76–77 iterations against 73/70 expected. Treat these as environment differences unless your change touches `lin_alg`.
 
 ## 6. Python packaging
