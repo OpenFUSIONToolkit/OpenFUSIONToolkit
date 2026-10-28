@@ -671,7 +671,7 @@ TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L ma
 INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits,int_inds(2)
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: its_hist
 REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt,dt_old,dt_op,int_facs(2),elapsed_time
-REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist
+REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist,eig_tmp
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
 CLASS(oft_vector), POINTER :: u,g,up
@@ -688,7 +688,6 @@ CHARACTER(LEN=15) :: fmt_str
 CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
 !---Projection initial guess fields
 integer(i4) :: nproj,maxproj,iproj
-real(r8) :: dt_proj
 real(r8), pointer, dimension(:) :: pvals
 real(r8), allocatable, target, dimension(:,:) :: proj_x,proj_ax,proj_q,proj_aq
 CLASS(oft_vector), POINTER :: vtmp,vtmp2
@@ -781,6 +780,13 @@ IF(.NOT.direct)THEN
     linv_pre%alpha=1.d0
     linv_pre%beta=fmat%alam
     linv%pre=>linv_pre
+    !---Slowest L/R eigenmodes for the coarse space of the two-level preconditioner
+    IF(hodlr_op%pre_coarse.AND.(hodlr_op%pre_neigs>0))THEN
+      ALLOCATE(linv_pre%z_glob(self%nelems,hodlr_op%pre_neigs),eig_tmp(hodlr_op%pre_neigs))
+      linv_pre%z_glob=0.d0
+      CALL lr_eigenmodes_arpack(self,hodlr_op%pre_neigs,eig_tmp,linv_pre%z_glob,hodlr_op=hodlr_op)
+      DEALLOCATE(eig_tmp)
+    END IF
   ELSE
     CALL create_diag_pre(linv%pre)
   END IF
@@ -794,7 +800,6 @@ IF(.NOT.direct)THEN
     NULLIFY(pvals)
     nproj=0
     iproj=0
-    dt_proj=dt_op
   END IF
 ELSE
   !---Setup dense matrix for inverse
@@ -922,17 +927,17 @@ DO i=1,nsteps
     ELSE
       fmat%alam = dt_op ! Update forward matrix timestep
       CALL fmat%assemble(g)
-      !---Update stored products A*x for the new timestep, A changes by (dt_op-dt_proj)*R
+      !---Recompute stored products A*x for the new timestep (an update by the change in dt*R cancels badly
+      !   when the R term dominates the old products)
       IF(maxproj>0)THEN
         DO j=1,nproj
           pvals=>proj_x(:,j)
           CALL vtmp%restore_local(pvals)
-          CALL self%Rmat%apply(vtmp,vtmp2)
+          CALL fmat%apply(vtmp,vtmp2)
+          pvals=>proj_ax(:,j)
           CALL vtmp2%get_local(pvals)
-          proj_ax(:,j)=proj_ax(:,j)+(dt_op-dt_proj)*pvals
         END DO
         NULLIFY(pvals)
-        dt_proj=dt_op
       END IF
       IF(PRESENT(hodlr_op))THEN
         linv_pre%beta=fmat%alam ! Update preconditioner timestep
@@ -1012,11 +1017,11 @@ DO i=1,nsteps
     CALL Minv%apply(g,u)
     nits=1
   ELSE
-    !---Initial guess: Galerkin projection of the solution onto the previous solutions
+    !---Initial guess: combination of the previous solutions with the smallest residual
     IF(maxproj>0)THEN
       CALL tw_proj_basis(self%nelems,nproj,iproj,proj_x,proj_ax,proj_q,proj_aq,k)
       CALL g%get_local(vals)
-      vals=MATMUL(proj_q(:,1:k),MATMUL(vals,proj_q(:,1:k)))
+      vals=MATMUL(proj_q(:,1:k),MATMUL(vals,proj_aq(:,1:k)))
       CALL u%restore_local(vals)
     END IF
     CALL linv%apply(u,g)
@@ -1108,10 +1113,11 @@ END IF
 CALL oft_decrease_indent
 END SUBROUTINE run_td_sim
 !------------------------------------------------------------------------------
-!> A-orthonormal basis for a set of vectors by modified Gram-Schmidt in the A inner product
+!> Basis for the least-squares initial guess from a set of vectors
 !!
-!! Two orthogonalization passes; vectors whose A-norm drops below 1E-10 of their original value (nearly dependent
-!! on the previous ones) are skipped. The products A*q are formed from the stored products A*x.
+!! Builds q = X*C with A*q orthonormal (modified Gram-Schmidt on A*x, two passes), so the combination of the vectors
+!! with the smallest residual for a right-hand side b is q*((A*q)^T b). Vectors whose A*x drops below 1E-10 of its
+!! original norm (nearly dependent on the previous ones) are skipped. The products A*q are formed from the stored A*x.
 !------------------------------------------------------------------------------
 SUBROUTINE tw_proj_basis(m,n,inew,x,ax,q,aq,nq)
 INTEGER(4), INTENT(in) :: m !< Vector length
@@ -1119,8 +1125,8 @@ INTEGER(4), INTENT(in) :: n !< Number of vectors
 INTEGER(4), INTENT(in) :: inew !< Column of the newest vector (columns stored circularly)
 REAL(8), INTENT(in) :: x(:,:) !< Vectors [m,:]
 REAL(8), INTENT(in) :: ax(:,:) !< Products A*x [m,:]
-REAL(8), INTENT(out) :: q(:,:) !< A-orthonormal basis [m,:]
-REAL(8), INTENT(out) :: aq(:,:) !< Products A*q [m,:]
+REAL(8), INTENT(out) :: q(:,:) !< Basis vectors [m,:]
+REAL(8), INTENT(out) :: aq(:,:) !< Products A*q, orthonormal [m,:]
 INTEGER(4), INTENT(out) :: nq !< Number of basis vectors
 INTEGER(4) :: i,j,ii,ipass
 REAL(8) :: nrm0,nrm,c
@@ -1129,16 +1135,16 @@ DO i=0,n-1
   ii=MODULO(inew-1-i,n)+1 ! Newest first
   q(:,nq+1)=x(:,ii)
   aq(:,nq+1)=ax(:,ii)
-  nrm0=DOT_PRODUCT(q(:,nq+1),aq(:,nq+1))
+  nrm0=DOT_PRODUCT(aq(:,nq+1),aq(:,nq+1))
   IF(nrm0<=0.d0)CYCLE
   DO ipass=1,2
     DO j=1,nq
-      c=DOT_PRODUCT(q(:,j),aq(:,nq+1))
+      c=DOT_PRODUCT(aq(:,j),aq(:,nq+1))
       q(:,nq+1)=q(:,nq+1)-c*q(:,j)
       aq(:,nq+1)=aq(:,nq+1)-c*aq(:,j)
     END DO
   END DO
-  nrm=DOT_PRODUCT(q(:,nq+1),aq(:,nq+1))
+  nrm=DOT_PRODUCT(aq(:,nq+1),aq(:,nq+1))
   IF(nrm<=1.d-20*nrm0)CYCLE
   nrm=1.d0/SQRT(nrm)
   q(:,nq+1)=q(:,nq+1)*nrm

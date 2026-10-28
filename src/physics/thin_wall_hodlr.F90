@@ -60,6 +60,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
   LOGICAL :: pre_single = .FALSE. !< Compute, store, and apply block-Jacobi preconditioners in single precision?
   LOGICAL :: pre_coarse = .FALSE. !< Add a global coarse correction to block-Jacobi preconditioners (two-level preconditioner)?
+  INTEGER(4) :: pre_neigs = 0 !< Number of slowest L/R eigenmodes added to the coarse space (requires pre_coarse)
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_blocks => NULL() !< Indices of compressed off-diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: L_thread_ptr => NULL()
@@ -134,6 +135,8 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   INTEGER(4), POINTER, DIMENSION(:) :: z_block => NULL() !< Dense block of each coarse vector (0: unit vector)
   INTEGER(4), POINTER, DIMENSION(:) :: z_unit => NULL() !< Element of each unit coarse vector
   REAL(r8), POINTER, DIMENSION(:,:) :: z_vals => NULL() !< Values of each block coarse vector on its block
+  REAL(r8), POINTER, DIMENSION(:,:) :: z_glob => NULL() !< Global vectors to add to the coarse space [nelems,:] (optional)
+  REAL(r8), POINTER, DIMENSION(:,:) :: z_gvals => NULL() !< Values of each global coarse vector [nelems,:]
   REAL(r8), POINTER, DIMENSION(:,:) :: zlz => NULL() !< Z^T L Z
   REAL(r8), POINTER, DIMENSION(:,:) :: zrz => NULL() !< Z^T R Z
   REAL(r8), POINTER, DIMENSION(:,:) :: einv => NULL() !< (Z^T (alpha*L + beta*R) Z)^-1
@@ -534,8 +537,9 @@ REAL(8) :: B_svd_tol = -1.d99
 REAL(8) :: B_aca_rel_tol = -1.d0
 LOGICAL :: pre_single = .FALSE.
 LOGICAL :: pre_coarse = .FALSE.
+INTEGER(4) :: pre_neigs = 0
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
-  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse
+  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse,pre_neigs
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -566,6 +570,7 @@ self%aca_min_its=aca_min_its
 self%aca_sep_thresh=aca_sep_thresh
 self%pre_single=pre_single
 self%pre_coarse=pre_coarse
+self%pre_neigs=pre_neigs
 !
 L_approx_scale = 0.5d0*self%tw_obj%mesh%hrms
 IF(L_svd_tol<0.d0)THEN
@@ -3353,7 +3358,8 @@ END SUBROUTINE rbjprecond_apply
 !!
 !! On each diagonal (leaf) block: a constant and the three coordinates of the element positions, orthonormalised
 !! on the block (directions the block does not span are dropped); and a unit vector for each hole and V-coil.
-!! These are the smooth, long-range current patterns block-Jacobi cannot represent.
+!! These are the smooth, long-range current patterns block-Jacobi cannot represent. The global vectors in `z_glob`
+!! (e.g. the slowest L/R eigenmodes), if present, are added after orthonormalisation against the rest of the space.
 !!
 !! The vectors are defined on the element indices of the blocks. For meshes split at junctions these are the
 !! expanded elements, and the coarse space is \f$ Z = P^T Z_{exp} \f$: each vector is reduced before the L and R
@@ -3361,7 +3367,7 @@ END SUBROUTINE rbjprecond_apply
 !------------------------------------------------------------------------------
 SUBROUTINE rbjprecond_coarse_setup(self)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
-INTEGER(4) :: i,j,k,m,c,n,level,iblock,nmax,nunit,nfun
+INTEGER(4) :: i,j,k,m,c,n,level,iblock,nmax,nunit,nfun,nglob
 REAL(r8) :: nrm,nrm0,cen(3),ext
 REAL(r8), ALLOCATABLE :: zb(:,:)
 REAL(8), POINTER, DIMENSION(:) :: vals,wvals
@@ -3376,7 +3382,9 @@ DO i=1,self%mf_obj%ndense
 END DO
 nfun=4
 IF(self%coarse_order>1)nfun=10
-ALLOCATE(self%z_block(nfun*self%mf_obj%ndense+nunit),self%z_unit(nfun*self%mf_obj%ndense+nunit))
+nglob=0
+IF(ASSOCIATED(self%z_glob))nglob=SIZE(self%z_glob,DIM=2)
+ALLOCATE(self%z_block(nfun*self%mf_obj%ndense+nunit+nglob),self%z_unit(nfun*self%mf_obj%ndense+nunit+nglob))
 ALLOCATE(self%z_vals(nmax,nfun*self%mf_obj%ndense+nunit),zb(nmax,nfun))
 self%z_vals=0.d0
 c=0
@@ -3425,6 +3433,31 @@ DO j=1,nunit
 END DO
 self%nz=c
 DEALLOCATE(zb)
+!---Global vectors, orthonormalised against the block/unit vectors (orthonormal) and each other
+IF(nglob>0)THEN
+  ALLOCATE(self%z_gvals(tw%nelems,nglob),zb(self%nz+nglob,1))
+  k=0
+  DO m=1,nglob
+    self%z_gvals(:,k+1)=self%z_glob(:,m)
+    nrm0=SQRT(SUM(self%z_gvals(:,k+1)**2))
+    IF(nrm0<=0.d0)CYCLE
+    DO j=1,2
+      CALL rbjprecond_coarse_restrict(self,self%z_gvals(:,k+1),zb(1:self%nz,1))
+      DO i=1,self%nz
+        CALL rbjprecond_coarse_expand(self,i,-zb(i,1),self%z_gvals(:,k+1))
+      END DO
+    END DO
+    nrm=SQRT(SUM(self%z_gvals(:,k+1)**2))
+    IF(nrm>1.d-6*nrm0)THEN
+      self%z_gvals(:,k+1)=self%z_gvals(:,k+1)/nrm
+      k=k+1
+      self%nz=self%nz+1
+      self%z_block(self%nz)=-k
+      self%z_unit(self%nz)=0
+    END IF
+  END DO
+  DEALLOCATE(zb)
+END IF
 !---Z^T L Z and Z^T R Z, one L and R product per coarse vector
 ALLOCATE(self%zlz(self%nz,self%nz),self%zrz(self%nz,self%nz))
 CALL tw%Uloc%new(zvec)
@@ -3475,7 +3508,9 @@ INTEGER(4), INTENT(in) :: c !< Coarse vector
 REAL(r8), INTENT(in) :: a !< Coefficient
 REAL(r8), INTENT(inout) :: vals(:) !< Element vector
 INTEGER(4) :: j,level,iblock
-IF(self%z_block(c)==0)THEN
+IF(self%z_block(c)<0)THEN
+  vals=vals+a*self%z_gvals(:,-self%z_block(c))
+ELSE IF(self%z_block(c)==0)THEN
   vals(self%z_unit(c))=vals(self%z_unit(c))+a
 ELSE
   level=self%mf_obj%dense_blocks(1,self%z_block(c))
@@ -3495,7 +3530,9 @@ REAL(r8), INTENT(in) :: v(:) !< Element vector
 REAL(r8), INTENT(out) :: w(:) !< Coarse vector [nz]
 INTEGER(4) :: c,j,level,iblock
 DO c=1,self%nz
-  IF(self%z_block(c)==0)THEN
+  IF(self%z_block(c)<0)THEN
+    w(c)=DOT_PRODUCT(self%z_gvals(:,-self%z_block(c)),v)
+  ELSE IF(self%z_block(c)==0)THEN
     w(c)=v(self%z_unit(c))
   ELSE
     level=self%mf_obj%dense_blocks(1,self%z_block(c))
@@ -3541,6 +3578,8 @@ IF(ASSOCIATED(self%inverse_mats))THEN
   DEALLOCATE(self%inverse_mats)
 END IF
 IF(ASSOCIATED(self%z_block))DEALLOCATE(self%z_block,self%z_unit,self%z_vals)
+IF(ASSOCIATED(self%z_glob))DEALLOCATE(self%z_glob)
+IF(ASSOCIATED(self%z_gvals))DEALLOCATE(self%z_gvals)
 IF(ASSOCIATED(self%zlz))DEALLOCATE(self%zlz,self%zrz)
 IF(ASSOCIATED(self%einv))DEALLOCATE(self%einv)
 self%nz=0
