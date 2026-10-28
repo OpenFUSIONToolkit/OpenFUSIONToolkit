@@ -14,6 +14,7 @@ import platform
 import shutil
 import tempfile
 import ctypes
+import multiprocessing.util
 from warnings import warn
 import numpy
 from ._interface import *
@@ -83,25 +84,23 @@ class OFT_env():
                             details=["If correct, this may significantly degrade performance due to oversubcription"])
         ## ID of Python interpreter process
         self.pid = os.getpid()
-        if unique_tempfiles == 'global':
-            ## Directory for temporary files
-            self.tempdir = os.path.join(tempfile.gettempdir(),'oft_{0}'.format(self.pid))
+        ## Directory for temporary files
+        self.tempdir = None
+        if unique_tempfiles in ('global', 'local_dir'):
+            # Use a random suffix so stale directories left by earlier processes with the same PID can not collide
+            if unique_tempfiles == 'global':
+                tempdir_prefix = 'oft_{0}_'.format(self.pid)
+                tempdir_parent = None
+            else:
+                tempdir_prefix = 'oft_tmp-{0}-'.format(self.pid)
+                tempdir_parent = os.getcwd()
             try:
-                os.mkdir(self.tempdir)
-            except:
-                raise IOError("Could not create temporary directory."
-                              "This usually means you have tried to instantiate more than one instance of `OFT_env` within a single python kernel.")
-        elif unique_tempfiles == 'local_dir':
-            self.tempdir = os.path.join(os.getcwd(),'oft_tmp-{0}'.format(self.pid))
-            try:
-                os.mkdir(self.tempdir)
-            except:
-                raise IOError("Could not create temporary directory."
-                              "This usually means you have tried to instantiate more than one instance of `OFT_env` within a single python kernel.")
+                self.tempdir = tempfile.mkdtemp(prefix=tempdir_prefix, dir=tempdir_parent)
+            except OSError as e:
+                raise IOError('Could not create temporary directory: {0}'.format(e))
         elif unique_tempfiles == 'local_file':
-            self.tempdir = None
+            pass
         elif unique_tempfiles == 'none':
-            self.tempdir = None
             self.pid = None
             oft_warning("Using non-unique names/locations for temporary files can lead to conflicts if multiple python instances are used in the same directory")
         else:
@@ -119,22 +118,27 @@ class OFT_env():
                 "meshname": "'none'"
             }
         }
-        ## Input filename for execution environment
-        self.oft_ifile = self.unique_tmpfile('oftpyin')
+        ## Input filename for execution environment (absolute, so cleanup is unaffected by later changes of directory)
+        self.oft_ifile = os.path.abspath(self.unique_tmpfile('oftpyin'))
+        # Remove temporary files at exit, including for `multiprocessing` child processes, which
+        # skip `atexit` handlers (finalizer runs at most once and only in the creating process)
+        self._tempfiles_finalizer = multiprocessing.util.Finalize(None, self._remove_tempfiles, exitpriority=0)
         self.update_oft_in()
-        # Initialize OFT
+        # Get string sizes before initialization so paths passed to OFT can be checked
         slens = numpy.zeros((4,), dtype=numpy.int32)
-        ifile_c = c_char_p(self.oft_ifile.encode())
-        if abort_callback:
-            oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,oft_python_abort)
-        else:
-            oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,c_void_p())
+        oftpy_get_slens(slens)
         ## General string size
         self.oft_slen = slens[1]
         ## Path string size
         self.oft_path_slen = slens[2]
         ## Error string size
         self.oft_error_slen = slens[3]
+        # Initialize OFT
+        ifile_c = self.path2c(self.oft_ifile)
+        if abort_callback:
+            oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,oft_python_abort)
+        else:
+            oft_init(c_int(nthreads),c_bool(quiet),ifile_c,slens,c_void_p())
         ## Value for marking a float quantity as disabled
         self.float_disable_flag = -1.E99
 
@@ -266,8 +270,8 @@ class OFT_env():
         )
         write_oft_xml(xml_blocks,path)
 
-    def __del__(self):
-        '''! Destroy environment and cleanup known temporary files'''
+    def _remove_tempfiles(self):
+        '''! Remove known temporary files'''
         if self.tempdir is not None:
             try:
                 shutil.rmtree(self.tempdir)
