@@ -998,73 +998,21 @@ SUBROUTINE compress_block(isparse,tol,size_out)
 INTEGER(4), INTENT(in) :: isparse
 REAL(8), INTENT(in) :: tol
 INTEGER(8), INTENT(out) :: size_out
-INTEGER(4) :: i,j,io_unit
-REAL(8) :: S_sum,frob_K
-!
-INTEGER(4) :: ilevel,iblock,jblock
-INTEGER(4) :: M,N,LDA,LDU,LDVT,LWORK,INFO,MIN_DIM
-INTEGER(8) :: full_size
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: IWORK
-REAL(8), ALLOCATABLE, DIMENSION(:) :: S,WORK
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: U,VT,Atmp
-!
-ilevel=self%sparse_blocks(1,isparse)
-iblock=self%sparse_blocks(2,isparse)
-jblock=self%sparse_blocks(3,isparse)
+INTEGER(4) :: M,N,rank
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: U,V
 !
 M = SIZE(self%aca_dense(isparse)%M,DIM=1)
 N = SIZE(self%aca_dense(isparse)%M,DIM=2)
-full_size = INT(M,8)*INT(N,8)
-LDA = M
-LDU = M
-MIN_DIM = min(M,N)
-LDVT = MIN_DIM
-ALLOCATE(Atmp(M,N))
-Atmp = self%aca_dense(isparse)%M
-ALLOCATE(S(MIN_DIM),U(LDU,MIN_DIM),VT(LDVT,N))
-!---Get optimal workspace size
-LWORK = -1
-ALLOCATE(WORK(1),IWORK(8*MIN_DIM))
-CALL DGESDD('S', M, N, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-LWORK = INT(WORK(1))
-DEALLOCATE(WORK)
-!---Compute SVD of matrix block
-ALLOCATE(WORK(LWORK))
-CALL DGESDD('S', M, N, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-!---Truncate at desired accuracy
-! S_sum=SUM(S**2)
-! frob_K=S_sum
-! DO i=1,MIN_DIM
-!     ! IF(SQRT(frob_K/S_sum)<tol)EXIT
-!     IF(SQRT(frob_K)<tol)EXIT
-!     frob_K = frob_K - S(i)**2
-! END DO
-frob_K=0.d0
-DO i=MIN_DIM,1,-1
-  frob_K = frob_K + S(i)**2
-  IF(SQRT(frob_K)>tol)EXIT
-END DO
-i=MAX(MIN(self%min_rank,MIN_DIM),i)
-IF(i<full_size/INT(M+N,8))THEN
-  ALLOCATE(self%aca_U_mats(isparse)%M(M,i))
-  self%aca_U_mats(isparse)%M=U(:,1:i)
-  ALLOCATE(self%aca_V_mats(isparse)%M(i,N))
-  DO j=1,i
-  self%aca_V_mats(isparse)%M(j,:)=VT(j,:)*S(j)
-  END DO
+CALL tw_lowrank_qrcp(self%aca_dense(isparse)%M,tol,self%min_rank,U,V,rank)
+IF(rank>0)THEN
+  ALLOCATE(self%aca_U_mats(isparse)%M(M,rank),self%aca_V_mats(isparse)%M(rank,N))
+  self%aca_U_mats(isparse)%M=U
+  self%aca_V_mats(isparse)%M=V
   DEALLOCATE(self%aca_dense(isparse)%M)
-  ! WRITE(*,*)'Savings:',iblock,jblock,i,M,N
-  size_out=INT(i,8)*INT(M+N,8)
+  size_out=INT(rank,8)*INT(M+N,8)
 ELSE
-  ! WRITE(*,*)'No savings:',iblock,jblock
-  size_out=full_size
+  size_out=INT(M,8)*INT(N,8)
 END IF
-!
-IF( INFO.NE.0 )THEN
-  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_block",__FILE__)
-END IF
-! CALL oft_abort("","",__FILE__)
-DEALLOCATE(WORK,IWORK,S,U,VT,Atmp)
 END SUBROUTINE compress_block
 !
 FUNCTION max_masked(vals,mask) RESULT(iloc)
@@ -1809,59 +1757,21 @@ SUBROUTINE compress_block(isparse,iblock,jblock,dim,tol,size_out)
 INTEGER(4), INTENT(in) :: isparse,iblock,jblock,dim
 REAL(8), INTENT(in) :: tol
 INTEGER(8), INTENT(out) :: size_out
-INTEGER(4) :: i,j,io_unit
-REAL(8) :: S_sum,frob_K
-INTEGER(4) :: M,N,LDA,LDU,LDVT,LWORK,INFO,MIN_DIM
-INTEGER(8) :: full_size
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: IWORK
-REAL(8), ALLOCATABLE, DIMENSION(:) :: S,WORK
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: U,VT,Atmp
+INTEGER(4) :: M,N,rank
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: U,V
 !
 M = SIZE(self%aca_B_dense(isparse,dim)%M,DIM=1)
 N = SIZE(self%aca_B_dense(isparse,dim)%M,DIM=2)
-full_size = INT(M,8)*INT(N,8)
-LDA = M
-LDU = M
-MIN_DIM = min(M,N)
-LDVT = MIN_DIM
-ALLOCATE(Atmp(M,N))
-Atmp = self%aca_B_dense(isparse,dim)%M
-ALLOCATE(S(MIN_DIM),U(LDU,MIN_DIM),VT(LDVT,N))
-!---Get optimal workspace size
-LWORK = -1
-ALLOCATE(WORK(1),IWORK(8*MIN_DIM))
-CALL DGESDD('S', M, N, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-LWORK = INT(WORK(1))
-DEALLOCATE(WORK)
-!---Compute SVD of matrix block
-ALLOCATE(WORK(LWORK))
-CALL DGESDD('S', M, N, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-!---Truncate at desired accuracy
-frob_K=0.d0
-DO i=MIN_DIM,1,-1
-  frob_K = frob_K + S(i)**2
-  IF(SQRT(frob_K)>tol)EXIT
-END DO
-i=MAX(MIN(self%min_rank,MIN_DIM),i)
-IF(i<full_size/INT(M+N,8))THEN
-  ALLOCATE(self%aca_BU_mats(isparse,dim)%M(M,i))
-  self%aca_BU_mats(isparse,dim)%M=U(:,1:i)
-  ALLOCATE(self%aca_BV_mats(isparse,dim)%M(i,N))
-  DO j=1,i
-      self%aca_BV_mats(isparse,dim)%M(j,:)=VT(j,:)*S(j)
-  END DO
+CALL tw_lowrank_qrcp(self%aca_B_dense(isparse,dim)%M,tol,self%min_rank,U,V,rank)
+IF(rank>0)THEN
+  ALLOCATE(self%aca_BU_mats(isparse,dim)%M(M,rank),self%aca_BV_mats(isparse,dim)%M(rank,N))
+  self%aca_BU_mats(isparse,dim)%M=U
+  self%aca_BV_mats(isparse,dim)%M=V
   DEALLOCATE(self%aca_B_dense(isparse,dim)%M)
-  ! WRITE(*,*)'Savings SVD:',isparse,dim,i,M,N
-  size_out=INT(i,8)*INT(M+N,8)
+  size_out=INT(rank,8)*INT(M+N,8)
 ELSE
-  ! WRITE(*,*)'No savings:',iblock,jblock
-  size_out=full_size
+  size_out=INT(M,8)*INT(N,8)
 END IF
-!
-IF( INFO.NE.0 )THEN
-  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_Bsetup::compress_block",__FILE__)
-END IF
-DEALLOCATE(WORK,IWORK,S,U,VT,Atmp)
 END SUBROUTINE compress_block
 !
 FUNCTION max_masked(vals,mask) RESULT(iloc)
@@ -2806,6 +2716,120 @@ out_tree%children=>in_tree%children
 out_tree%parent=>in_tree%parent
 END SUBROUTINE clone_tree
 END SUBROUTINE tw_part_mesh
+!------------------------------------------------------------------------------
+!> Low-rank compression of a dense block by truncated pivoted QR and a small SVD
+!!
+!! Householder QR with column pivoting is stopped once the norm of the remaining block \f$ \|R_{22}\|_F \f$ (known
+!! exactly from the column norms) is below a tenth of `tol`. The small factor is then compressed with an SVD and
+!! truncated with the same rule as a full SVD: the smallest rank whose discarded part, including \f$ R_{22} \f$, has
+!! a Frobenius norm below `tol`. Costs \f$ O(M N r) \f$ instead of \f$ O(M N \min(M,N)) \f$ for a full SVD.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_lowrank_qrcp(A,tol,min_rank,U,V,rank)
+REAL(8), INTENT(in) :: A(:,:) !< Dense block [M,N]
+REAL(8), INTENT(in) :: tol !< Absolute tolerance on the Frobenius norm of the error
+INTEGER(4), INTENT(in) :: min_rank !< Minimum rank to keep
+REAL(8), ALLOCATABLE, INTENT(out) :: U(:,:) !< Left factor [M,rank]
+REAL(8), ALLOCATABLE, INTENT(out) :: V(:,:) !< Right factor, singular values included [rank,N]
+INTEGER(4), INTENT(out) :: rank !< Rank of the factors (-1 if the block is not worth compressing)
+INTEGER(4) :: M,N,MIN_DIM,kmin,kbe,r,j,p,i,LWORK,INFO
+INTEGER(4), ALLOCATABLE :: perm(:),IWORK(:)
+REAL(8) :: aii,tmp,etrail,tstop
+REAL(8), ALLOCATABLE :: W(:,:),cn(:),cn0(:),tau(:),work(:),Q(:,:),Rs(:,:),S(:),Ur(:,:),Vt(:,:)
+M=SIZE(A,1); N=SIZE(A,2)
+MIN_DIM=MIN(M,N)
+kmin=MIN(min_rank,MIN_DIM)
+kbe=INT(INT(M,8)*INT(N,8)/INT(M+N,8),4) ! Break-even rank: no savings at or above
+rank=-1
+ALLOCATE(W(M,N),perm(N),cn(N),cn0(N),tau(MIN_DIM),work(MAX(M,N)))
+W=A
+DO j=1,N
+  perm(j)=j
+  cn(j)=SUM(W(:,j)**2)
+END DO
+cn0=cn
+tstop=(0.1d0*tol)**2
+etrail=SUM(cn)
+!---Pivoted Householder QR, stopped once the remaining block is small enough
+r=0
+DO WHILE(r<MIN_DIM)
+  IF((etrail<=tstop).AND.(r>=kmin))EXIT
+  IF(r>=kbe)EXIT
+  r=r+1
+  p=r-1+MAXLOC(cn(r:N),DIM=1)
+  IF(p/=r)THEN
+    work(1:M)=W(:,r); W(:,r)=W(:,p); W(:,p)=work(1:M)
+    j=perm(r); perm(r)=perm(p); perm(p)=j
+    tmp=cn(r); cn(r)=cn(p); cn(p)=tmp
+    tmp=cn0(r); cn0(r)=cn0(p); cn0(p)=tmp
+  END IF
+  CALL DLARFG(M-r+1,W(r,r),W(MIN(r+1,M),r),1,tau(r))
+  IF(r<N)THEN
+    aii=W(r,r)
+    W(r,r)=1.d0
+    CALL DLARF('L',M-r+1,N-r,W(r,r),1,tau(r),W(r,r+1),M,work)
+    W(r,r)=aii
+  END IF
+  !---Downdate the remaining column norms (recomputed where cancellation sets in)
+  DO j=r+1,N
+    IF(r>=M)THEN
+      cn(j)=0.d0
+    ELSE
+      tmp=cn(j)-W(r,j)**2
+      IF(tmp<=SQRT(EPSILON(1.d0))*cn0(j))THEN
+        cn(j)=SUM(W(r+1:M,j)**2)
+        cn0(j)=cn(j)
+      ELSE
+        cn(j)=tmp
+      END IF
+    END IF
+  END DO
+  etrail=0.d0
+  IF(r<N)etrail=SUM(cn(r+1:N))
+END DO
+IF((etrail>tol**2).OR.(r==0))THEN ! Not compressible below the break-even rank
+  DEALLOCATE(W,perm,cn,cn0,tau,work)
+  RETURN
+END IF
+!---Q factor and R factor (columns in the original order)
+ALLOCATE(Q(M,r),Rs(r,N))
+Q=W(:,1:r)
+LWORK=-1
+CALL DORGQR(M,r,r,Q,M,tau,work,LWORK,INFO)
+LWORK=INT(work(1))
+DEALLOCATE(work); ALLOCATE(work(LWORK))
+CALL DORGQR(M,r,r,Q,M,tau,work,LWORK,INFO)
+IF(INFO/=0)CALL oft_abort("Forming Q failed","tw_lowrank_qrcp",__FILE__)
+Rs=0.d0
+DO j=1,N
+  DO i=1,MIN(j,r)
+    Rs(i,perm(j))=W(i,j)
+  END DO
+END DO
+DEALLOCATE(W)
+!---SVD of the small factor and truncation, including the remaining block
+ALLOCATE(S(r),Ur(r,r),Vt(r,N),IWORK(8*r))
+LWORK=-1
+CALL DGESDD('S',r,N,Rs,r,S,Ur,r,Vt,r,work,LWORK,IWORK,INFO)
+LWORK=INT(work(1))
+DEALLOCATE(work); ALLOCATE(work(LWORK))
+CALL DGESDD('S',r,N,Rs,r,S,Ur,r,Vt,r,work,LWORK,IWORK,INFO)
+IF(INFO/=0)CALL oft_abort("The algorithm computing SVD failed to converge.","tw_lowrank_qrcp",__FILE__)
+tmp=etrail
+DO i=r,1,-1
+  tmp=tmp+S(i)**2
+  IF(SQRT(tmp)>tol)EXIT
+END DO
+i=MIN(r,MAX(kmin,i))
+IF(i<kbe)THEN
+  rank=i
+  ALLOCATE(U(M,i),V(i,N))
+  CALL DGEMM('N','N',M,i,r,1.d0,Q,M,Ur,r,0.d0,U,M)
+  DO j=1,i
+    V(j,:)=S(j)*Vt(j,:)
+  END DO
+END IF
+DEALLOCATE(perm,cn,cn0,tau,work,Q,Rs,S,Ur,Vt,IWORK)
+END SUBROUTINE tw_lowrank_qrcp
 !
 SUBROUTINE get_qr(Mat,Q,R)
 REAL(8), INTENT(in) :: Mat(:,:)
