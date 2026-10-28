@@ -34,7 +34,7 @@ class flux_loop():
         '''
         fid.write('\n{0} {1} {2}\n'.format(self._pts.shape[0], self._scale, self._name))
         for i in range(self._pts.shape[0]):
-            fid.write('{0:.6E} {1:.6E} {2:.6E}\n'.format(*self._pts[i,:]))
+            fid.write('{0:.16E} {1:.16E} {2:.16E}\n'.format(*self._pts[i,:]))
 
 
 class circular_flux_loop(flux_loop):
