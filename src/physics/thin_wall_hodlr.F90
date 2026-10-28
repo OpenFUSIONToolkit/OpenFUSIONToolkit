@@ -407,12 +407,16 @@ IF(self%n_vcoils>0)THEN
       ecc = 0.d0
       IF(self%vcoils(j)%sens_mask)CYCLE
       DO k=1,self%vcoils(j)%ncoils
-        diffvec=0.d0
-        DO kk=2,self%vcoils(j)%coils(k)%npts
-          cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
-          cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
-          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
-        END DO
+        IF(self%vcoils(j)%coils(k)%is_ring)THEN
+          diffvec=tw_ring_bvec(self%vcoils(j)%coils(k)%ring_rz,pt_j)
+        ELSE
+          diffvec=0.d0
+          DO kk=2,self%vcoils(j)%coils(k)%npts
+            cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
+            cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
+            diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+          END DO
+        END IF
         ecc=ecc+self%vcoils(j)%scales(k)*diffvec
       END DO
       DO jj=1,3
@@ -435,12 +439,16 @@ IF(self%n_icoils>0)THEN
       ecc = 0.d0
       IF(self%icoils(j)%sens_mask)CYCLE
       DO k=1,self%icoils(j)%ncoils
-        diffvec=0.d0
-        DO kk=2,self%icoils(j)%coils(k)%npts
-          cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
-          cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
-          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
-        END DO
+        IF(self%icoils(j)%coils(k)%is_ring)THEN
+          diffvec=tw_ring_bvec(self%icoils(j)%coils(k)%ring_rz,pt_j)
+        ELSE
+          diffvec=0.d0
+          DO kk=2,self%icoils(j)%coils(k)%npts
+            cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
+            cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
+            diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+          END DO
+        END IF
         ecc=ecc+self%icoils(j)%scales(k)*diffvec
       END DO
       DO jj=1,3

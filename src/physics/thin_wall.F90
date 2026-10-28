@@ -33,7 +33,7 @@ USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, native_vector_cas
   native_vector_slice_push, native_vector_slice_pop, oft_native_dense_matrix
 USE oft_solver_base, ONLY: oft_solver, oft_csolver
 USE oft_lu, ONLY: lapack_matinv, lapack_cholesky
-USE axi_green, ONLY: green, axi_coil_set
+USE axi_green, ONLY: green, grad_green, axi_coil_set
 USE mhd_utils, ONLY: mu0
 #define MAX_EDGE_CONN 6
 IMPLICIT NONE
@@ -731,6 +731,43 @@ DO k=1,coil%npts
 END DO
 END SUBROUTINE tw_coil_set_ring
 !---------------------------------------------------------------------------------
+!> Exact vector potential kernel \f$ \oint d\mathbf{l}'/|\mathbf{r}-\mathbf{r}'| \f$ of a circular coil about the Z axis
+!!
+!! For a unit current traversed counter-clockwise about +Z: \f$ A_\phi = -4 \pi G(R,Z;R_c,Z_c)/R \f$ (@ref axi_green::green)
+!---------------------------------------------------------------------------------
+FUNCTION tw_ring_avec(rz,pt) RESULT(avec)
+REAL(r8), INTENT(in) :: rz(2) !< Radius and height of the coil
+REAL(r8), INTENT(in) :: pt(3) !< Evaluation point
+REAL(r8) :: avec(3) !< Vector potential kernel
+REAL(r8) :: rp,aphi
+avec=0.d0
+rp=SQRT(pt(1)**2+pt(2)**2)
+IF(rp<1.d-12)RETURN
+aphi=-4.d0*pi*green(rp,pt(3),rz(1),rz(2))/rp
+avec(1:2)=[-aphi*pt(2)/rp,aphi*pt(1)/rp]
+END FUNCTION tw_ring_avec
+!---------------------------------------------------------------------------------
+!> Exact Biot-Savart kernel \f$ \oint d\mathbf{l}' \times (\mathbf{r}-\mathbf{r}')/|\mathbf{r}-\mathbf{r}'|^3 \f$ of a circular coil
+!! about the Z axis
+!!
+!! For a unit current traversed counter-clockwise about +Z, the curl of @ref tw_ring_avec:
+!! \f$ B_R = 4 \pi (\partial G/\partial Z)/R \f$, \f$ B_Z = -4 \pi (\partial G/\partial R)/R \f$
+!---------------------------------------------------------------------------------
+FUNCTION tw_ring_bvec(rz,pt) RESULT(bvec)
+REAL(r8), INTENT(in) :: rz(2) !< Radius and height of the coil
+REAL(r8), INTENT(in) :: pt(3) !< Evaluation point
+REAL(r8) :: bvec(3) !< Biot-Savart kernel
+REAL(r8) :: rp,fg,gg(2),br
+rp=SQRT(pt(1)**2+pt(2)**2)
+IF(rp<1.d-12)THEN ! On axis
+  bvec=[0.d0,0.d0,2.d0*pi*rz(1)**2/(rz(1)**2+(pt(3)-rz(2))**2)**1.5d0]
+  RETURN
+END IF
+CALL grad_green(rp,pt(3),rz(1),rz(2),fg,gg)
+br=4.d0*pi*gg(2)/rp
+bvec=[br*pt(1)/rp,br*pt(2)/rp,-4.d0*pi*gg(1)/rp]
+END FUNCTION tw_ring_bvec
+!---------------------------------------------------------------------------------
 !> Compute element to driver (Icoils) coupling matrix
 !!
 !! Circular coils about the Z axis are integrated with the exact vector potential of a ring (elliptic integrals)
@@ -883,12 +920,7 @@ DO i=1,bmesh%nc
             pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
               + quads(iquad)%pts(2,ii)*pts_i(:,2) &
               + quads(iquad)%pts(3,ii)*pts_i(:,3)
-            rp=SQRT(pt_i(1)**2+pt_i(2)**2)
-            IF(rp<1.d-12)CYCLE
-            !---Ring potential sum of dl/|r-r'| = A_phi*phi_hat, A_phi = -4*pi*green/R
-            aphi=-4.d0*pi*green(rp,pt_i(3),ring_rz(1,k,j),ring_rz(2,k,j))/rp
-            avec(1)=avec(1)-quads(iquad)%wts(ii)*aphi*pt_i(2)/rp
-            avec(2)=avec(2)+quads(iquad)%wts(ii)*aphi*pt_i(1)/rp
+            avec=avec+quads(iquad)%wts(ii)*tw_ring_avec(ring_rz(1:2,k,j),pt_i)
           END DO
           avec=avec*area_i*ring_rz(3,k,j)
           DO jj=1,3
@@ -1818,6 +1850,12 @@ IF(nsensors>0.AND.ncoils_tot>0)THEN
         DO j=1,ncoils_tot
           IF(coils_tot(j)%sens_mask)CYCLE
           DO k=1,coils_tot(j)%ncoils
+            IF(coils_tot(j)%coils(k)%is_ring)THEN
+              tmp=DOT_PRODUCT(rvec_i,tw_ring_avec(coils_tot(j)%coils(k)%ring_rz,pt_i) &
+                + tw_ring_avec(coils_tot(j)%coils(k)%ring_rz,pt_i_last))/2.d0
+              atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*tmp
+              CYCLE
+            END IF
             tmp=0.d0
             pot_last = 0.d0
             DO kk=1,coils_tot(j)%coils(k)%npts
@@ -2400,12 +2438,16 @@ DO i=1,bmesh%np
     ecc = 0.d0
     IF(self%vcoils(j)%sens_mask)CYCLE
     DO k=1,self%vcoils(j)%ncoils
-      diffvec=0.d0
-      DO kk=2,self%vcoils(j)%coils(k)%npts
-        cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
-        cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
-        diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
-      END DO
+      IF(self%vcoils(j)%coils(k)%is_ring)THEN
+        diffvec=tw_ring_bvec(self%vcoils(j)%coils(k)%ring_rz,pt_j)
+      ELSE
+        diffvec=0.d0
+        DO kk=2,self%vcoils(j)%coils(k)%npts
+          cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
+          cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
+          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+        END DO
+      END IF
       ecc=ecc+self%vcoils(j)%scales(k)*diffvec
     END DO
     DO jj=1,3
@@ -2428,12 +2470,16 @@ DO i=1,bmesh%np
     ecc = 0.d0
     IF(self%icoils(j)%sens_mask)CYCLE
     DO k=1,self%icoils(j)%ncoils
-      diffvec=0.d0
-      DO kk=2,self%icoils(j)%coils(k)%npts
-        cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
-        cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
-        diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
-      END DO
+      IF(self%icoils(j)%coils(k)%is_ring)THEN
+        diffvec=tw_ring_bvec(self%icoils(j)%coils(k)%ring_rz,pt_j)
+      ELSE
+        diffvec=0.d0
+        DO kk=2,self%icoils(j)%coils(k)%npts
+          cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
+          cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
+          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+        END DO
+      END IF
       ecc=ecc+self%icoils(j)%scales(k)*diffvec
     END DO
     DO jj=1,3
