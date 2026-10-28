@@ -179,7 +179,6 @@ DEBUG_STACK_PUSH
 Lmat=0.d0
 ! CALL mytimer%tick
 !---Setup quadrature
-CALL tw_quads_setup
 quads=>tw_quads
 !
 rmesh=>row_obj%mesh
@@ -291,7 +290,6 @@ DEBUG_STACK_PUSH
 Lmat=0.d0
 ! CALL mytimer%tick
 !---Setup quadrature
-CALL tw_quads_setup
 quads=>tw_quads
 !
 rmesh=>row_obj%mesh
@@ -357,7 +355,6 @@ LOGICAL :: is_neighbor
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), POINTER :: quads(:)
 bmesh=>self%mesh
-CALL tw_quads_setup
 quads=>tw_quads
 Bop=0.d0
 f=1.d0/3.d0
@@ -477,7 +474,6 @@ LOGICAL :: is_neighbor
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), POINTER :: quads(:)
 bmesh=>self%mesh
-CALL tw_quads_setup
 quads=>tw_quads
 Bop=0.d0
 f=1.d0/3.d0
@@ -529,7 +525,6 @@ LOGICAL :: is_neighbor
 CLASS(oft_bmesh), POINTER :: bmesh
 TYPE(oft_quad_type), POINTER :: quads(:)
 bmesh=>self%mesh
-CALL tw_quads_setup
 quads=>tw_quads
 Bop=0.d0
 f=1.d0/3.d0

@@ -174,20 +174,17 @@ integer(i4), public, parameter :: tw_cache_ver=2 !< Version of cached matrix fil
 character(LEN=16), public, parameter :: tw_idx_path="ThinCurr_Version" !< HDF5 field name
 CONTAINS
 !---------------------------------------------------------------------------------
-!> Set up the shared triangle quadrature rules (once; safe to call from threads)
+!> Set up the shared triangle quadrature rules (done once, by the first @ref tw_setup)
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_quads_setup()
 INTEGER(i4) :: i
-!$omp critical (tw_quads_init)
-IF(.NOT.tw_quads_ready)THEN
-  DO i=1,18
-    CALL set_quad_2d(tw_quads(i),i)
-  END DO
-  IF(tw_quads(tw_quad_far_max)%np>tw_quad_far_np)CALL oft_abort('Far-field quadrature rule exceeds "tw_quad_far_np"', &
-    'tw_quads_setup',__FILE__)
-  tw_quads_ready=.TRUE.
-END IF
-!$omp end critical (tw_quads_init)
+IF(tw_quads_ready)RETURN
+DO i=1,18
+  CALL set_quad_2d(tw_quads(i),i)
+END DO
+IF(tw_quads(tw_quad_far_max)%np>tw_quad_far_np)CALL oft_abort('Far-field quadrature rule exceeds "tw_quad_far_np"', &
+  'tw_quads_setup',__FILE__)
+tw_quads_ready=.TRUE.
 END SUBROUTINE tw_quads_setup
 !---------------------------------------------------------------------------------
 !> Hash of the coil definitions of a model, seeded with the cache file version, for keys of cached matrices
@@ -255,6 +252,7 @@ TYPE(xml_node) :: coil_element
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Creating thin-wall model'
 CALL oft_increase_indent
+CALL tw_quads_setup
 CALL mesh_global_resolution(self%mesh)
 CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
 !---Load ThinCurr-specific mesh information
@@ -851,7 +849,6 @@ IF(PRESENT(save_file))THEN
   END IF
 END IF
 !---Setup quadrature
-CALL tw_quads_setup
 quads=>tw_quads
 !---Build temporary coil set from all filaments in model
 ncoils_tot=tw_obj%n_vcoils+tw_obj%n_icoils
@@ -1058,7 +1055,6 @@ TYPE(oft_quad_type), POINTER :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
-CALL tw_quads_setup
 quads=>tw_quads
 !---Build temporary coil set from all filaments in model
 ncoils_tot=tw_obj%n_vcoils
@@ -1283,7 +1279,6 @@ CALL oft_increase_indent
 Lmat=0.d0
 CALL mytimer%tick
 !---Setup quadrature
-CALL tw_quads_setup
 quads=>tw_quads
 !
 rmesh=>row_obj%mesh
@@ -1731,7 +1726,6 @@ IF(PRESENT(save_file))THEN
   END IF
 END IF
 !
-CALL tw_quads_setup
 quads=>tw_quads
 bmesh=>tw_obj%mesh
 !---Compute coupling between vertices and sensors
@@ -2181,7 +2175,7 @@ END SUBROUTINE tw_compute_Rmat
 !> Compute \f$ \int \int 1/|r-r'| dA dA' \f$ for a pair of triangles
 !!
 !! The quadrature order is chosen from the pair's separation; close pairs integrate the inner triangle analytically
-!! (@ref tw_compute_phipot). Requires @ref tw_quads_setup.
+!! (@ref tw_compute_phipot). Uses the shared quadrature rules (@ref tw_quads_setup, done by @ref tw_setup).
 !---------------------------------------------------------------------------------
 FUNCTION tw_cell_pair_kernel(pts_i,area_i,pts_j,area_j) RESULT(tmp)
 REAL(8), INTENT(in) :: pts_i(3,3) !< Vertices of first triangle
@@ -2245,7 +2239,7 @@ END FUNCTION tw_cell_pair_kernel
 !> Compute the B-field at a point from the three basis functions of a triangle (without the 1/(4 pi) factor)
 !!
 !! Far points use quadrature of the Biot-Savart kernel; near points (and points on the cell) use centered finite
-!! differences of the analytic potential (@ref tw_compute_phipot). Requires @ref tw_quads_setup.
+!! differences of the analytic potential (@ref tw_compute_phipot). Uses the shared quadrature rules (@ref tw_quads_setup, done by @ref tw_setup).
 !---------------------------------------------------------------------------------
 FUNCTION tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_i,pt,va,B_dx) RESULT(atmp)
 REAL(8), INTENT(in) :: pts_i(3,3) !< Vertices of triangle
@@ -2383,7 +2377,6 @@ IF(PRESENT(save_file))THEN
 END IF
 !
 bmesh=>self%mesh
-CALL tw_quads_setup
 quads=>tw_quads
 ALLOCATE(self%Bel(bmesh%np,self%nelems,3))
 self%Bel=0.d0
