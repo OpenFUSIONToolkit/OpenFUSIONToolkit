@@ -17,8 +17,7 @@ USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
 !
-USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_matrix, oft_graph, &
-  vector_extrapolate
+USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_matrix, oft_graph
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
 USE oft_native_la, ONLY: oft_native_dense_matrix, partition_graph
 USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
@@ -687,10 +686,12 @@ LOGICAL :: exists,volt_full,pm_save
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=15) :: fmt_str
 CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
-!---Extrapolation fields
-integer(i4) :: nextrap,maxextrap
-real(r8), allocatable, dimension(:) :: extrapt
-type(oft_vector_ptr), allocatable, dimension(:) :: extrap_fields
+!---Projection initial guess fields
+integer(i4) :: nproj,maxproj,iproj
+real(r8) :: dt_proj
+real(r8), pointer, dimension(:) :: pvals
+real(r8), allocatable, target, dimension(:,:) :: proj_x,proj_ax,proj_q,proj_aq
+CLASS(oft_vector), POINTER :: vtmp,vtmp2
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Starting time-domain simulation'
 CALL oft_increase_indent
@@ -758,6 +759,7 @@ ELSE
   dt_op = dt
 END IF
 !---Setup timestep solvers
+maxproj=0
 IF(.NOT.direct)THEN
   !---Setup forward matrix wrapper
   fmat%nr=self%nelems; fmat%nc=self%nelems
@@ -782,18 +784,19 @@ IF(.NOT.direct)THEN
   ELSE
     CALL create_diag_pre(linv%pre)
   END IF
-  !---Setup extrapolation fields
-  maxextrap=3 ! Number of points for extrapolation (0: No extrapolation, 2: Linear, 3: Quadratic)
-  IF(maxextrap>0)THEN
-    ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
-    DO i=1,maxextrap
-      CALL self%Uloc%new(extrap_fields(i)%f)
-      extrapt(i)=0.d0
-    END DO
-    nextrap=0
+  !---Setup initial guess fields
+  maxproj=8 ! Number of previous solutions for the projection initial guess (0: previous solution)
+  IF(maxproj>0)THEN
+    ALLOCATE(proj_x(self%nelems,maxproj),proj_ax(self%nelems,maxproj))
+    ALLOCATE(proj_q(self%nelems,maxproj),proj_aq(self%nelems,maxproj))
+    CALL self%Uloc%new(vtmp)
+    CALL self%Uloc%new(vtmp2)
+    NULLIFY(pvals)
+    nproj=0
+    iproj=0
+    dt_proj=dt_op
   END IF
 ELSE
-  maxextrap=-1
   !---Setup dense matrix for inverse
   Minv%nr=self%nelems; Minv%nc=self%nelems
   Minv%nrg=self%nelems; Minv%ncg=self%nelems
@@ -919,6 +922,18 @@ DO i=1,nsteps
     ELSE
       fmat%alam = dt_op ! Update forward matrix timestep
       CALL fmat%assemble(g)
+      !---Update stored products A*x for the new timestep, A changes by (dt_op-dt_proj)*R
+      IF(maxproj>0)THEN
+        DO j=1,nproj
+          pvals=>proj_x(:,j)
+          CALL vtmp%restore_local(pvals)
+          CALL self%Rmat%apply(vtmp,vtmp2)
+          CALL vtmp2%get_local(pvals)
+          proj_ax(:,j)=proj_ax(:,j)+(dt_op-dt_proj)*pvals
+        END DO
+        NULLIFY(pvals)
+        dt_proj=dt_op
+      END IF
       IF(PRESENT(hodlr_op))THEN
         linv_pre%beta=fmat%alam ! Update preconditioner timestep
         linv_pre%refactor=.TRUE.
@@ -926,16 +941,6 @@ DO i=1,nsteps
     END IF
   END IF
 
-  !---Update extrapolation fields
-  IF(maxextrap>0)THEN
-    DO j=maxextrap,2,-1
-      CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
-      extrapt(j)=extrapt(j-1)
-    END DO
-    IF(nextrap<maxextrap)nextrap=nextrap+1
-    CALL extrap_fields(1)%f%add(0.d0,1.d0,u)
-    extrapt(1)=t
-  END IF
   !---Update driven coil dI/dt waveforms
   IF(ntimes_curr>0)THEN
     DO j=1,self%n_icoils
@@ -977,6 +982,19 @@ DO i=1,nsteps
       pcoil_volt=pcoil_volt*dt
     END IF
   END IF
+  !---Add current solution and A*u = g + dt*R*u (before sources) to projection basis
+  IF(maxproj>0)THEN
+    iproj=MOD(iproj,maxproj)+1 ! Circular storage, newest in column iproj
+    IF(nproj<maxproj)nproj=nproj+1
+    pvals=>proj_x(:,iproj)
+    CALL u%get_local(pvals)
+    CALL self%Rmat%apply(u,vtmp)
+    pvals=>proj_ax(:,iproj)
+    CALL vtmp%get_local(pvals)
+    CALL g%get_local(vals)
+    proj_ax(:,iproj)=dt*proj_ax(:,iproj)+vals
+    NULLIFY(pvals)
+  END IF
   uu=g%dot(g)
   CALL g%get_local(vals)
   IF(ntimes_curr>0)CALL dgemv('N',self%nelems,self%n_icoils,-1.d0,self%Ael2dr, &
@@ -994,8 +1012,13 @@ DO i=1,nsteps
     CALL Minv%apply(g,u)
     nits=1
   ELSE
-    !---Extrapolate solution
-    IF(maxextrap>0)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,t+dt,u)
+    !---Initial guess: Galerkin projection of the solution onto the previous solutions
+    IF(maxproj>0)THEN
+      CALL tw_proj_basis(self%nelems,nproj,iproj,proj_x,proj_ax,proj_q,proj_aq,k)
+      CALL g%get_local(vals)
+      vals=MATMUL(proj_q(:,1:k),MATMUL(vals,proj_q(:,1:k)))
+      CALL u%restore_local(vals)
+    END IF
     CALL linv%apply(u,g)
     nits=linv%cits
   END IF
@@ -1069,11 +1092,10 @@ CALL u%delete()
 CALL up%delete()
 CALL g%delete()
 DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,up,g)
-IF(maxextrap>0)THEN
-  DO i=1,maxextrap
-    CALL extrap_fields(i)%f%delete()
-  END DO
-  DEALLOCATE(extrap_fields,extrapt)
+IF(maxproj>0)THEN
+  CALL vtmp%delete()
+  CALL vtmp2%delete()
+  DEALLOCATE(proj_x,proj_ax,proj_q,proj_aq,vtmp,vtmp2)
 END IF
 IF(direct)THEN
   DEALLOCATE(minv%m)
@@ -1085,6 +1107,45 @@ ELSE
 END IF
 CALL oft_decrease_indent
 END SUBROUTINE run_td_sim
+!------------------------------------------------------------------------------
+!> A-orthonormal basis for a set of vectors by modified Gram-Schmidt in the A inner product
+!!
+!! Two orthogonalization passes; vectors whose A-norm drops below 1E-10 of their original value (nearly dependent
+!! on the previous ones) are skipped. The products A*q are formed from the stored products A*x.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_proj_basis(m,n,inew,x,ax,q,aq,nq)
+INTEGER(4), INTENT(in) :: m !< Vector length
+INTEGER(4), INTENT(in) :: n !< Number of vectors
+INTEGER(4), INTENT(in) :: inew !< Column of the newest vector (columns stored circularly)
+REAL(8), INTENT(in) :: x(:,:) !< Vectors [m,:]
+REAL(8), INTENT(in) :: ax(:,:) !< Products A*x [m,:]
+REAL(8), INTENT(out) :: q(:,:) !< A-orthonormal basis [m,:]
+REAL(8), INTENT(out) :: aq(:,:) !< Products A*q [m,:]
+INTEGER(4), INTENT(out) :: nq !< Number of basis vectors
+INTEGER(4) :: i,j,ii,ipass
+REAL(8) :: nrm0,nrm,c
+nq=0
+DO i=0,n-1
+  ii=MODULO(inew-1-i,n)+1 ! Newest first
+  q(:,nq+1)=x(:,ii)
+  aq(:,nq+1)=ax(:,ii)
+  nrm0=DOT_PRODUCT(q(:,nq+1),aq(:,nq+1))
+  IF(nrm0<=0.d0)CYCLE
+  DO ipass=1,2
+    DO j=1,nq
+      c=DOT_PRODUCT(q(:,j),aq(:,nq+1))
+      q(:,nq+1)=q(:,nq+1)-c*q(:,j)
+      aq(:,nq+1)=aq(:,nq+1)-c*aq(:,j)
+    END DO
+  END DO
+  nrm=DOT_PRODUCT(q(:,nq+1),aq(:,nq+1))
+  IF(nrm<=1.d-20*nrm0)CYCLE
+  nrm=1.d0/SQRT(nrm)
+  q(:,nq+1)=q(:,nq+1)*nrm
+  aq(:,nq+1)=aq(:,nq+1)*nrm
+  nq=nq+1
+END DO
+END SUBROUTINE tw_proj_basis
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
