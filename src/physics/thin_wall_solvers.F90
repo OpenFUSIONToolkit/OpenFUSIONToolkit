@@ -314,7 +314,7 @@ ELSE
     frinv%pre=>frinv_pre
     frinv_pre%mf_obj=>hodlr_op
     frinv_pre%Rmat=>self%Rmat
-    IF(self%junctions)frinv_pre%Rmat=>self%Rmat_exp
+    IF(ASSOCIATED(self%junc))frinv_pre%Rmat=>self%junc%Rmat_exp
     frinv_pre%alpha=aca_Fmat%beta
     frinv_pre%beta=aca_Fmat%alam
     ! ALLOCATE(oft_diag_cscale::frinv%pre)
@@ -747,7 +747,7 @@ IF(.NOT.direct)THEN
   IF(PRESENT(hodlr_op))THEN
     linv_pre%mf_obj=>hodlr_op
     linv_pre%Rmat=>self%Rmat
-    IF(self%junctions)linv_pre%Rmat=>self%Rmat_exp
+    IF(ASSOCIATED(self%junc))linv_pre%Rmat=>self%junc%Rmat_exp
     linv_pre%alpha=1.d0
     linv_pre%beta=fmat%alam
     linv%pre=>linv_pre
