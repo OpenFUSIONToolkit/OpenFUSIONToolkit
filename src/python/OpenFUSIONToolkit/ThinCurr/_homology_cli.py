@@ -91,7 +91,7 @@ def _compute_junction_holes(input_model, out_file, verify_only, print_info):
         print("  # of junction lines = {0}".format(len(out['lines'])))
         print("  # of junction edges = {0}".format(len(out['kje'])-1))
         print("  # of vertices after split = {0}".format(out['r'].shape[0]))
-        print("  # of holes = {0} (outer arcs and cuts)".format(len(out['holes'])))
+        print("  # of holes = {0} (sheet boundaries and cuts)".format(len(out['holes'])))
         print("  # of cuts = {0}".format(len(out['cuts'])))
         print("  # of closures = {0}".format(len(out['info']['closures'])))
         print("  # of unknowns = {0} (independent currents {1})".format(out['n_unknowns'], out['n_loops']))
@@ -275,12 +275,13 @@ def script_entry():
 # (see \ref OpenFUSIONToolkit.ThinCurr._tree_homology); the previous Greedy Homotopy approach
 # is available using `--use_legacy`.
 #
-# If the mesh has junctions (edges shared by more than two cells, or sheets of different regions touching at a
-# point), or `--split_regions` is given, it is split at the region interfaces instead (not supported for periodic
-# meshes) and the output file holds the split mesh with the junction data (`thincurr/junctions`): see
+# If the mesh has junctions (edges shared by more than two cells, or sheets of different regions touching only at a
+# point), or `--split_regions` is given, it is split at the junctions and the region interfaces instead (not
+# supported for periodic meshes) and the output file holds the split mesh with the junction data
+# (`thincurr/junctions`): see
 # \ref doc_tw_main_junctions. Each region must be a separate sheet. `--split_regions` is needed when sheets
 # meet two at a time (e.g. a torus in sectors) but should be insulatable from each other with
-# `setup_model(junction_insulated=...)`.
+# `setup_model(insulated_junctions=...)`.
 #
 #```shell
 # usage: OFT_ThinCurr_holes [-h] --in_file IN_FILE [--out_file OUT_FILE] [--keep_nodeset_start KEEP_NODESET_START] [--plot_final] [--plot_steps] [--show_omitted]

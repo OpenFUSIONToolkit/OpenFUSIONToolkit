@@ -209,7 +209,7 @@ def run_reduction(files, P, insulated_runtime, mp_q):
         for path, ins in ((files[0], insulated_runtime), (files[1], None)):
             tw = ThinCurr(myOFT)
             # The expanded reference (P = identity) is not a valid reduced model, so it is not verified
-            tw.setup_model(mesh_file=path, junction_insulated=ins, no_verify_holes=(path == files[1]))
+            tw.setup_model(mesh_file=path, insulated_junctions=ins, no_verify_holes=(path == files[1]))
             Mc = np.array(tw.compute_Mcoil())
             tw.compute_Lmat()
             tw.compute_Rmat()

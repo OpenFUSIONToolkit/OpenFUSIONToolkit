@@ -103,18 +103,19 @@ class ThinCurr():
 ''')
 
     def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0,no_verify_holes=False,
-                    junction_insulated=None):
+                    insulated_junctions=None):
         '''! Setup ThinCurr model
 
         @param r Point list `(np,3)`
         @param lc Cell list `(nc,3)`
         @param reg Region tag `(nc,)`
         @param mesh_file File containing model in native mesh format
-        @param pmap Vertex to unknown map `(np,)`: 0 for inactive vertices, otherwise the 1-based unknown index
+        @param pmap Vertex to unknown map `(np,)`, only needed for periodic grids: 0 for inactive vertices,
+        otherwise the 1-based unknown index
         @param xml_filename Path to XML file for model
         @param jumper_start Index of first jumper nodeset in meshfile (positive values Fortran style, negative values Python style)
         @param no_verify_holes Skip verification of mesh and model
-        @param junction_insulated Junction insulation (mesh files split at junctions only): regions, insulated at every
+        @param insulated_junctions Junction insulation (mesh files split at junctions only): regions, insulated at every
         junction they touch, and/or pairs of regions, insulated from each other only (e.g. `[3, (1,2)]`)
         '''
         if self.nregs != -1:
@@ -132,12 +133,12 @@ class ThinCurr():
                             raise ValueError('"jumper_start" is not supported for meshes split at junctions, define '
                                              'jumpers in the unsplit mesh before running "OFT_ThinCurr_holes"')
                         raise ValueError('"pmap" is not supported for meshes split at junctions')
-            if junction_insulated is not None:
+            if insulated_junctions is not None:
                 if pmap is not None:
-                    raise ValueError('"junction_insulated" is incompatible with "pmap"')
+                    raise ValueError('"insulated_junctions" is incompatible with "pmap"')
                 self._junction_tmp = tempfile.TemporaryDirectory()
                 insulated_file = os.path.join(self._junction_tmp.name, os.path.basename(mesh_file))
-                insulate_junction_file(mesh_file, tuple(junction_insulated), insulated_file)
+                insulate_junction_file(mesh_file, tuple(insulated_junctions), insulated_file)
                 mesh_file = insulated_file
             if no_verify_holes:
                 print('Skipping mesh hole and closure verification...')

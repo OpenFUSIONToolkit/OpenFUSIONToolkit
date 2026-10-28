@@ -223,11 +223,15 @@ closures in ThinCurr models, although \ref doc_tw_dep_leg_holes "manual definiti
 
 \subsection doc_tw_main_junctions Junctions between sheets
 ThinCurr's stream-function formulation requires each edge of the mesh to be shared by at most two cells. Structures
-where three or more conducting sheets meet along an edge, a *junction* (for example a plate with a stiffening rib,
-a flange welded around a tube, or ribs that cross each other), are supported by splitting the mesh at the junctions:
+where three or more conducting sheets meet along an edge, a *junction* (for example a plate with a stiffening rib),
+are supported by splitting the mesh at the junctions:
 
- - Each region is a sheet, and a junction edge is an edge shared by more than two cells or by cells of different
-   regions. At each vertex, every group of cells connected through ordinary edges gets its own copy of the vertex,
+ - Each region is a sheet, and a junction edge is an edge shared by more than two cells. Only meshes with junctions
+   (or with sheets of different regions that touch only at a point) are split, so a mesh whose regions form a
+   manifold sheet is not split unless requested (see below). In a mesh that is split, edges where two regions meet
+   are also treated as junction edges, even where only two cells share them, so that those regions can be insulated
+   from each other; with two cells, current conservation there is ordinary continuity, so this does not change the
+   currents. At each vertex, every group of cells connected through ordinary edges gets its own copy of the vertex,
    so the split mesh is an ordinary (manifold) ThinCurr mesh. Cells keep their index and region. Sheets that touch
    only at a point are therefore not connected (no current passes through a point), and a region may lie on both
    sides of a junction (for example a plate under a stiffening rib).
@@ -241,12 +245,12 @@ a flange welded around a tube, or ribs that cross each other), are supported by 
 
 Holes are chosen automatically for junction meshes. The currents the model can carry are the cycles of a graph
 whose nodes are the cells and the junction edges, linked wherever current can cross an edge. The stream function is
-uniform along each chain of outer edges (an "outer arc"); constant shifts that carry no current are removed by fixing
-one arc (or one vertex, a closure, on a closed surface) per connected piece; and the currents these unknowns do not
-represent are added as hole elements built from cycles of the graph (a jump of the stream function at the vertex where
-each cell on the cycle is entered and left). This covers holes of any kind, including loops that cross junctions
-(for example the long way around a torus divided into sectors, with or without ribs). The number of unknowns is
-checked against the number of cycles of the graph.
+uniform along each sheet boundary (a chain of outer edges); constant shifts that carry no current are removed by
+fixing one sheet boundary (or one vertex, a closure, on a closed surface) per connected piece; and the currents these
+unknowns do not represent are added as hole elements built from cycles of the graph (a jump of the stream function at
+the vertex where each cell on the cycle is entered and left). This covers holes of any kind, including loops that
+cross junctions (for example the long way around a torus divided into sectors, with or without ribs). The number of
+unknowns is checked against the number of cycles of the graph.
 
 \subsubsection doc_tw_main_junctions_def Defining junction meshes
  - Give each sheet its own region, e.g. a gmsh physical surface converted with `OFT_convert_gmsh --physical_regions`.
@@ -258,7 +262,7 @@ checked against the number of cycles of the graph.
  - When a model is set up, an unsplit mesh with junctions is rejected, and a split mesh is checked against its unsplit
    mesh (split, number of junction edges, and number of unknowns for the stored insulation).
  - Use the resulting file as any other ThinCurr mesh. Sheets can be insulated at the junctions when the model is set
-   up, without a new mesh file, with \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.setup_model "setup_model(junction_insulated=[...])".
+   up, without a new mesh file, with \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.setup_model "setup_model(insulated_junctions=[...])".
    A region in the list is insulated at every junction it touches; a pair of regions, e.g. `(1,2)`, is insulated
    only from each other (for example a single insulating break in a sectored torus). Where a third sheet meets both
    on the same junction edge, current can pass between the pair through it, so the pair has no effect there (a

@@ -5,9 +5,11 @@
 #------------------------------------------------------------------------------
 '''! Mesh tools for ThinCurr models with junctions (edges shared by more than two sheets)
 
-Each region is a sheet. A junction edge is an edge shared by more than two cells or by cells of different
-regions. The mesh is split so that, at every vertex, each group of cells connected through ordinary edges
-(a "fan") has its own copy of the vertex; the split mesh is manifold and keeps the cells and their regions.
+Each region is a sheet. A junction edge is an edge shared by more than two cells; in a mesh that is split, edges
+where two regions meet are also junction edges, even where only two cells share them, so that those regions can be
+insulated from each other (with two cells, current conservation there is ordinary continuity). The mesh is split
+so that, at every vertex, each group of cells connected through ordinary edges (a "fan") has its own copy of the
+vertex; the split mesh is manifold and keeps the cells and their regions.
 Current conservation across each junction edge (Kirchhoff) joins the cells again:
 
   sum_c s_c (chi_c(b) - chi_c(a)) = 0 for each junction edge a -> b,
@@ -19,9 +21,9 @@ is the current leaving cell c across the edge.
 The currents the model can carry are the cycles of the dual graph whose nodes are the cells and the junction
 edges, linked where current can cross (ordinary edges, and joined cells at junction edges). The vertex
 unknowns represent most of them; the rest are added as hole elements built from cycles of that graph (a jump
-of chi at the vertex where each cell on the cycle is entered and left). Outer arcs (chains of outer edges,
-with chi uniform along each) and references (arcs, or one vertex, fixed at zero to remove constant shifts
-that carry no current) complete the set. The number of unknowns equals the number of independent cycles.
+of chi at the vertex where each cell on the cycle is entered and left). Sheet boundaries (chains of outer
+edges, with chi uniform along each) and references (sheet boundaries, or one vertex, fixed at zero to remove
+constant shifts that carry no current) complete the set. The number of unknowns equals the number of independent cycles.
 
 @authors Ian Stewart
 @date October 2026
@@ -93,7 +95,8 @@ def orient_cells(lc):
 
 
 def _junction_edges(lc, reg, ec=None):
-    '''! Junction edges, {(a, b): [cells]}: edges with more than two cells or cells of different regions'''
+    '''! Junction edges, {(a, b): [cells]}: edges with more than two cells, and edges where two regions meet (so that
+    those regions can be insulated from each other)'''
     ec = ec or _edge_cells(lc)
     return {e: cells for e, cells in ec.items() if len(cells) > 2 or len(set(int(reg[c]) for c in cells)) > 1}
 
@@ -350,8 +353,9 @@ def junction_basis(lc, lc_split, reg, jedges, insulated=(), holes=()):
     @param reg Region list
     @param insulated Insulation, see @ref find_junction_holes
     @param holes Extra hole elements, each [n,3] (cell, split vertex, sign): chi += sign*h at that corner
-    @result M (sparse [3 nc, n_reduced], corner (c, i) is row 3c+i), info dict with 'arcs' [(points, closed)],
-            'references' (arcs fixed at zero), 'closures' (cells), 'shifts', 'pmap', 'P', 'explicit_holes'
+    @result M (sparse [3 nc, n_reduced], corner (c, i) is row 3c+i), info dict with 'arcs' (sheet boundaries)
+            [(points, closed)], 'references' (sheet boundaries fixed at zero), 'closures' (cells), 'shifts', 'pmap',
+            'P', 'explicit_holes'
     '''
     lc_split = numpy.asarray(lc_split)
     nv, nc = int(lc_split.max()) + 1, len(lc_split)
@@ -588,9 +592,9 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10):
     (insulated from each other where they are the only regions on a junction edge)
     @param tol Relative eigenvalue below which the model is taken to have a zero-energy mode
     @result Dictionary: 'r', 'lc' (split mesh), 'reg', 'lines', 'jedges', 'kje', 'lje' (junction table),
-            'vmap', 'holes' (explicit holes, [n,3] (cell, split vertex, sign) arrays: non-reference arcs, then
-            cycle holes), 'cuts' (the cycle holes), 'pmap', 'P' (sparse [n_expanded, n_reduced]; expanded
-            unknowns are the active vertices then the explicit holes), 'n_unknowns', 'n_loops', 'M', 'info',
+            'vmap', 'holes' (explicit holes, [n,3] (cell, split vertex, sign) arrays: non-reference sheet
+            boundaries, then cycle holes), 'cuts' (the cycle holes), 'pmap', 'P' (sparse [n_expanded, n_reduced];
+            expanded unknowns are the active vertices then the explicit holes), 'n_unknowns', 'n_loops', 'M', 'info',
             'insulated'
     '''
     lc = numpy.asarray(lc, dtype=numpy.int32)
