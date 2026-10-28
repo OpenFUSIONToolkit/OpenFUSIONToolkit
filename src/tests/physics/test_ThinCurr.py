@@ -1086,7 +1086,7 @@ def test_eig_passive(direct_flag):
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_eig_passive_circular(direct_flag):
-    eigs = approx_list((1.489372E-1, 6.275102E-2, 3.042023E-2, 2.794258E-2), rel=1.E-5)
+    eigs = approx_list((1.489295E-1, 6.274780E-2, 3.041867E-2, 2.794114E-2), rel=1.E-5)
     assert ThinCurr_setup(None,2,direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)),circular=True)

@@ -209,6 +209,7 @@ DO i=1,self%n_vcoils
   hash=coil_set_hash(self%vcoils(i),hash)
 END DO
 CONTAINS
+!> Combine one coil set's definition (count, scales, radii, resistances unless vcoils_only, each coil's points or R, Z)
 FUNCTION coil_set_hash(coil_set,hash_in) RESULT(hash_out)
 TYPE(tw_coil_set), INTENT(in) :: coil_set
 INTEGER(4), INTENT(in) :: hash_in
@@ -721,8 +722,9 @@ END SUBROUTINE tw_save_debug
 !---------------------------------------------------------------------------------
 !> Define a circular coil about the Z axis from its radius and height
 !!
-!! The coil is flagged as circular, so couplings use the exact ring formulas, and its points (traversed
-!! counter-clockwise about +Z) are generated for the paths that integrate the coil polygon.
+!! The coil is flagged as circular, so couplings use the exact ring formulas. Its points (traversed
+!! counter-clockwise about +Z) are still generated: the polygon is integrated for elements too close to the ring for
+!! the exact formula and for mutuals with coils given as points, and it is used for plotting.
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_coil_set_ring(coil,rz,npts)
 TYPE(tw_gen_coil), INTENT(inout) :: coil !< Coil
@@ -795,7 +797,6 @@ REAL(8) :: avec(3),dring
 REAL(8), allocatable :: atmp(:,:),Ael2coil_tmp(:,:),ring_rz(:,:,:)
 LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), POINTER :: quads(:)
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
@@ -857,7 +858,6 @@ IF(PRESENT(save_file))THEN
   END IF
 END IF
 !---Setup quadrature
-quads=>tw_quads
 !---Build temporary coil set from all filaments in model
 ncoils_tot=tw_obj%n_vcoils+tw_obj%n_icoils
 ALLOCATE(coils_tot(ncoils_tot))
@@ -925,11 +925,11 @@ DO i=1,bmesh%nc
             nrad_cross(j)=nrad_cross(j)+1
           END IF
           avec=0.d0
-          DO ii=1,quads(iquad)%np
-            pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
-              + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-              + quads(iquad)%pts(3,ii)*pts_i(:,3)
-            avec=avec+quads(iquad)%wts(ii)*tw_ring_avec(ring_rz(1:2,k,j),pt_i)
+          DO ii=1,tw_quads(iquad)%np
+            pt_i = tw_quads(iquad)%pts(1,ii)*pts_i(:,1) &
+              + tw_quads(iquad)%pts(2,ii)*pts_i(:,2) &
+              + tw_quads(iquad)%pts(3,ii)*pts_i(:,3)
+            avec=avec+tw_quads(iquad)%wts(ii)*tw_ring_avec(ring_rz(1:2,k,j),pt_i)
           END DO
           avec=avec*area_i*ring_rz(3,k,j)
           DO jj=1,3
@@ -963,11 +963,11 @@ DO i=1,bmesh%nc
         ELSE
           pot_tmp=0.d0
           !$omp simd private(pt_i) reduction(+:pot_tmp)
-          DO ii=1,quads(iquad)%np
-            pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
-              + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-              + quads(iquad)%pts(3,ii)*pts_i(:,3)
-            pot_tmp = pot_tmp + quads(iquad)%wts(ii)/SQRT(SUM((pt_i-cpt)**2))
+          DO ii=1,tw_quads(iquad)%np
+            pt_i = tw_quads(iquad)%pts(1,ii)*pts_i(:,1) &
+              + tw_quads(iquad)%pts(2,ii)*pts_i(:,2) &
+              + tw_quads(iquad)%pts(3,ii)*pts_i(:,3)
+            pot_tmp = pot_tmp + tw_quads(iquad)%wts(ii)/SQRT(SUM((pt_i-cpt)**2))
           END DO
           pot_tmp=pot_tmp*area_i
         END IF
@@ -1674,7 +1674,6 @@ REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 INTEGER(4) :: ncoils_tot
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
-TYPE(oft_quad_type), POINTER :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
@@ -1732,7 +1731,6 @@ IF(PRESENT(save_file))THEN
   END IF
 END IF
 !
-quads=>tw_quads
 bmesh=>tw_obj%mesh
 !---Compute coupling between vertices and sensors
 f=1.d0/3.d0
@@ -1780,11 +1778,11 @@ IF(nsensors>0)THEN
         ELSE
           tmp=0.d0
           !$omp simd private(pt_i) reduction(+:tmp)
-          DO ii=1,quads(iquad)%np
-            pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
-              + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-              + quads(iquad)%pts(3,ii)*pts_i(:,3)
-            tmp = tmp + quads(iquad)%wts(ii)/SQRT(SUM((pt_i-pt_j)**2))
+          DO ii=1,tw_quads(iquad)%np
+            pt_i = tw_quads(iquad)%pts(1,ii)*pts_i(:,1) &
+              + tw_quads(iquad)%pts(2,ii)*pts_i(:,2) &
+              + tw_quads(iquad)%pts(3,ii)*pts_i(:,3)
+            tmp = tmp + tw_quads(iquad)%wts(ii)/SQRT(SUM((pt_i-pt_j)**2))
           END DO
           tmp=tmp*area_i
         END IF
@@ -2146,9 +2144,13 @@ DO i=1,tw_obj%n_vcoils
   tw_obj%vcoils(i)%Rself=0.d0
   DO j=1,tw_obj%vcoils(i)%ncoils
     dl=0.d0
-    DO k=2,tw_obj%vcoils(i)%coils(j)%npts
-      dl = dl + SQRT(SUM((tw_obj%vcoils(i)%coils(j)%pts(:,k)-tw_obj%vcoils(i)%coils(j)%pts(:,k-1))**2))
-    END DO
+    IF(tw_obj%vcoils(i)%coils(j)%is_ring)THEN
+      dl = 2.d0*pi*tw_obj%vcoils(i)%coils(j)%ring_rz(1) ! Exact length of a circular coil
+    ELSE
+      DO k=2,tw_obj%vcoils(i)%coils(j)%npts
+        dl = dl + SQRT(SUM((tw_obj%vcoils(i)%coils(j)%pts(:,k)-tw_obj%vcoils(i)%coils(j)%pts(:,k-1))**2))
+      END DO
+    END IF
     tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself + tw_obj%vcoils(i)%res_per_len(j)*dl
   END DO
   WRITE(*,"(2A,1X,I4,A,ES12.4)")oft_indent,"Vcoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself !*pi*4.d-7
