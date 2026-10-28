@@ -1200,3 +1200,14 @@ def test_td_volt_aca(convert_xml):
                            volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)),
                            jumper_start=2)
     assert validate_td(sigs_final,jumpers_final)
+
+@pytest.mark.parametrize("pre_single", (False, True))
+def test_td_volt_aca_coarse(pre_single):
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.513623E-4, 1.292107E-4), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.122550E3, 1122.550, 656.9544, 656.9797], rel=1.E-3)
+    assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,hodlr_opts={'pre_coarse': True, 'pre_single': pre_single},
+                           vcoils=((1.1, 0.25), (1.1, -0.25)),
+                           floops=((0.9, 0.5), (0.9, 0.0)),
+                           volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)),
+                           jumper_start=2)
+    assert validate_td(sigs_final,jumpers_final)

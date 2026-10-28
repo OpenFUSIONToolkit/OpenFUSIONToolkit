@@ -59,6 +59,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: B_svd_tol = -1.d0 !< SVD tolerance for B-field operators
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
   LOGICAL :: pre_single = .FALSE. !< Compute, store, and apply block-Jacobi preconditioners in single precision?
+  LOGICAL :: pre_coarse = .FALSE. !< Add a global coarse correction to block-Jacobi preconditioners (two-level preconditioner)?
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_blocks => NULL() !< Indices of compressed off-diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: L_thread_ptr => NULL()
@@ -127,7 +128,6 @@ END TYPE
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
-  LOGICAL :: coarse = .FALSE. !< Add a global coarse correction (two-level preconditioner)?
   INTEGER(4) :: coarse_order = 1 !< Polynomial order of the coarse space on each block (1 or 2)
   INTEGER(4) :: max_block_size = 0
   INTEGER(4) :: nz = 0 !< Number of coarse vectors
@@ -582,8 +582,9 @@ REAL(8) :: L_aca_rel_tol = -1.d0
 REAL(8) :: B_svd_tol = -1.d99
 REAL(8) :: B_aca_rel_tol = -1.d0
 LOGICAL :: pre_single = .FALSE.
+LOGICAL :: pre_coarse = .FALSE.
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
-  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single
+  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -613,6 +614,7 @@ self%min_rank=min_rank
 self%aca_min_its=aca_min_its
 self%aca_sep_thresh=aca_sep_thresh
 self%pre_single=pre_single
+self%pre_coarse=pre_coarse
 !
 L_approx_scale = 0.5d0*self%tw_obj%mesh%hrms
 IF(L_svd_tol<0.d0)THEN
@@ -724,6 +726,7 @@ END IF
 WRITE(*,'(2A,I6)')oft_indent,'# of SVD  =      ',sparse_count(2)
 WRITE(*,'(2A,I6)')oft_indent,'# of ACA+ =      ',sparse_count(1)
 IF(self%pre_single)WRITE(*,'(2A)')oft_indent,'Using single precision block preconditioners'
+IF(self%pre_coarse)WRITE(*,'(2A)')oft_indent,'Using two-level block preconditioners'
 !---Diagnostic block field (only when plot output has been set up)
 IF(self%tw_obj%xdmf%n_grids>0)CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')
 ALLOCATE(cell_mark(self%tw_obj%mesh%nc))
@@ -3139,7 +3142,7 @@ IF(self%refactor)THEN
   END IF
   DEALLOCATE(imap)
   !---Coarse correction: Z^T (alpha*L + beta*R) Z, from the stored Z^T L Z and Z^T R Z
-  IF(self%coarse)THEN
+  IF(self%mf_obj%pre_coarse)THEN
     IF(.NOT.ASSOCIATED(self%zlz))CALL rbjprecond_coarse_setup(self)
     IF(self%nz>0)THEN
       IF(.NOT.ASSOCIATED(self%einv))ALLOCATE(self%einv(self%nz,self%nz))
@@ -3182,7 +3185,7 @@ ELSE
   DEALLOCATE(vloc)
 END IF
 !$omp end parallel
-IF(self%coarse.AND.(self%nz>0))CALL rbjprecond_coarse_apply(self,gtmp,utmp)
+IF(self%mf_obj%pre_coarse.AND.(self%nz>0))CALL rbjprecond_coarse_apply(self,gtmp,utmp)
 CALL u%restore_local(utmp)
 CALL g%set(0.d0)
 DEALLOCATE(utmp,gtmp,hole_inds)

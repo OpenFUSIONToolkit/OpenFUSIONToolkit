@@ -272,3 +272,11 @@ stored in double precision. Alternatively, by setting `pre_single=T` (`pre_singl
 \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options"), each block is rounded to single precision and
 the inverse is computed, stored, and applied in single precision. This halves the memory required for the preconditioner and reduces
 the cost of both constructing and applying it, at the cost of a small perturbation to the preconditioner itself.
+
+Block-Jacobi preconditioning cannot represent smooth, long-range current patterns, which limits its effect on large models.
+Setting `pre_coarse=T` (`pre_coarse=True` in
+\ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options") adds a global coarse correction
+\f$ \textrm{Z} (\textrm{Z}^T \textrm{A} \textrm{Z})^{-1} \textrm{Z}^T \f$ (two-level preconditioner). The coarse space
+\f$ \textrm{Z} \f$ holds, on each diagonal block, a constant and linear functions of position, plus one vector for each
+hole and V-coil. This usually reduces the number of iterations substantially, but setting it up costs one HODLR
+matrix-vector product per coarse vector, so it is off by default.
