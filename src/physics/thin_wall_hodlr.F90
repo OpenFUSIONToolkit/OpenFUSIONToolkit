@@ -444,22 +444,6 @@ END IF
 Bop_dr=Bop_dr*mu0/(4.d0*pi)
 END SUBROUTINE tw_compute_Bops_hole
 !---------------------------------------------------------------------------------
-!> Compute one direction of a block of the B-field operator (see @ref tw_compute_Bops_block3)
-!---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Bops_block(self,Bop,row_block,col_block,dir,B_dx)
-TYPE(tw_type), INTENT(inout) :: self
-REAL(8), INTENT(out) :: Bop(:,:) !< Magnetic field evaluation matrix
-TYPE(oft_tw_block), INTENT(in) :: row_block !< Block of rows to compute
-TYPE(oft_tw_block), INTENT(in) :: col_block !< Block of columns to compute
-INTEGER(4), INTENT(in) :: dir !< Direction of B-field to compute (1=x,2=y,3=z)
-REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
-REAL(8), ALLOCATABLE :: Bop3(:,:,:)
-ALLOCATE(Bop3(SIZE(Bop,1),SIZE(Bop,2),3))
-CALL tw_compute_Bops_block3(self,Bop3,row_block,col_block,B_dx)
-Bop=Bop3(:,:,dir)
-DEALLOCATE(Bop3)
-END SUBROUTINE tw_compute_Bops_block
-!---------------------------------------------------------------------------------
 !> Compute all three directions of a block of the B-field operator in one pass
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Bops_block3(self,Bop,row_block,col_block,B_dx)
@@ -1551,36 +1535,47 @@ DO i=1,self%nsparse
       k = self%sparse_blocks(2,i)
       j = self%sparse_blocks(3,i)
     END IF
-    DO dim=1,3
-      IF(ASSOCIATED(self%aca_B_dense(ii,dim)%M))THEN
-        size_out=self%levels(level)%blocks(k)%nelems*self%levels(level)%blocks(j)%nelems
-      ELSE IF(ASSOCIATED(self%aca_BU_mats(ii,dim)%M))THEN
-        size_out=SIZE(self%aca_BV_mats(ii,dim)%M,DIM=1)*(self%levels(level)%blocks(k)%nelems+self%levels(level)%blocks(j)%nelems)
-      ELSE
-        mat_updated=.TRUE.
-        !---Build full representation
-        size_out=-1
-        IF((self%B_aca_tol>0.d0).AND.ABS(self%levels(level)%mat_mask(j,k))==2)THEN
-        CALL aca_approx(ii,level,j,k,dim,self%B_aca_tol,size_out)
-        IF(size_out>0)CALL compress_aca(ii,level,j,k,dim,self%B_svd_tol,size_out)
+    IF(ALL([(ASSOCIATED(self%aca_B_dense(ii,dim)%M).OR.ASSOCIATED(self%aca_BU_mats(ii,dim)%M),dim=1,3)]))THEN
+      !---Loaded from file
+      DO dim=1,3
+        IF(ASSOCIATED(self%aca_B_dense(ii,dim)%M))THEN
+          size_out=self%levels(level)%blocks(k)%nelems*self%levels(level)%blocks(j)%nelems
+        ELSE
+          size_out=SIZE(self%aca_BV_mats(ii,dim)%M,DIM=1)*(self%levels(level)%blocks(k)%nelems+self%levels(level)%blocks(j)%nelems)
+        END IF
+        sparse_sizes(i) = sparse_sizes(i) + size_out
+      END DO
+    ELSE
+      mat_updated=.TRUE.
+      DO dim=1,3
+        IF(ASSOCIATED(self%aca_B_dense(ii,dim)%M))DEALLOCATE(self%aca_B_dense(ii,dim)%M)
+        IF(ASSOCIATED(self%aca_BU_mats(ii,dim)%M))DEALLOCATE(self%aca_BU_mats(ii,dim)%M,self%aca_BV_mats(ii,dim)%M)
+      END DO
+      !---All three directions with one ACA+ (shared pivots), then per-direction SVD recompression
+      size_out=-1
+      IF((self%B_aca_tol>0.d0).AND.ABS(self%levels(level)%mat_mask(j,k))==2)THEN
+        CALL aca_approx3(ii,level,j,k,self%B_aca_tol,size_out)
         IF(size_out==-1)WRITE(*,'(2A,2I4)')oft_indent,'ACA+ failure',self%levels(level)%blocks(j)%np, &
           self%levels(level)%blocks(k)%nelems
-        END IF
-        !---IF ACA+ failed or diagonal compute dense matrix
-        IF(size_out<0)THEN
+      END IF
+      IF(size_out>0)THEN
+        DO dim=1,3
+          CALL compress_aca(ii,level,j,k,dim,self%B_svd_tol,size_out)
+          sparse_sizes(i) = sparse_sizes(i) + size_out
+        END DO
+      ELSE
+        !---ACA+ failed or not used: dense block (all three directions in one pass) and SVD compression
+        ALLOCATE(Btmp(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems,3))
+        CALL tw_compute_Bops_block3(self%tw_obj,Btmp, &
+          self%levels(level)%blocks(j),self%levels(level)%blocks(k),self%tw_obj%B_dx)
+        DO dim=1,3
           ALLOCATE(self%aca_B_dense(ii,dim)%M(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems))
-          IF(.NOT.ALLOCATED(Btmp))THEN ! all three directions in one pass, reused by the other directions
-            ALLOCATE(Btmp(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems,3))
-            CALL tw_compute_Bops_block3(self%tw_obj,Btmp, &
-              self%levels(level)%blocks(j),self%levels(level)%blocks(k),self%tw_obj%B_dx)
-          END IF
           self%aca_B_dense(ii,dim)%M=Btmp(:,:,dim)
           CALL compress_block(ii,j,k,dim,self%B_svd_tol,size_out)
-          ! size_out = self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
-        END IF
+          sparse_sizes(i) = sparse_sizes(i) + size_out
+        END DO
       END IF
-      sparse_sizes(i) = sparse_sizes(i) + size_out
-    END DO
+    END IF
     IF(ALLOCATED(Btmp))DEALLOCATE(Btmp)
   END DO
   compressed_size = compressed_size + sparse_sizes(i)
@@ -1883,247 +1878,174 @@ DO i=1,SIZE(vals)
 END DO
 END FUNCTION max_masked
 !
-SUBROUTINE aca_approx(isparse,ilevel,iblock,jblock,dim,tol,size_out)
-INTEGER(4), INTENT(in) :: isparse,ilevel,iblock,jblock,dim
+!> ACA+ approximation of all three directions of a B-field block at once
+!!
+!! Runs ACA+ on the stacked block [Bx; By; Bz] (rows: block points, one set per direction) with shared pivots. A
+!! column (one element at all points) gives all three directions in one kernel evaluation. The stacked factors are
+!! split per direction (shared right factor) for recompression with @ref compress_aca.
+SUBROUTINE aca_approx3(isparse,ilevel,iblock,jblock,tol,size_out)
+INTEGER(4), INTENT(in) :: isparse,ilevel,iblock,jblock
 REAL(8), INTENT(in) :: tol
 INTEGER(8), INTENT(out) :: size_out
-INTEGER(4) :: M,N,MIN_DIM,max_iter,Iref,Jref,Istar,Jstar,i,k,nterms,k1,k2
+INTEGER(4) :: M,M3,N,MIN_DIM,max_iter,Iref,Jref,Istar,Jstar,i,k,nterms,d
 INTEGER(8) :: full_size
 REAL(8) :: tmp,step_size,Istar_val,Jstar_val
-REAL(8), ALLOCATABLE :: us(:,:),vs(:,:),RIstar(:,:),RJstar(:,:),RIref(:,:),RJref(:,:)
+REAL(8), ALLOCATABLE :: us(:,:),vs(:,:),RIstar(:),RJstar(:),RIref(:),RJref(:)
 LOGICAL, ALLOCATABLE :: prevIstar(:),prevJstar(:)
-TYPE(oft_tw_block) :: tmp_block
+TYPE(oft_tw_block) :: elem_block,pt_block
 !
 size_out=-2
 M = self%levels(ilevel)%blocks(jblock)%np
+M3 = 3*M
 N = self%levels(ilevel)%blocks(iblock)%nelems
 MIN_DIM = min(M,N)
 IF(MIN_DIM<=self%aca_min_its)RETURN
-full_size = INT(M,8)*INT(N,8)
-
-!---Create temporary single element block
-tmp_block%np=1
-ALLOCATE(tmp_block%ipts(tmp_block%np))
-tmp_block%ipts=1
-!
-tmp_block%nelems=1
-ALLOCATE(tmp_block%ielem(tmp_block%nelems))
-tmp_block%ielem=1
-ALLOCATE(tmp_block%icell(200))
-tmp_block%icell=0
-ALLOCATE(tmp_block%inv_map(self%tw_obj%mesh%np))
-tmp_block%inv_map=0
-
-! If we haven't converged before running for max_iter, we'll stop anyway.
-! We want the sum of the two matrices to always be smaller than the dense one
-max_iter = MIN(self%leaf_target*2,INT(full_size/INT(M+N,8),4)-1)
-
-!
+full_size = INT(M3,8)*INT(N,8)
+!---Temporary single element and single point blocks
+pt_block%np=1
+ALLOCATE(pt_block%ipts(1))
+elem_block%nelems=1
+ALLOCATE(elem_block%ielem(1))
+elem_block%ielem=1
+ALLOCATE(elem_block%icell(200))
+elem_block%icell=0
+ALLOCATE(elem_block%inv_map(self%tw_obj%mesh%np))
+elem_block%inv_map=0
+!---Stop if the stacked factors would not be smaller than the dense stacked block
+max_iter = MIN(3*self%leaf_target*2,INT(full_size/INT(M3+N,8),4)-1)
 size_out=-1
-ALLOCATE(US(N,max_iter),VS(max_iter,M))
-us = 0.d0  ! The left vectors of the approximation
-vs = 0.d0  ! The right vectors of the approximation
+ALLOCATE(us(N,max_iter),vs(max_iter,M3))
+us = 0.d0
+vs = 0.d0
 nterms = 0
-ALLOCATE(prevIstar(N),prevJstar(M))
-prevIstar = .TRUE.  ! Previously used i^* pivots
-prevJstar = .TRUE.  ! Previously used j^* pivots
-
-! Create a buffer for storing the R_{i^*,j} and R_{i, j^*}
-ALLOCATE(RIstar(M,1),RJstar(1,N),RIref(M,1),RJref(1,N))
-RIstar = 0.d0
-RJstar = 0.d0
-RIref = 0.d0
-RJref = 0.d0
-
-! Choose our starting random reference row and column.
+ALLOCATE(prevIstar(N),prevJstar(M3))
+prevIstar = .TRUE.
+prevJstar = .TRUE.
+ALLOCATE(RIstar(M3),RJstar(N),RIref(M3),RJref(N))
+!---Random reference element (column) and stacked point row
 CALL random_number(tmp)
 Iref = INT(tmp*(N-1),4)+1
 CALL random_number(tmp)
-Jref = INT(tmp*(M-1),4)+1
-
-! And collect the corresponding blocks of rows
-! DO Iref=1,N
-!     IF(prevIstar(Iref))EXIT
-! END DO
-tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
-tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Iref)
-tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
-k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
-k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
-tmp_block%ncells=k2-k1+1
-tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
-CALL tw_compute_Bops_block(self%tw_obj,RIref, &
-  tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%tw_obj%B_dx)
-! DO i=1,nterms
-!   RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
-! END DO
-!... and columns
-! DO Jref=1,M
-!     IF(prevJstar(Jref))EXIT
-! END DO
-tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jref)
-CALL tw_compute_Bops_block(self%tw_obj,RJref, &
-  self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%tw_obj%B_dx)
-! DO i=1,nterms
-!   RJref(:,1) = RJref(:,1) - us(:,i)*vs(i,Jref)
-! END DO
-
+Jref = INT(tmp*(M3-1),4)+1
+CALL aca3_elem_vector(ilevel,iblock,jblock,elem_block,Iref,RIref)
+CALL aca3_point_row(ilevel,iblock,jblock,pt_block,Jref,RJref)
 step_size = -1.d0
 DO k=1,max_iter
-  ! Find the column in RIref with the largest entry (step 1 above).
-  Jstar = max_masked(ABS(RIref(:,1)), prevJstar) !argmax_not_in_list(maxabsRIref, prevJstar)
-
-  ! Find the row in RJref with the largest entry (step 1 above).
-  Istar = max_masked(ABS(RJref(1,:)), prevIstar) !argmax_not_in_list(maxabsRJref, prevIstar)
-
-  ! Check if we should pivot first based on row or based on column (step 2 above)
-  Jstar_val = ABS(RIref(Jstar,1)) !maxabsRIref[Jstar]
-  Istar_val = ABS(RJref(1,Istar)) !maxabsRJref[Istar]
+  Jstar = max_masked(ABS(RIref), prevJstar)
+  Istar = max_masked(ABS(RJref), prevIstar)
+  Jstar_val = ABS(RIref(Jstar))
+  Istar_val = ABS(RJref(Istar))
   IF(Istar_val > Jstar_val)THEN
-    ! If we pivot first on the row, then calculate the corresponding row
-    ! of the residual matrix.
-    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
-    tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Istar)
-    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
-    tmp_block%ncells=k2-k1+1
-    tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
-    CALL tw_compute_Bops_block(self%tw_obj,RIstar, &
-      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%tw_obj%B_dx)
+    CALL aca3_elem_vector(ilevel,iblock,jblock,elem_block,Istar,RIstar)
     DO i=1,nterms
-      RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
+      RIstar = RIstar - us(Istar,i)*vs(i,:)
     END DO
-
-    ! Then find the largest entry in that row vector to identify which
-    ! column to pivot on. (See step 3 above)
-    Jstar = max_masked(ABS(RIstar(:,1)), prevJstar) !argmax_not_in_list(np.abs(RIstar), prevJstar)
-
-    ! Calculate the corresponding residual column!
-    tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jstar)
-    CALL tw_compute_Bops_block(self%tw_obj,RJstar, &
-      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%tw_obj%B_dx)
+    Jstar = max_masked(ABS(RIstar), prevJstar)
+    CALL aca3_point_row(ilevel,iblock,jblock,pt_block,Jstar,RJstar)
     DO i=1,nterms
-      RJstar(1,:) = RJstar(1,:) - us(:,i)*vs(i,Jstar)
+      RJstar = RJstar - us(:,i)*vs(i,Jstar)
     END DO
   ELSE
-    ! If we pivot first on the column, then calculate the corresponding column
-    ! of the residual matrix.
-    tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jstar)
-    CALL tw_compute_Bops_block(self%tw_obj,RJstar, &
-      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%tw_obj%B_dx)
+    CALL aca3_point_row(ilevel,iblock,jblock,pt_block,Jstar,RJstar)
     DO i=1,nterms
-      RJstar(1,:) = RJstar(1,:) - us(:,i)*vs(i,Jstar)
+      RJstar = RJstar - us(:,i)*vs(i,Jstar)
     END DO
-
-    ! Then find the largest entry in that row vector to identify which
-    ! column to pivot on.  (See step 3 above)
-    Istar = max_masked(ABS(RJstar(1,:)), prevIstar) !argmax_not_in_list(np.abs(RJstar), prevIstar)
-
-    ! Calculate the corresponding residual row!
-    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
-    tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Istar)
-    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
-    tmp_block%ncells=k2-k1+1
-    tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
-    CALL tw_compute_Bops_block(self%tw_obj,RIstar, &
-      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%tw_obj%B_dx)
+    Istar = max_masked(ABS(RJstar), prevIstar)
+    CALL aca3_elem_vector(ilevel,iblock,jblock,elem_block,Istar,RIstar)
     DO i=1,nterms
-      RIstar(:,1) = RIstar(:,1) - us(Istar,i)*vs(i,:)
+      RIstar = RIstar - us(Istar,i)*vs(i,:)
     END DO
   END IF
-  ! Record the pivot row and column so that we don't re-use them.
-  prevIstar(Istar) = .FALSE. !prevIstar.append(Istar)
-  prevJstar(Jstar) = .FALSE. !prevJstar.append(Jstar)
-
-  ! Add the new rank-1 outer product to the approximation (see step 4 above)
+  prevIstar(Istar) = .FALSE.
+  prevJstar(Jstar) = .FALSE.
+  !---New rank-1 term
   nterms = nterms + 1
-  vs(nterms,:) = RIstar(:,1)/RIstar(Jstar,1) !vs.append(RIstar / RIstar[Jstar])
-  us(:,nterms) = RJstar(1,:) !us.append(RJstar.copy())
-
-  ! How "large" was this update to the approximation?
+  vs(nterms,:) = RIstar/RIstar(Jstar)
+  us(:,nterms) = RJstar
   step_size = SQRT(SUM(us(:,nterms)**2)*SUM(vs(nterms,:)**2))
-  IF(oft_debug_print(2))WRITE(*,'(A,3I4,2ES14.6)')oft_indent,k,Istar,Jstar,step_size,tol
-
-  ! The convergence criteria will simply be whether the Frobenius norm of the
-  ! step is smaller than the user provided tolerance.
   IF((k>=self%aca_min_its).AND.(step_size < tol))EXIT
-
-  ! We also break here if this is the last iteration to avoid wasting effort
-  ! updating the reference row/column
   IF(k == max_iter - 1)THEN
     step_size = -1.d0
-    EXIT !None, None
+    EXIT
   END IF
-
-  !! If we didn't converge, let's prep the reference residual row and column for the next iteration:
-
-  ! If we pivoted on the reference row, then choose a new reference row.
+  !---Update or replace the reference column and row
   IF(Iref==Istar)THEN
     DO Iref=1,N
       IF(prevIstar(Iref))EXIT
     END DO
-    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=0
-    tmp_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(Iref)
-    tmp_block%inv_map(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))=1
-    k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1)))
-    k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(tmp_block%ielem(1))+1)-1
-    tmp_block%ncells=k2-k1+1
-    tmp_block%icell(1:tmp_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
-    CALL tw_compute_Bops_block(self%tw_obj,RIref, &
-      tmp_block,self%levels(ilevel)%blocks(jblock),dim,self%tw_obj%B_dx)
+    CALL aca3_elem_vector(ilevel,iblock,jblock,elem_block,Iref,RIref)
     DO i=1,nterms
-      RIref(:,1) = RIref(:,1) - us(Iref,i)*vs(i,:)
+      RIref = RIref - us(Iref,i)*vs(i,:)
     END DO
   ELSE
-    ! If we didn't change the reference row of the residual matrix "R",
-    ! update the row to account for the new components of the approximation.
-    RIref(:,1) = RIref(:,1) - us(Iref,nterms)*vs(nterms,:) !RIref -= us[-1][Iref : Iref + 1][:, None] * vs[-1][None, :]
+    RIref = RIref - us(Iref,nterms)*vs(nterms,:)
   END IF
-
-  ! If we pivoted on the reference column, then choose a new reference column.
   IF(Jref==Jstar)THEN
-    DO Jref=1,M
-        IF(prevJstar(Jref))EXIT
+    DO Jref=1,M3
+      IF(prevJstar(Jref))EXIT
     END DO
-    tmp_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(Jref)
-    CALL tw_compute_Bops_block(self%tw_obj,RJref, &
-      self%levels(ilevel)%blocks(iblock),tmp_block,dim,self%tw_obj%B_dx)
+    CALL aca3_point_row(ilevel,iblock,jblock,pt_block,Jref,RJref)
     DO i=1,nterms
-      RJref(1,:) = RJref(1,:) - us(:,i)*vs(i,Jref)
+      RJref = RJref - us(:,i)*vs(i,Jref)
     END DO
   ELSE
-    ! If we didn't change the reference column of the residual matrix "R",
-    ! update the column to account for the new components of the approximation.
-    RJref(1,:) = RJref(1,:) - us(:,nterms)*vs(nterms,Jref) !RJref -= vs[-1][Jref : Jref + 1][None, :] * us[-1][:, None]
+    RJref = RJref - us(:,nterms)*vs(nterms,Jref)
   END IF
 END DO
 IF(step_size > 0.d0)THEN
-  ! WRITE(*,*)'Savings:   ',iblock,jblock,nterms,MIN(M,N)
-  ! Return the left and right approximation matrices.
-  ! The approximate is such that:
-  ! M ~ U_ACA.dot(V_ACA)
-  ALLOCATE(self%aca_BU_mats(isparse,dim)%M(M,nterms))
-  DO i=1,nterms
-    DO k=1,M
-      self%aca_BU_mats(isparse,dim)%M(k,i)=vs(i,k)
+  !---Split per direction: B_d ~ U_d V, with U_d the rows of direction d
+  DO d=1,3
+    ALLOCATE(self%aca_BU_mats(isparse,d)%M(M,nterms))
+    DO i=1,nterms
+      self%aca_BU_mats(isparse,d)%M(:,i)=vs(i,(d-1)*M+1:d*M)
     END DO
+    ALLOCATE(self%aca_BV_mats(isparse,d)%M(nterms,N))
+    self%aca_BV_mats(isparse,d)%M=TRANSPOSE(us(:,1:nterms))
   END DO
-  ALLOCATE(self%aca_BV_mats(isparse,dim)%M(nterms,N))
-  DO i=1,nterms
-    DO k=1,N
-      self%aca_BV_mats(isparse,dim)%M(i,k)=us(k,i)
-    END DO
-  END DO
-  ! DEALLOCATE(self%sparse_dense(isparse,dim)%M)
-  size_out=INT(nterms,8)*INT(M+N,8)
+  size_out=INT(nterms,8)*INT(M3+N,8)
 END IF
-DEALLOCATE(RIstar,RJstar,RIref,RJref)
-DEALLOCATE(us,vs,prevIstar,prevJstar)
-DEALLOCATE(tmp_block%ipts,tmp_block%ielem,tmp_block%icell,tmp_block%inv_map)
-END SUBROUTINE aca_approx
+DEALLOCATE(RIstar,RJstar,RIref,RJref,us,vs,prevIstar,prevJstar)
+DEALLOCATE(pt_block%ipts,elem_block%ielem,elem_block%icell,elem_block%inv_map)
+END SUBROUTINE aca_approx3
+!
+!> Field of block element `ie` at all block points, stacked over the three directions (for @ref aca_approx3)
+SUBROUTINE aca3_elem_vector(ilevel,iblock,jblock,elem_block,ie,vec)
+INTEGER(4), INTENT(in) :: ilevel,iblock,jblock,ie
+TYPE(oft_tw_block), INTENT(inout) :: elem_block
+REAL(8), INTENT(out) :: vec(:)
+INTEGER(4) :: k1,k2,dd,M
+REAL(8), ALLOCATABLE :: B3(:,:,:)
+M=self%levels(ilevel)%blocks(jblock)%np
+elem_block%inv_map(self%tw_obj%lpmap_inv(elem_block%ielem(1)))=0
+elem_block%ielem=self%levels(ilevel)%blocks(iblock)%ielem(ie)
+elem_block%inv_map(self%tw_obj%lpmap_inv(elem_block%ielem(1)))=1
+k1=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(elem_block%ielem(1)))
+k2=self%tw_obj%mesh%kpc(self%tw_obj%lpmap_inv(elem_block%ielem(1))+1)-1
+elem_block%ncells=k2-k1+1
+elem_block%icell(1:elem_block%ncells)=self%tw_obj%mesh%lpc(k1:k2)
+ALLOCATE(B3(M,1,3))
+CALL tw_compute_Bops_block3(self%tw_obj,B3,elem_block,self%levels(ilevel)%blocks(jblock),self%tw_obj%B_dx)
+DO dd=1,3
+  vec((dd-1)*M+1:dd*M)=B3(:,1,dd)
+END DO
+DEALLOCATE(B3)
+END SUBROUTINE aca3_elem_vector
+!
+!> Stacked row `ir` (block point and direction) at all block elements (for @ref aca_approx3)
+SUBROUTINE aca3_point_row(ilevel,iblock,jblock,pt_block,ir,vec)
+INTEGER(4), INTENT(in) :: ilevel,iblock,jblock,ir
+TYPE(oft_tw_block), INTENT(inout) :: pt_block
+REAL(8), INTENT(out) :: vec(:)
+INTEGER(4) :: M,N
+REAL(8), ALLOCATABLE :: B3(:,:,:)
+M=self%levels(ilevel)%blocks(jblock)%np
+N=self%levels(ilevel)%blocks(iblock)%nelems
+pt_block%ipts=self%levels(ilevel)%blocks(jblock)%ipts(MOD(ir-1,M)+1)
+ALLOCATE(B3(1,N,3))
+CALL tw_compute_Bops_block3(self%tw_obj,B3,self%levels(ilevel)%blocks(iblock),pt_block,self%tw_obj%B_dx)
+vec=B3(1,:,(ir-1)/M+1)
+DEALLOCATE(B3)
+END SUBROUTINE aca3_point_row
 !
 SUBROUTINE compress_aca(isparse,ilevel,iblock,jblock,dim,tol,size_out)
 INTEGER(4), INTENT(in) :: isparse,ilevel,iblock,jblock,dim
