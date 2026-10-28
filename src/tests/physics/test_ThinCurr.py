@@ -716,6 +716,64 @@ def run_plot_td_compute_jvol_outputs_fields(mp_q):
     mp_q.put(result)
 
 
+def _default_pmap(lc, npts):
+    edges = np.sort(np.vstack((lc[:,[0,1]], lc[:,[1,2]], lc[:,[2,0]])), axis=1)
+    uedges, counts = np.unique(edges, axis=0, return_counts=True)
+    active = np.ones((npts,), dtype=bool)
+    active[uedges[counts == 1].ravel()] = False
+    pmap = np.zeros((npts,), dtype=np.int32)
+    pmap[active] = np.arange(1, active.sum()+1)
+    return pmap
+
+
+@pytest.mark.coverage
+def test_user_pmap():
+    assert mp_run(run_user_pmap, ())
+
+
+def run_user_pmap(mp_q):
+    result = True
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+        os.chdir(test_dir)
+        xml_filename = 'oft_in_pmap.xml'
+        _write_thincurr_xml(xml_filename, eta_values=np.r_[1.E4*mu0])
+        myOFT = OFT_env(nthreads=-1)
+        r, lc = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25, nsplit=2)
+        pmap = _default_pmap(lc, r.shape[0])
+        nactive = pmap.max()
+        reverse = pmap.copy()
+        reverse[pmap > 0] = nactive+1-pmap[pmap > 0]
+        mats = []
+        for pmap_in in (None, pmap, reverse):
+            model = ThinCurr(myOFT)
+            model.setup_model(r=r, lc=lc, xml_filename=xml_filename, pmap=pmap_in)
+            model.compute_Lmat()
+            model.compute_Rmat()
+            mats.append((np.array(model.Lmat), model.Rmat.toarray()))
+        if not (np.allclose(mats[1][0], mats[0][0], rtol=1.E-12, atol=0.0)
+                and np.allclose(mats[1][1], mats[0][1], rtol=1.E-12, atol=0.0)):
+            print("FAILED: default point map does not reproduce the model")
+            result = False
+        if not (np.allclose(mats[2][0], mats[0][0][::-1,::-1], rtol=0.0, atol=1.E-6*np.abs(mats[0][0]).max())
+                and np.allclose(mats[2][1], mats[0][1][::-1,::-1], rtol=0.0, atol=1.E-12*np.abs(mats[0][1]).max())):
+            print("FAILED: reordered point map does not reorder the model")
+            result = False
+        try:
+            ThinCurr(myOFT).setup_model(r=r, lc=lc, xml_filename=xml_filename, pmap=pmap[:-1])
+            print("FAILED: point map of wrong length accepted")
+            result = False
+        except ValueError:
+            pass
+    except BaseException as e:
+        print(e)
+        result = False
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
 @pytest.mark.coverage
 def test_eta_only_matches_surface_resistivity_with_thickness():
     assert mp_run(run_eta_only_matches_surface_resistivity_with_thickness, ())

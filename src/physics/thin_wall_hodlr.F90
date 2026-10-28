@@ -944,7 +944,7 @@ ALLOCATE(self%aca_V_mats(self%nsparse))
 ALLOCATE(self%aca_dense(self%nsparse))
 WRITE(*,'(2A)')oft_indent,'Building hole and Vcoil columns'
 IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
-  ALLOCATE(self%hole_Vcoil_mat%M(self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils))
+  ALLOCATE(self%hole_Vcoil_mat%M(tw_nelems_exp(self%tw_obj),self%tw_obj%nholes+self%tw_obj%n_vcoils))
   CALL tw_compute_LmatHole(self%tw_obj,self%tw_obj,self%hole_Vcoil_mat%M)
 END IF
 IF(PRESENT(save_file))CALL load_from_file()
@@ -1071,7 +1071,7 @@ CHARACTER(LEN=5) :: matrix_id
 TYPE(HODLR_hash), TARGET :: sparse_hash
 !---Save computed matrix to file
 IF(TRIM(save_file)/='none')THEN
-  hash_tmp(1) = self%tw_obj%nelems
+  hash_tmp(1) = tw_nelems_exp(self%tw_obj)
   hash_tmp(2) = self%tw_obj%mesh%nc
   hash_tmp(3) = self%ndense
   sparse_hash%nsparse = self%nsparse
@@ -1135,7 +1135,7 @@ TYPE(HODLR_hash), TARGET :: sparse_hash
 IF(TRIM(save_file)/='none')THEN
   INQUIRE(FILE=TRIM(save_file),EXIST=exists)
   IF(exists)THEN
-    hash_tmp(1) = self%tw_obj%nelems
+    hash_tmp(1) = tw_nelems_exp(self%tw_obj)
     hash_tmp(2) = self%tw_obj%mesh%nc
     hash_tmp(3) = self%ndense
     sparse_hash%nsparse = self%nsparse
@@ -1823,7 +1823,7 @@ CHARACTER(LEN=5) :: matrix_id
 TYPE(HODLR_hash), TARGET :: sparse_hash
 !---Save computed matrix to file
 IF(TRIM(save_file)/='none')THEN
-  hash_tmp(1) = self%tw_obj%nelems
+  hash_tmp(1) = tw_nelems_exp(self%tw_obj)
   hash_tmp(2) = self%tw_obj%mesh%nc
   hash_tmp(3) = self%ndense
   sparse_hash%nsparse = self%nsparse
@@ -1900,7 +1900,7 @@ TYPE(HODLR_hash), TARGET :: sparse_hash
 IF(TRIM(save_file)/='none')THEN
   INQUIRE(FILE=TRIM(save_file),EXIST=exists)
   IF(exists)THEN
-    hash_tmp(1) = self%tw_obj%nelems
+    hash_tmp(1) = tw_nelems_exp(self%tw_obj)
     hash_tmp(2) = self%tw_obj%mesh%nc
     hash_tmp(3) = self%ndense
     sparse_hash%nsparse = self%nsparse
@@ -2395,11 +2395,20 @@ class(oft_vector), target, intent(inout) :: a
 class(oft_vector), intent(inout) :: b
 integer(4) :: i,j,k,iblock,jblock,level
 real(8), allocatable :: row_tmp(:),col_tmp(:),int_tmp1(:),int_tmp2(:)
-REAL(8), pointer :: avals(:),bvals(:)
-NULLIFY(avals,bvals)
-CALL a%get_local(avals)
+REAL(8), POINTER :: avals(:),bvals(:),ared(:),bred(:)
+NULLIFY(avals,bvals,ared,bred)
+CALL a%get_local(ared)
 CALL b%set(0.d0)
-CALL b%get_local(bvals)
+CALL b%get_local(bred)
+IF(ASSOCIATED(self%tw_obj%junc))THEN
+  ALLOCATE(avals(tw_nelems_exp(self%tw_obj)),bvals(tw_nelems_exp(self%tw_obj)))
+  CALL tw_junction_expand(self%tw_obj,ared,avals)
+  bvals=0.d0
+  DEALLOCATE(ared)
+ELSE
+  avals=>ared
+  bvals=>bred
+END IF
 !$omp parallel private(j,k,iblock,jblock,level,row_tmp,col_tmp,int_tmp1,int_tmp2)
 ALLOCATE(col_tmp(self%tw_obj%np_active),row_tmp(self%tw_obj%np_active))
 ALLOCATE(int_tmp1(self%tw_obj%np_active),int_tmp2(self%tw_obj%np_active))
@@ -2486,11 +2495,16 @@ bvals(1:self%tw_obj%np_active)=bvals(1:self%tw_obj%np_active)+int_tmp2
 DEALLOCATE(col_tmp,row_tmp,int_tmp1,int_tmp2)
 !$omp end parallel
 IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
-  CALL dgemv('N',self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_mat%M, &
-    self%tw_obj%nelems,avals(self%tw_obj%np_active+1:self%tw_obj%nelems),1,1.d0,bvals,1)
-  avals(self%tw_obj%np_active+1:self%tw_obj%nelems)=0.d0 ! Prevent double diagonal contributions
-  CALL dgemv('T',self%tw_obj%nelems,self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_mat%M, &
-    self%tw_obj%nelems,avals,1,1.d0,bvals(self%tw_obj%np_active+1:self%tw_obj%nelems),1)
+  CALL dgemv('N',tw_nelems_exp(self%tw_obj),self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_mat%M, &
+    tw_nelems_exp(self%tw_obj),avals(self%tw_obj%np_active+1:tw_nelems_exp(self%tw_obj)),1,1.d0,bvals,1)
+  avals(self%tw_obj%np_active+1:tw_nelems_exp(self%tw_obj))=0.d0 ! Prevent double diagonal contributions
+  CALL dgemv('T',tw_nelems_exp(self%tw_obj),self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_mat%M, &
+    tw_nelems_exp(self%tw_obj),avals,1,1.d0,bvals(self%tw_obj%np_active+1:tw_nelems_exp(self%tw_obj)),1)
+END IF
+IF(ASSOCIATED(self%tw_obj%junc))THEN
+  CALL tw_junction_reduce_vec(self%tw_obj,bvals,bred)
+  DEALLOCATE(bvals)
+  bvals=>bred
 END IF
 CALL b%restore_local(bvals)
 DEALLOCATE(avals,bvals)
@@ -2504,9 +2518,16 @@ class(oft_vector), target, intent(inout) :: a
 class(oft_vector), intent(inout) :: bx,by,bz
 integer(4) :: i,j,jj,k,dim,iblock,jblock,level,flip
 real(8), allocatable :: row_tmp(:),col_tmp(:),int_tmp1(:),int_tmp2(:,:)
-REAL(8), pointer :: avals(:),bvals(:,:),btmp(:)
-NULLIFY(avals,bvals)
-CALL a%get_local(avals)
+REAL(8), POINTER :: avals(:),bvals(:,:),btmp(:),ared(:)
+NULLIFY(avals,bvals,ared)
+CALL a%get_local(ared)
+IF(ASSOCIATED(self%tw_obj%junc))THEN
+  ALLOCATE(avals(tw_nelems_exp(self%tw_obj)))
+  CALL tw_junction_expand(self%tw_obj,ared,avals)
+  DEALLOCATE(ared)
+ELSE
+  avals=>ared
+END IF
 CALL bx%set(0.d0)
 CALL by%set(0.d0)
 CALL bz%set(0.d0)
@@ -2591,7 +2612,7 @@ DEALLOCATE(col_tmp,row_tmp,int_tmp1,int_tmp2)
 IF((self%tw_obj%nholes+self%tw_obj%n_vcoils)>0)THEN
   DO dim=1,3
     CALL dgemv('N',self%tw_obj%mesh%np,self%tw_obj%nholes+self%tw_obj%n_vcoils,1.d0,self%hole_Vcoil_Bmat(:,:,dim), &
-      self%tw_obj%mesh%np,avals(self%tw_obj%np_active+1:self%tw_obj%nelems),1,1.d0,bvals(:,dim),1)
+      self%tw_obj%mesh%np,avals(self%tw_obj%np_active+1:tw_nelems_exp(self%tw_obj)),1,1.d0,bvals(:,dim),1)
   END DO
 END IF
 CALL bx%restore_local(bvals(:,1))
@@ -2606,12 +2627,17 @@ subroutine tw_hodlr_Lassemble(self,diag)
 class(oft_tw_hodlr_op), intent(inout) :: self
 class(oft_vector), optional, target, intent(inout) :: diag
 integer(4) :: i,j,level,iblock
-real(8), POINTER, DIMENSION(:) :: vals
+REAL(8), POINTER, DIMENSION(:) :: vals,vred
 IF(present(diag))THEN
   IF(associated(self%D))CALL self%D%delete
   CALL diag%new(self%D)
   NULLIFY(vals)
   CALL self%D%get_local(vals)
+  IF(ASSOCIATED(self%tw_obj%junc))THEN
+    vred=>vals
+    ALLOCATE(vals(tw_nelems_exp(self%tw_obj)))
+    vals=0.d0
+  END IF
   !---Get hole diagonal values
   IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
     DO i=1,self%tw_obj%nholes+self%tw_obj%n_vcoils
@@ -2625,6 +2651,12 @@ IF(present(diag))THEN
       vals(self%levels(level)%blocks(iblock)%ielem(j))=self%dense_mats(i)%M(j,j)
     END DO
   END DO
+  IF(ASSOCIATED(self%tw_obj%junc))THEN
+    CALL tw_junction_reduce_diag(self%tw_obj,vals,vred)
+    CALL tw_hodlr_junction_cross_diag(self,vred)
+    DEALLOCATE(vals)
+    vals=>vred
+  END IF
   CALL self%D%restore_local(vals)
   DEALLOCATE(vals)
   CALL diag%add(0.d0,1.d0,self%D)
@@ -2632,6 +2664,94 @@ END IF
 self%nr=self%tw_obj%nelems; self%nrg=self%tw_obj%nelems
 self%nc=self%tw_obj%nelems; self%ncg=self%tw_obj%nelems
 end subroutine tw_hodlr_Lassemble
+!---------------------------------------------------------------------------------
+!> Add the cross terms of the reduced diagonal of a junction model, sum over e/=f of P(e,a) L(e,f) P(f,a),
+!! for the columns of P with more than one entry (entries of L are taken from the HODLR blocks)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_junction_cross_diag(self,d)
+CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator
+REAL(8), INTENT(inout) :: d(:) !< Reduced diagonal [nelems]
+TYPE :: level_index
+  INTEGER(4), ALLOCATABLE :: ind(:,:)
+END TYPE level_index
+INTEGER(4) :: a,i,j,k,l,np
+INTEGER(4), ALLOCATABLE :: pt_kr(:),pt_lc(:),blk(:,:),pos(:,:),dense_ind(:)
+REAL(8), ALLOCATABLE :: pt_val(:)
+TYPE(level_index), ALLOCATABLE :: sparse_ind(:)
+CALL tw_junction_transpose(self%tw_obj,pt_kr,pt_lc,pt_val)
+IF(ALL(pt_kr(2:)-pt_kr(:SIZE(pt_kr)-1)<2))THEN
+  DEALLOCATE(pt_kr,pt_lc,pt_val)
+  RETURN
+END IF
+np=self%tw_obj%np_active
+!---Block and position of each vertex on each level, and stored interaction of each block pair
+ALLOCATE(blk(self%nlevels,np),pos(self%nlevels,np),sparse_ind(self%nlevels))
+DO l=1,self%nlevels
+  DO i=1,self%levels(l)%nblocks
+    DO j=1,self%levels(l)%blocks(i)%nelems
+      blk(l,self%levels(l)%blocks(i)%ielem(j))=i
+      pos(l,self%levels(l)%blocks(i)%ielem(j))=j
+    END DO
+  END DO
+  ALLOCATE(sparse_ind(l)%ind(self%levels(l)%nblocks,self%levels(l)%nblocks))
+  sparse_ind(l)%ind=0
+END DO
+DO i=1,self%nsparse
+  sparse_ind(self%sparse_blocks(1,i))%ind(self%sparse_blocks(2,i),self%sparse_blocks(3,i))=i
+END DO
+ALLOCATE(dense_ind(self%levels(self%nlevels)%nblocks))
+DO i=1,self%ndense
+  dense_ind(self%dense_blocks(2,i))=i
+END DO
+!---Cross terms
+DO a=1,SIZE(d)
+  DO k=pt_kr(a),pt_kr(a+1)-1
+    DO j=pt_kr(a),pt_kr(a+1)-1
+      IF(j==k)CYCLE
+      d(a)=d(a)+pt_val(k)*pt_val(j)*entry(pt_lc(k),pt_lc(j))
+    END DO
+  END DO
+END DO
+DO l=1,self%nlevels
+  DEALLOCATE(sparse_ind(l)%ind)
+END DO
+DEALLOCATE(pt_kr,pt_lc,pt_val,blk,pos,dense_ind,sparse_ind)
+CONTAINS
+!> Entry (e,f) of the expanded inductance matrix
+FUNCTION entry(e,f) RESULT(val)
+INTEGER(4), INTENT(in) :: e !< Row
+INTEGER(4), INTENT(in) :: f !< Column
+REAL(8) :: val
+INTEGER(4) :: lev,ib,jb,isp,r,c
+IF(f>np)THEN
+  val=self%hole_Vcoil_mat%M(e,f-np)
+  RETURN
+ELSE IF(e>np)THEN
+  val=self%hole_Vcoil_mat%M(f,e-np)
+  RETURN
+END IF
+DO lev=1,self%nlevels
+  ib=blk(lev,e)
+  jb=blk(lev,f)
+  IF(ib==jb)CYCLE
+  isp=MAX(sparse_ind(lev)%ind(ib,jb),sparse_ind(lev)%ind(jb,ib))
+  IF(isp==0)CYCLE
+  !---Stored as rows of the second block, columns of the first
+  IF(blk(lev,e)==self%sparse_blocks(3,isp))THEN
+    r=pos(lev,e); c=pos(lev,f)
+  ELSE
+    r=pos(lev,f); c=pos(lev,e)
+  END IF
+  IF(ASSOCIATED(self%aca_dense(isp)%M))THEN
+    val=self%aca_dense(isp)%M(r,c)
+  ELSE
+    val=DOT_PRODUCT(self%aca_U_mats(isp)%M(r,:),self%aca_V_mats(isp)%M(:,c))
+  END IF
+  RETURN
+END DO
+val=self%dense_mats(dense_ind(blk(self%nlevels,e)))%M(pos(self%nlevels,e),pos(self%nlevels,f))
+END FUNCTION entry
+END SUBROUTINE tw_hodlr_junction_cross_diag
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -3003,7 +3123,7 @@ CLASS(oft_cvector), INTENT(inout) :: g !< RHS/Residual field
 !---
 INTEGER(4) :: i,j,k,l,n,level,iblock,max_size
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,hole_inds
-COMPLEX(8), POINTER, DIMENSION(:) :: utmp,gtmp
+COMPLEX(8), POINTER, DIMENSION(:) :: utmp,gtmp,ue,ge
 COMPLEX(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
 COMPLEX(4), ALLOCATABLE, DIMENSION(:,:) :: vloc4
 DEBUG_STACK_PUSH
@@ -3011,7 +3131,7 @@ IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%nde
 IF(self%refactor)THEN
   max_size = 0
   !$omp parallel private(imap,i,j,k,l,n,level,iblock) reduction(MAX:max_size)
-  ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
+  ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
   !$omp do schedule(static)
   DO i=1,self%mf_obj%ndense
     level=self%mf_obj%dense_blocks(1,i)
@@ -3046,7 +3166,7 @@ IF(self%refactor)THEN
   !$omp end parallel
   self%max_block_size = max_size
   !---Get holes
-  ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
+  ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
   IF(n>0)THEN
     i = self%mf_obj%ndense+1
@@ -3079,6 +3199,14 @@ NULLIFY(utmp,gtmp)
 CALL u%get_local(utmp)
 CALL g%get_local(gtmp)
 utmp=(0.d0,0.d0)
+IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
+  ALLOCATE(ue(tw_nelems_exp(self%mf_obj%tw_obj)),ge(tw_nelems_exp(self%mf_obj%tw_obj)))
+  CALL tw_junction_expand_c(self%mf_obj%tw_obj,gtmp,ge)
+  ue=(0.d0,0.d0)
+ELSE
+  ue=>utmp
+  ge=>gtmp
+END IF
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
 ALLOCATE(hole_inds(n))
 DO j=1,n
@@ -3106,6 +3234,10 @@ ELSE
   DEALLOCATE(vloc)
 END IF
 !$omp end parallel
+IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
+  CALL tw_junction_reduce_vec_c(self%mf_obj%tw_obj,ue,utmp)
+  DEALLOCATE(ue,ge)
+END IF
 CALL u%restore_local(utmp)
 CALL g%set((0.d0,0.d0))
 DEALLOCATE(utmp,gtmp,hole_inds)
@@ -3151,23 +3283,23 @@ IF(self%mf_obj%pre_single)THEN
   !---Scale RHS to avoid underflow/overflow in single precision
   scale=0.d0
   DO j=1,nrows
-    scale=MAX(scale,ABS(REAL(gtmp(inds(j)),8)),ABS(AIMAG(gtmp(inds(j)))))
+    scale=MAX(scale,ABS(REAL(ge(inds(j)),8)),ABS(AIMAG(ge(inds(j)))))
   END DO
-  IF(scale<=0.d0)RETURN ! Zero RHS for this block (corresponding entries of utmp are already zero)
+  IF(scale<=0.d0)RETURN ! Zero RHS for this block (corresponding entries of ue are already zero)
   DO j=1,nrows
-    vloc4(j,1) = CMPLX(gtmp(inds(j))/scale,KIND=c4)
+    vloc4(j,1) = CMPLX(ge(inds(j))/scale,KIND=c4)
   END DO
   CALL cgemv('N',nrows,nrows,(1.0_r4,0.0_r4),mat%M4,nrows,vloc4(:,1),1,(0.0_r4,0.0_r4),vloc4(:,2),1)
   DO j=1,nrows
-    utmp(inds(j)) = CMPLX(vloc4(j,2),KIND=c8)*scale
+    ue(inds(j)) = CMPLX(vloc4(j,2),KIND=c8)*scale
   END DO
 ELSE
   DO j=1,nrows
-    vloc(j,1) = gtmp(inds(j))
+    vloc(j,1) = ge(inds(j))
   END DO
   CALL zgemv('N',nrows,nrows,(1.d0,0.d0),mat%M,nrows,vloc(:,1),1,(0.d0,0.d0),vloc(:,2),1)
   DO j=1,nrows
-    utmp(inds(j)) = vloc(j,2)
+    ue(inds(j)) = vloc(j,2)
   END DO
 END IF
 END SUBROUTINE apply_block
@@ -3208,7 +3340,7 @@ CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
 INTEGER(4) :: i,j,k,l,n,level,iblock,max_size
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,hole_inds
-REAL(8), POINTER, DIMENSION(:) :: utmp,gtmp
+REAL(8), POINTER, DIMENSION(:) :: utmp,gtmp,ue,ge
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
 REAL(4), ALLOCATABLE, DIMENSION(:,:) :: vloc4
 DEBUG_STACK_PUSH
@@ -3216,7 +3348,7 @@ IF(.NOT.ASSOCIATED(self%inverse_mats))ALLOCATE(self%inverse_mats(self%mf_obj%nde
 IF(self%refactor)THEN
   max_size = 0
   !$omp parallel private(imap,i,j,k,l,n,level,iblock) reduction(MAX:max_size)
-  ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
+  ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
   !$omp do schedule(static)
   DO i=1,self%mf_obj%ndense
     level=self%mf_obj%dense_blocks(1,i)
@@ -3251,7 +3383,7 @@ IF(self%refactor)THEN
   !$omp end parallel
   self%max_block_size = max_size
   !---Get holes
-  ALLOCATE(imap(self%mf_obj%tw_obj%nelems))
+  ALLOCATE(imap(tw_nelems_exp(self%mf_obj%tw_obj)))
   n=self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
   IF(n>0)THEN
     i = self%mf_obj%ndense+1
@@ -3284,6 +3416,14 @@ NULLIFY(utmp,gtmp)
 CALL u%get_local(utmp)
 CALL g%get_local(gtmp)
 utmp=0.d0
+IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
+  ALLOCATE(ue(tw_nelems_exp(self%mf_obj%tw_obj)),ge(tw_nelems_exp(self%mf_obj%tw_obj)))
+  CALL tw_junction_expand(self%mf_obj%tw_obj,gtmp,ge)
+  ue=0.d0
+ELSE
+  ue=>utmp
+  ge=>gtmp
+END IF
 n = self%mf_obj%tw_obj%nholes+self%mf_obj%tw_obj%n_vcoils
 ALLOCATE(hole_inds(n))
 DO j=1,n
@@ -3311,6 +3451,10 @@ ELSE
   DEALLOCATE(vloc)
 END IF
 !$omp end parallel
+IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
+  CALL tw_junction_reduce_vec(self%mf_obj%tw_obj,ue,utmp)
+  DEALLOCATE(ue,ge)
+END IF
 CALL u%restore_local(utmp)
 CALL g%set(0.d0)
 DEALLOCATE(utmp,gtmp,hole_inds)
@@ -3356,23 +3500,23 @@ IF(self%mf_obj%pre_single)THEN
   !---Scale RHS to avoid underflow/overflow in single precision
   scale=0.d0
   DO j=1,nrows
-    scale=MAX(scale,ABS(gtmp(inds(j))))
+    scale=MAX(scale,ABS(ge(inds(j))))
   END DO
-  IF(scale<=0.d0)RETURN ! Zero RHS for this block (corresponding entries of utmp are already zero)
+  IF(scale<=0.d0)RETURN ! Zero RHS for this block (corresponding entries of ue are already zero)
   DO j=1,nrows
-    vloc4(j,1) = REAL(gtmp(inds(j))/scale,r4)
+    vloc4(j,1) = REAL(ge(inds(j))/scale,r4)
   END DO
   CALL sgemv('N',nrows,nrows,1.0_r4,mat%M4,nrows,vloc4(:,1),1,0.0_r4,vloc4(:,2),1)
   DO j=1,nrows
-    utmp(inds(j)) = REAL(vloc4(j,2),r8)*scale
+    ue(inds(j)) = REAL(vloc4(j,2),r8)*scale
   END DO
 ELSE
   DO j=1,nrows
-    vloc(j,1) = gtmp(inds(j))
+    vloc(j,1) = ge(inds(j))
   END DO
   CALL dgemv('N',nrows,nrows,1.d0,mat%M,nrows,vloc(:,1),1,0.d0,vloc(:,2),1)
   DO j=1,nrows
-    utmp(inds(j)) = vloc(j,2)
+    ue(inds(j)) = vloc(j,2)
   END DO
 END IF
 END SUBROUTINE apply_block

@@ -33,6 +33,7 @@ if( OFT_BUILD_TESTS )
 
   # ThinCurr tests
   configure_file( test_ThinCurr.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( test_ThinCurr_junctions.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( test_ThinCurr_homology.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( homology_torus.msh ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( homology_torus_port.msh ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
