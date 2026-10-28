@@ -2356,8 +2356,8 @@ END FUNCTION tw_cell_pair_kernel
 !---------------------------------------------------------------------------------
 !> Compute the B-field at a point from the three basis functions of a triangle (without the 1/(4 pi) factor)
 !!
-!! Far points use quadrature of the Biot-Savart kernel; near points (and points on the cell) use centered finite
-!! differences of the analytic potential (@ref tw_compute_phipot). Uses the shared quadrature rules (@ref tw_quads_setup, done by @ref tw_setup).
+!! Far points use quadrature of the Biot-Savart kernel; near points use the analytic gradient of the cell potential
+!! (@ref tw_compute_phigrad). Points on the cell are evaluated `10*B_dx` inside and outside the face and averaged. Uses the shared quadrature rules (@ref tw_quads_setup, done by @ref tw_setup).
 !---------------------------------------------------------------------------------
 FUNCTION tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_i,pt,va,B_dx) RESULT(atmp)
 REAL(8), INTENT(in) :: pts_i(3,3) !< Vertices of triangle
@@ -2366,10 +2366,10 @@ REAL(8), INTENT(in) :: area_i !< Area of triangle
 REAL(8), INTENT(in) :: norm_i(3) !< Unit normal of triangle
 REAL(8), INTENT(in) :: pt(3) !< Evaluation point
 REAL(8), INTENT(in) :: va !< Vertex area of evaluation point
-REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation
+REAL(8), INTENT(in) :: B_dx !< Length scale for points on the cell (evaluated 10*B_dx off the face)
 REAL(8) :: atmp(3,3) !< B-field from each basis function [3,3]
-INTEGER(4) :: ii,jj,ik,iquad
-REAL(8) :: dl_min,dl_max,d2,tmp,pt_j(3),pt_i(3),diffvec(3),gvec(3)
+INTEGER(4) :: ii,ik,iquad
+REAL(8) :: dl_min,dl_max,d2,pt_j(3),pt_i(3),diffvec(3),gvec(3)
 LOGICAL :: is_neighbor
 !---Compute minimum separation (squared distances)
 dl_min=1.d99
@@ -2393,25 +2393,11 @@ END IF
 pt_j=pt
 IF(iquad>10)THEN
   IF(is_neighbor)THEN
-    pt_j = pt_j - norm_i*10.d0*B_dx ! Sample just inside face
+    !---Point on the cell: average just inside and just outside the face (the tangential field jumps across the sheet)
+    diffvec=(tw_compute_phigrad(pts_i,pt-norm_i*10.d0*B_dx)+tw_compute_phigrad(pts_i,pt+norm_i*10.d0*B_dx))/2.d0
+  ELSE
+    diffvec=tw_compute_phigrad(pts_i,pt)
   END IF
-  diffvec=0.d0
-  DO ik=1,2
-    IF(ik==2)pt_j=pt_j+norm_i*20.d0*B_dx ! Sample just outside face
-    DO jj=1,3
-      ! Forward step
-      pt_j(jj)=pt_j(jj)+B_dx
-      tmp=tw_compute_phipot(pts_i,pt_j)
-      diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
-      ! Backward step
-      pt_j(jj)=pt_j(jj)-2.d0*B_dx
-      tmp=tw_compute_phipot(pts_i,pt_j)
-      diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
-      pt_j(jj)=pt_j(jj)+B_dx ! Reset point
-    END DO
-    IF(.NOT.is_neighbor)EXIT
-  END DO
-  IF(is_neighbor)diffvec=diffvec/2.d0
   DO ik=1,3
     atmp(1,ik) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
     atmp(2,ik) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
@@ -2475,6 +2461,47 @@ DO i=1,3
 END DO
 DEBUG_STACK_POP
 END FUNCTION tw_compute_phipot
+!---------------------------------------------------------------------------------
+!> Compute \f$ \nabla \int 1/|r-r'| dA' \f$ for a triangle (gradient with respect to the observation point)
+!!
+!! \f$ \nabla \phi = -\sum_i \hat{m}_i \int_{e_i} dl'/|r-r'| + \hat{n} \Omega \f$, with \f$ \hat{m}_i \f$ the outward
+!! in-plane normal of edge \f$ e_i \f$ and \f$ \Omega \f$ the signed solid angle (as in @ref tw_compute_phipot)
+!---------------------------------------------------------------------------------
+FUNCTION tw_compute_phigrad(pt_cell,pt) RESULT(grad)
+REAL(8), INTENT(in) :: pt_cell(3,3) !< Vertices defining triangle
+REAL(8), INTENT(in) :: pt(3) !< Observation point (r)
+REAL(8) :: grad(3)
+REAL(8) :: nhat(3),a(3),b(3),r(3,3),rmag(3),e(3),elen,num,den
+INTEGER(4) :: i,ip
+DEBUG_STACK_PUSH
+!---Get unit normal
+a=pt_cell(:,2)-pt_cell(:,1)
+b=pt_cell(:,3)-pt_cell(:,2)
+nhat=[a(2)*b(3)-a(3)*b(2), a(3)*b(1)-a(1)*b(3), a(1)*b(2)-a(2)*b(1)]
+nhat=nhat/SQRT(SUM(nhat**2))
+!---Compute local vectors
+DO i=1,3
+  r(:,i)=pt_cell(:,i)-pt
+  rmag(i)=SQRT(SUM(r(:,i)**2))
+END DO
+!---Normal part: signed solid angle
+num=r(1,1)*(r(2,2)*r(3,3)-r(3,2)*r(2,3)) + r(2,1)*(r(3,2)*r(1,3)-r(1,2)*r(3,3)) &
+  + r(3,1)*(r(1,2)*r(2,3)-r(2,2)*r(1,3))
+den=rmag(1)*rmag(2)*rmag(3) + SUM(r(:,1)*r(:,2))*rmag(3) &
+  + SUM(r(:,1)*r(:,3))*rmag(2) + SUM(r(:,2)*r(:,3))*rmag(1)
+grad=nhat*2.d0*ATAN2(num,den)
+!---In-plane part: outward edge normals times the edge integrals of 1/|r-r'|
+DO i=1,3
+  ip=MOD(i,3)+1
+  e=r(:,ip)-r(:,i)
+  elen=SQRT(SUM(e**2))
+  num=rmag(ip)*elen + SUM(r(:,ip)*e)
+  den=rmag(i)*elen + SUM(r(:,i)*e)
+  IF(ABS(den)<1.d-14.OR.elen<1.d-14)CYCLE
+  grad=grad-[e(2)*nhat(3)-e(3)*nhat(2), e(3)*nhat(1)-e(1)*nhat(3), e(1)*nhat(2)-e(2)*nhat(1)]*LOG(num/den)/elen
+END DO
+DEBUG_STACK_POP
+END FUNCTION tw_compute_phigrad
 !---------------------------------------------------------------------------------
 !> Compute the magnetic field reconstruction operators at the mesh vertices
 !!
