@@ -127,7 +127,7 @@ END TYPE
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
-  LOGICAL :: coarse = .TRUE. !< Add a global coarse correction (two-level preconditioner)?
+  LOGICAL :: coarse = .FALSE. !< Add a global coarse correction (two-level preconditioner)?
   INTEGER(4) :: coarse_order = 1 !< Polynomial order of the coarse space on each block (1 or 2)
   INTEGER(4) :: max_block_size = 0
   INTEGER(4) :: nz = 0 !< Number of coarse vectors
