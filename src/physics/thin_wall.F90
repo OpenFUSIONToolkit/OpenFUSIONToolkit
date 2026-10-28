@@ -164,6 +164,8 @@ END TYPE tw_type
 REAL(r8) :: quad_tols(3) = [0.75d0, 0.95d0, 0.995d0] !< Distance tolerances for quadrature order selection
 INTEGER(i4) :: quad_orders(3) = [18, 10, 6] !< Quadrature order for each tolerance
 REAL(r8), PARAMETER :: target_err = 1.d-8
+INTEGER(i4), PARAMETER :: tw_quad_far_max = 10 !< Highest quadrature order of far-field cell-pair integrals (closer pairs integrate one cell analytically)
+INTEGER(i4), PARAMETER :: tw_quad_far_np = 25 !< Number of points of the order `tw_quad_far_max` triangle rule (sizes cell-pair work arrays)
 REAL(r8), PARAMETER :: coil_min_rad = 1.d-6
 TYPE(oft_quad_type), TARGET, SAVE :: tw_quads(18) !< Triangle quadrature rules of orders 1-18 (shared)
 LOGICAL, SAVE :: tw_quads_ready = .FALSE. !< Have tw_quads been set up?
@@ -181,6 +183,8 @@ IF(.NOT.tw_quads_ready)THEN
   DO i=1,18
     CALL set_quad_2d(tw_quads(i),i)
   END DO
+  IF(tw_quads(tw_quad_far_max)%np>tw_quad_far_np)CALL oft_abort('Far-field quadrature rule exceeds "tw_quad_far_np"', &
+    'tw_quads_setup',__FILE__)
   tw_quads_ready=.TRUE.
 END IF
 !$omp end critical (tw_quads_init)
@@ -2186,7 +2190,7 @@ REAL(8), INTENT(in) :: pts_j(3,3) !< Vertices of second triangle
 REAL(8), INTENT(in) :: area_j !< Area of second triangle
 REAL(8) :: tmp
 INTEGER(4) :: ii,jj,iquad,np
-REAL(8) :: dl_min,dl_max,d2,s,pt_i(3),pt_j(3),xj(25),yj(25),zj(25)
+REAL(8) :: dl_min,dl_max,d2,s,pt_i(3),pt_j(3),xj(tw_quad_far_np),yj(tw_quad_far_np),zj(tw_quad_far_np)
 !---Compute minimum separation (squared distances)
 dl_min=1.d99
 dl_max=MAX(area_i,area_j)*2.d0
@@ -2207,7 +2211,7 @@ ELSE
 END IF
 tmp=0.d0
 np=tw_quads(iquad)%np
-IF(iquad>10)THEN
+IF(iquad>tw_quad_far_max)THEN
   DO jj=1,np
     pt_j = tw_quads(iquad)%pts(1,jj)*pts_j(:,1) &
       + tw_quads(iquad)%pts(2,jj)*pts_j(:,2) &
