@@ -188,15 +188,23 @@ tw_quads_ready=.TRUE.
 END SUBROUTINE tw_quads_setup
 !---------------------------------------------------------------------------------
 !> Hash of the coil definitions of a model, seeded with the cache file version, for keys of cached matrices
+!!
+!! With `vcoils_only`, only what the self-inductance matrix depends on: the V-coils, without their resistances.
 !---------------------------------------------------------------------------------
-FUNCTION tw_coil_hash(self) RESULT(hash)
+FUNCTION tw_coil_hash(self,vcoils_only) RESULT(hash)
 TYPE(tw_type), INTENT(in) :: self !< ThinCurr object
+LOGICAL, OPTIONAL, INTENT(in) :: vcoils_only !< Hash only the V-coils, without resistances (default: all coils)
 INTEGER(4) :: hash
 INTEGER(4) :: i
+LOGICAL :: lonly
+lonly=.FALSE.
+IF(PRESENT(vcoils_only))lonly=vcoils_only
 hash=tw_cache_ver
-DO i=1,self%n_icoils
-  hash=coil_set_hash(self%icoils(i),hash)
-END DO
+IF(.NOT.lonly)THEN
+  DO i=1,self%n_icoils
+    hash=coil_set_hash(self%icoils(i),hash)
+  END DO
+END IF
 DO i=1,self%n_vcoils
   hash=coil_set_hash(self%vcoils(i),hash)
 END DO
@@ -211,7 +219,7 @@ itmp=[coil_set%ncoils,0]
 hash_out=oft_simple_hash(C_LOC(itmp),INT(4*2,8),starting_value=hash_in)
 IF(ASSOCIATED(coil_set%scales))hash_out=oft_simple_hash(C_LOC(coil_set%scales),INT(8*coil_set%ncoils,8),starting_value=hash_out)
 IF(ASSOCIATED(coil_set%radius))hash_out=oft_simple_hash(C_LOC(coil_set%radius),INT(8*coil_set%ncoils,8),starting_value=hash_out)
-IF(ASSOCIATED(coil_set%res_per_len))hash_out=oft_simple_hash(C_LOC(coil_set%res_per_len),INT(8*coil_set%ncoils,8),starting_value=hash_out)
+IF(ASSOCIATED(coil_set%res_per_len).AND.(.NOT.lonly))hash_out=oft_simple_hash(C_LOC(coil_set%res_per_len),INT(8*coil_set%ncoils,8),starting_value=hash_out)
 DO j=1,coil_set%ncoils
   itmp=[coil_set%coils(j)%npts,0]
   IF(coil_set%coils(j)%is_ring)itmp(2)=1
@@ -1198,7 +1206,9 @@ ELSE
 END IF
 !
 IF(PRESENT(save_file))THEN
-  hash_tmp(3) = oft_simple_hash(C_LOC(row_obj%mesh%lc),INT(4*3*row_obj%mesh%nc,8),starting_value=tw_coil_hash(row_obj))
+  !---Self inductance depends on the V-coils only (no I-coils or resistances); mutual inductance on no coils
+  hash_tmp(3) = oft_simple_hash(C_LOC(row_obj%mesh%lc),INT(4*3*row_obj%mesh%nc,8), &
+    starting_value=MERGE(tw_coil_hash(row_obj,vcoils_only=.TRUE.),tw_cache_ver,Lself))
   hash_tmp(4) = oft_simple_hash(C_LOC(col_obj%mesh%lc),INT(4*3*col_obj%mesh%nc,8))
   hash_tmp(5) = oft_simple_hash(C_LOC(row_obj%mesh%r),INT(8*3*row_obj%mesh%np,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(col_obj%mesh%r),INT(8*3*col_obj%mesh%np,8))
