@@ -65,7 +65,7 @@ class Mirnov(flux_loop):
         @param pt Location of Mirnov sensor [3]
         @param norm Normal direction of Mirnov sensor [3]; the loop is wound right-handed about `norm`, so the signal is \f$ +\mathbf{B} \cdot \hat{n} \f$
         @param name Name of Mirnov sensor
-        @param dx Scale of Mirnov flux loop
+        @param dx Scale of Mirnov flux loop, or `None` for a point sensor (field along `norm` evaluated directly at `pt`)
         '''
         center = numpy.asarray(pt)
         if center.shape[0] != 3:
@@ -77,6 +77,14 @@ class Mirnov(flux_loop):
         if (not numpy.isfinite(norm_mag)) or (norm_mag < 1.E-12):
             raise ValueError('"norm" must be a non-zero vector')
         norm = norm/norm_mag
+        if dx is None:
+            # Point sensor
+            self._pts = numpy.array([center, norm])
+            self._name = name
+            self._scale = 1.0
+            self._point = True
+            return
+        self._point = False
         v1 = numpy.cross([1.0, 0.0, 0.0], norm)
         if numpy.linalg.norm(v1) < 1.E-8:
             v1 = numpy.cross([0.0, 1.0, 0.0], norm)
@@ -93,6 +101,18 @@ class Mirnov(flux_loop):
         ])
         self._name = name
         self._scale = 1.0/numpy.power(dx, 2)
+
+    def write(self,fid):
+        '''! Write Mirnov sensor to file (a point sensor is written as `-1`, then its position and normal)
+
+        @param fid File object for writing
+        '''
+        if not self._point:
+            super().write(fid)
+            return
+        fid.write('\n{0} {1} {2}\n'.format(-1, self._scale, self._name))
+        for i in range(2):
+            fid.write('{0:.16E} {1:.16E} {2:.16E}\n'.format(*self._pts[i,:]))
 
 
 def save_sensors(sensor_list,filename='floops.loc'):

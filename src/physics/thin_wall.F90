@@ -57,8 +57,10 @@ END TYPE hole_mesh
 !> Structure containing definition of a flux loop sensor
 !---------------------------------------------------------------------------------
 TYPE :: floop_sensor
+  LOGICAL :: point = .FALSE. !< Point probe: signal is the field along `norm` at `r(:,1)` (point Mirnov sensor)
   INTEGER(i4) :: np = 0 !< Number of points in loop
   REAL(r8) :: scale_fac = 1.d0 !< Scale factor to apply to signal
+  REAL(r8) :: norm(3) = 0.d0 !< Unit normal of a point probe
   REAL(r8), POINTER, DIMENSION(:,:) :: r => NULL() !< List of points [3,np]
   CHARACTER(LEN=40) :: name = '' !< Name of sensor
 END TYPE floop_sensor
@@ -1800,8 +1802,8 @@ INTEGER(4), INTENT(in) :: nsensors !< Number of flux loops
 TYPE(floop_sensor), POINTER, INTENT(in) :: sensors(:) !< List of flux loops
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 LOGICAL :: exists
-INTEGER(4) :: i,ii,j,jj,k,kk,l,ik,jk,ih,ihp,ihc,file_counts(5),ierr,io_unit,iquad,sens_hash
-REAL(8) :: tmp,dl,pt_i(3),pt_j(3),evec_i(3,3),evec_j(3,3),pts_i(3,3),pt_i_last(3)
+INTEGER(4) :: i,ii,j,jj,k,kk,l,ik,jk,ih,ihp,ihc,file_counts(5),ierr,io_unit,iquad,sens_hash,npoint
+REAL(8) :: tmp,dl,pt_i(3),pt_j(3),evec_i(3,3),evec_j(3,3),pts_i(3,3),pt_i_last(3),bpt(3,3)
 REAL(8) :: rvec_i(3),r1,rmag,rvec_j(3),z1,cvec(3),cpt(3),coil_thickness,elapsed_time
 REAL(8) :: rgop(3,3),norm_i(3),area_i,f(3),dl_min,dl_max,pot_last,pot_tmp
 REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:)
@@ -1815,6 +1817,7 @@ DEBUG_STACK_PUSH
 sens_hash=tw_model_hash(tw_obj)
 DO i=1,nsensors
   sens_hash=oft_simple_hash(C_LOC(sensors(i)%r),INT(8*3*sensors(i)%np,8),starting_value=sens_hash)
+  IF(sensors(i)%point)sens_hash=oft_simple_hash(C_LOC(sensors(i)%norm),INT(8*3,8),starting_value=sens_hash)
 END DO
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
@@ -1868,6 +1871,7 @@ END IF
 bmesh=>tw_obj%mesh
 !---Compute coupling between vertices and sensors
 f=1.d0/3.d0
+npoint=COUNT([(sensors(j)%point,j=1,nsensors)])
 WRITE(*,'(2A)')oft_indent,'Building element->sensor inductance matrix'
 CALL oft_increase_indent
 IF(ASSOCIATED(tw_obj%Ael2sen))DEALLOCATE(tw_obj%Ael2sen)
@@ -1876,7 +1880,7 @@ tw_obj%Ael2sen=0.d0
 IF(nsensors>0)THEN
   CALL mytimer%tick()
   !$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_i,pt_j,evec_i,rvec_j, &
-  !$omp atmp,i,ih,ihp,ihc,rgop,area_i,norm_i,dl_min,dl_max,pot_last,iquad)
+  !$omp atmp,i,ih,ihp,ihc,rgop,area_i,norm_i,dl_min,dl_max,pot_last,iquad,bpt)
   ALLOCATE(atmp(3,nsensors))
   !$omp do
   DO i=1,bmesh%nc
@@ -1890,8 +1894,16 @@ IF(nsensors>0)THEN
       evec_i(:,ii)=tw_obj%qbasis(:,ii,i)
     END DO
     !---Compute sensor couplings
+    IF(npoint>0)CALL bmesh%norm(i,f,norm_i)
     atmp=0.d0
     DO j=1,nsensors
+      IF(sensors(j)%point)THEN ! Field along the probe normal from the cell's three basis functions
+        bpt=tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_i,sensors(j)%r(:,1),0.d0,tw_obj%B_dx)
+        DO ik=1,3
+          atmp(ik,j)=DOT_PRODUCT(sensors(j)%norm,bpt(:,ik))
+        END DO
+        CYCLE
+      END IF
       pot_last = 0.d0
       DO jj=1,sensors(j)%np
         pt_j=sensors(j)%r(:,jj)
@@ -1978,6 +1990,29 @@ IF(nsensors>0.AND.ncoils_tot>0)THEN
   !$omp do
   DO i=1,nsensors
     atmp=0.d0
+    IF(sensors(i)%point)THEN ! Field along the probe normal
+      pt_i=sensors(i)%r(:,1)
+      DO j=1,ncoils_tot
+        IF(coils_tot(j)%sens_mask)CYCLE
+        DO k=1,coils_tot(j)%ncoils
+          IF(coils_tot(j)%coils(k)%is_ring)THEN
+            cvec=tw_ring_bvec(coils_tot(j)%coils(k)%ring_rz,pt_i)
+          ELSE
+            cvec=0.d0
+            DO kk=2,coils_tot(j)%coils(k)%npts
+              rvec_i=coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
+              cpt=pt_i-(coils_tot(j)%coils(k)%pts(:,kk)+coils_tot(j)%coils(k)%pts(:,kk-1))/2.d0
+              tmp=SUM(cpt**2)
+              cvec=cvec+[rvec_i(2)*cpt(3)-rvec_i(3)*cpt(2),rvec_i(3)*cpt(1)-rvec_i(1)*cpt(3), &
+                rvec_i(1)*cpt(2)-rvec_i(2)*cpt(1)]/(tmp*SQRT(tmp))
+            END DO
+          END IF
+          atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*DOT_PRODUCT(sensors(i)%norm,cvec)
+        END DO
+      END DO
+      Acoil2sen_tmp(i,:)=atmp(:,1)
+      CYCLE
+    END IF
     DO ii=1,sensors(i)%np
       pt_i=sensors(i)%r(:,ii)
       !
@@ -3653,6 +3688,15 @@ IF(exists)THEN
   DO i=1,sensors%nfloops
     READ(io_unit,*)
     READ(io_unit,*)sensors%floops(i)%np,sensors%floops(i)%scale_fac,sensors%floops(i)%name
+    IF(sensors%floops(i)%np<0)THEN ! Point probe: position and normal
+      sensors%floops(i)%point=.TRUE.
+      sensors%floops(i)%np=1
+      ALLOCATE(sensors%floops(i)%r(3,1))
+      READ(io_unit,*)sensors%floops(i)%r(:,1)
+      READ(io_unit,*)sensors%floops(i)%norm
+      sensors%floops(i)%norm=sensors%floops(i)%norm/SQRT(SUM(sensors%floops(i)%norm**2))
+      CYCLE
+    END IF
     IF(oft_debug_print(1))WRITE(*,'(2A,I6)')oft_indent,'    # of floops pts =',sensors%floops(i)%np
     ALLOCATE(sensors%floops(i)%r(3,sensors%floops(i)%np))
     DO j=1,sensors%floops(i)%np
