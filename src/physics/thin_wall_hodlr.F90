@@ -33,6 +33,9 @@ type :: oft_tw_block
   INTEGER(4), POINTER :: ipts(:) => NULL()
   INTEGER(4), POINTER :: icell(:) => NULL()
 end type oft_tw_block
+INTEGER(4), PARAMETER :: tw_hole_aca_rmin = 4 !< Minimum ACA rank for groups of cells far from a hole
+REAL(8), PARAMETER :: tw_hole_aca_sep = 1.d0 !< Separation ratio (distance/(sum of extents)) for ACA of hole columns
+REAL(8), PARAMETER :: tw_hole_aca_tol = 1.d-6 !< Relative ACA tolerance for hole columns
 !---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
@@ -156,120 +159,259 @@ TYPE, BIND(c) :: HODLR_hash
   REAL(c_float) :: aca_tol
 END TYPE HODLR_hash
 CONTAINS
-!---------------------------------------------------------------------------------
-!> Compute mutual inductance matrix between two thin-wall models
-!---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_LmatHole(row_obj,col_obj,Lmat)
-TYPE(tw_type), INTENT(in) :: row_obj !< Thin-wall model object for rows
-TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
-REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix
-INTEGER(4) :: i,ii,j,jj,ik,jk
-INTEGER(8) :: counts(4)
-REAL(8) :: tmp,dl_min,f(3)
-REAL(8) :: area_i,evec_i(3,3),pts_i(3,3)
-REAL(8) :: area_j,evec_j(3,3),pts_j(3,3)
-CLASS(oft_bmesh), POINTER :: rmesh,cmesh
-DEBUG_STACK_PUSH
-! ALLOCATE(Lmat(col_obj%nelems,row_obj%nelems))
-!
-! WRITE(*,*)'Building element<->element inductance matrix'
+!------------------------------------------------------------------------------
+!> Hole and V-coil columns of the inductance matrix, with ACA for groups of cells far from each hole
+!!
+!! A hole column is \f$ K C_h \f$: the cell-pair kernel K between all cells and the cells around hole h, times the
+!! current vector of each of those cells. Cells are split into disjoint groups (by the leaf block of their first
+!! vertex). Groups well separated from a hole's cells use an ACA approximation of their block of K; the others, and
+!! groups where ACA does not converge at low rank, are summed directly. V-coil columns are copied from the coil
+!! couplings.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_LmatHole(self,Lmat)
+CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator
+REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Hole and V-coil columns [nelems_exp,nholes+n_vcoils]
+INTEGER(4) :: i,ii,j,jj,h,ib,ig,nleaf,ngroup,ncell,nstrip,jk
+INTEGER(4), ALLOCATABLE :: cell_owner(:),kgroup(:),lgroup(:),kstrip(:),lstrip(:),cnt(:)
+REAL(8), ALLOCATABLE :: cstrip(:,:),gcen(:,:),gext(:),scen(:,:),sext(:),V(:,:)
+TYPE(tw_type), POINTER :: tw
+CLASS(oft_bmesh), POINTER :: mesh
+tw=>self%tw_obj
+mesh=>tw%mesh
 Lmat=0.d0
-! CALL mytimer%tick
-!---Setup quadrature
-!
-rmesh=>row_obj%mesh
-cmesh=>col_obj%mesh
-!---
-counts=0
-f=1.d0/3.d0
-!$omp parallel private(ii,j,jj,ik,jk,pts_i,pts_j,tmp, &
-!$omp evec_i,evec_j,dl_min,i, &
-!$omp area_i,area_j) reduction(+:counts)
-!$omp do schedule(dynamic,100)
-DO i=1,rmesh%nc
-    IF(row_obj%kfh(i+1)-row_obj%kfh(i)==0)CYCLE
-    ! CALL rmesh%jacobian(i,f,rgop,area_i)
-    ! CALL rmesh%norm(i,f,norm_i)
-    area_i=rmesh%ca(i)
-    DO ii=1,3
-    pts_i(:,ii)=rmesh%r(:,rmesh%lc(ii,i))
-    ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
-    evec_i(:,ii)=row_obj%qbasis(:,ii,i)
+!---Disjoint cell groups from the leaf blocks
+nleaf=self%levels(self%nlevels)%nblocks
+ALLOCATE(cell_owner(mesh%nc))
+cell_owner=nleaf+1 ! Cells with no active vertex: own group, always summed directly
+DO i=1,mesh%nc
+  DO ii=1,3
+    DO ib=1,nleaf
+      IF(self%levels(self%nlevels)%blocks(ib)%inv_map(mesh%lc(ii,i))>0)THEN
+        cell_owner(i)=ib
+        EXIT
+      END IF
     END DO
-    !---Compute inter-edge inductances
-    DO j=1,cmesh%nc
-    ! CALL cmesh%jacobian(j,f,cgop,area_j)
-    ! CALL cmesh%norm(j,f,norm_j)
-    area_j=cmesh%ca(j)
+    IF(cell_owner(i)<=nleaf)EXIT
+  END DO
+END DO
+ngroup=nleaf+1
+ALLOCATE(kgroup(ngroup+1),lgroup(mesh%nc),cnt(ngroup))
+cnt=0
+DO i=1,mesh%nc
+  cnt(cell_owner(i))=cnt(cell_owner(i))+1
+END DO
+kgroup(1)=1
+DO ig=1,ngroup
+  kgroup(ig+1)=kgroup(ig)+cnt(ig)
+END DO
+cnt=0
+DO i=1,mesh%nc
+  ig=cell_owner(i)
+  lgroup(kgroup(ig)+cnt(ig))=i
+  cnt(ig)=cnt(ig)+1
+END DO
+ALLOCATE(gcen(3,ngroup),gext(ngroup))
+DO ig=1,ngroup
+  CALL cell_cluster(lgroup(kgroup(ig):kgroup(ig+1)-1),gcen(:,ig),gext(ig))
+END DO
+!---Cells around each hole with their current vectors (sign * basis vector), combined per cell
+DEALLOCATE(cnt)
+ALLOCATE(cnt(tw%nholes))
+cnt=0
+DO i=1,mesh%nc
+  DO ii=tw%kfh(i),tw%kfh(i+1)-1
+    cnt(ABS(tw%lfh(1,ii)))=cnt(ABS(tw%lfh(1,ii)))+1
+  END DO
+END DO
+ALLOCATE(kstrip(tw%nholes+1))
+kstrip(1)=1
+DO h=1,tw%nholes
+  kstrip(h+1)=kstrip(h)+cnt(h)
+END DO
+ALLOCATE(lstrip(kstrip(tw%nholes+1)-1),cstrip(3,kstrip(tw%nholes+1)-1))
+cnt=0
+DO i=1,mesh%nc
+  DO ii=tw%kfh(i),tw%kfh(i+1)-1
+    h=ABS(tw%lfh(1,ii))
+    IF(cnt(h)>0)THEN
+      IF(lstrip(kstrip(h)+cnt(h)-1)==i)THEN
+        cstrip(:,kstrip(h)+cnt(h)-1)=cstrip(:,kstrip(h)+cnt(h)-1)+SIGN(1,tw%lfh(1,ii))*tw%qbasis(:,tw%lfh(2,ii),i)
+        CYCLE
+      END IF
+    END IF
+    lstrip(kstrip(h)+cnt(h))=i
+    cstrip(:,kstrip(h)+cnt(h))=SIGN(1,tw%lfh(1,ii))*tw%qbasis(:,tw%lfh(2,ii),i)
+    cnt(h)=cnt(h)+1
+  END DO
+END DO
+ALLOCATE(scen(3,tw%nholes),sext(tw%nholes))
+DO h=1,tw%nholes
+  CALL cell_cluster(lstrip(kstrip(h):kstrip(h)+cnt(h)-1),scen(:,h),sext(h))
+END DO
+!---Columns
+ALLOCATE(V(3,mesh%nc))
+DO h=1,tw%nholes
+  nstrip=cnt(h)
+  IF(nstrip==0)CYCLE
+  !$omp parallel do schedule(dynamic,1) private(ncell)
+  DO ig=1,ngroup
+    ncell=kgroup(ig+1)-kgroup(ig)
+    IF(ncell==0)CYCLE
+    IF((ig<=nleaf).AND.(MIN(ncell,nstrip)>2*tw_hole_aca_rmin).AND. &
+      (magnitude(gcen(:,ig)-scen(:,h))/(gext(ig)+sext(h))>tw_hole_aca_sep))THEN
+      IF(group_aca(lgroup(kgroup(ig):kgroup(ig+1)-1),lstrip(kstrip(h):kstrip(h)+nstrip-1), &
+        cstrip(:,kstrip(h):kstrip(h)+nstrip-1),V))CYCLE
+    END IF
+    CALL group_direct(lgroup(kgroup(ig):kgroup(ig+1)-1),lstrip(kstrip(h):kstrip(h)+nstrip-1), &
+      cstrip(:,kstrip(h):kstrip(h)+nstrip-1),V)
+  END DO
+  !---Scatter to element and hole rows
+  DO j=1,mesh%nc
     DO jj=1,3
-        pts_j(:,jj)=cmesh%r(:,cmesh%lc(jj,j))
-        ! evec_j(:,jj)=cross_product(cgop(:,jj),norm_j)
-        evec_j(:,jj)=col_obj%qbasis(:,jj,j)
+      jk=tw%pmap(mesh%lc(jj,j))
+      IF(jk<=0)CYCLE
+      Lmat(jk,h)=Lmat(jk,h)+DOT_PRODUCT(tw%qbasis(:,jj,j),V(:,j))
     END DO
-    !---Cell-pair integral of 1/|r-r'|
-    tmp=tw_cell_pair_kernel(pts_i,area_i,pts_j,area_j)
-    !
-    DO ii=row_obj%kfh(i),row_obj%kfh(i+1)-1
-        ik=ABS(row_obj%lfh(1,ii))
-        DO jj=1,3
-        jk=col_obj%pmap(cmesh%lc(jj,j))
-        IF(jk<=0)CYCLE
-        dl_min = SIGN(1,row_obj%lfh(1,ii))*DOT_PRODUCT(evec_i(:,row_obj%lfh(2,ii)),evec_j(:,jj))*tmp
-        !$omp atomic
-        Lmat(jk,ik) = Lmat(jk,ik) + dl_min
-        END DO
-        DO jj=col_obj%kfh(j),col_obj%kfh(j+1)-1
-        jk=ABS(col_obj%lfh(1,jj))+col_obj%np_active
-        dl_min = SIGN(1,row_obj%lfh(1,ii))*SIGN(1,col_obj%lfh(1,jj))* &
-            DOT_PRODUCT(evec_i(:,row_obj%lfh(2,ii)),evec_j(:,col_obj%lfh(2,jj)))*tmp
-        !$omp atomic
-        Lmat(jk,ik) = Lmat(jk,ik) + dl_min
-        END DO
+    DO jj=tw%kfh(j),tw%kfh(j+1)-1
+      jk=ABS(tw%lfh(1,jj))+tw%np_active
+      Lmat(jk,h)=Lmat(jk,h)+SIGN(1,tw%lfh(1,jj))*DOT_PRODUCT(tw%qbasis(:,tw%lfh(2,jj),j),V(:,j))
     END DO
-    END DO
+  END DO
 END DO
-!$omp end do nowait
-!---Add passive coils to model
-!$omp do
-DO i=1,row_obj%np_active+row_obj%nholes
-    DO j=1,col_obj%n_vcoils
-    jj=col_obj%nholes+j
-    Lmat(i,jj) = row_obj%Ael2coil(i,j)
-    END DO
+!---Passive coils
+DO i=1,tw%np_active+tw%nholes
+  DO j=1,tw%n_vcoils
+    Lmat(i,tw%nholes+j)=tw%Ael2coil(i,j)
+  END DO
 END DO
-!$omp end do nowait
-!$omp do
-DO i=1,row_obj%nholes
-    DO j=1,col_obj%n_vcoils
-    jj=row_obj%np_active+col_obj%nholes+j
-    Lmat(jj,i) = row_obj%Ael2coil(row_obj%np_active+i,j)
-    END DO
+DO i=1,tw%nholes
+  DO j=1,tw%n_vcoils
+    Lmat(tw%np_active+tw%nholes+j,i)=tw%Ael2coil(tw%np_active+i,j)
+  END DO
 END DO
-!$omp end do nowait
-!$omp do
-DO i=1,row_obj%n_vcoils
-    ii=row_obj%nholes+i
-    DO j=1,col_obj%n_vcoils
-    jj=col_obj%np_active+col_obj%nholes+j
-    Lmat(jj,ii) = row_obj%Acoil2coil(i,j)
-    END DO
+DO i=1,tw%n_vcoils
+  DO j=1,tw%n_vcoils
+    Lmat(tw%np_active+tw%nholes+j,tw%nholes+i)=tw%Acoil2coil(i,j)
+  END DO
 END DO
-!$omp end parallel
-Lmat = Lmat/(4.d0*pi)
-! elapsed_time=mytimer%tock()
-! WRITE(*,*)'  Time = ',elapsed_time
-DEBUG_STACK_POP
-END SUBROUTINE tw_compute_LmatHole
+DEALLOCATE(cell_owner,kgroup,lgroup,cnt,gcen,gext,kstrip,lstrip,cstrip,scen,sext,V)
+Lmat=Lmat/(4.d0*pi)
+CONTAINS
+!---Center and extent of a set of cells
+SUBROUTINE cell_cluster(cells,c,e)
+INTEGER(4), INTENT(in) :: cells(:)
+REAL(8), INTENT(out) :: c(3),e
+INTEGER(4) :: m,n
+c=0.d0; e=0.d0
+IF(SIZE(cells)==0)RETURN
+DO m=1,SIZE(cells)
+  c=c+SUM(mesh%r(:,mesh%lc(:,cells(m))),DIM=2)/3.d0
+END DO
+c=c/REAL(SIZE(cells),8)
+DO m=1,SIZE(cells)
+  DO n=1,3
+    e=MAX(e,magnitude(mesh%r(:,mesh%lc(n,cells(m)))-c))
+  END DO
+END DO
+END SUBROUTINE cell_cluster
+!---Kernel between target cell jc and hole cell ic
+FUNCTION kern(jc,ic) RESULT(val)
+INTEGER(4), INTENT(in) :: jc,ic
+REAL(8) :: val,pi_(3,3),pj_(3,3)
+INTEGER(4) :: m
+DO m=1,3
+  pi_(:,m)=mesh%r(:,mesh%lc(m,ic))
+  pj_(:,m)=mesh%r(:,mesh%lc(m,jc))
+END DO
+val=tw_cell_pair_kernel(pi_,mesh%ca(ic),pj_,mesh%ca(jc))
+END FUNCTION kern
+!---Direct sum V(:,j) = sum_i c_i K(j,i) for the cells of a group
+SUBROUTINE group_direct(gcells,scells,c,Vout)
+INTEGER(4), INTENT(in) :: gcells(:),scells(:)
+REAL(8), INTENT(in) :: c(:,:)
+REAL(8), INTENT(inout) :: Vout(:,:)
+INTEGER(4) :: m,n
+DO m=1,SIZE(gcells)
+  Vout(:,gcells(m))=0.d0
+  DO n=1,SIZE(scells)
+    Vout(:,gcells(m))=Vout(:,gcells(m))+c(:,n)*kern(gcells(m),scells(n))
+  END DO
+END DO
+END SUBROUTINE group_direct
+!---ACA (partial pivoting) of K(group,hole cells), then V = U (W^T c); .FALSE. if not converged at low rank
+FUNCTION group_aca(gcells,scells,c,Vout) RESULT(success)
+INTEGER(4), INTENT(in) :: gcells(:),scells(:)
+REAL(8), INTENT(in) :: c(:,:)
+REAL(8), INTENT(inout) :: Vout(:,:)
+LOGICAL :: success
+INTEGER(4) :: m,n,kk,rmax,ir,jc,l2
+LOGICAL, ALLOCATABLE :: row_used(:)
+REAL(8) :: fro2,unrm,wnrm,piv
+REAL(8), ALLOCATABLE :: U(:,:),W(:,:),y(:,:)
+m=SIZE(gcells); n=SIZE(scells)
+rmax=MIN(m,n)/3
+ALLOCATE(U(m,rmax),W(n,rmax),row_used(m))
+row_used=.FALSE.
+success=.FALSE.
+fro2=0.d0
+ir=1
+kk=0
+DO l2=1,rmax
+  !---Residual row ir
+  row_used(ir)=.TRUE.
+  DO jc=1,n
+    W(jc,kk+1)=kern(gcells(ir),scells(jc))
+  END DO
+  IF(kk>0)W(:,kk+1)=W(:,kk+1)-MATMUL(W(:,1:kk),U(ir,1:kk))
+  jc=MAXLOC(ABS(W(:,kk+1)),DIM=1)
+  piv=W(jc,kk+1)
+  IF(ABS(piv)<=0.d0)THEN
+    IF(ALL(row_used))EXIT
+    ir=FINDLOC(row_used,.FALSE.,DIM=1)
+    CYCLE
+  END IF
+  W(:,kk+1)=W(:,kk+1)/piv
+  !---Residual column jc
+  DO ir=1,m
+    U(ir,kk+1)=kern(gcells(ir),scells(jc))
+  END DO
+  IF(kk>0)U(:,kk+1)=U(:,kk+1)-MATMUL(U(:,1:kk),W(jc,1:kk))
+  kk=kk+1
+  !---Frobenius norm estimate and stopping test
+  unrm=SUM(U(:,kk)**2); wnrm=SUM(W(:,kk)**2)
+  fro2=fro2+unrm*wnrm
+  IF(kk>1)fro2=fro2+2.d0*SUM(MATMUL(TRANSPOSE(U(:,1:kk-1)),U(:,kk))*MATMUL(TRANSPOSE(W(:,1:kk-1)),W(:,kk)))
+  IF((kk>=tw_hole_aca_rmin).AND.(SQRT(unrm*wnrm)<=tw_hole_aca_tol*SQRT(ABS(fro2))))THEN
+    success=.TRUE.
+    EXIT
+  END IF
+  !---Next row: largest entry of the new column among unused rows
+  IF(ALL(row_used))EXIT
+  ir=MAXLOC(ABS(U(:,kk)),MASK=.NOT.row_used,DIM=1)
+END DO
+IF(success)THEN
+  ALLOCATE(y(kk,3))
+  y=MATMUL(TRANSPOSE(W(:,1:kk)),TRANSPOSE(c))
+  DO ir=1,m
+    Vout(:,gcells(ir))=MATMUL(U(ir,1:kk),y)
+  END DO
+  DEALLOCATE(y)
+END IF
+DEALLOCATE(U,W,row_used)
+END FUNCTION group_aca
+END SUBROUTINE tw_hodlr_LmatHole
 !---------------------------------------------------------------------------------
 !> Compute mutual inductance matrix between two thin-wall models
 !---------------------------------------------------------------------------------
-SUBROUTINE tw_compute_Lmatblock(row_obj,col_obj,Lmat,row_block,col_block)
+SUBROUTINE tw_compute_Lmatblock(row_obj,col_obj,Lmat,row_block,col_block,sym)
 TYPE(tw_type), INTENT(in) :: row_obj !< Thin-wall model object for rows
 TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
 TYPE(oft_tw_block), INTENT(in) :: row_block !< Block of rows to compute
 TYPE(oft_tw_block), INTENT(in) :: col_block !< Block of columns to compute
 REAL(8), INTENT(out) :: Lmat(:,:) !< Mutual inductance matrix
-INTEGER(4) :: i,ii,j,jj,ik,jk,irow,jcol
+LOGICAL, OPTIONAL, INTENT(in) :: sym !< Row and column blocks are the same (diagonal block): compute each cell pair once
+INTEGER(4) :: i,ii,j,jj,ik,jk,irow,jcol,jstart
+LOGICAL :: is_sym
 INTEGER(8) :: counts(4)
 REAL(8) :: tmp,dl_min,f(3)
 REAL(8) :: area_i,evec_i(3,3),pts_i(3,3)
@@ -287,6 +429,9 @@ cmesh=>col_obj%mesh
 !---
 counts=0
 f=1.d0/3.d0
+is_sym=.FALSE.
+IF(PRESENT(sym))is_sym=sym
+jstart=1
 DO irow=1,row_block%ncells
     i = row_block%icell(irow)
     ! CALL rmesh%jacobian(i,f,rgop,area_i)
@@ -297,8 +442,9 @@ DO irow=1,row_block%ncells
     ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
     evec_i(:,ii)=row_obj%qbasis(:,ii,i)
     END DO
+    IF(is_sym)jstart=irow
     !---Compute inter-edge inductances
-    DO jcol=1,col_block%ncells
+    DO jcol=jstart,col_block%ncells
     j = col_block%icell(jcol)
     ! CALL cmesh%jacobian(j,f,cgop,area_j)
     ! CALL cmesh%norm(j,f,norm_j)
@@ -320,6 +466,7 @@ DO irow=1,row_block%ncells
         dl_min = DOT_PRODUCT(evec_i(:,ii),evec_j(:,jj))*tmp
         ! !$omp atomic
         Lmat(jk,ik) = Lmat(jk,ik) + dl_min
+        IF(is_sym.AND.(jcol/=irow))Lmat(ik,jk) = Lmat(ik,jk) + dl_min ! Mirrored pair (j,i)
         END DO
     END DO
     END DO
@@ -732,7 +879,7 @@ ALLOCATE(self%aca_dense(self%nsparse))
 WRITE(*,'(2A)')oft_indent,'Building hole and Vcoil columns'
 IF(self%tw_obj%nholes+self%tw_obj%n_vcoils>0)THEN
   ALLOCATE(self%hole_Vcoil_mat%M(tw_nelems_exp(self%tw_obj),self%tw_obj%nholes+self%tw_obj%n_vcoils))
-  CALL tw_compute_LmatHole(self%tw_obj,self%tw_obj,self%hole_Vcoil_mat%M)
+  CALL tw_hodlr_LmatHole(self,self%hole_Vcoil_mat%M)
 END IF
 IF(PRESENT(save_file))CALL load_from_file()
 compressed_size=0
@@ -757,7 +904,7 @@ DO i=1,self%ndense
     mat_updated=.TRUE.
     ALLOCATE(self%dense_mats(i)%M(self%levels(level)%blocks(j)%nelems,self%levels(level)%blocks(k)%nelems))
     CALL tw_compute_Lmatblock(self%tw_obj,self%tw_obj,self%dense_mats(i)%M, &
-      self%levels(level)%blocks(k),self%levels(level)%blocks(j))
+      self%levels(level)%blocks(k),self%levels(level)%blocks(j),sym=(j==k))
   END IF
   dense_sizes(i) = self%levels(level)%blocks(j)%nelems*self%levels(level)%blocks(k)%nelems
   compressed_size = compressed_size + dense_sizes(i)
