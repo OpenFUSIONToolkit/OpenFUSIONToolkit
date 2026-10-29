@@ -494,6 +494,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
             cmake_lines.append("-DOFT_SUPERLU_DIST_ROOT:PATH={0}".format(mydict["SUPERLU_DIST_ROOT"]))
         if "UMFPACK_ROOT" in mydict:
             cmake_lines.append("-DOFT_UMFPACK_ROOT:PATH={0}".format(mydict["UMFPACK_ROOT"]))
+    if "STRUMPACK_ROOT" in mydict:
+        cmake_lines.append("-DOFT_STRUMPACK_ROOT:PATH={0}".format(mydict["STRUMPACK_ROOT"]))
     if tmp_dict['OS_TYPE'] == 'Darwin':
         linker_test_source = """
 program test_program
@@ -1725,6 +1727,92 @@ class UMFPACK(package):
         self.setup_build_script(build_lines, self.config_dict)
 
 
+class STRUMPACK(package):
+    def __init__(self, build_openmp, comp_wrapper=False, shared_libs=False):
+        self.name = "STRUMPACK"
+        self.url = "https://github.com/pghysels/STRUMPACK/archive/refs/tags/v8.1.0.tar.gz"
+        self.build_dir = "STRUMPACK-8.1.0"
+        self.build_openmp = build_openmp
+        self.comp_wrapper = comp_wrapper
+        self.shared_libs = shared_libs
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        if self.comp_wrapper:
+            self.skip = True
+            print("STRUMPACK provided by compiler wrappers: Skipping build")
+            return self.config_dict
+        self.setup_root_struct()
+        self.config_dict['STRUMPACK_LIBS'] = "-lstrumpack"
+        # Installation check files
+        if self.shared_libs:
+            self.install_chk_files = [os.path.join(self.config_dict['STRUMPACK_LIB'], 'libstrumpack'+self.config_dict['DYN_EXT'])]
+        else:
+            self.install_chk_files = [os.path.join(self.config_dict['STRUMPACK_LIB'], 'libstrumpack.a')]
+        #
+        return self.config_dict
+
+    def setup_build(self):
+        if ver_lt(self.config_dict.get('CMAKE_VERSION','0.0'),"3.21"):
+            error_exit('CMAKE >= 3.21 required for STRUMPACK', ('Update or retry with "--build_cmake=1" to build a compatible version',))
+        # Local (non-MPI) build with OpenMP only, all GPU and optional TPLs disabled
+        cmake_options = [
+            "-DCMAKE_INSTALL_PREFIX:PATH={STRUMPACK_ROOT}",
+            "-DCMAKE_INSTALL_LIBDIR=lib",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DSTRUMPACK_USE_MPI:BOOL=OFF",
+            "-DSTRUMPACK_USE_CUDA:BOOL=OFF",
+            "-DSTRUMPACK_USE_HIP:BOOL=OFF",
+            "-DSTRUMPACK_USE_SYCL:BOOL=OFF",
+            "-DTPL_ENABLE_SLATE:BOOL=OFF",
+            "-DTPL_ENABLE_PARMETIS:BOOL=OFF",
+            "-DTPL_ENABLE_SCOTCH:BOOL=OFF",
+            "-DTPL_ENABLE_PTSCOTCH:BOOL=OFF",
+            "-DTPL_ENABLE_COMBBLAS:BOOL=OFF",
+            "-DTPL_ENABLE_BPACK:BOOL=OFF",
+            "-DTPL_ENABLE_ZFP:BOOL=OFF",
+            "-DTPL_ENABLE_SZ3:BOOL=OFF",
+            "-DTPL_ENABLE_MAGMA:BOOL=OFF",
+            "-DTPL_ENABLE_KBLAS:BOOL=OFF",
+            "-DTPL_ENABLE_MATLAB:BOOL=OFF"
+        ]
+        if self.build_openmp:
+            cmake_options.append("-DSTRUMPACK_USE_OPENMP:BOOL=ON")
+        else:
+            cmake_options.append("-DSTRUMPACK_USE_OPENMP:BOOL=OFF")
+        if self.shared_libs:
+            cmake_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=ON'
+            ]
+        else:
+            cmake_options += [
+                '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
+                '-DBUILD_SHARED_LIBS:BOOL=OFF'
+            ]
+        if "METIS_ROOT" in self.config_dict:
+            cmake_options.append("-DTPL_METIS_PREFIX:PATH={METIS_ROOT}")
+        if "BLAS_LIB_PATH" in self.config_dict:
+            cmake_options += [
+                "-DTPL_BLAS_LIBRARIES:PATH={BLAS_LIB_PATH}",
+                "-DTPL_LAPACK_LIBRARIES:PATH={LAPACK_LIB_PATH}"
+            ]
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
+        build_lines = [
+            "rm -rf build_dir",
+            "mkdir build_dir",
+            "cd build_dir",
+            "export CC={CC}",
+            "export CXX={CXX}",
+            "export FC={FC}",
+            "{CMAKE} " + " ".join(cmake_options) + " ..",
+            "make -j{MAKE_THREADS} strumpack",  # Skip tests and examples
+            "make install/fast"
+        ]
+        self.setup_build_script(build_lines, self.config_dict)
+
+
 class LIBXML2(package):
     def __init__(self, static_libs=True):
         self.name = "LIBXML2"
@@ -2034,6 +2122,10 @@ group = parser.add_argument_group("UMFPACK", "UMFPACK package options")
 group.add_argument("--build_umfpack", default=0, type=int, choices=(0,1), help="Build UMFPACK library? (default: 0)")
 group.add_argument("--umfpack_wrapper", action="store_true", default=False, help="UMFPACK included in compilers")
 #
+group = parser.add_argument_group("STRUMPACK", "STRUMPACK package options")
+group.add_argument("--build_strumpack", default=0, type=int, choices=(0,1), help="Build STRUMPACK library? (default: 0)")
+group.add_argument("--strumpack_wrapper", action="store_true", default=False, help="STRUMPACK included in compilers")
+#
 group = parser.add_argument_group("PETSc", "PETSc package options")
 group.add_argument("--build_petsc", default=0, type=int, choices=(0,1), help="Build PETSc library? (default: 0)")
 group.add_argument("--petsc_debug", default=0, type=int, choices=(0,1), help="Build PETSc with debugging information (default: 0)")
@@ -2160,6 +2252,8 @@ else:
         packages.append(SUPERLU_DIST(options.superlu_dist_threads, options.superlu_dist_wrapper))
     if (options.build_umfpack == 1) or options.umfpack_wrapper:
         packages.append(UMFPACK(options.umfpack_wrapper))
+    if (options.build_strumpack == 1) or options.strumpack_wrapper:
+        packages.append(STRUMPACK((options.oft_use_openmp == 1), options.strumpack_wrapper))
 #
 for package in packages:
     config_dict = package.install(config_dict, keep_build_dirs=options.keep_build_dirs)
