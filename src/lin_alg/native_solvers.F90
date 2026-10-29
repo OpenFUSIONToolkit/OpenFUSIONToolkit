@@ -37,7 +37,9 @@ USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr,
   oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   oft_native_matrix, native_matrix_cast, oft_native_submatrix, &
-  partition_graph, native_matrix_setup_full, oft_native_submatrix
+  partition_graph, native_matrix_setup_full, oft_native_submatrix, &
+  oft_native_dense_cmatrix
+USE oft_lu, ONLY: lapack_matinv
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, oft_solver_ptr, &
   oft_csolver, oft_csolver_bc, oft_eigsolver, solver_setup, csolver_setup, &
   eigsolver_setup, solver_delete, csolver_delete
@@ -266,6 +268,40 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => bjprecond_delete
 END TYPE oft_bjprecond
+!------------------------------------------------------------------------------
+!> Inverted diagonal block for @ref oft_native_dense_cbjprecond
+!------------------------------------------------------------------------------
+TYPE :: dense_cbjprecond_block
+  INTEGER(i4) :: n = 0 !< Number of rows in block
+  INTEGER(i4), POINTER, DIMENSION(:) :: ind => NULL() !< Row indices (negative for overlap rows)
+  COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: inv => NULL() !< Inverse of diagonal block
+END TYPE dense_cbjprecond_block
+!------------------------------------------------------------------------------
+!> Block-Jacobi preconditioner for native dense complex matrices
+!!
+!! Blocks are defined by partitioning a supplied graph (eg. the non-zero pattern
+!! of a related sparse matrix) using METIS. Each diagonal block is extracted from
+!! the dense matrix and inverted explicitly during @ref dense_cbjprecond_setup.
+!! If `loverlap` is set each block is extended by one level of graph neighbors and
+!! only rows owned by the block are updated (restricted Additive-Schwarz). If
+!! `nlocal<=1` diagonal scaling is used instead.
+!!
+!! @note Only supports local (non-distributed) matrices
+!------------------------------------------------------------------------------
+TYPE, PUBLIC, EXTENDS(oft_csolver) :: oft_native_dense_cbjprecond
+  LOGICAL :: loverlap = .FALSE. !< Extend blocks by one level of graph neighbors?
+  INTEGER(i4) :: nlocal = 1 !< Number of blocks (diagonal scaling if <=1)
+  INTEGER(i4), PRIVATE :: max_block_size = 0 !< Size of largest block
+  COMPLEX(c8), PRIVATE, POINTER, CONTIGUOUS, DIMENSION(:) :: dinv => NULL() !< Inverse of matrix diagonal (`nlocal<=1` only)
+  TYPE(dense_cbjprecond_block), PRIVATE, POINTER, DIMENSION(:) :: blocks => NULL() !< Inverted diagonal blocks
+CONTAINS
+  !> Partition graph and factor diagonal blocks
+  PROCEDURE :: setup => dense_cbjprecond_setup
+  !> Apply preconditioner
+  PROCEDURE :: apply => dense_cbjprecond_apply
+  !> Clean-up internal storage
+  PROCEDURE :: delete => dense_cbjprecond_delete
+END TYPE oft_native_dense_cbjprecond
 !---Interfaces
 ABSTRACT INTERFACE
   !------------------------------------------------------------------------------
@@ -2389,4 +2425,196 @@ self%nlocal=1
 self%initialized=.FALSE.
 DEBUG_STACK_POP
 end subroutine bjprecond_delete
+!------------------------------------------------------------------------------
+!> Setup Block-Jacobi preconditioner for a native dense complex matrix
+!!
+!! Partitions `graph` into `self%nlocal` blocks using METIS, optionally extends
+!! each block by one level of graph neighbors (`self%loverlap`), and explicitly
+!! inverts the corresponding diagonal blocks of `A`. If `self%nlocal<=1` only the
+!! inverse of the diagonal is computed. Any existing factorization is replaced.
+!!
+!! @note Rows not assigned to a partition by METIS (`part<0`) are excluded from all
+!! blocks and the preconditioner returns zero for those entries.
+!------------------------------------------------------------------------------
+SUBROUTINE dense_cbjprecond_setup(self,A,graph)
+CLASS(oft_native_dense_cbjprecond), INTENT(inout) :: self !< Solver object
+CLASS(oft_cmatrix), TARGET, INTENT(inout) :: A !< Matrix to precondition (must be @ref oft_native_dense_cmatrix)
+TYPE(oft_graph), INTENT(inout) :: graph !< Graph used to partition the matrix into blocks [A%nr]
+!---
+INTEGER(i4) :: i,j,k,jr,n,info,nfail,max_size
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: part
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: eflag
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Amat
+DEBUG_STACK_PUSH
+SELECT TYPE(A)
+CLASS IS(oft_native_dense_cmatrix)
+  Amat=>A%M
+CLASS DEFAULT
+  CALL oft_abort('"A" is not a native dense complex matrix','dense_cbjprecond_setup',__FILE__)
+END SELECT
+IF(A%nr/=A%nc)CALL oft_abort('Matrix is not square','dense_cbjprecond_setup',__FILE__)
+IF(graph%nr/=A%nr)CALL oft_abort('Graph and matrix sizes do not match','dense_cbjprecond_setup',__FILE__)
+CALL dense_cbjprecond_delete(self)
+self%A=>A
+!---Diagonal scaling only
+IF(self%nlocal<=1)THEN
+  ALLOCATE(self%dinv(A%nr))
+  DO i=1,A%nr
+    self%dinv(i)=(1.d0,0.d0)/Amat(i,i)
+  END DO
+  self%initialized=.TRUE.
+  DEBUG_STACK_POP
+  RETURN
+END IF
+IF(oft_env%pm.AND.oft_env%head_proc)WRITE(*,'(2A,I6)')oft_indent,'nLocal = ',self%nlocal
+!---Partition graph
+ALLOCATE(part(A%nr))
+CALL partition_graph(graph,self%nlocal,part)
+ALLOCATE(self%blocks(self%nlocal))
+IF(self%loverlap)THEN
+  !$omp parallel private(j,jr,k,eflag)
+  ALLOCATE(eflag(A%nr))
+  !$omp do
+  DO i=1,self%nlocal
+    !---Flag owned rows and their graph neighbors
+    eflag=(part==i)
+    DO jr=1,A%nr
+      IF(part(jr)/=i)CYCLE
+      DO k=graph%kr(jr),graph%kr(jr+1)-1
+        eflag(graph%lc(k))=.TRUE.
+      END DO
+    END DO
+    DO j=1,A%nr
+      IF(part(j)<0)eflag(j)=.FALSE.
+    END DO
+    !---Overlap rows are marked with negative indices (input only)
+    self%blocks(i)%n=COUNT(eflag)
+    ALLOCATE(self%blocks(i)%ind(self%blocks(i)%n))
+    k=0
+    DO j=1,A%nr
+      IF(.NOT.eflag(j))CYCLE
+      k=k+1
+      IF(part(j)==i)THEN
+        self%blocks(i)%ind(k)=j
+      ELSE
+        self%blocks(i)%ind(k)=-j
+      END IF
+    END DO
+  END DO
+  DEALLOCATE(eflag)
+  !$omp end parallel
+ELSE
+  DO i=1,A%nr
+    IF(part(i)<0)CYCLE
+    self%blocks(part(i))%n=self%blocks(part(i))%n+1
+  END DO
+  DO i=1,self%nlocal
+    ALLOCATE(self%blocks(i)%ind(self%blocks(i)%n))
+    self%blocks(i)%n=0
+  END DO
+  DO i=1,A%nr
+    IF(part(i)<0)CYCLE
+    self%blocks(part(i))%n=self%blocks(part(i))%n+1
+    self%blocks(part(i))%ind(self%blocks(part(i))%n)=i
+  END DO
+END IF
+DEALLOCATE(part)
+!---Extract and invert diagonal blocks
+max_size=0
+nfail=0
+!$omp parallel do private(j,k,n,info) schedule(static) reduction(+:nfail) reduction(max:max_size)
+DO i=1,self%nlocal
+  n=self%blocks(i)%n
+  max_size=MAX(max_size,n)
+  IF(n==0)CYCLE
+  ALLOCATE(self%blocks(i)%inv(n,n))
+  DO k=1,n
+    DO j=1,n
+      self%blocks(i)%inv(j,k)=Amat(ABS(self%blocks(i)%ind(j)),ABS(self%blocks(i)%ind(k)))
+    END DO
+  END DO
+  CALL lapack_matinv(n,self%blocks(i)%inv,info)
+  IF(info/=0)nfail=nfail+1
+END DO
+IF(nfail>0)CALL oft_abort('Block inversion failed','dense_cbjprecond_setup',__FILE__)
+self%max_block_size=max_size
+self%initialized=.TRUE.
+DEBUG_STACK_POP
+END SUBROUTINE dense_cbjprecond_setup
+!------------------------------------------------------------------------------
+!> Precondition a linear system using a Block-Jacobi method with native dense
+!! complex matrices
+!!
+!! Computes \f$ u = M^{-1} g \f$, where \f$ M \f$ is the block-diagonal (or
+!! diagonal) approximation of the matrix. The input value of `u` is ignored and
+!! `g` is unchanged.
+!------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE dense_cbjprecond_apply(self,u,g)
+CLASS(oft_native_dense_cbjprecond), INTENT(inout) :: self !< Solver object
+CLASS(oft_cvector), INTENT(inout) :: u !< Guess (input), Solution (output)
+CLASS(oft_cvector), INTENT(inout) :: g !< RHS (input), Residual (output)
+!---
+INTEGER(i4) :: i,j,n
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals
+COMPLEX(c8), ALLOCATABLE, DIMENSION(:,:) :: vloc
+DEBUG_STACK_PUSH
+IF(.NOT.self%initialized)CALL oft_abort('Preconditioner has not been setup','dense_cbjprecond_apply',__FILE__)
+IF(g%n/=self%A%nr)CALL oft_abort('Row mismatch','dense_cbjprecond_apply',__FILE__)
+IF(u%n/=self%A%nc)CALL oft_abort('Col mismatch','dense_cbjprecond_apply',__FILE__)
+NULLIFY(uvals,gvals)
+CALL u%get_local(uvals)
+CALL g%get_local(gvals)
+IF(self%nlocal>1)THEN
+  uvals=(0.d0,0.d0)
+  !$omp parallel private(vloc,i,j,n)
+  ALLOCATE(vloc(self%max_block_size,2))
+  !$omp do schedule(static)
+  DO i=1,self%nlocal
+    n=self%blocks(i)%n
+    IF(n==0)CYCLE
+    DO j=1,n
+      vloc(j,1)=gvals(ABS(self%blocks(i)%ind(j)))
+    END DO
+    CALL zgemv('N',n,n,(1.d0,0.d0),self%blocks(i)%inv,n,vloc(:,1),1,(0.d0,0.d0),vloc(:,2),1)
+    DO j=1,n
+      IF(self%blocks(i)%ind(j)>0)uvals(self%blocks(i)%ind(j))=vloc(j,2)
+    END DO
+  END DO
+  !$omp end do
+  DEALLOCATE(vloc)
+  !$omp end parallel
+ELSE
+  !$omp parallel do
+  DO i=1,self%A%nr
+    uvals(i)=self%dinv(i)*gvals(i)
+  END DO
+END IF
+CALL u%restore_local(uvals)
+DEALLOCATE(uvals,gvals)
+DEBUG_STACK_POP
+END SUBROUTINE dense_cbjprecond_apply
+!------------------------------------------------------------------------------
+!> Destroy dense Block-Jacobi preconditioner and deallocate all internal storage
+!!
+!! @note Settings (`nlocal`, `loverlap`) are retained
+!------------------------------------------------------------------------------
+SUBROUTINE dense_cbjprecond_delete(self,propogate)
+CLASS(oft_native_dense_cbjprecond), INTENT(inout) :: self !< Solver object
+LOGICAL, OPTIONAL, INTENT(in) :: propogate !< Update matrix non-zero pattern? (optional)
+INTEGER(i4) :: i
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%blocks))THEN
+  DO i=1,SIZE(self%blocks)
+    IF(ASSOCIATED(self%blocks(i)%ind))DEALLOCATE(self%blocks(i)%ind)
+    IF(ASSOCIATED(self%blocks(i)%inv))DEALLOCATE(self%blocks(i)%inv)
+  END DO
+  DEALLOCATE(self%blocks)
+END IF
+IF(ASSOCIATED(self%dinv))DEALLOCATE(self%dinv)
+self%max_block_size=0
+NULLIFY(self%A)
+self%initialized=.FALSE.
+CALL csolver_delete(self,propogate)
+DEBUG_STACK_POP
+END SUBROUTINE dense_cbjprecond_delete
 end module oft_native_solvers
