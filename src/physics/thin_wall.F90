@@ -488,6 +488,11 @@ IF(.NOT.ASSOCIATED(self%pmap))THEN
 ELSE
   self%np_active=MAXVAL(self%pmap)
 END IF
+!---Operator assembly assumes a non-empty model
+IF(self%mesh%nc<1.OR.self%np_active<1)THEN
+  error_string="Thin-wall model must have at least one cell and one active vertex"
+  RETURN
+END IF
 !
 ALLOCATE(self%kpmap_inv(self%np_active+1))
 self%kpmap_inv=0
@@ -1238,6 +1243,7 @@ REAL(8) :: tmp,dl_min,f(3),elapsed_time
 REAL(8) :: area_i,evec_i(3,3),pts_i(3,3)
 REAL(8) :: area_j,evec_j(3,3),pts_j(3,3)
 REAL(8), ALLOCATABLE :: rval(:),cval(:),vbuf(:)
+REAL(8), CONTIGUOUS, POINTER :: Ael2coil(:,:)
 LOGICAL :: exists,Lself,jscatter
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
 TYPE(tw_type), POINTER :: row_obj,col_obj
@@ -1347,15 +1353,24 @@ IF(PRESENT(save_file))THEN
     END IF
   END IF
 END IF
-!---Junction maps (identity for a model without junctions)
-!---Contributions of each cell pair are buffered, then scattered together (size of buffer bounded by the vertex
+!---Contributions of each cell pair are buffered, then added together (size of buffer bounded by the vertex
 !---and hole counts of the two cells)
-nbuf_max=0
+nbuf_max=(3+MAXVAL(row_obj%kfh(2:)-row_obj%kfh(1:row_obj%mesh%nc)))* &
+  (3+MAXVAL(col_obj%kfh(2:)-col_obj%kfh(1:col_obj%mesh%nc)))
+!---Junction maps (identity for a model without junctions)
 IF(jscatter)THEN
   CALL tw_junction_map(row_obj,rkr,rlc,rval)
   CALL tw_junction_map(col_obj,ckr,clc,cval)
-  nbuf_max=(3+MAXVAL(row_obj%kfh(2:)-row_obj%kfh(1:row_obj%mesh%nc)))* &
-    (3+MAXVAL(col_obj%kfh(2:)-col_obj%kfh(1:col_obj%mesh%nc)))
+END IF
+!---Element to V-coil couplings, with rows reduced by the junction map (V-coil rows of P are the identity)
+IF(Lself)THEN
+  IF(ASSOCIATED(row_obj%junc))THEN
+    ALLOCATE(Ael2coil(tw_nelems_exp(row_obj),row_obj%n_vcoils))
+    Ael2coil=row_obj%Ael2coil
+    CALL tw_junction_reduce_rows(row_obj,Ael2coil)
+  ELSE
+    Ael2coil=>row_obj%Ael2coil
+  END IF
 END IF
 !
 IF(Lself)THEN
@@ -1375,8 +1390,8 @@ counts=0
 f=1.d0/3.d0
 !$omp parallel private(ii,j,jj,ik,jk,pts_i,pts_j,tmp, &
 !$omp evec_i,evec_j,dl_min,i,jmax,imin, &
-!$omp area_i,area_j,nbuf,ebuf,vbuf) reduction(+:counts)
-IF(jscatter)ALLOCATE(ebuf(2,nbuf_max),vbuf(nbuf_max))
+!$omp area_i,area_j,k,nbuf,ebuf,vbuf) reduction(+:counts)
+ALLOCATE(ebuf(2,nbuf_max),vbuf(nbuf_max))
 !$omp do schedule(dynamic,100)
 DO i=1,rmesh%nc
   ! CALL rmesh%jacobian(i,f,rgop,area_i)
@@ -1421,27 +1436,17 @@ DO i=1,rmesh%nc
         jk=col_obj%pmap(cmesh%lc(jj,j))
         IF((Lself.AND.jk<ik).OR.jk<=0)CYCLE
         dl_min = DOT_PRODUCT(evec_i(:,ii),evec_j(:,jj))*tmp
-        IF(jscatter)THEN
-          nbuf=nbuf+1
-          ebuf(:,nbuf)=[jk,ik]
-          vbuf(nbuf)=dl_min
-        ELSE
-          !$omp atomic
-          Lmat(jk,ik) = Lmat(jk,ik) + dl_min
-        END IF
+        nbuf=nbuf+1
+        ebuf(:,nbuf)=[jk,ik]
+        vbuf(nbuf)=dl_min
       END DO
       DO jj=col_obj%kfh(j),col_obj%kfh(j+1)-1
         jk=ABS(col_obj%lfh(1,jj))+col_obj%np_active
         dl_min = SIGN(1,col_obj%lfh(1,jj))* &
           DOT_PRODUCT(evec_i(:,ii),evec_j(:,col_obj%lfh(2,jj)))*tmp
-        IF(jscatter)THEN
-          nbuf=nbuf+1
-          ebuf(:,nbuf)=[jk,ik]
-          vbuf(nbuf)=dl_min
-        ELSE
-          !$omp atomic
-          Lmat(jk,ik) = Lmat(jk,ik) + dl_min
-        END IF
+        nbuf=nbuf+1
+        ebuf(:,nbuf)=[jk,ik]
+        vbuf(nbuf)=dl_min
       END DO
     END DO
     DO ii=row_obj%kfh(i),row_obj%kfh(i+1)-1
@@ -1451,14 +1456,9 @@ DO i=1,rmesh%nc
         IF(Lself.AND.jk<ik)CYCLE
         dl_min = SIGN(1,row_obj%lfh(1,ii))*SIGN(1,col_obj%lfh(1,jj))* &
           DOT_PRODUCT(evec_i(:,row_obj%lfh(2,ii)),evec_j(:,col_obj%lfh(2,jj)))*tmp
-        IF(jscatter)THEN
-          nbuf=nbuf+1
-          ebuf(:,nbuf)=[jk,ik]
-          vbuf(nbuf)=dl_min
-        ELSE
-          !$omp atomic
-          Lmat(jk,ik) = Lmat(jk,ik) + dl_min
-        END IF
+        nbuf=nbuf+1
+        ebuf(:,nbuf)=[jk,ik]
+        vbuf(nbuf)=dl_min
       END DO
       !
       IF(.NOT.Lself)THEN
@@ -1467,46 +1467,36 @@ DO i=1,rmesh%nc
           IF(jk<=0)CYCLE
           dl_min = SIGN(1,row_obj%lfh(1,ii))* &
             DOT_PRODUCT(evec_i(:,row_obj%lfh(2,ii)),evec_j(:,jj))*tmp
-          IF(jscatter)THEN
-            nbuf=nbuf+1
-            ebuf(:,nbuf)=[jk,ik]
-            vbuf(nbuf)=dl_min
-          ELSE
-            !$omp atomic
-            Lmat(jk,ik) = Lmat(jk,ik) + dl_min
-          END IF
+          nbuf=nbuf+1
+          ebuf(:,nbuf)=[jk,ik]
+          vbuf(nbuf)=dl_min
         END DO
       END IF
     END DO
-    IF(jscatter)CALL tw_junction_scatter_add(Lmat,ckr,clc,cval,rkr,rlc,rval,nbuf,ebuf,vbuf,Lself)
+    !---Add this cell pair's contributions, through the junction maps if present
+    IF(jscatter)THEN
+      CALL tw_junction_scatter_add(Lmat,ckr,clc,cval,rkr,rlc,rval,nbuf,ebuf,vbuf,Lself)
+    ELSE
+      DO k=1,nbuf
+        !$omp atomic
+        Lmat(ebuf(1,k),ebuf(2,k)) = Lmat(ebuf(1,k),ebuf(2,k)) + vbuf(k)
+      END DO
+    END IF
   END DO
 END DO
 !$omp end do nowait
-IF(jscatter)DEALLOCATE(ebuf,vbuf)
+DEALLOCATE(ebuf,vbuf)
 IF(Lself)THEN
-  !---Add passive coils to model (V-coil rows of P are the identity, so only the element side is mapped)
+  !---Add passive coils to model
   nsurf=row_obj%nelems-row_obj%n_vcoils
-  IF(jscatter)THEN
-    !$omp do private(i,k)
+  !$omp do
+  DO i=1,nsurf
     DO j=1,row_obj%n_vcoils
       jj=nsurf+j
-      DO i=1,row_obj%np_active+row_obj%nholes
-        DO k=rkr(i),rkr(i+1)-1
-          Lmat(jj,rlc(k)) = Lmat(jj,rlc(k)) + rval(k)*row_obj%Ael2coil(i,j)
-        END DO
-      END DO
+      Lmat(jj,i) = Ael2coil(i,j)
     END DO
-    !$omp end do nowait
-  ELSE
-    !$omp do
-    DO i=1,row_obj%np_active+row_obj%nholes
-      DO j=1,row_obj%n_vcoils
-        jj=nsurf+j
-        Lmat(jj,i) = row_obj%Ael2coil(i,j)
-      END DO
-    END DO
-    !$omp end do nowait
-  END IF
+  END DO
+  !$omp end do nowait
   !$omp do
   DO i=1,row_obj%n_vcoils
     ii=nsurf+i
@@ -1527,6 +1517,7 @@ Lmat = Lmat/(4.d0*pi)
 elapsed_time=mytimer%tock()
 WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 IF(jscatter)DEALLOCATE(rkr,rlc,rval,ckr,clc,cval)
+IF(Lself.AND.ASSOCIATED(row_obj%junc))DEALLOCATE(Ael2coil)
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
@@ -2495,9 +2486,7 @@ CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file !< Cache file
 REAL(r8) :: evec_i(3,3),pts_i(3,3),pt_j(3),diffvec(3),ecc(3)
 REAL(r8) :: cvec(3),cpt(3),tmp,area_i,norm_j(3),f(3)
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-INTEGER(4) :: i,ii,j,jj,ik,k,kk,l,nsurf
-INTEGER(4), ALLOCATABLE :: pkr(:),plc(:)
-REAL(r8), ALLOCATABLE :: pval(:)
+INTEGER(4) :: i,ii,j,jj,ik,k,kk,nsurf
 LOGICAL :: load_success
 CLASS(oft_bmesh), POINTER :: bmesh
 IF(PRESENT(save_file))THEN
@@ -2508,12 +2497,10 @@ END IF
 bmesh=>self%mesh
 ALLOCATE(self%Bel(bmesh%np,self%nelems,3))
 self%Bel=0.d0
-!---Junction map (identity for a model without junctions)
-CALL tw_junction_map(self,pkr,plc,pval)
 f=1.d0/3.d0
 WRITE(*,'(2A)')oft_indent,'Building element->element magnetic reconstruction operator'
 !$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_j,evec_i, &
-!$omp atmp,i,area_i,norm_j,diffvec,k,l)
+!$omp atmp,i,area_i,norm_j,diffvec)
 ALLOCATE(atmp(3,3,bmesh%np))
 !$omp do schedule(dynamic,100)
 DO i=1,bmesh%nc
@@ -2535,34 +2522,15 @@ DO i=1,bmesh%nc
   DO ii=1,3
     ik=self%pmap(bmesh%lc(ii,i))
     IF(ik==0)CYCLE
-    DO k=pkr(ik),pkr(ik+1)-1
-      l=plc(k)
-      DO jj=1,3
-        DO j=1,bmesh%np
-          tmp=pval(k)*atmp(jj,ii,j)
-          !$omp atomic
-          self%Bel(j,l,jj) = self%Bel(j,l,jj) + tmp
-        END DO
-      END DO
-    END DO
+    CALL add_elem(atmp,ii,ik,1.d0)
   END DO
   DO ii=self%kfh(i),self%kfh(i+1)-1
     ik=ABS(self%lfh(1,ii))+self%np_active
-    DO k=pkr(ik),pkr(ik+1)-1
-      l=plc(k)
-      DO jj=1,3
-        DO j=1,bmesh%np
-          tmp=pval(k)*SIGN(1,self%lfh(1,ii))*atmp(jj,self%lfh(2,ii),j)
-          !$omp atomic
-          self%Bel(j,l,jj) = self%Bel(j,l,jj) + tmp
-        END DO
-      END DO
-    END DO
+    CALL add_elem(atmp,self%lfh(2,ii),ik,REAL(SIGN(1,self%lfh(1,ii)),r8))
   END DO
 END DO
 DEALLOCATE(atmp)
 !$omp end parallel
-DEALLOCATE(pkr,plc,pval)
 !
 WRITE(*,'(2A)')oft_indent,'Building vcoil->element magnetic reconstruction operator'
 nsurf=self%nelems-self%n_vcoils ! V-coil rows of the junction map are the identity
@@ -2629,6 +2597,38 @@ CALL oft_increase_indent
 IF(PRESENT(save_file))CALL save_to_file()
 CALL oft_decrease_indent
 CONTAINS
+!> Add the field of one basis function of a cell to the operator of an element, scattered through the junction
+!! map if present
+SUBROUTINE add_elem(atmp,ib,ik,s)
+REAL(r8), INTENT(in) :: atmp(:,:,:) !< Field of the cell's basis functions at each vertex [3,3,np]
+INTEGER(4), INTENT(in) :: ib !< Basis function of the cell
+INTEGER(4), INTENT(in) :: ik !< Element (expanded if the model has junctions)
+REAL(r8), INTENT(in) :: s !< Sign of the element's basis function
+INTEGER(4) :: k
+IF(ASSOCIATED(self%junc))THEN
+  DO k=self%junc%p_kr(ik),self%junc%p_kr(ik+1)-1
+    CALL add_col(atmp,ib,self%junc%p_lc(k),s*self%junc%p_val(k))
+  END DO
+ELSE
+  CALL add_col(atmp,ib,ik,s)
+END IF
+END SUBROUTINE add_elem
+!> Add a scaled basis function field to one column of the operator
+SUBROUTINE add_col(atmp,ib,l,w)
+REAL(r8), INTENT(in) :: atmp(:,:,:) !< Field of the cell's basis functions at each vertex [3,3,np]
+INTEGER(4), INTENT(in) :: ib !< Basis function of the cell
+INTEGER(4), INTENT(in) :: l !< Column (element) of the operator
+REAL(r8), INTENT(in) :: w !< Weight
+INTEGER(4) :: j,jj
+REAL(r8) :: tmp
+DO jj=1,3
+  DO j=1,SIZE(atmp,DIM=3)
+    tmp=w*atmp(jj,ib,j)
+    !$omp atomic
+    self%Bel(j,l,jj) = self%Bel(j,l,jj) + tmp
+  END DO
+END DO
+END SUBROUTINE add_col
 !> Load the operators from the cache file if its key matches the model
 FUNCTION load_from_file() RESULT(exists)
 INTEGER(4) :: hash_tmp(4),file_counts(4),jhash(1)
@@ -4148,17 +4148,23 @@ END DO
 END SUBROUTINE tw_junction_scatter_add
 !---------------------------------------------------------------------------------
 !> Hash of the junction map P, used to key cache files (0 for a model without junctions)
+!!
+!! Only the vertex and hole rows are hashed. The V-coil rows are the identity, and the coils are keyed
+!! separately where a matrix depends on them, so caches stay valid when only the V-coils change.
 !---------------------------------------------------------------------------------
 FUNCTION tw_junction_hash(self) RESULT(hash)
 TYPE(tw_type), TARGET, INTENT(in) :: self !< Thin-wall model object
 INTEGER(4) :: hash !< Hash of the map
+INTEGER(4) :: ns,nnz
 IF(.NOT.ASSOCIATED(self%junc))THEN
   hash=0
   RETURN
 END IF
-hash=oft_simple_hash(C_LOC(self%junc%p_kr),INT(4*SIZE(self%junc%p_kr),8))
-hash=oft_simple_hash(C_LOC(self%junc%p_lc),INT(4*SIZE(self%junc%p_lc),8),starting_value=hash)
-hash=oft_simple_hash(C_LOC(self%junc%p_val),INT(8*SIZE(self%junc%p_val),8),starting_value=hash)
+ns=self%np_active+self%nholes
+nnz=self%junc%p_kr(ns+1)-1
+hash=oft_simple_hash(C_LOC(self%junc%p_kr),INT(4*(ns+1),8))
+hash=oft_simple_hash(C_LOC(self%junc%p_lc),INT(4*nnz,8),starting_value=hash)
+hash=oft_simple_hash(C_LOC(self%junc%p_val),INT(8*nnz,8),starting_value=hash)
 END FUNCTION tw_junction_hash
 !---------------------------------------------------------------------------------
 !> Transpose of the junction map, P^T in CSR form
