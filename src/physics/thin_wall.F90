@@ -1363,7 +1363,9 @@ IF(jscatter)THEN
   CALL tw_junction_map(col_obj,ckr,clc,cval)
 END IF
 !---Element to V-coil couplings, with rows reduced by the junction map (V-coil rows of P are the identity)
-IF(Lself)THEN
+!---(only computed, and only needed, when the model has V-coils)
+NULLIFY(Ael2coil)
+IF(Lself.AND.row_obj%n_vcoils>0)THEN
   IF(ASSOCIATED(row_obj%junc))THEN
     ALLOCATE(Ael2coil(tw_nelems_exp(row_obj),row_obj%n_vcoils))
     Ael2coil=row_obj%Ael2coil
@@ -1517,7 +1519,7 @@ Lmat = Lmat/(4.d0*pi)
 elapsed_time=mytimer%tock()
 WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 IF(jscatter)DEALLOCATE(rkr,rlc,rval,ckr,clc,cval)
-IF(Lself.AND.ASSOCIATED(row_obj%junc))DEALLOCATE(Ael2coil)
+IF(Lself.AND.row_obj%n_vcoils>0.AND.ASSOCIATED(row_obj%junc))DEALLOCATE(Ael2coil)
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
