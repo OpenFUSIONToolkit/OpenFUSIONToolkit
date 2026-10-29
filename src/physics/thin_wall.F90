@@ -871,6 +871,34 @@ br=4.d0*pi*gg(2)/rp
 bvec=[br*pt(1)/rp,br*pt(2)/rp,-4.d0*pi*gg(1)/rp]
 END FUNCTION tw_ring_bvec
 !---------------------------------------------------------------------------------
+!> Exact Biot-Savart kernel \f$ \int d\mathbf{l}' \times (\mathbf{r}-\mathbf{r}')/|\mathbf{r}-\mathbf{r}'|^3 \f$ of a
+!! straight segment from p0 to p1
+!!
+!! With \f$ \mathbf{r}_i = \mathbf{p}_i - \mathbf{r} \f$:
+!! \f$ (\mathbf{r}_0 \times \mathbf{r}_1)(r_0+r_1)/(r_0 r_1 (r_0 r_1 + \mathbf{r}_0 \cdot \mathbf{r}_1)) \f$, with the
+!! last factor rewritten as \f$ (r_0 r_1 - \mathbf{r}_0 \cdot \mathbf{r}_1)/|\mathbf{r}_0 \times \mathbf{r}_1|^2 \f$ when
+!! the point is beside the segment to avoid cancellation. Zero on the segment's line.
+!---------------------------------------------------------------------------------
+PURE FUNCTION tw_seg_bvec(p0,p1,pt) RESULT(bvec)
+REAL(r8), INTENT(in) :: p0(3) !< Start of segment
+REAL(r8), INTENT(in) :: p1(3) !< End of segment
+REAL(r8), INTENT(in) :: pt(3) !< Evaluation point
+REAL(r8) :: bvec(3) !< Biot-Savart kernel
+REAL(r8) :: r0(3),r1(3),cr(3),m0,m1,dp,c2
+r0=p0-pt; r1=p1-pt
+cr=[r0(2)*r1(3)-r0(3)*r1(2),r0(3)*r1(1)-r0(1)*r1(3),r0(1)*r1(2)-r0(2)*r1(1)]
+c2=SUM(cr**2)
+m0=SQRT(SUM(r0**2)); m1=SQRT(SUM(r1**2))
+bvec=0.d0
+IF(c2<=1.d-24*(m0*m1)**2)RETURN
+dp=DOT_PRODUCT(r0,r1)
+IF(dp>=0.d0)THEN
+  bvec=cr*(m0+m1)/(m0*m1*(m0*m1+dp))
+ELSE
+  bvec=cr*(m0+m1)*(m0*m1-dp)/(m0*m1*c2)
+END IF
+END FUNCTION tw_seg_bvec
+!---------------------------------------------------------------------------------
 !> Closest approach of two segments [p0,p1] and [q0,q1]: parameter s in [0,1] on the first, and the distance
 !---------------------------------------------------------------------------------
 PURE SUBROUTINE tw_seg_closest(p0,p1,q0,q1,s,dist)
@@ -2652,11 +2680,7 @@ IF(nsensors>0.AND.ncoils_tot>0)THEN
           ELSE
             cvec=0.d0
             DO kk=2,coils_tot(j)%coils(k)%npts
-              rvec_i=coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
-              cpt=pt_i-(coils_tot(j)%coils(k)%pts(:,kk)+coils_tot(j)%coils(k)%pts(:,kk-1))/2.d0
-              tmp=SUM(cpt**2)
-              cvec=cvec+[rvec_i(2)*cpt(3)-rvec_i(3)*cpt(2),rvec_i(3)*cpt(1)-rvec_i(1)*cpt(3), &
-                rvec_i(1)*cpt(2)-rvec_i(2)*cpt(1)]/(tmp*SQRT(tmp))
+              cvec=cvec+tw_seg_bvec(coils_tot(j)%coils(k)%pts(:,kk-1),coils_tot(j)%coils(k)%pts(:,kk),pt_i)
             END DO
           END IF
           atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*DOT_PRODUCT(sensors(i)%norm,cvec)
@@ -3457,9 +3481,7 @@ DO i=1,bmesh%np
       ELSE
         diffvec=0.d0
         DO kk=2,self%vcoils(j)%coils(k)%npts
-          cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
-          cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
-          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+          diffvec = diffvec + tw_seg_bvec(self%vcoils(j)%coils(k)%pts(:,kk-1),self%vcoils(j)%coils(k)%pts(:,kk),pt_j)
         END DO
       END IF
       ecc=ecc+self%vcoils(j)%scales(k)*diffvec
@@ -3488,9 +3510,7 @@ DO i=1,bmesh%np
       ELSE
         diffvec=0.d0
         DO kk=2,self%icoils(j)%coils(k)%npts
-          cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
-          cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
-          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+          diffvec = diffvec + tw_seg_bvec(self%icoils(j)%coils(k)%pts(:,kk-1),self%icoils(j)%coils(k)%pts(:,kk),pt_j)
         END DO
       END IF
       ecc=ecc+self%icoils(j)%scales(k)*diffvec

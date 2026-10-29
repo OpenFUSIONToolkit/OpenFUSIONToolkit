@@ -547,9 +547,7 @@ IF(self%n_vcoils>0)THEN
         ELSE
           diffvec=0.d0
           DO kk=2,self%vcoils(j)%coils(k)%npts
-            cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
-            cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
-            diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+            diffvec = diffvec + tw_seg_bvec(self%vcoils(j)%coils(k)%pts(:,kk-1),self%vcoils(j)%coils(k)%pts(:,kk),pt_j)
           END DO
         END IF
         ecc=ecc+self%vcoils(j)%scales(k)*diffvec
@@ -579,9 +577,7 @@ IF(self%n_icoils>0)THEN
         ELSE
           diffvec=0.d0
           DO kk=2,self%icoils(j)%coils(k)%npts
-            cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
-            cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
-            diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+            diffvec = diffvec + tw_seg_bvec(self%icoils(j)%coils(k)%pts(:,kk-1),self%icoils(j)%coils(k)%pts(:,kk),pt_j)
           END DO
         END IF
         ecc=ecc+self%icoils(j)%scales(k)*diffvec
