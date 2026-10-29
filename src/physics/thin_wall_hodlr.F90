@@ -3437,10 +3437,15 @@ self%nzg=0
 DEALLOCATE(zb)
 !---Global vectors, orthonormalised against the block/unit vectors (orthonormal) and each other
 IF(nglob>0)THEN
-  ALLOCATE(self%z_gvals(tw%nelems,nglob),zb(self%nz+nglob,1))
+  ALLOCATE(self%z_gvals(tw_nelems_exp(tw),nglob),zb(self%nz+nglob,1))
   k=0
   DO m=1,nglob
-    self%z_gvals(:,k+1)=self%z_glob(:,m)
+    !---Global vectors are given on the model unknowns; on junction meshes they are expanded (P z)
+    IF(ASSOCIATED(tw%junc))THEN
+      CALL tw_junction_expand(tw,self%z_glob(:,m),self%z_gvals(:,k+1))
+    ELSE
+      self%z_gvals(:,k+1)=self%z_glob(:,m)
+    END IF
     nrm0=SQRT(SUM(self%z_gvals(:,k+1)**2))
     IF(nrm0<=0.d0)CYCLE
     DO j=1,2
