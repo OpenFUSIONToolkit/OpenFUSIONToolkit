@@ -136,7 +136,8 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   INTEGER(4), POINTER, DIMENSION(:) :: z_unit => NULL() !< Element of each unit coarse vector
   REAL(r8), POINTER, DIMENSION(:,:) :: z_vals => NULL() !< Values of each block coarse vector on its block
   REAL(r8), POINTER, DIMENSION(:,:) :: z_glob => NULL() !< Global vectors to add to the coarse space [nelems,:] (optional)
-  REAL(r8), POINTER, DIMENSION(:,:) :: z_gvals => NULL() !< Values of each global coarse vector [nelems,:]
+  REAL(r8), POINTER, DIMENSION(:,:) :: z_gvals => NULL() !< Values of each global coarse vector [nelems_exp,:]
+  INTEGER(4) :: nzg = 0 !< Number of global coarse vectors (the last `nzg` of the `nz`, columns of `z_gvals`)
   REAL(r8), POINTER, DIMENSION(:,:) :: zlz => NULL() !< Z^T L Z
   REAL(r8), POINTER, DIMENSION(:,:) :: zrz => NULL() !< Z^T R Z
   REAL(r8), POINTER, DIMENSION(:,:) :: einv => NULL() !< (Z^T (alpha*L + beta*R) Z)^-1
@@ -3432,6 +3433,7 @@ DO j=1,nunit
   self%z_unit(c)=tw%np_active+j
 END DO
 self%nz=c
+self%nzg=0
 DEALLOCATE(zb)
 !---Global vectors, orthonormalised against the block/unit vectors (orthonormal) and each other
 IF(nglob>0)THEN
@@ -3452,6 +3454,7 @@ IF(nglob>0)THEN
       self%z_gvals(:,k+1)=self%z_gvals(:,k+1)/nrm
       k=k+1
       self%nz=self%nz+1
+      self%nzg=k
       self%z_block(self%nz)=-k
       self%z_unit(self%nz)=0
     END IF
@@ -3529,10 +3532,8 @@ CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
 REAL(r8), INTENT(in) :: v(:) !< Element vector
 REAL(r8), INTENT(out) :: w(:) !< Coarse vector [nz]
 INTEGER(4) :: c,j,level,iblock
-DO c=1,self%nz
-  IF(self%z_block(c)<0)THEN
-    w(c)=DOT_PRODUCT(self%z_gvals(:,-self%z_block(c)),v)
-  ELSE IF(self%z_block(c)==0)THEN
+DO c=1,self%nz-self%nzg
+  IF(self%z_block(c)==0)THEN
     w(c)=v(self%z_unit(c))
   ELSE
     level=self%mf_obj%dense_blocks(1,self%z_block(c))
@@ -3543,6 +3544,9 @@ DO c=1,self%nz
     END DO
   END IF
 END DO
+!---Global vectors together: w_g = Z_g^T v
+IF(self%nzg>0)CALL dgemv('T',SIZE(self%z_gvals,1),self%nzg,1.d0,self%z_gvals,SIZE(self%z_gvals,1), &
+  v,1,0.d0,w(self%nz-self%nzg+1),1)
 END SUBROUTINE rbjprecond_coarse_restrict
 !------------------------------------------------------------------------------
 !> Add the coarse correction u += Z (Z^T A Z)^-1 Z^T g
@@ -3556,9 +3560,12 @@ REAL(r8), ALLOCATABLE :: w(:),y(:)
 ALLOCATE(w(self%nz),y(self%nz))
 CALL rbjprecond_coarse_restrict(self,g,w)
 CALL dgemv('N',self%nz,self%nz,1.d0,self%einv,self%nz,w,1,0.d0,y,1)
-DO c=1,self%nz
+DO c=1,self%nz-self%nzg
   CALL rbjprecond_coarse_expand(self,c,y(c),u)
 END DO
+!---Global vectors together: u += Z_g y_g
+IF(self%nzg>0)CALL dgemv('N',SIZE(self%z_gvals,1),self%nzg,1.d0,self%z_gvals,SIZE(self%z_gvals,1), &
+  y(self%nz-self%nzg+1),1,1.d0,u,1)
 DEALLOCATE(w,y)
 END SUBROUTINE rbjprecond_coarse_apply
 !------------------------------------------------------------------------------
