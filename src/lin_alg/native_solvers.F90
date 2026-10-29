@@ -78,6 +78,7 @@ end type oft_native_cg_solver
 type, public, extends(oft_solver) :: oft_native_gmres_solver
   logical :: precond = .FALSE. !< Flag to indicate use as a preconditioner (not used)
   integer(i4) :: nrits=10 !< Convergence specification
+  integer(i4) :: min_nits=0 !< Minimum inner iterations per cycle before the \f$ |r|/|u| \f$ check (`its=-1,-2` only)
   class(oft_solver_bc), pointer :: orthog => NULL() !< Orthogonalization
   class(oft_solver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
   class(oft_vector), private, pointer :: r => NULL() !< Temporary storage vector
@@ -98,6 +99,7 @@ end type oft_native_gmres_solver
 type, public, extends(oft_csolver) :: oft_native_gmres_csolver
   logical :: precond = .FALSE. !< Flag to indicate use as a preconditioner (not used)
   integer(i4) :: nrits=10 !< Convergence specification
+  integer(i4) :: min_nits=0 !< Minimum inner iterations per cycle before the \f$ |r|/|u| \f$ check (`its=-1,-2` only)
   class(oft_csolver_bc), pointer :: orthog => NULL() !< Orthogonalization
   class(oft_csolver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
   class(oft_cvector), private, pointer :: r => NULL() !< Temporary storage vector
@@ -283,16 +285,15 @@ END TYPE dense_cbjprecond_block
 !! of a related sparse matrix) using METIS. Each diagonal block is extracted from
 !! the dense matrix and inverted explicitly during @ref dense_cbjprecond_setup.
 !! If `loverlap` is set each block is extended by one level of graph neighbors and
-!! only rows owned by the block are updated (restricted Additive-Schwarz). If
-!! `nlocal<=1` diagonal scaling is used instead.
+!! only rows owned by the block are updated (restricted Additive-Schwarz).
 !!
-!! @note Only supports local (non-distributed) matrices
+!! @note Only supports local (non-distributed) matrices. For diagonal scaling use
+!! @ref oft_diag_cscale instead.
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_csolver) :: oft_native_dense_cbjprecond
   LOGICAL :: loverlap = .FALSE. !< Extend blocks by one level of graph neighbors?
-  INTEGER(i4) :: nlocal = 1 !< Number of blocks (diagonal scaling if <=1)
+  INTEGER(i4) :: nlocal = 1 !< Number of blocks (must be >=1)
   INTEGER(i4), PRIVATE :: max_block_size = 0 !< Size of largest block
-  COMPLEX(c8), PRIVATE, POINTER, CONTIGUOUS, DIMENSION(:) :: dinv => NULL() !< Inverse of matrix diagonal (`nlocal<=1` only)
   TYPE(dense_cbjprecond_block), PRIVATE, POINTER, DIMENSION(:) :: blocks => NULL() !< Inverted diagonal blocks
 CONTAINS
   !> Partition graph and factor diagonal blocks
@@ -700,8 +701,9 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     IF(nits==its)EXIT
     IF(ABS(res(i+1))<self%atol)EXIT
     IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
-    !---Check |r|/|u| criterion for current iterate
-    IF(res_u_tol>0.d0)THEN
+    !---Check |r|/|u| criterion for current iterate (after `min_nits` inner iterations
+    !   to avoid stalling through many short restart cycles)
+    IF(res_u_tol>0.d0.AND.i>=self%min_nits)THEN
       CALL gmres_backsolve(i,h,res,hdots)
       ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
       IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
@@ -996,8 +998,9 @@ do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
     IF(nits==its)EXIT
     IF(ABS(res(i+1))<self%atol)EXIT
     IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
-    !---Check |r|/|u| criterion for current iterate
-    IF(res_u_tol>0.d0)THEN
+    !---Check |r|/|u| criterion for current iterate (after `min_nits` inner iterations
+    !   to avoid stalling through many short restart cycles)
+    IF(res_u_tol>0.d0.AND.i>=self%min_nits)THEN
       CALL gmres_backsolve(i,h,res,hdots)
       ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
       IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
@@ -2430,11 +2433,8 @@ end subroutine bjprecond_delete
 !!
 !! Partitions `graph` into `self%nlocal` blocks using METIS, optionally extends
 !! each block by one level of graph neighbors (`self%loverlap`), and explicitly
-!! inverts the corresponding diagonal blocks of `A`. If `self%nlocal<=1` only the
-!! inverse of the diagonal is computed. Any existing factorization is replaced.
-!!
-!! @note Rows not assigned to a partition by METIS (`part<0`) are excluded from all
-!! blocks and the preconditioner returns zero for those entries.
+!! inverts the corresponding diagonal blocks of `A`. If `self%nlocal==1` a single
+!! block containing the full matrix is used. Any existing factorization is replaced.
 !------------------------------------------------------------------------------
 SUBROUTINE dense_cbjprecond_setup(self,A,graph)
 CLASS(oft_native_dense_cbjprecond), INTENT(inout) :: self !< Solver object
@@ -2454,22 +2454,19 @@ CLASS DEFAULT
 END SELECT
 IF(A%nr/=A%nc)CALL oft_abort('Matrix is not square','dense_cbjprecond_setup',__FILE__)
 IF(graph%nr/=A%nr)CALL oft_abort('Graph and matrix sizes do not match','dense_cbjprecond_setup',__FILE__)
+IF(self%nlocal<1)CALL oft_abort('"nlocal" must be >=1','dense_cbjprecond_setup',__FILE__)
 CALL dense_cbjprecond_delete(self)
 self%A=>A
-!---Diagonal scaling only
-IF(self%nlocal<=1)THEN
-  ALLOCATE(self%dinv(A%nr))
-  DO i=1,A%nr
-    self%dinv(i)=(1.d0,0.d0)/Amat(i,i)
-  END DO
-  self%initialized=.TRUE.
-  DEBUG_STACK_POP
-  RETURN
-END IF
 IF(oft_env%pm.AND.oft_env%head_proc)WRITE(*,'(2A,I6)')oft_indent,'nLocal = ',self%nlocal
 !---Partition graph
 ALLOCATE(part(A%nr))
-CALL partition_graph(graph,self%nlocal,part)
+IF(self%nlocal>1)THEN
+  CALL partition_graph(graph,self%nlocal,part)
+  IF(ANY(part<1.OR.part>self%nlocal))CALL oft_abort('Unowned row after partitioning', &
+    'dense_cbjprecond_setup',__FILE__)
+ELSE
+  part=1
+END IF
 ALLOCATE(self%blocks(self%nlocal))
 IF(self%loverlap)THEN
   !$omp parallel private(j,jr,k,eflag)
@@ -2483,9 +2480,6 @@ IF(self%loverlap)THEN
       DO k=graph%kr(jr),graph%kr(jr+1)-1
         eflag(graph%lc(k))=.TRUE.
       END DO
-    END DO
-    DO j=1,A%nr
-      IF(part(j)<0)eflag(j)=.FALSE.
     END DO
     !---Overlap rows are marked with negative indices (input only)
     self%blocks(i)%n=COUNT(eflag)
@@ -2505,7 +2499,6 @@ IF(self%loverlap)THEN
   !$omp end parallel
 ELSE
   DO i=1,A%nr
-    IF(part(i)<0)CYCLE
     self%blocks(part(i))%n=self%blocks(part(i))%n+1
   END DO
   DO i=1,self%nlocal
@@ -2513,7 +2506,6 @@ ELSE
     self%blocks(i)%n=0
   END DO
   DO i=1,A%nr
-    IF(part(i)<0)CYCLE
     self%blocks(part(i))%n=self%blocks(part(i))%n+1
     self%blocks(part(i))%ind(self%blocks(part(i))%n)=i
   END DO
@@ -2545,9 +2537,9 @@ END SUBROUTINE dense_cbjprecond_setup
 !> Precondition a linear system using a Block-Jacobi method with native dense
 !! complex matrices
 !!
-!! Computes \f$ u = M^{-1} g \f$, where \f$ M \f$ is the block-diagonal (or
-!! diagonal) approximation of the matrix. The input value of `u` is ignored and
-!! `g` is unchanged.
+!! Computes \f$ u = M^{-1} g \f$, where \f$ M \f$ is the block-diagonal
+!! approximation of the matrix. The input value of `u` is ignored and `g` is
+!! unchanged.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE dense_cbjprecond_apply(self,u,g)
 CLASS(oft_native_dense_cbjprecond), INTENT(inout) :: self !< Solver object
@@ -2561,34 +2553,28 @@ DEBUG_STACK_PUSH
 IF(.NOT.self%initialized)CALL oft_abort('Preconditioner has not been setup','dense_cbjprecond_apply',__FILE__)
 IF(g%n/=self%A%nr)CALL oft_abort('Row mismatch','dense_cbjprecond_apply',__FILE__)
 IF(u%n/=self%A%nc)CALL oft_abort('Col mismatch','dense_cbjprecond_apply',__FILE__)
+IF(self%nlocal/=SIZE(self%blocks))CALL oft_abort('"nlocal" changed since setup','dense_cbjprecond_apply',__FILE__)
 NULLIFY(uvals,gvals)
 CALL u%get_local(uvals)
 CALL g%get_local(gvals)
-IF(self%nlocal>1)THEN
-  uvals=(0.d0,0.d0)
-  !$omp parallel private(vloc,i,j,n)
-  ALLOCATE(vloc(self%max_block_size,2))
-  !$omp do schedule(static)
-  DO i=1,self%nlocal
-    n=self%blocks(i)%n
-    IF(n==0)CYCLE
-    DO j=1,n
-      vloc(j,1)=gvals(ABS(self%blocks(i)%ind(j)))
-    END DO
-    CALL zgemv('N',n,n,(1.d0,0.d0),self%blocks(i)%inv,n,vloc(:,1),1,(0.d0,0.d0),vloc(:,2),1)
-    DO j=1,n
-      IF(self%blocks(i)%ind(j)>0)uvals(self%blocks(i)%ind(j))=vloc(j,2)
-    END DO
+uvals=(0.d0,0.d0)
+!$omp parallel private(vloc,i,j,n)
+ALLOCATE(vloc(self%max_block_size,2))
+!$omp do schedule(static)
+DO i=1,self%nlocal
+  n=self%blocks(i)%n
+  IF(n==0)CYCLE
+  DO j=1,n
+    vloc(j,1)=gvals(ABS(self%blocks(i)%ind(j)))
   END DO
-  !$omp end do
-  DEALLOCATE(vloc)
-  !$omp end parallel
-ELSE
-  !$omp parallel do
-  DO i=1,self%A%nr
-    uvals(i)=self%dinv(i)*gvals(i)
+  CALL zgemv('N',n,n,(1.d0,0.d0),self%blocks(i)%inv,n,vloc(:,1),1,(0.d0,0.d0),vloc(:,2),1)
+  DO j=1,n
+    IF(self%blocks(i)%ind(j)>0)uvals(self%blocks(i)%ind(j))=vloc(j,2)
   END DO
-END IF
+END DO
+!$omp end do
+DEALLOCATE(vloc)
+!$omp end parallel
 CALL u%restore_local(uvals)
 DEALLOCATE(uvals,gvals)
 DEBUG_STACK_POP
@@ -2610,7 +2596,6 @@ IF(ASSOCIATED(self%blocks))THEN
   END DO
   DEALLOCATE(self%blocks)
 END IF
-IF(ASSOCIATED(self%dinv))DEALLOCATE(self%dinv)
 self%max_block_size=0
 NULLIFY(self%A)
 self%initialized=.FALSE.

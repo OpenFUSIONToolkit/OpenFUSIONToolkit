@@ -23,7 +23,7 @@ USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
 USE oft_native_la, ONLY: oft_native_dense_matrix, oft_native_dense_cmatrix
 USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
 USE oft_solver_base, ONLY: oft_solver
-USE oft_native_solvers, ONLY: oft_native_gmres_csolver, oft_native_dense_cbjprecond
+USE oft_native_solvers, ONLY: oft_native_gmres_csolver, oft_native_dense_cbjprecond, oft_diag_cscale
 USE oft_solver_utils, ONLY: create_diag_pre, create_native_solver, create_cg_solver
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
@@ -237,7 +237,6 @@ INTEGER(i4) :: i,j,k,io_unit,info
 REAL(r8) :: lam0
 REAL(r8), ALLOCATABLE :: senout(:,:)
 DOUBLE COMPLEX, POINTER, DIMENSION(:) :: x,b
-DOUBLE COMPLEX, POINTER, CONTIGUOUS, DIMENSION(:,:) :: Mmat
 TYPE(oft_sum_cmatrix), TARGET :: aca_Fmat
 TYPE(oft_native_dense_cmatrix), TARGET :: dense_Fmat
 CLASS(oft_vector), POINTER :: uloc
@@ -246,6 +245,7 @@ TYPE(oft_graph) :: graph
 TYPE(oft_native_gmres_csolver), TARGET :: frinv
 TYPE(oft_tw_hodlr_bjpre), TARGET :: frinv_pre
 TYPE(oft_native_dense_cbjprecond), TARGET :: frinv_dense_pre
+TYPE(oft_diag_cscale), TARGET :: frinv_diag_pre
 TYPE(oft_bin_file) :: floop_hist
 LOGICAL :: pm_save
 !---
@@ -279,25 +279,27 @@ IF(PRESENT(hodlr_op))THEN
     CALL oft_abort('Invalid "fr_limit" value (0,1,2)', 'run_fr', __FILE__)
   END SELECT
 ELSE
-  ALLOCATE(Mmat(self%nelems,self%nelems))
+  dense_Fmat%nr=self%nelems; dense_Fmat%nc=self%nelems
+  dense_Fmat%nrg=self%nelems; dense_Fmat%ncg=self%nelems
+  ALLOCATE(dense_Fmat%M(self%nelems,self%nelems))
   SELECT CASE(fr_limit)
   CASE(0)
     WRITE(*,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
-    Mmat=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
+    dense_Fmat%M=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
-        Mmat(i,self%Rmat%lc(j))=Mmat(i,self%Rmat%lc(j)) + self%Rmat%M(j)
+        dense_Fmat%M(i,self%Rmat%lc(j))=dense_Fmat%M(i,self%Rmat%lc(j)) + self%Rmat%M(j)
       END DO
     END DO
   CASE(1)
     WRITE(*,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
-    Mmat=(0.d0,1.d0)*self%Lmat
+    dense_Fmat%M=(0.d0,1.d0)*self%Lmat
   CASE(2)
     WRITE(*,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
-    Mmat=(0.d0,0.d0)
+    dense_Fmat%M=(0.d0,0.d0)
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
-        Mmat(i,self%Rmat%lc(j))=Mmat(i,self%Rmat%lc(j)) + self%Rmat%M(j)
+        dense_Fmat%M(i,self%Rmat%lc(j))=dense_Fmat%M(i,self%Rmat%lc(j)) + self%Rmat%M(j)
       END DO
     END DO
   CASE DEFAULT
@@ -308,12 +310,18 @@ END IF
 ALLOCATE(x(self%nelems))
 x=(0.d0,0.d0)
 IF(direct)THEN
-  CALL lapack_matinv(self%nelems,Mmat,info)
+  CALL lapack_matinv(self%nelems,dense_Fmat%M,info)
   IF(info/=0)CALL oft_abort('Matrix inversion failed','frequency_response',__FILE__)
-  CALL zgemv('N',self%nelems,self%nelems,(1.d0,0.d0),Mmat,self%nelems,b,1,(0.d0,0.d0),x,1)
-  DEALLOCATE(Mmat)
+  CALL zgemv('N',self%nelems,self%nelems,(1.d0,0.d0),dense_Fmat%M,self%nelems,b,1,(0.d0,0.d0),x,1)
+  CALL dense_Fmat%delete()
 ELSE
+  NULLIFY(aloc,bloc)
+  CALL self%Uloc%new(aloc)
+  CALL self%Uloc%new(bloc)
+  frinv%nrits=60
+  frinv%its=-1
   IF(PRESENT(hodlr_op))THEN
+    CALL aca_Fmat%assemble(aloc)
     frinv%pre=>frinv_pre
     frinv_pre%mf_obj=>hodlr_op
     frinv_pre%Rmat=>self%Rmat
@@ -321,26 +329,26 @@ ELSE
     frinv_pre%beta=aca_Fmat%alam
     frinv%A=>aca_Fmat
   ELSE
-    dense_Fmat%nr=self%nelems; dense_Fmat%nc=self%nelems
-    dense_Fmat%nrg=self%nelems; dense_Fmat%ncg=self%nelems
-    dense_Fmat%M=>Mmat
-    !---Block-Jacobi preconditioner partitioned using the graph of R
-    graph%nr=self%Rmat%nr
-    graph%nnz=self%Rmat%nnz
-    graph%kr=>self%Rmat%kr
-    graph%lc=>self%Rmat%lc
-    frinv_dense_pre%nlocal=MAX(1,INT(self%nelems/2000,4))
-    frinv_dense_pre%loverlap=.TRUE.
-    CALL frinv_dense_pre%setup(dense_Fmat,graph)
-    frinv%pre=>frinv_dense_pre
     frinv%A=>dense_Fmat
+    !---Converge on |r|/|u| only (as for the previous dense solver)
+    frinv%min_nits=10
+    frinv%atol=0.d0
+    frinv%rtol=0.d0
+    !---Block-Jacobi preconditioner (blocks of <=2000 rows) partitioned using the graph of R
+    frinv_dense_pre%nlocal=CEILING(REAL(self%nelems,r8)/2000.d0)
+    IF(frinv_dense_pre%nlocal>1)THEN
+      graph%nr=self%Rmat%nr
+      graph%nnz=self%Rmat%nnz
+      graph%kr=>self%Rmat%kr
+      graph%lc=>self%Rmat%lc
+      frinv_dense_pre%loverlap=.TRUE.
+      CALL frinv_dense_pre%setup(dense_Fmat,graph)
+      frinv%pre=>frinv_dense_pre
+    ELSE
+      CALL dense_Fmat%assemble(aloc)
+      frinv%pre=>frinv_diag_pre
+    END IF
   END IF
-  frinv%nrits=60
-  frinv%its=-1
-  NULLIFY(aloc,bloc)
-  CALL self%Uloc%new(aloc)
-  CALL self%Uloc%new(bloc)
-  IF(PRESENT(hodlr_op))CALL aca_Fmat%assemble(aloc)
   !---Solve system
   CALL aloc%restore_local(x)
   CALL bloc%restore_local(b)
@@ -355,8 +363,8 @@ ELSE
     CALL frinv_pre%delete()
   ELSE
     CALL frinv_dense_pre%delete()
-    NULLIFY(dense_Fmat%M)
-    DEALLOCATE(Mmat)
+    CALL frinv_diag_pre%delete()
+    CALL dense_Fmat%delete()
   END IF
 END IF
 driver(:,1)=REAL(x,8)
