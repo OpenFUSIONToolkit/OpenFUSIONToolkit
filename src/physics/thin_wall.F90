@@ -1023,6 +1023,83 @@ DO ip=1,ne
 END DO
 END FUNCTION tw_seg_seg_int
 !---------------------------------------------------------------------------------
+!> Sum over all pairs of straight segments of two polygons of \f$ (\hat{t}_a \cdot \hat{t}_b) \int_a \int_b
+!! dl\,dl' / \sqrt{|r-r'|^2+c^2} \f$
+!!
+!! Near pairs (midpoints closer than twice the longer segment) use the exact integral @ref tw_seg_seg_int.
+!! Other pairs are integrated exactly along B (@ref tw_seg_lineint) and with Gauss-Legendre along A: n = 1-4
+!! points, or two 4-point panels, from the ratio q of segment length to distance (error ~ (q/2)^(2n) < 1E-8).
+!---------------------------------------------------------------------------------
+FUNCTION tw_poly_poly_int(pa,na,pb,nb,c2) RESULT(val)
+INTEGER(i4), INTENT(in) :: na !< Number of points of polygon A
+REAL(r8), INTENT(in) :: pa(3,na) !< Points of polygon A
+INTEGER(i4), INTENT(in) :: nb !< Number of points of polygon B
+REAL(r8), INTENT(in) :: pb(3,nb) !< Points of polygon B
+REAL(r8), INTENT(in) :: c2 !< Softening c^2 (> 0)
+REAL(r8) :: val,ua(3),la,ma(3),q,d2,lmax,acc,x(3)
+REAL(r8), ALLOCATABLE :: ub(:,:),lb(:),mb(:,:)
+INTEGER(i4) :: ia,ib,n,ig
+REAL(r8), PARAMETER :: gx(4,4) = RESHAPE([0.5d0, 0.d0, 0.d0, 0.d0, &
+  0.5d0-0.5d0/SQRT(3.d0), 0.5d0+0.5d0/SQRT(3.d0), 0.d0, 0.d0, &
+  0.5d0-0.5d0*SQRT(0.6d0), 0.5d0, 0.5d0+0.5d0*SQRT(0.6d0), 0.d0, &
+  0.5d0-0.5d0*0.8611363115940526d0, 0.5d0-0.5d0*0.3399810435848563d0, &
+  0.5d0+0.5d0*0.3399810435848563d0, 0.5d0+0.5d0*0.8611363115940526d0], [4,4])
+REAL(r8), PARAMETER :: gw(4,4) = RESHAPE([1.d0, 0.d0, 0.d0, 0.d0, 0.5d0, 0.5d0, 0.d0, 0.d0, &
+  5.d0/18.d0, 8.d0/18.d0, 5.d0/18.d0, 0.d0, &
+  0.5d0*0.3478548451374538d0, 0.5d0*0.6521451548625461d0, 0.5d0*0.6521451548625461d0, &
+  0.5d0*0.3478548451374538d0], [4,4])
+val=0.d0
+ALLOCATE(ub(3,nb),lb(nb),mb(3,nb))
+DO ib=2,nb
+  ub(:,ib)=pb(:,ib)-pb(:,ib-1); lb(ib)=SQRT(SUM(ub(:,ib)**2))
+  IF(lb(ib)>0.d0)ub(:,ib)=ub(:,ib)/lb(ib)
+  mb(:,ib)=0.5d0*(pb(:,ib)+pb(:,ib-1))
+END DO
+DO ia=2,na
+  ua=pa(:,ia)-pa(:,ia-1); la=SQRT(SUM(ua**2))
+  IF(la<=0.d0)CYCLE
+  ua=ua/la; ma=0.5d0*(pa(:,ia)+pa(:,ia-1))
+  DO ib=2,nb
+    IF(lb(ib)<=0.d0)CYCLE
+    lmax=MAX(la,lb(ib))
+    d2=SUM((ma-mb(:,ib))**2)
+    IF(d2<4.d0*lmax*lmax)THEN
+      acc=tw_seg_seg_int(pa(:,ia-1),pa(:,ia),pb(:,ib-1),pb(:,ib),c2)
+    ELSE
+      q=lmax/SQRT(d2)
+      IF(q<2.d-4)THEN
+        n=1
+      ELSE IF(q<2.d-2)THEN
+        n=2
+      ELSE IF(q<9.d-2)THEN
+        n=3
+      ELSE IF(q<0.2d0)THEN
+        n=4
+      ELSE
+        n=8  ! two 4-point panels
+      END IF
+      acc=0.d0
+      IF(n<=4)THEN
+        DO ig=1,n
+          x=pa(:,ia-1)+gx(ig,n)*la*ua
+          acc=acc+gw(ig,n)*tw_seg_lineint(x,pb(:,ib-1),ub(:,ib),lb(ib),c2)
+        END DO
+      ELSE
+        DO ig=1,4
+          x=pa(:,ia-1)+0.5d0*gx(ig,4)*la*ua
+          acc=acc+0.5d0*gw(ig,4)*tw_seg_lineint(x,pb(:,ib-1),ub(:,ib),lb(ib),c2)
+          x=pa(:,ia-1)+(0.5d0+0.5d0*gx(ig,4))*la*ua
+          acc=acc+0.5d0*gw(ig,4)*tw_seg_lineint(x,pb(:,ib-1),ub(:,ib),lb(ib),c2)
+        END DO
+      END IF
+      acc=acc*la
+    END IF
+    val=val+DOT_PRODUCT(ua,ub(:,ib))*acc
+  END DO
+END DO
+DEALLOCATE(ub,lb,mb)
+END FUNCTION tw_poly_poly_int
+!---------------------------------------------------------------------------------
 !> Integral along a straight segment of the triangle potential \f$ \int_{tri} dA/|r-y| \f$ (@ref tw_compute_phipot),
 !! by Gauss-Legendre on panels graded toward the triangle (near-field element-coil coupling)
 !---------------------------------------------------------------------------------
@@ -1845,6 +1922,8 @@ REAL(8) :: rvec_i(3),r1,rmag,rvec_j(3),z1,cvec(3),coil_thickness,sqrt_e
 REAL(8) :: rgop(3,3),norm_i(3),area_i,dl_min,dl_max,elapsed_time
 REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:),ring_rz(:,:,:)
 LOGICAL, ALLOCATABLE :: ring_ok(:,:)
+INTEGER(4), ALLOCATABLE :: fil(:,:)
+INTEGER(4) :: nfil,f
 CLASS(oft_bmesh), POINTER :: bmesh
 INTEGER(4) :: ncoils_tot
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
@@ -1885,51 +1964,72 @@ IF((tw_obj%n_vcoils>0).AND.(ncoils_tot>0))THEN
   CALL oft_increase_indent
   CALL mytimer%tick()
   sqrt_e=SQRT(EXP(1.d0))
-  !$omp parallel private(i,ii,j,k,kk,tmp,rvec_i,r1,rmag,atmp,cvec,coil_thickness)
-  ALLOCATE(atmp(ncoils_tot,1))
-  !$omp do
+  !---Work list of V-coil filaments (balances the load across coil sets of very different sizes)
+  nfil=0
   DO l=1,tw_obj%n_vcoils
-    atmp=0.d0
+    nfil=nfil+coils_tot(l)%ncoils
+  END DO
+  ALLOCATE(fil(2,nfil))
+  nfil=0
+  DO l=1,tw_obj%n_vcoils
     DO i=1,coils_tot(l)%ncoils
-      coil_thickness=(coils_tot(l)%radius(i)**2)/sqrt_e
-      DO j=1,ncoils_tot
-        DO k=1,coils_tot(j)%ncoils
-          IF(ring_ok(i,l).AND.ring_ok(k,j))THEN
-            !---Two coaxial rings: the softened kernel 1/sqrt(|r-r'|^2+t) is the exact ring-ring mutual with the
-            !---height difference dz replaced by sqrt(dz^2+t), so sum dl.dl'/... = -8*pi^2*green
-            tmp=-8.d0*pi*pi*green(ring_rz(1,i,l),SQRT((ring_rz(2,i,l)-ring_rz(2,k,j))**2+coil_thickness), &
-              ring_rz(1,k,j),0.d0)*ring_rz(3,i,l)*ring_rz(3,k,j)
-          ELSE
-            !---Polygons: exact double integral of the softened kernel over each pair of straight segments
-            tmp=0.d0
-            DO ii=2,coils_tot(l)%coils(i)%npts
-              rvec_i = coils_tot(l)%coils(i)%pts(:,ii)-coils_tot(l)%coils(i)%pts(:,ii-1)
-              r1=SQRT(SUM(rvec_i**2))
-              IF(r1<=0.d0)CYCLE
-              DO kk=2,coils_tot(j)%coils(k)%npts
-                cvec = coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
-                rmag=SQRT(SUM(cvec**2))
-                IF(rmag<=0.d0)CYCLE
-                tmp = tmp + DOT_PRODUCT(rvec_i,cvec)/(r1*rmag)*tw_seg_seg_int(coils_tot(l)%coils(i)%pts(:,ii-1), &
-                  coils_tot(l)%coils(i)%pts(:,ii),coils_tot(j)%coils(k)%pts(:,kk-1),coils_tot(j)%coils(k)%pts(:,kk), &
-                  coil_thickness)
-              END DO
-            END DO
-          END IF
-          atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*coils_tot(l)%scales(i)*tmp
-        END DO
-      END DO
-    END DO
-    DO j=1,ncoils_tot
-      Acoil2coil_tmp(l,j) = atmp(j,1)
+      nfil=nfil+1; fil(:,nfil)=[l,i]
     END DO
   END DO
+  !$omp parallel private(f,l,i,ii,j,k,kk,tmp,atmp,coil_thickness)
+  ALLOCATE(atmp(tw_obj%n_vcoils,ncoils_tot))
+  atmp=0.d0
+  !$omp do schedule(dynamic,1)
+  DO f=1,nfil
+    l=fil(1,f); i=fil(2,f)
+    DO j=1,ncoils_tot
+      DO k=1,coils_tot(j)%ncoils
+        !---V-coil pairs are symmetric: each filament pair once (mirrored below), softening from both wire radii
+        IF(j<=tw_obj%n_vcoils)THEN
+          IF((j<l).OR.((j==l).AND.(k<i)))CYCLE
+          coil_thickness=0.5d0*(coils_tot(l)%radius(i)**2+coils_tot(j)%radius(k)**2)/sqrt_e
+        ELSE
+          coil_thickness=(coils_tot(l)%radius(i)**2)/sqrt_e
+        END IF
+        IF(ring_ok(i,l).AND.ring_ok(k,j))THEN
+          !---Two coaxial rings: the softened kernel 1/sqrt(|r-r'|^2+t) is the exact ring-ring mutual with the
+          !---height difference dz replaced by sqrt(dz^2+t), so sum dl.dl'/... = -8*pi^2*green
+          tmp=-8.d0*pi*pi*green(ring_rz(1,i,l),SQRT((ring_rz(2,i,l)-ring_rz(2,k,j))**2+coil_thickness), &
+            ring_rz(1,k,j),0.d0)*ring_rz(3,i,l)*ring_rz(3,k,j)
+        ELSE IF(ring_ok(i,l).OR.ring_ok(k,j))THEN
+          !---Ring and polygon (different coils): exact integral of the ring's kernel along each polygon segment
+          tmp=0.d0
+          IF(ring_ok(i,l))THEN
+            DO kk=2,coils_tot(j)%coils(k)%npts
+              tmp=tmp+tw_ring_seg_int(ring_rz(1:2,i,l),coils_tot(j)%coils(k)%pts(:,kk-1),coils_tot(j)%coils(k)%pts(:,kk))
+            END DO
+            tmp=tmp*ring_rz(3,i,l)
+          ELSE
+            DO ii=2,coils_tot(l)%coils(i)%npts
+              tmp=tmp+tw_ring_seg_int(ring_rz(1:2,k,j),coils_tot(l)%coils(i)%pts(:,ii-1),coils_tot(l)%coils(i)%pts(:,ii))
+            END DO
+            tmp=tmp*ring_rz(3,k,j)
+          END IF
+        ELSE
+          !---Polygons: exact double integral of the softened kernel for near segment pairs, Gauss-Legendre for far
+          tmp=tw_poly_poly_int(coils_tot(l)%coils(i)%pts,coils_tot(l)%coils(i)%npts, &
+            coils_tot(j)%coils(k)%pts,coils_tot(j)%coils(k)%npts,coil_thickness)
+        END IF
+        atmp(l,j)=atmp(l,j)+coils_tot(j)%scales(k)*coils_tot(l)%scales(i)*tmp
+        IF((j<=tw_obj%n_vcoils).AND.((j/=l).OR.(k/=i)))atmp(j,l)=atmp(j,l)+coils_tot(j)%scales(k)*coils_tot(l)%scales(i)*tmp
+      END DO
+    END DO
+  END DO
+  !$omp critical
+  Acoil2coil_tmp=Acoil2coil_tmp+atmp
+  !$omp end critical
   DEALLOCATE(atmp)
   !$omp end parallel
   elapsed_time=mytimer%tock()
   WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 END IF
 DEALLOCATE(coils_tot,ring_ok,ring_rz)
+IF(ALLOCATED(fil))DEALLOCATE(fil)
 !---Unpack passive and driver coils
 IF(ASSOCIATED(tw_obj%Acoil2coil))DEALLOCATE(tw_obj%Acoil2coil)
 ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
