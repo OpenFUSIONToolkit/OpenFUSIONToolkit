@@ -345,6 +345,44 @@ def run_jumpers(path, mp_q):
     mp_q.put(result)
 
 
+def run_hodlr_coarse(path, use_hodlr, mp_q):
+    """Current potential after a short time-domain run: HODLR L with the two-level preconditioner (iterative), or
+    dense L (direct)"""
+    result = False
+    try:
+        import h5py
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        tw = ThinCurr(myOFT)
+        tw.setup_model(mesh_file=path)
+        basepath = f'junction_coarse_{use_hodlr}/'
+        tw.setup_io(basepath=basepath)
+        if use_hodlr:
+            tw.set_hodlr_options(target_size=150, L_svd_tol=1.E-12, pre_coarse=True)
+        tw.compute_Mcoil()
+        tw.compute_Lmat(use_hodlr=use_hodlr)
+        tw.compute_Rmat()
+        tw.run_td(1.E-4, 10, direct=(not use_hodlr), coil_currs=np.array([[0.0, 0.0], [1.E-4, 1.E3], [1.0, 1.E3]]),
+                  lin_tol=1.E-12, lin_rtol=1.E-20, plot_freq=10)
+        with h5py.File(basepath + 'pThinCurr_0010.rst', 'r') as fid:
+            result = np.array(fid['U'])
+    except BaseException as e:
+        print(e)
+    mp_q.put(result)
+
+
+def test_hodlr_coarse():
+    """Two-level HODLR preconditioner (pre_coarse) on a junction mesh, against the dense direct solution"""
+    r, lc, reg = ring()
+    files, _ = write_pair(r, lc, reg, 'junction_ring_coarse')
+    ref = mp_run(run_hodlr_coarse, (files[0], False))
+    out = mp_run(run_hodlr_coarse, (files[0], True))
+    assert ref is not False and out is not False
+    assert np.max(np.abs(ref)) > 0.0
+    assert np.allclose(out, ref, rtol=0.0, atol=1.E-5*np.max(np.abs(ref)))
+
+
 def test_jumpers(tmp_path):
     from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil
     r, lc, reg, jumpers = tplate_jumpers()

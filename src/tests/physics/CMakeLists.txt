@@ -31,6 +31,10 @@ if( OFT_BUILD_TESTS )
   configure_file( oft_in_taylor_green.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( oft_in_taylor_green_p2_mf.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
+  # Axisymmetric Green's function tests
+  oft_add_test( test_axi_green.F90 )
+  configure_file( test_axi_green.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+
   # ThinCurr tests
   configure_file( test_ThinCurr.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( test_ThinCurr_junctions.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )

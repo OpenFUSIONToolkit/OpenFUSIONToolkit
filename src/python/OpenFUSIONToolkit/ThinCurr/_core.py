@@ -41,7 +41,8 @@ class ThinCurr():
             'L_aca_rel_tol': '0.05',
             'B_svd_tol': '-1.E-5',
             'B_aca_rel_tol': '0.05',
-            'pre_single': 'F'
+            'pre_single': 'F',
+            'pre_coarse': 'F'
         }
         self._oft_env.update_oft_in()
         ## Thin-wall model object
@@ -366,7 +367,7 @@ class ThinCurr():
         return data_in
 
     def set_hodlr_options(self,target_size=None,aca_min_its=None,aca_sep_thresh=None,L_svd_tol=None,
-                          L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None):
+                          L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None,pre_coarse=None):
         '''! Set HODLR options for ThinCurr model
 
         @param target_size Target size for HODLR blocks
@@ -377,6 +378,7 @@ class ThinCurr():
         @param B_svd_tol Tolerance for SVD compression of B-matrix blocks
         @param B_aca_rel_tol Relative tolerance for ACA compression of B-matrix blocks
         @param pre_single Compute, store, and apply HODLR block-Jacobi preconditioners in single precision?
+        @param pre_coarse Add a global coarse correction to HODLR block-Jacobi preconditioners (two-level preconditioner)?
         '''
         if target_size is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
@@ -396,6 +398,8 @@ class ThinCurr():
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['B_aca_rel_tol'] = '{0:.4E}'.format(B_aca_rel_tol)
         if pre_single is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_single'] = 'T' if pre_single else 'F'
+        if pre_coarse is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_coarse'] = 'T' if pre_coarse else 'F'
         self._oft_env.update_oft_in()
 
     def compute_Lmat(self,cache_file=None,use_hodlr=False):

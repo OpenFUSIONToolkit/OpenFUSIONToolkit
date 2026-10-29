@@ -33,7 +33,7 @@ USE oft_native_la, ONLY: oft_native_vector, oft_native_matrix, native_vector_cas
   native_vector_slice_push, native_vector_slice_pop, oft_native_dense_matrix
 USE oft_solver_base, ONLY: oft_solver, oft_csolver
 USE oft_lu, ONLY: lapack_matinv, lapack_cholesky
-USE axi_green, ONLY: green, axi_coil_set
+USE axi_green, ONLY: green, grad_green, axi_coil_set
 USE mhd_utils, ONLY: mu0
 #define MAX_EDGE_CONN 6
 IMPLICIT NONE
@@ -106,7 +106,9 @@ END TYPE tw_junctions
 !> Structure containing filament coil definition
 !---------------------------------------------------------------------------------
 TYPE :: tw_gen_coil
+  LOGICAL :: is_ring = .FALSE. !< Circular coil about the Z axis, defined by its radius and height?
   INTEGER(i4) :: npts = 0 !< Number of points in coil
+  REAL(r8) :: ring_rz(2) = 0.d0 !< Radius and height of a circular coil
   REAL(r8), POINTER, DIMENSION(:,:) :: pts => NULL() !< Points [3,npts]
 END TYPE tw_gen_coil
 !---------------------------------------------------------------------------------
@@ -183,10 +185,86 @@ END TYPE tw_type
 REAL(r8) :: quad_tols(3) = [0.75d0, 0.95d0, 0.995d0] !< Distance tolerances for quadrature order selection
 INTEGER(i4) :: quad_orders(3) = [18, 10, 6] !< Quadrature order for each tolerance
 REAL(r8), PARAMETER :: target_err = 1.d-8
+INTEGER(i4), PARAMETER :: tw_quad_far_max = 10 !< Highest quadrature order of far-field cell-pair integrals (closer pairs integrate one cell analytically)
+INTEGER(i4), PARAMETER :: tw_quad_far_np = 25 !< Number of points of the order `tw_quad_far_max` triangle rule (sizes cell-pair work arrays)
 REAL(r8), PARAMETER :: coil_min_rad = 1.d-6
+TYPE(oft_quad_type), TARGET, SAVE :: tw_quads(18) !< Triangle quadrature rules of orders 1-18 (shared)
+LOGICAL, SAVE :: tw_quads_ready = .FALSE. !< Have tw_quads been set up?
 integer(i4), public, parameter :: tw_idx_ver=1 !< File version for array indexing
+integer(i4), public, parameter :: tw_cache_ver=2 !< Version of cached matrix files (increment when a change invalidates existing caches)
 character(LEN=16), public, parameter :: tw_idx_path="ThinCurr_Version" !< HDF5 field name
 CONTAINS
+!---------------------------------------------------------------------------------
+!> Set up the shared triangle quadrature rules (done once, by the first @ref tw_setup)
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_quads_setup()
+INTEGER(i4) :: i
+IF(tw_quads_ready)RETURN
+DO i=1,18
+  CALL set_quad_2d(tw_quads(i),i)
+END DO
+IF(tw_quads(tw_quad_far_max)%np>tw_quad_far_np)CALL oft_abort('Far-field quadrature rule exceeds "tw_quad_far_np"', &
+  'tw_quads_setup',__FILE__)
+tw_quads_ready=.TRUE.
+END SUBROUTINE tw_quads_setup
+!---------------------------------------------------------------------------------
+!> Hash of the coil definitions of a model, seeded with the cache file version, for keys of cached matrices
+!!
+!! With `vcoils_only`, only what the self-inductance matrix depends on: the V-coils, without their resistances.
+!---------------------------------------------------------------------------------
+FUNCTION tw_coil_hash(self,vcoils_only) RESULT(hash)
+TYPE(tw_type), INTENT(in) :: self !< ThinCurr object
+LOGICAL, OPTIONAL, INTENT(in) :: vcoils_only !< Hash only the V-coils, without resistances (default: all coils)
+INTEGER(4) :: hash
+INTEGER(4) :: i
+LOGICAL :: lonly
+lonly=.FALSE.
+IF(PRESENT(vcoils_only))lonly=vcoils_only
+hash=tw_cache_ver
+IF(.NOT.lonly)THEN
+  DO i=1,self%n_icoils
+    hash=coil_set_hash(self%icoils(i),hash)
+  END DO
+END IF
+DO i=1,self%n_vcoils
+  hash=coil_set_hash(self%vcoils(i),hash)
+END DO
+CONTAINS
+!> Combine one coil set's definition (count, scales, radii, resistances unless vcoils_only, each coil's points or R, Z)
+FUNCTION coil_set_hash(coil_set,hash_in) RESULT(hash_out)
+TYPE(tw_coil_set), INTENT(in) :: coil_set
+INTEGER(4), INTENT(in) :: hash_in
+INTEGER(4) :: hash_out,j
+INTEGER(4), TARGET :: itmp(2)
+REAL(8), TARGET :: rtmp(2)
+itmp=[coil_set%ncoils,0]
+hash_out=oft_simple_hash(C_LOC(itmp),INT(4*2,8),starting_value=hash_in)
+IF(ASSOCIATED(coil_set%scales))hash_out=oft_simple_hash(C_LOC(coil_set%scales),INT(8*coil_set%ncoils,8),starting_value=hash_out)
+IF(ASSOCIATED(coil_set%radius))hash_out=oft_simple_hash(C_LOC(coil_set%radius),INT(8*coil_set%ncoils,8),starting_value=hash_out)
+IF(ASSOCIATED(coil_set%res_per_len).AND.(.NOT.lonly))hash_out=oft_simple_hash(C_LOC(coil_set%res_per_len),INT(8*coil_set%ncoils,8),starting_value=hash_out)
+DO j=1,coil_set%ncoils
+  itmp=[coil_set%coils(j)%npts,0]
+  IF(coil_set%coils(j)%is_ring)itmp(2)=1
+  hash_out=oft_simple_hash(C_LOC(itmp),INT(4*2,8),starting_value=hash_out)
+  IF(coil_set%coils(j)%is_ring)THEN
+    rtmp=coil_set%coils(j)%ring_rz
+    hash_out=oft_simple_hash(C_LOC(rtmp),INT(8*2,8),starting_value=hash_out)
+  ELSE
+    hash_out=oft_simple_hash(C_LOC(coil_set%coils(j)%pts),INT(8*3*coil_set%coils(j)%npts,8),starting_value=hash_out)
+  END IF
+END DO
+END FUNCTION coil_set_hash
+END FUNCTION tw_coil_hash
+!---------------------------------------------------------------------------------
+!> Hash of the mesh and coil definitions of a model, for keys of cached coil and sensor matrices
+!---------------------------------------------------------------------------------
+FUNCTION tw_model_hash(self) RESULT(hash)
+TYPE(tw_type), INTENT(in) :: self !< ThinCurr object
+INTEGER(4) :: hash
+hash=tw_coil_hash(self)
+hash=oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=hash)
+hash=oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8),starting_value=hash)
+END FUNCTION tw_model_hash
 !---------------------------------------------------------------------------------
 !> Number of elements on the model mesh before the junction reduction
 !!
@@ -218,6 +296,7 @@ TYPE(xml_node) :: coil_element
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Creating thin-wall model'
 CALL oft_increase_indent
+CALL tw_quads_setup
 CALL mesh_global_resolution(self%mesh)
 CALL bmesh_local_init(self%mesh,sync_normals=.TRUE.)
 !---Load ThinCurr-specific mesh information
@@ -689,19 +768,83 @@ DO i=1,SIZE(self%jumper_nsets)
 END DO
 END SUBROUTINE tw_save_debug
 !---------------------------------------------------------------------------------
+!> Define a circular coil about the Z axis from its radius and height
+!!
+!! The coil is flagged as circular, so couplings use the exact ring formulas. Its points (traversed
+!! counter-clockwise about +Z) are still generated: the polygon is integrated for elements too close to the ring for
+!! the exact formula and for mutuals with coils given as points, and it is used for plotting.
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_coil_set_ring(coil,rz,npts)
+TYPE(tw_gen_coil), INTENT(inout) :: coil !< Coil
+REAL(r8), INTENT(in) :: rz(2) !< Radius and height
+INTEGER(i4), INTENT(in) :: npts !< Number of points for the coil polygon (181 if <= 0)
+INTEGER(i4) :: k
+REAL(r8) :: theta
+coil%is_ring=.TRUE.
+coil%ring_rz=rz
+coil%npts=npts
+IF(coil%npts<=0)coil%npts=181
+ALLOCATE(coil%pts(3,coil%npts))
+DO k=1,coil%npts
+  theta=(k-1)*2.d0*pi/REAL(coil%npts-1,8)
+  coil%pts(:,k)=[rz(1)*COS(theta),rz(1)*SIN(theta),rz(2)]
+END DO
+END SUBROUTINE tw_coil_set_ring
+!---------------------------------------------------------------------------------
+!> Exact vector potential kernel \f$ \oint d\mathbf{l}'/|\mathbf{r}-\mathbf{r}'| \f$ of a circular coil about the Z axis
+!!
+!! For a unit current traversed counter-clockwise about +Z: \f$ A_\phi = -4 \pi G(R,Z;R_c,Z_c)/R \f$ (@ref axi_green::green)
+!---------------------------------------------------------------------------------
+FUNCTION tw_ring_avec(rz,pt) RESULT(avec)
+REAL(r8), INTENT(in) :: rz(2) !< Radius and height of the coil
+REAL(r8), INTENT(in) :: pt(3) !< Evaluation point
+REAL(r8) :: avec(3) !< Vector potential kernel
+REAL(r8) :: rp,aphi
+avec=0.d0
+rp=SQRT(pt(1)**2+pt(2)**2)
+IF(rp<1.d-12)RETURN
+aphi=-4.d0*pi*green(rp,pt(3),rz(1),rz(2))/rp
+avec(1:2)=[-aphi*pt(2)/rp,aphi*pt(1)/rp]
+END FUNCTION tw_ring_avec
+!---------------------------------------------------------------------------------
+!> Exact Biot-Savart kernel \f$ \oint d\mathbf{l}' \times (\mathbf{r}-\mathbf{r}')/|\mathbf{r}-\mathbf{r}'|^3 \f$ of a circular coil
+!! about the Z axis
+!!
+!! For a unit current traversed counter-clockwise about +Z, the curl of @ref tw_ring_avec:
+!! \f$ B_R = 4 \pi (\partial G/\partial Z)/R \f$, \f$ B_Z = -4 \pi (\partial G/\partial R)/R \f$
+!---------------------------------------------------------------------------------
+FUNCTION tw_ring_bvec(rz,pt) RESULT(bvec)
+REAL(r8), INTENT(in) :: rz(2) !< Radius and height of the coil
+REAL(r8), INTENT(in) :: pt(3) !< Evaluation point
+REAL(r8) :: bvec(3) !< Biot-Savart kernel
+REAL(r8) :: rp,fg,gg(2),br
+rp=SQRT(pt(1)**2+pt(2)**2)
+IF(rp<1.d-12)THEN ! On axis
+  bvec=[0.d0,0.d0,2.d0*pi*rz(1)**2/(rz(1)**2+(pt(3)-rz(2))**2)**1.5d0]
+  RETURN
+END IF
+CALL grad_green(rp,pt(3),rz(1),rz(2),fg,gg)
+br=4.d0*pi*gg(2)/rp
+bvec=[br*pt(1)/rp,br*pt(2)/rp,-4.d0*pi*gg(1)/rp]
+END FUNCTION tw_ring_bvec
+!---------------------------------------------------------------------------------
 !> Compute element to driver (Icoils) coupling matrix
+!!
+!! Circular coils about the Z axis are integrated with the exact vector potential of a ring (elliptic integrals)
+!! where they are well separated from an element; otherwise the coil polygon is integrated point by point.
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Ael2dr_exp(tw_obj,save_file)
 TYPE(tw_type), INTENT(inout) :: tw_obj !< Thin-wall model object
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 LOGICAL :: exists
-INTEGER(4) :: i,ii,j,jj,k,kk,ik,ncoils_tot,ih,ihp,ihc,file_counts(3),ierr,io_unit,iquad
+INTEGER(4) :: i,ii,j,jj,k,kk,ik,ncoils_tot,ih,ihp,ihc,file_counts(4),ierr,io_unit,iquad
 INTEGER(i4), ALLOCATABLE :: nrad_cross(:)
 REAL(8) :: tmp(3),cvec(3),cpt(3),pt_i(3),evec_i(3,3),pts_i(3,3),elapsed_time
 REAL(8) :: pot_tmp,rgop(3,3),area_i,norm_i(3),f(3),dl_min,dl_max,pot_last
-REAL(8), allocatable :: atmp(:,:),Ael2coil_tmp(:,:)
+REAL(8) :: avec(3),dring
+REAL(8), allocatable :: atmp(:,:),Ael2coil_tmp(:,:),ring_rz(:,:,:)
+LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
@@ -714,9 +857,9 @@ IF(PRESENT(save_file))THEN
       CALL oft_increase_indent
       OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
       READ(io_unit, IOSTAT=ierr)file_counts
-      IF((ierr/=0).OR.ANY(file_counts/=[tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils]))THEN
+      IF((ierr/=0).OR.ANY(file_counts/=[tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,tw_model_hash(tw_obj)]))THEN
         exists=.FALSE.
-        WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Sizes do not match'
+        WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Model, coils or cache version do not match'
       END IF
       IF(exists)THEN
         ALLOCATE(tw_obj%Ael2coil(tw_nelems_exp(tw_obj),tw_obj%n_vcoils))
@@ -763,10 +906,6 @@ IF(PRESENT(save_file))THEN
   END IF
 END IF
 !---Setup quadrature
-ALLOCATE(quads(18))
-DO i=1,18
-  CALL set_quad_2d(quads(i),i)
-END DO
 !---Build temporary coil set from all filaments in model
 ncoils_tot=tw_obj%n_vcoils+tw_obj%n_icoils
 ALLOCATE(coils_tot(ncoils_tot))
@@ -783,11 +922,24 @@ CALL oft_increase_indent
 CALL mytimer%tick
 ALLOCATE(Ael2coil_tmp(tw_nelems_exp(tw_obj),ncoils_tot),nrad_cross(ncoils_tot))
 nrad_cross=0
+!---Circular coils (rings about the Z axis): radius, height and orientation
+k=0
+DO j=1,ncoils_tot
+  k=MAX(k,coils_tot(j)%ncoils)
+END DO
+ALLOCATE(ring_ok(k,ncoils_tot),ring_rz(3,k,ncoils_tot))
+ring_ok=.FALSE.
+DO j=1,ncoils_tot
+  DO k=1,coils_tot(j)%ncoils
+    ring_ok(k,j)=coils_tot(j)%coils(k)%is_ring
+    ring_rz(:,k,j)=[coils_tot(j)%coils(k)%ring_rz(1),coils_tot(j)%coils(k)%ring_rz(2),1.d0]
+  END DO
+END DO
 Ael2coil_tmp=0.d0
 f=1.d0/3.d0
 !$omp parallel private(ii,ik,j,jj,k,kk,pts_i,pt_i,cvec, &
 !$omp cpt,tmp,atmp,evec_i,pot_tmp,pot_last,i,ih,ihp, &
-!$omp ihc,rgop,area_i,norm_i,dl_min,dl_max,iquad)
+!$omp ihc,rgop,area_i,norm_i,dl_min,dl_max,iquad,avec,dring)
 ALLOCATE(atmp(ncoils_tot,3))
 !$omp do
 DO i=1,bmesh%nc
@@ -803,6 +955,37 @@ DO i=1,bmesh%nc
   atmp=0.d0
   DO j=1,ncoils_tot
     DO k=1,coils_tot(j)%ncoils
+      !---Ring well separated from the element: integrate its exact vector potential over the element
+      IF(ring_ok(k,j))THEN
+        dl_min=1.d99
+        dl_max=SQRT(area_i*2.d0)
+        DO ii=1,3
+          dring=SQRT((SQRT(pts_i(1,ii)**2+pts_i(2,ii)**2)-ring_rz(1,k,j))**2+(pts_i(3,ii)-ring_rz(2,k,j))**2)
+          dl_min=MIN(dl_min,dring)
+          dl_max=MAX(dl_max,dring)
+        END DO
+        iquad=18
+        IF(dl_min>1.d-8)iquad=MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
+        IF(iquad<=10)THEN
+          !---Elements close to the ring use the polygon path below, which counts intersections itself
+          IF(dl_min<coils_tot(j)%radius(k))THEN
+            !$omp atomic
+            nrad_cross(j)=nrad_cross(j)+1
+          END IF
+          avec=0.d0
+          DO ii=1,tw_quads(iquad)%np
+            pt_i = tw_quads(iquad)%pts(1,ii)*pts_i(:,1) &
+              + tw_quads(iquad)%pts(2,ii)*pts_i(:,2) &
+              + tw_quads(iquad)%pts(3,ii)*pts_i(:,3)
+            avec=avec+tw_quads(iquad)%wts(ii)*tw_ring_avec(ring_rz(1:2,k,j),pt_i)
+          END DO
+          avec=avec*area_i*ring_rz(3,k,j)
+          DO jj=1,3
+            atmp(j,jj)=atmp(j,jj)+coils_tot(j)%scales(k)*DOT_PRODUCT(evec_i(:,jj),avec)
+          END DO
+          CYCLE
+        END IF
+      END IF
       tmp=0.d0
       pot_last=0.d0
       DO kk=1,coils_tot(j)%coils(k)%npts
@@ -828,11 +1011,11 @@ DO i=1,bmesh%nc
         ELSE
           pot_tmp=0.d0
           !$omp simd private(pt_i) reduction(+:pot_tmp)
-          DO ii=1,quads(iquad)%np
-            pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
-              + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-              + quads(iquad)%pts(3,ii)*pts_i(:,3)
-            pot_tmp = pot_tmp + quads(iquad)%wts(ii)/SQRT(SUM((pt_i-cpt)**2))
+          DO ii=1,tw_quads(iquad)%np
+            pt_i = tw_quads(iquad)%pts(1,ii)*pts_i(:,1) &
+              + tw_quads(iquad)%pts(2,ii)*pts_i(:,2) &
+              + tw_quads(iquad)%pts(3,ii)*pts_i(:,3)
+            pot_tmp = pot_tmp + tw_quads(iquad)%wts(ii)/SQRT(SUM((pt_i-cpt)**2))
           END DO
           pot_tmp=pot_tmp*area_i
         END IF
@@ -885,11 +1068,7 @@ DO i=1,tw_obj%n_icoils
   tw_obj%Ael2dr(:,i)=Ael2coil_tmp(:,i+tw_obj%n_vcoils)
 END DO
 !---Cleanup temporaries
-DEALLOCATE(Ael2coil_tmp,coils_tot)
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
+DEALLOCATE(Ael2coil_tmp,coils_tot,ring_ok,ring_rz)
 elapsed_time=mytimer%tock()
 WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 CALL oft_decrease_indent
@@ -899,7 +1078,7 @@ CALL tw_compute_Lmat_coils(tw_obj)
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-    WRITE(io_unit)tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils
+    WRITE(io_unit)tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,tw_model_hash(tw_obj)
     WRITE(io_unit)tw_obj%Ael2coil
     WRITE(io_unit)tw_obj%Ael2dr
     IF(tw_obj%n_vcoils>0)WRITE(io_unit)tw_obj%Acoil2coil
@@ -922,19 +1101,15 @@ LOGICAL :: exists
 INTEGER(4) :: i,ii,j,jj,k,kk,l,ik,jk,ih,ihp,ihc,file_counts(4),ierr,io_unit,iquad
 REAL(8) :: tmp,dl,pt_i(3),pt_j(3),evec_i(3,3),evec_j(3,3),pts_i(3,3),pt_i_last(3)
 REAL(8) :: rvec_i(3),r1,rmag,rvec_j(3),z1,cvec(3),cpt(3),coil_thickness,sqrt_e
-REAL(8) :: rgop(3,3),norm_i(3),area_i,dl_min,dl_max,pot_last,pot_tmp,elapsed_time
-REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:)
+REAL(8) :: rgop(3,3),norm_i(3),area_i,dl_min,dl_max,pot_last,pot_tmp,elapsed_time,tmp_seg
+REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:),ring_rz(:,:,:)
+LOGICAL, ALLOCATABLE :: ring_ok(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 INTEGER(4) :: ncoils_tot
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
-ALLOCATE(quads(18))
-DO i=1,18
-  CALL set_quad_2d(quads(i),i)
-END DO
 !---Build temporary coil set from all filaments in model
 ncoils_tot=tw_obj%n_vcoils
 IF(ASSOCIATED(tw_obj%Ael2dr))ncoils_tot=ncoils_tot+tw_obj%n_icoils
@@ -948,6 +1123,19 @@ IF(ASSOCIATED(tw_obj%Ael2dr))THEN
   END DO
 END IF
 bmesh=>tw_obj%mesh
+!---Circular coils (rings about the Z axis): radius, height and orientation
+k=0
+DO j=1,ncoils_tot
+  k=MAX(k,coils_tot(j)%ncoils)
+END DO
+ALLOCATE(ring_ok(k,ncoils_tot),ring_rz(3,k,ncoils_tot))
+ring_ok=.FALSE.
+DO j=1,ncoils_tot
+  DO k=1,coils_tot(j)%ncoils
+    ring_ok(k,j)=coils_tot(j)%coils(k)%is_ring
+    ring_rz(:,k,j)=[coils_tot(j)%coils(k)%ring_rz(1),coils_tot(j)%coils(k)%ring_rz(2),1.d0]
+  END DO
+END DO
 !---Compute coupling between coils
 ALLOCATE(Acoil2coil_tmp(tw_obj%n_vcoils,ncoils_tot))
 Acoil2coil_tmp=0.d0
@@ -956,34 +1144,43 @@ IF((tw_obj%n_vcoils>0).AND.(ncoils_tot>0))THEN
   CALL oft_increase_indent
   CALL mytimer%tick()
   sqrt_e=SQRT(EXP(1.d0))
-  !$omp parallel private(i,ii,j,k,kk,tmp,pt_i,rvec_i,atmp,cvec,cpt,coil_thickness,pot_tmp,pot_last,pt_i_last)
+  !$omp parallel private(i,ii,j,k,kk,tmp,tmp_seg,pt_i,rvec_i,atmp,cvec,cpt,coil_thickness,pot_tmp,pot_last,pt_i_last)
   ALLOCATE(atmp(ncoils_tot,1))
   !$omp do
   DO l=1,tw_obj%n_vcoils
     atmp=0.d0
     DO i=1,coils_tot(l)%ncoils
       coil_thickness=(coils_tot(l)%radius(i)**2)/sqrt_e
-      pt_i_last = coils_tot(l)%coils(i)%pts(:,1)
-      DO ii=2,coils_tot(l)%coils(i)%npts
-        rvec_i = coils_tot(l)%coils(i)%pts(:,ii)-coils_tot(l)%coils(i)%pts(:,ii-1)
-        pt_i = coils_tot(l)%coils(i)%pts(:,ii)
-        DO j=1,ncoils_tot
-          DO k=1,coils_tot(j)%ncoils
-            pot_last=0.d0
+      DO j=1,ncoils_tot
+        DO k=1,coils_tot(j)%ncoils
+          IF(ring_ok(i,l).AND.ring_ok(k,j))THEN
+            !---Two coaxial rings: the softened kernel 1/sqrt(|r-r'|^2+t) is the exact ring-ring mutual with the
+            !---height difference dz replaced by sqrt(dz^2+t), so sum dl.dl'/... = -8*pi^2*green
+            tmp=-8.d0*pi*pi*green(ring_rz(1,i,l),SQRT((ring_rz(2,i,l)-ring_rz(2,k,j))**2+coil_thickness), &
+              ring_rz(1,k,j),0.d0)*ring_rz(3,i,l)*ring_rz(3,k,j)
+          ELSE
             tmp=0.d0
-            DO kk=1,coils_tot(j)%coils(k)%npts
-              cpt = coils_tot(j)%coils(k)%pts(:,kk)
-              pot_tmp = (1.d0/SQRT(SUM((pt_i-cpt)**2) + coil_thickness) + 1.d0/SQRT(SUM((pt_i_last-cpt)**2) + coil_thickness))/2.d0
-              IF(kk>1)THEN
-                cvec = coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
-                tmp = tmp + DOT_PRODUCT(rvec_i,cvec)*(pot_tmp+pot_last)/2.d0
-              END IF
-              pot_last = pot_tmp
+            pt_i_last = coils_tot(l)%coils(i)%pts(:,1)
+            DO ii=2,coils_tot(l)%coils(i)%npts
+              rvec_i = coils_tot(l)%coils(i)%pts(:,ii)-coils_tot(l)%coils(i)%pts(:,ii-1)
+              pt_i = coils_tot(l)%coils(i)%pts(:,ii)
+              pot_last=0.d0
+              tmp_seg=0.d0
+              DO kk=1,coils_tot(j)%coils(k)%npts
+                cpt = coils_tot(j)%coils(k)%pts(:,kk)
+                pot_tmp = (1.d0/SQRT(SUM((pt_i-cpt)**2) + coil_thickness) + 1.d0/SQRT(SUM((pt_i_last-cpt)**2) + coil_thickness))/2.d0
+                IF(kk>1)THEN
+                  cvec = coils_tot(j)%coils(k)%pts(:,kk)-coils_tot(j)%coils(k)%pts(:,kk-1)
+                  tmp_seg = tmp_seg + DOT_PRODUCT(rvec_i,cvec)*(pot_tmp+pot_last)/2.d0
+                END IF
+                pot_last = pot_tmp
+              END DO
+              tmp = tmp + tmp_seg
+              pt_i_last = pt_i
             END DO
-            atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*coils_tot(l)%scales(i)*tmp
-          END DO
+          END IF
+          atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*coils_tot(l)%scales(i)*tmp
         END DO
-        pt_i_last = pt_i
       END DO
     END DO
     DO j=1,ncoils_tot
@@ -995,7 +1192,7 @@ IF((tw_obj%n_vcoils>0).AND.(ncoils_tot>0))THEN
   elapsed_time=mytimer%tock()
   WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 END IF
-DEALLOCATE(coils_tot)
+DEALLOCATE(coils_tot,ring_ok,ring_rz)
 !---Unpack passive and driver coils
 IF(ASSOCIATED(tw_obj%Acoil2coil))DEALLOCATE(tw_obj%Acoil2coil)
 ALLOCATE(tw_obj%Acoil2coil(tw_obj%n_vcoils,tw_obj%n_vcoils))
@@ -1019,10 +1216,6 @@ IF(ASSOCIATED(tw_obj%Ael2dr))THEN
 END IF
 DEALLOCATE(Acoil2coil_tmp)
 !
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Lmat_coils
@@ -1034,15 +1227,14 @@ TYPE(tw_type), TARGET, INTENT(in) :: row_model !< Thin-wall model object for row
 REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix
 TYPE(tw_type), TARGET, OPTIONAL, INTENT(in) :: col_model !< Thin-wall model object for columns
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
-INTEGER(4) :: i,ii,j,jj,ik,jk,imin,jmax,io_unit,ierr,file_counts(6),hash_tmp(6),iquad
+INTEGER(4) :: i,ii,j,jj,ik,jk,imin,jmax,io_unit,ierr,file_counts(6),hash_tmp(6)
 INTEGER(8) :: counts(4)
-REAL(8) :: tmp,dl_min,dl_max,f(3),elapsed_time
-REAL(8) :: pt_i(3),rgop(3,3),area_i,norm_i(3),evec_i(3,3),pts_i(3,3)
-REAL(8) :: pt_j(3),cgop(3,3),area_j,norm_j(3),evec_j(3,3),pts_j(3,3)
-LOGICAL :: vvclose_flag,close_flag,exists,Lself
+REAL(8) :: tmp,dl_min,f(3),elapsed_time
+REAL(8) :: area_i,evec_i(3,3),pts_i(3,3)
+REAL(8) :: area_j,evec_j(3,3),pts_j(3,3)
+LOGICAL :: exists,Lself
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
 TYPE(tw_type), POINTER :: row_obj,col_obj
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 row_obj=>row_model
@@ -1062,7 +1254,9 @@ ELSE
 END IF
 !
 IF(PRESENT(save_file))THEN
-  hash_tmp(3) = oft_simple_hash(C_LOC(row_obj%mesh%lc),INT(4*3*row_obj%mesh%nc,8))
+  !---Self inductance depends on the V-coils only (no I-coils or resistances); mutual inductance on no coils
+  hash_tmp(3) = oft_simple_hash(C_LOC(row_obj%mesh%lc),INT(4*3*row_obj%mesh%nc,8), &
+    starting_value=MERGE(tw_coil_hash(row_obj,vcoils_only=.TRUE.),tw_cache_ver,Lself))
   hash_tmp(4) = oft_simple_hash(C_LOC(col_obj%mesh%lc),INT(4*3*col_obj%mesh%nc,8))
   hash_tmp(5) = oft_simple_hash(C_LOC(row_obj%mesh%r),INT(8*3*row_obj%mesh%np,8))
   hash_tmp(6) = oft_simple_hash(C_LOC(col_obj%mesh%r),INT(8*3*col_obj%mesh%np,8))
@@ -1140,19 +1334,15 @@ CALL oft_increase_indent
 Lmat=0.d0
 CALL mytimer%tick
 !---Setup quadrature
-ALLOCATE(quads(18))
-DO i=1,18
-  CALL set_quad_2d(quads(i),i)
-END DO
 !
 rmesh=>row_obj%mesh
 cmesh=>col_obj%mesh
 !---
 counts=0
 f=1.d0/3.d0
-!$omp parallel private(ii,j,jj,ik,jk,pts_i,pts_j,tmp,iquad, &
-!$omp pt_i,pt_j,evec_i,evec_j,dl_min,dl_max,i,jmax,imin, &
-!$omp rgop,area_i,norm_i,cgop,area_j,norm_j,close_flag,vvclose_flag) reduction(+:counts)
+!$omp parallel private(ii,j,jj,ik,jk,pts_i,pts_j,tmp, &
+!$omp evec_i,evec_j,dl_min,i,jmax,imin, &
+!$omp area_i,area_j) reduction(+:counts)
 !$omp do schedule(dynamic,100)
 DO i=1,rmesh%nc
   ! CALL rmesh%jacobian(i,f,rgop,area_i)
@@ -1186,46 +1376,8 @@ DO i=1,rmesh%nc
       ! evec_j(:,jj)=cross_product(cgop(:,jj),norm_j)
       evec_j(:,jj)=col_obj%qbasis(:,jj,j)
     END DO
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,area_j)*2.d0) !-1.d99
-    !$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
-    DO ii=1,3
-      DO jj=1,3
-        dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-        dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-      END DO
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-      iquad = 18
-    ELSE
-      iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-    END IF
-    tmp=0.d0
-    IF(iquad>10)THEN
-      DO jj=1,quads(iquad)%np
-        pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-          + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-          + quads(iquad)%pts(3,jj)*pts_j(:,3)
-        tmp = tmp + quads(iquad)%wts(jj)*tw_compute_phipot(pts_i,pt_j)
-      END DO
-      tmp=tmp*area_j
-    ELSE
-      !$omp simd collapse(1) private(pt_i,pt_j) reduction(+:tmp)
-      DO ii=1,quads(iquad)%np
-        pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
-          + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-          + quads(iquad)%pts(3,ii)*pts_i(:,3)
-        DO jj=1,quads(iquad)%np
-          pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-            + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-            + quads(iquad)%pts(3,jj)*pts_j(:,3)
-          tmp = tmp + quads(iquad)%wts(jj)*quads(iquad)%wts(ii)/SQRT(SUM((pt_i-pt_j)**2))
-        END DO
-      END DO
-      tmp=tmp*area_i*area_j
-    END IF
+    !---Cell-pair integral of 1/|r-r'|
+    tmp=tw_cell_pair_kernel(pts_i,area_i,pts_j,area_j)
     !
     DO ii=1,3
       ik=row_obj%pmap(rmesh%lc(ii,i))
@@ -1297,10 +1449,6 @@ IF(Lself)THEN
 END IF
 !$omp end parallel
 Lmat = Lmat/(4.d0*pi)
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 elapsed_time=mytimer%tock()
 WRITE(*,'(3A)')oft_indent,'Time = ',time_to_string(elapsed_time)
 IF(PRESENT(save_file))THEN
@@ -1566,7 +1714,7 @@ INTEGER(4), INTENT(in) :: nsensors !< Number of flux loops
 TYPE(floop_sensor), POINTER, INTENT(in) :: sensors(:) !< List of flux loops
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
 LOGICAL :: exists
-INTEGER(4) :: i,ii,j,jj,k,kk,l,ik,jk,ih,ihp,ihc,file_counts(4),ierr,io_unit,iquad
+INTEGER(4) :: i,ii,j,jj,k,kk,l,ik,jk,ih,ihp,ihc,file_counts(5),ierr,io_unit,iquad,sens_hash
 REAL(8) :: tmp,dl,pt_i(3),pt_j(3),evec_i(3,3),evec_j(3,3),pts_i(3,3),pt_i_last(3)
 REAL(8) :: rvec_i(3),r1,rmag,rvec_j(3),z1,cvec(3),cpt(3),coil_thickness,elapsed_time
 REAL(8) :: rgop(3,3),norm_i(3),area_i,f(3),dl_min,dl_max,pot_last,pot_tmp
@@ -1574,10 +1722,14 @@ REAL(8), allocatable :: atmp(:,:),Acoil2sen_tmp(:,:),Acoil2coil_tmp(:,:)
 CLASS(oft_bmesh), POINTER :: bmesh
 INTEGER(4) :: ncoils_tot
 TYPE(tw_coil_set), POINTER, DIMENSION(:) :: coils_tot
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
+!---Key for cached matrices: mesh, coils, sensors and cache version
+sens_hash=tw_model_hash(tw_obj)
+DO i=1,nsensors
+  sens_hash=oft_simple_hash(C_LOC(sensors(i)%r),INT(8*3*sensors(i)%np,8),starting_value=sens_hash)
+END DO
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     INQUIRE(FILE=TRIM(save_file),EXIST=exists)
@@ -1586,7 +1738,7 @@ IF(PRESENT(save_file))THEN
       CALL oft_increase_indent
       OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
       READ(io_unit, IOSTAT=ierr)file_counts
-      IF((ierr/=0).OR.ANY(file_counts/=[tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,nsensors]))THEN
+      IF((ierr/=0).OR.ANY(file_counts/=[tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,nsensors,sens_hash]))THEN
         exists=.FALSE.
         WRITE(*,'(2A)')oft_indent,'Ignoring stored matrix: Sizes do not match'
       END IF
@@ -1627,10 +1779,6 @@ IF(PRESENT(save_file))THEN
   END IF
 END IF
 !
-ALLOCATE(quads(18))
-DO i=1,18
-  CALL set_quad_2d(quads(i),i)
-END DO
 bmesh=>tw_obj%mesh
 !---Compute coupling between vertices and sensors
 f=1.d0/3.d0
@@ -1678,11 +1826,11 @@ IF(nsensors>0)THEN
         ELSE
           tmp=0.d0
           !$omp simd private(pt_i) reduction(+:tmp)
-          DO ii=1,quads(iquad)%np
-            pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
-              + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-              + quads(iquad)%pts(3,ii)*pts_i(:,3)
-            tmp = tmp + quads(iquad)%wts(ii)/SQRT(SUM((pt_i-pt_j)**2))
+          DO ii=1,tw_quads(iquad)%np
+            pt_i = tw_quads(iquad)%pts(1,ii)*pts_i(:,1) &
+              + tw_quads(iquad)%pts(2,ii)*pts_i(:,2) &
+              + tw_quads(iquad)%pts(3,ii)*pts_i(:,3)
+            tmp = tmp + tw_quads(iquad)%wts(ii)/SQRT(SUM((pt_i-pt_j)**2))
           END DO
           tmp=tmp*area_i
         END IF
@@ -1752,6 +1900,12 @@ IF(nsensors>0.AND.ncoils_tot>0)THEN
         DO j=1,ncoils_tot
           IF(coils_tot(j)%sens_mask)CYCLE
           DO k=1,coils_tot(j)%ncoils
+            IF(coils_tot(j)%coils(k)%is_ring)THEN
+              tmp=DOT_PRODUCT(rvec_i,tw_ring_avec(coils_tot(j)%coils(k)%ring_rz,pt_i) &
+                + tw_ring_avec(coils_tot(j)%coils(k)%ring_rz,pt_i_last))/2.d0
+              atmp(j,1)=atmp(j,1)+coils_tot(j)%scales(k)*tmp
+              CYCLE
+            END IF
             tmp=0.d0
             pot_last = 0.d0
             DO kk=1,coils_tot(j)%coils(k)%npts
@@ -1812,15 +1966,11 @@ IF(nsensors>0)THEN
 END IF
 DEALLOCATE(Acoil2sen_tmp)
 !
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 !---
 IF(PRESENT(save_file))THEN
   IF(TRIM(save_file)/='none')THEN
     OPEN(NEWUNIT=io_unit,FILE=TRIM(save_file),FORM='UNFORMATTED')
-    WRITE(io_unit)tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,nsensors
+    WRITE(io_unit)tw_nelems_exp(tw_obj),tw_obj%n_vcoils,tw_obj%n_icoils,nsensors,sens_hash
     WRITE(io_unit)tw_obj%Ael2sen
     ! WRITE(io_unit)tw_obj%Acoil2sen
     WRITE(io_unit)tw_obj%Adr2sen
@@ -2042,9 +2192,13 @@ DO i=1,tw_obj%n_vcoils
   tw_obj%vcoils(i)%Rself=0.d0
   DO j=1,tw_obj%vcoils(i)%ncoils
     dl=0.d0
-    DO k=2,tw_obj%vcoils(i)%coils(j)%npts
-      dl = dl + SQRT(SUM((tw_obj%vcoils(i)%coils(j)%pts(:,k)-tw_obj%vcoils(i)%coils(j)%pts(:,k-1))**2))
-    END DO
+    IF(tw_obj%vcoils(i)%coils(j)%is_ring)THEN
+      dl = 2.d0*pi*tw_obj%vcoils(i)%coils(j)%ring_rz(1) ! Exact length of a circular coil
+    ELSE
+      DO k=2,tw_obj%vcoils(i)%coils(j)%npts
+        dl = dl + SQRT(SUM((tw_obj%vcoils(i)%coils(j)%pts(:,k)-tw_obj%vcoils(i)%coils(j)%pts(:,k-1))**2))
+      END DO
+    END IF
     tw_obj%vcoils(i)%Rself = tw_obj%vcoils(i)%Rself + tw_obj%vcoils(i)%res_per_len(j)*dl
   END DO
   WRITE(*,"(2A,1X,I4,A,ES12.4)")oft_indent,"Vcoil",i,": R [Ohm] = ",tw_obj%vcoils(i)%Rself !*pi*4.d-7
@@ -2074,58 +2228,189 @@ CALL oft_decrease_indent
 DEBUG_STACK_POP
 END SUBROUTINE tw_compute_Rmat_exp
 !---------------------------------------------------------------------------------
+!> Compute \f$ \int \int 1/|r-r'| dA dA' \f$ for a pair of triangles
+!!
+!! The quadrature order is chosen from the pair's separation; close pairs integrate the inner triangle analytically
+!! (@ref tw_compute_phipot). Uses the shared quadrature rules (@ref tw_quads_setup, done by @ref tw_setup).
+!---------------------------------------------------------------------------------
+FUNCTION tw_cell_pair_kernel(pts_i,area_i,pts_j,area_j) RESULT(tmp)
+REAL(8), INTENT(in) :: pts_i(3,3) !< Vertices of first triangle
+REAL(8), INTENT(in) :: area_i !< Area of first triangle
+REAL(8), INTENT(in) :: pts_j(3,3) !< Vertices of second triangle
+REAL(8), INTENT(in) :: area_j !< Area of second triangle
+REAL(8) :: tmp
+INTEGER(4) :: ii,jj,iquad,np
+REAL(8) :: dl_min,dl_max,d2,s,pt_i(3),pt_j(3),xj(tw_quad_far_np),yj(tw_quad_far_np),zj(tw_quad_far_np)
+!---Compute minimum separation (squared distances)
+dl_min=1.d99
+dl_max=MAX(area_i,area_j)*2.d0
+DO ii=1,3
+  DO jj=1,3
+    d2=SUM((pts_i(:,ii)-pts_j(:,jj))**2)
+    dl_min=MIN(dl_min,d2)
+    dl_max=MAX(dl_max,d2)
+  END DO
+END DO
+dl_min=SQRT(dl_min)
+dl_max=SQRT(dl_max)
+!---Chose quadrature order based on distance
+IF(dl_min<1.d-8)THEN
+  iquad = 18
+ELSE
+  iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
+END IF
+tmp=0.d0
+np=tw_quads(iquad)%np
+IF(iquad>tw_quad_far_max)THEN
+  DO jj=1,np
+    pt_j = tw_quads(iquad)%pts(1,jj)*pts_j(:,1) &
+      + tw_quads(iquad)%pts(2,jj)*pts_j(:,2) &
+      + tw_quads(iquad)%pts(3,jj)*pts_j(:,3)
+    tmp = tmp + tw_quads(iquad)%wts(jj)*tw_compute_phipot(pts_i,pt_j)
+  END DO
+  tmp=tmp*area_j
+ELSE
+  !---Map the second triangle's points once, then a vectorizable 1/r loop
+  DO jj=1,np
+    pt_j = tw_quads(iquad)%pts(1,jj)*pts_j(:,1) &
+      + tw_quads(iquad)%pts(2,jj)*pts_j(:,2) &
+      + tw_quads(iquad)%pts(3,jj)*pts_j(:,3)
+    xj(jj)=pt_j(1); yj(jj)=pt_j(2); zj(jj)=pt_j(3)
+  END DO
+  DO ii=1,np
+    pt_i = tw_quads(iquad)%pts(1,ii)*pts_i(:,1) &
+      + tw_quads(iquad)%pts(2,ii)*pts_i(:,2) &
+      + tw_quads(iquad)%pts(3,ii)*pts_i(:,3)
+    s=0.d0
+    !$omp simd reduction(+:s)
+    DO jj=1,np
+      s = s + tw_quads(iquad)%wts(jj)/SQRT((pt_i(1)-xj(jj))**2+(pt_i(2)-yj(jj))**2+(pt_i(3)-zj(jj))**2)
+    END DO
+    tmp = tmp + tw_quads(iquad)%wts(ii)*s
+  END DO
+  tmp=tmp*area_i*area_j
+END IF
+END FUNCTION tw_cell_pair_kernel
+!---------------------------------------------------------------------------------
+!> Compute the B-field at a point from the three basis functions of a triangle (without the 1/(4 pi) factor)
+!!
+!! Far points use quadrature of the Biot-Savart kernel; near points (and points on the cell) use centered finite
+!! differences of the analytic potential (@ref tw_compute_phipot). Uses the shared quadrature rules (@ref tw_quads_setup, done by @ref tw_setup).
+!---------------------------------------------------------------------------------
+FUNCTION tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_i,pt,va,B_dx) RESULT(atmp)
+REAL(8), INTENT(in) :: pts_i(3,3) !< Vertices of triangle
+REAL(8), INTENT(in) :: evec_i(3,3) !< Basis function current directions
+REAL(8), INTENT(in) :: area_i !< Area of triangle
+REAL(8), INTENT(in) :: norm_i(3) !< Unit normal of triangle
+REAL(8), INTENT(in) :: pt(3) !< Evaluation point
+REAL(8), INTENT(in) :: va !< Vertex area of evaluation point
+REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation
+REAL(8) :: atmp(3,3) !< B-field from each basis function [3,3]
+INTEGER(4) :: ii,jj,ik,iquad
+REAL(8) :: dl_min,dl_max,d2,tmp,pt_j(3),pt_i(3),diffvec(3),gvec(3)
+LOGICAL :: is_neighbor
+!---Compute minimum separation (squared distances)
+dl_min=1.d99
+dl_max=MAX(area_i,va/(pi**2))
+DO ii=1,3
+  d2=SUM((pts_i(:,ii)-pt)**2)
+  dl_min=MIN(dl_min,d2)
+  dl_max=MAX(dl_max,d2)
+END DO
+dl_min=SQRT(dl_min)
+dl_max=SQRT(dl_max)
+!---Chose quadrature order based on distance
+IF(dl_min<1.d-8)THEN
+  iquad = 18
+  is_neighbor=.TRUE.
+ELSE
+  iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
+  is_neighbor=.FALSE.
+END IF
+!
+pt_j=pt
+IF(iquad>10)THEN
+  IF(is_neighbor)THEN
+    pt_j = pt_j - norm_i*10.d0*B_dx ! Sample just inside face
+  END IF
+  diffvec=0.d0
+  DO ik=1,2
+    IF(ik==2)pt_j=pt_j+norm_i*20.d0*B_dx ! Sample just outside face
+    DO jj=1,3
+      ! Forward step
+      pt_j(jj)=pt_j(jj)+B_dx
+      tmp=tw_compute_phipot(pts_i,pt_j)
+      diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
+      ! Backward step
+      pt_j(jj)=pt_j(jj)-2.d0*B_dx
+      tmp=tw_compute_phipot(pts_i,pt_j)
+      diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
+      pt_j(jj)=pt_j(jj)+B_dx ! Reset point
+    END DO
+    IF(.NOT.is_neighbor)EXIT
+  END DO
+  IF(is_neighbor)diffvec=diffvec/2.d0
+  DO ik=1,3
+    atmp(1,ik) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
+    atmp(2,ik) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
+    atmp(3,ik) = diffvec(1)*evec_i(2,ik) - diffvec(2)*evec_i(1,ik)
+  END DO
+ELSE
+  !---sum_q w (e x d)/|d|^3 = e x sum_q w d/|d|^3: one pass over the points for all three basis functions
+  gvec=0.d0
+  DO ii=1,tw_quads(iquad)%np
+    pt_i = pt_j - (tw_quads(iquad)%pts(1,ii)*pts_i(:,1) &
+      + tw_quads(iquad)%pts(2,ii)*pts_i(:,2) &
+      + tw_quads(iquad)%pts(3,ii)*pts_i(:,3))
+    d2=SUM(pt_i**2)
+    gvec = gvec + pt_i*(tw_quads(iquad)%wts(ii)/(d2*SQRT(d2)))
+  END DO
+  gvec=gvec*area_i
+  DO ik=1,3
+    atmp(1,ik) = evec_i(2,ik)*gvec(3) - evec_i(3,ik)*gvec(2)
+    atmp(2,ik) = evec_i(3,ik)*gvec(1) - evec_i(1,ik)*gvec(3)
+    atmp(3,ik) = evec_i(1,ik)*gvec(2) - evec_i(2,ik)*gvec(1)
+  END DO
+END IF
+END FUNCTION tw_cell_point_Bkernel
+!---------------------------------------------------------------------------------
 !> Compute \f$ \int 1/(r-r') dA' \f$ for a triangle
 !---------------------------------------------------------------------------------
 FUNCTION tw_compute_phipot(pt_cell,pt) RESULT(phi)
 REAL(8), INTENT(in) :: pt_cell(3,3) !< Vertices defining triangle
 REAL(8), INTENT(in) :: pt(3) !< Observation point (r)
 REAL(8) :: phi
-REAL(8) :: gam(3),num,den,omega,nhat(3),c(3,3),r(3,3),rmag(3),tmp,yp(3),yp1(3)
-INTEGER(4) :: i
+REAL(8) :: nhat(3),a(3),b(3),r(3,3),rmag(3),e(3),elen,num,den,omega
+INTEGER(4) :: i,ip
 DEBUG_STACK_PUSH
 !---Get unit normal
-nhat = cross_product(pt_cell(:,2)-pt_cell(:,1),pt_cell(:,3)-pt_cell(:,2))
-nhat = nhat/SQRT(DOT_PRODUCT(nhat,nhat))
+a=pt_cell(:,2)-pt_cell(:,1)
+b=pt_cell(:,3)-pt_cell(:,2)
+nhat=[a(2)*b(3)-a(3)*b(2), a(3)*b(1)-a(1)*b(3), a(1)*b(2)-a(2)*b(1)]
+nhat=nhat/SQRT(SUM(nhat**2))
 !---Compute local vectors
 DO i=1,3
   r(:,i)=pt_cell(:,i)-pt
-  rmag(i)=SQRT(DOT_PRODUCT(r(:,i),r(:,i)))
-  c(:,i)=r(:,i)-DOT_PRODUCT(nhat,r(:,i))*nhat
+  rmag(i)=SQRT(SUM(r(:,i)**2))
 END DO
 !---Compute solid angle
-num=DOT_PRODUCT(r(:,1),cross_product(r(:,2),r(:,3)))
-den=PRODUCT(rmag) + DOT_PRODUCT(r(:,1),r(:,2))*rmag(3) &
-  + DOT_PRODUCT(r(:,1),r(:,3))*rmag(2) + DOT_PRODUCT(r(:,2),r(:,3))*rmag(1)
+num=r(1,1)*(r(2,2)*r(3,3)-r(3,2)*r(2,3)) + r(2,1)*(r(3,2)*r(1,3)-r(1,2)*r(3,3)) &
+  + r(3,1)*(r(1,2)*r(2,3)-r(2,2)*r(1,3))
+den=rmag(1)*rmag(2)*rmag(3) + SUM(r(:,1)*r(:,2))*rmag(3) &
+  + SUM(r(:,1)*r(:,3))*rmag(2) + SUM(r(:,2)*r(:,3))*rmag(1)
 omega=2.d0*ATAN2(num,den)
-!---Compute gammas
+!---Edge terms; nhat.(c_i x c_i+1) = nhat.(r_i x r_i+1) since the in-plane parts c differ from r by the same normal offset
+phi=-DOT_PRODUCT(nhat,r(:,1))*omega
 DO i=1,3
-  yp=r(:,i)
-  IF(i==3)THEN
-    yp1=r(:,1)
-  ELSE
-    yp1=r(:,i+1)
-  END IF
-  tmp=magnitude(yp1-yp)
-  num=magnitude(yp1)*tmp + DOT_PRODUCT(yp1,yp1-yp)
-  den=magnitude(yp)*tmp + DOT_PRODUCT(yp,yp1-yp)
-  IF(ABS(den)<1.d-14.OR.tmp<1.d-14)THEN
-    gam(i)=0.d0
-  ELSE
-    gam(i)=LOG(num/den)/tmp
-  END IF
+  ip=MOD(i,3)+1
+  e=r(:,ip)-r(:,i)
+  elen=SQRT(SUM(e**2))
+  num=rmag(ip)*elen + SUM(r(:,ip)*e)
+  den=rmag(i)*elen + SUM(r(:,i)*e)
+  IF(ABS(den)<1.d-14.OR.elen<1.d-14)CYCLE
+  phi=phi+(nhat(1)*(r(2,i)*r(3,ip)-r(3,i)*r(2,ip)) + nhat(2)*(r(3,i)*r(1,ip)-r(1,i)*r(3,ip)) &
+    + nhat(3)*(r(1,i)*r(2,ip)-r(2,i)*r(1,ip)))*LOG(num/den)/elen
 END DO
-!---Evalute final function
-phi=0.d0
-DO i=1,3
-  yp=c(:,i)
-  IF(i==3)THEN
-    yp1=c(:,1)
-  ELSE
-    yp1=c(:,i+1)
-  END IF
-  phi=phi+DOT_PRODUCT(nhat,cross_product(yp,yp1))*gam(i)
-END DO
-phi=phi-DOT_PRODUCT(nhat,r(:,1))*omega
 DEBUG_STACK_POP
 END FUNCTION tw_compute_phipot
 !---------------------------------------------------------------------------------
@@ -2135,30 +2420,24 @@ SUBROUTINE tw_compute_Bops_exp(self,B_dx,save_file)
 TYPE(tw_type), INTENT(inout) :: self
 REAL(r8), INTENT(in) :: B_dx
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: save_file
-REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
-REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
+REAL(r8) :: evec_i(3,3),pts_i(3,3),pt_j(3),diffvec(3),ecc(3)
+REAL(r8) :: cvec(3),cpt(3),tmp,area_i,norm_j(3),f(3)
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
-LOGICAL :: is_neighbor,load_success
-INTEGER(c_int), PARAMETER :: Bops_cache_ver = 1 !< Cache file version (used as hash starting value)
+INTEGER(4) :: i,ii,j,jj,ik,k,kk
+LOGICAL :: load_success
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 IF(PRESENT(save_file))THEN
   load_success=load_from_file()
   IF(load_success)RETURN
 END IF
 !
 bmesh=>self%mesh
-ALLOCATE(quads(18))
-DO i=1,18
-  CALL set_quad_2d(quads(i),i)
-END DO
 ALLOCATE(self%Bel(bmesh%np,tw_nelems_exp(self),3))
 self%Bel=0.d0
 f=1.d0/3.d0
 WRITE(*,'(2A)')oft_indent,'Building element->element magnetic reconstruction operator'
-!$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_i,pt_j,evec_i, &
-!$omp atmp,i,area_i,dl_min,dl_max,norm_j,diffvec,is_neighbor,iquad)
+!$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_j,evec_i, &
+!$omp atmp,i,area_i,norm_j,diffvec)
 ALLOCATE(atmp(3,3,bmesh%np))
 !$omp do schedule(dynamic,100)
 DO i=1,bmesh%nc
@@ -2174,64 +2453,8 @@ DO i=1,bmesh%nc
   !---Compute sensor couplings
   atmp=0.d0
   DO j=1,bmesh%np
-    pt_j=bmesh%r(:,j)
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,bmesh%va(j)/(pi**2))) !-1.d99
-    !!$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
-    DO ii=1,3
-      dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-      dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-      iquad = 18
-      is_neighbor=.TRUE.
-    ELSE
-      iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-      is_neighbor=.FALSE.
-    END IF
-    !
-    IF(iquad>10)THEN
-      IF(is_neighbor)THEN
-        ! pt_j = (SUM(pts_i,DIM=2)/3.d0 + 19.d0*pt_j)/20.d0 ! Move incrementally toward cell center
-        pt_j = pt_j - norm_j*10.d0*B_dx ! Sample just inside face
-      END IF
-      diffvec=0.d0
-      DO ik=1,2
-        IF(ik==2)pt_j=pt_j+norm_j*20.d0*B_dx ! Sample just outside face
-        DO jj=1,3
-          ! Forward step
-          pt_j(jj)=pt_j(jj)+B_dx
-          tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
-          ! Backward step
-          pt_j(jj)=pt_j(jj)-2.d0*B_dx
-          tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
-          pt_j(jj)=pt_j(jj)+B_dx ! Reset point
-        END DO
-        IF(.NOT.is_neighbor)EXIT
-      END DO
-      IF(is_neighbor)diffvec=diffvec/2.d0
-      DO ik=1,3
-        atmp(1,ik,j) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
-        atmp(2,ik,j) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
-        atmp(3,ik,j) = diffvec(1)*evec_i(2,ik) - diffvec(2)*evec_i(1,ik)
-      END DO
-    ELSE
-      DO ik=1,3
-        diffvec=0.d0
-        ! !$omp simd private(pt_i) reduction(+:diffvec)
-        DO ii=1,quads(iquad)%np
-          pt_i = pt_j - (quads(iquad)%pts(1,ii)*pts_i(:,1) &
-            + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-            + quads(iquad)%pts(3,ii)*pts_i(:,3))
-          diffvec = diffvec + cross_product(evec_i(:,ik),pt_i)*quads(iquad)%wts(ii)/(SUM(pt_i**2))**1.5d0
-        END DO
-        atmp(:,ik,j) = diffvec*area_i
-      END DO
-    END IF
+    !---Field from the cell's three basis functions
+    atmp(:,:,j)=tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_j,bmesh%r(:,j),bmesh%va(j),B_dx)
   END DO
   DO ii=1,3
     ik=self%pmap(bmesh%lc(ii,i))
@@ -2256,13 +2479,9 @@ DO i=1,bmesh%nc
 END DO
 DEALLOCATE(atmp)
 !$omp end parallel
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 !
 WRITE(*,'(2A)')oft_indent,'Building vcoil->element magnetic reconstruction operator'
-!$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
+!$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt)
 DO i=1,bmesh%np
   pt_j=bmesh%r(:,i)
   !---Compute driver contributions
@@ -2270,12 +2489,16 @@ DO i=1,bmesh%np
     ecc = 0.d0
     IF(self%vcoils(j)%sens_mask)CYCLE
     DO k=1,self%vcoils(j)%ncoils
-      diffvec=0.d0
-      DO kk=2,self%vcoils(j)%coils(k)%npts
-        cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
-        cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
-        diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
-      END DO
+      IF(self%vcoils(j)%coils(k)%is_ring)THEN
+        diffvec=tw_ring_bvec(self%vcoils(j)%coils(k)%ring_rz,pt_j)
+      ELSE
+        diffvec=0.d0
+        DO kk=2,self%vcoils(j)%coils(k)%npts
+          cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
+          cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
+          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+        END DO
+      END IF
       ecc=ecc+self%vcoils(j)%scales(k)*diffvec
     END DO
     DO jj=1,3
@@ -2290,7 +2513,7 @@ self%Bel=self%Bel/(4.d0*pi)
 WRITE(*,'(2A)')oft_indent,'Building icoil->element magnetic reconstruction operator'
 ALLOCATE(self%Bdr(bmesh%np,self%n_icoils,3))
 self%Bdr=0.d0
-!$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
+!$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt)
 DO i=1,bmesh%np
   pt_j=bmesh%r(:,i)
   !---Compute driver contributions
@@ -2298,12 +2521,16 @@ DO i=1,bmesh%np
     ecc = 0.d0
     IF(self%icoils(j)%sens_mask)CYCLE
     DO k=1,self%icoils(j)%ncoils
-      diffvec=0.d0
-      DO kk=2,self%icoils(j)%coils(k)%npts
-        cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
-        cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
-        diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
-      END DO
+      IF(self%icoils(j)%coils(k)%is_ring)THEN
+        diffvec=tw_ring_bvec(self%icoils(j)%coils(k)%ring_rz,pt_j)
+      ELSE
+        diffvec=0.d0
+        DO kk=2,self%icoils(j)%coils(k)%npts
+          cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
+          cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
+          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+        END DO
+      END IF
       ecc=ecc+self%icoils(j)%scales(k)*diffvec
     END DO
     DO jj=1,3
@@ -2326,7 +2553,7 @@ IF(TRIM(save_file)/='none')THEN
   IF(exists)THEN
     hash_tmp(1) = tw_nelems_exp(self)
     hash_tmp(2) = self%mesh%nc
-    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=Bops_cache_ver)
+    hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=tw_coil_hash(self))
     hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
     WRITE(*,'(3A)')oft_indent,'Loading B-field operator from file: ',TRIM(save_file)
     CALL hdf5_read(file_counts,TRIM(save_file),'MODEL_hash',success=exists)
@@ -2357,7 +2584,7 @@ INTEGER(4) :: hash_tmp(4)
 IF(TRIM(save_file)/='none')THEN
   hash_tmp(1) = tw_nelems_exp(self)
   hash_tmp(2) = self%mesh%nc
-  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=Bops_cache_ver)
+  hash_tmp(3) = oft_simple_hash(C_LOC(self%mesh%lc),INT(4*3*self%mesh%nc,8),starting_value=tw_coil_hash(self))
   hash_tmp(4) = oft_simple_hash(C_LOC(self%mesh%r),INT(8*3*self%mesh%np,8))
   WRITE(*,'(2A)')oft_indent,'Saving B-field operator to file: ',TRIM(save_file)
   CALL hdf5_create_file(TRIM(save_file))
@@ -2504,10 +2731,10 @@ TYPE(oft_1d_int), POINTER, INTENT(inout) :: hole_ns(:)
 CHARACTER(LEN=:), ALLOCATABLE, INTENT(out) :: error_string
 integer(4) :: ncoils,ncoil_sets,nread,coil_type,nmasked
 LOGICAL :: success
-INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims,n_jumpers
+INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims,n_jumpers,npts_tmp
 INTEGER(4), ALLOCATABLE :: dim_sizes(:),itmp2(:,:)
 INTEGER(4) :: psize(2)
-REAL(8) :: res_per_len,radius,dl,theta
+REAL(8) :: res_per_len,radius,dl,theta,rz_tmp(2)
 REAL(8), POINTER :: pts_tmp(:)
 CHARACTER(LEN=4) :: blknum,blknum2
 CHARACTER(LEN=16) :: coil_ind
@@ -2575,6 +2802,21 @@ IF(hdf5_field_exist(TRIM(filepath),'thincurr/coils'))THEN
     !
     DO j=1,ncoils
       WRITE(blknum2,'(I4.4)')j
+      coil_path='thincurr/coils/coilset'//blknum//'/coil'//blknum2
+      !---Circular coil: radius and height (and optionally the number of polygon points)
+      IF(hdf5_field_exist(TRIM(filepath),TRIM(coil_path)//'/RZ'))THEN
+        CALL hdf5_read(rz_tmp,TRIM(filepath),TRIM(coil_path)//'/RZ',success=success)
+        npts_tmp=0
+        IF(success.AND.hdf5_field_exist(TRIM(filepath),TRIM(coil_path)//'/NPTS'))THEN
+          CALL hdf5_read(npts_tmp,TRIM(filepath),TRIM(coil_path)//'/NPTS',success=success)
+        END IF
+        IF(.NOT.success)THEN
+          WRITE(coil_ind,'(I6,2X,I6)')i,j
+          CALL oft_abort('Failed to read circular coil for coilset/coil '//coil_ind,'tw_load_coils_hdf5',__FILE__)
+        END IF
+        CALL tw_coil_set_ring(coil_tmp%coils(j),rz_tmp,npts_tmp)
+        CYCLE
+      END IF
       CALL hdf5_field_get_sizes(TRIM(filepath),'thincurr/coils/coilset'//blknum//'/coil'//blknum2//'/PTS',ndims,dim_sizes)
       IF(ndims==2)THEN
         coil_tmp%coils(j)%npts=dim_sizes(2)
@@ -2847,16 +3089,16 @@ INTEGER(i4), INTENT(IN) :: name_offset !< Offset for coil set names
 INTEGER(4), INTENT(out) :: ncoils !< Number of coil sets found
 TYPE(tw_coil_set), POINTER, INTENT(out) :: coils(:) !< List of coil sets
 !---XML solver fields
-integer(4) :: ncoil_sets,nread,coil_type,nmasked
+integer(4) :: ncoil_sets,nread,nmasked,npts_tmp
 TYPE(xml_node) :: doc,thincurr_group
 TYPE(xml_node), POINTER :: coil_set,coil
 TYPE(xml_nodelist) :: coil_sets,coil_list
 !---
 LOGICAL :: success
-INTEGER(4) :: i,j,k,io_unit,ierr,id,cell,ipath,ndims
+INTEGER(4) :: i,j,io_unit,ierr,id,cell,ipath,ndims
 INTEGER(4), ALLOCATABLE :: dim_sizes(:)
-REAL(8) :: res_per_len,radius,dl,theta
-REAL(8), POINTER :: pts_tmp(:)
+REAL(8) :: res_per_len,radius,dl
+REAL(8), POINTER :: pts2_tmp(:,:)
 CHARACTER(LEN=16) :: coil_ind
 CHARACTER(LEN=OFT_PATH_SLEN) :: coil_path
 CHARACTER(LEN=:), ALLOCATABLE :: str_tmp
@@ -2965,51 +3207,36 @@ DO i=1,ncoils
       END IF
       DEALLOCATE(str_tmp)
     ELSE
-      !---Read number of points
+      !---Read number of points (optional; polygon resolution for a circular coil)
+      npts_tmp=0
       IF(xml_hasAttribute(coil,"npts"))THEN
-        CALL xml_read_attribute(coil,"npts",coil_tmp%coils(j)%npts,iostat=ierr)
+        CALL xml_read_attribute(coil,"npts",npts_tmp,iostat=ierr)
         IF(ierr/=0)THEN
           WRITE(coil_ind,'(I6,2X,I6)')i,j
           CALL oft_xml_abort('Error reading "npts" for coil '//coil_ind,'tw_load_coils_xml',__FILE__)
         END IF
-        coil_type=2
-      ELSE
-        coil_type=1
       END IF
-      SELECT CASE(coil_type)
-        CASE(1)
-          CALL xml_read_content(coil,pts_tmp,iostat=ierr)
-          IF(ierr/=0)THEN
-            WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_xml_abort('Error reading circular coil '//coil_ind,'tw_load_coils_xml',__FILE__)
-          END IF
-          IF(SIZE(pts_tmp,1)/=2)THEN
-            WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_abort('Incorrect size of pts in RZ coil '//coil_ind,'tw_load_coils_xml',__FILE__)
-          END IF
-          IF(coil_tmp%coils(j)%npts==0)coil_tmp%coils(j)%npts=181
-          ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
-          DO k=1,coil_tmp%coils(j)%npts
-            theta=(k-1)*2.d0*pi/REAL(coil_tmp%coils(j)%npts-1,8)
-            coil_tmp%coils(j)%pts(:,k)=[pts_tmp(1)*COS(theta),pts_tmp(1)*SIN(theta),pts_tmp(2)]
-          END DO
-          DEALLOCATE(pts_tmp)
-        CASE(2)
-          ! ALLOCATE(coil_tmp%coils(j)%pts(3,coil_tmp%coils(j)%npts))
-          CALL xml_read_content(coil,coil_tmp%coils(j)%pts,iostat=ierr)
-          IF(ierr/=0)THEN
-            WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_xml_abort('Error reading coil '//coil_ind,'tw_load_coils_xml',__FILE__)
-          END IF
-          IF(SIZE(coil_tmp%coils(j)%pts,1)/=3)THEN
-            WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_abort('Incorrect first dimension of coil points in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
-          END IF
-          IF(SIZE(coil_tmp%coils(j)%pts,2)/=coil_tmp%coils(j)%npts)THEN
-            WRITE(coil_ind,'(I6,2X,I6)')i,j
-            CALL oft_abort('Incorrect second dimension of coil points in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
-          END IF
-      END SELECT
+      !---Points: a single (R, Z) pair for a circular coil, otherwise rows of (x, y, z)
+      CALL xml_read_content(coil,pts2_tmp,iostat=ierr)
+      IF(ierr/=0)THEN
+        WRITE(coil_ind,'(I6,2X,I6)')i,j
+        CALL oft_xml_abort('Error reading coil '//coil_ind,'tw_load_coils_xml',__FILE__)
+      END IF
+      IF(SIZE(pts2_tmp)==2)THEN
+        CALL tw_coil_set_ring(coil_tmp%coils(j),RESHAPE(pts2_tmp,[2]),npts_tmp)
+        DEALLOCATE(pts2_tmp)
+      ELSE
+        IF(SIZE(pts2_tmp,1)/=3)THEN
+          WRITE(coil_ind,'(I6,2X,I6)')i,j
+          CALL oft_abort('Incorrect first dimension of coil points in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
+        END IF
+        IF((npts_tmp>0).AND.(SIZE(pts2_tmp,2)/=npts_tmp))THEN
+          WRITE(coil_ind,'(I6,2X,I6)')i,j
+          CALL oft_abort('Incorrect second dimension of coil points in coil '//coil_ind,'tw_load_coils_xml',__FILE__)
+        END IF
+        coil_tmp%coils(j)%npts=SIZE(pts2_tmp,2)
+        coil_tmp%coils(j)%pts=>pts2_tmp
+      END IF
     END IF
     !---Get scale factor
     IF(xml_hasAttribute(coil,"scale"))THEN

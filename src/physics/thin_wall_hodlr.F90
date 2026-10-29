@@ -59,6 +59,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: B_svd_tol = -1.d0 !< SVD tolerance for B-field operators
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
   LOGICAL :: pre_single = .FALSE. !< Compute, store, and apply block-Jacobi preconditioners in single precision?
+  LOGICAL :: pre_coarse = .FALSE. !< Add a global coarse correction to block-Jacobi preconditioners (two-level preconditioner)?
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_blocks => NULL() !< Indices of compressed off-diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: L_thread_ptr => NULL()
@@ -127,7 +128,15 @@ END TYPE
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
+  INTEGER(4) :: coarse_order = 1 !< Polynomial order of the coarse space on each block (1 or 2)
   INTEGER(4) :: max_block_size = 0
+  INTEGER(4) :: nz = 0 !< Number of coarse vectors
+  INTEGER(4), POINTER, DIMENSION(:) :: z_block => NULL() !< Dense block of each coarse vector (0: unit vector)
+  INTEGER(4), POINTER, DIMENSION(:) :: z_unit => NULL() !< Element of each unit coarse vector
+  REAL(r8), POINTER, DIMENSION(:,:) :: z_vals => NULL() !< Values of each block coarse vector on its block
+  REAL(r8), POINTER, DIMENSION(:,:) :: zlz => NULL() !< Z^T L Z
+  REAL(r8), POINTER, DIMENSION(:,:) :: zrz => NULL() !< Z^T R Z
+  REAL(r8), POINTER, DIMENSION(:,:) :: einv => NULL() !< (Z^T (alpha*L + beta*R) Z)^-1
   REAL(r8) :: alpha = 1.d0
   REAL(r8) :: beta = 1.d0
   REAL(r8) :: times = 0.d0
@@ -154,15 +163,12 @@ SUBROUTINE tw_compute_LmatHole(row_obj,col_obj,Lmat)
 TYPE(tw_type), INTENT(in) :: row_obj !< Thin-wall model object for rows
 TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
 REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Mutual inductance matrix
-INTEGER(4) :: i,ii,j,jj,ik,jk,imin,jmax,io_unit,ierr,file_counts(2),iquad
+INTEGER(4) :: i,ii,j,jj,ik,jk
 INTEGER(8) :: counts(4)
-REAL(8) :: tmp,dl_min,dl_max,f(3),elapsed_time
-REAL(8) :: pt_i(3),rgop(3,3),area_i,norm_i(3),evec_i(3,3),pts_i(3,3)
-REAL(8) :: pt_j(3),cgop(3,3),area_j,norm_j(3),evec_j(3,3),pts_j(3,3)
-LOGICAL :: vvclose_flag, close_flag,exists
+REAL(8) :: tmp,dl_min,f(3)
+REAL(8) :: area_i,evec_i(3,3),pts_i(3,3)
+REAL(8) :: area_j,evec_j(3,3),pts_j(3,3)
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
-type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 ! ALLOCATE(Lmat(col_obj%nelems,row_obj%nelems))
 !
@@ -170,19 +176,15 @@ DEBUG_STACK_PUSH
 Lmat=0.d0
 ! CALL mytimer%tick
 !---Setup quadrature
-ALLOCATE(quads(18))
-DO i=1,18
-    CALL set_quad_2d(quads(i),i)
-END DO
 !
 rmesh=>row_obj%mesh
 cmesh=>col_obj%mesh
 !---
 counts=0
 f=1.d0/3.d0
-!$omp parallel private(ii,j,jj,ik,jk,pts_i,pts_j,tmp,iquad, &
-!$omp pt_i,pt_j,evec_i,evec_j,dl_min,dl_max,i,jmax,imin, &
-!$omp rgop,area_i,norm_i,cgop,area_j,norm_j,close_flag,vvclose_flag) reduction(+:counts)
+!$omp parallel private(ii,j,jj,ik,jk,pts_i,pts_j,tmp, &
+!$omp evec_i,evec_j,dl_min,i, &
+!$omp area_i,area_j) reduction(+:counts)
 !$omp do schedule(dynamic,100)
 DO i=1,rmesh%nc
     IF(row_obj%kfh(i+1)-row_obj%kfh(i)==0)CYCLE
@@ -204,46 +206,8 @@ DO i=1,rmesh%nc
         ! evec_j(:,jj)=cross_product(cgop(:,jj),norm_j)
         evec_j(:,jj)=col_obj%qbasis(:,jj,j)
     END DO
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,area_j)*2.d0) !-1.d99
-    !$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
-    DO ii=1,3
-        DO jj=1,3
-        dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-        dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-        END DO
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-        iquad = 18
-    ELSE
-        iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-    END IF
-    tmp=0.d0
-    IF(iquad>10)THEN
-        DO jj=1,quads(iquad)%np
-        pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-            + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-            + quads(iquad)%pts(3,jj)*pts_j(:,3)
-        tmp = tmp + quads(iquad)%wts(jj)*tw_compute_phipot(pts_i,pt_j)
-        END DO
-        tmp=tmp*area_j
-    ELSE
-        !$omp simd collapse(1) private(pt_i,pt_j) reduction(+:tmp)
-        DO ii=1,quads(iquad)%np
-        pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
-            + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-            + quads(iquad)%pts(3,ii)*pts_i(:,3)
-        DO jj=1,quads(iquad)%np
-            pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-            + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-            + quads(iquad)%pts(3,jj)*pts_j(:,3)
-            tmp = tmp + quads(iquad)%wts(jj)*quads(iquad)%wts(ii)/SQRT(SUM((pt_i-pt_j)**2))
-        END DO
-        END DO
-        tmp=tmp*area_i*area_j
-    END IF
+    !---Cell-pair integral of 1/|r-r'|
+    tmp=tw_cell_pair_kernel(pts_i,area_i,pts_j,area_j)
     !
     DO ii=row_obj%kfh(i),row_obj%kfh(i+1)-1
         ik=ABS(row_obj%lfh(1,ii))
@@ -292,10 +256,6 @@ DO i=1,row_obj%n_vcoils
 END DO
 !$omp end parallel
 Lmat = Lmat/(4.d0*pi)
-DO i=1,18
-    CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 ! elapsed_time=mytimer%tock()
 ! WRITE(*,*)'  Time = ',elapsed_time
 DEBUG_STACK_POP
@@ -309,27 +269,18 @@ TYPE(tw_type), INTENT(in) :: col_obj !< Thin-wall model object for columns
 TYPE(oft_tw_block), INTENT(in) :: row_block !< Block of rows to compute
 TYPE(oft_tw_block), INTENT(in) :: col_block !< Block of columns to compute
 REAL(8), INTENT(out) :: Lmat(:,:) !< Mutual inductance matrix
-INTEGER(4) :: i,ii,j,jj,ik,jk,imin,jmax,io_unit,ierr,file_counts(2),iquad,irow,jcol
-INTEGER(4) :: rowi,coli
+INTEGER(4) :: i,ii,j,jj,ik,jk,irow,jcol
 INTEGER(8) :: counts(4)
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: rpmap,cpmap
-REAL(8) :: tmp,dl_min,dl_max,f(3),elapsed_time
-REAL(8) :: pt_i(3),rgop(3,3),area_i,norm_i(3),evec_i(3,3),pts_i(3,3)
-REAL(8) :: pt_j(3),cgop(3,3),area_j,norm_j(3),evec_j(3,3),pts_j(3,3)
-LOGICAL :: vvclose_flag, close_flag,exists
+REAL(8) :: tmp,dl_min,f(3)
+REAL(8) :: area_i,evec_i(3,3),pts_i(3,3)
+REAL(8) :: area_j,evec_j(3,3),pts_j(3,3)
 CLASS(oft_bmesh), POINTER :: rmesh,cmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
-type(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 !
 ! WRITE(*,*)'Building element<->element inductance matrix block'
 Lmat=0.d0
 ! CALL mytimer%tick
 !---Setup quadrature
-ALLOCATE(quads(18))
-DO i=1,18
-    CALL set_quad_2d(quads(i),i)
-END DO
 !
 rmesh=>row_obj%mesh
 cmesh=>col_obj%mesh
@@ -357,45 +308,8 @@ DO irow=1,row_block%ncells
         ! evec_j(:,jj)=cross_product(cgop(:,jj),norm_j)
         evec_j(:,jj)=col_obj%qbasis(:,jj,j)
     END DO
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,area_j)*2.d0) !-1.d99
-    DO ii=1,3
-        DO jj=1,3
-        dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-        dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pts_j(:,jj))**2)))
-        END DO
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-        iquad = 18
-    ELSE
-        iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-    END IF
-    tmp=0.d0
-    IF(iquad>10)THEN
-        DO jj=1,quads(iquad)%np
-        pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-            + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-            + quads(iquad)%pts(3,jj)*pts_j(:,3)
-        tmp = tmp + quads(iquad)%wts(jj)*tw_compute_phipot(pts_i,pt_j)
-        END DO
-        tmp=tmp*area_j
-    ELSE
-        ! !$omp simd collapse(1) private(pt_i,pt_j) reduction(+:tmp)
-        DO ii=1,quads(iquad)%np
-        pt_i = quads(iquad)%pts(1,ii)*pts_i(:,1) &
-            + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-            + quads(iquad)%pts(3,ii)*pts_i(:,3)
-        DO jj=1,quads(iquad)%np
-            pt_j = quads(iquad)%pts(1,jj)*pts_j(:,1) &
-            + quads(iquad)%pts(2,jj)*pts_j(:,2) &
-            + quads(iquad)%pts(3,jj)*pts_j(:,3)
-            tmp = tmp + quads(iquad)%wts(jj)*quads(iquad)%wts(ii)/SQRT(SUM((pt_i-pt_j)**2))
-        END DO
-        END DO
-        tmp=tmp*area_i*area_j
-    END IF
+    !---Cell-pair integral of 1/|r-r'|
+    tmp=tw_cell_pair_kernel(pts_i,area_i,pts_j,area_j)
     !
     DO ii=1,3
         ik=row_block%inv_map(rmesh%lc(ii,i))
@@ -411,10 +325,6 @@ DO irow=1,row_block%ncells
     END DO
 END DO
 Lmat = Lmat/(4.d0*pi)
-DO i=1,18
-    CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads) !,rpmap,cpmap)
 ! elapsed_time=mytimer%tock()
 ! WRITE(*,*)'  Time = ',elapsed_time
 DEBUG_STACK_POP
@@ -427,23 +337,17 @@ TYPE(tw_type), INTENT(inout) :: self
 REAL(8), INTENT(out) :: Bop(:,:,:) !< Magnetic field evaluation matrix
 REAL(8), INTENT(out) :: Bop_dr(:,:,:) !< Magnetic field evaluation matrix
 REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
-REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
-REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
+REAL(r8) :: evec_i(3,3),pts_i(3,3),pt_j(3),diffvec(3),ecc(3)
+REAL(r8) :: cvec(3),cpt(3),tmp,area_i,norm_j(3),f(3)
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad
-LOGICAL :: is_neighbor
+INTEGER(4) :: i,ii,j,jj,ik,k,kk
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 bmesh=>self%mesh
-ALLOCATE(quads(18))
-DO i=1,18
-    CALL set_quad_2d(quads(i),i)
-END DO
 Bop=0.d0
 f=1.d0/3.d0
 ! WRITE(*,*)'Building element->element magnetic reconstruction operator'
-!$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_i,pt_j,evec_i, &
-!$omp atmp,i,area_i,dl_min,dl_max,norm_j,diffvec,is_neighbor,iquad)
+!$omp parallel private(ii,j,jj,ik,pts_i,tmp,pt_j,evec_i, &
+!$omp atmp,i,area_i,norm_j,diffvec)
 ALLOCATE(atmp(3,3,bmesh%np))
 !$omp do schedule(dynamic,100)
 DO i=1,bmesh%nc
@@ -460,64 +364,8 @@ DO i=1,bmesh%nc
   !---Compute sensor couplings
   atmp=0.d0
   DO j=1,bmesh%np
-    pt_j=bmesh%r(:,j)
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,bmesh%va(j)/(pi**2))) !-1.d99
-    !!$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
-    DO ii=1,3
-      dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-      dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-      iquad = 18
-      is_neighbor=.TRUE.
-    ELSE
-      iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-      is_neighbor=.FALSE.
-    END IF
-    !
-    IF(iquad>10)THEN
-      IF(is_neighbor)THEN
-        ! pt_j = (SUM(pts_i,DIM=2)/3.d0 + 19.d0*pt_j)/20.d0 ! Move incrementally toward cell center
-        pt_j = pt_j - norm_j*10.d0*B_dx ! Sample just inside face
-      END IF
-      diffvec=0.d0
-      DO ik=1,2
-        IF(ik==2)pt_j=pt_j+norm_j*20.d0*B_dx ! Sample just outside face
-        DO jj=1,3
-          ! Forward step
-          pt_j(jj)=pt_j(jj)+B_dx
-          tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
-          ! Backward step
-          pt_j(jj)=pt_j(jj)-2.d0*B_dx
-          tmp=tw_compute_phipot(pts_i,pt_j)
-          diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
-          pt_j(jj)=pt_j(jj)+B_dx ! Reset point
-        END DO
-        IF(.NOT.is_neighbor)EXIT
-      END DO
-      IF(is_neighbor)diffvec=diffvec/2.d0
-      DO ik=1,3
-        atmp(1,ik,j) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
-        atmp(2,ik,j) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
-        atmp(3,ik,j) = diffvec(1)*evec_i(2,ik) - diffvec(2)*evec_i(1,ik)
-      END DO
-    ELSE
-      DO ik=1,3
-        diffvec=0.d0
-        ! !$omp simd private(pt_i) reduction(+:diffvec)
-        DO ii=1,quads(iquad)%np
-          pt_i = pt_j - (quads(iquad)%pts(1,ii)*pts_i(:,1) &
-            + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-            + quads(iquad)%pts(3,ii)*pts_i(:,3))
-          diffvec = diffvec + cross_product(evec_i(:,ik),pt_i)*quads(iquad)%wts(ii)/(SUM(pt_i**2))**1.5d0
-        END DO
-        atmp(:,ik,j) = diffvec*area_i
-      END DO
-    END IF
+    !---Field from the cell's three basis functions
+    atmp(:,:,j)=tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_j,bmesh%r(:,j),bmesh%va(j),B_dx)
   END DO
   DO ii=self%kfh(i),self%kfh(i+1)-1
     ik=ABS(self%lfh(1,ii))!+self%np_active
@@ -532,14 +380,10 @@ DO i=1,bmesh%nc
 END DO
 DEALLOCATE(atmp)
 !$omp end parallel
-DO i=1,18
-  CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
 !
 ! WRITE(*,*)'Building vcoil->element magnetic reconstruction operator'
 IF(self%n_vcoils>0)THEN
-  !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
+  !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt)
   DO i=1,bmesh%np
     pt_j=bmesh%r(:,i)
     !---Compute driver contributions
@@ -547,12 +391,16 @@ IF(self%n_vcoils>0)THEN
       ecc = 0.d0
       IF(self%vcoils(j)%sens_mask)CYCLE
       DO k=1,self%vcoils(j)%ncoils
-        diffvec=0.d0
-        DO kk=2,self%vcoils(j)%coils(k)%npts
-          cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
-          cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
-          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
-        END DO
+        IF(self%vcoils(j)%coils(k)%is_ring)THEN
+          diffvec=tw_ring_bvec(self%vcoils(j)%coils(k)%ring_rz,pt_j)
+        ELSE
+          diffvec=0.d0
+          DO kk=2,self%vcoils(j)%coils(k)%npts
+            cvec = self%vcoils(j)%coils(k)%pts(:,kk)-self%vcoils(j)%coils(k)%pts(:,kk-1)
+            cpt = (self%vcoils(j)%coils(k)%pts(:,kk)+self%vcoils(j)%coils(k)%pts(:,kk-1))/2.d0
+            diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+          END DO
+        END IF
         ecc=ecc+self%vcoils(j)%scales(k)*diffvec
       END DO
       DO jj=1,3
@@ -567,7 +415,7 @@ Bop=Bop/(4.d0*pi)
 Bop_dr=0.d0
 ! WRITE(*,*)'Building icoil->element magnetic reconstruction operator'
 IF(self%n_icoils>0)THEN
-  !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt,pot_tmp,pot_last)
+  !$omp parallel do private(ii,j,k,kk,pt_j,ecc,diffvec,cvec,cpt)
   DO i=1,bmesh%np
     pt_j=bmesh%r(:,i)
     !---Compute driver contributions
@@ -575,12 +423,16 @@ IF(self%n_icoils>0)THEN
       ecc = 0.d0
       IF(self%icoils(j)%sens_mask)CYCLE
       DO k=1,self%icoils(j)%ncoils
-        diffvec=0.d0
-        DO kk=2,self%icoils(j)%coils(k)%npts
-          cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
-          cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
-          diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
-        END DO
+        IF(self%icoils(j)%coils(k)%is_ring)THEN
+          diffvec=tw_ring_bvec(self%icoils(j)%coils(k)%ring_rz,pt_j)
+        ELSE
+          diffvec=0.d0
+          DO kk=2,self%icoils(j)%coils(k)%npts
+            cvec = self%icoils(j)%coils(k)%pts(:,kk)-self%icoils(j)%coils(k)%pts(:,kk-1)
+            cpt = (self%icoils(j)%coils(k)%pts(:,kk)+self%icoils(j)%coils(k)%pts(:,kk-1))/2.d0
+            diffvec = diffvec + cross_product(cvec,pt_j-cpt)/SUM((pt_j-cpt)**2)**1.5d0
+          END DO
+        END IF
         ecc=ecc+self%icoils(j)%scales(k)*diffvec
       END DO
       DO jj=1,3
@@ -592,7 +444,7 @@ END IF
 Bop_dr=Bop_dr*mu0/(4.d0*pi)
 END SUBROUTINE tw_compute_Bops_hole
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Compute one direction of a block of the B-field operator (see @ref tw_compute_Bops_block3)
 !---------------------------------------------------------------------------------
 SUBROUTINE tw_compute_Bops_block(self,Bop,row_block,col_block,dir,B_dx)
 TYPE(tw_type), INTENT(inout) :: self
@@ -601,30 +453,35 @@ TYPE(oft_tw_block), INTENT(in) :: row_block !< Block of rows to compute
 TYPE(oft_tw_block), INTENT(in) :: col_block !< Block of columns to compute
 INTEGER(4), INTENT(in) :: dir !< Direction of B-field to compute (1=x,2=y,3=z)
 REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
-REAL(r8) :: evec_i(3,3),evec_j(3),pts_i(3,3),pt_i(3),pt_j(3),diffvec(3),ecc(3)
-REAL(r8) :: r1,z1,rmag,cvec(3),cpt(3),tmp,area_i,dl_min,dl_max,norm_j(3),f(3),pot_tmp,pot_last
+REAL(8), ALLOCATABLE :: Bop3(:,:,:)
+ALLOCATE(Bop3(SIZE(Bop,1),SIZE(Bop,2),3))
+CALL tw_compute_Bops_block3(self,Bop3,row_block,col_block,B_dx)
+Bop=Bop3(:,:,dir)
+DEALLOCATE(Bop3)
+END SUBROUTINE tw_compute_Bops_block
+!---------------------------------------------------------------------------------
+!> Compute all three directions of a block of the B-field operator in one pass
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_compute_Bops_block3(self,Bop,row_block,col_block,B_dx)
+TYPE(tw_type), INTENT(inout) :: self
+REAL(8), INTENT(out) :: Bop(:,:,:) !< Magnetic field evaluation matrix [col_block%np,row_block%nelems,3]
+TYPE(oft_tw_block), INTENT(in) :: row_block !< Block of rows to compute
+TYPE(oft_tw_block), INTENT(in) :: col_block !< Block of columns to compute
+REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation of B-field
+REAL(r8) :: evec_i(3,3),pts_i(3,3)
+REAL(r8) :: area_i,norm_j(3),f(3)
 REAL(r8), ALLOCATABLE :: atmp(:,:,:)
-INTEGER(4) :: i,ii,j,jj,ik,jk,k,kk,iquad,irow,jcol
-LOGICAL :: is_neighbor
+INTEGER(4) :: i,ii,j,jj,ik,irow,jcol
 CLASS(oft_bmesh), POINTER :: bmesh
-TYPE(oft_quad_type), ALLOCATABLE :: quads(:)
 bmesh=>self%mesh
-ALLOCATE(quads(18))
-DO i=1,18
-    CALL set_quad_2d(quads(i),i)
-END DO
 Bop=0.d0
 f=1.d0/3.d0
-!WRITE(*,*)'Building element->element magnetic reconstruction operator'
 ALLOCATE(atmp(3,3,col_block%np))
 DO irow=1,row_block%ncells
     i = row_block%icell(irow)
-    ! CALL bmesh%jacobian(i,f,rgop,area_i)
-    ! CALL bmesh%norm(i,f,norm_i)
     area_i=bmesh%ca(i)
     DO ii=1,3
     pts_i(:,ii)=bmesh%r(:,bmesh%lc(ii,i))
-    ! evec_i(:,ii)=cross_product(rgop(:,ii),norm_i)
     evec_i(:,ii)=self%qbasis(:,ii,i)
     END DO
     CALL bmesh%norm(i,f,norm_j)
@@ -632,80 +489,22 @@ DO irow=1,row_block%ncells
     atmp=0.d0
     DO jcol=1,col_block%np
     j=col_block%ipts(jcol)
-    pt_j=bmesh%r(:,j)
-    !---Compute minimum separation
-    dl_min=1.d99
-    dl_max=SQRT(MAX(area_i,bmesh%va(j)/(pi**2))) !-1.d99
-    !!$omp simd collapse(1) reduction(max:dl_max) reduction(min:dl_min)
-    DO ii=1,3
-        dl_min=MIN(dl_min,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-        dl_max=MAX(dl_max,SQRT(SUM((pts_i(:,ii)-pt_j)**2)))
-    END DO
-    !---Chose quadrature order based on distance
-    IF(dl_min<1.d-8)THEN
-        iquad = 18
-        is_neighbor=.TRUE.
-    ELSE
-        iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
-        is_neighbor=.FALSE.
-    END IF
-    !
-    IF(iquad>10)THEN
-        IF(is_neighbor)THEN
-            ! pt_j = (SUM(pts_i,DIM=2)/3.d0 + 19.d0*pt_j)/20.d0 ! Move incrementally toward cell center
-            pt_j = pt_j - norm_j*10.d0*B_dx ! Sample just inside face
-        END IF
-        diffvec=0.d0
-        DO ik=1,2
-            IF(ik==2)pt_j=pt_j+norm_j*20.d0*B_dx ! Sample just outside face
-            DO jj=1,3
-                ! Forward step
-                pt_j(jj)=pt_j(jj)+B_dx
-                tmp=tw_compute_phipot(pts_i,pt_j)
-                diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
-                ! Backward step
-                pt_j(jj)=pt_j(jj)-2.d0*B_dx
-                tmp=tw_compute_phipot(pts_i,pt_j)
-                diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
-                pt_j(jj)=pt_j(jj)+B_dx ! Reset point
-            END DO
-            IF(.NOT.is_neighbor)EXIT
-        END DO
-        IF(is_neighbor)diffvec=diffvec/2.d0
-        DO ik=1,3
-            atmp(1,ik,jcol) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
-            atmp(2,ik,jcol) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
-            atmp(3,ik,jcol) = diffvec(1)*evec_i(2,ik) - diffvec(2)*evec_i(1,ik)
-        END DO
-    ELSE
-        DO ik=1,3
-            diffvec=0.d0
-            ! !$omp simd private(pt_i) reduction(+:diffvec)
-            DO ii=1,quads(iquad)%np
-                pt_i = pt_j - (quads(iquad)%pts(1,ii)*pts_i(:,1) &
-                + quads(iquad)%pts(2,ii)*pts_i(:,2) &
-                + quads(iquad)%pts(3,ii)*pts_i(:,3))
-                diffvec = diffvec + cross_product(evec_i(:,ik),pt_i)*quads(iquad)%wts(ii)/(SUM(pt_i**2))**1.5d0
-            END DO
-            atmp(:,ik,jcol) = diffvec*area_i
-        END DO
-    END IF
+    !---Field from the cell's three basis functions
+    atmp(:,:,jcol)=tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_j,bmesh%r(:,j),bmesh%va(j),B_dx)
     END DO
     DO ii=1,3
-        ik=row_block%inv_map(bmesh%lc(ii,i)) !self%pmap(bmesh%lc(ii,i))
+        ik=row_block%inv_map(bmesh%lc(ii,i))
         IF(ik==0)CYCLE
-        DO j=1,col_block%np
-            Bop(j,ik) = Bop(j,ik) + atmp(dir,ii,j)
+        DO jj=1,3
+            DO j=1,col_block%np
+                Bop(j,ik,jj) = Bop(j,ik,jj) + atmp(jj,ii,j)
+            END DO
         END DO
     END DO
 END DO
 Bop=Bop/(4.d0*pi)
 DEALLOCATE(atmp)
-DO i=1,18
-    CALL quads(i)%delete()
-END DO
-DEALLOCATE(quads)
-END SUBROUTINE tw_compute_Bops_block
+END SUBROUTINE tw_compute_Bops_block3
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -734,8 +533,9 @@ REAL(8) :: L_aca_rel_tol = -1.d0
 REAL(8) :: B_svd_tol = -1.d99
 REAL(8) :: B_aca_rel_tol = -1.d0
 LOGICAL :: pre_single = .FALSE.
+LOGICAL :: pre_coarse = .FALSE.
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
-  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single
+  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -765,6 +565,7 @@ self%min_rank=min_rank
 self%aca_min_its=aca_min_its
 self%aca_sep_thresh=aca_sep_thresh
 self%pre_single=pre_single
+self%pre_coarse=pre_coarse
 !
 L_approx_scale = 0.5d0*self%tw_obj%mesh%hrms
 IF(L_svd_tol<0.d0)THEN
@@ -876,7 +677,9 @@ END IF
 WRITE(*,'(2A,I6)')oft_indent,'# of SVD  =      ',sparse_count(2)
 WRITE(*,'(2A,I6)')oft_indent,'# of ACA+ =      ',sparse_count(1)
 IF(self%pre_single)WRITE(*,'(2A)')oft_indent,'Using single precision block preconditioners'
-CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')
+IF(self%pre_coarse)WRITE(*,'(2A)')oft_indent,'Using two-level block preconditioners'
+!---Diagnostic block field (only when plot output has been set up)
+IF(self%tw_obj%xdmf%n_grids>0)CALL self%tw_obj%mesh%save_vertex_scalar(point_block,self%tw_obj%xdmf,'ACA_Block')
 ALLOCATE(cell_mark(self%tw_obj%mesh%nc))
 DO j=1,self%nlevels
   DO i=1,self%levels(j)%nblocks
@@ -1077,7 +880,7 @@ IF(TRIM(save_file)/='none')THEN
   sparse_hash%nsparse = self%nsparse
   sparse_hash%aca_tol = REAL(self%L_aca_tol,c_float)
   sparse_hash%svd_tol = REAL(self%L_svd_tol,c_float)
-  hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+  hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8),starting_value=tw_cache_ver)
   DO i=1,self%nlevels
     hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
   END DO
@@ -1141,7 +944,7 @@ IF(TRIM(save_file)/='none')THEN
     sparse_hash%nsparse = self%nsparse
     sparse_hash%aca_tol = REAL(self%L_aca_tol,c_float)
     sparse_hash%svd_tol = REAL(self%L_svd_tol,c_float)
-    hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+    hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8),starting_value=tw_cache_ver)
     DO i=1,self%nlevels
       hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
     END DO
@@ -1660,6 +1463,7 @@ LOGICAL, ALLOCATABLE, DIMENSION(:) :: near_closure,cell_mark
 LOGICAL, ALLOCATABLE, DIMENSION(:,:) :: dense_blocks
 REAL(8) :: corners_i(3,8),corners_j(3,8),rmin(3),elapsed_time,avg_size,curr_size,target_size
 REAL(8), ALLOCATABLE, DIMENSION(:) :: point_block
+REAL(8), ALLOCATABLE, DIMENSION(:,:,:) :: Btmp
 TYPE(oft_native_dense_matrix), POINTER :: mat_tmp => NULL()
 type(oft_timer) :: mytimer
 WRITE(*,*)
@@ -1691,7 +1495,7 @@ mat_updated=.FALSE.
 ALLOCATE(dense_sizes(self%ndense),sparse_sizes(self%nsparse))
 dense_sizes=0
 sparse_sizes=0
-!$omp parallel private(i,ii,level,j,k,size_out,avg_size,dim,flip) reduction(+:compressed_size) &
+!$omp parallel private(i,ii,level,j,k,size_out,avg_size,dim,flip,Btmp) reduction(+:compressed_size) &
 !$omp reduction(.OR.:mat_updated)
 !$omp single
 nblocks_progress = INT(self%ndense*[0.1d0,0.2d0,0.3d0,0.4d0,0.5d0,0.6d0,0.7d0,0.8d0,0.9d0],4)
@@ -1703,14 +1507,20 @@ DO i=1,self%ndense
   j = self%dense_blocks(2,i)
   k = self%dense_blocks(3,i)
   !---Build full representation
-  DO dim=1,3
-    IF(.NOT.ASSOCIATED(self%dense_B_mats(i,dim)%M))THEN
-      mat_updated=.TRUE.
-      ALLOCATE(self%dense_B_mats(i,dim)%M(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems))
-      CALL tw_compute_Bops_block(self%tw_obj,self%dense_B_mats(i,dim)%M, &
-        self%levels(level)%blocks(k),self%levels(level)%blocks(j),dim,self%tw_obj%B_dx)
-    END IF
-  END DO
+  IF(.NOT.(ASSOCIATED(self%dense_B_mats(i,1)%M).AND.ASSOCIATED(self%dense_B_mats(i,2)%M) &
+    .AND.ASSOCIATED(self%dense_B_mats(i,3)%M)))THEN
+    mat_updated=.TRUE.
+    ALLOCATE(Btmp(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems,3))
+    CALL tw_compute_Bops_block3(self%tw_obj,Btmp, &
+      self%levels(level)%blocks(k),self%levels(level)%blocks(j),self%tw_obj%B_dx)
+    DO dim=1,3
+      IF(.NOT.ASSOCIATED(self%dense_B_mats(i,dim)%M))THEN
+        ALLOCATE(self%dense_B_mats(i,dim)%M(self%levels(level)%blocks(j)%np,self%levels(level)%blocks(k)%nelems))
+        self%dense_B_mats(i,dim)%M=Btmp(:,:,dim)
+      END IF
+    END DO
+    DEALLOCATE(Btmp)
+  END IF
   dense_sizes(i) = 3*self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
   compressed_size = compressed_size + dense_sizes(i)
   !$omp critical
@@ -1759,14 +1569,19 @@ DO i=1,self%nsparse
         !---IF ACA+ failed or diagonal compute dense matrix
         IF(size_out<0)THEN
           ALLOCATE(self%aca_B_dense(ii,dim)%M(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems))
-          CALL tw_compute_Bops_block(self%tw_obj,self%aca_B_dense(ii,dim)%M, &
-            self%levels(level)%blocks(j),self%levels(level)%blocks(k),dim,self%tw_obj%B_dx)
+          IF(.NOT.ALLOCATED(Btmp))THEN ! all three directions in one pass, reused by the other directions
+            ALLOCATE(Btmp(self%levels(level)%blocks(k)%np,self%levels(level)%blocks(j)%nelems,3))
+            CALL tw_compute_Bops_block3(self%tw_obj,Btmp, &
+              self%levels(level)%blocks(j),self%levels(level)%blocks(k),self%tw_obj%B_dx)
+          END IF
+          self%aca_B_dense(ii,dim)%M=Btmp(:,:,dim)
           CALL compress_block(ii,j,k,dim,self%B_svd_tol,size_out)
           ! size_out = self%levels(level)%blocks(j)%np*self%levels(level)%blocks(k)%nelems
         END IF
       END IF
       sparse_sizes(i) = sparse_sizes(i) + size_out
     END DO
+    IF(ALLOCATED(Btmp))DEALLOCATE(Btmp)
   END DO
   compressed_size = compressed_size + sparse_sizes(i)
   !$omp critical
@@ -1829,7 +1644,7 @@ IF(TRIM(save_file)/='none')THEN
   sparse_hash%nsparse = self%nsparse
   sparse_hash%aca_tol = REAL(self%B_aca_tol,c_float)
   sparse_hash%svd_tol = REAL(self%B_svd_tol,c_float)
-  hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+  hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8),starting_value=tw_cache_ver)
   DO i=1,self%nlevels
     hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
   END DO
@@ -1906,7 +1721,7 @@ IF(TRIM(save_file)/='none')THEN
     sparse_hash%nsparse = self%nsparse
     sparse_hash%aca_tol = REAL(self%B_aca_tol,c_float)
     sparse_hash%svd_tol = REAL(self%B_svd_tol,c_float)
-    hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8))
+    hash_tmp(4) = oft_simple_hash(C_LOC(sparse_hash),INT(c_sizeof(sparse_hash),8),starting_value=tw_cache_ver)
     DO i=1,self%nlevels
       hash_tmp(4) = oft_simple_hash(C_LOC(self%levels(i)%mat_mask),INT(4*self%levels(i)%nblocks*self%levels(i)%nblocks,8),starting_value=hash_tmp(4))
     END DO
@@ -3338,7 +3153,7 @@ CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
 CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
 CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
 !---
-INTEGER(4) :: i,j,k,l,n,level,iblock,max_size
+INTEGER(4) :: i,j,k,l,n,level,iblock,max_size,info
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: imap,hole_inds
 REAL(8), POINTER, DIMENSION(:) :: utmp,gtmp,ue,ge
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: vloc
@@ -3409,6 +3224,16 @@ IF(self%refactor)THEN
     CALL invert_block(self%inverse_mats(i),n)
   END IF
   DEALLOCATE(imap)
+  !---Coarse correction: Z^T (alpha*L + beta*R) Z, from the stored Z^T L Z and Z^T R Z
+  IF(self%mf_obj%pre_coarse)THEN
+    IF(.NOT.ASSOCIATED(self%zlz))CALL rbjprecond_coarse_setup(self)
+    IF(self%nz>0)THEN
+      IF(.NOT.ASSOCIATED(self%einv))ALLOCATE(self%einv(self%nz,self%nz))
+      self%einv=self%alpha*self%zlz+self%beta*self%zrz
+      CALL lapack_cholesky(self%nz,self%einv,info)
+      IF(info/=0)CALL oft_abort("coarse factorization failed","rbjprecond_apply",__FILE__)
+    END IF
+  END IF
   self%refactor=.FALSE.
 END IF
 !
@@ -3451,6 +3276,8 @@ ELSE
   DEALLOCATE(vloc)
 END IF
 !$omp end parallel
+!---Coarse correction on the expanded residual/solution (same as gtmp/utmp without junctions)
+IF(self%mf_obj%pre_coarse.AND.(self%nz>0))CALL rbjprecond_coarse_apply(self,ge,ue)
 IF(ASSOCIATED(self%mf_obj%tw_obj%junc))THEN
   CALL tw_junction_reduce_vec(self%mf_obj%tw_obj,ue,utmp)
   DEALLOCATE(ue,ge)
@@ -3522,6 +3349,182 @@ END IF
 END SUBROUTINE apply_block
 END SUBROUTINE rbjprecond_apply
 !------------------------------------------------------------------------------
+!> Build the coarse space of the two-level preconditioner and its projections of L and R
+!!
+!! On each diagonal (leaf) block: a constant and the three coordinates of the element positions, orthonormalised
+!! on the block (directions the block does not span are dropped); and a unit vector for each hole and V-coil.
+!! These are the smooth, long-range current patterns block-Jacobi cannot represent.
+!!
+!! The vectors are defined on the element indices of the blocks. For meshes split at junctions these are the
+!! expanded elements, and the coarse space is \f$ Z = P^T Z_{exp} \f$: each vector is reduced before the L and R
+!! products, and the products are expanded before the projection, so that \f$ Z^T A Z \f$ is exact.
+!------------------------------------------------------------------------------
+SUBROUTINE rbjprecond_coarse_setup(self)
+CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
+INTEGER(4) :: i,j,k,m,c,n,level,iblock,nmax,nunit,nfun
+REAL(r8) :: nrm,nrm0,cen(3),ext
+REAL(r8), ALLOCATABLE :: zb(:,:)
+REAL(8), POINTER, DIMENSION(:) :: vals,wvals
+REAL(8), ALLOCATABLE, DIMENSION(:) :: rvals,wexp
+CLASS(oft_vector), POINTER :: zvec,azvec
+TYPE(tw_type), POINTER :: tw
+tw=>self%mf_obj%tw_obj
+nunit=tw%nholes+tw%n_vcoils
+nmax=0
+DO i=1,self%mf_obj%ndense
+  nmax=MAX(nmax,self%mf_obj%levels(self%mf_obj%dense_blocks(1,i))%blocks(self%mf_obj%dense_blocks(2,i))%nelems)
+END DO
+nfun=4
+IF(self%coarse_order>1)nfun=10
+ALLOCATE(self%z_block(nfun*self%mf_obj%ndense+nunit),self%z_unit(nfun*self%mf_obj%ndense+nunit))
+ALLOCATE(self%z_vals(nmax,nfun*self%mf_obj%ndense+nunit),zb(nmax,nfun))
+self%z_vals=0.d0
+c=0
+DO i=1,self%mf_obj%ndense
+  level=self%mf_obj%dense_blocks(1,i)
+  iblock=self%mf_obj%dense_blocks(2,i)
+  n=self%mf_obj%levels(level)%blocks(iblock)%nelems
+  cen=0.d0
+  DO j=1,n
+    cen=cen+tw%mesh%r(:,tw%lpmap_inv(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)))
+  END DO
+  cen=cen/REAL(n,8)
+  ext=1.d-30
+  DO j=1,n
+    zb(j,1)=1.d0
+    zb(j,2:4)=tw%mesh%r(:,tw%lpmap_inv(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)))-cen
+    ext=MAX(ext,MAXVAL(ABS(zb(j,2:4))))
+  END DO
+  zb(1:n,2:4)=zb(1:n,2:4)/ext
+  IF(nfun==10)THEN
+    zb(1:n,5)=zb(1:n,2)**2; zb(1:n,6)=zb(1:n,3)**2; zb(1:n,7)=zb(1:n,4)**2
+    zb(1:n,8)=zb(1:n,2)*zb(1:n,3); zb(1:n,9)=zb(1:n,2)*zb(1:n,4); zb(1:n,10)=zb(1:n,3)*zb(1:n,4)
+  END IF
+  !---Modified Gram-Schmidt on the block, dropping directions the block does not span
+  nrm0=SQRT(REAL(n,8))
+  DO m=1,nfun
+    DO k=1,m-1
+      IF(SUM(zb(1:n,k)**2)>0.d0)zb(1:n,m)=zb(1:n,m)-DOT_PRODUCT(zb(1:n,k),zb(1:n,m))*zb(1:n,k)
+    END DO
+    nrm=SQRT(SUM(zb(1:n,m)**2))
+    IF(nrm>1.d-6*nrm0)THEN
+      zb(1:n,m)=zb(1:n,m)/nrm
+      c=c+1
+      self%z_block(c)=i
+      self%z_unit(c)=0
+      self%z_vals(1:n,c)=zb(1:n,m)
+    ELSE
+      zb(1:n,m)=0.d0
+    END IF
+  END DO
+END DO
+DO j=1,nunit
+  c=c+1
+  self%z_block(c)=0
+  self%z_unit(c)=tw%np_active+j
+END DO
+self%nz=c
+DEALLOCATE(zb)
+!---Z^T L Z and Z^T R Z, one L and R product per coarse vector
+ALLOCATE(self%zlz(self%nz,self%nz),self%zrz(self%nz,self%nz))
+CALL tw%Uloc%new(zvec)
+CALL tw%Uloc%new(azvec)
+NULLIFY(vals,wvals)
+ALLOCATE(vals(tw_nelems_exp(tw)))
+IF(ASSOCIATED(tw%junc))ALLOCATE(rvals(tw%nelems),wexp(tw_nelems_exp(tw)))
+DO c=1,self%nz
+  vals=0.d0
+  CALL rbjprecond_coarse_expand(self,c,1.d0,vals)
+  IF(ASSOCIATED(tw%junc))THEN
+    CALL tw_junction_reduce_vec(tw,vals,rvals)
+    CALL zvec%restore_local(rvals)
+  ELSE
+    CALL zvec%restore_local(vals)
+  END IF
+  !---L and R of the model (reduced for junction meshes; the preconditioner's own R is the expanded one)
+  CALL self%mf_obj%apply(zvec,azvec)
+  CALL azvec%get_local(wvals)
+  CALL coarse_project(self%zlz(:,c))
+  CALL tw%Rmat%apply(zvec,azvec)
+  CALL azvec%get_local(wvals)
+  CALL coarse_project(self%zrz(:,c))
+END DO
+DEALLOCATE(vals,wvals)
+IF(ASSOCIATED(tw%junc))DEALLOCATE(rvals,wexp)
+CALL zvec%delete(); CALL azvec%delete()
+DEALLOCATE(zvec,azvec)
+WRITE(*,'(2A,I6,A)')oft_indent,'Two-level preconditioner: ',self%nz,' coarse vectors'
+CONTAINS
+!> Z^T w for a product w of the model operator (expanded first for junction meshes)
+SUBROUTINE coarse_project(zw)
+REAL(r8), INTENT(out) :: zw(:)
+IF(ASSOCIATED(tw%junc))THEN
+  CALL tw_junction_expand(tw,wvals,wexp)
+  CALL rbjprecond_coarse_restrict(self,wexp,zw)
+ELSE
+  CALL rbjprecond_coarse_restrict(self,wvals,zw)
+END IF
+END SUBROUTINE coarse_project
+END SUBROUTINE rbjprecond_coarse_setup
+!------------------------------------------------------------------------------
+!> Add a*z_c to an element vector
+!------------------------------------------------------------------------------
+SUBROUTINE rbjprecond_coarse_expand(self,c,a,vals)
+CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
+INTEGER(4), INTENT(in) :: c !< Coarse vector
+REAL(r8), INTENT(in) :: a !< Coefficient
+REAL(r8), INTENT(inout) :: vals(:) !< Element vector
+INTEGER(4) :: j,level,iblock
+IF(self%z_block(c)==0)THEN
+  vals(self%z_unit(c))=vals(self%z_unit(c))+a
+ELSE
+  level=self%mf_obj%dense_blocks(1,self%z_block(c))
+  iblock=self%mf_obj%dense_blocks(2,self%z_block(c))
+  DO j=1,self%mf_obj%levels(level)%blocks(iblock)%nelems
+    vals(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))=vals(self%mf_obj%levels(level)%blocks(iblock)%ielem(j)) &
+      + a*self%z_vals(j,c)
+  END DO
+END IF
+END SUBROUTINE rbjprecond_coarse_expand
+!------------------------------------------------------------------------------
+!> Coarse projection w = Z^T v of an element vector
+!------------------------------------------------------------------------------
+SUBROUTINE rbjprecond_coarse_restrict(self,v,w)
+CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
+REAL(r8), INTENT(in) :: v(:) !< Element vector
+REAL(r8), INTENT(out) :: w(:) !< Coarse vector [nz]
+INTEGER(4) :: c,j,level,iblock
+DO c=1,self%nz
+  IF(self%z_block(c)==0)THEN
+    w(c)=v(self%z_unit(c))
+  ELSE
+    level=self%mf_obj%dense_blocks(1,self%z_block(c))
+    iblock=self%mf_obj%dense_blocks(2,self%z_block(c))
+    w(c)=0.d0
+    DO j=1,self%mf_obj%levels(level)%blocks(iblock)%nelems
+      w(c)=w(c)+self%z_vals(j,c)*v(self%mf_obj%levels(level)%blocks(iblock)%ielem(j))
+    END DO
+  END IF
+END DO
+END SUBROUTINE rbjprecond_coarse_restrict
+!------------------------------------------------------------------------------
+!> Add the coarse correction u += Z (Z^T A Z)^-1 Z^T g
+!------------------------------------------------------------------------------
+SUBROUTINE rbjprecond_coarse_apply(self,g,u)
+CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
+REAL(r8), INTENT(in) :: g(:) !< Residual
+REAL(r8), INTENT(inout) :: u(:) !< Preconditioned residual
+INTEGER(4) :: c
+REAL(r8), ALLOCATABLE :: w(:),y(:)
+ALLOCATE(w(self%nz),y(self%nz))
+CALL rbjprecond_coarse_restrict(self,g,w)
+CALL dgemv('N',self%nz,self%nz,1.d0,self%einv,self%nz,w,1,0.d0,y,1)
+DO c=1,self%nz
+  CALL rbjprecond_coarse_expand(self,c,y(c),u)
+END DO
+DEALLOCATE(w,y)
+END SUBROUTINE rbjprecond_coarse_apply
+!------------------------------------------------------------------------------
 !> Destroy Block-Jacobi preconditioner and deallocate all internal storage
 !------------------------------------------------------------------------------
 subroutine rbjprecond_delete(self,propogate)
@@ -3537,6 +3540,10 @@ IF(ASSOCIATED(self%inverse_mats))THEN
   END DO
   DEALLOCATE(self%inverse_mats)
 END IF
+IF(ASSOCIATED(self%z_block))DEALLOCATE(self%z_block,self%z_unit,self%z_vals)
+IF(ASSOCIATED(self%zlz))DEALLOCATE(self%zlz,self%zrz)
+IF(ASSOCIATED(self%einv))DEALLOCATE(self%einv)
+self%nz=0
 !---Reset
 self%max_block_size=0
 self%refactor=.TRUE.
