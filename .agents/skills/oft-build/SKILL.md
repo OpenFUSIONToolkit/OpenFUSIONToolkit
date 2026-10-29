@@ -131,7 +131,7 @@ python <repo_root>/src/utilities/build_libs.py \
 | `--oft_build_debug=1` | Debug build (runtime checks on; tests get 4× timeouts) |
 | `--oft_build_examples=1` | Build examples (`OFT_BUILD_EXAMPLES`) |
 | `--oft_build_docs=1` | Build Doxygen documentation (`OFT_BUILD_DOCS`) |
-| `--build_arpack=1`, `--build_superlu=1`, `--build_superlu_dist=1`, `--build_umfpack=1`, `--build_petsc=1` | Optional solver libraries |
+| `--build_arpack=1`, `--build_superlu=1`, `--build_superlu_dist=1`, `--build_umfpack=1`, `--build_strumpack=1`, `--build_petsc=1` | Optional solver libraries |
 
 ### Stage 2: configure, build, install
 
@@ -211,7 +211,7 @@ Notes for this configuration:
 - OpenMPI refuses to run as root by default. In a root sandbox, prefix each test command with `OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1`, in the same command like `OMP_NUM_THREADS` (agent shells may not keep exported variables between calls), eg. `OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 OMP_NUM_THREADS=2 make test`.
 - When running tests, always set `OMP_NUM_THREADS` (`1` on one or two cores, otherwise `2`), as described in the `oft-test` skill.
 - `config_cmake.sh` sources `setup_env.sh` itself, so re-running it later resolves `pytest` from the venv rather than whatever happens to be on `PATH`. It stops with an error if `setup_env.sh` is missing, instead of configuring against the wrong `pytest`.
-- Expected `make test` results for this configuration (October 2026; counts drift as tests are added): about 906 passed, 337 skipped, 2 failed, in roughly 50 minutes on 4 cores. The skips are about 266 `Not compiled with PETSc` (PETSc is not included), 45 `Configuration not supported` (all `lin_alg/test_native_bjacobi.py`, for the missing SuperLU-DIST/MUMPS/UMFPACK), and 26 bare `Skipped` (MUG physics tests); see "Skips" in the `oft-test` skill. The failures are the two below.
+- Expected `make test` results for this configuration (October 2026; counts drift as tests are added): about 906 passed, 337 skipped, 2 failed, in roughly 50 minutes on 4 cores. The skips are about 266 `Not compiled with PETSc` (PETSc is not included), 59 `Configuration not supported` (`lin_alg/test_native_bjacobi.py` for the missing SuperLU-DIST/MUMPS/UMFPACK/STRUMPACK, and `lin_alg/test_strumpack.py`), and 26 bare `Skipped` (MUG physics tests); see "Skips" in the `oft-test` skill. The failures are the two below.
 - Exact solver iteration counts can differ from CI's bundled MPICH/METIS. On Ubuntu OpenMPI 4.1.6 with distro METIS, `lin_alg/test_native_bjacobi.py::test_ILU_mpi4_nlocal2[0]` and `test_ILU_mpi4_nlocal2_part[0]` have been seen to fail with 76–77 iterations against 73/70 expected. Treat these as environment differences unless your change touches `lin_alg`.
 
 ## 6. Python packaging
