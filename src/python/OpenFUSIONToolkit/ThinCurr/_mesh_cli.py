@@ -547,6 +547,11 @@ def _boundary_chains(lc):
     return chains
 
 
+def _boxes_overlap(lo1, hi1, lo2, hi2, margin):
+    """! True if two axis-aligned bounding boxes overlap when widened by margin"""
+    return bool(np.all(lo1 - margin <= hi2) and np.all(lo2 - margin <= hi1))
+
+
 def _polyline_distance(pts, poly, closed):
     """! Distance from each point to a polyline"""
     a = poly
@@ -620,13 +625,14 @@ def stitch_meshes(meshes, rel_tol=0.1, keep=None, exclude=None):
             pts = mesh.r[chain]
             seg = np.linalg.norm(pts - np.roll(pts, -1, axis=0), axis=1)
             h = 0.5*(seg + np.roll(seg, 1))
-            chains.append({'mesh': im, 'v': chain, 'pts': pts, 'h': h})
+            chains.append({'mesh': im, 'v': chain, 'pts': pts, 'h': h, 'lo': pts.min(axis=0), 'hi': pts.max(axis=0)})
     # Seam runs: consecutive chain vertices on another mesh's boundary
     runs = []
     for c in chains:
         on = np.zeros(len(c['v']), dtype=bool)
+        margin = rel_tol*c['h'].max()
         for d in chains:
-            if d['mesh'] != c['mesh']:
+            if (d['mesh'] != c['mesh']) and _boxes_overlap(c['lo'], c['hi'], d['lo'], d['hi'], margin):
                 on |= _polyline_distance(c['pts'], d['pts'], True) < rel_tol*c['h']
         if exclude is not None:
             on &= ~exclude[c['mesh']][c['v']]
@@ -943,33 +949,46 @@ def close_gaps(meshes, gap_tol, exclude=None):
                 vcells.setdefault(int(cell[k]), []).append(c)
                 ecell[(min(int(cell[k]), int(cell[(k + 1) % 3])), max(int(cell[k]), int(cell[(k + 1) % 3])))] = c
         info.append({'normals': normals, 'vcells': vcells, 'ecell': ecell, 'chains': _boundary_chains(mesh.lc)})
+    # Boundary segments of each chain: start, end, normal of the cell on the edge, excluded flag
+    for jm, other in enumerate(meshes):
+        segs = []
+        for ochain in info[jm]['chains']:
+            a = other.r[ochain]
+            nxt = np.roll(ochain, -1)
+            nrm = np.array([info[jm]['normals'][info[jm]['ecell'][(min(u, w), max(u, w))]]
+                            for u, w in zip(ochain, nxt)])
+            ex = np.zeros(len(ochain), dtype=bool)
+            if exclude is not None:
+                ex = exclude[jm][ochain] | exclude[jm][nxt]
+            segs.append({'a': a, 'b': other.r[nxt], 'n': nrm, 'ex': ex, 'lo': a.min(axis=0), 'hi': a.max(axis=0)})
+        info[jm]['segs'] = segs
     moves = []
     for im, mesh in enumerate(meshes):
         for chain in info[im]['chains']:
             pts = mesh.r[chain]
             best = np.full(len(chain), np.inf)
             target = [None]*len(chain)
-            for jm, other in enumerate(meshes):
-                if jm == im:
-                    continue
-                for ochain in info[jm]['chains']:
-                    a = other.r[ochain]
-                    b = np.roll(a, -1, axis=0)
-                    ab = b - a
-                    if exclude is not None:
-                        oex = exclude[jm][ochain]
-                        oex = oex | np.roll(oex, -1)
-                    for iv, pv in enumerate(pts):
-                        t = np.clip(np.einsum('sk,sk->s', pv - a, ab)/np.maximum(np.einsum('sk,sk->s', ab, ab), 1.E-300), 0.0, 1.0)
-                        q = a + t[:, None]*ab
-                        d = np.linalg.norm(q - pv, axis=1)
-                        if exclude is not None:
-                            d[oex] = np.inf
-                        k = int(np.argmin(d))
-                        if d[k] < best[iv]:
-                            best[iv] = d[k]
-                            e = (min(ochain[k], ochain[(k + 1) % len(ochain)]), max(ochain[k], ochain[(k + 1) % len(ochain)]))
-                            target[iv] = (q[k], info[jm]['normals'][info[jm]['ecell'][e]])
+            # Segments of the other meshes' chains near this one (same order as a search over all of them)
+            lo, hi = pts.min(axis=0), pts.max(axis=0)
+            near_segs = [sg for jm in range(len(meshes)) if jm != im for sg in info[jm]['segs']
+                         if _boxes_overlap(lo, hi, sg['lo'], sg['hi'], gap_tol)]
+            if near_segs:
+                a = np.vstack([sg['a'] for sg in near_segs])
+                ab = np.vstack([sg['b'] for sg in near_segs]) - a
+                nrm = np.vstack([sg['n'] for sg in near_segs])
+                ex = np.concatenate([sg['ex'] for sg in near_segs])
+                abab = np.maximum(np.einsum('sk,sk->s', ab, ab), 1.E-300)
+                for i0 in range(0, len(chain), 256):  # chunks bound the memory of the point-segment arrays
+                    pv = pts[i0:i0 + 256]
+                    t = np.clip(np.einsum('psk,sk->ps', pv[:, None, :] - a[None, :, :], ab)/abab, 0.0, 1.0)
+                    q = a[None, :, :] + t[:, :, None]*ab[None, :, :]
+                    d = np.linalg.norm(q - pv[:, None, :], axis=2)
+                    d[:, ex] = np.inf
+                    k = np.argmin(d, axis=1)
+                    for j in range(pv.shape[0]):
+                        if d[j, k[j]] < np.inf:
+                            best[i0 + j] = d[j, k[j]]
+                            target[i0 + j] = (q[j, k[j]], nrm[k[j]])
             near = best < gap_tol
             if exclude is not None:
                 near &= ~exclude[im][chain]
