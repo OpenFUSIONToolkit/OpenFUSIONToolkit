@@ -783,7 +783,7 @@ IF(.NOT.direct)THEN
     CALL create_diag_pre(linv%pre)
   END IF
   !---Setup extrapolation fields
-  maxextrap=2 ! Number of points for extrapolation (0: No extrapolation, 2: Linear, 3: Quadratic)
+  maxextrap=3 ! Number of points for extrapolation (0: No extrapolation, 2: Linear, 3: Quadratic)
   IF(maxextrap>0)THEN
     ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
     DO i=1,maxextrap
