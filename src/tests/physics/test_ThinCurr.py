@@ -1317,6 +1317,30 @@ def test_combine_merge_points(tmp_path):
         combine_meshes(files, merge_points=True, merge_tol=0.2)
 
 
+def test_combine_regions(tmp_path):
+    '''Inputs with several regions: only points of different inputs merge, and excluded regions stay separate'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    # Input 0: two sheets meeting along x = z = 0 with separate, coincident points (an intended break)
+    # Input 1: a sheet meeting the first sheet of input 0 along x = -0.5, z = 0, and a sheet far from everything
+    inputs = ((lambda u, v: np.c_[-0.5*u, v, 0*u], lambda u, v: np.c_[0.5*u, v, 0*u]),
+              (lambda u, v: np.c_[-0.5 + 0*u, v, 0.5*u], lambda u, v: np.c_[u, v, 5.0 + 0*u]))
+    files = []
+    for k, sheets in enumerate(inputs):
+        parts = [_sheet(4, 8, mapping) for mapping in sheets]
+        r = np.vstack([p[0] for p in parts])
+        lc = np.vstack((parts[0][1], parts[1][1] + parts[0][0].shape[0]))
+        reg = np.repeat(np.array([1, 2], dtype=np.int32), [parts[0][1].shape[0], parts[1][1].shape[0]])
+        files.append(str(tmp_path / 'input{0}.h5'.format(k)))
+        write_ThinCurr_mesh(files[-1], r, lc, reg, eta_surf=np.array([1.E-4, 1.E-4]))
+    # Only the 9 points shared by the two inputs merge; the break within input 0 and the far sheet are kept
+    joined = combine_meshes(files, merge_points=True)
+    assert joined.np == 4*45 - 9 and joined.nregions == 4
+    # Excluding the touching sheet of input 1 (region 3 of the combined mesh) leaves it separate
+    excluded = combine_meshes(files, merge_points=True, no_stitch_regions=[3])
+    assert excluded.np == 4*45
+
+
 def test_combine_stitch(tmp_path):
     '''Sheets whose vertices do not line up along a shared edge are stitched to a common set of seam vertices'''
     from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh

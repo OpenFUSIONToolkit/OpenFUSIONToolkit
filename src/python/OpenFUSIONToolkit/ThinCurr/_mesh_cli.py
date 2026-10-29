@@ -414,7 +414,7 @@ class ThinCurrMesh:
             self._drop_props("append with non-distinct regions")
 
 
-    def merge_points(self, tol=None):
+    def merge_points(self, tol=None, groups=None, frozen=None):
         '''! Merge coincident points (in place), e.g. where combined meshes share an edge
 
         Points closer than `tol` are replaced by a single point, which joins sheets that meet along shared
@@ -422,11 +422,20 @@ class ThinCurrMesh:
         mesh topology; run `OFT_ThinCurr_holes` on the result. Jumpers are remapped.
 
         @param tol Distance below which points are merged (default: 1E-8 times the bounding-box diagonal)
+        @param groups Group of each point [np] (optional); only points of different groups are merged, so
+            coincident points within a group (e.g. an intended break between sheets of one input) are kept
+        @param frozen Points that are never merged [np] (bool, optional)
         @result Number of points removed
         '''
         if tol is None:
             tol = 1.E-8*np.linalg.norm(self.r.max(axis=0) - self.r.min(axis=0))
         pairs = scipy.spatial.cKDTree(self.r).query_pairs(tol, output_type='ndarray')
+        if (groups is not None) and (pairs.shape[0] > 0):
+            groups = np.asarray(groups)
+            pairs = pairs[groups[pairs[:, 0]] != groups[pairs[:, 1]]]
+        if (frozen is not None) and (pairs.shape[0] > 0):
+            frozen = np.asarray(frozen, dtype=bool)
+            pairs = pairs[~(frozen[pairs[:, 0]] | frozen[pairs[:, 1]])]
         if pairs.shape[0] == 0:
             print("  No coincident points found (tolerance {0:.3E})".format(tol))
             return 0
@@ -582,7 +591,7 @@ def _zip_strip(P, Q, r):
     return np.array(tris, dtype=np.int64).reshape(-1, 3)
 
 
-def stitch_meshes(meshes, rel_tol=0.1, keep=None):
+def stitch_meshes(meshes, rel_tol=0.1, keep=None, exclude=None):
     """! Make the shared edges (seams) of separate meshes conforming, in place
 
     A seam is a boundary run of one mesh that lies on the boundary of other meshes (within `rel_tol` times the
@@ -601,6 +610,7 @@ def stitch_meshes(meshes, rel_tol=0.1, keep=None):
     @param meshes List of @ref ThinCurrMesh (modified in place)
     @param rel_tol Seam matching tolerance relative to the local boundary edge length
     @param keep Index of a mesh whose seam vertices are kept unchanged (optional)
+    @param exclude Vertices of each mesh that are never part of a seam (list of boolean arrays, optional)
     @result Number of seams stitched
     """
     # Boundary chains and their local edge lengths
@@ -618,6 +628,8 @@ def stitch_meshes(meshes, rel_tol=0.1, keep=None):
         for d in chains:
             if d['mesh'] != c['mesh']:
                 on |= _polyline_distance(c['pts'], d['pts'], True) < rel_tol*c['h']
+        if exclude is not None:
+            on &= ~exclude[c['mesh']][c['v']]
         if on.all():
             runs.append({'mesh': c['mesh'], 'v': list(c['v']), 'closed': True})
             continue
@@ -905,7 +917,7 @@ def _restitch(mesh, seam, closed, new_pts, rel_tol, end_tol=0.0):
         mesh.closures = None
 
 
-def close_gaps(meshes, gap_tol):
+def close_gaps(meshes, gap_tol, exclude=None):
     """! Close small gaps between the edges of separate meshes, in place, by extending each edge to where the
     surfaces meet
 
@@ -917,6 +929,7 @@ def close_gaps(meshes, gap_tol):
 
     @param meshes List of @ref ThinCurrMesh (modified in place)
     @param gap_tol Largest gap to close (distance)
+    @param exclude Vertices of each mesh that are neither moved nor used as targets (list of boolean arrays, optional)
     @result Number of vertices moved
     """
     info = []
@@ -943,16 +956,23 @@ def close_gaps(meshes, gap_tol):
                     a = other.r[ochain]
                     b = np.roll(a, -1, axis=0)
                     ab = b - a
+                    if exclude is not None:
+                        oex = exclude[jm][ochain]
+                        oex = oex | np.roll(oex, -1)
                     for iv, pv in enumerate(pts):
                         t = np.clip(np.einsum('sk,sk->s', pv - a, ab)/np.maximum(np.einsum('sk,sk->s', ab, ab), 1.E-300), 0.0, 1.0)
                         q = a + t[:, None]*ab
                         d = np.linalg.norm(q - pv, axis=1)
+                        if exclude is not None:
+                            d[oex] = np.inf
                         k = int(np.argmin(d))
                         if d[k] < best[iv]:
                             best[iv] = d[k]
                             e = (min(ochain[k], ochain[(k + 1) % len(ochain)]), max(ochain[k], ochain[(k + 1) % len(ochain)]))
                             target[iv] = (q[k], info[jm]['normals'][info[jm]['ecell'][e]])
             near = best < gap_tol
+            if exclude is not None:
+                near &= ~exclude[im][chain]
             n = len(chain)
             for iv in range(n):
                 if not near[iv] or best[iv] < 1.E-12*gap_tol:
@@ -987,7 +1007,7 @@ def close_gaps(meshes, gap_tol):
 
 
 def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_tol=None, stitch=False, stitch_tol=0.1,
-                   stitch_keep=None, close_gaps_tol=None):
+                   stitch_keep=None, close_gaps_tol=None, no_stitch_regions=None):
     '''! Combine multiple mesh files into a single mesh
 
     Aborts if any input file contains native `NODESET` entries, since such
@@ -1004,6 +1024,11 @@ def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_t
     @param stitch_keep Index of the input whose seam vertices are kept unchanged when stitching (see @ref stitch_meshes)
     @param close_gaps_tol Close gaps up to this distance between the inputs' edges before stitching (see
     @ref close_gaps; implies `stitch`)
+    @param no_stitch_regions Regions (numbered as in the combined mesh) whose edges are never stitched, moved by
+    gap closing or merged, e.g. sheets that must stay insulated from the others (optional)
+
+    Merging only joins points of different inputs: coincident points within one input (e.g. an intended break
+    between two of its sheets) are kept separate.
     @result Combined @ref ThinCurrMesh
     '''
     meshes = []
@@ -1015,12 +1040,28 @@ def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_t
                 "uncategorized nodesets. Run 'modify' on it first to convert them "
                 "into ThinCurr holes/jumpers.".format(fn))
         meshes.append(mesh)
+    # Vertices of regions that must not be stitched or merged (regions numbered as in the combined mesh)
+    def excluded_vertices():
+        if not no_stitch_regions:
+            return None
+        out, offset = [], 0
+        for mesh in meshes:
+            ex = np.zeros((mesh.np,), dtype=bool)
+            cells = np.isin(mesh.reg + offset, np.asarray(no_stitch_regions))
+            ex[mesh.lc[cells].reshape(-1)] = True
+            out.append(ex)
+            if distinct_regions:
+                offset += mesh.nregions
+        return out
     if close_gaps_tol is not None:
-        close_gaps(meshes, close_gaps_tol)
+        close_gaps(meshes, close_gaps_tol, exclude=excluded_vertices())
         stitch = True
     if stitch:
-        stitch_meshes(meshes, stitch_tol, keep=stitch_keep)
+        stitch_meshes(meshes, stitch_tol, keep=stitch_keep, exclude=excluded_vertices())
         merge_points = True
+    exclude = excluded_vertices()
+    groups = np.concatenate([np.full((mesh.np,), i, dtype=np.int32) for i, mesh in enumerate(meshes)])
+    frozen = np.concatenate(exclude) if exclude is not None else None
     combined = meshes[0].copy()
     for mesh in meshes[1:]:
         combined.append(mesh, distinct_regions=distinct_regions)
@@ -1029,7 +1070,7 @@ def combine_meshes(filenames, distinct_regions=True, merge_points=False, merge_t
             print("  Warning: Multiple input meshes contain ThinCurr coil sets; "
                   "these are not combined and only the first mesh's coil sets are preserved.")
     if merge_points:
-        combined.merge_points(merge_tol)
+        combined.merge_points(merge_tol, groups=groups, frozen=frozen)
     return combined
 
 
@@ -1101,6 +1142,9 @@ def build_parser():
     p_comb.add_argument("--stitch_keep", type=int, default=None, metavar='IDX',
                         help="Index (0-based) of the input file whose seam vertices are kept unchanged by --stitch "
                              "(default: new seam vertices with a resolution between the inputs')")
+    p_comb.add_argument("--no_stitch_regions", type=int, nargs='+', default=None, metavar='REG',
+                        help="Regions (numbered as in the combined mesh) whose edges are never stitched, moved by "
+                             "--close_gaps or merged, e.g. sheets that must stay insulated from the others")
     p_comb.add_argument("--merge_tol", type=float, default=None,
                         help="Distance below which points are merged with --merge_points "
                              "(default: 1E-8 times the bounding-box diagonal)")
@@ -1193,7 +1237,8 @@ def script_entry(argv=None):
                                     distinct_regions=not options.merge_regions,
                                     merge_points=options.merge_points, merge_tol=options.merge_tol,
                                     stitch=options.stitch, stitch_tol=options.stitch_tol,
-                                    stitch_keep=options.stitch_keep, close_gaps_tol=options.close_gaps)
+                                    stitch_keep=options.stitch_keep, close_gaps_tol=options.close_gaps,
+                                    no_stitch_regions=options.no_stitch_regions)
         except ValueError as err:
             parser.error(str(err))
         result.save(out_file)
@@ -1351,6 +1396,10 @@ def script_entry(argv=None):
 # With `--close_gaps TOL`, inputs whose edges stop up to TOL short of each other are first extended, within their own
 # surface, to where the surfaces meet (the intersection line for sheets at an angle, half way for coplanar sheets),
 # and then stitched. Only the boundary row of each input moves, so TOL should be smaller than the cells.
+# Points are only merged between different inputs: coincident points within one input (e.g. an intended break
+# between two of its sheets) stay separate. With `--no_stitch_regions REG ...`, the edges of those regions (numbered
+# as in the combined mesh) are never stitched, moved by `--close_gaps` or merged, so those sheets stay insulated from
+# the others even where they touch.
 #
 # In general, the \ref thincurr_compute_holes "OFT_thincurr_holes" utility should be used on the final
 # model to compute holes and colusures from the combined geometry. For compatibility with older models,
@@ -1409,7 +1458,8 @@ def script_entry(argv=None):
 #
 #```shell
 #usage: OFT_ThinCurr_mesh_tool combine [-h] --in_files IN_FILES [IN_FILES ...] [--out_file OUT_FILE] [--merge_regions] [--merge_points]
-#                                       [--stitch] [--stitch_tol STITCH_TOL] [--close_gaps TOL] [--stitch_keep IDX] [--merge_tol MERGE_TOL]
+#                                       [--stitch] [--stitch_tol STITCH_TOL] [--close_gaps TOL] [--stitch_keep IDX]
+#                                       [--no_stitch_regions REG [REG ...]] [--merge_tol MERGE_TOL]
 #
 #options:
 #  -h, --help            show this help message and exit
@@ -1427,6 +1477,9 @@ def script_entry(argv=None):
 #                        (implies --stitch)
 #  --stitch_keep IDX     Index (0-based) of the input file whose seam vertices are kept unchanged by --stitch (default: new seam
 #                        vertices with a resolution between the inputs')
+#  --no_stitch_regions REG [REG ...]
+#                        Regions (numbered as in the combined mesh) whose edges are never stitched, moved by --close_gaps or merged,
+#                        e.g. sheets that must stay insulated from the others
 #  --merge_tol MERGE_TOL
 #                        Distance below which points are merged with --merge_points (default: 1E-8 times the bounding-box diagonal)
 #```
