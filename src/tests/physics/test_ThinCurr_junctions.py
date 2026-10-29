@@ -181,19 +181,25 @@ def mp_run(target, args, timeout=180):
     return test_result
 
 
-def write_pair(r, lc, reg, prefix, insulated=()):
-    """Junction mesh file with its map P and the same mesh with P = identity (expanded reference), with an I-coil."""
-    from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil
+def write_pair(r, lc, reg, prefix, insulated=(), vcoil=False):
+    """Junction mesh file with its map P and the same mesh with P = identity (expanded reference), with an I-coil
+    (and a V-coil if `vcoil`)."""
+    from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil, ThinCurr_Vcoil
     out = find_junction_holes(r, lc, reg, insulated=insulated)
     ident = copy.copy(out)
     ident['P'] = scipy.sparse.identity(out['P'].shape[0], format='csr')
     coil = ThinCurr_Icoil('IC')
     coil.add_circular_subcoil([0.7, 0.3])
+    coils = [coil]
+    if vcoil:
+        coil = ThinCurr_Vcoil('VC', 1.0E-4, 0.01)
+        coil.add_circular_subcoil([0.6, -0.2])
+        coils.append(coil)
     files = []
     for tag, junc in (('junction', out), ('expanded', ident)):
         path = os.path.join(test_dir, '{0}_{1}.h5'.format(prefix, tag))
         write_ThinCurr_mesh(path, out['r'], out['lc'], reg, junctions=junc, eta_surf=1.0E-4*np.ones(reg.max()),
-                            coil_sets=[coil])
+                            coil_sets=coils)
         files.append(path)
     return files, out['P'].toarray()
 
@@ -265,6 +271,120 @@ def test_cache():
             os.remove(os.path.join(test_dir, f))
     files, _ = write_pair(*tplate(), 'junction_cache')
     assert mp_run(run_cache, (files[0],))
+
+
+def rel_err(a, b):
+    """Maximum absolute difference relative to the largest entry of the reference `b`."""
+    return np.abs(a - b).max()/np.abs(b).max()
+
+
+def run_dense_vcoil(files, P, mp_q):
+    """Dense L and B operators of a junction model with a V-coil must equal P applied to the expanded model's."""
+    result = False
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        mats = []
+        for path in files:
+            tw = ThinCurr(myOFT)
+            tw.setup_model(mesh_file=path, no_verify_holes=(path == files[1]))
+            tw.compute_Mcoil()
+            tw.compute_Lmat()
+            Bel, Bdr = tw.compute_Bmat()
+            mats.append((np.array(tw.Lmat), np.array(Bel), np.array(Bdr), tw.n_vcoils))
+        (L, B, Bdr, nv), (Lx, Bx, Bdrx, _) = mats
+        # V-coil rows of the junction map are the identity
+        Pv = scipy.sparse.block_diag((P, scipy.sparse.identity(nv))).toarray()
+        errs = [rel_err(L, Pv.T @ Lx @ Pv), rel_err(B, np.einsum('dep,ea->dap', Bx, Pv)), rel_err(Bdr, Bdrx)]
+        print('L, B, Bdr errors', errs)
+        result = (nv == 1) and (max(errs) < 1.0E-12)
+    except BaseException as e:
+        print(e)
+    mp_q.put(result)
+
+
+@pytest.mark.parametrize("mesh", ('tplate', 'ring', 'torus'))
+def test_dense_vcoil(mesh):
+    r, lc, reg = {'tplate': tplate, 'ring': ring, 'torus': torus}[mesh]()
+    files, P = write_pair(r, lc, reg, 'junction_dense_' + mesh, vcoil=True)
+    assert mp_run(run_dense_vcoil, (files, P))
+
+
+def run_mutual(models, mp_q):
+    """Mutual inductances between junction and plain models must equal P applied to those of the expanded models.
+
+    `models` holds (junction file, expanded reference file, P) for each model, with P `None` for a plain model."""
+    result = False
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        tws = {}
+        for name, (path, path_x, _) in models.items():
+            for tag, file in (('', path), ('x', path_x)):
+                tws[name + tag] = ThinCurr(myOFT)
+                tws[name + tag].setup_model(mesh_file=file, no_verify_holes=(tag == 'x'))
+        maps = {name: (P if P is not None else np.eye(tws[name].nelems)) for name, (_, _, P) in models.items()}
+        errs = []
+        for row, col in (('tplate', 'plate'), ('plate', 'tplate'), ('tplate', 'ring')):
+            M = tws[row].cross_coupling(tws[col])
+            Mx = tws[row + 'x'].cross_coupling(tws[col + 'x'])
+            errs.append(rel_err(M, maps[row].T @ Mx @ maps[col]))
+        # Cache round trip for a mutual matrix between two junction models
+        if os.path.exists('junction_mutual_M.save'):
+            os.remove('junction_mutual_M.save')
+        Mc = [tws['tplate'].cross_coupling(tws['ring'], cache_file='junction_mutual_M.save') for _ in range(2)]
+        errs.append(rel_err(Mc[1], Mc[0]))
+        print('Mutual errors', errs)
+        result = max(errs) < 1.0E-12
+    except BaseException as e:
+        print(e)
+    mp_q.put(result)
+
+
+def test_mutual():
+    tfiles, tP = write_pair(*tplate(), 'junction_mutual_tplate')
+    r, lc, reg = ring()
+    rfiles, rP = write_pair(r + np.array([0.0, 0.0, 1.5]), lc, reg, 'junction_mutual_ring')
+    plate_file = os.path.join(test_dir, 'junction_mutual_plate.h5')
+    pr, plc, preg = sheet(5, 5, lambda u, v: np.c_[u - 0.5, v, 0*u + 0.8], 1)
+    write_ThinCurr_mesh(plate_file, pr, plc, preg, eta_surf=1.0E-4*np.ones(1))
+    models = {'tplate': (tfiles[0], tfiles[1], tP), 'ring': (rfiles[0], rfiles[1], rP),
+              'plate': (plate_file, plate_file, None)}
+    assert mp_run(run_mutual, (models,))
+
+
+def run_cache_insulation(path, mp_q):
+    """A cached reduced L or B operator must not be reused for a different junction map on the same mesh."""
+    result = False
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        mats = []
+        for insulated, cache in (([2], None), ([1], 'save'), ([2], 'save')):
+            tw = ThinCurr(myOFT)
+            tw.setup_model(mesh_file=path, insulated_junctions=insulated)
+            tw.compute_Lmat(cache_file=cache and 'junction_ins_L.' + cache)
+            Bel, _ = tw.compute_Bmat(cache_file=cache and 'junction_ins_B.' + cache)
+            mats.append((np.array(tw.Lmat), np.array(Bel)))
+        (L2, B2), (L1, B1), (L2c, B2c) = mats
+        # Same number of unknowns but a different map, so only the map hash tells the cached matrices apart
+        print('Map change', rel_err(L1, L2), rel_err(B1, B2), 'cached errors', rel_err(L2c, L2), rel_err(B2c, B2))
+        result = (L1.shape == L2.shape) and (rel_err(L1, L2) > 1.0E-3) and (rel_err(B1, B2) > 1.0E-3) and \
+            (rel_err(L2c, L2) < 1.0E-12) and (rel_err(B2c, B2) < 1.0E-12)
+    except BaseException as e:
+        print(e)
+    mp_q.put(result)
+
+
+def test_cache_insulation():
+    for f in ('junction_ins_L.save', 'junction_ins_B.save'):
+        if os.path.exists(os.path.join(test_dir, f)):
+            os.remove(os.path.join(test_dir, f))
+    files, _ = write_pair(*torus(), 'junction_cache_ins')
+    assert mp_run(run_cache_insulation, (files[0],))
 
 
 def run_lmat_pair(files, mp_q):
