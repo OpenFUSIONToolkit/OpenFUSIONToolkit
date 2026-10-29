@@ -51,7 +51,7 @@ Detailed, task-specific procedures live in agent skills under `.agents/skills/`
 
 | Skill | Use it to |
 |---|---|
-| [`oft-build`](.agents/skills/oft-build/SKILL.md) | Locate or set up a build tree, build external libraries, configure/compile/install OFT, build against system libraries in a sandbox |
+| [`oft-build`](.agents/skills/oft-build/SKILL.md) | Locate or set up a build tree, build external libraries, configure/compile/install OFT, build against system libraries in a sandbox, or change Python packaging (`make_package.sh.in`/`pyproject.toml.in`, which supersede the lint-only `src/python/pyproject.toml`) |
 | [`oft-test`](.agents/skills/oft-test/SKILL.md) | Run, select, debug, or write regression tests |
 
 ## Build System
@@ -80,7 +80,7 @@ new build unasked.
 Building and testing need a Python environment with `pytest`, `numpy`, `scipy`, `h5py`,
 `netcdf4`, and `matplotlib`.
 
-- **User environments**: there is no project-managed virtual environment; `oft_venv/` and `setup_env.sh` are gitignored and will not exist in a normal checkout. If the user has not already specified which interpreter or environment to use, **ask them** — do not fall back to the system `python3`. Carry the answer forward for the rest of the session.
+- **User environments**: there is no project-managed virtual environment; `oft_venv/` and `setup_env.sh` are gitignored and will not exist in a normal checkout. If either is present anyway, it was made by hand: do not source it without asking, and check that the venv it activates still exists. If the user has not already specified which interpreter or environment to use, **ask them** — do not fall back to the system `python3`. Carry the answer forward for the rest of the session.
 - **CI/ephemeral environments only**: the workflows create `oft_venv/` and a `setup_env.sh` that activates it. `source setup_env.sh` is valid there, and only there.
 
 ## Testing
@@ -88,8 +88,8 @@ Building and testing need a Python environment with `pytest`, `numpy`, `scipy`, 
 Tests use **pytest** and live in `src/tests/` in subdirectories matching the source
 layout (`base/`, `grid/`, `lin_alg/`, `fem/`, `physics/`), pairing `test_*.py` files with
 the `test_*.F90` programs they drive. They run from `<build_dir>` (`make test`, or
-`<build_dir>/tests/run_test.sh <file> -k <name>` for targeted runs), never from the source
-tree. See the `oft-test` skill for running, markers, debugging, and writing tests.
+from `<build_dir>/tests`, `./run_test.sh <file> -k <name>` for targeted runs; the file
+path is resolved against the current directory), never from the source tree. See the `oft-test` skill for running, markers, debugging, and writing tests.
 
 Always set `OMP_NUM_THREADS` when running tests: `1` if only one or two cores are
 available, otherwise `2`, regardless of core count. The only exception is running

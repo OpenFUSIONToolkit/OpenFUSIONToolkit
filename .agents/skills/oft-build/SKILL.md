@@ -100,9 +100,9 @@ make install        # only if something uses <config_dir>/install_release (see b
 
 Run from the directory that will become `<config_dir>`, with the Python environment
 active. This downloads and compiles OpenBLAS, HDF5, METIS, etc., which takes 20–30
-minutes. Run it in the background with its output sent to a log, since its download
-progress bars produce a very large amount of output; check the exit code and
-`tail build_libs.log` when it finishes.
+minutes. Run it in the background with `--no_dl_progress` (download progress bars
+otherwise produce a very large amount of output) and its output sent to a log; check the
+exit code and `tail build_libs.log` when it finishes.
 
 `build_libs.py` takes its compilers from the `CC`, `CXX`, and `FC` environment
 variables (default `gcc`/`g++`/`gfortran`; `LD` and `CMAKE` are also honored). On macOS
@@ -116,13 +116,9 @@ mkdir -p builds/GCC/MPI && cd builds/GCC/MPI   # one directory per configuration
 CC=gcc-16 CXX=g++-16 FC=gfortran-16 \
 python <repo_root>/src/utilities/build_libs.py \
   --nthread=4 --build_umfpack=1 --build_superlu=1 \
-  --build_arpack=1 --oft_build_tests=1 --build_mpich=1 > build_libs.log 2>&1
+  --build_arpack=1 --oft_build_tests=1 --build_mpich=1 \
+  --no_dl_progress > build_libs.log 2>&1
 ```
-
-On macOS, `build_libs.py` finds hwloc (for MPICH/OpenMPI) through `brew --prefix`, and
-captures Homebrew's status messages along with the path. If MPI's configure fails with
-``Invalid configuration `Homebrew'``, run any `brew` command first so Homebrew finishes
-refreshing its package data, then rerun with `HOMEBREW_NO_AUTO_UPDATE=1`.
 
 `python src/utilities/build_libs.py --help` lists every option. Commonly used ones:
 
@@ -149,7 +145,7 @@ make install                 # installs to <config_dir>/install_release/
 
 ## 5. Ephemeral agent environments
 
-`.github/workflows/copilot-setup-steps.yml` mirrors the Ubuntu 24.04 GCC 14 + OpenMP CI
+`.github/workflows/copilot-setup-steps.yml` mirrors the Ubuntu 24.04 GCC 14 + OpenMP + MPICH CI
 configuration. After it runs, the environment has `gcc-14`/`g++-14`/`gfortran-14`, a
 venv at `oft_venv/` (activated by `source setup_env.sh`), external libraries pre-built
 in `builds/`, and OFT installed in `builds/install_release/` — the flat layout.
@@ -221,7 +217,8 @@ Notes for this configuration:
 ## 6. Python packaging
 
 Packaging builds use `src/python/make_package.sh.in` and `src/python/pyproject.toml.in`,
-configured during the CMake build for packaging builds (`OFT_PACKAGE_BUILD` and
-`OFT_PACKAGE_PYTHON`, ie. `build_libs.py --oft_package`, with `--oft_package_python`
-defaulting to on). Dependencies and scripts listed there supersede the lint-only
+configured during the CMake build for packaging builds (`build_libs.py --oft_package`,
+which sets `OFT_PACKAGE_BUILD`) when the CMake option `OFT_PACKAGE_PYTHON` is on, which
+it is by default. `build_libs.py` does not pass `OFT_PACKAGE_PYTHON` to CMake; its
+`--oft_package_python` flag only affects a macOS deployment-target check. Dependencies and scripts listed there supersede the lint-only
 `src/python/pyproject.toml`.

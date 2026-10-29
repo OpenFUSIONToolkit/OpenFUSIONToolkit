@@ -14,7 +14,7 @@ files, the `test_*.F90` Fortran programs they drive, and data files (`.h5`, `.g`
 
 1. **Tests run from the build tree, never the source tree.** The compiled Fortran test executables, copies of the test scripts and data, and the Python package all live under `<build_dir>`. Find `<build_dir>` with the `oft-build` skill ("Locate the build tree") — do not assume `builds/build_release`, which is only the CI/ephemeral layout. Also check that the build tree compiles *this* checkout (see "Check which source tree it builds" in `oft-build`), or you will be testing different code.
 2. **Rebuild first.** Run `make -j<N>` in `<build_dir>` after any source change, including edits to test `.py` files or data: they are copied into the build tree by `configure_file`, so the build-tree copy is stale until `make` runs. `make install` is not needed for tests.
-3. **Python environment.** `make test` and `run_test.sh` call the `pytest` recorded at configure time (`OFT_PYTEST_EXE`) by absolute path, so they work without activating anything as long as that environment still exists. They also add that interpreter's directory to `PATH`, but after the build-tree `python/` and the MPI `bin/` directory: with a system MPI in `/usr/bin`, a bare `python` inside a test is the system interpreter, so tests must launch Python with `sys.executable`. If it is gone or broken, or you run `python`/`pytest` directly, you need the user's environment — ask which to use if not already known; in CI/ephemeral environments only, `source setup_env.sh`.
+3. **Python environment.** `make test` and `run_test.sh` call the `pytest` recorded at configure time (`OFT_PYTEST_EXE`) by absolute path, so they work without activating anything as long as that environment still exists (except `make test`/`test_full` in coverage builds; see below). They also add that interpreter's directory to `PATH`, but after the build-tree `python/` and the MPI `bin/` directory: with a system MPI in `/usr/bin`, a bare `python` inside a test is the system interpreter, so tests must launch Python with `sys.executable`. If it is gone or broken, or you run `python`/`pytest` directly, you need the user's environment — ask which to use if not already known; in CI/ephemeral environments only, `source setup_env.sh`.
 4. **Always set `OMP_NUM_THREADS`.** Use `1` if only one or two cores are available, otherwise `2`, however many cores there are. Leaving it unset lets OpenMP use every core in every test process, which oversubscribes the machine (especially with MPI tests) and makes timings and timeouts unreliable. Set it in the same command that runs the tests, since agent shells may not keep exported variables between calls:
 
    ```bash
@@ -35,8 +35,15 @@ OMP_NUM_THREADS=2 make test_full       # all tests, including slow ones
 OMP_NUM_THREADS=2 make test_examples   # example notebooks/programs (needs OFT_BUILD_EXAMPLES or OFT_BUILD_PYTHON)
 ```
 
-`make test`/`test_full` write `<build_dir>/tests/OFT.junit.xml`. With `OMP_NUM_THREADS=2`,
-`make test` alone took about 50 minutes on a 4-core Linux sandbox, about 28 minutes on a
+`make test`/`test_full` write `<build_dir>/tests/OFT.junit.xml`. **Coverage builds**
+(`OFT_COVERAGE`, from `build_libs.py --oft_build_coverage`) behave differently: `make test`
+runs only `coverage`-marked tests (`coverage run -m pytest -m "coverage"`), `test_full`
+runs everything under `coverage`, both force `OFT_DEBUG_TEST=1`, and neither writes
+`OFT.junit.xml`. They call `coverage` by bare name through `PATH`, not `OFT_PYTEST_EXE`, so
+make sure the intended environment provides it (activate it if unsure). `run_test.sh` is
+unaffected.
+
+With `OMP_NUM_THREADS=2`, `make test` alone took about 50 minutes on a 4-core Linux sandbox, about 28 minutes on a
 40-core Linux server, and about 18 minutes on an 18-core Apple Silicon Mac, and
 `test_full` takes longer — run them in the background,
 and prefer targeted runs while iterating.
