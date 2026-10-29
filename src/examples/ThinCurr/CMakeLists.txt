@@ -4,6 +4,7 @@ install(DIRECTORY torus DESTINATION examples/ThinCurr COMPONENT examples)
 install(DIRECTORY ports DESTINATION examples/ThinCurr COMPONENT examples)
 install(DIRECTORY REGCOIL DESTINATION examples/ThinCurr COMPONENT examples)
 install(DIRECTORY xml DESTINATION examples/ThinCurr COMPONENT examples)
+install(DIRECTORY junctions DESTINATION examples/ThinCurr COMPONENT examples)
 
 if( OFT_BUILD_TESTS )
   file(COPY plate DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
@@ -12,6 +13,7 @@ if( OFT_BUILD_TESTS )
 #   file(COPY ports DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
 #   file(COPY REGCOIL DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
   file(COPY xml DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+  file(COPY junctions DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
   # Create test driver
   configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/test_examples.sh.in ${CMAKE_CURRENT_BINARY_DIR}/test_examples.sh @ONLY )
   file(

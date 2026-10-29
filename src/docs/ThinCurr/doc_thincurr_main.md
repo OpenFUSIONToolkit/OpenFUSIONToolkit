@@ -30,6 +30,7 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_tCurr_regcoil
  - \subpage doc_tCurr_hodlr
  - \subpage doc_tCurr_reduction
+ - \subpage doc_tCurr_junctions
 
 \section doc_tw_main_settings ThinCurr settings groups
 
@@ -194,6 +195,8 @@ This use of jumps and a single-valued potential to represent a multivalued poten
 Holes can be defined using the `OFT_ThinCurr_holes.py` script. This script analyzes the toplogy of a given
 mesh and automatically locates and defines needed hole elements. This is now the recommended way of defining holes in
 ThinCurr models, although \ref doc_tw_dep_leg_holes "manual definition" is also still supported.
+The script also records the version of its hole construction in the mesh file (`thincurr/HOLES_VERSION`), so that
+ThinCurr can skip checks that only apply to holes defined in other ways (duplicate holes and unordered loops).
 
 The script should be available in one of two ways depending on the installation/build setup:
  - If OFT is installed via `pip` or similar, then it should be available via command line as `OFT_ThinCurr_holes` in any environment where OFT is also available (eg. virtual environment)
@@ -217,6 +220,57 @@ solveable.
 \subsubsection doc_tw_main_close_def Defining closures
 As with holes, closures can also be defined using the `OFT_ThinCurr_holes.py` script. This is now the recommended way of defining
 closures in ThinCurr models, although \ref doc_tw_dep_leg_holes "manual definition" is also still supported.
+
+\subsection doc_tw_main_junctions Junctions between sheets
+ThinCurr's stream-function formulation requires each edge of the mesh to be shared by at most two cells. Structures
+where three or more conducting sheets meet along an edge, a *junction* (for example a plate with a stiffening rib),
+are supported by splitting the mesh at the junctions:
+
+ - Each region is a sheet, and a junction edge is an edge shared by more than two cells. Only meshes with junctions
+   (or with sheets of different regions that touch only at a point) are split, so a mesh whose regions form a
+   manifold sheet is not split unless requested (see below). In a mesh that is split, edges where two regions meet
+   are also treated as junction edges, even where only two cells share them, so that those regions can be insulated
+   from each other; with two cells, current conservation there is ordinary continuity, so this does not change the
+   currents. At each vertex, every group of cells connected through ordinary edges gets its own copy of the vertex,
+   so the split mesh is an ordinary (manifold) ThinCurr mesh. Cells keep their index and region. Sheets that touch
+   only at a point are therefore not connected (no current passes through a point), and a region may lie on both
+   sides of a junction (for example a plate under a stiffening rib).
+ - Current conservation (Kirchhoff's law) across each junction edge joins the cells again:
+   \f$ \sum_c s_c (\phi_c(b) - \phi_c(a)) = 0 \f$ over the cells on the edge \f$ a \rightarrow b \f$, where
+   \f$ s_c = \pm 1 \f$ follows each cell's orientation, so that each term is the current leaving that cell.
+ - The resulting constraints define a map \f$ \textbf{P} \f$ from the reduced (joined) unknowns to the unknowns of
+   the split mesh, \f$ \phi_{split} = \textbf{P} x \f$. ThinCurr assembles all operators on the split mesh as usual
+   and reduces them, e.g. \f$ \textbf{L} \rightarrow \textbf{P}^T \textbf{L} \textbf{P} \f$, so that all solvers,
+   coils, sensors, HODLR compression and plotting work on the joined model.
+
+Holes are chosen automatically for junction meshes. The currents the model can carry are the cycles of a graph
+whose nodes are the cells and the junction edges, linked wherever current can cross an edge. The stream function is
+uniform along each sheet boundary (a chain of outer edges); constant shifts that carry no current are removed by
+fixing one sheet boundary (or one vertex, a closure, on a closed surface) per connected piece; and the currents these
+unknowns do not represent are added as hole elements built from cycles of the graph (a jump of the stream function at
+the vertex where each cell on the cycle is entered and left). This covers holes of any kind, including loops that
+cross junctions (for example the long way around a torus divided into sectors, with or without ribs). The number of
+unknowns is checked against the number of cycles of the graph.
+
+\subsubsection doc_tw_main_junctions_def Defining junction meshes
+ - Give each sheet its own region, e.g. a gmsh physical surface converted with `OFT_convert_gmsh --physical_regions`.
+ - Run `OFT_ThinCurr_holes` (\ref thincurr_holes_tool) on the mesh. If it finds junctions (or sheets of different
+   regions touching at a point) it writes the split mesh with a `thincurr/junctions` group (junction table, hole
+   elements, vertex map and \f$ \textbf{P} \f$). Where sheets only meet two at a time (for example a torus divided
+   into sectors), add `--split_regions` to split at the region interfaces anyway, so that the sheets can be
+   insulated from each other.
+ - When a model is set up, an unsplit mesh with junctions is rejected, and a split mesh is checked against its unsplit
+   mesh (split, number of junction edges, and number of unknowns for the stored insulation).
+ - Use the resulting file as any other ThinCurr mesh. Sheets can be insulated at the junctions when the model is set
+   up, without a new mesh file, with \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.setup_model "setup_model(insulated_junctions=[...])".
+   A region in the list is insulated at every junction it touches; a pair of regions, e.g. `(1,2)`, is insulated
+   only from each other (for example a single insulating break in a sectored torus). Where a third sheet meets both
+   on the same junction edge, current can pass between the pair through it, so the pair has no effect there (a
+   warning is given).
+
+Junctions are not yet supported for periodic models (`nfp`, or a periodic point map `pmap`).
+
+See \ref doc_tCurr_junctions for an example.
 
 \subsection doc_tw_main_hodlr Hierarchical Off-Diagonal Low-Rank (HODLR) approximation
 In the standard BFEM approach described above every element interacts with every other element, leading to a dense \f$ \textrm{L} \f$ and
@@ -272,3 +326,11 @@ stored in double precision. Alternatively, by setting `pre_single=T` (`pre_singl
 \ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options"), each block is rounded to single precision and
 the inverse is computed, stored, and applied in single precision. This halves the memory required for the preconditioner and reduces
 the cost of both constructing and applying it, at the cost of a small perturbation to the preconditioner itself.
+
+Block-Jacobi preconditioning cannot represent smooth, long-range current patterns, which limits its effect on large models.
+Setting `pre_coarse=T` (`pre_coarse=True` in
+\ref OpenFUSIONToolkit.ThinCurr._core.ThinCurr.set_hodlr_options "set_hodlr_options") adds a global coarse correction
+\f$ \textrm{Z} (\textrm{Z}^T \textrm{A} \textrm{Z})^{-1} \textrm{Z}^T \f$ (two-level preconditioner). The coarse space
+\f$ \textrm{Z} \f$ holds, on each diagonal block, a constant and linear functions of position, plus one vector for each
+hole and V-coil. This usually reduces the number of iterations substantially, but setting it up costs one HODLR
+matrix-vector product per coarse vector, so it is off by default.
