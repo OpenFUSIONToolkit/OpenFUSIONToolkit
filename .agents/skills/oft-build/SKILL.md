@@ -218,7 +218,7 @@ Notes for this configuration:
 
 Packaging builds use `src/python/make_package.sh.in` and `src/python/pyproject.toml.in`,
 configured during the CMake build for packaging builds (`build_libs.py --oft_package`,
-which sets `OFT_PACKAGE_BUILD`) when the CMake option `OFT_PACKAGE_PYTHON` is on, which
-it is by default. `build_libs.py` does not pass `OFT_PACKAGE_PYTHON` to CMake; its
-`--oft_package_python` flag only affects a macOS deployment-target check. Dependencies and scripts listed there supersede the lint-only
+which sets `OFT_PACKAGE_BUILD`) when `OFT_PACKAGE_PYTHON` is on. `build_libs.py
+--oft_package_python={0,1}` sets `OFT_PACKAGE_PYTHON` (default on); turning it off also
+drops the macOS deployment-target requirement for package builds. Dependencies and scripts listed there supersede the lint-only
 `src/python/pyproject.toml`.
