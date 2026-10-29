@@ -793,7 +793,15 @@ def stitch_meshes(meshes, rel_tol=0.1, keep=None, exclude=None):
                     sel = np.concatenate((np.where(sv >= sa - 1.E-9*length)[0], np.where(sv <= sb + 1.E-9*length)[0]))
                 else:
                     sel = np.where((sv >= sa - 1.E-9*length) & (sv <= sb + 1.E-9*length))[0]
-            _restitch(meshes[g['mesh']], g['v'], g['closed'], pts[sel], rel_tol, end_tol)
+            new_of_old = _restitch(meshes[g['mesh']], g['v'], g['closed'], pts[sel], rel_tol, end_tol)
+            g['done'] = True
+            # Renumber the seams of this mesh still to be stitched (re-triangulation drops and renumbers vertices)
+            for run in runs:
+                if (run['mesh'] == g['mesh']) and not run.get('done', False):
+                    v = new_of_old[run['v']]
+                    if np.any(v < 0):
+                        raise ValueError("seams of one mesh overlap; they cannot be stitched separately")
+                    run['v'] = [int(x) for x in v]
         nstitched += 1
         print("  Stitched seam shared by {0} meshes: {1} -> {2} segments".format(
             len(group), [g['nseg'] for g in group], len(s_new) if closed else len(s_new) - 1))
@@ -835,7 +843,10 @@ def _covers(span, sm, length, closed):
 
 
 def _restitch(mesh, seam, closed, new_pts, rel_tol, end_tol=0.0):
-    """! Replace the seam of one mesh by new seam points, re-triangulating its row of cells along the seam"""
+    """! Replace the seam of one mesh by new seam points, re-triangulating its row of cells along the seam
+
+    @result New index of each vertex of the mesh before the call (-1: dropped old seam vertex)
+    """
     r = mesh.r
     seam = list(seam)
     if not closed:
@@ -921,6 +932,7 @@ def _restitch(mesh, seam, closed, new_pts, rel_tol, end_tol=0.0):
         print("  Note: dropping holes and closures of a stitched mesh; run OFT_ThinCurr_holes on the result")
         mesh.holes = None
         mesh.closures = None
+    return new_of_old
 
 
 def close_gaps(meshes, gap_tol, exclude=None):

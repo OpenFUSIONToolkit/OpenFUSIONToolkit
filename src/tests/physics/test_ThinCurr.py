@@ -1341,6 +1341,29 @@ def test_combine_regions(tmp_path):
     assert excluded.np == 4*45
 
 
+def test_combine_stitch_two_seams(tmp_path):
+    '''A sheet with two seams (joined on both sides to sheets of another input) is stitched along both'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    # Input 0: plates on x in [-1, 0] and [1, 2]; input 1: a plate on x in [0, 1] with a different resolution
+    (ra, lca), (rc, lcc) = _sheet(4, 6, lambda u, v: np.c_[-u, v, 0*u]), _sheet(4, 6, lambda u, v: np.c_[1.0 + u, v, 0*u])
+    rb, lcb = _sheet(5, 9, lambda u, v: np.c_[u, v, 0*u])
+    files = [str(tmp_path / 'outer.h5'), str(tmp_path / 'middle.h5')]
+    write_ThinCurr_mesh(files[0], np.vstack((ra, rc)), np.vstack((lca, lcc + ra.shape[0])),
+                        np.ones(lca.shape[0] + lcc.shape[0], dtype=np.int32))
+    write_ThinCurr_mesh(files[1], rb, lcb, np.ones(lcb.shape[0], dtype=np.int32))
+    joined = combine_meshes(files, stitch=True)
+    edges = {}
+    for cell in joined.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            edges[e] = edges.get(e, 0) + 1
+    # Both seams are joined: every edge on x = 0 or x = 1 is shared by two cells
+    on_seams = [e for e in edges if np.allclose(joined.r[list(e)][:, 0], 0.0) or np.allclose(joined.r[list(e)][:, 0], 1.0)]
+    assert len(on_seams) > 0 and all(edges[e] == 2 for e in on_seams)
+    assert max(edges.values()) == 2
+
+
 def test_combine_stitch(tmp_path):
     '''Sheets whose vertices do not line up along a shared edge are stitched to a common set of seam vertices'''
     from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
