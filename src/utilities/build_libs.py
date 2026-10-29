@@ -410,7 +410,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
 
 def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=False,build_tests=False,
                        build_examples=False,build_docs=False,build_coverage=False,package_build=False,
-                       package_release=False,enable_debug_stack=False,enable_profiling=False,
+                       package_python=True,package_release=False,enable_debug_stack=False,enable_profiling=False,
                        use_lto=True,debug_check_flags=True,debug_asanitizer=False):
     def bool_to_string(val):
         if val:
@@ -438,6 +438,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DOFT_USE_OpenMP:BOOL={0}".format(bool_to_string(use_openmp)),
         "-DOFT_USE_LTO:BOOL={0}".format(bool_to_string(use_lto)),
         "-DOFT_PACKAGE_BUILD:BOOL={0}".format(bool_to_string(package_build)),
+        "-DOFT_PACKAGE_PYTHON:BOOL={0}".format(bool_to_string(package_python)),
         "-DOFT_PACKAGE_NIGHTLY:BOOL={0}".format(bool_to_string(not package_release)),
         "-DOFT_COVERAGE:BOOL={0}".format(bool_to_string(build_coverage)),
         "-DOFT_DEBUG_STACK:BOOL={0}".format(bool_to_string(enable_debug_stack)),
@@ -2186,6 +2187,7 @@ if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
         build_docs=(options.oft_build_docs == 1),
         build_coverage=options.oft_build_coverage,
         package_build=options.oft_package,
+        package_python=(options.oft_package_python == 1),
         package_release=options.oft_package_release,
         enable_debug_stack=options.oft_debug_stack,
         enable_profiling=options.oft_profiling,
