@@ -1341,6 +1341,39 @@ def test_combine_regions(tmp_path):
     assert excluded.np == 4*45
 
 
+def test_combine_stitch_edge_on_face(tmp_path):
+    '''A plate's hole edge lying across a tube that passes through it is joined to the tube (T connection)'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    # Plate z = 0 on [-1, 1]^2 with a square hole [-0.2, 0.2]^2
+    r, lc = _sheet(10, 10, lambda u, v: np.c_[2*u - 1, 2*v - 1, 0*u])
+    lc = lc[np.max(np.abs(r[lc][:, :, :2].mean(axis=1)), axis=1) > 0.2]
+    # Square tube through the hole, with no ring of vertices at z = 0
+    n, nz = 12, 7
+    s = np.arange(n)*1.6/n
+    side, t = (s//0.4).astype(int), s % 0.4 - 0.2
+    xy = np.c_[np.select([side == 0, side == 1, side == 2], [t, 0*t + 0.2, -t], 0*t - 0.2),
+               np.select([side == 0, side == 1, side == 2], [0*t - 0.2, t, 0*t + 0.2], -t)]
+    rt = np.vstack([np.c_[xy, np.full(n, z)] for z in np.linspace(-0.5, 0.5, nz + 1)])
+    lct = [[k*n + i, k*n + (i + 1) % n, (k + 1)*n + (i + 1) % n] for k in range(nz) for i in range(n)]
+    lct += [[k*n + i, (k + 1)*n + (i + 1) % n, (k + 1)*n + i] for k in range(nz) for i in range(n)]
+    files = [str(tmp_path / 'plate.h5'), str(tmp_path / 'tube.h5')]
+    write_ThinCurr_mesh(files[0], r, lc, np.ones(lc.shape[0], dtype=np.int32))
+    write_ThinCurr_mesh(files[1], rt, np.array(lct, dtype=np.int32), np.ones(len(lct), dtype=np.int32))
+    joined = combine_meshes(files, stitch=True)
+    edges = {}
+    for cell in joined.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            edges[e] = edges.get(e, 0) + 1
+    # The hole edge is shared by the plate and both halves of the tube, all around
+    tee = [e for e, c in edges.items() if c == 3]
+    assert len(tee) > 0 and max(edges.values()) == 3
+    assert all(np.allclose(joined.r[list(e)][:, 2], 0.0) for e in tee)
+    hole = np.isclose(np.abs(joined.r[:, :2]).max(axis=1), 0.2) & np.isclose(joined.r[:, 2], 0.0)
+    assert all(c == 3 for e, c in edges.items() if hole[list(e)].all())
+
+
 def test_combine_stitch_two_seams(tmp_path):
     '''A sheet with two seams (joined on both sides to sheets of another input) is stitched along both'''
     from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
