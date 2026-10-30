@@ -5,12 +5,15 @@
 !---------------------------------------------------------------------------------
 !> @file test_thin_wall_kernels.F90
 !
-!> Regression test for the ThinCurr triangle potential and its gradient
-!! (@ref thin_wall::tw_compute_phipot "tw_compute_phipot" and @ref thin_wall::tw_compute_phigrad "tw_compute_phigrad").
-!!
-!! Values are written for points off the triangle, in its plane, and on the lines of its edges beyond either end,
-!! for a triangle in metre and in millimetre scale, and compared with quadrature references in
-!! test_thin_wall_kernels.py.
+!> Regression test for ThinCurr kernels and block compression, compared with independent references in
+!! test_thin_wall_kernels.py:
+!! - triangle potential and its gradient (@ref thin_wall::tw_compute_phipot "tw_compute_phipot",
+!!   @ref thin_wall::tw_compute_phigrad "tw_compute_phigrad") at points off the triangle, in its plane, and on the
+!!   lines of its edges beyond either end, for a triangle in metre and in millimetre scale (quadrature);
+!! - low-rank compression (@ref thin_wall_hodlr::tw_lowrank_qrcp "tw_lowrank_qrcp") of a smooth kernel block, a block
+!!   of exact rank just below the break-even rank and an incompressible block (SVD);
+!! - ACA+ (@ref thin_wall::tw_aca_plus "tw_aca_plus") of a smooth kernel block with absolute and relative tolerance,
+!!   and of an incompressible block (dense block).
 !!
 !! @authors Ian Stewart
 !! @date October 2026

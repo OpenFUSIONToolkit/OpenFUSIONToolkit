@@ -196,7 +196,7 @@ REAL(r8), PARAMETER :: coil_min_rad = 1.d-6
 TYPE(oft_quad_type), TARGET, SAVE :: tw_quads(18) !< Triangle quadrature rules of orders 1-18 (shared)
 LOGICAL, SAVE :: tw_quads_ready = .FALSE. !< Have tw_quads been set up?
 integer(i4), public, parameter :: tw_idx_ver=1 !< File version for array indexing
-integer(i4), public, parameter :: tw_cache_ver=2 !< Version of cached matrix files (increment when a change invalidates existing caches)
+integer(i4), public, parameter :: tw_cache_ver=3 !< Version of cached matrix files (increment when a change invalidates existing caches)
 character(LEN=16), public, parameter :: tw_idx_path="ThinCurr_Version" !< HDF5 field name
 !------------------------------------------------------------------------------
 !> Rows and columns of a matrix block for ACA+ (@ref tw_aca_plus)
