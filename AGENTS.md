@@ -44,103 +44,56 @@ src/
 └── CMakeLists.txt  # Top-level CMake configuration
 ```
 
+## Skills
+
+Detailed, task-specific procedures live in agent skills under `.agents/skills/`
+(symlinked to `.claude/skills/`). Read the relevant `SKILL.md` before doing the task:
+
+| Skill | Use it to |
+|---|---|
+| [`oft-build`](.agents/skills/oft-build/SKILL.md) | Locate or set up a build tree, build external libraries, configure/compile/install OFT, build against system libraries in a sandbox, or change Python packaging (`make_package.sh.in`/`pyproject.toml.in`, which supersede the lint-only `src/python/pyproject.toml`) |
+| [`oft-test`](.agents/skills/oft-test/SKILL.md) | Run, select, debug, or write regression tests |
+
 ## Build System
 
-OFT uses a two-stage build process:
+OFT uses a two-stage build: `src/utilities/build_libs.py` builds external libraries and
+generates `config_cmake.sh`, which runs CMake (≥ 3.27) to create the build tree; then
+`make` and `make install`. Full instructions are in the `oft-build` skill.
 
-### Stage 1: Build external libraries
+### Locating the build tree
 
-```bash
-mkdir builds && cd builds
-source ../setup_env.sh  # activates Python venv
-python ../src/utilities/build_libs.py \
-  --nthread=4 --build_umfpack=1 --build_superlu=1 \
-  --build_arpack=1 --oft_build_tests=1 --build_mpich=1
-```
+The build tree is created by the user and its location is **not** fixed by the
+project. These instructions use `<build_dir>` for the configured build directory and
+`<config_dir>` for its parent (holding `config_cmake.sh`, the compiled external
+libraries, and `install_release/`; `build_debug`/`install_debug` for Debug configurations). **Do not assume `builds/build_release`.**
 
-This downloads and compiles dependencies (OpenBLAS, HDF5, METIS, etc.) and generates `config_cmake.sh` — a shell script containing the full CMake invocation with all paths.
+- **User environments** (the normal case): several build trees side by side, one per toolchain/parallelism combination, eg. `builds/GCC/MPI/build_release` and `builds/LLVM/build_release`.
+- **CI/ephemeral environments**: a single flat tree — `<config_dir>` is `builds/`, `<build_dir>` is `builds/build_release`.
 
-### Stage 2: Configure, build, and install OFT
+Find candidates with `find builds -maxdepth 4 -name config_cmake.sh`. If more than one
+is found, **ask the user which to use** rather than guessing. If none is found (eg. in a git
+worktree, which never has `builds/`), follow the `oft-build` skill rather than starting a
+new build unasked.
 
-```bash
-# Still in builds/
-bash config_cmake.sh        # runs cmake, creates builds/build_release/
-cd build_release
-make                         # compile
-make install                 # install to builds/install_release/
-```
+### Python environment
 
-### Key CMake options (set via build_libs.py flags)
+Building and testing need a Python environment with `pytest`, `numpy`, `scipy`, `h5py`,
+`netcdf4`, and `matplotlib`.
 
-- `OFT_BUILD_TESTS` — build test executables (enable with `--oft_build_tests=1`)
-- `OFT_BUILD_PYTHON` — build Python wrappers (default ON)
-- `OFT_USE_MPI` — enable MPI parallelism (set by `--build_mpich=1` or `--build_openmpi=1`)
-- `OFT_BUILD_DOCS` — build Doxygen documentation
-- `OFT_BUILD_EXAMPLES` — build example programs
-
-### Important Environment Notes
-
-- The project uses a Python virtual environment at `oft_venv/`. **Always** `source setup_env.sh` before running builds or tests.
-- The `copilot-setup-steps.yml` workflow mirrors the Ubuntu 24.04 GCC 14 + OpenMP CI configuration and pre-builds external libraries in a cached `builds/` directory. After this workflow runs, the agent environment has:
-  - Compilers: `gcc-14`, `g++-14`, `gfortran-14`
-  - Python venv with: `pytest`, `numpy`, `scipy`, `h5py`, `netcdf4`, `matplotlib`
-  - Pre-built external libraries in `builds/`
-  - OFT compiled and installed in `builds/install_release/`
-
-### Python packaging information
-
-Python packaging is handled by a dedicated script template at `src/python/make_package.sh.in` and associated `src/python/pyproject.toml.in`, which are configured/installed during the CMAKE build process if the `OFT_PACKAGE_PYTHON` option is set. Dependencies, scripts, and other information are available in this file a supersede the lint-only file `src/python/pyproject.toml`. 
+- **User environments**: there is no project-managed virtual environment; `oft_venv/` and `setup_env.sh` are gitignored and will not exist in a normal checkout. If either is present anyway, it was made by hand: do not source it without asking, and check that the venv it activates still exists. If the user has not already specified which interpreter or environment to use, **ask them** — do not fall back to the system `python3`. Carry the answer forward for the rest of the session.
+- **CI/ephemeral environments only**: the workflows create `oft_venv/` and a `setup_env.sh` that activates it. `source setup_env.sh` is valid there, and only there.
 
 ## Testing
 
-Tests use **pytest** and are organized under `src/tests/` in subdirectories matching the source layout: `base/`, `grid/`, `lin_alg/`, `fem/`, `physics/`.
+Tests use **pytest** and live in `src/tests/` in subdirectories matching the source
+layout (`base/`, `grid/`, `lin_alg/`, `fem/`, `physics/`), pairing `test_*.py` files with
+the `test_*.F90` programs they drive. They run from `<build_dir>` (`make test`, or
+from `<build_dir>/tests`, `./run_test.sh <file> -k <name>` for targeted runs; the file
+path is resolved against the current directory), never from the source tree. See the `oft-test` skill for running, markers, debugging, and writing tests.
 
-### Test structure
-
-Each test subdirectory has:
-- `test_*.py` — pytest test files
-- `test_*.F90` — corresponding Fortran test programs (compiled during build)
-- Various data files (`.h5`, `.g`, `.inp`, etc.)
-
-### Running tests
-
-From `builds/build_release/`:
-
-```bash
-source ../../setup_env.sh
-make test                    # runs: pytest -m "not slow" base grid lin_alg fem physics
-make test_full               # runs all tests including slow ones
-make test_examples           # runs example notebook tests
-```
-
-Or run individual test files:
-
-```bash
-cd builds/build_release/tests
-../../run_test.sh physics/test_TokaMaker.py -k "test_name"
-```
-
-To list tests for a specific file or folder:
-
-```bash
-cd builds/build_release/tests
-../../run_test.sh physics/test_TokaMaker.py --collect-only
-```
-
-To run a specific test `test_name`, optionally with arguments (`test_args`), within a specific file `test_file.py` (current working director must contain `test_file.py`):
-
-```bash
-python -c "from test_file import test_name; test_name(*test_args)"
-```
-
-### Test conventions
-
-- Tests marked `@pytest.mark.slow` are excluded from default CI runs
-- Tests marked `@pytest.mark.mpi` require MPI (`OFT_HAVE_MPI=1`)
-- Tests marked `@pytest.mark.coverage` are for code coverage runs
-- `oft_testing.py` provides `run_OFT()` helper for running Fortran executables with timeout
-- Physics Python tests (TokaMaker, ThinCurr) use `multiprocessing.Process` to isolate OFT runtime (only one `OFT_env` instance per process)
-- Test timeout is multiplied by 4× when `OFT_DEBUG_TEST=1`
+Always set `OMP_NUM_THREADS` when running tests: `1` if only one or two cores are
+available, otherwise `2`, regardless of core count. The only exception is running
+individual tests specifically to study OpenMP thread scaling or performance.
 
 ## Linting
 
@@ -194,7 +147,7 @@ A representative build environment that can be used for creating a testing sandb
 - Doxygen-style comments with `!>` and `!!` markers
 - Module names typically prefixed with `oft_` (e.g., `oft_gs`, `oft_la_base`)
 - Line length: unlimited (`-ffree-line-length-none`), but keep reasonable
-- New functions/subroutines must have Doxygen documentation
+- New functions/subroutines must have Doxygen documentation — this applies to code Doxygen actually processes; see "Test and example code" below
 - All fortran keywords, statements, and built-in functions should be in UPPERCASE 
 - New functions should use `RESULT` style definition instead of leading variable style
 - `INTEGER` and `REAL` definitions should explicitly provide the `KIND`/precision using one of `i4`/`i8` or `r4`/`r8` (defined in `src/base/local.F90`) respectively
@@ -203,12 +156,31 @@ A representative build environment that can be used for creating a testing sandb
 ### Python
 
 - SPDX license header comment block at top of each file
-- New functions/subroutines must have Doxygen documentation using docstrings with `@`-style commands (eg. `@param`, `@result`)
+- New functions/subroutines must have Doxygen documentation using docstrings with `@`-style commands (eg. `@param`, `@result`) — this applies to code Doxygen actually processes; see "Test and example code" below
 - Target Python 3.7+ (for OMFIT compatibility)
 - Use `ctypes` for Fortran interop; wrapper patterns in `_interface.py` files
 - All Python wrappers live under `src/python/OpenFUSIONToolkit/`
 - Balance readability and efficiency; For example, avoid overly long or nested list comprehensions and inline if statements
 - Four space indentation should be used
+
+### Test and example code
+
+Doxygen's `INPUT` list in `src/docs/Doxyfile.in` covers `src/docs`, `base`, `grid`,
+`lin_alg`, `fem`, `physics`, `bin`, and `python`. Neither `src/tests/` nor
+`src/examples/` is scanned directly, but examples still reach the documentation
+indirectly: the `build_ex_docs` target runs `src/utilities/generate_doc.py`, which
+reads `examples/*.F90`, `examples/*/*/*.F90`, and `examples/*/*/*.ipynb` and writes
+`docs/generated/doc_*.md`, which Doxygen then picks up through its `docs` entry.
+
+- **Example sources are documentation.** Fortran examples under `src/examples/` carry their own `!!` comment format, including Doxygen page anchors and linking commands (eg. `!!API Example 1 ... {#doc_api_ex1}`, `\section`, `\ref`), which `generate_doc.py` parses into published pages. The same applies to the example notebooks. Do not strip or "correct" this markup, and follow the surrounding file when extending it.
+- **Everything else under `src/tests/` and `src/examples/`** is not parsed into the API documentation, so its functions do not need Doxygen-style documentation — no `!>`/`!!` function blocks in Fortran, no `@`-style commands (`@param`, `@result`, `@brief`) in Python docstrings. Plain comments and plain docstrings are fine.
+- Doxygen **linking** commands (`\section`, `\ref`, …) remain valid anywhere and may be used where they help, even in files whose functions need no documentation blocks.
+- Function-level documentation blocks in test code are **optional**.
+- Brief documentation is still helpful and welcome: a short line saying what a test covers or what an example demonstrates aids the next reader.
+
+When reviewing changes, do not flag missing documentation on test functions, and do
+not request Doxygen-style function documentation for files outside the paths
+Doxygen processes.
 
 ### Pull Requests
 
@@ -221,10 +193,12 @@ A representative build environment that can be used for creating a testing sandb
 
 1. **Single OFT_env instance**: The Python `OFT_env` class enforces a singleton. Tests use `multiprocessing.Process` to work around this. Never create two `OFT_env` instances in the same process.
 
-2. **Tests run from build tree**: Tests must be run from `builds/build_release/tests/` (or via `make test` from `builds/build_release/`), not from the source tree, because compiled Fortran test executables are in the build tree.
+2. **Tests run from build tree**: Tests must be run from `<build_dir>/tests/` (or via `make test` from `<build_dir>`), not from the source tree, because compiled Fortran test executables are in the build tree. See "Locating the build tree" — `<build_dir>` is only `builds/build_release` in CI/ephemeral environments.
 
 3. **ext_libs/ is bundled third-party code**: Do not modify files in `src/ext_libs/`. These are upstream sources (triangle, minpack, bvls, dlsode).
 
 4. **Fortran/Python interop**: The Python package calls compiled Fortran via `ctypes`. The Fortran-side wrappers are in `src/python/wrappers/` and use `ISO_C_BINDING`. Changes to Fortran function signatures require corresponding updates to both `wrappers/*_f.F90` and `python/OpenFUSIONToolkit/*/_interface.py`.
 
 5. **CMake template files**: Some files use `@VARIABLE@` CMake substitution (e.g., `__init__.py`, `pyproject.toml.in`, `run_test.sh.in`). Edit the `.in` template, not the generated file.
+
+6. **Build trees compile an absolute source path**: `config_cmake.sh` ends with the absolute path of the `src/` it builds, so in a git worktree or second checkout an existing build tree usually compiles the *main* checkout, not your changes. See "Check which source tree it builds" in the `oft-build` skill.

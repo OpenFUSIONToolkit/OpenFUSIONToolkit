@@ -9,12 +9,15 @@
 @date March 2024
 @ingroup doxy_oft_python
 '''
+import os
 import ctypes
+import tempfile
 import numpy
 import h5py
 import scipy
 from ._interface import *
 from ._homology_cli import compute_homology
+from .junctions import insulate_junction_file
 from ..io import build_XDMF
 from warnings import warn
 
@@ -37,7 +40,9 @@ class ThinCurr():
             'L_svd_tol': '-1.E-5',
             'L_aca_rel_tol': '0.05',
             'B_svd_tol': '-1.E-5',
-            'B_aca_rel_tol': '0.05'
+            'B_aca_rel_tol': '0.05',
+            'pre_single': 'F',
+            'pre_coarse': 'F'
         }
         self._oft_env.update_oft_in()
         ## Thin-wall model object
@@ -98,17 +103,21 @@ class ThinCurr():
   |_| |_| |_|_|_| |_|\____\__,_|_|  |_|
 ''')
 
-    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0,no_verify_holes=False):
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,pmap=None,xml_filename=None,jumper_start=0,no_verify_holes=False,
+                    insulated_junctions=None):
         '''! Setup ThinCurr model
 
         @param r Point list `(np,3)`
         @param lc Cell list `(nc,3)`
         @param reg Region tag `(nc,)`
         @param mesh_file File containing model in native mesh format
-        @param pmap Point map for periodic grids
+        @param pmap Vertex to unknown map `(np,)`, only needed for periodic grids: 0 for inactive vertices,
+        otherwise the 1-based unknown index
         @param xml_filename Path to XML file for model
         @param jumper_start Index of first jumper nodeset in meshfile (positive values Fortran style, negative values Python style)
         @param no_verify_holes Skip verification of mesh and model
+        @param insulated_junctions Junction insulation (mesh files split at junctions only): regions, insulated at every
+        junction they touch, and/or pairs of regions, insulated from each other only (e.g. `[3, (1,2)]`)
         '''
         if self.nregs != -1:
             raise ValueError('Mesh already setup, delete or create new instance for new model')
@@ -118,6 +127,20 @@ class ThinCurr():
         if mesh_file is not None:
             if (r is not None) or (lc is not None) or (reg is not None):
                 raise ValueError('Specification of "mesh_file" is incompatible with specification of "r", "lc", and "reg"')
+            if (jumper_start != 0) or (pmap is not None):
+                with h5py.File(mesh_file, 'r') as h5_file:
+                    if 'thincurr/junctions' in h5_file:
+                        if jumper_start != 0:
+                            raise ValueError('"jumper_start" is not supported for meshes split at junctions, define '
+                                             'jumpers in the unsplit mesh before running "OFT_ThinCurr_holes"')
+                        raise ValueError('"pmap" is not supported for meshes split at junctions')
+            if insulated_junctions is not None:
+                if pmap is not None:
+                    raise ValueError('"insulated_junctions" is incompatible with "pmap"')
+                self._junction_tmp = tempfile.TemporaryDirectory()
+                insulated_file = os.path.join(self._junction_tmp.name, os.path.basename(mesh_file))
+                insulate_junction_file(mesh_file, tuple(insulated_junctions), insulated_file)
+                mesh_file = insulated_file
             if no_verify_holes:
                 print('Skipping mesh hole and closure verification...')
             else:
@@ -131,7 +154,8 @@ class ThinCurr():
             if pmap is None:
                 pmap = -numpy.ones((1,),dtype=numpy.int32)
             else:
-                pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
+                with h5py.File(mesh_file,'r') as fid:
+                    pmap = self._check_pmap(pmap,fid['mesh/R'].shape[0])
             sizes = numpy.zeros((9,),dtype=numpy.int32)
             cfilename = self._oft_env.path2c(mesh_file)
             error_string = self._oft_env.get_c_errorbuff()
@@ -154,8 +178,7 @@ class ThinCurr():
             if pmap is None:
                 pmap = -numpy.ones((1,),dtype=numpy.int32)
             else:
-                # pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
-                raise ValueError('"pmap" not supported with manual mesh specification')
+                pmap = self._check_pmap(pmap,np.value)
             sizes = numpy.zeros((9,),dtype=numpy.int32)
             cfilename = self._oft_env.path2c('')
             error_string = self._oft_env.get_c_errorbuff()
@@ -191,6 +214,21 @@ class ThinCurr():
                 'type': 'vcoil' if vcoil_flag.value else 'icoil'
             }
 
+    @staticmethod
+    def _check_pmap(pmap,npts):
+        '''! Check a periodic point map (shape and non-negative entries) and convert it for the Fortran interface
+
+        @param pmap Point map `(npts,)`
+        @param npts Number of mesh points
+        @result Contiguous `int32` copy of `pmap`
+        '''
+        pmap = numpy.ascontiguousarray(pmap, dtype=numpy.int32)
+        if pmap.shape != (npts,):
+            raise ValueError('"pmap" must have shape ({0},), got {1}'.format(npts,pmap.shape))
+        if pmap.min() < 0:
+            raise ValueError('"pmap" entries must be non-negative')
+        return pmap
+
     def update_coil_types(self,vcoils=[],icoils=[]):
         '''! Update coil types for ThinCurr model
 
@@ -214,9 +252,9 @@ class ThinCurr():
         thincurr_set_coil_types(self.tw_obj,vcoil_flags,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
+        self.nelems += numpy.sum(vcoil_flags) - self.n_vcoils
         self.n_vcoils = numpy.sum(vcoil_flags)
         self.n_icoils = self.n_coils - self.n_vcoils
-        self.nelems = self.np_active + self.nholes + self.n_vcoils
         # Resync with Fortran model
         for i in range(self.n_coils):
             coil_name = ctypes.create_string_buffer(b"",41)
@@ -329,7 +367,7 @@ class ThinCurr():
         return data_in
 
     def set_hodlr_options(self,target_size=None,aca_min_its=None,aca_sep_thresh=None,L_svd_tol=None,
-                          L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None):
+                          L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None,pre_coarse=None):
         '''! Set HODLR options for ThinCurr model
 
         @param target_size Target size for HODLR blocks
@@ -339,6 +377,8 @@ class ThinCurr():
         @param L_aca_rel_tol Relative tolerance for ACA compression of L-matrix blocks
         @param B_svd_tol Tolerance for SVD compression of B-matrix blocks
         @param B_aca_rel_tol Relative tolerance for ACA compression of B-matrix blocks
+        @param pre_single Compute, store, and apply HODLR block-Jacobi preconditioners in single precision?
+        @param pre_coarse Add a global coarse correction to HODLR block-Jacobi preconditioners (two-level preconditioner)?
         '''
         if target_size is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
@@ -356,6 +396,10 @@ class ThinCurr():
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['B_svd_tol'] = '{0:.4E}'.format(B_svd_tol)
         if B_aca_rel_tol is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['B_aca_rel_tol'] = '{0:.4E}'.format(B_aca_rel_tol)
+        if pre_single is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_single'] = 'T' if pre_single else 'F'
+        if pre_coarse is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_coarse'] = 'T' if pre_coarse else 'F'
         self._oft_env.update_oft_in()
 
     def compute_Lmat(self,cache_file=None,use_hodlr=False):
@@ -399,10 +443,13 @@ class ThinCurr():
     def compute_Bmat(self,cache_file=None,B_dx=-1.E-2):
         '''! Compute magnetic field reconstruction operators for this model
 
+        @note To reconstruct the magnetic field from a current potential and coil currents use
+        \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.reconstruct_Bfield "reconstruct_Bfield()".
+
         @param cache_file Path to cache file to store/load matrix
         @param B_dx Spatial step size for finite difference evaluation of B-field (negative values for relative sizing)
-        @result Element B-field reconstruction matrix (`(:,:)` if HODLR is available else `None`)
-        @result Icoil B-field reconstruction matrix `(:,:)`
+        @result Element B-field reconstruction matrix `(3,nelems,np)` (`None` if HODLR is used)
+        @result Icoil B-field reconstruction matrix `(3,n_icoils,np)`
         '''
         if cache_file is None:
             cache_string = self._oft_env.path2c("")

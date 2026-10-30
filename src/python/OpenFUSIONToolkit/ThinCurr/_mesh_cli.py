@@ -14,7 +14,7 @@ import os
 import xml.etree.ElementTree as ET
 import numpy as np
 from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
-from .coils import ThinCurr_XML
+from .coils import ThinCurr_XML, convert_circular_coils
 
 
 class ThinCurrMesh:
@@ -585,6 +585,9 @@ def build_parser():
     p_mod.add_argument("--coils_from_xml", type=str, default=None,
                         help="Read coil sets from an "
                             "<oft><thincurr> XML file and add to the output mesh")
+    p_mod.add_argument("--circular_coils", action="store_true", default=False,
+                       help="Convert coils given as points that form circles about the Z axis to circular "
+                            "coils (exact couplings in ThinCurr)")
     jumps = p_mod.add_mutually_exclusive_group()
     jumps.add_argument("--jumpers", type=int, nargs='+', default=None, metavar='IDX',
                        help="Nodeset indices to treat as jumpers instead of holes "
@@ -716,6 +719,11 @@ def script_entry(argv=None):
             print()
             print("Adding coil sets...")
             mesh.coil_sets = mesh.coil_sets + coil_sets if mesh.coil_sets is not None else coil_sets
+        if options.circular_coils:
+            print()
+            print("Converting circular coils...")
+            nconverted = convert_circular_coils(mesh.coil_sets) if mesh.coil_sets is not None else 0
+            print("  Converted {0} coils".format(nconverted))
         mesh.save(out_file)
 
 
@@ -781,7 +789,8 @@ def script_entry(argv=None):
 #usage: OFT_ThinCurr_mesh_tool modify [-h] --in_file IN_FILE [--out_file OUT_FILE] [--remove_regions REMOVE_REGIONS [REMOVE_REGIONS ...]] [--shift X Y Z |
 #                                        --rotate AXIS ANGLE | --scale SX SY SZ] [--rotate_center X Y Z] [--copies COPIES] [--persist_regions]
 #                                        [--eta_surf ETA_SURF [ETA_SURF ...]] [--eta_vol ETA_VOL [ETA_VOL ...]] [--thickness THICKNESS [THICKNESS ...]]
-#                                        [--eta_from_xml ETA_FROM_XML] [--coils_from_xml COILS_FROM_XML] [--jumpers IDX [IDX ...] | --jumper_range N [N ...]]
+#                                        [--eta_from_xml ETA_FROM_XML] [--coils_from_xml COILS_FROM_XML] [--circular_coils]
+#                                        [--jumpers IDX [IDX ...] | --jumper_range N [N ...]]
 #
 #options:
 #  -h, --help            show this help message and exit
@@ -808,6 +817,7 @@ def script_entry(argv=None):
 #                        Read eta/eta_surf, eta_vol, and thickness from an <oft><thincurr> XML file instead of the flags above
 #  --coils_from_xml COILS_FROM_XML
 #                        Read coil sets from an <oft><thincurr> XML file and add to the output mesh
+#  --circular_coils      Convert coils given as points that form circles about the Z axis to circular coils (exact couplings in ThinCurr)
 #  --jumpers IDX [IDX ...]
 #                        Nodeset indices to treat as jumpers instead of holes (0-based; negative indices count from the end). All other nodesets are holes
 #  --jumper_range N [N ...]
