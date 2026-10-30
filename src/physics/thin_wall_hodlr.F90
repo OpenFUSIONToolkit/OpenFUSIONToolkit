@@ -54,7 +54,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   INTEGER(4) :: nsparse = 0 !< Number of compressed off-diagonal interactions
   INTEGER(4) :: leaf_target = 1500 !< Target size for leaves on lowest level
   INTEGER(4) :: aca_min_its = 20 !< Minimum number of ACA+ iterations
-  INTEGER(4) :: min_rank = 10 !< Minimum rank of compressed off-diagonal matrices
+  INTEGER(4) :: min_rank = 10 !< Minimum rank of compressed off-diagonal matrices (>= 1)
   REAL(r8) :: times(4) = 0 !< Timing information for diagonal and sparse matrix products
   REAL(8) :: aca_sep_thresh(2) = [1.1d0,1.1d0] !< Separation threshold for blocks ACA+ vs SVD [lowest level, all other levels]
   REAL(8) :: L_svd_tol = -1.d0 !< SVD tolerance for inductance matrix
@@ -172,7 +172,7 @@ SUBROUTINE tw_hodlr_LmatHole(self,Lmat)
 CLASS(oft_tw_hodlr_op), INTENT(inout) :: self !< HODLR operator
 REAL(8), CONTIGUOUS, POINTER, INTENT(inout) :: Lmat(:,:) !< Hole and V-coil columns [nelems_exp,nholes+n_vcoils]
 INTEGER(4) :: i,ii,j,jj,h,ib,ig,nleaf,ngroup,ncell,nstrip,jk
-INTEGER(4), ALLOCATABLE :: cell_owner(:),kgroup(:),lgroup(:),kstrip(:),lstrip(:),cnt(:)
+INTEGER(4), ALLOCATABLE :: cell_owner(:),vert_leaf(:),kgroup(:),lgroup(:),kstrip(:),lstrip(:),cnt(:)
 REAL(8), ALLOCATABLE :: cstrip(:,:),gcen(:,:),gext(:),scen(:,:),sext(:),V(:,:)
 TYPE(tw_type), POINTER :: tw
 CLASS(oft_bmesh), POINTER :: mesh
@@ -181,19 +181,25 @@ mesh=>tw%mesh
 Lmat=0.d0
 !---Disjoint cell groups from the leaf blocks
 nleaf=self%levels(self%nlevels)%nblocks
-ALLOCATE(cell_owner(mesh%nc))
-cell_owner=nleaf+1 ! Cells with no active vertex: own group, always summed directly
-DO i=1,mesh%nc
-  DO ii=1,3
-    DO ib=1,nleaf
-      IF(self%levels(self%nlevels)%blocks(ib)%inv_map(mesh%lc(ii,i))>0)THEN
-        cell_owner(i)=ib
-        EXIT
-      END IF
-    END DO
-    IF(cell_owner(i)<=nleaf)EXIT
+!---Leaf block of each vertex (the first leaf containing it), then each cell goes to the leaf of its first vertex
+!   in a leaf; cells with no active vertex form their own group, always summed directly
+ALLOCATE(vert_leaf(mesh%np),cell_owner(mesh%nc))
+vert_leaf=0
+DO ib=nleaf,1,-1
+  DO j=1,self%levels(self%nlevels)%blocks(ib)%nelems
+    vert_leaf(tw%lpmap_inv(self%levels(self%nlevels)%blocks(ib)%ielem(j)))=ib
   END DO
 END DO
+cell_owner=nleaf+1
+DO i=1,mesh%nc
+  DO ii=1,3
+    IF(vert_leaf(mesh%lc(ii,i))>0)THEN
+      cell_owner(i)=vert_leaf(mesh%lc(ii,i))
+      EXIT
+    END IF
+  END DO
+END DO
+DEALLOCATE(vert_leaf)
 ngroup=nleaf+1
 ALLOCATE(kgroup(ngroup+1),lgroup(mesh%nc),cnt(ngroup))
 cnt=0
@@ -257,7 +263,7 @@ DO h=1,tw%nholes
   DO ig=1,ngroup
     ncell=kgroup(ig+1)-kgroup(ig)
     IF(ncell==0)CYCLE
-    IF((ig<=nleaf).AND.(MIN(ncell,nstrip)>2*tw_hole_aca_rmin).AND. &
+    IF((ig<=nleaf).AND.(MIN(ncell,nstrip)/3>=tw_hole_aca_rmin).AND. &
       (magnitude(gcen(:,ig)-scen(:,h))/(gext(ig)+sext(h))>tw_hole_aca_sep))THEN
       IF(group_aca(lgroup(kgroup(ig):kgroup(ig+1)-1),lstrip(kstrip(h):kstrip(h)+nstrip-1), &
         cstrip(:,kstrip(h):kstrip(h)+nstrip-1),V))CYCLE
@@ -690,6 +696,7 @@ if(ierr>0)call oft_abort('Error parsing "thincurr_hodlr_options" in input file.'
   'tw_hodlr_setup',__FILE__)
 IF((L_svd_tol>0.d0).AND.(min_rank>aca_min_its))CALL oft_abort('"min_rank" must be <= "aca_min_its"', &
   "tw_hodlr_setup",__FILE__)
+IF(min_rank<1)CALL oft_abort('"min_rank" must be >= 1',"tw_hodlr_setup",__FILE__)
 !
 self%leaf_target=target_size
 self%min_rank=min_rank
@@ -1968,8 +1975,9 @@ ALLOCATE(elem_block%icell(200))
 elem_block%icell=0
 ALLOCATE(elem_block%inv_map(self%tw_obj%mesh%np))
 elem_block%inv_map=0
-!---Stop if the stacked factors would not be smaller than the dense stacked block
-max_iter = MIN(3*self%leaf_target*2,INT(full_size/INT(M3+N,8),4)-1)
+!---Stop if the stacked factors would not be smaller than the dense stacked block, or if a direction's factor
+!   (M x nterms) would have more columns than rows
+max_iter = MIN(3*self%leaf_target*2,INT(full_size/INT(M3+N,8),4)-1,MIN_DIM-1)
 size_out=-1
 ALLOCATE(us(N,max_iter),vs(max_iter,M3))
 us = 0.d0
@@ -2884,7 +2892,7 @@ REAL(8) :: aii,tmp,etrail,tstop
 REAL(8), ALLOCATABLE :: W(:,:),cn(:),cn0(:),tau(:),work(:),Q(:,:),Rs(:,:),S(:),Ur(:,:),Vt(:,:)
 M=SIZE(A,1); N=SIZE(A,2)
 MIN_DIM=MIN(M,N)
-kmin=MIN(min_rank,MIN_DIM)
+kmin=MAX(1,MIN(min_rank,MIN_DIM))
 kbe=INT(INT(M,8)*INT(N,8)/INT(M+N,8),4) ! Break-even rank: no savings at or above
 rank=-1
 ALLOCATE(W(M,N),perm(N),cn(N),cn0(N),tau(MIN_DIM),work(MAX(M,N)))
