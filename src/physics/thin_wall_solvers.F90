@@ -13,6 +13,7 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 MODULE thin_wall_solvers
+USE, INTRINSIC :: iso_c_binding, ONLY: c_loc
 USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
@@ -222,6 +223,53 @@ CALL oft_abort("Iterative eigenvalue solve requires ARPACK", "lr_eigenmodes_arpa
 #endif
 DEBUG_STACK_POP
 END SUBROUTINE lr_eigenmodes_arpack
+!---------------------------------------------------------------------------------
+!> Slowest L/R eigenmodes for the coarse space of the two-level preconditioner (`pre_neigs`)
+!!
+!! The eigenmodes depend only on L and R, so they are kept on the HODLR operator (`pre_evecs`) and reused by later
+!! runs until `pre_neigs` or the resistance matrix changes. Requires ARPACK; the count is limited by the model size.
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_pre_eigenmodes(self,hodlr_op)
+TYPE(tw_type), TARGET, INTENT(in) :: self !< ThinCurr object
+TYPE(oft_tw_hodlr_op), TARGET, INTENT(inout) :: hodlr_op !< HODLR L matrix
+INTEGER(4) :: neigs,rhash,i
+REAL(8), ALLOCATABLE, DIMENSION(:) :: eig_tmp
+CHARACTER(LEN=80) :: msg
+#ifdef HAVE_ARPACK
+neigs=hodlr_op%pre_neigs
+!---ARPACK needs a Ritz space of 2*neigs+1 vectors
+IF(2*neigs+1>self%nelems)THEN
+  neigs=(self%nelems-1)/2
+  WRITE(msg,'(A,I8)')'"pre_neigs" too large for the model, reduced to ',neigs
+  CALL oft_warn(msg)
+END IF
+IF(neigs<1)RETURN
+IF(neigs>50)CALL oft_warn('Large "pre_neigs": the eigenmode solve and coarse space cost grow with the number of modes')
+rhash=oft_simple_hash(C_LOC(self%Rmat%M),INT(8*SIZE(self%Rmat%M),8),starting_value=neigs)
+IF(ASSOCIATED(hodlr_op%pre_evecs))THEN
+  IF((SIZE(hodlr_op%pre_evecs,2)==neigs).AND.(hodlr_op%pre_evecs_hash==rhash))THEN
+    WRITE(*,'(2A)')oft_indent,'Reusing L/R eigenmodes for the coarse space'
+    RETURN
+  END IF
+  DEALLOCATE(hodlr_op%pre_evecs)
+END IF
+ALLOCATE(hodlr_op%pre_evecs(self%nelems,neigs),eig_tmp(neigs))
+hodlr_op%pre_evecs=0.d0
+CALL lr_eigenmodes_arpack(self,neigs,eig_tmp,hodlr_op%pre_evecs,hodlr_op=hodlr_op)
+DEALLOCATE(eig_tmp)
+!---Eigenvectors are left at zero if ARPACK fails
+DO i=1,neigs
+  IF(MAXVAL(ABS(hodlr_op%pre_evecs(:,i)))<=0.d0)THEN
+    CALL oft_warn('L/R eigenmode solve failed, continuing without eigenmodes in the coarse space')
+    DEALLOCATE(hodlr_op%pre_evecs)
+    RETURN
+  END IF
+END DO
+hodlr_op%pre_evecs_hash=rhash
+#else
+CALL oft_warn('"pre_neigs" requires ARPACK, continuing without eigenmodes in the coarse space')
+#endif
+END SUBROUTINE tw_hodlr_pre_eigenmodes
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
@@ -671,7 +719,7 @@ TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L ma
 INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits,int_inds(2)
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: its_hist
 REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt,dt_old,dt_op,int_facs(2),elapsed_time
-REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist,eig_tmp
+REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist,proj_c
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
 CLASS(oft_vector), POINTER :: u,g,up
@@ -782,10 +830,8 @@ IF(.NOT.direct)THEN
     linv%pre=>linv_pre
     !---Slowest L/R eigenmodes for the coarse space of the two-level preconditioner
     IF(hodlr_op%pre_coarse.AND.(hodlr_op%pre_neigs>0))THEN
-      ALLOCATE(linv_pre%z_glob(self%nelems,hodlr_op%pre_neigs),eig_tmp(hodlr_op%pre_neigs))
-      linv_pre%z_glob=0.d0
-      CALL lr_eigenmodes_arpack(self,hodlr_op%pre_neigs,eig_tmp,linv_pre%z_glob,hodlr_op=hodlr_op)
-      DEALLOCATE(eig_tmp)
+      CALL tw_hodlr_pre_eigenmodes(self,hodlr_op)
+      IF(ASSOCIATED(hodlr_op%pre_evecs))linv_pre%z_glob=>hodlr_op%pre_evecs
     END IF
   ELSE
     CALL create_diag_pre(linv%pre)
@@ -794,7 +840,7 @@ IF(.NOT.direct)THEN
   maxproj=8 ! Number of previous solutions for the projection initial guess (0: previous solution)
   IF(maxproj>0)THEN
     ALLOCATE(proj_x(self%nelems,maxproj),proj_ax(self%nelems,maxproj))
-    ALLOCATE(proj_q(self%nelems,maxproj),proj_aq(self%nelems,maxproj))
+    ALLOCATE(proj_q(self%nelems,maxproj),proj_aq(self%nelems,maxproj),proj_c(maxproj))
     CALL self%Uloc%new(vtmp)
     CALL self%Uloc%new(vtmp2)
     NULLIFY(pvals)
@@ -996,12 +1042,10 @@ DO i=1,nsteps
     CALL self%Rmat%apply(u,vtmp)
     pvals=>proj_ax(:,iproj)
     CALL vtmp%get_local(pvals)
-    CALL g%get_local(vals)
-    proj_ax(:,iproj)=dt*proj_ax(:,iproj)+vals
     NULLIFY(pvals)
   END IF
-  uu=g%dot(g)
   CALL g%get_local(vals)
+  IF(maxproj>0)proj_ax(:,iproj)=dt*proj_ax(:,iproj)+vals
   IF(ntimes_curr>0)CALL dgemv('N',self%nelems,self%n_icoils,-1.d0,self%Ael2dr, &
     self%nelems,icoil_dcurr,1,1.d0,vals,1)
   IF(volt_full)THEN
@@ -1019,10 +1063,13 @@ DO i=1,nsteps
   ELSE
     !---Initial guess: combination of the previous solutions with the smallest residual
     IF(maxproj>0)THEN
-      CALL tw_proj_basis(self%nelems,nproj,iproj,proj_x,proj_ax,proj_q,proj_aq,k)
-      CALL g%get_local(vals)
-      vals=MATMUL(proj_q(:,1:k),MATMUL(vals,proj_aq(:,1:k)))
-      CALL u%restore_local(vals)
+      CALL tw_proj_basis(nproj,iproj,proj_x,proj_ax,proj_q,proj_aq,k)
+      IF(k>0)THEN
+        CALL g%get_local(vals)
+        CALL dgemv('T',self%nelems,k,1.d0,proj_aq,self%nelems,vals,1,0.d0,proj_c,1)
+        CALL dgemv('N',self%nelems,k,1.d0,proj_q,self%nelems,proj_c,1,0.d0,vals,1)
+        CALL u%restore_local(vals)
+      END IF
     END IF
     CALL linv%apply(u,g)
     nits=linv%cits
@@ -1100,7 +1147,7 @@ DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,up,g)
 IF(maxproj>0)THEN
   CALL vtmp%delete()
   CALL vtmp2%delete()
-  DEALLOCATE(proj_x,proj_ax,proj_q,proj_aq,vtmp,vtmp2)
+  DEALLOCATE(proj_x,proj_ax,proj_q,proj_aq,proj_c,vtmp,vtmp2)
 END IF
 IF(direct)THEN
   DEALLOCATE(minv%m)
@@ -1115,36 +1162,38 @@ END SUBROUTINE run_td_sim
 !------------------------------------------------------------------------------
 !> Basis for the least-squares initial guess from a set of vectors
 !!
-!! Builds q = X*C with A*q orthonormal (modified Gram-Schmidt on A*x, two passes), so the combination of the vectors
+!! Builds q = X*C with A*q orthonormal (classical Gram-Schmidt on A*x with BLAS, two passes), so the combination of the vectors
 !! with the smallest residual for a right-hand side b is q*((A*q)^T b). Vectors whose A*x drops below 1E-10 of its
 !! original norm (nearly dependent on the previous ones) are skipped. The products A*q are formed from the stored A*x.
 !------------------------------------------------------------------------------
-SUBROUTINE tw_proj_basis(m,n,inew,x,ax,q,aq,nq)
-INTEGER(4), INTENT(in) :: m !< Vector length
+SUBROUTINE tw_proj_basis(n,inew,x,ax,q,aq,nq)
 INTEGER(4), INTENT(in) :: n !< Number of vectors
 INTEGER(4), INTENT(in) :: inew !< Column of the newest vector (columns stored circularly)
-REAL(8), INTENT(in) :: x(:,:) !< Vectors [m,:]
-REAL(8), INTENT(in) :: ax(:,:) !< Products A*x [m,:]
-REAL(8), INTENT(out) :: q(:,:) !< Basis vectors [m,:]
-REAL(8), INTENT(out) :: aq(:,:) !< Products A*q, orthonormal [m,:]
+REAL(8), CONTIGUOUS, INTENT(in) :: x(:,:) !< Vectors [m,:]
+REAL(8), CONTIGUOUS, INTENT(in) :: ax(:,:) !< Products A*x [m,:]
+REAL(8), CONTIGUOUS, INTENT(out) :: q(:,:) !< Basis vectors [m,:]
+REAL(8), CONTIGUOUS, INTENT(out) :: aq(:,:) !< Products A*q, orthonormal [m,:]
 INTEGER(4), INTENT(out) :: nq !< Number of basis vectors
-INTEGER(4) :: i,j,ii,ipass
-REAL(8) :: nrm0,nrm,c
+INTEGER(4) :: i,ii,ipass,m
+REAL(8) :: nrm0,nrm,c(SIZE(x,2))
+REAL(8), EXTERNAL :: ddot
+m=SIZE(x,1)
 nq=0
 DO i=0,n-1
   ii=MODULO(inew-1-i,n)+1 ! Newest first
   q(:,nq+1)=x(:,ii)
   aq(:,nq+1)=ax(:,ii)
-  nrm0=DOT_PRODUCT(aq(:,nq+1),aq(:,nq+1))
+  nrm0=ddot(m,aq(:,nq+1),1,aq(:,nq+1),1)
   IF(nrm0<=0.d0)CYCLE
-  DO ipass=1,2
-    DO j=1,nq
-      c=DOT_PRODUCT(aq(:,j),aq(:,nq+1))
-      q(:,nq+1)=q(:,nq+1)-c*q(:,j)
-      aq(:,nq+1)=aq(:,nq+1)-c*aq(:,j)
+  !---Classical Gram-Schmidt against the previous basis vectors, two passes
+  IF(nq>0)THEN
+    DO ipass=1,2
+      CALL dgemv('T',m,nq,1.d0,aq,m,aq(:,nq+1),1,0.d0,c,1)
+      CALL dgemv('N',m,nq,-1.d0,q,m,c,1,1.d0,q(:,nq+1),1)
+      CALL dgemv('N',m,nq,-1.d0,aq,m,c,1,1.d0,aq(:,nq+1),1)
     END DO
-  END DO
-  nrm=DOT_PRODUCT(aq(:,nq+1),aq(:,nq+1))
+  END IF
+  nrm=ddot(m,aq(:,nq+1),1,aq(:,nq+1),1)
   IF(nrm<=1.d-20*nrm0)CYCLE
   nrm=1.d0/SQRT(nrm)
   q(:,nq+1)=q(:,nq+1)*nrm
