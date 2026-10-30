@@ -504,6 +504,7 @@ def run_td_noconductor_case(use_vcoil,mp_q):
             mygs.step_td(0.0,1.E-3)
     except Exception as e:
         mp_q.put(str(e))
+        oftpy_dump_cov()
         return
     mp_q.put('')
     oftpy_dump_cov()
