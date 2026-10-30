@@ -705,7 +705,7 @@ IF(track_free)THEN
   CALL h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error, creation_prp=plist_id)
   CALL h5pclose_f(plist_id, error)
 #else
-  call oft_warn('HDF5 free space tracking requires HDF5 v1.10+')
+  call oft_warn('HDF5 free space tracking requires HDF5 v1.14.3+')
   call h5fcreate_f(TRIM(filename), H5F_ACC_TRUNC_F, file_id, error)
 #endif
 ELSE

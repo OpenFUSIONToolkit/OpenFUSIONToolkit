@@ -93,6 +93,12 @@ except OSError:
 # Abort callback
 @ctypes.CFUNCTYPE(None)
 def oft_python_abort():
+    # Remove temporary files, as `os._exit()` skips normal exit cleanup
+    try:
+        from ._core import OFT_env
+        OFT_env.instance._tempfiles_finalizer()
+    except:
+        pass
     sys.stdout.flush()
     time.sleep(0.1)
     sys.stderr.flush()
@@ -102,6 +108,10 @@ def oft_python_abort():
 # Global init function
 oft_init = ctypes_subroutine(oftpy_lib.oftpy_init,
     [c_int, c_bool, c_char_p, ctypes_numpy_array(int32,1), c_void_p])
+
+# oftpy_get_slens(slens)
+oftpy_get_slens = ctypes_subroutine(oftpy_lib.oftpy_get_slens,
+    [ctypes_numpy_array(int32,1)])
 
 # oftpy_set_debug(debug_level)
 oftpy_set_debug = ctypes_subroutine(oftpy_lib.oftpy_set_debug,
