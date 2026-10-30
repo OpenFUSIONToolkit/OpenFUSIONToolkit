@@ -16,11 +16,38 @@
 !! @date October 2026
 !! @ingroup testing
 !------------------------------------------------------------------------------
+MODULE test_thin_wall_kernels_aca
+USE thin_wall_hodlr, ONLY: tw_aca_source
+IMPLICIT NONE
+!> Dense test block given by rows and columns
+TYPE, EXTENDS(tw_aca_source) :: dense_source
+  REAL(8), ALLOCATABLE :: K(:,:)
+CONTAINS
+  PROCEDURE :: row => dense_row
+  PROCEDURE :: col => dense_col
+END TYPE dense_source
+CONTAINS
+SUBROUTINE dense_row(self,i,vec)
+CLASS(dense_source), INTENT(inout) :: self
+INTEGER(4), INTENT(in) :: i
+REAL(8), INTENT(out) :: vec(:)
+vec=self%K(i,:)
+END SUBROUTINE dense_row
+SUBROUTINE dense_col(self,i,vec)
+CLASS(dense_source), INTENT(inout) :: self
+INTEGER(4), INTENT(in) :: i
+REAL(8), INTENT(out) :: vec(:)
+vec=self%K(:,i)
+END SUBROUTINE dense_col
+END MODULE test_thin_wall_kernels_aca
+!------------------------------------------------------------------------------
 PROGRAM test_thin_wall_kernels
 USE oft_base
 USE thin_wall, ONLY: tw_compute_phipot, tw_compute_phigrad
-USE thin_wall_hodlr, ONLY: tw_lowrank_qrcp
+USE thin_wall_hodlr, ONLY: tw_lowrank_qrcp, tw_aca_plus
+USE test_thin_wall_kernels_aca, ONLY: dense_source
 IMPLICIT NONE
+TYPE(dense_source) :: src
 INTEGER(i4) :: i,j,k,io_unit,rank
 REAL(r8) :: pt(3)
 REAL(r8), ALLOCATABLE :: A(:,:),U(:,:),V(:,:)
@@ -55,6 +82,28 @@ IF(oft_env%head_proc)THEN
     END DO
     DEALLOCATE(A)
   END DO
+  CLOSE(io_unit)
+  !---ACA+: case, number of terms and relative error against the dense block
+  OPEN(NEWUNIT=io_unit,FILE='thin_wall_aca.results')
+  ALLOCATE(src%K(60,50))
+  DO j=1,50
+    DO i=1,60
+      src%K(i,j)=1.d0/(3.d0+REAL(j,8)/50.d0-REAL(i,8)/60.d0)
+    END DO
+  END DO
+  CALL tw_aca_plus(src,60,50,1.d-10,1,40,1,1,U,V,rank)
+  WRITE(io_unit,'(2I6,ES24.15)')1,rank,SQRT(SUM((src%K-MATMUL(U,V))**2)/SUM(src%K**2))
+  DEALLOCATE(U,V)
+  CALL tw_aca_plus(src,60,50,1.d-8,1,40,1,1,U,V,rank,rel_tol=.TRUE.)
+  WRITE(io_unit,'(2I6,ES24.15)')2,rank,SQRT(SUM((src%K-MATMUL(U,V))**2)/SUM(src%K**2))
+  DEALLOCATE(U,V)
+  DO j=1,50
+    DO i=1,60
+      src%K(i,j)=1.d0/(ABS(REAL(i,8)/60.d0-REAL(j,8)/50.d0)+1.d-3)
+    END DO
+  END DO
+  CALL tw_aca_plus(src,60,50,1.d-10,1,10,1,1,U,V,rank)
+  WRITE(io_unit,'(2I6,ES24.15)')3,rank,0.d0
   CLOSE(io_unit)
 END IF
 CALL oft_finalize

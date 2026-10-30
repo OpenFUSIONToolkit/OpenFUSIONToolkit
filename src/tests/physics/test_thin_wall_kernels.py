@@ -66,3 +66,16 @@ def test_lowrank_qrcp():
         else:
             assert svd_rank <= rank <= svd_rank + 1
             assert err <= tol
+
+
+def test_aca_plus():
+    """ACA+ of a smooth kernel block (absolute and relative tolerance) against the dense block; an incompressible
+    block does not converge within a few terms"""
+    os.chdir(test_dir)
+    with open('oft.in', 'w+') as fid:
+        fid.write(oft_in)
+    assert run_OFT('./test_thin_wall_kernels', 1, 60)
+    data = np.loadtxt('thin_wall_aca.results')
+    assert data[0, 1] > 0 and data[0, 2] < 1.E-8
+    assert data[1, 1] > 0 and data[1, 2] < 1.E-6
+    assert data[2, 1] == -1
