@@ -2878,6 +2878,9 @@ END SUBROUTINE tw_part_mesh
 !! exactly from the column norms) is below a tenth of `tol`. The small factor is then compressed with an SVD and
 !! truncated with the same rule as a full SVD: the smallest rank whose discarded part, including \f$ R_{22} \f$, has
 !! a Frobenius norm below `tol`. Costs \f$ O(M N r) \f$ instead of \f$ O(M N \min(M,N)) \f$ for a full SVD.
+!!
+!! Pivoted QR can need a few more columns than the SVD rank to reach the tolerance, so it may run past the
+!! break-even rank (by `MAX(8,kbe/8)` columns); the block is compressed only if the final rank is below it.
 !------------------------------------------------------------------------------
 SUBROUTINE tw_lowrank_qrcp(A,tol,min_rank,U,V,rank)
 REAL(8), INTENT(in) :: A(:,:) !< Dense block [M,N]
@@ -2886,7 +2889,7 @@ INTEGER(4), INTENT(in) :: min_rank !< Minimum rank to keep
 REAL(8), ALLOCATABLE, INTENT(out) :: U(:,:) !< Left factor [M,rank]
 REAL(8), ALLOCATABLE, INTENT(out) :: V(:,:) !< Right factor, singular values included [rank,N]
 INTEGER(4), INTENT(out) :: rank !< Rank of the factors (-1 if the block is not worth compressing)
-INTEGER(4) :: M,N,MIN_DIM,kmin,kbe,r,j,p,i,LWORK,INFO
+INTEGER(4) :: M,N,MIN_DIM,kmin,kbe,kqr,r,j,p,i,LWORK,INFO
 INTEGER(4), ALLOCATABLE :: perm(:),IWORK(:)
 REAL(8) :: aii,tmp,etrail,tstop
 REAL(8), ALLOCATABLE :: W(:,:),cn(:),cn0(:),tau(:),work(:),Q(:,:),Rs(:,:),S(:),Ur(:,:),Vt(:,:)
@@ -2894,6 +2897,7 @@ M=SIZE(A,1); N=SIZE(A,2)
 MIN_DIM=MIN(M,N)
 kmin=MAX(1,MIN(min_rank,MIN_DIM))
 kbe=INT(INT(M,8)*INT(N,8)/INT(M+N,8),4) ! Break-even rank: no savings at or above
+kqr=MIN(MIN_DIM,kbe+MAX(8,kbe/8)) ! Most QR columns, past kbe since QR can need a few more columns than the SVD
 rank=-1
 ALLOCATE(W(M,N),perm(N),cn(N),cn0(N),tau(MIN_DIM),work(MAX(M,N)))
 W=A
@@ -2908,7 +2912,7 @@ etrail=SUM(cn)
 r=0
 DO WHILE(r<MIN_DIM)
   IF((etrail<=tstop).AND.(r>=kmin))EXIT
-  IF(r>=kbe)EXIT
+  IF(r>=kqr)EXIT
   r=r+1
   p=r-1+MAXLOC(cn(r:N),DIM=1)
   IF(p/=r)THEN
