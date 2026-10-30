@@ -221,10 +221,34 @@ class MyEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
+        # numpy scalars that are not Python float subclasses (e.g. np.float32, np.int64, np.bool_)
+        if isinstance(obj, np.generic):
+            return obj.item()
         # Handle xarray DataArray
         if hasattr(obj, 'to_numpy'):
             return obj.to_numpy().tolist()
         return json.JSONEncoder.default(self, obj)
+
+# _state entries holding live objects rather than data; skipped by TokaMaker_TORAX.save_state.
+_STATE_NOT_SAVED = ('equil',)
+
+
+def _pedestal_formation_model(ped_cfg):
+    r'''! Return the L/H formation model a TORAX pedestal config section gates on.
+
+            @param ped_cfg TORAX 'pedestal' config section (dict), or None.
+            @result formation_model model_name (e.g. 'martin_scaling'), or None when the
+                    formation model is off or its name is not set explicitly in ped_cfg.
+    '''
+    if not isinstance(ped_cfg, dict):
+        return None
+    if not ped_cfg.get('use_formation_model_with_adaptive_source', False):
+        return None
+    formation_model = ped_cfg.get('formation_model')
+    if not isinstance(formation_model, dict):
+        return None
+    return formation_model.get('model_name')
+
 
 class TokaMaker_TORAX:
     '''! TokaMaker + TORAX Coupled Pulse Simulation Code'''
@@ -685,6 +709,9 @@ class TokaMaker_TORAX:
         # Loop-1 merged TORAX config (with applied defaults), captured in _get_tx_config
         # for the reproduction file written by save_tmtx_config(). None until loop 1 runs.
         self._tx_config_snapshot = None
+        # L/H formation model in the most recent main TORAX config (None = off or not set);
+        # set in _get_tx_config and used by the P_LH plots to mark the threshold TORAX gated on.
+        self._tx_formation_model = None
 
         self._diverted_times = None
         self._x_point_targets = None            # primary (active) nulls
@@ -2504,6 +2531,7 @@ class TokaMaker_TORAX:
                 f.write('tx_config = ')
                 f.write(pprint.pformat(self._numpy_to_plain_python(myconfig), width=100, sort_dicts=False))
 
+        self._tx_formation_model = _pedestal_formation_model(myconfig.get('pedestal'))
         tx_config = torax.ToraxConfig.from_dict(myconfig)
         return tx_config
 
@@ -4256,11 +4284,17 @@ class TokaMaker_TORAX:
 
     def save_state(self, fname):
         r'''! Save intermediate simulation state to JSON.
-                @param fname Filename to save to.
 
+                The TokaMaker equilibrium objects in `_state['equil']` are live solver handles,
+                not data, so they are not written. Their outputs are already saved through the
+                other state entries (psi_tm, q_prof_tm, Ip_tm, ...). Call save_eqdsk on an
+                equilibrium to keep the equilibrium itself.
+
+                @param fname Filename to save to.
         '''
+        state = {key: val for key, val in self._state.items() if key not in _STATE_NOT_SAVED}
         with open(fname, 'w') as f:
-            json.dump(self._state, f, cls=MyEncoder)
+            json.dump(state, f, cls=MyEncoder)
 
     def save_res(self):
         r'''! Save simulation results to JSON.'''
@@ -5704,6 +5738,20 @@ def _tx_scalar(tt, var_name, scale=1.0):
         return None, None
     var = getattr(dt.scalars, var_name)
     return var.coords['time'].values, var.to_numpy() * scale
+
+
+# TORAX scalar output holding the P_LH threshold of each L/H formation model.
+_PLH_SCALAR_BY_MODEL = {'martin_scaling': 'P_LH', 'delabie_scaling': 'P_LH_delabie'}
+
+
+def _plh_used_scalar(tt):
+    r'''! Return the TORAX P_LH output that the configured L/H formation model gated on.
+
+            @param tt TokaMaker_TORAX object.
+            @result 'P_LH' (Martin) or 'P_LH_delabie', or None if the last TORAX run had no
+                    formation model or used a model other than these two.
+    '''
+    return _PLH_SCALAR_BY_MODEL.get(getattr(tt, '_tx_formation_model', None))
 
 
 def _tx_profile_at_rho(tt, var_name, rho_val, rho_coord='rho_norm', scale=1.0):
@@ -7476,25 +7524,33 @@ def plot_scalars(tt, save_path=None, display=True):
             span = hi - lo
             pad = 0.05 * span if span > 0 else 0.05 * max(abs(hi), abs(lo), 1.0)
             ax.set_ylim(lo - pad, hi + pad)
+    plh_used = _plh_used_scalar(tt)
     t_plh_pc, y_plh_pc = _tx_scalar(tt, 'P_LH')
     t_plh_pc_d, y_plh_pc_d = _tx_scalar(tt, 'P_LH_delabie')
     if t_plh_pc is not None:
-        ax.plot(t_plh_pc, y_plh_pc, 'k-', linewidth=1, label='P_LH_martin', zorder=5)
+        label = 'P_LH_martin (used)' if plh_used == 'P_LH' else 'P_LH_martin'
+        ax.plot(t_plh_pc, y_plh_pc, 'k-', linewidth=1, label=label, zorder=5)
     if t_plh_pc_d is not None:
-        ax.plot(t_plh_pc_d, y_plh_pc_d, 'k--', linewidth=1, label='P_LH_delabie', zorder=4)
+        label = 'P_LH_delabie (used)' if plh_used == 'P_LH_delabie' else 'P_LH_delabie'
+        ax.plot(t_plh_pc_d, y_plh_pc_d, 'k--', linewidth=1, label=label, zorder=4)
     ax.set_xlabel('Time [s]')
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # Bottom row (right): L–H transition gate over the full pulse — Delabie P_LH
-    # (the threshold the formation model uses) vs P_SOL, shaded where P_SOL > P_LH
-    # (H-mode access satisfied).
+    # Bottom row (right): L–H transition gate over the full pulse — P_LH of the configured
+    # formation model (Delabie if no formation model ran) vs P_SOL, shaded where
+    # P_SOL > P_LH (H-mode access satisfied).
     ax = ax_plh
-    ax.set_title(r'$P_{\mathrm{LH}}$ (Delabie) vs $P_{\mathrm{SOL}}$ [W]')
-    t_d, y_d = _tx_scalar(tt, 'P_LH_delabie')
+    gate_name = plh_used if plh_used is not None else 'P_LH_delabie'
+    gate_model = 'Martin' if gate_name == 'P_LH' else 'Delabie'
+    gate_label = r'$P_{\mathrm{LH}}$ ' + gate_model
+    if plh_used is not None:
+        gate_label += ' (used)'
+    ax.set_title(r'$P_{\mathrm{LH}}$ (' + gate_model + r') vs $P_{\mathrm{SOL}}$ [W]')
+    t_d, y_d = _tx_scalar(tt, gate_name)
     t_sol, y_sol = _tx_scalar(tt, 'P_SOL_total')
     if t_d is not None and t_sol is not None:
-        ax.plot(t_d, y_d, color='tab:red', ls='-', lw=1.4, label=r'$P_{\mathrm{LH}}$ Delabie', zorder=5)
+        ax.plot(t_d, y_d, color='tab:red', ls='-', lw=1.4, label=gate_label, zorder=5)
         ax.plot(t_sol, y_sol, color='tab:blue', ls='-', lw=1.4, label=r'$P_{\mathrm{SOL}}$', zorder=4)
         # Shade where P_SOL > P_LH (interpolate P_SOL onto the P_LH time base).
         t_d_a = np.asarray(t_d, dtype=float)
@@ -7979,7 +8035,7 @@ def plot_PLH_components(tt, save_path=None, display=True):
     # (1,1) P_LH branch decomposition (log)
     ax = axes[1, 1]
     for name, color, ls, lw, zord, lab in [
-        ('P_LH_delabie',              'k',          '-',  2.5, 1, r'$P_{LH}$ Delabie (selected)'),
+        ('P_LH_delabie',              'k',          '-',  2.5, 1, r'$P_{LH}$ Delabie (selected branch)'),
         ('P_LH_high_density',         'C0',         '--', 1.2, 2, 'Martin high-n'),
         ('P_LH_delabie_high_density', 'tab:red',    '--', 1.2, 2, 'Delabie high-n'),
         ('P_LH_delabie_low_density',  'tab:purple', ':',  1.2, 2, r'Delabie low-n ($n^{-2}$)'),
@@ -8030,21 +8086,31 @@ def plot_PLH_components(tt, save_path=None, display=True):
     ax.set_ylabel(r'$f_{GW}$')
     ax.legend(fontsize=8)
 
-    # P_SOL vs P_LH gate (Delabie is what the formation model uses here). Drawn twice:
-    # zoomed to the transition at (2,1) and over the whole pulse at (2,2).
+    # P_SOL vs P_LH gate. "(used)" marks the threshold of the configured TORAX formation
+    # model; none is marked if no formation model ran. Drawn twice: zoomed to the
+    # transition at (2,1) and over the whole pulse at (2,2).
+    plh_used = _plh_used_scalar(tt)
     t_lh, y_lh = _tx_scalar(tt, 'P_LH', scale=1e-6)
     t_lhd, y_lhd = _tx_scalar(tt, 'P_LH_delabie', scale=1e-6)
     t_sol, y_sol = _tx_scalar(tt, 'P_SOL_total', scale=1e-6)
+    lab_lh = r'$P_{LH}$ Martin (used)' if plh_used == 'P_LH' else r'$P_{LH}$ Martin'
+    lab_lhd = r'$P_{LH}$ Delabie (used)' if plh_used == 'P_LH_delabie' else r'$P_{LH}$ Delabie'
 
     def _plot_psol_vs_plh(ax):
         if t_lh is not None:
-            ax.plot(t_lh, y_lh, 'k--', lw=1, label=r'$P_{LH}$ Martin')
+            ax.plot(t_lh, y_lh, 'k--', lw=1, label=lab_lh)
         if t_lhd is not None:
-            ax.plot(t_lhd, y_lhd, color='tab:red', ls='-', lw=1.4, label=r'$P_{LH}$ Delabie (used)')
+            ax.plot(t_lhd, y_lhd, color='tab:red', ls='-', lw=1.4, label=lab_lhd)
         if t_sol is not None:
             ax.plot(t_sol, y_sol, color='tab:green', ls='-', lw=1, label=r'$P_{SOL}$')
-        # H-mode shading vs the Delabie threshold (the one the formation model gates on)
-        t_gate, y_gate = (t_lhd, y_lhd) if t_lhd is not None else (t_lh, y_lh)
+        # H-mode shading vs the threshold the formation model gates on (Delabie, then
+        # Martin, when no formation model ran)
+        if plh_used == 'P_LH' and t_lh is not None:
+            t_gate, y_gate = t_lh, y_lh
+        elif t_lhd is not None:
+            t_gate, y_gate = t_lhd, y_lhd
+        else:
+            t_gate, y_gate = t_lh, y_lh
         if t_gate is not None and t_sol is not None:
             ax.fill_between(t_sol, y_sol, y_gate, where=(np.asarray(y_sol) > np.asarray(y_gate)),
                             color='tab:green', alpha=0.2, label=r'$P_{SOL}>P_{LH}$')

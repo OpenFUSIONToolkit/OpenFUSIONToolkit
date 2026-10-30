@@ -14,6 +14,7 @@ import os
 import sys
 import tempfile
 import time
+from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -356,6 +357,85 @@ def test_tokamaker_torax() -> None:
     assert isinstance(result, dict)
     assert "Ip_flattop_MA" in result
     assert "t_final_s" in result
+
+
+def test_save_state_json(tmp_path) -> None:
+    r'''! save_state writes loadable JSON and skips the live TokaMaker equilibrium objects.'''
+    pytest.importorskip("torax")
+    from OpenFUSIONToolkit.TokaMaker.pulse_design import TokaMaker_TORAX
+
+    # Bypass __init__: only _state is needed, so no TokaMaker or TORAX run is required.
+    tt = TokaMaker_TORAX.__new__(TokaMaker_TORAX)
+    tt._state = {
+        'Ip': np.array([1.0e6, 2.0e6]),
+        'confinement_mode': np.array([False, True]),
+        'psi_lcfs_tx': {0: np.float32(0.5), 1: np.int64(2)},
+        'T_e': {0: {'x': np.linspace(0.0, 1.0, 3), 'y': np.ones(3), 'type': 'linterp'}},
+        'equil': {0: object(), 1: object()},  # stand-ins for TokaMaker_equilibrium objects
+    }
+    fname = os.path.join(str(tmp_path), "state.json")
+    tt.save_state(fname)
+    with open(fname) as fid:
+        loaded = json.load(fid)
+
+    assert 'equil' not in loaded
+    assert loaded['Ip'] == [1.0e6, 2.0e6]
+    assert loaded['confinement_mode'] == [False, True]
+    assert loaded['psi_lcfs_tx'] == {'0': 0.5, '1': 2}
+    assert loaded['T_e']['0']['x'] == [0.0, 0.5, 1.0]
+    assert 'equil' in tt._state  # the in-memory state is left untouched
+
+
+class _FakeTxScalar:
+    r'''! Minimal stand-in for a TORAX output scalar (xarray DataArray with a time coordinate).'''
+
+    def __init__(self, t, y):
+        self.coords = {'time': SimpleNamespace(values=t)}
+        self._y = y
+
+    def to_numpy(self):
+        return self._y
+
+
+@pytest.mark.parametrize("formation_model, used_label", [
+    ('martin_scaling', r'$P_{LH}$ Martin (used)'),
+    ('delabie_scaling', r'$P_{LH}$ Delabie (used)'),
+    (None, None),
+])
+def test_plh_used_label(monkeypatch, formation_model, used_label) -> None:
+    r'''! The P_LH "(used)" label follows the formation model in the TORAX pedestal config.'''
+    pytest.importorskip("torax")
+    import matplotlib.pyplot as plt
+    from OpenFUSIONToolkit.TokaMaker import pulse_design
+
+    ped_cfg = {
+        'model_name': 'set_T_ped_n_ped',
+        'mode': 'ADAPTIVE_SOURCE',
+        'use_formation_model_with_adaptive_source': formation_model is not None,
+        'formation_model': {'model_name': formation_model},
+    }
+    assert pulse_design._pedestal_formation_model(ped_cfg) == formation_model
+
+    t = np.linspace(0.0, 10.0, 11)
+    scalars = {name: _FakeTxScalar(t, np.full(t.shape, val)) for name, val in [
+        ('P_LH', 30.0e6), ('P_LH_delabie', 20.0e6), ('P_SOL_total', 25.0e6),
+        ('n_e_line_avg', 5.0e19), ('n_e_min_P_LH', 3.0e19), ('Ip', 10.0e6),
+        ('a_minor', 2.0), ('R_major', 6.2), ('B_0', 5.3), ('fgw_n_e_line_avg', 0.5),
+    ]}
+    tt = SimpleNamespace(
+        _data_tree=SimpleNamespace(scalars=SimpleNamespace(**scalars), profiles=SimpleNamespace()),
+        _tx_formation_model=pulse_design._pedestal_formation_model(ped_cfg),
+        _lh_time=None, _t_init=0.0, _t_final=10.0, _current_loop=1,
+    )
+    figs = []
+    monkeypatch.setattr(pulse_design, '_save_or_display', lambda fig, save_path, display: figs.append(fig))
+    plt.switch_backend('Agg')
+    pulse_design.plot_PLH_components(tt, display=False)
+
+    labels = [line.get_label() for line in figs[0].axes[7].get_lines()]  # axes[2, 1]: P_SOL vs P_LH
+    used = [lab for lab in labels if lab.endswith('(used)')]
+    assert used == ([used_label] if used_label is not None else [])
+    plt.close(figs[0])
 
 
 def main() -> None:
