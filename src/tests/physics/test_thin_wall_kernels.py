@@ -4,6 +4,8 @@ import sys
 import numpy as np
 import pytest
 from scipy.integrate import dblquad, quad
+from scipy.optimize import minimize_scalar
+from scipy.special import ellipe, ellipk
 
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
@@ -114,3 +116,32 @@ def test_ring_poly_softened():
     assert run_OFT('./test_thin_wall_kernels', 1, 60)
     ring_poly, ring_ring = np.loadtxt('thin_wall_ringpoly.results')
     assert ring_poly == pytest.approx(ring_ring, rel=1.E-4)
+
+
+def ring_seg_reference(a, b):
+    """Integral along a segment of u . (closed integral of dl'/|r-r'| around the ring R=1, Z=0), with the ring
+    integral from elliptic integrals and adaptive quadrature along the segment with a breakpoint at the closest point"""
+    lb = np.linalg.norm(b - a)
+    u = (b - a)/lb
+    def kernel(s):
+        y = a + s*u
+        rho = np.hypot(y[0], y[1])
+        q = (rho + 1.0)**2 + y[2]**2
+        m = 4.0*rho/q
+        aphi = 4.0/np.sqrt(q)*((2.0 - m)*ellipk(m) - 2.0*ellipe(m))/m
+        return aphi*(u @ np.array([-y[1], y[0], 0.0]))/rho
+    def dist(s):
+        y = a + s*u
+        return np.hypot(np.hypot(y[0], y[1]) - 1.0, y[2])
+    s0 = minimize_scalar(dist, bounds=(0.0, lb), method='bounded', options={'xatol': 1.E-12*lb}).x
+    return quad(kernel, 0.0, lb, points=[s0], epsabs=0.0, epsrel=1.E-13, limit=2000)[0]
+
+
+def test_ring_seg_close():
+    """Exact ring kernel along straight segments passing close to the ring against quadrature"""
+    os.chdir(test_dir)
+    with open('oft.in', 'w+') as fid:
+        fid.write(oft_in)
+    assert run_OFT('./test_thin_wall_kernels', 1, 60)
+    for row in np.loadtxt('thin_wall_ringseg.results'):
+        assert row[6] == pytest.approx(ring_seg_reference(row[:3], row[3:6]), rel=1.E-7)

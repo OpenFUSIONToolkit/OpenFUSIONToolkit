@@ -18,7 +18,9 @@
 !! - straight segment pair integrals (@ref thin_wall::tw_seg_seg_int "tw_seg_seg_int") for close parallel, skew and
 !!   collinear pairs (quadrature);
 !! - the softened kernel of a circular coil (@ref thin_wall::tw_ring_seg_int "tw_ring_seg_int") along a polygon of
-!!   the same coil (softened ring-ring mutual).
+!!   the same coil (softened ring-ring mutual), and the exact kernel along straight segments passing within 1 mm or
+!!   1 cm of the coil, tangent or tilted, with the closest point between or on the samples used to find it
+!!   (quadrature).
 !!
 !! @authors Ian Stewart
 !! @date October 2026
@@ -58,7 +60,11 @@ USE test_thin_wall_kernels_aca, ONLY: dense_source
 IMPLICIT NONE
 TYPE(dense_source) :: src
 INTEGER(i4) :: i,j,k,io_unit,rank
-REAL(r8) :: pt(3)
+REAL(r8) :: pt(3),ua(3),pa(3),pb(3)
+!---Segments near a ring (R=1, Z=0): distance from the ring, tilt from the tangent (degrees), length, and fraction of
+!   the length at which the segment passes the ring
+REAL(r8), PARAMETER :: rsegs(4,6) = RESHAPE([1.d-3,30.d0,1.d0,0.0625d0, 1.d-3,30.d0,0.5d0,0.0625d0, &
+  1.d-3,30.d0,0.1d0,0.0625d0, 1.d-2,30.d0,1.d0,0.0625d0, 1.d-3,0.d0,1.d0,0.0625d0, 1.d-3,30.d0,1.d0,0.125d0],[4,6])
 REAL(r8), ALLOCATABLE :: A(:,:),U(:,:),V(:,:)
 !---Segment pairs (a0, a1, b0, b1): partly overlapping parallel, parallel at two offsets, skew, collinear and separated
 REAL(r8), PARAMETER :: segs(3,4,5) = RESHAPE([0.d0,0.d0,0.d0, 1.d0,0.d0,0.d0, 0.d0,0.01d0,0.d0, 0.5d0,0.01d0,0.d0, &
@@ -113,6 +119,15 @@ IF(oft_env%head_proc)THEN
       [COS(2.d0*pi*k/400.d0),SIN(2.d0*pi*k/400.d0),0.d0],1.d-4)
   END DO
   WRITE(io_unit,'(2ES24.15)')pt(1),-8.d0*pi*pi*green(1.d0,SQRT(1.d-4),1.d0,0.d0)
+  CLOSE(io_unit)
+  !---Exact ring kernel along segments passing close to the ring: the two end points, then the integral
+  OPEN(NEWUNIT=io_unit,FILE='thin_wall_ringseg.results')
+  DO k=1,6
+    ua=[0.d0,COS(rsegs(2,k)*pi/180.d0),SIN(rsegs(2,k)*pi/180.d0)]
+    pa=[1.d0+rsegs(1,k),0.d0,0.d0]-rsegs(4,k)*rsegs(3,k)*ua
+    pb=pa+rsegs(3,k)*ua
+    WRITE(io_unit,'(7ES24.15)')pa,pb,tw_ring_seg_int([1.d0,0.d0],pa,pb)
+  END DO
   CLOSE(io_unit)
   !---ACA+: case, number of terms and relative error against the dense block
   OPEN(NEWUNIT=io_unit,FILE='thin_wall_aca.results')
