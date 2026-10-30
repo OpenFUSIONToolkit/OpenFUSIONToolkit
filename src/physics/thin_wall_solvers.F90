@@ -20,10 +20,10 @@ USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
 !
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_matrix, oft_graph
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
-USE oft_native_la, ONLY: oft_native_dense_matrix, partition_graph
+USE oft_native_la, ONLY: oft_native_dense_matrix, oft_native_dense_cmatrix
 USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
 USE oft_solver_base, ONLY: oft_solver
-USE oft_native_solvers, ONLY: oft_native_gmres_csolver, gmres_backsolve
+USE oft_native_solvers, ONLY: oft_native_gmres_csolver, oft_native_dense_cbjprecond, oft_diag_cscale
 USE oft_solver_utils, ONLY: create_diag_pre, create_native_solver, create_cg_solver
 #ifdef HAVE_ARPACK
 USE oft_arpack, ONLY: oft_irlm_eigsolver
@@ -272,28 +272,33 @@ CALL oft_warn('"pre_neigs" requires ARPACK, continuing without eigenmodes in the
 #endif
 END SUBROUTINE tw_hodlr_pre_eigenmodes
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Compute frequency response of a ThinCurr model to given driver voltages
+!!
+!! Solves \f$ (i \omega L + R) I = V \f$ for the complex currents \f$ I \f$, where
+!! \f$ \omega = 2 \pi f \f$, or the inductive (\f$ i L I = V \f$) or resistive
+!! (\f$ R I = V \f$) limit if `fr_limit/=0`. The system is solved either directly
+!! using LAPACK (dense \f$ L \f$ only) or iteratively using GMRES. The iterative
+!! solver is preconditioned using block-Jacobi on the HODLR diagonal blocks (if
+!! `hodlr_op` is present) or on blocks from partitioning the graph of \f$ R \f$
+!! (diagonal scaling for models with <=2000 elements).
 !---------------------------------------------------------------------------------
 SUBROUTINE frequency_response(self,direct,fr_limit,freq,driver,hodlr_op)
 TYPE(tw_type), INTENT(in) :: self !< ThinCurr object
-LOGICAL, INTENT(in) :: direct !< Use direct solver?
-REAL(r8), INTENT(in) :: freq !< Frequency for calculation (if `fr_limit=0`)
-INTEGER(i4), INTENT(in) :: fr_limit !< Limit for frequency response (0: Use `freq`, 1: Inductive, 2: Resistive)
-REAL(r8), INTENT(inout) :: driver(:,:) !< Driver voltages (real, imaginary) [self%nelems,2]
-TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
-INTEGER(i4) :: i,j,k,io_unit,info
-REAL(r8) :: lam0
-REAL(r8), ALLOCATABLE :: senout(:,:)
+LOGICAL, INTENT(in) :: direct !< Use direct solver? (not supported with `hodlr_op`)
+REAL(r8), INTENT(in) :: freq !< Frequency for response calculation [Hz] (unused if `fr_limit/=0`)
+INTEGER(i4), INTENT(in) :: fr_limit !< Frequency limit for calculation (0: none, 1: inductive, 2: resistive)
+REAL(r8), INTENT(inout) :: driver(:,:) !< Driver voltages (real, imaginary), overwritten with resulting currents [self%nelems,2]
+TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix (optional)
+INTEGER(i4) :: i,j,info
 DOUBLE COMPLEX, POINTER, DIMENSION(:) :: x,b
-DOUBLE COMPLEX, POINTER, DIMENSION(:,:) :: Mmat
 TYPE(oft_sum_cmatrix), TARGET :: aca_Fmat
-CLASS(oft_vector), POINTER :: uloc
+TYPE(oft_native_dense_cmatrix), TARGET :: dense_Fmat
 CLASS(oft_cvector), POINTER :: aloc,bloc
 TYPE(oft_graph) :: graph
 TYPE(oft_native_gmres_csolver), TARGET :: frinv
 TYPE(oft_tw_hodlr_bjpre), TARGET :: frinv_pre
-TYPE(oft_bin_file) :: floop_hist
-LOGICAL :: pm_save
+TYPE(oft_native_dense_cbjprecond), TARGET :: frinv_dense_pre
+TYPE(oft_diag_cscale), TARGET :: frinv_diag_pre
 !---
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Starting frequency-domain run'
@@ -325,25 +330,27 @@ IF(PRESENT(hodlr_op))THEN
     CALL oft_abort('Invalid "fr_limit" value (0,1,2)', 'run_fr', __FILE__)
   END SELECT
 ELSE
-  ALLOCATE(Mmat(self%nelems,self%nelems))
+  dense_Fmat%nr=self%nelems; dense_Fmat%nc=self%nelems
+  dense_Fmat%nrg=self%nelems; dense_Fmat%ncg=self%nelems
+  ALLOCATE(dense_Fmat%M(self%nelems,self%nelems))
   SELECT CASE(fr_limit)
   CASE(0)
     WRITE(*,'(2A,ES13.5)')oft_indent,'Frequency [Hz] = ',freq
-    Mmat=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
+    dense_Fmat%M=(0.d0,1.d0)*freq*2.d0*pi*self%Lmat
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
-        Mmat(i,self%Rmat%lc(j))=Mmat(i,self%Rmat%lc(j)) + self%Rmat%M(j)
+        dense_Fmat%M(i,self%Rmat%lc(j))=dense_Fmat%M(i,self%Rmat%lc(j)) + self%Rmat%M(j)
       END DO
     END DO
   CASE(1)
     WRITE(*,'(2A)')oft_indent,'Frequency -> Inf (L limit)'
-    Mmat=(0.d0,1.d0)*self%Lmat
+    dense_Fmat%M=(0.d0,1.d0)*self%Lmat
   CASE(2)
     WRITE(*,'(2A)')oft_indent,'Frequency -> 0   (R limit)'
-    Mmat=(0.d0,0.d0)
+    dense_Fmat%M=(0.d0,0.d0)
     DO i=1,self%Rmat%nr
       DO j=self%Rmat%kr(i),self%Rmat%kr(i+1)-1
-        Mmat(i,self%Rmat%lc(j))=Mmat(i,self%Rmat%lc(j)) + self%Rmat%M(j)
+        dense_Fmat%M(i,self%Rmat%lc(j))=dense_Fmat%M(i,self%Rmat%lc(j)) + self%Rmat%M(j)
       END DO
     END DO
   CASE DEFAULT
@@ -354,349 +361,69 @@ END IF
 ALLOCATE(x(self%nelems))
 x=(0.d0,0.d0)
 IF(direct)THEN
-  CALL lapack_matinv(self%nelems,Mmat,info)
+  CALL lapack_matinv(self%nelems,dense_Fmat%M,info)
   IF(info/=0)CALL oft_abort('Matrix inversion failed','frequency_response',__FILE__)
-  CALL zgemv('N',self%nelems,self%nelems,(1.d0,0.d0),Mmat,self%nelems,b,1,(0.d0,0.d0),x,1)
-  DEALLOCATE(Mmat)
+  CALL zgemv('N',self%nelems,self%nelems,(1.d0,0.d0),dense_Fmat%M,self%nelems,b,1,(0.d0,0.d0),x,1)
+  CALL dense_Fmat%delete()
 ELSE
+  NULLIFY(aloc,bloc)
+  CALL self%Uloc%new(aloc)
+  CALL self%Uloc%new(bloc)
+  frinv%nrits=60
+  frinv%its=-1
   IF(PRESENT(hodlr_op))THEN
+    CALL aca_Fmat%assemble(aloc)
     frinv%pre=>frinv_pre
     frinv_pre%mf_obj=>hodlr_op
     frinv_pre%Rmat=>self%Rmat
     IF(ASSOCIATED(self%junc))frinv_pre%Rmat=>self%junc%Rmat_exp
     frinv_pre%alpha=aca_Fmat%beta
     frinv_pre%beta=aca_Fmat%alam
-    ! ALLOCATE(oft_diag_cscale::frinv%pre)
     frinv%A=>aca_Fmat
-    frinv%nrits=60
-    frinv%its=-1
-    NULLIFY(aloc,bloc)
-    CALL self%Uloc%new(aloc)
-    CALL self%Uloc%new(bloc)
-    CALL aca_Fmat%assemble(aloc)
-    !---Solve system
-    CALL aloc%restore_local(x)
-    CALL bloc%restore_local(b)
-    CALL frinv%apply(aloc,bloc)
-    CALL aloc%get_local(x)
-    !---Cleanup temporaries
-    CALL aloc%delete()
-    CALL bloc%delete()
-    DEALLOCATE(aloc,bloc)
   ELSE
-    graph%nr=self%Rmat%nr
-    graph%nnz=self%Rmat%nnz
-    graph%kr=>self%Rmat%kr
-    graph%lc=>self%Rmat%lc
-    CALL gmres_comp(60,-1,self%nelems,Mmat,x,b,graph,MAX(1,INT(self%nelems/2000,4)),.TRUE.)
-    DEALLOCATE(Mmat)
+    frinv%A=>dense_Fmat
+    !---Converge on |r|/|u| only (no absolute or relative tolerance)
+    frinv%min_nits=10
+    frinv%atol=0.d0
+    frinv%rtol=0.d0
+    !---Block-Jacobi preconditioner partitioned using the graph of R
+    !   (about 2000 owned rows per block, more with overlap)
+    frinv_dense_pre%nlocal=CEILING(REAL(self%nelems,r8)/2000.d0)
+    IF(frinv_dense_pre%nlocal>1)THEN
+      graph%nr=self%Rmat%nr
+      graph%nnz=self%Rmat%nnz
+      graph%kr=>self%Rmat%kr
+      graph%lc=>self%Rmat%lc
+      frinv_dense_pre%loverlap=.TRUE.
+      CALL frinv_dense_pre%setup(dense_Fmat,graph)
+      frinv%pre=>frinv_dense_pre
+    ELSE
+      CALL dense_Fmat%assemble(aloc)
+      frinv%pre=>frinv_diag_pre
+    END IF
+  END IF
+  !---Solve system
+  CALL aloc%restore_local(x)
+  CALL bloc%restore_local(b)
+  CALL frinv%apply(aloc,bloc)
+  CALL aloc%get_local(x)
+  !---Cleanup temporaries
+  CALL aloc%delete()
+  CALL bloc%delete()
+  DEALLOCATE(aloc,bloc)
+  CALL frinv%delete()
+  IF(PRESENT(hodlr_op))THEN
+    CALL frinv_pre%delete()
+  ELSE
+    CALL frinv_dense_pre%delete()
+    CALL frinv_diag_pre%delete()
+    CALL dense_Fmat%delete()
   END IF
 END IF
 driver(:,1)=REAL(x,8)
 driver(:,2)=AIMAG(x)
 DEALLOCATE(b,x)
 CALL oft_decrease_indent
-CONTAINS
-!---------------------------------------------------------------------------------
-!> Conjugated dot product of two complex vectors \f$ a^H b \f$
-!---------------------------------------------------------------------------------
-function vec_comp_dot(n,a,b) result(dot)
-integer(i4), intent(in) :: n !< Length of vectors
-DOUBLE COMPLEX, intent(in) :: a(n) !< First vector (conjugated)
-DOUBLE COMPLEX, intent(in) :: b(n) !< Second vector
-INTEGER(i4) :: i
-DOUBLE COMPLEX :: dot !< \f$ \sum_i \overline{a_i} b_i \f$
-dot=(0.d0,0.d0)
-!$omp parallel do reduction(+:dot)
-DO i=1,n
-  dot=dot+CONJG(a(i))*b(i)
-END DO
-end function vec_comp_dot
-!---------------------------------------------------------------------------------
-!> Dense complex matrix-vector product \f$ b = A x \f$
-!---------------------------------------------------------------------------------
-subroutine mat_comp(n,A,x,b)
-integer(i4), intent(in) :: n !< Size of system
-DOUBLE COMPLEX, intent(in) :: A(n,n) !< Matrix
-DOUBLE COMPLEX, intent(in) :: x(n) !< Input vector
-DOUBLE COMPLEX, intent(out) :: b(n) !< Result
-integer(i4) :: i,j,i1,i2
-b=(0.d0,0.d0)
-IF(omp_in_parallel())THEN
-  DO j=1,n
-    !$omp simd
-    DO i=1,n
-      b(i)=b(i)+A(i,j)*x(j)
-    END DO
-  END DO
-ELSE
-  !$omp parallel private(i1,i2,i,j)
-  CALL oft_thread_slice(oft_tid,oft_env%nthreads,n,i1,i2)
-  DO j=1,n
-    !$omp simd
-    DO i=i1,i2
-      b(i)=b(i)+A(i,j)*x(j)
-    END DO
-  END DO
-  !$omp end parallel
-END IF
-end subroutine mat_comp
-!---------------------------------------------------------------------------------
-!> Solve a dense complex linear system using restarted GMRES with a
-!! (optionally overlapping) block-Jacobi preconditioner
-!---------------------------------------------------------------------------------
-RECURSIVE SUBROUTINE gmres_comp(nrits,its,ncoils,A,u,g,graph,nlocal,loverlap)
-INTEGER(i4), INTENT(in) :: nrits !< Restart length
-INTEGER(i4), INTENT(in) :: its !< Maximum iterations (-1/-2 for relative tolerance of 1E-7/1E-14)
-INTEGER(i4), INTENT(in) :: ncoils !< Size of system
-INTEGER(i4), INTENT(in) :: nlocal !< Number of preconditioner blocks (diagonal scaling if <=1)
-DOUBLE COMPLEX, INTENT(inout) :: A(ncoils,ncoils) !< Matrix
-DOUBLE COMPLEX, CONTIGUOUS, intent(inout) :: u(:) !< Guess (input), Solution (output)
-DOUBLE COMPLEX, CONTIGUOUS, intent(inout) :: g(:) !< RHS (input), Residual (output)
-TYPE(oft_graph), INTENT(inout) :: graph !< Matrix graph used for block partitioning
-LOGICAL, INTENT(in) :: loverlap !< Overlap preconditioner blocks by one level?
-!
-TYPE :: mat_parts
-  INTEGER(i4) :: n = 0 !< Number of values in set
-  INTEGER(i4), POINTER, DIMENSION(:) :: ind => NULL() !< Indices
-  DOUBLE COMPLEX, POINTER, CONTIGUOUS, DIMENSION(:) :: x => NULL() !< Indices
-  DOUBLE COMPLEX, POINTER, CONTIGUOUS, DIMENSION(:) :: b => NULL() !< Indices
-  DOUBLE COMPLEX, POINTER, CONTIGUOUS, DIMENSION(:,:) :: mat => NULL() !< Indices
-END TYPE mat_parts
-!
-DOUBLE COMPLEX, allocatable, dimension(:) :: r,w
-DOUBLE COMPLEX, allocatable, dimension(:,:) :: v,z
-DOUBLE COMPLEX, allocatable :: h(:,:),c(:),s(:),res(:),y(:)
-DOUBLE COMPLEX :: delta,hkmi
-REAL(r8) :: uu,uuold,gg,ggold,ggin,elapsed_time,res_u_tol
-REAL(r8), allocatable :: znorm(:)
-integer(i4) :: i,j,jr,k,kk,nits,info,nfail
-INTEGER(i4), PARAMETER :: min_inner_its = 10 !< Minimum inner iterations before |r|/|u| check
-LOGICAL :: inner_conv
-integer(i4), allocatable, dimension(:) :: part
-LOGICAL, allocatable, dimension(:) :: eflag
-TYPE(mat_parts), pointer, dimension(:) :: parts,parts_tmp
-LOGICAL :: pm
-TYPE(oft_timer) :: stimer
-pm=oft_env%pm
-oft_env%pm=.FALSE.
-!---Preconditioner setup
-IF(nlocal>1)THEN
-  IF(pm)WRITE(*,'(2A,I6)')oft_indent,'nLocal = ',nlocal
-  ALLOCATE(part(ncoils))
-  CALL partition_graph(graph,nlocal,part)
-  !---Create partition mappings
-  ALLOCATE(parts(nlocal))
-  DO i=1,ncoils
-    IF(part(i)<0)CYCLE
-    parts(part(i))%n=parts(part(i))%n+1
-  END DO
-  DO i=1,nlocal
-    ALLOCATE(parts(i)%ind(parts(i)%n))
-    ! ALLOCATE(parts(i)%x(parts(i)%n))
-    ! ALLOCATE(parts(i)%b(parts(i)%n))
-    ! ALLOCATE(parts(i)%mat(parts(i)%n,parts(i)%n))
-    parts(i)%n=0
-  END DO
-  DO i=1,ncoils
-    IF(part(i)<0)CYCLE
-    parts(part(i))%n=parts(part(i))%n+1
-    parts(part(i))%ind(parts(part(i))%n) = i
-  END DO
-  IF(loverlap)THEN
-    parts_tmp=>parts
-    ALLOCATE(parts(nlocal))
-    !$omp parallel private(j,jr,k,eflag)
-    ALLOCATE(eflag(ncoils))
-    !$omp do
-    DO i=1,nlocal
-      eflag=(part==i)
-      DO j=1,parts_tmp(i)%n
-        jr=parts_tmp(i)%ind(j)
-        DO k=graph%kr(jr),graph%kr(jr+1)-1
-          eflag(graph%lc(k))=.TRUE.
-        END DO
-      END DO
-      DO j=1,ncoils
-        IF(part(j)<0)eflag(j)=.FALSE.
-      END DO
-      parts(i)%n=COUNT(eflag)
-      ALLOCATE(parts(i)%ind(parts(i)%n))
-      k=0
-      DO j=1,graph%nr
-        IF(.NOT.eflag(j))CYCLE
-        k=k+1
-        parts(i)%ind(k)=j
-      END DO
-      DEALLOCATE(parts_tmp(i)%ind)
-    END DO
-    DEALLOCATE(eflag)
-    !$omp end parallel
-    DEALLOCATE(parts_tmp)
-  END IF
-  DO i=1,nlocal
-    ! ALLOCATE(parts(i)%ind(parts(i)%n))
-    ALLOCATE(parts(i)%x(parts(i)%n))
-    ALLOCATE(parts(i)%b(parts(i)%n))
-    ALLOCATE(parts(i)%mat(parts(i)%n,parts(i)%n))
-    ! parts(i)%n=0
-  END DO
-  !---Get matrix slice
-  nfail=0
-  !$omp parallel do private(j,k,info) schedule(static) reduction(+:nfail)
-  DO i=1,nlocal
-    DO j=1,parts(i)%n
-      DO k=1,parts(i)%n
-        parts(i)%mat(j,k)=A(parts(i)%ind(j),parts(i)%ind(k))
-      END DO
-    END DO
-    CALL lapack_matinv(parts(i)%n,parts(i)%mat,info)
-    IF(info/=0)nfail=nfail+1
-  END DO
-  IF(nfail>0)CALL oft_abort('Preconditioner block inversion failed','gmres_comp',__FILE__)
-  IF(loverlap)THEN
-    !$omp parallel do private(j)
-    DO i=1,nlocal
-      DO j=1,parts(i)%n
-        IF(part(parts(i)%ind(j))/=i)parts(i)%ind(j)=-parts(i)%ind(j)
-      END DO
-    END DO
-  END IF
-  DEALLOCATE(part)
-END IF
-!---
-IF(pm)THEN
-  WRITE(*,'(2A)')oft_indent,'Starting complex GMRES solver'
-  CALL oft_increase_indent
-  CALL stimer%tick
-END IF
-!---
-ALLOCATE(v(ncoils,nrits+1),z(ncoils,nrits+1))
-ALLOCATE(r(ncoils),w(ncoils))
-w=(0.d0,0.d0); z=(0.d0,0.d0)
-allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits),y(nrits),znorm(nrits))
-c=(0.d0,0.d0); s=(0.d0,0.d0); res=(0.d0,0.d0); h=(0.d0,0.d0)
-!
-uu = REAL(vec_comp_dot(ncoils,u,u),8)
-IF(uu>0.d0)CALL mat_comp(ncoils,A,u,w)
-r=g-w
-gg = REAL(vec_comp_dot(ncoils,r,r),8)
-ggin=gg
-IF(pm)WRITE(*,'(A,I6,2ES14.6)')oft_indent,0,SQRT(uu),SQRT(gg)
-! Tolerance on |r|/|u| for its=-1/-2
-res_u_tol=-1.d0
-IF(its==-1)res_u_tol=1.d-7
-IF(its==-2)res_u_tol=1.d-14
-nits=0
-DO j=1,ncoils
-  IF(gg==0.d0)EXIT
-  res=(0.d0,0.d0)
-  res(1)=SQRT(gg)
-  v(:,1)=r/res(1)
-  inner_conv=.FALSE.
-  DO i=1,nrits
-  !---Precondition search direction
-  IF(nlocal>1)THEN
-      !$omp parallel do private(kk) schedule(static)
-      DO k=1,nlocal
-        DO kk=1,parts(k)%n
-          parts(k)%b(kk)=v(ABS(parts(k)%ind(kk)),i)
-          parts(k)%x(kk)=(0.d0,0.d0)
-        END DO
-        CALL mat_comp(parts(k)%n,parts(k)%mat,parts(k)%b,parts(k)%x)
-        DO kk=1,parts(k)%n
-          IF(parts(k)%ind(kk)>0)z(parts(k)%ind(kk),i)=parts(k)%x(kk)
-        END DO
-      END DO
-      ! CALL gmres_comp(4,4,ncoils,A,z(:,i),w,1)
-    ELSE
-      DO k=1,ncoils
-        z(k,i)=v(k,i)/A(k,k)
-      END DO
-    END IF
-    IF(res_u_tol>0.d0)znorm(i)=SQRT(REAL(vec_comp_dot(ncoils,z(:,i),z(:,i)),8))
-    CALL mat_comp(ncoils,A,z(:,i),w)
-    !---Arnoldi iteration
-    DO k=1,i
-      h(k,i)=vec_comp_dot(ncoils,v(:,k),w)
-      w=w-h(k,i)*v(:,k)
-    END DO
-    h(i+1,i)=SQRT(REAL(vec_comp_dot(ncoils,w,w),8))
-    IF(ABS(h(i+1,i))>0.d0)v(:,i+1)=w/h(i+1,i)
-    !---Apply Givens rotation
-    DO k=2,i
-      hkmi = h(k-1,i)
-      h(k-1,i) = CONJG(c(k-1))*hkmi + CONJG(s(k-1))*h(k,i)
-      h(k,i) = -s(k-1)*hkmi + c(k-1)*h(k,i)
-    END DO
-    delta = SQRT( ABS(h(i,i))**2 + ABS(h(i+1,i))**2 )
-    c(i) = h(i,i) / delta
-    s(i) = h(i+1,i) / delta
-    h(i,i) = CONJG(c(i))*h(i,i) + CONJG(s(i))*h(i+1,i)
-    !---Update residual
-    res(i+1) = -s(i)*res(i)
-    res(i) = CONJG(c(i))*res(i)
-    nits=nits+1
-    IF(i==nrits)EXIT
-    IF(ABS(res(i+1))==0.d0)EXIT ! Lucky breakdown
-    IF(nits==its)EXIT
-    !---Check |r|/|u| criterion for current iterate (after a minimum number of
-    !   inner iterations to avoid stalling through many short restart cycles)
-    IF(res_u_tol>0.d0.AND.i>=MIN(min_inner_its,ncoils))THEN
-      CALL gmres_backsolve(i,h,res,y)
-      ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
-      IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(y(1:i))*znorm(1:i))))THEN
-        w=u ! Form iterate in w (used as scratch)
-        DO kk=1,i
-          w=w+y(kk)*z(:,kk)
-        END DO
-        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(REAL(vec_comp_dot(ncoils,w,w),8)))
-        IF(inner_conv)EXIT
-      END IF
-    END IF
-    IF(pm)WRITE(*,'(A,I6,14X,ES14.6)')oft_indent,nits,ABS(res(i+1))
-  END DO
-  k=i
-  ! Update iterate
-  IF(inner_conv)THEN
-    u=w ! Already formed by inner convergence check
-  ELSE
-    CALL gmres_backsolve(k,h,res,y)
-    DO i=1,k
-      u=u+y(i)*z(:,i)
-    END DO
-  END IF
-  CALL mat_comp(ncoils,A,u,w)
-  r=g-w
-  IF(nits==its)EXIT
-  ggold=gg; uuold=uu
-  gg = REAL(vec_comp_dot(ncoils,r,r),8)
-  uu = REAL(vec_comp_dot(ncoils,u,u),8)
-  IF(pm)WRITE(*,'(A,I6,3ES14.6)')oft_indent,nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
-  IF(res_u_tol>0.d0.AND.SQRT(gg/uu)<res_u_tol)EXIT
-  IF(nits==its)EXIT
-  IF(uu==uuold)EXIT
-END DO
-g=r
-DEALLOCATE(c,s,h,res,y,znorm)
-DEALLOCATE(v,z,r,w)
-!
-IF(pm)THEN
-  elapsed_time=stimer%tock()
-  WRITE(*,'(2A,ES13.5)')oft_indent,'Time = ',elapsed_time
-  CALL oft_decrease_indent
-END IF
-IF(nlocal>1)THEN
-  DO i=1,nlocal
-    DEALLOCATE(parts(i)%ind)
-    DEALLOCATE(parts(i)%x)
-    DEALLOCATE(parts(i)%b)
-    DEALLOCATE(parts(i)%mat)
-  END DO
-  DEALLOCATE(parts)
-END IF
-oft_env%pm=pm
-END SUBROUTINE gmres_comp
 END SUBROUTINE frequency_response
 !---------------------------------------------------------------------------------
 !> Needs Docs
