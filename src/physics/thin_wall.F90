@@ -2458,14 +2458,41 @@ DO i=1,3
   ip=MOD(i,3)+1
   e=r(:,ip)-r(:,i)
   elen=SQRT(SUM(e**2))
-  num=rmag(ip)*elen + SUM(r(:,ip)*e)
-  den=rmag(i)*elen + SUM(r(:,i)*e)
-  IF(ABS(den)<1.d-14.OR.elen<1.d-14)CYCLE
+  IF(elen<1.d-14)CYCLE
   phi=phi+(nhat(1)*(r(2,i)*r(3,ip)-r(3,i)*r(2,ip)) + nhat(2)*(r(3,i)*r(1,ip)-r(1,i)*r(3,ip)) &
-    + nhat(3)*(r(1,i)*r(2,ip)-r(2,i)*r(1,ip)))*LOG(num/den)/elen
+    + nhat(3)*(r(1,i)*r(2,ip)-r(2,i)*r(1,ip)))*tw_edge_lineint(r(:,i),r(:,ip),rmag(i),rmag(ip),e,elen)/elen
 END DO
 DEBUG_STACK_POP
 END FUNCTION tw_compute_phipot
+!---------------------------------------------------------------------------------
+!> Integral of \f$ 1/|r-r'| \f$ along a straight edge from \f$ r_a \f$ to \f$ r_b \f$ (relative to the
+!! observation point), \f$ \ln((|r_b|+s_b)/(|r_a|+s_a)) \f$ with \f$ s = r \cdot \hat{e} \f$
+!!
+!! Evaluated as \f$ \ln((|r_a|-s_a)/(|r_b|-s_b)) \f$ when the point lies mostly beyond the end \f$ r_b \f$
+!! (\f$ s_a+s_b<0 \f$), where the first form cancels; both are exact, including for points on the line of the
+!! edge outside it. Zero for points on the edge itself (singular).
+!---------------------------------------------------------------------------------
+PURE FUNCTION tw_edge_lineint(ra,rb,rma,rmb,e,elen) RESULT(val)
+REAL(8), INTENT(in) :: ra(3) !< Start vertex relative to the observation point
+REAL(8), INTENT(in) :: rb(3) !< End vertex relative to the observation point
+REAL(8), INTENT(in) :: rma !< \f$ |r_a| \f$
+REAL(8), INTENT(in) :: rmb !< \f$ |r_b| \f$
+REAL(8), INTENT(in) :: e(3) !< Edge vector, rb-ra
+REAL(8), INTENT(in) :: elen !< Edge length
+REAL(8) :: val,sa,sb,num,den
+sa=SUM(ra*e)/elen
+sb=SUM(rb*e)/elen
+IF(sa+sb>=0.d0)THEN
+  num=rmb+sb; den=rma+sa
+ELSE
+  num=rma-sa; den=rmb-sb
+END IF
+IF(MIN(num,den)<=1.d-14*(rma+rmb))THEN
+  val=0.d0
+ELSE
+  val=LOG(num/den)
+END IF
+END FUNCTION tw_edge_lineint
 !---------------------------------------------------------------------------------
 !> Compute \f$ \nabla \int 1/|r-r'| dA' \f$ for a triangle (gradient with respect to the observation point)
 !!
@@ -2500,10 +2527,9 @@ DO i=1,3
   ip=MOD(i,3)+1
   e=r(:,ip)-r(:,i)
   elen=SQRT(SUM(e**2))
-  num=rmag(ip)*elen + SUM(r(:,ip)*e)
-  den=rmag(i)*elen + SUM(r(:,i)*e)
-  IF(ABS(den)<1.d-14.OR.elen<1.d-14)CYCLE
-  grad=grad-[e(2)*nhat(3)-e(3)*nhat(2), e(3)*nhat(1)-e(1)*nhat(3), e(1)*nhat(2)-e(2)*nhat(1)]*LOG(num/den)/elen
+  IF(elen<1.d-14)CYCLE
+  grad=grad-[e(2)*nhat(3)-e(3)*nhat(2), e(3)*nhat(1)-e(1)*nhat(3), e(1)*nhat(2)-e(2)*nhat(1)] &
+    *tw_edge_lineint(r(:,i),r(:,ip),rmag(i),rmag(ip),e,elen)/elen
 END DO
 DEBUG_STACK_POP
 END FUNCTION tw_compute_phigrad
