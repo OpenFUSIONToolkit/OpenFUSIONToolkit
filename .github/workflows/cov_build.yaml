@@ -5,8 +5,18 @@ on:
     branches:
       - main
       - cov_debug
+    paths:
+      - '.github/workflows/cov_build.yaml'
+      - 'codecov.yml'
+      - 'src/**'
+      - '!src/docs/**'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - '.github/workflows/cov_build.yaml'
+      - 'codecov.yml'
+      - 'src/**'
+      - '!src/docs/**'
 
 concurrency:
   group: cov-${{ github.ref }}
