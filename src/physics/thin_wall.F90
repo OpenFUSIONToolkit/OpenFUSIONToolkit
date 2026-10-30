@@ -231,6 +231,34 @@ ABSTRACT INTERFACE
     REAL(8), INTENT(out) :: vec(:) !< Row [ncols] or column [nrows] of the block
   END SUBROUTINE tw_aca_vector
 END INTERFACE
+!------------------------------------------------------------------------------
+!> Cell-segment kernel between a group of cells (rows) and consecutive segments of a coil filament (columns)
+!------------------------------------------------------------------------------
+TYPE, EXTENDS(tw_aca_source) :: tw_aca_segblock
+  CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Mesh
+  INTEGER(i4), ALLOCATABLE :: cells(:) !< Row cells
+  REAL(r8), ALLOCATABLE :: pts(:,:) !< Segment end points [3,nseg+1]
+CONTAINS
+  PROCEDURE :: row => tw_aca_segblock_row
+  PROCEDURE :: col => tw_aca_segblock_col
+END TYPE tw_aca_segblock
+!------------------------------------------------------------------------------
+!> Cell-ring kernel between the three basis functions of a group of cells (rows, three per cell) and circular
+!! filaments (columns). A row needs all three basis functions of its cell, so they are kept for the other two.
+!------------------------------------------------------------------------------
+TYPE, EXTENDS(tw_aca_source) :: tw_aca_ringblock
+  CLASS(oft_bmesh), POINTER :: mesh => NULL() !< Mesh
+  INTEGER(i4), ALLOCATABLE :: cells(:) !< Cells
+  REAL(r8), ALLOCATABLE :: qbasis(:,:,:) !< Basis function directions of each cell [3,3,ncells]
+  REAL(r8), ALLOCATABLE :: rz(:,:) !< Radius, height and orientation of each filament [3,nrings]
+  REAL(r8), ALLOCATABLE :: radius(:) !< Wire radius of each filament
+  INTEGER(i4) :: nslot = 0 !< Number of cells with stored rows
+  INTEGER(i4), ALLOCATABLE :: slot(:) !< Storage slot of each cell (0: not computed)
+  REAL(r8), ALLOCATABLE :: rows(:,:,:) !< Stored rows of computed cells [nrings,3,:]
+CONTAINS
+  PROCEDURE :: row => tw_aca_ringblock_row
+  PROCEDURE :: col => tw_aca_ringblock_col
+END TYPE tw_aca_ringblock
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Set up the shared triangle quadrature rules (done once, by the first @ref tw_setup)
@@ -1331,72 +1359,35 @@ DO g=1,ngroup
 END DO
 DEALLOCATE(cent,glist,gptr,gcen,gext,ch,ccen,cext)
 CONTAINS
-!> Kernel between cell glist(ic) and segment s of the chunk's filament
-FUNCTION kern(ic,jc,cc) RESULT(kv)
-INTEGER(i4), INTENT(in) :: ic,jc,cc
-REAL(r8) :: kv,dm,pc(3,3)
-INTEGER(i4) :: ci
-ci=glist(ic)
-pc(:,1)=mesh%r(:,mesh%lc(1,ci)); pc(:,2)=mesh%r(:,mesh%lc(2,ci)); pc(:,3)=mesh%r(:,mesh%lc(3,ci))
-kv=tw_cell_seg_kernel(pc,mesh%ca(ci),coils_tot(ch(1,cc))%coils(ch(2,cc))%pts(:,jc), &
-  coils_tot(ch(1,cc))%coils(ch(2,cc))%pts(:,jc+1),dm)
-END FUNCTION kern
-!> ACA (partial pivoting) of K(group, chunk), then V += scale U (W^T D) with D the segment directions;
+!> ACA+ (@ref tw_aca_plus) of K(group, chunk), then V += scale U (W D) with D the segment directions;
 !! .FALSE. if not converged at low rank
 FUNCTION block_aca(gg,cc) RESULT(success)
 INTEGER(i4), INTENT(in) :: gg,cc
 LOGICAL :: success
-INTEGER(i4) :: mm,nn,kk,rmax,ir,jcol,l2,s0
-LOGICAL, ALLOCATABLE :: row_used(:)
-REAL(r8) :: fro2,unrm,wnrm,piv,dvec(3)
+INTEGER(i4) :: mm,nn,kk,ir,jcol,s0
+REAL(r8) :: dvec(3)
 REAL(r8), ALLOCATABLE :: Ua(:,:),Wa(:,:),D(:,:),y(:,:)
+TYPE(tw_aca_segblock) :: src
 mm=gptr(gg+1)-gptr(gg); nn=ch(4,cc)-ch(3,cc)+1; s0=ch(3,cc)
-rmax=MIN(mm,nn)/2
-ALLOCATE(Ua(mm,rmax),Wa(nn,rmax),row_used(mm),D(nn,3))
-DO jcol=1,nn
-  dvec=coils_tot(ch(1,cc))%coils(ch(2,cc))%pts(:,s0+jcol)-coils_tot(ch(1,cc))%coils(ch(2,cc))%pts(:,s0+jcol-1)
-  D(jcol,:)=0.d0
-  IF(SUM(dvec**2)>0.d0)D(jcol,:)=dvec/SQRT(SUM(dvec**2))
-END DO
-row_used=.FALSE.; success=.FALSE.; fro2=0.d0; ir=1; kk=0
-DO l2=1,rmax
-  row_used(ir)=.TRUE.
-  DO jcol=1,nn
-    Wa(jcol,kk+1)=kern(gptr(gg)+ir-1,s0+jcol-1,cc)
-  END DO
-  IF(kk>0)Wa(:,kk+1)=Wa(:,kk+1)-MATMUL(Wa(:,1:kk),Ua(ir,1:kk))
-  jcol=MAXLOC(ABS(Wa(:,kk+1)),DIM=1)
-  piv=Wa(jcol,kk+1)
-  IF(ABS(piv)<=0.d0)THEN
-    IF(ALL(row_used))EXIT
-    ir=FINDLOC(row_used,.FALSE.,DIM=1)
-    CYCLE
-  END IF
-  Wa(:,kk+1)=Wa(:,kk+1)/piv
-  DO ir=1,mm
-    Ua(ir,kk+1)=kern(gptr(gg)+ir-1,s0+jcol-1,cc)
-  END DO
-  IF(kk>0)Ua(:,kk+1)=Ua(:,kk+1)-MATMUL(Ua(:,1:kk),Wa(jcol,1:kk))
-  kk=kk+1
-  unrm=SUM(Ua(:,kk)**2); wnrm=SUM(Wa(:,kk)**2)
-  fro2=fro2+unrm*wnrm
-  IF(kk>1)fro2=fro2+2.d0*SUM(MATMUL(TRANSPOSE(Ua(:,1:kk-1)),Ua(:,kk))*MATMUL(TRANSPOSE(Wa(:,1:kk-1)),Wa(:,kk)))
-  IF((kk>=tw_coil_aca_rmin).AND.(SQRT(unrm*wnrm)<=tw_coil_aca_tol*SQRT(ABS(fro2))))THEN
-    success=.TRUE.
-    EXIT
-  END IF
-  IF(ALL(row_used))EXIT
-  ir=MAXLOC(ABS(Ua(:,kk)),MASK=.NOT.row_used,DIM=1)
-END DO
+src%mesh=>mesh
+src%cells=glist(gptr(gg):gptr(gg+1)-1)
+src%pts=coils_tot(ch(1,cc))%coils(ch(2,cc))%pts(:,s0:s0+nn)
+!---Relative tolerance, at most MIN(mm,nn)/2 terms
+CALL tw_aca_plus(src,mm,nn,tw_coil_aca_tol,tw_coil_aca_rmin,MIN(mm,nn)/2+1,1,1,Ua,Wa,kk,rel_tol=.TRUE.)
+success=(kk>0)
 IF(success)THEN
-  ALLOCATE(y(kk,3))
-  y=MATMUL(TRANSPOSE(Wa(:,1:kk)),D)*coils_tot(ch(1,cc))%scales(ch(2,cc))
-  DO ir=1,mm
-    V(:,glist(gptr(gg)+ir-1),pidx(ch(1,cc)))=V(:,glist(gptr(gg)+ir-1),pidx(ch(1,cc)))+MATMUL(Ua(ir,1:kk),y)
+  ALLOCATE(D(nn,3),y(kk,3))
+  DO jcol=1,nn
+    dvec=src%pts(:,jcol+1)-src%pts(:,jcol)
+    D(jcol,:)=0.d0
+    IF(SUM(dvec**2)>0.d0)D(jcol,:)=dvec/SQRT(SUM(dvec**2))
   END DO
-  DEALLOCATE(y)
+  y=MATMUL(Wa,D)*coils_tot(ch(1,cc))%scales(ch(2,cc))
+  DO ir=1,mm
+    V(:,glist(gptr(gg)+ir-1),pidx(ch(1,cc)))=V(:,glist(gptr(gg)+ir-1),pidx(ch(1,cc)))+MATMUL(Ua(ir,:),y)
+  END DO
+  DEALLOCATE(Ua,Wa,D,y)
 END IF
-DEALLOCATE(Ua,Wa,row_used,D)
 END FUNCTION block_aca
 END SUBROUTINE tw_coil_poly_sum
 !---------------------------------------------------------------------------------
@@ -1649,54 +1640,34 @@ DO ic=1,m
 END DO
 DEALLOCATE(lset,sglob,B,S)
 END SUBROUTINE ring_block
-!> ACA (partial pivoting) of the 3m x n block of cell group gg and ring cluster cc, B = U (W^T S); .FALSE. if not
+!> ACA+ (@ref tw_aca_plus) of the 3m x n block of cell group gg and ring cluster cc, B = U (W S); .FALSE. if not
 !! converged at low rank
 FUNCTION ring_aca(cc,gg,mm,nn,nsl,S,B) RESULT(success)
 INTEGER(i4), INTENT(in) :: cc,gg,mm,nn,nsl
 REAL(r8), INTENT(in) :: S(nn,nsl)
 REAL(r8), INTENT(inout) :: B(3*mm,nsl)
 LOGICAL :: success
-INTEGER(i4) :: kk,rmax,irow,jcol,l2,jc,ic2
-LOGICAL :: cr
-LOGICAL, ALLOCATABLE :: row_used(:)
-REAL(r8) :: fro2,unrm,wnrm,piv,tt(3)
+INTEGER(i4) :: kk,ic2,jc,rr
 REAL(r8), ALLOCATABLE :: Ua(:,:),Wa(:,:)
-rmax=MIN(3*mm,nn)/2
-ALLOCATE(Ua(3*mm,rmax),Wa(nn,rmax),row_used(3*mm))
-row_used=.FALSE.; success=.FALSE.; fro2=0.d0; irow=1; kk=0
-DO l2=1,rmax
-  row_used(irow)=.TRUE.
-  ic2=(irow-1)/3+1
-  DO jc=1,nn
-    tt=kern3(gptr(gg)+ic2-1,rptr(cc)+jc-1,cr)
-    Wa(jc,kk+1)=tt(irow-3*(ic2-1))
-  END DO
-  IF(kk>0)Wa(:,kk+1)=Wa(:,kk+1)-MATMUL(Wa(:,1:kk),Ua(irow,1:kk))
-  jcol=MAXLOC(ABS(Wa(:,kk+1)),DIM=1)
-  piv=Wa(jcol,kk+1)
-  IF(ABS(piv)<=0.d0)THEN
-    IF(ALL(row_used))EXIT
-    irow=FINDLOC(row_used,.FALSE.,DIM=1)
-    CYCLE
-  END IF
-  Wa(:,kk+1)=Wa(:,kk+1)/piv
-  DO ic2=1,mm
-    Ua(3*ic2-2:3*ic2,kk+1)=kern3(gptr(gg)+ic2-1,rptr(cc)+jcol-1,cr)
-  END DO
-  IF(kk>0)Ua(:,kk+1)=Ua(:,kk+1)-MATMUL(Ua(:,1:kk),Wa(jcol,1:kk))
-  kk=kk+1
-  unrm=SUM(Ua(:,kk)**2); wnrm=SUM(Wa(:,kk)**2)
-  fro2=fro2+unrm*wnrm
-  IF(kk>1)fro2=fro2+2.d0*SUM(MATMUL(TRANSPOSE(Ua(:,1:kk-1)),Ua(:,kk))*MATMUL(TRANSPOSE(Wa(:,1:kk-1)),Wa(:,kk)))
-  IF((kk>=tw_coil_aca_rmin).AND.(SQRT(unrm*wnrm)<=tw_coil_aca_tol*SQRT(ABS(fro2))))THEN
-    success=.TRUE.
-    EXIT
-  END IF
-  IF(ALL(row_used))EXIT
-  irow=MAXLOC(ABS(Ua(:,kk)),MASK=.NOT.row_used,DIM=1)
+TYPE(tw_aca_ringblock) :: src
+src%mesh=>mesh
+src%cells=glist(gptr(gg):gptr(gg+1)-1)
+ALLOCATE(src%qbasis(3,3,mm),src%rz(3,nn),src%radius(nn))
+DO ic2=1,mm
+  src%qbasis(:,:,ic2)=tw_obj%qbasis(:,:,src%cells(ic2))
 END DO
-IF(success)B=MATMUL(Ua(:,1:kk),MATMUL(TRANSPOSE(Wa(:,1:kk)),S))
-DEALLOCATE(Ua,Wa,row_used)
+DO jc=1,nn
+  rr=rlist(rptr(cc)+jc-1)
+  src%rz(:,jc)=ring_rz(:,rfil(rr),rset(rr))
+  src%radius(jc)=coils_tot(rset(rr))%radius(rfil(rr))
+END DO
+!---Relative tolerance, at most MIN(3*mm,nn)/2 terms
+CALL tw_aca_plus(src,3*mm,nn,tw_coil_aca_tol,tw_coil_aca_rmin,MIN(3*mm,nn)/2+1,1,1,Ua,Wa,kk,rel_tol=.TRUE.)
+success=(kk>0)
+IF(success)THEN
+  B=MATMUL(Ua,MATMUL(Wa,S))
+  DEALLOCATE(Ua,Wa)
+END IF
 END FUNCTION ring_aca
 END SUBROUTINE tw_coil_ring_sum
 !---------------------------------------------------------------------------------
@@ -3467,6 +3438,85 @@ DO i=1,SIZE(vals)
   END IF
 END DO
 END FUNCTION tw_max_masked
+!------------------------------------------------------------------------------
+!> Row: cell `i` against all segments
+!------------------------------------------------------------------------------
+SUBROUTINE tw_aca_segblock_row(self,i,vec)
+CLASS(tw_aca_segblock), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: i
+REAL(r8), INTENT(out) :: vec(:)
+INTEGER(i4) :: j
+REAL(r8) :: pc(3,3),dm
+pc=self%mesh%r(:,self%mesh%lc(:,self%cells(i)))
+DO j=1,SIZE(vec)
+  vec(j)=tw_cell_seg_kernel(pc,self%mesh%ca(self%cells(i)),self%pts(:,j),self%pts(:,j+1),dm)
+END DO
+END SUBROUTINE tw_aca_segblock_row
+!------------------------------------------------------------------------------
+!> Column: all cells against segment `i`
+!------------------------------------------------------------------------------
+SUBROUTINE tw_aca_segblock_col(self,i,vec)
+CLASS(tw_aca_segblock), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: i
+REAL(r8), INTENT(out) :: vec(:)
+INTEGER(i4) :: j
+REAL(r8) :: pc(3,3),dm
+DO j=1,SIZE(vec)
+  pc=self%mesh%r(:,self%mesh%lc(:,self%cells(j)))
+  vec(j)=tw_cell_seg_kernel(pc,self%mesh%ca(self%cells(j)),self%pts(:,i),self%pts(:,i+1),dm)
+END DO
+END SUBROUTINE tw_aca_segblock_col
+!------------------------------------------------------------------------------
+!> Row: basis function `MOD(i-1,3)+1` of cell `(i-1)/3+1` against all filaments
+!!
+!! All three basis functions of the cell are computed together and kept.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_aca_ringblock_row(self,i,vec)
+CLASS(tw_aca_ringblock), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: i
+REAL(r8), INTENT(out) :: vec(:)
+INTEGER(i4) :: c,j,nr
+LOGICAL :: crossed
+REAL(r8) :: pc(3,3)
+REAL(r8), ALLOCATABLE :: tmp(:,:,:)
+nr=SIZE(self%radius)
+c=(i-1)/3+1
+IF(.NOT.ALLOCATED(self%slot))THEN
+  ALLOCATE(self%slot(SIZE(self%cells)),self%rows(nr,3,16))
+  self%slot=0
+END IF
+IF(self%slot(c)==0)THEN
+  IF(self%nslot==SIZE(self%rows,3))THEN
+    ALLOCATE(tmp(nr,3,2*self%nslot))
+    tmp(:,:,1:self%nslot)=self%rows
+    CALL MOVE_ALLOC(tmp,self%rows)
+  END IF
+  self%nslot=self%nslot+1
+  self%slot(c)=self%nslot
+  pc=self%mesh%r(:,self%mesh%lc(:,self%cells(c)))
+  DO j=1,nr
+    self%rows(j,:,self%nslot)=tw_cell_ring_kernel(pc,self%mesh%ca(self%cells(c)),self%qbasis(:,:,c), &
+      self%rz(:,j),self%radius(j),crossed)
+  END DO
+END IF
+vec=self%rows(:,i-3*(c-1),self%slot(c))
+END SUBROUTINE tw_aca_ringblock_row
+!------------------------------------------------------------------------------
+!> Column: the three basis functions of all cells against filament `i`
+!------------------------------------------------------------------------------
+SUBROUTINE tw_aca_ringblock_col(self,i,vec)
+CLASS(tw_aca_ringblock), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: i
+REAL(r8), INTENT(out) :: vec(:)
+INTEGER(i4) :: c
+LOGICAL :: crossed
+REAL(r8) :: pc(3,3)
+DO c=1,SIZE(self%cells)
+  pc=self%mesh%r(:,self%mesh%lc(:,self%cells(c)))
+  vec(3*c-2:3*c)=tw_cell_ring_kernel(pc,self%mesh%ca(self%cells(c)),self%qbasis(:,:,c),self%rz(:,i), &
+    self%radius(i),crossed)
+END DO
+END SUBROUTINE tw_aca_ringblock_col
 !---------------------------------------------------------------------------------
 !> Compute \f$ \nabla \int 1/|r-r'| dA' \f$ for a triangle (gradient with respect to the observation point)
 !!
