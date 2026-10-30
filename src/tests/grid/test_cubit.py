@@ -1,7 +1,9 @@
 import os
 import sys
+import shlex
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
+python_dir = os.path.abspath(os.path.join(test_dir, '..', '..', 'python'))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 from oft_testing import run_OFT, run_command, approx_list
 
@@ -50,7 +52,10 @@ def cubit_setup(nbase, nlevels, prefix, grid_order=1,
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(nbase, nlevels, prefix, grid_order, reflect, zstretch, test_2d, ref_periodic))
     # Run mesh conversion script
-    outs, errs, errcode = run_command(" ".join(convert_cmd))
+    # Run under the interpreter running the tests; the stub's "#!/usr/bin/env python" shebang
+    # would otherwise pick up whichever interpreter comes first on PATH
+    convert_cmd = [sys.executable, os.path.join(python_dir, convert_cmd[0])] + convert_cmd[1:]
+    outs, errs, errcode = run_command(" ".join(shlex.quote(arg) for arg in convert_cmd))
     if errcode != 0:
         print("FAILED: OFT_convert_cubit.py exited with non-zero error code!")
         print("========== STD OUTPUT ==========")
