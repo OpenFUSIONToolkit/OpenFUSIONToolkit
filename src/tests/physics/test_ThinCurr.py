@@ -675,6 +675,21 @@ def run_thickness_api_roundtrip_and_validation(mp_q):
             tw_model_no_thickness.set_eta_values(eta_vol=np.r_[1.0e-6])
         with pytest.raises(IndexError):
             tw_model.set_eta_values(eta_surf=eta_values, thickness=np.r_[1.E-3, 2.E-3])
+        # Surface resistivity only from the mesh file: no volumetric resistivity is set
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        from OpenFUSIONToolkit.ThinCurr._mesh_cli import ThinCurrMesh
+        from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+        r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
+        mesh = ThinCurrMesh(r_dummy, lc_dummy, np.ones((lc_dummy.shape[0],), dtype=np.int32))
+        mesh.set_resistivity(eta_surf=eta_values)
+        mesh.save('tw_eta_surf_only.h5')
+        tw_model_mesh_eta = ThinCurr(_oft_env_singleton)  # set by _build_dummy_model above
+        tw_model_mesh_eta.setup_model(mesh_file='tw_eta_surf_only.h5')
+        eta_surf_mesh, eta_vol_mesh = tw_model_mesh_eta.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_mesh, eta_values):
+            result = False
+        if eta_vol_mesh is not None:
+            result = False
     except BaseException as e:
         print(e)
         result = False
