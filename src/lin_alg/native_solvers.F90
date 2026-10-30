@@ -37,8 +37,7 @@ USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr,
   oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   oft_native_matrix, native_matrix_cast, oft_native_submatrix, &
-  partition_graph, native_matrix_setup_full, oft_native_submatrix, &
-  oft_native_dense_cmatrix
+  partition_graph, native_matrix_setup_full, oft_native_dense_cmatrix
 USE oft_lu, ONLY: lapack_matinv
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, oft_solver_ptr, &
   oft_csolver, oft_csolver_bc, oft_eigsolver, solver_setup, csolver_setup, &
@@ -2543,8 +2542,8 @@ END SUBROUTINE dense_cbjprecond_setup
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE dense_cbjprecond_apply(self,u,g)
 CLASS(oft_native_dense_cbjprecond), INTENT(inout) :: self !< Solver object
-CLASS(oft_cvector), INTENT(inout) :: u !< Guess (input), Solution (output)
-CLASS(oft_cvector), INTENT(inout) :: g !< RHS (input), Residual (output)
+CLASS(oft_cvector), INTENT(inout) :: u !< Result \f$ M^{-1} g \f$ (output)
+CLASS(oft_cvector), INTENT(inout) :: g !< Input vector (unchanged)
 !---
 INTEGER(i4) :: i,j,n
 COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals

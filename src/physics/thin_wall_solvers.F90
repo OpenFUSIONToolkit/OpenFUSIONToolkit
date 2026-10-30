@@ -224,30 +224,33 @@ CALL oft_abort("Iterative eigenvalue solve requires ARPACK", "lr_eigenmodes_arpa
 DEBUG_STACK_POP
 END SUBROUTINE lr_eigenmodes_arpack
 !---------------------------------------------------------------------------------
-!> Needs Docs
+!> Compute frequency response of a ThinCurr model to given driver voltages
+!!
+!! Solves \f$ (i \omega L + R) I = V \f$ for the complex currents \f$ I \f$, where
+!! \f$ \omega = 2 \pi f \f$, or the inductive (\f$ i L I = V \f$) or resistive
+!! (\f$ R I = V \f$) limit if `fr_limit/=0`. The system is solved either directly
+!! using LAPACK (dense \f$ L \f$ only) or iteratively using GMRES. The iterative
+!! solver is preconditioned using block-Jacobi on the HODLR diagonal blocks (if
+!! `hodlr_op` is present) or on blocks from partitioning the graph of \f$ R \f$
+!! (diagonal scaling for models with <=2000 elements).
 !---------------------------------------------------------------------------------
 SUBROUTINE frequency_response(self,direct,fr_limit,freq,driver,hodlr_op)
 TYPE(tw_type), INTENT(in) :: self !< ThinCurr object
-LOGICAL, INTENT(in) :: direct !< Use direct solver?
-REAL(r8), INTENT(in) :: freq !< Frequency for calculation (if `fr_limit=0`)
-INTEGER(i4), INTENT(in) :: fr_limit !< Limit for frequency response (0: Use `freq`, 1: Inductive, 2: Resistive)
-REAL(r8), INTENT(inout) :: driver(:,:) !< Driver voltages (real, imaginary) [self%nelems,2]
-TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix
-INTEGER(i4) :: i,j,k,io_unit,info
-REAL(r8) :: lam0
-REAL(r8), ALLOCATABLE :: senout(:,:)
+LOGICAL, INTENT(in) :: direct !< Use direct solver? (not supported with `hodlr_op`)
+REAL(r8), INTENT(in) :: freq !< Frequency for response calculation [Hz] (unused if `fr_limit/=0`)
+INTEGER(i4), INTENT(in) :: fr_limit !< Frequency limit for calculation (0: none, 1: inductive, 2: resistive)
+REAL(r8), INTENT(inout) :: driver(:,:) !< Driver voltages (real, imaginary), overwritten with resulting currents [self%nelems,2]
+TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L matrix (optional)
+INTEGER(i4) :: i,j,info
 DOUBLE COMPLEX, POINTER, DIMENSION(:) :: x,b
 TYPE(oft_sum_cmatrix), TARGET :: aca_Fmat
 TYPE(oft_native_dense_cmatrix), TARGET :: dense_Fmat
-CLASS(oft_vector), POINTER :: uloc
 CLASS(oft_cvector), POINTER :: aloc,bloc
 TYPE(oft_graph) :: graph
 TYPE(oft_native_gmres_csolver), TARGET :: frinv
 TYPE(oft_tw_hodlr_bjpre), TARGET :: frinv_pre
 TYPE(oft_native_dense_cbjprecond), TARGET :: frinv_dense_pre
 TYPE(oft_diag_cscale), TARGET :: frinv_diag_pre
-TYPE(oft_bin_file) :: floop_hist
-LOGICAL :: pm_save
 !---
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Starting frequency-domain run'
@@ -330,11 +333,12 @@ ELSE
     frinv%A=>aca_Fmat
   ELSE
     frinv%A=>dense_Fmat
-    !---Converge on |r|/|u| only (as for the previous dense solver)
+    !---Converge on |r|/|u| only (no absolute or relative tolerance)
     frinv%min_nits=10
     frinv%atol=0.d0
     frinv%rtol=0.d0
-    !---Block-Jacobi preconditioner (blocks of <=2000 rows) partitioned using the graph of R
+    !---Block-Jacobi preconditioner partitioned using the graph of R
+    !   (about 2000 owned rows per block, more with overlap)
     frinv_dense_pre%nlocal=CEILING(REAL(self%nelems,r8)/2000.d0)
     IF(frinv_dense_pre%nlocal>1)THEN
       graph%nr=self%Rmat%nr
