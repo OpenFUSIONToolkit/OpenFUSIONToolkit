@@ -11,7 +11,8 @@
 !!   @ref thin_wall::tw_compute_phigrad "tw_compute_phigrad") at points off the triangle, in its plane, and on the
 !!   lines of its edges beyond either end, for a triangle in metre and in millimetre scale (quadrature);
 !! - low-rank compression (@ref thin_wall_hodlr::tw_lowrank_qrcp "tw_lowrank_qrcp") of a smooth kernel block, a block
-!!   of exact rank just below the break-even rank and an incompressible block (SVD);
+!!   of exact rank just below the break-even rank, a Kahan block whose pivoted QR needs more columns than the
+!!   break-even rank although its SVD rank is below it, and an incompressible block (SVD);
 !! - ACA+ (@ref thin_wall::tw_aca_plus "tw_aca_plus") of a smooth kernel block with absolute and relative tolerance,
 !!   and of an incompressible block (dense block).
 !!
@@ -71,7 +72,7 @@ IF(oft_env%head_proc)THEN
   CLOSE(io_unit)
   !---Low-rank compression: M, N, tolerance, rank and error of each block, then the block
   OPEN(NEWUNIT=io_unit,FILE='thin_wall_qrcp.results')
-  DO k=1,3
+  DO k=1,4
     CALL qrcp_block(k)
     CALL tw_lowrank_qrcp(A,1.d-8,1,U,V,rank)
     IF(rank>0)THEN
@@ -111,12 +112,15 @@ IF(oft_env%head_proc)THEN
 END IF
 CALL oft_finalize
 CONTAINS
-!> Test blocks: 1/|x-y| between separated point sets; exact rank 18 (Chebyshev products) with break-even rank 20;
-!! 1/(|x-y|+0.01) between interleaved point sets (not compressible)
+!---Test blocks: 1/|x-y| between separated point sets; exact rank 18 (Chebyshev products) with break-even rank 20;
+!   1/(|x-y|+0.01) between interleaved point sets (not compressible); Kahan matrix
+!   diag(1,s,...,s^(n-1)) (I - c U) (U strictly upper ones, s^2+c^2=1, columns scaled
+!   by (1-1E-3)^j so pivoting keeps the natural order) with n=48 and c=0.8: SVD rank 23 at the tolerance,
+!   break-even rank 24, but pivoted QR needs 29 columns
 SUBROUTINE qrcp_block(icase)
 INTEGER(i4), INTENT(in) :: icase
 INTEGER(i4) :: ii,jj,kk
-REAL(r8) :: x,y
+REAL(r8) :: x,y,c,sk
 SELECT CASE(icase)
 CASE(1)
   ALLOCATE(A(60,50))
@@ -142,6 +146,18 @@ CASE(3)
   DO jj=1,30
     DO ii=1,30
       A(ii,jj)=1.d0/(ABS(REAL(2*ii,8)-REAL(2*jj+1,8))/60.d0+0.01d0)
+    END DO
+  END DO
+CASE(4)
+  ALLOCATE(A(48,48))
+  c=0.8d0
+  sk=SQRT(1.d0-c**2)
+  A=0.d0
+  DO jj=1,48
+    DO ii=1,jj
+      A(ii,jj)=-c
+      IF(ii==jj)A(ii,jj)=1.d0
+      A(ii,jj)=A(ii,jj)*sk**(ii-1)*(1.d0-1.d-3)**(jj-1)*(1.d-8/1.8d-5)
     END DO
   END DO
 END SELECT

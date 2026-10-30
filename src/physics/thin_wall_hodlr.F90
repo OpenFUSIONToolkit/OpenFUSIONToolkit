@@ -207,8 +207,9 @@ CONTAINS
 !> Hole and V-coil columns of the inductance matrix, with ACA for groups of cells far from each hole
 !!
 !! A hole column is \f$ K C_h \f$: the cell-pair kernel K between all cells and the cells around hole h, times the
-!! current vector of each of those cells. Cells are split into disjoint groups (by the leaf block of their first
-!! vertex). Groups well separated from a hole's cells use an ACA approximation of their block of K; the others, and
+!! current vector of each of those cells. Cells are split into disjoint groups by the leaf block of their first
+!! vertex in a leaf; cells with no vertex in any leaf form one more group, which is always summed directly. Groups
+!! well separated from a hole's cells use an ACA approximation of their block of K; the others, and
 !! groups where ACA does not converge at low rank, are summed directly. V-coil columns are copied from the coil
 !! couplings.
 !------------------------------------------------------------------------------
@@ -377,7 +378,7 @@ DO m=1,SIZE(gcells)
   END DO
 END DO
 END SUBROUTINE group_direct
-!---ACA+ (@ref tw_aca_plus) of K(group,hole cells), then V = U (W c^T); .FALSE. if not converged at low rank
+!---ACA+ (tw_aca_plus) of K(group,hole cells), then V = U (W c^T); .FALSE. if not converged at low rank
 FUNCTION group_aca(gcells,scells,c,Vout) RESULT(success)
 INTEGER(4), TARGET, INTENT(in) :: gcells(:),scells(:)
 REAL(8), INTENT(in) :: c(:,:)
@@ -943,7 +944,8 @@ DO i=1,self%nsparse
     size_out=-1
     IF((self%L_aca_tol>0.d0).AND.self%levels(level)%mat_mask(j,k)==2)THEN
       CALL aca_approx(i,self%L_aca_tol,size_out)
-      IF(size_out>0)CALL compress_aca(i,self%L_svd_tol,size_out)
+      IF(size_out>0)CALL tw_lowrank_recompress(self%aca_U_mats(i),self%aca_V_mats(i),self%L_svd_tol,self%min_rank, &
+        self%aca_min_its,size_out)
       IF(size_out==-1)WRITE(*,'(2A,2I6)')oft_indent,'ACA+ failure',self%levels(level)%blocks(j)%nelems, &
         self%levels(level)%blocks(k)%nelems
     END IF
@@ -1210,87 +1212,6 @@ END IF
 DEALLOCATE(src%buf)
 IF(ASSOCIATED(src%one%ielem))DEALLOCATE(src%one%ielem,src%one%icell,src%one%inv_map)
 END SUBROUTINE aca_approx
-!
-SUBROUTINE compress_aca(isparse,tol,size_out)
-INTEGER(4), INTENT(in) :: isparse
-REAL(8), INTENT(in) :: tol
-INTEGER(8), INTENT(out) :: size_out
-INTEGER(4) :: i,j,io_unit
-REAL(8) :: S_sum,frob_K
-!
-INTEGER(4) :: ilevel,iblock,jblock
-INTEGER(4) :: M,N,K,LDA,LDU,LDVT,LWORK,INFO,MIN_DIM
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: IWORK
-REAL(8), ALLOCATABLE, DIMENSION(:) :: S,WORK
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: U,VT,Atmp,QU,QV,RU,RV
-!
-ilevel=self%sparse_blocks(1,isparse)
-iblock=self%sparse_blocks(2,isparse)
-jblock=self%sparse_blocks(3,isparse)
-! Get QR factorization of U and V matrices
-! WRITE(*,*)'QR U'
-CALL get_qr(self%aca_U_mats(isparse)%M,QU,RU)
-! WRITE(*,*)'QR VT'
-ALLOCATE(Atmp(SIZE(self%aca_V_mats(isparse)%M,2),SIZE(self%aca_V_mats(isparse)%M,1)))
-Atmp = TRANSPOSE(self%aca_V_mats(isparse)%M)
-CALL get_qr(Atmp,QV,RV)
-DEALLOCATE(Atmp)
-M=SIZE(QU,DIM=1)
-N=SIZE(QV,DIM=1)
-K=SIZE(RU,DIM=1)
-! WRITE(*,*)K
-ALLOCATE(Atmp(K,K))
-CALL DGEMM('N', 'T', K, K, K, 1.d0, RU, K, RV, K, 0.d0, Atmp, K)
-!
-LDA = K
-LDU = K
-MIN_DIM = K !MIN(M,N)
-LDVT = MIN_DIM
-ALLOCATE(S(MIN_DIM),U(LDU,MIN_DIM),VT(LDVT,K))
-!---Get optimal workspace size
-LWORK = -1
-ALLOCATE(WORK(1),IWORK(8*MIN_DIM))
-CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 )THEN
-  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
-END IF
-LWORK = INT(WORK(1))
-DEALLOCATE(WORK)
-!---Compute SVD of matrix block
-ALLOCATE(WORK(LWORK))
-CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 )THEN
-  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
-END IF
-!---Truncate at desired accuracy
-frob_K=0.d0
-DO i=MIN_DIM,1,-1
-  frob_K = frob_K + S(i)**2
-  IF(SQRT(frob_K)>tol)EXIT
-END DO
-i=MAX(MIN(self%min_rank,MIN_DIM),i)
-IF((i==MIN_DIM).AND.(MIN_DIM>self%aca_min_its))THEN
-  i=MIN_DIM
-  WRITE(*,'(2A)')oft_indent,'SVD recompression failed'
-END IF
-!i=MIN(i,MIN_DIM)
-!---Replace U and V matrices
-DEALLOCATE(self%aca_U_mats(isparse)%M,self%aca_V_mats(isparse)%M)
-ALLOCATE(self%aca_U_mats(isparse)%M(self%levels(ilevel)%blocks(jblock)%nelems,i))
-ALLOCATE(self%aca_V_mats(isparse)%M(i,self%levels(ilevel)%blocks(iblock)%nelems))
-! U = UQ.dot(U[:, :r] * S[:r])
-! V = VT[:r, :].dot(VQ.T)
-DO j=1,i
-  U(:,j) = U(:,j)*S(j)
-END DO
-CALL DGEMM('N', 'N', M, i, K, 1.d0, QU, M, U, K, 0.d0, self%aca_U_mats(isparse)%M, M)
-!self%aca_U_mats(isparse)%M = MATMUL(QU,U(:,1:i))
-CALL DGEMM('N', 'T', i, N, K, 1.d0, VT, K, QV, N, 0.d0, self%aca_V_mats(isparse)%M, i)
-!self%aca_V_mats(isparse)%M = MATMUL(VT(1:i,:),TRANSPOSE(QV))
-size_out=INT(i,8)*INT(M+N,8)
-! WRITE(*,*)'Compressed:',iblock,jblock,i,MIN(M,N)
-DEALLOCATE(WORK,IWORK,S,U,VT,Atmp,QU,QV,RU,RV)
-END SUBROUTINE compress_aca
 END SUBROUTINE tw_hodlr_Lcompute
 !---------------------------------------------------------------------------------
 !> Needs Docs
@@ -1422,7 +1343,8 @@ DO i=1,self%nsparse
       END IF
       IF(size_out>0)THEN
         DO dim=1,3
-          CALL compress_aca(ii,level,j,k,dim,self%B_svd_tol,size_out)
+          CALL tw_lowrank_recompress(self%aca_BU_mats(ii,dim),self%aca_BV_mats(ii,dim),self%B_svd_tol,self%min_rank, &
+            self%min_rank,size_out)
           sparse_sizes(i) = sparse_sizes(i) + size_out
         END DO
       ELSE
@@ -1688,12 +1610,11 @@ ELSE
 END IF
 END SUBROUTINE compress_block
 !
-!> ACA+ approximation of all three directions of a B-field block at once
-!!
-!! Runs ACA+ (@ref tw_aca_plus) on the stacked block [Bx; By; Bz] (block points, one set per direction) with shared
-!! pivots. One element at all points gives all three directions in one kernel evaluation, and the three directions
-!! at a point are computed together and kept (@ref tw_aca_B3block_col). The stacked factors are split per direction
-!! (shared right factor) for recompression with @ref compress_aca.
+!---ACA+ approximation of all three directions of a B-field block at once
+!   Runs ACA+ (tw_aca_plus) on the stacked block [Bx; By; Bz] (block points, one set per direction) with shared
+!   pivots. One element at all points gives all three directions in one kernel evaluation, and the three directions
+!   at a point are computed together and kept (tw_aca_B3block_col). The stacked factors are split per direction
+!   (shared right factor) for recompression with tw_lowrank_recompress.
 SUBROUTINE aca_approx3(isparse,ilevel,iblock,jblock,tol,size_out)
 INTEGER(4), INTENT(in) :: isparse,ilevel,iblock,jblock
 REAL(8), INTENT(in) :: tol
@@ -1726,7 +1647,7 @@ CALL random_number(tmp)
 Jref = INT(tmp*(M3-1),4)+1
 CALL tw_aca_plus(src,N,M3,tol,self%aca_min_its,max_iter,Iref,Jref,U,V,nterms)
 IF(nterms>0)THEN
-  !---Split per direction: B_d ~ U_d V, with U_d the columns of direction d
+  !---Split per direction: B_d ~ BU_d BV, with BU_d = V(:,direction d)^T and the shared BV = U^T
   DO d=1,3
     ALLOCATE(self%aca_BU_mats(isparse,d)%M(M,nterms))
     self%aca_BU_mats(isparse,d)%M=TRANSPOSE(V(:,(d-1)*M+1:d*M))
@@ -1739,82 +1660,6 @@ END IF
 IF(ASSOCIATED(src%one_elem%ielem))DEALLOCATE(src%one_elem%ielem,src%one_elem%icell,src%one_elem%inv_map)
 IF(ASSOCIATED(src%one_pt%ipts))DEALLOCATE(src%one_pt%ipts)
 END SUBROUTINE aca_approx3
-!
-SUBROUTINE compress_aca(isparse,ilevel,iblock,jblock,dim,tol,size_out)
-INTEGER(4), INTENT(in) :: isparse,ilevel,iblock,jblock,dim
-REAL(8), INTENT(in) :: tol
-INTEGER(8), INTENT(out) :: size_out
-INTEGER(4) :: i,j,io_unit
-REAL(8) :: S_sum,frob_K,tol_loc
-INTEGER(4) :: M,N,K,LDA,LDU,LDVT,LWORK,INFO,MIN_DIM
-INTEGER(4), ALLOCATABLE, DIMENSION(:) :: IWORK
-REAL(8), ALLOCATABLE, DIMENSION(:) :: S,WORK
-REAL(8), ALLOCATABLE, DIMENSION(:,:) :: U,VT,Atmp,QU,QV,RU,RV
-!
-! Get QR factorization of U and V matrices
-! WRITE(*,*)'QR U'
-CALL get_qr(self%aca_BU_mats(isparse,dim)%M,QU,RU)
-! WRITE(*,*)'QR VT'
-ALLOCATE(Atmp(SIZE(self%aca_BV_mats(isparse,dim)%M,2),SIZE(self%aca_BV_mats(isparse,dim)%M,1)))
-Atmp = TRANSPOSE(self%aca_BV_mats(isparse,dim)%M)
-CALL get_qr(Atmp,QV,RV)
-DEALLOCATE(Atmp)
-M=SIZE(QU,DIM=1)
-N=SIZE(QV,DIM=1)
-K=SIZE(RU,DIM=1)
-! WRITE(*,*)K
-ALLOCATE(Atmp(K,K))
-CALL DGEMM('N', 'T', K, K, K, 1.d0, RU, K, RV, K, 0.d0, Atmp, K)
-!
-LDA = K
-LDU = K
-MIN_DIM = K !MIN(M,N)
-LDVT = MIN_DIM
-ALLOCATE(S(MIN_DIM),U(LDU,MIN_DIM),VT(LDVT,K))
-!---Get optimal workspace size
-LWORK = -1
-ALLOCATE(WORK(1),IWORK(8*MIN_DIM))
-CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 )THEN
-  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
-END IF
-LWORK = INT(WORK(1))
-DEALLOCATE(WORK)
-!---Compute SVD of matrix block
-ALLOCATE(WORK(LWORK))
-CALL DGESDD('S', K, K, Atmp, LDA, S, U, LDU, VT, LDVT, WORK, LWORK, IWORK, INFO )
-IF( INFO.NE.0 )THEN
-  CALL oft_abort("The algorithm computing SVD failed to converge.","tw_Lmat_MF_setup::compress_aca",__FILE__)
-END IF
-!---Truncate at desired accuracy
-tol_loc = tol!*MAX(1.d0,S(1))
-frob_K=0.d0
-DO i=MIN_DIM,1,-1
-  frob_K = frob_K + S(i)**2
-  IF(SQRT(frob_K)>tol_loc)EXIT
-END DO
-i=MAX(MIN(self%min_rank,MIN_DIM),i)
-IF((i==MIN_DIM).AND.(MIN_DIM>self%min_rank))THEN
-  WRITE(*,'(2A,3ES14.6)')oft_indent,'SVD recompression failed',S(1),S(MIN_DIM),tol_loc
-END IF
-!i=MIN(i,MIN_DIM)
-!---Replace U and V matrices
-DEALLOCATE(self%aca_BU_mats(isparse,dim)%M,self%aca_BV_mats(isparse,dim)%M)
-ALLOCATE(self%aca_BU_mats(isparse,dim)%M(self%levels(ilevel)%blocks(jblock)%np,i))
-ALLOCATE(self%aca_BV_mats(isparse,dim)%M(i,self%levels(ilevel)%blocks(iblock)%nelems))
-! U = UQ.dot(U[:, :r] * S[:r])
-! V = VT[:r, :].dot(VQ.T)
-DO j=1,i
-  U(:,j) = U(:,j)*S(j)
-END DO
-CALL DGEMM('N', 'N', M, i, K, 1.d0, QU, M, U, K, 0.d0, self%aca_BU_mats(isparse,dim)%M, M)
-!self%aca_BU_mats(isparse,dim)%M = MATMUL(QU,U(:,1:i))
-CALL DGEMM('N', 'T', i, N, K, 1.d0, VT, K, QV, N, 0.d0, self%aca_BV_mats(isparse,dim)%M, i)
-!self%aca_BV_mats(isparse,dim)%M = MATMUL(VT(1:i,:),TRANSPOSE(QV))
-size_out=INT(i,8)*INT(M+N,8)
-! WRITE(*,*)'Compressed:',iblock,jblock,i,MIN(M,N)
-DEALLOCATE(WORK,IWORK,S,U,VT,Atmp,QU,QV,RU,RV)
-END SUBROUTINE compress_aca
 END SUBROUTINE tw_hodlr_Bcompute
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -2573,7 +2418,7 @@ DO WHILE(r<MIN_DIM)
   etrail=0.d0
   IF(r<N)etrail=SUM(cn(r+1:N))
 END DO
-IF((etrail>tol**2).OR.(r==0))THEN ! Not compressible below the break-even rank
+IF((etrail>tol**2).OR.(r==0))THEN ! Remaining block above tol after kqr columns: not compressible
   DEALLOCATE(W,perm,cn,cn0,tau,work)
   RETURN
 END IF
@@ -2645,9 +2490,9 @@ END SUBROUTINE tw_aca_set_elem
 !> Row: element `i` of `iblock` against the elements of `jblock`
 !------------------------------------------------------------------------------
 SUBROUTINE tw_aca_Lblock_row(self,i,vec)
-CLASS(tw_aca_Lblock), INTENT(inout) :: self
-INTEGER(4), INTENT(in) :: i
-REAL(8), INTENT(out) :: vec(:)
+CLASS(tw_aca_Lblock), INTENT(inout) :: self !< Block source
+INTEGER(4), INTENT(in) :: i !< Row (element of `iblock`)
+REAL(8), INTENT(out) :: vec(:) !< Row of the block [ncols]
 INTEGER(4) :: n
 n=SIZE(vec)
 CALL tw_aca_set_elem(self%op%tw_obj,self%one,self%op%levels(self%ilevel)%blocks(self%iblock),i)
@@ -2659,9 +2504,9 @@ END SUBROUTINE tw_aca_Lblock_row
 !> Column: element `j` of `jblock` against the elements of `iblock`
 !------------------------------------------------------------------------------
 SUBROUTINE tw_aca_Lblock_col(self,i,vec)
-CLASS(tw_aca_Lblock), INTENT(inout) :: self
-INTEGER(4), INTENT(in) :: i
-REAL(8), INTENT(out) :: vec(:)
+CLASS(tw_aca_Lblock), INTENT(inout) :: self !< Block source
+INTEGER(4), INTENT(in) :: i !< Column (element of `jblock`)
+REAL(8), INTENT(out) :: vec(:) !< Column of the block [nrows]
 INTEGER(4) :: n
 n=SIZE(vec)
 CALL tw_aca_set_elem(self%op%tw_obj,self%one,self%op%levels(self%ilevel)%blocks(self%jblock),i)
@@ -2673,9 +2518,9 @@ END SUBROUTINE tw_aca_Lblock_col
 !> Row: field of element `i` of `iblock` at all points of `jblock`, stacked over the three directions
 !------------------------------------------------------------------------------
 SUBROUTINE tw_aca_B3block_row(self,i,vec)
-CLASS(tw_aca_B3block), INTENT(inout) :: self
-INTEGER(4), INTENT(in) :: i
-REAL(8), INTENT(out) :: vec(:)
+CLASS(tw_aca_B3block), INTENT(inout) :: self !< Block source
+INTEGER(4), INTENT(in) :: i !< Row (element of `iblock`)
+REAL(8), INTENT(out) :: vec(:) !< Row of the block [ncols]
 INTEGER(4) :: d,M
 REAL(8), ALLOCATABLE :: B3(:,:,:)
 M=self%op%levels(self%ilevel)%blocks(self%jblock)%np
@@ -2694,9 +2539,9 @@ END SUBROUTINE tw_aca_B3block_row
 !! All three directions are computed together and kept, so the other directions of the same point are free.
 !------------------------------------------------------------------------------
 SUBROUTINE tw_aca_B3block_col(self,i,vec)
-CLASS(tw_aca_B3block), INTENT(inout) :: self
-INTEGER(4), INTENT(in) :: i
-REAL(8), INTENT(out) :: vec(:)
+CLASS(tw_aca_B3block), INTENT(inout) :: self !< Block source
+INTEGER(4), INTENT(in) :: i !< Stacked column (point and direction)
+REAL(8), INTENT(out) :: vec(:) !< Column of the block [nrows]
 INTEGER(4) :: M,N,p
 REAL(8), ALLOCATABLE :: B3(:,:,:),tmp(:,:,:)
 M=self%op%levels(self%ilevel)%blocks(self%jblock)%np
@@ -2728,9 +2573,11 @@ END SUBROUTINE tw_aca_B3block_col
 !> Kernel between cells `jc` (target) and `ic` (source)
 !------------------------------------------------------------------------------
 FUNCTION tw_aca_cell_kernel(mesh,jc,ic) RESULT(val)
-CLASS(oft_bmesh), INTENT(in) :: mesh
-INTEGER(4), INTENT(in) :: jc,ic
-REAL(8) :: val,pi_(3,3),pj_(3,3)
+CLASS(oft_bmesh), INTENT(in) :: mesh !< Mesh
+INTEGER(4), INTENT(in) :: jc !< Target cell
+INTEGER(4), INTENT(in) :: ic !< Source cell
+REAL(8) :: val !< Cell-pair kernel (@ref thin_wall::tw_cell_pair_kernel "tw_cell_pair_kernel")
+REAL(8) :: pi_(3,3),pj_(3,3)
 INTEGER(4) :: m
 DO m=1,3
   pi_(:,m)=mesh%r(:,mesh%lc(m,ic))
@@ -2742,9 +2589,9 @@ END FUNCTION tw_aca_cell_kernel
 !> Row: row cell `i` against all column cells
 !------------------------------------------------------------------------------
 SUBROUTINE tw_aca_cellblock_row(self,i,vec)
-CLASS(tw_aca_cellblock), INTENT(inout) :: self
-INTEGER(4), INTENT(in) :: i
-REAL(8), INTENT(out) :: vec(:)
+CLASS(tw_aca_cellblock), INTENT(inout) :: self !< Block source
+INTEGER(4), INTENT(in) :: i !< Row (index in `rcells`)
+REAL(8), INTENT(out) :: vec(:) !< Row of the block [ncols]
 INTEGER(4) :: j
 DO j=1,SIZE(self%ccells)
   vec(j)=tw_aca_cell_kernel(self%mesh,self%rcells(i),self%ccells(j))
@@ -2754,9 +2601,9 @@ END SUBROUTINE tw_aca_cellblock_row
 !> Column: all row cells against column cell `i`
 !------------------------------------------------------------------------------
 SUBROUTINE tw_aca_cellblock_col(self,i,vec)
-CLASS(tw_aca_cellblock), INTENT(inout) :: self
-INTEGER(4), INTENT(in) :: i
-REAL(8), INTENT(out) :: vec(:)
+CLASS(tw_aca_cellblock), INTENT(inout) :: self !< Block source
+INTEGER(4), INTENT(in) :: i !< Column (index in `ccells`)
+REAL(8), INTENT(out) :: vec(:) !< Column of the block [nrows]
 INTEGER(4) :: j
 DO j=1,SIZE(self%rcells)
   vec(j)=tw_aca_cell_kernel(self%mesh,self%rcells(j),self%ccells(i))
@@ -2802,6 +2649,65 @@ CALL DORGQR( M, N, N, Q, M, TAU, WORK, LWORK, INFO )
 IF(INFO/=0)CALL oft_abort("QR factorization failed","tw_Lmat_MF_setup::get_qr",__FILE__)
 DEALLOCATE(WORK,TAU)
 END SUBROUTINE get_qr
+!------------------------------------------------------------------------------
+!> Recompress a low-rank factorization \f$ U V \f$ (from ACA+) with the SVD truncation rule
+!!
+!! QR factorizations \f$ U = Q_U R_U \f$, \f$ V^T = Q_V R_V \f$ and an SVD of the small core \f$ R_U R_V^T \f$; the
+!! factors are replaced by those of the smallest rank whose discarded singular values have a Frobenius norm below
+!! `tol` (at least `min_rank`), with the singular values included in U.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_lowrank_recompress(Umat,Vmat,tol,min_rank,warn_rank,size_out)
+TYPE(oft_native_dense_matrix), INTENT(inout) :: Umat !< Left factor [M,k], replaced by [M,rank]
+TYPE(oft_native_dense_matrix), INTENT(inout) :: Vmat !< Right factor [k,N], replaced by [rank,N]
+REAL(8), INTENT(in) :: tol !< Absolute tolerance on the Frobenius norm of the discarded part
+INTEGER(4), INTENT(in) :: min_rank !< Minimum rank to keep
+INTEGER(4), INTENT(in) :: warn_rank !< Warn if the rank is not reduced and k is above this
+INTEGER(8), INTENT(out) :: size_out !< Size of the new factors, rank*(M+N)
+INTEGER(4) :: i,j,M,N,K,LWORK,INFO
+INTEGER(4), ALLOCATABLE, DIMENSION(:) :: IWORK
+REAL(8) :: frob_K
+REAL(8), ALLOCATABLE, DIMENSION(:) :: S,WORK
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: U,VT,Atmp,QU,QV,RU,RV
+!---QR factorizations of U and V^T
+CALL get_qr(Umat%M,QU,RU)
+ALLOCATE(Atmp(SIZE(Vmat%M,2),SIZE(Vmat%M,1)))
+Atmp=TRANSPOSE(Vmat%M)
+CALL get_qr(Atmp,QV,RV)
+DEALLOCATE(Atmp)
+M=SIZE(QU,DIM=1)
+N=SIZE(QV,DIM=1)
+K=SIZE(RU,DIM=1)
+ALLOCATE(Atmp(K,K))
+CALL DGEMM('N','T',K,K,K,1.d0,RU,K,RV,K,0.d0,Atmp,K)
+!---SVD of the core
+ALLOCATE(S(K),U(K,K),VT(K,K),WORK(1),IWORK(8*K))
+LWORK=-1
+CALL DGESDD('S',K,K,Atmp,K,S,U,K,VT,K,WORK,LWORK,IWORK,INFO)
+IF(INFO/=0)CALL oft_abort("The algorithm computing SVD failed to converge.","tw_lowrank_recompress",__FILE__)
+LWORK=INT(WORK(1))
+DEALLOCATE(WORK)
+ALLOCATE(WORK(LWORK))
+CALL DGESDD('S',K,K,Atmp,K,S,U,K,VT,K,WORK,LWORK,IWORK,INFO)
+IF(INFO/=0)CALL oft_abort("The algorithm computing SVD failed to converge.","tw_lowrank_recompress",__FILE__)
+!---Truncate at desired accuracy
+frob_K=0.d0
+DO i=K,1,-1
+  frob_K=frob_K+S(i)**2
+  IF(SQRT(frob_K)>tol)EXIT
+END DO
+i=MAX(MIN(min_rank,K),i)
+IF((i==K).AND.(K>warn_rank))WRITE(*,'(2A,3ES14.6)')oft_indent,'SVD recompression failed',S(1),S(K),tol
+!---Replace U and V: U = Q_U U_r S_r, V = VT_r Q_V^T
+DEALLOCATE(Umat%M,Vmat%M)
+ALLOCATE(Umat%M(M,i),Vmat%M(i,N))
+DO j=1,i
+  U(:,j)=U(:,j)*S(j)
+END DO
+CALL DGEMM('N','N',M,i,K,1.d0,QU,M,U,K,0.d0,Umat%M,M)
+CALL DGEMM('N','T',i,N,K,1.d0,VT,K,QV,N,0.d0,Vmat%M,i)
+size_out=INT(i,8)*INT(M+N,8)
+DEALLOCATE(WORK,IWORK,S,U,VT,Atmp,QU,QV,RU,RV)
+END SUBROUTINE tw_lowrank_recompress
 !------------------------------------------------------------------------------
 !> Precondition a linear system using a Block-Jacobi method (complex)
 !!

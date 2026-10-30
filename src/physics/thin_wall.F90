@@ -209,11 +209,12 @@ CONTAINS
   PROCEDURE(tw_aca_vector), DEFERRED :: col
 END TYPE tw_aca_source
 ABSTRACT INTERFACE
+  !> Row or column `i` of an ACA+ block
   SUBROUTINE tw_aca_vector(self,i,vec)
     IMPORT :: tw_aca_source
-    CLASS(tw_aca_source), INTENT(inout) :: self
-    INTEGER(4), INTENT(in) :: i
-    REAL(8), INTENT(out) :: vec(:)
+    CLASS(tw_aca_source), INTENT(inout) :: self !< Block source
+    INTEGER(4), INTENT(in) :: i !< Row or column index
+    REAL(8), INTENT(out) :: vec(:) !< Row [ncols] or column [nrows] of the block
   END SUBROUTINE tw_aca_vector
 END INTERFACE
 CONTAINS
@@ -2497,7 +2498,8 @@ REAL(8), INTENT(in) :: rma !< \f$ |r_a| \f$
 REAL(8), INTENT(in) :: rmb !< \f$ |r_b| \f$
 REAL(8), INTENT(in) :: e(3) !< Edge vector, rb-ra
 REAL(8), INTENT(in) :: elen !< Edge length
-REAL(8) :: val,sa,sb,num,den
+REAL(8) :: val !< Line integral (0 for points on the edge)
+REAL(8) :: sa,sb,num,den
 sa=SUM(ra*e)/elen
 sb=SUM(rb*e)/elen
 IF(sa+sb>=0.d0)THEN
@@ -2517,7 +2519,8 @@ END FUNCTION tw_edge_lineint
 !! Builds \f$ K \approx U V \f$ one rank-1 term at a time, each from a residual row and column chosen by partial
 !! pivoting against a reference row and column. Stops once the Frobenius norm of the latest term is below `tol`
 !! (or below `tol` times the estimated norm of the approximation, with `rel_tol`) after at least `min_its` terms.
-!! Fails (`nterms=-1`) if `max_iter-1` terms are reached first.
+!! Fails (`nterms=-1`) if `max_iter-1` terms are reached first. `max_iter` is limited to `MIN(nrows,ncols)+1`, so
+!! every term has an unused pivot row and column.
 !------------------------------------------------------------------------------
 SUBROUTINE tw_aca_plus(src,nrows,ncols,tol,min_its,max_iter,Iref_in,Jref_in,U,V,nterms,rel_tol)
 CLASS(tw_aca_source), INTENT(inout) :: src !< Rows and columns of the block
@@ -2532,14 +2535,19 @@ REAL(8), ALLOCATABLE, INTENT(out) :: U(:,:) !< Left factor (residual columns) [n
 REAL(8), ALLOCATABLE, INTENT(out) :: V(:,:) !< Right factor (scaled residual rows) [nterms,ncols]
 INTEGER(4), INTENT(out) :: nterms !< Number of terms (-1 if not converged)
 LOGICAL, OPTIONAL, INTENT(in) :: rel_tol !< Is `tol` relative to the norm of the approximation?
-INTEGER(4) :: Iref,Jref,Istar,Jstar,i,k
+INTEGER(4) :: Iref,Jref,Istar,Jstar,i,k,kmax
 LOGICAL :: rel
 REAL(8) :: step_size,Istar_val,Jstar_val,fro2
 REAL(8), ALLOCATABLE :: us(:,:),vs(:,:),RIstar(:),RJstar(:),RIref(:),RJref(:)
 LOGICAL, ALLOCATABLE :: prevIstar(:),prevJstar(:)
 rel=.FALSE.
 IF(PRESENT(rel_tol))rel=rel_tol
-ALLOCATE(us(nrows,max_iter),vs(max_iter,ncols))
+kmax=MIN(max_iter,MIN(nrows,ncols)+1)
+IF(kmax<2)THEN
+  nterms=-1
+  RETURN
+END IF
+ALLOCATE(us(nrows,kmax),vs(kmax,ncols))
 us=0.d0
 vs=0.d0
 nterms=0
@@ -2553,7 +2561,7 @@ Jref=Jref_in
 CALL src%row(Iref,RIref)
 CALL src%col(Jref,RJref)
 step_size=-1.d0
-DO k=1,max_iter
+DO k=1,kmax
   !---Pivot candidates from the reference column and row
   Jstar=tw_max_masked(ABS(RIref),prevJstar)
   Istar=tw_max_masked(ABS(RJref),prevIstar)
@@ -2599,7 +2607,7 @@ DO k=1,max_iter
   ELSE
     IF((k>=min_its).AND.(step_size<tol))EXIT
   END IF
-  IF(k==max_iter-1)THEN
+  IF(k==kmax-1)THEN
     step_size=-1.d0
     EXIT
   END IF
@@ -2643,8 +2651,9 @@ END SUBROUTINE tw_aca_plus
 FUNCTION tw_max_masked(vals,mask) RESULT(iloc)
 REAL(8), INTENT(in) :: vals(:) !< Values
 LOGICAL, INTENT(in) :: mask(:) !< Candidates
+INTEGER(4) :: iloc !< Index of the largest candidate value (0 if no entry of `mask` is set)
 REAL(8) :: max_tmp
-INTEGER(4) :: i,iloc
+INTEGER(4) :: i
 max_tmp=-1.d99
 iloc=0
 DO i=1,SIZE(vals)
@@ -2663,7 +2672,7 @@ END FUNCTION tw_max_masked
 FUNCTION tw_compute_phigrad(pt_cell,pt) RESULT(grad)
 REAL(8), INTENT(in) :: pt_cell(3,3) !< Vertices defining triangle
 REAL(8), INTENT(in) :: pt(3) !< Observation point (r)
-REAL(8) :: grad(3)
+REAL(8) :: grad(3) !< Gradient of the potential with respect to `pt`
 REAL(8) :: nhat(3),a(3),b(3),r(3,3),rmag(3),e(3),elen,num,den
 INTEGER(4) :: i,ip
 DEBUG_STACK_PUSH
