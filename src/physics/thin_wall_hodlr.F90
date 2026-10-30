@@ -63,6 +63,9 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
   LOGICAL :: pre_single = .FALSE. !< Compute, store, and apply block-Jacobi preconditioners in single precision?
   LOGICAL :: pre_coarse = .FALSE. !< Add a global coarse correction to block-Jacobi preconditioners (two-level preconditioner)?
+  INTEGER(4) :: pre_neigs = 0 !< Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires pre_coarse and ARPACK)
+  INTEGER(4) :: pre_evecs_hash = 0 !< Hash of the resistance matrix used for `pre_evecs`
+  REAL(r8), POINTER, DIMENSION(:,:) :: pre_evecs => NULL() !< Slowest L/R eigenmodes for the coarse space, kept between runs [nelems,:]
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: sparse_blocks => NULL() !< Indices of compressed off-diagonal interactions
   INTEGER(4), POINTER, DIMENSION(:,:) :: L_thread_ptr => NULL()
@@ -134,9 +137,12 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   INTEGER(4) :: coarse_order = 1 !< Polynomial order of the coarse space on each block (1 or 2)
   INTEGER(4) :: max_block_size = 0
   INTEGER(4) :: nz = 0 !< Number of coarse vectors
-  INTEGER(4), POINTER, DIMENSION(:) :: z_block => NULL() !< Dense block of each coarse vector (0: unit vector)
-  INTEGER(4), POINTER, DIMENSION(:) :: z_unit => NULL() !< Element of each unit coarse vector
+  INTEGER(4), POINTER, DIMENSION(:) :: z_block => NULL() !< Dense block of each coarse vector (0: unit vector, -k: global vector k in z_gvals)
+  INTEGER(4), POINTER, DIMENSION(:) :: z_unit => NULL() !< Element of each unit coarse vector (0 for block and global vectors)
   REAL(r8), POINTER, DIMENSION(:,:) :: z_vals => NULL() !< Values of each block coarse vector on its block
+  REAL(r8), POINTER, DIMENSION(:,:) :: z_glob => NULL() !< Global vectors to add to the coarse space [nelems,:] (optional, not owned)
+  REAL(r8), POINTER, DIMENSION(:,:) :: z_gvals => NULL() !< Values of each global coarse vector [nelems_exp,:]
+  INTEGER(4) :: nzg = 0 !< Number of global coarse vectors (the last `nzg` of the `nz`, columns of `z_gvals`)
   REAL(r8), POINTER, DIMENSION(:,:) :: zlz => NULL() !< Z^T L Z
   REAL(r8), POINTER, DIMENSION(:,:) :: zrz => NULL() !< Z^T R Z
   REAL(r8), POINTER, DIMENSION(:,:) :: einv => NULL() !< (Z^T (alpha*L + beta*R) Z)^-1
@@ -665,8 +671,9 @@ REAL(8) :: B_svd_tol = -1.d99
 REAL(8) :: B_aca_rel_tol = -1.d0
 LOGICAL :: pre_single = .FALSE.
 LOGICAL :: pre_coarse = .FALSE.
+INTEGER(4) :: pre_neigs = 0
 NAMELIST/thincurr_hodlr_options/target_size,min_rank,aca_min_its,aca_sep_thresh,L_svd_tol, &
-  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse
+  L_aca_rel_tol,B_svd_tol,B_aca_rel_tol,pre_single,pre_coarse,pre_neigs
 !
 IF(self%tw_obj%kpmap_inv(self%tw_obj%np_active+1)/=self%tw_obj%np_active+1)THEN
   WRITE(*,*)self%tw_obj%kpmap_inv(self%tw_obj%np_active+1),self%tw_obj%np_active+1
@@ -698,6 +705,7 @@ self%aca_min_its=aca_min_its
 self%aca_sep_thresh=aca_sep_thresh
 self%pre_single=pre_single
 self%pre_coarse=pre_coarse
+self%pre_neigs=pre_neigs
 !
 L_approx_scale = 0.5d0*self%tw_obj%mesh%hrms
 IF(L_svd_tol<0.d0)THEN
@@ -3133,15 +3141,17 @@ END SUBROUTINE rbjprecond_apply
 !!
 !! On each diagonal (leaf) block: a constant and the three coordinates of the element positions, orthonormalised
 !! on the block (directions the block does not span are dropped); and a unit vector for each hole and V-coil.
-!! These are the smooth, long-range current patterns block-Jacobi cannot represent.
+!! These are the smooth, long-range current patterns block-Jacobi cannot represent. The global vectors in `z_glob`
+!! (e.g. the slowest L/R eigenmodes), if present, are added after orthonormalisation against the rest of the space.
 !!
 !! The vectors are defined on the element indices of the blocks. For meshes split at junctions these are the
 !! expanded elements, and the coarse space is \f$ Z = P^T Z_{exp} \f$: each vector is reduced before the L and R
-!! products, and the products are expanded before the projection, so that \f$ Z^T A Z \f$ is exact.
+!! products, and the products are expanded before the projection, so that \f$ Z^T A Z \f$ is exact. The global
+!! vectors are the exception: they are given on the model unknowns and expanded with the right inverse of \f$ P^T \f$.
 !------------------------------------------------------------------------------
 SUBROUTINE rbjprecond_coarse_setup(self)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
-INTEGER(4) :: i,j,k,m,c,n,level,iblock,nmax,nunit,nfun
+INTEGER(4) :: i,j,k,m,c,n,level,iblock,nmax,nunit,nfun,nglob
 REAL(r8) :: nrm,nrm0,cen(3),ext
 REAL(r8), ALLOCATABLE :: zb(:,:)
 REAL(8), POINTER, DIMENSION(:) :: vals,wvals
@@ -3156,7 +3166,9 @@ DO i=1,self%mf_obj%ndense
 END DO
 nfun=4
 IF(self%coarse_order>1)nfun=10
-ALLOCATE(self%z_block(nfun*self%mf_obj%ndense+nunit),self%z_unit(nfun*self%mf_obj%ndense+nunit))
+nglob=0
+IF(ASSOCIATED(self%z_glob))nglob=SIZE(self%z_glob,DIM=2)
+ALLOCATE(self%z_block(nfun*self%mf_obj%ndense+nunit+nglob),self%z_unit(nfun*self%mf_obj%ndense+nunit+nglob))
 ALLOCATE(self%z_vals(nmax,nfun*self%mf_obj%ndense+nunit),zb(nmax,nfun))
 self%z_vals=0.d0
 c=0
@@ -3204,7 +3216,40 @@ DO j=1,nunit
   self%z_unit(c)=tw%np_active+j
 END DO
 self%nz=c
+self%nzg=0
 DEALLOCATE(zb)
+!---Global vectors, orthonormalised against the block/unit vectors (orthonormal) and each other
+IF(nglob>0)THEN
+  ALLOCATE(self%z_gvals(tw_nelems_exp(tw),nglob),zb(self%nz+nglob,1))
+  k=0
+  DO m=1,nglob
+    !---Global vectors are given on the model unknowns; on junction meshes they are expanded with the right inverse
+    !   of P^T (z = P (P^T P)^-1 x), so that P^T z = x before orthonormalisation
+    IF(ASSOCIATED(tw%junc))THEN
+      CALL junction_right_inverse(self%z_glob(:,m),self%z_gvals(:,k+1))
+    ELSE
+      self%z_gvals(:,k+1)=self%z_glob(:,m)
+    END IF
+    nrm0=SQRT(SUM(self%z_gvals(:,k+1)**2))
+    IF(nrm0<=0.d0)CYCLE
+    DO j=1,2
+      CALL rbjprecond_coarse_restrict(self,self%z_gvals(:,k+1),zb(1:self%nz,1))
+      DO i=1,self%nz
+        CALL rbjprecond_coarse_expand(self,i,-zb(i,1),self%z_gvals(:,k+1))
+      END DO
+    END DO
+    nrm=SQRT(SUM(self%z_gvals(:,k+1)**2))
+    IF(nrm>1.d-6*nrm0)THEN
+      self%z_gvals(:,k+1)=self%z_gvals(:,k+1)/nrm
+      k=k+1
+      self%nz=self%nz+1
+      self%nzg=k
+      self%z_block(self%nz)=-k
+      self%z_unit(self%nz)=0
+    END IF
+  END DO
+  DEALLOCATE(zb)
+END IF
 !---Z^T L Z and Z^T R Z, one L and R product per coarse vector
 ALLOCATE(self%zlz(self%nz,self%nz),self%zrz(self%nz,self%nz))
 CALL tw%Uloc%new(zvec)
@@ -3245,17 +3290,50 @@ ELSE
   CALL rbjprecond_coarse_restrict(self,wvals,zw)
 END IF
 END SUBROUTINE coarse_project
+!---Expanded vector z = P (P^T P)^-1 x, so that P^T z = x (Jacobi-preconditioned CG on P^T P, which is sparse and SPD;
+!   it is not diagonal, as hole and junction unknowns span many elements)
+SUBROUTINE junction_right_inverse(x,z)
+REAL(r8), INTENT(in) :: x(:) !< Vector on the model unknowns [nelems]
+REAL(r8), INTENT(out) :: z(:) !< Expanded vector [nelems_exp]
+INTEGER(4) :: it,kk
+REAL(r8) :: rz,rzold,alf,xnrm
+REAL(r8), ALLOCATABLE :: d(:),y(:),r(:),pv(:),ap(:),zr(:)
+ALLOCATE(d(tw%nelems),y(tw%nelems),r(tw%nelems),pv(tw%nelems),ap(tw%nelems),zr(tw%nelems))
+!---Jacobi preconditioner, diag(P^T P)
+d=0.d0
+DO kk=1,tw%junc%p_kr(tw%junc%nelems_exp+1)-1
+  d(tw%junc%p_lc(kk))=d(tw%junc%p_lc(kk))+tw%junc%p_val(kk)**2
+END DO
+WHERE(d<=0.d0)d=1.d0
+xnrm=SQRT(SUM(x**2))
+y=0.d0; r=x
+zr=r/d; pv=zr; rz=DOT_PRODUCT(r,zr)
+DO it=1,1000
+  IF(SQRT(SUM(r**2))<=1.d-12*xnrm)EXIT
+  CALL tw_junction_expand(tw,pv,z)
+  CALL tw_junction_reduce_vec(tw,z,ap)
+  alf=rz/DOT_PRODUCT(pv,ap)
+  y=y+alf*pv; r=r-alf*ap
+  zr=r/d; rzold=rz; rz=DOT_PRODUCT(r,zr)
+  pv=zr+(rz/rzold)*pv
+END DO
+IF(SQRT(SUM(r**2))>1.d-12*xnrm)CALL oft_warn('Junction expansion of a global coarse vector did not converge')
+CALL tw_junction_expand(tw,y,z)
+DEALLOCATE(d,y,r,pv,ap,zr)
+END SUBROUTINE junction_right_inverse
 END SUBROUTINE rbjprecond_coarse_setup
 !------------------------------------------------------------------------------
 !> Add a*z_c to an element vector
 !------------------------------------------------------------------------------
 SUBROUTINE rbjprecond_coarse_expand(self,c,a,vals)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
-INTEGER(4), INTENT(in) :: c !< Coarse vector
+INTEGER(4), INTENT(in) :: c !< Index of the coarse vector
 REAL(r8), INTENT(in) :: a !< Coefficient
-REAL(r8), INTENT(inout) :: vals(:) !< Element vector
+REAL(r8), INTENT(inout) :: vals(:) !< Element vector [nelems_exp]
 INTEGER(4) :: j,level,iblock
-IF(self%z_block(c)==0)THEN
+IF(self%z_block(c)<0)THEN
+  vals=vals+a*self%z_gvals(:,-self%z_block(c))
+ELSE IF(self%z_block(c)==0)THEN
   vals(self%z_unit(c))=vals(self%z_unit(c))+a
 ELSE
   level=self%mf_obj%dense_blocks(1,self%z_block(c))
@@ -3271,10 +3349,10 @@ END SUBROUTINE rbjprecond_coarse_expand
 !------------------------------------------------------------------------------
 SUBROUTINE rbjprecond_coarse_restrict(self,v,w)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
-REAL(r8), INTENT(in) :: v(:) !< Element vector
-REAL(r8), INTENT(out) :: w(:) !< Coarse vector [nz]
+REAL(r8), CONTIGUOUS, INTENT(in) :: v(:) !< Element vector [nelems_exp]
+REAL(r8), CONTIGUOUS, INTENT(out) :: w(:) !< Coarse vector [nz]
 INTEGER(4) :: c,j,level,iblock
-DO c=1,self%nz
+DO c=1,self%nz-self%nzg
   IF(self%z_block(c)==0)THEN
     w(c)=v(self%z_unit(c))
   ELSE
@@ -3286,22 +3364,28 @@ DO c=1,self%nz
     END DO
   END IF
 END DO
+!---Global vectors together: w_g = Z_g^T v
+IF(self%nzg>0)CALL dgemv('T',SIZE(self%z_gvals,1),self%nzg,1.d0,self%z_gvals,SIZE(self%z_gvals,1), &
+  v,1,0.d0,w(self%nz-self%nzg+1),1)
 END SUBROUTINE rbjprecond_coarse_restrict
 !------------------------------------------------------------------------------
 !> Add the coarse correction u += Z (Z^T A Z)^-1 Z^T g
 !------------------------------------------------------------------------------
 SUBROUTINE rbjprecond_coarse_apply(self,g,u)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(in) :: self !< Solver object
-REAL(r8), INTENT(in) :: g(:) !< Residual
-REAL(r8), INTENT(inout) :: u(:) !< Preconditioned residual
+REAL(r8), CONTIGUOUS, INTENT(in) :: g(:) !< Residual [nelems_exp]
+REAL(r8), CONTIGUOUS, INTENT(inout) :: u(:) !< Preconditioned residual [nelems_exp]
 INTEGER(4) :: c
 REAL(r8), ALLOCATABLE :: w(:),y(:)
 ALLOCATE(w(self%nz),y(self%nz))
 CALL rbjprecond_coarse_restrict(self,g,w)
 CALL dgemv('N',self%nz,self%nz,1.d0,self%einv,self%nz,w,1,0.d0,y,1)
-DO c=1,self%nz
+DO c=1,self%nz-self%nzg
   CALL rbjprecond_coarse_expand(self,c,y(c),u)
 END DO
+!---Global vectors together: u += Z_g y_g
+IF(self%nzg>0)CALL dgemv('N',SIZE(self%z_gvals,1),self%nzg,1.d0,self%z_gvals,SIZE(self%z_gvals,1), &
+  y(self%nz-self%nzg+1),1,1.d0,u,1)
 DEALLOCATE(w,y)
 END SUBROUTINE rbjprecond_coarse_apply
 !------------------------------------------------------------------------------
@@ -3321,6 +3405,8 @@ IF(ASSOCIATED(self%inverse_mats))THEN
   DEALLOCATE(self%inverse_mats)
 END IF
 IF(ASSOCIATED(self%z_block))DEALLOCATE(self%z_block,self%z_unit,self%z_vals)
+NULLIFY(self%z_glob) ! Not owned
+IF(ASSOCIATED(self%z_gvals))DEALLOCATE(self%z_gvals)
 IF(ASSOCIATED(self%zlz))DEALLOCATE(self%zlz,self%zrz)
 IF(ASSOCIATED(self%einv))DEALLOCATE(self%einv)
 self%nz=0

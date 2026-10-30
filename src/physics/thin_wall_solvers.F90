@@ -13,12 +13,12 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 MODULE thin_wall_solvers
+USE, INTRINSIC :: iso_c_binding, ONLY: c_loc
 USE oft_base
 USE oft_sort, ONLY: sort_array
 USE oft_io, ONLY: oft_bin_file, hdf5_add_string_attribute
 !
-USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_matrix, oft_graph, &
-  vector_extrapolate
+USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_matrix, oft_graph
 USE oft_lu, ONLY: oft_lusolver, lapack_matinv, lapack_cholesky
 USE oft_native_la, ONLY: oft_native_dense_matrix, oft_native_dense_cmatrix
 USE oft_deriv_matrices, ONLY: oft_sum_matrix, oft_sum_cmatrix
@@ -224,6 +224,54 @@ CALL oft_abort("Iterative eigenvalue solve requires ARPACK", "lr_eigenmodes_arpa
 DEBUG_STACK_POP
 END SUBROUTINE lr_eigenmodes_arpack
 !---------------------------------------------------------------------------------
+!> Slowest L/R eigenmodes for the coarse space of the two-level preconditioner (`pre_neigs`)
+!!
+!! The eigenmodes depend only on L and R, so they are kept on the HODLR operator (`pre_evecs`) and reused by later
+!! runs until `pre_neigs` or the resistance matrix changes. Requires ARPACK; the count is limited by the model size.
+!---------------------------------------------------------------------------------
+SUBROUTINE tw_hodlr_pre_eigenmodes(self,hodlr_op)
+TYPE(tw_type), TARGET, INTENT(in) :: self !< ThinCurr object
+TYPE(oft_tw_hodlr_op), TARGET, INTENT(inout) :: hodlr_op !< HODLR L matrix
+INTEGER(4) :: neigs,rhash,i
+REAL(8), ALLOCATABLE, DIMENSION(:) :: eig_tmp
+CHARACTER(LEN=120) :: msg
+#ifdef HAVE_ARPACK
+neigs=hodlr_op%pre_neigs
+!---ARPACK needs a Ritz space of 2*neigs+1 vectors
+IF(2*neigs+1>self%nelems)THEN
+  neigs=(self%nelems-1)/2
+  WRITE(msg,'(A,I8,A)')'"pre_neigs" too large for the model, reduced to ',neigs, &
+    ' (consider a direct solve for a model this small)'
+  CALL oft_warn(msg)
+END IF
+IF(neigs<1)RETURN
+IF(neigs>50)CALL oft_warn('Large "pre_neigs": the eigenmode solve and coarse space cost grow with the number of modes')
+rhash=oft_simple_hash(C_LOC(self%Rmat%M),INT(8*SIZE(self%Rmat%M),8),starting_value=neigs)
+IF(ASSOCIATED(hodlr_op%pre_evecs))THEN
+  IF((SIZE(hodlr_op%pre_evecs,2)==neigs).AND.(hodlr_op%pre_evecs_hash==rhash))THEN
+    WRITE(*,'(2A)')oft_indent,'Reusing L/R eigenmodes for the coarse space'
+    RETURN
+  END IF
+  DEALLOCATE(hodlr_op%pre_evecs)
+END IF
+ALLOCATE(hodlr_op%pre_evecs(self%nelems,neigs),eig_tmp(neigs))
+hodlr_op%pre_evecs=0.d0
+CALL lr_eigenmodes_arpack(self,neigs,eig_tmp,hodlr_op%pre_evecs,hodlr_op=hodlr_op)
+DEALLOCATE(eig_tmp)
+!---Eigenvectors are left at zero if ARPACK fails
+DO i=1,neigs
+  IF(MAXVAL(ABS(hodlr_op%pre_evecs(:,i)))<=0.d0)THEN
+    CALL oft_warn('L/R eigenmode solve failed, continuing without eigenmodes in the coarse space')
+    DEALLOCATE(hodlr_op%pre_evecs)
+    RETURN
+  END IF
+END DO
+hodlr_op%pre_evecs_hash=rhash
+#else
+CALL oft_warn('"pre_neigs" requires ARPACK, continuing without eigenmodes in the coarse space')
+#endif
+END SUBROUTINE tw_hodlr_pre_eigenmodes
+!---------------------------------------------------------------------------------
 !> Compute frequency response of a ThinCurr model to given driver voltages
 !!
 !! Solves \f$ (i \omega L + R) I = V \f$ for the complex currents \f$ I \f$, where
@@ -399,7 +447,7 @@ TYPE(oft_tw_hodlr_op), TARGET, OPTIONAL, INTENT(inout) :: hodlr_op !< HODLR L ma
 INTEGER(4) :: i,j,k,ntimes_curr,ntimes_volt,ncols,itime,io_unit,neta,face,info,ind1,nits,int_inds(2)
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: its_hist
 REAL(8) :: uu,t,tmp,area,p2,p1,val_prev,dt,dt_old,dt_op,int_facs(2),elapsed_time
-REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist
+REAL(8), ALLOCATABLE, DIMENSION(:) :: icoil_curr,icoil_dcurr,pcoil_volt,senout,jumpout,eta_check,time_hist,proj_c
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: cc_vals
 REAL(8), POINTER, DIMENSION(:) :: vals
 CLASS(oft_vector), POINTER :: u,g,up
@@ -414,10 +462,11 @@ LOGICAL :: exists,volt_full,pm_save
 CHARACTER(LEN=4) :: pltnum
 CHARACTER(LEN=15) :: fmt_str
 CHARACTER(LEN=OFT_SLEN) :: hole_jumper_name,rst_file
-!---Extrapolation fields
-integer(i4) :: nextrap,maxextrap
-real(r8), allocatable, dimension(:) :: extrapt
-type(oft_vector_ptr), allocatable, dimension(:) :: extrap_fields
+!---Projection initial guess fields
+integer(i4) :: nproj,maxproj,iproj
+real(r8), pointer, dimension(:) :: pvals
+real(r8), allocatable, target, dimension(:,:) :: proj_x,proj_ax,proj_q,proj_aq
+CLASS(oft_vector), POINTER :: vtmp,vtmp2
 WRITE(*,*)
 WRITE(*,'(2A)')oft_indent,'Starting time-domain simulation'
 CALL oft_increase_indent
@@ -485,6 +534,7 @@ ELSE
   dt_op = dt
 END IF
 !---Setup timestep solvers
+maxproj=0
 IF(.NOT.direct)THEN
   !---Setup forward matrix wrapper
   fmat%nr=self%nelems; fmat%nc=self%nelems
@@ -506,21 +556,26 @@ IF(.NOT.direct)THEN
     linv_pre%alpha=1.d0
     linv_pre%beta=fmat%alam
     linv%pre=>linv_pre
+    !---Slowest L/R eigenmodes for the coarse space of the two-level preconditioner
+    IF(hodlr_op%pre_coarse.AND.(hodlr_op%pre_neigs>0))THEN
+      CALL tw_hodlr_pre_eigenmodes(self,hodlr_op)
+      IF(ASSOCIATED(hodlr_op%pre_evecs))linv_pre%z_glob=>hodlr_op%pre_evecs
+    END IF
   ELSE
     CALL create_diag_pre(linv%pre)
   END IF
-  !---Setup extrapolation fields
-  maxextrap=3 ! Number of points for extrapolation (0: No extrapolation, 2: Linear, 3: Quadratic)
-  IF(maxextrap>0)THEN
-    ALLOCATE(extrap_fields(maxextrap),extrapt(maxextrap))
-    DO i=1,maxextrap
-      CALL self%Uloc%new(extrap_fields(i)%f)
-      extrapt(i)=0.d0
-    END DO
-    nextrap=0
+  !---Setup initial guess fields
+  maxproj=8 ! Number of previous solutions for the projection initial guess (0: previous solution)
+  IF(maxproj>0)THEN
+    ALLOCATE(proj_x(self%nelems,maxproj),proj_ax(self%nelems,maxproj))
+    ALLOCATE(proj_q(self%nelems,maxproj),proj_aq(self%nelems,maxproj),proj_c(maxproj))
+    CALL self%Uloc%new(vtmp)
+    CALL self%Uloc%new(vtmp2)
+    NULLIFY(pvals)
+    nproj=0
+    iproj=0
   END IF
 ELSE
-  maxextrap=-1
   !---Setup dense matrix for inverse
   Minv%nr=self%nelems; Minv%nc=self%nelems
   Minv%nrg=self%nelems; Minv%ncg=self%nelems
@@ -646,6 +701,18 @@ DO i=1,nsteps
     ELSE
       fmat%alam = dt_op ! Update forward matrix timestep
       CALL fmat%assemble(g)
+      !---Recompute stored products A*x for the new timestep (an update by the change in dt*R cancels badly
+      !   when the R term dominates the old products)
+      IF(maxproj>0)THEN
+        DO j=1,nproj
+          pvals=>proj_x(:,j)
+          CALL vtmp%restore_local(pvals)
+          CALL fmat%apply(vtmp,vtmp2)
+          pvals=>proj_ax(:,j)
+          CALL vtmp2%get_local(pvals)
+        END DO
+        NULLIFY(pvals)
+      END IF
       IF(PRESENT(hodlr_op))THEN
         linv_pre%beta=fmat%alam ! Update preconditioner timestep
         linv_pre%refactor=.TRUE.
@@ -653,16 +720,6 @@ DO i=1,nsteps
     END IF
   END IF
 
-  !---Update extrapolation fields
-  IF(maxextrap>0)THEN
-    DO j=maxextrap,2,-1
-      CALL extrap_fields(j)%f%add(0.d0,1.d0,extrap_fields(j-1)%f)
-      extrapt(j)=extrapt(j-1)
-    END DO
-    IF(nextrap<maxextrap)nextrap=nextrap+1
-    CALL extrap_fields(1)%f%add(0.d0,1.d0,u)
-    extrapt(1)=t
-  END IF
   !---Update driven coil dI/dt waveforms
   IF(ntimes_curr>0)THEN
     DO j=1,self%n_icoils
@@ -704,8 +761,19 @@ DO i=1,nsteps
       pcoil_volt=pcoil_volt*dt
     END IF
   END IF
-  uu=g%dot(g)
+  !---Add current solution and A*u = g + dt*R*u (before sources) to projection basis
+  IF(maxproj>0)THEN
+    iproj=MOD(iproj,maxproj)+1 ! Circular storage, newest in column iproj
+    IF(nproj<maxproj)nproj=nproj+1
+    pvals=>proj_x(:,iproj)
+    CALL u%get_local(pvals)
+    CALL self%Rmat%apply(u,vtmp)
+    pvals=>proj_ax(:,iproj)
+    CALL vtmp%get_local(pvals)
+    NULLIFY(pvals)
+  END IF
   CALL g%get_local(vals)
+  IF(maxproj>0)proj_ax(:,iproj)=dt*proj_ax(:,iproj)+vals
   IF(ntimes_curr>0)CALL dgemv('N',self%nelems,self%n_icoils,-1.d0,self%Ael2dr, &
     self%nelems,icoil_dcurr,1,1.d0,vals,1)
   IF(volt_full)THEN
@@ -721,8 +789,16 @@ DO i=1,nsteps
     CALL Minv%apply(g,u)
     nits=1
   ELSE
-    !---Extrapolate solution
-    IF(maxextrap>0)CALL vector_extrapolate(extrapt,extrap_fields,nextrap,t+dt,u)
+    !---Initial guess: combination of the previous solutions with the smallest residual
+    IF(maxproj>0)THEN
+      CALL tw_proj_basis(nproj,iproj,proj_x,proj_ax,proj_q,proj_aq,k)
+      IF(k>0)THEN
+        CALL g%get_local(vals)
+        CALL dgemv('T',self%nelems,k,1.d0,proj_aq,self%nelems,vals,1,0.d0,proj_c,1)
+        CALL dgemv('N',self%nelems,k,1.d0,proj_q,self%nelems,proj_c,1,0.d0,vals,1)
+        CALL u%restore_local(vals)
+      END IF
+    END IF
     CALL linv%apply(u,g)
     nits=linv%cits
   END IF
@@ -796,11 +872,10 @@ CALL u%delete()
 CALL up%delete()
 CALL g%delete()
 DEALLOCATE(vals,icoil_curr,icoil_dcurr,pcoil_volt,u,up,g)
-IF(maxextrap>0)THEN
-  DO i=1,maxextrap
-    CALL extrap_fields(i)%f%delete()
-  END DO
-  DEALLOCATE(extrap_fields,extrapt)
+IF(maxproj>0)THEN
+  CALL vtmp%delete()
+  CALL vtmp2%delete()
+  DEALLOCATE(proj_x,proj_ax,proj_q,proj_aq,proj_c,vtmp,vtmp2)
 END IF
 IF(direct)THEN
   DEALLOCATE(minv%m)
@@ -812,6 +887,48 @@ ELSE
 END IF
 CALL oft_decrease_indent
 END SUBROUTINE run_td_sim
+!------------------------------------------------------------------------------
+!> Basis for the least-squares initial guess from a set of vectors
+!!
+!! Builds q = X*C with A*q orthonormal (classical Gram-Schmidt on A*x with BLAS, two passes), so the combination of the vectors
+!! with the smallest residual for a right-hand side b is q*((A*q)^T b). Vectors whose A*x drops below 1E-10 of its
+!! original norm (nearly dependent on the previous ones) are skipped. The products A*q are formed from the stored A*x.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_proj_basis(n,inew,x,ax,q,aq,nq)
+INTEGER(4), INTENT(in) :: n !< Number of vectors
+INTEGER(4), INTENT(in) :: inew !< Column of the newest vector (columns stored circularly)
+REAL(8), CONTIGUOUS, INTENT(in) :: x(:,:) !< Vectors [vector length,n]
+REAL(8), CONTIGUOUS, INTENT(in) :: ax(:,:) !< Products A*x [vector length,n]
+REAL(8), CONTIGUOUS, INTENT(out) :: q(:,:) !< Basis vectors [vector length,n]
+REAL(8), CONTIGUOUS, INTENT(out) :: aq(:,:) !< Products A*q, orthonormal [vector length,n]
+INTEGER(4), INTENT(out) :: nq !< Number of basis vectors
+INTEGER(4) :: i,ii,ipass,m
+REAL(8) :: nrm0,nrm,c(SIZE(x,2))
+REAL(8), EXTERNAL :: ddot
+m=SIZE(x,1)
+nq=0
+DO i=0,n-1
+  ii=MODULO(inew-1-i,n)+1 ! Newest first
+  q(:,nq+1)=x(:,ii)
+  aq(:,nq+1)=ax(:,ii)
+  nrm0=ddot(m,aq(:,nq+1),1,aq(:,nq+1),1)
+  IF(nrm0<=0.d0)CYCLE
+  !---Classical Gram-Schmidt against the previous basis vectors, two passes
+  IF(nq>0)THEN
+    DO ipass=1,2
+      CALL dgemv('T',m,nq,1.d0,aq,m,aq(:,nq+1),1,0.d0,c,1)
+      CALL dgemv('N',m,nq,-1.d0,q,m,c,1,1.d0,q(:,nq+1),1)
+      CALL dgemv('N',m,nq,-1.d0,aq,m,c,1,1.d0,aq(:,nq+1),1)
+    END DO
+  END IF
+  nrm=ddot(m,aq(:,nq+1),1,aq(:,nq+1),1)
+  IF(nrm<=1.d-20*nrm0)CYCLE
+  nrm=1.d0/SQRT(nrm)
+  q(:,nq+1)=q(:,nq+1)*nrm
+  aq(:,nq+1)=aq(:,nq+1)*nrm
+  nq=nq+1
+END DO
+END SUBROUTINE tw_proj_basis
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !---------------------------------------------------------------------------------
