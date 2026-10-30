@@ -1295,12 +1295,18 @@ def run_mirnov_point(meshfile,mp_q):
         mp_q.put(None)
 
 
-def test_mirnov_point():
+@pytest.mark.parametrize("coil_type", ("circular", "polygon"))
+def test_mirnov_point(coil_type):
     os.chdir(test_dir)
     xml = ThinCurr_XML()
     xml.set_eta([10.0*mu0])
     coil = ThinCurr_Icoil(name="Test")
-    coil.add_circular_subcoil([1.6, 0.6])
+    if coil_type == "circular":
+        coil.add_circular_subcoil([1.6, 0.6])
+    else:
+        # Non-planar polygon coil: segment fields (point sensors) against segment-pair integrals (small loops)
+        t = np.linspace(0.0, 2.0*np.pi, 181)
+        coil.add_subcoil(pts=np.c_[1.6*np.cos(t), 1.6*np.sin(t), 0.6 + 0.1*np.sin(3.0*t)])
     xml.add_Icoil(coil)
     write_oft_xml([xml], "oft_in.xml")
     mp_q = multiprocessing.Queue()
