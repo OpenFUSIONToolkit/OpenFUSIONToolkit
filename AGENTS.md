@@ -125,7 +125,7 @@ This validates that all `SUBROUTINE`/`FUNCTION` entries have matching debug stac
 | **Lint** | `lint.yaml` | push to main, PRs | ruff check + Fortran stack check |
 | **Coverage** | `cov_build.yaml` | push to main, cov_debug; PRs (incl. ready for review) — only when `src/**` (excluding `src/docs/**`) or the workflow file changes | Build with `--coverage`, upload to Codecov |
 | **CD Build and Deployment** | `cd_combined.yaml` | push to main, pypi_release; manual | Release and nightly package/PyPI builds (deploy from `pypi_release`) |
-| **Container CD Build and Deployment** | `container_cd.yaml` | push to main, container_release; manual | Container release builds (deploy from `container_release`) |
+| **Container CD Build and Deployment** | `container_cd.yaml` | push to container_release; manual | Container release builds (deploy from `container_release`) |
 | **GitHub Pages Build** | `website.yml` | push to main, gh-pages, PRs | Documentation/website build (deploy from `gh-pages`) |
 | **Cleanup build caches** | `prune_cache.yaml` | PR closed; manual (with PR number) | Delete the GitHub Actions caches created by a PR's branch |
 | **Copilot Agent Setup** | `copilot-setup-steps.yml` | manual; PRs changing the workflow file or `src/utilities/build_libs.py` | Copilot agent environment setup |
