@@ -17,7 +17,7 @@
 !! @ingroup testing
 !------------------------------------------------------------------------------
 MODULE test_thin_wall_kernels_aca
-USE thin_wall_hodlr, ONLY: tw_aca_source
+USE thin_wall, ONLY: tw_aca_source
 IMPLICIT NONE
 !> Dense test block given by rows and columns
 TYPE, EXTENDS(tw_aca_source) :: dense_source
@@ -43,8 +43,8 @@ END MODULE test_thin_wall_kernels_aca
 !------------------------------------------------------------------------------
 PROGRAM test_thin_wall_kernels
 USE oft_base
-USE thin_wall, ONLY: tw_compute_phipot, tw_compute_phigrad
-USE thin_wall_hodlr, ONLY: tw_lowrank_qrcp, tw_aca_plus
+USE thin_wall, ONLY: tw_compute_phipot, tw_compute_phigrad, tw_aca_plus
+USE thin_wall_hodlr, ONLY: tw_lowrank_qrcp
 USE test_thin_wall_kernels_aca, ONLY: dense_source
 IMPLICIT NONE
 TYPE(dense_source) :: src

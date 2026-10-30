@@ -198,6 +198,24 @@ LOGICAL, SAVE :: tw_quads_ready = .FALSE. !< Have tw_quads been set up?
 integer(i4), public, parameter :: tw_idx_ver=1 !< File version for array indexing
 integer(i4), public, parameter :: tw_cache_ver=2 !< Version of cached matrix files (increment when a change invalidates existing caches)
 character(LEN=16), public, parameter :: tw_idx_path="ThinCurr_Version" !< HDF5 field name
+!------------------------------------------------------------------------------
+!> Rows and columns of a matrix block for ACA+ (@ref tw_aca_plus)
+!------------------------------------------------------------------------------
+TYPE, ABSTRACT :: tw_aca_source
+CONTAINS
+  !> Row `i` of the block [ncols]
+  PROCEDURE(tw_aca_vector), DEFERRED :: row
+  !> Column `j` of the block [nrows]
+  PROCEDURE(tw_aca_vector), DEFERRED :: col
+END TYPE tw_aca_source
+ABSTRACT INTERFACE
+  SUBROUTINE tw_aca_vector(self,i,vec)
+    IMPORT :: tw_aca_source
+    CLASS(tw_aca_source), INTENT(inout) :: self
+    INTEGER(4), INTENT(in) :: i
+    REAL(8), INTENT(out) :: vec(:)
+  END SUBROUTINE tw_aca_vector
+END INTERFACE
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Set up the shared triangle quadrature rules (done once, by the first @ref tw_setup)
@@ -2493,6 +2511,149 @@ ELSE
   val=LOG(num/den)
 END IF
 END FUNCTION tw_edge_lineint
+!------------------------------------------------------------------------------
+!> ACA+ (adaptive cross approximation with a reference row and column) of a block given by its rows and columns
+!!
+!! Builds \f$ K \approx U V \f$ one rank-1 term at a time, each from a residual row and column chosen by partial
+!! pivoting against a reference row and column. Stops once the Frobenius norm of the latest term is below `tol`
+!! (or below `tol` times the estimated norm of the approximation, with `rel_tol`) after at least `min_its` terms.
+!! Fails (`nterms=-1`) if `max_iter-1` terms are reached first.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_aca_plus(src,nrows,ncols,tol,min_its,max_iter,Iref_in,Jref_in,U,V,nterms,rel_tol)
+CLASS(tw_aca_source), INTENT(inout) :: src !< Rows and columns of the block
+INTEGER(4), INTENT(in) :: nrows !< Number of rows
+INTEGER(4), INTENT(in) :: ncols !< Number of columns
+REAL(8), INTENT(in) :: tol !< Tolerance on the Frobenius norm of the latest term
+INTEGER(4), INTENT(in) :: min_its !< Minimum number of terms
+INTEGER(4), INTENT(in) :: max_iter !< Maximum number of iterations (at most `max_iter-1` terms)
+INTEGER(4), INTENT(in) :: Iref_in !< Initial reference row
+INTEGER(4), INTENT(in) :: Jref_in !< Initial reference column
+REAL(8), ALLOCATABLE, INTENT(out) :: U(:,:) !< Left factor (residual columns) [nrows,nterms]
+REAL(8), ALLOCATABLE, INTENT(out) :: V(:,:) !< Right factor (scaled residual rows) [nterms,ncols]
+INTEGER(4), INTENT(out) :: nterms !< Number of terms (-1 if not converged)
+LOGICAL, OPTIONAL, INTENT(in) :: rel_tol !< Is `tol` relative to the norm of the approximation?
+INTEGER(4) :: Iref,Jref,Istar,Jstar,i,k
+LOGICAL :: rel
+REAL(8) :: step_size,Istar_val,Jstar_val,fro2
+REAL(8), ALLOCATABLE :: us(:,:),vs(:,:),RIstar(:),RJstar(:),RIref(:),RJref(:)
+LOGICAL, ALLOCATABLE :: prevIstar(:),prevJstar(:)
+rel=.FALSE.
+IF(PRESENT(rel_tol))rel=rel_tol
+ALLOCATE(us(nrows,max_iter),vs(max_iter,ncols))
+us=0.d0
+vs=0.d0
+nterms=0
+fro2=0.d0
+ALLOCATE(prevIstar(nrows),prevJstar(ncols))
+prevIstar=.TRUE. ! Rows not yet used as pivots
+prevJstar=.TRUE. ! Columns not yet used as pivots
+ALLOCATE(RIstar(ncols),RJstar(nrows),RIref(ncols),RJref(nrows))
+Iref=Iref_in
+Jref=Jref_in
+CALL src%row(Iref,RIref)
+CALL src%col(Jref,RJref)
+step_size=-1.d0
+DO k=1,max_iter
+  !---Pivot candidates from the reference column and row
+  Jstar=tw_max_masked(ABS(RIref),prevJstar)
+  Istar=tw_max_masked(ABS(RJref),prevIstar)
+  Jstar_val=ABS(RIref(Jstar))
+  Istar_val=ABS(RJref(Istar))
+  IF(Istar_val>Jstar_val)THEN
+    !---Pivot on the row first, then the largest entry of its residual
+    CALL src%row(Istar,RIstar)
+    DO i=1,nterms
+      RIstar=RIstar-us(Istar,i)*vs(i,:)
+    END DO
+    Jstar=tw_max_masked(ABS(RIstar),prevJstar)
+    CALL src%col(Jstar,RJstar)
+    DO i=1,nterms
+      RJstar=RJstar-us(:,i)*vs(i,Jstar)
+    END DO
+  ELSE
+    !---Pivot on the column first, then the largest entry of its residual
+    CALL src%col(Jstar,RJstar)
+    DO i=1,nterms
+      RJstar=RJstar-us(:,i)*vs(i,Jstar)
+    END DO
+    Istar=tw_max_masked(ABS(RJstar),prevIstar)
+    CALL src%row(Istar,RIstar)
+    DO i=1,nterms
+      RIstar=RIstar-us(Istar,i)*vs(i,:)
+    END DO
+  END IF
+  prevIstar(Istar)=.FALSE.
+  prevJstar(Jstar)=.FALSE.
+  !---New rank-1 term
+  nterms=nterms+1
+  vs(nterms,:)=RIstar/RIstar(Jstar)
+  us(:,nterms)=RJstar
+  step_size=SQRT(SUM(us(:,nterms)**2)*SUM(vs(nterms,:)**2))
+  IF(oft_debug_print(2))WRITE(*,'(A,3I4,2ES14.6)')oft_indent,k,Istar,Jstar,step_size,tol
+  IF(rel)THEN
+    !---Frobenius norm of the approximation, updated with the new term
+    fro2=fro2+step_size**2
+    IF(nterms>1)fro2=fro2+2.d0*SUM(MATMUL(TRANSPOSE(us(:,1:nterms-1)),us(:,nterms)) &
+      *MATMUL(vs(1:nterms-1,:),vs(nterms,:)))
+    IF((k>=min_its).AND.(step_size<tol*SQRT(ABS(fro2))))EXIT
+  ELSE
+    IF((k>=min_its).AND.(step_size<tol))EXIT
+  END IF
+  IF(k==max_iter-1)THEN
+    step_size=-1.d0
+    EXIT
+  END IF
+  !---Replace the reference row if it was used as a pivot, otherwise update it with the new term
+  IF(Iref==Istar)THEN
+    DO Iref=1,nrows
+      IF(prevIstar(Iref))EXIT
+    END DO
+    CALL src%row(Iref,RIref)
+    DO i=1,nterms
+      RIref=RIref-us(Iref,i)*vs(i,:)
+    END DO
+  ELSE
+    RIref=RIref-us(Iref,nterms)*vs(nterms,:)
+  END IF
+  !---Same for the reference column
+  IF(Jref==Jstar)THEN
+    DO Jref=1,ncols
+      IF(prevJstar(Jref))EXIT
+    END DO
+    CALL src%col(Jref,RJref)
+    DO i=1,nterms
+      RJref=RJref-us(:,i)*vs(i,Jref)
+    END DO
+  ELSE
+    RJref=RJref-us(:,nterms)*vs(nterms,Jref)
+  END IF
+END DO
+IF(step_size>0.d0)THEN
+  ALLOCATE(U(nrows,nterms),V(nterms,ncols))
+  U=us(:,1:nterms)
+  V=vs(1:nterms,:)
+ELSE
+  nterms=-1
+END IF
+DEALLOCATE(us,vs,RIstar,RJstar,RIref,RJref,prevIstar,prevJstar)
+END SUBROUTINE tw_aca_plus
+!------------------------------------------------------------------------------
+!> Location of the largest value where `mask` is set
+!------------------------------------------------------------------------------
+FUNCTION tw_max_masked(vals,mask) RESULT(iloc)
+REAL(8), INTENT(in) :: vals(:) !< Values
+LOGICAL, INTENT(in) :: mask(:) !< Candidates
+REAL(8) :: max_tmp
+INTEGER(4) :: i,iloc
+max_tmp=-1.d99
+iloc=0
+DO i=1,SIZE(vals)
+  IF((vals(i)>max_tmp).AND.mask(i))THEN
+    max_tmp=vals(i)
+    iloc=i
+  END IF
+END DO
+END FUNCTION tw_max_masked
 !---------------------------------------------------------------------------------
 !> Compute \f$ \nabla \int 1/|r-r'| dA' \f$ for a triangle (gradient with respect to the observation point)
 !!
