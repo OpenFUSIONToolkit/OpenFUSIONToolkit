@@ -381,8 +381,9 @@ class ThinCurr():
         @param B_aca_rel_tol Relative tolerance for ACA compression of B-matrix blocks
         @param pre_single Compute, store, and apply HODLR block-Jacobi preconditioners in single precision?
         @param pre_coarse Add a global coarse correction to HODLR block-Jacobi preconditioners (two-level preconditioner)?
-        @param pre_neigs Number of slowest L/R eigenmodes added to the coarse space (requires `pre_coarse` and ARPACK;
-        computed once and reused by later `run_td` calls on the same model)
+        @param pre_neigs Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires
+        `pre_coarse` and ARPACK; computed once and reused by later `run_td` calls on the same model while the
+        resistivity is unchanged)
         '''
         if target_size is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)

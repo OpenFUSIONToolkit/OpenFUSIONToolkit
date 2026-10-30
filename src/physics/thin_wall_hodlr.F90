@@ -60,7 +60,7 @@ type, extends(oft_noop_matrix) :: oft_tw_hodlr_op
   REAL(8) :: B_aca_tol = -1.d0 !< ACA+ tolerance for B-field operators
   LOGICAL :: pre_single = .FALSE. !< Compute, store, and apply block-Jacobi preconditioners in single precision?
   LOGICAL :: pre_coarse = .FALSE. !< Add a global coarse correction to block-Jacobi preconditioners (two-level preconditioner)?
-  INTEGER(4) :: pre_neigs = 0 !< Number of slowest L/R eigenmodes added to the coarse space (requires pre_coarse)
+  INTEGER(4) :: pre_neigs = 0 !< Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires pre_coarse and ARPACK)
   INTEGER(4) :: pre_evecs_hash = 0 !< Hash of the resistance matrix used for `pre_evecs`
   REAL(r8), POINTER, DIMENSION(:,:) :: pre_evecs => NULL() !< Slowest L/R eigenmodes for the coarse space, kept between runs [nelems,:]
   INTEGER(4), POINTER, DIMENSION(:,:) :: dense_blocks => NULL() !< Indices of diagonal interactions
@@ -134,8 +134,8 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_tw_hodlr_rbjpre
   INTEGER(4) :: coarse_order = 1 !< Polynomial order of the coarse space on each block (1 or 2)
   INTEGER(4) :: max_block_size = 0
   INTEGER(4) :: nz = 0 !< Number of coarse vectors
-  INTEGER(4), POINTER, DIMENSION(:) :: z_block => NULL() !< Dense block of each coarse vector (0: unit vector)
-  INTEGER(4), POINTER, DIMENSION(:) :: z_unit => NULL() !< Element of each unit coarse vector
+  INTEGER(4), POINTER, DIMENSION(:) :: z_block => NULL() !< Dense block of each coarse vector (0: unit vector, -k: global vector k in z_gvals)
+  INTEGER(4), POINTER, DIMENSION(:) :: z_unit => NULL() !< Element of each unit coarse vector (0 for block and global vectors)
   REAL(r8), POINTER, DIMENSION(:,:) :: z_vals => NULL() !< Values of each block coarse vector on its block
   REAL(r8), POINTER, DIMENSION(:,:) :: z_glob => NULL() !< Global vectors to add to the coarse space [nelems,:] (optional, not owned)
   REAL(r8), POINTER, DIMENSION(:,:) :: z_gvals => NULL() !< Values of each global coarse vector [nelems_exp,:]
@@ -3366,7 +3366,8 @@ END SUBROUTINE rbjprecond_apply
 !!
 !! The vectors are defined on the element indices of the blocks. For meshes split at junctions these are the
 !! expanded elements, and the coarse space is \f$ Z = P^T Z_{exp} \f$: each vector is reduced before the L and R
-!! products, and the products are expanded before the projection, so that \f$ Z^T A Z \f$ is exact.
+!! products, and the products are expanded before the projection, so that \f$ Z^T A Z \f$ is exact. The global
+!! vectors are the exception: they are given on the model unknowns and expanded with the right inverse of \f$ P^T \f$.
 !------------------------------------------------------------------------------
 SUBROUTINE rbjprecond_coarse_setup(self)
 CLASS(oft_tw_hodlr_rbjpre), INTENT(inout) :: self !< Solver object
@@ -3443,7 +3444,7 @@ IF(nglob>0)THEN
   k=0
   DO m=1,nglob
     !---Global vectors are given on the model unknowns; on junction meshes they are expanded with the right inverse
-    !   of P^T (z = P (P^T P)^-1 x), so the reduced coarse vector P^T z is x itself
+    !   of P^T (z = P (P^T P)^-1 x), so that P^T z = x before orthonormalisation
     IF(ASSOCIATED(tw%junc))THEN
       CALL junction_right_inverse(self%z_glob(:,m),self%z_gvals(:,k+1))
     ELSE

@@ -234,13 +234,14 @@ TYPE(tw_type), TARGET, INTENT(in) :: self !< ThinCurr object
 TYPE(oft_tw_hodlr_op), TARGET, INTENT(inout) :: hodlr_op !< HODLR L matrix
 INTEGER(4) :: neigs,rhash,i
 REAL(8), ALLOCATABLE, DIMENSION(:) :: eig_tmp
-CHARACTER(LEN=80) :: msg
+CHARACTER(LEN=120) :: msg
 #ifdef HAVE_ARPACK
 neigs=hodlr_op%pre_neigs
 !---ARPACK needs a Ritz space of 2*neigs+1 vectors
 IF(2*neigs+1>self%nelems)THEN
   neigs=(self%nelems-1)/2
-  WRITE(msg,'(A,I8)')'"pre_neigs" too large for the model, reduced to ',neigs
+  WRITE(msg,'(A,I8,A)')'"pre_neigs" too large for the model, reduced to ',neigs, &
+    ' (consider a direct solve for a model this small)'
   CALL oft_warn(msg)
 END IF
 IF(neigs<1)RETURN
@@ -1169,10 +1170,10 @@ END SUBROUTINE run_td_sim
 SUBROUTINE tw_proj_basis(n,inew,x,ax,q,aq,nq)
 INTEGER(4), INTENT(in) :: n !< Number of vectors
 INTEGER(4), INTENT(in) :: inew !< Column of the newest vector (columns stored circularly)
-REAL(8), CONTIGUOUS, INTENT(in) :: x(:,:) !< Vectors [m,:]
-REAL(8), CONTIGUOUS, INTENT(in) :: ax(:,:) !< Products A*x [m,:]
-REAL(8), CONTIGUOUS, INTENT(out) :: q(:,:) !< Basis vectors [m,:]
-REAL(8), CONTIGUOUS, INTENT(out) :: aq(:,:) !< Products A*q, orthonormal [m,:]
+REAL(8), CONTIGUOUS, INTENT(in) :: x(:,:) !< Vectors [vector length,n]
+REAL(8), CONTIGUOUS, INTENT(in) :: ax(:,:) !< Products A*x [vector length,n]
+REAL(8), CONTIGUOUS, INTENT(out) :: q(:,:) !< Basis vectors [vector length,n]
+REAL(8), CONTIGUOUS, INTENT(out) :: aq(:,:) !< Products A*q, orthonormal [vector length,n]
 INTEGER(4), INTENT(out) :: nq !< Number of basis vectors
 INTEGER(4) :: i,ii,ipass,m
 REAL(8) :: nrm0,nrm,c(SIZE(x,2))
