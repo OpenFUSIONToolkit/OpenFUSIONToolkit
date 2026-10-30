@@ -1216,6 +1216,18 @@ def test_td_aca(convert_xml):
     assert validate_td(sigs_final,jumpers_final)
 
 @pytest.mark.coverage
+@pytest.mark.parametrize("direct_flag", ('F', 'T'))
+def test_fr_cyl_hr(direct_flag):
+    # Dense model with >2000 elements, so the iterative solve uses the block-Jacobi preconditioner
+    fr_real = approx_list((5.888738E-2, 4.881442E-3), rel=1.E-4)
+    fr_imag = approx_list((-2.017045E-3, -2.313881E-3), rel=1.E-4)
+    assert ThinCurr_setup("tw_test-cyl_hr.h5",3,direct_flag,freq=5.E3,fr_limit=0,
+                           icoils=((1.1, 0.25), (1.1, -0.25)),
+                           floops=((0.9, 0.5), (0.9, 0.0)),
+                           jumper_start=2)
+    assert validate_fr(fr_real, fr_imag)
+
+@pytest.mark.coverage
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_fr_aca(convert_xml):
     fr_real = approx_list((5.888736E-2, 4.881440E-3), rel=1.E-3)
