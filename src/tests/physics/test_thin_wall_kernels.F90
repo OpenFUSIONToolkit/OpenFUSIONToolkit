@@ -14,7 +14,11 @@
 !!   of exact rank just below the break-even rank, a Kahan block whose pivoted QR needs more columns than the
 !!   break-even rank although its SVD rank is below it, and an incompressible block (SVD);
 !! - ACA+ (@ref thin_wall::tw_aca_plus "tw_aca_plus") of a smooth kernel block with absolute and relative tolerance,
-!!   and of an incompressible block (dense block).
+!!   and of an incompressible block (dense block);
+!! - straight segment pair integrals (@ref thin_wall::tw_seg_seg_int "tw_seg_seg_int") for close parallel, skew and
+!!   collinear pairs (quadrature);
+!! - the softened kernel of a circular coil (@ref thin_wall::tw_ring_seg_int "tw_ring_seg_int") along a polygon of
+!!   the same coil (softened ring-ring mutual).
 !!
 !! @authors Ian Stewart
 !! @date October 2026
