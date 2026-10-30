@@ -3510,8 +3510,8 @@ ELSE
   CALL rbjprecond_coarse_restrict(self,wvals,zw)
 END IF
 END SUBROUTINE coarse_project
-!> Expanded vector z = P (P^T P)^-1 x, so that P^T z = x (Jacobi-preconditioned CG on P^T P, which is sparse and SPD;
-!! it is not diagonal, as hole and junction unknowns span many elements)
+!---Expanded vector z = P (P^T P)^-1 x, so that P^T z = x (Jacobi-preconditioned CG on P^T P, which is sparse and SPD;
+!   it is not diagonal, as hole and junction unknowns span many elements)
 SUBROUTINE junction_right_inverse(x,z)
 REAL(r8), INTENT(in) :: x(:) !< Vector on the model unknowns [nelems]
 REAL(r8), INTENT(out) :: z(:) !< Expanded vector [nelems_exp]
