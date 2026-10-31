@@ -1095,7 +1095,7 @@ do j=2,npsi
   ! Trace contour
   !---------------------------------------------------------------------------
   psi_surf = cout(j,1)
-  IF(gseq%diverted.AND.ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near divertor
+  IF(ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near the LCFS
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
@@ -1445,7 +1445,7 @@ do j=1,nr
   psi_surf = x2 - xr*((j-1)/REAL(nr-1,8))
   psi_trace = psi_surf
   IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
-  IF(gseq%diverted.AND.(psi_trace-x1)/xr<0.02d0)THEN ! Use higher tracing tolerance near divertor
+  IF((psi_trace-x1)/xr<0.02d0)THEN ! Use higher tracing tolerance near the LCFS
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8

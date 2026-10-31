@@ -4698,12 +4698,12 @@ do j=1,nr
   ! psi_surf=(x2-x1)*((j-1)/REAL(nr,8))
   ! psi_surf=x2 - psi_surf
   psi_surf=psi_q(j)*(x2-x1) + x1
-  IF(gseq%diverted.AND.psi_q(j)<=0.02d0)THEN ! Use higher tracing tolerance near divertor
+  IF(psi_q(j)<=0.02d0)THEN ! Use higher tracing tolerance near the LCFS
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
   END IF
-  IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,gseq%diverted.AND.psi_q(j)<=0.02d0)
+  IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,psi_q(j)<=0.02d0)
   !
   pt=pt_last
   !!$omp critical
