@@ -702,7 +702,7 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
             mygs.replace_eq(source_file='test_eq.h5')
             EQ_obj = mygs.copy_eq()
             _, nl_its = mygs.solve(return_its=True)
-        eq_info = EQ_obj.get_stats(li_normalization='ITER')
+        eq_info = EQ_obj.get_stats(li_normalization='ITER',li_both=True)
         Lmat = mygs.get_coil_Lmat()
         eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
         eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
@@ -903,6 +903,7 @@ ITER_eq_dict = {
 @pytest.mark.parametrize("helicity", (1.0,-1.0))
 def test_ITER_eq(order,helicity):
     eq_dict = ITER_eq_dict.copy()
+    eq_dict['l_i_std'] = 1.1532768229095525 # Other l_i normalization from the same get_stats call
     eq_dict['tflux'] *= helicity
     eq_dict['dflux'] *= helicity
     eq_dict['q_0'] *= helicity
