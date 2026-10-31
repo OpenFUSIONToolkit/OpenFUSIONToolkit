@@ -429,7 +429,7 @@ p1=edge_cross(s,k0,k1)
 p2=edge_cross(s,k0,k2)
 !---Plasma mask at chord midpoint
 CALL cell_geom((p1+p2)/2.d0,pt,detm)
-IF(.NOT.gs_test_bounds(gseq,pt))RETURN
+IF(.NOT.gs_test_bounds(gseq,pt,cell))RETURN
 e=[-dvec(2),dvec(1)]
 xi1=DOT_PRODUCT(e,p1); xi2=DOT_PRODUCT(e,p2)
 IF(xi1==xi2)RETURN
