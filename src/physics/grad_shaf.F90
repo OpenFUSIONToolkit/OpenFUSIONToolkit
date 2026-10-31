@@ -1157,10 +1157,7 @@ self%o_point=source%o_point
 self%lim_point=source%lim_point
 self%x_points=source%x_points
 self%x_vecs=source%x_vecs
-IF(ASSOCIATED(source%core_cells))THEN
-  IF(.NOT.ASSOCIATED(self%core_cells))ALLOCATE(self%core_cells(SIZE(source%core_cells)))
-  self%core_cells=source%core_cells
-END IF
+IF(ASSOCIATED(source%core_cells))ALLOCATE(self%core_cells,SOURCE=source%core_cells)
 self%vcontrol_val=source%vcontrol_val
 !---Things that need equilibrium fully setup to copy
 IF(ASSOCIATED(source%P_ani))CALL source%P_ani%copy(self%P_ani,self)
@@ -3848,6 +3845,7 @@ IF(self%o_point(1)<0.d0)THEN
   self%plasma_bounds(1)=MAXVAL(psi_vals) !MINVAL(psiv%v)
   self%plasma_bounds(2)=MAXVAL(psi_vals)
   self%nx_points=0
+  CALL gs_core_cells(self)
   self%o_point=[0.5d0, 0.d0]
   DEALLOCATE(psi_vals)
   RETURN
@@ -4274,15 +4272,14 @@ subroutine gs_core_cells(self)
 class(gs_equil), intent(inout) :: self !< G-S object
 integer(4) :: i,k,nq,cell,jd(self%device%fe_rep%nce)
 integer(4), allocatable :: queue(:)
-real(8) :: f(3)
 real(8), pointer :: vals(:)
 class(oft_bmesh), pointer :: mesh
 mesh=>self%device%fe_rep%mesh
 IF(.NOT.ASSOCIATED(self%core_cells))ALLOCATE(self%core_cells(mesh%nc))
 self%core_cells=.TRUE.
-IF((self%o_point(1)<0.d0).OR.(self%plasma_bounds(1)<-1.d98))RETURN
+IF((self%o_point(1)<0.d0).OR.(self%plasma_bounds(1)<-1.d98).OR.self%device%dipole_mode.OR.self%device%mirror_mode)RETURN
 cell=0
-CALL bmesh_findcell(mesh,cell,self%o_point,f)
+CALL bmesh_findcell(mesh,cell,self%o_point)
 IF(cell==0)RETURN
 NULLIFY(vals)
 CALL self%psi%get_local(vals)
