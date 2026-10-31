@@ -34,7 +34,7 @@ USE fem_base, ONLY: oft_fem_type, oft_bfem_type, fem_max_levels, oft_ml_fem_type
   oft_afem_type
 USE fem_utils, ONLY: fem_interp, bfem_interp
 USE oft_lag_basis, ONLY: oft_lag_eval_all, oft_lag_geval_all, oft_lag_eval, oft_blag_d2eval, &
-  oft_lag_nodes, oft_blag_eval, oft_2D_lagrange_cast, &
+  oft_lag_nodes, oft_blag_eval, oft_blag_eval_all, oft_2D_lagrange_cast, &
   oft_blag_geval, oft_lag_npos, oft_scalar_fem, oft_scalar_bfem
 IMPLICIT NONE
 #include "local.h"
@@ -182,20 +182,20 @@ real(r8), intent(in) :: gop(3,3) !< Logical gradient vectors at `f` [3,3]
 real(r8), intent(out) :: val(:) !< Reconstructed field at `f` [1]
 integer(i4), allocatable :: j(:)
 integer(i4) :: jc
-real(r8) :: rop(1)
+real(r8), allocatable :: rop(:)
 DEBUG_STACK_PUSH
 !---
 IF(.NOT.ASSOCIATED(self%vals))CALL oft_abort('Setup has not been called!','lag_brinterp',__FILE__)
 !---Get dofs
-allocate(j(self%lag_rep%nce))
+allocate(j(self%lag_rep%nce),rop(self%lag_rep%nce))
 call self%lag_rep%ncdofs(cell,j) ! get DOFs
 !---Reconstruct field
+call oft_blag_eval_all(self%lag_rep,cell,f,rop)
 val=0.d0
 do jc=1,self%lag_rep%nce
-  call oft_blag_eval(self%lag_rep,cell,jc,f,rop(1))
-  val=val+self%vals(j(jc))*rop
+  val=val+self%vals(j(jc))*rop(jc)
 end do
-deallocate(j)
+deallocate(j,rop)
 DEBUG_STACK_POP
 end subroutine lag_brinterp
 !------------------------------------------------------------------------------

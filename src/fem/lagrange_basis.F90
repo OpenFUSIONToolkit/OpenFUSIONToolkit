@@ -825,6 +825,54 @@ rop(offset+1) = PRODUCT(f-self%xnodes(1))/((self%xnodes(2)-self%xnodes(1))**4)
 end subroutine tet_eval_all4
 end subroutine oft_lag_eval_all
 !------------------------------------------------------------------------------
+!> Evaluate all lagrange interpolation functions on a face
+!!
+!! @note Evaluation is performed in logical coordinates
+!------------------------------------------------------------------------------
+subroutine oft_blag_eval_all(self,face,f,rop)
+class(oft_scalar_bfem), intent(in) :: self !< Lagrange type for evaluation
+integer(i4), intent(in) :: face !< Cell for evaluation
+real(r8), intent(in) :: f(:) !< Position in cell in logical space
+real(r8), contiguous, intent(out) :: rop(:) !< Value of interpolation functions at point (f) [nce]
+integer(i4) :: i,j,offset,etmp(2),ftmp(3),il(3)
+real(r8) :: fac(self%order+1,3)
+DEBUG_STACK_PUSH
+IF(self%mesh%type==3)THEN
+  DO i=1,self%nce
+    CALL oft_blag_eval(self,face,i,f,rop(i))
+  END DO
+ELSE
+  !---1D factors of each logical coordinate, shared by all functions (see lag_2d_bary)
+  DO i=1,3
+    DO j=1,self%order+1
+      fac(j,i)=lag_1d(j,f(i),self%xnodes,j)
+    END DO
+  END DO
+  !---Vertices
+  DO i=1,3
+    rop(i)=fac(self%order+1,i)
+  END DO
+  !---Edges
+  DO i=1,3
+    offset=(i-1)*self%gstruct(2)+3
+    etmp=self%mesh%cell_ed(:,i)
+    CALL orient_list2(self%mesh%lce(i,face),etmp)
+    DO j=1,self%gstruct(2)
+      rop(offset+j)=fac(j+1,etmp(1))*fac(self%order+1-j,etmp(2))
+    END DO
+  END DO
+  !---Face
+  offset=3*self%gstruct(2)+3
+  ftmp=(/1,2,3/)
+  CALL orient_listn(self%mesh%lco(face),ftmp,3_i4)
+  DO j=1,self%gstruct(3)
+    il=(/self%inodesf(:,j),self%order-SUM(self%inodesf(:,j))/)+1
+    rop(offset+j)=fac(il(1),ftmp(1))*fac(il(2),ftmp(2))*fac(il(3),ftmp(3))
+  END DO
+END IF
+DEBUG_STACK_POP
+end subroutine oft_blag_eval_all
+!------------------------------------------------------------------------------
 !> Evaluate lagrange gradient function
 !!
 !! @note Evaluation is performed in logical coordinates with the resulting
