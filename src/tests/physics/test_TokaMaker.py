@@ -127,6 +127,22 @@ def validate_eqdsk(file_test,file_ref,helicity=1.0):
     return test_result
 
 
+def ifile_errors(mygs,filename):
+    """Relative errors of an i-file: psi at its R,Z points vs its psi grid, its FF', P' records and its psi bounds."""
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    ifile = read_ifile(filename)
+    psi_range = mygs.psi_bounds[1]-mygs.psi_bounds[0]
+    R, Z = ifile['R'][1:], ifile['Z'][1:]
+    psi_pts = mygs.get_field_eval('psi').eval(np.column_stack([R.ravel(),Z.ravel()]))[:,0].reshape(R.shape)
+    _, F, Fp, _, Pp = mygs.get_profiles(psi=(mygs.psi_bounds[1]-ifile['psi'])/psi_range)
+    return {
+        'ifile_psi_err': np.max(np.abs(psi_pts-ifile['psi'][1:,None]))/abs(psi_range),
+        'ifile_ffp_err': np.max(np.abs(ifile['ffp']-F*Fp))/np.max(np.abs(F*Fp)),
+        'ifile_pp_err': np.max(np.abs(ifile['pp']-Pp))/np.max(np.abs(Pp)),
+        'ifile_bounds_err': np.max(np.abs(ifile['psi_bounds']-mygs.psi_bounds[::-1]))/abs(psi_range)
+    }
+
+
 def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile
     try:
@@ -374,7 +390,7 @@ def test_spheromak_h2(order):
 @pytest.mark.parametrize("order", (2,3,4))
 def test_spheromak_h3(order):
     errs = [3.257155111957006e-07, 2.090369020180253e-09, 8.601148342547016e-12]
-    results = mp_run(run_sph_case,(0.05/4.0,order))
+    results = mp_run(run_sph_case,(0.05/4.0,order),timeout=60)
     assert validate_sph(results,errs[order-2])
 
 
@@ -826,6 +842,10 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
     # Save equilibrium to gEQDSK and i-file format
     mygs.save_eqdsk('tokamaker.eqdsk',nr=64,nz=64,lcfs_pad=0.001)
     mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001)
+    mygs.save_ifile('tokamaker_ext.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,profile_derivs=True,psi_bounds=True)
+    eq_info.update(ifile_errors(mygs,'tokamaker_ext.ifile'))
+    mygs.save_ifile('tokamaker_axis.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,axis_pack=1.E-4)
+    eq_info['ifile_psi_err_axis'] = ifile_errors(mygs,'tokamaker_axis.ifile')['ifile_psi_err']
     # Save final one
     mp_q.put([eq_info])
     oftpy_dump_cov()
@@ -916,6 +936,30 @@ def test_ITER_eq(order,helicity):
     assert validate_dict(results,eq_dict)
     assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)
     assert validate_ifile('tokamaker.ifile','ITER_test.ifile',helicity)
+    # Optional records are written only on request and leave the others unchanged
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    ifile, ifile_ext = read_ifile('tokamaker.ifile'), read_ifile('tokamaker_ext.ifile')
+    assert ('ffp' not in ifile) and ('psi_bounds' not in ifile)
+    assert all(np.array_equal(ifile[key],ifile_ext[key]) for key in ifile)
+    # Records after the known ones are ignored (here a repeat of the last, 2-value record)
+    with open('tokamaker_ext.ifile','rb') as fid:
+        content = fid.read()
+    with open('tokamaker_trail.ifile','wb') as fid:
+        fid.write(content + content[-24:])
+    ifile_trail = read_ifile('tokamaker_trail.ifile')
+    assert all(np.array_equal(ifile_ext[key],ifile_trail[key]) for key in ifile_ext)
+    # i-file points lie on their flux surfaces; FF', P' and psi bounds match the equilibrium
+    assert results[0]['ifile_psi_err'] < 1.E-10
+    assert results[0]['ifile_ffp_err'] < 1.E-10
+    assert results[0]['ifile_pp_err'] < 1.E-10
+    assert results[0]['ifile_bounds_err'] < 1.E-12
+    # Axis zone: first surface at axis_pack, spacing growing smoothly into the LCFS-packed points
+    ifile_axis = read_ifile('tokamaker_axis.ifile')
+    x = (ifile_axis['psi']-ifile_axis['psi_bounds'][0])/(ifile_axis['psi_bounds'][1]-ifile_axis['psi_bounds'][0])
+    dx = np.diff(x)
+    assert abs(x[1]-1.E-4) < 1.E-10
+    assert np.all(dx > 0) and np.max(dx[1:]/dx[:-1]) < 1.7
+    assert results[0]['ifile_psi_err_axis'] < 1.E-10
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
@@ -1708,6 +1752,9 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     eq_info['q_axis']    = float(q_i[0])
     sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
     eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
+    # A failed LCFS trace (exactly on the diverted separatrix) gives NaN LCFS outputs
+    _, _, _, dl, rbounds, zbounds = mygs.get_q(np.r_[1.0],compute_geo=True)
+    eq_info['lcfs_fail_nan'] = bool(np.isnan(dl) and np.all(np.isnan(rbounds)) and np.all(np.isnan(zbounds)))
 
     # --- Verify the jdotB_bs -> jphi conversion (doc_tokamaker_current_conventions eqs. A7, A8)
     #     against geometry traced independently from the converged equilibrium ---
@@ -1937,6 +1984,7 @@ ITER_bootstrap_internal_eq_dict = {
 def test_ITER_bootstrap_internal(order):
     results = mp_run(run_ITER_bootstrap_case_internal, (1.0, order), timeout=300)
     assert validate_dict(results, ITER_bootstrap_internal_eq_dict)
+    assert results[0]['lcfs_fail_nan']
 
 
 def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):

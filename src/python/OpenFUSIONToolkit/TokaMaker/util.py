@@ -346,7 +346,8 @@ def read_ifile(filename):
     '''! Read i-file inverse equilibrium file
 
     @param filename Path to file
-    @result Dictionary containing i-file information
+    @result Dictionary containing i-file information (when present: `ffp`, `pp` for \f$FF'\f$, \f$P'\f$;
+    `psi_bounds` for the unpadded \f$[\psi_{axis}, \psi_{LCFS}]\f$)
     '''
     def read_array(content,offset,var_type,count):
         if var_type in ("i", "f"):
@@ -392,6 +393,17 @@ def read_ifile(filename):
     Z, offset = read_array(content,offset,var_type,sizes[0]*sizes[1])
     out_dict["R"] = R.reshape(sizes)
     out_dict["Z"] = Z.reshape(sizes)
+    # Optional records in writer order: FF', P' (npsi each), then psi bounds (2); later records are ignored
+    var_size = 4 if var_type == "f" else 8
+    def next_count(offset):
+        if offset >= len(content):
+            return 0
+        return struct.unpack_from("i",content,offset=offset)[0]//var_size
+    if next_count(offset) == sizes[0] and next_count(offset+var_size*sizes[0]+8) == sizes[0]:
+        out_dict["ffp"], offset = read_array(content,offset,var_type,sizes[0])
+        out_dict["pp"], offset = read_array(content,offset,var_type,sizes[0])
+    if next_count(offset) == 2:
+        out_dict["psi_bounds"], offset = read_array(content,offset,var_type,2)
     return out_dict
 
 
