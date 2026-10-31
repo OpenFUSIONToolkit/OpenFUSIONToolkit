@@ -1336,7 +1336,7 @@ real(r8) :: grad(2),cofs(10),d2etmp(3),d2ftmp(6)
 integer(i4) :: ed,etmp(2),fc,ftmp(3),i,j,k,ind,finds(16)
 integer(i4), parameter :: pmap(3)=(/1,4,6/)
 integer(i4), parameter :: emap(3)=(/5,3,2/)
-integer(i4), parameter :: fmap(3,3)=RESHAPE((/1,2,3,2,4,5,3,4,6/),(/3,3/))
+integer(i4), parameter :: fmap(3,3)=RESHAPE((/1,2,3,2,4,5,3,5,6/),(/3,3/))
 IF(self%mesh%type==3)THEN
   val=0.d0
   select case(self%cmap(dof)%type)
