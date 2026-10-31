@@ -631,7 +631,8 @@ def _surface_distance(mesh, tree, vcells, pts, k=8):
         cells = set()
         for v in near[i]:
             cells.update(vcells[int(v)])
-        pi += [i]*len(cells); ci += list(cells)
+        pi += [i]*len(cells)
+        ci += list(cells)
     pi, ci = np.array(pi), np.array(ci)
     d = _point_tri_distance(pts[pi], mesh.r[mesh.lc[ci, 0]], mesh.r[mesh.lc[ci, 1]], mesh.r[mesh.lc[ci, 2]])
     out = np.full(pts.shape[0], np.inf)
@@ -661,10 +662,13 @@ def _imprint_loop(mesh, loop, h):
     if band.size == 0:
         raise ValueError("no vertices near the edge to imprint")
     dist = _polyline_distance(r[band], loop, True)
-    band = band[dist < 1.2*h]; dist = dist[dist < 1.2*h]
+    band = band[dist < 1.2*h]
+    dist = dist[dist < 1.2*h]
     spos = np.array(_project_s(r[band], ploop, s_loop)) % length
-    dmap = np.full(mesh.np, np.inf); dmap[band] = dist
-    smap = np.zeros(mesh.np); smap[band] = spos
+    dmap = np.full(mesh.np, np.inf)
+    dmap[band] = dist
+    smap = np.zeros(mesh.np)
+    smap[band] = spos
     inband = np.isfinite(dmap)
     bnd = np.zeros(mesh.np, dtype=bool)
     for ch in _boundary_chains(mesh.lc):
@@ -717,7 +721,8 @@ def _imprint_loop(mesh, loop, h):
         if len(cs) != 2:
             raise ValueError("the edge to imprint must cross the interior of the surface")
         for c in cs:
-            cell = list(mesh.lc[c]); k = cell.index(u)
+            cell = list(mesh.lc[c])
+            k = cell.index(u)
             if cell[(k + 1) % 3] != v:
                 right.add(c)
     # Duplicate each path vertex for the cells on the right side (around the vertex, without crossing the path)
@@ -734,7 +739,8 @@ def _imprint_loop(mesh, loop, h):
                     continue
                 for c2 in cells_of[v]:
                     if c2 not in sector and w in mesh.lc[c2]:
-                        sector.add(c2); todo.append(c2)
+                        sector.add(c2)
+                        todo.append(c2)
         if len(sector) == len(cells_of[v]):
             raise ValueError("the edge to imprint does not separate the surface locally")
         vnew = mesh.np + len(new_r)
@@ -955,7 +961,9 @@ def stitch_meshes(meshes, rel_tol=0.1, keep=None, exclude=None):
             sk += list(np.array(_project_s(g['pts'], bpts, bs)) % length if closed else _project_s(g['pts'], bpts, bs))
             pk += list(g['pts'])
         sk, pk = np.array(sk), np.array(pk).reshape(-1, 3)
-        in_kept = lambda sv: any(_covers(g['span'], sv, length, closed) for g in kept)
+        def in_kept(sv):
+            return any(_covers(g['span'], sv, length, closed) for g in kept)
+
         def nearest_kept(sv):
             d = np.abs(sk - sv)
             d = np.minimum(d, length - d) if closed else d
