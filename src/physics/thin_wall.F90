@@ -185,14 +185,38 @@ END TYPE tw_type
 REAL(r8) :: quad_tols(3) = [0.75d0, 0.95d0, 0.995d0] !< Distance tolerances for quadrature order selection
 INTEGER(i4) :: quad_orders(3) = [18, 10, 6] !< Quadrature order for each tolerance
 REAL(r8), PARAMETER :: target_err = 1.d-8
+!> Quadrature target of the inductance cell-pair kernel (@ref tw_cell_pair_kernel). Looser than `target_err`: the
+!! order formula assumes the error falls as (2h/d)^order, which is very pessimistic for 1/r between separated
+!! triangles. With 1E-6 the change to L is ~1E-9 relative to the matrix (eigenvalues ~1E-9), well below the HODLR/ACA
+!! compression tolerances, while assembly is ~1.75x faster than with 1E-8.
+REAL(r8), PARAMETER :: tw_L_quad_err = 1.d-6
 INTEGER(i4), PARAMETER :: tw_quad_far_max = 10 !< Highest quadrature order of far-field cell-pair integrals (closer pairs integrate one cell analytically)
 INTEGER(i4), PARAMETER :: tw_quad_far_np = 25 !< Number of points of the order `tw_quad_far_max` triangle rule (sizes cell-pair work arrays)
 REAL(r8), PARAMETER :: coil_min_rad = 1.d-6
 TYPE(oft_quad_type), TARGET, SAVE :: tw_quads(18) !< Triangle quadrature rules of orders 1-18 (shared)
 LOGICAL, SAVE :: tw_quads_ready = .FALSE. !< Have tw_quads been set up?
 integer(i4), public, parameter :: tw_idx_ver=1 !< File version for array indexing
-integer(i4), public, parameter :: tw_cache_ver=2 !< Version of cached matrix files (increment when a change invalidates existing caches)
+integer(i4), public, parameter :: tw_cache_ver=3 !< Version of cached matrix files (increment when a change invalidates existing caches)
 character(LEN=16), public, parameter :: tw_idx_path="ThinCurr_Version" !< HDF5 field name
+!------------------------------------------------------------------------------
+!> Rows and columns of a matrix block for ACA+ (@ref tw_aca_plus)
+!------------------------------------------------------------------------------
+TYPE, ABSTRACT :: tw_aca_source
+CONTAINS
+  !> Row `i` of the block [ncols]
+  PROCEDURE(tw_aca_vector), DEFERRED :: row
+  !> Column `j` of the block [nrows]
+  PROCEDURE(tw_aca_vector), DEFERRED :: col
+END TYPE tw_aca_source
+ABSTRACT INTERFACE
+  !> Row or column `i` of an ACA+ block
+  SUBROUTINE tw_aca_vector(self,i,vec)
+    IMPORT :: tw_aca_source
+    CLASS(tw_aca_source), INTENT(inout) :: self !< Block source
+    INTEGER(4), INTENT(in) :: i !< Row or column index
+    REAL(8), INTENT(out) :: vec(:) !< Row [ncols] or column [nrows] of the block
+  END SUBROUTINE tw_aca_vector
+END INTERFACE
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Set up the shared triangle quadrature rules (done once, by the first @ref tw_setup)
@@ -2319,7 +2343,7 @@ dl_max=SQRT(dl_max)
 IF(dl_min<1.d-8)THEN
   iquad = 18
 ELSE
-  iquad = MAX(4,MIN(18,ABS(INT(LOG(target_err)/LOG(1.d0-dl_min/dl_max)))))
+  iquad = MAX(4,MIN(18,ABS(INT(LOG(tw_L_quad_err)/LOG(1.d0-dl_min/dl_max)))))
 END IF
 tmp=0.d0
 np=tw_quads(iquad)%np
@@ -2356,8 +2380,8 @@ END FUNCTION tw_cell_pair_kernel
 !---------------------------------------------------------------------------------
 !> Compute the B-field at a point from the three basis functions of a triangle (without the 1/(4 pi) factor)
 !!
-!! Far points use quadrature of the Biot-Savart kernel; near points (and points on the cell) use centered finite
-!! differences of the analytic potential (@ref tw_compute_phipot). Uses the shared quadrature rules (@ref tw_quads_setup, done by @ref tw_setup).
+!! Far points use quadrature of the Biot-Savart kernel; near points use the analytic gradient of the cell potential
+!! (@ref tw_compute_phigrad). Points on the cell are evaluated `10*B_dx` inside and outside the face and averaged. Uses the shared quadrature rules (@ref tw_quads_setup, done by @ref tw_setup).
 !---------------------------------------------------------------------------------
 FUNCTION tw_cell_point_Bkernel(pts_i,evec_i,area_i,norm_i,pt,va,B_dx) RESULT(atmp)
 REAL(8), INTENT(in) :: pts_i(3,3) !< Vertices of triangle
@@ -2366,10 +2390,10 @@ REAL(8), INTENT(in) :: area_i !< Area of triangle
 REAL(8), INTENT(in) :: norm_i(3) !< Unit normal of triangle
 REAL(8), INTENT(in) :: pt(3) !< Evaluation point
 REAL(8), INTENT(in) :: va !< Vertex area of evaluation point
-REAL(8), INTENT(in) :: B_dx !< Spatial step size for finite difference evaluation
+REAL(8), INTENT(in) :: B_dx !< Length scale for points on the cell (evaluated 10*B_dx off the face)
 REAL(8) :: atmp(3,3) !< B-field from each basis function [3,3]
-INTEGER(4) :: ii,jj,ik,iquad
-REAL(8) :: dl_min,dl_max,d2,tmp,pt_j(3),pt_i(3),diffvec(3),gvec(3)
+INTEGER(4) :: ii,ik,iquad
+REAL(8) :: dl_min,dl_max,d2,pt_j(3),pt_i(3),diffvec(3),gvec(3)
 LOGICAL :: is_neighbor
 !---Compute minimum separation (squared distances)
 dl_min=1.d99
@@ -2393,25 +2417,11 @@ END IF
 pt_j=pt
 IF(iquad>10)THEN
   IF(is_neighbor)THEN
-    pt_j = pt_j - norm_i*10.d0*B_dx ! Sample just inside face
+    !---Point on the cell: average just inside and just outside the face (the tangential field jumps across the sheet)
+    diffvec=(tw_compute_phigrad(pts_i,pt-norm_i*10.d0*B_dx)+tw_compute_phigrad(pts_i,pt+norm_i*10.d0*B_dx))/2.d0
+  ELSE
+    diffvec=tw_compute_phigrad(pts_i,pt)
   END IF
-  diffvec=0.d0
-  DO ik=1,2
-    IF(ik==2)pt_j=pt_j+norm_i*20.d0*B_dx ! Sample just outside face
-    DO jj=1,3
-      ! Forward step
-      pt_j(jj)=pt_j(jj)+B_dx
-      tmp=tw_compute_phipot(pts_i,pt_j)
-      diffvec(jj)=diffvec(jj)+tmp/(2.d0*B_dx)
-      ! Backward step
-      pt_j(jj)=pt_j(jj)-2.d0*B_dx
-      tmp=tw_compute_phipot(pts_i,pt_j)
-      diffvec(jj)=diffvec(jj)-tmp/(2.d0*B_dx)
-      pt_j(jj)=pt_j(jj)+B_dx ! Reset point
-    END DO
-    IF(.NOT.is_neighbor)EXIT
-  END DO
-  IF(is_neighbor)diffvec=diffvec/2.d0
   DO ik=1,3
     atmp(1,ik) = diffvec(2)*evec_i(3,ik) - diffvec(3)*evec_i(2,ik)
     atmp(2,ik) = diffvec(3)*evec_i(1,ik) - diffvec(1)*evec_i(3,ik)
@@ -2467,14 +2477,232 @@ DO i=1,3
   ip=MOD(i,3)+1
   e=r(:,ip)-r(:,i)
   elen=SQRT(SUM(e**2))
-  num=rmag(ip)*elen + SUM(r(:,ip)*e)
-  den=rmag(i)*elen + SUM(r(:,i)*e)
-  IF(ABS(den)<1.d-14.OR.elen<1.d-14)CYCLE
+  IF(elen<1.d-14)CYCLE
   phi=phi+(nhat(1)*(r(2,i)*r(3,ip)-r(3,i)*r(2,ip)) + nhat(2)*(r(3,i)*r(1,ip)-r(1,i)*r(3,ip)) &
-    + nhat(3)*(r(1,i)*r(2,ip)-r(2,i)*r(1,ip)))*LOG(num/den)/elen
+    + nhat(3)*(r(1,i)*r(2,ip)-r(2,i)*r(1,ip)))*tw_edge_lineint(r(:,i),r(:,ip),rmag(i),rmag(ip),e,elen)/elen
 END DO
 DEBUG_STACK_POP
 END FUNCTION tw_compute_phipot
+!---------------------------------------------------------------------------------
+!> Integral of \f$ 1/|r-r'| \f$ along a straight edge from \f$ r_a \f$ to \f$ r_b \f$ (relative to the
+!! observation point), \f$ \ln((|r_b|+s_b)/(|r_a|+s_a)) \f$ with \f$ s = r \cdot \hat{e} \f$
+!!
+!! Evaluated as \f$ \ln((|r_a|-s_a)/(|r_b|-s_b)) \f$ when the point lies mostly beyond the end \f$ r_b \f$
+!! (\f$ s_a+s_b<0 \f$), where the first form cancels; both are exact, including for points on the line of the
+!! edge outside it. Zero for points on the edge itself (singular).
+!---------------------------------------------------------------------------------
+PURE FUNCTION tw_edge_lineint(ra,rb,rma,rmb,e,elen) RESULT(val)
+REAL(8), INTENT(in) :: ra(3) !< Start vertex relative to the observation point
+REAL(8), INTENT(in) :: rb(3) !< End vertex relative to the observation point
+REAL(8), INTENT(in) :: rma !< \f$ |r_a| \f$
+REAL(8), INTENT(in) :: rmb !< \f$ |r_b| \f$
+REAL(8), INTENT(in) :: e(3) !< Edge vector, rb-ra
+REAL(8), INTENT(in) :: elen !< Edge length
+REAL(8) :: val !< Line integral (0 for points on the edge)
+REAL(8) :: sa,sb,num,den
+sa=SUM(ra*e)/elen
+sb=SUM(rb*e)/elen
+IF(sa+sb>=0.d0)THEN
+  num=rmb+sb; den=rma+sa
+ELSE
+  num=rma-sa; den=rmb-sb
+END IF
+IF(MIN(num,den)<=1.d-14*(rma+rmb))THEN
+  val=0.d0
+ELSE
+  val=LOG(num/den)
+END IF
+END FUNCTION tw_edge_lineint
+!------------------------------------------------------------------------------
+!> ACA+ (adaptive cross approximation with a reference row and column) of a block given by its rows and columns
+!!
+!! Builds \f$ K \approx U V \f$ one rank-1 term at a time, each from a residual row and column chosen by partial
+!! pivoting against a reference row and column. Stops once the Frobenius norm of the latest term is below `tol`
+!! (or below `tol` times the estimated norm of the approximation, with `rel_tol`) after at least `min_its` terms.
+!! Fails (`nterms=-1`) if `max_iter-1` terms are reached first. `max_iter` is limited to `MIN(nrows,ncols)+1`, so
+!! every term has an unused pivot row and column.
+!------------------------------------------------------------------------------
+SUBROUTINE tw_aca_plus(src,nrows,ncols,tol,min_its,max_iter,Iref_in,Jref_in,U,V,nterms,rel_tol)
+CLASS(tw_aca_source), INTENT(inout) :: src !< Rows and columns of the block
+INTEGER(4), INTENT(in) :: nrows !< Number of rows
+INTEGER(4), INTENT(in) :: ncols !< Number of columns
+REAL(8), INTENT(in) :: tol !< Tolerance on the Frobenius norm of the latest term
+INTEGER(4), INTENT(in) :: min_its !< Minimum number of terms
+INTEGER(4), INTENT(in) :: max_iter !< Maximum number of iterations (at most `max_iter-1` terms)
+INTEGER(4), INTENT(in) :: Iref_in !< Initial reference row
+INTEGER(4), INTENT(in) :: Jref_in !< Initial reference column
+REAL(8), ALLOCATABLE, INTENT(out) :: U(:,:) !< Left factor (residual columns) [nrows,nterms]
+REAL(8), ALLOCATABLE, INTENT(out) :: V(:,:) !< Right factor (scaled residual rows) [nterms,ncols]
+INTEGER(4), INTENT(out) :: nterms !< Number of terms (-1 if not converged)
+LOGICAL, OPTIONAL, INTENT(in) :: rel_tol !< Is `tol` relative to the norm of the approximation?
+INTEGER(4) :: Iref,Jref,Istar,Jstar,i,k,kmax
+LOGICAL :: rel
+REAL(8) :: step_size,Istar_val,Jstar_val,fro2
+REAL(8), ALLOCATABLE :: us(:,:),vs(:,:),RIstar(:),RJstar(:),RIref(:),RJref(:)
+LOGICAL, ALLOCATABLE :: prevIstar(:),prevJstar(:)
+rel=.FALSE.
+IF(PRESENT(rel_tol))rel=rel_tol
+kmax=MIN(max_iter,MIN(nrows,ncols)+1)
+IF(kmax<2)THEN
+  nterms=-1
+  RETURN
+END IF
+ALLOCATE(us(nrows,kmax),vs(kmax,ncols))
+us=0.d0
+vs=0.d0
+nterms=0
+fro2=0.d0
+ALLOCATE(prevIstar(nrows),prevJstar(ncols))
+prevIstar=.TRUE. ! Rows not yet used as pivots
+prevJstar=.TRUE. ! Columns not yet used as pivots
+ALLOCATE(RIstar(ncols),RJstar(nrows),RIref(ncols),RJref(nrows))
+Iref=Iref_in
+Jref=Jref_in
+CALL src%row(Iref,RIref)
+CALL src%col(Jref,RJref)
+step_size=-1.d0
+DO k=1,kmax
+  !---Pivot candidates from the reference column and row
+  Jstar=tw_max_masked(ABS(RIref),prevJstar)
+  Istar=tw_max_masked(ABS(RJref),prevIstar)
+  Jstar_val=ABS(RIref(Jstar))
+  Istar_val=ABS(RJref(Istar))
+  IF(Istar_val>Jstar_val)THEN
+    !---Pivot on the row first, then the largest entry of its residual
+    CALL src%row(Istar,RIstar)
+    DO i=1,nterms
+      RIstar=RIstar-us(Istar,i)*vs(i,:)
+    END DO
+    Jstar=tw_max_masked(ABS(RIstar),prevJstar)
+    CALL src%col(Jstar,RJstar)
+    DO i=1,nterms
+      RJstar=RJstar-us(:,i)*vs(i,Jstar)
+    END DO
+  ELSE
+    !---Pivot on the column first, then the largest entry of its residual
+    CALL src%col(Jstar,RJstar)
+    DO i=1,nterms
+      RJstar=RJstar-us(:,i)*vs(i,Jstar)
+    END DO
+    Istar=tw_max_masked(ABS(RJstar),prevIstar)
+    CALL src%row(Istar,RIstar)
+    DO i=1,nterms
+      RIstar=RIstar-us(Istar,i)*vs(i,:)
+    END DO
+  END IF
+  prevIstar(Istar)=.FALSE.
+  prevJstar(Jstar)=.FALSE.
+  !---New rank-1 term
+  nterms=nterms+1
+  vs(nterms,:)=RIstar/RIstar(Jstar)
+  us(:,nterms)=RJstar
+  step_size=SQRT(SUM(us(:,nterms)**2)*SUM(vs(nterms,:)**2))
+  IF(oft_debug_print(2))WRITE(*,'(A,3I4,2ES14.6)')oft_indent,k,Istar,Jstar,step_size,tol
+  IF(rel)THEN
+    !---Frobenius norm of the approximation, updated with the new term
+    fro2=fro2+step_size**2
+    IF(nterms>1)fro2=fro2+2.d0*SUM(MATMUL(TRANSPOSE(us(:,1:nterms-1)),us(:,nterms)) &
+      *MATMUL(vs(1:nterms-1,:),vs(nterms,:)))
+    IF((k>=min_its).AND.(step_size<tol*SQRT(ABS(fro2))))EXIT
+  ELSE
+    IF((k>=min_its).AND.(step_size<tol))EXIT
+  END IF
+  IF(k==kmax-1)THEN
+    step_size=-1.d0
+    EXIT
+  END IF
+  !---Replace the reference row if it was used as a pivot, otherwise update it with the new term
+  IF(Iref==Istar)THEN
+    DO Iref=1,nrows
+      IF(prevIstar(Iref))EXIT
+    END DO
+    CALL src%row(Iref,RIref)
+    DO i=1,nterms
+      RIref=RIref-us(Iref,i)*vs(i,:)
+    END DO
+  ELSE
+    RIref=RIref-us(Iref,nterms)*vs(nterms,:)
+  END IF
+  !---Same for the reference column
+  IF(Jref==Jstar)THEN
+    DO Jref=1,ncols
+      IF(prevJstar(Jref))EXIT
+    END DO
+    CALL src%col(Jref,RJref)
+    DO i=1,nterms
+      RJref=RJref-us(:,i)*vs(i,Jref)
+    END DO
+  ELSE
+    RJref=RJref-us(:,nterms)*vs(nterms,Jref)
+  END IF
+END DO
+IF(step_size>0.d0)THEN
+  ALLOCATE(U(nrows,nterms),V(nterms,ncols))
+  U=us(:,1:nterms)
+  V=vs(1:nterms,:)
+ELSE
+  nterms=-1
+END IF
+DEALLOCATE(us,vs,RIstar,RJstar,RIref,RJref,prevIstar,prevJstar)
+END SUBROUTINE tw_aca_plus
+!------------------------------------------------------------------------------
+!> Location of the largest value where `mask` is set
+!------------------------------------------------------------------------------
+FUNCTION tw_max_masked(vals,mask) RESULT(iloc)
+REAL(8), INTENT(in) :: vals(:) !< Values
+LOGICAL, INTENT(in) :: mask(:) !< Candidates
+INTEGER(4) :: iloc !< Index of the largest candidate value (0 if no entry of `mask` is set)
+REAL(8) :: max_tmp
+INTEGER(4) :: i
+max_tmp=-1.d99
+iloc=0
+DO i=1,SIZE(vals)
+  IF((vals(i)>max_tmp).AND.mask(i))THEN
+    max_tmp=vals(i)
+    iloc=i
+  END IF
+END DO
+END FUNCTION tw_max_masked
+!---------------------------------------------------------------------------------
+!> Compute \f$ \nabla \int 1/|r-r'| dA' \f$ for a triangle (gradient with respect to the observation point)
+!!
+!! \f$ \nabla \phi = -\sum_i \hat{m}_i \int_{e_i} dl'/|r-r'| + \hat{n} \Omega \f$, with \f$ \hat{m}_i \f$ the outward
+!! in-plane normal of edge \f$ e_i \f$ and \f$ \Omega \f$ the signed solid angle (as in @ref tw_compute_phipot)
+!---------------------------------------------------------------------------------
+FUNCTION tw_compute_phigrad(pt_cell,pt) RESULT(grad)
+REAL(8), INTENT(in) :: pt_cell(3,3) !< Vertices defining triangle
+REAL(8), INTENT(in) :: pt(3) !< Observation point (r)
+REAL(8) :: grad(3) !< Gradient of the potential with respect to `pt`
+REAL(8) :: nhat(3),a(3),b(3),r(3,3),rmag(3),e(3),elen,num,den
+INTEGER(4) :: i,ip
+DEBUG_STACK_PUSH
+!---Get unit normal
+a=pt_cell(:,2)-pt_cell(:,1)
+b=pt_cell(:,3)-pt_cell(:,2)
+nhat=[a(2)*b(3)-a(3)*b(2), a(3)*b(1)-a(1)*b(3), a(1)*b(2)-a(2)*b(1)]
+nhat=nhat/SQRT(SUM(nhat**2))
+!---Compute local vectors
+DO i=1,3
+  r(:,i)=pt_cell(:,i)-pt
+  rmag(i)=SQRT(SUM(r(:,i)**2))
+END DO
+!---Normal part: signed solid angle
+num=r(1,1)*(r(2,2)*r(3,3)-r(3,2)*r(2,3)) + r(2,1)*(r(3,2)*r(1,3)-r(1,2)*r(3,3)) &
+  + r(3,1)*(r(1,2)*r(2,3)-r(2,2)*r(1,3))
+den=rmag(1)*rmag(2)*rmag(3) + SUM(r(:,1)*r(:,2))*rmag(3) &
+  + SUM(r(:,1)*r(:,3))*rmag(2) + SUM(r(:,2)*r(:,3))*rmag(1)
+grad=nhat*2.d0*ATAN2(num,den)
+!---In-plane part: outward edge normals times the edge integrals of 1/|r-r'|
+DO i=1,3
+  ip=MOD(i,3)+1
+  e=r(:,ip)-r(:,i)
+  elen=SQRT(SUM(e**2))
+  IF(elen<1.d-14)CYCLE
+  grad=grad-[e(2)*nhat(3)-e(3)*nhat(2), e(3)*nhat(1)-e(1)*nhat(3), e(1)*nhat(2)-e(2)*nhat(1)] &
+    *tw_edge_lineint(r(:,i),r(:,ip),rmag(i),rmag(ip),e,elen)/elen
+END DO
+DEBUG_STACK_POP
+END FUNCTION tw_compute_phigrad
 !---------------------------------------------------------------------------------
 !> Compute the magnetic field reconstruction operators at the mesh vertices
 !!
