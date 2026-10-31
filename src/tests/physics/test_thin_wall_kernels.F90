@@ -14,7 +14,13 @@
 !!   of exact rank just below the break-even rank, a Kahan block whose pivoted QR needs more columns than the
 !!   break-even rank although its SVD rank is below it, and an incompressible block (SVD);
 !! - ACA+ (@ref thin_wall::tw_aca_plus "tw_aca_plus") of a smooth kernel block with absolute and relative tolerance,
-!!   and of an incompressible block (dense block).
+!!   and of an incompressible block (dense block);
+!! - straight segment pair integrals (@ref thin_wall::tw_seg_seg_int "tw_seg_seg_int") for close parallel, skew and
+!!   collinear pairs (quadrature);
+!! - the softened kernel of a circular coil (@ref thin_wall::tw_ring_seg_int "tw_ring_seg_int") along a polygon of
+!!   the same coil (softened ring-ring mutual), and the exact kernel along straight segments passing within 1 mm or
+!!   1 cm of the coil, tangent or tilted, with the closest point between or on the samples used to find it
+!!   (quadrature).
 !!
 !! @authors Ian Stewart
 !! @date October 2026
@@ -47,14 +53,25 @@ END MODULE test_thin_wall_kernels_aca
 !------------------------------------------------------------------------------
 PROGRAM test_thin_wall_kernels
 USE oft_base
-USE thin_wall, ONLY: tw_compute_phipot, tw_compute_phigrad, tw_aca_plus
+USE thin_wall, ONLY: tw_compute_phipot, tw_compute_phigrad, tw_aca_plus, tw_seg_seg_int, tw_ring_seg_int
+USE axi_green, ONLY: green
 USE thin_wall_hodlr, ONLY: tw_lowrank_qrcp
 USE test_thin_wall_kernels_aca, ONLY: dense_source
 IMPLICIT NONE
 TYPE(dense_source) :: src
 INTEGER(i4) :: i,j,k,io_unit,rank
-REAL(r8) :: pt(3)
+REAL(r8) :: pt(3),ua(3),pa(3),pb(3)
+!---Segments near a ring (R=1, Z=0): distance from the ring, tilt from the tangent (degrees), length, and fraction of
+!   the length at which the segment passes the ring
+REAL(r8), PARAMETER :: rsegs(4,6) = RESHAPE([1.d-3,30.d0,1.d0,0.0625d0, 1.d-3,30.d0,0.5d0,0.0625d0, &
+  1.d-3,30.d0,0.1d0,0.0625d0, 1.d-2,30.d0,1.d0,0.0625d0, 1.d-3,0.d0,1.d0,0.0625d0, 1.d-3,30.d0,1.d0,0.125d0],[4,6])
 REAL(r8), ALLOCATABLE :: A(:,:),U(:,:),V(:,:)
+!---Segment pairs (a0, a1, b0, b1): partly overlapping parallel, parallel at two offsets, skew, collinear and separated
+REAL(r8), PARAMETER :: segs(3,4,5) = RESHAPE([0.d0,0.d0,0.d0, 1.d0,0.d0,0.d0, 0.d0,0.01d0,0.d0, 0.5d0,0.01d0,0.d0, &
+  0.d0,0.d0,0.d0, 1.d0,0.d0,0.d0, 0.d0,0.01d0,0.d0, 1.d0,0.01d0,0.d0, &
+  0.d0,0.d0,0.d0, 1.d0,0.d0,0.d0, 0.d0,0.001d0,0.d0, 1.d0,0.001d0,0.d0, &
+  0.d0,0.d0,0.d0, 1.d0,0.d0,0.d0, 0.3d0,0.05d0,-0.2d0, 0.6d0,0.02d0,0.4d0, &
+  0.d0,0.d0,0.d0, 1.d0,0.d0,0.d0, 1.2d0,0.001d0,0.d0, 2.d0,0.001d0,0.d0],[3,4,5])
 REAL(r8), PARAMETER :: tri(3,3) = RESHAPE([0.d0,0.d0,0.d0, 1.d0,0.d0,0.d0, 0.d0,1.d0,0.d0],[3,3]) !< Unit triangle
 REAL(r8), PARAMETER :: scales(2) = [1.d0, 1.d-3] !< Metre and millimetre scale
 !---Observation points (unit triangle): off the plane, in the plane, and collinear with each edge beyond either end
@@ -85,6 +102,31 @@ IF(oft_env%head_proc)THEN
       WRITE(io_unit,'(100ES24.15)')A(i,:)
     END DO
     DEALLOCATE(A)
+  END DO
+  CLOSE(io_unit)
+  !---Segment pair integrals: the four points, then the integral
+  OPEN(NEWUNIT=io_unit,FILE='thin_wall_segseg.results')
+  DO k=1,5
+    WRITE(io_unit,'(13ES24.15)')segs(:,:,k),tw_seg_seg_int(segs(:,1,k),segs(:,2,k),segs(:,3,k),segs(:,4,k),0.d0)
+  END DO
+  CLOSE(io_unit)
+  !---Softened ring kernel along a 400-point polygon of the same ring (R=1, Z=0, c^2=1E-4), and the softened
+  !   ring-ring mutual (height difference sqrt(dz^2+c^2))
+  OPEN(NEWUNIT=io_unit,FILE='thin_wall_ringpoly.results')
+  pt=0.d0
+  DO k=1,400
+    pt(1)=pt(1)+tw_ring_seg_int([1.d0,0.d0],[COS(2.d0*pi*(k-1)/400.d0),SIN(2.d0*pi*(k-1)/400.d0),0.d0], &
+      [COS(2.d0*pi*k/400.d0),SIN(2.d0*pi*k/400.d0),0.d0],1.d-4)
+  END DO
+  WRITE(io_unit,'(2ES24.15)')pt(1),-8.d0*pi*pi*green(1.d0,SQRT(1.d-4),1.d0,0.d0)
+  CLOSE(io_unit)
+  !---Exact ring kernel along segments passing close to the ring: the two end points, then the integral
+  OPEN(NEWUNIT=io_unit,FILE='thin_wall_ringseg.results')
+  DO k=1,6
+    ua=[0.d0,COS(rsegs(2,k)*pi/180.d0),SIN(rsegs(2,k)*pi/180.d0)]
+    pa=[1.d0+rsegs(1,k),0.d0,0.d0]-rsegs(4,k)*rsegs(3,k)*ua
+    pb=pa+rsegs(3,k)*ua
+    WRITE(io_unit,'(7ES24.15)')pa,pb,tw_ring_seg_int([1.d0,0.d0],pa,pb)
   END DO
   CLOSE(io_unit)
   !---ACA+: case, number of terms and relative error against the dense block
