@@ -505,17 +505,31 @@ def _write_thincurr_xml(xml_filename, eta_values=None, thickness_values=None, et
     write_oft_xml([thincurr_xml], xml_filename)
 
 
+def _get_oft_env():
+    '''OFT environment shared by the models built in this process (created on first use)'''
+    global _oft_env_singleton
+    if _oft_env_singleton is None:
+        from OpenFUSIONToolkit import OFT_env
+        _oft_env_singleton = OFT_env(nthreads=-1)
+    return _oft_env_singleton
+
+
+def _save_dummy_mesh(filename, eta_surf):
+    '''Save the dummy mesh with its surface resistivity (no XML file needed) to `filename`'''
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import ThinCurrMesh
+    from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+    r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
+    mesh = ThinCurrMesh(r_dummy, lc_dummy, np.ones((lc_dummy.shape[0],), dtype=np.int32))
+    mesh.set_resistivity(eta_surf=eta_surf)
+    mesh.save(filename)
+
+
 def _build_dummy_model(xml_filename):
-    from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.ThinCurr import ThinCurr
     from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
 
-    global _oft_env_singleton
-    if _oft_env_singleton is None:
-        _oft_env_singleton = OFT_env(nthreads=-1)
-
     r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
-    model = ThinCurr(_oft_env_singleton)
+    model = ThinCurr(_get_oft_env())
     model.setup_model(r=r_dummy, lc=lc_dummy, xml_filename=xml_filename)
     return model
 
@@ -572,48 +586,52 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
     return result_val
 
 
-@pytest.mark.coverage
 def run_bfield_no_icoils(use_hodlr,mp_q):
     """B-field operators and reconstruction for a model without Icoils (no coil currents given)"""
     result = None
     try:
-        os.chdir(test_dir)
-        from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        from OpenFUSIONToolkit.ThinCurr._mesh_cli import ThinCurrMesh
-        from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
-        r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
-        mesh = ThinCurrMesh(r_dummy, lc_dummy, np.ones((lc_dummy.shape[0],), dtype=np.int32))
-        mesh.set_resistivity(eta_surf=np.r_[1.E4*mu0])
-        mesh.save('tw_no_icoils.h5')
-        tw_model = ThinCurr(OFT_env(nthreads=1))
+        _save_dummy_mesh('tw_no_icoils.h5', np.r_[1.E4*mu0])
+        tw_model = ThinCurr(_get_oft_env())
         tw_model.setup_model(mesh_file='tw_no_icoils.h5')
         tw_model.setup_io(basepath=f'no_icoils_{use_hodlr}/')
         if use_hodlr:
             tw_model.set_hodlr_options(target_size=20)
         tw_model.compute_Lmat(use_hodlr=use_hodlr)
-        _, Bdr = tw_model.compute_Bmat()
         pot = np.sin(np.arange(tw_model.nelems)*0.37)
-        result = (Bdr.shape == (3, 0, tw_model.np), np.asarray(tw_model.reconstruct_Bfield(pot)))
+        checks = []
+        try:
+            tw_model.reconstruct_Bfield(pot)  # operators not computed yet
+            checks.append(False)
+        except ValueError:
+            checks.append(True)
+        _, Bdr = tw_model.compute_Bmat()
+        checks.append(Bdr.shape == (3, 0, tw_model.np))
+        try:
+            tw_model.reconstruct_Bfield(pot[:-1])  # wrong size
+            checks.append(False)
+        except ValueError:
+            checks.append(True)
+        field = np.asarray(tw_model.reconstruct_Bfield(pot))
+        checks.append(np.array_equal(field, tw_model.reconstruct_Bfield(pot[:, None])))  # column input
+        result = (all(checks), field)
     except BaseException as e:
         print(e)
+    oftpy_dump_cov()
     mp_q.put(result)
 
 
+@pytest.mark.coverage
 def test_bfield_no_icoils():
-    out = {}
-    for use_hodlr in (False, True):
-        mp_q = multiprocessing.Queue()
-        p = multiprocessing.Process(target=run_bfield_no_icoils, args=(use_hodlr, mp_q))
-        p.start()
-        out[use_hodlr] = mp_q.get(timeout=180)
-        p.join()
-        assert out[use_hodlr] is not None
-        assert out[use_hodlr][0]
-        assert np.all(np.isfinite(out[use_hodlr][1]))
+    out = {use_hodlr: mp_run(run_bfield_no_icoils, (use_hodlr,)) for use_hodlr in (False, True)}
+    for res in out.values():
+        assert res  # False (timeout or crash) or None (exception)
+        assert res[0]
+        assert np.all(np.isfinite(res[1]))
     assert np.allclose(out[True][1], out[False][1], rtol=0.0, atol=1.E-4*np.abs(out[False][1]).max())
 
 
+@pytest.mark.coverage
 def test_thickness_api_roundtrip_and_validation():
     assert mp_run(run_thickness_api_roundtrip_and_validation, ())
 
@@ -718,13 +736,8 @@ def run_thickness_api_roundtrip_and_validation(mp_q):
             tw_model.set_eta_values(eta_surf=eta_values, thickness=np.r_[1.E-3, 2.E-3])
         # Surface resistivity only from the mesh file: no volumetric resistivity is set
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        from OpenFUSIONToolkit.ThinCurr._mesh_cli import ThinCurrMesh
-        from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
-        r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
-        mesh = ThinCurrMesh(r_dummy, lc_dummy, np.ones((lc_dummy.shape[0],), dtype=np.int32))
-        mesh.set_resistivity(eta_surf=eta_values)
-        mesh.save('tw_eta_surf_only.h5')
-        tw_model_mesh_eta = ThinCurr(_oft_env_singleton)  # set by _build_dummy_model above
+        _save_dummy_mesh('tw_eta_surf_only.h5', eta_values)
+        tw_model_mesh_eta = ThinCurr(_get_oft_env())
         tw_model_mesh_eta.setup_model(mesh_file='tw_eta_surf_only.h5')
         eta_surf_mesh, eta_vol_mesh = tw_model_mesh_eta.get_eta_values(include_eta_vol=True)
         if not np.allclose(eta_surf_mesh, eta_values):
