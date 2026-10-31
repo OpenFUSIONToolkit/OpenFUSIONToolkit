@@ -29,7 +29,7 @@ USE mhd_utils, ONLY: mu0
 USE oft_quadrature, ONLY: oft_quad_type
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
   gs_cell_quad, &
-  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend, gs_fpol
+  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend, gs_fpol, gs_ffprim_pprime
 USE oft_gs_contour, ONLY: gs_rays_contour
 USE oft_gs_profiles
 USE grad_shaf_prof_phys, ONLY: jphi_flux_func
@@ -235,7 +235,7 @@ real(8), intent(out) :: tflux !< Contained toroidal flux
 real(8), intent(out) :: bp_vol !< \f$ \int B_p^2 dV \f$
 type(oft_lag_brinterp) :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp) :: psi_geval
-real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
+real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3),fpsi
 real(8) :: pt(3),curr_cent(2),Btor,Bpol(2),pani(2),bcross_kappa(1)
 integer(4) :: i,m
 class(oft_bmesh), pointer :: smesh
@@ -262,7 +262,7 @@ vol = 0.d0
 dflux = 0.d0
 tflux = 0.d0
 bp_vol = 0.d0
-!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,Btor,Bpol,bcross_kappa,pani,quad) &
+!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,fpsi,Btor,Bpol,bcross_kappa,pani,quad) &
 !$omp reduction(+:itor) reduction(+:centroid) reduction(+:pvol) reduction(+:vol) reduction(+:dflux) &
 !$omp reduction(+:tflux) reduction(+:bp_vol)
 do i=1,smesh%nc
@@ -275,8 +275,9 @@ do i=1,smesh%nc
     pt=smesh%log2phys(i,quad%pts(:,m))
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt))THEN
+      fpsi=self%I%F(psitmp(1))
       IF(self%mode==0)THEN
-        itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
+        itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*fpsi+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
         itor_loc = 0.5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
       END IF
@@ -294,9 +295,9 @@ do i=1,smesh%nc
       vol = vol + v*quad%wts(m)*pt(1)
       !---Compute total toroidal Field
       IF(self%mode==0)THEN
-        Btor = (self%ffp_scale*(self%I%F(psitmp(1))) + self%I%f_offset)/(pt(1)+gs_epsilon)
+        Btor = (self%ffp_scale*fpsi + self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2))/(pt(1)+gs_epsilon)
+        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*fpsi + self%I%f_offset**2))/(pt(1)+gs_epsilon)
       END IF
       tflux = tflux + Btor*v*quad%wts(m)
       !---Compute internal inductance
@@ -305,9 +306,9 @@ do i=1,smesh%nc
       bp_vol = bp_vol + SUM(Bpol**2)*v*quad%wts(m)*pt(1)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
-        Btor = self%ffp_scale*(self%I%F(psitmp(1)))/pt(1)
+        Btor = self%ffp_scale*fpsi/pt(1)
       ELSE
-        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2) &
+        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*fpsi + self%I%f_offset**2) &
         - self%I%f_offset)/pt(1)
       END IF
       dflux = dflux + Btor*v*quad%wts(m)
@@ -980,7 +981,7 @@ LOGICAL, OPTIONAL, INTENT(in) :: single_prec !< Save file with single precision 
 LOGICAL, OPTIONAL, INTENT(in) :: profile_derivs !< Append F*dF/dpsi and dp/dpsi records? (extends the format)
 LOGICAL, OPTIONAL, INTENT(in) :: psi_bounds !< Append the unpadded [psi_axis, psi_LCFS] record? (extends the format)
 CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str !< Error message (empty on success)
-REAL(8), OPTIONAL, INTENT(in) :: axis_pack !< Normalized flux of the innermost surface of a geometric axis zone (0: none)
+REAL(8), OPTIONAL, INTENT(in) :: axis_pack !< Normalized flux of the innermost surface of a geometric axis zone (<= 0: none)
 type(gsinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
@@ -989,8 +990,7 @@ real(8), allocatable :: ptout(:,:)
 real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),rzc(:,:,:),qf(:),un(:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: j,k,cell,io_unit,ierr
-LOGICAL :: do_pack,save_single,save_derivs,save_bounds,cc_done
-LOGICAL, allocatable :: ok(:)
+LOGICAL :: do_pack,save_single,save_derivs,save_bounds,cc_done(npsi)
 TYPE(spline_type) :: rz
 type(gs_factory), pointer :: device
 device=>gseq%device
@@ -1072,28 +1072,26 @@ do j=2,npsi
   cout(j,1) = xr*un(j) + x1
   cout(j,2)=gs_fpol(gseq,cout(j,1))
   cout(j,3)=gseq%p_scale*gseq%P%f(cout(j,1))/mu0
-  CALL ifile_derivs(gseq,cout(j,1),cout(j,2),cout(j,5:6))
+  cout(j,5:6)=gs_ffprim_pprime(gseq,cout(j,1))
 end do
 DEALLOCATE(un)
 !---Surfaces at uniform polar angle from the contour quadrature (exact on the FE surface);
-!---the field-line tracer below is the deprecated method and the fallback
+!---the field-line tracer below is the deprecated method and the fallback for the surfaces it rejects
 cc_done=.FALSE.
 IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
-  ALLOCATE(psi_q(npsi-1),rzc(2,ntheta-1,npsi-1),qf(npsi-1),ok(npsi-1))
+  ALLOCATE(psi_q(npsi-1),rzc(2,ntheta-1,npsi-1),qf(npsi-1))
   psi_q=(cout(2:npsi,1)-gseq%plasma_bounds(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
-  CALL gs_rays_contour(gseq,npsi-1,psi_q,ntheta-1,rzc,qf,ok)
-  IF(ALL(ok))THEN
-    DO j=2,npsi
-      rout(1:ntheta-1,j)=rzc(1,:,j-1); rout(ntheta,j)=rzc(1,1,j-1)
-      zout(1:ntheta-1,j)=rzc(2,:,j-1); zout(ntheta,j)=rzc(2,1,j-1)
-      cout(j,4)=cout(j,2)*qf(j-1)
-    END DO
-    cc_done=.TRUE.
-  END IF
-  DEALLOCATE(psi_q,rzc,qf,ok)
+  CALL gs_rays_contour(gseq,npsi-1,psi_q,ntheta-1,rzc,qf,cc_done(2:npsi))
+  DO j=2,npsi
+    IF(.NOT.cc_done(j))CYCLE
+    rout(1:ntheta-1,j)=rzc(1,:,j-1); rout(ntheta,j)=rzc(1,1,j-1)
+    zout(1:ntheta-1,j)=rzc(2,:,j-1); zout(ntheta,j)=rzc(2,1,j-1)
+    cout(j,4)=cout(j,2)*qf(j-1)
+  END DO
+  DEALLOCATE(psi_q,rzc,qf)
 END IF
 !---Trace
-IF(.NOT.cc_done)THEN
+IF(.NOT.ALL(cc_done(2:npsi)))THEN
 call set_tracer(1)
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 ALLOCATE(field)
@@ -1108,6 +1106,7 @@ active_tracer%inv=.TRUE.
 ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=2,npsi
+  IF(cc_done(j))CYCLE
   IF(PRESENT(error_str))THEN
     IF(error_str/="")CYCLE
   END IF
@@ -1115,7 +1114,7 @@ do j=2,npsi
   ! Trace contour
   !---------------------------------------------------------------------------
   psi_surf = cout(j,1)
-  IF(gseq%diverted.AND.ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near divertor
+  IF(ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near the LCFS
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
@@ -1173,13 +1172,9 @@ END IF
 rout(:,1)=raxis
 zout(:,1)=zaxis
 cout(1,1)=x2
-IF(gseq%mode==0)THEN
-  cout(1,2)=(gseq%ffp_scale*gseq%I%f(x2)+gseq%I%f_offset)
-ELSE
-  cout(1,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(x2) + gseq%I%f_offset**2)
-END IF
+cout(1,2)=gs_fpol(gseq,x2)
 cout(1,3)=gseq%p_scale*gseq%P%f(x2)/mu0
-CALL ifile_derivs(gseq,x2,cout(1,2),cout(1,5:6))
+cout(1,5:6)=gs_ffprim_pprime(gseq,x2)
 cout(1,4)=(cout(3,4)-cout(2,4))*(x2-cout(2,1))/(cout(3,1)-cout(2,1)) + cout(2,4)
 !---Add LCFS pressure if specified
 IF(PRESENT(lcfs_press))cout(:,3)=cout(:,3)+lcfs_press
@@ -1269,7 +1264,7 @@ end subroutine gs_save_ifile
 SUBROUTINE ifile_psi_nodes(npsi,pack,xa,u,ierr)
 INTEGER(i4), INTENT(in) :: npsi !< Number of flux points
 LOGICAL, INTENT(in) :: pack !< Quadratic packing toward the LCFS?
-REAL(r8), INTENT(in) :: xa !< Innermost surface of the axis zone, as a fraction from the axis (0: no zone)
+REAL(r8), INTENT(in) :: xa !< Innermost surface of the axis zone, as a fraction from the axis (<= 0: no zone)
 REAL(r8), INTENT(out) :: u(npsi) !< Flux points (1 at the axis, 0 at the padded LCFS)
 INTEGER(i4), INTENT(out) :: ierr !< 1 if the axis zone does not fit
 REAL(r8), PARAMETER :: lr=LOG(1.5d0)
@@ -1316,27 +1311,13 @@ END DO
 u(npsi)=0.d0
 CONTAINS
 !> Packing \f$ f(s) \f$
-PURE REAL(r8) FUNCTION pfun(s)
+PURE FUNCTION pfun(s) RESULT(f)
 REAL(r8), INTENT(in) :: s
-pfun=s
-IF(pack)pfun=1.d0-(1.d0-s)**2
+REAL(r8) :: f
+f=s
+IF(pack)f=1.d0-(1.d0-s)**2
 END FUNCTION pfun
 END SUBROUTINE ifile_psi_nodes
-!------------------------------------------------------------------------------
-!> F*dF/dpsi and dp/dpsi at `psi` (`fval` is F there)
-!------------------------------------------------------------------------------
-SUBROUTINE ifile_derivs(gseq,psi,fval,derivs)
-CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
-REAL(r8), INTENT(in) :: psi !< Poloidal flux
-REAL(r8), INTENT(in) :: fval !< F at psi
-REAL(r8), INTENT(out) :: derivs(2) !< [F*dF/dpsi, dp/dpsi]
-IF(gseq%mode==0)THEN
-  derivs(1)=fval*gseq%ffp_scale*gseq%I%fp(psi)
-ELSE
-  derivs(1)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi)
-END IF
-derivs(2)=gseq%p_scale*gseq%P%fp(psi)/mu0
-END SUBROUTINE ifile_derivs
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
@@ -1370,12 +1351,11 @@ INTEGER(4) :: nlim
 REAL(8), ALLOCATABLE, DIMENSION(:) :: rlim,zlim
 CHARACTER(LEN=48) :: eqdsk_case
 INTEGER(4) :: idum
-REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS
+REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS,fpp(2)
 REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi,ftrace,psi_q,qf
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
 REAL(8), ALLOCATABLE, DIMENSION(:,:,:) :: rzc
-LOGICAL :: do_truncate,cc_done
-LOGICAL, ALLOCATABLE, DIMENSION(:) :: ok
+LOGICAL :: do_truncate,cc_done(nr)
 !---
 device=>gseq%device
 IF(PRESENT(error_str))error_str=""
@@ -1440,31 +1420,27 @@ do j=1,nr
   psi_q(j)=psi_trace
   ftrace(j)=gs_fpol(gseq,psi_trace)
   fpol(j)=gs_fpol(gseq,psi_surf)
-  IF(gseq%mode==0)THEN
-    ffprim(j)=gseq%I%fp(psi_surf)*((gseq%ffp_scale**2)*gseq%I%f(psi_surf)+gseq%ffp_scale*gseq%I%f_offset)
-  ELSE
-    ffprim(j)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi_surf)
-  END IF
+  fpp=gs_ffprim_pprime(gseq,psi_surf)
+  ffprim(j)=fpp(1); pprime(j)=fpp(2)
   pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0
-  pprime(j)=gseq%p_scale*gseq%P%fp(psi_surf)/mu0
 end do
 !---q and the boundary contour (uniform polar angle) from the contour quadrature (exact on the
-!---FE surface); the field-line tracer below is the deprecated method and the fallback
-cc_done=.FALSE.
+!---FE surface); the field-line tracer below is the deprecated method and the fallback for the
+!---surfaces it rejects (not closed and star-shaped about the O-point)
+cc_done=.FALSE.; cc_done(1)=.TRUE.
 IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
-  ALLOCATE(rzc(2,nr-1,nr-1),qf(nr-1),ok(nr-1))
+  ALLOCATE(rzc(2,nr-1,nr-1),qf(nr-1))
   psi_q=(psi_q-gseq%plasma_bounds(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
-  CALL gs_rays_contour(gseq,nr-1,psi_q(2:nr),nr-1,rzc,qf,ok)
-  IF(ALL(ok))THEN
-    qpsi(2:nr)=ftrace(2:nr)*qf
+  CALL gs_rays_contour(gseq,nr-1,psi_q(2:nr),nr-1,rzc,qf,cc_done(2:nr))
+  WHERE(cc_done(2:nr))qpsi(2:nr)=ftrace(2:nr)*qf
+  IF(cc_done(nr))THEN
     rout(1:nr-1)=rzc(1,:,nr-1); rout(nr)=rzc(1,1,nr-1)
     zout(1:nr-1)=rzc(2,:,nr-1); zout(nr)=rzc(2,1,nr-1)
-    cc_done=.TRUE.
   END IF
-  DEALLOCATE(rzc,qf,ok)
+  DEALLOCATE(rzc,qf)
 END IF
 !---Trace
-IF(.NOT.cc_done)THEN
+IF(.NOT.ALL(cc_done))THEN
 call set_tracer(1)
 !$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field) firstprivate(pt_last)
 ALLOCATE(field)
@@ -1478,6 +1454,7 @@ active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
 !$omp do schedule(dynamic,1)
 do j=1,nr
+  IF(cc_done(j))CYCLE
   IF(PRESENT(error_str))THEN
     IF(error_str/="")CYCLE
   END IF
@@ -1487,7 +1464,7 @@ do j=1,nr
   psi_surf = x2 - xr*((j-1)/REAL(nr-1,8))
   psi_trace = psi_surf
   IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
-  IF(gseq%diverted.AND.(psi_trace-x1)/xr<0.02d0)THEN ! Use higher tracing tolerance near divertor
+  IF((psi_trace-x1)/xr<0.02d0)THEN ! Use higher tracing tolerance near the LCFS
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
