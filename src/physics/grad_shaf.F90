@@ -4013,7 +4013,7 @@ CONTAINS
 !! rises toward the axis value (into the core and the private-flux region), on the side of `vec`
 SUBROUTINE core_axis(pt,vec)
 REAL(8), INTENT(in) :: pt(2) !< X-point
-REAL(8), INTENT(inout) :: vec(2) !< In: a vector toward the O-point; out: the core axis (unchanged off the mesh)
+REAL(8), INTENT(inout) :: vec(2) !< In: a vector toward the O-point; out: the core axis
 TYPE(oft_lag_bg2interp) :: psi_g2interp
 INTEGER(4) :: icell
 REAL(8) :: fl(3),gop(3,3),vol,d2(6),lam,ax(2)
