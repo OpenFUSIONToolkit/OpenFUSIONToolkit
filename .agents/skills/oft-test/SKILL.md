@@ -93,7 +93,7 @@ as a broken build, check the reason (`-rs` prints a summary). The common ones co
 `run_OFT()` in `oft_testing.py`:
 
 - `Not compiled with PETSc` — the Fortran program reported that PETSc is unavailable. Without PETSc this covers a few hundred cases across `fem/`, `lin_alg/test_solver_xml.py`, and the MUG/Marklin physics tests.
-- `Configuration not supported` — the program printed `SKIP TEST`, eg. `lin_alg/test_native_bjacobi.py` cases whose direct solver (SuperLU, SuperLU-DIST, MUMPS, UMFPACK) this build lacks, and `lin_alg/test_arpack.py` without ARPACK.
+- `Configuration not supported` — the program printed `SKIP TEST`, eg. `lin_alg/test_native_bjacobi.py` cases whose direct solver (SuperLU, SuperLU-DIST, MUMPS, UMFPACK, STRUMPACK) this build lacks, `lin_alg/test_strumpack.py` without STRUMPACK, and `lin_alg/test_arpack.py` without ARPACK.
 - `Not compiled with MPI` — a `nproc > 1` case in a non-MPI build.
 - A bare `Skipped` — a parameter combination the test itself excludes (eg. matrix-free together with PETSc in the MUG tests).
 

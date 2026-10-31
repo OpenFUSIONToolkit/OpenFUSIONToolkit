@@ -6,7 +6,7 @@
 !> @file test_native_bjacobi.F90
 !
 !> Regression tests for native Block-Jacobi solver. Tests are performed
-!! on a unit cube at different polynomial orders using SuperLU.
+!! on a unit cube at different polynomial orders using several LU packages.
 !!
 !! The current test cases are:
 !! - Solve the Poisson equation \f$ \nabla \cdot \nabla T = 1 \f$
@@ -78,6 +78,12 @@ END IF
 #if !defined( HAVE_MKL )
 IF(sol_type==5)THEN
   WRITE(*,*)'SKIP TEST: 5'
+  CALL oft_finalize
+END IF
+#endif
+#if !defined( HAVE_STRUMPACK )
+IF(sol_type==6)THEN
+  WRITE(*,*)'SKIP TEST: 6'
   CALL oft_finalize
 END IF
 #endif
@@ -168,6 +174,8 @@ ELSE
       linv_pre_lu%package='umfpack'
     CASE(5)
       linv_pre_lu%package='mkl'
+    CASE(6)
+      linv_pre_lu%package='strumpack'
     CASE DEFAULT
       CALL oft_abort("Unknown LU solver package","test_lap",__FILE__)
   END SELECT
