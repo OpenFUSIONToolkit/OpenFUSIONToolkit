@@ -573,6 +573,47 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
 
 
 @pytest.mark.coverage
+def run_bfield_no_icoils(use_hodlr,mp_q):
+    """B-field operators and reconstruction for a model without Icoils (no coil currents given)"""
+    result = None
+    try:
+        os.chdir(test_dir)
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        from OpenFUSIONToolkit.ThinCurr._mesh_cli import ThinCurrMesh
+        from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+        r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
+        mesh = ThinCurrMesh(r_dummy, lc_dummy, np.ones((lc_dummy.shape[0],), dtype=np.int32))
+        mesh.set_resistivity(eta_surf=np.r_[1.E4*mu0])
+        mesh.save('tw_no_icoils.h5')
+        tw_model = ThinCurr(OFT_env(nthreads=1))
+        tw_model.setup_model(mesh_file='tw_no_icoils.h5')
+        tw_model.setup_io(basepath=f'no_icoils_{use_hodlr}/')
+        if use_hodlr:
+            tw_model.set_hodlr_options(target_size=20)
+        tw_model.compute_Lmat(use_hodlr=use_hodlr)
+        _, Bdr = tw_model.compute_Bmat()
+        pot = np.sin(np.arange(tw_model.nelems)*0.37)
+        result = (Bdr.shape == (3, 0, tw_model.np), np.asarray(tw_model.reconstruct_Bfield(pot)))
+    except BaseException as e:
+        print(e)
+    mp_q.put(result)
+
+
+def test_bfield_no_icoils():
+    out = {}
+    for use_hodlr in (False, True):
+        mp_q = multiprocessing.Queue()
+        p = multiprocessing.Process(target=run_bfield_no_icoils, args=(use_hodlr, mp_q))
+        p.start()
+        out[use_hodlr] = mp_q.get(timeout=180)
+        p.join()
+        assert out[use_hodlr] is not None
+        assert out[use_hodlr][0]
+        assert np.all(np.isfinite(out[use_hodlr][1]))
+    assert np.allclose(out[True][1], out[False][1], rtol=0.0, atol=1.E-4*np.abs(out[False][1]).max())
+
+
 def test_thickness_api_roundtrip_and_validation():
     assert mp_run(run_thickness_api_roundtrip_and_validation, ())
 
@@ -675,6 +716,21 @@ def run_thickness_api_roundtrip_and_validation(mp_q):
             tw_model_no_thickness.set_eta_values(eta_vol=np.r_[1.0e-6])
         with pytest.raises(IndexError):
             tw_model.set_eta_values(eta_surf=eta_values, thickness=np.r_[1.E-3, 2.E-3])
+        # Surface resistivity only from the mesh file: no volumetric resistivity is set
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        from OpenFUSIONToolkit.ThinCurr._mesh_cli import ThinCurrMesh
+        from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+        r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
+        mesh = ThinCurrMesh(r_dummy, lc_dummy, np.ones((lc_dummy.shape[0],), dtype=np.int32))
+        mesh.set_resistivity(eta_surf=eta_values)
+        mesh.save('tw_eta_surf_only.h5')
+        tw_model_mesh_eta = ThinCurr(_oft_env_singleton)  # set by _build_dummy_model above
+        tw_model_mesh_eta.setup_model(mesh_file='tw_eta_surf_only.h5')
+        eta_surf_mesh, eta_vol_mesh = tw_model_mesh_eta.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_mesh, eta_values):
+            result = False
+        if eta_vol_mesh is not None:
+            result = False
     except BaseException as e:
         print(e)
         result = False

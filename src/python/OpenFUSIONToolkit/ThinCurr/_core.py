@@ -312,11 +312,15 @@ class ThinCurr():
         '''! Reconstruct magnetic field on original grid
 
         @param weights Reduced model basis weights
-        @param coil_currs Coil currents [A]
+        @param coil_currs Icoil currents [A] (`n_icoils`, zero if not specified)
         @result Magnetic field on original grid `(:,3)`
         '''
         potential = numpy.ascontiguousarray(potential, dtype=numpy.float64)
+        if coil_currs is None:
+            coil_currs = numpy.zeros((self.n_icoils,), dtype=numpy.float64)
         coil_currs = numpy.ascontiguousarray(coil_currs, dtype=numpy.float64)
+        if coil_currs.shape != (self.n_icoils,):
+            raise ValueError('Size of "coil_currs" does not match number of Icoils')
         field = numpy.zeros((self.np,3), dtype=numpy.float64)
         if self.Lmat_hodlr:
             thincurr_recon_field(self.tw_obj,potential,coil_currs,field,self.Lmat_hodlr)
@@ -471,11 +475,14 @@ class ThinCurr():
             thincurr_Bmat(self.tw_obj,c_void_p(),B_dx,ctypes.byref(Bmat_loc),ctypes.byref(Bdr_ptr),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
-        if self.Lmat_hodlr:
-            return None, numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
+        if self.n_icoils > 0:
+            Bdr = numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
         else:
-            return numpy.ctypeslib.as_array(ctypes.cast(Bmat_loc, c_double_ptr),shape=(3,self.nelems,self.np)), \
-                numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
+            Bdr = numpy.zeros((3,0,self.np), dtype=numpy.float64)  # No Icoil operator is allocated
+        if self.Lmat_hodlr:
+            return None, Bdr
+        else:
+            return numpy.ctypeslib.as_array(ctypes.cast(Bmat_loc, c_double_ptr),shape=(3,self.nelems,self.np)), Bdr
 
     def compute_Mcoil(self,cache_file=None):
         '''! Compute the mutual inductance between passive (mesh+Vcoils) and active elements (Icoils)
