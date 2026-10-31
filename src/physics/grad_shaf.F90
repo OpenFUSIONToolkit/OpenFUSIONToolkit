@@ -4345,14 +4345,16 @@ END DO
 END SUBROUTINE add_tri
 END SUBROUTINE gs_split_setup
 !------------------------------------------------------------------------------
-!> Quadrature rule for plasma integrals on `cell`: the split rule (@ref gs_split_setup) if the
-!! plasma boundary (LCFS or X-point cut) may cross the cell, else the FE rule
+!> Quadrature rule for plasma integrals on `cell`: the FE rule, unless the split rule (@ref gs_split_setup) is set up;
+!! then no points if \f$ \psi \f$ stays below the LCFS, the split rule if the plasma boundary (LCFS or X-point cut)
+!! may cross the cell, else the FE rule
 !------------------------------------------------------------------------------
 SUBROUTINE gs_cell_quad(self,cell,vals,quad)
 CLASS(gs_equil), INTENT(inout) :: self !< G-S object
 INTEGER(i4), INTENT(in) :: cell !< Cell index
 REAL(r8), INTENT(in) :: vals(:) !< Local \f$ \psi \f$ values
 TYPE(oft_quad_type), POINTER, INTENT(out) :: quad !< Rule for this cell
+TYPE(oft_quad_type), TARGET, SAVE :: no_quad !< Rule without points
 INTEGER(i4) :: k,jd(self%device%fe_rep%nce)
 REAL(r8) :: lo,hi,pad
 LOGICAL :: msk(3)
@@ -4361,7 +4363,10 @@ IF((self%device%split_quad%np==0).OR.(self%plasma_bounds(1)<-1.d98))RETURN
 CALL self%device%fe_rep%ncdofs(cell,jd)
 lo=MINVAL(vals(jd)); hi=MAXVAL(vals(jd))
 pad=self%device%split_pad*(hi-lo)
-IF(hi+pad<=self%plasma_bounds(1))RETURN
+IF(hi+pad<=self%plasma_bounds(1))THEN
+  quad=>no_quad
+  RETURN
+END IF
 DO k=1,3
   msk(k)=gs_test_bounds(self,self%device%fe_rep%mesh%r(1:2,self%device%fe_rep%mesh%lc(k,cell)))
 END DO
