@@ -3498,7 +3498,7 @@ CLASS(oft_vector), intent(inout) :: b2 !< F*F' component of source (including `f
 CLASS(oft_vector), intent(inout) :: b3 !< P' component of source (without `p_scale`)
 REAL(8), INTENT(out) :: itor_ffp,itor_press,estore,dflux_ffp
 real(r8), pointer, dimension(:) :: atmp,btmp,b2tmp,b3tmp
-real(8) :: psitmp,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),pani(2)
+real(8) :: psitmp,gpsitmp(3),goptmp(3,3),det,pt(3),v,ffp(3),t1,gop(3),bcross_kappa(1),pani(2),fpsi(2),ppsi(2)
 real(8), allocatable :: rhs_loc(:,:),cond_fac(:),rop(:),vcache(:)
 integer(4) :: j,m,l
 integer(4), allocatable :: j_lag(:)
@@ -3529,7 +3529,7 @@ itor_ffp=0.d0
 itor_press=0.d0
 estore=0.d0
 dflux_ffp=0.d0
-!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp) &
+!$omp parallel private(rhs_loc,j_lag,ffp,curved,goptmp,v,m,det,pt,psitmp,l,rop,gop,vcache,bcross_kappa,pani,gpsitmp,fpsi,ppsi) &
 !$omp reduction(+:itor_ffp) reduction(+:itor_press) reduction(+:estore) reduction(+:dflux_ffp)
 allocate(rhs_loc(device%fe_rep%nce,3))
 allocate(rop(device%fe_rep%nce),vcache(device%fe_rep%nce))
@@ -3559,27 +3559,29 @@ do j=1,device%fe_rep%mesh%nc
         psitmp=psitmp+vcache(l)*rop(l)
       END DO
       IF(psitmp>self%plasma_bounds(1))THEN
+        fpsi=[self%I%f(psitmp),self%I%fp(psitmp)]
+        ppsi=[self%P%f(psitmp),self%P%fp(psitmp)]
         IF(self%mode==0)THEN
-          ffp(1:2)=((self%ffp_scale**2)*self%I%f(psitmp)+self%ffp_scale*self%I%f_offset)*self%I%fp(psitmp)
-          itor_ffp = itor_ffp + self%I%Fp(psitmp)*(self%I%f(psitmp)+self%I%f_offset)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
-          dflux_ffp = dflux_ffp + (self%ffp_scale*self%I%F(psitmp))/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+          ffp(1:2)=((self%ffp_scale**2)*fpsi(1)+self%ffp_scale*self%I%f_offset)*fpsi(2)
+          itor_ffp = itor_ffp + fpsi(2)*(fpsi(1)+self%I%f_offset)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+          dflux_ffp = dflux_ffp + (self%ffp_scale*fpsi(1))/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
         ELSE
-          ffp(1:2)=0.5d0*self%ffp_scale*self%I%fp(psitmp)
-          itor_ffp = itor_ffp + 0.5d0*self%I%Fp(psitmp)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
-          dflux_ffp = dflux_ffp + (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp) + self%I%f_offset**2) &
+          ffp(1:2)=0.5d0*self%ffp_scale*fpsi(2)
+          itor_ffp = itor_ffp + 0.5d0*fpsi(2)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
+          dflux_ffp = dflux_ffp + (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*fpsi(1) + self%I%f_offset**2) &
             - self%I%f_offset)/(pt(1)+gs_epsilon)*v*device%fe_rep%quad%wts(m)
         END IF
         ! Handle anisotropic pressure
         IF(ASSOCIATED(self%P_ani))THEN
           CALL self%P_ani%interp(j,device%fe_rep%quad%pts(:,m),goptmp,pani)
           CALL bcross_kappa_fun%interp(j,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
-          ffp([1,3]) = ffp([1,3]) + [self%p_scale,1.d0]*(self%P%fp(psitmp)*pani(2)+self%P%f(psitmp)*(pani(1)-pani(2))*bcross_kappa(1))*(pt(1)**2)
+          ffp([1,3]) = ffp([1,3]) + [self%p_scale,1.d0]*(ppsi(2)*pani(2)+ppsi(1)*(pani(1)-pani(2))*bcross_kappa(1))*(pt(1)**2)
         ELSE
-          ffp([1,3]) = ffp([1,3]) + [self%p_scale,1.d0]*self%P%fp(psitmp)*(pt(1)**2)
+          ffp([1,3]) = ffp([1,3]) + [self%p_scale,1.d0]*ppsi(2)*(pt(1)**2)
         END IF
         !
-        estore = estore + (self%P%F(psitmp))*v*device%fe_rep%quad%wts(m)*pt(1)
-        itor_press = itor_press + pt(1)*self%P%Fp(psitmp)*v*device%fe_rep%quad%wts(m)
+        estore = estore + ppsi(1)*v*device%fe_rep%quad%wts(m)*pt(1)
+        itor_press = itor_press + pt(1)*ppsi(2)*v*device%fe_rep%quad%wts(m)
       END IF
     END IF
     pt(1) = MAX(pt(1),gs_epsilon)

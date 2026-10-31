@@ -221,7 +221,7 @@ real(8), intent(out) :: tflux !< Contained toroidal flux
 real(8), intent(out) :: bp_vol !< \f$ \int B_p^2 dV \f$
 type(oft_lag_brinterp) :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp) :: psi_geval
-real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
+real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3),fpsi
 real(8) :: pt(3),curr_cent(2),Btor,Bpol(2),pani(2),bcross_kappa(1)
 integer(4) :: i,m
 class(oft_bmesh), pointer :: smesh
@@ -247,7 +247,7 @@ vol = 0.d0
 dflux = 0.d0
 tflux = 0.d0
 bp_vol = 0.d0
-!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,Btor,Bpol,bcross_kappa,pani) &
+!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,fpsi,Btor,Bpol,bcross_kappa,pani) &
 !$omp reduction(+:itor) reduction(+:centroid) reduction(+:pvol) reduction(+:vol) reduction(+:dflux) &
 !$omp reduction(+:tflux) reduction(+:bp_vol)
 do i=1,smesh%nc
@@ -259,8 +259,9 @@ do i=1,smesh%nc
     pt=smesh%log2phys(i,device%fe_rep%quad%pts(:,m))
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt))THEN
+      fpsi=self%I%F(psitmp(1))
       IF(self%mode==0)THEN
-        itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
+        itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*fpsi+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
         itor_loc = 0.5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
       END IF
@@ -278,9 +279,9 @@ do i=1,smesh%nc
       vol = vol + v*device%fe_rep%quad%wts(m)*pt(1)
       !---Compute total toroidal Field
       IF(self%mode==0)THEN
-        Btor = (self%ffp_scale*(self%I%F(psitmp(1))) + self%I%f_offset)/(pt(1)+gs_epsilon)
+        Btor = (self%ffp_scale*fpsi + self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2))/(pt(1)+gs_epsilon)
+        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*fpsi + self%I%f_offset**2))/(pt(1)+gs_epsilon)
       END IF
       tflux = tflux + Btor*v*device%fe_rep%quad%wts(m)
       !---Compute internal inductance
@@ -289,9 +290,9 @@ do i=1,smesh%nc
       bp_vol = bp_vol + SUM(Bpol**2)*v*device%fe_rep%quad%wts(m)*pt(1)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
-        Btor = self%ffp_scale*(self%I%F(psitmp(1)))/pt(1)
+        Btor = self%ffp_scale*fpsi/pt(1)
       ELSE
-        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2) &
+        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*fpsi + self%I%f_offset**2) &
         - self%I%f_offset)/pt(1)
       END IF
       dflux = dflux + Btor*v*device%fe_rep%quad%wts(m)
