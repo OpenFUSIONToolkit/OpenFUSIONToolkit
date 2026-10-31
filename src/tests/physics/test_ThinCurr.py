@@ -1282,3 +1282,262 @@ def test_td_volt_aca_coarse(pre_single,pre_neigs):
                            volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)),
                            jumper_start=2)
     assert validate_td(sigs_final,jumpers_final)
+
+
+def _sheet(n1, n2, mapping):
+    u, v = np.meshgrid(np.linspace(0.0, 1.0, n1 + 1), np.linspace(0.0, 1.0, n2 + 1), indexing='ij')
+    r = mapping(u.ravel(), v.ravel())
+    idx = lambda i, j: i*(n2 + 1) + j
+    lc = [[idx(i, j), idx(i + 1, j), idx(i + 1, j + 1)] for i in range(n1) for j in range(n2)]
+    lc += [[idx(i, j), idx(i + 1, j + 1), idx(i, j + 1)] for i in range(n1) for j in range(n2)]
+    return r, np.array(lc, dtype=np.int32)
+
+
+def test_combine_merge_points(tmp_path):
+    '''Combining sheets that share an edge joins them only with --merge_points'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh, read_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    sheets = (lambda u, v: np.c_[-0.5*u, v, 0*u], lambda u, v: np.c_[0.5*u, v, 0*u], lambda u, v: np.c_[0*u, v, 0.5*u])
+    files = []
+    for k, mapping in enumerate(sheets):
+        r, lc = _sheet(4, 8, mapping)
+        files.append(str(tmp_path / 'sheet{0}.h5'.format(k)))
+        write_ThinCurr_mesh(files[-1], r, lc, np.ones(lc.shape[0], dtype=np.int32), holes=[np.arange(3)],
+                            jumpers=[np.arange(0, 45, 9)], eta_surf=np.array([1.E-4]))
+    separate = combine_meshes(files)
+    assert separate.np == 3*45 and separate.nholes == 3
+    joined = combine_meshes(files, merge_points=True)
+    # The three sheets share the 9 points of the line x = z = 0
+    assert joined.np == 3*45 - 2*9 and joined.nc == separate.nc
+    assert np.all(joined.reg == separate.reg)
+    assert joined.holes is None and joined.closures is None
+    assert [len(j) for j in joined.jumpers] == [len(j) for j in separate.jumpers]
+    edges = {}
+    for cell in joined.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            edges[e] = edges.get(e, 0) + 1
+    assert max(edges.values()) == 3
+    # Command line
+    out_file = str(tmp_path / 'joined.h5')
+    result = subprocess.run([sys.executable, os.path.join(python_dir, "OFT_ThinCurr_mesh_tool.py"), "combine",
+                             "--in_files"] + files + ["--out_file", out_file, "--merge_points"])
+    assert result.returncode == 0
+    mesh = read_ThinCurr_mesh(out_file)
+    assert mesh['r'].shape[0] == joined.np and np.all(mesh['thincurr']['eta_surf'] == 1.E-4)
+    # A tolerance large enough to collapse cells is rejected
+    with pytest.raises(ValueError, match='collapses cells'):
+        combine_meshes(files, merge_points=True, merge_tol=0.2)
+
+
+def test_combine_regions(tmp_path):
+    '''Inputs with several regions: only points of different inputs merge, and excluded regions stay separate'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    # Input 0: two sheets meeting along x = z = 0 with separate, coincident points (an intended break)
+    # Input 1: a sheet meeting the first sheet of input 0 along x = -0.5, z = 0, and a sheet far from everything
+    inputs = ((lambda u, v: np.c_[-0.5*u, v, 0*u], lambda u, v: np.c_[0.5*u, v, 0*u]),
+              (lambda u, v: np.c_[-0.5 + 0*u, v, 0.5*u], lambda u, v: np.c_[u, v, 5.0 + 0*u]))
+    files = []
+    for k, sheets in enumerate(inputs):
+        parts = [_sheet(4, 8, mapping) for mapping in sheets]
+        r = np.vstack([p[0] for p in parts])
+        lc = np.vstack((parts[0][1], parts[1][1] + parts[0][0].shape[0]))
+        reg = np.repeat(np.array([1, 2], dtype=np.int32), [parts[0][1].shape[0], parts[1][1].shape[0]])
+        files.append(str(tmp_path / 'input{0}.h5'.format(k)))
+        write_ThinCurr_mesh(files[-1], r, lc, reg, eta_surf=np.array([1.E-4, 1.E-4]))
+    # Only the 9 points shared by the two inputs merge; the break within input 0 and the far sheet are kept
+    joined = combine_meshes(files, merge_points=True)
+    assert joined.np == 4*45 - 9 and joined.nregions == 4
+    # Excluding the touching sheet of input 1 (region 3 of the combined mesh) leaves it separate
+    excluded = combine_meshes(files, merge_points=True, no_stitch_regions=[3])
+    assert excluded.np == 4*45
+
+
+def test_combine_stitch_edge_on_face(tmp_path):
+    '''A plate's hole edge lying across a tube that passes through it is joined to the tube (T connection)'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    # Plate z = 0 on [-1, 1]^2 with a square hole [-0.2, 0.2]^2
+    r, lc = _sheet(10, 10, lambda u, v: np.c_[2*u - 1, 2*v - 1, 0*u])
+    lc = lc[np.max(np.abs(r[lc][:, :, :2].mean(axis=1)), axis=1) > 0.2]
+    # Square tube through the hole, with no ring of vertices at z = 0
+    n, nz = 12, 7
+    s = np.arange(n)*1.6/n
+    side, t = (s//0.4).astype(int), s % 0.4 - 0.2
+    xy = np.c_[np.select([side == 0, side == 1, side == 2], [t, 0*t + 0.2, -t], 0*t - 0.2),
+               np.select([side == 0, side == 1, side == 2], [0*t - 0.2, t, 0*t + 0.2], -t)]
+    rt = np.vstack([np.c_[xy, np.full(n, z)] for z in np.linspace(-0.5, 0.5, nz + 1)])
+    lct = [[k*n + i, k*n + (i + 1) % n, (k + 1)*n + (i + 1) % n] for k in range(nz) for i in range(n)]
+    lct += [[k*n + i, (k + 1)*n + (i + 1) % n, (k + 1)*n + i] for k in range(nz) for i in range(n)]
+    files = [str(tmp_path / 'plate.h5'), str(tmp_path / 'tube.h5')]
+    write_ThinCurr_mesh(files[0], r, lc, np.ones(lc.shape[0], dtype=np.int32))
+    write_ThinCurr_mesh(files[1], rt, np.array(lct, dtype=np.int32), np.ones(len(lct), dtype=np.int32))
+    joined = combine_meshes(files, stitch=True)
+    edges = {}
+    for cell in joined.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            edges[e] = edges.get(e, 0) + 1
+    # The hole edge is shared by the plate and both halves of the tube, all around
+    tee = [e for e, c in edges.items() if c == 3]
+    assert len(tee) > 0 and max(edges.values()) == 3
+    assert all(np.allclose(joined.r[list(e)][:, 2], 0.0) for e in tee)
+    hole = np.isclose(np.abs(joined.r[:, :2]).max(axis=1), 0.2) & np.isclose(joined.r[:, 2], 0.0)
+    assert all(c == 3 for e, c in edges.items() if hole[list(e)].all())
+
+
+def test_combine_stitch_two_seams(tmp_path):
+    '''A sheet with two seams (joined on both sides to sheets of another input) is stitched along both'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    # Input 0: plates on x in [-1, 0] and [1, 2]; input 1: a plate on x in [0, 1] with a different resolution
+    (ra, lca), (rc, lcc) = _sheet(4, 6, lambda u, v: np.c_[-u, v, 0*u]), _sheet(4, 6, lambda u, v: np.c_[1.0 + u, v, 0*u])
+    rb, lcb = _sheet(5, 9, lambda u, v: np.c_[u, v, 0*u])
+    files = [str(tmp_path / 'outer.h5'), str(tmp_path / 'middle.h5')]
+    write_ThinCurr_mesh(files[0], np.vstack((ra, rc)), np.vstack((lca, lcc + ra.shape[0])),
+                        np.ones(lca.shape[0] + lcc.shape[0], dtype=np.int32))
+    write_ThinCurr_mesh(files[1], rb, lcb, np.ones(lcb.shape[0], dtype=np.int32))
+    joined = combine_meshes(files, stitch=True)
+    edges = {}
+    for cell in joined.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            edges[e] = edges.get(e, 0) + 1
+    # Both seams are joined: every edge on x = 0 or x = 1 is shared by two cells
+    on_seams = [e for e in edges if np.allclose(joined.r[list(e)][:, 0], 0.0) or np.allclose(joined.r[list(e)][:, 0], 1.0)]
+    assert len(on_seams) > 0 and all(edges[e] == 2 for e in on_seams)
+    assert max(edges.values()) == 2
+
+
+def test_combine_stitch(tmp_path):
+    '''Sheets whose vertices do not line up along a shared edge are stitched to a common set of seam vertices'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    sheets = ((3, 6, lambda u, v: np.c_[-0.5*u, v, 0*u]), (5, 9, lambda u, v: np.c_[0.5*u, v, 0*u]),
+              (4, 7, lambda u, v: np.c_[0*u, v, 0.5*u]))
+    files = []
+    for k, (n1, n2, mapping) in enumerate(sheets):
+        r, lc = _sheet(n1, n2, mapping)
+        files.append(str(tmp_path / 'sheet{0}.h5'.format(k)))
+        write_ThinCurr_mesh(files[-1], r, lc, np.ones(lc.shape[0], dtype=np.int32))
+    def edge_counts(mesh):
+        edges = {}
+        for cell in mesh.lc:
+            for k in range(3):
+                e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+                edges[e] = edges.get(e, 0) + 1
+        return edges
+    # Without stitching the seam is not joined (no edge is shared by the three sheets)
+    assert max(edge_counts(combine_meshes(files, merge_points=True)).values()) == 2
+    joined = combine_meshes(files, stitch=True)
+    edges = edge_counts(joined)
+    on_seam = [e for e in edges if np.allclose(joined.r[list(e)][:, [0, 2]], 0.0)]
+    # 7 seam segments (the average of 6, 9 and 7), each shared by the three sheets
+    assert len(on_seam) == 7 and all(edges[e] == 3 for e in on_seam)
+    assert max(edges.values()) == 3
+    # Consistent orientation: each sheet's normals keep one direction
+    n = np.cross(joined.r[joined.lc[:, 1]] - joined.r[joined.lc[:, 0]], joined.r[joined.lc[:, 2]] - joined.r[joined.lc[:, 0]])
+    for reg in np.unique(joined.reg):
+        nr = n[joined.reg == reg]
+        assert np.all(nr @ nr[0] > 0.0)
+    # Keeping the finest input: its cells are unchanged and the seam has its 9 segments
+    kept = combine_meshes(files, stitch=True, stitch_keep=1)
+    r1, lc1 = _sheet(*sheets[1][:2], sheets[1][2])
+    keys = lambda r, lc: set(tuple(sorted(map(tuple, np.round(r[c], 9) + 0.0))) for c in lc)
+    assert keys(r1, lc1) <= keys(kept.r, kept.lc)
+    edges = edge_counts(kept)
+    on_seam = [e for e in edges if np.allclose(kept.r[list(e)][:, [0, 2]], 0.0)]
+    assert len(on_seam) == 9 and all(edges[e] == 3 for e in on_seam)
+
+
+def test_combine_stitch_partial(tmp_path):
+    '''A sheet along part of a shared edge (a stem on half of a plate seam) is stitched into it'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    sheets = ((3, 6, lambda u, v: np.c_[-0.5*u, v, 0*u]), (4, 9, lambda u, v: np.c_[0.5*u, v, 0*u]),
+              (4, 7, lambda u, v: np.c_[0*u, 0.5*v, 0.5*u]))
+    files = []
+    for k, (n1, n2, mapping) in enumerate(sheets):
+        r, lc = _sheet(n1, n2, mapping)
+        files.append(str(tmp_path / 'sheet{0}.h5'.format(k)))
+        write_ThinCurr_mesh(files[-1], r, lc, np.ones(lc.shape[0], dtype=np.int32))
+    joined = combine_meshes(files, stitch=True)
+    edges = {}
+    for cell in joined.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            edges[e] = edges.get(e, 0) + 1
+    on_seam = [e for e in edges if np.allclose(joined.r[list(e)][:, [0, 2]], 0.0)]
+    under_stem = [e for e in on_seam if joined.r[list(e), 1].max() <= 0.5 + 1.E-12]
+    # The whole seam is joined, with three sheets on the stem's half and two on the other half
+    assert all(edges[e] == 3 for e in under_stem) and all(edges[e] == 2 for e in on_seam if e not in under_stem)
+    assert len(under_stem) > 0 and len(under_stem) < len(on_seam)
+    assert max(edges.values()) == 3
+
+
+def test_combine_stitch_aligned_graded(tmp_path):
+    '''Stitching leaves seams whose vertices already coincide unchanged, and keeps a grading common to the inputs'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    def graded_sheet(n1, vs, mapping):
+        u, v = np.meshgrid(np.linspace(0.0, 1.0, n1 + 1), vs, indexing='ij')
+        n2 = len(vs) - 1
+        idx = lambda i, j: i*(n2 + 1) + j
+        lc = [[idx(i, j), idx(i + 1, j), idx(i + 1, j + 1)] for i in range(n1) for j in range(n2)]
+        lc += [[idx(i, j), idx(i + 1, j + 1), idx(i, j + 1)] for i in range(n1) for j in range(n2)]
+        return mapping(u.ravel(), v.ravel()), np.array(lc, dtype=np.int32)
+    maps = ((3, lambda u, v: np.c_[-0.5*u, v, 0*u]), (5, lambda u, v: np.c_[0.5*u, v, 0*u]), (4, lambda u, v: np.c_[0*u, v, 0.5*u]))
+    keys = lambda m: set(tuple(sorted(map(tuple, np.round(m.r[c], 9) + 0.0))) for c in m.lc)
+    def write(tag, vlist):
+        files = []
+        for k, ((n1, mapping), vs) in enumerate(zip(maps, vlist)):
+            r, lc = graded_sheet(n1, vs, mapping)
+            files.append(str(tmp_path / '{0}{1}.h5'.format(tag, k)))
+            write_ThinCurr_mesh(files[-1], r, lc, np.ones(lc.shape[0], dtype=np.int32))
+        return files
+    # Aligned (graded) seam: same result as merging points only
+    files = write('aligned', [np.linspace(0.0, 1.0, 9)**1.8]*3)
+    merged = combine_meshes(files, merge_points=True)
+    for keep in (None, 0):
+        stitched = combine_meshes(files, stitch=True, stitch_keep=keep)
+        assert stitched.np == merged.np and keys(stitched) == keys(merged)
+    # Same grading, different counts (6, 9, 7): the 7-segment seam keeps the grading
+    files = write('graded', [np.linspace(0.0, 1.0, n + 1)**1.8 for n in (6, 9, 7)])
+    stitched = combine_meshes(files, stitch=True)
+    ys = np.sort([p[1] for p in stitched.r if abs(p[0]) < 1.E-12 and abs(p[2]) < 1.E-12])
+    assert ys.size == 8
+    assert np.allclose(np.diff(ys), np.diff(np.linspace(0.0, 1.0, 8)**1.8), atol=0.01)
+
+
+def test_combine_close_gaps(tmp_path):
+    '''Sheets stopping short of a shared edge are extended to where their surfaces meet, then stitched'''
+    from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import combine_meshes
+    g, th = 0.02, np.radians(25.0)
+    sheets = ((3, 6, lambda u, v: np.c_[-(g + 0.48*u)*np.cos(th), v, -(g + 0.48*u)*np.sin(th)]),
+              (5, 9, lambda u, v: np.c_[(g + 0.48*u)*np.cos(th), v, -(g + 0.48*u)*np.sin(th)]),
+              (4, 7, lambda u, v: np.c_[0*u, v, g + 0.48*u]))
+    files = []
+    for k, (n1, n2, mapping) in enumerate(sheets):
+        r, lc = _sheet(n1, n2, mapping)
+        files.append(str(tmp_path / 'sheet{0}.h5'.format(k)))
+        write_ThinCurr_mesh(files[-1], r, lc, np.ones(lc.shape[0], dtype=np.int32))
+    joined = combine_meshes(files, close_gaps_tol=0.05)
+    edges = {}
+    for cell in joined.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            edges[e] = edges.get(e, 0) + 1
+    # The roof planes and the stem meet on the line x = z = 0
+    junction = [e for e, n in edges.items() if n == 3]
+    assert len(junction) == 7
+    assert np.allclose(joined.r[np.unique(junction)][:, [0, 2]], 0.0, atol=1.E-12)
+    # Gaps larger than the tolerance are left open
+    still_open = combine_meshes(files, close_gaps_tol=0.01)
+    counts = {}
+    for cell in still_open.lc:
+        for k in range(3):
+            e = tuple(sorted((int(cell[k]), int(cell[(k + 1) % 3]))))
+            counts[e] = counts.get(e, 0) + 1
+    assert max(counts.values()) == 2
