@@ -2408,6 +2408,8 @@ class TokaMaker():
     def setup_td(self,dt,lin_tol,nl_tol,pre_plasma=False):
         '''! Setup the time-dependent G-S solver
 
+        @note Requires at least one conducting region (finite `eta`) or Vcoil (see @ref set_vcoils), otherwise an exception is raised
+
         @param dt Starting time step
         @param lin_tol Tolerance for linear solver
         @param nl_tol Tolerance for non-linear solver
