@@ -257,7 +257,7 @@ do i=1,smesh%nc
     IF(psitmp(1)<self%plasma_bounds(1))CYCLE
     pt=smesh%log2phys(i,device%fe_rep%quad%pts(:,m))
     !---Compute Magnetic Field
-    IF(gs_test_bounds(self,pt))THEN
+    IF(gs_test_bounds(self,pt,i))THEN
       IF(self%mode==0)THEN
         itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
@@ -355,7 +355,7 @@ do i=1,smesh%nc
     IF(psitmp(1)<self%plasma_bounds(1))CYCLE
     pt=smesh%log2phys(i,device%fe_rep%quad%pts(:,m))
     !---Compute toroidal current itor, and eta*j^2 eta_jsq (numerator of Vloop integral)
-    IF(gs_test_bounds(self,pt))THEN
+    IF(gs_test_bounds(self,pt,i))THEN
       IF(ASSOCIATED(self%I_NI))I_NI=self%I_NI%Fp(psitmp(1))
       IF(self%mode==0)THEN
         itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
