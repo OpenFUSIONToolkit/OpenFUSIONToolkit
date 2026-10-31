@@ -2890,6 +2890,12 @@ IF(ASSOCIATED(saddle_save))THEN
   END IF
 END IF
 equil%skip_targets=.FALSE.
+!---If solving on full domain, update bounds regularly to allow tracing and other operations.
+IF(self%full_domain)THEN
+  self%full_domain=.FALSE.
+  CALL gs_update_bounds(equil)
+  self%full_domain=.TRUE.
+END IF
 !---
 IF(self%compute_chi)CALL equil%get_chi
 self%ierr=error_flag
