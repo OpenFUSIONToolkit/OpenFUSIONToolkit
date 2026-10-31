@@ -27,7 +27,8 @@ def create_prof_file(self, filename, profile_dict, name):
 
     @param filename Name of input file, see options in set_profiles()
     @param profile_dict Dictionary object containing profile values ['y'] and sampled locations ['x'],
-    in normalized Psi unless ['coord'] is 'phi_n' (normalized toroidal flux)
+    in normalized Psi unless ['coord'] is 'phi_n' (normalized toroidal flux), interpolated as ['interp']
+    ('linterp' or 'cubic')
     @param filename Name of input quantity, see options in set_profiles()
     '''
     coord = profile_dict.get('coord','psi_n')
@@ -36,7 +37,12 @@ def create_prof_file(self, filename, profile_dict, name):
     if coord == 'phi_n':  # Value profiles keep their values, derivative profiles are derivatives w.r.t. toroidal flux
         value = profile_dict['type'].startswith('jphi') or name in ('Te','Ti','ne','ni','Zeff','eta','jphi_fixed','jphi_saw')
         coord = 'phi_n_val' if value else 'phi_n_deriv'
-    file_lines = [profile_dict['type'] if coord == 'psi_n' else '{0} {1}'.format(profile_dict['type'], coord)]
+    interp = profile_dict.get('interp','linterp')
+    if (interp not in ('linterp','cubic')) or ((interp == 'cubic') and (profile_dict['type'] == 'flat')):
+        raise ValueError('Invalid interp "{0}" for {1} profile, must be "linterp" or (piecewise profiles) "cubic"'.format(interp, name))
+    if (interp == 'cubic') and ((len(profile_dict['x']) < 4) or (numpy.min(numpy.diff(profile_dict['x'])) <= 0.0)):
+        raise ValueError('A cubic {0} profile needs at least 4 strictly increasing psi values'.format(name))
+    file_lines = [' '.join([profile_dict['type']] + ([coord] if coord != 'psi_n' else []) + (['cubic'] if interp == 'cubic' else []))]
     if profile_dict['type'] == 'flat':
         pass
     elif (profile_dict['type'] == 'linterp') or (profile_dict['type'] == 'jphi-linterp') \
@@ -136,7 +142,10 @@ _BOOT_OPS_DEFAULTS = {
     'saw_relax': 1.0,
     'saw_ramp': 0.01,
     'saw_rule': 2,
+    'bs_interp': 2,
 }
+## Names of the `bs_interp` codes 1, 2, 3 (see @ref TokaMaker.TokaMaker_equilibrium.set_boot_ops "set_boot_ops")
+_BS_INTERP_NAMES = ('linterp', 'hermite', 'cubic')
 
 
 ## Keyword inputs of @ref TokaMaker.TokaMaker.solve_bootstrap "solve_bootstrap" kept between calls and in saved files
@@ -167,6 +176,31 @@ def _save_boot_inputs(filename, inputs):
                         sub.create_dataset(k, data=numpy.asarray(v, dtype=numpy.float64))
             else:
                 grp.attrs[key] = val if isinstance(val, str) else float(val)
+
+
+def _bs_interpolant(method, x, y):
+    '''! Interpolant of y(x) (x increasing) for a `bs_interp` method, NaN outside [x[0], x[-1]]
+
+    @param method 'linterp' (piecewise linear), 'hermite' (cubic Hermite with pchip slopes) or 'cubic'
+      (not-a-knot C2 spline)
+    @param x Nodes
+    @param y Values at x
+    @result Callable f(xs, nu=0): values (nu=0) or first derivatives (nu=1) at xs; for 'linterp' the derivative
+      is the finite-difference one at the nodes (xs must be x)
+    '''
+    from scipy.interpolate import CubicSpline, PchipInterpolator
+    x, y = numpy.asarray(x, dtype=numpy.float64), numpy.asarray(y, dtype=numpy.float64)
+    if method == 'hermite':
+        return PchipInterpolator(x, y, extrapolate=False)
+    if method == 'cubic':
+        return CubicSpline(x, y, bc_type='not-a-knot', extrapolate=False)
+    if method != 'linterp':
+        raise ValueError(f"bs_interp must be one of {_BS_INTERP_NAMES} (got {method!r})")
+    def linear(xs, nu=0):
+        if nu == 0:
+            return numpy.interp(xs, x, y, left=numpy.nan, right=numpy.nan)
+        return numpy.gradient(y, x, edge_order=2)
+    return linear
 
 
 def _load_boot_inputs(filename):
@@ -514,11 +548,13 @@ class TokaMaker():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def setup(self,order=2,F0=0.0,full_domain=False):
+    def setup(self,order=2,F0=0.0,full_domain=False,split_nlev=2):
         r'''! Setup G-S solver
 
         @param order Order of FE representation to use
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
+        @param split_nlev Plasma integrals split cells crossed by the plasma boundary into
+        \f$ 4^{split\_nlev} \f$ sub-cells (0: whole cells)
         '''
         if self.np != -1:
             raise ValueError('G-S instance already setup')
@@ -527,7 +563,7 @@ class TokaMaker():
         ncoils = c_int()
         Lmat_loc = c_double_ptr()
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_setup(self._tMaker_ptr,ctypes.byref(self._fe_ptr),order,full_domain,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
+        tokamaker_setup(self._tMaker_ptr,ctypes.byref(self._fe_ptr),order,full_domain,split_nlev,ctypes.byref(ncoils),ctypes.byref(Lmat_loc),error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
         # Update vacuum flux
@@ -909,6 +945,10 @@ class TokaMaker():
         Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized
         toroidal flux, ['y'] is then the derivative w.r.t. toroidal flux, eg. \f$dP/d\hat{\Phi}\f$, except for
         jphi profiles, whose ['y'] is \f$j_\phi\f$ as usual).
+
+        Optional profile key ['interp']: 'linterp' (default) or 'cubic', a not-a-knot cubic spline through the
+        nodes (C2; at least 4 strictly increasing ['x']). Use 'cubic' only for smooth node values on a fine enough
+        grid. A cubic profile on 'phi_n' also makes the toroidal flux map C2.
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -961,7 +1001,8 @@ class TokaMaker():
         @param jphi_fixed_prof Dictionary object containing fixed toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
         @param jphi_saw_prof Dictionary object containing the input sawtooth toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
 
-        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux).
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux),
+        and ['interp'] the interpolation: 'linterp' (default) or 'cubic' (see set_profiles()).
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -983,7 +1024,8 @@ class TokaMaker():
 
     def set_boot_ops(self, isolate_edge_jbs=None, scale_jbs=None, djbs_tol=None,
                      diagnose_bs=None, taper_edge_jphi=None, taper_edge_psi0=None, taper_edge_shape=None,
-                     saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None):
+                     saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None,
+                     bs_interp=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update
 
         See @ref TokaMaker.TokaMaker_equilibrium.set_boot_ops "set_boot_ops"
@@ -993,7 +1035,8 @@ class TokaMaker():
         return self._tMaker_equil.set_boot_ops(isolate_edge_jbs, scale_jbs, djbs_tol,
                                                diagnose_bs,
                                                taper_edge_jphi, taper_edge_psi0, taper_edge_shape,
-                                               saw_q_s, saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule)
+                                               saw_q_s, saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule,
+                                               bs_interp)
 
     def get_boot_profs(self):
         r'''! Get the current profiles of the last G-S solve with a `jphi-split-bootstrap` current profile
@@ -1597,10 +1640,10 @@ class TokaMaker():
         return Lmat
 
     def trace_surf(self,psi,nresample=None):
-        r'''! Trace surface for a given poloidal flux
+        r'''! Points on the surface of a given poloidal flux (contour, uniform polar angle about the O-point; tracer as fallback)
 
         @param psi Flux surface to trace \f$\hat{\psi}\f$
-        @param nresample Number of points to resample along the traced surface (default: None, return all points)
+        @param nresample Number of points to resample uniformly in arc length (default: None, return all points)
         @result \f$r(\hat{\psi})\f$
         '''
         if self._tMaker_equil is None:
@@ -2270,7 +2313,7 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         self._tMaker_equil.save_eqdsk(filename,nr,nz,rbounds,zbounds,run_info,lcfs_pad,rcentr,truncate_eq,limiter_file,lcfs_pressure,cocos)
 
-    def save_ifile(self,filename,npsi=65,ntheta=65,lcfs_pad=0.01,lcfs_pressure=0.0,pack_lcfs=True,single_precision=False):
+    def save_ifile(self,filename,npsi=129,ntheta=257,lcfs_pad=0.01,lcfs_pressure=0.0,pack_lcfs=True,single_precision=False,profile_derivs=False,psi_bounds=False,axis_pack=0.0):
         r'''! Save current equilibrium to iFile format
 
         @param filename Filename to save equilibrium to
@@ -2280,10 +2323,15 @@ class TokaMaker():
         @param lcfs_pressure Plasma pressure on the LCFS (zero by default)
         @param pack_lcfs Pack toward LCFS with quadraturic sampling?
         @param single_precision Save single precision file? (default: double precision)
+        @param profile_derivs Append \f$FF'\f$ and \f$P'\f$ records after Z? (extends the i-file format)
+        @param psi_bounds Append the unpadded \f$[\psi_{axis}, \psi_{LCFS}]\f$ record last? (extends the i-file format)
+        @param axis_pack Normalized flux of the innermost surface, with the spacing growing by about 1.5 per surface away from
+        the axis (\f$\le 0\f$: off); this uses about \f$\log_{1.5}(f_1/\mathrm{axis\_pack})\f$ of the `npsi` surfaces, with
+        \f$f_1 = 2/(n_\psi-1)\f$ if `pack_lcfs` and \f$1/(n_\psi-1)\f$ otherwise
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        self._tMaker_equil.save_ifile(filename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision)
+        self._tMaker_equil.save_ifile(filename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,profile_derivs,psi_bounds,axis_pack)
 
     def save_mug(self,filename):
         r'''! Save current equilibrium to MUG transfer format
@@ -2464,7 +2512,8 @@ class TokaMaker():
         take the value of the previous call (or of the loaded equilibrium), so repeating a call with the
         same positional arguments reproduces it. @ref boot_reset returns them to their defaults (shown below).
 
-        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'``: in ``coord``, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``)
+        @param ffp_prof Non-bootstrap toroidal current profile dict (``'x'``: in ``coord``, ``'y'``: jphi input shape, rescaled internally to match ``Ip_target``;
+          optional ``'interp'``: ``'cubic'`` for the C2 spline, see set_profiles(), also used for the P' profile built here)
         @param te_prof Electron temperature profile dict (``'x'``: in ``coord``, ``'y'``: \f$T_e\f$ [keV])
         @param ne_prof Electron density profile dict (``'x'``: in ``coord``, ``'y'``: \f$n_e\f$ [m\f$^{-3}\f$])
         @param ti_prof Ion temperature profile dict (``'x'``: in ``coord``, ``'y'``: \f$T_i\f$ [keV])
@@ -2497,7 +2546,7 @@ class TokaMaker():
         @param saw_q_s Sawtooth reset q floor; 0 = off (default: 0). The q of
           \f$\alpha j_{ind} + j_{BS} + j_{fixed} + j_{saw,in}\f$ in the traced geometry is reset where it dips
           below q_s (``saw_rule``); the Ip-neutral current that does this is added to ``jphi_saw``
-        @param saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule See ``set_boot_ops()``
+        @param saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule, bs_interp See ``set_boot_ops()``
 
         @result Dictionary with 1-D numpy array values (A/m² unless noted). All current densities, inputs
           included, are TokaMaker \f$j_\phi = \langle j_\phi \rangle = \langle R \rangle P' + \langle 1/R \rangle FF'/\mu_0\f$
@@ -2518,9 +2567,11 @@ class TokaMaker():
           - ``'saw_rho_m'``, ``'saw_rho_out'``, ``'saw_n_dips'`` Sawtooth radius (q_s + dq crossing beyond the outermost
             q < q_s, \f$\rho_{tor,N}\f$), outer end of the reset and number of regions reset, at the last reset
         '''
-        from scipy.interpolate import Akima1DInterpolator
         # Keyword inputs left as None keep their values from the previous call or the loaded state
         kept = self._tMaker_equil._boot_inputs or {}
+        # Profile interpolation: this call's bs_interp, else the kept one
+        bs_interp = kwargs.get('bs_interp') or \
+            _BS_INTERP_NAMES[(self._tMaker_equil._boot_ops or _BOOT_OPS_DEFAULTS)['bs_interp'] - 1]
         if (coord is not None) and (coord != (kept.get('coord') or 'psi_n')):
             # Kept profiles are on the kept coordinate, so they cannot be reused on another one
             p_passed = (pres_prof is not None) or (p_fixed_prof is not None)
@@ -2572,10 +2623,10 @@ class TokaMaker():
 
         # Evaluate pprime from kinetic profiles on the same psi 'x' grid as ffp_prof
         psi_sample = numpy.asarray(ffp_prof['x'])
-        Te_eV = Akima1DInterpolator(te_prof['x'], te_prof['y'])(psi_sample) * 1e3
-        ne    = Akima1DInterpolator(ne_prof['x'], ne_prof['y'])(psi_sample)
-        Ti_eV = Akima1DInterpolator(ti_prof['x'], ti_prof['y'])(psi_sample) * 1e3
-        ni    = Akima1DInterpolator(ni_prof['x'], ni_prof['y'])(psi_sample)
+        Te_eV = _bs_interpolant(bs_interp, te_prof['x'], te_prof['y'])(psi_sample) * 1e3
+        ne    = _bs_interpolant(bs_interp, ne_prof['x'], ne_prof['y'])(psi_sample)
+        Ti_eV = _bs_interpolant(bs_interp, ti_prof['x'], ti_prof['y'])(psi_sample) * 1e3
+        ni    = _bs_interpolant(bs_interp, ni_prof['x'], ni_prof['y'])(psi_sample)
         p_fixed = 0.0
         if p_fixed_prof is not None:
             if pres_prof is not None:
@@ -2585,7 +2636,7 @@ class TokaMaker():
             for _key in ('x', 'y'):
                 if _key not in p_fixed_prof:
                     raise ValueError(f"p_fixed_prof is missing required key '{_key}'")
-            p_fixed = Akima1DInterpolator(p_fixed_prof['x'], p_fixed_prof['y'])(psi_sample)
+            p_fixed = _bs_interpolant(bs_interp, p_fixed_prof['x'], p_fixed_prof['y'])(psi_sample)
             if numpy.any(p_fixed < 0.0):
                 raise ValueError("p_fixed_prof must be >= 0 at every point on the psi grid")
         pressure = eC * ne * Te_eV + eC * ni * Ti_eV + p_fixed
@@ -2595,15 +2646,15 @@ class TokaMaker():
             for _key in ('x', 'y'):
                 if _key not in pres_prof:
                     raise ValueError(f"pres_prof is missing required key '{_key}'")
-            pres_vals = Akima1DInterpolator(pres_prof['x'], pres_prof['y'])(psi_sample)
+            pres_vals = _bs_interpolant(bs_interp, pres_prof['x'], pres_prof['y'])(psi_sample)
             if numpy.any(pres_vals < pressure):
                 raise ValueError(
                     "pres_prof must be >= the kinetic pressure (eC*(ne*Te + ni*Ti)) at every point on the psi grid"
                 )
             pressure = pres_vals
-        if not numpy.all(numpy.isfinite(pressure)):  # Akima gives NaN outside its data
+        if not numpy.all(numpy.isfinite(pressure)):  # NaN outside the profiles' data
             raise ValueError("The kinetic, pres_prof and p_fixed_prof profiles must cover ffp_prof['x']")
-        pp_vals = Akima1DInterpolator(psi_sample, pressure).derivative()(psi_sample)
+        pp_vals = _bs_interpolant(bs_interp, psi_sample, pressure)(psi_sample, 1)
         pp_vals[-1] = 0.0
         # Shape only (the pax target sets the scale): normalise by the largest |P'|, which is
         # nonzero unless the pressure is flat (P'(axis) can be 0 for a flat core)
@@ -2611,6 +2662,7 @@ class TokaMaker():
         if pp_norm == 0.0:
             raise ValueError("The pressure profile is flat (P' = 0 everywhere)")
         pp_prof = {'type': 'linterp', 'x': psi_sample, 'y': pp_vals / pp_norm}
+        pp_prof['interp'] = ffp_prof.get('interp', 'linterp')
         if coord == 'phi_n':
             # P' above is dP/dPhi_N
             pp_prof['coord'] = 'phi_n'
@@ -2994,6 +3046,10 @@ class TokaMaker_equilibrium():
         Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized
         toroidal flux, ['y'] is then the derivative w.r.t. toroidal flux, eg. \f$dP/d\hat{\Phi}\f$, except for
         jphi profiles, whose ['y'] is \f$j_\phi\f$ as usual).
+
+        Optional profile key ['interp']: 'linterp' (default) or 'cubic', a not-a-knot cubic spline through the
+        nodes (C2; at least 4 strictly increasing ['x']). Use 'cubic' only for smooth node values on a fine enough
+        grid. A cubic profile on 'phi_n' also makes the toroidal flux map C2.
         '''
         delete_files = []
         ffp_file = 'none'
@@ -3099,7 +3155,8 @@ class TokaMaker_equilibrium():
         @param jphi_fixed_prof Dictionary object containing fixed toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
         @param jphi_saw_prof Dictionary object containing the input sawtooth toroidal current density profile in A/m^2 ['y'] and sampled locations in normalized Psi ['x']
 
-        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux).
+        Optional profile key ['coord'] sets the coordinate of ['x']: 'psi_n' (default) or 'phi_n' (normalized toroidal flux),
+        and ['interp'] the interpolation: 'linterp' (default) or 'cubic' (see set_profiles()).
         '''
         delete_files = []
         def prof_file(name, prof, label):
@@ -3137,7 +3194,8 @@ class TokaMaker_equilibrium():
 
     def set_boot_ops(self, isolate_edge_jbs=None, scale_jbs=None, djbs_tol=None,
                      diagnose_bs=None, taper_edge_jphi=None, taper_edge_psi0=None, taper_edge_shape=None,
-                     saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None):
+                     saw_q_s=None, saw_dq=None, saw_tol=None, saw_relax=None, saw_ramp=None, saw_rule=None,
+                     bs_interp=None):
         r'''! Set bootstrap current options for the jphi-split-bootstrap current profile update.
 
         Call after setting a `jphi-split-bootstrap`-type ffp_prof profile, and before mygs.solve().
@@ -3157,14 +3215,22 @@ class TokaMaker_equilibrium():
         @param saw_ramp Reset weight ramps over this q deficit below saw_q_s; 0 = hard trigger. (Internal default: 0.01)
         @param saw_rule Reset rule: 1 = fuse (FUSE's saw_crash!: q reset from the axis out to the sawtooth radius);
           2 = local (each dip below saw_q_s raised about its q minimum, current moved only inside it). (Internal default: 2)
+        @param bs_interp Interpolation of the profiles in the bootstrap update: the kinetic profiles and P onto the
+          ffp_prof nodes and P' there (solve_bootstrap), the kinetic gradients of the bootstrap current and the
+          sawtooth reset between its nodes. 'linterp': piecewise linear, finite-difference derivatives; 'hermite':
+          cubic Hermite with pchip slopes (C1, no overshoot); 'cubic': not-a-knot cubic spline (C2). (Internal default: 'hermite')
         '''
+        if bs_interp is not None:
+            if bs_interp not in _BS_INTERP_NAMES:
+                raise ValueError(f"bs_interp must be one of {_BS_INTERP_NAMES} (got {bs_interp!r})")
+            bs_interp = _BS_INTERP_NAMES.index(bs_interp) + 1
         if self._boot_ops is None:
             self._boot_ops = dict(_BOOT_OPS_DEFAULTS)
         for key, val in (('isolate_edge_jbs', isolate_edge_jbs), ('scale_jbs', scale_jbs), ('djbs_tol', djbs_tol),
                          ('diagnose_bs', diagnose_bs), ('taper_edge_jphi', taper_edge_jphi),
                          ('taper_edge_psi0', taper_edge_psi0), ('taper_edge_shape', taper_edge_shape),
                          ('saw_q_s', saw_q_s), ('saw_dq', saw_dq), ('saw_tol', saw_tol), ('saw_relax', saw_relax),
-                         ('saw_ramp', saw_ramp), ('saw_rule', saw_rule)):
+                         ('saw_ramp', saw_ramp), ('saw_rule', saw_rule), ('bs_interp', bs_interp)):
             if val is not None:
                 self._boot_ops[key] = type(_BOOT_OPS_DEFAULTS[key])(val)
         if self._boot_ops['saw_q_s'] < 0.0 or self._boot_ops['saw_dq'] <= 0.0 or not (0.0 < self._boot_ops['saw_relax'] <= 1.0) \
@@ -3360,7 +3426,8 @@ class TokaMaker_equilibrium():
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param compute_geo Compute geometric values for LCFS
         @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f${<R>,<1/R>,<1/R^2>,dV/dPsi}\f$, length of last surface,
-        [r(R_min),r(R_max)], [r(z_min),r(z_max)] (profiles are NaN on surfaces where the trace failed)
+        [r(R_min),r(R_max)], [r(z_min),r(z_max)] (profiles are NaN on surfaces where the trace failed; the length and
+        bounds are NaN if the trace of their surface failed)
         '''
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
@@ -3386,6 +3453,10 @@ class TokaMaker_equilibrium():
         failed = qvals < -1.E98 # Trace failed
         for vals in (qvals, ravgs):
             vals[...,failed] = numpy.nan
+        if compute_geo and dl.value < 0.0: # Trace of the LCFS surface failed
+            dl.value = numpy.nan
+            rbounds.fill(numpy.nan)
+            zbounds.fill(numpy.nan)
         ravg_dict = {
             '<R>': ravgs[0,:],
             '<1/R>': ravgs[1,:],
@@ -3428,8 +3499,8 @@ class TokaMaker_equilibrium():
     def get_fsa(self,psi=None,psi_pad=0.02,npsi=50):
         r'''! Get flux surface averages and per-surface shape parameters
 
-        Traces each requested surface once and accumulates all quantities in the
-        tracing ODE, so every returned profile shares the same quadrature. This
+        Evaluates all quantities on each surface with one contour quadrature (field-line
+        tracer as fallback), so every returned profile shares the same quadrature. This
         extends @ref TokaMaker.TokaMaker_equilibrium.get_q "get_q" with the
         averages needed to close a 1D transport formulation.
 
@@ -3502,10 +3573,10 @@ class TokaMaker_equilibrium():
         }
 
     def trace_surf(self,psi,nresample=None):
-        r'''! Trace surface for a given poloidal flux
+        r'''! Points on the surface of a given poloidal flux (contour, uniform polar angle about the O-point; tracer as fallback)
 
         @param psi Flux surface to trace \f$\hat{\psi}\f$
-        @param nresample Number of points to resample along the traced surface (default: None, return all points)
+        @param nresample Number of points to resample uniformly in arc length (default: None, return all points)
         @result \f$r(\hat{\psi})\f$
         '''
         if self.psi_convention == 0:
@@ -4003,20 +4074,25 @@ class TokaMaker_equilibrium():
         if error_string.value != b'':
             raise Exception(error_string.value)
 
-    def save_ifile(self,filename,npsi=65,ntheta=65,lcfs_pad=0.01,lcfs_pressure=0.0,pack_lcfs=True,single_precision=False):
+    def save_ifile(self,filename,npsi=129,ntheta=257,lcfs_pad=0.01,lcfs_pressure=0.0,pack_lcfs=True,single_precision=False,profile_derivs=False,psi_bounds=False,axis_pack=0.0):
         r'''! Save current equilibrium to iFile format
 
         @param filename Filename to save equilibrium to
         @param npsi Number of radial sampling points
-        @param ntheta Number of vertical sampling points
+        @param ntheta Number of poloidal sampling points
         @param lcfs_pad Padding in normalized flux at LCFS
         @param lcfs_pressure Plasma pressure on the LCFS (zero by default)
         @param pack_lcfs Pack toward LCFS with quadraturic sampling?
         @param single_precision Save single precision file? (default: double precision)
+        @param profile_derivs Append \f$FF'\f$ and \f$P'\f$ records after Z? (extends the i-file format)
+        @param psi_bounds Append the unpadded \f$[\psi_{axis}, \psi_{LCFS}]\f$ record last? (extends the i-file format)
+        @param axis_pack Normalized flux of the innermost surface, with the spacing growing by about 1.5 per surface away from
+        the axis (\f$\le 0\f$: off); this uses about \f$\log_{1.5}(f_1/\mathrm{axis\_pack})\f$ of the `npsi` surfaces, with
+        \f$f_1 = 2/(n_\psi-1)\f$ if `pack_lcfs` and \f$1/(n_\psi-1)\f$ otherwise
         '''
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_save_ifile(self._equil_ptr,cfilename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,error_string)
+        tokamaker_save_ifile(self._equil_ptr,cfilename,npsi,ntheta,lcfs_pad,lcfs_pressure,pack_lcfs,single_precision,profile_derivs,psi_bounds,axis_pack,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value)
 

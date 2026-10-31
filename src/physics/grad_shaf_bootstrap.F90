@@ -17,7 +17,7 @@ MODULE grad_shaf_bootstrap
 USE oft_base
 USE oft_gs, ONLY: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
  gs_itor_nl, qprof_trace_tol, gs_fpol, qprof_backend
-USE oft_gs_profiles, ONLY: torflux_set_bounds
+USE oft_gs_profiles, ONLY: torflux_set_bounds, linterp_save_interp, linterp_interp_token, cubic_slopes, hermite_seg
 USE oft_gs_contour, ONLY: gs_sauter_contour
 USE oft_lag_basis, ONLY: oft_blag_geval
 USE oft_mesh_type, ONLY: bmesh_findcell
@@ -47,6 +47,8 @@ TYPE :: boot_ops
   REAL(r8) :: saw_relax = 1.0_r8 !< Under-relaxation of the jphi_saw update (1 = none)
   REAL(r8) :: saw_ramp = 0.01_r8 !< Reset weight ramps over this q deficit below saw_q_s (0 = hard trigger)
   INTEGER(i4) :: saw_rule = 2 !< Reset rule: 1 = fuse (axis to rho_m, FUSE saw_crash!), 2 = local (each dip, two-sided)
+  INTEGER(i4) :: bs_interp = 2 !< Kinetic gradients and sawtooth-reset interpolation (@ref node_slopes): 1 = linterp
+                               !! (finite differences, piecewise linear), 2 = hermite (pchip), 3 = cubic (C2 spline)
 END TYPE boot_ops
 !------------------------------------------------------------------------------
 !> Current profiles of the last @ref jphi_bs_update (diagnostics; the update itself uses its own
@@ -141,6 +143,7 @@ CALL hdf5_write(self%jphi,filename,path//'/YVALS')
 CALL hdf5_write(self%j0,filename,path//'/J0')
 CALL hdf5_write(self%yp,filename,path//'/YPVALS')
 CALL hdf5_write(self%y0,filename,path//'/Y0')
+CALL linterp_save_interp(self,filename,path)
 IF(self%boot_ops%initialized)THEN
   CALL hdf5_create_group(filename,path//'/BOOT_OPS')
   CALL hdf5_write(MERGE(1_i4, 0_i4, self%boot_ops%isolate_edge_jbs),filename,path//'/BOOT_OPS/ISOLATE_EDGE_JBS')
@@ -156,6 +159,7 @@ IF(self%boot_ops%initialized)THEN
   CALL hdf5_write(self%boot_ops%saw_relax,filename,path//'/BOOT_OPS/SAW_RELAX')
   CALL hdf5_write(self%boot_ops%saw_ramp,filename,path//'/BOOT_OPS/SAW_RAMP')
   CALL hdf5_write(self%boot_ops%saw_rule,filename,path//'/BOOT_OPS/SAW_RULE')
+  CALL hdf5_write(self%boot_ops%bs_interp,filename,path//'/BOOT_OPS/BS_INTERP')
 END IF
 CALL boot_profs_save(self%boot_profs,filename,path//'/BOOT_PROFS')
 END SUBROUTINE jphi_bs_save_hdf5
@@ -165,7 +169,7 @@ END SUBROUTINE jphi_bs_save_hdf5
 SUBROUTINE jphi_bs_save_txt(self,io_unit)
 CLASS(jphi_bs_flux_func), INTENT(inout) :: self
 INTEGER, INTENT(in) :: io_unit
-WRITE(io_unit,*)'jphi-split-bootstrap'
+WRITE(io_unit,*)'jphi-split-bootstrap'//linterp_interp_token(self)
 WRITE(io_unit,*)self%npsi,self%j0
 WRITE(io_unit,*)self%x
 WRITE(io_unit,*)self%jphi
@@ -228,6 +232,8 @@ IF(hdf5_field_exist(filename,path//'/BOOT_OPS'))THEN
     CALL hdf5_read(self%boot_ops%saw_ramp,filename,path//'/BOOT_OPS/SAW_RAMP',success=success)
     CALL hdf5_read(self%boot_ops%saw_rule,filename,path//'/BOOT_OPS/SAW_RULE',success=success)
   END IF
+  IF(hdf5_field_exist(filename,path//'/BOOT_OPS/BS_INTERP')) &
+    CALL hdf5_read(self%boot_ops%bs_interp,filename,path//'/BOOT_OPS/BS_INTERP',success=success)
   self%boot_ops%initialized = .TRUE.
 END IF
 CALL boot_profs_load(self%boot_profs,filename,path//'/BOOT_PROFS')
@@ -322,6 +328,7 @@ IF(ASSOCIATED(self%jphi))DEALLOCATE(self%jphi)
 IF(ASSOCIATED(self%x))DEALLOCATE(self%x)
 IF(ASSOCIATED(self%yp))DEALLOCATE(self%yp)
 IF(ASSOCIATED(self%y))DEALLOCATE(self%y)
+IF(ALLOCATED(self%m))DEALLOCATE(self%m)
 CALL reset_solve_state(self)
 self%boot_profs = boot_profs()
 END SUBROUTINE jphi_bs_delete
@@ -848,9 +855,10 @@ INTEGER(i4), ALLOCATABLE :: kk(:)
 REAL(r8), PARAMETER :: psi_ax = 1.0e-4_r8
 REAL(r8) :: rho_s, rho_m, rho_out, w, wf, dAmin, alast, psi, h
 REAL(r8), ALLOCATABLE :: q_eq(:), c1(:), rho(:), qb(:), Ib(:), Ie(:), Ar(:), ap(:), qn(:), djr(:), wr(:), r(:), &
-  phi(:), g(:)
+  phi(:), g(:), djn(:), wn(:), jn(:)
 n = SIZE(xn)
-ALLOCATE(q_eq(n), c1(n), rho(n), qb(n), Ib(n), Ie(n), Ar(n), ap(n), qn(n), djr(n), wr(n), r(n), phi(n), g(n))
+ALLOCATE(q_eq(n), c1(n), rho(n), qb(n), Ib(n), Ie(n), Ar(n), ap(n), qn(n), djr(n), wr(n), r(n), phi(n), g(n), &
+  djn(n), wn(n), jn(n))
 !---q and dA/dpsi_N = oint dl/|grad psi_N| on the nodes, axis-first (index 1 = innermost node). Nodes
 !   without a closed surface (the LCFS, the axis, a failed surface) take the values of the next node
 !   inward (the axis: outward).
@@ -934,20 +942,24 @@ IF(ierr /= 0)THEN
   CALL oft_warn('saw_redistribute: sawtooth reset failed, keeping the last reset this update')
   RETURN
 END IF
-!---Reset interpolated in rho; inside the reset the base structure between kept nodes is reset too
-!   (target total = base + reset is interpolated), weighted by the reset weight (rule 1: w inside
-!   rho_m, a sharp cut as in FUSE; rule 2: wr interpolated) so it vanishes with the reset
+!---Reset interpolated in rho (as set by bs_interp, @ref nodes_interp); inside the
+!   reset the base structure between kept nodes is reset too (target total = base + reset is
+!   interpolated), weighted by the reset weight (rule 1: w inside rho_m, a sharp cut as in FUSE;
+!   rule 2: wr interpolated) so it vanishes with the reset
 DO i = 1, nk
   phi(i) = j_base(n+1-kk(i))
 END DO
+CALL nodes_interp(self%boot_ops%bs_interp, nk, rho(kk(1:nk)), djr(1:nk), n, rho, djn)
+CALL nodes_interp(self%boot_ops%bs_interp, nk, rho(kk(1:nk)), wr(1:nk), n, rho, wn)
+CALL nodes_interp(self%boot_ops%bs_interp, nk, rho(kk(1:nk)), phi(1:nk), n, rho, jn)
 DO i = 1, n
-  dj(n + 1 - i) = linterp(rho(kk(1:nk)), djr(1:nk), nk, rho(i), 1)
+  dj(n + 1 - i) = djn(i)
   IF(self%boot_ops%saw_rule == 1)THEN
     wf = MERGE(w, 0.0_r8, rho(i) < rho_m)
   ELSE
-    wf = linterp(rho(kk(1:nk)), wr(1:nk), nk, rho(i), 1)
+    wf = wn(i)
   END IF
-  IF(wf > 0.0_r8)dj(n + 1 - i) = dj(n + 1 - i) + wf*(linterp(rho(kk(1:nk)), phi(1:nk), nk, rho(i), 1) - j_base(n+1-i))
+  IF(wf > 0.0_r8)dj(n + 1 - i) = dj(n + 1 - i) + wf*(jn(i) - j_base(n+1-i))
 END DO
 IF(.NOT.ALL(ABS(dj) < HUGE(1.0_r8)))THEN
   CALL oft_warn('saw_redistribute: non-finite reset current, keeping the last reset this update')
@@ -961,8 +973,88 @@ IF(self%boot_ops%diagnose_bs)THEN
   WRITE(*,'(A,3F8.4,I3,F7.3,2F8.4)') '  [saw] rho_s rho_m rho_out n_dips w q_base(0) q_new(0) = ', &
     rho_s, rho_m, rho_out, n_dips, w, qb(1), qn(1)
 END IF
-DEALLOCATE(q_eq, c1, rho, qb, Ib, Ie, Ar, ap, qn, djr, wr, r, phi, g, kk)
+DEALLOCATE(q_eq, c1, rho, qb, Ib, Ie, Ar, ap, qn, djr, wr, r, phi, g, kk, djn, wn, jn)
 END SUBROUTINE saw_redistribute
+!---------------------------------------------------------------------------------
+!> Slopes dy/dx at the nodes of a cubic through (x, y), x strictly monotonic: `method` 2 = pchip (Fritsch-Carlson:
+!! weighted harmonic mean of the secants, zero where they change sign, so no overshoot), 3 = not-a-knot C2 cubic
+!! spline (@ref cubic_slopes; n >= 4, else pchip)
+!---------------------------------------------------------------------------------
+SUBROUTINE node_slopes(method, n, x, y, d)
+INTEGER(i4), INTENT(in) :: method !< 2 = pchip, 3 = not-a-knot spline
+INTEGER(i4), INTENT(in) :: n !< Number of nodes (>= 3)
+REAL(r8), INTENT(in) :: x(n) !< Node abscissae
+REAL(r8), INTENT(in) :: y(n) !< Node values
+REAL(r8), INTENT(out) :: d(n) !< dy/dx at the nodes
+INTEGER(i4) :: k
+REAL(r8) :: h(n-1), s(n-1), sgn, wa, wb
+sgn = SIGN(1.0_r8, x(2) - x(1)) ! Slopes in sgn*x, which ascends
+IF(method == 3 .AND. n >= 4)THEN
+  CALL cubic_slopes(sgn*x, y, d)
+  d = sgn*d
+  RETURN
+END IF
+h = sgn*(x(2:n) - x(1:n-1))
+s = (y(2:n) - y(1:n-1))/h
+DO k = 2, n-1
+  d(k) = 0.0_r8
+  IF(s(k-1)*s(k) > 0.0_r8)THEN
+    wa = 2.0_r8*h(k) + h(k-1); wb = h(k) + 2.0_r8*h(k-1)
+    d(k) = (wa + wb)/(wa/s(k-1) + wb/s(k))
+  END IF
+END DO
+d(1) = end_slope(h(1), h(2), s(1), s(2))
+d(n) = end_slope(h(n-1), h(n-2), s(n-1), s(n-2))
+d = sgn*d
+CONTAINS
+!---Shape-preserving three-point end slope (end interval h0, secant s0; next h1, s1)
+FUNCTION end_slope(h0, h1, s0, s1) RESULT(de)
+REAL(r8), INTENT(in) :: h0, h1, s0, s1
+REAL(r8) :: de
+de = ((2.0_r8*h0 + h1)*s0 - h0*s1)/(h0 + h1)
+IF(de*s0 <= 0.0_r8)THEN
+  de = 0.0_r8
+ELSE IF(s0*s1 < 0.0_r8 .AND. ABS(de) > 3.0_r8*ABS(s0))THEN
+  de = 3.0_r8*s0
+END IF
+END FUNCTION end_slope
+END SUBROUTINE node_slopes
+!---------------------------------------------------------------------------------
+!> y at the points x from the nodes (xk, yk), both ascending, constant beyond the end nodes: piecewise linear
+!! (`method` 1, or nk < 3), else the cubic Hermite (@ref hermite_seg) with the @ref node_slopes of `method`
+!---------------------------------------------------------------------------------
+SUBROUTINE nodes_interp(method, nk, xk, yk, n, x, y)
+INTEGER(i4), INTENT(in) :: method !< 1 = linear, 2 = pchip, 3 = not-a-knot spline
+INTEGER(i4), INTENT(in) :: nk !< Number of nodes
+REAL(r8), INTENT(in) :: xk(nk) !< Node abscissae
+REAL(r8), INTENT(in) :: yk(nk) !< Node values
+INTEGER(i4), INTENT(in) :: n !< Number of points
+REAL(r8), INTENT(in) :: x(n) !< Points
+REAL(r8), INTENT(out) :: y(n) !< Values at x
+INTEGER(i4) :: i, k
+REAL(r8) :: d(nk), h
+IF(method == 1 .OR. nk < 3)THEN
+  DO i = 1, n
+    y(i) = linterp(xk, yk, nk, x(i), 1)
+  END DO
+  RETURN
+END IF
+CALL node_slopes(method, nk, xk, yk, d)
+k = 1
+DO i = 1, n
+  IF(x(i) <= xk(1))THEN
+    y(i) = yk(1)
+  ELSE IF(x(i) >= xk(nk))THEN
+    y(i) = yk(nk)
+  ELSE
+    DO WHILE(x(i) > xk(k+1))
+      k = k + 1
+    END DO
+    h = xk(k+1) - xk(k)
+    y(i) = hermite_seg(yk(k), yk(k+1), d(k), d(k+1), h, (x(i) - xk(k))/h, 0)
+  END IF
+END DO
+END SUBROUTINE nodes_interp
 !---------------------------------------------------------------------------------
 !> Smooth y(x) in place by a least-squares quadratic over +-hw points about each point (Savitzky-Golay
 !! on a non-uniform grid; exact for quadratics). If x(1) = 0 the points are mirrored about it (y even in x).
@@ -1488,12 +1580,12 @@ ALLOCATE(ptout(3,active_tracer%maxsteps+1),vout(3,active_tracer%maxsteps))
 !$omp do schedule(dynamic,1)
 DO j=1,nr
   IF(done(j))CYCLE
-  IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN
+  IF(psi_q(j)<0.02d0)THEN
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
   END IF
-  IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,gseq%diverted.AND.psi_q(j)<0.02d0)
+  IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,psi_q(j)<0.02d0)
   field%f_surf=fpol(j)
   field%bmax=0.d0
   field%rmax_surf = -1.d30
@@ -1602,10 +1694,11 @@ END DO
 END SUBROUTINE apply_edge_taper
 !------------------------------------------------------------------------------
 !> dy/dx on a strictly monotonic, possibly non-uniform grid, as `numpy.gradient(y, x, edge_order=...)`:
-!! three-point central interior, one-sided ends of order `edge_order` (1 or 2, default 2). On a
+!! three-point central interior, one-sided ends of order `edge_order` (1 or 2, default 2); with `method` 2 or 3,
+!! the node slopes of a cubic through the points instead (@ref node_slopes). On a
 !! non-finite input or result, a repeated or unsorted abscissa, or too few points: warns, ierr = -1.
 !------------------------------------------------------------------------------
-SUBROUTINE gradient_(n, x, y, dydx, ierr, edge_order)
+SUBROUTINE gradient_(n, x, y, dydx, ierr, edge_order, method)
 USE, INTRINSIC :: IEEE_ARITHMETIC, ONLY: IEEE_IS_FINITE
 INTEGER(i4), INTENT(in) :: n !< Number of points
 REAL(r8), INTENT(in) :: x(n) !< Abscissae
@@ -1613,12 +1706,15 @@ REAL(r8), INTENT(in) :: y(n) !< Values on x
 REAL(r8), INTENT(out) :: dydx(n) !< dy/dx on x
 INTEGER(i4), INTENT(out) :: ierr !< 0 on success, -1 on failure (dydx = 0)
 INTEGER(i4), OPTIONAL, INTENT(in) :: edge_order !< Order of the end stencils (1 or 2, default 2)
+INTEGER(i4), OPTIONAL, INTENT(in) :: method !< 1 = finite differences (default), 2 = pchip, 3 = not-a-knot spline
 !---
-INTEGER(i4) :: i, eo
+INTEGER(i4) :: i, eo, meth
 REAL(r8) :: hs, hd !< Backward and forward interval widths about the stencil centre
 CHARACTER(len=512) :: char_buf
 eo = 2
 IF(PRESENT(edge_order))eo = edge_order
+meth = 1
+IF(PRESENT(method))meth = method
 IF(n < eo+1)THEN
   CALL fail('too few input points for the end stencils')
   RETURN
@@ -1642,29 +1738,34 @@ DO i = 2, n
   CALL fail(char_buf)
   RETURN
 END DO
-!--- Interior: three-point central stencil for the local spacing
-DO i = 2, n-1
-  hs = x(i) - x(i-1)
-  hd = x(i+1) - x(i)
-  dydx(i) = -(hd/(hs*(hs + hd)))*y(i-1) &
-            + ((hd - hs)/(hs*hd))*y(i) &
-            + (hs/(hd*(hs + hd)))*y(i+1)
-END DO
-!--- Endpoints: one-sided stencils of order eo
-IF(eo == 1)THEN
-  dydx(1) = (y(2) - y(1))/(x(2) - x(1))
-  dydx(n) = (y(n) - y(n-1))/(x(n) - x(n-1))
+IF(meth > 1)THEN
+  !--- Cubic methods: the node slopes of the cubic through the points
+  CALL node_slopes(meth, n, x, y, dydx)
 ELSE
-  hs = x(2) - x(1)
-  hd = x(3) - x(2)
-  dydx(1) = -((2.0_r8*hs + hd)/(hs*(hs + hd)))*y(1) &
-            + ((hs + hd)/(hs*hd))*y(2) &
-            - (hs/(hd*(hs + hd)))*y(3)
-  hs = x(n-1) - x(n-2)
-  hd = x(n) - x(n-1)
-  dydx(n) = (hd/(hs*(hs + hd)))*y(n-2) &
-            - ((hd + hs)/(hs*hd))*y(n-1) &
-            + ((2.0_r8*hd + hs)/(hd*(hs + hd)))*y(n)
+  !--- Interior: three-point central stencil for the local spacing
+  DO i = 2, n-1
+    hs = x(i) - x(i-1)
+    hd = x(i+1) - x(i)
+    dydx(i) = -(hd/(hs*(hs + hd)))*y(i-1) &
+              + ((hd - hs)/(hs*hd))*y(i) &
+              + (hs/(hd*(hs + hd)))*y(i+1)
+  END DO
+  !--- Endpoints: one-sided stencils of order eo
+  IF(eo == 1)THEN
+    dydx(1) = (y(2) - y(1))/(x(2) - x(1))
+    dydx(n) = (y(n) - y(n-1))/(x(n) - x(n-1))
+  ELSE
+    hs = x(2) - x(1)
+    hd = x(3) - x(2)
+    dydx(1) = -((2.0_r8*hs + hd)/(hs*(hs + hd)))*y(1) &
+              + ((hs + hd)/(hs*hd))*y(2) &
+              - (hs/(hd*(hs + hd)))*y(3)
+    hs = x(n-1) - x(n-2)
+    hd = x(n) - x(n-1)
+    dydx(n) = (hd/(hs*(hs + hd)))*y(n-2) &
+              - ((hd + hs)/(hs*hd))*y(n-1) &
+              + ((2.0_r8*hd + hs)/(hd*(hs + hd)))*y(n)
+  END IF
 END IF
 !--- Finite input does not guarantee a finite result: the stencil weights
 !   overflow for large y on a very fine grid.
@@ -1759,10 +1860,10 @@ ft = 1.0_r8 - fc
 pe = EC * ne * Te
 pi_arr = EC * ni * Ti
 ! Gradients d/dpsi [Wb^-1]
-CALL gradient_(n_psi, psi_abs, Te, dT_e_dpsi, ierr)
-IF(ierr == 0)CALL gradient_(n_psi, psi_abs, Ti, dT_i_dpsi, ierr)
-IF(ierr == 0)CALL gradient_(n_psi, psi_abs, ne, dn_e_dpsi, ierr)
-IF(ierr == 0)CALL gradient_(n_psi, psi_abs, ni, dn_i_dpsi, ierr)
+CALL gradient_(n_psi, psi_abs, Te, dT_e_dpsi, ierr, method=self%boot_ops%bs_interp)
+IF(ierr == 0)CALL gradient_(n_psi, psi_abs, Ti, dT_i_dpsi, ierr, method=self%boot_ops%bs_interp)
+IF(ierr == 0)CALL gradient_(n_psi, psi_abs, ne, dn_e_dpsi, ierr, method=self%boot_ops%bs_interp)
+IF(ierr == 0)CALL gradient_(n_psi, psi_abs, ni, dn_i_dpsi, ierr, method=self%boot_ops%bs_interp)
 IF(ierr /= 0)RETURN
 ! In the Fortran internal convention psi increases LCFS→axis (opposite to the
 ! standard Sauter/Redl derivation where psi increases axis→LCFS).  Negate
