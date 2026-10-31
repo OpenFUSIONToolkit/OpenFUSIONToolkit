@@ -892,6 +892,13 @@ def test_ITER_eq(order,helicity):
     ifile, ifile_ext = read_ifile('tokamaker.ifile'), read_ifile('tokamaker_ext.ifile')
     assert ('ffp' not in ifile) and ('psi_bounds' not in ifile)
     assert all(np.array_equal(ifile[key],ifile_ext[key]) for key in ifile)
+    # Records after the known ones are ignored (here a repeat of the last, 2-value record)
+    with open('tokamaker_ext.ifile','rb') as fid:
+        content = fid.read()
+    with open('tokamaker_trail.ifile','wb') as fid:
+        fid.write(content + content[-24:])
+    ifile_trail = read_ifile('tokamaker_trail.ifile')
+    assert all(np.array_equal(ifile_ext[key],ifile_trail[key]) for key in ifile_ext)
     # i-file points lie on their flux surfaces; FF', P' and psi bounds match the equilibrium
     assert results[0]['ifile_psi_err'] < 1.E-10
     assert results[0]['ifile_ffp_err'] < 1.E-10
@@ -1696,6 +1703,9 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     eq_info['q_axis']    = float(q_i[0])
     sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
     eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
+    # A failed LCFS trace (exactly on the diverted separatrix) gives NaN LCFS outputs
+    _, _, _, dl, rbounds, zbounds = mygs.get_q(np.r_[1.0],compute_geo=True)
+    eq_info['lcfs_fail_nan'] = bool(np.isnan(dl) and np.all(np.isnan(rbounds)) and np.all(np.isnan(zbounds)))
 
     # --- Verify the jdotB_bs -> jphi conversion (doc_tokamaker_current_conventions eqs. A7, A8)
     #     against geometry traced independently from the converged equilibrium ---
@@ -1925,6 +1935,7 @@ ITER_bootstrap_internal_eq_dict = {
 def test_ITER_bootstrap_internal(order):
     results = mp_run(run_ITER_bootstrap_case_internal, (1.0, order), timeout=300)
     assert validate_dict(results, ITER_bootstrap_internal_eq_dict)
+    assert results[0]['lcfs_fail_nan']
 
 
 def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):

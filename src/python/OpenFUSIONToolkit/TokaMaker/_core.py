@@ -2283,7 +2283,8 @@ class TokaMaker():
         @param profile_derivs Append \f$FF'\f$ and \f$P'\f$ records after Z? (extends the i-file format)
         @param psi_bounds Append the unpadded \f$[\psi_{axis}, \psi_{LCFS}]\f$ record last? (extends the i-file format)
         @param axis_pack Normalized flux of the innermost surface, with the spacing growing by about 1.5 per surface away from
-        the axis (0: off); this uses about \f$\log_{1.5}[2/((n_\psi-1)\,\mathrm{axis\_pack})]\f$ of the `npsi` surfaces
+        the axis (\f$\le 0\f$: off); this uses about \f$\log_{1.5}(f_1/\mathrm{axis\_pack})\f$ of the `npsi` surfaces, with
+        \f$f_1 = 2/(n_\psi-1)\f$ if `pack_lcfs` and \f$1/(n_\psi-1)\f$ otherwise
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
@@ -3362,7 +3363,8 @@ class TokaMaker_equilibrium():
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param compute_geo Compute geometric values for LCFS
         @result \f$\hat{\psi}\f$, \f$q(\hat{\psi})\f$, \f${<R>,<1/R>,<1/R^2>,dV/dPsi}\f$, length of last surface,
-        [r(R_min),r(R_max)], [r(z_min),r(z_max)] (profiles are NaN on surfaces where the trace failed)
+        [r(R_min),r(R_max)], [r(z_min),r(z_max)] (profiles are NaN on surfaces where the trace failed; the length and
+        bounds are NaN if the trace of their surface failed)
         '''
         if psi is None:
             psi = numpy.linspace(psi_pad,1.0-psi_pad,npsi,dtype=numpy.float64)
@@ -3388,6 +3390,10 @@ class TokaMaker_equilibrium():
         failed = qvals < -1.E98 # Trace failed
         for vals in (qvals, ravgs):
             vals[...,failed] = numpy.nan
+        if compute_geo and dl.value < 0.0: # Trace of the LCFS surface failed
+            dl.value = numpy.nan
+            rbounds.fill(numpy.nan)
+            zbounds.fill(numpy.nan)
         ravg_dict = {
             '<R>': ravgs[0,:],
             '<1/R>': ravgs[1,:],
@@ -4018,7 +4024,8 @@ class TokaMaker_equilibrium():
         @param profile_derivs Append \f$FF'\f$ and \f$P'\f$ records after Z? (extends the i-file format)
         @param psi_bounds Append the unpadded \f$[\psi_{axis}, \psi_{LCFS}]\f$ record last? (extends the i-file format)
         @param axis_pack Normalized flux of the innermost surface, with the spacing growing by about 1.5 per surface away from
-        the axis (0: off); this uses about \f$\log_{1.5}[2/((n_\psi-1)\,\mathrm{axis\_pack})]\f$ of the `npsi` surfaces
+        the axis (\f$\le 0\f$: off); this uses about \f$\log_{1.5}(f_1/\mathrm{axis\_pack})\f$ of the `npsi` surfaces, with
+        \f$f_1 = 2/(n_\psi-1)\f$ if `pack_lcfs` and \f$1/(n_\psi-1)\f$ otherwise
         '''
         cfilename = self._oft_env.path2c(filename)
         error_string = self._oft_env.get_c_errorbuff()

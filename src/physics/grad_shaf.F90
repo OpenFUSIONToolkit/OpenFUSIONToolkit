@@ -556,8 +556,9 @@ abstract interface
   END SUBROUTINE torflux_map_delete
 end interface
 INTERFACE
-  !> q, `ravgs`, `fsa_avgs` and `shape_geo` of @ref gs_get_qprof from the contour quadrature (see grad_shaf_contour.F90)
-  MODULE SUBROUTINE gs_qprof_contour(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,done)
+  !> q, `ravgs`, `fsa_avgs`, `shape_geo` and the LCFS outputs of @ref gs_get_qprof from the contour quadrature
+  !! (see grad_shaf_contour.F90)
+  MODULE SUBROUTINE gs_qprof_contour(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,done,dl,rbounds,zbounds)
     CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
     INTEGER(i4), INTENT(in) :: nr !< Number of flux surfaces
     REAL(r8), INTENT(in) :: psi_q(nr) !< Locations in normalized flux
@@ -566,6 +567,9 @@ INTERFACE
     REAL(r8), OPTIONAL, INTENT(out) :: fsa_avgs(nr,4) !< <|grad(psi)|>, <|grad(psi)|^2>, <B_p^2>, <1/B^2>
     REAL(r8), OPTIONAL, INTENT(out) :: shape_geo(nr,6) !< R_min, R_max, Z_min, Z_max, R(Z_min), R(Z_max)
     LOGICAL, INTENT(out) :: done(nr) !< Surfaces evaluated (the others are left for the tracer)
+    REAL(r8), OPTIONAL, INTENT(out) :: dl !< Length of surface 1 (if `done(1)`)
+    REAL(r8), OPTIONAL, INTENT(out) :: rbounds(2,2) !< (R,Z) at minimum and maximum R of surface 1
+    REAL(r8), OPTIONAL, INTENT(out) :: zbounds(2,2) !< (R,Z) at minimum and maximum Z of surface 1
   END SUBROUTINE gs_qprof_contour
   !> @ref gs_trace_surf from the contour quadrature (see grad_shaf_contour.F90); `npoints=-1` if not available
   MODULE SUBROUTINE gs_trace_surf_contour(gseq,psi_in,points,npoints)
@@ -574,15 +578,6 @@ INTERFACE
     REAL(r8), POINTER, DIMENSION(:,:), INTENT(out) :: points !< Surface points [2,npoints]
     INTEGER(i4), INTENT(out) :: npoints !< Number of points
   END SUBROUTINE gs_trace_surf_contour
-  !> LCFS outputs of @ref gs_get_qprof from the contour quadrature (see grad_shaf_contour.F90)
-  MODULE SUBROUTINE gs_lcfs_contour(gseq,psi_q1,dl,rbounds,zbounds,ok)
-    CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
-    REAL(r8), INTENT(in) :: psi_q1 !< Surface location in normalized flux
-    REAL(r8), INTENT(out) :: dl !< Surface length
-    REAL(r8), INTENT(out) :: rbounds(2,2) !< (R,Z) at minimum and maximum R
-    REAL(r8), INTENT(out) :: zbounds(2,2) !< (R,Z) at minimum and maximum Z
-    LOGICAL, INTENT(out) :: ok !< Surface evaluated (otherwise use the tracer)
-  END SUBROUTINE gs_lcfs_contour
 END INTERFACE
 !---Encapsulation for external function call parameters
 TYPE, PRIVATE :: opt_targets
@@ -4473,6 +4468,22 @@ ELSE
 END IF
 END FUNCTION gs_fpol
 !------------------------------------------------------------------------------
+!> \f$ F\,dF/d\psi \f$ and \f$ dP/d\psi \f$ (P in Pa) at (unnormalized) \f$ \psi \f$
+!!
+!! @warning Only valid inside the plasma; \f$ \psi \f$ is not checked against the plasma bounds
+!------------------------------------------------------------------------------
+FUNCTION gs_ffprim_pprime(self,psi) RESULT(d)
+CLASS(gs_equil), INTENT(inout) :: self !< G-S object
+REAL(r8), INTENT(in) :: psi !< Poloidal flux
+REAL(r8) :: d(2) !< [F*dF/dpsi, dP/dpsi]
+IF(self%mode==0)THEN
+  d(1)=gs_fpol(self,psi)*self%ffp_scale*self%I%fp(psi)
+ELSE
+  d(1)=0.5d0*self%ffp_scale*self%I%fp(psi)
+END IF
+d(2)=self%p_scale*self%P%fp(psi)/mu0
+END FUNCTION gs_ffprim_pprime
+!------------------------------------------------------------------------------
 !> Compute the magnetic energy and helicity of a fixed boundary equilibrium
 !!
 !! @note Helicity computed by this subroutine is only valid for equilibria
@@ -4590,7 +4601,7 @@ real(8), pointer :: ptout(:,:)
 real(8), parameter :: tol=1.d-10
 integer(4) :: i,j,cell,imin_r,imax_r,imin_z,imax_z
 integer(4), parameter :: nlcfs=1000
-logical :: lcfs_all,lcfs_any,geo,trace,lcfs_ok,cc_done(nr)
+logical :: lcfs_all,lcfs_any,geo,trace,cc_done(nr)
 type(gsinv_interp), pointer :: field
 TYPE(spline_type) :: lcfs_rz
 CHARACTER(LEN=OFT_ERROR_SLEN) :: error_str
@@ -4605,14 +4616,11 @@ IF(lcfs_all.AND.(psi_q(1)>=0.05d0))CALL oft_warn('LCFS parameters requested but 
 IF(PRESENT(shape_geo).AND.lcfs_any)CALL oft_abort('"shape_geo" cannot be combined with LCFS arguments', &
   'gs_get_qprof',__FILE__)
 !---Contour quadrature (exact on the FE surface); the field-line tracer below is the deprecated
-!---method (`qprof_backend=1`) and the fallback for the surfaces, and the LCFS outputs, the contour
-!---path does not accept.
+!---method (`qprof_backend=1`) and the fallback for the surfaces the contour path does not accept
 cc_done=.FALSE.
-lcfs_ok=.NOT.lcfs_all
 IF((qprof_backend==0).AND.(.NOT.(geo.OR.trace)))THEN
-  CALL gs_qprof_contour(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,cc_done)
-  IF(lcfs_all.AND.cc_done(1))CALL gs_lcfs_contour(gseq,psi_q(1),dl,rbounds,zbounds,lcfs_ok)
-  IF(ALL(cc_done).AND.lcfs_ok)RETURN
+  CALL gs_qprof_contour(gseq,nr,psi_q,prof,ravgs,fsa_avgs,shape_geo,cc_done,dl,rbounds,zbounds)
+  IF(ALL(cc_done))RETURN
 END IF
 !---
 raxis=gseq%o_point(1)
@@ -4683,7 +4691,7 @@ active_tracer%inv=.TRUE.
 IF(PRESENT(shape_geo))ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=1,nr
-  IF(cc_done(j).AND.((j>1).OR.lcfs_ok))CYCLE
+  IF(cc_done(j))CYCLE
   !------------------------------------------------------------------------------
   ! Trace contour
   !------------------------------------------------------------------------------
@@ -4724,7 +4732,8 @@ do j=1,nr
   if(active_tracer%status/=1)THEN
     WRITE(error_str,"(A,F10.4)")"gs_get_qprof: Trace did not complete at psi = ",1.d0-psi_q(j)
     CALL oft_warn(error_str)
-    IF(.NOT.cc_done(j))prof(j)=-1.d99
+    prof(j)=-1.d99
+    IF(PRESENT(dl).AND.(j==1))dl=-1.d0 ! LCFS outputs failed
     CYCLE
   end if
   !------------------------------------------------------------------------------
@@ -4791,11 +4800,9 @@ do j=1,nr
           zbounds(:,2)=ptout(2:3,i)
         END IF
       END DO
-      IF(active_tracer%status/=1)dl=-1.d0
       IF(.NOT.PRESENT(shape_geo))DEALLOCATE(ptout)
     END IF
   END IF
-  IF(cc_done(j))CYCLE ! Profiles kept from the contour path
   !---Safety Factor (q)
   qpsi=fpol*active_tracer%v(3)/(2*pi)
   prof(j)=qpsi
