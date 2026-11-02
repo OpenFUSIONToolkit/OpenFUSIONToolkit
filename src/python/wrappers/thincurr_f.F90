@@ -851,7 +851,11 @@ TYPE(tw_type), POINTER :: tw_obj
 CALL copy_string('',error_str)
 CALL c_f_pointer(tw_ptr, tw_obj)
 CALL c_f_pointer(eta_ptr, res_tmp, [tw_obj%mesh%nreg])
-res_tmp=tw_obj%Eta_vol*mu0
+IF(ASSOCIATED(tw_obj%Eta_vol))THEN
+  res_tmp=tw_obj%Eta_vol*mu0
+ELSE
+  res_tmp=-1.d0 ! Not set (e.g. only surface resistivity in the mesh file)
+END IF
 END SUBROUTINE thincurr_get_eta_vol
 !---------------------------------------------------------------------------------
 !> Set resistivity and thickness values with automatic derivation of missing parameter.
