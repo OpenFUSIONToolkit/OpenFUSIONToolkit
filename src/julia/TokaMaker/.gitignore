@@ -1,0 +1,17 @@
+# Machine-specific HDF5.jl library path (points HDF5.jl at liboftpy's libhdf5;
+# see README "HDF5 setup"). Holds an absolute path — must not be committed.
+LocalPreferences.toml
+
+# Scratch output directories from examples/plotting.
+/plots/
+/examples/plots/
+
+# OFT scratch input files.
+oftpyin-*
+
+# Julia build artifacts.
+/Manifest.toml.bak
+
+# The repo-level .gitignore ignores src/julia/**/*.eqdsk (test-generated g-files);
+# re-include the committed EQDSK COCOS test fixture.
+!test/data/ITER_test.eqdsk
