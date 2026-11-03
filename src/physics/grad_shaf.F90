@@ -34,7 +34,7 @@ USE oft_lu, ONLY: oft_lusolver, lapack_matinv
 !
 USE fem_base, ONLY: oft_ml_fem_type, oft_afem_type
 USE fem_utils, ONLY: bfem_interp, bfem_map_flag
-USE oft_lag_basis, ONLY: oft_blag_eval, oft_blag_geval, &
+USE oft_lag_basis, ONLY: oft_blag_eval, oft_blag_eval_all, oft_blag_geval, &
   oft_blag_npos, oft_blag_d2eval, oft_scalar_bfem
 USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginterp, &
   oft_lag_bg2interp, oft_blag_zerob, oft_blag_zerogrnd, oft_blag_getmop, &
@@ -3533,9 +3533,7 @@ do j=1,device%fe_rep%mesh%nc
   do m=1,device%fe_rep%quad%np
     if(curved.OR.(m==1))call device%fe_rep%mesh%jacobian(j,device%fe_rep%quad%pts(:,m),goptmp,v)
     det=v*device%fe_rep%quad%wts(m)
-    DO l=1,device%fe_rep%nce
-      CALL oft_blag_eval(device%fe_rep,j,l,device%fe_rep%quad%pts(:,m),rop(l))
-    END DO
+    CALL oft_blag_eval_all(device%fe_rep,j,device%fe_rep%quad%pts(:,m),rop)
     ffp=0.d0
     pt=device%fe_rep%mesh%log2phys(j,device%fe_rep%quad%pts(:,m))
     IF(gs_test_bounds(self,pt))THEN
