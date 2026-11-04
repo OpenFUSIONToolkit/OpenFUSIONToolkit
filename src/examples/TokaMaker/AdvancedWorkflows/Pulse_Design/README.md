@@ -26,7 +26,8 @@ These files support workflows for:
 ## Getting Started
 ### Jupyter Notebooks
 1. Ensure you have **Python 3.9+** and common scientific packages (`numpy`, `scipy`, `matplotlib`, `h5py`, etc.).
-  a. For the `ITER_TokaMaker_TORAX_ex.ipynb` notebook, ensure you have the python packages specific in `requirements_TokaMaker_TORAX.txt`.
+  a. For the `TokaMaker_TORAX/ITER/ITER_TokaMaker_TORAX_pulse_ex.ipynb` notebook, install the Python packages listed in `TokaMaker_TORAX/requirements_TokaMaker_TORAX.txt` (eg. `pip install -r TokaMaker_TORAX/requirements_TokaMaker_TORAX.txt`).
+  The TokaMaker + TORAX workflow (`OpenFUSIONToolkit.TokaMaker.pulse_design`) supports TORAX 1.4.x and is tested with `torax==1.4.3`; TORAX 1.3.x and earlier, and 2.x, are not supported. The pinned versions (eg. `jax==0.12.0.1`) require **Python 3.12+**.
 2. Open the notebooks in **JupyterLab** or **VS Code**.
 3. Place all files in the same working directory so notebooks can import the libraries and load the geometry files.
 
