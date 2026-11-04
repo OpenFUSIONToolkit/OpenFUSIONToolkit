@@ -1086,9 +1086,19 @@ REAL(c_double), VALUE, INTENT(in) :: lin_tol !< Linear solver tolerance
 REAL(c_double), VALUE, INTENT(in) :: nl_tol !< Nonlinear solver tolerance
 LOGICAL(c_bool), VALUE, INTENT(in) :: pre_plasma !< Include plasma contributions in preconditioner?
 CHARACTER(KIND=c_char), INTENT(out) :: error_str(OFT_ERROR_SLEN) !< Error string (empty if no error)
+LOGICAL :: has_dynamics
 TYPE(tokamaker_instance), POINTER :: tMaker_obj
 IF(.NOT.tokamaker_ccast(tMaker_ptr,tMaker_obj,error_str))RETURN
 IF(.NOT.tokamaker_require_equil(tMaker_obj,error_str))RETURN
+!---Masked regions are only used by coupled workflows and would bypass the conductor check below
+IF(ANY(tMaker_obj%device%ignore_rmask))CALL oft_abort("Time-dependent solve not supported with masked regions", &
+  "tokamaker_setup_td",__FILE__)
+!---Require at least one resistive conductor or Vcoil, otherwise the time evolution is undefined
+has_dynamics=ANY(tMaker_obj%device%cond_regions%eta>0.d0).OR.ANY(tMaker_obj%device%Rcoils>0.d0)
+IF(.NOT.has_dynamics)THEN
+  CALL copy_string('Time-dependent solve requires at least one conducting region (finite "eta") or Vcoil (see "set_vcoils")',error_str)
+  RETURN
+END IF
 IF(ASSOCIATED(tMaker_obj%gs_td))THEN
   CALL tMaker_obj%gs_td%delete()
   DEALLOCATE(tMaker_obj%gs_td)

@@ -17,7 +17,7 @@ from oft_testing import approx_list
 from OpenFUSIONToolkit.io import histfile, write_oft_xml
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil, ThinCurr_Vcoil, ThinCurr_XML
-from OpenFUSIONToolkit.ThinCurr.sensor import save_sensors, circular_flux_loop
+from OpenFUSIONToolkit.ThinCurr.sensor import save_sensors, circular_flux_loop, Mirnov
 
 
 
@@ -505,17 +505,31 @@ def _write_thincurr_xml(xml_filename, eta_values=None, thickness_values=None, et
     write_oft_xml([thincurr_xml], xml_filename)
 
 
+def _get_oft_env():
+    '''OFT environment shared by the models built in this process (created on first use)'''
+    global _oft_env_singleton
+    if _oft_env_singleton is None:
+        from OpenFUSIONToolkit import OFT_env
+        _oft_env_singleton = OFT_env(nthreads=-1)
+    return _oft_env_singleton
+
+
+def _save_dummy_mesh(filename, eta_surf):
+    '''Save the dummy mesh with its surface resistivity (no XML file needed) to `filename`'''
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import ThinCurrMesh
+    from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
+    r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
+    mesh = ThinCurrMesh(r_dummy, lc_dummy, np.ones((lc_dummy.shape[0],), dtype=np.int32))
+    mesh.set_resistivity(eta_surf=eta_surf)
+    mesh.save(filename)
+
+
 def _build_dummy_model(xml_filename):
-    from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.ThinCurr import ThinCurr
     from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
 
-    global _oft_env_singleton
-    if _oft_env_singleton is None:
-        _oft_env_singleton = OFT_env(nthreads=-1)
-
     r_dummy, lc_dummy = build_ThinCurr_dummy([0.0, 0.0, 10.0], size=0.25)
-    model = ThinCurr(_oft_env_singleton)
+    model = ThinCurr(_get_oft_env())
     model.setup_model(r=r_dummy, lc=lc_dummy, xml_filename=xml_filename)
     return model
 
@@ -570,6 +584,51 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
     for file in save_files:
         os.remove(file)
     return result_val
+
+
+def run_bfield_no_icoils(use_hodlr,mp_q):
+    """B-field operators and reconstruction for a model without Icoils (no coil currents given)"""
+    result = None
+    try:
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        _save_dummy_mesh('tw_no_icoils.h5', np.r_[1.E4*mu0])
+        tw_model = ThinCurr(_get_oft_env())
+        tw_model.setup_model(mesh_file='tw_no_icoils.h5')
+        tw_model.setup_io(basepath=f'no_icoils_{use_hodlr}/')
+        if use_hodlr:
+            tw_model.set_hodlr_options(target_size=20)
+        tw_model.compute_Lmat(use_hodlr=use_hodlr)
+        pot = np.sin(np.arange(tw_model.nelems)*0.37)
+        checks = []
+        try:
+            tw_model.reconstruct_Bfield(pot)  # operators not computed yet
+            checks.append(False)
+        except ValueError:
+            checks.append(True)
+        _, Bdr = tw_model.compute_Bmat()
+        checks.append(Bdr.shape == (3, 0, tw_model.np))
+        try:
+            tw_model.reconstruct_Bfield(pot[:-1])  # wrong size
+            checks.append(False)
+        except ValueError:
+            checks.append(True)
+        field = np.asarray(tw_model.reconstruct_Bfield(pot))
+        checks.append(np.array_equal(field, tw_model.reconstruct_Bfield(pot[:, None])))  # column input
+        result = (all(checks), field)
+    except BaseException as e:
+        print(e)
+    oftpy_dump_cov()
+    mp_q.put(result)
+
+
+@pytest.mark.coverage
+def test_bfield_no_icoils():
+    out = {use_hodlr: mp_run(run_bfield_no_icoils, (use_hodlr,)) for use_hodlr in (False, True)}
+    for res in out.values():
+        assert res  # False (timeout or crash) or None (exception)
+        assert res[0]
+        assert np.all(np.isfinite(res[1]))
+    assert np.allclose(out[True][1], out[False][1], rtol=0.0, atol=1.E-4*np.abs(out[False][1]).max())
 
 
 @pytest.mark.coverage
@@ -675,6 +734,16 @@ def run_thickness_api_roundtrip_and_validation(mp_q):
             tw_model_no_thickness.set_eta_values(eta_vol=np.r_[1.0e-6])
         with pytest.raises(IndexError):
             tw_model.set_eta_values(eta_surf=eta_values, thickness=np.r_[1.E-3, 2.E-3])
+        # Surface resistivity only from the mesh file: no volumetric resistivity is set
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        _save_dummy_mesh('tw_eta_surf_only.h5', eta_values)
+        tw_model_mesh_eta = ThinCurr(_get_oft_env())
+        tw_model_mesh_eta.setup_model(mesh_file='tw_eta_surf_only.h5')
+        eta_surf_mesh, eta_vol_mesh = tw_model_mesh_eta.get_eta_values(include_eta_vol=True)
+        if not np.allclose(eta_surf_mesh, eta_values):
+            result = False
+        if eta_vol_mesh is not None:
+            result = False
     except BaseException as e:
         print(e)
         result = False
@@ -963,8 +1032,8 @@ def test_td_plate(direct_flag,convert_xml):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_fr_plate(direct_flag,convert_xml):
-    fr_real = approx_list((6.807649E-2, 7.207748E-2), rel=1.E-4)
-    fr_imag = approx_list((-3.011666E-3, -2.177010E-3), rel=1.E-4)
+    fr_real = approx_list((6.801291E-2, 7.203606E-2), rel=1.E-4)
+    fr_imag = approx_list((-3.012114E-3, -2.177358E-3), rel=1.E-4)
     assert ThinCurr_setup("tw_test-plate.h5",3,direct_flag,freq=5.E3,fr_limit=0,convert_xml=convert_xml,
                            icoils=((0.5, 0.1),),
                            floops=((0.5, -0.05), (0.5, -0.1)))
@@ -973,8 +1042,8 @@ def test_fr_plate(direct_flag,convert_xml):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_td_plate_volt(direct_flag,convert_xml):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.580643E-4, 3.854292E-4), rel=1.E-3)
-    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1697.895], rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.699522E-4, 3.954280E-4), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1740.513], rel=1.E-3)
     assert ThinCurr_setup("tw_test-plate.h5",1,direct_flag,convert_xml=convert_xml,
                            vcoils=((0.5, 0.1),),
                            floops=((0.5, -0.05), (0.5, -0.1)),
@@ -1005,8 +1074,8 @@ def test_td_cyl(direct_flag,convert_xml):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_fr_cyl(direct_flag,convert_xml):
-    fr_real = approx_list((6.118337E-2, 4.356188E-3), rel=1.E-4)
-    fr_imag = approx_list((-1.911861E-3, -2.283493E-3), rel=1.E-4)
+    fr_real = approx_list((6.113541E-2, 4.356824E-3), rel=1.E-4)
+    fr_imag = approx_list((-1.911861E-3, -2.283967E-3), rel=1.E-4)
     assert ThinCurr_setup("tw_test-cyl.h5",3,direct_flag,freq=5.E3,fr_limit=0,convert_xml=convert_xml,
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
@@ -1016,8 +1085,8 @@ def test_fr_cyl(direct_flag,convert_xml):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_td_cyl_volt(direct_flag,convert_xml):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.504279E-4, 1.276624E-4), rel=1.E-3)
-    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.1203960E3, 1120.396, 655.853, 655.850], rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.813054E-4, 1.542203E-4), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.3453041E3, 1345.304, 787.155, 787.150], rel=1.E-3)
     assert ThinCurr_setup("tw_test-cyl.h5",1,direct_flag,convert_xml=convert_xml,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
@@ -1036,7 +1105,7 @@ circular_coil_defs = {
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("coil_def", ('xml', 'mesh', 'converted'))
 def test_td_cyl_volt_circular(direct_flag,coil_def):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.815131E-4, 1.545396E-4), rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.813188E-4, 1.541818E-4), rel=1.E-3)
     jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.344134E3, 1344.134, 786.6749, 786.6708], rel=1.E-3)
     assert ThinCurr_setup("tw_test-cyl.h5",1,direct_flag,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
@@ -1070,7 +1139,7 @@ def test_td_torus(direct_flag,convert_xml):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("coil_def", ('xml', 'mesh', 'converted'))
 def test_td_torus_circular(direct_flag,coil_def):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.802373E-4, 3.423895E-5), rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.778715E-4, 3.407226E-5), rel=1.E-3)
     assert ThinCurr_setup("tw_test-torus.h5",1,direct_flag,
                            icoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
@@ -1082,8 +1151,8 @@ def test_td_torus_circular(direct_flag,coil_def):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_fr_torus(direct_flag,convert_xml):
-    fr_real = approx_list((-2.807955E-3, -1.196091E-4), rel=1.E-4)
-    fr_imag = approx_list((-1.869732E-3, -1.248642E-4), rel=1.E-4)
+    fr_real = approx_list((-2.807268E-3, -1.196091E-4), rel=1.E-4)
+    fr_imag = approx_list((-1.870323E-3, -1.248355E-4), rel=1.E-4)
     assert ThinCurr_setup("tw_test-torus.h5",3,direct_flag,freq=5.E3,fr_limit=0,convert_xml=convert_xml,
                            icoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)))
@@ -1093,8 +1162,8 @@ def test_fr_torus(direct_flag,convert_xml):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_td_torus_volt(direct_flag,convert_xml):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((5.653338E-5, 4.035387E-6), rel=1.E-3)
-    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([None, -597.6068, 371.74769, 371.74780], rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((7.423015E-5, 5.296107E-6), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([None, -780.7178, 485.56802, 485.56820], rel=1.E-3)
     assert ThinCurr_setup("tw_test-torus.h5",1,direct_flag,convert_xml=convert_xml,
                            vcoils=((1.5, 0.5), (1.5, -0.5)),
                            floops=((1.4, 0.0), (0.6, 0.0)),
@@ -1136,7 +1205,7 @@ def test_torus_fourier_sensor(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_eig_passive(direct_flag):
-    eigs = approx_list((1.503561E-1, 6.420533E-2, 3.188782E-2, 2.941118E-2), rel=1.E-5)
+    eigs = approx_list((1.489156E-1, 6.274424E-2, 3.041702E-2, 2.793962E-2), rel=1.E-5)
     assert ThinCurr_setup(None,2,direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)))
@@ -1153,7 +1222,7 @@ def test_eig_passive_circular(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_passive(direct_flag):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((8.326557E-4, 8.347735E-4), rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((7.938330E-4, 8.069765E-4), rel=1.E-3)
     assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
                           icoils=((0.5, 0.1),),
                           vcoils=((0.5, 0.0),),
@@ -1164,8 +1233,8 @@ def test_td_passive(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_fr_passive(direct_flag):
-    fr_real = approx_list((1.947713E-1, 1.990873E-1), rel=1.E-4)
-    fr_imag = approx_list((-2.175942E-4, -1.560726E-4), rel=1.E-4)
+    fr_real = approx_list((1.844588E-1, 1.917030E-1), rel=1.E-4)
+    fr_imag = approx_list((-2.272322E-4, -1.629831E-4), rel=1.E-4)
     assert ThinCurr_setup(None,3,direct_flag,eta=1.E4,freq=5.E3,fr_limit=0,
                            icoils=((0.5, 0.1),),
                            vcoils=((0.5, 0.0),),
@@ -1175,8 +1244,8 @@ def test_fr_passive(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_passive_volt(direct_flag):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.379235E-4, 4.389248E-4), rel=1.E-3)
-    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([-641.4736, 1673.2893], rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.296507E-4, 4.366419E-4), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([-673.8428, 1721.1650], rel=1.E-3)
     assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
                           vcoils=((0.5, 0.0), (0.5, 0.1)),
                           floops=((0.5, -0.05), (0.5, -0.1)),
@@ -1219,8 +1288,8 @@ def test_td_aca(convert_xml):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_fr_cyl_hr(direct_flag):
     # Dense model with >2000 elements, so the iterative solve uses the block-Jacobi preconditioner
-    fr_real = approx_list((5.888738E-2, 4.881442E-3), rel=1.E-4)
-    fr_imag = approx_list((-2.017045E-3, -2.313881E-3), rel=1.E-4)
+    fr_real = approx_list((5.884322E-2, 4.882137E-3), rel=1.E-4)
+    fr_imag = approx_list((-2.016855E-3, -2.314362E-3), rel=1.E-4)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",3,direct_flag,freq=5.E3,fr_limit=0,
                            icoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
@@ -1262,8 +1331,8 @@ def test_fr_aca_single():
 @pytest.mark.coverage
 @pytest.mark.parametrize("convert_xml", (False, True))
 def test_td_volt_aca(convert_xml):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.513623E-4, 1.292107E-4), rel=1.E-3)
-    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.122550E3, 1122.550, 656.9544, 656.9797], rel=1.E-3)
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.823946E-4, 1.560471E-4), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.348327E3, 1348.327, 788.7134, 788.7133], rel=1.E-3)
     assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,convert_xml=convert_xml,
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
@@ -1271,13 +1340,65 @@ def test_td_volt_aca(convert_xml):
                            jumper_start=2)
     assert validate_td(sigs_final,jumpers_final)
 
-@pytest.mark.parametrize("pre_single", (False, True))
-def test_td_volt_aca_coarse(pre_single):
-    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.513623E-4, 1.292107E-4), rel=1.E-3)
-    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.122550E3, 1122.550, 656.9544, 656.9797], rel=1.E-3)
-    assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,hodlr_opts={'pre_coarse': True, 'pre_single': pre_single},
+@pytest.mark.parametrize("pre_single,pre_neigs", ((False, 0), (True, 0), (False, 2)))
+def test_td_volt_aca_coarse(pre_single,pre_neigs):
+    sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((1.823946E-4, 1.560471E-4), rel=1.E-3)
+    jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([1.348327E3, 1348.327, 788.7134, 788.7133], rel=1.E-3)
+    assert ThinCurr_setup("tw_test-cyl_hr.h5",1,'F',use_aca=True,hodlr_opts={'pre_coarse': True, 'pre_single': pre_single,
+                                                                          'pre_neigs': pre_neigs},
                            vcoils=((1.1, 0.25), (1.1, -0.25)),
                            floops=((0.9, 0.5), (0.9, 0.0)),
                            volt_waveform=((0.0, 1.0, 1.0), (1.0, 1.0, 1.0)),
                            jumper_start=2)
     assert validate_td(sigs_final,jumpers_final)
+
+
+#============================================================================
+# Point Mirnov sensors
+def run_mirnov_point(meshfile,mp_q):
+    """Couplings of point Mirnov sensors and of small loop Mirnov sensors at the same locations"""
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit.ThinCurr import ThinCurr
+        myOFT = OFT_env(nthreads=-1)
+        probes = (([1.38, 0.0, 0.0], [1.0, 0.0, 0.0]), ([1.36, 0.05, 0.1], [0.3, 0.2, 0.9]),
+                  ([1.0, 0.0, 0.0], [0.0, 0.0, 1.0]))
+        result = []
+        for dx in (None, 1.E-4):
+            save_sensors([Mirnov(p, n, 'B{0}'.format(k), dx=dx) for k, (p, n) in enumerate(probes)],
+                         'mirnov_point.loc')
+            tw_model = ThinCurr(myOFT)
+            tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml')
+            Ms, Msc, _ = tw_model.compute_Msensor('mirnov_point.loc')
+            result.append((np.array(Ms), np.array(Msc)))
+        mp_q.put(result)
+    except BaseException as e:
+        print(e)
+        mp_q.put(None)
+
+
+@pytest.mark.parametrize("coil_type", ("circular", "polygon"))
+def test_mirnov_point(coil_type):
+    os.chdir(test_dir)
+    xml = ThinCurr_XML()
+    xml.set_eta([10.0*mu0])
+    coil = ThinCurr_Icoil(name="Test")
+    if coil_type == "circular":
+        coil.add_circular_subcoil([1.6, 0.6])
+    else:
+        # Non-planar polygon coil: segment fields (point sensors) against segment-pair integrals (small loops)
+        t = np.linspace(0.0, 2.0*np.pi, 181)
+        coil.add_subcoil(pts=np.c_[1.6*np.cos(t), 1.6*np.sin(t), 0.6 + 0.1*np.sin(3.0*t)])
+    xml.add_Icoil(coil)
+    write_oft_xml([xml], "oft_in.xml")
+    mp_q = multiprocessing.Queue()
+    p = multiprocessing.Process(target=run_mirnov_point, args=("tw_test-torus.h5", mp_q))
+    p.start()
+    result = mp_q.get(timeout=180)
+    p.join()
+    assert result is not None
+    (Ms_point, Msc_point), (Ms_loop, Msc_loop) = result
+    # A loop of side dx approaches the point value as dx^2
+    assert np.abs(Ms_loop - Ms_point).max() < 1.E-5*np.abs(Ms_point).max()
+    assert np.allclose(Msc_loop, Msc_point, rtol=1.E-6, atol=0.0)
+

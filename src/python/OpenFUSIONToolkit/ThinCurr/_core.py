@@ -42,7 +42,8 @@ class ThinCurr():
             'B_svd_tol': '-1.E-5',
             'B_aca_rel_tol': '0.05',
             'pre_single': 'F',
-            'pre_coarse': 'F'
+            'pre_coarse': 'F',
+            'pre_neigs': '0'
         }
         self._oft_env.update_oft_in()
         ## Thin-wall model object
@@ -69,6 +70,8 @@ class ThinCurr():
         self.Lmat = None
         ## Model inductance matrix (HODLR)
         self.Lmat_hodlr = c_void_p()
+        ## Have the B-field reconstruction operators been computed (compute_Bmat)?
+        self._Bmat_computed = False
         ## Model resistance matrix
         self.Rmat = None
         ## Mesh vertices [np,3] (last column should be all zeros)
@@ -310,12 +313,23 @@ class ThinCurr():
     def reconstruct_Bfield(self,potential,coil_currs=None):
         '''! Reconstruct magnetic field on original grid
 
-        @param weights Reduced model basis weights
-        @param coil_currs Coil currents [A]
+        @note The B-field reconstruction operators must be computed first with
+        \ref OpenFUSIONToolkit.ThinCurr.ThinCurr.compute_Bmat "compute_Bmat()".
+
+        @param potential Current potential on the full model `(nelems,)`
+        @param coil_currs Icoil currents [A] (`n_icoils`, zero if not specified)
         @result Magnetic field on original grid `(:,3)`
         '''
-        potential = numpy.ascontiguousarray(potential, dtype=numpy.float64)
-        coil_currs = numpy.ascontiguousarray(coil_currs, dtype=numpy.float64)
+        if not self._Bmat_computed:
+            raise ValueError('B-field reconstruction operators not computed, call "compute_Bmat()" first')
+        potential = numpy.ascontiguousarray(potential, dtype=numpy.float64).reshape(-1)
+        if potential.shape[0] != self.nelems:
+            raise ValueError('Size of "potential" does not match number of elements')
+        if coil_currs is None:
+            coil_currs = numpy.zeros((self.n_icoils,), dtype=numpy.float64)
+        coil_currs = numpy.ascontiguousarray(coil_currs, dtype=numpy.float64).reshape(-1)
+        if coil_currs.shape[0] != self.n_icoils:
+            raise ValueError('Size of "coil_currs" does not match number of Icoils')
         field = numpy.zeros((self.np,3), dtype=numpy.float64)
         if self.Lmat_hodlr:
             thincurr_recon_field(self.tw_obj,potential,coil_currs,field,self.Lmat_hodlr)
@@ -367,7 +381,8 @@ class ThinCurr():
         return data_in
 
     def set_hodlr_options(self,target_size=None,aca_min_its=None,aca_sep_thresh=None,L_svd_tol=None,
-                          L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None,pre_coarse=None):
+                          L_aca_rel_tol=None,B_svd_tol=None,B_aca_rel_tol=None,pre_single=None,pre_coarse=None,
+                          pre_neigs=None):
         '''! Set HODLR options for ThinCurr model
 
         @param target_size Target size for HODLR blocks
@@ -379,6 +394,9 @@ class ThinCurr():
         @param B_aca_rel_tol Relative tolerance for ACA compression of B-matrix blocks
         @param pre_single Compute, store, and apply HODLR block-Jacobi preconditioners in single precision?
         @param pre_coarse Add a global coarse correction to HODLR block-Jacobi preconditioners (two-level preconditioner)?
+        @param pre_neigs Number of slowest L/R eigenmodes added to the coarse space (time-dependent runs only; requires
+        `pre_coarse` and ARPACK; computed once and reused by later `run_td` calls on the same model while the
+        resistivity is unchanged)
         '''
         if target_size is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['target_size'] = '{0:d}'.format(target_size)
@@ -400,6 +418,8 @@ class ThinCurr():
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_single'] = 'T' if pre_single else 'F'
         if pre_coarse is not None:
             self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_coarse'] = 'T' if pre_coarse else 'F'
+        if pre_neigs is not None:
+            self._oft_env.oft_in_groups['thincurr_hodlr_options']['pre_neigs'] = '{0:d}'.format(pre_neigs)
         self._oft_env.update_oft_in()
 
     def compute_Lmat(self,cache_file=None,use_hodlr=False):
@@ -464,11 +484,15 @@ class ThinCurr():
             thincurr_Bmat(self.tw_obj,c_void_p(),B_dx,ctypes.byref(Bmat_loc),ctypes.byref(Bdr_ptr),cache_string,error_string)
         if error_string.value != b'':
             raise Exception(error_string.value.decode())
-        if self.Lmat_hodlr:
-            return None, numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
+        self._Bmat_computed = True
+        if self.n_icoils > 0:
+            Bdr = numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
         else:
-            return numpy.ctypeslib.as_array(ctypes.cast(Bmat_loc, c_double_ptr),shape=(3,self.nelems,self.np)), \
-                numpy.ctypeslib.as_array(ctypes.cast(Bdr_ptr, c_double_ptr),shape=(3,self.n_icoils,self.np))
+            Bdr = numpy.zeros((3,0,self.np), dtype=numpy.float64)  # No Icoil operator is allocated
+        if self.Lmat_hodlr:
+            return None, Bdr
+        else:
+            return numpy.ctypeslib.as_array(ctypes.cast(Bmat_loc, c_double_ptr),shape=(3,self.nelems,self.np)), Bdr
 
     def compute_Mcoil(self,cache_file=None):
         '''! Compute the mutual inductance between passive (mesh+Vcoils) and active elements (Icoils)
@@ -950,7 +974,7 @@ class ThinCurr_reduced:
         '''! Reconstruct magnetic field on original grid
 
         @param weights Reduced model basis weights
-        @param coil_currs Coil currents [A]
+        @param coil_currs Coil currents [A] (zero if not specified)
         @result Magnetic field on original grid `(:,3)`
         '''
         if (self.B is None):
@@ -958,12 +982,13 @@ class ThinCurr_reduced:
         if coil_currs is not None:
             if (self.Bc is None):
                 raise ValueError('Coil magnetic field reconstruction operator not part of this model')
+            coil_currs = numpy.ascontiguousarray(coil_currs, dtype=numpy.float64).reshape(-1)
             if coil_currs.shape[0] != self.Bc[0].shape[0]:
                 raise ValueError('Size of "coil_currs" does not match number of coils in reduced model')
         Bfield = numpy.zeros((self.B[0].shape[1],3))
         for i in range(3):
             Bfield[:,i] = numpy.dot(weights,self.B[i])
-            if self.Bc is not None:
+            if (self.Bc is not None) and (coil_currs is not None):
                 Bfield[:,i] += numpy.dot(coil_currs,self.Bc[i])
         return Bfield
 
