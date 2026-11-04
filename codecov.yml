@@ -14,7 +14,63 @@ coverage:
 # GitHub specific settings
 github_checks:
   annotations: false # Disable code annotations
-# Skip bundled 3rd party libraries
+# PR comment: only post when a PR adds source lines that no test runs, or lowers coverage.
+# Show coverage by tool (components below) instead of the full per-file table.
+comment:
+  layout: "condensed_header, components, condensed_files, condensed_footer"
+  require_changes: "coverage_drop OR uncovered_patch"
+# Coverage of the code itself only
 ignore:
-  - "src/ext_libs"
+  - "src/ext_libs" # Bundled 3rd party libraries
   - "libs/build"
+  - "src/tests" # Test drivers and pytest files (often skipped by optional dependencies)
+  - "src/examples"
+  - "src/utilities"
+# Report coverage per physics tool and for the shared framework
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        informational: true
+  individual_components:
+    - component_id: tokamaker
+      name: TokaMaker
+      paths:
+        - "src/physics/grad_shaf*.F90"
+        - "src/physics/gs_eq.F90"
+        - "src/physics/axi_green.F90"
+        - "src/physics/tracing_2d.F90"
+        - "src/python/wrappers/tokamaker_f.F90"
+        - "src/python/OpenFUSIONToolkit/TokaMaker/**"
+    - component_id: thincurr
+      name: ThinCurr
+      paths:
+        - "src/physics/thin_wall*.F90"
+        - "src/python/wrappers/thincurr_f.F90"
+        - "src/python/OpenFUSIONToolkit/ThinCurr/**"
+    - component_id: mug
+      name: MUG
+      paths:
+        - "src/physics/xmhd*.F90"
+        - "src/physics/mugtok_td.F90"
+        - "src/physics/mhd_utils.F90"
+        - "src/python/wrappers/mugtok_f.F90"
+        - "src/python/OpenFUSIONToolkit/TokaMaker/mug_tok.py"
+    - component_id: marklin
+      name: Marklin
+      paths:
+        - "src/physics/taylor.F90"
+        - "src/physics/tracing.F90"
+        - "src/python/wrappers/marklin_f.F90"
+        - "src/python/OpenFUSIONToolkit/Marklin/**"
+    - component_id: framework
+      name: Framework
+      paths:
+        - "src/base/**"
+        - "src/grid/**"
+        - "src/fem/**"
+        - "src/lin_alg/**"
+        - "src/physics/diagnostic.F90"
+        - "src/physics/oft_*_inits.F90"
+        - "src/python/wrappers/oft_base_f.F90"
+        - "src/python/OpenFUSIONToolkit/*.py"
