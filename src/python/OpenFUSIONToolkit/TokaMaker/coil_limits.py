@@ -12,9 +12,9 @@ are supplied by the user.
 
 Limits are given as either a scalar `L` (meaning `|value| <= L`) or a pair
 `[min, max]` with `min <= 0 <= max` (either entry may be `None` for no limit).
-The fraction of a limit used is `value/max` for positive values and
-`value/min` for negative values, so a value above 1 means the limit is
-exceeded.
+A limit of `None` skips that check. The fraction of a limit used is
+`value/max` for positive values and `value/min` for negative values, so a
+value above 1 means the limit is exceeded.
 
 Quantities and units:
  - `current`: current per turn [A] (the coil current used by TokaMaker,
@@ -27,9 +27,8 @@ Quantities and units:
  - `force_z`: net vertical force on the coil [N] (\f$ -2 \pi \int J_\phi B_r R dA \f$)
  - `energy_coils`, `energy_total`: poloidal magnetic energy of the coils only,
    and of coils plus plasma, from the inductance matrix [J]
- - keep-out clearances [m]
 
-@authors Open FUSION Toolkit contributors
+@authors Eleanor Adams
 @date October 2026
 @ingroup doxy_oft_python
 '''
@@ -60,15 +59,22 @@ def _get_bounds(limit):
     @param limit Scalar `L` (meaning `[-L, L]`) or pair `[min, max]` (`None` entries mean no limit)
     @result (min, max) with `min <= 0 <= max`
     '''
-    if numpy.isscalar(limit):
-        if limit <= 0.0:
+    if numpy.ndim(limit) == 0:
+        try:
+            value = float(limit)
+        except (TypeError, ValueError):
+            raise ValueError('Limits must be a number or a pair [min, max], got {0!r}'.format(limit))
+        if not value > 0.0:
             raise ValueError('Scalar limits must be positive, got {0}'.format(limit))
-        return (-float(limit), float(limit))
-    if len(limit) != 2:
-        raise ValueError('Limits must be a scalar or a pair [min, max], got {0}'.format(limit))
-    lower = -numpy.inf if limit[0] is None else float(limit[0])
-    upper = numpy.inf if limit[1] is None else float(limit[1])
-    if (lower > 0.0) or (upper < 0.0):
+        return (-value, value)
+    if numpy.ndim(limit) != 1 or len(limit) != 2:
+        raise ValueError('Limits must be a number or a pair [min, max], got {0!r}'.format(limit))
+    try:
+        lower = -numpy.inf if limit[0] is None else float(limit[0])
+        upper = numpy.inf if limit[1] is None else float(limit[1])
+    except (TypeError, ValueError):
+        raise ValueError('Limit pair entries must be numbers or None, got {0!r}'.format(limit))
+    if (not lower <= 0.0) or (not upper >= 0.0):
         raise ValueError('Limit pairs must satisfy min <= 0 <= max, got {0}'.format(limit))
     return (lower, upper)
 
@@ -98,10 +104,12 @@ def _make_check(name, kind, quantity, value, limit):
     @param name Name of coil, coil set, group, or "system"
     @param kind One of "coil", "group", or "global"
     @param quantity Quantity name (see @ref UNITS)
-    @param value Computed value
+    @param value Computed value (must be finite)
     @param limit User limit (scalar or [min, max])
     @result Check record dictionary
     '''
+    if not numpy.isfinite(value):
+        raise ValueError('Value of {0} for "{1}" is not finite ({2}), cannot check against limit'.format(quantity, name, value))
     bounds = _get_bounds(limit)
     fraction, active_limit = _fraction_used(value, bounds)
     return {
@@ -131,11 +139,27 @@ def _lookup_coil(quantities, name):
     raise KeyError('Unknown coil "{0}"'.format(name))
 
 
+def _warn_double_counting(quantities, group_name, names):
+    '''! Warn if a group lists both a coil set and one of its regions
+
+    @param quantities Output of @ref compute_coil_quantities
+    @param group_name Name of group (for the warning message)
+    @param names Coil set and coil region names in the group
+    '''
+    for name in names:
+        if (name in quantities['coil_sets']) or (name not in quantities['coils']):
+            continue
+        set_name = quantities['coils'][name]['coil_set']
+        if (set_name != name) and (set_name in names):
+            warn('Group "{0}" lists coil set "{1}" and its region "{2}", which counts "{2}" twice'.format(group_name, set_name, name))
+
+
 def evaluate_limits(quantities, coil_limits=None, group_limits=None, global_limits=None):
     '''! Compare computed coil quantities against user limits
 
     This is the numerical part of @ref check_coil_limits and does not need an
-    equilibrium, so it can be reused with stored quantities.
+    equilibrium, so it can be reused with stored quantities. Limits of `None`
+    are skipped.
 
     @param quantities Output of @ref compute_coil_quantities
     @param coil_limits Limits per coil set or coil region, `{name: {quantity: limit}}`
@@ -153,18 +177,22 @@ def evaluate_limits(quantities, coil_limits=None, group_limits=None, global_limi
         for quantity, limit in limits.items():
             if quantity not in COIL_QUANTITIES:
                 raise ValueError('Unknown coil limit "{0}" for "{1}", must be one of {2}'.format(quantity, name, COIL_QUANTITIES))
-            checks.append(_make_check(name, 'coil', quantity, values[quantity], limit))
+            if limit is not None:
+                checks.append(_make_check(name, 'coil', quantity, values[quantity], limit))
     for group_name, group in (group_limits or {}).items():
         if 'coils' not in group:
             raise ValueError('Group "{0}" must list its coils under the "coils" key'.format(group_name))
         weights = group['coils']
         if not isinstance(weights, dict):
             weights = {name: 1.0 for name in weights}
+        _warn_double_counting(quantities, group_name, list(weights.keys()))
         for quantity, limit in group.items():
             if quantity == 'coils':
                 continue
             if quantity not in GROUP_QUANTITIES:
                 raise ValueError('Unknown group limit "{0}" for "{1}", must be one of {2}'.format(quantity, group_name, GROUP_QUANTITIES))
+            if limit is None:
+                continue
             value = 0.0
             for name, weight in weights.items():
                 value += weight*_lookup_coil(quantities, name)[quantity]
@@ -172,8 +200,43 @@ def evaluate_limits(quantities, coil_limits=None, group_limits=None, global_limi
     for quantity, limit in (global_limits or {}).items():
         if quantity not in GLOBAL_QUANTITIES:
             raise ValueError('Unknown global limit "{0}", must be one of {1}'.format(quantity, GLOBAL_QUANTITIES))
-        checks.append(_make_check('system', 'global', quantity, quantities[quantity], limit))
+        if limit is not None:
+            checks.append(_make_check('system', 'global', quantity, quantities[quantity], limit))
     return checks
+
+
+def _check_supported(tMaker_obj):
+    '''! Raise an error for configurations the coil limit checks do not support
+
+    @param tMaker_obj TokaMaker object
+    '''
+    if tMaker_obj.settings.mirror_mode:
+        raise NotImplementedError('Coil limit checks are not supported in mirror mode')
+    if len(tMaker_obj.dist_coils) > 0:
+        names = [tMaker_obj.coil_set_names[coil_id] for coil_id in tMaker_obj.dist_coils]
+        raise NotImplementedError('Coil limit checks assume uniform current density, but coil(s) {0} '
+                                  'have a non-uniform current distribution'.format(names))
+
+
+def _plasma_current(tMaker_obj):
+    r'''! Get the plasma current carried by the present \f$ \psi \f$
+
+    `get_globals` reports the plasma current from the profiles, which can be
+    nonzero after a vacuum solve even though \f$ \psi \f$ carries no plasma current.
+    The reported value is used only if the current from \f$ \Delta^* \psi \f$ in the
+    plasma region agrees with it to within 50%.
+
+    @param tMaker_obj TokaMaker object
+    @result Plasma current [A] (0 if \f$ \psi \f$ has no plasma current)
+    '''
+    Ip = tMaker_obj.get_globals()[0]
+    if Ip == 0.0:
+        return 0.0
+    psi = tMaker_obj.get_psi(normalized=False)
+    Ip_field = tMaker_obj.compute_area_integral(tMaker_obj.calc_delstar_curr(psi), reg_mask=1)
+    if abs(Ip_field - Ip) > 0.5*abs(Ip):
+        return 0.0
+    return Ip
 
 
 def compute_coil_forces(tMaker_obj):
@@ -190,6 +253,7 @@ def compute_coil_forces(tMaker_obj):
     @param tMaker_obj TokaMaker object with a solved equilibrium
     @result `{coil_name: {'force_r': F_r, 'force_z': F_z}}` per coil region [N]
     '''
+    _check_supported(tMaker_obj)
     _, region_currents = tMaker_obj.get_coil_currents()
     field_eval = tMaker_obj.get_field_eval('B')
     ones = numpy.ones((tMaker_obj.np,))
@@ -217,19 +281,21 @@ def compute_coil_quantities(tMaker_obj):
     Values are computed for each coil region (keyed by coil name, as in the mesh
     coil dictionary) and for each coil set (keyed by coil set name, as used by
     @ref TokaMaker.TokaMaker.set_coil_bounds "set_coil_bounds"). For a coil set,
-    `ampere_turns` and forces are sums over its regions and `current_density`
+    `ampere_turns` and forces are net sums over its regions and `current_density`
     is the region value with the largest magnitude.
 
+    With no plasma current in \f$ \psi \f$ (eg. after a vacuum solve), `energy_total`
+    equals `energy_coils`.
+
     @note Coils with non-uniform current distributions (see
-    @ref TokaMaker.TokaMaker.set_coil_current_dist "set_coil_current_dist") are
-    treated as having uniform current density.
+    @ref TokaMaker.TokaMaker.set_coil_current_dist "set_coil_current_dist") and
+    mirror mode are not supported and raise `NotImplementedError`.
 
     @param tMaker_obj TokaMaker object with a solved equilibrium
     @result Dictionary with keys `coils`, `coil_sets` (per-coil values, see @ref COIL_QUANTITIES),
     `energy_coils` and `energy_total` [J]
     '''
-    if len(tMaker_obj.dist_coils) > 0:
-        warn('Coils with non-uniform current distributions are treated as uniform in coil limit checks')
+    _check_supported(tMaker_obj)
     set_currents, region_currents = tMaker_obj.get_coil_currents()
     forces = compute_coil_forces(tMaker_obj)
     ones = numpy.ones((tMaker_obj.np,))
@@ -271,128 +337,35 @@ def compute_coil_quantities(tMaker_obj):
     current_vec = numpy.zeros((tMaker_obj.ncoils,))
     for set_name, coil_set in tMaker_obj.coil_sets.items():
         current_vec[coil_set['id']] = set_currents[set_name]
-    Lmat = tMaker_obj.get_coil_Lmat()
-    Ip = tMaker_obj.get_globals()[0]
-    full_vec = numpy.append(current_vec, Ip)
+    energy_coils = 0.5*numpy.dot(current_vec, numpy.dot(tMaker_obj.Lcoils, current_vec))
+    energy_total = energy_coils
+    Ip = _plasma_current(tMaker_obj)
+    if Ip != 0.0:
+        # Plasma row of the inductance matrix is normalized by Ip, so only use it with plasma current
+        Lmat = tMaker_obj.get_coil_Lmat()
+        full_vec = numpy.append(current_vec, Ip)
+        energy_total = 0.5*numpy.dot(full_vec, numpy.dot(Lmat, full_vec))
     return {
         'coils': coils,
         'coil_sets': coil_sets,
-        'energy_coils': 0.5*numpy.dot(current_vec, numpy.dot(Lmat[:-1, :-1], current_vec)),
-        'energy_total': 0.5*numpy.dot(full_vec, numpy.dot(Lmat, full_vec)),
+        'energy_coils': energy_coils,
+        'energy_total': energy_total,
     }
-
-
-def _boundary_contour_points(tMaker_obj):
-    r'''! Get points on the plasma boundary flux contour inside the plasma region
-
-    The contour \f$ \psi = \psi_{LCFS} \f$ is found by linear interpolation on mesh
-    edges in the plasma region (region 1). For a diverted plasma this gives the
-    LCFS and the separatrix legs up to the limiter/wall.
-
-    @param tMaker_obj TokaMaker object with a solved equilibrium
-    @result Contour points [:,2] [m]
-    '''
-    psi = tMaker_obj.get_psi(normalized=False)
-    level = tMaker_obj.psi_bounds[0]
-    lc = tMaker_obj.lc[tMaker_obj.reg == 1, :]
-    rz = tMaker_obj.r[:, :2]
-    nodes = numpy.unique(lc)
-    points = [rz[nodes[psi[nodes] == level], :]]
-    for i, j in ((0, 1), (1, 2), (2, 0)):
-        f_a = psi[lc[:, i]] - level
-        f_b = psi[lc[:, j]] - level
-        crosses = f_a*f_b < 0.0
-        t = f_a[crosses]/(f_a[crosses] - f_b[crosses])
-        r_a = rz[lc[crosses, i], :]
-        r_b = rz[lc[crosses, j], :]
-        points.append(r_a + t[:, None]*(r_b - r_a))
-    return numpy.vstack(points)
-
-
-def _points_in_polygon(points, polygon):
-    '''! Test which points are inside a closed polygon (even-odd rule)
-
-    @param points Points to test [:,2]
-    @param polygon Polygon vertices [:,2] (closing segment is implied)
-    @result Boolean mask [:]
-    '''
-    inside = numpy.zeros((points.shape[0],), dtype=bool)
-    x, y = points[:, 0], points[:, 1]
-    for k in range(polygon.shape[0]):
-        x1, y1 = polygon[k-1, :]
-        x2, y2 = polygon[k, :]
-        straddles = (y1 > y) != (y2 > y)
-        x_cross = x1 + (y - y1)*(x2 - x1)/(y2 - y1 + 1.E-300)
-        inside ^= straddles & (x < x_cross)
-    return inside
-
-
-def _distance_to_polygon(points, polygon):
-    '''! Distance from each point to the nearest polygon edge
-
-    @param points Points [:,2]
-    @param polygon Polygon vertices [:,2] (closing segment is implied)
-    @result Distances [:] [m]
-    '''
-    start = numpy.roll(polygon, 1, axis=0)
-    seg = polygon - start
-    seg_len2 = numpy.maximum(numpy.sum(seg**2, axis=1), 1.E-300)
-    rel = points[:, None, :] - start[None, :, :]
-    t = numpy.clip(numpy.sum(rel*seg[None, :, :], axis=2)/seg_len2[None, :], 0.0, 1.0)
-    nearest = start[None, :, :] + t[:, :, None]*seg[None, :, :]
-    return numpy.sqrt(numpy.min(numpy.sum((points[:, None, :] - nearest)**2, axis=2), axis=1))
-
-
-def check_keepout(points, keepout):
-    '''! Check that points stay outside keep-out polygons
-
-    @param points Points to check [:,2] [m] (eg. LCFS and separatrix legs)
-    @param keepout Keep-out regions, `{name: polygon[:,2]}` or
-    `{name: {'polygon': polygon[:,2], 'min_clearance': d}}` with `d` in [m] (default 0)
-    @result List of keep-out records with signed minimum clearance [m]
-    (negative = penetration depth inside the polygon)
-    '''
-    records = []
-    for name, spec in keepout.items():
-        if isinstance(spec, dict):
-            polygon = numpy.asarray(spec['polygon'], dtype=numpy.float64)
-            required = float(spec.get('min_clearance', 0.0))
-        else:
-            polygon = numpy.asarray(spec, dtype=numpy.float64)
-            required = 0.0
-        if numpy.allclose(polygon[0, :], polygon[-1, :]):
-            polygon = polygon[:-1, :]
-        inside = _points_in_polygon(points, polygon)
-        clearance = _distance_to_polygon(points, polygon)
-        clearance[inside] *= -1.0
-        imin = int(numpy.argmin(clearance))
-        records.append({
-            'name': name,
-            'n_inside': int(numpy.count_nonzero(inside)),
-            'min_clearance': float(clearance[imin]),
-            'closest_point': points[imin, :].copy(),
-            'required_clearance': required,
-            'ok': bool(clearance[imin] >= required),
-        })
-    return records
 
 
 class CoilLimitReport():
     '''! Results of a coil limit check (see @ref check_coil_limits)'''
-    def __init__(self, checks, quantities=None, keepout=None):
+    def __init__(self, checks, quantities=None):
         '''! Create report from check records
 
         @param checks List of check records from @ref evaluate_limits
         @param quantities Computed quantities from @ref compute_coil_quantities
-        @param keepout List of keep-out records from @ref check_keepout
         '''
         ## All limit checks, each a dictionary with `name`, `kind`, `quantity`, `units`,
         ## `value`, `bounds`, `limit` (active bound), `fraction_used`, and `ok`
         self.checks = checks
         ## Computed quantities used for the checks
         self.quantities = quantities
-        ## Keep-out check records
-        self.keepout = keepout if keepout is not None else []
         ## Check with the largest fraction of its limit used (`None` if no checks)
         self.binding = None
         if len(checks) > 0:
@@ -400,8 +373,8 @@ class CoilLimitReport():
 
     @property
     def ok(self):
-        '''! True if all limit and keep-out checks pass'''
-        return all(check['ok'] for check in self.checks) and all(rec['ok'] for rec in self.keepout)
+        '''! True if all limit checks pass'''
+        return all(check['ok'] for check in self.checks)
 
     @property
     def violations(self):
@@ -442,13 +415,6 @@ class CoilLimitReport():
             lines.append('{0:<16} {1:<16} {2:>12.4e} {3:>12.4e} {4:<8} {5:>7.1f}%{6}'.format(
                 check['name'], check['quantity'], check['value'], check['limit'],
                 check['units'], 100.0*check['fraction_used'], flag))
-        if len(self.keepout) > 0:
-            lines.append('')
-            lines.append('{0:<16} {1:>9} {2:>16} {3:>14}'.format('Keep-out', 'N inside', 'Min clearance', 'Required'))
-            for rec in self.keepout:
-                lines.append('{0:<16} {1:>9d} {2:>14.4f} m {3:>12.4f} m{4}'.format(
-                    rec['name'], rec['n_inside'], rec['min_clearance'], rec['required_clearance'],
-                    '' if rec['ok'] else ' !'))
         return '\n'.join(lines)
 
     def plot_margins(self, fig, ax):
@@ -467,7 +433,7 @@ class CoilLimitReport():
         ax.tick_params(axis='x', labelrotation=90)
 
 
-def check_coil_limits(tMaker_obj, coil_limits=None, group_limits=None, global_limits=None, keepout=None):
+def check_coil_limits(tMaker_obj, coil_limits=None, group_limits=None, global_limits=None):
     '''! Check a solved equilibrium against user-supplied coil limits
 
     This is a post-solve check and is separate from the solver constraint set by
@@ -480,8 +446,7 @@ def check_coil_limits(tMaker_obj, coil_limits=None, group_limits=None, global_li
     report = check_coil_limits(mygs,
         coil_limits={'PF1': {'current': 45.E3, 'force_z': [-50.E6, 50.E6]}},
         group_limits={'CS_upper': {'coils': ['CS1U', 'CS2U'], 'force_z': 100.E6}},
-        global_limits={'energy_coils': 5.E9},
-        keepout={'blanket': blanket_polygon})
+        global_limits={'energy_coils': 5.E9})
     print(report.summary())
     ~~~~~~~~~~
 
@@ -493,12 +458,8 @@ def check_coil_limits(tMaker_obj, coil_limits=None, group_limits=None, global_li
     quantities from @ref GROUP_QUANTITIES
     @param global_limits Limits on system quantities, `{quantity: limit}` with
     quantities from @ref GLOBAL_QUANTITIES
-    @param keepout Keep-out regions for the LCFS and separatrix legs (see @ref check_keepout)
     @result @ref CoilLimitReport
     '''
     quantities = compute_coil_quantities(tMaker_obj)
     checks = evaluate_limits(quantities, coil_limits, group_limits, global_limits)
-    keepout_records = None
-    if keepout is not None:
-        keepout_records = check_keepout(_boundary_contour_points(tMaker_obj), keepout)
-    return CoilLimitReport(checks, quantities, keepout_records)
+    return CoilLimitReport(checks, quantities)

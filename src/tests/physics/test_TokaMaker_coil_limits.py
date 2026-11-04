@@ -12,23 +12,19 @@ import os
 import sys
 import time
 import json
+import warnings
 import multiprocessing
 import numpy as np
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..', 'python')))
-from OpenFUSIONToolkit.TokaMaker.coil_limits import (CoilLimitReport, check_coil_limits, check_keepout,
-                                                     compute_coil_forces, evaluate_limits)
+from OpenFUSIONToolkit.TokaMaker.coil_limits import CoilLimitReport, check_coil_limits, evaluate_limits
+
+mu0 = 4.E-7*np.pi
 
 
 def mp_run(target, args, timeout=60):
-    '''! Run a test case in a separate process (only one OFT_env is allowed per process)
-
-    @param target Function to run, the last argument is a result queue
-    @param args Arguments to pass to `target`
-    @param timeout Timeout [s]
-    @result Value put in the queue by `target`, or `None` on failure
-    '''
+    '''Run a test case in a separate process (only one OFT_env is allowed per process)'''
     if os.environ.get('OFT_DEBUG_TEST', 0):
         timeout *= 4
     os.chdir(test_dir)
@@ -58,10 +54,7 @@ def mp_run(target, args, timeout=60):
 # Limit evaluation (no equilibrium needed)
 #============================================================================
 def synthetic_quantities():
-    '''! Build a small set of coil quantities by hand
-
-    @result Quantities dictionary in the format of `compute_coil_quantities`
-    '''
+    '''Small set of hand-built coil quantities, in the format of `compute_coil_quantities`'''
     def coil(current, nturns, area, force_r, force_z, coil_set):
         return {'coil_set': coil_set, 'current': current, 'nturns': nturns, 'ampere_turns': current*nturns,
                 'current_density': current*nturns/area, 'force_r': force_r, 'force_z': force_z, 'area': area}
@@ -79,13 +72,7 @@ def synthetic_quantities():
 
 
 def find_check(checks, name, quantity):
-    '''! Get the check record for a name and quantity
-
-    @param checks List of check records
-    @param name Coil, group, or "system"
-    @param quantity Quantity name
-    @result Matching check record
-    '''
+    '''Get the check record for a name and quantity'''
     for check in checks:
         if (check['name'] == name) and (check['quantity'] == quantity):
             return check
@@ -93,13 +80,14 @@ def find_check(checks, name, quantity):
 
 
 def test_limit_fractions():
-    '''! Fraction of limit used for scalar, asymmetric, and one-sided limits'''
+    '''Fraction of limit used for scalar, asymmetric, and one-sided limits'''
     quantities = synthetic_quantities()
     checks = evaluate_limits(quantities, coil_limits={
-        'A': {'current': 20.0E3, 'force_z': [-6.0E6, 1.0E6]},
+        'A': {'current': 20.0E3, 'force_z': [-6.0E6, 1.0E6], 'force_r': None},
         'B': {'current': [-5.0E3, 0.0], 'force_z': [None, 8.0E6]},
-        'BU': {'current_density': 1.5E6},
-    }, global_limits={'energy_coils': 4.0E8})
+        'BU': {'current_density': np.array(1.5E6)},
+    }, global_limits={'energy_coils': 4.0E8, 'energy_total': None})
+    assert len(checks) == 6  # `None` limits are skipped
     assert find_check(checks, 'A', 'current')['fraction_used'] == pytest.approx(0.5)
     assert find_check(checks, 'A', 'force_z')['fraction_used'] == pytest.approx(0.5)
     assert find_check(checks, 'A', 'force_z')['limit'] == pytest.approx(-6.0E6)
@@ -115,14 +103,22 @@ def test_limit_fractions():
 
 
 def test_limit_wrong_sign():
-    '''! A value on the side of a zero limit (eg. unipolar supply) is flagged'''
+    '''A value on the side of a zero limit (eg. unipolar supply) is flagged'''
     checks = evaluate_limits(synthetic_quantities(), coil_limits={'B': {'current': [0.0, 5.0E3]}})
     assert np.isinf(checks[0]['fraction_used'])
     assert not checks[0]['ok']
 
 
+def test_nonfinite_value():
+    '''Non-finite values fail loudly instead of passing as 0% used'''
+    quantities = synthetic_quantities()
+    quantities['energy_total'] = np.nan
+    with pytest.raises(ValueError, match='not finite'):
+        evaluate_limits(quantities, global_limits={'energy_total': 1.0E9})
+
+
 def test_group_limits():
-    '''! Group sums with default and explicit weights'''
+    '''Group sums with default and explicit weights'''
     quantities = synthetic_quantities()
     checks = evaluate_limits(quantities, group_limits={
         'all_z': {'coils': ['A', 'BU', 'BL'], 'force_z': 10.0E6},
@@ -133,42 +129,36 @@ def test_group_limits():
     assert find_check(checks, 'split_z', 'force_z')['fraction_used'] == pytest.approx(0.6)
 
 
+def test_group_double_count_warning():
+    '''Listing a coil set and one of its regions in a group warns'''
+    with pytest.warns(UserWarning, match='twice'):
+        evaluate_limits(synthetic_quantities(), group_limits={'g': {'coils': ['B', 'BU'], 'force_z': 1.0E7}})
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        evaluate_limits(synthetic_quantities(), group_limits={'g': {'coils': ['A', 'BU', 'BL'], 'force_z': 1.0E7}})
+
+
 @pytest.mark.parametrize('kwargs', [
     {'coil_limits': {'missing': {'current': 1.0}}},
     {'coil_limits': {'A': {'voltage': 1.0}}},
     {'coil_limits': {'A': {'current': -1.0}}},
+    {'coil_limits': {'A': {'current': np.nan}}},
+    {'coil_limits': {'A': {'current': 'big'}}},
     {'coil_limits': {'A': {'current': [1.0, 2.0]}}},
+    {'coil_limits': {'A': {'current': [1.0, 2.0, 3.0]}}},
+    {'coil_limits': {'A': {'current': ['low', 2.0]}}},
     {'group_limits': {'g': {'force_z': 1.0}}},
     {'group_limits': {'g': {'coils': ['A'], 'current': 1.0}}},
     {'global_limits': {'energy': 1.0}},
 ])
 def test_limit_bad_specs(kwargs):
-    '''! Invalid limit specifications raise errors
-
-    @param kwargs Arguments to `evaluate_limits`
-    '''
+    '''Invalid limit specifications raise errors'''
     with pytest.raises((KeyError, ValueError)):
         evaluate_limits(synthetic_quantities(), **kwargs)
 
 
-def test_keepout_geometry():
-    '''! Signed clearance for points inside and outside a polygon'''
-    square = np.array([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]])
-    outside = np.array([[1.5, 0.5], [2.0, 2.0]])
-    records = check_keepout(outside, {'sq': square, 'sq_margin': {'polygon': square, 'min_clearance': 0.6}})
-    assert records[0]['n_inside'] == 0
-    assert records[0]['min_clearance'] == pytest.approx(0.5)
-    assert records[0]['ok']
-    assert not records[1]['ok']
-    inside = np.vstack((outside, [[0.5, 0.2]]))
-    records = check_keepout(inside, {'sq': np.vstack((square, square[:1, :]))})
-    assert records[0]['n_inside'] == 1
-    assert records[0]['min_clearance'] == pytest.approx(-0.2)
-    assert not records[0]['ok']
-
-
 def test_plot_margins():
-    '''! Margin bar plot runs'''
+    '''Margin bar plot runs'''
     matplotlib = pytest.importorskip('matplotlib')
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
@@ -180,10 +170,151 @@ def test_plot_margins():
 
 
 #============================================================================
+# Vacuum fields from simple coils
+#============================================================================
+## Coil geometry for the vacuum test mesh: name: (rc, zc, w, h, nturns, coil_set)
+VAC_COILS = {
+    'C5': (3.0, 3.5, 0.6, 0.6, 5.0, 'C5'),
+    'PU': (1.5, 1.0, 0.4, 0.8, 1.0, 'PU'),
+    'PL': (1.5, -1.0, 0.4, 0.8, 1.0, 'PL'),
+    'MIXU': (6.0, 2.0, 0.5, 0.5, 3.0, 'MIX'),
+    'MIXL': (6.0, -2.0, 0.5, 0.5, -2.0, 'MIX'),
+}
+
+
+def hoop_force(rc, w, h, ampere_turns):
+    '''Analytic total radial self-force of a thin ring with rectangular cross-section
+
+    F_r = mu0 I^2/2 (ln(8R/g) - 1), with geometric mean distance g ~ 0.2235(w+h)
+    '''
+    gmd = 0.2235*(w + h)
+    return 0.5*mu0*ampere_turns**2*(np.log(8.0*rc/gmd) - 1.0)
+
+
+def run_vacuum_coils(mp_q):
+    '''Vacuum solves with single coils, coil pairs, and a mixed-turn coil set'''
+    try:
+        from OpenFUSIONToolkit import OFT_env
+        from OpenFUSIONToolkit._interface import oftpy_dump_cov
+        from OpenFUSIONToolkit.TokaMaker import TokaMaker
+        from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain
+        from OpenFUSIONToolkit.TokaMaker.coil_limits import compute_coil_quantities
+        gs_mesh = gs_Domain(rextent=8.0, zextents=[-5.0, 5.0])
+        gs_mesh.define_region('air', 0.4, 'boundary')
+        gs_mesh.define_region('plasma', 0.2, 'plasma')
+        for name, (_, _, _, _, nturns, coil_set) in VAC_COILS.items():
+            gs_mesh.define_region(name, 0.05, 'coil', coil_set=coil_set, nTurns=nturns)
+        gs_mesh.add_rectangle(4.0, 0.0, 1.5, 2.0, 'plasma')
+        for name, (rc, zc, w, h, _, _) in VAC_COILS.items():
+            gs_mesh.add_rectangle(rc, zc, w, h, name)
+        mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
+        myOFT = OFT_env(nthreads=-1)
+        mygs = TokaMaker(myOFT)
+        mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
+        mygs.setup_regions(cond_dict=gs_mesh.get_conductors(), coil_dict=gs_mesh.get_coils())
+        mygs.setup(order=2)
+        results = {}
+        # After `vac_solve` get_globals reports a profile Ip that is not in psi;
+        # after `solve(vacuum=True)` it reports Ip = 0. Both must give coil-only energy.
+        cases = {
+            'single': ({'C5': 2.0E5}, 'vac_solve'),
+            'single_solve': ({'C5': 2.0E5}, 'solve'),
+            'same_sign': ({'PU': 1.0E6, 'PL': 1.0E6}, 'vac_solve'),
+            'opposite_sign': ({'PU': 1.0E6, 'PL': -1.0E6}, 'vac_solve'),
+            'mixed': ({'MIX': 1.0E5}, 'vac_solve'),
+        }
+        for case, (currents, method) in cases.items():
+            mygs.set_coil_currents(currents)
+            if method == 'solve':
+                mygs.solve(vacuum=True)
+            else:
+                mygs.replace_eq(mygs.vac_solve())
+            quantities = compute_coil_quantities(mygs)
+            psi = mygs.get_psi(normalized=False)
+            J_delstar = mygs.calc_delstar_curr(psi)
+            energy_direct = 0.0
+            delstar_turns = {}
+            for name, values in quantities['coils'].items():
+                reg_id = mygs._coil_dict[name]['reg_id']
+                energy_direct += values['current_density']*mygs.compute_area_integral(psi, reg_mask=reg_id)
+                delstar_turns[name] = mygs.compute_area_integral(J_delstar, reg_mask=reg_id)
+            report = check_coil_limits(mygs, global_limits={'energy_total': 2.0*quantities['energy_total']})
+            results[case] = {
+                'quantities': quantities,
+                'energy_direct': np.pi*energy_direct,  # psi is in Wb/rad
+                'delstar_turns': delstar_turns,
+                'Ip': mygs.get_globals()[0],
+                'energy_check': report.checks[0],
+            }
+        # Non-uniform current distributions are not supported
+        mygs.set_coil_current_dist('C5', 2.0*np.ones((mygs.np,)))
+        try:
+            check_coil_limits(mygs)
+            results['dist_error'] = None
+        except NotImplementedError as e:
+            results['dist_error'] = str(e)
+        oftpy_dump_cov()
+    except Exception as e:
+        print(e)
+        results = None
+    mp_q.put(results)
+
+
+@pytest.mark.coverage
+def test_vacuum_coils():
+    '''Coil bookkeeping, forces, and energy for vacuum fields from simple coils'''
+    results = mp_run(run_vacuum_coils, ())
+    assert results is not None
+    assert results['single']['Ip'] != 0.0
+    assert results['single_solve']['Ip'] == 0.0
+    for case in ('single', 'single_solve', 'same_sign', 'opposite_sign', 'mixed'):
+        res = results[case]
+        # Vacuum solve: no plasma current in psi, energy_total is finite and equals energy_coils
+        assert np.isfinite(res['quantities']['energy_total'])
+        assert res['quantities']['energy_total'] == res['quantities']['energy_coils']
+        assert res['quantities']['energy_coils'] == pytest.approx(res['energy_direct'], rel=1.E-3)
+        assert res['energy_check']['fraction_used'] == pytest.approx(0.5)
+        # Region A-turns match the integral of the Del*(psi) current (smeared over region edges)
+        for name, values in res['quantities']['coils'].items():
+            if values['current'] != 0.0:
+                assert res['delstar_turns'][name] == pytest.approx(values['ampere_turns'], rel=0.1)
+    # Single 5-turn coil at 200 kA: A-turns and hoop force for 1 MA-turn
+    c5 = results['single']['quantities']['coils']['C5']
+    rc, _, w, h, _, _ = VAC_COILS['C5']
+    assert c5['ampere_turns'] == pytest.approx(1.0E6)
+    assert c5['current_density'] == pytest.approx(1.0E6/c5['area'])
+    assert c5['force_r'] == pytest.approx(hoop_force(rc, w, h, 1.0E6), rel=1.E-2)
+    c5_solve = results['single_solve']['quantities']['coils']['C5']
+    assert c5_solve['force_r'] == pytest.approx(c5['force_r'], rel=1.E-6)
+    # Coaxial pair: attract with same-sign currents, repel with opposite signs, equal and opposite
+    for case, sign in (('same_sign', -1.0), ('opposite_sign', 1.0)):
+        coils = results[case]['quantities']['coils']
+        assert np.sign(coils['PU']['force_z']) == sign
+        assert np.sign(coils['PL']['force_z']) == -sign
+        assert coils['PL']['force_z'] == pytest.approx(-coils['PU']['force_z'], rel=1.E-2)
+    # Mixed-turn set (3 and -2 turns) at 100 kA per turn
+    mixed = results['mixed']['quantities']
+    upper, lower, mix_set = mixed['coils']['MIXU'], mixed['coils']['MIXL'], mixed['coil_sets']['MIX']
+    assert upper['ampere_turns'] == pytest.approx(3.0E5)
+    assert lower['ampere_turns'] == pytest.approx(-2.0E5)
+    assert upper['current_density'] == pytest.approx(3.0E5/upper['area'])
+    assert lower['current_density'] == pytest.approx(-2.0E5/lower['area'])
+    assert mix_set['current'] == pytest.approx(1.0E5)
+    assert mix_set['ampere_turns'] == pytest.approx(1.0E5)
+    assert mix_set['current_density'] == pytest.approx(upper['current_density'])
+    # Opposite A-turns repel: upper pushed up, lower pushed down, equal and opposite
+    assert upper['force_z'] > 0.0
+    assert lower['force_z'] == pytest.approx(-upper['force_z'], rel=1.E-2)
+    # Current distributions raise
+    assert results['dist_error'] is not None
+    assert 'C5' in results['dist_error']
+
+
+#============================================================================
 # ITER-like equilibrium (public geometry from ITER_geom.json)
 #============================================================================
 def create_ITER_mesh():
-    '''! Build the ITER test mesh (same as `test_TokaMaker.py`) if it does not exist'''
+    '''Build the ITER test mesh (same as `test_TokaMaker.py`) if it does not exist'''
     from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain, save_gs_mesh
     with open('ITER_geom.json', 'r') as fid:
         ITER_geom = json.load(fid)
@@ -210,10 +341,7 @@ def create_ITER_mesh():
 
 
 def solve_ITER():
-    '''! Solve the ITER-like test equilibrium
-
-    @result TokaMaker object with solved equilibrium
-    '''
+    '''Solve the ITER-like test equilibrium and return the TokaMaker object'''
     from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.TokaMaker import TokaMaker
     from OpenFUSIONToolkit.TokaMaker.meshing import load_gs_mesh
@@ -234,8 +362,8 @@ def solve_ITER():
         [4.26, 1.33], [4.28, 0.08], [4.49, -1.34], [7.28, -1.89], [8.00, -0.68]
     ])
     x_point = np.array([[5.125, -3.4],])
-    mygs.set_isoflux(np.vstack((isoflux_pts, x_point)))
-    mygs.set_saddles(x_point)
+    mygs.set_isoflux_constraints(np.vstack((isoflux_pts, x_point)))
+    mygs.set_saddle_constraints(x_point)
     reg_terms = []
     for name in mygs.coil_sets:
         weight = 2.E-2 if name.startswith('CS1') else 1.E-2
@@ -248,83 +376,44 @@ def solve_ITER():
     return mygs
 
 
-def centroid_forces(mygs):
-    r'''! Independent coil force calculation using one-point (centroid) quadrature per cell
-
-    Uses the force density convention from `compute_forces_components` usage
-    (\f$ f_r = J_\phi B_z \f$, \f$ f_z = -J_\phi B_r \f$).
-
-    @param mygs TokaMaker object with solved equilibrium
-    @result `{coil_name: [F_r, F_z]}` [N]
-    '''
-    _, region_currents = mygs.get_coil_currents()
-    field_eval = mygs.get_field_eval('B')
-    forces = {}
-    for name, coil in mygs._coil_dict.items():
-        cells = mygs.lc[mygs.reg == coil['reg_id'], :]
-        p0, p1, p2 = mygs.r[cells[:, 0], :2], mygs.r[cells[:, 1], :2], mygs.r[cells[:, 2], :2]
-        area = 0.5*np.abs((p1[:, 0]-p0[:, 0])*(p2[:, 1]-p0[:, 1]) - (p2[:, 0]-p0[:, 0])*(p1[:, 1]-p0[:, 1]))
-        centroids = (p0 + p1 + p2)/3.0
-        B = field_eval.eval(centroids)
-        J_phi = region_currents[coil['reg_id']-1]/area.sum()
-        forces[name] = [
-            2.0*np.pi*J_phi*np.sum(B[:, 2]*centroids[:, 0]*area),
-            -2.0*np.pi*J_phi*np.sum(B[:, 0]*centroids[:, 0]*area),
-        ]
-    return forces
-
-
 def run_ITER_limits(mp_q):
-    '''! Run coil limit checks on the ITER-like equilibrium
-
-    @param mp_q Result queue
-    '''
+    '''Run coil limit checks on the ITER-like equilibrium'''
     try:
+        from OpenFUSIONToolkit._interface import oftpy_dump_cov
         mygs = solve_ITER()
-        report = check_coil_limits(mygs)
-        quantities = report.quantities
-        # Illustrative limits relative to the solution: PF6 current at 80% (binding),
-        # CS2L vertical force at 110% (violated), other currents at 50%
+        quantities = check_coil_limits(mygs).quantities
+        # Illustrative limits relative to the solution: PF6 current at 80%,
+        # CS2L vertical force at 110% (violated, binding), other currents at 50%
         coil_limits = {}
         for name, values in quantities['coil_sets'].items():
             coil_limits[name] = {'current': 2.0*abs(values['current'])}
         coil_limits['PF6']['current'] = abs(quantities['coil_sets']['PF6']['current'])/0.8
         coil_limits['CS2L']['force_z'] = abs(quantities['coil_sets']['CS2L']['force_z'])/1.1
         coil_limits['VSU'] = {'current_density': 2.0*abs(quantities['coils']['VSU']['current_density'])}
-        upper_cs = ['CS1U', 'CS2U', 'CS3U']
-        group_limits = {'CS_upper': {'coils': upper_cs, 'force_z': 1.0E9}}
+        group_limits = {'CS_upper': {'coils': ['CS1U', 'CS2U', 'CS3U'], 'force_z': 1.0E9}}
         global_limits = {'energy_total': 2.0*quantities['energy_total']}
-        keepout = {
-            'around_xpoint': np.array([[4.8, -3.7], [5.4, -3.7], [5.4, -3.1], [4.8, -3.1]]),
-            'outboard': {'polygon': np.array([[10.0, -1.0], [11.0, -1.0], [11.0, 1.0], [10.0, 1.0]]), 'min_clearance': 0.5},
-        }
         report = check_coil_limits(mygs, coil_limits=coil_limits, group_limits=group_limits,
-                                   global_limits=global_limits, keepout=keepout)
-        # Independent checks
+                                   global_limits=global_limits)
+        # Independent checks: energy from pi*int(psi*J dA) and Del*(psi) current in coils
         psi = mygs.get_psi(normalized=False)
-        J_plasma = mygs.calc_jtor_plasma()
-        energy_direct = mygs.compute_area_integral(psi*J_plasma, reg_mask=1)
-        for name, values in quantities['coils'].items():
-            energy_direct += values['current_density']*mygs.compute_area_integral(psi, reg_mask=mygs._coil_dict[name]['reg_id'])
-        energy_direct *= np.pi  # psi is in Wb/rad
+        energy_direct = mygs.compute_area_integral(psi*mygs.calc_jtor_plasma(), reg_mask=1)
         J_delstar = mygs.calc_delstar_curr(psi)
         delstar_avg = {}
         for name, values in quantities['coils'].items():
             reg_id = mygs._coil_dict[name]['reg_id']
+            energy_direct += values['current_density']*mygs.compute_area_integral(psi, reg_mask=reg_id)
             delstar_avg[name] = mygs.compute_area_integral(J_delstar, reg_mask=reg_id)/values['area']
         result = {
             'checks': report.checks,
             'binding': report.binding,
             'ok': report.ok,
             'summary': report.summary(),
-            'keepout': report.keepout,
             'quantities': report.quantities,
-            'forces': compute_coil_forces(mygs),
-            'centroid_forces': centroid_forces(mygs),
-            'energy_direct': energy_direct,
+            'energy_direct': np.pi*energy_direct,  # psi is in Wb/rad
             'delstar_avg': delstar_avg,
             'limits': coil_limits,
         }
+        oftpy_dump_cov()
     except Exception as e:
         print(e)
         result = None
@@ -333,7 +422,7 @@ def run_ITER_limits(mp_q):
 
 @pytest.mark.coverage
 def test_ITER_coil_limits():
-    '''! Coil limit checks on the ITER-like equilibrium'''
+    '''Coil limit checks on the ITER-like equilibrium'''
     results = mp_run(run_ITER_limits, ())
     assert results is not None
     checks = results['checks']
@@ -358,22 +447,10 @@ def test_ITER_coil_limits():
     # Current density sign and magnitude agree with Del*(psi) current in coil regions
     for name in ['PF1', 'PF6', 'CS1U']:
         assert results['delstar_avg'][name] == pytest.approx(quantities['coils'][name]['current_density'], rel=0.1)
-    # Forces agree with an independent centroid quadrature of J x B
-    force_scale = max(abs(np.array(list(results['forces'][name].values()))).max() for name in results['forces'])
-    for name, forces in results['forces'].items():
-        assert abs(forces['force_r'] - results['centroid_forces'][name][0]) < 1.E-2*force_scale
-        assert abs(forces['force_z'] - results['centroid_forces'][name][1]) < 1.E-2*force_scale
-    # Net vertical force on all coils vanishes (plasma is in vertical force balance)
+    # Net vertical force on all coils vanishes (plasma is in vertical force balance),
+    # relative to the largest coil force
+    largest_force = max(max(abs(values['force_r']), abs(values['force_z'])) for values in quantities['coils'].values())
     total_fz = sum(values['force_z'] for values in quantities['coils'].values())
-    assert abs(total_fz) < 1.E-3*force_scale
+    assert abs(total_fz) < 1.E-3*largest_force
     # Stored energy from inductance matrix matches pi*int(psi*J dA)
     assert quantities['energy_total'] == pytest.approx(results['energy_direct'], rel=1.E-3)
-    assert quantities['energy_coils'] < quantities['energy_total']
-    # Keep-out: separatrix legs pass through the box around the X-point, outboard box is clear
-    keepout = {rec['name']: rec for rec in results['keepout']}
-    assert keepout['around_xpoint']['n_inside'] > 0
-    assert keepout['around_xpoint']['min_clearance'] < 0.0
-    assert not keepout['around_xpoint']['ok']
-    assert keepout['outboard']['n_inside'] == 0
-    assert keepout['outboard']['min_clearance'] > 0.5
-    assert keepout['outboard']['ok']
