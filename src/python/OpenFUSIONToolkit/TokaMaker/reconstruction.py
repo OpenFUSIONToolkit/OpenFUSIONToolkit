@@ -30,15 +30,15 @@ class tokamaker_recon_settings_cstruct(c_struct):
 
 # tokamaker_recon_run(tMaker_ptr,vacuum,settings,error_flag)
 tokamaker_recon_run = ctypes_subroutine(oftpy_lib.tokamaker_recon_run,
-    [c_void_p, c_bool, tokamaker_recon_settings_cstruct, c_int_ptr])
+    [c_void_p, c_bool, ctypes.POINTER(tokamaker_recon_settings_cstruct), c_int_ptr])
 
 # tokamaker_recon_err(tMaker_ptr,vacuum,settings,error_mat,error_flag)
 tokamaker_recon_err = ctypes_subroutine(oftpy_lib.tokamaker_recon_err,
-    [c_void_p, c_bool, tokamaker_recon_settings_cstruct, c_double_ptr, c_int_ptr])
+    [c_void_p, c_bool, ctypes.POINTER(tokamaker_recon_settings_cstruct), c_double_ptr, c_int_ptr])
 
 # tokamaker_recon_setup(tMaker_ptr,settings,ncons,error_flag)
 tokamaker_recon_setup = ctypes_subroutine(oftpy_lib.tokamaker_recon_setup,
-    [c_void_p, tokamaker_recon_settings_cstruct, c_int_ptr, c_int_ptr])
+    [c_void_p, ctypes.POINTER(tokamaker_recon_settings_cstruct), c_int_ptr, c_int_ptr])
 
 # tokamaker_recon_destroy(tMaker_ptr,error_flag)
 tokamaker_recon_destroy = ctypes_subroutine(oftpy_lib.tokamaker_recon_destroy,
@@ -747,7 +747,7 @@ class reconstruction():
         # Run setup
         ncons = c_int()
         error_flag = c_int()
-        tokamaker_recon_setup(self._tMaker_obj._tMaker_ptr,self.settings.get_c_struct(self._tMaker_obj._oft_env),ctypes.byref(ncons),ctypes.byref(error_flag))
+        tokamaker_recon_setup(self._tMaker_obj._tMaker_ptr,ctypes.byref(self.settings.get_c_struct(self._tMaker_obj._oft_env)),ctypes.byref(ncons),ctypes.byref(error_flag))
         if error_flag.value != 0:
             raise ValueError("Constraint setup failed with error code {0:d}".format(error_flag.value))
         self._ncons = ncons.value
@@ -776,7 +776,7 @@ class reconstruction():
             error_mat = numpy.zeros((self._ncons, 4), dtype=numpy.float64)
             mat_ptr = error_mat.ctypes.data_as(c_double_ptr)
         error_flag = c_int()
-        tokamaker_recon_err(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings.get_c_struct(self._tMaker_obj._oft_env),mat_ptr,ctypes.byref(error_flag))
+        tokamaker_recon_err(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),ctypes.byref(self.settings.get_c_struct(self._tMaker_obj._oft_env)),mat_ptr,ctypes.byref(error_flag))
         if error_flag.value != 0:
             raise ValueError("Error evaluation failed with error code {0:d}".format(error_flag.value))
         return error_mat if not save_to_file else None
@@ -948,5 +948,5 @@ class reconstruction():
         self._tMaker_obj._oft_env.update_oft_in()
         # Run reconstruction
         error_flag = c_int()
-        tokamaker_recon_run(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),self.settings.get_c_struct(self._tMaker_obj._oft_env),ctypes.byref(error_flag))
+        tokamaker_recon_run(self._tMaker_obj._tMaker_ptr,c_bool(vacuum),ctypes.byref(self.settings.get_c_struct(self._tMaker_obj._oft_env)),ctypes.byref(error_flag))
         return error_flag.value

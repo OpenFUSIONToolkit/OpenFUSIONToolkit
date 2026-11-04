@@ -115,7 +115,7 @@ IF(oft_env%head_proc)THEN
   IF(ierr>0)CALL oft_abort('Error parsing "t3d_options" in input file.','mesh_t3d_load',__FILE__)
   IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','mesh_t3d_load',__FILE__)
   IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','mesh_t3d_load',__FILE__)
-  lenreflag=lnblnk(reflect)
+  lenreflag=LEN_TRIM(reflect)
   !
   WRITE(*,'(2A)')oft_indent,'T3D volume mesh:'
   CALL oft_increase_indent
@@ -241,7 +241,7 @@ IF(oft_env%head_proc)THEN
   IF(ierr>0)CALL oft_abort('Error parsing "t3d_options" in input file.','smesh_t3d_load',__FILE__)
   IF(TRIM(filename)=='none')CALL oft_abort('No mesh file specified','smesh_t3d_load',__FILE__)
   IF(TRIM(inpname)=='none')CALL oft_abort('No T3D input file specified','smesh_t3d_load',__FILE__)
-  lenreflag=lnblnk(reflect)
+  lenreflag=LEN_TRIM(reflect)
   !
   WRITE(*,'(2A)')oft_indent,'T3D surface mesh:'
   CALL oft_increase_indent

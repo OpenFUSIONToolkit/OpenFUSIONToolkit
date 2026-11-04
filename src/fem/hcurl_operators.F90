@@ -453,7 +453,7 @@ subroutine oft_hcurl_getmop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_type
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
 real(r8), allocatable :: rop(:,:),mop(:,:)
@@ -475,6 +475,12 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero
 END IF
+!---
+bc_type=0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_type=1
+END SELECT
 !------------------------------------------------------------------------------
 !
 !------------------------------------------------------------------------------
@@ -502,8 +508,8 @@ do i=1,hcurl_rep%mesh%nc
   !---Get local to global DOF mapping
   call hcurl_rep%ncdofs(i,j)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("zerob")
+  SELECT CASE(bc_type)
+    CASE(1)
       DO jr=1,hcurl_rep%nce
         IF(hcurl_rep%global%gbe(j(jr)))THEN
           mop(jr,:)=0.d0
@@ -519,8 +525,8 @@ deallocate(j,rop,mop)
 !$omp end parallel
 ALLOCATE(mop(1,1),j(1))
 !---Set diagonal entries for dirichlet rows
-SELECT CASE(TRIM(bc))
-  CASE("zerob")
+SELECT CASE(bc_type)
+  CASE(1)
     mop(1,1)=1.d0
     DO i=1,hcurl_rep%nbe
       jr=hcurl_rep%lbe(i)
@@ -552,7 +558,7 @@ subroutine oft_hcurl_getkop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_type
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),cgop(3,6),elapsed_time
 real(r8), allocatable :: rop(:,:),cop(:,:),kop(:,:)
@@ -574,6 +580,12 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero
 END IF
+!---
+bc_type=0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_type=1
+END SELECT
 !------------------------------------------------------------------------------
 !
 !------------------------------------------------------------------------------
@@ -606,8 +618,8 @@ do i=1,hcurl_rep%mesh%nc
   !---Get local to global DOF mapping
   call hcurl_rep%ncdofs(i,j)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("zerob")
+  SELECT CASE(bc_type)
+    CASE(1)
       DO jr=1,hcurl_rep%nce
         IF(hcurl_rep%global%gbe(j(jr)))kop(jr,:)=0.d0
       END DO
@@ -621,8 +633,8 @@ deallocate(j,rop,cop,kop)
 !$omp end parallel
 ALLOCATE(kop(1,1),j(1))
 !---Set diagonal entries for dirichlet rows
-SELECT CASE(TRIM(bc))
-  CASE("zerob")
+SELECT CASE(bc_type)
+  CASE(1)
     kop(1,1)=1.d0
     DO i=1,hcurl_rep%nbe
       jr=hcurl_rep%lbe(i)
@@ -654,7 +666,7 @@ subroutine oft_hcurl_getwop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_type
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),cgop(3,6),elapsed_time
 real(r8), allocatable :: cop(:,:),wop(:,:)
@@ -676,6 +688,12 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero
 END IF
+!---
+bc_type=0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_type=1
+END SELECT
 !------------------------------------------------------------------------------
 !
 !------------------------------------------------------------------------------
@@ -706,8 +724,8 @@ do i=1,hcurl_rep%mesh%nc
   !---Get local to global DOF mapping
   call hcurl_rep%ncdofs(i,j)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("zerob")
+  SELECT CASE(bc_type)
+    CASE(1)
       DO jr=1,hcurl_rep%nce
         IF(hcurl_rep%global%gbe(j(jr)))wop(jr,:)=0.d0
       END DO
@@ -721,8 +739,8 @@ deallocate(j,cop,wop)
 !$omp end parallel
 ALLOCATE(wop(1,1),j(1))
 !---Set diagonal entries for dirichlet rows
-SELECT CASE(TRIM(bc))
-  CASE("zerob")
+SELECT CASE(bc_type)
+  CASE(1)
     wop(1,1)=1.d0
     DO i=1,hcurl_rep%nbe
       jr=hcurl_rep%lbe(i)
@@ -755,7 +773,7 @@ class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 real(r8), intent(in) :: alam !< Lambda for response
 character(LEN=*), intent(in) :: bc !< Boundary condition
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_type
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),cgop(3,6),elapsed_time
 real(r8), allocatable :: rop(:,:),cop(:,:),wop(:,:)
@@ -777,6 +795,12 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero
 END IF
+!---
+bc_type=0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_type=1
+END SELECT
 !------------------------------------------------------------------------------
 !
 !------------------------------------------------------------------------------
@@ -809,8 +833,8 @@ do i=1,hcurl_rep%mesh%nc
   !---Get local to global DOF mapping
   call hcurl_rep%ncdofs(i,j)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("zerob")
+  SELECT CASE(bc_type)
+    CASE(1)
       DO jr=1,hcurl_rep%nce
         IF(hcurl_rep%global%gbe(j(jr)))wop(jr,:)=0.d0
       END DO
@@ -824,8 +848,8 @@ deallocate(j,rop,cop,wop)
 !$omp end parallel
 ALLOCATE(wop(1,1),j(1))
 !---Set diagonal entries for dirichlet rows
-SELECT CASE(TRIM(bc))
-  CASE("zerob")
+SELECT CASE(bc_type)
+  CASE(1)
     wop(1,1)=1.d0
     DO i=1,hcurl_rep%nbe
       jr=hcurl_rep%lbe(i)
@@ -872,7 +896,7 @@ NULLIFY(xloc)
 call x%set(0.d0)
 call x%get_local(xloc)
 !---Integerate over the volume
-!$omp parallel default(firstprivate) shared(xloc) private(curved,det)
+!$omp parallel default(firstprivate) shared(xloc,field) private(curved,det)
 allocate(j(hcurl_rep%nce),rop(3,hcurl_rep%nce))
 !$omp do schedule(guided)
 do i=1,hcurl_rep%mesh%nc ! Loop over cells
@@ -925,7 +949,7 @@ call x%set(0.d0)
 call x%get_local(xloc)
 !---Operator integration loop
 det=0.d0
-!$omp parallel default(firstprivate) shared(field,xloc) private(det)
+!$omp parallel private(j,rop,m,vol,sgop,vgop,norm,cell,ptmap,flog,etmp,det)
 allocate(j(hcurl_rep%nce),rop(3,hcurl_rep%nce))
 !$omp do schedule(guided)
 do i=1,smesh%nc

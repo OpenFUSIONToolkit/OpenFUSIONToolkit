@@ -19,6 +19,8 @@ import http.client
 import urllib.request
 import urllib.error
 
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
 
 def error_exit(error_str, extra_info=None, exception=None):
     # Exit build script with error
@@ -122,6 +124,22 @@ def run_command(command, timeout=10, env_vars={}):
     errcode = pid.poll()
     result = outs.decode("utf-8")
     return result, errcode
+
+
+# Suppress Homebrew auto-update and hint messages during package lookups
+brew_env = {"HOMEBREW_NO_AUTO_UPDATE": "1", "HOMEBREW_NO_ENV_HINTS": "1"}
+
+
+def brew_prefix(package):
+    # Get install prefix for a Homebrew package (None if not installed)
+    result, errcode = run_command("brew --prefix --installed {0}".format(package), timeout=60, env_vars=brew_env)
+    if errcode != 0:
+        return None
+    # Status output (eg. API data downloads) may precede the path, so use the last non-empty line
+    lines = [line.strip() for line in result.splitlines() if line.strip() != ""]
+    if (len(lines) == 0) or (not os.path.isdir(lines[-1])):
+        return None
+    return lines[-1]
 
 
 def ver_lt(ver_string, ver_test):
@@ -294,15 +312,27 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     result, errcode = run_command("{FC} --version".format(**config_dict))
     if errcode != 0:
         error_exit("FORTRAN compiler does not appear to work!")
-    line = result.split("\n")[0]
+    line = result.strip().split("\n")[0]
     fc_vendor = 'unknown'
     if line.find('GNU') >= 0:
         fc_vendor = 'gnu'
+    elif line.find('flang') >= 0:
+        ver_string = line.split("version")[1]
+        ver_string = ver_string.split("-")[0]  # Needed if patch release
+        if ver_lt(ver_string,"23.0"):
+            error_exit('LLVM Flang version must be >= 23.0')
+        fc_vendor = 'llvm'
     elif (line.find('ifort') >= 0) or (line.find('ifx') >= 0):
         fc_vendor = 'intel'
         if line.find('ifx') >= 0:
             if ver_lt(config_dict.get('CMAKE_VERSION','0.0'),"3.20"):
                 error_exit('CMAKE >= 3.20 required for Intel "ifx" Fortran compiler', ('Update or retry with "--build_cmake=1" to build a compatible version',))
+    elif line.find('nvfortran') >= 0:
+        ver_string = line.split(" ")[1]
+        ver_string = ver_string.split("-")[0]  # Needed if patch release
+        if ver_lt(ver_string,"26.0"):
+            error_exit('Nvidia Fortran compiler version must be >= 26.0')
+        fc_vendor = 'nvidia'
     # Check C++ compiler
     result, errcode = run_command("{CXX} --version".format(**config_dict))
     if errcode != 0:
@@ -316,7 +346,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     elif result.find('oneAPI DPC++/C++') >= 0:
         if ver_lt(config_dict.get('CMAKE_VERSION','0.0'),"3.20"):
             error_exit('CMAKE >= 3.20 required for Intel "icx" C/C++ compiler', ('Update or retry with "--build_cmake=1" to build a compatible version',))
-    line = result.split("\n")[0]
+    line = result.strip().split("\n")[0]
     cc_vendor = 'unknown'
     cc_version = 'unknown'
     if line.find('gcc') >= 0:
@@ -326,8 +356,12 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
         except:
             print('Unable to determine GCC version, assuming version 12+')
             cc_version = '12.0.0'
+    elif line.find('clang') >= 0:
+        cc_vendor = 'llvm'
     elif (line.find('icc') >= 0) or (line.find('oneAPI') >= 0):
         cc_vendor = 'intel'
+    elif line.find('nvc') >= 0:
+        cc_vendor = 'nvidia'
     # Make sure we are using compaitble C and Fortran compilers
     if cc_vendor != fc_vendor:
         error_exit("C and FORTRAN compilers appear to be from different vendors!",
@@ -337,14 +371,12 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     config_dict['CC_VERSION'] = cc_version
     if cc_vendor == 'gnu':
         config_dict['OMP_FLAGS'] = "-fopenmp"
-        config_dict['DEBUG_FLAGS'] = "-g"
-        config_dict['CHK_FLAGS'] = "-O0 -fcheck=all"
-        config_dict['OPT_FLAGS'] = "-O2"
+    elif cc_vendor == 'llvm':
+        config_dict['OMP_FLAGS'] = "-fopenmp"
     elif cc_vendor == 'intel':
         config_dict['OMP_FLAGS'] = "-qopenmp"
-        config_dict['DEBUG_FLAGS'] = "-g"
-        config_dict['CHK_FLAGS'] = "-O0 -check bounds,pointers,shape,uninit"
-        config_dict['OPT_FLAGS'] = ""
+    elif cc_vendor == 'nvidia':
+        config_dict['OMP_FLAGS'] = "-mp"
     # Determine OS type
     config_dict['OS_TYPE'] = platform.uname().system
     config_dict['HOST_ARCH'] = platform.uname().machine
@@ -364,7 +396,11 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     else:
         match_archs = [config_dict['TARGET_ARCH'],]
     for compiler_key in ('CC', 'CXX', 'FC'):
-        target_arch = detect_compiler_target(config_dict[compiler_key])
+        if config_dict['CC_VENDOR'] == 'nvidia':
+            print('WARNING: Unable to detect default target architecture for NVIDIA compilers, skipping check')
+            break
+        else:
+            target_arch = detect_compiler_target(config_dict[compiler_key])
         if target_arch not in match_archs:
             error_exit('Detected compiler "{0}" target "{1}" does not match target architecture "{2}"'.format(config_dict[compiler_key], target_arch, ', '.join(match_archs)),
                        ["If cross-compiling, specify target architecture with --cross_compile_arch (e.g. --cross_compile_arch=arm64)"])
@@ -374,7 +410,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
 
 def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=False,build_tests=False,
                        build_examples=False,build_docs=False,build_coverage=False,package_build=False,
-                       package_release=False,enable_debug_stack=False,enable_profiling=False,
+                       package_python=True,package_release=False,enable_debug_stack=False,enable_profiling=False,
                        use_lto=True,debug_check_flags=True,debug_asanitizer=False):
     def bool_to_string(val):
         if val:
@@ -402,6 +438,7 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DOFT_USE_OpenMP:BOOL={0}".format(bool_to_string(use_openmp)),
         "-DOFT_USE_LTO:BOOL={0}".format(bool_to_string(use_lto)),
         "-DOFT_PACKAGE_BUILD:BOOL={0}".format(bool_to_string(package_build)),
+        "-DOFT_PACKAGE_PYTHON:BOOL={0}".format(bool_to_string(package_python)),
         "-DOFT_PACKAGE_NIGHTLY:BOOL={0}".format(bool_to_string(not package_release)),
         "-DOFT_COVERAGE:BOOL={0}".format(bool_to_string(build_coverage)),
         "-DOFT_DEBUG_STACK:BOOL={0}".format(bool_to_string(enable_debug_stack)),
@@ -412,6 +449,9 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         "-DCMAKE_CXX_COMPILER:FILEPATH={CXX}",
         "-DCMAKE_Fortran_COMPILER:FILEPATH={FC}"
     ]
+    if tmp_dict['OS_TYPE'] == 'Darwin' and tmp_dict['CC_VENDOR'] == 'llvm':
+        LLVM_fix_path = os.path.abspath(os.path.join(script_dir, os.pardir))
+        cmake_lines.append('-DCMAKE_USER_MAKE_RULES_OVERRIDE:PATH={0}'.format(os.path.join(LLVM_fix_path,"cmake","Apple-LLVMFlang-Fortran.cmake")))
     if 'MACOS_SDK_PATH' in tmp_dict:
         env_lines.append('export SYSROOT={0}'.format(tmp_dict['MACOS_SDK_PATH']))
         cmake_lines.append('-DCMAKE_OSX_SYSROOT={0}'.format(tmp_dict['MACOS_SDK_PATH']))
@@ -488,7 +528,7 @@ end program test_program
             else:
                 error_exit("Unable to compile Fortran test program",
                            ["===Compile output===", compile_res, "===Run output===", run_res])
-    cmake_lines += [os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir))]
+    cmake_lines += [os.path.abspath(os.path.join(script_dir, os.pardir))]
     cmake_lines_str = ' \\\n  '.join(cmake_lines)
     if len(env_lines) > 0:
         env_lines_str = '# Environment modifications\n' + '\n'.join(env_lines) + '\n\n'
@@ -606,6 +646,7 @@ class package:
                     return config_dict
             else:
                 print("  Ignoring existing installation due to hash mismatch")
+                shutil.rmtree(install_dir_abspath)
         print("  Executing build (this may take a few minutes)")
         build_start = time.time()
         self.run_build(self.config_dict)
@@ -646,14 +687,14 @@ class package:
                 break
         else:
             print("  Using existing file: {0}".format(self.file))
-        for args in self.extra_fetch + self.patch_files:
+        for args in self.extra_fetch:
             url = args[0]
             if len(args) == 1:
                 tmp_file = url.split("/")[-1]
             elif len(args) == 2:
                 tmp_file = args[1]
             else:
-                error_exit('Invalid "extra_fetch" or "patch_file" object!')
+                error_exit('Invalid "extra_fetch" object!')
             if (not os.path.isfile(tmp_file)) or force:
                 for i in range(nretry+1):
                     try:
@@ -677,21 +718,18 @@ class package:
         extract_archive(self.file)
         # Apply patches
         for patch in self.patch_files:
-            if len(patch) == 1:
-                tmp_file = patch[0].split("/")[-1]
-            elif len(patch) == 2:
-                tmp_file = patch[1]
+            patch_name = os.path.basename(patch)
             os.chdir(self.build_dir)
-            result, errcode = run_command("patch -N -p0 < {0}".format(os.path.join("..", tmp_file)))
+            result, errcode = run_command("patch -N -p0 < {0}".format(patch))
             os.chdir("..")
             if errcode == 0:
-                print('  Applied patch "{0}"'.format(tmp_file))
+                print('  Applied patch "{0}"'.format(patch_name))
             else:
                 shutil.rmtree(self.build_dir)
-                with open("{0}.log".format(tmp_file), "w+") as fid:
+                with open("{0}.log".format(patch_name), "w+") as fid:
                     fid.write(result)
-                error_exit('Failed to apply patch "{0}"'.format(tmp_file),
-                           ('See "{0}.log" for more information'.format(os.path.join(self.root_build_path, tmp_file)),))
+                error_exit('Failed to apply patch "{0}"'.format(patch_name),
+                           ('See "{0}.log" for more information'.format(os.path.join(self.root_build_path, patch_name)),))
 
     def setup_root_struct(self, lib_path="lib", inc_path="include", bin_path="bin"):
         # Setup default directory structure
@@ -925,17 +963,15 @@ class MPICH(package):
         if self.config_dict['OS_TYPE'] == 'Darwin':
             print("  macOS detected: Looking for required packages with homebrew")
             # Search for HWLOC
-            result, errcode = run_command("brew --prefix --installed hwloc")
-            if errcode == 0:
-                hwloc_path = result.strip()
+            hwloc_path = brew_prefix("hwloc")
+            if hwloc_path is not None:
                 print("    Using hwloc from homebrew: {0}".format(hwloc_path))
                 config_options.append('--with-hwloc={0}'.format(hwloc_path))
             else:
                 print("    Could not find hwloc, using MPICH-bundled version")
             # # Search for PMIx (If external PMIx is used mpiexec is not built)
-            # result, errcode = run_command("brew --prefix --installed pmix")
-            # if errcode == 0:
-            #     pmix_path = result.strip()
+            # pmix_path = brew_prefix("pmix")
+            # if pmix_path is not None:
             #     print("    Using pmix from homebrew: {0}".format(pmix_path))
             #     config_options.append('--with-pmix={0}'.format(pmix_path))
             # else:
@@ -1017,32 +1053,29 @@ class OpenMPI(package):
         if self.config_dict['OS_TYPE'] == 'Darwin':
             print("  macOS detected: Looking for required packages with homebrew")
             # Search for HWLOC
-            result, errcode = run_command("brew --prefix --installed hwloc")
-            if errcode == 0:
-                hwloc_path = result.strip()
+            hwloc_path = brew_prefix("hwloc")
+            if hwloc_path is not None:
                 print("    Using hwloc from homebrew: {0}".format(hwloc_path))
                 config_options.append('--with-hwloc={0}'.format(hwloc_path))
             else:
                 print("    Could not find hwloc, build may fail")
             # Search for PMIx
-            result, errcode = run_command("brew --prefix --installed pmix")
-            if errcode == 0:
-                ver_result, errcode = run_command("brew list --versions pmix")
+            pmix_path = brew_prefix("pmix")
+            if pmix_path is not None:
+                ver_result, errcode = run_command("brew list --versions pmix", timeout=60, env_vars=brew_env)
                 if errcode == 0:
                     pmix_ver = ver_result.split()[-1].strip()
                     if not ver_lt(pmix_ver, "6.0"):
                         print("  Found pmix version {0}, which is not compatible with OpenMPI 5.x".format(pmix_ver))
                         config_options.append('--with-pmix=internal')
                     else:
-                        pmix_path = result.strip()
                         print("    Using pmix from homebrew: {0}".format(pmix_path))
                         config_options.append('--with-pmix={0}'.format(pmix_path))
             else:
                 print("    Could not find pmix, build may fail")
             # Search for libevent
-            result, errcode = run_command("brew --prefix --installed libevent")
-            if errcode == 0:
-                libevent_path = result.strip()
+            libevent_path = brew_prefix("libevent")
+            if libevent_path is not None:
                 print("    Using libevent from homebrew: {0}".format(libevent_path))
                 config_options.append('--with-libevent={0}'.format(libevent_path))
             else:
@@ -1064,6 +1097,7 @@ class HDF5(package):
     def __init__(self, parallel=False, cmake_build=False, build_hl=False, shared_libs=True):
         self.name = "HDF5"
         self.url = "https://github.com/HDFGroup/hdf5/releases/download/hdf5_1.14.6/hdf5-1.14.6.tar.gz"
+        #self.url = "https://github.com/HDFGroup/hdf5/releases/download/2.0.0/hdf5-2.0.0.tar.gz"
         self.parallel = parallel
         self.cmake_build = cmake_build
         self.build_hl = build_hl
@@ -1101,7 +1135,9 @@ class HDF5(package):
                 '-DHDF5_BUILD_FORTRAN:BOOL=ON',
                 '-DHDF5_BUILD_CPP_LIB=OFF',
                 '-DBUILD_TESTING=OFF',
-                '-DHDF5_BUILD_EXAMPLES=OFF'
+                '-DHDF5_BUILD_EXAMPLES=OFF',
+                '-DHDF5_BUILD_HL_LIB=OFF',
+                '-DHDF5_ENABLE_SZIP_SUPPORT=OFF'
             ]
             if self.shared_libs:
                 cmake_options += [
@@ -1109,6 +1145,9 @@ class HDF5(package):
                     '-DBUILD_SHARED_LIBS:BOOL=ON',
                     '-DBUILD_STATIC_LIBS:BOOL=OFF'
                 ]
+                if self.config_dict['OS_TYPE'] == 'Darwin' and self.config_dict['CC_VENDOR'] == 'llvm':
+                    LLVM_fix_path = os.path.abspath(os.path.join(script_dir, os.pardir))
+                    cmake_options.append('-DCMAKE_USER_MAKE_RULES_OVERRIDE:PATH={0}'.format(os.path.join(LLVM_fix_path,"cmake","Apple-LLVMFlang-Fortran.cmake")))
             else:
                 cmake_options += [
                     '-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON',
@@ -1243,6 +1282,9 @@ int main(int argc, char** argv) {
             make_thread = ['NO_PARALLEL_MAKE=1']
         else:
             make_thread = ['MAKE_NB_JOBS={MAKE_THREADS}']
+        # fopt = ["-fPIC"]
+        #if config_dict['CC_VENDOR'] == 'gnu':
+        #    fopt.append("-frecursive")
         if self.threaded:
             oblas_options += ['USE_THREAD=1', 'USE_OPENMP=1']
         else:
@@ -1263,7 +1305,7 @@ int main(int argc, char** argv) {
             'export CC={CC}',
             'export FC={FC}',
             'make clean',
-            'make {0}'.format(' '.join(oblas_options + make_thread)),
+            'make {0} shared'.format(' '.join(oblas_options + make_thread)),
             'make {0} install'.format(' '.join(oblas_options + ['NO_PARALLEL_MAKE=1', 'PREFIX={OpenBLAS_ROOT}']))
         ]
         self.setup_build_script(build_lines, tmp_dict)
@@ -1927,7 +1969,6 @@ parser.add_argument("--download_only", action="store_true", default=False, help=
 parser.add_argument("--setup_only", action="store_true", default=False, help="Download and setup build, but do not actually build")
 parser.add_argument("--keep_build_dirs", action="store_true", default=False, help="Keep build directories after successful build (default: False)")
 parser.add_argument("--nthread", "--nthreads", default=1, type=int, help="Number of threads to use for make (default=1)")
-parser.add_argument("--opt_flags", default=None, type=str, help="Compiler optimization flags")
 parser.add_argument("--ld_flags", default=None, type=str, help="Linker flags")
 parser.add_argument("--macos_sdk_path", default=None, type=str, help="Path to macOS SDK to use for building")
 parser.add_argument("--macos_deployment_target", default=None, type=str, help="macOS deployment target version, required for python package builds (e.g. 10.15)")
@@ -2027,8 +2068,6 @@ config_dict['DOWN_ONLY'] = options.download_only
 config_dict['SETUP_ONLY'] = options.setup_only
 if options.nthread > 1:
     config_dict['MAKE_THREADS'] = options.nthread
-if options.opt_flags is not None:
-    config_dict['OPT_FLAGS'] = options.opt_flags
 if options.ld_flags is not None:
     config_dict['LD_FLAGS'] = options.ld_flags
 if config_dict['OS_TYPE'] == 'Darwin':
@@ -2148,6 +2187,7 @@ if not (config_dict['DOWN_ONLY'] or config_dict['SETUP_ONLY']):
         build_docs=(options.oft_build_docs == 1),
         build_coverage=options.oft_build_coverage,
         package_build=options.oft_package,
+        package_python=(options.oft_package_python == 1),
         package_release=options.oft_package_release,
         enable_debug_stack=options.oft_debug_stack,
         enable_profiling=options.oft_profiling,

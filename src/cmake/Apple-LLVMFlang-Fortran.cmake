@@ -1,0 +1,7 @@
+set(CMAKE_C_OSX_COMPATIBILITY_VERSION_FLAG "-Wl,-compatibility_version,")
+set(CMAKE_C_OSX_CURRENT_VERSION_FLAG "-Wl,-current_version,")
+set(CMAKE_Fortran_OSX_COMPATIBILITY_VERSION_FLAG "-Wl,-compatibility_version,")
+set(CMAKE_Fortran_OSX_CURRENT_VERSION_FLAG "-Wl,-current_version,")
+set(CMAKE_SHARED_MODULE_CREATE_Fortran_FLAGS "-Wl,-bundle -Wl,-headerpad_max_install_names")
+set(CMAKE_SHARED_LIBRARY_CREATE_Fortran_FLAGS "-Wl,-dylib -Wl,-headerpad_max_install_names")
+set(CMAKE_SHARED_LIBRARY_SONAME_Fortran_FLAG "-Wl,-install_name -Xlinker")

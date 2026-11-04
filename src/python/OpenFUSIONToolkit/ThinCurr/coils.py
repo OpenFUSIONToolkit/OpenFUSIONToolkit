@@ -40,15 +40,22 @@ class ThinCurr_coil_set:
         """! Add a circular subcoil to this coil set
         @param RZ [R, Z] position (for circular coils; centered on Z-axis)
         @param scale Scaling factor for coil current (`1.0` if not specified)
-        @param npoints Number of points for circular coil discretization (default: 181)
+        @param npoints Number of points of the coil polygon, used where ThinCurr integrates the coil point by
+        point (default: 181); couplings use the exact circular coil where possible
         @param resistivity_per_length Resistivity per unit length (required if used as Vcoil)
         @param radius Coil radius (required if used as Vcoil)
         """
-        if npoints is None:
-            npoints = 181  # Default number of points for circular coil
-        theta = numpy.linspace(0, 2*numpy.pi, npoints)
-        pts = numpy.column_stack([RZ[0] * numpy.cos(theta), RZ[0] * numpy.sin(theta), numpy.full(npoints, RZ[1])])
-        self.add_subcoil(pts=pts, scale=scale, attr=attr, resistivity_per_length=resistivity_per_length, radius=radius)
+        if attr is None:
+            attr = {}
+        if scale is not None:
+            attr['scale'] = scale
+        if resistivity_per_length is not None:
+            attr['res_per_len'] = resistivity_per_length
+        if radius is not None:
+            attr['radius'] = radius
+        self.subcoils.append({'RZ': [float(RZ[0]), float(RZ[1])], 'npts': npoints, 'attr': attr})
+        self.resistivity_per_length_list.append(attr.get('res_per_len'))
+        self.radius_list.append(attr.get('radius'))
 
     def add_subcoil(self, RZ=None, pts=None, scale=None, npoints=None, hdf5_path=None, attr=None, resistivity_per_length=None, radius=None):
         """! Add a subcoil to this V-coil set
@@ -102,6 +109,11 @@ class ThinCurr_coil_set:
                 for xyz in subcoil['pts']:
                     text_lines.append('{0:E}, {1:E}, {2:E}'.format(xyz[0], xyz[1], xyz[2]))
                 coil_element.text = "\n" + "\n".join(text_lines) + "\n"
+            elif 'RZ' in subcoil:
+                # Circular coil: a single (R, Z) pair
+                attrib = {} if subcoil['npts'] is None else {"npts": str(subcoil['npts'])}
+                coil_element = ET.SubElement(coil_set, "coil", attrib=attrib)
+                coil_element.text = '{0:.15E}, {1:.15E}'.format(subcoil['RZ'][0], subcoil['RZ'][1])
             elif 'hdf5_path' in subcoil:
                 coil_element = ET.SubElement(coil_set, "coil", attrib={"path": subcoil['hdf5_path']})
             # Handling attributes
@@ -152,8 +164,9 @@ class ThinCurr_coil_set:
                 pts_text = subcoil_elem.text.strip()
                 pts_lines = pts_text.splitlines()
                 pts = numpy.array([_split_delimited_float(line) for line in pts_lines])
-                if (npts == 0) or (pts.shape[0] == 1):
-                    coil_set.add_circular_subcoil(RZ=pts[0], scale=subcoil_scale, resistivity_per_length=subcoil_resistivity, radius=subcoil_radius)
+                if pts.size == 2:
+                    coil_set.add_circular_subcoil(RZ=pts.flatten(), scale=subcoil_scale, npoints=(npts if npts > 0 else None),
+                                                  resistivity_per_length=subcoil_resistivity, radius=subcoil_radius)
                 else:
                     coil_set.add_subcoil(pts=pts, scale=subcoil_scale, npoints=npts, resistivity_per_length=subcoil_resistivity, radius=subcoil_radius)
         return coil_set
@@ -192,6 +205,10 @@ class ThinCurr_coil_set:
             subcoil_group = h5_group.create_group('coil{0:04d}'.format(i+1))
             if 'pts' in subcoil:
                 subcoil_group.create_dataset('PTS', data=subcoil['pts'], dtype='f8')
+            elif 'RZ' in subcoil:
+                subcoil_group.create_dataset('RZ', data=subcoil['RZ'], dtype='f8')
+                if subcoil['npts'] is not None:
+                    subcoil_group.create_dataset('NPTS', data=[subcoil['npts'],], dtype='i4')
             elif 'hdf5_path' in subcoil:
                 source_filepath = subcoil['hdf5_path'].split(':')[0]
                 source_dataset = subcoil['hdf5_path'].split(':')[1]
@@ -226,6 +243,65 @@ class ThinCurr_Vcoil(ThinCurr_coil_set):
         super().__init__(name, sens_mask=sens_mask, resistivity_per_length=resistivity_per_length, radius=radius)
 
 
+def _circle_from_points(pts, rtol):
+    """! Radius, height and orientation of a point-list coil that is a circle about the Z axis
+    @param pts Coil points [npts,3]
+    @param rtol Relative tolerance (to the radius) for closure and constant radius and height
+    @result `(R, Z, orientation)` with orientation `+1` for counter-clockwise about +Z and `-1` otherwise, or `None`
+    """
+    pts = numpy.asarray(pts, dtype=numpy.float64)
+    if (pts.ndim != 2) or (pts.shape[1] != 3) or (pts.shape[0] < 4):
+        return None
+    R = numpy.hypot(pts[:, 0], pts[:, 1])
+    Rc, Zc = R.mean(), pts[:, 2].mean()
+    if Rc <= 0.0:
+        return None
+    if numpy.abs(pts[0, :] - pts[-1, :]).max() > rtol*Rc:
+        return None
+    if (numpy.abs(R - Rc).max() > rtol*Rc) or (numpy.abs(pts[:, 2] - Zc).max() > rtol*Rc):
+        return None
+    phi = numpy.unwrap(numpy.arctan2(pts[:, 1], pts[:, 0]))
+    turns = (phi[-1] - phi[0])/(2.0*numpy.pi)
+    if abs(abs(turns) - 1.0) > 1.E-6:
+        return None
+    return Rc, Zc, numpy.sign(turns)
+
+
+def convert_circular_coils(coil_sets, rtol=1.E-6):
+    """! Convert point-list subcoils that are circles about the Z axis to circular subcoils (in place)
+
+    Circular subcoils are defined by their radius and height, so ThinCurr uses the exact couplings of a circular coil
+    for them. The number of points is kept as the resolution of the coil polygon, and a subcoil traversed clockwise
+    about +Z has its scale negated.
+
+    @param coil_sets List of coil sets (@ref ThinCurr_coil_set)
+    @param rtol Relative tolerance (to the radius) for closure and constant radius and height
+    @result Number of subcoils converted
+    """
+    nconverted = 0
+    for coil_set in coil_sets:
+        for subcoil in coil_set.subcoils:
+            if 'pts' in subcoil:
+                pts = subcoil['pts']
+            elif 'hdf5_path' in subcoil:
+                source_filepath, source_dataset = subcoil['hdf5_path'].split(':')
+                with h5py.File(source_filepath, 'r') as source_file:
+                    pts = source_file[source_dataset][()]
+            else:
+                continue
+            circle = _circle_from_points(pts, rtol)
+            if circle is None:
+                continue
+            attr = subcoil.get('attr', {})
+            if circle[2] < 0.0:
+                attr['scale'] = -(attr.get('scale') if attr.get('scale') is not None else 1.0)
+            npts = numpy.asarray(pts).shape[0]
+            subcoil.clear()
+            subcoil.update({'RZ': [float(circle[0]), float(circle[1])], 'npts': npts, 'attr': attr})
+            nconverted += 1
+    return nconverted
+
+
 def coil_from_hdf5(h5_group):
     """! Load coil information from HDF5 group
     @param h5_group HDF5 group containing the coil information
@@ -250,11 +326,14 @@ def coil_from_hdf5(h5_group):
     for i in range(h5_group['NCOILS'][0]):
         subcoil_group = h5_group['coil{0:04d}'.format(i+1)]
         scale = h5_group['SCALES'][i] if 'SCALES' in h5_group else None
+        vcoil_args = {}
         if resistivity_per_length_list is not None:
-            coil.add_subcoil(pts=subcoil_group['PTS'][()],scale=scale,
-                             resistivity_per_length=resistivity_per_length_list[i], radius=radius_list[i])
+            vcoil_args = {'resistivity_per_length': resistivity_per_length_list[i], 'radius': radius_list[i]}
+        if 'RZ' in subcoil_group:
+            npts = int(subcoil_group['NPTS'][0]) if 'NPTS' in subcoil_group else None
+            coil.add_circular_subcoil(RZ=subcoil_group['RZ'][()], scale=scale, npoints=npts, **vcoil_args)
         else:
-            coil.add_subcoil(pts=subcoil_group['PTS'][()],scale=scale)
+            coil.add_subcoil(pts=subcoil_group['PTS'][()], scale=scale, **vcoil_args)
     return coil
 
 
