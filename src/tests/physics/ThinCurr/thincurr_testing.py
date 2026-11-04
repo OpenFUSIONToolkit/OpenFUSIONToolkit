@@ -192,57 +192,6 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,hodlr_
     mp_q.put(result)
 
 
-def run_mode(meshfile,freq,mp_q):
-    result = True
-    try:
-        from OpenFUSIONToolkit import OFT_env
-        from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        from OpenFUSIONToolkit.ThinCurr.meshing import build_torus_bnorm_grid, ThinCurr_periodic_toroid
-        myOFT = OFT_env(nthreads=-1)
-        ntheta = 20
-        nphi = 20
-        r_grid, bnorm, nfp = build_torus_bnorm_grid('tCurr_test_mode.dat',ntheta,nphi,resample_type='theta',use_spline=False)
-        plasma_mode = ThinCurr_periodic_toroid(r_grid,nfp,ntheta,nphi)
-        plasma_mode.write_to_file('thincurr_mode.h5')
-        #
-        tw_mode = ThinCurr(myOFT)
-        tw_mode.setup_model(mesh_file='thincurr_mode.h5')
-        tw_mode.setup_io(basepath='plasma/')
-        tw_mode.compute_Lmat()
-        Lmat_new = plasma_mode.condense_matrix(tw_mode.Lmat)
-        Linv = np.linalg.inv(Lmat_new)
-        #
-        bnorm_flat = bnorm.reshape((2,bnorm.shape[1]*bnorm.shape[2]))
-        flux_flat = bnorm_flat.copy()
-        flux_flat[0,plasma_mode.r_map] = tw_mode.scale_va(bnorm_flat[0,plasma_mode.r_map])
-        flux_flat[1,plasma_mode.r_map] = tw_mode.scale_va(bnorm_flat[1,plasma_mode.r_map])
-        mode_drive = np.zeros((2,tw_mode.nelems))
-        for j in range(2):
-            output_unique = np.dot(Linv,plasma_mode.nodes_to_unique(flux_flat[j,:]))
-            mode_drive[j,:] = plasma_mode.expand_vector(output_unique)
-        with h5py.File('thincurr_mode.h5', 'r+') as h5_file:
-            h5_file.create_dataset('thincurr/driver', data=mode_drive, dtype='f8')
-        #
-        tw_torus = ThinCurr(myOFT)
-        if pathlib.Path("oft_in.xml").is_file():
-            tw_torus.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml')
-        else:
-            tw_torus.setup_model(mesh_file=meshfile)
-        tw_torus.setup_io(basepath='wall/')
-        tw_torus.compute_Lmat()
-        tw_torus.compute_Rmat()
-        mode_driver = tw_mode.cross_eval(tw_torus,mode_drive)
-        fr_result = tw_torus.compute_freq_response(fdriver=mode_driver,freq=freq)
-        with open('thincurr_mode.dat','w+') as fid:
-            fid.write('{0} {1}\n'.format(*np.linalg.norm(mode_drive,axis=1)))
-            fid.write('{0} {1}\n'.format(*np.linalg.norm(fr_result,axis=1)))
-    except BaseException as e:
-        print(e)
-        result = False
-    oftpy_dump_cov()
-    mp_q.put(result)
-
-
 def run_td_for_Mirnov(meshfile,direct_flag,curr_waveform,lin_tol,mp_q):
     result = True
     try:
@@ -357,8 +306,6 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
         return mp_run(run_eig,(meshfile,direct_flag,use_aca,jumper_start))
     elif run_type == 3:
         return mp_run(run_fr,(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,hodlr_opts))
-    elif run_type == 5:
-        return mp_run(run_mode,(meshfile,freq))
     elif run_type == 6:
         return mp_run(run_td_for_Mirnov,(meshfile,direct_flag,curr_waveform,lin_tol))
 

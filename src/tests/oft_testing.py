@@ -26,7 +26,7 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
             pytest.skip("Not compiled with MPI")
     pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     # Increase timeout if testing in debug configuration
-    if os.environ.get('OFT_DEBUG_TEST', 0):
+    if int(os.environ.get('OFT_DEBUG_TEST', 0)) == 1:
         timeout *= 4
     # Wait for process to complete or timeout
     timeout *= 10
@@ -93,7 +93,7 @@ def mp_run(target, args, cwd, timeout=180):
     process. Returns `None` if the process does not finish within `timeout` seconds or produces no result.
     '''
     # Increase timeout if testing in debug configuration
-    if os.environ.get('OFT_DEBUG_TEST', 0):
+    if int(os.environ.get('OFT_DEBUG_TEST', 0)) == 1:
         timeout *= 4
     os.chdir(cwd)
     mp_q = multiprocessing.Queue()
