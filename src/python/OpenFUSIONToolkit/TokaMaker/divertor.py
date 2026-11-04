@@ -289,12 +289,32 @@ def _trace_field_line(field, start, psi_target, direction, segs, x_points, step,
     }
 
 
-def _polyline_distance(pt, pts):
-    '''! Minimum distance from a point to the vertices of a densely sampled polyline'''
-    return numpy.sqrt(((pts - pt)**2).sum(axis=1)).min()
+def _closest_on_trace(pt, pts, L_pol, values):
+    r'''! Interpolate a cumulative quantity at the point of a traced line closest to `pt`
+
+    The squared distance to `pt` is fit with a parabola in poloidal length through the nearest trace point and
+    its neighbours, and `values` is interpolated quadratically at the parabola's minimum. This keeps the result
+    independent of the trace step where `values` changes rapidly (eg. \f$ L_\parallel \f$ near an X-point).
+
+    @param pt Point [2]
+    @param pts Trace points [n,2]
+    @param L_pol Cumulative poloidal length at each trace point [n] [m]
+    @param values Quantity at each trace point [n]
+    @result `values` interpolated at the closest point
+    '''
+    dist2 = ((pts - pt)**2).sum(axis=1)
+    if pts.shape[0] < 3:
+        return values[dist2.argmin()]
+    i = min(max(dist2.argmin(), 1), pts.shape[0] - 2)
+    s = L_pol[i-1:i+2]
+    coeffs = numpy.polyfit(s - s[1], dist2[i-1:i+2], 2)
+    s_min = s[1] - 0.5*coeffs[1]/coeffs[0] if coeffs[0] > 0.0 else s[1]
+    s_min = min(max(s_min, s[0]), s[2])
+    return numpy.polyval(numpy.polyfit(s - s[1], values[i-1:i+2], 2), s_min - s[1])
 
 
-def _divertor_metrics(field, o_point, x_points, walls, sol_width=3.E-3, step=5.E-3, max_length=None, diverted=None):
+def _divertor_metrics(field, o_point, x_points, walls, sol_width=3.E-3, step=5.E-3, max_length=None,
+                      primary=None, diverted=True):
     r'''! Compute divertor geometry metrics from a field adapter
 
     Core of @ref OpenFUSIONToolkit.TokaMaker.divertor.compute_divertor_metrics "compute_divertor_metrics", independent of the TokaMaker object so it can be used with any
@@ -307,9 +327,12 @@ def _divertor_metrics(field, o_point, x_points, walls, sol_width=3.E-3, step=5.E
     @param sol_width Outboard-midplane distance outside the separatrix of the SOL surface used for connection lengths [m]
     @param step Maximum poloidal step for field-line tracing [m]
     @param max_length Maximum poloidal length of a single trace [m] (default: 10x total wall length)
+    @param primary Index of the active X-point in `x_points` (default: the X-point whose separatrix is innermost at the OMP)
     @param diverted Diverted flag reported in the output (informational)
     @result Metrics dictionary (see @ref OpenFUSIONToolkit.TokaMaker.divertor.compute_divertor_metrics "compute_divertor_metrics")
     '''
+    if not (numpy.isfinite(sol_width) and (sol_width > 0.0)):
+        raise ValueError('"sol_width" must be positive, got {0}'.format(sol_width))
     o_point = numpy.asarray(o_point, dtype=numpy.float64)
     closed_walls = []
     for contour in walls:
@@ -348,10 +371,17 @@ def _divertor_metrics(field, o_point, x_points, walls, sol_width=3.E-3, step=5.E
             'primary': False
         })
     inside_idx = [i for i, info in enumerate(xpt_info) if info['inside_wall']]
-    candidates = [i for i in inside_idx if numpy.isfinite(xpt_info[i]['R_OMP'])]
-    if len(candidates) == 0:
-        raise ValueError('No X-point inside the wall whose separatrix reaches the outboard midplane')
-    ipri = min(candidates, key=lambda i: xpt_info[i]['R_OMP'])
+    if primary is None:
+        candidates = [i for i, info in enumerate(xpt_info) if numpy.isfinite(info['R_OMP'])]
+        if len(candidates) == 0:
+            raise ValueError('No X-point whose separatrix reaches the outboard midplane')
+        ipri = min(candidates, key=lambda i: xpt_info[i]['R_OMP'])
+    else:
+        ipri = int(primary)
+    if not xpt_info[ipri]['inside_wall']:
+        raise ValueError('Primary X-point ({0:.3f}, {1:.3f}) is outside the wall'.format(*x_points[ipri, :]))
+    if not numpy.isfinite(xpt_info[ipri]['R_OMP']):
+        raise ValueError('Separatrix of the primary X-point does not reach the outboard midplane')
     xpt_info[ipri]['primary'] = True
     x_inside = x_points[inside_idx, :]
 
@@ -359,17 +389,16 @@ def _divertor_metrics(field, o_point, x_points, walls, sol_width=3.E-3, step=5.E
     R_omp = xpt_info[ipri]['R_OMP']
     B_omp = field.B(numpy.r_[R_omp, o_point[1]])[0]
 
-    # Double-null balance: lower minus upper separatrix radius at the OMP
-    upper = xpt_info[ipri]['Z'] > o_point[1]
-    opposite = [i for i, info in enumerate(xpt_info)
-                if ((info['Z'] > o_point[1]) != upper) and numpy.isfinite(info['R_OMP'])]
+    # Double-null balance: innermost lower minus innermost upper separatrix radius at the OMP,
+    # over all X-points (inside or outside the wall)
+    R_omp_side = {True: numpy.inf, False: numpy.inf}
+    for info in xpt_info:
+        if numpy.isfinite(info['R_OMP']):
+            is_upper = bool(info['Z'] > o_point[1])
+            R_omp_side[is_upper] = min(R_omp_side[is_upper], info['R_OMP'])
     dR_sep = numpy.nan
-    if len(opposite) > 0:
-        iopp = min(opposite, key=lambda i: xpt_info[i]['R_OMP'])
-        if upper:
-            dR_sep = xpt_info[iopp]['R_OMP'] - R_omp
-        else:
-            dR_sep = R_omp - xpt_info[iopp]['R_OMP']
+    if numpy.isfinite(R_omp_side[True]) and numpy.isfinite(R_omp_side[False]):
+        dR_sep = R_omp_side[False] - R_omp_side[True]
 
     # Trace separatrix legs from each X-point inside the wall (primary first)
     targets = {}
@@ -391,6 +420,7 @@ def _divertor_metrics(field, o_point, x_points, walls, sol_width=3.E-3, step=5.E
         R_u = xpt_info[ix]['R_OMP']
         B_u = field.B(numpy.r_[R_u, o_point[1]])[0] if numpy.isfinite(R_u) else numpy.full(3, numpy.nan)
         Bp_u = numpy.hypot(B_u[0], B_u[2])
+        Btot_u = numpy.linalg.norm(B_u)
         for k in range(2):
             leg_dir = legs[k, :]
             name = '{0}_{1}'.format(side, 'outer' if leg_dir[0] >= legs[1-k, 0] else 'inner')
@@ -441,7 +471,7 @@ def _divertor_metrics(field, o_point, x_points, walls, sol_width=3.E-3, step=5.E
             target['B_target'] = numpy.linalg.norm(B_t)
             target['poloidal_flux_expansion'] = (R_u*Bp_u)/(pt[0]*Bp_t)
             target['toroidal_flux_expansion'] = pt[0]/R_u
-            target['total_flux_expansion'] = Bp_u/Bp_t
+            target['total_flux_expansion'] = Btot_u/numpy.linalg.norm(B_t)
             target['angle_poloidal_target'] = numpy.degrees(numpy.arcsin(min(1.0, Bn/Bp_t)))
             target['angle_of_incidence_target'] = numpy.degrees(numpy.arcsin(min(1.0, Bn/numpy.linalg.norm(B_t))))
             target['xpoint_distance'] = numpy.linalg.norm(pt - x_pt)
@@ -456,6 +486,8 @@ def _divertor_metrics(field, o_point, x_points, walls, sol_width=3.E-3, step=5.E
     # Trace the SOL surface from the outboard midplane in both directions
     R_sol = R_omp + sol_width
     start = numpy.r_[R_sol, o_point[1]]
+    if (R_sol >= R_wall_omp) or not any(_point_in_contour(start, contour) for contour in closed_walls):
+        raise ValueError('SOL start point (R={0:.4f} m) is outside the wall (wall at R={1:.4f} m on the OMP)'.format(R_sol, R_wall_omp))
     psi_sol = field.psi(start)[0]
     sol = {
         'width': sol_width,
@@ -464,7 +496,6 @@ def _divertor_metrics(field, o_point, x_points, walls, sol_width=3.E-3, step=5.E
         'psi_n': field.psi_norm(psi_sol) if has_norm else numpy.nan,
         'ends': []
     }
-    assign_tol = max(0.1, 30.0*sol_width)
     for direction in (1.0, -1.0):
         trace = _trace_field_line(field, start, psi_sol, direction, segs, x_inside, step, max_length)
         end = {
@@ -487,24 +518,33 @@ def _divertor_metrics(field, o_point, x_points, walls, sol_width=3.E-3, step=5.E
         end['Z_target'] = pt[1]
         end['connection_length'] = trace['L_par'][-1]
         end['poloidal_length'] = trace['L_pol'][-1]
-        # Assign to the nearest separatrix leg reaching the wall
+        # Assign to the separatrix strike point whose distance best matches the expected separation
+        # delta*f_x/sin(angle_poloidal), where delta is the OMP distance of the SOL surface outside that
+        # leg's separatrix (accept up to 3x the expected separation). Only legs on the same side of the
+        # midplane whose separatrix lies inside the SOL surface are eligible.
         best_name = None
-        best_dist = assign_tol
+        best_ratio = 3.0
         for name, target in targets.items():
             if target['status'] != 'wall':
                 continue
-            dist = _polyline_distance(pt, target['trace'])
-            if dist < best_dist:
-                best_name, best_dist = name, dist
+            if (pt[1] > o_point[1]) != (target['Z_target'] > o_point[1]):
+                continue
+            delta = R_sol - target['R_OMP']
+            expected = delta*target['poloidal_flux_expansion']/numpy.sin(numpy.radians(target['angle_poloidal_target']))
+            if not (expected > 0.0):
+                continue
+            ratio = numpy.hypot(pt[0] - target['R_target'], pt[1] - target['Z_target'])/expected
+            if ratio < best_ratio:
+                best_name, best_ratio = name, ratio
         if best_name is None:
             continue
         end['target'] = best_name
         target = targets[best_name]
-        x_pt = x_points[target['xpoint'], :]
-        ixpt = numpy.sqrt(((trace['pts'] - x_pt)**2).sum(axis=1)).argmin()
+        # L_par from the point of the SOL line closest to the X-point
+        L_par_xpt = _closest_on_trace(x_points[target['xpoint'], :], trace['pts'], trace['L_pol'], trace['L_par'])
         target['connection_length_target'] = trace['L_par'][-1]
         target['poloidal_connection_length_target'] = trace['L_pol'][-1]
-        target['connection_length_divertor'] = trace['L_par'][-1] - trace['L_par'][ixpt]
+        target['connection_length_divertor'] = trace['L_par'][-1] - L_par_xpt
 
     return {
         'diverted': diverted,
@@ -526,39 +566,51 @@ def _divertor_metrics(field, o_point, x_points, walls, sol_width=3.E-3, step=5.E
 
 
 def compute_divertor_metrics(tokamaker, sol_width=3.E-3, wall=None, step=5.E-3, max_length=None):
-    r'''! Compute divertor geometry metrics for a solved TokaMaker equilibrium
+    r'''! Compute divertor geometry metrics for a solved, diverted TokaMaker equilibrium
 
     All lengths are in [m], fields in [T], \f$ \psi \f$ in [Wb/rad] and angles in [degrees].
     "OMP" denotes the outboard midplane, the horizontal ray \f$ Z = Z_{axis} \f$, \f$ R > R_{axis} \f$.
 
     **Algorithm**
-    - The primary X-point is the X-point inside the wall whose separatrix crosses the OMP at the smallest
-      radius (the active X-point when diverted). Secondary X-points inside the wall are also analyzed.
+    - The equilibrium must be diverted (a `ValueError` is raised for limited plasmas). The primary X-point is
+      TokaMaker's active X-point (the last entry of `get_xpoints()`, which TokaMaker orders by \f$ \psi \f$ so
+      the active one is last), so its separatrix is the LCFS. Secondary X-points inside the wall are also analyzed.
     - Separatrix branches are located on a small circle around each X-point. The two branches pointing away
       from the magnetic axis are the divertor legs; they are followed to the wall to give the strike points.
       Legs are named `{upper,lower}_{inner,outer}` (outer = the leg leaving the X-point at larger R).
       Names for secondary X-points that collide with an existing name get an `_x{index}` suffix.
     - Connection lengths use the SOL flux surface `sol_width` outside the primary separatrix at the OMP,
-      traced in both directions from the OMP to the wall. Each end is attributed to the separatrix leg
-      whose trace passes nearest to it (within max(0.1 m, 30*sol_width)).
+      traced in both directions from the OMP to the wall. Each end is attributed to a separatrix strike point on
+      the same side of the midplane, choosing the one whose distance best matches the expected separation
+      `delta*f_x/sin(angle_poloidal_target)`. Here `delta` is how far the SOL surface lies outside that leg's
+      separatrix at the OMP (legs with `delta <= 0` are not eligible). Up to 3x the expected separation is
+      accepted; otherwise the end is not attributed to any target.
 
     **Definitions** (u = OMP point of the same flux surface, t = target/strike point)
     - `poloidal_flux_expansion` \f$ f_{x} = (R_u B_{p,u})/(R_t B_{p,t}) \f$: ratio of flux-surface spacing at the
       target to that at the OMP. With \f$ F = R B_\phi \f$ constant in the SOL this equals the pitch-angle
       ratio \f$ (B_p/B_\phi)_u / (B_p/B_\phi)_t \f$.
     - `toroidal_flux_expansion` \f$ R_t/R_u \f$ (TORAX extended Lengyel `toroidal_flux_expansion`).
-    - `total_flux_expansion` \f$ f_x R_t/R_u = B_{p,u}/B_{p,t} \f$.
+    - `total_flux_expansion` \f$ |B_u|/|B_t| \f$: ratio of flux-tube cross-section perpendicular to
+      \f$ \mathbf{B} \f$ at the target to that at the OMP (approximately \f$ R_t/R_u \f$ when \f$ B_\phi \f$ dominates).
     - `angle_poloidal_target`: angle between the separatrix leg and the wall in the poloidal plane.
     - `angle_of_incidence_target`: angle between the total field and the wall surface,
       \f$ \sin^{-1}(|\mathbf{B} \cdot \hat{n}|/|B|) \f$ (TORAX `angle_of_incidence_target`).
     - `connection_length_target`: parallel length \f$ L_\parallel \f$ from the OMP to the target along the SOL surface
       (TORAX `connection_length_target`).
-    - `connection_length_divertor`: \f$ L_\parallel \f$ from the point of the SOL surface closest to the leg's
-      X-point to the target (TORAX `connection_length_divertor`).
-    - `dR_sep` \f$ \Delta R_{sep} = R_{OMP}(\psi_{X,lower}) - R_{OMP}(\psi_{X,upper}) \f$ using the primary X-point and
-      the innermost X-point on the opposite side of the midplane; positive when the upper X-point is primary
-      (DIII-D convention), NaN if there is no opposite X-point.
+    - `connection_length_divertor`: \f$ L_\parallel \f$ from the point of the SOL field line closest to the leg's
+      X-point to the target (TORAX `connection_length_divertor`). The closest point is located by a quadratic fit
+      between trace points, so the value does not depend on the trace step.
+    - `dR_sep` \f$ \Delta R_{sep} = R_{OMP,lower} - R_{OMP,upper} \f$, where each term is the OMP radius of the innermost
+      separatrix among the X-points below/above the axis, considering every X-point TokaMaker reports (inside or
+      outside the wall). Positive when the upper separatrix is the inner one, which for a diverted equilibrium
+      means the upper X-point is primary (DIII-D convention). NaN if there is no X-point on one side.
     - Flux expansions and angles are evaluated on the separatrix (\f$ \psi = \psi_X \f$) of each leg.
+
+    **TORAX extended Lengyel model**: that model describes the outer divertor only. Its geometry inputs come from
+    the outer leg of the primary X-point (`targets['lower_outer']` for a lower single null):
+    `connection_length_target`, `connection_length_divertor`, `angle_of_incidence_target` and
+    `toroidal_flux_expansion` from that target, and `B_pol_OMP` from the top level.
 
     **Returned dictionary**
     - `diverted`, `R_axis`, `Z_axis`, `Z_OMP`
@@ -578,6 +630,7 @@ def compute_divertor_metrics(tokamaker, sol_width=3.E-3, wall=None, step=5.E-3, 
 
     @param tokamaker TokaMaker object (current equilibrium is used) or TokaMaker equilibrium object
     @param sol_width Distance outside the separatrix at the OMP of the SOL surface used for connection lengths [m]
+    (must be positive and keep the SOL start point inside the wall)
     @param wall Wall contour [n,2] or list of contours (default: limiter contours of the TokaMaker mesh)
     @param step Maximum poloidal step for field-line tracing [m]
     @param max_length Maximum poloidal length of a single trace [m] (default: 10x total wall length)
@@ -593,6 +646,8 @@ def compute_divertor_metrics(tokamaker, sol_width=3.E-3, wall=None, step=5.E-3, 
         tMaker = tokamaker._tMaker
     if tMaker.settings.mirror_mode:
         raise ValueError('Divertor metrics are not supported in mirror mode')
+    if tMaker.settings.dipole_mode:
+        raise ValueError('Divertor metrics are not supported in dipole mode')
     if wall is None:
         if tMaker.lim_contours is None:
             raise ValueError('No limiter contour available, specify "wall"')
@@ -602,9 +657,11 @@ def compute_divertor_metrics(tokamaker, sol_width=3.E-3, wall=None, step=5.E-3, 
     else:
         walls = list(wall)
     x_points, diverted = equil.get_xpoints()
+    if (x_points is None) or (not diverted):
+        raise ValueError('Equilibrium is limited; divertor metrics require a diverted equilibrium')
     field = _TokaMakerField(equil)
     return _divertor_metrics(field, equil.o_point, x_points, walls, sol_width=sol_width, step=step,
-                             max_length=max_length, diverted=bool(diverted))
+                             max_length=max_length, primary=x_points.shape[0]-1, diverted=True)
 
 
 def plot_divertor_metrics(fig, ax, metrics, wall_color='k', leg_color='tab:red', sol_color='tab:blue',
