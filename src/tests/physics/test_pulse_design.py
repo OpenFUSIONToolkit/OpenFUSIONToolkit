@@ -397,26 +397,30 @@ class _FakeTxScalar:
         return self._y
 
 
-@pytest.mark.parametrize("formation_model, used_label", [
-    ('martin_scaling', r'$P_{LH}$ Martin (used)'),
-    ('delabie_scaling', r'$P_{LH}$ Delabie (used)'),
-    (None, None),
+@pytest.mark.parametrize("formation_cfg, used_label", [
+    ({'use_formation_model_with_adaptive_source': True,
+      'formation_model': {'model_name': 'martin_scaling'}}, r'$P_{LH}$ Martin (used)'),
+    ({'use_formation_model_with_adaptive_source': True,
+      'formation_model': {'model_name': 'delabie_scaling'}}, r'$P_{LH}$ Delabie (used)'),
+    # Flag on, no model named: TORAX defaults the formation model to martin_scaling.
+    ({'use_formation_model_with_adaptive_source': True}, r'$P_{LH}$ Martin (used)'),
+    ({}, None),
 ])
-def test_plh_used_label(monkeypatch, formation_model, used_label) -> None:
-    r'''! The P_LH "(used)" label follows the formation model in the TORAX pedestal config.'''
-    pytest.importorskip("torax")
+def test_plh_used_label(monkeypatch, formation_cfg, used_label) -> None:
+    r'''! The P_LH "(used)" label follows the formation model in the validated TORAX config.'''
+    torax = pytest.importorskip("torax")
     import matplotlib.pyplot as plt
     from OpenFUSIONToolkit.TokaMaker import pulse_design
 
-    ped_cfg = {
-        'model_name': 'set_T_ped_n_ped',
-        'mode': 'ADAPTIVE_SOURCE',
-        'use_formation_model_with_adaptive_source': formation_model is not None,
-        'formation_model': {'model_name': formation_model},
-    }
-    assert pulse_design._pedestal_formation_model(ped_cfg) == formation_model
+    ped_cfg = {'model_name': 'set_T_ped_n_ped', 'set_pedestal': True, 'mode': 'ADAPTIVE_SOURCE'}
+    ped_cfg.update(formation_cfg)
+    tx_config = torax.ToraxConfig.from_dict({
+        'profile_conditions': {}, 'plasma_composition': {}, 'numerics': {},
+        'geometry': {'geometry_type': 'circular'}, 'pedestal': ped_cfg,
+        'sources': {}, 'solver': {}, 'transport': {},
+    })
 
-    t = np.linspace(0.0, 10.0, 11)
+    t =np.linspace(0.0, 10.0, 11)
     scalars = {name: _FakeTxScalar(t, np.full(t.shape, val)) for name, val in [
         ('P_LH', 30.0e6), ('P_LH_delabie', 20.0e6), ('P_SOL_total', 25.0e6),
         ('n_e_line_avg', 5.0e19), ('n_e_min_P_LH', 3.0e19), ('Ip', 10.0e6),
@@ -424,7 +428,7 @@ def test_plh_used_label(monkeypatch, formation_model, used_label) -> None:
     ]}
     tt = SimpleNamespace(
         _data_tree=SimpleNamespace(scalars=SimpleNamespace(**scalars), profiles=SimpleNamespace()),
-        _tx_formation_model=pulse_design._pedestal_formation_model(ped_cfg),
+        _tx_formation_model=pulse_design._pedestal_formation_model(tx_config.pedestal),
         _lh_time=None, _t_init=0.0, _t_final=10.0, _current_loop=1,
     )
     figs = []
@@ -432,9 +436,16 @@ def test_plh_used_label(monkeypatch, formation_model, used_label) -> None:
     plt.switch_backend('Agg')
     pulse_design.plot_PLH_components(tt, display=False)
 
-    labels = [line.get_label() for line in figs[0].axes[7].get_lines()]  # axes[2, 1]: P_SOL vs P_LH
-    used = [lab for lab in labels if lab.endswith('(used)')]
-    assert used == ([used_label] if used_label is not None else [])
+    # Check every P_SOL vs P_LH panel, found by its P_SOL curve rather than its grid position.
+    gate_axes = []
+    for ax in figs[0].axes:
+        if r'$P_{SOL}$' in [line.get_label() for line in ax.get_lines()]:
+            gate_axes.append(ax)
+    assert gate_axes
+    expected = [used_label] if used_label is not None else []
+    for ax in gate_axes:
+        used = [line.get_label() for line in ax.get_lines() if line.get_label().endswith('(used)')]
+        assert used == expected
     plt.close(figs[0])
 
 

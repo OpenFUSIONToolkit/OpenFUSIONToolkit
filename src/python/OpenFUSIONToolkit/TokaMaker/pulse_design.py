@@ -233,21 +233,19 @@ class MyEncoder(json.JSONEncoder):
 _STATE_NOT_SAVED = ('equil',)
 
 
-def _pedestal_formation_model(ped_cfg):
-    r'''! Return the L/H formation model a TORAX pedestal config section gates on.
+def _pedestal_formation_model(pedestal):
+    r'''! Return the L/H formation model a validated TORAX pedestal config gates on.
 
-            @param ped_cfg TORAX 'pedestal' config section (dict), or None.
+            Reads the validated config rather than the raw dict so TORAX's defaults apply
+            (a formation model with no model_name defaults to 'martin_scaling').
+
+            @param pedestal Validated TORAX pedestal config (ToraxConfig.pedestal).
             @result formation_model model_name (e.g. 'martin_scaling'), or None when the
-                    formation model is off or its name is not set explicitly in ped_cfg.
+                    formation model is off.
     '''
-    if not isinstance(ped_cfg, dict):
+    if not getattr(pedestal, 'use_formation_model_with_adaptive_source', False):
         return None
-    if not ped_cfg.get('use_formation_model_with_adaptive_source', False):
-        return None
-    formation_model = ped_cfg.get('formation_model')
-    if not isinstance(formation_model, dict):
-        return None
-    return formation_model.get('model_name')
+    return pedestal.formation_model.model_name
 
 
 class TokaMaker_TORAX:
@@ -709,7 +707,7 @@ class TokaMaker_TORAX:
         # Loop-1 merged TORAX config (with applied defaults), captured in _get_tx_config
         # for the reproduction file written by save_tmtx_config(). None until loop 1 runs.
         self._tx_config_snapshot = None
-        # L/H formation model in the most recent main TORAX config (None = off or not set);
+        # L/H formation model in the most recent main TORAX config (None = formation model off);
         # set in _get_tx_config and used by the P_LH plots to mark the threshold TORAX gated on.
         self._tx_formation_model = None
 
@@ -2531,8 +2529,8 @@ class TokaMaker_TORAX:
                 f.write('tx_config = ')
                 f.write(pprint.pformat(self._numpy_to_plain_python(myconfig), width=100, sort_dicts=False))
 
-        self._tx_formation_model = _pedestal_formation_model(myconfig.get('pedestal'))
         tx_config = torax.ToraxConfig.from_dict(myconfig)
+        self._tx_formation_model = _pedestal_formation_model(tx_config.pedestal)
         return tx_config
 
     def _test_eqdsk_tx_config(self, eqdsk, *, quiet=False):
@@ -7959,6 +7957,8 @@ def plot_PLH_components(tt, save_path=None, display=True):
       (2,0) f_GW (line-avg)    — headroom to the density limit.
       (2,1) P_SOL vs P_LH (transition) — the transition gate, zoomed to L->H.
       (2,2) P_SOL vs P_LH (full pulse) — same gate over the whole pulse duration.
+            The shading uses unscaled P_LH; TORAX gates on P_LH * P_LH_prefactor
+            (and * P_LH_hysteresis_factor for the H->L back transition).
 
     Isolates why the L->H transition can fire in one loop but not another even
     when geometry/Ip are nearly identical: the branch crossover is set by
