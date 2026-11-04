@@ -2,7 +2,6 @@ import os
 import sys
 import time
 import multiprocessing
-import warnings
 import pytest
 import numpy as np
 test_dir = os.path.abspath(os.path.dirname(__file__))
@@ -81,24 +80,13 @@ def validate_eigs(results,eigs):
     return test_result
 
 
-def run_marklin_vac(meshfile,order,grid_order,mp_q,legacy=False):
+def run_marklin_vac(meshfile,order,grid_order,mp_q):
     try:
         from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.Marklin import Marklin
         myOFT = OFT_env(nthreads=-1)
         taylor_solver = Marklin(myOFT)
-        if legacy:
-            # Deprecated staged setup must still work and warn once per method
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter('always')
-                taylor_solver.setup_mesh(mesh_file=meshfile, grid_order=grid_order)
-                taylor_solver.setup(order=order, minlev=1)
-            dep_msgs = [str(wtmp.message) for wtmp in w if issubclass(wtmp.category, DeprecationWarning)]
-            for name in ('setup_mesh','setup'):
-                if sum('`{0}()` is deprecated'.format(name) in msg for msg in dep_msgs) != 1:
-                    raise ValueError('Expected one DeprecationWarning for `{0}()`, got: {1}'.format(name, dep_msgs))
-        else:
-            taylor_solver.setup_model(mesh_file=meshfile, grid_order=grid_order, order=order, minlev=1)
+        taylor_solver.setup_model(mesh_file=meshfile, grid_order=grid_order, order=order, minlev=1)
         nh = 1
         hcpc = np.array([[1.0,0.0,0.0],])
         hcpv = np.array([[0.0,1.5,0.0],])
@@ -195,16 +183,6 @@ def test_marklin_vac_g2_p3():
 def test_marklin_vac_g2_p4():
     field_mag = 1.188126
     marklin_torus_vac(4,field_mag)
-
-def run_marklin_vac_legacy(meshfile,order,grid_order,mp_q):
-    run_marklin_vac(meshfile,order,grid_order,mp_q,legacy=True)
-
-# Deprecated setup_mesh()/setup() path must match setup_model()
-@pytest.mark.coverage
-def test_marklin_vac_legacy_setup():
-    results = mp_run(run_marklin_vac_legacy,('torus_test.h5',1,2))
-    assert results is not None
-    assert abs((results-1.145501)/1.145501) < 1.E-4
 
 # # Example of how to run single test without pytest
 # if __name__ == '__main__':
