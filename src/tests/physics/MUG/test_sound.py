@@ -1,10 +1,10 @@
 import os
 import sys
-import h5py
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
-sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
+sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
 from oft_testing import run_OFT
+from mug_testing import validate_errors, validate_mug_output
 
 # Basic template for input file
 oft_in_template = """
@@ -99,58 +99,9 @@ def sound_setup(nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,pet
     return run_OFT("./test_sound", nproc, 2000)
 
 def validate_result(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_temp=False):
-    retval = True
-    with open('sound.results','r') as fid:
-        nerr_test = float(fid.readline())
-        if nerr_test > 1.01*nerr_exp:
-            print("FAILED: Density error too high!")
-            print("  Expected = {0}".format(nerr_exp))
-            print("  Actual =   {0}".format(nerr_test))
-            retval = False
-        terr_test = float(fid.readline())
-        if terr_test > 1.01*terr_exp:
-            print("FAILED: Temperature error too high!")
-            print("  Expected = {0}".format(terr_exp))
-            print("  Actual =   {0}".format(terr_test))
-            retval = False
-        verr_test = float(fid.readline())
-        if verr_test > 1.01*verr_exp:
-            print("FAILED: Velocity error too high!")
-            print("  Expected = {0}".format(verr_exp))
-            print("  Actual =   {0}".format(verr_test))
-            retval = False
-    #
-    step_count=0
-    B0_found = False
-    Te_found = False
-    with h5py.File("{0}.{1}.h5".format('oft_xdmf',str(1).zfill(4)),'r') as h5_file:
-        if 'mug' in h5_file:
-            for _, mesh_obj in h5_file['mug'].items():
-                if mesh_obj['TYPE'][()] > 30:
-                    for i in range(9999):
-                        timestep = mesh_obj.get('{0:04d}'.format(i),None)
-                        if timestep is None:
-                            break
-                        step_count += 1
-                        if 'B0' in timestep:
-                            B0_found = True
-                        if 'Te' in timestep:
-                            Te_found = True
-        else:
-            print('FAILED: "mug" plot group not found in output file')
-            retval = False
-    if step_count != steps_exp:
-        print("FAILED: Incorrect number of time steps!")
-        print("  Expected = {0}".format(steps_exp))
-        print("  Actual =   {0}".format(step_count))
-        retval = False
-    if linear and (not B0_found):
-        print("FAILED: Linearization plot fields missing for linear run!")
-        retval = False
-    if two_temp and (not Te_found):
-        print("FAILED: Te plot field missing for two-temperature run!")
-        retval = False
-    return retval
+    errors_ok = validate_errors('sound.results', (('Density', nerr_exp), ('Temperature', terr_exp), ('Velocity', verr_exp)), 1.01)
+    output_ok = validate_mug_output(steps_exp, linear=linear, two_temp=two_temp)
+    return errors_ok and output_ok
 
 #============================================================================
 # Non-Linear test runners for NP=2

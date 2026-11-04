@@ -5,7 +5,7 @@ Reads `ITER_test.eqdsk` and `D3Dlike_Hmode_test.peqdsk` with the OMFIT
 `OMFITgeqdsk` / `OMFITpFile` readers (which the TokaMaker `eqdsk` module
 was adapted from) and writes the results next to this script as
 `eqdsk_gfile_expected.json` and `eqdsk_pfile_expected.json`.  These are
-consumed directly by `test_TokaMaker.py::test_eqdsk_gfile` /
+consumed directly by `test_TokaMaker_eqdsk.py::test_eqdsk_gfile` /
 `test_eqdsk_pfile`; the per-key tolerance overrides live in
 `eqdsk_gfile_tol.json` and are hand-maintained (not regenerated here).
 

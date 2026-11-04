@@ -8,7 +8,7 @@ from scipy.optimize import minimize_scalar
 from scipy.special import ellipe, ellipk
 
 test_dir = os.path.abspath(os.path.dirname(__file__))
-sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
+sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
 from oft_testing import run_OFT
 
 oft_in = """

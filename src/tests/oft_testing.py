@@ -1,8 +1,15 @@
 import subprocess
+import multiprocessing
 import time
 import os
+import sys
 import warnings
 import pytest
+
+# Make the OFT Python package (<build_dir>/python) importable by all tests
+oft_python_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'python'))
+if oft_python_dir not in sys.path:
+    sys.path.append(oft_python_dir)
 
 def run_command(command, cwd=None):
     pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd)
@@ -77,6 +84,39 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
         return True, std_out
     else:
         return True
+
+
+def mp_run(target, args, cwd, timeout=180):
+    '''Run `target(*args, mp_q)` in a separate process from `cwd` and return the first result put on `mp_q`
+
+    Only one `OFT_env` may exist per process, so tests using the Python interface run each case in its own
+    process. Returns `None` if the process does not finish within `timeout` seconds or produces no result.
+    '''
+    # Increase timeout if testing in debug configuration
+    if os.environ.get('OFT_DEBUG_TEST', 0):
+        timeout *= 4
+    os.chdir(cwd)
+    mp_q = multiprocessing.Queue()
+    p = multiprocessing.Process(target=target, args=args + (mp_q,))
+    p.start()
+    start = time.time()
+    while time.time() - start <= timeout:
+        if not p.is_alive():
+            break
+        time.sleep(.5)
+    else: # Reached timeout
+        print("Timeout reached")
+        p.terminate()
+        p.join()
+        return None
+    # Completed successfully?
+    try:
+        test_result = mp_q.get(timeout=5)
+    except:
+        print("Failed to get output")
+        return None
+    p.join()
+    return test_result
 
 
 def approx_list(list, rel=None, abs=None):

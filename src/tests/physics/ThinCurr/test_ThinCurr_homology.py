@@ -9,15 +9,12 @@
 import os
 import sys
 import shlex
-import time
-import multiprocessing
 import pytest
 import numpy as np
 test_dir = os.path.abspath(os.path.dirname(__file__))
-python_dir = os.path.abspath(os.path.join(test_dir, '..','..','python'))
-sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
-sys.path.append(python_dir)
-from oft_testing import run_command
+sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
+import oft_testing
+from oft_testing import run_command, oft_python_dir
 from OpenFUSIONToolkit.ThinCurr.meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
 from OpenFUSIONToolkit.ThinCurr._homology_cli import compute_homology
 
@@ -49,7 +46,7 @@ def script_cmd(script, *args):
     The generated stubs start with "#!/usr/bin/env python", so invoking them by name would pick up
     whichever interpreter comes first on PATH instead of the one the tests are using.
     '''
-    parts = [shlex.quote(sys.executable), shlex.quote(os.path.join(python_dir, script))]
+    parts = [shlex.quote(sys.executable), shlex.quote(os.path.join(oft_python_dir, script))]
     return " ".join(parts + [shlex.quote(arg) for arg in args])
 
 
@@ -190,29 +187,7 @@ def test_invalid(mesh_name, message):
 
 
 def mp_run(target, args, timeout=180):
-    if os.environ.get('OFT_DEBUG_TEST', 0):
-        timeout *= 4
-    os.chdir(test_dir)
-    mp_q = multiprocessing.Queue()
-    p = multiprocessing.Process(target=target, args=args + (mp_q,))
-    p.start()
-    start = time.time()
-    while time.time() - start <= timeout:
-        if not p.is_alive():
-            break
-        time.sleep(.5)
-    else:
-        print("Timeout reached")
-        p.terminate()
-        p.join()
-        return None
-    try:
-        result = mp_q.get(timeout=5)
-    except:
-        print("Failed to get output")
-        return None
-    p.join()
-    return result
+    return oft_testing.mp_run(target, args, test_dir, timeout=timeout)
 
 
 def run_eigs(mesh_file, mp_q):

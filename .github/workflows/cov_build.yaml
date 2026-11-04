@@ -119,7 +119,7 @@ jobs:
       working-directory: builds/build_release/tests
       run: |
         source ${{ github.workspace }}/oft_venv/bin/activate
-        coverage combine . grid lin_alg fem physics
+        coverage combine . grid lin_alg fem physics physics/TokaMaker physics/ThinCurr physics/Marklin physics/MUG
         coverage report
         coverage xml
 

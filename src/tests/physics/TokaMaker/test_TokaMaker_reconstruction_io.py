@@ -10,7 +10,7 @@ from unittest.mock import Mock
 
 import pytest
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'python')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'python')))
 from OpenFUSIONToolkit.TokaMaker.reconstruction import Ip_con, Press_con, reconstruction
 
 

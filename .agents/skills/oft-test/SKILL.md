@@ -10,6 +10,14 @@ layout: `base/`, `grid/`, `lin_alg/`, `fem/`, `physics/`. Each holds `test_*.py`
 files, the `test_*.F90` Fortran programs they drive, and data files (`.h5`, `.g`,
 `.inp`, …).
 
+`physics/` is further split into one folder per tool (`TokaMaker/`, `ThinCurr/`,
+`Marklin/`, `MUG/`), with tests shared by several tools (`test_python_comb.py`,
+`test_axi_green.py`) at its top level. Within a tool folder each `test_<Tool>_<case>.py`
+file covers a single physics case (eg. `TokaMaker/test_TokaMaker_ITER.py`), and helpers
+shared by that tool's tests live in a non-test module in the same folder
+(`tokamaker_testing.py`, `thincurr_testing.py`, `marklin_testing.py`, `mug_testing.py`).
+Helpers shared across tools belong in `oft_testing.py`.
+
 ## Before running anything
 
 1. **Tests run from the build tree, never the source tree.** The compiled Fortran test executables, copies of the test scripts and data, and the Python package all live under `<build_dir>`. Find `<build_dir>` with the `oft-build` skill ("Locate the build tree") — do not assume `builds/build_release`, which is only the CI/ephemeral layout. Also check that the build tree compiles *this* checkout (see "Check which source tree it builds" in `oft-build`), or you will be testing different code.
@@ -61,9 +69,9 @@ against), `OFT_HAVE_MPI`, and `OFT_DEBUG_TEST`, then passes all arguments to pyt
 
 ```bash
 cd <build_dir>/tests
-OMP_NUM_THREADS=2 ./run_test.sh physics/test_TokaMaker.py                 # one file
-OMP_NUM_THREADS=2 ./run_test.sh physics/test_TokaMaker.py -k "test_name"  # matching tests
-./run_test.sh physics/test_TokaMaker.py --collect-only                   # list tests (runs nothing)
+OMP_NUM_THREADS=2 ./run_test.sh physics/TokaMaker/test_TokaMaker_ITER.py                 # one file
+OMP_NUM_THREADS=2 ./run_test.sh physics/TokaMaker/test_TokaMaker_ITER.py -k "test_name"  # matching tests
+./run_test.sh physics/TokaMaker --collect-only                                          # list tests (runs nothing)
 OMP_NUM_THREADS=2 ./run_test.sh grid -m "not slow"                        # a folder, skipping slow tests
 ```
 
@@ -107,6 +115,7 @@ as a broken build, check the reason (`-rs` prints a summary). The common ones co
 
 - Add the test file **and** every data file it reads to the subdirectory's `CMakeLists.txt` (`configure_file(<file> ${CMAKE_CURRENT_BINARY_DIR} COPYONLY)`), and new Fortran programs with `oft_add_test(test_foo.F90)`; otherwise they never reach the build tree.
 - Use `run_OFT(command, nproc, timeout)` from `oft_testing.py` to run Fortran executables.
-- Only one `OFT_env` may exist per process. Physics Python tests (TokaMaker, ThinCurr, Marklin) run each case through an `mp_run()` helper that starts a `multiprocessing.Process` and returns results through a `multiprocessing.Queue` — follow the pattern in the existing test file rather than creating `OFT_env` at module level or twice in one process.
+- Only one `OFT_env` may exist per process. Physics Python tests (TokaMaker, ThinCurr, Marklin) run each case through `oft_testing.mp_run()` (wrapped by each tool's helper module), which starts a `multiprocessing.Process` and returns the result the target puts on its `multiprocessing.Queue`, or `None` on timeout or missing output — follow the pattern in the existing test files rather than creating `OFT_env` at module level or twice in one process.
+- Test file names must be unique across all of `src/tests/`, since pytest imports them by basename (there are no `__init__.py` files). Name new physics tests `test_<Tool>_<case>.py`.
 - Mark cases too slow for routine CI as `@pytest.mark.slow`, and parallel cases as `@pytest.mark.mpi`.
 - Test functions do not need Doxygen-style documentation (see "Test and example code" in `AGENTS.md`); a short comment saying what is covered is welcome.

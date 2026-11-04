@@ -2,7 +2,7 @@ import os
 import sys
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
-sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
+sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
 from oft_testing import run_OFT, run_command
 
 # Basic template for input file

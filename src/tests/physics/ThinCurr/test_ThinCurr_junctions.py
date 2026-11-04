@@ -1,14 +1,12 @@
 import os
 import sys
 import copy
-import time
-import multiprocessing
 import numpy as np
 import scipy.sparse
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
-python_dir = os.path.abspath(os.path.join(test_dir, '..', '..', 'python'))
-sys.path.append(python_dir)
+sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
+from thincurr_testing import mp_run
 from OpenFUSIONToolkit.ThinCurr.junctions import (split_junctions, junction_table, find_junction_holes,
                                                   current_loop_count, has_junctions)
 from OpenFUSIONToolkit.ThinCurr.meshing import write_ThinCurr_mesh, read_ThinCurr_mesh
@@ -153,32 +151,6 @@ def test_insulate_file(tmp_path):
         del h5_file['thincurr/junctions/INSULATED']
     with pytest.raises(ValueError, match='unknowns'):
         compute_homology(str(tmp_path / 'ring-gap.h5'), verify_only=True)
-
-
-def mp_run(target, args, timeout=180):
-    if os.environ.get('OFT_DEBUG_TEST', 0):
-        timeout *= 4
-    os.chdir(test_dir)
-    mp_q = multiprocessing.Queue()
-    p = multiprocessing.Process(target=target, args=args + (mp_q,))
-    p.start()
-    start = time.time()
-    while time.time() - start <= timeout:
-        if not p.is_alive():
-            break
-        time.sleep(.5)
-    else:
-        print("Timeout reached")
-        p.terminate()
-        p.join()
-        return False
-    try:
-        test_result = mp_q.get(timeout=5)
-    except:
-        print("Failed to get output")
-        return False
-    p.join()
-    return test_result
 
 
 def write_pair(r, lc, reg, prefix, insulated=(), vcoil=False):
@@ -498,7 +470,8 @@ def test_hodlr_coarse():
     files, _ = write_pair(r, lc, reg, 'junction_ring_coarse')
     ref = mp_run(run_hodlr_coarse, (files[0], False))
     out = mp_run(run_hodlr_coarse, (files[0], True))
-    assert ref is not False and out is not False
+    # None on timeout, False if the run failed
+    assert not any(res is None or res is False for res in (ref, out))
     assert np.max(np.abs(ref)) > 0.0
     assert np.allclose(out, ref, rtol=0.0, atol=1.E-5*np.max(np.abs(ref)))
 
@@ -542,7 +515,8 @@ def test_runtime_insulation():
     files_ins, _ = write_pair(r, lc, reg, 'junction_ring_ins', insulated=(3,))
     eig_rt = mp_run(run_reduction, (files_rt, None, [3]))
     eig_ins = mp_run(run_reduction, (files_ins, None, None))
-    assert eig_rt is not False and eig_ins is not False
+    # None on timeout, False if the run failed
+    assert not any(res is None or res is False for res in (eig_rt, eig_ins))
     assert np.allclose(eig_rt, eig_ins, rtol=1.0E-10, atol=0.0)
 
 
@@ -569,7 +543,8 @@ def test_runtime_pair_insulation():
     files_ins, _ = write_pair(r, lc, reg, 'junction_torus_ins', insulated=[(1, 2)])
     eig_rt = mp_run(run_reduction, (files_rt, None, [(1, 2)]))
     eig_ins = mp_run(run_reduction, (files_ins, None, None))
-    assert eig_rt is not False and eig_ins is not False
+    # None on timeout, False if the run failed
+    assert not any(res is None or res is False for res in (eig_rt, eig_ins))
     assert np.allclose(eig_rt, eig_ins, rtol=1.0E-10, atol=0.0)
 
 

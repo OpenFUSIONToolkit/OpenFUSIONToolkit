@@ -1,11 +1,11 @@
 from __future__ import print_function
-import math
 import os
 import sys
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
-sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
+sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
 from oft_testing import run_OFT
+from mug_testing import validate_errors
 
 # Basic template for input file
 oft_in_template = """
@@ -75,27 +75,7 @@ def taylor_green_setup(nbase, nlevels, order, mf=False, ni=8, dt='2.5E-2', nstep
     return run_OFT("./test_taylor_green_2d oft.in {0}".format(xml_file), nproc, 1000)
 
 def validate_result(vxerr_exp, vzerr_exp, perr_exp):
-    retval = True
-    with open('taylor_green_2d.results', 'r') as fid:
-        vxerr_test = float(fid.readline())
-        if not math.isfinite(vxerr_test) or vxerr_test > 1.05*vxerr_exp:
-            print("FAILED: v_x error too high!")
-            print("  Expected = {0:.8E}".format(vxerr_exp))
-            print("  Actual =   {0:.8E}".format(vxerr_test))
-            retval = False
-        vzerr_test = float(fid.readline())
-        if not math.isfinite(vzerr_test) or vzerr_test > 1.05*vzerr_exp:
-            print("FAILED: v_z error too high!")
-            print("  Expected = {0:.8E}".format(vzerr_exp))
-            print("  Actual =   {0:.8E}".format(vzerr_test))
-            retval = False
-        perr_test = float(fid.readline())
-        if not math.isfinite(perr_test) or perr_test > 1.05*perr_exp:
-            print("FAILED: Pressure error too high!")
-            print("  Expected = {0:.8E}".format(perr_exp))
-            print("  Actual =   {0:.8E}".format(perr_test))
-            retval = False
-    return retval
+    return validate_errors('taylor_green_2d.results', (('v_x', vxerr_exp), ('v_z', vzerr_exp), ('Pressure', perr_exp)), 1.05)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("error_index", (0, 1, 2), ids=("vx", "vz", "pressure"))

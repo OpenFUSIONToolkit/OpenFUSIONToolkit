@@ -2,8 +2,9 @@ import os
 import sys
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
-sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
+sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
 from oft_testing import run_OFT
+from mug_testing import validate_errors
 
 # Basic template for input file
 oft_in_template = """
@@ -91,21 +92,7 @@ def alfven_2d_setup(nbase,nlevels,order,
     return run_OFT("./test_alfven_2d", nproc, 4000)
 
 def validate_result(verr_exp,berr_exp,steps_exp=11,linear=False):
-    retval = True
-    with open('alfven_2d.results','r') as fid:
-        verr_test = float(fid.readline())
-        if verr_test > 1.05*verr_exp:
-            print("FAILED: Velocity error too high!")
-            print("  Expected = {0:.8E}".format(verr_exp))
-            print("  Actual =   {0:.8E}".format(verr_test))
-            retval = False
-        berr_test = float(fid.readline())
-        if berr_test > 1.05*berr_exp:
-            print("FAILED: Magnetic error too high!")
-            print("  Expected = {0:.8E}".format(berr_exp))
-            print("  Actual =   {0:.8E}".format(berr_test))
-            retval = False
-    return retval
+    return validate_errors('alfven_2d.results', (('Velocity', verr_exp), ('Magnetic', berr_exp)), 1.05)
 
 #============================================================================
 # Non-Linear test runners for NP=2
