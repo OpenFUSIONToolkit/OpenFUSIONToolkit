@@ -19,7 +19,7 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
             pytest.skip("Not compiled with MPI")
     pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     # Increase timeout if testing in debug configuration
-    if os.environ.get('OFT_DEBUG_TEST', 0):
+    if os.environ.get('OFT_DEBUG_TEST', '0') not in ('', '0'):
         timeout *= 4
     # Wait for process to complete or timeout
     timeout *= 10
