@@ -379,3 +379,57 @@ def test_divertor_ITER():
     assert results['limited_has_xpoint']
     assert 'limited' in errors['limited']
 
+
+def profile_sets():
+    '''Alternative F*F' and P' profiles (the default set from test_TokaMaker.py is covered by test_divertor_ITER)'''
+    psi = np.linspace(0.0, 1.0, 50)
+    pedestal = {'type': 'linterp', 'x': psi, 'y': np.where(psi < 0.92, 1.0 - 0.3*psi, 0.724*(1.0 - psi)/0.08)}
+    return {
+        'broad': (create_power_flux_fun(40, 1.0, 1.0), create_power_flux_fun(40, 1.0, 1.0)),
+        'peaked': (create_power_flux_fun(40, 3.0, 3.0), create_power_flux_fun(40, 6.0, 2.0)),
+        'pedestal': (create_power_flux_fun(40, 1.5, 2.0), pedestal),
+    }
+
+
+def run_ITER_profiles_case(mp_q):
+    '''Diverted ITER metrics for several profile shapes (same shape targets)'''
+    results = {}
+    try:
+        myOFT = OFT_env(nthreads=-1)
+        mygs = setup_ITER(myOFT)
+        for name, (ffp_prof, pp_prof) in profile_sets().items():
+            mygs.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof)
+            solve_ITER_diverted(mygs)
+            psi_eval = mygs.get_field_eval('PSI')
+            results[name] = summarize(compute_divertor_metrics(mygs, sol_width=1.E-3), mygs, psi_eval)
+    except Exception as err:
+        print(err)
+        mp_q.put(None)
+        return
+    mp_q.put(results)
+    oftpy_dump_cov()
+
+
+def test_divertor_ITER_profiles():
+    '''Metrics stay consistent for broad, peaked and pedestal-like profiles, and respond to the profile change'''
+    results = mp_run(run_ITER_profiles_case, (), timeout=180)
+    assert results is not None
+    assert set(results.keys()) == set(profile_sets().keys())
+    for summary in results.values():
+        assert summary['diverted']
+        assert summary['primary_Z'] < 0.0
+        assert summary['dR_sep'] < 0.0
+        assert sorted(end['target'] for end in summary['ends']) == ['lower_inner', 'lower_outer']
+        for target in summary['targets'].values():
+            assert target['status'] == 'wall'
+            assert target['on_wall']
+            assert abs(target['dpsi']) < 1.E-4*summary['psi_range']
+            assert target['poloidal_flux_expansion'] > 1.0
+            assert 0.0 < target['angle_of_incidence_target'] < target['angle_poloidal_target'] <= 90.0
+            assert 0.0 < target['connection_length_divertor'] < target['connection_length_target']
+        assert summary['targets']['lower_outer']['connection_length_target'] < summary['targets']['lower_inner']['connection_length_target']
+        for ratio in summary['strike_ratio'].values():
+            assert ratio == pytest.approx(1.0, rel=2.E-2)
+    # Different profiles give a different equilibrium, so the metrics must change
+    f_x = [summary['targets']['lower_outer']['poloidal_flux_expansion'] for summary in results.values()]
+    assert max(f_x) - min(f_x) > 0.05
