@@ -414,10 +414,10 @@ class TokaMaker():
         a `vac_id`) are removed from `cond_dict` and a `name` field is added to each entry of
         `coil_dict`. Pass copies if the originals are needed unchanged.
 
-        @note If setup fails part way (eg. due to an invalid `reg_id`), the mesh may already
-        be loaded, so calling this method again raises "Mesh already setup". Call
-        \ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker.reset "reset()" before retrying; this
-        also restores the default `settings`, so any modified settings must be set again.
+        @note If setup fails part way (eg. due to an invalid `reg_id`), the object is reset with
+        \ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker.reset "reset()" before the exception is
+        re-raised, so this method can be called again directly once the issue is fixed. Any
+        modified `settings` are retained through this reset.
 
         @param r Mesh point list [np,2]
         @param lc Mesh cell list [nc,3] (base zero)
@@ -429,9 +429,19 @@ class TokaMaker():
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
         @param full_domain If `True` the full domain will be used for the G-S solve (only one region is allowed)
         '''
-        self._setup_mesh(r=r,lc=lc,reg=reg,mesh_file=mesh_file)
-        self._setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-        self._setup_fe(order=order,F0=F0,full_domain=full_domain)
+        # Check before setup so an existing model is not reset below
+        if (self.nregs != -1) or (self.np != -1):
+            raise ValueError('Model already setup, must call "reset" before calling "setup_model" again')
+        try:
+            self._setup_mesh(r=r,lc=lc,reg=reg,mesh_file=mesh_file)
+            self._setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
+            self._setup_fe(order=order,F0=F0,full_domain=full_domain)
+        except Exception:
+            # Return to a clean state (keeping user settings) so setup can be retried
+            settings = self.settings
+            self.reset()
+            self.settings = settings
+            raise
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
         '''! Setup mesh for static and time-dependent G-S calculations
