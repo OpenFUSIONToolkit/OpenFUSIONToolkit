@@ -3,6 +3,7 @@ import sys
 import time
 import multiprocessing
 import json
+import warnings
 import pytest
 import numpy as np
 from scipy.special import jv, jn_zeros
@@ -376,7 +377,7 @@ def test_spheromak_h3(order):
 
 
 #============================================================================
-def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
+def run_coil_case(mesh_resolution,fe_order,dist,mp_q,legacy=False):
     px1,py1,pdx,pdy = 0.4,0.4,0.2,0.2
     cx1,cy1,cdx,cdy = 0.8,0.8,0.1,0.1
     cx2,cy2 = 0.8,0.4
@@ -416,7 +417,21 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     # Run EQ
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order)
+    if legacy:
+        # Deprecated staged setup must still work and warn once per method
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
+            mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
+            mygs.setup(order=fe_order)
+        dep_msgs = [str(wtmp.message) for wtmp in w if issubclass(wtmp.category, DeprecationWarning)]
+        for name in ('setup_mesh','setup_regions','setup'):
+            if sum('`{0}()` is deprecated'.format(name) in msg for msg in dep_msgs) != 1:
+                print('FAILED: expected one DeprecationWarning for `{0}()`, got: {1}'.format(name, dep_msgs))
+                mp_q.put(None)
+                return
+    else:
+        mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order)
     mygs.set_coil_currents({'COIL1': cdx*cdy})
     if dist is not None:
         mygs.set_coil_current_dist('COIL1',dist(mygs.r[:,0],mygs.r[:,1]))
@@ -464,6 +479,15 @@ def validate_coil(results,psi_err_exp,mutual_err_exp):
 # Test runners for vacuum coil cases
 def coil_dist(r,z):
     return r-z
+
+def run_coil_case_legacy(mesh_resolution,fe_order,mp_q):
+    run_coil_case(mesh_resolution,fe_order,None,mp_q,legacy=True)
+
+# Deprecated setup_mesh()/setup_regions()/setup() path must match setup_model()
+@pytest.mark.coverage
+def test_coil_legacy_setup():
+    results = mp_run(run_coil_case_legacy,(0.1,2))
+    assert validate_coil(results,9.62847E-03,1.01747E-03)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3,4))

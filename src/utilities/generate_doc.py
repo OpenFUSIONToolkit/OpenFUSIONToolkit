@@ -171,12 +171,14 @@ if __name__ == '__main__':
         try:
             with open(filename, 'r') as file:
                 ipy_dict = json.load(file)
-                if ipy_dict['cells'][0]['cell_type'] == 'markdown':
-                    is_doc = (ipy_dict['cells'][0]['source'][0].find('{#doc_') >= 0)
         except Exception as e:
-            pass
+            print('s {0} (skipped: unable to read notebook, {1})'.format(filename, e))
+            continue
+        cells = ipy_dict.get('cells', [])
+        if (len(cells) > 0) and (cells[0].get('cell_type') == 'markdown'):
+            is_doc = (''.join(cells[0].get('source', [])).find('{#doc_') >= 0)
         if not is_doc:
-            print('s {0}'.format(filename))
+            print('s {0} (skipped: no {{#doc_}} label in first cell)'.format(filename))
             continue
         print('  {0}'.format(filename))
         base_path = filename.split('.')[0]

@@ -117,12 +117,12 @@ class Marklin():
 ''')
 
     def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,grid_order=1,order=2,minlev=-1):
-        r'''! Setup full force-free equilibrium solver
+        r'''! Setup full force-free equilibrium solver (mesh and finite element space)
 
         A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
 
         @param r Mesh point list [np,3]
-        @param lc Mesh cell list [nc,4] (base one)
+        @param lc Mesh cell list [nc,4] (base zero)
         @param reg Mesh region list [nc] (base one)
         @param mesh_file Filename containing mesh to load (native format only)
         @param grid_order Order of mesh representation (1: linear, 2: quadratic)
@@ -135,16 +135,18 @@ class Marklin():
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None,grid_order=1):
         r'''! Setup mesh for Marklin force-free equilibrium calculations
 
+        @deprecated Use `setup_model()` instead.
+
         A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
 
         @param r Mesh point list [np,3]
-        @param lc Mesh cell list [nc,4] (base one)
+        @param lc Mesh cell list [nc,4] (base zero)
         @param reg Mesh region list [nc] (base one)
         @param mesh_file Filename containing mesh to load (native format only)
         @param grid_order Order of mesh representation (1: linear, 2: quadratic)
         '''
         warnings.warn(
-            "Separate mesh and FE setup is deprecated, use `setup_model()` for all steps instead. This function will be removed in a future version.",
+            "`setup_mesh()` is deprecated, use `setup_model()` to perform mesh and FE setup in one call instead. This function will be removed in a future version.",
             DeprecationWarning,
             stacklevel=2
         )
@@ -156,7 +158,7 @@ class Marklin():
         A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
 
         @param r Mesh point list [np,3]
-        @param lc Mesh cell list [nc,4] (base one)
+        @param lc Mesh cell list [nc,4] (base zero)
         @param reg Mesh region list [nc] (base one)
         @param mesh_file Filename containing mesh to load (native format only)
         @param grid_order Order of mesh representation (1: linear, 2: quadratic)
@@ -196,11 +198,13 @@ class Marklin():
     def setup(self,order=2,minlev=-1):
         '''! Setup finite element space for Marklin force-free equilibrium calculations
 
+        @deprecated Use `setup_model()` instead.
+
         @param order Order of finite element basis functions
         @param minlev Lowest level for multigrid solver (-1: no multigrid)
         '''
         warnings.warn(
-            "Separate mesh and FE setup is deprecated, use `setup_model()` for all steps instead. This function will be removed in a future version.",
+            "`setup()` is deprecated, use `setup_model()` to perform mesh and FE setup in one call instead. This function will be removed in a future version.",
             DeprecationWarning,
             stacklevel=2
         )
