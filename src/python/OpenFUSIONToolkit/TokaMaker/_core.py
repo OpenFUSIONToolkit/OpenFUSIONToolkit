@@ -346,12 +346,16 @@ class TokaMaker():
 
     def reset(self):
         '''! Reset G-S object to enable loading a new mesh and coil configuration'''
-        if not self._tMaker_ptr:
+        if (not self._tMaker_ptr) and (not self._mesh_ptr):
             return # Nothing to do
-        error_string = self._oft_env.get_c_errorbuff()
-        tokamaker_destroy(self._tMaker_ptr,error_string)
-        if error_string.value != b'':
-            raise Exception(error_string.value)
+        # Destroying the TokaMaker object also destroys its mesh. A mesh pointer without a
+        # TokaMaker object means `tokamaker_alloc` failed, which only happens when the mesh
+        # pointer is not associated, so only the Python-side state needs to be cleared then.
+        if self._tMaker_ptr:
+            error_string = self._oft_env.get_c_errorbuff()
+            tokamaker_destroy(self._tMaker_ptr,error_string)
+            if error_string.value != b'':
+                raise Exception(error_string.value)
         if self._tMaker_equil is not None:
             del self._tMaker_equil
         self.nregs = -1
@@ -439,7 +443,15 @@ class TokaMaker():
         except Exception:
             # Return to a clean state (keeping user settings) so setup can be retried
             settings = self.settings
-            self.reset()
+            try:
+                self.reset()
+            except Exception as reset_err:
+                # Do not replace the original error with one from cleanup
+                warn(
+                    "Failed to reset TokaMaker object after setup error, call `reset()` before retrying: {0}".format(reset_err),
+                    RuntimeWarning,
+                    stacklevel=2
+                )
             self.settings = settings
             raise
 
