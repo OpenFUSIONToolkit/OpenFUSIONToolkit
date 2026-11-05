@@ -571,7 +571,7 @@ K=0.d0
   !---Get Jacobian entries
   jfull=ri
   do j=1,2
-    jac(j,:)=jfull(:,j+1)-jfull(:,1)
+    jac(j,:)=jfull(:,j)-jfull(:,3)
   end do
   !---Get 2nd order mapping
   !---Row 1
