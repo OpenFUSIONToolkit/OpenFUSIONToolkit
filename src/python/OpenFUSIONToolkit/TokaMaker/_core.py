@@ -244,6 +244,8 @@ class tokamaker_settings:
         self.opoint_target_weight = -1.0
         ## File containing additional limiter points not included in mesh (default: 'none')
         self.limiter_file = None
+        ## Plot with Z on the horizontal axis (Python plotting only, set automatically when `mirror_mode=True`)
+        self.rotate_plots = False
         # Must be added last
         self._initialized = True
 
@@ -252,6 +254,9 @@ class tokamaker_settings:
         if (name not in self.__dict__) and hasattr(self, '_initialized'):
             raise AttributeError(f"Cannot add new attribute '{name}' to tokamaker_settings")
         super().__setattr__(name, value)
+        # Mirror mode always uses rotated plots
+        if (name == 'mirror_mode') and value:
+            super().__setattr__('rotate_plots', True)
 
     def get_c_struct(self,oft_env):
         r'''! Get C struct representation of settings for passing to TokaMaker Fortran API'''
@@ -1808,6 +1813,20 @@ class TokaMaker():
             raise ValueError("Equilibrium object is `None`")
         return self._tMaker_equil.compute_flux_integral(psi_vals,field_vals)
 
+    def _get_plot_coords(self,pts):
+        r'''! Get horizontal and vertical plotting coordinates for a set of points
+
+        If `settings.rotate_plots` is set, \f$ Z \f$ is placed on the horizontal axis and
+        \f$ R \f$ on the vertical axis.
+
+        @param pts Point locations in (R,Z) [:,2+] (a single point [2] is also accepted)
+        @result Horizontal coordinates [:], Vertical coordinates [:]
+        '''
+        pts = numpy.atleast_2d(pts)
+        if self.settings.rotate_plots:
+            return pts[:,1], pts[:,0]
+        return pts[:,0], pts[:,1]
+
     def plot_machine(self,fig,ax,equilibrium=None,vacuum_color='whitesmoke',cond_color='gray',limiter_color='k',
                      coil_color='gray',coil_colormap=None,coil_symmap=False,coil_scale=1.0,coil_clabel=r'$I_C$ [A]',colorbar=None):
         '''! Plot machine geometry
@@ -1830,12 +1849,7 @@ class TokaMaker():
         if equilibrium is None:
             equilibrium = self._tMaker_equil
         mask_vals = numpy.ones((self.np,))
-        if self.settings.mirror_mode:
-            r_plot = self.r[:,1]
-            z_plot = self.r[:,0]
-        else:
-            r_plot = self.r[:,0]
-            z_plot = self.r[:,1]
+        r_plot, z_plot = self._get_plot_coords(self.r)
         # Shade vacuum region
         if vacuum_color is not None:
             mask = numpy.logical_and(self.reg > 1, self.reg <= self.nvac+1)
@@ -1879,10 +1893,7 @@ class TokaMaker():
         # Show limiter
         if limiter_color and (self.lim_contour is not None):
             for lim_contour in self.lim_contours:
-                if self.settings.mirror_mode:
-                    ax.plot(lim_contour[:,1],lim_contour[:,0],color=limiter_color)
-                else:
-                    ax.plot(lim_contour[:,0],lim_contour[:,1],color=limiter_color)
+                ax.plot(*self._get_plot_coords(lim_contour),color=limiter_color)
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
         return colorbar
@@ -1962,12 +1973,7 @@ class TokaMaker():
             vac_axis = ax[0,0]
             ax_flat = ax.flatten()
         #
-        if self.settings.mirror_mode:
-            r_plot = rz_plot[:,1]
-            z_plot = rz_plot[:,0]
-        else:
-            r_plot = rz_plot[:,0]
-            z_plot = rz_plot[:,1]
+        r_plot, z_plot = self._get_plot_coords(rz_plot)
         # Get region count
         nregs = reg_plot.max()
         reg_mark = numpy.zeros((nregs,))
@@ -2005,7 +2011,7 @@ class TokaMaker():
         # Format plots
         for ax_tmp in ax_flat:
             ax_tmp.set_aspect('equal','box')
-            if self.settings.mirror_mode:
+            if self.settings.rotate_plots:
                 ax_tmp.set_xlabel('Z (m)')
                 ax_tmp.set_ylabel('R (m)')
             else:
@@ -2053,12 +2059,7 @@ class TokaMaker():
         @param opoint_color Color for O-point markers (`None` to disable)
         @param opoint_marker Marker style for O-points
         '''
-        if self.settings.mirror_mode:
-            r_plot = self.r[:,1]
-            z_plot = self.r[:,0]
-        else:
-            r_plot = self.r[:,0]
-            z_plot = self.r[:,1]
+        r_plot, z_plot = self._get_plot_coords(self.r)
         # Get equilibrium object if not set
         if equilibrium is None:
             equilibrium = self._tMaker_equil
@@ -2105,12 +2106,12 @@ class TokaMaker():
             x_points, diverted = equilibrium.get_xpoints()
             if x_points is not None:
                 if diverted:
-                    ax.plot(x_points[-1,0], x_points[-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none')
-                    ax.plot(x_points[:-1,0], x_points[:-1,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
+                    ax.plot(*self._get_plot_coords(x_points[-1:,:]), color=xpoint_color, marker=xpoint_marker, linestyle='none')
+                    ax.plot(*self._get_plot_coords(x_points[:-1,:]), color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
                 else:
-                    ax.plot(x_points[:,0], x_points[:,1], color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
+                    ax.plot(*self._get_plot_coords(x_points), color=xpoint_color, marker=xpoint_marker, linestyle='none', alpha=xpoint_inactive_alpha)
         if (opoint_color is not None) and (equilibrium.o_point[0] > 0.0):
-            ax.plot(equilibrium.o_point[0], equilibrium.o_point[1], color=opoint_color, marker=opoint_marker)
+            ax.plot(*self._get_plot_coords(equilibrium.o_point), color=opoint_color, marker=opoint_marker)
         # Make 1:1 aspect ratio
         ax.set_aspect('equal','box')
 
@@ -2128,10 +2129,10 @@ class TokaMaker():
             equilibrium = self._tMaker_equil
         # Plot isoflux constraints
         if (isoflux_color is not None) and (equilibrium.Isoflux_constraints is not None):
-            ax.plot(equilibrium.Isoflux_constraints[:,0],equilibrium.Isoflux_constraints[:,1],color=isoflux_color,marker=isoflux_marker,linestyle='none')
+            ax.plot(*self._get_plot_coords(equilibrium.Isoflux_constraints),color=isoflux_color,marker=isoflux_marker,linestyle='none')
         # Plot saddle constraints
         if (saddle_color is not None) and (equilibrium.Saddle_constraints is not None):
-            ax.plot(equilibrium.Saddle_constraints[:,0],equilibrium.Saddle_constraints[:,1],color=saddle_color,marker=saddle_marker,linestyle='none')
+            ax.plot(*self._get_plot_coords(equilibrium.Saddle_constraints),color=saddle_color,marker=saddle_marker,linestyle='none')
 
     def plot_eddy(self,fig,ax,psi=None,equilibrium=None,dpsi_dt=None,nlevels=40,colormap='jet',clabel=r'$J_w$ [$A/m^2$]',symmap=False,include_Vcoils=False):
         r'''! Plot contours of \f$\hat{\psi}\f$
@@ -2148,12 +2149,7 @@ class TokaMaker():
         @param include_Vcoils Include V-coil regions when plotting eddy currents? (only applies if `dpsi_dt=None` is specified)
         @result Colorbar object
         '''
-        if self.settings.mirror_mode:
-            r_plot = self.r[:,1]
-            z_plot = self.r[:,0]
-        else:
-            r_plot = self.r[:,0]
-            z_plot = self.r[:,1]
+        r_plot, z_plot = self._get_plot_coords(self.r)
         # Get equilibrium object if not set
         if dpsi_dt is not None:
             if (psi is not None) or (equilibrium is not None):
