@@ -132,6 +132,7 @@ python <repo_root>/src/utilities/build_libs.py \
 | `--oft_build_examples=1` | Build examples (`OFT_BUILD_EXAMPLES`) |
 | `--oft_build_docs=1` | Build Doxygen documentation (`OFT_BUILD_DOCS`) |
 | `--build_arpack=1`, `--build_superlu=1`, `--build_superlu_dist=1`, `--build_umfpack=1`, `--build_petsc=1` | Optional solver libraries |
+| `--build_cvode=1` | Optional minimal CVODE (SUNDIALS) build, static and C-only, used for field-line/flux-surface tracing; without it tracing falls back to the bundled LSODE |
 
 ### Stage 2: configure, build, install
 
@@ -206,6 +207,7 @@ On a 4-core sandbox, configuring takes about 15 s and compiling about 4 minutes.
 
 Notes for this configuration:
 - Optional libraries are only searched for when the corresponding `OFT_<LIB>_ROOT` is set, so set it to `/usr` for system packages. SuperLU (`libsuperlu-dev`) is the baseline and is included above; SuperLU-DIST and UMFPACK are not. Install `libsuperlu-dist-dev` or `libsuitesparse-dev` and add `-DOFT_SUPERLU_DIST_ROOT=/usr` or `-DOFT_UMFPACK_ROOT=/usr` only if a specific test requires them.
+- CVODE is optional: install `libsundials-dev` (SUNDIALS 6.0+) and add `-DOFT_CVODE_ROOT=/usr` to use it for tracing instead of the bundled LSODE; the `base/test_cvode` tests are only built when it is found.
 - Use the default `gcc`/`g++`/`gfortran` (GCC 13) so the compilers match the ones Ubuntu used to build the OpenMPI Fortran modules.
 - Ubuntu ships HDF5 1.10, which lacks the Fortran file-space-strategy API (added in 1.14.3). OFT builds fine but persistent free-space tracking in HDF5 output files is disabled, and a warning is printed when it is requested.
 - OpenMPI refuses to run as root by default. In a root sandbox, prefix each test command with `OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1`, in the same command like `OMP_NUM_THREADS` (agent shells may not keep exported variables between calls), eg. `OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 OMP_NUM_THREADS=2 make test`.

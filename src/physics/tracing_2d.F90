@@ -13,6 +13,7 @@
 !---------------------------------------------------------------------------------
 module tracing_2d
 USE oft_base
+USE oft_cvode, ONLY: oft_cvode_ode, oft_cvode_enabled
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
@@ -85,6 +86,16 @@ contains
   procedure :: delete => trace_delete_lsode
 end type tracer_lsode
 !---------------------------------------------------------------------------------
+!> Tracer implementation using CVODE (Adams method) as the ODE solver
+!---------------------------------------------------------------------------------
+type, extends(tracer) :: tracer_cvode
+  type(oft_cvode_ode) :: ode !< CVODE integrator
+contains
+  procedure :: setup => trace_setup_cvode
+  procedure :: step => trace_advance_cvode
+  procedure :: delete => trace_delete_cvode
+end type tracer_cvode
+!---------------------------------------------------------------------------------
 !> Tracer implementation using a simple forward Euler method as the ODE solver
 !---------------------------------------------------------------------------------
 type, extends(tracer) :: tracer_euler
@@ -108,9 +119,14 @@ class(tracer), pointer :: active_tracer => NULL() !< Current tracer for thread (
 contains
 !------------------------------------------------------------------------------
 !> Allocate tracer for current thread
+!!
+!! Available types:
+!! - `1`: Adams method using CVODE if available in this build, otherwise LSODE
+!! - `2`: Forward Euler
+!! - `3`: Adams method using LSODE
 !------------------------------------------------------------------------------
 subroutine set_tracer(type)
-integer(i4), intent(in) :: type !< Desired type (1-> LSODE)
+integer(i4), intent(in) :: type !< Desired type (see above)
 !$omp parallel
 if(associated(active_tracer))then
   call active_tracer%delete
@@ -118,10 +134,17 @@ if(associated(active_tracer))then
 end if
 select case(type)
   case(1)
-    allocate(tracer_lsode::active_tracer)
+    if(oft_cvode_enabled)then
+      allocate(tracer_cvode::active_tracer)
+    else
+      allocate(tracer_lsode::active_tracer)
+    end if
     active_tracer%status=0
   case(2)
     allocate(tracer_euler::active_tracer)
+    active_tracer%status=0
+  case(3)
+    allocate(tracer_lsode::active_tracer)
     active_tracer%status=0
   case default
     call oft_abort('Invalid tracer type.','set_tracer',__FILE__)
@@ -332,6 +355,78 @@ IF(ASSOCIATED(self%iwork))deallocate(self%iwork)
 IF(ASSOCIATED(self%v))deallocate(self%v)
 IF(ASSOCIATED(self%dv))deallocate(self%dv)
 end subroutine trace_delete_lsode
+!------------------------------------------------------------------------------
+!> Initialize tracer using CVODE
+!------------------------------------------------------------------------------
+subroutine trace_setup_cvode(self,y,cell)
+class(tracer_cvode), intent(inout) :: self !< CVODE tracer object
+real(8), intent(in) :: y(2) !< Initial position
+integer(4), optional, intent(in) :: cell !< Guess for starting cell
+integer(i4) :: ierr
+real(8) :: pttmp(3)
+if(self%neq<=0)call oft_abort('Invalid number of equations.','trace_setup_cvode',__FILE__)
+!---
+IF(.NOT.self%initialized)THEN
+  allocate(self%v(self%neq))
+  allocate(self%dv(self%neq))
+END IF
+self%v=0.d0
+self%dv=0.d0
+!---
+self%t=0.d0
+self%tmax=2.d0*pi
+self%nsteps=0
+!---Find starting point
+self%cell=0
+if(present(cell))self%cell=cell
+IF(self%inv)THEN
+  self%v(1)=y(1)-self%raxis
+  self%v(2)=0.d0
+ELSE
+  self%v(1:2)=y
+END IF
+!---Create integrator (always fresh, equivalent to LSODE `istate=1`)
+call self%ode%delete()
+IF(self%inv)THEN
+  call self%ode%setup(self%neq,tracing_eval_Binv,self%tol,self%tol,self%t,self%v,ierr)
+ELSE
+  call self%ode%setup(self%neq,tracing_eval_B,self%tol,self%tol,self%t,self%v,ierr)
+END IF
+if(ierr/=0)call oft_abort('Failed to create CVODE integrator.','trace_setup_cvode',__FILE__)
+!---
+self%y=y
+self%dy=0.d0
+pttmp=[self%y(1),self%y(2),0.d0]
+call bmesh_findcell(self%mesh,self%cell,pttmp,self%f)
+self%initialized=.TRUE.
+self%status=0
+end subroutine trace_setup_cvode
+!------------------------------------------------------------------------------
+!> Advance the tracer one step using CVODE
+!------------------------------------------------------------------------------
+subroutine trace_advance_cvode(self)
+class(tracer_cvode), intent(inout) :: self !< CVODE tracer object
+integer(i4) :: ierr
+IF(self%inv)THEN
+  ! Do not step past one full poloidal transit
+  call self%ode%step(self%v,self%t,self%tmax,ierr,tstop=self%tmax)
+ELSE
+  call self%ode%step(self%v,self%t,self%tmax,ierr)
+END IF
+self%nsteps=self%nsteps+1
+IF(ierr<0)self%status=-4
+end subroutine trace_advance_cvode
+!------------------------------------------------------------------------------
+!> Destroy CVODE tracer and deallocate internal storage
+!------------------------------------------------------------------------------
+subroutine trace_delete_cvode(self)
+class(tracer_cvode), intent(inout) :: self !< CVODE tracer object
+self%nsteps=0
+self%initialized=.FALSE.
+call self%ode%delete()
+IF(ASSOCIATED(self%v))deallocate(self%v)
+IF(ASSOCIATED(self%dv))deallocate(self%dv)
+end subroutine trace_delete_cvode
 !------------------------------------------------------------------------------
 !> Initialize simple forward Euler tracer
 !------------------------------------------------------------------------------

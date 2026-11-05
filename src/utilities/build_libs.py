@@ -498,6 +498,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         cmake_lines.append("-DBLA_VENDOR:STRING={0}".format(mydict["BLAS_VENDOR"]))
     if "ARPACK_ROOT" in mydict:
         cmake_lines.append("-DOFT_ARPACK_ROOT:PATH={0}".format(mydict["ARPACK_ROOT"]))
+    if "CVODE_ROOT" in mydict:
+        cmake_lines.append("-DOFT_CVODE_ROOT:PATH={0}".format(mydict["CVODE_ROOT"]))
     if "LIBXML2_ROOT" in mydict:
         cmake_lines.append("-DLIBXML2_ROOT:PATH={0}".format(mydict["LIBXML2_ROOT"]))
     if "PETSC_ROOT" in mydict:
@@ -1508,6 +1510,63 @@ class ARPACK(package):
         self.setup_build_script(build_lines, tmp_dict)
 
 
+class CVODE(package):
+    """Minimal SUNDIALS build providing only serial CVODE (static libraries, C only)"""
+    def __init__(self):
+        self.name = "CVODE"
+        self.url = "https://github.com/llnl/sundials/releases/download/v7.9.0/cvode-7.9.0.tar.gz"
+        self.build_dir = "cvode-7.9.0"
+
+    def setup(self, config_dict):
+        self.config_dict = config_dict.copy()
+        self.setup_root_struct()
+        # Installation check files
+        self.install_chk_files = [
+            os.path.join(self.config_dict['CVODE_LIB'], 'libsundials_cvode.a'),
+            os.path.join(self.config_dict['CVODE_LIB'], 'libsundials_nvecserial.a'),
+            os.path.join(self.config_dict['CVODE_LIB'], 'libsundials_sunnonlinsolfixedpoint.a'),
+            os.path.join(self.config_dict['CVODE_LIB'], 'libsundials_core.a')
+        ]
+        #
+        return self.config_dict
+
+    def setup_build(self):
+        cmake_options = [
+            "-DCMAKE_INSTALL_PREFIX:PATH={CVODE_ROOT}",
+            "-DCMAKE_INSTALL_LIBDIR=lib",
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-DCMAKE_POSITION_INDEPENDENT_CODE:BOOL=ON",
+            "-DBUILD_SHARED_LIBS:BOOL=OFF",
+            "-DBUILD_STATIC_LIBS:BOOL=ON",
+            # Only CVODE is needed (core, serial vector, and nonlinear solvers are always built)
+            "-DSUNDIALS_ENABLE_CVODE:BOOL=ON",
+            "-DSUNDIALS_ENABLE_CVODES:BOOL=OFF",
+            "-DSUNDIALS_ENABLE_ARKODE:BOOL=OFF",
+            "-DSUNDIALS_ENABLE_IDA:BOOL=OFF",
+            "-DSUNDIALS_ENABLE_IDAS:BOOL=OFF",
+            "-DSUNDIALS_ENABLE_KINSOL:BOOL=OFF",
+            # No examples, language interfaces, or optional TPLs
+            "-DSUNDIALS_ENABLE_C_EXAMPLES:BOOL=OFF",
+            "-DSUNDIALS_ENABLE_EXAMPLES_INSTALL:BOOL=OFF",
+            "-DSUNDIALS_ENABLE_FORTRAN:BOOL=OFF",
+            "-DSUNDIALS_ENABLE_MPI:BOOL=OFF",
+            "-DSUNDIALS_ENABLE_OPENMP:BOOL=OFF",
+            "-DSUNDIALS_ENABLE_LAPACK:BOOL=OFF"
+        ]
+        if 'MACOS_SDK_PATH' in self.config_dict:
+            cmake_options.append('-DCMAKE_OSX_SYSROOT={0}'.format(self.config_dict['MACOS_SDK_PATH']))
+        build_lines = [
+            "rm -rf build",
+            "mkdir build",
+            "cd build",
+            "export CC={CC}",
+            "{CMAKE} " + " ".join(cmake_options) + " ..",
+            "make -j{MAKE_THREADS}",
+            "make install"
+        ]
+        self.setup_build_script(build_lines, self.config_dict)
+
+
 class SUPERLU(package):
     def __init__(self, comp_wrapper=False, shared_libs=False):
         self.name = "SUPERLU"
@@ -2033,6 +2092,9 @@ group.add_argument("--libxml2_shared", action="store_true", default=False, help=
 group = parser.add_argument_group("ARPACK", "ARPACK package options")
 group.add_argument("--build_arpack", default=0, type=int, choices=(0,1), help="Build ARPACK library? (default: 0)")
 #
+group = parser.add_argument_group("CVODE", "CVODE (SUNDIALS) package options")
+group.add_argument("--build_cvode", default=0, type=int, choices=(0,1), help="Build CVODE library (minimal SUNDIALS)? (default: 0)")
+#
 group = parser.add_argument_group("SuperLU", "SuperLU package options")
 group.add_argument("--build_superlu", default=0, type=int, choices=(0,1), help="Build SuperLU library? (default: 0)")
 group.add_argument("--superlu_wrapper", action="store_true", default=False, help="SuperLU included in compilers")
@@ -2156,6 +2218,9 @@ packages.append(LIBXML2(not options.libxml2_shared))
 # Are we building ARPACK?
 if options.build_arpack == 1:
     packages.append(ARPACK(parallel=use_mpi, link_omp=options.oblas_threads))
+# Are we building CVODE?
+if options.build_cvode == 1:
+    packages.append(CVODE())
 # Are we building PETSc?
 if (options.build_petsc == 1) or options.petsc_wrapper:
     packages.append(PETSC(debug=options.petsc_debug, with_openmp=options.petsc_openmp, with_superlu=options.petsc_superlu,

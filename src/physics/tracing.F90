@@ -7,8 +7,8 @@
 !
 !> Tracing implementation for the Open FUSION Toolkit
 !!
-!! The default tracing implementation uses LSODE as the ode solver for advancing
-!! field lines.
+!! The default tracing implementation uses CVODE (Adams method) as the ode solver for
+!! advancing field lines when available, otherwise LSODE is used.
 !!
 !! @authors Chris Hansen
 !! @date Feburary 2012
@@ -16,6 +16,7 @@
 !---------------------------------------------------------------------------------
 module tracing
 use oft_base
+use oft_cvode, only: oft_cvode_ode, oft_cvode_enabled
 use oft_mesh_type, only: mesh_findcell
 use multigrid, only: multigrid_mesh
 USE oft_io, only: hdf5_write
@@ -132,6 +133,39 @@ contains
   !> Clean-up internal storage
   procedure :: delete => tracer_lsode_delete
 end type oft_tracer_lsode
+!---------------------------------------------------------------------------------
+!> Tracer implementation using CVODE (Adams method) as the ODE solver package
+!!
+!! Unlike LSODE the integrator state is not transferred between domains. Instead
+!! the solution, time and last step size are sent and the integrator is restarted
+!! on the receiving processor.
+!---------------------------------------------------------------------------------
+type, extends(oft_tracer) :: oft_tracer_cvode
+  integer(i4) :: nisend = 2 !< Number of values in isend
+  integer(i4) :: nrsend = 0 !< Number of values in rsend
+  integer(i4), pointer, dimension(:) :: isend => NULL() !< Integer MPI transfer array
+  logical :: restart = .TRUE. !< Integrator must be restarted before the next step
+  real(r8) :: t = 0.d0 !< Current time in ODE advance
+  real(r8) :: tout = 1.d0 !< Time scale for ODE advance (target time is `t+tout`)
+  real(r8) :: hrestart = 0.d0 !< Initial step size to use when restarting (<=0 for default)
+  real(r8), pointer, dimension(:) :: rsend => NULL() !< Real MPI transfer array
+  type(oft_cvode_ode) :: ode !< CVODE integrator
+contains
+  !> Initialize tracer at a given point
+  procedure :: setup => tracer_cvode_setup
+  !> Create a copy of this tracer
+  procedure :: copy => tracer_cvode_copy
+  !> Save tracer information for transfer
+  procedure :: save => tracer_cvode_save
+  !> Transfer tracer information to new domain
+  procedure :: send => tracer_cvode_send
+  !> Receive tracer information from other domain
+  procedure :: recv => tracer_cvode_recv
+  !> Advance tracer one step
+  procedure :: step => tracer_cvode_step
+  !> Clean-up internal storage
+  procedure :: delete => tracer_cvode_delete
+end type oft_tracer_cvode
 !---Abstract procedure prototypes
 abstract interface
   !---------------------------------------------------------------------------------
@@ -246,12 +280,17 @@ end subroutine set_timeout
 !> Create tracer object
 !!
 !! The following tracer types are currently available:
-!! - (1) \ref tracing::oft_tracer_lsode "LSODE tracer", using LSODE`s non-stiff
-!! Adam's method
+!! - (1) Non-stiff Adam's method using \ref tracing::oft_tracer_cvode "CVODE" if available,
+!! otherwise \ref tracing::oft_tracer_lsode "LSODE"
 !! - (2) \ref tracing::oft_tracer_lsode "LSODE tracer", using LSODE`s stiff
 !! BDF method
 !! - (3) \ref tracing::oft_tracer_euler "EULER tracer", using an adaptive
 !! step size
+!! - (4) \ref tracing::oft_tracer_lsode "LSODE tracer", using LSODE`s non-stiff
+!! Adam's method
+!!
+!! Type (1) uses \ref tracing::oft_tracer_cvode "CVODE" with Adam's method if OFT
+!! was built with CVODE, otherwise it is equivalent to type (4).
 !------------------------------------------------------------------------------
 subroutine create_tracer(tracer,type)
 class(oft_tracer), pointer, intent(out) :: tracer !< Tracer object
@@ -259,7 +298,11 @@ integer(i4), intent(in) :: type !< Tracer type key
 DEBUG_STACK_PUSH
 SELECT CASE(type)
   CASE(1)
-    ALLOCATE(oft_tracer_lsode::tracer)
+    IF(oft_cvode_enabled)THEN
+      ALLOCATE(oft_tracer_cvode::tracer)
+    ELSE
+      ALLOCATE(oft_tracer_lsode::tracer)
+    END IF
   CASE(2)
     ALLOCATE(oft_tracer_lsode::tracer)
     SELECT TYPE(this=>tracer)
@@ -268,6 +311,8 @@ SELECT CASE(type)
     END SELECT
   CASE(3)
     ALLOCATE(oft_tracer_euler::tracer)
+  CASE(4)
+    ALLOCATE(oft_tracer_lsode::tracer)
   CASE DEFAULT
     CALL oft_abort('Invalid tracer type.','set_tracer',__FILE__)
 END SELECT
@@ -1389,4 +1434,234 @@ self%comm_load=.FALSE.
 NULLIFY(self%ydot)
 DEBUG_STACK_POP
 end subroutine tracer_lsode_delete
+!---------------------------------------------------------------------------------
+!> Cast a tracer object to a oft_tracer_cvode
+!!
+!! The source tracer must be @ref oft_tracer_cvode or a child class, otherwise
+!! pointer will be returned as `null` and `success == .FALSE.`
+!---------------------------------------------------------------------------------
+FUNCTION tracer_cvode_cast(self,source) result(success)
+class(oft_tracer_cvode), pointer, intent(out) :: self !< Reference to source object with desired class
+class(oft_tracer), target, intent(in) :: source !< Source tracer to cast
+logical :: success !< Cast success flag
+DEBUG_STACK_PUSH
+select type(source)
+  class is(oft_tracer_cvode)
+    self=>source
+    success=.TRUE.
+  class default
+    success=.FALSE.
+end select
+DEBUG_STACK_POP
+end FUNCTION tracer_cvode_cast
+!------------------------------------------------------------------------------
+!> Setup a CVODE tracer with a new starting point
+!!
+!! The integrator is (re)started on a new trace and after receiving a tracer from
+!! another domain, but is otherwise continued from the previous step.
+!------------------------------------------------------------------------------
+subroutine tracer_cvode_setup(self,y,cell,init)
+class(oft_tracer_cvode), intent(inout) :: self !< Tracer object
+real(r8), intent(in) :: y(:) !< New start point [3]
+integer(i4), optional, intent(in) :: cell !< Guess cell for use in \ref oft_mesh_type::mesh_findcell
+!! "mesh_findcell" (optional)
+logical, optional, intent(in) :: init !< Flag indicating tracer is starting a new trace and all counts
+!! should be set to zero (optional)
+integer(i4) :: ierr
+DEBUG_STACK_PUSH
+IF(.NOT.ASSOCIATED(self%isend))THEN
+  ALLOCATE(self%y(self%neq),self%dy(self%neq),self%dyp(self%neq))
+  self%dy=0.d0
+  self%dyp=0.d0
+  !---
+  self%nisend=2
+  self%nrsend=2*self%neq+2
+  ALLOCATE(self%isend(self%nisend),self%rsend(self%nrsend))
+END IF
+IF(PRESENT(init))THEN
+  IF(init)THEN
+    self%restart=.TRUE.
+    self%hrestart=0.d0
+    !---
+    self%ntrans=0
+    self%nsteps=0
+    self%status=TRACER_INIT
+    self%estatus=0
+  END IF
+END IF
+!---Find starting point
+self%cell=0
+if(present(cell))self%cell=cell
+self%y=y
+call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
+self%initialized=.TRUE.
+!---Start integrator if necessary
+IF(self%restart)THEN
+  IF(self%ode%active())THEN
+    CALL self%ode%reinit(self%t,self%y,ierr,h0=self%hrestart)
+  ELSE
+    CALL self%ode%setup(self%neq,tracer_lsode_eval_B,self%tol,self%tol,self%t,self%y,ierr)
+  END IF
+  IF(ierr/=0)CALL oft_abort('Failed to start CVODE integrator.','tracer_cvode_setup',__FILE__)
+  self%restart=.FALSE.
+END IF
+DEBUG_STACK_POP
+end subroutine tracer_cvode_setup
+!------------------------------------------------------------------------------
+!> Create a bare copy of the CVODE tracer object
+!------------------------------------------------------------------------------
+subroutine tracer_cvode_copy(self,new)
+class(oft_tracer_cvode), intent(in) :: self !< Tracer object
+class(oft_tracer), pointer, intent(out) :: new !< Copy of object with same tolerances and referenced interpolator
+class(oft_tracer_cvode), pointer :: newtmp
+DEBUG_STACK_PUSH
+allocate(oft_tracer_cvode::new)
+IF(.NOT.tracer_cvode_cast(newtmp,new))CALL oft_abort('Failure to allocate CVODE tracer.', &
+  'tracer_cvode_copy',__FILE__)
+new%B=>self%B
+new%maxsteps=self%maxsteps
+new%tol=self%tol
+new%maxtrans=self%maxtrans
+new%neq=self%neq
+IF(ASSOCIATED(self%ydot))new%ydot=>self%ydot
+newtmp%tout=self%tout
+DEBUG_STACK_POP
+end subroutine tracer_cvode_copy
+!------------------------------------------------------------------------------
+!> Save tracer information for transfer (no action needed, see \ref tracer_cvode_send)
+!------------------------------------------------------------------------------
+subroutine tracer_cvode_save(self)
+class(oft_tracer_cvode), intent(inout) :: self !< Tracer object
+end subroutine tracer_cvode_save
+!------------------------------------------------------------------------------
+!> Send tracer information to a new domain
+!!
+!! This subroutine transfers the number of steps, tracer position, time and last
+!! step size. Data is packed into a single array for each real and integer
+!! data types and non-blocking MPI sends are created to transfer each array
+!------------------------------------------------------------------------------
+function tracer_cvode_send(self,proc) result(sid)
+class(oft_tracer_cvode), intent(inout) :: self !< Tracer object
+integer(i4), intent(in) :: proc !< Processor ID to send tracer information to
+#ifdef OFT_MPI_F08
+type(mpi_request) :: sid(2)
+#else
+integer(i4) :: sid(2) !< MPI request IDs for transfer of real and integer data (2)
+#endif
+#ifdef HAVE_MPI
+integer(i4) :: ierr
+DEBUG_STACK_PUSH
+!---Pack info
+self%isend(1)=self%nsteps
+self%isend(2)=self%estatus
+self%rsend(1:self%neq)=self%y
+self%rsend(self%neq+1:2*self%neq)=self%dy
+self%rsend(2*self%neq+1)=self%t
+self%rsend(2*self%neq+2)=self%ode%h
+!---Set send flags
+sid=MPI_REQUEST_NULL
+!---Send to all other procs
+CALL MPI_ISEND(self%rsend,self%nrsend,OFT_MPI_R8,proc,self%tids(1),oft_env%COMM,sid(1),ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','tracer_cvode_send',__FILE__)
+CALL MPI_ISEND(self%isend,self%nisend,OFT_MPI_I4,proc,self%tids(2),oft_env%COMM,sid(2),ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_ISEND','tracer_cvode_send',__FILE__)
+self%status=TRACER_SEND_ACTIVE
+DEBUG_STACK_POP
+#else
+sid=MPI_REQUEST_NULL
+CALL oft_abort("Send requested without MPI","tracer_cvode_send",__FILE__)
+#endif
+end function tracer_cvode_send
+!------------------------------------------------------------------------------
+!> Recieve tracer information from a different domain
+!!
+!! This subroutine sets up non-blocking MPI recieve requests and unpacks the
+!! resulting data sent by \ref tracing::tracer_cvode_send "tracer_cvode_send"
+!------------------------------------------------------------------------------
+function tracer_cvode_recv(self,proc) result(rid)
+class(oft_tracer_cvode), intent(inout) :: self !< Tracer object
+integer(i4), intent(in) :: proc !< Processor ID to receive tracer information from
+#ifdef OFT_MPI_F08
+type(mpi_request) :: rid(2)
+#else
+integer(i4) :: rid(2) !< MPI request IDs for transfer of real and integer data (2)
+#endif
+#ifdef HAVE_MPI
+integer(i4) :: ierr
+logical :: testr,testi
+DEBUG_STACK_PUSH
+IF(oft_mpi_check_reqs(2,self%rids))THEN
+  !---Setup recv
+  CALL MPI_IRECV(self%rsend,self%nrsend,OFT_MPI_R8,proc,self%tids(1),oft_env%COMM,self%rids(1),ierr)
+  IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','tracer_cvode_recv',__FILE__)
+  CALL MPI_IRECV(self%isend,self%nisend,OFT_MPI_I4,proc,self%tids(2),oft_env%COMM,self%rids(2),ierr)
+  IF(ierr/=0)CALL oft_abort('Error in MPI_IRECV','tracer_cvode_recv',__FILE__)
+  self%status=TRACER_RECV_ACTIVE
+  rid=self%rids
+ELSE
+  !---Test for completion of recv
+  call MPI_TEST(self%rids(1),testr,MPI_STATUS_IGNORE,ierr)
+  call MPI_TEST(self%rids(2),testi,MPI_STATUS_IGNORE,ierr)
+  rid=self%rids
+  !---Set flag and restore if complete
+  IF(testr.AND.testi)THEN
+    self%nsteps=self%isend(1)
+    self%estatus=self%isend(2)
+    self%y=self%rsend(1:self%neq)
+    self%dy=self%rsend(self%neq+1:2*self%neq)
+    self%t=self%rsend(2*self%neq+1)
+    self%hrestart=self%rsend(2*self%neq+2)
+    self%restart=.TRUE.
+    rid=MPI_REQUEST_NULL
+    self%rids=MPI_REQUEST_NULL
+  END IF
+END IF
+DEBUG_STACK_POP
+#else
+rid=MPI_REQUEST_NULL
+CALL oft_abort("Receive requested without MPI","tracer_cvode_recv",__FILE__)
+#endif
+end function tracer_cvode_recv
+!------------------------------------------------------------------------------
+!> Advancing tracer by one step using CVODE
+!------------------------------------------------------------------------------
+subroutine tracer_cvode_step(self)
+class(oft_tracer_cvode), intent(inout) :: self !< Tracer object
+integer(i4) :: ierr
+real(r8) :: fmin,fmax
+DEBUG_STACK_PUSH
+self%dyp=self%dy
+call self%ode%step(self%y,self%t,self%t+self%tout,ierr)
+self%nsteps=self%nsteps+1
+IF(ierr<0.OR.ANY(self%y(1:3)>1.d20))THEN
+  self%cell=0
+  self%estatus=TRACER_ERROR_FAIL
+END IF
+IF(self%cell/=0)THEN ! Check for exit mesh
+  call mesh_findcell(self%ml_mesh%mesh,self%cell,self%y(1:3),self%f)
+  fmin=minval(self%f)
+  fmax=maxval(self%f)
+  IF(( fmax>=1.d0+offmesh_tol ).OR.( fmin<=-offmesh_tol ))self%cell=0
+END IF
+DEBUG_STACK_POP
+end subroutine tracer_cvode_step
+!------------------------------------------------------------------------------
+!> Delete internal storage and reset counters
+!------------------------------------------------------------------------------
+subroutine tracer_cvode_delete(self)
+class(oft_tracer_cvode), intent(inout) :: self !< Tracer object
+DEBUG_STACK_PUSH
+CALL self%ode%delete()
+IF(ASSOCIATED(self%isend))THEN
+  DEALLOCATE(self%y,self%dy,self%dyp)
+  DEALLOCATE(self%isend,self%rsend)
+END IF
+self%nsteps=0
+self%ntrans=0
+self%initialized=.FALSE.
+self%restart=.TRUE.
+self%hrestart=0.d0
+NULLIFY(self%ydot)
+DEBUG_STACK_POP
+end subroutine tracer_cvode_delete
 end module tracing
