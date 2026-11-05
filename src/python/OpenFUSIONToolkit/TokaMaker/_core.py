@@ -401,8 +401,80 @@ class TokaMaker():
   | | (_) |   < (_| | |  | | (_| |   <  __/ |
   |_|\___/|_|\_\__,_|_|  |_|\__,_|_|\_\___|_|
 ''')
+    def setup_model(self,r=None,lc=None,reg=None,mesh_file=None,cond_dict=None,coil_dict=None,order=2,F0=0.0,full_domain=False):
+        r'''! Setup full G-S solver (mesh, regions, and finite element space)
+
+        A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
+        When a region is specified the following ordering should apply:
+          - 1: Plasma region
+          - 2: Vacuum/air regions
+          - 3+: Conducting regions and coils
+
+        @note `cond_dict` and `coil_dict` are modified in place: vacuum entries (those with
+        a `vac_id`) are removed from `cond_dict` and a `name` field is added to each entry of
+        `coil_dict`. Pass copies if the originals are needed unchanged.
+
+        @note If setup fails part way (eg. due to an invalid `reg_id`), the object is reset with
+        \ref OpenFUSIONToolkit.TokaMaker._core.TokaMaker.reset "reset()" before the exception is
+        re-raised, so this method can be called again directly once the issue is fixed. Any
+        modified `settings` are retained through this reset.
+
+        @param r Mesh point list [np,2]
+        @param lc Mesh cell list [nc,3] (base zero)
+        @param reg Mesh region list [nc] (base one)
+        @param mesh_file Filename containing mesh to load (native format only)
+        @param cond_dict Dictionary specifying conducting regions
+        @param coil_dict Dictionary specifying coil regions
+        @param order Order of FE representation to use
+        @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
+        @param full_domain If `True` the full domain will be used for the G-S solve (only one region is allowed)
+        '''
+        # Check before setup so an existing model is not reset below
+        if (self.nregs != -1) or (self.np != -1):
+            raise ValueError('Model already setup, must call "reset" before calling "setup_model" again')
+        try:
+            self._setup_mesh(r=r,lc=lc,reg=reg,mesh_file=mesh_file)
+            self._setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
+            self._setup_fe(order=order,F0=F0,full_domain=full_domain)
+        except Exception:
+            # Return to a clean state (keeping user settings) so setup can be retried
+            settings = self.settings
+            try:
+                self.reset()
+            except Exception as reset_err:
+                # Do not replace the original error with one from cleanup
+                warn(
+                    "Failed to reset TokaMaker object after setup error, call `reset()` before retrying: {0}".format(reset_err),
+                    RuntimeWarning,
+                    stacklevel=2
+                )
+            self.settings = settings
+            raise
 
     def setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
+        '''! Setup mesh for static and time-dependent G-S calculations
+
+        @deprecated Use `setup_model()` instead.
+
+        A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
+        When a region is specified the following ordering should apply:
+          - 1: Plasma region
+          - 2: Vacuum/air regions
+          - 3+: Conducting regions and coils
+
+        @param r Mesh point list [np,2]
+        @param lc Mesh cell list [nc,3] (base zero)
+        @param reg Mesh region list [nc] (base one)
+        @param mesh_file Filename containing mesh to load (native format only)
+        '''
+        warn(
+            "`setup_mesh()` is deprecated, use `setup_model()` to perform mesh, region, and FE setup in one call instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        self._setup_mesh(r=r,lc=lc,reg=reg,mesh_file=mesh_file)
+
+    def _setup_mesh(self,r=None,lc=None,reg=None,mesh_file=None):
         '''! Setup mesh for static and time-dependent G-S calculations
 
         A mesh should be specified by passing "r", "lc", and optionally "reg" or using a "mesh_file".
@@ -412,7 +484,7 @@ class TokaMaker():
           - 3+: Conducting regions and coils
 
         @param r Mesh point list [np,2]
-        @param lc Mesh cell list [nc,3] (base one)
+        @param lc Mesh cell list [nc,3] (base zero)
         @param reg Mesh region list [nc] (base one)
         @param mesh_file Filename containing mesh to load (native format only)
         '''
@@ -451,11 +523,33 @@ class TokaMaker():
         self.update_settings()
         self.nregs = nregs.value
 
-    def setup_regions(self,cond_dict={},coil_dict={}):
+    def setup_regions(self,cond_dict=None,coil_dict=None):
         '''! Define mesh regions (coils and conductors)
 
+        @deprecated Use `setup_model()` instead.
+
         @param cond_dict Dictionary specifying conducting regions
+        @param coil_dict Dictionary specifying coil regions
         '''
+        warn(
+            "`setup_regions()` is deprecated, use `setup_model()` to perform mesh, region, and FE setup in one call instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        self._setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
+
+    def _setup_regions(self,cond_dict=None,coil_dict=None):
+        r'''! Define mesh regions (coils and conductors)
+
+        @note `cond_dict` and `coil_dict` are modified in place (see \ref setup_model "setup_model()")
+
+        @param cond_dict Dictionary specifying conducting regions
+        @param coil_dict Dictionary specifying coil regions
+        '''
+        if cond_dict is None:
+            cond_dict = {}
+        if coil_dict is None:
+            coil_dict = {}
         xpoint_mask = numpy.zeros((self.nregs,),dtype=numpy.int32)
         xpoint_mask[0] = 1
         eta_vals = -2.0*numpy.ones((self.nregs,),dtype=numpy.float64)
@@ -517,8 +611,25 @@ class TokaMaker():
     def setup(self,order=2,F0=0.0,full_domain=False):
         r'''! Setup G-S solver
 
+        @deprecated Use `setup_model()` instead.
+
         @param order Order of FE representation to use
         @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
+        @param full_domain If `True` the full domain will be used for the G-S solve (only one region is allowed)
+        '''
+        warn(
+            "`setup()` is deprecated, use `setup_model()` to perform mesh, region, and FE setup in one call instead. This function will be removed in a future version.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        self._setup_fe(order=order,F0=F0,full_domain=full_domain)
+
+    def _setup_fe(self,order=2,F0=0.0,full_domain=False):
+        r'''! Setup G-S solver
+
+        @param order Order of FE representation to use
+        @param F0 Vacuum \f$F(\psi)\f$ value (B0*R0)
+        @param full_domain If `True` the full domain will be used for the G-S solve (only one region is allowed)
         '''
         if self.np != -1:
             raise ValueError('G-S instance already setup')
@@ -1900,7 +2011,7 @@ class TokaMaker():
         '''
         if not plot_tessellated:
             if not self._mesh_ptr:
-                raise ValueError('`plot_mesh()` can only be called after `setup_mesh()`')
+                raise ValueError('`plot_mesh()` can only be called after `setup_model()`')
             # Get "raw" mesh
             ndim_c = c_int()
             np_c = c_int()
@@ -1920,7 +2031,7 @@ class TokaMaker():
             reg_plot = numpy.ctypeslib.as_array(reg_loc,shape=(nc_c.value,))
         else:
             if self.r is None:
-                raise ValueError('`plot_mesh(plot_tessellated=True)` can only be called after `setup()`')
+                raise ValueError('`plot_mesh(plot_tessellated=True)` can only be called after `setup_model()`')
             rz_plot = self.r
             lc_plot = self.lc
             reg_plot = self.reg
