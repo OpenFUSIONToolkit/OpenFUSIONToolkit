@@ -26,7 +26,7 @@ _oft_env_singleton = None
 
 
 def mp_run(target,args,timeout=180):
-    if os.environ.get('OFT_DEBUG_TEST', '0') not in ('', '0'):
+    if os.environ.get('OFT_DEBUG_TEST', 0):
         timeout *= 4
     os.chdir(test_dir)
     mp_q = multiprocessing.Queue()
