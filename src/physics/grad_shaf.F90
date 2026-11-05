@@ -312,7 +312,8 @@ TYPE :: gs_equil
   REAL(r8) :: o_point(2) = [-1.d0,1.d99] !< Location of magnetic axis
   REAL(r8) :: lim_point(2) = [-1.d0,1.d99] !< Location of limiting point or active X-point
   REAL(r8) :: x_points(2,max_xpoints) = 0.d0 !< Location of tracked X-points
-  REAL(r8) :: x_vecs(2,max_xpoints) = 0.d0 !< Normals of the X-point cuts, toward the core
+  REAL(r8) :: x_vecs(2,max_xpoints) = 0.d0 !< Vectors point from X-points to O-point
+  REAL(r8) :: x_cut(2) = 0.d0 !< Normal of the second cut at the active X-point, toward the core (zero if none)
   REAL(r8) :: vcontrol_val = 0.d0 !< Amplitude of virtual VSC "current"
   REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL() !< Targets for coil regularization terms
   REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL() !< Coil currents
@@ -1156,6 +1157,7 @@ self%o_point=source%o_point
 self%lim_point=source%lim_point
 self%x_points=source%x_points
 self%x_vecs=source%x_vecs
+self%x_cut=source%x_cut
 self%vcontrol_val=source%vcontrol_val
 !---Things that need equilibrium fully setup to copy
 IF(ASSOCIATED(source%P_ani))CALL source%P_ani%copy(self%P_ani,self)
@@ -3853,6 +3855,7 @@ self%plasma_bounds(1)=-1.d99
 
 !---Look for X-points
 self%nx_points=0
+self%x_cut=0.d0
 self%diverted=.FALSE.
 x_psi_sort=1.d99
 zmin=device%spatial_bounds(1,2)
@@ -3918,9 +3921,9 @@ IF(self%nx_points>0)THEN
     self%plasma_bounds(1)=x_psi_sort(i)
   END DO
   self%nx_points=j
-  !---Cut at the active X-point across its own core axis, not across O - X: a skewed X-point (e.g. with
-  !---a second X-point nearby) otherwise lets part of its private-flux region past the cut
-  IF(ANY(x_masked).AND.(.NOT.device%dipole_mode))CALL core_axis(self%x_points(:,j),self%x_vecs(:,j))
+  !---Also cut at the active X-point across its own core axis: at a skewed X-point (e.g. with a second
+  !---X-point nearby) the O - X cut alone lets part of its private-flux region past it
+  IF(ANY(x_masked).AND.(.NOT.device%dipole_mode))CALL core_axis(self%x_points(:,j),self%x_vecs(:,j),self%x_cut)
   DEALLOCATE(x_masked)
 END IF
 
@@ -4011,9 +4014,10 @@ device%timing(4)=device%timing(4)+(omp_get_wtime()-t1)
 CONTAINS
 !> Unit vector along the Hessian eigenvector of \f$ \psi \f$ at the X-point `pt` along which \f$ \psi \f$
 !! rises toward the axis value (into the core and the private-flux region), on the side of `vec`
-SUBROUTINE core_axis(pt,vec)
+SUBROUTINE core_axis(pt,vec,cut)
 REAL(8), INTENT(in) :: pt(2) !< X-point
-REAL(8), INTENT(inout) :: vec(2) !< In: a vector toward the O-point; out: the core axis
+REAL(8), INTENT(in) :: vec(2) !< A vector toward the O-point
+REAL(8), INTENT(inout) :: cut(2) !< The core axis (unchanged off the mesh)
 TYPE(oft_lag_bg2interp) :: psi_g2interp
 INTEGER(4) :: icell
 REAL(8) :: fl(3),gop(3,3),vol,d2(6),lam,ax(2)
@@ -4033,7 +4037,7 @@ ELSE
   ax=[lam-d2(4),d2(2)]
 END IF
 IF(SUM(ax**2)==0.d0)RETURN
-vec=SIGN(1.d0,DOT_PRODUCT(ax,vec))*ax/SQRT(SUM(ax**2))
+cut=SIGN(1.d0,DOT_PRODUCT(ax,vec))*ax/SQRT(SUM(ax**2))
 END SUBROUTINE core_axis
 end subroutine gs_update_bounds
 !------------------------------------------------------------------------------
@@ -4284,6 +4288,8 @@ in_bounds=in_bounds.AND.(pt(2)>=self%device%spatial_bounds(1,2).AND.pt(2)<=self%
 DO i=1,self%nx_points
   in_bounds=in_bounds.AND.(DOT_PRODUCT(pt-self%x_points(:,i),self%x_vecs(:,i))>0.d0)
 END DO
+IF((self%nx_points>0).AND.ANY(self%x_cut/=0.d0))in_bounds=in_bounds.AND. &
+  (DOT_PRODUCT(pt-self%x_points(:,self%nx_points),self%x_cut)>0.d0)
 end function gs_test_bounds
 !------------------------------------------------------------------------------
 !> Compute magnetic fields from Grad-Shafranov equilibrium
