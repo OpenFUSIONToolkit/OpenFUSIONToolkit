@@ -39,7 +39,6 @@ component_management:
         - "src/physics/grad_shaf*.F90"
         - "src/physics/gs_eq.F90"
         - "src/physics/axi_green.F90"
-        - "src/physics/tracing_2d.F90"
         - "src/python/wrappers/tokamaker_f.F90"
         - "src/python/OpenFUSIONToolkit/TokaMaker/**"
     - component_id: thincurr
@@ -60,7 +59,6 @@ component_management:
       name: Marklin
       paths:
         - "src/physics/taylor.F90"
-        - "src/physics/tracing.F90"
         - "src/python/wrappers/marklin_f.F90"
         - "src/python/OpenFUSIONToolkit/Marklin/**"
     - component_id: framework
@@ -71,6 +69,7 @@ component_management:
         - "src/fem/**"
         - "src/lin_alg/**"
         - "src/physics/diagnostic.F90"
+        - "src/physics/tracing*.F90"
         - "src/physics/oft_*_inits.F90"
         - "src/python/wrappers/oft_base_f.F90"
         - "src/python/OpenFUSIONToolkit/*.py"
