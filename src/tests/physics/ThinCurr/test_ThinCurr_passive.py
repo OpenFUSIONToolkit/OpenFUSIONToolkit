@@ -15,7 +15,7 @@ from oft_testing import approx_list
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_eig_passive(direct_flag):
     eigs = approx_list((1.489156E-1, 6.274424E-2, 3.041702E-2, 2.793962E-2), rel=1.E-5)
-    assert ThinCurr_setup(None,2,direct_flag,eta=1.E4,
+    assert ThinCurr_setup(None,'eig',direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)))
     assert validate_eigs(eigs)
@@ -23,7 +23,7 @@ def test_eig_passive(direct_flag):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_eig_passive_circular(direct_flag):
     eigs = approx_list((1.489295E-1, 6.274780E-2, 3.041867E-2, 2.794114E-2), rel=1.E-5)
-    assert ThinCurr_setup(None,2,direct_flag,eta=1.E4,
+    assert ThinCurr_setup(None,'eig',direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
                                    (0.5, -0.05), (0.5, -0.1)),circular=True)
     assert validate_eigs(eigs)
@@ -32,7 +32,7 @@ def test_eig_passive_circular(direct_flag):
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_passive(direct_flag):
     sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((7.938330E-4, 8.069765E-4), rel=1.E-3)
-    assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
+    assert ThinCurr_setup(None,'td',direct_flag,eta=1.E4,
                           icoils=((0.5, 0.1),),
                           vcoils=((0.5, 0.0),),
                           floops=((0.5, -0.05), (0.5, -0.1)),
@@ -44,7 +44,7 @@ def test_td_passive(direct_flag):
 def test_fr_passive(direct_flag):
     fr_real = approx_list((1.844588E-1, 1.917030E-1), rel=1.E-4)
     fr_imag = approx_list((-2.272322E-4, -1.629831E-4), rel=1.E-4)
-    assert ThinCurr_setup(None,3,direct_flag,eta=1.E4,freq=5.E3,fr_limit=0,
+    assert ThinCurr_setup(None,'fr',direct_flag,eta=1.E4,freq=5.E3,fr_limit=0,
                            icoils=((0.5, 0.1),),
                            vcoils=((0.5, 0.0),),
                            floops=((0.5, -0.05), (0.5, -0.1)))
@@ -55,7 +55,7 @@ def test_fr_passive(direct_flag):
 def test_td_passive_volt(direct_flag):
     sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.296507E-4, 4.366419E-4), rel=1.E-3)
     jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([-673.8428, 1721.1650], rel=1.E-3)
-    assert ThinCurr_setup(None,1,direct_flag,eta=1.E4,
+    assert ThinCurr_setup(None,'td',direct_flag,eta=1.E4,
                           vcoils=((0.5, 0.0), (0.5, 0.1)),
                           floops=((0.5, -0.05), (0.5, -0.1)),
                           volt_waveform=((0.0, 0.0, 1.0), (1.0, 0.0, 1.0)))

@@ -80,7 +80,7 @@ def test_torus_fourier_sensor(direct_flag):
     interface_hminus1 = torus_fourier_sensor(R_gpec,Z_gpec,R_0,-1)
     interface_hminus1.place_normal_sensors(nphi=15,filename='floops.loc')
     t = 80
-    assert ThinCurr_setup("tw_test-torus.h5",6,direct_flag,
+    assert ThinCurr_setup("tw_test-torus.h5",'td_mirnov',direct_flag,
                            curr_waveform=((0.0, 1.E6), (4.E-3, 0.0), (1.0, 0.0)),
                            lin_tol=1.E-10)
     sigs_nmodes_1D_PEST = np.load('sigs_nmodes_1D_PEST-h1.npy')

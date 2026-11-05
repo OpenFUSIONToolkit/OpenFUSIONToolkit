@@ -1,9 +1,13 @@
 import os
 import sys
+import traceback
 import pytest
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..')))
 from oft_testing import mp_run
+
+# Packages run by run_all(), in order
+packages = ('Marklin', 'ThinCurr', 'TokaMaker')
 
 
 def run_all(dummy,mp_q):
@@ -13,7 +17,8 @@ def run_all(dummy,mp_q):
     from OpenFUSIONToolkit.TokaMaker import TokaMaker
     from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain
     myOFT = OFT_env(nthreads=-1)
-    # Results from each package, left as None if that package (or an earlier one) fails
+    # Results from each package, left as None if that package (or an earlier one) fails; the traceback
+    # printed below identifies where
     results = [None, None, None]
     try:
         # Run Marklin
@@ -54,8 +59,8 @@ def run_all(dummy,mp_q):
         mygs.init_psi()
         mygs.solve()
         results[2] = mygs.ffp_scale
-    except BaseException as e:
-        print(e)
+    except Exception:
+        traceback.print_exc()
     mp_q.put(results)
 
 
@@ -67,13 +72,13 @@ def validate_all(results, expected, rtol=1.E-3):
         print("FAILED: Number of results does not match expected")
         return False
     retval = True
-    for i in range(3):
+    for i, package in enumerate(packages):
         if results[i] is None:
-            print("FAILED: No result {0}!".format(i))
+            print("FAILED: No {0} result (failed or not run)!".format(package))
             retval = False
             continue
         if abs((results[i]-expected[i])/expected[i]) > rtol:
-            print("FAILED: Result {0} outside tolerance!".format(i))
+            print("FAILED: {0} result outside tolerance!".format(package))
             print("  Expected = {0}".format(expected[i]))
             print("  Actual =   {0}".format(results[i]))
             retval = False

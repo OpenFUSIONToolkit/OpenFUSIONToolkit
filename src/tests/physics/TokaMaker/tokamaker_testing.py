@@ -73,14 +73,15 @@ def validate_dict(results,dict_exp,tol_dict=None):
 
 
 def validate_eqdsk(file_test,file_ref,helicity=1.0):
+    '''Compare an EQDSK file against a reference (relative paths are in the TokaMaker test folder)'''
     from OpenFUSIONToolkit.TokaMaker.util import read_eqdsk
     try:
-        test_data = read_eqdsk(file_test)
+        test_data = read_eqdsk(os.path.join(test_dir, file_test))
     except:
         print("FAILED: Could not read result EQDSK")
         return False
     try:
-        ref_data = read_eqdsk(file_ref)
+        ref_data = read_eqdsk(os.path.join(test_dir, file_ref))
     except:
         print("FAILED: Could not read reference EQDSK")
         return False
@@ -111,14 +112,15 @@ def validate_eqdsk(file_test,file_ref,helicity=1.0):
 
 
 def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
+    '''Compare an i-file against a reference (relative paths are in the TokaMaker test folder)'''
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile
     try:
-        test_data = read_ifile(ifile_test)
+        test_data = read_ifile(os.path.join(test_dir, ifile_test))
     except:
         print("FAILED: Could not read result i-file")
         return False
     try:
-        ref_data = read_ifile(ifile_ref)
+        ref_data = read_ifile(os.path.join(test_dir, ifile_ref))
     except:
         print("FAILED: Could not read reference i-file")
         return False

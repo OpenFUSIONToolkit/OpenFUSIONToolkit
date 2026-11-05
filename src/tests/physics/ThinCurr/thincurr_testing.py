@@ -22,6 +22,8 @@ from OpenFUSIONToolkit.ThinCurr.sensor import save_sensors, circular_flux_loop
 
 
 mu0 = np.pi*4.E-7
+# Calculations run by ThinCurr_setup()
+THINCURR_RUN_TYPES = ('td', 'eig', 'fr', 'td_mirnov')
 _oft_env_singleton = None
 
 # Circular coils, defined by radius and height in the XML file ('xml') or the mesh file ('mesh'), or converted from
@@ -222,7 +224,12 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
                     hodlr_opts=None,circular=False,convert_circular=False):
     """
     Common setup and run operations for thin-wall physics module test cases
+
+    `run_type` selects the calculation: 'td' (time-dependent), 'eig' (L/R eigenmodes), 'fr' (frequency
+    response), or 'td_mirnov' (time-dependent run recording the sensors in 'floops.loc' to the history file).
     """
+    if run_type not in THINCURR_RUN_TYPES:
+        raise ValueError("Unknown ThinCurr run type '{0}' (expected one of {1})".format(run_type, ', '.join(THINCURR_RUN_TYPES)))
     nPhi = 180
     phi_fac = 2.0*np.pi/(nPhi-1)
     # Create main input file from template
@@ -300,13 +307,13 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
             for i in range(n):
                 fid.write(' '.join(['{0}'.format(val) for val in volt_waveform[i]])+'\n')
     # Run thin-wall model
-    if run_type == 1:
-       return mp_run(run_td,(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,basepath,hodlr_opts))
-    elif run_type == 2:
+    if run_type == 'td':
+        return mp_run(run_td,(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,basepath,hodlr_opts))
+    elif run_type == 'eig':
         return mp_run(run_eig,(meshfile,direct_flag,use_aca,jumper_start))
-    elif run_type == 3:
+    elif run_type == 'fr':
         return mp_run(run_fr,(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,hodlr_opts))
-    elif run_type == 6:
+    else:
         return mp_run(run_td_for_Mirnov,(meshfile,direct_flag,curr_waveform,lin_tol))
 
 
