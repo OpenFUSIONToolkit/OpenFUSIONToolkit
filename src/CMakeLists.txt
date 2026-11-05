@@ -460,6 +460,16 @@ endif()
 if( OFT_MUMPS_FOUND )
   add_definitions( -DHAVE_MUMPS )
 endif()
+# STRUMPACK (not provided by PETSc)
+if( OFT_STRUMPACK_ROOT )
+  find_package( OFT_STRUMPACK )
+endif()
+if( OFT_STRUMPACK_FOUND )
+  add_definitions( -DHAVE_STRUMPACK )
+  include_directories( ${OFT_STRUMPACK_INCLUDE_DIRS} )
+  # C++ runtime is already linked by CMake as OFT contains C++ sources
+  set( EXT_LIBS ${OFT_STRUMPACK_LIBRARIES} ${EXT_LIBS} )
+endif()
 
 ########################
 # Setup component libraries
