@@ -11,9 +11,6 @@ from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.util import mu0, eC
 
 
-#============================================================================
-# Internal bootstrap test (ITER-based)
-#============================================================================
 def _check_boot_state_restored(mygs, restore, label):
     '''Check that restore() (a replace_eq call) restores the bootstrap options shadow and profiles'''
     ops_ref, profs_ref = dict(mygs._tMaker_equil._boot_ops), mygs.get_boot_profs()
@@ -42,7 +39,6 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         setup[k] for k in ('mygs', 'myOFT', 'psi_sample', 'n_sample', 'Ip_target', 'Zeff_val',
                            'ne', 'Te', 'ni', 'Ti', 'inductive_jphi'))
 
-    # --- Bootstrap solve ---
     try:
         mygs.solve_bootstrap(
             ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
@@ -60,8 +56,6 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         return
 
     eq_info = mygs.get_stats(li_normalization='ITER')
-
-    # --- Extract 1D profiles ---
     psi_i, F_i, Fp_i, P_i, Pp_i = mygs.get_profiles(npsi=n_sample, psi_pad=1e-3)
     _, q_i, ravgs_i, _, _, _     = mygs.get_q(npsi=n_sample, psi_pad=1e-3)
     jtor_i = F_i * Fp_i * ravgs_i['<1/R>'] / mu0 + Pp_i * ravgs_i['<R>']
@@ -72,8 +66,8 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
     eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
 
-    # --- Verify the jdotB_bs -> jphi conversion (doc_tokamaker_current_conventions eqs. A7, A8)
-    #     against geometry traced independently from the converged equilibrium ---
+    # Conversion of the bootstrap <J.B> to j_phi (doc_tokamaker_current_conventions eqs. A7, A8), checked against
+    # flux-surface geometry traced from the converged equilibrium, away from the axis and edge
     try:
         bp = mygs.get_boot_profs()
         inner = (bp['psi_n'] > 0.05) & (bp['psi_n'] < 0.95)
@@ -88,6 +82,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         scale = np.max(np.abs(bp['jphi_bs_raw'][inner]))
         j_bs_raw = bp['jphi_bs_raw'][inner] + bp['jphi_pd_raw'][inner]
         err = np.max(np.abs(j_bs_raw - (field_aligned + p_term))) / scale
+        # The flipped pressure term must be clearly worse, so the check is sensitive to its sign
         err_flip = np.max(np.abs(j_bs_raw - (field_aligned - p_term))) / scale
         print(f"jphi_bs_raw vs A7: rel err {err:.3e} (pressure term flipped: {err_flip:.3e}), "
               f"max|P'G|/max|jphi_bs_raw| = {np.max(np.abs(p_term))/scale:.3e}")
@@ -105,7 +100,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         print(f"<J.B> balance (A8): rel err {err_par:.3e}")
         if err_par > 2.0e-2:
             raise AssertionError(f"equilibrium <J.B> != sum of components (rel err {err_par:.3e})")
-        # A9d: I_p from TokaMaker's own jphi equals the FEM I_p; the old <R><1/R> measure does not
+        # A9d: I_p integrated from TokaMaker's flux-surface j_phi equals the finite element I_p
         psi_f = np.linspace(1.0e-4, 1.0 - 1.0e-4, 1001)
         _, F_f, Fp_f, _, Pp_f = mygs.get_profiles(psi=psi_f)
         _, _, rv_f, _, _, _ = mygs.get_q(psi=psi_f)
@@ -125,14 +120,13 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         mp_q.put(None)
         return
 
-    # --- Verify that boot_ops and boot_profs survive save/load and copy_eq, and that
-    #     replace_eq(source_file=/source_eq=) syncs the _boot_ops shadow dict ---
+    # Bootstrap options and profiles survive save/load and copy_eq, and replace_eq updates the Python-side copy
     save_file = 'ITER_boot_ops_test.h5'
     try:
         _, F_s, Fp_s, _, _ = mygs.get_profiles(npsi=50)
         mygs._tMaker_equil.save_TokaMaker(save_file)
         _check_boot_state_restored(mygs, lambda: mygs.replace_eq(source_file=save_file), 'source_file')
-        # F*F' round-trips exactly (the saved knots are restored, not recomputed)
+        # F*F' round-trips exactly because the saved profile knots are restored, not recomputed
         _, F_l, Fp_l, _, _ = mygs.get_profiles(npsi=50)
         ffp_err = np.max(np.abs(F_l*Fp_l - F_s*Fp_s)) / np.max(np.abs(F_s*Fp_s))
         if ffp_err > 1e-10:
@@ -145,8 +139,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         mp_q.put(None)
         return
 
-    # --- verify that scalar Zeff and a linearly-increasing Zeff profile
-    #     produce different bootstrap current profiles ---
+    # A Zeff profile must be used, not just its scalar value
     try:
         zeff_common_kwargs = dict(
             ffp_prof={'type': 'jphi-split-bootstrap', 'x': psi_sample, 'y': inductive_jphi},
@@ -179,8 +172,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         mp_q.put(None)
         return
 
-    # --- verify jphi_fixed_prof is added unscaled to the total and reduces the
-    #     inductive share; omitting it afterwards keeps it, until boot_reset() ---
+    # A fixed current profile is added unscaled and displaces inductive current; it persists until boot_reset()
     try:
         jfix_y = 2.0e5 * np.exp(-((psi_sample - 0.5) / 0.1)**2)
         profs_fixed = mygs.solve_bootstrap(
@@ -199,7 +191,7 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         profs_kept = mygs.solve_bootstrap(Zeff=Zeff_val, **zeff_common_kwargs)
         if not np.array_equal(profs_kept['jphi_fixed'], profs_fixed['jphi_fixed']):
             raise AssertionError("jphi_fixed not kept by solve_bootstrap without jphi_fixed_prof")
-        try:  # the kept profiles are on psi_n, so they cannot be reused on another coordinate
+        try:  # The kept profile is on psi_N, so it cannot be reused with toroidal flux coordinates
             mygs.solve_bootstrap(Zeff=Zeff_val, coord='phi_n', **zeff_common_kwargs)
         except ValueError as err:
             if 'kept coord' not in str(err):
@@ -215,8 +207,8 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         mp_q.put(None)
         return
 
-    # --- verify p_fixed_prof [Pa] is added to the kinetic pressure: same result as
-    #     pres_prof = kinetic + p_fixed, and mutually exclusive with pres_prof ---
+    # A fixed pressure [Pa] adds to the kinetic pressure, matching pres_prof = kinetic + p_fixed; the two options
+    # are mutually exclusive and negative values are rejected
     try:
         p_kin = eC * (ne * Te + ni * Ti)
         # Offset keeps pres_prof safely above the kinetic pressure (roundoff) at the edge
@@ -253,8 +245,8 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
         mp_q.put(None)
         return
 
-    # --- verify isolate_edge_jbs isolates the field-aligned jphi_bs only: jphi_pd stays jphi_pd_raw and
-    #     jphi_bs is flat in the core (isolating it with p'G would leave the floor minus p'G there) ---
+    # Isolating the edge bootstrap current acts on the field-aligned part only: the pressure-driven part is
+    # unchanged and the field-aligned part is flat in the core
     try:
         profs_iso = mygs.solve_bootstrap(Zeff=Zeff_val, isolate_edge_jbs=True, **zeff_common_kwargs)
         if not np.allclose(profs_iso['jphi_pd'], profs_iso['jphi_pd_raw'], rtol=1e-12, atol=1e-6):
@@ -298,10 +290,12 @@ ITER_bootstrap_internal_eq_dict = {
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,))
 def test_ITER_bootstrap_internal(order):
-    '''Self-consistent bootstrap current through the internal solve_bootstrap() on ITER with H-mode profiles: the
-    converged equilibrium and current profile; the j.B to j_phi conversion and current balance against independently
-    traced geometry (current conventions eqs. A7-A9); persistence of the bootstrap state through save/load and copy;
-    a Zeff profile against a scalar; fixed current and pressure additions; and edge isolation of the bootstrap
-    current.'''
+    '''Self-consistent bootstrap current solve with TokaMaker's internal solve_bootstrap() on ITER H-mode profiles:
+    the equilibrium and current profile match reference values, the current decomposition is consistent with the
+    flux-surface geometry, and the bootstrap state survives save/load and copy. Also covers Zeff profiles, fixed
+    current and pressure profiles, and edge bootstrap isolation.
+
+    References: A. Redl et al., Phys. Plasmas 28, 022502 (2021); doc_tokamaker_current_conventions.
+    '''
     results = mp_run(run_ITER_bootstrap_case_internal, (1.0, order), timeout=300)
     assert validate_dict(results, ITER_bootstrap_internal_eq_dict)

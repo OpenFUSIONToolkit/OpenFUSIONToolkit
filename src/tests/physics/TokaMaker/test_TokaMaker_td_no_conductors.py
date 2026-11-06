@@ -13,6 +13,7 @@ from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain
 
 
 def run_td_noconductor_case(use_vcoil,mp_q):
+    # Build mesh with coils but no conducting regions
     gs_mesh = gs_Domain(rextent=1.0,zextents=[0.0,1.0])
     gs_mesh.define_region('air',0.1,'boundary')
     gs_mesh.define_region('plasma',0.1,'plasma')
@@ -47,7 +48,8 @@ def run_td_noconductor_case(use_vcoil,mp_q):
 
 @pytest.mark.coverage
 def test_td_no_conductors():
-    '''Time-dependent setup on a mesh with coils but no conducting regions fails with a clear error.'''
+    '''Time-dependent setup on a mesh with coils but no conducting regions or voltage-driven coils raises a clear
+    error'''
     result = mp_run(run_td_noconductor_case,(False,))
     assert result is not None
     assert 'requires at least one conducting region' in result
@@ -55,6 +57,6 @@ def test_td_no_conductors():
 
 @pytest.mark.coverage
 def test_td_vcoil_only():
-    '''A voltage-driven coil alone provides the conducting structure a time-dependent step needs.'''
+    '''A voltage-driven coil is enough conducting structure for time-dependent setup and a time step to succeed'''
     result = mp_run(run_td_noconductor_case,(True,))
     assert result == ''

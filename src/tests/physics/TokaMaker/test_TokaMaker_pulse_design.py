@@ -1,29 +1,29 @@
-r'''! Minimal ITER test for pulse_design.py: the TokaMaker_TORAX coupled pulse design workflow.
-
-Builds two flattop-like seed equilibria (same Ip),
-runs a 5 s simulation at constant Ip, and returns a flat dict of scalars.
-
-Expects ITER_mesh.h5 produced from src/examples/TokaMaker/ITER/ITER_mesh_ex.ipynb,
-or set environment variable TOKAMAKER_ITER_MESH to the .h5 path.
-
-'''
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# TokaMaker tests: coupled TokaMaker-TORAX pulse design workflow (pulse_design.py) on ITER
+#
+# Skipped unless the torax package is installed. Uses the ITER test mesh (see tokamaker_testing.create_ITER_mesh),
+# or the mesh file named by TOKAMAKER_ITER_MESH.
 from __future__ import annotations
 
 import json
 import os
-import sys
 import tempfile
 import time
 from typing import Any, Dict, Optional
 
 import numpy as np
 import pytest
+from tokamaker_testing import mp_run, create_ITER_mesh, ITER_isoflux_pts, ITER_x_point
 
 _NUMERIC = (int, float, np.integer, np.floating)
 
 
 def _round_outputs(obj: Any, ndigits: int = 2) -> Any:
-    r'''! Round floats (and ints as floats) for JSON-friendly regression output; preserve bool, None, str.'''
+    '''Round numbers (as floats) for JSON regression output, leaving bool, None, and str unchanged'''
     if obj is None or isinstance(obj, bool) or isinstance(obj, str):
         return obj
     if isinstance(obj, _NUMERIC):
@@ -35,40 +35,14 @@ def _round_outputs(obj: Any, ndigits: int = 2) -> Any:
         return type(obj)(seq) if isinstance(obj, tuple) else seq
     return obj
 
-# Repo root: walk upward from this file until src/python exists (works for
-# src/tests/physics/, tests/, etc.).
-def _repo_root() -> str:
-    d = os.path.dirname(os.path.abspath(__file__))
-    while True:
-        if os.path.isdir(os.path.join(d, "src", "python")):
-            return d
-        parent = os.path.dirname(d)
-        if parent == d:
-            raise RuntimeError(
-                "Could not find repository root (no parent directory contains src/python). "
-                "Set TOKAMAKER_ITER_MESH to the ITER_mesh.h5 path."
-            )
-        d = parent
-
-
-_REPO_ROOT = _repo_root()
-_PYTHON_SRC = os.path.join(_REPO_ROOT, "src", "python")
-if _PYTHON_SRC not in sys.path:
-    sys.path.insert(0, _PYTHON_SRC)
-
 
 def _default_iter_mesh_path() -> str:
+    '''Mesh named by TOKAMAKER_ITER_MESH, or the ITER test mesh in the working directory (built if needed)'''
     env = os.environ.get("TOKAMAKER_ITER_MESH")
     if env:
         return os.path.abspath(env)
-    return os.path.join(
-        _REPO_ROOT,
-        "src",
-        "examples",
-        "TokaMaker",
-        "ITER",
-        "ITER_mesh.h5",
-    )
+    create_ITER_mesh()
+    return os.path.abspath("ITER_mesh.h5")
 
 
 def _array_to_profile_dict(profile_array: np.ndarray, psi_grid: np.ndarray) -> Dict[float, float]:
@@ -94,7 +68,7 @@ def _build_min_norm_coil_reg(mygs) -> None:
 
 
 def _final_tmtx_equilibrium_stats(tt) -> Dict[str, Any]:
-    r'''! Scalars from each TokaMaker equilibrium produced in the last fly() TM pass.'''
+    '''Scalars from each TokaMaker equilibrium of the last fly() pass'''
     out: Dict[str, Any] = {}
     out["tmtx_last_completed_loop"] = int(getattr(tt, "_current_loop", -1))
     equil = tt.state.get("equil", {}) or {}
@@ -132,26 +106,6 @@ def _final_tmtx_equilibrium_stats(tt) -> Dict[str, Any]:
     return out
 
 
-def _iter_baseline_shape() -> tuple[np.ndarray, np.ndarray]:
-    r'''! LCFS isoflux points and X-point from ITER_baseline_ex.ipynb (L-mode inverse case).'''
-    isoflux_pts = np.array(
-        [
-            [8.20, 0.41],
-            [8.06, 1.46],
-            [7.51, 2.62],
-            [6.14, 3.78],
-            [4.51, 3.02],
-            [4.26, 1.33],
-            [4.28, 0.08],
-            [4.49, -1.34],
-            [7.28, -1.89],
-            [8.00, -0.68],
-        ]
-    )
-    x_point = np.array([[5.125, -3.4]])
-    return isoflux_pts, x_point
-
-
 def _run_tokamaker_torax(
     mesh_path: Optional[str] = None,
     nthreads: int = 2,
@@ -165,29 +119,13 @@ def _run_tokamaker_torax(
     max_loop: int = 1,
     loop0: bool = True,
 ) -> Dict[str, Any]:
-    r'''! Run the minimal ITER TokaMaker_TORAX benchmark and return numerical outputs.
-    
-        Parameters
-        ----------
-        mesh_path
-            Path to ITER_mesh.h5. Default: TOKAMAKER_ITER_MESH or
-            src/examples/TokaMaker/ITER/ITER_mesh.h5 under the repo root.
-        ip_flat
-            Constant plasma current [A] for both seeds and the TORAX Ip schedule.
-        pax_a, pax_b
-            Axis pressure targets [Pa] for the two seeds (slight mismatch so transport
-            has something to do while Ip stays flat).
-        max_loop
-            Highest counted coupling index (see TokaMaker_TORAX.fly); default 1.
-        loop0
-            If True (default), run the cheap index-0 pass before counted loops.
-        
-    '''
-    try:
-        import torax  # noqa: F401
-    except ImportError:
-        pytest.skip("TokaMaker_TORAX requires the torax package.")
+    '''Run the minimal ITER TokaMaker_TORAX case and return its rounded scalar outputs
 
+    `mesh_path` defaults to TOKAMAKER_ITER_MESH or the ITER test mesh. Both seed equilibria and the TORAX
+    schedule use the constant current `Ip_flattop` [A]; the seeds' axis pressures `pax_a` and `pax_b` [Pa] differ
+    slightly so transport has something to evolve. `max_loop` is the highest counted coupling pass and `loop0`
+    adds the initial pass (see TokaMaker_TORAX.fly).
+    '''
     from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.TokaMaker import TokaMaker
     from OpenFUSIONToolkit.TokaMaker.meshing import load_gs_mesh
@@ -202,11 +140,11 @@ def _run_tokamaker_torax(
 
     r0_geo = 6.3
     b0 = 5.2
-    z0 = 0.5
     f0 = r0_geo * b0
 
-    isoflux_pts, x_point = _iter_baseline_shape()
-    diverted_pts = np.vstack((isoflux_pts, x_point))
+    # LCFS shape and lower X-point of the ITER baseline (L-mode inverse case of ITER_baseline_ex.ipynb)
+    x_point = ITER_x_point
+    diverted_pts = np.vstack((ITER_isoflux_pts, x_point))
 
     work_dir = tempfile.mkdtemp(prefix="test_tmtx_")
     eq_a = os.path.join(work_dir, "seed_t0.eqdsk")
@@ -319,7 +257,7 @@ def _run_tokamaker_torax(
     out["tx_dt_s"] = float(tx_dt)
     out["n_tm_times"] = int(len(times))
 
-    # TokaMaker-side traces (good for regression; values evolve with TORAX coupling).
+    # TokaMaker-side traces, which evolve with the TORAX coupling
     out["psi_lcfs_tm_first_Wb_per_rad"] = float(st["psi_lcfs_tm"][0])
     out["psi_lcfs_tm_last_Wb_per_rad"] = float(st["psi_lcfs_tm"][-1])
     out["Ip_tm_first_MA"] = float(st["Ip_tm"][0] / 1.0e6)
@@ -330,17 +268,11 @@ def _run_tokamaker_torax(
 
     out.update(_final_tmtx_equilibrium_stats(tt))
 
-    # Merge physics summary (TORAX / integrated quantities).
     for k, v in phys.items():
         if v is not None and k not in out:
             out[k] = v
 
     out["_work_dir"] = work_dir
-
-    # tt.plot_scalars(display=True)
-    # tt.plot_profile_evolution(display=True, one_plot=True)
-    # tt.plot_lcfs_evolution(display=True, one_plot=True)
-
     rounded: Dict[str, Any] = {}
     for k, v in out.items():
         if k.startswith("_"):
@@ -350,9 +282,23 @@ def _run_tokamaker_torax(
     return rounded
 
 
+def run_tokamaker_torax_case(mp_q):
+    '''Run the TokaMaker-TORAX case in this (child) process, putting its outputs, or None on failure, on `mp_q`'''
+    import traceback
+    try:
+        result = _run_tokamaker_torax()
+    except Exception:
+        traceback.print_exc()
+        result = None
+    mp_q.put(result)
+
+
+@pytest.mark.slow
 def test_tokamaker_torax() -> None:
-    r'''! Run the minimal ITER TokaMaker_TORAX benchmark and assert key outputs exist.'''
-    result = _run_tokamaker_torax()
+    '''Coupled TokaMaker-TORAX pulse simulation at constant plasma current on ITER from two seed equilibria runs to
+    completion and returns its summary (smoke test, skipped without TORAX)'''
+    pytest.importorskip("torax", reason="TokaMaker_TORAX requires the torax package")
+    result = mp_run(run_tokamaker_torax_case, (), timeout=1800)
     assert isinstance(result, dict)
     assert "Ip_flattop_MA" in result
     assert "t_final_s" in result

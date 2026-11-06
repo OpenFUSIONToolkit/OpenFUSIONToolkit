@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-# TokaMaker tests: Mirnov sensor normals in the reconstruction constraint files
+# TokaMaker tests: Mirnov sensor normals in reconstruction constraints (pure Python)
 import io
 import os
 import sys
@@ -23,8 +23,7 @@ from OpenFUSIONToolkit.TokaMaker.reconstruction import Mirnov_con, Mirnov_con_id
     np.ones((3, 1)),
 ])
 def test_mirnov_rejects_invalid_normal(normal):
-    '''A Mirnov constraint with a normal that does not have three (R, phi, Z) components is rejected before it is
-    added.'''
+    '''A Mirnov constraint whose normal does not have three (R, phi, Z) components is rejected before it is added'''
     recon = SimpleNamespace(_mirnovs=[])
     with pytest.raises(ValueError, match=r'three components \(R, phi, Z\)'):
         reconstruction.add_Mirnov(recon, [0.3, 0.0], normal, 0.01, 0.001)
@@ -33,8 +32,8 @@ def test_mirnov_rejects_invalid_normal(normal):
 
 @pytest.mark.parametrize('normal_type', [list, tuple, np.array])
 def test_mirnov_normal_round_trip(normal_type):
-    '''The cylindrical components of a Mirnov normal keep their order through writing and reading the constraint file,
-    whatever container they are given in.'''
+    '''Mirnov location, normal, value, and error survive writing and reading a constraint file, keeping the
+    (R, phi, Z) order of the normal for list, tuple, and array input'''
     normal = normal_type([0.36, 0.48, 0.8])
     recon = SimpleNamespace(_mirnovs=[])
     reconstruction.add_Mirnov(recon, [0.3, 0.1], normal, 0.01, 0.001)

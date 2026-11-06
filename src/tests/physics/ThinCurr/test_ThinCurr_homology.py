@@ -3,15 +3,15 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-# ThinCurr tests: hole and closure selection by OFT_ThinCurr_holes on GMSH meshes built by create_ThinCurr_meshes.py
+# ThinCurr tests: hole and closure selection for multiply connected surfaces (OFT_ThinCurr_holes)
+#
+# Meshes are built with GMSH by "create_ThinCurr_meshes.py".
 import os
 import sys
 import shlex
 import pytest
 import numpy as np
-test_dir = os.path.abspath(os.path.dirname(__file__))
-sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
-import oft_testing
+from thincurr_testing import mp_run, test_dir
 from oft_testing import run_command, oft_python_dir
 from OpenFUSIONToolkit.ThinCurr.meshing import read_ThinCurr_mesh, write_ThinCurr_mesh
 from OpenFUSIONToolkit.ThinCurr._homology_cli import compute_homology
@@ -90,6 +90,7 @@ def edge_counts(lc):
 
 
 def edge_set(lc):
+    '''Set of mesh edges as sorted vertex pairs'''
     return set(edge_counts(lc))
 
 
@@ -111,6 +112,7 @@ def homology_rank(lc, loops):
 
 
 def is_simple_loop(loop, edges):
+    '''Whether `loop` visits distinct vertices joined by mesh edges'''
     n = len(loop)
     if len(set(int(v) for v in loop)) != n:
         return False
@@ -118,6 +120,7 @@ def is_simple_loop(loop, edges):
 
 
 def has_chord(loop, edges):
+    '''Whether two non-consecutive vertices of `loop` are joined by a mesh edge'''
     n = len(loop)
     for i in range(n):
         for j in range(i+2, n):
@@ -129,6 +132,7 @@ def has_chord(loop, edges):
 
 
 def loop_length(r, loops):
+    '''Total length of a set of closed loops'''
     total = 0.0
     for loop in loops:
         pts = r[np.asarray(loop)]
@@ -184,11 +188,8 @@ def test_invalid(mesh_name, message):
         compute_homology(in_file, verify_only=True)
 
 
-def mp_run(target, args, timeout=180):
-    return oft_testing.mp_run(target, args, test_dir, timeout=timeout)
-
-
 def run_eigs(mesh_file, mp_q):
+    '''Ten slowest L/R eigenvalues of a mesh, sorted'''
     try:
         from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
@@ -232,7 +233,6 @@ def test_tee_junction():
     out_file = 'homology_tee-junction.h5'
     _, _, errcode = run_script(["OFT_ThinCurr_holes.py", "--in_file={0}".format(in_file), "--out_file={0}".format(out_file)])
     assert errcode == 0
-    from OpenFUSIONToolkit.ThinCurr.meshing import read_ThinCurr_mesh
     from OpenFUSIONToolkit.ThinCurr.junctions import current_loop_count
     mesh_in = read_ThinCurr_mesh(in_file)
     junc = read_ThinCurr_mesh(out_file)['thincurr']['junctions']
@@ -241,6 +241,7 @@ def test_tee_junction():
 
 
 def run_Lmat(mesh_file, mp_q):
+    '''Inductance matrix of a mesh, returned as the name of a .npy file'''
     try:
         from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.ThinCurr import ThinCurr

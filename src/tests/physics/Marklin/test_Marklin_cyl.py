@@ -3,13 +3,14 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-# Marklin tests: Taylor states in a cylinder on straight (linear) and curved (quadratic) meshes
+# Marklin tests: lowest Taylor (minimum-energy force-free) eigenstate of a cylinder through the Python
+# interface, on straight-sided (linear) and curved (quadratic) mesh geometry [J. B. Taylor,
+# Phys. Rev. Lett. 33, 1139 (1974)]; eigenvalues are compared to regression values
 import pytest
 from marklin_testing import mp_run, clear_cache, run_marklin, validate_eigs
 
 
 def marklin_lin_cell(order):
-    '''Lowest Taylor-state eigenvalue of the cylinder on the straight-sided mesh at `order`'''
     eigs = [5.029946,4.958005,4.957746,4.957744]
     if order == 1:
         clear_cache()
@@ -18,28 +19,23 @@ def marklin_lin_cell(order):
 
 @pytest.mark.coverage
 def test_marklin_g1_p1():
-    '''Lowest Taylor-state eigenvalue of a cylinder through the Python interface on the straight-sided (linear) mesh
-    with order-1 elements; the cached modes of earlier runs are cleared first.'''
+    '''Linear elements on straight-sided (linear geometry) cells.'''
     marklin_lin_cell(1)
 
 @pytest.mark.coverage
 def test_marklin_g1_p2():
-    '''Lowest Taylor-state eigenvalue of a cylinder through the Python interface on the straight-sided (linear) mesh
-    with order-2 elements.'''
+    '''Quadratic elements on straight-sided (linear geometry) cells.'''
     marklin_lin_cell(2)
 
 def test_marklin_g1_p3():
-    '''Lowest Taylor-state eigenvalue of a cylinder through the Python interface on the straight-sided (linear) mesh
-    with order-3 elements.'''
+    '''Cubic elements on straight-sided (linear geometry) cells.'''
     marklin_lin_cell(3)
 
 def test_marklin_g1_p4():
-    '''Lowest Taylor-state eigenvalue of a cylinder through the Python interface on the straight-sided (linear) mesh
-    with order-4 elements.'''
+    '''Quartic elements on straight-sided (linear geometry) cells.'''
     marklin_lin_cell(4)
 
 def marklin_quad_cell(order):
-    '''Lowest Taylor-state eigenvalue of the cylinder on the curved (quadratic) mesh at `order`'''
     eigs = [5.027066,4.955207,4.954955,4.954955]
     if order == 1:
         clear_cache()
@@ -48,22 +44,18 @@ def marklin_quad_cell(order):
 
 @pytest.mark.coverage
 def test_marklin_g2_p1():
-    '''Lowest Taylor-state eigenvalue of a cylinder through the Python interface on the curved (quadratic) mesh with
-    order-1 elements; the cached modes of earlier runs are cleared first.'''
+    '''Linear elements on curved (quadratic geometry) cells.'''
     marklin_quad_cell(1)
 
 @pytest.mark.coverage
 def test_marklin_g2_p2():
-    '''Lowest Taylor-state eigenvalue of a cylinder through the Python interface on the curved (quadratic) mesh with
-    order-2 elements.'''
+    '''Quadratic elements on curved (quadratic geometry) cells.'''
     marklin_quad_cell(2)
 
 def test_marklin_g2_p3():
-    '''Lowest Taylor-state eigenvalue of a cylinder through the Python interface on the curved (quadratic) mesh with
-    order-3 elements.'''
+    '''Cubic elements on curved (quadratic geometry) cells.'''
     marklin_quad_cell(3)
 
 def test_marklin_g2_p4():
-    '''Lowest Taylor-state eigenvalue of a cylinder through the Python interface on the curved (quadratic) mesh with
-    order-4 elements.'''
+    '''Quartic elements on curved (quadratic geometry) cells.'''
     marklin_quad_cell(4)

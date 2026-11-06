@@ -3,8 +3,10 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-# ThinCurr tests: triangle potential, segment and ring kernels, and low-rank block compression against independent
-# quadrature and dense linear algebra (test_thin_wall_kernels.F90)
+# ThinCurr tests: integration kernels and low-rank compression used to build thin-wall operators
+#
+# test_thin_wall_kernels.F90 writes one results file per kernel, which the tests check against independent
+# quadrature or dense linear algebra.
 import os
 import sys
 
@@ -38,15 +40,21 @@ def triangle_integrals(pt, scale):
     return phi, np.array(grad)
 
 
-@pytest.mark.coverage
-def test_triangle_potential():
-    '''Potential and gradient of a uniformly charged triangle at points off the triangle, in its plane and on the lines
-    of its edges, in metre and millimetre scale, against adaptive quadrature.'''
+@pytest.fixture(scope='module')
+def kernel_results():
+    '''Run test_thin_wall_kernels once for all tests in this file, returning the path of a results file'''
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in)
     assert run_OFT('./test_thin_wall_kernels', 1, 60)
-    data = np.loadtxt('thin_wall_kernels.results')
+    return lambda filename: os.path.join(test_dir, filename)
+
+
+@pytest.mark.coverage
+def test_triangle_potential(kernel_results):
+    '''Analytic potential of a uniform source on a triangle, and its gradient, at points near and far from the
+    triangle and at several scales, against adaptive quadrature'''
+    data = np.loadtxt(kernel_results('thin_wall_kernels.results'))
     for row in data:
         scale, pt, phi, grad = row[0], row[1:4], row[4], row[5:8]
         phi_ref, grad_ref = triangle_integrals(pt, scale)
@@ -55,14 +63,10 @@ def test_triangle_potential():
         assert np.allclose(grad, grad_ref, rtol=0.0, atol=1.E-9*np.linalg.norm(grad_ref))
 
 
-def test_lowrank_qrcp():
-    '''Truncated pivoted-QR plus SVD compression of test blocks against the rank the SVD gives with the same truncation
-    rule, including a block that is not worth compressing.'''
-    os.chdir(test_dir)
-    with open('oft.in', 'w+') as fid:
-        fid.write(oft_in)
-    assert run_OFT('./test_thin_wall_kernels', 1, 60)
-    with open('thin_wall_qrcp.results') as fid:
+def test_lowrank_qrcp(kernel_results):
+    '''Low-rank compression by truncated pivoted QR and SVD reaches the rank of the optimal SVD truncation (or one
+    more) within tolerance, and reports blocks that do not compress'''
+    with open(kernel_results('thin_wall_qrcp.results')) as fid:
         lines = fid.readlines()
     i = 0
     while i < len(lines):
@@ -73,6 +77,7 @@ def test_lowrank_qrcp():
         s = np.linalg.svd(A, compute_uv=False)
         tail = np.sqrt(np.cumsum(s[::-1]**2))[::-1]  # tail[k]: norm of the discarded part at rank k
         svd_rank = max(1, int(np.sum(tail > tol)))
+        # A rank-k factorization only saves storage if k (m + n) < m n
         if svd_rank >= m*n//(m + n):
             assert rank == -1
         else:
@@ -80,14 +85,10 @@ def test_lowrank_qrcp():
             assert err <= tol
 
 
-def test_aca_plus():
-    '''ACA+ of a smooth kernel block with absolute and relative tolerance against the dense block; an incompressible
-    block does not converge within a few terms.'''
-    os.chdir(test_dir)
-    with open('oft.in', 'w+') as fid:
-        fid.write(oft_in)
-    assert run_OFT('./test_thin_wall_kernels', 1, 60)
-    data = np.loadtxt('thin_wall_aca.results')
+def test_aca_plus(kernel_results):
+    '''Adaptive cross approximation (ACA+) of a smooth kernel block meets absolute and relative tolerances against
+    the dense block, and an incompressible block is reported as not converged'''
+    data = np.loadtxt(kernel_results('thin_wall_aca.results'))
     assert data[0, 1] > 0 and data[0, 2] < 1.E-8
     assert data[1, 1] > 0 and data[1, 2] < 1.E-6
     assert data[2, 1] == -1
@@ -107,26 +108,18 @@ def seg_seg_reference(a0, a1, b0, b1):
     return quad(inner, 0.0, la, points=pts or None, epsabs=0.0, epsrel=1.E-13, limit=2000)[0]
 
 
-def test_seg_seg_int():
-    '''Double integral of 1/|x-y| over close parallel, skew and collinear straight segment pairs against quadrature.
-    Double integral of 1/|x-y| over close parallel, skew and collinear straight segment pairs against quadrature.'''
-    os.chdir(test_dir)
-    with open('oft.in', 'w+') as fid:
-        fid.write(oft_in)
-    assert run_OFT('./test_thin_wall_kernels', 1, 60)
-    for row in np.loadtxt('thin_wall_segseg.results'):
+def test_seg_seg_int(kernel_results):
+    '''Mutual inductance integral of two straight segments, for close parallel, skew, and collinear pairs, against
+    quadrature'''
+    for row in np.loadtxt(kernel_results('thin_wall_segseg.results')):
         p = row[:12].reshape(4, 3)
         assert row[12] == pytest.approx(seg_seg_reference(*p), rel=1.E-9)
 
 
-def test_ring_poly_softened():
-    '''The softened ring kernel integrated along a polygon of the same ring against the softened ring-ring mutual
-    inductance.'''
-    os.chdir(test_dir)
-    with open('oft.in', 'w+') as fid:
-        fid.write(oft_in)
-    assert run_OFT('./test_thin_wall_kernels', 1, 60)
-    ring_poly, ring_ring = np.loadtxt('thin_wall_ringpoly.results')
+def test_ring_poly_softened(kernel_results):
+    '''Softened (finite wire radius) ring kernel integrated along a polygon approximating the same ring matches the
+    softened ring-ring self inductance'''
+    ring_poly, ring_ring = np.loadtxt(kernel_results('thin_wall_ringpoly.results'))
     assert ring_poly == pytest.approx(ring_ring, rel=1.E-4)
 
 
@@ -149,12 +142,8 @@ def ring_seg_reference(a, b):
     return quad(kernel, 0.0, lb, points=[s0], epsabs=0.0, epsrel=1.E-13, limit=2000)[0]
 
 
-def test_ring_seg_close():
-    '''The exact ring kernel along straight segments passing close to the ring against quadrature with elliptic
-    integrals.'''
-    os.chdir(test_dir)
-    with open('oft.in', 'w+') as fid:
-        fid.write(oft_in)
-    assert run_OFT('./test_thin_wall_kernels', 1, 60)
-    for row in np.loadtxt('thin_wall_ringseg.results'):
+def test_ring_seg_close(kernel_results):
+    '''Exact circular-ring kernel integrated along straight segments passing close to the ring, against quadrature
+    with the ring's vector potential from elliptic integrals'''
+    for row in np.loadtxt(kernel_results('thin_wall_ringseg.results')):
         assert row[6] == pytest.approx(ring_seg_reference(row[:3], row[3:6]), rel=1.E-7)

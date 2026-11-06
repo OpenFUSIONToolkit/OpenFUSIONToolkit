@@ -15,14 +15,13 @@ import h5py
 test_dir = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
 import oft_testing
+from OpenFUSIONToolkit.util import mu0
 from OpenFUSIONToolkit.io import histfile, write_oft_xml
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil, ThinCurr_Vcoil, ThinCurr_XML
-from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
 from OpenFUSIONToolkit.ThinCurr.sensor import save_sensors, circular_flux_loop
 
 
-mu0 = np.pi*4.E-7
 # Calculations run by ThinCurr_setup()
 THINCURR_RUN_TYPES = ('td', 'eig', 'fr', 'td_mirnov')
 _oft_env_singleton = None
@@ -40,41 +39,41 @@ def mp_run(target,args,timeout=180):
     return oft_testing.mp_run(target,args,test_dir,timeout=timeout)
 
 
-def setup_test_model(tw_model, meshfile, jumper_start, nsplit=0):
-    '''Load `meshfile`, with the coil/resistivity XML written by ThinCurr_setup() if it exists, or build the dummy
-    plate with a high surface resistivity when `meshfile` is None (filament-only cases)'''
+def _setup_model(meshfile,jumper_start,nsplit=0):
+    '''Create a ThinCurr model from `meshfile` and `oft_in.xml` (if present)
+
+    With no mesh file, the model is the dummy plate (a single active node), so only the filaments defined in
+    `oft_in.xml` carry current.
+    '''
+    from OpenFUSIONToolkit import OFT_env
+    from OpenFUSIONToolkit.ThinCurr import ThinCurr
+    myOFT = OFT_env(nthreads=-1)
+    tw_model = ThinCurr(myOFT)
     if meshfile is None:
+        from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
         r_dummy, lc_dummy = build_ThinCurr_dummy([0.0,0.0,10.0],size=0.25,nsplit=nsplit)
         tw_model.setup_model(r=r_dummy,lc=lc_dummy,xml_filename='oft_in.xml',jumper_start=jumper_start)
         tw_model.set_eta_values(eta_values=np.r_[1.E4*mu0])
     elif pathlib.Path("oft_in.xml").is_file():
         tw_model.setup_model(mesh_file=meshfile,xml_filename='oft_in.xml',jumper_start=jumper_start)
     else:
+        # Coils and resistivity were moved into the mesh file (convert_xml)
         tw_model.setup_model(mesh_file=meshfile)
-
-
-def write_flux_loops(floops):
-    '''Save circular flux loops at the (R, Z) positions `floops` to "floops.loc"'''
-    sensors = [circular_flux_loop(R,Z,'FLOOP_{0}'.format(k),npts=180) for k, (R, Z) in enumerate(floops)]
-    save_sensors(sensors, 'floops.loc')
+    return tw_model
 
 
 def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,basepath,hodlr_opts,mp_q):
-    '''Time-dependent run driven by coil currents or voltages, with flux-loop sensors and optional model reduction'''
+    '''Time-dependent run recording flux loop signals, optionally checking a reduced model and the output folder'''
     result = True
     try:
-        from OpenFUSIONToolkit import OFT_env
-        from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        myOFT = OFT_env(nthreads=-1)
-        tw_model = ThinCurr(myOFT)
-        setup_test_model(tw_model, meshfile, jumper_start)
+        tw_model = _setup_model(meshfile,jumper_start)
         tw_model.setup_io(basepath=basepath)
         if floops is not None:
-            write_flux_loops(floops)
             _, _, sensor_obj = tw_model.compute_Msensor('floops.loc')
         else:
             sensor_obj = None
         if curr_waveform is not None:
+            # Waveforms are given in units of mu0*A
             curr_waveform = np.array(curr_waveform)
             curr_waveform[:,1:] /= mu0
         if volt_waveform is not None:
@@ -89,7 +88,7 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
         tw_model.run_td(2.E-5,200,direct=(direct_flag == 'T'),lin_tol=lin_tol,coil_currs=curr_waveform,coil_volts=volt_waveform,sensor_obj=sensor_obj)
         tw_model.plot_td(200,sensor_obj=sensor_obj)
         if basepath is not None:
-            # Output must go to basepath, not the working directory
+            # Output files must be written to basepath, not the working directory
             rst_in_outdir = glob.glob(os.path.join(basepath, 'pThinCurr_*.rst'))
             new_rst_in_cwd = set(glob.glob('pThinCurr_*.rst')) - rst_before
             if len(rst_in_outdir) == 0:
@@ -106,6 +105,7 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
                     print("FAILED: floops.hist written to CWD instead of output directory")
                     result = False
         if run_reduced:
+            # A reduced model built from the 30 slowest modes must reproduce the 10 slowest decay rates
             eig_vals, eig_vecs = tw_model.get_eigs(30,direct=(direct_flag == 'T'))
             tw_reduced = tw_model.build_reduced_model(eig_vecs, compute_B=True, sensor_obj=sensor_obj, filename='tCurr_reduced.h5')
             eig_vals_r, _ = tw_reduced.get_eigs()
@@ -125,13 +125,9 @@ def run_td(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_t
 
 
 def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
-    '''The four slowest L/R eigenmodes, written to "thincurr_eigs.dat"'''
+    '''Four slowest L/R eigenvalues, written to `thincurr_eigs.dat`'''
     try:
-        from OpenFUSIONToolkit import OFT_env
-        from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        myOFT = OFT_env(nthreads=-1)
-        tw_model = ThinCurr(myOFT)
-        setup_test_model(tw_model, meshfile, jumper_start, nsplit=1)
+        tw_model = _setup_model(meshfile,jumper_start,nsplit=1)
         tw_model.setup_io()
         tw_model.compute_Mcoil()
         tw_model.compute_Lmat(use_hodlr=use_aca,cache_file='Lmat.save')
@@ -149,27 +145,23 @@ def run_eig(meshfile,direct_flag,use_aca,jumper_start,mp_q):
 
 
 def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,hodlr_opts,mp_q):
-    '''Frequency response to the first coil at `freq`, as flux-loop signals written to "thincurr_fr.dat"'''
+    '''Flux loop response to the first I-coil driven at `freq`, written to `thincurr_fr.dat`'''
     try:
-        from OpenFUSIONToolkit import OFT_env
-        from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        myOFT = OFT_env(nthreads=-1)
-        tw_model = ThinCurr(myOFT)
-        setup_test_model(tw_model, meshfile, jumper_start, nsplit=1)
+        tw_model = _setup_model(meshfile,jumper_start,nsplit=1)
         tw_model.setup_io()
         if floops is not None:
-            write_flux_loops(floops)
             Msensor, Msc, _ = tw_model.compute_Msensor('floops.loc')
         Mcoil = tw_model.compute_Mcoil()
         if hodlr_opts is not None:
             tw_model.set_hodlr_options(**hodlr_opts)
         tw_model.compute_Lmat(use_hodlr=use_aca,cache_file='Lmat.save')
         tw_model.compute_Rmat()
-        # Coupling matrices omit mu0, so a 1/mu0 A drive gives unit-normalized signals
+        # Unit drive in units of mu0*A; the two rows are the real and imaginary parts
         driver_current = 1.0/mu0
         driver = np.zeros((2,tw_model.nelems))
         driver[0,:] = Mcoil[0,:]*driver_current
         result = tw_model.compute_freq_response(driver,fr_limit=fr_limit,freq=freq,direct=(direct_flag == 'T'))
+        # Sensor signals from wall currents plus the direct (in-phase) coil coupling
         probe_signals = np.dot(result,Msensor)
         probe_signals[0,:] += np.dot(np.r_[driver_current],Msc)
         fr_file = '\n'.join(['{0} {1}'.format(*probe_signals[:,i]) for i in range(probe_signals.shape[1])])
@@ -184,8 +176,7 @@ def run_fr(meshfile,direct_flag,use_aca,freq,fr_limit,floops,jumper_start,hodlr_
 
 
 def run_td_for_Mirnov(meshfile,direct_flag,curr_waveform,lin_tol,mp_q):
-    '''Time-dependent run with the coils of "oft_in_remc.xml", recording the sensors in "floops.loc" to the history
-    file for Fourier analysis'''
+    '''Time-dependent run driven by the coils in `oft_in_remc.xml`, recording the sensors in `floops.loc`'''
     result = True
     try:
         from OpenFUSIONToolkit import OFT_env
@@ -213,15 +204,17 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
                     icoils=None,vcoils=None,floops=None,curr_waveform=None,volt_waveform=None,
                     lin_tol=1.E-9,jumper_start=0,run_reduced=False,basepath=None,convert_xml=False,
                     hodlr_opts=None,circular=False,convert_circular=False):
-    """
-    Common setup and run operations for thin-wall physics module test cases
+    '''Write the coil, resistivity, and sensor inputs for a ThinCurr case and run it in a separate process
 
     `run_type` selects the calculation: 'td' (time-dependent), 'eig' (L/R eigenmodes), 'fr' (frequency
     response), or 'td_mirnov' (time-dependent run recording the sensors in 'floops.loc' to the history file).
-    """
+    Coils are given as (R, Z) circles, either as polygons or as exact circles (`circular`). With `convert_xml`,
+    coils and resistivity are moved from the XML file into the mesh file by OFT_ThinCurr_mesh_tool.
+    '''
     if run_type not in THINCURR_RUN_TYPES:
         raise ValueError("Unknown ThinCurr run type '{0}' (expected one of {1})".format(run_type, ', '.join(THINCURR_RUN_TYPES)))
     nPhi = 180
+    # Closed polygons: the last point repeats the first
     phi_fac = 2.0*np.pi/(nPhi-1)
     os.chdir(test_dir)
     xml = ThinCurr_XML()
@@ -248,6 +241,7 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
                     test_Vcoil.add_circular_subcoil([R, Z], npoints=nPhi)
                     xml.add_Vcoil(test_Vcoil)
                     continue
+                # Polygon V-coils are read from an HDF5 file to cover that input path
                 vcoil_pts = []
                 for i in range(nPhi):
                     phi = i*phi_fac
@@ -275,22 +269,10 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
             os.remove("oft_in.xml")
             meshfile = "test.h5"
     if floops is not None:
-        write_flux_loops(floops)
-    # Drive waveforms as (time, value...) rows; currents are given in mu0-normalized units
-    if curr_waveform is not None:
-        n = len(curr_waveform)
-        m = len(curr_waveform[0])
-        with open('curr.drive', 'w+') as fid:
-            fid.write('{0} {1}\n'.format(m,n))
-            for i in range(n):
-                fid.write(' '.join(['{0}'.format(curr_waveform[i][0])] + ['{0}'.format(val/mu0) for val in curr_waveform[i][1:]])+'\n')
-    if volt_waveform is not None:
-        n = len(volt_waveform)
-        m = len(volt_waveform[0])
-        with open('volt.drive', 'w+') as fid:
-            fid.write('{0} {1}\n'.format(m,n))
-            for i in range(n):
-                fid.write(' '.join(['{0}'.format(val) for val in volt_waveform[i]])+'\n')
+        sensors = []
+        for (k, floop) in enumerate(floops):
+            sensors.append(circular_flux_loop(floop[0],floop[1],'FLOOP_{0}'.format(k),npts=180))
+        save_sensors(sensors, 'floops.loc')
     if run_type == 'td':
         return mp_run(run_td,(meshfile,direct_flag,use_aca,floops,curr_waveform,volt_waveform,lin_tol,jumper_start,run_reduced,basepath,hodlr_opts))
     elif run_type == 'eig':
@@ -302,9 +284,7 @@ def ThinCurr_setup(meshfile,run_type,direct_flag,freq=0.0,fr_limit=0,eta=10.0,us
 
 
 def validate_eigs(eigs, imag_tol=1.E-9):
-    """
-    Helper function to validate eigenvalues against test case.
-    """
+    '''Check the eigenvalues in `thincurr_eigs.dat` against `eigs` (usually `pytest.approx` values)'''
     eigs_run_real = []
     eigs_run_imag = []
     with open('thincurr_eigs.dat', 'r') as fid:
@@ -330,9 +310,7 @@ def validate_eigs(eigs, imag_tol=1.E-9):
 
 
 def validate_fr(fr_real, fr_imag):
-    """
-    Helper function to validate frequency-response results against test case.
-    """
+    '''Check the real and imaginary sensor responses in `thincurr_fr.dat` against expected values'''
     try:
         fr_run_real = []
         fr_run_imag = []
@@ -364,9 +342,8 @@ def validate_fr(fr_real, fr_imag):
 
 
 def validate_td(sigs_final, jumpers_final=None):
-    """
-    Helper function to validate time-dependent results against test case.
-    """
+    '''Check the final time and sensor signals in `floops.hist`, and optionally the jumper currents in
+    `jumpers.hist`; expected jumper values of `None` are skipped'''
     try:
         hist_file = histfile('floops.hist')
         td_sigs_final = [hist_file[field][-1] for field in hist_file]
@@ -388,7 +365,6 @@ def validate_td(sigs_final, jumpers_final=None):
             print("  Expected = {0}".format(val))
             print("  Actual =   {0}".format(td_sigs_final[i+1]))
             retval = False
-    #
     if jumpers_final is not None:
         try:
             hist_file = histfile('jumpers.hist')
@@ -416,8 +392,7 @@ def validate_td(sigs_final, jumpers_final=None):
 
 
 def write_thincurr_xml(xml_filename, eta_values=None, thickness_values=None, eta_vol_values=None):
-    from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_XML
-
+    '''Write a ThinCurr XML file with surface resistivity, volume resistivity, and thickness for each region'''
     thincurr_xml = ThinCurr_XML()
     if eta_values is not None:
         thincurr_xml.set_eta(eta_values)
@@ -448,6 +423,7 @@ def save_dummy_mesh(filename, eta_surf):
 
 
 def build_dummy_model(xml_filename):
+    '''Dummy plate model (a single active node) in the shared OFT environment, with region data from `xml_filename`'''
     from OpenFUSIONToolkit.ThinCurr import ThinCurr
     from OpenFUSIONToolkit.ThinCurr.meshing import build_ThinCurr_dummy
 

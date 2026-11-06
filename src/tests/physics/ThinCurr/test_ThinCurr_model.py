@@ -13,7 +13,7 @@ test_dir = os.path.abspath(os.path.dirname(__file__))
 
 
 def run_bfield_no_icoils(use_hodlr,mp_q):
-    """B-field operators and reconstruction for a model without Icoils (no coil currents given)"""
+    '''B-field operators and reconstruction for a model without I-coils, with input checks'''
     result = None
     try:
         from OpenFUSIONToolkit.ThinCurr import ThinCurr
@@ -49,9 +49,8 @@ def run_bfield_no_icoils(use_hodlr,mp_q):
 
 @pytest.mark.coverage
 def test_bfield_no_icoils():
-    '''B-field operators and field reconstruction for a model without drive coils, dense and HODLR-compressed:
-    reconstruction before the operators exist or from a wrong-size potential is rejected, column input is accepted,
-    and the compressed field matches the dense one.'''
+    '''Magnetic field operators of a model without I-coils, with dense and compressed inductance matrices: invalid
+    input is rejected, column vectors are accepted, and both give the same field'''
     out = {use_hodlr: mp_run(run_bfield_no_icoils, (use_hodlr,)) for use_hodlr in (False, True)}
     for res in out.values():
         assert res  # None (timeout, crash, or exception)
@@ -61,6 +60,7 @@ def test_bfield_no_icoils():
 
 
 def _default_pmap(lc, npts):
+    '''Point map ThinCurr builds by default: interior vertices numbered in order, boundary vertices inactive (0)'''
     edges = np.sort(np.vstack((lc[:,[0,1]], lc[:,[1,2]], lc[:,[2,0]])), axis=1)
     uedges, counts = np.unique(edges, axis=0, return_counts=True)
     active = np.ones((npts,), dtype=bool)
@@ -72,12 +72,13 @@ def _default_pmap(lc, npts):
 
 @pytest.mark.coverage
 def test_user_pmap():
-    '''A user point map reproduces the default model, a reversed map reorders the inductance and resistance matrices
-    consistently, and a map of the wrong length is rejected.'''
+    '''A user-supplied point map equal to the default reproduces the default model, a reversed map reverses the
+    matrices, and a map of the wrong length is rejected'''
     assert mp_run(run_user_pmap, ())
 
 
 def run_user_pmap(mp_q):
+    '''Matrices for the default point map, the same map passed explicitly, and the map in reverse order'''
     result = True
     try:
         from OpenFUSIONToolkit import OFT_env

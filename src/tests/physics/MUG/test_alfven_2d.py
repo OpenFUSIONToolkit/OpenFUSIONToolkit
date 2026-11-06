@@ -3,8 +3,8 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-# MUG tests: traveling shear Alfven wave on a periodic strip with the 2-D Lagrange xMHD module
-# (test_alfven_2d.F90): velocity and magnetic field of the evolved wave against the initial wave
+# MUG tests: linear shear Alfven wave in a doubly periodic Cartesian slab with the 2D xMHD solver,
+# advanced half a wave period and compared with the analytic (inverted) wave
 import os
 import sys
 import pytest
@@ -13,7 +13,7 @@ sys.path.append(os.path.abspath(os.path.join(test_dir, '..', '..')))
 from oft_testing import run_OFT
 from mug_testing import validate_errors
 
-# Basic template for input file
+# Input file template, filled in by the setup function
 oft_in_template = """
 &runtime_options
  ppn=1
@@ -73,7 +73,6 @@ oft_in_template = """
 /
 """
 
-# Common setup function and process handling
 def alfven_2d_setup(nbase,nlevels,order,
                     linear=False,mf=False,petsc=False,hex_mesh=False):
     mesh_type=1
@@ -85,29 +84,31 @@ def alfven_2d_setup(nbase,nlevels,order,
     mf_flag='F'
     petsc_flag=('T' if petsc else 'F')
     lin_flag=('T' if linear else 'F')
+    # Matrix-free Jacobian products are finite-difference approximations, so the linear tolerance is relaxed
     if (not linear) and mf:
         tol='1.E-9'
         mf_flag='T'
+    # The level above nbase is the base mesh distributed over the processes (a transfer level, not a refinement),
+    # so MPI runs reproduce the serial errors
     nproc = 1
     if nbase != nlevels:
         nproc = 2
-    #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(nbase, nlevels, order, lin_flag,
                                          dt, its, mf_flag, tol, mesh_type, petsc_flag))
     return run_OFT("./test_alfven_2d", nproc, 4000)
 
+# Errors are regression values from a reference run; each may exceed its stored value by up to 5%
 def validate_result(verr_exp,berr_exp,steps_exp=11,linear=False):
     return validate_errors('alfven_2d.results', (('Velocity', verr_exp), ('Magnetic', berr_exp)), 1.05)
 
 #============================================================================
-# Non-Linear test runners for NP=2
+# Nonlinear runs, triangular mesh, quadratic elements
 @pytest.mark.parametrize("mf", (False, True))
 def test_nl_r1_p2(mf,petsc_flag=False):
-    '''Nonlinear shear Alfven wave advanced in time on a periodic strip with the 2-D Lagrange module on the tet mesh
-    with order-2 elements, with and without the matrix-free Newton-Krylov solver: velocity and magnetic field errors
-    against the initial wave.'''
+    '''Nonlinear Alfven wave, quadratic elements on a triangular mesh, serial.
+    Also covers matrix-free Newton-Krylov.'''
     verr_exp = 3.627799135938326E-2
     berr_exp = 2.7401604608693758E-2
     assert alfven_2d_setup(1,1,2,mf=mf,petsc=petsc_flag)
@@ -118,8 +119,8 @@ def test_nl_r1_p2(mf,petsc_flag=False):
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_nl_r1_p2_mpi(mf,petsc_flag):
-    '''The order-2 tet-mesh nonlinear case on two MPI ranks with one more refinement level, with and without the
-    matrix-free Newton-Krylov solver, with the native and the PETSc linear algebra backends.'''
+    '''Nonlinear Alfven wave, quadratic elements on a triangular mesh, on two MPI processes.
+    Also covers matrix-free Newton-Krylov and (default variant only) PETSc runs.'''
     if mf and petsc_flag:
         pytest.skip()
     verr_exp = 3.627799135938326E-2
@@ -128,12 +129,11 @@ def test_nl_r1_p2_mpi(mf,petsc_flag):
     assert validate_result(verr_exp, berr_exp)
 
 #============================================================================
-# Non-Linear test runners for NP=3
+# Nonlinear runs, triangular mesh, cubic elements
 @pytest.mark.parametrize("mf", (False, True))
 def test_nl_r1_p3(mf,petsc_flag=False):
-    '''Nonlinear shear Alfven wave advanced in time on a periodic strip with the 2-D Lagrange module on the tet mesh
-    with order-3 elements, with and without the matrix-free Newton-Krylov solver: velocity and magnetic field errors
-    against the initial wave.'''
+    '''Nonlinear Alfven wave, cubic elements on a triangular mesh, serial.
+    Also covers matrix-free Newton-Krylov.'''
     verr_exp = 3.1531577649676595E-2
     berr_exp = 2.7201129077752486E-2
     assert alfven_2d_setup(1,1,3,mf=mf,petsc=petsc_flag)
@@ -144,8 +144,8 @@ def test_nl_r1_p3(mf,petsc_flag=False):
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_nl_r1_p3_mpi(mf,petsc_flag):
-    '''The order-3 tet-mesh nonlinear case on two MPI ranks with one more refinement level, with and without the
-    matrix-free Newton-Krylov solver, with the native and the PETSc linear algebra backends.'''
+    '''Nonlinear Alfven wave, cubic elements on a triangular mesh, on two MPI processes.
+    Also covers matrix-free Newton-Krylov and (default variant only) PETSc runs.'''
     if mf and petsc_flag:
         pytest.skip()
     verr_exp = 3.1531577649676595E-2
@@ -154,12 +154,11 @@ def test_nl_r1_p3_mpi(mf,petsc_flag):
     assert validate_result(verr_exp, berr_exp)
 
 #============================================================================
-# Non-Linear test runners for NP=4
+# Nonlinear runs, triangular mesh, quartic elements
 @pytest.mark.parametrize("mf", (False, True))
 def test_nl_r1_p4(mf,petsc_flag=False):
-    '''Nonlinear shear Alfven wave advanced in time on a periodic strip with the 2-D Lagrange module on the tet mesh
-    with order-4 elements, with and without the matrix-free Newton-Krylov solver: velocity and magnetic field errors
-    against the initial wave.'''
+    '''Nonlinear Alfven wave, quartic elements on a triangular mesh, serial.
+    Also covers matrix-free Newton-Krylov.'''
     verr_exp = 3.13872526257328E-2
     berr_exp = 2.719581233696034E-2
     assert alfven_2d_setup(1,1,4,mf=mf,petsc=petsc_flag)
@@ -170,8 +169,8 @@ def test_nl_r1_p4(mf,petsc_flag=False):
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_nl_r1_p4_mpi(mf,petsc_flag):
-    '''The order-4 tet-mesh nonlinear case on two MPI ranks with one more refinement level, with and without the
-    matrix-free Newton-Krylov solver, with the native and the PETSc linear algebra backends.'''
+    '''Nonlinear Alfven wave, quartic elements on a triangular mesh, on two MPI processes.
+    Also covers matrix-free Newton-Krylov and (default variant only) PETSc runs.'''
     if mf and petsc_flag:
         pytest.skip()
     verr_exp = 3.13872526257328E-2
@@ -180,11 +179,9 @@ def test_nl_r1_p4_mpi(mf,petsc_flag):
     assert validate_result(verr_exp, berr_exp)
 
 #============================================================================
-#Linear test runners for NP=2
+# Linearized runs, triangular mesh, quadratic elements
 def test_lin_r1_p2(petsc_flag=False):
-    '''Linearized shear Alfven wave (the perturbation evolved about the uniform equilibrium) advanced in time on a
-    periodic strip with the 2-D Lagrange module on the tet mesh with order-2 elements: velocity and magnetic field
-    errors against the initial wave.'''
+    '''Linearized Alfven wave, quadratic elements on a triangular mesh, serial.'''
     verr_exp = 1.811020939389565E-2
     berr_exp = 4.923999966698998E-3
     assert alfven_2d_setup(1,1,2, linear = True, petsc=petsc_flag)
@@ -194,19 +191,17 @@ def test_lin_r1_p2(petsc_flag=False):
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_lin_r1_p2_mpi(petsc_flag):
-    '''The order-2 tet-mesh linearized case on two MPI ranks with one more refinement level, with the native and the
-    PETSc linear algebra backends.'''
+    '''Linearized Alfven wave, quadratic elements on a triangular mesh, on two MPI processes.
+    Run with native and PETSc linear algebra.'''
     verr_exp = 1.811020939389565E-2
     berr_exp = 4.923999966698998E-3
     assert alfven_2d_setup(1,2,2, petsc=petsc_flag, linear = True)
     assert validate_result(verr_exp, berr_exp)
 
 #============================================================================
-#Linear test runners for NP=3
+# Linearized runs, triangular mesh, cubic elements
 def test_lin_r1_p3(petsc_flag=False):
-    '''Linearized shear Alfven wave (the perturbation evolved about the uniform equilibrium) advanced in time on a
-    periodic strip with the 2-D Lagrange module on the tet mesh with order-3 elements: velocity and magnetic field
-    errors against the initial wave.'''
+    '''Linearized Alfven wave, cubic elements on a triangular mesh, serial.'''
     verr_exp = 2.5746106154166067E-3
     berr_exp = 5.148998451109316E-4
     assert alfven_2d_setup(1,1,3, linear = True, petsc=petsc_flag)
@@ -216,19 +211,17 @@ def test_lin_r1_p3(petsc_flag=False):
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_lin_r1_p3_mpi(petsc_flag):
-    '''The order-3 tet-mesh linearized case on two MPI ranks with one more refinement level, with the native and the
-    PETSc linear algebra backends.'''
+    '''Linearized Alfven wave, cubic elements on a triangular mesh, on two MPI processes.
+    Run with native and PETSc linear algebra.'''
     verr_exp = 2.5746106154166067E-3
     berr_exp = 5.148998451109316E-4
     assert alfven_2d_setup(1,2,3, petsc=petsc_flag, linear = True)
     assert validate_result(verr_exp, berr_exp)
 
 #============================================================================
-#Linear test runners for NP=4
+# Linearized runs, triangular mesh, quartic elements
 def test_lin_r1_p4(petsc_flag=False):
-    '''Linearized shear Alfven wave (the perturbation evolved about the uniform equilibrium) advanced in time on a
-    periodic strip with the 2-D Lagrange module on the tet mesh with order-4 elements: velocity and magnetic field
-    errors against the initial wave.'''
+    '''Linearized Alfven wave, quartic elements on a triangular mesh, serial.'''
     verr_exp = 4.997848969169074E-4
     berr_exp = 4.504851399342237E-4
     assert alfven_2d_setup(1,1,4, linear = True, petsc=petsc_flag)
@@ -238,8 +231,8 @@ def test_lin_r1_p4(petsc_flag=False):
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_lin_r1_p4_mpi(petsc_flag):
-    '''The order-4 tet-mesh linearized case on two MPI ranks with one more refinement level, with the native and the
-    PETSc linear algebra backends.'''
+    '''Linearized Alfven wave, quartic elements on a triangular mesh, on two MPI processes.
+    Run with native and PETSc linear algebra.'''
     verr_exp = 4.997848969169074E-4
     berr_exp = 4.504851399342237E-4
     assert alfven_2d_setup(1,2,4, petsc=petsc_flag, linear = True)

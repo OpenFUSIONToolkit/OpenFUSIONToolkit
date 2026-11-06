@@ -10,30 +10,25 @@ import numpy as np
 from tokamaker_testing import validate_dict, load_fixture
 test_dir = os.path.abspath(os.path.dirname(__file__))
 
-
-# Expected values and per-key tolerances for the g-file reader are JSON fixtures produced by OMFIT's OMFITgeqdsk
-# reader (Meneghini et al., Nucl. Fusion 55, 083008 (2015)) on the same ITER_test.eqdsk, from which the TokaMaker
-# reader was adapted. Raw quantities match to floating-point precision; derived flux-surface quantities carry
-# per-key tolerances where the algorithms differ (triangularity definition, edge resampling). Regenerate both
-# fixtures with generate_eqdsk_expected.py in an environment with scipy<1.14 and numpy<2.0.
+# Expected values come from the OMFIT readers, from which TokaMaker.eqdsk was adapted, run once offline on the
+# same files (see generate_eqdsk_expected.py). Raw file contents match to round-off; derived flux-surface
+# quantities use slightly different algorithms (eg. triangularity definition), so eqdsk_gfile_tol.json relaxes
+# their tolerances.
 eqdsk_gfile_expected_dict = load_fixture('eqdsk_gfile_expected.json')
 eqdsk_gfile_tol_dict      = load_fixture('eqdsk_gfile_tol.json')
 
 
 def run_eqdsk_gfile_case():
-    """Read ITER_test.eqdsk with TokaMaker.eqdsk and produce a result dict
-    with the same keys as eqdsk_gfile_expected_dict."""
+    '''Raw and derived quantities from ITER_test.eqdsk, keyed as in eqdsk_gfile_expected.json'''
     from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
     eq = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
     raw = eq._raw
     results = {}
 
-    # --- Raw scalars (pulled directly from the parsed dict) ---
     for key in ['NW','NH','RDIM','ZDIM','RCENTR','RLEFT','ZMID',
                 'RMAXIS','ZMAXIS','SIMAG','SIBRY','BCENTR','CURRENT']:
         results[key] = float(raw[key])
 
-    # --- 1-D profiles: spot samples + sum + length ---
     for key in ['FPOL','PRES','FFPRIM','PPRIME','QPSI']:
         arr = np.asarray(raw[key])
         results[f'{key}_0']   = float(arr[0])
@@ -42,20 +37,17 @@ def run_eqdsk_gfile_case():
         results[f'{key}_sum'] = float(np.sum(arr))
         results[f'{key}_len'] = len(arr)
 
-    # --- 2-D PSIRZ spot values ---
     psi = np.asarray(raw['PSIRZ'])
     results['PSIRZ_min'] = float(np.min(psi))
     results['PSIRZ_max'] = float(np.max(psi))
     results['PSIRZ_sum'] = float(np.sum(psi))
 
-    # --- Boundary and limiter ---
     for key in ['RBBBS','ZBBBS','RLIM','ZLIM']:
         arr = np.asarray(raw[key])
         results[f'{key}_min'] = float(np.min(arr))
         results[f'{key}_max'] = float(np.max(arr))
         results[f'{key}_len'] = len(arr)
 
-    # --- Derived FSA quantities ---
     geo = eq.geometry
     avg = eq.averages
     mid = eq.midplane
@@ -78,7 +70,7 @@ def run_eqdsk_gfile_case():
     results['beta_n']           = float(betas.get('beta_n', 0.0))
     results['cocos']            = int(eq.cocos)
 
-    # Profiles sampled at interior psi_N on the FSA levels (the g-file grid unless nlevels is overridden)
+    # Flux-surface averages are on psi_N_levels, which differs from the g-file grid if nlevels is set
     psi_N_lvl  = eq.psi_N_levels
     j_tor      = eq.j_tor_averaged         # <Jt/R>/<1/R>  standard convention
     j_tor_dir  = eq.j_tor_averaged_direct  # -(p'<R> + FF'<1/R>/mu0)*(2pi)^exp_Bp
@@ -92,22 +84,18 @@ def run_eqdsk_gfile_case():
 
 
 def test_eqdsk_gfile():
-    '''GEQDSK reader on ITER_test.eqdsk: raw scalars, profiles, 2-D flux and boundary against OMFIT's reader, and
-    derived flux-surface quantities (q, geometry, li, betas, averaged j_tor) within the per-key tolerances of the
-    fixture.'''
-    os.chdir(test_dir)
+    '''gEQDSK reader: raw file contents and derived flux-surface quantities (q, shape, internal inductance, beta,
+    averaged toroidal current) match the OMFIT reader'''
     results = run_eqdsk_gfile_case()
     assert validate_dict([results], eqdsk_gfile_expected_dict,
                          tol_dict=eqdsk_gfile_tol_dict)
 
 
-# The p-file fixture comes from OMFIT's OMFITpFile reader on the same file and must match to floating-point precision
 eqdsk_pfile_expected_dict = load_fixture('eqdsk_pfile_expected.json')
 
 
 def run_eqdsk_pfile_case():
-    """Read D3Dlike_Hmode_test.peqdsk with TokaMaker.eqdsk and produce a
-    result dict matching the expected-dict keys."""
+    '''Profile samples from D3Dlike_Hmode_test.peqdsk, keyed as in eqdsk_pfile_expected.json'''
     from OpenFUSIONToolkit.TokaMaker.eqdsk import read_pfile
     pf = read_pfile(os.path.join(test_dir, 'D3Dlike_Hmode_test.peqdsk'))
     results = {}
@@ -134,20 +122,17 @@ def run_eqdsk_pfile_case():
 
 
 def test_eqdsk_pfile():
-    '''Osborne p-file reader on a DIII-D-like H-mode profile set against OMFIT's reader.'''
-    os.chdir(test_dir)
+    '''Osborne p-file reader: every profile and its psi_N grid match the OMFIT reader'''
     results = run_eqdsk_pfile_case()
     assert validate_dict([results], eqdsk_pfile_expected_dict)
 
 
-# ITER_test.eqdsk is COCOS 1; cocosify() applies the sign and 2pi factors of Sauter & Medvedev, Comput. Phys.
-# Commun. 184, 293 (2013). The checks cover every valid index (1-8 and 11-18) against an independent copy of the table.
+# COCOS indices 1-8 and 11-18 (O. Sauter and S. Yu. Medvedev, Comput. Phys. Commun. 184, 293 (2013))
 _COCOS_VALID = tuple(list(range(1, 9)) + list(range(11, 19)))
 
 
 def _cocos_params_reference(cocos_index):
-    """Reference copy of `_cocos_params` from eqdsk.py, kept locally so
-    this test is an independent check of the table."""
+    '''Sign conventions for a COCOS index (Sauter and Medvedev), written independently of eqdsk.py'''
     if cocos_index < 1 or cocos_index > 18 or cocos_index in (9, 10):
         raise ValueError(f'Invalid COCOS index: {cocos_index}')
     exp_Bp = 0 if cocos_index < 10 else 1
@@ -161,8 +146,8 @@ def _cocos_params_reference(cocos_index):
 
 
 def _expected_cocos_factors(cocos_in, cocos_out):
-    """Multiplicative factors cocosify() should apply when converting from
-    cocos_in to cocos_out.  Returns a dict keyed by raw g-file field name."""
+    '''Factor applied to each raw g-file field when converting from `cocos_in` to `cocos_out` (Sauter and
+    Medvedev, Eqs. 14 and 23)'''
     cc_in  = _cocos_params_reference(cocos_in)
     cc_out = _cocos_params_reference(cocos_out)
     sBp    = cc_out['sigma_Bp']    * cc_in['sigma_Bp']
@@ -190,9 +175,8 @@ def _expected_cocos_factors(cocos_in, cocos_out):
 
 @pytest.mark.parametrize('cocos_out', _COCOS_VALID)
 def test_eqdsk_cocos_roundtrip(cocos_out):
-    '''COCOS conversion 1 -> N -> 1 reproduces the original g-file data for every valid index.'''
+    '''Converting the COCOS 1 test file to each COCOS convention and back reproduces the original data'''
     from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
-    os.chdir(test_dir)
     eq_ref = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
     eq_rt  = (eq_ref.cocosify(cocos_out, copy=True)
                     .cocosify(eq_ref.cocos, copy=True))
@@ -205,9 +189,9 @@ def test_eqdsk_cocos_roundtrip(cocos_out):
 
 @pytest.mark.parametrize('cocos_out', _COCOS_VALID)
 def test_eqdsk_cocos_signs(cocos_out):
-    '''Each field converted from COCOS 1 to N is scaled by the sign and 2pi factor predicted by the COCOS table.'''
+    '''Converting to each COCOS convention scales every flux, field, current, and q entry by the sign and 2 pi
+    factors predicted from the COCOS definitions'''
     from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
-    os.chdir(test_dir)
     eq_ref = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
     eq_n   = eq_ref.cocosify(cocos_out, copy=True)
     assert eq_n.cocos == cocos_out
@@ -221,9 +205,8 @@ def test_eqdsk_cocos_signs(cocos_out):
 
 @pytest.mark.parametrize('bad', [0, 9, 10, 19, -1])
 def test_eqdsk_cocos_invalid(bad):
-    '''Invalid COCOS indices are rejected both when reading a g-file and when converting.'''
+    '''Invalid COCOS indices raise ValueError both when reading and when converting'''
     from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
-    os.chdir(test_dir)
     with pytest.raises(ValueError):
         read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'), cocos=bad)
     eq = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
@@ -232,9 +215,8 @@ def test_eqdsk_cocos_invalid(bad):
 
 
 def test_eqdsk_flip_Bt_Ip_roundtrip():
-    '''Flipping the toroidal field and plasma current twice is the identity.'''
+    '''Reversing the toroidal field and plasma current twice restores the original data'''
     from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
-    os.chdir(test_dir)
     eq_ref = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
     eq_rt  = eq_ref.flip_Bt_Ip(copy=True).flip_Bt_Ip(copy=True)
     for key in ('BCENTR', 'FPOL', 'CURRENT', 'SIMAG', 'SIBRY',
@@ -244,10 +226,9 @@ def test_eqdsk_flip_Bt_Ip_roundtrip():
 
 
 def test_eqdsk_save_load_roundtrip(tmp_path):
-    '''Writing a g-file and reading it back preserves scalars and arrays to the precision of the fixed-format ASCII.
-    Writing a g-file and reading it back preserves scalars and arrays to the precision of the fixed-format ASCII.'''
+    '''Writing a gEQDSK file and reading it back reproduces the data to the precision of the fixed-format
+    text'''
     from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk
-    os.chdir(test_dir)
     eq = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
     out_path = tmp_path / 'ITER_roundtrip.eqdsk'
     eq.save(str(out_path))
@@ -262,9 +243,8 @@ def test_eqdsk_save_load_roundtrip(tmp_path):
 
 
 def test_eqdsk_cocos_bytes_roundtrip():
-    '''In-memory serialization of a g-file (to_bytes/from_bytes) reproduces the equilibrium.'''
+    '''Serializing a gEQDSK equilibrium to bytes and back reproduces the data'''
     from OpenFUSIONToolkit.TokaMaker.eqdsk import read_geqdsk, GEQDSKEquilibrium
-    os.chdir(test_dir)
     eq = read_geqdsk(os.path.join(test_dir, 'ITER_test.eqdsk'))
     raw_bytes = eq.to_bytes()
     eq_rt = GEQDSKEquilibrium.from_bytes(raw_bytes, cocos=eq.cocos)
@@ -274,9 +254,8 @@ def test_eqdsk_cocos_bytes_roundtrip():
 
 
 def test_pfile_bytes_roundtrip():
-    '''In-memory serialization of a p-file reproduces its profiles.'''
+    '''Serializing a p-file to bytes and back reproduces the profiles'''
     from OpenFUSIONToolkit.TokaMaker.eqdsk import read_pfile, PFile
-    os.chdir(test_dir)
     pf = read_pfile(os.path.join(test_dir, 'D3Dlike_Hmode_test.peqdsk'))
     pf_rt = PFile.from_bytes(pf.to_bytes())
     for key in ('ne', 'te', 'ni', 'ti'):

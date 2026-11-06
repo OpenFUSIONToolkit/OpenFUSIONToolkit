@@ -6,7 +6,7 @@
 # TokaMaker tests: bootstrap current from the Python solve_with_bootstrap() workflow and Redl model on ITER
 import pytest
 import numpy as np
-from tokamaker_testing import mp_run, validate_dict, ITER_bootstrap_reference
+from tokamaker_testing import mp_run, validate_dict, solve_ITER_reference, ITER_Hmode_profiles
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.util import eC
 from OpenFUSIONToolkit.TokaMaker.util import create_power_flux_fun
@@ -14,19 +14,20 @@ from OpenFUSIONToolkit.TokaMaker.util import create_power_flux_fun
 
 def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
     from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap
-
-    ref = ITER_bootstrap_reference(mesh_resolution, fe_order)
-    if ref is None:
+    mygs, _ = solve_ITER_reference(mesh_resolution, fe_order)
+    if mygs is None:
         mp_q.put(None)
         return
-    mygs, psi_sample, ne, Te, Zeff = ref
     Ip_target = 15.6E6
+    n_sample = 257
+    psi_sample = np.linspace(0.0, 1.0, n_sample)
     psi_pad = 1.E-3
-    inductive_jphi = create_power_flux_fun(len(psi_sample), 2.25, 2.5)['y']
-    # Single ion species at the electron density and temperature
-    ni = ne.copy()
-    Ti = Te.copy()
-
+    jphi_prof = create_power_flux_fun(len(psi_sample), 2.25, 2.5)
+    inductive_jphi = jphi_prof['y']
+    ne, Te = ITER_Hmode_profiles(n_sample)
+    ni = ne.copy()       # Assuming quasineutrality
+    Ti = Te.copy()       # Assuming isothermal
+    Zeff = np.full(n_sample, 1.7)
     try:
         bs_results = solve_with_bootstrap(
             mygs,
@@ -44,27 +45,23 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
         print("Bootstrap solve failed: {0}".format(e))
         mp_q.put(None)
         return
-
     eq_info = mygs.get_stats(li_normalization='ITER')
-
-    # Bootstrap current including its pressure-driven part (current conventions eq. A7)
+    # Bootstrap j_phi including its pressure-driven part (doc_tokamaker_current_conventions eq. A7)
     jphi_bs_raw = bs_results['jphi_bs_raw'] + bs_results['jphi_pd_raw']
     jphi_total = bs_results['jphi_total']
     jphi_ind = bs_results['jphi_ind']
-
     eq_info['jphi_bs_max'] = float(np.max(np.abs(jphi_bs_raw)))
     eq_info['jphi_bs_axis'] = float(jphi_bs_raw[0])
     eq_info['jphi_axis'] = float(jphi_total[0])
     eq_info['jphi_max'] = float(np.max(np.abs(jphi_total)))
     eq_info['jphi_ind_axis'] = float(jphi_ind[0])
-
-    # Bootstrap fraction (psi-space trapezoid estimate)
+    # Bootstrap fraction estimated in psi_N rather than by area, sufficient for regression
     bs_frac = np.trapezoid(jphi_bs_raw, psi_sample) / np.trapezoid(jphi_total, psi_sample) \
               if np.trapezoid(jphi_total, psi_sample) != 0 else 0.0
     eq_info['bs_fraction'] = float(bs_frac)
-
     mp_q.put([eq_info])
     oftpy_dump_cov()
+
 
 ITER_bootstrap_eq_dict = {
     'Ip': 15599997.261988742,
@@ -86,52 +83,52 @@ ITER_bootstrap_eq_dict = {
 
 @pytest.mark.parametrize("order", (2,))
 def test_ITER_bootstrap(order):
-    '''Self-consistent bootstrap current on the ITER equilibrium with H-mode kinetic profiles through the Python
-    solve_with_bootstrap() iteration, using the Redl model (A. Redl et al., Phys. Plasmas 28, 022502 (2021)):
-    equilibrium parameters, peak and on-axis current densities, and the bootstrap fraction.'''
+    '''Bootstrap current iteration with the Python solve_with_bootstrap() workflow on the ITER equilibrium with
+    H-mode profiles and the Redl model; equilibrium quantities, current density profile values, and the bootstrap
+    fraction are compared to reference values.
+
+    Reference: A. Redl et al., Phys. Plasmas 28, 022502 (2021).
+    '''
     results = mp_run(run_ITER_bootstrap_case, (1.0, order), timeout=300)
     assert validate_dict(results, ITER_bootstrap_eq_dict)
 
 
 def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
-    '''Evaluate redl_bootstrap() from the equilibrium geometry the way solve_with_bootstrap() does'''
     from OpenFUSIONToolkit.TokaMaker.bootstrap import redl_bootstrap, calculate_ln_lambda
-
-    ref = ITER_bootstrap_reference(mesh_resolution, fe_order)
-    if ref is None:
+    mygs, _ = solve_ITER_reference(mesh_resolution, fe_order)
+    if mygs is None:
         mp_q.put(None)
         return
-    mygs, psi_N, ne, Te, Zeff = ref
+    # Geometry, gradients, Coulomb logarithms, and collisionalities are computed here as in solve_with_bootstrap(),
+    # so redl_bootstrap() is tested on its own with the same inputs as test_ITER_bootstrap
+    n_psi = 257
+    psi_N = np.linspace(0.0, 1.0, n_psi)
     psi_pad = 1.E-3
+
+    ne, Te = ITER_Hmode_profiles(n_psi)
     ni = ne.copy()
     Ti = Te.copy()
-
-    # Flux-surface geometry, padded away from the axis and LCFS where surface tracing is singular
+    Zeff = np.full(n_psi, 1.7)
+    # Flux-surface quantities are ill-defined exactly on the axis and LCFS
     psi_eval = np.clip(psi_N, psi_pad, 1.0 - psi_pad)
     _, f, _, _, pp_eq = mygs.get_profiles(psi=psi_eval)
     _, fc, r_avgs, b_avgs, eps = mygs.sauter_fc(psi=psi_eval, return_eps=True)
-
     ft = 1 - fc
     _, qvals, ravgs_q, _, _, _ = mygs.get_q(psi=psi_eval)
     R_avg = ravgs_q['<R>']
     fsa = mygs.get_fsa(psi=psi_eval)
     R_geo = 0.5*(fsa['R_min'] + fsa['R_max'])
-
-    # Gradients with respect to the unnormalized poloidal flux
     psi_range = mygs.psi_bounds[1] - mygs.psi_bounds[0]
-
     dn_e_dpsi = np.gradient(ne, psi_N, edge_order=2) / psi_range
     dT_e_dpsi = np.gradient(Te, psi_N, edge_order=2) / psi_range
     dn_i_dpsi = np.gradient(ni, psi_N, edge_order=2) / psi_range
     dT_i_dpsi = np.gradient(Ti, psi_N, edge_order=2) / psi_range
-
     ln_le, ln_lii = calculate_ln_lambda(
         Te, Ti, ne, ni, Zeff,
         electron_lnLambda_model='NRL',
         ion_lnLambda_model='Zavg',
     )
-
-    # Collisionalities of Sauter et al., Phys. Plasmas 6, 2834 (1999), eqs. 18b-c
+    # Normalized collisionalities (Sauter et al. 1999, Eqs. 18b and 18c)
     Zdom = 1.0
     Zavg = ne / ni
     Zion = (Zdom**2 * Zavg * Zeff)**0.25
@@ -139,7 +136,6 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
                  * Zion**4 * ln_lii / (Ti**2 * eps**1.5))
     nu_e_star = (6.921e-18 * np.abs(qvals) * R_geo * ne
                  * Zeff * ln_le / (Te**2 * eps**1.5))
-
     try:
         j_BS_neo, coeffs = redl_bootstrap(
             psi_N=psi_N, Te=Te, Ti=Ti, ne=ne, ni=ni,
@@ -158,12 +154,10 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
         print("redl_bootstrap failed: {0}".format(e))
         mp_q.put(None)
         return
-
-    # <j.B> to j_phi (doc_tokamaker_current_conventions eq. A7)
+    # Convert <J.B> to j_phi [A/m^2] (doc_tokamaker_current_conventions eq. A7)
     inv_R, B2 = ravgs_q['<1/R>'], b_avgs[1]
     jphi_bs = j_BS_neo * f * inv_R / B2 + pp_eq * (R_avg - f**2 * inv_R / B2)
     jphi_bs = np.nan_to_num(jphi_bs, nan=0.0)
-
     results = {}
     results['jphi_bs_max'] = float(np.max(np.abs(jphi_bs)))
     results['jphi_bs_axis'] = float(jphi_bs[0])
@@ -173,7 +167,6 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     results['alpha_axis'] = float(coeffs['alpha'][0])
     results['nu_e_star_axis'] = float(coeffs['nu_e_star'][0])
     results['nu_i_star_axis'] = float(coeffs['nu_i_star'][0])
-
     mp_q.put([results])
     oftpy_dump_cov()
 
@@ -192,9 +185,11 @@ Redl_jBS_eq_dict = {
 
 @pytest.mark.parametrize("order", (2,))
 def test_Redl_jBS(order):
-    '''The Redl bootstrap formula evaluated directly from the equilibrium geometry (trapped fraction, collisionalities,
-    profile gradients) as solve_with_bootstrap() does: the resulting current density profile and the L31, L32 and
-    alpha coefficients on axis.'''
+    '''Redl bootstrap current model evaluated directly on the ITER equilibrium with H-mode profiles: current
+    density, transport coefficients, and collisionalities on axis are compared to reference values.
+
+    References: O. Sauter et al., Phys. Plasmas 6, 2834 (1999); A. Redl et al., Phys. Plasmas 28, 022502 (2021).
+    '''
     results = mp_run(run_Redl_jBS_case, (1.0, order), timeout=300)
     assert validate_dict(results, Redl_jBS_eq_dict)
 
@@ -202,8 +197,8 @@ def test_Redl_jBS(order):
 @pytest.mark.coverage
 @pytest.mark.parametrize("use_python_solve", (True, False))
 def test_bootstrap_x_validation(use_python_solve):
-    '''Input grid validation of solve_with_bootstrap(): grids of the wrong length, not strictly increasing, non-finite
-    or not spanning [0, 1], too few points, and the deprecated psi_N alias are all rejected before any solve.'''
+    '''solve_with_bootstrap() rejects invalid profile grids (wrong length, unsorted, non-finite, not spanning [0,1],
+    too few points, or padding too large) and handles the deprecated psi_N argument, before any solve'''
     from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap
     n = 65
     ne = np.full(n, 1.0e20)
@@ -236,10 +231,10 @@ def test_bootstrap_x_validation(use_python_solve):
         call(np.linspace(0.0, 0.5, n))
     with pytest.raises(ValueError, match="at least 5 points"):
         call(None, m=4)
-    if use_python_solve:  # psi_pad is used by the Python solver only
+    if use_python_solve:  # psi_pad is only used by the Python solver
         with pytest.raises(ValueError, match="exceeds the first/last"):
             call(good, psi_pad=0.5)
-    # deprecated alias psi_N: warns, then validated as x
+    # The deprecated psi_N alias warns, then is validated like x
     with pytest.warns(DeprecationWarning, match="psi_N"):
         with pytest.raises(ValueError, match="same length"):
             call(psi_N=good[:-1])
@@ -250,8 +245,8 @@ def test_bootstrap_x_validation(use_python_solve):
 @pytest.mark.coverage
 @pytest.mark.parametrize("use_python_solve", (True, False))
 def test_bootstrap_deprecated_names(use_python_solve):
-    '''Deprecated keyword (scale_jBS) and result-key (total_j_phi) names warn and map onto their replacements, and
-    passing both old and new keywords is an error.'''
+    '''Deprecated solve_with_bootstrap() argument and result names warn but still work, and passing both old and
+    new argument names is an error'''
     from OpenFUSIONToolkit.TokaMaker.bootstrap import solve_with_bootstrap, _BootstrapResults
     n = 65
     ne = np.full(n, 1.0e20)

@@ -210,7 +210,8 @@ def namelist_flag(value):
 
 
 def mpi_ranks(nbase, nlevels):
-    '''Refinement past the base level runs distributed over two ranks'''
+    '''Two ranks when the mesh has a distributed level: the level above nbase is the base mesh distributed over the
+    processes (a transfer level, not a refinement), so MPI runs reproduce the serial errors'''
     return 2 if nbase != nlevels else 1
 
 
@@ -218,8 +219,8 @@ def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fal
     '''Write the input for a traveling sound wave and run test_sound (`representation` 'hcurl') or test_sound_lag
     ('lagrange')
 
-    `nu_mhd` gives the multigrid smoother iterations per level. The matrix-free Newton-Krylov solver (`mf`, nonlinear
-    runs only) is run with a looser linear tolerance.
+    `nu_mhd` gives the multigrid smoother iterations per level. Matrix-free Jacobian products (`mf`, nonlinear runs
+    only) are finite-difference approximations, so the linear tolerance is relaxed.
     '''
     exe, rep_options, timeout = {'hcurl': ('./test_sound', " bbc='bc'\n", 2000),
                                  'lagrange': ('./test_sound_lag', " k_db=1.\n", 1000)}[representation]
@@ -239,7 +240,8 @@ def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fal
 
 
 def validate_sound(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_temp=False):
-    '''Density, temperature and velocity errors of a sound wave run, and its plot output'''
+    '''Density, temperature and velocity errors of a sound wave run, and its plot output; the errors are regression
+    values from a reference run and each may exceed its stored value by up to 1%'''
     errors_ok = validate_errors('sound.results', (('Density', nerr_exp), ('Temperature', terr_exp), ('Velocity', verr_exp)), 1.01)
     output_ok = validate_mug_output(steps_exp, linear=linear, two_temp=two_temp)
     return errors_ok and output_ok
@@ -270,7 +272,8 @@ def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fa
 
 
 def validate_alfven(berr_exp,verr_exp,steps_exp=11,linear=False):
-    '''Magnetic field and velocity errors of an Alfven wave run, and its plot output'''
+    '''Magnetic field and velocity errors of an Alfven wave run, and its plot output; the errors are regression
+    values from a reference run and each may exceed its stored value by up to 1%'''
     errors_ok = validate_errors('alfven.results', (('Magnetic', berr_exp), ('Velocity', verr_exp)), 1.01)
     output_ok = validate_mug_output(steps_exp, linear=linear)
     return errors_ok and output_ok

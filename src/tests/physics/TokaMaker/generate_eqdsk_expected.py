@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
 """Regenerate the expected-value JSON fixtures for the TokaMaker eqdsk tests.
 
 Reads `ITER_test.eqdsk` and `D3Dlike_Hmode_test.peqdsk` with the OMFIT

@@ -3,8 +3,7 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-# Tests for the axisymmetric Green's function of a current filament shared by TokaMaker and ThinCurr
-# (test_axi_green.F90)
+# Axisymmetric Green's function tests (shared by TokaMaker and ThinCurr)
 import os
 import sys
 
@@ -45,9 +44,11 @@ def green_closed_form(r, z, rc, zc):
 
 @pytest.mark.coverage
 def test_green():
-    '''Green's function of a circular current filament and its gradient at medium- and far-field points against direct
-    quadrature, the closed form in complete elliptic integrals (Jackson, Classical Electrodynamics, Sec. 5.5), and
-    the magnetic dipole far-field limit.'''
+    '''Axisymmetric filament Green's function and its R and Z derivatives, from both evaluation routines, against
+    direct quadrature, the elliptic-integral closed form, and the far-field dipole limit.
+
+    Reference: J. D. Jackson, Classical Electrodynamics, 3rd ed. (Wiley, 1999), Sec. 5.5.
+    '''
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in)
@@ -61,7 +62,8 @@ def test_green():
         assert g == pytest.approx(green_closed_form(r, z, rc, zc), rel=1.0E-9)
         assert dgdr == pytest.approx(dgdr_ref, rel=1.0E-8)
         assert dgdz == pytest.approx(dgdz_ref, rel=1.0E-8)
-        # Far field: magnetic dipole, -r^2 rc^2/(4 rho^3) with rho the distance from the filament's center
+        # Far field: magnetic dipole, -r^2 rc^2/(4 rho^3) with rho the distance from the filament's center, accurate
+        # to O((rc/rho)^2)
         rho = np.hypot(r, z - zc)
         if rho > 10.0*rc:
             eps = (rc/rho)**2
