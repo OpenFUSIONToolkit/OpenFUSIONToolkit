@@ -9,11 +9,12 @@ from thincurr_testing import ThinCurr_setup, validate_eigs, validate_fr, validat
 from oft_testing import approx_list
 
 
-#============================================================================
-# Test runners for filament model
+# The dummy plate is made highly resistive so that the response comes from the passive filaments alone
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_eig_passive(direct_flag):
+    '''L/R eigenmodes of four passive circular filaments (voltage-driven coils) coupled through their mutual
+    inductances.'''
     eigs = approx_list((1.489156E-1, 6.274424E-2, 3.041702E-2, 2.793962E-2), rel=1.E-5)
     assert ThinCurr_setup(None,'eig',direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
@@ -22,6 +23,7 @@ def test_eig_passive(direct_flag):
 
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_eig_passive_circular(direct_flag):
+    '''The passive filament eigenmodes with the filaments given as circular coils rather than point lists.'''
     eigs = approx_list((1.489295E-1, 6.274780E-2, 3.041867E-2, 2.794114E-2), rel=1.E-5)
     assert ThinCurr_setup(None,'eig',direct_flag,eta=1.E4,
                            vcoils=((0.5, 0.1), (0.5, 0.05),
@@ -31,6 +33,8 @@ def test_eig_passive_circular(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_passive(direct_flag):
+    '''Time-dependent response of a passive filament to a ramped current in a drive coil: final flux-loop signals.
+    Time-dependent response of a passive filament to a ramped current in a drive coil: final flux-loop signals.'''
     sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((7.938330E-4, 8.069765E-4), rel=1.E-3)
     assert ThinCurr_setup(None,'td',direct_flag,eta=1.E4,
                           icoils=((0.5, 0.1),),
@@ -42,6 +46,7 @@ def test_td_passive(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_fr_passive(direct_flag):
+    '''Frequency response of a passive filament at 5 kHz to a drive coil: real and imaginary flux-loop signals.'''
     fr_real = approx_list((1.844588E-1, 1.917030E-1), rel=1.E-4)
     fr_imag = approx_list((-2.272322E-4, -1.629831E-4), rel=1.E-4)
     assert ThinCurr_setup(None,'fr',direct_flag,eta=1.E4,freq=5.E3,fr_limit=0,
@@ -53,6 +58,8 @@ def test_fr_passive(direct_flag):
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_td_passive_volt(direct_flag):
+    '''Time-dependent response of two filaments, one voltage-driven: final flux-loop signals and filament currents.
+    Time-dependent response of two filaments, one voltage-driven: final flux-loop signals and filament currents.'''
     sigs_final = approx_list([4.E-3], rel=1.E-8) +  approx_list((4.296507E-4, 4.366419E-4), rel=1.E-3)
     jumpers_final = approx_list([4.E-3], rel=1.E-8) +  approx_list([-673.8428, 1721.1650], rel=1.E-3)
     assert ThinCurr_setup(None,'td',direct_flag,eta=1.E4,

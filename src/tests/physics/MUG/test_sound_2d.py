@@ -1,3 +1,10 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# MUG tests: traveling sound wave on a periodic strip with the 2-D Lagrange xMHD module (test_sound_2d.F90):
+# velocity, density and temperature of the evolved wave against the initial wave
 import os
 import sys
 import pytest
@@ -98,6 +105,9 @@ def validate_result(verr_exp,nerr_exp,terr_exp, steps_exp=11,linear=False):
 # Non-Linear test runners for NP=2
 @pytest.mark.parametrize("mf", (False, True))
 def test_nl_r1_p2(mf,petsc_flag=False):
+    '''Nonlinear sound wave advanced in time on a periodic strip with the 2-D Lagrange module on the tet mesh with
+    order-2 elements, with and without the matrix-free Newton-Krylov solver: velocity, density and temperature
+    errors against the initial wave.'''
     verr_exp = 3.4757492919345006E-3
     nerr_exp = 1.0042257109873824E-2
     terr_exp = 1.0042257501380656E-2
@@ -109,6 +119,8 @@ def test_nl_r1_p2(mf,petsc_flag=False):
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_nl_r1_p2_mpi(mf,petsc_flag):
+    '''The order-2 tet-mesh nonlinear case on two MPI ranks with one more refinement level, with and without the
+    matrix-free Newton-Krylov solver, with the native and the PETSc linear algebra backends.'''
     if mf and petsc_flag:
         pytest.skip()
     verr_exp = 3.4757492919345006E-3
@@ -121,6 +133,9 @@ def test_nl_r1_p2_mpi(mf,petsc_flag):
 # Non-Linear test runners for NP=3
 @pytest.mark.parametrize("mf", (False, True))
 def test_nl_r1_p3(mf,petsc_flag=False):
+    '''Nonlinear sound wave advanced in time on a periodic strip with the 2-D Lagrange module on the tet mesh with
+    order-3 elements, with and without the matrix-free Newton-Krylov solver: velocity, density and temperature
+    errors against the initial wave.'''
     verr_exp = 2.1428547309174486E-3
     nerr_exp = 2.1814302475110835E-3
     terr_exp = 2.1800283394622167E-3
@@ -132,6 +147,8 @@ def test_nl_r1_p3(mf,petsc_flag=False):
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_nl_r1_p3_mpi(mf,petsc_flag):
+    '''The order-3 tet-mesh nonlinear case on two MPI ranks with one more refinement level, with and without the
+    matrix-free Newton-Krylov solver, with the native and the PETSc linear algebra backends.'''
     if mf and petsc_flag:
         pytest.skip()
     verr_exp = 2.1428547309174486E-3
@@ -144,6 +161,9 @@ def test_nl_r1_p3_mpi(mf,petsc_flag):
 # Non-Linear test runners for NP=4
 @pytest.mark.parametrize("mf", (False, True))
 def test_nl_r1_p4(mf,petsc_flag=False):
+    '''Nonlinear sound wave advanced in time on a periodic strip with the 2-D Lagrange module on the tet mesh with
+    order-4 elements, with and without the matrix-free Newton-Krylov solver: velocity, density and temperature
+    errors against the initial wave.'''
     verr_exp = 2.081834197322753E-3
     nerr_exp = 2.083623647676870E-3
     terr_exp = 2.083635171836626E-3
@@ -155,6 +175,8 @@ def test_nl_r1_p4(mf,petsc_flag=False):
 @pytest.mark.parametrize("mf", (False, True))
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_nl_r1_p4_mpi(mf,petsc_flag):
+    '''The order-4 tet-mesh nonlinear case on two MPI ranks with one more refinement level, with and without the
+    matrix-free Newton-Krylov solver, with the native and the PETSc linear algebra backends.'''
     if mf and petsc_flag:
         pytest.skip()
     verr_exp = 2.081834197322753E-3
@@ -166,6 +188,9 @@ def test_nl_r1_p4_mpi(mf,petsc_flag):
 #============================================================================
 # Linear test runners for NP=2
 def test_lin_r1_p2(petsc_flag=False):
+    '''Linearized sound wave (the perturbation evolved about the uniform equilibrium) advanced in time on a periodic
+    strip with the 2-D Lagrange module on the tet mesh with order-2 elements: velocity, density and temperature
+    errors against the initial wave.'''
     verr_exp = 8.54387175E-03
     nerr_exp = 1.18926533E-02
     terr_exp = 1.18926532E-02
@@ -176,6 +201,8 @@ def test_lin_r1_p2(petsc_flag=False):
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_lin_r1_p2_mpi(petsc_flag):
+    '''The order-2 tet-mesh linearized case on two MPI ranks with one more refinement level, with the native and the
+    PETSc linear algebra backends.'''
     verr_exp = 8.54387175E-03
     nerr_exp = 1.18926533E-02
     terr_exp = 1.18926532E-02
@@ -185,6 +212,9 @@ def test_lin_r1_p2_mpi(petsc_flag):
 #============================================================================
 # Linear test runners for NP=3
 def test_lin_r1_p3(petsc_flag=False):
+    '''Linearized sound wave (the perturbation evolved about the uniform equilibrium) advanced in time on a periodic
+    strip with the 2-D Lagrange module on the tet mesh with order-3 elements: velocity, density and temperature
+    errors against the initial wave.'''
     verr_exp = 8.74577449E-03
     nerr_exp = 8.75411608E-03
     terr_exp = 8.75411607E-03
@@ -195,6 +225,8 @@ def test_lin_r1_p3(petsc_flag=False):
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_lin_r1_p3_mpi(petsc_flag):
+    '''The order-3 tet-mesh linearized case on two MPI ranks with one more refinement level, with the native and the
+    PETSc linear algebra backends.'''
     verr_exp = 8.74577449E-03
     nerr_exp = 8.75411608E-03
     terr_exp = 8.75411607E-03
@@ -204,6 +236,9 @@ def test_lin_r1_p3_mpi(petsc_flag):
 #============================================================================
 # Linear test runners for NP=4
 def test_lin_r1_p4(petsc_flag=False):
+    '''Linearized sound wave (the perturbation evolved about the uniform equilibrium) advanced in time on a periodic
+    strip with the 2-D Lagrange module on the tet mesh with order-4 elements: velocity, density and temperature
+    errors against the initial wave.'''
     verr_exp = 8.74382139E-03
     nerr_exp = 8.74369833E-03
     terr_exp = 8.74369838E-03
@@ -214,6 +249,8 @@ def test_lin_r1_p4(petsc_flag=False):
 @pytest.mark.coverage
 @pytest.mark.parametrize("petsc_flag", (True, False))
 def test_lin_r1_p4_mpi(petsc_flag):
+    '''The order-4 tet-mesh linearized case on two MPI ranks with one more refinement level, with the native and the
+    PETSc linear algebra backends.'''
     verr_exp = 8.74382139E-03
     nerr_exp = 8.74369833E-03
     terr_exp = 8.74369838E-03

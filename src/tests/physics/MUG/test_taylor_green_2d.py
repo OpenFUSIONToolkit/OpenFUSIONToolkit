@@ -1,4 +1,9 @@
-from __future__ import print_function
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# MUG tests: decaying Taylor-Green vortex with the incompressible 2-D xMHD solver (test_taylor_green_2d.F90)
 import os
 import sys
 import pytest
@@ -59,15 +64,13 @@ def taylor_green_setup(nbase, nlevels, order, mf=False, ni=8, dt='2.5E-2', nstep
     if nbase != nlevels:
         nproc = 2
     xml_file = 'oft_in_taylor_green.xml'
+    # Two block-Jacobi blocks only for serial P2 matrix-free, which otherwise gets a near-exact inner GMRES solve
     if order == 2 and mf and nproc == 1:
         xml_file = 'oft_in_taylor_green_p2_mf.xml'
     mf_flag = ('T' if mf else 'F')
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(nbase, nlevels, order, ni, dt, nsteps, nu, mf_flag))
-    # Block-Jacobi makes the periodic Jacobian suitable for local LU solves.
-    # Use two blocks only for serial P2 matrix-free to avoid a near-exact
-    # inner GMRES solve.
     try:
         os.remove('taylor_green_2d.results')
     except FileNotFoundError:
@@ -82,6 +85,7 @@ def validate_result(vxerr_exp, vzerr_exp, perr_exp):
 @pytest.mark.parametrize("nonfinite", (float('nan'), float('inf'), float('-inf')),
                          ids=("nan", "positive-inf", "negative-inf"))
 def test_validate_result_rejects_nonfinite(tmp_path, monkeypatch, error_index, nonfinite):
+    '''The error-file validator rejects a NaN or infinite error in any of the three fields.'''
     errors = [0.1, 0.2, 0.3]
     errors[error_index] = nonfinite
     (tmp_path / 'taylor_green_2d.results').write_text(
@@ -91,6 +95,7 @@ def test_validate_result_rejects_nonfinite(tmp_path, monkeypatch, error_index, n
 
 @pytest.mark.coverage
 def test_validate_result_accepts_finite(tmp_path, monkeypatch):
+    '''The error-file validator accepts finite errors within tolerance.'''
     (tmp_path / 'taylor_green_2d.results').write_text('0.1\n0.2\n0.3\n')
     monkeypatch.chdir(tmp_path)
     assert validate_result(0.1, 0.2, 0.3)
@@ -99,6 +104,9 @@ def test_validate_result_accepts_finite(tmp_path, monkeypatch):
 # Taylor-Green vortex, incompressible, NP=2
 @pytest.mark.parametrize("mf", (False, True))
 def test_taylor_green_p2(mf):
+    '''Decaying Taylor-Green vortex (G. I. Taylor, Phil. Mag. 46, 671 (1923)) in the incompressible 2-D solver with
+    order-2 elements, with and without the matrix-free solver: velocity and pressure errors against the exact
+    exponentially decaying solution.'''
     vxerr_exp = 2.9214986850512860E-2
     vzerr_exp = 2.9214986892598150E-2
     perr_exp = 8.2921136337263515E-2
@@ -109,6 +117,9 @@ def test_taylor_green_p2(mf):
 @pytest.mark.coverage
 @pytest.mark.parametrize("mf", (False, True))
 def test_taylor_green_p2_mpi(mf):
+    '''Decaying Taylor-Green vortex (G. I. Taylor, Phil. Mag. 46, 671 (1923)) in the incompressible 2-D solver with
+    order-2 elements on two MPI ranks with one more refinement level, with and without the matrix-free solver:
+    velocity and pressure errors against the exact exponentially decaying solution.'''
     vxerr_exp = 2.9214986850512860E-2
     vzerr_exp = 2.9214986892598150E-2
     perr_exp = 8.2921136337263515E-2
@@ -119,6 +130,9 @@ def test_taylor_green_p2_mpi(mf):
 # Taylor-Green vortex, incompressible, NP=3
 @pytest.mark.parametrize("mf", (False, True))
 def test_taylor_green_p3(mf):
+    '''Decaying Taylor-Green vortex (G. I. Taylor, Phil. Mag. 46, 671 (1923)) in the incompressible 2-D solver with
+    order-3 elements, with and without the matrix-free solver: velocity and pressure errors against the exact
+    exponentially decaying solution.'''
     vxerr_exp = 1.4264674522612337E-3
     vzerr_exp = 1.4264676548348997E-3
     perr_exp = 5.8785206705912092E-3
@@ -129,6 +143,9 @@ def test_taylor_green_p3(mf):
 @pytest.mark.coverage
 @pytest.mark.parametrize("mf", (False, True))
 def test_taylor_green_p3_mpi(mf):
+    '''Decaying Taylor-Green vortex (G. I. Taylor, Phil. Mag. 46, 671 (1923)) in the incompressible 2-D solver with
+    order-3 elements on two MPI ranks with one more refinement level, with and without the matrix-free solver:
+    velocity and pressure errors against the exact exponentially decaying solution.'''
     vxerr_exp = 1.4264674522612337E-3
     vzerr_exp = 1.4264676548348997E-3
     perr_exp = 5.8785206705912092E-3
@@ -139,6 +156,9 @@ def test_taylor_green_p3_mpi(mf):
 # Taylor-Green vortex, incompressible, NP=4
 @pytest.mark.parametrize("mf", (False, True))
 def test_taylor_green_p4(mf):
+    '''Decaying Taylor-Green vortex (G. I. Taylor, Phil. Mag. 46, 671 (1923)) in the incompressible 2-D solver with
+    order-4 elements, with and without the matrix-free solver: velocity and pressure errors against the exact
+    exponentially decaying solution.'''
     vxerr_exp = 5.6846822406755744E-5
     vzerr_exp = 5.6845321594545741E-5
     perr_exp = 2.4035705160280522E-4
@@ -149,6 +169,9 @@ def test_taylor_green_p4(mf):
 @pytest.mark.coverage
 @pytest.mark.parametrize("mf", (False, True))
 def test_taylor_green_p4_mpi(mf):
+    '''Decaying Taylor-Green vortex (G. I. Taylor, Phil. Mag. 46, 671 (1923)) in the incompressible 2-D solver with
+    order-4 elements on two MPI ranks with one more refinement level, with and without the matrix-free solver:
+    velocity and pressure errors against the exact exponentially decaying solution.'''
     vxerr_exp = 5.6846822406755744E-5
     vzerr_exp = 5.6845321594545741E-5
     perr_exp = 2.4035705160280522E-4

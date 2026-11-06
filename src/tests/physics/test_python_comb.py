@@ -1,3 +1,9 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# Combined test: the Marklin, ThinCurr and TokaMaker Python interfaces in one OFT environment
 import os
 import sys
 import traceback
@@ -21,13 +27,11 @@ def run_all(dummy,mp_q):
     # printed below identifies where
     results = [None, None, None]
     try:
-        # Run Marklin
         taylor_solver = Marklin(myOFT)
         taylor_solver.setup_mesh(mesh_file='cyl_Marklin.h5',grid_order=1)
         taylor_solver.setup(2,minlev=1)
         taylor_solver.compute_eig(1)
         results[0] = taylor_solver.eig_vals
-        # Run ThinCurr
         tw_model = ThinCurr(myOFT)
         tw_model.setup_model(mesh_file="tw_test-plate.h5",xml_filename='oft_in.xml')
         tw_model.setup_io()
@@ -36,7 +40,6 @@ def run_all(dummy,mp_q):
         tw_model.compute_Rmat()
         eig_vals, _ = tw_model.get_eigs(4,direct=True)
         results[1] = eig_vals[0]
-        # Run TokaMaker
         gs_mesh = gs_Domain()
         gs_mesh.define_region('plasma',0.05,'plasma')
         gs_mesh.add_rectangle(0.5,0.5,1.0,1.0,'plasma')
@@ -86,6 +89,8 @@ def validate_all(results, expected, rtol=1.E-3):
 
 @pytest.mark.coverage
 def test_packages_serial():
+    '''Marklin, ThinCurr and TokaMaker instances in one OFT environment and process, each reproducing the result of its
+    standalone test (cylinder eigenvalue, plate eigenvalue, spheromak FF' scale).'''
     with open(os.path.join(test_dir,"oft_in.xml"), "w+") as fid:
         fid.write("""<oft>
   <thincurr>

@@ -20,13 +20,11 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
         print(e)
         mp_q.put(None)
         return
-    # Run EQ
     mygs = None
     myOFT = OFT_env(nthreads=-1)
     for fe_order in fe_orders:
         mygs_last = mygs
         mygs = setup_ITER_gs(myOFT,fe_order,F0=helicity*5.3*6.2)
-        #
         if test_type.startswith('eig'):
             if test_type == 'eig_dep':
                 eig_vals, _ = mygs.eig_wall(10)
@@ -36,7 +34,6 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
                 mp_q.put([{'Tau_w': eig_vals[:5]}])
             oftpy_dump_cov()
             return
-        #
         set_ITER_constraints(mygs)
         try:
             EQ_obj, nl_its = solve_ITER_eq(mygs)
@@ -49,7 +46,7 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
                 growth_rates = -eig_vals[:,0]
             else:
                 growth_rates, eig_modes = mygs.compute_linear_stability(1.E2,10,False)
-            # Run brief nonlinear evolution
+            # Brief nonlinear evolution seeded with 1% of the least stable mode
             R0 = 6.3
             psi0 = mygs.get_psi(False)
             eig_sign = eig_modes[0,(mygs.r[:,1]-R0)>0.0][abs(eig_modes[0,(mygs.r[:,1]-R0)>0.0]).argmax()]
@@ -84,13 +81,11 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
         for key in ('q', 'F', 'dV/dPsi', '<|grad psi|>', '<|grad psi|^2>', '<Bp^2>',
                     '<1/B^2>', 'R_min', 'R_max', 'Z_min', 'Z_max', 'R_at_Zmin', 'R_at_Zmax'):
             eq_info['fsa_' + key] = fsa[key].tolist()
-    # Test deletion if multiple cases
+    # Deleting an instance must not disturb the one still in use
     if mygs_last is not None:
         del mygs_last
-    # Save equilibrium to gEQDSK and i-file format
     mygs.save_eqdsk('tokamaker.eqdsk',nr=64,nz=64,lcfs_pad=0.001)
     mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001)
-    # Save final one
     mp_q.put([eq_info])
     oftpy_dump_cov()
 
@@ -101,37 +96,37 @@ def ITER_eq_dict_helicity(helicity):
     eq_dict['dflux'] *= helicity
     eq_dict['q_0'] *= helicity
     eq_dict['q_95'] *= helicity
-    # `q` and `F` follow the sign of F0; the remaining `fsa_*` entries are invariant.
-    # Rebind rather than scale in place: `ITER_eq_dict.copy()` is shallow, so mutating
-    # these lists would leak into the other parametrized runs.
+    # q and F follow the sign of F0; rebind the lists since the dict copy is shallow
     eq_dict['fsa_q'] = [val*helicity for val in eq_dict['fsa_q']]
     eq_dict['fsa_F'] = [val*helicity for val in eq_dict['fsa_F']]
     return eq_dict
 
 
-# Test runners for ITER test cases
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_eig(order):
+    '''Wall eddy-current (L/R) eigenmodes of the ITER vacuum vessel: the five slowest decay times of the
+    conducting-region model, through both the current and the deprecated interface.'''
     exp_dict = {
         'Tau_w': [6.619977E-01, 3.479492E-01, 2.554444E-01, 1.910381E-01, 1.782464E-01]
     }
     results = mp_run(run_ITER_case,(1.0,(order,),'eig',1.0))
     assert validate_dict(results,exp_dict)
-    # Test deprecated interface
     results = mp_run(run_ITER_case,(1.0,(order,),'eig_dep',1.0))
     assert validate_dict(results,exp_dict)
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_ITER_stability(order):
+    '''Linear stability of the free-boundary ITER equilibrium: the growth-rate spectrum of the linearized
+    time-dependent system (one vertically unstable mode and stable modes) and the change over a short nonlinear
+    evolution seeded with the unstable mode, through both the current and the deprecated interface.'''
     exp_dict = {
         'gamma': [12.3620, -1.83981, -3.41613, -5.12470, -6.53393],
         'nl_change': [225.4421413167051, 338.0113029638385][order-2]
     }
     results = mp_run(run_ITER_case,(1.0,(order,),'stab',1.0))
     assert validate_dict(results,exp_dict)
-    # Test deprecated interface
     results = mp_run(run_ITER_case,(1.0,(order,),'stab_dep',1.0))
     assert validate_dict(results,exp_dict)
 
@@ -139,6 +134,9 @@ def test_ITER_stability(order):
 @pytest.mark.parametrize("order", (2,3))#,4))
 @pytest.mark.parametrize("helicity", (1.0,-1.0))
 def test_ITER_eq(order,helicity):
+    '''Free-boundary ITER equilibrium with coil regularization, isoflux and X-point constraints: global parameters,
+    coil inductances, flux-surface averages and shape, and the gEQDSK and i-file output, for both signs of the
+    toroidal field.'''
     eq_dict = ITER_eq_dict_helicity(helicity)
     results = mp_run(run_ITER_case,(1.0,(order,),'',helicity))
     assert validate_dict(results,eq_dict)
@@ -149,11 +147,15 @@ def test_ITER_eq(order,helicity):
 @pytest.mark.parametrize("order", (2,3))#,4))
 @pytest.mark.parametrize("helicity", (1.0,-1.0))
 def test_ITER_eq_io(order,helicity):
+    '''Save/load round trip of the ITER equilibrium through replace_eq(): the reloaded state must reproduce the
+    solution and re-converge in a single iteration.'''
     eq_dict = ITER_eq_dict_helicity(helicity)
     eq_dict['nl_its'] = 1
     results = mp_run(run_ITER_case,(1.0,(order,),'io',helicity))
     assert validate_dict(results,eq_dict)
 
 def test_ITER_concurrent():
+    '''Two TokaMaker instances of different element order on the same mesh in one environment, deleting the first; the
+    second must still reproduce the ITER equilibrium.'''
     results = mp_run(run_ITER_case,(1.0,(2,3),'',1.0))
     assert validate_dict(results,ITER_eq_dict)

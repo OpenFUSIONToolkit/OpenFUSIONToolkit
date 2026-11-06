@@ -25,7 +25,6 @@ def run_LTX_case(fe_order,test_type,mp_q):
         vv_dx = 0.015
         vac_dx = 0.05
         gs_mesh = gs_Domain()
-        #
         gs_mesh.define_region('air',vac_dx,'boundary')
         gs_mesh.define_region('plasma',plasma_dx,'plasma')
         gs_mesh.define_region('shellU',vv_dx,'conductor',eta=4.E-7,noncontinuous=True)
@@ -37,7 +36,6 @@ def run_LTX_case(fe_order,test_type,mp_q):
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'],coil_set='OH')
             else:
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'])
-        #
         gs_mesh.add_polygon(LTX_geom['limiter'],'plasma',parent_name='air')
         gs_mesh.add_polygon(LTX_geom['shell'],'shellU',parent_name='air')
         shell_lower = np.array(LTX_geom['shell'].copy()); shell_lower[:,1] *= -1.0
@@ -46,7 +44,6 @@ def run_LTX_case(fe_order,test_type,mp_q):
             gs_mesh.add_polygon(vv_segment[0],'vv{0}'.format(i),parent_name='air')
         for key, coil in LTX_geom['coils'].items():
             gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='air')
-        #
         mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
         coil_dict = gs_mesh.get_coils()
         cond_dict = gs_mesh.get_conductors()
@@ -58,22 +55,18 @@ def run_LTX_case(fe_order,test_type,mp_q):
             print(e)
             mp_q.put(None)
             return
-    # Run EQ
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('LTX_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order,F0=0.10752)
-    #
     if test_type == 'eig':
         eig_vals, _ = mygs.compute_wall_modes(10)
         mp_q.put([{'Tau_w': eig_vals[:5]}])
         oftpy_dump_cov()
         return
-    #
     mygs.set_coil_vsc({'INTERNALU': 1.0, 'INTERNALL': -1.0})
-    #
     Ip_target = 8.0E4
     mygs.set_targets(Ip=Ip_target,Ip_ratio=2.0)
     isoflux_pts = create_isoflux(20,0.40,0.0,0.22,1.5,0.1)
@@ -94,11 +87,9 @@ def run_LTX_case(fe_order,test_type,mp_q):
         regularization_terms.append(mygs.coil_reg_term({name: 1.0, name[:-1]+'L': -1.0},target=0.0,weight=1.E2))
     regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0},target=0.0,weight=1.E-4))
     mygs.set_coil_reg(reg_terms=regularization_terms)
-    #
     ffp_prof = create_power_flux_fun(50,1.5,2.0)
     pp_prof = create_power_flux_fun(50,4.0,1.0)
     mygs.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
-    #
     mygs.init_psi(0.42,0.0,0.15,1.5,0.6)
     mygs.settings.pm=True
     mygs.update_settings()
@@ -108,21 +99,20 @@ def run_LTX_case(fe_order,test_type,mp_q):
         mp_q.put([{'gamma': eig_vals[:5]}])
         oftpy_dump_cov()
         return
-    #
     psi_last = mygs.get_psi(False)
     mygs.set_psi_dt(psi_last,5.E-3)
     Ip_target = 9.0E4
     mygs.set_targets(Ip=Ip_target,Ip_ratio=2.0)
     mygs.solve()
     mygs.save_eqdsk('test.eqdsk')
-    #
     mp_q.put([mygs.get_stats()])
     oftpy_dump_cov()
 
-# Test runners for LTX test cases
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_eig(order):
+    '''Wall eddy-current eigenmodes of the LTX shell halves and vessel segments, including conductor regions that are
+    not electrically continuous.'''
     exp_dict = {
         'Tau_w': [5.152566E-03, 3.953030E-03, 2.536384E-03, 2.172948E-03, 1.853882E-03]
     }
@@ -132,6 +122,7 @@ def test_LTX_eig(order):
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_stability(order):
+    '''Growth-rate spectrum of the free-boundary LTX equilibrium with its internal vertical stability coil pair.'''
     exp_dict = {
         'gamma': [234.1051, -214.4196, -282.0877, -388.7592, -388.7592]
     }
@@ -165,5 +156,7 @@ LTX_eq_dict = {
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
 def test_LTX_eq(order):
+    '''Free-boundary LTX equilibrium with up/down coil-pair regularization, followed by a current ramp with eddy
+    currents in the shell (set_psi_dt) and gEQDSK output.'''
     results = mp_run(run_LTX_case,(order,''))
     assert validate_dict(results,LTX_eq_dict)

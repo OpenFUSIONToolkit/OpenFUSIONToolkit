@@ -298,5 +298,10 @@ ITER_bootstrap_internal_eq_dict = {
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,))
 def test_ITER_bootstrap_internal(order):
+    '''Self-consistent bootstrap current through the internal solve_bootstrap() on ITER with H-mode profiles: the
+    converged equilibrium and current profile; the j.B to j_phi conversion and current balance against independently
+    traced geometry (current conventions eqs. A7-A9); persistence of the bootstrap state through save/load and copy;
+    a Zeff profile against a scalar; fixed current and pressure additions; and edge isolation of the bootstrap
+    current.'''
     results = mp_run(run_ITER_bootstrap_case_internal, (1.0, order), timeout=300)
     assert validate_dict(results, ITER_bootstrap_internal_eq_dict)

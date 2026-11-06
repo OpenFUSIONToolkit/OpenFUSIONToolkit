@@ -1,3 +1,16 @@
+!---------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
+!> @file test_alfven_2d.F90
+!
+!> Regression test for the 2D xMHD module. A traveling shear Alfven wave is initialized on a
+!! periodic strip and advanced in time, and the resulting velocity and magnetic field are
+!! compared to the initial wave.
+!!
+!! @ingroup testing
+!------------------------------------------------------------------------------
 MODULE alfven_2d_helpers
 USE oft_local
 IMPLICIT NONE

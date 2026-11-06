@@ -3,9 +3,7 @@
 #
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
-# Tests for ThinCurr hole and closure selection (OFT_ThinCurr_holes)
-#
-# Meshes are built with GMSH by "create_ThinCurr_meshes.py".
+# ThinCurr tests: hole and closure selection by OFT_ThinCurr_holes on GMSH meshes built by create_ThinCurr_meshes.py
 import os
 import sys
 import shlex

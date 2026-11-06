@@ -1,3 +1,10 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# Tests for the axisymmetric Green's function of a current filament shared by TokaMaker and ThinCurr
+# (test_axi_green.F90)
 import os
 import sys
 
@@ -38,6 +45,9 @@ def green_closed_form(r, z, rc, zc):
 
 @pytest.mark.coverage
 def test_green():
+    '''Green's function of a circular current filament and its gradient at medium- and far-field points against direct
+    quadrature, the closed form in complete elliptic integrals (Jackson, Classical Electrodynamics, Sec. 5.5), and
+    the magnetic dipole far-field limit.'''
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in)

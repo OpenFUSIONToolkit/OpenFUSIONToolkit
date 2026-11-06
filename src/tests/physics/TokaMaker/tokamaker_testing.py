@@ -28,6 +28,8 @@ def load_fixture(filename):
 
 
 def validate_dict(results,dict_exp,tol_dict=None):
+    '''Compare the first result dictionary against expected values (1% relative unless overridden); every expected
+    key must be present'''
     default_tol = {
         'delta': 5.E-2,
         'deltaU': 5.E-2,
@@ -52,7 +54,7 @@ def validate_dict(results,dict_exp,tol_dict=None):
         result_val = results[0].get(key,None)
         if result_val is None:
             print('FAILED: key "{0}" not present!'.format(key))
-            result_val = False
+            test_result = False
         else:
             if type(exp_val) is list:
                 for i in range(len(exp_val)):
@@ -93,7 +95,7 @@ def validate_eqdsk(file_test,file_ref,helicity=1.0):
         result_val = test_data.get(key,None)
         if result_val is None:
             print('FAILED: key "{0}" not present in result!'.format(key))
-            result_val = False
+            test_result = False
         else:
             if key == 'case':
                 continue
@@ -131,7 +133,7 @@ def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
         result_val = test_data.get(key,None)
         if result_val is None:
             print('FAILED: key "{0}" not present in result!'.format(key))
-            result_val = False
+            test_result = False
         else:
             if isinstance(exp_val,np.ndarray):
                 if np.linalg.norm(exp_val-result_val)/np.linalg.norm(exp_val) > 1.E-2:
@@ -293,6 +295,26 @@ def ITER_Hmode_profiles(n_sample):
     Te = Hmode_profiles(edge=1500., ped=5000., core=21000., rgrid=n_sample,
                         expin=1.3, expout=1.7, widthp=0.1, xphalf=xphalf)
     return ne, Te
+
+
+def ITER_bootstrap_reference(mesh_resolution, fe_order, n_sample=257, Zeff=1.7):
+    '''Converged reference ITER equilibrium with H-mode kinetic profiles for the bootstrap cases; None on failure
+
+    Returns the TokaMaker object, the uniform psi_N grid, ne, Te and a constant Zeff profile.
+    '''
+    try:
+        create_ITER_mesh(mesh_resolution)
+    except Exception as e:
+        print(e)
+        return None
+    mygs = setup_ITER_gs(OFT_env(nthreads=-1), fe_order)
+    set_ITER_constraints(mygs)
+    try:
+        solve_ITER_eq(mygs)
+    except ValueError:
+        return None
+    ne, Te = ITER_Hmode_profiles(n_sample)
+    return mygs, np.linspace(0.0, 1.0, n_sample), ne, Te, np.full(n_sample, Zeff)
 
 
 def setup_ITER_bootstrap_internal(mesh_resolution, fe_order):

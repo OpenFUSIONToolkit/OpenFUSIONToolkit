@@ -15,24 +15,21 @@ from OpenFUSIONToolkit.TokaMaker.meshing import gs_Domain
 
 def run_solo_case(mesh_resolution,fe_order,mp_q):
     def solovev_psi(r_grid, z_grid,R,a,b,c0):
-        # psi = np.zeros_like(r_grid)
         zeta = (np.power(r_grid,2)-np.power(R,2))/(2.0*R)
         psi_x = (a-c0)*np.power(b+c0,2)*np.power(R,4)/(8.0*np.power(c0,2))
         zeta_x = -(b+c0)*R/(2*c0)
         Z_x = np.sqrt((b+c0)*(a-c0)/(2*c0*c0))*R
         psi_grid = (b+c0)*np.power(R,2)*np.power(z_grid,2)/2.0 + c0*R*zeta*np.power(z_grid,2) + (a-c0)*np.power(R,2)*np.power(zeta,2)/2.0
         return psi_grid, psi_x, [np.sqrt(zeta_x*2*R+R*R), Z_x]
-    # Fixed parameters
+    # Major radius and the a, b, c0 shape coefficients of the Solov'ev solution
     R=1.0
     a=1.2
     b=-1.0
     c0=1.1
-    # Build mesh
     gs_mesh = gs_Domain()
     gs_mesh.define_region('plasma',mesh_resolution,'plasma')
     gs_mesh.add_rectangle(R,0.0,0.12,0.15,'plasma')
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
-    # Run EQ
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mygs.setup_mesh(mesh_pts,mesh_lc)
@@ -52,9 +49,8 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
         mp_q.put(None)
         return
     psi_TM = mygs.get_psi(False)
-    # Compute error in psi
     psi_err = np.linalg.norm(psi_TM+psi_solovev_TM)
-    # Compute error in X-points
+    # The analytic solution gives the upper X-point; the lower one is its mirror image
     x_points, _ = mygs.get_xpoints()
     X_err = 0.0
     for i in range(2):
@@ -84,10 +80,12 @@ def validate_solo(results,psi_err_exp,X_err_exp):
     return test_result
 
 
-# Test runners for Solov'ev cases
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3,4))
 def test_solo_h1(order):
+    '''Fixed-boundary Solov'ev equilibrium (L. S. Solov'ev, Sov. Phys. JETP 26, 400 (1968)) with flat p' and FF' on a
+    rectangular domain: error in psi and in the two X-point locations against the analytic solution at the base mesh
+    resolution for element orders 2-4.'''
     errs = [
         [3.2048631614233643e-07,0.00014929412629149645],
         [8.919954733021135e-10,4.659825491095631e-07],
@@ -97,6 +95,9 @@ def test_solo_h1(order):
     assert validate_solo(results,errs[order-2][0],errs[order-2][1])
 @pytest.mark.parametrize("order", (2,3,4))
 def test_solo_h2(order):
+    '''Fixed-boundary Solov'ev equilibrium (L. S. Solov'ev, Sov. Phys. JETP 26, 400 (1968)) with flat p' and FF' on a
+    rectangular domain: error in psi and in the two X-point locations against the analytic solution at half the base
+    mesh resolution for element orders 2-4.'''
     errs = [
         [7.725262474858205e-08,4.9243688140144384e-05],
         [1.1190059530634016e-10,2.919838380657025e-08],
@@ -107,6 +108,9 @@ def test_solo_h2(order):
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,3,4))
 def test_solo_h3(order):
+    '''Fixed-boundary Solov'ev equilibrium (L. S. Solov'ev, Sov. Phys. JETP 26, 400 (1968)) with flat p' and FF' on a
+    rectangular domain: error in psi and in the two X-point locations against the analytic solution at a quarter of
+    the base mesh resolution for element orders 2-4.'''
     errs = [
         [2.0607919004158514e-08,5.955338556344096e-06],
         [1.3950375633902016e-11,1.154542061756696e-09],
@@ -144,9 +148,10 @@ def run_nonfinite_case(mode,mp_q):
     mp_q.put('converged')
 
 
-# A non-finite initial flux or source must fail at once (error -10), not run to "maxits"
 @pytest.mark.parametrize("mode", ('psi','source'))
 def test_nonfinite_abort(mode):
+    '''A non-finite initial flux or source term must abort the Grad-Shafranov solve at once with a clear error instead
+    of iterating to maxits.'''
     result = mp_run(run_nonfinite_case,(mode,))
     assert result is not None
     assert 'Non-finite state' in result

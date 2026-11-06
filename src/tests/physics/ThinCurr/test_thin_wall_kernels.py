@@ -1,3 +1,10 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# ThinCurr tests: triangle potential, segment and ring kernels, and low-rank block compression against independent
+# quadrature and dense linear algebra (test_thin_wall_kernels.F90)
 import os
 import sys
 
@@ -33,6 +40,8 @@ def triangle_integrals(pt, scale):
 
 @pytest.mark.coverage
 def test_triangle_potential():
+    '''Potential and gradient of a uniformly charged triangle at points off the triangle, in its plane and on the lines
+    of its edges, in metre and millimetre scale, against adaptive quadrature.'''
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in)
@@ -47,7 +56,8 @@ def test_triangle_potential():
 
 
 def test_lowrank_qrcp():
-    """Truncated pivoted QR + SVD compression against the rank of the SVD with the same truncation rule"""
+    '''Truncated pivoted-QR plus SVD compression of test blocks against the rank the SVD gives with the same truncation
+    rule, including a block that is not worth compressing.'''
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in)
@@ -71,8 +81,8 @@ def test_lowrank_qrcp():
 
 
 def test_aca_plus():
-    """ACA+ of a smooth kernel block (absolute and relative tolerance) against the dense block; an incompressible
-    block does not converge within a few terms"""
+    '''ACA+ of a smooth kernel block with absolute and relative tolerance against the dense block; an incompressible
+    block does not converge within a few terms.'''
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in)
@@ -98,7 +108,8 @@ def seg_seg_reference(a0, a1, b0, b1):
 
 
 def test_seg_seg_int():
-    """Straight segment pair integrals for close parallel, skew and collinear pairs against quadrature"""
+    '''Double integral of 1/|x-y| over close parallel, skew and collinear straight segment pairs against quadrature.
+    Double integral of 1/|x-y| over close parallel, skew and collinear straight segment pairs against quadrature.'''
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in)
@@ -109,7 +120,8 @@ def test_seg_seg_int():
 
 
 def test_ring_poly_softened():
-    """Softened ring kernel integrated along a polygon of the same ring against the softened ring-ring mutual"""
+    '''The softened ring kernel integrated along a polygon of the same ring against the softened ring-ring mutual
+    inductance.'''
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in)
@@ -138,7 +150,8 @@ def ring_seg_reference(a, b):
 
 
 def test_ring_seg_close():
-    """Exact ring kernel along straight segments passing close to the ring against quadrature"""
+    '''The exact ring kernel along straight segments passing close to the ring against quadrature with elliptic
+    integrals.'''
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in)

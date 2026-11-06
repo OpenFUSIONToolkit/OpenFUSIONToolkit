@@ -15,6 +15,8 @@ test_dir = os.path.abspath(os.path.dirname(__file__))
 
 
 def test_mirnov_orientation_and_validation():
+    '''The area normal of a Mirnov loop points along the requested normal, and zero normals or two-component positions
+    are rejected.'''
     for norm in ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.3, -0.5, 0.8]):
         pts = Mirnov([1.0, 0.5, -0.2], norm, 'test')._pts
         area = 0.5*sum(np.cross(pts[i], pts[i+1]) for i in range(len(pts)-1))
@@ -68,6 +70,9 @@ def validate_torus_fourier_sensor(interface,sigs_nmodes_1D_PEST,sigs_nmodes_1D_H
 @pytest.mark.coverage
 @pytest.mark.parametrize("direct_flag", ('F', 'T'))
 def test_torus_fourier_sensor(direct_flag):
+    '''Toroidal and poloidal Fourier spectra of normal-field probes on a GPEC control surface around the current-driven
+    torus, in PEST and Hamada angles for both helicities, against stored spectra (the interface passes ThinCurr wall
+    responses to GPEC; Park, Boozer and Glasser, Phys. Plasmas 14, 052110 (2007)).'''
     from OpenFUSIONToolkit.ThinCurr.util import torus_fourier_sensor
     import netCDF4
     R_0 = 1.0
@@ -121,6 +126,8 @@ def run_mirnov_point(meshfile,mp_q):
 
 @pytest.mark.parametrize("coil_type", ("circular", "polygon"))
 def test_mirnov_point(coil_type):
+    '''Point Mirnov sensors reproduce small loop Mirnov sensors at the same locations for a circular and a non-planar
+    polygon drive coil, with the loop coupling converging to the point value as the loop size squared.'''
     os.chdir(test_dir)
     xml = ThinCurr_XML()
     xml.set_eta([10.0*mu0])

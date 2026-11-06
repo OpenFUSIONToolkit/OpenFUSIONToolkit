@@ -7,8 +7,9 @@
 from marklin_testing import mp_run, run_marklin, validate_eigs
 
 
-# Test runner for multiple concurrent Marklin instances
 def test_marklin_multiple():
+    '''Two Marklin instances (cylinder and torus) in one OFT environment, created in either order: the second solve
+    must return its own eigenvalue, undisturbed by the first.'''
     cyl_eig = 4.955207
     tor_eig = 6.317001
     results = mp_run(run_marklin,('cyl_Marklin.h5',1,2,2,'torus_test.h5'))

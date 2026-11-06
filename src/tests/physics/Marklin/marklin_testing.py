@@ -37,7 +37,7 @@ def run_marklin(meshfile,nmodes,order,grid_order,meshfile2,mp_q):
         result = False
     if (meshfile2 is not None) and result:
         try:
-            taylor_solver_old = taylor_solver
+            taylor_solver_old = taylor_solver  # noqa: F841 (keeps the first instance alive beside the second)
             taylor_solver = Marklin(myOFT)
             taylor_solver.setup_mesh(mesh_file=meshfile2,grid_order=grid_order)
             taylor_solver.setup(order,minlev=1)

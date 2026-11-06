@@ -1,3 +1,15 @@
+!---------------------------------------------------------------------------------
+! Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+!
+! SPDX-License-Identifier: LGPL-3.0-only
+!---------------------------------------------------------------------------------
+!> @file test_taylor_green_2d.F90
+!
+!> Regression test for the incompressible 2D xMHD solver using the decaying Taylor-Green
+!! vortex (see the program header below for the analytic solution).
+!!
+!! @ingroup testing
+!------------------------------------------------------------------------------
 MODULE taylor_green_helpers
 USE oft_local
 IMPLICIT NONE

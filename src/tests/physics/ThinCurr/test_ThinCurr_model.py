@@ -49,6 +49,9 @@ def run_bfield_no_icoils(use_hodlr,mp_q):
 
 @pytest.mark.coverage
 def test_bfield_no_icoils():
+    '''B-field operators and field reconstruction for a model without drive coils, dense and HODLR-compressed:
+    reconstruction before the operators exist or from a wrong-size potential is rejected, column input is accepted,
+    and the compressed field matches the dense one.'''
     out = {use_hodlr: mp_run(run_bfield_no_icoils, (use_hodlr,)) for use_hodlr in (False, True)}
     for res in out.values():
         assert res  # None (timeout, crash, or exception)
@@ -69,6 +72,8 @@ def _default_pmap(lc, npts):
 
 @pytest.mark.coverage
 def test_user_pmap():
+    '''A user point map reproduces the default model, a reversed map reorders the inductance and resistance matrices
+    consistently, and a map of the wrong length is rejected.'''
     assert mp_run(run_user_pmap, ())
 
 

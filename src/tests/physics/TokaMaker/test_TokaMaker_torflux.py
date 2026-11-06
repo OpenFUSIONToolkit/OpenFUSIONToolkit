@@ -12,13 +12,8 @@ from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.TokaMaker.util import create_power_flux_fun
 
 
-# -----------------------------------------------------------------------
-# Test: profiles on normalized toroidal flux (coord='phi_n')
-#
-# Each case solves ITER with psi_N profiles, maps them onto Phi_N with the
-# converged q, re-solves with the toroidal-flux profiles and compares.
-# Differences are set by profile interpolation in the two coordinates.
-# -----------------------------------------------------------------------
+# Each case solves ITER with profiles on psi_N, maps them onto Phi_N with the converged q, re-solves with the
+# toroidal-flux profiles and compares; the differences are set by profile interpolation in the two coordinates
 def _torflux_ITER_gs(fe_order, Ip_target=15.6E6):
     create_ITER_mesh()
     mygs = setup_ITER_gs(OFT_env(nthreads=-1),fe_order,maxits=100)
@@ -199,6 +194,8 @@ def _torflux_check(res, psi_tol, q_tol, its_ref=None, ip_tol=1.E-4):
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,))
 def test_ITER_torflux_ffp(order):
+    '''FF' and p' profiles given on normalized toroidal flux (coord='phi_n') reproduce the psi_N-profile equilibrium;
+    the solver's flux map agrees with the integral of q, inverts exactly, and survives copy_eq() and save/load.'''
     results = mp_run(run_ITER_torflux_case,(order,'ffp'),timeout=120)
     assert results is not None
     _torflux_check(results['phi_n'],4.E-3,4.E-3,results['psi_its'])
@@ -212,6 +209,8 @@ def test_ITER_torflux_ffp(order):
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,))
 def test_ITER_torflux_jphi(order):
+    '''A jphi-linterp current profile on normalized toroidal flux reproduces the psi_N solution, and switching to a
+    bootstrap profile type on phi_n keeps FF' across save/load.'''
     results = mp_run(run_ITER_torflux_case,(order,'jphi'),timeout=120)
     assert results is not None
     _torflux_check(results['phi_n'],1.E-3,2.E-3,results['psi_its'])
@@ -221,6 +220,9 @@ def test_ITER_torflux_jphi(order):
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,))
 def test_ITER_torflux_bootstrap(order):
+    '''solve_bootstrap() and solve_with_bootstrap() with every profile (kinetic, inductive, fixed and sawtooth current,
+    fixed pressure) on normalized toroidal flux against the same case on psi_N; the Python solver must reject
+    toroidal coordinates.'''
     results = mp_run(run_ITER_torflux_case,(order,'bootstrap'),timeout=600)
     assert results is not None
     _torflux_check(results['phi_n'],3.E-3,3.E-3,ip_tol=2.E-4)

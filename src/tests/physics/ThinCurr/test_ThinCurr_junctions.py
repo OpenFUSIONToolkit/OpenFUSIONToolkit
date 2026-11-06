@@ -1,3 +1,10 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# ThinCurr tests: junctions (edges shared by more than two sheets) on small analytic meshes: sheet splitting,
+# hole selection, the reduction map P, and consistency of the reduced model with the expanded (unsplit) one
 import os
 import sys
 import copy
@@ -55,6 +62,8 @@ def torus(nsect=3):
 
 
 def test_tplate():
+    '''Splitting a T-plate (three sheets meeting along one edge): one open junction line, the duplicated vertices and
+    junction table, and the unknown count with and without one sheet insulated.'''
     r, lc, reg = tplate()
     assert has_junctions(lc)
     rs, lcs, jedges, lines, vmap = split_junctions(r, lc, reg)
@@ -70,6 +79,8 @@ def test_tplate():
 
 @pytest.mark.parametrize("insulated,nholes", (((), 1), ((3,), 2)))
 def test_ring(insulated, nholes):
+    '''A cylindrical ring with a flange forms a closed junction line; the unknown count equals the loop count with and
+    without the flange insulated.'''
     r, lc, reg = ring()
     out = find_junction_holes(r, lc, reg, insulated=insulated)
     assert out['lines'][0]['closed']
@@ -77,6 +88,7 @@ def test_ring(insulated, nholes):
 
 
 def test_torus_sectors():
+    '''A torus assembled from sectors meeting edge to edge has no junctions and keeps its unknown count.'''
     r, lc, reg = torus()
     assert not has_junctions(lc)
     out = find_junction_holes(r, lc, reg)
@@ -84,6 +96,8 @@ def test_torus_sectors():
 
 
 def test_homology_file(tmp_path):
+    '''compute_homology() on a junction mesh file writes the split mesh with its junction table, reduction map and
+    holes.'''
     r, lc, reg = ring()
     in_file = str(tmp_path / 'ring.h5')
     write_ThinCurr_mesh(in_file, r, lc, reg)
@@ -118,6 +132,7 @@ def corner_map(lc, pmap, holes, nexp):
 
 @pytest.mark.parametrize("mesh", ('tplate', 'ring', 'torus'))
 def test_expanded_map(mesh):
+    '''The reduction map P composed with the corner map reproduces the stored expanded map M on each test mesh.'''
     r, lc, reg = {'tplate': tplate, 'ring': ring, 'torus': torus}[mesh]()
     out = find_junction_holes(r, lc, reg)
     B = corner_map(out['lc'], out['pmap'], out['holes'], out['P'].shape[0])
@@ -125,6 +140,7 @@ def test_expanded_map(mesh):
 
 
 def test_gmsh_physical_regions(tmp_path):
+    '''Reading a GMSH file with physical region tags instead of elementary entity tags.'''
     msh = tmp_path / 'two.msh'
     msh.write_text('\n'.join(['$MeshFormat', '2.2 0 8', '$EndMeshFormat', '$Nodes', '4', '1 0 0 0', '2 1 0 0',
                               '3 1 1 0', '4 0 1 0', '$EndNodes', '$Elements', '2', '1 2 2 7 1 1 2 3',
@@ -134,6 +150,8 @@ def test_gmsh_physical_regions(tmp_path):
 
 
 def test_insulate_file(tmp_path):
+    '''insulate_junction_file() rewrites a junction mesh with one sheet insulated, matching a direct computation, and
+    the file fails verification once its insulation record is removed.'''
     from OpenFUSIONToolkit.ThinCurr.junctions import insulate_junction_file
     r, lc, reg = ring()
     in_file = str(tmp_path / 'ring.h5')
@@ -208,6 +226,8 @@ def run_reduction(files, P, insulated_runtime, mp_q):
 
 @pytest.mark.parametrize("mesh", ('tplate', 'ring', 'torus'))
 def test_reduction(mesh):
+    '''The inductance, resistance and coil coupling matrices of a junction model equal the reduction map P applied to
+    those of the expanded (unsplit) reference model.'''
     r, lc, reg = {'tplate': tplate, 'ring': ring, 'torus': torus}[mesh]()
     files, P = write_pair(r, lc, reg, 'junction_' + mesh)
     assert mp_run(run_reduction, (files, P, None))
@@ -238,6 +258,7 @@ def run_cache(path, mp_q):
 
 
 def test_cache():
+    '''Inductance and sensor coupling matrices of a junction model round-trip through cache files.'''
     for f in ('junction_cache_L.save', 'junction_cache_Ms.save'):
         if os.path.exists(os.path.join(test_dir, f)):
             os.remove(os.path.join(test_dir, f))
@@ -278,6 +299,8 @@ def run_dense_vcoil(files, P, mp_q):
 
 @pytest.mark.parametrize("mesh", ('tplate', 'ring', 'torus'))
 def test_dense_vcoil(mesh):
+    '''Dense inductance and B-field operators of a junction model with a voltage-driven coil equal the reduction map
+    (identity on the coil) applied to the expanded model's.'''
     r, lc, reg = {'tplate': tplate, 'ring': ring, 'torus': torus}[mesh]()
     files, P = write_pair(r, lc, reg, 'junction_dense_' + mesh, vcoil=True)
     assert mp_run(run_dense_vcoil, (files, P))
@@ -316,6 +339,8 @@ def run_mutual(models, mp_q):
 
 
 def test_mutual():
+    '''Mutual inductances between junction and plain models equal the reduction maps applied to those of the expanded
+    models, and round-trip through a cache file.'''
     tfiles, tP = write_pair(*tplate(), 'junction_mutual_tplate')
     r, lc, reg = ring()
     rfiles, rP = write_pair(r + np.array([0.0, 0.0, 1.5]), lc, reg, 'junction_mutual_ring')
@@ -352,6 +377,8 @@ def run_cache_insulation(path, mp_q):
 
 
 def test_cache_insulation():
+    '''A cached reduced operator is not reused for a different insulation of the same mesh with the same number of
+    unknowns.'''
     for f in ('junction_ins_L.save', 'junction_ins_B.save'):
         if os.path.exists(os.path.join(test_dir, f)):
             os.remove(os.path.join(test_dir, f))
@@ -378,7 +405,8 @@ def run_lmat_pair(files, mp_q):
 
 
 def test_holes_share_vertices():
-    """Junction holes on the same vertices but with different signs are not duplicates."""
+    '''Junction holes on the same vertices with different signs are distinct unknowns and give a different inductance
+    matrix.'''
     out = find_junction_holes(*tplate())
     extra = copy.copy(out)
     extra['holes'] = out['holes'] + [out['holes'][0]*np.array([1, 1, -1])]
@@ -401,6 +429,8 @@ def tplate_jumpers():
 
 
 def test_split_jumper():
+    '''Mapping jumpers onto the split mesh: a jumper crossing the junction is split at it, and one running along the
+    junction is rejected.'''
     from OpenFUSIONToolkit.ThinCurr.junctions import split_jumper
     r, lc, reg, jumpers = tplate_jumpers()
     out = find_junction_holes(r, lc, reg)
@@ -477,6 +507,8 @@ def test_hodlr_coarse():
 
 
 def test_jumpers(tmp_path):
+    '''Time-dependent run on a T-plate with two jumpers that together cut it in two: the jumper currents must cancel.
+    Time-dependent run on a T-plate with two jumpers that together cut it in two: the jumper currents must cancel.'''
     from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil
     r, lc, reg, jumpers = tplate_jumpers()
     # Ring in the corner between the plate (x > 0) and the stem, so current loops through the junction
@@ -505,11 +537,14 @@ def run_jumper_start(path, mp_q):
 
 
 def test_jumper_start_rejected():
+    '''The legacy jumper_start option is rejected on junction meshes.'''
     files, _ = write_pair(*tplate(), 'junction_jumper_start')
     assert mp_run(run_jumper_start, (files[0],))
 
 
 def test_runtime_insulation():
+    '''Insulating a sheet at setup (insulated_junctions) gives the same eigenvalues as a mesh file written with that
+    sheet insulated.'''
     r, lc, reg = ring()
     files_rt, _ = write_pair(r, lc, reg, 'junction_ring_rt')
     files_ins, _ = write_pair(r, lc, reg, 'junction_ring_ins', insulated=(3,))
@@ -522,12 +557,15 @@ def test_runtime_insulation():
 
 @pytest.mark.parametrize("insulated,nholes", (([1], 2), ([(1, 2)], 1), ([(1, 2), (2, 3)], 2), ([1, 2, 3], 3)))
 def test_torus_insulation(insulated, nholes):
+    '''Insulating sheets or sheet pairs of the sectored torus keeps the unknown count equal to the loop count.'''
     r, lc, reg = torus()
     out = find_junction_holes(r, lc, reg, insulated=insulated)
     assert out['n_unknowns'] == out['n_loops'] == current_loop_count(lc, reg, insulated=insulated)
 
 
 def test_split_regions_file(tmp_path):
+    '''compute_homology(split_regions=True) treats region boundaries as junctions, producing a junction table across
+    every sector interface.'''
     r, lc, reg = torus()
     in_file = str(tmp_path / 'torus.h5')
     write_ThinCurr_mesh(in_file, r, lc, reg)
@@ -538,6 +576,7 @@ def test_split_regions_file(tmp_path):
 
 
 def test_runtime_pair_insulation():
+    '''Insulating a sheet pair at setup matches a mesh file written with that pair insulated.'''
     r, lc, reg = torus()
     files_rt, _ = write_pair(r, lc, reg, 'junction_torus_rt')
     files_ins, _ = write_pair(r, lc, reg, 'junction_torus_ins', insulated=[(1, 2)])
@@ -549,6 +588,7 @@ def test_runtime_pair_insulation():
 
 
 def test_region_both_sides():
+    '''A junction whose sheets share a region on both sides of the plate is still handled consistently.'''
     r, lc, reg = tplate()
     reg = np.where(reg == 2, 1, reg)
     out = find_junction_holes(r, lc, reg)
@@ -556,6 +596,7 @@ def test_region_both_sides():
 
 
 def test_point_contact():
+    '''Two sheets touching at a single vertex are split at that vertex.'''
     a = sheet(4, 4, lambda u, v: np.c_[-0.5 + 0.5*u, -0.5 + 0.5*v, 0*u], 1)
     b = sheet(4, 4, lambda u, v: np.c_[0.5*u, 0.5*v, 0.3*u*v], 2)
     r, lc, reg = merge(a, b)
@@ -566,6 +607,7 @@ def test_point_contact():
 
 
 def test_pair_at_three_sheets_warns():
+    '''Insulating a sheet pair where three sheets meet warns and has no effect.'''
     r, lc, reg = tplate()
     with pytest.warns(UserWarning):
         out = find_junction_holes(r, lc, reg, insulated=[(1, 2)])
@@ -573,6 +615,7 @@ def test_pair_at_three_sheets_warns():
 
 
 def test_torus_with_rib():
+    '''A torus with an internal rib sheet forms a closed junction line.'''
     rib = sheet(2, 8, lambda u, v: np.c_[1.0 + (0.3 + 0.15*u)*np.cos(2*np.pi*v), 0*u, (0.3 + 0.15*u)*np.sin(2*np.pi*v)], 4)
     r, lc, reg = merge(*[torus_sector_sheet(k) for k in range(3)], rib)
     assert has_junctions(lc, reg)
@@ -602,6 +645,7 @@ def periodic_torus_file(path, nfp=3, nphi=7, ntheta=12):
 
 
 def test_periodic_rejected(tmp_path):
+    '''Junction splitting is refused on a periodic (field-period) mesh.'''
     path = str(tmp_path / 'ptorus.h5')
     periodic_torus_file(path)
     with pytest.raises(ValueError, match='periodic'):
@@ -664,6 +708,7 @@ def run_vcoil_switch(path, mp_q):
 
 
 def test_vcoil_after_setup():
+    '''A coil switched to voltage-driven after setup gives the same model as one defined as voltage-driven.'''
     out = find_junction_holes(*tplate())
     path = os.path.join(test_dir, 'junction_vcoil_switch.h5')
     write_ThinCurr_mesh(path, out['r'], out['lc'], out['reg'], junctions=out, eta_surf=1.0E-4*np.ones(out['reg'].max()))

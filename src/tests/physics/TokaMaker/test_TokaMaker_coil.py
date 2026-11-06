@@ -40,7 +40,6 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
             return integrand
         mutual, _ = dblquad(mutual_integrand,cx2-cdx/2,cx2+cdx/2,cy2-cdy/2,cy2+cdy/2)
         return mutual*2.0*np.pi/(cdx*cdy)/(cdx*cdy)
-    # Build mesh
     gs_mesh = gs_Domain(rextent=1.0,zextents=[0.0,1.0])
     gs_mesh.define_region('air',mesh_resolution,'boundary')
     gs_mesh.define_region('plasma',mesh_resolution,'plasma')
@@ -52,7 +51,6 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
     coil_dict = gs_mesh.get_coils()
     cond_dict = gs_mesh.get_conductors()
-    # Run EQ
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
@@ -67,16 +65,14 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     except ValueError:
         mp_q.put(None)
         return
-    # Get coil mutual matrix
     Lmat = mygs.get_coil_Lmat()
     Mcc = analytic_mutual()
     mutual_err = abs((Lmat[0,1]+Mcc)/Mcc)
 
-    # Get analytic result
+    # Flux on the three outer boundary edges against the Green's function integrated over the coil
     green1, psi1 = masked_err(mygs.r[:,1]==1.0,mygs,psi0,0)
     green2, psi2 = masked_err(mygs.r[:,0]==1.0,mygs,psi0,1)
     green3, psi3 = masked_err(mygs.r[:,1]==0.0,mygs,psi0,0)
-    # Compute error in psi
     green_full = np.hstack((green1[1:], green2, green3[1:]))
     psi_full = np.hstack((psi1[1:], psi2, psi3[1:]))
     psi_err = np.linalg.norm(green_full+psi_full)/np.linalg.norm(green_full)
@@ -102,7 +98,6 @@ def validate_coil(results,psi_err_exp,mutual_err_exp):
     return test_result
 
 
-# Test runners for vacuum coil cases
 def coil_dist(r,z):
     return r-z
 
@@ -110,6 +105,9 @@ def coil_dist(r,z):
 @pytest.mark.parametrize("order", (2,3,4))
 @pytest.mark.parametrize("dist_coil", (False, True))
 def test_coil_h1(order,dist_coil):
+    '''Vacuum field of a rectangular coil with uniform or linearly varying current density: flux on the domain boundary
+    against the axisymmetric Green's function integrated over the coil, and the coil-coil mutual inductance against
+    the corresponding double integral, at the base mesh resolution for element orders 2-4.'''
     if dist_coil:
         errs = np.r_[2.34993E-02, 7.68143E-03, 7.54414E-04]
         mutual_errs = np.r_[9.88100E-03, 5.16977E-03, 3.54599E-04]
@@ -122,6 +120,9 @@ def test_coil_h1(order,dist_coil):
 @pytest.mark.parametrize("order", (2,3,4))
 @pytest.mark.parametrize("dist_coil", (False, True))
 def test_coil_h2(order,dist_coil):
+    '''Vacuum field of a rectangular coil with uniform or linearly varying current density: flux on the domain boundary
+    against the axisymmetric Green's function integrated over the coil, and the coil-coil mutual inductance against
+    the corresponding double integral, at half the base mesh resolution for element orders 2-4.'''
     if dist_coil:
         errs = np.r_[4.32354E-03, 2.15974E-04, 1.97917E-05]
         mutual_errs = np.r_[4.54609E-04, 1.25920E-04, 4.84935E-06]
@@ -135,6 +136,9 @@ def test_coil_h2(order,dist_coil):
 @pytest.mark.parametrize("order", (2,3,4))
 @pytest.mark.parametrize("dist_coil", (False, True))
 def test_coil_h3(order,dist_coil):
+    '''Vacuum field of a rectangular coil with uniform or linearly varying current density: flux on the domain boundary
+    against the axisymmetric Green's function integrated over the coil, and the coil-coil mutual inductance against
+    the corresponding double integral, at a quarter of the base mesh resolution for element orders 2-4.'''
     if dist_coil:
         errs = np.r_[1.30686E-03, 1.00862E-05, 4.33982E-07]
         mutual_errs = np.r_[4.30803E-04, 3.04001E-06, 1.69941E-07]
