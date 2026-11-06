@@ -8,34 +8,21 @@ import json
 import random
 import pytest
 import numpy as np
-from tokamaker_testing import (mp_run, validate_dict, ITER_eq_dict, create_ITER_mesh, setup_ITER_gs,
-                               set_ITER_constraints, solve_ITER_eq)
-from OpenFUSIONToolkit import OFT_env
+from tokamaker_testing import mp_run, validate_dict, ITER_eq_dict, solve_ITER_reference
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
 from OpenFUSIONToolkit.util import mu0
 
 
-#============================================================================
 def run_ITER_recon_case(mesh_resolution,fe_order,test_type,mp_q):
     from OpenFUSIONToolkit.TokaMaker.reconstruction import reconstruction
-    try:
-        create_ITER_mesh(mesh_resolution)
-    except Exception as e:
-        print(e)
-        mp_q.put(None)
-        return
-    # Compute reference equilibrium
-    myOFT = OFT_env(nthreads=-1)
-    mygs = setup_ITER_gs(myOFT,fe_order)
-    set_ITER_constraints(mygs)
-    try:
-        EQ_obj, _ = solve_ITER_eq(mygs)
-    except ValueError:
+    # The reference equilibrium supplies the synthetic measurements
+    mygs, EQ_obj = solve_ITER_reference(mesh_resolution,fe_order)
+    if mygs is None:
         mp_q.put(None)
         return
     eq_info = EQ_obj.get_stats(li_normalization='ITER')
     Lmat = mygs.get_coil_Lmat()
-    # Sample constraint locations
+    # Every fifth of 100 points spaced evenly along the inner vessel wall
     with open('ITER_geom.json','r') as fid:
         ITER_geom = json.load(fid)
         probe_contour = np.asarray(ITER_geom['inner_vv'][0])
@@ -48,7 +35,7 @@ def run_ITER_recon_case(mesh_resolution,fe_order,test_type,mp_q):
         if i % 5 == 0:
             B_locs.append(pt)
     B_locs = np.asarray(B_locs)
-    # Setup constraints
+    # Fixed seed so the 5% Gaussian measurement noise, and the reference values, are reproducible
     random.seed(42)
     myrecon = reconstruction(mygs)
     noise_amp = random.gauss(0.0,1.0)
@@ -73,7 +60,8 @@ def run_ITER_recon_case(mesh_resolution,fe_order,test_type,mp_q):
     for key in coil_currents:
         noise_amp = random.gauss(0.0,1.0)
         coil_currents[key] *= 1.0+noise_amp*0.05
-    # Compute starting equilibrium
+    # Starting equilibrium from a circular guess, constrained by the noisy flux loops and coil currents instead
+    # of the true shape
     mygs.set_isoflux(None)
     mygs.set_saddles(None)
     mygs.set_targets(Ip=Ip_noised,Ip_ratio=2.0)
@@ -101,7 +89,6 @@ def run_ITER_recon_case(mesh_resolution,fe_order,test_type,mp_q):
         mygs.settings.maxits=100
     mygs.update_settings()
     mygs.solve()
-    # Perform reconstruction
     if test_type == 'recon':
         mygs.settings.pm = False
         mygs.update_settings()
@@ -110,7 +97,7 @@ def run_ITER_recon_case(mesh_resolution,fe_order,test_type,mp_q):
         mygs.set_targets(Ip=Ip_noised)
         mygs.settings.ffp_target_weight=1.0/((0.05*abs(Ip_noised))*mu0)
         myrecon.setup_constraints()
-        # Configure reconstruction settings
+        # Fit only the pressure scale (with coil currents) using the Python least-squares driver
         myrecon.settings.fitF = False
         myrecon.settings.fitP = False
         myrecon.settings.fit_Pscale = True
@@ -125,6 +112,7 @@ def run_ITER_recon_case(mesh_resolution,fe_order,test_type,mp_q):
         mygs.settings.pm = True
         mygs.update_settings()
     elif test_type == 'recon_legacy':
+        # Fortran reconstruction driver, fitting the magnetic axis radius and coil currents
         mygs.set_isoflux(None)
         mygs.set_flux(None,None)
         mygs.set_saddles(None)
@@ -134,22 +122,27 @@ def run_ITER_recon_case(mesh_resolution,fe_order,test_type,mp_q):
         myrecon.settings.fitCoils = True
         myrecon.settings.pm = False
         _ = myrecon.reconstruct()
-    #
     eq_info = mygs.get_stats(li_normalization='ITER')
     eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
     eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
     eq_info['Lplasma'] = Lmat[-1,-1]
-    # Save equilibrium to gEQDSK and i-file format
     mygs.save_eqdsk('tokamaker.eqdsk',nr=64,nz=64,lcfs_pad=0.001)
     mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001)
     mp_q.put([eq_info])
     oftpy_dump_cov()
 
 
-# Test runners for ITER reconstruction cases
+def ITER_recon_dict_base():
+    '''Global quantities of the ITER reference equilibrium (reconstruction cases do not compute flux-surface averages)'''
+    return {key: val for key, val in ITER_eq_dict.items() if not key.startswith('fsa_')}
+
+
 @pytest.mark.coverage
 def test_ITER_recon():
-    ITER_recon_dict = ITER_eq_dict.copy()
+    '''Equilibrium reconstruction of the ITER reference equilibrium from noisy synthetic plasma current, flux loop,
+    Mirnov, and coil current measurements with the Python least-squares driver; the reconstructed equilibrium is
+    compared to reference values, which stay close to the true equilibrium'''
+    ITER_recon_dict = ITER_recon_dict_base()
     ITER_recon_dict['q_0'] = 0.8417344
     ITER_recon_dict['P_ax'] = 6.575446E5
     ITER_recon_dict['W_MHD'] = 2.591990E8
@@ -161,9 +154,11 @@ def test_ITER_recon():
     results = mp_run(run_ITER_recon_case,(1.0,2,'recon'))
     assert validate_dict(results,ITER_recon_dict)
 
+
 @pytest.mark.coverage
 def test_ITER_recon_legacy():
-    ITER_recon_dict = ITER_eq_dict.copy()
+    '''Reconstruction of the same synthetic ITER measurements with the Fortran reconstruction driver'''
+    ITER_recon_dict = ITER_recon_dict_base()
     ITER_recon_dict['vol'] = 8.119402E2
     ITER_recon_dict['q_95'] = 2.718779
     ITER_recon_dict['P_ax'] = 6.656184E5

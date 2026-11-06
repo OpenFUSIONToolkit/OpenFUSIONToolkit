@@ -1,3 +1,9 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# Combined Python interface test: Marklin, ThinCurr, and TokaMaker in one process and OFT environment
 import os
 import sys
 import traceback
@@ -11,6 +17,7 @@ packages = ('Marklin', 'ThinCurr', 'TokaMaker')
 
 
 def run_all(dummy,mp_q):
+    '''Small Marklin, ThinCurr, and TokaMaker cases sharing one OFT_env'''
     from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.Marklin import Marklin
     from OpenFUSIONToolkit.ThinCurr import ThinCurr
@@ -86,6 +93,8 @@ def validate_all(results, expected, rtol=1.E-3):
 
 @pytest.mark.coverage
 def test_packages_serial():
+    '''A Marklin Taylor-state eigenvalue, a ThinCurr plate L/R eigenvalue, and a TokaMaker spheromak solve run in
+    sequence in one process and OFT environment; each result matches its reference value'''
     with open(os.path.join(test_dir,"oft_in.xml"), "w+") as fid:
         fid.write("""<oft>
   <thincurr>

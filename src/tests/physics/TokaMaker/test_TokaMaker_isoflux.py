@@ -10,17 +10,12 @@ from tokamaker_testing import load_fixture
 from OpenFUSIONToolkit.TokaMaker.util import create_isoflux_xpts, xpoints_from_moments
 
 
-# -----------------------------------------------------------------------
-# Test: X-point isoflux boundary helpers in TokaMaker.util
-#
-# These helpers check the generated boundary from 'create_isoflux_xpts'
-# against the reference `isoflux_xpts_expected.json`.
-# -----------------------------------------------------------------------
 isoflux_xpts_expected = load_fixture('isoflux_xpts_expected.json')
 
 
 def test_xpoints_from_moments():
-    """X-points are exact analytic Miller-moment coordinates."""
+    '''X-points placed from elongation and triangularity sit at (R0 - a delta, Z0 +/- a kappa), with the lower
+    X-point using its own shape values when they are given'''
     r0, z0, a = 6.2, 0.3, 2.0
     kU, dU, kL, dL = 1.7, 0.33, 2.0, 0.5
     # Up-down symmetric (lower defaults to upper)
@@ -36,8 +31,8 @@ def test_xpoints_from_moments():
 
 @pytest.mark.parametrize('case', ['symmetric', 'asymmetric'])
 def test_create_isoflux_xpts(case):
-    """Generated boundary matches the reference contour, has exactly npts
-    unique points, and passes through both X-points."""
+    '''Boundary contour with X-points has the requested number of distinct points, passes through both X-points,
+    and matches the stored reference contour'''
     ref = isoflux_xpts_expected[case]
     params = ref['params']
     pts = create_isoflux_xpts(**params)
@@ -55,6 +50,6 @@ def test_create_isoflux_xpts(case):
 
 
 def test_create_isoflux_xpts_requires_min_npts():
-    """npts < 3 must raise rather than allocate invalid segment counts."""
+    '''Fewer than three boundary points raises ValueError'''
     with pytest.raises(ValueError):
         create_isoflux_xpts(2, 6.2, 0.0, 2.0, 1.7, 0.33)

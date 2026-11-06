@@ -18,6 +18,7 @@ from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, create_power_flux_f
 
 def run_LTX_case(fe_order,test_type,mp_q):
     def create_mesh():
+        '''Build the LTX mesh (plasma, segmented shell and vessel, coils) and save it to `LTX_mesh.h5`'''
         with open('LTX_geom.json','r') as fid:
             LTX_geom = json.load(fid)
         plasma_dx = 0.02
@@ -25,9 +26,9 @@ def run_LTX_case(fe_order,test_type,mp_q):
         vv_dx = 0.015
         vac_dx = 0.05
         gs_mesh = gs_Domain()
-        #
         gs_mesh.define_region('air',vac_dx,'boundary')
         gs_mesh.define_region('plasma',plasma_dx,'plasma')
+        # The shell halves are toroidally broken, so they carry no net toroidal current
         gs_mesh.define_region('shellU',vv_dx,'conductor',eta=4.E-7,noncontinuous=True)
         gs_mesh.define_region('shellL',vv_dx,'conductor',eta=4.E-7,noncontinuous=True)
         for i, vv_segment in enumerate(LTX_geom['vv']):
@@ -37,7 +38,6 @@ def run_LTX_case(fe_order,test_type,mp_q):
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'],coil_set='OH')
             else:
                 gs_mesh.define_region(key,coil_dx,'coil',nTurns=coil['nturns'])
-        #
         gs_mesh.add_polygon(LTX_geom['limiter'],'plasma',parent_name='air')
         gs_mesh.add_polygon(LTX_geom['shell'],'shellU',parent_name='air')
         shell_lower = np.array(LTX_geom['shell'].copy()); shell_lower[:,1] *= -1.0
@@ -46,7 +46,6 @@ def run_LTX_case(fe_order,test_type,mp_q):
             gs_mesh.add_polygon(vv_segment[0],'vv{0}'.format(i),parent_name='air')
         for key, coil in LTX_geom['coils'].items():
             gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='air')
-        #
         mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
         coil_dict = gs_mesh.get_coils()
         cond_dict = gs_mesh.get_conductors()
@@ -58,27 +57,25 @@ def run_LTX_case(fe_order,test_type,mp_q):
             print(e)
             mp_q.put(None)
             return
-    # Run EQ
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('LTX_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
     mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.setup(order=fe_order,F0=0.10752)
-    #
     if test_type == 'eig':
         eig_vals, _ = mygs.compute_wall_modes(10)
         mp_q.put([{'Tau_w': eig_vals[:5]}])
         oftpy_dump_cov()
         return
-    #
+    # Up-down antisymmetric internal coil pair provides vertical stability control
     mygs.set_coil_vsc({'INTERNALU': 1.0, 'INTERNALL': -1.0})
-    #
     Ip_target = 8.0E4
     mygs.set_targets(Ip=Ip_target,Ip_ratio=2.0)
     isoflux_pts = create_isoflux(20,0.40,0.0,0.22,1.5,0.1)
     mygs.set_isoflux(isoflux_pts)
-    # Set regularization weights
+    # Weak current regularization for each coil pair and a strong up-down symmetry penalty; the YELLOW pair is
+    # effectively disabled
     disable_list = ('YELLOW',)
     regularization_terms = []
     for name in mygs.coil_sets:
@@ -94,11 +91,9 @@ def run_LTX_case(fe_order,test_type,mp_q):
         regularization_terms.append(mygs.coil_reg_term({name: 1.0, name[:-1]+'L': -1.0},target=0.0,weight=1.E2))
     regularization_terms.append(mygs.coil_reg_term({'#VSC': 1.0},target=0.0,weight=1.E-4))
     mygs.set_coil_reg(reg_terms=regularization_terms)
-    #
     ffp_prof = create_power_flux_fun(50,1.5,2.0)
     pp_prof = create_power_flux_fun(50,4.0,1.0)
     mygs.set_profiles(ffp_prof=ffp_prof,pp_prof=pp_prof)
-    #
     mygs.init_psi(0.42,0.0,0.15,1.5,0.6)
     mygs.settings.pm=True
     mygs.update_settings()
@@ -108,35 +103,38 @@ def run_LTX_case(fe_order,test_type,mp_q):
         mp_q.put([{'gamma': eig_vals[:5]}])
         oftpy_dump_cov()
         return
-    #
+    # Re-solve at higher Ip with a 5 ms flux-change (eddy current) source from the first equilibrium
     psi_last = mygs.get_psi(False)
     mygs.set_psi_dt(psi_last,5.E-3)
     Ip_target = 9.0E4
     mygs.set_targets(Ip=Ip_target,Ip_ratio=2.0)
     mygs.solve()
     mygs.save_eqdsk('test.eqdsk')
-    #
     mp_q.put([mygs.get_stats()])
     oftpy_dump_cov()
 
-# Test runners for LTX test cases
 @pytest.mark.coverage
-@pytest.mark.parametrize("order", (2,3))#,4))
+@pytest.mark.parametrize("order", (2,3))
 def test_LTX_eig(order):
+    '''L/R decay times of the slowest eddy-current modes in the LTX shell and vessel against reference values'''
     exp_dict = {
         'Tau_w': [5.152566E-03, 3.953030E-03, 2.536384E-03, 2.172948E-03, 1.853882E-03]
     }
     results = mp_run(run_LTX_case,(order,'eig'))
     assert validate_dict(results,exp_dict)
 
+
 @pytest.mark.coverage
-@pytest.mark.parametrize("order", (2,3))#,4))
+@pytest.mark.parametrize("order", (2,3))
 def test_LTX_stability(order):
+    '''Linearized axisymmetric stability of an LTX equilibrium with a segmented, partly toroidally broken wall,
+    against reference growth rates'''
     exp_dict = {
         'gamma': [234.1051, -214.4196, -282.0877, -388.7592, -388.7592]
     }
     results = mp_run(run_LTX_case,(order,'stab'))
     assert validate_dict(results,exp_dict)
+
 
 LTX_eq_dict = {
     'Ip': 90002.51679781199,
@@ -163,7 +161,9 @@ LTX_eq_dict = {
 }
 
 @pytest.mark.coverage
-@pytest.mark.parametrize("order", (2,3))#,4))
+@pytest.mark.parametrize("order", (2,3))
 def test_LTX_eq(order):
+    '''Free-boundary LTX equilibrium re-solved at higher plasma current with eddy currents driven by the flux change
+    over a finite time step; global quantities are compared to reference values and a gEQDSK file is written'''
     results = mp_run(run_LTX_case,(order,''))
     assert validate_dict(results,LTX_eq_dict)

@@ -8,10 +8,10 @@ import pytest
 import numpy as np
 from tokamaker_testing import mp_run, validate_dict, setup_ITER_bootstrap_internal
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
+from OpenFUSIONToolkit.util import eC
 
 
 def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
-    '''Sawtooth reset (saw_q_s) in the internal bootstrap solve'''
     setup = setup_ITER_bootstrap_internal(mesh_resolution, fe_order)
     if setup is None:
         mp_q.put(None)
@@ -35,7 +35,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
     try:
         base = mygs.solve_bootstrap(**common)
         _, q_base, _, _, _, _ = mygs.get_q(npsi=40)
-        # (a) an input jphi_saw_prof with the reset off acts as a fixed current
+        # With the reset off, an input jphi_saw_prof acts as a fixed current
         bump = 1.0e5 * np.exp(-((psi_sample - 0.2) / 0.1)**2)
         p_fix = mygs.solve_bootstrap(jphi_fixed_prof={'x': psi_sample, 'y': bump}, **common)
         mygs.boot_reset()  # jphi_fixed_prof would otherwise be kept
@@ -47,8 +47,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
             raise AssertionError("j_saw / jphi_fixed with jphi_saw_prof (saw off) wrong")
         if not (sum_ok(p_fix) and sum_ok(p_saw)):
             raise AssertionError("jphi_total != j_ind + j_bs + jphi_fixed + jphi_saw")
-        # jphi_saw survives an equilibrium save/load: re-solving the reloaded state keeps j_saw
-        # (zeroed before the reload, since replace_eq loads into a copy of the live equilibrium)
+        # jphi_saw survives save/load; it is zeroed first because replace_eq loads into a copy of the live equilibrium
         mygs._tMaker_equil.save_TokaMaker('ITER_saw_roundtrip.h5')
         mygs.set_kinetic_profiles(jphi_saw_prof={'x': np.array([0.0, 1.0]), 'y': np.zeros(2)})
         mygs.replace_eq(source_file='ITER_saw_roundtrip.h5')
@@ -56,7 +55,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         p_rel = mygs.get_boot_profs()
         if not (close(p_rel['jphi_saw'], p_saw['jphi_saw'], 1e-6) and close(p_rel['jphi_total'], p_saw['jphi_total'], 1e-3)):
             raise AssertionError("jphi_saw lost in the equilibrium save/load")
-        # (c, d) q_s below min q: no reset, same result as saw off (alpha through the cumulative integral)
+        # q_s below the minimum q: no reset, so the result matches the reset off
         mygs.boot_reset()  # jphi_saw_prof would otherwise be kept
         p_low = mygs.solve_bootstrap(saw_q_s=0.5*np.min(q_base), **common)
         if np.any(p_low['jphi_saw'] != 0.0) or p_low['saw_n_dips'] != 0:
@@ -64,9 +63,8 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         for key in ('jphi_total', 'jphi_ind', 'jphi_bs'):
             if not close(p_low[key], base[key], 2e-4):
                 raise AssertionError(f"saw_q_s below min q: '{key}' differs from saw off")
-        # (b) q_s above the unconstrained q0 (default rule 2, local; the base has reversed shear, so the
-        #     region holds the axis with q0 < q_s: flat at q_s inside the q minimum): q0 -> q_s, monotone
-        #     inside rho_out, Ip on target
+        # q_s above q0 with the default local rule: q0 is raised to q_s, q is monotone inside the mixing radius,
+        # and Ip stays on target
         q_s, dq = float(q_base[0]) + 0.2, 0.03
         p_on = mygs.solve_bootstrap(saw_q_s=q_s, saw_dq=dq, diagnose_bs=False, **common)
         psi_q, q_on, _, _, _, _ = mygs.get_q(npsi=40)
@@ -84,22 +82,22 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         if not sum_ok(p_on) or p_on['saw_n_dips'] != 1 or not (0.0 < p_on['saw_rho_m'] < 1.0) \
                 or abs(p_on['saw_rho_out'] - p_on['saw_rho_m']) > 1e-12:
             raise AssertionError("saw: profile sum / rho_m / rho_out / n_dips wrong")
-        # j_saw vanishes outside rho_out (rho_tor_norm from int q dpsi)
+        # j_saw vanishes outside the mixing radius
         def rho_tor(psi_q, q, psi):
+            '''Normalized toroidal flux radius from the integral of q over psi'''
             phi = np.concatenate(([0.0], np.cumsum(0.5*(q[1:] + q[:-1])*np.diff(psi_q))))
             return np.sqrt(np.interp(psi, psi_q, phi/phi[-1]))
         rho_of_psi = rho_tor(psi_q, q_on, p_on['psi_n'])
         outside = rho_of_psi > p_on['saw_rho_out'] + 0.05
         if np.max(np.abs(p_on['jphi_saw'][outside])) > 1e-3*np.max(np.abs(p_on['jphi_saw'])):
             raise AssertionError("saw: j_saw nonzero outside rho_out")
-        # (b2) a second solve from the converged reset state must reset again (an early iterate with
-        #      no dip must not freeze the reset off)
+        # Re-solving from the converged reset state must reset again, even though its first iterate has no q dip
         mygs.solve_bootstrap(saw_q_s=q_s, saw_dq=dq, **common)
         _, q_on2, _, _, _, _ = mygs.get_q(npsi=40)
         if abs(q_on2[0] - q_s) > 0.03:
             raise AssertionError(f"saw: repeated solve q0 {q_on2[0]:.4f} not at q_s {q_s:.4f}")
-        # (e) node-dense axis (psi_N = rho^2, as on a FUSE core_profiles grid): inner cumulative-area
-        #     bins hold no quadrature points; the reset must stay finite and still reach q_s
+        # Profiles on psi_N = rho^2 nodes (dense near the axis, as from transport codes) leave inner area bins without
+        # quadrature points; the reset must stay finite and still reach q_s
         x2 = np.linspace(0.0, 1.0, n_sample)**2
         dense = {k: (dict(v, x=x2, y=np.interp(x2, v['x'], v['y'])) if isinstance(v, dict) else v)
                  for k, v in common.items()}
@@ -108,8 +106,8 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         print(f"saw dense axis: q0 {q_d[0]:.4f} (q_s {q_s:.4f}), rho_m {p_d['saw_rho_m']:.3f}")
         if not np.all(np.isfinite(p_d['jphi_saw'])) or abs(q_d[0] - q_s) > 0.03:
             raise AssertionError("saw: dense-axis grid reset not finite or q0 not at q_s")
-        # (f) reversed shear, q_s between the off-axis min q and q0 (> q_s + dq): local raises only the dip
-        #     (q0 kept, j_saw zero inside the region's inner end); fuse resets from the axis (q0 -> q_s)
+        # Reversed shear with q_s between the off-axis minimum and q0: the local rule (2) raises only the dip, while
+        # the fused rule (1) resets from the axis
         q_s = 0.5*(float(q_base[0]) + float(np.min(q_base)))
         out = {}
         for rule in (2, 1):
@@ -130,9 +128,7 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
         away = (rho_l < rho_in - 0.05) | (rho_l > p_l['saw_rho_out'] + 0.05)
         if not (0.1 < rho_in < p_l['saw_rho_out']) or np.max(np.abs(p_l['jphi_saw'][away])) > 1e-3*np.max(np.abs(p_l['jphi_saw'])):
             raise AssertionError("saw reversed shear: local j_saw not confined to [rho_in, rho_out]")
-        # (g) a loaded bootstrap state is re-solvable as saved: the same positional call after loading
-        #     reproduces the call with every keyword input and option passed explicitly
-        eC = 1.602176634e-19
+        # A loaded bootstrap state re-solves as saved: a call without keyword inputs matches one passing them all
         p_kin = eC*(setup['ne']*setup['Te'] + setup['ni']*setup['Ti'])
         kw = dict(jphi_fixed_prof={'x': psi_sample, 'y': 0.5*bump}, jphi_saw_prof={'x': psi_sample, 'y': 0.5*bump},
                   p_fixed_prof={'x': psi_sample, 'y': p_kin[0]*(0.1*np.exp(-((psi_sample - 0.3)/0.15)**2) + 1.0e-3)},
@@ -166,6 +162,9 @@ def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
 @pytest.mark.slow
 @pytest.mark.parametrize("order", (2,))
 def test_ITER_bootstrap_saw_internal(order):
+    '''Sawtooth q-profile reset in the internal bootstrap solve on ITER: an input sawtooth current, no reset when
+    q stays above q_s, the local and fused reset rules (including reversed shear and axis-dense profile grids),
+    persistence through save/load, and boot_reset() restoring the defaults'''
     results = mp_run(run_ITER_bootstrap_saw_internal, (1.0, order), timeout=600)
     assert validate_dict(results, {'saw_checks': 1.0})
 
@@ -180,7 +179,9 @@ def run_saw_reset_1d(mp_q):
 
 
 def test_saw_reset_1d():
-    '''1-D sawtooth reset on a cylinder (I = rho^2/q, A = rho^2): rule 1 (fuse) and rule 2 (local)'''
+    '''One-dimensional sawtooth q reset on a cylindrical model (I = rho^2/q, A = rho^2) for the fused (1) and
+    local (2) rules: mixing radii, Ip neutrality, single, merged, and split q dips, non-finite q, and continuity
+    of the local rule as a second dip appears'''
     result = mp_run(run_saw_reset_1d, (), timeout=60)
     assert result == 'ok', result
 

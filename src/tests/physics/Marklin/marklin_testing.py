@@ -14,6 +14,7 @@ from OpenFUSIONToolkit._interface import oftpy_dump_cov
 
 
 def mp_run(target,args,timeout=180):
+    '''Run `target` in its own process from the Marklin test folder (see `oft_testing.mp_run`)'''
     return oft_testing.mp_run(target,args,test_dir,timeout=timeout)
 
 
@@ -23,6 +24,8 @@ def clear_cache():
 
 
 def run_marklin(meshfile,nmodes,order,grid_order,meshfile2,mp_q):
+    '''Compute Taylor eigenmodes on `meshfile`, then on `meshfile2` (if given) with a second Marklin instance
+    in the same OFT environment, returning the eigenvalues of the last instance (None on failure)'''
     try:
         from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.Marklin import Marklin
@@ -37,6 +40,7 @@ def run_marklin(meshfile,nmodes,order,grid_order,meshfile2,mp_q):
         result = False
     if (meshfile2 is not None) and result:
         try:
+            # Keep the first instance alive so both coexist in the same environment
             taylor_solver_old = taylor_solver
             taylor_solver = Marklin(myOFT)
             taylor_solver.setup_mesh(mesh_file=meshfile2,grid_order=grid_order)
@@ -54,6 +58,7 @@ def run_marklin(meshfile,nmodes,order,grid_order,meshfile2,mp_q):
 
 
 def validate_eigs(results,eigs):
+    '''Check the lowest eigenvalue against `eigs` to a relative tolerance of 1E-4'''
     if results is None:
         print("FAILED: error in solve!")
         return False
@@ -67,6 +72,7 @@ def validate_eigs(results,eigs):
 
 
 def run_marklin_vac(meshfile,order,grid_order,mp_q):
+    '''Compute the vacuum field for one flux jump plane and return |B| at (1, 0, 0) (None on failure)'''
     try:
         from OpenFUSIONToolkit import OFT_env
         from OpenFUSIONToolkit.Marklin import Marklin
@@ -74,6 +80,7 @@ def run_marklin_vac(meshfile,order,grid_order,mp_q):
         taylor_solver = Marklin(myOFT)
         taylor_solver.setup_mesh(mesh_file=meshfile,grid_order=grid_order)
         taylor_solver.setup(order,minlev=1)
+        # One flux jump plane through (1, 0, 0) with normal along the toroidal direction there
         nh = 1
         hcpc = np.array([[1.0,0.0,0.0],])
         hcpv = np.array([[0.0,1.5,0.0],])

@@ -25,7 +25,6 @@ def run_td_noconductor_case(use_vcoil,mp_q):
     mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
     coil_dict = gs_mesh.get_coils()
     cond_dict = gs_mesh.get_conductors()
-    # Setup vacuum state and attempt time-dependent setup
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
@@ -49,6 +48,8 @@ def run_td_noconductor_case(use_vcoil,mp_q):
 
 @pytest.mark.coverage
 def test_td_no_conductors():
+    '''Time-dependent setup on a mesh with coils but no conducting regions or voltage-driven coils raises a clear
+    error'''
     result = mp_run(run_td_noconductor_case,(False,))
     assert result is not None
     assert 'requires at least one conducting region' in result
@@ -56,5 +57,6 @@ def test_td_no_conductors():
 
 @pytest.mark.coverage
 def test_td_vcoil_only():
+    '''A voltage-driven coil is enough conducting structure for time-dependent setup and a time step to succeed'''
     result = mp_run(run_td_noconductor_case,(True,))
     assert result == ''

@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
 # Shared helpers for TokaMaker tests: process runner, result validation, and the
-# ITER mesh, constraints, and profiles used by the ITER-based cases
+# ITER mesh, constraints, reference equilibrium, and profiles used by the ITER-based cases
 import os
 import sys
 import json
@@ -27,8 +27,31 @@ def load_fixture(filename):
         return json.load(fh)
 
 
+def validate_errors(results,errs_exp,labels,factor=1.1):
+    '''Check that each error in `results` is no more than `factor` times its expected value
+
+    Used for convergence cases, where the expected values are the errors against an analytic solution.
+    '''
+    if results is None:
+        print("FAILED: error in solve!")
+        return False
+    test_result = True
+    for label, err, err_exp in zip(labels,results,errs_exp):
+        if abs(err) > factor*abs(err_exp):
+            print("FAILED: {0} error too high!".format(label))
+            print("  Expected = {0:.5E}".format(err_exp))
+            print("  Actual =   {0:.5E}".format(err))
+            test_result = False
+    return test_result
+
+
 def validate_dict(results,dict_exp,tol_dict=None):
+    '''Check each entry of `results[0]` against `dict_exp` to a relative tolerance (1% unless set in `tol_dict`)
+
+    List entries are compared element-wise, skipping expected values of `None`.
+    '''
     default_tol = {
+        # Triangularity depends on the outermost traced boundary points, so it is resolution sensitive
         'delta': 5.E-2,
         'deltaU': 5.E-2,
         'deltaL': 5.E-2,
@@ -37,13 +60,9 @@ def validate_dict(results,dict_exp,tol_dict=None):
         'fsa_R_at_Zmin': 2.E-2,
         'fsa_R_at_Zmax': 2.E-2
     }
-    if tol_dict is None:
-        tol_dict = default_tol
-    else:
-        # Merge user-provided tolerances on top of the defaults
-        merged = dict(default_tol)
-        merged.update(tol_dict)
-        tol_dict = merged
+    if tol_dict is not None:
+        default_tol.update(tol_dict)
+    tol_dict = default_tol
     if results is None:
         print("FAILED: error in solve!")
         return False
@@ -52,7 +71,7 @@ def validate_dict(results,dict_exp,tol_dict=None):
         result_val = results[0].get(key,None)
         if result_val is None:
             print('FAILED: key "{0}" not present!'.format(key))
-            result_val = False
+            test_result = False
         else:
             if type(exp_val) is list:
                 for i in range(len(exp_val)):
@@ -93,7 +112,7 @@ def validate_eqdsk(file_test,file_ref,helicity=1.0):
         result_val = test_data.get(key,None)
         if result_val is None:
             print('FAILED: key "{0}" not present in result!'.format(key))
-            result_val = False
+            test_result = False
         else:
             if key == 'case':
                 continue
@@ -131,7 +150,7 @@ def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
         result_val = test_data.get(key,None)
         if result_val is None:
             print('FAILED: key "{0}" not present in result!'.format(key))
-            result_val = False
+            test_result = False
         else:
             if isinstance(exp_val,np.ndarray):
                 if np.linalg.norm(exp_val-result_val)/np.linalg.norm(exp_val) > 1.E-2:
@@ -246,7 +265,7 @@ def create_ITER_mesh(mesh_resolution=1.0):
 
 
 def setup_ITER_gs(myOFT,fe_order,F0=5.3*6.2,maxits=None):
-    '''Create a TokaMaker object on the ITER mesh (see `create_ITER_mesh`)'''
+    '''Create a TokaMaker object on the ITER mesh (see `create_ITER_mesh`); F0 = B0*R0 with B0 = 5.3 T at R0 = 6.2 m'''
     mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
     mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
@@ -284,6 +303,26 @@ def solve_ITER_eq(mygs):
     return mygs.solve(return_its=True)
 
 
+def solve_ITER_reference(mesh_resolution,fe_order):
+    '''Build the ITER mesh and solve the reference equilibrium, returning the TokaMaker object and equilibrium
+
+    Returns `(None, None)` if meshing or the solve fails.
+    '''
+    try:
+        create_ITER_mesh(mesh_resolution)
+    except Exception as e:
+        print(e)
+        return None, None
+    myOFT = OFT_env(nthreads=-1)
+    mygs = setup_ITER_gs(myOFT,fe_order)
+    set_ITER_constraints(mygs)
+    try:
+        EQ_obj, _ = solve_ITER_eq(mygs)
+    except ValueError:
+        return None, None
+    return mygs, EQ_obj
+
+
 def ITER_Hmode_profiles(n_sample):
     '''H-mode electron density [m^-3] and temperature [eV] profiles on `n_sample` uniform psi_N points'''
     from OpenFUSIONToolkit.TokaMaker.bootstrap import Hmode_profiles
@@ -303,7 +342,6 @@ def setup_ITER_bootstrap_internal(mesh_resolution, fe_order):
         print(e)
         return None
 
-    # --- Kinetic and current profiles (ITER H-mode) ---
     n_sample = 257
     psi_sample = np.linspace(0.0, 1.0, n_sample)
     Ip_target = 13.0e6
@@ -313,12 +351,10 @@ def setup_ITER_bootstrap_internal(mesh_resolution, fe_order):
     Ti = Te.copy()
     inductive_jphi = create_power_flux_fun(n_sample, 2.25, 2.5)['y']
 
-    # --- Set up GS solver ---
     myOFT = OFT_env(nthreads=-1)
     mygs = setup_ITER_gs(myOFT, fe_order, maxits=100)
     set_ITER_constraints(mygs, Ip_target=Ip_target)
-
-    # Initial no-bootstrap solve
+    # Converged starting equilibrium without bootstrap current
     mygs.settings.pm = False
     mygs.update_settings()
     try:
