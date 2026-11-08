@@ -495,6 +495,38 @@ def _local_stiffness(r, lc):
     return numpy.einsum('cik,cjk->cij', e, e)/(4.0*area)[:, None, None]
 
 
+def _add_independent(r, basis):
+    '''! Add a sparse row to an echelon basis if it is independent of the rows already in it
+
+    The row is reduced by the basis rows (exact arithmetic, pivoting on the largest index); anything left is
+    normalized and added to the basis.
+
+    @param r Row {index: value} (integer or Fraction values; modified)
+    @param basis Echelon basis {pivot index: row}, updated in place
+    @result True if the row was independent (and added)
+    '''
+    while r:
+        p = max(r)
+        if p not in basis:
+            break
+        f = r[p]
+        for j, val in basis[p].items():
+            rj = r.get(j, 0) - f*val
+            if rj == 0:
+                r.pop(j, None)
+            else:
+                r[j] = rj
+    if not r:
+        return False
+    p = max(r)
+    rp = r[p]
+    if rp == 1:
+        basis[p] = r
+    else:
+        basis[p] = {j: Fraction(val)/rp for j, val in r.items()}
+    return True
+
+
 def _vertex_cells(lc_split, nv):
     '''! Cells at each vertex, in increasing order; @result pointer [nv+1], cells'''
     flat = numpy.asarray(lc_split, dtype=numpy.int64).ravel()
@@ -590,17 +622,19 @@ def junction_basis(lc, lc_split, reg, jedges, insulated=(), holes=(), lco=None):
         grows.append({k: c for k, c in g.items() if c != 0})
     gexpr = _solve(grows)
     gfree = [c for c in range(ncomp) if c not in gexpr]
-    gauge = numpy.zeros((len(gfree), ncomp))
-    for i, f in enumerate(gfree):
-        gauge[i, f] = 1.0
-        for c, e in gexpr.items():
-            gauge[i, c] = float(e.get(f, 0))
+    gindex = {f: i for i, f in enumerate(gfree)}
+
+    def gauge(c):
+        '''! Zero-current shift removed by fixing an unknown of piece c, over the free shifts'''
+        if c not in gexpr:
+            return {gindex[c]: 1}
+        return {gindex[f]: cf for f, cf in gexpr[c].items() if cf != 0}
     free = [x for x in sorted(set(var_of.tolist())) if x not in expr]
     plain = set(range(nv)) - jverts
     order = [x for x in free if x >= nv] + [x for x in free if x < nv and x in plain] + [x for x in free if x < nv and x not in plain]
     # Fix one unknown per zero-current shift; whether an unknown removes a shift depends only on its piece, so each
     # piece is tried once
-    fixed, block, tried = [], numpy.zeros((len(gfree), 0)), set()
+    fixed, basis, tried = [], {}, set()
     for x in order:
         if len(fixed) == len(gfree):
             break
@@ -608,9 +642,8 @@ def junction_basis(lc, lc_split, reg, jedges, insulated=(), holes=(), lco=None):
         if cx in tried:
             continue
         tried.add(cx)
-        trial = numpy.hstack((block, gauge[:, [cx]]))
-        if numpy.linalg.matrix_rank(trial) > block.shape[1]:
-            block, fixed = trial, fixed + [x]
+        if _add_independent(gauge(cx), basis):
+            fixed.append(x)
     if len(fixed) != len(gfree):
         raise ValueError('Could not remove every zero-current shift')
     hfree = [-1 - j for j in range(len(holes)) if -1 - j not in expr]
@@ -746,25 +779,7 @@ def _cycle_holes(lc, lc_split, links, M, lco):
     rows = _flux_rows(lc, lc_split, M, lcell[nontree], la[nontree], lb[nontree], lco)
     basis, generators = {}, []
     for k, r in zip(nontree.tolist(), rows):
-        while r:
-            p = max(r)
-            if p not in basis:
-                break
-            f = r[p]
-            for j, val in basis[p].items():
-                rj = r.get(j, 0) - f*val
-                if rj == 0:
-                    r.pop(j, None)
-                else:
-                    r[j] = rj
-        if r:
-            p = max(r)
-            rp = r[p]
-            if rp == 1:
-                basis[p] = r
-            else:
-                basis[p] = {j: Fraction(val)/rp for j, val in r.items()}
-        else:
+        if not _add_independent(r, basis):
             generators.append(k)
     pred = pred.tolist()
 
