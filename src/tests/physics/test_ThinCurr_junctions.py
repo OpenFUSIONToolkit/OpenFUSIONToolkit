@@ -81,7 +81,8 @@ def test_ring(insulated, nholes):
 def test_torus_sectors():
     r, lc, reg = torus()
     assert not has_junctions(lc)
-    out = find_junction_holes(r, lc, reg)
+    out = find_junction_holes(r, lc, reg, split_regions=True)
+    assert len(out['jedges']) == 3*8
     assert out['n_unknowns'] == out['n_loops']
 
 
@@ -121,7 +122,7 @@ def corner_map(lc, pmap, holes, nexp):
 @pytest.mark.parametrize("mesh", ('tplate', 'ring', 'torus'))
 def test_expanded_map(mesh):
     r, lc, reg = {'tplate': tplate, 'ring': ring, 'torus': torus}[mesh]()
-    out = find_junction_holes(r, lc, reg)
+    out = find_junction_holes(r, lc, reg, split_regions=True)
     B = corner_map(out['lc'], out['pmap'], out['holes'], out['P'].shape[0])
     assert abs(B @ out['P'] - out['M']).max() < 1.0E-12
 
@@ -181,11 +182,11 @@ def mp_run(target, args, timeout=180):
     return test_result
 
 
-def write_pair(r, lc, reg, prefix, insulated=(), vcoil=False):
+def write_pair(r, lc, reg, prefix, insulated=(), vcoil=False, split_regions=True):
     """Junction mesh file with its map P and the same mesh with P = identity (expanded reference), with an I-coil
-    (and a V-coil if `vcoil`)."""
+    (and a V-coil if `vcoil`). The mesh is split at region interfaces too unless `split_regions` is False."""
     from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil, ThinCurr_Vcoil
-    out = find_junction_holes(r, lc, reg, insulated=insulated)
+    out = find_junction_holes(r, lc, reg, insulated=insulated, split_regions=split_regions)
     ident = copy.copy(out)
     ident['P'] = scipy.sparse.identity(out['P'].shape[0], format='csr')
     coil = ThinCurr_Icoil('IC')
@@ -549,8 +550,8 @@ def test_runtime_insulation():
 @pytest.mark.parametrize("insulated,nholes", (([1], 2), ([(1, 2)], 1), ([(1, 2), (2, 3)], 2), ([1, 2, 3], 3)))
 def test_torus_insulation(insulated, nholes):
     r, lc, reg = torus()
-    out = find_junction_holes(r, lc, reg, insulated=insulated)
-    assert out['n_unknowns'] == out['n_loops'] == current_loop_count(lc, reg, insulated=insulated)
+    out = find_junction_holes(r, lc, reg, insulated=insulated, split_regions=True)
+    assert out['n_unknowns'] == out['n_loops'] == current_loop_count(lc, reg, insulated=insulated, split_regions=True)
 
 
 def test_split_regions_file(tmp_path):
@@ -559,8 +560,10 @@ def test_split_regions_file(tmp_path):
     write_ThinCurr_mesh(in_file, r, lc, reg)
     compute_homology(in_file, split_regions=True)
     junc = read_ThinCurr_mesh(str(tmp_path / 'torus-homology.h5'))['thincurr']['junctions']
-    assert junc['P'].shape[1] == current_loop_count(lc, reg)
+    assert junc['P'].shape[1] == current_loop_count(lc, reg, split_regions=True)
     assert len(junc['kje']) - 1 == 3*8
+    assert junc['split_regions']
+    compute_homology(str(tmp_path / 'torus-homology.h5'), verify_only=True)
 
 
 def test_runtime_pair_insulation():
@@ -603,6 +606,69 @@ def test_torus_with_rib():
     assert has_junctions(lc, reg)
     out = find_junction_holes(r, lc, reg)
     assert out['n_unknowns'] == out['n_loops']
+
+
+def torus_with_rib():
+    """Torus in three sectors (regions 1-3) with a rib (region 4) standing on it away from the sector interfaces"""
+    rib = sheet(2, 8, lambda u, v: np.c_[(1.0 + (0.3 + 0.15*u)*np.cos(2*np.pi*v))*np.cos(np.pi/3),
+                                         (1.0 + (0.3 + 0.15*u)*np.cos(2*np.pi*v))*np.sin(np.pi/3),
+                                         (0.3 + 0.15*u)*np.sin(2*np.pi*v)], 4)
+    return merge(*[torus_sector_sheet(k) for k in range(3)], rib)
+
+
+def test_split_regions_with_junctions():
+    """A mesh with junctions is only split at its junction edges unless region interfaces are also requested"""
+    r, lc, reg = torus_with_rib()
+    assert has_junctions(lc, reg)
+    out = find_junction_holes(r, lc, reg)
+    assert not out['split_regions']
+    assert len(out['jedges']) == 8 and all(len(cells) == 3 for cells in out['jedges'].values())
+    assert out['n_unknowns'] == out['n_loops'] == current_loop_count(lc, reg)
+    full = find_junction_holes(r, lc, reg, split_regions=True)
+    assert full['split_regions']
+    assert len(full['jedges']) == 8 + 3*8
+    assert full['n_unknowns'] == full['n_loops'] == out['n_loops']
+    # Sectors can only be insulated from each other if the mesh is split at their interfaces
+    with pytest.warns(UserWarning, match='no effect'):
+        find_junction_holes(r, lc, reg, insulated=[(1, 2)])
+    gap = find_junction_holes(r, lc, reg, insulated=[(1, 2)], split_regions=True)
+    assert gap['n_unknowns'] == gap['n_loops'] == current_loop_count(lc, reg, insulated=[(1, 2)], split_regions=True)
+    assert gap['n_unknowns'] < full['n_unknowns']
+
+
+@pytest.mark.parametrize("split_regions", (False, True))
+def test_split_regions_with_junctions_file(tmp_path, split_regions):
+    """The hole tool honours "split_regions" for meshes with junctions, and the file records it for verification
+    and insulation"""
+    from OpenFUSIONToolkit.ThinCurr.junctions import insulate_junction_file
+    r, lc, reg = torus_with_rib()
+    in_file = str(tmp_path / 'rib.h5')
+    out_file = str(tmp_path / 'rib-homology.h5')
+    write_ThinCurr_mesh(in_file, r, lc, reg)
+    compute_homology(in_file, split_regions=split_regions)
+    junc = read_ThinCurr_mesh(out_file)['thincurr']['junctions']
+    assert junc['split_regions'] == split_regions
+    assert len(junc['kje']) - 1 == (8 + 3*8 if split_regions else 8)
+    compute_homology(out_file, verify_only=True)
+    insulated = [(1, 2)]
+    out = insulate_junction_file(out_file, insulated, str(tmp_path / 'rib-gap.h5'))
+    assert out['split_regions'] == split_regions
+    assert out['n_unknowns'] == current_loop_count(lc, reg, insulated=insulated, split_regions=split_regions)
+    compute_homology(str(tmp_path / 'rib-gap.h5'), verify_only=True)
+
+
+def test_legacy_rejected(tmp_path):
+    """The legacy hole method does not support junctions: it is an error, not a fallback to the junction split"""
+    r, lc, reg = torus_with_rib()
+    in_file = str(tmp_path / 'rib.h5')
+    write_ThinCurr_mesh(in_file, r, lc, reg)
+    with pytest.raises(ValueError, match='legacy'):
+        compute_homology(in_file, use_legacy=True)
+    r, lc, reg = torus()
+    in_file = str(tmp_path / 'torus.h5')
+    write_ThinCurr_mesh(in_file, r, lc, reg)
+    with pytest.raises(ValueError, match='legacy'):
+        compute_homology(in_file, use_legacy=True, split_regions=True)
 
 
 def torus_sector_sheet(k, nsect=3):

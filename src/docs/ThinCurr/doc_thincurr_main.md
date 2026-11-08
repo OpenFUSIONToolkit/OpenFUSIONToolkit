@@ -228,10 +228,11 @@ are supported by splitting the mesh at the junctions:
 
  - Each region is a sheet, and a junction edge is an edge shared by more than two cells. Only meshes with junctions
    (or with sheets of different regions that touch only at a point) are split, so a mesh whose regions form a
-   manifold sheet is not split unless requested (see below). In a mesh that is split, edges where two regions meet
-   are also treated as junction edges, even where only two cells share them, so that those regions can be insulated
-   from each other; with two cells, current conservation there is ordinary continuity, so this does not change the
-   currents. At each vertex, every group of cells connected through ordinary edges gets its own copy of the vertex,
+   manifold sheet is not split unless requested (see below). By default the mesh is only split at its junction edges;
+   if requested, edges where two regions meet are also treated as junction edges, even where only two cells share
+   them, so that those regions can be insulated from each other; with two cells, current conservation there is
+   ordinary continuity, so this does not change the currents. At each vertex, every group of cells connected through
+   ordinary edges gets its own copy of the vertex,
    so the split mesh is an ordinary (manifold) ThinCurr mesh. Cells keep their index and region. Sheets that touch
    only at a point are therefore not connected (no current passes through a point), and a region may lie on both
    sides of a junction (for example a plate under a stiffening rib).
@@ -256,9 +257,11 @@ unknowns is checked against the number of cycles of the graph.
  - Give each sheet its own region, e.g. a gmsh physical surface converted with `OFT_convert_gmsh --physical_regions`.
  - Run `OFT_ThinCurr_holes` (\ref thincurr_holes_tool) on the mesh. If it finds junctions (or sheets of different
    regions touching at a point) it writes the split mesh with a `thincurr/junctions` group (junction table, hole
-   elements, vertex map and \f$ \textbf{P} \f$). Where sheets only meet two at a time (for example a torus divided
-   into sectors), add `--split_regions` to split at the region interfaces anyway, so that the sheets can be
-   insulated from each other.
+   elements, vertex map and \f$ \textbf{P} \f$). Add `--split_regions` to also split the mesh at every edge where two
+   regions meet, with or without junctions, so that those sheets can be insulated from each other (for example the
+   sectors of a torus, which only meet two at a time). The choice is stored in the file (`SPLIT_REGIONS`) and used
+   when the mesh is verified or insulated. The legacy hole method (`--use_legacy`) does not support junctions, so it
+   gives an error for meshes with junctions or with `--split_regions`.
  - When a model is set up, an unsplit mesh with junctions is rejected, and a split mesh is checked against its unsplit
    mesh (split, number of junction edges, and number of unknowns for the stored insulation).
  - Use the resulting file as any other ThinCurr mesh. Sheets can be insulated at the junctions when the model is set
@@ -266,7 +269,8 @@ unknowns is checked against the number of cycles of the graph.
    A region in the list is insulated at every junction it touches; a pair of regions, e.g. `(1,2)`, is insulated
    only from each other (for example a single insulating break in a sectored torus). Where a third sheet meets both
    on the same junction edge, current can pass between the pair through it, so the pair has no effect there (a
-   warning is given).
+   warning is given). Insulation only acts at junction edges, so regions that meet two at a time can only be
+   insulated from each other in a mesh split with `--split_regions` (otherwise a warning is given).
 
 Junctions are not yet supported for periodic models (`nfp`, or a periodic point map `pmap`).
 
