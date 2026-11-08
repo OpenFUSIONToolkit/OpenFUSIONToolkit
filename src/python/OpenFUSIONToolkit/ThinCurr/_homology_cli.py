@@ -136,7 +136,7 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     @param verify_only Verify the correct number of holes and closures are found, but do not write output file?
     @param use_legacy Use the legacy Greedy Homotopy method?
     @param verbose Print progress for each search base point (tree-cotree method only)?
-    @param split_regions Split the mesh at all region interfaces (junction mesh), in addition to any junctions?
+    @param split_regions Also split the mesh at all region interfaces (only needed to insulate regions, see @ref thincurr_holes_tool)?
     '''
     if out_file is None:
         out_file = os.path.splitext(in_file)[0] + "-homology.h5"
@@ -256,7 +256,7 @@ def script_entry():
     parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes (little effect with the default method)?")
     parser.add_argument("--use_legacy", action="store_true", default=False, help="Use the legacy Greedy Homotopy method?")
     parser.add_argument("--verbose", action="store_true", default=False, help="Print progress for each search base point (tree-cotree method only)?")
-    parser.add_argument("--split_regions", action="store_true", default=False, help="Split the mesh at all region interfaces (junction mesh), in addition to any junctions?")
+    parser.add_argument("--split_regions", action="store_true", default=False, help="Also split at all region interfaces (only needed to insulate regions)?")
     options = parser.parse_args()
 
     if options.keep_nodeset_start is not None:
@@ -289,9 +289,8 @@ def script_entry():
 # If the mesh has junctions (edges shared by more than two cells, or sheets of different regions touching only at a
 # point), or `--split_regions` is given, it is split at the junctions instead (not supported for periodic meshes or
 # with `--use_legacy`) and the output file holds the split mesh with the junction data (`thincurr/junctions`): see
-# \ref doc_tw_main_junctions. Each region must be a separate sheet. With `--split_regions` the mesh is also split
-# at every edge where two regions meet, with or without junctions, so that sheets that meet two at a time (e.g. a
-# torus in sectors) can be insulated from each other with `setup_model(insulated_junctions=...)`.
+# \ref doc_tw_main_junctions. Each region must be a separate sheet. See \ref OFT_ThinCurr_holes_split for when
+# to use `--split_regions`.
 #
 #```shell
 # usage: OFT_ThinCurr_holes [-h] --in_file IN_FILE [--out_file OUT_FILE] [--keep_nodeset_start KEEP_NODESET_START] [--plot_final] [--plot_steps] [--show_omitted]
@@ -313,5 +312,21 @@ def script_entry():
 #     --optimize_holes      Sample additional points to attempt to optimize holes (little effect with the default method)?
 #     --use_legacy          Use the legacy Greedy Homotopy method?
 #     --verbose             Print progress for each search base point (tree-cotree method only)?
-#     --split_regions       Split the mesh at all region interfaces (junction mesh), in addition to any junctions?
+#     --split_regions       Also split at all region interfaces (only needed to insulate regions)?
 #```
+#
+# @section OFT_ThinCurr_holes_split Splitting at region interfaces (`--split_regions`)
+# By default a mesh is only split at its junction edges. With `--split_regions` it is also split at every edge where
+# two regions meet, with or without junctions, and those edges become two-cell junction edges.
+#
+# On its own this does not change the model: with no insulation, current conservation across a two-cell junction edge
+# is ordinary continuity, so the sheets are joined back together and the model carries exactly the same currents as
+# without the split (same number of unknowns, same resistance and inductance up to quadrature-level differences in the
+# inductance). The split only matters for insulation, which acts at junction edges only: it allows sheets that meet
+# two at a time (e.g. the sectors of a torus) to be insulated from each other when the model is set up, with
+# `setup_model(insulated_junctions=...)`, without generating a new mesh file. Without the split, regions or pairs of
+# regions that do not meet at a junction edge cannot be insulated (a warning is given if this is requested).
+#
+# Only use `--split_regions` if this insulation is needed, as the split mesh has more vertices, junction constraints
+# and hole elements, which increases the cost of setting up the model, and jumpers cannot run along the split region
+# interfaces. The choice is stored in the output file and used when the mesh is verified or insulated.

@@ -259,8 +259,9 @@ unknowns is checked against the number of cycles of the graph.
    regions touching at a point) it writes the split mesh with a `thincurr/junctions` group (junction table, hole
    elements, vertex map and \f$ \textbf{P} \f$). Add `--split_regions` to also split the mesh at every edge where two
    regions meet, with or without junctions, so that those sheets can be insulated from each other (for example the
-   sectors of a torus, which only meet two at a time). The choice is stored in the file (`SPLIT_REGIONS`) and used
-   when the mesh is verified or insulated. The legacy hole method (`--use_legacy`) does not support junctions, so it
+   sectors of a torus, which only meet two at a time). Without insulation this does not change the model, so it is
+   only needed for insulation (see \ref OFT_ThinCurr_holes_split). The choice is stored in the file
+   (`SPLIT_REGIONS`) and used when the mesh is verified or insulated. The legacy hole method (`--use_legacy`) does not support junctions, so it
    gives an error for meshes with junctions or with `--split_regions`.
  - When a model is set up, an unsplit mesh with junctions is rejected, and a split mesh is checked against its unsplit
    mesh (split, number of junction edges, and number of unknowns for the stored insulation).
