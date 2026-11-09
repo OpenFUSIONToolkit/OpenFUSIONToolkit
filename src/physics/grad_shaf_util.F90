@@ -918,7 +918,9 @@ IF(hdf5_field_exist(filename,'tokamaker/MIRNOV_TARGETS'))THEN
   END IF
 END IF
 !---Update all flux functions now that all fields (F0, targets, kinetics) are loaded; a bootstrap
-!   F*F' restored from the file is kept as saved (an update would recompute it)
+!   F*F' restored from the file is kept as saved (an update would recompute it); the flux map
+!   settles from identity, not from one copied with an earlier equilibrium
+IF(ASSOCIATED(self%torflux))CALL self%torflux%delete()
 CALL torflux_setup(self,resettle=.TRUE.)
 IF(ASSOCIATED(self%torflux))CALL self%torflux%update(self)
 restored=.FALSE.
