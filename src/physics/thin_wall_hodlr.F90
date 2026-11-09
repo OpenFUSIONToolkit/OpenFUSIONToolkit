@@ -2194,9 +2194,10 @@ END SUBROUTINE fill_levels
 RECURSIVE SUBROUTINE subdivide_leaf(leaf,depth)
 TYPE(tw_oct_tree), TARGET, INTENT(inout) :: leaf
 INTEGER(4), INTENT(in) :: depth
-INTEGER(4) :: j,k,kk,i,ii,npts,sep_max(1)
+INTEGER(4) :: j,k,kk,i,ii,npts,sep_max(1),nabove
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: child_mark
-REAL(8) :: xm,ym,zm,rleft(3),rdenom(3),locs(3),xs,extents(2,3),split_center(3)
+REAL(8) :: rleft(3),rdenom(3),locs(3),xs,extents(2,3),split_center(3),split,vlow,vhigh
+LOGICAL :: axis_tried(3)
 REAL(8), ALLOCATABLE, DIMENSION(:) :: vals
 REAL(8), PARAMETER :: pt_tol=0.d-6
 TYPE(tw_oct_tree) :: child_tmp(2)
@@ -2213,24 +2214,48 @@ DO j=1,3
   locs(j)=SUM((vals-split_center(j))**2)
 END DO
 DEALLOCATE(vals,child_mark)
-!---Split cell in half in each direction
-xm = split_center(1) !(leaf%bounds(1,1)+leaf%bounds(2,1))/2.d0
-ym = split_center(2) !(leaf%bounds(1,2)+leaf%bounds(2,2))/2.d0
-zm = split_center(3) !(leaf%bounds(1,3)+leaf%bounds(2,3))/2.d0
-DO k=1,leaf%npts
-  IF(ABS(active_pts(1,leaf%pts(k))-xm)<1.d-8)xm=xm+(leaf%bounds(2,1)-leaf%bounds(1,1))*1.d-4
-  IF(ABS(active_pts(2,leaf%pts(k))-ym)<1.d-8)ym=ym+(leaf%bounds(2,2)-leaf%bounds(1,2))*1.d-4
-  IF(ABS(active_pts(3,leaf%pts(k))-zm)<1.d-8)zm=zm+(leaf%bounds(2,3)-leaf%bounds(1,3))*1.d-4
+!---Choose the split plane, trying axes in order of decreasing spread about the median
+axis_tried=.FALSE.
+DO ii=1,3
+  sep_max=MAXLOC(locs,MASK=.NOT.axis_tried)
+  j=sep_max(1)
+  axis_tried(j)=.TRUE.
+  !---Median, moved upward off any vertex lying on it
+  split=split_center(j)
+  DO k=1,leaf%npts
+    IF(ABS(active_pts(j,leaf%pts(k))-split)<1.d-8)split=split+(leaf%bounds(2,j)-leaf%bounds(1,j))*1.d-4
+  END DO
+  nabove=COUNT(active_pts(j,leaf%pts)>=split)
+  IF((nabove>0).AND.(nabove<leaf%npts))EXIT
+  !---One side is empty (eg. more than half of the vertices share the largest value along this axis), so split
+  !---halfway between the median value and the nearest distinct value below it (or above it)
+  vlow=-1.d99
+  vhigh=1.d99
+  DO k=1,leaf%npts
+    xs=active_pts(j,leaf%pts(k))
+    IF(xs<split_center(j)-1.d-8)vlow=MAX(vlow,xs)
+    IF(xs>split_center(j)+1.d-8)vhigh=MIN(vhigh,xs)
+  END DO
+  IF(vlow>-1.d98)THEN
+    split=(vlow+split_center(j))/2.d0
+    EXIT
+  ELSE IF(vhigh<1.d98)THEN
+    split=(split_center(j)+vhigh)/2.d0
+    EXIT
+  END IF
+  !---All vertices lie on one plane normal to this axis, try the next one
+  j=0
 END DO
-!---Split cell in half
+IF(j==0)THEN
+  !---Vertices coincide, so this block cannot be split further and is left as a leaf
+  CALL oft_warn("HODLR partitioning found a block of coincident vertices larger than the target size")
+  RETURN
+END IF
+!---Split cell in half at the plane (child 1: x_j >= split, child 2: x_j < split)
 child_tmp(1)%bounds=leaf%bounds
 child_tmp(2)%bounds=leaf%bounds
-sep_max=MAXLOC(locs)
-j=sep_max(1)
-!WRITE(*,*)'Split',j,locs
-locs=[xm,ym,zm]
-child_tmp(1)%bounds(1,j)=locs(j)
-child_tmp(2)%bounds(2,j)=locs(j)
+child_tmp(1)%bounds(1,j)=split
+child_tmp(2)%bounds(2,j)=split
 ! WRITE(*,*)0
 ! WRITE(*,*)leaf%bounds(:,1)
 ! WRITE(*,*)leaf%bounds(:,2)
