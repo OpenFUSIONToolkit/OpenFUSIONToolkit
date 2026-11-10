@@ -27,7 +27,7 @@ USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_field_get_sizes, hdf5_write, hdf5_create_file, hdf5_create_group
 USE oft_lag_poly
 USE oft_tet_quadrature, ONLY: oft_quad_type, set_quad_2d
-USE oft_mesh_type, ONLY: oft_bmesh, bmesh_destroy
+USE oft_mesh_type, ONLY: oft_bmesh, bmesh_destroy, cell_is_curved
 USE trimesh_tessellation, ONLY: tessellate1, tessellate2, tessellate3, tessellate4
 IMPLICIT NONE
 #include "local.h"
@@ -520,6 +520,7 @@ integer(i4), parameter :: emap(6)=(/4,7,9,6,3,2/)
 integer(i4), parameter :: fmap(4,4)=RESHAPE((/1,2,3,4,2,5,6,7,3,6,8,9,4,7,9,10/),(/4,4/))
 if(self%order>3)call oft_abort('Invalid mesh order','trimesh_hessian',__FILE__)
 IF(self%dim==3)call oft_abort('Only supported for dim=2','trimesh_hessian',__FILE__)
+IF(cell_is_curved(self,cell))call oft_abort('Curved cells not supported','trimesh_hessian',__FILE__)
 jfull=0.d0
 K=0.d0
 ! IF(cell_is_curved(self, i))THEN
