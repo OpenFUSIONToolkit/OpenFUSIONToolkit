@@ -86,3 +86,49 @@ def test_jac_lin(grid_type, elem_order):
 def test_jac_quad(grid_type, elem_order):
     assert mapping_setup(1,1,2,91,'jac',grid_type=grid_type,elem_order=elem_order,catch_warning=False)
     assert check_result('mapping_jac.results')
+
+#============================================================================
+# Input file for 2D jacobian tests (circle or packed/stretched square triangle mesh)
+oft_in_2d_template = """
+&runtime_options
+ ppn=1
+ debug=0
+ test_run=T
+/
+
+&mesh_options
+ meshname='test'
+ cad_type={0}
+ nlevels={1}
+ nbase={1}
+ grid_order=1
+/
+
+&sphere_options
+ mesh_type=1
+/
+
+&cube_options
+ mesh_type=1
+ ni=2,3,0
+ rscale=1.5,1.0,1.0
+ packing=1.3,0.8,1.0
+/
+
+&test_mapping_options
+ order={2}
+/
+"""
+
+#============================================================================
+# Test runner for 2D (triangle) jacobian tests on linear elements
+# (the 2D Hessian does not support curved triangles or quads)
+@pytest.mark.coverage
+@pytest.mark.parametrize("cad_type", (91, 92))
+@pytest.mark.parametrize("elem_order", (2, 3, 4))
+def test_jac_2d_lin(cad_type, elem_order):
+    os.chdir(test_dir)
+    with open('oft.in', 'w+') as fid:
+        fid.write(oft_in_2d_template.format(cad_type, 2, elem_order))
+    assert run_OFT("./test_mapping_jac_2d", 1, 60)
+    assert check_result('mapping_jac.results')

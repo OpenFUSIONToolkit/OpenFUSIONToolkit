@@ -316,6 +316,8 @@ TYPE :: gs_equil
   REAL(r8) :: lim_point(2) = [-1.d0,1.d99] !< Location of limiting point or active X-point
   REAL(r8) :: x_points(2,max_xpoints) = 0.d0 !< Location of tracked X-points
   REAL(r8) :: x_vecs(2,max_xpoints) = 0.d0 !< Vectors point from X-points to O-point
+  REAL(r8) :: x_cut(2) = 0.d0 !< Normal of the second cut at the active X-point, toward the core (zero if none)
+  LOGICAL :: x_cut_skipped = .FALSE. !< Second cut skipped (core axis more than 60 degrees from O - X)
   REAL(r8) :: vcontrol_val = 0.d0 !< Amplitude of virtual VSC "current"
   REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL() !< Targets for coil regularization terms
   REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL() !< Coil currents
@@ -1170,6 +1172,8 @@ self%o_point=source%o_point
 self%lim_point=source%lim_point
 self%x_points=source%x_points
 self%x_vecs=source%x_vecs
+self%x_cut=source%x_cut
+self%x_cut_skipped=source%x_cut_skipped
 self%vcontrol_val=source%vcontrol_val
 !---Things that need equilibrium fully setup to copy
 IF(ASSOCIATED(source%P_ani))CALL source%P_ani%copy(self%P_ani,self)
@@ -2840,6 +2844,7 @@ IF(i>self%maxits)THEN
   IF(tmap_fails>0)error_flag=-9 ! Ran out of iterations on a stale toroidal flux map
   IF(equil%prof_failed)error_flag=-10
 END IF
+IF(equil%x_cut_skipped)CALL oft_warn('X-point core axis more than 60 degrees from O - X, second cut skipped')
 IF(error_flag==0)THEN
   self%nl_its=i
 ELSE
@@ -3806,6 +3811,7 @@ REAL(8) :: x_point(2,max_xpoints),t1,t2,x_psi(max_xpoints),x_psi_sort(max_xpoint
 REAL(8) :: x_point_old(2,max_xpoints),x_vec_old(2,max_xpoints)
 REAL(8), POINTER :: psi_vals(:)
 REAL(8), PARAMETER :: tol=1.d-8, bounds_exp=2.5d-2
+logical :: x_cut_on
 logical, allocatable :: x_masked(:)
 type(gs_factory), pointer :: device
 device=>self%device
@@ -3867,6 +3873,8 @@ self%plasma_bounds(1)=-1.d99
 
 !---Look for X-points
 self%nx_points=0
+self%x_cut=0.d0
+self%x_cut_skipped=.FALSE.
 self%diverted=.FALSE.
 x_psi_sort=1.d99
 zmin=device%spatial_bounds(1,2)
@@ -3932,6 +3940,7 @@ IF(self%nx_points>0)THEN
     self%plasma_bounds(1)=x_psi_sort(i)
   END DO
   self%nx_points=j
+  x_cut_on=ANY(x_masked).AND.(.NOT.device%dipole_mode)
   DEALLOCATE(x_masked)
 END IF
 
@@ -3999,6 +4008,9 @@ IF(v>self%plasma_bounds(1).OR.self%nx_points==0)THEN
   IF(self%plasma_bounds(1)<-1.d98)self%plasma_bounds(1)=v
 ELSE
   self%lim_point=self%x_points(:,self%nx_points)
+  !---Also cut at the active X-point across its own core axis: at a skewed X-point (e.g. with a second
+  !---X-point nearby) the O - X cut alone lets part of its private-flux region past it
+  IF(x_cut_on)CALL core_axis(self%x_points(:,self%nx_points),self%x_vecs(:,self%nx_points),self%x_cut)
   IF(oft_debug_print(1))THEN
     WRITE(*,'(2A,5ES11.3)')oft_indent,'  Active X-point:',self%plasma_bounds(1), &
       self%x_points(:,self%nx_points),self%o_point
@@ -4019,6 +4031,38 @@ IF(oft_debug_print(1).AND.oft_env%pm)THEN
   WRITE(*,'(2A,4ES11.3)')oft_indent,'New plasma bounds',self%plasma_bounds,self%o_point
 END IF
 device%timing(4)=device%timing(4)+(omp_get_wtime()-t1)
+CONTAINS
+!> Unit vector along the Hessian eigenvector of \f$ \psi \f$ at the X-point `pt` along which \f$ \psi \f$
+!! rises toward the axis value (into the core and the private-flux region), on the side of `vec`
+SUBROUTINE core_axis(pt,vec,cut)
+REAL(8), INTENT(in) :: pt(2) !< X-point
+REAL(8), INTENT(in) :: vec(2) !< A vector toward the O-point
+REAL(8), INTENT(inout) :: cut(2) !< The core axis (unchanged off the mesh)
+TYPE(oft_lag_bg2interp) :: psi_g2interp
+INTEGER(4) :: icell
+REAL(8) :: fl(3),gop(3,3),vol,d2(6),lam,ax(2)
+icell=0
+CALL bmesh_findcell(device%fe_rep%mesh,icell,pt,fl)
+IF((icell==0).OR.(MAXVAL(fl)>1.d0+tol).OR.(MINVAL(fl)<-tol))RETURN
+CALL psi_g2interp%shared_setup(psi_interp)
+CALL device%fe_rep%mesh%jacobian(icell,fl,gop,vol)
+CALL psi_g2interp%interp(icell,fl,gop,d2)
+CALL psi_g2interp%delete()
+!---Hessian eigenvalue with the sign of psi_axis - psi_X, and its eigenvector
+lam=(d2(1)+d2(4))/2.d0+SIGN(SQRT(((d2(1)-d2(4))/2.d0)**2+d2(2)**2),self%plasma_bounds(2)-self%plasma_bounds(1))
+IF(ABS(lam-d2(1))>ABS(lam-d2(4)))THEN
+  ax=[d2(2),lam-d2(1)]
+ELSE
+  ax=[lam-d2(4),d2(2)]
+END IF
+IF(SUM(ax**2)==0.d0)RETURN
+!---Core side ambiguous (axis within 30 degrees of normal to O - X): keep the O - X cut only
+IF(ABS(DOT_PRODUCT(ax,vec))<0.5d0*SQRT(SUM(ax**2)*SUM(vec**2)))THEN
+  self%x_cut_skipped=.TRUE.
+  RETURN
+END IF
+cut=SIGN(1.d0,DOT_PRODUCT(ax,vec))*ax/SQRT(SUM(ax**2))
+END SUBROUTINE core_axis
 end subroutine gs_update_bounds
 !------------------------------------------------------------------------------
 !> Analyze psi and location stationary points where \f$ | \nabla \psi | = 0 \f$
@@ -4268,6 +4312,8 @@ in_bounds=in_bounds.AND.(pt(2)>=self%device%spatial_bounds(1,2).AND.pt(2)<=self%
 DO i=1,self%nx_points
   in_bounds=in_bounds.AND.(DOT_PRODUCT(pt-self%x_points(:,i),self%x_vecs(:,i))>0.d0)
 END DO
+IF((self%nx_points>0).AND.ANY(self%x_cut/=0.d0))in_bounds=in_bounds.AND. &
+  (DOT_PRODUCT(pt-self%x_points(:,self%nx_points),self%x_cut)>0.d0)
 end function gs_test_bounds
 !------------------------------------------------------------------------------
 !> Compute magnetic fields from Grad-Shafranov equilibrium

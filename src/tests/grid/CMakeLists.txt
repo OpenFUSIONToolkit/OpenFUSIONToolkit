@@ -9,6 +9,7 @@ if( OFT_BUILD_TESTS )
   # Mapping tests
   oft_add_test( test_mapping_find.F90 )
   oft_add_test( test_mapping_jac.F90 )
+  oft_add_test( test_mapping_jac_2d.F90 )
   configure_file( test_mapping.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
   configure_file( mapping_jac.tests ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
