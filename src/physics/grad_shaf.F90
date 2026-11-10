@@ -4039,7 +4039,10 @@ ELSE
 END IF
 IF(SUM(ax**2)==0.d0)RETURN
 !---Core side ambiguous (axis within 30 degrees of normal to O - X): keep the O - X cut only
-IF(ABS(DOT_PRODUCT(ax,vec))<0.5d0*SQRT(SUM(ax**2)*SUM(vec**2)))RETURN
+IF(ABS(DOT_PRODUCT(ax,vec))<0.5d0*SQRT(SUM(ax**2)*SUM(vec**2)))THEN
+  CALL oft_warn('X-point core axis more than 60 degrees from O - X, second cut skipped')
+  RETURN
+END IF
 cut=SIGN(1.d0,DOT_PRODUCT(ax,vec))*ax/SQRT(SUM(ax**2))
 END SUBROUTINE core_axis
 end subroutine gs_update_bounds
