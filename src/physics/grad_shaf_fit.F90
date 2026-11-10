@@ -1652,7 +1652,7 @@ IF(self%r(1)>0.d0)THEN
   CALL psi_eval%setup(gs%device%fe_rep)
   call psi_eval%interp(self%cell,self%f,goptmp,psi)
   in_plasma=.TRUE.
-  IF(gs_test_bounds(gs,self%r))THEN
+  IF(gs_test_bounds(gs,self%r,self%cell))THEN
     IF(psi(1)<=gs%plasma_bounds(1))in_plasma=.FALSE.
   ELSE
     in_plasma=.FALSE.
