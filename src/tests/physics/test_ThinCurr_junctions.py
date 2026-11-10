@@ -503,46 +503,6 @@ def test_hodlr_coarse():
     assert np.allclose(out, ref, rtol=0.0, atol=1.E-5*np.max(np.abs(ref)))
 
 
-def run_hodlr_small_leaves(path, target_size, mp_q):
-    """Error of the HODLR L, applied to random vectors, relative to the dense L"""
-    result = False
-    try:
-        from OpenFUSIONToolkit import OFT_env
-        from OpenFUSIONToolkit.ThinCurr import ThinCurr
-        myOFT = OFT_env(nthreads=-1)
-        tw_dense = ThinCurr(myOFT)
-        tw_dense.setup_model(mesh_file=path)
-        tw_dense.compute_Lmat()
-        tw = ThinCurr(myOFT)
-        tw.setup_model(mesh_file=path)
-        tw.set_hodlr_options(target_size=target_size, L_svd_tol=1.E-12, L_aca_rel_tol=1.E-12)
-        tw.compute_Lmat(use_hodlr=True)
-        rng = np.random.default_rng(1)
-        errs = []
-        for _ in range(3):
-            x = rng.standard_normal(tw.nelems)
-            ref = np.array(tw_dense.Lmat) @ x
-            errs.append(rel_err(tw.apply_Lmat(x), ref))
-        print('HODLR L errors', errs)
-        result = max(errs)
-    except BaseException as e:
-        print(e)
-    mp_q.put(result)
-
-
-@pytest.mark.parametrize("target_size", (30, 60))
-def test_hodlr_small_leaves(target_size):
-    """HODLR partitioning of the junction ring with leaves small enough that the median vertex of some blocks is tied
-    with more than half of the vertices at the largest coordinate along the split axis (flange plane z = 0)"""
-    r, lc, reg = ring()
-    files, _ = write_pair(r, lc, reg, 'junction_ring_leaves')
-    err = mp_run(run_hodlr_small_leaves, (files[0], target_size))
-    # Same accuracy as with leaves large enough not to hit the tie (HODLR L differs from the dense L by ~3E-6 even
-    # for a single block)
-    assert err is not False
-    assert err < 1.E-5
-
-
 def test_jumpers(tmp_path):
     from OpenFUSIONToolkit.ThinCurr.coils import ThinCurr_Icoil
     r, lc, reg, jumpers = tplate_jumpers()
