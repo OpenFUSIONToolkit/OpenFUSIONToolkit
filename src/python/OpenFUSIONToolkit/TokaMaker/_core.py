@@ -1062,22 +1062,21 @@ class TokaMaker():
         equil_out.set_psi(psi)
         return equil_out
 
-    def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None,li_both=False):
+    def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
 
         See eq. 1 for `li_normalization='std'` and eq 2. for `li_normalization='iter'`
         in [Jackson et al.](https://dx.doi.org/10.1088/0029-5515/48/12/125002)
 
         @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
-        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
+        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER'; 'all' returns each form as `l_i_<form>` instead of `l_i`)
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
         @param beta_Ip Override \f$ I_p \f$ used for beta calculations
-        @param li_both Also return \f$ l_i \f$ in both forms (`l_i_std`, `l_i_iter`) from the same call
         @result Dictionary of equilibrium parameters
         '''
         if self._tMaker_equil is None:
             raise ValueError("Equilibrium object is `None`")
-        return self._tMaker_equil.get_stats(lcfs_pad,axis_pad,li_normalization,geom_type,beta_Ip,li_both)
+        return self._tMaker_equil.get_stats(lcfs_pad,axis_pad,li_normalization,geom_type,beta_Ip)
 
     def print_info(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
         r'''! Print information (Ip, q, etc.) about current G-S equilbirium
@@ -3567,17 +3566,16 @@ class TokaMaker_equilibrium():
             field_dim = 2
         return TokaMaker_field_interpolator(self._equil_ptr,int_obj,imode,field_dim)
 
-    def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None,li_both=False):
+    def get_stats(self,lcfs_pad=None,axis_pad=0.02,li_normalization='std',geom_type='max',beta_Ip=None):
         r'''! Get information (Ip, q, kappa, etc.) about current G-S equilbirium
 
         See eq. 1 for `li_normalization='std'` and eq 2. for `li_normalization='iter'`
         in [Jackson et al.](https://dx.doi.org/10.1088/0029-5515/48/12/125002)
 
         @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
-        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
+        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER'; 'all' returns each form as `l_i_<form>` instead of `l_i`)
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
         @param beta_Ip Override \f$ I_p \f$ used for beta calculations
-        @param li_both Also return \f$ l_i \f$ in both forms (`l_i_std`, `l_i_iter`) from the same call
         @result Dictionary of equilibrium parameters
         '''
         Ip,centroid,vol,pvol,dflux,tflux,Bp_vol = self.get_globals()
@@ -3623,13 +3621,11 @@ class TokaMaker_equilibrium():
                         zbounds[0,:] = x_points[-(i+1),:]
                         break
         # Compute normalized inductance
-        li_std = (Bp_vol/vol)/numpy.power(mu0*Ip/dl,2)
-        li_iter = 2.0*Bp_vol/(numpy.power(mu0*Ip,2)*self.o_point[0])
-        if li_normalization.lower() == 'std':
-            li = li_std
-        elif li_normalization.lower() == 'iter':
-            li = li_iter
-        else:
+        li = {
+            'std': (Bp_vol/vol)/numpy.power(mu0*Ip/dl,2),
+            'iter': 2.0*Bp_vol/(numpy.power(mu0*Ip,2)*self.o_point[0])
+        }
+        if li_normalization.lower() not in list(li)+['all']:
             raise ValueError('Invalid "li_normalization"')
         # Compute geometric major/minor radius
         if geom_type == 'mid':
@@ -3664,12 +3660,12 @@ class TokaMaker_equilibrium():
             'W_MHD': pvol*1.5,
             'beta_pol': 100.0*(2.0*pvol*mu0/vol)/numpy.power(Ip*mu0/dl,2),
             'dflux': dflux,
-            'tflux': tflux,
-            'l_i': li
+            'tflux': tflux
         }
-        if li_both:
-            eq_stats['l_i_std'] = li_std
-            eq_stats['l_i_iter'] = li_iter
+        if li_normalization.lower() == 'all':
+            eq_stats.update({'l_i_'+key: val for key, val in li.items()})
+        else:
+            eq_stats['l_i'] = li[li_normalization.lower()]
         if abs(self._F0) > 0.0:
             F0_abs = abs(self._F0)
             eq_stats['beta_tor'] = 100.0*(2.0*pvol*mu0/vol)/(numpy.power(F0_abs/R_geo,2))

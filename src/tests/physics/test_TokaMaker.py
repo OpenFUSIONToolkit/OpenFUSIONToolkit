@@ -702,7 +702,8 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
             mygs.replace_eq(source_file='test_eq.h5')
             EQ_obj = mygs.copy_eq()
             _, nl_its = mygs.solve(return_its=True)
-        eq_info = EQ_obj.get_stats(li_normalization='ITER',li_both=True)
+        eq_info = EQ_obj.get_stats(li_normalization='all')
+        eq_info['l_i'] = eq_info.pop('l_i_iter')
         Lmat = mygs.get_coil_Lmat()
         eq_info['LCS1'] = Lmat[mygs.coil_sets['CS1U']['id'],mygs.coil_sets['CS1U']['id']]
         eq_info['MCS1_plasma'] = Lmat[mygs.coil_sets['CS1U']['id'],-1]
