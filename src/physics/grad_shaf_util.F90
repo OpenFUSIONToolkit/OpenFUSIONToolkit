@@ -1013,7 +1013,7 @@ IF(oft_debug_print(1))THEN
   CALL oft_decrease_indent
 END IF
 !---Trace
-call set_tracer(1)
+call set_tracer(4)
 ALLOCATE(cout(npsi,4))
 ALLOCATE(rout(ntheta,npsi))
 ALLOCATE(zout(ntheta,npsi))
@@ -1043,9 +1043,9 @@ do j=2,npsi
   END IF
   ! psi_surf(1)=x2 - psi_surf(1)
   IF(gseq%diverted.AND.ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near divertor
-    active_tracer%tol=1.d-10
-  ELSE
     active_tracer%tol=1.d-8
+  ELSE
+    active_tracer%tol=1.d-6
   END IF
   pt=pt_last
   !$omp critical
@@ -1261,7 +1261,7 @@ IF(oft_debug_print(1))THEN
   CALL oft_decrease_indent
 END IF
 !---Trace
-call set_tracer(1)
+call set_tracer(4)
 ALLOCATE(rout(nr))
 ALLOCATE(zout(nr))
 !$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field,fptmp) firstprivate(pt_last)
@@ -1286,9 +1286,9 @@ do j=1,nr
   psi_trace = psi_surf
   IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
   IF(gseq%diverted.AND.(psi_trace-x1)/xr<0.02d0)THEN ! Use higher tracing tolerance near divertor
-    active_tracer%tol=1.d-10
-  ELSE
     active_tracer%tol=1.d-8
+  ELSE
+    active_tracer%tol=1.d-6
   END IF
   IF(j>1)THEN
     pt=pt_last
