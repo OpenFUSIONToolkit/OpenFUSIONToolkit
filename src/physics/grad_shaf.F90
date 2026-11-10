@@ -4632,7 +4632,7 @@ IF(oft_debug_print(1))THEN
   CALL oft_decrease_indent
 END IF
 !---Trace
-call set_tracer(4)
+call set_tracer(3)
 !$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field,i,imin_r,imax_r, &
 !$omp                  imin_z,imax_z,error_str,lcfs_rz) firstprivate(pt_last)
 NULLIFY(ptout)
@@ -4848,7 +4848,7 @@ pt_last=[rmax,zaxis,0.d0]
 !   CALL oft_decrease_indent
 ! END IF
 !---Trace
-call set_tracer(4)
+call set_tracer(3)
 !!$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
 CALL field%setup(gseq%device%fe_rep)

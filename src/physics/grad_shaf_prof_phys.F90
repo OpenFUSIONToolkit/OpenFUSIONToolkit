@@ -252,7 +252,7 @@ DO j=1,100
 END DO
 IF(oft_debug_print(2))WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
 !---Trace
-call set_tracer(4)
+call set_tracer(3)
 !$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
 pt=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
 field%u=>gseq%psi
@@ -962,7 +962,7 @@ DO j=1,100
 END DO
 IF(oft_debug_print(2))WRITE(*,'(2A,ES11.3)')oft_indent,'Rmin = ',rmax
 !---Trace
-call set_tracer(4)
+call set_tracer(3)
 !$omp parallel private(field,gop,vol,psi_surf,I,Ip,v,q,qp,vp,vpp,s,a,b,pp,pt)
 pt=[(.9d0*rmax+.1d0*raxis),zaxis,0.d0]
 ALLOCATE(field)

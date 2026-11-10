@@ -1471,7 +1471,7 @@ END DO
 CALL psi_int%delete()
 !---Trace the remaining surfaces
 IF(.NOT.ALL(done))THEN
-CALL set_tracer(4)
+CALL set_tracer(3)
 !$omp parallel private(j,field,ptout,vout,h,h2,hf,ftu,ftl)
 ALLOCATE(field)
 field%u=>gseq%psi

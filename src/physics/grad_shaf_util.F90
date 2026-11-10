@@ -1013,7 +1013,7 @@ IF(oft_debug_print(1))THEN
   CALL oft_decrease_indent
 END IF
 !---Trace
-call set_tracer(4)
+call set_tracer(3)
 ALLOCATE(cout(npsi,4))
 ALLOCATE(rout(ntheta,npsi))
 ALLOCATE(zout(ntheta,npsi))
@@ -1261,7 +1261,7 @@ IF(oft_debug_print(1))THEN
   CALL oft_decrease_indent
 END IF
 !---Trace
-call set_tracer(4)
+call set_tracer(3)
 ALLOCATE(rout(nr))
 ALLOCATE(zout(nr))
 !$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field,fptmp) firstprivate(pt_last)
