@@ -3794,6 +3794,7 @@ REAL(8) :: x_point(2,max_xpoints),t1,t2,x_psi(max_xpoints),x_psi_sort(max_xpoint
 REAL(8) :: x_point_old(2,max_xpoints),x_vec_old(2,max_xpoints)
 REAL(8), POINTER :: psi_vals(:)
 REAL(8), PARAMETER :: tol=1.d-8, bounds_exp=2.5d-2
+logical :: x_cut_on
 logical, allocatable :: x_masked(:)
 type(gs_factory), pointer :: device
 device=>self%device
@@ -3921,9 +3922,7 @@ IF(self%nx_points>0)THEN
     self%plasma_bounds(1)=x_psi_sort(i)
   END DO
   self%nx_points=j
-  !---Also cut at the active X-point across its own core axis: at a skewed X-point (e.g. with a second
-  !---X-point nearby) the O - X cut alone lets part of its private-flux region past it
-  IF(ANY(x_masked).AND.(.NOT.device%dipole_mode))CALL core_axis(self%x_points(:,j),self%x_vecs(:,j),self%x_cut)
+  x_cut_on=ANY(x_masked).AND.(.NOT.device%dipole_mode)
   DEALLOCATE(x_masked)
 END IF
 
@@ -3991,6 +3990,9 @@ IF(v>self%plasma_bounds(1).OR.self%nx_points==0)THEN
   IF(self%plasma_bounds(1)<-1.d98)self%plasma_bounds(1)=v
 ELSE
   self%lim_point=self%x_points(:,self%nx_points)
+  !---Also cut at the active X-point across its own core axis: at a skewed X-point (e.g. with a second
+  !---X-point nearby) the O - X cut alone lets part of its private-flux region past it
+  IF(x_cut_on)CALL core_axis(self%x_points(:,self%nx_points),self%x_vecs(:,self%nx_points),self%x_cut)
   IF(oft_debug_print(1))THEN
     WRITE(*,'(2A,5ES11.3)')oft_indent,'  Active X-point:',self%plasma_bounds(1), &
       self%x_points(:,self%nx_points),self%o_point
@@ -4023,9 +4025,8 @@ INTEGER(4) :: icell
 REAL(8) :: fl(3),gop(3,3),vol,d2(6),lam,ax(2)
 icell=0
 CALL bmesh_findcell(device%fe_rep%mesh,icell,pt,fl)
-IF(icell==0)RETURN
-psi_g2interp%u=>self%psi
-CALL psi_g2interp%setup(device%fe_rep)
+IF((icell==0).OR.(MAXVAL(fl)>1.d0+tol).OR.(MINVAL(fl)<-tol))RETURN
+CALL psi_g2interp%shared_setup(psi_interp)
 CALL device%fe_rep%mesh%jacobian(icell,fl,gop,vol)
 CALL psi_g2interp%interp(icell,fl,gop,d2)
 CALL psi_g2interp%delete()
@@ -4037,6 +4038,8 @@ ELSE
   ax=[lam-d2(4),d2(2)]
 END IF
 IF(SUM(ax**2)==0.d0)RETURN
+!---Core side ambiguous (axis within 30 degrees of normal to O - X): keep the O - X cut only
+IF(ABS(DOT_PRODUCT(ax,vec))<0.5d0*SQRT(SUM(ax**2)*SUM(vec**2)))RETURN
 cut=SIGN(1.d0,DOT_PRODUCT(ax,vec))*ax/SQRT(SUM(ax**2))
 END SUBROUTINE core_axis
 end subroutine gs_update_bounds
