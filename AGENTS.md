@@ -105,7 +105,7 @@ Python code is linted with **ruff**. Configuration is in `src/python/pyproject.t
 cd src/python && ruff check
 ```
 
-Rules: Pyflakes (`F`) + pycodestyle (`E`) with ignores for `E722`, `F403`, `F405`. Target: Python 3.7.
+Rules: Pyflakes (`F`) + pycodestyle (`E`) with ignores for `E722`, `F403`, `F405`, `E741`. Target: Python 3.7.
 
 ### Fortran stack checking
 
@@ -115,7 +115,7 @@ A custom lint checks Fortran debug stack entries:
 cd src && python utilities/generate_stack.py -l
 ```
 
-This validates that all `SUBROUTINE`/`FUNCTION` entries have matching debug stack annotations. Run from the `src/` directory.
+This checks that no generated debug stack markers (`#define DEBUG_STACK_*` / `#undef DEBUG_STACK_*` lines added by `generate_stack.py` for debug builds) have been committed to the Fortran sources, and exits non-zero if any are found. Run from the `src/` directory.
 
 ## CI Workflows (utilizing GitHub actions)
 

@@ -27,9 +27,7 @@ def run_td_noconductor_case(use_vcoil,mp_q):
     cond_dict = gs_mesh.get_conductors()
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-    mygs.setup(order=2)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=2)
     mygs.set_coil_currents({'COIL1': 1.E3})
     mygs.vac_solve()
     if use_vcoil:

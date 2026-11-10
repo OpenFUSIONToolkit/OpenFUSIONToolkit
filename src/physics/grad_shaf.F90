@@ -286,7 +286,7 @@ TYPE :: gs_equil
   LOGICAL :: has_plasma = .TRUE. !< Solve with plasma? (otherwise vacuum)
   LOGICAL :: skip_targets = .FALSE. !< Skip toroidal current target in non-linear solve?
   LOGICAL :: prof_failed = .FALSE. !< A flux function update failed (set by the profile, ends @ref gs_solve)
-  INTEGER(i4) :: mode = 0 !< RHS source mode (0 -> F*F', 1 -> F')
+  INTEGER(i4) :: mode = 0 !< F definition mode, sets the meaning of `self%I%fp` (0 -> F', 1 -> F*F')
   INTEGER(i4) :: nx_points = 0 !< Number of X-points in current solution
   INTEGER(i4) :: nregularize = 0 !< Number of regularization terms
   INTEGER(i4) :: isoflux_ntargets = 0 !< Number of isoflux target locations

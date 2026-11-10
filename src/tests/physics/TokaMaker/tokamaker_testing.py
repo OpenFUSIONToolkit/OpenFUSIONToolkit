@@ -268,11 +268,9 @@ def setup_ITER_gs(myOFT,fe_order,F0=5.3*6.2,maxits=None):
     '''Create a TokaMaker object on the ITER mesh (see `create_ITER_mesh`); F0 = B0*R0 with B0 = 5.3 T at R0 = 6.2 m'''
     mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     if maxits is not None:
         mygs.settings.maxits = maxits
-    mygs.setup(order=fe_order,F0=F0)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=F0)
     return mygs
 
 

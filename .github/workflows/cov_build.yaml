@@ -93,7 +93,8 @@ jobs:
 
     - name: Test OFT
       shell: bash
-      timeout-minutes: 120
+      # Instrumented tests take 1-2 h and vary ~2x with runner speed
+      timeout-minutes: 180
       working-directory: builds/build_release
       run: |
         source ${{ github.workspace }}/oft_venv/bin/activate

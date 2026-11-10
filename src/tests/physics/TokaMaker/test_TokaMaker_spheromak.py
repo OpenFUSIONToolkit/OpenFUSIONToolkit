@@ -29,9 +29,8 @@ def run_sph_case(mesh_resolution,fe_order,mp_q):
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
-    mygs.setup(order=fe_order)
+    mygs.setup_model(mesh_pts, mesh_lc, order=fe_order)
     # Force-free with FF' linear in psi, so the equilibrium is an eigenmode of Delta*
     mygs.p_scale=0.0
     ffp_prof={

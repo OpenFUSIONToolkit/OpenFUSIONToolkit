@@ -35,9 +35,8 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
-    mygs.setup(order=fe_order,F0=1.0,full_domain=True)
+    mygs.setup_model(mesh_pts, mesh_lc, order=fe_order, F0=1.0, full_domain=True)
     # Uniform sources dP/dpsi = a and dF^2/dpsi = 2 b R0^2 give the Solov'ev solution (Delta* psi = a R^2 + b R0^2)
     mygs.p_scale=a
     mygs.ffp_scale=b*R*R*2.0
@@ -122,10 +121,9 @@ def run_nonfinite_case(mode,mp_q):
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.settings.maxits = 200
-    mygs.setup(order=2,F0=1.0,full_domain=True)
+    mygs.setup_model(mesh_pts, mesh_lc, order=2, F0=1.0, full_domain=True)
     mygs.p_scale=np.nan if mode == 'source' else 1.2
     mygs.ffp_scale=-2.0
     mygs.set_profiles(ffp_prof={'type': 'flat'},pp_prof={'type': 'flat'})

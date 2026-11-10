@@ -60,9 +60,7 @@ def run_LTX_case(fe_order,test_type,mp_q):
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('LTX_mesh.h5')
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-    mygs.setup(order=fe_order,F0=0.10752)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=0.10752)
     if test_type == 'eig':
         eig_vals, _ = mygs.compute_wall_modes(10)
         mp_q.put([{'Tau_w': eig_vals[:5]}])

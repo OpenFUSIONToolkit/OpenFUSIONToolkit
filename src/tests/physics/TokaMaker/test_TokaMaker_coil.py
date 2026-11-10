@@ -58,9 +58,7 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     cond_dict = gs_mesh.get_conductors()
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-    mygs.setup(order=fe_order)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order)
     # Total current equal to the coil area, so the current density is unity
     mygs.set_coil_currents({'COIL1': cdx*cdy})
     if dist is not None:
