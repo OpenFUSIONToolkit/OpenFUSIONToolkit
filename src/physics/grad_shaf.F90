@@ -314,6 +314,7 @@ TYPE :: gs_equil
   REAL(r8) :: x_points(2,max_xpoints) = 0.d0 !< Location of tracked X-points
   REAL(r8) :: x_vecs(2,max_xpoints) = 0.d0 !< Vectors point from X-points to O-point
   REAL(r8) :: x_cut(2) = 0.d0 !< Normal of the second cut at the active X-point, toward the core (zero if none)
+  LOGICAL :: x_cut_skipped = .FALSE. !< Second cut skipped (core axis more than 60 degrees from O - X)
   REAL(r8) :: vcontrol_val = 0.d0 !< Amplitude of virtual VSC "current"
   REAL(r8), POINTER, DIMENSION(:) :: coil_reg_targets => NULL() !< Targets for coil regularization terms
   REAL(r8), POINTER, DIMENSION(:) :: coil_currs => NULL() !< Coil currents
@@ -1158,6 +1159,7 @@ self%lim_point=source%lim_point
 self%x_points=source%x_points
 self%x_vecs=source%x_vecs
 self%x_cut=source%x_cut
+self%x_cut_skipped=source%x_cut_skipped
 self%vcontrol_val=source%vcontrol_val
 !---Things that need equilibrium fully setup to copy
 IF(ASSOCIATED(source%P_ani))CALL source%P_ani%copy(self%P_ani,self)
@@ -2828,6 +2830,7 @@ IF(i>self%maxits)THEN
   IF(tmap_fails>0)error_flag=-9 ! Ran out of iterations on a stale toroidal flux map
   IF(equil%prof_failed)error_flag=-10
 END IF
+IF(equil%x_cut_skipped)CALL oft_warn('X-point core axis more than 60 degrees from O - X, second cut skipped')
 IF(error_flag==0)THEN
   self%nl_its=i
 ELSE
@@ -3857,6 +3860,7 @@ self%plasma_bounds(1)=-1.d99
 !---Look for X-points
 self%nx_points=0
 self%x_cut=0.d0
+self%x_cut_skipped=.FALSE.
 self%diverted=.FALSE.
 x_psi_sort=1.d99
 zmin=device%spatial_bounds(1,2)
@@ -4040,7 +4044,7 @@ END IF
 IF(SUM(ax**2)==0.d0)RETURN
 !---Core side ambiguous (axis within 30 degrees of normal to O - X): keep the O - X cut only
 IF(ABS(DOT_PRODUCT(ax,vec))<0.5d0*SQRT(SUM(ax**2)*SUM(vec**2)))THEN
-  CALL oft_warn('X-point core axis more than 60 degrees from O - X, second cut skipped')
+  self%x_cut_skipped=.TRUE.
   RETURN
 END IF
 cut=SIGN(1.d0,DOT_PRODUCT(ax,vec))*ax/SQRT(SUM(ax**2))
