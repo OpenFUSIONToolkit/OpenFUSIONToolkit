@@ -569,41 +569,44 @@ def test_td_vcoil_only():
 
 
 #============================================================================
+def create_ITER_mesh(mesh_resolution=1.0):
+    '''Build the ITER test mesh (also used by test_TokaMaker_divertor.py) and save it to ITER_mesh.h5'''
+    with open('ITER_geom.json','r') as fid:
+        ITER_geom = json.load(fid)
+    plasma_dx = 0.15/mesh_resolution
+    coil_dx = 0.2/mesh_resolution
+    vv_dx = 0.3/mesh_resolution
+    vac_dx = 0.6/mesh_resolution
+    gs_mesh = gs_Domain()
+    gs_mesh.define_region('air',vac_dx,'boundary')
+    gs_mesh.define_region('plasma',plasma_dx,'plasma')
+    gs_mesh.define_region('vacuum1',vv_dx,'vacuum')
+    gs_mesh.define_region('vacuum2',vv_dx,'vacuum')
+    gs_mesh.define_region('vv1',vv_dx,'conductor',eta=6.9E-7)
+    gs_mesh.define_region('vv2',vv_dx,'conductor',eta=6.9E-7)
+    for key, coil in ITER_geom['coils'].items():
+        if not key.startswith('VS'):
+            gs_mesh.define_region(key,coil_dx,'coil')
+    gs_mesh.define_region('VSU',coil_dx,'coil',coil_set='VS',nTurns=1.0)
+    gs_mesh.define_region('VSL',coil_dx,'coil',coil_set='VS',nTurns=-1.0)
+    gs_mesh.add_polygon(ITER_geom['limiter'],'plasma',parent_name='vacuum1')             # Define the shape of the limiter
+    gs_mesh.add_annulus(ITER_geom['inner_vv'][0],'vacuum1',ITER_geom['inner_vv'][1],'vv1',parent_name='vacuum2') # Define the shape of the VV
+    gs_mesh.add_annulus(ITER_geom['outer_vv'][0],'vacuum2',ITER_geom['outer_vv'][1],'vv2',parent_name='air') # Define the shape of the VV
+    for key, coil in ITER_geom['coils'].items():
+        if key.startswith('VS'):
+            gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='vacuum1')
+        else:
+            gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='air')
+    mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
+    coil_dict = gs_mesh.get_coils()
+    cond_dict = gs_mesh.get_conductors()
+    save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,'ITER_mesh.h5')
+
+
 def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
-    def create_mesh():
-        with open('ITER_geom.json','r') as fid:
-            ITER_geom = json.load(fid)
-        plasma_dx = 0.15/mesh_resolution
-        coil_dx = 0.2/mesh_resolution
-        vv_dx = 0.3/mesh_resolution
-        vac_dx = 0.6/mesh_resolution
-        gs_mesh = gs_Domain()
-        gs_mesh.define_region('air',vac_dx,'boundary')
-        gs_mesh.define_region('plasma',plasma_dx,'plasma')
-        gs_mesh.define_region('vacuum1',vv_dx,'vacuum')
-        gs_mesh.define_region('vacuum2',vv_dx,'vacuum')
-        gs_mesh.define_region('vv1',vv_dx,'conductor',eta=6.9E-7)
-        gs_mesh.define_region('vv2',vv_dx,'conductor',eta=6.9E-7)
-        for key, coil in ITER_geom['coils'].items():
-            if not key.startswith('VS'):
-                gs_mesh.define_region(key,coil_dx,'coil')
-        gs_mesh.define_region('VSU',coil_dx,'coil',coil_set='VS',nTurns=1.0)
-        gs_mesh.define_region('VSL',coil_dx,'coil',coil_set='VS',nTurns=-1.0)
-        gs_mesh.add_polygon(ITER_geom['limiter'],'plasma',parent_name='vacuum1')             # Define the shape of the limiter
-        gs_mesh.add_annulus(ITER_geom['inner_vv'][0],'vacuum1',ITER_geom['inner_vv'][1],'vv1',parent_name='vacuum2') # Define the shape of the VV
-        gs_mesh.add_annulus(ITER_geom['outer_vv'][0],'vacuum2',ITER_geom['outer_vv'][1],'vv2',parent_name='air') # Define the shape of the VV
-        for key, coil in ITER_geom['coils'].items():
-            if key.startswith('VS'):
-                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='vacuum1')
-            else:
-                gs_mesh.add_rectangle(coil['rc'],coil['zc'],coil['w'],coil['h'],key,parent_name='air')
-        mesh_pts, mesh_lc, mesh_reg = gs_mesh.build_mesh()
-        coil_dict = gs_mesh.get_coils()
-        cond_dict = gs_mesh.get_conductors()
-        save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict,'ITER_mesh.h5')
     if not os.path.exists('ITER_mesh.h5'):
         try:
-            create_mesh()
+            create_ITER_mesh(mesh_resolution)
         except Exception as e:
             print(e)
             mp_q.put(None)
