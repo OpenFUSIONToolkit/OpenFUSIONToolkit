@@ -1180,7 +1180,7 @@ class TokaMaker():
         in [Jackson et al.](https://dx.doi.org/10.1088/0029-5515/48/12/125002)
 
         @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
-        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
+        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER'; 'all' returns each form as `l_i_<form>` instead of `l_i`)
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
         @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         @result Dictionary of equilibrium parameters
@@ -3694,7 +3694,7 @@ class TokaMaker_equilibrium():
         in [Jackson et al.](https://dx.doi.org/10.1088/0029-5515/48/12/125002)
 
         @param lcfs_pad Padding at LCFS for boundary calculations (default: 1.0 for limited; 0.99 for diverted)
-        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER')
+        @param li_normalization Form of normalized \f$ l_i \f$ ('std', 'ITER'; 'all' returns each form as `l_i_<form>` instead of `l_i`)
         @param geom_type Method for computing geometric major/minor radius ('max': Use LCFS extrema, 'mid': Use axis plane extrema)
         @param beta_Ip Override \f$ I_p \f$ used for beta calculations
         @result Dictionary of equilibrium parameters
@@ -3742,11 +3742,11 @@ class TokaMaker_equilibrium():
                         zbounds[0,:] = x_points[-(i+1),:]
                         break
         # Compute normalized inductance
-        if li_normalization.lower() == 'std':
-            li = (Bp_vol/vol)/numpy.power(mu0*Ip/dl,2)
-        elif li_normalization.lower() == 'iter':
-            li = 2.0*Bp_vol/(numpy.power(mu0*Ip,2)*self.o_point[0])
-        else:
+        li = {
+            'std': (Bp_vol/vol)/numpy.power(mu0*Ip/dl,2),
+            'iter': 2.0*Bp_vol/(numpy.power(mu0*Ip,2)*self.o_point[0])
+        }
+        if li_normalization.lower() not in list(li)+['all']:
             raise ValueError('Invalid "li_normalization"')
         # Compute geometric major/minor radius
         if geom_type == 'mid':
@@ -3781,9 +3781,12 @@ class TokaMaker_equilibrium():
             'W_MHD': pvol*1.5,
             'beta_pol': 100.0*(2.0*pvol*mu0/vol)/numpy.power(Ip*mu0/dl,2),
             'dflux': dflux,
-            'tflux': tflux,
-            'l_i': li
+            'tflux': tflux
         }
+        if li_normalization.lower() == 'all':
+            eq_stats.update({'l_i_'+key: val for key, val in li.items()})
+        else:
+            eq_stats['l_i'] = li[li_normalization.lower()]
         if abs(self._F0) > 0.0:
             F0_abs = abs(self._F0)
             eq_stats['beta_tor'] = 100.0*(2.0*pvol*mu0/vol)/(numpy.power(F0_abs/R_geo,2))
