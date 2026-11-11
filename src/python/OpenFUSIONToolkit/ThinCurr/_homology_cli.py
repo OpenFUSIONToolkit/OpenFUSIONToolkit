@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh, HOLES_VERSION
 from . import _tree_homology
 from . import _manifold_homology
-from .junctions import has_junctions, find_junction_holes, verify_junction_mesh, split_jumper
+from .junctions import has_junctions, find_junction_holes, verify_junction_mesh, split_jumpers
 
 
 def _verify_counts(input_model, nholes, nclosures):
@@ -79,15 +79,22 @@ def _write_holes(out_file, input_model, holes, closures):
                         holes_version=HOLES_VERSION)
 
 
-def _compute_junction_holes(input_model, out_file, verify_only, print_info):
+def _compute_junction_holes(input_model, out_file, verify_only, print_info, split_regions):
     '''! Split a mesh with junctions (edges shared by more than two cells) and choose its holes
 
     See @ref junctions.find_junction_holes. The output file holds the split mesh and, in the
     `thincurr/junctions` group, the junction table, explicit holes, vertex map and P.
+
+    @param input_model Mesh information from @ref meshing.read_ThinCurr_mesh
+    @param out_file Output mesh file
+    @param verify_only Only report the junction model, do not write output file?
+    @param print_info Print information about the junction model?
+    @param split_regions Also split the mesh at all region interfaces?
     '''
-    out = find_junction_holes(input_model['r'], input_model['lc'], input_model['reg'])
+    out = find_junction_holes(input_model['r'], input_model['lc'], input_model['reg'], split_regions=split_regions)
     if print_info:
         print("Junction mesh:")
+        print("  Split at region interfaces = {0}".format(split_regions))
         print("  # of junction lines = {0}".format(len(out['lines'])))
         print("  # of junction edges = {0}".format(len(out['kje'])-1))
         print("  # of vertices after split = {0}".format(out['r'].shape[0]))
@@ -98,8 +105,7 @@ def _compute_junction_holes(input_model, out_file, verify_only, print_info):
     if verify_only:
         return
     thincurr = input_model['thincurr']
-    jumpers = [split_jumper(input_model['lc'], out['lc'], out['vmap'], out['jedges'], jumper)
-               for jumper in thincurr.get('jumpers', [])]
+    jumpers = split_jumpers(input_model['lc'], out['lc'], out['vmap'], out['jedges'], thincurr.get('jumpers', []))
     write_ThinCurr_mesh(out_file, out['r'], out['lc'], input_model['reg'],
                         junctions=out, jumpers=jumpers,
                         eta_surf=thincurr.get('eta_surf'), eta_vol=thincurr.get('eta_vol'),
@@ -128,7 +134,7 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
     @param verify_only Verify the correct number of holes and closures are found, but do not write output file?
     @param use_legacy Use the legacy Greedy Homotopy method?
     @param verbose Print progress for each search base point (tree-cotree method only)?
-    @param split_regions Split the mesh at all region interfaces (junction mesh) even if every edge has at most two cells?
+    @param split_regions Also split the mesh at all region interfaces (only needed to insulate regions, see @ref thincurr_holes_tool)?
     '''
     if out_file is None:
         out_file = os.path.splitext(in_file)[0] + "-homology.h5"
@@ -159,21 +165,28 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
                 raise ValueError('Homology calculation does not support periodic ThinCurr meshes (nfp > 0) at this time')
     else:
         input_model['thincurr'] = {}
-    if 'junctions' in input_model['thincurr']:
+    split_mesh = 'junctions' in input_model['thincurr']
+    unsplit_junctions = (not split_mesh) and has_junctions(input_model['lc'], input_model['reg'])
+    if use_legacy and (split_mesh or unsplit_junctions or split_regions):
+        raise ValueError('The legacy method does not support meshes with junctions (edges shared by more than two cells, '
+                         'or sheets touching at a vertex) or "split_regions"')
+    if split_mesh:
         if verify_only:
+            if split_regions and (not input_model['thincurr']['junctions']['split_regions']):
+                print('Note: "split_regions" is ignored when verifying a mesh that is already split; this mesh is not '
+                      'split at region interfaces (rerun "OFT_ThinCurr_holes --split_regions" on the unsplit mesh to '
+                      'split it there)')
             njedges, nunknowns = verify_junction_mesh(input_model['r'], input_model['lc'], input_model['reg'],
                                                       input_model['thincurr']['junctions'])
             if print_info:
                 print("Junction mesh: {0} junction edges, {1} unknowns".format(njedges, nunknowns))
             return
         raise ValueError('Mesh has already been split at junctions')
-    if has_junctions(input_model['lc'], input_model['reg']):
-        if verify_only:
+    if unsplit_junctions or split_regions:
+        if unsplit_junctions and verify_only:
             raise ValueError('Mesh has junctions (edges shared by more than two cells, or sheets touching at a vertex) '
                              'but no junction data, run "OFT_ThinCurr_holes" to split it')
-        return _compute_junction_holes(input_model, out_file, verify_only, print_info)
-    if split_regions:
-        return _compute_junction_holes(input_model, out_file, verify_only, print_info)
+        return _compute_junction_holes(input_model, out_file, verify_only, print_info, split_regions)
 
     # Select (or count) holes and closures
     if use_legacy:
@@ -245,7 +258,7 @@ def script_entry():
     parser.add_argument("--optimize_holes", action="store_true", default=False, help="Sample additional points to attempt to optimize holes (little effect with the default method)?")
     parser.add_argument("--use_legacy", action="store_true", default=False, help="Use the legacy Greedy Homotopy method?")
     parser.add_argument("--verbose", action="store_true", default=False, help="Print progress for each search base point (tree-cotree method only)?")
-    parser.add_argument("--split_regions", action="store_true", default=False, help="Split the mesh at all region interfaces (junction mesh)?")
+    parser.add_argument("--split_regions", action="store_true", default=False, help="Also split at all region interfaces (only needed to insulate regions)?")
     options = parser.parse_args()
 
     if options.keep_nodeset_start is not None:
@@ -276,12 +289,10 @@ def script_entry():
 # is available using `--use_legacy`.
 #
 # If the mesh has junctions (edges shared by more than two cells, or sheets of different regions touching only at a
-# point), or `--split_regions` is given, it is split at the junctions and the region interfaces instead (not
-# supported for periodic meshes) and the output file holds the split mesh with the junction data
-# (`thincurr/junctions`): see
-# \ref doc_tw_main_junctions. Each region must be a separate sheet. `--split_regions` is needed when sheets
-# meet two at a time (e.g. a torus in sectors) but should be insulatable from each other with
-# `setup_model(insulated_junctions=...)`.
+# point), or `--split_regions` is given, it is split at the junctions instead (not supported for periodic meshes or
+# with `--use_legacy`) and the output file holds the split mesh with the junction data (`thincurr/junctions`): see
+# \ref doc_tw_main_junctions. Each region must be a separate sheet. See \ref OFT_ThinCurr_holes_split for when
+# to use `--split_regions`.
 #
 #```shell
 # usage: OFT_ThinCurr_holes [-h] --in_file IN_FILE [--out_file OUT_FILE] [--keep_nodeset_start KEEP_NODESET_START] [--plot_final] [--plot_steps] [--show_omitted]
@@ -303,5 +314,21 @@ def script_entry():
 #     --optimize_holes      Sample additional points to attempt to optimize holes (little effect with the default method)?
 #     --use_legacy          Use the legacy Greedy Homotopy method?
 #     --verbose             Print progress for each search base point (tree-cotree method only)?
-#     --split_regions       Split the mesh at all region interfaces (junction mesh)?
+#     --split_regions       Also split at all region interfaces (only needed to insulate regions)?
 #```
+#
+# @section OFT_ThinCurr_holes_split Splitting at region interfaces (`--split_regions`)
+# By default a mesh is only split at its junction edges. With `--split_regions` it is also split at every edge where
+# two regions meet, with or without junctions, and those edges become two-cell junction edges.
+#
+# On its own this does not change the model: with no insulation, current conservation across a two-cell junction edge
+# is ordinary continuity, so the sheets are joined back together and the model carries exactly the same currents as
+# without the split (same number of unknowns, same resistance and inductance up to quadrature-level differences in the
+# inductance). The split only matters for insulation, which acts at junction edges only: it allows sheets that meet
+# two at a time (e.g. the sectors of a torus) to be insulated from each other when the model is set up, with
+# `setup_model(insulated_junctions=...)`, without generating a new mesh file. Without the split, regions or pairs of
+# regions that do not meet at a junction edge cannot be insulated (an error is raised if this is requested).
+#
+# Only use `--split_regions` if this insulation is needed, as the split mesh has more vertices, junction constraints
+# and hole elements, which increases the cost of setting up the model, and jumpers cannot run along the split region
+# interfaces. The choice is stored in the output file and used when the mesh is verified or insulated.

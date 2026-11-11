@@ -41,6 +41,7 @@ def write_junction_group(h5_file, junctions):
     if len(insulated) > 0:
         ins = [list(i) if numpy.ndim(i) > 0 else [i, 0] for i in insulated]
         h5_file.create_dataset('thincurr/junctions/INSULATED', data=ins, dtype='i4')
+    h5_file.create_dataset('thincurr/junctions/SPLIT_REGIONS', data=[int(junctions.get('split_regions', True)),], dtype='i4')
     P = junctions['P'].tocsr()
     h5_file.create_dataset('thincurr/junctions/P_SIZE', data=list(P.shape), dtype='i4')
     h5_file.create_dataset('thincurr/junctions/P_KR', data=P.indptr+1, dtype='i4')
@@ -161,7 +162,9 @@ def read_ThinCurr_mesh(filename):
                     'P': scipy.sparse.csr_matrix((jgroup['P_VAL'][()], jgroup['P_LC'][()] - 1, jgroup['P_KR'][()] - 1),
                                                  shape=tuple(psize)),
                     'insulated': [int(i[0]) if i[1] == 0 else (int(i[0]), int(i[1]))
-                                  for i in jgroup['INSULATED'][()]] if 'INSULATED' in jgroup else []}
+                                  for i in jgroup['INSULATED'][()]] if 'INSULATED' in jgroup else [],
+                    # Files written before this flag was added were always split at region interfaces
+                    'split_regions': bool(jgroup['SPLIT_REGIONS'][0]) if 'SPLIT_REGIONS' in jgroup else True}
             # Read jumpers
             if 'jumpers' in thincurr:
                 njumpers = thincurr['jumpers/NJUMPERS'][0]
