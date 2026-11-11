@@ -1471,7 +1471,7 @@ END DO
 CALL psi_int%delete()
 !---Trace the remaining surfaces
 IF(.NOT.ALL(done))THEN
-CALL set_tracer(1)
+CALL set_tracer(3)
 !$omp parallel private(j,field,ptout,vout,h,h2,hf,ftu,ftl)
 ALLOCATE(field)
 field%u=>gseq%psi
@@ -1488,10 +1488,11 @@ ALLOCATE(ptout(3,active_tracer%maxsteps+1),vout(3,active_tracer%maxsteps))
 !$omp do schedule(dynamic,1)
 DO j=1,nr
   IF(done(j))CYCLE
+  ! Tighter than for q alone, as the trapped fraction is a quadrature over the steps
   IF(psi_q(j)<0.02d0)THEN
-    active_tracer%tol=1.d-10
+    active_tracer%tol=1.d-9
   ELSE
-    active_tracer%tol=1.d-8
+    active_tracer%tol=1.d-7
   END IF
   IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,psi_q(j)<0.02d0)
   field%f_surf=fpol(j)

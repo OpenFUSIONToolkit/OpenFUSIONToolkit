@@ -4664,7 +4664,7 @@ IF(oft_debug_print(1))THEN
   CALL oft_decrease_indent
 END IF
 !---Trace
-call set_tracer(1)
+call set_tracer(3)
 !$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field,i,imin_r,imax_r, &
 !$omp                  imin_z,imax_z,error_str,lcfs_rz) firstprivate(pt_last)
 NULLIFY(ptout)
@@ -4699,9 +4699,9 @@ do j=1,nr
   ! psi_surf=x2 - psi_surf
   psi_surf=psi_q(j)*(x2-x1) + x1
   IF(psi_q(j)<=0.02d0)THEN ! Use higher tracing tolerance near the LCFS
-    active_tracer%tol=1.d-10
-  ELSE
     active_tracer%tol=1.d-8
+  ELSE
+    active_tracer%tol=1.d-6
   END IF
   IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,psi_q(j)<=0.02d0)
   !
@@ -4737,27 +4737,27 @@ do j=1,nr
     CYCLE
   end if
   !------------------------------------------------------------------------------
-  ! If shape information is requested, reinterpolate LCFS to get uniform spacing for geometric parameters
+  ! If shape information is requested, reinterpolate LCFS to get uniform spacing for geometric parameters.
+  ! The trace is always resampled, as the number and spacing of the tracer's steps depend on the
+  ! integrator and tolerance. The resampled points span [0,2*pi], so the last point closes the surface.
   !------------------------------------------------------------------------------
   IF(PRESENT(shape_geo).OR.(PRESENT(dl).AND.(j==1)))THEN
-    IF(active_tracer%nsteps>nlcfs)THEN
-      !---Allocate and fit spline
-      CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
-      lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
-      lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
-      lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
-      CALL spline_fit(lcfs_rz,"periodic")
-      !---Resample trace
-      DO i=0,nlcfs-1
-        CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
-        ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
-        ptout(2,i+1)=lcfs_rz%f(1)
-        ptout(3,i+1)=lcfs_rz%f(2)
-      END DO
-      !---Destroy Spline
-      CALL spline_dealloc(lcfs_rz)
-      active_tracer%nsteps=nlcfs
-    END IF
+    !---Allocate and fit spline
+    CALL spline_alloc(lcfs_rz,active_tracer%nsteps,2)
+    lcfs_rz%xs(0:active_tracer%nsteps) = ptout(1,1:active_tracer%nsteps+1)/ptout(1,active_tracer%nsteps+1)
+    lcfs_rz%fs(0:active_tracer%nsteps,1) = ptout(2,1:active_tracer%nsteps+1)
+    lcfs_rz%fs(0:active_tracer%nsteps,2) = ptout(3,1:active_tracer%nsteps+1)
+    CALL spline_fit(lcfs_rz,"periodic")
+    !---Resample trace
+    DO i=0,nlcfs-1
+      CALL spline_eval(lcfs_rz,i/REAL(nlcfs-1,8),0)
+      ptout(1,i+1)=i*ptout(1,active_tracer%nsteps+1)/REAL(nlcfs-1,8)
+      ptout(2,i+1)=lcfs_rz%f(1)
+      ptout(3,i+1)=lcfs_rz%f(2)
+    END DO
+    !---Destroy Spline
+    CALL spline_dealloc(lcfs_rz)
+    active_tracer%nsteps=nlcfs
     !---Per-surface extrema, used for elongation and triangularity
     IF(PRESENT(shape_geo))THEN
       imin_r=1; imax_r=1; imin_z=1; imax_z=1
@@ -4887,7 +4887,7 @@ pt_last=[rmax,zaxis,0.d0]
 !   CALL oft_decrease_indent
 ! END IF
 !---Trace
-call set_tracer(1)
+call set_tracer(3)
 !!$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
 CALL field%setup(gseq%device%fe_rep)

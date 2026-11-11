@@ -70,7 +70,7 @@ CLASS(oft_vector), POINTER :: u,v,check
 TYPE(oft_taylor_rinterp), TARGET :: Bfield
 CLASS(oft_tracer), POINTER :: tracer
 TYPE(xdmf_plot_file) :: plot_file
-TYPE(multigrid_mesh) :: mg_mesh
+TYPE(multigrid_mesh), TARGET :: mg_mesh
 TYPE(oft_ml_fem_comp_type) :: ML_vlagrange
 TYPE(oft_taylor_hmodes) :: hmodes
 TYPE(oft_taylor_ifield) :: ff_obj
@@ -200,8 +200,8 @@ call mg_mesh%mesh%save_vertex_vector(bvout,plot_file,'B')
 !! is used as a template to spawn additional tracers that are advanced in parallel. Tracing
 !! objects can be created using the \ref tracing::create_tracer "create_tracer" subroutine.
 !! Once the tracer has been created basic properties are set including the tracing tolerance,
-!! maximum number of steps, maximum number of domain transfers and the field interpolation
-!! object.
+!! maximum number of steps, maximum number of domain transfers, the field interpolation
+!! object and the mesh used to locate points.
 !!
 !! For this example a line of points in the xz-plane are used, positioned at the radius of
 !! the magnetic axis of the Taylor state. The resulting puncture list is stored in the file
@@ -216,6 +216,7 @@ tracer%tol=1.d-9
 tracer%maxsteps=1E5
 tracer%maxtrans=2E3
 tracer%B=>Bfield
+tracer%ml_mesh=>mg_mesh
 !---Create launch point list
 npts=20
 ALLOCATE(pts(3,npts))

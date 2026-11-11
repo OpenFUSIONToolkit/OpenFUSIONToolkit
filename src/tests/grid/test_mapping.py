@@ -26,6 +26,11 @@ oft_in_template = """
  mesh_type={4}
 /
 
+&cube_options
+ mesh_type={4}
+ ni=4,4,4
+/
+
 &test_mapping_options
  order={5}
 /
@@ -67,6 +72,15 @@ def test_find_lin(grid_type):
 @pytest.mark.parametrize("grid_type", (1, 2))
 def test_find_quad(grid_type):
     assert mapping_setup(1,1,2,91,'find',grid_type=grid_type)
+    assert check_result('mapping_find.results')
+
+#============================================================================
+# Test runner for find_cell test on a cube (structured tets or hexes)
+@pytest.mark.coverage
+@pytest.mark.parametrize("grid_type", (1, 2))
+@pytest.mark.parametrize("order", (1, 2))
+def test_find_cube(grid_type, order):
+    assert mapping_setup(1,1,order,92,'find',grid_type=grid_type)
     assert check_result('mapping_find.results')
 
 #============================================================================

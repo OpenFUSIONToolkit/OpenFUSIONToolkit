@@ -391,21 +391,26 @@ END SUBROUTINE hexmesh_vlog
 !---------------------------------------------------------------------------------
 !> Test if logical position lies within the base cell
 !!
-!! @returns Position `f` is inside the base cell?
+!! @note The face index follows the `hex_fc`/`lcc` ordering. This is not the ordering of
+!! `hex_get_bary`, whose entry `i` vanishes on the face opposite face `i`.
+!!
+!! @returns Zero if position `f` is inside the base cell, otherwise the face of `hex_fc`
+!! the point lies furthest outside of
 !---------------------------------------------------------------------------------
 FUNCTION hexmesh_in_cell(self,f,tol) RESULT(eface)
 CLASS(oft_hexmesh), INTENT(in) :: self !< Mesh object
 REAL(r8), INTENT(in) :: f(:) !< Logical coordinate to evaluate
 REAL(r8), INTENT(in) :: tol !< Tolerance for test
 INTEGER(i4) :: eface
-REAL(r8) :: fmin,fmax,fbary(6)
+REAL(r8) :: fmin,fmax,fface(6)
 fmin=MINVAL(f(1:3))
 fmax=MAXVAL(f(1:3))
 IF((fmax<=1.d0+tol).AND.(fmin>=-tol))THEN
   eface=0
 ELSE
-  fbary=hex_get_bary(f(1:3))
-  eface=MINLOC(fbary, DIM=1)
+  !---Signed distance (in logical space) inside each face of `hex_fc`
+  fface=(/f(3), f(2), 1.d0-f(1), 1.d0-f(2), f(1), 1.d0-f(3)/)
+  eface=MINLOC(fface, DIM=1)
 END IF
 END FUNCTION hexmesh_in_cell
 !---------------------------------------------------------------------------------
@@ -598,6 +603,7 @@ call lmdif(tm_findcell_error,nerr,neq,uv,error, &
            nfev,fjac,ldfjac,ipvt,qtf,wa1,wa2,wa3,wa4)
 !IF(info>4)WRITE(*,*)'High-order find failed',i,info,nfev
 f(1:3)=uv
+f(4)=0.d0 ! Unused for hexahedra, but callers often test the range of all 4 entries
 DEBUG_STACK_POP
 end function hexmesh_phys2logho
 !------------------------------------------------------------------------------

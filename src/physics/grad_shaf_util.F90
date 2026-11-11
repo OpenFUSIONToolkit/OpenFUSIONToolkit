@@ -1074,7 +1074,7 @@ IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
 END IF
 !---Trace
 IF(.NOT.ALL(cc_done(2:npsi)))THEN
-call set_tracer(1)
+call set_tracer(3)
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
@@ -1097,9 +1097,9 @@ do j=2,npsi
   !---------------------------------------------------------------------------
   psi_surf = cout(j,1)
   IF(ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near the LCFS
-    active_tracer%tol=1.d-10
-  ELSE
     active_tracer%tol=1.d-8
+  ELSE
+    active_tracer%tol=1.d-6
   END IF
   pt=pt_last
   !$omp critical
@@ -1423,7 +1423,7 @@ IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
 END IF
 !---Trace
 IF(.NOT.ALL(cc_done))THEN
-call set_tracer(1)
+call set_tracer(3)
 !$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
@@ -1447,9 +1447,9 @@ do j=1,nr
   psi_trace = psi_surf
   IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
   IF((psi_trace-x1)/xr<0.02d0)THEN ! Use higher tracing tolerance near the LCFS
-    active_tracer%tol=1.d-10
-  ELSE
     active_tracer%tol=1.d-8
+  ELSE
+    active_tracer%tol=1.d-6
   END IF
   IF(j>1)THEN
     pt=pt_last
