@@ -90,7 +90,7 @@ END INTERFACE
 !! of the common options.
 !------------------------------------------------------------------------------
 TYPE, ABSTRACT, PUBLIC :: oft_solver
-  LOGICAL :: pm = .FALSE. !< Print convergence information
+  LOGICAL :: pm = .FALSE. !< Print convergence information when called by a parent solver (top-level output follows `oft_env%pm`)
   LOGICAL :: initialized = .FALSE. !< Solver has been constructed
   LOGICAL :: full_residual = .TRUE. !< Compute true residual on exit
   INTEGER(i4) :: its = -1 !< Iteration limit (see @ref doc_solvers_common)
@@ -138,7 +138,7 @@ END INTERFACE
 !! @sa oft_solver
 !------------------------------------------------------------------------------
 TYPE, ABSTRACT, PUBLIC :: oft_csolver
-  LOGICAL :: pm = .FALSE. !< Print convergence information
+  LOGICAL :: pm = .FALSE. !< Print convergence information when called by a parent solver (top-level output follows `oft_env%pm`)
   LOGICAL :: initialized = .FALSE. !< Solver has been constructed
   LOGICAL :: full_residual = .TRUE. !< Compute true residual on exit
   INTEGER(i4) :: its = -1 !< Iteration limit (see @ref doc_solvers_common)
@@ -186,7 +186,7 @@ END INTERFACE
 !! See @ref doc_solvers_eig for available implementations.
 !------------------------------------------------------------------------------
 TYPE, ABSTRACT, PUBLIC :: oft_eigsolver
-  LOGICAL :: pm = .FALSE. !< Print convergence information
+  LOGICAL :: pm = .FALSE. !< Print convergence information (currently output follows `oft_env%pm`)
   LOGICAL :: initialized = .FALSE. !< Solver has been constructed
   INTEGER(i4) :: its = -1 !< Iteration limit (meaning depends on implementation)
   INTEGER(i4) :: cits = 0 !< Number of iterations taken in last solve

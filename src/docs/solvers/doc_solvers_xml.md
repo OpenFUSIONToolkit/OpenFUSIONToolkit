@@ -1,68 +1,10 @@
-Available Solvers     {#doc_solvers}
-=================
+Solver XML Reference     {#doc_solvers_xml_ref}
+====================
 
 [TOC]
 
-This page outlines the linear solvers and preconditioners available through Open FUSION Toolkit (OFT) solver
-objects and how to configure them, either in Fortran or from the XML input file. Additional methods may be used
-internally by a backend, but only those directly supported by OFT are listed here.
-
-\section doc_solvers_usage Using Solver Objects
-
-All linear solvers and preconditioners extend \ref oft_solver_base::oft_solver "oft_solver" and share the same
-calling sequence. Preconditioners are themselves solver objects, attached to a parent solver through its `pre` field.
-
-~~~~~~~~~~~~~~~~~~~~~{.f90}
-CLASS(oft_solver), POINTER :: solver
-CALL create_cg_solver(solver)    ! Create a CG solver for the active backend
-solver%A=>mat                    ! Matrix to invert
-solver%its=-3                    ! Set common options (see below)
-solver%atol=1.d-10
-CALL create_diag_pre(solver%pre) ! Optional preconditioner (uses solver%A)
-CALL solver%apply(u,g)           ! Solve A*u = g
-CALL solver%update(.TRUE.)       ! After changing A (.TRUE. if non-zero pattern changed)
-CALL solver%delete(.TRUE.)       ! Free storage (.TRUE. also deletes preconditioner)
-~~~~~~~~~~~~~~~~~~~~~
-
-In `apply(u,g)` the vector `u` holds the initial guess on input and the solution on output. The vector `g` holds the
-right-hand side on input and is overwritten; iterative solvers return the final residual in `g`. After a solve
-`cits` holds the number of iterations taken. A negative value indicates failure, eg. breakdown or the native
-GMRES solver reaching its iteration limit.
-
-Solver objects are created with the helper routines in \ref oft_solver_utils, which select the native or PETSc
-implementation according to the `use_petsc` runtime option (\ref doc_input_runtime):
-
-| Routine | Creates |
-|---------|---------|
-| \ref oft_solver_utils::create_cg_solver "create_cg_solver" | Conjugate Gradient solver |
-| \ref oft_solver_utils::create_gmres_solver "create_gmres_solver" | GMRES solver |
-| \ref oft_solver_utils::create_diag_pre "create_diag_pre" | Jacobi (diagonal scaling) preconditioner |
-| \ref oft_solver_utils::create_ilu_pre "create_ilu_pre" | ILU(0) preconditioner |
-| \ref oft_solver_utils::create_bjacobi_pre "create_bjacobi_pre" | Block Jacobi preconditioner with LU sub-solves |
-| \ref oft_solver_utils::create_mlpre "create_mlpre" | Multigrid preconditioner (\ref doc_solvers_mg) |
-| \ref oft_solver_utils::create_solver_xml "create_solver_xml" | Any solver from an XML definition (\ref doc_solvers_xml) |
-
-\subsection doc_solvers_common Common Options
-
-The following options are shared by all iterative solvers. They are fields of
-\ref oft_solver_base::oft_solver "oft_solver" and, unless noted otherwise, can also be set from XML.
-
-| Option | Description | Type | Default |
-|--------|-------------|------|---------|
-| `its`  | Iteration limit (see below) | int | -1 |
-| `atol` | Absolute tolerance, stop when \f$ \|r\| < atol \f$ | real | 1E-14 |
-| `rtol` | Relative tolerance, stop when \f$ \|r\|/\|r_0\| < rtol \f$ | real | 1E-14 |
-| `pm`   | Print convergence information (Fortran only) | bool | F |
-
-For native solvers `its` also controls the stopping criteria:
- - `its > 0`: Stop after at most `its` iterations
- - `its = 0`: Return immediately without iterating
- - `its = -1` or `-2`: Stop when the solution stagnates in single (`-1`) or double (`-2`) precision. For CG this
-   is when the energy functional stops decreasing; for GMRES when \f$ \|r\|/\|u\| \f$ falls below 1E-7 or 1E-14.
- - `its < -2`: No iteration limit, stop on `atol` and `rtol` only
-
-For PETSc solvers `its > 0` sets the iteration limit, otherwise the PETSc default limit is used (`its = 0` skips
-GMRES solves).
+This page describes how to define solvers in the XML input file and lists the options for each method. The same
+options are available as fields of the corresponding Fortran classes (\ref doc_solvers_api).
 
 \section doc_solvers_xml XML Specification
 
@@ -88,8 +30,8 @@ elements, where the `type` attribute selects the method and options are given as
    (\ref doc_solvers_mg); outside of a multigrid preconditioner the first value is used. Options marked
    "Per-level: No" accept only a single value.
  - Logical options accept `true`/`false` (also `T`/`F` or `1`/`0`).
- - The backend follows the `use_petsc` runtime option. For the `cg`, `gmres` and `sjacobi` solver types the
-   attribute `native="true"` forces the native implementation when PETSc is in use.
+ - The implementation is chosen by the active backend (\ref doc_solvers_backends). For the `cg`, `gmres` and
+   `sjacobi` solver types the attribute `native="true"` forces the native implementation when PETSc is in use.
 
 \subsection doc_solvers_xml_types Available Types
 
@@ -109,11 +51,7 @@ elements, where the `type` attribute selects the method and options are given as
 | `lu`           | \ref doc_solvers_lu | \ref oft_lu::oft_lusolver "oft_lusolver" | \ref oft_petsc_solvers::oft_petsc_luprecond "oft_petsc_luprecond" |
 | `ilu`          | \ref doc_solvers_ilu | \ref oft_lu::oft_ilusolver "oft_ilusolver" | Not available |
 
-\subsection doc_solvers_xml_mixing Mixing Native and PETSc Methods
-
-Native solvers use generic linear algebra calls and work with either backend. PETSc solvers require PETSc
-preconditioners, which is always the case when building from XML. A native solver (`native="true"`) may use the PETSc
-`jacobi`, `block_jacobi` and `add_schwarz` preconditioners, but not `lu` or `ilu`.
+Not all combinations of native and PETSc methods are valid, see \ref doc_solvers_backends_mixing.
 
 \subsection doc_solvers_xml_modules Modules Using XML Definitions
 
@@ -125,6 +63,27 @@ preconditioners, which is always the case when building from XML. A native solve
 | \ref oft_h1_operators | `<h1><lop>` | Multigrid preconditioner for the Laplacian |
 | \ref oft_hcurl_operators | `<hcurl><wop>`, `<hcurl><jmlb>` | Multigrid preconditioners for the curl-curl and Jacobian operators |
 | \ref oft_hcurl_grad_operators | `<hcurl_grad><mop>` | Multigrid preconditioner for the mass matrix |
+
+\section doc_solvers_common Common Options
+
+The following options are shared by all iterative solvers. They can be set from XML or as fields of
+\ref oft_solver_base::oft_solver "oft_solver" (`pm` is Fortran only).
+
+| Option | Description | Type | Default |
+|--------|-------------|------|---------|
+| `its`  | Iteration limit (see below) | int | -1 |
+| `atol` | Absolute tolerance, stop when \f$ \|r\| < atol \f$ | real | 1E-14 |
+| `rtol` | Relative tolerance, stop when \f$ \|r\|/\|r_0\| < rtol \f$ | real | 1E-14 |
+| `pm`   | Print convergence information when called by a parent solver; top-level output follows `oft_env%pm` (Fortran only) | bool | F |
+
+For native solvers `its` also controls the stopping criteria:
+ - `its > 0`: Stop after at most `its` iterations
+ - `its = 0`: Return immediately without iterating
+ - `its = -1` or `-2`: Stop when the solution stagnates in single (`-1`) or double (`-2`) precision. For CG this
+   is when the energy functional stops decreasing; for GMRES when \f$ \|r\|/\|u\| \f$ falls below 1E-7 or 1E-14.
+ - `its < -2`: No iteration limit, stop on `atol` and `rtol` only
+
+PETSc solvers interpret `its` differently, see \ref doc_solvers_backends_petsc.
 
 \section doc_solvers_krylov Krylov Solvers
 
@@ -258,17 +217,3 @@ mesh levels with \ref oft_solver_utils::create_mlpre "create_mlpre". Each module
 
 The smoother definition is created separately on each level, and list-valued options are indexed by the mesh level
 number (1 = coarsest mesh), so lists must have at least as many entries as the finest level used.
-
-\section doc_solvers_eig Eigenvalue Solvers
-
-Eigenvalue solvers extend \ref oft_solver_base::oft_eigsolver "oft_eigsolver" and are configured in Fortran only:
- - \ref oft_native_solvers::oft_native_cg_eigsolver "oft_native_cg_eigsolver": Lowest eigenvalue of a symmetric
-   positive-definite generalized system using non-linear CG
- - \ref oft_arpack::oft_irlm_eigsolver "oft_irlm_eigsolver" (symmetric) and
-   \ref oft_arpack::oft_iram_eigsolver "oft_iram_eigsolver" (general): Multiple eigenvalues using
-   [ARPACK](https://github.com/opencollab/arpack-ng) (requires ARPACK)
-
-\section doc_solvers_nl Non-Linear Solver
-
-\ref oft_native_solvers::oft_nksolver "oft_nksolver" provides a Newton iteration with backtracking for
-\f$ M(u) = g \f$, using a linear solver (`J_inv`) for the Jacobian system. It is configured in Fortran only.
