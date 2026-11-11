@@ -4,9 +4,10 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
 # TokaMaker tests: ITER free-boundary equilibrium, wall modes, linear stability, and equilibrium I/O
+import os
 import pytest
 import numpy as np
-from tokamaker_testing import (mp_run, validate_dict, validate_eqdsk, validate_ifile, ITER_eq_dict,
+from tokamaker_testing import (mp_run, validate_dict, validate_eqdsk, validate_ifile, ifile_errors, ITER_eq_dict, test_dir,
                                create_ITER_mesh, setup_ITER_gs, set_ITER_constraints, solve_ITER_eq)
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit._interface import oftpy_dump_cov
@@ -91,6 +92,10 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
         del mygs_last
     mygs.save_eqdsk('tokamaker.eqdsk',nr=64,nz=64,lcfs_pad=0.001)
     mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001)
+    mygs.save_ifile('tokamaker_ext.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,profile_derivs=True,psi_bounds=True)
+    eq_info.update(ifile_errors(mygs,'tokamaker_ext.ifile'))
+    mygs.save_ifile('tokamaker_axis.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,axis_pack=1.E-4)
+    eq_info['ifile_psi_err_axis'] = ifile_errors(mygs,'tokamaker_axis.ifile')['ifile_psi_err']
     mp_q.put([eq_info])
     oftpy_dump_cov()
 
@@ -144,12 +149,38 @@ def test_ITER_stability(order):
 def test_ITER_eq(order,helicity):
     '''Free-boundary ITER H-mode equilibrium with shape, X-point, and coil regularization targets, for both
     toroidal field directions: global and flux-surface quantities, coil inductances, and the written gEQDSK and
-    i-file are compared to reference values'''
+    i-file are compared to reference values. The optional i-file records (FF', P', psi bounds) and axis packing
+    are checked against the equilibrium itself'''
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
     eq_dict = ITER_eq_dict_helicity(helicity)
     results = mp_run(run_ITER_case,(1.0,(order,),'',helicity))
     assert validate_dict(results,eq_dict)
     assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)
     assert validate_ifile('tokamaker.ifile','ITER_test.ifile',helicity)
+    # Optional records are written only on request and leave the others unchanged
+    ifile = read_ifile(os.path.join(test_dir,'tokamaker.ifile'))
+    ifile_ext = read_ifile(os.path.join(test_dir,'tokamaker_ext.ifile'))
+    assert ('ffp' not in ifile) and ('psi_bounds' not in ifile)
+    assert all(np.array_equal(ifile[key],ifile_ext[key]) for key in ifile)
+    # Records after the known ones are ignored (here a repeat of the last, 2-value record)
+    with open(os.path.join(test_dir,'tokamaker_ext.ifile'),'rb') as fid:
+        content = fid.read()
+    with open(os.path.join(test_dir,'tokamaker_trail.ifile'),'wb') as fid:
+        fid.write(content + content[-24:])
+    ifile_trail = read_ifile(os.path.join(test_dir,'tokamaker_trail.ifile'))
+    assert all(np.array_equal(ifile_ext[key],ifile_trail[key]) for key in ifile_ext)
+    # i-file points lie on their flux surfaces; FF', P' and psi bounds match the equilibrium
+    assert results[0]['ifile_psi_err'] < 1.E-10
+    assert results[0]['ifile_ffp_err'] < 1.E-10
+    assert results[0]['ifile_pp_err'] < 1.E-10
+    assert results[0]['ifile_bounds_err'] < 1.E-12
+    # Axis zone: first surface at axis_pack, spacing growing smoothly into the LCFS-packed points
+    ifile_axis = read_ifile(os.path.join(test_dir,'tokamaker_axis.ifile'))
+    x = (ifile_axis['psi']-ifile_axis['psi_bounds'][0])/(ifile_axis['psi_bounds'][1]-ifile_axis['psi_bounds'][0])
+    dx = np.diff(x)
+    assert abs(x[1]-1.E-4) < 1.E-10
+    assert np.all(dx > 0) and np.max(dx[1:]/dx[:-1]) < 1.7
+    assert results[0]['ifile_psi_err_axis'] < 1.E-10
 
 
 @pytest.mark.coverage

@@ -130,6 +130,22 @@ def validate_eqdsk(file_test,file_ref,helicity=1.0):
     return test_result
 
 
+def ifile_errors(mygs,filename):
+    """Relative errors of an i-file: psi at its R,Z points vs its psi grid, its FF', P' records and its psi bounds."""
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    ifile = read_ifile(filename)
+    psi_range = mygs.psi_bounds[1]-mygs.psi_bounds[0]
+    R, Z = ifile['R'][1:], ifile['Z'][1:]
+    psi_pts = mygs.get_field_eval('psi').eval(np.column_stack([R.ravel(),Z.ravel()]))[:,0].reshape(R.shape)
+    _, F, Fp, _, Pp = mygs.get_profiles(psi=(mygs.psi_bounds[1]-ifile['psi'])/psi_range)
+    return {
+        'ifile_psi_err': np.max(np.abs(psi_pts-ifile['psi'][1:,None]))/abs(psi_range),
+        'ifile_ffp_err': np.max(np.abs(ifile['ffp']-F*Fp))/np.max(np.abs(F*Fp)),
+        'ifile_pp_err': np.max(np.abs(ifile['pp']-Pp))/np.max(np.abs(Pp)),
+        'ifile_bounds_err': np.max(np.abs(ifile['psi_bounds']-mygs.psi_bounds[::-1]))/abs(psi_range)
+    }
+
+
 def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
     '''Compare an i-file against a reference (relative paths are in the TokaMaker test folder)'''
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile
