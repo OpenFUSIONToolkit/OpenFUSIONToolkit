@@ -3,23 +3,25 @@
 !
 ! SPDX-License-Identifier: LGPL-3.0-only
 !---------------------------------------------------------------------------------
-!> @file oft_petsc_solvers.F90
+!> @file petsc_solvers.F90
 !
 !> PETSc solver implementations
 !!
-!! Wrappers for PETSc solvers implementing the common @ref oft_solvers::oft_solver
+!! Wrappers for PETSc solvers implementing the common @ref oft_solver_base::oft_solver
 !! "oft_solver" interface.
-!! - Conjugate-Gradient
-!! - Generalized Minimum Residual
-!! - LU Factorization (SUPERLU, MUMPS, etc.)
+!! - Conjugate Gradient (@ref oft_petsc_cg_solver)
+!! - GMRES (@ref oft_petsc_gmres_solver)
+!! - Symmetric Jacobi smoother (@ref oft_petsc_sjacobi_solver)
+!! - LU factorization (@ref oft_petsc_direct_solver)
 !!
-!! Wrappers for PETSc preconditioners implementing the common @ref oft_solvers::oft_solver
+!! Wrappers for PETSc preconditioners implementing the common @ref oft_solver_base::oft_solver
 !! "oft_solver" interface.
-!! - Diagonal scaling
-!! - Additive Schwarz
-!! - Block Jacobi
-!! - Multi-Grid
-!! - LU Factorization (SUPERLU, MUMPS, etc.)
+!! - Diagonal scaling (@ref oft_petsc_diagprecond)
+!! - Block Jacobi and Additive Schwarz (@ref oft_petsc_asprecond)
+!! - LU factorization (@ref oft_petsc_luprecond)
+!! - Multigrid (@ref oft_petsc_mgprecond)
+!!
+!! See @ref doc_solvers for usage and XML options.
 !!
 !! @authors Chris Hansen
 !! @date January 2013
@@ -58,16 +60,18 @@ IMPLICIT NONE
 #define PETSC_DEF_LU MATSOLVERPETSC
 #endif
 !------------------------------------------------------------------------------
-!> PETSc factorization package information
+!> PETSc factorization package information (see @ref doc_solvers_lu)
 !------------------------------------------------------------------------------
 type :: oft_petsc_factordef
-  CHARACTER(LEN=6) :: type = 'lu' !< Factor type
+  CHARACTER(LEN=6) :: type = 'lu' !< Factor type (`lu` or `ilu`)
   CHARACTER(LEN=7) :: package = DEF_LU_PACK !< Factor package
 end type oft_petsc_factordef
 !------------------------------------------------------------------------------
 !> PETSc abstract preconditioner class
 !!
-!! @note If called from a native solver a solver wrapper will be created
+!! When used by a PETSc solver the preconditioner is set up directly on the
+!! solver's PETSc PC object. When applied directly (eg. from a native solver)
+!! a PETSc `KSPPREONLY` solver wrapper is created.
 !------------------------------------------------------------------------------
 type, abstract, public, extends(oft_solver) :: oft_petsc_precond
   TYPE(tpc) :: pre_obj !< PETSc preconditioner object
@@ -87,6 +91,9 @@ end type oft_petsc_precond
 !!
 !! Use PETSc multi-grid framework for preconditioning. V and W cycle types are
 !! supported. Galerkin construction of sub-level matrices is also available.
+!!
+!! @note Not available from XML, see @ref doc_solvers_mg for the standard
+!! multigrid preconditioner.
 !------------------------------------------------------------------------------
 type, public, extends(oft_petsc_precond) :: oft_petsc_mgprecond
   TYPE(oft_matrix_ptr), POINTER, DIMENSION(:) :: I => NULL() !< Interpolation matrices
@@ -103,7 +110,9 @@ contains
   procedure :: setup => mgprecond_setup
 end type oft_petsc_mgprecond
 !------------------------------------------------------------------------------
-!> PETSc diagonal preconditioning
+!> PETSc diagonal scaling (Jacobi) preconditioner
+!!
+!! See @ref doc_solvers_jacobi (XML: `<pre type="jacobi">`).
 !------------------------------------------------------------------------------
 type, public, extends(oft_petsc_precond) :: oft_petsc_diagprecond
 contains
@@ -113,7 +122,10 @@ contains
   PROCEDURE :: view => diagprecond_view
 end type oft_petsc_diagprecond
 !------------------------------------------------------------------------------
-!> PETSc LU factorization/solve
+!> PETSc LU factorization preconditioner
+!!
+!! Always uses the default factorization package. See @ref doc_solvers_lu
+!! (XML: `<pre type="lu">`).
 !------------------------------------------------------------------------------
 type, public, extends(oft_petsc_precond) :: oft_petsc_luprecond
 contains
@@ -121,12 +133,16 @@ contains
   procedure :: setup => luprecond_setup
 end type oft_petsc_luprecond
 !------------------------------------------------------------------------------
-!> PETSc Additive-Schwarz preconditioner
+!> PETSc Additive Schwarz and Block Jacobi preconditioner
+!!
+!! Each block is solved with the PETSc solver in `pre` if set, otherwise with an
+!! LU factorization defined by `sub_factor`. See @ref doc_solvers_bjacobi for
+!! options (XML: `<pre type="add_schwarz">` or `<pre type="block_jacobi">`).
 !------------------------------------------------------------------------------
 type, public, extends(oft_petsc_precond) :: oft_petsc_asprecond
   INTEGER(i4) :: overlap = 1 !< Size of domain overlap
-  INTEGER(i4) :: n_local = 0 !< Use local field partitioning?
-  TYPE(oft_petsc_factordef) :: sub_factor !< PETSc factor definition
+  INTEGER(i4) :: n_local = 0 !< Number of blocks per process (see `nlocal` in @ref doc_solvers_bjacobi)
+  TYPE(oft_petsc_factordef) :: sub_factor !< Block factorization used if `pre` is not set
 contains
   !> Setup preconditioner
   procedure :: setup => asprecond_setup
@@ -135,6 +151,10 @@ contains
 end type oft_petsc_asprecond
 !------------------------------------------------------------------------------
 !> PETSc abstract solver class
+!!
+!! Requires PETSc matrices and vectors, and a PETSc preconditioner
+!! (@ref oft_petsc_precond) if `pre` is set. `its<=0` uses the PETSc default
+!! iteration limit.
 !------------------------------------------------------------------------------
 type, abstract, public, extends(oft_solver) :: oft_petsc_solver
   TYPE(tksp) :: solver !< PETSc solver object
@@ -148,7 +168,9 @@ CONTAINS
   PROCEDURE :: delete => petsc_solver_delete
 end type oft_petsc_solver
 !------------------------------------------------------------------------------
-!> PETSc Conjugate-Gradient solver
+!> PETSc Conjugate Gradient solver
+!!
+!! See @ref doc_solvers_cg for options (XML: `<solver type="cg">`).
 !!
 !! @note Matrix must be SPD, otherwise solver will fail.
 !------------------------------------------------------------------------------
@@ -165,10 +187,12 @@ contains
 end type oft_petsc_cg_solver
 !------------------------------------------------------------------------------
 !> PETSc GMRES solver
+!!
+!! See @ref doc_solvers_gmres for options (XML: `<solver type="gmres">`).
 !------------------------------------------------------------------------------
 type, public, extends(oft_petsc_solver) :: oft_petsc_gmres_solver
   integer(i4) :: nrits=10 !< Number of iterations before restart
-  integer(i4) :: algorithm=1 !< Algorithm type
+  integer(i4) :: algorithm=1 !< Algorithm type (1: FGMRES, 2: GMRES, 3: Pipelined GMRES)
 contains
   !> Solve system
   procedure :: apply => gmres_solver_apply
@@ -180,7 +204,9 @@ contains
   PROCEDURE :: setup_ksp => gmres_setup_ksp
 end type oft_petsc_gmres_solver
 !------------------------------------------------------------------------------
-!> PETSc Point-Jacobi solver
+!> PETSc damped point-Jacobi (Richardson) solver
+!!
+!! @note Not available from XML
 !------------------------------------------------------------------------------
 type, public, extends(oft_petsc_solver) :: oft_petsc_jacobi_solver
   REAL(r8) :: df = .9d0 !< Damping factor
@@ -189,7 +215,9 @@ contains
   procedure :: apply => jacobi_solver_apply
 end type oft_petsc_jacobi_solver
 !------------------------------------------------------------------------------
-!> PETSc symmetric Point-Jacobi solver
+!> PETSc symmetric Jacobi smoother
+!!
+!! See @ref doc_solvers_sjacobi for options and usage (XML: `<solver type="sjacobi">`).
 !!
 !! @sa oft_native_solvers::oft_jblock_precond
 !------------------------------------------------------------------------------
@@ -211,8 +239,8 @@ end type oft_petsc_sjacobi_solver
 !------------------------------------------------------------------------------
 !> PETSc direct solver (LU factorization)
 !!
-!! Use PETSc direct solver, LU decomposition, to invert system. Actual solve
-!! employs a GMRES method preconditioned by an LU factorization.
+!! Applies an LU (or ILU) factorization through PETSc (`KSPPREONLY`). See
+!! @ref doc_solvers_lu for options (XML: `<solver type="lu">`).
 !------------------------------------------------------------------------------
 type, public, extends(oft_petsc_solver) :: oft_petsc_direct_solver
   TYPE(oft_petsc_factordef) :: pre_factor !< PETSc factor definition
@@ -229,9 +257,9 @@ end type oft_petsc_direct_solver
 !---Start subroutines
 contains
 !------------------------------------------------------------------------------
-!> Cast a vector object to a oft_petsc_vector
+!> Cast a solver object to a oft_petsc_solver
 !!
-!! The source vector must be @ref oft_petsc_vector or a child class, otherwise
+!! The source solver must be @ref oft_petsc_solver or a child class, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
 !------------------------------------------------------------------------------
 FUNCTION petsc_solver_cast(self,source) result(success)
@@ -322,18 +350,18 @@ END IF
 DEBUG_STACK_POP
 end subroutine petsc_solver_update
 !------------------------------------------------------------------------------
-!> Setup PETSc ksp object
+!> Setup PETSc ksp object (base implementation does nothing)
 !------------------------------------------------------------------------------
 subroutine petsc_solver_setup_ksp(self,ksp)
 class(oft_petsc_solver), intent(inout) :: self !< Solver object
-TYPE(tksp), intent(inout) :: ksp
+TYPE(tksp), intent(inout) :: ksp !< PETSc KSP object
 end subroutine petsc_solver_setup_ksp
 !---------------------------------------------------------------------------------
 !> Delete PETSc solver
 !---------------------------------------------------------------------------------
 subroutine petsc_solver_delete(self,propogate)
 class(oft_petsc_solver), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 IF(self%initialized)CALL KSPDestroy(self%solver,ierr)
@@ -416,6 +444,8 @@ DEBUG_STACK_POP
 end subroutine cg_solver_apply
 !------------------------------------------------------------------------------
 !> Setup CG solver from XML definition
+!!
+!! See @ref doc_solvers_cg for available options
 !------------------------------------------------------------------------------
 subroutine cg_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_cg_solver), INTENT(inout) :: self !< Solver object
@@ -595,7 +625,9 @@ END IF
 DEBUG_STACK_POP
 end subroutine gmres_solver_apply
 !------------------------------------------------------------------------------
-!> Setup FGMRES solver from XML definition
+!> Setup GMRES solver from XML definition
+!!
+!! See @ref doc_solvers_gmres for available options
 !------------------------------------------------------------------------------
 subroutine gmres_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_gmres_solver), INTENT(inout) :: self !< Solver object
@@ -918,6 +950,8 @@ DEBUG_STACK_POP
 end subroutine sjacobi_solver_apply
 !------------------------------------------------------------------------------
 !> Setup symmetric Jacobi solver from XML definition
+!!
+!! See @ref doc_solvers_sjacobi for available options
 !------------------------------------------------------------------------------
 subroutine sjacobi_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_sjacobi_solver), INTENT(inout) :: self !< Solver object
@@ -976,7 +1010,7 @@ end subroutine sjacobi_setup_xml
 !---------------------------------------------------------------------------------
 subroutine sjacobi_delete(self,propogate)
 class(oft_petsc_sjacobi_solver), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 IF(ASSOCIATED(self%u_save))THEN
@@ -1056,6 +1090,8 @@ DEBUG_STACK_POP
 end subroutine direct_solver_apply
 !------------------------------------------------------------------------------
 !> Setup direct solver from XML definition
+!!
+!! See @ref doc_solvers_lu for available options
 !------------------------------------------------------------------------------
 subroutine direct_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_direct_solver), INTENT(inout) :: self !< Solver object
@@ -1209,7 +1245,7 @@ end subroutine precond_apply
 !---------------------------------------------------------------------------------
 subroutine precond_delete(self,propogate)
 class(oft_petsc_precond), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 integer(i4) :: ierr
 DEBUG_STACK_PUSH
 IF(self%initialized)CALL KSPDestroy(self%solver,ierr)
@@ -1389,7 +1425,7 @@ CALL PCMGGetCoarseSolve(pc,ksp,ierr)
 DEBUG_STACK_POP
 end subroutine mgprecond_setup
 !---------------------------------------------------------------------------------
-!> Setup additiv Schwarz preconditioner
+!> Setup additive Schwarz preconditioner
 !---------------------------------------------------------------------------------
 subroutine asprecond_setup(self,pc,dist)
 CLASS(oft_petsc_asprecond), INTENT(inout) :: self !< Solver object
@@ -1461,6 +1497,8 @@ DEBUG_STACK_POP
 end subroutine asprecond_setup
 !------------------------------------------------------------------------------
 !> Setup additive Schwarz preconditioner from XML definition
+!!
+!! See @ref doc_solvers_bjacobi for available options
 !------------------------------------------------------------------------------
 subroutine asprecond_setup_xml(self,solver_node,level)
 CLASS(oft_petsc_asprecond), INTENT(inout) :: self !< Solver object
@@ -1567,7 +1605,9 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_lu_pc
 !---------------------------------------------------------------------------------
-!> Setup LU preconditioner object from XML definition
+!> Setup factorization definition from XML (`type` and `package` elements)
+!!
+!! See @ref doc_solvers_lu for available options
 !---------------------------------------------------------------------------------
 subroutine lu_pc_load_xml(self,solver_node,level)
 CLASS(oft_petsc_factordef), INTENT(inout) :: self !< Solver object

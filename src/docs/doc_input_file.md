@@ -80,6 +80,8 @@ the code. Going forward these blocks may be reorganized or removed as the code m
 @note The presence or structure of these settings blocks may change in the future.
 Make sure you use the current documentation as a reference.
 
+These defaults are replaced when a multigrid preconditioner is defined in the XML input file, see \ref doc_solvers_mg.
+
 ## Lagrange
 
 This group is used to specify the common smoother settings for common Lagrange scalar

@@ -5,12 +5,13 @@
 !---------------------------------------------------------------------------------
 !> @file oft_lu.F90
 !
-!> Native module for direct solves.
-!! Available interfaces:
-!! - LAPACK (dgetrf, dgetrs)
-!! - SuperLU
-!! - MUMPS
-!! - PARDISO (MKL interface)
+!> Native direct (LU) and incomplete (ILU) factorization solvers
+!!
+!! - LU factorization (@ref oft_lusolver): LAPACK, SuperLU, SuperLU-DIST, UMFPACK, MUMPS, MKL PARDISO
+!! - ILU(0) factorization (@ref oft_ilusolver): native, MKL
+!! - Dense matrix inversion and Cholesky factorization helpers using LAPACK
+!!
+!! See @ref doc_solvers_lu and @ref doc_solvers_ilu for usage and XML options.
 !!
 !! @note Currently supports local solves only.
 !!
@@ -93,7 +94,9 @@ TYPE :: pardiso_struc
   TYPE(C_PTR) :: f_factors = C_NULL_PTR !< ILU0 factors pointer
 END TYPE pardiso_struc
 !------------------------------------------------------------------------------
-!> LU solver class
+!> Native LU factorization solver for process-local matrices
+!!
+!! See @ref doc_solvers_lu for options (XML: `<solver type="lu">` or `<pre type="lu">`).
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
@@ -103,7 +106,7 @@ TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_lusolver
   INTEGER(i4), POINTER, DIMENSION(:) :: ipiv => NULL() !< Row pivot array ("lapack" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: atmp => NULL() !< Local dense matrix ("lapack" only)
   REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL() !< Storage for additional RHS data
-  CHARACTER(LEN=7) :: package = DEF_LU_PACK !< Factorization package
+  CHARACTER(LEN=7) :: package = DEF_LU_PACK !< Factorization package (see @ref doc_solvers_lu)
 #if defined( HAVE_SUPERLU ) || defined( HAVE_SUPERLU_DIST ) || defined( HAVE_UMFPACK )
   TYPE(superlu_struc) :: superlu_struct !< SuperLU solver information
 #endif
@@ -126,14 +129,16 @@ CONTAINS
   PROCEDURE :: delete => lusolver_delete
 END TYPE oft_lusolver
 !------------------------------------------------------------------------------
-!> ILU solver class
+!> Native ILU(0) factorization solver for process-local matrices
+!!
+!! See @ref doc_solvers_ilu for options (XML: `<solver type="ilu">` or `<pre type="ilu">`).
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_ilusolver
   LOGICAL :: refactor = .TRUE. !< Refactor solution on next application
   LOGICAL :: update_graph = .TRUE. !< Perform full factorization including symbolic steps
   INTEGER(i4) :: nrhs = 1 !< Number of right hand sides
   REAL(r8), POINTER, DIMENSION(:,:) :: sec_rhs => NULL() !< Storage for additional RHS data
-  CHARACTER(LEN=7) :: package = DEF_ILU_PACK !< Factorization package
+  CHARACTER(LEN=7) :: package = DEF_ILU_PACK !< Factorization package (see @ref doc_solvers_ilu)
   TYPE(native_ilu_struc) :: native_struct !< Data for native iLU solver
 #if defined( HAVE_SUPERLU )
   TYPE(superlu_struc) :: superlu_struct !< SuperLU solver information
@@ -353,11 +358,13 @@ DEBUG_STACK_POP
 END SUBROUTINE convert_csr_to_csc
 !------------------------------------------------------------------------------
 !> Solve a linear system using a direct solve
+!!
+!! The matrix is factored on the first call and after @ref oft_lusolver::update "update"
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE lusolver_apply(self,u,g)
-CLASS(oft_lusolver), INTENT(inout) :: self
-CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
-CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
+CLASS(oft_lusolver), INTENT(inout) :: self !< Solver object
+CLASS(oft_vector), INTENT(inout) :: u !< Solution (output)
+CLASS(oft_vector), INTENT(inout) :: g !< RHS (input, unchanged)
 !---
 INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info
 INTEGER(i4), POINTER :: csr_map(:),kr_tmp(:)
@@ -655,19 +662,21 @@ DEALLOCATE(vals)
 DEBUG_STACK_POP
 END SUBROUTINE lusolver_apply
 !------------------------------------------------------------------------------
-!> Update solver after changing settings/operators
+!> Update solver after changing settings/operators, forces refactorization on next application
 !------------------------------------------------------------------------------
 recursive subroutine lusolver_update(self,new_pattern)
-class(oft_lusolver), intent(inout) :: self
+class(oft_lusolver), intent(inout) :: self !< Solver object
 LOGICAL, optional, intent(in) :: new_pattern !< Update matrix pattern (optional)
 self%refactor=.TRUE.
 IF(PRESENT(new_pattern))self%update_graph=new_pattern
 end subroutine lusolver_update
 !------------------------------------------------------------------------------
-!> Setup solver from XML definition
+!> Setup LU solver from XML definition
+!!
+!! See @ref doc_solvers_lu for available options
 !------------------------------------------------------------------------------
 subroutine lusolver_setup_xml(self,solver_node,level)
-CLASS(oft_lusolver), INTENT(inout) :: self
+CLASS(oft_lusolver), INTENT(inout) :: self !< Solver object
 TYPE(xml_node), INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
@@ -695,11 +704,11 @@ END IF
 DEBUG_STACK_POP
 end subroutine lusolver_setup_xml
 !------------------------------------------------------------------------------
-!> Check for thread safety
+!> Check for thread safety (`mumps` and `superd` packages are not thread safe)
 !------------------------------------------------------------------------------
 recursive function lusolver_check_thread(self) result(thread_safe)
-class(oft_lusolver), intent(inout) :: self
-logical :: thread_safe
+class(oft_lusolver), intent(inout) :: self !< Solver object
+logical :: thread_safe !< Solver is thread safe?
 thread_safe=.TRUE.
 IF(self%package(1:5)=='mumps')thread_safe=.FALSE.
 IF(self%package(1:6)=='superd')thread_safe=.FALSE.
@@ -708,8 +717,8 @@ end function lusolver_check_thread
 !> Destroy direct solver and deallocate all internal storage
 !------------------------------------------------------------------------------
 subroutine lusolver_delete(self,propogate)
-class(oft_lusolver), intent(inout) :: self
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+class(oft_lusolver), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Not used (optional)
 INTEGER(i4) :: mode,nrhs,ierr,ldb,nr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ivals
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: rvals
@@ -775,12 +784,14 @@ NULLIFY(self%A)
 self%initialized=.FALSE.
 end subroutine lusolver_delete
 !------------------------------------------------------------------------------
-!> Solve a linear system using a direct solve
+!> Approximately solve a linear system using an ILU(0) factorization
+!!
+!! The matrix is factored on the first call and after @ref oft_ilusolver::update "update"
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE ilusolver_apply(self,u,g)
-CLASS(oft_ilusolver), INTENT(inout) :: self
-CLASS(oft_vector), INTENT(inout) :: u !< Guess/Solution field
-CLASS(oft_vector), INTENT(inout) :: g !< RHS/Residual field
+CLASS(oft_ilusolver), INTENT(inout) :: self !< Solver object
+CLASS(oft_vector), INTENT(inout) :: u !< Solution (output)
+CLASS(oft_vector), INTENT(inout) :: g !< RHS (input, unchanged)
 !---
 INTEGER(i4) :: mode,nrhs,ldb,ierr,i,j,k,info
 INTEGER(i4), POINTER :: csr_map(:),kr_tmp(:)
@@ -923,19 +934,21 @@ DEALLOCATE(vals)
 DEBUG_STACK_POP
 END SUBROUTINE ilusolver_apply
 !------------------------------------------------------------------------------
-!> Update solver after changing settings/operators
+!> Update solver after changing settings/operators, forces refactorization on next application
 !------------------------------------------------------------------------------
 recursive subroutine ilusolver_update(self,new_pattern)
-class(oft_ilusolver), intent(inout) :: self
+class(oft_ilusolver), intent(inout) :: self !< Solver object
 LOGICAL, optional, intent(in) :: new_pattern !< Update matrix pattern (optional)
 self%refactor=.TRUE.
 IF(PRESENT(new_pattern))self%update_graph=new_pattern
 end subroutine ilusolver_update
 !------------------------------------------------------------------------------
-!> Setup solver from XML definition
+!> Setup ILU solver from XML definition
+!!
+!! See @ref doc_solvers_ilu for available options
 !------------------------------------------------------------------------------
 subroutine ilusolver_setup_xml(self,solver_node,level)
-CLASS(oft_ilusolver), INTENT(inout) :: self
+CLASS(oft_ilusolver), INTENT(inout) :: self !< Solver object
 TYPE(xml_node), INTENT(in) :: solver_node !< XML node containing solver definition
 INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy (optional)
 !---
@@ -966,18 +979,18 @@ end subroutine ilusolver_setup_xml
 !> Check for thread safety
 !------------------------------------------------------------------------------
 recursive function ilusolver_check_thread(self) result(thread_safe)
-class(oft_ilusolver), intent(inout) :: self
-logical :: thread_safe
+class(oft_ilusolver), intent(inout) :: self !< Solver object
+logical :: thread_safe !< Solver is thread safe?
 thread_safe=.TRUE.
 ! IF(self%package(1:5)=='mumps')thread_safe=.FALSE.
 ! IF(self%package(1:6)=='superd')thread_safe=.FALSE.
 end function ilusolver_check_thread
 !------------------------------------------------------------------------------
-!> Destroy direct solver and deallocate all internal storage
+!> Destroy ILU solver and deallocate all internal storage
 !------------------------------------------------------------------------------
 subroutine ilusolver_delete(self,propogate)
-class(oft_ilusolver), intent(inout) :: self
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+class(oft_ilusolver), intent(inout) :: self !< Solver object
+LOGICAL, optional, intent(in) :: propogate !< Not used (optional)
 INTEGER(i4) :: mode,nrhs,ierr,ldb,nr
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: ivals
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: rvals

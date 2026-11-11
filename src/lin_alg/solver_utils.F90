@@ -3,9 +3,13 @@
 !
 ! SPDX-License-Identifier: LGPL-3.0-only
 !---------------------------------------------------------------------------------
-!> @file oft_solver_utils.F90
+!> @file solver_utils.F90
 !
-!> Matrix and vector management routines
+!> Solver construction utilities
+!!
+!! Routines to create solvers and preconditioners for the active linear algebra
+!! backend (native or PETSc, see `use_petsc`), either directly or from an XML
+!! definition. See @ref doc_solvers for available methods and XML options.
 !!
 !! @authors Chris Hansen
 !! @date December 2012
@@ -37,17 +41,23 @@ CONTAINS
 !------------------------------------------------------------------------------
 !> Construct Multi-Grid preconditioner
 !!
-!! This subroutine is a wrapper around specific subroutines for construction
-!! from an XML specification or standard native/PETSc preconditioners
+!! If `xml_root` is present and associated the smoothers are defined from XML
+!! (see @ref doc_solvers_mg), otherwise default smoothers are created using
+!! `stype`, `df` and `nu`:
+!! - `stype=1`: Symmetric Jacobi (@ref doc_solvers_sjacobi), requires `df` and `nu`
+!! - `stype=2`: GMRES with Jacobi preconditioning, requires `nu`
+!! - `stype=3`: CG (with Jacobi preconditioning for PETSc), requires `nu`
+!!
+!! With PETSc a negative `stype` uses an LU solve on the coarsest level.
 !------------------------------------------------------------------------------
 subroutine create_mlpre(pre,Mats,levels,nlevels,ml_vecspace,bc,stype,df,nu,xml_root)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
-integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices, negative to skip smoothing on a level [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
 class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< Multi-level vectorspace
-class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition subroutine (optional)
-integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition (optional)
+integer(i4), optional, intent(in) :: stype !< Smoother type (optional, default: 1)
 real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
 integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
 TYPE(xml_node), optional, intent(in) :: xml_root !< Preconditioner definition node (optional)
@@ -71,15 +81,17 @@ IF(.NOT.ASSOCIATED(pre))THEN
 END IF
 end subroutine create_mlpre
 !------------------------------------------------------------------------------
-!> Construct native Multi-Grid preconditioner
+!> Construct native Multi-Grid preconditioner with default smoothers
+!!
+!! @sa create_mlpre
 !------------------------------------------------------------------------------
 subroutine create_native_mlpre(pre,Mats,levels,nlevels,ml_vecspace,bc,stype,df,nu)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
-integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices, negative to skip smoothing on a level [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
 class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< Multi-level vectorspace
-class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition (optional)
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition (optional)
 integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
 real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
 integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
@@ -217,15 +229,17 @@ END DO
 DEBUG_STACK_POP
 end subroutine create_native_mlpre
 !------------------------------------------------------------------------------
-!> Construct PETSc Multi-Grid preconditioner using native mechanics
+!> Construct Multi-Grid preconditioner with default PETSc smoothers
+!!
+!! @sa create_mlpre
 !------------------------------------------------------------------------------
 subroutine create_petsc_mlpre(pre,Mats,levels,nlevels,ml_vecspace,bc,stype,df,nu)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
-integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices, negative to skip smoothing on a level [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
 class(oft_ml_vecspace), target, optional, intent(in) :: ml_vecspace !< Multi-level vectorspace
-class(oft_solver_bc), target, optional, intent(in) :: bc !< Bondary condition (optional)
+class(oft_solver_bc), target, optional, intent(in) :: bc !< Boundary condition (optional)
 integer(i4), optional, intent(in) :: stype !< Smoother type (optional)
 real(r8), optional, intent(in) :: df(:) !< Smoother damping factors [nlevels] (optional)
 integer(i4), optional, intent(in) :: nu(:) !< Number of smoother iterations [nlevels] (optional)
@@ -379,11 +393,13 @@ CALL oft_abort("Not compiled with PETSc", "create_petsc_mlpre", __FILE__)
 #endif
 end subroutine create_petsc_mlpre
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Create native solver by type name
+!!
+!! @sa @ref doc_solvers_xml_types for available types
 !------------------------------------------------------------------------------
 SUBROUTINE create_native_solver(solver,solver_type)
-CLASS(oft_solver), POINTER, INTENT(out) :: solver
-CHARACTER(LEN=*), INTENT(in) :: solver_type
+CLASS(oft_solver), POINTER, INTENT(out) :: solver !< Solver object
+CHARACTER(LEN=*), INTENT(in) :: solver_type !< Solver type (`cg`, `gmres`, `sjacobi`, `lu`, `ilu`)
 DEBUG_STACK_PUSH
 SELECT CASE(TRIM(solver_type))
   CASE("cg")
@@ -402,11 +418,13 @@ END SELECT
 DEBUG_STACK_POP
 end subroutine create_native_solver
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Create PETSc solver by type name
+!!
+!! @sa @ref doc_solvers_xml_types for available types
 !------------------------------------------------------------------------------
 SUBROUTINE create_petsc_solver(solver,solver_type)
-CLASS(oft_solver), POINTER, INTENT(out) :: solver
-CHARACTER(LEN=*), INTENT(in) :: solver_type
+CLASS(oft_solver), POINTER, INTENT(out) :: solver !< Solver object
+CHARACTER(LEN=*), INTENT(in) :: solver_type !< Solver type (`cg`, `gmres`, `sjacobi`, `lu`)
 #ifdef HAVE_PETSC
 DEBUG_STACK_PUSH
 SELECT CASE(TRIM(solver_type))
@@ -429,11 +447,11 @@ DEBUG_STACK_POP
 #endif
 end subroutine create_petsc_solver
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Create Conjugate Gradient solver (@ref doc_solvers_cg) for the active backend
 !------------------------------------------------------------------------------
 SUBROUTINE create_cg_solver(solver,force_native)
-CLASS(oft_solver), POINTER, INTENT(out) :: solver
-LOGICAL, OPTIONAL, INTENT(in) :: force_native
+CLASS(oft_solver), POINTER, INTENT(out) :: solver !< Solver object
+LOGICAL, OPTIONAL, INTENT(in) :: force_native !< Use native solver even if PETSc is active? (optional)
 LOGICAL :: native_solver
 DEBUG_STACK_PUSH
 native_solver=.FALSE.
@@ -446,12 +464,12 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_cg_solver
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Create GMRES solver (@ref doc_solvers_gmres) for the active backend
 !------------------------------------------------------------------------------
 SUBROUTINE create_gmres_solver(solver,nrits,force_native)
-CLASS(oft_solver), POINTER, INTENT(out) :: solver
-INTEGER(i4), OPTIONAL, INTENT(in) :: nrits
-LOGICAL, OPTIONAL, INTENT(in) :: force_native
+CLASS(oft_solver), POINTER, INTENT(out) :: solver !< Solver object
+INTEGER(i4), OPTIONAL, INTENT(in) :: nrits !< Restart length (optional)
+LOGICAL, OPTIONAL, INTENT(in) :: force_native !< Use native solver even if PETSc is active? (optional)
 LOGICAL :: native_solver
 DEBUG_STACK_PUSH
 native_solver=.FALSE.
@@ -478,12 +496,15 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_gmres_solver
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Create solver, and any nested preconditioners, from an XML definition
+!!
+!! The solver type is set by the `type` attribute of `solver_node`, see
+!! @ref doc_solvers_xml for the specification and available options.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_solver_xml(solver,solver_node,level)
-CLASS(oft_solver), POINTER, INTENT(out) :: solver
-TYPE(xml_node), INTENT(in) :: solver_node
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
+CLASS(oft_solver), POINTER, INTENT(out) :: solver !< Solver object
+TYPE(xml_node), INTENT(in) :: solver_node !< XML element containing solver definition
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy, used to index list-valued options (optional, default: 1)
 !---
 INTEGER(i4) :: nread,nnodes,ierr
 TYPE(xml_node) :: pre_node
@@ -557,11 +578,13 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_solver_xml
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Create native preconditioner by type name
+!!
+!! @sa @ref doc_solvers_xml_types for available types
 !------------------------------------------------------------------------------
 SUBROUTINE create_native_pre(pre,pre_type)
-CLASS(oft_solver), POINTER, INTENT(out) :: pre
-CHARACTER(LEN=*), INTENT(in) :: pre_type
+CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Preconditioner object
+CHARACTER(LEN=*), INTENT(in) :: pre_type !< Preconditioner type (`jacobi`, `block_jacobi`, `lu`, `ilu`)
 DEBUG_STACK_PUSH
 SELECT CASE(TRIM(pre_type))
   CASE("jacobi")
@@ -578,11 +601,13 @@ END SELECT
 DEBUG_STACK_POP
 end subroutine create_native_pre
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Create PETSc preconditioner by type name
+!!
+!! @sa @ref doc_solvers_xml_types for available types
 !------------------------------------------------------------------------------
 SUBROUTINE create_petsc_pre(pre,pre_type)
-CLASS(oft_solver), POINTER, INTENT(out) :: pre
-CHARACTER(LEN=*), INTENT(in) :: pre_type
+CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Preconditioner object
+CHARACTER(LEN=*), INTENT(in) :: pre_type !< Preconditioner type (`jacobi`, `block_jacobi`, `add_schwarz`, `lu`)
 #ifdef HAVE_PETSC
 DEBUG_STACK_PUSH
 SELECT CASE(TRIM(pre_type))
@@ -610,10 +635,10 @@ DEBUG_STACK_POP
 #endif
 end subroutine create_petsc_pre
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Create Jacobi (diagonal scaling) preconditioner (@ref doc_solvers_jacobi) for the active backend
 !------------------------------------------------------------------------------
 SUBROUTINE create_diag_pre(pre)
-CLASS(oft_solver), POINTER, INTENT(out) :: pre
+CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Preconditioner object
 LOGICAL :: native_solver
 DEBUG_STACK_PUSH
 IF(use_petsc)THEN
@@ -624,10 +649,10 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_diag_pre
 !------------------------------------------------------------------------------
-!> Create ILU(0) preconditioner (native or MKL)
+!> Create ILU(0) preconditioner (@ref doc_solvers_ilu, native backend only)
 !------------------------------------------------------------------------------
 SUBROUTINE create_ilu_pre(pre)
-CLASS(oft_solver), POINTER, INTENT(out) :: pre
+CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Preconditioner object
 LOGICAL :: native_solver
 DEBUG_STACK_PUSH
 IF(use_petsc)THEN
@@ -638,11 +663,11 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_ilu_pre
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Create Block Jacobi preconditioner (@ref doc_solvers_bjacobi) with LU sub-solves for the active backend
 !------------------------------------------------------------------------------
 SUBROUTINE create_bjacobi_pre(pre,nlocal)
-CLASS(oft_solver), POINTER, INTENT(out) :: pre
-INTEGER(i4), INTENT(in) :: nlocal
+CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Preconditioner object
+INTEGER(i4), INTENT(in) :: nlocal !< Number of blocks per process (see `nlocal` in @ref doc_solvers_bjacobi)
 DEBUG_STACK_PUSH
 IF(use_petsc)THEN
 #ifdef HAVE_PETSC
@@ -664,13 +689,16 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_bjacobi_pre
 !------------------------------------------------------------------------------
-!> Needs docs
+!> Create preconditioner, and any nested sub-solver, from an XML definition
+!!
+!! The preconditioner type is set by the `type` attribute of `pre_node`, see
+!! @ref doc_solvers_xml for the specification and available options.
 !------------------------------------------------------------------------------
 RECURSIVE SUBROUTINE create_pre_xml(pre,pre_node,native_solver,level)
-CLASS(oft_solver), POINTER, INTENT(out) :: pre
-TYPE(xml_node), INTENT(in) :: pre_node
-LOGICAL, INTENT(in) :: native_solver
-INTEGER(i4), OPTIONAL, INTENT(in) :: level
+CLASS(oft_solver), POINTER, INTENT(out) :: pre !< Preconditioner object
+TYPE(xml_node), INTENT(in) :: pre_node !< XML element containing preconditioner definition
+LOGICAL, INTENT(in) :: native_solver !< Parent solver is native (restricts PETSc preconditioner types)
+INTEGER(i4), OPTIONAL, INTENT(in) :: level !< Level in MG hierarchy, used to index list-valued options (optional, default: 1)
 !---
 INTEGER(i4) :: nread,nnodes,ierr
 TYPE(xml_node) :: solver_node
@@ -737,12 +765,14 @@ END IF
 DEBUG_STACK_POP
 end subroutine create_pre_xml
 !------------------------------------------------------------------------------
-!> Construct PETSc Multi-Grid preconditioner using native mechanics
+!> Construct Multi-Grid preconditioner with smoothers defined from XML
+!!
+!! See @ref doc_solvers_mg for the XML specification.
 !------------------------------------------------------------------------------
 subroutine create_ml_xml(pre,Mats,levels,nlevels,ml_vecspace,pre_node,bc)
 class(oft_solver), pointer, intent(out) :: pre !< Preconditioner object
 TYPE(oft_matrix_ptr), INTENT(in) :: Mats(:) !< Operator matrices [nlevels]
-integer(i4), intent(in) :: levels(:) !< List of level indices [nlevels]
+integer(i4), intent(in) :: levels(:) !< List of level indices, negative to skip smoothing on a level [nlevels]
 integer(i4), intent(in) :: nlevels !< Number of levels
 class(oft_ml_vecspace), target, intent(in) :: ml_vecspace !< Multi-level vectorspace
 TYPE(xml_node), INTENT(in) :: pre_node !< Preconditioner XML element

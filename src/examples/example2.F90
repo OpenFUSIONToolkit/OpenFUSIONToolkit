@@ -24,7 +24,7 @@
 !!
 !!\subsection doc_ex2_code_inc Module Includes
 !!
-!!In order to construct MG preconditioners we must include the MG constructor \ref oft_la_utils::create_mlpre
+!!In order to construct MG preconditioners we must include the MG constructor \ref oft_solver_utils::create_mlpre
 !!"create_mlpre".
 ! START SOURCE
 PROGRAM example2

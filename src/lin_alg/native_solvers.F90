@@ -3,27 +3,25 @@
 !
 ! SPDX-License-Identifier: LGPL-3.0-only
 !---------------------------------------------------------------------------------
-!> @file oft_native_solvers.F90
+!> @file native_solvers.F90
 !
-!> Abstract solver interfaces and select native implementations
+!> Native solver implementations
 !!
-!! Abstract interface definitions
-!! - Abstract solver class
-!! - Abstract eigensolver class
-!! - Abstract orthogonalization class
-!! - Field creation prototype
-!! - Boundary condition prototype
+!! Solvers
+!! - Conjugate Gradient (@ref oft_native_cg_solver)
+!! - GMRES (@ref oft_native_gmres_solver, @ref oft_native_gmres_csolver)
+!! - Newton iteration (@ref oft_nksolver)
+!! - CG eigensolver (@ref oft_native_cg_eigsolver)
 !!
-!! Native solver implementations
-!! - Newton iteration
+!! Preconditioners
+!! - Diagonal scaling (@ref oft_diag_scale, @ref oft_diag_cscale)
+!! - Symmetric Jacobi smoother (@ref oft_jblock_precond)
+!! - Block Jacobi (@ref oft_bjprecond, @ref oft_native_dense_cbjprecond)
+!! - Multigrid (@ref oft_ml_precond)
 !!
-!! Preconditioner implementations
-!! - Diagonal scaling
-!! - Symmetric Point-Jacobi (Richardson iteration with diagonal scaling)
-!! - Block-Jacobi
-!! - Multi-Grid
+!! See @ref doc_solvers for usage and XML options.
 !!
-!! @sa oft_cg, oft_gmres, oft_petsc_solvers
+!! @sa oft_solver_base, oft_lu, oft_petsc_solvers
 !!
 !! @authors Chris Hansen
 !! @date August 2011
@@ -55,12 +53,14 @@ INTERFACE gmres_backsolve
 END INTERFACE gmres_backsolve
 PUBLIC gmres_backsolve
 !------------------------------------------------------------------------------
-!> CG solver class
+!> Native Conjugate Gradient solver
+!!
+!! See @ref doc_solvers_cg for options (XML: `<solver type="cg">`).
 !!
 !! @note Matrix must be SPD, otherwise solver will fail.
 !------------------------------------------------------------------------------
 type, public, extends(oft_solver) :: oft_native_cg_solver
-  logical :: precond=.FALSE. !< Solver as preconditioner
+  logical :: precond=.FALSE. !< Restore RHS in `g` on exit (for use as a preconditioner)
   class(oft_solver_bc), pointer :: orthog => NULL() !< Orthogonalization
   class(oft_solver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
 contains
@@ -72,11 +72,13 @@ contains
   PROCEDURE :: delete => cg_delete
 end type oft_native_cg_solver
 !------------------------------------------------------------------------------
-!> GMRES solver class
+!> Native flexible GMRES solver
+!!
+!! See @ref doc_solvers_gmres for options (XML: `<solver type="gmres">`).
 !------------------------------------------------------------------------------
 type, public, extends(oft_solver) :: oft_native_gmres_solver
   logical :: precond = .FALSE. !< Flag to indicate use as a preconditioner (not used)
-  integer(i4) :: nrits=10 !< Convergence specification
+  integer(i4) :: nrits=10 !< Restart length
   integer(i4) :: min_nits=0 !< Minimum inner iterations per cycle before the \f$ |r|/|u| \f$ check (`its=-1,-2` only)
   class(oft_solver_bc), pointer :: orthog => NULL() !< Orthogonalization
   class(oft_solver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
@@ -93,11 +95,13 @@ contains
   PROCEDURE :: delete => gmres_delete
 end type oft_native_gmres_solver
 !------------------------------------------------------------------------------
-!> GMRES solver class (complex)
+!> Native flexible GMRES solver (complex)
+!!
+!! @sa oft_native_gmres_solver
 !------------------------------------------------------------------------------
 type, public, extends(oft_csolver) :: oft_native_gmres_csolver
   logical :: precond = .FALSE. !< Flag to indicate use as a preconditioner (not used)
-  integer(i4) :: nrits=10 !< Convergence specification
+  integer(i4) :: nrits=10 !< Restart length
   integer(i4) :: min_nits=0 !< Minimum inner iterations per cycle before the \f$ |r|/|u| \f$ check (`its=-1,-2` only)
   class(oft_csolver_bc), pointer :: orthog => NULL() !< Orthogonalization
   class(oft_csolver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
@@ -114,13 +118,17 @@ contains
   PROCEDURE :: delete => cgmres_delete
 end type oft_native_gmres_csolver
 !------------------------------------------------------------------------------
-!> CG eigensolver class
+!> Native CG eigensolver
+!!
+!! Computes the lowest eigenvalue of \f$ A u = \lambda M u \f$ by minimizing the
+!! Rayleigh quotient with non-linear CG. `its=-1` (`-2`) stops when the eigenvalue
+!! stagnates in single (double) precision.
 !!
 !! @note Matrix system must be SPD, otherwise solver will fail.
 !------------------------------------------------------------------------------
 type, public, extends(oft_eigsolver) :: oft_native_cg_eigsolver
-  integer(i4) :: nrestarts = 2
-  integer(i4) :: ninner = -1
+  integer(i4) :: nrestarts = 2 !< Maximum number of restarts
+  integer(i4) :: ninner = -1 !< Iterations per restart (<=0 for vector size)
   class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   class(oft_solver_bc), pointer :: orthog => NULL() !< Orthogonalization
 contains
@@ -136,18 +144,21 @@ end type oft_native_cg_eigsolver
 !! \f$ M_j(x_i) = y_j \f$, where the Jacobian is defined as
 !! \f$ J_{ij} = \frac{\partial M_j}{\partial x_i} \f$. The non-linear update then
 !! takes the form \f$ x^{n+1} = x^n - J^{-1}(x^n) \cdot M(x^n) \f$.
+!!
+!! The solve stops when \f$ |res| < atol \f$ or \f$ |res|/|x| < rtol \f$. On exit
+!! `cits` is -1 if the solve failed (iteration limit, backtracking or linear solver failure).
 !------------------------------------------------------------------------------
 TYPE, PUBLIC :: oft_nksolver
   LOGICAL :: backtrack = .TRUE. !< Perform backtracking?
-  INTEGER(i4) :: its = -1 !< Maximum iteration count
-  INTEGER(i4) :: cits = 0 !< Number of iteractions to convergence
-  INTEGER(i4) :: lits = 0 !< Number of linear solver iteractions
-  INTEGER(i4) :: nlits = 0 !< Number of non-linear steps to convergence
+  INTEGER(i4) :: its = -1 !< Maximum iteration count (<=0 for 100)
+  INTEGER(i4) :: cits = 0 !< Solve status (-1 on failure)
+  INTEGER(i4) :: lits = 0 !< Total number of linear solver iterations
+  INTEGER(i4) :: nlits = 0 !< Number of non-linear steps taken
   INTEGER(i4) :: up_freq = 1 !< Frequency of jacobian updates
   REAL(r8) :: atol = 1.d-14 !< Absolute convergence tolerance \f$ |res| < atol \f$
-  REAL(r8) :: rtol = 1.d-14 !< Relative convergence tolerance \f$ |res|/|res_0| < rtol \f$
+  REAL(r8) :: rtol = 1.d-14 !< Relative convergence tolerance \f$ |res|/|x| < rtol \f$
   CLASS(oft_vector), POINTER :: du => NULL() !< Storage for non-linear corrections
-  CLASS(oft_matrix), POINTER :: A => NULL() !< Metric matrix
+  CLASS(oft_matrix), POINTER :: A => NULL() !< Non-linear operator \f$ M \f$
   CLASS(oft_solver), POINTER :: J_inv => NULL() !< Jacobian inverse solver
   class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   PROCEDURE(oft_update_jacobian), POINTER, NOPASS :: J_update => NULL() !< Jacobian update subroutine
@@ -158,7 +169,7 @@ CONTAINS
   PROCEDURE :: delete => nksolver_delete
 END TYPE oft_nksolver
 !------------------------------------------------------------------------------
-!> Identity matrix inversion
+!> Identity matrix inversion, \f$ u = g \f$
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, extends(oft_solver) :: oft_identity_inv
 CONTAINS
@@ -168,7 +179,9 @@ CONTAINS
   PROCEDURE :: delete => identity_inv_delete
 END TYPE oft_identity_inv
 !------------------------------------------------------------------------------
-!> Diagonal preconditioner
+!> Native diagonal scaling (Jacobi) preconditioner
+!!
+!! See @ref doc_solvers_jacobi (XML: `<pre type="jacobi">`).
 !------------------------------------------------------------------------------
 type, public, extends(oft_solver) :: oft_diag_scale
 contains
@@ -178,7 +191,7 @@ contains
   procedure :: delete => diag_scale_delete
 end type oft_diag_scale
 !------------------------------------------------------------------------------
-!> Diagonal preconditioner
+!> Native diagonal scaling (Jacobi) preconditioner (complex)
 !------------------------------------------------------------------------------
 type, public, extends(oft_csolver) :: oft_diag_cscale
 contains
@@ -188,7 +201,9 @@ contains
   procedure :: delete => cdiag_scale_delete
 end type oft_diag_cscale
 !------------------------------------------------------------------------------
-!> Symmetric Jacobi smoother
+!> Native symmetric Jacobi smoother
+!!
+!! See @ref doc_solvers_sjacobi for options and usage (XML: `<solver type="sjacobi">`).
 !------------------------------------------------------------------------------
 type, public, extends(oft_solver) :: oft_jblock_precond
   logical, private :: down=.TRUE. !< Internal flag for smoother step
@@ -209,11 +224,15 @@ end type oft_jblock_precond
 !------------------------------------------------------------------------------
 !> Multi-level preconditioner level
 !!
+!! Each object represents one level and holds the smoothers for that level and
+!! the preconditioner for the next coarser level (`base_solve`). Usually created
+!! with @ref oft_solver_utils::create_mlpre, see @ref doc_solvers_mg.
+!!
 !! @note This class acts as a driver/container for separate solver objects
 !! as a result any linear algebra backend may be used with this type.
 !------------------------------------------------------------------------------
 type, public, extends(oft_solver) :: oft_ml_precond
-  logical :: symmetric = .FALSE. !< Symmetric flag
+  logical :: symmetric = .FALSE. !< Up and down smoothers are the same object
   integer(i4) :: level !< Current level in ML context
   integer(i4) :: minlevel !< Lowest level
   real(r8) :: timings(4) = 0.d0 !< Timing for each stage
@@ -246,15 +265,20 @@ contains
   procedure :: delete => ml_trans_delete
 end type oft_ml_trans
 !------------------------------------------------------------------------------
-!> Block-Jacobi preconditioner
+!> Native Block Jacobi preconditioner
+!!
+!! The sub-solver for each block is a copy of the solver in `pre`. See
+!! @ref doc_solvers_bjacobi for options (XML: `<pre type="block_jacobi">`).
+!!
+!! @note Requires native matrices.
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_solver) :: oft_bjprecond
   LOGICAL :: update_slice = .FALSE. !< Update local matrices on next application
-  LOGICAL :: boundary_overlap = .FALSE. !< Use Additive-Schwarz with boundary elements
-  LOGICAL :: loverlap = .FALSE. !< Use Additive-Schwarz with interior boundaries
-  INTEGER(i4) :: nlocal = 1 !< Number of subdomains on each processor
-  INTEGER(i4) :: slice_group(10) = -1 !< Slice groupings
-  INTEGER(i4), POINTER, DIMENSION(:) :: part => NULL()
+  LOGICAL :: boundary_overlap = .FALSE. !< Include rows shared with other processes in local blocks (XML: `boverlap`)
+  LOGICAL :: loverlap = .FALSE. !< Extend blocks by one layer of neighboring rows
+  INTEGER(i4) :: nlocal = 1 !< Number of blocks on each process (see @ref doc_solvers_bjacobi)
+  INTEGER(i4) :: slice_group(10) = -1 !< Block index for each field when `nlocal < -1` (XML: `groups`)
+  INTEGER(i4), POINTER, DIMENSION(:) :: part => NULL() !< Not used
   TYPE(oft_native_submatrix), pointer, dimension(:) :: alocals => NULL() !< Local matrix block
   TYPE(oft_seam), pointer, dimension(:) :: local_stitch => NULL() !< Local vectors
   TYPE(oft_solver_ptr), pointer, dimension(:) :: solvers => NULL() !< Local block solvers
@@ -305,11 +329,11 @@ END TYPE oft_native_dense_cbjprecond
 !---Interfaces
 ABSTRACT INTERFACE
   !------------------------------------------------------------------------------
-  !> Needs docs
+  !> Update Jacobian matrix (used by @ref oft_nksolver)
   !------------------------------------------------------------------------------
   SUBROUTINE oft_update_jacobian(a)
     IMPORT oft_vector
-    CLASS(oft_vector), TARGET, INTENT(inout) :: a !< Needs docs
+    CLASS(oft_vector), TARGET, INTENT(inout) :: a !< Current solution
   END SUBROUTINE oft_update_jacobian
 END INTERFACE
 !---Make classes and prototypes public
@@ -474,6 +498,8 @@ DEBUG_STACK_POP
 end subroutine cg_solver_apply
 !------------------------------------------------------------------------------
 !> Setup CG solver from XML definition
+!!
+!! See @ref doc_solvers_cg for available options
 !------------------------------------------------------------------------------
 subroutine cg_setup_xml(self,solver_node,level)
 CLASS(oft_native_cg_solver), INTENT(inout) :: self !< Solver object
@@ -541,11 +567,11 @@ END IF
 DEBUG_STACK_POP
 end subroutine cg_setup_xml
 !------------------------------------------------------------------------------
-!> Destroy diagonal preconditioner and deallocate all internal storage
+!> Destroy CG solver and deallocate all internal storage
 !------------------------------------------------------------------------------
 subroutine cg_delete(self,propogate)
 class(oft_native_cg_solver), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 NULLIFY(self%A)
 self%initialized=.FALSE.
 CALL solver_delete(self,propogate)
@@ -757,6 +783,8 @@ DEBUG_STACK_POP
 end subroutine gmres_solver_apply
 !------------------------------------------------------------------------------
 !> Setup GMRES solver from XML definition
+!!
+!! See @ref doc_solvers_gmres for available options
 !------------------------------------------------------------------------------
 subroutine gmres_setup_xml(self,solver_node,level)
 CLASS(oft_native_gmres_solver), INTENT(inout) :: self !< Solver object
@@ -843,11 +871,11 @@ END IF
 DEBUG_STACK_POP
 end subroutine gmres_setup_xml
 !------------------------------------------------------------------------------
-!> Destroy diagonal preconditioner and deallocate all internal storage
+!> Destroy GMRES solver and deallocate all internal storage
 !------------------------------------------------------------------------------
 subroutine gmres_delete(self,propogate)
 class(oft_native_gmres_solver), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 integer(i4) :: i
 NULLIFY(self%A)
 IF(self%initialized)THEN
@@ -1051,7 +1079,9 @@ IF(nits==its)self%cits=-1
 DEBUG_STACK_POP
 end subroutine cgmres_solver_apply
 !------------------------------------------------------------------------------
-!> Setup GMRES solver from XML definition
+!> Setup GMRES solver from XML definition (complex)
+!!
+!! See @ref doc_solvers_gmres for available options
 !------------------------------------------------------------------------------
 subroutine cgmres_setup_xml(self,solver_node,level)
 CLASS(oft_native_gmres_csolver), INTENT(inout) :: self !< Solver object
@@ -1138,11 +1168,11 @@ END IF
 DEBUG_STACK_POP
 end subroutine cgmres_setup_xml
 !------------------------------------------------------------------------------
-!> Destroy diagonal preconditioner and deallocate all internal storage
+!> Destroy GMRES solver and deallocate all internal storage (complex)
 !------------------------------------------------------------------------------
 subroutine cgmres_delete(self,propogate)
 class(oft_native_gmres_csolver), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 integer(i4) :: i
 NULLIFY(self%A)
 IF(self%initialized)THEN
@@ -1365,7 +1395,7 @@ self%cits=n
 DEBUG_STACK_POP
 end subroutine cg_eigsolver_apply
 !------------------------------------------------------------------------------
-!> Destroy diagonal preconditioner and deallocate all internal storage
+!> Destroy CG eigensolver and deallocate all internal storage
 !------------------------------------------------------------------------------
 subroutine cg_eig_delete(self)
 class(oft_native_cg_eigsolver), intent(inout) :: self !< Solver object
@@ -1497,11 +1527,11 @@ call u%add(0.d0,1.d0,g)
 DEBUG_STACK_POP
 end subroutine identity_inv_apply
 !------------------------------------------------------------------------------
-!> Destroy diagonal preconditioner and deallocate all internal storage
+!> Destroy identity solver and deallocate all internal storage
 !------------------------------------------------------------------------------
 subroutine identity_inv_delete(self,propogate)
 class(oft_identity_inv), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 CALL solver_delete(self,propogate)
 end subroutine identity_inv_delete
 !------------------------------------------------------------------------------
@@ -1545,7 +1575,7 @@ end subroutine diag_scale_apply
 !------------------------------------------------------------------------------
 subroutine diag_scale_delete(self,propogate)
 class(oft_diag_scale), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 NULLIFY(self%A)
 CALL solver_delete(self,propogate)
 end subroutine diag_scale_delete
@@ -1570,14 +1600,14 @@ end subroutine cdiag_scale_apply
 !------------------------------------------------------------------------------
 subroutine cdiag_scale_delete(self,propogate)
 class(oft_diag_cscale), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 NULLIFY(self%A)
 CALL csolver_delete(self,propogate)
 end subroutine cdiag_scale_delete
 !------------------------------------------------------------------------------
-!> Cast a solver object to a jblock_precond_cast
+!> Cast a solver object to a oft_jblock_precond
 !!
-!! The source matrix must be @ref jblock_precond_cast or a child class, otherwise
+!! The source matrix must be @ref oft_jblock_precond, otherwise
 !! pointer will be returned as `null` and `success == .FALSE.`
 !------------------------------------------------------------------------------
 FUNCTION jblock_precond_cast(self,source) result(success)
@@ -1677,6 +1707,8 @@ DEBUG_STACK_POP
 end subroutine jblock_precond_apply
 !------------------------------------------------------------------------------
 !> Setup symmetric Jacobi smoother from XML definition
+!!
+!! See @ref doc_solvers_sjacobi for available options
 !------------------------------------------------------------------------------
 subroutine jblock_setup_xml(self,solver_node,level)
 CLASS(oft_jblock_precond), INTENT(inout) :: self !< Solver object
@@ -1733,7 +1765,7 @@ end subroutine jblock_setup_xml
 !------------------------------------------------------------------------------
 subroutine jblock_precond_delete(self,propogate)
 class(oft_jblock_precond), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 DEBUG_STACK_PUSH
 IF(self%initialized)THEN
   DEALLOCATE(self%u_save,self%g_save)
@@ -1853,7 +1885,7 @@ end subroutine ml_precond_apply
 !------------------------------------------------------------------------------
 recursive subroutine ml_precond_update(self,new_pattern)
 class(oft_ml_precond), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: new_pattern
+LOGICAL, optional, intent(in) :: new_pattern !< Update matrix non-zero pattern? (optional)
 !---
 IF(ASSOCIATED(self%smooth_up))CALL self%smooth_up%update(new_pattern)
 IF(ASSOCIATED(self%smooth_down))CALL self%smooth_down%update(new_pattern)
@@ -1864,7 +1896,7 @@ end subroutine ml_precond_update
 !------------------------------------------------------------------------------
 recursive subroutine ml_precond_delete(self,propogate)
 class(oft_ml_precond), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 DEBUG_STACK_PUSH
 if(ASSOCIATED(self%smooth_up))then
   call self%smooth_up%delete(propogate)
@@ -1950,7 +1982,7 @@ end subroutine ml_trans_apply
 !------------------------------------------------------------------------------
 subroutine ml_trans_delete(self,propogate)
 class(oft_ml_trans), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 DEBUG_STACK_PUSH
 if(associated(self%smooth_up))then
   call self%smooth_up%delete(propogate)
@@ -2319,7 +2351,9 @@ END IF
 DEBUG_STACK_POP
 end subroutine bjprecond_update
 !------------------------------------------------------------------------------
-!> Setup block-Jacobi smoother from XML definition
+!> Setup block-Jacobi preconditioner from XML definition
+!!
+!! See @ref doc_solvers_bjacobi for available options
 !------------------------------------------------------------------------------
 subroutine bjprecond_setup_xml(self,solver_node,level)
 CLASS(oft_bjprecond), INTENT(inout) :: self !< Solver object
@@ -2390,7 +2424,7 @@ end subroutine bjprecond_setup_xml
 !------------------------------------------------------------------------------
 subroutine bjprecond_delete(self,propogate)
 class(oft_bjprecond), intent(inout) :: self !< Solver object
-LOGICAL, optional, intent(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, optional, intent(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 !---Destroy local solvers
@@ -2437,7 +2471,7 @@ end subroutine bjprecond_delete
 !------------------------------------------------------------------------------
 SUBROUTINE dense_cbjprecond_setup(self,A,graph)
 CLASS(oft_native_dense_cbjprecond), INTENT(inout) :: self !< Solver object
-CLASS(oft_cmatrix), TARGET, INTENT(inout) :: A !< Matrix to precondition (must be @ref oft_native_dense_cmatrix)
+CLASS(oft_cmatrix), TARGET, INTENT(inout) :: A !< Matrix to precondition (must be @ref oft_native_la::oft_native_dense_cmatrix)
 TYPE(oft_graph), INTENT(inout) :: graph !< Graph used to partition the matrix into blocks [A%nr]
 !---
 INTEGER(i4) :: i,j,k,jr,n,info,nfail,max_size
@@ -2585,7 +2619,7 @@ END SUBROUTINE dense_cbjprecond_apply
 !------------------------------------------------------------------------------
 SUBROUTINE dense_cbjprecond_delete(self,propogate)
 CLASS(oft_native_dense_cbjprecond), INTENT(inout) :: self !< Solver object
-LOGICAL, OPTIONAL, INTENT(in) :: propogate !< Update matrix non-zero pattern? (optional)
+LOGICAL, OPTIONAL, INTENT(in) :: propogate !< Also delete preconditioner and sub-solvers? (optional)
 INTEGER(i4) :: i
 DEBUG_STACK_PUSH
 IF(ASSOCIATED(self%blocks))THEN

@@ -114,8 +114,8 @@ CALL oft_lag_getmop(ML_oft_lagrange%current_level,mop,'zerob')
 !!This section assembles the solver object by fill the required references. The solver object used here
 !!is the native non-linear Conjugate-Gradient iterative method. It requires the right and left hand side
 !!matrices for the generalized EV problem, `A` and `M`. The convergence tolerance is also specified
-!!to be double precision convergence of the eigenvalue, see \ref oft_cg::oft_cg_eigsolver
-!!"oft_cg_eigsolver". Preconditioning is supplied by diagonal scaling, which requires identifying the
+!!to be double precision convergence of the eigenvalue, see \ref oft_native_solvers::oft_native_cg_eigsolver
+!!"oft_native_cg_eigsolver". Preconditioning is supplied by diagonal scaling, which requires identifying the
 !!preconditioner matrix, in this case `A`.
 !!
 !!The vector is then initialized with a guess solution and the boundary condition is applied to make sure

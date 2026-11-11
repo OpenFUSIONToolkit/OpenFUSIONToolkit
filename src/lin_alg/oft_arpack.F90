@@ -6,8 +6,10 @@
 !> @file oft_arpack.F90
 !
 !> Interface to parallel ARPACK for eigenvalue problems
-!! - IR-Arnoldi (General)
-!! - IR-Lanczos (Symmetric)
+!! - IR-Arnoldi (General, @ref oft_iram_eigsolver)
+!! - IR-Lanczos (Symmetric, @ref oft_irlm_eigsolver)
+!!
+!! @sa @ref doc_solvers_eig
 !!
 !! @authors Chris Hansen
 !! @date June 2012
@@ -25,15 +27,15 @@ PRIVATE
 !> Implicity Restarted Arnoldi Method
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_eigsolver) :: oft_iram_eigsolver
-  INTEGER(i4) :: mode = 1 !< Operational mode
+  INTEGER(i4) :: mode = 1 !< Problem type (1: \f$ A x = \lambda x \f$, 2: \f$ A x = \lambda M x \f$ using `Minv` to apply \f$ M^{-1} \f$)
   INTEGER(i4) :: nev = 1 !< Number of eigenvalues to compute
   INTEGER(i4) :: ncv = 0 !< Size of Ritz space (determined in call to `apply`)
   INTEGER(i4) :: info = 0 !< Solver status/return code
   REAL(r8) :: tol = 1.E-10_r8 !< Solver tolerance
   REAL(r8), POINTER, DIMENSION(:,:) :: eig_val => NULL() !< Eigenvalues
   REAL(r8), POINTER, DIMENSION(:,:) :: eig_vec => NULL() !< Eigenvectors
-  CHARACTER(LEN=2) :: which = 'LM' !< Spectrum search flag
-  CLASS(oft_solver), POINTER :: Minv => NULL() !< RHS inversion operator
+  CHARACTER(LEN=2) :: which = 'LM' !< Part of spectrum to compute (ARPACK `which` flag, eg. `LM` largest magnitude, `SM` smallest magnitude)
+  CLASS(oft_solver), POINTER :: Minv => NULL() !< Solver for \f$ M \f$ (`mode=2` only)
   class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   CLASS(oft_solver_bc), POINTER :: orthog => NULL() !< Orthogonalization
 CONTAINS
@@ -48,15 +50,15 @@ END TYPE oft_iram_eigsolver
 !> Implicity Restarted Lanczos Method
 !------------------------------------------------------------------------------
 TYPE, PUBLIC, EXTENDS(oft_eigsolver) :: oft_irlm_eigsolver
-  INTEGER(i4) :: mode = 1 !< Operational mode
+  INTEGER(i4) :: mode = 1 !< Problem type (1: \f$ A x = \lambda x \f$, 2: \f$ A x = \lambda M x \f$ using `Minv` to apply \f$ M^{-1} \f$)
   INTEGER(i4) :: nev = 1 !< Number of eigenvalues to compute
   INTEGER(i4) :: ncv = 0 !< Size of Ritz space (determined in call to `apply`)
   INTEGER(i4) :: info = 0 !< Solver status/return code
   REAL(r8) :: tol = 1.E-10_r8 !< Solver tolerance
   REAL(r8), POINTER, DIMENSION(:,:) :: eig_val => NULL() !< Eigenvalues
   REAL(r8), POINTER, DIMENSION(:,:) :: eig_vec => NULL() !< Eigenvectors
-  CHARACTER(LEN=2) :: which = 'LM' !< Spectrum search flag
-  CLASS(oft_solver), POINTER :: Minv => NULL() !< RHS inversion operator
+  CHARACTER(LEN=2) :: which = 'LM' !< Part of spectrum to compute (ARPACK `which` flag, eg. `LM` largest magnitude, `SM` smallest magnitude)
+  CLASS(oft_solver), POINTER :: Minv => NULL() !< Solver for \f$ M \f$ (`mode=2` only)
   class(oft_solver_bc), pointer :: bc => NULL() !< Boundary condition
   CLASS(oft_solver_bc), POINTER :: orthog => NULL() !< Orthogonalization
 CONTAINS
