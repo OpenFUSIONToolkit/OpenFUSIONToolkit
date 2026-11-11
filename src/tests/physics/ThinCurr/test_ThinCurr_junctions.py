@@ -664,11 +664,16 @@ def test_split_regions_with_junctions():
     assert len(full['jedges']) == 8 + 3*8
     assert full['n_unknowns'] == full['n_loops'] == out['n_loops']
     # Sectors can only be insulated from each other if the mesh is split at their interfaces
-    with pytest.warns(UserWarning, match='no effect'):
+    with pytest.raises(ValueError, match='split_regions'):
         find_junction_holes(r, lc, reg, insulated=[(1, 2)])
     gap = find_junction_holes(r, lc, reg, insulated=[(1, 2)], split_regions=True)
     assert gap['n_unknowns'] == gap['n_loops'] == current_loop_count(lc, reg, insulated=[(1, 2)], split_regions=True)
     assert gap['n_unknowns'] < full['n_unknowns']
+    # Insulation that cannot take effect is rejected even when the mesh is split at region interfaces: sector 2 and
+    # the rib (on sector 1) never meet
+    with pytest.raises(ValueError, match='already split') as err:
+        find_junction_holes(r, lc, reg, insulated=[(2, 4)], split_regions=True)
+    assert '--split_regions' not in str(err.value)
 
 
 @pytest.mark.parametrize("split_regions", (False, True))
@@ -686,10 +691,86 @@ def test_split_regions_with_junctions_file(tmp_path, split_regions):
     assert len(junc['kje']) - 1 == (8 + 3*8 if split_regions else 8)
     compute_homology(out_file, verify_only=True)
     insulated = [(1, 2)]
+    if not split_regions:
+        # The sectors only meet on two-cell edges, which are not split, so they cannot be insulated
+        with pytest.raises(ValueError, match='split_regions'):
+            insulate_junction_file(out_file, insulated, str(tmp_path / 'rib-gap.h5'))
+        return
     out = insulate_junction_file(out_file, insulated, str(tmp_path / 'rib-gap.h5'))
-    assert out['split_regions'] == split_regions
-    assert out['n_unknowns'] == current_loop_count(lc, reg, insulated=insulated, split_regions=split_regions)
+    assert out['split_regions']
+    assert out['n_unknowns'] == current_loop_count(lc, reg, insulated=insulated, split_regions=True)
     compute_homology(str(tmp_path / 'rib-gap.h5'), verify_only=True)
+
+
+def test_split_regions_verify_note(tmp_path, capsys):
+    '''Verifying a mesh that is already split notes that a "split_regions" request does not match the file'''
+    r, lc, reg = torus_with_rib()
+    in_file = str(tmp_path / 'rib.h5')
+    write_ThinCurr_mesh(in_file, r, lc, reg)
+    compute_homology(in_file)
+    capsys.readouterr()
+    compute_homology(str(tmp_path / 'rib-homology.h5'), verify_only=True, split_regions=True)
+    assert 'not split at region interfaces' in capsys.readouterr().out
+
+
+def test_mesh_tool_rejects_split(tmp_path):
+    '''The mesh tool rejects meshes that are already split at junctions, alone or combined with an unsplit mesh'''
+    from OpenFUSIONToolkit.ThinCurr._mesh_cli import ThinCurrMesh, combine_meshes
+    r, lc, reg = tplate()
+    in_file = str(tmp_path / 'tplate.h5')
+    write_ThinCurr_mesh(in_file, r, lc, reg)
+    compute_homology(in_file)
+    split_file = str(tmp_path / 'tplate-homology.h5')
+    with pytest.raises(ValueError, match='split at junctions'):
+        ThinCurrMesh.load(split_file)
+    with pytest.raises(ValueError, match='split at junctions'):
+        combine_meshes([in_file, split_file])
+
+
+def fin_plate():
+    '''Plate (region 1) with a fin (region 2) standing on a single interior edge: both ends of the junction edge lie
+    on the fin's only boundary'''
+    plate = sheet(4, 4, lambda u, v: np.c_[u, v, 0*u], 1)
+    fin = sheet(2, 1, lambda u, v: np.c_[0.5 + 0*u, 0.5 + 0.25*v, 0.3*u], 2)
+    return merge(plate, fin)
+
+
+def test_boundary_coefficients_summed():
+    '''Junction constraint coefficients of split vertices on the same sheet boundary are summed (here to zero), so the
+    fin's boundary is a reference and not a spurious constrained hole element with an empty row in P'''
+    out = find_junction_holes(*fin_plate())
+    assert out['n_unknowns'] == out['n_loops']
+    assert len(out['holes']) == 0
+    assert len(out['info']['references']) == 2
+    assert np.all(np.diff(out['P'].tocsr().indptr) > 0)
+
+
+def strip(n, twist):
+    '''Closed strip of 2n cells, a cylinder or (with `twist`) a Mobius strip'''
+    th = 2.0*np.pi*np.arange(n)/n
+    r = np.vstack([np.c_[(1.0 + w*np.cos(th/2))*np.cos(th), (1.0 + w*np.cos(th/2))*np.sin(th), w*np.sin(th/2)]
+                   if twist else np.c_[np.cos(th), np.sin(th), w + 0*th] for w in (-0.2, 0.2)])
+    def vert(i, j):
+        if j == n:
+            j, i = 0, (1 - i if twist else i)
+        return i*n + j
+    lc = [[vert(0, j), vert(1, j), vert(1, j + 1)] for j in range(n)] + [[vert(0, j), vert(1, j + 1), vert(0, j + 1)] for j in range(n)]
+    return r, np.array(lc, dtype=np.int32)
+
+
+def test_orient_nonorientable():
+    '''Cell orientation is consistent on an orientable sheet, and a non-orientable sheet is rejected'''
+    from OpenFUSIONToolkit.ThinCurr.junctions import orient_cells, _edge_table
+    _, lc = strip(12, False)
+    lco = orient_cells(lc)
+    tab = _edge_table(lco)
+    two = np.flatnonzero(tab['count'] == 2)
+    flat = lco.ravel()
+    # Consistently oriented neighbours traverse their shared edge in opposite directions
+    assert np.all(flat[tab['corners'][tab['ptr'][two]]] != flat[tab['corners'][tab['ptr'][two] + 1]])
+    _, lc = strip(12, True)
+    with pytest.raises(ValueError, match='not orientable'):
+        orient_cells(lc)
 
 
 def test_legacy_rejected(tmp_path):

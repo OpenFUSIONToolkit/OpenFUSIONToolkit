@@ -66,7 +66,12 @@ def _edge_table(lc):
 
 
 def _edge_dict(tab, edges):
-    '''! Cells on some edges of an edge table, {(a, b): [cells]}, in the given order of edges'''
+    '''! Cells on some edges of an edge table, in the given order of edges
+
+    @param tab Edge table from @ref _edge_table
+    @param edges Indices of the edges to include, in the order wanted
+    @result {(a, b): [cells]}
+    '''
     out = {}
     ptr, cells = tab['ptr'], tab['cells']
     for e, (a, b) in zip(edges.tolist(), tab['edges'][edges].tolist()):
@@ -75,7 +80,11 @@ def _edge_dict(tab, edges):
 
 
 def _edge_cells(lc):
-    '''! Cells on each edge, {(a, b) with a < b: [cells]}, in order of first appearance'''
+    '''! Cells on each edge, in order of first appearance
+
+    @param lc Cell list [nc,3] (0-based)
+    @result {(a, b) with a < b: [cells]}
+    '''
     tab = _edge_table(lc)
     return _edge_dict(tab, numpy.argsort(tab['first']))
 
@@ -118,7 +127,8 @@ def orient_cells(lc):
     '''! Cell orientation as ThinCurr sets it on load (`sync_face_normals`)
 
     In each connected piece the lowest-numbered cell keeps its order and its neighbours are flipped to
-    agree with it. Requires a manifold mesh.
+    agree with it. Requires a manifold, orientable mesh: a non-orientable piece (eg. a Mobius strip) is not a valid
+    thin-wall model of a volumetric conductor and is rejected.
 
     @param lc Cell list [nc,3] (0-based)
     @result Oriented cell list [nc,3]
@@ -138,9 +148,9 @@ def orient_cells(lc):
     flip = (flat[k1] == flat[k2]).astype(numpy.int64)
     c1, c2 = k1//3, k2//3
     keep = c1 != c2
-    c1, c2, flip = c1[keep], c2[keep], flip[keep]
-    _, uniq = numpy.unique(numpy.minimum(c1, c2)*nc + numpy.maximum(c1, c2), return_index=True)
-    c1, c2, flip = c1[uniq], c2[uniq], flip[uniq]
+    c1_all, c2_all, flip_all = c1[keep], c2[keep], flip[keep]
+    _, uniq = numpy.unique(numpy.minimum(c1_all, c2_all)*nc + numpy.maximum(c1_all, c2_all), return_index=True)
+    c1, c2, flip = c1_all[uniq], c2_all[uniq], flip_all[uniq]
     A = scipy.sparse.csr_matrix((numpy.concatenate((flip, flip)) + 1, (numpy.concatenate((c1, c2)),
                                                                       numpy.concatenate((c2, c1)))), shape=(nc, nc))
     order, pred = _spanning_forest(A)
@@ -152,13 +162,24 @@ def orient_cells(lc):
         if p >= 0:
             flipped[c] = flipped[p] ^ f
     flipped = numpy.array(flipped, dtype=bool)
+    # Every pair of neighbours must agree after flipping, which fails only on a non-orientable piece
+    bad = numpy.flatnonzero((flipped[c1_all] ^ flipped[c2_all]) != flip_all.astype(bool))
+    if len(bad) > 0:
+        raise ValueError('Mesh is not orientable (cells {0} and {1} cannot be oriented consistently); non-orientable '
+                         'surfaces are not supported'.format(int(c1_all[bad[0]]), int(c2_all[bad[0]])))
     lc[flipped] = lc[flipped][:, ::-1]
     return lc
 
 
 def _junction_mask(tab, reg, split_regions):
     '''! Junction edges of an edge table: edges with more than two cells and, if `split_regions`, edges where two
-    regions meet (so that those regions can be insulated from each other)'''
+    regions meet (so that those regions can be insulated from each other)
+
+    @param tab Edge table from @ref _edge_table
+    @param reg Region list [nc]
+    @param split_regions Also treat all edges where two regions meet as junction edges?
+    @result Boolean mask over the edges of `tab`
+    '''
     mask = tab['count'] > 2
     if split_regions and len(mask) > 0:
         regc = numpy.asarray(reg)[tab['cells']]
@@ -168,7 +189,12 @@ def _junction_mask(tab, reg, split_regions):
 
 
 def _junction_edges(tab, jmask):
-    '''! Junction edges, {(a, b): [cells]}, in order of first appearance'''
+    '''! Junction edges and their cells, in order of first appearance
+
+    @param tab Edge table from @ref _edge_table
+    @param jmask Junction edges of `tab` from @ref _junction_mask
+    @result {(a, b): [cells]}
+    '''
     jedges = numpy.flatnonzero(jmask)
     return _edge_dict(tab, jedges[numpy.argsort(tab['first'][jedges], kind='stable')])
 
@@ -204,7 +230,12 @@ def _fan_groups(lc, tab, jmask):
 
 def has_junctions(lc, reg=None):
     '''! True if the mesh needs splitting: an edge shared by more than two cells, or (with `reg`) cells of
-    different regions that touch only at a vertex'''
+    different regions that touch only at a vertex
+
+    @param lc Cell list [nc,3] (0-based)
+    @param reg Region list [nc] (optional)
+    @result True if the mesh has junctions
+    '''
     tab = _edge_table(lc)
     if tab['count'].max() > 2:
         return True
@@ -227,7 +258,11 @@ def _split(r, lc, tab, jmask):
     The fan with the lowest cell keeps the vertex. The other copies are added in order of the first appearance of
     their vertex in the cell list, then of their lowest cell.
 
-    @result r_split, lc_split, vmap
+    @param r Point list [np,3]
+    @param lc Cell list [nc,3] (0-based)
+    @param tab Edge table of `lc` from @ref _edge_table
+    @param jmask Junction edges of `tab` from @ref _junction_mask
+    @result r_split, lc_split, vmap (original vertex of each split vertex)
     '''
     lc = numpy.asarray(lc)
     r = numpy.asarray(r)
@@ -248,13 +283,22 @@ def _split(r, lc, tab, jmask):
 
 
 def _junction_lines(jedges):
-    '''! Junction edges grouped into lines between branch points (for reporting)'''
+    '''! Junction edges grouped into lines between branch points (for reporting)
+
+    @param jedges Junction edges {(a, b): [cells]}
+    @result List of dicts with 'vertices' (original indices) and 'closed'
+    '''
     adj = {}
     for a, b in jedges:
         adj.setdefault(a, []).append(b)
         adj.setdefault(b, []).append(a)
     ends = sorted(v for v, n in adj.items() if len(n) != 2)
     def key(a, b):
+        '''! Edge key with the lower vertex first
+
+        @param a, b Edge vertices
+        @result (min(a, b), max(a, b))
+        '''
         return (min(a, b), max(a, b))
     lines, used = [], set()
     for start in ends + sorted(adj):
@@ -297,7 +341,14 @@ def split_junctions(r, lc, reg, split_regions=False):
 
 
 def _copy(lc, lc_split, c, v):
-    '''! Split vertex of original vertex v in cell c'''
+    '''! Split vertex of an original vertex in a cell
+
+    @param lc Original cell list [nc,3]
+    @param lc_split Split cell list [nc,3]
+    @param c Cell
+    @param v Original vertex of cell c
+    @result Split vertex of v in cell c
+    '''
     return int(lc_split[c][list(lc[c]).index(v)])
 
 
@@ -305,7 +356,8 @@ def junction_table(lc, lc_split, jedges, lco=None):
     '''! Junction edge table for the mesh file
 
     @param lc Original cell list
-    @param lc_split, jedges From @ref split_junctions
+    @param lc_split Split cell list from @ref split_junctions
+    @param jedges Junction edges {(a, b): [cells]} from @ref split_junctions
     @param lco Split cell list oriented by @ref orient_cells (computed if not given)
     @result kje [n_jedges+1] pointer, lje [n,4] (vertex a, vertex b, cell, sign) per cell on each junction
     edge, 0-based split indices; a -> b is the junction's direction and sign is +1 if the cell lists the edge
@@ -322,7 +374,11 @@ def junction_table(lc, lc_split, jedges, lco=None):
 
 
 def _insulation(insulated):
-    '''! Split an insulation list into insulated regions and insulated pairs of regions'''
+    '''! Split an insulation list into insulated regions and insulated pairs of regions
+
+    @param insulated Insulation, see @ref find_junction_holes
+    @result set of insulated regions, set of insulated pairs (frozensets)
+    '''
     regions, pairs = set(), set()
     for item in insulated:
         if isinstance(item, (tuple, list, set, frozenset, numpy.ndarray)):
@@ -340,7 +396,13 @@ def _joined_cells(cells, reg, insulated):
 
     A pair of regions insulated from each other is only separated where they are the only regions on the
     edge. Where a third sheet meets both on the same edge, current can still pass between them through it,
-    so the pair has no effect there (a warning is given).'''
+    so the pair has no effect there (a warning is given).
+
+    @param cells Cells on the junction edge
+    @param reg Region list [nc]
+    @param insulated Insulation from @ref _insulation
+    @result Cells joined across the edge (none if fewer than two remain connected)
+    '''
     ins_regions, ins_pairs = insulated
     regions = frozenset(int(reg[c]) for c in cells)
     if regions in ins_pairs:
@@ -352,8 +414,18 @@ def _joined_cells(cells, reg, insulated):
     return [c for c in cells if int(reg[c]) not in ins_regions]
 
 
-def _check_insulation(tab, jmask, reg, insulated):
-    '''! Warn about insulated regions and pairs of regions that are not separated at any junction edge'''
+def _check_insulation(tab, jmask, reg, insulated, split_regions):
+    '''! Reject insulated regions and pairs of regions that are not separated at any junction edge
+
+    Insulation only acts at junction edges, so a region that is on none, or a pair of regions that never meet on one,
+    would silently leave the model uninsulated.
+
+    @param tab Edge table from @ref _edge_table
+    @param jmask Junction edges of `tab`
+    @param reg Region list [nc]
+    @param insulated Insulation, see @ref find_junction_holes
+    @param split_regions Was the mesh also split at all region interfaces (used for the error message)?
+    '''
     ins_regions, ins_pairs = _insulation(insulated)
     if not (ins_regions or ins_pairs):
         return
@@ -364,18 +436,27 @@ def _check_insulation(tab, jmask, reg, insulated):
         regions = frozenset(reg[cells[ptr[e]:ptr[e + 1]]].tolist())
         found_regions |= regions
         found_pairs.add(regions)
-    for k in sorted(ins_regions - found_regions):
-        warnings.warn('Insulated region {0} is not on any junction edge, so insulating it has no effect (use '
-                      '"split_regions" to also split the mesh where regions meet)'.format(k))
-    for pair in ins_pairs - found_pairs:
+    if split_regions:
+        hint = 'the mesh is already split at all region interfaces, so this insulation is not possible'
+    else:
+        hint = ('to insulate regions where they meet two at a time, split the mesh at region interfaces too '
+                '("OFT_ThinCurr_holes --split_regions")')
+    errors = ['region {0} is not on any junction edge'.format(k) for k in sorted(ins_regions - found_regions)]
+    for pair in sorted(ins_pairs - found_pairs, key=sorted):
         if not any(pair < regions for regions in found_pairs):
-            warnings.warn('Insulated regions {0} do not meet on any junction edge, so insulating them has no effect (use '
-                          '"split_regions" to also split the mesh where regions meet)'.format(sorted(pair)))
+            errors.append('regions {0} do not meet on any junction edge'.format(sorted(pair)))
+    if errors:
+        raise ValueError('Insulation has no effect: {0}; {1}'.format(', '.join(errors), hint))
 
 
 def _dual_links(lc, reg, insulated, tab, jmask):
     '''! Links of @ref dual_graph as arrays
 
+    @param lc Cell list [nc,3] (0-based)
+    @param reg Region list [nc]
+    @param insulated Insulation, see @ref find_junction_holes
+    @param tab Edge table of `lc` from @ref _edge_table
+    @param jmask Junction edges of `tab` from @ref _junction_mask
     @result number of nodes, node u, node w, edge vertex a, edge vertex b, cell of each link
     '''
     reg = numpy.asarray(reg)
@@ -403,7 +484,12 @@ def _dual_links(lc, reg, insulated, tab, jmask):
 
 
 def _loop_count(n, u, w):
-    '''! Number of independent cycles of a graph with n nodes and links u-w'''
+    '''! Number of independent cycles of a graph
+
+    @param n Number of nodes
+    @param u, w Nodes of each link
+    @result Number of independent cycles
+    '''
     G = scipy.sparse.coo_matrix((numpy.ones(len(u)), (u, w)), shape=(n, n))
     return len(u) - n + scipy.sparse.csgraph.connected_components(G, directed=False)[0]
 
@@ -431,15 +517,25 @@ def dual_graph(lc, reg, insulated=(), jedges=None, split_regions=False):
 
 
 def current_loop_count(lc, reg, insulated=(), split_regions=False):
-    '''! Number of independent divergence-free current patterns (cycles of @ref dual_graph)'''
+    '''! Number of independent divergence-free current patterns (cycles of @ref dual_graph)
+
+    @param lc Cell list [nc,3] (0-based)
+    @param reg Region list [nc]
+    @param insulated Insulation, see @ref find_junction_holes
+    @param split_regions Also treat all edges where two regions meet as junction edges?
+    @result Number of independent currents
+    '''
     tab = _edge_table(lc)
     n, u, w, _, _, _ = _dual_links(lc, reg, insulated, tab, _junction_mask(tab, reg, split_regions))
     return _loop_count(n, u, w)
 
 
 def _solve(rows):
-    '''! Exact sparse elimination of rows (each {var: coef}) = 0, pivoting on the largest variable
-    @result {pivot var: {free var: coef}}'''
+    '''! Exact sparse elimination of rows = 0, pivoting on the largest variable
+
+    @param rows List of rows, each {var: coef}
+    @result {pivot var: {free var: coef}}
+    '''
     expr, users = {}, {}
     for row in rows:
         r = {}
@@ -469,7 +565,11 @@ def _solve(rows):
 
 
 def _ordered_chain(edges):
-    '''! Order a connected chain of edges; @result (points, closed)'''
+    '''! Order a connected chain of edges
+
+    @param edges List of edges (a, b)
+    @result (points, closed); points are unordered if the edges branch
+    '''
     adj = {}
     for a, b in edges:
         adj.setdefault(a, []).append(b)
@@ -488,7 +588,12 @@ def _ordered_chain(edges):
 
 
 def _local_stiffness(r, lc):
-    '''! P1 stiffness of each cell, int grad(lambda_i).grad(lambda_j) dA, [nc,3,3]'''
+    '''! P1 stiffness of each cell, int grad(lambda_i).grad(lambda_j) dA
+
+    @param r Point list [np,3]
+    @param lc Cell list [nc,3] (0-based)
+    @result Local stiffness matrices [nc,3,3]
+    '''
     p = r[lc]
     e = numpy.stack([p[:, 2] - p[:, 1], p[:, 0] - p[:, 2], p[:, 1] - p[:, 0]], axis=1)
     area = 0.5*numpy.linalg.norm(numpy.cross(e[:, 0], e[:, 1]), axis=1)
@@ -528,7 +633,12 @@ def _add_independent(r, basis):
 
 
 def _vertex_cells(lc_split, nv):
-    '''! Cells at each vertex, in increasing order; @result pointer [nv+1], cells'''
+    '''! Cells at each vertex, in increasing order
+
+    @param lc_split Cell list [nc,3] (0-based)
+    @param nv Number of vertices
+    @result pointer [nv+1], cells (cells at vertex v are cells[pointer[v]:pointer[v+1]])
+    '''
     flat = numpy.asarray(lc_split, dtype=numpy.int64).ravel()
     order = numpy.argsort(flat, kind='stable')
     ptr = numpy.zeros(nv + 1, dtype=numpy.int64)
@@ -540,8 +650,9 @@ def junction_basis(lc, lc_split, reg, jedges, insulated=(), holes=(), lco=None):
     '''! Reduced unknowns of a split mesh: map from unknowns to the stream function at each cell corner
 
     @param lc Original cell list
-    @param lc_split, jedges From @ref split_junctions
+    @param lc_split Split cell list from @ref split_junctions
     @param reg Region list
+    @param jedges Junction edges {(a, b): [cells]} from @ref split_junctions
     @param insulated Insulation, see @ref find_junction_holes
     @param holes Extra hole elements, each [n,3] (cell, split vertex, sign): chi += sign*h at that corner
     @param lco Split cell list oriented by @ref orient_cells (computed if not given)
@@ -612,6 +723,11 @@ def junction_basis(lc, lc_split, reg, jedges, insulated=(), holes=(), lco=None):
                                 shape=(nv, nv))
     comp = scipy.sparse.csgraph.connected_components(G, directed=False)[1]
     def comp_of(x):
+        '''! Connected piece of a variable
+
+        @param x Vertex (< nv) or sheet boundary (>= nv) variable
+        @result Piece index
+        '''
         return comp[x] if x < nv else comp[arcs[x - nv][0][0]]
     ncomp = comp.max() + 1
     grows = []
@@ -625,7 +741,11 @@ def junction_basis(lc, lc_split, reg, jedges, insulated=(), holes=(), lco=None):
     gindex = {f: i for i, f in enumerate(gfree)}
 
     def gauge(c):
-        '''! Zero-current shift removed by fixing an unknown of piece c, over the free shifts'''
+        '''! Zero-current shift removed by fixing an unknown of a piece, over the free shifts
+
+        @param c Piece index
+        @result Sparse row {free shift index: coefficient}
+        '''
         if c not in gexpr:
             return {gindex[c]: 1}
         return {gindex[f]: cf for f, cf in gexpr[c].items() if cf != 0}
@@ -646,14 +766,25 @@ def junction_basis(lc, lc_split, reg, jedges, insulated=(), holes=(), lco=None):
             fixed.append(x)
     if len(fixed) != len(gfree):
         raise ValueError('Could not remove every zero-current shift')
+    fixed_set = set(fixed)
     hfree = [-1 - j for j in range(len(holes)) if -1 - j not in expr]
-    cols = [x for x in free if x not in fixed] + hfree
+    cols = [x for x in free if x not in fixed_set] + hfree
     col = {x: j for j, x in enumerate(cols)}
     def terms_of(x):
+        '''! Expansion of a variable in the free variables
+
+        @param x Variable (vertex, sheet boundary, or -1-j for hole j)
+        @result {free var: coefficient}
+        '''
         return expr.get(x, {x: 1})
     # Map from all variables (vertices, sheet boundaries, holes) to the reduced unknowns
     narcs = len(arcs)
     def var_index(x):
+        '''! Row of a variable in the variable-to-unknown map T
+
+        @param x Variable (vertex, sheet boundary, or -1-j for hole j)
+        @result Row index
+        '''
         return x if x >= 0 else nv + narcs - 1 - x
     I, J, V = [], [], []
     for x in cols:
@@ -697,7 +828,7 @@ def junction_basis(lc, lc_split, reg, jedges, insulated=(), holes=(), lco=None):
     is_active[[x for x in fixed if x < nv]] = False
     active = numpy.flatnonzero(is_active)
     pmap[active] = numpy.arange(1, len(active) + 1)
-    hole_arcs = [a for a in range(narcs) if nv + a not in fixed]
+    hole_arcs = [a for a in range(narcs) if nv + a not in fixed_set]
     elements = numpy.concatenate((active, nv + numpy.array(hole_arcs, dtype=numpy.int64),
                                   nv + narcs + numpy.arange(len(holes)))).astype(numpy.int64)
     P = T[elements]
@@ -714,7 +845,11 @@ def junction_basis(lc, lc_split, reg, jedges, insulated=(), holes=(), lco=None):
 
 
 def _exact(values):
-    '''! Exact (integer or rational) values of floats that are ratios of small integers'''
+    '''! Exact (integer or rational) values of floats that are ratios of small integers
+
+    @param values Float array
+    @result List of int (near-integer values) or Fraction (denominator up to 1E6)
+    '''
     near = numpy.rint(values)
     is_int = numpy.abs(values - near) < 1.0E-9
     return [int(n) if i else Fraction(v).limit_denominator(1000000)
@@ -784,7 +919,11 @@ def _cycle_holes(lc, lc_split, links, M, lco):
     pred = pred.tolist()
 
     def path_up(v):
-        '''! Path from node v up to the root of its spanning tree'''
+        '''! Path from a node up to the root of its spanning tree
+
+        @param v Node
+        @result Nodes from v to the root
+        '''
         out = [v]
         while pred[out[-1]] >= 0:
             out.append(pred[out[-1]])
@@ -842,7 +981,7 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10, split_regions=Fal
     rs, lcs, vmap = _split(r, lc, tab, jmask)
     jedges = _junction_edges(tab, jmask)
     lines = _junction_lines(jedges)
-    _check_insulation(tab, jmask, reg, insulated)
+    _check_insulation(tab, jmask, reg, insulated, split_regions)
     links = _dual_links(lc, reg, insulated, tab, jmask)
     target = _loop_count(*links[:3])
     lco = orient_cells(lcs)
@@ -868,7 +1007,12 @@ def find_junction_holes(r, lc, reg, insulated=(), tol=1.0E-10, split_regions=Fal
 
 
 def _min_energy(M, K):
-    '''! Smallest pivot of a sparse LU factorization of M^T K M relative to the largest (zero for a zero-energy mode)'''
+    '''! Smallest pivot of a sparse LU factorization of M^T K M relative to the largest
+
+    @param M Corner map from @ref junction_basis [3 nc, n]
+    @param K Corner stiffness matrix [3 nc, 3 nc]
+    @result Relative smallest pivot (zero for a zero-energy mode)
+    '''
     A = (M.T @ K @ M).tocsc()
     try:
         lu = scipy.sparse.linalg.splu(A, permc_spec='MMD_AT_PLUS_A', diag_pivot_thresh=0.0,
@@ -939,9 +1083,34 @@ def split_jumper(lc, lc_split, vmap, jedges, jumper, ec=None):
     return numpy.array(out, dtype=numpy.int32)
 
 
+def split_jumpers(lc, lc_split, vmap, jedges, jumpers):
+    '''! Map several jumpers onto the split mesh, see @ref split_jumper
+
+    The cells on each edge of the unsplit mesh are found once and shared by all jumpers.
+
+    @param lc Unsplit cell list [nc,3] (0-based)
+    @param lc_split Split cell list [nc,3]
+    @param vmap Unsplit vertex of each split vertex
+    @param jedges Junction edges {(a, b): [cells]} of the unsplit mesh
+    @param jumpers List of jumpers, each a set of vertices of the unsplit mesh (0-based)
+    @result List of mapped jumpers, see @ref split_jumper
+    '''
+    if len(jumpers) == 0:
+        return []
+    ec = _edge_cells(lc)
+    return [split_jumper(lc, lc_split, vmap, jedges, jumper, ec=ec) for jumper in jumpers]
+
+
 def _copies_opposed(lc_split, vmap, jedges, va, vb):
     '''! True if the sheets of two copies of a vertex are oppositely oriented (both traverse a junction edge they
-    share in the same direction)'''
+    share in the same direction)
+
+    @param lc_split Split cell list [nc,3]
+    @param vmap Unsplit vertex of each split vertex
+    @param jedges Junction edges {(a, b): [cells]} of the unsplit mesh
+    @param va, vb Split copies of the same vertex
+    @result True if the two sheets are oppositely oriented
+    '''
     v = int(vmap[va])
     for (a, b), cells in jedges.items():
         if v not in (a, b):
@@ -997,6 +1166,7 @@ def insulate_junction_file(mesh_file, insulated, out_file):
     @param mesh_file Junction mesh file (from the homology tool or @ref find_junction_holes)
     @param insulated Insulation: regions and/or pairs of regions
     @param out_file Output file
+    @result Junction data from @ref find_junction_holes for the insulated model
     '''
     import shutil
     import h5py

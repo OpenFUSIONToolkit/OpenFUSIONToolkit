@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from .meshing import read_ThinCurr_mesh, write_ThinCurr_mesh, HOLES_VERSION
 from . import _tree_homology
 from . import _manifold_homology
-from .junctions import has_junctions, find_junction_holes, verify_junction_mesh, split_jumper, _edge_cells
+from .junctions import has_junctions, find_junction_holes, verify_junction_mesh, split_jumpers
 
 
 def _verify_counts(input_model, nholes, nclosures):
@@ -105,9 +105,7 @@ def _compute_junction_holes(input_model, out_file, verify_only, print_info, spli
     if verify_only:
         return
     thincurr = input_model['thincurr']
-    ec = _edge_cells(input_model['lc']) if thincurr.get('jumpers') else None
-    jumpers = [split_jumper(input_model['lc'], out['lc'], out['vmap'], out['jedges'], jumper, ec=ec)
-               for jumper in thincurr.get('jumpers', [])]
+    jumpers = split_jumpers(input_model['lc'], out['lc'], out['vmap'], out['jedges'], thincurr.get('jumpers', []))
     write_ThinCurr_mesh(out_file, out['r'], out['lc'], input_model['reg'],
                         junctions=out, jumpers=jumpers,
                         eta_surf=thincurr.get('eta_surf'), eta_vol=thincurr.get('eta_vol'),
@@ -174,6 +172,10 @@ def compute_homology(in_file, out_file=None, plot_final=False, plot_steps=False,
                          'or sheets touching at a vertex) or "split_regions"')
     if split_mesh:
         if verify_only:
+            if split_regions and (not input_model['thincurr']['junctions']['split_regions']):
+                print('Note: "split_regions" is ignored when verifying a mesh that is already split; this mesh is not '
+                      'split at region interfaces (rerun "OFT_ThinCurr_holes --split_regions" on the unsplit mesh to '
+                      'split it there)')
             njedges, nunknowns = verify_junction_mesh(input_model['r'], input_model['lc'], input_model['reg'],
                                                       input_model['thincurr']['junctions'])
             if print_info:
@@ -325,7 +327,7 @@ def script_entry():
 # inductance). The split only matters for insulation, which acts at junction edges only: it allows sheets that meet
 # two at a time (e.g. the sectors of a torus) to be insulated from each other when the model is set up, with
 # `setup_model(insulated_junctions=...)`, without generating a new mesh file. Without the split, regions or pairs of
-# regions that do not meet at a junction edge cannot be insulated (a warning is given if this is requested).
+# regions that do not meet at a junction edge cannot be insulated (an error is raised if this is requested).
 #
 # Only use `--split_regions` if this insulation is needed, as the split mesh has more vertices, junction constraints
 # and hole elements, which increases the cost of setting up the model, and jumpers cannot run along the split region
