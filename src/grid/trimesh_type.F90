@@ -503,102 +503,100 @@ DEBUG_STACK_POP
 end subroutine trimesh_jacobian
 !---------------------------------------------------------------------------------
 !> Compute the spatial hessian matrices for a given cell at a given logical position
+!!
+!! Logical second derivatives are mapped with \f$ \lambda_3 \f$ eliminated. For curved
+!! cells the Jacobian is evaluated at `f` and `K` holds the second derivatives of the
+!! high-order mapping, so the physical Hessian of a field \f$ u \f$ is
+!! `MATMUL(g2op, d2u - MATMUL(K, grad_u))`, where `d2u` are the logical second derivatives
+!! and `grad_u` is the physical gradient (`K=0` on straight-sided cells).
 !---------------------------------------------------------------------------------
 subroutine trimesh_hessian(self,cell,f,g2op,K)
 class(oft_trimesh), intent(in) :: self !< Mesh object
 INTEGER(i4), INTENT(in) :: cell !< Index of cell for evaulation
-REAL(r8), INTENT(in) :: f(:) !< Logical coordinate in cell [4]
+REAL(r8), INTENT(in) :: f(:) !< Logical coordinate in cell [3]
 REAL(r8), INTENT(out) :: g2op(:,:) !< Second order Jacobian matrix
-!! \f$ (\frac{\partial x_i}{\partial \lambda_l} \frac{\partial x_j}{\partial \lambda_k})^{-1} \f$
+!! \f$ (\frac{\partial x_i}{\partial \lambda_l} \frac{\partial x_j}{\partial \lambda_k})^{-1} \f$ [6,6]
 REAL(r8), INTENT(out) :: K(:,:) !< Gradient correction matrix
-!! \f$ \frac{\partial^2 x_i}{\partial \lambda_k \partial \lambda_l}\f$ [10,3]
+!! \f$ \frac{\partial^2 x_i}{\partial \lambda_k \partial \lambda_l}\f$ [6,3]
 real(r8) :: jfull(2,3),getmp(2),gftmp(3),d2etmp(3),d2ftmp(6),pt(3)
-real(r8) :: ri(2,3),jac(2,2),A(3,3),C(3,3),v
-integer(i4) :: j,m,l,etmp(2),dof,ed
-integer(i4), parameter :: pmap(4)=(/1,5,8,10/)
-integer(i4), parameter :: emap(6)=(/4,7,9,6,3,2/)
-integer(i4), parameter :: fmap(4,4)=RESHAPE((/1,2,3,4,2,5,6,7,3,6,8,9,4,7,9,10/),(/4,4/))
+real(r8) :: jac(2,2),A(3,3),C(3,3),v
+integer(i4) :: j,l,dof,ed
+integer(i4), parameter :: pmap(3)=(/1,4,6/)
+integer(i4), parameter :: fmap(3,3)=RESHAPE((/1,2,3,2,4,5,3,5,6/),(/3,3/))
 if(self%order>3)call oft_abort('Invalid mesh order','trimesh_hessian',__FILE__)
 IF(self%dim==3)call oft_abort('Only supported for dim=2','trimesh_hessian',__FILE__)
-IF(cell_is_curved(self,cell))call oft_abort('Curved cells not supported','trimesh_hessian',__FILE__)
 jfull=0.d0
 K=0.d0
-! IF(cell_is_curved(self, i))THEN
-!   do m=1,4 ! Get corner nodes
-!     jfull(:,m)=jfull(:,m) + dlag_1d(self%order+1,f(m),self%xnodes,self%order+1)*self%r(:,self%lc(m,i))
-!     !
-!     K(pmap(m),:) = K(pmap(m),:) + d2lag_1d(self%order+1,f(m),self%xnodes,self%order+1)*self%r(:,self%lc(m,i))
-!   end do
-!   do m=1,6 ! Get edge nodes
-!     ed=self%lce(m,i)
-!     do dof=1,self%ho_info%nep
-!       IF(ed<0)THEN
-!         pt=self%ho_info%r(:,self%ho_info%lep(self%ho_info%nep+1-dof,ABS(ed)))
-!       ELSE
-!         pt=self%ho_info%r(:,self%ho_info%lep(dof,ABS(ed)))
-!       END IF
-!       getmp=dlag_1d_bary(dof,f(tet_ed(:,m)),self%xnodes,self%order+1)
-!       do l=1,2
-!         jfull(:,tet_ed(l,m))=jfull(:,tet_ed(l,m))+getmp(l)*pt
-!       end do
-!       !
-!       d2etmp=d2lag_1d_bary(dof,f(tet_ed(:,m)),self%xnodes,self%order+1)
-!       K(pmap(tet_ed(1,m)),:)=K(pmap(tet_ed(1,m)),:)+d2etmp(1)*pt
-!       K(emap(m),:)=K(emap(m),:)+d2etmp(2)*pt
-!       K(pmap(tet_ed(2,m)),:)=K(pmap(tet_ed(2,m)),:)+d2etmp(3)*pt
-!     end do
-!   end do
-!   IF(self%ho_info%ncp>0)THEN
-!     do m=1,4 ! Get face nodes
-!       pt=self%ho_info%r(:,self%ho_info%lcp(1,ABS(self%lcf(m,i))))
-!       gftmp=dlag_2d_bary((/1,1/),f(tet_fc(:,m)),self%xnodes,self%order+1)
-!       do l=1,3
-!         jfull(:,tet_fc(l,m))=jfull(:,tet_fc(l,m))+gftmp(l)*pt
-!       end do
-!       !
-!       d2ftmp=d2lag_2d_bary((/1,1/),f(tet_fc(:,m)),self%xnodes,self%order+1)
-!       K(pmap(tet_fc(1,m)),:)=K(pmap(tet_fc(1,m)),:)+d2ftmp(1)*pt
-!       K(fmap(tet_fc(1,m),tet_fc(2,m)),:)=K(fmap(tet_fc(1,m),tet_fc(2,m)),:)+d2ftmp(2)*pt
-!       K(fmap(tet_fc(1,m),tet_fc(3,m)),:)=K(fmap(tet_fc(1,m),tet_fc(3,m)),:)+d2ftmp(3)*pt
-!       K(pmap(tet_fc(2,m)),:)=K(pmap(tet_fc(2,m)),:)+d2ftmp(4)*pt
-!       K(fmap(tet_fc(2,m),tet_fc(3,m)),:)=K(fmap(tet_fc(2,m),tet_fc(3,m)),:)+d2ftmp(5)*pt
-!       K(pmap(tet_fc(3,m)),:)=K(pmap(tet_fc(3,m)),:)+d2ftmp(6)*pt
-!     end do
-!   END IF
-! ELSE
+IF(cell_is_curved(self,cell))THEN
+  !---Gradient (jfull) and second derivatives (K) of the mapping in all three
+  !---logical coordinates, with K in (11,12,13,22,23,33) order
+  do j=1,3 ! Get corner nodes
+    pt=self%r(:,self%lc(j,cell))
+    jfull(:,j)=jfull(:,j)+dlag_1d(self%order+1,f(j),self%xnodes,self%order+1)*pt(1:2)
+    K(pmap(j),1:2)=K(pmap(j),1:2)+d2lag_1d(self%order+1,f(j),self%xnodes,self%order+1)*pt(1:2)
+  end do
+  do j=1,3 ! Get edge nodes
+    ed=self%lce(j,cell)
+    do dof=1,self%ho_info%nep
+      IF(ed<0)THEN
+        pt=self%ho_info%r(:,self%ho_info%lep(self%ho_info%nep+1-dof,ABS(ed)))
+      ELSE
+        pt=self%ho_info%r(:,self%ho_info%lep(dof,ABS(ed)))
+      END IF
+      getmp=dlag_1d_bary(dof,f(tri_ed(:,j)),self%xnodes,self%order+1)
+      do l=1,2
+        jfull(:,tri_ed(l,j))=jfull(:,tri_ed(l,j))+getmp(l)*pt(1:2)
+      end do
+      d2etmp=d2lag_1d_bary(dof,f(tri_ed(:,j)),self%xnodes,self%order+1)
+      K(pmap(tri_ed(1,j)),1:2)=K(pmap(tri_ed(1,j)),1:2)+d2etmp(1)*pt(1:2)
+      K(fmap(tri_ed(1,j),tri_ed(2,j)),1:2)=K(fmap(tri_ed(1,j),tri_ed(2,j)),1:2)+d2etmp(2)*pt(1:2)
+      K(pmap(tri_ed(2,j)),1:2)=K(pmap(tri_ed(2,j)),1:2)+d2etmp(3)*pt(1:2)
+    end do
+  end do
+  IF(self%ho_info%ncp>0)THEN ! Get cell node (matches trimesh_log2phys)
+    pt=self%ho_info%r(:,self%ho_info%lcp(1,cell))
+    gftmp=dlag_2d_bary((/1,1/),f,self%xnodes,self%order+1)
+    do l=1,3
+      jfull(:,l)=jfull(:,l)+gftmp(l)*pt(1:2)
+    end do
+    d2ftmp=d2lag_2d_bary((/1,1/),f,self%xnodes,self%order+1)
+    do l=1,2
+      K(:,l)=K(:,l)+d2ftmp*pt(l)
+    end do
+  END IF
+ELSE
   do j=1,3 ! Get node points
-    ri(:,j)=self%r(1:2,self%lc(j,cell))
+    jfull(:,j)=self%r(1:2,self%lc(j,cell))
   end do
-  !---Get Jacobian entries
-  jfull=ri
-  do j=1,2
-    jac(j,:)=jfull(:,j)-jfull(:,3)
-  end do
-  !---Get 2nd order mapping
-  !---Row 1
-  A(1,1)=jac(1,1)**2
-  A(1,2)=2*jac(1,1)*jac(1,2)
-  A(1,3)=jac(1,2)**2
-  !---Row 2
-  A(2,1)=jac(1,1)*jac(2,1)
-  A(2,2)=jac(1,1)*jac(2,2)+jac(2,1)*jac(1,2)
-  A(2,3)=jac(1,2)*jac(2,2)
-  !---Row 3
-  A(3,1)=jac(2,1)**2
-  A(3,2)=2*jac(2,1)*jac(2,2)
-  A(3,3)=jac(2,2)**2
-  !---Invert
-  call trimesh_m3inv(A,C,v)
-  !---Map back to g2op
-  g2op=0.d0
-  g2op([1,2,4],1)=C(:,1)
-  g2op([1,2,4],2)=C(:,2)
-  g2op([1,2,4],4)=C(:,3)
-  !---Scatter to redundant dimension
-  g2op([1,2,4],3)=-2*C(:,1)-C(:,2)
-  g2op([1,2,4],5)=-C(:,2)-2*C(:,3)
-  g2op([1,2,4],6)=C(:,1)+C(:,2)+C(:,3)
-! END IF
+END IF
+!---Get Jacobian entries (lambda_3 eliminated)
+do j=1,2
+  jac(j,:)=jfull(:,j)-jfull(:,3)
+end do
+!---Get 2nd order mapping
+!---Row 1
+A(1,1)=jac(1,1)**2
+A(1,2)=2*jac(1,1)*jac(1,2)
+A(1,3)=jac(1,2)**2
+!---Row 2
+A(2,1)=jac(1,1)*jac(2,1)
+A(2,2)=jac(1,1)*jac(2,2)+jac(2,1)*jac(1,2)
+A(2,3)=jac(1,2)*jac(2,2)
+!---Row 3
+A(3,1)=jac(2,1)**2
+A(3,2)=2*jac(2,1)*jac(2,2)
+A(3,3)=jac(2,2)**2
+!---Invert
+call trimesh_m3inv(A,C,v)
+!---Map back to g2op
+g2op=0.d0
+g2op([1,2,4],1)=C(:,1)
+g2op([1,2,4],2)=C(:,2)
+g2op([1,2,4],4)=C(:,3)
+!---Scatter to redundant dimension
+g2op([1,2,4],3)=-2*C(:,1)-C(:,2)
+g2op([1,2,4],5)=-C(:,2)-2*C(:,3)
+g2op([1,2,4],6)=C(:,1)+C(:,2)+C(:,3)
 end subroutine trimesh_hessian
 !---------------------------------------------------------------------------------
 !> Linear implementation of @trimesh_jacobian

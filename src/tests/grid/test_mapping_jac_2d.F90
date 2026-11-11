@@ -9,7 +9,8 @@
 !! 2D counterpart of test_mapping_jac.F90: quadratic functions of (x,y) are
 !! interpolated onto a boundary Lagrange space on a circle or (packed) square
 !! triangle mesh and their Hessians, reconstructed with oft_lag_bg2interp, are
-!! compared to the exact values.
+!! compared to the exact values. With `grid_order=2` the circle mesh has curved
+!! boundary cells, which tests the high-order mapping correction.
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -56,7 +57,8 @@ READ(io_unit,*)ntests
 DO i=1,ntests
   READ(io_unit,'(2I12,6E25.17)')xi,xj,check_vec
   IF((xi==3).OR.(xj==3))CYCLE
-  nfail=nfail+check_jac2(xi,xj,check_vec,tol)
+  !---On curved (quadratic) meshes x_i*x_j is only exactly representable for order >= 4
+  IF((xj==0).OR.(order/mg_mesh%smesh%order>=2))nfail=nfail+check_jac2(xi,xj,check_vec,tol)
 END DO
 CLOSE(io_unit)
 OPEN(NEWUNIT=io_unit,FILE='mapping_jac.results')
