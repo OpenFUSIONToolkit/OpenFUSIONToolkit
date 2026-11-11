@@ -127,6 +127,22 @@ def validate_eqdsk(file_test,file_ref,helicity=1.0):
     return test_result
 
 
+def ifile_errors(mygs,filename):
+    """Relative errors of an i-file: psi at its R,Z points vs its psi grid, its FF', P' records and its psi bounds."""
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    ifile = read_ifile(filename)
+    psi_range = mygs.psi_bounds[1]-mygs.psi_bounds[0]
+    R, Z = ifile['R'][1:], ifile['Z'][1:]
+    psi_pts = mygs.get_field_eval('psi').eval(np.column_stack([R.ravel(),Z.ravel()]))[:,0].reshape(R.shape)
+    _, F, Fp, _, Pp = mygs.get_profiles(psi=(mygs.psi_bounds[1]-ifile['psi'])/psi_range)
+    return {
+        'ifile_psi_err': np.max(np.abs(psi_pts-ifile['psi'][1:,None]))/abs(psi_range),
+        'ifile_ffp_err': np.max(np.abs(ifile['ffp']-F*Fp))/np.max(np.abs(F*Fp)),
+        'ifile_pp_err': np.max(np.abs(ifile['pp']-Pp))/np.max(np.abs(Pp)),
+        'ifile_bounds_err': np.max(np.abs(ifile['psi_bounds']-mygs.psi_bounds[::-1]))/abs(psi_range)
+    }
+
+
 def validate_ifile(ifile_test,ifile_ref,helicity=1.0):
     from OpenFUSIONToolkit.TokaMaker.util import read_ifile
     try:
@@ -185,9 +201,8 @@ def run_solo_case(mesh_resolution,fe_order,mp_q):
     # Run EQ
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
-    mygs.setup(order=fe_order,F0=1.0,full_domain=True)
+    mygs.setup_model(mesh_pts, mesh_lc, order=fe_order, F0=1.0, full_domain=True)
     mygs.p_scale=a
     mygs.ffp_scale=b*R*R*2.0
     mygs.set_profiles(ffp_prof={'type': 'flat'},pp_prof={'type': 'flat'})
@@ -264,10 +279,9 @@ def run_nonfinite_case(mode,mp_q):
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
     mygs.settings.maxits = 200
-    mygs.setup(order=2,F0=1.0,full_domain=True)
+    mygs.setup_model(mesh_pts, mesh_lc, order=2, F0=1.0, full_domain=True)
     mygs.p_scale=np.nan if mode == 'source' else 1.2
     mygs.ffp_scale=-2.0
     mygs.set_profiles(ffp_prof={'type': 'flat'},pp_prof={'type': 'flat'})
@@ -316,9 +330,8 @@ def run_sph_case(mesh_resolution,fe_order,mp_q):
     # Run EQ
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc)
     mygs.settings.free_boundary = False
-    mygs.setup(order=fe_order)
+    mygs.setup_model(mesh_pts, mesh_lc, order=fe_order)
     mygs.p_scale=0.0
     ffp_prof={
         'type': 'linterp',
@@ -419,9 +432,7 @@ def run_coil_case(mesh_resolution,fe_order,dist,mp_q):
     # Run EQ
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-    mygs.setup(order=fe_order)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order)
     mygs.set_coil_currents({'COIL1': cdx*cdy})
     if dist is not None:
         mygs.set_coil_current_dist('COIL1',dist(mygs.r[:,0],mygs.r[:,1]))
@@ -527,9 +538,7 @@ def run_td_noconductor_case(use_vcoil,mp_q):
     # Setup vacuum state and attempt time-dependent setup
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-    mygs.setup(order=2)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=2)
     mygs.set_coil_currents({'COIL1': 1.E3})
     mygs.vac_solve()
     if use_vcoil:
@@ -606,9 +615,7 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
         mygs_last = mygs
         mygs = TokaMaker(myOFT)
         mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
-        mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-        mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-        mygs.setup(order=fe_order,F0=helicity*5.3*6.2)
+        mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=helicity*5.3*6.2)
         #
         if test_type.startswith('eig'):
             if test_type == 'eig_dep':
@@ -826,6 +833,10 @@ def run_ITER_case(mesh_resolution,fe_orders,test_type,helicity,mp_q):
     # Save equilibrium to gEQDSK and i-file format
     mygs.save_eqdsk('tokamaker.eqdsk',nr=64,nz=64,lcfs_pad=0.001)
     mygs.save_ifile('tokamaker.ifile',npsi=64,ntheta=64,lcfs_pad=0.001)
+    mygs.save_ifile('tokamaker_ext.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,profile_derivs=True,psi_bounds=True)
+    eq_info.update(ifile_errors(mygs,'tokamaker_ext.ifile'))
+    mygs.save_ifile('tokamaker_axis.ifile',npsi=64,ntheta=64,lcfs_pad=0.001,psi_bounds=True,profile_derivs=True,axis_pack=1.E-4)
+    eq_info['ifile_psi_err_axis'] = ifile_errors(mygs,'tokamaker_axis.ifile')['ifile_psi_err']
     # Save final one
     mp_q.put([eq_info])
     oftpy_dump_cov()
@@ -916,6 +927,30 @@ def test_ITER_eq(order,helicity):
     assert validate_dict(results,eq_dict)
     assert validate_eqdsk('tokamaker.eqdsk','ITER_test.eqdsk',helicity)
     assert validate_ifile('tokamaker.ifile','ITER_test.ifile',helicity)
+    # Optional records are written only on request and leave the others unchanged
+    from OpenFUSIONToolkit.TokaMaker.util import read_ifile
+    ifile, ifile_ext = read_ifile('tokamaker.ifile'), read_ifile('tokamaker_ext.ifile')
+    assert ('ffp' not in ifile) and ('psi_bounds' not in ifile)
+    assert all(np.array_equal(ifile[key],ifile_ext[key]) for key in ifile)
+    # Records after the known ones are ignored (here a repeat of the last, 2-value record)
+    with open('tokamaker_ext.ifile','rb') as fid:
+        content = fid.read()
+    with open('tokamaker_trail.ifile','wb') as fid:
+        fid.write(content + content[-24:])
+    ifile_trail = read_ifile('tokamaker_trail.ifile')
+    assert all(np.array_equal(ifile_ext[key],ifile_trail[key]) for key in ifile_ext)
+    # i-file points lie on their flux surfaces; FF', P' and psi bounds match the equilibrium
+    assert results[0]['ifile_psi_err'] < 1.E-10
+    assert results[0]['ifile_ffp_err'] < 1.E-10
+    assert results[0]['ifile_pp_err'] < 1.E-10
+    assert results[0]['ifile_bounds_err'] < 1.E-12
+    # Axis zone: first surface at axis_pack, spacing growing smoothly into the LCFS-packed points
+    ifile_axis = read_ifile('tokamaker_axis.ifile')
+    x = (ifile_axis['psi']-ifile_axis['psi_bounds'][0])/(ifile_axis['psi_bounds'][1]-ifile_axis['psi_bounds'][0])
+    dx = np.diff(x)
+    assert abs(x[1]-1.E-4) < 1.E-10
+    assert np.all(dx > 0) and np.max(dx[1:]/dx[:-1]) < 1.7
+    assert results[0]['ifile_psi_err_axis'] < 1.E-10
 
 @pytest.mark.coverage
 @pytest.mark.parametrize("order", (2,3))#,4))
@@ -1016,9 +1051,7 @@ def run_LTX_case(fe_order,test_type,mp_q):
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('LTX_mesh.h5')
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
-    mygs.setup(order=fe_order,F0=0.10752)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=0.10752)
     #
     if test_type == 'eig':
         eig_vals, _ = mygs.compute_wall_modes(10)
@@ -1173,9 +1206,7 @@ def run_ITER_bootstrap_case(mesh_resolution, fe_order, mp_q):
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('ITER_mesh.h5')
-    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
-    mygs.setup(order=fe_order, F0=5.3*6.2)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=5.3*6.2)
 
     mygs.set_coil_vsc({'VS': 1.0})
     coil_bounds = {key: [-50.E6, 50.E6] for key in mygs.coil_sets}
@@ -1374,9 +1405,7 @@ def run_Redl_jBS_case(mesh_resolution, fe_order, mp_q):
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('ITER_mesh.h5')
-    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
-    mygs.setup(order=fe_order, F0=5.3*6.2)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=5.3*6.2)
 
     mygs.set_coil_vsc({'VS': 1.0})
     coil_bounds = {key: [-50.E6, 50.E6] for key in mygs.coil_sets}
@@ -1629,10 +1658,8 @@ def _ITER_bootstrap_internal_setup(mesh_resolution, fe_order):
     myOFT = OFT_env(nthreads=-1)
     mygs = TokaMaker(myOFT)
     mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('ITER_mesh.h5')
-    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
     mygs.settings.maxits = 100
-    mygs.setup(order=fe_order, F0=5.3*6.2)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=5.3*6.2)
 
     mygs.set_coil_vsc({'VS': 1.0})
     mygs.set_coil_bounds({key: [-50.E6, 50.E6] for key in mygs.coil_sets})
@@ -1708,6 +1735,9 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     eq_info['q_axis']    = float(q_i[0])
     sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
     eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
+    # A failed LCFS trace (exactly on the diverted separatrix) gives NaN LCFS outputs
+    _, _, _, dl, rbounds, zbounds = mygs.get_q(np.r_[1.0],compute_geo=True)
+    eq_info['lcfs_fail_nan'] = bool(np.isnan(dl) and np.all(np.isnan(rbounds)) and np.all(np.isnan(zbounds)))
 
     # --- Verify the jdotB_bs -> jphi conversion (doc_tokamaker_current_conventions eqs. A7, A8)
     #     against geometry traced independently from the converged equilibrium ---
@@ -1937,6 +1967,7 @@ ITER_bootstrap_internal_eq_dict = {
 def test_ITER_bootstrap_internal(order):
     results = mp_run(run_ITER_bootstrap_case_internal, (1.0, order), timeout=300)
     assert validate_dict(results, ITER_bootstrap_internal_eq_dict)
+    assert results[0]['lcfs_fail_nan']
 
 
 def run_ITER_bootstrap_saw_internal(mesh_resolution, fe_order, mp_q):
@@ -2250,10 +2281,8 @@ def _torflux_ITER_gs(fe_order, Ip_target=15.6E6):
         save_gs_mesh(mesh_pts,mesh_lc,mesh_reg,gs_mesh.get_coils(),gs_mesh.get_conductors(),'ITER_mesh.h5')
     mygs = TokaMaker(OFT_env(nthreads=-1))
     mesh_pts,mesh_lc,mesh_reg,coil_dict,cond_dict = load_gs_mesh('ITER_mesh.h5')
-    mygs.setup_mesh(mesh_pts,mesh_lc,mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict,coil_dict=coil_dict)
     mygs.settings.maxits = 100
-    mygs.setup(order=fe_order,F0=5.3*6.2)
+    mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=fe_order, F0=5.3*6.2)
     mygs.set_coil_vsc({'VS': 1.0})
     mygs.set_coil_bounds({key: [-50.E6, 50.E6] for key in mygs.coil_sets})
     mygs.set_targets(Ip=Ip_target, pax=6.2E5)

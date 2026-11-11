@@ -1489,12 +1489,12 @@ ALLOCATE(ptout(3,active_tracer%maxsteps+1),vout(3,active_tracer%maxsteps))
 DO j=1,nr
   IF(done(j))CYCLE
   ! Tighter than for q alone, as the trapped fraction is a quadrature over the steps
-  IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN
+  IF(psi_q(j)<0.02d0)THEN
     active_tracer%tol=1.d-9
   ELSE
     active_tracer%tol=1.d-7
   END IF
-  IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,gseq%diverted.AND.psi_q(j)<0.02d0)
+  IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,psi_q(j)<0.02d0)
   field%f_surf=fpol(j)
   field%bmax=0.d0
   field%rmax_surf = -1.d30
