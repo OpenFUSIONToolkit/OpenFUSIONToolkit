@@ -139,7 +139,8 @@ def test_jac_2d_lin(cad_type, elem_order):
 
 #============================================================================
 # Test runner for 2D (triangle) jacobian tests on quadratic elements
-# (curved boundary cells on the circle mesh)
+# (curved boundary cells on the circle mesh; on the square mesh all cells
+# use the quadratic mapping, with straight edges)
 @pytest.mark.coverage
 @pytest.mark.parametrize("cad_type", (91, 92))
 @pytest.mark.parametrize("elem_order", (2, 3, 4))

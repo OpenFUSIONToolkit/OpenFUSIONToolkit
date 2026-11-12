@@ -284,11 +284,18 @@ DEBUG_STACK_POP
 end subroutine mesh_global_orient
 !---------------------------------------------------------------------------------
 !> Set cell curvature flag for common cases
+!!
+!! With `flag=3` a cell is flagged if any of its edge nodes is off the straight edge
+!! midpoint (relative to edge length). Only quadratic edge nodes are compared, so
+!! face and cell nodes are not checked.
 !---------------------------------------------------------------------------------
 subroutine mesh_global_set_curved(self,flag)
 CLASS(oft_amesh), INTENT(inout) :: self !< Mesh object
-INTEGER(i4), INTENT(in) :: flag !< How to set curvature (1 -> all cells, 2 -> contains boundary edge)
+INTEGER(i4), INTENT(in) :: flag !< How to set curvature (1 -> all cells, 2 -> contains boundary edge, 3 -> has a curved edge)
 INTEGER(i4) :: i,k
+REAL(r8) :: pt(3),dl
+REAL(r8), PARAMETER :: tol=1.d-8
+LOGICAL, ALLOCATABLE :: ecurved(:)
 SELECT CASE(flag)
 CASE(1)
   self%ho_info%is_curved=.TRUE.
@@ -299,6 +306,18 @@ CASE(2)
       self%ho_info%is_curved(self%lec(k))=.TRUE.
     END DO
   END DO
+CASE(3)
+  IF(self%ho_info%nep/=1)CALL oft_abort("Requires one node per edge","mesh_global_set_curved",__FILE__)
+  ALLOCATE(ecurved(self%ne))
+  DO i=1,self%ne
+    pt=(self%r(:,self%le(1,i))+self%r(:,self%le(2,i)))/2.d0
+    dl=SQRT(SUM((self%r(:,self%le(2,i))-self%r(:,self%le(1,i)))**2))
+    ecurved(i)=SQRT(SUM((self%ho_info%r(:,self%ho_info%lep(1,i))-pt)**2))>tol*dl
+  END DO
+  DO i=1,self%nc
+    self%ho_info%is_curved(i)=ANY(ecurved(ABS(self%lce(:,i))))
+  END DO
+  DEALLOCATE(ecurved)
 CASE DEFAULT
   CALL oft_abort("Unknown setup flag","mesh_global_set_curved",__FILE__)
 END SELECT

@@ -10,7 +10,9 @@
 !! interpolated onto a boundary Lagrange space on a circle or (packed) square
 !! triangle mesh and their Hessians, reconstructed with oft_lag_bg2interp, are
 !! compared to the exact values. With `grid_order=2` the circle mesh has curved
-!! boundary cells, which tests the high-order mapping correction.
+!! boundary cells, which tests the high-order mapping correction, and every cell
+!! of the square mesh is flagged as curved so the quadratic mapping path is checked
+!! against the exact (affine) result on straight cells.
 !!
 !! @ingroup testing
 !------------------------------------------------------------------------------
@@ -19,6 +21,8 @@ USE oft_base
 USE oft_quadrature
 USE oft_mesh_sphere, ONLY: mesh_sphere_id
 USE oft_mesh_cube, ONLY: mesh_cube_id
+USE oft_mesh_type, ONLY: cell_is_curved
+USE oft_mesh_global_util, ONLY: mesh_global_set_curved
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct_surf
 !---
@@ -30,6 +34,7 @@ USE oft_blag_operators, ONLY: oft_lag_brinterp, oft_lag_bg2interp
 IMPLICIT NONE
 INTEGER(i4) :: xi,xj,ierr,nfail,i,ntests,io_unit
 REAL(r8) :: check_vec(6),tol=1.d-6
+LOGICAL :: skip_curved
 TYPE(multigrid_mesh) :: mg_mesh
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_blagrange
 INTEGER(i4) :: order
@@ -48,6 +53,12 @@ IF(oft_env%nprocs>1)CALL oft_abort('Test is for serial meshes only.','main',__FI
 !---Treat the (planar) mesh as a true 2D mesh, as for TokaMaker meshes
 IF(ANY(ABS(mg_mesh%smesh%r(3,:))>1.d-10))CALL oft_abort('Mesh is not planar.','main',__FILE__)
 mg_mesh%smesh%dim=2
+!---Send every square cell through the quadratic mapping path (its edges are straight)
+IF((mg_mesh%smesh%cad_type==mesh_cube_id).AND.(mg_mesh%smesh%order>1)) &
+  CALL mesh_global_set_curved(mg_mesh%smesh,1)
+!---On curved cells x_i*x_j is quartic in the logical coordinates, so it is only
+!---exactly representable for order >= 4 (only the circle mesh has curved cells)
+skip_curved=(mg_mesh%smesh%cad_type==mesh_sphere_id).AND.(order<2*mg_mesh%smesh%order)
 !---Setup FEM
 CALL oft_lag_setup(mg_mesh,order,ML_blag_obj=ML_oft_blagrange,minlev=-1)
 !---Run test cases (same reference data as the 3D test; z terms do not apply in 2D)
@@ -57,8 +68,7 @@ READ(io_unit,*)ntests
 DO i=1,ntests
   READ(io_unit,'(2I12,6E25.17)')xi,xj,check_vec
   IF((xi==3).OR.(xj==3))CYCLE
-  !---On curved (quadratic) meshes x_i*x_j is only exactly representable for order >= 4
-  IF((xj==0).OR.(order/mg_mesh%smesh%order>=2))nfail=nfail+check_jac2(xi,xj,check_vec,tol)
+  nfail=nfail+check_jac2(xi,xj,check_vec,tol,skip_curved.AND.(xj/=0))
 END DO
 CLOSE(io_unit)
 OPEN(NEWUNIT=io_unit,FILE='mapping_jac.results')
@@ -69,11 +79,13 @@ CALL oft_finalize
 CONTAINS
 !------------------------------------------------------------------------------
 ! Interpolate x_i*x_j (x_0 = 1) onto the Lagrange space and compare its
-! reconstructed Hessian at every quadrature point to the exact result.
+! reconstructed Hessian at every quadrature point to the exact result,
+! optionally skipping curved cells.
 !------------------------------------------------------------------------------
-FUNCTION check_jac2(xi,xj,check_vec,tol) RESULT(fail_count)
+FUNCTION check_jac2(xi,xj,check_vec,tol,skip_curved_cells) RESULT(fail_count)
 INTEGER(i4), INTENT(in) :: xi,xj
 REAL(r8), INTENT(in) :: check_vec(6),tol
+LOGICAL, INTENT(in) :: skip_curved_cells
 !---
 INTEGER(i4) :: i,j,k,fail_count
 INTEGER(i4), ALLOCATABLE :: dofs(:)
@@ -112,6 +124,7 @@ field%u=>u
 CALL field%setup(lag_rep)
 CALL field_d2%shared_setup(field)
 DO i=1,mg_mesh%smesh%nc
+  IF(skip_curved_cells.AND.cell_is_curved(mg_mesh%smesh,i))CYCLE
   DO j=1,quad%np
     CALL mg_mesh%smesh%jacobian(i,quad%pts(:,j),gop,v)
     CALL field_d2%interp(i,quad%pts(:,j),gop,val)
