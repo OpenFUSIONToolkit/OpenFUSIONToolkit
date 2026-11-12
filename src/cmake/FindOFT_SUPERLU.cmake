@@ -17,6 +17,7 @@ find_library(SUPERLU_LIBRARY
 
 find_path(SUPERLU_INCLUDE_DIR
   NAMES slu_ddefs.h
+  PATH_SUFFIXES superlu
 )
 
 include(FindPackageHandleStandardArgs)

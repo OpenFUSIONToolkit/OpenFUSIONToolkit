@@ -74,6 +74,15 @@ IF(c_associated(abort_fun))CALL c_f_procpointer(abort_fun,oft_abort_cb)
 slens_tmp=[OFT_MPI_PLEN,OFT_SLEN,OFT_PATH_SLEN,OFT_ERROR_SLEN]
 END SUBROUTINE oftpy_init
 !---------------------------------------------------------------------------------
+!> Get string lengths used by the compiled library (does not require initialization)
+!---------------------------------------------------------------------------------
+SUBROUTINE oftpy_get_slens(slens) BIND(C,NAME="oftpy_get_slens")
+TYPE(c_ptr), VALUE, INTENT(in) :: slens !< String lengths [OFT_MPI_PLEN,OFT_SLEN,OFT_PATH_SLEN,OFT_ERROR_SLEN] (4)
+INTEGER(i4), POINTER, DIMENSION(:) :: slens_tmp
+CALL c_f_pointer(slens, slens_tmp, [4])
+slens_tmp=[OFT_MPI_PLEN,OFT_SLEN,OFT_PATH_SLEN,OFT_ERROR_SLEN]
+END SUBROUTINE oftpy_get_slens
+!---------------------------------------------------------------------------------
 !> Needs docs
 !---------------------------------------------------------------------------------
 SUBROUTINE oftpy_load_xml(xml_file,oft_node_ptr) BIND(C,NAME="oftpy_load_xml")
