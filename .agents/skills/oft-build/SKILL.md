@@ -1,0 +1,224 @@
+---
+name: oft-build
+description: Configure, compile, rebuild, and install the Open FUSION Toolkit (OFT) from source. Use when OFT needs to be (re)built after changes to Fortran, C/C++, or Python wrapper code, when locating or setting up a build tree, when building external libraries with build_libs.py, or when building against Ubuntu system packages in a fresh sandbox.
+---
+
+# Building and installing OFT
+
+OFT uses a two-stage build: `src/utilities/build_libs.py` compiles third-party
+dependencies and writes `config_cmake.sh`, which runs CMake to create the OFT build
+tree. Throughout, `<config_dir>` is the directory holding `config_cmake.sh` (and the
+compiled external libraries), and `<build_dir>` is `<config_dir>/build_release`
+(`build_debug`, installing to `install_debug`, for `--oft_build_debug=1` configurations).
+
+## 1. Locate the build tree
+
+The build tree's location is chosen by the user and is **not** fixed by the project.
+**Do not assume `builds/build_release`.**
+
+- **User environments** (the normal case): several trees usually sit side by side, one per toolchain/parallelism combination, eg. `builds/GCC/MPI/` and `builds/LLVM/`, each with its own `config_cmake.sh`, external libraries, `build_release/`, and `install_release/`.
+- **CI/ephemeral environments**: a single flat tree — `<config_dir>` is `builds/`, `<build_dir>` is `builds/build_release`, installing to `builds/install_release`.
+
+```bash
+find builds -maxdepth 4 -name config_cmake.sh 2>/dev/null
+```
+
+If more than one is found, **ask the user which to use** — they may differ in compiler,
+MPI configuration, or build type, and some may be stale.
+
+If nothing is found, you are probably in a git worktree or second checkout: `builds/` is
+gitignored, so it is never copied into a new worktree. Look in the other checkouts of
+the repository (`git worktree list`; the first entry is the main checkout), and if that
+finds nothing, ask the user where their build trees are. Summarize each candidate so the
+user can choose:
+
+```bash
+grep -E 'COMPILER|OFT_USE_MPI|CMAKE_BUILD_TYPE' <config_dir>/config_cmake.sh
+grep -E 'OFT_PYTEST_EXE|CMAKE_HOME_DIRECTORY' <build_dir>/CMakeCache.txt
+```
+
+Then offer to reuse one through a sibling configuration (next section, which rebuilds
+OFT but not the external libraries) or to set up a new configuration from scratch
+(section 4). If no build tree exists anywhere, say so, ask which directory and options
+to use, and follow section 4; its Stage 1 takes 20–30 minutes, so confirm before
+starting. Use section 5 only if the environment qualifies as ephemeral as defined there.
+
+### Check which source tree it builds
+
+`CMAKE_HOME_DIRECTORY` in `<build_dir>/CMakeCache.txt` is the absolute path of the
+`src/` directory the tree compiles. In a `build_libs.py`-generated `config_cmake.sh` the
+same absolute path is also the script's last line (the hand-written system-library
+script in section 5 uses `$ROOT_PATH/../src` instead). In a git worktree, or any second
+checkout, an existing build tree usually points at the *main* checkout, so building it
+will not compile your changes. To build the current checkout
+without disturbing the user's tree, make a sibling configuration that reuses the same
+external libraries:
+
+```bash
+mkdir -p <new_config_dir>
+sed -e '$ s|[^ ].*|<this_checkout>/src|' \
+    -e 's|\$ROOT_PATH/\.\./setup_env\.sh|<config_dir>/../setup_env.sh|' \
+    <config_dir>/config_cmake.sh > <new_config_dir>/config_cmake.sh
+cd <new_config_dir> && bash config_cmake.sh
+```
+
+Use an absolute `<config_dir>`. `config_cmake.sh` uses `$(pwd)` for the build and install
+paths, and absolute paths for the external libraries, so the copy is self-contained. The
+second `sed` expression only matters for the system-library script in section 5, which
+sources `setup_env.sh` relative to its own directory; it changes nothing in scripts from
+`build_libs.py`. Afterwards, check that the `Found pytest:` line in the CMake output names
+the intended environment. Put `<new_config_dir>` somewhere gitignored (eg. under
+`builds/`) and tell the user where it is.
+
+## 2. Python environment
+
+Building (and testing) needs a Python environment with `pytest`, `numpy`, `scipy`,
+`h5py`, `netcdf4`, and `matplotlib`. CMake records the interpreter and `pytest` it finds
+at configure time, so the right environment must be active when `config_cmake.sh` runs.
+
+- **User environments**: there is no project-managed virtual environment. `oft_venv/` and `setup_env.sh` are **not** created by `build_libs.py`, are gitignored, and will not exist in a normal checkout. If either is present anyway, it was made by hand: do not source it without asking, and check that the venv it activates still exists. If the user has not already said which interpreter or environment to use, **ask them** — do not guess, and do not fall back to the system `python3`, which frequently lacks `numpy`/`h5py`. Carry the answer forward for the rest of the session.
+- **CI/ephemeral environments only**: the workflows create a venv at `oft_venv/` and write `source oft_venv/bin/activate` into `setup_env.sh` at the workspace root. `source setup_env.sh` is valid there, and only there.
+
+## 3. Rebuild after source changes (the common case)
+
+```bash
+cd <build_dir>
+make -j<N>          # compile; re-runs CMake automatically if CMake inputs changed
+make install        # only if something uses <config_dir>/install_release (see below)
+```
+
+- **Choosing `<N>`:** take the CPU count from `getconf _NPROCESSORS_ONLN`, not `nproc`, which returns `OMP_NUM_THREADS` when that is set (as it should be when running tests). On a shared machine, ask the user for a limit if you don't know one.
+- **Do not re-run `config_cmake.sh` just to rebuild.** It starts with `rm -rf build_release`, discarding the whole build tree and forcing a full recompile. Only re-run it to change CMake options or after the source path or external libraries change.
+- Regression tests run from the build tree (`<build_dir>/tests`, with `<build_dir>/python` for the Python package), so `make` alone is enough before running tests — see the `oft-test` skill.
+- `make install` is needed when using OFT from an arbitrary Python environment, via `OFT_ROOTPATH=<config_dir>/install_release` (the Python examples append `$OFT_ROOTPATH/python` to `sys.path`) or `PYTHONPATH=<config_dir>/install_release/python`.
+- Changing a Fortran function called from Python requires matching edits to `src/python/wrappers/*_f.F90` and `src/python/OpenFUSIONToolkit/*/_interface.py`; both are rebuilt/copied by `make`.
+- Files using `@VARIABLE@` substitution (`__init__.py`, `pyproject.toml.in`, `run_test.sh.in`, …) are generated at configure time — edit the template in `src/`, then `make`.
+
+## 4. Set up a new configuration from scratch
+
+### Stage 1: external libraries
+
+Run from the directory that will become `<config_dir>`, with the Python environment
+active. This downloads and compiles OpenBLAS, HDF5, METIS, etc., which takes 20–30
+minutes. Run it in the background with `--no_dl_progress` (download progress bars
+otherwise produce a very large amount of output) and its output sent to a log; check the
+exit code and `tail build_libs.log` when it finishes.
+
+`build_libs.py` takes its compilers from the `CC`, `CXX`, and `FC` environment
+variables (default `gcc`/`g++`/`gfortran`; `LD` and `CMAKE` are also honored). On macOS
+`gcc` is Apple clang, so pass Homebrew GCC explicitly. If the user already has a
+configuration, match its compilers and MPI choice (the `*_COMPILER` lines of its
+`config_cmake.sh`); otherwise ask which toolchain and MPI to use.
+
+```bash
+mkdir -p builds/GCC/MPI && cd builds/GCC/MPI   # one directory per configuration
+# Compilers shown are Homebrew GCC 16 on macOS; omit or adjust to the chosen toolchain
+CC=gcc-16 CXX=g++-16 FC=gfortran-16 \
+python <repo_root>/src/utilities/build_libs.py \
+  --nthread=4 --build_umfpack=1 --build_superlu=1 \
+  --build_arpack=1 --oft_build_tests=1 --build_mpich=1 \
+  --no_dl_progress > build_libs.log 2>&1
+```
+
+`python src/utilities/build_libs.py --help` lists every option. Commonly used ones:
+
+| Flag | Effect |
+|---|---|
+| `--oft_build_tests=1` | Build regression test executables (`OFT_BUILD_TESTS`; default off) |
+| `--oft_build_python={0,1}` | Build Python wrappers (`OFT_BUILD_PYTHON`; default on) |
+| `--build_mpich=1` / `--build_openmpi=1` | Build MPI and enable `OFT_USE_MPI` |
+| `--oft_use_openmp={0,1}` | OpenMP support (default on) |
+| `--oft_build_debug=1` | Debug build (runtime checks on; tests get 4× timeouts) |
+| `--oft_build_examples=1` | Build examples (`OFT_BUILD_EXAMPLES`) |
+| `--oft_build_docs=1` | Build Doxygen documentation (`OFT_BUILD_DOCS`) |
+| `--build_arpack=1`, `--build_superlu=1`, `--build_superlu_dist=1`, `--build_umfpack=1`, `--build_petsc=1` | Optional solver libraries |
+
+### Stage 2: configure, build, install
+
+```bash
+# In <config_dir>, beside config_cmake.sh
+bash config_cmake.sh        # runs cmake, creates <config_dir>/build_release/
+cd build_release
+make -j<N>
+make install                 # installs to <config_dir>/install_release/
+```
+
+## 5. Ephemeral agent environments
+
+`.github/workflows/copilot-setup-steps.yml` mirrors the Ubuntu 24.04 GCC 14 + OpenMP + MPICH CI
+configuration. After it runs, the environment has `gcc-14`/`g++-14`/`gfortran-14`, a
+venv at `oft_venv/` (activated by `source setup_env.sh`), external libraries pre-built
+in `builds/`, and OFT installed in `builds/install_release/` — the flat layout.
+
+### Building against system libraries (Ubuntu 24.04)
+
+When no pre-built `builds/` directory exists (eg. a fresh cloud sandbox, or one where
+`build_libs.py` cannot download dependencies), building against distribution packages is
+much faster. This skips Stage 1 and writes `config_cmake.sh` by hand so the tree still
+matches the layout above. It uses the flat layout and creates the `oft_venv/` +
+`setup_env.sh` pair, so **do not use it in a user checkout without asking**. Treat the
+environment as ephemeral only if there is no `builds/` directory, you are in a
+disposable container (eg. a cloud agent sandbox or CI runner), and the task did not name
+an existing environment; otherwise ask before installing system packages or creating
+`oft_venv/`.
+
+```bash
+apt-get update
+apt-get install -y --no-install-recommends gfortran libopenmpi-dev openmpi-bin \
+  libarpack2-dev libparpack2-dev libsuperlu-dev libhdf5-dev libxml2-dev \
+  libopenblas-dev liblapack-dev libmetis-dev
+
+# From the repository root: Python venv for tests
+python3 -m venv oft_venv
+echo "source $PWD/oft_venv/bin/activate" > setup_env.sh
+source setup_env.sh
+python -m pip install pytest numpy scipy h5py netcdf4 matplotlib
+
+# Write config_cmake.sh into <config_dir>, mirroring what build_libs.py generates
+mkdir -p builds && cd builds
+cat > config_cmake.sh <<'EOF'
+ROOT_PATH=$(pwd)
+BUILD_DIR=$ROOT_PATH/build_release
+INSTALL_DIR=$ROOT_PATH/install_release
+
+# Activate the venv so the configured pytest is the one in it, however the script is run
+source $ROOT_PATH/../setup_env.sh || { echo "config_cmake.sh: setup_env.sh not found" >&2; exit 1; }
+
+rm -rf $BUILD_DIR
+mkdir $BUILD_DIR && cd $BUILD_DIR
+
+cmake \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX:PATH=$INSTALL_DIR \
+  -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DCMAKE_Fortran_COMPILER=gfortran \
+  -DOFT_USE_MPI:BOOL=TRUE -DOFT_USE_OpenMP:BOOL=TRUE -DOFT_BUILD_TESTS:BOOL=TRUE \
+  -DBLA_VENDOR=OpenBLAS \
+  -DOFT_ARPACK_ROOT=/usr -DOFT_SUPERLU_ROOT=/usr \
+  -DOFT_PYTEST_EXE=$(which pytest) \
+  $ROOT_PATH/../src
+EOF
+
+bash config_cmake.sh
+cd build_release && make -j$(getconf _NPROCESSORS_ONLN)
+```
+
+On a 4-core sandbox, configuring takes about 15 s and compiling about 4 minutes.
+
+Notes for this configuration:
+- Optional libraries are only searched for when the corresponding `OFT_<LIB>_ROOT` is set, so set it to `/usr` for system packages. SuperLU (`libsuperlu-dev`) is the baseline and is included above; SuperLU-DIST and UMFPACK are not. Install `libsuperlu-dist-dev` or `libsuitesparse-dev` and add `-DOFT_SUPERLU_DIST_ROOT=/usr` or `-DOFT_UMFPACK_ROOT=/usr` only if a specific test requires them.
+- Use the default `gcc`/`g++`/`gfortran` (GCC 13) so the compilers match the ones Ubuntu used to build the OpenMPI Fortran modules.
+- Ubuntu ships HDF5 1.10, which lacks the Fortran file-space-strategy API (added in 1.14.3). OFT builds fine but persistent free-space tracking in HDF5 output files is disabled, and a warning is printed when it is requested.
+- OpenMPI refuses to run as root by default. In a root sandbox, prefix each test command with `OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1`, in the same command like `OMP_NUM_THREADS` (agent shells may not keep exported variables between calls), eg. `OMPI_ALLOW_RUN_AS_ROOT=1 OMPI_ALLOW_RUN_AS_ROOT_CONFIRM=1 OMP_NUM_THREADS=2 make test`.
+- When running tests, always set `OMP_NUM_THREADS` (`1` on one or two cores, otherwise `2`), as described in the `oft-test` skill.
+- `config_cmake.sh` sources `setup_env.sh` itself, so re-running it later resolves `pytest` from the venv rather than whatever happens to be on `PATH`. It stops with an error if `setup_env.sh` is missing, instead of configuring against the wrong `pytest`.
+- Expected `make test` results for this configuration (October 2026; counts drift as tests are added): about 906 passed, 337 skipped, 2 failed, in roughly 50 minutes on 4 cores. The skips are about 266 `Not compiled with PETSc` (PETSc is not included), 45 `Configuration not supported` (all `lin_alg/test_native_bjacobi.py`, for the missing SuperLU-DIST/MUMPS/UMFPACK), and 26 bare `Skipped` (MUG physics tests); see "Skips" in the `oft-test` skill. The failures are the two below.
+- Exact solver iteration counts can differ from CI's bundled MPICH/METIS. On Ubuntu OpenMPI 4.1.6 with distro METIS, `lin_alg/test_native_bjacobi.py::test_ILU_mpi4_nlocal2[0]` and `test_ILU_mpi4_nlocal2_part[0]` have been seen to fail with 76–77 iterations against 73/70 expected. Treat these as environment differences unless your change touches `lin_alg`.
+
+## 6. Python packaging
+
+Packaging builds use `src/python/make_package.sh.in` and `src/python/pyproject.toml.in`,
+configured during the CMake build for packaging builds (`build_libs.py --oft_package`,
+which sets `OFT_PACKAGE_BUILD`) when `OFT_PACKAGE_PYTHON` is on. `build_libs.py
+--oft_package_python={0,1}` sets `OFT_PACKAGE_PYTHON` (default on); turning it off also
+drops the macOS deployment-target requirement for package builds. Dependencies and scripts listed there supersede the lint-only
+`src/python/pyproject.toml`.

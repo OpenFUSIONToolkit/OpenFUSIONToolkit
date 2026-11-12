@@ -1,0 +1,8 @@
+# Python packages required by DIIID_NT_ballooning_GPEC_ex.ipynb, in addition to
+# OpenFUSIONToolkit itself. GPEC is a Julia package and is NOT installed from
+# here -- see README.md for how to obtain and instantiate it.
+numpy
+scipy
+matplotlib
+h5py
+jupyterlab

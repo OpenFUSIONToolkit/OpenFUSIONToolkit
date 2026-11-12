@@ -29,6 +29,37 @@ class tokamaker_settings_cstruct(c_struct):
                 ("opoint_target_weight", c_double),
                 ("limiter_file", ctypes.c_char_p)]
 
+class tokamaker_boot_ops_struct(c_struct):
+    r'''! Bootstrap current options for the jphi-split-bootstrap current profile update.
+
+     - `isolate_edge_jbs` Isolate the edge bootstrap spike from the bulk bootstrap current?
+     - `scale_jbs` Scaling factor applied to the field-aligned bootstrap current (the isolated spike if `isolate_edge_jbs`), not to jphi_pd; default 1.0
+     - `djbs_tol` Threshold on relative change in the bootstrap current to freeze it (default 1e-4)
+     - `diagnose_bs` Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration?
+     - `taper_edge_jphi` Taper all current components to zero at the LCFS (default False)
+     - `taper_edge_psi0` psi_N where the taper begins (standard: 0=axis, 1=LCFS; default 0.999)
+     - `taper_edge_shape` Taper shape: 1=cos²/Hann, 2=quintic smoothstep (default), 3=cubic power
+     - `saw_q_s` Sawtooth reset q on axis; 0 = off (default 0)
+     - `saw_dq` Reset regions end where the base q crosses saw_q_s + saw_dq (default 0.03)
+     - `saw_tol` Threshold on relative change in jphi_saw to freeze it (default 1e-4)
+     - `saw_relax` Under-relaxation of the jphi_saw update (default 1)
+     - `saw_ramp` Reset weight ramps over this q deficit below saw_q_s; 0 = hard trigger (default 0.01)
+     - `saw_rule` Reset rule: 1 fuse (axis to the sawtooth radius, FUSE's saw_crash!), 2 local (each dip, two-sided; default)
+    '''
+    _fields_ = [('isolate_edge_jbs', c_bool),
+                ('scale_jbs', c_double),
+                ('djbs_tol', c_double),
+                ('diagnose_bs', c_bool),
+                ('taper_edge_jphi', c_bool),
+                ('taper_edge_psi0', c_double),
+                ('taper_edge_shape', c_int),
+                ('saw_q_s', c_double),
+                ('saw_dq', c_double),
+                ('saw_tol', c_double),
+                ('saw_relax', c_double),
+                ('saw_ramp', c_double),
+                ('saw_rule', c_int)]
+
 # tokamaker_alloc(tMaker_ptr,mesh_ptr,error_str)
 tokamaker_alloc = ctypes_subroutine(oftpy_lib.tokamaker_alloc,
     [c_void_ptr_ptr, c_void_p, c_char_p])
@@ -45,9 +76,9 @@ tokamaker_equil_set = ctypes_subroutine(oftpy_lib.tokamaker_equil_set,
 tokamaker_setup_regions = ctypes_subroutine(oftpy_lib.tokamaker_setup_regions,
     [c_void_p, c_char_p, ctypes_numpy_array(float64,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(int32,1), ctypes_numpy_array(float64,2), c_int, c_char_p])
 
-# tokamaker_setup(tMaker_ptr,order,full_domain,ncoils,coil_Lmat,error_str)
+# tokamaker_setup(tMaker_ptr,fe_ptr,order,full_domain,ncoils,coil_Lmat,error_str)
 tokamaker_setup = ctypes_subroutine(oftpy_lib.tokamaker_setup,
-    [c_void_p, c_int, c_bool, c_int_ptr, c_double_ptr_ptr, c_char_p])
+    [c_void_p, c_void_ptr_ptr, c_int, c_bool, c_int_ptr, c_double_ptr_ptr, c_char_p])
 
 # tokamaker_destroy(tMaker_ptr,error_str)
 tokamaker_destroy = ctypes_subroutine(oftpy_lib.tokamaker_destroy,
@@ -73,16 +104,43 @@ tokamaker_get_profile_dofs = ctypes_subroutine(oftpy_lib.tokamaker_get_profile_d
 tokamaker_set_profile_dofs = ctypes_subroutine(oftpy_lib.tokamaker_set_profile_dofs,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
+# tokamaker_load_kinetic_profiles(tMaker_equil_ptr,te_file,ne_file,ti_file,ni_file,zeff_file,jphi_fixed_file,jphi_saw_file,error_str)
+tokamaker_load_kinetic_profiles = ctypes_subroutine(oftpy_lib.tokamaker_load_kinetic_profiles,
+    [c_void_p, c_char_p, c_char_p, c_char_p, c_char_p, c_char_p, c_char_p, c_char_p, c_char_p])
+
+# tokamaker_set_boot_ops(tMaker_equil_ptr,bops,error_str)
+tokamaker_set_boot_ops = ctypes_subroutine(oftpy_lib.tokamaker_set_boot_ops,
+    [c_void_p, ctypes.POINTER(tokamaker_boot_ops_struct), c_char_p])
+
+# tokamaker_get_boot_ops(tMaker_equil_ptr,bops,initialized,error_str)
+tokamaker_get_boot_ops = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_ops,
+    [c_void_p, ctypes.POINTER(tokamaker_boot_ops_struct), ctypes.POINTER(c_bool), c_char_p])
+
+# tokamaker_get_boot_prof(tMaker_equil_ptr,name,n,prof_ptr,error_str)
+tokamaker_get_boot_prof = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_prof,
+    [c_void_p, c_char_p, c_int_ptr, c_double_ptr_ptr, c_char_p])
+
+# tokamaker_get_boot_saw(tMaker_equil_ptr,saw_rho_m,saw_rho_out,saw_n_dips,error_str)
+tokamaker_get_boot_saw = ctypes_subroutine(oftpy_lib.tokamaker_get_boot_saw,
+    [c_void_p, c_double_ptr, c_double_ptr, c_int_ptr, c_char_p])
+
+# tokamaker_saw_reset_1d(n,rho,q,itor,area,c1,q_s,dq,ramp,rule,q_new,dj,wr,scal,ierr)
+tokamaker_saw_reset_1d = ctypes_subroutine(oftpy_lib.tokamaker_saw_reset_1d,
+    [c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1),
+     ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_double, c_double, c_double, c_int,
+     ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1),
+     ctypes_numpy_array(numpy.float64,1), c_int_ptr])
+
 # tokamaker_init_psi(tMaker_ptr,r0,z0,a,kappa,delta,rhs_source,error_str)
 tokamaker_init_psi = ctypes_subroutine(oftpy_lib.tokamaker_init_psi,
     [c_void_p, c_double, c_double, c_double, c_double, c_double, c_double_ptr, c_char_p])
 
 # tokamaker_solve(tMaker_ptr,vacuum,nl_its,error_str)
-tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve, 
+tokamaker_solve = ctypes_subroutine(oftpy_lib.tokamaker_solve,
     [c_void_p, c_bool, c_int_ptr, c_char_p])
 
 # tokamaker_vac_solve(tMaker_ptr,psi_in,rhs_source,error_str)
-tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve, 
+tokamaker_vac_solve = ctypes_subroutine(oftpy_lib.tokamaker_vac_solve,
     [c_void_p, ctypes_numpy_array(float64,1), c_double_ptr,  c_char_p])
 
 # tokamaker_setup_td(tMaker_ptr,dt,lin_tol,nl_tol,pre_plasma,error_str)
@@ -114,12 +172,20 @@ tokamaker_get_limiter = ctypes_subroutine(oftpy_lib.tokamaker_get_limiter,
 tokamaker_get_psi = ctypes_subroutine(oftpy_lib.tokamaker_get_psi,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_double_ptr, c_double_ptr, c_char_p])
 
+# tokamaker_get_field(tMaker_equil_ptr,vals,prof_type,error_str)
+tokamaker_get_field = ctypes_subroutine(oftpy_lib.tokamaker_get_field,
+    [c_void_p, ctypes_numpy_array(numpy.float64,2), c_int, c_char_p])
+
 # tokamaker_get_dels_curr(tMaker_equil_ptr,psi_vals,error_str)
 tokamaker_get_dels_curr = ctypes_subroutine(oftpy_lib.tokamaker_get_dels_curr,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
 # tokamaker_get_jtor(tMaker_equil_ptr,jtor,error_str)
 tokamaker_get_jtor = ctypes_subroutine(oftpy_lib.tokamaker_get_jtor,
+    [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
+
+# tokamaker_get_local_shear(tMaker_equil_ptr,shear,error_str)
+tokamaker_get_local_shear = ctypes_subroutine(oftpy_lib.tokamaker_get_local_shear,
     [c_void_p, ctypes_numpy_array(numpy.float64,1), c_char_p])
 
 # tokamaker_area_int(tMaker_ptr,vec_vals,reg_ind,result,error_str)
@@ -151,15 +217,20 @@ tokamaker_get_q = ctypes_subroutine(oftpy_lib.tokamaker_get_q,
     [c_void_p, c_int,ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,2),
      c_double_ptr, ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_char_p])
 
+# tokamaker_torflux_map(tMaker_equil_ptr,npts,xin,xout,jac,inverse,error_str)
+tokamaker_torflux_map = ctypes_subroutine(oftpy_lib.tokamaker_torflux_map,
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1),
+     ctypes_numpy_array(numpy.float64,1), c_bool, c_char_p])
+
 # tokamaker_get_fsa(tMaker_equil_ptr,npsi,psi_q,qvals,ravgs,fsa_avgs,shape_geo,error_str)
 tokamaker_get_fsa = ctypes_subroutine(oftpy_lib.tokamaker_get_fsa,
     [c_void_p, c_int,ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,2),
      ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,2), c_char_p])
 
-# tokamaker_sauter_fc(tMaker_equil_ptr,npsi,psi_saut,fc,r_avgs,modb_avgs,error_str)
+# tokamaker_sauter_fc(tMaker_equil_ptr,npsi,psi_saut,fc,r_avgs,modb_avgs,eps,error_str)
 tokamaker_sauter_fc = ctypes_subroutine(oftpy_lib.tokamaker_sauter_fc,
-    [c_void_p, c_int,ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,2),
-     ctypes_numpy_array(numpy.float64,2), c_char_p])
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,2),
+     ctypes_numpy_array(numpy.float64,2), ctypes_numpy_array(numpy.float64,1), c_char_p])
 
 # tokamaker_get_globals(tMaker_equil_ptr,Itor,centroid,vol,pvol,dflux,tflux,bp_vol,error_str)
 tokamaker_get_globals = ctypes_subroutine(oftpy_lib.tokamaker_get_globals,
@@ -171,7 +242,7 @@ tokamaker_gs_calc_vloop = ctypes_subroutine(oftpy_lib.tokamaker_gs_calc_vloop,
 
 # tokamaker_get_profs(tMaker_equil_ptr,npsi,psi_in,f,fp,p,pp,error_str)
 tokamaker_get_profs = ctypes_subroutine(oftpy_lib.tokamaker_get_profs,
-    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), 
+    [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1),
      ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p])
 
 # tokamaker_get_vfixed(tMaker_equil_ptr,npts,pts,fluxes,error_str)
@@ -182,9 +253,9 @@ tokamaker_get_vfixed = ctypes_subroutine(oftpy_lib.tokamaker_get_vfixed,
 tokamaker_get_field_eval = ctypes_subroutine(oftpy_lib.tokamaker_get_field_eval,
     [c_void_p, c_int, c_void_ptr_ptr, c_char_p])
 
-# tokamaker_apply_field_eval(tMaker_ptr,int_obj,int_type,pt,fbary_tol,cell,dim,field)
+# tokamaker_apply_field_eval(tMaker_ptr,int_obj,int_type,pt_ptr,npts,fbary_tol,dim,field)
 tokamaker_apply_field_eval = ctypes_subroutine(oftpy_lib.tokamaker_apply_field_eval,
-    [c_void_p, c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_double, c_int_ptr, c_int, ctypes_numpy_array(numpy.float64,1)])
+    [c_void_p, c_void_p, c_int, ctypes_numpy_array(numpy.float64,2), c_int, c_double, c_int, ctypes_numpy_array(numpy.float64,2)])
 
 # tokamaker_set_psi(tMaker_equil_ptr,psi_vals,update_bounds,error_str)
 tokamaker_set_psi = ctypes_subroutine(oftpy_lib.tokamaker_set_psi,
@@ -197,7 +268,7 @@ tokamaker_set_psi_dt = ctypes_subroutine(oftpy_lib.tokamaker_set_psi_dt,
 
 # tokamaker_set_settings(tMaker_ptr,settings,error_str)
 tokamaker_set_settings = ctypes_subroutine(oftpy_lib.tokamaker_set_settings,
-    [c_void_p, tokamaker_settings_cstruct, c_char_p])
+    [c_void_p, ctypes.POINTER(tokamaker_settings_cstruct), c_char_p])
 
 # tokamaker_set_dipole_a(tMaker_ptr,dipole_a,error_str)
 tokamaker_set_dipole_a = ctypes_subroutine(oftpy_lib.tokamaker_set_dipole_a,
@@ -252,9 +323,9 @@ tokamaker_save_eqdsk = ctypes_subroutine(oftpy_lib.tokamaker_save_eqdsk,
     [c_void_p, c_char_p, c_int, c_int, ctypes_numpy_array(numpy.float64,1), ctypes_numpy_array(numpy.float64,1), c_char_p,
      c_double, c_double, c_bool, c_char_p, c_double, c_int, c_char_p])
 
-# tokamaker_save_ifile(tMaker_equil_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
+# tokamaker_save_ifile(tMaker_equil_ptr,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs,psi_bounds,axis_pack,error_str)
 tokamaker_save_ifile = ctypes_subroutine(oftpy_lib.tokamaker_save_ifile,
-    [c_void_p, c_char_p, c_int, c_int, c_double, c_double, c_bool, c_bool, c_char_p])
+    [c_void_p, c_char_p, c_int, c_int, c_double, c_double, c_bool, c_bool, c_bool, c_bool, c_double, c_char_p])
 
 # tokamaker_save_mug(tMaker_equil_ptr,filename,error_str)
 tokamaker_save_mug = ctypes_subroutine(oftpy_lib.tokamaker_save_mug,
@@ -271,8 +342,8 @@ tokamaker_load_tokamaker = ctypes_subroutine(oftpy_lib.tokamaker_load_tokamaker,
 # tokamaker_set_coil_current_dist(tMaker_ptr,iCoil,curr_dist,dist_pointer,normalize,error_str)
 tokamaker_set_coil_current_dist = ctypes_subroutine(oftpy_lib.tokamaker_set_coil_current_dist,
     [c_void_p, c_int, ctypes_numpy_array(numpy.float64,1), c_double_ptr_ptr, c_bool, c_char_p])
-## @endcond
 
+## @endcond
 
 class TokaMaker_field_interpolator():
     '''! Interpolation class for Grad-Shafranov fields'''
@@ -285,31 +356,43 @@ class TokaMaker_field_interpolator():
         @param dim Dimension of vector field
         @param fbary_tol Tolerance for physical to logical mapping
         '''
-        self.cell = c_int(-1)
         self.int_type = int_type
-        self.dim_return = dim
+        self.dim = dim
         if dim == 2:
-            self.dim_eval = 3
+            self._dim_eval = 3
         else:
-            self.dim_eval = dim
-        self.val = numpy.zeros((self.dim_eval,), dtype=numpy.float64)
+            self._dim_eval = dim
+        self.val = numpy.zeros((self._dim_eval,), dtype=numpy.float64)
         self._tMaker_equil_obj = tMaker_equil_obj
         self._int_obj = int_obj
         self.fbary_tol = fbary_tol
-    
+
     def __del__(self):
         '''Destroy underlying interpolation object'''
-        pt_eval = numpy.zeros((3,), dtype=numpy.float64)
-        tokamaker_apply_field_eval(self._tMaker_equil_obj,self._int_obj,-self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim_eval,self.val)
+        pts_eval = numpy.zeros((1,1), dtype=numpy.float64)
+        vals_out = numpy.zeros((1,1), dtype=numpy.float64)
+        tokamaker_apply_field_eval(self._tMaker_equil_obj,self._int_obj,-self.int_type,pts_eval,1,self.fbary_tol,self._dim_eval,vals_out)
 
-    def eval(self,pt):
+    def eval(self,pts):
         '''! Evaluate field at a given location
 
         @param pt Location for evaluation [2]
         @result Field at evaluation point [self.dim_return]
         '''
-        pt_eval = numpy.zeros((3,), dtype=numpy.float64)
-        pt_eval[:2] = pt
-        tokamaker_apply_field_eval(self._tMaker_equil_obj,self._int_obj,self.int_type,pt_eval,self.fbary_tol,ctypes.byref(self.cell),self.dim_eval,self.val)
-        return self.val[:self.dim_return].copy()
+        pts = numpy.ascontiguousarray(pts, dtype=numpy.float64)
+        if pts.ndim == 1:
+            in_1d = True
+            npts = 1
+            pts = pts.reshape((1,pts.shape[0]))
+        else:
+            in_1d = False
+            npts = pts.shape[0]
+        pts_eval = numpy.zeros((npts,3), dtype=numpy.float64)
+        pts_eval[:,:2] = pts
+        vals_out = numpy.zeros((npts,self._dim_eval), dtype=numpy.float64)
+        tokamaker_apply_field_eval(self._tMaker_equil_obj,self._int_obj,self.int_type,pts_eval,npts,self.fbary_tol,self._dim_eval,vals_out)
+        if in_1d:
+            return vals_out[0,:self.dim].copy()
+        else:
+            return vals_out[:,:self.dim].copy()
 

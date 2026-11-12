@@ -1,0 +1,9 @@
+# Python packages required by kink_tearing_stability.ipynb, in addition to
+# OpenFUSIONToolkit itself. GPEC is a Julia package and is NOT installed from
+# here -- see README.md for how to obtain and instantiate it.
+numpy
+pandas
+matplotlib
+h5py
+juliacall
+jupyterlab

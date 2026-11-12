@@ -2242,8 +2242,8 @@ class TokaMaker_TORAX:
             myconfig['sources']['generic_heat']['P_total'] = (nbi_times, nbi_pow)
             myconfig['sources']['generic_heat']['gaussian_location'] = self._generic_heat_loc
             myconfig['sources']['generic_heat']['gaussian_width'] = self._generic_heat_width
-            myconfig['sources']['generic_heat']['absorption_fraction'] = self._generic_heat_absorption_fraction 
-            myconfig['sources']['generic_heat']['electron_heat_fraction'] = self._generic_heat_electron_heat_fraction 
+            myconfig['sources']['generic_heat']['absorption_fraction'] = self._generic_heat_absorption_fraction
+            myconfig['sources']['generic_heat']['electron_heat_fraction'] = self._generic_heat_electron_heat_fraction
 
             if self._use_nbi_current:
                 myconfig['sources'].setdefault('generic_current', {})
@@ -2257,7 +2257,7 @@ class TokaMaker_TORAX:
             myconfig['sources']['generic_particle']['deposition_location'] = self._generic_particle_location
             myconfig['sources']['generic_particle']['particle_width'] = self._generic_particle_width
             myconfig['sources']['generic_particle']['S_total'] = self._generic_particle_s_total
-            
+
         if self._ped_mode == 'off' and self._pedestal_config is None:
             # No pedestal: leave myconfig['pedestal'] unset (TORAX default no_pedestal).
             pass
@@ -2520,7 +2520,7 @@ class TokaMaker_TORAX:
 
         # Snapshot the loop-1 merged TORAX config (BASE_CONFIG + loaded config +
         # set_*() overrides, with applied defaults) for the reproduction file written
-        # by save_tmtx_config(). 
+        # by save_tmtx_config().
         if self._current_loop == 1 and getattr(self, '_tx_config_snapshot', None) is None:
             snap = copy.deepcopy(myconfig)
             # Geometry is rebuilt from the seeds on replay; keep only the radial grid
@@ -3045,7 +3045,7 @@ class TokaMaker_TORAX:
                 @param data_tree Result object from Torax.
                 @param tx_time If not None, use this time (s) for all TORAX extractions instead of
                        self._tm_times[i] (e.g. last TORAX output time after a failed run).
-                
+
         '''
         t = float(tx_time) if tx_time is not None else self._tm_times[i]
         # Profiles and the scalars derived from them come from one sawtooth phase (mid-cycle,
@@ -3343,7 +3343,7 @@ class TokaMaker_TORAX:
 
                 Ip_target = abs(self._state['Ip'][i])
                 P0_target = abs(self._state['pax'][i])
-        
+
                 self._tm.set_targets(Ip=Ip_target, pax=P0_target) # using pax target with j_phi inputs
                 self._tm.set_resistivity(eta_prof=self._state['eta_prof'][i])
 
@@ -3460,8 +3460,8 @@ class TokaMaker_TORAX:
                 # Set lcfs psi value target (from TORAX) only at midplane outboard side of lcfs.
                 self._tm.set_psi_constraints(omp_point, targets=np.array([lcfs_psi_target]),
                                              weights=np.array([self._psi_lcfs_weight])) # psi value target
-        
-        
+
+
                 self._tm.update_settings()
 
                 if prev_tm_idx is not None:
@@ -3550,7 +3550,7 @@ class TokaMaker_TORAX:
                         # targets mutated, so they are pushed again before each solve.
                         self._tm.set_targets(Ip=Ip_target, pax=P0_target)
                         self._tm.set_profiles(ffp_prof=ffp_level, pp_prof=pp_level, ffp_NI_prof=level_prof['ffp_ni'])
-                        
+
                         if self._output_mode == 'debug': # allows TM terminal outputs in debug mode
                             self._state['equil'][i], _nl_its = self._tm.solve(return_its=True)
                         else:
@@ -3917,7 +3917,7 @@ class TokaMaker_TORAX:
         # through the diverted phase (previously it went None, breaking the LCFS shape error).
         lcfs_tm = _trace_lcfs_for_evolution_plot(self._state['equil'][i])
         self._state['lcfs_geo_tm'][i] = np.asarray(lcfs_tm) if lcfs_tm is not None else None
-        
+
         try:
             x_pts, _ = self._state['equil'][i].get_xpoints()
             self._state['x_pts_tm'][i] = np.asarray(x_pts) if x_pts is not None else None
@@ -4214,7 +4214,7 @@ class TokaMaker_TORAX:
                        written automatically; call save_res() to persist it. In-memory self._results
                        is updated after each successful TORAX pass for any non-False mode.
                        End-of-run PNG/MP4 saves are skipped inside Jupyter notebooks.
-                
+
                        False / None — No output directory. Log only (TokaMaker_TORAX_log_tmp.log or
                        TokaMaker_TORAX_log_{run_name}_{timestamp}.log in cwd). No plots or config files.
 
@@ -4226,7 +4226,7 @@ class TokaMaker_TORAX:
                        failure: scalars_loop{N}_torax_failed.png and, if partial TORAX data exist,
                        profile_loop{N}_torax_failed_tfinal.png. No TORAX config .py files, no
                        per-timestep profile plots, no relax-profile figures.
-                
+
                        'normal' (also output_mode=True) — Per loop: scalars_loop{N}.png,
                        PLH_components_loop{N}.png, tm_summary_loop{N}.png; tx_config_loop{N}.py;
                        initial / inter-loop relax
@@ -4235,7 +4235,7 @@ class TokaMaker_TORAX:
                        profile_evolution.png and movie_loop{N}.mp4 (no lcfs_evolution.png).
                        Same failure plots as minimal. No tm_diag on successful solves, no
                        relax-profile figures.
-                
+
                        'debug' — All normal artifacts plus lcfs_evolution.png at end of run.
                        Initial / inter-loop relax: tx_relax_profiles_initial.png,
                        tx_relax_profiles_inter_loop{N}.png. Every TokaMaker timestep (success or fail):
@@ -5287,14 +5287,14 @@ class TokaMaker_TORAX:
 
         '''
         return plot_lcfs_evolution(self, save_path=save_path, display=display, one_plot=one_plot, **kwargs)
-    
+
     def plot_PLH_components(self, save_path=None, display=True, **kwargs):
         r'''! Plot the components of the PLH model (pedestal height, width, and core gradient) over time.
                 @param save_path Path to save figure. If None, does not save.
                 @param display Whether to show the plot.
         '''
         return plot_PLH_components(self, save_path=save_path, display=display)
-    
+
     def summary(self, **kwargs):
         r'''! Print/display a physics summary of the simulation.'''
         return summary(self, **kwargs)
@@ -8899,13 +8899,14 @@ def _init_TM_object(tmtx_config):
 
     myOFT = OFT_env(nthreads=tm_inputs.get('nthreads', 4))
     mygs  = TokaMaker(myOFT)
+    mygs.settings.maxits = tm_inputs.get('maxits', 100)
 
     mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh(tm_inputs['mesh_file'])
     # Series-wire coil groups. Every coil whose 'coil_set' field matches collapses into a
     # single TokaMaker DOF, and that DOF is the per-winding current I [A/turn], so grouped
     # coils carry the same conductor current for all time while their A-turns (I*nturns)
     # differ with their own turn counts -- exactly a series connection. This must happen
-    # before setup_regions, which is where the grouping is read.
+    # before setup_model, which is where the grouping is read.
     for _set_name, _members in tm_inputs.get('coil_groups', {}).items():
         _unknown = [m for m in _members if m not in coil_dict]
         if _unknown:
@@ -8913,10 +8914,7 @@ def _init_TM_object(tmtx_config):
                            f'mesh defines {list(coil_dict)}')
         for _member in _members:
             coil_dict[_member]['coil_set'] = _set_name
-    mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-    mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
-    mygs.settings.maxits = tm_inputs.get('maxits', 100)
-    mygs.setup(order=2, F0=tmtx_config['R0'] * tmtx_config['B0'])
+    mygs.setup_model(mesh_pts, mesh_lc, mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict, order=2, F0=tmtx_config['R0'] * tmtx_config['B0'])
 
     vsc = tm_inputs.get('vsc', None)
     if vsc is not None:

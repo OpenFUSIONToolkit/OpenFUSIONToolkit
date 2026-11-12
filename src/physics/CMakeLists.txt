@@ -12,7 +12,9 @@ set( OBJS
   tracing_2d.F90
   axi_green.F90
   grad_shaf.F90
+  grad_shaf_contour.F90
   grad_shaf_profiles.F90
+  grad_shaf_bootstrap.F90
   grad_shaf_prof_phys.F90
   grad_shaf_util.F90
   grad_shaf_fit.F90
@@ -20,6 +22,7 @@ set( OBJS
   thin_wall.F90
   thin_wall_solvers.F90
   thin_wall_hodlr.F90
+  mugtok_td.F90
 )
 
 add_library( oftphysics ${OBJS} )

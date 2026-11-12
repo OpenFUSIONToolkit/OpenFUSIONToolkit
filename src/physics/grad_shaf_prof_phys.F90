@@ -19,12 +19,13 @@ USE oft_la_base, ONLY: oft_vector
 USE fem_utils, ONLY: bfem_interp
 use oft_lag_basis, only: oft_blag_d2eval, oft_blag_geval
 USE oft_blag_operators, only: oft_lag_brinterp, oft_lag_bginterp
-use oft_gs, only: gs_equil, flux_func, gs_psi2r, gs_itor_nl, oft_indent, &
+use oft_gs, only: gs_equil, flux_func, gs_psi2r, oft_indent, &
   oft_increase_indent, oft_decrease_indent, gsinv_interp, gs_prof_interp, &
-  gs_get_qprof, gs_ani_press, gs_epsilon
+  gs_get_qprof, gs_ani_press, gs_epsilon, qprof_backend, gs_fpol
+use oft_gs_contour, only: gs_fsa_contour
 use tracing_2d, only: set_tracer, active_tracer, tracinginv_fs
 use oft_gs_profiles, only: spline_flux_func, linterp_flux_func, linterp_copy, &
-  spline_func_copy, spline_func_delete
+  spline_func_copy, spline_func_delete, phi_flux_wrapper
 use spline_mod
 USE mhd_utils, ONLY: mu0
 implicit none
@@ -56,7 +57,6 @@ end type mercier_flux_func
 !> Needs docs
 !------------------------------------------------------------------------------
 type, extends(linterp_flux_func) :: jphi_flux_func
-  integer(4) :: ngeom = 50 !< Number of points in psi for <R>, <1/R> evaluation
   real(8) :: j0 = 0.d0 !< LCFS Jphi value
   real(8) :: norm_last = 1.d0 !< Last Jphi normalization factor (for Ip target)
   real(8), pointer, dimension(:) :: jphi => NULL() !< Jphi(psi) profile values
@@ -71,7 +71,7 @@ contains
   procedure :: copy => jphi_copy
   !> Needs docs
   procedure :: delete => jphi_delete
-  !> Update F*F' profile from Jphi, P', and current equilibrium
+  !> Update F*F' profile from Jphi and current equilibrium state
   procedure :: update => jphi_update
 end type jphi_flux_func
 !------------------------------------------------------------------------------
@@ -501,7 +501,6 @@ SELECT TYPE(new)
   CLASS IS(jphi_flux_func)
     new%plasma_bounds=self%plasma_bounds
     new%f_offset=self%f_offset
-    new%ngeom = self%ngeom
     new%j0 = self%j0
     new%norm_last = self%norm_last
     ALLOCATE(new%jphi, SOURCE=self%jphi)
@@ -525,64 +524,45 @@ subroutine jphi_update(self,gseq)
 class(jphi_flux_func), intent(inout) :: self
 class(gs_equil), intent(inout) :: gseq
 INTEGER(i4) :: i
-REAL(r8) :: jphi_norm,pscale,pprime,dnorm
-REAL(r8), ALLOCATABLE :: ravgs(:,:),qtmp(:),psi_q(:)
-type(spline_type) :: R_spline
+REAL(r8) :: jphi_norm,pscale,pprime,ip0,ip1
+REAL(r8), ALLOCATABLE :: jtor(:),xpsi(:),ravgs(:,:),xn(:),jn(:)
 self%plasma_bounds=gseq%plasma_bounds
+CALL jphi_psi_nodes(self,xpsi)
 IF(gseq%mode/=1)CALL oft_abort("Jphi profile requires (F^2)' formulation","jphi_update",__FILE__)
 IF(gseq%Ip_target<0.d0)CALL oft_abort("Jphi profile requires Ip target","jphi_update",__FILE__)
 IF(gseq%pax_target<0.d0)CALL oft_abort("Jphi profile requires Pax target","jphi_update",__FILE__)
-!---Get updated flux surface geometry for Jphi -> F*F' mapping
-ALLOCATE(ravgs(self%ngeom+1,4),psi_q(self%ngeom+1),qtmp(self%ngeom+1))
-IF(gseq%diverted)THEN
-  psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
-  psi_q(1)=psi_q(2)
-  CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
-  psi_q(1)=0.d0
-  ravgs(1,1)=gseq%lim_point(1)
-  ravgs(1,2)=1.d0/gseq%lim_point(1)
-ELSE
-  psi_q=[(REAL(i-1,8)/REAL(self%ngeom,8),i=1,self%ngeom)]
-  CALL gs_get_qprof(gseq,self%ngeom,psi_q,qtmp,ravgs=ravgs)
-END IF
-! WRITE(*,*)'  <R>     = ',ravgs(2,1),ravgs(self%ngeom-2,1)
-! WRITE(*,*)'  <1/R>   = ',ravgs(2,2),ravgs(self%ngeom-2,2)
-CALL spline_alloc(R_spline,self%ngeom-1,2)
-R_spline%xs(0:self%ngeom-2)=psi_q; R_spline%xs(self%ngeom-1)=1.d0
-R_spline%fs(0:self%ngeom-2,1)=ravgs(1:self%ngeom-1,1); R_spline%fs(self%ngeom-1,1)=gseq%o_point(1)
-R_spline%fs(0:self%ngeom-2,2)=ravgs(1:self%ngeom-1,2); R_spline%fs(self%ngeom-1,2)=1.d0/gseq%o_point(1)
-CALL spline_fit(R_spline,"extrap")
-DEALLOCATE(ravgs,psi_q,qtmp)
-!---Update jphi normalization to match Ip target
-CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
-IF(gseq%skip_targets)THEN
-  CALL gs_itor_nl(gseq,jphi_norm)
-  dnorm=gseq%Ip_target/jphi_norm
-  jphi_norm=(1.d0+dnorm)*self%norm_last/2.d0
-  self%norm_last=jphi_norm
-ELSE
-  ALLOCATE(qtmp(self%npsi))
-  DO i=1,self%npsi
-    CALL spline_eval(R_spline,self%x(i),0)
-    qtmp(i) = R_spline%f(1)*R_spline%f(2)
-  END DO
-  CALL gs_flux_int(gseq,self%x,self%jphi/qtmp,self%npsi,jphi_norm)
-  DEALLOCATE(qtmp)
-  jphi_norm=ABS(gseq%Ip_target)/jphi_norm
-  self%norm_last=jphi_norm
-END IF
+!---Flux surface geometry for Jphi -> F*F' mapping at the LCFS (row 0) and nodes
+ALLOCATE(ravgs(0:self%npsi,3))
+CALL gs_ravgs(gseq, self%npsi+1, [0.d0, xpsi], ravgs)
+IF(gs_ravgs_failed(gseq, xpsi, ravgs, 'jphi_update'))RETURN
 !---Get pressure profile
-IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__) !CALL gseq%P_ani%update(gseq)
+CALL gseq%P%update(gseq) ! Make sure pressure profile is up to date with EQ
+IF(ASSOCIATED(gseq%P_ani))CALL oft_abort('Jphi profiles do not support anistopic pressure','jphi_update',__FILE__)
 pscale=gseq%P%f(gseq%plasma_bounds(2))
 pscale=gseq%pax_target/pscale
+!---Update jphi normalization to match Ip target: the exact I_p (A9c) is affine in the jphi scale,
+!   I_p(norm) = ip0 + norm*(ip1 - ip0); past the last node jphi is held, as F*F' is
+ALLOCATE(xn(0:self%npsi),jn(0:self%npsi),jtor(0:self%npsi))
+xn=[0.d0,xpsi]; jn=[self%j0,self%jphi]
+CALL eval_dIdA(gseq, xn, self%npsi+1, ravgs, jn, pscale, jtor)
+CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip1,extrap=1)
+jn=0.d0
+CALL eval_dIdA(gseq, xn, self%npsi+1, ravgs, jn, pscale, jtor)
+CALL gs_flux_int(gseq,xn,jtor,self%npsi+1,ip0,extrap=1)
+DEALLOCATE(xn,jn,jtor)
+IF(ABS(ip1-ip0)>0.d0)THEN
+  jphi_norm=(ABS(gseq%Ip_target)-ip0)/(ip1-ip0)
+ELSE
+  CALL oft_warn("jphi_update: jphi profile carries no (finite) net current, keeping the last normalization")
+  jphi_norm=self%norm_last
+END IF
+self%norm_last=jphi_norm
 !---Compute updated F*F' profile ! 2.0*(jtor -  R_avg * (-pprime)) * (mu0 / one_over_R_avg)
-CALL spline_eval(R_spline,0.d0,0)
 pprime=gseq%P%fp(gseq%plasma_bounds(1))
-self%y0 = 2.d0*(self%j0*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
+self%y0 = 2.d0*(self%j0*jphi_norm - ravgs(0,1)*pprime*pscale)/ravgs(0,2)
 DO i=1,self%npsi
-  CALL spline_eval(R_spline,self%x(i),0)
-  pprime=gseq%P%fp(self%x(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
-  self%yp(i) = 2.d0*(self%jphi(i)*jphi_norm - R_spline%f(1)*pprime*pscale)/R_spline%f(2)
+  pprime=gseq%P%fp(xpsi(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
+  self%yp(i) = 2.d0*(self%jphi(i)*jphi_norm - ravgs(i,1)*pprime*pscale)/ravgs(i,2)
 END DO
 ! Disable Ip matching and fix F*F' scale (matching is done here instead)
 gseq%skip_targets=.TRUE.
@@ -590,23 +570,51 @@ gseq%skip_targets=.TRUE.
 gseq%ffp_scale=1.d0
 gseq%p_scale=pscale
 !---Clean up
-CALL spline_dealloc(R_spline)
+DEALLOCATE(ravgs)
 i=self%set_cofs(self%yp)
 end subroutine jphi_update
+!------------------------------------------------------------------------------
+!> Node locations in normalized poloidal flux (`x` mapped from toroidal flux if wrapped)
+!------------------------------------------------------------------------------
+SUBROUTINE jphi_psi_nodes(self,xpsi,mapped)
+CLASS(jphi_flux_func), INTENT(inout) :: self
+REAL(r8), ALLOCATABLE, INTENT(out) :: xpsi(:) !< Node locations in \f$ 1-\hat{\psi} \f$
+LOGICAL, OPTIONAL, INTENT(out) :: mapped !< `.FALSE.` if on toroidal flux and the map is not built
+INTEGER(i4) :: i
+ALLOCATE(xpsi(self%npsi))
+xpsi=self%x
+IF(PRESENT(mapped))mapped=.TRUE.
+IF(.NOT.ASSOCIATED(self%phi_wrapper))RETURN
+SELECT TYPE(wrap=>self%phi_wrapper)
+  TYPE IS(phi_flux_wrapper)
+    IF(.NOT.wrap%val)CALL oft_abort('Jphi profiles on toroidal flux must use "phi_n_val"', &
+      'jphi_psi_nodes',__FILE__)
+    IF(.NOT.ASSOCIATED(wrap%map))CALL oft_abort('Profile on toroidal flux not attached, call torflux_setup', &
+      'jphi_psi_nodes',__FILE__)
+    IF(PRESENT(mapped))mapped=(wrap%map%ns>=2)
+    DO i=1,self%npsi
+      xpsi(i)=wrap%map%inv(self%x(i))
+    END DO
+END SELECT
+END SUBROUTINE jphi_psi_nodes
 !---------------------------------------------------------------------------------
-!> Needs docs
+!> Area integral over the plasma (inside the LCFS) of a flux function given on
+!! normalized psi nodes (0 at the LCFS, 1 at the axis)
 !---------------------------------------------------------------------------------
-SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result)
+SUBROUTINE gs_flux_int(self,psi_tmp,field_tmp,nvals,result,extrap)
 class(gs_equil), INTENT(inout) :: self !< Pointer to TokaMaker object
-REAL(r8), INTENT(in) :: psi_tmp(:) !< Needs docs
-REAL(r8), INTENT(in) :: field_tmp(:) !< Needs docs
-INTEGER(i4), INTENT(in) :: nvals
-REAL(r8), INTENT(out) :: result !< Needs docs
-INTEGER(i4) :: i,m
+REAL(r8), INTENT(in) :: psi_tmp(:) !< Normalised psi nodes (OFT convention)
+REAL(r8), INTENT(in) :: field_tmp(:) !< Flux function on @p psi_tmp
+INTEGER(i4), INTENT(in) :: nvals !< Number of nodes
+REAL(r8), INTENT(out) :: result !< Integral over the plasma cross-section
+INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Beyond the last node: 0 skip (default), 1 hold its value (see linterp)
+INTEGER(i4) :: i,m,extrap_loc
 REAL(r8) :: area,psitmp(1),sgop(3,3)
 TYPE(gs_prof_interp) :: prof_interp_obj
 ! DEBUG_STACK_PUSH
 !---Setup
+extrap_loc=0
+IF(PRESENT(extrap))extrap_loc=extrap
 result=0.d0
 prof_interp_obj%mode=4
 CALL prof_interp_obj%setup(self)
@@ -617,7 +625,8 @@ do i=1,self%device%mesh%nc
   do m=1,self%device%fe_rep%quad%np
     call self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
     call prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
-    psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),0)
+    IF(psitmp(1)<=0.d0)CYCLE ! Outside the plasma (mode 4 gives 0 outside the LCFS or gs_test_bounds)
+    psitmp(1)=linterp(psi_tmp,field_tmp,nvals,psitmp(1),extrap_loc)
     IF(psitmp(1)>-1.d98)result = result + psitmp(1)*area*self%device%fe_rep%quad%wts(m)
   end do
 end do
@@ -626,6 +635,199 @@ result=oft_mpi_sum(result)
 CALL prof_interp_obj%delete()
 ! DEBUG_STACK_POP
 END SUBROUTINE gs_flux_int
+!---------------------------------------------------------------------------------
+!> Area integrals of several flux functions inside each node's surface, in one quadrature
+!! pass (same quadrature as @ref gs_flux_int). cum(1,:) is the full plasma integral.
+!---------------------------------------------------------------------------------
+SUBROUTINE gs_flux_cumint(self,psi_tmp,fields,nvals,nf,cum,extrap)
+CLASS(gs_equil), INTENT(inout) :: self !< TokaMaker object
+INTEGER(i4), INTENT(in) :: nvals !< Number of nodes
+INTEGER(i4), INTENT(in) :: nf !< Number of fields
+REAL(r8), INTENT(in) :: psi_tmp(nvals) !< Nodes in normalized psi (0 at LCFS, 1 at axis), ascending
+REAL(r8), INTENT(in) :: fields(nvals,nf) !< Fields on the nodes
+REAL(r8), INTENT(out) :: cum(nvals,nf) !< Integral over psi >= psi_tmp(k) of each field
+INTEGER(i4), OPTIONAL, INTENT(in) :: extrap !< Beyond the last node: 0 skip (default), 1 hold its value (see linterp)
+INTEGER(i4), PARAMETER :: nblk_cells=64 !< Cells per block (fixed-order sums, independent of the thread count)
+INTEGER(i4) :: i,m,k,ib,nblk,inds(2),extrap_loc
+REAL(r8) :: area,psitmp(1),sgop(3,3),facs(2)
+REAL(r8), ALLOCATABLE :: bins(:,:),bblk(:,:,:)
+TYPE(gs_prof_interp) :: prof_interp_obj
+extrap_loc=0
+IF(PRESENT(extrap))extrap_loc=extrap
+nblk=(self%device%mesh%nc+nblk_cells-1)/nblk_cells
+ALLOCATE(bins(nvals,nf),bblk(nvals,nf,nblk))
+bblk=0.d0
+prof_interp_obj%mode=4
+CALL prof_interp_obj%setup(self)
+!$omp parallel do private(i,m,psitmp,sgop,area,inds,facs) schedule(dynamic,1)
+DO ib=1,nblk
+  DO i=(ib-1)*nblk_cells+1,MIN(ib*nblk_cells,self%device%mesh%nc)
+    IF(self%device%mesh%reg(i)/=1)CYCLE
+    DO m=1,self%device%fe_rep%quad%np
+      CALL self%device%mesh%jacobian(i,self%device%fe_rep%quad%pts(:,m),sgop,area)
+      CALL prof_interp_obj%interp(i,self%device%fe_rep%quad%pts(:,m),sgop,psitmp)
+      IF(psitmp(1)<=0.d0)CYCLE ! outside the plasma
+      CALL linterp_facs(psi_tmp,nvals,psitmp(1),inds,facs,extrap_loc)
+      IF(inds(1)<=0)CYCLE
+      area=area*self%device%fe_rep%quad%wts(m)
+      ! Lower node inds(2) is the innermost surface enclosing this point
+      bblk(inds(2),:,ib)=bblk(inds(2),:,ib)+(fields(inds(1),:)*facs(1)+fields(inds(2),:)*facs(2))*area
+    END DO
+  END DO
+END DO
+bins=0.d0
+DO ib=1,nblk
+  bins=bins+bblk(:,:,ib)
+END DO
+DEALLOCATE(bblk)
+DO k=1,nf
+  bins(:,k)=oft_mpi_sum(bins(:,k),nvals)
+END DO
+cum(nvals,:)=bins(nvals,:)
+DO k=nvals-1,1,-1
+  cum(k,:)=cum(k+1,:)+bins(k,:)
+END DO
+CALL prof_interp_obj%delete()
+DEALLOCATE(bins)
+END SUBROUTINE gs_flux_cumint
+!------------------------------------------------------------------------------
+!> Flux surface averages <R>, <1/R>, <1/R^2> on normalized psi nodes (0 at the LCFS, 1 at the axis)
+!!
+!! The axis takes its exact limit (the O-point values). Other nodes use contour quadrature
+!! (@ref oft_gs_contour::gs_fsa_contour), tracing only surfaces it cannot close (all when
+!! `qprof_backend=1`, testing). The LCFS of a diverted plasma is evaluated `psi_pad` inside it
+!! (q is singular on it, and the averages approach their X-point limits only logarithmically); a limited
+!! LCFS is traced on it, and retried `psi_pad` inside if that fails. Nodes that fail both methods take
+!! the averages of the nearest node that did not; non-finite nodes are skipped (see @ref gs_ravgs_failed).
+!------------------------------------------------------------------------------
+SUBROUTINE gs_ravgs(gseq, n, psi_vals, ravgs, qa)
+CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+INTEGER(i4), INTENT(in) :: n !< Number of nodes
+REAL(r8), INTENT(in) :: psi_vals(n) !< Node locations
+REAL(r8), INTENT(out) :: ravgs(n,3) !< <R>, <1/R>, <1/R^2> at each node
+REAL(r8), OPTIONAL, INTENT(out) :: qa(n,2) !< q and dA/dpsi_N at the nodes inside the LCFS closed by the contour pass, else 0
+REAL(r8), PARAMETER :: psi_pad = 1.d-3 !< Offset inside a diverted LCFS, or a limited one whose trace failed
+REAL(r8) :: psi_q(n)
+LOGICAL :: ok(n), retry(n)
+INTEGER(i4) :: k, m
+psi_q = psi_vals
+IF(gseq%diverted)WHERE(psi_q <= 0.d0)psi_q = psi_pad
+ravgs = 0.d0
+IF(PRESENT(qa))qa = 0.d0
+!---Axis: exact limit
+WHERE(psi_q >= 1.d0)
+  ravgs(:,1) = gseq%o_point(1)
+  ravgs(:,2) = 1.d0/gseq%o_point(1)
+  ravgs(:,3) = 1.d0/gseq%o_point(1)**2
+END WHERE
+!---Other finite nodes; a limited LCFS whose trace failed is retried psi_pad inside
+CALL eval_surfs((psi_q < 1.d0).AND.(ABS(psi_q) < HUGE(1.d0)))
+retry = (psi_q <= 0.d0).AND.(.NOT.(ravgs(:,2) > 0.d0))
+IF(ANY(retry))THEN
+  WHERE(retry)psi_q = psi_pad
+  CALL eval_surfs(retry)
+END IF
+IF(PRESENT(qa))THEN ! Only on the nodes themselves (not at the LCFS offset)
+  WHERE(psi_vals <= 0.d0)
+    qa(:,1) = 0.d0; qa(:,2) = 0.d0
+  END WHERE
+END IF
+!---Nodes that failed both methods (zero averages) take the averages of the nearest node that did not
+ok = (ravgs(:,2) > 0.d0)
+IF(ALL(ok).OR.(.NOT.ANY(ok)))RETURN ! None: no equilibrium yet, the caller sees zeros
+DO k=1,n
+  IF(ok(k))CYCLE
+  DO m=1,n
+    IF(k-m>=1)THEN
+      IF(ok(k-m))THEN
+        ravgs(k,:)=ravgs(k-m,:); EXIT
+      END IF
+    END IF
+    IF(k+m<=n)THEN
+      IF(ok(k+m))THEN
+        ravgs(k,:)=ravgs(k+m,:); EXIT
+      END IF
+    END IF
+  END DO
+END DO
+CONTAINS
+!---Contour averages on the nodes in todo, then the tracer for those it cannot close
+SUBROUTINE eval_surfs(todo)
+LOGICAL, INTENT(in) :: todo(n)
+INTEGER(i4) :: nt, nf, j
+REAL(r8) :: dpsi
+REAL(r8), ALLOCATABLE :: pq(:), qf(:), avgs(:,:), rtr(:,:), qtr(:), qc(:,:)
+LOGICAL, ALLOCATABLE :: done(:)
+nt = COUNT(todo)
+IF(nt==0)RETURN
+ALLOCATE(pq(nt), qf(nt), avgs(nt,4), done(nt))
+pq = PACK(psi_q, todo)
+avgs = 0.d0
+done = .FALSE.
+IF(qprof_backend/=1)CALL gs_fsa_contour(gseq, nt, pq, qf, avgs, done)
+IF(PRESENT(qa))THEN
+  ALLOCATE(qc(nt,2))
+  qc = 0.d0
+  dpsi = gseq%plasma_bounds(2) - gseq%plasma_bounds(1)
+  DO j=1,nt
+    IF(.NOT.done(j))CYCLE
+    qc(j,1) = ABS(qf(j)*gs_fpol(gseq, gseq%plasma_bounds(1) + pq(j)*dpsi))
+    qc(j,2) = ABS(avgs(j,2)*avgs(j,4)*dpsi)/(2.d0*pi)
+  END DO
+  DO j=1,2
+    qa(:,j) = UNPACK(qc(:,j), todo, qa(:,j))
+  END DO
+END IF
+nf = COUNT(.NOT.done)
+IF(nf>0)THEN
+  ALLOCATE(rtr(nf,4), qtr(nf))
+  rtr = 0.d0
+  CALL gs_get_qprof(gseq, nf, PACK(pq, .NOT.done), qtr, ravgs=rtr, trace_only=.TRUE.)
+  DO j=1,3
+    avgs(:,j) = UNPACK(rtr(:,j), .NOT.done, avgs(:,j))
+  END DO
+END IF
+DO j=1,3
+  ravgs(:,j) = UNPACK(avgs(:,j), todo, ravgs(:,j))
+END DO
+END SUBROUTINE eval_surfs
+END SUBROUTINE gs_ravgs
+!------------------------------------------------------------------------------
+!> True, with a warning and `gseq%prof_failed` set (the solve ends with error -10), if a node is
+!! non-finite or its flux-surface averages from @ref gs_ravgs are not positive and finite
+!------------------------------------------------------------------------------
+FUNCTION gs_ravgs_failed(gseq, psi_vals, ravgs, caller) RESULT(failed)
+CLASS(gs_equil), INTENT(inout) :: gseq !< G-S object
+REAL(r8), INTENT(in) :: psi_vals(:) !< Node locations
+REAL(r8), INTENT(in) :: ravgs(:,:) !< <R>, <1/R>, <1/R^2> at each node
+CHARACTER(LEN=*), INTENT(in) :: caller !< Calling routine, for the warning
+LOGICAL :: failed
+failed = .NOT.(ALL(ABS(psi_vals) < HUGE(1.d0)).AND.ALL((ravgs(:,2) > 0.d0).AND.(ravgs(:,2) < HUGE(1.d0))))
+IF(failed)THEN
+  CALL oft_warn(caller//': flux-surface evaluation failed on a profile node')
+  gseq%prof_failed = .TRUE.
+END IF
+END FUNCTION gs_ravgs_failed
+!------------------------------------------------------------------------------
+!> Current per unit cross-section area, dI/dA = <j_phi/R>/<1/R>, from TokaMaker jphi = <j_phi> on the psi_N grid psi_vals
+!! (OFT convention), eq. A5 of doc_tokamaker_current_conventions; gs_flux_int of the result is
+!! exactly I_p (eq. A9c). jphi and P'*pscale must share units.
+!------------------------------------------------------------------------------
+SUBROUTINE eval_dIdA(gseq, psi_vals, n, ravgs, jphi, pscale, jtor)
+CLASS(gs_equil), INTENT(inout) :: gseq !< Equilibrium
+INTEGER(i4), INTENT(in) :: n !< Number of nodes
+REAL(r8), INTENT(in) :: psi_vals(n) !< Normalised psi nodes (OFT convention)
+REAL(r8), INTENT(in) :: ravgs(n,3) !< <R>, <1/R>, <1/R^2> at psi_vals (@ref gs_ravgs)
+REAL(r8), INTENT(in) :: jphi(n) !< TokaMaker jphi = <j_phi> at psi_vals
+REAL(r8), INTENT(in) :: pscale !< Pressure scale applied to P'
+REAL(r8), INTENT(out) :: jtor(n) !< <j_phi/R>/<1/R>
+INTEGER(i4) :: i
+REAL(r8) :: pprime
+DO i = 1, n
+  pprime = pscale*gseq%P%fp(psi_vals(i)*(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))+gseq%plasma_bounds(1))
+  jtor(i) = (pprime + ravgs(i,3)*(jphi(i) - ravgs(i,1)*pprime)/ravgs(i,2))/ravgs(i,2)
+END DO
+END SUBROUTINE eval_dIdA
 !---------------------------------------------------------------------------------
 !> Needs Docs
 !------------------------------------------------------------------------------

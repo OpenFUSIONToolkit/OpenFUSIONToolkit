@@ -27,22 +27,13 @@ USE oft_blag_operators, ONLY: oft_blag_project, oft_lag_brinterp, oft_lag_bginte
 USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer
 USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_factory, flux_func, gs_dflux, gs_itor_nl, gs_test_bounds, gs_b_interp, &
-  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds
+  gsinv_interp, gs_psi2r, gs_psi2pt, gs_epsilon, gs_update_bounds, gs_bcrosskappa, qprof_backend, gs_fpol, gs_ffprim_pprime
+USE oft_gs_contour, ONLY: gs_rays_contour
 USE oft_gs_profiles
-USE grad_shaf_prof_phys, ONLY: create_jphi_ff, jphi_flux_func
+USE grad_shaf_prof_phys, ONLY: jphi_flux_func
+USE grad_shaf_bootstrap, ONLY: jphi_bs_flux_func
 IMPLICIT NONE
 #include "local.h"
-!------------------------------------------------------------------------------
-!> Need docs
-!------------------------------------------------------------------------------
-type, extends(gsinv_interp) :: sauter_interp
-  logical :: stage_1 = .FALSE.
-  real(8) :: bmax = -1.d0
-  real(8) :: mag_axis(2) = 0.d0
-contains
-  !> Reconstruct the gradient of a Lagrange scalar field
-  procedure :: interp => sauter_apply
-end type sauter_interp
 !
 CLASS(gs_factory), POINTER :: gs_fit => NULL()
 CLASS(flux_func), POINTER :: ff_fit => NULL()
@@ -68,12 +59,26 @@ SELECT CASE(TRIM(profType))
     ALLOCATE(mlinterp_flux_func::F)
   CASE("jphi-linterp")
     ALLOCATE(jphi_flux_func::F)
+  CASE("jphi-split-bootstrap")
+    ALLOCATE(jphi_bs_flux_func::F)
   CASE("wesson")
     ALLOCATE(wesson_flux_func::F)
   CASE DEFAULT
     CALL oft_abort('Invalid profile type.','gs_profile_load',__FILE__)
 END SELECT
 END SUBROUTINE gs_profile_alloc
+!---------------------------------------------------------------------------------
+!> Wrap a loaded flux function if it was saved on toroidal flux (HDF5 `COORD`, default psi_n)
+!---------------------------------------------------------------------------------
+SUBROUTINE gs_profile_load_coord(F,filename,path)
+CLASS(flux_func), POINTER, INTENT(inout) :: F !< Flux function object
+CHARACTER(LEN=*), INTENT(in) :: filename !< HDF5 file
+CHARACTER(LEN=*), INTENT(in) :: path !< Profile group path
+INTEGER(i4) :: coord
+coord=0
+IF(hdf5_field_exist(filename,path//'/COORD'))CALL hdf5_read(coord,filename,path//'/COORD')
+CALL torflux_wrap(F,coord)
+END SUBROUTINE gs_profile_load_coord
 !---------------------------------------------------------------------------------
 !> Create flux function object from definition file
 !---------------------------------------------------------------------------------
@@ -86,13 +91,30 @@ INTEGER(4) :: io_unit
 ! REAL(8), ALLOCATABLE, DIMENSION(:) :: cofs,yvals
 ! INTEGER(4) :: ncofs,npsi,io_unit
 ! LOGICAL :: zero_grad
-CHARACTER(LEN=15) :: profType
-!---
+CHARACTER(LEN=32) :: profType,coordType
+CHARACTER(LEN=128) :: line
+INTEGER(i4) :: ios
+!---First line: "<type> [coord]"
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
-READ(io_unit,*)profType
+READ(io_unit,'(A)')line
+coordType='psi_n'
+READ(line,*,IOSTAT=ios)profType,coordType
+IF(ios/=0)THEN
+  READ(line,*)profType
+  coordType='psi_n'
+END IF
 CALL gs_profile_alloc(profType,F)
 CALL F%load(io_unit)
 CLOSE(io_unit)
+SELECT CASE(TRIM(coordType))
+  CASE("psi_n")
+  CASE("phi_n_deriv")
+    CALL torflux_wrap(F,1)
+  CASE("phi_n_val")
+    CALL torflux_wrap(F,2)
+  CASE DEFAULT
+    CALL oft_abort('Invalid profile coordinate "'//TRIM(coordType)//'"','gs_profile_load',__FILE__)
+END SELECT
 ! !---
 ! SELECT CASE(TRIM(profType))
 !   CASE("zero")
@@ -197,10 +219,10 @@ real(8), intent(out) :: pvol !< \f$ \int P dV \f$
 real(8), intent(out) :: dflux !< Diamagnetic flux
 real(8), intent(out) :: tflux !< Contained toroidal flux
 real(8), intent(out) :: bp_vol !< \f$ \int B_p^2 dV \f$
-type(oft_lag_brinterp) :: psi_eval
+type(oft_lag_brinterp) :: psi_eval,bcross_kappa_fun
 type(oft_lag_bginterp) :: psi_geval
-real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3)
-real(8) :: pt(3),curr_cent(2),Btor,Bpol(2)
+real(8) :: itor_loc,goptmp(3,3),v,psitmp(1),gpsitmp(3),fpsi
+real(8) :: pt(3),curr_cent(2),Btor,Bpol(2),pani(2),bcross_kappa(1)
 integer(4) :: i,m
 class(oft_bmesh), pointer :: smesh
 type(gs_factory), pointer :: device
@@ -210,6 +232,13 @@ smesh=>device%mesh
 psi_eval%u=>self%psi
 CALL psi_eval%setup(device%fe_rep)
 CALL psi_geval%shared_setup(psi_eval)
+IF(ASSOCIATED(self%P_ani))THEN
+  CALL self%psi%new(bcross_kappa_fun%u)
+  CALL gs_bcrosskappa(self,bcross_kappa_fun%u)
+  CALL bcross_kappa_fun%setup(device%fe_rep)
+ELSE
+  NULLIFY(bcross_kappa_fun%u)
+END IF
 !---
 itor = 0.d0
 centroid = 0.d0
@@ -218,7 +247,7 @@ vol = 0.d0
 dflux = 0.d0
 tflux = 0.d0
 bp_vol = 0.d0
-!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,Btor,Bpol) &
+!$omp parallel do private(m,goptmp,v,psitmp,gpsitmp,pt,itor_loc,fpsi,Btor,Bpol,bcross_kappa,pani) &
 !$omp reduction(+:itor) reduction(+:centroid) reduction(+:pvol) reduction(+:vol) reduction(+:dflux) &
 !$omp reduction(+:tflux) reduction(+:bp_vol)
 do i=1,smesh%nc
@@ -230,12 +259,19 @@ do i=1,smesh%nc
     pt=smesh%log2phys(i,device%fe_rep%quad%pts(:,m))
     !---Compute Magnetic Field
     IF(gs_test_bounds(self,pt))THEN
+      fpsi=self%I%F(psitmp(1))
       IF(self%mode==0)THEN
-        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
-        + self%I%Fp(psitmp(1))*((self%ffp_scale**2)*self%I%f(psitmp(1))+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon))
+        itor_loc = self%I%Fp(psitmp(1))*((self%ffp_scale**2)*fpsi+self%ffp_scale*self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        itor_loc = (self%p_scale*pt(1)*self%P%Fp(psitmp(1)) &
-        + .5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon))
+        itor_loc = 0.5d0*self%ffp_scale*self%I%Fp(psitmp(1))/(pt(1)+gs_epsilon)
+      END IF
+      ! Handle anisotropic pressure
+      IF(ASSOCIATED(self%P_ani))THEN
+        CALL self%P_ani%interp(i,device%fe_rep%quad%pts(:,m),goptmp,pani)
+        CALL bcross_kappa_fun%interp(i,device%fe_rep%quad%pts(:,m),goptmp,bcross_kappa)
+        itor_loc = itor_loc + self%p_scale*pt(1)*(self%P%fp(psitmp(1))*pani(2)+self%P%f(psitmp(1))*(pani(1)-pani(2))*bcross_kappa(1))
+      ELSE
+        itor_loc = itor_loc + self%p_scale*pt(1)*self%P%Fp(psitmp(1))
       END IF
       itor = itor + itor_loc*v*device%fe_rep%quad%wts(m)
       centroid = centroid + itor_loc*pt(1:2)*v*device%fe_rep%quad%wts(m)
@@ -243,9 +279,9 @@ do i=1,smesh%nc
       vol = vol + v*device%fe_rep%quad%wts(m)*pt(1)
       !---Compute total toroidal Field
       IF(self%mode==0)THEN
-        Btor = (self%ffp_scale*(self%I%F(psitmp(1))) + self%I%f_offset)/(pt(1)+gs_epsilon)
+        Btor = (self%ffp_scale*fpsi + self%I%f_offset)/(pt(1)+gs_epsilon)
       ELSE
-        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2))/(pt(1)+gs_epsilon)
+        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*fpsi + self%I%f_offset**2))/(pt(1)+gs_epsilon)
       END IF
       tflux = tflux + Btor*v*device%fe_rep%quad%wts(m)
       !---Compute internal inductance
@@ -254,9 +290,9 @@ do i=1,smesh%nc
       bp_vol = bp_vol + SUM(Bpol**2)*v*device%fe_rep%quad%wts(m)*pt(1)
       !---Compute differential toroidal Field
       IF(self%mode==0)THEN
-        Btor = self%ffp_scale*(self%I%F(psitmp(1)))/pt(1)
+        Btor = self%ffp_scale*fpsi/pt(1)
       ELSE
-        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*self%I%F(psitmp(1)) + self%I%f_offset**2) &
+        Btor = (SIGN(1.d0,self%I%f_offset)*SQRT(self%ffp_scale*fpsi + self%I%f_offset**2) &
         - self%I%f_offset)/pt(1)
       END IF
       dflux = dflux + Btor*v*device%fe_rep%quad%wts(m)
@@ -271,6 +307,11 @@ pvol=pvol*self%psiscale*self%psiscale
 bp_vol=bp_vol*self%psiscale*self%psiscale
 dflux=dflux*self%psiscale
 tflux=tflux*self%psiscale
+IF(ASSOCIATED(bcross_kappa_fun%u))THEN
+  CALL bcross_kappa_fun%u%delete
+  DEALLOCATE(bcross_kappa_fun%u)
+  CALL bcross_kappa_fun%delete
+END IF
 CALL psi_eval%delete
 CALL psi_geval%delete
 end subroutine gs_comp_globals
@@ -381,6 +422,35 @@ IF(ASSOCIATED(self%eta))THEN
   CALL hdf5_create_group(filename,'tokamaker/ETA_PROFILE')
   CALL self%eta%save(filename,'tokamaker/ETA_PROFILE')
 END IF
+!---Save kinetic profiles (Te, Ti, ne, ni, Zeff, jphi_fixed, jphi_saw) if set
+IF(ASSOCIATED(self%Te))THEN
+  CALL hdf5_create_group(filename,'tokamaker/TE_PROFILE')
+  CALL self%Te%save(filename,'tokamaker/TE_PROFILE')
+END IF
+IF(ASSOCIATED(self%Ti))THEN
+  CALL hdf5_create_group(filename,'tokamaker/TI_PROFILE')
+  CALL self%Ti%save(filename,'tokamaker/TI_PROFILE')
+END IF
+IF(ASSOCIATED(self%ne))THEN
+  CALL hdf5_create_group(filename,'tokamaker/NE_PROFILE')
+  CALL self%ne%save(filename,'tokamaker/NE_PROFILE')
+END IF
+IF(ASSOCIATED(self%ni))THEN
+  CALL hdf5_create_group(filename,'tokamaker/NI_DENS_PROFILE')
+  CALL self%ni%save(filename,'tokamaker/NI_DENS_PROFILE')
+END IF
+IF(ASSOCIATED(self%Zeff))THEN
+  CALL hdf5_create_group(filename,'tokamaker/ZEFF_PROFILE')
+  CALL self%Zeff%save(filename,'tokamaker/ZEFF_PROFILE')
+END IF
+IF(ASSOCIATED(self%jphi_fixed))THEN
+  CALL hdf5_create_group(filename,'tokamaker/JPHI_FIXED_PROFILE')
+  CALL self%jphi_fixed%save(filename,'tokamaker/JPHI_FIXED_PROFILE')
+END IF
+IF(ASSOCIATED(self%jphi_saw))THEN
+  CALL hdf5_create_group(filename,'tokamaker/JPHI_SAW_PROFILE')
+  CALL self%jphi_saw%save(filename,'tokamaker/JPHI_SAW_PROFILE')
+END IF
 ! IF(ASSOCIATED(self%P_ani))THEN
 !   CALL hdf5_create_group(filename,'tokamaker/P_ANI')
 !   CALL self%P_ani%save(filename,'tokamaker/P_ANI')
@@ -414,7 +484,8 @@ integer(4) :: hash_tmp,hash_in,io_unit,int_tmp,ndims
 integer(i4), allocatable :: dim_sizes(:)
 REAL(r8) :: pt_tmp(2),scale_tmp,diff_val
 real(r8), pointer :: vals_tmp(:)
-logical :: success,pm_save,logical_tmp
+logical :: success,pm_save,logical_tmp,restored
+CLASS(flux_func), POINTER :: I_base
 CHARACTER(LEN=:), ALLOCATABLE :: profType
 error_string=''
 ! CALL hdf5_write(self%device%fe_rep%mesh%r,filename,'mesh/R')
@@ -474,6 +545,141 @@ IF(.NOT.success)THEN
   RETURN
 END IF
 CALL gs_update_bounds(self)
+!---Load kinetic profiles (Te, Ti, ne, ni, Zeff, jphi_fixed, jphi_saw) before flux functions so they are
+!   available when flux function update() calls (e.g. jphi_bs_update) are made below
+IF(hdf5_field_exist(filename,'tokamaker/TE_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/TE_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Te profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%Te))THEN
+    CALL self%Te%delete()
+    DEALLOCATE(self%Te)
+  END IF
+  CALL gs_profile_alloc(profType,self%Te)
+  DEALLOCATE(profType)
+  CALL self%Te%load(filename,'tokamaker/TE_PROFILE',success=success)
+  CALL gs_profile_load_coord(self%Te,filename,'tokamaker/TE_PROFILE')
+  IF(.NOT.success)THEN
+    error_string='Failed to load Te profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/TI_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/TI_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Ti profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%Ti))THEN
+    CALL self%Ti%delete()
+    DEALLOCATE(self%Ti)
+  END IF
+  CALL gs_profile_alloc(profType,self%Ti)
+  DEALLOCATE(profType)
+  CALL self%Ti%load(filename,'tokamaker/TI_PROFILE',success=success)
+  CALL gs_profile_load_coord(self%Ti,filename,'tokamaker/TI_PROFILE')
+  IF(.NOT.success)THEN
+    error_string='Failed to load Ti profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/NE_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/NE_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read ne profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%ne))THEN
+    CALL self%ne%delete()
+    DEALLOCATE(self%ne)
+  END IF
+  CALL gs_profile_alloc(profType,self%ne)
+  DEALLOCATE(profType)
+  CALL self%ne%load(filename,'tokamaker/NE_PROFILE',success=success)
+  CALL gs_profile_load_coord(self%ne,filename,'tokamaker/NE_PROFILE')
+  IF(.NOT.success)THEN
+    error_string='Failed to load ne profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/NI_DENS_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/NI_DENS_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read ni profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%ni))THEN
+    CALL self%ni%delete()
+    DEALLOCATE(self%ni)
+  END IF
+  CALL gs_profile_alloc(profType,self%ni)
+  DEALLOCATE(profType)
+  CALL self%ni%load(filename,'tokamaker/NI_DENS_PROFILE',success=success)
+  CALL gs_profile_load_coord(self%ni,filename,'tokamaker/NI_DENS_PROFILE')
+  IF(.NOT.success)THEN
+    error_string='Failed to load ni profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/ZEFF_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/ZEFF_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read Zeff profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%Zeff))THEN
+    CALL self%Zeff%delete()
+    DEALLOCATE(self%Zeff)
+  END IF
+  CALL gs_profile_alloc(profType,self%Zeff)
+  DEALLOCATE(profType)
+  CALL self%Zeff%load(filename,'tokamaker/ZEFF_PROFILE',success=success)
+  CALL gs_profile_load_coord(self%Zeff,filename,'tokamaker/ZEFF_PROFILE')
+  IF(.NOT.success)THEN
+    error_string='Failed to load Zeff profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/JPHI_FIXED_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/JPHI_FIXED_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read jphi_fixed profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%jphi_fixed))THEN
+    CALL self%jphi_fixed%delete()
+    DEALLOCATE(self%jphi_fixed)
+  END IF
+  CALL gs_profile_alloc(profType,self%jphi_fixed)
+  DEALLOCATE(profType)
+  CALL self%jphi_fixed%load(filename,'tokamaker/JPHI_FIXED_PROFILE',success=success)
+  CALL gs_profile_load_coord(self%jphi_fixed,filename,'tokamaker/JPHI_FIXED_PROFILE')
+  IF(.NOT.success)THEN
+    error_string='Failed to load jphi_fixed profile.'
+    RETURN
+  END IF
+END IF
+IF(hdf5_field_exist(filename,'tokamaker/JPHI_SAW_PROFILE'))THEN
+  CALL hdf5_read(profType,filename,'tokamaker/JPHI_SAW_PROFILE/TYPE',success=success)
+  IF(.NOT.success)THEN
+    error_string='Failed to read jphi_saw profile type.'
+    RETURN
+  END IF
+  IF(ASSOCIATED(self%jphi_saw))THEN
+    CALL self%jphi_saw%delete()
+    DEALLOCATE(self%jphi_saw)
+  END IF
+  CALL gs_profile_alloc(profType,self%jphi_saw)
+  DEALLOCATE(profType)
+  CALL self%jphi_saw%load(filename,'tokamaker/JPHI_SAW_PROFILE',success=success)
+  CALL gs_profile_load_coord(self%jphi_saw,filename,'tokamaker/JPHI_SAW_PROFILE')
+  IF(.NOT.success)THEN
+    error_string='Failed to load jphi_saw profile.'
+    RETURN
+  END IF
+END IF
 !---Load flux functions
 CALL hdf5_read(self%ffp_scale,filename,'tokamaker/FFP_SCALE',success=success)
 IF(.NOT.success)THEN
@@ -492,7 +698,7 @@ END IF
 CALL gs_profile_alloc(profType,self%I)
 DEALLOCATE(profType)
 CALL self%I%load(filename,'tokamaker/FFP_PROFILE',success=success)
-CALL self%I%update(self)
+CALL gs_profile_load_coord(self%I,filename,'tokamaker/FFP_PROFILE')
 IF(.NOT.success)THEN
   error_string="Failed to load F*F' profile."
   RETURN
@@ -519,7 +725,7 @@ END IF
 CALL gs_profile_alloc(profType,self%P)
 DEALLOCATE(profType)
 CALL self%P%load(filename,'tokamaker/PP_PROFILE',success=success)
-CALL self%P%update(self)
+CALL gs_profile_load_coord(self%P,filename,'tokamaker/PP_PROFILE')
 IF(.NOT.success)THEN
   error_string="Failed to load P' profile."
   RETURN
@@ -537,11 +743,11 @@ IF(hdf5_field_exist(filename,'tokamaker/NI_PROFILE'))THEN
   CALL gs_profile_alloc(profType,self%I_NI)
   DEALLOCATE(profType)
   CALL self%I_NI%load(filename,'tokamaker/NI_PROFILE',success=success)
+  CALL gs_profile_load_coord(self%I_NI,filename,'tokamaker/NI_PROFILE')
   IF(.NOT.success)THEN
     error_string='Failed to load non-inductive current profile.'
     RETURN
   END IF
-  CALL self%I_NI%update(self)
 END IF
 IF(hdf5_field_exist(filename,'tokamaker/ETA_PROFILE'))THEN
   CALL hdf5_read(profType,filename,'tokamaker/ETA_PROFILE/TYPE',success=success)
@@ -556,11 +762,11 @@ IF(hdf5_field_exist(filename,'tokamaker/ETA_PROFILE'))THEN
   CALL gs_profile_alloc(profType,self%eta)
   DEALLOCATE(profType)
   CALL self%eta%load(filename,'tokamaker/ETA_PROFILE',success=success)
+  CALL gs_profile_load_coord(self%eta,filename,'tokamaker/ETA_PROFILE')
   IF(.NOT.success)THEN
     error_string='Failed to load ETA profile.'
     RETURN
   END IF
-  CALL self%eta%update(self)
 END IF
 ! IF(hdf5_field_exist(filename,'tokamaker/P_ANI'))THEN
 !   CALL hdf5_read(profType,filename,'tokamaker/P_ANI/TYPE',success=success)
@@ -713,29 +919,62 @@ IF(hdf5_field_exist(filename,'tokamaker/MIRNOV_TARGETS'))THEN
     RETURN
   END IF
 END IF
+!---Update all flux functions now that all fields (F0, targets, kinetics) are loaded; a bootstrap
+!   F*F' restored from the file is kept as saved (an update would recompute it); the flux map
+!   settles from identity, not from one copied with an earlier equilibrium
+IF(ASSOCIATED(self%torflux))CALL self%torflux%delete()
+CALL torflux_setup(self,resettle=.TRUE.)
+IF(ASSOCIATED(self%torflux))CALL self%torflux%update(self)
+restored=.FALSE.
+I_base=>torflux_unwrap(self%I)
+SELECT TYPE(I=>I_base)
+  TYPE IS(jphi_bs_flux_func)
+    restored=I%ffp_restored
+END SELECT
+IF(restored)THEN
+  CALL torflux_set_bounds(self%I,self%plasma_bounds)
+ELSE
+  CALL self%I%update(self)
+END IF
+CALL self%P%update(self)
+IF(ASSOCIATED(self%I_NI))CALL self%I_NI%update(self)
+IF(ASSOCIATED(self%eta))CALL self%eta%update(self)
 end subroutine gs_load_tokamaker
 !---------------------------------------------------------------------------
-!> Needs docs
+!> Save an inverse-equilibrium (flux-coordinate) file, Fortran unformatted
+!!
+!! Surfaces at uniform polar angle about the O-point from the contour quadrature (tracer as fallback).
+!! Records (r8, or r4 if @p single_prec):
+!! 1. npsi, ntheta (i4)
+!! 2-5. psi, F, p, q on the npsi flux points
+!! 6-7. R(ntheta,npsi), Z(ntheta,npsi)
+!! 8-9. F*dF/dpsi, dp/dpsi (only if @p profile_derivs)
+!! 10. [psi_axis, psi_LCFS], unpadded (only if @p psi_bounds)
+!! Flux points: see @ref ifile_psi_nodes.
 !---------------------------------------------------------------------------
-subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,error_str)
+subroutine gs_save_ifile(gseq,filename,npsi,ntheta,psi_pad,lcfs_press,pack_lcfs,single_prec,profile_derivs,psi_bounds,error_str, &
+  axis_pack)
 class(gs_equil), intent(inout) :: gseq !< G-S object
-CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Outpute filename
+CHARACTER(LEN=OFT_PATH_SLEN), intent(in) :: filename !< Output filename
 integer(4), intent(in) :: npsi !< Number of points in flux coordinate
 integer(4), intent(in) :: ntheta !< Number of points in poloidal coordinate
 REAL(8), intent(in) :: psi_pad !< Padding at LCFS in normalized units
 REAL(8), optional, intent(in) :: lcfs_press !< LCFS pressure
 LOGICAL, OPTIONAL, INTENT(in) :: pack_lcfs !< Use quadratic packing toward LCFS?
 LOGICAL, OPTIONAL, INTENT(in) :: single_prec !< Save file with single precision fields?
-CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str
+LOGICAL, OPTIONAL, INTENT(in) :: profile_derivs !< Append F*dF/dpsi and dp/dpsi records? (extends the format)
+LOGICAL, OPTIONAL, INTENT(in) :: psi_bounds !< Append the unpadded [psi_axis, psi_LCFS] record? (extends the format)
+CHARACTER(LEN=OFT_ERROR_SLEN), OPTIONAL, INTENT(out) :: error_str !< Error message (empty on success)
+REAL(8), OPTIONAL, INTENT(in) :: axis_pack !< Normalized flux of the innermost surface of a geometric axis zone (<= 0: none)
 type(gsinv_interp), pointer :: field
 type(oft_lag_brinterp) :: psi_int
 real(8) :: gop(3,3),psi_surf(1),pt_last(3)
-real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr
+real(8) :: raxis,zaxis,f(3),pt(3),rmax,x1,x2,xr,xa,bounds(2)
 real(8), allocatable :: ptout(:,:)
-real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:)
+real(8), allocatable :: rout(:,:),zout(:,:),cout(:,:),psi_q(:),rzc(:,:,:),qf(:),un(:)
 real(8), parameter :: tol=1.d-10
-integer(4) :: j,k,cell,io_unit
-LOGICAL :: do_pack,save_single
+integer(4) :: j,k,cell,io_unit,ierr
+LOGICAL :: do_pack,save_single,save_derivs,save_bounds,cc_done(npsi)
 TYPE(spline_type) :: rz
 type(gs_factory), pointer :: device
 device=>gseq%device
@@ -745,8 +984,26 @@ WRITE(*,'(3A)')oft_indent,'Saving iFile: ',TRIM(filename)
 CALL oft_increase_indent
 do_pack=.FALSE.
 save_single=.FALSE.
+save_derivs=.FALSE.
+save_bounds=.FALSE.
 IF(PRESENT(pack_lcfs))do_pack=pack_lcfs
 IF(PRESENT(single_prec))save_single=single_prec
+IF(PRESENT(profile_derivs))save_derivs=profile_derivs
+IF(PRESENT(psi_bounds))save_bounds=psi_bounds
+!---Flux points
+xa=0.d0
+IF(PRESENT(axis_pack))xa=axis_pack/(1.d0-psi_pad)
+ALLOCATE(un(npsi))
+CALL ifile_psi_nodes(npsi,do_pack,xa,un,ierr)
+IF(ierr/=0)THEN
+  DEALLOCATE(un)
+  IF(PRESENT(error_str))THEN
+    error_str="axis_pack must be below the LCFS and leave npsi room for the axis zone"
+    CALL oft_decrease_indent
+    RETURN
+  END IF
+  CALL oft_abort('Invalid axis_pack','gs_save_ifile',__FILE__)
+END IF
 !---
 raxis=gseq%o_point(1)
 zaxis=gseq%o_point(2)
@@ -754,6 +1011,7 @@ x1=0.d0; x2=1.d0
 IF(gseq%plasma_bounds(1)>-1.d98)THEN
   x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
 END IF
+bounds=[x2,x1]
 !
 xr = (x2-x1)
 x1 = x1 + xr*psi_pad
@@ -790,11 +1048,35 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
   CALL oft_decrease_indent
 END IF
-!---Trace
-call set_tracer(1)
-ALLOCATE(cout(npsi,4))
+ALLOCATE(cout(npsi,6))
 ALLOCATE(rout(ntheta,npsi))
 ALLOCATE(zout(ntheta,npsi))
+!---Surface flux, F, pressure and their derivatives
+do j=2,npsi
+  cout(j,1) = xr*un(j) + x1
+  cout(j,2)=gs_fpol(gseq,cout(j,1))
+  cout(j,3)=gseq%p_scale*gseq%P%f(cout(j,1))/mu0
+  cout(j,5:6)=gs_ffprim_pprime(gseq,cout(j,1))
+end do
+DEALLOCATE(un)
+!---Surfaces at uniform polar angle from the contour quadrature (exact on the FE surface);
+!---the field-line tracer below is the deprecated method and the fallback for the surfaces it rejects
+cc_done=.FALSE.
+IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
+  ALLOCATE(psi_q(npsi-1),rzc(2,ntheta-1,npsi-1),qf(npsi-1))
+  psi_q=(cout(2:npsi,1)-gseq%plasma_bounds(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
+  CALL gs_rays_contour(gseq,npsi-1,psi_q,ntheta-1,rzc,qf,cc_done(2:npsi))
+  DO j=2,npsi
+    IF(.NOT.cc_done(j))CYCLE
+    rout(1:ntheta-1,j)=rzc(1,:,j-1); rout(ntheta,j)=rzc(1,1,j-1)
+    zout(1:ntheta-1,j)=rzc(2,:,j-1); zout(ntheta,j)=rzc(2,1,j-1)
+    cout(j,4)=cout(j,2)*qf(j-1)
+  END DO
+  DEALLOCATE(psi_q,rzc,qf)
+END IF
+!---Trace
+IF(.NOT.ALL(cc_done(2:npsi)))THEN
+call set_tracer(1)
 !$omp parallel private(j,psi_surf,pt,ptout,field,rz,gop) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
@@ -808,19 +1090,15 @@ active_tracer%inv=.TRUE.
 ALLOCATE(ptout(3,active_tracer%maxsteps+1))
 !$omp do schedule(dynamic,1)
 do j=2,npsi
+  IF(cc_done(j))CYCLE
   IF(PRESENT(error_str))THEN
     IF(error_str/="")CYCLE
   END IF
   !---------------------------------------------------------------------------
   ! Trace contour
   !---------------------------------------------------------------------------
-  IF(pack_lcfs)THEN
-    psi_surf = xr*(1.d0-(j-1)/REAL(npsi-1,8))**2 + x1
-  ELSE
-    psi_surf = xr*(1.d0-(j-1)/REAL(npsi-1,8)) + x1
-  END IF
-  ! psi_surf(1)=x2 - psi_surf(1)
-  IF(gseq%diverted.AND.ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near divertor
+  psi_surf = cout(j,1)
+  IF(ABS((psi_surf(1)-x1)/xr)<0.02d0)THEN ! Use higher tracing tolerance near the LCFS
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
@@ -860,23 +1138,13 @@ do j=2,npsi
   END DO
   !---Destroy Spline
   CALL spline_dealloc(rz)
-  !---------------------------------------------------------------------------
-  ! Save DCON information
-  !---------------------------------------------------------------------------
-  cout(j,1)=psi_surf(1) ! Poloidal flux
-  !---Toroidal flux function
-  IF(gseq%mode==0)THEN
-    cout(j,2)=gseq%ffp_scale*gseq%I%f(psi_surf(1))+gseq%I%f_offset
-  ELSE
-    cout(j,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf(1)) + gseq%I%f_offset**2)
-  END IF
-  cout(j,3)=gseq%p_scale*gseq%P%f(psi_surf(1))/mu0 ! Plasma pressure
   cout(j,4)=cout(j,2)*active_tracer%v(3)/(2*pi) ! Safety Factor (q)
 end do
 CALL active_tracer%delete
 CALL field%delete
 DEALLOCATE(ptout,field)
 !$omp end parallel
+END IF
 CALL psi_int%delete()
 IF(PRESENT(error_str))THEN
   IF(error_str/="")THEN
@@ -888,12 +1156,9 @@ END IF
 rout(:,1)=raxis
 zout(:,1)=zaxis
 cout(1,1)=x2
-IF(gseq%mode==0)THEN
-  cout(1,2)=(gseq%ffp_scale*gseq%I%f(x2)+gseq%I%f_offset)
-ELSE
-  cout(1,2)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(x2) + gseq%I%f_offset**2)
-END IF
+cout(1,2)=gs_fpol(gseq,x2)
 cout(1,3)=gseq%p_scale*gseq%P%f(x2)/mu0
+cout(1,5:6)=gs_ffprim_pprime(gseq,x2)
 cout(1,4)=(cout(3,4)-cout(2,4))*(x2-cout(2,1))/(cout(3,1)-cout(2,1)) + cout(2,4)
 !---Add LCFS pressure if specified
 IF(PRESENT(lcfs_press))cout(:,3)=cout(:,3)+lcfs_press
@@ -934,20 +1199,109 @@ ELSE
   WRITE(io_unit)zout
 END IF
 !---------------------------------------------------------------------------
+! Optional records (after the original ones; readers tell them apart by length)
+!
+! cout(:,5) -> F*dF/dpsi(0:npsi)
+! cout(:,6) -> dp/dpsi(0:npsi)
+! bounds -> [psi_axis, psi_LCFS] (unpadded)
+!---------------------------------------------------------------------------
+IF(save_derivs)THEN
+  DO j=5,6
+    IF(save_single)THEN
+      WRITE(io_unit)REAL(cout(:,j),4)
+    ELSE
+      WRITE(io_unit)cout(:,j)
+    END IF
+  END DO
+END IF
+IF(save_bounds)THEN
+  IF(save_single)THEN
+    WRITE(io_unit)REAL(bounds,4)
+  ELSE
+    WRITE(io_unit)bounds
+  END IF
+END IF
+!---------------------------------------------------------------------------
 ! Close output file
 !---------------------------------------------------------------------------
 CLOSE(io_unit)
 !---
 IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,2ES11.3)')oft_indent,'Psi  = ',x1,x2
-  WRITE(*,'(2A,F7.2)')oft_indent,'Qmin = ',MINVAL(cout(4,:))
-  WRITE(*,'(2A,F7.2)')oft_indent,'Qmax = ',MAXVAL(cout(4,:))
+  WRITE(*,'(2A,F7.2)')oft_indent,'Qmin = ',MINVAL(cout(:,4))
+  WRITE(*,'(2A,F7.2)')oft_indent,'Qmax = ',MAXVAL(cout(:,4))
   ! WRITE(*,'(2A)')oft_indent,'Done'
 END IF
 CALL oft_decrease_indent
 !---
 DEALLOCATE(cout,rout,zout)
 end subroutine gs_save_ifile
+!------------------------------------------------------------------------------
+!> i-file flux points, as the fraction of the padded axis-to-LCFS flux left to the LCFS (`u(1)=1` is the axis)
+!!
+!! A surface at fraction \f$ x \f$ from the axis has \f$ u=1-x \f$. Without an axis zone (`xa=0`)
+!! \f$ x_j=f(s_j) \f$, \f$ s_j=(j-1)/(n_\psi-1) \f$, with \f$ f(s)=1-(1-s)^2 \f$ if `pack`, else \f$ f(s)=s \f$.
+!! With one, surfaces sit at unit steps of \f$ C(s)=m s+\ln[f\,(x_a+f_1)/(x_a(f+f_1))]/\ln 1.5 \f$ from
+!! \f$ f=x_a \f$ to \f$ f=1 \f$ (\f$ f_1=f(s_2) \f$): the spacing grows by about 1.5 per surface while \f$ f \ll f_1 \f$
+!! and follows \f$ f \f$ beyond. The zone takes \f$ \ln[(x_a+f_1)/(x_a(1+f_1))]/\ln 1.5 \f$ of the surfaces.
+!------------------------------------------------------------------------------
+SUBROUTINE ifile_psi_nodes(npsi,pack,xa,u,ierr)
+INTEGER(i4), INTENT(in) :: npsi !< Number of flux points
+LOGICAL, INTENT(in) :: pack !< Quadratic packing toward the LCFS?
+REAL(r8), INTENT(in) :: xa !< Innermost surface of the axis zone, as a fraction from the axis (<= 0: no zone)
+REAL(r8), INTENT(out) :: u(npsi) !< Flux points (1 at the axis, 0 at the padded LCFS)
+INTEGER(i4), INTENT(out) :: ierr !< 1 if the axis zone does not fit
+REAL(r8), PARAMETER :: lr=LOG(1.5d0)
+REAL(r8) :: s,f1,sa,m,lo,hi
+INTEGER(i4) :: j,k
+ierr=0
+u(1)=1.d0
+IF(xa<=0.d0)THEN
+  DO j=2,npsi
+    s=(j-1)/REAL(npsi-1,r8)
+    IF(pack)THEN
+      u(j)=(1.d0-s)**2
+    ELSE
+      u(j)=1.d0-s
+    END IF
+  END DO
+  RETURN
+END IF
+IF(xa>=1.d0)THEN
+  ierr=1
+  RETURN
+END IF
+f1=pfun(1.d0/REAL(npsi-1,r8))
+sa=xa
+IF(pack)sa=1.d0-SQRT(1.d0-xa)
+m=(npsi-2-LOG((xa+f1)/(xa*(1.d0+f1)))/lr)/(1.d0-sa)
+IF(m<=0.d0)THEN
+  ierr=1
+  RETURN
+END IF
+!---Bisection for C(s)=C(sa)+j-2
+DO j=2,npsi-1
+  lo=sa; hi=1.d0
+  DO k=1,100
+    s=0.5d0*(lo+hi)
+    IF(m*s+LOG(pfun(s)*(xa+f1)/(xa*(pfun(s)+f1)))/lr<m*sa+(j-2))THEN
+      lo=s
+    ELSE
+      hi=s
+    END IF
+  END DO
+  u(j)=1.d0-pfun(s)
+END DO
+u(npsi)=0.d0
+CONTAINS
+!> Packing \f$ f(s) \f$
+PURE FUNCTION pfun(s) RESULT(f)
+REAL(r8), INTENT(in) :: s
+REAL(r8) :: f
+f=s
+IF(pack)f=1.d0-(1.d0-s)**2
+END FUNCTION pfun
+END SUBROUTINE ifile_psi_nodes
 !---------------------------------------------------------------------------
 !> Save equilibrium to General Atomics gEQDSK file
 !------------------------------------------------------------------------------
@@ -981,10 +1335,11 @@ INTEGER(4) :: nlim
 REAL(8), ALLOCATABLE, DIMENSION(:) :: rlim,zlim
 CHARACTER(LEN=48) :: eqdsk_case
 INTEGER(4) :: idum
-REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS,fptmp
-REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi
+REAL(8) :: rdim,zdim,rleft,zmid,rcentr,bcentr,itor,xdum,rHFS,rLFS,zHFS,fpp(2)
+REAL(8), ALLOCATABLE, DIMENSION(:) :: fpol,pres,ffprim,pprime,qpsi,ftrace,psi_q,qf
 REAL(8), ALLOCATABLE, DIMENSION(:,:) :: psirz
-LOGICAL :: do_truncate
+REAL(8), ALLOCATABLE, DIMENSION(:,:,:) :: rzc
+LOGICAL :: do_truncate,cc_done(nr)
 !---
 device=>gseq%device
 IF(PRESENT(error_str))error_str=""
@@ -1038,11 +1393,40 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
   CALL oft_decrease_indent
 END IF
-!---Trace
-call set_tracer(1)
 ALLOCATE(rout(nr))
 ALLOCATE(zout(nr))
-!$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field,fptmp) firstprivate(pt_last)
+!---Flux functions on each surface; q is evaluated on the traced surface `psi_trace`
+ALLOCATE(ftrace(nr),psi_q(nr))
+do j=1,nr
+  psi_surf = x2 - xr*((j-1)/REAL(nr-1,8))
+  psi_trace = psi_surf
+  IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
+  psi_q(j)=psi_trace
+  ftrace(j)=gs_fpol(gseq,psi_trace)
+  fpol(j)=gs_fpol(gseq,psi_surf)
+  fpp=gs_ffprim_pprime(gseq,psi_surf)
+  ffprim(j)=fpp(1); pprime(j)=fpp(2)
+  pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0
+end do
+!---q and the boundary contour (uniform polar angle) from the contour quadrature (exact on the
+!---FE surface); the field-line tracer below is the deprecated method and the fallback for the
+!---surfaces it rejects (not closed and star-shaped about the O-point)
+cc_done=.FALSE.; cc_done(1)=.TRUE.
+IF((qprof_backend==0).AND.(gseq%plasma_bounds(1)>-1.d98))THEN
+  ALLOCATE(rzc(2,nr-1,nr-1),qf(nr-1))
+  psi_q=(psi_q-gseq%plasma_bounds(1))/(gseq%plasma_bounds(2)-gseq%plasma_bounds(1))
+  CALL gs_rays_contour(gseq,nr-1,psi_q(2:nr),nr-1,rzc,qf,cc_done(2:nr))
+  WHERE(cc_done(2:nr))qpsi(2:nr)=ftrace(2:nr)*qf
+  IF(cc_done(nr))THEN
+    rout(1:nr-1)=rzc(1,:,nr-1); rout(nr)=rzc(1,1,nr-1)
+    zout(1:nr-1)=rzc(2,:,nr-1); zout(nr)=rzc(2,1,nr-1)
+  END IF
+  DEALLOCATE(rzc,qf)
+END IF
+!---Trace
+IF(.NOT.ALL(cc_done))THEN
+call set_tracer(1)
+!$omp parallel private(j,psi_surf,psi_trace,pt,ptout,field) firstprivate(pt_last)
 ALLOCATE(field)
 field%u=>gseq%psi
 CALL field%setup(device%fe_rep)
@@ -1054,6 +1438,7 @@ active_tracer%zaxis=zaxis
 active_tracer%inv=.TRUE.
 !$omp do schedule(dynamic,1)
 do j=1,nr
+  IF(cc_done(j))CYCLE
   IF(PRESENT(error_str))THEN
     IF(error_str/="")CYCLE
   END IF
@@ -1063,7 +1448,7 @@ do j=1,nr
   psi_surf = x2 - xr*((j-1)/REAL(nr-1,8))
   psi_trace = psi_surf
   IF((.NOT.do_truncate).AND.((psi_trace-x1)/xr<psi_pad))psi_trace = x1 + xr*psi_pad
-  IF(gseq%diverted.AND.(psi_trace-x1)/xr<0.02d0)THEN ! Use higher tracing tolerance near divertor
+  IF((psi_trace-x1)/xr<0.02d0)THEN ! Use higher tracing tolerance near the LCFS
     active_tracer%tol=1.d-10
   ELSE
     active_tracer%tol=1.d-8
@@ -1122,28 +1507,15 @@ do j=1,nr
     CALL spline_dealloc(rz)
     DEALLOCATE(ptout)
   END IF
-  !------------------------------------------------------------------------------
-  ! Compute Mercier Profiles
-  !------------------------------------------------------------------------------
-  !---Get flux variables
-  IF(gseq%mode==0)THEN
-    fptmp=gseq%ffp_scale*gseq%I%f(psi_trace)+gseq%I%f_offset
-    fpol(j)=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
-    ffprim(j)=gseq%I%fp(psi_surf)*((gseq%ffp_scale**2)*gseq%I%f(psi_surf)+gseq%ffp_scale*gseq%I%f_offset)
-  ELSE
-    fptmp=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_trace) + gseq%I%f_offset**2)
-    fpol(j)=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
-    ffprim(j)=0.5d0*gseq%ffp_scale*gseq%I%fp(psi_surf)
-  END IF
-  pres(j)=gseq%p_scale*gseq%P%f(psi_surf)/mu0
-  pprime(j)=gseq%p_scale*gseq%P%fp(psi_surf)/mu0
   !---Safety Factor (q)
-  IF(j>1)qpsi(j)=fptmp*active_tracer%v(3)/(2*pi)
+  IF(j>1)qpsi(j)=ftrace(j)*active_tracer%v(3)/(2*pi)
 end do
 CALL active_tracer%delete
 CALL field%delete()
 DEALLOCATE(field)
 !$omp end parallel
+END IF
+DEALLOCATE(ftrace,psi_q)
 IF(PRESENT(error_str))THEN
   IF(error_str/="")THEN
     DEALLOCATE(rout,zout)
@@ -1254,19 +1626,19 @@ END IF
 2022 format(2i5)
 OPEN(NEWUNIT=io_unit,FILE=TRIM(filename))
 WRITE (io_unit,2000) eqdsk_case,0,nr,nz
-WRITE (io_unit,2020) REAL([rdim,zdim,rcentr,rleft,zmid],4)
-WRITE (io_unit,2020) REAL([raxis,zaxis,x2,x1,bcentr],4)
-WRITE (io_unit,2020) REAL([itor,x2,xdum,raxis,xdum],4)
-WRITE (io_unit,2020) REAL([zaxis,xdum,x1,xdum,xdum],4)
-WRITE (io_unit,2020) (REAL(fpol(i),4),i=1,nr)
-WRITE (io_unit,2020) (REAL(pres(i),4),i=1,nr)
-WRITE (io_unit,2020) (REAL(ffprim(i),4),i=1,nr)
-WRITE (io_unit,2020) (REAL(pprime(i),4),i=1,nr)
-WRITE (io_unit,2020) ((REAL(psirz(i,j),4),i=1,nr),j=1,nz)
-WRITE (io_unit,2020) (REAL(qpsi(i),4),i=1,nr)
+WRITE (io_unit,2020) eqdsk_val([rdim,zdim,rcentr,rleft,zmid])
+WRITE (io_unit,2020) eqdsk_val([raxis,zaxis,x2,x1,bcentr])
+WRITE (io_unit,2020) eqdsk_val([itor,x2,xdum,raxis,xdum])
+WRITE (io_unit,2020) eqdsk_val([zaxis,xdum,x1,xdum,xdum])
+WRITE (io_unit,2020) (eqdsk_val(fpol(i)),i=1,nr)
+WRITE (io_unit,2020) (eqdsk_val(pres(i)),i=1,nr)
+WRITE (io_unit,2020) (eqdsk_val(ffprim(i)),i=1,nr)
+WRITE (io_unit,2020) (eqdsk_val(pprime(i)),i=1,nr)
+WRITE (io_unit,2020) ((eqdsk_val(psirz(i,j)),i=1,nr),j=1,nz)
+WRITE (io_unit,2020) (eqdsk_val(qpsi(i)),i=1,nr)
 WRITE (io_unit,2022) nr,nlim
-WRITE (io_unit,2020) (REAL([rout(i),zout(i)],4),i=1,nr)
-WRITE (io_unit,2020) (REAL([rlim(i),zlim(i)],4),i=1,nlim)
+WRITE (io_unit,2020) (eqdsk_val([rout(i),zout(i)]),i=1,nr)
+WRITE (io_unit,2020) (eqdsk_val([rlim(i),zlim(i)]),i=1,nlim)
 CLOSE (io_unit)
 !---
 IF(oft_debug_print(1))THEN
@@ -1278,174 +1650,13 @@ CALL oft_decrease_indent
 !---
 DEALLOCATE(rout,zout,rlim,zlim)
 DEALLOCATE(fpol,pres,ffprim,pprime,qpsi,psirz)
+CONTAINS
+!> Flush |x| < 1E-99 to zero so (5e16.9) keeps a 2-digit exponent
+ELEMENTAL FUNCTION eqdsk_val(x) RESULT(y)
+REAL(8), INTENT(in) :: x
+REAL(8) :: y
+y=x
+IF(ABS(y)<1.d-99)y=0.d0
+END FUNCTION eqdsk_val
 end subroutine gs_save_eqdsk
-!------------------------------------------------------------------------------
-!> Evaluate terms in augmented tracing ODE for computing Sauter factors (see @ref sauter_fc)
-!------------------------------------------------------------------------------
-subroutine sauter_apply(self,cell,f,gop,val)
-class(sauter_interp), intent(inout) :: self !< Interpolation object
-integer(4), intent(in) :: cell !< Cell for interpolation
-real(8), intent(in) :: f(:) !< Position in cell in logical coord [3]
-real(8), intent(in) :: gop(3,3) !< Logical gradient vectors at f [3,3]
-real(8), intent(out) :: val(:) !< Reconstructed field at f [8]
-integer(4), allocatable :: j(:)
-integer(4) :: jc
-real(8) :: rop(3),d2op(6),pt(3),grad(3),tmp
-real(8) :: s,c,Bp2,Bt2,mod_B,bratio
-!---Get dofs
-allocate(j(self%lag_rep%nce))
-call self%lag_rep%ncdofs(cell,j)
-!---Reconstruct gradient
-grad=0.d0
-do jc=1,self%lag_rep%nce
-  call oft_blag_geval(self%lag_rep,cell,jc,f,rop,gop)
-  grad=grad+self%uvals(j(jc))*rop
-end do
-!---Get radial position
-pt=self%mesh%log2phys(cell,f)
-!---
-s=SIN(self%t)
-c=COS(self%t)
-Bp2 = (grad(1)**2 + grad(2)**2)/pt(1)**2
-Bt2 = (self%f_surf/pt(1))**2
-mod_B = SQRT(Bp2+Bt2)
-!---Position
-val(1)=(self%rho*(grad(1)*s-grad(2)*c))/(grad(1)*c+grad(2)*s)
-val(2)=pt(1)*SQRT((self%rho**2+val(1)**2)/SUM(grad**2))
-!---Geometric factors
-val(3)=val(2)*pt(1)         ! <R>
-val(4)=val(2)/pt(1)         ! <1/R>
-val(5)=val(2)*SQRT((pt(1)-self%mag_axis(1))**2+(pt(2)-self%mag_axis(2))**2)  ! <a>
-!---Magnetic field averages
-val(6)=val(2)*SQRT(Bp2+Bt2) ! <|B|>
-val(7)=val(2)*(Bp2+Bt2)     ! <|B|^2>
-IF(self%stage_1)THEN
-  self%bmax = MAX(self%bmax,mod_B)
-ELSE
-  bratio = MIN(1.d0,mod_B/self%bmax)
-  val(8)=val(2)*((1.d0 - SQRT(1.d0 - bratio) * (1.d0 + bratio / 2.d0)) / bratio**2)
-END IF
-deallocate(j)
-end subroutine sauter_apply
-!------------------------------------------------------------------------------
-!> Compute factors required for Sauter bootstrap formula
-!------------------------------------------------------------------------------
-subroutine sauter_fc(gseq,nr,psi_q,fc,r_avgs,modb_avgs)
-class(gs_equil), intent(inout) :: gseq !< G-S object
-integer(4), intent(in) :: nr !< Number of flux sample points
-real(8), intent(in) :: psi_q(nr) !< Location of flux sample points
-real(8), intent(out) :: fc(nr) !< Trapped particle fraction \f$ f_c \f$
-real(8), intent(out) :: r_avgs(nr,3) !< Flux surface averaged radial coordinates \f$<R>\f$, \f$<1/R>\f$, \f$<a>\f$
-real(8), intent(out) :: modb_avgs(nr,2) !< Flux surface averaged field strength \f$<|B|>\f$, \f$<|B|^2>\f$
-real(8) :: psi_surf,rmax,x1,x2,raxis,zaxis,fpol,qpsi,h,h2,hf,ftu,ftl
-real(8) :: pt(3),pt_last(3),f(3),psi_tmp(1),gop(3,3)
-type(oft_lag_brinterp) :: psi_int
-real(8), pointer :: ptout(:,:)
-real(8), parameter :: tol=1.d-10
-integer(4) :: i,j,cell
-type(sauter_interp), target :: field
-type(gs_factory), pointer :: device
-!---
-device=>gseq%device
-raxis=gseq%o_point(1)
-zaxis=gseq%o_point(2)
-x1=0.d0; x2=1.d0
-IF(gseq%plasma_bounds(1)>-1.d98)THEN
-  x1=gseq%plasma_bounds(1); x2=gseq%plasma_bounds(2)
-!   x1 = x1 + (x2-x1)*2.d-2
-!   x2 = x2 + (x1-x2)*2.d-2
-END IF
-! IF(.NOT.gseq%free)x1 = x1 + (x2-x1)*2.d-2
-psi_int%u=>gseq%psi
-CALL psi_int%setup(device%fe_rep)
-!---Find Rmax along Zaxis
-rmax=raxis
-cell=0
-DO j=1,100
-  pt=[(device%rmax-raxis)*j/REAL(100,8)+raxis,zaxis,0.d0]
-  CALL bmesh_findcell(device%mesh,cell,pt,f)
-  IF( (MAXVAL(f)>1.d0+tol) .OR. (MINVAL(f)<-tol) )EXIT
-  CALL psi_int%interp(cell,f,gop,psi_tmp)
-  IF( psi_tmp(1) < x1)EXIT
-  rmax=pt(1)
-END DO
-pt_last=[(.1d0*rmax+.9d0*raxis),zaxis,0.d0]
-!---
-IF(oft_debug_print(1))THEN
-  WRITE(*,'(2A)')oft_indent,'Axis Position:'
-  CALL oft_increase_indent
-  WRITE(*,'(2A,ES11.3)')oft_indent,'R    = ',raxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Z    = ',zaxis
-  WRITE(*,'(2A,ES11.3)')oft_indent,'Rmax = ',rmax
-  CALL oft_decrease_indent
-END IF
-!---Trace
-call set_tracer(1)
-! !$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
-field%u=>gseq%psi
-field%mag_axis=gseq%o_point
-CALL field%setup(device%fe_rep)
-active_tracer%neq=8
-active_tracer%B=>field
-active_tracer%maxsteps=8e4
-active_tracer%raxis=raxis
-active_tracer%zaxis=zaxis
-active_tracer%inv=.TRUE.
-ALLOCATE(ptout(3,active_tracer%maxsteps+1))
-! !$omp do schedule(dynamic,1)
-do j=1,nr
-  !------------------------------------------------------------------------------
-  ! Trace contour
-  !------------------------------------------------------------------------------
-  psi_surf=psi_q(j)*(x2-x1) + x1
-  IF(gseq%diverted.AND.psi_q(j)<0.02d0)THEN ! Use higher tracing tolerance near divertor
-    active_tracer%tol=1.d-10
-  ELSE
-    active_tracer%tol=1.d-8
-  END IF
-  !
-  pt=pt_last
-  ! !$omp critical
-  CALL gs_psi2r(gseq,psi_surf,pt,psi_int=psi_int)
-  ! !$omp end critical
-  IF(gseq%mode==0)THEN
-    field%f_surf=gseq%ffp_scale*gseq%I%f(psi_surf)+gseq%I%f_offset
-  ELSE
-    field%f_surf=SIGN(1.d0,gseq%I%f_offset)*SQRT(gseq%ffp_scale*gseq%I%f(psi_surf) + gseq%I%f_offset**2)
-  END IF
-  field%bmax=0.d0
-  field%stage_1=.TRUE.
-  CALL tracinginv_fs(device%mesh,pt(1:2))
-  field%stage_1=.FALSE.
-  CALL tracinginv_fs(device%mesh,pt(1:2))
-  pt_last=pt
-  !---Skip point if trace fails
-  if(active_tracer%status/=1)THEN
-    WRITE(*,*)j,pt
-    CALL oft_warn("sauter_fc: Trace did not complete")
-    CYCLE
-  end if
-  !---Get flux variables
-  r_avgs(j,1)=active_tracer%v(3)/active_tracer%v(2)
-  r_avgs(j,2)=active_tracer%v(4)/active_tracer%v(2)
-  r_avgs(j,3)=active_tracer%v(5)/active_tracer%v(2)
-  modb_avgs(j,1)=active_tracer%v(6)/active_tracer%v(2)
-  modb_avgs(j,2)=active_tracer%v(7)/active_tracer%v(2)
-  !---Sauter formula
-  ! Equation 4
-  h = modb_avgs(j,1)/field%bmax
-  h2 = modb_avgs(j,2)/field%bmax**2
-  ftu = 1.d0 - h2 / (h**2) * (1.d0 - SQRT(1.d0 - h) * (1.d0 + 0.5d0 * h))
-  ! Equation 7
-  hf = active_tracer%v(8)/active_tracer%v(2)
-  ftl = 1.d0 - h2 * hf
-  ! Equation 18,19
-  fc(j) = 1.d0 - (0.75d0 * ftu + 0.25d0 * ftl)
-end do
-CALL field%delete
-CALL active_tracer%delete
-DEALLOCATE(ptout)
-! !$omp end parallel
-CALL psi_int%delete()
-end subroutine sauter_fc
 END MODULE oft_gs_util

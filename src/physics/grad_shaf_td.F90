@@ -538,6 +538,8 @@ allocate(j(lag_rep%nce),vals_loc(lag_rep%nce+self%gs_device%ncoils)) ! Local DOF
 allocate(rop(lag_rep%nce),gop(3,lag_rep%nce)) ! Reconstructed gradient operator
 !$omp do schedule(static)
 do i=1,mesh%nc
+    !---Skip cell if in 'ignore' region
+    IF(self%gs_device%ignore_rmask(mesh%reg(i))) CYCLE
     IF(mesh%reg(i)==1)CYCLE
     !---Get local to global DOF mapping
     call lag_rep%ncdofs(i,j)
@@ -612,6 +614,8 @@ self%p_scale=self%gs_equil%p_scale
 !
 self%F=>self%gs_equil%I
 self%P=>self%gs_equil%P
+IF(self%F%coord()/=0.OR.self%P%coord()/=0)CALL oft_abort( &
+  'Toroidal flux profiles not supported in time-dependent solves','setup_mfop',__FILE__)
 !
 ALLOCATE(self%eta_reg(self%gs_device%mesh%nreg))
 self%eta_reg=-1.d0

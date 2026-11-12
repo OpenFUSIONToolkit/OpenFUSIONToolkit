@@ -275,7 +275,7 @@ subroutine oft_h1_getmop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_flag
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
 real(r8), allocatable :: rop(:),mop(:,:)
@@ -297,6 +297,14 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero()
 END IF
+!---
+bc_flag=0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_flag=1
+  CASE("grnd")
+    bc_flag=2
+END SELECT
 !------------------------------------------------------------------------------
 !
 !------------------------------------------------------------------------------
@@ -324,12 +332,12 @@ do i=1,h1_rep%mesh%nc
   !---Get local to global DOF mapping
   call h1_rep%ncdofs(i,j)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("zerob")
+  SELECT CASE(bc_flag)
+    CASE(1)
       DO jr=1,h1_rep%nce
         IF(h1_rep%global%gbe(j(jr)))mop(jr,:)=0.d0
       END DO
-    CASE("grnd")
+    CASE(2)
       IF(ANY(h1_rep%mesh%igrnd>0))THEN
         DO jr=1,h1_rep%nce
           IF(ANY(h1_rep%mesh%igrnd==j(jr)))mop(jr,:)=0.d0
@@ -346,8 +354,8 @@ deallocate(j,rop,mop)
 ALLOCATE(mop(1,1),j(1))
 !---Set diagonal entries for dirichlet rows
 mop(1,1)=1.d0
-SELECT CASE(TRIM(bc))
-  CASE("zerob")
+SELECT CASE(bc_flag)
+  CASE(1)
     DO i=1,h1_rep%nbe
       jr=h1_rep%lbe(i)
       IF(h1_rep%linkage%leo(i).AND.h1_rep%global%gbe(jr))THEN
@@ -355,7 +363,7 @@ SELECT CASE(TRIM(bc))
         call mat%add_values(j,j,mop,1,1)
       END IF
     END DO
-  CASE("grnd")
+  CASE(2)
     IF(ANY(h1_rep%mesh%igrnd>0))THEN
       DO i=1,h1_rep%nbe
         jr=h1_rep%lbe(i)
@@ -389,7 +397,7 @@ subroutine oft_h1_getlop(fe_rep,mat,bc)
 class(oft_afem_type), target, intent(inout) :: fe_rep
 class(oft_matrix), pointer, intent(inout) :: mat !< Matrix object
 character(LEN=*), intent(in) :: bc !< Boundary condition
-integer(i4) :: i,m,jr,jc
+integer(i4) :: i,m,jr,jc,bc_flag
 integer(i4), allocatable :: j(:)
 real(r8) :: vol,det,goptmp(3,4),elapsed_time
 real(r8), allocatable :: gop(:,:),lop(:,:)
@@ -411,6 +419,14 @@ IF(.NOT.ASSOCIATED(mat))THEN
 ELSE
   CALL mat%zero()
 END IF
+!---
+bc_flag=0
+SELECT CASE(TRIM(bc))
+  CASE("zerob")
+    bc_flag=1
+  CASE("grnd")
+    bc_flag=2
+END SELECT
 !------------------------------------------------------------------------------
 !
 !------------------------------------------------------------------------------
@@ -438,12 +454,12 @@ do i=1,h1_rep%mesh%nc
   !---Get local to global DOF mapping
   call h1_rep%ncdofs(i,j)
   !---Apply bc to local matrix
-  SELECT CASE(TRIM(bc))
-    CASE("zerob")
+  SELECT CASE(bc_flag)
+    CASE(1)
       DO jr=1,h1_rep%nce
         IF(h1_rep%global%gbe(j(jr)))lop(jr,:)=0.d0
       END DO
-    CASE("grnd")
+    CASE(2)
       IF(ANY(h1_rep%mesh%igrnd>0))THEN
         DO jr=1,h1_rep%nce
           IF(ANY(h1_rep%mesh%igrnd==j(jr)))lop(jr,:)=0.d0
@@ -460,8 +476,8 @@ deallocate(j,gop,lop)
 ALLOCATE(lop(1,1),j(1))
 !---Set diagonal entries for dirichlet rows
 lop(1,1)=1.d0
-SELECT CASE(TRIM(bc))
-  CASE("zerob")
+SELECT CASE(bc_flag)
+  CASE(1)
     DO i=1,h1_rep%nbe
       jr=h1_rep%lbe(i)
       IF(h1_rep%linkage%leo(i).AND.h1_rep%global%gbe(jr))THEN
@@ -469,7 +485,7 @@ SELECT CASE(TRIM(bc))
         call mat%add_values(j,j,lop,1,1)
       END IF
     END DO
-  CASE("grnd")
+  CASE(2)
     IF(ANY(h1_rep%mesh%igrnd>0))THEN
       DO i=1,h1_rep%nbe
         jr=h1_rep%lbe(i)

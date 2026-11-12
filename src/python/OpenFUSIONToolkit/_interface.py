@@ -19,7 +19,7 @@ import numpy
 from numpy import float64, int32
 
 # Helper datatypes
-## ctypes logical (bool) pointer alias 
+## ctypes logical (bool) pointer alias
 c_bool_ptr = ctypes.POINTER(c_bool)
 ## ctypes logical (bool) double pointer alias
 c_bool_ptr_ptr = ctypes.POINTER(c_bool_ptr)
@@ -60,6 +60,10 @@ def bool_to_string(value):
     '''! Convert boolean value to lowercase string for XML attributes'''
     return 'true' if value else 'false'
 
+def string_to_bool(value):
+    '''! Convert string to boolean for XML attributes'''
+    return (value.lower() == 'true') or (value.lower() == '1')
+
 # Common parameters
 ## Vacuum magnetic permeability
 mu0 = numpy.pi*4.E-7
@@ -89,6 +93,12 @@ except OSError:
 # Abort callback
 @ctypes.CFUNCTYPE(None)
 def oft_python_abort():
+    # Remove temporary files, as `os._exit()` skips normal exit cleanup
+    try:
+        from ._core import OFT_env
+        OFT_env.instance._tempfiles_finalizer()
+    except:
+        pass
     sys.stdout.flush()
     time.sleep(0.1)
     sys.stderr.flush()
@@ -98,6 +108,10 @@ def oft_python_abort():
 # Global init function
 oft_init = ctypes_subroutine(oftpy_lib.oftpy_init,
     [c_int, c_bool, c_char_p, ctypes_numpy_array(int32,1), c_void_p])
+
+# oftpy_get_slens(slens)
+oftpy_get_slens = ctypes_subroutine(oftpy_lib.oftpy_get_slens,
+    [ctypes_numpy_array(int32,1)])
 
 # oftpy_set_debug(debug_level)
 oftpy_set_debug = ctypes_subroutine(oftpy_lib.oftpy_set_debug,
@@ -127,6 +141,13 @@ oft_setup_vmesh = ctypes_subroutine(oftpy_lib.oft_setup_vmesh,
 oft_vmesh_get = ctypes_subroutine(oftpy_lib.oft_vmesh_get,
     [c_void_p, c_int_ptr, c_double_ptr_ptr, c_int_ptr, c_int_ptr, c_int_ptr_ptr, c_int_ptr_ptr, c_int_ptr, c_char_p])
 
+# Create general FE interpolation object: oft_get_field_eval(fe_ptr,vals,imode,int_obj,error_str)
+oft_get_field_eval = ctypes_subroutine(oftpy_lib.oft_get_field_eval,
+    [c_void_p, ctypes_numpy_array(float64,1), c_int, c_void_ptr_ptr, c_char_p])
+
+# Create general FE interpolation object: oft_apply_field_eval(fe_ptr,int_obj,int_type,pt_ptr,npts,fbary_tol,dim,field)
+oft_apply_field_eval = ctypes_subroutine(oftpy_lib.oft_apply_field_eval,
+    [c_void_p, c_void_p, c_int, ctypes_numpy_array(numpy.float64,2), c_int, c_double, c_int, ctypes_numpy_array(numpy.float64,2)])
 
 # Dump coverage information if needed
 oftpy_dump_cov = ctypes_subroutine(oftpy_lib.dump_cov)

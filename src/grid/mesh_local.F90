@@ -962,54 +962,57 @@ end subroutine bmesh_areas
 !---------------------------------------------------------------------------------
 subroutine sync_face_normals(self)
 class(oft_bmesh), INTENT(inout) :: self !< Mesh object
-integer(i4) :: i,max_depth=1
+integer(i4) :: i,noriented,max_depth=1
+integer(i4), allocatable :: face_stack(:)
 logical, ALLOCATABLE, DIMENSION(:) :: oriented
 IF(self%nc==0)RETURN
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Ensuring surface normal orientations'
 CALL oft_increase_indent
-ALLOCATE(oriented(self%nc))
+ALLOCATE(oriented(self%nc),face_stack(self%nc))
 oriented=.FALSE.
+face_stack=0
+noriented=0
 do i=1,self%nc ! loop over cells
   IF(.NOT.oriented(i))THEN
-    oriented(i)=.TRUE.
-    CALL orient_neighbors(i,1)
-    IF(oft_debug_print(2))WRITE(*,'(2A,I8,I8)')oft_indent,'Chunk oriented',i,COUNT(oriented)
+    CALL orient_neighbors(i)
+    IF(oft_debug_print(2))WRITE(*,'(2A,I8,I8)')oft_indent,'Chunk oriented',i,COUNT(oriented)-noriented
+    noriented=COUNT(oriented)
   END IF
 enddo
 IF(oft_debug_print(1))WRITE(*,'(2A,I8)')oft_indent,'Orientation depth =',max_depth
 CALL oft_decrease_indent
 IF(COUNT(oriented)/=self%nc)CALL oft_abort("Orientation failed", &
   "sync_face_normals",__FILE__)
-DEALLOCATE(oriented)
+DEALLOCATE(oriented,face_stack)
 CONTAINS
-recursive subroutine orient_neighbors(face1,depth)
-integer(i4), intent(in) :: face1,depth
-integer(i4) :: j,face2,k,ed1(2),ed2(2)
-! logical, allocatable :: mark(:)
-max_depth=MAX(depth,max_depth)
-! allocate(mark(self%cell_ne))
-! mark=.FALSE.
-DO j=1,self%cell_ne
-  face2=self%lcc(j,face1)
-  IF(face2==0)CYCLE
-  IF(oriented(face2))CYCLE
-  ed1=self%lc(self%cell_ed(:,j),face1)
-  !---Ensure same sense as neighbor (opposite direction of shared edge)
-  DO k=1,self%cell_ne
-    IF(self%lcc(k,face2)==face1)EXIT
+subroutine orient_neighbors(starting_face)
+integer(i4), intent(in) :: starting_face
+integer(i4) :: j,face1,face2,k,ed1(2),ed2(2),nstack
+oriented(starting_face)=.TRUE.
+nstack=1
+face_stack(nstack)=starting_face
+DO WHILE(nstack>0)
+  max_depth=MAX(max_depth,nstack)
+  face1=face_stack(nstack)
+  nstack=nstack-1
+  DO j=1,self%cell_ne
+    face2=self%lcc(j,face1)
+    IF(face2==0)CYCLE
+    IF(oriented(face2))CYCLE
+    ed1=self%lc(self%cell_ed(:,j),face1)
+    !---Ensure same sense as neighbor (opposite direction of shared edge)
+    DO k=1,self%cell_ne
+      IF(self%lcc(k,face2)==face1)EXIT
+    END DO
+    ed2=self%lc(self%cell_ed(:,k),face2)
+    IF(ALL(ed1==ed2))THEN
+      CALL self%invert_face(face2)
+    END IF
+    oriented(face2)=.TRUE.
+    nstack=nstack+1
+    face_stack(nstack)=face2
   END DO
-  ed2=self%lc(self%cell_ed(:,k),face2)
-  IF(ALL(ed1==ed2))THEN
-    CALL self%invert_face(face2)
-  END IF
-  oriented(face2)=.TRUE.
-  CALL orient_neighbors(face2,depth+1)
-  ! mark(j)=.TRUE.
 END DO
-! DO j=1,3
-!   IF(mark(j))CALL orient_neighbors(self%lcc(j,face1),depth+1)
-! END DO
-! DEALLOCATE(mark)
 end subroutine orient_neighbors
 end subroutine sync_face_normals
 !---------------------------------------------------------------------------------

@@ -26,7 +26,7 @@ echo $CURR_RELEASE >> doc_versions.txt
 MENU_PATCH+='{text:"'$CURR_RELEASE'",url:"'../$CURR_RELEASE'/index.html"},'
 
 # Build previous releases (explicitly set for now)
-for verTag in v1.0.0-beta7 v1.0.0-beta6 ;
+for verTag in v26.6 v1.0.0-beta7 ;
 do
     git checkout $verTag
     mkdir $verTag && cd $verTag

@@ -12,7 +12,8 @@
 !! @ingroup doxy_oft_physics
 !------------------------------------------------------------------------------
 MODULE oft_gs_fit
-use oft_base
+USE, INTRINSIC :: ieee_arithmetic, ONLY: ieee_is_nan
+USE oft_base
 USE oft_io, ONLY: hdf5_read, oft_file_exist
 USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 !---
@@ -630,7 +631,7 @@ real(8), allocatable :: cof_tmp(:),err_tmp(:)
 real(8), save :: ffp_scale_in,p_scale_in,bounds_in(2,2),vcont_in,ip_target_in,estore_target_in
 real(8), allocatable, save :: cofs_in(:)
 class(oft_vector), pointer, save :: psi_center => NULL()
-CHARACTER(LEN=40) :: err_reason
+CHARACTER(LEN=80) :: err_reason
 IF(.NOT.ASSOCIATED(psi_center))THEN
   ALLOCATE(cofs_in(n))
   cofs_in=cofs
@@ -656,7 +657,7 @@ IF(iflag==1)THEN
     END IF
   END IF
   CALL oft_increase_indent
-  IF(ANY(isnan(cofs)))THEN
+  IF(ANY(ieee_is_nan(cofs)))THEN
     WRITE(*,'(2A)')oft_indent,'Step failed: Bad parameters!'
     WRITE(*,*)
     CALL oft_decrease_indent
@@ -865,7 +866,7 @@ IF(iflag==1)THEN
     WRITE(*,*)
   END IF
   CALL oft_decrease_indent
-  IF(ANY(isnan(err)))THEN
+  IF(ANY(ieee_is_nan(err)))THEN
     WRITE(*,'(2A)')oft_indent,'Evaluation failed: NaN detected'
     err=1.d99
   END IF
@@ -1027,7 +1028,7 @@ ELSE
   END IF
   gs_active%device%plot_final=plot_save
   CALL oft_decrease_indent
-  IF(ANY(isnan(jac_mat)))THEN
+  IF(ANY(ieee_is_nan(jac_mat)))THEN
     CALL oft_abort("Gradient failed: NaN detected", "fit_error_grad", __FILE__)
   END IF
   WRITE(*,*)
@@ -1327,6 +1328,11 @@ TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: qval
 qval = self%eval(gs)
+IF(qval<-1.d98)THEN ! Trace failed (-1.d99), skip the constraint
+  CALL oft_warn('fit_q_error: q trace failed, constraint skipped')
+  err = 0.d0
+  RETURN
+END IF
 err = (qval - self%val)*self%wt
 IF(self%type==-1.AND.qval>self%val)err=0.d0
 END FUNCTION fit_q_error
@@ -1349,13 +1355,15 @@ psi0=0.d0; psi1=1.d0
 !   IF(.NOT.gs%free)psi0 = psi0 + (psi1-psi0)*2.d-2
 ! END IF
 !
+val = -1.d99 ! Returned if no surface traced
 IF(ABS(self%type)==1)THEN
   do j=2,31
     psi_q(j-1)=(psi1-psi0)*((j-1)/REAL(npsi,8)) + psi0
   end do
   CALL gs_get_qprof(gs,npsi,psi_q,qprof)
-  qmin = MINVAL(qprof)
-  qmax = MAXVAL(qprof)
+  IF(ALL(qprof<-1.d98))RETURN
+  qmin = MINVAL(qprof,MASK=qprof>-1.d98)
+  qmax = MAXVAL(qprof,MASK=qprof>-1.d98)
   IF(qmax<0.d0)THEN
     val = ABS(qmax)
   ELSE
@@ -1366,8 +1374,9 @@ ELSEIF(self%type==2)THEN
     psi_q(j-1)=(psi1-psi0)*((j-1)/REAL(npsi,8)) + psi0
   end do
   CALL gs_get_qprof(gs,npsi,psi_q,qprof)
-  qmin = MINVAL(qprof)
-  qmax = MAXVAL(qprof)
+  IF(ALL(qprof<-1.d98))RETURN
+  qmin = MINVAL(qprof,MASK=qprof>-1.d98)
+  qmax = MAXVAL(qprof,MASK=qprof>-1.d98)
   IF(qmax<0.d0)THEN
     val = ABS(qmin)
   ELSE

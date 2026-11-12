@@ -871,7 +871,7 @@ integer(i4), optional, intent(in) :: iblock !< Row block (optional)
 integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4) :: j,ierr
 DEBUG_STACK_PUSH
-IF(XOR(PRESENT(iblock),PRESENT(jblock)))call oft_abort('Only one block index was supplied', &
+IF(PRESENT(iblock).NEQV.PRESENT(jblock))call oft_abort('Only one block index was supplied', &
   'mat_set_values',__FILE__)
 !---
 !$omp critical (petsc_mat)
@@ -903,7 +903,7 @@ integer(i4), optional, intent(in) :: jblock !< Column block (optional)
 integer(i4), optional, intent(inout) :: loc_cache(n,m) !< Cache of entry locations
 integer(i4) :: j,ierr
 DEBUG_STACK_PUSH
-IF(XOR(PRESENT(iblock),PRESENT(jblock)))call oft_abort('Only one block index was supplied', &
+IF(PRESENT(iblock).NEQV.PRESENT(jblock))call oft_abort('Only one block index was supplied', &
   'mat_add_values',__FILE__)
 !---
 !$omp critical (petsc_mat)

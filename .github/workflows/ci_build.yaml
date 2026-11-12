@@ -5,8 +5,16 @@ on:
     branches:
       - main
       - ci_debug
+    paths:
+      - '.github/workflows/ci_build.yaml'
+      - 'src/**'
+      - '!src/docs/**'
   pull_request:
     types: [opened, reopened, synchronize]
+    paths:
+      - '.github/workflows/ci_build.yaml'
+      - 'src/**'
+      - '!src/docs/**'
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -92,15 +100,13 @@ jobs:
           }
         exclude:
           - parallel: mpich
-            config: {os: macos-14}
-          - parallel: mpich
             config: {os: macos-15-intel}
-          - parallel: openmpi
-            config: {os: macos-14}
           - parallel: openmpi
             config: {os: macos-15}
           - parallel: openmpi
             config: {os: macos-15-intel}
+          - parallel: openmpi
+            config: {os: macos-26}
           - parallel: openmpi
             config: {cc: icx}
         include:
@@ -222,14 +228,7 @@ jobs:
         source ${{ github.workspace }}/setup_env.sh
         bash config_cmake.sh
 
-    - name: Build OFT
-      shell: bash
-      working-directory: builds/build_release
-      run: |
-        source ${{ github.workspace }}/setup_env.sh
-        make
-
-    - name: Install OFT
+    - name: Build+Install OFT
       shell: bash
       working-directory: builds/build_release
       run: |
