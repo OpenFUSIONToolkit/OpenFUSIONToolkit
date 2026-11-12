@@ -1,35 +1,14 @@
 if( OFT_BUILD_TESTS )
 
-  # Marklin tests
-  oft_add_test( test_taylor.F90 )
-  configure_file( test_taylor.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  configure_file( test_Marklin.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  configure_file( cyl_Marklin.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  oft_add_test( test_taylor_inj.F90 )
-  configure_file( test_taylor_inj.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  configure_file( torus_test.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  # Tests for each physics tool
+  add_subdirectory( TokaMaker )
+  add_subdirectory( ThinCurr )
+  add_subdirectory( Marklin )
+  add_subdirectory( MUG )
 
-  # MUG tests
-  add_library( test_phys_helpers test_phys_helpers.F90 )
-  add_dependencies( test_phys_helpers oftphysics )
-  oft_add_test( test_sound.F90 test_phys_helpers )
-  configure_file( test_sound.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  oft_add_test( test_sound_lag.F90 test_phys_helpers )
-  configure_file( test_sound_lag.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  oft_add_test( test_alfven.F90 test_phys_helpers )
-  configure_file( test_alfven.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  oft_add_test( test_alfven_lag.F90 test_phys_helpers )
-  configure_file( test_alfven_lag.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  configure_file( cube.inp ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  configure_file( cube.t3d ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  oft_add_test( test_alfven_2d.F90 test_phys_helpers )
-  configure_file( test_alfven_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  oft_add_test( test_sound_2d.F90 test_phys_helpers )
-  configure_file( test_sound_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  oft_add_test( test_taylor_green_2d.F90 test_phys_helpers )
-  configure_file( test_taylor_green_2d.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  configure_file( oft_in_taylor_green.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
-  configure_file( oft_in_taylor_green_p2_mf.xml ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  # Axisymmetric Green's function tests (shared by TokaMaker and ThinCurr)
+  oft_add_test( test_axi_green.F90 )
+  configure_file( test_axi_green.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 
   # ThinCurr tests
   configure_file( test_ThinCurr.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
@@ -77,4 +56,6 @@ if( OFT_BUILD_TESTS )
 
   # Combined tests
   configure_file( test_python_comb.py ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( Marklin/cyl_Marklin.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
+  configure_file( ThinCurr/tw_test-plate.h5 ${CMAKE_CURRENT_BINARY_DIR} COPYONLY )
 endif()

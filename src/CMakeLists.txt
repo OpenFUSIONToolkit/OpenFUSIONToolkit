@@ -348,7 +348,7 @@ if( HDF5_IS_PARALLEL )
     message( FATAL_ERROR "Parallel HDF5 found, but MPI not available" )
   endif()
 endif()
-if( HDF5_VERSION VERSION_GREATER_EQUAL "1.10.0" )
+if( HDF5_VERSION VERSION_GREATER_EQUAL "1.14.3" ) # Fortran H5Pset_file_space_strategy_f added in v1.14.3
   add_definitions( -DOFT_HDF5_FS_TRACK )
 endif()
 # PETSc
