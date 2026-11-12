@@ -5,6 +5,9 @@
 #------------------------------------------------------------------------------
 # TokaMaker tests: coupled TokaMaker-TORAX pulse design workflow (pulse_design.py) on ITER
 #
+# Seeds are handed to TORAX as get_fsa() flux surface averages, so the run exercises the 'tokamaker' geometry
+# rather than re-contoured gEQDSKs.
+#
 # Skipped unless the torax package is installed. Uses the ITER test mesh (see tokamaker_testing.create_ITER_mesh),
 # or the mesh file named by TOKAMAKER_ITER_MESH.
 from __future__ import annotations
@@ -13,6 +16,7 @@ import json
 import os
 import tempfile
 import time
+from types import SimpleNamespace
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -114,8 +118,8 @@ def _run_tokamaker_torax(
     Ip_flattop: float = 15.0e6,
     pax_a: float = 6.2e5,
     pax_b: float = 5.7e5,
-    eqdsk_nr: int = 100,
-    eqdsk_nz: int = 100,
+    n_surfaces: int = 200,
+    last_surface_factor: float = 0.99,
     max_loop: int = 1,
     loop0: bool = True,
 ) -> Dict[str, Any]:
@@ -123,14 +127,19 @@ def _run_tokamaker_torax(
 
     `mesh_path` defaults to TOKAMAKER_ITER_MESH or the ITER test mesh. Both seed equilibria and the TORAX
     schedule use the constant current `Ip_flattop` [A]; the seeds' axis pressures `pax_a` and `pax_b` [Pa] differ
-    slightly so transport has something to evolve. `max_loop` is the highest counted coupling pass and `loop0`
-    adds the initial pass (see TokaMaker_TORAX.fly).
+    slightly so transport has something to evolve. `n_surfaces` and `last_surface_factor` set the get_fsa()
+    surfaces shared by the seeds and the TokaMaker_TORAX object. `max_loop` is the highest counted coupling pass
+    and `loop0` adds the initial pass (see TokaMaker_TORAX.fly).
     '''
     from OpenFUSIONToolkit import OFT_env
     from OpenFUSIONToolkit.TokaMaker import TokaMaker
     from OpenFUSIONToolkit.TokaMaker.meshing import load_gs_mesh
-    from OpenFUSIONToolkit.TokaMaker.pulse_design import TokaMaker_TORAX, summary
-    from OpenFUSIONToolkit.TokaMaker.util import create_power_flux_fun, read_eqdsk
+    from OpenFUSIONToolkit.TokaMaker.pulse_design import (
+        TokaMaker_TORAX,
+        seed_from_equilibrium,
+        summary,
+    )
+    from OpenFUSIONToolkit.TokaMaker.util import create_power_flux_fun
 
     mesh = os.path.abspath(mesh_path or _default_iter_mesh_path())
     if not os.path.isfile(mesh):
@@ -147,8 +156,6 @@ def _run_tokamaker_torax(
     diverted_pts = np.vstack((ITER_isoflux_pts, x_point))
 
     work_dir = tempfile.mkdtemp(prefix="test_tmtx_")
-    eq_a = os.path.join(work_dir, "seed_t0.eqdsk")
-    eq_b = os.path.join(work_dir, "seed_t5.eqdsk")
 
     myoft = OFT_env(nthreads=nthreads)
     mygs = TokaMaker(myoft)
@@ -166,18 +173,25 @@ def _run_tokamaker_torax(
     mygs.set_profiles(ffp_prof=ffp_prof, pp_prof=pp_prof)
 
     seed_metrics: Dict[str, float] = {}
+    # Seeds are kept as get_fsa() flux surface averages rather than written out as
+    # gEQDSKs, so TORAX takes the 'tokamaker' geometry and nothing round trips through
+    # a rectangular grid. seeds=[...] of gEQDSK filenames selects the 'eqdsk' geometry
+    # instead; the two cannot be mixed in one config.
+    seeds = []
 
-    for idx, (pax, eq_path) in enumerate(((pax_a, eq_a), (pax_b, eq_b))):
+    for idx, pax in enumerate((pax_a, pax_b)):
         mygs.set_isoflux_constraints(diverted_pts)
         mygs.set_saddle_constraints(x_point)
         mygs.set_targets(Ip=Ip_flattop, pax=pax)
         _build_min_norm_coil_reg(mygs)
         mygs.init_psi()
         mygs.solve()
+        seed = seed_from_equilibrium(
+            mygs, n_surfaces=n_surfaces, last_surface_factor=last_surface_factor
+        )
+        seeds.append(seed)
         seed_metrics[f"seed{idx}_pax_Pa"] = float(pax)
-        mygs.save_eqdsk(eq_path, cocos=2, nr=eqdsk_nr, nz=eqdsk_nz)
-        g = read_eqdsk(eq_path)
-        seed_metrics[f"seed{idx}_psi_lcfs_Wb_per_rad"] = float(-g["psibry"])
+        seed_metrics[f"seed{idx}_psi_lcfs_Wb_per_rad"] = float(seed["psi_lcfs"])
 
     prev_cwd = os.getcwd()
     os.chdir(work_dir)
@@ -187,11 +201,12 @@ def _run_tokamaker_torax(
             t_init=0.0,
             t_final=t_final,
             eqtimes=[0.0, t_final],
-            g_eqdsk_arr=["seed_t0.eqdsk", "seed_t5.eqdsk"],
+            seeds=seeds,
             tokamaker_obj=mygs,
             tx_dt=tx_dt,
             tm_times=tm_times,
-            last_surface_factor=0.99,
+            last_surface_factor=last_surface_factor,
+            n_surfaces=n_surfaces,
             truncate_eq=False,
         )
 
@@ -209,7 +224,7 @@ def _run_tokamaker_torax(
         # H-mode pedestal-top targets; the TORAX L/H formation model owns the transition timing
         # (pedestal applied once P_SOL > P_LH), ramped over transition_time.
         tt.set_pedestal(
-            config_mode="ADAPTIVE_SOURCE",
+            config_mode="INTERNAL_BOUNDARY_CONDITION",
             ped_height_Te=3.0,
             ped_height_Ti=3.0,
             ped_height_ne=0.8e20,
@@ -250,6 +265,11 @@ def _run_tokamaker_torax(
     times = np.asarray(tt._tm_times)
     out: Dict[str, Any] = {}
     out.update(seed_metrics)
+    # Resolved through the same helper fly() uses, so this asserts on the geometry
+    # type TORAX was actually handed, not on how the seeds were built.
+    out["torax_geometry_type"] = str(
+        tt._tx_geometry({0.0: seeds[0]["geometry"]})["model_name"]
+    )
     out["Ip_flattop_MA"] = float(Ip_flattop / 1.0e6)
     out["t_final_s"] = float(t_final)
     out["tx_dt_s"] = float(tx_dt)
@@ -300,6 +320,97 @@ def test_tokamaker_torax() -> None:
     assert isinstance(result, dict)
     assert "Ip_flattop_MA" in result
     assert "t_final_s" in result
+    # Guards the FSA geometry path: seeds built by seed_from_equilibrium must reach
+    # TORAX as the 'tokamaker' geometry, not as re-contoured gEQDSKs.
+    assert result["torax_geometry_type"] == "tokamaker"
+
+
+def test_save_state_json(tmp_path) -> None:
+    '''save_state writes loadable JSON and skips the live TokaMaker equilibrium objects'''
+    pytest.importorskip("torax", reason="TokaMaker_TORAX requires the torax package")
+    from OpenFUSIONToolkit.TokaMaker.pulse_design import TokaMaker_TORAX
+
+    # Bypass __init__: only _state is needed, so no TokaMaker or TORAX run is required.
+    tt = TokaMaker_TORAX.__new__(TokaMaker_TORAX)
+    tt._state = {
+        'Ip': np.array([1.0e6, 2.0e6]),
+        'confinement_mode': np.array([False, True]),
+        'psi_lcfs_tx': {0: np.float32(0.5), 1: np.int64(2)},
+        'T_e': {0: {'x': np.linspace(0.0, 1.0, 3), 'y': np.ones(3), 'type': 'linterp'}},
+        'equil': {0: object(), 1: object()},  # stand-ins for TokaMaker_equilibrium objects
+    }
+    fname = os.path.join(str(tmp_path), "state.json")
+    tt.save_state(fname)
+    with open(fname) as fid:
+        loaded = json.load(fid)
+
+    assert 'equil' not in loaded
+    assert loaded['Ip'] == [1.0e6, 2.0e6]
+    assert loaded['confinement_mode'] == [False, True]
+    assert loaded['psi_lcfs_tx'] == {'0': 0.5, '1': 2}
+    assert loaded['T_e']['0']['x'] == [0.0, 0.5, 1.0]
+    assert 'equil' in tt._state  # the in-memory state is left untouched
+
+
+class _FakeTxScalar:
+    '''Minimal stand-in for a TORAX output scalar (xarray DataArray with a time coordinate)'''
+
+    def __init__(self, t, y):
+        self.coords = {'time': SimpleNamespace(values=t)}
+        self._y = y
+
+    def to_numpy(self):
+        return self._y
+
+
+@pytest.mark.parametrize("pedestal_cfg, used_label", [
+    ({'structure_model': {'model_name': 'set_T_top_n_top'}, 'transition_time_width': 0.5,
+      'formation_model': {'model_name': 'martin_scaling'}}, r'$P_{LH}$ Martin (used)'),
+    ({'structure_model': {'model_name': 'set_T_top_n_top'}, 'transition_time_width': 0.5,
+      'formation_model': {'model_name': 'delabie_scaling'}}, r'$P_{LH}$ Delabie (used)'),
+    # No model named: TORAX defaults the formation model to 'prescribed', which has no P_LH.
+    ({'structure_model': {'model_name': 'set_T_top_n_top'}, 'formation_model': {}}, None),
+    ({}, None),
+])
+def test_plh_used_label(monkeypatch, pedestal_cfg, used_label) -> None:
+    '''The P_LH "(used)" label follows the formation model in the validated TORAX config'''
+    torax = pytest.importorskip("torax", reason="TokaMaker_TORAX requires the torax package")
+    import matplotlib.pyplot as plt
+    from OpenFUSIONToolkit.TokaMaker import pulse_design
+
+    tx_config = torax.ToraxConfig.from_dict({
+        'profile_conditions': {'I_p': 10.0e6, 'psi_source': 'j'}, 'plasma_composition': {}, 'numerics': {},
+        'geometry': {'model_name': 'circular'}, 'pedestal': pedestal_cfg,
+        'sources': {}, 'solver': {}, 'transport': {},
+    })
+
+    t = np.linspace(0.0, 10.0, 11)
+    scalars = {name: _FakeTxScalar(t, np.full(t.shape, val)) for name, val in [
+        ('P_LH_martin', 30.0e6), ('P_LH_delabie', 20.0e6), ('P_SOL_total', 25.0e6),
+        ('n_e_line_avg', 5.0e19), ('n_e_min_P_LH', 3.0e19), ('I_p', 10.0e6),
+        ('a_minor', 2.0), ('R_major', 6.2), ('B_0', 5.3), ('f_GW_n_e_line_avg', 0.5),
+    ]}
+    tt = SimpleNamespace(
+        _data_tree=SimpleNamespace(scalars=SimpleNamespace(**scalars), profiles=SimpleNamespace()),
+        _tx_formation_model=tx_config.pedestal.formation_model.model_name,
+        _lh_time=None, _t_init=0.0, _t_final=10.0, _current_loop=1,
+    )
+    figs = []
+    monkeypatch.setattr(pulse_design, '_save_or_display', lambda fig, save_path=None, display=True: figs.append(fig))
+    plt.switch_backend('Agg')
+    pulse_design.plot_PLH_components(tt, display=False)
+
+    # Check every P_SOL vs P_LH panel, found by its P_SOL curve rather than its grid position.
+    gate_axes = []
+    for ax in figs[0].axes:
+        if r'$P_{SOL}$' in [line.get_label() for line in ax.get_lines()]:
+            gate_axes.append(ax)
+    assert gate_axes
+    expected = [used_label] if used_label is not None else []
+    for ax in gate_axes:
+        used = [line.get_label() for line in ax.get_lines() if line.get_label().endswith('(used)')]
+        assert used == expected
+    plt.close(figs[0])
 
 
 def main() -> None:

@@ -3343,7 +3343,7 @@ class TokaMaker_equilibrium():
         '''
         eta_file = 'none'
         if eta_prof is not None:
-            eta_file = 'tokamaker_eta.prof'
+            eta_file = self._oft_env.unique_tmpfile('tokamaker_eta.prof')
             create_prof_file(self, eta_file, eta_prof, "eta")
         self.load_profiles(eta_file=eta_file)
 
