@@ -8313,7 +8313,7 @@ def plot_lcfs_evolution(tt, save_path=None, display=True, one_plot=False):
         phases = [('Pulse', np.ones(len(times), dtype=bool))]
 
     lim_contours = getattr(tt._tm, 'lim_contours', None) or []
-    mirror_mode  = getattr(getattr(tt._tm, 'settings', None), 'mirror_mode', False)
+    rotate_plots = getattr(getattr(tt._tm, 'settings', None), 'rotate_plots', False)
 
     cmap = cm.plasma
 
@@ -8335,7 +8335,7 @@ def plot_lcfs_evolution(tt, save_path=None, display=True, one_plot=False):
 
         for lc in lim_contours:
             lc = np.asarray(lc)
-            if mirror_mode:
+            if rotate_plots:
                 ax.plot(lc[:, 1], lc[:, 0], color='k', linewidth=1.5, zorder=5)
             else:
                 ax.plot(lc[:, 0], lc[:, 1], color='k', linewidth=1.5, zorder=5)
