@@ -2194,67 +2194,78 @@ END SUBROUTINE fill_levels
 RECURSIVE SUBROUTINE subdivide_leaf(leaf,depth)
 TYPE(tw_oct_tree), TARGET, INTENT(inout) :: leaf
 INTEGER(4), INTENT(in) :: depth
-INTEGER(4) :: j,k,kk,i,ii,npts,sep_max(1)
+INTEGER(4) :: j,k,kk,i,ii,imed,sep_max(1)
 INTEGER(4), ALLOCATABLE, DIMENSION(:) :: child_mark
-REAL(8) :: xm,ym,zm,rleft(3),rdenom(3),locs(3),xs,extents(2,3),split_center(3)
-REAL(8), ALLOCATABLE, DIMENSION(:) :: vals
-REAL(8), PARAMETER :: pt_tol=0.d-6
+REAL(8) :: locs(3),xs,extents(2,3),split,vtol
+LOGICAL :: axis_tried(3)
+REAL(8), ALLOCATABLE, DIMENSION(:,:) :: vals
 TYPE(tw_oct_tree) :: child_tmp(2)
+CHARACTER(LEN=200) :: warn_msg
 ! WRITE(*,*)'Subdividing block',leaf%ncells,nblocks
 IF(nlevels>20)CALL oft_abort("Maximum recursion", "subdivide_leaf", __FILE__)
 nlevels=MAX(nlevels,depth)
-ALLOCATE(vals(leaf%npts),child_mark(leaf%npts))
-child_mark=0
-locs=0.d0
+!---Sort vertex coordinates along each axis and measure their spread about the median
+ALLOCATE(vals(leaf%npts,3),child_mark(leaf%npts))
+imed=INT(leaf%npts/2,4)
 DO j=1,3
-  vals=active_pts(j,leaf%pts)
-  CALL sort_array(vals,child_mark,leaf%npts)
-  split_center(j)=vals(INT(leaf%npts/2,4))
-  locs(j)=SUM((vals-split_center(j))**2)
+  vals(:,j)=active_pts(j,leaf%pts)
+  child_mark=0
+  CALL sort_array(vals(:,j),child_mark,leaf%npts)
+  locs(j)=SUM((vals(:,j)-vals(imed,j))**2)
 END DO
-DEALLOCATE(vals,child_mark)
-!---Split cell in half in each direction
-xm = split_center(1) !(leaf%bounds(1,1)+leaf%bounds(2,1))/2.d0
-ym = split_center(2) !(leaf%bounds(1,2)+leaf%bounds(2,2))/2.d0
-zm = split_center(3) !(leaf%bounds(1,3)+leaf%bounds(2,3))/2.d0
-DO k=1,leaf%npts
-  IF(ABS(active_pts(1,leaf%pts(k))-xm)<1.d-8)xm=xm+(leaf%bounds(2,1)-leaf%bounds(1,1))*1.d-4
-  IF(ABS(active_pts(2,leaf%pts(k))-ym)<1.d-8)ym=ym+(leaf%bounds(2,2)-leaf%bounds(1,2))*1.d-4
-  IF(ABS(active_pts(3,leaf%pts(k))-zm)<1.d-8)zm=zm+(leaf%bounds(2,3)-leaf%bounds(1,3))*1.d-4
+DEALLOCATE(child_mark)
+!---Values closer than this (relative to the size of the block) are treated as tied
+vtol=1.d-8*MAXVAL(leaf%bounds(2,:)-leaf%bounds(1,:))
+!---Choose the split plane, trying axes in order of decreasing spread about the median. The split is placed halfway
+!---between the median and the next distinct value above it (or below it if there is none above), so that both
+!---children are non-empty. If all values are tied the next axis is tried.
+axis_tried=.FALSE.
+DO ii=1,3
+  sep_max=MAXLOC(locs,MASK=.NOT.axis_tried)
+  j=sep_max(1)
+  axis_tried(j)=.TRUE.
+  DO k=imed+1,leaf%npts
+    IF(vals(k,j)>vals(imed,j)+vtol)EXIT
+  END DO
+  IF(k<=leaf%npts)THEN
+    split=(vals(imed,j)+vals(k,j))/2.d0
+    IF((split>vals(imed,j)).AND.(split<=vals(k,j)))EXIT
+  END IF
+  DO k=imed-1,1,-1
+    IF(vals(k,j)<vals(imed,j)-vtol)EXIT
+  END DO
+  IF(k>=1)THEN
+    split=(vals(k,j)+vals(imed,j))/2.d0
+    IF((split>vals(k,j)).AND.(split<=vals(imed,j)))EXIT
+  END IF
+  j=0
 END DO
-!---Split cell in half
+DEALLOCATE(vals)
+IF(j==0)THEN
+  !---Vertices coincide, so this block cannot be split further and is left as a leaf
+  WRITE(warn_msg,'(A,I0,A,I0,A,ES10.3,A)')"HODLR partitioning left a block of ",leaf%npts, &
+    " coincident vertices unsplit (target size ",leaf_target,", block width ", &
+    MAXVAL(leaf%bounds(2,:)-leaf%bounds(1,:)),")"
+  CALL oft_warn(warn_msg)
+  RETURN
+END IF
+!---Split cell in half at the plane (child 1: x_j >= split, child 2: x_j < split)
 child_tmp(1)%bounds=leaf%bounds
 child_tmp(2)%bounds=leaf%bounds
-sep_max=MAXLOC(locs)
-j=sep_max(1)
-!WRITE(*,*)'Split',j,locs
-locs=[xm,ym,zm]
-child_tmp(1)%bounds(1,j)=locs(j)
-child_tmp(2)%bounds(2,j)=locs(j)
-! WRITE(*,*)0
-! WRITE(*,*)leaf%bounds(:,1)
-! WRITE(*,*)leaf%bounds(:,2)
-! WRITE(*,*)leaf%bounds(:,3)
-! DO j=1,8
-!   WRITE(*,*)j
-!   WRITE(*,*)child_tmp(j)%bounds(:,1)
-!   WRITE(*,*)child_tmp(j)%bounds(:,2)
-!   WRITE(*,*)child_tmp(j)%bounds(:,3)
-! END DO
-!---
+child_tmp(1)%bounds(1,j)=split
+child_tmp(2)%bounds(2,j)=split
 ALLOCATE(child_mark(leaf%npts))
-child_mark=0
+DO k=1,leaf%npts
+  IF(active_pts(j,leaf%pts(k))>=split)THEN
+    child_mark(k)=1
+  ELSE
+    child_mark(k)=2
+  END IF
+END DO
 leaf%nchildren=0
 DO j=1,2
   child_tmp(j)%depth=depth
   child_tmp(j)%parent=>leaf
-  ! child_mark=0
-  rleft = child_tmp(j)%bounds(1,:)
-  rdenom = child_tmp(j)%bounds(2,:)-child_tmp(j)%bounds(1,:)
-  DO k=1,leaf%npts
-    locs = (active_pts(:,leaf%pts(k))-rleft)/rdenom
-    IF(ALL(locs>=-pt_tol).AND.ALL(locs<1.d0+pt_tol).AND.child_mark(k)==0)child_mark(k)=j
-  END DO
   child_tmp(j)%npts=COUNT(child_mark==j)
   IF(child_tmp(j)%npts==0)CYCLE
   ! IF(child_tmp(j)%npts<200)WRITE(*,*)'Small leaf',child_tmp(j)%npts
@@ -2292,24 +2303,7 @@ DO j=1,2
     child_tmp(j)%extent=MAX(child_tmp(j)%extent,magnitude(active_pts(:,child_tmp(j)%pts(k))-child_tmp(j)%center))
   END DO
 END DO
-IF(ANY(child_mark==0))THEN
-  WRITE(*,*)leaf%depth
-  WRITE(*,*)leaf%bounds(1,:)
-  WRITE(*,*)leaf%bounds(2,:)
-  WRITE(*,*)"---"
-  DO k=1,leaf%npts
-    IF(child_mark(k)==0)THEN
-      WRITE(*,*)active_pts(:,leaf%pts(k))
-      DO j=1,2!8
-        rleft = child_tmp(j)%bounds(1,:)
-        rdenom = child_tmp(j)%bounds(2,:)-child_tmp(j)%bounds(1,:)
-        locs = (active_pts(:,leaf%pts(k))-rleft)/rdenom
-        WRITE(*,*)j,locs
-      END DO
-    END IF
-  END DO
-  CALL oft_abort("Lost element in partitioning","tw_part_mesh::subdivide_leaf",__FILE__)
-END IF
+IF(ANY(child_tmp%npts==0))CALL oft_abort("Empty child in partitioning","tw_part_mesh::subdivide_leaf",__FILE__)
 DEALLOCATE(child_mark)
 !---Subdivide further
 IF(leaf%nchildren==0)RETURN
