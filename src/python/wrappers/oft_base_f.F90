@@ -18,7 +18,7 @@ MODULE oft_base_f
 USE iso_c_binding, ONLY: c_int, c_double, c_char, c_loc, c_null_char, c_ptr, &
     c_f_pointer, c_bool, c_null_ptr, c_funptr, c_associated, c_f_procpointer
 USE oft_base
-USE oft_mesh_type, ONLY: oft_bmesh, oft_mesh, bmesh_findcell, mesh_findcell
+USE oft_mesh_type, ONLY: oft_bmesh, bmesh_findcell
 USE oft_mesh_native, ONLY: r_mem, lc_mem, reg_mem
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
@@ -307,10 +307,9 @@ TYPE(c_ptr), VALUE, INTENT(in) :: field_ptr !< Field at locations specified by `
 INTEGER(i4) :: i,cell
 REAL(r8), POINTER, DIMENSION(:,:) :: pts,field
 CLASS(oft_bmesh), POINTER :: smesh
-CLASS(oft_mesh), POINTER :: vmesh
 TYPE(oft_lag_brinterp), POINTER :: br_obj
 TYPE(oft_lag_bginterp), POINTER :: bg_obj
-REAL(8) :: f(4),goptmp(3,4),vol,fmin,fmax
+REAL(8) :: f(3),goptmp(3,4),vol,fmin,fmax
 IF(int_type<0)THEN
   SELECT CASE(ABS(int_type))
   CASE(211)
@@ -347,13 +346,7 @@ CALL c_f_pointer(field_ptr, field, [dim,npts])
 !$omp parallel do private(cell,f,goptmp,vol,fmin,fmax) if(npts>1000)
 DO i=1,npts
   cell=0
-  IF((int_type>200).AND.(int_type<300))THEN
-    call bmesh_findcell(smesh,cell,pts(:,i),f)
-  ELSE IF((int_type>300).AND.(int_type<400))THEN
-    call mesh_findcell(vmesh,cell,pts(:,i),f)
-  ELSE
-    CALL oft_abort("Invalid field spatial dimension","oft_apply_field_eval",__FILE__)
-  END IF
+  call bmesh_findcell(smesh,cell,pts(:,i),f)
   IF(cell==0)THEN
     field(:,i)=ieee_value(1.d0, ieee_quiet_nan)
     CYCLE
