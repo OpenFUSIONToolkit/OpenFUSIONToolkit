@@ -3473,14 +3473,18 @@ class TokaMaker_TORAX:
 
                 self._tm.update_settings()
 
-                if prev_tm_idx is not None:
-                    _psi_prev = self._state['psi_grid_prev_tm'].get(prev_tm_idx)
-                    if _psi_prev is not None:
-                        self._tm.set_psi_dt(
-                            psi0=_psi_prev,
-                            # dt=self._tm_times[i] - self._tm_times[prev_tm_idx],
-                            dt=1.0e10, # deactivated
-                        )
+                # Eddy currents in the conducting structures: backward-Euler step from the last
+                # solved psi of this loop, J = -(psi - psi0) / (eta R dt). A failed solve stores
+                # None, so step back to the last good one (otherwise the previous step's psi0/dt
+                # would be reused against the wrong interval).
+                _j = prev_tm_idx
+                while _j is not None and self._state['psi_grid_prev_tm'].get(_j) is None:
+                    _j = prev_solve_for[_j]
+                if _j is not None:
+                    self._tm.set_psi_dt(
+                        psi0=self._state['psi_grid_prev_tm'][_j],
+                        dt=self._tm_times[i] - self._tm_times[_j],
+                    )
 
                 skip_coil_update = False
                 step_fail_msg = None  # set when TM GS succeeds but its geometry is unusable
