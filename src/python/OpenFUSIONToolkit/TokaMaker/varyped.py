@@ -39,12 +39,19 @@ MU0 = 4.0e-7 * np.pi
 KEV_TO_KPA = constants.eV * 1.0e20
 DENOM_TOL = 1.0e-7
 PSI_PAD = 1.0e-3
-# Output g-files are written at psi_N = 1 - LCFS_PAD of the solve. A pad of
-# 1e-2 cuts off the outer 1% of the pedestal, which edge stability codes
-# (ELITE) need, so the boundary is written close to the separatrix.
+# Warn when the p-file species pressures differ from ptot by more than this
+# fraction of the axis ptot
+SPECIES_PTOT_WARN = 0.05
+# Output g-file profiles are evaluated out to psi_N = 1 - LCFS_PAD of the
+# solve, where q is still finite. A pad of 1e-2 cuts off the outer 1% of the
+# pedestal, which edge stability codes (ELITE) need, so a small pad is used.
 LCFS_PAD = 1.0e-3
-# Truncate the written equilibrium at LCFS_PAD (TokaMaker's default)
-TRUNCATE_EQ = True
+# Do not truncate the written equilibrium at LCFS_PAD: g-file psi_N then keeps
+# the solve's separatrix normalization, so the g-file pressure, the p-file and
+# the separatrix pressure agree at psi_N = 1, and the boundary is the separatrix.
+# Truncating renormalizes psi_N to the 1 - LCFS_PAD surface, which shifts the
+# g-file pressure off the p-file grid (a few % in a steep pedestal).
+TRUNCATE_EQ = False
 # Defaults of the OMFIT VARYPED module:
 # scale_pres = scale_cur = [0.5, 0.1, 11]; error = 1e-8 (set as the TokaMaker
 # nl_tol by the caller); the boundary is the input separatrix resampled to 110
@@ -1077,17 +1084,32 @@ def _update_fast_ion_profiles(pfile, psf, psi_n):
         pb = np.zeros_like(psi_n)
     pfile.set_profile('pb', psi_n, pb)
 
-def _update_total_pressure(pfile, resampled_gfile_profiles, psi_n):
+def _update_total_pressure(pfile, psf, psi_n):
 
-    num_impurity_species = resampled_gfile_profiles['n_imps']
-    
-    p_electron = pfile['ne']['data'] * pfile['te']['data'] * KEV_TO_KPA
-    nzs = sum(pfile[f'nz{i+1}']['data'] for i in range(num_impurity_species))
+    # Scale the input ptot, which is the pressure solved for and written to the
+    # g-file; a re-sum of the species differs whenever the input species do
+    # not add up to the input ptot
+    pfile.set_profile('ptot', psi_n, pfile['ptot']['data']*psf)
 
-    p_ions = (pfile['ni']['data'] + nzs) * pfile['ti']['data'] * KEV_TO_KPA
-    p_beam = pfile['pb']['data'] 
+def _species_pressure(pfile):
+    r'''! Sum of the species pressures in a p-file
 
-    pfile.set_profile('ptot', psi_n, (p_electron + p_ions + p_beam))
+    Electrons, main ions, impurities (`nz1`, `nz2`, ... at the ion temperature)
+    and the fast-ion pressure `pb`, each included when present.
+
+    @param pfile p-file object with all profiles on one grid
+    @result Pressure [kPa]
+    '''
+    p_total = pfile['ne']['data'] * pfile['te']['data'] * KEV_TO_KPA
+    n_ions = np.asarray(pfile['ni']['data'], dtype=float).copy()
+    num_impurity_species = max(len(pfile['N Z A']['N']) - 2, 0)
+    for i in range(num_impurity_species):
+        if profile_exists(pfile, f'nz{i+1}'):
+            n_ions += pfile[f'nz{i+1}']['data']
+    p_total = p_total + n_ions * pfile['ti']['data'] * KEV_TO_KPA
+    if profile_exists(pfile, 'pb'):
+        p_total = p_total + pfile['pb']['data']
+    return p_total
 
 def _safe_divide(numerator, denominator, psi_n, eps=1.0e-6):
     num = np.asarray(numerator, dtype=float)
@@ -1213,7 +1235,7 @@ def make_updated_pfile(pfile, resampled_gfile_profiles, psf, psi_n):
     _update_main_profiles(pfile_copy, psf, psi_n)
     _update_fast_ion_profiles(pfile_copy, psf, psi_n)
     _update_impurity_species(pfile_copy, resampled_gfile_profiles, psi_n)
-    _update_total_pressure(pfile_copy, resampled_gfile_profiles, psi_n)
+    _update_total_pressure(pfile_copy, psf, psi_n)
     _update_rotation_profiles(pfile_copy, resampled_gfile_profiles, psi_n)
     _update_diamagnetic_and_rotation_decomposition(pfile_copy, resampled_gfile_profiles)
 
@@ -2000,10 +2022,27 @@ def _run_equilibrium_scan(t_object, pfile, gfile, scaling_values,
     if psi_n_pfile is None:
         raise ValueError("Could not extract psinorm for 'ptot' profile")
     psi_n_pfile = np.asarray(psi_n_pfile, dtype=float)
+    # TokaMaker profiles are defined on 0 <= psi_N <= 1: drop p-file points
+    # outside the separatrix and interpolate the profiles at psi_N = 1
+    if psi_n_pfile[-1] > 1.0:
+        n_outside = np.count_nonzero(psi_n_pfile > 1.0)
+        psi_n_pfile = np.append(psi_n_pfile[psi_n_pfile < 1.0], 1.0)
+        print(f"Dropped {n_outside} p-file points outside psi_N = 1")
     
     # Remap all pfile profiles onto ptot's psi_n 
     # ensures all profiles share a common coordinate system
     pfile_copy = pfile.remap(psi_n_pfile)
+    if file_output:
+        # Output p-files scale the input ptot, so flag input species that do
+        # not add up to it (e.g. a ptot that includes a missing fast-ion term)
+        ptot_input = np.asarray(pfile_copy['ptot']['data'], dtype=float)
+        species_gap = np.max(np.abs(_species_pressure(pfile_copy) - ptot_input))
+        if species_gap > SPECIES_PTOT_WARN*abs(ptot_input[0]):
+            print(
+                f"WARNING: p-file species pressures differ from ptot by up to "
+                f"{species_gap/abs(ptot_input[0]):.1%} of the axis ptot; output "
+                f"p-files scale ptot and the species independently"
+            )
     
     # Get psi_n from gfile 
     psi_n_gfile = np.asarray(gfile.psi_N, dtype=float)
