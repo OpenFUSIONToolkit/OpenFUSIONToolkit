@@ -333,7 +333,7 @@ def _run_tokamaker_torax(
     # Resolved through the same helper fly() uses, so this asserts on the geometry
     # type TORAX was actually handed, not on how the seeds were built.
     out["torax_geometry_type"] = str(
-        tt._tx_geometry({0.0: seeds[0]["geometry"]})["geometry_type"]
+        tt._tx_geometry({0.0: seeds[0]["geometry"]})["model_name"]
     )
     out["Ip_flattop_MA"] = float(Ip_flattop / 1.0e6)
     out["t_final_s"] = float(t_final)

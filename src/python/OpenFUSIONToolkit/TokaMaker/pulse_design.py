@@ -8,6 +8,7 @@ r'''! TokaMaker + TORAX Coupled Pulse Design and Simulation Workflow (TokaMaker_
     TokaMaker (tm) = free-boundary equilibrium solver, part of OFT
     TORAX (tx) = Python Jax transport solver (developed by Google DeepMind)
         https://github.com/google-deepmind/torax
+        Requires TORAX 2.0 (Python >= 3.12).
 
     TokaMaker_TORAX workflow couples the two codes for pulse planning, predictive kinetic equilibria,
         and other integrated modeling applications.
@@ -63,13 +64,11 @@ DEFAULT_LOOP0_TX_FACE_POINTS = 51
 BASE_CONFIG = {
     'plasma_composition': {},
     'profile_conditions': {
-        'normalize_n_e_to_nbar': False,
-        'n_e_nbar_is_fGW': False,
-        'initial_psi_source': 'geometry',
+        'normalize_n_e': False,
+        'n_e_bar_is_f_GW': False,
+        'psi_source': 'geometry',
     },
-    'numerics': {
-        'dt_reduction_factor': 3,
-    },
+    'numerics': {},
     'geometry': {},
     'sources': {
         'ohmic': {},
@@ -85,9 +84,7 @@ BASE_CONFIG = {
     'neoclassical': {
         'bootstrap_current': {'model_name': 'redl'},
     },
-    'pedestal': {
-        # 'model_name': 'set_T_ped_n_ped',
-    },
+    'pedestal': {},
     # QLKNN everywhere, overwritten by constant (prescribed) coefficients inside rho_norm = 0.1.
     # The inner patch is not needed for stability; it speeds up coupling convergence, since
     # the GS solve then chases a smoother core current profile (ITER example: loop-2 error
@@ -143,6 +140,7 @@ BASE_CONFIG = {
     },
     'time_step_calculator': {
         'calculator_type': 'fixed',
+        'dt_backtracking_factor': 3.0,
     },
 }
 
@@ -177,12 +175,9 @@ log_redirect_setup()
 # Now import "noisy" packages, after running log_redirect_setup:
 import torax  # noqa: E402
 import xarray as xr  # noqa: E402
-# Internal TORAX APIs for running the loop ourselves so we can keep the raw
-# list[SimState] (run_simulation() drops the pedestal confinement_mode).
+# Not in TORAX's public API; the per-step code is what the output tree stores in
+# model_state/pedestal/confinement_mode.
 from torax._src.pedestal_model.runtime_params import ConfinementMode  # noqa: E402
-from torax._src.orchestration import run_simulation as run_sim_lib  # noqa: E402
-from torax._src.orchestration import jit_run_loop as run_loop_lib  # noqa: E402
-from torax._src.output_tools import output as output_lib  # noqa: E402
 
 
 @contextmanager
@@ -1004,7 +999,7 @@ class TokaMaker_TORAX:
 
     def set_TORAX_grid(self, grid_type, grid):
         r'''! Set TORAX grid type and grid points.
-                TORAX grid documentation: https://torax.readthedocs.io/en/latest/configuration.html#geometry
+                TORAX grid documentation: https://torax.readthedocs.io/en/latest/configuration/geometry.html
                 @param grid_type Grid type ('n_rho' or 'face_centers').
                 @param grid Grid points (integer or np.array).
 
@@ -1480,7 +1475,7 @@ class TokaMaker_TORAX:
 
     def set_ne(self, n_e, right_bc=None):
         r'''! Set electron density profiles and optional right boundary condition.
-                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#profile-conditions
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration/profile_conditions.html
                 @param n_e Electron density (m^-3).
                 @param right_bc Right boundary value at rho=1 (m^-3), scalar or time-varying map.
         '''
@@ -1490,7 +1485,7 @@ class TokaMaker_TORAX:
 
     def set_Te(self, T_e, right_bc=None):
         r'''! Set electron temperature profiles and optional right boundary condition.
-                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#profile-conditions
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration/profile_conditions.html
                 @param T_e Electron temperature (keV).
                 @param right_bc Right boundary value at rho=1 (keV), scalar or time-varying map.
         '''
@@ -1500,7 +1495,7 @@ class TokaMaker_TORAX:
 
     def set_Ti(self, T_i, right_bc=None):
         r'''! Set ion temperature profiles and optional right boundary condition.
-                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#profile-conditions
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration/profile_conditions.html
                 @param T_i Ion temperature (keV).
                 @param right_bc Right boundary value at rho=1 (keV), scalar or time-varying map.
         '''
@@ -1510,7 +1505,7 @@ class TokaMaker_TORAX:
 
     def set_plasma_composition(self, Zeff=None, main_ion=None, impurity=None):
         r'''! Set plasma effective charge and composition.
-                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#profile-conditions
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration/plasma_composition.html
                 @param Zeff Effective charge target.
                 @param main_ion Main ion species dict, e.g. {'D': 0.5, 'T': 0.5}.
                 @param impurity Impurity species string, e.g. 'Ne', 'Ar', 'W' (the whole impurity
@@ -1529,7 +1524,7 @@ class TokaMaker_TORAX:
 
     def set_heating(self, generic_heat=None, generic_heat_loc=None, generic_heat_width=0.25, generic_heat_absorption_fraction=1.0, generic_heat_electron_heat_fraction=0.4, nbi_current=False, ecrh=None, ecrh_loc=None, ecrh_width=0.1, ohmic=None, fusion=True, ei_exchange=True):
         r'''! Set TORAX heating and source toggles.
-                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#sources
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration/sources.html
                 @param generic_heat Generic heating ({time: power_W}).
                 @param generic_heat_loc Generic heating deposition location (normalized rho).
                 @param generic_heat_width Generic heating deposition width (normalized rho).
@@ -1565,12 +1560,12 @@ class TokaMaker_TORAX:
                      transition_time=0.5, formation_model='delabie_scaling',
                      set_pedestal=None, T_i_ped=None, T_e_ped=None, n_e_ped=None, ped_top=0.90):
         r'''! Configure the TORAX pedestal model.
-                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#pedestal
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration/pedestal.html
 
                 Three modes via config_mode:
                 - 'off'                   : no pedestal (default).
-                - 'INTERNAL_BOUNDARY_CONDITION' : TORAX set_T_ped_n_ped pedestal in
-                                            INTERNAL_BOUNDARY_CONDITION mode.
+                - 'INTERNAL_BOUNDARY_CONDITION' : TORAX set_T_top_n_top pedestal in
+                                            internal_boundary_condition mode.
                                             ped_height_* are the H-mode pedestal-top targets and
                                             a power-scaling formation model is set, so
                                             TORAX's L/H state machine owns the timing: the pedestal
@@ -1594,7 +1589,7 @@ class TokaMaker_TORAX:
                 @param T_i_ped Legacy alias of ped_height_Ti.
                 @param T_e_ped Legacy alias of ped_height_Te.
                 @param n_e_ped Legacy alias of ped_height_ne.
-                @param ped_top Pedestal-top location rho_norm_ped_top.
+                @param ped_top Pedestal-top location rho_norm_top.
         '''
         # 'ADAPTIVE_SOURCE' is TORAX's former name for INTERNAL_BOUNDARY_CONDITION.
         if config_mode == 'ADAPTIVE_SOURCE':
@@ -1657,7 +1652,7 @@ class TokaMaker_TORAX:
 
     def set_evolve(self, density=True, Ti=True, Te=True, current=True):
         r'''! Set variables as either prescribed (False) or evolved (True) for TORAX.
-                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#numerics
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration/numerics.html
                 @param density Evolve density.
                 @param Ti Evolve ion temperature.
                 @param Te Evolve electron temperature.
@@ -1672,7 +1667,7 @@ class TokaMaker_TORAX:
     def set_fueling(self, gas_puff_S_total=None, gas_puff_decay_length=None, pellet_deposition_location=None, pellet_width=None, pellet_S_total=None,
                     generic_particle_location=None, generic_particle_width=None, generic_particle_S_total=None):
         r'''! Set gas puff and pellet fueling particle sources for TORAX.
-                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#sources
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration/sources.html
                 @param gas_puff_S_total Gas puff particle source (particles/s).
                 @param gas_puff_decay_length Gas puff decay length from edge (normalized rho).
                 @param pellet_deposition_location Pellet deposition location (normalized rho).
@@ -1697,7 +1692,7 @@ class TokaMaker_TORAX:
 
     def set_transport_coefs(self, chi_min=None, chi_max=None, De_min=None, De_max=None, Ve_min=None, Ve_max=None):
         r'''! Set transport coefficient bounds for TORAX.
-                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration.html#transport
+                TORAX input config documentation: https://torax.readthedocs.io/en/latest/configuration/transport.html
                 @param chi_min Minimum ion thermal diffusivity (m^2/s).
                 @param chi_max Maximum ion thermal diffusivity (m^2/s).
                 @param De_min Minimum electron diffusion coefficient (m^2/s).
@@ -2191,8 +2186,8 @@ class TokaMaker_TORAX:
                 so each relax simulation sees the same plasma
                 conditions as the main sim.
 
-                Does NOT touch geometry, numerics.{t_initial, t_final, fixed_dt},
-                or profile_conditions.{psi, initial_psi_source} —
+                Does NOT touch geometry, time_step_calculator.{t_initial, t_final, dt},
+                or profile_conditions.{psi, psi_source} —
                 those are loop-specific and set by the calling method.
 
                 @param myconfig Config dict (modified in place).
@@ -2202,7 +2197,7 @@ class TokaMaker_TORAX:
         myconfig.setdefault('numerics', {})
 
         if self._Ip is not None:
-            myconfig['profile_conditions']['Ip'] = self._Ip
+            myconfig['profile_conditions']['I_p'] = self._Ip
 
         if self._n_e is not None:
             myconfig['profile_conditions']['n_e'] = self._n_e
@@ -2279,16 +2274,16 @@ class TokaMaker_TORAX:
             )
 
             if ped_enabled:
-                structure = {'model_name': 'set_T_ped_n_ped'}
+                structure = {'model_name': 'set_T_top_n_top'}
                 if self._ped_top is not None:
-                    structure['rho_norm_ped_top'] = self._ped_top
+                    structure['rho_norm_top'] = self._ped_top
                 if self._T_i_ped is not None:
-                    structure['T_i_ped'] = self._T_i_ped
+                    structure['T_i_top'] = self._T_i_ped
                 if self._T_e_ped is not None:
-                    structure['T_e_ped'] = self._T_e_ped
+                    structure['T_e_top'] = self._T_e_ped
                 if self._n_e_ped is not None:
-                    structure['n_e_ped_is_fGW'] = False
-                    structure['n_e_ped'] = self._n_e_ped
+                    structure['n_e_top_is_f_GW'] = False
+                    structure['n_e_top'] = self._n_e_ped
                 ped_cfg = {
                     'mode': self._ped_mode.lower(),  # TORAX config enums are lower_snake_case
                     'structure_model': structure,
@@ -2310,12 +2305,12 @@ class TokaMaker_TORAX:
                 myconfig['pedestal'] = {'structure_model': {'model_name': 'no_pedestal'}}
 
         if self._nbar is not None:
-            myconfig['profile_conditions']['nbar'] = self._nbar
+            myconfig['profile_conditions']['n_e_bar'] = self._nbar
         if self._normalize_to_nbar is not None:
-            myconfig['profile_conditions']['normalize_n_e_to_nbar'] = self._normalize_to_nbar
+            myconfig['profile_conditions']['normalize_n_e'] = self._normalize_to_nbar
 
         if self._ne_right_bc is not None:
-            myconfig['profile_conditions']['n_e_right_bc_is_fGW'] = False
+            myconfig['profile_conditions']['n_e_right_bc_is_f_GW'] = False
             myconfig['profile_conditions']['n_e_right_bc'] = self._ne_right_bc
 
         if self._Te_right_bc is not None:
@@ -2378,7 +2373,7 @@ class TokaMaker_TORAX:
                    For loop 1+ with injected psi and relax=False, the seed is
                    forced at t_initial (psi from initial TORAX relax on seed); if relax=True,
                    loop N relax keeps psi on the TM i=0 surface so the TM equilibrium is used.
-                4. Override t_initial / t_final / fixed_dt from __init__ params.
+                4. Override t_initial / t_final / dt from __init__ params.
                 5. Use psi profile from initial TORAX relax (if available) from profile_conditions.
                 6. Apply any explicit set_*() overrides (only when the attribute is
                    not None, i.e. the user called the setter after load_TORAX_config).
@@ -2478,19 +2473,19 @@ class TokaMaker_TORAX:
 
         myconfig['geometry'] = self._tx_geometry(entries)
 
-        # ── 4. Override t_initial / t_final / fixed_dt from __init__ ───────
-        myconfig.setdefault('numerics', {})
-        myconfig['numerics']['t_initial'] = self._t_init
-        myconfig['numerics']['t_final'] = self._t_final
-        myconfig['numerics']['fixed_dt'] = self._tx_dt
+        # ── 4. Override t_initial / t_final / dt from __init__ ─────────────
+        myconfig.setdefault('time_step_calculator', {})
+        myconfig['time_step_calculator']['t_initial'] = self._t_init
+        myconfig['time_step_calculator']['t_final'] = self._t_final
+        myconfig['time_step_calculator']['dt'] = self._tx_dt
 
         # ── 5. Psi profile from last TORAX relax (initial / inter-loop) ───────────────────
         myconfig.setdefault('profile_conditions', {})
         if self._psi_init is not None:
             myconfig['profile_conditions']['psi'] = self._psi_init
-            myconfig['profile_conditions']['initial_psi_source'] = 'profile_conditions'
+            myconfig['profile_conditions']['psi_source'] = 'profile_conditions'
         else:
-            myconfig['profile_conditions']['initial_psi_source'] = 'geometry'  # if initial relax was skipped
+            myconfig['profile_conditions']['psi_source'] = 'geometry'  # if initial relax was skipped
 
         # ── 6. Explicit set_*() overrides ──────────────────────────────────
         self._apply_tx_set_overrides(myconfig)
@@ -2538,7 +2533,7 @@ class TokaMaker_TORAX:
             else:
                 snap.pop('geometry', None)
             pc = snap.get('profile_conditions', {})
-            for k in ('psi', 'initial_psi_source'):
+            for k in ('psi', 'psi_source'):
                 pc.pop(k, None)
             self._tx_config_snapshot = snap
 
@@ -2556,7 +2551,7 @@ class TokaMaker_TORAX:
         tx_config = torax.ToraxConfig.from_dict(myconfig)
         return tx_config
 
-    def _tx_geometry(self, entries, *, Ip_from_parameters=True):
+    def _tx_geometry(self, entries):
         r'''! Build the TORAX geometry block for a {time: geometry entry} map.
 
                 An entry is either {'fsa_profiles': get_fsa() dict} -- what every TokaMaker solve
@@ -2567,25 +2562,30 @@ class TokaMaker_TORAX:
                 gEQDSK entry instead.
 
                 @param entries {time: geometry entry}.
-                @param Ip_from_parameters True tells TORAX to take Ip from the config rather than
-                       from the geometry, so a bad equilibrium cannot move the Ip target.
                 @return Geometry sub-dict for a TORAX config.
         '''
         is_fsa = [('fsa_profiles' in e) for e in entries.values()]
         if all(is_fsa):
-            geometry = {'geometry_type': 'tokamaker'}
-        elif not any(is_fsa):
             geometry = {
-                'geometry_type': 'eqdsk',
+                'model_name': 'tokamaker',
+                'fsa_profiles': {t: e['fsa_profiles'] for t, e in entries.items()},
+            }
+        elif not any(is_fsa):
+            cocos = {e['cocos'] for e in entries.values()}
+            if len(cocos) != 1:
+                raise ValueError(f'gEQDSK seeds use different COCOS conventions {sorted(cocos)}; '
+                                 'TORAX takes one cocos for all time slices.')
+            geometry = {
+                'model_name': 'eqdsk',
                 'geometry_directory': os.getcwd(),
+                'geometry_file': {t: e['geometry_file'] for t, e in entries.items()},
+                'cocos': cocos.pop(),
                 'last_surface_factor': self._last_surface_factor,
                 'n_surfaces': 50,
             }
         else:
             raise ValueError('TORAX geometry entries mix flux surface averages and gEQDSK files; '
                              'a TORAX config takes one geometry type for all time slices.')
-        geometry['Ip_from_parameters'] = Ip_from_parameters
-        geometry['geometry_configs'] = dict(entries)
         if self._tx_grid_type == 'n_rho':
             geometry['n_rho'] = self._tx_grid
         elif self._tx_grid_type == 'face_centers':
@@ -2621,7 +2621,7 @@ class TokaMaker_TORAX:
         r'''! Return whether TORAX accepts a geometry entry as ToraxConfig geometry.
 
                 What is validated is the whole config -- BASE_CONFIG, the user's loaded config,
-                and this geometry entry -- so a rejection is frequently not about the geometry
+                the set_*() values and this geometry entry -- so a rejection is frequently not about the geometry
                 at all: one stale key anywhere in the loaded config fails every entry
                 identically. The exception is kept in _last_tx_geometry_error so callers can
                 report the actual reason instead of blaming the equilibrium.
@@ -2632,8 +2632,14 @@ class TokaMaker_TORAX:
         myconfig = copy.deepcopy(BASE_CONFIG)
         if self._loaded_config is not None:
             self._tx_config_merge(myconfig, self._loaded_config)
-        myconfig['geometry'] = self._tx_geometry({self._t_init: entry},
-                                                 Ip_from_parameters=False)
+        # set_*() values complete sections of the loaded config (TORAX rejects e.g. an ecrh
+        # block without P_total), so validate the config as it will run.
+        self._apply_tx_set_overrides(myconfig)
+        myconfig['geometry'] = self._tx_geometry({self._t_init: entry})
+        # Ip from the equilibrium, so the test does not depend on set_Ip() having been called
+        pc = myconfig.setdefault('profile_conditions', {})
+        pc['I_p_source'] = 'geometry'
+        pc.pop('I_p', None)
         try:
             _ = torax.ToraxConfig.from_dict(myconfig)
             self._last_tx_geometry_error = None
@@ -2702,12 +2708,10 @@ class TokaMaker_TORAX:
         self._steady_state_tx_seed = seed
 
     def _run_torax(self, config):
-        r'''! Run TORAX via make_step_fn + run_loop so we keep the raw list[SimState]
-                (torax.run_simulation() drops the pedestal confinement_mode). Returns the same
-                (data_tree, history) that run_simulation() would, plus the SimState list.
+        r'''! Run TORAX and convert its output to an xarray DataTree, with tau_R added.
 
                 @param config TORAX config as a dict or a ToraxConfig.
-                @return Tuple (data_tree, state_history, state_list).
+                @return Tuple (data_tree, state_history).
         '''
         tx_config = config if isinstance(config, torax.ToraxConfig) else torax.ToraxConfig.from_dict(config)
 
@@ -2725,14 +2729,7 @@ class TokaMaker_TORAX:
             except Exception as _e:
                 self._log(f'Could not write resolved ToraxConfig JSON ({cfg_name}): {_e}')
 
-        step_fn = run_sim_lib.make_step_fn(tx_config)
-        state_list, pp_history, sim_error = run_loop_lib.run_loop(step_fn, progress_bar=True)
-        history = output_lib.StateHistory(
-            state_history=state_list,
-            post_processed_outputs_history=pp_history,
-            sim_error=sim_error,
-            torax_config=tx_config,
-        )
+        history = torax.run_simulation(tx_config, progress_bar=True)
         data_tree = history.simulation_output_to_xr()
 
         # Resistive current-diffusion time tau_R = mu0 a^2 <sigma_par>_V (Wesson, Tokamaks), added
@@ -2749,33 +2746,25 @@ class TokaMaker_TORAX:
         data_tree['scalars']['tau_R'] = xr.DataArray(mu0 * a_minor**2 * sigma_vol, dims=['time'],
                                                      coords={'time': sigma_par.coords['time'].values},
                                                      attrs={'units': 's'})
-        return data_tree, history, state_list
+        return data_tree, history
 
-    def _capture_confinement_mode(self, state_list):
+    def _capture_confinement_mode(self, data_tree):
         r'''! Map per-step pedestal confinement_mode to an H-mode bool series, store it per
                 tm_time in _state['confinement_mode'], and record the H-mode start/end times.
                 H_MODE and TRANSITIONING_TO_H_MODE -> True; L_MODE and TRANSITIONING_TO_L_MODE
-                -> False. No-op (leaves all False) if the L/H state machine is inactive.
+                -> False. No-op (leaves all False) if the run never leaves L-mode.
 
                 The confinement_mode can dither around a transition, so a transition is only
                 accepted once the new state persists for at least the pedestal transition_time
                 (dwell debounce): a brief L dip inside H-mode is not read as the back-transition,
                 and a brief H blip in L-mode is not read as the L->H transition.
 
-                @param state_list list[SimState] from _run_torax.
+                @param data_tree TORAX output DataTree from _run_torax.
         '''
-        h_codes = {int(ConfinementMode.H_MODE), int(ConfinementMode.TRANSITIONING_TO_H_MODE)}
-        tx_times, is_h = [], []
-        for s in state_list:
-            pts = s.pedestal_transition_state
-            if pts is None:
-                continue
-            tx_times.append(float(s.t))
-            is_h.append(int(pts.confinement_mode) in h_codes)
-        if not tx_times:
-            return
-        tx_times = np.array(tx_times)
-        is_h = np.array(is_h, dtype=bool)
+        mode = data_tree['model_state/pedestal'].confinement_mode
+        tx_times = mode.coords['time'].values
+        h_codes = [int(ConfinementMode.H_MODE), int(ConfinementMode.TRANSITIONING_TO_H_MODE)]
+        is_h = np.isin(mode.values.astype(int), h_codes)
         dwell = self._ped_transition_time
 
         # First L->H that stays H for at least `dwell` (ignores brief H blips in L-mode).
@@ -2818,7 +2807,7 @@ class TokaMaker_TORAX:
         r'''! Short TORAX relax: initial run on the seed, or inter-loop on the TM i=0 equilibrium.
 
                 Uses flattened user inputs (_apply_tx_set_overrides + _flatten_time_dependent).
-                psi always follows initial_psi_source='geometry', so the relax re-derives the
+                psi always follows psi_source='geometry', so the relax re-derives the
                 current profile from the equilibrium it is handed. If prescribed_profiles is
                 None, n_e, T_e, T_i stay as already merged from base / loaded config and
                 _apply_tx_set_overrides (user inputs); if a dict is passed, its n_e, T_e, T_i
@@ -2847,10 +2836,12 @@ class TokaMaker_TORAX:
 
             init_config['geometry'] = self._tx_geometry({self._t_init: geometry})
 
+            init_config.setdefault('time_step_calculator', {})
+            init_config['time_step_calculator']['t_initial'] = self._t_init
+            init_config['time_step_calculator']['t_final'] = self._t_init + runtime
+            init_config['time_step_calculator']['dt'] = dt_relax
+
             init_config.setdefault('numerics', {})
-            init_config['numerics']['t_initial'] = self._t_init
-            init_config['numerics']['t_final'] = self._t_init + runtime
-            init_config['numerics']['fixed_dt'] = dt_relax
 
             if not getattr(self, '_relax_kinetics', False):
                 init_config['numerics']['evolve_current'] = True
@@ -2864,7 +2855,7 @@ class TokaMaker_TORAX:
             init_config.setdefault('profile_conditions', {})
             pc = init_config['profile_conditions']
             pc.pop('psi', None)
-            pc['initial_psi_source'] = 'geometry'
+            pc['psi_source'] = 'geometry'
             if prescribed_profiles is not None:
                 for _k in ('n_e', 'T_e', 'T_i'):
                     if prescribed_profiles.get(_k) is not None:
@@ -2894,7 +2885,7 @@ class TokaMaker_TORAX:
                     f.write(pprint.pformat(self._numpy_to_plain_python(init_config), width=100, sort_dicts=False))
 
             self._log(f'{tag}: running TORAX...')
-            data_tree, hist, _ = self._run_torax(init_config)
+            data_tree, hist = self._run_torax(init_config)
 
             if hist.sim_error != torax.SimError.NO_ERROR:
                 raise ValueError(f'TORAX relax ({stage}) failed: {hist.sim_error}')
@@ -2988,7 +2979,7 @@ class TokaMaker_TORAX:
             myconfig = self._get_tx_config()
             self._print('  TORAX: running simulation...')
             try:
-                data_tree, hist, state_list = self._run_torax(myconfig)
+                data_tree, hist = self._run_torax(myconfig)
             except Exception as e:
                 self._print(f'  TORAX: config/init FAILED — {e}')
                 raise
@@ -3001,7 +2992,7 @@ class TokaMaker_TORAX:
                 raise ValueError(f'TORAX failed to run the simulation: {hist.sim_error}')
 
             # Capture the L/H confinement state (active with the formation model enabled).
-            self._capture_confinement_mode(state_list)
+            self._capture_confinement_mode(data_tree)
 
             try:
                 self._capture_relax_tx_profiles_from_datatree(data_tree, self._t_init)
@@ -3063,7 +3054,7 @@ class TokaMaker_TORAX:
         t_prof = self._sawtooth_sample_time(data_tree, t) if tx_time is None else t
 
         # ── Scalars ─────────────────────────────────────────────────────────
-        self._state['Ip'][i]        = self._extract_tx_scalar(data_tree, 'Ip', t)
+        self._state['Ip'][i]        = self._extract_tx_scalar(data_tree, 'I_p', t)
         self._state['Ip_tx'][i]     = self._state['Ip'][i]
         self._state['Ip_ni_tx'][i]  = self._extract_tx_scalar(data_tree, 'I_non_inductive', t_prof)
         self._state['pax'][i]       = self._extract_tx_scalar_at_rho(data_tree, 'pressure_thermal_total', t_prof, 0.0)
@@ -3076,8 +3067,8 @@ class TokaMaker_TORAX:
         self._state['vloop_tx'][i]  = self._extract_tx_scalar(data_tree, 'v_loop_lcfs', t)
         self._state['tau_E_tx'][i]  = self._extract_tx_scalar(data_tree, 'tau_E', t_prof)
         self._state['tau_R_tx'][i]  = self._extract_tx_scalar(data_tree, 'tau_R', t_prof)
-        self._state['f_GW'][i]      = self._extract_tx_scalar(data_tree, 'fgw_n_e_line_avg', t_prof)
-        self._state['f_GW_vol'][i]  = self._extract_tx_scalar(data_tree, 'fgw_n_e_volume_avg', t_prof)
+        self._state['f_GW'][i]      = self._extract_tx_scalar(data_tree, 'f_GW_n_e_line_avg', t_prof)
+        self._state['f_GW_vol'][i]  = self._extract_tx_scalar(data_tree, 'f_GW_n_e_volume_avg', t_prof)
         self._state['q95'][i]       = self._extract_tx_scalar(data_tree, 'q95', t_prof)
         self._state['q0'][i]        = self._extract_tx_scalar_at_rho(data_tree, 'q', t_prof, 0.0, rho_coord='rho_face_norm')
 
@@ -3180,7 +3171,7 @@ class TokaMaker_TORAX:
         # ── Scalar time-series (with time-averaging) ────────────────────────
         self._results['E_fusion']      = self._extract_tx_scalar_timeseries(data_tree, 'E_fusion')
         self._results['Q']             = self._extract_tx_scalar_timeseries(data_tree, 'Q_fusion')
-        self._results['Ip']            = self._extract_tx_scalar_timeseries(data_tree, 'Ip')
+        self._results['Ip']            = self._extract_tx_scalar_timeseries(data_tree, 'I_p')
         self._results['B0']            = self._extract_tx_scalar_timeseries(data_tree, 'B_0')
         self._results['n_e_line_avg']  = self._extract_tx_scalar_timeseries(data_tree, 'n_e_line_avg')
         self._results['n_i_line_avg']  = self._extract_tx_scalar_timeseries(data_tree, 'n_i_line_avg')
@@ -3192,7 +3183,7 @@ class TokaMaker_TORAX:
         self._results['P_alpha_total'] = self._extract_tx_scalar_timeseries(data_tree, 'P_alpha_total')
         self._results['P_aux_total']   = self._extract_tx_scalar_timeseries(data_tree, 'P_aux_total')
         self._results['P_ohmic_e']     = self._extract_tx_scalar_timeseries(data_tree, 'P_ohmic_e')
-        self._results['P_radiation_e'] = self._extract_tx_scalar_timeseries(data_tree, 'P_radiation_e', scale=-1.0)
+        self._results['P_radiation_e'] = self._extract_tx_scalar_timeseries(data_tree, 'P_impurity_radiation_e', scale=-1.0)
         self._results['P_SOL_total']   = self._extract_tx_scalar_timeseries(data_tree, 'P_SOL_total')
         self._results['f_ni']          = self._extract_tx_scalar_timeseries(data_tree, 'f_non_inductive')
         self._results['I_ni']          = self._extract_tx_scalar_timeseries(data_tree, 'I_non_inductive')
@@ -4279,7 +4270,7 @@ class TokaMaker_TORAX:
                        relaxed n_e, T_e, T_i are injected into main TORAX after set_*() like psi.
                 @param relax_duration Duration (s) of each relax simulation. Default 1.0 s.
                 @param relax_dt Fixed timestep (s) for each initial / inter-loop TORAX relax run
-                       (numerics.fixed_dt). Default 0.1 s.
+                       (time_step_calculator.dt). Default 0.1 s.
                 @param t_ave_toggle Time-averaging mode: 'off' (no averaging), 'flattop' (average only
                        during flat-top), 'on' (average over the whole pulse), or 'sawtooth' (during
                        flat-top and after t_ave_ignore_start, take the profiles from the midpoint of
@@ -6623,7 +6614,7 @@ def plot_tx_relax_profiles(
 
         Shows main-run history (tt._relax_mainrun_profile_history), **user** kinetic
         profiles from flattened profile_conditions, **initial geometry** psi at t_initial
-        when psi is not prescribed (initial_psi_source='geometry'), and the profile at
+        when psi is not prescribed (psi_source='geometry'), and the profile at
         t_final_relax. Used when TokaMaker_TORAX.fly(..., output_mode='debug').
 
     '''
@@ -6761,7 +6752,7 @@ def plot_scalars(tt, save_path=None, display=True):
     ax = axes[0, 0]
     ax.set_title('Ip [A]')
     ax.plot(times, s['Ip_tm'], color=COLOR_TM, ls='-', marker='o', ms=MK_SZ, lw=1, label='Ip TM')
-    t_Ip, y_Ip = _tx_scalar(tt, 'Ip')
+    t_Ip, y_Ip = _tx_scalar(tt, 'I_p')
     if t_Ip is not None:
         ax.plot(t_Ip, y_Ip, color=COLOR_TX, ls='-', lw=1, label='Ip TX')
     t_Ini, y_Ini = _tx_scalar(tt, 'I_non_inductive')
@@ -7035,12 +7026,12 @@ def plot_scalars(tt, save_path=None, display=True):
     # Bottom row (left): power channels; P_LH overlaid here and shown on log axis at right.
     ax = ax_power
     ax.set_title('Power channels [W]')
-    power_rows = [('P_ohmic_e', 'P_ohmic_e', 'r-'), ('P_radiation_e', 'P_radiation_e', 'm--'),
+    power_rows = [('P_ohmic_e', 'P_ohmic_e', 'r-'), ('P_impurity_radiation_e', 'P_impurity_radiation_e', 'm--'),
                   ('P_SOL_total', 'P_SOL_total', 'c--'), ('P_alpha_total', 'P_alpha_total', 'g-.'),
                   ('P_aux_total', 'P_aux_total', 'y-.')]
     y_non_lh = []
     for tx_name, label, fmt in power_rows:
-        scale = -1.0 if tx_name == 'P_radiation_e' else 1.0
+        scale = -1.0 if tx_name == 'P_impurity_radiation_e' else 1.0
         tx_t, tx_y = _tx_scalar(tt, tx_name, scale=scale)
         if tx_t is not None:
             ax.plot(tx_t, tx_y, fmt, linewidth=1, label=label)
@@ -7506,14 +7497,14 @@ def plot_PLH_components(tt, save_path=None, display=True):
 
     t_n,  y_n  = _tx_scalar(tt, 'n_e_line_avg', scale=1e-20)   # 1e20 m^-3
     t_nm, y_nm = _tx_scalar(tt, 'n_e_min_P_LH', scale=1e-20)
-    t_Ip, y_Ip = _tx_scalar(tt, 'Ip', scale=1e-6)             # MA
+    t_Ip, y_Ip = _tx_scalar(tt, 'I_p', scale=1e-6)             # MA
     t_a,  y_a  = _tx_scalar(tt, 'a_minor')
     t_R,  y_R  = _tx_scalar(tt, 'R_major')
     t_B,  y_B  = _tx_scalar(tt, 'B_0')
     if t_B is None:
         t_B, y_B = geom_face('R_major_profile')  # fallback; B handled below
     t_S,  y_S  = geom_face('g0')                              # surface area [m^2]
-    t_fg, y_fg = _tx_scalar(tt, 'fgw_n_e_line_avg')
+    t_fg, y_fg = _tx_scalar(tt, 'f_GW_n_e_line_avg')
     B0 = float(np.nanmean(y_B)) if (y_B is not None) else float(getattr(tt, '_B0', np.nan))
 
     fig, axes = plt.subplots(3, 3, figsize=(17, 13))
@@ -8239,7 +8230,7 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm):
 
     ax = axes[0]
     ax.plot(times, np.array(s['Ip_tm']) / 1e6, color=COLOR_TM, ls=LS_PRI, lw=LW, marker=MK_TM, ms=MK_SZ, label='Ip TM')
-    t_Ip, y_Ip = _tx_scalar(tt, 'Ip', scale=1e-6)
+    t_Ip, y_Ip = _tx_scalar(tt, 'I_p', scale=1e-6)
     if t_Ip is not None:
         ax.plot(t_Ip, y_Ip, color=COLOR_TX, ls=LS_PRI, lw=LW, label='Ip TX')
     t_Ini, y_Ini = _tx_scalar(tt, 'I_non_inductive', scale=1e-6)
@@ -8270,12 +8261,12 @@ def _draw_scalars_movie(axes, tt, times, t_now, flux_con_tm):
         ('P_ohmic_e', 'Ohmic', COLORS_MULTI[0]),
         ('P_aux_total', 'Aux', COLORS_MULTI[1]),
         ('P_alpha_total', 'Fusion', COLORS_MULTI[2]),
-        ('P_radiation_e', 'Radiation', COLORS_MULTI[3]),
+        ('P_impurity_radiation_e', 'Radiation', COLORS_MULTI[3]),
         ('P_SOL_total', 'SOL', COLORS_MULTI[4]),
         ('P_LH_martin', 'P_LH_martin', COLORS_MULTI[5]),
     ]
     for tx_name, label, clr in pkeys:
-        scale = -1.0 if tx_name == 'P_radiation_e' else 1.0
+        scale = -1.0 if tx_name == 'P_impurity_radiation_e' else 1.0
         tx_t, tx_y = _tx_scalar(tt, tx_name, scale=scale)
         if tx_t is not None:
             ax.plot(tx_t, tx_y / 1e6, color=clr, ls=LS_PRI, lw=LW, label=label)

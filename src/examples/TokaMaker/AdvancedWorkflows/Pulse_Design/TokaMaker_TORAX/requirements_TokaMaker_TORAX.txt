@@ -1,7 +1,7 @@
-torax @ git+https://github.com/google-deepmind/torax.git@46a41bf1782e234c5c75aa13211ed81b5ddcbfee
-jax==0.11.2
-pydantic==2.13.4
-pydantic_core==2.46.4
+torax==2.0.0
+jax==0.12.0.1
+pydantic==2.14.3
+pydantic_core==2.50.4
 eqdsk==0.9.0
-tqdm==4.67.3
-xarray==2026.4.0
+tqdm==4.70.1
+xarray==2026.9.0
