@@ -631,7 +631,7 @@ real(8), allocatable :: cof_tmp(:),err_tmp(:)
 real(8), save :: ffp_scale_in,p_scale_in,bounds_in(2,2),vcont_in,ip_target_in,estore_target_in
 real(8), allocatable, save :: cofs_in(:)
 class(oft_vector), pointer, save :: psi_center => NULL()
-CHARACTER(LEN=40) :: err_reason
+CHARACTER(LEN=80) :: err_reason
 IF(.NOT.ASSOCIATED(psi_center))THEN
   ALLOCATE(cofs_in(n))
   cofs_in=cofs
@@ -1328,6 +1328,11 @@ TYPE(gs_equil), INTENT(inout) :: gs !< Needs docs
 REAL(8) :: err !< Needs docs
 REAL(8) :: qval
 qval = self%eval(gs)
+IF(qval<-1.d98)THEN ! Trace failed (-1.d99), skip the constraint
+  CALL oft_warn('fit_q_error: q trace failed, constraint skipped')
+  err = 0.d0
+  RETURN
+END IF
 err = (qval - self%val)*self%wt
 IF(self%type==-1.AND.qval>self%val)err=0.d0
 END FUNCTION fit_q_error
@@ -1350,13 +1355,15 @@ psi0=0.d0; psi1=1.d0
 !   IF(.NOT.gs%free)psi0 = psi0 + (psi1-psi0)*2.d-2
 ! END IF
 !
+val = -1.d99 ! Returned if no surface traced
 IF(ABS(self%type)==1)THEN
   do j=2,31
     psi_q(j-1)=(psi1-psi0)*((j-1)/REAL(npsi,8)) + psi0
   end do
   CALL gs_get_qprof(gs,npsi,psi_q,qprof)
-  qmin = MINVAL(qprof)
-  qmax = MAXVAL(qprof)
+  IF(ALL(qprof<-1.d98))RETURN
+  qmin = MINVAL(qprof,MASK=qprof>-1.d98)
+  qmax = MAXVAL(qprof,MASK=qprof>-1.d98)
   IF(qmax<0.d0)THEN
     val = ABS(qmax)
   ELSE
@@ -1367,8 +1374,9 @@ ELSEIF(self%type==2)THEN
     psi_q(j-1)=(psi1-psi0)*((j-1)/REAL(npsi,8)) + psi0
   end do
   CALL gs_get_qprof(gs,npsi,psi_q,qprof)
-  qmin = MINVAL(qprof)
-  qmax = MAXVAL(qprof)
+  IF(ALL(qprof<-1.d98))RETURN
+  qmin = MINVAL(qprof,MASK=qprof>-1.d98)
+  qmax = MAXVAL(qprof,MASK=qprof>-1.d98)
   IF(qmax<0.d0)THEN
     val = ABS(qmin)
   ELSE

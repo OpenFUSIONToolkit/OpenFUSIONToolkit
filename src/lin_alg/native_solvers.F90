@@ -37,13 +37,23 @@ USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr,
   oft_matrix, oft_cmatrix, oft_graph, oft_ml_vecspace
 USE oft_native_la, ONLY: oft_native_vector, native_vector_cast, &
   oft_native_matrix, native_matrix_cast, oft_native_submatrix, &
-  partition_graph, native_matrix_setup_full, oft_native_submatrix
+  partition_graph, native_matrix_setup_full, oft_native_dense_cmatrix
+USE oft_lu, ONLY: lapack_matinv
 USE oft_solver_base, ONLY: oft_solver, oft_solver_bc, oft_solver_ptr, &
   oft_csolver, oft_csolver_bc, oft_eigsolver, solver_setup, csolver_setup, &
   eigsolver_setup, solver_delete, csolver_delete
 IMPLICIT NONE
 #include "local.h"
 private
+!> Re-orthogonalize GMRES Arnoldi vectors when orthogonalization reduces the norm
+!! by more than this factor ("twice is enough" criterion)
+REAL(r8), PARAMETER :: gmres_reorth_tol = 1.d0/SQRT(2.d0)
+!> Solve the upper-triangular GMRES least-squares system
+INTERFACE gmres_backsolve
+  MODULE PROCEDURE gmres_backsolve_r8
+  MODULE PROCEDURE gmres_backsolve_c8
+END INTERFACE gmres_backsolve
+PUBLIC gmres_backsolve
 !------------------------------------------------------------------------------
 !> CG solver class
 !!
@@ -67,6 +77,7 @@ end type oft_native_cg_solver
 type, public, extends(oft_solver) :: oft_native_gmres_solver
   logical :: precond = .FALSE. !< Flag to indicate use as a preconditioner (not used)
   integer(i4) :: nrits=10 !< Convergence specification
+  integer(i4) :: min_nits=0 !< Minimum inner iterations per cycle before the \f$ |r|/|u| \f$ check (`its=-1,-2` only)
   class(oft_solver_bc), pointer :: orthog => NULL() !< Orthogonalization
   class(oft_solver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
   class(oft_vector), private, pointer :: r => NULL() !< Temporary storage vector
@@ -87,6 +98,7 @@ end type oft_native_gmres_solver
 type, public, extends(oft_csolver) :: oft_native_gmres_csolver
   logical :: precond = .FALSE. !< Flag to indicate use as a preconditioner (not used)
   integer(i4) :: nrits=10 !< Convergence specification
+  integer(i4) :: min_nits=0 !< Minimum inner iterations per cycle before the \f$ |r|/|u| \f$ check (`its=-1,-2` only)
   class(oft_csolver_bc), pointer :: orthog => NULL() !< Orthogonalization
   class(oft_csolver_bc), pointer :: cleaner => NULL() !< Null-Space cleaner
   class(oft_cvector), private, pointer :: r => NULL() !< Temporary storage vector
@@ -257,6 +269,39 @@ CONTAINS
   !> Clean-up internal storage
   PROCEDURE :: delete => bjprecond_delete
 END TYPE oft_bjprecond
+!------------------------------------------------------------------------------
+!> Inverted diagonal block for @ref oft_native_dense_cbjprecond
+!------------------------------------------------------------------------------
+TYPE :: dense_cbjprecond_block
+  INTEGER(i4) :: n = 0 !< Number of rows in block
+  INTEGER(i4), POINTER, DIMENSION(:) :: ind => NULL() !< Row indices (negative for overlap rows)
+  COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: inv => NULL() !< Inverse of diagonal block
+END TYPE dense_cbjprecond_block
+!------------------------------------------------------------------------------
+!> Block-Jacobi preconditioner for native dense complex matrices
+!!
+!! Blocks are defined by partitioning a supplied graph (eg. the non-zero pattern
+!! of a related sparse matrix) using METIS. Each diagonal block is extracted from
+!! the dense matrix and inverted explicitly during @ref dense_cbjprecond_setup.
+!! If `loverlap` is set each block is extended by one level of graph neighbors and
+!! only rows owned by the block are updated (restricted Additive-Schwarz).
+!!
+!! @note Only supports local (non-distributed) matrices. For diagonal scaling use
+!! @ref oft_diag_cscale instead.
+!------------------------------------------------------------------------------
+TYPE, PUBLIC, EXTENDS(oft_csolver) :: oft_native_dense_cbjprecond
+  LOGICAL :: loverlap = .FALSE. !< Extend blocks by one level of graph neighbors?
+  INTEGER(i4) :: nlocal = 1 !< Number of blocks (must be >=1)
+  INTEGER(i4), PRIVATE :: max_block_size = 0 !< Size of largest block
+  TYPE(dense_cbjprecond_block), PRIVATE, POINTER, DIMENSION(:) :: blocks => NULL() !< Inverted diagonal blocks
+CONTAINS
+  !> Partition graph and factor diagonal blocks
+  PROCEDURE :: setup => dense_cbjprecond_setup
+  !> Apply preconditioner
+  PROCEDURE :: apply => dense_cbjprecond_apply
+  !> Clean-up internal storage
+  PROCEDURE :: delete => dense_cbjprecond_delete
+END TYPE oft_native_dense_cbjprecond
 !---Interfaces
 ABSTRACT INTERFACE
   !------------------------------------------------------------------------------
@@ -299,7 +344,7 @@ recursive subroutine cg_solver_apply(self,u,g)
 class(oft_native_cg_solver), intent(inout) :: self !< Solver object
 CLASS(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
 CLASS(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
-logical :: pm_save
+logical :: pm_save,breakdown
 integer(i4) :: k,its,max_its
 real(r8) :: alfa,beta,uu,gg,ggold,f,fold,pdq,ggin,ggnew
 CLASS(oft_matrix), pointer :: A
@@ -320,14 +365,15 @@ end if
 if(associated(self%pre))call u%new(s)
 if(associated(self%bc))call self%bc%apply(g)
 if(associated(self%orthog))call self%orthog%apply(u)
-gg = g%dot(u)
-if(gg==0.d0)then
+uu = u%dot(u)
+if(uu==0.d0)then
   alfa=1.d0; f=0.d0
   call q%set(0.d0)
 else
   call A%apply(u,q)
   if(associated(self%bc))call self%bc%apply(q)
   pdq = u%dot(q)
+  gg = g%dot(u)
   alfa=1.d0; f=pdq/2.d0-gg
 endif
 call g%add(1.d0,-1.d0,q)
@@ -341,7 +387,6 @@ if(associated(self%pre))then
 end if
 gg = g%dot(p)
 ggin = g%dot(g)
-uu=u%dot(u)
 100 FORMAT (I6,3ES14.6)
 110 FORMAT (I6,4ES14.6)
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,f,SQRT(uu),SQRT(ggin)
@@ -350,6 +395,7 @@ if(its==0.or.gg==0.d0)then
   call q%delete
   deallocate(p,q)
   if(self%precond)then
+    call g%add(0.d0,1.d0,r)
     CALL r%delete
     DEALLOCATE(r)
   end if
@@ -362,10 +408,15 @@ if(its==0.or.gg==0.d0)then
 endif
 !---Begin CG iteration
 max_its=INT(MIN(1000000_i8,u%ng+abs(its)),4)
+breakdown=.FALSE.
 do k=1,max_its
   if(associated(self%orthog))call self%orthog%apply(p)
   call A%apply(p,q)
   pdq = p%dot(q)
+  if(pdq==0.d0)then ! Breakdown (zero search direction)
+    breakdown=.TRUE.
+    exit
+  end if
   if(associated(self%bc))call self%bc%apply(q)
   alfa=gg/pdq
   fold=f; f=f-alfa*gg/2
@@ -383,11 +434,16 @@ do k=1,max_its
   if(associated(self%orthog))call self%orthog%apply(q)
   ggold=gg
   gg=g%dot(q)
-  ggnew = g%dot(g)
-  uu=u%dot(u)
+  ! Without preconditioning or orthogonalization q==g, so skip the redundant reduction
+  if(associated(self%pre).OR.associated(self%orthog))then
+    ggnew = g%dot(g)
+  else
+    ggnew = gg
+  end if
   beta=gg/ggold
-  if((k<=self%itplot.OR.MOD(k,self%itplot)==0).AND.(oft_env%pm.AND.oft_env%head_proc))THEN
-    write(*,110)k,f,SQRT(uu),SQRT(ggnew),SQRT(ggnew/uu)
+  if((k<=self%itplot.OR.MOD(k,self%itplot)==0).AND.oft_env%pm)THEN
+    uu=u%dot(u) ! Only needed for output
+    if(oft_env%head_proc)write(*,110)k,f,SQRT(uu),SQRT(ggnew),SQRT(ggnew/uu)
   END IF
   if(k==its)exit
   if(its==-1.and.REAL(f,4)>=REAL(fold,4))exit
@@ -408,8 +464,12 @@ if(associated(self%pre))then
   call s%delete
   DEALLOCATE(s)
 end if
-if(k>=max_its)write(*,*)'Full Its: cgsolver_apply'
+if(k>=max_its.AND.oft_env%head_proc)write(*,*)'Full Its: cgsolver_apply'
 self%cits=k
+if(breakdown)then
+  if(oft_env%head_proc)call oft_warn('CG breakdown (p.Ap == 0) in cg_solver_apply')
+  self%cits=-k
+end if
 DEBUG_STACK_POP
 end subroutine cg_solver_apply
 !------------------------------------------------------------------------------
@@ -518,12 +578,13 @@ class(oft_native_gmres_solver), intent(inout) :: self !< Solver object
 class(oft_vector), intent(inout) :: u !< Guess (input), Solution (output)
 class(oft_vector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_matrix), pointer :: A
-logical :: pm_save
+logical :: pm_save,pre_full_res,inner_conv
 integer(i4) :: i,j,k,nits,its,nrits
-real(r8) :: uu,uuold,gg,ggold,delta,hkmi,ggin
-real(r8), allocatable :: h(:,:),c(:),s(:),res(:)
+real(r8) :: uu,uuold,gg,ggold,delta,hkmi,ggin,wnorm0,res_u_tol
+real(r8), allocatable :: h(:,:),c(:),s(:),res(:),hdots(:),znorm(:)
 class(oft_vector), pointer :: r,w
 type(oft_vector_ptr), pointer, dimension(:) :: v,z
+type(oft_vector_ptr), allocatable, dimension(:) :: vw
 DEBUG_STACK_PUSH
 !---
 A=>self%A
@@ -552,6 +613,7 @@ r=>self%r
 w=>self%w
 CALL w%set(0.d0)
 allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
+allocate(hdots(nrits+1),vw(nrits+1),znorm(nrits))
 c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
 uu = u%dot(u)
@@ -565,38 +627,59 @@ ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,SQRT(uu),SQRT(gg)
-if(self%its/=0.AND.self%nrits/=0)THEN
+! Tolerance on |r|/|u| for its=-1/-2 (distinct from self%rtol, which is relative to |r0|)
+res_u_tol=-1.d0
+IF(its==-1)res_u_tol=1.d-7
+IF(its==-2)res_u_tol=1.d-14
 nits=0
-do j=1,INT(u%ng,4)
+if(self%its/=0.AND.self%nrits/=0)THEN
+do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   IF(gg==0.d0)EXIT
   res=0.d0
   res(1)=sqrt(gg)
   call v(1)%f%add(0.d0,1.d0/res(1),r)
+  inner_conv=.FALSE.
   do i=1,nrits
     ! Precondition search direction
     if(associated(self%pre))then
       call w%add(0.d0,1.d0,v(i)%f)
       CALL z(i)%f%set(0.d0)
       pm_save=oft_env%pm; oft_env%pm=self%pre%pm
+      pre_full_res=self%pre%full_residual
       self%pre%full_residual=.FALSE.
       call self%pre%apply(z(i)%f,w)
-      self%pre%full_residual=.TRUE.
+      self%pre%full_residual=pre_full_res
       oft_env%pm=pm_save
     else
       call z(i)%f%add(0.d0,1.d0,v(i)%f)
     end if
     if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
+    IF(res_u_tol>0.d0)znorm(i)=SQRT(z(i)%f%dot(z(i)%f))
     call A%apply(z(i)%f,w)
     if(associated(self%bc))call self%bc%apply(w)
-    !---Arnoldi iteration
-    h(1:i,i)=w%mdot(v(1:i),i)
+    !---Arnoldi iteration (CGS with selective re-orthogonalization)
+    do k=1,i
+      vw(k)%f=>v(k)%f
+    end do
+    vw(i+1)%f=>w
+    hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
+    h(1:i,i)=hdots(1:i)
+    wnorm0=SQRT(hdots(i+1))
     do k=1,i
       call w%add(1.d0,-h(k,i),v(k)%f)
     end do
     !if(associated(self%cleaner))call self%cleaner%apply(w)
     h(i+1,i)=SQRT(w%dot(w))
-    call v(i+1)%f%add(0.d0,1.d0/h(i+1,i),w)
+    IF(h(i+1,i)<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
+      hdots(1:i)=w%mdot(v(1:i),i)
+      do k=1,i
+        call w%add(1.d0,-hdots(k),v(k)%f)
+      end do
+      h(1:i,i)=h(1:i,i)+hdots(1:i)
+      h(i+1,i)=SQRT(w%dot(w))
+    END IF
+    IF(h(i+1,i)>0.d0)call v(i+1)%f%add(0.d0,1.d0/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
     !---Apply Givens rotation
     do k=2,i
@@ -613,24 +696,40 @@ do j=1,INT(u%ng,4)
     res(i) = c(i)*res(i)
     nits=nits+1
     IF(i==nrits)EXIT
+    IF(ABS(res(i+1))==0.d0)EXIT ! Lucky breakdown
     IF(nits==its)EXIT
     IF(ABS(res(i+1))<self%atol)EXIT
     IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
+    !---Check |r|/|u| criterion for current iterate (after `min_nits` inner iterations
+    !   to avoid stalling through many short restart cycles)
+    IF(res_u_tol>0.d0.AND.i>=self%min_nits)THEN
+      CALL gmres_backsolve(i,h,res,hdots)
+      ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
+      IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
+        call w%add(0.d0,1.d0,u) ! Form iterate in w (used as scratch)
+        do k=1,i
+          call w%add(1.d0,hdots(k),z(k)%f)
+        end do
+        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(w%dot(w)))
+        IF(inner_conv)EXIT
+      END IF
+    END IF
     IF(oft_env%head_proc.AND.oft_env%pm.AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
       WRITE(*,'(I6,14X,ES14.6)')nits,ABS(res(i+1))
     END IF
   end do
   k=i
-  do i=k,2,-1
-    res(i) = res(i) / h(i,i)
-    res(1:i-1) = res(1:i-1) - res(i)*h(1:i-1,i)
-  end do
-  res(1) = res(1) / h(1,1)
   ! Update iterate
-  do i=1,k
-    call u%add(1.d0,res(i),z(i)%f)
-  enddo
-  IF(((nits==its).OR.(k<nrits)).AND.(.NOT.self%full_residual))EXIT
+  IF(inner_conv)THEN
+    call u%add(0.d0,1.d0,w) ! Already formed by inner convergence check
+  ELSE
+    CALL gmres_backsolve(k,h,res,hdots)
+    do i=1,k
+      call u%add(1.d0,hdots(i),z(i)%f)
+    enddo
+  END IF
+  ! Early inner exits based on |r|/|u| must be confirmed with the true residual
+  IF(((nits==its).OR.((k<nrits).AND.(.NOT.inner_conv))).AND.(.NOT.self%full_residual))EXIT
   call A%apply(u,w)
   IF(associated(self%bc))call self%bc%apply(w)
   call r%add(0.d0,1.d0,g,-1.d0,w)
@@ -642,17 +741,16 @@ do j=1,INT(u%ng,4)
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
-  IF(its==-1.AND.sqrt(gg/uu)<1.d-7)EXIT
-  IF(its==-2.AND.sqrt(gg/uu)<1.d-14)EXIT
+  IF(res_u_tol>0.d0.AND.SQRT(gg/uu)<res_u_tol)EXIT
   IF(SQRT(gg)<self%atol)EXIT
   IF(SQRT(gg/ggin)<self%rtol)EXIT
   IF(nits==its)EXIT
-  IF(k<nrits)EXIT
+  IF((k<nrits).AND.(.NOT.inner_conv))EXIT
   IF(uu==uuold)EXIT
 end do
 END IF
 call g%add(0.d0,1.d0,r)
-deallocate(c,s,h,res)
+deallocate(c,s,h,res,hdots,vw,znorm)
 self%cits=nits
 IF(nits==its)self%cits=-1
 DEBUG_STACK_POP
@@ -774,13 +872,16 @@ class(oft_native_gmres_csolver), intent(inout) :: self !< Solver object
 class(oft_cvector), intent(inout) :: u !< Guess (input), Solution (output)
 class(oft_cvector), intent(inout) :: g !< RHS (input), Residual (output)
 class(oft_cmatrix), pointer :: A
-logical :: pm_save
+logical :: pm_save,pre_full_res,inner_conv
 integer(i4) :: i,j,k,nits,its,nrits
 real(r8) :: uu,uuold,gg,ggold,ggin
+real(r8) :: wnorm0,res_u_tol
+real(r8), allocatable :: znorm(:)
 complex(c8) :: delta,hkmi
-complex(c8), allocatable :: h(:,:),c(:),s(:),res(:)
+complex(c8), allocatable :: h(:,:),c(:),s(:),res(:),hdots(:)
 class(oft_cvector), pointer :: r,w
 type(oft_cvector_ptr), pointer, dimension(:) :: v,z
+type(oft_cvector_ptr), allocatable, dimension(:) :: vw
 DEBUG_STACK_PUSH
 !---
 A=>self%A
@@ -809,6 +910,7 @@ r=>self%r
 w=>self%w
 CALL w%set((0.d0,0.d0))
 allocate(c(nrits+1),s(nrits+1),res(nrits+1),h(nrits+1,nrits))
+allocate(hdots(nrits+1),vw(nrits+1),znorm(nrits))
 c=0.d0; s=0.d0; res=0.d0; h=0.d0
 !
 uu = REAL(u%dot(u))
@@ -822,72 +924,107 @@ ggin=gg
 100 FORMAT (I6,2ES14.6)
 110 FORMAT (I6,3ES14.6)
 if((oft_env%pm.AND.oft_env%head_proc))write(*,100)0,SQRT(uu),SQRT(gg)
-if(self%its/=0.AND.self%nrits/=0)THEN
+! Tolerance on |r|/|u| for its=-1/-2 (distinct from self%rtol, which is relative to |r0|)
+res_u_tol=-1.d0
+IF(its==-1)res_u_tol=1.d-7
+IF(its==-2)res_u_tol=1.d-14
 nits=0
-do j=1,INT(u%ng,4)
+if(self%its/=0.AND.self%nrits/=0)THEN
+do j=1,INT(MIN(u%ng,INT(HUGE(j),i8)),4)
   IF(gg==0.d0)EXIT
   res=0.d0
   res(1)=sqrt(gg)
   call v(1)%f%add((0.d0,0.d0),(1.d0,0.d0)/res(1),r)
+  inner_conv=.FALSE.
   do i=1,nrits
     ! Precondition search direction
     if(associated(self%pre))then
       call w%add((0.d0,0.d0),(1.d0,0.d0),v(i)%f)
       CALL z(i)%f%set((0.d0,0.d0))
       pm_save=oft_env%pm; oft_env%pm=self%pre%pm
+      pre_full_res=self%pre%full_residual
       self%pre%full_residual=.FALSE.
       call self%pre%apply(z(i)%f,w)
-      self%pre%full_residual=.TRUE.
+      self%pre%full_residual=pre_full_res
       oft_env%pm=pm_save
     else
       call z(i)%f%add((0.d0,0.d0),(1.d0,0.d0),v(i)%f)
     end if
     if(associated(self%bc))call self%bc%apply(z(i)%f)
     if(associated(self%orthog))call self%orthog%apply(z(i)%f)
+    IF(res_u_tol>0.d0)znorm(i)=SQRT(REAL(z(i)%f%dot(z(i)%f),r8))
     call A%apply(z(i)%f,w)
     if(associated(self%bc))call self%bc%apply(w)
-    !---Arnoldi iteration
-    ! h(1:i,i)=w%mdot(v,i)
+    !---Arnoldi iteration (CGS with selective re-orthogonalization)
     do k=1,i
-      h(k,i)=w%dot(v(k)%f)
+      vw(k)%f=>v(k)%f
+    end do
+    vw(i+1)%f=>w
+    hdots(1:i+1)=w%mdot(vw(1:i+1),i+1) ! Fuse projections and initial norm into one reduction
+    h(1:i,i)=CONJG(hdots(1:i)) ! mdot gives w^H v_k
+    wnorm0=SQRT(REAL(hdots(i+1),r8))
+    do k=1,i
       call w%add((1.d0,0.d0),-h(k,i),v(k)%f)
     end do
     !if(associated(self%cleaner))call self%cleaner%apply(w)
-    h(i+1,i)=SQRT(w%dot(w))
-    call v(i+1)%f%add((0.d0,0.d0),(1.d0,0.d0)/h(i+1,i),w)
+    h(i+1,i)=SQRT(REAL(w%dot(w),r8))
+    IF(ABS(h(i+1,i))<gmres_reorth_tol*wnorm0)THEN ! Significant cancellation, re-orthogonalize
+      hdots(1:i)=CONJG(w%mdot(v(1:i),i))
+      do k=1,i
+        call w%add((1.d0,0.d0),-hdots(k),v(k)%f)
+      end do
+      h(1:i,i)=h(1:i,i)+hdots(1:i)
+      h(i+1,i)=SQRT(REAL(w%dot(w),r8))
+    END IF
+    IF(ABS(h(i+1,i))>0.d0)call v(i+1)%f%add((0.d0,0.d0),(1.d0,0.d0)/h(i+1,i),w)
     !if(associated(self%cleaner))call self%cleaner%apply(v(i+1)%f)
     !---Apply Givens rotation
     do k=2,i
       hkmi = h(k-1,i)
-      h(k-1,i) = c(k-1)*hkmi + s(k-1)*h(k,i)
+      h(k-1,i) = CONJG(c(k-1))*hkmi + CONJG(s(k-1))*h(k,i)
       h(k,i) = -s(k-1)*hkmi + c(k-1)*h(k,i)
     enddo
     delta = SQRT( ABS(h(i,i))**2 + ABS(h(i+1,i))**2 )
     c(i) = h(i,i) / delta
     s(i) = h(i+1,i) / delta
-    h(i,i) = c(i)*h(i,i) + s(i)*h(i+1,i)
+    h(i,i) = CONJG(c(i))*h(i,i) + CONJG(s(i))*h(i+1,i)
     !---Update residual
     res(i+1) = -s(i)*res(i)
-    res(i) = c(i)*res(i)
+    res(i) = CONJG(c(i))*res(i)
     nits=nits+1
     IF(i==nrits)EXIT
+    IF(ABS(res(i+1))==0.d0)EXIT ! Lucky breakdown
     IF(nits==its)EXIT
     IF(ABS(res(i+1))<self%atol)EXIT
     IF(ABS(res(i+1))/SQRT(ggin)<self%rtol)EXIT
+    !---Check |r|/|u| criterion for current iterate (after `min_nits` inner iterations
+    !   to avoid stalling through many short restart cycles)
+    IF(res_u_tol>0.d0.AND.i>=self%min_nits)THEN
+      CALL gmres_backsolve(i,h,res,hdots)
+      ! Necessary condition using |u0 + Z*y| <= |u0| + sum_k |y_k|*|z_k|
+      IF(ABS(res(i+1))<res_u_tol*(SQRT(uu)+SUM(ABS(hdots(1:i))*znorm(1:i))))THEN
+        call w%add((0.d0,0.d0),(1.d0,0.d0),u) ! Form iterate in w (used as scratch)
+        do k=1,i
+          call w%add((1.d0,0.d0),hdots(k),z(k)%f)
+        end do
+        inner_conv=(ABS(res(i+1))<res_u_tol*SQRT(REAL(w%dot(w),r8)))
+        IF(inner_conv)EXIT
+      END IF
+    END IF
     IF(oft_env%head_proc.AND.oft_env%pm.AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
       WRITE(*,'(I6,14X,ES14.6)')nits,ABS(res(i+1))
     END IF
   end do
   k=i
-  do i=k,2,-1
-    res(i) = res(i) / h(i,i)
-    res(1:i-1) = res(1:i-1) - res(i)*h(1:i-1,i)
-  end do
-  res(1) = res(1) / h(1,1)
   ! Update iterate
-  do i=1,k
-    call u%add((1.d0,0.d0),res(i),z(i)%f)
-  enddo
+  IF(inner_conv)THEN
+    call u%add((0.d0,0.d0),(1.d0,0.d0),w) ! Already formed by inner convergence check
+  ELSE
+    CALL gmres_backsolve(k,h,res,hdots)
+    do i=1,k
+      call u%add((1.d0,0.d0),hdots(i),z(i)%f)
+    enddo
+  END IF
   IF((nits==its).AND.(.NOT.self%full_residual))EXIT
   call A%apply(u,w)
   IF(associated(self%bc))call self%bc%apply(w)
@@ -900,8 +1037,7 @@ do j=1,INT(u%ng,4)
   IF((oft_env%pm.AND.oft_env%head_proc).AND.(nits<=self%itplot.OR.MOD(nits,self%itplot)==0))THEN
     WRITE(*,110)nits,SQRT(uu),SQRT(gg),SQRT(gg/uu)
   END IF
-  IF(its==-1.AND.sqrt(gg/uu)<1.d-7)EXIT
-  IF(its==-2.AND.sqrt(gg/uu)<1.d-14)EXIT
+  IF(res_u_tol>0.d0.AND.SQRT(gg/uu)<res_u_tol)EXIT
   IF(SQRT(gg)<self%atol)EXIT
   IF(SQRT(gg/ggin)<self%rtol)EXIT
   IF(nits==its)EXIT
@@ -909,7 +1045,7 @@ do j=1,INT(u%ng,4)
 end do
 END IF
 call g%add((0.d0,0.d0),(1.d0,0.d0),r)
-deallocate(c,s,h,res)
+deallocate(c,s,h,res,hdots,vw,znorm)
 self%cits=nits
 IF(nits==its)self%cits=-1
 DEBUG_STACK_POP
@@ -1023,6 +1159,44 @@ END IF
 self%initialized=.FALSE.
 CALL csolver_delete(self,propogate)
 end subroutine cgmres_delete
+!------------------------------------------------------------------------------
+!> Solve the upper-triangular GMRES least-squares system \f$ R y = b \f$ (real)
+!!
+!! \f$ R \f$ is the leading `k x k` block of the Hessenberg matrix after Givens rotations
+!------------------------------------------------------------------------------
+subroutine gmres_backsolve_r8(k,h,b,y)
+integer(i4), intent(in) :: k !< Size of system
+real(r8), intent(in) :: h(:,:) !< Rotated Hessenberg matrix
+real(r8), intent(in) :: b(:) !< Rotated residual vector
+real(r8), intent(inout) :: y(:) !< Solution [k]
+integer(i4) :: i
+DEBUG_STACK_PUSH
+y(1:k)=b(1:k)
+DO i=k,1,-1
+  y(i)=y(i)/h(i,i)
+  y(1:i-1)=y(1:i-1)-y(i)*h(1:i-1,i)
+END DO
+DEBUG_STACK_POP
+end subroutine gmres_backsolve_r8
+!------------------------------------------------------------------------------
+!> Solve the upper-triangular GMRES least-squares system \f$ R y = b \f$ (complex)
+!!
+!! \f$ R \f$ is the leading `k x k` block of the Hessenberg matrix after Givens rotations
+!------------------------------------------------------------------------------
+subroutine gmres_backsolve_c8(k,h,b,y)
+integer(i4), intent(in) :: k !< Size of system
+complex(c8), intent(in) :: h(:,:) !< Rotated Hessenberg matrix
+complex(c8), intent(in) :: b(:) !< Rotated residual vector
+complex(c8), intent(inout) :: y(:) !< Solution [k]
+integer(i4) :: i
+DEBUG_STACK_PUSH
+y(1:k)=b(1:k)
+DO i=k,1,-1
+  y(i)=y(i)/h(i,i)
+  y(1:i-1)=y(1:i-1)-y(i)*h(1:i-1,i)
+END DO
+DEBUG_STACK_POP
+end subroutine gmres_backsolve_c8
 !------------------------------------------------------------------------------
 !> Cast an eigensolver object to a oft_native_cg_eigsolver
 !!
@@ -2253,4 +2427,178 @@ self%nlocal=1
 self%initialized=.FALSE.
 DEBUG_STACK_POP
 end subroutine bjprecond_delete
+!------------------------------------------------------------------------------
+!> Setup Block-Jacobi preconditioner for a native dense complex matrix
+!!
+!! Partitions `graph` into `self%nlocal` blocks using METIS, optionally extends
+!! each block by one level of graph neighbors (`self%loverlap`), and explicitly
+!! inverts the corresponding diagonal blocks of `A`. If `self%nlocal==1` a single
+!! block containing the full matrix is used. Any existing factorization is replaced.
+!------------------------------------------------------------------------------
+SUBROUTINE dense_cbjprecond_setup(self,A,graph)
+CLASS(oft_native_dense_cbjprecond), INTENT(inout) :: self !< Solver object
+CLASS(oft_cmatrix), TARGET, INTENT(inout) :: A !< Matrix to precondition (must be @ref oft_native_dense_cmatrix)
+TYPE(oft_graph), INTENT(inout) :: graph !< Graph used to partition the matrix into blocks [A%nr]
+!---
+INTEGER(i4) :: i,j,k,jr,n,info,nfail,max_size
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: part
+LOGICAL, ALLOCATABLE, DIMENSION(:) :: eflag
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:,:) :: Amat
+DEBUG_STACK_PUSH
+SELECT TYPE(A)
+CLASS IS(oft_native_dense_cmatrix)
+  Amat=>A%M
+CLASS DEFAULT
+  CALL oft_abort('"A" is not a native dense complex matrix','dense_cbjprecond_setup',__FILE__)
+END SELECT
+IF(A%nr/=A%nc)CALL oft_abort('Matrix is not square','dense_cbjprecond_setup',__FILE__)
+IF(graph%nr/=A%nr)CALL oft_abort('Graph and matrix sizes do not match','dense_cbjprecond_setup',__FILE__)
+IF(self%nlocal<1)CALL oft_abort('"nlocal" must be >=1','dense_cbjprecond_setup',__FILE__)
+CALL dense_cbjprecond_delete(self)
+self%A=>A
+IF(oft_env%pm.AND.oft_env%head_proc)WRITE(*,'(2A,I6)')oft_indent,'nLocal = ',self%nlocal
+!---Partition graph
+ALLOCATE(part(A%nr))
+IF(self%nlocal>1)THEN
+  CALL partition_graph(graph,self%nlocal,part)
+  IF(ANY(part<1.OR.part>self%nlocal))CALL oft_abort('Unowned row after partitioning', &
+    'dense_cbjprecond_setup',__FILE__)
+ELSE
+  part=1
+END IF
+ALLOCATE(self%blocks(self%nlocal))
+IF(self%loverlap)THEN
+  !$omp parallel private(j,jr,k,eflag)
+  ALLOCATE(eflag(A%nr))
+  !$omp do
+  DO i=1,self%nlocal
+    !---Flag owned rows and their graph neighbors
+    eflag=(part==i)
+    DO jr=1,A%nr
+      IF(part(jr)/=i)CYCLE
+      DO k=graph%kr(jr),graph%kr(jr+1)-1
+        eflag(graph%lc(k))=.TRUE.
+      END DO
+    END DO
+    !---Overlap rows are marked with negative indices (input only)
+    self%blocks(i)%n=COUNT(eflag)
+    ALLOCATE(self%blocks(i)%ind(self%blocks(i)%n))
+    k=0
+    DO j=1,A%nr
+      IF(.NOT.eflag(j))CYCLE
+      k=k+1
+      IF(part(j)==i)THEN
+        self%blocks(i)%ind(k)=j
+      ELSE
+        self%blocks(i)%ind(k)=-j
+      END IF
+    END DO
+  END DO
+  DEALLOCATE(eflag)
+  !$omp end parallel
+ELSE
+  DO i=1,A%nr
+    self%blocks(part(i))%n=self%blocks(part(i))%n+1
+  END DO
+  DO i=1,self%nlocal
+    ALLOCATE(self%blocks(i)%ind(self%blocks(i)%n))
+    self%blocks(i)%n=0
+  END DO
+  DO i=1,A%nr
+    self%blocks(part(i))%n=self%blocks(part(i))%n+1
+    self%blocks(part(i))%ind(self%blocks(part(i))%n)=i
+  END DO
+END IF
+DEALLOCATE(part)
+!---Extract and invert diagonal blocks
+max_size=0
+nfail=0
+!$omp parallel do private(j,k,n,info) schedule(static) reduction(+:nfail) reduction(max:max_size)
+DO i=1,self%nlocal
+  n=self%blocks(i)%n
+  max_size=MAX(max_size,n)
+  IF(n==0)CYCLE
+  ALLOCATE(self%blocks(i)%inv(n,n))
+  DO k=1,n
+    DO j=1,n
+      self%blocks(i)%inv(j,k)=Amat(ABS(self%blocks(i)%ind(j)),ABS(self%blocks(i)%ind(k)))
+    END DO
+  END DO
+  CALL lapack_matinv(n,self%blocks(i)%inv,info)
+  IF(info/=0)nfail=nfail+1
+END DO
+IF(nfail>0)CALL oft_abort('Block inversion failed','dense_cbjprecond_setup',__FILE__)
+self%max_block_size=max_size
+self%initialized=.TRUE.
+DEBUG_STACK_POP
+END SUBROUTINE dense_cbjprecond_setup
+!------------------------------------------------------------------------------
+!> Precondition a linear system using a Block-Jacobi method with native dense
+!! complex matrices
+!!
+!! Computes \f$ u = M^{-1} g \f$, where \f$ M \f$ is the block-diagonal
+!! approximation of the matrix. The input value of `u` is ignored and `g` is
+!! unchanged.
+!------------------------------------------------------------------------------
+RECURSIVE SUBROUTINE dense_cbjprecond_apply(self,u,g)
+CLASS(oft_native_dense_cbjprecond), INTENT(inout) :: self !< Solver object
+CLASS(oft_cvector), INTENT(inout) :: u !< Result \f$ M^{-1} g \f$ (output)
+CLASS(oft_cvector), INTENT(inout) :: g !< Input vector (unchanged)
+!---
+INTEGER(i4) :: i,j,n
+COMPLEX(c8), POINTER, CONTIGUOUS, DIMENSION(:) :: uvals,gvals
+COMPLEX(c8), ALLOCATABLE, DIMENSION(:,:) :: vloc
+DEBUG_STACK_PUSH
+IF(.NOT.self%initialized)CALL oft_abort('Preconditioner has not been setup','dense_cbjprecond_apply',__FILE__)
+IF(g%n/=self%A%nr)CALL oft_abort('Row mismatch','dense_cbjprecond_apply',__FILE__)
+IF(u%n/=self%A%nc)CALL oft_abort('Col mismatch','dense_cbjprecond_apply',__FILE__)
+IF(self%nlocal/=SIZE(self%blocks))CALL oft_abort('"nlocal" changed since setup','dense_cbjprecond_apply',__FILE__)
+NULLIFY(uvals,gvals)
+CALL u%get_local(uvals)
+CALL g%get_local(gvals)
+uvals=(0.d0,0.d0)
+!$omp parallel private(vloc,i,j,n)
+ALLOCATE(vloc(self%max_block_size,2))
+!$omp do schedule(static)
+DO i=1,self%nlocal
+  n=self%blocks(i)%n
+  IF(n==0)CYCLE
+  DO j=1,n
+    vloc(j,1)=gvals(ABS(self%blocks(i)%ind(j)))
+  END DO
+  CALL zgemv('N',n,n,(1.d0,0.d0),self%blocks(i)%inv,n,vloc(:,1),1,(0.d0,0.d0),vloc(:,2),1)
+  DO j=1,n
+    IF(self%blocks(i)%ind(j)>0)uvals(self%blocks(i)%ind(j))=vloc(j,2)
+  END DO
+END DO
+!$omp end do
+DEALLOCATE(vloc)
+!$omp end parallel
+CALL u%restore_local(uvals)
+DEALLOCATE(uvals,gvals)
+DEBUG_STACK_POP
+END SUBROUTINE dense_cbjprecond_apply
+!------------------------------------------------------------------------------
+!> Destroy dense Block-Jacobi preconditioner and deallocate all internal storage
+!!
+!! @note Settings (`nlocal`, `loverlap`) are retained
+!------------------------------------------------------------------------------
+SUBROUTINE dense_cbjprecond_delete(self,propogate)
+CLASS(oft_native_dense_cbjprecond), INTENT(inout) :: self !< Solver object
+LOGICAL, OPTIONAL, INTENT(in) :: propogate !< Update matrix non-zero pattern? (optional)
+INTEGER(i4) :: i
+DEBUG_STACK_PUSH
+IF(ASSOCIATED(self%blocks))THEN
+  DO i=1,SIZE(self%blocks)
+    IF(ASSOCIATED(self%blocks(i)%ind))DEALLOCATE(self%blocks(i)%ind)
+    IF(ASSOCIATED(self%blocks(i)%inv))DEALLOCATE(self%blocks(i)%inv)
+  END DO
+  DEALLOCATE(self%blocks)
+END IF
+self%max_block_size=0
+NULLIFY(self%A)
+self%initialized=.FALSE.
+CALL csolver_delete(self,propogate)
+DEBUG_STACK_POP
+END SUBROUTINE dense_cbjprecond_delete
 end module oft_native_solvers

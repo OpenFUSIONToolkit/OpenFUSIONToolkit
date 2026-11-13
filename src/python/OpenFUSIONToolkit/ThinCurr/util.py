@@ -63,9 +63,8 @@ class torus_fourier_sensor():
             @result `normals` The outward unit normal vectors on the surface [ntheta,2]
             '''
 
-            n = len(R)
-            dR = R[(np.arange(n)+1)%n]-R
-            dZ = Z[(np.arange(n)+1)%n]-Z
+            dR = np.roll(R,-1)-np.roll(R,1)
+            dZ = np.roll(Z,-1)-np.roll(Z,1)
             T = np.stack([dR,dZ],axis=1)
 
             T_magn = np.linalg.norm(T,axis=1,keepdims=True)
