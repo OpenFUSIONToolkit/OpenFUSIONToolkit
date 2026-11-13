@@ -1986,7 +1986,7 @@ CALL grad_psi%setup(oft_blagrange)
 !---------------------------------------------------------------------------
 ! Pass 1: main fields (n, V, psi, B, and T if compressible) on the full-order mesh
 !---------------------------------------------------------------------------
-CALL xdmf_plot%setup("xmhd_2d", "all/")
+CALL xdmf_plot%setup("xmhd_2d")
 CALL mesh%setup_io(xdmf_plot,oft_blagrange%order)
 
 !---------------------------------------------------------------------------
