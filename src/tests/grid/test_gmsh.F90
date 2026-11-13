@@ -20,6 +20,7 @@ USE oft_base
 USE oft_io, ONLY: xdmf_plot_file
 USE oft_quadrature
 USE oft_mesh_native, ONLY: mesh_native_id
+USE oft_mesh_global_util, ONLY: mesh_global_set_curved
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct, multigrid_construct_surf
 IMPLICIT NONE
@@ -42,6 +43,8 @@ IF(ierr>0)CALL oft_abort('Error parsing "gmsh_test_options" in input file.', &
 IF(test_surf)THEN
   CALL multigrid_construct_surf(mg_mesh)
   IF(mg_mesh%smesh%cad_type/=mesh_native_id)CALL oft_abort('Wrong mesh type.','main',__FILE__)
+  !---Imported quadratic meshes may be curved away from the boundary
+  IF(mg_mesh%smesh%order>1)CALL mesh_global_set_curved(mg_mesh%smesh,1)
   CALL plot_file%setup("Test")
   CALL mg_mesh%smesh%setup_io(plot_file,1)
   IF(oft_env%head_proc)THEN
