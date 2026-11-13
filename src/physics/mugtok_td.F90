@@ -526,6 +526,9 @@ DO j = 1,4
     IF(self%nksolver%cits<0)THEN
         CALL self%u%add(0.d0,1.d0,self%tmp)
         self%nlfun%dt=self%nlfun%dt/2.d0
+        !---Keep every sub-operator on the reduced timestep (TokaMaker LHS/vacuum operator use tkmr%dt)
+        self%mug%dt = self%nlfun%dt
+        self%tkmr%dt = self%nlfun%dt
         CALL build_mugtok_td_jacobian(self, self%nlfun%jac_op, self%u, update_vac = .TRUE.)
         CALL self%pre%update(.TRUE.)
         CALL apply_rhs_mugtok(self%nlfun,self%u,self%rhs)
@@ -534,6 +537,9 @@ DO j = 1,4
         EXIT
     END IF
 END DO
+!---Number of timestep reductions (negative if the solve never converged)
+nretry=j-1
+IF(j>4)nretry=-nretry
 
 !Advance time and return iteration counts
 time=time+self%nlfun%dt
