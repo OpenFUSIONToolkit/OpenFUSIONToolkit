@@ -849,6 +849,7 @@ IF(.NOT.ASSOCIATED(smesh%ho_info%r))THEN
 ELSE
   CALL smesh%set_order(2)
 END IF
+CALL mesh_global_set_curved(smesh,2)
 !---Select mesh type and adjust boundary
 select case(smesh%cad_type)
   case(mesh_native_id)
@@ -862,8 +863,6 @@ select case(smesh%cad_type)
   case default
     call oft_abort('Invalid mesh type.','multigrid_add_quad',__FILE__)
 end select
-!---Flag cells with curved edges (imported meshes may be curved anywhere)
-CALL mesh_global_set_curved(smesh,3)
 ! CALL multigrid_check_ho
 !---Boundary adjustment complete
 DEBUG_STACK_POP
