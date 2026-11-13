@@ -30,6 +30,9 @@ The following examples illustrate usage of ThinCurr to perform calculations usin
  - \subpage doc_tCurr_regcoil
  - \subpage doc_tCurr_hodlr
  - \subpage doc_tCurr_reduction
+ - \subpage doc_tCurr_jamfit_one_filament
+ - \subpage doc_tCurr_jamfit_vde_create
+ - \subpage doc_tCurr_jamfit_vde_reconstruct
 
 \section doc_tw_main_settings ThinCurr settings groups
 

@@ -38,3 +38,9 @@ run_test torus torus_time_domain.ipynb
 
 # XML example
 run_test xml ex_oft_creation.ipynb
+
+# JAMfit filament reconstruction cases
+run_test filament_reconstruct one_filament_ex.ipynb
+# vde_diiid_create_ex writes the vde_diiid_*.npy inputs that vde_diiid_reconstruct_ex reads, so it must run first
+run_test filament_reconstruct vde_diiid_create_ex.ipynb
+run_test filament_reconstruct vde_diiid_reconstruct_ex.ipynb

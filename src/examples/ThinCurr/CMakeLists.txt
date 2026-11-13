@@ -11,9 +11,10 @@ if( OFT_BUILD_TESTS )
   file(COPY plate DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
   file(COPY cyl DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
   file(COPY torus DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
-#   file(COPY ports DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+  file(COPY ports DESTINATION ${CMAKE_CURRENT_BINARY_DIR})  # one_filament_ex reads ../ports/thincurr_ex-ports.h5
 #   file(COPY REGCOIL DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
   file(COPY xml DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
+  file(COPY filament_reconstruct DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
   # Create test driver
   configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/test_examples.sh.in ${CMAKE_CURRENT_BINARY_DIR}/test_examples.sh @ONLY )
   file(
