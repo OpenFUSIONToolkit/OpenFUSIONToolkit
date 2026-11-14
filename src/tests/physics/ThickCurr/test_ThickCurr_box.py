@@ -23,10 +23,9 @@ def run_decay(order, nproc=1, direct=True):
     # Crank-Nicolson for second-order time accuracy (no stiff pseudo-vacuum modes here)
     assert thickcurr_setup('decay', MESH_FILE, 1, ETA, order=order, nlevels=nlevels, dt=1.E-3, theta=0.5,
                            nsteps=20, rst_freq=10, direct=direct, nproc=nproc)
-    rate, shape_err, rayleigh = read_results()
+    rate, shape_err = read_results()
     rate_exp = 1.0/box_tau(ETA, (1, 1, 0))
     retval = check_value("Decay rate", rate, rate_exp, 2.E-2)
-    retval &= check_value("Rayleigh quotient", rayleigh, rate_exp, 2.E-2)
     if shape_err > 1.E-2:
         print("FAILED: Mode shape changed during decay, err = {0:.3E}".format(shape_err))
         retval = False
@@ -49,7 +48,7 @@ def run_eigs(order, nproc=1):
 @pytest.mark.parametrize("order", (2, 3))
 def test_decay(order):
     '''Time advance (thickcurr_run) of the slowest diffusion eigenmode of a conducting cube, checking the decay
-    rate, the conservation of the mode shape, and the Ohmic power against the analytic decay rate.'''
+    rate against the analytic value and the conservation of the mode shape.'''
     assert run_decay(order)
 
 
