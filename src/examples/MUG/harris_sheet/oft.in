@@ -15,9 +15,10 @@
 &cube_options
  mesh_type=1
  ref_per=T,F,F
- ni=64,32,0
+ ni=64,128,0
  rscale=25.6,12.8,0.0
  shift=-12.8,-6.4,0.0
+ packing=1.0,0.25,0.0
 /
 
 &harris_sheet_options
@@ -42,8 +43,12 @@
   L_x = 25.6E0
   L_z = 12.8E0
   nsteps=4000
-  rst_freq=10
+  rst_freq=50
   use_mfnk=T
   pm=F
   linear=F
+/
+
+&xmhd_plot_options
+  rst_end=4000
 /
