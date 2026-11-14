@@ -1,0 +1,56 @@
+&runtime_options
+ ppn=1
+ debug=0
+/
+
+&mesh_options
+ meshname='slab'
+ cad_type=92
+ nlevels=1
+ nbase=1
+ grid_order=1
+/
+
+&cube_options
+ mesh_type=2                      ! Hexahedral mesh
+ ni=4,1,4                         ! Cells in x (periodic), y (along B), z (between walls)
+ rscale=4.524425E-2,1.E-2,7.200847E-2  ! Lx = 2 pi/10 d_i, Lz = d_i
+ shift=-2.262213E-2,-5.E-3,-3.600423E-2  ! Center the domain on the origin
+ ref_per=T,T,F                    ! Periodic in x and y
+/
+
+&gyro_grav_options
+ order=3        ! FE order
+ minlev=3       ! Single FE level
+ n_bar=1.E19    ! Reference density [m^-3]
+ B_bar=1.E-2    ! Reference field [T]
+ beta=1.E-3     ! Plasma beta at the midplane
+ g=5.E-3        ! Gravity [d_i Omega_i^2]
+ Ln=100.        ! Density gradient scale length [d_i]
+ I0=100.        ! Field at the midplane [B_bar]
+ eps=1.E-8      ! Relative amplitude of the density perturbation
+/
+
+&xmhd_options
+ mu_ion=1.                ! Proton mass (assumed by the driver)
+ xmhd_hall=F              ! No Hall term (see the example docs)
+ me_factor=0.             ! No electron inertia
+ te_factor=0.             ! p = p_i
+ nu_gyro=1.               ! Braginskii gyroviscosity
+ nu_perp=0.               ! No fluid viscosity
+ xmhd_diss_centered=T     ! Time-center gyroviscosity
+ xmhd_upwind=F            ! No upwinding
+ eta=0.                   ! Ideal Ohm's law
+ d_dens=0.                ! No particle diffusion
+ kappa_par=0.,0.          ! No thermal conduction
+ kappa_perp=0.,0.
+ bbc='bc'                 ! Conducting walls
+ vbc='all'                ! No-slip walls
+ dt=5.E-6                 ! Time step [s] (~5/Omega_i)
+ nsteps=500               ! Number of time steps (~2400/Omega_i)
+ rst_freq=1000            ! No restart files after the initial one
+ lin_tol=1.E-10
+ nl_tol=1.E-6
+ nu_xmhd=1
+ nclean=1000
+/

@@ -20,6 +20,7 @@ The following examples illustrate usage of MUG to run time-dependent resistive a
  - \subpage doc_mug_sph_ex1
  - \subpage doc_mug_sph_ex2
  - \subpage doc_mug_recon_ex
+ - \subpage doc_mug_gyro_grav_ex
 
 \section doc_mhd_main_eqns MHD System
 MUG solves the single- or two-temperature extended MHD equations: continuity, momentum (with optional
