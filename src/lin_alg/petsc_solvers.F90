@@ -121,11 +121,20 @@ contains
   procedure :: setup => luprecond_setup
 end type oft_petsc_luprecond
 !------------------------------------------------------------------------------
+!> PETSc iLU factorization/solve
+!------------------------------------------------------------------------------
+type, public, extends(oft_petsc_precond) :: oft_petsc_iluprecond
+contains
+  !> Setup preconditioner
+  procedure :: setup => iluprecond_setup
+end type oft_petsc_iluprecond
+!------------------------------------------------------------------------------
 !> PETSc Additive-Schwarz preconditioner
 !------------------------------------------------------------------------------
 type, public, extends(oft_petsc_precond) :: oft_petsc_asprecond
   INTEGER(i4) :: overlap = 1 !< Size of domain overlap
   INTEGER(i4) :: n_local = 0 !< Use local field partitioning?
+  INTEGER(i4) :: full_node = 0 !< Partition across full node (only for n_local==1)
   TYPE(oft_petsc_factordef) :: sub_factor !< PETSc factor definition
 contains
   !> Setup preconditioner
@@ -282,9 +291,6 @@ ELSE
 END IF
 CALL KSPSetOperators(self%solver,mat%M,pmat%M,ierr)
 CALL KSPSetInitialGuessNonzero(self%solver,PETSC_TRUE,ierr) ! Default to non-zero guess
-!---
-CALL KSPGetPC(self%solver,pc,ierr)
-CALL PCSetType(pc,PCNONE,ierr)
 DEBUG_STACK_POP
 end subroutine petsc_solver_setup
 !------------------------------------------------------------------------------
@@ -581,6 +587,7 @@ IF((oft_env%pm.AND.oft_env%head_proc))WRITE(*,*)'Starting PETSc GMRES solver'
 IF(oft_env%pm)CALL petsc_solver_setup_pm(self%solver)
 CALL KSPSolve(self%solver,gv%v,uv%v,ierr)
 CALL KSPGetIterationNumber(self%solver,self%cits,ierr)
+IF(oft_env%pm.AND.oft_env%head_proc)CALL KSPConvergedReasonView(self%solver,PETSC_VIEWER_STDOUT_SELF,ierr)
 CALL KSPSetReusePreconditioner(self%solver,PETSC_TRUE,ierr)
 uv%loc_current=.FALSE.
 gv%loc_current=.FALSE.
@@ -1277,13 +1284,41 @@ TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
 LOGICAL, INTENT(in) :: dist !< Flag for local vs distributed solve?
 !---Local variables
 INTEGER(i4) :: ierr
+TYPE(tMat) :: fac_mat
 DEBUG_STACK_PUSH
 !---Basic preconditioner setup
 CALL PCSetType(pc,PCLU,ierr)
 !---Set solver package
-CALL set_solver_package(pc,PETSC_DEF_LU,ierr)
+!CALL set_solver_package(pc,PETSC_DEF_LU,ierr)
+!CALL set_solver_package(pc,MATSOLVERSUPERLU_DIST,ierr)
+!CALL set_solver_package(pc,MATSOLVERMUMPS,ierr)
+CALL PCFactorSetMatSolverType(pc,MATSOLVERMUMPS,ierr)
+CALL PCFactorSetUpMatSolverType(pc,ierr)
+CALL PCFactorGetMatrix(pc,fac_mat,ierr)
 DEBUG_STACK_POP
 end subroutine luprecond_setup
+!---------------------------------------------------------------------------------
+!> Setup iLU factorization preconditioner
+!---------------------------------------------------------------------------------
+subroutine iluprecond_setup(self,pc,dist)
+CLASS(oft_petsc_iluprecond), INTENT(inout) :: self !< Solver object
+TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
+LOGICAL, INTENT(in) :: dist !< Flag for local vs distributed solve?
+!---Local variables
+INTEGER(i4) :: ierr
+DEBUG_STACK_PUSH
+!---Basic preconditioner setup
+CALL PCSetType(pc,PCILU,ierr)
+!CALL PCFactorSetLevels(pc,1,ierr)
+!CALL PCFactorReorderForNonzeroDiagonal(pc,1.d-8,ierr)
+!CALL PCFactorSetAllowDiagonalFill(pc,PETSC_TRUE,ierr)
+!CALL PCFactorSetMatSolverType(pc,MATSOLVERSUPERLU,ierr)
+!CALL PCFactorSetDropTolerance(pc,1.d-6,0.1d0,maxrowcount)
+!CALL PCFactorSetShiftType(pc,MAT_SHIFT_NONZERO,ierr)
+!CALL PCFactorSetLevels(pc,0,ierr)
+!CALL PCFactorSetDropTolerance(pc,dt,dtcol,maxrowcount, ierr)
+DEBUG_STACK_POP
+end subroutine iluprecond_setup
 !---------------------------------------------------------------------------------
 !> Setup multi-grid preconditioner
 !---------------------------------------------------------------------------------
@@ -1302,7 +1337,11 @@ DEBUG_STACK_PUSH
 ! Basic preconditioner setup
 !---------------------------------------------------------------------------------
 CALL PCSetType(pc,PCMG,ierr)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<25)
 CALL PCMGSetLevels(pc,self%nlevels,PETSC_NULL_INTEGER,ierr)
+#else
+CALL PCMGSetLevels(pc,self%nlevels,MPI_COMM_NULL,ierr)
+#endif
 CALL PCMGSetType(pc,PC_MG_MULTIPLICATIVE,ierr)
 !---Set galerkin
 IF(self%galerkin)THEN
@@ -1389,7 +1428,7 @@ CALL PCMGGetCoarseSolve(pc,ksp,ierr)
 DEBUG_STACK_POP
 end subroutine mgprecond_setup
 !---------------------------------------------------------------------------------
-!> Setup additiv Schwarz preconditioner
+!> Setup additive Schwarz preconditioner
 !---------------------------------------------------------------------------------
 subroutine asprecond_setup(self,pc,dist)
 CLASS(oft_petsc_asprecond), INTENT(inout) :: self !< Solver object
@@ -1397,11 +1436,18 @@ TYPE(tpc), INTENT(inout) :: pc !< PETSc PC object
 LOGICAL, INTENT(in) :: dist !< Flag for local vs distributed solve?
 TYPE(tpc) :: pc_local
 TYPE(tksp), POINTER, DIMENSION(:) :: ksp
-TYPE(tis), ALLOCATABLE, DIMENSION(:) :: is_parts
+TYPE(tis), POINTER, DIMENSION(:) :: is_parts,is_outer
+TYPE(tmat) :: sub_mat
 !---
-INTEGER(i4) :: i,ierr,n_local,loc_start,loc_end
+INTEGER(i4) :: i,iblk,j,ierr,n_local,loc_start,loc_end,ncolor,node_num
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: color_flag
 CLASS(oft_petsc_matrix), pointer :: mat
 CLASS(oft_petsc_solver), POINTER :: pre
+#ifdef OFT_MPI_F08
+TYPE(mpi_comm) :: comm_tmp
+#else
+INTEGER(i4) :: comm_tmp
+#endif
 DEBUG_STACK_PUSH
 !---
 NULLIFY(pre)
@@ -1410,43 +1456,171 @@ IF(ASSOCIATED(self%pre))THEN
     CALL oft_abort('"pre" is not a PETSc solver object.','asprecond_setup',__FILE__)
 END IF
 !---
-CALL PCSetType(pc,PCASM,ierr)
-CALL PCASMSetOverlap(pc,self%overlap,ierr)
+IF((self%full_node>=1).AND.(oft_env%ppn>=1))THEN
+  IF(self%n_local>1)CALL oft_abort('More than one block per node not supported.','asprecond_setup',__FILE__)
+  !WRITE(*,*)oft_env%rank,'Using full node for Additive Schwarz',node_num
+  CALL PCSetType(pc,PCGASM,ierr)
+  CALL PCGASMSetOverlap(pc,self%overlap,ierr)
+ELSE
+  CALL PCSetType(pc,PCASM,ierr)
+  CALL PCASMSetOverlap(pc,self%overlap,ierr)
+END IF
 !---
 IF(self%n_local==-1)THEN
   IF(.NOT.oft_petsc_matrix_cast(mat,self%A)) &
     CALL oft_abort('"A" is not a PETSc matrix object.','asprecond_setup',__FILE__)
   n_local=mat%ni
-  ALLOCATE(is_parts(n_local))
-  CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
-  DO i=1,mat%ni
-    loc_end = mat%i_map(i)%nslice
-    CALL ISCreateStride(PETSC_COMM_SELF,loc_end,loc_start,1,is_parts(i),ierr)
-    loc_start=loc_start+loc_end
-  END DO
-  CALL PCASMSetLocalSubdomains(pc,n_local,is_parts,is_parts,ierr)
-  DEALLOCATE(is_parts)
-ELSE IF(self%n_local>1)THEN
+  IF((self%full_node>=1).AND.(oft_env%ppn>=1))THEN
+    IF(.FALSE.)THEN
+      CALL PCGASMSetTotalSubdomains(pc,oft_env%nnodes,ierr)
+    ELSE
+      ALLOCATE(is_parts(n_local))
+      CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
+      DO i=1,mat%ni
+        loc_end = mat%i_map(i)%nslice
+        IF(self%full_node>1)THEN
+          CALL MPI_Comm_split(oft_env%comm,oft_env%rank/(self%full_node*oft_env%ppn),oft_env%rank,comm_tmp,ierr)
+          CALL ISCreateStride(comm_tmp,loc_end,loc_start,1,is_parts(i),ierr)
+          CALL MPI_Comm_free(comm_tmp,ierr)
+        ELSE
+          CALL ISCreateStride(oft_env%node_comm,loc_end,loc_start,1,is_parts(i),ierr)
+        END IF
+        loc_start=loc_start+loc_end
+      END DO
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
+      CALL PCGASMSetSubdomains(pc,n_local,is_parts,PETSC_NULL_IS,ierr)
+#else
+      CALL PCGASMSetSubdomains(pc,n_local,is_parts,[PETSC_NULL_IS],ierr)
+      DO i=1,n_local
+        CALL ISDestroy(is_parts(i),ierr)
+      END DO
+#endif
+      !IF(ierr/=0)WRITE(*,*)oft_env%rank,'Bad SetSubdomains',ierr
+      DEALLOCATE(is_parts)
+    END IF
+  ELSE
+    ALLOCATE(is_parts(n_local))
+    CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
+    DO i=1,mat%ni
+      loc_end = mat%i_map(i)%nslice
+      CALL ISCreateStride(PETSC_COMM_SELF,loc_end,loc_start,1,is_parts(i),ierr)
+      loc_start=loc_start+loc_end
+    END DO
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
+    CALL PCASMSetLocalSubdomains(pc,n_local,PETSC_NULL_IS,is_parts,ierr)
+#else
+    CALL PCASMSetLocalSubdomains(pc,n_local,[PETSC_NULL_IS],is_parts,ierr)
+#endif
+    DEALLOCATE(is_parts)
+  END IF
+ELSE IF(self%n_local>=1)THEN
   IF(.NOT.oft_petsc_matrix_cast(mat,self%A)) &
     CALL oft_abort('"A" is not a PETSc matrix object.','asprecond_setup',__FILE__)
   n_local=self%n_local
-  ALLOCATE(is_parts(n_local))
-  CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
-  DO i=1,self%n_local
-    loc_end = FLOOR(mat%nrslice/REAL(self%n_local,8))
-    IF(i==self%n_local)loc_end = loc_end + MOD(mat%nrslice,self%n_local)
-    CALL ISCreateStride(PETSC_COMM_SELF,loc_end,loc_start,1,is_parts(i),ierr)
-    loc_start=loc_start+loc_end
-  END DO
-  CALL PCASMSetLocalSubdomains(pc,n_local,is_parts,is_parts,ierr)
-  DEALLOCATE(is_parts)
-ELSE
-  n_local=1
+  IF(ASSOCIATED(mat%color))THEN
+    n_local=MAXVAL(mat%color)
+    IF(oft_env%head_proc.AND.self%n_local/=n_local)WRITE(*,'(A,X,I4)')' Updating number of local parts to match coloring',n_local
+  END IF
+  IF(n_local>1)THEN
+    ALLOCATE(is_parts(n_local))
+    CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
+    IF(ASSOCIATED(mat%color))THEN
+      ALLOCATE(color_flag(mat%nrslice))
+      DO i=1,n_local
+        ncolor = 0
+        DO iblk=1,mat%ni
+          DO j=1,mat%i_map(iblk)%nslice
+            IF(mat%color(mat%i_map(iblk)%offset+mat%i_map(iblk)%slice(j))==i)THEN
+              ncolor=ncolor+1
+              color_flag(ncolor)=loc_start+mat%i_map(iblk)%soffset+j-1
+            END IF
+          END DO
+        END DO
+        CALL ISCreateGeneral(PETSC_COMM_SELF,ncolor,color_flag,PETSC_COPY_VALUES,is_parts(i),ierr)
+      END DO
+      DEALLOCATE(color_flag)
+    ELSE
+      DO i=1,self%n_local
+        loc_end = FLOOR(mat%nrslice/REAL(self%n_local,8))
+        IF(i==self%n_local)loc_end = loc_end + MOD(mat%nrslice,self%n_local)
+        CALL ISCreateStride(PETSC_COMM_SELF,loc_end,loc_start,1,is_parts(i),ierr)
+        loc_start=loc_start+loc_end
+      END DO
+    END IF
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
+    CALL PCASMSetLocalSubdomains(pc,n_local,PETSC_NULL_IS,is_parts,ierr)
+#else
+    CALL PCASMSetLocalSubdomains(pc,n_local,[PETSC_NULL_IS],is_parts,ierr)
+#endif
+    DEALLOCATE(is_parts)
+  ELSE
+    IF((self%full_node>=1).AND.(oft_env%ppn>=1))THEN
+      IF(.FALSE.)THEN
+        !CALL PCGASMSetTotalSubdomains(pc,oft_env%nnodes,ierr)
+        ! Do nothing
+      ELSE
+        ALLOCATE(is_parts(n_local))
+        CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
+        IF(self%full_node>1)THEN
+          CALL MPI_Comm_split(oft_env%comm,oft_env%rank/(self%full_node*oft_env%ppn),oft_env%rank,comm_tmp,ierr)
+          CALL ISCreateStride(comm_tmp,loc_end-loc_start,loc_start,1,is_parts(1),ierr)
+          CALL MPI_Comm_free(comm_tmp,ierr)
+        ELSE
+          CALL ISCreateStride(oft_env%node_comm,loc_end-loc_start,loc_start,1,is_parts(1),ierr)
+        END IF
+        ALLOCATE(is_outer(n_local))
+        DO i=1,n_local
+          CALL ISDuplicate(is_parts(i),is_outer(i),ierr)
+        END DO
+        CALL MatIncreaseOverlapSplit(mat%M,n_local,is_outer,self%overlap,ierr)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
+        !CALL PCGASMSetSubdomains(pc,n_local,is_parts,PETSC_NULL_IS,ierr)
+        CALL PCGASMSetSubdomains(pc,n_local,is_parts,is_outer,ierr)
+#else
+        !CALL PCGASMSetSubdomains(pc,n_local,is_parts,[PETSC_NULL_IS],ierr)
+        CALL PCGASMSetSubdomains(pc,n_local,is_parts,is_outer,ierr)
+        DO i=1,n_local
+          CALL ISDestroy(is_parts(i),ierr)
+        END DO
+#endif
+        !IF(ierr/=0)WRITE(*,*)oft_env%rank,'Bad SetSubdomains',ierr
+        DEALLOCATE(is_parts,is_outer)
+      END IF
+    ELSE
+      ALLOCATE(is_parts(n_local))
+      CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
+      CALL ISCreateStride(oft_env%node_comm,loc_end-loc_start,loc_start,1,is_parts(1),ierr)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
+      CALL PCASMSetLocalSubdomains(pc,n_local,PETSC_NULL_IS,is_parts,ierr)
+#else
+      CALL PCASMSetLocalSubdomains(pc,n_local,[PETSC_NULL_IS],is_parts,ierr)
+#endif
+      DEALLOCATE(is_parts)
+    END IF
+  END IF
 END IF
 !---
+NULLIFY(ksp)
 CALL PCSetUp(pc,ierr)
+!CALL PCView(pc,PETSC_VIEWER_STDOUT_WORLD,ierr)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
 ALLOCATE(ksp(n_local))
-CALL PCASMGetSubKSP(pc,n_local,PETSC_NULL_INTEGER,ksp,ierr)
+#endif
+IF((self%full_node>=1).AND.(oft_env%ppn>=1))THEN
+  CALL PCGASMGetSubKSP(pc,n_local,PETSC_NULL_INTEGER,ksp,ierr)
+  !CALL KSPGetOperators(ksp(1), sub_mat, PETSC_NULL_MAT,ierr)
+  !CALL MatGetSize(sub_mat, loc_start, loc_end, ierr)
+  !WRITE(*,*)'CHK GASM',oft_env%rank,loc_start,loc_end
+ELSE
+  CALL PCASMGetSubKSP(pc,n_local,PETSC_NULL_INTEGER,ksp,ierr)
+  !ALLOCATE(is_parts(n_local),is_outer(n_local))
+  !CALL PCASMGetLocalSubdomains(pc,n_local,is_parts,is_outer,ierr)
+  !CALL ISGetSize(is_parts(1),loc_start,ierr)
+  !CALL ISGetSize(is_outer(1),loc_end,ierr)
+  !DEALLOCATE(is_parts,is_outer)
+  !WRITE(*,*)'CHK ASM',oft_env%rank,loc_start,loc_end
+END IF
+!WRITE(*,*)oft_env%rank,'PC Setup',n_local
 DO i=1,n_local
   IF(ASSOCIATED(pre))THEN
     CALL pre%setup_ksp(ksp(i))
@@ -1456,7 +1630,17 @@ DO i=1,n_local
     CALL create_lu_pc(self%sub_factor,pc_local)
   END IF
 END DO
+!WRITE(*,*)oft_env%rank,'Setup done'
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>23)
+IF((self%full_node>=1).AND.(oft_env%ppn>=1))THEN
+  CALL PCGASMRestoreSubKSP(pc,n_local,PETSC_NULL_INTEGER,ksp,ierr)
+ELSE
+  CALL PCASMRestoreSubKSP(pc,n_local,PETSC_NULL_INTEGER,ksp,ierr)
+END IF
+#endif
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
 DEALLOCATE(ksp)
+#endif
 DEBUG_STACK_POP
 end subroutine asprecond_setup
 !------------------------------------------------------------------------------
@@ -1508,6 +1692,21 @@ IF(ierr==0)THEN
 END IF
 IF(self%n_local<-1)CALL oft_abort("Slice grouping not supported with PETSc","asprecond_setup_xml",__FILE__)
 IF(self%n_local==-1)self%overlap=0
+!---Read in local field splitting flag
+CALL xml_get_element(solver_node,"full_node",current_node,ierr)
+IF(ierr==0)THEN
+  CALL xml_read_content(current_node,read_int,iostat=ierr)
+  IF(ierr/=0)CALL oft_xml_abort("Error reading `full_node` node","asprecond_setup_xml",__FILE__)
+  IF(ASSOCIATED(read_int))THEN
+    IF(SIZE(read_int)>1)THEN
+      IF(SIZE(read_int)<val_level)CALL oft_abort("Not enough `full_node` values specified","asprecond_setup_xml",__FILE__)
+      self%full_node=read_int(val_level)
+    ELSE
+      self%full_node=read_int(1)
+    END IF
+    DEALLOCATE(read_int)
+  END IF
+END IF
 !---Read-in desired overlap specification
 CALL xml_get_element(solver_node,"boverlap",current_node,ierr)
 IF(ierr==0)CALL oft_abort("Boundary overlap not supported with PETSc","asprecond_setup_xml",__FILE__)
@@ -1515,6 +1714,7 @@ IF(oft_debug_print(1))THEN
   WRITE(*,*)'Additive Schwartz solver setup:'
   WRITE(*,*)' - Overlap:    ',self%overlap
   WRITE(*,*)' - NLocal:     ',self%n_local
+  WRITE(*,*)' - Full node:  ',self%full_node
 END IF
 DEBUG_STACK_POP
 end subroutine asprecond_setup_xml
@@ -1561,6 +1761,7 @@ IF(factor_req)THEN
     CASE('umfpack')
       CALL set_solver_package(pc,MATSOLVERUMFPACK,ierr)
     CASE DEFAULT
+      WRITE(*,*)self%package,oft_env%rank
       CALL oft_abort("Unknown solver package.","create_lu_pc",__FILE__)
   END SELECT
 END IF

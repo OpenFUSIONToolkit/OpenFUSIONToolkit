@@ -300,6 +300,7 @@ LOGICAL :: xmhd_rw = .FALSE. !< Resistive wall present
 LOGICAL :: xmhd_two_temp = .FALSE. !< Run 2 Temperature model
 LOGICAL :: xmhd_therm_equil = .FALSE. !< Include cross-species thermalization
 LOGICAL :: xmhd_diss_centered = .FALSE. !< Time-center dissipation terms
+LOGICAL :: xmhd_lin_euler_start = .FALSE. !< Start linear BDF2 runs with one backward Euler step
 LOGICAL :: xmhd_skip_update = .FALSE. !< Internal flag for skipping Jac update
 INTEGER(i4) :: te_ind = -1 !< Index of electron temperature field
 INTEGER(i4) :: n2_ind = -1 !< Index of hyper-diff aux field
@@ -317,7 +318,6 @@ INTEGER(i4) :: visc_itype = 1 !< Viscosity type flag (1->kin,2->iso,3->ani)
 LOGICAL, ALLOCATABLE, DIMENSION(:) :: solid_cell !< Solid region flag
 !---Physical parameters
 REAL(r8) :: jac_dt = 1.E-3_r8 !< Time step
-REAL(r8) :: dt_scale = 1._r8 !< Time step scaling factor
 REAL(r8) :: k_db = 1._r8 !< Divergence cleaning term
 REAL(r8) :: eta = 1.E-2_r8 !< Resistivity \f$ \eta / \mu_0 \f$
 REAL(r8) :: eta_temp = -1._r8 !< Reference temperature for resistivity
@@ -412,6 +412,7 @@ CONTAINS
 !! | `xmhd_upwind=T`    | Use upwinding for advection terms | bool |
 !! | `xmhd_therm_equil=F` | Include thermal equilibration between electrons/ions | bool |
 !! | `xmhd_diss_centered=F` | Use time-centered dissipation terms for (V, Ti, Te) | bool |
+!! | `xmhd_lin_euler_start=F` | Linear runs only: take one backward Euler step before BDF2, instead of using the initial condition for both BDF2 history levels (costs one extra preconditioner update) | bool |
 !! | `vbc="all"`        | Velocity boundary condition ("all") | str(3) |
 !! | `nbc="d"`          | Density boundary condition ("d", "n") | str(1) |
 !! | `tbc="d"`          | Temperature boundary condition ("d", "n") | str(1) |
@@ -460,7 +461,7 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   xmhd_visc_heat,xmhd_brag,xmhd_upwind,vbc,nbc,tbc,visc_type,dt,k_db,eta,eta_temp,nu_par, &
   nu_perp,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd,xmhd_nparts, &
   nclean,rst_ind,maxextrap,ittarget,mu_ion,me_factor,xmhd_prefreq,xmhd_mfnk,xmhd_diss_centered, &
-  xmhd_therm_equil,te_factor,d2_dens,eta_hyper
+  xmhd_therm_equil,te_factor,d2_dens,eta_hyper,xmhd_lin_euler_start
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -498,9 +499,9 @@ IF(m_ion<0.d0)CALL oft_abort('Invalid Ion mass','xmhd_read_settings',__FILE__)
 IF(vbc(1:3)/='all')xmhd_vbcdir=.TRUE.
 SELECT CASE(TRIM(vbc))
   CASE("norm")
-    vbc_type=1
-  CASE("tang")
     vbc_type=2
+  CASE("tang")
+    vbc_type=3
 END SELECT
 !---Check viscosity type
 SELECT CASE(visc_type)
@@ -1154,7 +1155,12 @@ IF(oft_env%head_proc)CALL hist_file%open ! Open history file
 ! Setup Operators
 !------------------------------------------------------------------------------
 call xmhd_alloc_ops
-jac_dt=dt
+!---Optionally start BDF2 with a backward Euler step (operators switched to BDF2 at step 2)
+IF(xmhd_lin_euler_start)THEN
+  jac_dt=dt
+ELSE
+  jac_dt=dt*2.d0/3.d0
+END IF
 call xmhd_set_ops(u0)
 mop%u0=>u0
 !---Force perturbation to zero in solid regions
@@ -1262,6 +1268,8 @@ xmhd_pre=>solver%pre
 !------------------------------------------------------------------------------
 ! Begin time stepping
 !------------------------------------------------------------------------------
+!---Without the Euler start-up step, use the initial condition for both BDF2 history levels
+IF(.NOT.xmhd_lin_euler_start)CALL un1%add(0.d0,1.d0,du)
 DO i=1,nsteps
     merp=mer
     verp=ver
@@ -1279,20 +1287,18 @@ DO i=1,nsteps
 !------------------------------------------------------------------------------
 ! Perform Linear Advance
 !------------------------------------------------------------------------------
-    !---Compute metric to get RHS
-    IF(i==2)THEN
+    !---Switch from the backward Euler start-up step to BDF2 (requires a preconditioner update)
+    IF(xmhd_lin_euler_start.AND.(i==2))THEN
       jac_dt=dt*2.d0/3.d0
-      dt_scale=2.d0/3.d0
       CALL xmhd_set_ops(u0)
       CALL xmhd_pre%update(.TRUE.)
     END IF
     !---Compute metric to get RHS
     CALL un2%add(0.d0,1.d0,un1)
     CALL un1%add(0.d0,1.d0,du)
-    IF(i>1)THEN
+    IF((i>1).OR.(.NOT.xmhd_lin_euler_start))THEN
       CALL un2%add(-1.d0,4.d0,un1)
       CALL un2%scale(1.d0/3.d0)
-      dt_scale=2.d0/3.d0
       CALL mop%apply(un2,v)
       CALL xmhd_diag(du,mop%diag_vals,u0)
     ELSE
@@ -1580,7 +1586,7 @@ do ii=1,mesh%tloc_c(ip)%n
       umat(:,1) = u0%V*c1
       IF(xmhd_hall)THEN
         c2 = c1/(mu0*u0%N*elec_charge)
-        c3 = c3 + dt_scale*me_factor*elec_mass*det/(mu0*u0%N*elec_charge**2)
+        c3 = c3 + me_factor*elec_mass*det/(mu0*u0%N*elec_charge**2)
         umat(:,1) = umat(:,1) - u0%J*c2
       END IF
       do li=1,3
@@ -2158,7 +2164,7 @@ do ii=1,mesh%tloc_c(ip)%n
   IF(xmhd_adv_b)THEN
     DO jr=1,oft_lagrange%nce
       IF(oft_lagrange%global%gbe(j_lag(jr)))THEN
-        CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),1,umat)
+        CALL lag_vbc_tensor(oft_lagrange,j_lag(jr),2,umat)
         DO m=1,xmhd_rep%nfields
           IF(ASSOCIATED(mtmp(1,m)%m))THEN
             DO jc=1,oft_lagrange%nce
@@ -2246,7 +2252,7 @@ IF(xmhd_adv_b)THEN
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
     jtmp=j
-    CALL lag_vbc_diag(oft_lagrange,j,1,umat)
+    CALL lag_vbc_diag(oft_lagrange,j,2,umat)
     DO jr=1,3
       DO jc=1,3
         CALL Jac%add_values(jtmp,jtmp,umat(jr,jc),1,1,jr,jc)
@@ -3188,10 +3194,10 @@ IF(xmhd_adv_b)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(oft_lagrange,j,1,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,2,mloc)
     bout(:,j)=MATMUL(mloc,bout(:,j))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(oft_lagrange,j,1,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,2,mloc)
     bout(:,j)=bout(:,j)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -3415,7 +3421,7 @@ do ii=1,mesh%tloc_c(ip)%n
     END IF
     !---Electron inertia
     IF(xmhd_hall)THEN
-      u0%J=u0%J*dt_scale*me_factor*elec_mass*det/(mu0*neq*den_scale*elec_charge**2)
+      u0%J=u0%J*me_factor*elec_mass*det/(mu0*neq*den_scale*elec_charge**2)
       do li=1,3
       do jr=1,oft_lagrange%nce
         b_loc(li,jr) = b_loc(li,jr) + DOT_PRODUCT(b_cop(:,jr,li),u0%J)
@@ -3470,10 +3476,10 @@ IF(xmhd_adv_b)THEN
   DO i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     IF(.NOT.oft_lagrange%global%gbe(j))CYCLE
-    CALL lag_vbc_tensor(oft_lagrange,j,1,mloc)
+    CALL lag_vbc_tensor(oft_lagrange,j,2,mloc)
     bout(:,j)=MATMUL(mloc,bout(:,j))
     IF(.NOT.oft_lagrange%linkage%leo(i))CYCLE
-    CALL lag_vbc_diag(oft_lagrange,j,1,mloc)
+    CALL lag_vbc_diag(oft_lagrange,j,2,mloc)
     bout(:,j)=bout(:,j)+MATMUL(mloc,full_interp%lf_loc(j,1:3))
   END DO
 ELSE
@@ -4285,7 +4291,7 @@ IF(xmhd_adv_b)THEN
   do i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     if(oft_lagrange%global%gbe(j))then
-      CALL lag_vbc_tensor(oft_lagrange,j,1,nn)
+      CALL lag_vbc_tensor(oft_lagrange,j,2,nn)
       v3tmp(:,j)=MATMUL(nn, v3tmp(:,j))
     end if
   end do
@@ -4368,7 +4374,7 @@ IF(xmhd_adv_b)THEN
   do i=1,oft_lagrange%nbe
     j=oft_lagrange%lbe(i)
     if(oft_lagrange%global%gbe(j))then
-      CALL lag_vbc_tensor(oft_lagrange,j,1,nn)
+      CALL lag_vbc_tensor(oft_lagrange,j,2,nn)
       v3tmp(:,j)=MATMUL(nn, v3tmp(:,j))
     end if
   end do

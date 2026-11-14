@@ -179,7 +179,6 @@ ALFVEN_TEMPLATE = """
 {rep_options} vbc='all'
  dt={dt}
  eta=1.e-3
- nu_par=1.e-3
  nsteps={nsteps}
  rst_freq=125
  lin_tol={lin_tol}
@@ -215,6 +214,21 @@ def mpi_ranks(nbase, nlevels):
     return 2 if nbase != nlevels else 1
 
 
+def mug_command(exe, nlevels, order, minlev, petsc=False):
+    '''Command line for a 3-D xMHD test program, with an XML file selecting a fast preconditioner
+
+    The tests do not need to exercise the default preconditioners, so native runs use a block-Jacobi/LU
+    preconditioner: inside one GMRES iteration (`oft_in_xmhd.xml`) on a single level, or as the GMRES smoother of a
+    multigrid preconditioner (`oft_in_xmhd_mg.xml`). The FE levels run from `minlev` to the mesh levels plus
+    `order-1`. PETSc runs keep the default preconditioners.
+    '''
+    if petsc:
+        return exe
+    if nlevels + order - 1 > minlev:
+        return "{0} oft.in oft_in_xmhd_mg.xml".format(exe)
+    return "{0} oft.in oft_in_xmhd.xml".format(exe)
+
+
 def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,two_temp=False):
     '''Write the input for a traveling sound wave and run test_sound (`representation` 'hcurl') or test_sound_lag
     ('lagrange')
@@ -224,6 +238,9 @@ def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fal
     '''
     exe, rep_options, timeout = {'hcurl': ('./test_sound', " bbc='bc'\n", 2000),
                                  'lagrange': ('./test_sound_lag', " k_db=1.\n", 1000)}[representation]
+    # Start linear BDF2 runs with a backward Euler step
+    if linear:
+        rep_options += " xmhd_lin_euler_start=T\n"
     lin_tol = '1.E-12'
     mfnk = False
     if (not linear) and mf:
@@ -236,7 +253,7 @@ def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fal
                                         mfnk=namelist_flag(mfnk), petsc=namelist_flag(petsc),
                                         mesh_type=(2 if hex_mesh else 1), two_temp=namelist_flag(two_temp),
                                         rep_options=rep_options))
-    return run_OFT(exe, mpi_ranks(nbase, nlevels), timeout)
+    return run_OFT(mug_command(exe, nlevels, order, minlev, petsc), mpi_ranks(nbase, nlevels), timeout)
 
 
 def validate_sound(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_temp=False):
@@ -252,23 +269,28 @@ def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fa
     test_alfven_lag ('lagrange')
 
     `nu_mhd` gives the multigrid smoother iterations per level; `mf` selects the matrix-free Newton-Krylov solver
-    (nonlinear runs only). Order 4 needs a tighter linear tolerance to reach the expected error.
+    (nonlinear runs only). Order 4 needs a tighter linear tolerance to reach the expected error, otherwise MPI
+    runs (with a different multigrid layout) do not reproduce the serial errors.
     '''
-    exe, rep_options, timeout = {'hcurl': ('./test_alfven', " bbc='bc'\n", 4000),
-                                 'lagrange': ('./test_alfven_lag', "", 2000)}[representation]
+    # nu_par is parallel-only viscosity in xmhd (no effect on this transverse wave) but the fluid viscosity in xmhd_lag
+    exe, rep_options, timeout = {'hcurl': ('./test_alfven', " bbc='bc'\n nu_perp=1.E-3\n", 4000),
+                                 'lagrange': ('./test_alfven_lag', " nu_par=1.e-3\n", 2000)}[representation]
+    # Start linear BDF2 runs with a backward Euler step
+    if linear:
+        rep_options += " xmhd_lin_euler_start=T\n"
     lin_tol = '1.E-12'
+    if order == 4:
+        lin_tol = '1.E-13'
     mfnk = False
     if not linear:
-        if order == 4:
-            lin_tol = '1.E-13'
         mfnk = mf
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
         fid.write(ALFVEN_TEMPLATE.format(nbase=nbase, nlevels=nlevels, order=order, minlev=minlev, nu_mhd=nu_mhd,
-                                         linear=namelist_flag(linear), dt='4.E-7', nsteps='250', lin_tol=lin_tol,
+                                         linear=namelist_flag(linear), dt='8.E-7', nsteps='125', lin_tol=lin_tol,
                                          mfnk=namelist_flag(mfnk), petsc=namelist_flag(petsc),
                                          mesh_type=(2 if hex_mesh else 1), rep_options=rep_options))
-    return run_OFT(exe, mpi_ranks(nbase, nlevels), timeout)
+    return run_OFT(mug_command(exe, nlevels, order, minlev, petsc), mpi_ranks(nbase, nlevels), timeout)
 
 
 def validate_alfven(berr_exp,verr_exp,steps_exp=11,linear=False):

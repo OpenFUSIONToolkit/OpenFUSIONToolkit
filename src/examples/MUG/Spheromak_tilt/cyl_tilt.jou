@@ -1,0 +1,17 @@
+reset
+
+create Cylinder height 2 radius 1
+
+volume 1 scheme Tetmesh
+set tetmesher interior points on
+set tetmesher optimize level 3 optimize overconstrained  off sliver  off
+set tetmesher boundary recovery  off
+volume 1 size .2
+mesh volume 1
+
+set duplicate block elements off
+block 1 add volume 1 
+block 1 element type tetra10
+
+set large exodus file on
+export Genesis  "cyl_tilt.g" overwrite block 1

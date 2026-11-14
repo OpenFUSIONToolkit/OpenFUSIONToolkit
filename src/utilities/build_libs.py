@@ -108,6 +108,15 @@ def extract_archive(file):
         error_exit('Extraction failed for file: "{0}"'.format(file), exception=e)
 
 
+def resolve_abspath(command):
+    result, errcode = run_command("which {0}".format(command))
+    if errcode != 0:
+        print('WARNING: Could not resolve path for command "{0}"'.format(command))
+        return command
+    else:
+        return result.strip()
+
+
 def run_command(command, timeout=10, env_vars={}):
     # Run shell command
     my_env = os.environ.copy()
@@ -271,7 +280,7 @@ def setup_build_env(build_dir="build", build_cmake_ver=None, cross_compile_targe
     for key in ('CC', 'CXX', 'FC', 'LD', 'CMAKE'):
         temp = os.environ.get(key)
         if temp is not None:
-            config_dict[key] = temp
+            config_dict[key] = resolve_abspath(temp)
     if config_dict["LD"] is None:
         config_dict["LD"] = config_dict["FC"]
     # Get build location
@@ -481,11 +490,6 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
         cmake_lines.append("-DOFT_MPI_HEADER:BOOL={0}".format(bool_to_string(mydict.get("MPI_USE_HEADERS",False))))
     else:
         cmake_lines.append("-DOFT_USE_MPI:BOOL=FALSE")
-    if "PETSC_ROOT" in mydict:
-        cmake_lines.append("-DOFT_PETSc_ROOT:PATH={0}".format(mydict["PETSC_ROOT"]))
-    else:
-        if "METIS_ROOT" in mydict:
-            cmake_lines.append("-DOFT_METIS_ROOT:PATH={0}".format(mydict["METIS_ROOT"]))
     if "HDF5_ROOT" in mydict:
         cmake_lines.append("-DHDF5_ROOT:PATH={0}".format(mydict["HDF5_ROOT"]))
     if mydict.get("HDF5_HAS_HL",False):
@@ -503,6 +507,8 @@ def build_cmake_script(mydict,build_debug=False,use_openmp=False,build_python=Fa
     if "PETSC_ROOT" in mydict:
         cmake_lines.append("-DOFT_PETSc_ROOT:PATH={0}".format(mydict["PETSC_ROOT"]))
     else:
+        if "METIS_ROOT" in mydict:
+            cmake_lines.append("-DOFT_METIS_ROOT:PATH={0}".format(mydict["METIS_ROOT"]))
         if "SUPERLU_ROOT" in mydict:
             cmake_lines.append("-DOFT_SUPERLU_ROOT:PATH={0}".format(mydict["SUPERLU_ROOT"]))
             if "SUPERLU_VER_MAJOR" in mydict:
@@ -1802,9 +1808,11 @@ class PETSC(package):
         elif self.version == '3.23':
             self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.23.7/petsc-v3.23.7.tar.gz"
         elif self.version == '3.24':
-            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.24.3/petsc-v3.24.3.tar.gz"
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.24.6/petsc-v3.24.6.tar.gz"
+        elif self.version == '3.25':
+            self.url = "https://gitlab.com/petsc/petsc/-/archive/v3.25.2/petsc-v3.25.2.tar.gz"
         else:
-            error_exit('Invalid PETSc version requested (3.20 <= version <= 3.24)')
+            error_exit('Invalid PETSc version requested (3.20 <= version <= 3.25)')
         self.debug = debug
         self.with_openmp = with_openmp
         self.with_superlu = with_superlu
@@ -2008,6 +2016,7 @@ group.add_argument("--mpi_use_headers", action="store_true", default=False, help
 #
 group = parser.add_argument_group("HDF5", "HDF5 package options")
 group.add_argument("--hdf5_cc", default=None, type=str, help="HDF5 C compiler wrapper")
+group.add_argument("--hdf5_cxx", default=None, type=str, help="HDF5 C++ compiler wrapper")
 group.add_argument("--hdf5_fc", default=None, type=str, help="HDF5 FORTRAN compiler wrapper")
 group.add_argument("--hdf5_parallel", action="store_true", default=False, help="Use parallel HDF5 interface?")
 group.add_argument("--hdf5_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")
@@ -2055,7 +2064,7 @@ group.add_argument("--petsc_superlu_dist", default=1, type=int, choices=(0,1), h
 group.add_argument("--petsc_mumps", default=0, type=int, choices=(0,1), help="Build PETSc with MUMPS (default: 0)")
 group.add_argument("--petsc_umfpack", default=1, type=int, choices=(0,1), help="Build PETSc with UMFPACK (default: 1)")
 group.add_argument("--petsc_version", default="3.23", type=str,
-    help="Use different version of PETSc [3.20,3.21,3.22,3.23,2.24] (default: 3.23)")
+    help="Use different version of PETSc [3.20,3.21,3.22,3.23,3.24,3.25] (default: 3.23)")
 group.add_argument("--petsc_wrapper", action="store_true", default=False, help="PETSc included in compilers")
 #
 options = parser.parse_args()
@@ -2089,10 +2098,10 @@ if config_dict['OS_TYPE'] == 'Darwin':
 # Building with MPI?
 use_mpi = False
 if (options.mpi_cc is not None) and (options.mpi_fc is not None):
-    config_dict['MPI_CC'] = options.mpi_cc
-    config_dict['MPI_FC'] = options.mpi_fc
+    config_dict['MPI_CC'] = resolve_abspath(options.mpi_cc)
+    config_dict['MPI_FC'] = resolve_abspath(options.mpi_fc)
     if options.mpi_cxx is not None:
-        config_dict['MPI_CXX'] = options.mpi_cxx
+        config_dict['MPI_CXX'] = resolve_abspath(options.mpi_cxx)
     use_mpi = True
 else:
     if options.mpi_lib_dir is not None:
