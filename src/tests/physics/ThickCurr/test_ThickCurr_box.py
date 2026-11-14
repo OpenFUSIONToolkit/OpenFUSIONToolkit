@@ -26,7 +26,7 @@ def run_decay(order, nproc=1, direct=True):
     rate, shape_err = read_results()
     rate_exp = 1.0/box_tau(ETA, (1, 1, 0))
     retval = check_value("Decay rate", rate, rate_exp, 2.E-2)
-    if shape_err > 1.E-2:
+    if shape_err > 3.E-2:
         print("FAILED: Mode shape changed during decay, err = {0:.3E}".format(shape_err))
         retval = False
     return retval

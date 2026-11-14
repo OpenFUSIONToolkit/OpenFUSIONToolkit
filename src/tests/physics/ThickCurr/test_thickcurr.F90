@@ -45,15 +45,23 @@ USE multigrid_build, ONLY: multigrid_construct
 USE oft_la_base, ONLY: oft_vector, oft_matrix
 USE oft_solver_base, ONLY: oft_solver
 USE oft_solver_utils, ONLY: create_cg_solver, create_diag_pre
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup
-USE oft_hcurl_operators, ONLY: hcurl_setup_interp, oft_hcurl_getmop, oft_hcurl_project
+USE oft_h1_basis, ONLY: oft_h1_setup
+USE oft_h1_operators, ONLY: h1_setup_interp
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
+USE oft_hcurl_operators, ONLY: hcurl_setup_interp
+USE oft_hcurl_grad_operators, ONLY: hcurl_grad_setup_interp, hcurl_grad_getmop, &
+  oft_hcurl_grad_project, oft_hcurl_grad_gzerop
 USE fem_base, ONLY: oft_ml_fem_type
-USE thick_wall, ONLY: thickcurr_ML_hcurl, thickcurr_minlev, thickcurr_setup, thickcurr_run, &
-  thickcurr_eigs, thickcurr_plot, thickcurr_diag, thickcurr_zerob
+USE fem_composite, ONLY: oft_ml_fem_comp_type
+USE thick_wall, ONLY: thickcurr_ML_hcurl, thickcurr_ML_H1grad, thickcurr_ML_hcurl_grad, &
+  thickcurr_minlev, thickcurr_setup, thickcurr_run, thickcurr_eigs, thickcurr_plot, &
+  thickcurr_diag
 USE test_thickcurr_helpers, ONLY: box_mode
 IMPLICIT NONE
 TYPE(multigrid_mesh) :: mg_mesh
-TYPE(oft_ml_fem_type), TARGET :: ML_hcurl
+TYPE(oft_ml_fem_type), TARGET :: ML_H1,ML_H1grad,ML_hcurl
+TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
+TYPE(oft_hcurl_grad_gzerop) :: gzerop
 TYPE(box_mode) :: init_field
 CLASS(oft_solver), POINTER :: minv => NULL()
 CLASS(oft_matrix), POINTER :: mop => NULL()
@@ -80,9 +88,15 @@ IF(minlev<0)minlev=mg_mesh%mgmax+order-1
 !------------------------------------------------------------------------------
 ! Build FE structures
 !------------------------------------------------------------------------------
+CALL oft_h1_setup(mg_mesh,order+1,ML_H1,minlev=minlev)
+CALL h1_setup_interp(ML_H1)
 CALL oft_hcurl_setup(mg_mesh,order,ML_hcurl,minlev=minlev)
 CALL hcurl_setup_interp(ML_hcurl)
+CALL oft_hcurl_grad_setup(ML_hcurl,ML_H1,ML_hcurl_grad,ML_H1grad,minlev)
+CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_H1,create_full=.TRUE.)
 thickcurr_ML_hcurl=>ML_hcurl
+thickcurr_ML_H1grad=>ML_H1grad
+thickcurr_ML_hcurl_grad=>ML_hcurl_grad
 thickcurr_minlev=minlev
 !------------------------------------------------------------------------------
 ! Setup ThickCurr (resistivity taken from XML input)
@@ -94,20 +108,21 @@ SELECT CASE(TRIM(test_case))
 !------------------------------------------------------------------------------
 CASE('decay')
   NULLIFY(mop)
-  CALL oft_hcurl_getmop(ML_hcurl%current_level,mop,"zerob")
+  CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,"none")
   CALL create_cg_solver(minv)
   minv%A=>mop
   minv%its=-3
   minv%atol=1.d-12
   CALL create_diag_pre(minv%pre)
-  CALL ML_hcurl%vec_create(u)
-  CALL ML_hcurl%vec_create(v)
-  CALL ML_hcurl%vec_create(b0)
-  !---Project initial mode (zero tangential component on boundary)
+  CALL ML_hcurl_grad%vec_create(u)
+  CALL ML_hcurl_grad%vec_create(v)
+  CALL ML_hcurl_grad%vec_create(b0)
+  !---Project initial mode (tangential component on boundary is zero to projection error)
   init_field%mesh=>mg_mesh%mesh
   init_field%L=box_size
-  CALL oft_hcurl_project(ML_hcurl%current_level,init_field,v)
-  CALL thickcurr_zerob(v)
+  gzerop%ML_hcurl_grad_rep=>ML_hcurl_grad
+  CALL oft_hcurl_grad_project(ML_hcurl_grad%current_level,init_field,v)
+  CALL gzerop%apply(v)
   CALL u%set(0.d0)
   CALL minv%apply(u,v)
   CALL b0%add(0.d0,1.d0,u)

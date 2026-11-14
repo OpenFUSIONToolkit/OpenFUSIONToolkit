@@ -9,8 +9,8 @@
 !! structures (ThickCurr).
 !!
 !! The magnetic field is represented by a vector potential \f$ B = \nabla \times A \f$,
-!! with \f$ A \f$ in the H(Curl) (Nedelec) space used by the @ref xmhd "xMHD" module,
-!! but without the higher order Grad(H^1) subspace. Using the temporal gauge
+!! with \f$ A \f$ in the mixed H(Curl) + Grad(H^1) (Nedelec) space used by the
+!! @ref xmhd "xMHD" module. Using the temporal gauge
 !! (\f$ E = -\partial A / \partial t \f$), Ohm's law and Ampere's law give
 !!
 !! \f[ \sigma \frac{\partial A}{\partial t} + \nabla \times \left( \frac{1}{\mu_0}
@@ -20,6 +20,13 @@
 !! \f$ \Omega \cdot m \f$ (SI units, matching ThinCurr). Non-conducting regions are
 !! treated as a pseudo-vacuum with a large resistivity (`eta_vac`), which drives the
 !! field in those regions toward \f$ \nabla \times B = 0 \f$.
+!!
+!! The higher order Grad(H^1) subspace is required to accurately represent the
+!! electric field (\f$ -\partial A / \partial t \f$) in conducting regions. In vacuum
+!! regions these DOFs only change the gauge and are removed (constrained to zero) for
+!! all DOFs that do not touch a conducting cell, which reduces the number of active
+!! DOFs and removes most of the gradient null space in vacuum. The vertex Grad(H^1)
+!! DOFs duplicate the lowest order H(Curl) gradients and are always removed.
 !!
 !! The outer boundary of the domain is treated as a perfect conductor
 !! (\f$ \hat{n} \times E = 0 \f$), which holds the tangential component of \f$ A \f$
@@ -48,6 +55,7 @@ MODULE thick_wall
 USE oft_base
 USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
+USE oft_stitching, ONLY: oft_seam
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
 USE multigrid, ONLY: multigrid_mesh
 !---
@@ -61,16 +69,16 @@ USE oft_solver_utils, ONLY: create_mlpre, create_pre_xml, create_diag_pre, &
 USE oft_arpack, ONLY: oft_irlm_eigsolver
 #endif
 !---
-USE fem_base, ONLY: fem_max_levels, oft_ml_fem_type, oft_ml_fe_vecspace
+USE fem_base, ONLY: fem_max_levels, oft_ml_fem_type
 USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE fem_utils, ONLY: fem_avg_bcc
-USE oft_lag_basis, ONLY: oft_lag_setup, oft_scalar_fem, oft_3D_lagrange_cast, &
-  oft_lag_geval_all
-USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vproject, oft_lag_zerob
+USE oft_lag_basis, ONLY: oft_scalar_fem, oft_3D_lagrange_cast
+USE oft_lag_operators, ONLY: oft_lag_vgetmop, oft_lag_vproject
 USE oft_hcurl_basis, ONLY: oft_hcurl_fem, oft_3D_hcurl_cast, oft_hcurl_eval_all, &
   oft_hcurl_ceval_all, oft_hcurl_get_cgops
-USE oft_hcurl_operators, ONLY: oft_hcurl_rinterp, oft_hcurl_cinterp, oft_hcurl_zerob, &
-  oft_hcurl_getmop, hcurl_grad, hcurl_gradtp
+USE oft_h1_basis, ONLY: oft_h1_fem, oft_3D_h1_cast, oft_h1_geval_all
+USE oft_hcurl_grad_operators, ONLY: oft_hcurl_grad_rinterp, oft_hcurl_grad_cinterp, &
+  oft_ml_hcurl_grad_vecspace, hcurl_grad_getmop, hcurl_grad_grad
 !---
 USE mhd_utils, ONLY: mu0
 IMPLICIT NONE
@@ -129,6 +137,14 @@ ABSTRACT INTERFACE
   END SUBROUTINE thickcurr_probe_apply
 END INTERFACE
 !------------------------------------------------------------------------------
+!> Constrained (removed) DOF flags for a given FE level
+!------------------------------------------------------------------------------
+TYPE :: thickcurr_bc_flags
+  LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: curl => NULL() !< Fixed H(Curl) DOFs (boundary)
+  LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: grad => NULL() !< Fixed Grad(H^1) DOFs (vertex, boundary, or vacuum)
+  LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: grad_vac => NULL() !< Grad(H^1) DOFs removed in vacuum (interior, high order)
+END TYPE thickcurr_bc_flags
+!------------------------------------------------------------------------------
 !> Operator for eigenvalue solves, \f$ M_{\sigma} P \f$, where \f$ P \f$ is the
 !! \f$ M_{\sigma} \f$-orthogonal projection that removes the gradient null space
 !------------------------------------------------------------------------------
@@ -142,6 +158,8 @@ END TYPE thickcurr_eig_amat
 !------------------------------------------------------------------------------
 !---FE representation (must be set by the user before calling setup)
 TYPE(oft_ml_fem_type), POINTER, PUBLIC :: thickcurr_ML_hcurl => NULL() !< H(Curl) FE space
+TYPE(oft_ml_fem_type), POINTER, PUBLIC :: thickcurr_ML_H1grad => NULL() !< Grad(H^1) FE space
+TYPE(oft_ml_fem_comp_type), POINTER, PUBLIC :: thickcurr_ML_hcurl_grad => NULL() !< Full H(Curl) + Grad(H^1) FE space
 TYPE(oft_ml_fem_type), POINTER, PUBLIC :: thickcurr_ML_lagrange => NULL() !< Lagrange FE space (optional, for plotting)
 TYPE(oft_ml_fem_comp_type), POINTER, PUBLIC :: thickcurr_ML_vlagrange => NULL() !< Vector Lagrange FE space (optional, for plotting)
 INTEGER(i4), PUBLIC :: thickcurr_minlev = -1 !< Lowest MG level (negative to use top level only)
@@ -161,24 +179,24 @@ LOGICAL, ALLOCATABLE, DIMENSION(:) :: tc_cond_reg !< Is region a conductor?
 LOGICAL :: tc_initialized = .FALSE. !< Has setup been completed?
 INTEGER(i4) :: tc_level = 1 !< Top FE level
 INTEGER(i4) :: tc_minlev = 1 !< Lowest FE level for MG
+TYPE(thickcurr_bc_flags), DIMENSION(fem_max_levels) :: tc_bcs !< Constrained DOFs on each level
+REAL(r8) :: tc_ndofs(3) = 0.d0 !< Number of DOFs (total, active, removed in vacuum)
 CLASS(oft_matrix), POINTER :: tc_kop => NULL() !< Curl-curl operator (no BC)
 CLASS(oft_matrix), POINTER :: tc_mcop => NULL() !< Conductivity weighted mass matrix (conductors only, no BC)
 CLASS(oft_matrix), POINTER :: tc_mop => NULL() !< Conductivity weighted mass matrix (boundary DOFs removed)
 TYPE(oft_matrix_ptr), DIMENSION(fem_max_levels) :: tc_lhs !< LHS operator on each level
 CLASS(oft_solver), POINTER :: tc_solver => NULL() !< Linear solver for LHS
-TYPE(oft_ml_fe_vecspace), POINTER :: tc_vecspace => NULL() !< ML vector space for MG
-TYPE(oft_hcurl_zerob), TARGET :: tc_zerob !< Boundary condition for H(Curl) vectors
+TYPE(oft_ml_hcurl_grad_vecspace), POINTER :: tc_vecspace => NULL() !< ML vector space for MG
 TYPE(xml_node) :: tc_root_node !< ThickCurr XML node
 TYPE(xml_node) :: tc_pre_node !< Preconditioner XML node
 !---Gradient projection (eigenvalue solves)
 LOGICAL :: tc_proj_initialized = .FALSE. !< Has gradient projection been setup?
-TYPE(oft_ml_fem_type), TARGET :: tc_ML_lag1 !< Linear Lagrange FE space for gradient projection
-TYPE(oft_lag_zerob), TARGET :: tc_lag_zerob !< Boundary condition for linear Lagrange vectors
+LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: tc_lop_fixed => NULL() !< Fixed DOFs for weighted Laplacian
 CLASS(oft_matrix), POINTER :: tc_lop => NULL() !< Conductivity weighted Laplacian
 CLASS(oft_solver), POINTER :: tc_lop_solver => NULL() !< Solver for weighted Laplacian
 !---Plotting
-CLASS(oft_matrix), POINTER :: tc_hcurl_mop => NULL() !< Unweighted H(Curl) mass matrix
-CLASS(oft_solver), POINTER :: tc_hcurl_minv => NULL() !< Unweighted H(Curl) mass solver
+CLASS(oft_matrix), POINTER :: tc_hcurl_mop => NULL() !< Unweighted H(Curl) + Grad(H^1) mass matrix
+CLASS(oft_solver), POINTER :: tc_hcurl_minv => NULL() !< Unweighted H(Curl) + Grad(H^1) mass solver
 CLASS(oft_matrix), POINTER :: tc_lag_mop => NULL() !< Vector Lagrange mass matrix
 CLASS(oft_solver), POINTER :: tc_lag_minv => NULL() !< Vector Lagrange mass solver
 !------------------------------------------------------------------------------
@@ -186,7 +204,7 @@ CLASS(oft_solver), POINTER :: tc_lag_minv => NULL() !< Vector Lagrange mass solv
 !------------------------------------------------------------------------------
 PUBLIC thickcurr_setup, thickcurr_run, thickcurr_eigs, thickcurr_plot, thickcurr_save_field
 PUBLIC thickcurr_diag, thickcurr_plot_order, thickcurr_rst_save, thickcurr_rst_load, thickcurr_delete
-PUBLIC thickcurr_zerob, thickcurr_driver_apply, thickcurr_probe_apply
+PUBLIC thickcurr_zerob, thickcurr_clean_field, thickcurr_driver_apply, thickcurr_probe_apply
 CONTAINS
 !------------------------------------------------------------------------------
 !> Read run settings for ThickCurr from input files
@@ -325,8 +343,10 @@ END SUBROUTINE thickcurr_setup_regions
 !------------------------------------------------------------------------------
 !> Setup ThickCurr model and construct operators and solvers
 !!
-!! The FE representation (@ref thick_wall::thickcurr_ml_hcurl "thickcurr_ML_hcurl")
-!! must be set before calling this subroutine. See @ref thick_wall::thickcurr_read_settings
+!! The FE representation (@ref thick_wall::thickcurr_ml_hcurl "thickcurr_ML_hcurl",
+!! @ref thick_wall::thickcurr_ml_h1grad "thickcurr_ML_H1grad", and
+!! @ref thick_wall::thickcurr_ml_hcurl_grad "thickcurr_ML_hcurl_grad") must be
+!! set before calling this subroutine. See @ref thick_wall::thickcurr_read_settings
 !! "thickcurr_read_settings" for available runtime options.
 !------------------------------------------------------------------------------
 SUBROUTINE thickcurr_setup(eta_reg)
@@ -338,34 +358,40 @@ CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 TYPE(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
 IF(tc_initialized)CALL thickcurr_delete
-IF(.NOT.ASSOCIATED(thickcurr_ML_hcurl))CALL oft_abort("FE representation not set", &
+IF(.NOT.ASSOCIATED(thickcurr_ML_hcurl_grad))CALL oft_abort("FE representation not set", &
   "thickcurr_setup",__FILE__)
 IF(oft_env%head_proc)CALL mytimer%tick()
 !---Read settings
 CALL thickcurr_read_settings
-tc_level=thickcurr_ML_hcurl%level
-IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl%current_level)) &
+tc_level=thickcurr_ML_hcurl_grad%level
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields(1)%fe)) &
   CALL oft_abort("Invalid Curl FE object","thickcurr_setup",__FILE__)
 CALL thickcurr_setup_regions(hcurl_rep%mesh,eta_reg)
-tc_zerob%ML_hcurl_rep=>thickcurr_ML_hcurl
 !---Determine MG levels
 tc_minlev=thickcurr_minlev
 IF(tc_minlev<0)tc_minlev=tc_level
-IF(tc_minlev>tc_level.OR.tc_minlev<thickcurr_ML_hcurl%minlev) &
+IF(tc_minlev>tc_level.OR.tc_minlev<thickcurr_ML_hcurl_grad%minlev) &
   CALL oft_abort("Invalid minimum MG level","thickcurr_setup",__FILE__)
 nlevels=tc_level-tc_minlev+1
+IF(nlevels>1)THEN
+  IF(.NOT.ASSOCIATED(thickcurr_ML_hcurl_grad%interp_matrices(tc_level)%m))THEN
+    CALL thickcurr_ML_hcurl_grad%build_interp(tc_minlev)
+    CALL thickcurr_ML_hcurl_grad%set_level(tc_level,propogate=.TRUE.)
+  END IF
+END IF
 !------------------------------------------------------------------------------
-! Build operators
+! Build constraint flags and operators
 !------------------------------------------------------------------------------
-CALL thickcurr_build_mat(tc_kop,0.d0,1.d0,.FALSE.,0.d0,.TRUE.)
-CALL thickcurr_build_mat(tc_mcop,1.d0,0.d0,.FALSE.,0.d0,.FALSE.)
-CALL thickcurr_build_mat(tc_mop,1.d0,0.d0,.TRUE.,0.d0,.TRUE.)
 DO level=tc_level,tc_minlev,-1
-  CALL thickcurr_ML_hcurl%set_level(level)
+  CALL thickcurr_ML_hcurl_grad%set_level(level,propogate=.TRUE.)
+  CALL thickcurr_set_bcs(level)
   NULLIFY(tc_lhs(level)%m)
   CALL thickcurr_build_mat(tc_lhs(level)%m,1.d0,tc_theta*tc_dt,.TRUE.,1.d0,.TRUE.)
 END DO
-CALL thickcurr_ML_hcurl%set_level(tc_level)
+CALL thickcurr_ML_hcurl_grad%set_level(tc_level,propogate=.TRUE.)
+CALL thickcurr_build_mat(tc_kop,0.d0,1.d0,.FALSE.,0.d0,.TRUE.)
+CALL thickcurr_build_mat(tc_mcop,1.d0,0.d0,.FALSE.,0.d0,.FALSE.)
+CALL thickcurr_build_mat(tc_mop,1.d0,0.d0,.TRUE.,0.d0,.TRUE.)
 !------------------------------------------------------------------------------
 ! Setup linear solver
 !------------------------------------------------------------------------------
@@ -393,7 +419,7 @@ ELSE
     ml_mats(i)%m=>tc_lhs(levels(i))%m
   END DO
   ALLOCATE(tc_vecspace)
-  tc_vecspace%ML_FE_rep=>thickcurr_ML_hcurl
+  tc_vecspace%ML_FE_rep=>thickcurr_ML_hcurl_grad
   CALL create_mlpre(tc_solver%pre,ml_mats,levels,nlevels=nlevels,ml_vecspace=tc_vecspace, &
     stype=2,nu=tc_nu(tc_minlev:tc_level),xml_root=tc_pre_node)
   DEALLOCATE(levels,ml_mats)
@@ -420,7 +446,9 @@ IF(oft_env%head_proc)THEN
       WRITE(*,'(4X,I4,A)')i,': vacuum'
     END IF
   END DO
-  WRITE(*,'(2X,A,ES11.3)')'# A-DOFs   = ',REAL(hcurl_rep%global%ne,8)
+  WRITE(*,'(2X,A,ES11.3)')'# A-DOFs   = ',tc_ndofs(1)
+  WRITE(*,'(2X,A,ES11.3)')'  Active   = ',tc_ndofs(2)
+  WRITE(*,'(2X,A,ES11.3)')'  Vac-grad = ',tc_ndofs(3)
   WRITE(*,'(2X,A,ES11.3)')'Setup time = ',mytimer%tock()
   WRITE(*,'(A)')'============================'
   WRITE(*,*)
@@ -449,6 +477,7 @@ DO level=tc_level,tc_minlev,-1
     CALL tc_lhs(level)%m%delete
     DEALLOCATE(tc_lhs(level)%m)
   END IF
+  IF(ASSOCIATED(tc_bcs(level)%curl))DEALLOCATE(tc_bcs(level)%curl,tc_bcs(level)%grad,tc_bcs(level)%grad_vac)
 END DO
 CALL tc_kop%delete
 CALL tc_mcop%delete
@@ -460,38 +489,149 @@ IF(tc_proj_initialized)THEN
   CALL tc_lop_solver%delete
   DEALLOCATE(tc_lop_solver)
   CALL tc_lop%delete
-  DEALLOCATE(tc_lop)
+  DEALLOCATE(tc_lop,tc_lop_fixed)
   tc_proj_initialized=.FALSE.
 END IF
 tc_initialized=.FALSE.
 DEBUG_STACK_POP
 END SUBROUTINE thickcurr_delete
 !------------------------------------------------------------------------------
+!> Determine constrained (removed) DOFs on the current FE level
+!!
+!! - H(Curl): DOFs on the boundary (perfectly conducting wall)
+!! - Grad(H^1): vertex DOFs (gauge), DOFs on the boundary, and higher order DOFs
+!!   that do not touch a conducting cell (vacuum gauge)
+!------------------------------------------------------------------------------
+SUBROUTINE thickcurr_set_bcs(level)
+INTEGER(i4), INTENT(in) :: level !< FE level
+INTEGER(i4) :: i,j
+INTEGER(i4), ALLOCATABLE :: j_grad(:)
+REAL(r8), POINTER, DIMENSION(:) :: flag
+CLASS(oft_vector), POINTER :: vtmp
+CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
+CLASS(oft_h1_fem), POINTER :: hgrad_rep
+CLASS(oft_mesh), POINTER :: mesh
+DEBUG_STACK_PUSH
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields(1)%fe)) &
+  CALL oft_abort("Incorrect Curl FE type","thickcurr_set_bcs",__FILE__)
+IF(.NOT.oft_3D_h1_cast(hgrad_rep,thickcurr_ML_hcurl_grad%current_level%fields(2)%fe)) &
+  CALL oft_abort("Incorrect Grad FE type","thickcurr_set_bcs",__FILE__)
+mesh=>hcurl_rep%mesh
+IF(ASSOCIATED(tc_bcs(level)%curl))DEALLOCATE(tc_bcs(level)%curl,tc_bcs(level)%grad,tc_bcs(level)%grad_vac)
+ALLOCATE(tc_bcs(level)%curl(hcurl_rep%ne))
+ALLOCATE(tc_bcs(level)%grad(hgrad_rep%ne),tc_bcs(level)%grad_vac(hgrad_rep%ne))
+tc_bcs(level)%curl=hcurl_rep%global%gbe
+!---Flag Grad(H^1) DOFs touching a conducting cell (summed over processors)
+NULLIFY(flag)
+CALL hgrad_rep%vec_create(vtmp)
+CALL vtmp%set(0.d0)
+CALL vtmp%get_local(flag)
+ALLOCATE(j_grad(hgrad_rep%nce))
+DO i=1,mesh%nc
+  IF(.NOT.tc_cond_reg(mesh%reg(i)))CYCLE
+  CALL hgrad_rep%ncdofs(i,j_grad)
+  flag(j_grad)=1.d0
+END DO
+DEALLOCATE(j_grad)
+CALL vtmp%restore_local(flag,add=.TRUE.)
+CALL vtmp%get_local(flag)
+DO j=1,hgrad_rep%ne
+  tc_bcs(level)%grad_vac(j)=(flag(j)<0.5d0).AND.(j>mesh%np).AND.(.NOT.hgrad_rep%global%gbe(j))
+  tc_bcs(level)%grad(j)=(j<=mesh%np).OR.hgrad_rep%global%gbe(j).OR.tc_bcs(level)%grad_vac(j)
+END DO
+!---Count DOFs (top level only)
+IF(level==tc_level)THEN
+  tc_ndofs(1)=REAL(hcurl_rep%global%ne+hgrad_rep%global%ne,8)
+  flag=0.d0
+  WHERE(tc_bcs(level)%grad_vac)flag=1.d0
+  CALL vtmp%restore_local(flag)
+  tc_ndofs(3)=vtmp%dot(vtmp)
+  flag=0.d0
+  WHERE(tc_bcs(level)%grad)flag=1.d0
+  CALL vtmp%restore_local(flag)
+  tc_ndofs(2)=vtmp%dot(vtmp)
+  DEALLOCATE(flag)
+  CALL vtmp%delete
+  DEALLOCATE(vtmp)
+  CALL hcurl_rep%vec_create(vtmp)
+  NULLIFY(flag)
+  CALL vtmp%get_local(flag)
+  flag=0.d0
+  WHERE(tc_bcs(level)%curl)flag=1.d0
+  CALL vtmp%restore_local(flag)
+  tc_ndofs(2)=tc_ndofs(1)-tc_ndofs(2)-vtmp%dot(vtmp)
+END IF
+CALL vtmp%delete
+DEALLOCATE(vtmp,flag)
+DEBUG_STACK_POP
+END SUBROUTINE thickcurr_set_bcs
+!------------------------------------------------------------------------------
+!> Add a diagonal value for constrained DOFs in one block of a matrix
+!------------------------------------------------------------------------------
+SUBROUTINE thickcurr_add_bc_diag(mat,ne,linkage,fixed,diag_val,iblock)
+CLASS(oft_matrix), INTENT(inout) :: mat !< Matrix object
+INTEGER(i4), INTENT(in) :: ne !< Number of DOFs in block
+TYPE(oft_seam), INTENT(in) :: linkage !< Linkage information for block
+LOGICAL, INTENT(in) :: fixed(:) !< Constrained DOF flags [ne]
+REAL(r8), INTENT(in) :: diag_val !< Diagonal value
+INTEGER(i4), OPTIONAL, INTENT(in) :: iblock !< Block index (optional)
+INTEGER(i4) :: i,j_tmp(1)
+REAL(r8) :: val_tmp(1,1)
+DEBUG_STACK_PUSH
+val_tmp=diag_val
+!---DOFs not shared with other processors
+DO i=1,ne
+  IF(.NOT.fixed(i))CYCLE
+  IF(linkage%be(i))CYCLE
+  j_tmp=i
+  IF(PRESENT(iblock))THEN
+    CALL mat%add_values(j_tmp,j_tmp,val_tmp,1,1,iblock,iblock)
+  ELSE
+    CALL mat%add_values(j_tmp,j_tmp,val_tmp,1,1)
+  END IF
+END DO
+!---Shared DOFs (owner only)
+DO i=1,linkage%nbe
+  j_tmp=linkage%lbe(i)
+  IF(.NOT.fixed(j_tmp(1)))CYCLE
+  IF(.NOT.linkage%leo(i))CYCLE
+  IF(PRESENT(iblock))THEN
+    CALL mat%add_values(j_tmp,j_tmp,val_tmp,1,1,iblock,iblock)
+  ELSE
+    CALL mat%add_values(j_tmp,j_tmp,val_tmp,1,1)
+  END IF
+END DO
+DEBUG_STACK_POP
+END SUBROUTINE thickcurr_add_bc_diag
+!------------------------------------------------------------------------------
 !> Construct a ThickCurr operator on the current FE level
 !!
 !! The matrix is given by \f$ \alpha_M M_{\sigma} + \alpha_K K \f$ where
-!! \f$ M_{\sigma} \f$ is the H(Curl) mass matrix weighted by \f$ \mu_0 / \eta \f$
-!! and \f$ K \f$ is the curl-curl operator,
+!! \f$ M_{\sigma} \f$ is the H(Curl) + Grad(H^1) mass matrix weighted by
+!! \f$ \mu_0 / \eta \f$ and \f$ K \f$ is the curl-curl operator,
 !! \f$ K_{ij} = \int \nabla \times w_i \cdot \nabla \times w_j dV \f$.
 !!
-!! If `apply_bc` is true, the rows and columns corresponding to boundary DOFs are
-!! removed and a value of `bc_diag` is placed on the diagonal of these rows.
+!! If `apply_bc` is true, the rows and columns corresponding to constrained DOFs
+!! (see @ref thick_wall::thickcurr_set_bcs "thickcurr_set_bcs") are removed and a
+!! value of `bc_diag` is placed on the diagonal of these rows.
 !------------------------------------------------------------------------------
 SUBROUTINE thickcurr_build_mat(mat,alpha_m,alpha_k,apply_bc,bc_diag,include_vac)
 CLASS(oft_matrix), POINTER, INTENT(inout) :: mat !< Matrix object
 REAL(r8), INTENT(in) :: alpha_m !< Scale factor for mass matrix
 REAL(r8), INTENT(in) :: alpha_k !< Scale factor for curl-curl operator
-LOGICAL, INTENT(in) :: apply_bc !< Remove boundary DOFs?
-REAL(r8), INTENT(in) :: bc_diag !< Diagonal value for boundary DOFs
+LOGICAL, INTENT(in) :: apply_bc !< Remove constrained DOFs?
+REAL(r8), INTENT(in) :: bc_diag !< Diagonal value for constrained DOFs
 LOGICAL, INTENT(in) :: include_vac !< Include pseudo-vacuum regions in mass matrix?
-INTEGER(i4) :: i,m,jr,jc
-INTEGER(i4), ALLOCATABLE :: j_curl(:)
+INTEGER(i4) :: i,m,jr,jc,level
+INTEGER(i4), ALLOCATABLE :: j_curl(:),j_grad(:)
 REAL(r8) :: vol,det,goptmp(3,4),cgop(3,6),sigma_m,elapsed_time
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: rop,cop,mop
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: rop_curl,cop_curl,rop_grad
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: mop11,mop12,mop21,mop22
 LOGICAL :: curved
-LOGICAL, ALLOCATABLE, DIMENSION(:) :: bc_flag
+LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: bc_curl,bc_grad
 CLASS(oft_vector), POINTER :: vtmp
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
+CLASS(oft_h1_fem), POINTER :: hgrad_rep
 CLASS(oft_mesh), POINTER :: mesh
 TYPE(oft_timer) :: mytimer
 DEBUG_STACK_PUSH
@@ -499,24 +639,31 @@ IF(oft_debug_print(1))THEN
   WRITE(*,'(2X,A)')'Constructing ThickCurr operator'
   CALL mytimer%tick()
 END IF
-IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl%current_level)) &
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields(1)%fe)) &
   CALL oft_abort("Incorrect Curl FE type","thickcurr_build_mat",__FILE__)
+IF(.NOT.oft_3D_h1_cast(hgrad_rep,thickcurr_ML_hcurl_grad%current_level%fields(2)%fe)) &
+  CALL oft_abort("Incorrect Grad FE type","thickcurr_build_mat",__FILE__)
 mesh=>hcurl_rep%mesh
+level=thickcurr_ML_hcurl_grad%level
+bc_curl=>tc_bcs(level)%curl
+bc_grad=>tc_bcs(level)%grad
 !------------------------------------------------------------------------------
 ! Allocate matrix
 !------------------------------------------------------------------------------
 IF(.NOT.ASSOCIATED(mat))THEN
-  CALL hcurl_rep%mat_create(mat)
+  CALL thickcurr_ML_hcurl_grad%current_level%mat_create(mat)
 ELSE
   CALL mat%zero
 END IF
 !------------------------------------------------------------------------------
 ! Operator integration
 !------------------------------------------------------------------------------
-!$omp parallel private(j_curl,rop,cop,det,mop,curved,goptmp,cgop,m,vol,jc,jr,sigma_m,bc_flag)
-ALLOCATE(j_curl(hcurl_rep%nce),bc_flag(hcurl_rep%nce))
-ALLOCATE(rop(3,hcurl_rep%nce),cop(3,hcurl_rep%nce))
-ALLOCATE(mop(hcurl_rep%nce,hcurl_rep%nce))
+!$omp parallel private(j_curl,j_grad,rop_curl,cop_curl,rop_grad,det,mop11,mop12,mop21,mop22, &
+!$omp curved,goptmp,cgop,m,vol,jc,jr,sigma_m)
+ALLOCATE(j_curl(hcurl_rep%nce),j_grad(hgrad_rep%nce))
+ALLOCATE(rop_curl(3,hcurl_rep%nce),cop_curl(3,hcurl_rep%nce),rop_grad(3,hgrad_rep%nce))
+ALLOCATE(mop11(hcurl_rep%nce,hcurl_rep%nce),mop12(hcurl_rep%nce,hgrad_rep%nce))
+ALLOCATE(mop21(hgrad_rep%nce,hcurl_rep%nce),mop22(hgrad_rep%nce,hgrad_rep%nce))
 !$omp do schedule(guided)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i) ! Straight cell test
@@ -524,56 +671,68 @@ DO i=1,mesh%nc
   sigma_m=alpha_m*mu0/tc_eta_reg(mesh%reg(i))
   IF((.NOT.include_vac).AND.(.NOT.tc_cond_reg(mesh%reg(i))))sigma_m=0.d0
   !---Get local reconstructed operators
-  mop=0.d0
+  mop11=0.d0; mop12=0.d0; mop22=0.d0
   DO m=1,hcurl_rep%quad%np ! Loop over quadrature points
     IF(curved.OR.m==1)THEN
       CALL mesh%jacobian(i,hcurl_rep%quad%pts(:,m),goptmp,vol)
       CALL oft_hcurl_get_cgops(goptmp,cgop)
     END IF
     det=vol*hcurl_rep%quad%wts(m)
-    CALL oft_hcurl_eval_all(hcurl_rep,i,hcurl_rep%quad%pts(:,m),rop,goptmp)
-    CALL oft_hcurl_ceval_all(hcurl_rep,i,hcurl_rep%quad%pts(:,m),cop,cgop)
+    CALL oft_hcurl_eval_all(hcurl_rep,i,hcurl_rep%quad%pts(:,m),rop_curl,goptmp)
+    CALL oft_hcurl_ceval_all(hcurl_rep,i,hcurl_rep%quad%pts(:,m),cop_curl,cgop)
+    CALL oft_h1_geval_all(hgrad_rep,i,hcurl_rep%quad%pts(:,m),rop_grad,goptmp)
     !---Compute local matrix contributions
     DO jr=1,hcurl_rep%nce
       DO jc=1,hcurl_rep%nce
-        mop(jr,jc) = mop(jr,jc) + (sigma_m*DOT_PRODUCT(rop(:,jr),rop(:,jc)) &
-          + alpha_k*DOT_PRODUCT(cop(:,jr),cop(:,jc)))*det
+        mop11(jr,jc) = mop11(jr,jc) + (sigma_m*DOT_PRODUCT(rop_curl(:,jr),rop_curl(:,jc)) &
+          + alpha_k*DOT_PRODUCT(cop_curl(:,jr),cop_curl(:,jc)))*det
+      END DO
+      DO jc=1,hgrad_rep%nce
+        mop12(jr,jc) = mop12(jr,jc) + sigma_m*DOT_PRODUCT(rop_curl(:,jr),rop_grad(:,jc))*det
+      END DO
+    END DO
+    DO jr=1,hgrad_rep%nce
+      DO jc=1,hgrad_rep%nce
+        mop22(jr,jc) = mop22(jr,jc) + sigma_m*DOT_PRODUCT(rop_grad(:,jr),rop_grad(:,jc))*det
       END DO
     END DO
   END DO
   !---Get local to global DOF mapping
   CALL hcurl_rep%ncdofs(i,j_curl)
-  !---Remove boundary DOFs
+  CALL hgrad_rep%ncdofs(i,j_grad)
+  !---Remove constrained DOFs
   IF(apply_bc)THEN
     DO jr=1,hcurl_rep%nce
-      bc_flag(jr)=hcurl_rep%global%gbe(j_curl(jr))
+      IF(bc_curl(j_curl(jr)))THEN
+        mop11(jr,:)=0.d0
+        mop11(:,jr)=0.d0
+        mop12(jr,:)=0.d0
+      END IF
     END DO
-    DO jr=1,hcurl_rep%nce
-      IF(bc_flag(jr))THEN
-        mop(jr,:)=0.d0
-        mop(:,jr)=0.d0
+    DO jr=1,hgrad_rep%nce
+      IF(bc_grad(j_grad(jr)))THEN
+        mop12(:,jr)=0.d0
+        mop22(jr,:)=0.d0
+        mop22(:,jr)=0.d0
       END IF
     END DO
   END IF
+  mop21=TRANSPOSE(mop12)
   !---Add local values to global matrix
-  CALL mat%atomic_add_values(j_curl,j_curl,mop,hcurl_rep%nce,hcurl_rep%nce)
+  CALL mat%atomic_add_values(j_curl,j_curl,mop11,hcurl_rep%nce,hcurl_rep%nce,1,1)
+  CALL mat%atomic_add_values(j_curl,j_grad,mop12,hcurl_rep%nce,hgrad_rep%nce,1,2)
+  CALL mat%atomic_add_values(j_grad,j_curl,mop21,hgrad_rep%nce,hcurl_rep%nce,2,1)
+  CALL mat%atomic_add_values(j_grad,j_grad,mop22,hgrad_rep%nce,hgrad_rep%nce,2,2)
 END DO
-DEALLOCATE(j_curl,bc_flag,rop,cop,mop)
+DEALLOCATE(j_curl,j_grad,rop_curl,cop_curl,rop_grad)
+DEALLOCATE(mop11,mop12,mop21,mop22)
 !$omp end parallel
-!---Set diagonal entries for boundary rows
+!---Set diagonal entries for constrained rows
 IF(apply_bc.AND.(bc_diag/=0.d0))THEN
-  ALLOCATE(mop(1,1),j_curl(1))
-  mop(1,1)=bc_diag
-  DO i=1,hcurl_rep%nbe
-    jr=hcurl_rep%lbe(i)
-    IF(.NOT.hcurl_rep%global%gbe(jr))CYCLE
-    IF(.NOT.hcurl_rep%linkage%leo(i))CYCLE
-    j_curl=jr
-    CALL mat%add_values(j_curl,j_curl,mop,1,1)
-  END DO
-  DEALLOCATE(j_curl,mop)
+  CALL thickcurr_add_bc_diag(mat,hcurl_rep%ne,hcurl_rep%linkage,bc_curl,bc_diag,1)
+  CALL thickcurr_add_bc_diag(mat,hgrad_rep%ne,hgrad_rep%linkage,bc_grad,bc_diag,2)
 END IF
-CALL hcurl_rep%vec_create(vtmp)
+CALL thickcurr_ML_hcurl_grad%current_level%vec_create(vtmp)
 CALL mat%assemble(vtmp)
 CALL vtmp%delete
 DEALLOCATE(vtmp)
@@ -584,15 +743,58 @@ END IF
 DEBUG_STACK_POP
 END SUBROUTINE thickcurr_build_mat
 !------------------------------------------------------------------------------
-!> Zero boundary (tangential) components of a vector potential
+!> Zero constrained components of a vector (boundary, gauge, and vacuum DOFs)
 !------------------------------------------------------------------------------
 SUBROUTINE thickcurr_zerob(a)
 CLASS(oft_vector), INTENT(inout) :: a !< Vector
+REAL(r8), POINTER, DIMENSION(:) :: vals
+INTEGER(i4) :: level
 DEBUG_STACK_PUSH
-tc_zerob%ML_hcurl_rep=>thickcurr_ML_hcurl
-CALL tc_zerob%apply(a)
+level=thickcurr_ML_hcurl_grad%level
+NULLIFY(vals)
+CALL a%get_local(vals,1)
+WHERE(tc_bcs(level)%curl)vals=0.d0
+CALL a%restore_local(vals,1,wait=.TRUE.)
+DEALLOCATE(vals)
+CALL a%get_local(vals,2)
+WHERE(tc_bcs(level)%grad)vals=0.d0
+CALL a%restore_local(vals,2)
+DEALLOCATE(vals)
 DEBUG_STACK_POP
 END SUBROUTINE thickcurr_zerob
+!------------------------------------------------------------------------------
+!> Prepare a vector potential for use in ThickCurr
+!!
+!! Vertex Grad(H^1) components are moved to the equivalent lowest order H(Curl)
+!! DOFs and higher order Grad(H^1) components in vacuum are removed. Neither
+!! operation changes the magnetic field.
+!------------------------------------------------------------------------------
+SUBROUTINE thickcurr_clean_field(a)
+CLASS(oft_vector), INTENT(inout) :: a !< Vector potential
+INTEGER(i4) :: i,level
+REAL(r8), POINTER, DIMENSION(:) :: acurl,agrad
+CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
+CLASS(oft_mesh), POINTER :: mesh
+DEBUG_STACK_PUSH
+IF(.NOT.tc_initialized)CALL oft_abort("ThickCurr not initialized","thickcurr_clean_field",__FILE__)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields(1)%fe)) &
+  CALL oft_abort("Incorrect Curl FE type","thickcurr_clean_field",__FILE__)
+mesh=>hcurl_rep%mesh
+level=thickcurr_ML_hcurl_grad%level
+NULLIFY(acurl,agrad)
+CALL a%get_local(acurl,1)
+CALL a%get_local(agrad,2)
+DO i=1,mesh%ne
+  acurl((i-1)*hcurl_rep%gstruct(2)+1)=acurl((i-1)*hcurl_rep%gstruct(2)+1) + &
+    (agrad(mesh%le(2,i))-agrad(mesh%le(1,i)))*SIGN(1_i8,mesh%global%le(i))
+END DO
+agrad(1:mesh%np)=0.d0
+WHERE(tc_bcs(level)%grad_vac)agrad=0.d0
+CALL a%restore_local(acurl,1,wait=.TRUE.)
+CALL a%restore_local(agrad,2)
+DEALLOCATE(acurl,agrad)
+DEBUG_STACK_POP
+END SUBROUTINE thickcurr_clean_field
 !------------------------------------------------------------------------------
 !> Compute diagnostic quantities for a given vector potential
 !------------------------------------------------------------------------------
@@ -625,7 +827,7 @@ REAL(r8), INTENT(in) :: t !< Current solution time
 REAL(r8), INTENT(in) :: dt !< Current timestep
 CHARACTER(LEN=*), INTENT(in) :: filename !< Name of restart file
 DEBUG_STACK_PUSH
-CALL thickcurr_ML_hcurl%current_level%vec_save(a,filename,'A')
+CALL thickcurr_ML_hcurl_grad%current_level%vec_save(a,filename,'A')
 IF(oft_env%head_proc)THEN
   CALL hdf5_write(t,filename,'t')
   CALL hdf5_write(dt,filename,'dt')
@@ -641,7 +843,7 @@ CHARACTER(LEN=*), INTENT(in) :: filename !< Name of restart file
 REAL(r8), OPTIONAL, INTENT(out) :: t !< Time of loaded solution
 REAL(r8), OPTIONAL, INTENT(out) :: dt !< Timestep at loaded time
 DEBUG_STACK_PUSH
-CALL thickcurr_ML_hcurl%current_level%vec_load(a,filename,'A')
+CALL thickcurr_ML_hcurl_grad%current_level%vec_load(a,filename,'A')
 IF(PRESENT(t))CALL hdf5_read(t,filename,'t')
 IF(PRESENT(dt))CALL hdf5_read(dt,filename,'dt')
 DEBUG_STACK_POP
@@ -668,7 +870,8 @@ END FUNCTION thickcurr_rst_name
 !! group, see @ref thick_wall::thickcurr_read_settings "thickcurr_read_settings".
 !!
 !! The tangential components of the vector potential on the boundary are held
-!! fixed at their initial values (perfectly conducting wall).
+!! fixed at their initial values (perfectly conducting wall). The initial field is
+!! first processed with @ref thick_wall::thickcurr_clean_field "thickcurr_clean_field".
 !!
 !! Restart files are written to `thickcurr_XXXXX.rst` every `rst_freq` steps and
 !! time history information is written to `thickcurr.hist`.
@@ -690,10 +893,10 @@ IF(.NOT.tc_initialized)CALL thickcurr_setup
 !------------------------------------------------------------------------------
 ! Create solver fields
 !------------------------------------------------------------------------------
-CALL thickcurr_ML_hcurl%vec_create(u)
-CALL thickcurr_ML_hcurl%vec_create(up)
-CALL thickcurr_ML_hcurl%vec_create(du)
-CALL thickcurr_ML_hcurl%vec_create(rhs)
+CALL thickcurr_ML_hcurl_grad%vec_create(u)
+CALL thickcurr_ML_hcurl_grad%vec_create(up)
+CALL thickcurr_ML_hcurl_grad%vec_create(du)
+CALL thickcurr_ML_hcurl_grad%vec_create(rhs)
 dt=tc_dt
 !------------------------------------------------------------------------------
 ! Setup history file
@@ -723,6 +926,7 @@ IF((tc_rst_ind>0).AND.oft_file_exist(TRIM(rst_file)))THEN
 ELSE
   IF(tc_rst_ind>0)CALL oft_abort('Restart does not exist.','thickcurr_run',__FILE__)
   CALL u%add(0.d0,1.d0,a)
+  CALL thickcurr_clean_field(u)
   t=0.d0
   CALL thickcurr_rst_save(u,t,dt,TRIM(thickcurr_rst_name(0)))
   IF(oft_env%head_proc)CALL hist_file%write_header
@@ -796,105 +1000,166 @@ END SUBROUTINE thickcurr_run
 !------------------------------------------------------------------------------
 !> Setup projection used to remove the gradient null space in eigenvalue solves
 !!
-!! The null space of the curl-curl operator is spanned by gradients of linear
-!! Lagrange functions (that vanish on the boundary). The projection
+!! The null space of the curl-curl operator is spanned by gradients of Grad(H^1)
+!! functions consistent with the constrained DOFs (zero on the boundary and on
+!! higher order DOFs removed in vacuum). The projection
 !! \f$ P = I - G L^{-1} G^T M_{\sigma} \f$, where \f$ G \f$ is the discrete gradient
 !! and \f$ L = G^T M_{\sigma} G \f$ is the conductivity weighted Laplacian, removes
 !! these components in an \f$ M_{\sigma} \f$-orthogonal manner.
 !------------------------------------------------------------------------------
 SUBROUTINE thickcurr_grad_proj_setup()
-INTEGER(i4) :: i,m,jr,jc
-INTEGER(i4), ALLOCATABLE :: j_lag(:)
+INTEGER(i4) :: i,j,m,jr,jc,level
+INTEGER(i4), ALLOCATABLE :: j_grad(:)
 REAL(r8) :: vol,det,goptmp(3,4),sigma_m
 REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: gop,lop
 LOGICAL :: curved
 CLASS(oft_vector), POINTER :: vtmp
-CLASS(oft_scalar_fem), POINTER :: lag_rep
-CLASS(multigrid_mesh), POINTER :: mg_mesh
+CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
+CLASS(oft_h1_fem), POINTER :: hgrad_rep
 CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
 IF(tc_proj_initialized)THEN
   DEBUG_STACK_POP
   RETURN
 END IF
-!---Create linear Lagrange space on the finest mesh
-IF(tc_ML_lag1%nlevels==0)THEN
-  mg_mesh=>thickcurr_ML_hcurl%ml_mesh
-  CALL oft_lag_setup(mg_mesh,1,tc_ML_lag1,minlev=mg_mesh%mgdim)
-END IF
-tc_lag_zerob%ML_lag_rep=>tc_ML_lag1
-IF(.NOT.oft_3D_lagrange_cast(lag_rep,tc_ML_lag1%current_level)) &
-  CALL oft_abort("Invalid Lagrange FE object","thickcurr_grad_proj_setup",__FILE__)
-mesh=>lag_rep%mesh
-!---Construct conductivity weighted Laplacian (zero on boundary)
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields(1)%fe)) &
+  CALL oft_abort("Incorrect Curl FE type","thickcurr_grad_proj_setup",__FILE__)
+IF(.NOT.oft_3D_h1_cast(hgrad_rep,thickcurr_ML_hcurl_grad%current_level%fields(2)%fe)) &
+  CALL oft_abort("Incorrect Grad FE type","thickcurr_grad_proj_setup",__FILE__)
+mesh=>hgrad_rep%mesh
+level=thickcurr_ML_hcurl_grad%level
+!---Fixed scalar DOFs: boundary and higher order DOFs removed in vacuum
+ALLOCATE(tc_lop_fixed(hgrad_rep%ne))
+DO j=1,hgrad_rep%ne
+  tc_lop_fixed(j)=hgrad_rep%global%gbe(j).OR.tc_bcs(level)%grad_vac(j)
+END DO
+!---Construct conductivity weighted Laplacian (same quadrature as mass matrix)
 NULLIFY(tc_lop)
-CALL lag_rep%mat_create(tc_lop)
-!$omp parallel private(j_lag,gop,lop,det,curved,goptmp,m,vol,jc,jr,sigma_m)
-ALLOCATE(j_lag(lag_rep%nce),gop(3,lag_rep%nce),lop(lag_rep%nce,lag_rep%nce))
+CALL hgrad_rep%mat_create(tc_lop)
+!$omp parallel private(j_grad,gop,lop,det,curved,goptmp,m,vol,jc,jr,sigma_m)
+ALLOCATE(j_grad(hgrad_rep%nce),gop(3,hgrad_rep%nce),lop(hgrad_rep%nce,hgrad_rep%nce))
 !$omp do schedule(guided)
 DO i=1,mesh%nc
   curved=cell_is_curved(mesh,i)
   sigma_m=mu0/tc_eta_reg(mesh%reg(i))
   lop=0.d0
-  DO m=1,lag_rep%quad%np
-    IF(curved.OR.m==1)CALL mesh%jacobian(i,lag_rep%quad%pts(:,m),goptmp,vol)
-    det=vol*lag_rep%quad%wts(m)
-    CALL oft_lag_geval_all(lag_rep,i,lag_rep%quad%pts(:,m),gop,goptmp)
-    DO jr=1,lag_rep%nce
-      DO jc=1,lag_rep%nce
+  DO m=1,hcurl_rep%quad%np
+    IF(curved.OR.m==1)CALL mesh%jacobian(i,hcurl_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*hcurl_rep%quad%wts(m)
+    CALL oft_h1_geval_all(hgrad_rep,i,hcurl_rep%quad%pts(:,m),gop,goptmp)
+    DO jr=1,hgrad_rep%nce
+      DO jc=1,hgrad_rep%nce
         lop(jr,jc) = lop(jr,jc) + sigma_m*DOT_PRODUCT(gop(:,jr),gop(:,jc))*det
       END DO
     END DO
   END DO
-  CALL lag_rep%ncdofs(i,j_lag)
-  DO jr=1,lag_rep%nce
-    IF(lag_rep%global%gbe(j_lag(jr)))THEN
+  CALL hgrad_rep%ncdofs(i,j_grad)
+  DO jr=1,hgrad_rep%nce
+    IF(tc_lop_fixed(j_grad(jr)))THEN
       lop(jr,:)=0.d0
       lop(:,jr)=0.d0
     END IF
   END DO
-  CALL tc_lop%atomic_add_values(j_lag,j_lag,lop,lag_rep%nce,lag_rep%nce)
+  CALL tc_lop%atomic_add_values(j_grad,j_grad,lop,hgrad_rep%nce,hgrad_rep%nce)
 END DO
-DEALLOCATE(j_lag,gop,lop)
+DEALLOCATE(j_grad,gop,lop)
 !$omp end parallel
-ALLOCATE(lop(1,1),j_lag(1))
-lop(1,1)=1.d0
-DO i=1,lag_rep%nbe
-  jr=lag_rep%lbe(i)
-  IF(.NOT.lag_rep%global%gbe(jr))CYCLE
-  IF(.NOT.lag_rep%linkage%leo(i))CYCLE
-  j_lag=jr
-  CALL tc_lop%add_values(j_lag,j_lag,lop,1,1)
-END DO
-DEALLOCATE(j_lag,lop)
-CALL lag_rep%vec_create(vtmp)
+CALL thickcurr_add_bc_diag(tc_lop,hgrad_rep%ne,hgrad_rep%linkage,tc_lop_fixed,1.d0)
+CALL hgrad_rep%vec_create(vtmp)
 CALL tc_lop%assemble(vtmp)
 CALL vtmp%delete
 DEALLOCATE(vtmp)
 !---Setup solver
 CALL create_cg_solver(tc_lop_solver)
 tc_lop_solver%A=>tc_lop
-tc_lop_solver%its=2000
+tc_lop_solver%its=5000
 CALL create_diag_pre(tc_lop_solver%pre)
 tc_proj_initialized=.TRUE.
 DEBUG_STACK_POP
 END SUBROUTINE thickcurr_grad_proj_setup
 !------------------------------------------------------------------------------
+!> Apply the transposed discrete gradient, \f$ g = G^T y \f$
+!!
+!! Vertex components are computed from the lowest order H(Curl) DOFs and higher
+!! order components from the Grad(H^1) DOFs. Shared DOFs are only included by
+!! their owning processor before the result is summed.
+!------------------------------------------------------------------------------
+SUBROUTINE thickcurr_gradtp(y,g)
+CLASS(oft_vector), INTENT(inout) :: y !< H(Curl) + Grad(H^1) dual vector
+CLASS(oft_vector), INTENT(inout) :: g !< Grad(H^1) result
+INTEGER(i4) :: i,j,k
+INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: emap,gmap
+REAL(r8), POINTER, DIMENSION(:) :: ycurl,ygrad,gloc
+CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
+CLASS(oft_h1_fem), POINTER :: hgrad_rep
+CLASS(oft_mesh), POINTER :: mesh
+DEBUG_STACK_PUSH
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields(1)%fe)) &
+  CALL oft_abort("Incorrect Curl FE type","thickcurr_gradtp",__FILE__)
+IF(.NOT.oft_3D_h1_cast(hgrad_rep,thickcurr_ML_hcurl_grad%current_level%fields(2)%fe)) &
+  CALL oft_abort("Incorrect Grad FE type","thickcurr_gradtp",__FILE__)
+mesh=>hgrad_rep%mesh
+NULLIFY(ycurl,ygrad,gloc)
+CALL y%get_local(ycurl,1)
+CALL y%get_local(ygrad,2)
+CALL g%set(0.d0)
+CALL g%get_local(gloc)
+gloc=0.d0
+!---Vertex part from lowest order edge DOFs
+ALLOCATE(emap(mesh%ne))
+CALL get_inverse_map(mesh%lbe,mesh%nbe,emap,mesh%ne)
+!$omp parallel do private(j,k)
+DO i=1,mesh%np
+  DO j=mesh%kpe(i),mesh%kpe(i+1)-1
+    k=mesh%lpe(j)
+    IF(.NOT.mesh%fullmesh)THEN
+      IF(emap(k)>0)THEN
+        IF(.NOT.mesh%estitch%leo(emap(k)))CYCLE
+      END IF
+    END IF
+    IF(mesh%global%le(k)<0)THEN
+      gloc(i)=gloc(i)+ycurl((k-1)*hcurl_rep%gstruct(2)+1)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+    ELSE
+      gloc(i)=gloc(i)-ycurl((k-1)*hcurl_rep%gstruct(2)+1)*(1-2*MIN(1,ABS(mesh%le(1,k)-i)))
+    END IF
+  END DO
+END DO
+DEALLOCATE(emap)
+!---Higher order part (identity)
+ALLOCATE(gmap(hgrad_rep%ne))
+CALL get_inverse_map(hgrad_rep%linkage%lbe,hgrad_rep%linkage%nbe,gmap,hgrad_rep%ne)
+!$omp parallel do
+DO i=mesh%np+1,hgrad_rep%ne
+  IF(gmap(i)>0)THEN
+    IF(.NOT.hgrad_rep%linkage%leo(gmap(i)))CYCLE
+  END IF
+  gloc(i)=gloc(i)+ygrad(i)
+END DO
+DEALLOCATE(gmap)
+CALL g%restore_local(gloc,add=.TRUE.)
+DEALLOCATE(ycurl,ygrad,gloc)
+DEBUG_STACK_POP
+END SUBROUTINE thickcurr_gradtp
+!------------------------------------------------------------------------------
 !> Remove gradient components from a vector potential, \f$ x = P x \f$
 !------------------------------------------------------------------------------
 SUBROUTINE thickcurr_grad_proj(x)
-CLASS(oft_vector), INTENT(inout) :: x !< Vector potential (boundary DOFs must be zero)
+CLASS(oft_vector), INTENT(inout) :: x !< Vector potential (constrained DOFs must be zero)
+REAL(r8), POINTER, DIMENSION(:) :: vals
 CLASS(oft_vector), POINTER :: tmp,g,u
 LOGICAL :: pm_save
 DEBUG_STACK_PUSH
 CALL x%new(tmp)
-CALL tc_ML_lag1%vec_create(g)
-CALL tc_ML_lag1%vec_create(u)
+CALL thickcurr_ML_H1grad%vec_create(g)
+CALL thickcurr_ML_H1grad%vec_create(u)
 !---Weighted weak divergence, G^T M x
 CALL tc_mop%apply(x,tmp)
-CALL g%set(0.d0)
-CALL hcurl_gradtp(thickcurr_ML_hcurl%current_level,tmp,g)
-CALL tc_lag_zerob%apply(g)
+CALL thickcurr_gradtp(tmp,g)
+NULLIFY(vals)
+CALL g%get_local(vals)
+WHERE(tc_lop_fixed)vals=0.d0
+CALL g%restore_local(vals)
+DEALLOCATE(vals)
 !---Solve for gradient correction
 CALL u%set(0.d0)
 tc_lop_solver%atol=MAX(1.d-14,1.d-12*SQRT(g%dot(g)))
@@ -903,7 +1168,7 @@ CALL tc_lop_solver%apply(u,g)
 oft_env%pm=pm_save
 !---Remove gradient, x = x - G u
 CALL u%scale(-1.d0)
-CALL hcurl_grad(thickcurr_ML_hcurl%current_level,u,x)
+CALL hcurl_grad_grad(thickcurr_ML_hcurl_grad%current_level,u,x)
 CALL thickcurr_zerob(x)
 CALL tmp%delete
 CALL g%delete
@@ -932,8 +1197,7 @@ END SUBROUTINE eig_amat_apply
 !------------------------------------------------------------------------------
 !> Compute the slowest decaying eigenmodes (L/R time constants) of the system
 !!
-!! Eigenmodes satisfy \f$ K x = \lambda M_{\sigma} x \f$ (with \f$ \hat{n} \times x = 0 \f$
-!! on the boundary), with decay time \f$ \tau = 1/\lambda \f$. To exclude the gradient
+!! Eigenmodes satisfy \f$ K x = \lambda M_{\sigma} x \f$ (with constrained DOFs removed), with decay time \f$ \tau = 1/\lambda \f$. To exclude the gradient
 !! null space and target the slowest modes, the equivalent problem
 !! \f$ M_{\sigma} P x = \mu (M_{\sigma} + \theta \Delta t K) x \f$ is solved for the
 !! largest \f$ \mu = 1 / (1 + \theta \Delta t \lambda) \f$ using ARPACK, where \f$ P \f$
@@ -981,7 +1245,7 @@ arsolver%ncv=MAX(2*nev+1,20)
 arsolver%its=1000
 arsolver%tol=1.d-8
 IF(PRESENT(tol))arsolver%tol=tol
-CALL thickcurr_ML_hcurl%vec_create(u)
+CALL thickcurr_ML_hcurl_grad%vec_create(u)
 CALL u%set(1.d0)
 IF(oft_env%head_proc)THEN
   WRITE(*,'(A)')'============================'
@@ -1019,7 +1283,7 @@ END IF
 !------------------------------------------------------------------------------
 IF(PRESENT(vecs).OR.do_plot)THEN
   IF(do_plot)THEN
-    IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl%current_level)) &
+    IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields(1)%fe)) &
       CALL oft_abort("Invalid Curl FE object","thickcurr_eigs",__FILE__)
     CALL xdmf%setup("thickcurr_eigs")
     CALL hcurl_rep%mesh%setup_io(xdmf,thickcurr_plot_order())
@@ -1032,7 +1296,7 @@ IF(PRESENT(vecs).OR.do_plot)THEN
     CALL thickcurr_diag(u,energy)
     IF(energy>0.d0)CALL u%scale(1.d0/SQRT(energy))
     IF(PRESENT(vecs))THEN
-      IF(.NOT.ASSOCIATED(vecs(i)%f))CALL thickcurr_ML_hcurl%vec_create(vecs(i)%f)
+      IF(.NOT.ASSOCIATED(vecs(i)%f))CALL thickcurr_ML_hcurl_grad%vec_create(vecs(i)%f)
       CALL vecs(i)%f%add(0.d0,1.d0,u)
     END IF
     IF(do_plot)THEN
@@ -1069,7 +1333,7 @@ END FUNCTION thickcurr_plot_order
 !!
 !! The magnetic field is \f$ B = \nabla \times A \f$ and the current density is
 !! computed from the weak curl of \f$ B \f$, \f$ \mu_0 J = M^{-1} K A \f$, where
-!! \f$ M \f$ is the (unweighted) H(Curl) mass matrix.
+!! \f$ M \f$ is the (unweighted) H(Curl) + Grad(H^1) mass matrix.
 !!
 !! If the Lagrange FE representation (@ref thick_wall::thickcurr_ml_lagrange
 !! "thickcurr_ML_lagrange" and @ref thick_wall::thickcurr_ml_vlagrange
@@ -1083,19 +1347,19 @@ TYPE(xdmf_plot_file), INTENT(in) :: xdmf !< Plot file object
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: suffix !< Suffix for field names (optional)
 CHARACTER(LEN=:), ALLOCATABLE :: tag
 CLASS(oft_vector), POINTER :: jvec,tmp
-TYPE(oft_hcurl_rinterp), TARGET :: Afield,Jfield
-TYPE(oft_hcurl_cinterp), TARGET :: Bfield
+TYPE(oft_hcurl_grad_rinterp), TARGET :: Afield,Jfield
+TYPE(oft_hcurl_grad_cinterp), TARGET :: Bfield
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 LOGICAL :: pm_save
 DEBUG_STACK_PUSH
-IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl%current_level)) &
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields(1)%fe)) &
   CALL oft_abort("Invalid Curl FE object","thickcurr_save_field",__FILE__)
 tag=''
 IF(PRESENT(suffix))tag=suffix
 !---Compute current density from weak curl of B
 IF(.NOT.ASSOCIATED(tc_hcurl_minv))THEN
   NULLIFY(tc_hcurl_mop)
-  CALL oft_hcurl_getmop(hcurl_rep,tc_hcurl_mop,'none')
+  CALL hcurl_grad_getmop(thickcurr_ML_hcurl_grad%current_level,tc_hcurl_mop,'none')
   CALL create_cg_solver(tc_hcurl_minv)
   tc_hcurl_minv%A=>tc_hcurl_mop
   tc_hcurl_minv%its=-2
@@ -1111,11 +1375,11 @@ CALL tc_hcurl_minv%apply(jvec,tmp)
 oft_env%pm=pm_save
 !---Save fields
 Afield%u=>a
-CALL Afield%setup(hcurl_rep)
+CALL Afield%setup(thickcurr_ML_hcurl_grad%current_level)
 Bfield%u=>a
-CALL Bfield%setup(hcurl_rep)
+CALL Bfield%setup(thickcurr_ML_hcurl_grad%current_level)
 Jfield%u=>jvec
-CALL Jfield%setup(hcurl_rep)
+CALL Jfield%setup(thickcurr_ML_hcurl_grad%current_level)
 CALL save_interp(Afield,'A'//tag)
 CALL save_interp(Bfield,'B'//tag)
 CALL save_interp(Jfield,'J'//tag)
@@ -1131,7 +1395,7 @@ CONTAINS
 !> Save an interpolated vector field at vertices or cell centers
 !------------------------------------------------------------------------------
 SUBROUTINE save_interp(field,name)
-CLASS(oft_hcurl_rinterp), INTENT(inout) :: field !< Field interpolator
+CLASS(oft_hcurl_grad_rinterp), INTENT(inout) :: field !< Field interpolator
 CHARACTER(LEN=*), INTENT(in) :: name !< Name of field in plot file
 INTEGER(i4) :: i
 REAL(r8), POINTER, DIMENSION(:,:) :: bvout
@@ -1200,14 +1464,14 @@ CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 TYPE(xdmf_plot_file) :: xdmf
 NAMELIST/thickcurr_plot_options/rst_start,rst_end
 DEBUG_STACK_PUSH
-IF(.NOT.ASSOCIATED(thickcurr_ML_hcurl))CALL oft_abort("FE representation not set", &
+IF(.NOT.ASSOCIATED(thickcurr_ML_hcurl_grad))CALL oft_abort("FE representation not set", &
   "thickcurr_plot",__FILE__)
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,thickcurr_plot_options,IOSTAT=ierr)
 CLOSE(io_unit)
 IF(ierr>0)CALL oft_abort('Error parsing ThickCurr plot options in input file.','thickcurr_plot',__FILE__)
 IF(.NOT.tc_initialized)CALL thickcurr_setup
-IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl%current_level)) &
+IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields(1)%fe)) &
   CALL oft_abort("Invalid Curl FE object","thickcurr_plot",__FILE__)
 mesh=>hcurl_rep%mesh
 IF(oft_env%head_proc)THEN
@@ -1228,7 +1492,7 @@ IF(thickcurr_plot_order()==1)THEN
   DEALLOCATE(eta_cell)
 END IF
 !---Loop over restart files
-CALL thickcurr_ML_hcurl%vec_create(u)
+CALL thickcurr_ML_hcurl_grad%vec_create(u)
 DO i=rst_start,rst_end,tc_rst_freq
   rst_file=thickcurr_rst_name(i)
   IF(.NOT.oft_file_exist(TRIM(rst_file)))EXIT
