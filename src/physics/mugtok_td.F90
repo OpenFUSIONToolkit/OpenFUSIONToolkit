@@ -23,7 +23,7 @@ USE mhd_utils, ONLY: mu0
 USE oft_gs, ONLY: gs_epsilon, gs_equil, gs_factory, gs_update_bounds, gs_test_bounds, flux_func, build_dels
 USE oft_gs_td, ONLY: oft_tmaker_td_mfop, build_vac_op, apply_rhs
 USE oft_mesh_local_util, ONLY: mesh_local_findedge
-USE xmhd_2d, ONLY: oft_xmhd_2d_sim, build_approx_jacobian
+USE xmhd_2d, ONLY: oft_xmhd_2d_sim, build_approx_jacobian_incomp
 USE oft_stitching, ONLY: seam_list
 IMPLICIT NONE
 #include "local.h"
@@ -1159,7 +1159,8 @@ end select
 
 !Populate MUG and TokaMaker Jacobian matrices
 self%mug%jac_dt = self%nlfun%dt
-CALL build_approx_jacobian(self%mug, a)
+! MUGTok only supports incompressible flow (enforced in setup_mugtok_td)
+CALL build_approx_jacobian_incomp(self%mug, a)
 IF (PRESENT(update_vac)) THEN
     IF (update_vac) CALL build_vac_op(self%tkmr,self%tkmr%vac_op)
 ELSE
