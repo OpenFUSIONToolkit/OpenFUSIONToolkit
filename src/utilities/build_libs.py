@@ -2016,7 +2016,6 @@ group.add_argument("--mpi_use_headers", action="store_true", default=False, help
 #
 group = parser.add_argument_group("HDF5", "HDF5 package options")
 group.add_argument("--hdf5_cc", default=None, type=str, help="HDF5 C compiler wrapper")
-group.add_argument("--hdf5_cxx", default=None, type=str, help="HDF5 C++ compiler wrapper")
 group.add_argument("--hdf5_fc", default=None, type=str, help="HDF5 FORTRAN compiler wrapper")
 group.add_argument("--hdf5_parallel", action="store_true", default=False, help="Use parallel HDF5 interface?")
 group.add_argument("--hdf5_cmake_build", action="store_true", default=False, help="Use CMake build instead of legacy?")

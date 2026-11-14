@@ -1289,10 +1289,7 @@ DEBUG_STACK_PUSH
 !---Basic preconditioner setup
 CALL PCSetType(pc,PCLU,ierr)
 !---Set solver package
-!CALL set_solver_package(pc,PETSC_DEF_LU,ierr)
-!CALL set_solver_package(pc,MATSOLVERSUPERLU_DIST,ierr)
-!CALL set_solver_package(pc,MATSOLVERMUMPS,ierr)
-CALL PCFactorSetMatSolverType(pc,MATSOLVERMUMPS,ierr)
+CALL set_solver_package(pc,PETSC_DEF_LU,ierr)
 CALL PCFactorSetUpMatSolverType(pc,ierr)
 CALL PCFactorGetMatrix(pc,fac_mat,ierr)
 DEBUG_STACK_POP
@@ -1309,14 +1306,6 @@ INTEGER(i4) :: ierr
 DEBUG_STACK_PUSH
 !---Basic preconditioner setup
 CALL PCSetType(pc,PCILU,ierr)
-!CALL PCFactorSetLevels(pc,1,ierr)
-!CALL PCFactorReorderForNonzeroDiagonal(pc,1.d-8,ierr)
-!CALL PCFactorSetAllowDiagonalFill(pc,PETSC_TRUE,ierr)
-!CALL PCFactorSetMatSolverType(pc,MATSOLVERSUPERLU,ierr)
-!CALL PCFactorSetDropTolerance(pc,1.d-6,0.1d0,maxrowcount)
-!CALL PCFactorSetShiftType(pc,MAT_SHIFT_NONZERO,ierr)
-!CALL PCFactorSetLevels(pc,0,ierr)
-!CALL PCFactorSetDropTolerance(pc,dt,dtcol,maxrowcount, ierr)
 DEBUG_STACK_POP
 end subroutine iluprecond_setup
 !---------------------------------------------------------------------------------
@@ -1458,7 +1447,6 @@ END IF
 !---
 IF((self%full_node>=1).AND.(oft_env%ppn>=1))THEN
   IF(self%n_local>1)CALL oft_abort('More than one block per node not supported.','asprecond_setup',__FILE__)
-  !WRITE(*,*)oft_env%rank,'Using full node for Additive Schwarz',node_num
   CALL PCSetType(pc,PCGASM,ierr)
   CALL PCGASMSetOverlap(pc,self%overlap,ierr)
 ELSE
@@ -1471,33 +1459,28 @@ IF(self%n_local==-1)THEN
     CALL oft_abort('"A" is not a PETSc matrix object.','asprecond_setup',__FILE__)
   n_local=mat%ni
   IF((self%full_node>=1).AND.(oft_env%ppn>=1))THEN
-    IF(.FALSE.)THEN
-      CALL PCGASMSetTotalSubdomains(pc,oft_env%nnodes,ierr)
-    ELSE
-      ALLOCATE(is_parts(n_local))
-      CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
-      DO i=1,mat%ni
-        loc_end = mat%i_map(i)%nslice
-        IF(self%full_node>1)THEN
-          CALL MPI_Comm_split(oft_env%comm,oft_env%rank/(self%full_node*oft_env%ppn),oft_env%rank,comm_tmp,ierr)
-          CALL ISCreateStride(comm_tmp,loc_end,loc_start,1,is_parts(i),ierr)
-          CALL MPI_Comm_free(comm_tmp,ierr)
-        ELSE
-          CALL ISCreateStride(oft_env%node_comm,loc_end,loc_start,1,is_parts(i),ierr)
-        END IF
-        loc_start=loc_start+loc_end
-      END DO
+    ALLOCATE(is_parts(n_local))
+    CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
+    DO i=1,mat%ni
+      loc_end = mat%i_map(i)%nslice
+      IF(self%full_node>1)THEN
+        CALL MPI_Comm_split(oft_env%comm,oft_env%rank/(self%full_node*oft_env%ppn),oft_env%rank,comm_tmp,ierr)
+        CALL ISCreateStride(comm_tmp,loc_end,loc_start,1,is_parts(i),ierr)
+        CALL MPI_Comm_free(comm_tmp,ierr)
+      ELSE
+        CALL ISCreateStride(oft_env%node_comm,loc_end,loc_start,1,is_parts(i),ierr)
+      END IF
+      loc_start=loc_start+loc_end
+    END DO
 #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
-      CALL PCGASMSetSubdomains(pc,n_local,is_parts,PETSC_NULL_IS,ierr)
+    CALL PCGASMSetSubdomains(pc,n_local,is_parts,PETSC_NULL_IS,ierr)
 #else
-      CALL PCGASMSetSubdomains(pc,n_local,is_parts,[PETSC_NULL_IS],ierr)
-      DO i=1,n_local
-        CALL ISDestroy(is_parts(i),ierr)
-      END DO
+    CALL PCGASMSetSubdomains(pc,n_local,is_parts,[PETSC_NULL_IS],ierr)
+    DO i=1,n_local
+      CALL ISDestroy(is_parts(i),ierr)
+    END DO
 #endif
-      !IF(ierr/=0)WRITE(*,*)oft_env%rank,'Bad SetSubdomains',ierr
-      DEALLOCATE(is_parts)
-    END IF
+    DEALLOCATE(is_parts)
   ELSE
     ALLOCATE(is_parts(n_local))
     CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
@@ -1555,37 +1538,29 @@ ELSE IF(self%n_local>=1)THEN
     DEALLOCATE(is_parts)
   ELSE
     IF((self%full_node>=1).AND.(oft_env%ppn>=1))THEN
-      IF(.FALSE.)THEN
-        !CALL PCGASMSetTotalSubdomains(pc,oft_env%nnodes,ierr)
-        ! Do nothing
+      ALLOCATE(is_parts(n_local))
+      CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
+      IF(self%full_node>1)THEN
+        CALL MPI_Comm_split(oft_env%comm,oft_env%rank/(self%full_node*oft_env%ppn),oft_env%rank,comm_tmp,ierr)
+        CALL ISCreateStride(comm_tmp,loc_end-loc_start,loc_start,1,is_parts(1),ierr)
+        CALL MPI_Comm_free(comm_tmp,ierr)
       ELSE
-        ALLOCATE(is_parts(n_local))
-        CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
-        IF(self%full_node>1)THEN
-          CALL MPI_Comm_split(oft_env%comm,oft_env%rank/(self%full_node*oft_env%ppn),oft_env%rank,comm_tmp,ierr)
-          CALL ISCreateStride(comm_tmp,loc_end-loc_start,loc_start,1,is_parts(1),ierr)
-          CALL MPI_Comm_free(comm_tmp,ierr)
-        ELSE
-          CALL ISCreateStride(oft_env%node_comm,loc_end-loc_start,loc_start,1,is_parts(1),ierr)
-        END IF
-        ALLOCATE(is_outer(n_local))
-        DO i=1,n_local
-          CALL ISDuplicate(is_parts(i),is_outer(i),ierr)
-        END DO
-        CALL MatIncreaseOverlapSplit(mat%M,n_local,is_outer,self%overlap,ierr)
-#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
-        !CALL PCGASMSetSubdomains(pc,n_local,is_parts,PETSC_NULL_IS,ierr)
-        CALL PCGASMSetSubdomains(pc,n_local,is_parts,is_outer,ierr)
-#else
-        !CALL PCGASMSetSubdomains(pc,n_local,is_parts,[PETSC_NULL_IS],ierr)
-        CALL PCGASMSetSubdomains(pc,n_local,is_parts,is_outer,ierr)
-        DO i=1,n_local
-          CALL ISDestroy(is_parts(i),ierr)
-        END DO
-#endif
-        !IF(ierr/=0)WRITE(*,*)oft_env%rank,'Bad SetSubdomains',ierr
-        DEALLOCATE(is_parts,is_outer)
+        CALL ISCreateStride(oft_env%node_comm,loc_end-loc_start,loc_start,1,is_parts(1),ierr)
       END IF
+      ALLOCATE(is_outer(n_local))
+      DO i=1,n_local
+        CALL ISDuplicate(is_parts(i),is_outer(i),ierr)
+      END DO
+      CALL MatIncreaseOverlapSplit(mat%M,n_local,is_outer,self%overlap,ierr)
+#if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
+      CALL PCGASMSetSubdomains(pc,n_local,is_parts,is_outer,ierr)
+#else
+      CALL PCGASMSetSubdomains(pc,n_local,is_parts,is_outer,ierr)
+      DO i=1,n_local
+        CALL ISDestroy(is_parts(i),ierr)
+      END DO
+#endif
+      DEALLOCATE(is_parts,is_outer)
     ELSE
       ALLOCATE(is_parts(n_local))
       CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
@@ -1602,25 +1577,14 @@ END IF
 !---
 NULLIFY(ksp)
 CALL PCSetUp(pc,ierr)
-!CALL PCView(pc,PETSC_VIEWER_STDOUT_WORLD,ierr)
 #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<23)
 ALLOCATE(ksp(n_local))
 #endif
 IF((self%full_node>=1).AND.(oft_env%ppn>=1))THEN
   CALL PCGASMGetSubKSP(pc,n_local,PETSC_NULL_INTEGER,ksp,ierr)
-  !CALL KSPGetOperators(ksp(1), sub_mat, PETSC_NULL_MAT,ierr)
-  !CALL MatGetSize(sub_mat, loc_start, loc_end, ierr)
-  !WRITE(*,*)'CHK GASM',oft_env%rank,loc_start,loc_end
 ELSE
   CALL PCASMGetSubKSP(pc,n_local,PETSC_NULL_INTEGER,ksp,ierr)
-  !ALLOCATE(is_parts(n_local),is_outer(n_local))
-  !CALL PCASMGetLocalSubdomains(pc,n_local,is_parts,is_outer,ierr)
-  !CALL ISGetSize(is_parts(1),loc_start,ierr)
-  !CALL ISGetSize(is_outer(1),loc_end,ierr)
-  !DEALLOCATE(is_parts,is_outer)
-  !WRITE(*,*)'CHK ASM',oft_env%rank,loc_start,loc_end
 END IF
-!WRITE(*,*)oft_env%rank,'PC Setup',n_local
 DO i=1,n_local
   IF(ASSOCIATED(pre))THEN
     CALL pre%setup_ksp(ksp(i))
@@ -1630,7 +1594,6 @@ DO i=1,n_local
     CALL create_lu_pc(self%sub_factor,pc_local)
   END IF
 END DO
-!WRITE(*,*)oft_env%rank,'Setup done'
 #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR>23)
 IF((self%full_node>=1).AND.(oft_env%ppn>=1))THEN
   CALL PCGASMRestoreSubKSP(pc,n_local,PETSC_NULL_INTEGER,ksp,ierr)
@@ -1761,8 +1724,7 @@ IF(factor_req)THEN
     CASE('umfpack')
       CALL set_solver_package(pc,MATSOLVERUMFPACK,ierr)
     CASE DEFAULT
-      WRITE(*,*)self%package,oft_env%rank
-      CALL oft_abort("Unknown solver package.","create_lu_pc",__FILE__)
+      CALL oft_abort("Unknown solver package: "//TRIM(self%package),"create_lu_pc",__FILE__)
   END SELECT
 END IF
 DEBUG_STACK_POP

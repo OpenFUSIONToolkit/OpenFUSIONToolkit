@@ -113,7 +113,7 @@ CALL ML_oft_blagrange%vec_create(v)
 
 
 !---Project n initial condition onto scalar Lagrange basis
-!field_init%func=>dens_harris
+field_init%func=>dens_harris
 field_init%mesh=>mesh
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
@@ -174,7 +174,7 @@ ELSE
 END IF
 
 !---Project psi initial condition onto scalar Lagrange basis
-!field_init%func=>psi_harris_eq
+field_init%func=>psi_harris_eq
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
@@ -185,7 +185,7 @@ IF(linear)THEN
 ELSE
     CALL mhd_sim%u%restore_local(vec_vals,6)
 END IF
-!field_init%func=>psi_harris_pert
+field_init%func=>psi_harris_pert
 CALL oft_blag_project(ML_oft_blagrange%current_level,field_init,v)
 CALL u%set(0.d0)
 CALL minv%apply(u,v)
@@ -248,7 +248,7 @@ END IF
 CALL xmhd_2d_plot(mhd_sim)
 !---Finalize enviroment
 CALL oft_finalize
-!CONTAINS
+CONTAINS
 
 !! To set the initial conditions we define a set of functions
 !!
@@ -259,22 +259,22 @@ CALL oft_finalize
 !! The perturbation is then given by
 !! \f[ \delta B = -\frac{\pi}{L_z} cos(2 \pi x / L_x) sin(\pi z / L_z) \hat{x} + \frac{2 \pi}{L_x} sin(2 \pi x / L_x) cos(\pi z / L_z) \hat{x} \f]
 
-!SUBROUTINE dens_harris(pt, val)
-!REAL(r8), INTENT(in) :: pt(3)
-!REAL(r8), INTENT(out) :: val
-!val = den_inf + 1/((COSH(pt(2)/lam_n))**2)
-!END SUBROUTINE dens_harris
+SUBROUTINE dens_harris(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = den_inf + 1/((COSH(pt(2)/lam_n))**2)
+END SUBROUTINE dens_harris
 
-!SUBROUTINE psi_harris_eq(pt, val)
-!REAL(r8), INTENT(in) :: pt(3)
-!REAL(r8), INTENT(out) :: val
-!val = -lam_b*LOG(COSH(pt(2)/lam_b))
-!END SUBROUTINE psi_harris_eq
+SUBROUTINE psi_harris_eq(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = -lam_b*LOG(COSH(pt(2)/lam_b))
+END SUBROUTINE psi_harris_eq
 
-!SUBROUTINE psi_harris_pert(pt, val)
-!REAL(r8), INTENT(in) :: pt(3)
-!REAL(r8), INTENT(out) :: val
-!val = - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
-!END SUBROUTINE psi_harris_pert
+SUBROUTINE psi_harris_pert(pt, val)
+REAL(r8), INTENT(in) :: pt(3)
+REAL(r8), INTENT(out) :: val
+val = - delta*COS(2*pi*pt(1)/L_x)*COS(pi*pt(2)/L_z)
+END SUBROUTINE psi_harris_pert
 
 END PROGRAM xmhd_tearing

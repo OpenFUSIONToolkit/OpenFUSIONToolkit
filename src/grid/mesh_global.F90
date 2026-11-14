@@ -334,8 +334,7 @@ if(oft_env%rank==0)then
     zrange = (zmax-zmin)/REAL(oft_env%nnodes,8)
     ! IF(MOD(mesh%nc,oft_env%nnodes)/=0)CALL oft_abort( &
     !   "Partition count invalid for spatial partitioning",'mesh_global_partition',__FILE__)
-    ALLOCATE(pflag(self%nc),part_sort(self%nc),isort(self%nc))
-    pflag=oft_env%nnodes+1
+    ALLOCATE(part_sort(self%nc),isort(self%nc))
     isort=[(i,i=1,self%nc)]
     !$omp parallel do private(k)
     DO i=1,self%nc
@@ -351,33 +350,14 @@ if(oft_env%rank==0)then
       IF(i>REAL(self%nc,8)*REAL(k,8)/REAL(oft_env%nnodes,8))k=k+1
       cpart(isort(i))=k
     END DO
-    !
-    ! ALLOCATE(pflag(self%np),part_sort(self%np),isort(self%np))
-    ! pflag=oft_env%nnodes+1
-    ! isort=[(i,i=1,self%np)]
-    ! part_sort=self%r(part_meth-1,:)
-    ! CALL sort_array(part_sort,isort,self%np)
-    ! k=1
-    ! DO i=1,self%np
-    !   IF(i>REAL(self%np,8)*REAL(k,8)/REAL(oft_env%nnodes,8))k=k+1
-    !   pflag(isort(i))=k
-    ! END DO
-    ! DO i=1,self%nc
-    !   cpart(i)=oft_env%nnodes+1
-    !   DO k=1,self%cell_np
-    !     cpart(i)=MIN(cpart(i),pflag(self%lc(k,i)))
-    !   END DO
-    !   IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(*,*)'cBAD',i,cpart(i)
-    ! END DO
-    DEALLOCATE(pflag,part_sort,isort)
+    DEALLOCATE(part_sort,isort)
   elseif((part_meth>=5).AND.(part_meth<=7))THEN ! Toroidal spatial partitioning
     zmin = -pi
     zmax = pi
     zrange = (zmax-zmin)/REAL(oft_env%nnodes,8)
     ! IF(MOD(mesh%nc,oft_env%nnodes)/=0)CALL oft_abort( &
     ! 'Partition count invalid for spatial partitioning','mesh_global_partition',__FILE__)
-    ALLOCATE(pflag(self%nc),part_sort(self%nc),isort(self%nc))
-    pflag=oft_env%nnodes+1
+    ALLOCATE(part_sort(self%nc),isort(self%nc))
     isort=[(i,i=1,self%nc)]
     !$omp parallel do private(k,pt)
     DO i=1,self%nc
@@ -400,21 +380,7 @@ if(oft_env%rank==0)then
       IF(i>REAL(self%nc,8)*REAL(k,8)/REAL(oft_env%nnodes,8))k=k+1
       cpart(isort(i))=k
     END DO
-    ! k=1
-    ! DO i=1,self%np
-    !   IF(i>REAL(k*self%np,8)/REAL(oft_env%nnodes,8))THEN
-    !     k=k+1
-    !   END IF
-    !   pflag(isort(i))=k
-    ! END DO
-    ! DO i=1,self%nc
-    !   cpart(i)=oft_env%nnodes+1
-    !   DO k=1,self%cell_np
-    !     cpart(i)=MIN(cpart(i),pflag(self%lc(k,i)))
-    !   END DO
-    !   IF(cpart(i)<1.OR.cpart(i)>oft_env%nnodes)WRITE(*,*)'cBAD',i,cpart(i)
-    ! END DO
-    DEALLOCATE(pflag,part_sort,isort)
+    DEALLOCATE(part_sort,isort)
   else
     CALL oft_abort('Invalid partitioning method', 'mesh_global_partition', __FILE__)
   endif

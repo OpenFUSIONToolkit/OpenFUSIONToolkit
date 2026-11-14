@@ -1773,9 +1773,10 @@ ELSE
 END IF
 END SUBROUTINE lagrange_vector_repack
 !------------------------------------------------------------------------------
-!> Repack Lagrange vector field, accounting for periodicity
+!> Transform the columns of local vector matrices for rotated periodic boundaries
 !!
-!! Maps vectors from (x,y,z)->(n,t1,t2) on rotated periodic boundaries
+!! Right-multiplies the vector components of each boundary column by the periodic
+!! rotation, so the matrix acts on (n,t1,t2) weights for those elements
 !------------------------------------------------------------------------------
 SUBROUTINE lagrange_vector_packcols(fe_rep,mtmp,elems)
 CLASS(oft_afem_type), TARGET, INTENT(inout) :: fe_rep !< Lagrange FE obj
@@ -1809,9 +1810,9 @@ DO j=1,self%nce
 END DO
 END SUBROUTINE lagrange_vector_packcols
 !------------------------------------------------------------------------------
-!> Repack Lagrange vector field, accounting for periodicity
+!> Transform the rows of local vector matrices for rotated periodic boundaries
 !!
-!! Maps vectors from (x,y,z)->(n,t1,t2) on rotated periodic boundaries
+!! Projects the vector components of each boundary row onto (n,t1,t2)
 !------------------------------------------------------------------------------
 SUBROUTINE lagrange_vector_packrows(fe_rep,mtmp,elems)
 CLASS(oft_afem_type), TARGET, INTENT(inout) :: fe_rep !< Lagrange FE obj
@@ -1845,9 +1846,10 @@ DO j=1,self%nce
 END DO
 END SUBROUTINE lagrange_vector_packrows
 !------------------------------------------------------------------------------
-!> Repack Lagrange vector field, accounting for periodicity
+!> Transform the rows and columns of a local 3x3 block vector matrix for rotated periodic boundaries
 !!
-!! Maps vectors from (x,y,z)->(n,t1,t2) on rotated periodic boundaries
+!! Rows are projected onto (n,t1,t2) and columns act on (n,t1,t2) weights for
+!! elements on rotated periodic boundaries
 !------------------------------------------------------------------------------
 SUBROUTINE lagrange_vector_packblock(fe_rep,mtmp,elems)
 CLASS(oft_afem_type), TARGET, INTENT(inout) :: fe_rep !< Lagrange FE obj
@@ -1857,7 +1859,7 @@ INTEGER(i4) :: i,j,k,ki,jr,jc
 REAL(r8) :: tmp1(3,3),vmapr(3,3),vmapc(3,3)
 REAL(r8), PARAMETER :: eye(3,3) = RESHAPE([1.d0,0.d0,0.d0,0.d0,1.d0,0.d0,0.d0,0.d0,1.d0],[3,3])
 CLASS(oft_scalar_fem), POINTER :: self
-IF(.NOT.oft_3D_lagrange_cast(self,fe_rep))CALL oft_abort("Incorrect FE type","lagrange_vector_packrows",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(self,fe_rep))CALL oft_abort("Incorrect FE type","lagrange_vector_packblock",__FILE__)
 IF(.NOT.self%mesh%periodic%revolved)RETURN ! Only required for revolved periodic grids
 DO j=1,self%nce
   i=elems(j)
@@ -1892,9 +1894,10 @@ DO j=1,self%nce
 END DO
 END SUBROUTINE lagrange_vector_packblock
 !------------------------------------------------------------------------------
-!> Repack Lagrange vector field, accounting for periodicity
+!> Transform a 3x3 vector coupling matrix at one element for rotated periodic boundaries
 !!
-!! Maps vectors from (x,y,z)->(n,t1,t2) on rotated periodic boundaries
+!! Applies the rotation to both rows and columns if element `i` is on a rotated
+!! periodic boundary
 !------------------------------------------------------------------------------
 SUBROUTINE lagrange_vector_transmat(fe_rep,mtmp,i)
 CLASS(oft_afem_type), TARGET, INTENT(inout) :: fe_rep !< Lagrange FE obj
@@ -1902,7 +1905,7 @@ REAL(r8), INTENT(inout) :: mtmp(3,3) !< Local matrix terms
 INTEGER(i4), INTENT(in) :: i !< Row indices
 REAL(r8) :: vtmp(3)
 CLASS(oft_scalar_fem), POINTER :: self
-IF(.NOT.oft_3D_lagrange_cast(self,fe_rep))CALL oft_abort("Incorrect FE type","lagrange_vector_packrows",__FILE__)
+IF(.NOT.oft_3D_lagrange_cast(self,fe_rep))CALL oft_abort("Incorrect FE type","lagrange_vector_transmat",__FILE__)
 IF(.NOT.self%mesh%periodic%revolved)RETURN ! Only required for revolved periodic grids
 IF(.NOT.self%be(i))RETURN
 IF(self%per_vmap(i)==1)THEN

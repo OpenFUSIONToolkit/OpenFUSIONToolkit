@@ -32,7 +32,7 @@ INTEGER(i4), ALLOCATABLE, PUBLIC :: lc_mem(:,:)
 INTEGER(i4), ALLOCATABLE, PUBLIC :: reg_mem(:)
 !---
 LOGICAL :: cyl_mesh = .FALSE. !< Curve grid to toroidal shaping
-REAL(r8) :: cyl_rmin = 0.d0
+REAL(r8) :: cyl_rmin = 0.d0 !< Only project nodes with radius above this value when `cyl_mesh=T`
 LOGICAL :: reflect_copy_reg = .TRUE. !< Copy region numbers during reflection
 INTEGER(i4) :: np_ho = 0
 REAL(r8), ALLOCATABLE :: r_ho(:,:)
@@ -89,6 +89,7 @@ reflect=.FALSE.
 ref_periodic=.FALSE.
 zstretch=1.d0
 cyl_mesh=.FALSE.
+cyl_rmin=0.d0
 reflect_copy_reg=.TRUE.
 IF(oft_env%head_proc)THEN
     IF(ALLOCATED(r_mem).AND.ALLOCATED(lc_mem).AND.ALLOCATED(reg_mem))THEN
@@ -121,6 +122,10 @@ IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 CALL MPI_Bcast(zstretch,1,OFT_MPI_R8,0,oft_env%COMM,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 CALL MPI_Bcast(cyl_mesh,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
+CALL MPI_Bcast(cyl_rmin,1,OFT_MPI_R8,0,oft_env%COMM,ierr)
+IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
+CALL MPI_Bcast(reflect_copy_reg,1,OFT_MPI_LOGICAL,0,oft_env%COMM,ierr)
 IF(ierr/=0)CALL oft_abort('Error in MPI_Bcast','native_load_vmesh',__FILE__)
 #endif
 !---Read in mesh sizes
@@ -969,7 +974,6 @@ DO i=1,mesh%nbe
         IF(ALL(pt_e==mesh%le(:,j)))CYCLE ! Skip "uncopied" periodic edges
         ind=ABS(mesh_local_findedge(mesh,pt_e))
         IF(ind==0)THEN
-            WRITE(*,'(2I8)')i,ind
             CALL oft_abort('Unmatched periodic edge','native_set_periodic',__FILE__)
         END IF
         mesh%periodic%le(j)=ind
@@ -983,7 +987,6 @@ DO i=1,mesh%nbf
     IF(ALL(pt_f>0))THEN
         ind=ABS(mesh_local_findface(mesh,pt_f))
         IF(ind==0)THEN
-            WRITE(*,'(2I8)')i,ind
             CALL oft_abort('Unmatched periodic face','native_set_periodic',__FILE__)
         END IF
         mesh%periodic%lf(j)=ind

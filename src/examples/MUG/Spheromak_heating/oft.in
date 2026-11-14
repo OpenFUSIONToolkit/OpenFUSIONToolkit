@@ -34,7 +34,7 @@
  dt=2.e-7          ! Maximum time step
  eta=25.           ! Resistivity at reference temperature (Spitzer-like)
  eta_temp=6.       ! Reference temperature for resistivity
- nu_par=400.       ! Fluid viscosity
+ nu_perp=400.       ! Fluid viscosity
  d_dens=10.        ! Density diffusion
  kappa_par=1.E4    ! Parallel thermal conduction (fixed)
  kappa_perp=1.E2   ! Perpendicular thermal conduction (fixed)

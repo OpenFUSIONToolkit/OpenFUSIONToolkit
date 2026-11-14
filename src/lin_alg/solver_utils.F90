@@ -420,7 +420,11 @@ SELECT CASE(TRIM(solver_type))
     ALLOCATE(oft_petsc_direct_solver::solver)
   CASE("ilu")
     ALLOCATE(oft_petsc_direct_solver::solver)
-    !CALL oft_abort("ILU0 not currently supported as a base solver via PETSc.","create_petsc_pre",__FILE__)
+    !---Default to an incomplete factorization (can be overridden by `type` in XML)
+    SELECT TYPE(solver)
+      TYPE IS(oft_petsc_direct_solver)
+        solver%pre_factor%type='ilu'
+    END SELECT
   CASE DEFAULT
     CALL oft_abort("Invalid solver type.","create_petsc_solver",__FILE__)
 END SELECT

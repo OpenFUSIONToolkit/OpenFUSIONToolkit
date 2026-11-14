@@ -106,9 +106,7 @@ With `visc_type='kin'`
 With `visc_type='iso'`
 \f[ \mathcal{V}_\perp = \nu_\perp \frac{n_0}{n} W, \quad \text{i.e.} \quad \Pi_\perp = -\mu_\perp W \f]
 
-\note `visc_type='ani'` is listed in the \ref xmhd "xmhd" option table but is not accepted by
-\ref xmhd::xmhd_read_settings "xmhd_read_settings". Anisotropic viscosity is obtained by setting `nu_par`
-in addition to `nu_perp` with either type.
+\note Anisotropic viscosity is obtained by setting `nu_par` in addition to `nu_perp` with either type.
 
 **Parallel viscosity** (\f$ \Pi_\parallel \f$)
 
@@ -122,12 +120,7 @@ This is Braginskii's parallel stress, with \f$ \mu_\parallel = m_i n_0 \nu_\para
 stress rather than replacing its parallel part, so with `visc_type='iso'` the total parallel
 coefficient is \f$ \mu_\parallel + \mu_\perp \f$.
 
-\warning Most MUG example inputs set `nu_par`, describe it as the "Fluid viscosity", and leave `nu_perp`
-at its default of zero. With the current implementation these inputs get parallel viscosity only, and no
-isotropic viscosity. The same holds for the sound wave regression test (`test_sound.py`), where the magnetic
-field is zero, so it runs with no viscosity at all. In the Lagrange-only variant (\ref xmhd_lag), `nu_par` is
-still the isotropic fluid viscosity.
-The \ref xmhd "xmhd" option table also gives the default of `nu_par` as 0, but it is -1 (disabled).
+\note In the Lagrange-only variant (\ref xmhd_lag), `nu_par` is still the isotropic fluid viscosity.
 
 **Gyroviscosity** (\f$ \Pi_{gv} \f$)
 

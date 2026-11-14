@@ -1326,7 +1326,6 @@ DO i=1,lag_rep%mesh%nc
   !---Compute local matrix contributions
   DO jp=1,3
     DO jn=1,3
-      ! IF(vbc_type<=0.AND.jp/=jn)CYCLE
       mtmp(jp,jn)%m = 0.d0
     END DO
   END DO
@@ -1377,7 +1376,6 @@ DO i=1,lag_rep%mesh%nc
   lcache(1,1)=0
   DO jp=1,3
     DO jn=1,3
-      ! IF(vbc_type<=0.AND.jp/=jn)CYCLE
       CALL mat%atomic_add_values(j,j,mtmp(jp,jn)%m,lag_rep%nce,lag_rep%nce,jp,jn,lcache)
     END DO
   END DO
@@ -2031,7 +2029,6 @@ SUBROUTINE lag_build_per_vinterp(ML_lag_rep,mats)
 TYPE(oft_ml_fem_type), intent(inout) :: ML_lag_rep
 TYPE(oft_matrix_ptr), intent(inout) :: mats(3,3)
 INTEGER(i4) :: i,j,jr,k,jc,rt,ct
-INTEGER(i4) :: chk_list(12) = [292602,152974,152975,292603,581883,581894,699546,699553,152966,152967,292614,292615] 
 REAL(r8) :: vmapr(3,3),vmapc(3,3),mat_val(1,1)
 REAL(r8), PARAMETER :: eye(3,3) = RESHAPE([1.d0,0.d0,0.d0,0.d0,1.d0,0.d0,0.d0,0.d0,1.d0],[3,3])
 CLASS(oft_scalar_fem), POINTER :: lag_cors => NULL()
@@ -2062,9 +2059,6 @@ IF(mesh%periodic%revolved)THEN
     DO k=interp_graph%kr(jr),interp_graph%kr(jr+1)-1
       jc=interp_graph%lc(k)
       IF(ABS(interp_graph%M(k))<1.d-8)CYCLE
-      IF(lag_fine%global%gbe(jr).AND.(.NOT.lag_cors%global%gbe(jc)))THEN
-        WRITE(*,'(A,3I8,ES14.6)')'iCHK',oft_env%rank,lag_fine%global%le(jr),lag_cors%global%le(jc),interp_graph%M(k)
-      END IF
       IF(lag_cors%per_vmap(jc)==1)THEN
         ct=1
         vmapc=lag_cors%mesh%periodic%vmap_mats(:,:,1)
@@ -2075,7 +2069,6 @@ IF(mesh%periodic%revolved)THEN
         ct=0
         vmapc=eye
       END IF
-      ! IF(lag_cors%per_vmap(jr)>0.OR.lag_cors%per_vmap(jc)>0)THEN
       IF(rt==ct)THEN
         mat_val=interp_graph%M(k)
         DO i=1,3
@@ -2085,8 +2078,6 @@ IF(mesh%periodic%revolved)THEN
         DO i=1,3
           DO j=1,3
             mat_val = DOT_PRODUCT(vmapr(:,i),vmapc(:,j))
-            !IF(i==j)mat_val=mat_val-1.d0
-            !WRITE(*,'(A,3I5,2I2,2ES14.6)')'Vlag_op',oft_env%rank,jr,jc,i,j,mat_val,interp_graph%M(k)
             mat_val=mat_val*interp_graph%M(k)
             CALL mats(i,j)%m%add_values([jr],[jc],mat_val,1,1)
           END DO
