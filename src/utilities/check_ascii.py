@@ -10,7 +10,8 @@
 #
 # Source files (Fortran, C/C++, Python, CMake, shell, and "*.in" templates)
 # containing non-ASCII characters are reported as errors and cause a non-zero
-# exit status. Markdown files are reported as warnings only.
+# exit status. Markdown files are reported as warnings only. Files under the
+# directories in EXCLUDE_DIRS are not checked.
 #
 # Files are found with "git ls-files", so the script can be run from anywhere
 # inside the repository. When run under GitHub Actions, results are also
@@ -31,10 +32,15 @@ SOURCE_EXTS = (
 SOURCE_NAMES = ('CMakeLists.txt',)
 # Extensions (lowercase) treated as Markdown files
 MARKDOWN_EXTS = ('.md',)
+# Directories (relative to the repository root) that are not checked
+EXCLUDE_DIRS = ('src/utilities', 'spack')
 
 
 def classify(path):
     '''Return "error" for source files, "warning" for Markdown, or None to skip'''
+    for exclude_dir in EXCLUDE_DIRS:
+        if path.replace(os.sep, '/').startswith(exclude_dir + '/'):
+            return None
     name = os.path.basename(path)
     ext = os.path.splitext(name)[1].lower()
     if (name in SOURCE_NAMES) or (ext in SOURCE_EXTS):
