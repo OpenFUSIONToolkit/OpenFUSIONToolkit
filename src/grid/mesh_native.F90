@@ -38,7 +38,7 @@ INTEGER(i4) :: np_ho = 0
 REAL(r8), ALLOCATABLE :: r_ho(:,:)
 INTEGER(i4), ALLOCATABLE :: le_ho(:,:),lf_ho(:,:)
 INTEGER(i4), ALLOCATABLE, DIMENSION(:) :: per_nodes
-TYPE(oft_1d_int), POINTER, DIMENSION(:) :: nsets
+TYPE(oft_1d_int), POINTER, DIMENSION(:) :: nsets => NULL()
 CONTAINS
 !---------------------------------------------------------------------------------
 !> Finalize setup/load-in of native mesh and destroy temporaries created
@@ -897,7 +897,7 @@ IF(ASSOCIATED(nsets))THEN
         ltemp(:,1)=nsets(i)%v
         DEALLOCATE(nsets(i)%v)
         ALLOCATE(nsets(i)%v(np_per))
-        nsets(i)%v=ltemp(:,1)
+        nsets(i)%v(1:nsets(i)%n)=ltemp(:,1)
         DEALLOCATE(ltemp)
         np_per=nsets(i)%n
         DO j=1,nsets(i)%n
@@ -929,10 +929,8 @@ end subroutine native_reflect
 !---------------------------------------------------------------------------------
 subroutine native_set_periodic(mesh)
 class(oft_mesh), intent(inout) :: mesh
-integer(i4) :: i,j,pt_e(2),ind,k,kk,np_per,find
+integer(i4) :: i,j,pt_e(2),ind,k,kk,np_per
 integer(i4), ALLOCATABLE :: pt_f(:)
-REAL(r8) :: chkmat(3,3)
-REAL(r8), ALLOCATABLE :: ftmp(:)
 IF(.NOT.ALLOCATED(per_nodes))RETURN
 DEBUG_STACK_PUSH
 IF(oft_debug_print(1))WRITE(*,'(2A)')oft_indent,'Setting native volume mesh periodicity'
@@ -964,8 +962,8 @@ ALLOCATE(mesh%periodic%lf(mesh%nf))
 mesh%periodic%le=-1
 mesh%periodic%lf=-1
 !---Flag periodic edges
-!$omp parallel private(j,pt_e,pt_f,ind,find,ftmp)
-allocate(pt_f(mesh%face_np),ftmp(mesh%cell_nf))
+!$omp parallel private(j,pt_e,pt_f,ind)
+allocate(pt_f(mesh%face_np))
 !$omp do
 DO i=1,mesh%nbe
     j = mesh%lbe(i)
@@ -991,44 +989,76 @@ DO i=1,mesh%nbf
         END IF
         mesh%periodic%lf(j)=ind
         mesh%bfs(i)=-2
-        !---Build periodic mapping basis
-        DO find=1,mesh%cell_nf
-            IF(mesh%lcf(find,mesh%lfc(1,j))==j)EXIT
-        END DO
-        ftmp=1.d0/3.d0; ftmp(find)=0.d0
-        CALL mesh%snormal(mesh%lfc(1,j),find,ftmp,mesh%periodic%vmap_mats(:,1,1))
-        mesh%periodic%vmap_mats(:,2,1)=cross_product(mesh%periodic%vmap_mats(:,1,1),[0.d0,0.d0,1.d0])
-        mesh%periodic%vmap_mats(:,2,1)=mesh%periodic%vmap_mats(:,2,1)/magnitude(mesh%periodic%vmap_mats(:,2,1))
-        mesh%periodic%vmap_mats(:,3,1)=cross_product(mesh%periodic%vmap_mats(:,1,1),mesh%periodic%vmap_mats(:,2,1))
-        mesh%periodic%vmap_mats(:,3,1)=mesh%periodic%vmap_mats(:,3,1)/magnitude(mesh%periodic%vmap_mats(:,3,1))
-        DO find=1,mesh%cell_nf
-            IF(mesh%lcf(find,mesh%lfc(1,ind))==ind)EXIT
-        END DO
-        ftmp=1.d0/3.d0; ftmp(find)=0.d0
-        CALL mesh%snormal(mesh%lfc(1,ind),find,ftmp,mesh%periodic%vmap_mats(:,1,2))
-        mesh%periodic%vmap_mats(:,1,2)=-mesh%periodic%vmap_mats(:,1,2)
-        mesh%periodic%vmap_mats(:,2,2)=-cross_product(mesh%periodic%vmap_mats(:,1,2),[0.d0,0.d0,1.d0])
-        mesh%periodic%vmap_mats(:,2,2)=mesh%periodic%vmap_mats(:,2,2)/magnitude(mesh%periodic%vmap_mats(:,2,2))
-        mesh%periodic%vmap_mats(:,3,2)=cross_product(mesh%periodic%vmap_mats(:,1,2),mesh%periodic%vmap_mats(:,2,2))
-        mesh%periodic%vmap_mats(:,3,2)=mesh%periodic%vmap_mats(:,3,2)/magnitude(mesh%periodic%vmap_mats(:,3,2))
+        !---Revolved periodicity is only supported about the x-axis
+        CALL check_revolved_face(j)
+        CALL check_revolved_face(ind)
     END IF
 END DO
-deallocate(pt_f,ftmp)
+deallocate(pt_f)
+!$omp end parallel
 !---Remove "uncopied" periodic points
 DO i=1,mesh%nbp
     j=mesh%lbp(i)
     IF(mesh%periodic%lp(j)==j)mesh%periodic%lp(j)=-1
 END DO
-!$omp end parallel
-IF(ABS(mesh%periodic%vmap_mats(3,1,1))>1.d0-1.d-8)THEN
-    mesh%periodic%vmap_mats=0.d0
-ELSE
-    mesh%periodic%revolved=.TRUE.
-    mesh%periodic%vmap_matsT(:,:,1)=TRANSPOSE(mesh%periodic%vmap_mats(:,:,1))
-    mesh%periodic%vmap_matsT(:,:,2)=TRANSPOSE(mesh%periodic%vmap_mats(:,:,2))
+!---Build periodic mapping basis from the first periodic face
+DO i=1,mesh%nbf
+    j = mesh%lbf(i)
+    IF(mesh%periodic%lf(j)>0)EXIT
+END DO
+IF(i<=mesh%nbf)THEN
+    ind=mesh%periodic%lf(j)
+    CALL periodic_face_normal(j,mesh%periodic%vmap_mats(:,1,1))
+    mesh%periodic%vmap_mats(:,2,1)=cross_product(mesh%periodic%vmap_mats(:,1,1),[0.d0,0.d0,1.d0])
+    mesh%periodic%vmap_mats(:,2,1)=mesh%periodic%vmap_mats(:,2,1)/magnitude(mesh%periodic%vmap_mats(:,2,1))
+    mesh%periodic%vmap_mats(:,3,1)=cross_product(mesh%periodic%vmap_mats(:,1,1),mesh%periodic%vmap_mats(:,2,1))
+    mesh%periodic%vmap_mats(:,3,1)=mesh%periodic%vmap_mats(:,3,1)/magnitude(mesh%periodic%vmap_mats(:,3,1))
+    CALL periodic_face_normal(ind,mesh%periodic%vmap_mats(:,1,2))
+    mesh%periodic%vmap_mats(:,1,2)=-mesh%periodic%vmap_mats(:,1,2)
+    mesh%periodic%vmap_mats(:,2,2)=-cross_product(mesh%periodic%vmap_mats(:,1,2),[0.d0,0.d0,1.d0])
+    mesh%periodic%vmap_mats(:,2,2)=mesh%periodic%vmap_mats(:,2,2)/magnitude(mesh%periodic%vmap_mats(:,2,2))
+    mesh%periodic%vmap_mats(:,3,2)=cross_product(mesh%periodic%vmap_mats(:,1,2),mesh%periodic%vmap_mats(:,2,2))
+    mesh%periodic%vmap_mats(:,3,2)=mesh%periodic%vmap_mats(:,3,2)/magnitude(mesh%periodic%vmap_mats(:,3,2))
+    IF(ABS(mesh%periodic%vmap_mats(3,1,1))>1.d0-1.d-8)THEN
+        mesh%periodic%vmap_mats=0.d0
+    ELSE
+        mesh%periodic%revolved=.TRUE.
+        mesh%periodic%vmap_matsT(:,:,1)=TRANSPOSE(mesh%periodic%vmap_mats(:,:,1))
+        mesh%periodic%vmap_matsT(:,:,2)=TRANSPOSE(mesh%periodic%vmap_mats(:,:,2))
+    END IF
 END IF
 CALL oft_decrease_indent
 DEBUG_STACK_POP
+CONTAINS
+!> Compute the outward unit normal of a boundary face
+SUBROUTINE periodic_face_normal(face,norm)
+INTEGER(i4), INTENT(in) :: face !< Boundary face index
+REAL(r8), INTENT(out) :: norm(3) !< Outward unit normal
+INTEGER(i4) :: cface
+REAL(r8) :: fcoords(mesh%cell_nf)
+DO cface=1,mesh%cell_nf
+    IF(mesh%lcf(cface,mesh%lfc(1,face))==face)EXIT
+END DO
+fcoords=1.d0/3.d0; fcoords(cface)=0.d0
+CALL mesh%snormal(mesh%lfc(1,face),cface,fcoords,norm)
+END SUBROUTINE periodic_face_normal
+!> Abort if a periodic face is not normal to z and its plane does not contain the x-axis
+!!
+!! Non-planar ("revolved") periodicity assumes rotation about the x-axis
+SUBROUTINE check_revolved_face(face)
+INTEGER(i4), INTENT(in) :: face !< Periodic face index
+INTEGER(i4) :: k
+REAL(r8) :: norm(3),pt(3)
+CALL periodic_face_normal(face,norm)
+IF(ABS(norm(3))>1.d0-1.d-8)RETURN ! Planar periodicity in z
+IF(ABS(norm(1))>1.d-6)CALL oft_abort('Revolved periodic planes must contain the x-axis', &
+  'native_set_periodic',__FILE__)
+DO k=1,mesh%face_np
+    pt=mesh%r(:,mesh%lf(k,face))
+    IF(ABS(DOT_PRODUCT(norm,pt))>1.d-6*magnitude(pt))CALL oft_abort( &
+      'Revolved periodic planes must contain the x-axis','native_set_periodic',__FILE__)
+END DO
+END SUBROUTINE check_revolved_face
 end subroutine native_set_periodic
 !---------------------------------------------------------------------------------
 !> Needs docs

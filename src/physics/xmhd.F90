@@ -267,6 +267,7 @@ LOGICAL :: xmhd_monitor_div = .FALSE. !< Monitor div error?
 LOGICAL :: xmhd_two_temp = .FALSE. !< Run 2 Temperature model
 LOGICAL :: xmhd_therm_equil = .FALSE. !< Include cross-species thermalization
 LOGICAL :: xmhd_diss_centered = .FALSE. !< Time-center dissipation terms
+LOGICAL :: xmhd_lin_bdf2 = .TRUE. !< Use BDF2 time integration for linear runs (otherwise backward Euler)
 LOGICAL :: xmhd_lin_euler_start = .FALSE. !< Start linear BDF2 runs with one backward Euler step
 LOGICAL :: xmhd_skip_update = .FALSE. !< Internal flag for skipping Jac update
 INTEGER(i4) :: te_ind = -1 !< Index of electron temperature field
@@ -345,7 +346,7 @@ INTEGER(i4) :: gmres_maxits = 200
 INTEGER(i4) :: gmres_ninner = 20
 INTEGER(i4) :: xmhd_prefreq = 30 !< Desired update frequency for preconditioner
 INTEGER(i4) :: xmhd_opcount = 1 !< Number of time steps since preconditioner update
-INTEGER(i4), DIMENSION(fem_max_levels) :: xmhd_nparts = 1 !< Number of local partitions for preconditioning
+INTEGER(i4), DIMENSION(fem_max_levels) :: xmhd_nparts = 1 !< Total number of partitions for preconditioning (divided across MPI processes)
 REAL(r8) :: xmhd_opdt = 1.d0 !< Time step for current preconditioner object
 LOGICAL :: xmhd_mfnk = .FALSE. !< Use Jacobian free non-linear advance
 !---Interpolator cache variables
@@ -397,6 +398,7 @@ CONTAINS
 !! | `xmhd_upwind=T`    | Use upwinding for advection terms | bool |
 !! | `xmhd_therm_equil=F` | Include thermal equilibration between electrons/ions | bool |
 !! | `xmhd_diss_centered=F` | Use time-centered dissipation terms for (V, Ti, Te) | bool |
+!! | `xmhd_lin_bdf2=T` | Linear runs only: use second-order BDF2 time integration (otherwise first-order backward Euler) | bool |
 !! | `xmhd_lin_euler_start=F` | Linear runs only: take one backward Euler step before BDF2, instead of using the initial condition for both BDF2 history levels (costs one extra preconditioner update) | bool |
 !! | `bbc="bc"`         | Magnetic field boundary condition ("bc", "ic") | str(2) |
 !! | `vbc="all"`        | Velocity boundary condition ("all", "norm", "tang", "xml": per surface from `<vel_bc>`) | str(4) |
@@ -420,7 +422,7 @@ CONTAINS
 !! | `lin_tol=1E-9`     | Linear solver tolerance | real |
 !! | `nl_tol=1E-5`      | Non-Linear solver tolerance | real |
 !! | `nu_xmhd=1`        | Number of smoother iterations for MG preconditioner | int [nlevels] |
-!! | `xmhd_nparts=1`    | Number of local partitions for factor based preconditioning | int [nlevels] |
+!! | `xmhd_nparts=1`    | Total number of partitions (colors) for factor based preconditioning. On distributed meshes this is divided across MPI processes (`xmhd_nparts/nprocs` per process, rounded down), so it must be at least the number of processes, and a result of one partition per process disables coloring | int [nlevels] |
 !! | `gmres_maxits=200` | Maximum number of GMRES iterations per linear solve | int |
 !! | `gmres_ninner=20`  | GMRES restart length (iterations between restarts) | int |
 !! | `nclean=500`       | Frequency of divergence cleaning | int |
@@ -454,7 +456,7 @@ namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,x
   eta_temp,nu_par,nu_perp,nu_gyro,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens,gmres_ninner,gmres_maxits, &
-  dt_max,xmhd_lin_euler_start
+  dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start
 DEBUG_STACK_PUSH
 !------------------------------------------------------------------------------
 ! Set defaults
@@ -1140,7 +1142,7 @@ xmhd_brag=.FALSE.
 xmhd_linear=.TRUE.
 xmhd_upwind=.FALSE.
 xmhd_diss_centered=.TRUE.
-use_bdf2=.TRUE.
+use_bdf2=xmhd_lin_bdf2
 !------------------------------------------------------------------------------
 ! Setup ML environment
 !------------------------------------------------------------------------------
@@ -1420,11 +1422,12 @@ DO i=1,nsteps
         CALL oft_xmhd_push(sub_fields,un1)
         IF(maxextrap>1)CALL extrap_fields(1)%f%add(0.d0,1.d0,un1)
       END IF
-      IF(maxextrap>1)THEN ! Clean extrapolation history vectors
-        DO j=maxextrap-1,2,-1
-          CALL oft_xmhd_pop(extrap_fields(j-1)%f,sub_fields)
+      IF(maxextrap>1)THEN ! Clean extrapolation history vectors that survive the shift below
+        DO j=1,maxextrap-1
+          IF(use_bdf2.AND.(j==1))CYCLE ! Already replaced by the cleaned un1
+          CALL oft_xmhd_pop(extrap_fields(j)%f,sub_fields)
           CALL divout%apply(sub_fields%B)
-          CALL oft_xmhd_push(sub_fields,extrap_fields(j-1)%f)
+          CALL oft_xmhd_push(sub_fields,extrap_fields(j)%f)
         END DO
       END IF
     END IF
@@ -2666,7 +2669,7 @@ do level=levelin,xmhd_minlev,-1
           j = INT(REAL(xmhd_nparts(level),8)/REAL(oft_env%nprocs,8),4)
         END IF
         IF(j<=0)THEN
-           CALL oft_abort('Coloring results in 1 or fewer blocks per processor','xmhd_alloc_ops',__FILE__)
+           CALL oft_abort('Coloring results in fewer than one block per processor (xmhd_nparts < nprocs)','xmhd_alloc_ops',__FILE__)
         ELSE IF(j==1)THEN
           DEALLOCATE(this%color)
         ELSE
@@ -4773,7 +4776,7 @@ subroutine oft_xmhd_interp(self,acors,afine)
 class(ml_xmhd_vecspace), intent(inout) :: self
 class(oft_vector), intent(inout) :: acors !< Coarse level vector to interpolate
 class(oft_vector), intent(inout) :: afine !< Interpolated solution on fine level
-INTEGER(i4) :: i,j
+INTEGER(i4) :: i
 REAL(r8), POINTER :: acurl(:),agrad(:),tmp(:)
 DEBUG_STACK_PUSH
 !
@@ -4817,67 +4820,6 @@ IF(oft_hcurl%order==1)THEN
   CALL afine%restore_local(agrad,2)
   DEALLOCATE(acurl,agrad,tmp)
 END IF
-RETURN
-!---Apply boundary conditions
-NULLIFY(tmp)
-CALL afine%get_local(tmp,iblock=1)
-!WHERE(oft_xmhd_ops%b1_bc)
-!  tmp = 0.d0
-!END WHERE
-CALL afine%restore_local(tmp,iblock=1,wait=.TRUE.)
-DEALLOCATE(tmp)
-!
-CALL afine%get_local(tmp,iblock=2)
-!WHERE(oft_xmhd_ops%b2_bc)
-!  tmp = 0.d0
-!END WHERE
-CALL afine%restore_local(tmp,iblock=2,wait=.TRUE.)
-DEALLOCATE(tmp)
-!
-DO i=1,3
-  CALL afine%get_local(tmp,iblock=2+i)
-  IF(i==1)THEN
-    DO j=1,oft_lagrange%ne
-      IF(oft_xmhd_ops%v_bc_type(j)==1)THEN
-        tmp(j)=0.d0
-      END IF
-    END DO
-    !WHERE(oft_xmhd_ops%v_bc_type==1)
-    !  tmp = 0.d0
-    !END WHERE
-  ELSE
-    DO j=1,oft_lagrange%ne
-      IF(ABS(oft_xmhd_ops%v_bc_type(j))==1)THEN
-        tmp(j)=0.d0
-      END IF
-    END DO
-    !WHERE(ABS(oft_xmhd_ops%v_bc_type)==1)
-    !   tmp = 0.d0
-    !END WHERE
-  END IF
-  CALL afine%restore_local(tmp,iblock=2+i,wait=.TRUE.)
-END DO
-!
-CALL afine%get_local(tmp,iblock=6)
-!WHERE(oft_xmhd_ops%n_bc)
-!  tmp = 0.d0
-!END WHERE
-CALL afine%restore_local(tmp,iblock=6,wait=.TRUE.)
-!
-CALL afine%get_local(tmp,iblock=7)
-!WHERE(oft_xmhd_ops%t_bc)
-!  tmp = 0.d0
-!END WHERE
-CALL afine%restore_local(tmp,iblock=7,wait=(te_ind>0))
-!
-IF(te_ind>0)THEN
-  CALL afine%get_local(tmp,iblock=te_ind)
-  WHERE(oft_xmhd_ops%t_bc)
-    tmp = 0.d0
-  END WHERE
-  CALL afine%restore_local(tmp,iblock=te_ind)
-END IF
-DEALLOCATE(tmp)
 DEBUG_STACK_POP
 end subroutine oft_xmhd_interp
 !------------------------------------------------------------------------------

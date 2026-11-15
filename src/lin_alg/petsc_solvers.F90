@@ -291,6 +291,9 @@ ELSE
 END IF
 CALL KSPSetOperators(self%solver,mat%M,pmat%M,ierr)
 CALL KSPSetInitialGuessNonzero(self%solver,PETSC_TRUE,ierr) ! Default to non-zero guess
+!---No preconditioning unless one is attached (set later in setup_ksp)
+CALL KSPGetPC(self%solver,pc,ierr)
+CALL PCSetType(pc,PCNONE,ierr)
 DEBUG_STACK_POP
 end subroutine petsc_solver_setup
 !------------------------------------------------------------------------------
@@ -1564,7 +1567,7 @@ ELSE IF(self%n_local>=1)THEN
     ELSE
       ALLOCATE(is_parts(n_local))
       CALL MatGetOwnershipRange(mat%M,loc_start,loc_end,ierr)
-      CALL ISCreateStride(oft_env%node_comm,loc_end-loc_start,loc_start,1,is_parts(1),ierr)
+      CALL ISCreateStride(PETSC_COMM_SELF,loc_end-loc_start,loc_start,1,is_parts(1),ierr)
 #if (PETSC_VERSION_MAJOR==3 && PETSC_VERSION_MINOR<22)
       CALL PCASMSetLocalSubdomains(pc,n_local,PETSC_NULL_IS,is_parts,ierr)
 #else
@@ -1573,6 +1576,8 @@ ELSE IF(self%n_local>=1)THEN
       DEALLOCATE(is_parts)
     END IF
   END IF
+ELSE
+  n_local=1 ! Default PETSc subdomains (one block per process)
 END IF
 !---
 NULLIFY(ksp)
