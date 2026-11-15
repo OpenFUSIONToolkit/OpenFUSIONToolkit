@@ -1195,6 +1195,35 @@ END SUBROUTINE nlfun_apply
 SUBROUTINE build_approx_jacobian_comp(self,a)
 CLASS(oft_xmhd_2d_sim), INTENT(INOUT) :: self !< Simulation object
 CLASS(oft_vector), INTENT(INOUT) :: a !< Solution for computing Jacobian
+CALL build_approx_jacobian(self,a,oft_blagrange,.FALSE.)
+END SUBROUTINE build_approx_jacobian_comp
+!---------------------------------------------------------------------------
+!> Compute the approximate Jacobian matrix for the incompressible system
+!!
+!! Field 5 is pressure, represented on a separate Lagrange space
+!! (@ref oft_blagrange_p) and acting as a Lagrange multiplier for the
+!! divergence-free constraint on velocity.
+!---------------------------------------------------------------------------
+SUBROUTINE build_approx_jacobian_incomp(self,a)
+CLASS(oft_xmhd_2d_sim), INTENT(INOUT) :: self !< Simulation object
+CLASS(oft_vector), INTENT(INOUT) :: a !< Solution for computing Jacobian
+CALL build_approx_jacobian(self,a,oft_blagrange_p,.TRUE.)
+END SUBROUTINE build_approx_jacobian_incomp
+!---------------------------------------------------------------------------
+!> Assemble the approximate Jacobian matrix for either system
+!!
+!! Loops over cells and quadrature points, adding the terms shared by both
+!! systems (@ref jac_add_shared) and then the field-5 couplings of the chosen
+!! system (@ref jac_add_comp or @ref jac_add_incomp). Field 5 (temperature or
+!! pressure) is represented on `T_fe`; in the compressible system that is
+!! @ref oft_blagrange itself, so its basis and DOFs are copied rather than
+!! evaluated a second time.
+!---------------------------------------------------------------------------
+SUBROUTINE build_approx_jacobian(self,a,T_fe,incomp)
+CLASS(oft_xmhd_2d_sim), INTENT(INOUT) :: self !< Simulation object
+CLASS(oft_vector), INTENT(INOUT) :: a !< Solution for computing Jacobian
+CLASS(oft_scalar_bfem), INTENT(INOUT) :: T_fe !< Lagrange representation for field 5
+LOGICAL, INTENT(IN) :: incomp !< Field 5 is pressure (incompressible) rather than temperature
 INTEGER(i4) :: i
 REAL(r8) :: dt_fac
 REAL(r8), POINTER, DIMENSION(:) :: n_weights,T_weights,psi_weights,by_weights
@@ -1213,33 +1242,40 @@ END DO
 BLOCK
 LOGICAL :: curved
 INTEGER(i4) :: jr,m
-INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs
+INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs,cell_dofs_T
 REAL(r8) :: jac_mat(3,4),jac_det,coords(3)
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,n_loc,T_loc,psi_loc,by_loc
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: basis_grads,vel_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,basis_vals_T,n_loc,T_loc,psi_loc,by_loc
+REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: basis_grads,basis_grads_T,vel_loc
 TYPE(xmhd_2d_jac_pt) :: pt
 TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: iloc
 TYPE(oft_local_mat), ALLOCATABLE, DIMENSION(:,:) :: jac_loc
-!$omp parallel private(jr,m,curved,cell_dofs,jac_mat,jac_det,coords,basis_vals,basis_grads, &
-!$omp n_loc,vel_loc,T_loc,psi_loc,by_loc,pt,iloc,jac_loc)
+!$omp parallel private(jr,m,curved,cell_dofs,cell_dofs_T,jac_mat,jac_det,coords,basis_vals,basis_grads, &
+!$omp basis_vals_T,basis_grads_T,n_loc,vel_loc,T_loc,psi_loc,by_loc,pt,iloc,jac_loc)
 ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
-ALLOCATE(n_loc(oft_blagrange%nce),vel_loc(3,oft_blagrange%nce),T_loc(oft_blagrange%nce), &
+ALLOCATE(basis_vals_T(T_fe%nce),basis_grads_T(3,T_fe%nce))
+ALLOCATE(n_loc(oft_blagrange%nce),vel_loc(3,oft_blagrange%nce),T_loc(T_fe%nce), &
   psi_loc(oft_blagrange%nce),by_loc(oft_blagrange%nce))
-ALLOCATE(cell_dofs(oft_blagrange%nce))
+ALLOCATE(cell_dofs(oft_blagrange%nce),cell_dofs_T(T_fe%nce))
 ALLOCATE(jac_loc(self%fe_rep%nfields,self%fe_rep%nfields),iloc(self%fe_rep%nfields))
 DO jr=1,self%fe_rep%nfields
   iloc(jr)%v=>cell_dofs
 END DO
+iloc(5)%v=>cell_dofs_T
 CALL self%fe_rep%mat_setup_local(jac_loc)
 !$omp do ordered
 DO i=1,mesh%nc
   IF(self%ignore_rmask(mesh%reg(i)))CYCLE ! Skip cells in ignored regions
   curved=cell_is_curved(mesh,i) ! Straight cell test
   CALL oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
+  IF(incomp)THEN
+    CALL T_fe%ncdofs(i,cell_dofs_T) ! Get global index of local field-5 DOFs
+  ELSE
+    cell_dofs_T=cell_dofs
+  END IF
   CALL self%fe_rep%mat_zero_local(jac_loc) ! Zero local (cell) contribution to matrix
   n_loc=n_weights(cell_dofs)
   vel_loc=vel_weights(:,cell_dofs)
-  T_loc=T_weights(cell_dofs)
+  T_loc=T_weights(cell_dofs_T)
   psi_loc=psi_weights(cell_dofs)
   by_loc=by_weights(cell_dofs)
   !---Set material properties
@@ -1253,18 +1289,28 @@ DO i=1,mesh%nc
   DO m=1,quad%np
     IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
     CALL jac_eval_basis(oft_blagrange,i,quad%pts(:,m),jac_mat,basis_vals,basis_grads)
+    IF(incomp)THEN
+      CALL jac_eval_basis(T_fe,i,quad%pts(:,m),jac_mat,basis_vals_T,basis_grads_T)
+    ELSE
+      basis_vals_T=basis_vals
+      basis_grads_T=basis_grads
+    END IF
     coords=mesh%log2phys(i,quad%pts(:,m))
     pt%int_factor=jac_det*quad%wts(m)
     CALL jac_eval_fields(self,pt,coords,basis_vals,basis_grads,n_loc,vel_loc,psi_loc,by_loc)
     pt%T=0.d0; pt%dT=0.d0
-    DO jr=1,oft_blagrange%nce
-      pt%T=pt%T+T_loc(jr)*basis_vals(jr)
-      pt%dT=pt%dT+T_loc(jr)*basis_grads(:,jr)
+    DO jr=1,T_fe%nce
+      pt%T=pt%T+T_loc(jr)*basis_vals_T(jr)
+      pt%dT=pt%dT+T_loc(jr)*basis_grads_T(:,jr)
     END DO
     CALL jac_add_shared(self,jac_loc,pt,basis_vals,basis_grads,dt_fac)
-    CALL jac_add_comp(self,jac_loc,pt,basis_vals,basis_grads,dt_fac)
+    IF(incomp)THEN
+      CALL jac_add_incomp(self,jac_loc,pt,basis_vals,basis_grads,basis_vals_T,dt_fac)
+    ELSE
+      CALL jac_add_comp(self,jac_loc,pt,basis_vals,basis_grads,dt_fac)
+    END IF
   END DO
-  CALL jac_finish_local(self,jac_loc,cell_dofs,cell_dofs)
+  CALL jac_finish_local(self,jac_loc,cell_dofs,cell_dofs_T)
   !---Add local contributions to matrix
   !$omp ordered
   CALL self%fe_rep%mat_add_local(self%jacobian,jac_loc,iloc,tlocks)
@@ -1272,7 +1318,8 @@ DO i=1,mesh%nc
 END DO
 !---Cleanup thread-local storage
 CALL self%fe_rep%mat_destroy_local(jac_loc)
-DEALLOCATE(basis_vals,basis_grads,n_loc,vel_loc,T_loc,psi_loc,by_loc,cell_dofs,jac_loc,iloc)
+DEALLOCATE(basis_vals,basis_grads,basis_vals_T,basis_grads_T,n_loc,vel_loc,T_loc,psi_loc,by_loc, &
+  cell_dofs,cell_dofs_T,jac_loc,iloc)
 !$omp end parallel
 END BLOCK
 !---Destroy thread locks
@@ -1280,110 +1327,9 @@ DO i=1,self%fe_rep%nfields
   CALL omp_destroy_lock(tlocks(i))
 END DO
 DEALLOCATE(tlocks)
-CALL jac_finalize(self,oft_blagrange)
+CALL jac_finalize(self,T_fe)
 DEALLOCATE(n_weights,vel_weights,T_weights,psi_weights,by_weights)
-END SUBROUTINE build_approx_jacobian_comp
-!---------------------------------------------------------------------------
-!> Compute the approximate Jacobian matrix for the incompressible system
-!!
-!! Field 5 is pressure, represented on a separate Lagrange space
-!! (@ref oft_blagrange_p) and acting as a Lagrange multiplier for the
-!! divergence-free constraint on velocity.
-!---------------------------------------------------------------------------
-SUBROUTINE build_approx_jacobian_incomp(self,a)
-CLASS(oft_xmhd_2d_sim), INTENT(INOUT) :: self !< Simulation object
-CLASS(oft_vector), INTENT(INOUT) :: a !< Solution for computing Jacobian
-INTEGER(i4) :: i
-REAL(r8) :: dt_fac
-REAL(r8), POINTER, DIMENSION(:) :: n_weights,p_weights,psi_weights,by_weights
-REAL(r8), POINTER, DIMENSION(:,:) :: vel_weights
-INTEGER(KIND=omp_lock_kind), ALLOCATABLE, DIMENSION(:) :: tlocks
-TYPE(oft_quad_type), POINTER :: quad
-quad=>oft_blagrange%quad
-CALL self%jacobian%zero
-CALL jac_get_weights(self,a,n_weights,vel_weights,p_weights,psi_weights,by_weights)
-dt_fac=self%jac_dt
-!---Setup thread locks
-ALLOCATE(tlocks(self%fe_rep%nfields))
-DO i=1,self%fe_rep%nfields
-  CALL omp_init_lock(tlocks(i))
-END DO
-BLOCK
-LOGICAL :: curved
-INTEGER(i4) :: jr,m
-INTEGER(i4), POINTER, DIMENSION(:) :: cell_dofs,cell_dofs_p
-REAL(r8) :: jac_mat(3,4),jac_det,coords(3)
-REAL(r8), ALLOCATABLE, DIMENSION(:) :: basis_vals,basis_vals_p,n_loc,p_loc,psi_loc,by_loc
-REAL(r8), ALLOCATABLE, DIMENSION(:,:) :: basis_grads,basis_grads_p,vel_loc
-TYPE(xmhd_2d_jac_pt) :: pt
-TYPE(oft_1d_int), ALLOCATABLE, DIMENSION(:) :: iloc
-TYPE(oft_local_mat), ALLOCATABLE, DIMENSION(:,:) :: jac_loc
-!$omp parallel private(jr,m,curved,cell_dofs,cell_dofs_p,jac_mat,jac_det,coords,basis_vals,basis_grads, &
-!$omp basis_vals_p,basis_grads_p,n_loc,vel_loc,p_loc,psi_loc,by_loc,pt,iloc,jac_loc)
-ALLOCATE(basis_vals(oft_blagrange%nce),basis_grads(3,oft_blagrange%nce))
-ALLOCATE(basis_vals_p(oft_blagrange_p%nce),basis_grads_p(3,oft_blagrange_p%nce))
-ALLOCATE(n_loc(oft_blagrange%nce),vel_loc(3,oft_blagrange%nce),p_loc(oft_blagrange_p%nce), &
-  psi_loc(oft_blagrange%nce),by_loc(oft_blagrange%nce))
-ALLOCATE(cell_dofs(oft_blagrange%nce),cell_dofs_p(oft_blagrange_p%nce))
-ALLOCATE(jac_loc(self%fe_rep%nfields,self%fe_rep%nfields),iloc(self%fe_rep%nfields))
-DO jr=1,self%fe_rep%nfields
-  iloc(jr)%v=>cell_dofs
-END DO
-iloc(5)%v=>cell_dofs_p
-CALL self%fe_rep%mat_setup_local(jac_loc)
-!$omp do ordered
-DO i=1,mesh%nc
-  IF(self%ignore_rmask(mesh%reg(i)))CYCLE ! Skip cells in ignored regions
-  curved=cell_is_curved(mesh,i) ! Straight cell test
-  CALL oft_blagrange%ncdofs(i,cell_dofs) ! Get global index of local DOFs
-  CALL oft_blagrange_p%ncdofs(i,cell_dofs_p) ! Get global index of local pressure DOFs
-  CALL self%fe_rep%mat_zero_local(jac_loc) ! Zero local (cell) contribution to matrix
-  n_loc=n_weights(cell_dofs)
-  vel_loc=vel_weights(:,cell_dofs)
-  p_loc=p_weights(cell_dofs_p)
-  psi_loc=psi_weights(cell_dofs)
-  by_loc=by_weights(cell_dofs)
-  !---Set material properties
-  pt%m_i=self%m_i(mesh%reg(i))
-  pt%eta=self%eta(mesh%reg(i),:)
-  pt%nu=self%nu(mesh%reg(i))
-  pt%D_diff=self%D_diff(mesh%reg(i))
-  !---Quadrature loop
-  DO m=1,quad%np
-    IF(curved.OR.(m==1))CALL mesh%jacobian(i,quad%pts(:,m),jac_mat,jac_det) ! Evaluate spatial jacobian
-    CALL jac_eval_basis(oft_blagrange_p,i,quad%pts(:,m),jac_mat,basis_vals_p,basis_grads_p)
-    CALL jac_eval_basis(oft_blagrange,i,quad%pts(:,m),jac_mat,basis_vals,basis_grads)
-    coords=mesh%log2phys(i,quad%pts(:,m))
-    pt%int_factor=jac_det*quad%wts(m)
-    CALL jac_eval_fields(self,pt,coords,basis_vals,basis_grads,n_loc,vel_loc,psi_loc,by_loc)
-    pt%T=0.d0; pt%dT=0.d0
-    DO jr=1,oft_blagrange_p%nce
-      pt%T=pt%T+p_loc(jr)*basis_vals_p(jr)
-      pt%dT=pt%dT+p_loc(jr)*basis_grads_p(:,jr)
-    END DO
-    CALL jac_add_incomp(self,jac_loc,pt,basis_vals,basis_grads,basis_vals_p,dt_fac)
-    CALL jac_add_shared(self,jac_loc,pt,basis_vals,basis_grads,dt_fac)
-  END DO
-  CALL jac_finish_local(self,jac_loc,cell_dofs,cell_dofs_p)
-  !---Add local contributions to matrix
-  !$omp ordered
-  CALL self%fe_rep%mat_add_local(self%jacobian,jac_loc,iloc,tlocks)
-  !$omp end ordered
-END DO
-!---Cleanup thread-local storage
-CALL self%fe_rep%mat_destroy_local(jac_loc)
-DEALLOCATE(basis_vals,basis_grads,basis_vals_p,basis_grads_p,n_loc,vel_loc,p_loc,psi_loc,by_loc, &
-  cell_dofs,cell_dofs_p,jac_loc,iloc)
-!$omp end parallel
-END BLOCK
-!---Destroy thread locks
-DO i=1,self%fe_rep%nfields
-  CALL omp_destroy_lock(tlocks(i))
-END DO
-DEALLOCATE(tlocks)
-CALL jac_finalize(self,oft_blagrange_p)
-DEALLOCATE(n_weights,vel_weights,p_weights,psi_weights,by_weights)
-END SUBROUTINE build_approx_jacobian_incomp
+END SUBROUTINE build_approx_jacobian
 !---------------------------------------------------------------------------
 !> Get local weights of all fields from a solution vector for Jacobian construction
 !!
