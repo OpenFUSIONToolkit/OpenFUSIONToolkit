@@ -17,7 +17,7 @@ class Openfusiontoolkit(CMakePackage):
       - TokaMaker: A time-dependent free-boundary Grad-Shafranov equilibrium code
       - ThinCurr: A 3D thin-wall electromagnetic simulation package
       - MUG: A 3D linear/nonlinear extended MHD simulation package
-      - Marklin: A 3D force-free, uniform λ equilibrium solver"""
+      - Marklin: A 3D force-free, uniform lambda equilibrium solver"""
 
     # Project and repo information
     homepage = "https://openfusiontoolkit.github.io/OpenFUSIONToolkit/"

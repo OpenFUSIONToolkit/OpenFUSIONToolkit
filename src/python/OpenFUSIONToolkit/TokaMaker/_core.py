@@ -2615,7 +2615,7 @@ class TokaMaker():
           below q_s (``saw_rule``); the Ip-neutral current that does this is added to ``jphi_saw``
         @param saw_dq, saw_tol, saw_relax, saw_ramp, saw_rule See ``set_boot_ops()``
 
-        @result Dictionary with 1-D numpy array values (A/m² unless noted). All current densities, inputs
+        @result Dictionary with 1-D numpy array values (A/m^2 unless noted). All current densities, inputs
           included, are TokaMaker \f$j_\phi = \langle j_\phi \rangle = \langle R \rangle P' + \langle 1/R \rangle FF'/\mu_0\f$
           (see doc_tokamaker_current_conventions):
           - ``'psi_n'`` Normalised poloidal flux grid (0 = axis, 1 = LCFS) of the ``ffp_prof['x']`` nodes
@@ -2624,7 +2624,7 @@ class TokaMaker():
           - ``'jphi_bs_raw'`` Field-aligned bootstrap current density from the Redl PoP 2021 formula,
             \f$\langle j_{BS} \cdot B \rangle F \langle 1/R \rangle/\langle B^2 \rangle\f$ [A/m^2]
           - ``'jphi_pd_raw'`` Pressure-driven (diamagnetic + Pfirsch-Schlueter) current density,
-            \f$P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m²]
+            \f$P'(\langle R \rangle - F^2 \langle 1/R \rangle/\langle B^2 \rangle)\f$ [A/m^2]
           - ``'jphi_total'`` Total toroidal current density = jphi_ind + jphi_bs + jphi_pd + jphi_saw + jphi_fixed [A/m^2]
           - ``'jphi_bs'`` ``'jphi_bs_raw'``, (optionally) edge-isolated, scaled by ``scale_jbs`` and (optionally) tapered [A/m^2]
           - ``'jphi_pd'`` ``'jphi_pd_raw'``, (optionally) tapered; not isolated or scaled by ``scale_jbs`` [A/m^2]
@@ -2680,7 +2680,7 @@ class TokaMaker():
         for _prof, _name in ((te_prof, 'te_prof'), (ti_prof, 'ti_prof')):
             if numpy.max(_prof['y']) > 500.0:
                 warn(
-                    f"{_name}: maximum value ({numpy.max(_prof['y']):.1f}) exceeds 500 — "
+                    f"{_name}: maximum value ({numpy.max(_prof['y']):.1f}) exceeds 500 -- "
                     "assuming input is in eV and converting to keV.",
                     UserWarning, stacklevel=2,
                 )
@@ -3265,7 +3265,7 @@ class TokaMaker_equilibrium():
         @param diagnose_bs Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration. (Internal default: False)
         @param taper_edge_jphi Smoothly taper all current components (jphi_ind, _bs, _pd, _fixed, _saw) to zero at the LCFS. (Internal default: False)
         @param taper_edge_psi0 psi_N (standard: 0=axis, 1=LCFS) where the taper begins. (Internal default: 0.999)
-        @param taper_edge_shape Taper shape: 1=cos²/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
+        @param taper_edge_shape Taper shape: 1=cos^2/Hann, 2=quintic smoothstep, 3=cubic power. (Internal default: 2)
         @param saw_q_s Sawtooth reset q floor; 0 = off. (Internal default: 0)
         @param saw_dq Reset regions end where the base q crosses saw_q_s + saw_dq. (Internal default: 0.03)
         @param saw_tol Threshold on relative change in jphi_saw to freeze it. (Internal default: 1e-4)
@@ -3301,9 +3301,9 @@ class TokaMaker_equilibrium():
 
         @result Dictionary of 1-D numpy arrays, keys `_BOOT_PROF_NAMES` (those available), or `None`
           if no profiles have been computed. `'psi_n'` is in standard convention (0 = axis, 1 = LCFS).
-          Current densities are TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$ in A/m² (see
+          Current densities are TokaMaker \f$j_\phi = \langle j_\phi \rangle\f$ in A/m^2 (see
           doc_tokamaker_current_conventions); `'jdotB_bs_raw'` is the Redl
-          \f$\langle j_{BS} \cdot B \rangle\f$ [T A/m²] behind `'jphi_bs_raw'`. `_raw`: from the last
+          \f$\langle j_{BS} \cdot B \rangle\f$ [T A/m^2] behind `'jphi_bs_raw'`. `_raw`: from the last
           bootstrap evaluation, before scaling, isolation and taper; no suffix: as added into `'jphi_total'`.
           It also holds the sawtooth scalars `'saw_rho_m'`, `'saw_rho_out'`, `'saw_n_dips'` (zero without a reset).
         '''
@@ -3853,12 +3853,12 @@ class TokaMaker_equilibrium():
         @param npsi Number of points for uniform sampling (ignored if `psi` is not None)
         @param return_eps If True, append the local inverse aspect ratio array to the return tuple
         @result Tuple `(psi, fc, r_avgs, modb_avgs)`, or `(psi, fc, r_avgs, modb_avgs, eps)` when `return_eps=True`
-          - `psi` [npsi] — normalised poloidal flux \f$\hat{\psi}\f$ of each sample
-          - `fc` [npsi] — circulating-particle fraction \f$f_c\f$ (Sauter 1999)
-          - `r_avgs` dict — flux-surface averaged values \f${<R>,<1/R>,<a>}\f$ where a is minor radius
-          - `modb_avgs` [2, npsi] — flux-surface-averaged magnetic field values:
+          - `psi` [npsi] -- normalised poloidal flux \f$\hat{\psi}\f$ of each sample
+          - `fc` [npsi] -- circulating-particle fraction \f$f_c\f$ (Sauter 1999)
+          - `r_avgs` dict -- flux-surface averaged values \f${<R>,<1/R>,<a>}\f$ where a is minor radius
+          - `modb_avgs` [2, npsi] -- flux-surface-averaged magnetic field values:
             row 0: \f$\langle |B| \rangle\f$, row 1: \f$\langle |B|^2 \rangle\f$
-          - `eps` [npsi] *(only when `return_eps=True`)* — local inverse aspect ratio
+          - `eps` [npsi] *(only when `return_eps=True`)* -- local inverse aspect ratio
             \f$\varepsilon = (R_{\max} - R_{\min}) / (R_{\max} + R_{\min})\f$ (Redl 2021 \f$r/R_0\f$, with the
             surface's major radius \f$R_0 = (R_{\max} + R_{\min})/2\f$, as OMFIT and FUSE), where
             \f$R_{\max}\f$ and \f$R_{\min}\f$ are the maximum and minimum major radius of the surface
