@@ -514,18 +514,18 @@ CASE("superd")
 #ifdef HAVE_SUPERLU_DIST
     IF(self%refactor)THEN
       mode=3
-      IF(self%update_graph)THEN
-        DEALLOCATE(self%superlu_struct%csc_map,self%superlu_struct%csc_vals)
-        DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
-        csr_graph%nr=A_native%nr; csr_graph%nc=A_native%nc; csr_graph%nnz=A_native%nnz
-        csr_graph%kr=>A_native%kr; csr_graph%lc=>A_native%lc
-        ALLOCATE(self%superlu_struct%csc_map(A_native%nnz))
-        ALLOCATE(self%superlu_struct%csc_vals(A_native%nnz))
-        CALL convert_csr_to_csc(csr_graph,csc_graph,self%superlu_struct%csc_map)
-        csc_graph%kr=csc_graph%kr-1; csc_graph%lc=csc_graph%lc-1
-        self%superlu_struct%kr=>csc_graph%kr; self%superlu_struct%lc=>csc_graph%lc
-        mode=1
-      END IF
+      IF(self%update_graph)mode=1
+      !---Rebuild the CSC graph even when the pattern is unchanged, as the previous factorization
+      !---(pdgssvx_ABglobal) overwrites the row indices with their row-permuted values
+      DEALLOCATE(self%superlu_struct%csc_map,self%superlu_struct%csc_vals)
+      DEALLOCATE(self%superlu_struct%kr,self%superlu_struct%lc)
+      csr_graph%nr=A_native%nr; csr_graph%nc=A_native%nc; csr_graph%nnz=A_native%nnz
+      csr_graph%kr=>A_native%kr; csr_graph%lc=>A_native%lc
+      ALLOCATE(self%superlu_struct%csc_map(A_native%nnz))
+      ALLOCATE(self%superlu_struct%csc_vals(A_native%nnz))
+      CALL convert_csr_to_csc(csr_graph,csc_graph,self%superlu_struct%csc_map)
+      csc_graph%kr=csc_graph%kr-1; csc_graph%lc=csc_graph%lc-1
+      self%superlu_struct%kr=>csc_graph%kr; self%superlu_struct%lc=>csc_graph%lc
       self%superlu_struct%csc_vals=mat_vals(self%superlu_struct%csc_map)
       !!$omp critical (superlu_solve)
       CALL oft_superlu_dist_dgssv(mode,A_native%nr,A_native%nnz,nrhs, &
