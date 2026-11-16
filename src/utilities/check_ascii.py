@@ -8,9 +8,10 @@
 #
 # Lint check for non-ASCII characters in tracked source and Markdown files.
 #
+# Only files under SOURCE_DIR are checked, excluding those under EXCLUDE_DIRS.
 # Source files (Fortran, C/C++, and Python) containing non-ASCII characters
-# are reported as errors and cause a non-zero exit status. Markdown files are
-# reported as warnings only. Files under the directories in EXCLUDE_DIRS are
+# are reported as errors and cause a non-zero exit status. Markdown files
+# under MARKDOWN_DIR are reported as warnings only; other Markdown files are
 # not checked.
 #
 # Files are found with "git ls-files", so the script can be run from anywhere
@@ -31,19 +32,32 @@ SOURCE_EXTS = (
 )
 # Extensions (lowercase) treated as Markdown files
 MARKDOWN_EXTS = ('.md',)
-# Directories (relative to the repository root) that are not checked
-EXCLUDE_DIRS = ('src/utilities', 'src/ext_libs', 'spack')
+# Directories below are relative to the repository root
+# Directory containing all checked files
+SOURCE_DIR = 'src'
+# Directory containing the checked Markdown files
+MARKDOWN_DIR = 'src/docs'
+# Directories that are not checked
+EXCLUDE_DIRS = ('src/utilities', 'src/ext_libs')
+
+
+def in_dir(path, directory):
+    '''Return True if a repository-relative path is inside a directory'''
+    return path.startswith(directory + '/')
 
 
 def classify(path):
     '''Return "error" for source files, "warning" for Markdown, or None to skip'''
+    path = path.replace(os.sep, '/')
+    if not in_dir(path, SOURCE_DIR):
+        return None
     for exclude_dir in EXCLUDE_DIRS:
-        if path.replace(os.sep, '/').startswith(exclude_dir + '/'):
+        if in_dir(path, exclude_dir):
             return None
     ext = os.path.splitext(path)[1].lower()
     if ext in SOURCE_EXTS:
         return 'error'
-    if ext in MARKDOWN_EXTS:
+    if (ext in MARKDOWN_EXTS) and in_dir(path, MARKDOWN_DIR):
         return 'warning'
     return None
 
