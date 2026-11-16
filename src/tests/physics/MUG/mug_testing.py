@@ -264,20 +264,24 @@ def validate_sound(nerr_exp,terr_exp,verr_exp,steps_exp=11,linear=False,two_temp
     return errors_ok and output_ok
 
 
-def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False):
+def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=False,mf=False,petsc=False,hex_mesh=False,
+                 bdf2=True):
     '''Write the input for a traveling shear Alfven wave and run test_alfven (`representation` 'hcurl') or
     test_alfven_lag ('lagrange')
 
     `nu_mhd` gives the multigrid smoother iterations per level; `mf` selects the matrix-free Newton-Krylov solver
-    (nonlinear runs only). Order 4 needs a tighter linear tolerance to reach the expected error, otherwise MPI
+    (nonlinear runs only); `bdf2=False` uses first-order backward Euler steps (linear runs only). Order 4 needs a tighter linear tolerance to reach the expected error, otherwise MPI
     runs (with a different multigrid layout) do not reproduce the serial errors.
     '''
     # nu_par is parallel-only viscosity in xmhd (no effect on this transverse wave) but the fluid viscosity in xmhd_lag
     exe, rep_options, timeout = {'hcurl': ('./test_alfven', " bbc='bc'\n nu_perp=1.E-3\n", 4000),
                                  'lagrange': ('./test_alfven_lag', " nu_par=1.e-3\n", 2000)}[representation]
-    # Start linear BDF2 runs with a backward Euler step
+    # Start linear BDF2 runs with a backward Euler step, or use backward Euler throughout
     if linear:
-        rep_options += " xmhd_lin_euler_start=T\n"
+        if bdf2:
+            rep_options += " xmhd_lin_euler_start=T\n"
+        else:
+            rep_options += " xmhd_lin_bdf2=F\n"
     lin_tol = '1.E-12'
     if order == 4:
         lin_tol = '1.E-13'
