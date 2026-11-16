@@ -1,0 +1,10 @@
+{
+  "model": {
+    "mesh_file": "../../../../src/examples/ThinCurr/cyl/thincurr_ex-cyl.h5",
+    "xml_file": "../../../../src/examples/ThinCurr/cyl/oft_in.xml",
+    "jumper_start": -1
+  },
+  "analysis": "eig",
+  "eig": {"neigs": 5, "save_modes": 2},
+  "output": {"prefix": "cyl"}
+}

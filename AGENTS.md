@@ -54,6 +54,8 @@ Detailed, task-specific procedures live in agent skills under `.agents/skills/`
 | [`oft-build`](.agents/skills/oft-build/SKILL.md) | Locate or set up a build tree, build external libraries, configure/compile/install OFT, build against system libraries in a sandbox, or change Python packaging (`make_package.sh.in`/`pyproject.toml.in`, which supersede the lint-only `src/python/pyproject.toml`) |
 | [`oft-test`](.agents/skills/oft-test/SKILL.md) | Run, select, debug, or write regression tests |
 | [`tokamaker-equilibrium`](.agents/skills/tokamaker-equilibrium/SKILL.md) | Compute fixed- or free-boundary Grad-Shafranov equilibria with TokaMaker from a target boundary, or debug a non-converging solve |
+| [`thincurr-model`](.agents/skills/thincurr-model/SKILL.md) | Build, convert, and verify ThinCurr models: surface meshes (gmsh, structured grids, Cubit), holes/closures, junctions, resistivity, and coils |
+| [`thincurr-run`](.agents/skills/thincurr-run/SKILL.md) | Run ThinCurr calculations on a verified model (currently L/R eigenmodes, dense or HODLR) |
 
 ## Build System
 
