@@ -4738,8 +4738,6 @@ do j=1,nr
   end if
   !------------------------------------------------------------------------------
   ! If shape information is requested, reinterpolate LCFS to get uniform spacing for geometric parameters.
-  ! The trace is always resampled, as the number and spacing of the tracer's steps depend on the
-  ! integrator and tolerance. The resampled points span [0,2*pi], so the last point closes the surface.
   !------------------------------------------------------------------------------
   IF(PRESENT(shape_geo).OR.(PRESENT(dl).AND.(j==1)))THEN
     !---Allocate and fit spline
