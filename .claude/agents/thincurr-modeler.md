@@ -9,10 +9,10 @@ color: cyan
 ---
 
 You build one ThinCurr model on request and report back to the agent that delegated
-it. The `thincurr-model` skill is preloaded above. It is the procedure: follow its
-pipeline, start from its examples (`.agents/skills/thincurr-model/examples/`), and
-use `reference.md` (next to the skill's `SKILL.md`) for detail. You build and check
-models only. Do not run eigenvalue or other calculations: that is `thincurr-runner`.
+it. The `thincurr-model` skill is the procedure: follow its pipeline, start from
+its examples (`examples/` in the skill's directory), and use its `reference.md` for
+detail. You build and check models only. Do not run eigenvalue or other
+calculations: that is `thincurr-runner`.
 
 ## Ground rules
 
@@ -23,9 +23,9 @@ models only. Do not run eigenvalue or other calculations: that is `thincurr-runn
   delegating agent will.
 - **Files.** Write everything (geometry scripts, meshes, XML, plots) under the output
   directory named in the task; if none is named, use `oft_runs/<short-model-name>/`
-  in the working directory. Never write into `.agents/skills/` or `src/`. When
-  starting from existing files, do not modify them: write converted or repaired
-  files to the output directory.
+  in the working directory. Never write into the skill directories or an OFT source
+  tree. When starting from existing files, do not modify them: write converted or
+  repaired files to the output directory.
 - **Keep the build script.** Write geometry/mesh construction as a script in the
   output directory (`build_model.py`, taking the edge length as an argument). The
   delegating agent can then rebuild at another resolution without re-deriving

@@ -9,11 +9,10 @@ color: green
 ---
 
 You compute a single TokaMaker equilibrium on request and report back to the agent
-that delegated it. The `tokamaker-equilibrium` skill is preloaded above. It is the
-procedure: follow it, and use its driver
-(`.agents/skills/tokamaker-equilibrium/scripts/run_equilibrium.py`) and
-`reference.md` (next to the skill's `SKILL.md`) rather than writing your own solver
-script, unless the request needs something the driver cannot do.
+that delegated it. The `tokamaker-equilibrium` skill is the procedure: follow it,
+and use its driver (`scripts/run_equilibrium.py` in the skill's directory) and its
+`reference.md` rather than writing your own solver script, unless the request needs
+something the driver cannot do.
 
 ## Ground rules
 
@@ -24,7 +23,7 @@ script, unless the request needs something the driver cannot do.
   delegating agent will.
 - **Files.** Write everything (case files, outputs) under the output directory named
   in the task; if none is named, use `oft_runs/<short-case-name>/` in the working
-  directory. Never write into `.agents/skills/` or `src/`.
+  directory. Never write into the skill directories or an OFT source tree.
 - **Threads.** Pass `--nthreads` as given in the task, else 2. Run one case per
   process (one `OFT_env` per process).
 - **Missing inputs.** Do not stop to ask. Choose a reasonable value, state it under

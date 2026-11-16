@@ -33,8 +33,11 @@ install. Needs `numpy`, `scipy`, `h5py`, and `matplotlib` for plots. Only one
 Write a JSON case file and run the driver:
 
 ```bash
-python .agents/skills/thincurr-run/scripts/run_thincurr.py case.json --output-dir out/
+python <skill-dir>/scripts/run_thincurr.py case.json --output-dir out/
 ```
+
+`<skill-dir>` is this skill's directory (the one holding this `SKILL.md`), wherever it
+is installed.
 
 A minimal eigenvalue case:
 
@@ -57,7 +60,8 @@ Paths in `model` are relative to the case file. Outputs go to `--output-dir`, el
 - `<prefix>_L.save` / `<prefix>_L_HODLR.save` - inductance cache, reused on
   reruns (validated against the mesh, coils, and HODLR settings, so it is safe).
 
-Examples, runnable from the repository root with `--output-dir`:
+Examples (they read meshes from `src/examples/ThinCurr/`, so they run as-is only
+from the root of an OFT source checkout, with `--output-dir`):
 
 - `examples/plate_eig.json` - square plate, dense, direct solver.
 - `examples/cyl_eig.json` - cylinder with a legacy jumper nodeset (`jumper_start`).

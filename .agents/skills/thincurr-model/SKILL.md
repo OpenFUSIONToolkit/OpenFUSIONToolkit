@@ -71,10 +71,11 @@ module for new geometry. Only one `OFT_env` may exist per Python process.
    through). Give exactly one value per region.
 5. **Verify.**
    ```bash
-   python .agents/skills/thincurr-model/scripts/inspect_model.py mesh-homology.h5 \
+   python <skill-dir>/scripts/inspect_model.py mesh-homology.h5 \
        --xml oft_in.xml --plot model.png
    ```
-   Look at the plot. Fix every `ERROR`; read every `WARNING`.
+   Look at the plot. Fix every `ERROR`; read every `WARNING`. (`<skill-dir>` is this
+   skill's directory, the one holding this `SKILL.md`.)
 
 ## Units
 

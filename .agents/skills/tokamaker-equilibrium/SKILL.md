@@ -33,8 +33,11 @@ several cases, use a separate process for each.
 Write a JSON case file and run the driver:
 
 ```bash
-python .agents/skills/tokamaker-equilibrium/scripts/run_equilibrium.py case.json
+python <skill-dir>/scripts/run_equilibrium.py case.json --output-dir out/
 ```
+
+`<skill-dir>` is this skill's directory (the one holding this `SKILL.md`), wherever it
+is installed.
 
 It writes `<prefix>_stats.json`, a gEQDSK file `g<prefix>`, and a flux-surface plot
 `<prefix>_psi.png`, and prints the usual `print_info()` summary plus coil currents.
@@ -44,7 +47,9 @@ Start from the example closest to the request and edit it:
 - `examples/fixed_boundary.json` — analytic LCFS shape, mesh generated on the fly.
 - `examples/free_boundary.json` — ITER L-mode on the repository's `ITER_mesh.h5`, solving for coil currents against an isoflux + X-point target.
 
-Both run as-is from the repository root.
+Both run as-is from the root of an OFT source checkout; the free-boundary one reads
+its mesh from the repository's `src/examples/`, so elsewhere, point `mesh_file` at
+a local copy.
 
 A minimal fixed-boundary case:
 

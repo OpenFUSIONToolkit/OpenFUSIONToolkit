@@ -82,6 +82,24 @@ the skills directly. When delegating:
   when they share files.
 - Relay a report's assumptions and caveats to the user, not only its numbers.
 
+### Installing outside this repository
+
+`.agents/install.py` installs the run skills and agents for Claude Code
+(`anthropic`), Codex (`openai`), or Gemini CLI (`google`), into the home directory
+(`--scope user`) or a project (`--scope project --project-dir DIR`):
+
+```bash
+python .agents/install.py --target anthropic openai --scope user
+```
+
+Skills are copied unchanged (`--link` symlinks them instead); agents are translated
+from `.claude/agents/` to each tool's format. Hardcoded agent models are mapped
+through `.agents/model_map.json` (edit it, or pass `--model-map FILE`). `--list`,
+`--dry-run`, `--force`, and `--uninstall` do what they say. Keep skills and agents
+free of paths into this repository (use `<skill-dir>/scripts/...`), and when adding
+agent frontmatter fields, check that `install.py` translates or drops them: Codex
+and Gemini CLI reject agent files with unknown keys.
+
 ## Build System
 
 OFT uses a two-stage build: `src/utilities/build_libs.py` builds external libraries and

@@ -1,0 +1,26 @@
+{
+  "_comment": [
+    "Model mapping used by install.py when translating agent definitions.",
+    "Keys are the 'model' values found in the source agents (.claude/agents/*.md):",
+    "Claude aliases (opus, sonnet, haiku, fable) or full IDs (claude-opus-...). Full IDs",
+    "with no entry of their own fall back to their alias. 'inherit' is never mapped: the",
+    "installed agent uses the main session's model. A model with no entry for a",
+    "non-Anthropic target is dropped (the agent inherits) with a warning.",
+    "Edit the values here, or pass --model-map FILE with only the entries to change.",
+    "openai: gpt-6-astra is the most capable model but is not available on every plan.",
+    "google: pro/flash/flash-lite are Gemini CLI aliases that track the current models."
+  ],
+  "anthropic": {},
+  "openai": {
+    "fable": "gpt-6.1-sol",
+    "opus": "gpt-6.1-sol",
+    "sonnet": "gpt-6.1-sol",
+    "haiku": "gpt-6-luna"
+  },
+  "google": {
+    "fable": "pro",
+    "opus": "pro",
+    "sonnet": "flash",
+    "haiku": "flash-lite"
+  }
+}
