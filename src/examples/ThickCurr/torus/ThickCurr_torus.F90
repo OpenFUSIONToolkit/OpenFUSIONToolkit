@@ -32,7 +32,10 @@
 !! \; R = \frac{2 \eta R_0}{a^2} \f]
 !! which gives \f$ \tau = L/R \approx 230 \f$ ms for this case. As the eigenmode adjusts its current
 !! distribution to maximize the decay time, the true value is expected to be somewhat larger than this
-!! estimate, while the nearby conducting wall reduces the inductance (and decay time) slightly.
+!! estimate, while the nearby conducting wall reduces the inductance (and decay time) slightly. Using the
+!! included mesh ThickCurr gives \f$ \tau \approx 239.5 \f$ ms, which agrees with the result on a finer
+!! mesh (6337 cells) to within 0.2%. The next slowest modes, with \f$ \tau \approx 81 \f$ ms, are nearly
+!! degenerate.
 !!
 !!\section doc_thickcurr_torus_ex_mesh Mesh generation
 !!
@@ -40,8 +43,12 @@
 !! `create_torus_mesh.py`, which requires the `gmsh` python package. A second-order (curved) mesh
 !! is generated to accurately represent the curved surfaces of the torus and outer boundary. The
 !! script also embeds a disk of radius 0.45 m in the \f$ z = 0 \f$ plane within the hole of the torus,
-!! which is used to measure the magnetic flux through the hole. The resulting mesh (`thickcurr_torus.h5`)
-!! is included with this example.
+!! which is used to measure the magnetic flux through the hole. The resulting mesh (`thickcurr_torus.h5`,
+!! 3571 cells) is included with this example.
+!!
+!! \note The direct solver used in this example requires approximately 2.5 GB of memory and the example
+!! takes approximately 5 minutes to run in serial with SuperLU. As the cost of the direct solve grows rapidly
+!! with problem size, care should be taken when refining the mesh (a mesh with 6337 cells required ~6 GB).
 !!
 !!\section doc_thickcurr_torus_ex_code Code Walk Through
 !!
@@ -378,9 +385,11 @@ END PROGRAM ThickCurr_torus
 !!\subsection doc_thickcurr_torus_ex_post_hist Flux history
 !!
 !! The script `plot_torus_flux.py` included with this example plots the flux through the hole of the
-!! torus (`torus_flux.hist`) and the magnetic energy (`thickcurr.hist`) as a function of time. After a
-!! short initial transient as the field in the vacuum region relaxes, the flux decays with the slowest
-!! decay time from the eigenvalue solve.
+!! torus (`torus_flux.hist`) and the magnetic energy (`thickcurr.hist`) as a function of time. Initially
+!! the flux decays slowly, as faster decaying modes redistribute the induced currents, after which the flux
+!! decays with the slowest decay time from the eigenvalue solve. With backward Euler time stepping the
+!! observed decay time is \f$ \Delta t / ln(1 + \Delta t / \tau) \approx 244.5 \f$ ms for the time step used
+!! here, see \ref doc_thickcurr_slab_ex_post_hist.
 !!
 !!\verbatim
 !!~$ python plot_torus_flux.py
@@ -398,6 +407,5 @@ END PROGRAM ThickCurr_torus
 !!~$ OFT_build_xdmf
 !!\endverbatim
 !!
-!! The current density (`J`) shows the toroidal eddy currents induced in the torus, which are
-!! concentrated toward the outer surface of the torus at early times before diffusing into the
-!! interior as they decay.
+!! The current density (`J`) shows the toroidal eddy currents induced in the torus by the removal of
+!! the vertical field.

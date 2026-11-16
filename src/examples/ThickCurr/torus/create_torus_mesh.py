@@ -17,8 +17,8 @@ R0 = 1.0          # Major radius of torus [m]
 a = 0.5           # Minor radius of torus [m]
 R_sphere = 3.0    # Radius of spherical domain [m]
 r_probe = 0.45    # Radius of embedded flux probe disk [m]
-h_torus = 0.2     # Mesh size in and near the torus [m]
-h_far = 1.0       # Mesh size near the outer boundary [m]
+h_torus = 0.3     # Mesh size in and near the torus [m]
+h_far = 1.5       # Mesh size near the outer boundary [m]
 
 gmsh.initialize()
 gmsh.option.setNumber("General.Terminal", 1)
