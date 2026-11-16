@@ -123,6 +123,12 @@ type, abstract, extends(bfem_interp) :: cylinv_interp
 end type cylinv_interp
 class(tracer), pointer :: active_tracer => NULL() !< Current tracer for thread (OpenMP)
 !$omp threadprivate(active_tracer)
+!---Bogacki-Shampine 3(2) Runge-Kutta method (FSAL), shared with the 3D tracer in @ref tracing
+REAL(r8), PARAMETER :: bs32_c2 = 0.5d0 !< Time of stage 2, also its coefficient \f$ a_{21} \f$
+REAL(r8), PARAMETER :: bs32_c3 = 0.75d0 !< Time of stage 3, also its coefficient \f$ a_{32} \f$ (\f$ a_{31}=0 \f$)
+REAL(r8), PARAMETER :: bs32_b(3) = (/2.d0/9.d0, 1.d0/3.d0, 4.d0/9.d0/) !< Weights of stages 1-3 for the 3rd order solution
+REAL(r8), PARAMETER :: bs32_e(4) = (/-5.d0/72.d0, 1.d0/12.d0, 1.d0/9.d0, -1.d0/8.d0/) !< Weights of stages 1-4 for
+!! the error estimate (difference between the 3rd and 2nd order solutions)
 ! integer(4), parameter, private :: nlocpts = 2e4
 contains
 !------------------------------------------------------------------------------
@@ -164,7 +170,7 @@ real(8), intent(in) :: pt(2) !< Starting point [2]
 real(8), optional, intent(inout) :: ptout(:,:) !< Points on surface [3,:]
 real(8), optional, intent(inout) :: vout(:,:) !< Leading ODE RHS components at the last evaluation of each step [:,maxsteps]
 real(8) :: z,tp,yp(2)
-integer(4) :: ncross
+integer(4) :: ncross,nstall
 !---
 IF(present(ptout))THEN
   ptout(2:3,1)=pt
@@ -172,6 +178,7 @@ IF(present(ptout))THEN
 END IF
 !---
 ncross=0
+nstall=0
 active_tracer%mesh=>mesh
 call active_tracer%setup(pt)
 z=pt(2)
@@ -194,9 +201,16 @@ do while(active_tracer%nsteps<active_tracer%maxsteps)
         active_tracer%status=1
         exit
     end if
+    !---Stop if the trace stalls; single short steps are allowed, as steps limited at cell
+    !---boundaries can be very short where the trace passes close to a vertex
     if(active_tracer%t-tp<active_tracer%tol*1.d-4)then
+      nstall=nstall+1
+      if(nstall>=10)then
         active_tracer%status=-5
         exit
+      end if
+    else
+      nstall=0
     end if
 end do
 IF(active_tracer%nsteps>=active_tracer%maxsteps)active_tracer%status=-1
@@ -433,16 +447,71 @@ IF(ASSOCIATED(self%dv))deallocate(self%dv)
 IF(ASSOCIATED(self%dv_last))deallocate(self%dv_last)
 end subroutine trace_delete_euler
 !------------------------------------------------------------------------------
+!> Step size factor for an embedded 3(2) Runge-Kutta method
+!!
+!! Standard controller \f$ 0.9 \, err^{-1/3} \f$, limited to [0.2,`facmax`]. Used both to
+!! grow accepted steps and to shrink rejected ones (`facmax=1`).
+!------------------------------------------------------------------------------
+PURE FUNCTION rk_step_factor(err,facmax) RESULT(fac)
+REAL(r8), INTENT(in) :: err !< Scaled error estimate of the step
+REAL(r8), INTENT(in) :: facmax !< Maximum factor
+REAL(r8) :: fac !< Factor for the next step size
+IF(err<1.d-10)THEN
+  fac=facmax
+ELSE
+  fac=MIN(facmax,MAX(0.2d0,0.9d0*err**(-1.d0/3.d0)))
+END IF
+END FUNCTION rk_step_factor
+!------------------------------------------------------------------------------
+!> Size of the explicit Euler step used to probe the solution for the initial step size
+!!
+!! First part of the initial step size selection in Hairer, Norsett and Wanner (Solving
+!! ODEs I, Sec. II.4), see \ref tracing_2d::rk_initial_step "rk_initial_step".
+!------------------------------------------------------------------------------
+PURE FUNCTION rk_probe_step(d0,d1) RESULT(h0)
+REAL(r8), INTENT(in) :: d0 !< Scaled RMS norm of the solution
+REAL(r8), INTENT(in) :: d1 !< Scaled RMS norm of the right-hand side
+REAL(r8) :: h0 !< Probe step size
+IF((d0<1.d-5).OR.(d1<1.d-5))THEN
+  h0=1.d-6
+ELSE
+  h0=1.d-2*d0/d1
+END IF
+END FUNCTION rk_probe_step
+!------------------------------------------------------------------------------
+!> Initial step size of a 3rd order method from an explicit Euler probe step
+!!
+!! Second part of the initial step size selection in Hairer, Norsett and Wanner (Solving
+!! ODEs I, Sec. II.4), using the estimated second derivative of the solution.
+!------------------------------------------------------------------------------
+PURE FUNCTION rk_initial_step(h0,d1,d2) RESULT(h)
+REAL(r8), INTENT(in) :: h0 !< Probe step size (from \ref tracing_2d::rk_probe_step "rk_probe_step")
+REAL(r8), INTENT(in) :: d1 !< Scaled RMS norm of the right-hand side
+REAL(r8), INTENT(in) :: d2 !< Scaled RMS norm of the change in the right-hand side over the probe step, divided by `h0`
+REAL(r8) :: h !< Initial step size
+IF(MAX(d1,d2)<=1.d-15)THEN
+  h=MAX(1.d-6,h0*1.d-3)
+ELSE
+  h=(1.d-2/MAX(d1,d2))**(1.d0/4.d0)
+END IF
+h=MIN(1.d2*h0,h)
+END FUNCTION rk_initial_step
+!------------------------------------------------------------------------------
 !> Evaluate the tracing ODE right-hand side for the RK tracer
 !!
 !! Also updates the tracer's current cell, logical position and field.
+!!
+!! @note The evaluation routines work on the thread's `active_tracer`, so `self` must be
+!! that tracer.
 !------------------------------------------------------------------------------
 SUBROUTINE trace_rk_eval(self,t,y,ydot)
-CLASS(tracer_rk), INTENT(inout) :: self !< RK tracer object
+CLASS(tracer_rk), TARGET, INTENT(inout) :: self !< RK tracer object
 REAL(r8), INTENT(in) :: t !< Time (or poloidal angle for inverse coordinates)
 REAL(r8), INTENT(in) :: y(:) !< State vector [neq]
 REAL(r8), INTENT(out) :: ydot(:) !< ODE right-hand side [neq]
 REAL(r8) :: ytmp(self%neq)
+IF(.NOT.ASSOCIATED(active_tracer,self))CALL oft_abort('Tracer is not the active tracer for this thread', &
+  'trace_rk_eval',__FILE__)
 ytmp=y ! Copy as the evaluation routines overwrite `self%v`
 IF(self%inv)THEN
   CALL tracing_eval_Binv(self%neq,t,ytmp,ydot)
@@ -457,7 +526,8 @@ SUBROUTINE trace_setup_rk(self,y,cell)
 CLASS(tracer_rk), INTENT(inout) :: self !< RK tracer object
 REAL(8), INTENT(in) :: y(2) !< Initial position
 INTEGER(4), OPTIONAL, INTENT(in) :: cell !< Guess for starting cell
-REAL(r8) :: pttmp(3),d0,d1,d2,h0
+INTEGER(i4) :: cell0
+REAL(r8) :: pttmp(3),d0,d1,d2,h0,f0(3),gop0(3,3),y0(2),dy0(2)
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: v0,dv0,sc
 IF(self%neq<=0)CALL oft_abort('Invalid number of equations.','trace_setup_rk',__FILE__)
 !---
@@ -487,30 +557,26 @@ pttmp=[self%y(1),self%y(2),0.d0]
 CALL bmesh_findcell(self%mesh,self%cell,pttmp,self%f)
 self%initialized=.TRUE.
 self%status=0
-!---Initial step size (Hairer, Norsett & Wanner, Solving ODEs I, Sec. II.4)
+!---Evaluate the first stage at the starting point
 ALLOCATE(v0(self%neq),dv0(self%neq),sc(self%neq))
 v0=self%v
 CALL trace_rk_eval(self,self%t,v0,dv0)
+cell0=self%cell; f0=self%f; gop0=self%gop; y0=self%y; dy0=self%dy
+!---Initial step size (Hairer, Norsett & Wanner, Solving ODEs I, Sec. II.4)
 sc=self%tol*(1.d0+ABS(v0))
 d0=SQRT(SUM((v0/sc)**2)/self%neq)
 d1=SQRT(SUM((dv0/sc)**2)/self%neq)
-IF((d0<1.d-5).OR.(d1<1.d-5))THEN
-  h0=1.d-6
-ELSE
-  h0=1.d-2*d0/d1
-END IF
-h0=MIN(h0,self%tmax)
+h0=MIN(rk_probe_step(d0,d1),self%tmax)
 CALL trace_rk_eval(self,self%t+h0,v0+h0*dv0,self%k(:,2))
-d2=SQRT(SUM(((self%k(:,2)-dv0)/sc)**2)/self%neq)/h0
-IF(MAX(d1,d2)<=1.d-15)THEN
-  self%h=MAX(1.d-6,h0*1.d-3)
+IF(self%cell==0)THEN ! Probe left the mesh, no estimate of the second derivative
+  d2=0.d0
 ELSE
-  self%h=(1.d-2/MAX(d1,d2))**(1.d0/4.d0)
+  d2=SQRT(SUM(((self%k(:,2)-dv0)/sc)**2)/self%neq)/h0
 END IF
-self%h=MIN(1.d2*h0,self%h,self%tmax)
-!---Restore field, cell and state at the starting point
-CALL trace_rk_eval(self,self%t,v0,self%dv)
-self%v=v0
+self%h=MIN(rk_initial_step(h0,d1,d2),self%tmax)
+!---Restore the location and field at the starting point (the probe may have left the cell or mesh)
+self%cell=cell0; self%f=f0; self%gop=gop0; self%y=y0; self%dy=dy0
+self%v=v0; self%dv=dv0
 DEALLOCATE(v0,dv0,sc)
 END SUBROUTINE trace_setup_rk
 !------------------------------------------------------------------------------
@@ -528,10 +594,6 @@ INTEGER(i4) :: i,cell0,nfail
 REAL(r8) :: h,err,fac,facmax,texit,dl,dx(2),f0(3),gop0(3,3),y0(2)
 REAL(r8) :: v0(self%neq),dv0(self%neq),ynew(self%neq),ytmp(self%neq),sc(self%neq)
 LOGICAL :: last,clipped,outside
-REAL(r8), PARAMETER :: c2=0.5d0, c3=0.75d0
-REAL(r8), PARAMETER :: a32=0.75d0
-REAL(r8), PARAMETER :: b1=2.d0/9.d0, b2=1.d0/3.d0, b3=4.d0/9.d0
-REAL(r8), PARAMETER :: e1=-5.d0/72.d0, e2=1.d0/12.d0, e3=1.d0/9.d0, e4=-1.d0/8.d0
 REAL(r8), PARAMETER :: clip_rel=1.d-6 !< Overshoot past the estimated cell exit, relative to the distance
 REAL(r8) :: clip_min
 !---Save state at the start of the step
@@ -554,6 +616,9 @@ DO
     END IF
     texit=HUGE(1.d0)
     DO i=1,3
+      ! Faces the point is already on (or just past, within the tolerance of the cell search) are
+      ! crossed at the start of the step, so they do not limit it
+      IF(f0(i)<=0.d0)CYCLE
       dl=gop0(1,i)*dx(1)+gop0(2,i)*dx(2)
       IF(dl<0.d0)texit=MIN(texit,-f0(i)/dl)
     END DO
@@ -569,14 +634,14 @@ DO
   END IF
   !---Stages (first same as last)
   self%k(:,1)=dv0
-  CALL trace_rk_eval(self,self%t+c2*h,v0+(c2*h)*self%k(:,1),self%k(:,2))
+  CALL trace_rk_eval(self,self%t+bs32_c2*h,v0+(bs32_c2*h)*self%k(:,1),self%k(:,2))
   outside=(self%cell==0)
   IF(.NOT.outside)THEN
-    CALL trace_rk_eval(self,self%t+c3*h,v0+(a32*h)*self%k(:,2),self%k(:,3))
+    CALL trace_rk_eval(self,self%t+bs32_c3*h,v0+(bs32_c3*h)*self%k(:,2),self%k(:,3))
     outside=(self%cell==0)
   END IF
   IF(.NOT.outside)THEN
-    ynew=v0+h*(b1*self%k(:,1)+b2*self%k(:,2)+b3*self%k(:,3))
+    ynew=v0+h*(bs32_b(1)*self%k(:,1)+bs32_b(2)*self%k(:,2)+bs32_b(3)*self%k(:,3))
     CALL trace_rk_eval(self,self%t+h,ynew,self%k(:,4))
     outside=(self%cell==0)
   END IF
@@ -584,7 +649,7 @@ DO
   IF(outside)THEN
     err=1.d10
   ELSE
-    ytmp=h*(e1*self%k(:,1)+e2*self%k(:,2)+e3*self%k(:,3)+e4*self%k(:,4))
+    ytmp=h*(bs32_e(1)*self%k(:,1)+bs32_e(2)*self%k(:,2)+bs32_e(3)*self%k(:,3)+bs32_e(4)*self%k(:,4))
     sc=self%tol*(1.d0+MAX(ABS(v0),ABS(ynew)))
     err=SQRT(SUM((ytmp/sc)**2)/self%neq)
   END IF
@@ -596,11 +661,7 @@ DO
     ELSE
       self%t=self%t+h
     END IF
-    IF(err<1.d-10)THEN
-      fac=facmax
-    ELSE
-      fac=MIN(facmax,MAX(0.2d0,0.9d0*err**(-1.d0/3.d0)))
-    END IF
+    fac=rk_step_factor(err,facmax)
     IF(clipped.OR.last)THEN ! Truncated steps should not reduce the nominal step size
       self%h=MAX(self%h,h*fac)
     ELSE
@@ -610,7 +671,7 @@ DO
   END IF
   !---Reject step and restore state at the start of the step
   nfail=nfail+1
-  self%h=h*MAX(0.2d0,0.9d0*err**(-1.d0/3.d0))
+  self%h=h*rk_step_factor(err,1.d0)
   facmax=1.d0
   self%cell=cell0; self%f=f0; self%gop=gop0; self%y=y0
   self%v=v0; self%dv=dv0

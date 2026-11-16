@@ -62,6 +62,8 @@ INTEGER(i4), PARAMETER :: hex_ed(2,12)=RESHAPE((/ & !< Hexahedron edge list
 INTEGER(i4), PARAMETER :: hex_fc(4,6)=RESHAPE((/ & !< Hexahedron face list
   1,2,3,4, 1,5,6,2, 2,6,7,3, &
   3,7,8,4, 1,4,8,5, 5,8,7,6/),(/4,6/))
+INTEGER(i4), PARAMETER :: hex_fc_coord(6) = (/3,2,-1,-2,1,-3/) !< Logical coordinate that is zero on each face
+!! of `hex_fc` (`k`: \f$ u_k \f$, `-k`: \f$ 1-u_k \f$)
 INTEGER(i4), PARAMETER :: hex_fe(4,6)=RESHAPE((/ & !< Hexahedron face edge list
   1,2,3,4, 5,9,-6,-1, 6,10,-7,-2, &
   7,11,-8,-3, -4,8,12,-5, -12,-11,-10,-9/),(/4,6/))
@@ -101,8 +103,33 @@ REAL(r8), PRIVATE :: active_pt(3) = 0.d0 !< Active point for high order find_cel
 !$omp threadprivate(active_mesh,active_cell,active_pt)
 !
 PUBLIC hex_3d_grid, hex_grid_forient, hex_get_bary, hex_get_bary_gop, hex_get_bary_cgop
-PUBLIC hex_bary_pfcoords, hex_bary_efcoords, hex_bary_ecoords, hex_bary_fcoords
+PUBLIC hex_bary_pfcoords, hex_bary_efcoords, hex_bary_ecoords, hex_bary_fcoords, hex_face_dist
 CONTAINS
+!------------------------------------------------------------------------------
+!> Get the signed distance (in logical space) of a point inside each face of a hexahedron
+!!
+!! Faces are numbered as in `hex_fc`, which is also the ordering of the cell face and
+!! neighbor lists (`lcf`, `lcc`). Each distance is zero on the face and positive inside the
+!! cell. The gradients of the distances are also returned if the gradients of the logical
+!! coordinates are provided.
+!------------------------------------------------------------------------------
+SUBROUTINE hex_face_dist(f,fface,gop,gface)
+REAL(r8), INTENT(in) :: f(:) !< Logical position in cell [3]
+REAL(r8), INTENT(out) :: fface(6) !< Distance inside each face
+REAL(r8), OPTIONAL, INTENT(in) :: gop(:,:) !< Gradients of logical coordinates [3,3]
+REAL(r8), OPTIONAL, INTENT(out) :: gface(3,6) !< Gradients of distances [3,6]
+INTEGER(i4) :: i,k
+DO i=1,6
+  k=hex_fc_coord(i)
+  IF(k>0)THEN
+    fface(i)=f(k)
+    IF(PRESENT(gface))gface(:,i)=gop(:,k)
+  ELSE
+    fface(i)=1.d0-f(-k)
+    IF(PRESENT(gface))gface(:,i)=-gop(:,-k)
+  END IF
+END DO
+END SUBROUTINE hex_face_dist
 !------------------------------------------------------------------------------
 !> Setup mesh with implementation specifics (`cell_np`, `cell_ne`, etc.)
 !------------------------------------------------------------------------------
@@ -408,8 +435,7 @@ fmax=MAXVAL(f(1:3))
 IF((fmax<=1.d0+tol).AND.(fmin>=-tol))THEN
   eface=0
 ELSE
-  !---Signed distance (in logical space) inside each face of `hex_fc`
-  fface=(/f(3), f(2), 1.d0-f(1), 1.d0-f(2), f(1), 1.d0-f(3)/)
+  CALL hex_face_dist(f,fface)
   eface=MINLOC(fface, DIM=1)
 END IF
 END FUNCTION hexmesh_in_cell

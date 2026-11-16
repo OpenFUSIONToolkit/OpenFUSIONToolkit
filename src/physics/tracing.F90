@@ -17,7 +17,9 @@
 module tracing
 use oft_base
 use oft_mesh_type, only: oft_mesh, mesh_findcell, cell_is_curved
+USE oft_hexmesh_type, ONLY: hex_face_dist
 use multigrid, only: multigrid_mesh
+USE tracing_2d, ONLY: bs32_c2, bs32_c3, bs32_b, bs32_e, rk_step_factor, rk_probe_step, rk_initial_step
 USE oft_io, only: hdf5_write
 !---
 use fem_utils, only: fem_interp
@@ -252,8 +254,11 @@ REAL(r8), PRIVATE, PARAMETER :: offmesh_tol = 1.d-2 !< Tolerance for cell logica
 LOGICAL, PRIVATE :: test_timeout = .FALSE. !< Timeout has passed?
 REAL(r8), PRIVATE :: timeout = 60.d0 !< Timeout for tracing calls (seconds)
 TYPE(oft_timer), PRIVATE :: timeout_timer !< Timer for timeout tests
-INTEGER(i4), PRIVATE, PARAMETER :: hex_face_coord(6) = (/3,2,-1,-2,1,-3/) !< Logical coordinate that is
-!! zero on each face of a hexahedron, in the ordering of `mesh%lcc` (`k`: \f$ u_k \f$, `-k`: \f$ 1-u_k \f$)
+REAL(r8), PRIVATE, PARAMETER :: rk_margin_linear = 1.d-9 !< Overshoot of RK steps past the faces of straight sided tetrahedra
+REAL(r8), PRIVATE, PARAMETER :: rk_margin_ho = 1.d-5 !< Overshoot of RK steps past the faces of curved cells and
+!! hexahedra, several times the accuracy of their logical coordinates (`ho_find_tol`)
+REAL(r8), PRIVATE, PARAMETER :: rk_margin_proc = 1.d-8 !< Minimum overshoot of RK steps past faces shared with other domains,
+!! in the logical coordinates of the base mesh used to find the domain containing the new point
 !---Tracer state definitions
 INTEGER(i4), PRIVATE, PARAMETER :: TRACER_INIT = 99 !< Tracer is awaiting setup
 !---Error states
@@ -1509,20 +1514,10 @@ REAL(r8), INTENT(in) :: gop(3,4) !< Gradients of logical coordinates
 INTEGER(i4), INTENT(out) :: nf !< Number of faces
 REAL(r8), INTENT(out) :: fb(6) !< Face coordinates [nf]
 REAL(r8), INTENT(out) :: gb(3,6) !< Gradients of face coordinates [3,nf]
-INTEGER(i4) :: i,k
 DEBUG_STACK_PUSH
 IF(mesh%type==3)THEN ! Hexahedra
   nf=6
-  DO i=1,6
-    k=hex_face_coord(i)
-    IF(k>0)THEN
-      fb(i)=f(k)
-      gb(:,i)=gop(:,k)
-    ELSE
-      fb(i)=1.d0-f(-k)
-      gb(:,i)=-gop(:,-k)
-    END IF
-  END DO
+  CALL hex_face_dist(f,fb,gop,gb)
 ELSE ! Tetrahedra
   nf=4
   fb(1:4)=f
@@ -1536,17 +1531,19 @@ END SUBROUTINE tracer_rk_faces
 !! Each face coordinate (see \ref tracing::tracer_rk_faces "tracer_rk_faces") is extrapolated
 !! linearly, \f$ \lambda_i(t) = \lambda_i + t \nabla \lambda_i \cdot \dot{x} \f$, and the
 !! exit is where the first one reaches \f$ -\delta \f$, so that the point is just past the
-!! face. A point that is already past a face with no neighboring cell (on the boundary of the
-!! local mesh) is instead allowed to continue until it is clearly off the mesh
-!! (\f$ \lambda_i = -1.5 \f$ `offmesh_tol`), so that the trace leaves the domain promptly.
+!! face. For faces shared with another domain \f$ \delta \f$ is replaced by `pmargin`.
+!! A point that is already past a face on the boundary of the global mesh is instead allowed
+!! to continue until it is clearly off the mesh (\f$ \lambda_i = -1.5 \f$ `offmesh_tol`), so
+!! that the trace leaves the domain promptly.
 !------------------------------------------------------------------------------
-FUNCTION tracer_rk_texit(mesh,cell,f,gop,dx,margin) RESULT(texit)
+FUNCTION tracer_rk_texit(mesh,cell,f,gop,dx,margin,pmargin) RESULT(texit)
 CLASS(oft_mesh), INTENT(in) :: mesh !< Mesh containing cell
 INTEGER(i4), INTENT(in) :: cell !< Current cell
 REAL(r8), INTENT(in) :: f(4) !< Logical position in cell
 REAL(r8), INTENT(in) :: gop(3,4) !< Gradients of logical coordinates
 REAL(r8), INTENT(in) :: dx(3) !< Velocity in physical coordinates
 REAL(r8), INTENT(in) :: margin !< Distance past the face \f$ \delta \f$ in logical coordinates
+REAL(r8), INTENT(in) :: pmargin !< Distance past faces shared with other domains in logical coordinates
 REAL(r8) :: texit !< Estimated exit time (`HUGE` if not leaving)
 INTEGER(i4) :: i,nf
 REAL(r8) :: rate,dist,fb(6),gb(3,6)
@@ -1557,7 +1554,13 @@ DO i=1,nf
   rate=DOT_PRODUCT(gb(:,i),dx)
   IF(rate>=0.d0)CYCLE
   dist=fb(i)
-  IF((dist<=0.d0).AND.(mesh%lcc(i,cell)==0))dist=dist+1.5d0*offmesh_tol
+  IF(mesh%lcc(i,cell)==0)THEN
+    IF(mesh%global%gbf(ABS(mesh%lcf(i,cell))))THEN ! Global boundary
+      IF(dist<=0.d0)dist=dist+1.5d0*offmesh_tol
+    ELSE ! Shared with another domain
+      dist=dist+pmargin-margin
+    END IF
+  END IF
   texit=MIN(texit,(MAX(dist,0.d0)+margin)/(-rate))
 END DO
 DEBUG_STACK_POP
@@ -1590,7 +1593,7 @@ IF(.NOT.ASSOCIATED(self%isend))THEN
   self%k=0.d0
   !---
   self%nisend=2
-  self%nrsend=2*self%neq+2
+  self%nrsend=self%neq+2
   ALLOCATE(self%isend(self%nisend),self%rsend(self%nrsend))
 END IF
 IF(PRESENT(init))THEN
@@ -1622,19 +1625,10 @@ cell0=self%cell; f0=self%f; gop0=self%gop
 sc=self%tol*(1.d0+ABS(y0))
 d0=SQRT(SUM((y0/sc)**2)/REAL(self%neq,r8))
 d1=SQRT(SUM((self%dy/sc)**2)/REAL(self%neq,r8))
-IF((d0<1.d-5).OR.(d1<1.d-5))THEN
-  h0=1.d-6
-ELSE
-  h0=1.d-2*d0/d1
-END IF
+h0=rk_probe_step(d0,d1)
 CALL tracer_rk_eval_cell(self,self%t+h0,y0+h0*self%dy,self%k(:,2))
 d2=SQRT(SUM(((self%k(:,2)-self%dy)/sc)**2)/REAL(self%neq,r8))/h0
-IF(MAX(d1,d2)<=1.d-15)THEN
-  self%h=MAX(1.d-6,h0*1.d-3)
-ELSE
-  self%h=(1.d-2/MAX(d1,d2))**(1.d0/4.d0)
-END IF
-self%h=MIN(1.d2*h0,self%h)
+self%h=rk_initial_step(h0,d1,d2)
 !---Restore location at the starting point
 self%cell=cell0; self%f=f0; self%gop=gop0
 DEBUG_STACK_POP
@@ -1666,7 +1660,8 @@ END SUBROUTINE tracer_rk_save
 !> Send tracer information to a new domain
 !!
 !! This subroutine transfers the number of steps, tracer position, time and step
-!! size, which is the full state of the integrator. Data is packed into a single array
+!! size, which is the full state of the integrator (the right-hand side is re-evaluated
+!! by \ref tracing::tracer_rk_setup "tracer_rk_setup" on the new domain). Data is packed into a single array
 !! for each real and integer data types and non-blocking MPI sends are created to
 !! transfer each array
 !------------------------------------------------------------------------------
@@ -1685,9 +1680,8 @@ DEBUG_STACK_PUSH
 self%isend(1)=self%nsteps
 self%isend(2)=self%estatus
 self%rsend(1:self%neq)=self%y
-self%rsend(self%neq+1:2*self%neq)=self%dy
-self%rsend(2*self%neq+1)=self%t
-self%rsend(2*self%neq+2)=self%h
+self%rsend(self%neq+1)=self%t
+self%rsend(self%neq+2)=self%h
 !---Set send flags
 sid=MPI_REQUEST_NULL
 !---Send to all other procs
@@ -1738,9 +1732,8 @@ ELSE
     self%nsteps=self%isend(1)
     self%estatus=self%isend(2)
     self%y=self%rsend(1:self%neq)
-    self%dy=self%rsend(self%neq+1:2*self%neq)
-    self%t=self%rsend(2*self%neq+1)
-    self%h=self%rsend(2*self%neq+2)
+    self%t=self%rsend(self%neq+1)
+    self%h=self%rsend(self%neq+2)
     rid=MPI_REQUEST_NULL
     self%rids=MPI_REQUEST_NULL
   END IF
@@ -1763,7 +1756,7 @@ END FUNCTION tracer_rk_recv
 !! straight-line extrapolation of the current direction leaves the current cell (see
 !! \ref tracing::tracer_rk_texit "tracer_rk_texit"), so that the next step starts in the
 !! neighboring cell. \f$ \delta = 10^{-9} \f$ for straight sided tetrahedra and
-!! \f$ 10^{-6} \f$ for other cells, matching the accuracy of the logical coordinates.
+!! \f$ 10^{-5} \f$ for other cells, several times the accuracy of their logical coordinates.
 !! Truncated steps do not reduce the nominal step size \f$ h \f$.
 !!
 !! When the end of the step lies in a different cell the right-hand side is re-evaluated
@@ -1773,20 +1766,26 @@ END FUNCTION tracer_rk_recv
 !! straight-line estimate of the exit was poor and the field is discontinuous between cells,
 !! the step is retried with the exit time re-estimated from the start and end of the step.
 !!
+!! The field across a face shared with another domain is not available, so a step that
+!! crosses such a face is retried in the same way until it ends just past the face (by at most
+!! twice its overshoot). This overshoot is the larger of \f$ \delta \f$ and `rk_margin_proc` in the
+!! logical coordinates of the base mesh, which is used to find the domain containing the new
+!! point. The tracer then stops (`cell=0`) so that it is transferred to that domain.
+!!
 !! A step that is rejected by the error test is retried with a smaller step size. If no
 !! acceptable step can be found the tracer is stopped with an error.
 !------------------------------------------------------------------------------
 SUBROUTINE tracer_rk_step(self)
 CLASS(oft_tracer_rk), INTENT(inout) :: self !< Tracer object
-INTEGER(i4) :: i,nf,cell0,cell1,cellnew,nfail
-REAL(r8) :: h,err,errover,fac,facmax,texit,margin,fover,tover,tcross,fmin,fmax
-REAL(r8) :: f0(4),gop0(3,4),f1(4),gop1(3,4),fnew(4),fb0(6),fb1(6),gb(3,6)
+INTEGER(i4) :: i,nf,cell0,cellnew,nfail
+REAL(r8) :: h,err,errover,facmax,texit,margin,pmargin,fmargin,fover,fproc,tover,tcross,fmin,fmax
+REAL(r8) :: f0(4),gop0(3,4),fnew(4),fb0(6),fb1(6),gb(3,6)
 REAL(r8) :: y0(self%neq),dy0(self%neq),dynew(self%neq),ynew(self%neq),ytmp(self%neq),sc(self%neq)
-LOGICAL :: clipped
-REAL(r8), PARAMETER :: c2=0.5d0, c3=0.75d0
-REAL(r8), PARAMETER :: b1=2.d0/9.d0, b2=1.d0/3.d0, b3=4.d0/9.d0
-REAL(r8), PARAMETER :: e1=-5.d0/72.d0, e2=1.d0/12.d0, e3=1.d0/9.d0, e4=-1.d0/8.d0
+LOGICAL :: clipped,leaving
+LOGICAL :: proc_face(6)
+CLASS(oft_mesh), POINTER :: mesh
 DEBUG_STACK_PUSH
+mesh=>self%ml_mesh%mesh
 self%nsteps=self%nsteps+1
 IF(self%cell==0)THEN
   self%estatus=TRACER_ERROR_FAIL
@@ -1799,58 +1798,80 @@ cell0=self%cell; f0=self%f; gop0=self%gop
 y0=self%y; dy0=self%dy
 facmax=5.d0
 nfail=0
-IF(cell_is_curved(self%ml_mesh%mesh,cell0))THEN
-  margin=1.d-6
+leaving=.FALSE.
+IF(cell_is_curved(mesh,cell0))THEN
+  margin=rk_margin_ho
 ELSE
-  margin=1.d-9
+  margin=rk_margin_linear
 END IF
-CALL tracer_rk_faces(self%ml_mesh%mesh,f0,gop0,nf,fb0,gb)
-texit=tracer_rk_texit(self%ml_mesh%mesh,cell0,f0,gop0,dy0(1:3),margin)
+!---Overshoot past faces shared with other domains, scaled so the new point is clearly in one
+!---cell of the base mesh used to find its domain (see tracing_line)
+pmargin=margin
+IF(self%ml_mesh%nbase<self%ml_mesh%mgdim)pmargin=MAX(margin,rk_margin_proc)* &
+  MAX(1.d0,self%ml_mesh%meshes(self%ml_mesh%nbase)%hrms/mesh%hrms)
+CALL tracer_rk_faces(mesh,f0,gop0,nf,fb0,gb)
+!---Faces shared with another domain
+DO i=1,nf
+  proc_face(i)=.FALSE.
+  IF(mesh%lcc(i,cell0)==0)proc_face(i)=(.NOT.mesh%global%gbf(ABS(mesh%lcf(i,cell0))))
+END DO
+texit=tracer_rk_texit(mesh,cell0,f0,gop0,dy0(1:3),margin,pmargin)
 DO
   !---End the step just past the exit of the current cell
   h=MIN(self%h,texit)
   clipped=(texit<self%h)
   !---Stages (first same as last), all using the field in the starting cell
   self%k(:,1)=dy0
-  CALL tracer_rk_eval_cell(self,self%t+c2*h,y0+(c2*h)*self%k(:,1),self%k(:,2))
-  CALL tracer_rk_eval_cell(self,self%t+c3*h,y0+(c3*h)*self%k(:,2),self%k(:,3))
-  ynew=y0+h*(b1*self%k(:,1)+b2*self%k(:,2)+b3*self%k(:,3))
+  CALL tracer_rk_eval_cell(self,self%t+bs32_c2*h,y0+(bs32_c2*h)*self%k(:,1),self%k(:,2))
+  CALL tracer_rk_eval_cell(self,self%t+bs32_c3*h,y0+(bs32_c3*h)*self%k(:,2),self%k(:,3))
+  ynew=y0+h*(bs32_b(1)*self%k(:,1)+bs32_b(2)*self%k(:,2)+bs32_b(3)*self%k(:,3))
   CALL tracer_rk_eval_cell(self,self%t+h,ynew,self%k(:,4))
   !---Error test
-  ytmp=h*(e1*self%k(:,1)+e2*self%k(:,2)+e3*self%k(:,3)+e4*self%k(:,4))
+  ytmp=h*(bs32_e(1)*self%k(:,1)+bs32_e(2)*self%k(:,2)+bs32_e(3)*self%k(:,3)+bs32_e(4)*self%k(:,4))
   sc=self%tol*(1.d0+MAX(ABS(y0),ABS(ynew)))
   err=SQRT(SUM((ytmp/sc)**2)/REAL(self%neq,r8))
   IF(err<=1.d0)THEN
     !---Find how far the step went past the faces of the starting cell
-    CALL tracer_rk_faces(self%ml_mesh%mesh,self%f,self%gop,nf,fb1,gb)
+    CALL tracer_rk_faces(mesh,self%f,self%gop,nf,fb1,gb)
     tover=0.d0
     tcross=h
     fover=0.d0
+    fproc=0.d0
     cellnew=cell0
     DO i=1,nf
       IF((fb1(i)>=0.d0).OR.(fb0(i)<=fb1(i)))CYCLE
-      IF((-fb1(i)>fover).AND.(self%ml_mesh%mesh%lcc(i,cell0)/=0))cellnew=self%ml_mesh%mesh%lcc(i,cell0)
+      IF((-fb1(i)>fover).AND.(mesh%lcc(i,cell0)/=0))cellnew=mesh%lcc(i,cell0)
       fover=MAX(fover,-fb1(i))
+      fmargin=margin
+      IF(proc_face(i))THEN
+        fmargin=pmargin
+        fproc=MAX(fproc,-fb1(i)/fmargin)
+      END IF
       tover=MAX(tover,h*(-fb1(i))/(fb0(i)-fb1(i)))
-      tcross=MIN(tcross,h*(MAX(fb0(i),0.d0)+margin)/(fb0(i)-fb1(i)))
+      tcross=MIN(tcross,h*(MAX(fb0(i),0.d0)+fmargin)/(fb0(i)-fb1(i)))
     END DO
-    !---Locate the new point (starting from the neighbor across the face crossed furthest)
-    CALL mesh_findcell(self%ml_mesh%mesh,cellnew,ynew(1:3),fnew)
-    IF((cellnew==cell0).OR.(cellnew==0))EXIT
-    IF(self%ml_mesh%mesh%in_cell(fnew,margin)/=0)EXIT ! Off mesh
-    !---Error from integrating the part of the step past the faces of the starting cell
-    !---with its field, estimated from the jump in the field at the new point
-    cell1=self%cell; f1=self%f; gop1=self%gop
-    self%cell=cellnew; self%f=fnew
-    CALL tracer_rk_rhs(self,self%t+h,ynew,dynew)
-    errover=tover*SQRT(SUM(((dynew-self%k(:,4))/sc)**2)/REAL(self%neq,r8))
-    IF((errover<=1.d0).OR.(fover<=2.d0*margin).OR.(tcross>=h))EXIT
+    !---Step left the local domain: the field there is not available to check the error from the
+    !---part of the step past the face, so retry until the end point is just past the face
+    leaving=(fproc>0.d0)
+    IF(leaving)THEN
+      IF((fproc<=2.d0).OR.(tcross>=h))EXIT
+    ELSE
+      !---Locate the new point (starting from the neighbor across the face crossed furthest)
+      CALL mesh_findcell(mesh,cellnew,ynew(1:3),fnew)
+      IF((cellnew==cell0).OR.(cellnew==0))EXIT
+      IF(mesh%in_cell(fnew,margin)/=0)EXIT ! Off mesh
+      !---Error from integrating the part of the step past the faces of the starting cell
+      !---with its field, estimated from the jump in the field at the new point
+      self%cell=cellnew; self%f=fnew
+      CALL tracer_rk_rhs(self,self%t+h,ynew,dynew)
+      errover=tover*SQRT(SUM(((dynew-self%k(:,4))/sc)**2)/REAL(self%neq,r8))
+      IF((errover<=1.d0).OR.(fover<=2.d0*margin).OR.(tcross>=h))EXIT
+    END IF
     !---Retry with exit time estimated from the start and end of the step
-    self%cell=cell1; self%f=f1; self%gop=gop1
     texit=tcross
   ELSE
     !---Reject step
-    self%h=h*MAX(0.2d0,0.9d0*err**(-1.d0/3.d0))
+    self%h=h*rk_step_factor(err,1.d0)
     facmax=1.d0
   END IF
   !---Restore state at the start of the step
@@ -1866,7 +1887,10 @@ END DO
 !---Accept step
 self%y=ynew
 self%t=self%t+h
-IF(cellnew==cell0)THEN ! Cell, logical position and gradients are already at the new point
+IF(leaving)THEN ! Stop to transfer the tracer to the domain containing the new point
+  self%dy=self%k(:,4)
+  self%cell=0
+ELSE IF(cellnew==cell0)THEN ! Cell, logical position and gradients are already at the new point
   self%dy=self%k(:,4)
 ELSE IF(cellnew==0)THEN
   self%cell=0
@@ -1877,15 +1901,10 @@ ELSE ! New point is off the mesh, use field from the closest cell
   self%f=fnew
   CALL tracer_rk_rhs(self,self%t,self%y,self%dy)
 END IF
-IF(err<1.d-10)THEN
-  fac=facmax
-ELSE
-  fac=MIN(facmax,MAX(0.2d0,0.9d0*err**(-1.d0/3.d0)))
-END IF
 IF(clipped)THEN ! Truncated steps should not reduce the nominal step size
-  self%h=MAX(self%h,h*fac)
+  self%h=MAX(self%h,h*rk_step_factor(err,facmax))
 ELSE
-  self%h=h*fac
+  self%h=h*rk_step_factor(err,facmax)
 END IF
 !---Check for exit from mesh
 IF(self%cell/=0)THEN
