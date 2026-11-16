@@ -1,6 +1,7 @@
 import subprocess
 import multiprocessing
 import queue
+import signal
 import time
 import os
 import sys
@@ -34,18 +35,20 @@ def run_OFT(command, nproc, timeout, return_stdout=False):
             command = "mpirun --map-by :OVERSUBSCRIBE -np {0} {1}".format(nproc, command)
         else:
             pytest.skip("Not compiled with MPI")
-    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    # Run in a new session so a timeout can kill the whole process group (shell, mpirun, and ranks)
+    pid = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           start_new_session=True)
     # Increase timeout if testing in debug configuration
     if env_flag('OFT_DEBUG_TEST'):
         timeout *= 4
-    # Wait for process to complete or timeout
-    timeout *= 10
-    while (pid.poll() is None) and (timeout > 0):
-        time.sleep(0.1)
-        timeout -= 1
-    if timeout <= 0:
-        pid.kill()
-    outs, errs = pid.communicate()
+    # Wait for process to complete or timeout, reading the output as it arrives; waiting without reading
+    # deadlocks once the output fills the pipe buffer (64 KB)
+    try:
+        outs, errs = pid.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        print("FAILED: OFT timed out after {0} s".format(timeout))
+        os.killpg(pid.pid, signal.SIGKILL)
+        outs, errs = pid.communicate()
     errcode = pid.poll()
     #
     std_out = outs.decode()
