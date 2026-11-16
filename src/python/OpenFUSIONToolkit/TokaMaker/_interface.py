@@ -38,7 +38,7 @@ class tokamaker_boot_ops_struct(c_struct):
      - `diagnose_bs` Print alpha/Ip scalars, bootstrap current stats, and full profile tables each NL iteration?
      - `taper_edge_jphi` Taper all current components to zero at the LCFS (default False)
      - `taper_edge_psi0` psi_N where the taper begins (standard: 0=axis, 1=LCFS; default 0.999)
-     - `taper_edge_shape` Taper shape: 1=cos²/Hann, 2=quintic smoothstep (default), 3=cubic power
+     - `taper_edge_shape` Taper shape: 1=cos^2/Hann, 2=quintic smoothstep (default), 3=cubic power
      - `saw_q_s` Sawtooth reset q on axis; 0 = off (default 0)
      - `saw_dq` Reset regions end where the base q crosses saw_q_s + saw_dq (default 0.03)
      - `saw_tol` Threshold on relative change in jphi_saw to freeze it (default 1e-4)
