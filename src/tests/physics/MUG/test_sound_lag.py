@@ -16,9 +16,9 @@ sound_setup = functools.partial(_sound_setup, 'lagrange')
 # Nonlinear runs, tetrahedral mesh, quadratic elements
 def test_nl_r1_p2(petsc_flag=False):
     '''Nonlinear sound wave, quadratic elements on a tetrahedral mesh, serial.'''
-    nerr_exp = 2.003579E-02
-    terr_exp = 2.001985E-02
-    verr_exp = 1.916730E-02
+    nerr_exp = 2.013377E-02
+    terr_exp = 2.011735E-02
+    verr_exp = 1.919536E-02
     assert sound_setup(1,1,2,2,petsc=petsc_flag)
     assert validate_sound(nerr_exp,terr_exp,verr_exp)
 @pytest.mark.mpi
@@ -31,9 +31,9 @@ def test_nl_r1_p2_mpi(mf,two_temp,petsc_flag):
     Also covers matrix-free Newton-Krylov, two-temperature, and (default variant only) PETSc runs.'''
     if (mf or two_temp) and petsc_flag:
         pytest.skip()
-    nerr_exp = 2.003579E-02
-    terr_exp = 2.001985E-02
-    verr_exp = 1.916730E-02
+    nerr_exp = 2.013377E-02
+    terr_exp = 2.011735E-02
+    verr_exp = 1.919536E-02
     assert sound_setup(1,2,2,3,mf=mf,petsc=petsc_flag,two_temp=two_temp)
     assert validate_sound(nerr_exp,terr_exp,verr_exp,two_temp=two_temp)
 
@@ -42,9 +42,9 @@ def test_nl_r1_p2_mpi(mf,two_temp,petsc_flag):
 @pytest.mark.slow
 def test_nl_r1_p3(petsc_flag=False):
     '''Nonlinear sound wave, cubic elements on a tetrahedral mesh with p-multigrid, serial.'''
-    nerr_exp = 3.136249E-03
-    terr_exp = 3.139014E-03
-    verr_exp = 3.416857E-03
+    nerr_exp = 3.067374E-03
+    terr_exp = 3.070338E-03
+    verr_exp = 3.355883E-03
     assert sound_setup(1,1,3,2,'0,2,2',petsc=petsc_flag)
     assert validate_sound(nerr_exp,terr_exp,verr_exp)
 @pytest.mark.slow
@@ -57,9 +57,9 @@ def test_nl_r1_p3_mpi(mf,two_temp,petsc_flag):
     Also covers matrix-free Newton-Krylov, two-temperature, and (default variant only) PETSc runs.'''
     if (mf or two_temp) and petsc_flag:
         pytest.skip()
-    nerr_exp = 3.136249E-03
-    terr_exp = 3.139014E-03
-    verr_exp = 3.416857E-03
+    nerr_exp = 3.067374E-03
+    terr_exp = 3.070338E-03
+    verr_exp = 3.355883E-03
     assert sound_setup(1,2,3,3,'0,0,2,2',mf=mf,petsc=petsc_flag,two_temp=two_temp)
     assert validate_sound(nerr_exp,terr_exp,verr_exp,two_temp=two_temp)
 
@@ -68,9 +68,9 @@ def test_nl_r1_p3_mpi(mf,two_temp,petsc_flag):
 @pytest.mark.slow
 def test_nl_r1_p4(petsc_flag=False):
     '''Nonlinear sound wave, quartic elements on a tetrahedral mesh with p-multigrid, serial.'''
-    nerr_exp = 2.675841E-03
-    terr_exp = 2.675744E-03
-    verr_exp = 2.679904E-03
+    nerr_exp = 2.620971E-03
+    terr_exp = 2.621259E-03
+    verr_exp = 2.624835E-03
     assert sound_setup(1,1,4,2,'0,2,2,2',petsc=petsc_flag)
     assert validate_sound(nerr_exp,terr_exp,verr_exp)
 @pytest.mark.slow
@@ -83,9 +83,9 @@ def test_nl_r1_p4_mpi(mf,two_temp,petsc_flag):
     Also covers matrix-free Newton-Krylov, two-temperature, and (default variant only) PETSc runs.'''
     if (mf or two_temp) and petsc_flag:
         pytest.skip()
-    nerr_exp = 2.675841E-03
-    terr_exp = 2.675744E-03
-    verr_exp = 2.679904E-03
+    nerr_exp = 2.620971E-03
+    terr_exp = 2.621259E-03
+    verr_exp = 2.624835E-03
     assert sound_setup(1,2,4,3,'0,0,2,2,2',mf=mf,petsc=petsc_flag,two_temp=two_temp)
     assert validate_sound(nerr_exp,terr_exp,verr_exp,two_temp=two_temp)
 
@@ -175,7 +175,7 @@ def test_hex_nl_r1_p2(petsc_flag=False):
     '''Nonlinear sound wave, quadratic elements on a hexahedral mesh, serial.'''
     nerr_exp = 2.124349E-02
     terr_exp = 2.124506E-02
-    verr_exp = 2.125581E-02
+    verr_exp = 2.116004E-02
     assert sound_setup(1,1,2,2,petsc=petsc_flag,hex_mesh=True)
     assert validate_sound(nerr_exp,terr_exp,verr_exp)
 @pytest.mark.mpi
@@ -190,7 +190,7 @@ def test_hex_nl_r1_p2_mpi(mf,two_temp,petsc_flag):
         pytest.skip()
     nerr_exp = 2.124349E-02
     terr_exp = 2.124506E-02
-    verr_exp = 2.125581E-02
+    verr_exp = 2.116004E-02
     assert sound_setup(1,2,2,3,mf=mf,petsc=petsc_flag,two_temp=two_temp,hex_mesh=True)
     assert validate_sound(nerr_exp,terr_exp,verr_exp,two_temp=two_temp)
 
@@ -199,9 +199,9 @@ def test_hex_nl_r1_p2_mpi(mf,two_temp,petsc_flag):
 @pytest.mark.slow
 def test_hex_nl_r1_p3(petsc_flag=False):
     '''Nonlinear sound wave, cubic elements on a hexahedral mesh with p-multigrid, serial.'''
-    nerr_exp = 4.525660E-03
-    terr_exp = 4.524234E-03
-    verr_exp = 4.513495E-03
+    nerr_exp = 3.770252E-03
+    terr_exp = 3.769822E-03
+    verr_exp = 3.765357E-03
     assert sound_setup(1,1,3,2,'0,2,2',petsc=petsc_flag,hex_mesh=True)
     assert validate_sound(nerr_exp,terr_exp,verr_exp)
 @pytest.mark.slow
@@ -214,9 +214,9 @@ def test_hex_nl_r1_p3_mpi(mf,two_temp,petsc_flag):
     Also covers matrix-free Newton-Krylov, two-temperature, and (default variant only) PETSc runs.'''
     if (mf or two_temp) and petsc_flag:
         pytest.skip()
-    nerr_exp = 4.525660E-03
-    terr_exp = 4.524234E-03
-    verr_exp = 4.513495E-03
+    nerr_exp = 3.770252E-03
+    terr_exp = 3.769822E-03
+    verr_exp = 3.765357E-03
     assert sound_setup(1,2,3,3,'0,0,2,2',mf=mf,petsc=petsc_flag,two_temp=two_temp,hex_mesh=True)
     assert validate_sound(nerr_exp,terr_exp,verr_exp,two_temp=two_temp)
 
@@ -227,9 +227,9 @@ def test_hex_nl_r1_p3_mpi(mf,two_temp,petsc_flag):
 def test_hex_nl_r1_p4(petsc_flag):
     '''Nonlinear sound wave, quartic elements on a hexahedral mesh with p-multigrid, serial.
     Run with native and PETSc linear algebra.'''
-    nerr_exp = 3.312218E-03
-    terr_exp = 3.312555E-03
-    verr_exp = 3.315561E-03
+    nerr_exp = 2.646936E-03
+    terr_exp = 2.647355E-03
+    verr_exp = 2.650340E-03
     assert sound_setup(1,1,4,2,'0,2,2,2',petsc=petsc_flag,hex_mesh=True)
     assert validate_sound(nerr_exp,terr_exp,verr_exp)
 @pytest.mark.slow
@@ -242,9 +242,9 @@ def test_hex_nl_r1_p4_mpi(mf,two_temp,petsc_flag):
     Also covers matrix-free Newton-Krylov, two-temperature, and (default variant only) PETSc runs.'''
     if (mf or two_temp) and petsc_flag:
         pytest.skip()
-    nerr_exp = 3.312218E-03
-    terr_exp = 3.312555E-03
-    verr_exp = 3.315561E-03
+    nerr_exp = 2.646936E-03
+    terr_exp = 2.647355E-03
+    verr_exp = 2.650340E-03
     assert sound_setup(1,2,4,3,'0,0,2,2,2',mf=mf,petsc=petsc_flag,two_temp=two_temp,hex_mesh=True)
     assert validate_sound(nerr_exp,terr_exp,verr_exp,two_temp=two_temp)
 

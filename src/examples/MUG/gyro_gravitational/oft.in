@@ -37,7 +37,7 @@
  me_factor=0.             ! No electron inertia
  te_factor=0.             ! p = p_i
  nu_gyro=1.               ! Braginskii gyroviscosity
- nu_perp=0.               ! No fluid viscosity
+ nu_visc=0.               ! No fluid viscosity
  xmhd_diss_centered=T     ! Time-center gyroviscosity
  xmhd_upwind=F            ! No upwinding
  eta=0.                   ! Ideal Ohm's law

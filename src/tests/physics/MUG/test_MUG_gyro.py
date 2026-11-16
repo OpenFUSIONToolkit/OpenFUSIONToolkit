@@ -59,7 +59,7 @@ oft_in_template = """
  vbc='all'
  dt=8.e-7
  eta={1}
- nu_perp={2}
+ nu_visc={2}
  nu_gyro={3}
  me_factor={5}
  xmhd_lin_euler_start=T
@@ -81,7 +81,7 @@ n0 = 1.e19          # Density
 mu_ion = 2.0        # Ion mass (amu)
 t_final = 1.e-4     # One half wave period (nsteps*dt)
 eta = 1.e-3         # Resistivity (diffusivity units)
-nu_perp = 1.e-3     # Viscosity (diffusivity units)
+nu_visc = 1.e-3     # Viscosity (diffusivity units)
 ti0 = 2.0           # Ion temperature (eV)
 phys_tol = 1.e-2    # Allowed deviation; the gyroviscous and Hall rotations each change V_y by ~0.47
 # Physical constants (as in mhd_utils.F90)
@@ -110,7 +110,7 @@ def alfven_linear(nu_gyro, hall=False, me_factor=100.):
         h = k_wave**2*B0/(mu0*elec_charge*n0)
         de2 = me_factor*elec_mass/(mu0*elec_charge**2*n0)
     ikv = 1j*k_wave*v_alf
-    dk2 = nu_perp*k_wave**2
+    dk2 = nu_visc*k_wave**2
     ek2 = eta*k_wave**2
     # State = [U_x, U_y, b_x, b_y]
     mat = np.array([
@@ -135,7 +135,7 @@ def gyro_case(nu_gyro, hall=False, me_factor=100., linear=False):
     '''
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(ti0, eta, nu_perp, nu_gyro, 'T' if hall else 'F', me_factor,
+        fid.write(oft_in_template.format(ti0, eta, nu_visc, nu_gyro, 'T' if hall else 'F', me_factor,
                                          'T' if linear else 'F'))
     # Single FE level: block-Jacobi/LU preconditioner inside one GMRES iteration (as in mug_testing.mug_command)
     return run_OFT("./test_MUG_gyro oft.in oft_in_xmhd.xml", 1, 600)

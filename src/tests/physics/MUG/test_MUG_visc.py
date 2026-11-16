@@ -57,7 +57,7 @@ oft_in_template = """
  dt=1.e-6
  eta=1.
  visc_type='{1}'
- nu_perp={2}
+ nu_visc={2}
  nu_par={3}
  d_dens={4}
  nsteps=100
@@ -103,14 +103,14 @@ def sound_linear(nu_long):
     u_hat = (expm(mat*t_final) @ x0)[1]/0.6
     return np.array([-u_hat.imag, u_hat.real])
 
-def visc_case(visc_type,nu_perp,nu_par,b_dir):
+def visc_case(visc_type,nu_visc,nu_par,b_dir):
     '''Write the input for a damped sound wave and run test_MUG_visc
 
     `b_dir` is the (unnormalized) field direction as a namelist string.
     '''
     os.chdir(test_dir)
     with open('oft.in','w+') as fid:
-        fid.write(oft_in_template.format(b_dir,visc_type,nu_perp,nu_par,d_dens,kappa))
+        fid.write(oft_in_template.format(b_dir,visc_type,nu_visc,nu_par,d_dens,kappa))
     # Single FE level: block-Jacobi/LU preconditioner inside one GMRES iteration (as in mug_testing.mug_command)
     return run_OFT("./test_MUG_visc oft.in oft_in_xmhd.xml", 1, 600)
 
@@ -167,16 +167,16 @@ def test_par_aligned():
     (1965)) with eta_0 = m_i n0 nu_par, which acts on the longitudinal velocity with coefficient 4/3 nu_par, the same
     as `iso`.'''
     assert visc_case('kin',0.,nu_visc,'0.,0.,1.')
-    assert validate_result(4.0*nu_visc/3.0,7.742497757901297E-003)
+    assert validate_result(4.0*nu_visc/3.0,7.728128494748115E-003)
 
 def test_par_perp():
     '''Sound wave across B damped by the parallel stress, which acts on the longitudinal velocity with coefficient
     1/3 nu_par, a quarter of the field-aligned case.'''
     assert visc_case('kin',0.,nu_visc,'1.,0.,0.')
-    assert validate_result(nu_visc/3.0,3.348344623499156E-003)
+    assert validate_result(nu_visc/3.0,3.337417275579408E-003)
 
 def test_par_magic():
     '''Sound wave at the angle to B where b.W.b = 0 (cos^2 = 1/3), so the parallel stress vanishes and the wave
     is undamped.'''
     assert visc_case('kin',0.,nu_visc,b_magic)
-    assert validate_result(0.0,1.731701163369848E-003)
+    assert validate_result(0.0,1.452759324069408E-003)

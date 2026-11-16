@@ -292,8 +292,8 @@ REAL(r8) :: eta = 1.E-2_r8 !< Resistivity \f$ \eta / \mu_0 \f$
 REAL(r8) :: eta_temp = -1._r8 !< Reference temperature for resistivity
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: eta_reg !< Resistivity scale factors
 REAL(r8) :: eta_hyper = -1.d0 !< Hyper resistivity
-REAL(r8) :: nu_par = -1.d0 !< Braginskii parallel viscosity, added to `nu_perp` (neg to disable)
-REAL(r8) :: nu_perp = 0.d0 !< Fluid viscosity (note: dynamic viscosity is nu=nu_perp*den_scale/n0)
+REAL(r8) :: nu_par = -1.d0 !< Braginskii parallel viscosity, added to `nu_visc` (neg to disable)
+REAL(r8) :: nu_visc = -1.d0 !< Fluid viscosity, must be set (note: dynamic viscosity is nu=nu_visc*den_scale/n0)
 REAL(r8) :: nu_gyro = -1.d0 !< Gyroviscosity coefficient
 REAL(r8) :: m_ion = -1.d0 !< Ion mass in SI units
 REAL(r8) :: mu_ion = 2.d0 !< Ion mass in atomic units
@@ -305,13 +305,15 @@ REAL(r8) :: k_boltz = elec_charge !< Boltzmann constant
 REAL(r8) :: temp_gamma = 5.d0/3.d0 !< Ratio of specific heats
 REAL(r8) :: kappa_par(2) = 1.d0 !< Parallel thermal conductivity factor
 REAL(r8) :: kappa_perp(2) = 1.d0 !< Perpendicular thermal conductivity factor
+!> Lower limit on the electron perpendicular diffusivity [m^2/s] with Braginskii conduction (two temperatures)
+REAL(r8), PARAMETER :: chi_perp_e_min = 0.d0
 REAL(r8), PUBLIC :: vel_scale = 1.d3 !< Velocity scale factor
 REAL(r8), PUBLIC :: den_scale = -1.d0 !< Density scale factor
 REAL(r8), PUBLIC :: n2_scale = -1.d0 !< Hyper-diffusivity aux variable scale factor
 REAL(r8), PUBLIC :: j2_scale = -1.d0  !< Hyper-resistivity aux variable scale factor
 REAL(r8), PUBLIC :: den_floor = -1.d0 !< Density floor
 REAL(r8), PUBLIC :: temp_floor = -1.d0 !< Temperature floor
-REAL(r8), PUBLIC :: g_accel = 0.d0 !< Gravity (oriented in the -Z direction)
+REAL(r8), PUBLIC :: g_accel = 0.d0 !< Gravitational acceleration [m/s^2], acting in the -Z direction for `g_accel>0`
 REAL(r8), PUBLIC :: xmhd_B_eps = 1.d-10 !< Epsilon for magnetic field normalization
 INTEGER(i4) :: xmhd_taxis = 3 !< Axis for toroidal flux and current
 !> Resistivity profile
@@ -395,7 +397,7 @@ CONTAINS
 !! | `xmhd_ohmic=F`     | Include Ohmic heating | bool |
 !! | `xmhd_visc_heat=F` | Include Viscous heating | bool |
 !! | `xmhd_brag=F`      | Use Braginskii thermal conduction coefficients | bool |
-!! | `xmhd_upwind=T`    | Use upwinding for advection terms | bool |
+!! | `xmhd_upwind=T`    | Use streamline upwinding for advection terms (see \ref doc_mug_xmhd_eqns_upwind). Ignored (always off) for linear runs | bool |
 !! | `xmhd_therm_equil=F` | Include thermal equilibration between electrons/ions | bool |
 !! | `xmhd_diss_centered=F` | Use time-centered dissipation terms for (V, Ti, Te) | bool |
 !! | `xmhd_lin_bdf2=T` | Linear runs only: use second-order BDF2 time integration (otherwise first-order backward Euler) | bool |
@@ -410,8 +412,8 @@ CONTAINS
 !! | `eta=1E-2`         | Plasma resistivity, in diffusivity units | real |
 !! | `eta_temp=-1`      | Base resistivity temperature (neg to disable) | real |
 !! | `eta_hyper=-1`     | Plasma hyper-resistivity, in diffusivity units (neg to disable) | real |
-!! | `nu_perp=0`        | Fluid viscosity (`visc_type`), in diffusivity units | real |
-!! | `nu_par=-1`        | Braginskii parallel viscosity, added to `nu_perp`, in diffusivity units (neg to disable) | real |
+!! | `nu_visc=-1`       | Fluid viscosity (`visc_type`), in diffusivity units. Must be set (0 for none). Legacy name `nu_perp` is accepted but deprecated | real |
+!! | `nu_par=-1`        | Braginskii parallel viscosity, added to `nu_visc`, in diffusivity units (neg to disable) | real |
 !! | `nu_gyro=-1`       | Scale factor for Braginskii ion gyroviscosity (neg to disable) | real |
 !! | `d_dens=1`         | Plasma diffusivity, in diffusivity units | real |
 !! | `d2_dens=-1`        | Plasma hyper-diffusivity, in diffusivity units (neg to disable) | real |
@@ -450,10 +452,11 @@ integer(i4), intent(out) :: maxextrap !< Extrapolation order for initial guess
 integer(i4), intent(out) :: ittarget !< Maximum number of linear iterations
 integer(i4), intent(out) :: nl_update !< Maximum number of linear iterations
 integer(i4) :: io_unit,ierr
+real(r8) :: nu_perp !< Legacy name for `nu_visc` (deprecated)
 !---
 namelist/xmhd_options/xmhd_jcb,xmhd_advec,xmhd_adv_den,xmhd_adv_temp,xmhd_hall,xmhd_ohmic, &
   xmhd_visc_heat,xmhd_brag,xmhd_upwind,xmhd_therm_equil,bbc,vbc,nbc,tbc,visc_type,dt,eta, &
-  eta_temp,nu_par,nu_perp,nu_gyro,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
+  eta_temp,nu_par,nu_visc,nu_perp,nu_gyro,d_dens,kappa_par,kappa_perp,nsteps,rst_freq,lin_tol,nl_tol,nu_xmhd, &
   xmhd_nparts,nclean,rst_ind,maxextrap,ittarget,nl_update,mu_ion,me_factor,te_factor,xmhd_prefreq, &
   xmhd_monitor_div,xmhd_mfnk,xmhd_diss_centered,eta_hyper,d2_dens,gmres_ninner,gmres_maxits, &
   dt_max,xmhd_lin_bdf2,xmhd_lin_euler_start
@@ -471,6 +474,7 @@ maxextrap=2
 ittarget=60
 nl_update=2
 dt_max=-1.d0
+nu_perp=-HUGE(nu_perp)
 !------------------------------------------------------------------------------
 ! Read-in Parameters
 !------------------------------------------------------------------------------
@@ -479,6 +483,11 @@ read(io_unit,xmhd_options,IOSTAT=ierr)
 close(io_unit)
 if(ierr<0)call oft_abort('No MHD options found in input file.','xmhd_read_settings',__FILE__)
 if(ierr>0)call oft_abort('Error parsing MHD options in input file.','xmhd_read_settings',__FILE__)
+!---Legacy name for fluid viscosity
+IF(nu_perp>-HUGE(nu_perp))THEN
+  CALL oft_warn('"nu_perp" is deprecated, use "nu_visc" instead (value copied to "nu_visc")')
+  nu_visc=nu_perp
+END IF
 IF(dt_max<0.d0)dt_max=dt
 !---Look for xMHD node
 IF(ASSOCIATED(oft_env%xml))THEN
@@ -520,6 +529,29 @@ IF(.NOT.xmhd_two_temp)xmhd_therm_equil=.FALSE.
 CALL xmhd_setup_regions
 DEBUG_STACK_POP
 END SUBROUTINE xmhd_read_settings
+!------------------------------------------------------------------------------
+!> Check physics settings before a time-dependent run
+!!
+!! Aborts if the fluid viscosity (`nu_visc`) has not been set, or if upwinding is requested
+!! for an advected field whose diffusivity is not positive, which the upwinding weight requires
+!! (see \ref doc_mug_xmhd_eqns_upwind).
+!------------------------------------------------------------------------------
+SUBROUTINE xmhd_check_settings()
+IF(nu_visc<0.d0)CALL oft_abort('Fluid viscosity "nu_visc" must be set (0 for none)', &
+  'xmhd_check_settings',__FILE__)
+IF(xmhd_upwind)THEN
+  IF(xmhd_advec.AND.(nu_visc<=0.d0))CALL oft_abort('Upwinding requires "nu_visc>0" when advection is enabled', &
+    'xmhd_check_settings',__FILE__)
+  IF(xmhd_adv_den.AND.(d_dens<=0.d0))CALL oft_abort('Upwinding requires "d_dens>0" when density is advanced', &
+    'xmhd_check_settings',__FILE__)
+  IF(xmhd_adv_temp)THEN
+    IF(kappa_perp(1)<=0.d0)CALL oft_abort('Upwinding requires "kappa_perp(1)>0" when temperature is advanced', &
+      'xmhd_check_settings',__FILE__)
+    IF(xmhd_two_temp.AND.(kappa_perp(2)<=0.d0))CALL oft_abort( &
+      'Upwinding requires "kappa_perp(2)>0" when electron temperature is advanced','xmhd_check_settings',__FILE__)
+  END IF
+END IF
+END SUBROUTINE xmhd_check_settings
 !------------------------------------------------------------------------------
 !> Main driver subroutine for extended MHD time advance
 !!
@@ -576,6 +608,7 @@ mesh=>oft_hcurl%mesh
 !------------------------------------------------------------------------------
 IF(ASSOCIATED(initial_fields%Te))xmhd_two_temp=.TRUE.
 CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget,nl_update)
+CALL xmhd_check_settings
 IF(den_scale<0.d0)den_scale=SQRT(initial_fields%Ne%dot(initial_fields%Ne)/REAL(initial_fields%Ne%ng,8))
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))j2_scale=(REAL(oft_lagrange%order,8)/mesh%hrms)**2
@@ -765,7 +798,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,102)'eta0_Temp  = ',eta_temp
   WRITE(*,101)'visc_type  = ',visc_type
   WRITE(*,102)'  nu_par   = ',nu_par
-  WRITE(*,102)'  nu_perp  = ',nu_perp
+  WRITE(*,102)'  nu_visc  = ',nu_visc
   IF(xmhd_adv_den)WRITE(*,102)'D_dens     = ',d_dens
   IF(xmhd_adv_temp)THEN
     IF(xmhd_two_temp)THEN
@@ -1143,6 +1176,7 @@ xmhd_linear=.TRUE.
 xmhd_upwind=.FALSE.
 xmhd_diss_centered=.TRUE.
 use_bdf2=xmhd_lin_bdf2
+CALL xmhd_check_settings
 !------------------------------------------------------------------------------
 ! Setup ML environment
 !------------------------------------------------------------------------------
@@ -1341,7 +1375,7 @@ IF(oft_env%head_proc)THEN
   WRITE(*,102)'eta0_Temp  = ',eta_temp
   WRITE(*,101)'visc_type  = ',visc_type
   WRITE(*,102)'  nu_par   = ',nu_par
-  WRITE(*,102)'  nu_perp  = ',nu_perp
+  WRITE(*,102)'  nu_visc  = ',nu_visc
   IF(xmhd_adv_den)WRITE(*,102)'D_dens     = ',d_dens
   IF(xmhd_adv_temp)THEN
     IF(xmhd_two_temp)THEN
@@ -1559,22 +1593,51 @@ END IF
 DEBUG_STACK_POP
 end subroutine xmhd_lin_run
 !------------------------------------------------------------------------------
-!> Evalute upwinding parameter
+!> Evaluate upwinding weight
 !!
-!! Upwinding parameter for inconsistent streamline upwinded Petrov-Galerkin method
-!! (distorted bases applied to advective terms only).
+!! Weight for the inconsistent streamline-upwind Petrov-Galerkin (SUPG) method, where the
+!! streamline modification of the test functions is applied to the advection terms only (see
+!! \ref doc_mug_xmhd_eqns_upwind). The weight is the optimal value for 1D advection-diffusion,
+!! \f$ w = \beta h_e / (2 |v|) \f$ with \f$ \beta = \coth(Pe) - 1/Pe \f$ and \f$ Pe = |v| h_e / (2 \nu) \f$,
+!! from A. N. Brooks and T. J. R. Hughes, Comput. Methods Appl. Mech. Eng. 32, 199 (1982).
 !!
-!! @result Upwinding weight
+!! Where the local diffusivity is not positive (eg. zeroed by a shaping function) full upwinding
+!! (\f$ \beta = 1 \f$) is used. Uniform zero diffusivities are rejected when upwinding is enabled
+!! (see \ref xmhd::xmhd_check_settings "xmhd_check_settings").
+!!
+!! @result Upwinding weight [s]
 !------------------------------------------------------------------------------
 PURE FUNCTION xmhd_upwind_weight(v_mag,he,nu) RESULT(w_up)
-REAL(r8), INTENT(in) :: v_mag !< Advection velocity [m/s]
+REAL(r8), INTENT(in) :: v_mag !< Advection speed [m/s]
 REAL(r8), INTENT(in) :: he !< Element size [m]
-REAL(r8), INTENT(in) :: nu !< Dissipation amplitude [m^2/s^2]
+REAL(r8), INTENT(in) :: nu !< Diffusivity of the advected field [m^2/s]
 REAL(r8) :: Pc,beta,w_up
-Pc = MAX(1.d-8,v_mag*he/(2.d0*nu)) ! Peclet number
-beta = 1.d0/TANH(Pc) - 1.d0/Pc ! Beta parameter
+IF(nu>0.d0)THEN
+  Pc = MAX(1.d-8,v_mag*he/(2.d0*nu)) ! Peclet number
+  beta = 1.d0/TANH(Pc) - 1.d0/Pc ! Beta parameter
+ELSE
+  beta = 1.d0 ! Full upwinding without diffusion
+END IF
 w_up = beta*he/(2.d0*MAX(1.d-10,v_mag)) ! Upwinding weight
 END FUNCTION xmhd_upwind_weight
+!------------------------------------------------------------------------------
+!> Get element size used for upwinding
+!!
+!! Node spacing of a regular cell with the volume of cell `i`: edge length divided by
+!! the Lagrange element order.
+!!
+!! @result Element size [m]
+!------------------------------------------------------------------------------
+FUNCTION xmhd_elem_size(i) RESULT(he)
+INTEGER(i4), INTENT(in) :: i !< Cell index
+REAL(r8) :: he
+IF(mesh%cell_np==8)THEN ! Hexahedron (cube)
+  he = mesh%cv(i)**(1.d0/3.d0)
+ELSE ! Tetrahedron (regular)
+  he = (6.d0*SQRT(2.d0)*mesh%cv(i))**(1.d0/3.d0)
+END IF
+he = he/REAL(oft_lagrange%order,8)
+END FUNCTION xmhd_elem_size
 !------------------------------------------------------------------------------
 !> Update Jacobian matrix with new fields
 !------------------------------------------------------------------------------
@@ -1657,7 +1720,7 @@ DO ip=1,mesh%nparts
 do ii=1,mesh%tloc_c(ip)%n
   i=mesh%tloc_c(ip)%v(ii)
   curved=cell_is_curved(mesh,i) ! Straight cell test
-  he = (6.d0*SQRT(2.d0)*mesh%cv(i))**(1.d0/3.d0)/REAL(oft_lagrange%order,8) ! Cell node spacing
+  he = xmhd_elem_size(i) ! Cell node spacing
   !---Get local to global DOF mapping
   call oft_lagrange%ncdofs(i,j_lag)
   call oft_hgrad%ncdofs(i,j_hgrad)
@@ -1714,7 +1777,7 @@ do ii=1,mesh%tloc_c(ip)%n
     IF(ASSOCIATED(res_shaping))eta_curr = eta_curr*res_shaping(pt)
     !---Viscous diffusion
     nu_tmp(1) = nu_par
-    nu_tmp(2) = nu_perp
+    nu_tmp(2) = nu_visc
     IF(ASSOCIATED(visc_shaping))nu_tmp = nu_tmp*visc_shaping(pt)
     !---Density diffusion
     diff_tmp=d_dens
@@ -1725,7 +1788,7 @@ do ii=1,mesh%tloc_c(ip)%n
         chi_temp(1:2) = brag_ion_transport(u0%N,u0%Ti,mu_ion,bmag)/u0%N
         chi_temp(3:4) = brag_elec_transport(u0%N,u0%Te,bmag)/u0%N
         chi_temp(3) = kappa_par(2)*chi_temp(3)
-        chi_temp(4) = MAX(1.d1, kappa_perp(2)*chi_temp(4))
+        chi_temp(4) = MAX(chi_perp_e_min, kappa_perp(2)*chi_temp(4))
       ELSE
         chi_temp(1:2)=brag_comb_transport(u0%N,u0%Ti,mu_ion,bmag)/u0%N
       END IF
@@ -1959,7 +2022,8 @@ do ii=1,mesh%tloc_c(ip)%n
 ! Compute dV/dt(V) matrix (3:5,3:5)
 !------------------------------------------------------------------------------
     !---Upwinding setup
-    IF(xmhd_upwind)c1 = jac_dt*det*xmhd_upwind_weight(v0_mag,he,nu_tmp(2)*den_scale/u0%N)
+    c1 = 0.d0
+    IF(xmhd_upwind.AND.xmhd_advec)c1 = jac_dt*det*xmhd_upwind_weight(v0_mag,he,nu_tmp(2)*den_scale/u0%N)
     c2 = den_scale*jac_dt*det/u0%N
     IF(.NOT.xmhd_diss_centered)THEN
       c1 = 2.d0*c1; c2 = 2.d0*c2
@@ -1980,7 +2044,7 @@ do ii=1,mesh%tloc_c(ip)%n
       umat(1,1) = umat(1,1) + u
       umat(2,2) = umat(2,2) + u
       umat(3,3) = umat(3,3) + u
-      IF(xmhd_upwind)THEN
+      IF(xmhd_upwind.AND.xmhd_advec)THEN
         uvec = u0%V*(DOT_PRODUCT(u0%V,lag_gop(:,jc)))*c1
       ELSE
         uvec=0.d0
@@ -2405,7 +2469,9 @@ do ii=1,mesh%tloc_c(ip)%n
       c2 = divv*tgam_fac ! compression
       IF(xmhd_therm_equil)c2 = c2 - (1.d0 - 3.d0*u0%Ti/u0%Te)/(2.d0*elec_ion_therm_rate(u0%Te,u0%N,mu_ion))
       c3 = tgam_fac*jac_dt*det
-      IF(.NOT.xmhd_diss_centered)c3 = 2.d0*c3
+      IF(.NOT.xmhd_diss_centered)THEN
+        c1 = 2.d0*c1; c3 = 2.d0*c3
+      END IF
       do jc=1,oft_lagrange%nce
         u = (lag_rop(jc)*c2 + DOT_PRODUCT(umat(:,1),lag_gop(:,jc)))*jac_dt*det
         u = u + lag_rop(jc)*det
@@ -2415,7 +2481,7 @@ do ii=1,mesh%tloc_c(ip)%n
         u = u - ((chi_temp(3)-chi_temp(4))*DOT_PRODUCT(u0%dN,bhat)*DOT_PRODUCT(bhat,lag_gop(:,jc)) &
           + chi_temp(4)*DOT_PRODUCT(u0%dN,lag_gop(:,jc)))*c3/u0%N
         !---Upwinding
-        IF(xmhd_upwind)uvec = uvec + 2.d0*umat(:,1)*(DOT_PRODUCT(umat(:,1),lag_gop(:,jc)))*c1
+        IF(xmhd_upwind)uvec = uvec + umat(:,1)*(DOT_PRODUCT(umat(:,1),lag_gop(:,jc)))*c1
         !$omp simd
         do jr=1,oft_lagrange%nce
           mtmp(te_ind,te_ind)%m(jr,jc) = mtmp(te_ind,te_ind)%m(jr,jc) + lag_rop(jr)*u &
@@ -3189,7 +3255,7 @@ DO ip=1,mesh%nparts
 do ii=1,mesh%tloc_c(ip)%n
   i=mesh%tloc_c(ip)%v(ii)
   curved=cell_is_curved(mesh,i) ! Straight cell test
-  he = (6.d0*SQRT(2.d0)*mesh%cv(i))**(1.d0/3.d0)/REAL(oft_lagrange%order,8) ! Cell node spacing
+  he = xmhd_elem_size(i) ! Cell node spacing
   call oft_lagrange%ncdofs(i,j_lag)
   call oft_hgrad%ncdofs(i,j_hgrad)
   call oft_hcurl%ncdofs(i,j_hcurl)
@@ -3272,7 +3338,7 @@ do ii=1,mesh%tloc_c(ip)%n
     eta_curr=eta*eta_reg(mesh%reg(i))
     IF(ASSOCIATED(res_shaping))eta_curr = eta_curr*res_shaping(pt)
     nu_tmp(1) = nu_par
-    nu_tmp(2) = nu_perp
+    nu_tmp(2) = nu_visc
     IF(ASSOCIATED(visc_shaping))nu_tmp = nu_tmp*visc_shaping(pt)
     diff_tmp=d_dens
     IF(ASSOCIATED(diff_shaping))diff_tmp = diff_tmp*diff_shaping(pt)
@@ -3281,7 +3347,7 @@ do ii=1,mesh%tloc_c(ip)%n
         chi_temp(1:2) = brag_ion_transport(u0%N,u0%Ti,mu_ion,bmag)/u0%N
         chi_temp(3:4) = brag_elec_transport(u0%N,u0%Te,bmag)/u0%N
         chi_temp(3) = kappa_par(2)*chi_temp(3)
-        chi_temp(4) = MAX(1.d1, kappa_perp(2)*chi_temp(4))
+        chi_temp(4) = MAX(chi_perp_e_min, kappa_perp(2)*chi_temp(4))
       ELSE
         chi_temp(1:2)=brag_comb_transport(u0%N,u0%Ti,mu_ion,bmag)/u0%N
       END IF
@@ -3387,7 +3453,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !---JxB
     IF(xmhd_jcb)uvec = uvec - cross_product(u0%J,u0%B)/(u0%N*m_ion*mu0)
     !---Gravity
-    uvec(3) = uvec(3) - g_accel
+    uvec(3) = uvec(3) + g_accel
     !---Advection
     IF(xmhd_advec)uvec = uvec + MATMUL(u0%V,u0%dV)
     !---Pressure
@@ -3449,7 +3515,7 @@ do ii=1,mesh%tloc_c(ip)%n
       IF(.NOT.xmhd_diss_centered)umat = 2.d0*umat
       IF(xmhd_adv_den)uvec = uvec - MATMUL(u0%dN,umat)/u0%N
       !---Upwinding
-      IF(xmhd_upwind)THEN
+      IF(xmhd_upwind.AND.xmhd_advec)THEN
         u = xmhd_upwind_weight(vad_mag,he,nu_tmp(2)*den_scale/u0%N)
         IF(.NOT.xmhd_diss_centered)u = 2.d0*u
         umat(:,1) = umat(:,1) + vad*u*DOT_PRODUCT(u0%V,u0%dV(:,1))

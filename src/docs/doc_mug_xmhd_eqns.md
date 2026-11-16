@@ -17,16 +17,16 @@ Runtime options referenced below are set in the `xmhd_options` group of the inpu
 
 | Field | Basis | Units | Notes |
 |-------|-------|-------|-------|
-| \f$ B \f$   | H(Curl) + Grad(H^1) | T | |
+| \f$ B \f$   | H(Curl) + \f$ \nabla H^1 \f$ | T | |
 | \f$ V \f$   | Vector Lagrange | m/s | Stored scaled by `vel_scale` |
 | \f$ n \f$   | Lagrange | m^-3 | Stored scaled by `den_scale` |
-| \f$ T \f$   | Lagrange | eV | Ion temperature \f$ T_i \f$ with two temperatures |
-| \f$ T_e \f$ | Lagrange | eV | Two-temperature model only |
+| \f$ T_i \f$ | Lagrange | eV | Ion temperature |
+| \f$ T_e \f$ | Lagrange | eV | Electron temperature (two-temperature model only, enabled by passing `Te` in the initial fields to \ref xmhd::xmhd_run "xmhd_run") |
 | \f$ N_2 \f$ | Lagrange | m^-5 | Hyper-diffusion auxiliary field (`d2_dens>0` only) |
 | \f$ J_2 \f$ | H(Curl) | T/m^2 | Hyper-resistivity auxiliary field (`eta_hyper>0` only) |
 
 The following conventions are used throughout:
- - \f$ J \equiv \nabla \times B \f$, so the physical current density is \f$ J / \mu_0 \f$.
+ - \f$ J_\mu \equiv \nabla \times B \f$, so the physical current density is \f$ J = J_\mu / \mu_0 \f$.
  - Temperatures are in eV and \f$ k = e \f$ (`k_boltz = elec_charge`).
  - \f$ m_i = \mu_{ion} m_p \f$ (`mu_ion`) and \f$ m_e' = f_{m_e} m_e \f$, where \f$ f_{m_e} \f$ is the artificial electron
    mass enhancement `me_factor`.
@@ -37,11 +37,13 @@ The following conventions are used throughout:
  - \f$ (\nabla V)_{ij} = \partial_i V_j \f$, \f$ A:C = \sum_{ij} A_{ij} C_{ij} \f$, and
    \f$ (\nabla \cdot A)_j = \sum_i \partial_i A_{ij} \f$.
  - \f$ W = \nabla V + (\nabla V)^T - \frac{2}{3} I \nabla \cdot V \f$ is the rate of strain tensor.
- - \f$ V^n \f$, \f$ n^n \f$, and \f$ J^n \f$ denote values at the start of the current time step.
+ - \f$ V^n \f$, \f$ n^n \f$, and \f$ J_\mu^n \f$ denote values at the start of the current time step.
+ - \f$ \textbf{r} \f$ is the position vector, which is the argument of the optional spatial shaping functions.
 
-In the single-temperature model only one temperature \f$ T \f$ is evolved, and the electron temperature is
-\f$ T_e = \tau T \f$, where \f$ \tau \f$ is `te_factor`. The two-temperature model is used when an initial electron
-temperature is supplied to \ref xmhd::xmhd_run "xmhd_run".
+The ion temperature \f$ T_i \f$ is always evolved. In the single-temperature model the electron temperature is
+not evolved separately, but is a fixed multiple of the ion temperature, \f$ T_e = f_{T_e} T_i \f$, where
+\f$ f_{T_e} \f$ is `te_factor`. The two-temperature model, which evolves \f$ T_e \f$ separately, is used when an
+initial electron temperature is supplied to \ref xmhd::xmhd_run "xmhd_run".
 
 The momentum and temperature equations are evolved in non-conservative form. Each is divided by
 \f$ m_i n \f$ (momentum) or \f$ n k / (\gamma - 1) \f$ (temperature), so the time derivative of every field
@@ -55,7 +57,7 @@ has an unweighted mass matrix.
 
 \f[ N_2 = \nabla^2 n \f]
 
- - \f$ D \f$ = `d_dens` \f$ \times \f$ `diff_shaping`\f$ (r) \f$
+ - \f$ D \f$ = `d_dens` \f$ \times \f$ `diff_shaping`\f$ (\textbf{r}) \f$
  - \f$ D_h \f$ = `d2_dens`. The hyper-diffusion term and the \f$ N_2 \f$ equation are included only if
    `d2_dens>0`. The \f$ N_2 \f$ equation is solved in weak form
    (\f$ \int \phi N_2 + \int \nabla \phi \cdot \nabla n = 0 \f$) with natural boundary conditions, so for uniform
@@ -66,8 +68,8 @@ has an unweighted mass matrix.
 
 \section doc_mug_xmhd_eqns_mom Momentum
 
-\f[ \frac{\partial V}{\partial t} + V \cdot \nabla V = \frac{J \times B}{\mu_0 m_i n}
-- \frac{\nabla \left[ n k \left( T_i + T_e \right) \right]}{m_i n} + g \hat{z}
+\f[ \frac{\partial V}{\partial t} + V \cdot \nabla V = \frac{J_\mu \times B}{\mu_0 m_i n}
+- \frac{\nabla \left[ n k \left( T_i + T_e \right) \right]}{m_i n} - g \hat{z}
 + \frac{1}{n} \nabla \cdot \left( n \mathcal{V} \right)
 + \nabla \cdot \left[ w_V V^n \left( V \cdot \nabla V \right) \right] \f]
 
@@ -79,34 +81,38 @@ upwinding contribution, in which \f$ V^n \left( V \cdot \nabla V \right) \f$ is 
    is forced to `F` if the magnetic field is not advanced.
  - The pressure gradient is split into \f$ k (T_i + T_e) \nabla n \f$, which is included only if
    `xmhd_adv_den=T`, and \f$ n k \nabla (T_i + T_e) \f$, which is included only if `xmhd_adv_temp=T`.
- - \f$ g \f$ = `g_accel`. This is a public module variable, not a namelist option.
-
-\warning The source documents `g_accel` as gravity "oriented in the -Z direction", but the implemented
-acceleration is \f$ +g\hat{z} \f$, so a downward (\f$ -\hat{z} \f$) acceleration requires `g_accel<0`.
+ - \f$ g \f$ = `g_accel`, so gravity acts in the \f$ -\hat{z} \f$ direction for `g_accel>0`. Gravity is disabled
+   by default (`g_accel=0`). This is a public module variable, not a namelist option.
+ - The upwinding term (\f$ w_V \f$) is included only if `xmhd_upwind=T` and `xmhd_advec=T`.
 
 \subsection doc_mug_xmhd_eqns_visc Viscosity
 
 The viscous stress is written as \f$ \frac{1}{n} \nabla \cdot \left( n \mathcal{V} \right) \f$, where
-\f$ \mathcal{V} = -\Pi / (m_i n) \f$ and \f$ \Pi = \Pi_\perp + \Pi_\parallel + \Pi_{gv} \f$. Each part is included
+\f$ \mathcal{V} = -\Pi / (m_i n) \f$ and \f$ \Pi = \Pi_f + \Pi_\parallel + \Pi_{gv} \f$. Each part is included
 independently and the parts are summed. In the weak form the divergence is integrated by parts onto the
 test function, so the residual (written as in \ref doc_mug_xmhd_eqns_time) contains
 \f$ \int \partial_i \phi \, \mathcal{V}_{ik} \f$ for velocity component \f$ k \f$. The boundary term is dropped, which
-gives a zero-traction condition wherever the velocity is not constrained.
+gives a free-slip condition wherever the velocity is not constrained.
 
-The isotropic and parallel parts use constant dynamic viscosities \f$ \mu = m_i n_0 \nu \f$, which is why
+The fluid and parallel parts use constant dynamic viscosities \f$ \mu = m_i n_0 \nu \f$, which is why
 they carry the factor \f$ n_0 / n \f$ below. The coefficients are
+ - \f$ \nu_f \f$ = `nu_visc` \f$ \times \f$ `visc_shaping`\f$ (\textbf{r}) \f$
+ - \f$ \nu_\parallel \f$ = `nu_par` \f$ \times \f$ `visc_shaping`\f$ (\textbf{r}) \f$
 
-\f$ \nu_\perp \f$ = `nu_perp` \f$ \times \f$ `visc_shaping`\f$ (r) \f$, \f$ \nu_\parallel \f$ = `nu_par` \f$ \times \f$ `visc_shaping`\f$ (r) \f$
+`nu_visc` must be set in the input file (use `nu_visc=0` for no fluid viscosity). The legacy name `nu_perp` is
+still accepted, with a deprecation warning.
 
-**Isotropic viscosity** (\f$ \Pi_\perp \f$)
+**Fluid viscosity** (\f$ \Pi_f \f$)
+
+The fluid viscosity does not depend on the magnetic field direction. Its form is set by `visc_type`.
 
 With `visc_type='kin'`
-\f[ \mathcal{V}_\perp = \nu_\perp \frac{n_0}{n} \nabla V \f]
+\f[ \mathcal{V}_f = \nu_f \frac{n_0}{n} \nabla V \f]
 
 With `visc_type='iso'`
-\f[ \mathcal{V}_\perp = \nu_\perp \frac{n_0}{n} W, \quad \text{i.e.} \quad \Pi_\perp = -\mu_\perp W \f]
+\f[ \mathcal{V}_f = \nu_f \frac{n_0}{n} W, \quad \text{i.e.} \quad \Pi_f = -\mu_f W \f]
 
-\note Anisotropic viscosity is obtained by setting `nu_par` in addition to `nu_perp` with either type.
+\note Anisotropic viscosity is obtained by setting `nu_par` in addition to `nu_visc` with either type.
 
 **Parallel viscosity** (\f$ \Pi_\parallel \f$)
 
@@ -116,9 +122,9 @@ If `nu_par>0`
 \Pi_\parallel = -\frac{3}{2} \mu_\parallel \left( \hat{b} \cdot W \cdot \hat{b} \right) \left( \hat{b}\hat{b} - \frac{1}{3} I \right) \f]
 
 This is Braginskii's parallel stress, with \f$ \mu_\parallel = m_i n_0 \nu_\parallel \f$ playing the role of
-\f$ \eta_0 \f$ (\f$ \Pi_{zz} = -\mu_\parallel W_{zz} \f$ for \f$ \hat{b} = \hat{z} \f$). As in NIMROD, it adds to the isotropic
+\f$ \eta_0 \f$ (\f$ \Pi_{zz} = -\mu_\parallel W_{zz} \f$ for \f$ \hat{b} = \hat{z} \f$). It adds to the fluid
 stress rather than replacing its parallel part, so with `visc_type='iso'` the total parallel
-coefficient is \f$ \mu_\parallel + \mu_\perp \f$.
+coefficient is \f$ \mu_\parallel + \mu_f \f$.
 
 \note In the Lagrange-only variant (\ref xmhd_lag), `nu_par` is still the isotropic fluid viscosity.
 
@@ -135,9 +141,9 @@ where \f$ \nu_g \f$ = `nu_gyro`, \f$ (\hat{b} \times A)_{ij} = \epsilon_{ikl} \h
 - \left( I + 3 \hat{b}\hat{b} \right) \cdot W \times \hat{b} \right], \quad
 p_i = n k T_i, \quad \Omega_i = \frac{e |B|}{m_i} \f]
 
-with the same sign as Braginskii (and NIMROD) for a positive ion. The stress is symmetric, and it does
-no work (\f$ \Pi_{gv} : \nabla V = 0 \f$). \f$ T_i \f$ is \f$ T \f$ in the single-temperature model. The ion charge is
-taken to be \f$ e \f$.
+with the same sign as Braginskii for a positive ion. The stress is symmetric, and it does
+no work (\f$ \Pi_{gv} : \nabla V = 0 \f$). The ion charge is taken to be \f$ e \f$. This is the same form of the
+gyroviscous stress used in NIMROD (C. R. Sovinec and J. R. King, J. Comput. Phys. 229, 5803 (2010), Eq. 7).
 
 \warning Gyroviscosity is not dissipative, but it is grouped with the dissipative terms in the time
 discretization (see \ref doc_mug_xmhd_eqns_time). With the default `xmhd_diss_centered=F` it is therefore
@@ -150,27 +156,25 @@ Otherwise the term reduces to \f$ \nabla \cdot \mathcal{V} \f$.
 
 \f[ \frac{\partial B}{\partial t} = - \nabla \times E \f]
 
-\f[ E = -V \times B + \eta J - \eta_h \nabla \times J_2
-+ \frac{1}{\mu_0 e n} \left( J \times B - \mu_0 k T_e \nabla n \right)
-+ \frac{m_e'}{\mu_0 e^2 n} \frac{\partial J}{\partial t} \f]
+\f[ E = -V \times B + \eta J_\mu - \eta_h \nabla \times J_2
++ \frac{1}{e n} \left[ \frac{J_\mu \times B}{\mu_0} - \nabla \left( n k T_e \right) \right]
++ \frac{m_e'}{\mu_0 e^2 n} \frac{\partial J_\mu}{\partial t} \f]
 
-\f[ J_2 = -\nabla \times J \f]
+\f[ J_2 = -\nabla \times J_\mu \f]
 
  - The Hall, electron pressure, and electron inertia terms are included only if `xmhd_hall=T`.
- - The electron pressure term uses \f$ k T_e \nabla n \f$ instead of \f$ \nabla (n k T_e) / n \f$. The two differ
-   by \f$ k \nabla T_e \f$, which is curl-free and does not contribute to the induction equation.
  - Hyper-resistivity is included only if `eta_hyper>0`, with \f$ \eta_h \f$ = `eta_hyper`. The \f$ J_2 \f$ equation
-   is solved in weak form (\f$ \int \psi \cdot J_2 + \int \nabla \times \psi \cdot J = 0 \f$) with natural boundary
-   conditions, so the term is \f$ \eta_h \nabla \times \nabla \times J = -\eta_h \nabla^2 J \f$.
- - The Grad(H^1) component of \f$ B \f$ has only a mass term
+   is solved in weak form (\f$ \int \psi \cdot J_2 + \int \nabla \times \psi \cdot J_\mu = 0 \f$) with natural boundary
+   conditions, so the term is \f$ \eta_h \nabla \times \nabla \times J_\mu = -\eta_h \nabla^2 J_\mu \f$.
+ - The \f$ \nabla H^1 \f$ component of \f$ B \f$ has only a mass term
    (\f$ \int \nabla \chi \cdot \partial B / \partial t = 0 \f$), because \f$ \nabla \times \nabla \chi = 0 \f$.
  - The equation is advanced only if `xmhd_adv_b=T`. If it is not, `xmhd_jcb=F` and `eta_hyper<0` are forced.
 
 **Resistivity**
 
 \f[ \eta = \begin{cases}
-\eta_0 \, \eta_{reg} \, f_\eta(r) & \text{if } T_{\eta} \leq 0 \\
-\eta_0 \left( T_{\eta} / T_e \right)^{3/2} f_\eta(r) & \text{if } T_{\eta} > 0
+\eta_0 \, \eta_{reg} \, f_\eta(\textbf{r}) & \text{if } T_{\eta} \leq 0 \\
+\eta_0 \left( T_{\eta} / T_e \right)^{3/2} f_\eta(\textbf{r}) & \text{if } T_{\eta} > 0
 \end{cases} \f]
 
 where \f$ \eta_0 \f$ = `eta`, \f$ T_\eta \f$ = `eta_temp`, \f$ \eta_{reg} \f$ is the per-region `eta` value from the XML
@@ -186,8 +190,8 @@ resistivity is used (`eta_temp>0`).
 XML `<region>` blocks with `type=2` (the default if `type` is omitted) are solid conducting regions.
 In these cells only resistive diffusion of \f$ B \f$ is solved:
 
-\f[ \frac{\partial B}{\partial t} = -\nabla \times \left( \eta_w J \right),
-\quad \eta_w = \eta_{reg} \, f_\eta(r) \f]
+\f[ \frac{\partial B}{\partial t} = -\nabla \times \left( \eta_w J_\mu \right),
+\quad \eta_w = \eta_{reg} \, f_\eta(\textbf{r}) \f]
 
 Here \f$ \eta_{reg} \f$ is the absolute wall resistivity, not a scale factor on `eta`. The velocity, density,
 and temperature equations are not assembled in solid cells. Nodes in solid regions are treated as
@@ -201,30 +205,36 @@ The thermal conduction tensor for species \f$ s \f$ is
 
 \subsection doc_mug_xmhd_eqns_temp1 Single temperature
 
-\f[ \frac{\partial T}{\partial t} + V \cdot \nabla T + (\gamma - 1) T \nabla \cdot V =
-\frac{\gamma - 1}{n} \nabla \cdot \left( n \chi \cdot \nabla T \right)
-+ \frac{\gamma - 1}{(1 + \tau) n k} \left( Q_\eta + Q_\nu \right)
-+ \nabla \cdot \left[ w_T V^n \left( V \cdot \nabla T \right) \right] + S_T \f]
+\f[ \begin{aligned}
+\frac{\partial T_i}{\partial t} + V \cdot \nabla T_i + (\gamma - 1) T_i \nabla \cdot V = {}&
+\frac{\gamma - 1}{n} \nabla \cdot \left( n \chi \cdot \nabla T_i \right)
++ \frac{\gamma - 1}{(1 + f_{T_e}) n k} \left( Q_\eta + Q_\nu \right) \\
+&+ \nabla \cdot \left[ w_T V^n \left( V \cdot \nabla T_i \right) \right] + S_T
+\end{aligned} \f]
 
 In energy form this is
-\f$ \frac{n k}{\gamma - 1} \frac{d T}{d t} = -n k T \nabla \cdot V - \nabla \cdot q + \frac{Q_\eta + Q_\nu}{1 + \tau} \f$,
-with \f$ q = -n k \chi \cdot \nabla T \f$. Equivalently, the total thermal energy \f$ (1 + \tau) n k T / (\gamma - 1) \f$
-receives all of the heating, and the conductive flux is \f$ (1 + \tau) q \f$.
+\f$ \frac{n k}{\gamma - 1} \frac{d T_i}{d t} = -n k T_i \nabla \cdot V - \nabla \cdot q + \frac{Q_\eta + Q_\nu}{1 + f_{T_e}} \f$,
+with \f$ q = -n k \chi \cdot \nabla T_i \f$. Equivalently, the total thermal energy \f$ (1 + f_{T_e}) n k T_i / (\gamma - 1) \f$
+receives all of the heating, and the conductive flux is \f$ (1 + f_{T_e}) q \f$.
 
 \subsection doc_mug_xmhd_eqns_temp2 Two temperatures
 
-\f[ \frac{\partial T_i}{\partial t} + V \cdot \nabla T_i + (\gamma - 1) T_i \nabla \cdot V =
+\f[ \begin{aligned}
+\frac{\partial T_i}{\partial t} + V \cdot \nabla T_i + (\gamma - 1) T_i \nabla \cdot V = {}&
 \frac{\gamma - 1}{n} \nabla \cdot \left( n \chi_i \cdot \nabla T_i \right)
-+ \frac{\gamma - 1}{n k} Q_\nu - \frac{T_i - T_e}{\tau_{eq}}
-+ \nabla \cdot \left[ w_i V^n \left( V \cdot \nabla T_i \right) \right] + S_{T_i} \f]
++ \frac{\gamma - 1}{n k} Q_\nu - \frac{T_i - T_e}{\tau_{eq}} \\
+&+ \nabla \cdot \left[ w_i V^n \left( V \cdot \nabla T_i \right) \right] + S_{T_i}
+\end{aligned} \f]
 
-\f[ \frac{\partial T_e}{\partial t} + V_e \cdot \nabla T_e + (\gamma - 1) T_e \nabla \cdot V_e =
+\f[ \begin{aligned}
+\frac{\partial T_e}{\partial t} + V_e \cdot \nabla T_e + (\gamma - 1) T_e \nabla \cdot V_e = {}&
 \frac{\gamma - 1}{n} \nabla \cdot \left( n \chi_e \cdot \nabla T_e \right)
-+ \frac{\gamma - 1}{n k} Q_\eta + \frac{T_i - T_e}{\tau_{eq}}
-+ \nabla \cdot \left[ w_e V_e^n \left( V_e \cdot \nabla T_e \right) \right] + S_{T_e} \f]
++ \frac{\gamma - 1}{n k} Q_\eta + \frac{T_i - T_e}{\tau_{eq}} \\
+&+ \nabla \cdot \left[ w_e V_e^n \left( V_e \cdot \nabla T_e \right) \right] + S_{T_e}
+\end{aligned} \f]
 
-\f[ V_e = V - \frac{J}{\mu_0 e n}, \quad
-\nabla \cdot V_e = \nabla \cdot V + \frac{J \cdot \nabla n}{\mu_0 e n^2} \f]
+\f[ V_e = V - \frac{J_\mu}{\mu_0 e n}, \quad
+\nabla \cdot V_e = \nabla \cdot V + \frac{J_\mu \cdot \nabla n}{\mu_0 e n^2} \f]
 
  - Thermal equilibration is included only if `xmhd_therm_equil=T`, with
    \f$ \tau_{eq} = 3.125 \times 10^{14} \mu_{ion} T_e^{3/2} / (n \ln \Lambda) \f$ and
@@ -233,12 +243,14 @@ receives all of the heating, and the conductive flux is \f$ (1 + \tau) q \f$.
 
 \subsection doc_mug_xmhd_eqns_heat Heating
 
- - Ohmic heating, if `xmhd_ohmic=T`: \f$ Q_\eta = \eta |J|^2 / \mu_0 \f$, which is the physical
-   \f$ \eta_{phys} J_{phys}^2 \f$.
- - Viscous heating, if `xmhd_visc_heat=T`: \f$ Q_\nu = -\Pi : \nabla V = Q_\perp + Q_\parallel \f$, with
-   \f$ Q_\perp = \mu_\perp \nabla V : \nabla V \f$ (`kin`) or \f$ Q_\perp = \mu_\perp \nabla V : W \f$ (`iso`), and
-   \f$ Q_\parallel = \frac{3}{4} \mu_\parallel \left( \hat{b} \cdot W \cdot \hat{b} \right)^2 \f$ if `nu_par>0`. Here
-   \f$ \mu = m_i n_0 \nu \f$ as in \ref doc_mug_xmhd_eqns_visc. Gyroviscosity does no work, so it has no heating term.
+ - Ohmic heating, if `xmhd_ohmic=T`:
+   - \f$ Q_\eta = \eta |J_\mu|^2 / \mu_0 \f$, which is the physical \f$ \eta_{phys} J^2 \f$.
+ - Viscous heating, if `xmhd_visc_heat=T`:
+   - \f$ Q_\nu = -\Pi : \nabla V = Q_f + Q_\parallel \f$
+   - \f$ Q_f = \mu_f \nabla V : \nabla V \f$ (`kin`) or \f$ Q_f = \mu_f \nabla V : W \f$ (`iso`)
+   - \f$ Q_\parallel = \frac{3}{4} \mu_\parallel \left( \hat{b} \cdot W \cdot \hat{b} \right)^2 \f$ if `nu_par>0`
+   - Here \f$ \mu = m_i n_0 \nu \f$ as in \ref doc_mug_xmhd_eqns_visc. Gyroviscosity does no work, so it has no
+     heating term.
 
 \note The viscous heating is always time-centered, while the viscous stress is in \f$ R_d \f$ (see
 \ref doc_mug_xmhd_eqns_time). With the default `xmhd_diss_centered=F` the two are evaluated at different
@@ -249,7 +261,7 @@ time levels, so the kinetic energy removed by viscosity and the heat added are e
 
 Below, \f$ \kappa_{\parallel,s} \f$ and \f$ \kappa_{\perp,s} \f$ are `kappa_par(s)` and `kappa_perp(s)`, with
 \f$ s = 1 \f$ for ions (or the single temperature) and \f$ s = 2 \f$ for electrons. All coefficients are also
-multiplied by the optional `cond_shaping`\f$ (r) \f$ function.
+multiplied by the optional `cond_shaping`\f$ (\textbf{r}) \f$ function.
 
 With `xmhd_brag=F` the conductivities are constant:
 \f[ \chi_{\parallel,s} = \kappa_{\parallel,s} \frac{n_0}{n}, \quad \chi_{\perp,s} = \kappa_{\perp,s} \frac{n_0}{n} \f]
@@ -259,36 +271,46 @@ With `xmhd_brag=T`, \f$ \kappa \f$ are dimensionless multipliers on the Braginsk
 \f$ \chi^{B} \f$ (\ref mhd_utils, with \f$ \ln \Lambda = 11 \f$ and the physical electron mass). In each
 species, \f$ \chi^{B}_\perp \f$ is capped at \f$ \chi^{B}_\parallel \f$.
  - Two temperatures:
-   \f$ \chi_{\parallel,i} = \kappa_{\parallel,1} \chi^{B}_{\parallel,i}(T_i) \f$,
-   \f$ \chi_{\perp,i} = \kappa_{\perp,1} \chi^{B}_{\perp,i}(T_i) \f$,
-   \f$ \chi_{\parallel,e} = \kappa_{\parallel,2} \chi^{B}_{\parallel,e}(T_e) \f$, and
-   \f$ \chi_{\perp,e} = \max \left( 10, \kappa_{\perp,2} \chi^{B}_{\perp,e}(T_e) \right) \f$ m^2/s
+   - \f$ \chi_{\parallel,i} = \kappa_{\parallel,1} \chi^{B}_{\parallel,i}(T_i) \f$
+   - \f$ \chi_{\perp,i} = \kappa_{\perp,1} \chi^{B}_{\perp,i}(T_i) \f$
+   - \f$ \chi_{\parallel,e} = \kappa_{\parallel,2} \chi^{B}_{\parallel,e}(T_e) \f$
+   - \f$ \chi_{\perp,e} = \max \left( \chi_{e,min}, \kappa_{\perp,2} \chi^{B}_{\perp,e}(T_e) \right) \f$
  - Single temperature:
-   \f$ \chi_{\parallel} = \kappa_{\parallel,1} \chi^{B}_{\parallel,e}(T) \f$ and
-   \f$ \chi_{\perp} = \kappa_{\perp,1} \max \left( \chi^{B}_{\perp,i}(T), \chi^{B}_{\perp,e}(T) \right) \f$
+   - \f$ \chi_{\parallel} = \kappa_{\parallel,1} \chi^{B}_{\parallel,e}(T_i) \f$
+   - \f$ \chi_{\perp} = \kappa_{\perp,1} \max \left( \chi^{B}_{\perp,i}(T_i), \chi^{B}_{\perp,e}(T_i) \right) \f$
 
-\warning The electron perpendicular diffusivity has a hard-coded lower limit of 10 m^2/s in the
-two-temperature Braginskii model.
+\note \f$ \chi_{e,min} \f$ is the compile-time constant `chi_perp_e_min` in \ref xmhd (m^2/s), which is 0 by default
+(no limit). If needed, a lower limit on the electron perpendicular diffusivity can be set by changing it.
 
 \section doc_mug_xmhd_eqns_upwind Upwinding
 
 If `xmhd_upwind=T`, streamline diffusion terms of the form
 \f$ \nabla \cdot \left[ w \, v_{ad} \left( v \cdot \nabla f \right) \right] \f$ are added to the advected fields,
 where \f$ v_{ad} \f$ is the advecting velocity at the start of the time step. This is an inconsistent
-streamline-upwind Petrov-Galerkin method: the modified test functions are applied to the advection terms
-only. The weight is
+streamline-upwind Petrov-Galerkin (SUPG) method: the modified test functions
+\f$ \phi + w \, v_{ad} \cdot \nabla \phi \f$ are applied to the advection terms only, so the scheme adds
+diffusion along the streamlines. The weight is the optimal value for 1D advection-diffusion from
+A. N. Brooks and T. J. R. Hughes, Comput. Methods Appl. Mech. Eng. 32, 199 (1982):
 
 \f[ w = \frac{\beta h_e}{2 |v_{ad}|}, \quad \beta = \coth(Pe) - \frac{1}{Pe}, \quad
-Pe = \frac{|v_{ad}| h_e}{2 \nu_{up}}, \quad h_e = \frac{\left( 6 \sqrt{2} V_{cell} \right)^{1/3}}{p} \f]
+Pe = \frac{|v_{ad}| h_e}{2 \nu_{up}} \f]
 
-where \f$ V_{cell} \f$ is the cell volume and \f$ p \f$ is the Lagrange element order.
+The element size \f$ h_e \f$ is the node spacing of a regular cell with the same volume \f$ V_{cell} \f$,
+\f$ h_e = (6 \sqrt{2} V_{cell})^{1/3} / p \f$ for tetrahedra and \f$ h_e = V_{cell}^{1/3} / p \f$ for hexahedra,
+where \f$ p \f$ is the Lagrange element order.
 
 | Equation | \f$ f \f$ | \f$ v_{ad} \f$ | \f$ v \f$ | \f$ \nu_{up} \f$ |
 |----------|-----------|----------------|-----------|------------------|
 | Continuity | \f$ n \f$ | \f$ V^n \f$ | \f$ V \f$ | \f$ D \f$ |
-| Momentum | \f$ V \f$ | \f$ V^n \f$ | \f$ V \f$ | \f$ \nu n_0 / n \f$ |
-| Temperature | \f$ T \f$ or \f$ T_i \f$ | \f$ V^n \f$ | \f$ V \f$ | \f$ (\gamma - 1) \chi_{\perp} \f$ |
+| Momentum | \f$ V \f$ | \f$ V^n \f$ | \f$ V \f$ | \f$ \nu_f n_0 / n \f$ |
+| Ion temperature | \f$ T_i \f$ | \f$ V^n \f$ | \f$ V \f$ | \f$ (\gamma - 1) \chi_{\perp} \f$ or \f$ (\gamma - 1) \chi_{\perp,i} \f$ |
 | Electron temperature | \f$ T_e \f$ | \f$ V_e^n \f$ | \f$ V_e \f$ | \f$ (\gamma - 1) \chi_{\perp,e} \f$ |
+
+ - Each term is included only when its equation is advanced, and the momentum term only if `xmhd_advec=T`.
+ - The diffusivities of the upwinded fields (`nu_visc`, `d_dens`, and `kappa_perp`) must be positive, and the run
+   aborts otherwise. Where a shaping function makes \f$ \nu_{up} \f$ zero locally, full upwinding
+   (\f$ \beta = 1 \f$) is used.
+ - Upwinding is always disabled in linearized runs (\ref xmhd::xmhd_lin_run "xmhd_lin_run").
 
 \section doc_mug_xmhd_eqns_floors Density and temperature floors
 
@@ -331,7 +353,7 @@ heating, are always time-centered.
 Additional details:
  - The upwinding velocities (\f$ V^n \f$, \f$ V_e^n \f$) are taken from the start of the step.
  - The electron inertia term is discretized as
-   \f$ \frac{m_e'}{\mu_0 e^2} \frac{1}{2} \left( \frac{1}{n^{n+1}} + \frac{1}{n^n} \right) \frac{J^{n+1} - J^n}{\Delta t} \f$.
+   \f$ \frac{m_e'}{\mu_0 e^2} \frac{1}{2} \left( \frac{1}{n^{n+1}} + \frac{1}{n^n} \right) \frac{J_\mu^{n+1} - J_\mu^n}{\Delta t} \f$.
  - The floor sources \f$ S_f \f$ are applied as described in \ref doc_mug_xmhd_eqns_floors.
  - Rows of the auxiliary equations (\f$ N_2 \f$, \f$ J_2 \f$) are scaled by `n2_scale` and `j2_scale`. They are
    assembled only for the implicit solve, and the right-hand side uses the auxiliary fields from the

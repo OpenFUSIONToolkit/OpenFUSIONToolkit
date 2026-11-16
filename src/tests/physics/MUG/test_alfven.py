@@ -17,7 +17,7 @@ alfven_setup = functools.partial(_alfven_setup, 'hcurl')
 def test_nl_r1_p2(petsc_flag=False):
     '''Nonlinear Alfven wave, quadratic elements on a tetrahedral mesh, serial.'''
     berr_exp = 4.2660712289547556E-002
-    verr_exp = 3.2114524936411738E-002
+    verr_exp = 2.124825E-02
     assert alfven_setup(1,1,2,2,petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 @pytest.mark.mpi
@@ -30,7 +30,7 @@ def test_nl_r1_p2_mpi(mf,petsc_flag):
     if mf and petsc_flag:
         pytest.skip()
     berr_exp = 4.2660712289547556E-002
-    verr_exp = 3.2114524936411738E-002
+    verr_exp = 2.124825E-02
     assert alfven_setup(1,2,2,3,mf=mf,petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 
@@ -40,7 +40,7 @@ def test_nl_r1_p2_mpi(mf,petsc_flag):
 def test_nl_r1_p3(petsc_flag=False):
     '''Nonlinear Alfven wave, cubic elements on a tetrahedral mesh with p-multigrid, serial.'''
     berr_exp = 6.370534E-03
-    verr_exp = 2.345991E-03
+    verr_exp = 2.357204E-03
     assert alfven_setup(1,1,3,2,'0,2,2',petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 @pytest.mark.slow
@@ -53,7 +53,7 @@ def test_nl_r1_p3_mpi(mf,petsc_flag):
     if mf and petsc_flag:
         pytest.skip()
     berr_exp = 6.370534E-03
-    verr_exp = 2.345991E-03
+    verr_exp = 2.357204E-03
     assert alfven_setup(1,2,3,3,'0,0,2,2',mf=mf,petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 
@@ -63,7 +63,7 @@ def test_nl_r1_p3_mpi(mf,petsc_flag):
 def test_nl_r1_p4(petsc_flag=False):
     '''Nonlinear Alfven wave, quartic elements on a tetrahedral mesh with p-multigrid, serial.'''
     berr_exp = 4.097590E-04
-    verr_exp = 2.143000E-04
+    verr_exp = 2.147172E-04
     assert alfven_setup(1,1,4,2,'0,10,4,2',petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 @pytest.mark.slow
@@ -76,7 +76,7 @@ def test_nl_r1_p4_mpi(mf,petsc_flag):
     if mf and petsc_flag:
         pytest.skip()
     berr_exp = 4.097590E-04
-    verr_exp = 2.143000E-04
+    verr_exp = 2.147172E-04
     assert alfven_setup(1,2,4,3,'0,0,10,4,2',mf=mf,petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 
@@ -171,8 +171,8 @@ def test_lin_r1_p4_mpi(petsc_flag):
 # Nonlinear runs, hexahedral mesh, quadratic elements
 def test_hex_nl_r1_p2(petsc_flag=False):
     '''Nonlinear Alfven wave, quadratic elements on a hexahedral mesh, serial.'''
-    berr_exp = 1.8217184894941060E-002
-    verr_exp = 1.8207419422505190E-002
+    berr_exp = 1.818669E-02
+    verr_exp = 1.818676E-02
     assert alfven_setup(1,1,2,2,petsc=petsc_flag,hex_mesh=True)
     assert validate_alfven(berr_exp,verr_exp)
 @pytest.mark.mpi
@@ -184,8 +184,8 @@ def test_hex_nl_r1_p2_mpi(mf,petsc_flag):
     Also covers matrix-free Newton-Krylov and (default variant only) PETSc runs.'''
     if mf and petsc_flag:
         pytest.skip()
-    berr_exp = 1.8217184894941060E-002
-    verr_exp = 1.8207419422505190E-002
+    berr_exp = 1.818669E-02
+    verr_exp = 1.818676E-02
     assert alfven_setup(1,2,2,3,mf=mf,petsc=petsc_flag,hex_mesh=True)
     assert validate_alfven(berr_exp,verr_exp)
 

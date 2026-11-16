@@ -21,7 +21,7 @@
 !!
 !! The paper works in units of a reference density \f$ \bar{n} \f$ and field \f$ \bar{B} \f$, with time
 !! in units of \f$ \Omega_i^{-1} = m_i / e \bar{B} \f$ and length in units of \f$ d_i = c / \omega_{pi} \f$.
-!! Its geometry is rotated here, since gravity in MUG acts along \f$ \hat{z} \f$ (see \ref xmhd::g_accel "g_accel"):
+!! Its geometry is rotated here, since gravity in MUG acts along \f$ -\hat{z} \f$ (see \ref xmhd::g_accel "g_accel"):
 !!  - Gravity \f$ -g \hat{z} \f$ and density \f$ n = n_0 e^{z/L_n} \f$, so the heavier plasma is on top
 !!  - Magnetic field \f$ B(z) \hat{y} \f$ along the ignorable direction
 !!  - Perturbation \f$ \delta n = \epsilon n_0 \cos(k_x x) \cos(\pi z / L_z) \f$
@@ -274,10 +274,10 @@ CALL xmhd_ML_vlagrange%vec_create(vel)
 CALL vel%set(0.d0)
 !!\subsubsection doc_mug_gyro_grav_ex_code_run Run simulation
 !!
-!! Gravity points along \f$ -\hat{z} \f$, which requires \f$ g_{accel} < 0 \f$ (see \ref xmhd::g_accel "g_accel").
+!! Gravity points along \f$ -\hat{z} \f$, which corresponds to \f$ g_{accel} > 0 \f$ (see \ref xmhd::g_accel "g_accel").
 !! The growth rate is then obtained from the kinetic energy in the history file `xmhd.hist`,
 !! \f$ \gamma = \frac{1}{2} \partial_t \ln E_k \f$ (see `run_scan.py`).
-g_accel=-g_phys
+g_accel=g_phys
 xmhd_minlev=minlev
 equil_fields%B=>b
 equil_fields%V=>vel

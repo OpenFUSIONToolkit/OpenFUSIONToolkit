@@ -16,8 +16,8 @@ alfven_setup = functools.partial(_alfven_setup, 'lagrange')
 # Nonlinear runs, tetrahedral mesh, quadratic elements
 def test_nl_r1_p2(petsc_flag=False):
     '''Nonlinear Alfven wave, quadratic elements on a tetrahedral mesh, serial.'''
-    berr_exp = 4.2378931381112289E-002
-    verr_exp = 4.1830283541690064E-002
+    berr_exp = 3.279583E-02
+    verr_exp = 2.842441E-02
     assert alfven_setup(1,1,2,2,petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 @pytest.mark.mpi
@@ -29,8 +29,8 @@ def test_nl_r1_p2_mpi(mf,petsc_flag):
     Also covers matrix-free Newton-Krylov and (default variant only) PETSc runs.'''
     if mf and petsc_flag:
         pytest.skip()
-    berr_exp = 4.2378931381112289E-002
-    verr_exp = 4.1830283541690064E-002
+    berr_exp = 3.279583E-02
+    verr_exp = 2.842441E-02
     assert alfven_setup(1,2,2,3,mf=mf,petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 
@@ -39,8 +39,8 @@ def test_nl_r1_p2_mpi(mf,petsc_flag):
 @pytest.mark.slow
 def test_nl_r1_p3(petsc_flag=False):
     '''Nonlinear Alfven wave, cubic elements on a tetrahedral mesh with p-multigrid, serial.'''
-    berr_exp = 4.544611E-03
-    verr_exp = 3.495514E-03
+    berr_exp = 4.559155E-03
+    verr_exp = 3.517496E-03
     assert alfven_setup(1,1,3,2,'0,2,2',petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 @pytest.mark.slow
@@ -52,8 +52,8 @@ def test_nl_r1_p3_mpi(mf,petsc_flag):
     Also covers matrix-free Newton-Krylov and (default variant only) PETSc runs.'''
     if mf and petsc_flag:
         pytest.skip()
-    berr_exp = 4.544611E-03
-    verr_exp = 3.495514E-03
+    berr_exp = 4.559155E-03
+    verr_exp = 3.517496E-03
     assert alfven_setup(1,2,3,3,'0,0,2,2',mf=mf,petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 
@@ -63,7 +63,7 @@ def test_nl_r1_p3_mpi(mf,petsc_flag):
 def test_nl_r1_p4(petsc_flag=False):
     '''Nonlinear Alfven wave, quartic elements on a tetrahedral mesh with p-multigrid, serial.'''
     berr_exp = 3.195141E-04
-    verr_exp = 2.121018E-04
+    verr_exp = 2.126173E-04
     assert alfven_setup(1,1,4,2,'0,10,4,2',petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 @pytest.mark.slow
@@ -76,7 +76,7 @@ def test_nl_r1_p4_mpi(mf,petsc_flag):
     if mf and petsc_flag:
         pytest.skip()
     berr_exp = 3.195141E-04
-    verr_exp = 2.121018E-04
+    verr_exp = 2.126173E-04
     assert alfven_setup(1,2,4,3,'0,0,10,4,2',mf=mf,petsc=petsc_flag)
     assert validate_alfven(berr_exp,verr_exp)
 

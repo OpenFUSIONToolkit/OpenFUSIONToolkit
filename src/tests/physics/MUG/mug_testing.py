@@ -236,7 +236,7 @@ def sound_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fal
     `nu_mhd` gives the multigrid smoother iterations per level. Matrix-free Jacobian products (`mf`, nonlinear runs
     only) are finite-difference approximations, so the linear tolerance is relaxed.
     '''
-    exe, rep_options, timeout = {'hcurl': ('./test_sound', " bbc='bc'\n", 2000),
+    exe, rep_options, timeout = {'hcurl': ('./test_sound', " bbc='bc'\n nu_visc=0.\n", 2000),
                                  'lagrange': ('./test_sound_lag', " k_db=1.\n", 1000)}[representation]
     # Start linear BDF2 runs with a backward Euler step
     if linear:
@@ -274,7 +274,7 @@ def alfven_setup(representation,nbase,nlevels,order,minlev,nu_mhd='-1',linear=Fa
     runs (with a different multigrid layout) do not reproduce the serial errors.
     '''
     # nu_par is parallel-only viscosity in xmhd (no effect on this transverse wave) but the fluid viscosity in xmhd_lag
-    exe, rep_options, timeout = {'hcurl': ('./test_alfven', " bbc='bc'\n nu_perp=1.E-3\n", 4000),
+    exe, rep_options, timeout = {'hcurl': ('./test_alfven', " bbc='bc'\n nu_visc=1.E-3\n", 4000),
                                  'lagrange': ('./test_alfven_lag', " nu_par=1.e-3\n", 2000)}[representation]
     # Start linear BDF2 runs with a backward Euler step, or use backward Euler throughout
     if linear:

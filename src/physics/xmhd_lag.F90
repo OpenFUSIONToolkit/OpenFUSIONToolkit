@@ -341,7 +341,7 @@ REAL(r8), PUBLIC :: n2_scale = -1.d0 !< Hyper-diffusivity aux variable scale fac
 REAL(r8), PUBLIC :: j2_scale = -1.d0 !< Hyper-resistivity aux variable scale factor
 REAL(r8), PUBLIC :: den_floor = -1.d0 !< Density floor
 REAL(r8), PUBLIC :: temp_floor = -1.d0 !< Temperature floor
-REAL(r8), PUBLIC :: g_accel = 0.d0 !< Gravity (oriented in the -Z direction)
+REAL(r8), PUBLIC :: g_accel = 0.d0 !< Gravitational acceleration [m/s^2], acting in the -Z direction for `g_accel>0`
 REAL(r8) :: xmhd_eps = 1.d-10 !< Epsilon for magnetic field normalization
 INTEGER(i4) :: xmhd_taxis = 3 !< Axis for toroidal flux and current
 !> Resistivity profile
@@ -527,6 +527,22 @@ CALL xmhd_setup_regions
 DEBUG_STACK_POP
 END SUBROUTINE xmhd_read_settings
 !------------------------------------------------------------------------------
+!> Check upwinding settings before a nonlinear run
+!!
+!! Aborts if upwinding is requested for an advected field whose diffusivity is not positive,
+!! which the upwinding weight requires.
+!------------------------------------------------------------------------------
+SUBROUTINE xmhd_check_settings()
+IF(xmhd_upwind)THEN
+  IF(xmhd_advec.AND.(nu_perp<=0.d0))CALL oft_abort('Upwinding requires a positive fluid viscosity when advection is enabled', &
+    'xmhd_check_settings',__FILE__)
+  IF(xmhd_adv_den.AND.(d_dens<=0.d0))CALL oft_abort('Upwinding requires "d_dens>0" when density is advanced', &
+    'xmhd_check_settings',__FILE__)
+  IF(xmhd_adv_temp.AND.(kappa_perp<=0.d0))CALL oft_abort('Upwinding requires "kappa_perp>0" when temperature is advanced', &
+    'xmhd_check_settings',__FILE__)
+END IF
+END SUBROUTINE xmhd_check_settings
+!------------------------------------------------------------------------------
 !> Main driver subroutine for extended MHD time advance
 !!
 !! Runtime options are set in the main input file using the group
@@ -574,6 +590,7 @@ mesh=>oft_lagrange%mesh
 !------------------------------------------------------------------------------
 IF(ASSOCIATED(initial_fields%Te))xmhd_two_temp=.TRUE.
 CALL xmhd_read_settings(dt,lin_tol,nl_tol,rst_ind,nsteps,rst_freq,nclean,maxextrap,ittarget)
+CALL xmhd_check_settings
 IF(den_scale<0.d0)den_scale=SQRT(initial_fields%Ne%dot(initial_fields%Ne)/REAL(initial_fields%Ne%ng,8))
 IF((d2_dens>0.d0).AND.(n2_scale<0.d0))n2_scale=den_scale*(REAL(oft_lagrange%order,8)/mesh%hrms)**2
 IF((eta_hyper>0.d0).AND.(j2_scale<0.d0))THEN
@@ -1380,20 +1397,49 @@ END IF
 DEBUG_STACK_POP
 end subroutine xmhd_lin_run
 !------------------------------------------------------------------------------
-!> Evalute upwinding parameter
+!> Evaluate upwinding weight
 !!
-!! Upwinding parameter for inconsistent streamline upwinded Petrov-Galerkin method
-!! (distorted bases applied to advective terms only).
+!! Weight for the inconsistent streamline-upwind Petrov-Galerkin (SUPG) method, where the
+!! streamline modification of the test functions is applied to the advection terms only. The
+!! weight is the optimal value for 1D advection-diffusion,
+!! \f$ w = \beta h_e / (2 |v|) \f$ with \f$ \beta = \coth(Pe) - 1/Pe \f$ and \f$ Pe = |v| h_e / (2 \nu) \f$,
+!! from A. N. Brooks and T. J. R. Hughes, Comput. Methods Appl. Mech. Eng. 32, 199 (1982).
+!!
+!! Where the local diffusivity is not positive full upwinding (\f$ \beta = 1 \f$) is used.
+!!
+!! @result Upwinding weight [s]
 !------------------------------------------------------------------------------
 PURE FUNCTION xmhd_upwind_weight(v_mag,he,nu) RESULT(w_up)
-REAL(r8), INTENT(in) :: v_mag !< Advection velocity [m/s]
+REAL(r8), INTENT(in) :: v_mag !< Advection speed [m/s]
 REAL(r8), INTENT(in) :: he !< Element size [m]
-REAL(r8), INTENT(in) :: nu !< Dissipation amplitude [m^2/s^2]
+REAL(r8), INTENT(in) :: nu !< Diffusivity of the advected field [m^2/s]
 REAL(r8) :: Pc,beta,w_up
-Pc = MAX(1.d-8,v_mag*he/(2.d0*nu)) ! Peclet number
-beta = 1.d0/TANH(Pc) - 1.d0/Pc ! Beta parameter
+IF(nu>0.d0)THEN
+  Pc = MAX(1.d-8,v_mag*he/(2.d0*nu)) ! Peclet number
+  beta = 1.d0/TANH(Pc) - 1.d0/Pc ! Beta parameter
+ELSE
+  beta = 1.d0 ! Full upwinding without diffusion
+END IF
 w_up = beta*he/(2.d0*MAX(1.d-10,v_mag)) ! Upwinding weight
 END FUNCTION xmhd_upwind_weight
+!------------------------------------------------------------------------------
+!> Get element size used for upwinding
+!!
+!! Node spacing of a regular cell with the volume of cell `i`: edge length divided by
+!! the Lagrange element order.
+!!
+!! @result Element size [m]
+!------------------------------------------------------------------------------
+FUNCTION xmhd_elem_size(i) RESULT(he)
+INTEGER(i4), INTENT(in) :: i !< Cell index
+REAL(r8) :: he
+IF(mesh%cell_np==8)THEN ! Hexahedron (cube)
+  he = mesh%cv(i)**(1.d0/3.d0)
+ELSE ! Tetrahedron (regular)
+  he = (6.d0*SQRT(2.d0)*mesh%cv(i))**(1.d0/3.d0)
+END IF
+he = he/REAL(oft_lagrange%order,8)
+END FUNCTION xmhd_elem_size
 !------------------------------------------------------------------------------
 !> Update Jacobian matrix with new fields
 !------------------------------------------------------------------------------
@@ -1476,7 +1522,7 @@ DO ip=1,mesh%nparts
 do ii=1,mesh%tloc_c(ip)%n
   i=mesh%tloc_c(ip)%v(ii)
   curved=cell_is_curved(mesh,i) ! Straight cell test
-  he = (6.d0*SQRT(2.d0)*mesh%cv(i))**(1.d0/3.d0)/REAL(oft_lagrange%order,8) ! Cell node spacing
+  he = xmhd_elem_size(i) ! Cell node spacing
   !---Get local to global DOF mapping
   call oft_lagrange%ncdofs(i,j_lag)
   IF(j2_ind>0)call oft_hcurl%ncdofs(i,j_hcurl)
@@ -1722,7 +1768,8 @@ do ii=1,mesh%tloc_c(ip)%n
 ! Compute dV/dt(V) matrix (4:6,4:6)
 !------------------------------------------------------------------------------
     !---Upwinding setup
-    IF(xmhd_upwind)c1 = jac_dt*det*xmhd_upwind_weight(v0_mag,he,nu_tmp(2)*den_scale/u0%N)
+    c1 = 0.d0
+    IF(xmhd_upwind.AND.xmhd_advec)c1 = jac_dt*det*xmhd_upwind_weight(v0_mag,he,nu_tmp(2)*den_scale/u0%N)
     c2 = den_scale*jac_dt*det/u0%N
     IF(.NOT.xmhd_diss_centered)THEN
       c1 = 2.d0*c1; c2 = 2.d0*c2
@@ -1750,7 +1797,7 @@ do ii=1,mesh%tloc_c(ip)%n
       umat(1,1) = umat(1,1) + u
       umat(2,2) = umat(2,2) + u
       umat(3,3) = umat(3,3) + u
-      IF(xmhd_upwind)THEN
+      IF(xmhd_upwind.AND.xmhd_advec)THEN
         uvec = u0%V*(DOT_PRODUCT(u0%V,lag_gop(:,jc)))*c1
       ELSE
         uvec=0.d0
@@ -2131,7 +2178,9 @@ do ii=1,mesh%tloc_c(ip)%n
       c2 = divv*tgam_fac ! compression
       IF(xmhd_therm_equil)c2 = c2 - (1.d0 - 3.d0*u0%Ti/u0%Te)/(2.d0*elec_ion_therm_rate(u0%Te,u0%N,mu_ion))
       c3 = tgam_fac*jac_dt*det
-      IF(.NOT.xmhd_diss_centered)c3 = 2.d0*c3
+      IF(.NOT.xmhd_diss_centered)THEN
+        c1 = 2.d0*c1; c3 = 2.d0*c3
+      END IF
       do jc=1,oft_lagrange%nce
         u = (lag_rop(jc)*c2 + DOT_PRODUCT(umat(:,1),lag_gop(:,jc)))*jac_dt*det
         u = u + lag_rop(jc)*det
@@ -2141,7 +2190,7 @@ do ii=1,mesh%tloc_c(ip)%n
         u = u - ((chi_temp(1)-chi_temp(2))*DOT_PRODUCT(u0%dN,bhat)*DOT_PRODUCT(bhat,lag_gop(:,jc)) &
           + chi_temp(2)*DOT_PRODUCT(u0%dN,lag_gop(:,jc)))*c3/u0%N
         !---Upwinding
-        IF(xmhd_upwind)uvec = uvec + 2.d0*umat(:,1)*(DOT_PRODUCT(umat(:,1),lag_gop(:,jc)))*c1
+        IF(xmhd_upwind)uvec = uvec + umat(:,1)*(DOT_PRODUCT(umat(:,1),lag_gop(:,jc)))*c1
         !$omp simd
         do jr=1,oft_lagrange%nce
             mtmp(te_ind,te_ind)%m(jr,jc) = mtmp(te_ind,te_ind)%m(jr,jc) + lag_rop(jr)*u &
@@ -2732,7 +2781,7 @@ DO ip=1,mesh%nparts
 do ii=1,mesh%tloc_c(ip)%n
   i=mesh%tloc_c(ip)%v(ii)
   curved=cell_is_curved(mesh,i) ! Straight cell test
-  he = (6.d0*SQRT(2.d0)*mesh%cv(i))**(1.d0/3.d0)/REAL(oft_lagrange%order,8) ! Cell node spacing
+  he = xmhd_elem_size(i) ! Cell node spacing
   call oft_lagrange%ncdofs(i,j_lag)
   IF(j2_ind>0)call oft_hcurl%ncdofs(i,j_hcurl)
 !------------------------------------------------------------------------------
@@ -2914,7 +2963,7 @@ do ii=1,mesh%tloc_c(ip)%n
     !---JxB
     IF(xmhd_jcb)uvec = -cross_product(u0%J,u0%B)/(u0%N*m_ion*mu0)
     !---Gravity
-    uvec(3) = uvec(3) - g_accel
+    uvec(3) = uvec(3) + g_accel
     !---Advection
     IF(xmhd_advec)uvec = uvec + MATMUL(u0%V,u0%dV)
     !---Pressure
@@ -2951,7 +3000,7 @@ do ii=1,mesh%tloc_c(ip)%n
       IF(.NOT.xmhd_diss_centered)umat = 2.d0*umat
       IF(xmhd_adv_den)uvec = uvec - MATMUL(u0%dN,umat)/u0%N
       !---Upwinding
-      IF(xmhd_upwind)THEN
+      IF(xmhd_upwind.AND.xmhd_advec)THEN
         u = xmhd_upwind_weight(vad_mag,he,nu_tmp(2)*den_scale/u0%N)
         IF(.NOT.xmhd_diss_centered)u = 2.d0*u
         umat(:,1) = umat(:,1) + vad*u*DOT_PRODUCT(u0%V,u0%dV(:,1))
