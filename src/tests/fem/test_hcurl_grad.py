@@ -34,20 +34,22 @@ oft_in_template = """
 &test_hcurl_grad_options
  order={2}
  mg_test={4}
+ zerob_test={8}
 /
 """
 
 # Common setup function and process handling
-def hcurl_grad_setup(nbase, nlevels, order, grid_type, mg=False, df='', nu='', petsc=False):
+def hcurl_grad_setup(nbase, nlevels, order, grid_type, mg=False, df='', nu='', petsc=False, zerob=False):
     petsc_flag=('T' if petsc else 'F')
     mg_flag=('T' if mg else 'F')
+    zerob_flag=('T' if zerob else 'F')
     nproc = 1
     if nbase != nlevels:
         nproc = 2
     #
     os.chdir(test_dir)
     with open('oft.in', 'w+') as fid:
-        fid.write(oft_in_template.format(nbase, nlevels, order, grid_type, mg_flag, df, nu, petsc_flag))
+        fid.write(oft_in_template.format(nbase, nlevels, order, grid_type, mg_flag, df, nu, petsc_flag, zerob_flag))
     return run_OFT("./test_hcurl_grad", nproc, 120)
 
 def validate_result(iteration_count,converged_error):
@@ -66,6 +68,34 @@ def validate_result(iteration_count,converged_error):
         print("  Actual =   {0}".format(error_test))
         return False
     return True
+
+def validate_zerob_result(exp_error):
+    with open('hcurl_grad.results','r') as fid:
+        its_test = int(fid.readline())
+        res_test = float(fid.readline())
+        error_test = float(fid.readline())
+    if (its_test <= 0) or (not res_test < 1.E-8):
+        print("FAILED: Solver did not converge!")
+        print("  Iterations = {0}".format(its_test))
+        print("  Residual =   {0}".format(res_test))
+        return False
+    if not abs(error_test-exp_error) < 0.05*exp_error:
+        print("FAILED: Projection error incorrect!")
+        print("  Expected = {0}".format(exp_error))
+        print("  Actual =   {0}".format(error_test))
+        return False
+    return True
+
+# 'zerob' mass matrix projection test function
+def zerob_projection(nlevels,order,exp_error,grid_type=1,mpi=False,petsc=False):
+    if mpi:
+        nbase = nlevels-1
+        nlev = nlevels+1
+    else:
+        nbase = nlevels
+        nlev = nlevels
+    assert hcurl_grad_setup(nbase, nlev, order, grid_type, petsc=petsc, zerob=True)
+    assert validate_zerob_result(exp_error)
 
 # Single level test function
 def single_level(nlevels,order,exp_its,exp_error,grid_type=1,mpi=False,petsc=False):
@@ -179,3 +209,10 @@ def test_hex_r3_p4(mpi, petsc_flag):
     single_level(3, 4, 1035, 1.0, grid_type=2, mpi=mpi, petsc=petsc_flag)
 def test_hex_r3_p4_mg(petsc_flag=False):
     multi_level(3, 4, 248, 1.0, grid_type=2, petsc=petsc_flag)
+
+#============================================================================
+# Projection tests using 'zerob' mass matrix
+@pytest.mark.parametrize("mpi", (False, True))
+@pytest.mark.parametrize("order,exp_error", ((1, 2.7564E-2), (2, 2.0973E-3), (3, 1.4600E-4)))
+def test_zerob_proj(order, exp_error, mpi):
+    zerob_projection(3, order, exp_error, mpi=mpi)

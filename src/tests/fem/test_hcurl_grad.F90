@@ -10,14 +10,44 @@
 !!
 !! The current test cases are:
 !! - Solve the equation \f$ M B = M \hat{I} \f$
+!! - L2 projection of an analytic field with vanishing tangential boundary
+!!   component using the `'zerob'` mass matrix
 !!
 !! @authors Chris Hansen
 !! @date April 2013
 !! @ingroup testing
 !------------------------------------------------------------------------------
+!------------------------------------------------------------------------------
+! Analytic vector field with vanishing tangential component on the boundary of
+! the unit cube, used to test projection with the 'zerob' mass matrix
+!------------------------------------------------------------------------------
+MODULE test_hcurl_grad_helpers
+USE oft_base
+USE fem_utils, ONLY: fem_interp
+IMPLICIT NONE
+TYPE, EXTENDS(fem_interp) :: tang_zero_field
+CONTAINS
+  PROCEDURE :: interp => tang_zero_field_interp
+END TYPE tang_zero_field
+CONTAINS
+SUBROUTINE tang_zero_field_interp(self,cell,f,gop,val)
+CLASS(tang_zero_field), INTENT(inout) :: self
+INTEGER(i4), INTENT(in) :: cell
+REAL(r8), INTENT(in) :: f(:)
+REAL(r8), INTENT(in) :: gop(3,4)
+REAL(r8), INTENT(out) :: val(:)
+REAL(r8) :: pt(3),s(3)
+pt=self%mesh%log2phys(cell,f)
+s=SIN(pi*pt)
+val(1)=s(2)*s(3)*(1.d0+pt(1))
+val(2)=s(1)*s(3)*(1.d0+pt(2)**2)
+val(3)=s(1)*s(2)*COS(pt(3))
+END SUBROUTINE tang_zero_field_interp
+END MODULE test_hcurl_grad_helpers
 program test_hcurl_grad
 USE oft_base
 USE oft_mesh_cube, ONLY: mesh_cube_id
+USE oft_mesh_type, ONLY: cell_is_curved
 ! USE oft_io
 USE multigrid, ONLY: multigrid_mesh
 USE multigrid_build, ONLY: multigrid_construct
@@ -33,10 +63,11 @@ USE fem_composite, ONLY: oft_ml_fem_comp_type
 USE oft_h1_basis, ONLY: oft_h1_setup
 USE oft_h1_operators, ONLY: h1_setup_interp
 !---H(Curl) FE space
-USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup
+USE oft_hcurl_basis, ONLY: oft_hcurl_setup, oft_hcurl_grad_setup, oft_hcurl_fem
 USE oft_hcurl_operators, ONLY: hcurl_setup_interp
 USE oft_hcurl_grad_operators, ONLY: hcurl_grad_getmop, hcurl_grad_setup_interp, hcurl_grad_getmop_pre, hcurl_grad_mloptions, &
-  oft_hcurl_grad_rinterp, oft_hcurl_grad_gzerop
+  oft_hcurl_grad_rinterp, oft_hcurl_grad_gzerop, oft_hcurl_grad_zerob, oft_hcurl_grad_project
+USE test_hcurl_grad_helpers, ONLY: tang_zero_field
 IMPLICIT NONE
 INTEGER(i4) :: order,ierr,io_unit,minlev
 TYPE(multigrid_mesh) :: mg_mesh
@@ -44,11 +75,14 @@ TYPE(oft_ml_fem_type), TARGET :: ML_oft_h1,ML_h1grad
 TYPE(oft_ml_fem_type), TARGET :: ML_oft_hcurl
 TYPE(oft_ml_fem_comp_type), TARGET :: ML_hcurl_grad
 TYPE(oft_hcurl_grad_gzerop), TARGET :: hcurl_grad_gzerop
-LOGICAL :: mg_test
-NAMELIST/test_hcurl_grad_options/order,mg_test
+TYPE(oft_hcurl_grad_zerob), TARGET :: hcurl_grad_zerob
+LOGICAL :: mg_test,zerob_test
+NAMELIST/test_hcurl_grad_options/order,mg_test,zerob_test
 !---Initialize enviroment
 CALL oft_init
 !---Read in options
+mg_test=.FALSE.
+zerob_test=.FALSE.
 OPEN(NEWUNIT=io_unit,FILE=oft_env%ifile)
 READ(io_unit,test_hcurl_grad_options,IOSTAT=ierr)
 CLOSE(io_unit)
@@ -70,13 +104,16 @@ IF(mg_test)CALL hcurl_setup_interp(ML_oft_hcurl)
 !--- Full H(Curl) space
 CALL oft_hcurl_grad_setup(ML_oft_hcurl,ML_oft_h1,ML_hcurl_grad,ML_h1grad,minlev=minlev)
 hcurl_grad_gzerop%ML_hcurl_grad_rep=>ML_hcurl_grad
+hcurl_grad_zerob%ML_hcurl_grad_rep=>ML_hcurl_grad
 IF(mg_test)THEN
   CALL hcurl_grad_setup_interp(ML_hcurl_grad,ML_oft_h1,create_full=.TRUE.)
   CALL hcurl_grad_mloptions
 END IF
 !---Run tests
 oft_env%pm=.FALSE.
-IF(mg_test)THEN
+IF(zerob_test)THEN
+  CALL test_mop_zerob
+ELSE IF(mg_test)THEN
   CALL test_mopmg
 ELSE
   CALL test_mop
@@ -175,4 +212,84 @@ END IF
 CALL u%delete
 CALL v%delete
 END SUBROUTINE test_mopmg
+!---------------------------------------------------------------------------------
+! L2 project an analytic field with vanishing tangential boundary component
+! using the 'zerob' mass matrix and compute the relative projection error
+!---------------------------------------------------------------------------------
+SUBROUTINE test_mop_zerob
+CLASS(oft_solver), POINTER :: winv => NULL()
+INTEGER(i4) :: i,m
+REAL(r8) :: res_norm,rhs_norm,err_sq,ref_sq,vol,det,goptmp(3,4),bh(3),bex(3)
+LOGICAL :: curved
+CLASS(oft_vector), POINTER :: u,v,w,rhs
+CLASS(oft_matrix), POINTER :: mop => NULL()
+TYPE(tang_zero_field) :: field_ex
+TYPE(oft_hcurl_grad_rinterp) :: field_h
+CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
+!---Set FE level
+CALL ML_hcurl_grad%set_level(ML_hcurl_grad%nlevels,propogate=.TRUE.)
+!---Create solver fields
+CALL ML_hcurl_grad%vec_create(u)
+CALL ML_hcurl_grad%vec_create(v)
+CALL ML_hcurl_grad%vec_create(w)
+CALL ML_hcurl_grad%vec_create(rhs)
+!---Get FE operators
+CALL hcurl_grad_getmop(ML_hcurl_grad%current_level,mop,'zerob')
+!---Setup matrix solver
+CALL create_cg_solver(winv)
+winv%A=>mop
+winv%its=-3
+winv%rtol=1.d-12
+CALL create_diag_pre(winv%pre)
+!---Build RHS with boundary and vertex Grad(H^1) entries zeroed
+field_ex%mesh=>mg_mesh%mesh
+CALL oft_hcurl_grad_project(ML_hcurl_grad%current_level,field_ex,v)
+CALL hcurl_grad_zerob%apply(v)
+CALL hcurl_grad_gzerop%apply(v)
+rhs_norm=v%norm(2)
+CALL rhs%add(0.d0,1.d0,v)
+!---Solve
+CALL u%set(0.d0)
+CALL winv%apply(u,v)
+!---Check true residual
+CALL mop%apply(u,w)
+CALL w%add(1.d0,-1.d0,rhs)
+res_norm=w%norm(2)/rhs_norm
+!---Compute relative L2 projection error
+field_h%u=>u
+CALL field_h%setup(ML_hcurl_grad%current_level)
+SELECT TYPE(this=>ML_oft_hcurl%current_level)
+  CLASS IS(oft_hcurl_fem)
+    hcurl_rep=>this
+  CLASS DEFAULT
+    CALL oft_abort('Invalid H(Curl) space','test_mop_zerob',__FILE__)
+END SELECT
+err_sq=0.d0; ref_sq=0.d0
+DO i=1,mg_mesh%mesh%nc
+  curved=cell_is_curved(mg_mesh%mesh,i)
+  DO m=1,hcurl_rep%quad%np
+    IF(curved.OR.m==1)CALL mg_mesh%mesh%jacobian(i,hcurl_rep%quad%pts(:,m),goptmp,vol)
+    det=vol*hcurl_rep%quad%wts(m)
+    CALL field_h%interp(i,hcurl_rep%quad%pts(:,m),goptmp,bh)
+    CALL field_ex%interp(i,hcurl_rep%quad%pts(:,m),goptmp,bex)
+    err_sq=err_sq+SUM((bh-bex)**2)*det
+    ref_sq=ref_sq+SUM(bex**2)*det
+  END DO
+END DO
+err_sq=oft_mpi_sum(err_sq)
+ref_sq=oft_mpi_sum(ref_sq)
+IF(oft_env%head_proc)THEN
+  OPEN(NEWUNIT=io_unit,FILE='hcurl_grad.results')
+  WRITE(io_unit,*)winv%cits
+  WRITE(io_unit,*)res_norm
+  WRITE(io_unit,*)SQRT(err_sq/ref_sq)
+  CLOSE(io_unit)
+END IF
+!---Destroy vectors
+CALL field_h%delete
+CALL u%delete
+CALL v%delete
+CALL w%delete
+CALL rhs%delete
+END SUBROUTINE test_mop_zerob
 end program test_hcurl_grad

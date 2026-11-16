@@ -1051,11 +1051,12 @@ do i=1,hgrad_rep%mesh%nc
           mop12(jr,:)=0.d0
         END IF
       END DO
+      !---Vertex Grad(H^1) DOFs are always removed (duplicate lowest-order H(Curl) DOFs)
       mop21(1:hgrad_rep%mesh%cell_np,:)=0.d0
       mop22(1:hgrad_rep%mesh%cell_np,:)=0.d0
-      DO jr=hgrad_rep%mesh%cell_np,hgrad_rep%nce
+      DO jr=hgrad_rep%mesh%cell_np+1,hgrad_rep%nce
         IF(hgrad_rep%global%gbe(j_grad(jr)))THEN
-          mop12(jr,:)=0.d0
+          mop21(jr,:)=0.d0
           mop22(jr,:)=0.d0
         END IF
       END DO
@@ -1096,17 +1097,26 @@ SELECT CASE(bc_flag)
       j_curl=jr
       call mat%add_values(j_curl,j_curl,mop11,1,1,1,1)
     END DO
+    !---Vertex Grad(H^1) DOFs (always removed, including those on the global boundary)
     DO i=1,hgrad_rep%mesh%np
-      IF(.NOT.hgrad_rep%linkage%be(i))CYCLE
+      IF(hgrad_rep%mesh%bp(i))CYCLE
       j_curl=i
-      call mat%add_values(j_curl,j_curl,mop11,1,1,1,1)
+      call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
     END DO
+    DO i=1,hgrad_rep%mesh%nbp
+      jr=hgrad_rep%mesh%lbp(i)
+      IF(.NOT.hgrad_rep%mesh%pstitch%leo(i))CYCLE
+      j_curl=jr
+      call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
+    END DO
+    !---Non-vertex Grad(H^1) DOFs on the global boundary
     DO i=1,hgrad_rep%nbe
       jr=hgrad_rep%lbe(i)
+      IF(jr<=hgrad_rep%mesh%np)CYCLE ! Vertex DOFs handled above
       IF(.NOT.hgrad_rep%global%gbe(jr))CYCLE
       IF(.NOT.hgrad_rep%linkage%leo(i))CYCLE
       j_curl=jr
-      call mat%add_values(j_curl,j_curl,mop11,1,1,1,1)
+      call mat%add_values(j_curl,j_curl,mop11,1,1,2,2)
     END DO
 END SELECT
 DEALLOCATE(j_curl,mop11)
