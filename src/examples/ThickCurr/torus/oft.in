@@ -1,0 +1,38 @@
+&runtime_options
+ ppn=1
+ debug=0
+/
+
+&mesh_options
+ meshname='torus'
+ cad_type=0
+ nlevels=1
+ nbase=1
+ grid_order=2
+/
+
+&native_mesh_options
+ filename='thickcurr_torus.h5'
+/
+
+&thickcurr_torus_options
+ order=2           ! FE order
+ nev=4             ! Number of eigenvalues to compute
+ B0=0.1            ! Initial vertical magnetic field [T]
+ run_eigs=T        ! Compute decay times?
+ run_td=T          ! Run time-dependent simulation?
+ plot_run=F        ! Run plotting only (from existing restart files)
+/
+
+&thickcurr_options
+ dt=1.E-2          ! Time step [s] (also used as the shift for eigenvalue solves)
+ theta=1.0         ! Time centering (1 -> backward Euler)
+ nsteps=100        ! Number of time steps to take
+ rst_freq=5        ! Restart file frequency
+ lin_tol=1.E-10    ! Linear solver tolerance
+/
+
+&thickcurr_plot_options
+ rst_start=0       ! First restart file to plot
+ rst_end=100       ! Last restart file to plot
+/

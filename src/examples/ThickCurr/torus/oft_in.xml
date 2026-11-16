@@ -1,0 +1,12 @@
+<oft>
+  <thickcurr>
+    <region>
+      <id>2</id>
+      <eta>7.0E-7</eta>
+    </region>
+    <pre type="block_jacobi">
+      <nlocal>1</nlocal>
+      <solver type="lu"></solver>
+    </pre>
+  </thickcurr>
+</oft>

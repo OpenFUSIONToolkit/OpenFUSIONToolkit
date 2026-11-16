@@ -132,7 +132,7 @@ ABSTRACT INTERFACE
   SUBROUTINE thickcurr_probe_apply(self,a,t)
     IMPORT oft_thickcurr_probe, oft_vector, r8
     CLASS(oft_thickcurr_probe), INTENT(inout) :: self !< Probe object
-    CLASS(oft_vector), INTENT(inout) :: a !< Vector potential at current time
+    CLASS(oft_vector), TARGET, INTENT(inout) :: a !< Vector potential at current time
     REAL(r8), INTENT(in) :: t !< Current time
   END SUBROUTINE thickcurr_probe_apply
 END INTERFACE
