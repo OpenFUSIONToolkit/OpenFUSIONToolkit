@@ -7,7 +7,7 @@
 !
 !> Regression tests for periodic native meshes and vector Lagrange elements on them.
 !!
-!! A native mesh is loaded with reflection and periodicity enabled, and the periodic
+!! A native (tet or hex) mesh is loaded with reflection and periodicity enabled, and the periodic
 !! point, edge and face counts and periodicity type are written out. Two analytic
 !! vector fields are then projected onto vector Lagrange elements (mass matrix inverse)
 !! and the L2 errors are written out:

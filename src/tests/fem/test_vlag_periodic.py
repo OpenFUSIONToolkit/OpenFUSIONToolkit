@@ -4,8 +4,8 @@
 # SPDX-License-Identifier: LGPL-3.0-only
 #------------------------------------------------------------------------------
 # Regression tests for periodic native meshes (planar and revolved) and vector
-# Lagrange elements on them. Small structured tet meshes are generated here and
-# written in the native HDF5 format, then reflected about z = 0 by OFT to form
+# Lagrange elements on them. Small structured tet and hex meshes are generated here
+# and written in the native HDF5 format, then reflected about z = 0 by OFT to form
 # the periodic domain.
 import os
 import sys
@@ -48,15 +48,19 @@ oft_in_template = """
 NU, NV, NW = 4, 4, 2
 # Half-angle of the generated wedge; the reflected (periodic) domain spans twice this
 WEDGE_ANGLE = numpy.pi/6.0
+# Inner radius of the wedges: tet wedges include the axis, hexes cannot collapse onto it
+R_MIN = {'tet': 0.0, 'hex': 0.5}
+# Hex corner ordering in OFT (inodesp_base in hexmesh_type.F90) as (u,v,w) offsets
+HEX_CORNERS = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0), (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
 
 
-def structured_tets(nu, nv, nw, mapping):
-    '''Tetrahedralize a structured grid on the unit cube and map it to physical space
+def structured_mesh(nu, nv, nw, mapping, cell_type):
+    '''Mesh a structured grid on the unit cube with tets or hexes and map it to physical space
 
-    Each hex is split into the 6 Kuhn tets sharing its main diagonal, which gives a conforming
-    mesh. Points that map to the same location (eg. a collapsed axis) are merged and the
-    resulting degenerate tets are dropped. Returns points, 0-based cells, and the indices of
-    points on the w = 1 face.
+    For tets, each hex is split into the 6 Kuhn tets sharing its main diagonal, which gives a
+    conforming mesh. Points that map to the same location (eg. a collapsed axis) are merged and
+    the resulting degenerate cells are dropped. Cells are oriented to have positive volume.
+    Returns points, 0-based cells, and the indices of points on the w = 1 face.
     '''
     def node_id(i, j, k):
         return (i*(nv+1) + j)*(nw+1) + k
@@ -64,6 +68,9 @@ def structured_tets(nu, nv, nw, mapping):
     r_full = numpy.array([mapping(*pt) for pt in uvw])
     cells = []
     for i, j, k in itertools.product(range(nu), range(nv), range(nw)):
+        if cell_type == 'hex':
+            cells.append([node_id(i+di, j+dj, k+dk) for di, dj, dk in HEX_CORNERS])
+            continue
         for perm in itertools.permutations(range(3)):
             corner = [i, j, k]
             tet = [node_id(*corner)]
@@ -79,35 +86,42 @@ def structured_tets(nu, nv, nw, mapping):
     new_index[order] = numpy.arange(order.size)
     r = r_full[unique_ind[order]]
     lc = new_index[inverse[numpy.array(cells)]]
-    # Drop collapsed cells and orient the rest with positive volume
-    lc = lc[[len(set(cell)) == 4 for cell in lc]]
-    vol = numpy.einsum('ij,ij->i', numpy.cross(r[lc[:, 1]]-r[lc[:, 0]], r[lc[:, 2]]-r[lc[:, 0]]), r[lc[:, 3]]-r[lc[:, 0]])
+    lc = lc[[len(set(cell)) == lc.shape[1] for cell in lc]]
+    # Orientation from the corner spanned by the first edges along u, v, and w
+    if cell_type == 'hex':
+        edges = [r[lc[:, 1]]-r[lc[:, 0]], r[lc[:, 3]]-r[lc[:, 0]], r[lc[:, 4]]-r[lc[:, 0]]]
+        mirror = [3, 2, 1, 0, 7, 6, 5, 4]  # Reverse the v direction
+    else:
+        edges = [r[lc[:, 1]]-r[lc[:, 0]], r[lc[:, 2]]-r[lc[:, 0]], r[lc[:, 3]]-r[lc[:, 0]]]
+        mirror = [0, 1, 3, 2]
+    vol = numpy.einsum('ij,ij->i', numpy.cross(edges[0], edges[1]), edges[2])
     assert numpy.all(numpy.abs(vol) > 1.E-8)
-    flip = vol < 0
-    lc[numpy.ix_(flip, [2, 3])] = lc[numpy.ix_(flip, [3, 2])]
+    lc[vol < 0] = lc[vol < 0][:, mirror]
     per_nodes = numpy.unique(new_index[inverse[numpy.isclose(uvw[:, 2], 1.0)]])
     return r, lc, per_nodes
 
 
-def x_wedge(u, v, w):
-    '''Wedge about the x-axis, including the axis, with the w = 0 face on z = 0'''
+def x_wedge(u, v, w, r_min):
+    '''Wedge about the x-axis, with the w = 0 face on z = 0'''
     theta = WEDGE_ANGLE*w
-    return [u, v*numpy.cos(theta), v*numpy.sin(theta)]
+    r = r_min + (1.0-r_min)*v
+    return [u, r*numpy.cos(theta), r*numpy.sin(theta)]
 
 
-def y_wedge(u, v, w):
+def y_wedge(u, v, w, r_min):
     '''Wedge about the y-axis, with the w = 0 face on z = 0'''
     theta = WEDGE_ANGLE*w
-    return [v*numpy.cos(theta), u, v*numpy.sin(theta)]
+    r = r_min + (1.0-r_min)*v
+    return [r*numpy.cos(theta), u, r*numpy.sin(theta)]
 
 
-def z_slab(u, v, w):
+def z_slab(u, v, w, r_min):
     '''Unit square slab extending from z = 0 to z = 0.5'''
     return [u, v, 0.5*w]
 
 
-def write_mesh(filename, mapping):
-    r, lc, per_nodes = structured_tets(NU, NV, NW, mapping)
+def write_mesh(filename, mapping, cell_type):
+    r, lc, per_nodes = structured_mesh(NU, NV, NW, lambda u, v, w: mapping(u, v, w, R_MIN[cell_type]), cell_type)
     with h5py.File(filename, 'w') as h5_file:
         h5_file.create_dataset('mesh/R', data=r, dtype='f8')
         h5_file.create_dataset('mesh/LC', data=lc+1, dtype='i4')
@@ -115,11 +129,11 @@ def write_mesh(filename, mapping):
         h5_file.create_dataset('mesh/periodicity/nodes', data=per_nodes+1, dtype='i4')
 
 
-def periodic_setup(mesh_type, order=1, nbase=1, nlevels=1, nproc=1, expect_abort=False):
+def periodic_setup(mesh_type, cell_type, order=1, nbase=1, nlevels=1, nproc=1, expect_abort=False):
     mappings = {'x_wedge': x_wedge, 'y_wedge': y_wedge, 'z_slab': z_slab}
     os.chdir(test_dir)
-    mesh_file = 'periodic_{0}.h5'.format(mesh_type)
-    write_mesh(mesh_file, mappings[mesh_type])
+    mesh_file = 'periodic_{0}_{1}.h5'.format(mesh_type, cell_type)
+    write_mesh(mesh_file, mappings[mesh_type], cell_type)
     with open('oft.in', 'w+') as fid:
         fid.write(oft_in_template.format(nbase, nlevels, mesh_file, order))
     if os.path.exists('periodic.results'):
@@ -131,6 +145,7 @@ def periodic_setup(mesh_type, order=1, nbase=1, nlevels=1, nproc=1, expect_abort
         print(errs.decode())
         return errcode, errs.decode()
     return run_OFT("./test_vlag_periodic", nproc, 60)
+
 
 
 def check_results(revolved, nper):
@@ -159,43 +174,52 @@ def check_results(revolved, nper):
     return retval
 
 
-# Copied face (w = 1) of the generated mesh, after reflection: the axis points and the NU
-# edges between them lie on the reflection plane, so they are not copied and are not
-# periodic, but other edges and faces touching the axis are.
-X_WEDGE_COUNTS = [(NU+1)*NV, NU*(NV+1) + (NU+1)*NV + NU*NV - NU, 2*NU*NV]
-Z_SLAB_COUNTS = [(NU+1)*(NV+1), NU*(NV+1) + (NU+1)*NV + NU*NV, 2*NU*NV]
+# Periodic (point, edge, face) counts: entities on the copied (w = 1) face of the generated
+# mesh after reflection. For the tet wedge the axis points and the NU edges between them lie
+# on the reflection plane, so they are not copied and are not periodic, but other edges and
+# faces touching the axis are.
+EXPECTED_COUNTS = {
+    ('x_wedge', 'tet'): [(NU+1)*NV, NU*(NV+1) + (NU+1)*NV + NU*NV - NU, 2*NU*NV],
+    ('z_slab', 'tet'): [(NU+1)*(NV+1), NU*(NV+1) + (NU+1)*NV + NU*NV, 2*NU*NV],
+    ('x_wedge', 'hex'): [(NU+1)*(NV+1), NU*(NV+1) + (NU+1)*NV, NU*NV],
+    ('z_slab', 'hex'): [(NU+1)*(NV+1), NU*(NV+1) + (NU+1)*NV, NU*NV]
+}
 
 
 @pytest.mark.coverage
+@pytest.mark.parametrize("cell_type", ('tet', 'hex'))
 @pytest.mark.parametrize("order", (1, 2))
-def test_revolved(order):
+def test_revolved(order, cell_type):
     '''Revolved periodicity about the x-axis (native_set_periodic and Lagrange vector rotation)
 
-    A wedge containing the x-axis is reflected to give two periodic faces related by
-    rotation. Checks that the domain is flagged as revolved, the periodic point, edge, and
-    face counts, and that a rotation-compatible linear vector field is reproduced by
-    projection onto vector Lagrange elements, which requires rotating vectors across the
-    periodic boundary, while a non-compatible field is not.
+    A wedge about the x-axis (including the axis for tets) is reflected to give two periodic
+    faces related by rotation. Checks that the domain is flagged as revolved, the periodic
+    point, edge, and face counts, and that a rotation-compatible linear vector field is
+    reproduced by projection onto vector Lagrange elements, which requires rotating vectors
+    across the periodic boundary, while a non-compatible field is not.
     '''
-    assert periodic_setup('x_wedge', order=order)
-    assert check_results(True, X_WEDGE_COUNTS)
+    assert periodic_setup('x_wedge', cell_type, order=order)
+    assert check_results(True, EXPECTED_COUNTS[('x_wedge', cell_type)])
 
 
-def test_revolved_refined():
+@pytest.mark.parametrize("cell_type", ('tet', 'hex'))
+def test_revolved_refined(cell_type):
     '''Revolved periodicity is carried through uniform refinement (same checks as `test_revolved`)'''
-    assert periodic_setup('x_wedge', nbase=2, nlevels=2)
-    assert check_results(True, X_WEDGE_COUNTS)
+    assert periodic_setup('x_wedge', cell_type, nbase=2, nlevels=2)
+    assert check_results(True, EXPECTED_COUNTS[('x_wedge', cell_type)])
 
 
 @pytest.mark.mpi
-def test_revolved_mpi():
+@pytest.mark.parametrize("cell_type", ('tet', 'hex'))
+def test_revolved_mpi(cell_type):
     '''Revolved periodicity on a distributed mesh (same checks as `test_revolved`)'''
-    assert periodic_setup('x_wedge', nbase=1, nlevels=2, nproc=2)
-    assert check_results(True, X_WEDGE_COUNTS)
+    assert periodic_setup('x_wedge', cell_type, nbase=1, nlevels=2, nproc=2)
+    assert check_results(True, EXPECTED_COUNTS[('x_wedge', cell_type)])
 
 
 @pytest.mark.coverage
-def test_planar():
+@pytest.mark.parametrize("cell_type", ('tet', 'hex'))
+def test_planar(cell_type):
     '''Planar periodicity in z (native_set_periodic)
 
     A slab is reflected about z = 0 to give periodic faces normal to z. Checks that the
@@ -203,14 +227,15 @@ def test_planar():
     z-independent linear vector field is reproduced by projection, while a z-dependent field
     is not.
     '''
-    assert periodic_setup('z_slab')
-    assert check_results(False, Z_SLAB_COUNTS)
+    assert periodic_setup('z_slab', cell_type)
+    assert check_results(False, EXPECTED_COUNTS[('z_slab', cell_type)])
 
 
 @pytest.mark.coverage
-def test_revolved_bad_axis():
+@pytest.mark.parametrize("cell_type", ('tet', 'hex'))
+def test_revolved_bad_axis(cell_type):
     '''Revolved periodicity about the y-axis is rejected with an error by native_set_periodic'''
-    errcode, std_err = periodic_setup('y_wedge', expect_abort=True)
+    errcode, std_err = periodic_setup('y_wedge', cell_type, expect_abort=True)
     assert errcode != 0
     assert std_err.find('Revolved periodic planes must contain the x-axis') > -1
     assert not os.path.exists('periodic.results')
