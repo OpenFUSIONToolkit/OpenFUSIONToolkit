@@ -53,7 +53,7 @@
 MODULE thick_wall
 #define THICKCURR_RST_LEN 5
 USE oft_base
-USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, oft_bin_file, xdmf_plot_file
+USE oft_io, ONLY: hdf5_read, hdf5_write, oft_file_exist, hdf5_field_exist, oft_bin_file, xdmf_plot_file
 USE oft_quadrature
 USE oft_stitching, ONLY: oft_seam
 USE oft_mesh_type, ONLY: oft_mesh, cell_is_curved
@@ -144,6 +144,17 @@ TYPE :: thickcurr_bc_flags
   LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: grad => NULL() !< Fixed Grad(H^1) DOFs (vertex, boundary, or vacuum)
   LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: grad_vac => NULL() !< Grad(H^1) DOFs removed in vacuum (interior, high order)
 END TYPE thickcurr_bc_flags
+!------------------------------------------------------------------------------
+!> Interpolate a H(Curl) + Grad(H^1) field scaled by \f$ \alpha / \eta \f$ in conducting
+!! regions and zero in vacuum regions (eg. \f$ J = -\frac{1}{\eta} \frac{\partial A}{\partial t} \f$)
+!------------------------------------------------------------------------------
+TYPE, EXTENDS(oft_hcurl_grad_rinterp) :: thickcurr_cond_interp
+  REAL(r8) :: alpha = 1.d0 !< Scale factor
+  LOGICAL :: use_eta = .TRUE. !< Divide by resistivity (and zero in vacuum)?
+CONTAINS
+  !> Reconstruct field
+  PROCEDURE :: interp => cond_interp_apply
+END TYPE thickcurr_cond_interp
 !------------------------------------------------------------------------------
 !> Operator for eigenvalue solves, \f$ M_{\sigma} P \f$, where \f$ P \f$ is the
 !! \f$ M_{\sigma} \f$-orthogonal projection that removes the gradient null space
@@ -821,13 +832,15 @@ END SUBROUTINE thickcurr_diag
 !------------------------------------------------------------------------------
 !> Save ThickCurr solution to a restart file
 !------------------------------------------------------------------------------
-SUBROUTINE thickcurr_rst_save(a,t,dt,filename)
+SUBROUTINE thickcurr_rst_save(a,t,dt,filename,dadt)
 CLASS(oft_vector), POINTER, INTENT(inout) :: a !< Vector potential to save
 REAL(r8), INTENT(in) :: t !< Current solution time
 REAL(r8), INTENT(in) :: dt !< Current timestep
 CHARACTER(LEN=*), INTENT(in) :: filename !< Name of restart file
+CLASS(oft_vector), POINTER, OPTIONAL, INTENT(inout) :: dadt !< Time derivative of vector potential (optional)
 DEBUG_STACK_PUSH
 CALL thickcurr_ML_hcurl_grad%current_level%vec_save(a,filename,'A')
+IF(PRESENT(dadt))CALL thickcurr_ML_hcurl_grad%current_level%vec_save(dadt,filename,'dAdt',append=.TRUE.)
 IF(oft_env%head_proc)THEN
   CALL hdf5_write(t,filename,'t')
   CALL hdf5_write(dt,filename,'dt')
@@ -837,13 +850,21 @@ END SUBROUTINE thickcurr_rst_save
 !------------------------------------------------------------------------------
 !> Load ThickCurr solution from a restart file
 !------------------------------------------------------------------------------
-SUBROUTINE thickcurr_rst_load(a,filename,t,dt)
+SUBROUTINE thickcurr_rst_load(a,filename,t,dt,dadt,dadt_found)
 CLASS(oft_vector), POINTER, INTENT(inout) :: a !< Vector potential
 CHARACTER(LEN=*), INTENT(in) :: filename !< Name of restart file
 REAL(r8), OPTIONAL, INTENT(out) :: t !< Time of loaded solution
 REAL(r8), OPTIONAL, INTENT(out) :: dt !< Timestep at loaded time
+CLASS(oft_vector), POINTER, OPTIONAL, INTENT(inout) :: dadt !< Time derivative of vector potential (optional)
+LOGICAL, OPTIONAL, INTENT(out) :: dadt_found !< Was the time derivative found in the file? (optional)
+LOGICAL :: found
 DEBUG_STACK_PUSH
 CALL thickcurr_ML_hcurl_grad%current_level%vec_load(a,filename,'A')
+IF(PRESENT(dadt))THEN
+  found=hdf5_field_exist(filename,'dAdt_c')
+  IF(found)CALL thickcurr_ML_hcurl_grad%current_level%vec_load(dadt,filename,'dAdt')
+  IF(PRESENT(dadt_found))dadt_found=found
+END IF
 IF(PRESENT(t))CALL hdf5_read(t,filename,'t')
 IF(PRESENT(dt))CALL hdf5_read(dt,filename,'dt')
 DEBUG_STACK_POP
@@ -874,7 +895,10 @@ END FUNCTION thickcurr_rst_name
 !! first processed with @ref thick_wall::thickcurr_clean_field "thickcurr_clean_field".
 !!
 !! Restart files are written to `thickcurr_XXXXX.rst` every `rst_freq` steps and
-!! time history information is written to `thickcurr.hist`.
+!! time history information is written to `thickcurr.hist`. Restart files also contain
+!! the time derivative of the vector potential (\f$ -E \f$) over the preceding step,
+!! which is used to compute the electric field and current density for plotting. For
+!! the initial restart file the time derivative from the first step is used.
 !------------------------------------------------------------------------------
 SUBROUTINE thickcurr_run(a,driver,probes,t_final)
 CLASS(oft_vector), INTENT(inout) :: a !< Initial vector potential on input, final potential on output [T-m]
@@ -887,7 +911,7 @@ CLASS(oft_vector), POINTER :: u,up,du,rhs
 CHARACTER(LEN=OFT_PATH_SLEN) :: rst_file
 TYPE(oft_bin_file) :: hist_file
 TYPE(oft_timer) :: mytimer
-LOGICAL :: exists,pm_save
+LOGICAL :: exists,pm_save,save_rst0
 DEBUG_STACK_PUSH
 IF(.NOT.tc_initialized)CALL thickcurr_setup
 !------------------------------------------------------------------------------
@@ -914,6 +938,7 @@ END IF
 ! Import initial fields
 !------------------------------------------------------------------------------
 rst_file=thickcurr_rst_name(tc_rst_ind)
+save_rst0=.FALSE.
 IF((tc_rst_ind>0).AND.oft_file_exist(TRIM(rst_file)))THEN
   CALL thickcurr_rst_load(u,TRIM(rst_file),t=t)
   IF(oft_env%head_proc)THEN
@@ -928,7 +953,7 @@ ELSE
   CALL u%add(0.d0,1.d0,a)
   CALL thickcurr_clean_field(u)
   t=0.d0
-  CALL thickcurr_rst_save(u,t,dt,TRIM(thickcurr_rst_name(0)))
+  save_rst0=.TRUE. ! Initial restart file is saved after first step (with time derivative)
   IF(oft_env%head_proc)CALL hist_file%write_header
 END IF
 IF(oft_env%head_proc)CALL hist_file%open
@@ -967,9 +992,14 @@ DO i=1,tc_nsteps
   IF(lits<0)CALL oft_warn("Linear solver failed to converge")
   CALL u%add(1.d0,1.d0,du)
   t=t+dt
-  !---Diagnostics
+  !---Diagnostics (du temporarily holds dA/dt)
   CALL du%scale(1.d0/dt)
   CALL thickcurr_diag(u,energy,du,power)
+  IF(save_rst0)THEN
+    CALL thickcurr_rst_save(up,t-dt,dt,TRIM(thickcurr_rst_name(0)),dadt=du)
+    save_rst0=.FALSE.
+  END IF
+  IF(MOD(tc_rst_ind+i,tc_rst_freq)==0)CALL thickcurr_rst_save(u,t,dt,TRIM(thickcurr_rst_name(tc_rst_ind+i)),dadt=du)
   CALL du%scale(dt)
   IF(oft_env%head_proc)THEN
     elapsed_time=mytimer%tock()
@@ -977,13 +1007,13 @@ DO i=1,tc_nsteps
     CALL hist_file%write(data_i4=(/tc_rst_ind+i,lits/),data_r8=(/t,energy,power,elapsed_time/))
   END IF
   IF(PRESENT(probes))CALL probes%apply(u,t)
-  !---Save restart file
+  !---Flush output with restart files
   IF(MOD(tc_rst_ind+i,tc_rst_freq)==0)THEN
     IF(oft_env%head_proc)CALL hist_file%flush
     IF(PRESENT(probes))CALL probes%flush
-    CALL thickcurr_rst_save(u,t,dt,TRIM(thickcurr_rst_name(tc_rst_ind+i)))
   END IF
 END DO
+IF(save_rst0)CALL thickcurr_rst_save(u,t,dt,TRIM(thickcurr_rst_name(0))) ! No steps taken
 IF(oft_env%head_proc)CALL hist_file%close
 IF(PRESENT(probes))CALL probes%flush
 !---Copy final solution
@@ -1208,6 +1238,10 @@ END SUBROUTINE eig_amat_apply
 !!
 !! @note Fields with no resistive decay (eg. toroidal flux in a perfectly conducting
 !! torus) have \f$ \mu = 1 \f$ and are returned with \f$ \tau = -1 \f$.
+!!
+!! If `save_plot` is true, the modes are saved to the plot group `thickcurr_eigs` in the
+!! `eigs/` subdirectory (so that they are not overwritten by other plot files), with the
+!! mode index used as the time.
 !------------------------------------------------------------------------------
 SUBROUTINE thickcurr_eigs(nev,tau,vecs,save_plot,tol)
 INTEGER(i4), INTENT(in) :: nev !< Number of eigenvalues to compute
@@ -1220,7 +1254,7 @@ INTEGER(i4) :: i
 INTEGER(i4), ALLOCATABLE :: sort_inds(:)
 REAL(r8) :: alam,mu,dt_eff,energy
 REAL(r8), POINTER, DIMENSION(:) :: vslice
-CLASS(oft_vector), POINTER :: u
+CLASS(oft_vector), POINTER :: u,dadt
 TYPE(thickcurr_eig_amat), TARGET :: amat
 TYPE(oft_irlm_eigsolver) :: arsolver
 TYPE(xdmf_plot_file) :: xdmf
@@ -1285,7 +1319,7 @@ IF(PRESENT(vecs).OR.do_plot)THEN
   IF(do_plot)THEN
     IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields(1)%fe)) &
       CALL oft_abort("Invalid Curl FE object","thickcurr_eigs",__FILE__)
-    CALL xdmf%setup("thickcurr_eigs")
+    CALL xdmf%setup("thickcurr_eigs","eigs/")
     CALL hcurl_rep%mesh%setup_io(xdmf,thickcurr_plot_order())
   END IF
   DO i=1,nev
@@ -1301,7 +1335,15 @@ IF(PRESENT(vecs).OR.do_plot)THEN
     END IF
     IF(do_plot)THEN
       CALL xdmf%add_timestep(REAL(i,8))
-      CALL thickcurr_save_field(u,xdmf)
+      IF(tau(i)>0.d0)THEN
+        CALL u%new(dadt)
+        CALL dadt%add(0.d0,-1.d0/tau(i),u) ! Mode decays as exp(-t/tau)
+        CALL thickcurr_save_field(u,xdmf,dadt=dadt)
+        CALL dadt%delete
+        DEALLOCATE(dadt)
+      ELSE
+        CALL thickcurr_save_field(u,xdmf)
+      END IF
     END IF
   END DO
 END IF
@@ -1315,6 +1357,29 @@ tau=0.d0
 CALL oft_abort("Subroutine requires ARPACK","thickcurr_eigs",__FILE__)
 #endif
 END SUBROUTINE thickcurr_eigs
+!------------------------------------------------------------------------------
+!> Reconstruct a H(Curl) + Grad(H^1) field scaled by \f$ \alpha / \eta \f$
+!! (zero in vacuum regions) or by \f$ \alpha \f$ only if `use_eta` is false
+!------------------------------------------------------------------------------
+SUBROUTINE cond_interp_apply(self,cell,f,gop,val)
+CLASS(thickcurr_cond_interp), INTENT(inout) :: self !< Interpolation object
+INTEGER(i4), INTENT(in) :: cell !< Cell for interpolation
+REAL(r8), INTENT(in) :: f(:) !< Position in cell in logical coordinates
+REAL(r8), INTENT(in) :: gop(3,4) !< Logical gradient vectors at f
+REAL(r8), INTENT(out) :: val(:) !< Reconstructed field at f
+INTEGER(i4) :: reg
+CALL self%oft_hcurl_grad_rinterp%interp(cell,f,gop,val)
+IF(self%use_eta)THEN
+  reg=self%mesh%reg(cell)
+  IF(tc_cond_reg(reg))THEN
+    val=val*self%alpha/tc_eta_reg(reg)
+  ELSE
+    val=0.d0
+  END IF
+ELSE
+  val=val*self%alpha
+END IF
+END SUBROUTINE cond_interp_apply
 !------------------------------------------------------------------------------
 !> Get tessellation order for plotting (Lagrange order if available, otherwise 1)
 !------------------------------------------------------------------------------
@@ -1331,9 +1396,14 @@ END FUNCTION thickcurr_plot_order
 !------------------------------------------------------------------------------
 !> Save vector potential, magnetic field, and current density to a plot file
 !!
-!! The magnetic field is \f$ B = \nabla \times A \f$ and the current density is
-!! computed from the weak curl of \f$ B \f$, \f$ \mu_0 J = M^{-1} K A \f$, where
-!! \f$ M \f$ is the (unweighted) H(Curl) + Grad(H^1) mass matrix.
+!! The vector potential (`A`) and magnetic field (`B`), \f$ B = \nabla \times A \f$, are
+!! always saved. If the time derivative of the vector potential is provided, the electric
+!! field (`E`), \f$ E = -\partial A / \partial t \f$, and current density (`J`),
+!! \f$ J = E / \eta \f$ in conducting regions and zero in vacuum, are also saved.
+!! Otherwise the current density is computed from the weak curl of \f$ B \f$,
+!! \f$ \mu_0 J = M^{-1} K A \f$, where \f$ M \f$ is the (unweighted) H(Curl) + Grad(H^1)
+!! mass matrix. Note that this form includes surface currents on the perfectly conducting
+!! walls, which appear in the layer of cells adjacent to the boundary.
 !!
 !! If the Lagrange FE representation (@ref thick_wall::thickcurr_ml_lagrange
 !! "thickcurr_ML_lagrange" and @ref thick_wall::thickcurr_ml_vlagrange
@@ -1341,14 +1411,16 @@ END FUNCTION thickcurr_plot_order
 !! Otherwise cell averaged values are saved. The plot file must be setup with a
 !! tessellation order given by @ref thick_wall::thickcurr_plot_order "thickcurr_plot_order".
 !------------------------------------------------------------------------------
-SUBROUTINE thickcurr_save_field(a,xdmf,suffix)
+SUBROUTINE thickcurr_save_field(a,xdmf,suffix,dadt)
 CLASS(oft_vector), TARGET, INTENT(inout) :: a !< Vector potential [T-m]
 TYPE(xdmf_plot_file), INTENT(in) :: xdmf !< Plot file object
 CHARACTER(LEN=*), OPTIONAL, INTENT(in) :: suffix !< Suffix for field names (optional)
+CLASS(oft_vector), TARGET, OPTIONAL, INTENT(inout) :: dadt !< Time derivative of vector potential [V/m] (optional)
 CHARACTER(LEN=:), ALLOCATABLE :: tag
 CLASS(oft_vector), POINTER :: jvec,tmp
 TYPE(oft_hcurl_grad_rinterp), TARGET :: Afield,Jfield
 TYPE(oft_hcurl_grad_cinterp), TARGET :: Bfield
+TYPE(thickcurr_cond_interp), TARGET :: Efield,Jcfield
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 LOGICAL :: pm_save
 DEBUG_STACK_PUSH
@@ -1356,6 +1428,33 @@ IF(.NOT.oft_3D_hcurl_cast(hcurl_rep,thickcurr_ML_hcurl_grad%current_level%fields
   CALL oft_abort("Invalid Curl FE object","thickcurr_save_field",__FILE__)
 tag=''
 IF(PRESENT(suffix))tag=suffix
+!---Save potential and magnetic field
+Afield%u=>a
+CALL Afield%setup(thickcurr_ML_hcurl_grad%current_level)
+Bfield%u=>a
+CALL Bfield%setup(thickcurr_ML_hcurl_grad%current_level)
+CALL save_interp(Afield,'A'//tag)
+CALL save_interp(Bfield,'B'//tag)
+CALL Afield%delete
+CALL Bfield%delete
+!---Save electric field and current density from time derivative
+IF(PRESENT(dadt))THEN
+  Efield%u=>dadt
+  CALL Efield%setup(thickcurr_ML_hcurl_grad%current_level)
+  Efield%mesh=>hcurl_rep%mesh
+  Efield%alpha=-1.d0
+  Efield%use_eta=.FALSE.
+  CALL save_interp(Efield,'E'//tag)
+  Jcfield%u=>dadt
+  CALL Jcfield%setup(thickcurr_ML_hcurl_grad%current_level)
+  Jcfield%mesh=>hcurl_rep%mesh
+  Jcfield%alpha=-1.d0
+  CALL save_interp(Jcfield,'J'//tag)
+  CALL Efield%delete
+  CALL Jcfield%delete
+  DEBUG_STACK_POP
+  RETURN
+END IF
 !---Compute current density from weak curl of B
 IF(.NOT.ASSOCIATED(tc_hcurl_minv))THEN
   NULLIFY(tc_hcurl_mop)
@@ -1373,18 +1472,9 @@ CALL jvec%set(0.d0)
 pm_save=oft_env%pm; oft_env%pm=.FALSE.
 CALL tc_hcurl_minv%apply(jvec,tmp)
 oft_env%pm=pm_save
-!---Save fields
-Afield%u=>a
-CALL Afield%setup(thickcurr_ML_hcurl_grad%current_level)
-Bfield%u=>a
-CALL Bfield%setup(thickcurr_ML_hcurl_grad%current_level)
 Jfield%u=>jvec
 CALL Jfield%setup(thickcurr_ML_hcurl_grad%current_level)
-CALL save_interp(Afield,'A'//tag)
-CALL save_interp(Bfield,'B'//tag)
 CALL save_interp(Jfield,'J'//tag)
-CALL Afield%delete
-CALL Bfield%delete
 CALL Jfield%delete
 CALL jvec%delete
 CALL tmp%delete
@@ -1458,10 +1548,11 @@ INTEGER(i4) :: rst_end=2000
 REAL(r8) :: t
 REAL(r8), ALLOCATABLE, DIMENSION(:) :: eta_cell
 CHARACTER(LEN=OFT_PATH_SLEN) :: rst_file
-CLASS(oft_vector), POINTER :: u
+CLASS(oft_vector), POINTER :: u,dadt
 CLASS(oft_mesh), POINTER :: mesh
 CLASS(oft_hcurl_fem), POINTER :: hcurl_rep
 TYPE(xdmf_plot_file) :: xdmf
+LOGICAL :: dadt_found
 NAMELIST/thickcurr_plot_options/rst_start,rst_end
 DEBUG_STACK_PUSH
 IF(.NOT.ASSOCIATED(thickcurr_ML_hcurl_grad))CALL oft_abort("FE representation not set", &
@@ -1493,15 +1584,22 @@ IF(thickcurr_plot_order()==1)THEN
 END IF
 !---Loop over restart files
 CALL thickcurr_ML_hcurl_grad%vec_create(u)
+CALL thickcurr_ML_hcurl_grad%vec_create(dadt)
 DO i=rst_start,rst_end,tc_rst_freq
   rst_file=thickcurr_rst_name(i)
   IF(.NOT.oft_file_exist(TRIM(rst_file)))EXIT
-  CALL thickcurr_rst_load(u,TRIM(rst_file),t=t)
+  CALL thickcurr_rst_load(u,TRIM(rst_file),t=t,dadt=dadt,dadt_found=dadt_found)
   IF(oft_env%head_proc)WRITE(*,'(4X,2A,ES13.5)')TRIM(rst_file),': t = ',t
   IF(PRESENT(probes))CALL probes%apply(u,t)
   CALL xdmf%add_timestep(t)
-  CALL thickcurr_save_field(u,xdmf)
+  IF(dadt_found)THEN
+    CALL thickcurr_save_field(u,xdmf,dadt=dadt)
+  ELSE
+    CALL thickcurr_save_field(u,xdmf)
+  END IF
 END DO
+CALL dadt%delete
+DEALLOCATE(dadt)
 IF(PRESENT(probes))CALL probes%flush
 IF(oft_env%head_proc)WRITE(*,'(A)')'============================'
 CALL u%delete

@@ -3,6 +3,7 @@ if( OFT_BUILD_EXAMPLES )
     add_subdirectory( TokaMaker )
     add_subdirectory( ThinCurr )
     add_subdirectory( MUG )
+    add_subdirectory( ThickCurr )
     add_subdirectory( Marklin )
     #
     oft_add_exe( example1.F90 )
