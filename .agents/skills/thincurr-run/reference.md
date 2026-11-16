@@ -130,6 +130,11 @@ Changing any option invalidates the cache, which is then recomputed.
 A Fortran-side error aborted the process. During setup this is a model problem:
 run `inspect_model.py` (thincurr-model skill).
 
+**`Path length exceeds OFT library allowable lenght of 200`.** The OFT library takes
+file paths of at most 200 characters. The scripts here pass short relative paths
+automatically; in your own scripts, `os.chdir()` to the working directory and use
+relative paths.
+
 **`Surface resistivity is missing or non-positive for regions [...]`.** The model
 has no resistivity for those regions. Fix it in the model, or set `model.eta`.
 

@@ -64,6 +64,37 @@ def resolve_path(path, base_dir):
     return os.path.normpath(os.path.join(base_dir, path))
 
 
+# The OFT library rejects file paths longer than this (OFT_PATH_SLEN)
+OFT_PATH_MAX = 200
+
+
+def oft_path(path):
+    """Return a form of a path that the OFT library accepts (at most 200 characters).
+
+    Uses the shorter of the absolute path and the path relative to the working
+    directory, which the driver sets to the output directory.
+
+    Args:
+        path: File or directory path (or None).
+
+    Returns:
+        Path string, or None.
+    """
+    if path is None:
+        return None
+    options = [os.path.abspath(path)]
+    try:
+        options.append(os.path.relpath(path))
+    except ValueError:  # Different drive (Windows)
+        pass
+    short = min(options, key=len)
+    if len(short) > OFT_PATH_MAX:
+        raise ValueError('Path is too long for the OFT library ({0} > {1} characters, also relative to "{2}"): {3}\n'
+                         'Use shorter directory names, or keep the files near the output directory.'.format(
+                             len(short), OFT_PATH_MAX, os.getcwd(), path))
+    return short
+
+
 def build_lcfs(lcfs_spec, base_dir, api):
     """Build the LCFS contour and X-point list from the case "lcfs" block.
 
@@ -335,8 +366,13 @@ def main():
         case = json.load(fid)
     base_dir = os.path.dirname(os.path.abspath(args.case_file))
     out_spec = case.get('output', {})
-    out_dir = args.output_dir or resolve_path(out_spec.get('dir', '.'), base_dir)
+    if args.output_dir is not None:
+        out_dir = os.path.abspath(args.output_dir)
+    else:
+        out_dir = resolve_path(out_spec.get('dir', '.'), base_dir)
     os.makedirs(out_dir, exist_ok=True)
+    # Work from the output directory so the paths handed to OFT stay short (see oft_path())
+    os.chdir(out_dir)
     prefix = out_spec.get('prefix', os.path.splitext(os.path.basename(args.case_file))[0])
 
     api = _load_tokamaker()
@@ -435,7 +471,7 @@ def main():
         written.append(stats_file)
     if out_spec.get('eqdsk', True):
         eqdsk_file = os.path.join(out_dir, 'g'+prefix)
-        mygs.save_eqdsk(eqdsk_file, run_info=out_spec.get('run_info', 'TokaMaker')[:40])
+        mygs.save_eqdsk(oft_path(eqdsk_file), run_info=out_spec.get('run_info', 'TokaMaker')[:40])
         written.append(eqdsk_file)
     if out_spec.get('plot', True) and (not args.no_plot):
         plot_file = os.path.join(out_dir, prefix+'_psi.png')

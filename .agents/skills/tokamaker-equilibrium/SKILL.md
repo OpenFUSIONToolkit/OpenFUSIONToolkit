@@ -93,7 +93,19 @@ Always compare the achieved shape against what was asked. `print_info()` and
 `<prefix>_stats.json` report `kappa`/`kappaU`/`kappaL`, `delta`/`deltaU`/`deltaL`,
 `R_geo`, `a_geo`, `q_0`, `q_95`, `beta_n`, `l_i`, and `Topology`. Shape constraints
 are soft, so a converged solve can still miss the target — say so rather than
-reporting success on convergence alone. Report:
+reporting success on convergence alone.
+
+Two things to know when reading those numbers:
+
+- **Where shape is measured.** For fixed-boundary and diverted equilibria the shape
+  values come from the psi_N = 0.99 surface, not the LCFS, so they read low: by a
+  few percent in `kappa` and more in `delta` for strongly shaped plasmas. In fixed
+  boundary the LCFS *is* the mesh boundary and matches the request by construction.
+  To compare an actual LCFS, use `trace_surf()` closer to 1 (see `reference.md`).
+- **Units.** `beta_pol`, `beta_tor`, and `beta_n` are in percent (`beta_pol` 51.2
+  means beta_p = 0.512).
+
+Report:
 
 - whether it converged, and in how many iterations;
 - achieved vs. requested shape and global parameters;

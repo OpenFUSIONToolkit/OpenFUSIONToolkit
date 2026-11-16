@@ -56,6 +56,37 @@ def resolve_path(path, base_dir):
     return os.path.normpath(os.path.join(base_dir, path))
 
 
+# The OFT library rejects file paths longer than this (OFT_PATH_SLEN)
+OFT_PATH_MAX = 200
+
+
+def oft_path(path):
+    """Return a form of a path that the OFT library accepts (at most 200 characters).
+
+    Uses the shorter of the absolute path and the path relative to the working
+    directory, which the driver sets to the output directory.
+
+    Args:
+        path: File or directory path (or None).
+
+    Returns:
+        Path string, or None.
+    """
+    if path is None:
+        return None
+    options = [os.path.abspath(path)]
+    try:
+        options.append(os.path.relpath(path))
+    except ValueError:  # Different drive (Windows)
+        pass
+    short = min(options, key=len)
+    if len(short) > OFT_PATH_MAX:
+        raise ValueError('Path is too long for the OFT library ({0} > {1} characters, also relative to "{2}"): {3}\n'
+                         'Use shorter directory names, or keep the files near the output directory.'.format(
+                             len(short), OFT_PATH_MAX, os.getcwd(), path))
+    return short
+
+
 def _insulated_junctions(spec):
     """Convert JSON insulated-junction entries (ints or 2-lists) to setup_model() form.
 
@@ -88,11 +119,11 @@ def setup_model(case, base_dir, out_dir, prefix, nthreads):
     myOFT = OFT_env(nthreads=nthreads)
     tw_model = ThinCurr(myOFT)
     mesh_file = resolve_path(model['mesh_file'], base_dir)
-    tw_model.setup_model(mesh_file=mesh_file,
-                         xml_filename=resolve_path(model.get('xml_file'), base_dir),
+    tw_model.setup_model(mesh_file=oft_path(mesh_file),
+                         xml_filename=oft_path(resolve_path(model.get('xml_file'), base_dir)),
                          jumper_start=int(model.get('jumper_start', 0)),
                          insulated_junctions=_insulated_junctions(model.get('insulated_junctions')))
-    tw_model.setup_io(basepath=os.path.join(out_dir, prefix+'_plot'))
+    tw_model.setup_io(basepath=oft_path(os.path.join(out_dir, prefix+'_plot')))
     # Optional resistivity override (eg. for parameter scans without editing the model)
     eta_spec = model.get('eta')
     if eta_spec:
@@ -140,7 +171,7 @@ def build_operators(tw_model, case, out_dir, prefix):
         cache_file = os.path.join(out_dir, '{0}_L{1}.save'.format(prefix, '_HODLR' if use_hodlr else ''))
     print('\nComputing L ({0}, {1} unknowns)'.format('HODLR' if use_hodlr else 'dense', tw_model.nelems), flush=True)
     t0 = time.perf_counter()
-    tw_model.compute_Lmat(use_hodlr=use_hodlr, cache_file=cache_file)
+    tw_model.compute_Lmat(use_hodlr=use_hodlr, cache_file=oft_path(cache_file))
     t1 = time.perf_counter()
     tw_model.compute_Rmat()
     t2 = time.perf_counter()
@@ -270,7 +301,7 @@ def run_eig(ctx, make_plot):
         for i in range(nsave):
             tw_model.save_current(eig_vecs[i, :], 'J_{0:02d}'.format(i+1))
         tw_model.build_XDMF()
-        written.append(tw_model._io_basepath)
+        written.append(os.path.abspath(tw_model._io_basepath))
     if case.get('output', {}).get('vectors', False):
         vec_file = os.path.join(out_dir, prefix+'_eigvecs.npy')
         numpy.save(vec_file, eig_vecs)
@@ -310,6 +341,8 @@ def main():
     else:
         out_dir = os.getcwd()
     os.makedirs(out_dir, exist_ok=True)
+    # Work from the output directory so the paths handed to OFT stay short (see oft_path())
+    os.chdir(out_dir)
     prefix = out_spec.get('prefix', os.path.splitext(os.path.basename(args.case_file))[0])
     analysis = case.get('analysis', 'eig')
     if analysis not in ANALYSES:

@@ -186,6 +186,11 @@ takes precedence over the XML for each of resistivity and coils.
 abort the whole Python process (exit code 255 or similar), so they cannot be caught.
 Run `inspect_model.py` first: it checks the topology before calling ThinCurr.
 
+**`Path length exceeds OFT library allowable lenght of 200`.** The OFT library takes
+file paths of at most 200 characters. The scripts here pass short relative paths
+automatically; in your own scripts, `os.chdir()` to the working directory and use
+relative paths.
+
 **`Error building hole mesh, path is not periodic` / "More nodesets than holes".**
 A legacy mesh whose extra nodesets are jumpers: use `jumper_start` (`-1` for the
 last nodeset). Or replace the nodesets by running `OFT_ThinCurr_holes`.

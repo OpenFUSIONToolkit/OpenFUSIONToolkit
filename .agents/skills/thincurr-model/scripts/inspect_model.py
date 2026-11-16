@@ -58,6 +58,38 @@ def parse_insulated(values):
     return out
 
 
+
+# The OFT library rejects file paths longer than this (OFT_PATH_SLEN)
+OFT_PATH_MAX = 200
+
+
+def oft_path(path):
+    """Return a form of a path that the OFT library accepts (at most 200 characters).
+
+    Uses the shorter of the absolute path and the path relative to the working
+    directory, which this script sets to the mesh file's directory.
+
+    Args:
+        path: File or directory path (or None).
+
+    Returns:
+        Path string, or None.
+    """
+    if path is None:
+        return None
+    options = [os.path.abspath(path)]
+    try:
+        options.append(os.path.relpath(path))
+    except ValueError:  # Different drive (Windows)
+        pass
+    short = min(options, key=len)
+    if len(short) > OFT_PATH_MAX:
+        raise ValueError('Path is too long for the OFT library ({0} > {1} characters, also relative to "{2}"): {3}\n'
+                         'Use shorter directory names, or keep the files near the output directory.'.format(
+                             len(short), OFT_PATH_MAX, os.getcwd(), path))
+    return short
+
+
 def read_file_info(mesh_file):
     """Read mesh arrays and ThinCurr metadata directly from the HDF5 file.
 
@@ -198,7 +230,7 @@ def setup_and_query(mesh_file, xml_file, jumper_start, insulated, nthreads):
     from OpenFUSIONToolkit.ThinCurr import ThinCurr
     myOFT = OFT_env(nthreads=nthreads)
     tw_model = ThinCurr(myOFT)
-    tw_model.setup_model(mesh_file=mesh_file, xml_filename=xml_file, jumper_start=jumper_start,
+    tw_model.setup_model(mesh_file=oft_path(mesh_file), xml_filename=oft_path(xml_file), jumper_start=jumper_start,
                          insulated_junctions=insulated)
     sys.stdout.flush()
     eta_surf, eta_vol = tw_model.get_eta_values(include_eta_vol=True)
@@ -263,6 +295,13 @@ def main():
     parser.add_argument('--json', default=None, help='Write the report as JSON')
     parser.add_argument('--nthreads', type=int, default=2, help='OpenMP threads for setup (default: 2)')
     args = parser.parse_args()
+
+    # Resolve paths, then work from the mesh file's directory so the paths handed to OFT
+    # stay short (see oft_path())
+    for key in ('mesh_file', 'xml', 'plot', 'json'):
+        if getattr(args, key) is not None:
+            setattr(args, key, os.path.abspath(getattr(args, key)))
+    os.chdir(os.path.dirname(args.mesh_file))
 
     errors = []
     warnings = []

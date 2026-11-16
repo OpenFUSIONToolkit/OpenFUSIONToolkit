@@ -57,6 +57,31 @@ Detailed, task-specific procedures live in agent skills under `.agents/skills/`
 | [`thincurr-model`](.agents/skills/thincurr-model/SKILL.md) | Build, convert, and verify ThinCurr models: surface meshes (gmsh, structured grids, Cubit), holes/closures, junctions, resistivity, and coils |
 | [`thincurr-run`](.agents/skills/thincurr-run/SKILL.md) | Run ThinCurr calculations on a verified model (currently L/R eigenmodes, dense or HODLR) |
 
+### Subagents (Claude Code)
+
+`.claude/agents/` wraps the run skills as subagents. Each preloads its skill, does one
+job in its own context, and returns a short, fixed-format report, so solver output
+stays out of the main conversation and independent runs can go in parallel:
+
+| Agent | Skill | Does |
+|---|---|---|
+| [`tokamaker-runner`](.claude/agents/tokamaker-runner.md) | `tokamaker-equilibrium` | One equilibrium: converge, compare with the request, report |
+| [`thincurr-modeler`](.claude/agents/thincurr-modeler.md) | `thincurr-model` | One verified model, returned as the `model` block of a `thincurr-run` case file |
+| [`thincurr-runner`](.claude/agents/thincurr-runner.md) | `thincurr-run` | One calculation on a verified model: decay times, mode descriptions, sanity checks |
+
+The skills remain the source of truth: agents that do not support subagents follow
+the skills directly. When delegating:
+
+- Subagents cannot ask the user anything. Settle the Python interpreter/`OFT_ROOTPATH`
+  (see "Python environment") first and pass it in the task, along with an output
+  directory. Without one, they write to `oft_runs/` in the working directory.
+- Chain ThinCurr work through the handoff: `thincurr-modeler` -> its `model` block ->
+  `thincurr-runner`. A runner reporting `model problem` goes back to the modeler.
+- Parallelize independent runs (scan points; model resolutions for a convergence
+  check), keeping total threads within the machine. Run them one after another
+  when they share files.
+- Relay a report's assumptions and caveats to the user, not only its numbers.
+
 ## Build System
 
 OFT uses a two-stage build: `src/utilities/build_libs.py` builds external libraries and
