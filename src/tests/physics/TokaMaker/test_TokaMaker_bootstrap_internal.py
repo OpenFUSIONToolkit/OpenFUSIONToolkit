@@ -65,9 +65,18 @@ def run_ITER_bootstrap_case_internal(mesh_resolution, fe_order, mp_q):
     eq_info['q_axis']    = float(q_i[0])
     sample_idx = np.round(np.linspace(0, len(jtor_i) - 1, 10)).astype(int)
     eq_info['jphi_prof'] = [float(jtor_i[i]) for i in sample_idx]
-    # A failed LCFS trace (exactly on the diverted separatrix) gives NaN LCFS outputs
+    # Exactly on the diverted separatrix the contour method fails and the field-line tracer is used. The
+    # Runge-Kutta tracer (default) passes the X-point, so the LCFS length matches the surface just inside
+    _, _, _, dl, rbounds, zbounds = mygs.get_q(np.r_[1.0],compute_geo=True)
+    _, _, _, dl_in, _, _ = mygs.get_q(np.r_[0.9999],compute_geo=True)
+    eq_info['lcfs_sep_dl_err'] = float(abs(dl/dl_in-1.0))
+    # LSODE fails there, and a failed LCFS trace gives NaN LCFS outputs
+    mygs.settings.trace_type = 1
+    mygs.update_settings()
     _, _, _, dl, rbounds, zbounds = mygs.get_q(np.r_[1.0],compute_geo=True)
     eq_info['lcfs_fail_nan'] = bool(np.isnan(dl) and np.all(np.isnan(rbounds)) and np.all(np.isnan(zbounds)))
+    mygs.settings.trace_type = 3
+    mygs.update_settings()
 
     # Conversion of the bootstrap <J.B> to j_phi (doc_tokamaker_current_conventions eqs. A7, A8), checked against
     # flux-surface geometry traced from the converged equilibrium, away from the axis and edge
@@ -302,4 +311,5 @@ def test_ITER_bootstrap_internal(order):
     '''
     results = mp_run(run_ITER_bootstrap_case_internal, (1.0, order), timeout=300)
     assert validate_dict(results, ITER_bootstrap_internal_eq_dict)
+    assert results[0]['lcfs_sep_dl_err'] < 1.E-2
     assert results[0]['lcfs_fail_nan']

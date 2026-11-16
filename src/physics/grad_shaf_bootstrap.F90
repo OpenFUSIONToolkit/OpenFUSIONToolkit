@@ -16,7 +16,7 @@
 MODULE grad_shaf_bootstrap
 USE oft_base
 USE oft_gs, ONLY: gs_equil, flux_func, gsinv_interp, gs_factory, gs_psi2r, &
- gs_itor_nl, qprof_trace_tol, gs_fpol, qprof_backend
+ gs_itor_nl, qprof_trace_tol, gs_fpol, qprof_backend, gs_trace_tol
 USE oft_gs_profiles, ONLY: torflux_set_bounds
 USE oft_gs_contour, ONLY: gs_sauter_contour
 USE oft_lag_basis, ONLY: oft_blag_geval
@@ -1471,7 +1471,7 @@ END DO
 CALL psi_int%delete()
 !---Trace the remaining surfaces
 IF(.NOT.ALL(done))THEN
-CALL set_tracer(3)
+CALL set_tracer(device%trace_type)
 !$omp parallel private(j,field,ptout,vout,h,h2,hf,ftu,ftl)
 ALLOCATE(field)
 field%u=>gseq%psi
@@ -1490,9 +1490,9 @@ DO j=1,nr
   IF(done(j))CYCLE
   ! Tighter than for q alone, as the trapped fraction is a quadrature over the steps
   IF(psi_q(j)<0.02d0)THEN
-    active_tracer%tol=1.d-9
+    active_tracer%tol=gs_trace_tol(device,1.d-9,1.d-10)
   ELSE
-    active_tracer%tol=1.d-7
+    active_tracer%tol=gs_trace_tol(device,1.d-7,1.d-8)
   END IF
   IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,psi_q(j)<0.02d0)
   field%f_surf=fpol(j)

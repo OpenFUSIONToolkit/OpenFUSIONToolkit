@@ -47,7 +47,8 @@ USE tracing_2d, ONLY: active_tracer, tracinginv_fs, set_tracer, cylinv_interp
 IMPLICIT NONE
 #include "local.h"
 INTEGER(4), PARAMETER :: max_xpoints = 20
-REAL(r8), PARAMETER :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof, <0 for default (testing only)
+REAL(r8), PARAMETER :: qprof_trace_tol = -1.d0 !< Tracer tolerance override for @ref gs_get_qprof and the Sauter factors,
+!! applied as is to the selected tracer type (`trace_type`), <0 for default (testing only)
 !> Flux-surface backend of @ref gs_get_qprof, @ref gs_trace_surf, `gs_save_ifile`, `gs_save_eqdsk`, the averages,
 !! the toroidal flux map and the Sauter factors: 0 contour where supported, 1 field-line tracer (testing only;
 !! the sawtooth reset needs the contour and is skipped)
@@ -181,6 +182,8 @@ TYPE :: gs_factory
   INTEGER(i4) :: maxits = 30 !< Maximum number of iterations for nonlinear solve
   INTEGER(i4) :: nl_its = 0 !< Number of nonlinear iterations to converge most recent solve
   INTEGER(i4) :: nR0_ramp = 6 !< Number of iterations for R0 ramp if R0 target is used
+  INTEGER(i4) :: trace_type = 3 !< Field-line tracer for flux surface tracing, when the contour method is not used
+  !! (1: LSODE, 3: Runge-Kutta with steps limited at cell boundaries; see @ref tracing_2d::set_tracer "set_tracer")
   INTEGER(i4) :: ncoils = 0 !< Number of coils in device
   INTEGER(i4) :: ncoils_ext = 0 !< Number of external (non-meshed) coils in device
   INTEGER(i4) :: ncoil_regs = 0 !< Number of meshed coil regions in device
@@ -4664,7 +4667,7 @@ IF(oft_debug_print(1))THEN
   CALL oft_decrease_indent
 END IF
 !---Trace
-call set_tracer(3)
+call set_tracer(gseq%device%trace_type)
 !$omp parallel private(psi_surf,pt,pt_proj,ptout,fpol,qpsi,field,i,imin_r,imax_r, &
 !$omp                  imin_z,imax_z,error_str,lcfs_rz) firstprivate(pt_last)
 NULLIFY(ptout)
@@ -4699,9 +4702,9 @@ do j=1,nr
   ! psi_surf=x2 - psi_surf
   psi_surf=psi_q(j)*(x2-x1) + x1
   IF(psi_q(j)<=0.02d0)THEN ! Use higher tracing tolerance near the LCFS
-    active_tracer%tol=1.d-8
+    active_tracer%tol=gs_trace_tol(gseq%device,1.d-8,1.d-10)
   ELSE
-    active_tracer%tol=1.d-6
+    active_tracer%tol=gs_trace_tol(gseq%device,1.d-6,1.d-8)
   END IF
   IF(qprof_trace_tol>0.d0)active_tracer%tol=qprof_trace_tol*MERGE(1.d-2,1.d0,psi_q(j)<=0.02d0)
   !
@@ -4825,6 +4828,24 @@ DEALLOCATE(field)
 CALL psi_int%delete()
 end subroutine gs_get_qprof
 !------------------------------------------------------------------------------
+!> Get the tolerance for flux surface tracing with the selected field-line tracer
+!!
+!! The error of the Runge-Kutta tracer (`trace_type=3`) tracks the requested tolerance on
+!! finite element fields, while the error of LSODE (`trace_type=1`) is typically 100-600
+!! times larger, so each use of the tracer sets a tolerance for each type.
+!------------------------------------------------------------------------------
+PURE FUNCTION gs_trace_tol(device,tol_rk,tol_lsode) RESULT(tol)
+CLASS(gs_factory), INTENT(in) :: device !< TokaMaker device (`trace_type`)
+REAL(r8), INTENT(in) :: tol_rk !< Tolerance for the Runge-Kutta tracer
+REAL(r8), INTENT(in) :: tol_lsode !< Tolerance for LSODE
+REAL(r8) :: tol !< Tolerance for the selected tracer
+IF(device%trace_type==1)THEN
+  tol=tol_lsode
+ELSE
+  tol=tol_rk
+END IF
+END FUNCTION gs_trace_tol
+!------------------------------------------------------------------------------
 !> Points on one flux surface: 1000 contour points at uniform polar angle about the O-point
 !! (field-line tracer if the contour backend is off or fails)
 !------------------------------------------------------------------------------
@@ -4885,17 +4906,17 @@ pt_last=[rmax,zaxis,0.d0]
 !   CALL oft_decrease_indent
 ! END IF
 !---Trace
-call set_tracer(3)
+call set_tracer(gseq%device%trace_type)
 !!$omp parallel private(j,psi_surf,pt,ptout,fpol,qpsi,field) firstprivate(pt_last)
 field%u=>gseq%psi
 CALL field%setup(gseq%device%fe_rep)
 active_tracer%neq=3
 active_tracer%B=>field
 active_tracer%maxsteps=8e4
-IF(gseq%diverted.AND.psi_in<0.02d0)THEN ! Use higher tracing tolerance near divertor
-  active_tracer%tol=1.d-10
+IF(psi_in<=0.02d0)THEN ! Use higher tracing tolerance near the LCFS (as in @ref gs_get_qprof)
+  active_tracer%tol=gs_trace_tol(gseq%device,1.d-8,1.d-10)
 ELSE
-  active_tracer%tol=1.d-8
+  active_tracer%tol=gs_trace_tol(gseq%device,1.d-6,1.d-8)
 END IF
 active_tracer%raxis=raxis
 active_tracer%zaxis=zaxis
