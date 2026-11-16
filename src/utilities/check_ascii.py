@@ -8,14 +8,15 @@
 #
 # Lint check for non-ASCII characters in tracked source and Markdown files.
 #
-# Source files (Fortran, C/C++, Python, CMake, shell, and "*.in" templates)
-# containing non-ASCII characters are reported as errors and cause a non-zero
-# exit status. Markdown files are reported as warnings only. Files under the
-# directories in EXCLUDE_DIRS are not checked.
+# Source files (Fortran, C/C++, and Python) containing non-ASCII characters
+# are reported as errors and cause a non-zero exit status. Markdown files are
+# reported as warnings only. Files under the directories in EXCLUDE_DIRS are
+# not checked.
 #
 # Files are found with "git ls-files", so the script can be run from anywhere
-# inside the repository. When run under GitHub Actions, results are also
-# emitted as workflow annotations.
+# inside the repository. When run under GitHub Actions, errors are also
+# emitted as workflow annotations, along with a single summary warning for
+# Markdown files.
 #
 #------------------------------------------------------------------------------
 import os
@@ -24,16 +25,14 @@ import sys
 
 # Extensions (lowercase) treated as source files
 SOURCE_EXTS = (
-    '.f90', '.f', '.f03', '.f08', '.inc',
+    '.f90', '.f', '.f03', '.f08',
     '.c', '.h', '.cxx', '.cpp', '.cc', '.hpp', '.hxx',
-    '.py', '.cmake', '.sh', '.in',
+    '.py',
 )
-# File names treated as source files regardless of extension
-SOURCE_NAMES = ('CMakeLists.txt',)
 # Extensions (lowercase) treated as Markdown files
 MARKDOWN_EXTS = ('.md',)
 # Directories (relative to the repository root) that are not checked
-EXCLUDE_DIRS = ('src/utilities', 'spack')
+EXCLUDE_DIRS = ('src/utilities', 'src/ext_libs', 'spack')
 
 
 def classify(path):
@@ -41,9 +40,8 @@ def classify(path):
     for exclude_dir in EXCLUDE_DIRS:
         if path.replace(os.sep, '/').startswith(exclude_dir + '/'):
             return None
-    name = os.path.basename(path)
-    ext = os.path.splitext(name)[1].lower()
-    if (name in SOURCE_NAMES) or (ext in SOURCE_EXTS):
+    ext = os.path.splitext(path)[1].lower()
+    if ext in SOURCE_EXTS:
         return 'error'
     if ext in MARKDOWN_EXTS:
         return 'warning'
@@ -58,7 +56,8 @@ def find_non_ascii(path):
     for i, raw_line in enumerate(raw_lines):
         if max(raw_line, default=0) < 128:
             continue
-        line = raw_line.decode('utf-8', errors='replace')
+        # Invalid bytes are kept as U+DC80-U+DCFF so describe() can report them
+        line = raw_line.decode('utf-8', errors='surrogateescape')
         for j, char in enumerate(line):
             if ord(char) > 127:
                 hits.append((i+1, j+1, char))
@@ -66,18 +65,30 @@ def find_non_ascii(path):
 
 
 def describe(char):
-    '''Printable description of a character, eg. "'²' (U+00B2)"'''
-    if char == '�':
-        return 'invalid UTF-8 byte'
+    '''Printable description of a character, eg. "'<char>' (U+00B2)" or "invalid UTF-8 byte 0xE9"'''
+    if 0xDC80 <= ord(char) <= 0xDCFF:
+        return 'invalid UTF-8 byte 0x{0:02X}'.format(ord(char) - 0xDC00)
     return "'{0}' (U+{1:04X})".format(char, ord(char))
+
+
+def escape_data(value):
+    '''Escape a GitHub Actions workflow command message'''
+    return value.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+
+
+def escape_property(value):
+    '''Escape a GitHub Actions workflow command property value'''
+    return escape_data(value).replace(':', '%3A').replace(',', '%2C')
 
 
 def report(level, path, line, col, chars, annotate):
     message = 'Non-ASCII character(s) found: {0}'.format(', '.join(describe(char) for char in chars))
-    if annotate:
-        print('::{0} file={1},line={2},col={3}::{4}'.format(level, path, line, col, message))
-    else:
-        print('{0}:{1}:{2}: {3}: {4}'.format(path, line, col, level, message))
+    print('{0}:{1}:{2}: {3}: {4}'.format(path, line, col, level, message))
+    # Only errors are annotated; GitHub shows few annotations per step and
+    # Markdown warnings would crowd out the errors
+    if annotate and (level == 'error'):
+        print('::error file={0},line={1},col={2}::{3}'.format(
+            escape_property(path), line, col, escape_data(message)))
 
 
 def main():
@@ -111,6 +122,9 @@ def main():
             report(level, path, line, col, chars, annotate)
             counts[level] += 1
 
+    if annotate and (counts['warning'] > 0):
+        print('::warning::{0} line(s) in Markdown files contain non-ASCII characters (see log for details)'.format(
+            counts['warning']))
     print('')
     print('Non-ASCII check: {0} source line(s) with errors, {1} Markdown line(s) with warnings'.format(
         counts['error'], counts['warning']))

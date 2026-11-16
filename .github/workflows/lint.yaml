@@ -28,12 +28,14 @@ jobs:
           python utilities/generate_stack.py -l
 
       - name: Check for non-ASCII characters
+        if: ${{ !cancelled() }}
         working-directory: src
         run: |
           source ${{ github.workspace }}/setup_env.sh
           python utilities/check_ascii.py
 
       - name: Check python with ruff
+        if: ${{ !cancelled() }}
         working-directory: src/python
         run: |
           source ${{ github.workspace }}/setup_env.sh
