@@ -21,7 +21,8 @@ python -c "from OpenFUSIONToolkit.TokaMaker import TokaMaker; print('ok')"
 
 If that fails, set `OFT_ROOTPATH` to the install prefix (the driver appends
 `$OFT_ROOTPATH/python` to `sys.path`), or add the install's `python/` directory to
-`PYTHONPATH`. In this repository the install usually lives under `builds/*/install_release`.
+`PYTHONPATH`. When working inside the OFT repository, the `oft-build` skill covers
+locating (or building) an install.
 `numpy` is required; `h5py` is required to read mesh files and `matplotlib` to plot.
 
 Only **one** `OFT_env`/`TokaMaker` instance may exist per Python process. To run

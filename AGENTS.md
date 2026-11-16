@@ -53,6 +53,7 @@ Detailed, task-specific procedures live in agent skills under `.agents/skills/`
 |---|---|
 | [`oft-build`](.agents/skills/oft-build/SKILL.md) | Locate or set up a build tree, build external libraries, configure/compile/install OFT, build against system libraries in a sandbox, or change Python packaging (`make_package.sh.in`/`pyproject.toml.in`, which supersede the lint-only `src/python/pyproject.toml`) |
 | [`oft-test`](.agents/skills/oft-test/SKILL.md) | Run, select, debug, or write regression tests |
+| [`tokamaker-equilibrium`](.agents/skills/tokamaker-equilibrium/SKILL.md) | Compute fixed- or free-boundary Grad-Shafranov equilibria with TokaMaker from a target boundary, or debug a non-converging solve |
 
 ## Build System
 

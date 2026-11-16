@@ -156,6 +156,7 @@ When a case file is too rigid, write the script directly. The order of operation
 matters:
 
 ```python
+import numpy as np
 from OpenFUSIONToolkit import OFT_env
 from OpenFUSIONToolkit.TokaMaker import TokaMaker
 from OpenFUSIONToolkit.TokaMaker.meshing import load_gs_mesh
@@ -164,14 +165,12 @@ from OpenFUSIONToolkit.TokaMaker.util import create_isoflux, create_power_flux_f
 myOFT = OFT_env(nthreads=2)          # once per process, never twice
 mygs = TokaMaker(myOFT)
 
-mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('machine_mesh.h5')
-mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
-
-mygs.settings.free_boundary = True   # must precede setup()
+mygs.settings.free_boundary = True   # settings must precede setup_model(), which applies them
 mygs.settings.maxits = 60
-mygs.update_settings()
-mygs.setup(order=2, F0=5.3*6.2)      # F0 = B0*R0
+
+mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = load_gs_mesh('machine_mesh.h5')
+mygs.setup_model(mesh_pts, mesh_lc, reg=mesh_reg, cond_dict=cond_dict, coil_dict=coil_dict,
+                 order=2, F0=5.3*6.2)  # F0 = B0*R0
 
 mygs.set_coil_vsc({'VS': 1.0})
 mygs.set_coil_bounds({name: [-50.E6, 50.E6] for name in mygs.coil_sets})
@@ -202,16 +201,20 @@ gs_mesh = gs_Domain()
 gs_mesh.define_region('plasma', 0.015, 'plasma')
 gs_mesh.add_polygon(lcfs, 'plasma')
 mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
-mygs.setup_mesh(mesh_pts, mesh_lc)
 mygs.settings.free_boundary = False
-mygs.setup(order=2, F0=0.10752)
+mygs.setup_model(mesh_pts, mesh_lc, order=2, F0=0.10752)
 mygs.set_targets(Ip=120.E3, Ip_ratio=1.0)
 mygs.init_psi()
 mygs.solve()
 ```
 
-To run a second case in the same process, call `mygs.reset()` before loading the
-new mesh. Creating a second `OFT_env` or `TokaMaker` in one process is not
+`setup_mesh()`, `setup_regions()`, and `setup()` are deprecated in favor of the
+single `setup_model()` call; older scripts and notebooks may still use them.
+
+To run a second case in the same process, call `mygs.reset()` before calling
+`setup_model()` again (`reset()` also restores default `settings`). If
+`setup_model()` itself fails part way, it resets the object but keeps `settings`,
+so it can be called again directly once the problem is fixed. Creating a second `OFT_env` or `TokaMaker` in one process is not
 supported — use a `multiprocessing.Process` per case, as the repository's tests do.
 
 ### Useful post-solve methods
@@ -223,8 +226,9 @@ supported — use a `multiprocessing.Process` per case, as the repository's test
 | `get_coil_currents()` | `(dict of currents [A], array)` |
 | `get_profiles()` | `psi, F, F', P, P'` |
 | `get_q()` | `psi, q, <R>/<1/R> averages, dl, rbounds, zbounds` |
+| `get_fsa()` | Dictionary of flux-surface averages and per-surface shape parameters |
 | `get_xpoints()` | X-point locations; last entry is the active one |
-| `trace_surf(psi)` | Contour of one normalized flux surface |
+| `trace_surf(psi, nresample=None)` | Contour of one normalized flux surface (`nresample` resamples uniformly in arc length) |
 | `save_eqdsk(fn)` | gEQDSK output (COCOS 7 by default) |
 | `save_ifile(fn)` | iFile output |
 | `plot_machine`, `plot_psi`, `plot_constraints` | Matplotlib plots onto `(fig, ax)` |
@@ -260,7 +264,7 @@ or strengthen the VSC, and consider targeting `Z0` explicitly.
 
 **`KeyError: Unknown coil "..."`.** Coil set names come from the mesh file's
 `coil_dict`, and `coil_set` grouping may merge several mesh regions into one set.
-Print `list(mygs.coil_sets)` after `setup_regions()`.
+Print `list(mygs.coil_sets)` after `setup_model()`.
 
 **Mesh resolution.** For a new geometry, re-run at roughly half the `mesh_dx` and
 confirm `q_95`, `beta_n`, and `l_i` move by less than your tolerance.

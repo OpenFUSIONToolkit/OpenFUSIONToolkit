@@ -187,26 +187,26 @@ def build_profile(prof_spec, api):
     raise ValueError('Unknown profile type "{0}"'.format(prof_type))
 
 
-def setup_mesh(mygs, case, base_dir, lcfs_contour, api):
+def build_mesh_args(case, base_dir, lcfs_contour, api):
     """Load an existing mesh or generate a fixed-boundary mesh from the LCFS.
 
     Args:
-        mygs: TokaMaker instance.
         case: Full case dictionary.
         base_dir: Directory containing the case file.
         lcfs_contour: LCFS point list [npts,2].
         api: Dictionary of TokaMaker symbols from _load_tokamaker().
 
     Returns:
-        True if the mesh defines coils/conductors (free-boundary capable).
+        Tuple of (mesh keyword arguments for setup_model(), True if the mesh
+        defines coils/conductors).
     """
     mesh_file = case.get('mesh_file')
     if mesh_file is not None:
         mesh_pts, mesh_lc, mesh_reg, coil_dict, cond_dict = \
             api['load_gs_mesh'](resolve_path(mesh_file, base_dir))
-        mygs.setup_mesh(mesh_pts, mesh_lc, mesh_reg)
-        mygs.setup_regions(cond_dict=cond_dict, coil_dict=coil_dict)
-        return True
+        mesh_args = {'r': mesh_pts, 'lc': mesh_lc, 'reg': mesh_reg,
+                     'cond_dict': cond_dict, 'coil_dict': coil_dict}
+        return mesh_args, True
     if case.get('mode', 'free') == 'free':
         raise ValueError('"mesh_file" is required for free-boundary cases')
     # Fixed boundary: mesh the plasma region bounded by the LCFS
@@ -219,8 +219,7 @@ def setup_mesh(mygs, case, base_dir, lcfs_contour, api):
     gs_mesh.define_region('plasma', float(mesh_dx), 'plasma')
     gs_mesh.add_polygon(lcfs_contour, 'plasma')
     mesh_pts, mesh_lc, _ = gs_mesh.build_mesh()
-    mygs.setup_mesh(mesh_pts, mesh_lc)
-    return False
+    return {'r': mesh_pts, 'lc': mesh_lc}, False
 
 
 def apply_coil_settings(mygs, coil_spec):
@@ -352,15 +351,15 @@ def main():
     nthreads = args.nthreads or int(case.get('nthreads', 2))
     myOFT = api['OFT_env'](nthreads=nthreads)
     mygs = api['TokaMaker'](myOFT)
-    has_regions = setup_mesh(mygs, case, base_dir, lcfs_contour, api)
+    mesh_args, has_regions = build_mesh_args(case, base_dir, lcfs_contour, api)
 
+    # Settings must be in place before setup_model(), which applies them
     for key, value in case.get('settings', {}).items():
         setattr(mygs.settings, key, value)
     # `mode` and the CLI flags win over anything in the "settings" block
     mygs.settings.free_boundary = (mode == 'free')
     if args.quiet:
         mygs.settings.pm = False
-    mygs.update_settings()
 
     if 'F0' in case:
         F0 = float(case['F0'])
@@ -368,7 +367,7 @@ def main():
         F0 = float(case['B0'])*float(case['R0_tor'])
     else:
         raise ValueError('Either "F0" or both "B0" and "R0_tor" must be given')
-    mygs.setup(order=int(case.get('order', 2)), F0=F0)
+    mygs.setup_model(order=int(case.get('order', 2)), F0=F0, **mesh_args)
 
     # Coils (free boundary only)
     if mode == 'free':
