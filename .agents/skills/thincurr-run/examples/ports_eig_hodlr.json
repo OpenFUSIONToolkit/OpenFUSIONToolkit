@@ -1,0 +1,11 @@
+{
+  "model": {
+    "mesh_file": "../../../../src/examples/ThinCurr/ports/thincurr_ex-ports.h5",
+    "xml_file": "../../../../src/examples/ThinCurr/ports/oft_in.xml"
+  },
+  "nthreads": 4,
+  "hodlr": "auto",
+  "analysis": "eig",
+  "eig": {"neigs": 10, "save_modes": 4},
+  "output": {"prefix": "ports"}
+}

@@ -1,0 +1,30 @@
+{
+  "_comment": "Fixed-boundary equilibrium in an analytic LCFS shape (LTX-beta-like). No mesh file is needed: the LCFS is meshed directly as the plasma region.",
+  "mode": "fixed",
+  "mesh_dx": 0.015,
+  "F0": 0.10752,
+  "order": 2,
+  "lcfs": {
+    "type": "shape",
+    "R0": 0.42,
+    "Z0": 0.0,
+    "a": 0.15,
+    "kappa": 1.4,
+    "delta": 0.4,
+    "npts": 80
+  },
+  "targets": {
+    "Ip": 120000.0,
+    "Ip_ratio": 1.0
+  },
+  "profiles": {
+    "ffp": {"type": "power", "alpha": 1.5, "gamma": 2.0},
+    "pp": {"type": "power", "alpha": 4.0, "gamma": 1.0}
+  },
+  "output": {
+    "prefix": "fixed_boundary",
+    "eqdsk": true,
+    "plot": true,
+    "stats": true
+  }
+}

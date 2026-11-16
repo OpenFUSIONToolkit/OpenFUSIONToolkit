@@ -1,0 +1,9 @@
+{
+  "model": {
+    "mesh_file": "../../../../src/examples/ThinCurr/plate/thincurr_ex-plate.h5",
+    "xml_file": "../../../../src/examples/ThinCurr/plate/oft_in.xml"
+  },
+  "analysis": "eig",
+  "eig": {"neigs": 5, "save_modes": 4},
+  "output": {"prefix": "plate"}
+}

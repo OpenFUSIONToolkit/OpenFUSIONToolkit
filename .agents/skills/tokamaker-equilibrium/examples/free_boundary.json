@@ -1,0 +1,50 @@
+{
+  "_comment": "Free-boundary ITER L-mode equilibrium on the existing mesh from src/examples/TokaMaker/ITER. The LCFS is given as Miller shaping moments plus an explicit lower X-point; TokaMaker solves for the coil currents that produce it.",
+  "mode": "free",
+  "mesh_file": "../../../../src/examples/TokaMaker/ITER/ITER_mesh.h5",
+  "B0": 5.3,
+  "R0_tor": 6.2,
+  "order": 2,
+  "lcfs": {
+    "type": "shape",
+    "R0": 6.2,
+    "Z0": 0.5,
+    "a": 2.0,
+    "kappa_upper": 1.7,
+    "delta_upper": 0.33,
+    "kappa_lower": 1.95,
+    "delta_lower": 0.5375,
+    "npts": 60,
+    "xpoints": [[5.125, -3.4]]
+  },
+  "targets": {
+    "Ip": 15600000.0,
+    "pax": 620000.0
+  },
+  "profiles": {
+    "ffp": {"type": "power", "alpha": 1.5, "gamma": 2.0},
+    "pp": {"type": "power", "alpha": 4.0, "gamma": 1.0}
+  },
+  "coils": {
+    "vsc": {"VS": 1.0},
+    "bounds": {"default": [-50000000.0, 50000000.0]},
+    "regularization": {
+      "default_weight": 0.01,
+      "weights": {"CS1U": 0.02, "CS1L": 0.02},
+      "vsc_weight": 100.0
+    }
+  },
+  "init": {
+    "R0": 6.3,
+    "Z0": 0.5,
+    "a": 2.0,
+    "kappa": 1.4,
+    "delta": 0.0
+  },
+  "output": {
+    "prefix": "free_boundary",
+    "eqdsk": true,
+    "plot": true,
+    "stats": true
+  }
+}
