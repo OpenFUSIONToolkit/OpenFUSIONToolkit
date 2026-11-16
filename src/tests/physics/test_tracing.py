@@ -1,3 +1,9 @@
+#------------------------------------------------------------------------------
+# Flexible Unstructured Simulation Infrastructure with Open Numerics (Open FUSION Toolkit)
+#
+# SPDX-License-Identifier: LGPL-3.0-only
+#------------------------------------------------------------------------------
+# Field line tracing tests (3D tracers on an analytic helical field)
 import os
 import sys
 import pytest
@@ -59,6 +65,7 @@ def tracing_setup(tracer_type, parallel=False, mesh_type=1, poincare=False):
 @pytest.mark.parametrize("parallel", (False,True))
 @pytest.mark.parametrize("mesh_type", (1,2))
 def test_tracing(tracer_type, parallel, mesh_type):
+    '''Single field line traced with tracing_line, checked against the analytic helical field line'''
     assert tracing_setup(tracer_type, parallel, mesh_type)
 
 # Poincare sections of several field lines traced concurrently (tracing_poincare),
@@ -68,4 +75,5 @@ def test_tracing(tracer_type, parallel, mesh_type):
 @pytest.mark.parametrize("parallel", (False,True))
 @pytest.mark.parametrize("mesh_type", (1,2))
 def test_poincare(tracer_type, parallel, mesh_type):
+    '''Poincare section of several field lines (tracing_poincare), checked against the analytic crossings'''
     assert tracing_setup(tracer_type, parallel, mesh_type, poincare=True)
