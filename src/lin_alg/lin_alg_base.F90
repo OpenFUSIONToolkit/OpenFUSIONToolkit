@@ -21,6 +21,7 @@ MODULE oft_la_base
 USE oft_local
 USE oft_base
 USE oft_stitching, ONLY: oft_seam
+USE oft_scatter, ONLY: oft_scatter_plan
 IMPLICIT NONE
 #include "local.h"
 PRIVATE
@@ -40,10 +41,18 @@ PRIVATE
 !!   the borrowed copy is authoritative and any other copy is stale.
 !! - `OFT_ACCESS_READWRITE`: current values are needed on borrow; after release the
 !!   borrowed copy is authoritative and any other copy is stale.
+!! - `OFT_ACCESS_ACCUMULATE`: the borrowed array is zeroed accumulation storage, not the
+!!   vector's values (no transfer is needed before the borrow). Contributions written
+!!   into it are summed across processes (`stitch(1)`) and added to the vector when the
+!!   accumulation is completed by a release with `sync=.TRUE.`, for operators that
+!!   assemble a result element by element (eg. matrix-free applies). Several blocks may
+!!   be borrowed in one accumulation; all but the last are released with
+!!   `sync=.FALSE.` and the summation is done once, on the last release.
 !! @{
 INTEGER(i4), PARAMETER, PUBLIC :: OFT_ACCESS_READ = 1 !< Read-only access
 INTEGER(i4), PARAMETER, PUBLIC :: OFT_ACCESS_WRITE = 2 !< Write-only access (all entries must be set)
 INTEGER(i4), PARAMETER, PUBLIC :: OFT_ACCESS_READWRITE = 3 !< Read-write access
+INTEGER(i4), PARAMETER, PUBLIC :: OFT_ACCESS_ACCUMULATE = 4 !< Accumulate contributions (added on completion)
 !! @}
 !---------------------------------------------------------------------------------
 !> Needs docs
@@ -75,6 +84,9 @@ TYPE, PUBLIC :: oft_map
   LOGICAL, POINTER, CONTIGUOUS, DIMENSION(:) :: gbe => NULL() !< Global boundary element flag
   INTEGER(i4), POINTER, CONTIGUOUS, DIMENSION(:)  :: slice => NULL() !< List of boundary elements in full vector
   INTEGER(i8), POINTER, CONTIGUOUS, DIMENSION(:)  :: lge => NULL() !< List of global indices
+  !> Local scatter plan gathering the owned entries (`slice`) of this block (built on
+  !! first use by native vectors, see `get_slice`)
+  TYPE(oft_scatter_plan) :: slice_plan
 END TYPE oft_map
 !---------------------------------------------------------------------------------
 !> Block mapping pointer
@@ -925,18 +937,23 @@ contains
 !!   With @ref OFT_ACCESS_WRITE alone the initial contents are undefined and every
 !!   entry must be assigned before release.
 !! - `array` is invalid after release (it is nullified).
+!! - With @ref OFT_ACCESS_ACCUMULATE `array` starts as zero and holds contributions to
+!!   be added to the vector (see the access modes). Between the first accumulate borrow
+!!   and the completing release (`sync=.TRUE.`) no other access to the vector is
+!!   allowed, and blocks not borrowed in the accumulation are left unchanged.
 !---------------------------------------------------------------------------------
 subroutine vector_borrow_local(self,array,mode,iblock)
 class(oft_vector), intent(inout) :: self !< Vector object
 real(r8), pointer, contiguous, intent(inout) :: array(:) !< Local values (output)
-integer(i4), intent(in) :: mode !< Access mode (@ref OFT_ACCESS_READ, @ref OFT_ACCESS_WRITE or @ref OFT_ACCESS_READWRITE)
+integer(i4), intent(in) :: mode !< Access mode (@ref OFT_ACCESS_READ, @ref OFT_ACCESS_WRITE, @ref OFT_ACCESS_READWRITE or @ref OFT_ACCESS_ACCUMULATE)
 integer(i4), optional, intent(in) :: iblock !< Sub-block to borrow (optional)
 real(r8), pointer, dimension(:) :: vtmp
 DEBUG_STACK_PUSH
-IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'vector_borrow_local',__FILE__)
 NULLIFY(vtmp)
 CALL self%get_local(vtmp,iblock)
+IF(mode==OFT_ACCESS_ACCUMULATE)vtmp=0.d0
 array=>vtmp
 DEBUG_STACK_POP
 end subroutine vector_borrow_local
@@ -958,7 +975,10 @@ end subroutine vector_borrow_local
 !! Backends that keep a single copy of each shared value (eg. PETSc) only retain
 !! the owned values, which is the same result as `sync=.TRUE.`.
 !!
-!! For @ref OFT_ACCESS_READ `sync` must be `.FALSE.`. `array` is nullified on return.
+!! For @ref OFT_ACCESS_READ `sync` must be `.FALSE.`. For @ref OFT_ACCESS_ACCUMULATE,
+!! `sync=.TRUE.` completes the accumulation (contributions are summed across processes
+!! with `stitch(1)` and added to the vector) and `sync=.FALSE.` defers this to the
+!! release of a later block of the same accumulation. `array` is nullified on return.
 !---------------------------------------------------------------------------------
 subroutine vector_release_local(self,array,mode,sync,iblock)
 class(oft_vector), intent(inout) :: self !< Vector object
@@ -967,11 +987,20 @@ integer(i4), intent(in) :: mode !< Access mode used in the matching borrow
 logical, intent(in) :: sync !< Synchronize shared values from their owner after writing?
 integer(i4), optional, intent(in) :: iblock !< Sub-block used in the matching borrow (optional)
 DEBUG_STACK_PUSH
-IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'vector_release_local',__FILE__)
 IF(sync.AND.(mode==OFT_ACCESS_READ))CALL oft_abort('Synchronization requested for read-only access', &
   'vector_release_local',__FILE__)
-IF(IAND(mode,OFT_ACCESS_WRITE)/=0)THEN
+IF(mode==OFT_ACCESS_ACCUMULATE)THEN
+  !---Summed into a full-size cache by restore_local, stitched and added on the last block
+  IF(PRESENT(iblock))THEN
+    CALL self%restore_local(array,iblock,add=.TRUE.,wait=(.NOT.sync))
+  ELSE
+    IF(.NOT.sync)CALL oft_abort('Accumulation of the full vector must be completed on release', &
+      'vector_release_local',__FILE__)
+    CALL self%restore_local(array,add=.TRUE.)
+  END IF
+ELSE IF(IAND(mode,OFT_ACCESS_WRITE)/=0)THEN
   IF(PRESENT(iblock))THEN
     CALL self%restore_local(array,iblock,wait=(.NOT.sync))
   ELSE
@@ -1025,14 +1054,15 @@ end subroutine vector_maxpy
 subroutine cvector_borrow_local(self,array,mode,iblock)
 class(oft_cvector), intent(inout) :: self !< Vector object
 complex(c8), pointer, contiguous, intent(inout) :: array(:) !< Local values (output)
-integer(i4), intent(in) :: mode !< Access mode (@ref OFT_ACCESS_READ, @ref OFT_ACCESS_WRITE or @ref OFT_ACCESS_READWRITE)
+integer(i4), intent(in) :: mode !< Access mode (@ref OFT_ACCESS_READ, @ref OFT_ACCESS_WRITE, @ref OFT_ACCESS_READWRITE or @ref OFT_ACCESS_ACCUMULATE)
 integer(i4), optional, intent(in) :: iblock !< Sub-block to borrow (optional)
 complex(c8), pointer, dimension(:) :: vtmp
 DEBUG_STACK_PUSH
-IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'cvector_borrow_local',__FILE__)
 NULLIFY(vtmp)
 CALL self%get_local(vtmp,iblock)
+IF(mode==OFT_ACCESS_ACCUMULATE)vtmp=(0.d0,0.d0)
 array=>vtmp
 DEBUG_STACK_POP
 end subroutine cvector_borrow_local
@@ -1048,11 +1078,20 @@ integer(i4), intent(in) :: mode !< Access mode used in the matching borrow
 logical, intent(in) :: sync !< Synchronize shared values from their owner after writing?
 integer(i4), optional, intent(in) :: iblock !< Sub-block used in the matching borrow (optional)
 DEBUG_STACK_PUSH
-IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'cvector_release_local',__FILE__)
 IF(sync.AND.(mode==OFT_ACCESS_READ))CALL oft_abort('Synchronization requested for read-only access', &
   'cvector_release_local',__FILE__)
-IF(IAND(mode,OFT_ACCESS_WRITE)/=0)THEN
+IF(mode==OFT_ACCESS_ACCUMULATE)THEN
+  !---Summed into a full-size cache by restore_local, stitched and added on the last block
+  IF(PRESENT(iblock))THEN
+    CALL self%restore_local(array,iblock,add=.TRUE.,wait=(.NOT.sync))
+  ELSE
+    IF(.NOT.sync)CALL oft_abort('Accumulation of the full vector must be completed on release', &
+      'cvector_release_local',__FILE__)
+    CALL self%restore_local(array,add=.TRUE.)
+  END IF
+ELSE IF(IAND(mode,OFT_ACCESS_WRITE)/=0)THEN
   IF(PRESENT(iblock))THEN
     CALL self%restore_local(array,iblock,wait=(.NOT.sync))
   ELSE

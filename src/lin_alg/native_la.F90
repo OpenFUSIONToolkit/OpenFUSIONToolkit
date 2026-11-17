@@ -34,8 +34,10 @@ USE oft_stitching, ONLY: oft_seam, oft_global_stitch, oft_global_dp, &
 USE oft_io
 USE oft_la_base, ONLY: oft_vector, oft_vector_ptr, oft_cvector, oft_cvector_ptr, &
   oft_matrix, oft_cmatrix, oft_map, oft_matrix_map, oft_graph, OFT_ACCESS_READ, OFT_ACCESS_WRITE, &
-  OFT_ACCESS_READWRITE
+  OFT_ACCESS_READWRITE, OFT_ACCESS_ACCUMULATE
 USE oft_native_kernels
+USE oft_scatter, ONLY: oft_scatter_plan, scatter_plan_setup_local, scatter_local, OFT_SCATTER_INSERT, &
+  OFT_SCATTER_ADD
 IMPLICIT NONE
 #include "local.h"
 private
@@ -47,6 +49,8 @@ private
 type, public, extends(oft_vector) :: oft_native_vector
   real(r8), pointer, contiguous, dimension(:) :: v => NULL() !< Vector values
   real(r8), pointer, contiguous, dimension(:) :: local_tmp => NULL() !< Local value cache
+  real(r8), pointer, contiguous, dimension(:) :: acc => NULL() !< Accumulation storage (`OFT_ACCESS_ACCUMULATE`, persistent)
+  logical :: acc_open = .FALSE. !< Accumulation in progress?
 contains
   procedure :: new_real => vec_new_vec
   procedure :: new_complex => vec_new_cvec
@@ -95,6 +99,8 @@ end type oft_native_vector
 type, public, extends(oft_cvector) :: oft_native_cvector
   complex(c8), pointer, contiguous, dimension(:) :: v => NULL() !< Vector values
   complex(c8), pointer, contiguous, dimension(:) :: local_tmp => NULL() !< Local value cache
+  complex(c8), pointer, contiguous, dimension(:) :: acc => NULL() !< Accumulation storage (`OFT_ACCESS_ACCUMULATE`, persistent)
+  logical :: acc_open = .FALSE. !< Accumulation in progress?
 contains
   procedure :: new_real => cvec_new_vec
   procedure :: new_complex => cvec_new_cvec
@@ -598,6 +604,20 @@ DO i=1,nnz
 END DO
 END SUBROUTINE native_lc_small_build
 !---------------------------------------------------------------------------------
+!> Build the owned-entry (slice) scatter plan of a vector block, if not already built
+!!
+!! The plan gathers `slice(j)` of the block into entry `j` of the slice. Maps are shared
+!! by all vectors of a space, so the plan is built once; the build is serialized for
+!! callers in parallel regions.
+!---------------------------------------------------------------------------------
+SUBROUTINE native_slice_plan(mp)
+TYPE(oft_map), INTENT(inout) :: mp !< Block mapping
+IF(mp%slice_plan%setup)RETURN
+!$omp critical (native_slice_plan_build)
+IF(.NOT.mp%slice_plan%setup)CALL scatter_plan_setup_local(mp%slice_plan,mp%nslice,mp%slice)
+!$omp end critical (native_slice_plan_build)
+END SUBROUTINE native_slice_plan
+!---------------------------------------------------------------------------------
 !> Create a new vector as a bare copy of `self`
 !---------------------------------------------------------------------------------
 subroutine vec_new_vec(self,new)
@@ -689,7 +709,10 @@ IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_get_slice',__FILE__)
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%map(iblock)%nslice))
   ASSOCIATE(mp=>self%map(iblock))
-    IF(mp%nslice>0)CALL nk_gather(mp%nslice,mp%slice,self%v(mp%offset+1:mp%offset+mp%n),array(1:mp%nslice))
+    IF(mp%nslice>0)THEN
+      CALL native_slice_plan(mp)
+      CALL scatter_local(mp%slice_plan,self%v(mp%offset+1:mp%offset+mp%n),array(1:mp%nslice),OFT_SCATTER_INSERT)
+    END IF
   END ASSOCIATE
 ELSE
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%nslice))
@@ -698,8 +721,11 @@ ELSE
   ELSE
     DO i=1,self%nblocks
       ASSOCIATE(mp=>self%map(i))
-        IF(mp%nslice>0)CALL nk_gather(mp%nslice,mp%slice,self%v(mp%offset+1:mp%offset+mp%n), &
-          array(mp%soffset+1:mp%soffset+mp%nslice))
+        IF(mp%nslice>0)THEN
+          CALL native_slice_plan(mp)
+          CALL scatter_local(mp%slice_plan,self%v(mp%offset+1:mp%offset+mp%n), &
+            array(mp%soffset+1:mp%soffset+mp%nslice),OFT_SCATTER_INSERT)
+        END IF
       END ASSOCIATE
     END DO
   END IF
@@ -722,7 +748,11 @@ IF(PRESENT(wait))do_wait=wait
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_restore_slice',__FILE__)
   ASSOCIATE(mp=>self%map(iblock))
-    IF(mp%nslice>0)CALL nk_scatter(mp%nslice,mp%slice,array(1:mp%nslice),self%v(mp%offset+1:mp%offset+mp%n))
+    IF(mp%nslice>0)THEN
+      CALL native_slice_plan(mp)
+      CALL scatter_local(mp%slice_plan,array(1:mp%nslice),self%v(mp%offset+1:mp%offset+mp%n), &
+        OFT_SCATTER_INSERT,reverse=.TRUE.)
+    END IF
   END ASSOCIATE
 ELSE
   IF(self%n==self%nslice)THEN
@@ -730,8 +760,11 @@ ELSE
   ELSE
     DO i=1,self%nblocks
       ASSOCIATE(mp=>self%map(i))
-        IF(mp%nslice>0)CALL nk_scatter(mp%nslice,mp%slice,array(mp%soffset+1:mp%soffset+mp%nslice), &
-          self%v(mp%offset+1:mp%offset+mp%n))
+        IF(mp%nslice>0)THEN
+          CALL native_slice_plan(mp)
+          CALL scatter_local(mp%slice_plan,array(mp%soffset+1:mp%soffset+mp%nslice), &
+            self%v(mp%offset+1:mp%offset+mp%n),OFT_SCATTER_INSERT,reverse=.TRUE.)
+        END IF
       END ASSOCIATE
     END DO
   END IF
@@ -1090,13 +1123,29 @@ real(r8), pointer, contiguous, intent(inout) :: array(:) !< Local values (output
 integer(i4), intent(in) :: mode !< Access mode (@ref oft_la_base::oft_access_read "OFT_ACCESS_READ", etc.)
 integer(i4), optional, intent(in) :: iblock !< Sub-block to borrow (optional)
 DEBUG_STACK_PUSH
-IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'vec_borrow_local',__FILE__)
 IF(PRESENT(iblock))THEN
   IF(iblock<1.OR.iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_borrow_local',__FILE__)
-  array=>self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n)
+END IF
+IF(mode==OFT_ACCESS_ACCUMULATE)THEN
+  !---Zeroed accumulation storage, kept by the vector between accumulations
+  IF(.NOT.self%acc_open)THEN
+    IF(.NOT.ASSOCIATED(self%acc))ALLOCATE(self%acc(self%n))
+    CALL nk_set(self%n,0.d0,self%acc)
+    self%acc_open=.TRUE.
+  END IF
+  IF(PRESENT(iblock))THEN
+    array=>self%acc(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n)
+  ELSE
+    array=>self%acc
+  END IF
 ELSE
-  array=>self%v
+  IF(PRESENT(iblock))THEN
+    array=>self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n)
+  ELSE
+    array=>self%v
+  END IF
 END IF
 DEBUG_STACK_POP
 end subroutine vec_borrow_local
@@ -1114,22 +1163,39 @@ integer(i4), intent(in) :: mode !< Access mode used in the matching borrow
 logical, intent(in) :: sync !< Synchronize shared values from their owner after writing?
 integer(i4), optional, intent(in) :: iblock !< Sub-block used in the matching borrow (optional)
 logical :: match
+real(r8), pointer, contiguous, dimension(:) :: vals
 DEBUG_STACK_PUSH
-IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'vec_release_local',__FILE__)
 IF(sync.AND.(mode==OFT_ACCESS_READ))CALL oft_abort('Synchronization requested for read-only access', &
   'vec_release_local',__FILE__)
+IF(mode==OFT_ACCESS_ACCUMULATE)THEN
+  IF(.NOT.self%acc_open)CALL oft_abort('No accumulation in progress','vec_release_local',__FILE__)
+  vals=>self%acc
+ELSE
+  vals=>self%v
+END IF
 !---Check that the array was borrowed from this vector (zero-size targets never match)
 IF(PRESENT(iblock))THEN
   IF(iblock<1.OR.iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','vec_release_local',__FILE__)
   match=(self%map(iblock)%n==0)
-  IF(.NOT.match)match=ASSOCIATED(array,self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n))
+  IF(.NOT.match)match=ASSOCIATED(array,vals(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n))
 ELSE
   match=(self%n==0)
-  IF(.NOT.match)match=ASSOCIATED(array,self%v)
+  IF(.NOT.match)match=ASSOCIATED(array,vals)
 END IF
 IF(.NOT.match)CALL oft_abort('Array was not borrowed from this vector','vec_release_local',__FILE__)
 NULLIFY(array)
+IF(mode==OFT_ACCESS_ACCUMULATE)THEN
+  !---Complete accumulation: sum contributions across copies once and add
+  IF(sync)THEN
+    CALL oft_global_stitch(self%stitch_info,self%acc,1)
+    CALL nk_axpby(self%n,1.d0,1.d0,self%acc,self%v)
+    self%acc_open=.FALSE.
+  END IF
+  DEBUG_STACK_POP
+  RETURN
+END IF
 IF(sync.AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))CALL self%stitch(0)
 #ifdef OFT_DEBUG
 IF((.NOT.sync).AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))CALL native_check_shared(self%stitch_info,self%v,'vec_release_local')
@@ -1191,6 +1257,8 @@ class(oft_native_vector), intent(inout) :: self !< Vector object
 DEBUG_STACK_PUSH
 if(associated(self%v))deallocate(self%v)
 if(associated(self%local_tmp))deallocate(self%local_tmp)
+if(associated(self%acc))deallocate(self%acc)
+self%acc_open=.FALSE.
 self%n=-1
 self%nslice=-1
 self%ng=-1
@@ -1547,7 +1615,10 @@ IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_get_slice',__FILE__)
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%map(iblock)%nslice))
   ASSOCIATE(mp=>self%map(iblock))
-    IF(mp%nslice>0)CALL nk_gather(mp%nslice,mp%slice,self%v(mp%offset+1:mp%offset+mp%n),array(1:mp%nslice))
+    IF(mp%nslice>0)THEN
+      CALL native_slice_plan(mp)
+      CALL scatter_local(mp%slice_plan,self%v(mp%offset+1:mp%offset+mp%n),array(1:mp%nslice),OFT_SCATTER_INSERT)
+    END IF
   END ASSOCIATE
 ELSE
   IF(.NOT.ASSOCIATED(array))ALLOCATE(array(self%nslice))
@@ -1556,8 +1627,11 @@ ELSE
   ELSE
     DO i=1,self%nblocks
       ASSOCIATE(mp=>self%map(i))
-        IF(mp%nslice>0)CALL nk_gather(mp%nslice,mp%slice,self%v(mp%offset+1:mp%offset+mp%n), &
-          array(mp%soffset+1:mp%soffset+mp%nslice))
+        IF(mp%nslice>0)THEN
+          CALL native_slice_plan(mp)
+          CALL scatter_local(mp%slice_plan,self%v(mp%offset+1:mp%offset+mp%n), &
+            array(mp%soffset+1:mp%soffset+mp%nslice),OFT_SCATTER_INSERT)
+        END IF
       END ASSOCIATE
     END DO
   END IF
@@ -1580,7 +1654,11 @@ IF(PRESENT(wait))do_wait=wait
 IF(PRESENT(iblock))THEN
   IF(iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_restore_slice',__FILE__)
   ASSOCIATE(mp=>self%map(iblock))
-    IF(mp%nslice>0)CALL nk_scatter(mp%nslice,mp%slice,array(1:mp%nslice),self%v(mp%offset+1:mp%offset+mp%n))
+    IF(mp%nslice>0)THEN
+      CALL native_slice_plan(mp)
+      CALL scatter_local(mp%slice_plan,array(1:mp%nslice),self%v(mp%offset+1:mp%offset+mp%n), &
+        OFT_SCATTER_INSERT,reverse=.TRUE.)
+    END IF
   END ASSOCIATE
 ELSE
   IF(self%n==self%nslice)THEN
@@ -1588,8 +1666,11 @@ ELSE
   ELSE
     DO i=1,self%nblocks
       ASSOCIATE(mp=>self%map(i))
-        IF(mp%nslice>0)CALL nk_scatter(mp%nslice,mp%slice,array(mp%soffset+1:mp%soffset+mp%nslice), &
-          self%v(mp%offset+1:mp%offset+mp%n))
+        IF(mp%nslice>0)THEN
+          CALL native_slice_plan(mp)
+          CALL scatter_local(mp%slice_plan,array(mp%soffset+1:mp%soffset+mp%nslice), &
+            self%v(mp%offset+1:mp%offset+mp%n),OFT_SCATTER_INSERT,reverse=.TRUE.)
+        END IF
       END ASSOCIATE
     END DO
   END IF
@@ -1959,13 +2040,29 @@ complex(c8), pointer, contiguous, intent(inout) :: array(:) !< Local values (out
 integer(i4), intent(in) :: mode !< Access mode (@ref oft_la_base::oft_access_read "OFT_ACCESS_READ", etc.)
 integer(i4), optional, intent(in) :: iblock !< Sub-block to borrow (optional)
 DEBUG_STACK_PUSH
-IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'cvec_borrow_local',__FILE__)
 IF(PRESENT(iblock))THEN
   IF(iblock<1.OR.iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_borrow_local',__FILE__)
-  array=>self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n)
+END IF
+IF(mode==OFT_ACCESS_ACCUMULATE)THEN
+  !---Zeroed accumulation storage, kept by the vector between accumulations
+  IF(.NOT.self%acc_open)THEN
+    IF(.NOT.ASSOCIATED(self%acc))ALLOCATE(self%acc(self%n))
+    CALL nk_set(self%n,(0.d0,0.d0),self%acc)
+    self%acc_open=.TRUE.
+  END IF
+  IF(PRESENT(iblock))THEN
+    array=>self%acc(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n)
+  ELSE
+    array=>self%acc
+  END IF
 ELSE
-  array=>self%v
+  IF(PRESENT(iblock))THEN
+    array=>self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n)
+  ELSE
+    array=>self%v
+  END IF
 END IF
 DEBUG_STACK_POP
 end subroutine cvec_borrow_local
@@ -1983,25 +2080,42 @@ integer(i4), intent(in) :: mode !< Access mode used in the matching borrow
 logical, intent(in) :: sync !< Synchronize shared values from their owner after writing?
 integer(i4), optional, intent(in) :: iblock !< Sub-block used in the matching borrow (optional)
 logical :: match
+complex(c8), pointer, contiguous, dimension(:) :: vals
 DEBUG_STACK_PUSH
-IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_READWRITE)CALL oft_abort('Invalid access mode', &
+IF(mode<OFT_ACCESS_READ.OR.mode>OFT_ACCESS_ACCUMULATE)CALL oft_abort('Invalid access mode', &
   'cvec_release_local',__FILE__)
 IF(sync.AND.(mode==OFT_ACCESS_READ))CALL oft_abort('Synchronization requested for read-only access', &
   'cvec_release_local',__FILE__)
+IF(mode==OFT_ACCESS_ACCUMULATE)THEN
+  IF(.NOT.self%acc_open)CALL oft_abort('No accumulation in progress','cvec_release_local',__FILE__)
+  vals=>self%acc
+ELSE
+  vals=>self%v
+END IF
 !---Check that the array was borrowed from this vector (zero-size targets never match)
 IF(PRESENT(iblock))THEN
   IF(iblock<1.OR.iblock>self%nblocks)CALL oft_abort('Requested block exceeds nblocks.','cvec_release_local',__FILE__)
   match=(self%map(iblock)%n==0)
-  IF(.NOT.match)match=ASSOCIATED(array,self%v(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n))
+  IF(.NOT.match)match=ASSOCIATED(array,vals(self%map(iblock)%offset+1:self%map(iblock)%offset+self%map(iblock)%n))
 ELSE
   match=(self%n==0)
-  IF(.NOT.match)match=ASSOCIATED(array,self%v)
+  IF(.NOT.match)match=ASSOCIATED(array,vals)
 END IF
 IF(.NOT.match)CALL oft_abort('Array was not borrowed from this vector','cvec_release_local',__FILE__)
 NULLIFY(array)
+IF(mode==OFT_ACCESS_ACCUMULATE)THEN
+  !---Complete accumulation: sum contributions across copies once and add
+  IF(sync)THEN
+    CALL oft_global_stitch(self%stitch_info,self%acc,1)
+    CALL nk_axpby(self%n,(1.d0,0.d0),(1.d0,0.d0),self%acc,self%v)
+    self%acc_open=.FALSE.
+  END IF
+  DEBUG_STACK_POP
+  RETURN
+END IF
 IF(sync.AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))CALL self%stitch(0)
 #ifdef OFT_DEBUG
-!---Real and imaginary parts are checked separately (complex vector seams have no buffers)
+!---Real and imaginary parts are checked separately
 IF((.NOT.sync).AND.(IAND(mode,OFT_ACCESS_WRITE)/=0))THEN
   CALL native_check_shared(self%stitch_info,REAL(self%v,r8),'cvec_release_local (real part)')
   CALL native_check_shared(self%stitch_info,AIMAG(self%v),'cvec_release_local (imaginary part)')
@@ -2078,6 +2192,8 @@ class(oft_native_cvector), intent(inout) :: self !< Vector object
 DEBUG_STACK_PUSH
 if(associated(self%v))deallocate(self%v)
 if(associated(self%local_tmp))deallocate(self%local_tmp)
+if(associated(self%acc))deallocate(self%acc)
+self%acc_open=.FALSE.
 self%n=-1
 self%nslice=-1
 self%ng=-1
